@@ -82,6 +82,7 @@ test: $(IMG)
 	tests/run_write_tests.sh $(IMG)
 	tests/run_batch_tests.sh $(IMG)
 	tests/run_config_tests.sh $(IMG)
+	tests/run_compat_tests.sh
 
 clean:
 	rm -rf $(B)

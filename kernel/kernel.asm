@@ -4392,9 +4392,11 @@ ret_err:
         ret
 
 fn_unsup:
+        ; como MS-DOS: AL = 0, AH sin tocar (7100h para las funciones LFN)
         mov byte [F_AL], 0
-        mov ax, E_FUNC
-        jmp ret_err
+        mov word [last_err], E_FUNC
+        or byte [F_FL], 1
+        ret
 
 fn_nop:
         ret
@@ -5259,13 +5261,16 @@ fn_43:
         mov dl, 0x16
         call find_path
         jc ret_err
-        test byte [fentry+11], 0x18
+        test byte [fentry+11], 0x08
         jnz .sacc
         mov ax, [w_dir]
         call dir_get
         jc .sacc
         mov al, [F_CL]
         and al, 0x27
+        mov ah, [si+11]
+        and ah, 0x10
+        or al, ah
         mov [si+11], al
         call cache_write
         ret
@@ -5298,7 +5303,54 @@ fn_44:
         je .getp
         cmp byte [F_CL], 0x40
         je .ok
+        cmp byte [F_CL], 0x66
+        je .getid
+        cmp byte [F_CL], 0x46
+        je .setid
         jmp fn_unsup
+; número de serie, etiqueta y sistema de ficheros del sector de arranque
+.getid:
+        call bl_drive
+        call select_drive
+        jc .baddrv
+        xor eax, eax
+        call cache_read
+        jc .baddrv
+        mov es, [F_DS]
+        mov di, [F_DX]
+        mov word [es:di], 0
+        add di, 2
+        mov si, secbuf+0x27
+        mov cx, 4 + 11 + 8
+        rep movsb
+        ret
+.setid:
+        call bl_drive
+        call select_drive
+        jc .baddrv
+        xor eax, eax
+        call cache_read
+        jc .baddrv
+        cmp byte [secbuf+0x26], 0x29
+        jne .baddrv
+        push ds
+        mov ds, [F_DS]
+        mov si, [F_DX]
+        add si, 2
+        push ds
+        pop ax
+        mov di, secbuf+0x27
+        push es
+        push ds
+        mov ax, KSEG
+        mov es, ax
+        pop ds
+        mov cx, 4 + 11 + 8
+        rep movsb
+        pop es
+        pop ds
+        call cache_write
+        ret
 .getp:
         call bl_drive
         call select_raw
@@ -6405,6 +6457,21 @@ fn_4b:
         mov es, bx
         mov [es:1], ax
         call build_psp
+        ; nombre del programa en el MCB de su PSP
+        mov ax, [ex_psp]
+        dec ax
+        mov es, ax
+        mov di, 8
+        mov si, w_name
+        mov cx, 8
+.mn:
+        lodsb
+        cmp al, ' '
+        jne .mn1
+        xor al, al
+.mn1:
+        stosb
+        loop .mn
         ; cargar la imagen
         cmp word [ex_isexe], 0
         jne .load_exe
@@ -6916,6 +6983,731 @@ do_term:
         jmp halt
 
 ; =============================================================================
+;  FCB (bloques de control de fichero, API de DOS 1.x)
+;  FCB: +00 unidad, +01 nombre(8), +09 ext(3), +0C bloque, +0E tamaño de
+;  registro, +10 tamaño, +14 fecha, +16 hora, +18 reservado (SFT+1, 'H'),
+;  +20 registro actual, +21 registro aleatorio. Extendido: FF,5 x 0,atrib.
+; =============================================================================
+; -> [fcb_off] = parte normal del FCB del llamante (ES = su segmento)
+fcb_setup:
+        mov es, [F_DS]
+        mov di, [F_DX]
+        mov byte [fcb_ext], 0
+        mov byte [fcb_attr], 0
+        cmp byte [es:di], 0xFF
+        jne .n
+        mov byte [fcb_ext], 1
+        mov al, [es:di+6]
+        mov [fcb_attr], al
+        add di, 7
+.n:
+        mov [fcb_off], di
+        ret
+
+; nombre del FCB -> fcb_name ("X:NOMBRE.EXT"), normalize + walk
+fcb_resolve:
+        mov es, [F_DS]
+        mov si, [fcb_off]
+        mov al, [es:si]
+        test al, al
+        jnz .d
+        mov al, [cur_drive]
+        inc al
+.d:
+        add al, 'A' - 1
+        mov [fcb_name], al
+        mov byte [fcb_name+1], ':'
+        push ds
+        push es
+        pop ds
+        inc si
+        mov di, fcb_n11
+        push es
+        mov ax, KSEG
+        mov es, ax
+        mov cx, 11
+        rep movsb
+        pop es
+        pop ds
+        push es
+        push ds
+        pop es
+        mov si, fcb_n11
+        mov di, fcb_name+2
+        call from11
+        mov si, fcb_name
+        call normalize
+        pop es
+        jc .r
+        call walk
+        jc .r
+        cmp byte [w_has], 0
+        je .bad
+        ; el nombre conserva los '?' del FCB
+        push es
+        push ds
+        pop es
+        mov si, fcb_n11
+        mov di, w_name
+        mov cx, 11
+        rep movsb
+        pop es
+        clc
+.r:
+        ret
+.bad:
+        stc
+        ret
+
+; -> DI = SFT abierta por este FCB; CF si no está abierto
+fcb_sft:
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        cmp byte [es:bx+0x19], 'H'
+        jne .bad
+        movzx di, byte [es:bx+0x18]
+        test di, di
+        jz .bad
+        dec di
+        cmp di, NSFT
+        jae .bad
+        shl di, 5
+        add di, sft_table
+        cmp byte [di+SFT_REF], 0
+        je .bad
+        clc
+        ret
+.bad:
+        stc
+        ret
+
+; rellenar el FCB abierto con la SFT DI
+fcb_fill:
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov ax, di
+        sub ax, sft_table
+        shr ax, 5
+        inc al
+        mov [es:bx+0x18], al
+        mov byte [es:bx+0x19], 'H'
+        cmp byte [es:bx], 0
+        jne .dk
+        mov al, [op_drv]
+        inc al
+        mov [es:bx], al
+.dk:
+        mov word [es:bx+0x0C], 0
+        mov word [es:bx+0x0E], 128
+        mov eax, [di+SFT_SIZE]
+        mov [es:bx+0x10], eax
+        mov ax, [di+SFT_DATE]
+        mov [es:bx+0x14], ax
+        mov ax, [di+SFT_TIME]
+        mov [es:bx+0x16], ax
+        mov byte [es:bx+0x20], 0
+        ret
+
+; -> ECX = tamaño de registro (128 si es 0)
+fcb_recsize:
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        movzx ecx, word [es:bx+0x0E]
+        test ecx, ecx
+        jnz .r
+        mov cx, 128
+        mov [es:bx+0x0E], cx
+.r:
+        ret
+
+; registro secuencial actual -> EAX
+fcb_seqrec:
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        movzx eax, word [es:bx+0x0C]
+        shl eax, 7
+        movzx edx, byte [es:bx+0x20]
+        add eax, edx
+        ret
+
+; EAX = registro -> bloque y registro actual del FCB
+fcb_setrec:
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        push eax
+        mov dl, al
+        and dl, 0x7F
+        mov [es:bx+0x20], dl
+        shr eax, 7
+        mov [es:bx+0x0C], ax
+        pop eax
+        ret
+
+; registro aleatorio -> EAX (3 bytes si el registro es de 64 o más)
+fcb_randrec:
+        call fcb_recsize
+        mov eax, [es:bx+0x21]
+        cmp ecx, 64
+        jb .r
+        and eax, 0x00FFFFFF
+.r:
+        ret
+
+; DI = SFT, EAX = registro, CX = número de registros -> leer en la DTA
+; -> AL = 0 bien, 1 fin, 3 parcial; DX = registros leídos
+fcb_read_recs:
+        mov [fcb_n], cx
+        push eax
+        call fcb_recsize
+        pop eax
+        mov [fcb_rs], ecx
+        mul ecx
+        mov [di+SFT_POS], eax
+        movzx eax, word [fcb_n]
+        mul dword [fcb_rs]
+        cmp eax, 0xFFFF
+        jbe .c
+        mov eax, 0xFFFF
+.c:
+        mov cx, ax
+        mov [fcb_want], cx
+        les bx, [dta_off]
+        call file_read
+        mov [fcb_got], ax
+        ; registros completos y relleno del último
+        xor dx, dx
+        div word [fcb_rs]
+        test dx, dx
+        jz .full
+        ; rellenar con ceros hasta el final del registro
+        push ax
+        mov cx, [fcb_rs]
+        sub cx, dx
+        les di, [dta_off]
+        add di, [fcb_got]
+        xor al, al
+        rep stosb
+        pop ax
+        inc ax
+        mov dx, ax
+        mov al, 3
+        ret
+.full:
+        mov dx, ax
+        mov al, 0
+        test dx, dx
+        jnz .r
+        mov al, 1
+.r:
+        ret
+
+; DI = SFT, EAX = registro, CX = registros -> escribir desde la DTA
+; -> AL = 0 bien, 1 disco lleno; DX = registros escritos
+fcb_write_recs:
+        mov [fcb_n], cx
+        push eax
+        call fcb_recsize
+        pop eax
+        mov [fcb_rs], ecx
+        mul ecx
+        mov [di+SFT_POS], eax
+        movzx eax, word [fcb_n]
+        mul dword [fcb_rs]
+        mov cx, ax
+        les bx, [dta_off]
+        push cx
+        call file_write
+        pop cx
+        mov [fcb_got], ax
+        ; tamaño en el FCB
+        push es
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov edx, [di+SFT_SIZE]
+        mov [es:bx+0x10], edx
+        pop es
+        xor dx, dx
+        div word [fcb_rs]
+        mov dx, ax
+        mov al, 0
+        cmp [fcb_got], cx
+        jae .r
+        mov al, 1
+.r:
+        ret
+
+; SI = etiqueta (11) -> copiarla en el sector de arranque si tiene BPB extendido
+boot_label:
+        pushad
+        push es
+        xor eax, eax
+        call cache_read
+        jc .r
+        cmp byte [secbuf+0x26], 0x29
+        jne .r
+        push ds
+        pop es
+        mov di, secbuf+0x2B
+        mov cx, 11
+        rep movsb
+        call cache_write
+.r:
+        pop es
+        popad
+        ret
+noname11    db "NO NAME    "
+
+fn_0f:
+        call fcb_setup
+        call fcb_resolve
+        jc .fail
+        ; ¿dispositivo (CON, NUL...)?
+        call check_device
+        jnc .file
+        push ax
+        call sft_alloc
+        pop dx
+        jc .fail
+        mov byte [di+SFT_REF], 1
+        mov [di+SFT_TYPE], dl
+        mov byte [di+SFT_MODE], 2
+        mov eax, [cd_hdr]
+        mov [di+SFT_SIZE], eax
+        call fcb_fill
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov dword [es:bx+0x10], 0
+        mov byte [F_AL], 0
+        ret
+.file:
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        mov dl, [fcb_attr]
+        call find_entry
+        jc .fail
+        test byte [fentry+11], 0x18
+        jnz .fail
+        call sft_alloc
+        jc .fail
+        call sft_fill_file
+        mov byte [di+SFT_MODE], 2
+        call fcb_fill
+        mov byte [F_AL], 0
+        ret
+.fail:
+        mov byte [F_AL], 0xFF
+        ret
+
+fn_10:
+        call fcb_setup
+        call fcb_sft
+        jc .r
+        call sft_release
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov byte [es:bx+0x18], 0
+.r:
+        mov byte [F_AL], 0
+        ret
+
+fn_16:
+        call fcb_setup
+        test byte [fcb_attr], 0x08
+        jnz .label
+        call fcb_resolve
+        jc .fail
+        push ds
+        pop es
+        mov si, fcb_name
+        mov cl, [fcb_attr]
+        xor al, al
+        call create_file
+        jc .fail
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .dev
+        call fcb_fill
+.dev:
+        mov byte [F_AL], 0
+        ret
+.label:
+        ; etiqueta de volumen: entrada con atributo 08h en la raíz
+        call fcb_resolve
+        jc .fail
+        mov ax, [w_dir]
+        call dir_free_slot
+        jc .fail
+        mov si, w_name
+        mov bl, 0x08
+        xor dx, dx
+        call dir_make
+        mov si, w_name
+        call boot_label
+        mov byte [F_AL], 0
+        ret
+.fail:
+        mov byte [F_AL], 0xFF
+        ret
+
+; 13h: borrar (admite comodines y etiquetas con FCB extendido)
+fn_13:
+        call fcb_setup
+        call fcb_resolve
+        jc .fail
+        mov word [fcb_cnt], 0
+        xor cx, cx
+.l:
+        mov ax, [w_dir]
+        mov si, w_name
+        mov dl, [fcb_attr]
+        call find_entry
+        jc .end
+        test byte [fentry+11], 0x10
+        jnz .n
+        test byte [fentry+11], 0x08
+        jnz .del
+        test byte [fentry+11], 0x01
+        jnz .n
+        mov ax, [fentry+26]
+        call fat_free_chain
+.del:
+        mov ax, [w_dir]
+        call dir_get
+        jc .end
+        test byte [si+11], 0x08
+        mov byte [si], 0xE5
+        call cache_write
+        jz .nolab
+        push si
+        mov si, noname11
+        call boot_label
+        pop si
+.nolab:
+        inc word [fcb_cnt]
+.n:
+        inc cx
+        jmp .l
+.end:
+        cmp word [fcb_cnt], 0
+        je .fail
+        mov byte [F_AL], 0
+        ret
+.fail:
+        mov byte [F_AL], 0xFF
+        ret
+
+; 17h: renombrar; nombre nuevo en FCB+11h ('?' conserva el carácter)
+fn_17:
+        call fcb_setup
+        mov es, [F_DS]
+        mov si, [fcb_off]
+        add si, 0x11
+        push ds
+        push es
+        pop ds
+        mov di, fcb_new11
+        push es
+        mov ax, KSEG
+        mov es, ax
+        mov cx, 11
+        rep movsb
+        pop es
+        pop ds
+        call fcb_resolve
+        jc .fail
+        mov word [fcb_cnt], 0
+        xor cx, cx
+.l:
+        mov ax, [w_dir]
+        mov si, w_name
+        mov dl, [fcb_attr]
+        call find_entry
+        jc .end
+        ; nombre resultante
+        push cx
+        mov si, fcb_new11
+        mov di, fcb_res11
+        mov bx, fentry
+        mov cx, 11
+.m:
+        mov al, [si]
+        cmp al, '?'
+        jne .k
+        mov al, [bx]
+.k:
+        mov [di], al
+        inc si
+        inc di
+        inc bx
+        loop .m
+        ; ¿ya existe?
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, fcb_res11
+        mov dl, 0x16
+        call find_entry
+        pop cx
+        jnc .fail
+        mov ax, [w_dir]
+        call dir_get
+        jc .fail
+        push es
+        push ds
+        pop es
+        mov di, si
+        mov si, fcb_res11
+        push cx
+        mov cx, 11
+        rep movsb
+        pop cx
+        pop es
+        call cache_write
+        inc word [fcb_cnt]
+        inc cx
+        jmp .l
+.end:
+        cmp word [fcb_cnt], 0
+        je .fail
+        mov byte [F_AL], 0
+        ret
+.fail:
+        mov byte [F_AL], 0xFF
+        ret
+
+; 11h / 12h: buscar con FCB; el resultado (FCB sin abrir) va a la DTA
+fn_11:
+        call fcb_setup
+        call fcb_resolve
+        jc .fail
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov ax, [w_dir]
+        mov [es:bx+0x0C], ax
+        mov word [es:bx+0x0E], 0
+        mov al, [op_drv]
+        mov [es:bx+0x18], al
+        mov byte [es:bx+0x19], 'S'
+        jmp fcb_find_step
+.fail:
+        mov byte [F_AL], 0xFF
+        ret
+fn_12:
+        call fcb_setup
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        cmp byte [es:bx+0x19], 'S'
+        jne fn_11.fail
+        mov al, [es:bx+0x18]
+        mov [op_drv], al
+        call select_drive
+        jc fn_11.fail
+        ; nombre buscado desde el FCB
+        push ds
+        push es
+        pop ds
+        lea si, [bx+1]
+        mov di, w_name
+        push es
+        mov ax, KSEG
+        mov es, ax
+        mov cx, 11
+        rep movsb
+        pop es
+        pop ds
+        mov ax, [es:bx+0x0C]
+        mov [w_dir], ax
+fcb_find_step:
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov cx, [es:bx+0x0E]
+        mov ax, [w_dir]
+        mov si, w_name
+        mov dl, [fcb_attr]
+        call find_entry
+        jc fn_11.fail
+        inc cx
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov [es:bx+0x0E], cx
+        ; DTA: [FF 0 0 0 0 0 atrib] unidad + entrada de directorio
+        les di, [dta_off]
+        cmp byte [fcb_ext], 0
+        je .noext
+        mov byte [es:di], 0xFF
+        mov dword [es:di+1], 0
+        mov byte [es:di+5], 0
+        mov al, [fcb_attr]
+        mov [es:di+6], al
+        add di, 7
+.noext:
+        mov al, [op_drv]
+        inc al
+        stosb
+        mov si, fentry
+        mov cx, 16
+        rep movsw
+        mov byte [F_AL], 0
+        ret
+
+fn_14:
+        call fcb_setup
+        call fcb_sft
+        jc .eof
+        call fcb_seqrec
+        mov cx, 1
+        call fcb_read_recs
+        mov [F_AL], al
+        cmp al, 1
+        je .r
+        call fcb_seqrec
+        inc eax
+        call fcb_setrec
+.r:
+        ret
+.eof:
+        mov byte [F_AL], 1
+        ret
+
+fn_15:
+        call fcb_setup
+        call fcb_sft
+        jc .full
+        call fcb_seqrec
+        mov cx, 1
+        call fcb_write_recs
+        mov [F_AL], al
+        test al, al
+        jnz .r
+        call fcb_seqrec
+        inc eax
+        call fcb_setrec
+.r:
+        ret
+.full:
+        mov byte [F_AL], 1
+        ret
+
+fn_21:
+        call fcb_setup
+        call fcb_sft
+        jc fn_14.eof
+        call fcb_randrec
+        push eax
+        call fcb_setrec
+        pop eax
+        mov cx, 1
+        call fcb_read_recs
+        mov [F_AL], al
+        ret
+
+fn_22:
+        call fcb_setup
+        call fcb_sft
+        jc fn_15.full
+        call fcb_randrec
+        push eax
+        call fcb_setrec
+        pop eax
+        mov cx, 1
+        call fcb_write_recs
+        mov [F_AL], al
+        ret
+
+fn_27:
+        call fcb_setup
+        call fcb_sft
+        jc fn_14.eof
+        call fcb_randrec
+        mov cx, [F_CX]
+        push eax
+        call fcb_read_recs
+        mov [F_AL], al
+        mov [F_CX], dx
+        pop eax
+        movzx edx, dx
+        add eax, edx
+        call fcb_store_rand
+        ret
+
+fn_28:
+        call fcb_setup
+        call fcb_sft
+        jc fn_15.full
+        call fcb_randrec
+        mov cx, [F_CX]
+        test cx, cx
+        jnz .w
+        ; CX = 0: fijar el tamaño en el registro aleatorio
+        push eax
+        call fcb_recsize
+        pop eax
+        mul ecx
+        mov [di+SFT_POS], eax
+        call file_truncate
+        mov es, [F_DS]
+        mov bx, [fcb_off]
+        mov eax, [di+SFT_SIZE]
+        mov [es:bx+0x10], eax
+        mov byte [F_AL], 0
+        ret
+.w:
+        push eax
+        call fcb_write_recs
+        mov [F_AL], al
+        mov [F_CX], dx
+        pop eax
+        movzx edx, dx
+        add eax, edx
+        call fcb_store_rand
+        ret
+
+; EAX -> registro aleatorio del FCB (y bloque/registro actual)
+fcb_store_rand:
+        push eax
+        call fcb_recsize
+        pop eax
+        cmp ecx, 64
+        jb .four
+        mov [es:bx+0x21], ax
+        shr eax, 16
+        mov [es:bx+0x23], al
+        shl eax, 16
+        mov ax, [es:bx+0x21]
+        jmp fcb_setrec
+.four:
+        mov [es:bx+0x21], eax
+        jmp fcb_setrec
+
+fn_23:
+        call fcb_setup
+        call fcb_resolve
+        jc .fail
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        mov dl, [fcb_attr]
+        call find_entry
+        jc .fail
+        call fcb_recsize
+        mov eax, [fentry+28]
+        add eax, ecx
+        dec eax
+        xor edx, edx
+        div ecx
+        mov [es:bx+0x21], eax
+        mov byte [F_AL], 0
+        ret
+.fail:
+        mov byte [F_AL], 0xFF
+        ret
+
+fn_24:
+        call fcb_setup
+        call fcb_seqrec
+        call fcb_store_rand
+        ret
+
+; =============================================================================
 ;  Otras interrupciones
 ; =============================================================================
 int20:
@@ -7037,11 +7829,11 @@ int_iret:
 MAXFN   equ 0x6C
 fntable:
         dw fn_00, fn_01, fn_02, fn_unsup, fn_unsup, fn_unsup, fn_06, fn_07  ; 00
-        dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_unsup       ; 08
-        dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 10
+        dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_0f       ; 08
+        dw fn_10, fn_11, fn_12, fn_13, fn_14, fn_15, fn_16, fn_17 ; 10
         dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 18
-        dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_25, fn_26, fn_unsup ; 20
-        dw fn_unsup, fn_29, fn_2a, fn_set_ok, fn_2c, fn_set_ok, fn_nop, fn_2f ; 28
+        dw fn_unsup, fn_21, fn_22, fn_23, fn_24, fn_25, fn_26, fn_27 ; 20
+        dw fn_28, fn_29, fn_2a, fn_set_ok, fn_2c, fn_set_ok, fn_nop, fn_2f ; 28
         dw fn_30, fn_31, fn_unsup, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
         dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
         dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
@@ -7215,6 +8007,19 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+fcb_ext     resb 1
+fcb_attr    resb 1
+fcb_off     resw 1
+fcb_n       resw 1
+fcb_want    resw 1
+fcb_got     resw 1
+fcb_cnt     resw 1
+            alignb 4
+fcb_rs      resd 1
+fcb_name    resb 16
+fcb_n11     resb 12
+fcb_new11   resb 12
+fcb_res11   resb 12
 tmp_end     resw 1
 ex_mode     resb 1
             alignb 4

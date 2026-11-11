@@ -15,10 +15,11 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - ✅ INT 25h/26h e IOCTL 440Dh; el núcleo relee las particiones tras FDISK sin reiniciar.
 - ✅ Escritura FAT12/FAT16: crear, escribir, truncar, borrar, renombrar, `MKDIR`/`RMDIR`, atributos, fecha y hora (comprobada con `fsck.fat`).
 - Particiones extendidas y unidades lógicas; `SYS` para hacer arrancable una unidad ya formateada.
-- Funciones FCB (0Fh-29h) para programas antiguos.
+- ✅ Funciones FCB (0Fh-28h) para programas antiguos, también con FCB extendidos y etiquetas de volumen.
+- ✅ Compatibilidad comprobada con programas de FreeDOS (EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE).
 - ✅ `COMMAND.COM`: redirecciones `<`, `>`, `>>`, tuberías `|`, `COPY`, `DEL`, `REN`, `MD`, `RD`, `PAUSE`.
 - ✅ `COMMAND.COM`: ficheros `.BAT` y `AUTOEXEC.BAT`, `SET` con asignación, `IF`, `GOTO`, `FOR`, `CALL`, `SHIFT`, `PROMPT`, `PATH`, `/C`, `/P`.
-- Ctrl+C y Ctrl+Break, INT 23h e INT 24h completas.
+- ✅ Ctrl+C con INT 23h como DOS. Pendiente: Ctrl+Break (INT 1Bh) e INT 24h interactiva («Abort, Retry, Fail?»).
 - Mensajes en español además de en inglés.
 
 ## 0.3 — Drivers y memoria
@@ -34,7 +35,7 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 Windows 3.1 se apoya en estructuras internas de DOS, no solo en la API pública. Hay que implementarlas igual que las documenta la Interrupt List:
 
 - Lista de listas (52h) completa: DPB, SFT encadenadas, CDS, cabecera de dispositivos NUL.
-- *Swappable Data Area* (5D06h/5D0Bh), secciones críticas INT 2Ah, `ErrorMode`, `InDOS`.
+- ✅ *Swappable Data Area* (5D06h/5D0Bh) con `ErrorMode`, `InDOS`, PSP y DTA en sus desplazamientos. Pendiente: secciones críticas INT 2Ah.
 - Funciones de red y redirector 5Dh/5Eh/5Fh y difusión de arranque de Windows (INT 2Fh 1605h/1606h).
 - Objetivos de prueba: Windows 3.1 en **modo estándar** primero (con HSPXMS.SYS) y después en **386 mejorado**, en QEMU y 86Box.
 - Windows 3.1 no se distribuye: cada persona instala su propia copia.

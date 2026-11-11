@@ -50,6 +50,8 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | `CONFIG.SYS`: DEVICE(HIGH), INSTALL, SHELL, SET, LASTDRIVE, FILES, BUFFERS… | ✅ |
 | Drivers `.SYS` reales (carácter y bloque, también MZ), cadena de dispositivos, lista de listas | ✅ |
 | `HSPRAM.SYS` (disco RAM) y `HSPTEST.SYS` (dispositivo de ejemplo) | ✅ |
+| Funciones FCB (DOS 1.x), SDA (5D06h/5D0Bh), EXEC 4B01h/4B03h, 26h/55h, 65h (país CP437), Ctrl+C | ✅ |
+| Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
 | XMS/HMA, UMB, Windows 3.1 | 🔜 ver hoja de ruta |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
@@ -63,6 +65,8 @@ make          # crea build/hispados.img (disquete de 1,44 MB)
 make run      # arranca en QEMU
 make run-hdd  # arranca con un disco duro vacío de 64 MB (build/hdd.img)
 make test     # pruebas automáticas por el puerto serie
+tests/thirdparty/fetch.sh   # (opcional) descarga programas de FreeDOS para
+                            # la prueba de compatibilidad
 ```
 
 Para instalar en un disco duro (real o virtual), arranca desde el disquete y ejecuta:
