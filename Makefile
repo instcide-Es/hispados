@@ -54,6 +54,14 @@ $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/INSTALAR.COM: utils/instalar.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/EDIT.COM: utils/edit.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/GESTOR.COM: utils/gestor.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/SYSINFO.COM: utils/sysinfo.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPCD.SYS: drivers/hspcd.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/KEYB.COM: utils/keyb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
@@ -65,7 +73,8 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
-        $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM
+        $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
+        $(B)/SYSINFO.COM $(B)/HSPCD.SYS
 
 $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -78,6 +87,11 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/SYS.COM ::SYS.COM
 	mcopy -i $@ $(B)/KEYB.COM ::KEYB.COM
 	mcopy -i $@ $(B)/INSTALAR.COM ::INSTALAR.COM
+	mcopy -i $@ $(B)/EDIT.COM ::EDIT.COM
+	mcopy -i $@ $(B)/EDIT.COM ::EDITAR.COM
+	mcopy -i $@ $(B)/GESTOR.COM ::GESTOR.COM
+	mcopy -i $@ $(B)/SYSINFO.COM ::SYSINFO.COM
+	mcopy -i $@ $(B)/SYSINFO.COM ::INFO.COM
 	mcopy -i $@ tests/disk/README.TXT ::README.TXT
 	mcopy -i $@ tests/disk/AUTOEXEC.BAT ::AUTOEXEC.BAT
 	mmd   -i $@ ::BAT
@@ -95,6 +109,7 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/HSPXMS.SYS ::DRIVERS/HSPXMS.SYS
 	mcopy -i $@ $(B)/HSPSND.COM ::DRIVERS/HSPSND.COM
 	mcopy -i $@ $(B)/HSPUSB.SYS ::DRIVERS/HSPUSB.SYS
+	mcopy -i $@ $(B)/HSPCD.SYS ::DRIVERS/HSPCD.SYS
 	mcopy -i $@ $(B)/XMSTEST.COM ::BIN/XMSTEST.COM
 	mcopy -i $@ $(B)/MCBWALK.COM ::BIN/MCBWALK.COM
 	mcopy -i $@ $(B)/LOLTEST.COM ::BIN/LOLTEST.COM
@@ -127,6 +142,8 @@ test: $(IMG) usb
 	tests/run_keyb_tests.sh $(IMG)
 	tests/run_usbnative_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
+	tests/run_cd_tests.sh $(IMG)
+	tests/run_edit_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
 clean:

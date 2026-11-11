@@ -3,6 +3,7 @@ PROMPT $P$G
 PATH C:\;C:\BIN
 KEYB SP
 C:\DRIVERS\HSPSND
+SYSINFO
 ECHO.
 ECHO Bienvenido a HispaDOS. Escribe HELP para ver las ordenes.
 IF EXIST C:\INSTALL.BAT ECHO Para instalarlo en un disco duro vacio escribe INSTALL;

@@ -136,6 +136,8 @@ DF_MOUNTED      equ 2
 DF_LBA          equ 4
 DF_FIXED        equ 8
 DF_FAT16        equ 16
+DF_ISO          equ 64
+ISO_ND          equ 24
 
 %define spcw    cur_drv+D_SPCW
 %define epc     cur_drv+D_EPC
@@ -734,6 +736,15 @@ mount:
         pop ds
         jmp .parse
 .fail:
+        test byte [cur_drv+D_FLAGS], DF_DRIVER
+        jz .fail2
+        call iso_mount
+        jc .fail2
+        pop es
+        popad
+        clc
+        ret
+.fail2:
         pop es
         popad
         stc
@@ -1771,6 +1782,424 @@ fn_32:
         ret
 
 ; -----------------------------------------------------------------------------
+;  ISO 9660 (CD y DVD de datos), solo lectura
+;  Los sectores de 2048 bytes llegan del driver como cuatro de 512.
+;  Carpetas: "manejador" de 16 bits (0 = raíz) en una tabla de extensiones.
+; -----------------------------------------------------------------------------
+iso_deny:
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .ok
+        mov ax, E_ACCESS
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+; ¿la unidad seleccionada lleva ISO 9660? -> CF si no
+iso_mount:
+        pushad
+        mov eax, 16 * 4             ; descriptor primario de volumen
+        call cache_read
+        jc .no
+        cmp byte [secbuf], 1
+        jne .no
+        cmp dword [secbuf+1], 'CD00'
+        jne .no
+        cmp byte [secbuf+5], '1'
+        jne .no
+        mov eax, [secbuf+156+2]
+        mov [cur_drv+D_ROOTLBA], eax
+        mov eax, [secbuf+156+10]
+        mov [cur_drv+D_DATALBA], eax
+        mov eax, [secbuf+80]        ; bloques del volumen
+        shl eax, 2
+        mov [cur_drv+D_SIZE], eax
+        and byte [cur_drv+D_FLAGS], 0xFF ^ DF_FAT16
+        or byte [cur_drv+D_FLAGS], DF_ISO | DF_MOUNTED
+        mov word [cur_drv+D_SPCW], 4
+        mov word [cur_drv+D_BPC], 2048
+        mov byte [isob_drv], 0xFF
+        call drv_store
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
+        ret
+
+; bloque de 2048 EAX de la unidad seleccionada -> isobuf
+iso_block:
+        mov dl, [sel_drv]
+        cmp dl, [isob_drv]
+        jne .rd
+        cmp eax, [isob_lba]
+        je .ok
+.rd:
+        pushad
+        mov [isob_lba], eax
+        mov [isob_drv], dl
+        shl eax, 2
+        mov di, isobuf
+        mov cx, 4
+.l:
+        call cache_read
+        jc .err
+        push cx
+        push es
+        push ds
+        pop es
+        mov si, secbuf
+        mov cx, 256
+        rep movsw
+        pop es
+        pop cx
+        inc eax
+        loop .l
+        popad
+.ok:
+        clc
+        ret
+.err:
+        mov byte [isob_drv], 0xFF
+        popad
+        stc
+        ret
+
+; AX = manejador -> [ife_ext], [ife_size]
+iso_dir:
+        test ax, ax
+        jnz .t
+        mov eax, [cur_drv+D_ROOTLBA]
+        mov [ife_ext], eax
+        mov eax, [cur_drv+D_DATALBA]
+        mov [ife_size], eax
+        ret
+.t:
+        push bx
+        movzx bx, al
+        dec bx
+        imul bx, bx, 9
+        add bx, iso_dirs
+        mov eax, [bx]
+        mov [ife_ext], eax
+        mov eax, [bx+4]
+        mov [ife_size], eax
+        pop bx
+        ret
+
+; EAX = extensión, EDX = tamaño -> AX = manejador
+iso_handle:
+        cmp eax, [cur_drv+D_ROOTLBA]
+        jne .s
+        xor ax, ax
+        ret
+.s:
+        push bx
+        push cx
+        push si
+        mov si, iso_dirs
+        mov cx, 1
+.l:
+        cmp cx, ISO_ND
+        ja .new
+        cmp [si], eax
+        jne .n
+        push ax
+        mov al, [sel_drv]
+        cmp [si+8], al
+        pop ax
+        jne .n
+        mov ax, cx
+        jmp .r
+.n:
+        add si, 9
+        inc cx
+        jmp .l
+.new:
+        movzx cx, byte [iso_next]
+        inc byte [iso_next]
+        cmp byte [iso_next], ISO_ND
+        jb .w
+        mov byte [iso_next], 0
+.w:
+        mov si, cx
+        imul si, si, 9
+        add si, iso_dirs
+        mov [si], eax
+        mov [si+4], edx
+        mov al, [sel_drv]
+        mov [si+8], al
+        mov ax, cx
+        inc ax
+.r:
+        pop si
+        pop cx
+        pop bx
+        ret
+
+; como find_entry: AX = carpeta, CX = índice inicial, SI = patrón, DL = atrib.
+iso_find_entry:
+        push eax
+        push bx
+        push si
+        push di
+        push dx
+        push es
+        push ds
+        pop es
+        mov [ife_pat], si
+        mov [ife_attr], dl
+        mov [ife_start], cx
+        ; etiqueta de volumen (solo con atributo 08h)
+        cmp dl, 0x08
+        jne .dir
+        test cx, cx
+        jnz .nf
+        mov eax, 16 * 4
+        call cache_read
+        jc .nf
+        mov si, secbuf+40
+        mov di, fentry
+        mov cx, 11
+        rep movsb
+        mov byte [fentry+11], 0x08
+        xor cx, cx
+        jmp .found
+.dir:
+        call iso_dir
+        xor ebx, ebx                ; posición dentro de la carpeta
+        mov word [ife_n], 0
+.loop:
+        cmp ebx, [ife_size]
+        jae .nf
+        mov eax, ebx
+        shr eax, 11
+        add eax, [ife_ext]
+        call iso_block
+        jc .nf
+        mov si, bx
+        and si, 2047
+        add si, isobuf
+        movzx ax, byte [si]
+        test ax, ax
+        jnz .rec
+        ; relleno al final del bloque: saltar al siguiente
+        or ebx, 2047
+        inc ebx
+        jmp .loop
+.rec:
+        movzx eax, ax
+        add ebx, eax
+        mov cx, [ife_n]
+        inc word [ife_n]
+        cmp cx, [ife_start]
+        jb .loop
+        call iso_record             ; SI = registro -> fentry
+        ; filtro de atributos (como en FAT)
+        mov al, [ife_attr]
+        not al
+        and al, [fentry+11]
+        test al, 0x16
+        jnz .loop
+        ; nombre
+        mov si, [ife_pat]
+        mov di, fentry
+        push cx
+        mov cx, 11
+.c:
+        mov al, [si]
+        cmp al, '?'
+        je .ok
+        cmp al, [di]
+        jne .bad
+.ok:
+        inc si
+        inc di
+        loop .c
+        pop cx
+.found:
+        pop es
+        pop dx
+        pop di
+        pop si
+        pop bx
+        pop eax
+        clc
+        ret
+.bad:
+        pop cx
+        jmp .loop
+.nf:
+        pop es
+        pop dx
+        pop di
+        pop si
+        pop bx
+        pop eax
+        stc
+        ret
+
+; registro de directorio ISO en SI -> fentry (nombre 8.3, atributos, fecha)
+iso_record:
+        push eax
+        push bx
+        push cx
+        push si
+        push di
+        mov di, fentry
+        mov cx, 16
+        xor ax, ax
+        rep stosw
+        mov di, fentry
+        mov cx, 11
+        mov al, ' '
+        rep stosb
+        movzx cx, byte [si+32]
+        lea bx, [si+33]
+        cmp cx, 1
+        jne .name
+        cmp byte [bx], 1
+        ja .name
+        mov byte [fentry], '.'
+        cmp byte [bx], 0
+        je .attr
+        mov byte [fentry+1], '.'
+        jmp .attr
+.name:
+        mov di, fentry
+        xor dx, dx                  ; columna dentro de la parte
+        mov ah, 8
+.n:
+        jcxz .attr
+        mov al, [bx]
+        inc bx
+        dec cx
+        cmp al, ';'
+        je .attr
+        cmp al, '.'
+        jne .ch
+        mov di, fentry+8
+        xor dx, dx
+        mov ah, 3
+        jmp .n
+.ch:
+        cmp al, 'a'
+        jb .up
+        cmp al, 'z'
+        ja .up
+        sub al, 32
+.up:
+        cmp dl, ah
+        jae .n
+        mov [di], al
+        inc di
+        inc dx
+        jmp .n
+.attr:
+        mov al, 0x01                ; solo lectura
+        test byte [si+25], 2
+        jz .f
+        mov al, 0x11                ; carpeta
+.f:
+        test byte [si+25], 1
+        jz .h
+        or al, 0x02                 ; oculto
+.h:
+        mov [fentry+11], al
+        ; fecha y hora
+        movzx ax, byte [si+18]      ; años desde 1900
+        sub ax, 80
+        jae .y
+        xor ax, ax
+.y:
+        shl ax, 4
+        or al, [si+19]
+        shl ax, 5
+        or al, [si+20]
+        mov [fentry+24], ax
+        movzx ax, byte [si+21]
+        shl ax, 6
+        or al, [si+22]
+        shl ax, 5
+        mov cl, [si+23]
+        shr cl, 1
+        or al, cl
+        mov [fentry+22], ax
+        ; extensión y tamaño
+        mov eax, [si+2]
+        mov edx, [si+10]
+        mov [fentry+28], edx
+        test byte [fentry+11], 0x10
+        jz .file
+        call iso_handle
+        mov [fentry+26], ax
+        mov dword [fentry+28], 0
+        jmp .r
+.file:
+        mov [fentry+26], ax
+        shr eax, 16
+        mov [fentry+20], ax
+.r:
+        pop di
+        pop si
+        pop cx
+        pop bx
+        pop eax
+        ret
+
+; leer de un fichero ISO (contiguo); mismo contrato que el bucle de file_read
+iso_file_read:
+.loop:
+        cmp word [fr_left], 0
+        je .out
+        mov eax, [di+SFT_SIZE]
+        sub eax, [di+SFT_POS]
+        jbe .out
+        push eax
+        movzx eax, word [di+SFT_CCL]
+        shl eax, 16
+        mov ax, [di+SFT_CLUS]
+        shl eax, 2                  ; bloques de 2048 -> sectores de 512
+        mov edx, [di+SFT_POS]
+        shr edx, 9
+        add eax, edx
+        call cache_read
+        pop eax
+        jc .out
+        mov si, [di+SFT_POS]
+        and si, 511
+        mov cx, 512
+        sub cx, si
+        movzx ecx, cx
+        cmp eax, ecx
+        jae .c1
+        mov ecx, eax
+.c1:
+        cmp cx, [fr_left]
+        jbe .c2
+        mov cx, [fr_left]
+.c2:
+        push es
+        push di
+        les di, [fr_off]
+        add si, secbuf
+        push cx
+        rep movsb
+        pop cx
+        mov [fr_off], di
+        pop di
+        pop es
+        movzx ecx, cx
+        add [di+SFT_POS], ecx
+        sub [fr_left], cx
+        add [fr_done], cx
+        jmp .loop
+.out:
+        ret
+
+; -----------------------------------------------------------------------------
 ;  Disco: lectura y escritura de sectores por BIOS INT 13h (CHS o LBA)
 ; -----------------------------------------------------------------------------
 ; EAX = sector relativo a la unidad seleccionada, ES:BX = búfer -> CF
@@ -1779,6 +2208,10 @@ read_sector:
         jmp disk_io
 write_sector:
         mov byte [io_cmd], 3
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz disk_io
+        stc                         ; un CD/DVD no se puede escribir
+        ret
 disk_io:
         test byte [cur_drv+D_FLAGS], DF_DRIVER
         jz .bios
@@ -2119,6 +2552,10 @@ dir_get:
 ; AX = directorio, CX = índice inicial, SI = patrón (11), DL = atributos
 ; -> CF=0: CX = índice encontrado, fentry = copia de la entrada
 find_entry:
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .fat
+        jmp iso_find_entry
+.fat:
         push ax
         push bx
         push si
@@ -2633,6 +3070,10 @@ file_read:
         call select_drive
         pop ax
         jc .out
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .loop
+        call iso_file_read
+        jmp .out
 .loop:
         cmp word [fr_left], 0
         je .out
@@ -2749,6 +3190,8 @@ sft_fill_file:
         mov [di+SFT_ATTR], al
         mov ax, [fentry+26]
         mov [di+SFT_CLUS], ax
+        mov ax, [fentry+20]         ; ISO 9660: parte alta del sector inicial
+        mov [di+SFT_CCL], ax
         mov eax, [fentry+28]
         mov [di+SFT_SIZE], eax
         mov dword [di+SFT_POS], 0
@@ -3430,6 +3873,8 @@ create_file:
         mov [cf_attr], cl
         mov [cf_new], al
         call normalize
+        jc .r
+        call iso_deny
         jc .r
         call walk
         jc .r
@@ -4979,6 +5424,20 @@ fn_36:
         dec al
         call select_drive
         jc .bad
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .fat
+        mov word [F_AX], 4
+        mov word [F_BX], 0
+        mov word [F_CX], 512
+        mov eax, [cur_drv+D_SIZE]
+        shr eax, 2
+        cmp eax, 0xFFFF
+        jbe .t
+        mov ax, 0xFFFF
+.t:
+        mov [F_DX], ax
+        ret
+.fat:
         call fat_free_count
         mov [F_BX], ax
         mov ax, [cur_drv+D_SPCW]
@@ -6018,6 +6477,8 @@ fn_41:
         mov dl, 0x06
         call find_path
         jc ret_err
+        call iso_deny
+        jc ret_err
         test byte [fentry+11], 0x01
         jnz .acc
         mov ax, [fentry+26]
@@ -6037,6 +6498,8 @@ fn_39:
         mov es, [F_DS]
         mov si, [F_DX]
         call normalize
+        jc ret_err
+        call iso_deny
         jc ret_err
         call walk
         jc ret_err
@@ -6127,6 +6590,8 @@ fn_3a:
         mov dl, 0x16
         call find_path
         jc .np
+        call iso_deny
+        jc ret_err
         test byte [fentry+11], 0x10
         jz .np
         ; no puede ser el directorio actual de la unidad
@@ -6196,6 +6661,8 @@ fn_56:
         mov si, [F_DX]
         mov dl, 0x16
         call find_path
+        jc ret_err
+        call iso_deny
         jc ret_err
         test byte [fentry+11], 0x08
         jnz .acc
@@ -8412,6 +8879,17 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+isob_drv    resb 1
+iso_next    resb 1
+ife_attr    resb 1
+            alignb 4
+isob_lba    resd 1
+ife_ext     resd 1
+ife_size    resd 1
+ife_pat     resw 1
+ife_start   resw 1
+ife_n       resw 1
+iso_dirs    resb 9*ISO_ND
 hist_pos    resb 1
 hist_head   resb 1
 hist_count  resb 1
@@ -8470,6 +8948,7 @@ cfgl        resb 168
 setbuf      resb SET_MAX
 instbuf     resb INST_MAX
 cfgbuf      resb CFG_MAX
+isobuf      resb 2048
 hist_buf    resb HIST_N*HIST_LEN
 cds_tab     resb CDS_LEN*NCDS
 dpb_tab     resb DPB_LEN*NCDS

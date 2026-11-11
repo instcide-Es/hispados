@@ -46,7 +46,7 @@ def main():
         run('mmd', '-i', img, '::' + d)
     cp(os.path.join(B, 'KERNEL.SYS'), 'KERNEL.SYS')
     run('mattrib', '-i', img, '+h', '+s', '+r', '::KERNEL.SYS')
-    for f in ('COMMAND.COM', 'FDISK.COM', 'FORMAT.COM', 'PLAYWAV.COM', 'SYS.COM', 'KEYB.COM', 'INSTALAR.COM'):
+    for f in ('COMMAND.COM', 'FDISK.COM', 'FORMAT.COM', 'PLAYWAV.COM', 'SYS.COM', 'KEYB.COM', 'INSTALAR.COM', 'EDIT.COM', 'GESTOR.COM', 'SYSINFO.COM'):
         cp(os.path.join(B, f), f)
     os.makedirs(os.path.join(B, 'usb'), exist_ok=True)
     for f in ('AUTOEXEC.BAT', 'CONFIG.SYS', 'INSTALL.BAT', 'LEEME.TXT'):
@@ -55,8 +55,9 @@ def main():
         with open(dst, 'wb') as o:
             o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
         cp(dst, f)
+    cp(os.path.join(B, 'EDIT.COM'), 'EDITAR.COM')
     md('DRIVERS')
-    for f in ('HSPXMS.SYS', 'HSPRAM.SYS', 'HSPSND.COM', 'HSPTEST.SYS', 'HSPUSB.SYS'):
+    for f in ('HSPXMS.SYS', 'HSPRAM.SYS', 'HSPSND.COM', 'HSPTEST.SYS', 'HSPUSB.SYS', 'HSPCD.SYS'):
         cp(os.path.join(B, f), 'DRIVERS/' + f)
     md('BIN')
     for f in ('XMSTEST.COM', 'MCBWALK.COM', 'LOLTEST.COM', 'HELLO.COM', 'UPPER.COM'):
