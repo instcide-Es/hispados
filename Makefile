@@ -46,11 +46,16 @@ $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/HSPSND.COM: drivers/hspsnd.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
-        $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM
+        $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
+        $(B)/HSPSND.COM $(B)/PLAYWAV.COM
 
 $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -59,6 +64,7 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/COMMAND.COM ::COMMAND.COM
 	mcopy -i $@ $(B)/FDISK.COM ::FDISK.COM
 	mcopy -i $@ $(B)/FORMAT.COM ::FORMAT.COM
+	mcopy -i $@ $(B)/PLAYWAV.COM ::PLAYWAV.COM
 	mcopy -i $@ tests/disk/README.TXT ::README.TXT
 	mcopy -i $@ tests/disk/AUTOEXEC.BAT ::AUTOEXEC.BAT
 	mmd   -i $@ ::BAT
@@ -74,6 +80,7 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/HSPRAM.SYS ::DRIVERS/HSPRAM.SYS
 	mcopy -i $@ $(B)/HSPTEST.SYS ::DRIVERS/HSPTEST.SYS
 	mcopy -i $@ $(B)/HSPXMS.SYS ::DRIVERS/HSPXMS.SYS
+	mcopy -i $@ $(B)/HSPSND.COM ::DRIVERS/HSPSND.COM
 	mcopy -i $@ $(B)/XMSTEST.COM ::BIN/XMSTEST.COM
 	mcopy -i $@ $(B)/MCBWALK.COM ::BIN/MCBWALK.COM
 	mcopy -i $@ $(B)/LOLTEST.COM ::BIN/LOLTEST.COM
@@ -96,6 +103,7 @@ test: $(IMG)
 	tests/run_batch_tests.sh $(IMG)
 	tests/run_config_tests.sh $(IMG)
 	tests/run_xms_tests.sh $(IMG)
+	tests/run_sound_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
 clean:
