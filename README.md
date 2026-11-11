@@ -1,0 +1,93 @@
+# HispaDOS
+
+**Sistema operativo libre compatible con MS-DOS 6.22, escrito desde cero, con drivers para hardware actual.**
+*A free, from-scratch MS-DOS 6.22 compatible operating system with drivers for modern hardware.* — [English below](#english)
+
+```
+HispaDOS 0.1 - MS-DOS 6.22 compatible kernel
+
+A:\>DIR
+
+ Volume in drive A is HISPADOS
+ Directory of A:\
+
+KERNEL   SYS         7,288 11-11-26   4:37a
+COMMAND  COM         2,839 11-11-26   4:37a
+DOCS            <DIR>      11-11-26   4:37a
+HELLOEXE EXE           368 11-11-26   4:37a
+```
+
+## Objetivos
+
+1. **Compatibilidad con MS-DOS 6.22**: la misma API (INT 21h, INT 2Fh, PSP, MCB, FCB, drivers `.SYS`), para que los programas de DOS funcionen sin cambios.
+2. **Compatibilidad con Windows 3.1** (modo estándar y 386 mejorado) sobre HispaDOS.
+3. **Drivers actuales** para DOS y para Windows 3.1: vídeo (VESA/VBE, alta resolución), ratón (PS/2 y USB), sonido (HDA/AC'97 y compatibilidad Sound Blaster) y red con TCP/IP.
+4. **Código abierto** y sin código de Microsoft: todo se escribe a partir de documentación pública (Ralf Brown's Interrupt List, especificación FAT, formato MZ, especificaciones de hardware).
+
+El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Estado (versión 0.1)
+
+| Pieza | Estado |
+|---|---|
+| Sector de arranque FAT12 | ✅ carga `KERNEL.SYS` |
+| Núcleo: consola (INT 21h 01-0Ch), vectores, fecha/hora, versión 6.22 | ✅ |
+| Sistema de ficheros FAT12: abrir/leer/buscar, subdirectorios, CD | ✅ solo lectura |
+| Handles (3Dh-46h), SFT y JFT en el PSP | ✅ |
+| Memoria con cadena de MCB (48h/49h/4Ah) | ✅ |
+| Ejecución de `.COM` y `.EXE` (MZ con reubicaciones), entorno, código de retorno | ✅ |
+| `COMMAND.COM`: VER, DIR, TYPE, CD, ECHO, SET, MEM, DATE, TIME, VOL, CLS, HELP, EXIT, búsqueda en PATH | ✅ |
+| Escritura en disco, `.BAT`, `CONFIG.SYS`, discos duros FAT16 | 🔜 0.2 |
+| Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
+
+## Compilar y probar
+
+Hace falta `nasm`, `mtools` y, para probar, `qemu-system-i386`:
+
+```sh
+sudo apt install nasm mtools qemu-system-x86
+make          # crea build/hispados.img (disquete de 1,44 MB)
+make run      # arranca en QEMU
+make test     # prueba automática por el puerto serie
+```
+
+La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS (o UEFI con CSM) desde disquete o USB en modo disquete.
+
+## Estructura
+
+```
+boot/      sector de arranque FAT12
+kernel/    núcleo (KERNEL.SYS): INT 21h, FAT, memoria, ejecución de programas
+shell/     intérprete de órdenes (COMMAND.COM)
+tests/     programas y disco de prueba, prueba automática
+docs/      hoja de ruta y documentación técnica
+```
+
+## Contribuir
+
+Se aceptan *pull requests*. Normas importantes:
+
+- **No copiar código de Microsoft** (ni del MS-DOS publicado por Microsoft ni de desensamblados). Todo se implementa a partir de documentación pública.
+- Cada función nueva de INT 21h debe ir acompañada de una comprobación en `tests/`.
+- Windows 3.1 y otros programas de terceros no se incluyen en el repositorio: cada uno usa su propia copia legal.
+
+## Licencia
+
+GPL-2.0-or-later. Ver [LICENSE](LICENSE).
+
+---
+
+## English
+
+HispaDOS is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
+
+It contains no Microsoft code: everything is implemented from public documentation.
+
+**Status (0.1):** a FAT12 boot sector, a kernel with console, read-only FAT12 with subdirectories, file handles, MCB memory management and `.COM`/`.EXE` loading, plus a `COMMAND.COM` with the basic internal commands and PATH search. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
+
+```sh
+make && make run     # build the floppy image and boot it in QEMU
+make test            # automated end-to-end test over the serial port
+```
+
+Contributions are welcome. Please never submit Microsoft code or disassembly. Licensed under GPL-2.0-or-later.
