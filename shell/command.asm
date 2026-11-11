@@ -3603,7 +3603,8 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  SET  PROMPT  REM  IF  FOR  GOTO  SHIFT", 13, 10
             db "Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.", 13, 10
             db "Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y", 13, 10
-            db "después en PATH. Utilidades: FDISK, FORMAT, SYS, KEYB, PLAYWAV.", 13, 10, 0
+            db "después en PATH. Utilidades: FDISK, FORMAT, SYS, INSTALAR, KEYB, PLAYWAV.", 13, 10
+            db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10, 0
 days        db "Dom", 0, "Lun", 0, "Mar", 0, "Mié", 0, "Jue", 0, "Vie", 0, "Sáb", 0
 s_drive     db "A:\", 0
 s_all       db "*.*", 0

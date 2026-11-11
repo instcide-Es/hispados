@@ -128,6 +128,27 @@ interrupt:
         jne .s
         mov eax, [bx+0x1A]
 .s:
+%ifdef USBTRACE
+        push eax
+        push dx
+        mov dx, 0x3F8
+        mov al, 'W'
+        cmp byte [cs:rw_dir], 0
+        je .tw
+        mov al, 'R'
+.tw:
+        out dx, al
+        pop dx
+        pop eax
+        push eax
+        push dx
+        mov dx, 0x3F8
+        call trace_num
+        mov al, ' '
+        out dx, al
+        pop dx
+        pop eax
+%endif
         add eax, [cs:part_start]
         mov [cs:rw_lba], eax
         mov cx, [bx+0x12]
@@ -178,7 +199,34 @@ interrupt:
         mov word [bx+3], 0x810C     ; error general
         jmp .out
 
+%ifdef USBTRACE
+; EAX -> decimal por COM1 (DX = 3F8h)
+trace_num:
+        push ebx
+        push ecx
+        push edx
+        mov ebx, 10
+        xor cx, cx
+.l:
+        xor edx, edx
+        div ebx
+        push dx
+        inc cx
+        test eax, eax
+        jnz .l
+.p:
+        pop ax
+        add al, '0'
+        mov dx, 0x3F8
+        out dx, al
+        loop .p
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+%endif
 rw_dir      db 0
+opt_verbose_r db 0
 rw_n        dw 0
 rw_left     dw 0
 rw_off      dw 0
@@ -677,6 +725,7 @@ init:
         cmp al, 'V'
         jne .opt
         mov byte [cs:opt_verbose], 1
+        mov byte [cs:opt_verbose_r], 1
         jmp .opt
 .optd:
         pop bx
@@ -783,7 +832,7 @@ xhci_setup:
         add eax, gdt_tbl
         mov [gdtr+2], eax
         mov eax, ebx
-        add eax, resident_end + 4095
+        add eax, file_end + 4095        ; tras todo el fichero: el código de inicio sigue en uso
         and eax, 0xFFFFF000
         sub eax, ebx
         mov [mem_off], ax
@@ -1536,3 +1585,4 @@ msg_scsi    db "El disco USB no responde.", 13, 10, 0
 msg_bsize   db "El disco USB no tiene sectores de 512 bytes.", 13, 10, 0
 msg_nofat   db "El disco USB no tiene un sistema de archivos FAT12/FAT16.", 13, 10, 0
 msg_crlf    db 13, 10, 0
+file_end:

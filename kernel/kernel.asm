@@ -84,6 +84,8 @@ E_NOMORE        equ 18
 
 NPATH_MAX       equ 66
 PATHLEN         equ 68
+HIST_N          equ 10
+HIST_LEN        equ 128
 CDS_LEN         equ 0x58
 NCDS            equ 26
 DPB_LEN         equ 0x21
@@ -353,9 +355,39 @@ drives_scan:
         jc .nextdisk
         cmp word [secbuf+510], 0xAA55
         jne .nextdisk
+        ; ¿unidad sin particiones (superfloppy)? sector 0 = arranque FAT
+        cmp word [secbuf+0x0B], 512
+        jne .ptab
+        mov al, [secbuf+0x0D]
+        test al, al
+        jz .ptab
+        cmp byte [secbuf+0x15], 0xF0
+        jb .ptab
+        cmp byte [secbuf+0x10], 1
+        jb .ptab
+        cmp byte [secbuf+0x10], 2
+        ja .ptab
+        ; todo el disco es una unidad FAT
+        mov si, sf_entry
+        mov byte [si+4], 0x06
+        mov dword [si+8], 0
+        mov eax, [cur_drv+D_SIZE]
+        mov [si+12], eax
+        mov cx, 1
+        mov al, 0x06
+        jmp .add
+.ptab:
         mov si, secbuf+0x1BE
         mov cx, 4
 .part:
+        ; entrada coherente: estado 00h/80h, inicio y tamaño distintos de 0
+        mov al, [si]
+        and al, 0x7F
+        jnz .np
+        cmp dword [si+8], 0
+        je .np
+        cmp dword [si+12], 0
+        je .np
         mov al, [si+4]
         cmp al, 0x01
         je .add
@@ -394,6 +426,17 @@ drives_scan:
         dec byte [hd_count]
         jnz .disk
 .done:
+        mov al, [ndrives]
+        mov [bios_nd], al
+        call append_ext
+        pop es
+        popad
+        ret
+
+; añadir las unidades de los drivers de bloque tras las de la BIOS
+append_ext:
+        pushad
+        push es
         ; unidades de los drivers de bloque de CONFIG.SYS
         mov si, ext_tab
         movzx cx, byte [ext_count]
@@ -405,6 +448,10 @@ drives_scan:
         shl bx, 6
         add bx, drv_tab
         mov byte [bx+D_FLAGS], DF_EXISTS | DF_DRIVER | DF_FIXED
+        ; identificador propio para las cachés (no es una unidad de la BIOS)
+        mov al, [ndrives]
+        or al, 0xE0
+        mov [bx+D_BIOS], al
         mov eax, [si]
         mov [bx+D_DRVHDR], eax
         mov al, [si+4]
@@ -436,6 +483,28 @@ drives_scan:
         mov [lol+0x20], al
         call cds_all
         pop es
+        popad
+        ret
+
+; tras cargar un driver de bloque: solo sus unidades, sin volver a pedir
+; nada a la BIOS (un driver USB nativo puede haber tomado el controlador)
+drives_ext:
+        pushad
+        push es
+        push ds
+        pop es
+        movzx ax, byte [bios_nd]
+        mov [ndrives], al
+        mov di, ax
+        shl di, 6
+        add di, drv_tab
+        mov cx, NDRV
+        sub cx, ax
+        shl cx, 5
+        xor ax, ax
+        rep stosw
+        pop es
+        call append_ext
         popad
         ret
 
@@ -1304,11 +1373,42 @@ line_input:
         test cx, cx
         jz .out
         xor bx, bx
+        mov byte [hist_pos], 0
 .l:
         call con_getc
         test al, al
         jnz .nx
+        ; tecla extendida: historial de órdenes (como DOSKEY)
         call con_getc
+        cmp al, 0x48                ; flecha arriba
+        je .up
+        cmp al, 0x50                ; flecha abajo
+        je .down
+        cmp al, 0x3D                ; F3: repetir la última
+        je .f3
+        jmp .l
+.up:
+        mov al, [hist_pos]
+        cmp al, [hist_count]
+        jae .l
+        inc byte [hist_pos]
+        call .recall
+        jmp .l
+.down:
+        cmp byte [hist_pos], 1
+        jbe .dclr
+        dec byte [hist_pos]
+        call .recall
+        jmp .l
+.dclr:
+        mov byte [hist_pos], 0
+        call .clear
+        jmp .l
+.f3:
+        cmp byte [hist_count], 0
+        je .l
+        mov byte [hist_pos], 1
+        call .recall
         jmp .l
 .nx:
         cmp al, 13
@@ -1361,15 +1461,122 @@ line_input:
         call con_raw
         pop ax
         ret
+; borrar la línea escrita
+.clear:
+        test bx, bx
+        jz .cr0
+        dec bx
+        call .rub
+        jmp .clear
+.cr0:
+        ret
+; poner en la línea la entrada del historial hist_pos (1 = la última)
+.recall:
+        call .clear
+        push si
+        movzx si, byte [hist_head]
+        movzx ax, byte [hist_pos]
+        sub si, ax
+        jns .rpos
+        add si, HIST_N
+.rpos:
+        shl si, 7
+        add si, hist_buf
+        movzx dx, byte [si]         ; longitud
+        inc si
+.rc:
+        test dx, dx
+        jz .rd
+        mov ax, bx
+        inc ax
+        cmp ax, cx
+        jae .rd
+        mov al, [si]
+        mov [es:di+2+bx], al
+        call con_out
+        inc bx
+        inc si
+        dec dx
+        jmp .rc
+.rd:
+        pop si
+        ret
 .cr:
         mov byte [es:di+2+bx], 13
         mov [es:di+1], bl
         call con_out
+        call hist_save
 .out:
         pop dx
         pop cx
         pop bx
         pop ax
+        ret
+
+; guardar la línea ES:DI+2 (BX bytes) en el historial si no está vacía
+; y no es igual que la última
+hist_save:
+        test bx, bx
+        jz .r
+        cmp bx, HIST_LEN - 1
+        jbe .len
+        mov bx, HIST_LEN - 1
+.len:
+        pusha
+        ; ¿igual que la última?
+        cmp byte [hist_count], 0
+        je .new
+        movzx si, byte [hist_head]
+        dec si
+        jns .p
+        add si, HIST_N
+.p:
+        shl si, 7
+        add si, hist_buf
+        cmp [si], bl
+        jne .new
+        mov cx, bx
+        push di
+        add di, 2
+        inc si
+.cmp:
+        mov al, [si]
+        cmp al, [es:di]
+        jne .diff
+        inc si
+        inc di
+        loop .cmp
+        pop di
+        jmp .done
+.diff:
+        pop di
+.new:
+        movzx si, byte [hist_head]
+        shl si, 7
+        add si, hist_buf
+        mov [si], bl
+        inc si
+        mov cx, bx
+        push di
+        add di, 2
+.cp:
+        mov al, [es:di]
+        mov [si], al
+        inc si
+        inc di
+        loop .cp
+        pop di
+        inc byte [hist_head]
+        cmp byte [hist_head], HIST_N
+        jb .h
+        mov byte [hist_head], 0
+.h:
+        cmp byte [hist_count], HIST_N
+        jae .done
+        inc byte [hist_count]
+.done:
+        popa
+.r:
         ret
 
 ; imprimir cadena ASCIIZ DS:SI
@@ -4274,7 +4481,7 @@ cfg_device:
         dec cx
         jmp .unit
 .bdone:
-        call drives_scan
+        call drives_ext
 .nextdrv:
         mov ax, [ld_next]
         cmp ax, 0xFFFF
@@ -8205,6 +8412,11 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+hist_pos    resb 1
+hist_head   resb 1
+hist_count  resb 1
+bios_nd     resb 1
+sf_entry    resb 16
 boot_letter resb 1
 cu_drv      resb 1
 fcb_ext     resb 1
@@ -8258,6 +8470,7 @@ cfgl        resb 168
 setbuf      resb SET_MAX
 instbuf     resb INST_MAX
 cfgbuf      resb CFG_MAX
+hist_buf    resb HIST_N*HIST_LEN
 cds_tab     resb CDS_LEN*NCDS
 dpb_tab     resb DPB_LEN*NCDS
 abs_err     resw 1

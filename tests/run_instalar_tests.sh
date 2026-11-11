@@ -1,0 +1,57 @@
+#!/bin/bash
+# Prueba de INSTALAR unidad: (disco formateado sin sistema -> arranca solo y
+# tiene las utilidades) y del historial de órdenes con teclas reales
+# (flecha arriba, flecha abajo y F3).
+# INSTALAR and command history test.
+set -u
+cd "$(dirname "$0")/.."
+IMG=${1:-build/hispados.img}
+T=$(mktemp -d)
+cp "$IMG" $T/f.img
+dd if=/dev/zero of=$T/hdd.img bs=1M count=32 status=none
+send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
+# 1) FDISK + FORMAT sin sistema + INSTALAR C:
+{
+  sleep 4
+  send "FDISK /PRI" 2
+  send "FORMAT C: /V:DESTINO /AUTOTEST" 4
+  send "INSTALAR" 2
+  send "INSTALAR A:" 2
+  send "INSTALAR C:" 8
+} | timeout 40 qemu-system-i386 -display none -serial stdio -monitor none \
+      -drive file=$T/f.img,format=raw,if=floppy \
+      -drive file=$T/hdd.img,format=raw,if=ide -boot a -no-reboot > $T/l1 2>&1
+# 2) arrancar desde C: y usar el historial con teclas reales
+qemu-system-i386 -display none -serial file:$T/l2 -monitor unix:$T/mon,server,nowait \
+    -drive file=$T/hdd.img,format=raw,if=ide -boot c -no-reboot &
+QP=$!
+sleep 5
+k() { for x in "$@"; do printf 'sendkey %s\n' "$x" | socat - UNIX-CONNECT:$T/mon >/dev/null 2>&1; sleep 0.08; done; }
+k shift-e shift-c shift-o spc u n o ret; sleep 1
+k shift-e shift-c shift-o spc d o s ret; sleep 1
+k up up ret; sleep 1                 # ECO uno
+k up down down ret; sleep 1          # línea vacía
+k f3 ret; sleep 1                    # repite la última (ECO uno)
+k shift-l shift-i shift-s shift-t shift-a shift-r ret; sleep 2
+kill $QP 2>/dev/null; wait $QP 2>/dev/null
+tr -d '\r' < $T/l1 | iconv -f CP437 -t UTF-8 > $T/l1.txt
+tr -d '\r' < $T/l2 | iconv -f CP437 -t UTF-8 > $T/l2.txt
+fail=0
+check() {
+  if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
+}
+echo "== HispaDOS INSTALAR and history tests =="
+check $T/l1.txt "Uso: INSTALAR unidad:"
+check $T/l1.txt "No se puede instalar sobre la unidad de arranque."
+check $T/l1.txt "Sistema transferido a la unidad C:"
+check $T/l1.txt "HispaDOS instalado en la unidad C:"
+check $T/l2.txt "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "KEYB     COM"
+check $T/l2.txt "INSTALAR COM"
+check $T/l2.txt "DRIVERS"
+# el historial: "uno" debe salir tres veces (la orden, flecha arriba x2 y F3)
+n=$(grep -c "^uno$" $T/l2.txt)
+if [ "$n" -ge 3 ]; then echo "  OK   historial: ECO uno repetido ($n veces)"; else echo "  FAIL historial: ECO uno salió $n veces"; fail=1; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/l1.txt; echo ---; cat $T/l2.txt; fi
+rm -rf $T
+exit $fail
