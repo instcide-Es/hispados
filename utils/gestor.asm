@@ -251,7 +251,13 @@ k_mkdir:
 k_del:
         cmp word [nent], 0
         je loop_
+        mov ax, [sel]
+        call ent_ptr
+        test byte [si+13], 0x10
         mov si, ask_del
+        jz .ask
+        mov si, ask_deltree         ; carpeta: con todo su contenido
+.ask:
         call ask_yn
         jc redraw
         mov di, cmdline
@@ -1057,7 +1063,7 @@ s_copy      db "COPY ", 0
 s_ren       db "REN ", 0
 s_md        db "MD ", 0
 s_del       db "DEL ", 0
-s_rd        db "RD ", 0
+s_rd        db "DELTREE /Y ", 0
 s_crlf      db 13, 10, 0
 msg_title   db " Hispa-DOS - Gestor de archivos", 0
 msg_dir     db " Carpeta: ", 0
@@ -1076,6 +1082,7 @@ ask_copy    db " Copiar en (carpeta o nombre): ", 0
 ask_ren     db " Nuevo nombre: ", 0
 ask_md      db " Nombre de la carpeta nueva: ", 0
 ask_del     db " ¿Borrar el elemento seleccionado? (S/N) ", 0
+ask_deltree db " ¿Borrar la carpeta y TODO su contenido? (S/N) ", 0
 ask_drv     db " Unidad (letra): ", 0
 
         section .bss

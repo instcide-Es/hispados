@@ -409,6 +409,7 @@ cmd_table:
         dw n_mkdir, do_md
         dw n_rd, do_rd
         dw n_rmdir, do_rd
+        dw n_deltree, do_deltree
         dw n_pause, do_pause
         dw n_if, do_if
         dw n_goto, do_goto
@@ -433,6 +434,7 @@ cmd_table:
         dw e_pausa, do_pause
         dw e_creardir, do_md
         dw e_borrardir, do_rd
+        dw e_borrararbol, do_deltree
         dw e_llamar, do_call
         dw e_ruta, do_path
         dw e_eco, do_echo
@@ -462,6 +464,7 @@ n_md    db "MD", 0
 n_mkdir db "MKDIR", 0
 n_rd    db "RD", 0
 n_rmdir db "RMDIR", 0
+n_deltree db "DELTREE", 0
 n_pause db "PAUSE", 0
 n_if    db "IF", 0
 n_goto  db "GOTO", 0
@@ -486,6 +489,7 @@ e_salir     db "SALIR", 0
 e_pausa     db "PAUSA", 0
 e_creardir  db "CREARDIR", 0
 e_borrardir db "BORRARDIR", 0
+e_borrararbol db "BORRARARBOL", 0
 e_llamar    db "LLAMAR", 0
 e_ruta      db "RUTA", 0
 e_eco       db "ECO", 0
@@ -2564,6 +2568,234 @@ do_rd:
 .r:
         ret
 
+; -----------------------------------------------------------------------------
+;  DELTREE / BORRARARBOL [/Y] nombre...  borra archivos y carpetas con todo
+;  su contenido (también ocultos, de sistema y de solo lectura); admite
+;  comodines. Sin /Y pregunta antes de cada uno.
+; -----------------------------------------------------------------------------
+DT_MAXDEPTH equ 32
+do_deltree:
+        mov byte [dt_yes], 0
+        mov byte [dt_any], 0
+        mov [dt_args], si
+        ; primero las opciones
+.opt:
+        mov di, c_src
+        call get_tok
+        jc .optd
+        cmp byte [c_src], '/'
+        jne .opt
+        mov al, [c_src+1]
+        call upcase
+        cmp al, 'Y'
+        je .y
+        cmp al, 'S'
+        jne .opt
+.y:
+        mov byte [dt_yes], 1
+        jmp .opt
+.optd:
+        mov si, [dt_args]
+.arg:
+        mov di, c_src
+        call get_tok
+        jc .end
+        cmp byte [c_src], '/'
+        je .arg
+        mov byte [dt_any], 1
+        push si
+        call dt_pattern
+        pop si
+        jmp .arg
+.end:
+        cmp byte [dt_any], 0
+        jne .r
+        jmp msg_required
+.r:
+        ret
+
+; un argumento (c_src, puede tener comodines)
+dt_pattern:
+        ; carpeta del patrón: hasta la última \ o :
+        mov si, c_src
+        mov di, dt_dir
+        mov bx, di
+.d:
+        lodsb
+        mov [di], al
+        inc di
+        test al, al
+        jz .de
+        cmp al, '\'
+        je .ds
+        cmp al, ':'
+        jne .d
+.ds:
+        mov bx, di
+        jmp .d
+.de:
+        mov byte [bx], 0
+        mov dx, dt_dta0
+        mov ah, 0x1A
+        int 0x21
+        mov dx, c_src
+        mov cx, 0x37
+        mov ah, 0x4E
+        int 0x21
+        jnc .f
+        mov si, msg_dtnf
+        jmp puts
+.f:
+        ; . y .. no
+        cmp byte [dt_dta0+0x1E], '.'
+        je .next
+        ; ruta completa
+        mov si, dt_dir
+        mov di, dt_path
+.c1:
+        lodsb
+        test al, al
+        jz .c1e
+        stosb
+        jmp .c1
+.c1e:
+        mov si, dt_dta0+0x1E
+.c2:
+        lodsb
+        stosb
+        test al, al
+        jnz .c2
+        dec di
+        mov [dt_end], di
+        ; preguntar
+        cmp byte [dt_yes], 0
+        jne .go
+        mov si, msg_dtask1
+        call puts
+        mov si, dt_path
+        call puts
+        mov si, msg_dtask2
+        test byte [dt_dta0+0x15], 0x10
+        jnz .q
+        mov si, msg_dtask3
+.q:
+        call puts
+        call ask_yn
+        jc .next
+.go:
+        mov si, msg_dtdel
+        call puts
+        mov si, dt_path
+        call puts
+        mov si, msg_dtdots
+        call puts
+        mov byte [dt_depth], 0
+        call dt_remove
+        jnc .ok
+        mov si, msg_dterr
+        call puts
+.ok:
+        ; dt_remove cambia la DTA
+        mov dx, dt_dta0
+        mov ah, 0x1A
+        int 0x21
+.next:
+        mov ah, 0x4F
+        int 0x21
+        jnc .f
+        ret
+
+; borrar dt_path (fichero o carpeta, con todo su contenido); dt_end = su fin
+; -> CF si algo no se ha podido borrar
+dt_remove:
+        mov dx, dt_path
+        mov ax, 0x4300
+        int 0x21
+        jc .r
+        test cl, 0x10
+        jnz .dir
+        mov ax, 0x4301              ; quitar solo lectura, oculto, sistema
+        xor cx, cx
+        int 0x21
+        mov ah, 0x41
+        int 0x21
+.r:
+        ret
+.dir:
+        cmp byte [dt_depth], DT_MAXDEPTH
+        jb .deep
+        stc
+        ret
+.deep:
+        inc byte [dt_depth]
+        push bp
+        sub sp, 44                  ; DTA de este nivel
+        mov bp, sp
+        mov byte [bp+43], 0         ; errores en este nivel
+        mov dx, bp
+        mov ah, 0x1A
+        int 0x21
+        mov di, [dt_end]
+        push di
+        cmp di, dt_path + 200
+        jae .full
+        mov dword [di], '\*.*'
+        mov byte [di+4], 0
+        mov dx, dt_path
+        mov cx, 0x37
+        mov ah, 0x4E
+        int 0x21
+        jc .empty
+.l:
+        cmp byte [bp+0x1E], '.'
+        je .n
+        ; ruta del elemento
+        pop di
+        push di
+        mov byte [di], '\'
+        inc di
+        lea si, [bp+0x1E]
+.cp:
+        lodsb
+        stosb
+        test al, al
+        jnz .cp
+        dec di
+        mov [dt_end], di
+        call dt_remove
+        jnc .ok
+        mov byte [bp+43], 1
+.ok:
+        mov dx, bp                  ; la recursión ha cambiado la DTA
+        mov ah, 0x1A
+        int 0x21
+.n:
+        mov ah, 0x4F
+        int 0x21
+        jnc .l
+.empty:
+        pop di
+        mov byte [di], 0
+        mov [dt_end], di
+        mov al, [bp+43]
+        add sp, 44
+        pop bp
+        dec byte [dt_depth]
+        test al, al
+        jnz .bad
+        mov dx, dt_path
+        mov ah, 0x3A
+        int 0x21
+        ret
+.full:
+        pop di
+        add sp, 44
+        pop bp
+        dec byte [dt_depth]
+.bad:
+        stc
+        ret
+
 do_pause:
         mov si, msg_pause
         call puts
@@ -3627,6 +3859,13 @@ vol1_l      db "A es ", 0
 msg_vol0    db " El volumen de la unidad "
 vol0_l      db "A no tiene etiqueta", 0
 msg_dirof   db " Directorio de ", 0
+msg_dtask1  db "¿Eliminar ", 0
+msg_dtask2  db " y todo su contenido? (S/N) ", 0
+msg_dtask3  db "? (S/N) ", 0
+msg_dtdel   db "Eliminando ", 0
+msg_dtdots  db "...", 13, 10, 0
+msg_dterr   db "No se ha podido eliminar todo.", 13, 10, 0
+msg_dtnf    db "No se encontró el archivo", 13, 10, 0
 msg_files   db " archivo(s)", 0
 msg_bytes   db " bytes", 13, 10, 0
 msg_free    db " bytes libres", 13, 10, 0
@@ -3641,6 +3880,7 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  CD/CHDIR          LIMPIAR/CLS       FECHA/DATE        HORA/TIME", 13, 10
             db "  VERSION/VER       MEMORIA/MEM       VOLUMEN/VOL       PAUSA/PAUSE", 13, 10
             db "  ECO/ECHO          RUTA/PATH         LLAMAR/CALL       SALIR/EXIT", 13, 10
+            db "  BORRARARBOL/DELTREE (carpetas con todo su contenido)", 13, 10
             db "  SET  PROMPT  REM  IF  FOR  GOTO  SHIFT", 13, 10
             db "Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.", 13, 10
             db "Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y", 13, 10
@@ -3713,6 +3953,15 @@ c_first     resb 1
 c_last      resb 1
 c_next      resw 1
 ynbuf       resb 8
+dt_yes      resb 1
+dt_any      resb 1
+dt_depth    resb 1
+            resb 1
+dt_args     resw 1
+dt_end      resw 1
+dt_dta0     resb 44
+dt_dir      resb 132
+dt_path     resb 264
 m_mask      resb 12
 m_name      resb 12
 m_new       resb 14

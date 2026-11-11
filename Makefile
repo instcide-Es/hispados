@@ -153,6 +153,7 @@ test: $(IMG) usb
 	tests/run_cd_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG) ahci
 	tests/run_edit_tests.sh $(IMG)
+	tests/run_deltree_tests.sh $(IMG)
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
