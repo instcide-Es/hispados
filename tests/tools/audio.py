@@ -44,10 +44,22 @@ def check(path):
             start = None
     print("grabación: %d Hz, %d canales, %.2f s" % (rate, ch, n / rate))
     for a, b in segs:
-        s = vals[a * win:b * win]
-        zc = sum(1 for k in range(1, len(s)) if (s[k - 1] < 0) != (s[k] < 0))
-        hz = zc / 2 / (len(s) / rate)
-        print("tramo %.2f-%.2f s: %.0f Hz, pico %d" % (a / 100, b / 100, hz, max(abs(x) for x in s)))
+        # frecuencia por ventanas de 50 ms; se separa donde cambia más de un 10 %
+        w5 = rate // 20
+        runs = []
+        for k in range(a * win, b * win - w5 + 1, w5):
+            s = vals[k:k + w5]
+            zc = sum(1 for q in range(1, len(s)) if (s[q - 1] < 0) != (s[q] < 0))
+            hz = zc / 2 / (len(s) / rate)
+            if runs and abs(hz - runs[-1][2] / runs[-1][3]) < 0.1 * max(hz, 1):
+                runs[-1][1] = k + w5; runs[-1][2] += hz; runs[-1][3] += 1
+            else:
+                runs.append([k, k + w5, hz, 1])
+        for r0, r1, tot, cnt in runs:
+            if cnt < 2:
+                continue
+            seg = vals[r0:r1]
+            print("tramo %.2f-%.2f s: %.0f Hz, pico %d" % (r0 / rate, r1 / rate, tot / cnt, max(abs(x) for x in seg)))
 
 if __name__ == '__main__':
     if sys.argv[1] == 'make':
