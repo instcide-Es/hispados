@@ -13,10 +13,14 @@ persona que tenga un equipo antiguo.
 | Época | Sistema | Base técnica | Equipos objetivo |
 |---|---|---|---|
 | 1994 | **Hispa-DOS** | Modo real, compatible con MS-DOS 6.22 y con Windows 3.11 | 386/486, 4–16 MB |
-| Principios de los 90 | Entorno gráfico propio sobre Hispa-DOS | Ventanas, multitarea cooperativa, aplicaciones de Windows 3.x | 386/486 |
-| Mediados de los 90 | Sistema de 32 bits | Multitarea real, nombres largos, Plug and Play | Pentium, 8–32 MB |
-| Finales de los 90 | Sistema maduro | Red e Internet, USB, multimedia | Pentium II/III |
-| Años 2000 | … | Hasta donde lleguemos | |
+| Principios de los 90 | **Hispa Ventanas**: entorno gráfico propio sobre Hispa-DOS | Ventanas, multitarea cooperativa, aplicaciones de Windows 3.x | 386/486 |
+| Mediados de los 90 | **Hispa 32**: sistema de 32 bits | Multitarea real, nombres largos, Plug and Play | Pentium, 8–32 MB |
+| Finales de los 90 | **Hispa Red**: sistema maduro | Red e Internet, USB, multimedia | Pentium II/III |
+| Años 2000 | **Hispa XXI** | Hasta donde lleguemos | |
+
+Todos los sistemas llevan el nombre de la familia **Hispa**. No se usan nombres
+de países ni de lugares concretos: todos los países de habla hispana tienen el
+mismo valor en este proyecto.
 
 Cada época se termina con una **versión estable** publicada en GitHub, con su
 documentación y sus imágenes listas para usar, antes de empezar la siguiente.
