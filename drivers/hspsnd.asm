@@ -60,7 +60,7 @@ gdtr        dw 15
 gdt_tbl     dq 0
             dw 0xFFFF, 0
             db 0, 0x92, 0xCF, 0
-name_none   db "none", 0
+name_none   db "ninguna", 0
 bdl_off     dw 0
 buf_off     dw 0
 
@@ -1383,15 +1383,15 @@ puts:
 
 pci_bdf     dw 0
 tsr_end     dw 0
-msg_title   db "HSPSND 0.1 - HispaDOS sound driver", 13, 10, 0
-msg_already db "Already installed.", 13, 10, 0
-msg_ac97    db "Intel AC'97 audio at I/O ", 0
-msg_vra     db ", variable rate", 13, 10, 0
-msg_novra   db ", fixed 48 kHz", 13, 10, 0
-msg_hda     db "Intel HD Audio at ", 0
-msg_codec   db ", DAC node ", 0
-msg_pin     db ", output pin ", 0
+msg_title   db "HSPSND 0.1 - controlador de sonido de HispaDOS", 13, 10, 0
+msg_already db "Ya está instalado.", 13, 10, 0
+msg_ac97    db "Audio Intel AC'97 en E/S ", 0
+msg_vra     db ", frecuencia variable", 13, 10, 0
+msg_novra   db ", 48 kHz fijos", 13, 10, 0
+msg_hda     db "Intel HD Audio en ", 0
+msg_codec   db ", nodo DAC ", 0
+msg_pin     db ", salida ", 0
 msg_crlf2   db 13, 10, 0
-msg_hdafail db "HD Audio controller found, but it could not be started.", 13, 10, 0
-msg_nocard  db "No supported sound card found.", 13, 10, 0
-msg_fail    db "The AC'97 codec does not answer.", 13, 10, 0
+msg_hdafail db "Hay un controlador HD Audio, pero no se ha podido poner en marcha.", 13, 10, 0
+msg_nocard  db "No se ha encontrado ninguna tarjeta de sonido compatible.", 13, 10, 0
+msg_fail    db "El códec AC'97 no responde.", 13, 10, 0

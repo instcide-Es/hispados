@@ -410,6 +410,25 @@ cmd_table:
         dw n_call, do_call
         dw n_path, do_path
         dw n_prompt, do_prompt
+        dw e_ayuda, do_help
+        dw e_copiar, do_copy
+        dw e_borrar, do_del
+        dw e_renombrar, do_ren
+        dw e_mostrar, do_type
+        dw e_listar, do_dir
+        dw e_limpiar, do_cls
+        dw e_fecha, do_date
+        dw e_hora, do_time
+        dw e_version, do_ver
+        dw e_memoria, do_mem
+        dw e_volumen, do_vol
+        dw e_salir, do_exit
+        dw e_pausa, do_pause
+        dw e_creardir, do_md
+        dw e_borrardir, do_rd
+        dw e_llamar, do_call
+        dw e_ruta, do_path
+        dw e_eco, do_echo
         dw 0, 0
 
 n_ver   db "VER", 0
@@ -444,6 +463,25 @@ n_shift db "SHIFT", 0
 n_call  db "CALL", 0
 n_path  db "PATH", 0
 n_prompt db "PROMPT", 0
+e_ayuda     db "AYUDA", 0
+e_copiar    db "COPIAR", 0
+e_borrar    db "BORRAR", 0
+e_renombrar db "RENOMBRAR", 0
+e_mostrar   db "MOSTRAR", 0
+e_listar    db "LISTAR", 0
+e_limpiar   db "LIMPIAR", 0
+e_fecha     db "FECHA", 0
+e_hora      db "HORA", 0
+e_version   db "VERSION", 0
+e_memoria   db "MEMORIA", 0
+e_volumen   db "VOLUMEN", 0
+e_salir     db "SALIR", 0
+e_pausa     db "PAUSA", 0
+e_creardir  db "CREARDIR", 0
+e_borrardir db "BORRARDIR", 0
+e_llamar    db "LLAMAR", 0
+e_ruta      db "RUTA", 0
+e_eco       db "ECO", 0
 
 ; -----------------------------------------------------------------------------
 ;  Órdenes internas (SI = argumentos)
@@ -676,8 +714,8 @@ put_drive:
 ; AL = letra de la unidad
 print_label:
         mov [s_lab], al
-        mov [msg_vol1+17], al
-        mov [msg_vol0+17], al
+        mov [vol1_l], al
+        mov [vol0_l], al
         call set_dta
         mov dx, s_lab
         mov cx, 8
@@ -902,14 +940,14 @@ dir_line:
         call putc
         mov ax, [dta+0x18]
         mov bx, ax
-        shr ax, 5
-        and ax, 15
-        call put2
+        and ax, 31
+        call put2                   ; día
         mov al, '-'
         call putc
         mov ax, bx
-        and ax, 31
-        call put2
+        shr ax, 5
+        and ax, 15
+        call put2                   ; mes
         mov al, '-'
         call putc
         mov ax, bx
@@ -919,20 +957,10 @@ dir_line:
         mov cx, 100
         div cx
         mov ax, dx
-        call put2
-        ; hora 12 h con a/p
+        call put2                   ; año
+        ; hora de 24 horas
         mov ax, [dta+0x16]
         shr ax, 11
-        mov bl, 'a'
-        cmp ax, 12
-        jb .am
-        mov bl, 'p'
-        sub ax, 12
-.am:
-        test ax, ax
-        jnz .h
-        mov ax, 12
-.h:
         movzx eax, ax
         mov cl, 4
         call putnum_w
@@ -942,8 +970,6 @@ dir_line:
         shr ax, 5
         and ax, 63
         call put2
-        mov al, bl
-        call putc
         jmp crlf
 
 do_mem:
@@ -1026,9 +1052,18 @@ do_date:
         mov al, '-'
         call putc
         pop cx
-        movzx eax, cx
-        call putnum
+        call put_year
         jmp crlf
+
+; CX = año -> cuatro cifras sin separador
+put_year:
+        mov ax, cx
+        xor dx, dx
+        mov cx, 100
+        div cx
+        call put2
+        mov ax, dx
+        jmp put2
 
 do_time:
         mov ah, 0x2C
@@ -1420,7 +1455,7 @@ putnum_w:
         cmp ch, 3
         jne .nc
         dec di
-        mov byte [di], ','
+        mov byte [di], '.'           ; separador de miles español
         mov ch, 0
 .nc:
         dec di
@@ -2495,19 +2530,19 @@ do_pause:
         int 0x21
         jmp crlf
 
-msg_redir   db "File creation error", 13, 10, 0
-msg_self    db "File cannot be copied onto itself", 13, 10, 0
-msg_cantcreate db "Unable to create destination", 13, 10, 0
-msg_copied  db " file(s) copied", 13, 10, 0
-msg_full    db "Insufficient disk space", 13, 10, 0
-msg_delall  db "All files in directory will be deleted!", 13, 10
-            db "Are you sure (Y/N)?", 0
-msg_accden  db "Access denied", 13, 10, 0
-msg_badparam db "Invalid parameter", 13, 10, 0
-msg_dupnf   db "Duplicate file name or file not found", 13, 10, 0
-msg_mderr   db "Unable to create directory", 13, 10, 0
-msg_rderr   db "Invalid path, not directory,", 13, 10, "or directory not empty", 13, 10, 0
-msg_pause   db "Press any key to continue . . .", 0
+msg_redir   db "Error al crear el archivo", 13, 10, 0
+msg_self    db "No se puede copiar un archivo sobre sí mismo", 13, 10, 0
+msg_cantcreate db "No se puede crear el destino", 13, 10, 0
+msg_copied  db " archivo(s) copiado(s)", 13, 10, 0
+msg_full    db "Espacio insuficiente en el disco", 13, 10, 0
+msg_delall  db "¡Se borrarán todos los archivos del directorio!", 13, 10
+            db "¿Está seguro (S/N)? ", 0
+msg_accden  db "Acceso denegado", 13, 10, 0
+msg_badparam db "Parámetro no válido", 13, 10, 0
+msg_dupnf   db "Nombre de archivo duplicado o archivo no encontrado", 13, 10, 0
+msg_mderr   db "No se puede crear el directorio", 13, 10, 0
+msg_rderr   db "Ruta no válida, no es un directorio", 13, 10, "o el directorio no está vacío", 13, 10, 0
+msg_pause   db "Pulse una tecla para continuar . . .", 0
 pipe_names  db "A:\~PIPE0.TMP", 0, 0, 0
             db "A:\~PIPE1.TMP", 0, 0, 0
             db "A:\~PIPE2.TMP", 0, 0, 0
@@ -2816,8 +2851,7 @@ put_date:
         mov al, '-'
         call putc
         pop cx
-        movzx eax, cx
-        jmp putnum
+        jmp put_year
 put_time:
         mov ah, 0x2C
         int 0x21
@@ -3516,14 +3550,14 @@ for_run:
         mov si, for_cmd
         jmp execute_line
 
-msg_echoon  db "ECHO is on", 0
-msg_echooff db "ECHO is off", 0
-msg_syntax  db "Syntax error", 13, 10, 0
-msg_envfull db "Out of environment space", 13, 10, 0
-msg_nopath  db "No Path", 13, 10, 0
-msg_nolabel db "Label not found", 13, 10, 0
-msg_toodeep db "Batch nesting too deep", 13, 10, 0
-msg_vername db "HispaDOS Version 0.2", 0
+msg_echoon  db "ECHO está activado", 0
+msg_echooff db "ECHO está desactivado", 0
+msg_syntax  db "Error de sintaxis", 13, 10, 0
+msg_envfull db "No queda espacio en el entorno", 13, 10, 0
+msg_nopath  db "Sin ruta", 13, 10, 0
+msg_nolabel db "No se encontró la etiqueta", 13, 10, 0
+msg_toodeep db "Demasiados archivos de proceso por lotes anidados", 13, 10, 0
+msg_vername db "HispaDOS versión 0.2", 0
 s_on        db "ON", 0
 s_off       db "OFF", 0
 s_not       db "NOT", 0
@@ -3537,35 +3571,40 @@ s_defprompt db "$P$G", 0
 s_autoexec  db "A:\AUTOEXEC.BAT", 0
 s_empty     db 0
 ; -----------------------------------------------------------------------------
-msg_hello   db 13, 10, "HispaDOS Command Interpreter 0.2", 13, 10
-            db "Type HELP for a list of commands.", 13, 10, 13, 10, 0
-msg_ver     db 13, 10, "HispaDOS Version 0.2 (MS-DOS 6.22 compatible)", 13, 10
-            db "Reported DOS version: ", 0
-msg_badcmd  db "Bad command or file name", 13, 10, 0
-msg_execerr db "Cannot execute program", 13, 10, 0
-msg_baddir  db "Invalid directory", 13, 10, 0
-msg_baddrv  db "Invalid drive specification", 13, 10, 0
-msg_nofile  db "File not found", 13, 10, 0
-msg_reqparam db "Required parameter missing", 13, 10, 0
-msg_vol1    db " Volume in drive A is ", 0
-msg_vol0    db " Volume in drive A has no label", 0
-msg_dirof   db " Directory of ", 0
-msg_files   db " file(s)", 0
+msg_hello   db 13, 10, "Intérprete de órdenes de HispaDOS 0.2", 13, 10
+            db "Escriba AYUDA para ver la lista de órdenes.", 13, 10, 13, 10, 0
+msg_ver     db 13, 10, "HispaDOS versión 0.2 (compatible con MS-DOS 6.22)", 13, 10
+            db "Versión de DOS notificada: ", 0
+msg_badcmd  db "Comando o nombre de archivo incorrecto", 13, 10, 0
+msg_execerr db "No se puede ejecutar el programa", 13, 10, 0
+msg_baddir  db "Directorio no válido", 13, 10, 0
+msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
+msg_nofile  db "No se encontró el archivo", 13, 10, 0
+msg_reqparam db "Falta un parámetro obligatorio", 13, 10, 0
+msg_vol1    db " El volumen de la unidad "
+vol1_l      db "A es ", 0
+msg_vol0    db " El volumen de la unidad "
+vol0_l      db "A no tiene etiqueta", 0
+msg_dirof   db " Directorio de ", 0
+msg_files   db " archivo(s)", 0
 msg_bytes   db " bytes", 13, 10, 0
-msg_free    db " bytes free", 13, 10, 0
-msg_mtotal  db " bytes total conventional memory", 13, 10, 0
-msg_mfree   db " bytes free", 13, 10, 0
-msg_mlarge  db " bytes largest executable program size", 13, 10, 0
-msg_date    db "Current date is ", 0
-msg_time    db "Current time is ", 0
-msg_help    db "Internal commands:", 13, 10
-            db "  CALL  CD/CHDIR  CLS  COPY  DATE  DEL/ERASE  DIR  ECHO  EXIT", 13, 10
-            db "  FOR  GOTO  HELP  IF  MD/MKDIR  MEM  PATH  PAUSE  PROMPT", 13, 10
-            db "  RD/RMDIR  REM  REN/RENAME  SET  SHIFT  TIME  TYPE  VER  VOL", 13, 10
-            db "Redirection: > >> < and pipes |. Batch files: .BAT, AUTOEXEC.BAT.", 13, 10
-            db "Programs (.COM, .EXE, .BAT) are searched in the current", 13, 10
-            db "directory and then in PATH. Utilities: FDISK, FORMAT.", 13, 10, 0
-days        db "Sun", 0, "Mon", 0, "Tue", 0, "Wed", 0, "Thu", 0, "Fri", 0, "Sat", 0
+msg_free    db " bytes libres", 13, 10, 0
+msg_mtotal  db " bytes de memoria convencional en total", 13, 10, 0
+msg_mfree   db " bytes libres", 13, 10, 0
+msg_mlarge  db " bytes del mayor programa ejecutable", 13, 10, 0
+msg_date    db "La fecha actual es ", 0
+msg_time    db "La hora actual es ", 0
+msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):", 13, 10
+            db "  AYUDA/HELP        COPIAR/COPY       BORRAR/DEL,ERASE  RENOMBRAR/REN", 13, 10
+            db "  LISTAR/DIR        MOSTRAR/TYPE      CREARDIR/MD       BORRARDIR/RD", 13, 10
+            db "  CD/CHDIR          LIMPIAR/CLS       FECHA/DATE        HORA/TIME", 13, 10
+            db "  VERSION/VER       MEMORIA/MEM       VOLUMEN/VOL       PAUSA/PAUSE", 13, 10
+            db "  ECO/ECHO          RUTA/PATH         LLAMAR/CALL       SALIR/EXIT", 13, 10
+            db "  SET  PROMPT  REM  IF  FOR  GOTO  SHIFT", 13, 10
+            db "Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.", 13, 10
+            db "Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y", 13, 10
+            db "después en PATH. Utilidades: FDISK, FORMAT, SYS, KEYB, PLAYWAV.", 13, 10, 0
+days        db "Dom", 0, "Lun", 0, "Mar", 0, "Mié", 0, "Jue", 0, "Vie", 0, "Sáb", 0
 s_drive     db "A:\", 0
 s_all       db "*.*", 0
 s_lab       db "A:\*.*", 0

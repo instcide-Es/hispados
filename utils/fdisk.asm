@@ -1000,58 +1000,58 @@ types:
         db 0x0E, "PRI DOS  FAT16 LBA  ", 0
         db 0x05, "EXT DOS             ", 0
         db 0x0F, "EXT DOS  LBA        ", 0
-        db 0x0B, "Non-DOS  FAT32      ", 0
-        db 0x0C, "Non-DOS  FAT32 LBA  ", 0
-        db 0x07, "Non-DOS  NTFS/exFAT ", 0
-        db 0x82, "Non-DOS  Linux swap ", 0
-        db 0x83, "Non-DOS  Linux      ", 0
-        db 0xEE, "Non-DOS  GPT        ", 0
+        db 0x0B, "No DOS   FAT32      ", 0
+        db 0x0C, "No DOS   FAT32 LBA  ", 0
+        db 0x07, "No DOS   NTFS/exFAT ", 0
+        db 0x82, "No DOS   Linux swap ", 0
+        db 0x83, "No DOS   Linux      ", 0
+        db 0xEE, "No DOS   GPT        ", 0
         db 0xFF
-tn_other    db "Non-DOS             ", 0
+tn_other    db "No DOS              ", 0
 
-msg_title   db 13, 10, "HispaDOS Fixed Disk Setup Program 0.2", 13, 10
-            db "(C) 2026 HispaDOS contributors - GPL-2.0-or-later", 13, 10, 0
-msg_nodisk  db "No fixed disks present.", 13, 10, 0
-msg_baddisk db "Invalid fixed disk number.", 13, 10, 0
-msg_badopt  db "Invalid option. Use /STATUS /PRI[:MB] /ACT:n /DEL:n /MBR /EMPTY", 13, 10, 0
-msg_isempty db "The fixed disk has no partitions.", 13, 10, 0
-msg_notempty db "The fixed disk already has partitions.", 13, 10, 0
-msg_ioerr   db "Error reading or writing the fixed disk.", 13, 10, 0
-msg_menu1   db "                         FDISK Options", 13, 10, 13, 10
-            db "Current fixed disk drive: ", 0
-msg_menu2   db 13, 10, "Choose one of the following:", 13, 10, 13, 10
-            db "1. Create DOS partition", 13, 10
-            db "2. Set active partition", 13, 10
-            db "3. Delete partition", 13, 10
-            db "4. Display partition information", 13, 10, 0
-msg_menu5   db "5. Change current fixed disk drive", 13, 10, 0
-msg_choice  db 13, 10, "Enter choice (Esc to exit): ", 0
-msg_whichdisk db "Enter fixed disk drive number: ", 0
-msg_askmb   db "Partition size in Mbytes (Enter = maximum, ", 0
+msg_title   db 13, 10, "Programa de configuración del disco duro de HispaDOS 0.2", 13, 10
+            db "(C) 2026 colaboradores de HispaDOS - GPL-2.0 o posterior", 13, 10, 0
+msg_nodisk  db "No hay discos duros.", 13, 10, 0
+msg_baddisk db "Número de disco duro no válido.", 13, 10, 0
+msg_badopt  db "Opción no válida. Use /STATUS /PRI[:MB] /ACT:n /DEL:n /MBR /EMPTY", 13, 10, 0
+msg_isempty db "El disco duro no tiene particiones.", 13, 10, 0
+msg_notempty db "El disco duro ya tiene particiones.", 13, 10, 0
+msg_ioerr   db "Error al leer o escribir el disco duro.", 13, 10, 0
+msg_menu1   db "                        Opciones de FDISK", 13, 10, 13, 10
+            db "Disco duro actual: ", 0
+msg_menu2   db 13, 10, "Elija una de las siguientes opciones:", 13, 10, 13, 10
+            db "1. Crear una partición DOS", 13, 10
+            db "2. Establecer la partición activa", 13, 10
+            db "3. Eliminar una partición", 13, 10
+            db "4. Mostrar la información de las particiones", 13, 10, 0
+msg_menu5   db "5. Cambiar el disco duro actual", 13, 10, 0
+msg_choice  db 13, 10, "Escriba su opción (Esc para salir): ", 0
+msg_whichdisk db "Escriba el número de disco duro: ", 0
+msg_askmb   db "Tamaño de la partición en MB (Intro = máximo, ", 0
 msg_askmb2  db " MB): ", 0
-msg_askact  db "Enter the number of the partition you want to make active: ", 0
-msg_askdel  db "Enter the number of the partition you want to delete: ", 0
-msg_sure    db "WARNING! Data in the deleted partition will be lost.", 13, 10
-            db "Do you wish to continue (Y/N)? ", 0
-msg_esc     db "Press Enter or Esc to continue", 0
-msg_mbrok   db "Master boot code updated.", 13, 10, 0
-msg_full    db "No free partition table entry.", 13, 10, 0
-msg_nospace db "Not enough free space on the disk.", 13, 10, 0
-msg_created db "Primary DOS partition created. Drive letters have been updated.", 13, 10, 0
-msg_nopart  db "No such partition.", 13, 10, 0
-msg_actok   db "Active partition set.", 13, 10, 0
-msg_delok   db "Partition deleted. Drive letters have been updated.", 13, 10, 0
-msg_curdisk db 13, 10, "Current fixed disk drive: ", 0
+msg_askact  db "Número de la partición que quiere activar: ", 0
+msg_askdel  db "Número de la partición que quiere eliminar: ", 0
+msg_sure    db "¡Atención! Se perderán los datos de la partición eliminada.", 13, 10
+            db "¿Desea continuar (S/N)? ", 0
+msg_esc     db "Pulse Intro o Esc para continuar", 0
+msg_mbrok   db "Código de arranque principal actualizado.", 13, 10, 0
+msg_full    db "No queda ninguna entrada libre en la tabla de particiones.", 13, 10, 0
+msg_nospace db "No hay espacio libre suficiente en el disco.", 13, 10, 0
+msg_created db "Partición DOS primaria creada. Se han actualizado las letras de unidad.", 13, 10, 0
+msg_nopart  db "No existe esa partición.", 13, 10, 0
+msg_actok   db "Partición activa establecida.", 13, 10, 0
+msg_delok   db "Partición eliminada. Se han actualizado las letras de unidad.", 13, 10, 0
+msg_curdisk db 13, 10, "Disco duro actual: ", 0
 msg_open    db "  (", 0
 msg_mbytes  db " MB", 0
 msg_sectors db ", ", 0
-msg_sects   db " sectors", 0
+msg_sects   db " sectores", 0
 msg_lba     db ", LBA", 0
 msg_close   db ")", 13, 10, 0
-msg_noparts db "No partitions defined.", 13, 10, 0
-msg_thead   db "Partition Status  Type                  Start MB   Size MB   Drive", 13, 10, 0
+msg_noparts db "No hay particiones definidas.", 13, 10, 0
+msg_thead   db "Partición Estado  Tipo                 Inicio MB Tamaño MB  Unidad", 13, 10, 0
 msg_sp4     db "    ", 0
-msg_freesp  db "Free space: ", 0
+msg_freesp  db "Espacio libre: ", 0
 
 mbr_code:
         incbin "build/mbr.bin", 0, 446

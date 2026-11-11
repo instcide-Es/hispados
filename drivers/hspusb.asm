@@ -1512,27 +1512,27 @@ opt_verbose db 0
 hcc1        dd 0
 cap_mb      dd 0
 fail_msg    dw 0
-msg_title   db "HSPUSB 0.1 - HispaDOS native USB (xHCI)", 13, 10, 0
-msg_found   db "xHCI controller at ", 0
-msg_port    db "Device on port ", 0
-msg_speed   db ", speed ", 0
-msg_disk    db "USB disk: ", 0
-msg_mbas    db " MB as drive "
+msg_title   db "HSPUSB 0.1 - USB nativo de HispaDOS (xHCI)", 13, 10, 0
+msg_found   db "Controlador xHCI en ", 0
+msg_port    db "Dispositivo en el puerto ", 0
+msg_speed   db ", velocidad ", 0
+msg_disk    db "Disco USB: ", 0
+msg_mbas    db " MB en la unidad "
 msg_drv     db "?:", 13, 10, 0
-msg_nox     db "No xHCI (USB 3) controller found.", 13, 10, 0
-msg_v86     db "Cannot run under EMM386 (V86 mode).", 13, 10, 0
-msg_high    db "The xHCI registers are above 4 GB: not supported.", 13, 10, 0
-msg_bios    db "The BIOS is using the USB controller (USB keyboard or boot", 13, 10
-            db "device). Use /F to take it over anyway.", 13, 10, 0
-msg_reset   db "The xHCI controller does not reset.", 13, 10, 0
-msg_nodev   db "No USB device connected.", 13, 10, 0
-msg_slot    db "USB: Enable Slot failed.", 13, 10, 0
-msg_addr    db "USB: Address Device failed.", 13, 10, 0
-msg_desc    db "USB: cannot read the descriptors.", 13, 10, 0
-msg_notmsc  db "The USB device is not a mass storage device.", 13, 10, 0
-msg_cfg     db "USB: Set Configuration failed.", 13, 10, 0
-msg_epcfg   db "USB: Configure Endpoint failed.", 13, 10, 0
-msg_scsi    db "USB disk does not answer.", 13, 10, 0
-msg_bsize   db "USB disk sector size is not 512 bytes.", 13, 10, 0
-msg_nofat   db "USB disk has no FAT12/FAT16 file system.", 13, 10, 0
+msg_nox     db "No se ha encontrado ningún controlador xHCI (USB 3).", 13, 10, 0
+msg_v86     db "No funciona con EMM386 (modo V86).", 13, 10, 0
+msg_high    db "Los registros del xHCI están por encima de 4 GB: no se admite.", 13, 10, 0
+msg_bios    db "La BIOS está usando el controlador USB (teclado USB o unidad de", 13, 10
+            db "arranque). Use /F para tomarlo igualmente.", 13, 10, 0
+msg_reset   db "El controlador xHCI no se reinicia.", 13, 10, 0
+msg_nodev   db "No hay ningún dispositivo USB conectado.", 13, 10, 0
+msg_slot    db "USB: ha fallado Enable Slot.", 13, 10, 0
+msg_addr    db "USB: ha fallado Address Device.", 13, 10, 0
+msg_desc    db "USB: no se pueden leer los descriptores.", 13, 10, 0
+msg_notmsc  db "El dispositivo USB no es de almacenamiento masivo.", 13, 10, 0
+msg_cfg     db "USB: ha fallado Set Configuration.", 13, 10, 0
+msg_epcfg   db "USB: ha fallado Configure Endpoint.", 13, 10, 0
+msg_scsi    db "El disco USB no responde.", 13, 10, 0
+msg_bsize   db "El disco USB no tiene sectores de 512 bytes.", 13, 10, 0
+msg_nofat   db "El disco USB no tiene un sistema de archivos FAT12/FAT16.", 13, 10, 0
 msg_crlf    db 13, 10, 0

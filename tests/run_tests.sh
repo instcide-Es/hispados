@@ -24,28 +24,28 @@ send() { sleep "${2:-0.7}"; printf '%s\r' "$1"; }
   sleep 1.5
 } | timeout 25 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file="$IMG",format=raw,if=floppy -boot a -no-reboot > "$LOG" 2>&1
-tr -d '\r' < "$LOG" > "$LOG.txt"
+tr -d '\r' < "$LOG" | iconv -f CP437 -t UTF-8 > "$LOG.txt"
 fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 echo "== HispaDOS tests =="
-check "HispaDOS 0.2 - MS-DOS 6.22 compatible kernel"
-check "HispaDOS Command Interpreter 0.2"
-check "Reported DOS version: 6.22"
-check " Volume in drive A is HISPADOS"
-check " Directory of A:\\"
+check "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check "Intérprete de órdenes de HispaDOS 0.2"
+check "Versión de DOS notificada: 6.22"
+check " El volumen de la unidad A es HISPADOS"
+check " Directorio de A:\\"
 check "COMMAND  COM"
 check "<DIR>"
-check "bytes free"
+check "bytes libres"
 check "This file was read through INT 21h AH=3Fh."
-check " Directory of A:\\DOCS"
+check " Directorio de A:\\DOCS"
 check "Subdirectory file OK"
 check "Hello from a relocated .EXE program!"
 check "Hello from a .COM program! Args:[ uno dos]"
 check "Hello from a .COM program! Args:[ tres]"
-check "bytes largest executable program size"
-check "Bad command or file name"
+check "bytes del mayor programa ejecutable"
+check "Comando o nombre de archivo incorrecto"
 check "CDS A: A:\\ flags=4000"
 check "DPB drive A: spc=0001 bps=0200 maxclus=0B20"
 check "fin de la prueba"

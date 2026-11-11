@@ -4,7 +4,9 @@ QEMU  ?= qemu-system-i386
 B      = build
 IMG    = $(B)/hispados.img
 HDD    = $(B)/hdd.img
-NFLAGS = -f bin -i lib/
+NFLAGS = -f bin -i $(B)/gen/lib/ -i lib/
+# los fuentes están en UTF-8: se pasan a CP437 (la página de DOS) al ensamblar
+ASM = python3 tools/cp437.py lib/util.inc $(B)/gen/lib/util.inc && python3 tools/cp437.py $< $(B)/gen/$< && $(NASM) $(NFLAGS)
 ifdef TRACE
 KFLAGS = -DTRACE
 endif
@@ -15,47 +17,47 @@ $(B):
 	mkdir -p $(B)
 
 $(B)/boot.bin: boot/boot.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/boot16.bin: boot/boot16.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/mbr.bin: boot/mbr.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/KERNEL.SYS: kernel/kernel.asm | $(B)
-	$(NASM) $(NFLAGS) $(KFLAGS) -o $@ $<
+	$(ASM) $(KFLAGS) -o $@ $(B)/gen/$<
 $(B)/COMMAND.COM: shell/command.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/FDISK.COM: utils/fdisk.asm lib/util.inc $(B)/mbr.bin | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/FORMAT.COM: utils/format.asm lib/util.inc $(B)/boot.bin $(B)/boot16.bin | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HELLO.COM: tests/progs/hello.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HELLOEXE.EXE: tests/progs/helloexe.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/UPPER.COM: tests/progs/upper.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPRAM.SYS: drivers/hspram.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPTEST.SYS: drivers/hsptest.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPXMS.SYS: drivers/hspxms.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XMSTEST.COM: tests/progs/xmstest.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPSND.COM: drivers/hspsnd.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/KEYB.COM: utils/keyb.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(ASM) -o $@ $(B)/gen/$<
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \

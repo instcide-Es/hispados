@@ -26,10 +26,10 @@ for CARD in hda ac97; do
   } | timeout 30 qemu-system-i386 -display none -serial stdio -monitor none \
         -audiodev wav,id=snd0,path=$T/out.wav $DEV \
         -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
-  tr -d '\r' < $T/log | grep -v '^audio:' > $T/log.txt
+  tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 | grep -v '^audio:' > $T/log.txt
   python3 tests/tools/audio.py check $T/out.wav > $T/audio.txt 2>&1
   echo "== HispaDOS sound tests ($NAME) =="
-  for want in "$NAME" "Tone 440 Hz on $NAME" "Playing TEST.WAV (22050 Hz, 8-bit mono) on $NAME" "Already installed."; do
+  for want in "$NAME" "Tono 440 Hz en $NAME" "Reproduciendo TEST.WAV (22050 Hz, 8 bits, mono) en $NAME" "Ya está instalado."; do
     if grep -qF -- "$want" $T/log.txt; then echo "  OK   $want"; else echo "  FAIL $want"; fail=1; fi
   done
   python3 - $T/audio.txt <<'EOF' || fail=1

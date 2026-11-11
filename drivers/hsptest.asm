@@ -20,7 +20,7 @@ header:
 req     dd 0
 pos     dw 0
 len     dw msg_end - buf
-buf     db "HispaDOS test driver OK", 13, 10
+buf     db "Controlador de prueba de HispaDOS: OK", 13, 10
 msg_end:
         times 128 - (msg_end - buf) db 0
 BUFLEN  equ 128
@@ -124,4 +124,4 @@ init:
         jmp done
 
 resident_end:
-msg_init db "HSPTEST.SYS: test device installed", 13, 10, "$"
+msg_init db "HSPTEST.SYS: dispositivo de prueba instalado", 13, 10, "$"

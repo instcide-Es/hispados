@@ -902,27 +902,27 @@ fs16        db "FAT16   "
 label       db "           "
 
 msg_title   db 13, 10, "HispaDOS FORMAT 0.2", 13, 10, 0
-msg_usage   db "Usage: FORMAT drive: [/S] [/V:label] [/Q] [/U] [/AUTOTEST]", 13, 10, 0
-msg_baddrv  db "Invalid drive specification", 13, 10, 0
-msg_ioerr   db "Disk write error - format terminated", 13, 10, 0
-msg_badfl   db "Unsupported diskette size", 13, 10, 0
-msg_toobig  db "Partition too large for FAT16 (maximum 2 GB)", 13, 10, 0
-msg_small   db "Drive too small to format", 13, 10, 0
-msg_warn1   db 13, 10, "WARNING, ALL DATA ON NON-REMOVABLE DISK", 13, 10, "DRIVE ", 0
-msg_warn2   db ": WILL BE LOST!", 13, 10, "Proceed with Format (Y/N)? ", 0
-msg_insert  db 13, 10, "Insert new diskette for drive ", 0
-msg_insert2 db ":", 13, 10, "and press ENTER when ready...", 0
-msg_formatting db 13, 10, "Formatting ", 0
-msg_done    db "Format complete.", 13, 10, 0
-msg_systr   db "System transferred", 13, 10, 0
-msg_nosys   db "Cannot find system file ", 0
-msg_sysbig  db "System files too large", 13, 10, 0
-msg_total   db " bytes total disk space", 13, 10, 0
-msg_sysused db " bytes used by system", 13, 10, 0
-msg_avail   db " bytes available on disk", 13, 10, 0
-msg_unit    db " bytes in each allocation unit.", 13, 10, 0
-msg_units   db " allocation units available on disk.", 13, 10, 0
-msg_serial  db "Volume Serial Number is ", 0
+msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/Q] [/U] [/AUTOTEST]", 13, 10, 0
+msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
+msg_ioerr   db "Error de escritura en el disco: formato interrumpido", 13, 10, 0
+msg_badfl   db "Tamaño de disquete no admitido", 13, 10, 0
+msg_toobig  db "Partición demasiado grande para FAT16 (máximo 2 GB)", 13, 10, 0
+msg_small   db "Unidad demasiado pequeña para darle formato", 13, 10, 0
+msg_warn1   db 13, 10, "Atención: se perderán todos los datos del", 13, 10, "disco fijo de la unidad ", 0
+msg_warn2   db ":", 13, 10, "¿Desea continuar con el formato (S/N)? ", 0
+msg_insert  db 13, 10, "Inserte un disquete nuevo en la unidad ", 0
+msg_insert2 db ":", 13, 10, "y pulse INTRO cuando esté listo...", 0
+msg_formatting db 13, 10, "Formateando ", 0
+msg_done    db "Formato completado.", 13, 10, 0
+msg_systr   db "Sistema transferido", 13, 10, 0
+msg_nosys   db "No se encuentra el archivo de sistema ", 0
+msg_sysbig  db "Los archivos de sistema son demasiado grandes", 13, 10, 0
+msg_total   db " bytes de espacio total en disco", 13, 10, 0
+msg_sysused db " bytes usados por el sistema", 13, 10, 0
+msg_avail   db " bytes disponibles en el disco", 13, 10, 0
+msg_unit    db " bytes en cada unidad de asignación.", 13, 10, 0
+msg_units   db " unidades de asignación disponibles en el disco.", 13, 10, 0
+msg_serial  db "El número de serie del volumen es ", 0
 
 boot12:     incbin "build/boot.bin"
 boot16:     incbin "build/boot16.bin"

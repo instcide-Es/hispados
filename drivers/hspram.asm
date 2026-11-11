@@ -323,7 +323,7 @@ print_dec:
 
 kb          dw 0
 vlabel      db "HSPRAMDISK "
-msg1        db "HispaDOS RAM disk: $"
-msg2        db " KB as drive "
+msg1        db "Disco RAM de HispaDOS: $"
+msg2        db " KB en la unidad "
 msg_drive   db "?:", 13, 10, "$"
 file_end:

@@ -820,6 +820,6 @@ print_dec:
         loop .p
         ret
 
-msg_already db "HSPXMS: an XMS driver is already installed", 13, 10, "$"
-msg_ok      db "HSPXMS 0.1: XMS 3.0 driver, $"
-msg_kb      db " KB of extended memory", 13, 10, "$"
+msg_already db "HSPXMS: ya hay un gestor XMS instalado", 13, 10, "$"
+msg_ok      db "HSPXMS 0.1: gestor XMS 3.0, $"
+msg_kb      db " KB de memoria extendida", 13, 10, "$"

@@ -374,22 +374,22 @@ puts:
         ret
 
 msg_title   db "PLAYWAV 0.1 - HispaDOS", 13, 10, 0
-msg_usage   db "Usage: PLAYWAV file.wav | PLAYWAV /TONE hz [ms]", 13, 10, 0
-msg_nodrv   db "HSPSND is not loaded.", 13, 10, 0
-msg_nocard  db "No sound card.", 13, 10, 0
-msg_tone    db "Tone ", 0
+msg_usage   db "Uso: PLAYWAV archivo.wav | PLAYWAV /TONE hz [ms]", 13, 10, 0
+msg_nodrv   db "HSPSND no está cargado.", 13, 10, 0
+msg_nocard  db "No hay tarjeta de sonido.", 13, 10, 0
+msg_tone    db "Tono ", 0
 msg_hz      db " Hz", 0
-msg_playing db "Playing ", 0
+msg_playing db "Reproduciendo ", 0
 msg_open    db " (", 0
 msg_hzc     db " Hz, ", 0
-msg_bits    db "-bit ", 0
+msg_bits    db " bits, ", 0
 msg_mono    db "mono)", 0
-msg_stereo  db "stereo)", 0
-msg_on      db " on ", 0
-msg_done    db "Done.", 13, 10, 0
-msg_nf      db "File not found.", 13, 10, 0
-msg_bad     db "Not a WAV file.", 13, 10, 0
-msg_unsup   db "Only PCM WAV files are supported.", 13, 10, 0
+msg_stereo  db "estéreo)", 0
+msg_on      db " en ", 0
+msg_done    db "Hecho.", 13, 10, 0
+msg_nf      db "No se encontró el archivo.", 13, 10, 0
+msg_bad     db "No es un archivo WAV.", 13, 10, 0
+msg_unsup   db "Solo se admiten archivos WAV PCM.", 13, 10, 0
 msg_crlf    db 13, 10, 0
 
         section .bss

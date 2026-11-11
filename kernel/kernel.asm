@@ -8078,12 +8078,12 @@ shell_pb    dw 0
             dw shell_fcb, KSEG
             dw shell_fcb, KSEG
 
-msg_banner  db 13, 10, "HispaDOS 0.2 - MS-DOS 6.22 compatible kernel", 13, 10
-            db "(C) 2026 HispaDOS contributors - GPL-2.0-or-later", 13, 10, 13, 10, 0
-msg_fatbad  db "Cannot read the boot drive file system", 13, 10, 0
-msg_noshell db 13, 10, "Cannot load A:\COMMAND.COM - system halted", 13, 10, 0
-msg_reshell db 13, 10, "Restarting command interpreter...", 13, 10, 0
-msg_rootterm db 13, 10, "Root process terminated - system halted", 13, 10, 0
+msg_banner  db 13, 10, "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22", 13, 10
+            db "(C) 2026 colaboradores de HispaDOS - GPL-2.0 o posterior", 13, 10, 13, 10, 0
+msg_fatbad  db "No se puede leer el sistema de archivos de la unidad de arranque", 13, 10, 0
+msg_noshell db 13, 10, "No se puede cargar el intérprete de órdenes: sistema detenido", 13, 10, 0
+msg_reshell db 13, 10, "Reiniciando el intérprete de órdenes...", 13, 10, 0
+msg_rootterm db 13, 10, "El proceso raíz ha terminado: sistema detenido", 13, 10, 0
 
 ; lista de listas (INT 21h AH=52h); la palabra anterior es el primer MCB
             dw 0
@@ -8139,10 +8139,10 @@ s_comspec   db "COMSPEC=", 0
 s_path      db "PATH=", 0
 s_prompt    db "PROMPT=", 0
 s_pg        db "$P$G", 0
-msg_cfgunk  db "Unrecognized command in CONFIG.SYS", 13, 10, 0
-msg_cfgline db "Error in CONFIG.SYS line ", 0
-msg_missing db "Bad or missing ", 0
-msg_drverr  db "Error initializing device driver ", 0
+msg_cfgunk  db "Orden no reconocida en CONFIG.SYS", 13, 10, 0
+msg_cfgline db "Error en CONFIG.SYS, línea ", 0
+msg_missing db "Falta o no es válido ", 0
+msg_drverr  db "Error al iniciar el controlador de dispositivo ", 0
 msg_crlf    db 13, 10, 0
 inst_pb     dw 0
             dw itail, KSEG

@@ -65,7 +65,7 @@ putnum_w:
         cmp ch, 3
         jne .nc
         dec di
-        mov byte [di], ','
+        mov byte [di], '.'           ; separador de miles español
         mov ch, 0
 .nc:
         dec di

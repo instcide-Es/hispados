@@ -24,7 +24,7 @@ send() { sleep "${2:-0.7}"; printf '%s\r' "$1"; }
   sleep 1
 } | timeout 30 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file="$FLP",format=raw,if=floppy -boot a -no-reboot > "$LOG" 2>&1
-tr -d '\r' < "$LOG" > "$LOG.txt"
+tr -d '\r' < "$LOG" | iconv -f CP437 -t UTF-8 > "$LOG.txt"
 fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
@@ -58,7 +58,7 @@ checkn "@ECHO OFF"
 check "PATH=A:\\"
 check "WELCOME TO HISPADOS!"
 check "[A] A:\\>"
-check "ECHO is on"
+check "ECHO está activado"
 check "desde barra C"
 check "sigo vivo"
 # tras SET HISPA= la variable ya no debe aparecer en el último SET

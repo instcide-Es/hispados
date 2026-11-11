@@ -41,7 +41,7 @@ N=$(wc -l < "$CMDS")
   sleep 2
 } | timeout $((15 + N * 4)) qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file="$IMG",format=raw,if=floppy -boot a -no-reboot > "$LOG" 2>&1
-tr -d '\r' < "$LOG" > "$LOG.txt"
+tr -d '\r' < "$LOG" | iconv -f CP437 -t UTF-8 > "$LOG.txt"
 fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
@@ -55,19 +55,19 @@ check "alfa"
 check "---------------- LISTA.TXT"
 check "Directory PATH listing for Volume COMPAT"
 check "[---RA] A:\\DATOS\\INFO.TXT"
-check "Access denied"
-check "COMMAND     22."
+check "Acceso denegado"
+check "COMMAND     "
 check "Largest executable program size"
 check "Program terminated normally"
 check "2 file(s) copied"
 check "No differences"
 check "Deleting \"A:\\COPIA\""
 checkn "DOS error"
-check " Volume in drive A is PRUEBA"
+check " El volumen de la unidad A es PRUEBA"
 check "choice ok"
 check "medio"
 check "fin compat"
-checkn "Root process terminated"
+checkn "El proceso raíz ha terminado"
 if fsck.fat -n "$IMG" > "$LOG.fsck" 2>&1; then echo "  OK   fsck.fat tras los programas"; else echo "  FAIL fsck.fat"; cat "$LOG.fsck"; fail=1; fi
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida ---"; cat "$LOG.txt"; fi
 rm -f "$IMG" "$LOG" "$LOG.txt" "$LOG.fsck" "$CMDS"

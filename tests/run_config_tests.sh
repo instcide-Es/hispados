@@ -26,28 +26,28 @@ send() { sleep "${2:-0.7}"; printf '%s\r' "$1"; }
   sleep 1
 } | timeout 30 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file="$FLP",format=raw,if=floppy -boot a -no-reboot > "$LOG" 2>&1
-tr -d '\r' < "$LOG" > "$LOG.txt"
+tr -d '\r' < "$LOG" | iconv -f CP437 -t UTF-8 > "$LOG.txt"
 fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 echo "== HispaDOS CONFIG.SYS tests =="
-check "HSPTEST.SYS: test device installed"
-check "HispaDOS RAM disk: 128 KB as drive C:"
-check "Bad or missing A:\\NOEXISTE.SYS"
-check "Error in CONFIG.SYS line 8"
-check "Unrecognized command in CONFIG.SYS"
-check "Error in CONFIG.SYS line 9"
+check "HSPTEST.SYS: dispositivo de prueba instalado"
+check "Disco RAM de HispaDOS: 128 KB en la unidad C:"
+check "Falta o no es válido A:\\NOEXISTE.SYS"
+check "Error en CONFIG.SYS, línea 8"
+check "Orden no reconocida en CONFIG.SYS"
+check "Error en CONFIG.SYS, línea 9"
 check "Hello from a .COM program! Args:[ install]"
 check "CONFIGVAR=desde-config"
 check "COMSPEC=A:\\COMMAND.COM"
-check "HispaDOS test driver OK"
+check "Controlador de prueba de HispaDOS: OK"
 check "hola driver"
-check " Volume in drive C is HSPRAMDISK"
-check "1 file(s) copied"
+check " El volumen de la unidad C es HSPRAMDISK"
+check "1 archivo(s) copiado(s)"
 check "Welcome to HispaDOS!"
 check "Hello from a relocated .EXE program!"
-check "bytes largest executable program size"
+check "bytes del mayor programa ejecutable"
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida ---"; cat "$LOG.txt"; fi
 rm -f "$FLP" "$LOG" "$LOG.txt"
 exit $fail

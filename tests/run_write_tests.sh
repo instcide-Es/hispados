@@ -56,7 +56,7 @@ send() { sleep "${2:-0.6}"; printf '%s\r' "$1"; }
   sleep 1
 } | timeout 15 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file="$HDD",format=raw,if=ide -boot c -no-reboot > "$LOG2" 2>&1
-tr -d '\r' < "$LOG" > "$LOG.txt"; tr -d '\r' < "$LOG2" > "$LOG2.txt"
+tr -d '\r' < "$LOG" | iconv -f CP437 -t UTF-8 > "$LOG.txt"; tr -d '\r' < "$LOG2" | iconv -f CP437 -t UTF-8 > "$LOG2.txt"
 fail=0
 check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
@@ -67,25 +67,25 @@ checkn() {
 echo "== HispaDOS write tests =="
 check "$LOG.txt" "linea uno"
 check "$LOG.txt" "linea dos"
-check "$LOG.txt" "1 file(s) copied"
+check "$LOG.txt" "1 archivo(s) copiado(s)"
 check "$LOG.txt" "NOTA     TXT"
 check "$LOG.txt" "linea anadida"
 check "$LOG.txt" "LINEA UNO"
 check "$LOG.txt" "LINEA DOS"
 check "$LOG.txt" "NOTA     BAK"
 check "$LOG.txt" "LISTA    BAK"
-check "$LOG.txt" "or directory not empty"
-check "$LOG.txt" "All files in directory will be deleted!"
-check "$LOG.txt" "File not found"
-check "$LOG.txt" "Format complete."
-check "$LOG.txt" "file(s) copied"
-check "$LOG.txt" " Directory of C:\\DATOS"
+check "$LOG.txt" "o el directorio no está vacío"
+check "$LOG.txt" "¡Se borrarán todos los archivos del directorio!"
+check "$LOG.txt" "No se encontró el archivo"
+check "$LOG.txt" "Formato completado."
+check "$LOG.txt" "archivo(s) copiado(s)"
+check "$LOG.txt" " Directorio de C:\\DATOS"
 check "$LOG.txt" "HELLOEXE EXE"
 check "$LOG.txt" "UPPER    COM"
 check "$LOG.txt" "Welcome to HispaDOS!"
 check "$LOG.txt" "fin escritura"
-checkn "$LOG.txt" "Access denied"
-check "$LOG2.txt" " Directory of C:\\DATOS"
+checkn "$LOG.txt" "Acceso denegado"
+check "$LOG2.txt" " Directorio de C:\\DATOS"
 check "$LOG2.txt" "K2       SYS"
 echo "-- comprobación con herramientas de Linux --"
 if fsck.fat -n "$FLP" > "$LOG.fsck" 2>&1; then echo "  OK   fsck.fat A: (FAT12)"; else echo "  FAIL fsck.fat A:"; cat "$LOG.fsck"; fail=1; fi

@@ -37,25 +37,25 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
   send "INSTALL" 4
 } | timeout 20 qemu-system-i386 -display none -serial stdio -monitor none $USBDEV \
       -drive if=none,id=hd,format=raw,file=$T/hdd.img -device ide-hd,drive=hd,bootindex=1 -no-reboot > $T/log3 2>&1
-for i in 1 2 3; do tr -d '\r' < $T/log$i > $T/l$i.txt; done
+for i in 1 2 3; do tr -d '\r' < $T/log$i | iconv -f CP437 -t UTF-8 > $T/l$i.txt; done
 fail=0
 check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
 }
 echo "== HispaDOS USB image tests =="
-check $T/l1.txt "HispaDOS 0.2 - MS-DOS 6.22 compatible kernel"
-check $T/l1.txt "HSPXMS 0.1: XMS 3.0 driver"
+check $T/l1.txt "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l1.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l1.txt "Bienvenido a HispaDOS"
-check $T/l1.txt " Volume in drive C is HISPADOS"
-check $T/l1.txt "The fixed disk has no partitions."
-check $T/l1.txt "Primary DOS partition created."
-check $T/l1.txt "System transferred"
+check $T/l1.txt " El volumen de la unidad C es HISPADOS"
+check $T/l1.txt "El disco duro no tiene particiones."
+check $T/l1.txt "Partición DOS primaria creada."
+check $T/l1.txt "Sistema transferido"
 check $T/l1.txt "HispaDOS esta instalado."
-check $T/l1.txt " Directory of D:\\"
+check $T/l1.txt " Directorio de D:\\"
 echo "-- arranque desde el disco duro --"
-check $T/l2.txt "HispaDOS 0.2 - MS-DOS 6.22 compatible kernel"
+check $T/l2.txt "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "Bienvenido a HispaDOS"
-check $T/l2.txt " Directory of C:\\"
+check $T/l2.txt " Directorio de C:\\"
 check $T/l2.txt "DRIVERS"
 echo "-- INSTALL con el disco ya ocupado --"
 check $T/l3.txt "El disco duro ya tiene particiones: no se toca nada."

@@ -24,16 +24,16 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
   sleep 2
 } | timeout 25 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file="$FLP",format=raw,if=floppy -boot a -no-reboot > "$LOG" 2>&1
-tr -d '\r' < "$LOG" > "$LOG.txt"
+tr -d '\r' < "$LOG" | iconv -f CP437 -t UTF-8 > "$LOG.txt"
 fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 echo "== HispaDOS XMS tests =="
-check "HSPXMS 0.1: XMS 3.0 driver"
-check "HSPXMS: an XMS driver is already installed"
+check "HSPXMS 0.1: gestor XMS 3.0"
+check "HSPXMS: ya hay un gestor XMS instalado"
 checkn() { if grep -qF -- "$1" "$LOG.txt"; then echo "  FAIL (no debía salir) $1"; fail=1; else echo "  OK   sin \"$1\""; fi; }
-checkn "Error initializing"
+checkn "Error al iniciar"
 check "XMS version 0300"
 check "Locked at linear 00110000"
 if [ "$(grep -c 'XMS test OK' "$LOG.txt")" -ge 2 ]; then echo "  OK   XMS test OK (dos veces)"; else echo "  FAIL XMS test OK (dos veces)"; fail=1; fi
