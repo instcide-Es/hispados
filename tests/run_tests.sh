@@ -29,8 +29,8 @@ check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 echo "== HispaDOS tests =="
-check "HispaDOS 0.1 - MS-DOS 6.22 compatible kernel"
-check "HispaDOS Command Interpreter 0.1"
+check "HispaDOS 0.2 - MS-DOS 6.22 compatible kernel"
+check "HispaDOS Command Interpreter 0.2"
 check "Reported DOS version: 6.22"
 check " Volume in drive A is HISPADOS"
 check " Directory of A:\\"

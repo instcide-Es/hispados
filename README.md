@@ -26,7 +26,7 @@ HELLOEXE EXE           368 11-11-26   4:37a
 
 El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Estado (versión 0.1)
+## Estado (versión 0.2 en desarrollo)
 
 | Pieza | Estado |
 |---|---|
@@ -37,7 +37,12 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | Memoria con cadena de MCB (48h/49h/4Ah) | ✅ |
 | Ejecución de `.COM` y `.EXE` (MZ con reubicaciones), entorno, código de retorno | ✅ |
 | `COMMAND.COM`: VER, DIR, TYPE, CD, ECHO, SET, MEM, DATE, TIME, VOL, CLS, HELP, EXIT, búsqueda en PATH | ✅ |
-| Escritura en disco, `.BAT`, `CONFIG.SYS`, discos duros FAT16 | 🔜 0.2 |
+| Discos duros: MBR, particiones, FAT16, LBA, varias unidades (A:, C:, D:…) | ✅ |
+| `FDISK.COM`: crear, activar, borrar y ver particiones (menú y `/STATUS` `/PRI` `/ACT` `/DEL` `/MBR`) | ✅ |
+| `FORMAT.COM`: FAT12 (disquetes) y FAT16 (discos duros), `/S` para disco de arranque, `/V` | ✅ |
+| Arranque desde disco duro (MBR + sector de arranque FAT16) | ✅ |
+| INT 25h/26h, IOCTL 440Dh (parámetros de unidad) | ✅ |
+| Escritura de ficheros, `.BAT`, `CONFIG.SYS` | 🔜 0.2 |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
 ## Compilar y probar
@@ -48,17 +53,29 @@ Hace falta `nasm`, `mtools` y, para probar, `qemu-system-i386`:
 sudo apt install nasm mtools qemu-system-x86
 make          # crea build/hispados.img (disquete de 1,44 MB)
 make run      # arranca en QEMU
-make test     # prueba automática por el puerto serie
+make run-hdd  # arranca con un disco duro vacío de 64 MB (build/hdd.img)
+make test     # pruebas automáticas por el puerto serie
 ```
+
+Para instalar en un disco duro (real o virtual), arranca desde el disquete y ejecuta:
+
+```
+FDISK /PRI          (o FDISK para el menú)
+FORMAT C: /S
+```
+
+Después el disco arranca solo.
 
 La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS (o UEFI con CSM) desde disquete o USB en modo disquete.
 
 ## Estructura
 
 ```
-boot/      sector de arranque FAT12
+boot/      MBR y sectores de arranque FAT12/FAT16
 kernel/    núcleo (KERNEL.SYS): INT 21h, FAT, memoria, ejecución de programas
 shell/     intérprete de órdenes (COMMAND.COM)
+utils/     utilidades: FDISK, FORMAT
+lib/       rutinas comunes de las utilidades
 tests/     programas y disco de prueba, prueba automática
 docs/      hoja de ruta y documentación técnica
 ```
@@ -83,7 +100,7 @@ HispaDOS is a free operating system written from scratch that aims to be **compa
 
 It contains no Microsoft code: everything is implemented from public documentation.
 
-**Status (0.1):** a FAT12 boot sector, a kernel with console, read-only FAT12 with subdirectories, file handles, MCB memory management and `.COM`/`.EXE` loading, plus a `COMMAND.COM` with the basic internal commands and PATH search. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
+**Status (0.2, in progress):** boots from floppy or hard disk (own MBR and FAT12/FAT16 boot sectors); kernel with console, read-only FAT12/FAT16 with subdirectories, several drives (MBR partitions, LBA), file handles, MCB memory management and `.COM`/`.EXE` loading; `COMMAND.COM` with the basic internal commands and PATH search; `FDISK` and `FORMAT /S` to install HispaDOS on a hard disk. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
 
 ```sh
 make && make run     # build the floppy image and boot it in QEMU

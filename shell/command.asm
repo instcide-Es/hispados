@@ -9,6 +9,11 @@
 
 start:
         mov sp, stack_top
+        cld
+        mov di, bss_start
+        mov cx, (stack_top - bss_start) / 2
+        xor ax, ax
+        rep stosw
         mov bx, prog_end + 15
         shr bx, 4
         mov ah, 0x4A                ; reducir nuestro bloque y dejar memoria
@@ -33,8 +38,7 @@ main_loop:
 
 ; -----------------------------------------------------------------------------
 prompt:
-        mov si, s_drive
-        call puts
+        call put_drive
         mov si, curdir
         mov dl, 0
         mov ah, 0x47
@@ -93,7 +97,13 @@ execute_line:
         jne .ni
         cmp byte [cmdword+2], 0
         jne .ni
-        cmp byte [cmdword], 'A'
+        mov dl, [cmdword]
+        sub dl, 'A'
+        mov ah, 0x0E
+        int 0x21
+        mov ah, 0x19
+        int 0x21
+        cmp al, dl
         je .r
         mov si, msg_baddrv
         jmp puts
@@ -249,8 +259,7 @@ do_set:
 do_cd:
         cmp byte [si], 0
         jne .chg
-        mov si, s_drive
-        call puts
+        call put_drive
         mov si, curdir
         mov dl, 0
         mov ah, 0x47
@@ -304,11 +313,45 @@ do_type:
         jmp puts
 
 do_vol:
+        call arg_drive
         call crlf
         call print_label
         jmp crlf
 
+; SI = argumento -> AL = letra de unidad ("X:" o la actual)
+arg_drive:
+        cmp byte [si], 0
+        je .cur
+        cmp byte [si+1], ':'
+        jne .cur
+        mov al, [si]
+        call upcase
+        ret
+.cur:
+        mov ah, 0x19
+        int 0x21
+        add al, 'A'
+        ret
+
+; escribir "X:\" de la unidad actual
+put_drive:
+        push ax
+        mov ah, 0x19
+        int 0x21
+        add al, 'A'
+        call putc
+        mov al, ':'
+        call putc
+        mov al, '\'
+        call putc
+        pop ax
+        ret
+
+; AL = letra de la unidad
 print_label:
+        mov [s_lab], al
+        mov [msg_vol1+17], al
+        mov [msg_vol0+17], al
         call set_dta
         mov dx, s_lab
         mov cx, 8
@@ -396,13 +439,17 @@ do_dir:
         test al, al
         jnz .a3
 .ready:
-        call crlf
-        call print_label
-        ; "Directory of A:\..."
         mov si, pattern
         mov di, truebuf
         mov ah, 0x60
         int 0x21
+        jnc .tn
+        mov si, msg_baddrv
+        jmp puts
+.tn:
+        call crlf
+        mov al, [truebuf]
+        call print_label
         mov si, truebuf
         mov di, si
 .ls:
@@ -451,7 +498,8 @@ do_dir:
         mov si, msg_bytes
         call puts
         mov ah, 0x36
-        mov dl, 0
+        mov dl, [truebuf]
+        sub dl, 'A' - 1
         int 0x21
         movzx eax, ax
         movzx ebx, bx
@@ -1054,9 +1102,9 @@ putnum_w:
         ret
 
 ; -----------------------------------------------------------------------------
-msg_hello   db 13, 10, "HispaDOS Command Interpreter 0.1", 13, 10
+msg_hello   db 13, 10, "HispaDOS Command Interpreter 0.2", 13, 10
             db "Type HELP for a list of commands.", 13, 10, 13, 10, 0
-msg_ver     db 13, 10, "HispaDOS Version 0.1 (MS-DOS 6.22 compatible)", 13, 10
+msg_ver     db 13, 10, "HispaDOS Version 0.2 (MS-DOS 6.22 compatible)", 13, 10
             db "Reported DOS version: ", 0
 msg_badcmd  db "Bad command or file name", 13, 10, 0
 msg_execerr db "Cannot execute program", 13, 10, 0
@@ -1091,6 +1139,7 @@ s_crlf      db 13, 10, 0
 
 prog_end_data:
         section .bss
+bss_start:
 inbuf       resb 130
 cmdword     resb 64
 argp        resw 1

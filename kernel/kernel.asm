@@ -54,6 +54,7 @@ SFT_DIRC        equ 18
 SFT_DIRI        equ 20
 SFT_TIME        equ 22
 SFT_DATE        equ 24
+SFT_DRV         equ 26
 SFT_LEN         equ 32
 NSFT            equ 20
 
@@ -77,6 +78,42 @@ E_DRIVE         equ 15
 E_NOMORE        equ 18
 
 NPATH_MAX       equ 66
+PATHLEN         equ 68
+
+; --- unidades (A:, B:, C:...) ---
+D_FLAGS         equ 0
+D_BIOS          equ 1
+D_PTYPE         equ 2
+D_MEDIA         equ 3
+D_START         equ 4
+D_SIZE          equ 8
+D_SPT           equ 12
+D_HEADS         equ 14
+D_SPCW          equ 16
+D_EPC           equ 18
+D_BPC           equ 20
+D_FATLBA        equ 22
+D_NFATS         equ 26
+D_SPF           equ 28
+D_ROOTENT       equ 30
+D_ROOTLBA       equ 32
+D_ROOTSECS      equ 36
+D_DATALBA       equ 38
+D_NCLUS         equ 42
+DRV_LEN         equ 64
+NDRV            equ 8
+
+DF_EXISTS       equ 1
+DF_MOUNTED      equ 2
+DF_LBA          equ 4
+DF_FIXED        equ 8
+DF_FAT16        equ 16
+
+%define spcw    cur_drv+D_SPCW
+%define epc     cur_drv+D_EPC
+%define bpc     cur_drv+D_BPC
+%define nclus   cur_drv+D_NCLUS
+%define rootent cur_drv+D_ROOTENT
 
 ; =============================================================================
         section .text
@@ -85,6 +122,13 @@ start:
         cld
         mov ax, KSEG
         mov es, ax
+        ; poner a cero la zona .bss (la BIOS no la deja limpia)
+        push ax
+        mov di, bss_start
+        mov cx, (kernel_end - bss_start) / 2
+        xor ax, ax
+        rep stosw
+        pop ax
         mov di, bootsec
         mov cx, 256
         rep movsw
@@ -95,17 +139,15 @@ start:
         mov [boot_drive], dl
 
         call serial_init
-        call geom_init
-
         mov si, msg_banner
         call kputs
-
-        call fat_load
-        jnc .fatok
+        call drives_scan
+        call boot_select
+        jnc .bootok
         mov si, msg_fatbad
         call kputs
         jmp halt
-.fatok:
+.bootok:
         call vectors_init
         call mem_init
         call root_psp_init
@@ -133,65 +175,409 @@ halt:
         jmp halt
 
 ; -----------------------------------------------------------------------------
-;  Geometría del disco a partir del BPB
+;  Unidades: disquetes (A:, B:) y particiones FAT de los discos duros (C:...)
 ; -----------------------------------------------------------------------------
-geom_init:
-        mov ax, [bootsec+0x0B]
-        mov [bps], ax
-        movzx ax, byte [bootsec+0x0D]
-        mov [spcw], ax
-        shl ax, 4
-        mov [epc], ax
-        mov ax, [spcw]
-        shl ax, 9
-        mov [bpc], ax
-        mov ax, [bootsec+0x0E]
-        mov [fat_lba], ax
-        mov ax, [bootsec+0x11]
-        mov [rootent], ax
-        mov ax, [bootsec+0x16]
-        mov [spf], ax
-        mov ax, [bootsec+0x18]
-        mov [spt], ax
-        mov ax, [bootsec+0x1A]
-        mov [heads], ax
-        movzx ax, byte [bootsec+0x10]
-        mov [nfats], ax
-        mul word [spf]
-        add ax, [fat_lba]
-        mov [root_lba], ax
-        mov ax, [rootent]
-        add ax, 15
-        shr ax, 4
-        mov [root_secs], ax
-        add ax, [root_lba]
-        mov [data_lba], ax
-        mov ax, [bootsec+0x13]
-        sub ax, [data_lba]
-        xor dx, dx
-        div word [spcw]
-        mov [nclus], ax
-        mov word [cache_lba], 0xFFFF
+; DL = unidad BIOS -> AX = cilindros, CX = sectores/pista, DX = cabezas; CF
+bios_geom:
+        push bx
+        push di
+        push es
+        push bp
+        mov ah, 8
+        xor di, di
+        mov es, di
+        int 0x13
+        pop bp
+        pop es
+        pop di
+        pop bx
+        jc .r
+        mov [bg_count], dl
+        movzx ax, cl
+        and al, 0xC0
+        shl ax, 2
+        mov al, ch
+        inc ax
+        and cx, 0x3F
+        movzx dx, dh
+        inc dx
+        clc
+.r:
         ret
 
-; cargar la FAT entera en memoria (FAT12: máximo 12 sectores)
-fat_load:
-        mov cx, [spf]
-        cmp cx, 12
-        ja .bad
-        mov ax, [fat_lba]
-        mov bx, fatbuf
+; DL = unidad BIOS: ¿admite las extensiones LBA de INT 13h?
+check_ext:
+        push ax
+        push bx
+        push cx
+        push dx
+        mov ah, 0x41
+        mov bx, 0x55AA
+        push bp
+        int 0x13
+        pop bp
+        jc .no
+        cmp bx, 0xAA55
+        jne .no
+        test cl, 1
+        jz .no
+        or byte [cur_drv+D_FLAGS], DF_LBA
+.no:
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; recorrer disquetes y tablas de particiones -> drv_tab, ndrives
+drives_scan:
+        pushad
+        push es
         push ds
         pop es
-.l:
+        mov di, drv_tab
+        mov cx, NDRV*DRV_LEN/2
+        xor ax, ax
+        rep stosw
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        mov byte [ndrives], 2
+        ; disquetes según la lista de equipo de la BIOS
+        int 0x11
+        test al, 1
+        jz .hdd
+        shr al, 6
+        and al, 3
+        inc al
+        movzx si, al
+        cmp si, 2
+        jbe .fl
+        mov si, 2
+.fl:
+        xor dl, dl
+.flop:
+        movzx bx, dl
+        shl bx, 6
+        add bx, drv_tab
+        mov byte [bx+D_FLAGS], DF_EXISTS
+        mov [bx+D_BIOS], dl
+        mov word [bx+D_SPT], 18
+        mov word [bx+D_HEADS], 2
+        mov dword [bx+D_SIZE], 2880
+        push dx
+        call bios_geom
+        jc .fdef
+        test cx, cx
+        jz .fdef
+        mov [bx+D_SPT], cx
+        mov [bx+D_HEADS], dx
+        movzx eax, ax
+        movzx ecx, cx
+        imul eax, ecx
+        movzx edx, dx
+        imul eax, edx
+        mov [bx+D_SIZE], eax
+.fdef:
+        pop dx
+        inc dl
+        dec si
+        jnz .flop
+.hdd:
+        mov dl, 0x80
+        call bios_geom
+        jc .done
+        mov al, [bg_count]
+        test al, al
+        jz .done
+        mov [hd_count], al
+        mov byte [hd_cur], 0x80
+.disk:
+        mov dl, [hd_cur]
+        call bios_geom
+        jc .nextdisk
+        push ax
+        push cx
+        mov di, cur_drv
+        mov cx, DRV_LEN/2
+        xor ax, ax
+        rep stosw
+        pop cx
+        pop ax
+        mov bl, [hd_cur]
+        mov [cur_drv+D_BIOS], bl
+        mov [cur_drv+D_SPT], cx
+        mov [cur_drv+D_HEADS], dx
+        mov byte [cur_drv+D_FLAGS], DF_EXISTS | DF_FIXED
+        movzx eax, ax
+        movzx ecx, cx
+        imul eax, ecx
+        movzx edx, dx
+        imul eax, edx
+        mov [cur_drv+D_SIZE], eax
+        mov dl, [hd_cur]
+        call check_ext
+        ; leer el MBR
+        xor eax, eax
+        mov bx, secbuf
         call read_sector
+        mov dword [cache_lba], 0xFFFFFFFF
+        jc .nextdisk
+        cmp word [secbuf+510], 0xAA55
+        jne .nextdisk
+        mov si, secbuf+0x1BE
+        mov cx, 4
+.part:
+        mov al, [si+4]
+        cmp al, 0x01
+        je .add
+        cmp al, 0x04
+        je .add
+        cmp al, 0x06
+        je .add
+        cmp al, 0x0E
+        je .add
+        jmp .np
+.add:
+        movzx bx, byte [ndrives]
+        cmp bx, NDRV
+        jae .np
+        shl bx, 6
+        add bx, drv_tab
+        push si
+        push cx
+        mov si, cur_drv
+        mov di, bx
+        mov cx, DRV_LEN/2
+        rep movsw
+        pop cx
+        pop si
+        mov [bx+D_PTYPE], al
+        mov eax, [si+8]
+        mov [bx+D_START], eax
+        mov eax, [si+12]
+        mov [bx+D_SIZE], eax
+        inc byte [ndrives]
+.np:
+        add si, 16
+        loop .part
+.nextdisk:
+        inc byte [hd_cur]
+        dec byte [hd_count]
+        jnz .disk
+.done:
+        pop es
+        popad
+        ret
+
+; elegir la unidad de arranque como unidad actual
+boot_select:
+        mov al, [boot_drive]
+        cmp al, 0x80
+        jae .hd
+        movzx bx, al
+        cmp bx, 1
+        jbe .fl
+        xor bx, bx
+.fl:
+        mov ax, bx
+        shl bx, 6
+        add bx, drv_tab
+        test byte [bx+D_FLAGS], DF_EXISTS
+        jnz .set
+        mov byte [bx+D_FLAGS], DF_EXISTS
+        mov [bx+D_BIOS], al
+        mov word [bx+D_SPT], 18
+        mov word [bx+D_HEADS], 2
+        mov dword [bx+D_SIZE], 2880
+        jmp .set
+.hd:
+        mov ecx, [bootsec+0x1C]
+        mov bx, drv_tab + 2*DRV_LEN
+        mov ah, 2
+.find:
+        cmp ah, [ndrives]
+        jae .first
+        cmp [bx+D_BIOS], al
+        jne .nx
+        cmp [bx+D_START], ecx
+        je .found
+.nx:
+        add bx, DRV_LEN
+        inc ah
+        jmp .find
+.first:
+        mov ah, 2
+.found:
+        mov al, ah
+.set:
+        mov [cur_drive], al
+        add al, 'A'
+        mov [shell_path], al
+        mov [env_l1], al
+        mov [env_l2], al
+        sub al, 'A'
+        jmp select_drive
+
+; AL = unidad -> cur_drv = copia de su entrada (sin montarla); CF si no existe
+select_raw:
+        cmp al, NDRV
+        jae .bad
+        push cx
+        push si
+        push di
+        push es
+        movzx si, al
+        shl si, 6
+        add si, drv_tab
+        test byte [si+D_FLAGS], DF_EXISTS
+        jz .badp
+        push ds
+        pop es
+        mov di, cur_drv
+        mov cx, DRV_LEN/2
+        rep movsw
+        mov [sel_drv], al
+        pop es
+        pop di
+        pop si
+        pop cx
+        clc
+        ret
+.badp:
+        pop es
+        pop di
+        pop si
+        pop cx
+.bad:
+        stc
+        ret
+
+; AL = unidad -> seleccionada y montada; CF si no tiene sistema de ficheros
+select_drive:
+        call select_raw
+        jc .r
+        test byte [cur_drv+D_FLAGS], DF_MOUNTED
+        jnz .ok
+        call mount
+        jc .r
+.ok:
+        clc
+.r:
+        ret
+
+; guardar cur_drv en su entrada de la tabla
+drv_store:
+        push cx
+        push si
+        push di
+        push es
+        push ds
+        pop es
+        movzx di, byte [sel_drv]
+        shl di, 6
+        add di, drv_tab
+        mov si, cur_drv
+        mov cx, DRV_LEN/2
+        rep movsw
+        pop es
+        pop di
+        pop si
+        pop cx
+        ret
+
+; leer el BPB de la unidad seleccionada y calcular su geometría FAT
+mount:
+        pushad
+        push es
+        push ds
+        pop es
+        xor eax, eax
+        mov bx, secbuf
+        call read_sector
+        mov dword [cache_lba], 0xFFFFFFFF
         jc .bad
-        inc ax
-        add bx, 512
-        loop .l
+        cmp word [secbuf+0x0B], 512
+        jne .bad
+        movzx ax, byte [secbuf+0x0D]
+        test ax, ax
+        jz .bad
+        mov cx, ax
+        dec cx
+        test cx, ax
+        jnz .bad
+        mov [cur_drv+D_SPCW], ax
+        mov cx, ax
+        shl cx, 4
+        mov [cur_drv+D_EPC], cx
+        shl cx, 5
+        mov [cur_drv+D_BPC], cx
+        movzx eax, word [secbuf+0x0E]
+        test eax, eax
+        jz .bad
+        mov [cur_drv+D_FATLBA], eax
+        movzx ecx, byte [secbuf+0x10]
+        test ecx, ecx
+        jz .bad
+        cmp ecx, 2
+        ja .bad
+        mov [cur_drv+D_NFATS], cx
+        movzx edx, word [secbuf+0x16]
+        test edx, edx
+        jz .bad
+        mov [cur_drv+D_SPF], dx
+        imul edx, ecx
+        add eax, edx
+        mov [cur_drv+D_ROOTLBA], eax
+        movzx ecx, word [secbuf+0x11]
+        test ecx, ecx
+        jz .bad
+        mov [cur_drv+D_ROOTENT], cx
+        add ecx, 15
+        shr ecx, 4
+        mov [cur_drv+D_ROOTSECS], cx
+        add eax, ecx
+        mov [cur_drv+D_DATALBA], eax
+        movzx edx, word [secbuf+0x13]
+        test edx, edx
+        jnz .ts
+        mov edx, [secbuf+0x20]
+.ts:
+        sub edx, eax
+        jbe .bad
+        mov eax, edx
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_SPCW]
+        div ecx
+        test eax, eax
+        jz .bad
+        cmp eax, 65524
+        ja .bad
+        mov [cur_drv+D_NCLUS], ax
+        and byte [cur_drv+D_FLAGS], 0xFF ^ DF_FAT16
+        cmp eax, 4085
+        jb .f12
+        or byte [cur_drv+D_FLAGS], DF_FAT16
+.f12:
+        mov al, [secbuf+0x15]
+        mov [cur_drv+D_MEDIA], al
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jnz .fixed
+        mov ax, [secbuf+0x18]
+        test ax, ax
+        jz .fixed
+        mov [cur_drv+D_SPT], ax
+        mov ax, [secbuf+0x1A]
+        mov [cur_drv+D_HEADS], ax
+.fixed:
+        or byte [cur_drv+D_FLAGS], DF_MOUNTED
+        call drv_store
+        pop es
+        popad
         clc
         ret
 .bad:
+        pop es
+        popad
         stc
         ret
 
@@ -233,7 +619,7 @@ vec_table:
         db 0x25
         dw int25
         db 0x26
-        dw int25
+        dw int26
         db 0x27
         dw int27
         db 0x28
@@ -572,8 +958,10 @@ root_psp_init:
         ret
 
 root_env:
-        db "COMSPEC=A:\COMMAND.COM", 0
-        db "PATH=A:\", 0
+        db "COMSPEC="
+env_l1: db "A:\COMMAND.COM", 0
+        db "PATH="
+env_l2: db "A:\", 0
         db "PROMPT=$P$G", 0
         db 0
 root_env_end:
@@ -861,48 +1249,105 @@ kputs:
         ret
 
 ; -----------------------------------------------------------------------------
-;  Disco: lectura de sectores por BIOS INT 13h
+;  Disco: lectura y escritura de sectores por BIOS INT 13h (CHS o LBA)
 ; -----------------------------------------------------------------------------
-; AX = LBA, ES:BX = destino -> CF
+; EAX = sector relativo a la unidad seleccionada, ES:BX = búfer -> CF
 read_sector:
-        pusha
+        mov byte [io_cmd], 2
+        jmp disk_io
+write_sector:
+        mov byte [io_cmd], 3
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+disk_io:
+        pushad
+        add eax, [cur_drv+D_START]
         mov di, 3
 .retry:
-        push ax
-        xor dx, dx
-        div word [spt]
+        test byte [cur_drv+D_FLAGS], DF_LBA
+        jz .chs
+        mov byte [dap], 16
+        mov byte [dap+1], 0
+        mov word [dap+2], 1
+        mov [dap+4], bx
+        mov [dap+6], es
+        mov [dap+8], eax
+        mov dword [dap+12], 0
+        push eax
+        mov ah, [io_cmd]
+        or ah, 0x40
+        xor al, al
+        mov dl, [cur_drv+D_BIOS]
+        mov si, dap
+        push bp
+        int 0x13
+        pop bp
+        pop eax
+        jnc .ok
+        jmp .err
+.chs:
+        push eax
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_SPT]
+        jecxz .chsbad
+        div ecx
+        inc dx
         mov cx, dx
-        inc cx
-        xor dx, dx
-        div word [heads]
+        xor edx, edx
+        movzx esi, word [cur_drv+D_HEADS]
+        test esi, esi
+        jz .chsbad
+        div esi
+        cmp eax, 1023
+        ja .chsbad
         mov dh, dl
         mov ch, al
         shl ah, 6
         or cl, ah
-        mov dl, [boot_drive]
-        mov ax, 0x0201
+        mov dl, [cur_drv+D_BIOS]
+        mov ah, [io_cmd]
+        mov al, 1
+        push bp
         int 0x13
-        pop ax
+        pop bp
+        pop eax
         jnc .ok
-        push ax
+.err:
+        push eax
         xor ax, ax
-        mov dl, [boot_drive]
+        mov dl, [cur_drv+D_BIOS]
+        push bp
         int 0x13
-        pop ax
+        pop bp
+        pop eax
         dec di
         jnz .retry
-        popa
+        popad
+        stc
+        ret
+.chsbad:
+        pop eax
+        popad
         stc
         ret
 .ok:
-        popa
+        popad
         clc
         ret
 
-; AX = LBA -> sector en secbuf (con caché de un sector)
+; EAX = sector relativo -> copia en secbuf (caché de un sector)
 cache_read:
-        cmp ax, [cache_lba]
+        push edx
+        mov edx, eax
+        add edx, [cur_drv+D_START]
+        cmp edx, [cache_lba]
+        jne .miss
+        push ax
+        mov al, [cur_drv+D_BIOS]
+        cmp al, [cache_bios]
+        pop ax
         je .hit
+.miss:
         push es
         push bx
         push ds
@@ -912,46 +1357,147 @@ cache_read:
         pop bx
         pop es
         jc .err
-        mov [cache_lba], ax
+        mov [cache_lba], edx
+        push ax
+        mov al, [cur_drv+D_BIOS]
+        mov [cache_bios], al
+        pop ax
 .hit:
+        pop edx
         clc
         ret
 .err:
-        mov word [cache_lba], 0xFFFF
+        mov dword [cache_lba], 0xFFFFFFFF
+        pop edx
         stc
         ret
 
 ; -----------------------------------------------------------------------------
-;  FAT12
+;  FAT12 / FAT16 (la FAT se lee por sectores, con su propia caché)
 ; -----------------------------------------------------------------------------
-; AX = clúster -> AX = siguiente
-fat_next:
+; EAX = sector de FAT relativo -> fatsec
+fat_load_sec:
+        push edx
+        mov edx, eax
+        add edx, [cur_drv+D_START]
+        cmp edx, [fatc_lba]
+        jne .m
+        push ax
+        mov al, [cur_drv+D_BIOS]
+        cmp al, [fatc_bios]
+        pop ax
+        je .h
+.m:
+        push es
         push bx
-        push dx
-        mov bx, ax
-        shr bx, 1
-        add bx, ax
-        mov dx, [fatbuf+bx]
-        test al, 1
-        jz .even
-        shr dx, 4
-        jmp .d
-.even:
-        and dx, 0x0FFF
-.d:
-        mov ax, dx
-        pop dx
+        push ds
+        pop es
+        mov bx, fatsec
+        call read_sector
         pop bx
+        pop es
+        jc .e
+        mov [fatc_lba], edx
+        push ax
+        mov al, [cur_drv+D_BIOS]
+        mov [fatc_bios], al
+        pop ax
+.h:
+        pop edx
+        clc
+        ret
+.e:
+        mov dword [fatc_lba], 0xFFFFFFFF
+        pop edx
+        stc
         ret
 
-; AX = clúster -> AX = primer LBA (destruye DX)
+; ECX = desplazamiento dentro de la FAT -> DL = byte; CF
+fat_byte:
+        push eax
+        push ecx
+        push bx
+        mov eax, ecx
+        shr eax, 9
+        add eax, [cur_drv+D_FATLBA]
+        call fat_load_sec
+        jc .e
+        mov bx, cx
+        and bx, 511
+        mov dl, [fatsec+bx]
+        clc
+.e:
+        pop bx
+        pop ecx
+        pop eax
+        ret
+
+; AX = clúster -> AX = siguiente (0xFFFF = fin de cadena o error)
+fat_next:
+        push ecx
+        push edx
+        movzx ecx, ax
+        test byte [cur_drv+D_FLAGS], DF_FAT16
+        jnz .f16
+        mov edx, ecx
+        shr edx, 1
+        add ecx, edx
+        push ax
+        call fat_byte
+        jc .e12
+        mov [fn_lo], dl
+        inc ecx
+        call fat_byte
+        jc .e12
+        mov [fn_lo+1], dl
+        pop ax
+        test al, 1
+        mov ax, [fn_lo]
+        jz .even
+        shr ax, 4
+        jmp .c12
+.even:
+        and ax, 0x0FFF
+.c12:
+        cmp ax, 0x0FF7
+        jb .r
+        mov ax, 0xFFFF
+        jmp .r
+.e12:
+        pop ax
+        mov ax, 0xFFFF
+        jmp .r
+.f16:
+        shl ecx, 1
+        call fat_byte
+        jc .e16
+        mov [fn_lo], dl
+        inc ecx
+        call fat_byte
+        jc .e16
+        mov [fn_lo+1], dl
+        mov ax, [fn_lo]
+        cmp ax, 0xFFF7
+        jb .r
+.e16:
+        mov ax, 0xFFFF
+.r:
+        pop edx
+        pop ecx
+        ret
+
+; AX = clúster -> EAX = primer sector relativo
 clus_lba:
-        sub ax, 2
-        mul word [spcw]
-        add ax, [data_lba]
+        push edx
+        movzx eax, ax
+        sub eax, 2
+        movzx edx, word [cur_drv+D_SPCW]
+        imul eax, edx
+        add eax, [cur_drv+D_DATALBA]
+        pop edx
         ret
 
-; contar clústeres libres -> AX
+; contar clústeres libres de la unidad seleccionada -> AX
 fat_free_count:
         push bx
         push cx
@@ -959,9 +1505,9 @@ fat_free_count:
         mov cx, 2
 .l:
         mov ax, cx
-        dec ax
-        cmp ax, [nclus]
-        ja .d
+        sub ax, 2
+        cmp ax, [cur_drv+D_NCLUS]
+        jae .d
         mov ax, cx
         call fat_next
         test ax, ax
@@ -969,7 +1515,7 @@ fat_free_count:
         inc bx
 .n:
         inc cx
-        jmp .l
+        jnz .l
 .d:
         mov ax, bx
         pop cx
@@ -982,31 +1528,31 @@ fat_free_count:
 ; AX = clúster del directorio (0 = raíz), CX = índice -> SI = entrada en secbuf
 ; CF=1 si el índice sale del directorio
 dir_get:
-        push ax
+        push eax
         push bx
         push cx
         push dx
         mov [dg_idx], cx
         test ax, ax
         jnz .sub
-        cmp cx, [rootent]
+        cmp cx, [cur_drv+D_ROOTENT]
         jae .end
-        mov ax, cx
-        shr ax, 4
-        add ax, [root_lba]
+        movzx eax, cx
+        shr eax, 4
+        add eax, [cur_drv+D_ROOTLBA]
         jmp .read
 .sub:
         mov bx, ax
         mov ax, cx
         xor dx, dx
-        div word [epc]
+        div word [cur_drv+D_EPC]
         mov cx, ax
         mov ax, bx
         mov [dg_in], dx
 .walk:
         jcxz .got
         call fat_next
-        cmp ax, 0x0FF8
+        cmp ax, 0xFFF7
         jae .end
         cmp ax, 2
         jb .end
@@ -1014,9 +1560,9 @@ dir_get:
         jmp .walk
 .got:
         call clus_lba
-        mov dx, [dg_in]
-        shr dx, 4
-        add ax, dx
+        movzx edx, word [dg_in]
+        shr edx, 4
+        add eax, edx
 .read:
         call cache_read
         jc .end
@@ -1027,14 +1573,14 @@ dir_get:
         pop dx
         pop cx
         pop bx
-        pop ax
+        pop eax
         clc
         ret
 .end:
         pop dx
         pop cx
         pop bx
-        pop ax
+        pop eax
         stc
         ret
 
@@ -1252,12 +1798,19 @@ normalize:
         mov si, tmpath
         cmp byte [si], 0
         je .badpath
+        mov al, [cur_drive]
         cmp byte [si+1], ':'
         jne .nodrv
-        cmp byte [si], 'A'
-        jne .baddrv
+        mov al, [si]
+        sub al, 'A'
+        jb .baddrv
+        cmp al, NDRV
+        jae .baddrv
         add si, 2
 .nodrv:
+        mov [op_drv], al
+        call select_drive
+        jc .baddrv
         mov di, npath
         cmp byte [si], '\'
         jne .rel
@@ -1266,7 +1819,9 @@ normalize:
         jmp .loop
 .rel:
         push si
-        mov si, cur_path
+        movzx si, byte [op_drv]
+        imul si, si, PATHLEN
+        add si, cur_paths
 .rc:
         lodsb
         mov [di], al
@@ -1586,6 +2141,11 @@ file_read:
         mov [fr_seg], es
         mov [fr_left], cx
         mov word [fr_done], 0
+        push ax
+        mov al, [di+SFT_DRV]
+        call select_drive
+        pop ax
+        jc .out
 .loop:
         cmp word [fr_left], 0
         je .out
@@ -1600,10 +2160,10 @@ file_read:
         call sft_seek_clus
         jc .errp
         mov si, dx
-        mov cx, si
-        shr cx, 9
+        movzx ecx, si
+        shr ecx, 9
         call clus_lba
-        add ax, cx
+        add eax, ecx
         call cache_read
         jc .errp
         and si, 511
@@ -1667,7 +2227,7 @@ sft_seek_clus:
 .walk:
         cmp cx, 2
         jb .fail
-        cmp cx, 0x0FF8
+        cmp cx, 0xFFF7
         jae .fail
         cmp bx, ax
         je .done
@@ -1695,6 +2255,8 @@ sft_seek_clus:
 ; rellenar la SFT DI con fentry (índice CX en w_dir)
 sft_fill_file:
         mov byte [di+SFT_REF], 1
+        mov al, [sel_drv]
+        mov [di+SFT_DRV], al
         mov byte [di+SFT_TYPE], T_FILE
         mov al, [fentry+11]
         mov [di+SFT_ATTR], al
@@ -1890,11 +2452,44 @@ fn_0c:
         jmp fn_06
 
 ; ---- unidades ----
+fn_0d:
+        call drives_scan
+        push es
+        push ds
+        pop es
+        mov di, cur_paths + 2*PATHLEN
+        mov cx, (NDRV-2)*PATHLEN
+        xor al, al
+        rep stosb
+        pop es
+        ret
 fn_0e:
-        mov byte [F_AL], 5
+        mov al, [F_DL]
+        call select_raw
+        jc .r
+        mov [cur_drive], al
+.r:
+        mov al, [ndrives]
+        cmp al, 5
+        jae .s
+        mov al, 5
+.s:
+        mov [F_AL], al
         ret
 fn_19:
-        mov byte [F_AL], 0
+        mov al, [cur_drive]
+        mov [F_AL], al
+        ret
+
+; BL del llamante (0 = actual, 1 = A:...) -> AL = unidad
+bl_drive:
+        mov al, [F_BL]
+        test al, al
+        jnz .d
+        mov al, [cur_drive]
+        ret
+.d:
+        dec al
         ret
 fn_1a:
         mov ax, [F_DX]
@@ -1910,14 +2505,20 @@ fn_2f:
         ret
 fn_36:
         mov al, [F_DL]
-        cmp al, 1
-        ja .bad
+        test al, al
+        jnz .d
+        mov al, [cur_drive]
+        inc al
+.d:
+        dec al
+        call select_drive
+        jc .bad
         call fat_free_count
         mov [F_BX], ax
-        mov ax, [spcw]
+        mov ax, [cur_drv+D_SPCW]
         mov [F_AX], ax
         mov word [F_CX], 512
-        mov ax, [nclus]
+        mov ax, [cur_drv+D_NCLUS]
         mov [F_DX], ax
         ret
 .bad:
@@ -2274,7 +2875,9 @@ fn_3b:
         push ds
         pop es
         mov si, npath
-        mov di, cur_path
+        movzx di, byte [op_drv]
+        imul di, di, PATHLEN
+        add di, cur_paths
 .c:
         lodsb
         stosb
@@ -2283,11 +2886,19 @@ fn_3b:
         ret
 fn_47:
         mov al, [F_DL]
-        cmp al, 1
-        ja .bad
+        test al, al
+        jnz .d
+        mov al, [cur_drive]
+        inc al
+.d:
+        dec al
+        call select_raw
+        jc .bad
+        movzx si, al
+        imul si, si, PATHLEN
+        add si, cur_paths
         mov es, [F_DS]
         mov di, [F_SI]
-        mov si, cur_path
 .c:
         lodsb
         stosb
@@ -2306,8 +2917,10 @@ fn_60:
         mov es, [F_ES]
         mov di, [F_DI]
         mov ax, ':\'
-        mov byte [es:di], 'A'
         mov [es:di+1], ax
+        mov al, [op_drv]
+        add al, 'A'
+        mov [es:di], al
         add di, 3
         mov si, npath
 .c:
@@ -2540,7 +3153,89 @@ fn_44:
         je .rem
         cmp al, 9
         je .remote
+        cmp al, 0x0D
+        je .gen
         jmp fn_unsup
+.baddrv:
+        mov ax, E_DRIVE
+        jmp ret_err
+.gen:
+        cmp byte [F_CL], 0x60
+        je .getp
+        cmp byte [F_CL], 0x40
+        je .ok
+        jmp fn_unsup
+.getp:
+        call bl_drive
+        call select_raw
+        jc .baddrv
+        test byte [cur_drv+D_FLAGS], DF_MOUNTED
+        jnz .gm
+        call mount
+.gm:
+        mov es, [F_DS]
+        mov di, [F_DX]
+        push di
+        add di, 1
+        mov cx, 6 + 25
+        xor al, al
+        rep stosb
+        pop di
+        mov byte [es:di+1], 7
+        mov word [es:di+2], 0
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jz .gfl
+        mov byte [es:di+1], 5
+        mov word [es:di+2], 1
+.gfl:
+        test byte [cur_drv+D_FLAGS], DF_MOUNTED
+        jz .gnobpb
+        xor eax, eax
+        call cache_read
+        jc .gnobpb
+        push di
+        add di, 7
+        mov si, secbuf+0x0B
+        mov cx, 25
+        rep movsb
+        pop di
+        jmp .gcommon
+.gnobpb:
+        mov word [es:di+7], 512
+        mov byte [es:di+7+10], 0xF8
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jnz .gtot
+        mov byte [es:di+7+10], 0xF0
+.gtot:
+        mov eax, [cur_drv+D_SIZE]
+        cmp eax, 0xFFFF
+        ja .g32
+        mov [es:di+7+8], ax
+        jmp .gcommon
+.g32:
+        mov [es:di+7+21], eax
+.gcommon:
+        mov ax, [cur_drv+D_SPT]
+        mov [es:di+7+13], ax
+        mov ax, [cur_drv+D_HEADS]
+        mov [es:di+7+15], ax
+        mov eax, [cur_drv+D_START]
+        mov [es:di+7+17], eax
+        ; cilindros
+        mov eax, [cur_drv+D_SIZE]
+        movzx ecx, word [cur_drv+D_SPT]
+        movzx edx, word [cur_drv+D_HEADS]
+        imul ecx, edx
+        jecxz .gnc
+        xor edx, edx
+        div ecx
+        cmp eax, 0xFFFF
+        jbe .gc
+        mov ax, 0xFFFF
+.gc:
+        mov [es:di+4], ax
+.gnc:
+        ret
 .info:
         mov bx, [F_BX]
         call get_sft
@@ -2567,7 +3262,15 @@ fn_44:
         mov byte [F_AL], 0xFF
         ret
 .rem:
-        mov word [F_AX], 0
+        call bl_drive
+        call select_raw
+        jc .baddrv
+        mov ax, 1
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jnz .rr
+        xor ax, ax
+.rr:
+        mov [F_AX], ax
         ret
 .remote:
         mov word [F_DX], 0
@@ -2688,7 +3391,9 @@ fn_4e:
         call walk
         jc ret_err
         les di, [dta_off]
-        mov byte [es:di], 1
+        mov al, [op_drv]
+        inc al
+        mov [es:di], al
         cmp byte [w_has], 0
         jne .pat
         mov si, all11
@@ -2727,6 +3432,12 @@ fn_4f:
 
 ; DTA en ES:DI -> busca desde el índice guardado y rellena el resultado
 find_step:
+        mov al, [es:di]
+        dec al
+        call select_drive
+        jnc .sel
+        ret
+.sel:
         push es
         push di
         lea si, [di+1]
@@ -2791,8 +3502,9 @@ fn_4b:
         push ds
         pop es
         mov di, ex_path
-        mov ax, ':A'
-        xchg al, ah
+        mov al, [op_drv]
+        add al, 'A'
+        mov ah, ':'
         stosw
         mov al, '\'
         stosb
@@ -3303,9 +4015,87 @@ int23:
 int24:
         mov al, 3
         iret
+; INT 25h / INT 26h: leer / escribir sectores absolutos de una unidad.
+; AL = unidad, CX = sectores, DX = primer sector, DS:BX = búfer;
+; CX = FFFFh: DS:BX -> paquete {dd sector, dw cuenta, dd búfer}.
+; Vuelven con RETF dejando los indicadores en la pila (como en DOS).
 int25:
+        push ax
+        mov al, 2
+        jmp abs_io
+int26:
+        push ax
+        mov al, 3
+abs_io:
+        sti
+        cld
+        pushad
+        push ds
+        push es
+        mov bp, sp
+        mov cx, KSEG
+        mov ds, cx
+        mov [abs_cmd], al
+        mov al, [bp+36]
+        call select_raw
+        jc .bdrv
+        mov cx, [bp+28]
+        cmp cx, 0xFFFF
+        jne .short
+        mov es, [bp+2]
+        mov bx, [bp+20]
+        mov eax, [es:bx]
+        mov cx, [es:bx+4]
+        les bx, [es:bx+6]
+        jmp .go
+.short:
+        movzx eax, word [bp+24]
+        mov es, [bp+2]
+        mov bx, [bp+20]
+.go:
+        jcxz .ok
+.l:
+        cmp eax, [cur_drv+D_SIZE]
+        jae .bsec
+        cmp byte [abs_cmd], 2
+        jne .w
+        call read_sector
+        jmp .chk
+.w:
+        call write_sector
+.chk:
+        jc .bsec
+        inc eax
+        mov dx, es
+        add dx, 0x20
+        mov es, dx
+        loop .l
+.ok:
+        cmp byte [abs_cmd], 3
+        jne .ok2
+        and byte [cur_drv+D_FLAGS], 0xFF ^ DF_MOUNTED
+        call drv_store
+.ok2:
+        pop es
+        pop ds
+        popad
+        pop ax
+        xor ax, ax
+        clc
+        retf
+.bdrv:
+        mov word [abs_err], 0x0201
+        jmp .fail
+.bsec:
+        mov word [abs_err], 0x0408
+.fail:
+        pop es
+        pop ds
+        popad
+        pop ax
+        mov ax, [cs:abs_err]
         stc
-        retf 2
+        retf
 int29:
         push ds
         push ax
@@ -3325,7 +4115,7 @@ int_iret:
 MAXFN   equ 0x6C
 fntable:
         dw fn_00, fn_01, fn_02, fn_unsup, fn_unsup, fn_unsup, fn_06, fn_07  ; 00
-        dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_nop, fn_0e, fn_unsup       ; 08
+        dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_unsup       ; 08
         dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 10
         dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 18
         dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_25, fn_unsup, fn_unsup ; 20
@@ -3348,9 +4138,9 @@ shell_pb    dw 0
             dw shell_fcb, KSEG
             dw shell_fcb, KSEG
 
-msg_banner  db 13, 10, "HispaDOS 0.1 - MS-DOS 6.22 compatible kernel", 13, 10
+msg_banner  db 13, 10, "HispaDOS 0.2 - MS-DOS 6.22 compatible kernel", 13, 10
             db "(C) 2026 HispaDOS contributors - GPL-2.0-or-later", 13, 10, 13, 10, 0
-msg_fatbad  db "Disk error reading FAT", 13, 10, 0
+msg_fatbad  db "Cannot read the boot drive file system", 13, 10, 0
 msg_noshell db 13, 10, "Cannot load A:\COMMAND.COM - system halted", 13, 10, 0
 msg_reshell db 13, 10, "Restarting command interpreter...", 13, 10, 0
 msg_rootterm db 13, 10, "Root process terminated - system halted", 13, 10, 0
@@ -3362,13 +4152,32 @@ lol_end:
 
 indos       db 0
             db 0
-cur_path    db 0
-            times NPATH_MAX+2 db 0
 
 ; =============================================================================
         section .bss
+bss_start:
 bootsec     resb 512
 boot_drive  resb 1
+cur_drive   resb 1
+sel_drv     resb 1
+op_drv      resb 1
+ndrives     resb 1
+bg_count    resb 1
+hd_count    resb 1
+hd_cur      resb 1
+io_cmd      resb 1
+abs_cmd     resb 1
+cache_bios  resb 1
+fatc_bios   resb 1
+            alignb 4
+cache_lba   resd 1
+fatc_lba    resd 1
+abs_err     resw 1
+fn_lo       resw 1
+dap         resb 16
+cur_drv     resb DRV_LEN
+drv_tab     resb DRV_LEN*NDRV
+cur_paths   resb PATHLEN*NDRV
 ser_ok      resb 1
 ser_last    resb 1
 col         resb 1
@@ -3376,21 +4185,6 @@ pend_scan   resb 1
 peek_ok     resb 1
 peek_ch     resb 1
             resb 1
-bps         resw 1
-spcw        resw 1
-epc         resw 1
-bpc         resw 1
-fat_lba     resw 1
-nfats       resw 1
-spf         resw 1
-rootent     resw 1
-root_lba    resw 1
-root_secs   resw 1
-data_lba    resw 1
-nclus       resw 1
-spt         resw 1
-heads       resw 1
-cache_lba   resw 1
 first_mcb   resw 1
 mem_top     resw 1
 cur_psp     resw 1
@@ -3443,7 +4237,7 @@ ex_sft      resb SFT_LEN
 sft_table   resb SFT_LEN*NSFT
             alignb 16
 secbuf      resb 512
-fatbuf      resb 512*12
+fatsec      resb 512
             alignb 2
 kstack      resb 1024
 kstack_top:
