@@ -32,7 +32,7 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 |---|---|
 | Sector de arranque FAT12 | ✅ carga `KERNEL.SYS` |
 | Núcleo: consola (INT 21h 01-0Ch), vectores, fecha/hora, versión 6.22 | ✅ |
-| Sistema de ficheros FAT12: abrir/leer/buscar, subdirectorios, CD | ✅ solo lectura |
+| Sistema de ficheros FAT12: abrir/leer/buscar, subdirectorios, CD | ✅ |
 | Handles (3Dh-46h), SFT y JFT en el PSP | ✅ |
 | Memoria con cadena de MCB (48h/49h/4Ah) | ✅ |
 | Ejecución de `.COM` y `.EXE` (MZ con reubicaciones), entorno, código de retorno | ✅ |
@@ -56,8 +56,12 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
 | Sonido: `HSPSND` (Intel HD Audio y AC'97) y `PLAYWAV` | ✅ |
 | Imagen para memoria USB (arrancar o instalar con `INSTALL`) | ✅ |
-| Drivers USB nativos, UMB/EMS, Windows 3.1, vídeo y red | 🔜 ver hoja de ruta |
-| Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
+| `HSPUSB.SYS`: memorias USB nativas (controladora xHCI, almacenamiento masivo) | ✅ |
+| `HSPCD.SYS`: lectores de CD/DVD (ATAPI) e ISO 9660 en el núcleo (solo lectura) | ✅ |
+| `SYS.COM`, `INSTALAR` (instalar en un disco duro), `KEYB SP` (teclado español, AltGr) | ✅ |
+| Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes | ✅ |
+| `EDIT`/`EDITAR` (editor), `GESTOR` (gestor de archivos), `SYSINFO`/`INFO` (propiedades del sistema) | ✅ |
+| Teclado y ratón USB nativos, UMB/EMS, Windows 3.1, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
 
 ## Compilar y probar
 
@@ -95,7 +99,7 @@ La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS 
 boot/      MBR y sectores de arranque FAT12/FAT16
 kernel/    núcleo (KERNEL.SYS): INT 21h, FAT, memoria, ejecución de programas
 shell/     intérprete de órdenes (COMMAND.COM)
-utils/     utilidades: FDISK, FORMAT
+utils/     utilidades: FDISK, FORMAT, SYS, KEYB, INSTALAR, EDIT, GESTOR, SYSINFO…
 drivers/   drivers de dispositivo (.SYS)
 lib/       rutinas comunes de las utilidades
 tests/     programas y disco de prueba, prueba automática
