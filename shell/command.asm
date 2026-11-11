@@ -26,7 +26,7 @@ start:
         mov dx, ctrlc_handler
         mov ax, 0x2523
         int 0x21
-        ; opciones: /P (intérprete principal) y /C orden
+        ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT) y /C orden
         mov si, 0x81
 .opt:
         lodsb
@@ -41,6 +41,11 @@ start:
         mov byte [primary], 1
         jmp .opt
 .notp:
+        cmp al, 'D'
+        jne .notd
+        mov byte [no_auto], 1
+        jmp .opt
+.notd:
         cmp al, 'C'
         jne .opt
         inc si
@@ -64,6 +69,8 @@ start:
         call puts
         cmp byte [primary], 0
         je main_loop
+        cmp byte [no_auto], 0
+        jne main_loop
         ; AUTOEXEC.BAT de la unidad de arranque
         mov ax, 0x3305
         int 0x21
@@ -3712,6 +3719,7 @@ m_new       resb 14
 cbuf        resb CBUF_LEN
 echo_on     resb 1
 primary     resb 1
+no_auto     resb 1
 exit_after  resb 1
 errlvl      resb 1
 bdepth      resb 1

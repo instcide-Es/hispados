@@ -137,6 +137,7 @@ run-hdd: $(IMG) $(HDD)
 
 test: $(IMG) usb
 	tests/run_tests.sh $(IMG)
+	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
 	tests/run_write_tests.sh $(IMG)
 	tests/run_batch_tests.sh $(IMG)
