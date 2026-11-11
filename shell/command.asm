@@ -743,7 +743,15 @@ print_label:
 .c:
         lodsb
         cmp al, '.'
-        je .c
+        jne .c1
+        ; nombre de la etiqueta hasta 8 con espacios, luego la «extensión»
+.pad:
+        cmp di, lbl+8
+        jae .c
+        mov byte [di], ' '
+        inc di
+        jmp .pad
+.c1:
         mov [di], al
         inc di
         test al, al

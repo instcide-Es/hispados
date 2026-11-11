@@ -86,6 +86,8 @@ $(B)/PAGINAR.COM: utils/paginar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/ELEGIR.COM: utils/elegir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/ETIQUETA.COM: utils/etiqueta.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
@@ -97,7 +99,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/SHARETST.COM \
-        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM
+        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -126,6 +128,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/PAGINAR.COM ::HISPADOS/PAGINAR.COM
 	mcopy -i $@ $(B)/ELEGIR.COM ::HISPADOS/ELEGIR.COM
 	mcopy -i $@ $(B)/EXPANDIR.COM ::HISPADOS/EXPANDIR.COM
+	mcopy -i $@ $(B)/ETIQUETA.COM ::HISPADOS/ETIQUETA.COM
 	iconv -f UTF-8 -t CP437 sistema/ALIAS.INI | sed 's/$$/\r/' > $(B)/ALIAS.INI
 	mcopy -i $@ $(B)/ALIAS.INI ::HISPADOS/ALIAS.INI
 	mcopy -i $@ $(B)/HSPRAM.SYS ::HISPADOS/HSPRAM.SYS
@@ -193,6 +196,7 @@ test: $(IMG) usb
 	CDBUS=ahci tests/run_mediachange_tests.sh $(IMG)
 	tests/run_usbchange_tests.sh $(IMG)
 	tests/run_floppychange_tests.sh $(IMG)
+	tests/run_etiqueta_tests.sh $(IMG)
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 

@@ -2884,30 +2884,45 @@ to11:
         ret
 
 ; nombre de 11 bytes DS:SI -> "NOMBRE.EXT",0 en ES:DI
+; (solo se quitan los espacios del final: una etiqueta puede tenerlos dentro)
 from11:
         push ax
         push cx
         push si
         mov cx, 8
-.n:
-        lodsb
-        cmp al, ' '
-        je .ns
-        stosb
-.ns:
-        loop .n
+        call .part
+        add si, 8
         cmp byte [si], ' '
+        jne .ext
+        cmp word [si+1], '  '
         je .end
+.ext:
         mov al, '.'
         stosb
         mov cx, 3
-.e:
+        call .part
+        jmp .end
+; CX octetos de DS:SI sin los espacios del final -> ES:DI
+.part:
+        push si
+        push bx
+        mov bx, cx
+.t:
+        cmp byte [si+bx-1], ' '
+        jne .c
+        dec bx
+        jnz .t
+.c:
+        mov cx, bx
+        jcxz .pd
+.pc:
         lodsb
-        cmp al, ' '
-        je .es
         stosb
-.es:
-        loop .e
+        loop .pc
+.pd:
+        pop bx
+        pop si
+        ret
 .end:
         xor al, al
         stosb
