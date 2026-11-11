@@ -23,8 +23,8 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 
 ## 0.3 — Drivers y memoria
 
-- `CONFIG.SYS`: `DEVICE=`, `DEVICEHIGH=`, `FILES=`, `BUFFERS=`, `LASTDRIVE=`, `SHELL=`, `DOS=HIGH,UMB`.
-- Interfaz de drivers de DOS (`.SYS` de carácter y de bloque, *strategy*/*interrupt*), cabeceras y cadena de dispositivos reales.
+- ✅ `CONFIG.SYS`: `DEVICE=`, `DEVICEHIGH=`, `INSTALL=`, `SHELL=`, `SET`, `LASTDRIVE=` (y `FILES=`, `BUFFERS=`… aceptadas); `DOS=HIGH,UMB` pendiente.
+- ✅ Interfaz de drivers de DOS (`.SYS` de carácter y de bloque, *strategy*/*interrupt*, también en formato MZ), cabeceras y cadena de dispositivos reales; drivers propios `HSPRAM.SYS` y `HSPTEST.SYS`.
 - INT 2Fh multiplex completo.
 - **HSPXMS.SYS**: gestor XMS 3.0 (compatible con HIMEM), A20 y HMA.
 - **HSPEMM.EXE**: UMB y EMS 4.0 en modo V86 (como EMM386).

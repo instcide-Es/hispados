@@ -47,7 +47,10 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | `COMMAND.COM`: COPY (comodines, `+`, `COPY CON`), DEL/ERASE, REN, MD, RD, PAUSE, `>` `>>` `<` y tuberías `\|` | ✅ |
 | Ficheros por lotes: `%0`-`%9`, `%VAR%`, `@`, ECHO ON/OFF, IF, GOTO, FOR, CALL, SHIFT; `AUTOEXEC.BAT` | ✅ |
 | SET, PATH, PROMPT (`$P $G $N $D $T $V $_`…), `COMMAND /C` y `/P` | ✅ |
-| `CONFIG.SYS` y drivers `.SYS` | 🔜 0.3 |
+| `CONFIG.SYS`: DEVICE(HIGH), INSTALL, SHELL, SET, LASTDRIVE, FILES, BUFFERS… | ✅ |
+| Drivers `.SYS` reales (carácter y bloque, también MZ), cadena de dispositivos, lista de listas | ✅ |
+| `HSPRAM.SYS` (disco RAM) y `HSPTEST.SYS` (dispositivo de ejemplo) | ✅ |
+| XMS/HMA, UMB, Windows 3.1 | 🔜 ver hoja de ruta |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
 ## Compilar y probar
@@ -80,6 +83,7 @@ boot/      MBR y sectores de arranque FAT12/FAT16
 kernel/    núcleo (KERNEL.SYS): INT 21h, FAT, memoria, ejecución de programas
 shell/     intérprete de órdenes (COMMAND.COM)
 utils/     utilidades: FDISK, FORMAT
+drivers/   drivers de dispositivo (.SYS)
 lib/       rutinas comunes de las utilidades
 tests/     programas y disco de prueba, prueba automática
 docs/      hoja de ruta y documentación técnica

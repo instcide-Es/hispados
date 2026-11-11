@@ -31,9 +31,14 @@ $(B)/HELLOEXE.EXE: tests/progs/helloexe.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/UPPER.COM: tests/progs/upper.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/HSPRAM.SYS: drivers/hspram.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/HSPTEST.SYS: drivers/hsptest.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
-        $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM
+        $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
+        $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS
 
 $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -53,6 +58,9 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/HELLO.COM ::BIN/HELLO.COM
 	mcopy -i $@ $(B)/UPPER.COM ::BIN/UPPER.COM
 	mcopy -i $@ $(B)/HELLOEXE.EXE ::HELLOEXE.EXE
+	mmd   -i $@ ::DRIVERS
+	mcopy -i $@ $(B)/HSPRAM.SYS ::DRIVERS/HSPRAM.SYS
+	mcopy -i $@ $(B)/HSPTEST.SYS ::DRIVERS/HSPTEST.SYS
 
 # disco duro vacío de 64 MB para probar FDISK y FORMAT
 $(HDD): | $(B)
@@ -70,6 +78,7 @@ test: $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
 	tests/run_write_tests.sh $(IMG)
 	tests/run_batch_tests.sh $(IMG)
+	tests/run_config_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)

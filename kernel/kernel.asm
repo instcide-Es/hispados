@@ -60,12 +60,13 @@ E_EXISTS        equ 80
 E_CURDIR        equ 16
 E_NOTSAME       equ 17
 SFT_LEN         equ 32
-NSFT            equ 20
+NSFT            equ 40
 
 T_FREE          equ 0
 T_CON           equ 1
 T_FILE          equ 2
 T_NUL           equ 3
+T_DEV           equ 4
 
 ; --- errores DOS ---
 E_FUNC          equ 1
@@ -83,6 +84,10 @@ E_NOMORE        equ 18
 
 NPATH_MAX       equ 66
 PATHLEN         equ 68
+CFG_MAX         equ 4096
+SET_MAX         equ 512
+INST_MAX        equ 256
+ENV_ROOT        equ 768
 
 ; --- unidades (A:, B:, C:...) ---
 D_FLAGS         equ 0
@@ -105,6 +110,11 @@ D_ROOTSECS      equ 36
 D_DATALBA       equ 38
 D_NCLUS         equ 42
 D_HINT          equ 44
+D_DRVHDR        equ 48
+D_UNIT          equ 52
+D_BPBPTR        equ 56
+DF_DRIVER       equ 32
+NEXT            equ 6
 DRV_LEN         equ 64
 NDRV            equ 8
 
@@ -156,6 +166,9 @@ start:
         call vectors_init
         call mem_init
         call root_psp_init
+        call config_run
+        call build_root_env
+        call install_run
 
 .shell:
         mov ax, KSEG
@@ -370,6 +383,46 @@ drives_scan:
         dec byte [hd_count]
         jnz .disk
 .done:
+        ; unidades de los drivers de bloque de CONFIG.SYS
+        mov si, ext_tab
+        movzx cx, byte [ext_count]
+        jcxz .noext
+.ext:
+        movzx bx, byte [ndrives]
+        cmp bx, NDRV
+        jae .noext
+        shl bx, 6
+        add bx, drv_tab
+        mov byte [bx+D_FLAGS], DF_EXISTS | DF_DRIVER | DF_FIXED
+        mov eax, [si]
+        mov [bx+D_DRVHDR], eax
+        mov al, [si+4]
+        mov [bx+D_UNIT], al
+        mov eax, [si+5]
+        mov [bx+D_BPBPTR], eax
+        push es
+        push di
+        les di, [si+5]
+        movzx eax, word [es:di+8]
+        test eax, eax
+        jnz .t16
+        mov eax, [es:di+21]
+.t16:
+        mov [bx+D_SIZE], eax
+        mov ax, [es:di+13]
+        mov [bx+D_SPT], ax
+        mov ax, [es:di+15]
+        mov [bx+D_HEADS], ax
+        mov al, [es:di+10]
+        mov [bx+D_MEDIA], al
+        pop di
+        pop es
+        inc byte [ndrives]
+        add si, 9
+        loop .ext
+.noext:
+        mov al, [ndrives]
+        mov [lol+0x20], al
         pop es
         popad
         ret
@@ -496,11 +549,13 @@ mount:
         push es
         push ds
         pop es
+        mov byte [mnt_try], 0
         xor eax, eax
         mov bx, secbuf
         call read_sector
         mov dword [cache_lba], 0xFFFFFFFF
         jc .bad
+.parse:
         cmp word [secbuf+0x0B], 512
         jne .bad
         movzx ax, byte [secbuf+0x0D]
@@ -581,6 +636,20 @@ mount:
         clc
         ret
 .bad:
+        ; drivers de bloque: usar el BPB que dio el driver
+        test byte [cur_drv+D_FLAGS], DF_DRIVER
+        jz .fail
+        cmp byte [mnt_try], 0
+        jne .fail
+        mov byte [mnt_try], 1
+        push ds
+        lds si, [cur_drv+D_BPBPTR]
+        mov di, secbuf+0x0B
+        mov cx, 25
+        rep movsb
+        pop ds
+        jmp .parse
+.fail:
         pop es
         popad
         stc
@@ -1044,6 +1113,30 @@ con_out:
         ret
 
 con_raw:
+        cmp word [con_hdr+2], 0
+        je con_out_bios
+        push eax
+        push bx
+        push cx
+        push dx
+        mov [so_ch+1], al
+        mov eax, [dc_hdr]
+        push eax
+        mov eax, [con_hdr]
+        mov [dc_hdr], eax
+        mov al, 8
+        mov dx, ds
+        mov bx, so_ch+1
+        mov cx, 1
+        call dev_rw
+        pop eax
+        mov [dc_hdr], eax
+        pop dx
+        pop cx
+        pop bx
+        pop eax
+        ret
+con_out_bios:
         push ax
         push bx
         push bp
@@ -1154,8 +1247,26 @@ con_check:
         xor al, al
         ret
 
-; esperar un carácter -> AL
+; esperar un carácter -> AL (driver CON si lo hay)
 con_getc:
+        cmp word [con_hdr+2], 0
+        je con_getc_bios
+        push bx
+        push cx
+        push dx
+        mov eax, [con_hdr]
+        mov [dc_hdr], eax
+        mov al, 4
+        mov dx, ds
+        mov bx, so_ch+1
+        mov cx, 1
+        call dev_rw
+        mov al, [so_ch+1]
+        pop dx
+        pop cx
+        pop bx
+        ret
+con_getc_bios:
         cmp byte [peek_ok], 0
         je .wait
         mov byte [peek_ok], 0
@@ -1266,6 +1377,10 @@ read_sector:
 write_sector:
         mov byte [io_cmd], 3
 disk_io:
+        test byte [cur_drv+D_FLAGS], DF_DRIVER
+        jz .bios
+        jmp drv_block_io
+.bios:
         pushad
         add eax, [cur_drv+D_START]
         mov di, 3
@@ -2006,51 +2121,6 @@ resolve_dir:
         stc
         ret
 
-; ¿w_name es un dispositivo? -> CF=1 y AL = tipo
-check_device:
-        push si
-        push di
-        push cx
-        push es
-        push ds
-        pop es
-        mov si, dev_names
-.l:
-        cmp byte [si], 0
-        je .no
-        mov di, w_name
-        mov cx, 8
-        push si
-        repe cmpsb
-        pop si
-        je .yes
-        add si, 9
-        jmp .l
-.yes:
-        mov al, [si+8]
-        pop es
-        pop cx
-        pop di
-        pop si
-        stc
-        ret
-.no:
-        pop es
-        pop cx
-        pop di
-        pop si
-        clc
-        ret
-
-dev_names:
-        db "CON     ", T_CON
-        db "NUL     ", T_NUL
-        db "AUX     ", T_NUL
-        db "PRN     ", T_NUL
-        db "LPT1    ", T_NUL
-        db "COM1    ", T_NUL
-        db "CLOCK$  ", T_NUL
-        db 0
 
 ; -----------------------------------------------------------------------------
 ;  Ficheros: SFT y tabla de handles del PSP (JFT)
@@ -2303,6 +2373,8 @@ open_path:
         jnc .file
         mov byte [di+SFT_REF], 1
         mov [di+SFT_TYPE], al
+        mov eax, [cd_hdr]
+        mov [di+SFT_SIZE], eax
         clc
         ret
 .file:
@@ -2969,6 +3041,8 @@ create_file:
         mov byte [di+SFT_REF], 1
         mov [di+SFT_TYPE], dl
         mov byte [di+SFT_MODE], 2
+        mov eax, [cd_hdr]
+        mov [di+SFT_SIZE], eax
         clc
         ret
 .notdev:
@@ -3100,7 +3174,19 @@ std_out:
         je .file
         cmp ah, T_NUL
         je .r
+        cmp ah, T_DEV
+        je .dev
         call con_out
+        jmp .r
+.dev:
+        mov [so_ch], al
+        mov eax, [di+SFT_SIZE]
+        mov [dc_hdr], eax
+        mov al, 8
+        mov dx, ds
+        mov bx, so_ch
+        mov cx, 1
+        call dev_rw
         jmp .r
 .file:
         test byte [di+SFT_MODE], 3
@@ -3190,6 +3276,1009 @@ std_in_is_con:
         pop di
         pop bx
         pop ax
+        ret
+
+; -----------------------------------------------------------------------------
+;  Drivers de dispositivo: cabeceras, peticiones y cadena
+; -----------------------------------------------------------------------------
+; llamar al driver [dc_hdr] con la petición KSEG:dreq
+dev_call:
+        pushad
+        push ds
+        push es
+        les bx, [dc_hdr]
+        mov ax, [es:bx+6]
+        mov [dc_far], ax
+        mov [dc_far+2], es
+        mov ax, [es:bx+8]
+        mov [dc_far2], ax
+        mov [dc_far2+2], es
+        mov ax, KSEG
+        mov es, ax
+        mov bx, dreq
+        call far [dc_far]
+        mov ax, KSEG
+        mov ds, ax
+        mov es, ax
+        mov bx, dreq
+        call far [dc_far2]
+        mov ax, KSEG
+        mov ds, ax
+        pop es
+        pop ds
+        popad
+        ret
+
+; AL = orden, DX:BX = búfer, CX = cuenta -> AX = transferido; CF si error
+dev_rw:
+        push di
+        push es
+        push ds
+        pop es
+        push ax
+        push cx
+        mov di, dreq
+        mov cx, 15
+        xor ax, ax
+        rep stosw
+        pop cx
+        pop ax
+        mov byte [dreq], 0x16
+        mov [dreq+2], al
+        mov [dreq+0x0E], bx
+        mov [dreq+0x10], dx
+        mov [dreq+0x12], cx
+        call dev_call
+        pop es
+        pop di
+        mov ax, [dreq+0x12]
+        test word [dreq+3], 0x8000
+        jz .ok
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+; E/S de sector por un driver de bloque (EAX, ES:BX como disk_io)
+drv_block_io:
+        pushad
+        mov ecx, [cur_drv+D_DRVHDR]
+        mov [dc_hdr], ecx
+        push es
+        push ds
+        pop es
+        push eax
+        mov di, dreq
+        mov cx, 15
+        xor ax, ax
+        rep stosw
+        pop eax
+        pop es
+        mov byte [dreq], 0x1E
+        mov cl, [cur_drv+D_UNIT]
+        mov [dreq+1], cl
+        mov cl, [io_cmd]
+        cmp cl, 2
+        mov cl, 4
+        je .rd
+        mov cl, 8
+.rd:
+        mov [dreq+2], cl
+        mov cl, [cur_drv+D_MEDIA]
+        mov [dreq+0x0D], cl
+        mov [dreq+0x0E], bx
+        mov [dreq+0x10], es
+        mov word [dreq+0x12], 1
+        cmp eax, 0xFFFF
+        jae .big
+        mov [dreq+0x14], ax
+        jmp .go
+.big:
+        mov word [dreq+0x14], 0xFFFF
+        mov [dreq+0x1A], eax
+.go:
+        call dev_call
+        test word [dreq+3], 0x8000
+        jnz .err
+        popad
+        clc
+        ret
+.err:
+        popad
+        stc
+        ret
+
+; rutinas de los dispositivos propios del núcleo
+dev_strat:
+        mov [cs:dev_reqp], bx
+        mov [cs:dev_reqp+2], es
+        retf
+dev_intr_null:
+        push ds
+        push bx
+        lds bx, [cs:dev_reqp]
+        cmp byte [bx+2], 4
+        jne .d
+        mov word [bx+0x12], 0
+.d:
+        mov word [bx+3], 0x0100
+        pop bx
+        pop ds
+        retf
+dev_intr_con:
+        pushad
+        push ds
+        push es
+        mov ax, KSEG
+        mov ds, ax
+        les bx, [dev_reqp]
+        mov al, [es:bx+2]
+        mov word [es:bx+3], 0x0100
+        cmp al, 4
+        je .read
+        cmp al, 5
+        je .peek
+        cmp al, 8
+        je .write
+        cmp al, 9
+        je .write
+        jmp .r
+.read:
+        mov cx, [es:bx+0x12]
+        push es
+        push bx
+        les di, [es:bx+0x0E]
+.rl:
+        jcxz .rd
+        call con_getc_bios
+        stosb
+        dec cx
+        jmp .rl
+.rd:
+        pop bx
+        pop es
+        jmp .r
+.peek:
+        call con_check
+        jz .busy
+        mov al, [peek_ch]
+        mov [es:bx+0x0D], al
+        jmp .r
+.busy:
+        mov word [es:bx+3], 0x0300
+        jmp .r
+.write:
+        mov cx, [es:bx+0x12]
+        push ds
+        lds si, [es:bx+0x0E]
+.wl:
+        jcxz .wd
+        lodsb
+        push ds
+        push ax
+        mov ax, KSEG
+        mov ds, ax
+        pop ax
+        call con_out_bios
+        pop ds
+        dec cx
+        jmp .wl
+.wd:
+        pop ds
+.r:
+        pop es
+        pop ds
+        popad
+        retf
+
+; ¿w_name es un dispositivo de la cadena? CF=1: AL = tipo, cd_hdr = cabecera
+check_device:
+        push si
+        push di
+        push cx
+        push es
+        mov word [cd_hdr], dev_nul
+        mov word [cd_hdr+2], KSEG
+.l:
+        les di, [cd_hdr]
+        lea di, [di+10]
+        mov si, w_name
+        mov cx, 8
+        repe cmpsb
+        je .yes
+        les di, [cd_hdr]
+        mov eax, [es:di]
+        cmp ax, 0xFFFF
+        je .no
+        mov [cd_hdr], eax
+        jmp .l
+.yes:
+        les di, [cd_hdr]
+        mov ax, es
+        cmp ax, KSEG
+        jne .ext
+        mov al, T_NUL
+        cmp di, dev_con
+        jne .t
+        mov al, T_CON
+        jmp .t
+.ext:
+        mov al, T_DEV
+.t:
+        pop es
+        pop cx
+        pop di
+        pop si
+        stc
+        ret
+.no:
+        pop es
+        pop cx
+        pop di
+        pop si
+        clc
+        ret
+
+; -----------------------------------------------------------------------------
+;  CONFIG.SYS
+; -----------------------------------------------------------------------------
+config_run:
+        mov byte [lastdrive], 5
+        mov al, [cur_drive]
+        add al, 'A'
+        mov [cfg_path], al
+        push ds
+        pop es
+        mov si, cfg_path
+        call open_path
+        jc .none
+        mov byte [di+SFT_REF], 0
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .none
+        mov bx, cfgbuf
+        mov cx, CFG_MAX - 1
+        call file_read
+        mov bx, ax
+        mov byte [cfgbuf+bx], 0
+        mov word [cfg_line], 0
+        mov byte [cfg_inmenu], 0
+        mov si, cfgbuf
+.line:
+        cmp byte [si], 0
+        je .done
+        inc word [cfg_line]
+        ; copiar la línea en cfgl (terminada en CR LF 0)
+        mov di, cfgl
+.cl:
+        lodsb
+        test al, al
+        jz .ce0
+        cmp al, 10
+        je .ce
+        cmp al, 13
+        je .cl
+        cmp al, 0x1A
+        je .ce0
+        cmp di, cfgl + 160
+        jae .cl
+        mov [di], al
+        inc di
+        jmp .cl
+.ce0:
+        dec si
+.ce:
+        mov word [di], 0x0A0D
+        mov byte [di+2], 0
+        push si
+        call config_line
+        pop si
+        jmp .line
+.done:
+.none:
+        ret
+
+; una línea de CONFIG.SYS en cfgl
+config_line:
+        mov si, cfgl
+        call cfg_skip
+        mov al, [si]
+        cmp al, 13
+        je .r
+        cmp al, ';'
+        je .r
+        cmp al, '['
+        je .section
+        cmp byte [cfg_inmenu], 0
+        jne .r
+        ; palabra clave
+        mov di, cfg_key
+        mov cx, 15
+.k:
+        mov al, [si]
+        cmp al, '='
+        je .ke
+        cmp al, ' '
+        je .ke
+        cmp al, 9
+        je .ke
+        cmp al, 13
+        je .ke
+        cmp al, 'a'
+        jb .k1
+        cmp al, 'z'
+        ja .k1
+        sub al, 32
+.k1:
+        mov [di], al
+        inc di
+        inc si
+        loop .k
+.ke:
+        mov byte [di], 0
+        call cfg_skip
+        cmp byte [si], '='
+        jne .nv
+        inc si
+.nv:
+        call cfg_skip
+        mov [cfg_val], si
+        ; buscar en la tabla
+        mov bx, cfg_cmds
+.find:
+        mov di, [bx]
+        test di, di
+        jz .unk
+        push si
+        mov si, cfg_key
+.c:
+        mov al, [si]
+        cmp al, [di]
+        jne .n
+        test al, al
+        jz .hit
+        inc si
+        inc di
+        jmp .c
+.n:
+        pop si
+        add bx, 4
+        jmp .find
+.hit:
+        pop si
+        jmp [bx+2]
+.unk:
+        mov si, msg_cfgunk
+        call kputs
+        call cfg_lineerr
+.r:
+        ret
+.section:
+        ; [MENU] no se admite: sus líneas se ignoran; las demás secciones se procesan
+        mov byte [cfg_inmenu], 0
+        cmp dword [si+1], 'MENU'
+        je .menu
+        cmp dword [si+1], 'menu'
+        jne .r
+.menu:
+        mov byte [cfg_inmenu], 1
+        ret
+
+cfg_skip:
+        cmp byte [si], ' '
+        je .s
+        cmp byte [si], 9
+        jne .r
+.s:
+        inc si
+        jmp cfg_skip
+.r:
+        ret
+
+cfg_lineerr:
+        mov si, msg_cfgline
+        call kputs
+        movzx eax, word [cfg_line]
+        call kputnum
+        mov si, msg_crlf
+        jmp kputs
+
+; EAX -> decimal por la consola
+kputnum:
+        push eax
+        push ebx
+        push edx
+        push cx
+        mov ebx, 10
+        xor cx, cx
+.l:
+        xor edx, edx
+        div ebx
+        push dx
+        inc cx
+        test eax, eax
+        jnz .l
+.p:
+        pop ax
+        add al, '0'
+        call con_out
+        loop .p
+        pop cx
+        pop edx
+        pop ebx
+        pop eax
+        ret
+
+cfg_cmds:
+        dw k_device, cfg_device
+        dw k_devhigh, cfg_device
+        dw k_install, cfg_install
+        dw k_insthigh, cfg_install
+        dw k_shell, cfg_shell
+        dw k_set, cfg_set
+        dw k_lastdrive, cfg_lastdrive
+        dw k_rem, cfg_ignore
+        dw k_files, cfg_ignore
+        dw k_buffers, cfg_ignore
+        dw k_stacks, cfg_ignore
+        dw k_fcbs, cfg_ignore
+        dw k_break, cfg_ignore
+        dw k_dos, cfg_ignore
+        dw k_country, cfg_ignore
+        dw k_numlock, cfg_ignore
+        dw k_switches, cfg_ignore
+        dw k_menuitem, cfg_ignore
+        dw k_menudef, cfg_ignore
+        dw k_include, cfg_ignore
+        dw 0, 0
+k_device    db "DEVICE", 0
+k_devhigh   db "DEVICEHIGH", 0
+k_install   db "INSTALL", 0
+k_insthigh  db "INSTALLHIGH", 0
+k_shell     db "SHELL", 0
+k_set       db "SET", 0
+k_lastdrive db "LASTDRIVE", 0
+k_rem       db "REM", 0
+k_files     db "FILES", 0
+k_buffers   db "BUFFERS", 0
+k_stacks    db "STACKS", 0
+k_fcbs      db "FCBS", 0
+k_break     db "BREAK", 0
+k_dos       db "DOS", 0
+k_country   db "COUNTRY", 0
+k_numlock   db "NUMLOCK", 0
+k_switches  db "SWITCHES", 0
+k_menuitem  db "MENUITEM", 0
+k_menudef   db "MENUDEFAULT", 0
+k_include   db "INCLUDE", 0
+
+cfg_ignore:
+        ret
+
+cfg_lastdrive:
+        mov si, [cfg_val]
+        mov al, [si]
+        and al, 0xDF
+        sub al, 'A' - 1
+        cmp al, 1
+        jb .r
+        cmp al, 26
+        ja .r
+        mov [lastdrive], al
+        mov [lol+0x21], al
+.r:
+        ret
+
+; SET NOMBRE=valor -> setbuf
+cfg_set:
+        mov si, [cfg_val]
+        mov di, [set_end]
+        test di, di
+        jnz .h
+        mov di, setbuf
+.h:
+        mov bx, di
+.n:
+        lodsb
+        cmp al, 13
+        je .bad
+        cmp al, '='
+        je .eq
+        cmp al, 'a'
+        jb .n1
+        cmp al, 'z'
+        ja .n1
+        sub al, 32
+.n1:
+        cmp di, setbuf + SET_MAX - 2
+        jae .bad
+        mov [di], al
+        inc di
+        jmp .n
+.eq:
+        mov byte [di], '='
+        inc di
+.v:
+        lodsb
+        cmp al, 13
+        je .ve
+        cmp di, setbuf + SET_MAX - 2
+        jae .bad
+        mov [di], al
+        inc di
+        jmp .v
+.ve:
+        mov byte [di], 0
+        inc di
+        mov [set_end], di
+        ret
+.bad:
+        mov [set_end], bx
+        ret
+
+; SHELL=ruta argumentos
+cfg_shell:
+        mov si, [cfg_val]
+        mov di, shell_path
+        mov cx, 63
+.p:
+        lodsb
+        cmp al, ' '
+        je .pe
+        cmp al, 13
+        je .pe0
+        mov [di], al
+        inc di
+        loop .p
+.pe0:
+        dec si
+.pe:
+        mov byte [di], 0
+        ; argumentos
+        mov di, shell_tail + 1
+        xor cx, cx
+.a:
+        lodsb
+        cmp al, 13
+        je .ae
+        cmp cx, 120
+        jae .a
+        mov [di], al
+        inc di
+        inc cx
+        jmp .a
+.ae:
+        cmp cx, 0
+        je .noargs
+        ; DOS pasa la cola con un espacio delante
+        mov byte [di], 13
+        mov [shell_tail], cl
+        ret
+.noargs:
+        mov byte [shell_tail], 0
+        mov byte [shell_tail+1], 13
+        ret
+
+; INSTALL=programa argumentos -> se ejecutan tras los drivers
+cfg_install:
+        mov si, [cfg_val]
+        mov di, [inst_end]
+        test di, di
+        jnz .h
+        mov di, instbuf
+.h:
+.c:
+        lodsb
+        cmp al, 13
+        je .e
+        cmp di, instbuf + INST_MAX - 2
+        jae .e
+        mov [di], al
+        inc di
+        jmp .c
+.e:
+        mov byte [di], 0
+        inc di
+        mov [inst_end], di
+        ret
+
+; DEVICE=ruta argumentos
+cfg_device:
+        mov si, [cfg_val]
+        mov di, dpath
+        mov cx, 79
+.p:
+        lodsb
+        cmp al, ' '
+        je .pe
+        cmp al, 13
+        je .pe
+        cmp al, 9
+        je .pe
+        mov [di], al
+        inc di
+        loop .p
+.pe:
+        mov byte [di], 0
+        push ds
+        pop es
+        mov si, dpath
+        call open_path
+        jc .missing
+        mov byte [di+SFT_REF], 0
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .missing
+        mov eax, [di+SFT_SIZE]
+        cmp eax, 0xFFF0
+        ja .missing
+        mov [ld_size], ax
+        ; memoria: el bloque libre más grande
+        mov bx, 0xFFFF
+        call mcb_alloc
+        call mcb_alloc
+        jc .missing
+        mov [ld_seg], ax
+        mov [ld_paras], bx
+        push es
+        dec ax
+        mov es, ax
+        mov word [es:1], 8
+        ; nombre del bloque = nombre del fichero
+        push di
+        mov di, 8
+        mov cx, 8
+        xor al, al
+        rep stosb
+        pop di
+        mov si, dpath
+        mov bx, si
+.bn:
+        lodsb
+        test al, al
+        jz .bne
+        cmp al, '\'
+        je .bs
+        cmp al, ':'
+        jne .bn
+.bs:
+        mov bx, si
+        jmp .bn
+.bne:
+        mov si, bx
+        mov di, 8
+.bc:
+        lodsb
+        test al, al
+        jz .bce
+        cmp al, '.'
+        je .bce
+        cmp di, 16
+        jae .bce
+        mov [es:di], al
+        inc di
+        jmp .bc
+.bce:
+        pop es
+        ; leer el fichero
+        push ds
+        pop es
+        mov si, dpath
+        call open_path
+        mov byte [di+SFT_REF], 0
+        mov es, [ld_seg]
+        xor bx, bx
+        mov cx, [ld_size]
+        call file_read
+        ; ¿formato MZ?
+        mov es, [ld_seg]
+        mov ax, [ld_seg]
+        mov [ld_img], ax
+        cmp word [es:0], 'MZ'
+        jne .raw
+        mov ax, [es:8]
+        add ax, [ld_seg]
+        mov [ld_img], ax
+        mov cx, [es:6]
+        mov si, [es:0x18]
+.rl:
+        jcxz .raw
+        push es
+        mov bx, [es:si]
+        mov ax, [es:si+2]
+        add ax, [ld_img]
+        mov es, ax
+        mov ax, [ld_img]
+        add [es:bx], ax
+        pop es
+        add si, 4
+        dec cx
+        jmp .rl
+.raw:
+        ; inicializar cada driver del fichero
+        mov ax, [ld_seg]
+        add ax, [ld_paras]
+        mov [ld_end], ax
+        mov word [ld_used], 0
+        mov word [dc_hdr], 0
+        mov ax, [ld_img]
+        mov [dc_hdr+2], ax
+.drv:
+        les di, [dc_hdr]
+        mov ax, [es:di]
+        mov [ld_next], ax
+        ; petición INIT
+        push ds
+        pop es
+        mov di, dreq
+        mov cx, 15
+        xor ax, ax
+        rep stosw
+        mov byte [dreq], 0x17
+        mov byte [dreq+2], 0
+        mov word [dreq+0x0E], 0
+        mov ax, [ld_end]
+        mov [dreq+0x10], ax
+        mov ax, [cfg_val]
+        mov [dreq+0x12], ax
+        mov [dreq+0x14], ds
+        mov al, [ndrives]
+        mov [dreq+0x16], al
+        call dev_call
+        test word [dreq+3], 0x8000
+        jnz .initerr
+        ; memoria usada hasta la dirección de corte
+        mov ax, [dreq+0x0E]
+        add ax, 15
+        shr ax, 4
+        add ax, [dreq+0x10]
+        sub ax, [ld_seg]
+        jbe .initerr
+        cmp ax, [ld_paras]
+        ja .initerr
+        cmp ax, [ld_used]
+        jbe .nu
+        mov [ld_used], ax
+.nu:
+        les di, [dc_hdr]
+        test word [es:di+4], 0x8000
+        jz .block
+        ; carácter: enlazar tras NUL
+        mov eax, [dev_nul]
+        mov [es:di], eax
+        mov eax, [dc_hdr]
+        mov [dev_nul], eax
+        cmp dword [es:di+10], 'CON '
+        jne .nc
+        mov [con_hdr], eax
+.nc:
+        test word [es:di+4], 0x0008
+        jz .nextdrv
+        mov [lol+8], eax
+        jmp .nextdrv
+.block:
+        mov dword [es:di], 0xFFFFFFFF
+        movzx cx, byte [dreq+0x0D]
+        les si, [dreq+0x12]
+.unit:
+        jcxz .bdone
+        movzx bx, byte [ext_count]
+        cmp bx, 4
+        jae .bdone
+        imul bx, bx, 9
+        add bx, ext_tab
+        mov eax, [dc_hdr]
+        mov [bx], eax
+        mov al, [dreq+0x0D]
+        sub al, cl
+        mov [bx+4], al
+        mov ax, [es:si]
+        mov [bx+5], ax
+        mov [bx+7], es
+        inc byte [ext_count]
+        add si, 2
+        dec cx
+        jmp .unit
+.bdone:
+        call drives_scan
+.nextdrv:
+        mov ax, [ld_next]
+        cmp ax, 0xFFFF
+        je .fin
+        mov [dc_hdr], ax
+        jmp .drv
+.fin:
+        ; dejar solo la memoria que el driver necesita
+        mov es, [ld_seg]
+        mov bx, [ld_used]
+        call mcb_resize
+        ret
+.initerr:
+        mov es, [ld_seg]
+        call mcb_free
+        mov si, msg_drverr
+        call kputs
+        mov si, dpath
+        call kputs
+        mov si, msg_crlf
+        jmp kputs
+.missing:
+        mov si, msg_missing
+        call kputs
+        mov si, dpath
+        call kputs
+        mov si, msg_crlf
+        call kputs
+        jmp cfg_lineerr
+
+; entorno inicial: COMSPEC, PATH y PROMPT (si CONFIG.SYS no los fija) + SET
+build_root_env:
+        mov es, [root_psp]
+        push es
+        mov es, [es:0x2C]
+        call mcb_free
+        pop es
+        mov bx, (ENV_ROOT + 15) / 16
+        call mcb_alloc
+        jc .r
+        mov es, [root_psp]
+        mov [es:0x2C], ax
+        push ax
+        dec ax
+        mov es, ax
+        mov ax, [root_psp]
+        mov [es:1], ax
+        pop es
+        xor di, di
+        mov si, s_comspec
+        call .str
+        mov si, shell_path
+        call .strz
+        mov si, s_path
+        call .has
+        jnc .np
+        mov si, s_path
+        call .str
+        mov al, [cur_drive]
+        add al, 'A'
+        stosb
+        mov ax, '\:'
+        xchg al, ah
+        stosw
+        xor al, al
+        stosb
+.np:
+        mov si, s_prompt
+        call .has
+        jnc .npr
+        mov si, s_prompt
+        call .str
+        mov si, s_pg
+        call .strz
+.npr:
+        ; variables de SET
+        mov si, setbuf
+.sv:
+        cmp si, [set_end]
+        jae .end
+        call .strz
+        jmp .sv
+.end:
+        xor al, al
+        stosb
+.r:
+        push ds
+        pop es
+        ret
+; copiar SI sin el cero final / con el cero final
+.str:
+        lodsb
+        test al, al
+        jz .sr
+        stosb
+        jmp .str
+.sr:
+        ret
+.strz:
+        lodsb
+        stosb
+        test al, al
+        jnz .strz
+        ret
+; ¿setbuf define la variable SI (con "=")? CF=0 si sí
+.has:
+        push di
+        mov bx, setbuf
+.hl:
+        cmp bx, [set_end]
+        jae .hno
+        push si
+        mov di, bx
+.hc:
+        mov al, [si]
+        test al, al
+        jz .hyes
+        cmp al, [di]
+        jne .hn
+        inc si
+        inc di
+        jmp .hc
+.hn:
+        pop si
+.hs:
+        inc bx
+        cmp byte [bx-1], 0
+        jne .hs
+        jmp .hl
+.hyes:
+        pop si
+        pop di
+        clc
+        ret
+.hno:
+        pop di
+        stc
+        ret
+
+; ejecutar las líneas INSTALL=
+install_run:
+        mov si, instbuf
+.l:
+        cmp si, [inst_end]
+        jae .r
+        ; ruta
+        mov di, ipath
+.p:
+        lodsb
+        test al, al
+        jz .pe0
+        cmp al, ' '
+        je .pe
+        mov [di], al
+        inc di
+        jmp .p
+.pe0:
+        dec si
+.pe:
+        mov byte [di], 0
+        mov di, itail + 1
+        xor cx, cx
+        mov byte [di], ' '
+        inc di
+        inc cx
+.a:
+        lodsb
+        test al, al
+        jz .ae
+        mov [di], al
+        inc di
+        inc cx
+        jmp .a
+.ae:
+        mov byte [di], 13
+        mov [itail], cl
+        push si
+        mov ax, KSEG
+        mov ds, ax
+        mov es, ax
+        mov dx, ipath
+        mov bx, inst_pb
+        mov ax, 0x4B00
+        int 0x21
+        mov ax, KSEG
+        mov ds, ax
+        mov es, ax
+        pop si
+        jnc .l
+        push si
+        mov si, msg_missing
+        call kputs
+        mov si, ipath
+        call kputs
+        mov si, msg_crlf
+        call kputs
+        pop si
+        jmp .l
+.r:
         ret
 
 ; =============================================================================
@@ -3380,9 +4469,9 @@ fn_0e:
         mov [cur_drive], al
 .r:
         mov al, [ndrives]
-        cmp al, 5
+        cmp al, [lastdrive]
         jae .s
-        mov al, 5
+        mov al, [lastdrive]
 .s:
         mov [F_AL], al
         ret
@@ -3888,7 +4977,19 @@ fn_3f:
         je .file
         cmp al, T_CON
         je .con
+        cmp al, T_DEV
+        je .dev
         mov word [F_AX], 0
+        ret
+.dev:
+        mov eax, [di+SFT_SIZE]
+        mov [dc_hdr], eax
+        mov al, 4
+        mov dx, [F_DS]
+        mov bx, [F_DX]
+        mov cx, [F_CX]
+        call dev_rw
+        mov [F_AX], ax
         ret
 .file:
         mov es, [F_DS]
@@ -3966,6 +5067,18 @@ fn_40:
         je .con
         cmp al, T_NUL
         je .nul
+        cmp al, T_DEV
+        jne .notdev
+        mov eax, [di+SFT_SIZE]
+        mov [dc_hdr], eax
+        mov al, 8
+        mov dx, [F_DS]
+        mov bx, [F_DX]
+        mov cx, [F_CX]
+        call dev_rw
+        mov [F_AX], ax
+        ret
+.notdev:
         test byte [di+SFT_MODE], 3
         jz .acc
         mov cx, [F_CX]
@@ -4181,6 +5294,18 @@ fn_44:
         je .finfo
         cmp al, T_CON
         je .cinfo
+        cmp al, T_DEV
+        jne .ninfo
+        push es
+        les di, [di+SFT_SIZE]
+        mov ax, [es:di+4]
+        pop es
+        and ax, 0x001F
+        or ax, 0x0080
+        mov [F_DX], ax
+        mov [F_AX], ax
+        ret
+.ninfo:
         mov word [F_DX], 0x8084
         mov word [F_AX], 0x8084
         ret
@@ -5426,7 +6551,9 @@ fntable:
 
 all11       db "???????????"
 shell_path  db "A:\COMMAND.COM", 0
+            times 64 db 0
 shell_tail  db 3, " /P", 13
+            times 124 db 0
 shell_fcb   times 16 db 0
 shell_pb    dw 0
             dw shell_tail, KSEG
@@ -5442,8 +6569,62 @@ msg_rootterm db 13, 10, "Root process terminated - system halted", 13, 10, 0
 
 ; lista de listas (INT 21h AH=52h); la palabra anterior es el primer MCB
             dw 0
-lol:        times 0x40 db 0
+lol:        dd 0                    ; +00 DPB
+            dw sft_table, KSEG      ; +04 SFT
+            dw dev_clock, KSEG      ; +08 CLOCK$
+            dw dev_con, KSEG        ; +0C CON
+            dw 512                  ; +10 sector máximo
+            dd 0                    ; +12 búferes
+            dd 0                    ; +16 CDS
+            dd 0                    ; +1A FCB
+            dw 0                    ; +1E
+            db 0                    ; +20 unidades de bloque
+            db 5                    ; +21 LASTDRIVE
+dev_nul:    dw dev_con, KSEG        ; +22 cabecera del dispositivo NUL
+            dw 0x8004
+            dw dev_strat, dev_intr_null
+            db "NUL     "
+            times 0x40 db 0
 lol_end:
+dev_con:    dw dev_aux, KSEG
+            dw 0x8013
+            dw dev_strat, dev_intr_con
+            db "CON     "
+dev_aux:    dw dev_prn, KSEG
+            dw 0x8000
+            dw dev_strat, dev_intr_null
+            db "AUX     "
+dev_prn:    dw dev_clock, KSEG
+            dw 0xA0C0
+            dw dev_strat, dev_intr_null
+            db "PRN     "
+dev_clock:  dw dev_com1, KSEG
+            dw 0x8008
+            dw dev_strat, dev_intr_null
+            db "CLOCK$  "
+dev_com1:   dw dev_lpt1, KSEG
+            dw 0x8000
+            dw dev_strat, dev_intr_null
+            db "COM1    "
+dev_lpt1:   dw 0xFFFF, 0xFFFF
+            dw 0xA0C0
+            dw dev_strat, dev_intr_null
+            db "LPT1    "
+
+cfg_path    db "A:\CONFIG.SYS", 0
+s_comspec   db "COMSPEC=", 0
+s_path      db "PATH=", 0
+s_prompt    db "PROMPT=", 0
+s_pg        db "$P$G", 0
+msg_cfgunk  db "Unrecognized command in CONFIG.SYS", 13, 10, 0
+msg_cfgline db "Error in CONFIG.SYS line ", 0
+msg_missing db "Bad or missing ", 0
+msg_drverr  db "Error initializing device driver ", 0
+msg_crlf    db 13, 10, 0
+inst_pb     dw 0
+            dw itail, KSEG
+            dw shell_fcb, KSEG
+            dw shell_fcb, KSEG
 
 indos       db 0
             db 0
@@ -5481,6 +6662,38 @@ md_idx      resw 1
 rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
+mnt_try     resb 1
+cfg_inmenu  resb 1
+ext_count   resb 1
+lastdrive   resb 1
+            alignb 4
+dc_hdr      resd 1
+dc_far      resd 1
+dc_far2     resd 1
+cd_hdr      resd 1
+con_hdr     resd 1
+dev_reqp    resd 1
+ld_seg      resw 1
+ld_paras    resw 1
+ld_size     resw 1
+ld_img      resw 1
+ld_end      resw 1
+ld_used     resw 1
+ld_next     resw 1
+cfg_line    resw 1
+cfg_val     resw 1
+set_end     resw 1
+inst_end    resw 1
+ext_tab     resb 9*4
+dreq        resb 32
+cfg_key     resb 16
+dpath       resb 84
+ipath       resb 84
+itail       resb 130
+cfgl        resb 168
+setbuf      resb SET_MAX
+instbuf     resb INST_MAX
+cfgbuf      resb CFG_MAX
 abs_err     resw 1
 fn_lo       resw 1
 dap         resb 16
