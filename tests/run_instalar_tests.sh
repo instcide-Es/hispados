@@ -8,6 +8,9 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
+# CONFIG.SYS con la letra del disquete: INSTALAR la cambia a C:
+printf 'DEVICE=A:\\DRIVERS\\HSPXMS.SYS\r\n' > $T/CONFIG.SYS
+mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/hdd.img bs=1M count=32 status=none
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 # 1) FDISK + FORMAT sin sistema + INSTALAR C:
@@ -46,6 +49,7 @@ check $T/l1.txt "No se puede instalar sobre la unidad de arranque."
 check $T/l1.txt "Sistema transferido a la unidad C:"
 check $T/l1.txt "Hispa-DOS instalado en la unidad C:"
 check $T/l2.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l2.txt "KEYB     COM"
 check $T/l2.txt "INSTALAR COM"
 check $T/l2.txt "DRIVERS"

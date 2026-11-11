@@ -762,6 +762,40 @@ do_dir:
         jnz .copy
         dec di
         mov [pat_end], di
+        ; ".COM" -> "*.COM" (DIR.COM, DIR .TXT): nombre vacío = todos
+        mov si, pattern
+        mov bx, si
+.lc:
+        lodsb
+        test al, al
+        jz .lcd
+        cmp al, '\'
+        je .sl
+        cmp al, ':'
+        jne .lc
+.sl:
+        mov bx, si
+        jmp .lc
+.lcd:
+        cmp byte [bx], '.'
+        jne .nodot
+        cmp byte [bx+1], 0
+        je .nodot
+        cmp byte [bx+1], '.'
+        je .nodot
+        mov si, [pat_end]
+.sh:
+        mov al, [si]
+        mov [si+1], al
+        cmp si, bx
+        je .ins
+        dec si
+        jmp .sh
+.ins:
+        mov byte [bx], '*'
+        inc word [pat_end]
+        mov di, [pat_end]
+.nodot:
         mov al, [di-1]
         cmp al, '\'
         je .addall

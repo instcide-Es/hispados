@@ -20,6 +20,7 @@ send() { sleep "${2:-0.7}"; printf '%s\r' "$1"; }
   send "MEM"
   send "NOEXISTE"
   send "BIN\\LOLTEST"
+  send "dir.com"
   send "ECHO fin de la prueba"
   sleep 1.5
 } | timeout 25 qemu-system-i386 -display none -serial stdio -monitor none \
@@ -49,6 +50,8 @@ check "Comando o nombre de archivo incorrecto"
 check "CDS A: A:\\ flags=4000"
 check "DPB drive A: spc=0001 bps=0200 maxclus=0B20"
 check "fin de la prueba"
+# dir.com = DIR .COM = DIR *.COM (solo los .COM: 12 de la raíz)
+if sed -n "/>dir.com/,/>ECHO fin/p" "$LOG.txt" | grep -q "       12 archivo(s)" && ! sed -n "/>dir.com/,/>ECHO fin/p" "$LOG.txt" | grep -q "README"; then echo "  OK   dir.com = DIR *.COM"; else echo "  FAIL dir.com"; fail=1; fi
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida / output ---"; cat "$LOG.txt"; fi
 rm -f "$LOG" "$LOG.txt"
 exit $fail

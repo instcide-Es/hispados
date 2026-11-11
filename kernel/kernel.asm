@@ -4573,7 +4573,7 @@ cfg_cmds:
         dw k_break, cfg_ignore
         dw k_dos, cfg_ignore
         dw k_country, cfg_ignore
-        dw k_numlock, cfg_ignore
+        dw k_numlock, cfg_numlock
         dw k_switches, cfg_ignore
         dw k_menuitem, cfg_ignore
         dw k_menudef, cfg_ignore
@@ -4614,6 +4614,27 @@ cfg_lastdrive:
         ja .r
         mov [lastdrive], al
 .r:
+        ret
+
+; NUMLOCK=ON|OFF: Bloq Num al arrancar (la BIOS enciende la luz en la
+; siguiente llamada a INT 16h)
+cfg_numlock:
+        mov si, [cfg_val]
+        mov al, [si+1]
+        and al, 0xDF
+        push es
+        push word 0x40
+        pop es
+        cmp al, 'N'                 ; ON
+        jne .off
+        or byte [es:0x17], 0x20
+        jmp .r
+.off:
+        cmp al, 'F'                 ; OFF
+        jne .r
+        and byte [es:0x17], 0xDF
+.r:
+        pop es
         ret
 
 ; SET NOMBRE=valor -> setbuf

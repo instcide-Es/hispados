@@ -6,7 +6,9 @@
 ;                     de arranque las utilidades (*.COM), los drivers
 ;                     (\DRIVERS), las herramientas (\BIN), AUTOEXEC.BAT,
 ;                     CONFIG.SYS y LEEME.TXT. Si la unidad ya tiene un
-;                     AUTOEXEC.BAT o un CONFIG.SYS, se respetan.
+;                     AUTOEXEC.BAT o un CONFIG.SYS, se respetan. En los que
+;                     se copian, la letra de origen (A: o la USB) pasa a C:,
+;                     la que tendrá el disco al arrancar desde él.
 ;  Para preparar un disco nuevo: FDISK, reiniciar si hace falta, FORMAT
 ;  unidad: y después INSTALAR unidad:.
 ; =============================================================================
@@ -98,11 +100,13 @@ start:
         mov si, s_autoexec
         mov di, s_root
         mov byte [keep], 1
+        mov byte [fix], 1
         call copy_set
         mov si, s_config
         mov di, s_root
         call copy_set
         mov byte [keep], 0
+        mov byte [fix], 0
         mov si, s_leeme
         mov di, s_root
         call copy_set
@@ -278,6 +282,10 @@ copy_file:
         test ax, ax
         jz .eof
         mov cx, ax
+        cmp byte [fix], 0
+        je .w
+        call fix_drive
+.w:
         mov bx, [hd]
         mov dx, buf
         mov ah, 0x40
@@ -312,6 +320,30 @@ copy_file:
 .r:
         ret
 
+; en buf (CX bytes): "X:" de la unidad de origen -> "C:", la letra que
+; tendrá el disco al arrancar desde él (CONFIG.SYS y AUTOEXEC.BAT)
+fix_drive:
+        push cx
+        push si
+        mov si, buf
+        dec cx
+        jle .r
+.l:
+        cmp byte [si+1], ':'
+        jne .n
+        mov al, [si]
+        and al, 0xDF
+        cmp al, [src]
+        jne .n
+        mov byte [si], 'C'
+.n:
+        inc si
+        loop .l
+.r:
+        pop si
+        pop cx
+        ret
+
 putnum:
         mov ebx, 10
         xor cx, cx
@@ -344,6 +376,7 @@ BUFSZ       equ 16384
 src         db 0
 dst         db 0
 keep        db 0
+fix         db 0
 ncopied     dw 0
 hs          dw 0
 hd          dw 0

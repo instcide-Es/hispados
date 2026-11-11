@@ -5,6 +5,7 @@ DEVICE=A:\DRIVERS\HSPCD.SYS
 REM USB propio (memorias, teclado y ratón USB) sin la BIOS: quite el REM.
 REM Añada /F si la BIOS está usando el USB (teclado USB, arranque por USB).
 REM DEVICE=A:\DRIVERS\HSPUSB.SYS
+NUMLOCK=ON
 FILES=30
 BUFFERS=20
 LASTDRIVE=Z
