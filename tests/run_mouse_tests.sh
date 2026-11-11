@@ -10,7 +10,7 @@ T=$(mktemp -d)
 cp "$IMG" $T/f.img
 EXTRA=""
 if [ "$MODE" = usb ]; then
-  printf 'DEVICE=A:\\DRIVERS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+  printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   EXTRA="-device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0,id=ukbd -device usb-mouse,bus=xhci.0,id=umouse"
 fi
@@ -18,7 +18,7 @@ mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; }
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 {
   sleep 6
-  send "A:\\DRIVERS\\HSPRATON" 2
+  send "A:\\HISPADOS\\HSPRATON" 2
   send "BIN\\MOUSETST" 2
   sleep 1; mon "mouse_move 40 0"
   sleep 1; mon "mouse_move 0 24"
@@ -29,7 +29,7 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
   sleep 1; mon "mouse_move -2000 -2000"
   sleep 1; mon "sendkey ret"
   sleep 2
-  send "A:\\DRIVERS\\HSPRATON" 2
+  send "A:\\HISPADOS\\HSPRATON" 2
   sleep 1
 } | timeout 40 qemu-system-i386 -display none -serial stdio \
       -monitor unix:$T/mon,server,nowait \

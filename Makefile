@@ -68,7 +68,23 @@ $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPRATON.COM: drivers/hspraton.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MOUSETST.COM: tests/progs/mousetst.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/MOVER.COM: utils/mover.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/ATRIBUTO.COM: utils/atributo.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/ARBOL.COM: utils/arbol.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/BUSCAR.COM: utils/buscar.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/ORDENAR.COM: utils/ordenar.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/PAGINAR.COM: utils/paginar.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/ELEGIR.COM: utils/elegir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -78,26 +94,45 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM
+        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/SHARETST.COM \
+        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM
 
-$(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
+$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
 	mcopy -i $@ $(B)/COMMAND.COM ::COMMAND.COM
-	mcopy -i $@ $(B)/FDISK.COM ::FDISK.COM
-	mcopy -i $@ $(B)/FORMAT.COM ::FORMAT.COM
-	mcopy -i $@ $(B)/PLAYWAV.COM ::PLAYWAV.COM
-	mcopy -i $@ $(B)/SYS.COM ::SYS.COM
-	mcopy -i $@ $(B)/KEYB.COM ::KEYB.COM
-	mcopy -i $@ $(B)/INSTALAR.COM ::INSTALAR.COM
-	mcopy -i $@ $(B)/EDIT.COM ::EDIT.COM
-	mcopy -i $@ $(B)/EDIT.COM ::EDITAR.COM
-	mcopy -i $@ $(B)/GESTOR.COM ::GESTOR.COM
-	mcopy -i $@ $(B)/SYSINFO.COM ::SYSINFO.COM
-	mcopy -i $@ $(B)/SYSINFO.COM ::INFO.COM
 	mcopy -i $@ tests/disk/README.TXT ::README.TXT
 	mcopy -i $@ tests/disk/AUTOEXEC.BAT ::AUTOEXEC.BAT
+	# el sistema, en \HISPADOS (como \DOS en MS-DOS): nombres en español y
+	# los clásicos en ALIAS.INI
+	mmd   -i $@ ::HISPADOS
+	mcopy -i $@ $(B)/EDIT.COM ::HISPADOS/EDITAR.COM
+	mcopy -i $@ $(B)/FDISK.COM ::HISPADOS/PARTIR.COM
+	mcopy -i $@ $(B)/FORMAT.COM ::HISPADOS/FORMATEA.COM
+	mcopy -i $@ $(B)/SYS.COM ::HISPADOS/SISTEMA.COM
+	mcopy -i $@ $(B)/KEYB.COM ::HISPADOS/TECLADO.COM
+	mcopy -i $@ $(B)/PLAYWAV.COM ::HISPADOS/SONAR.COM
+	mcopy -i $@ $(B)/SYSINFO.COM ::HISPADOS/INFO.COM
+	mcopy -i $@ $(B)/GESTOR.COM ::HISPADOS/GESTOR.COM
+	mcopy -i $@ $(B)/INSTALAR.COM ::HISPADOS/INSTALAR.COM
+	mcopy -i $@ $(B)/MOVER.COM ::HISPADOS/MOVER.COM
+	mcopy -i $@ $(B)/ATRIBUTO.COM ::HISPADOS/ATRIBUTO.COM
+	mcopy -i $@ $(B)/ARBOL.COM ::HISPADOS/ARBOL.COM
+	mcopy -i $@ $(B)/BUSCAR.COM ::HISPADOS/BUSCAR.COM
+	mcopy -i $@ $(B)/ORDENAR.COM ::HISPADOS/ORDENAR.COM
+	mcopy -i $@ $(B)/PAGINAR.COM ::HISPADOS/PAGINAR.COM
+	mcopy -i $@ $(B)/ELEGIR.COM ::HISPADOS/ELEGIR.COM
+	iconv -f UTF-8 -t CP437 sistema/ALIAS.INI | sed 's/$$/\r/' > $(B)/ALIAS.INI
+	mcopy -i $@ $(B)/ALIAS.INI ::HISPADOS/ALIAS.INI
+	mcopy -i $@ $(B)/HSPRAM.SYS ::HISPADOS/HSPRAM.SYS
+	mcopy -i $@ $(B)/HSPTEST.SYS ::HISPADOS/HSPTEST.SYS
+	mcopy -i $@ $(B)/HSPXMS.SYS ::HISPADOS/HSPXMS.SYS
+	mcopy -i $@ $(B)/HSPSND.COM ::HISPADOS/HSPSND.COM
+	mcopy -i $@ $(B)/HSPUSB.SYS ::HISPADOS/HSPUSB.SYS
+	mcopy -i $@ $(B)/HSPCD.SYS ::HISPADOS/HSPCD.SYS
+	mcopy -i $@ $(B)/HSPRATON.COM ::HISPADOS/HSPRATON.COM
+	# pruebas
 	mmd   -i $@ ::BAT
 	mcopy -i $@ tests/disk/BAT/PRUEBA.BAT ::BAT/PRUEBA.BAT
 	mcopy -i $@ tests/disk/BAT/OTRA.BAT ::BAT/OTRA.BAT
@@ -107,15 +142,8 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/HELLO.COM ::BIN/HELLO.COM
 	mcopy -i $@ $(B)/UPPER.COM ::BIN/UPPER.COM
 	mcopy -i $@ $(B)/HELLOEXE.EXE ::HELLOEXE.EXE
-	mmd   -i $@ ::DRIVERS
-	mcopy -i $@ $(B)/HSPRAM.SYS ::DRIVERS/HSPRAM.SYS
-	mcopy -i $@ $(B)/HSPTEST.SYS ::DRIVERS/HSPTEST.SYS
-	mcopy -i $@ $(B)/HSPXMS.SYS ::DRIVERS/HSPXMS.SYS
-	mcopy -i $@ $(B)/HSPSND.COM ::DRIVERS/HSPSND.COM
-	mcopy -i $@ $(B)/HSPUSB.SYS ::DRIVERS/HSPUSB.SYS
-	mcopy -i $@ $(B)/HSPCD.SYS ::DRIVERS/HSPCD.SYS
-	mcopy -i $@ $(B)/HSPRATON.COM ::DRIVERS/HSPRATON.COM
 	mcopy -i $@ $(B)/MOUSETST.COM ::BIN/MOUSETST.COM
+	mcopy -i $@ $(B)/SHARETST.COM ::BIN/SHARETST.COM
 	mcopy -i $@ $(B)/XMSTEST.COM ::BIN/XMSTEST.COM
 	mcopy -i $@ $(B)/MCBWALK.COM ::BIN/MCBWALK.COM
 	mcopy -i $@ $(B)/LOLTEST.COM ::BIN/LOLTEST.COM
@@ -154,6 +182,9 @@ test: $(IMG) usb
 	tests/run_cd_tests.sh $(IMG) ahci
 	tests/run_edit_tests.sh $(IMG)
 	tests/run_deltree_tests.sh $(IMG)
+	tests/run_share_tests.sh $(IMG)
+	tests/run_mem_tests.sh $(IMG)
+	tests/run_ordenes_tests.sh $(IMG)
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 

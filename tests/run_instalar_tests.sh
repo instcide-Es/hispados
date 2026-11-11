@@ -9,7 +9,7 @@ IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
 # CONFIG.SYS con la letra del disquete: INSTALAR la cambia a C:
-printf 'DEVICE=A:\\DRIVERS\\HSPXMS.SYS\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/hdd.img bs=1M count=32 status=none
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
@@ -36,6 +36,7 @@ k up up ret; sleep 1                 # ECO uno
 k up down down ret; sleep 1          # línea vacía
 k f3 ret; sleep 1                    # repite la última (ECO uno)
 k shift-l shift-i shift-s shift-t shift-a shift-r ret; sleep 2
+k shift-l shift-i shift-s shift-t shift-a shift-r spc shift-h shift-i shift-s shift-p shift-a shift-d shift-o shift-s ret; sleep 2
 kill $QP 2>/dev/null; wait $QP 2>/dev/null
 tr -d '\r' < $T/l1 | iconv -f CP437 -t UTF-8 > $T/l1.txt
 tr -d '\r' < $T/l2 | iconv -f CP437 -t UTF-8 > $T/l2.txt
@@ -50,9 +51,10 @@ check $T/l1.txt "Sistema transferido a la unidad C:"
 check $T/l1.txt "Hispa-DOS instalado en la unidad C:"
 check $T/l2.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
-check $T/l2.txt "KEYB     COM"
+check $T/l2.txt "HISPADOS"
+check $T/l2.txt "TECLADO  COM"
 check $T/l2.txt "INSTALAR COM"
-check $T/l2.txt "DRIVERS"
+check $T/l2.txt "ALIAS    INI"
 # el historial: "uno" debe salir tres veces (la orden, flecha arriba x2 y F3)
 n=$(grep -c "^uno$" $T/l2.txt)
 if [ "$n" -ge 3 ]; then echo "  OK   historial: ECO uno repetido ($n veces)"; else echo "  FAIL historial: ECO uno salió $n veces"; fail=1; fi

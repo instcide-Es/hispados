@@ -10,7 +10,7 @@ fail=0
 for KIND in super mbr; do
   T=$(mktemp -d)
   cp "$IMG" $T/f.img
-  printf 'DEVICE=A:\\DRIVERS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+  printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   dd if=/dev/zero of=$T/usb.img bs=1M count=32 status=none
   if [ $KIND = super ]; then
@@ -30,7 +30,7 @@ EOF
   mcopy -i $T/usb.img@@$OFF $T/HOLA.TXT ::HOLA.TXT
   {
     sleep 7
-    for c in "MOSTRAR D:\\HOLA.TXT" "CREARDIR D:\\HISPA" "COPIAR A:\\*.COM D:\\HISPA" \
+    for c in "MOSTRAR D:\\HOLA.TXT" "CREARDIR D:\\HISPA" "COPIAR A:\\HISPADOS\\*.COM D:\\HISPA" \
              "COPIAR A:\\README.TXT D:\\" "BORRAR D:\\HOLA.TXT" "LISTAR D:\\HISPA"; do
       printf '%s\r' "$c"; sleep 3
     done
@@ -42,13 +42,13 @@ EOF
   tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
   echo "== Hispa-DOS native USB tests ($KIND) =="
   for want in "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)" "Disco USB: 32 MB en la unidad D:" \
-              "Hola desde la memoria USB" " Directorio de D:\\HISPA" "COMMAND  COM" "KEYB     COM"; do
+              "Hola desde la memoria USB" " Directorio de D:\\HISPA" "EDITAR   COM" "TECLADO  COM"; do
     if grep -qF -- "$want" $T/log.txt; then echo "  OK   $want"; else echo "  FAIL $want"; fail=1; fi
   done
   P=$T/part.img
   dd if=$T/usb.img of=$P bs=1M skip=$((OFF / 1048576)) status=none
   if fsck.fat -n $P > $T/fsck 2>&1; then echo "  OK   fsck.fat de la memoria USB"; else echo "  FAIL fsck.fat"; cat $T/fsck; fail=1; fi
-  if cmp -s <(mtype -i $P ::HISPA/COMMAND.COM) build/COMMAND.COM; then echo "  OK   COMMAND.COM copiado intacto"; else echo "  FAIL copia de COMMAND.COM"; fail=1; fi
+  if cmp -s <(mtype -i $P ::HISPA/EDITAR.COM) build/EDIT.COM; then echo "  OK   EDITAR.COM copiado intacto"; else echo "  FAIL copia de EDITAR.COM"; fail=1; fi
   if mdir -i $P ::HOLA.TXT > /dev/null 2>&1; then echo "  FAIL HOLA.TXT no se borró"; fail=1; else echo "  OK   HOLA.TXT borrado"; fi
   if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; fi
   rm -rf $T

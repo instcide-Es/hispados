@@ -19,10 +19,10 @@ for CARD in hda ac97; do
   fi
   {
     sleep 4
-    printf 'A:\\DRIVERS\\HSPSND\r'; sleep 3
+    printf 'A:\\HISPADOS\\HSPSND\r'; sleep 3
     printf 'PLAYWAV /TONE 440 800\r'; sleep 4
     printf 'PLAYWAV TEST.WAV\r'; sleep 4
-    printf 'A:\\DRIVERS\\HSPSND\r'; sleep 2
+    printf 'A:\\HISPADOS\\HSPSND\r'; sleep 2
   } | timeout 30 qemu-system-i386 -display none -serial stdio -monitor none \
         -audiodev wav,id=snd0,path=$T/out.wav $DEV \
         -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1

@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/base.img
-printf 'DEVICE=A:\\DRIVERS\\HSPXMS.SYS\r\nDEVICE=A:\\DRIVERS\\HSPTEST.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPTEST.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/base.img $T/CONFIG.SYS ::CONFIG.SYS
 # arranca, pulsa $1 durante el arranque y después el resto de teclas
 boot() {

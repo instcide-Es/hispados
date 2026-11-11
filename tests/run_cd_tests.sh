@@ -12,7 +12,7 @@ if [ "$BUS" = ahci ]; then
   CDDEV="-device ahci,id=ahci -drive if=none,id=cd,file=$T/disco.iso,media=cdrom -device ide-cd,bus=ahci.0,drive=cd"
 fi
 cp "$IMG" $T/f.img
-printf 'DEVICE=A:\\DRIVERS\\HSPCD.SYS\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPCD.SYS\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/iso/DOCS
 printf 'Hola desde el DVD de Hispa-DOS\r\n' > $T/iso/LEEME.TXT

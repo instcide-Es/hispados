@@ -7,7 +7,7 @@ set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 FLP=$(mktemp --suffix=.img); cp "$IMG" "$FLP"
-printf 'DEVICE=A:\\DRIVERS\\HSPXMS.SYS\r\nDEVICE=A:\\DRIVERS\\HSPXMS.SYS\r\n' > build/cfg_xms_test.sys
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n' > build/cfg_xms_test.sys
 mcopy -o -i "$FLP" build/cfg_xms_test.sys ::CONFIG.SYS
 HAVEMEM=0
 if [ -f tests/thirdparty/dl/mem/.ok ]; then

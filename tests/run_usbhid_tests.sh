@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
-printf 'DEVICE=A:\\DRIVERS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 Q="python3 tests/tools/qmp.py $T/qmp"
 qemu-system-i386 -display none -serial file:$T/log -monitor none -parallel none \
@@ -20,7 +20,7 @@ sleep 8
 $Q type vga0 "VER" key vga0 ret wait 1 \
    type vga0 "ECHO Hola" key vga0 ret wait 1 \
    key vga0 up key vga0 ret wait 1 \
-   type vga0 "A:\\DRIVERS\\HSPRATON" key vga0 ret wait 2 \
+   type vga0 "A:\\HISPADOS\\HSPRATON" key vga0 ret wait 2 \
    type vga0 "BIN\\MOUSETST" key vga0 ret wait 2 \
    move - 40 0 wait 1 move - 0 24 wait 1 \
    btn - 1 wait 1 btn - 0 wait 1 \

@@ -1017,7 +1017,116 @@ dir_line:
         call put2
         jmp crlf
 
+; -----------------------------------------------------------------------------
+;  MEM [/C | /F | /D | /M nombre] [/P]
+;   /C (/CLASSIFY)  programas en memoria y lo que usa cada uno
+;   /F (/FREE)      bloques libres
+;   /M (/MODULE)    bloques de un programa
+;   /D (/DEBUG)     todos los bloques y los controladores de dispositivo
+;   /P (/PAGE)      pausa en cada pantalla
+; -----------------------------------------------------------------------------
+MM_MAXN     equ 20                  ; nombres distintos en /C
 do_mem:
+        mov byte [mm_mode], 0
+        mov byte [mm_page], 0
+        mov byte [mm_lines], 0
+.opt:
+        call skip_sp
+        lodsb
+        test al, al
+        jz .optd
+        cmp al, '/'
+        jne .bad
+        lodsb
+        call upcase
+        cmp al, 'P'
+        jne .o1
+        mov byte [mm_page], 1
+        jmp .sk
+.o1:
+        cmp al, 'C'
+        je .mode
+        cmp al, 'F'
+        je .mode
+        cmp al, 'D'
+        je .mode
+        cmp al, 'M'
+        jne .bad
+        mov [mm_mode], al
+        ; resto de la palabra, «:» o espacios y el nombre
+.mw:
+        mov al, [si]
+        call upcase
+        cmp al, 'A'
+        jb .mn
+        cmp al, 'Z'
+        ja .mn
+        inc si
+        jmp .mw
+.mn:
+        cmp byte [si], ':'
+        jne .mn2
+        inc si
+.mn2:
+        call skip_sp
+        mov di, mm_name
+        mov cx, 8
+        mov eax, '    '
+        mov [di], eax
+        mov [di+4], eax
+.mc:
+        mov al, [si]
+        cmp al, ' '
+        jbe .mce
+        cmp al, '/'
+        je .mce
+        cmp al, '.'
+        je .mcx
+        call upcase
+        mov [di], al
+        inc di
+        inc si
+        loop .mc
+        jmp .mce
+.mcx:
+        ; la extensión no cuenta (COMMAND.COM = COMMAND)
+        inc si
+        mov al, [si]
+        cmp al, ' '
+        jbe .mce
+        cmp al, '/'
+        je .mce
+        jmp .mcx
+.mce:
+        cmp byte [mm_name], ' '
+        je .bad
+        jmp .opt
+.mode:
+        mov [mm_mode], al
+.sk:
+        mov al, [si]
+        call upcase
+        cmp al, 'A'
+        jb .opt
+        cmp al, 'Z'
+        ja .opt
+        inc si
+        jmp .sk
+.bad:
+        mov si, msg_mmbad
+        jmp puts
+.optd:
+        mov al, [mm_mode]
+        cmp al, 'C'
+        je mem_classify
+        cmp al, 'F'
+        je mem_free
+        cmp al, 'D'
+        je mem_debug
+        cmp al, 'M'
+        je mem_module
+
+mem_summary:
         mov ah, 0x52
         int 0x21
         mov ax, [es:bx-2]
@@ -1071,6 +1180,593 @@ do_mem:
         call putnum_w
         mov si, msg_mlarge
         jmp puts
+
+; ---- ayudas de MEM ----
+; salto de línea con pausa en cada pantalla si /P
+mm_nl:
+        call crlf
+        cmp byte [mm_page], 0
+        je .r
+        inc byte [mm_lines]
+        cmp byte [mm_lines], 22
+        jb .r
+        mov byte [mm_lines], 0
+        push si
+        mov si, msg_mmmore
+        call puts
+        pop si
+        push ax
+        mov ah, 0x08
+        int 0x21
+        pop ax
+        call crlf
+.r:
+        ret
+; AX -> 4 cifras hexadecimales
+mm_hex4:
+        push ax
+        push cx
+        mov cx, 4
+.l:
+        rol ax, 4
+        push ax
+        and al, 15
+        add al, '0'
+        cmp al, '9'
+        jbe .d
+        add al, 7
+.d:
+        call putc
+        pop ax
+        loop .l
+        pop cx
+        pop ax
+        ret
+; EAX bytes -> «nnn.nnn (nnnK)» en CL columnas para los bytes
+mm_bytes:
+        push eax
+        call putnum_w
+        mov al, ' '
+        call putc
+        mov al, '('
+        call putc
+        pop eax
+        push eax
+        add eax, 512
+        shr eax, 10
+        mov cl, 0
+        call putnum_w
+        mov al, 'K'
+        call putc
+        mov al, ')'
+        call putc
+        pop eax
+        ret
+; mm_nbuf (8) y relleno hasta 10 columnas
+mm_name8:
+        push si
+        push cx
+        mov si, mm_nbuf
+        mov cx, 8
+.l:
+        lodsb
+        call putc
+        loop .l
+        mov al, ' '
+        call putc
+        call putc
+        pop cx
+        pop si
+        ret
+; mm_nbuf sin los espacios del final, y un espacio
+mm_nametrim:
+        push si
+        push cx
+        mov si, mm_nbuf
+        mov cx, 8
+.l:
+        lodsb
+        cmp al, ' '
+        je .e
+        call putc
+        loop .l
+.e:
+        mov al, ' '
+        call putc
+        pop cx
+        pop si
+        ret
+; primer MCB -> AX
+mm_first:
+        push es
+        push bx
+        mov ah, 0x52
+        int 0x21
+        mov ax, [es:bx-2]
+        pop bx
+        pop es
+        ret
+; MCB AX -> mm_nbuf = nombre, BL = tipo (0 libre, 1 sistema, 2 programa,
+; 3 entorno, 4 datos), ECX = bytes (con la cabecera), DL = 'M' o 'Z'
+mm_class:
+        push es
+        push si
+        push di
+        push ax
+        mov es, ax
+        mov dl, [es:0]
+        movzx ecx, word [es:3]
+        inc ecx
+        shl ecx, 4
+        mov si, [es:1]                  ; propietario
+        mov dword [mm_nbuf], '    '
+        mov dword [mm_nbuf+4], '    '
+        test si, si
+        jnz .own
+        mov bl, 0
+        mov di, s_mmfree
+        jmp .setn
+.own:
+        cmp si, 8
+        jbe .sys
+        inc ax
+        cmp si, ax
+        jne .other
+        mov bl, 2                       ; el bloque del propio programa
+        jmp .mname
+.other:
+        ; de otro programa: el nombre está en el MCB de su PSP
+        mov bl, 4
+        push es
+        mov es, si
+        cmp [es:0x2C], ax               ; ¿es su entorno?
+        pop es
+        jne .o2
+        mov bl, 3
+.o2:
+        mov ax, si
+        dec ax
+        mov es, ax
+        cmp word [es:1], 8
+        jbe .sysn
+.mname:
+        ; nombre del MCB (+8, hasta 8 caracteres)
+        xor di, di
+.mc:
+        mov al, [es:8+di]
+        cmp al, ' '
+        jbe .mce
+        mov [mm_nbuf+di], al
+        inc di
+        cmp di, 8
+        jb .mc
+.mce:
+        test di, di
+        jnz .done
+        mov byte [mm_nbuf], '?'
+        jmp .done
+.sysn:
+        mov di, s_mmsys
+        jmp .setn
+.sys:
+        mov bl, 1
+        mov di, s_mmsys
+.setn:
+        push bx
+        xor bx, bx
+.sn:
+        mov al, [di+bx]
+        test al, al
+        jz .sne
+        mov [mm_nbuf+bx], al
+        inc bx
+        jmp .sn
+.sne:
+        pop bx
+.done:
+        pop ax
+        pop di
+        pop si
+        pop es
+        ret
+; tipo BL -> SI = texto
+mm_typename:
+        movzx si, bl
+        shl si, 1
+        mov si, [mm_types+si]
+        ret
+
+; ---- MEM /C ----
+mem_classify:
+        mov word [mm_n], 0
+        ; el núcleo y las tablas de la BIOS, antes del primer MCB
+        call mm_first
+        push ax
+        movzx ecx, ax
+        shl ecx, 4
+        mov dword [mm_nbuf], 'SIST'
+        mov dword [mm_nbuf+4], 'EMA '
+        call mm_add
+        pop ax
+.l:
+        push ax
+        call mm_class
+        call mm_add
+        pop ax
+        cmp dl, 'M'
+        jne .show
+        push es
+        mov es, ax
+        add ax, [es:3]
+        pop es
+        inc ax
+        jmp .l
+.show:
+        call mm_nl
+        mov si, msg_mmc1
+        call puts
+        call mm_nl
+        call mm_nl
+        mov si, msg_mmc2
+        call puts
+        call mm_nl
+        mov si, msg_mmc3
+        call puts
+        call mm_nl
+        xor bx, bx
+        xor edx, edx
+.p:
+        cmp bx, [mm_n]
+        jae .tot
+        imul si, bx, 12
+        add si, mm_tab
+        mov eax, [si]
+        mov [mm_nbuf], eax
+        mov eax, [si+4]
+        mov [mm_nbuf+4], eax
+        mov al, ' '
+        call putc
+        call putc
+        call mm_name8
+        mov eax, [si+8]
+        add edx, eax
+        mov cl, 12
+        call mm_bytes
+        call mm_nl
+        inc bx
+        jmp .p
+.tot:
+        mov si, msg_mmc3
+        call puts
+        call mm_nl
+        mov si, msg_mmtot
+        call puts
+        mov eax, edx
+        mov cl, 12
+        call mm_bytes
+        call mm_nl
+        call mm_nl
+        mov si, msg_mmnoumb
+        call puts
+        jmp mm_nl
+; sumar ECX bytes al nombre de mm_nbuf
+mm_add:
+        push bx
+        push si
+        push eax
+        xor bx, bx
+.f:
+        cmp bx, [mm_n]
+        jae .new
+        imul si, bx, 12
+        add si, mm_tab
+        mov eax, [mm_nbuf]
+        cmp eax, [si]
+        jne .n
+        mov eax, [mm_nbuf+4]
+        cmp eax, [si+4]
+        jne .n
+        add [si+8], ecx
+        jmp .r
+.n:
+        inc bx
+        jmp .f
+.new:
+        cmp bx, MM_MAXN
+        jae .r
+        imul si, bx, 12
+        add si, mm_tab
+        mov eax, [mm_nbuf]
+        mov [si], eax
+        mov eax, [mm_nbuf+4]
+        mov [si+4], eax
+        mov [si+8], ecx
+        inc word [mm_n]
+.r:
+        pop eax
+        pop si
+        pop bx
+        ret
+
+; ---- MEM /F ----
+mem_free:
+        call mm_nl
+        mov si, msg_mmf1
+        call puts
+        call mm_nl
+        call mm_nl
+        mov si, msg_mmf2
+        call puts
+        call mm_nl
+        mov si, msg_mmf3
+        call puts
+        call mm_nl
+        xor ebp, ebp                    ; total
+        xor edi, edi                    ; mayor
+        call mm_first
+.l:
+        push ax
+        call mm_class
+        test bl, bl
+        jnz .n
+        pop ax
+        push ax
+        mov si, s_mmind
+        call puts
+        call mm_hex4
+        mov si, s_mmind
+        call puts
+        add ebp, ecx
+        cmp ecx, edi
+        jbe .b
+        mov edi, ecx
+.b:
+        mov eax, ecx
+        mov cl, 12
+        call mm_bytes
+        call mm_nl
+.n:
+        pop ax
+        push es
+        mov es, ax
+        cmp byte [es:0], 'M'
+        jne .end
+        add ax, [es:3]
+        pop es
+        inc ax
+        jmp .l
+.end:
+        pop es
+        call mm_nl
+        mov si, msg_mmftot
+        call puts
+        mov eax, ebp
+        mov cl, 12
+        call mm_bytes
+        call mm_nl
+        mov si, msg_mmfbig
+        call puts
+        mov eax, edi
+        mov cl, 12
+        call mm_bytes
+        call mm_nl
+        call mm_nl
+        mov si, msg_mmnoumb
+        call puts
+        jmp mm_nl
+
+; ---- MEM /M nombre ----
+mem_module:
+        mov byte [mm_found], 0
+        xor edx, edx
+        call mm_first
+.l:
+        push ax
+        push edx
+        call mm_class
+        pop edx
+        mov [mm_sz], ecx
+        mov si, mm_nbuf
+        mov di, mm_name
+        mov cx, 8
+        push es
+        push ds
+        pop es
+        repe cmpsb
+        pop es
+        jne .n
+        cmp byte [mm_found], 0
+        jne .row
+        mov byte [mm_found], 1
+        call mm_nl
+        mov si, msg_mmm1
+        call puts
+        call mm_nametrim
+        mov si, msg_mmm2
+        call puts
+        call mm_nl
+        call mm_nl
+        mov si, msg_mmm3
+        call puts
+        call mm_nl
+        mov si, msg_mmm4
+        call puts
+        call mm_nl
+.row:
+        pop ax
+        push ax
+        mov si, s_mmind
+        call puts
+        call mm_hex4
+        mov si, s_mmind
+        call puts
+        mov ecx, [mm_sz]
+        add edx, ecx
+        mov eax, ecx
+        mov cl, 12
+        call mm_bytes
+        mov al, ' '
+        call putc
+        call putc
+        call mm_typename
+        call puts
+        call mm_nl
+.n:
+        pop ax
+        push es
+        mov es, ax
+        cmp byte [es:0], 'M'
+        jne .end
+        add ax, [es:3]
+        pop es
+        inc ax
+        jmp .l
+.end:
+        pop es
+        cmp byte [mm_found], 0
+        jne .tot
+        mov si, msg_mmnf1
+        call puts
+        mov si, mm_name
+        mov cx, 8
+.nf:
+        lodsb
+        cmp al, ' '
+        je .nfe
+        call putc
+        loop .nf
+.nfe:
+        mov si, msg_mmnf2
+        call puts
+        jmp mm_nl
+.tot:
+        call mm_nl
+        mov si, msg_mmtot
+        call puts
+        mov eax, edx
+        mov cl, 12
+        call mm_bytes
+        jmp mm_nl
+
+; ---- MEM /D ----
+mem_debug:
+        call mm_nl
+        mov si, msg_mmd1
+        call puts
+        call mm_nl
+        call mm_nl
+        mov si, msg_mmd2
+        call puts
+        call mm_nl
+        mov si, msg_mmd3
+        call puts
+        call mm_nl
+        ; zonas fijas antes del primer MCB
+        mov si, msg_mmivt
+        call puts
+        call mm_nl
+        mov si, msg_mmbda
+        call puts
+        call mm_nl
+        call mm_first
+        push ax
+        mov si, s_mmind
+        call puts
+        mov ax, 0x0050
+        call mm_hex4
+        mov si, s_mmind
+        call puts
+        pop ax
+        push ax
+        movzx eax, ax
+        sub eax, 0x50
+        shl eax, 4
+        mov cl, 12
+        call mm_bytes
+        mov si, msg_mmkern
+        call puts
+        call mm_nl
+        pop ax
+.l:
+        push ax
+        call mm_class
+        pop ax
+        push ax
+        mov si, s_mmind
+        call puts
+        call mm_hex4
+        mov si, s_mmind
+        call puts
+        mov eax, ecx
+        mov cl, 12
+        call mm_bytes
+        mov al, ' '
+        call putc
+        call putc
+        call mm_name8
+        call mm_typename
+        call puts
+        call mm_nl
+        pop ax
+        push es
+        mov es, ax
+        cmp byte [es:0], 'M'
+        jne .devs
+        add ax, [es:3]
+        pop es
+        inc ax
+        jmp .l
+.devs:
+        pop es
+        ; controladores de dispositivo (cadena desde NUL, lista de listas+22h)
+        call mm_nl
+        mov si, msg_mmdev
+        call puts
+        call mm_nl
+        mov ah, 0x52
+        int 0x21
+        add bx, 0x22
+.d:
+        mov si, s_mmind
+        call puts
+        mov ax, es
+        call mm_hex4
+        mov al, ':'
+        call putc
+        mov ax, bx
+        call mm_hex4
+        mov al, ' '
+        call putc
+        call putc
+        test word [es:bx+4], 0x8000
+        jz .blk
+        push bx
+        mov cx, 8
+.dn:
+        mov al, [es:bx+10]
+        call putc
+        inc bx
+        loop .dn
+        pop bx
+        mov si, msg_mmchr
+        call puts
+        jmp .dnx
+.blk:
+        movzx eax, byte [es:bx+10]
+        mov cl, 0
+        call putnum_w
+        mov si, msg_mmblk
+        call puts
+.dnx:
+        call mm_nl
+        cmp word [es:bx], 0xFFFF
+        je .dend
+        les bx, [es:bx]
+        jmp .d
+.dend:
+        push ds
+        pop es
+        ret
 
 do_date:
         mov ah, 0x2A
@@ -1142,6 +1838,8 @@ do_help:
 ;  Programas externos (.COM / .EXE) con búsqueda en PATH
 ; -----------------------------------------------------------------------------
 run_external:
+        mov byte [al_tried], 0
+.again:
         ; ¿lleva extensión o ruta?
         mov byte [hasext], 0
         mov byte [haspath], 0
@@ -1259,9 +1957,126 @@ run_external:
         push ds
         pop es
 .bad:
+        ; ¿es un alias? (EDIT=EDITAR en ALIAS.INI): un solo intento
+        cmp byte [al_tried], 0
+        jne .badmsg
+        mov byte [al_tried], 1
+        cmp byte [haspath], 0
+        jne .badmsg
+        cmp byte [hasext], 0
+        jne .badmsg
+        call alias_lookup
+        jc .badmsg
+        jmp .again
+.badmsg:
         mov si, msg_badcmd
         call puts
 .done:
+        ret
+
+; ---- alias: buscar cmdword en <unidad de arranque>:\HISPADOS\ALIAS.INI ----
+; Líneas «NOMBRE=PROGRAMA»; «;» empieza un comentario. Si está, cmdword pasa
+; a ser el programa (en mayúsculas). CF si no hay alias.
+ALIAS_MAX equ 2048
+alias_lookup:
+        mov ax, 0x3305
+        int 0x21
+        add dl, 'A' - 1
+        mov [s_alias], dl
+        mov dx, s_alias
+        mov ax, 0x3D00
+        int 0x21
+        jc .no
+        mov bx, ax
+        mov dx, alias_buf
+        mov cx, ALIAS_MAX - 1
+        mov ah, 0x3F
+        int 0x21
+        pushf
+        push ax
+        mov ah, 0x3E
+        int 0x21
+        pop ax
+        popf
+        jc .no
+        mov bx, ax
+        mov byte [alias_buf+bx], 0
+        mov si, alias_buf
+.line:
+        call al_skip
+        mov al, [si]
+        test al, al
+        jz .no
+        cmp al, ';'
+        je .eol
+        cmp al, 13
+        je .eol
+        cmp al, 10
+        je .eol
+        ; comparar el nombre con cmdword
+        mov di, cmdword
+.cmp:
+        mov al, [si]
+        call upcase
+        cmp al, '='
+        je .nend
+        cmp al, ' '
+        je .nend
+        cmp al, 9
+        je .nend
+        cmp al, [di]
+        jne .eol
+        inc si
+        inc di
+        jmp .cmp
+.nend:
+        cmp byte [di], 0            ; el nombre entero
+        jne .eol
+        call al_skip
+        cmp byte [si], '='
+        jne .eol
+        inc si
+        call al_skip
+        ; copiar el programa en cmdword
+        mov di, cmdword
+        mov cx, 63
+.cp:
+        mov al, [si]
+        cmp al, ' '
+        jbe .cpe
+        cmp al, ';'
+        je .cpe
+        call upcase
+        mov [di], al
+        inc di
+        inc si
+        loop .cp
+.cpe:
+        cmp di, cmdword
+        je .no
+        mov byte [di], 0
+        clc
+        ret
+.eol:
+        mov al, [si]
+        test al, al
+        jz .no
+        inc si
+        cmp al, 10
+        jne .eol
+        jmp .line
+.no:
+        stc
+        ret
+al_skip:
+        cmp byte [si], ' '
+        je .s
+        cmp byte [si], 9
+        jne .r
+.s:
+        inc si
+        jmp al_skip
+.r:
         ret
 
 ; prefix + cmdword (+ .COM/.EXE) -> ejecutar. CF=1 si no existe
@@ -3842,6 +4657,7 @@ s_pathvar   db "PATH", 0
 s_promptvar db "PROMPT", 0
 s_defprompt db "$P$G", 0
 s_autoexec  db "A:\AUTOEXEC.BAT", 0
+s_alias     db "A:\HISPADOS\ALIAS.INI", 0
 s_empty     db 0
 ; -----------------------------------------------------------------------------
 msg_hello   db 13, 10, "Intérprete de órdenes de Hispa-DOS 0.2", 13, 10
@@ -3866,6 +4682,42 @@ msg_dtdel   db "Eliminando ", 0
 msg_dtdots  db "...", 13, 10, 0
 msg_dterr   db "No se ha podido eliminar todo.", 13, 10, 0
 msg_dtnf    db "No se encontró el archivo", 13, 10, 0
+msg_mmbad   db "Parámetro no válido. Uso: MEM [/C | /F | /D | /M nombre] [/P]", 13, 10, 0
+msg_mmmore  db "Pulse una tecla para continuar . . .", 0
+msg_mmc1    db "Programas en la memoria convencional:", 0
+msg_mmc2    db "  Nombre                 Total", 0
+msg_mmc3    db "  --------  ------------------------", 0
+msg_mmtot   db "  Total     ", 0
+msg_mmnoumb db "No hay memoria superior (UMB) disponible.", 0
+msg_mmf1    db "Bloques libres de la memoria convencional:", 0
+msg_mmf2    db "  Segmento               Total", 0
+msg_mmf3    db "  --------  ------------------------", 0
+msg_mmftot  db "  Total libre     ", 0
+msg_mmfbig  db "  Mayor bloque    ", 0
+msg_mmm1    db "El programa ", 0
+msg_mmm2    db "usa esta memoria:", 0
+msg_mmm3    db "  Segmento               Total     Tipo", 0
+msg_mmm4    db "  --------  ------------------------  ---------", 0
+msg_mmnf1   db "El programa ", 0
+msg_mmnf2   db " no está en la memoria.", 0
+msg_mmd1    db "Memoria convencional, bloque a bloque:", 0
+msg_mmd2    db "  Segmento               Total     Nombre    Tipo", 0
+msg_mmd3    db "  --------  ------------------------  --------  ---------", 0
+msg_mmivt   db "    0000             1.024 (1K)    Tabla de interrupciones", 0
+msg_mmbda   db "    0040               256 (0K)    Datos de la BIOS", 0
+msg_mmkern  db "  SISTEMA   Núcleo de Hispa-DOS", 0
+msg_mmdev   db "Controladores de dispositivo:", 0
+msg_mmchr   db "  (carácter)", 0
+msg_mmblk   db " unidad(es) (bloque)", 0
+s_mmind     db "    ", 0
+s_mmfree    db "Libre", 0
+s_mmsys     db "SISTEMA", 0
+mm_t0       db "Libre", 0
+mm_t1       db "Sistema", 0
+mm_t2       db "Programa", 0
+mm_t3       db "Entorno", 0
+mm_t4       db "Datos", 0
+mm_types    dw mm_t0, mm_t1, mm_t2, mm_t3, mm_t4
 msg_files   db " archivo(s)", 0
 msg_bytes   db " bytes", 13, 10, 0
 msg_free    db " bytes libres", 13, 10, 0
@@ -3953,6 +4805,15 @@ c_first     resb 1
 c_last      resb 1
 c_next      resw 1
 ynbuf       resb 8
+mm_mode     resb 1
+mm_page     resb 1
+mm_lines    resb 1
+mm_found    resb 1
+mm_n        resw 1
+mm_sz       resd 1
+mm_name     resb 8
+mm_nbuf     resb 8
+mm_tab      resb MM_MAXN*12
 dt_yes      resb 1
 dt_any      resb 1
 dt_depth    resb 1
@@ -3968,6 +4829,8 @@ m_new       resb 14
 cbuf        resb CBUF_LEN
 echo_on     resb 1
 primary     resb 1
+al_tried    resb 1
+alias_buf   resb ALIAS_MAX
 no_auto     resb 1
 exit_after  resb 1
 errlvl      resb 1

@@ -6,7 +6,7 @@
 ;  Intro: entrar en la carpeta / ejecutar el programa / editar el texto.
 ;  Retroceso: carpeta superior.   F4 Editar   F5 Copiar   F6 Renombrar o mover
 ;  F7 Crear carpeta   F8 Borrar   F9 Cambiar de unidad   Esc o F10 Salir.
-;  Las operaciones se hacen con COMMAND.COM (COPY, REN, MD, DEL, RD) y EDIT.
+;  Las operaciones se hacen con COMMAND.COM (COPY, REN, MD, DEL, DELTREE) y EDITAR.
 ; =============================================================================
         cpu 386
         bits 16
@@ -1058,7 +1058,7 @@ comspec     db "C:\COMMAND.COM", 0
 s_slashc    db " /C ", 0
 s_all       db "*.*", 0
 s_dotdot    db "..", 0
-s_edit      db "EDIT ", 0
+s_edit      db "EDITAR ", 0
 s_copy      db "COPY ", 0
 s_ren       db "REN ", 0
 s_md        db "MD ", 0

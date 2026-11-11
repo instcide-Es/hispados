@@ -90,6 +90,7 @@ E_NOFILE        equ 2
 E_NOPATH        equ 3
 E_NOHANDLES     equ 4
 E_ACCESS        equ 5
+E_SHARE         equ 0x20            ; violación de compartición
 E_HANDLE        equ 6
 E_MCB           equ 7
 E_NOMEM         equ 8
@@ -3792,11 +3793,222 @@ dir_update:
         ret
 
 ; soltar una referencia a la SFT DI (al llegar a cero, guardar la entrada)
+
+; =============================================================================
+;  SHARE propio: bloqueos de zonas (INT 21h 5Ch) y modos de compartición al
+;  abrir (bits 4-6 del modo). Word y Excel lo necesitan.
+; =============================================================================
+NLOCKS      equ 32
+LK_LEN      equ 12                  ; SFT+1 (0 = libre), -, PSP, inicio, fin
+
+; DI = SFT recién abierta (modo en SFT_MODE) -> CF si choca con otra apertura
+; del mismo fichero. El modo «compatibilidad» (0) no niega nada a nadie.
+share_open:
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .ok
+        push ax
+        push bx
+        push cx
+        push si
+        mov si, sft_table
+        xor cx, cx                  ; índice
+.l:
+        cmp cl, NSFT
+        jae .free
+        cmp si, di
+        je .n
+        cmp byte [si+SFT_REF], 0
+        je .n
+        cmp byte [si+SFT_TYPE], T_FILE
+        jne .n
+        mov al, [si+SFT_DRV]
+        cmp al, [di+SFT_DRV]
+        jne .n
+        mov ax, [si+SFT_DIRC]
+        cmp ax, [di+SFT_DIRC]
+        jne .n
+        mov ax, [si+SFT_DIRI]
+        cmp ax, [di+SFT_DIRI]
+        jne .n
+        ; mismo fichero: ¿la otra apertura niega lo que pedimos, o al revés?
+        mov bl, [si+SFT_MODE]       ; su modo
+        mov bh, [di+SFT_MODE]       ; el nuestro
+        mov al, bl
+        mov ah, bh
+        call share_denies           ; su compartición contra nuestro acceso
+        jc .bad
+        mov al, bh
+        mov ah, bl
+        call share_denies           ; nuestra compartición contra su acceso
+        jc .bad
+.n:
+        add si, SFT_LEN
+        inc cl
+        cmp cl, SFT_N1              ; salto a la segunda tabla
+        jne .l
+        add si, 6                   ; cabecera del segundo bloque
+        jmp .l
+.free:
+        pop si
+        pop cx
+        pop bx
+        pop ax
+.ok:
+        clc
+        ret
+.bad:
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        stc
+        ret
+
+; AL = modo de quien comparte, AH = modo de quien accede -> CF si lo niega
+share_denies:
+        push ax
+        shr al, 4
+        and al, 7                   ; 1 todo, 2 escritura, 3 lectura, 4/0 nada
+        and ah, 3                   ; 0 leer, 1 escribir, 2 leer y escribir
+        cmp al, 1
+        je .no
+        cmp al, 2
+        jne .r
+        cmp ah, 0
+        jne .no                     ; niega escribir
+        jmp .yes
+.r:
+        cmp al, 3
+        jne .yes
+        cmp ah, 1
+        jne .no                     ; niega leer
+.yes:
+        pop ax
+        clc
+        ret
+.no:
+        pop ax
+        stc
+        ret
+
+; DI = SFT que se cierra del todo: quitar sus bloqueos
+share_close:
+        push ax
+        push bx
+        push cx
+        call sft_index
+        inc al
+        mov bx, lock_tab
+        mov cx, NLOCKS
+.l:
+        cmp [bx], al
+        jne .n
+        mov byte [bx], 0
+.n:
+        add bx, LK_LEN
+        loop .l
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; 5Ch: AL=0 bloquear / 1 desbloquear la zona CX:DX, longitud SI:DI, del
+; fichero BX. Choque -> error 21h (violación de bloqueo)
+fn_5c:
+        cmp byte [F_AL], 1
+        ja .func
+        mov bx, [F_BX]
+        call get_sft
+        jc ret_err
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .done                   ; dispositivos: no hay nada que bloquear
+        call sft_index
+        inc al
+        mov [lk_sft], al
+        mov ax, [F_CX]
+        shl eax, 16
+        mov ax, [F_DX]
+        mov [lk_start], eax
+        mov ax, [F_SI]
+        shl eax, 16
+        mov ax, [F_DI]
+        test eax, eax
+        jz .done
+        add eax, [lk_start]
+        jnc .e
+        mov eax, 0xFFFFFFFF
+.e:
+        mov [lk_end], eax
+        cmp byte [F_AL], 0
+        jne .unlock
+        ; bloquear: ninguna zona bloqueada puede solaparse
+        mov bx, lock_tab
+        mov cx, NLOCKS
+        xor si, si                  ; primera entrada libre
+.l:
+        cmp byte [bx], 0
+        jne .used
+        test si, si
+        jnz .n
+        mov si, bx
+        jmp .n
+.used:
+        mov eax, [lk_start]
+        cmp eax, [bx+8]
+        jae .n
+        mov eax, [bx+4]
+        cmp eax, [lk_end]
+        jb .viol
+.n:
+        add bx, LK_LEN
+        loop .l
+        test si, si
+        jz .full
+        mov al, [lk_sft]
+        mov [si], al
+        mov ax, [cur_psp]
+        mov [si+2], ax
+        mov eax, [lk_start]
+        mov [si+4], eax
+        mov eax, [lk_end]
+        mov [si+8], eax
+.done:
+        ret
+.unlock:
+        ; desbloquear: la misma zona, del mismo fichero
+        mov bx, lock_tab
+        mov cx, NLOCKS
+        mov al, [lk_sft]
+.ul:
+        cmp [bx], al
+        jne .un
+        mov edx, [lk_start]
+        cmp edx, [bx+4]
+        jne .un
+        mov edx, [lk_end]
+        cmp edx, [bx+8]
+        jne .un
+        mov byte [bx], 0
+        ret
+.un:
+        add bx, LK_LEN
+        loop .ul
+.viol:
+        mov ax, 0x21                ; violación de bloqueo
+        jmp ret_err
+.full:
+        mov ax, 0x24                ; búfer de compartición lleno
+        jmp ret_err
+.func:
+        mov ax, 1
+        jmp ret_err
+
 sft_release:
         cmp byte [di+SFT_REF], 0
         je .r
         dec byte [di+SFT_REF]
         jnz .r
+        call share_close
         cmp byte [di+SFT_TYPE], T_FILE
         jne .r
         test byte [di+SFT_FLAGS], 1
@@ -6839,6 +7051,13 @@ fn_3d:
         jc ret_err
         mov al, [F_AL]
         mov [di+SFT_MODE], al
+        call share_open             ; ¿choca con otra apertura?
+        jnc .shok
+        mov byte [di+SFT_REF], 0
+        mov ax, E_SHARE
+        jmp ret_err
+.shok:
+        mov al, [F_AL]
         test al, 3
         jz .ok
         cmp byte [di+SFT_TYPE], T_FILE
@@ -9735,6 +9954,11 @@ int2f:
 %endif
         cmp ax, 0x1302
         je i2f_1302
+        cmp ax, 0x1000              ; ¿SHARE instalado? -> sí (lo hace el núcleo)
+        jne .nsh
+        mov al, 0xFF
+        iret
+.nsh:
         cmp ah, 0x16
         je i2f_16
 int_iret:
@@ -9862,7 +10086,7 @@ fntable:
         dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
         dw fn_48, fn_49, fn_4a, fn_4b, fn_4c, fn_4d, fn_4e, fn_4f           ; 48
         dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_55, fn_56, fn_57 ; 50
-        dw fn_58, fn_59, fn_5a, fn_5b, fn_unsup, fn_5d, fn_unsup, fn_unsup ; 58
+        dw fn_58, fn_59, fn_5a, fn_5b, fn_5c, fn_5d, fn_unsup, fn_unsup ; 58
         dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_65, fn_66, fn_67 ; 60
         dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c                       ; 68
 
@@ -10175,6 +10399,10 @@ ld_end      resw 1
 ld_used     resw 1
 ld_next     resw 1
 cfg_line    resw 1
+lock_tab    resb NLOCKS*LK_LEN
+lk_sft      resb 1
+lk_start    resd 1
+lk_end      resd 1
 i13_cur     resd 1
 i13_halt    resd 1
 boot_clean  resb 1

@@ -3,13 +3,13 @@
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  INSTALAR unidad:   hace la unidad arrancable (SYS) y copia desde la unidad
-;                     de arranque las utilidades (*.COM), los drivers
-;                     (\DRIVERS), las herramientas (\BIN), AUTOEXEC.BAT,
+;                     de arranque la carpeta del sistema (\HISPADOS:
+;                     programas, drivers y ALIAS.INI), AUTOEXEC.BAT,
 ;                     CONFIG.SYS y LEEME.TXT. Si la unidad ya tiene un
 ;                     AUTOEXEC.BAT o un CONFIG.SYS, se respetan. En los que
 ;                     se copian, la letra de origen (A: o la USB) pasa a C:,
 ;                     la que tendrá el disco al arrancar desde él.
-;  Para preparar un disco nuevo: FDISK, reiniciar si hace falta, FORMAT
+;  Para preparar un disco nuevo: PARTIR, reiniciar si hace falta, FORMATEA
 ;  unidad: y después INSTALAR unidad:.
 ; =============================================================================
         cpu 386
@@ -93,9 +93,11 @@ start:
         ; 2) archivos
         mov si, msg_copying
         call puts
-        mov si, s_com
-        mov di, s_root
+        ; el sistema: \HISPADOS entero
         mov byte [keep], 0
+        mov si, s_hsp
+        mov di, s_hdir
+        call make_dir
         call copy_set
         mov si, s_autoexec
         mov di, s_root
@@ -109,14 +111,6 @@ start:
         mov byte [fix], 0
         mov si, s_leeme
         mov di, s_root
-        call copy_set
-        mov si, s_drivers
-        mov di, s_ddir
-        call make_dir
-        call copy_set
-        mov si, s_bin
-        mov di, s_bdir
-        call make_dir
         call copy_set
         mov si, msg_done
         call puts
@@ -381,26 +375,23 @@ ncopied     dw 0
 hs          dw 0
 hd          dw 0
 cs_dir      dw 0
-sys_path    db "A:\SYS.COM", 0
+sys_path    db "A:\HISPADOS\SISTEMA.COM", 0
 sys_tail    db 3, " "
 tail_drv    db "C:", 13
 s_root      db "\", 0
-s_ddir      db "\DRIVERS\", 0
-s_bdir      db "\BIN\", 0
-s_com       db "\*.COM", 0
+s_hdir      db "\HISPADOS\", 0
+s_hsp       db "\HISPADOS\*.*", 0
 s_autoexec  db "\AUTOEXEC.BAT", 0
 s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0
-s_drivers   db "\DRIVERS\*.*", 0
-s_bin       db "\BIN\*.*", 0
 msg_title   db "Instalador de Hispa-DOS", 13, 10, 0
 msg_usage   db "Uso: INSTALAR unidad:", 13, 10
             db "Instala Hispa-DOS en una unidad que ya tiene formato.", 13, 10
-            db "Para un disco nuevo: FDISK, FORMAT unidad: y después INSTALAR unidad:", 13, 10, 0
+            db "Para un disco nuevo: PARTIR, FORMATEA unidad: y después INSTALAR unidad:", 13, 10, 0
 msg_same    db "No se puede instalar sobre la unidad de arranque.", 13, 10, 0
 msg_nofmt   db "La unidad "
 msg_drv1    db "C: no existe o no tiene formato.", 13, 10
-            db "Prepárela con FDISK y FORMAT y vuelva a ejecutar INSTALAR.", 13, 10, 0
+            db "Prepárela con PARTIR y FORMATEA y vuelva a ejecutar INSTALAR.", 13, 10, 0
 msg_syserr  db "No se ha podido transferir el sistema (SYS).", 13, 10, 0
 msg_copying db "Copiando los archivos de Hispa-DOS...", 13, 10, 0
 msg_done    db "Hispa-DOS instalado en la unidad "

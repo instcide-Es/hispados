@@ -6,16 +6,16 @@ ECHO.
 ECHO  Instalador de Hispa-DOS
 ECHO  ======================
 ECHO.
-FDISK 2 /EMPTY
+PARTIR 2 /EMPTY
 IF ERRORLEVEL 2 GOTO nodisco
 IF ERRORLEVEL 1 GOTO ocupado
 ECHO.
 ECHO Se creara una particion en el disco duro y se le dara formato.
 ECHO Pulsa Ctrl+C para cancelar o cualquier tecla para seguir.
 PAUSE
-FDISK 2 /PRI
+PARTIR 2 /PRI
 IF ERRORLEVEL 1 GOTO error
-FORMAT D: /S /V:HISPADOS
+FORMATEA D: /S /V:HISPADOS
 IF ERRORLEVEL 1 GOTO error
 INSTALAR D:
 IF ERRORLEVEL 1 GOTO error
@@ -24,7 +24,7 @@ ECHO Hispa-DOS esta instalado. Quita la memoria USB y reinicia el ordenador.
 GOTO fin
 :ocupado
 ECHO El disco duro ya tiene particiones: no se toca nada.
-ECHO Si quieres instalar igualmente, usa FDISK 2 para borrarlas o para
+ECHO Si quieres instalar igualmente, usa PARTIR 2 para borrarlas o para
 ECHO hacer sitio, y vuelve a ejecutar INSTALL.
 GOTO fin
 :nodisco

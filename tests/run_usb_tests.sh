@@ -56,7 +56,7 @@ echo "-- arranque desde el disco duro --"
 check $T/l2.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "Bienvenido a Hispa-DOS"
 check $T/l2.txt " Directorio de C:\\"
-check $T/l2.txt "DRIVERS"
+check $T/l2.txt "HISPADOS"
 echo "-- INSTALL con el disco ya ocupado --"
 check $T/l3.txt "El disco duro ya tiene particiones: no se toca nada."
 P=$(mktemp --suffix=.img)

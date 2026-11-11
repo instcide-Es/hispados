@@ -46,8 +46,7 @@ def main():
         run('mmd', '-i', img, '::' + d)
     cp(os.path.join(B, 'KERNEL.SYS'), 'KERNEL.SYS')
     run('mattrib', '-i', img, '+h', '+s', '+r', '::KERNEL.SYS')
-    for f in ('COMMAND.COM', 'FDISK.COM', 'FORMAT.COM', 'PLAYWAV.COM', 'SYS.COM', 'KEYB.COM', 'INSTALAR.COM', 'EDIT.COM', 'GESTOR.COM', 'SYSINFO.COM'):
-        cp(os.path.join(B, f), f)
+    cp(os.path.join(B, 'COMMAND.COM'), 'COMMAND.COM')
     os.makedirs(os.path.join(B, 'usb'), exist_ok=True)
     for f in ('AUTOEXEC.BAT', 'CONFIG.SYS', 'INSTALL.BAT', 'LEEME.TXT'):
         txt = open(os.path.join('usb', f), encoding='utf-8').read()
@@ -55,14 +54,18 @@ def main():
         with open(dst, 'wb') as o:
             o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
         cp(dst, f)
-    cp(os.path.join(B, 'EDIT.COM'), 'EDITAR.COM')
-    cp(os.path.join(B, 'SYSINFO.COM'), 'INFO.COM')
-    md('DRIVERS')
-    for f in ('HSPXMS.SYS', 'HSPRAM.SYS', 'HSPSND.COM', 'HSPTEST.SYS', 'HSPUSB.SYS', 'HSPCD.SYS', 'HSPRATON.COM'):
-        cp(os.path.join(B, f), 'DRIVERS/' + f)
-    md('BIN')
-    for f in ('XMSTEST.COM', 'MCBWALK.COM', 'LOLTEST.COM', 'HELLO.COM', 'UPPER.COM'):
-        cp(os.path.join(B, f), 'BIN/' + f)
+    # el sistema en \HISPADOS: nombres en español (los clásicos en ALIAS.INI)
+    md('HISPADOS')
+    for src, dst in (('EDIT.COM', 'EDITAR.COM'), ('FDISK.COM', 'PARTIR.COM'),
+                     ('FORMAT.COM', 'FORMATEA.COM'), ('SYS.COM', 'SISTEMA.COM'),
+                     ('KEYB.COM', 'TECLADO.COM'), ('PLAYWAV.COM', 'SONAR.COM'),
+                     ('SYSINFO.COM', 'INFO.COM'), ('GESTOR.COM', 'GESTOR.COM'),
+                     ('INSTALAR.COM', 'INSTALAR.COM'), ('MOVER.COM', 'MOVER.COM'), ('ATRIBUTO.COM', 'ATRIBUTO.COM'), ('ARBOL.COM', 'ARBOL.COM'), ('BUSCAR.COM', 'BUSCAR.COM'), ('ORDENAR.COM', 'ORDENAR.COM'), ('PAGINAR.COM', 'PAGINAR.COM'), ('ELEGIR.COM', 'ELEGIR.COM'),
+                     ('ALIAS.INI', 'ALIAS.INI'),
+                     ('HSPXMS.SYS', 'HSPXMS.SYS'), ('HSPRAM.SYS', 'HSPRAM.SYS'),
+                     ('HSPSND.COM', 'HSPSND.COM'), ('HSPUSB.SYS', 'HSPUSB.SYS'),
+                     ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM')):
+        cp(os.path.join(B, src), 'HISPADOS/' + dst)
     print(OUT)
     mkfloppy()
 
