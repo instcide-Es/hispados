@@ -52,7 +52,9 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | `HSPRAM.SYS` (disco RAM) y `HSPTEST.SYS` (dispositivo de ejemplo) | ✅ |
 | Funciones FCB (DOS 1.x), SDA (5D06h/5D0Bh), EXEC 4B01h/4B03h, 26h/55h, 65h (país CP437), Ctrl+C | ✅ |
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
-| XMS/HMA, UMB, Windows 3.1 | 🔜 ver hoja de ruta |
+| `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
+| Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
+| UMB/EMS (HSPEMM), Windows 3.1, drivers de vídeo, sonido y red | 🔜 ver hoja de ruta |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
 ## Compilar y probar

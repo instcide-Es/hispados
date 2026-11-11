@@ -27,14 +27,14 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - ✅ `CONFIG.SYS`: `DEVICE=`, `DEVICEHIGH=`, `INSTALL=`, `SHELL=`, `SET`, `LASTDRIVE=` (y `FILES=`, `BUFFERS=`… aceptadas); `DOS=HIGH,UMB` pendiente.
 - ✅ Interfaz de drivers de DOS (`.SYS` de carácter y de bloque, *strategy*/*interrupt*, también en formato MZ), cabeceras y cadena de dispositivos reales; drivers propios `HSPRAM.SYS` y `HSPTEST.SYS`.
 - INT 2Fh multiplex completo.
-- **HSPXMS.SYS**: gestor XMS 3.0 (compatible con HIMEM), A20 y HMA.
+- ✅ **HSPXMS.SYS**: gestor XMS 3.0 (compatible con HIMEM), A20 y HMA; probado con XMSTEST y con MEM de FreeDOS. También funciona HIMEMX de FreeDOS.
 - **HSPEMM.EXE**: UMB y EMS 4.0 en modo V86 (como EMM386).
 
 ## 0.4 — Compatibilidad con Windows 3.1
 
 Windows 3.1 se apoya en estructuras internas de DOS, no solo en la API pública. Hay que implementarlas igual que las documenta la Interrupt List:
 
-- Lista de listas (52h) completa: DPB, SFT encadenadas, CDS, cabecera de dispositivos NUL.
+- ✅ Lista de listas (52h) con cadena de DPB, CDS de DOS 4+ y cabecera NUL; 1Fh y 32h. Pendiente: SFT en el formato de DOS encadenadas desde la lista de listas.
 - ✅ *Swappable Data Area* (5D06h/5D0Bh) con `ErrorMode`, `InDOS`, PSP y DTA en sus desplazamientos. Pendiente: secciones críticas INT 2Ah.
 - Funciones de red y redirector 5Dh/5Eh/5Fh y difusión de arranque de Windows (INT 2Fh 1605h/1606h).
 - Objetivos de prueba: Windows 3.1 en **modo estándar** primero (con HSPXMS.SYS) y después en **386 mejorado**, en QEMU y 86Box.

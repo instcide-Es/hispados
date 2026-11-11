@@ -19,6 +19,7 @@ send() { sleep "${2:-0.7}"; printf '%s\r' "$1"; }
   send "BIN\\HELLO.COM tres"
   send "MEM"
   send "NOEXISTE"
+  send "BIN\\LOLTEST"
   send "ECHO fin de la prueba"
   sleep 1.5
 } | timeout 25 qemu-system-i386 -display none -serial stdio -monitor none \
@@ -45,6 +46,8 @@ check "Hello from a .COM program! Args:[ uno dos]"
 check "Hello from a .COM program! Args:[ tres]"
 check "bytes largest executable program size"
 check "Bad command or file name"
+check "CDS A: A:\\ flags=4000"
+check "DPB drive A: spc=0001 bps=0200 maxclus=0B20"
 check "fin de la prueba"
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida / output ---"; cat "$LOG.txt"; fi
 rm -f "$LOG" "$LOG.txt"

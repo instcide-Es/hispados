@@ -38,10 +38,19 @@ $(B)/HSPRAM.SYS: drivers/hspram.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/HSPTEST.SYS: drivers/hsptest.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/HSPXMS.SYS: drivers/hspxms.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/XMSTEST.COM: tests/progs/xmstest.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
-        $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS
+        $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
+        $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM
 
 $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -64,6 +73,10 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mmd   -i $@ ::DRIVERS
 	mcopy -i $@ $(B)/HSPRAM.SYS ::DRIVERS/HSPRAM.SYS
 	mcopy -i $@ $(B)/HSPTEST.SYS ::DRIVERS/HSPTEST.SYS
+	mcopy -i $@ $(B)/HSPXMS.SYS ::DRIVERS/HSPXMS.SYS
+	mcopy -i $@ $(B)/XMSTEST.COM ::BIN/XMSTEST.COM
+	mcopy -i $@ $(B)/MCBWALK.COM ::BIN/MCBWALK.COM
+	mcopy -i $@ $(B)/LOLTEST.COM ::BIN/LOLTEST.COM
 
 # disco duro vacío de 64 MB para probar FDISK y FORMAT
 $(HDD): | $(B)
@@ -82,6 +95,7 @@ test: $(IMG)
 	tests/run_write_tests.sh $(IMG)
 	tests/run_batch_tests.sh $(IMG)
 	tests/run_config_tests.sh $(IMG)
+	tests/run_xms_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
 clean:

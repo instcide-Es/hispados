@@ -84,6 +84,9 @@ E_NOMORE        equ 18
 
 NPATH_MAX       equ 66
 PATHLEN         equ 68
+CDS_LEN         equ 0x58
+NCDS            equ 26
+DPB_LEN         equ 0x21
 SDA_LEN         equ 0x80
 %define indos     sda+0x01
 %define last_err  sda+0x04
@@ -431,6 +434,7 @@ drives_scan:
 .noext:
         mov al, [ndrives]
         mov [lol+0x20], al
+        call cds_all
         pop es
         popad
         ret
@@ -639,6 +643,8 @@ mount:
 .fixed:
         or byte [cur_drv+D_FLAGS], DF_MOUNTED
         call drv_store
+        mov al, [sel_drv]
+        call cds_update
         pop es
         popad
         clc
@@ -1378,6 +1384,182 @@ kputs:
 .d:
         pop si
         pop ax
+        ret
+
+; -----------------------------------------------------------------------------
+;  Estructuras internas de DOS 4+: CDS (carpeta actual por unidad) y DPB
+;  (parámetros de disco), enlazadas desde la lista de listas
+; -----------------------------------------------------------------------------
+; AL = unidad -> rellenar su DPB (si está montada) y su CDS
+cds_update:
+        pushad
+        push es
+        push ds
+        pop es
+        movzx bx, al
+        mov [cu_drv], al
+        ; DPB
+        mov di, bx
+        imul di, di, DPB_LEN
+        add di, dpb_tab
+        mov [di], al
+        cmp bx, NDRV
+        jae .nodpb
+        push bx
+        shl bx, 6
+        add bx, drv_tab
+        test byte [bx+D_FLAGS], DF_MOUNTED
+        jz .dpbpart
+        mov word [di+0x02], 512
+        mov ax, [bx+D_SPCW]
+        dec al
+        mov [di+0x04], al
+        ; desplazamiento = log2(sectores por clúster)
+        inc al
+        xor cl, cl
+.lg:
+        shr al, 1
+        jz .lgd
+        inc cl
+        jmp .lg
+.lgd:
+        mov [di+0x05], cl
+        mov ax, [bx+D_FATLBA]
+        mov [di+0x06], ax
+        mov ax, [bx+D_NFATS]
+        mov [di+0x08], al
+        mov ax, [bx+D_ROOTENT]
+        mov [di+0x09], ax
+        mov ax, [bx+D_DATALBA]
+        mov [di+0x0B], ax
+        mov ax, [bx+D_NCLUS]
+        inc ax
+        mov [di+0x0D], ax
+        mov ax, [bx+D_SPF]
+        mov [di+0x0F], ax
+        mov ax, [bx+D_ROOTLBA]
+        mov [di+0x11], ax
+        mov word [di+0x1F], 0xFFFF
+        mov ax, [bx+D_HINT]
+        mov [di+0x1D], ax
+.dpbpart:
+        mov al, [bx+D_UNIT]
+        mov [di+0x01], al
+        mov word [di+0x13], dev_disk
+        mov word [di+0x15], KSEG
+        mov al, [bx+D_MEDIA]
+        mov [di+0x17], al
+        mov byte [di+0x18], 0
+        pop bx
+.nodpb:
+        ; CDS
+        mov di, bx
+        imul di, di, CDS_LEN
+        add di, cds_tab
+        push di
+        mov cx, CDS_LEN
+        xor al, al
+        rep stosb
+        pop di
+        cmp bx, NDRV
+        jae .r
+        push bx
+        shl bx, 6
+        add bx, drv_tab
+        test byte [bx+D_FLAGS], DF_EXISTS
+        pop bx
+        jz .r
+        mov al, bl
+        add al, 'A'
+        mov [di], al
+        mov byte [di+1], ':'
+        mov byte [di+2], '\'
+        push di
+        add di, 3
+        mov si, bx
+        imul si, si, PATHLEN
+        add si, cur_paths
+.cp:
+        lodsb
+        stosb
+        test al, al
+        jnz .cp
+        pop di
+        mov word [di+0x43], 0x4000          ; unidad física
+        mov ax, bx
+        imul ax, ax, DPB_LEN
+        add ax, dpb_tab
+        mov [di+0x45], ax
+        mov word [di+0x47], KSEG
+        mov word [di+0x49], 0xFFFF
+        mov dword [di+0x4B], 0xFFFFFFFF
+        mov word [di+0x51], 2
+.r:
+        pop es
+        popad
+        ret
+
+; rehacer todas las CDS y DPB y enlazar los DPB
+cds_all:
+        pushad
+        xor al, al
+.l:
+        call cds_update
+        inc al
+        cmp al, NCDS
+        jb .l
+        ; cadena de DPB: solo las unidades que existen
+        mov word [lol], 0xFFFF
+        mov word [lol+2], 0xFFFF
+        mov si, lol
+        xor bx, bx
+.c:
+        cmp bx, NDRV
+        jae .ce
+        push bx
+        shl bx, 6
+        test byte [drv_tab+bx+D_FLAGS], DF_EXISTS
+        pop bx
+        jz .cn
+        mov ax, bx
+        imul ax, ax, DPB_LEN
+        add ax, dpb_tab
+        mov [si], ax
+        mov word [si+2], KSEG
+        mov si, ax
+        add si, 0x19
+        mov word [si], 0xFFFF
+        mov word [si+2], 0xFFFF
+.cn:
+        inc bx
+        jmp .c
+.ce:
+        popad
+        ret
+
+; ---- 1Fh / 32h: DPB de la unidad por defecto / de DL ----
+fn_1f:
+        mov byte [F_DL], 0
+fn_32:
+        mov al, [F_DL]
+        test al, al
+        jnz .d
+        mov al, [cur_drive]
+        inc al
+.d:
+        dec al
+        call select_drive
+        jc .bad
+        call cds_update
+        movzx bx, al
+        imul bx, bx, DPB_LEN
+        add bx, dpb_tab
+        mov word [F_DS], KSEG
+        mov [F_BX], bx
+        mov byte [F_AL], 0
+        ret
+.bad:
+        mov byte [F_AL], 0xFF
         ret
 
 ; -----------------------------------------------------------------------------
@@ -3778,7 +3960,6 @@ cfg_lastdrive:
         cmp al, 26
         ja .r
         mov [lastdrive], al
-        mov [lol+0x21], al
 .r:
         ret
 
@@ -4045,7 +4226,7 @@ cfg_device:
         shr ax, 4
         add ax, [dreq+0x10]
         sub ax, [ld_seg]
-        jbe .initerr
+        jbe .decline
         cmp ax, [ld_paras]
         ja .initerr
         cmp ax, [ld_used]
@@ -4104,6 +4285,13 @@ cfg_device:
         mov es, [ld_seg]
         mov bx, [ld_used]
         call mcb_resize
+        ret
+.decline:
+        ; el driver no quiere quedarse residente: se descarga sin mensaje
+        cmp word [ld_used], 0
+        jne .fin
+        mov es, [ld_seg]
+        call mcb_free
         ret
 .initerr:
         mov es, [ld_seg]
@@ -4969,6 +5157,8 @@ fn_3b:
         stosb
         test al, al
         jnz .c
+        mov al, [op_drv]
+        call cds_update
         ret
 fn_47:
         mov al, [F_DL]
@@ -7831,10 +8021,10 @@ fntable:
         dw fn_00, fn_01, fn_02, fn_unsup, fn_unsup, fn_unsup, fn_06, fn_07  ; 00
         dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_0f       ; 08
         dw fn_10, fn_11, fn_12, fn_13, fn_14, fn_15, fn_16, fn_17 ; 10
-        dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 18
+        dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_1f ; 18
         dw fn_unsup, fn_21, fn_22, fn_23, fn_24, fn_25, fn_26, fn_27 ; 20
         dw fn_28, fn_29, fn_2a, fn_set_ok, fn_2c, fn_set_ok, fn_nop, fn_2f ; 28
-        dw fn_30, fn_31, fn_unsup, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
+        dw fn_30, fn_31, fn_32, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
         dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
         dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
         dw fn_48, fn_49, fn_4a, fn_4b, fn_4c, fn_4d, fn_4e, fn_4f           ; 48
@@ -7900,11 +8090,11 @@ lol:        dd 0                    ; +00 DPB
             dw dev_con, KSEG        ; +0C CON
             dw 512                  ; +10 sector máximo
             dd 0                    ; +12 búferes
-            dd 0                    ; +16 CDS
+            dw cds_tab, KSEG        ; +16 CDS
             dd 0                    ; +1A FCB
             dw 0                    ; +1E
             db 0                    ; +20 unidades de bloque
-            db 5                    ; +21 LASTDRIVE
+            db 26                   ; +21 LASTDRIVE (entradas de la CDS)
 dev_nul:    dw dev_con, KSEG        ; +22 cabecera del dispositivo NUL
             dw 0x8004
             dw dev_strat, dev_intr_null
@@ -7931,6 +8121,11 @@ dev_com1:   dw dev_lpt1, KSEG
             dw 0x8000
             dw dev_strat, dev_intr_null
             db "COM1    "
+dev_disk:   dw 0xFFFF, 0xFFFF
+            dw 0x0802
+            dw dev_strat, dev_intr_null
+            db 26, "HSPDSK"
+            db 0
 dev_lpt1:   dw 0xFFFF, 0xFFFF
             dw 0xA0C0
             dw dev_strat, dev_intr_null
@@ -8007,6 +8202,7 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+cu_drv      resb 1
 fcb_ext     resb 1
 fcb_attr    resb 1
 fcb_off     resw 1
@@ -8058,6 +8254,8 @@ cfgl        resb 168
 setbuf      resb SET_MAX
 instbuf     resb INST_MAX
 cfgbuf      resb CFG_MAX
+cds_tab     resb CDS_LEN*NCDS
+dpb_tab     resb DPB_LEN*NCDS
 abs_err     resw 1
 fn_lo       resw 1
 dap         resb 16
