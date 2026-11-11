@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS KEYB.COM - distribución de teclado española (residente)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS KEYB.COM - distribución de teclado española (residente)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  KEYB SP | KEYB ES   teclado español (ñ, ç, ¡, ¿, º, ª, acentos con teclas
 ;                      muertas ´ ` ^ ¨, AltGr: @ # | \ [ ] { } ~ ¬)

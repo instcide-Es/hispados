@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  HSPTEST.SYS - driver de carácter de prueba (dispositivo HSPTEST$)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Al leerlo devuelve lo último que se le escribió (o un mensaje de prueba)
 ;  y después fin de fichero. Sirve para probar DEVICE= y la cadena de
@@ -20,7 +20,7 @@ header:
 req     dd 0
 pos     dw 0
 len     dw msg_end - buf
-buf     db "Controlador de prueba de HispaDOS: OK", 13, 10
+buf     db "Controlador de prueba de Hispa-DOS: OK", 13, 10
 msg_end:
         times 128 - (msg_end - buf) db 0
 BUFLEN  equ 128

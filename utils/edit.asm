@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS EDIT.COM (también EDITAR.COM) - editor de textos a pantalla completa
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS EDIT.COM (también EDITAR.COM) - editor de textos a pantalla completa
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  EDIT archivo       abre el archivo (o lo crea al guardar si no existe)
 ;
@@ -740,7 +740,7 @@ puts:
 
 msg_usage   db "Uso: EDIT archivo", 13, 10, 0
 msg_nomem   db "No hay memoria suficiente.", 13, 10, 0
-msg_title   db " HispaDOS EDIT - ", 0
+msg_title   db " Hispa-DOS EDIT - ", 0
 msg_line    db " Línea ", 0
 msg_col     db "  Col ", 0
 msg_mod     db "  [modificado]", 0

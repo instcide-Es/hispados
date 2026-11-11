@@ -56,7 +56,7 @@ Windows 3.1 se apoya en estructuras internas de DOS, no solo en la API pública.
 | Área | Driver | Notas |
 |---|---|---|
 | Vídeo | `HSPVBE.DRV` + VxD | Driver de pantalla de Windows 3.1 sobre VBE: alta resolución y color de 16/24/32 bits. |
-| Ratón | `HSPMOUSE.DRV` | Usa INT 33h de HispaDOS; puntero absoluto en máquinas virtuales. |
+| Ratón | `HSPMOUSE.DRV` | Usa INT 33h de Hispa-DOS; puntero absoluto en máquinas virtuales. |
 | Sonido | `HSPWAVE.DRV` | Driver MMSYSTEM (wave y MIDI por software) para HDA/AC'97. |
 | Red | `WINSOCK.DLL` (Winsock 1.1) | TCP/IP sobre los *packet drivers* de la fase 0.5, para navegadores y clientes de correo de la época. |
 
@@ -64,4 +64,4 @@ Herramientas previstas para el código Win16: **Open Watcom** (libre), que gener
 
 ## Arranque en PCs actuales (UEFI)
 
-Muchos PCs modernos ya no traen CSM (arranque de BIOS clásica). Para ellos se estudiará un cargador UEFI que prepare un entorno BIOS compatible (por ejemplo con SeaBIOS como CSM) antes de arrancar HispaDOS.
+Muchos PCs modernos ya no traen CSM (arranque de BIOS clásica). Para ellos se estudiará un cargador UEFI que prepare un entorno BIOS compatible (por ejemplo con SeaBIOS como CSM) antes de arrancar Hispa-DOS.

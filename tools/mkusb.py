@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Crea build/hispados-usb.img: imagen de disco para memorias USB.
 
-MBR de HispaDOS + una partición FAT16 activa que empieza en el sector 2048
+MBR de Hispa-DOS + una partición FAT16 activa que empieza en el sector 2048
 (alineada a 1 MB). La partición se formatea con mtools usando el sector de
-arranque FAT16 de HispaDOS. Grábala con Rufus (modo DD), balenaEtcher o dd.
+arranque FAT16 de Hispa-DOS. Grábala con Rufus (modo DD), balenaEtcher o dd.
 
-Creates the USB disk image (HispaDOS MBR + active FAT16 partition).
+Creates the USB disk image (Hispa-DOS MBR + active FAT16 partition).
 """
 import os, struct, subprocess, sys
 
@@ -56,13 +56,30 @@ def main():
             o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
         cp(dst, f)
     cp(os.path.join(B, 'EDIT.COM'), 'EDITAR.COM')
+    cp(os.path.join(B, 'SYSINFO.COM'), 'INFO.COM')
     md('DRIVERS')
-    for f in ('HSPXMS.SYS', 'HSPRAM.SYS', 'HSPSND.COM', 'HSPTEST.SYS', 'HSPUSB.SYS', 'HSPCD.SYS'):
+    for f in ('HSPXMS.SYS', 'HSPRAM.SYS', 'HSPSND.COM', 'HSPTEST.SYS', 'HSPUSB.SYS', 'HSPCD.SYS', 'HSPRATON.COM'):
         cp(os.path.join(B, f), 'DRIVERS/' + f)
     md('BIN')
     for f in ('XMSTEST.COM', 'MCBWALK.COM', 'LOLTEST.COM', 'HELLO.COM', 'UPPER.COM'):
         cp(os.path.join(B, f), 'BIN/' + f)
     print(OUT)
+    mkfloppy()
+
+def mkfloppy():
+    """Disquete para usar: el de las pruebas con CONFIG.SYS y AUTOEXEC.BAT
+    de uso normal (carpeta floppy/)."""
+    import shutil
+    out = os.path.join(B, 'hispados-disquete.img')
+    shutil.copy(os.path.join(B, 'hispados.img'), out)
+    os.makedirs(os.path.join(B, 'floppy'), exist_ok=True)
+    for f in ('CONFIG.SYS', 'AUTOEXEC.BAT'):
+        txt = open(os.path.join('floppy', f), encoding='utf-8').read()
+        dst = os.path.join(B, 'floppy', f)
+        with open(dst, 'wb') as o:
+            o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
+        run('mcopy', '-o', '-i', out, dst, '::' + f)
+    print(out)
 
 if __name__ == '__main__':
     main()

@@ -29,12 +29,12 @@ fail=0
 check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
 }
-echo "== HispaDOS SYS tests =="
+echo "== Hispa-DOS SYS tests =="
 check $T/l1.txt "Formato completado."
 check $T/l1.txt "Sistema transferido a la unidad C:"
 check $T/l1.txt "No se puede transferir el sistema a la unidad de arranque."
 check $T/l1.txt "COMMAND  COM"
-check $T/l2.txt "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt " El volumen de la unidad C es SINSYS"
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/l1.txt $T/l2.txt; fi
 rm -rf $T

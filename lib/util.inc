@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS - rutinas comunes de las utilidades (.COM)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS - rutinas comunes de las utilidades (.COM)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ; =============================================================================
 
 ; AL -> pantalla

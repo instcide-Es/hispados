@@ -1,4 +1,4 @@
-HispaDOS en memoria USB
+Hispa-DOS en memoria USB
 =======================
 
 Grabar la imagen
@@ -11,7 +11,7 @@ Arrancar
   Esc segun el fabricante). En equipos UEFI activa el modo "Legacy" o "CSM".
 
 Solo probar
-  HispaDOS arranca desde la memoria USB, que es la unidad C:.
+  Hispa-DOS arranca desde la memoria USB, que es la unidad C:.
 
 Instalar en el disco duro
   Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);

@@ -43,7 +43,7 @@ fail=0
 check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
 }
-echo "== HispaDOS hard disk tests =="
+echo "== Hispa-DOS hard disk tests =="
 check "$LOG.txt" "No hay particiones definidas."
 check "$LOG.txt" "Partición DOS primaria creada."
 check "$LOG.txt" "PRI DOS  FAT16"
@@ -57,7 +57,7 @@ check "$LOG.txt" "COMMAND  COM"
 check "$LOG.txt" " Directorio de A:\\DOCS"
 check "$LOG.txt" "Número de disco duro no válido."
 echo "-- arranque desde C: / boot from C: --"
-check "$LOG2.txt" "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check "$LOG2.txt" "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
 check "$LOG2.txt" "Versión de DOS notificada: 6.22"
 check "$LOG2.txt" " Directorio de C:\\"
 check "$LOG2.txt" "bytes del mayor programa ejecutable"

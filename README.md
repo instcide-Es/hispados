@@ -1,10 +1,10 @@
-# HispaDOS
+# Hispa-DOS
 
 **Sistema operativo libre compatible con MS-DOS 6.22, escrito desde cero, con drivers para hardware actual.**
 *A free, from-scratch MS-DOS 6.22 compatible operating system with drivers for modern hardware.* — [English below](#english)
 
 ```
-HispaDOS 0.1 - MS-DOS 6.22 compatible kernel
+Hispa-DOS 0.1 - MS-DOS 6.22 compatible kernel
 
 A:\>DIR
 
@@ -20,7 +20,7 @@ HELLOEXE EXE           368 11-11-26   4:37a
 ## Objetivos
 
 1. **Compatibilidad con MS-DOS 6.22**: la misma API (INT 21h, INT 2Fh, PSP, MCB, FCB, drivers `.SYS`), para que los programas de DOS funcionen sin cambios.
-2. **Compatibilidad con Windows 3.1** (modo estándar y 386 mejorado) sobre HispaDOS.
+2. **Compatibilidad con Windows 3.1** (modo estándar y 386 mejorado) sobre Hispa-DOS.
 3. **Drivers actuales** para DOS y para Windows 3.1: vídeo (VESA/VBE, alta resolución), ratón (PS/2 y USB), sonido (HDA/AC'97 y compatibilidad Sound Blaster) y red con TCP/IP.
 4. **Código abierto** y sin código de Microsoft: todo se escribe a partir de documentación pública (Ralf Brown's Interrupt List, especificación FAT, formato MZ, especificaciones de hardware).
 
@@ -89,7 +89,7 @@ Después el disco arranca solo.
 
 ### Memoria USB
 
-`make usb` crea `build/hispados-usb.img` (64 MB). Grábala con Rufus (modo DD), balenaEtcher o `dd` y arranca el PC desde la memoria (en equipos UEFI, con el modo *Legacy/CSM*). Sirve para **probar** HispaDOS sin tocar el disco duro o para **instalarlo** con `INSTALL`, que solo actúa sobre un disco duro vacío.
+`make usb` crea `build/hispados-usb.img` (64 MB). Grábala con Rufus (modo DD), balenaEtcher o `dd` y arranca el PC desde la memoria (en equipos UEFI, con el modo *Legacy/CSM*). Sirve para **probar** Hispa-DOS sin tocar el disco duro o para **instalarlo** con `INSTALL`, que solo actúa sobre un disco duro vacío.
 
 La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS (o UEFI con CSM) desde disquete o USB en modo disquete.
 
@@ -122,11 +122,11 @@ GPL-2.0-or-later. Ver [LICENSE](LICENSE).
 
 ## English
 
-HispaDOS is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
+Hispa-DOS is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
 
 It contains no Microsoft code: everything is implemented from public documentation.
 
-**Status (0.2, in progress):** boots from floppy or hard disk (own MBR and FAT12/FAT16 boot sectors); kernel with console, read-only FAT12/FAT16 with subdirectories, several drives (MBR partitions, LBA), file handles, MCB memory management and `.COM`/`.EXE` loading; `COMMAND.COM` with the basic internal commands and PATH search; `FDISK` and `FORMAT /S` to install HispaDOS on a hard disk. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
+**Status (0.2, in progress):** boots from floppy or hard disk (own MBR and FAT12/FAT16 boot sectors); kernel with console, read-only FAT12/FAT16 with subdirectories, several drives (MBR partitions, LBA), file handles, MCB memory management and `.COM`/`.EXE` loading; `COMMAND.COM` with the basic internal commands and PATH search; `FDISK` and `FORMAT /S` to install Hispa-DOS on a hard disk. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
 
 ```sh
 make && make run     # build the floppy image and boot it in QEMU

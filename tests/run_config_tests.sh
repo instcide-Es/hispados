@@ -31,9 +31,9 @@ fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
-echo "== HispaDOS CONFIG.SYS tests =="
+echo "== Hispa-DOS CONFIG.SYS tests =="
 check "HSPTEST.SYS: dispositivo de prueba instalado"
-check "Disco RAM de HispaDOS: 128 KB en la unidad C:"
+check "Disco RAM de Hispa-DOS: 128 KB en la unidad C:"
 check "Falta o no es válido A:\\NOEXISTE.SYS"
 check "Error en CONFIG.SYS, línea 8"
 check "Orden no reconocida en CONFIG.SYS"
@@ -41,11 +41,11 @@ check "Error en CONFIG.SYS, línea 9"
 check "Hello from a .COM program! Args:[ install]"
 check "CONFIGVAR=desde-config"
 check "COMSPEC=A:\\COMMAND.COM"
-check "Controlador de prueba de HispaDOS: OK"
+check "Controlador de prueba de Hispa-DOS: OK"
 check "hola driver"
 check " El volumen de la unidad C es HSPRAMDISK"
 check "1 archivo(s) copiado(s)"
-check "Welcome to HispaDOS!"
+check "Welcome to Hispa-DOS!"
 check "Hello from a relocated .EXE program!"
 check "bytes del mayor programa ejecutable"
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida ---"; cat "$LOG.txt"; fi

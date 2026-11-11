@@ -28,7 +28,7 @@ for CARD in hda ac97; do
         -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
   tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 | grep -v '^audio:' > $T/log.txt
   python3 tests/tools/audio.py check $T/out.wav > $T/audio.txt 2>&1
-  echo "== HispaDOS sound tests ($NAME) =="
+  echo "== Hispa-DOS sound tests ($NAME) =="
   for want in "$NAME" "Tono 440 Hz en $NAME" "Reproduciendo TEST.WAV (22050 Hz, 8 bits, mono) en $NAME" "Ya está instalado."; do
     if grep -qF -- "$want" $T/log.txt; then echo "  OK   $want"; else echo "  FAIL $want"; fail=1; fi
   done

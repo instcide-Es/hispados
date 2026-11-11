@@ -64,7 +64,7 @@ check() {
 checkn() {
   if grep -qF -- "$2" "$1"; then echo "  FAIL (no debía salir) $2"; fail=1; else echo "  OK   sin \"$2\""; fi
 }
-echo "== HispaDOS write tests =="
+echo "== Hispa-DOS write tests =="
 check "$LOG.txt" "linea uno"
 check "$LOG.txt" "linea dos"
 check "$LOG.txt" "1 archivo(s) copiado(s)"
@@ -82,7 +82,7 @@ check "$LOG.txt" "archivo(s) copiado(s)"
 check "$LOG.txt" " Directorio de C:\\DATOS"
 check "$LOG.txt" "HELLOEXE EXE"
 check "$LOG.txt" "UPPER    COM"
-check "$LOG.txt" "Welcome to HispaDOS!"
+check "$LOG.txt" "Welcome to Hispa-DOS!"
 check "$LOG.txt" "fin escritura"
 checkn "$LOG.txt" "Acceso denegado"
 check "$LOG2.txt" " Directorio de C:\\DATOS"
@@ -92,7 +92,7 @@ if fsck.fat -n "$FLP" > "$LOG.fsck" 2>&1; then echo "  OK   fsck.fat A: (FAT12)"
 PART=$(mktemp --suffix=.img)
 dd if="$HDD" of="$PART" bs=512 skip=63 status=none
 if fsck.fat -n "$PART" > "$LOG.fsck" 2>&1; then echo "  OK   fsck.fat C: (FAT16)"; else echo "  FAIL fsck.fat C:"; cat "$LOG.fsck"; fail=1; fi
-if mtype -i "$PART" ::DATOS/README.TXT 2>/dev/null | grep -q "Welcome to HispaDOS"; then echo "  OK   mtype C:\\DATOS\\README.TXT"; else echo "  FAIL mtype"; fail=1; fi
+if mtype -i "$PART" ::DATOS/README.TXT 2>/dev/null | grep -q "Welcome to Hispa-DOS"; then echo "  OK   mtype C:\\DATOS\\README.TXT"; else echo "  FAIL mtype"; fail=1; fi
 if cmp -s <(mtype -i "$PART" ::DATOS/K2.SYS 2>/dev/null) <(cat build/KERNEL.SYS build/KERNEL.SYS); then echo "  OK   K2.SYS = KERNEL.SYS + KERNEL.SYS"; else echo "  FAIL contenido de K2.SYS"; fail=1; fi
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida ---"; cat "$LOG.txt"; echo "--- arranque C: ---"; cat "$LOG2.txt"; fi
 rm -f "$FLP" "$HDD" "$PART" "$LOG" "$LOG2" "$LOG.txt" "$LOG2.txt" "$LOG.fsck"

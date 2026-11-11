@@ -29,7 +29,7 @@ fail=0
 check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
-echo "== HispaDOS XMS tests =="
+echo "== Hispa-DOS XMS tests =="
 check "HSPXMS 0.1: gestor XMS 3.0"
 check "HSPXMS: ya hay un gestor XMS instalado"
 checkn() { if grep -qF -- "$1" "$LOG.txt"; then echo "  FAIL (no debía salir) $1"; fail=1; else echo "  OK   sin \"$1\""; fi; }

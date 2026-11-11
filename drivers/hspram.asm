@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HSPRAM.SYS - disco RAM de HispaDOS (driver de bloque)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  HSPRAM.SYS - disco RAM de Hispa-DOS (driver de bloque)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  CONFIG.SYS:  DEVICE=C:\DRIVERS\HSPRAM.SYS [KB]     (16-512, por defecto 64)
 ;  Reserva la memoria convencional justo detrás del driver, le da formato
@@ -323,7 +323,7 @@ print_dec:
 
 kb          dw 0
 vlabel      db "HSPRAMDISK "
-msg1        db "Disco RAM de HispaDOS: $"
+msg1        db "Disco RAM de Hispa-DOS: $"
 msg2        db " KB en la unidad "
 msg_drive   db "?:", 13, 10, "$"
 file_end:

@@ -1,9 +1,9 @@
 @ECHO OFF
-REM Instalador de HispaDOS desde la memoria USB.
+REM Instalador de Hispa-DOS desde la memoria USB.
 REM Al arrancar desde USB, la memoria es el disco 1 (C:) y el disco duro
 REM interno es el disco 2. Solo se instala en un disco duro VACIO.
 ECHO.
-ECHO  Instalador de HispaDOS
+ECHO  Instalador de Hispa-DOS
 ECHO  ======================
 ECHO.
 FDISK 2 /EMPTY
@@ -17,7 +17,7 @@ FDISK 2 /PRI
 IF ERRORLEVEL 1 GOTO error
 FORMAT D: /S /V:HISPADOS
 IF ERRORLEVEL 1 GOTO error
-ECHO Copiando HispaDOS al disco duro...
+ECHO Copiando Hispa-DOS al disco duro...
 COPY C:\FDISK.COM D:\
 COPY C:\FORMAT.COM D:\
 COPY C:\PLAYWAV.COM D:\
@@ -32,7 +32,7 @@ COPY C:\DRIVERS\*.* D:\DRIVERS
 MD D:\BIN
 COPY C:\BIN\*.* D:\BIN
 ECHO.
-ECHO HispaDOS esta instalado. Quita la memoria USB y reinicia el ordenador.
+ECHO Hispa-DOS esta instalado. Quita la memoria USB y reinicia el ordenador.
 GOTO fin
 :ocupado
 ECHO El disco duro ya tiene particiones: no se toca nada.

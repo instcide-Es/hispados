@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS SYSINFO.COM - propiedades del sistema (cuadro informativo)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS SYSINFO.COM - propiedades del sistema (cuadro informativo)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Muestra: sistema, procesador, memoria, discos, almacenamiento, vídeo,
 ;  audio, USB, CD/DVD y red. Se ejecuta desde AUTOEXEC.BAT al arrancar.
@@ -728,11 +728,11 @@ crlf:
 
 title       db "                     Propiedades del sistema", 0
 logo        dw logo0, logo1, logo2, logo3, logo4, 0
-logo0       db "  ██   ██ ██ ███████ ██████   █████  ██████   ██████  ███████", 0
-logo1       db "  ██   ██ ██ ██      ██   ██ ██   ██ ██   ██ ██    ██ ██", 0
-logo2       db "  ███████ ██ ███████ ██████  ███████ ██   ██ ██    ██ ███████", 0
-logo3       db "  ██   ██ ██      ██ ██      ██   ██ ██   ██ ██    ██      ██", 0
-logo4       db "  ██   ██ ██ ███████ ██      ██   ██ ██████   ██████  ███████", 0
+logo0       db "  ██   ██ ██ ███████ ██████   █████        ██████   ██████  ███████", 0
+logo1       db "  ██   ██ ██ ██      ██   ██ ██   ██       ██   ██ ██    ██ ██", 0
+logo2       db "  ███████ ██ ███████ ██████  ███████ █████ ██   ██ ██    ██ ███████", 0
+logo3       db "  ██   ██ ██      ██ ██      ██   ██       ██   ██ ██    ██      ██", 0
+logo4       db "  ██   ██ ██ ███████ ██      ██   ██       ██████   ██████  ███████", 0
 s_empty     db 0
 
 l_os        db "Sistema", 0
@@ -745,7 +745,7 @@ l_audio     db "Audio", 0
 l_usb       db "USB", 0
 l_cd        db "CD/DVD", 0
 l_net       db "Red", 0
-v_os        db "HispaDOS 0.2 (DOS ", 0
+v_os        db "Hispa-DOS 0.2 (DOS ", 0
 v_os2       db ")", 0
 v_cpu486    db "386/486 (sin CPUID)", 0
 v_kbconv    db " KB convencional, ", 0

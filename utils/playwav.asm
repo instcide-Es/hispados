@@ -1,6 +1,6 @@
 ; =============================================================================
-;  PLAYWAV.COM - reproductor de sonido de HispaDOS (usa HSPSND)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  PLAYWAV.COM - reproductor de sonido de Hispa-DOS (usa HSPSND)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  PLAYWAV fichero.wav           reproduce un WAV PCM (8/16 bits, mono/estéreo)
 ;  PLAYWAV /TONE hz [ms]         tono de prueba (onda cuadrada, 22050 Hz)
@@ -373,7 +373,7 @@ puts:
 .r:
         ret
 
-msg_title   db "PLAYWAV 0.1 - HispaDOS", 13, 10, 0
+msg_title   db "PLAYWAV 0.1 - Hispa-DOS", 13, 10, 0
 msg_usage   db "Uso: PLAYWAV archivo.wav | PLAYWAV /TONE hz [ms]", 13, 10, 0
 msg_nodrv   db "HSPSND no está cargado.", 13, 10, 0
 msg_nocard  db "No hay tarjeta de sonido.", 13, 10, 0

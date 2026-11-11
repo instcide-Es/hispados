@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HSPXMS.SYS - gestor de memoria extendida XMS 3.0 de HispaDOS
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  HSPXMS.SYS - gestor de memoria extendida XMS 3.0 de Hispa-DOS
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  CONFIG.SYS:  DEVICE=C:\DRIVERS\HSPXMS.SYS
 ;  Implementa la especificación XMS 3.0 (funciones 00h-0Fh y 88h-8Fh).

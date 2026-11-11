@@ -5,7 +5,7 @@
 set -u
 cd "$(dirname "$0")/.."
 if [ ! -f tests/thirdparty/dl/edit/.ok ]; then
-  echo "== HispaDOS compatibility tests: omitida (ejecuta tests/thirdparty/fetch.sh) =="
+  echo "== Hispa-DOS compatibility tests: omitida (ejecuta tests/thirdparty/fetch.sh) =="
   exit 0
 fi
 tests/thirdparty/mkimg.sh > /dev/null
@@ -49,7 +49,7 @@ check() {
 checkn() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  FAIL (no debía salir) $1"; fail=1; else echo "  OK   sin \"$1\""; fi
 }
-echo "== HispaDOS compatibility tests (FreeDOS programs) =="
+echo "== Hispa-DOS compatibility tests (FreeDOS programs) =="
 checkn "Error reading NLS"
 check "alfa"
 check "---------------- LISTA.TXT"

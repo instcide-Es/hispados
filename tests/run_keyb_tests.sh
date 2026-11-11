@@ -36,7 +36,7 @@ k shift-k shift-e shift-y shift-b ret
 sleep 1.5
 kill $QP 2>/dev/null; wait $QP 2>/dev/null
 fail=0
-echo "== HispaDOS Spanish keyboard tests =="
+echo "== Hispa-DOS Spanish keyboard tests =="
 python3 - $T/ser.txt <<'EOF' || fail=1
 import sys
 t = open(sys.argv[1], 'rb').read().decode('cp437').replace('\r', '')

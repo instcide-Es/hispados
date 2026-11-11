@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS INSTALAR.COM - instalar HispaDOS en una unidad ya formateada
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS INSTALAR.COM - instalar Hispa-DOS en una unidad ya formateada
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  INSTALAR unidad:   hace la unidad arrancable (SYS) y copia desde la unidad
 ;                     de arranque las utilidades (*.COM), los drivers
@@ -360,17 +360,17 @@ s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0
 s_drivers   db "\DRIVERS\*.*", 0
 s_bin       db "\BIN\*.*", 0
-msg_title   db "Instalador de HispaDOS", 13, 10, 0
+msg_title   db "Instalador de Hispa-DOS", 13, 10, 0
 msg_usage   db "Uso: INSTALAR unidad:", 13, 10
-            db "Instala HispaDOS en una unidad que ya tiene formato.", 13, 10
+            db "Instala Hispa-DOS en una unidad que ya tiene formato.", 13, 10
             db "Para un disco nuevo: FDISK, FORMAT unidad: y después INSTALAR unidad:", 13, 10, 0
 msg_same    db "No se puede instalar sobre la unidad de arranque.", 13, 10, 0
 msg_nofmt   db "La unidad "
 msg_drv1    db "C: no existe o no tiene formato.", 13, 10
             db "Prepárela con FDISK y FORMAT y vuelva a ejecutar INSTALAR.", 13, 10, 0
 msg_syserr  db "No se ha podido transferir el sistema (SYS).", 13, 10, 0
-msg_copying db "Copiando los archivos de HispaDOS...", 13, 10, 0
-msg_done    db "HispaDOS instalado en la unidad "
+msg_copying db "Copiando los archivos de Hispa-DOS...", 13, 10, 0
+msg_done    db "Hispa-DOS instalado en la unidad "
 msg_drv2    db "C: (", 0
 msg_done2   db " archivos copiados). Ya puede arrancar desde ella.", 13, 10, 0
 

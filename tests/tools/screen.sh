@@ -33,6 +33,7 @@ while IFS= read -r line; do
     type) for ((i=0; i<${#arg}; i++)); do mon "sendkey $(keyname "${arg:$i:1}")"; sleep 0.05; done;;
     key)  mon "sendkey $arg"; sleep 0.2;;
     wait) sleep "$arg";;
+    mon)  mon "$arg"; sleep 0.3;;
     shot) mon "screendump $T/s.ppm"; sleep 0.5; convert $T/s.ppm "${OUT}_$arg.png";;
   esac
 done < "$SCRIPT"

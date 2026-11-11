@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS FORMAT.COM - dar formato FAT12/FAT16 a una unidad
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS FORMAT.COM - dar formato FAT12/FAT16 a una unidad
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  FORMAT unidad: [/S] [/V:etiqueta] [/Q] [/U] [/AUTOTEST]
 ;     /S         copiar el sistema (KERNEL.SYS y COMMAND.COM): disco de arranque
@@ -901,7 +901,7 @@ fs12        db "FAT12   "
 fs16        db "FAT16   "
 label       db "           "
 
-msg_title   db 13, 10, "HispaDOS FORMAT 0.2", 13, 10, 0
+msg_title   db 13, 10, "Hispa-DOS FORMAT 0.2", 13, 10, 0
 msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/Q] [/U] [/AUTOTEST]", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_ioerr   db "Error de escritura en el disco: formato interrumpido", 13, 10, 0

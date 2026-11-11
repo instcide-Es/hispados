@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS kernel (KERNEL.SYS)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS kernel (KERNEL.SYS)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Núcleo compatible con la API de MS-DOS 6.22 escrito desde cero a partir de
 ;  documentación pública (Ralf Brown's Interrupt List, especificación FAT,
@@ -8752,8 +8752,8 @@ shell_pb    dw 0
             dw shell_fcb, KSEG
             dw shell_fcb, KSEG
 
-msg_banner  db 13, 10, "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22", 13, 10
-            db "(C) 2026 colaboradores de HispaDOS - GPL-2.0 o posterior", 13, 10, 13, 10, 0
+msg_banner  db 13, 10, "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22", 13, 10
+            db "(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 13, 10, 0
 msg_fatbad  db "No se puede leer el sistema de archivos de la unidad de arranque", 13, 10, 0
 msg_noshell db 13, 10, "No se puede cargar el intérprete de órdenes: sistema detenido", 13, 10, 0
 msg_reshell db 13, 10, "Reiniciando el intérprete de órdenes...", 13, 10, 0

@@ -5,43 +5,48 @@
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
+BUS=${2:-ide}
 T=$(mktemp -d)
+L=C
+if [ "$BUS" = ahci ]; then
+  CDDEV="-device ahci,id=ahci -drive if=none,id=cd,file=$T/disco.iso,media=cdrom -device ide-cd,bus=ahci.0,drive=cd"
+fi
 cp "$IMG" $T/f.img
 printf 'DEVICE=A:\\DRIVERS\\HSPCD.SYS\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/iso/DOCS
-printf 'Hola desde el DVD de HispaDOS\r\n' > $T/iso/LEEME.TXT
+printf 'Hola desde el DVD de Hispa-DOS\r\n' > $T/iso/LEEME.TXT
 printf 'Fichero en una carpeta del DVD\r\n' > $T/iso/DOCS/DENTRO.TXT
 head -c 70000 /dev/urandom > $T/iso/GRANDE.BIN
 genisoimage -quiet -V DISCO_HISPA -o $T/disco.iso $T/iso 2>/dev/null
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 {
   sleep 5
-  send "LISTAR C:\\" 2
-  send "MOSTRAR C:\\LEEME.TXT"
-  send "CD C:\\DOCS"
-  send "MOSTRAR C:DENTRO.TXT"
-  send "COPIAR C:\\GRANDE.BIN A:\\" 3
-  send "BORRAR C:\\LEEME.TXT"
-  send "CREARDIR C:\\NUEVA"
+  send "LISTAR $L:\\" 2
+  send "MOSTRAR $L:\\LEEME.TXT"
+  send "CD $L:\\DOCS"
+  send "MOSTRAR $L:DENTRO.TXT"
+  send "COPIAR $L:\\GRANDE.BIN A:\\" 3
+  send "BORRAR $L:\\LEEME.TXT"
+  send "CREARDIR $L:\\NUEVA"
   send "SYSINFO" 3
 } | timeout 40 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file=$T/f.img,format=raw,if=floppy \
-      -drive file=$T/disco.iso,media=cdrom,if=ide,index=2 -boot a -no-reboot > $T/log 2>&1
+      ${CDDEV:--drive file=$T/disco.iso,media=cdrom,if=ide,index=2} -boot a -no-reboot > $T/log 2>&1
 tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
 fail=0
 check() {
   if grep -qF -- "$1" $T/log.txt; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
-echo "== HispaDOS CD/DVD tests =="
-check "HSPCD 0.1 - lectores de CD/DVD de HispaDOS"
+echo "== Hispa-DOS CD/DVD tests ($BUS) =="
+check "HSPCD 0.1 - lectores de CD/DVD de Hispa-DOS"
 check "Lector: QEMU DVD-ROM"
 check "Primera unidad de CD/DVD: C:"
-check " El volumen de la unidad C es DISCO_HISPA"
+check " El volumen de la unidad $L es DISCO_HISPA"
 check "LEEME    TXT"
 check "DOCS            <DIR>"
 check "GRANDE   BIN        70.000"
-check "Hola desde el DVD de HispaDOS"
+check "Hola desde el DVD de Hispa-DOS"
 check "Fichero en una carpeta del DVD"
 check "1 archivo(s) copiado(s)"
 check "Acceso denegado"

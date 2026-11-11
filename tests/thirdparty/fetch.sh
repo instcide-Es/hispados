@@ -1,5 +1,5 @@
 #!/bin/bash
-# Descarga programas libres de FreeDOS para probar la compatibilidad de HispaDOS.
+# Descarga programas libres de FreeDOS para probar la compatibilidad de Hispa-DOS.
 # No se incluyen en el repositorio: se guardan en tests/thirdparty/dl/ (ignorado).
 # Downloads free FreeDOS programs used only as a compatibility test suite.
 set -eu

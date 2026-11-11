@@ -1,0 +1,9 @@
+@ECHO OFF
+PROMPT $P$G
+PATH A:\;A:\BIN
+KEYB SP
+A:\DRIVERS\HSPRATON
+A:\DRIVERS\HSPSND
+SYSINFO
+ECHO.
+ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.

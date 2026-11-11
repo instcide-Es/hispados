@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS FDISK.COM - gestor de particiones de disco duro
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS FDISK.COM - gestor de particiones de disco duro
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  FDISK                 menú interactivo
 ;  FDISK [n] /STATUS     tabla de particiones del disco n (1 = primero)
@@ -8,7 +8,7 @@
 ;                        hay otra; sin tamaño usa todo el espacio libre
 ;  FDISK [n] /ACT:p      marcar activa la partición p
 ;  FDISK [n] /DEL:p      borrar la partición p
-;  FDISK [n] /MBR        escribir el código de arranque de HispaDOS en el MBR
+;  FDISK [n] /MBR        escribir el código de arranque de Hispa-DOS en el MBR
 ;  FDISK [n] /EMPTY      nivel de error 0 si el disco no tiene particiones,
 ;                        1 si tiene alguna, 2 si no existe (para instaladores)
 ;
@@ -1009,8 +1009,8 @@ types:
         db 0xFF
 tn_other    db "No DOS              ", 0
 
-msg_title   db 13, 10, "Programa de configuración del disco duro de HispaDOS 0.2", 13, 10
-            db "(C) 2026 colaboradores de HispaDOS - GPL-2.0 o posterior", 13, 10, 0
+msg_title   db 13, 10, "Programa de configuración del disco duro de Hispa-DOS 0.2", 13, 10
+            db "(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 0
 msg_nodisk  db "No hay discos duros.", 13, 10, 0
 msg_baddisk db "Número de disco duro no válido.", 13, 10, 0
 msg_badopt  db "Opción no válida. Use /STATUS /PRI[:MB] /ACT:n /DEL:n /MBR /EMPTY", 13, 10, 0

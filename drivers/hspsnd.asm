@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HSPSND.COM - driver de sonido de HispaDOS (residente)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  HSPSND.COM - driver de sonido de Hispa-DOS (residente)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Uso:  HSPSND          (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
 ;
@@ -1383,7 +1383,7 @@ puts:
 
 pci_bdf     dw 0
 tsr_end     dw 0
-msg_title   db "HSPSND 0.1 - controlador de sonido de HispaDOS", 13, 10, 0
+msg_title   db "HSPSND 0.1 - controlador de sonido de Hispa-DOS", 13, 10, 0
 msg_already db "Ya está instalado.", 13, 10, 0
 msg_ac97    db "Audio Intel AC'97 en E/S ", 0
 msg_vra     db ", frecuencia variable", 13, 10, 0

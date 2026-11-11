@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS - registro maestro de arranque (MBR) / Master Boot Record
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS - registro maestro de arranque (MBR) / Master Boot Record
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Se copia a 0000:0600, busca la partición activa, carga su sector de
 ;  arranque en 0000:7C00 (LBA si la BIOS lo admite, si no CHS) y salta a él
@@ -105,9 +105,9 @@ dap_lba:    dd 0, 0
 drive       db 0x80
 part        dw 0
 
-msg_noact   db "HispaDOS MBR: no active partition", 13, 10, 0
-msg_err     db "HispaDOS MBR: disk read error", 13, 10, 0
-msg_noos    db "HispaDOS MBR: missing operating system", 13, 10, 0
+msg_noact   db "Hispa-DOS MBR: no active partition", 13, 10, 0
+msg_err     db "Hispa-DOS MBR: disk read error", 13, 10, 0
+msg_noos    db "Hispa-DOS MBR: missing operating system", 13, 10, 0
 
         times 446 - ($ - $$) db 0
 table:

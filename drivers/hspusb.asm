@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HSPUSB.SYS - USB nativo de HispaDOS: controlador xHCI + memorias USB
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  HSPUSB.SYS - USB nativo de Hispa-DOS: controlador xHCI + memorias USB
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  CONFIG.SYS:  DEVICE=C:\DRIVERS\HSPUSB.SYS [/F] [/V]
 ;     /F  tomar el controlador aunque lo esté usando la BIOS (la BIOS dejará
@@ -1561,7 +1561,7 @@ opt_verbose db 0
 hcc1        dd 0
 cap_mb      dd 0
 fail_msg    dw 0
-msg_title   db "HSPUSB 0.1 - USB nativo de HispaDOS (xHCI)", 13, 10, 0
+msg_title   db "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)", 13, 10, 0
 msg_found   db "Controlador xHCI en ", 0
 msg_port    db "Dispositivo en el puerto ", 0
 msg_speed   db ", velocidad ", 0

@@ -1,4 +1,4 @@
-# HispaDOS - compilación / build
+# Hispa-DOS - compilación / build
 NASM  ?= nasm
 QEMU  ?= qemu-system-i386
 B      = build
@@ -66,6 +66,10 @@ $(B)/KEYB.COM: utils/keyb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPRATON.COM: drivers/hspraton.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/MOUSETST.COM: tests/progs/mousetst.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
@@ -74,7 +78,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/HSPCD.SYS
+        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM
 
 $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -110,6 +114,8 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/HSPSND.COM ::DRIVERS/HSPSND.COM
 	mcopy -i $@ $(B)/HSPUSB.SYS ::DRIVERS/HSPUSB.SYS
 	mcopy -i $@ $(B)/HSPCD.SYS ::DRIVERS/HSPCD.SYS
+	mcopy -i $@ $(B)/HSPRATON.COM ::DRIVERS/HSPRATON.COM
+	mcopy -i $@ $(B)/MOUSETST.COM ::BIN/MOUSETST.COM
 	mcopy -i $@ $(B)/XMSTEST.COM ::BIN/XMSTEST.COM
 	mcopy -i $@ $(B)/MCBWALK.COM ::BIN/MCBWALK.COM
 	mcopy -i $@ $(B)/LOLTEST.COM ::BIN/LOLTEST.COM
@@ -119,7 +125,7 @@ $(HDD): | $(B)
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 
 # imagen para memorias USB (arrancar o instalar)
-usb: $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(wildcard usb/*)
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(wildcard usb/* floppy/*)
 	python3 tools/mkusb.py
 
 run: $(IMG)
@@ -143,7 +149,9 @@ test: $(IMG) usb
 	tests/run_usbnative_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)
+	tests/run_cd_tests.sh $(IMG) ahci
 	tests/run_edit_tests.sh $(IMG)
+	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
 clean:

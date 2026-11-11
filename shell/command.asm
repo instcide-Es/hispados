@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS COMMAND.COM - intérprete de órdenes
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS COMMAND.COM - intérprete de órdenes
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;  Usa solo la API pública de INT 21h, así que también funciona sobre otros DOS.
 ; =============================================================================
         cpu 386
@@ -3557,7 +3557,7 @@ msg_envfull db "No queda espacio en el entorno", 13, 10, 0
 msg_nopath  db "Sin ruta", 13, 10, 0
 msg_nolabel db "No se encontró la etiqueta", 13, 10, 0
 msg_toodeep db "Demasiados archivos de proceso por lotes anidados", 13, 10, 0
-msg_vername db "HispaDOS versión 0.2", 0
+msg_vername db "Hispa-DOS versión 0.2", 0
 s_on        db "ON", 0
 s_off       db "OFF", 0
 s_not       db "NOT", 0
@@ -3571,9 +3571,9 @@ s_defprompt db "$P$G", 0
 s_autoexec  db "A:\AUTOEXEC.BAT", 0
 s_empty     db 0
 ; -----------------------------------------------------------------------------
-msg_hello   db 13, 10, "Intérprete de órdenes de HispaDOS 0.2", 13, 10
+msg_hello   db 13, 10, "Intérprete de órdenes de Hispa-DOS 0.2", 13, 10
             db "Escriba AYUDA para ver la lista de órdenes.", 13, 10, 13, 10, 0
-msg_ver     db 13, 10, "HispaDOS versión 0.2 (compatible con MS-DOS 6.22)", 13, 10
+msg_ver     db 13, 10, "Hispa-DOS versión 0.2 (compatible con MS-DOS 6.22)", 13, 10
             db "Versión de DOS notificada: ", 0
 msg_badcmd  db "Comando o nombre de archivo incorrecto", 13, 10, 0
 msg_execerr db "No se puede ejecutar el programa", 13, 10, 0

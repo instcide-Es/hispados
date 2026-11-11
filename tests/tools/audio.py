@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Utilidades de audio para las pruebas de HispaDOS.
+"""Utilidades de audio para las pruebas de Hispa-DOS.
 
   audio.py make  fichero.wav hz ms rate bits canales   -> genera un tono
   audio.py check grabacion.wav                         -> tramos con sonido

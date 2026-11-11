@@ -1,6 +1,6 @@
 #!/bin/bash
-# Crea build/compat.img (2,88 MB): HispaDOS + programas de FreeDOS en \FD
-# Builds build/compat.img with HispaDOS plus the FreeDOS test programs in \FD.
+# Crea build/compat.img (2,88 MB): Hispa-DOS + programas de FreeDOS en \FD
+# Builds build/compat.img with Hispa-DOS plus the FreeDOS test programs in \FD.
 set -eu
 cd "$(dirname "$0")/../.."
 DL=tests/thirdparty/dl

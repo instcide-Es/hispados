@@ -40,12 +40,12 @@ fail=0
 check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
 }
-echo "== HispaDOS INSTALAR and history tests =="
+echo "== Hispa-DOS INSTALAR and history tests =="
 check $T/l1.txt "Uso: INSTALAR unidad:"
 check $T/l1.txt "No se puede instalar sobre la unidad de arranque."
 check $T/l1.txt "Sistema transferido a la unidad C:"
-check $T/l1.txt "HispaDOS instalado en la unidad C:"
-check $T/l2.txt "HispaDOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l1.txt "Hispa-DOS instalado en la unidad C:"
+check $T/l2.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "KEYB     COM"
 check $T/l2.txt "INSTALAR COM"
 check $T/l2.txt "DRIVERS"

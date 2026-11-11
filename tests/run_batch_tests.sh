@@ -32,7 +32,7 @@ check() {
 checkn() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  FAIL (no debía salir) $1"; fail=1; else echo "  OK   sin \"$1\""; fi
 }
-echo "== HispaDOS batch tests =="
+echo "== Hispa-DOS batch tests =="
 check "Ejecutando AUTOEXEC.BAT"
 check "HISPA=funciona"
 check "COMSPEC=A:\\COMMAND.COM"

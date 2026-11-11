@@ -1,6 +1,6 @@
 ; =============================================================================
-;  HispaDOS GESTOR.COM - gestor de archivos a pantalla completa (estilo DOSSHELL)
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS GESTOR.COM - gestor de archivos a pantalla completa (estilo DOSSHELL)
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Flechas, RePág, AvPág, Inicio, Fin: moverse.  Una letra: saltar a ella.
 ;  Intro: entrar en la carpeta / ejecutar el programa / editar el texto.
@@ -1059,7 +1059,7 @@ s_md        db "MD ", 0
 s_del       db "DEL ", 0
 s_rd        db "RD ", 0
 s_crlf      db 13, 10, 0
-msg_title   db " HispaDOS - Gestor de archivos", 0
+msg_title   db " Hispa-DOS - Gestor de archivos", 0
 msg_dir     db " Carpeta: ", 0
 msg_dirtag  db "     <DIR>  ", 0
 msg_items   db "Elementos: ", 0

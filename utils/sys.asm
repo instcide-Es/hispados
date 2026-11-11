@@ -1,9 +1,9 @@
 ; =============================================================================
-;  HispaDOS SYS.COM - hacer arrancable una unidad ya formateada
-;  Copyright (C) 2026 HispaDOS contributors. GPL-2.0-or-later.
+;  Hispa-DOS SYS.COM - hacer arrancable una unidad ya formateada
+;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  SYS unidad:     copia KERNEL.SYS y COMMAND.COM desde la unidad de arranque
-;                  y escribe el código de arranque de HispaDOS (FAT12/FAT16),
+;                  y escribe el código de arranque de Hispa-DOS (FAT12/FAT16),
 ;                  conservando los parámetros (BPB) de la unidad.
 ; =============================================================================
         cpu 386
@@ -226,7 +226,7 @@ src_k       db "A:\KERNEL.SYS", 0
 src_c       db "A:\COMMAND.COM", 0
 dst_k       db "A:\KERNEL.SYS", 0
 dst_c       db "A:\COMMAND.COM", 0
-msg_title   db "HispaDOS SYS 0.2", 13, 10, 0
+msg_title   db "Hispa-DOS SYS 0.2", 13, 10, 0
 msg_usage   db "Uso: SYS unidad:", 13, 10, 0
 msg_same    db "No se puede transferir el sistema a la unidad de arranque.", 13, 10, 0
 msg_ioerr   db "Error al leer o escribir el disco.", 13, 10, 0
