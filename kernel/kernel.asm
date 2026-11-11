@@ -8154,6 +8154,23 @@ fn_4b:
         cmp eax, 0xFFFF
         ja .nomem_e
         mov [ex_min], ax
+        ; MINALLOC = MAXALLOC = 0: como MS-DOS, el programa recibe el bloque
+        ; libre mayor entero y la imagen se carga al final (el PSP queda al
+        ; principio). KRNL386.EXE de Windows 3.1x depende de ello: da por
+        ; libre la memoria que sigue al PSP.
+        mov byte [ex_high], 0
+        mov ax, [ex_hdr+0x0A]
+        or ax, [ex_hdr+0x0C]
+        jnz .exe_low
+        mov bx, 0xFFFF
+        call mcb_alloc                  ; falla: BX = bloque mayor
+        cmp bx, [ex_min]
+        jb .nomem
+        call mcb_alloc
+        jc .nomem
+        mov byte [ex_high], 1
+        jmp .gotexe
+.exe_low:
         mov eax, [ex_need]
         movzx ecx, word [ex_hdr+0x0C]
         add eax, ecx
@@ -8243,6 +8260,13 @@ fn_4b:
         mov [ex_sft+SFT_POS], eax
         mov ax, [ex_psp]
         add ax, 0x10
+        cmp byte [ex_high], 0
+        je .ld_low
+        mov ax, [ex_psp]                ; al final del bloque
+        add ax, [ex_size]
+        sub ax, [ex_need]
+        add ax, 0x10
+.ld_low:
         mov [ex_load], ax
         mov [ex_cur], ax
 .chunk:
@@ -9939,6 +9963,7 @@ ex_img      resd 1
 ex_need     resd 1
 ex_min      resw 1
 ex_load     resw 1
+ex_high     resb 1
 ex_cur      resw 1
 ex_cs       resw 1
 ex_ip       resw 1
