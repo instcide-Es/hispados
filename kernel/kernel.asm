@@ -7097,6 +7097,13 @@ fn_44:
         jnz .gm
         call mount
 .gm:
+        ; CD/DVD (ISO 9660): no es un disco FAT; como MS-DOS con MSCDEX,
+        ; la función no existe (DOSX de Windows usa entonces 512 bytes)
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .gfat
+        mov ax, 1
+        jmp ret_err
+.gfat:
         mov es, [F_DS]
         mov di, [F_DX]
         push di
