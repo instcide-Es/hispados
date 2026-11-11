@@ -65,6 +65,17 @@ E_EXISTS        equ 80
 E_CURDIR        equ 16
 E_NOTSAME       equ 17
 SFT_LEN         equ 0x3B
+SFT_N1          equ 5           ; entradas del primer bloque de la SFT
+; La SFT va en dos bloques, como en MS-DOS (5 entradas y el resto): los VxD
+; de Windows 3.11 recorren la cadena dando por hecho que hay al menos dos y
+; que ninguno esta vacio. La cabecera del segundo (6 octetos) queda entre la
+; entrada 4 y la 5: tras multiplicar el indice por SFT_LEN hay que saltarla.
+%macro SFT_GAP 1
+        cmp %1, SFT_N1*SFT_LEN
+        jb %%s
+        add %1, 6
+%%s:
+%endmacro
 NSFT            equ 40
 
 T_FREE          equ 0
@@ -153,6 +164,14 @@ ISO_ND          equ 24
 ; =============================================================================
         section .text
 start:
+        jmp short .go
+        db 0, 0
+        ; +04: en MS-DOS, este octeto del segmento de datos vale 0 o 1 e
+        ; identifica su disposicion interna; VSHARE.386 (Windows 3.11) lo mira
+        ; y, si lo reconoce, usa desplazamientos fijos de MS-DOS. Aqui no
+        ; valen: con otro valor, VSHARE no se carga y Windows sigue sin el.
+        db 0xFF
+.go:
         cli
         cld
         mov ax, KSEG
@@ -1104,8 +1123,16 @@ root_psp_init:
         mov word [es:0x50], 0x21CD
         mov byte [es:0x52], 0xCB
         ; SFT estáticas: CON, AUX(NUL), PRN(NUL)
-        mov dword [sft_hdr], 0xFFFFFFFF ; un solo bloque
-        mov word [sft_hdr+4], NSFT
+        ; dos bloques (ver SFT_GAP). El segundo se enlaza con otro segmento
+        ; que apunta al mismo sitio: DOSMGR busca el primer bloque que no esta
+        ; en el segmento del DOS, como los que crea FILES= en MS-DOS
+        mov word [sft_hdr], sft_hdr2 - 16
+        mov word [sft_hdr+2], KSEG + 1
+        mov word [sft_hdr+4], SFT_N1
+        mov dword [sft_hdr2], 0xFFFFFFFF
+        mov word [sft_hdr2+4], NSFT - SFT_N1
+        mov dword [sft_fcb], 0xFFFFFFFF
+        mov word [sft_fcb+4], 4
         mov byte [sft_table+SFT_REF], 3
         mov byte [sft_table+SFT_TYPE], T_CON
         mov byte [sft_table+SFT_LEN+SFT_REF], 1
@@ -3004,6 +3031,7 @@ get_sft:
         cmp di, NSFT
         jae .bad
         imul di, di, SFT_LEN
+        SFT_GAP di
         add di, sft_table
         cmp byte [di+SFT_REF], 0
         je .bad
@@ -3062,6 +3090,10 @@ sft_index:
         push cx
         mov ax, di
         sub ax, sft_table
+        cmp ax, SFT_N1*SFT_LEN
+        jb .b1
+        sub ax, 6
+.b1:
         xor dx, dx
         mov cx, SFT_LEN
         div cx
@@ -3078,6 +3110,10 @@ sft_alloc:
         je .ok
         add di, SFT_LEN
         inc al
+        cmp al, SFT_N1
+        jne .nb
+        add di, 6
+.nb:
         cmp al, NSFT
         jb .l
         mov ax, E_NOHANDLES
@@ -6456,6 +6492,41 @@ fn_set_ok:
         mov byte [F_AL], 0
         ret
 
+; ---- 2Bh / 2Dh: poner fecha y hora. No se cambia el reloj, pero los valores
+; se validan como en MS-DOS (AL=FFh si no valen): hay programas que detectan
+; DESQview con una fecha imposible (AX=2B01h, CX='DE', DX='SQ') y esperan FFh
+fn_2b:
+        mov cx, [F_CX]
+        mov dx, [F_DX]
+        cmp cx, 1980
+        jb fn_set_bad
+        cmp cx, 2099
+        ja fn_set_bad
+        cmp dh, 1
+        jb fn_set_bad
+        cmp dh, 12
+        ja fn_set_bad
+        cmp dl, 1
+        jb fn_set_bad
+        cmp dl, 31
+        ja fn_set_bad
+        jmp fn_set_ok
+fn_2d:
+        mov cx, [F_CX]
+        mov dx, [F_DX]
+        cmp ch, 23
+        ja fn_set_bad
+        cmp cl, 59
+        ja fn_set_bad
+        cmp dh, 59
+        ja fn_set_bad
+        cmp dl, 99
+        ja fn_set_bad
+        jmp fn_set_ok
+fn_set_bad:
+        mov byte [F_AL], 0xFF
+        ret
+
 ; ---- versión y varios ----
 fn_30:
         mov word [F_AX], DOS_MAJOR | (DOS_MINOR << 8)
@@ -7729,6 +7800,7 @@ fn_55:
         cmp bx, NSFT
         jae .ni
         imul bx, bx, SFT_LEN
+        SFT_GAP bx
         inc byte [sft_table+bx+SFT_REF]
 .ni:
         inc di
@@ -8651,6 +8723,7 @@ build_psp:
         cmp bx, NSFT
         jae .ni
         imul bx, bx, SFT_LEN
+        SFT_GAP bx
         inc byte [sft_table+bx+SFT_REF]
 .ni:
         inc di
@@ -8740,6 +8813,7 @@ do_term:
         cmp bx, NSFT
         jae .cn
         imul bx, bx, SFT_LEN
+        SFT_GAP bx
         push di
         lea di, [sft_table+bx]
         call sft_release
@@ -8883,6 +8957,7 @@ fcb_sft:
         cmp di, NSFT
         jae .bad
         imul di, di, SFT_LEN
+        SFT_GAP di
         add di, sft_table
         cmp byte [di+SFT_REF], 0
         je .bad
@@ -9644,6 +9719,15 @@ int2f:
         call trace_hex
         pop ax
         call trace_hex
+        cmp ah, 0x16                    ; avisos de Windows: tambien BX
+        jne .tnb
+        mov al, ':'
+        call ser_putc
+        mov al, bh
+        call trace_hex
+        mov al, bl
+        call trace_hex
+.tnb:
         mov al, '}'
         call ser_putc
         pop ax
@@ -9651,7 +9735,99 @@ int2f:
 %endif
         cmp ax, 0x1302
         je i2f_1302
+        cmp ah, 0x16
+        je i2f_16
 int_iret:
+        iret
+
+; INT 2Fh AH=16h: avisos de Windows en modo 386 mejorado. Con un DOS 5 o
+; posterior, el dispositivo DOSMGR de WIN386 exige que el DOS conteste:
+;   1605h  inicio: encadenar en ES:BX la estructura con los datos de instancia
+;   1606h  fin
+;   1607h  BX=0015h (DOSMGR), CX = subfuncion:
+;          0 consulta -> CX=1, DX=segmento del DOS, ES:BX -> tabla de variables
+;          1 parches pedidos en DX -> BX = los que el DOS da por hechos
+;          3 tamano de la CDS (DX=1) -> CX
+;          5 tamano del controlador de dispositivo ES:DI -> BX:CX
+;          con AX=B97Ch y DX=A2ABh como firma de respuesta (salvo en la 0)
+;          La 2 (quitar parches) y la 4 (datos que el DOS ya instancia) se
+;          dejan sin contestar, igual que hace MS-DOS 6.22: asi DOSMGR
+;          instancia el mismo la CDS, la SDA (INT 21h 5D06h), el enlace del
+;          ultimo bloque de la SFT y la lista de dispositivos.
+; Si no hay respuesta, DOSMGR solo acepta DOS 3.x y 4.x: "No se ha aceptado
+; esta version de MS-DOS".
+i2f_16:
+        cmp al, 0x05
+        je .init
+        cmp al, 0x06
+        je .exit
+        cmp al, 0x07
+        jne int_iret
+        cmp bx, 0x0015
+        jne int_iret
+        cmp cx, 5
+        je .q5
+        ja int_iret
+        push si
+        mov si, cx
+        shl si, 1
+        jmp [cs:si+.tab]
+.tab:   dw .q0, .q1, .no, .q3, .no
+.q0:
+        pop si
+        mov cx, 1
+        mov dx, cs
+        push cs
+        pop es
+        mov bx, win_vars
+        iret
+.q1:
+        ; el DOS no tiene el codigo que DOSMGR busca para parchear: se dan
+        ; por hechos todos menos el de las secciones criticas (bit 0), que
+        ; DOSMGR aplica con la lista (vacia) de win_vars
+        mov bx, dx
+        and bx, 0x001E
+        jmp short .ok
+.q3:
+        cmp dx, 1
+        jne .no
+        mov cx, CDS_LEN
+        jmp short .ok
+.ok:
+        mov ax, 0xB97C
+        mov dx, 0xA2AB
+.no:
+        pop si
+        iret
+.q5:
+        ; tamano del controlador de dispositivo de cabecera ES:DI -> BX:CX.
+        ; DOSMGR instancia CON entero; de los dispositivos del nucleo solo se
+        ; da la cabecera (su estado va en win_inst). De los demas no se sabe:
+        ; sin respuesta, DOSMGR lo calcula por su cuenta.
+        push ax
+        mov ax, es
+        cmp ax, KSEG
+        pop ax
+        jne int_iret
+        xor bx, bx
+        mov cx, 18
+        mov ax, 0xB97C
+        mov dx, 0xA2AB
+        iret
+.init:
+        test dl, 1                      ; DOSX (modo estandar): nada que hacer
+        jnz int_iret
+        mov byte [cs:win_active], 1
+        mov [cs:win_info+2], bx         ; encadenar con los anteriores
+        mov [cs:win_info+4], es
+        push cs
+        pop es
+        mov bx, win_info
+        iret
+.exit:
+        test dl, 1
+        jnz int_iret
+        mov byte [cs:win_active], 0
         iret
 
 ; INT 2Fh AX=1302h (DOS 3.2+): cambiar el manejador de disco de DOS.
@@ -9680,7 +9856,7 @@ fntable:
         dw fn_10, fn_11, fn_12, fn_13, fn_14, fn_15, fn_16, fn_17 ; 10
         dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_1f ; 18
         dw fn_unsup, fn_21, fn_22, fn_23, fn_24, fn_25, fn_26, fn_27 ; 20
-        dw fn_28, fn_29, fn_2a, fn_set_ok, fn_2c, fn_set_ok, fn_nop, fn_2f ; 28
+        dw fn_28, fn_29, fn_2a, fn_2b, fn_2c, fn_2d, fn_nop, fn_2f ; 28
         dw fn_30, fn_31, fn_32, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
         dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
         dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
@@ -9804,7 +9980,7 @@ lol:        dd 0                    ; +00 DPB
             dw 512                  ; +10 sector máximo
             dd 0                    ; +12 búferes
             dw cds_tab, KSEG        ; +16 CDS
-            dd 0                    ; +1A FCB
+            dw sft_fcb, KSEG        ; +1A SFT de los FCB
             dw 0                    ; +1E
             db 0                    ; +20 unidades de bloque
             db 26                   ; +21 LASTDRIVE (entradas de la CDS)
@@ -9881,6 +10057,34 @@ sda_list:   dw 2                    ; 5D0Bh: zonas de la SDA
             dw sda, KSEG, 0x0018
             dw sda + 0x18, KSEG, 0x8000 | (SDA_LEN - 0x18)
 tmp_count   dw 0
+
+; ---- Windows en modo 386 mejorado (INT 2Fh 1605h/1607h) ----
+win_active  db 0
+; estructura de inicio (Win386_Startup_Info)
+win_info:   db 3, 0                     ; version de la estructura
+            dd 0                        ; siguiente (el ES:BX recibido)
+            dd 0                        ; sin dispositivo virtual
+            dd 0
+            dw win_inst, KSEG           ; datos de instancia
+; datos propios de cada maquina virtual: {puntero, tamano}..., 0
+; (la CDS y la SDA las instancia DOSMGR; aqui, lo que solo conoce el nucleo)
+win_inst:   dw cur_paths, KSEG, PATHLEN*NDRV
+            dw col, KSEG, 4             ; consola: columna y tecla pendiente
+            dd 0
+            dw 0
+; tabla de variables del DOS para DOSMGR (desplazamientos en KSEG)
+win_vars:   db 6, 22                    ; version del DOS
+            dw win_tmpds                ; DS guardado al entrar en INT 21h
+            dw win_tmpbx                ; BX guardado al entrar en INT 21h
+            dw indos                    ; InDOS
+            dw win_userid               ; identificador de maquina
+            dw win_crit                 ; lista de parches de seccion critica
+            dw win_umbhead              ; ultimo MCB convencional
+win_tmpds   dw 0
+win_tmpbx   dw 0
+win_userid  dw 0
+win_crit    dw 0                        ; lista vacia
+win_umbhead dw 0xFFFF                   ; sin memoria superior
 
 ; =============================================================================
         section .bss
@@ -10061,7 +10265,9 @@ ex_rel      resd 1
             alignb 16
 ex_sft      resb SFT_LEN
 sft_hdr     resb 6                  ; siguiente bloque (dd) y entradas (dw)
-sft_table   resb SFT_LEN*NSFT
+sft_table   resb SFT_LEN*NSFT + 6    ; con la cabecera del segundo bloque
+sft_hdr2    equ sft_table + SFT_N1*SFT_LEN
+sft_fcb     resb 6 + SFT_LEN*4      ; SFT de los FCB (sin uso)
             alignb 16
 secbuf      resb 512
 fatsec      resb 512
