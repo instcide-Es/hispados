@@ -29,9 +29,11 @@ $(B)/HELLO.COM: tests/progs/hello.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/HELLOEXE.EXE: tests/progs/helloexe.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/UPPER.COM: tests/progs/upper.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
-        $(B)/HELLO.COM $(B)/HELLOEXE.EXE
+        $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM
 
 $(IMG): $(B)/boot.bin $(FILES) tests/disk/README.TXT tests/disk/DOCS/INFO.TXT
 	rm -f $@
@@ -45,6 +47,7 @@ $(IMG): $(B)/boot.bin $(FILES) tests/disk/README.TXT tests/disk/DOCS/INFO.TXT
 	mcopy -i $@ tests/disk/DOCS/INFO.TXT ::DOCS/INFO.TXT
 	mmd   -i $@ ::BIN
 	mcopy -i $@ $(B)/HELLO.COM ::BIN/HELLO.COM
+	mcopy -i $@ $(B)/UPPER.COM ::BIN/UPPER.COM
 	mcopy -i $@ $(B)/HELLOEXE.EXE ::HELLOEXE.EXE
 
 # disco duro vacío de 64 MB para probar FDISK y FORMAT
@@ -52,15 +55,16 @@ $(HDD): | $(B)
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 
 run: $(IMG)
-	$(QEMU) -drive file=$(IMG),format=raw,if=floppy -boot a
+	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy -boot a
 
 run-hdd: $(IMG) $(HDD)
-	$(QEMU) -drive file=$(IMG),format=raw,if=floppy \
+	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy \
 	        -drive file=$(HDD),format=raw,if=ide -boot a
 
 test: $(IMG)
 	tests/run_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
+	tests/run_write_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)

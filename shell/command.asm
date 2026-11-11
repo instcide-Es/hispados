@@ -33,7 +33,9 @@ main_loop:
         movzx bx, byte [inbuf+1]
         mov byte [inbuf+2+bx], 0
         mov si, inbuf+2
-        call execute_line
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
         jmp main_loop
 
 ; -----------------------------------------------------------------------------
@@ -162,6 +164,16 @@ cmd_table:
         dw n_help, do_help
         dw n_rem, do_rem
         dw n_exit, do_exit
+        dw n_copy, do_copy
+        dw n_del, do_del
+        dw n_erase, do_del
+        dw n_ren, do_ren
+        dw n_rename, do_ren
+        dw n_md, do_md
+        dw n_mkdir, do_md
+        dw n_rd, do_rd
+        dw n_rmdir, do_rd
+        dw n_pause, do_pause
         dw 0, 0
 
 n_ver   db "VER", 0
@@ -179,6 +191,16 @@ n_vol   db "VOL", 0
 n_help  db "HELP", 0
 n_rem   db "REM", 0
 n_exit  db "EXIT", 0
+n_copy  db "COPY", 0
+n_del   db "DEL", 0
+n_erase db "ERASE", 0
+n_ren   db "REN", 0
+n_rename db "RENAME", 0
+n_md    db "MD", 0
+n_mkdir db "MKDIR", 0
+n_rd    db "RD", 0
+n_rmdir db "RMDIR", 0
+n_pause db "PAUSE", 0
 
 ; -----------------------------------------------------------------------------
 ;  Órdenes internas (SI = argumentos)
@@ -1101,6 +1123,1070 @@ putnum_w:
         pop eax
         ret
 
+
+; -----------------------------------------------------------------------------
+;  Tuberías ("|") y redirecciones ("<", ">", ">>")
+; -----------------------------------------------------------------------------
+; SI = línea; [pl_in] = fichero de entrada heredado de la tubería (0 = ninguno)
+run_line:
+        mov di, si
+.f:
+        mov al, [di]
+        test al, al
+        jz .simple
+        cmp al, '|'
+        je .pipe
+        inc di
+        jmp .f
+.simple:
+        mov word [pl_out], 0
+        jmp run_simple
+.pipe:
+        mov byte [di], 0
+        inc di
+        push di
+        ; nombre del fichero temporal según la profundidad
+        movzx bx, byte [pl_depth]
+        inc byte [pl_depth]
+        imul bx, bx, 16
+        add bx, pipe_names
+        push bx
+        mov ah, 0x19
+        int 0x21
+        add al, 'A'
+        mov [bx], al
+        mov [pl_out], bx
+        call run_simple
+        pop bx
+        pop si
+        push word [pl_in]
+        mov [pl_in], bx
+        push bx
+        call run_line
+        pop dx
+        mov ah, 0x41
+        int 0x21
+        pop word [pl_in]
+        dec byte [pl_depth]
+        ret
+
+; SI = orden sin tuberías
+run_simple:
+        mov word [r_in], 0
+        mov word [r_out], 0
+        mov byte [r_app], 0
+        mov di, si
+.scan:
+        mov al, [di]
+        test al, al
+        jz .done
+        cmp al, '<'
+        je .in
+        cmp al, '>'
+        je .out
+        inc di
+        jmp .scan
+.in:
+        mov byte [di], ' '
+        inc di
+        mov bx, rin_name
+        mov [r_in], bx
+        call .name
+        jmp .scan
+.out:
+        mov byte [di], ' '
+        inc di
+        cmp byte [di], '>'
+        jne .o1
+        mov byte [di], ' '
+        inc di
+        mov byte [r_app], 1
+.o1:
+        mov bx, rout_name
+        mov [r_out], bx
+        call .name
+        jmp .scan
+; copiar el nombre que sigue a DI en BX y borrarlo de la línea
+.name:
+        cmp byte [di], ' '
+        jne .n1
+        inc di
+        jmp .name
+.n1:
+        mov al, [di]
+        test al, al
+        jz .ne
+        cmp al, ' '
+        je .ne
+        cmp al, '<'
+        je .ne
+        cmp al, '>'
+        je .ne
+        mov [bx], al
+        inc bx
+        mov byte [di], ' '
+        inc di
+        jmp .n1
+.ne:
+        mov byte [bx], 0
+        ret
+.done:
+        ; quitar los espacios que han dejado las redirecciones al final
+.trim:
+        cmp di, si
+        jbe .trimd
+        cmp byte [di-1], ' '
+        jne .trimd
+        dec di
+        mov byte [di], 0
+        jmp .trim
+.trimd:
+        ; la tubería manda si no hay redirección explícita
+        cmp word [r_in], 0
+        jne .ri
+        mov ax, [pl_in]
+        mov [r_in], ax
+.ri:
+        cmp word [r_out], 0
+        jne .ro
+        mov ax, [pl_out]
+        mov [r_out], ax
+.ro:
+        push si
+        call redir_setup
+        pop si
+        jc .bad
+        call execute_line
+        call redir_restore
+        ret
+.bad:
+        call redir_restore
+        mov si, msg_redir
+        jmp puts
+
+redir_setup:
+        mov word [sv_in], 0xFFFF
+        mov word [sv_out], 0xFFFF
+        mov dx, [r_in]
+        test dx, dx
+        jz .noin
+        mov ax, 0x3D00
+        int 0x21
+        jc .err
+        mov bx, 0
+        call swap_handle
+        mov [sv_in], ax
+.noin:
+        mov dx, [r_out]
+        test dx, dx
+        jz .ok
+        cmp byte [r_app], 0
+        je .create
+        mov ax, 0x3D01
+        int 0x21
+        jc .create
+        push ax
+        mov bx, ax
+        mov ax, 0x4202
+        xor cx, cx
+        xor dx, dx
+        int 0x21
+        pop ax
+        jmp .gotout
+.create:
+        mov dx, [r_out]
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .err
+.gotout:
+        mov bx, 1
+        call swap_handle
+        mov [sv_out], ax
+.ok:
+        clc
+        ret
+.err:
+        stc
+        ret
+
+; AX = handle nuevo, BX = handle estándar -> AX = copia del antiguo
+swap_handle:
+        push cx
+        push dx
+        mov dx, ax
+        push bx
+        mov ah, 0x45
+        int 0x21
+        pop bx
+        push ax
+        mov cx, bx
+        mov bx, dx
+        mov ah, 0x46
+        int 0x21
+        mov bx, dx
+        mov ah, 0x3E
+        int 0x21
+        pop ax
+        pop dx
+        pop cx
+        ret
+
+redir_restore:
+        mov bx, [sv_out]
+        cmp bx, 0xFFFF
+        je .i
+        mov cx, 1
+        mov ah, 0x46
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+        mov word [sv_out], 0xFFFF
+.i:
+        mov bx, [sv_in]
+        cmp bx, 0xFFFF
+        je .r
+        xor cx, cx
+        mov ah, 0x46
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+        mov word [sv_in], 0xFFFF
+.r:
+        ret
+
+; -----------------------------------------------------------------------------
+;  Utilidades de rutas
+; -----------------------------------------------------------------------------
+; SI -> palabra en DI (ASCIIZ), SI avanza; CF si no hay
+get_tok:
+        call skip_sp
+        cmp byte [si], 0
+        je .none
+.l:
+        lodsb
+        test al, al
+        jz .e0
+        cmp al, ' '
+        je .e
+        cmp al, 9
+        je .e
+        stosb
+        jmp .l
+.e0:
+        dec si
+.e:
+        mov byte [di], 0
+        clc
+        ret
+.none:
+        mov byte [di], 0
+        stc
+        ret
+
+; SI = ruta -> CF=1 si tiene comodines
+has_wild:
+        push si
+.l:
+        lodsb
+        test al, al
+        jz .no
+        cmp al, '*'
+        je .yes
+        cmp al, '?'
+        je .yes
+        jmp .l
+.yes:
+        pop si
+        stc
+        ret
+.no:
+        pop si
+        clc
+        ret
+
+; SI = ruta -> DI = su parte de carpeta ("A:\DOCS\", "A:", "")
+path_prefix:
+        push si
+        push di
+        mov bx, di
+.c:
+        lodsb
+        stosb
+        test al, al
+        jz .e
+        cmp al, '\'
+        je .m
+        cmp al, ':'
+        jne .c
+.m:
+        mov bx, di
+        jmp .c
+.e:
+        mov byte [bx], 0
+        pop di
+        pop si
+        ret
+
+; DI = destino <- SI (prefijo) + BX (nombre)
+join_path:
+        push si
+.a:
+        lodsb
+        test al, al
+        jz .b
+        stosb
+        jmp .a
+.b:
+        mov si, bx
+.c:
+        lodsb
+        stosb
+        test al, al
+        jnz .c
+        pop si
+        ret
+
+; SI = ruta: añadir "\*.*" (o "*.*" tras "\" o ":")
+append_all:
+        push si
+.e:
+        lodsb
+        test al, al
+        jnz .e
+        dec si
+        mov di, si
+        mov al, [di-1]
+        cmp al, '\'
+        je .a
+        cmp al, ':'
+        je .a
+        mov byte [di], '\'
+        inc di
+.a:
+        mov si, s_all
+.c:
+        lodsb
+        stosb
+        test al, al
+        jnz .c
+        pop si
+        ret
+
+; SI = ruta -> CF=0 si es un directorio existente
+is_dir:
+        push si
+        push di
+        mov di, t_buf
+        mov ah, 0x60
+        int 0x21
+        jc .no
+        mov si, t_buf
+        call has_wild
+        jc .no
+.e:
+        lodsb
+        test al, al
+        jnz .e
+        cmp byte [si-2], '\'
+        je .yes
+        mov dx, dta2
+        mov ah, 0x1A
+        int 0x21
+        mov dx, t_buf
+        mov cx, 0x16
+        mov ah, 0x4E
+        int 0x21
+        jc .no
+        test byte [dta2+0x15], 0x10
+        jz .no
+.yes:
+        pop di
+        pop si
+        clc
+        ret
+.no:
+        pop di
+        pop si
+        stc
+        ret
+
+; SI, DI = rutas -> CF=1 (y aviso) si son el mismo fichero
+same_file:
+        push si
+        push di
+        push di
+        mov di, t_buf
+        mov ah, 0x60
+        int 0x21
+        pop si
+        mov di, t_buf2
+        mov ah, 0x60
+        int 0x21
+        mov si, t_buf
+        mov di, t_buf2
+.c:
+        mov al, [si]
+        cmp al, [di]
+        jne .diff
+        inc si
+        inc di
+        test al, al
+        jnz .c
+        mov si, msg_self
+        call puts
+        pop di
+        pop si
+        stc
+        ret
+.diff:
+        pop di
+        pop si
+        clc
+        ret
+
+msg_required:
+        mov si, msg_reqparam
+        jmp puts
+
+; -----------------------------------------------------------------------------
+;  COPY origen [destino]
+; -----------------------------------------------------------------------------
+do_copy:
+        mov di, c_src
+        call get_tok
+        jc msg_required
+        mov byte [c_nodst], 0
+        mov di, c_dst
+        call get_tok
+        jnc .hd
+        mov word [c_dst], '.'
+        mov byte [c_nodst], 1
+.hd:
+        mov dword [c_count], 0
+        mov byte [c_open], 0
+        ; ¿concatenación A+B[+C...]?
+        mov si, c_src
+.plus:
+        lodsb
+        test al, al
+        jz .noplus
+        cmp al, '+'
+        jne .plus
+        jmp do_concat
+.noplus:
+        ; ¿origen dispositivo CON?
+        mov si, c_src
+        mov ax, 0x3D00
+        mov dx, si
+        int 0x21
+        jc .notdev
+        mov bx, ax
+        mov ax, 0x4400
+        int 0x21
+        push dx
+        mov ah, 0x3E
+        int 0x21
+        pop dx
+        test dl, 0x80
+        jz .notdev
+        jmp .device
+.notdev:
+        mov si, c_src
+        call is_dir
+        jc .nd
+        mov si, c_src
+        call append_all
+.nd:
+        mov si, c_src
+        mov di, c_pre
+        call path_prefix
+        mov byte [c_dstdir], 0
+        mov si, c_dst
+        call is_dir
+        jc .nd2
+        mov byte [c_dstdir], 1
+.nd2:
+        mov si, c_src
+        call has_wild
+        setc [c_wild]
+        call set_dta
+        mov dx, c_src
+        xor cx, cx
+        mov ah, 0x4E
+        int 0x21
+        jnc .loop
+        mov si, msg_nofile
+        call puts
+        jmp .summary
+.loop:
+        mov si, c_pre
+        mov bx, dta+0x1E
+        mov di, c_spath
+        call join_path
+        cmp byte [c_wild], 0
+        je .nw
+        mov si, c_spath
+        call puts
+        call crlf
+.nw:
+        cmp byte [c_dstdir], 0
+        je .tofile
+        ; destino carpeta: destino\nombre
+        mov si, c_dst
+        mov di, c_dpre
+.dp:
+        lodsb
+        stosb
+        test al, al
+        jnz .dp
+        dec di
+        mov al, [di-1]
+        cmp al, '\'
+        je .dp2
+        cmp al, ':'
+        je .dp2
+        mov byte [di], '\'
+        inc di
+        mov byte [di], 0
+.dp2:
+        mov si, c_dpre
+        mov bx, dta+0x1E
+        mov di, c_dpath
+        call join_path
+        mov si, c_spath
+        mov di, c_dpath
+        call same_file
+        jc .next
+        mov dx, c_dpath
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .cerr
+        mov [c_dh], ax
+        call copy_one
+        mov bx, [c_dh]
+        mov ah, 0x3E
+        int 0x21
+        jmp .next
+.tofile:
+        cmp byte [c_open], 0
+        jne .append
+        mov si, c_spath
+        mov di, c_dst
+        call same_file
+        jc .next
+        mov dx, c_dst
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .cerr
+        mov [c_dh], ax
+        mov byte [c_open], 1
+.append:
+        call copy_one
+.next:
+        call set_dta
+        mov ah, 0x4F
+        int 0x21
+        jnc .loop
+        jmp .close
+.cerr:
+        mov si, msg_cantcreate
+        call puts
+.close:
+        cmp byte [c_open], 0
+        je .summary
+        mov bx, [c_dh]
+        mov ah, 0x3E
+        int 0x21
+.summary:
+        mov eax, [c_count]
+        mov cl, 9
+        call putnum_w
+        mov si, msg_copied
+        jmp puts
+.device:
+        mov si, c_dst
+        call is_dir
+        jnc .devbad
+        mov dx, c_dst
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .cerr
+        mov [c_dh], ax
+        mov byte [c_open], 1
+        mov dx, c_src
+        mov ax, 0x3D00
+        int 0x21
+        jc .close
+        mov bx, ax
+        mov byte [c_isdev], 1
+        call copy_data
+        mov byte [c_isdev], 0
+        mov ah, 0x3E
+        int 0x21
+        inc dword [c_count]
+        jmp .close
+.devbad:
+        mov si, msg_cantcreate
+        call puts
+        jmp .summary
+
+; COPY A+B[+C] [destino]: unir ficheros (sin destino, se añade a A)
+do_concat:
+        mov si, c_src
+        mov di, c_spath
+        mov byte [c_first], 1
+.part:
+        ; copiar la parte siguiente en c_spath
+        mov di, c_spath
+.cp:
+        lodsb
+        cmp al, '+'
+        je .end
+        test al, al
+        je .end
+        stosb
+        jmp .cp
+.end:
+        mov byte [di], 0
+        mov [c_next], si
+        mov [c_last], al
+        cmp byte [c_first], 0
+        je .add
+        mov byte [c_first], 0
+        cmp byte [c_nodst], 0
+        je .newdst
+        ; sin destino: abrir la primera parte y añadir al final
+        mov dx, c_spath
+        mov ax, 0x3D02
+        int 0x21
+        jc .err
+        mov [c_dh], ax
+        mov bx, ax
+        mov ax, 0x4202
+        xor cx, cx
+        xor dx, dx
+        int 0x21
+        mov byte [c_open], 1
+        inc dword [c_count]
+        jmp .more
+.newdst:
+        mov dx, c_dst
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .err
+        mov [c_dh], ax
+        mov byte [c_open], 1
+.add:
+        call copy_one
+.more:
+        mov si, [c_next]
+        cmp byte [c_last], 0
+        jne .part
+        mov bx, [c_dh]
+        mov ah, 0x3E
+        int 0x21
+        mov eax, 1
+        mov cl, 9
+        call putnum_w
+        mov si, msg_copied
+        jmp puts
+.err:
+        mov si, msg_nofile
+        jmp puts
+
+; copiar c_spath en el handle c_dh (conserva fecha y hora si es copia simple)
+copy_one:
+        mov dx, c_spath
+        mov ax, 0x3D00
+        int 0x21
+        jc .r
+        mov bx, ax
+        call copy_data
+        jc .full
+        mov ax, 0x5700
+        int 0x21
+        push cx
+        push dx
+        mov ah, 0x3E
+        int 0x21
+        pop dx
+        pop cx
+        mov bx, [c_dh]
+        mov ax, 0x5701
+        int 0x21
+        inc dword [c_count]
+.r:
+        ret
+.full:
+        mov ah, 0x3E
+        int 0x21
+        mov si, msg_full
+        jmp puts
+
+; BX = origen -> c_dh; CF si el disco se llena
+copy_data:
+.l:
+        mov dx, cbuf
+        mov cx, CBUF_LEN
+        mov ah, 0x3F
+        int 0x21
+        jc .ok
+        test ax, ax
+        jz .ok
+        mov cx, ax
+        cmp byte [c_isdev], 0
+        je .w
+        ; de un dispositivo: parar en Ctrl+Z
+        push di
+        mov di, cbuf
+        push cx
+        mov al, 0x1A
+        repne scasb
+        pop cx
+        jne .noz
+        mov cx, di
+        sub cx, cbuf
+        dec cx
+        mov byte [c_eof], 1
+.noz:
+        pop di
+.w:
+        push bx
+        push cx
+        mov bx, [c_dh]
+        mov dx, cbuf
+        mov ah, 0x40
+        int 0x21
+        pop cx
+        pop bx
+        jc .err
+        cmp ax, cx
+        jb .err
+        cmp byte [c_eof], 0
+        je .l
+        mov byte [c_eof], 0
+.ok:
+        clc
+        ret
+.err:
+        stc
+        ret
+
+; -----------------------------------------------------------------------------
+;  DEL / ERASE patrón
+; -----------------------------------------------------------------------------
+do_del:
+        mov di, c_src
+        call get_tok
+        jc msg_required
+        mov si, c_src
+        call is_dir
+        jc .nd
+        mov si, c_src
+        call append_all
+.nd:
+        mov si, c_src
+        mov di, c_pre
+        call path_prefix
+        ; ¿todo el directorio?
+        mov si, c_src
+.e:
+        lodsb
+        test al, al
+        jnz .e
+        cmp dword [si-4], '*.*'
+        je .all
+        cmp word [si-2], '*'
+        jne .go
+        cmp si, c_src+2
+        je .all
+        cmp byte [si-3], '\'
+        je .all
+        cmp byte [si-3], ':'
+        je .all
+        jmp .go
+.all:
+        mov si, msg_delall
+        call puts
+        call ask_yn
+        jc .r
+.go:
+        call set_dta
+        mov dx, c_src
+        xor cx, cx
+        mov ah, 0x4E
+        int 0x21
+        jnc .l
+        mov si, msg_nofile
+        jmp puts
+.l:
+        mov si, c_pre
+        mov bx, dta+0x1E
+        mov di, c_spath
+        call join_path
+        mov dx, c_spath
+        mov ah, 0x41
+        int 0x21
+        jnc .n
+        mov si, msg_accden
+        call puts
+.n:
+        call set_dta
+        mov ah, 0x4F
+        int 0x21
+        jnc .l
+.r:
+        ret
+
+; leer S/N -> CF=0 si sí
+ask_yn:
+        mov dx, ynbuf
+        mov byte [ynbuf], 4
+        mov ah, 0x0A
+        int 0x21
+        call crlf
+        mov al, [ynbuf+2]
+        call upcase
+        cmp al, 'Y'
+        je .y
+        cmp al, 'S'
+        je .y
+        stc
+        ret
+.y:
+        clc
+        ret
+
+; -----------------------------------------------------------------------------
+;  REN / RENAME origen nombre (admite máscaras como *.BAK)
+; -----------------------------------------------------------------------------
+do_ren:
+        mov di, c_src
+        call get_tok
+        jc msg_required
+        mov di, c_dst
+        call get_tok
+        jc msg_required
+        mov si, c_dst
+.chk:
+        lodsb
+        test al, al
+        jz .ok
+        cmp al, '\'
+        je .bad
+        cmp al, ':'
+        je .bad
+        jmp .chk
+.bad:
+        mov si, msg_badparam
+        jmp puts
+.ok:
+        mov si, c_src
+        mov di, c_pre
+        call path_prefix
+        mov si, c_dst
+        mov di, m_mask
+        call to11
+        call set_dta
+        mov dx, c_src
+        mov cx, 0x10
+        mov ah, 0x4E
+        int 0x21
+        jnc .l
+        mov si, msg_dupnf
+        jmp puts
+.l:
+        mov si, dta+0x1E
+        mov di, m_name
+        call to11
+        ; aplicar la máscara
+        mov si, m_mask
+        mov di, m_name
+        mov cx, 11
+.m:
+        mov al, [si]
+        cmp al, '?'
+        je .keep
+        mov [di], al
+.keep:
+        inc si
+        inc di
+        loop .m
+        mov si, m_name
+        mov di, m_new
+        call from11
+        mov si, c_pre
+        mov bx, dta+0x1E
+        mov di, c_spath
+        call join_path
+        mov si, c_pre
+        mov bx, m_new
+        mov di, c_dpath
+        call join_path
+        mov dx, c_spath
+        mov di, c_dpath
+        mov ah, 0x56
+        int 0x21
+        jnc .n
+        mov si, msg_dupnf
+        call puts
+.n:
+        call set_dta
+        mov ah, 0x4F
+        int 0x21
+        jnc .l
+        ret
+
+; nombre "NOMBRE.EXT" o máscara en SI -> 11 caracteres en DI ('*' -> '?')
+to11:
+        push di
+        push cx
+        mov cx, 11
+        mov al, ' '
+        rep stosb
+        pop cx
+        pop di
+        push di
+        mov bx, di
+        cmp byte [si], '.'
+        je .dots
+        mov cx, 8
+.n:
+        lodsb
+        test al, al
+        jz .d
+        cmp al, '.'
+        je .x
+        call upcase
+        cmp al, '*'
+        jne .nc
+.nf:
+        jcxz .n
+        mov byte [di], '?'
+        inc di
+        dec cx
+        jmp .nf
+.nc:
+        jcxz .n
+        stosb
+        dec cx
+        jmp .n
+.x:
+        lea di, [bx+8]
+        mov cx, 3
+.e:
+        lodsb
+        test al, al
+        jz .d
+        call upcase
+        cmp al, '*'
+        jne .ec
+.ef:
+        jcxz .e
+        mov byte [di], '?'
+        inc di
+        dec cx
+        jmp .ef
+.ec:
+        jcxz .e
+        stosb
+        dec cx
+        jmp .e
+.dots:
+        lodsb
+        test al, al
+        jz .d
+        stosb
+        jmp .dots
+.d:
+        pop di
+        ret
+
+; 11 caracteres en SI -> "NOMBRE.EXT" en DI
+from11:
+        push si
+        mov cx, 8
+.n:
+        lodsb
+        cmp al, ' '
+        je .s
+        stosb
+.s:
+        loop .n
+        cmp byte [si], ' '
+        je .e
+        mov al, '.'
+        stosb
+        mov cx, 3
+.x:
+        lodsb
+        cmp al, ' '
+        je .xs
+        stosb
+.xs:
+        loop .x
+.e:
+        mov byte [di], 0
+        pop si
+        ret
+
+; -----------------------------------------------------------------------------
+do_md:
+        mov di, c_src
+        call get_tok
+        jc msg_required
+        mov dx, c_src
+        mov ah, 0x39
+        int 0x21
+        jnc .r
+        mov si, msg_mderr
+        call puts
+.r:
+        ret
+
+do_rd:
+        mov di, c_src
+        call get_tok
+        jc msg_required
+        mov dx, c_src
+        mov ah, 0x3A
+        int 0x21
+        jnc .r
+        mov si, msg_rderr
+        call puts
+.r:
+        ret
+
+do_pause:
+        mov si, msg_pause
+        call puts
+        mov ah, 0x08
+        int 0x21
+        jmp crlf
+
+msg_redir   db "File creation error", 13, 10, 0
+msg_self    db "File cannot be copied onto itself", 13, 10, 0
+msg_cantcreate db "Unable to create destination", 13, 10, 0
+msg_copied  db " file(s) copied", 13, 10, 0
+msg_full    db "Insufficient disk space", 13, 10, 0
+msg_delall  db "All files in directory will be deleted!", 13, 10
+            db "Are you sure (Y/N)?", 0
+msg_accden  db "Access denied", 13, 10, 0
+msg_badparam db "Invalid parameter", 13, 10, 0
+msg_dupnf   db "Duplicate file name or file not found", 13, 10, 0
+msg_mderr   db "Unable to create directory", 13, 10, 0
+msg_rderr   db "Invalid path, not directory,", 13, 10, "or directory not empty", 13, 10, 0
+msg_pause   db "Press any key to continue . . .", 0
+pipe_names  db "A:\~PIPE0.TMP", 0, 0, 0
+            db "A:\~PIPE1.TMP", 0, 0, 0
+            db "A:\~PIPE2.TMP", 0, 0, 0
+            db "A:\~PIPE3.TMP", 0, 0, 0
+CBUF_LEN    equ 4096
 ; -----------------------------------------------------------------------------
 msg_hello   db 13, 10, "HispaDOS Command Interpreter 0.2", 13, 10
             db "Type HELP for a list of commands.", 13, 10, 13, 10, 0
@@ -1163,6 +2249,41 @@ tail        resb 130
 fcb1        resb 37
 fcb2        resb 37
 pblock      resb 14
+pl_in       resw 1
+pl_out      resw 1
+pl_depth    resb 1
+r_app       resb 1
+r_in        resw 1
+r_out       resw 1
+sv_in       resw 1
+sv_out      resw 1
+rin_name    resb 80
+rout_name   resb 80
+t_buf       resb 132
+t_buf2      resb 132
+dta2        resb 128
+c_src       resb 132
+c_dst       resb 132
+c_pre       resb 132
+c_dpre      resb 132
+c_spath     resb 160
+c_dpath     resb 160
+c_count     resd 1
+c_dh        resw 1
+c_open      resb 1
+c_dstdir    resb 1
+c_wild      resb 1
+c_isdev     resb 1
+c_eof       resb 1
+c_nodst     resb 1
+c_first     resb 1
+c_last      resb 1
+c_next      resw 1
+ynbuf       resb 8
+m_mask      resb 12
+m_name      resb 12
+m_new       resb 14
+cbuf        resb CBUF_LEN
             resb 2048
 stack_top:
 prog_end:

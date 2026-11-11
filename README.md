@@ -42,7 +42,10 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | `FORMAT.COM`: FAT12 (disquetes) y FAT16 (discos duros), `/S` para disco de arranque, `/V` | ✅ |
 | Arranque desde disco duro (MBR + sector de arranque FAT16) | ✅ |
 | INT 25h/26h, IOCTL 440Dh (parámetros de unidad) | ✅ |
-| Escritura de ficheros, `.BAT`, `CONFIG.SYS` | 🔜 0.2 |
+| Escritura FAT12/FAT16: crear, escribir, truncar, borrar, renombrar/mover, MKDIR/RMDIR, atributos, fecha | ✅ |
+| Entrada/salida estándar redirigible (funciones 01h-0Ah por los handles 0 y 1) | ✅ |
+| `COMMAND.COM`: COPY (comodines, `+`, `COPY CON`), DEL/ERASE, REN, MD, RD, PAUSE, `>` `>>` `<` y tuberías `\|` | ✅ |
+| Ficheros `.BAT`, `AUTOEXEC.BAT`, `SET`, `CONFIG.SYS` | 🔜 0.2 |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
 ## Compilar y probar

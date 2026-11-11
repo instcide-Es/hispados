@@ -55,6 +55,10 @@ SFT_DIRI        equ 20
 SFT_TIME        equ 22
 SFT_DATE        equ 24
 SFT_DRV         equ 26
+SFT_FLAGS       equ 27
+E_EXISTS        equ 80
+E_CURDIR        equ 16
+E_NOTSAME       equ 17
 SFT_LEN         equ 32
 NSFT            equ 20
 
@@ -100,6 +104,7 @@ D_ROOTLBA       equ 32
 D_ROOTSECS      equ 36
 D_DATALBA       equ 38
 D_NCLUS         equ 42
+D_HINT          equ 44
 DRV_LEN         equ 64
 NDRV            equ 8
 
@@ -1186,8 +1191,11 @@ line_input:
         je .bs
         cmp al, 27
         je .esc
+        cmp al, 0x1A
+        je .store
         cmp al, 32
         jb .l
+.store:
         mov dx, bx
         inc dx
         cmp dx, cx
@@ -1257,8 +1265,6 @@ read_sector:
         jmp disk_io
 write_sector:
         mov byte [io_cmd], 3
-        mov dword [cache_lba], 0xFFFFFFFF
-        mov dword [fatc_lba], 0xFFFFFFFF
 disk_io:
         pushad
         add eax, [cur_drv+D_START]
@@ -1358,11 +1364,13 @@ cache_read:
         pop es
         jc .err
         mov [cache_lba], edx
+        mov [cache_rel], eax
         push ax
         mov al, [cur_drv+D_BIOS]
         mov [cache_bios], al
         pop ax
 .hit:
+        mov [cache_rel], eax
         pop edx
         clc
         ret
@@ -1388,6 +1396,7 @@ fat_load_sec:
         pop ax
         je .h
 .m:
+        call fat_flush
         push es
         push bx
         push ds
@@ -1398,6 +1407,11 @@ fat_load_sec:
         pop es
         jc .e
         mov [fatc_lba], edx
+        mov [fatc_rel], eax
+        push ax
+        mov al, [sel_drv]
+        mov [fatc_drv], al
+        pop ax
         push ax
         mov al, [cur_drv+D_BIOS]
         mov [fatc_bios], al
@@ -2309,6 +2323,875 @@ open_path:
         stc
         ret
 
+; -----------------------------------------------------------------------------
+;  Escritura: FAT, directorios y ficheros
+; -----------------------------------------------------------------------------
+; escribir secbuf en su sector
+cache_write:
+        push eax
+        push bx
+        push es
+        push ds
+        pop es
+        mov eax, [cache_rel]
+        mov bx, secbuf
+        call write_sector
+        pop es
+        pop bx
+        pop eax
+        ret
+
+; EAX = sector relativo -> secbuf a cero y asociado a ese sector
+cache_blank:
+        push eax
+        push cx
+        push di
+        push es
+        push ds
+        pop es
+        mov di, secbuf
+        mov cx, 256
+        push ax
+        xor ax, ax
+        rep stosw
+        pop ax
+        mov [cache_rel], eax
+        add eax, [cur_drv+D_START]
+        mov [cache_lba], eax
+        mov al, [cur_drv+D_BIOS]
+        mov [cache_bios], al
+        pop es
+        pop di
+        pop cx
+        pop eax
+        ret
+
+; escribir el sector de FAT modificado en todas las copias
+fat_flush:
+        cmp byte [fat_dirty], 0
+        jne .go
+        ret
+.go:
+        pushad
+        push es
+        mov al, [sel_drv]
+        push ax
+        mov al, [fatc_drv]
+        cmp al, [sel_drv]
+        je .same
+        call select_raw
+.same:
+        mov eax, [fatc_rel]
+        movzx cx, byte [cur_drv+D_NFATS]
+        push ds
+        pop es
+        mov bx, fatsec
+.l:
+        call write_sector
+        movzx edx, word [cur_drv+D_SPF]
+        add eax, edx
+        loop .l
+        mov byte [fat_dirty], 0
+        pop ax
+        cmp al, [sel_drv]
+        je .ns
+        call select_raw
+.ns:
+        pop es
+        popad
+        ret
+
+; ECX = desplazamiento en la FAT, BL = máscara AND, BH = valor OR
+fat_mod_byte:
+        push eax
+        push ecx
+        push si
+        mov eax, ecx
+        shr eax, 9
+        add eax, [cur_drv+D_FATLBA]
+        call fat_load_sec
+        jc .e
+        mov si, cx
+        and si, 511
+        and [fatsec+si], bl
+        or [fatsec+si], bh
+        mov byte [fat_dirty], 1
+.e:
+        pop si
+        pop ecx
+        pop eax
+        ret
+
+; AX = clúster, DX = valor
+fat_set:
+        push bx
+        push ecx
+        push edx
+        movzx ecx, ax
+        test byte [cur_drv+D_FLAGS], DF_FAT16
+        jnz .f16
+        and dx, 0x0FFF
+        shr ecx, 1
+        add cx, ax
+        test al, 1
+        jnz .odd
+        mov bl, 0
+        mov bh, dl
+        call fat_mod_byte
+        inc ecx
+        mov bl, 0xF0
+        mov bh, dh
+        call fat_mod_byte
+        jmp .r
+.odd:
+        mov bl, 0x0F
+        mov bh, dl
+        shl bh, 4
+        call fat_mod_byte
+        inc ecx
+        shr dx, 4
+        mov bl, 0
+        mov bh, dl
+        call fat_mod_byte
+        jmp .r
+.f16:
+        shl ecx, 1
+        mov bl, 0
+        mov bh, dl
+        call fat_mod_byte
+        inc ecx
+        mov bh, dh
+        call fat_mod_byte
+.r:
+        pop edx
+        pop ecx
+        pop bx
+        ret
+
+; AX = clúster anterior (0 = ninguno) -> AX = clúster nuevo (fin de cadena)
+; CF = 1 si el disco está lleno
+fat_alloc:
+        push bx
+        push cx
+        push dx
+        push ax
+        mov cx, [cur_drv+D_NCLUS]
+        mov bx, [cur_drv+D_HINT]
+        mov dx, [cur_drv+D_NCLUS]
+        inc dx
+        cmp bx, 2
+        jb .h0
+        cmp bx, dx
+        jbe .l
+.h0:
+        mov bx, 2
+.l:
+        mov ax, bx
+        call fat_next
+        test ax, ax
+        jz .found
+        inc bx
+        cmp bx, dx
+        jbe .n
+        mov bx, 2
+.n:
+        loop .l
+        pop ax
+        pop dx
+        pop cx
+        pop bx
+        stc
+        ret
+.found:
+        mov ax, bx
+        mov dx, 0xFFFF
+        call fat_set
+        pop ax
+        test ax, ax
+        jz .nolink
+        mov dx, bx
+        call fat_set
+.nolink:
+        mov ax, bx
+        inc bx
+        mov [cur_drv+D_HINT], bx
+        call drv_store
+        pop dx
+        pop cx
+        pop bx
+        clc
+        ret
+
+; AX = primer clúster -> liberar toda la cadena
+fat_free_chain:
+        push ax
+        push dx
+.l:
+        cmp ax, 2
+        jb .d
+        cmp ax, 0xFFF7
+        jae .d
+        push ax
+        call fat_next
+        mov dx, ax
+        pop ax
+        push dx
+        xor dx, dx
+        call fat_set
+        pop ax
+        jmp .l
+.d:
+        pop dx
+        pop ax
+        ret
+
+; AX = clúster -> llenarlo de ceros
+zero_cluster:
+        push eax
+        push cx
+        call clus_lba
+        mov cx, [cur_drv+D_SPCW]
+.l:
+        call cache_blank
+        call cache_write
+        inc eax
+        loop .l
+        pop cx
+        pop eax
+        ret
+
+; -> AX = hora DOS, DX = fecha DOS
+dos_now:
+        push bx
+        push cx
+        push bp
+        mov ah, 2
+        int 0x1A
+        jnc .t
+        xor cx, cx
+        xor dx, dx
+.t:
+        mov al, ch
+        call bcd2bin
+        movzx bx, al
+        shl bx, 6
+        mov al, cl
+        call bcd2bin
+        or bl, al
+        shl bx, 5
+        mov al, dh
+        call bcd2bin
+        shr al, 1
+        or bl, al
+        push bx
+        mov ah, 4
+        int 0x1A
+        jnc .d
+        mov cx, 0x2026
+        mov dx, 0x0101
+.d:
+        mov al, ch
+        call bcd2bin
+        mov bl, 100
+        mul bl
+        mov bx, ax
+        mov al, cl
+        call bcd2bin
+        xor ah, ah
+        add bx, ax
+        sub bx, 1980
+        shl bx, 4
+        mov al, dh
+        call bcd2bin
+        or bl, al
+        shl bx, 5
+        mov al, dl
+        call bcd2bin
+        or bl, al
+        mov dx, bx
+        pop ax
+        pop bp
+        pop cx
+        pop bx
+        ret
+
+; AX = directorio -> CX = índice de una entrada libre (amplía subdirectorios)
+; CF y AX = error si el directorio raíz está lleno o el disco lleno
+dir_free_slot:
+        push ax
+        push si
+        xor cx, cx
+.l:
+        call dir_get
+        jc .end
+        cmp byte [si], 0
+        je .ok
+        cmp byte [si], 0xE5
+        je .ok
+        inc cx
+        jnz .l
+.end:
+        test ax, ax
+        jz .full
+        ; ampliar el subdirectorio con un clúster nuevo
+        push cx
+.last:
+        mov si, ax
+        call fat_next
+        cmp ax, 0xFFF7
+        jae .gotl
+        cmp ax, 2
+        jb .gotl
+        jmp .last
+.gotl:
+        mov ax, si
+        call fat_alloc
+        pop cx
+        jc .full
+        call zero_cluster
+.ok:
+        pop si
+        pop ax
+        clc
+        ret
+.full:
+        pop si
+        pop ax
+        mov ax, E_ACCESS
+        stc
+        ret
+
+; AX = directorio, CX = índice, SI = nombre (11), BL = atributos,
+; DX = primer clúster -> entrada nueva con la fecha y hora actuales
+dir_make:
+        push eax
+        push di
+        push es
+        push si
+        push dx
+        call dir_get
+        pop dx
+        jc .r
+        mov di, si
+        pop si
+        push si
+        push ds
+        pop es
+        push cx
+        mov cx, 11
+        rep movsb
+        pop cx
+        mov [di], bl
+        push dx
+        push di
+        push cx
+        inc di
+        xor ax, ax
+        mov cx, 5
+        rep stosw
+        pop cx
+        pop di
+        call dos_now
+        mov [di+11], ax
+        mov [di+13], dx
+        pop dx
+        mov [di+15], dx
+        mov dword [di+17], 0
+        call cache_write
+.r:
+        pop si
+        pop es
+        pop di
+        pop eax
+        ret
+
+; actualizar la entrada de directorio de la SFT DI
+dir_update:
+        pushad
+        mov al, [di+SFT_DRV]
+        call select_drive
+        jc .r
+        mov ax, [di+SFT_DIRC]
+        mov cx, [di+SFT_DIRI]
+        call dir_get
+        jc .r
+        mov ax, [di+SFT_CLUS]
+        mov [si+26], ax
+        mov eax, [di+SFT_SIZE]
+        mov [si+28], eax
+        mov ax, [di+SFT_TIME]
+        mov [si+22], ax
+        mov ax, [di+SFT_DATE]
+        mov [si+24], ax
+        or byte [si+11], 0x20
+        call cache_write
+        and byte [di+SFT_FLAGS], 0xFE
+.r:
+        popad
+        ret
+
+; soltar una referencia a la SFT DI (al llegar a cero, guardar la entrada)
+sft_release:
+        cmp byte [di+SFT_REF], 0
+        je .r
+        dec byte [di+SFT_REF]
+        jnz .r
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .r
+        test byte [di+SFT_FLAGS], 1
+        jz .r
+        call dir_update
+.r:
+        ret
+
+; DI = SFT, AX = índice de clúster -> AX = clúster (amplía la cadena)
+sft_seek_alloc:
+        push bx
+        push cx
+        cmp word [di+SFT_CLUS], 0
+        jne .have
+        push ax
+        xor ax, ax
+        call fat_alloc
+        jc .full0
+        mov [di+SFT_CLUS], ax
+        mov [di+SFT_CCL], ax
+        mov word [di+SFT_CIX], 0
+        pop ax
+.have:
+        cmp ax, [di+SFT_CIX]
+        jb .restart
+        mov cx, [di+SFT_CCL]
+        mov bx, [di+SFT_CIX]
+        jmp .walk
+.restart:
+        mov cx, [di+SFT_CLUS]
+        xor bx, bx
+.walk:
+        cmp bx, ax
+        je .done
+        push ax
+        mov ax, cx
+        call fat_next
+        cmp ax, 2
+        jb .ext
+        cmp ax, 0xFFF7
+        jb .nx
+.ext:
+        mov ax, cx
+        call fat_alloc
+        jc .full1
+.nx:
+        mov cx, ax
+        pop ax
+        inc bx
+        jmp .walk
+.done:
+        mov [di+SFT_CCL], cx
+        mov [di+SFT_CIX], bx
+        mov ax, cx
+        pop cx
+        pop bx
+        clc
+        ret
+.full1:
+        pop ax
+        mov [di+SFT_CCL], cx
+        mov [di+SFT_CIX], bx
+        pop cx
+        pop bx
+        stc
+        ret
+.full0:
+        pop ax
+        pop cx
+        pop bx
+        stc
+        ret
+
+; marcar la SFT como modificada con la fecha y hora actuales
+sft_touch:
+        push ax
+        push dx
+        call dos_now
+        mov [di+SFT_TIME], ax
+        mov [di+SFT_DATE], dx
+        or byte [di+SFT_FLAGS], 1
+        pop dx
+        pop ax
+        ret
+
+; DI = SFT, ES:BX = origen, CX = bytes -> AX = escritos
+file_write:
+        push bx
+        push cx
+        push dx
+        push si
+        mov [fr_off], bx
+        mov [fr_seg], es
+        mov [fr_left], cx
+        mov word [fr_done], 0
+        mov al, [di+SFT_DRV]
+        call select_drive
+        jc .out
+        call sft_touch
+.loop:
+        cmp word [fr_left], 0
+        je .out
+        mov eax, [di+SFT_POS]
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_BPC]
+        div ecx
+        call sft_seek_alloc
+        jc .out
+        mov si, dx
+        movzx ecx, si
+        shr ecx, 9
+        call clus_lba
+        add eax, ecx
+        and si, 511
+        mov cx, 512
+        sub cx, si
+        cmp cx, [fr_left]
+        jbe .c1
+        mov cx, [fr_left]
+.c1:
+        ; sector entero: no hace falta leerlo
+        test si, si
+        jnz .rd
+        cmp cx, 512
+        jne .rd
+        call cache_blank
+        jmp .cp
+.rd:
+        call cache_read
+        jc .out
+.cp:
+        push ds
+        push es
+        push di
+        push si
+        mov ax, ds
+        mov es, ax
+        lea di, [secbuf+si]
+        lds si, [fr_off]
+        push cx
+        rep movsb
+        pop cx
+        pop si
+        pop di
+        pop es
+        pop ds
+        add [fr_off], cx
+        call cache_write
+        movzx ecx, cx
+        add [di+SFT_POS], ecx
+        mov eax, [di+SFT_POS]
+        cmp eax, [di+SFT_SIZE]
+        jbe .ns
+        mov [di+SFT_SIZE], eax
+.ns:
+        sub [fr_left], cx
+        add [fr_done], cx
+        jmp .loop
+.out:
+        mov ax, [fr_done]
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        ret
+
+; DI = SFT -> el fichero termina en la posición actual
+file_truncate:
+        pushad
+        mov al, [di+SFT_DRV]
+        call select_drive
+        jc .r
+        call sft_touch
+        mov eax, [di+SFT_POS]
+        cmp eax, [di+SFT_SIZE]
+        jae .grow
+        test eax, eax
+        jnz .part
+        mov ax, [di+SFT_CLUS]
+        call fat_free_chain
+        mov word [di+SFT_CLUS], 0
+        jmp .set
+.part:
+        dec eax
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_BPC]
+        div ecx
+        call sft_seek_clus
+        jc .set
+        mov bx, ax
+        call fat_next
+        push ax
+        mov ax, bx
+        mov dx, 0xFFFF
+        call fat_set
+        pop ax
+        call fat_free_chain
+        jmp .set
+.grow:
+        je .set
+        dec eax
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_BPC]
+        div ecx
+        call sft_seek_alloc
+.set:
+        mov word [di+SFT_CIX], 0xFFFF
+        mov eax, [di+SFT_POS]
+        mov [di+SFT_SIZE], eax
+.r:
+        popad
+        ret
+
+; crear o vaciar el fichero de la ruta ES:SI, atributos CL
+; AL = 1: fallar si ya existe -> DI = SFT abierta (lectura/escritura)
+create_file:
+        mov [cf_attr], cl
+        mov [cf_new], al
+        call normalize
+        jc .r
+        call walk
+        jc .r
+        cmp byte [w_has], 0
+        je .nopath
+        call check_device
+        jnc .notdev
+        push ax
+        call sft_alloc
+        pop dx
+        jc .r
+        mov byte [di+SFT_REF], 1
+        mov [di+SFT_TYPE], dl
+        mov byte [di+SFT_MODE], 2
+        clc
+        ret
+.notdev:
+        ; nombre válido (sin comodines)
+        mov si, w_name
+        cmp byte [si], ' '
+        je .nopath
+        mov cx, 11
+.chk:
+        cmp byte [si], '?'
+        je .nopath
+        inc si
+        loop .chk
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        mov dl, 0x16
+        call find_entry
+        jc .new
+        cmp byte [cf_new], 0
+        jne .exists
+        test byte [fentry+11], 0x19
+        jnz .acc
+        ; vaciar el fichero existente
+        mov ax, [fentry+26]
+        call fat_free_chain
+        mov ax, [w_dir]
+        call dir_get
+        jc .acc
+        mov word [si+26], 0
+        mov dword [si+28], 0
+        mov al, [cf_attr]
+        and al, 0x27
+        mov [si+11], al
+        call cache_write
+        jmp .open
+.new:
+        mov ax, [w_dir]
+        call dir_free_slot
+        jc .r
+        mov si, w_name
+        mov bl, [cf_attr]
+        and bl, 0x27
+        xor dx, dx
+        call dir_make
+        jc .acc
+.open:
+        ; releer la entrada creada en fentry
+        push cx
+        mov ax, [w_dir]
+        call dir_get
+        mov di, fentry
+        push es
+        push ds
+        pop es
+        push cx
+        mov cx, 16
+        rep movsw
+        pop cx
+        pop es
+        pop cx
+        call sft_alloc
+        jc .r
+        call sft_fill_file
+        mov byte [di+SFT_MODE], 2
+        call sft_touch
+        clc
+.r:
+        ret
+.exists:
+        mov ax, E_EXISTS
+        stc
+        ret
+.acc:
+        mov ax, E_ACCESS
+        stc
+        ret
+.nopath:
+        mov ax, E_NOPATH
+        stc
+        ret
+
+; ruta ES:SI -> fentry, CX = índice, [w_dir]; CF/AX (atributos DL)
+find_path:
+        call normalize
+        jc .r
+        call walk
+        jc .r
+        cmp byte [w_has], 0
+        je .nf
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        call find_entry
+        jc .nf
+        clc
+.r:
+        ret
+.nf:
+        mov ax, E_NOFILE
+        stc
+        ret
+
+; -----------------------------------------------------------------------------
+;  Entrada y salida estándar (handles 0 y 1 del proceso: admiten redirección)
+; -----------------------------------------------------------------------------
+; BX = handle -> AL = tipo (T_CON si no es válido), DI = SFT
+std_type:
+        push ax
+        call get_sft
+        pop ax
+        jc .con
+        mov ah, [di+SFT_TYPE]
+        ret
+.con:
+        mov ah, T_CON
+        ret
+
+; AL -> salida estándar
+std_out:
+        push ax
+        push bx
+        push cx
+        push di
+        push es
+        mov bx, 1
+        call std_type
+        cmp ah, T_FILE
+        je .file
+        cmp ah, T_NUL
+        je .r
+        call con_out
+        jmp .r
+.file:
+        test byte [di+SFT_MODE], 3
+        jz .r
+        mov [so_ch], al
+        push ds
+        pop es
+        mov bx, so_ch
+        mov cx, 1
+        call file_write
+.r:
+        pop es
+        pop di
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; -> AL desde la entrada estándar (1Ah al final de un fichero)
+std_in:
+        push bx
+        push cx
+        push di
+        push es
+        mov bx, 0
+        call std_type
+        cmp ah, T_FILE
+        je .file
+        cmp ah, T_NUL
+        je .eof
+        call con_getc
+        jmp .r
+.file:
+        push ds
+        pop es
+        mov bx, so_ch
+        mov cx, 1
+        call file_read
+        test ax, ax
+        jz .eof
+        mov al, [so_ch]
+        jmp .r
+.eof:
+        mov al, 0x1A
+.r:
+        pop es
+        pop di
+        pop cx
+        pop bx
+        ret
+
+; ZF=0 si la entrada estándar tiene algo que leer
+std_check:
+        push bx
+        push di
+        mov bx, 0
+        call std_type
+        cmp ah, T_FILE
+        je .file
+        cmp ah, T_NUL
+        je .no
+        pop di
+        pop bx
+        jmp con_check
+.file:
+        mov eax, [di+SFT_POS]
+        cmp eax, [di+SFT_SIZE]
+        jae .no
+        or al, 1
+        pop di
+        pop bx
+        ret
+.no:
+        xor al, al
+        pop di
+        pop bx
+        ret
+
+; ¿la entrada estándar es la consola? ZF=1 si sí
+std_in_is_con:
+        push ax
+        push bx
+        push di
+        mov bx, 0
+        call std_type
+        cmp ah, T_CON
+        pop di
+        pop bx
+        pop ax
+        ret
+
 ; =============================================================================
 ;  INT 21h
 ; =============================================================================
@@ -2338,6 +3221,7 @@ int21:
 .bad:
         call fn_unsup
 i21_ret:
+        call fat_flush
         dec byte [indos]
         pop ax
         pop bx
@@ -2380,19 +3264,19 @@ fn_31:
 
 ; ---- consola ----
 fn_01:
-        call con_getc
+        call std_in
         mov [F_AL], al
-        jmp con_out
+        jmp std_out
 fn_02:
         mov al, [F_DL]
-        jmp con_out
+        jmp std_out
 fn_06:
         mov al, [F_DL]
         cmp al, 0xFF
-        jne con_out
-        call con_check
+        jne std_out
+        call std_check
         jz .none
-        call con_getc
+        call std_in
         mov [F_AL], al
         and byte [F_FL], 0xBF
         ret
@@ -2402,7 +3286,7 @@ fn_06:
         ret
 fn_07:
 fn_08:
-        call con_getc
+        call std_in
         mov [F_AL], al
         ret
 fn_09:
@@ -2412,7 +3296,7 @@ fn_09:
         mov al, [es:si]
         cmp al, '$'
         je .d
-        call con_out
+        call std_out
         inc si
         jmp .l
 .d:
@@ -2421,15 +3305,41 @@ fn_09:
 fn_0a:
         mov es, [F_DS]
         mov di, [F_DX]
-        jmp line_input
+        call std_in_is_con
+        je line_input
+        ; entrada redirigida: leer hasta CR
+        movzx cx, byte [es:di]
+        xor bx, bx
+.l:
+        call std_in
+        cmp al, 0x1A
+        je .end
+        cmp al, 10
+        je .l
+        cmp al, 13
+        je .end
+        inc bx
+        cmp bx, cx
+        jae .full
+        mov [es:di+1+bx], al
+        jmp .l
+.full:
+        dec bx
+        jmp .l
+.end:
+        mov byte [es:di+2+bx], 13
+        mov [es:di+1], bl
+        ret
 fn_0b:
-        call con_check
+        call std_check
         mov byte [F_AL], 0
         jz .r
         mov byte [F_AL], 0xFF
 .r:
         ret
 fn_0c:
+        call std_in_is_con
+        jne .e
 .fl:
         call con_check
         jz .e
@@ -2934,24 +3844,20 @@ fn_60:
 fn_3d:
         mov es, [F_DS]
         mov si, [F_DX]
-        test byte [F_AL], 3
-        jz .rd
-        call normalize
-        jc ret_err
-        call walk
-        jc ret_err
-        call check_device
-        jc .dev
-        mov ax, E_ACCESS
-        jmp ret_err
-.dev:
-        mov es, [F_DS]
-        mov si, [F_DX]
-.rd:
         call open_path
         jc ret_err
         mov al, [F_AL]
         mov [di+SFT_MODE], al
+        test al, 3
+        jz .ok
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .ok
+        test byte [di+SFT_ATTR], 1
+        jz .ok
+        mov byte [di+SFT_REF], 0
+        mov ax, E_ACCESS
+        jmp ret_err
+.ok:
         call jft_alloc
         jc .nohand
         mov ax, di
@@ -2970,7 +3876,7 @@ fn_3e:
         jc ret_err
         mov al, 0xFF
         call jft_set
-        dec byte [di+SFT_REF]
+        call sft_release
         ret
 
 fn_3f:
@@ -3060,6 +3966,20 @@ fn_40:
         je .con
         cmp al, T_NUL
         je .nul
+        test byte [di+SFT_MODE], 3
+        jz .acc
+        mov cx, [F_CX]
+        jcxz .trunc
+        mov es, [F_DS]
+        mov bx, [F_DX]
+        call file_write
+        mov [F_AX], ax
+        ret
+.trunc:
+        call file_truncate
+        mov word [F_AX], 0
+        ret
+.acc:
         mov ax, E_ACCESS
         jmp ret_err
 .con:
@@ -3136,6 +4056,22 @@ fn_43:
         mov ax, E_NOFILE
         jmp ret_err
 .set:
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov dl, 0x16
+        call find_path
+        jc ret_err
+        test byte [fentry+11], 0x18
+        jnz .sacc
+        mov ax, [w_dir]
+        call dir_get
+        jc .sacc
+        mov al, [F_CL]
+        and al, 0x27
+        mov [si+11], al
+        call cache_write
+        ret
+.sacc:
         mov ax, E_ACCESS
         jmp ret_err
 
@@ -3299,7 +4235,7 @@ fn_46:
         jae .bad
         call get_sft
         jc .free
-        dec byte [di+SFT_REF]
+        call sft_release
 .free:
         pop di
         mov ax, di
@@ -3319,36 +4255,391 @@ fn_57:
         call get_sft
         jc ret_err
         cmp byte [F_AL], 0
-        jne .r
+        jne .set
         mov ax, [di+SFT_TIME]
         mov [F_CX], ax
         mov ax, [di+SFT_DATE]
         mov [F_DX], ax
+        ret
+.set:
+        cmp byte [F_AL], 1
+        jne .r
+        mov ax, [F_CX]
+        mov [di+SFT_TIME], ax
+        mov ax, [F_DX]
+        mov [di+SFT_DATE], ax
+        or byte [di+SFT_FLAGS], 1
 .r:
         ret
 
 fn_6c:
-        mov al, [F_DL]
-        and al, 0x0F
-        cmp al, 1
-        jne .acc
         mov ax, [F_SI]
         mov [F_DX], ax
         mov al, [F_BL]
         mov [F_AL], al
+        mov al, [F_DL]
+        mov [x6c_act], al
         call fn_3d
         test byte [F_FL], 1
-        jnz .r
+        jnz .notopen
+        mov al, [x6c_act]
+        and al, 0x0F
+        jz .exists
+        cmp al, 2
+        jne .opened
+        ; sustituir: vaciar
+        mov bx, [F_AX]
+        call get_sft
+        jc .opened
+        mov dword [di+SFT_POS], 0
+        call file_truncate
+        mov word [F_CX], 3
+        ret
+.opened:
         mov word [F_CX], 1
+        ret
+.exists:
+        mov bx, [F_AX]
+        call get_sft
+        jc .e80
+        mov al, 0xFF
+        call jft_set
+        call sft_release
+.e80:
+        mov ax, E_EXISTS
+        jmp ret_err
+.notopen:
+        cmp word [F_AX], E_NOFILE
+        jne .r
+        test byte [x6c_act], 0x10
+        jz .r
+        and byte [F_FL], 0xFE
+        call fn_3c
+        test byte [F_FL], 1
+        jnz .r
+        mov word [F_CX], 2
 .r:
+        ret
+
+fn_rdonly:
+        mov ax, E_ACCESS
+        jmp ret_err
+
+; ---- 3Ch / 5Bh: crear fichero ----
+fn_3c:
+        xor al, al
+        jmp fn_create
+fn_5b:
+        mov al, 1
+fn_create:
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov cl, [F_CL]
+        call create_file
+        jc ret_err
+        call jft_alloc
+        jc .noh
+        mov ax, di
+        sub ax, sft_table
+        shr ax, 5
+        call jft_set
+        mov [F_AX], bx
+        ret
+.noh:
+        mov byte [di+SFT_REF], 0
+        jmp ret_err
+
+; ---- 41h: borrar fichero ----
+fn_41:
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov dl, 0x06
+        call find_path
+        jc ret_err
+        test byte [fentry+11], 0x01
+        jnz .acc
+        mov ax, [fentry+26]
+        call fat_free_chain
+        mov ax, [w_dir]
+        call dir_get
+        jc .acc
+        mov byte [si], 0xE5
+        call cache_write
         ret
 .acc:
         mov ax, E_ACCESS
         jmp ret_err
 
-fn_rdonly:
+; ---- 39h: crear directorio ----
+fn_39:
+        mov es, [F_DS]
+        mov si, [F_DX]
+        call normalize
+        jc ret_err
+        call walk
+        jc ret_err
+        cmp byte [w_has], 0
+        je .acc
+        mov si, w_name
+        mov cx, 11
+.chk:
+        cmp byte [si], '?'
+        je .acc
+        inc si
+        loop .chk
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        mov dl, 0x16
+        call find_entry
+        jnc .acc
+        xor ax, ax
+        call fat_alloc
+        jc .acc
+        mov [md_clus], ax
+        call zero_cluster
+        ; "." y ".."
+        call clus_lba
+        call cache_read
+        mov di, secbuf
+        push es
+        push ds
+        pop es
+        mov al, ' '
+        mov cx, 64
+        push di
+        rep stosb
+        pop di
+        mov byte [di], '.'
+        mov byte [di+32], '.'
+        mov byte [di+33], '.'
+        mov byte [di+11], 0x10
+        mov byte [di+32+11], 0x10
+        xor ax, ax
+        push di
+        lea di, [di+12]
+        mov cx, 10
+        rep stosb
+        pop di
+        push di
+        lea di, [di+32+12]
+        mov cx, 10
+        rep stosb
+        pop di
+        pop es
+        call dos_now
+        mov [di+22], ax
+        mov [di+24], dx
+        mov [di+32+22], ax
+        mov [di+32+24], dx
+        mov ax, [md_clus]
+        mov [di+26], ax
+        mov ax, [w_dir]
+        mov [di+32+26], ax
+        mov dword [di+28], 0
+        mov dword [di+32+28], 0
+        call cache_write
+        ; entrada en el directorio padre
+        mov ax, [w_dir]
+        call dir_free_slot
+        jc .free
+        mov si, w_name
+        mov bl, 0x10
+        mov dx, [md_clus]
+        call dir_make
+        ret
+.free:
+        push ax
+        mov ax, [md_clus]
+        call fat_free_chain
+        pop ax
+        jmp ret_err
+.acc:
         mov ax, E_ACCESS
         jmp ret_err
+
+; ---- 3Ah: borrar directorio ----
+fn_3a:
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov dl, 0x16
+        call find_path
+        jc .np
+        test byte [fentry+11], 0x10
+        jz .np
+        ; no puede ser el directorio actual de la unidad
+        push cx
+        movzx si, byte [op_drv]
+        imul si, si, PATHLEN
+        add si, cur_paths
+        mov di, npath
+.cmp:
+        mov al, [di]
+        test al, al
+        jz .pref
+        cmp al, [si]
+        jne .notcur
+        inc si
+        inc di
+        jmp .cmp
+.pref:
+        mov al, [si]
+        test al, al
+        jz .cur
+        cmp al, '\'
+        je .cur
+.notcur:
+        pop cx
+        ; ¿vacío?
+        mov [md_idx], cx
+        mov ax, [fentry+26]
+        mov [md_clus], ax
+        mov cx, 2
+.l:
+        call dir_get
+        jc .empty
+        mov bl, [si]
+        test bl, bl
+        jz .empty
+        cmp bl, 0xE5
+        je .n
+        cmp byte [si+11], 0x0F
+        je .n
+        mov ax, E_ACCESS
+        jmp ret_err
+.n:
+        inc cx
+        jmp .l
+.empty:
+        mov ax, [md_clus]
+        call fat_free_chain
+        mov ax, [w_dir]
+        mov cx, [md_idx]
+        call dir_get
+        jc .np
+        mov byte [si], 0xE5
+        call cache_write
+        ret
+.cur:
+        pop cx
+        mov ax, E_CURDIR
+        jmp ret_err
+.np:
+        mov ax, E_NOPATH
+        jmp ret_err
+
+; ---- 56h: renombrar / mover ----
+fn_56:
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov dl, 0x16
+        call find_path
+        jc ret_err
+        test byte [fentry+11], 0x08
+        jnz .acc
+        mov [rn_idx], cx
+        mov ax, [w_dir]
+        mov [rn_dir], ax
+        mov al, [op_drv]
+        mov [rn_drv], al
+        push es
+        push ds
+        pop es
+        mov si, fentry
+        mov di, rn_ent
+        mov cx, 16
+        rep movsw
+        pop es
+        ; destino
+        mov es, [F_ES]
+        mov si, [F_DI]
+        call normalize
+        jc ret_err
+        mov al, [op_drv]
+        cmp al, [rn_drv]
+        jne .nsame
+        call walk
+        jc ret_err
+        cmp byte [w_has], 0
+        je .acc
+        mov si, w_name
+        mov cx, 11
+.chk:
+        cmp byte [si], '?'
+        je .acc
+        inc si
+        loop .chk
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        mov dl, 0x16
+        call find_entry
+        jnc .acc
+        mov ax, [w_dir]
+        cmp ax, [rn_dir]
+        je .inplace
+        test byte [rn_ent+11], 0x10
+        jnz .acc
+        ; mover a otro directorio
+        call dir_free_slot
+        jc ret_err
+        call dir_get
+        jc .acc
+        push es
+        push ds
+        pop es
+        mov di, si
+        mov si, rn_ent
+        push cx
+        mov cx, 16
+        rep movsw
+        pop cx
+        sub di, 32
+        mov si, w_name
+        mov cx, 11
+        rep movsb
+        pop es
+        call cache_write
+        mov ax, [rn_dir]
+        mov cx, [rn_idx]
+        call dir_get
+        jc .acc
+        mov byte [si], 0xE5
+        call cache_write
+        ret
+.inplace:
+        mov cx, [rn_idx]
+        call dir_get
+        jc .acc
+        push es
+        push ds
+        pop es
+        mov di, si
+        mov si, w_name
+        mov cx, 11
+        rep movsb
+        pop es
+        call cache_write
+        ret
+.nsame:
+        mov ax, E_NOTSAME
+        jmp ret_err
+.acc:
+        mov ax, E_ACCESS
+        jmp ret_err
+
+; ---- 68h / 6Ah: confirmar escritura ----
+fn_68:
+        mov bx, [F_BX]
+        call get_sft
+        jc ret_err
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .r
+        test byte [di+SFT_FLAGS], 1
+        jz .r
+        call dir_update
+.r:
+        ret
 
 ; ---- memoria ----
 fn_48:
@@ -3955,9 +5246,10 @@ do_term:
         cmp bx, NSFT
         jae .cn
         shl bx, 5
-        cmp byte [sft_table+bx+SFT_REF], 0
-        je .cn
-        dec byte [sft_table+bx+SFT_REF]
+        push di
+        lea di, [sft_table+bx]
+        call sft_release
+        pop di
 .cn:
         mov byte [es:di], 0xFF
         inc di
@@ -4073,6 +5365,9 @@ abs_io:
 .ok:
         cmp byte [abs_cmd], 3
         jne .ok2
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        mov byte [fat_dirty], 0
         and byte [cur_drv+D_FLAGS], 0xFF ^ DF_MOUNTED
         call drv_store
 .ok2:
@@ -4121,13 +5416,13 @@ fntable:
         dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_25, fn_unsup, fn_unsup ; 20
         dw fn_unsup, fn_29, fn_2a, fn_set_ok, fn_2c, fn_set_ok, fn_nop, fn_2f ; 28
         dw fn_30, fn_31, fn_unsup, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
-        dw fn_38, fn_rdonly, fn_rdonly, fn_3b, fn_rdonly, fn_3d, fn_3e, fn_3f ; 38
-        dw fn_40, fn_rdonly, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
+        dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
+        dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
         dw fn_48, fn_49, fn_4a, fn_4b, fn_4c, fn_4d, fn_4e, fn_4f           ; 48
-        dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_unsup, fn_rdonly, fn_57 ; 50
-        dw fn_58, fn_59, fn_rdonly, fn_rdonly, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 58
+        dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_unsup, fn_56, fn_57 ; 50
+        dw fn_58, fn_59, fn_unsup, fn_5b, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 58
         dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_unsup, fn_66, fn_67 ; 60
-        dw fn_nop, fn_unsup, fn_unsup, fn_unsup, fn_6c                       ; 68
+        dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c                       ; 68
 
 all11       db "???????????"
 shell_path  db "A:\COMMAND.COM", 0
@@ -4172,6 +5467,20 @@ fatc_bios   resb 1
             alignb 4
 cache_lba   resd 1
 fatc_lba    resd 1
+cache_rel   resd 1
+so_ch       resb 2
+fatc_rel    resd 1
+fatc_drv    resb 1
+fat_dirty   resb 1
+cf_attr     resb 1
+cf_new      resb 1
+x6c_act     resb 1
+rn_drv      resb 1
+md_clus     resw 1
+md_idx      resw 1
+rn_idx      resw 1
+rn_dir      resw 1
+rn_ent      resb 32
 abs_err     resw 1
 fn_lo       resw 1
 dap         resb 16

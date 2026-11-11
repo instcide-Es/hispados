@@ -13,10 +13,11 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - ✅ Discos duros: MBR con particiones, FAT16, INT 13h extendida (LBA), varias unidades (C:, D:…).
 - ✅ `FDISK` (menú y línea de órdenes), `FORMAT` (FAT12/FAT16, `/S`, `/V`), MBR y arranque FAT16 propios.
 - ✅ INT 25h/26h e IOCTL 440Dh; el núcleo relee las particiones tras FDISK sin reiniciar.
-- Escritura FAT12/FAT16: crear, escribir, truncar, borrar, renombrar, `MKDIR`/`RMDIR`, atributos, fecha y hora.
+- ✅ Escritura FAT12/FAT16: crear, escribir, truncar, borrar, renombrar, `MKDIR`/`RMDIR`, atributos, fecha y hora (comprobada con `fsck.fat`).
 - Particiones extendidas y unidades lógicas; `SYS` para hacer arrancable una unidad ya formateada.
 - Funciones FCB (0Fh-29h) para programas antiguos.
-- `COMMAND.COM`: ficheros `.BAT` y `AUTOEXEC.BAT`, `SET` con asignación, redirecciones `<`, `>`, `>>` y tuberías `|`, `COPY`, `DEL`, `REN`, `MD`, `RD`, `PAUSE`, `IF`, `GOTO`, `FOR`, `CALL`, `SHIFT`, `PROMPT`, `PATH`.
+- ✅ `COMMAND.COM`: redirecciones `<`, `>`, `>>`, tuberías `|`, `COPY`, `DEL`, `REN`, `MD`, `RD`, `PAUSE`.
+- `COMMAND.COM`: ficheros `.BAT` y `AUTOEXEC.BAT`, `SET` con asignación, `IF`, `GOTO`, `FOR`, `CALL`, `SHIFT`, `PROMPT`, `PATH`.
 - Ctrl+C y Ctrl+Break, INT 23h e INT 24h completas.
 - Mensajes en español además de en inglés.
 
