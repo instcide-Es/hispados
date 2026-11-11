@@ -6,6 +6,7 @@ uso: qmp.py SOCKET ORDEN...
   key DISPOSITIVO QCODE    pulsa y suelta una tecla (ret, esc, f2...)
   move DISPOSITIVO DX DY   movimiento relativo del ratón
   btn DISPOSITIVO 0|1      botón izquierdo soltado / pulsado
+  (DISPOSITIVO "-": sin dispositivo, al que QEMU tenga activo)
   wait SEGUNDOS
 Sends input events to a specific QEMU device through QMP.
 """
@@ -33,7 +34,10 @@ def main():
                 return r
 
     def ev(dev, events):
-        cmd('input-send-event', {'device': dev, 'events': events})
+        args = {'events': events}
+        if dev != '-':
+            args['device'] = dev
+        cmd('input-send-event', args)
 
     def key(dev, code, down):
         ev(dev, [{'type': 'key', 'data': {'down': down, 'key': {'type': 'qcode', 'data': code}}}])

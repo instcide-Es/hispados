@@ -549,7 +549,10 @@ xhci_cmd:
         call doorbell
         mov al, 33                  ; Command Completion
         call wait_event
-        jc .r
+        jnc .got
+        mov al, 0xFF
+        jmp .r
+.got:
         mov al, [cs:evt+11]         ; código
         mov ah, [cs:evt+15]         ; slot
         cmp al, 1
@@ -1413,6 +1416,15 @@ xhci_setup:
         call tmo_check
         jnc .h
 .halted:
+        ; dejar que la BIOS gaste los eventos que le queden (hay BIOS, como
+        ; SeaBIOS, que sondean su teclado USB con el reloj y escribirían en
+        ; nuestros registros después del reinicio)
+        sti
+        mov cx, 3
+        call tmo_start
+.bw:
+        call tmo_check
+        jnc .bw
         mov esi, [op_base]
         mov eax, 2                  ; HCRST
         call mwr
@@ -1665,7 +1677,10 @@ enum_one:
         mov ebp, 9 << 10
         call xhci_cmd
         mov word [fail_msg], msg_slot
-        jc .err
+        jnc .slok
+        call show_cc
+        jmp .err
+.slok:
         mov [cur_slot], ah
         ; DCBAA[slot] = contexto de salida
         mov bx, [cur_out]
@@ -1831,6 +1846,26 @@ enum_one:
         add di, bx
         mov dword [cs:di], 0
 .err:
+        ret
+
+; /V: código de finalización de la orden que ha fallado (AL; FFh = sin respuesta)
+show_cc:
+        jnc .r
+        pushf
+        push ax
+        cmp byte [opt_verbose], 0
+        je .p
+        push ax
+        mov si, msg_cc
+        call puts
+        pop ax
+        movzx eax, al
+        call putdec
+        call crlf
+.p:
+        pop ax
+        popf
+.r:
         ret
 
 ; SET_CONFIGURATION con el valor del descriptor de configuración en DESC
@@ -2471,6 +2506,7 @@ msg_found   db "Controlador xHCI en ", 0
 msg_port    db "Dispositivo en el puerto ", 0
 msg_speed   db ", velocidad ", 0
 msg_disk    db "Disco USB: ", 0
+msg_cc      db "xHCI: código de finalización ", 0
 msg_kbd     db "Teclado USB preparado.", 13, 10, 0
 msg_mouse   db "Ratón USB preparado.", 13, 10, 0
 units       db 0

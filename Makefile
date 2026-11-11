@@ -147,6 +147,7 @@ test: $(IMG) usb
 	tests/run_sys_tests.sh $(IMG)
 	tests/run_keyb_tests.sh $(IMG)
 	tests/run_usbnative_tests.sh $(IMG)
+	tests/run_usbhid_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG) ahci
