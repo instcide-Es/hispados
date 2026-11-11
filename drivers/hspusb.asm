@@ -7,10 +7,18 @@
 ;         de atender sus dispositivos USB: teclado USB, memoria de arranque)
 ;     /V  mensajes detallados
 ;
-;  Busca un controlador xHCI (USB 3, el de los PCs actuales), lo inicializa,
-;  enumera la primera memoria USB (clase 08h, SCSI, Bulk-Only Transport) y la
-;  ofrece a DOS como una unidad nueva (FAT12/FAT16, con o sin tabla de
-;  particiones). Usa el modo real "irreal" para los registros del xHCI.
+;  Busca un controlador xHCI (USB 3, el de los PCs actuales), lo inicializa y
+;  enumera los dispositivos de los puertos:
+;   - la primera memoria USB (clase 08h, SCSI, Bulk-Only Transport), que se
+;     ofrece a DOS como una unidad nueva (FAT12/FAT16, con o sin particiones);
+;   - un teclado USB (HID, protocolo de arranque): las teclas se entregan como
+;     si vinieran del teclado PS/2 (orden D2h del controlador 8042), así que
+;     funcionan la BIOS, KEYB y todos los programas;
+;   - un ratón USB: se entrega a HSPRATON (INT 33h AX=48D0h) o, si no está,
+;     como paquetes PS/2 (orden D3h del 8042).
+;  Los informes del teclado y del ratón se recogen con la interrupción del
+;  reloj (INT 08h). Usa el modo real "irreal" para los registros del xHCI, así
+;  que no funciona en modo V86 (EMM386, Windows en modo extendido).
 ; =============================================================================
         cpu 486
         bits 16
@@ -24,13 +32,24 @@ EP0_RING    equ 0x0B00
 BIN_RING    equ 0x0C00
 BOUT_RING   equ 0x0D00
 ERST        equ 0x0E00
-DCBAA       equ 0x0E40
+DCBAA       equ 0x0E40                ; 4 slots
+KBD_BUF     equ 0x0E80
+MOU_BUF     equ 0x0EC0
 OUT_CTX     equ 0x1000
 CBW_BUF         equ 0x1800
 CSW_BUF         equ 0x1840
 DESC        equ 0x1880
+EP0_RING1   equ 0x1A00
+EP0_RING2   equ 0x1B00
+KINT_RING   equ 0x1C00
+MINT_RING   equ 0x1D00
 DATA        equ 0x2000
-MEM_SIZE    equ 0x3000
+OUT_CTX1    equ 0x3000
+OUT_CTX2    equ 0x3800
+MEM_SIZE    equ 0x4000
+MAX_SLOTS   equ 4
+REP_DELAY   equ 9                   ; repetición: 0,5 s y unas 9 por segundo
+REP_RATE    equ 2
 RING_TRBS   equ 16
 CHUNK_SECS  equ 8                   ; 4 KB por transferencia
 
@@ -70,6 +89,36 @@ bout_cyc    db 1
 evt_idx     db 0
 evt_cyc     db 1
 evt         times 16 db 0
+; dispositivo que se está enumerando (lo usa control)
+cur_slot    db 0
+            db 0
+cur_ep0     dw EP0_RING
+cur_st      dw ep0_idx
+; estado de EP0 de los otros dispositivos
+ep0_1       db 0, 1
+ep0_2       db 0, 1
+; teclado y ratón USB
+busy        db 1
+k_on        db 0
+k_slot      db 0
+k_dci       db 0
+k_len       dw 8
+kint_idx    db 0
+kint_cyc    db 1
+m_on        db 0
+m_slot      db 0
+m_dci       db 0
+            db 0
+m_len       dw 4
+mint_idx    db 0
+mint_cyc    db 1
+oldrep      times 8 db 0
+newrep      times 8 db 0
+rep_key     db 0
+rep_cnt     db 0
+old08       dd 0
+sv_gdtr     dw 0
+            dd 0
 gdtr        dw 15
             dd 0
 gdt_tbl     dq 0
@@ -88,6 +137,7 @@ interrupt:
         pushad
         push ds
         push es
+        mov byte [cs:busy], 1
         call unreal
         lds bx, [cs:req]
         mov al, [bx+2]
@@ -106,6 +156,7 @@ interrupt:
 .done:
         mov word [bx+3], 0x0100
 .out:
+        mov byte [cs:busy], 0
         pop es
         pop ds
         popad
@@ -383,16 +434,11 @@ put_trb:
         pop di
         ret
 
-; esperar un evento del tipo AL -> evt; CF si vence el plazo
-wait_event:
-        push ax
+; tomar el siguiente evento del anillo -> evt, AL = tipo; CF si no hay
+get_event:
         push bx
-        push cx
         push di
-        mov [cs:want], al
-        mov cx, 40                  ; ~2 s
-        call tmo_start
-.l:
+        push esi
         mov bx, EVT_RING
         call zone
         movzx di, byte [cs:evt_idx]
@@ -402,7 +448,6 @@ wait_event:
         and al, 1
         cmp al, [cs:evt_cyc]
         jne .none
-        ; copiar el evento y avanzar
         mov eax, [cs:di]
         mov [cs:evt], eax
         mov eax, [cs:di+4]
@@ -433,22 +478,47 @@ wait_event:
         mov eax, [cs:evt+12]
         shr eax, 10
         and al, 0x3F
+        pop esi
+        pop di
+        pop bx
+        clc
+        ret
+.none:
+        pop esi
+        pop di
+        pop bx
+        stc
+        ret
+
+; esperar un evento del tipo AL -> evt; CF si vence el plazo. Los informes
+; del teclado y del ratón que lleguen mientras tanto se atienden aquí.
+wait_event:
+        push ax
+        push cx
+        mov [cs:want], al
+        mov cx, 40                  ; ~2 s
+        call tmo_start
+.l:
+        call get_event
+        jc .none
+        cmp al, 32
+        jne .chk
+        call hid_event
+        jnc .l
+        mov al, 32
+.chk:
         cmp al, [cs:want]
         je .ok
         jmp .l
 .none:
         call tmo_check
         jnc .l
-        pop di
         pop cx
-        pop bx
         pop ax
         stc
         ret
 .ok:
-        pop di
         pop cx
-        pop bx
         pop ax
         clc
         ret
@@ -520,8 +590,8 @@ control:
         je .nodata
         or ebp, 3 << 16                     ; TRT = IN
 .nodata:
-        mov bx, EP0_RING
-        mov si, ep0_idx
+        mov bx, [cs:cur_ep0]
+        mov si, [cs:cur_st]
         call put_trb
         cmp word [cs:ctl_setup+6], 0
         je .status
@@ -531,7 +601,7 @@ control:
         xor edx, edx
         movzx ecx, word [cs:ctl_setup+6]
         mov ebp, (3 << 10) | (1 << 16)      ; Data, IN
-        mov bx, EP0_RING
+        mov bx, [cs:cur_ep0]
         call put_trb
 .status:
         xor eax, eax
@@ -542,11 +612,11 @@ control:
         jne .st
         or ebp, 1 << 16                     ; sin datos: estado IN
 .st:
-        mov bx, EP0_RING
-        mov si, ep0_idx
+        mov bx, [cs:cur_ep0]
+        mov si, [cs:cur_st]
         call put_trb
         mov al, 1
-        mov ah, [cs:slot]
+        mov ah, [cs:cur_slot]
         call doorbell
         call wait_xfer
         pop si
@@ -696,6 +766,407 @@ scsi_rw:
         pop bx
         ret
 
+; =============================================================================
+;  Teclado y ratón USB (HID, protocolo de arranque)
+; =============================================================================
+; evento de transferencia en evt: si es del teclado o del ratón se atiende y
+; se vuelve a pedir el siguiente informe; CF si no es suyo
+hid_event:
+        push ax
+        mov al, [cs:evt+14]
+        and al, 0x1F                ; endpoint
+        mov ah, [cs:evt+15]         ; slot
+        cmp byte [cs:k_on], 0
+        je .m
+        cmp ah, [cs:k_slot]
+        jne .m
+        cmp al, [cs:k_dci]
+        jne .m
+        call ev_ok
+        jc .kq
+        call kbd_report
+.kq:
+        call kbd_queue
+        pop ax
+        clc
+        ret
+.m:
+        cmp byte [cs:m_on], 0
+        je .no
+        cmp ah, [cs:m_slot]
+        jne .no
+        cmp al, [cs:m_dci]
+        jne .no
+        call ev_ok
+        jc .mq
+        call mouse_report
+.mq:
+        call mou_queue
+        pop ax
+        clc
+        ret
+.no:
+        pop ax
+        stc
+        ret
+; ¿transferencia correcta? (éxito o paquete corto)
+ev_ok:
+        cmp byte [cs:evt+11], 1
+        je .y
+        cmp byte [cs:evt+11], 13
+        je .y
+        stc
+        ret
+.y:
+        clc
+        ret
+
+; pedir el siguiente informe
+kbd_queue:
+        pushad
+        mov bx, KBD_BUF
+        call zone
+        call phys
+        xor edx, edx
+        movzx ecx, word [cs:k_len]
+        mov ebp, (1 << 10) | (1 << 5) | (1 << 2)    ; Normal, IOC, ISP
+        mov bx, KINT_RING
+        mov si, kint_idx
+        call put_trb
+        mov al, [cs:k_dci]
+        mov ah, [cs:k_slot]
+        call doorbell
+        popad
+        ret
+mou_queue:
+        pushad
+        mov bx, MOU_BUF
+        call zone
+        call phys
+        xor edx, edx
+        movzx ecx, word [cs:m_len]
+        mov ebp, (1 << 10) | (1 << 5) | (1 << 2)
+        mov bx, MINT_RING
+        mov si, mint_idx
+        call put_trb
+        mov al, [cs:m_dci]
+        mov ah, [cs:m_slot]
+        call doorbell
+        popad
+        ret
+
+; ---- teclado: comparar el informe con el anterior ----
+kbd_report:
+        pushad
+        mov bx, KBD_BUF
+        call zone
+        xor di, di
+.cp:
+        mov al, [cs:bx+di]
+        mov [cs:newrep+di], al
+        inc di
+        cmp di, 8
+        jb .cp
+        ; "demasiadas teclas" (01h): se ignora el informe
+        mov di, 2
+.ro:
+        cmp byte [cs:newrep+di], 1
+        je .r
+        inc di
+        cmp di, 8
+        jb .ro
+        ; modificadores
+        mov dl, [cs:newrep]
+        mov dh, [cs:oldrep]
+        xor bx, bx
+.mo:
+        mov al, dl
+        xor al, dh
+        bt ax, bx
+        jnc .mn
+        mov al, [cs:modtab+bx]
+        mov ah, 0x80                ; soltada
+        bt dx, bx
+        jnc .mb
+        xor ah, ah                  ; pulsada
+.mb:
+        call send_key
+.mn:
+        inc bx
+        cmp bx, 8
+        jb .mo
+        ; teclas soltadas
+        mov di, 2
+.rl:
+        mov al, [cs:oldrep+di]
+        cmp al, 4
+        jb .rn
+        mov si, newrep
+        call in_rep
+        jnc .rn
+        cmp al, [cs:rep_key]
+        jne .rk
+        mov byte [cs:rep_key], 0
+.rk:
+        call usage_code
+        mov ah, 0x80
+        call send_key
+.rn:
+        inc di
+        cmp di, 8
+        jb .rl
+        ; teclas pulsadas
+        mov di, 2
+.pl:
+        mov al, [cs:newrep+di]
+        cmp al, 4
+        jb .pn
+        mov si, oldrep
+        call in_rep
+        jnc .pn
+        mov [cs:rep_key], al
+        mov byte [cs:rep_cnt], REP_DELAY
+        call usage_code
+        xor ah, ah
+        call send_key
+.pn:
+        inc di
+        cmp di, 8
+        jb .pl
+        ; guardar
+        xor di, di
+.sv:
+        mov al, [cs:newrep+di]
+        mov [cs:oldrep+di], al
+        inc di
+        cmp di, 8
+        jb .sv
+.r:
+        popad
+        ret
+
+; ¿está la tecla AL en las posiciones 2-7 del informe CS:SI? CF si NO está
+in_rep:
+        push bx
+        mov bx, 2
+.l:
+        cmp al, [cs:si+bx]
+        je .y
+        inc bx
+        cmp bx, 8
+        jb .l
+        pop bx
+        stc
+        ret
+.y:
+        pop bx
+        clc
+        ret
+
+; uso HID AL -> AL = código de tecla (bit 7 = prefijo E0h; 0 = ninguno)
+usage_code:
+        cmp al, 0x65
+        ja .no
+        sub al, 4
+        jb .no
+        push bx
+        movzx bx, al
+        mov al, [cs:keytab+bx]
+        pop bx
+        ret
+.no:
+        xor al, al
+        ret
+
+; enviar la tecla AL (bit 7 = E0h) pulsada (AH = 0) o soltada (AH = 80h)
+send_key:
+        test al, al
+        jz .r
+        push ax
+        test al, 0x80
+        jz .n
+        mov al, 0xE0
+        call kbc_put
+.n:
+        pop ax
+        push ax
+        and al, 0x7F
+        or al, ah
+        call kbc_put
+        pop ax
+.r:
+        ret
+
+; poner AL en el búfer de salida del 8042 como si viniera del teclado
+; (orden D2h) o del ratón PS/2 (orden D3h)
+kbc_put:
+        push bx
+        mov bl, 0xD2
+        call kbc_out
+        pop bx
+        ret
+kbc_aux:
+        push bx
+        mov bl, 0xD3
+        call kbc_out
+        pop bx
+        ret
+kbc_out:
+        push cx
+        push ax
+        sti
+        call kbc_drain              ; que se haya leído el anterior
+        call kbc_ibf
+        mov al, bl
+        out 0x64, al
+        call kbc_ibf
+        pop ax
+        push ax
+        out 0x60, al
+        call kbc_drain              ; IRQ 1 / 12: la BIOS lo lee
+        pop ax
+        pop cx
+        ret
+kbc_ibf:
+        push ax
+        mov cx, 0xFFFF
+.l:
+        in al, 0x64
+        test al, 2
+        jz .r
+        loop .l
+.r:
+        pop ax
+        ret
+kbc_drain:
+        push ax
+        mov cx, 0xFFFF
+.l:
+        in al, 0x64
+        test al, 1
+        jz .r
+        loop .l
+.r:
+        pop ax
+        ret
+
+; ---- ratón ----
+mouse_report:
+        pushad
+        push es
+        mov bx, MOU_BUF
+        call zone
+        mov si, bx
+        movzx bx, byte [cs:si]      ; botones
+        and bl, 7
+        movsx cx, byte [cs:si+1]    ; x
+        movsx dx, byte [cs:si+2]    ; y (positivo hacia abajo)
+        ; ¿está HSPRATON?
+        xor ax, ax
+        mov es, ax
+        cmp dword [es:0x33*4], 0
+        je .ps2
+        push bx
+        push cx
+        push dx
+        mov ax, 0x48D2
+        int 0x33
+        pop dx
+        pop cx
+        pop bx
+        cmp ax, 0x5253
+        jne .ps2
+        mov ax, 0x48D0
+        int 0x33
+        jmp .r
+.ps2:
+        ; paquete PS/2: botones | 08h | signos, x, y (positivo hacia arriba)
+        neg dx
+        mov al, bl
+        or al, 8
+        test cx, cx
+        jns .sx
+        or al, 0x10
+.sx:
+        test dx, dx
+        jns .sy
+        or al, 0x20
+.sy:
+        call kbc_aux
+        mov al, cl
+        call kbc_aux
+        mov al, dl
+        call kbc_aux
+.r:
+        pop es
+        popad
+        ret
+
+; ---- INT 08h: recoger informes y repetir la tecla mantenida ----
+int08:
+        pushf
+        call far [cs:old08]
+        cmp byte [cs:busy], 0
+        jne .ret
+        mov byte [cs:busy], 1
+        sti
+        pushad
+        push ds
+        push es
+        push fs
+        smsw ax
+        test al, 1
+        jnz .out                    ; modo V86: no se puede
+        sgdt [cs:sv_gdtr]
+        call unreal
+.ev:
+        call get_event
+        jc .rep
+        cmp al, 32
+        jne .ev
+        call hid_event
+        jmp .ev
+.rep:
+        cmp byte [cs:rep_key], 0
+        je .g
+        dec byte [cs:rep_cnt]
+        jnz .g
+        mov byte [cs:rep_cnt], REP_RATE
+        mov al, [cs:rep_key]
+        call usage_code
+        xor ah, ah
+        call send_key
+.g:
+        cli
+        lgdt [cs:sv_gdtr]
+.out:
+        pop fs
+        pop es
+        pop ds
+        popad
+        mov byte [cs:busy], 0
+.ret:
+        iret
+
+; códigos de tecla (juego 1 del PC) de los usos HID 04h-65h; bit 7 = E0h
+keytab:
+        db 0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23  ; a-h
+        db 0x17, 0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19  ; i-p
+        db 0x10, 0x13, 0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D  ; q-x
+        db 0x15, 0x2C                                      ; y z
+        db 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B  ; 1-0
+        db 0x1C, 0x01, 0x0E, 0x0F, 0x39                    ; Intro Esc Retroceso Tab Espacio
+        db 0x0C, 0x0D, 0x1A, 0x1B, 0x2B, 0x2B, 0x27, 0x28  ; - = [ ] \ # ; '
+        db 0x29, 0x33, 0x34, 0x35, 0x3A                    ; ` , . / BloqMayús
+        db 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58 ; F1-F12
+        db 0xB7, 0x46, 0x00                                ; ImprPant BloqDespl Pausa
+        db 0xD2, 0xC7, 0xC9, 0xD3, 0xCF, 0xD1              ; Insert Inicio RePág Supr Fin AvPág
+        db 0xCD, 0xCB, 0xD0, 0xC8                          ; flechas: der izq abajo arriba
+        db 0x45, 0xB5, 0x37, 0x4A, 0x4E, 0x9C              ; BloqNum / * - + Intro (numérico)
+        db 0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48, 0x49, 0x52, 0x53 ; 1-9 0 . (numérico)
+        db 0x56, 0xDD                                      ; < > (teclado español), Aplicación
+modtab  db 0x1D, 0x2A, 0x38, 0xDB, 0x9D, 0x36, 0xB8, 0xDC  ; Ctrl Mayús Alt Win (izq, der)
+
 resident_end:
 
 ; =============================================================================
@@ -738,17 +1209,17 @@ init:
         jc .fail
         call usb_enum
         jc .fail
+        mov byte [units], 0
+        cmp byte [disk_found], 0
+        je .hid
         call disk_setup
-        jc .fail
-        ; respuesta al núcleo: una unidad, BPB y memoria residente
+        jnc .disk
+        mov si, [fail_msg]
+        call puts
+        jmp .hid
+.disk:
+        mov byte [units], 1
         lds bx, [cs:req]
-        mov byte [bx+0x0D], 1
-        mov ax, [cs:mem_off]
-        add ax, MEM_SIZE
-        mov [bx+0x0E], ax
-        mov [bx+0x10], cs
-        mov word [bx+0x12], bpbarr
-        mov [bx+0x14], cs
         mov al, [bx+0x16]
         add al, 'A'
         mov [cs:msg_drv], al
@@ -760,6 +1231,45 @@ init:
         call putdec
         mov si, msg_mbas
         call puts
+.hid:
+        mov al, [k_on]
+        or al, [m_on]
+        jnz .hok
+        cmp byte [units], 0
+        je .fail
+        jmp .resp
+.hok:
+        cmp byte [k_on], 0
+        je .h1
+        mov si, msg_kbd
+        call puts
+        call kbd_queue
+.h1:
+        cmp byte [m_on], 0
+        je .h2
+        mov si, msg_mouse
+        call puts
+        call mou_queue
+.h2:
+        ; reloj: recoger los informes
+        mov ax, 0x3508
+        int 0x21
+        mov [old08], bx
+        mov [old08+2], es
+        mov dx, int08
+        mov ax, 0x2508
+        int 0x21
+.resp:
+        ; respuesta al núcleo: unidades, BPB y memoria residente
+        lds bx, [cs:req]
+        mov al, [cs:units]
+        mov [bx+0x0D], al
+        mov ax, [cs:mem_off]
+        add ax, MEM_SIZE
+        mov [bx+0x0E], ax
+        mov [bx+0x10], cs
+        mov word [bx+0x12], bpbarr
+        mov [bx+0x14], cs
         jmp .done
 .fail:
         push cs
@@ -773,6 +1283,7 @@ init:
 .done:
         lds bx, [cs:req]
         mov word [bx+3], 0x0100
+        mov byte [cs:busy], 0
         pop es
         pop ds
         popad
@@ -926,10 +1437,10 @@ xhci_setup:
         call tmo_check
         jnc .cnr
 .ready:
-        ; un slot, DCBAA, anillo de órdenes y anillo de eventos
+        ; slots, DCBAA, anillo de órdenes y anillo de eventos
         mov esi, [op_base]
         add esi, 0x38
-        mov eax, 1
+        mov eax, MAX_SLOTS
         call mwr
         mov bx, DCBAA
         call zone
@@ -1047,7 +1558,7 @@ legacy_handoff:
         clc
         ret
 
-; ---- puertos y enumeración del primer dispositivo de almacenamiento ----
+; ---- puertos: enumerar todos los dispositivos conectados ----
 usb_enum:
         mov word [fail_msg], msg_nodev
         ; dar tiempo a que los puertos se estabilicen
@@ -1056,12 +1567,14 @@ usb_enum:
 .wt:
         call tmo_check
         jnc .wt
-        mov byte [port], 0
+        mov byte [npool], 0
         xor cl, cl
 .pl:
         inc cl
         cmp cl, [maxports]
-        ja .noport
+        ja .end
+        cmp byte [npool], 3
+        jae .end
         movzx esi, cl
         dec esi
         shl esi, 4
@@ -1099,11 +1612,40 @@ usb_enum:
         shr eax, 10
         and al, 0x0F
         mov [speed], al
-        jmp .slot
-.noport:
+        push cx
+        call enum_one
+        pop cx
+        jmp .pl
+.end:
+        mov al, [disk_found]
+        or al, [k_on]
+        or al, [m_on]
+        jz .none
+        clc
+        ret
+.none:
         stc
         ret
-.slot:
+
+; enumerar el dispositivo de [port] con la entrada [npool] de la reserva
+enum_one:
+        movzx bx, byte [npool]
+        shl bx, 1
+        mov ax, [pool_ep0+bx]
+        mov [cur_ep0], ax
+        mov ax, [pool_st+bx]
+        mov [cur_st], ax
+        mov ax, [pool_out+bx]
+        mov [cur_out], ax
+        mov si, [cur_st]
+        mov byte [si], 0
+        mov byte [si+1], 1
+        mov bx, [cur_ep0]
+        mov cx, 0x100
+        call zero_zone
+        mov bx, [cur_out]
+        mov cx, 0x800
+        call zero_zone
         cmp byte [opt_verbose], 0
         je .q1
         mov si, msg_port
@@ -1124,12 +1666,12 @@ usb_enum:
         call xhci_cmd
         mov word [fail_msg], msg_slot
         jc .err
-        mov [slot], ah
+        mov [cur_slot], ah
         ; DCBAA[slot] = contexto de salida
-        mov bx, OUT_CTX
+        mov bx, [cur_out]
         call zone
         call phys
-        movzx di, byte [slot]
+        movzx di, byte [cur_slot]
         shl di, 3
         mov bx, DCBAA
         call zone
@@ -1159,11 +1701,12 @@ usb_enum:
         jb .m
         mov eax, 512
 .m:
+        mov [mps0], ax
         shl eax, 16
         or eax, (3 << 1) | (4 << 3)             ; CErr=3, tipo Control
         mov [cs:bx+4], eax
         push bx
-        mov bx, EP0_RING
+        mov bx, [cur_ep0]
         call zone
         call phys
         pop bx
@@ -1177,23 +1720,59 @@ usb_enum:
         call phys
         xor edx, edx
         xor ecx, ecx
-        movzx ebp, byte [slot]
+        movzx ebp, byte [cur_slot]
         shl ebp, 24
         or ebp, 11 << 10
         call xhci_cmd
         mov word [fail_msg], msg_addr
-        jc .err
-        ; descriptor de dispositivo
+        jc .dis
+        ; descriptor de dispositivo: primero 8 bytes (tamaño de paquete de EP0)
+        mov dword [ctl_setup], 0x01000680
+        mov dword [ctl_setup+4], 0x00080000
+        call control
+        mov word [fail_msg], msg_desc
+        jc .dis
+        cmp byte [speed], 4
+        jae .full
+        mov bx, DESC
+        call zone
+        movzx ax, byte [cs:bx+7]
+        cmp ax, 8
+        jb .full
+        cmp ax, [mps0]
+        je .full
+        mov [mps0], ax
+        ; Evaluate Context con el tamaño de paquete real
+        call clear_in
+        mov bx, IN_CTX
+        call zone
+        mov dword [cs:bx+4], 2                  ; A1
+        add bx, [ctx_sz]
+        add bx, [ctx_sz]
+        movzx eax, word [mps0]
+        shl eax, 16
+        or eax, (3 << 1) | (4 << 3)
+        mov [cs:bx+4], eax
+        mov bx, IN_CTX
+        call zone
+        call phys
+        xor edx, edx
+        xor ecx, ecx
+        movzx ebp, byte [cur_slot]
+        shl ebp, 24
+        or ebp, 13 << 10
+        call xhci_cmd
+        jc .dis
+.full:
         mov dword [ctl_setup], 0x01000680
         mov dword [ctl_setup+4], 0x00120000
         call control
-        mov word [fail_msg], msg_desc
-        jc .err
+        jc .dis
         ; descriptor de configuración: primero 9 bytes, después entero
         mov dword [ctl_setup], 0x02000680
         mov dword [ctl_setup+4], 0x00090000
         call control
-        jc .err
+        jc .dis
         mov bx, DESC
         call zone
         mov ax, [cs:bx+2]
@@ -1203,11 +1782,59 @@ usb_enum:
 .tl:
         mov [ctl_setup+6], ax
         call control
-        jc .err
+        jc .dis
         call parse_config
-        mov word [fail_msg], msg_notmsc
-        jc .err
-        ; SET_CONFIGURATION
+        ; ¿qué papel tiene?
+        cmp byte [p_msc], 0
+        je .hid
+        cmp byte [disk_found], 0
+        jne .hid
+        call role_disk
+        jc .dis
+        jmp .used
+.hid:
+        mov byte [want_k], 0
+        mov byte [want_m], 0
+        cmp byte [p_kbd], 0
+        je .hm
+        cmp byte [k_on], 0
+        jne .hm
+        mov byte [want_k], 1
+.hm:
+        cmp byte [p_mou], 0
+        je .hc
+        cmp byte [m_on], 0
+        jne .hc
+        mov byte [want_m], 1
+.hc:
+        mov al, [want_k]
+        or al, [want_m]
+        jz .dis
+        call role_hid
+        jc .dis
+.used:
+        inc byte [npool]
+        ret
+.dis:
+        ; no se usa: liberar el slot
+        xor eax, eax
+        xor edx, edx
+        xor ecx, ecx
+        movzx ebp, byte [cur_slot]
+        shl ebp, 24
+        or ebp, 10 << 10
+        call xhci_cmd
+        movzx di, byte [cur_slot]
+        shl di, 3
+        mov bx, DCBAA
+        call zone
+        add di, bx
+        mov dword [cs:di], 0
+.err:
+        ret
+
+; SET_CONFIGURATION con el valor del descriptor de configuración en DESC
+set_config:
         mov bx, DESC
         call zone
         movzx eax, byte [cs:bx+5]
@@ -1216,8 +1843,23 @@ usb_enum:
         mov [ctl_setup], eax
         mov dword [ctl_setup+4], 0
         call control
+        ret
+
+; memoria USB: endpoints bulk
+role_disk:
+        call set_config
         mov word [fail_msg], msg_cfg
         jc .err
+        mov al, [cur_slot]
+        mov [slot], al
+        mov al, [t_in]
+        mov [dci_in], al
+        mov al, [t_out]
+        mov [dci_out], al
+        mov ax, [t_mps_in]
+        mov [mps_in], ax
+        mov ax, [t_mps_out]
+        mov [mps_out], ax
         ; Configure Endpoint: bulk IN y bulk OUT
         call clear_in
         mov bx, IN_CTX
@@ -1246,6 +1888,8 @@ usb_enum:
         movzx eax, byte [port]
         shl eax, 16
         mov [cs:bx+4], eax
+        mov byte [ep_ival], 0
+        mov dword [ep_d4], 1024
         mov al, [dci_in]
         mov dx, BIN_RING
         mov cx, [mps_in]
@@ -1256,22 +1900,207 @@ usb_enum:
         mov cx, [mps_out]
         mov ah, 2                               ; bulk OUT
         call set_ep
+        call cfg_ep_cmd
+        mov word [fail_msg], msg_epcfg
+        jc .err
+        mov byte [disk_found], 1
+        clc
+.err:
+        ret
+
+; Configure Endpoint del slot actual con el contexto de entrada
+cfg_ep_cmd:
         mov bx, IN_CTX
         call zone
         call phys
         xor edx, edx
         xor ecx, ecx
-        movzx ebp, byte [slot]
+        movzx ebp, byte [cur_slot]
         shl ebp, 24
         or ebp, 12 << 10
         call xhci_cmd
-        mov word [fail_msg], msg_epcfg
+        ret
+
+; teclado y/o ratón (want_k, want_m): protocolo de arranque y endpoints
+role_hid:
+        call set_config
         jc .err
+        cmp byte [want_k], 0
+        je .m1
+        movzx eax, byte [pk_if]
+        call set_boot
+.m1:
+        cmp byte [want_m], 0
+        je .m2
+        movzx eax, byte [pm_if]
+        call set_boot
+.m2:
+        ; endpoints de interrupción
+        call clear_in
+        mov bx, IN_CTX
+        call zone
+        mov eax, 1
+        xor dl, dl                              ; DCI mayor
+        cmp byte [want_k], 0
+        je .a1
+        mov cl, [pk_dci]
+        bts eax, ecx
+        mov dl, cl
+.a1:
+        cmp byte [want_m], 0
+        je .a2
+        mov cl, [pm_dci]
+        bts eax, ecx
+        cmp cl, dl
+        jbe .a2
+        mov dl, cl
+.a2:
+        mov [cs:bx+4], eax
+        add bx, [ctx_sz]
+        movzx eax, dl
+        shl eax, 27
+        movzx edx, byte [speed]
+        shl edx, 20
+        or eax, edx
+        mov [cs:bx], eax
+        movzx eax, byte [port]
+        shl eax, 16
+        mov [cs:bx+4], eax
+        cmp byte [want_k], 0
+        je .e1
+        mov al, [pk_ival]
+        call calc_ival
+        mov [ep_ival], al
+        movzx eax, word [pk_mps]
+        mov edx, eax
+        shl edx, 16
+        or eax, edx
+        mov [ep_d4], eax
+        mov al, [pk_dci]
+        mov dx, KINT_RING
+        mov cx, [pk_mps]
+        mov ah, 7                               ; interrupción IN
+        call set_ep
+.e1:
+        cmp byte [want_m], 0
+        je .e2
+        mov al, [pm_ival]
+        call calc_ival
+        mov [ep_ival], al
+        movzx eax, word [pm_mps]
+        mov edx, eax
+        shl edx, 16
+        or eax, edx
+        mov [ep_d4], eax
+        mov al, [pm_dci]
+        mov dx, MINT_RING
+        mov cx, [pm_mps]
+        mov ah, 7
+        call set_ep
+.e2:
+        call cfg_ep_cmd
+        jc .err
+        mov al, [cur_slot]
+        cmp byte [want_k], 0
+        je .o1
+        mov [k_slot], al
+        mov ah, [pk_dci]
+        mov [k_dci], ah
+        mov cx, [pk_mps]
+        call cap_len
+        mov [k_len], cx
+        mov byte [k_on], 1
+.o1:
+        cmp byte [want_m], 0
+        je .o2
+        mov [m_slot], al
+        mov ah, [pm_dci]
+        mov [m_dci], ah
+        mov cx, [pm_mps]
+        call cap_len
+        mov [m_len], cx
+        mov byte [m_on], 1
+.o2:
         clc
-        ret
 .err:
-        stc
         ret
+cap_len:
+        cmp cx, 64
+        jbe .r
+        mov cx, 64
+.r:
+        ret
+
+; SET_PROTOCOL (arranque) y SET_IDLE (0) a la interfaz EAX; los errores no
+; importan (hay dispositivos que no admiten SET_IDLE)
+set_boot:
+        push eax
+        shl eax, 0
+        mov dword [ctl_setup], 0x00000B21
+        mov [ctl_setup+4], eax
+        call control
+        pop eax
+        mov dword [ctl_setup], 0x00000A21
+        mov [ctl_setup+4], eax
+        call control
+        ret
+
+; bInterval AL -> exponente del intervalo del xHCI (AL)
+calc_ival:
+        cmp byte [speed], 3
+        jae .hs
+        mov ah, 3                   ; FS/LS: milisegundos -> 2^n * 125 us
+.l:
+        cmp al, 1
+        jbe .d
+        shr al, 1
+        inc ah
+        jmp .l
+.d:
+        cmp ah, 10
+        jbe .k
+        mov ah, 10
+.k:
+        mov al, ah
+        ret
+.hs:
+        test al, al
+        jz .r
+        dec al
+        cmp al, 15
+        jbe .r
+        mov al, 15
+.r:
+        ret
+
+; poner a cero CX bytes de la zona desde BX
+zero_zone:
+        push di
+        push es
+        call zone
+        mov di, bx
+        push cs
+        pop es
+        xor al, al
+        cld
+        rep stosb
+        pop es
+        pop di
+        ret
+
+npool       db 0
+want_k      db 0
+want_m      db 0
+disk_found  db 0
+            db 0
+mps0        dw 8
+cur_out     dw OUT_CTX
+pool_ep0    dw EP0_RING, EP0_RING1, EP0_RING2
+pool_st     dw ep0_idx, ep0_1, ep0_2
+pool_out    dw OUT_CTX, OUT_CTX1, OUT_CTX2
+ep_ival     db 0
+            db 0
+ep_d4       dd 1024
 
 clear_in:
         push di
@@ -1312,18 +2141,29 @@ set_ep:
         or al, 1
         mov [cs:bx+8], eax
         mov dword [cs:bx+12], 0
-        mov dword [cs:bx+16], 1024
+        mov eax, [cs:ep_d4]
+        mov [cs:bx+16], eax
+        movzx eax, byte [cs:ep_ival]
+        shl eax, 16
+        mov [cs:bx], eax
         pop bx
         ret
 
-; buscar interfaz de almacenamiento masivo (08/06/50) y sus endpoints bulk
+; recorrer el descriptor de configuración: memoria (08/06/50, bulk), teclado
+; (03/01/01) y ratón (03/01/02) con su endpoint de interrupción de entrada
 parse_config:
         mov bx, DESC
         call zone
         mov si, bx
         movzx cx, byte [ctl_setup+6]
         add cx, bx
-        mov byte [found], 0
+        xor ax, ax
+        mov [p_msc], al
+        mov [p_kbd], al
+        mov [p_mou], al
+        mov [t_in], al
+        mov [t_out], al
+        mov [ifk], al
 .l:
         cmp si, cx
         jae .end
@@ -1333,53 +2173,118 @@ parse_config:
         mov ah, [cs:si+1]
         cmp ah, 4                   ; interfaz
         jne .ep
-        mov byte [found], 0
+        mov byte [ifk], 0
+        mov al, [cs:si+2]
+        mov [ifn], al
         cmp byte [cs:si+5], 8
-        jne .n
+        jne .hid
         cmp byte [cs:si+6], 6
         jne .n
         cmp byte [cs:si+7], 0x50
         jne .n
-        mov byte [found], 1
+        mov byte [ifk], 1
+        jmp .n
+.hid:
+        cmp byte [cs:si+5], 3
+        jne .n
+        cmp byte [cs:si+6], 1       ; subclase de arranque
+        jne .n
+        mov al, [cs:si+7]
+        cmp al, 1
+        jb .n
+        cmp al, 2
+        ja .n
+        inc al
+        mov [ifk], al               ; 2 teclado, 3 ratón
         jmp .n
 .ep:
         cmp ah, 5                   ; endpoint
         jne .n
-        cmp byte [found], 1
-        jne .n
-        mov dl, [cs:si+3]
-        and dl, 3
-        cmp dl, 2                   ; bulk
-        jne .n
-        mov dl, [cs:si+2]
+        mov dl, [cs:si+2]           ; dirección
         mov dh, dl
         and dh, 0x0F
         shl dh, 1                   ; DCI = 2 * número (+1 si es de entrada)
-        mov di, [cs:si+4]
         test dl, 0x80
         jz .o
         inc dh
-        mov [dci_in], dh
-        mov [mps_in], di
-        jmp .n
 .o:
-        mov [dci_out], dh
-        mov [mps_out], di
+        mov di, [cs:si+4]
+        and di, 0x7FF
+        mov al, [cs:si+3]
+        and al, 3
+        cmp byte [ifk], 1
+        jne .ek
+        cmp al, 2                   ; bulk
+        jne .n
+        test dl, 0x80
+        jz .bo
+        mov [t_in], dh
+        mov [t_mps_in], di
+        jmp .n
+.bo:
+        mov [t_out], dh
+        mov [t_mps_out], di
+        jmp .n
+.ek:
+        cmp al, 3                   ; interrupción
+        jne .n
+        test dl, 0x80
+        jz .n
+        mov al, [cs:si+6]           ; bInterval
+        cmp byte [ifk], 2
+        jne .em
+        cmp byte [p_kbd], 0
+        jne .n
+        mov [pk_dci], dh
+        mov [pk_mps], di
+        mov [pk_ival], al
+        mov ah, [ifn]
+        mov [pk_if], ah
+        mov byte [p_kbd], 1
+        jmp .n
+.em:
+        cmp byte [ifk], 3
+        jne .n
+        cmp byte [p_mou], 0
+        jne .n
+        mov [pm_dci], dh
+        mov [pm_mps], di
+        mov [pm_ival], al
+        mov ah, [ifn]
+        mov [pm_if], ah
+        mov byte [p_mou], 1
 .n:
         movzx ax, byte [cs:si]
         add si, ax
         jmp .l
 .end:
-        cmp byte [dci_in], 0
-        je .no
-        cmp byte [dci_out], 0
-        je .no
-        clc
+        cmp byte [t_in], 0
+        je .r
+        cmp byte [t_out], 0
+        je .r
+        mov byte [p_msc], 1
+.r:
         ret
-.no:
-        stc
-        ret
-found       db 0
+ifk         db 0
+ifn         db 0
+p_msc       db 0
+p_kbd       db 0
+p_mou       db 0
+t_in        db 0
+t_out       db 0
+            db 0
+t_mps_in    dw 0
+t_mps_out   dw 0
+pk_dci      db 0
+pk_ival     db 0
+pk_if       db 0
+            db 0
+pk_mps      dw 0
+pm_dci      db 0
+pm_ival     db 0
+pm_if       db 0
+            db 0
+pm_mps      dw 0
 
 ; ---- disco: capacidad, partición y BPB ----
 disk_setup:
@@ -1566,6 +2471,9 @@ msg_found   db "Controlador xHCI en ", 0
 msg_port    db "Dispositivo en el puerto ", 0
 msg_speed   db ", velocidad ", 0
 msg_disk    db "Disco USB: ", 0
+msg_kbd     db "Teclado USB preparado.", 13, 10, 0
+msg_mouse   db "Ratón USB preparado.", 13, 10, 0
+units       db 0
 msg_mbas    db " MB en la unidad "
 msg_drv     db "?:", 13, 10, 0
 msg_nox     db "No se ha encontrado ningún controlador xHCI (USB 3).", 13, 10, 0
@@ -1574,11 +2482,10 @@ msg_high    db "Los registros del xHCI están por encima de 4 GB: no se admite."
 msg_bios    db "La BIOS está usando el controlador USB (teclado USB o unidad de", 13, 10
             db "arranque). Use /F para tomarlo igualmente.", 13, 10, 0
 msg_reset   db "El controlador xHCI no se reinicia.", 13, 10, 0
-msg_nodev   db "No hay ningún dispositivo USB conectado.", 13, 10, 0
+msg_nodev   db "No hay ninguna memoria, teclado ni ratón USB conectado.", 13, 10, 0
 msg_slot    db "USB: ha fallado Enable Slot.", 13, 10, 0
 msg_addr    db "USB: ha fallado Address Device.", 13, 10, 0
 msg_desc    db "USB: no se pueden leer los descriptores.", 13, 10, 0
-msg_notmsc  db "El dispositivo USB no es de almacenamiento masivo.", 13, 10, 0
 msg_cfg     db "USB: ha fallado Set Configuration.", 13, 10, 0
 msg_epcfg   db "USB: ha fallado Configure Endpoint.", 13, 10, 0
 msg_scsi    db "El disco USB no responde.", 13, 10, 0
