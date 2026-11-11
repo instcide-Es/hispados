@@ -6031,6 +6031,23 @@ int21:
         inc si
         loop .tl
 .te:
+        ; 4Bh: también la línea de órdenes (ES:BX -> bloque, +2 = cola)
+        cmp byte [F_AH], 0x4B
+        jne .tt
+        mov al, '|'
+        call ser_putc
+        mov es, [F_ES]
+        mov si, [F_BX]
+        les si, [es:si+2]
+        movzx cx, byte [es:si]
+        jcxz .tt
+        inc si
+.tq:
+        mov al, [es:si]
+        call ser_putc
+        inc si
+        loop .tq
+.tt:
         pop cx
         pop si
         pop es
