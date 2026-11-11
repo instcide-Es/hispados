@@ -19,7 +19,13 @@ start:
         mov ah, 0x4A                ; reducir nuestro bloque y dejar memoria
         int 0x21
         mov byte [echo_on], 1
+        mov word [sv_in], 0xFFFF
+        mov word [sv_out], 0xFFFF
         call env_init
+        ; Ctrl+C: nuestro manejador (lo heredan los programas que lanzamos)
+        mov dx, ctrlc_handler
+        mov ax, 0x2523
+        int 0x21
         ; opciones: /P (intérprete principal) y /C orden
         mov si, 0x81
 .opt:
@@ -116,6 +122,40 @@ main_loop:
 .exit:
         mov al, [errlvl]
         mov ah, 0x4C
+        int 0x21
+
+; Ctrl+C: si corre un programa, terminarlo; si no, cancelar el lote y la
+; línea y volver al indicador
+ctrlc_handler:
+        push ax
+        push bx
+        push ds
+        mov ax, cs
+        mov ds, ax
+        mov ah, 0x62
+        int 0x21
+        cmp bx, ax
+        jne .child
+        pop ds
+        pop bx
+        pop ax
+        mov ax, cs
+        mov ds, ax
+        mov es, ax
+        cli
+        mov ss, ax
+        mov sp, stack_top
+        sti
+        call redir_restore
+        mov byte [bdepth], 0
+        mov byte [echo_on], 1
+        mov byte [call_flag], 0
+        jmp main_loop
+.child:
+        pop ds
+        pop bx
+        pop ax
+        mov ax, 0x4C03
         int 0x21
 
 ; -----------------------------------------------------------------------------

@@ -5,6 +5,9 @@ B      = build
 IMG    = $(B)/hispados.img
 HDD    = $(B)/hdd.img
 NFLAGS = -f bin -i lib/
+ifdef TRACE
+KFLAGS = -DTRACE
+endif
 
 all: $(IMG)
 
@@ -18,7 +21,7 @@ $(B)/boot16.bin: boot/boot16.asm | $(B)
 $(B)/mbr.bin: boot/mbr.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/KERNEL.SYS: kernel/kernel.asm | $(B)
-	$(NASM) $(NFLAGS) -o $@ $<
+	$(NASM) $(NFLAGS) $(KFLAGS) -o $@ $<
 $(B)/COMMAND.COM: shell/command.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/FDISK.COM: utils/fdisk.asm lib/util.inc $(B)/mbr.bin | $(B)

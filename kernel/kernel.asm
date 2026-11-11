@@ -84,6 +84,14 @@ E_NOMORE        equ 18
 
 NPATH_MAX       equ 66
 PATHLEN         equ 68
+SDA_LEN         equ 0x80
+%define indos     sda+0x01
+%define last_err  sda+0x04
+%define dta_off   sda+0x0C
+%define dta_seg   sda+0x0E
+%define cur_psp   sda+0x10
+%define last_ret  sda+0x14
+%define cur_drive sda+0x16
 CFG_MAX         equ 4096
 SET_MAX         equ 512
 INST_MAX        equ 256
@@ -1302,6 +1310,11 @@ line_input:
         je .bs
         cmp al, 27
         je .esc
+        cmp al, 3
+        jne .nc
+        cmp byte [indos], 0
+        jne do_ctrlc
+.nc:
         cmp al, 0x1A
         je .store
         cmp al, 32
@@ -4300,7 +4313,24 @@ int21:
         mov ax, KSEG
         mov ds, ax
         inc byte [indos]
+        mov ax, [cur_psp]
+        cmp ax, 0x40
+        jb .nosave
+        push es
+        mov es, ax
+        mov [es:0x2E], bp
+        mov [es:0x30], ss
+        pop es
+.nosave:
         and byte [F_FL], 0xFE
+%ifdef TRACE
+        mov al, '['
+        call ser_putc
+        mov al, [F_AH]
+        call trace_hex
+        mov al, [F_AL]
+        call trace_hex
+%endif
         movzx bx, byte [F_AH]
         cmp bx, MAXFN
         ja .bad
@@ -4310,6 +4340,21 @@ int21:
 .bad:
         call fn_unsup
 i21_ret:
+%ifdef TRACE
+        mov al, '='
+        call ser_putc
+        mov al, [F_AH]
+        call trace_hex
+        mov al, [F_AL]
+        call trace_hex
+        test byte [F_FL], 1
+        jz .tnc
+        mov al, 'C'
+        call ser_putc
+.tnc:
+        mov al, ']'
+        call ser_putc
+%endif
         call fat_flush
         dec byte [indos]
         pop ax
@@ -4322,6 +4367,23 @@ i21_ret:
         pop ds
         pop es
         iret
+
+%ifdef TRACE
+; AL -> dos cifras hexadecimales por el puerto serie
+trace_hex:
+        push ax
+        shr al, 4
+        call .d
+        pop ax
+        and al, 15
+.d:
+        add al, '0'
+        cmp al, '9'
+        jbe .o
+        add al, 7
+.o:
+        jmp ser_putc
+%endif
 
 ret_err:
         mov [F_AX], ax
@@ -4354,6 +4416,8 @@ fn_31:
 ; ---- consola ----
 fn_01:
         call std_in
+        cmp al, 3
+        je do_ctrlc
         mov [F_AL], al
         jmp std_out
 fn_02:
@@ -4373,8 +4437,13 @@ fn_06:
         mov byte [F_AL], 0
         or byte [F_FL], 0x40
         ret
-fn_07:
 fn_08:
+        call std_in
+        cmp al, 3
+        je do_ctrlc
+        mov [F_AL], al
+        ret
+fn_07:
         call std_in
         mov [F_AL], al
         ret
@@ -4655,13 +4724,21 @@ fn_33:
         mov al, [F_AL]
         cmp al, 0
         je .get
+        cmp al, 1
+        je .set
         cmp al, 5
         je .boot
         cmp al, 6
         je .ver
         ret
 .get:
-        mov byte [F_DL], 0
+        mov al, [break_flag]
+        mov [F_DL], al
+        ret
+.set:
+        mov al, [F_DL]
+        and al, 1
+        mov [break_flag], al
         ret
 .boot:
         mov byte [F_DL], 1
@@ -4712,12 +4789,20 @@ fn_58:
         test al, al
         jz .g
         cmp al, 2
-        jne .r
-        mov byte [F_AL], 0
-.r:
+        je .link
+        cmp al, 3
+        je .nolink
         ret
+.link:
+        mov byte [F_AL], 0
+        ret
+.nolink:
+        ; sin memoria superior (UMB) no se puede enlazar
+        mov ax, E_FUNC
+        jmp ret_err
 .g:
         mov word [F_AX], 0
+.r:
         ret
 fn_59:
         mov ax, [last_err]
@@ -5766,6 +5851,266 @@ fn_68:
 .r:
         ret
 
+; ---- 26h / 55h: crear PSP ----
+fn_26:
+        mov es, [F_DX]
+        push ds
+        mov ds, [cur_psp]
+        xor si, si
+        xor di, di
+        mov cx, 0x80
+        rep movsw
+        pop ds
+        mov word [es:0x34], 0x18
+        mov [es:0x36], es
+        ret
+fn_55:
+        mov es, [F_DX]
+        push ds
+        mov ds, [cur_psp]
+        xor si, si
+        xor di, di
+        mov cx, 0x80
+        rep movsw
+        pop ds
+        mov ax, [F_SI]
+        mov [es:2], ax
+        mov ax, [cur_psp]
+        mov [es:0x16], ax
+        mov word [es:0x32], 20
+        mov word [es:0x34], 0x18
+        mov [es:0x36], es
+        ; los handles heredados cuentan una referencia más
+        mov di, 0x18
+        mov cx, 20
+.inh:
+        movzx bx, byte [es:di]
+        cmp bx, NSFT
+        jae .ni
+        shl bx, 5
+        inc byte [sft_table+bx+SFT_REF]
+.ni:
+        inc di
+        loop .inh
+        mov ax, es
+        mov [cur_psp], ax
+        mov byte [F_AL], 0xF0
+        ret
+
+; ---- 65h: información de país extendida ----
+fn_65:
+        mov al, [F_AL]
+        cmp al, 0x20
+        jae .caps
+        mov es, [F_ES]
+        mov di, [F_DI]
+        cmp al, 1
+        je .ext
+        mov bx, upper_tbl
+        cmp al, 2
+        je .ptr
+        cmp al, 4
+        je .ptr
+        mov bx, fnterm_tbl
+        cmp al, 5
+        je .ptr
+        mov bx, coll_tbl
+        cmp al, 6
+        je .ptr
+        mov bx, dbcs_tbl
+        cmp al, 7
+        je .ptr
+        jmp fn_unsup
+.ptr:
+        mov [es:di], al
+        mov [es:di+1], bx
+        mov word [es:di+3], KSEG
+        mov word [F_CX], 5
+        ret
+.ext:
+        mov byte [es:di], 1
+        mov word [es:di+1], 38
+        mov word [es:di+3], 34
+        mov word [es:di+5], 437
+        add di, 7
+        mov si, country
+        mov cx, 34
+        rep movsb
+        mov word [F_CX], 41
+        ret
+.caps:
+        cmp al, 0x20
+        je .c1
+        cmp al, 0x21
+        je .cs
+        cmp al, 0x22
+        je .cz
+        cmp al, 0x23
+        je .yn
+        jmp fn_unsup
+.c1:
+        mov al, [F_DL]
+        call upcase437
+        mov [F_DL], al
+        ret
+.cs:
+        mov es, [F_DS]
+        mov di, [F_DX]
+        mov cx, [F_CX]
+.csl:
+        jcxz .r
+        mov al, [es:di]
+        call upcase437
+        mov [es:di], al
+        inc di
+        dec cx
+        jmp .csl
+.cz:
+        mov es, [F_DS]
+        mov di, [F_DX]
+.czl:
+        mov al, [es:di]
+        test al, al
+        jz .r
+        call upcase437
+        mov [es:di], al
+        inc di
+        jmp .czl
+.yn:
+        mov al, [F_DL]
+        call upcase437
+        mov word [F_AX], 1
+        cmp al, 'Y'
+        je .r
+        cmp al, 'S'
+        je .r
+        mov word [F_AX], 0
+        cmp al, 'N'
+        je .r
+        mov word [F_AX], 2
+.r:
+        ret
+
+; AL -> mayúscula (página 437)
+upcase437:
+        cmp al, 'a'
+        jb .hi
+        cmp al, 'z'
+        ja .hi
+        sub al, 32
+        ret
+.hi:
+        cmp al, 0x80
+        jb .r
+        push bx
+        movzx bx, al
+        mov al, [upper_tbl+2+bx-0x80]
+        pop bx
+.r:
+        ret
+
+; ---- Ctrl+C dentro de INT 21h: salir con los registros del usuario,
+;      llamar a INT 23h y, si vuelve con IRET, repetir la función ----
+do_ctrlc:
+        mov al, '^'
+        call con_out
+        mov al, 'C'
+        call con_out
+        mov al, 13
+        call con_out
+        mov al, 10
+        call con_out
+        mov word [conq_len], 0
+        mov word [conq_pos], 0
+        call fat_flush
+        mov sp, bp
+        dec byte [indos]
+        pop ax
+        pop bx
+        pop cx
+        pop dx
+        pop si
+        pop di
+        pop bp
+        pop ds
+        pop es
+        int 0x23
+        jmp int21
+
+; ---- 5Dh: SDA (06h) y lista de zonas de la SDA (0Bh) ----
+fn_5d:
+        mov al, [F_AL]
+        cmp al, 0x06
+        je .sda
+        cmp al, 0x0B
+        je .list
+        jmp fn_unsup
+.sda:
+        mov word [F_DS], KSEG
+        mov word [F_SI], sda
+        mov word [F_CX], SDA_LEN
+        mov word [F_DX], 0x18
+        ret
+.list:
+        mov word [F_DS], KSEG
+        mov word [F_SI], sda_list
+        ret
+
+; ---- 5Ah: crear un fichero temporal con nombre único en DS:DX ----
+fn_5a:
+        mov es, [F_DS]
+        mov di, [F_DX]
+        ; final de la ruta
+.e:
+        cmp byte [es:di], 0
+        je .end
+        inc di
+        jmp .e
+.end:
+        mov [tmp_end], di
+.try:
+        mov di, [tmp_end]
+        mov eax, 'HSP0'
+        mov [es:di], eax
+        inc word [tmp_count]
+        mov ax, [tmp_count]
+        ; cuatro cifras hexadecimales del contador
+        mov cx, 4
+        add di, 3
+.h:
+        rol ax, 4
+        push ax
+        and al, 15
+        add al, 'A'
+        mov [es:di], al
+        inc di
+        pop ax
+        loop .h
+        mov dword [es:di], '.TMP'
+        mov byte [es:di+4], 0
+        and byte [F_FL], 0xFE
+        mov byte [F_AL], 1
+        mov si, [F_DX]
+        mov cl, [F_CL]
+        mov al, 1
+        call create_file
+        jnc .ok
+        cmp ax, E_EXISTS
+        je .try
+        jmp ret_err
+.ok:
+        call jft_alloc
+        jc .noh
+        mov ax, di
+        sub ax, sft_table
+        shr ax, 5
+        call jft_set
+        mov [F_AX], bx
+        ret
+.noh:
+        mov byte [di+SFT_REF], 0
+        jmp ret_err
+
 ; ---- memoria ----
 fn_48:
         mov bx, [F_BX]
@@ -5902,8 +6247,16 @@ find_step:
 
 ; ---- 4Bh: cargar y ejecutar ----
 fn_4b:
-        cmp byte [F_AL], 0
+        mov al, [F_AL]
+        mov [ex_mode], al
+        cmp al, 0
         je .go
+        cmp al, 1
+        je .go
+        cmp al, 3
+        jne .bad
+        jmp exec_overlay
+.bad:
         jmp fn_unsup
 .go:
         mov ax, [F_BX]
@@ -6147,6 +6500,37 @@ fn_4b:
         mov [es:0x3C], ax
         mov ax, [dta_seg]
         mov [es:0x3E], ax
+        ; dirección de terminación (INT 22h) = vuelta del EXEC
+        mov ax, [F_IP]
+        mov [es:0x0A], ax
+        mov ax, [F_CS]
+        mov [es:0x0C], ax
+        cmp byte [ex_mode], 1
+        jne .run
+        ; 4B01h: devolver SS:SP y CS:IP iniciales sin ejecutar
+        ; DOS deja el AX inicial en la pila y devuelve SP-2
+        push es
+        mov es, [ex_ss]
+        mov bx, [ex_sp]
+        sub bx, 2
+        mov word [es:bx], 0
+        mov [ex_sp], bx
+        pop es
+        les di, [ex_pb]
+        mov ax, [ex_sp]
+        mov [es:di+0x0E], ax
+        mov ax, [ex_ss]
+        mov [es:di+0x10], ax
+        mov ax, [ex_ip]
+        mov [es:di+0x12], ax
+        mov ax, [ex_cs]
+        mov [es:di+0x14], ax
+        mov ax, [ex_psp]
+        mov [cur_psp], ax
+        mov [dta_seg], ax
+        mov word [dta_off], 0x80
+        ret
+.run:
         mov ax, [ex_psp]
         mov [cur_psp], ax
         mov [dta_seg], ax
@@ -6175,6 +6559,113 @@ fn_4b:
         call mcb_free_owner
         mov ax, E_FORMAT
         jmp ret_err
+.nf:
+        mov ax, E_NOFILE
+        jmp ret_err
+
+; 4B03h: cargar un overlay en ES:BX -> {seg de carga, factor de reubicación}
+exec_overlay:
+        mov es, [F_ES]
+        mov bx, [F_BX]
+        mov ax, [es:bx]
+        mov [ov_seg], ax
+        mov ax, [es:bx+2]
+        mov [ov_fact], ax
+        mov es, [F_DS]
+        mov si, [F_DX]
+        call normalize
+        jc ret_err
+        call walk
+        jc ret_err
+        cmp byte [w_has], 0
+        je .nf
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, w_name
+        mov dl, 0x06
+        call find_entry
+        jc .nf
+        mov di, ex_sft
+        call sft_fill_file
+        push ds
+        pop es
+        mov bx, ex_hdr
+        mov cx, 28
+        call file_read
+        cmp ax, 28
+        jb .com
+        mov ax, [ex_hdr]
+        cmp ax, 'MZ'
+        je .exe
+        cmp ax, 'ZM'
+        je .exe
+.com:
+        mov dword [ex_sft+SFT_POS], 0
+        mov eax, [ex_sft+SFT_SIZE]
+        mov [ex_img], eax
+        jmp .load
+.exe:
+        movzx eax, word [ex_hdr+4]
+        shl eax, 9
+        movzx ecx, word [ex_hdr+2]
+        test ecx, ecx
+        jz .full
+        sub eax, 512
+        add eax, ecx
+.full:
+        movzx ecx, word [ex_hdr+8]
+        shl ecx, 4
+        sub eax, ecx
+        mov [ex_img], eax
+        mov [ex_sft+SFT_POS], ecx
+.load:
+        mov ax, [ov_seg]
+        mov [ex_cur], ax
+.chunk:
+        mov eax, [ex_img]
+        test eax, eax
+        jz .reloc
+        cmp eax, 0x8000
+        jbe .last
+        mov eax, 0x8000
+.last:
+        mov cx, ax
+        sub [ex_img], eax
+        mov es, [ex_cur]
+        xor bx, bx
+        mov di, ex_sft
+        call file_read
+        add word [ex_cur], 0x800
+        jmp .chunk
+.reloc:
+        cmp word [ex_hdr], 'MZ'
+        je .rl0
+        cmp word [ex_hdr], 'ZM'
+        jne .done
+.rl0:
+        movzx eax, word [ex_hdr+0x18]
+        mov [ex_sft+SFT_POS], eax
+        mov cx, [ex_hdr+6]
+.rl:
+        jcxz .done
+        push cx
+        push ds
+        pop es
+        mov bx, ex_rel
+        mov cx, 4
+        mov di, ex_sft
+        call file_read
+        pop cx
+        mov ax, [ex_rel+2]
+        add ax, [ov_seg]
+        mov es, ax
+        mov bx, [ex_rel]
+        mov ax, [ov_fact]
+        add [es:bx], ax
+        dec cx
+        jmp .rl
+.done:
+        ret
 .nf:
         mov ax, E_NOFILE
         jmp ret_err
@@ -6384,10 +6875,14 @@ do_term:
         call mcb_free_owner
 .rest:
         mov es, [cur_psp]
+        mov eax, [es:0x0A]
+        mov [term_addr], eax
         ; restaurar INT 22h-24h y la DTA del padre
         push ds
         xor ax, ax
         mov ds, ax
+        mov eax, [es:0x0A]
+        mov [ds:0x22*4], eax
         mov eax, [es:0x0E]
         mov [ds:0x23*4], eax
         mov eax, [es:0x12]
@@ -6407,6 +6902,13 @@ do_term:
         sti
         mov bp, sp
         and byte [F_FL], 0xFE
+        mov eax, [term_addr]
+        test eax, eax
+        jz .keep
+        mov [F_IP], eax
+.keep:
+        ; volver con interrupciones activas y sin paso a paso
+        mov word [F_FL], 0x0202
         jmp i21_ret
 .root:
         mov si, msg_rootterm
@@ -6538,17 +7040,48 @@ fntable:
         dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_unsup       ; 08
         dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 10
         dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 18
-        dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_25, fn_unsup, fn_unsup ; 20
+        dw fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_25, fn_26, fn_unsup ; 20
         dw fn_unsup, fn_29, fn_2a, fn_set_ok, fn_2c, fn_set_ok, fn_nop, fn_2f ; 28
         dw fn_30, fn_31, fn_unsup, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
         dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
         dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
         dw fn_48, fn_49, fn_4a, fn_4b, fn_4c, fn_4d, fn_4e, fn_4f           ; 48
-        dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_unsup, fn_56, fn_57 ; 50
-        dw fn_58, fn_59, fn_unsup, fn_5b, fn_unsup, fn_unsup, fn_unsup, fn_unsup ; 58
-        dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_unsup, fn_66, fn_67 ; 60
+        dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_55, fn_56, fn_57 ; 50
+        dw fn_58, fn_59, fn_5a, fn_5b, fn_unsup, fn_5d, fn_unsup, fn_unsup ; 58
+        dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_65, fn_66, fn_67 ; 60
         dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c                       ; 68
 
+; tablas de país (página de códigos 437) para INT 21h AH=65h
+upper_tbl   dw 128
+            db 0x80, 0x9A, 0x90, 0x41, 0x8E, 0x41, 0x8F, 0x80, 0x45, 0x45, 0x45, 0x49, 0x49, 0x49, 0x8E, 0x8F
+            db 0x90, 0x92, 0x92, 0x4F, 0x99, 0x4F, 0x55, 0x55, 0x59, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F
+            db 0x41, 0x49, 0x4F, 0x55, 0xA5, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF
+            db 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF
+            db 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF
+            db 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF
+            db 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF
+            db 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
+coll_tbl    dw 256
+            db 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
+            db 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
+            db 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F
+            db 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F
+            db 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F
+            db 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F
+            db 0x60, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F
+            db 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F
+            db 0x43, 0x55, 0x45, 0x41, 0x41, 0x41, 0x41, 0x43, 0x45, 0x45, 0x45, 0x49, 0x49, 0x49, 0x41, 0x41
+            db 0x45, 0x91, 0x92, 0x4F, 0x4F, 0x4F, 0x55, 0x55, 0x59, 0x4F, 0x55, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F
+            db 0x41, 0x49, 0x4F, 0x55, 0x4E, 0x4E, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF
+            db 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF
+            db 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF
+            db 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF
+            db 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF
+            db 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
+fnterm_tbl  dw 22
+            db 1, 0x00, 0xFF, 0x00, 0x00, 0x20, 0x02, 14
+            db '.', '"', '/', 0x5C, '[', ']', ':', '|', '<', '>', '+', '=', ';', ','
+dbcs_tbl    dw 0
 all11       db "???????????"
 shell_path  db "A:\COMMAND.COM", 0
             times 64 db 0
@@ -6626,15 +7159,34 @@ inst_pb     dw 0
             dw shell_fcb, KSEG
             dw shell_fcb, KSEG
 
-indos       db 0
-            db 0
+; Swappable Data Area (SDA): estado del núcleo en los desplazamientos de
+; MS-DOS 4+; 5D06h/5D0Bh la entregan a quien la necesite (DEBUG, Windows)
+sda:
+            db 0                    ; +00 ErrorMode
+            db 0                    ; +01 InDOS
+            db 0                    ; +02 unidad del error crítico
+            db 0                    ; +03 lugar del último error
+            dw 0                    ; +04 último error extendido
+            db 0                    ; +06 acción sugerida
+            db 0                    ; +07 clase de error
+            dd 0                    ; +08 ES:DI del último error
+            dd 0                    ; +0C DTA actual
+            dw 0                    ; +10 PSP actual
+            dw 0                    ; +12 SP en INT 23h
+            dw 0                    ; +14 código de retorno del último proceso
+            db 0                    ; +16 unidad actual
+            db 0                    ; +17 indicador de BREAK extendido
+            times SDA_LEN - 0x18 db 0
+sda_list:   dw 2                    ; 5D0Bh: zonas de la SDA
+            dw sda, KSEG, 0x0018
+            dw sda + 0x18, KSEG, 0x8000 | (SDA_LEN - 0x18)
+tmp_count   dw 0
 
 ; =============================================================================
         section .bss
 bss_start:
 bootsec     resb 512
 boot_drive  resb 1
-cur_drive   resb 1
 sel_drv     resb 1
 op_drv      resb 1
 ndrives     resb 1
@@ -6663,6 +7215,13 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+tmp_end     resw 1
+ex_mode     resb 1
+            alignb 4
+term_addr   resd 1
+ov_seg      resw 1
+ov_fact     resw 1
+break_flag  resb 1
 cfg_inmenu  resb 1
 ext_count   resb 1
 lastdrive   resb 1
@@ -6709,12 +7268,7 @@ peek_ch     resb 1
             resb 1
 first_mcb   resw 1
 mem_top     resw 1
-cur_psp     resw 1
 root_psp    resw 1
-dta_off     resw 1
-dta_seg     resw 1
-last_err    resw 1
-last_ret    resw 1
 cur_clus    resw 1
 dg_idx      resw 1
 dg_in       resw 1
