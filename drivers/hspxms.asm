@@ -31,6 +31,7 @@ header:
 
 req         dd 0
 old2f       dd 0
+old15       dd 0
 total_kb    dd 0
 hma_used    db 0
 a20_global  db 0
@@ -67,6 +68,21 @@ interrupt:
         pop bx
         pop ds
         retf
+
+; ---- INT 15h: la memoria extendida es del XMS (como HIMEM) ----
+; AH=88h devuelve 0 KB: así nadie la usa a espaldas del gestor (DOSX de
+; Windows, por ejemplo, tomaría memoria que ya está repartida)
+int15:
+        cmp ah, 0x88
+        je .zero
+        jmp far [cs:old15]
+.zero:
+        xor ax, ax
+        push bp
+        mov bp, sp
+        and byte [bp+6], 0xFE       ; CF = 0
+        pop bp
+        iret
 
 ; ---- INT 2Fh: instalación y punto de entrada ----
 int2f:
@@ -146,8 +162,9 @@ ok:
         retf
 
 f_version:
-        mov ax, 0x0300
-        mov bx, 0x0100
+        mov ax, 0x0300              ; XMS 3.0
+        mov bx, 0x0350              ; revisión 3.50: el instalador de Windows
+                                    ; rechaza los drivers anteriores a HIMEM 3
         mov dx, 1
         retf
 
@@ -766,6 +783,20 @@ init:
         pop ds
         mov dx, int2f
         mov ax, 0x252F
+        int 0x21
+        pop ds
+        ; INT 15h AH=88h (después de medir la memoria)
+        push es
+        mov ax, 0x3515
+        int 0x21
+        mov [cs:old15], bx
+        mov [cs:old15+2], es
+        pop es
+        push ds
+        push cs
+        pop ds
+        mov dx, int15
+        mov ax, 0x2515
         int 0x21
         pop ds
         call a20_on

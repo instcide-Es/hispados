@@ -40,26 +40,31 @@ DOS_MINOR       equ 22
 %define F_CS bp+20
 %define F_FL bp+22
 
-; --- tabla de ficheros del sistema (SFT) ---
-SFT_REF         equ 0
-SFT_TYPE        equ 1
-SFT_MODE        equ 2
-SFT_ATTR        equ 3
-SFT_CLUS        equ 4
-SFT_SIZE        equ 6
-SFT_POS         equ 10
-SFT_CCL         equ 14
-SFT_CIX         equ 16
-SFT_DIRC        equ 18
-SFT_DIRI        equ 20
-SFT_TIME        equ 22
-SFT_DATE        equ 24
-SFT_DRV         equ 26
-SFT_FLAGS       equ 27
+; --- tabla de ficheros del sistema (SFT), formato de DOS 4+ ---
+; (Windows la recorre desde la lista de listas y la modifica directamente)
+SFT_REF         equ 0x00            ; handles que la usan (palabra)
+SFT_MODE        equ 0x02            ; modo de apertura (palabra)
+SFT_ATTR        equ 0x04
+SFT_DEVI        equ 0x05            ; información de dispositivo (palabra)
+SFT_DPTR        equ 0x07            ; DPB (ficheros) o driver (dispositivos)
+SFT_CLUS        equ 0x0B            ; primer cluster
+SFT_TIME        equ 0x0D
+SFT_DATE        equ 0x0F
+SFT_SIZE        equ 0x11            ; (dispositivos: también el driver)
+SFT_POS         equ 0x15
+SFT_CIX         equ 0x19            ; cluster relativo en caché
+SFT_DIRC        equ 0x1B            ; propio: cluster del directorio
+SFT_DIRI        equ 0x1D            ; propio: índice en el directorio
+SFT_NAME        equ 0x20            ; nombre en formato FCB (11)
+SFT_TYPE        equ 0x2B            ; propio (zona de SHARE): tipo
+SFT_DRV         equ 0x2C            ; propio: unidad
+SFT_FLAGS       equ 0x2D            ; propio
+SFT_PSP         equ 0x31            ; PSP propietario
+SFT_CCL         equ 0x35            ; cluster absoluto en caché
 E_EXISTS        equ 80
 E_CURDIR        equ 16
 E_NOTSAME       equ 17
-SFT_LEN         equ 32
+SFT_LEN         equ 0x3B
 NSFT            equ 40
 
 T_FREE          equ 0
@@ -1095,12 +1100,28 @@ root_psp_init:
         mov word [es:0x50], 0x21CD
         mov byte [es:0x52], 0xCB
         ; SFT estáticas: CON, AUX(NUL), PRN(NUL)
+        mov dword [sft_hdr], 0xFFFFFFFF ; un solo bloque
+        mov word [sft_hdr+4], NSFT
         mov byte [sft_table+SFT_REF], 3
         mov byte [sft_table+SFT_TYPE], T_CON
         mov byte [sft_table+SFT_LEN+SFT_REF], 1
         mov byte [sft_table+SFT_LEN+SFT_TYPE], T_NUL
         mov byte [sft_table+2*SFT_LEN+SFT_REF], 1
         mov byte [sft_table+2*SFT_LEN+SFT_TYPE], T_NUL
+        push di
+        mov di, sft_table
+        mov word [di+SFT_DPTR], dev_con
+        mov word [di+SFT_DPTR+2], KSEG
+        call sft_dev_fill
+        mov di, sft_table + SFT_LEN
+        mov word [di+SFT_DPTR], dev_nul
+        mov word [di+SFT_DPTR+2], KSEG
+        call sft_dev_fill
+        mov di, sft_table + 2*SFT_LEN
+        mov word [di+SFT_DPTR], dev_nul
+        mov word [di+SFT_DPTR+2], KSEG
+        call sft_dev_fill
+        pop di
         ; entorno inicial
         mov bx, (root_env_end - root_env + 15) / 16
         call mcb_alloc
@@ -2978,7 +2999,7 @@ get_sft:
         je .bad
         cmp di, NSFT
         jae .bad
-        shl di, 5
+        imul di, di, SFT_LEN
         add di, sft_table
         cmp byte [di+SFT_REF], 0
         je .bad
@@ -2987,6 +3008,61 @@ get_sft:
 .bad:
         mov ax, E_HANDLE
         stc
+        ret
+
+; formato DOS de una entrada de dispositivo DI (tipo en SFT_TYPE, driver en
+; SFT_DPTR): información de dispositivo, nombre y propietario
+sft_dev_fill:
+        push ax
+        push si
+        push cx
+        push es
+        mov ax, [cur_psp]
+        mov [di+SFT_PSP], ax
+        mov ax, 0x80D3              ; CON
+        cmp byte [di+SFT_TYPE], T_CON
+        je .s
+        mov ax, 0x8084              ; NUL
+        cmp byte [di+SFT_TYPE], T_NUL
+        je .s
+        les si, [di+SFT_DPTR]
+        mov ax, [es:si+4]
+        and ax, 0x001F
+        or ax, 0x00C0
+.s:
+        mov [di+SFT_DEVI], ax
+        ; nombre del driver (8) + 3 espacios
+        les si, [di+SFT_DPTR]
+        add si, 10
+        mov cx, 8
+        push di
+        add di, SFT_NAME
+.n:
+        mov al, [es:si]
+        mov [di], al
+        inc si
+        inc di
+        loop .n
+        mov word [di], '  '
+        mov byte [di+2], ' '
+        pop di
+        pop es
+        pop cx
+        pop si
+        pop ax
+        ret
+
+; DI = entrada de la SFT -> AX = índice
+sft_index:
+        push dx
+        push cx
+        mov ax, di
+        sub ax, sft_table
+        xor dx, dx
+        mov cx, SFT_LEN
+        div cx
+        pop cx
+        pop dx
         ret
 
 ; -> DI = SFT libre, AL = índice
@@ -3185,6 +3261,31 @@ sft_fill_file:
         mov byte [di+SFT_REF], 1
         mov al, [sel_drv]
         mov [di+SFT_DRV], al
+        ; formato DOS: unidad + "no escrito", DPB, nombre y propietario
+        movzx ax, al
+        or al, 0x40
+        mov [di+SFT_DEVI], ax
+        movzx ax, byte [sel_drv]
+        imul ax, ax, DPB_LEN
+        add ax, dpb_tab
+        mov [di+SFT_DPTR], ax
+        mov word [di+SFT_DPTR+2], KSEG
+        mov ax, [cur_psp]
+        mov [di+SFT_PSP], ax
+        push si
+        push di
+        push cx
+        push es
+        push ds
+        pop es
+        mov si, fentry
+        add di, SFT_NAME
+        mov cx, 11
+        rep movsb
+        pop es
+        pop cx
+        pop di
+        pop si
         mov byte [di+SFT_TYPE], T_FILE
         mov al, [fentry+11]
         mov [di+SFT_ATTR], al
@@ -3221,6 +3322,8 @@ open_path:
         mov [di+SFT_TYPE], al
         mov eax, [cd_hdr]
         mov [di+SFT_SIZE], eax
+        mov [di+SFT_DPTR], eax
+        call sft_dev_fill
         clc
         ret
 .file:
@@ -5192,6 +5295,65 @@ int21:
         call trace_hex
         mov al, [F_AL]
         call trace_hex
+        ; nombre de fichero en DS:DX
+        mov al, [F_AH]
+        cmp al, 0x09
+        jne .t9
+        push es
+        push si
+        push cx
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov cx, 300
+.t9l:
+        mov al, [es:si]
+        cmp al, '$'
+        je .t9e
+        call ser_putc
+        inc si
+        loop .t9l
+.t9e:
+        pop cx
+        pop si
+        pop es
+        jmp .tnd
+.t9:
+        cmp al, 0x3D
+        je .tn
+        cmp al, 0x3C
+        je .tn
+        cmp al, 0x4B
+        je .tn
+        cmp al, 0x4E
+        je .tn
+        cmp al, 0x41
+        je .tn
+        cmp al, 0x43
+        je .tn
+        cmp al, 0x5B
+        je .tn
+        jmp .tnd
+.tn:
+        push es
+        push si
+        push cx
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov al, ' '
+        call ser_putc
+        mov cx, 60
+.tl:
+        mov al, [es:si]
+        test al, al
+        jz .te
+        call ser_putc
+        inc si
+        loop .tl
+.te:
+        pop cx
+        pop si
+        pop es
+.tnd:
 %endif
         movzx bx, byte [F_AH]
         cmp bx, MAXFN
@@ -5916,9 +6078,7 @@ fn_3d:
 .ok:
         call jft_alloc
         jc .nohand
-        mov ax, di
-        sub ax, sft_table
-        shr ax, 5
+        call sft_index
         call jft_set
         mov [F_AX], bx
         ret
@@ -6331,8 +6491,9 @@ fn_44:
         mov word [F_AX], 0x80D3
         ret
 .finfo:
-        mov word [F_DX], 0x0000
-        mov word [F_AX], 0x0000
+        mov ax, [di+SFT_DEVI]
+        mov [F_DX], ax
+        mov [F_AX], ax
         ret
 .ok:
         ret
@@ -6360,9 +6521,7 @@ fn_45:
         jc ret_err
         call jft_alloc
         jc ret_err
-        mov ax, di
-        sub ax, sft_table
-        shr ax, 5
+        call sft_index
         call jft_set
         inc byte [di+SFT_REF]
         mov [F_AX], bx
@@ -6380,9 +6539,7 @@ fn_46:
         call sft_release
 .free:
         pop di
-        mov ax, di
-        sub ax, sft_table
-        shr ax, 5
+        call sft_index
         mov bx, [F_CX]
         call jft_set
         inc byte [di+SFT_REF]
@@ -6481,9 +6638,7 @@ fn_create:
         jc ret_err
         call jft_alloc
         jc .noh
-        mov ax, di
-        sub ax, sft_table
-        shr ax, 5
+        call sft_index
         call jft_set
         mov [F_AX], bx
         ret
@@ -6827,7 +6982,7 @@ fn_55:
         movzx bx, byte [es:di]
         cmp bx, NSFT
         jae .ni
-        shl bx, 5
+        imul bx, bx, SFT_LEN
         inc byte [sft_table+bx+SFT_REF]
 .ni:
         inc di
@@ -7041,9 +7196,7 @@ fn_5a:
 .ok:
         call jft_alloc
         jc .noh
-        mov ax, di
-        sub ax, sft_table
-        shr ax, 5
+        call sft_index
         call jft_set
         mov [F_AX], bx
         ret
@@ -7727,7 +7880,7 @@ build_psp:
         movzx bx, byte [es:di]
         cmp bx, NSFT
         jae .ni
-        shl bx, 5
+        imul bx, bx, SFT_LEN
         inc byte [sft_table+bx+SFT_REF]
 .ni:
         inc di
@@ -7816,7 +7969,7 @@ do_term:
         movzx bx, byte [es:di]
         cmp bx, NSFT
         jae .cn
-        shl bx, 5
+        imul bx, bx, SFT_LEN
         push di
         lea di, [sft_table+bx]
         call sft_release
@@ -7959,7 +8112,7 @@ fcb_sft:
         dec di
         cmp di, NSFT
         jae .bad
-        shl di, 5
+        imul di, di, SFT_LEN
         add di, sft_table
         cmp byte [di+SFT_REF], 0
         je .bad
@@ -7973,9 +8126,7 @@ fcb_sft:
 fcb_fill:
         mov es, [F_DS]
         mov bx, [fcb_off]
-        mov ax, di
-        sub ax, sft_table
-        shr ax, 5
+        call sft_index
         inc al
         mov [es:bx+0x18], al
         mov byte [es:bx+0x19], 'H'
@@ -8783,7 +8934,7 @@ msg_rootterm db 13, 10, "El proceso raíz ha terminado: sistema detenido", 13, 1
 ; lista de listas (INT 21h AH=52h); la palabra anterior es el primer MCB
             dw 0
 lol:        dd 0                    ; +00 DPB
-            dw sft_table, KSEG      ; +04 SFT
+            dw sft_hdr, KSEG        ; +04 SFT
             dw dev_clock, KSEG      ; +08 CLOCK$
             dw dev_con, KSEG        ; +0C CON
             dw 512                  ; +10 sector máximo
@@ -9030,6 +9181,7 @@ ex_sp       resw 1
 ex_rel      resd 1
             alignb 16
 ex_sft      resb SFT_LEN
+sft_hdr     resb 6                  ; siguiente bloque (dd) y entradas (dw)
 sft_table   resb SFT_LEN*NSFT
             alignb 16
 secbuf      resb 512
