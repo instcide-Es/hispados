@@ -16,7 +16,8 @@ persona que tenga un equipo antiguo.
 | Principios de los 90 | **Hispa Ventanas**: entorno gráfico propio sobre Hispa-DOS | Ventanas, multitarea cooperativa, aplicaciones de Windows 3.x | 386/486 |
 | Mediados de los 90 | **Hispa 32**: sistema de 32 bits | Multitarea real, nombres largos, Plug and Play | Pentium, 8–32 MB |
 | Finales de los 90 | **Hispa Red**: sistema maduro | Red e Internet, USB, multimedia | Pentium II/III |
-| Años 2000 | **Hispa XXI** | Hasta donde lleguemos | |
+| Principios de los 2000 | **Hispa XXI** | Sistema de 32 bits moderno | Pentium III/4 |
+| Desde mediados de los 2000 | **Hispa x64** | 64 bits: la culminación, para los PC actuales | x86-64 |
 
 Todos los sistemas llevan el nombre de la familia **Hispa**. No se usan nombres
 de países ni de lugares concretos: todos los países de habla hispana tienen el
