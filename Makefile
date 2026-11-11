@@ -50,6 +50,8 @@ $(B)/HSPSND.COM: drivers/hspsnd.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
+$(B)/KEYB.COM: utils/keyb.asm | $(B)
+	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
 	$(NASM) $(NFLAGS) -o $@ $<
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
@@ -59,7 +61,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
-        $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS
+        $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM
 
 $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -70,6 +72,7 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	mcopy -i $@ $(B)/FORMAT.COM ::FORMAT.COM
 	mcopy -i $@ $(B)/PLAYWAV.COM ::PLAYWAV.COM
 	mcopy -i $@ $(B)/SYS.COM ::SYS.COM
+	mcopy -i $@ $(B)/KEYB.COM ::KEYB.COM
 	mcopy -i $@ tests/disk/README.TXT ::README.TXT
 	mcopy -i $@ tests/disk/AUTOEXEC.BAT ::AUTOEXEC.BAT
 	mmd   -i $@ ::BAT
@@ -116,6 +119,7 @@ test: $(IMG) usb
 	tests/run_sound_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)
+	tests/run_keyb_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
 clean:

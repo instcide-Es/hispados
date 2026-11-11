@@ -1,6 +1,7 @@
 @ECHO OFF
 PROMPT $P$G
 PATH C:\;C:\BIN
+KEYB SP
 C:\DRIVERS\HSPSND
 ECHO.
 ECHO Bienvenido a HispaDOS. Escribe HELP para ver las ordenes.
