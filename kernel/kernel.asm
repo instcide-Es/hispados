@@ -775,6 +775,10 @@ vectors_init:
         mov word [es:bx+2], KSEG
         jmp .l
 .done:
+        ; manejador de INT 13h de la BIOS (lo cambia INT 2Fh AX=1302h)
+        mov eax, [es:0x13*4]
+        mov [i13_cur], eax
+        mov [i13_halt], eax
         sti
         pop es
         ret
@@ -7032,9 +7036,46 @@ fn_44:
         je .remote
         cmp al, 0x0D
         je .gen
+        cmp al, 2
+        je .ioctl_rw
+        cmp al, 3
+        je .ioctl_rw
         jmp fn_unsup
 .baddrv:
         mov ax, E_DRIVE
+        jmp ret_err
+; 4402h / 4403h: datos de control de un driver de carácter (IOCTL de entrada
+; o de salida, órdenes 3 y 0Ch del driver); IFSHLP.SYS de Windows lo usa
+.ioctl_rw:
+        mov bx, [F_BX]
+        call get_sft
+        jc ret_err
+        cmp byte [di+SFT_TYPE], T_DEV
+        jne .iobad
+        mov eax, [di+SFT_SIZE]          ; driver
+        mov [dc_hdr], eax
+        push es
+        les si, [di+SFT_SIZE]
+        test word [es:si+4], 0x4000     ; ¿admite IOCTL?
+        pop es
+        jz .iobad
+        mov al, 3
+        cmp byte [F_AL], 2
+        je .iocmd
+        mov al, 0x0C
+.iocmd:
+        mov dx, [F_DS]
+        mov bx, [F_DX]
+        mov cx, [F_CX]
+        call dev_rw
+        jc .ioerr
+        mov [F_AX], ax
+        ret
+.ioerr:
+        mov ax, 0x1F                    ; fallo general
+        jmp ret_err
+.iobad:
+        mov ax, 1                       ; función no válida
         jmp ret_err
 .gen:
         cmp byte [F_CL], 0x60
@@ -9588,7 +9629,45 @@ int29:
         pop ds
         iret
 int2f:
+%ifdef TRACE
+        ; traza: {AX} de cada llamada al multiplex
+        push ds
+        push ax
+        push ax
+        mov ax, KSEG
+        mov ds, ax
+        mov al, '{'
+        call ser_putc
+        pop ax
+        push ax
+        mov al, ah
+        call trace_hex
+        pop ax
+        call trace_hex
+        mov al, '}'
+        call ser_putc
+        pop ax
+        pop ds
+%endif
+        cmp ax, 0x1302
+        je i2f_1302
 int_iret:
+        iret
+
+; INT 2Fh AX=1302h (DOS 3.2+): cambiar el manejador de disco de DOS.
+; DS:DX = nuevo, ES:BX = el de apagado -> DS:DX y ES:BX = los anteriores
+; (Windows en modo mejorado lo usa para llamar al INT 13h original)
+i2f_1302:
+        push ax
+        mov ax, ds
+        xchg ax, [cs:i13_cur+2]
+        mov ds, ax
+        xchg dx, [cs:i13_cur]
+        mov ax, es
+        xchg ax, [cs:i13_halt+2]
+        mov es, ax
+        xchg bx, [cs:i13_halt]
+        pop ax
         iret
 
 ; =============================================================================
@@ -9892,6 +9971,8 @@ ld_end      resw 1
 ld_used     resw 1
 ld_next     resw 1
 cfg_line    resw 1
+i13_cur     resd 1
+i13_halt    resd 1
 boot_clean  resb 1
 boot_noauto resb 1
 bm_noauto   resb 1
