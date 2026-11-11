@@ -89,6 +89,10 @@ $(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 $(HDD): | $(B)
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 
+# imagen para memorias USB (arrancar o instalar)
+usb: $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(wildcard usb/*)
+	python3 tools/mkusb.py
+
 run: $(IMG)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy -boot a
 
@@ -96,7 +100,7 @@ run-hdd: $(IMG) $(HDD)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy \
 	        -drive file=$(HDD),format=raw,if=ide -boot a
 
-test: $(IMG)
+test: $(IMG) usb
 	tests/run_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
 	tests/run_write_tests.sh $(IMG)
@@ -104,9 +108,10 @@ test: $(IMG)
 	tests/run_config_tests.sh $(IMG)
 	tests/run_xms_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
+	tests/run_usb_tests.sh
 	tests/run_compat_tests.sh
 
 clean:
 	rm -rf $(B)
 
-.PHONY: all run run-hdd test clean
+.PHONY: all usb run run-hdd test clean

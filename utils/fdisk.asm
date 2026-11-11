@@ -9,6 +9,8 @@
 ;  FDISK [n] /ACT:p      marcar activa la partición p
 ;  FDISK [n] /DEL:p      borrar la partición p
 ;  FDISK [n] /MBR        escribir el código de arranque de HispaDOS en el MBR
+;  FDISK [n] /EMPTY      nivel de error 0 si el disco no tiene particiones,
+;                        1 si tiene alguna, 2 si no existe (para instaladores)
 ;
 ;  Tras cambiar la tabla llama a INT 21h AH=0Dh: el núcleo vuelve a leer las
 ;  particiones y asigna las letras de unidad sin reiniciar.
@@ -61,7 +63,7 @@ start:
 .baddisk:
         mov si, msg_baddisk
         call puts
-        mov ax, 0x4C01
+        mov ax, 0x4C02
         int 0x21
 .opt:
         mov di, si
@@ -70,6 +72,8 @@ start:
         mov di, optbuf
         cmp dword [di], 'STAT'
         je .o_status
+        cmp dword [di], 'EMPT'
+        je .o_empty
         cmp word [di], 'PR'
         jne .n1
         cmp byte [di+2], 'I'
@@ -90,6 +94,9 @@ start:
         int 0x21
 .o_status:
         mov byte [mode], 1
+        jmp .arg
+.o_empty:
+        mov byte [mode], 6
         jmp .arg
 .o_pri:
         mov byte [mode], 2
@@ -131,8 +138,25 @@ start:
         je .c_act
         cmp al, 4
         je .c_del
+        cmp al, 6
+        je .c_empty
         call install_mbr
         jmp exit_ok
+.c_empty:
+        mov si, mbrbuf+0x1BE
+        mov cx, 4
+.ce:
+        cmp byte [si+4], 0
+        jne .notempty
+        add si, 16
+        loop .ce
+        mov si, msg_isempty
+        call puts
+        jmp exit_ok
+.notempty:
+        mov si, msg_notempty
+        call puts
+        jmp exit_err
 .c_status:
         call show_table
         jmp exit_ok
@@ -989,7 +1013,9 @@ msg_title   db 13, 10, "HispaDOS Fixed Disk Setup Program 0.2", 13, 10
             db "(C) 2026 HispaDOS contributors - GPL-2.0-or-later", 13, 10, 0
 msg_nodisk  db "No fixed disks present.", 13, 10, 0
 msg_baddisk db "Invalid fixed disk number.", 13, 10, 0
-msg_badopt  db "Invalid option. Use /STATUS /PRI[:MB] /ACT:n /DEL:n /MBR", 13, 10, 0
+msg_badopt  db "Invalid option. Use /STATUS /PRI[:MB] /ACT:n /DEL:n /MBR /EMPTY", 13, 10, 0
+msg_isempty db "The fixed disk has no partitions.", 13, 10, 0
+msg_notempty db "The fixed disk already has partitions.", 13, 10, 0
 msg_ioerr   db "Error reading or writing the fixed disk.", 13, 10, 0
 msg_menu1   db "                         FDISK Options", 13, 10, 13, 10
             db "Current fixed disk drive: ", 0

@@ -481,6 +481,7 @@ boot_select:
         mov al, ah
 .set:
         mov [cur_drive], al
+        mov [boot_letter], al
         add al, 'A'
         mov [shell_path], al
         mov [env_l1], al
@@ -4931,7 +4932,9 @@ fn_33:
         mov [break_flag], al
         ret
 .boot:
-        mov byte [F_DL], 1
+        mov al, [boot_letter]
+        inc al
+        mov [F_DL], al
         ret
 .ver:
         mov word [F_BX], DOS_MAJOR | (DOS_MINOR << 8)
@@ -8202,6 +8205,7 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+boot_letter resb 1
 cu_drv      resb 1
 fcb_ext     resb 1
 fcb_attr    resb 1

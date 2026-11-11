@@ -1,0 +1,18 @@
+HispaDOS en memoria USB
+=======================
+
+Grabar la imagen
+  Windows: Rufus (elige "Imagen DD") o balenaEtcher.
+  Linux:   sudo dd if=hispados-usb.img of=/dev/sdX bs=4M status=progress
+  Se borra todo lo que hubiera en la memoria USB.
+
+Arrancar
+  Elige la memoria USB en el menu de arranque del ordenador (F12, F11, F8 o
+  Esc segun el fabricante). En equipos UEFI activa el modo "Legacy" o "CSM".
+
+Solo probar
+  HispaDOS arranca desde la memoria USB, que es la unidad C:.
+
+Instalar en el disco duro
+  Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);
+  si tiene particiones no toca nada. Despues quita la memoria y reinicia.

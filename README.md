@@ -54,7 +54,9 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
 | `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
-| UMB/EMS (HSPEMM), Windows 3.1, drivers de vídeo, sonido y red | 🔜 ver hoja de ruta |
+| Sonido: `HSPSND` (Intel HD Audio y AC'97) y `PLAYWAV` | ✅ |
+| Imagen para memoria USB (arrancar o instalar con `INSTALL`) | ✅ |
+| Drivers USB nativos, UMB/EMS, Windows 3.1, vídeo y red | 🔜 ver hoja de ruta |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
 ## Compilar y probar
@@ -66,6 +68,7 @@ sudo apt install nasm mtools qemu-system-x86
 make          # crea build/hispados.img (disquete de 1,44 MB)
 make run      # arranca en QEMU
 make run-hdd  # arranca con un disco duro vacío de 64 MB (build/hdd.img)
+make usb      # imagen para memoria USB: build/hispados-usb.img
 make test     # pruebas automáticas por el puerto serie
 tests/thirdparty/fetch.sh   # (opcional) descarga programas de FreeDOS para
                             # la prueba de compatibilidad
@@ -79,6 +82,10 @@ FORMAT C: /S
 ```
 
 Después el disco arranca solo.
+
+### Memoria USB
+
+`make usb` crea `build/hispados-usb.img` (64 MB). Grábala con Rufus (modo DD), balenaEtcher o `dd` y arranca el PC desde la memoria (en equipos UEFI, con el modo *Legacy/CSM*). Sirve para **probar** HispaDOS sin tocar el disco duro o para **instalarlo** con `INSTALL`, que solo actúa sobre un disco duro vacío.
 
 La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS (o UEFI con CSM) desde disquete o USB en modo disquete.
 

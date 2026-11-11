@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Crea build/hispados-usb.img: imagen de disco para memorias USB.
+
+MBR de HispaDOS + una partición FAT16 activa que empieza en el sector 2048
+(alineada a 1 MB). La partición se formatea con mtools usando el sector de
+arranque FAT16 de HispaDOS. Grábala con Rufus (modo DD), balenaEtcher o dd.
+
+Creates the USB disk image (HispaDOS MBR + active FAT16 partition).
+"""
+import os, struct, subprocess, sys
+
+B = 'build'
+OUT = os.path.join(B, 'hispados-usb.img')
+SIZE_MB = 64
+START = 2048
+HEADS, SPT = 255, 63
+
+def chs(lba):
+    c, rem = divmod(lba, HEADS * SPT)
+    h, s = divmod(rem, SPT)
+    if c > 1023:
+        c, h, s = 1023, HEADS - 1, SPT - 1
+    return bytes([h, ((s + 1) & 0x3F) | ((c >> 2) & 0xC0), c & 0xFF])
+
+def run(*args):
+    env = dict(os.environ, MTOOLS_SKIP_CHECK='1', MTOOLS_NO_VFAT='1')
+    subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL)
+
+def main():
+    total = SIZE_MB * 2048
+    psize = total - START
+    with open(OUT, 'wb') as f:
+        f.truncate(total * 512)
+    mbr = bytearray(open(os.path.join(B, 'mbr.bin'), 'rb').read()[:446])
+    entry = bytes([0x80]) + chs(START) + bytes([0x06]) + chs(START + psize - 1) \
+        + struct.pack('<II', START, psize)
+    mbr += entry + bytes(48) + b'\x55\xAA'
+    with open(OUT, 'r+b') as f:
+        f.write(mbr)
+    img = '%s@@%d' % (OUT, START * 512)
+    run('mformat', '-i', img, '-T', str(psize), '-h', str(HEADS), '-s', str(SPT),
+        '-H', str(START), '-c', '4', '-v', 'HISPADOS', '-B', os.path.join(B, 'boot16.bin'), '::')
+    def cp(src, dst):
+        run('mcopy', '-o', '-i', img, src, '::' + dst)
+    def md(d):
+        run('mmd', '-i', img, '::' + d)
+    cp(os.path.join(B, 'KERNEL.SYS'), 'KERNEL.SYS')
+    run('mattrib', '-i', img, '+h', '+s', '+r', '::KERNEL.SYS')
+    for f in ('COMMAND.COM', 'FDISK.COM', 'FORMAT.COM', 'PLAYWAV.COM'):
+        cp(os.path.join(B, f), f)
+    os.makedirs(os.path.join(B, 'usb'), exist_ok=True)
+    for f in ('AUTOEXEC.BAT', 'CONFIG.SYS', 'INSTALL.BAT', 'LEEME.TXT'):
+        txt = open(os.path.join('usb', f), encoding='utf-8').read()
+        dst = os.path.join(B, 'usb', f)
+        with open(dst, 'wb') as o:
+            o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
+        cp(dst, f)
+    md('DRIVERS')
+    for f in ('HSPXMS.SYS', 'HSPRAM.SYS', 'HSPSND.COM', 'HSPTEST.SYS'):
+        cp(os.path.join(B, f), 'DRIVERS/' + f)
+    md('BIN')
+    for f in ('XMSTEST.COM', 'MCBWALK.COM', 'LOLTEST.COM', 'HELLO.COM', 'UPPER.COM'):
+        cp(os.path.join(B, f), 'BIN/' + f)
+    print(OUT)
+
+if __name__ == '__main__':
+    main()
