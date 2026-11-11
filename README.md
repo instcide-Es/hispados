@@ -45,7 +45,9 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | Escritura FAT12/FAT16: crear, escribir, truncar, borrar, renombrar/mover, MKDIR/RMDIR, atributos, fecha | ✅ |
 | Entrada/salida estándar redirigible (funciones 01h-0Ah por los handles 0 y 1) | ✅ |
 | `COMMAND.COM`: COPY (comodines, `+`, `COPY CON`), DEL/ERASE, REN, MD, RD, PAUSE, `>` `>>` `<` y tuberías `\|` | ✅ |
-| Ficheros `.BAT`, `AUTOEXEC.BAT`, `SET`, `CONFIG.SYS` | 🔜 0.2 |
+| Ficheros por lotes: `%0`-`%9`, `%VAR%`, `@`, ECHO ON/OFF, IF, GOTO, FOR, CALL, SHIFT; `AUTOEXEC.BAT` | ✅ |
+| SET, PATH, PROMPT (`$P $G $N $D $T $V $_`…), `COMMAND /C` y `/P` | ✅ |
+| `CONFIG.SYS` y drivers `.SYS` | 🔜 0.3 |
 | Drivers, XMS, Windows 3.1 | 🔜 ver hoja de ruta |
 
 ## Compilar y probar

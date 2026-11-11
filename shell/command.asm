@@ -18,11 +18,79 @@ start:
         shr bx, 4
         mov ah, 0x4A                ; reducir nuestro bloque y dejar memoria
         int 0x21
+        mov byte [echo_on], 1
+        call env_init
+        ; opciones: /P (intérprete principal) y /C orden
+        mov si, 0x81
+.opt:
+        lodsb
+        cmp al, 13
+        je .optd
+        cmp al, '/'
+        jne .opt
+        mov al, [si]
+        call upcase
+        cmp al, 'P'
+        jne .notp
+        mov byte [primary], 1
+        jmp .opt
+.notp:
+        cmp al, 'C'
+        jne .opt
+        inc si
+        mov di, inbuf+2
+.cc:
+        lodsb
+        cmp al, 13
+        je .cce
+        stosb
+        jmp .cc
+.cce:
+        mov byte [di], 0
+        mov byte [exit_after], 1
+        mov si, inbuf+2
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
+        jmp main_loop
+.optd:
         mov si, msg_hello
         call puts
+        cmp byte [primary], 0
+        je main_loop
+        ; AUTOEXEC.BAT de la unidad de arranque
+        mov ax, 0x3305
+        int 0x21
+        add dl, 'A' - 1
+        mov [s_autoexec], dl
+        call set_dta
+        mov dx, s_autoexec
+        xor cx, cx
+        mov ah, 0x4E
+        int 0x21
+        jc main_loop
+        mov si, s_autoexec
+        mov di, progpath
+.ca:
+        lodsb
+        stosb
+        test al, al
+        jnz .ca
+        mov dword [cmdword], 'AUTO'
+        mov dword [cmdword+4], 'EXEC'
+        mov byte [cmdword+8], 0
+        mov word [argp], s_empty
+        call start_batch
 
 main_loop:
+        cmp byte [bdepth], 0
+        jne .batch
+        cmp byte [exit_after], 0
+        jne .exit
+        cmp byte [echo_on], 0
+        je .noprompt
         call prompt
+.noprompt:
         mov dx, inbuf
         mov byte [inbuf], 127
         mov ah, 0x0A
@@ -37,24 +105,145 @@ main_loop:
         mov byte [pl_depth], 0
         call run_line
         jmp main_loop
+.batch:
+        call batch_line
+        jc main_loop
+        mov si, eline
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
+        jmp main_loop
+.exit:
+        mov al, [errlvl]
+        mov ah, 0x4C
+        int 0x21
 
 ; -----------------------------------------------------------------------------
 prompt:
+        mov si, s_promptvar
+        mov di, pbuf
+        call env_get
+        jnc .have
+        mov si, s_defprompt
+        mov di, pbuf
+.dc:
+        lodsb
+        stosb
+        test al, al
+        jnz .dc
+.have:
+        mov si, pbuf
+.l:
+        lodsb
+        test al, al
+        jz .r
+        cmp al, '$'
+        je .code
+        call putc
+        jmp .l
+.code:
+        lodsb
+        test al, al
+        jz .r
+        call upcase
+        cmp al, 'P'
+        je .p
+        cmp al, 'G'
+        je .g
+        cmp al, 'L'
+        je .lt
+        cmp al, 'B'
+        je .b
+        cmp al, 'Q'
+        je .q
+        cmp al, 'N'
+        je .n
+        cmp al, '_'
+        je .nl
+        cmp al, 'E'
+        je .e
+        cmp al, 'H'
+        je .h
+        cmp al, 'D'
+        je .d
+        cmp al, 'T'
+        je .t
+        cmp al, 'V'
+        je .v
+        cmp al, '$'
+        je .dl
+        jmp .l
+.p:
+        push si
         call put_drive
         mov si, curdir
         mov dl, 0
         mov ah, 0x47
         int 0x21
         call puts
-        mov dl, '>'
-        mov ah, 2
+        pop si
+        jmp .l
+.g:
+        mov al, '>'
+        jmp .out
+.lt:
+        mov al, '<'
+        jmp .out
+.b:
+        mov al, '|'
+        jmp .out
+.q:
+        mov al, '='
+        jmp .out
+.dl:
+        mov al, '$'
+        jmp .out
+.e:
+        mov al, 27
+        jmp .out
+.h:
+        mov al, 8
+        call putc
+        mov al, ' '
+        call putc
+        mov al, 8
+        jmp .out
+.n:
+        mov ah, 0x19
         int 0x21
+        add al, 'A'
+        jmp .out
+.nl:
+        call crlf
+        jmp .l
+.d:
+        push si
+        call put_date
+        pop si
+        jmp .l
+.t:
+        push si
+        call put_time
+        pop si
+        jmp .l
+.v:
+        push si
+        mov si, msg_vername
+        call puts
+        pop si
+        jmp .l
+.out:
+        call putc
+        jmp .l
+.r:
         ret
 
 ; DS:SI = línea
 execute_line:
         call skip_sp
         cmp byte [si], 0
+        je .r
+        cmp byte [si], ':'
         je .r
         cmp byte [si], '@'
         jne .w
@@ -174,6 +363,13 @@ cmd_table:
         dw n_rd, do_rd
         dw n_rmdir, do_rd
         dw n_pause, do_pause
+        dw n_if, do_if
+        dw n_goto, do_goto
+        dw n_for, do_for
+        dw n_shift, do_shift
+        dw n_call, do_call
+        dw n_path, do_path
+        dw n_prompt, do_prompt
         dw 0, 0
 
 n_ver   db "VER", 0
@@ -201,6 +397,13 @@ n_mkdir db "MKDIR", 0
 n_rd    db "RD", 0
 n_rmdir db "RMDIR", 0
 n_pause db "PAUSE", 0
+n_if    db "IF", 0
+n_goto  db "GOTO", 0
+n_for   db "FOR", 0
+n_shift db "SHIFT", 0
+n_call  db "CALL", 0
+n_path  db "PATH", 0
+n_prompt db "PROMPT", 0
 
 ; -----------------------------------------------------------------------------
 ;  Órdenes internas (SI = argumentos)
@@ -209,8 +412,13 @@ do_rem:
         ret
 
 do_exit:
-        mov ax, 0x4C00
+        cmp byte [primary], 0
+        jne .r
+        mov al, [errlvl]
+        mov ah, 0x4C
         int 0x21
+.r:
+        ret
 
 do_ver:
         mov si, msg_ver
@@ -252,11 +460,67 @@ do_echo:
         cmp byte [si], '.'
         jne .n
         inc si
+        jmp .print
 .n:
+        cmp byte [si], 0
+        jne .arg
+        mov si, msg_echoon
+        cmp byte [echo_on], 0
+        jne .st
+        mov si, msg_echooff
+.st:
         call puts
         jmp crlf
+.arg:
+        mov di, s_on
+        call word_is
+        jnc .on
+        mov di, s_off
+        call word_is
+        jnc .off
+.print:
+        call puts
+        jmp crlf
+.on:
+        mov byte [echo_on], 1
+        ret
+.off:
+        mov byte [echo_on], 0
+        ret
 
 do_set:
+        cmp byte [si], 0
+        je .list
+        ; NOMBRE=valor
+        mov di, sname
+        mov cx, 60
+.nm:
+        lodsb
+        test al, al
+        jz .syn
+        cmp al, '='
+        je .eq
+        call upcase
+        stosb
+        loop .nm
+.syn:
+        mov si, msg_syntax
+        jmp puts
+.eq:
+        ; quitar espacios al final del nombre
+.tr:
+        cmp di, sname
+        je .syn
+        cmp byte [di-1], ' '
+        jne .tre
+        dec di
+        jmp .tr
+.tre:
+        mov byte [di], 0
+        mov di, si
+        mov si, sname
+        jmp env_set
+.list:
         mov es, [0x2C]
         xor di, di
 .l:
@@ -892,6 +1156,9 @@ try_dir:
         jnc .r
         mov bx, s_exe
         call try_one
+        jnc .r
+        mov bx, s_bat
+        call try_one
 .r:
         ret
 
@@ -933,6 +1200,20 @@ try_one:
         mov ah, 0x4E
         int 0x21
         jc .no
+        ; ¿es un .BAT?
+        mov si, progpath
+        call strlen
+        add si, cx
+        cmp cx, 4
+        jb .notbat
+        mov eax, [si-4]
+        and eax, 0xDFDFDFFF
+        cmp eax, '.BAT'
+        jne .notbat
+        call start_batch
+        clc
+        ret
+.notbat:
         mov word [pblock], 0
         mov word [pblock+2], tail
         mov [pblock+4], ds
@@ -944,9 +1225,14 @@ try_one:
         mov bx, pblock
         mov ax, 0x4B00
         int 0x21
-        jnc .ok
+        jnc .ran
         mov si, msg_execerr
         call puts
+        jmp .ok
+.ran:
+        mov ah, 0x4D
+        int 0x21
+        mov [errlvl], al
 .ok:
         clc
         ret
@@ -2187,6 +2473,1029 @@ pipe_names  db "A:\~PIPE0.TMP", 0, 0, 0
             db "A:\~PIPE2.TMP", 0, 0, 0
             db "A:\~PIPE3.TMP", 0, 0, 0
 CBUF_LEN    equ 4096
+
+; -----------------------------------------------------------------------------
+;  Entorno propio (1 KB) para SET, PATH y PROMPT
+; -----------------------------------------------------------------------------
+ENV_SIZE    equ 1024
+
+env_init:
+        mov bx, ENV_SIZE / 16
+        mov ah, 0x48
+        int 0x21
+        jc .r
+        mov es, ax
+        xor di, di
+        mov cx, ENV_SIZE / 2
+        push ax
+        xor ax, ax
+        rep stosw
+        pop ax
+        xor di, di
+        push ds
+        mov ds, [0x2C]
+        xor si, si
+        mov cx, ENV_SIZE - 2
+.l:
+        cmp byte [si], 0
+        je .end
+.c:
+        lodsb
+        stosb
+        dec cx
+        jz .end
+        test al, al
+        jnz .c
+        jmp .l
+.end:
+        pop ds
+        mov byte [es:di], 0
+        mov bx, es
+        push ds
+        pop es
+        ; liberar el entorno heredado (es nuestro) y usar el nuevo
+        push bx
+        mov es, [0x2C]
+        mov ah, 0x49
+        int 0x21
+        push ds
+        pop es
+        pop bx
+        mov [0x2C], bx
+.r:
+        push ds
+        pop es
+        ret
+
+; SI = nombre (mayúsculas) -> ES:DI = entrada "NOMBRE=..."; CF si no está
+env_find:
+        mov es, [0x2C]
+        xor di, di
+.l:
+        cmp byte [es:di], 0
+        je .nf
+        push si
+        push di
+.c:
+        mov al, [si]
+        test al, al
+        jz .eq
+        mov ah, [es:di]
+        cmp al, ah
+        jne .n
+        inc si
+        inc di
+        jmp .c
+.eq:
+        cmp byte [es:di], '='
+        jne .n
+        pop di
+        pop si
+        clc
+        ret
+.n:
+        pop di
+        pop si
+.sk:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .sk
+        jmp .l
+.nf:
+        push ds
+        pop es
+        stc
+        ret
+
+; SI = nombre -> valor copiado en DS:DI (ASCIIZ); CF si no está
+env_get:
+        push di
+        call env_find
+        pop bx
+        jc .r
+.s:
+        cmp byte [es:di], '='
+        je .v
+        inc di
+        jmp .s
+.v:
+        inc di
+.c:
+        mov al, [es:di]
+        mov [bx], al
+        inc di
+        inc bx
+        test al, al
+        jnz .c
+        push ds
+        pop es
+        clc
+.r:
+        ret
+
+; SI = nombre (mayúsculas), DI = valor (vacío = borrar)
+env_set:
+        mov [es_name], si
+        mov [es_val], di
+        call env_find
+        jc .add
+        ; borrar la entrada existente
+        mov si, di
+.sk:
+        inc si
+        cmp byte [es:si-1], 0
+        jne .sk
+        push ds
+        push es
+        pop ds
+.mv:
+        cmp byte [si], 0
+        je .mve
+.ms:
+        lodsb
+        stosb
+        test al, al
+        jnz .ms
+        jmp .mv
+.mve:
+        mov byte [es:di], 0
+        pop ds
+.add:
+        mov si, [es_val]
+        cmp byte [si], 0
+        je .done
+        ; final del entorno
+        mov es, [0x2C]
+        xor di, di
+.e:
+        cmp byte [es:di], 0
+        je .gotend
+.e2:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .e2
+        jmp .e
+.gotend:
+        ; ¿cabe?
+        mov si, [es_name]
+        call strlen
+        mov bx, cx
+        mov si, [es_val]
+        call strlen
+        add bx, cx
+        add bx, 3
+        add bx, di
+        cmp bx, ENV_SIZE
+        ja .full
+        mov si, [es_name]
+.cn:
+        lodsb
+        test al, al
+        jz .cv
+        stosb
+        jmp .cn
+.cv:
+        mov al, '='
+        stosb
+        mov si, [es_val]
+.cvl:
+        lodsb
+        stosb
+        test al, al
+        jnz .cvl
+        mov byte [es:di], 0
+.done:
+        push ds
+        pop es
+        ret
+.full:
+        push ds
+        pop es
+        mov si, msg_envfull
+        jmp puts
+
+; SI -> CX = longitud
+strlen:
+        push si
+        xor cx, cx
+.l:
+        lodsb
+        test al, al
+        jz .e
+        inc cx
+        jmp .l
+.e:
+        pop si
+        ret
+
+; ¿la palabra en SI (hasta espacio o fin) es DI (mayúsculas)? CF=0 si sí
+word_is:
+        push si
+        push di
+.l:
+        mov al, [si]
+        call upcase
+        mov ah, [di]
+        test ah, ah
+        jz .end
+        cmp al, ah
+        jne .no
+        inc si
+        inc di
+        jmp .l
+.end:
+        test al, al
+        jz .yes
+        cmp al, ' '
+        je .yes
+        cmp al, 9
+        je .yes
+.no:
+        pop di
+        pop si
+        stc
+        ret
+.yes:
+        pop di
+        pop si
+        clc
+        ret
+
+do_path:
+        cmp byte [si], 0
+        jne .set
+        mov si, s_pathvar
+        mov di, pbuf
+        call env_get
+        jc .none
+        mov si, s_pathvar
+        call puts
+        mov al, '='
+        call putc
+        mov si, pbuf
+        call puts
+        jmp crlf
+.none:
+        mov si, msg_nopath
+        jmp puts
+.set:
+        cmp word [si], ';'
+        jne .s2
+        mov byte [si], 0
+.s2:
+        mov di, si
+        mov si, s_pathvar
+        jmp env_set
+
+do_prompt:
+        mov di, si
+        mov si, s_promptvar
+        jmp env_set
+
+; escribir la fecha y la hora actuales (para PROMPT $D $T)
+put_date:
+        mov ah, 0x2A
+        int 0x21
+        push cx
+        push dx
+        movzx bx, al
+        shl bx, 2
+        lea si, [days+bx]
+        call puts
+        mov al, ' '
+        call putc
+        pop dx
+        push dx
+        movzx ax, dl
+        call put2
+        mov al, '-'
+        call putc
+        pop dx
+        movzx ax, dh
+        call put2
+        mov al, '-'
+        call putc
+        pop cx
+        movzx eax, cx
+        jmp putnum
+put_time:
+        mov ah, 0x2C
+        int 0x21
+        push dx
+        push cx
+        movzx eax, ch
+        mov cl, 2
+        call putnum_w
+        mov al, ':'
+        call putc
+        pop cx
+        movzx ax, cl
+        call put2
+        mov al, ':'
+        call putc
+        pop dx
+        movzx ax, dh
+        jmp put2
+
+; -----------------------------------------------------------------------------
+;  Ficheros por lotes (.BAT)
+; -----------------------------------------------------------------------------
+BC_NAME     equ 0
+BC_POS      equ 128
+BC_SHIFT    equ 132
+BC_ARGS     equ 134
+BC_LEN      equ 256
+BMAX        equ 4
+BLINE       equ 200
+
+; -> BX = contexto actual
+cur_ctx:
+        movzx bx, byte [bdepth]
+        dec bx
+        shl bx, 8
+        add bx, bctx
+        ret
+
+; progpath = .BAT, cmdword y argp = orden y argumentos
+start_batch:
+        cmp byte [call_flag], 0
+        jne .push
+        cmp byte [bdepth], 0
+        jne .set
+.push:
+        cmp byte [bdepth], BMAX
+        jb .ok
+        mov si, msg_toodeep
+        jmp puts
+.ok:
+        inc byte [bdepth]
+.set:
+        mov byte [call_flag], 0
+        call cur_ctx
+        mov si, progpath
+        lea di, [bx+BC_NAME]
+        mov ah, 0x60
+        int 0x21
+        mov dword [bx+BC_POS], 0
+        mov word [bx+BC_SHIFT], 0
+        lea di, [bx+BC_ARGS]
+        lea dx, [bx+BC_LEN-2]
+        mov si, cmdword
+.c1:
+        lodsb
+        test al, al
+        jz .c2
+        stosb
+        jmp .c1
+.c2:
+        mov si, [argp]
+.c3:
+        cmp di, dx
+        jae .c4
+        lodsb
+        stosb
+        test al, al
+        jnz .c3
+        ret
+.c4:
+        mov byte [di], 0
+        ret
+
+; BX = contexto, EAX = posición -> bline, EAX = siguiente; CF al final
+batch_read:
+        mov [br_pos], eax
+        push bx
+        lea dx, [bx+BC_NAME]
+        mov ax, 0x3D00
+        int 0x21
+        jc .eofp
+        mov bx, ax
+        mov dx, [br_pos]
+        mov cx, [br_pos+2]
+        mov ax, 0x4200
+        int 0x21
+        mov dx, rbuf
+        mov cx, BLINE
+        mov ah, 0x3F
+        int 0x21
+        jnc .rd
+        xor ax, ax
+.rd:
+        push ax
+        mov ah, 0x3E
+        int 0x21
+        pop ax
+        pop bx
+        test ax, ax
+        jz .eof
+        mov cx, ax
+        mov si, rbuf
+        mov di, bline
+        xor dx, dx
+        cmp byte [si], 0x1A
+        je .eof
+.l:
+        jcxz .done
+        lodsb
+        dec cx
+        inc dx
+        cmp al, 13
+        je .cr
+        cmp al, 10
+        je .done
+        cmp al, 0x1A
+        je .z
+        cmp di, bline + BLINE - 1
+        jae .l
+        stosb
+        jmp .l
+.cr:
+        jcxz .done
+        cmp byte [si], 10
+        jne .done
+        inc dx
+        jmp .done
+.z:
+        dec dx
+.done:
+        mov byte [di], 0
+        movzx eax, dx
+        add eax, [br_pos]
+        clc
+        ret
+.eofp:
+        pop bx
+.eof:
+        stc
+        ret
+
+; siguiente línea del lote -> eline; CF si no hay nada que ejecutar
+batch_line:
+        call cur_ctx
+        mov eax, [bx+BC_POS]
+        call batch_read
+        jc .eof
+        call cur_ctx
+        mov [bx+BC_POS], eax
+        mov si, bline
+        call skip_sp
+        cmp byte [si], 0
+        je .skip
+        cmp byte [si], ':'
+        je .skip
+        call expand
+        cmp byte [echo_on], 0
+        je .ok
+        mov si, eline
+        call skip_sp
+        cmp byte [si], '@'
+        je .ok
+        call crlf
+        call prompt
+        mov si, eline
+        call puts
+        call crlf
+.ok:
+        clc
+        ret
+.skip:
+        stc
+        ret
+.eof:
+        dec byte [bdepth]
+        jnz .skip
+        mov byte [echo_on], 1
+        stc
+        ret
+
+; bline -> eline con %0-%9, %% y %VARIABLE% sustituidos
+expand:
+        mov si, bline
+        mov di, eline
+.l:
+        cmp di, eline + BLINE - 1
+        jae .end
+        lodsb
+        test al, al
+        jz .end
+        cmp al, '%'
+        jne .st
+        mov al, [si]
+        cmp al, '%'
+        je .pct
+        cmp al, '0'
+        jb .var
+        cmp al, '9'
+        ja .var
+        inc si
+        sub al, '0'
+        push si
+        call get_arg
+        rep movsb
+        pop si
+        jmp .l
+.pct:
+        inc si
+        mov al, '%'
+        jmp .st
+.var:
+        ; buscar el % de cierre
+        mov bx, si
+.f:
+        mov al, [bx]
+        test al, al
+        jz .lit
+        cmp al, ' '
+        je .lit
+        cmp al, '%'
+        je .gotv
+        inc bx
+        jmp .f
+.lit:
+        mov al, '%'
+        jmp .st
+.gotv:
+        push di
+        mov di, vname
+.vn:
+        cmp si, bx
+        je .vne
+        lodsb
+        call upcase
+        stosb
+        jmp .vn
+.vne:
+        mov byte [di], 0
+        pop di
+        inc si
+        push si
+        mov si, vname
+        push di
+        mov di, vval
+        call env_get
+        pop di
+        jc .novar
+        mov si, vval
+.cp:
+        lodsb
+        test al, al
+        jz .novar
+        cmp di, eline + BLINE - 1
+        jae .novar
+        stosb
+        jmp .cp
+.novar:
+        pop si
+        jmp .l
+.st:
+        stosb
+        jmp .l
+.end:
+        mov byte [di], 0
+        ret
+
+; AL = número de parámetro -> SI = texto, CX = longitud (0 si no hay)
+get_arg:
+        push bx
+        push dx
+        movzx dx, al
+        call cur_ctx
+        add dx, [bx+BC_SHIFT]
+        lea si, [bx+BC_ARGS]
+.tok:
+        ; saltar separadores
+.sp:
+        mov al, [si]
+        call is_sep
+        jc .gs
+        inc si
+        jmp .sp
+.gs:
+        cmp byte [si], 0
+        je .none
+        test dx, dx
+        jz .this
+        ; saltar este parámetro
+.skip:
+        mov al, [si]
+        test al, al
+        jz .none
+        call is_sep
+        jc .sk1
+        dec dx
+        jmp .tok
+.sk1:
+        inc si
+        jmp .skip
+.this:
+        mov bx, si
+.ln:
+        mov al, [bx]
+        test al, al
+        jz .lnd
+        call is_sep
+        jnc .lnd
+.lnd0:
+        inc bx
+        jmp .ln
+.lnd:
+        mov cx, bx
+        sub cx, si
+        pop dx
+        pop bx
+        ret
+.none:
+        xor cx, cx
+        pop dx
+        pop bx
+        ret
+
+; AL -> CF=0 si es separador de parámetros
+is_sep:
+        cmp al, ' '
+        je .y
+        cmp al, 9
+        je .y
+        cmp al, ','
+        je .y
+        cmp al, ';'
+        je .y
+        cmp al, '='
+        je .y
+        stc
+        ret
+.y:
+        clc
+        ret
+
+do_shift:
+        cmp byte [bdepth], 0
+        je .r
+        call cur_ctx
+        inc word [bx+BC_SHIFT]
+.r:
+        ret
+
+do_call:
+        mov byte [call_flag], 1
+        call execute_line
+        mov byte [call_flag], 0
+        ret
+
+do_goto:
+        cmp byte [bdepth], 0
+        je .r
+        cmp byte [si], ':'
+        jne .n
+        inc si
+.n:
+        mov di, glabel
+        call get_tok
+        jc .r
+        call cur_ctx
+        xor eax, eax
+.l:
+        push bx
+        call batch_read
+        pop bx
+        jc .nf
+        mov si, bline
+        call skip_sp
+        cmp byte [si], ':'
+        jne .l
+        inc si
+        mov di, glabel
+.c:
+        mov dl, [si]
+        mov dh, [di]
+        test dh, dh
+        jz .end
+        push ax
+        mov al, dl
+        call upcase
+        mov dl, al
+        mov al, dh
+        call upcase
+        mov dh, al
+        pop ax
+        cmp dl, dh
+        jne .l
+        inc si
+        inc di
+        jmp .c
+.end:
+        cmp dl, 0
+        je .ok
+        cmp dl, ' '
+        je .ok
+        cmp dl, 9
+        jne .l
+.ok:
+        mov [bx+BC_POS], eax
+.r:
+        ret
+.nf:
+        mov si, msg_nolabel
+        call puts
+        dec byte [bdepth]
+        ret
+
+; IF [NOT] ERRORLEVEL n | EXIST fichero | a==b  orden
+do_if:
+        mov byte [if_not], 0
+        mov di, s_not
+        call word_is
+        jc .t
+        mov byte [if_not], 1
+        add si, 3
+        call skip_sp
+.t:
+        mov di, s_errorlevel
+        call word_is
+        jnc .el
+        mov di, s_exist
+        call word_is
+        jnc .ex
+        ; comparación de cadenas
+        mov di, if_a
+        call get_tok
+        jc .syn
+        mov di, if_a
+.fe:
+        mov al, [di]
+        test al, al
+        jz .noeq
+        cmp word [di], '=='
+        je .eq
+        inc di
+        jmp .fe
+.noeq:
+        call skip_sp
+        cmp word [si], '=='
+        jne .syn
+        add si, 2
+        mov di, if_b
+        call skip_sp
+        call get_tok
+        jc .syn
+        jmp .cmp
+.eq:
+        mov byte [di], 0
+        add di, 2
+        cmp byte [di], 0
+        jne .inl
+        mov di, if_b
+        call get_tok
+        jc .syn
+        jmp .cmp
+.inl:
+        push si
+        mov si, di
+        mov di, if_b
+.ci:
+        lodsb
+        stosb
+        test al, al
+        jnz .ci
+        pop si
+.cmp:
+        push si
+        mov si, if_a
+        mov di, if_b
+.cl:
+        mov al, [si]
+        cmp al, [di]
+        jne .cf
+        inc si
+        inc di
+        test al, al
+        jnz .cl
+        pop si
+        mov al, 1
+        jmp .res
+.cf:
+        pop si
+        xor al, al
+        jmp .res
+.el:
+        add si, 10
+        call skip_sp
+        call parse_dec
+        jc .syn
+        cmp [errlvl], al
+        mov al, 1
+        jae .res
+        xor al, al
+        jmp .res
+.ex:
+        add si, 5
+        mov di, if_a
+        call get_tok
+        jc .syn
+        push si
+        mov dx, dta2
+        mov ah, 0x1A
+        int 0x21
+        mov dx, if_a
+        mov cx, 0x06
+        mov ah, 0x4E
+        int 0x21
+        pop si
+        mov al, 1
+        jnc .res
+        xor al, al
+.res:
+        xor al, [if_not]
+        jz .r
+        jmp execute_line
+.syn:
+        mov si, msg_syntax
+        jmp puts
+.r:
+        ret
+
+; SI -> AL = número decimal (0-255); CF si no hay cifras
+parse_dec:
+        xor ax, ax
+        xor cx, cx
+.l:
+        mov bl, [si]
+        sub bl, '0'
+        jb .e
+        cmp bl, 9
+        ja .e
+        mov bh, 10
+        mul bh
+        add al, bl
+        inc si
+        inc cx
+        jmp .l
+.e:
+        cmp cx, 1
+        ret
+
+; FOR %v IN (conjunto) DO orden
+do_for:
+        cmp byte [si], '%'
+        jne .syn
+        mov al, [si+1]
+        call upcase
+        mov [for_var], al
+        add si, 2
+        call skip_sp
+        mov di, s_in
+        call word_is
+        jc .syn
+        add si, 2
+        call skip_sp
+        cmp byte [si], '('
+        jne .syn
+        inc si
+        mov di, for_set
+.cs:
+        lodsb
+        test al, al
+        jz .syn
+        cmp al, ')'
+        je .cse
+        stosb
+        jmp .cs
+.cse:
+        mov byte [di], 0
+        call skip_sp
+        mov di, s_do
+        call word_is
+        jc .syn
+        add si, 2
+        call skip_sp
+        mov di, for_tmpl
+.ct:
+        lodsb
+        stosb
+        test al, al
+        jnz .ct
+        ; recorrer el conjunto
+        mov word [for_pos], for_set
+.item:
+        mov si, [for_pos]
+.isp:
+        mov al, [si]
+        test al, al
+        jz .done
+        call is_sep
+        jc .igot
+        inc si
+        jmp .isp
+.igot:
+        mov di, for_item
+.ic:
+        mov al, [si]
+        test al, al
+        jz .ice
+        call is_sep
+        jnc .ice
+        stosb
+        inc si
+        jmp .ic
+.ice:
+        mov byte [di], 0
+        mov [for_pos], si
+        mov si, for_item
+        call has_wild
+        jc .wild
+        mov si, for_item
+        call for_run
+        jmp .item
+.wild:
+        mov si, for_item
+        mov di, for_pre
+        call path_prefix
+        mov dx, for_dta
+        mov ah, 0x1A
+        int 0x21
+        mov dx, for_item
+        xor cx, cx
+        mov ah, 0x4E
+        int 0x21
+        jc .item
+.wl:
+        mov si, for_pre
+        mov bx, for_dta+0x1E
+        mov di, for_full
+        call join_path
+        mov si, for_full
+        call for_run
+        mov dx, for_dta
+        mov ah, 0x1A
+        int 0x21
+        mov ah, 0x4F
+        int 0x21
+        jnc .wl
+        jmp .item
+.done:
+        ret
+.syn:
+        mov si, msg_syntax
+        jmp puts
+
+; SI = elemento -> ejecutar la plantilla con %v sustituido
+for_run:
+        mov bx, si
+        mov si, for_tmpl
+        mov di, for_cmd
+.l:
+        lodsb
+        test al, al
+        jz .e
+        cmp al, '%'
+        jne .st
+        mov ah, [si]
+        push ax
+        mov al, ah
+        call upcase
+        cmp al, [for_var]
+        pop ax
+        jne .st
+        inc si
+        push si
+        mov si, bx
+.cp:
+        lodsb
+        test al, al
+        jz .cpe
+        stosb
+        jmp .cp
+.cpe:
+        pop si
+        jmp .l
+.st:
+        stosb
+        jmp .l
+.e:
+        stosb
+        mov si, for_cmd
+        jmp execute_line
+
+msg_echoon  db "ECHO is on", 0
+msg_echooff db "ECHO is off", 0
+msg_syntax  db "Syntax error", 13, 10, 0
+msg_envfull db "Out of environment space", 13, 10, 0
+msg_nopath  db "No Path", 13, 10, 0
+msg_nolabel db "Label not found", 13, 10, 0
+msg_toodeep db "Batch nesting too deep", 13, 10, 0
+msg_vername db "HispaDOS Version 0.2", 0
+s_on        db "ON", 0
+s_off       db "OFF", 0
+s_not       db "NOT", 0
+s_errorlevel db "ERRORLEVEL", 0
+s_exist     db "EXIST", 0
+s_in        db "IN", 0
+s_do        db "DO", 0
+s_pathvar   db "PATH", 0
+s_promptvar db "PROMPT", 0
+s_defprompt db "$P$G", 0
+s_autoexec  db "A:\AUTOEXEC.BAT", 0
+s_empty     db 0
 ; -----------------------------------------------------------------------------
 msg_hello   db 13, 10, "HispaDOS Command Interpreter 0.2", 13, 10
             db "Type HELP for a list of commands.", 13, 10, 13, 10, 0
@@ -2210,16 +3519,19 @@ msg_mlarge  db " bytes largest executable program size", 13, 10, 0
 msg_date    db "Current date is ", 0
 msg_time    db "Current time is ", 0
 msg_help    db "Internal commands:", 13, 10
-            db "  CD/CHDIR  CLS  DATE  DIR  ECHO  EXIT  HELP  MEM", 13, 10
-            db "  REM  SET  TIME  TYPE  VER  VOL", 13, 10
-            db "Programs (.COM, .EXE) are searched in the current", 13, 10
-            db "directory and then in PATH.", 13, 10, 0
+            db "  CALL  CD/CHDIR  CLS  COPY  DATE  DEL/ERASE  DIR  ECHO  EXIT", 13, 10
+            db "  FOR  GOTO  HELP  IF  MD/MKDIR  MEM  PATH  PAUSE  PROMPT", 13, 10
+            db "  RD/RMDIR  REM  REN/RENAME  SET  SHIFT  TIME  TYPE  VER  VOL", 13, 10
+            db "Redirection: > >> < and pipes |. Batch files: .BAT, AUTOEXEC.BAT.", 13, 10
+            db "Programs (.COM, .EXE, .BAT) are searched in the current", 13, 10
+            db "directory and then in PATH. Utilities: FDISK, FORMAT.", 13, 10, 0
 days        db "Sun", 0, "Mon", 0, "Tue", 0, "Wed", 0, "Thu", 0, "Fri", 0, "Sat", 0
 s_drive     db "A:\", 0
 s_all       db "*.*", 0
 s_lab       db "A:\*.*", 0
 s_com       db ".COM", 0
 s_exe       db ".EXE", 0
+s_bat       db ".BAT", 0
 s_dirtag    db "    <DIR>     ", 0
 s_crlf      db 13, 10, 0
 
@@ -2284,6 +3596,36 @@ m_mask      resb 12
 m_name      resb 12
 m_new       resb 14
 cbuf        resb CBUF_LEN
+echo_on     resb 1
+primary     resb 1
+exit_after  resb 1
+errlvl      resb 1
+bdepth      resb 1
+call_flag   resb 1
+if_not      resb 1
+for_var     resb 1
+es_name     resw 1
+es_val      resw 1
+for_pos     resw 1
+br_pos      resd 1
+sname       resb 64
+pbuf        resb 132
+vname       resb 64
+vval        resb 132
+glabel      resb 40
+if_a        resb 132
+if_b        resb 132
+for_set     resb 132
+for_tmpl    resb 132
+for_cmd     resb 200
+for_item    resb 80
+for_pre     resb 80
+for_full    resb 132
+for_dta     resb 128
+rbuf        resb BLINE+2
+bline       resb BLINE+2
+eline       resb BLINE+2
+bctx        resb BC_LEN*BMAX
             resb 2048
 stack_top:
 prog_end:

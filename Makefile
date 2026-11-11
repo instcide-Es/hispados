@@ -35,7 +35,7 @@ $(B)/UPPER.COM: tests/progs/upper.asm | $(B)
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM
 
-$(IMG): $(B)/boot.bin $(FILES) tests/disk/README.TXT tests/disk/DOCS/INFO.TXT
+$(IMG): $(B)/boot.bin $(FILES) $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
@@ -43,6 +43,10 @@ $(IMG): $(B)/boot.bin $(FILES) tests/disk/README.TXT tests/disk/DOCS/INFO.TXT
 	mcopy -i $@ $(B)/FDISK.COM ::FDISK.COM
 	mcopy -i $@ $(B)/FORMAT.COM ::FORMAT.COM
 	mcopy -i $@ tests/disk/README.TXT ::README.TXT
+	mcopy -i $@ tests/disk/AUTOEXEC.BAT ::AUTOEXEC.BAT
+	mmd   -i $@ ::BAT
+	mcopy -i $@ tests/disk/BAT/PRUEBA.BAT ::BAT/PRUEBA.BAT
+	mcopy -i $@ tests/disk/BAT/OTRA.BAT ::BAT/OTRA.BAT
 	mmd   -i $@ ::DOCS
 	mcopy -i $@ tests/disk/DOCS/INFO.TXT ::DOCS/INFO.TXT
 	mmd   -i $@ ::BIN
@@ -65,6 +69,7 @@ test: $(IMG)
 	tests/run_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
 	tests/run_write_tests.sh $(IMG)
+	tests/run_batch_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)

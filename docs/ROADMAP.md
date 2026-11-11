@@ -17,7 +17,7 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - Particiones extendidas y unidades lógicas; `SYS` para hacer arrancable una unidad ya formateada.
 - Funciones FCB (0Fh-29h) para programas antiguos.
 - ✅ `COMMAND.COM`: redirecciones `<`, `>`, `>>`, tuberías `|`, `COPY`, `DEL`, `REN`, `MD`, `RD`, `PAUSE`.
-- `COMMAND.COM`: ficheros `.BAT` y `AUTOEXEC.BAT`, `SET` con asignación, `IF`, `GOTO`, `FOR`, `CALL`, `SHIFT`, `PROMPT`, `PATH`.
+- ✅ `COMMAND.COM`: ficheros `.BAT` y `AUTOEXEC.BAT`, `SET` con asignación, `IF`, `GOTO`, `FOR`, `CALL`, `SHIFT`, `PROMPT`, `PATH`, `/C`, `/P`.
 - Ctrl+C y Ctrl+Break, INT 23h e INT 24h completas.
 - Mensajes en español además de en inglés.
 

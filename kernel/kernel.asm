@@ -5426,7 +5426,7 @@ fntable:
 
 all11       db "???????????"
 shell_path  db "A:\COMMAND.COM", 0
-shell_tail  db 0, 13
+shell_tail  db 3, " /P", 13
 shell_fcb   times 16 db 0
 shell_pb    dw 0
             dw shell_tail, KSEG

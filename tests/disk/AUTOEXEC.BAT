@@ -1,0 +1,4 @@
+@ECHO OFF
+SET HISPA=funciona
+PROMPT $P$G
+ECHO Ejecutando AUTOEXEC.BAT
