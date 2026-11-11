@@ -162,18 +162,37 @@ interrupt:
         popad
         retf
 .media:
-        mov byte [bx+0x0E], 1       ; no ha cambiado
+        call usb_media
+        lds bx, [cs:req]
+        mov [bx+0x0E], al           ; 1 la misma, FFh cambiada o quitada
         jmp .done
 .bpb:
+        cmp byte [cs:gone], 0
+        je .bpb1
+        call try_back
+        lds bx, [cs:req]
+        jc .nrdy
+.bpb1:
         mov word [bx+0x12], bpb
         mov [bx+0x14], cs
         jmp .done
+.nrdy:
+        mov word [bx+3], 0x8102     ; unidad no preparada
+        jmp .out
 .read:
         mov byte [cs:rw_dir], 1
         jmp .rw
 .write:
         mov byte [cs:rw_dir], 0
 .rw:
+        cmp byte [cs:gone], 0
+        je .rw1
+        call try_back
+        lds bx, [cs:req]
+        jnc .rw1
+        mov word [bx+0x12], 0
+        jmp .nrdy
+.rw1:
         movzx eax, word [bx+0x14]
         cmp ax, 0xFFFF
         jne .s
@@ -249,6 +268,171 @@ interrupt:
         mov [bx+0x12], ax
         mov word [bx+3], 0x810C     ; error general
         jmp .out
+
+; ---- cambio de la memoria USB ----
+; -> AL = 1 la misma, FFh cambiada o quitada (DS cambia)
+usb_media:
+        push cs
+        pop ds
+        sti
+        cmp byte [dport], 0
+        je .same
+        cmp byte [gone], 0
+        jne .look
+        call dport_sc
+        test al, 1                  ; conectada
+        jz .lost
+        test eax, 1 << 17           ; CSC: se ha desconectado y conectado
+        jz .same
+.lost:
+        call drop_disk
+.look:
+        call rescan
+        mov al, 0xFF
+        ret
+.same:
+        mov al, 1
+        ret
+
+; sin memoria: ¿han conectado una? (DS cambia; CF si sigue sin haber)
+try_back:
+        push cs
+        pop ds
+        sti
+        call rescan
+        cmp byte [gone], 1
+        cmc
+        ret
+
+; ESI = PORTSC del puerto de la memoria, EAX = su valor
+dport_sc:
+        movzx esi, byte [dport]
+port_sc:
+        dec esi
+        shl esi, 4
+        add esi, [op_base]
+        add esi, 0x400
+        call mrd
+        ret
+
+; borrar los bits de cambio del puerto (ESI = PORTSC)
+clr_csc:
+        call mrd
+        and eax, 0x0E00C3E0
+        or eax, (1 << 9) | 0x00FE0000
+        call mwr
+        ret
+
+; la memoria ya no está: liberar su slot
+drop_disk:
+        xor eax, eax
+        xor edx, edx
+        xor ecx, ecx
+        movzx ebp, byte [slot]
+        shl ebp, 24
+        or ebp, 10 << 10            ; Disable Slot
+        call xhci_cmd
+        movzx di, byte [slot]
+        shl di, 3
+        mov bx, DCBAA
+        call zone
+        add di, bx
+        mov dword [cs:di], 0
+        mov byte [gone], 1
+        mov byte [disk_found], 0
+        ret
+
+; buscar una memoria en los puertos que acaban de conectarse (CSC)
+rescan:
+        mov al, [opt_verbose]
+        push ax
+        mov byte [opt_verbose], 0   ; sin mensajes: estamos dentro de DOS
+        mov byte [only_disk], 1
+        xor cl, cl
+.pl:
+        inc cl
+        cmp cl, [maxports]
+        ja .r
+        cmp byte [gone], 0
+        je .r
+        movzx esi, cl
+        call port_sc
+        test eax, 1 << 17
+        jz .pl
+        push cx
+        call clr_csc
+        call mrd
+        test al, 1
+        jz .nx
+        call port_enable
+        jc .nx
+        mov al, [dpool]
+        mov [npool], al
+        mov word [bin_idx], 0x0100  ; índice 0, ciclo 1
+        mov word [bout_idx], 0x0100
+        mov bx, BIN_RING
+        mov cx, 0x100
+        call zero_zone
+        mov bx, BOUT_RING
+        mov cx, 0x100
+        call zero_zone
+        call enum_one
+        cmp byte [disk_found], 0
+        je .nx
+        call disk_setup
+        jc .bad
+        mov byte [gone], 0
+        jmp .nx
+.bad:
+        call drop_disk
+.nx:
+        pop cx
+        jmp .pl
+.r:
+        mov byte [only_disk], 0
+        pop ax
+        mov [opt_verbose], al
+        ret
+
+; dejar el puerto CL habilitado (reiniciarlo si es USB 2) -> port, speed
+port_enable:
+        mov [port], cl
+        movzx esi, cl
+        call port_sc
+        test al, 1
+        jz .no
+        test al, 2
+        jnz .en
+        and eax, 0x0E00C3E0
+        or eax, (1 << 9) | (1 << 4) ; PP | PR
+        call mwr
+        mov cx, 10
+        call tmo_start
+.pr:
+        call mrd
+        test eax, 1 << 21           ; PRC
+        jnz .prd
+        call tmo_check
+        jnc .pr
+.prd:
+        call clr_csc
+        call mrd
+        test al, 2
+        jz .no
+.en:
+        shr eax, 10
+        and al, 0x0F
+        mov [speed], al
+        clc
+        ret
+.no:
+        stc
+        ret
+
+dport       db 0
+dpool       db 0
+gone        db 0
+only_disk   db 0
 
 %ifdef USBTRACE
 ; EAX -> decimal por COM1 (DX = 3F8h)
@@ -1212,6 +1396,16 @@ init:
         jc .fail
         call usb_enum
         jc .fail
+        xor cl, cl
+.cc:
+        inc cl
+        cmp cl, [maxports]
+        ja .ccd
+        movzx esi, cl
+        call port_sc
+        call clr_csc
+        jmp .cc
+.ccd:
         mov byte [units], 0
         cmp byte [disk_found], 0
         je .hid
@@ -1808,6 +2002,8 @@ enum_one:
         jc .dis
         jmp .used
 .hid:
+        cmp byte [only_disk], 0
+        jne .dis
         mov byte [want_k], 0
         mov byte [want_m], 0
         cmp byte [p_kbd], 0
@@ -1939,6 +2135,12 @@ role_disk:
         mov word [fail_msg], msg_epcfg
         jc .err
         mov byte [disk_found], 1
+        mov al, [port]
+        mov [dport], al
+        mov al, [npool]
+        mov [dpool], al
+        call dport_sc
+        call clr_csc                ; la conexión de ahora ya está vista
         clc
 .err:
         ret

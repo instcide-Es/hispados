@@ -87,7 +87,8 @@ interrupt:
         popad
         retf
 .media:
-        mov byte [bx+0x0E], 0       ; "no se sabe": puede haber cambiado el disco
+        call media
+        mov [bx+0x0E], al
         jmp .done
 .bpb:
         mov word [bx+0x12], bpb
@@ -146,6 +147,86 @@ interrupt:
 r_lba       dd 0
 r_unit      db 0
 
+; «media check»: ¿es el mismo disco? Se compara la identificación del
+; descriptor de volumen (bloque 16: nombre del volumen y fecha de creación)
+; con la del último visto. Como mucho una lectura por segundo y unidad.
+; -> AL = 1 el mismo, FFh cambiado (o sin disco)
+media:
+        push bx
+        push cx
+        push si
+        push di
+        push es
+        movzx si, byte [bx+1]
+        mov ax, si
+        mov [cs:r_unit], al
+        ; ¿menos de un segundo desde la última comprobación?
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x46C]
+        mov di, si
+        shl di, 1
+        mov cx, ax
+        sub cx, [cs:m_tick+di]
+        mov [cs:m_tick+di], ax
+        cmp cx, 18
+        mov al, 1
+        jb .r
+        ; leer el bloque 16 sin caché
+        mov byte [cs:buf_unit], 0xFF
+        mov eax, 16
+        call get_block
+        mov al, 0xFF
+        jc .r
+        ; huella: 32 octetos del nombre (+28h) y 17 de la fecha (+32Dh)
+        mov di, si
+        imul di, di, 49
+        add di, m_fp
+        push cs
+        pop es
+        mov si, cdbuf + 0x28
+        mov cx, 32
+        mov al, 1
+.c1:
+        push ax
+        mov al, [cs:si]
+        cmp al, [es:di]
+        je .s1
+        mov [es:di], al
+        pop ax
+        mov al, 0xFF
+        push ax
+.s1:
+        pop ax
+        inc si
+        inc di
+        loop .c1
+        mov si, cdbuf + 0x32D
+        mov cx, 17
+.c2:
+        push ax
+        mov al, [cs:si]
+        cmp al, [es:di]
+        je .s2
+        mov [es:di], al
+        pop ax
+        mov al, 0xFF
+        push ax
+.s2:
+        pop ax
+        inc si
+        inc di
+        loop .c2
+.r:
+        pop es
+        pop di
+        pop si
+        pop cx
+        pop bx
+        ret
+m_tick      dw 0, 0, 0, 0
+m_fp        times 4*49 db 0
+
 ; EAX = bloque de 2048 de la unidad r_unit -> cdbuf; CF si falla
 get_block:
         mov dl, [cs:r_unit]
@@ -166,6 +247,9 @@ get_block:
         call atapi_read
         pop cx
         jnc .good
+        push cx
+        call atapi_sense            ; borrar el aviso de la unidad
+        pop cx
         loop .try
         mov byte [cs:buf_unit], 0xFF
         pop es
@@ -195,7 +279,7 @@ atapi_read:
         add dx, 6
         out dx, al
         call delay400
-        call wait_nbsy
+        call wait_idle              ; (un error anterior no impide la orden)
         jc .r
         mov dx, [cs:port]
         inc dx
@@ -242,6 +326,84 @@ atapi_read:
 pkt         db 0x28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 port        dw 0
 
+; REQUEST SENSE (18 octetos): tras un cambio de disco la unidad contesta
+; «UNIT ATTENTION» a todo hasta que se le pide el estado.
+atapi_sense:
+        push eax
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push es
+        movzx bx, byte [cs:buf_unit]
+        cmp bx, 3
+        ja .r
+        mov dword [cs:pkt], 0x03
+        mov dword [cs:pkt+4], 0
+        mov dword [cs:pkt+8], 0
+        mov byte [cs:pkt+4], 18
+        cmp byte [cs:cd_type+bx], 1
+        jne .ide
+        mov al, 0xA0
+        mov ecx, 18
+        call ahci_cmd
+        jmp .r
+.ide:
+        mov al, [cs:cd_sel+bx]
+        shl bx, 1
+        mov dx, [cs:cd_port+bx]
+        mov [cs:port], dx
+        add dx, 6
+        out dx, al
+        call delay400
+        call wait_idle
+        jc .r
+        mov dx, [cs:port]
+        inc dx
+        xor al, al
+        out dx, al                  ; PIO
+        add dx, 3
+        mov al, 18
+        out dx, al                  ; límite de bytes: 18
+        inc dx
+        xor al, al
+        out dx, al
+        add dx, 2
+        mov al, 0xA0
+        out dx, al
+        call delay400
+        call wait_drq
+        jc .r
+        mov dx, [cs:port]
+        mov si, pkt
+        mov cx, 6
+.p:
+        mov ax, [cs:si]
+        out dx, ax
+        add si, 2
+        loop .p
+        call delay400
+        call wait_drq
+        jc .r
+        mov dx, [cs:port]
+        mov cx, 9
+.i:
+        in ax, dx                   ; el estado no hace falta guardarlo
+        loop .i
+        call delay400
+        call wait_nbsy
+.r:
+        mov dword [cs:pkt], 0x28    ; dejar el paquete de lectura
+        pop es
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        pop eax
+        ret
+
 delay400:
         push dx
         push cx
@@ -279,6 +441,27 @@ wait_nbsy:
         pop dx
         pop cx
         ret
+; esperar a que no esté ocupado, sin mirar ERR (CF si vence el plazo)
+wait_idle:
+        push cx
+        push dx
+        mov dx, [cs:port]
+        add dx, 7
+        mov ecx, 0x200000
+.l:
+        in al, dx
+        test al, 0x88               ; BSY y DRQ
+        jz .ok
+        loop .l, ecx
+        stc
+        jmp .r
+.ok:
+        clc
+.r:
+        pop dx
+        pop cx
+        ret
+
 ; esperar datos (DRQ) (CF si error o plazo)
 wait_drq:
         push cx
@@ -360,7 +543,7 @@ ahci_cmd:
         mov [cs:ac_cmd], al
         mov [cs:ac_len], ecx
         call unreal
-        jc .fail
+        jc .fail0
         mov di, bx
         shl di, 1
         mov di, [cs:cd_mem+di]      ; zona del puerto
@@ -447,6 +630,19 @@ ahci_cmd:
         clc
         ret
 .fail:
+        ; reiniciar el motor del puerto (ST) para la próxima orden
+        and dword [fs:esi+0x18], ~1
+        mov ecx, 0x400000
+.fs:
+        test dword [fs:esi+0x18], 0x8000    ; CR
+        jz .fr
+        dec ecx
+        jnz .fs
+.fr:
+        mov dword [fs:esi+0x30], 0xFFFFFFFF ; SERR
+        mov dword [fs:esi+0x10], 0xFFFFFFFF ; IS
+        or dword [fs:esi+0x18], 1
+.fail0:
         pop fs
         pop edi
         pop esi

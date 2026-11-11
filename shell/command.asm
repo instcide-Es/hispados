@@ -310,9 +310,12 @@ execute_line:
         je .curdir
         cmp al, '/'
         je .curdir
+        cmp al, '\'
+        je .cwi
         cmp al, '.'
         jne .cw1
-        ; "ECHO." / "CD.." : cortar si lo anterior es una orden interna
+.cwi:
+        ; "ECHO." / "CD.." / "CD\" : cortar si lo anterior es una orden interna
         push si
         push di
         mov byte [di], 0
@@ -854,7 +857,7 @@ do_dir:
         int 0x21
         jnc .tn
         mov si, msg_baddrv
-        jmp puts
+        jmp err_puts
 .tn:
         call crlf
         mov al, [truebuf]
@@ -2252,6 +2255,11 @@ putc:
         pop ax
         ret
 
+; SI = mensaje; AX = código de error de DOS: 21 -> «no está preparada»
+err_puts:
+        cmp ax, 21
+        jne puts
+        mov si, msg_nrdy
 puts:
         push ax
         push dx
@@ -2838,7 +2846,7 @@ do_copy:
         int 0x21
         jnc .loop
         mov si, msg_nofile
-        call puts
+        call err_puts
         jmp .summary
 .loop:
         mov si, c_pre
@@ -3144,7 +3152,7 @@ do_del:
         int 0x21
         jnc .l
         mov si, msg_nofile
-        jmp puts
+        jmp err_puts
 .l:
         mov si, c_pre
         mov bx, dta+0x1E
@@ -3459,7 +3467,7 @@ dt_pattern:
         int 0x21
         jnc .f
         mov si, msg_dtnf
-        jmp puts
+        jmp err_puts
 .f:
         ; . y .. no
         cmp byte [dt_dta0+0x1E], '.'
@@ -4668,6 +4676,7 @@ msg_badcmd  db "Comando o nombre de archivo incorrecto", 13, 10, 0
 msg_execerr db "No se puede ejecutar el programa", 13, 10, 0
 msg_baddir  db "Directorio no válido", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
+msg_nrdy    db "La unidad no está preparada", 13, 10, 0
 msg_nofile  db "No se encontró el archivo", 13, 10, 0
 msg_reqparam db "Falta un parámetro obligatorio", 13, 10, 0
 msg_vol1    db " El volumen de la unidad "

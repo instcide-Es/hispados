@@ -97,6 +97,7 @@ E_NOMEM         equ 8
 E_BLOCK         equ 9
 E_FORMAT        equ 11
 E_DRIVE         equ 15
+E_NOTREADY      equ 21
 E_NOMORE        equ 18
 
 NPATH_MAX       equ 66
@@ -475,6 +476,17 @@ append_ext:
         shl bx, 6
         add bx, drv_tab
         mov byte [bx+D_FLAGS], DF_EXISTS | DF_DRIVER | DF_FIXED
+        ; soporte extraíble (bit 11 de los atributos del driver, como los
+        ; lectores de CD): no es fija y se le pregunta si cambia el disco
+        push es
+        push di
+        les di, [si]
+        test word [es:di+4], 0x0800
+        pop di
+        pop es
+        jz .fixed
+        and byte [bx+D_FLAGS], ~DF_FIXED
+.fixed:
         ; identificador propio para las cachés (no es una unidad de la BIOS)
         mov al, [ndrives]
         or al, 0xE0
@@ -621,14 +633,92 @@ select_raw:
 
 ; AL = unidad -> seleccionada y montada; CF si no tiene sistema de ficheros
 select_drive:
+        mov byte [io_nrdy], 0
         call select_raw
         jc .r
+        call media_check            ; ¿han cambiado el disco?
         test byte [cur_drv+D_FLAGS], DF_MOUNTED
         jnz .ok
         call mount
         jc .r
 .ok:
         clc
+.r:
+        ret
+
+; ¿ha cambiado el disco de la unidad seleccionada (extraíble y montada)?
+; Disqueteras: INT 13h AH=16h. Drivers: petición «media check» (orden 1).
+; Si ha cambiado: se desmonta, se vacían las cachés y la carpeta actual de la
+; unidad vuelve a la raíz; el siguiente acceso la monta otra vez.
+media_check:
+        test byte [cur_drv+D_FLAGS], DF_MOUNTED
+        jz .r
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jnz .r
+        pushad
+        push es
+        test byte [cur_drv+D_FLAGS], DF_DRIVER
+        jnz .drv
+        mov dl, [cur_drv+D_BIOS]
+        mov ah, 0x16
+        push ds
+        int 0x13
+        pop ds
+        cmp ah, 6                   ; «cambiado»
+        je .changed
+        jmp .done
+.drv:
+        push ds
+        pop es
+        mov di, dreq
+        mov cx, 15
+        xor ax, ax
+        rep stosw
+        mov byte [dreq], 0x13
+        mov al, [cur_drv+D_UNIT]
+        mov [dreq+1], al
+        mov byte [dreq+2], 1        ; media check
+        mov al, [cur_drv+D_MEDIA]
+        mov [dreq+0x0D], al
+        mov eax, [cur_drv+D_DRVHDR]
+        mov [dc_hdr], eax
+        call dev_call
+        test word [dreq+3], 0x8000
+        jnz .done
+        cmp byte [dreq+0x0E], 0xFF  ; FFh cambiado, 0 no se sabe, 1 igual
+        jne .done
+.changed:
+        ; puede haber cambiado: fuera las cachés y se vuelve a leer el disco.
+        ; Si el número de serie del volumen es el mismo, es el mismo disco
+        ; (muchas disqueteras avisan sin haberlo cambiado): se sigue en la
+        ; misma carpeta; si no, a la raíz.
+        and byte [cur_drv+D_FLAGS], ~(DF_MOUNTED | DF_ISO)
+        call drv_store
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        movzx di, byte [sel_drv]
+        shl di, 2
+        xor eax, eax
+        xchg eax, [vol_ser+di]
+        mov [mc_old], eax
+        call mount
+        jc .reset
+        movzx di, byte [sel_drv]
+        shl di, 2
+        mov eax, [mc_old]
+        test eax, eax
+        jz .reset
+        cmp eax, [vol_ser+di]
+        je .done
+.reset:
+        movzx di, byte [sel_drv]
+        imul di, di, PATHLEN
+        mov byte [cur_paths+di], 0  ; a la raíz
+        mov al, [sel_drv]
+        call cds_update
+.done:
+        pop es
+        popad
 .r:
         ret
 
@@ -663,7 +753,10 @@ mount:
         mov bx, secbuf
         call read_sector
         mov dword [cache_lba], 0xFFFFFFFF
-        jc .bad
+        jnc .parse
+        cmp byte [io_nrdy], 0
+        jne .fail2                  ; no hay disco: no vale el BPB viejo
+        jmp .bad
 .parse:
         cmp word [secbuf+0x0B], 512
         jne .bad
@@ -738,6 +831,32 @@ mount:
         mov ax, [secbuf+0x1A]
         mov [cur_drv+D_HEADS], ax
 .fixed:
+        ; número de serie del volumen (0 si no tiene o si el BPB es del driver)
+        xor eax, eax
+        cmp byte [mnt_try], 0
+        jne .ns
+        cmp byte [secbuf+0x26], 0x29
+        jne .ns
+        ; huella: número de serie mezclado con la etiqueta (+2Bh, 11 octetos)
+        mov eax, [secbuf+0x27]
+        push si
+        push cx
+        mov si, secbuf+0x2B
+        mov cx, 11
+.lb:
+        rol eax, 5
+        xor al, [si]
+        inc si
+        loop .lb
+        pop cx
+        pop si
+        test eax, eax
+        jnz .ns
+        inc eax
+.ns:
+        movzx di, byte [sel_drv]
+        shl di, 2
+        mov [vol_ser+di], eax
         or byte [cur_drv+D_FLAGS], DF_MOUNTED
         call drv_store
         mov al, [sel_drv]
@@ -2292,6 +2411,7 @@ disk_io:
         push bp
         int 0x13
         pop bp
+        mov [io_st], ah
         pop eax
         jnc .ok
         jmp .err
@@ -2320,9 +2440,17 @@ disk_io:
         push bp
         int 0x13
         pop bp
+        mov [io_st], ah
         pop eax
         jnc .ok
 .err:
+        cmp byte [io_st], 0x80      ; sin respuesta: no hay disco
+        je .nr
+        cmp byte [io_st], 0xAA
+        jne .er
+.nr:
+        mov byte [io_nrdy], 1
+.er:
         push eax
         xor ax, ax
         mov dl, [cur_drv+D_BIOS]
@@ -2920,6 +3048,9 @@ normalize:
         ret
 .baddrv:
         mov ax, E_DRIVE
+        cmp byte [io_nrdy], 0
+        je .err
+        mov ax, E_NOTREADY
         jmp .err
 .badpath:
         mov ax, E_NOPATH
@@ -4588,6 +4719,10 @@ drv_block_io:
         clc
         ret
 .err:
+        cmp byte [dreq+3], 2
+        jne .e2
+        mov byte [io_nrdy], 1
+.e2:
         popad
         stc
         ret
@@ -10343,6 +10478,10 @@ rn_idx      resw 1
 rn_dir      resw 1
 rn_ent      resb 32
 mnt_try     resb 1
+mc_old      resd 1
+vol_ser     resd NDRV               ; huella (serie + etiqueta) de cada unidad montada
+io_nrdy     resb 1                  ; la última E/S: «no preparada»
+io_st       resb 1                  ; estado de la última INT 13h
 isob_drv    resb 1
 iso_next    resb 1
 ife_attr    resb 1
