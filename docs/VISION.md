@@ -17,7 +17,8 @@ persona que tenga un equipo antiguo.
 | Mediados de los 90 | **Hispa 32**: sistema de 32 bits | Multitarea real, nombres largos, Plug and Play | Pentium, 8–32 MB |
 | Finales de los 90 | **Hispa Red**: sistema maduro | Red e Internet, USB, multimedia | Pentium II/III |
 | Principios de los 2000 | **Hispa XXI** | Sistema de 32 bits moderno | Pentium III/4 |
-| Desde mediados de los 2000 | **Hispa x64** | 64 bits: la culminación, para los PC actuales | x86-64 |
+| Desde mediados de los 2000 | **Hispa x64** | 64 bits, para los PC actuales | x86-64 |
+| La era ARM | **Hispa ARM**: el último de la serie | Procesadores ARM | Raspberry Pi, portátiles y equipos ARM |
 
 Todos los sistemas llevan el nombre de la familia **Hispa**. No se usan nombres
 de países ni de lugares concretos: todos los países de habla hispana tienen el
