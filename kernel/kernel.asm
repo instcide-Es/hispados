@@ -1946,6 +1946,9 @@ line_input:
         mov byte [hist_pos], 0
 .l:
         call con_getc
+        cmp al, 9
+        je .tab
+        mov byte [tab_on], 0        ; otra tecla: se acaba el autocompletado
         test al, al
         jnz .nx
         ; tecla extendida: historial de órdenes (como DOSKEY)
@@ -2008,6 +2011,9 @@ line_input:
 .bell:
         mov al, 7
         call con_raw
+        jmp .l
+.tab:
+        call line_tab
         jmp .l
 .bs:
         test bx, bx
@@ -2077,6 +2083,238 @@ line_input:
         call con_out
         call hist_save
 .out:
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; ---- Tab: completar el nombre que se está escribiendo ----
+; ES:DI = búfer de 0Ah, BX = longitud escrita, CX = máximo (con el CR).
+; Usa las búsquedas del propio núcleo (4Eh/4Fh) con una DTA propia; los
+; registros del programa (marco F_) y su DTA quedan como estaban.
+line_tab:
+        push ax
+        push cx
+        push dx
+        push si
+        mov [tab_max], cx
+        cmp byte [tab_on], 0
+        jne .next
+        ; principio de la palabra: tras el último espacio
+        mov si, bx
+.ws:
+        test si, si
+        jz .wsd
+        push bx
+        mov bx, di
+        add bx, si
+        cmp byte [es:bx+1], ' '
+        pop bx
+        je .wsd
+        dec si
+        jmp .ws
+.wsd:
+        mov [tab_ws], si
+        ; copiar lo escrito a tab_pref y buscar dónde acaba la carpeta
+        push di
+        push bx
+        mov cx, bx
+        sub cx, si
+        cmp cx, 120
+        jbe .cl
+        mov cx, 120
+.cl:
+        mov [tab_pl], cx
+        mov word [tab_dl], 0
+        mov byte [tab_dot], 0
+        xor bx, bx
+.cp:
+        cmp bx, cx
+        jae .cpd
+        push bx
+        add bx, si
+        add bx, di
+        mov al, [es:bx+2]
+        pop bx
+        mov [tab_pref+bx], al
+        inc bx
+        cmp al, '\'
+        je .sl
+        cmp al, ':'
+        je .sl
+        cmp al, '.'
+        jne .cp
+        mov byte [tab_dot], 1
+        jmp .cp
+.sl:
+        mov [tab_dl], bx            ; la carpeta llega hasta aquí
+        mov byte [tab_dot], 0
+        jmp .cp
+.cpd:
+        mov byte [tab_pref+bx], 0
+        pop bx
+        pop di
+        ; patrón: lo escrito + «*.*» (o «*» si ya lleva punto)
+        push di
+        push es
+        push ds
+        pop es
+        mov si, tab_pref
+        mov di, tab_pat
+        mov cx, [tab_pl]
+        rep movsb
+        mov al, '*'
+        stosb
+        cmp byte [tab_dot], 0
+        jne .pz
+        mov ax, '.*'
+        stosw
+.pz:
+        mov byte [di], 0
+        pop es
+        pop di
+        mov word [tab_idx], 0
+        mov byte [tab_on], 1
+        jmp .find
+.next:
+        inc word [tab_idx]
+.find:
+        mov byte [tab_wrap], 0
+.again:
+        call tab_search             ; -> CF si no hay; tab_name, tab_isdir
+        jnc .got
+        cmp word [tab_idx], 0
+        je .none
+        cmp byte [tab_wrap], 0
+        jne .none
+        mov byte [tab_wrap], 1      ; se acabaron: otra vez la primera
+        mov word [tab_idx], 0
+        jmp .again
+.none:
+        mov byte [tab_on], 0
+        mov al, 7
+        call con_raw
+        jmp .r
+.got:
+        ; borrar desde el principio de la palabra
+.er:
+        cmp bx, [tab_ws]
+        jbe .erd
+        dec bx
+        mov al, 8
+        call con_raw
+        mov al, ' '
+        call con_raw
+        mov al, 8
+        call con_raw
+        jmp .er
+.erd:
+        ; la carpeta tal como se escribió y el nombre encontrado
+        xor si, si
+.wd:
+        cmp si, [tab_dl]
+        jae .wn
+        mov al, [tab_pref+si]
+        call .put
+        inc si
+        jmp .wd
+.wn:
+        mov si, tab_name
+.wn2:
+        lodsb
+        test al, al
+        jz .wdir
+        call .put
+        jmp .wn2
+.wdir:
+        cmp byte [tab_isdir], 0
+        je .r
+        mov al, '\'
+        call .put
+.r:
+        pop si
+        pop dx
+        pop cx
+        pop ax
+        ret
+; AL -> línea (si cabe)
+.put:
+        mov dx, bx
+        inc dx
+        cmp dx, [tab_max]
+        jae .pr
+        mov [es:di+2+bx], al
+        inc bx
+        call con_out
+.pr:
+        ret
+
+; la coincidencia número tab_idx de tab_pat (sin «.» ni «..»)
+; -> CF si no hay; tab_name (ASCIIZ) y tab_isdir
+tab_search:
+        push ax
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push es
+        push word [F_AX]
+        push word [F_CX]
+        push word [F_DX]
+        push word [F_DS]
+        push word [F_FL]
+        push word [dta_off]
+        push word [dta_off+2]
+        mov word [dta_off], tab_dta
+        mov [dta_off+2], ds
+        mov [F_DS], ds
+        mov word [F_DX], tab_pat
+        mov word [F_CX], 0x16       ; también carpetas, ocultos y de sistema
+        and byte [F_FL], 0xFE
+        call fn_4e
+        mov word [tab_cnt], 0
+.l:
+        test byte [F_FL], 1
+        jnz .no
+        cmp byte [tab_dta+0x1E], '.'
+        je .nx                      ; «.» y «..»
+        mov ax, [tab_cnt]           ; (4Fh no conserva los registros)
+        cmp ax, [tab_idx]
+        je .yes
+        inc word [tab_cnt]
+.nx:
+        and byte [F_FL], 0xFE
+        call fn_4f
+        jmp .l
+.yes:
+        push ds
+        pop es
+        mov si, tab_dta+0x1E
+        mov di, tab_name
+        mov cx, 13
+        rep movsb
+        mov byte [tab_isdir], 0
+        test byte [tab_dta+0x15], 0x10
+        jz .ok
+        mov byte [tab_isdir], 1
+.ok:
+        clc
+        jmp .r
+.no:
+        stc
+.r:
+        pop word [dta_off+2]
+        pop word [dta_off]
+        pop word [F_FL]
+        pop word [F_DS]
+        pop word [F_DX]
+        pop word [F_CX]
+        pop word [F_AX]
+        pop es
+        pop di
+        pop si
         pop dx
         pop cx
         pop bx
@@ -11973,6 +12211,20 @@ iso_tick    resd 1
 ife_dsize   resd 1
 ih_new      resw 1
 hist_pos    resb 1
+tab_on      resb 1                  ; autocompletado en curso (Tab seguidos)
+tab_dot     resb 1
+tab_wrap    resb 1
+tab_isdir   resb 1
+tab_ws      resw 1                  ; principio de la palabra en la línea
+tab_pl      resw 1
+tab_dl      resw 1                  ; longitud de la parte de carpeta
+tab_idx     resw 1
+tab_cnt     resw 1
+tab_max     resw 1
+tab_pref    resb 124
+tab_pat     resb 128
+tab_name    resb 14
+tab_dta     resb 64
 hist_head   resb 1
 hist_count  resb 1
 bios_nd     resb 1

@@ -249,6 +249,7 @@ test: $(IMG) usb nucprogs
 	tests/run_ayuda_tests.sh $(IMG)
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
+	tests/run_tab_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
 	tests/run_pila_tests.sh $(IMG)
 	tests/run_reloj_tests.sh $(IMG)
