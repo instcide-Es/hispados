@@ -82,7 +82,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `SYS.COM`, `INSTALAR` (instalar en un disco duro), `KEYB SP` (teclado español, AltGr) | ✅ |
 | Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes | ✅ |
 | `EDIT`/`EDITAR` (editor), `GESTOR` (gestor de archivos), `SYSINFO`/`INFO` (propiedades del sistema) | ✅ |
-| Teclado y ratón USB nativos (HID) y ratón PS/2 (`HSPRATON`, INT 33h) | ✅ |
+| Teclado y ratón USB nativos (HID) y ratón PS/2 y touchpads de portátil (`HSPRATON`, INT 33h: por la BIOS o, si no lo ofrece, directamente por el controlador 8042; `HSPRATON /INFO` enseña el diagnóstico y `/BIOS` o `/DIRECTO` fuerzan la vía) | ✅ |
 | CD/DVD también en SATA (AHCI); menú de arranque propio con F5 y F8 | ✅ |
 | SHARE en el núcleo (bloqueos y modos de compartición) | ✅ |
 | Sistema en `\HISPADOS` con nombres en español y `ALIAS.INI` con los clásicos (EDIT, FORMAT, XCOPY…) | ✅ |

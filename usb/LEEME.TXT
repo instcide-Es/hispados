@@ -16,3 +16,10 @@ Solo probar
 Instalar en el disco duro
   Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);
   si tiene particiones no toca nada. Despues quita la memoria y reinicia.
+
+Raton y touchpad
+  HSPRATON se carga solo al arrancar: usa el raton de la BIOS y, si la BIOS
+  no lo ofrece (pasa en algunos portatiles), habla directamente con el
+  touchpad PS/2. Si el raton no va, escribe HSPRATON /INFO y haz una foto
+  de la pantalla. Para forzar una via: en AUTOEXEC.BAT, HSPRATON /DIRECTO
+  o HSPRATON /BIOS (HSPRATON /? ensena las opciones).
