@@ -177,8 +177,14 @@ if [ -f $DL/dpmi-nasm/.ok ] && [ -f $DL/dpmi-gnused/.ok ] && [ -f $DL/dpmi-lua/.
   check "vuelta a lua"
   checkn "HSPDPMI: excepción"
   checkn "HSPDPMI: error interno"
-  if mcopy -n -i $T/b.img ::H.COM $T/h.com 2>/dev/null && cmp -s $T/h.com $T/ref.com; then
+  if ! mcopy -n -i $T/b.img ::H.COM $T/h.com 2>/dev/null || [ ! -s $T/h.com ]; then
+    ko "HSPDPMI ensamblado con NASM (DJGPP) dentro de Hispa-DOS"
+  elif cmp -s $T/h.com $T/ref.com; then
     ok "HSPDPMI ensamblado con NASM (DJGPP) dentro de Hispa-DOS: idéntico"
+  elif ! nasm -v | grep -q 'version 2\.'; then
+    # el NASM del sistema es de otra versión que el de DJGPP: no se puede
+    # exigir el mismo binario, pero sí que lo haya ensamblado
+    echo "  --   HSPDPMI ensamblado dentro de Hispa-DOS (comparación omitida: $(nasm -v | cut -d' ' -f3) en el sistema)"
   else
     ko "HSPDPMI ensamblado con NASM (DJGPP) dentro de Hispa-DOS"
   fi

@@ -19,8 +19,7 @@ ko() { echo "  FAIL $1"; fail=1; }
 check() { if grep -qF -- "$2" "$1"; then ok "$2"; else ko "$2"; fi; }
 checkn() { if grep -qF -- "$2" "$1"; then ko "no debía salir: $2"; else ok "no sale: $2"; fi; }
 # número con puntos de miles
-fmt() { printf "%'d" "$1" | tr ',' '.'; }
-export LC_NUMERIC=en_US.UTF-8
+fmt() { echo "$1" | sed ':a;s/\B[0-9]\{3\}\>/.&/;ta'; }   # (sin depender del idioma del sistema)
 # el trozo del registro entre «=Mn=» y la siguiente marca
 part() { awk -v m="=$2=" '$0==m{p=1;next} /^=M[0-9]+=$/{p=0} p' "$1"; }
 # run LOG B.IMG C.IMG [ESPERA] órdenes...

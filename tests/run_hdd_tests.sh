@@ -3,6 +3,9 @@
 # Hard disk test: FDISK + FORMAT /S from the floppy, then boot from C:.
 set -u
 IMG=${1:-build/hispados.img}
+# una copia: así se puede pasar a la vez que otras pruebas (QEMU bloquea la imagen)
+FLP=$(mktemp --suffix=.img); cp "$IMG" "$FLP"; IMG=$FLP
+trap 'rm -f "$FLP"' EXIT
 HDD=$(mktemp --suffix=.img)
 LOG=$(mktemp)
 LOG2=$(mktemp)

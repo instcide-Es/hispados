@@ -8,6 +8,9 @@ recorrer las épocas de los sistemas operativos y crear, para cada una, el
 nuestro: hecho desde cero, en español y libre. Lo podrá usar gratis cualquier
 persona que tenga un equipo antiguo.
 
+> «Vamos a hacer que muchos ordenadores puedan ser estudiados por los nietos
+> de las personas que los compraron por primera vez.» — Carlos, 12/11/2026
+
 ## Épocas
 
 | Época | Sistema | Base técnica | Equipos objetivo |

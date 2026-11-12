@@ -3,6 +3,9 @@
 # End-to-end test: boots the image in QEMU and drives it through COM1.
 set -u
 IMG=${1:-build/hispados.img}
+# una copia: así se puede pasar a la vez que otras pruebas (QEMU bloquea la imagen)
+FLP=$(mktemp --suffix=.img); cp "$IMG" "$FLP"; IMG=$FLP
+trap 'rm -f "$FLP"' EXIT
 LOG=$(mktemp)
 send() { sleep "${2:-0.7}"; printf '%s\r' "$1"; }
 {
