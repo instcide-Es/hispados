@@ -61,7 +61,14 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | `SYS.COM`, `INSTALAR` (instalar en un disco duro), `KEYB SP` (teclado español, AltGr) | ✅ |
 | Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes | ✅ |
 | `EDIT`/`EDITAR` (editor), `GESTOR` (gestor de archivos), `SYSINFO`/`INFO` (propiedades del sistema) | ✅ |
-| Teclado y ratón USB nativos, UMB/EMS, Windows 3.1, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
+| Teclado y ratón USB nativos (HID) y ratón PS/2 (`HSPRATON`, INT 33h) | ✅ |
+| CD/DVD también en SATA (AHCI); menú de arranque propio con F5 y F8 | ✅ |
+| SHARE en el núcleo (bloqueos y modos de compartición) | ✅ |
+| Sistema en `\HISPADOS` con nombres en español y `ALIAS.INI` con los clásicos (EDIT, FORMAT, XCOPY…) | ✅ |
+| Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
+| Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
+| Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
+| UMB/EMS, EHCI/UHCI, Sound Blaster, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
 
 ## Compilar y probar
 
