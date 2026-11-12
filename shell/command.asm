@@ -324,6 +324,29 @@ ce_e15      db "cambio de disco no válido", 0
 ce_msgs     dw ce_e0, ce_e1, ce_e2, ce_e3, ce_e4, ce_e5, ce_e6, ce_e7
             dw ce_e8, ce_e9, ce_e10, ce_e11, ce_e12, ce_e12, ce_e12, ce_e15
 
+; mayúsculas para el nombre de una orden, sin acentos (CP437 no tiene Ó, Á...)
+; así «Versión» o «VERSIÓN» son VERSION
+cw_upcase:
+        push si
+        mov si, cw_fold
+.f:
+        cmp byte [si], 0
+        je .u
+        cmp al, [si]
+        je .h
+        add si, 2
+        jmp .f
+.h:
+        mov al, [si+1]
+        pop si
+        ret
+.u:
+        pop si
+        jmp upcase
+cw_fold     db 0xA0, 'A', 0x82, 'E', 0x90, 'E', 0xA1, 'I', 0xA2, 'O', 0xA3, 'U'
+            db 0x81, 'U', 0x9A, 'U', 0x85, 'A', 0x8A, 'E', 0x8D, 'I', 0x95, 'O'
+            db 0x97, 'U', 0xA4, 0xA5
+            db 0xB5, 'A', 0xD6, 'I', 0xE0, 'O', 0xE9, 'U', 0   ; Á Í Ó Ú de CP850
 ctrlc_handler:
         push ax
         push bx
@@ -493,6 +516,17 @@ execute_line:
         cmp byte [si], 0            ; «@» sola: nada
         je .r
 .w:
+        ; «/ver» como «ver»; «/?» solo, la ayuda
+        cmp byte [si], '/'
+        jne .w2
+        cmp word [si+1], '?'        ; «/?» y fin de línea
+        jne .w1
+        mov si, e_ayuda
+        jmp .w2
+.w1:
+        inc si
+        jmp .w
+.w2:
         ; palabra de orden -> cmdword (mayúsculas)
         mov di, cmdword
         mov cx, 63
@@ -527,7 +561,7 @@ execute_line:
         jnc .curdir
         mov al, [si]
 .cw1:
-        call upcase
+        call cw_upcase
         mov [di], al
         inc di
         inc si
@@ -6561,7 +6595,8 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  GESTOR, INFO, MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR,", 13, 10
             db "  EXPANDIR, ETIQUETA, XCOPIAR, REVISAR (CHKDSK).", 13, 10
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
-            db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10, 0
+            db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
+            db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10, 0
 help_tab:
         dw do_dir, h_dir
         dw do_type, h_type
