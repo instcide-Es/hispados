@@ -1,3 +1,5 @@
 build/
 .claude/
 tests/thirdparty/dl/
+*.orig
+*.rej
