@@ -2,15 +2,19 @@
 ;  HSPSND.COM - driver de sonido de Hispa-DOS (residente)
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  Uso:  HSPSND          (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
+;  Uso:  HSPSND [/NOSB]  (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
+;        /NOSB  no buscar una Sound Blaster
 ;
-;  Tarjetas: Intel HD Audio (HDA, PCs actuales) e Intel AC'97 (ICH y
+;  Tarjetas: Sound Blaster 2.0/Pro/16 (ISA; variable BLASTER o sondeo en
+;  220h-280h; si no está BLASTER, la pone), Intel HD Audio (HDA, PCs
+;  actuales) e Intel AC'97 (ICH y
 ;  compatibles). HD Audio necesita el modo real "irreal" (FS con límite de
 ;  4 GB) para llegar a sus registros; no funciona bajo EMM386 (modo V86).
 ;
 ;  API: INT 2Fh AX=D700h -> AL=FFh si está instalado, ES:BX = punto de entrada
 ;  (llamada lejana, AH = función):
-;    00h información  -> AL = tarjeta (0 ninguna, 3 AC'97, 4 HD Audio),
+;    00h información  -> AL = tarjeta (0 ninguna, 1 Sound Blaster,
+;                        2 Sound Blaster 16, 3 AC'97, 4 HD Audio),
 ;                        BX = versión,
 ;                        ES:DI = nombre
 ;    01h reproducir   DS:SI = datos PCM, CX = bytes, DX = Hz,
@@ -95,6 +99,14 @@ f_info:
         push cs
         pop es
         mov di, name_none
+        cmp al, 1
+        jne .s16
+        mov di, name_sb
+.s16:
+        cmp al, 2
+        jne .s3
+        mov di, name_sb16
+.s3:
         cmp al, 3
         jne .h
         mov di, name_ac97
@@ -112,6 +124,10 @@ f_play:
         push es
         cmp byte [cs:dev_type], 4
         je hda_play
+        cmp byte [cs:dev_type], 2
+        je sb_play_f
+        cmp byte [cs:dev_type], 1
+        je sb_play_f
         cmp byte [cs:dev_type], 3
         jne .done
         mov [cs:p_fmt], al
@@ -146,6 +162,13 @@ f_play:
         retf
 
 f_wait:
+        cmp byte [cs:dev_type], 2
+        ja .nsb
+        cmp byte [cs:dev_type], 0
+        je .r
+        call sb_wait
+        jmp .r
+.nsb:
         cmp byte [cs:dev_type], 4
         jne .a
         call unreal
@@ -160,6 +183,13 @@ f_wait:
         retf
 
 f_stop:
+        cmp byte [cs:dev_type], 2
+        ja .nsb
+        cmp byte [cs:dev_type], 0
+        je .r
+        call sb_halt
+        jmp .r
+.nsb:
         cmp byte [cs:dev_type], 4
         jne .a
         call unreal
@@ -174,6 +204,13 @@ f_stop:
         retf
 
 f_volume:
+        cmp byte [cs:dev_type], 2
+        ja .nsb
+        cmp byte [cs:dev_type], 0
+        je .r
+        call sb_volume
+        jmp .r
+.nsb:
         cmp byte [cs:dev_type], 3
         jne .r
         push ax
@@ -829,6 +866,627 @@ hda_stop:
         pop ax
         ret
 
+; =============================================================================
+;  Sound Blaster (2.0, Pro y 16) - parte residente
+; =============================================================================
+; 4 bloques de SB_BLK octetos en una zona alineada a 16 KB (la DMA del ISA no
+; puede cruzar 64 KB). DMA de autoinicio sobre los 4 bloques; la tarjeta
+; avisa (IRQ) al acabar cada bloque: se llena de silencio y queda libre.
+; Sin datos durante SB_IDLE bloques se para (reset del DSP), así la tarjeta
+; queda libre para los juegos.
+SB_BLK      equ 4096
+SB_IDLE     equ 8
+
+sb_base     dw 0
+sb_irq      db 0
+sb_dma      db 1
+sb_hdma     db 0                    ; 0 = sin DMA de 16 bits
+sb_major    db 0
+sb_minor    db 0
+sb_vec      db 0
+sb_play     db 0                    ; bloque que suena
+sb_wr       db 0                    ; siguiente bloque que se llena
+sb_queued   db 0                    ; bloques con datos sin acabar
+sb_idle     db 0
+sb_full     db 0, 0, 0, 0
+sb_hs       db 0                    ; modo de alta velocidad (8 bits)
+sb_old      dd 0
+sb_req      dw 0
+name_sb     db "Sound Blaster", 0
+name_sb16   db "Sound Blaster 16", 0
+
+; ---- DSP ----
+; AL -> DSP (CF si no responde)
+sb_out:
+        push cx
+        push dx
+        push ax
+        mov dx, [cs:sb_base]
+        add dx, 0x0C
+        mov cx, 0xFFFF
+.w:
+        in al, dx
+        test al, 0x80
+        jz .ok
+        loop .w
+        pop ax
+        stc
+        jmp .r
+.ok:
+        pop ax
+        out dx, al
+        clc
+.r:
+        pop dx
+        pop cx
+        ret
+; DSP -> AL (CF si no responde)
+sb_in:
+        push cx
+        push dx
+        mov dx, [cs:sb_base]
+        add dx, 0x0E
+        mov cx, 0xFFFF
+.w:
+        in al, dx
+        test al, 0x80
+        jnz .ok
+        loop .w
+        stc
+        jmp .r
+.ok:
+        sub dx, 4
+        in al, dx
+        clc
+.r:
+        pop dx
+        pop cx
+        ret
+; reiniciar el DSP (CF si no hay DSP en sb_base)
+sb_reset:
+        push ax
+        push cx
+        push dx
+        mov dx, [cs:sb_base]
+        add dx, 6
+        mov al, 1
+        out dx, al
+        mov cx, 16                  ; > 3 microsegundos
+.d:
+        in al, dx
+        loop .d
+        xor al, al
+        out dx, al
+        mov cx, 8
+.t:
+        call sb_in
+        jc .n
+        cmp al, 0xAA
+        je .ok
+.n:
+        loop .t
+        stc
+        jmp .r
+.ok:
+        clc
+.r:
+        pop dx
+        pop cx
+        pop ax
+        ret
+; escribir un registro del mezclador: AH = registro, AL = valor
+sb_mix:
+        push dx
+        mov dx, [cs:sb_base]
+        add dx, 4
+        xchg al, ah
+        out dx, al
+        inc dx
+        xchg al, ah
+        out dx, al
+        pop dx
+        ret
+
+; dirección del bloque AL -> DI (en CS)
+sb_blk_di:
+        movzx di, al
+        and di, 3
+        shl di, 12
+        add di, [cs:buf_off]
+        ret
+
+; llenar de silencio el bloque AL
+sb_silence:
+        push ax
+        push cx
+        push di
+        push es
+        call sb_blk_di
+        push cs
+        pop es
+        mov ax, 0x8080              ; 8 bits sin signo
+        cmp byte [cs:dev_type], 2
+        jne .f
+        xor ax, ax                  ; 16 bits con signo
+.f:
+        mov cx, SB_BLK / 2
+        cld
+        rep stosw
+        pop es
+        pop di
+        pop cx
+        pop ax
+        ret
+
+; parar: reset del DSP, canal DMA tapado y bloques en silencio
+sb_halt:
+        push ax
+        push dx
+        pushf
+        cli
+        call sb_reset
+        call sb_dma_mask
+        mov byte [cs:started], 0
+        mov byte [cs:sb_queued], 0
+        mov dword [cs:sb_full], 0
+        mov byte [cs:sb_play], 0
+        mov byte [cs:sb_wr], 0
+        xor al, al
+.s:
+        call sb_silence
+        inc al
+        cmp al, 4
+        jb .s
+        popf
+        pop dx
+        pop ax
+        ret
+
+; tapar el canal de DMA que se usa
+sb_dma_mask:
+        push ax
+        cmp byte [cs:dev_type], 2
+        je .h
+        mov al, [cs:sb_dma]
+        or al, 4
+        out 0x0A, al
+        pop ax
+        ret
+.h:
+        mov al, [cs:sb_hdma]
+        and al, 3
+        or al, 4
+        out 0xD4, al
+        pop ax
+        ret
+
+; poner en marcha la DMA y el DSP sobre los 4 bloques (cur_rate, dev_type)
+sb_start:
+        pushad
+        call sb_reset
+        jc .r
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        movzx ebx, word [cs:buf_off]
+        add eax, ebx                ; dirección física de los bloques
+        cmp byte [cs:dev_type], 2
+        je .d16
+        ; --- DMA de 8 bits (canales 0-3) ---
+        mov bl, [cs:sb_dma]
+        and bl, 3
+        mov al, bl
+        or al, 4
+        out 0x0A, al                ; tapar
+        out 0x0C, al                ; biestable a cero
+        mov al, 0x58                ; lectura, autoinicio, uno a uno
+        or al, bl
+        out 0x0B, al
+        movzx dx, bl
+        shl dx, 1                   ; puerto de dirección
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        movzx ecx, word [cs:buf_off]
+        add eax, ecx
+        out dx, al
+        mov al, ah
+        out dx, al
+        shr eax, 16
+        push ax
+        inc dx                      ; puerto de cuenta
+        mov ax, 4 * SB_BLK - 1
+        out dx, al
+        mov al, ah
+        out dx, al
+        pop ax
+        movzx bx, bl
+        mov dl, [cs:pg8+bx]
+        xor dh, dh
+        out dx, al                  ; página
+        mov al, [cs:sb_dma]
+        and al, 3
+        out 0x0A, al                ; destapar
+        ; --- DSP de 8 bits ---
+        mov al, 0xD1                ; altavoz
+        call sb_out
+        ; constante de tiempo: 256 - 1000000 / Hz
+        mov eax, 1000000
+        xor edx, edx
+        movzx ecx, word [cs:cur_rate]
+        div ecx
+        mov ah, 0
+        neg al                      ; 256 - x (en 8 bits)
+        push ax
+        mov al, 0x40
+        call sb_out
+        pop ax
+        call sb_out
+        mov al, 0x48                ; tamaño del bloque
+        call sb_out
+        mov al, (SB_BLK - 1) & 0xFF
+        call sb_out
+        mov al, (SB_BLK - 1) >> 8
+        call sb_out
+        mov al, 0x1C                ; autoinicio, normal
+        cmp byte [cs:sb_hs], 0
+        je .g8
+        mov al, 0x90                ; autoinicio, alta velocidad
+.g8:
+        call sb_out
+        jmp .on
+.d16:
+        ; --- DMA de 16 bits (canales 5-7): en palabras ---
+        mov bl, [cs:sb_hdma]
+        and bl, 3
+        mov al, bl
+        or al, 4
+        out 0xD4, al
+        out 0xD8, al
+        mov al, 0x58
+        or al, bl
+        out 0xD6, al
+        movzx dx, bl
+        shl dx, 2
+        add dx, 0xC0                ; dirección
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        movzx ecx, word [cs:buf_off]
+        add eax, ecx
+        mov ecx, eax
+        shr eax, 1
+        out dx, al
+        mov al, ah
+        out dx, al
+        add dx, 2                   ; cuenta
+        mov ax, 4 * SB_BLK / 2 - 1
+        out dx, al
+        mov al, ah
+        out dx, al
+        shr ecx, 16
+        and cl, 0xFE
+        movzx bx, bl
+        mov dl, [cs:pg16+bx]
+        xor dh, dh
+        mov al, cl
+        out dx, al
+        mov al, [cs:sb_hdma]
+        and al, 3
+        out 0xD4, al
+        ; --- DSP 4.x: frecuencia de salida y 16 bits estéreo ---
+        mov al, 0x41
+        call sb_out
+        mov ax, [cs:cur_rate]
+        xchg al, ah
+        call sb_out
+        xchg al, ah
+        call sb_out
+        mov al, 0xB6                ; 16 bits, salida, autoinicio, FIFO
+        call sb_out
+        mov al, 0x30                ; estéreo con signo
+        call sb_out
+        mov ax, SB_BLK / 2 - 1      ; muestras por bloque
+        call sb_out
+        mov al, ah
+        call sb_out
+.on:
+        mov byte [cs:started], 1
+        mov byte [cs:sb_idle], 0
+.r:
+        popad
+        ret
+pg8         db 0x87, 0x83, 0x81, 0x82
+pg16        db 0x8F, 0x8B, 0x89, 0x8A
+
+; ---- interrupción de la tarjeta: ha acabado el bloque sb_play ----
+sb_isr:
+        cmp byte [cs:started], 0
+        jne .ours
+        jmp far [cs:sb_old]
+.ours:
+        push ax
+        push dx
+        mov dx, [cs:sb_base]
+        add dx, 0x0E                ; acuse de 8 bits
+        cmp byte [cs:dev_type], 2
+        jne .ack
+        inc dx                      ; acuse de 16 bits
+.ack:
+        in al, dx
+        push bx
+        movzx bx, byte [cs:sb_play]
+        cmp byte [cs:sb_full+bx], 0
+        je .e
+        mov byte [cs:sb_full+bx], 0
+        dec byte [cs:sb_queued]
+        mov byte [cs:sb_idle], 0
+        jmp .z
+.e:
+        inc byte [cs:sb_idle]
+.z:
+        mov al, bl
+        call sb_silence
+        inc bl
+        and bl, 3
+        mov [cs:sb_play], bl
+        ; sin nada en cola: no escribir en el que suena
+        cmp byte [cs:sb_queued], 0
+        jne .k
+        cmp [cs:sb_wr], bl
+        jne .k
+        inc bl
+        and bl, 3
+        mov [cs:sb_wr], bl
+.k:
+        pop bx
+        cmp byte [cs:sb_idle], SB_IDLE
+        jb .eoi
+        call sb_halt                ; un rato sin datos: a descansar
+.eoi:
+        mov al, 0x20
+        cmp byte [cs:sb_irq], 8
+        jb .m
+        out 0xA0, al
+.m:
+        out 0x20, al
+        pop dx
+        pop ax
+        iret
+
+; ---- reproducir (desde f_play, con pushad/ds/es ya guardados) ----
+sb_play_f:
+        mov [cs:p_fmt], al
+        mov [cs:p_left], cx
+        mov [cs:p_src], si
+        mov [cs:p_src+2], ds
+        cmp dx, [cs:sb_req]
+        je .rok
+        mov [cs:sb_req], dx
+        call sb_wait
+        call sb_halt
+        ; 8 bits: hasta 22050 Hz modo normal, por encima alta velocidad
+        cmp dx, 4000
+        jae .lo
+        mov dx, 4000
+.lo:
+        cmp dx, 44100
+        jbe .hi
+        mov dx, 44100
+.hi:
+        mov [cs:cur_rate], dx
+        mov byte [cs:sb_hs], 0
+        cmp byte [cs:dev_type], 2
+        je .rok
+        cmp dx, 22050
+        jbe .rok
+        cmp byte [cs:sb_major], 2
+        jb .slow                    ; DSP 1.x: sin alta velocidad
+        mov byte [cs:sb_hs], 1
+        jmp .rok
+.slow:
+        mov word [cs:cur_rate], 22050
+.rok:
+.loop:
+        cmp word [cs:p_left], 0
+        je .done
+        call sb_wait_slot
+        jc .done
+        cli
+        call sb_fill
+        test bx, bx
+        jz .dn
+        movzx bx, byte [cs:sb_wr]
+        mov byte [cs:sb_full+bx], 1
+        inc byte [cs:sb_queued]
+        inc bl
+        and bl, 3
+        mov [cs:sb_wr], bl
+        cmp byte [cs:started], 0
+        jne .go
+        call sb_start
+.go:
+        sti
+        jmp .loop
+.dn:
+        sti
+.done:
+        pop es
+        pop ds
+        popad
+        clc
+        retf
+
+; esperar un bloque libre (CF si vence el plazo)
+sb_wait_slot:
+        push bx
+        cmp byte [cs:started], 0
+        jne .s
+        ; parada: se empieza por el bloque 0
+        mov byte [cs:sb_play], 0
+        mov byte [cs:sb_wr], 0
+        clc
+        jmp .r
+.s:
+        call tmo_start
+.l:
+        sti
+        movzx bx, byte [cs:sb_wr]
+        cmp byte [cs:sb_full+bx], 0
+        jne .w
+        cmp bl, [cs:sb_play]
+        jne .ok
+.w:
+        cmp byte [cs:started], 0
+        je .s0
+        call tmo_check
+        jnc .l
+        jmp .r
+.s0:
+        mov byte [cs:sb_play], 0
+        mov byte [cs:sb_wr], 0
+.ok:
+        clc
+.r:
+        pop bx
+        ret
+
+; esperar a que acabe lo que hay en cola
+sb_wait:
+        cmp byte [cs:started], 0
+        je .r
+        call tmo_start
+.l:
+        sti
+        cmp byte [cs:sb_queued], 0
+        je .r
+        call tmo_check
+        jnc .l
+.r:
+        ret
+
+; p_src -> bloque sb_wr: 16 bits estéreo (SB16) u 8 bits mono -> BX tramas
+sb_fill:
+        mov cl, 1
+        test byte [cs:p_fmt], 1
+        jz .b
+        shl cl, 1
+.b:
+        test byte [cs:p_fmt], 2
+        jz .c
+        shl cl, 1
+.c:
+        movzx cx, cl
+        mov ax, [cs:p_left]
+        xor dx, dx
+        div cx                      ; tramas disponibles
+        mov bx, SB_BLK / 4
+        cmp byte [cs:dev_type], 2
+        je .m
+        mov bx, SB_BLK
+.m:
+        cmp ax, bx
+        jbe .n
+        mov ax, bx
+.n:
+        mov bx, ax
+        test ax, ax
+        jnz .go
+        mov word [cs:p_left], 0
+        ret
+.go:
+        push bx
+        mul cx
+        sub [cs:p_left], ax
+        mov al, [cs:sb_wr]
+        call sb_blk_di
+        push cs
+        pop es
+        lds si, [cs:p_src]
+        mov cx, bx
+        mov dl, [cs:p_fmt]
+        mov dh, [cs:dev_type]
+        cld
+.l:
+        ; una trama -> AX izquierdo, BX derecho (16 bits con signo)
+        test dl, 1
+        jnz .s16
+        lodsb
+        sub al, 0x80
+        mov ah, al
+        xor al, al
+        mov bx, ax
+        test dl, 2
+        jz .mono
+        lodsb
+        sub al, 0x80
+        mov ah, al
+        xor al, al
+        xchg ax, bx
+        jmp .put
+.s16:
+        lodsw
+        mov bx, ax
+        test dl, 2
+        jz .mono
+        lodsw
+        xchg ax, bx
+        jmp .put
+.mono:
+        mov ax, bx
+.put:
+        cmp dh, 2
+        jne .p8
+        stosw
+        mov ax, bx
+        stosw
+        loop .l
+        jmp .end
+.p8:
+        sar ax, 1                   ; media de los dos canales
+        sar bx, 1
+        add ax, bx
+        mov al, ah
+        add al, 0x80
+        stosb
+        loop .l
+.end:
+        mov ax, ds
+        mov bx, si
+        shr bx, 4
+        add ax, bx
+        and si, 15
+        mov [cs:p_src], si
+        mov [cs:p_src+2], ax
+        pop bx
+        ret
+
+; volumen AL = 0..31 (SB16: maestro 30h/31h; SB Pro: 22h)
+sb_volume:
+        push ax
+        and al, 31
+        cmp byte [cs:dev_type], 2
+        jne .pro
+        shl al, 3
+        mov ah, 0x30
+        call sb_mix
+        mov ah, 0x31
+        call sb_mix
+        pop ax
+        ret
+.pro:
+        cmp byte [cs:sb_major], 3
+        jne .r
+        shr al, 1
+        mov ah, al
+        shl ah, 4
+        or al, ah
+        mov ah, 0x22
+        call sb_mix
+.r:
+        pop ax
+        ret
+
 resident_end:
 
 ; =============================================================================
@@ -860,6 +1518,14 @@ init:
         mov [buf_off], ax
         add ax, NBUF * BUFSZ
         mov [tsr_end], ax
+        ; Sound Blaster (ISA) primero, salvo con /NOSB
+        call opt_nosb
+        jc .pci
+        call sb_detect
+        jc .pci
+        call sb_install
+        jmp .install
+.pci:
         ; ¿hay BIOS PCI?
         mov ax, 0xB101
         xor edi, edi
@@ -964,6 +1630,608 @@ init:
         shr dx, 4
         mov ax, 0x3100
         int 0x21
+
+; =============================================================================
+;  Sound Blaster - detección e instalación (se descarta)
+; =============================================================================
+; BLASTER=A220 I5 D1 H5 T6 del entorno -> bl_*
+sb_parse_env:
+        push es
+        mov es, [0x2C]
+        xor di, di
+.v:
+        cmp byte [es:di], 0
+        je .none
+        mov si, s_blaster
+        push di
+.c:
+        lodsb
+        test al, al
+        jz .found
+        mov ah, [es:di]
+        cmp ah, 'a'
+        jb .u
+        sub ah, 32
+.u:
+        cmp al, ah
+        jne .nx
+        inc di
+        jmp .c
+.nx:
+        pop di
+.sk:
+        cmp byte [es:di], 0
+        je .n2
+        inc di
+        jmp .sk
+.n2:
+        inc di
+        jmp .v
+.found:
+        pop ax
+        mov byte [bl_have], 1
+.t:
+        mov al, [es:di]
+        test al, al
+        jz .none
+        inc di
+        and al, 0xDF
+        cmp al, 'A'
+        je .a
+        cmp al, 'I'
+        je .i
+        cmp al, 'D'
+        je .d
+        cmp al, 'H'
+        je .h
+        jmp .t
+.a:
+        call .hex
+        mov [bl_a], dx
+        jmp .t
+.i:
+        call .dec
+        mov [bl_i], dl
+        jmp .t
+.d:
+        call .dec
+        mov [bl_d], dl
+        jmp .t
+.h:
+        call .dec
+        mov [bl_h], dl
+        jmp .t
+.none:
+        pop es
+        ret
+.hex:
+        xor dx, dx
+.hl:
+        mov al, [es:di]
+        sub al, '0'
+        jb .hr
+        cmp al, 9
+        jbe .hd
+        and al, 0xDF
+        sub al, 'A' - '0' - 10
+        cmp al, 10
+        jb .hr
+        cmp al, 15
+        ja .hr
+.hd:
+        shl dx, 4
+        or dl, al
+        inc di
+        jmp .hl
+.hr:
+        ret
+.dec:
+        xor dx, dx
+.dl:
+        mov al, [es:di]
+        sub al, '0'
+        jb .dr
+        cmp al, 9
+        ja .dr
+        imul dx, dx, 10
+        add dl, al
+        inc di
+        jmp .dl
+.dr:
+        ret
+
+; leer un registro del mezclador AL -> AL
+sb_mixrd:
+        push dx
+        mov dx, [sb_base]
+        add dx, 4
+        out dx, al
+        inc dx
+        in al, dx
+        pop dx
+        ret
+
+; buscar la tarjeta -> CF si no hay; dev_type, sb_* rellenos
+sb_detect:
+        mov byte [bl_have], 0
+        mov word [bl_a], 0
+        mov byte [bl_i], 0xFF
+        mov byte [bl_d], 0xFF
+        mov byte [bl_h], 0xFF
+        call sb_parse_env
+        mov ax, [bl_a]
+        test ax, ax
+        jz .probe
+        mov [sb_base], ax
+        call sb_reset
+        jnc .found
+        stc
+        ret
+.probe:
+        mov si, sb_ports
+.p:
+        lodsw
+        test ax, ax
+        jz .no
+        mov [sb_base], ax
+        call sb_reset
+        jc .p
+.found:
+        mov al, 0xE1                ; versión del DSP
+        call sb_out
+        call sb_in
+        jc .no
+        mov [sb_major], al
+        call sb_in
+        jc .no
+        mov [sb_minor], al
+        ; valores por omisión, la variable BLASTER manda
+        mov byte [sb_irq], 5
+        mov byte [sb_dma], 1
+        mov byte [sb_hdma], 0
+        cmp byte [sb_major], 4
+        jb .user
+        ; SB16: la configuración está en el mezclador (80h IRQ, 81h DMA)
+        mov al, 0x80
+        call sb_mixrd
+        mov ah, 2
+        test al, 1
+        jnz .ir
+        mov ah, 5
+        test al, 2
+        jnz .ir
+        mov ah, 7
+        test al, 4
+        jnz .ir
+        mov ah, 10
+        test al, 8
+        jnz .ir
+        mov ah, 5
+.ir:
+        mov [sb_irq], ah
+        mov al, 0x81
+        call sb_mixrd
+        mov bl, al
+        mov ah, 0
+        test bl, 1
+        jnz .d8
+        mov ah, 1
+        test bl, 2
+        jnz .d8
+        mov ah, 3
+        test bl, 8
+        jnz .d8
+        mov ah, 1
+.d8:
+        mov [sb_dma], ah
+        mov ah, 5
+        test bl, 0x20
+        jnz .d16
+        mov ah, 6
+        test bl, 0x40
+        jnz .d16
+        mov ah, 7
+        test bl, 0x80
+        jnz .d16
+        mov ah, 0
+.d16:
+        mov [sb_hdma], ah
+.user:
+        mov al, [bl_i]
+        cmp al, 0xFF
+        je .u1
+        mov [sb_irq], al
+.u1:
+        mov al, [bl_d]
+        cmp al, 0xFF
+        je .u2
+        mov [sb_dma], al
+.u2:
+        mov al, [bl_h]
+        cmp al, 0xFF
+        je .u3
+        mov [sb_hdma], al
+.u3:
+        cmp byte [sb_irq], 2
+        jne .i9
+        mov byte [sb_irq], 9        ; la IRQ 2 llega por la 9
+.i9:
+        ; comprobar lo que no se puede usar
+        movzx bx, byte [sb_irq]
+        cmp bx, 15
+        ja .no
+        cmp byte [sb_dma], 3
+        ja .no
+        cmp byte [sb_dma], 2        ; la 2 es de la disquetera
+        je .no
+        mov byte [dev_type], 1
+        cmp byte [sb_major], 4
+        jb .ok
+        mov al, [sb_hdma]
+        cmp al, 5
+        jb .ok
+        cmp al, 7
+        ja .ok
+        mov byte [dev_type], 2
+.ok:
+        clc
+        ret
+.no:
+        mov byte [dev_type], 0
+        stc
+        ret
+
+; instalar: bloques alineados, IRQ y BLASTER en el entorno
+sb_install:
+        ; bloques en una zona de 16 KB alineada (no cruza 64 KB)
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        mov ebx, eax
+        add eax, resident_end + 16383
+        and eax, 0xFFFFC000
+        sub eax, ebx
+        mov [buf_off], ax
+        add ax, 4 * SB_BLK
+        mov [tsr_end], ax
+        call sb_halt
+        ; vector de la IRQ
+        mov al, [sb_irq]
+        add al, 8
+        cmp byte [sb_irq], 8
+        jb .v
+        add al, 0x70 - 16
+.v:
+        mov [sb_vec], al
+        mov ah, 0x35
+        int 0x21
+        mov [sb_old], bx
+        mov [sb_old+2], es
+        mov al, [sb_vec]
+        mov dx, sb_isr
+        mov ah, 0x25
+        int 0x21
+        ; destapar la IRQ en el PIC
+        mov cl, [sb_irq]
+        cmp cl, 8
+        jae .slave
+        mov ah, 1
+        shl ah, cl
+        not ah
+        in al, 0x21
+        and al, ah
+        out 0x21, al
+        jmp .msg
+.slave:
+        sub cl, 8
+        mov ah, 1
+        shl ah, cl
+        not ah
+        in al, 0xA1
+        and al, ah
+        out 0xA1, al
+        in al, 0x21
+        and al, 0xFB                ; cascada
+        out 0x21, al
+.msg:
+        ; «Sound Blaster 16 en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)»
+        mov si, name_sb
+        cmp byte [dev_type], 2
+        jne .n
+        mov si, name_sb16
+.n:
+        call puts
+        mov si, msg_sb_en
+        call puts
+        mov ax, [sb_base]
+        call hex3
+        mov si, msg_sb_irq
+        call puts
+        movzx ax, byte [sb_irq]
+        call dec2
+        mov si, msg_sb_dma
+        call puts
+        movzx ax, byte [sb_dma]
+        call dec2
+        cmp byte [dev_type], 2
+        jne .nh
+        mov si, msg_sb_y
+        call puts
+        movzx ax, byte [sb_hdma]
+        call dec2
+.nh:
+        mov si, msg_sb_dsp
+        call puts
+        movzx ax, byte [sb_major]
+        call dec2
+        mov al, '.'
+        call putc
+        mov al, [sb_minor]
+        aam
+        add ax, 0x3030
+        xchg al, ah
+        call putc
+        mov al, ah
+        call putc
+        mov si, msg_sb_end
+        call puts
+        cmp byte [bl_have], 0
+        jne .r
+        call sb_set_blaster
+.r:
+        ret
+
+; BLASTER=A220 I5 D1 [H5] T6 en el entorno del intérprete que nos ejecuta
+sb_set_blaster:
+        ; montar el texto
+        mov di, bl_text
+        mov si, s_blaster
+.c:
+        lodsb
+        test al, al
+        jz .c1
+        mov [di], al
+        inc di
+        jmp .c
+.c1:
+        mov byte [di], 'A'
+        inc di
+        mov ax, [sb_base]
+        call hex3_di
+        mov dword [di], ' I'
+        add di, 2
+        movzx ax, byte [sb_irq]
+        call dec_di
+        mov dword [di], ' D'
+        add di, 2
+        movzx ax, byte [sb_dma]
+        call dec_di
+        cmp byte [dev_type], 2
+        jne .t
+        mov dword [di], ' H'
+        add di, 2
+        movzx ax, byte [sb_hdma]
+        call dec_di
+.t:
+        mov al, '1'
+        cmp byte [sb_major], 2
+        jb .tt
+        mov al, '3'
+        cmp byte [sb_major], 3
+        jb .tt
+        mov al, '4'
+        cmp byte [sb_major], 4
+        jb .tt
+        mov al, '6'
+.tt:
+        mov byte [di], ' '
+        mov byte [di+1], 'T'
+        mov [di+2], al
+        mov byte [di+3], 0
+        add di, 4
+        sub di, bl_text
+        mov [bl_len], di            ; con el cero
+        ; entorno del padre
+        mov ax, [0x16]
+        test ax, ax
+        jz .fail
+        mov es, ax
+        mov ax, [es:0x2C]
+        test ax, ax
+        jz .fail
+        mov es, ax
+        dec ax
+        push ds
+        mov ds, ax
+        mov cx, [3]                 ; tamaño del bloque en párrafos
+        pop ds
+        shl cx, 4
+        mov [bl_size], cx
+        ; fin de las variables: ES:BX = el cero que cierra la lista
+        xor bx, bx
+        cmp byte [es:0], 0
+        je .end
+.e:
+        cmp word [es:bx], 0
+        je .e1
+        inc bx
+        cmp bx, cx
+        jb .e
+        jmp .fail
+.e1:
+        inc bx
+.end:
+        ; lo que va detrás (DOS 3+: cuenta y nombre del programa)
+        lea si, [bx+1]
+        xor dx, dx
+        cmp word [es:si], 1
+        jne .tl
+        mov dx, 2
+        lea di, [si+2]
+.tn:
+        inc dx
+        cmp byte [es:di], 0
+        je .tl
+        inc di
+        cmp di, cx
+        jb .tn
+        jmp .fail
+.tl:
+        ; ¿cabe? bx (variables) + texto + 1 (cero final) + dx (cola)
+        mov ax, bx
+        add ax, [bl_len]
+        inc ax
+        add ax, dx
+        cmp ax, cx
+        ja .full
+        ; mover la cola hacia delante
+        push ds
+        push es
+        pop ds
+        std
+        lea si, [bx+1]
+        add si, dx
+        dec si                      ; último octeto de la cola
+        mov di, si
+        add di, [cs:bl_len]
+        mov cx, dx
+        inc cx                      ; y el cero final
+        rep movsb
+        cld
+        pop ds
+        ; copiar el texto en ES:BX
+        mov di, bx
+        mov si, bl_text
+        mov cx, [bl_len]
+        rep movsb
+        mov byte [es:di], 0         ; fin de la lista
+        mov si, msg_sb_set
+        call puts
+        mov si, bl_text
+        call puts
+        mov si, msg_crlf2
+        call puts
+        ret
+.full:
+        mov si, msg_sb_full
+        call puts
+        mov si, bl_text
+        call puts
+        mov si, msg_crlf2
+        call puts
+.fail:
+        ret
+
+; AX -> 3 cifras hexadecimales (puerto)
+hex3:
+        push ax
+        push cx
+        mov cx, 3
+        shl ax, 4
+.l:
+        rol ax, 4
+        push ax
+        and al, 15
+        add al, '0'
+        cmp al, '9'
+        jbe .d
+        add al, 7
+.d:
+        call putc
+        pop ax
+        loop .l
+        pop cx
+        pop ax
+        mov al, 'h'
+        jmp putc
+hex3_di:
+        push cx
+        mov cx, 3
+        shl ax, 4
+.l:
+        rol ax, 4
+        push ax
+        and al, 15
+        add al, '0'
+        cmp al, '9'
+        jbe .d
+        add al, 7
+.d:
+        mov [di], al
+        inc di
+        pop ax
+        loop .l
+        pop cx
+        ret
+; AX (0-99) en decimal
+dec2:
+        cmp ax, 10
+        jb .u
+        push ax
+        mov cl, 10
+        div cl
+        add al, '0'
+        call putc
+        mov al, ah
+        add al, '0'
+        call putc
+        pop ax
+        ret
+.u:
+        add al, '0'
+        jmp putc
+dec_di:
+        cmp ax, 10
+        jb .u
+        mov cl, 10
+        div cl
+        add al, '0'
+        mov [di], al
+        inc di
+        mov al, ah
+.u:
+        add al, '0'
+        mov [di], al
+        inc di
+        ret
+
+sb_ports    dw 0x220, 0x240, 0x260, 0x280, 0
+s_blaster   db "BLASTER=", 0
+msg_sb_en   db " en ", 0
+msg_sb_irq  db ", IRQ ", 0
+msg_sb_dma  db ", DMA ", 0
+msg_sb_y    db " y ", 0
+msg_sb_dsp  db " (DSP ", 0
+msg_sb_end  db ")", 13, 10, 0
+msg_sb_set  db "Variable puesta: ", 0
+msg_sb_full db "No cabe en el entorno; póngala en AUTOEXEC.BAT: SET ", 0
+bl_have     db 0
+bl_i        db 0
+bl_d        db 0
+bl_h        db 0
+bl_a        dw 0
+bl_len      dw 0
+bl_size     dw 0
+bl_text     times 40 db 0
+
+; ¿/NOSB en la línea de órdenes? -> CF
+opt_nosb:
+        mov si, 0x81
+.l:
+        lodsb
+        cmp al, 13
+        je .no
+        cmp al, '/'
+        jne .l
+        mov al, [si]
+        and al, 0xDF
+        cmp al, 'N'
+        jne .l
+        stc
+        ret
+.no:
+        clc
+        ret
 
 ; poner en marcha el controlador HD Audio y buscar una salida en el códec
 hda_init:

@@ -54,7 +54,7 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
 | `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
-| Sonido: `HSPSND` (Intel HD Audio y AC'97) y `PLAYWAV` | ✅ |
+| Sonido: `HSPSND` (Sound Blaster 2.0/Pro/16, Intel HD Audio y AC'97; pone la variable `BLASTER`) y `PLAYWAV`/`SONAR` | ✅ |
 | Imagen para memoria USB (arrancar o instalar con `INSTALL`) | ✅ |
 | `HSPUSB.SYS`: memorias USB nativas (controladora xHCI, almacenamiento masivo) | ✅ |
 | `HSPCD.SYS`: lectores de CD/DVD (ATAPI) e ISO 9660 en el núcleo (solo lectura) | ✅ |
@@ -68,7 +68,7 @@ El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 | Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
-| UMB/EMS, EHCI/UHCI, Sound Blaster, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
+| UMB/EMS (EMM386 propio), Sound Blaster emulada en tarjetas modernas, EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
 
 ## Compilar y probar
 
