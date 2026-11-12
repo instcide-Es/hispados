@@ -207,6 +207,7 @@ test: $(IMG) usb
 	tests/run_xcopiar_tests.sh $(IMG)
 	tests/run_revisar_tests.sh $(IMG)
 	tests/run_ayuda_tests.sh $(IMG)
+	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh

@@ -349,6 +349,7 @@ ctrlc_handler:
         mov byte [bdepth], 0
         mov byte [echo_on], 1
         mov byte [call_flag], 0
+        mov byte [in_for], 0
         jmp main_loop
 .child:
         pop ds
@@ -488,6 +489,8 @@ execute_line:
         jne .w
         inc si
         call skip_sp
+        cmp byte [si], 0            ; «@» sola: nada
+        je .r
 .w:
         ; palabra de orden -> cmdword (mayúsculas)
         mov di, cmdword
@@ -501,6 +504,12 @@ execute_line:
         cmp al, 9
         je .curdir
         cmp al, '/'
+        je .curdir
+        cmp al, ';'                 ; «PATH=C:\DOS», «ECHO,», «PROMPT=$P$G»
+        je .curdir
+        cmp al, ','
+        je .curdir
+        cmp al, '='
         je .curdir
         cmp al, '\'
         je .cwi
@@ -547,6 +556,10 @@ execute_line:
         call skip_sp
         cmp word [si], '/?'
         je int_help
+        cmp bx, do_echo             ; ECHO mira él mismo su separador
+        jne .go
+        mov si, [argp]
+.go:
         jmp bx
 .ext:
         jmp run_external
@@ -743,11 +756,21 @@ do_cls:
         ret
 
 do_echo:
-        cmp byte [si], '.'
+        ; «ECHO.», «ECHO,», «ECHO;» y «ECHO=»: el resto tal cual (o línea vacía)
+        mov al, [si]
+        cmp al, '.'
+        je .sep
+        cmp al, ','
+        je .sep
+        cmp al, ';'
+        je .sep
+        cmp al, '='
         jne .n
+.sep:
         inc si
         jmp .print
 .n:
+        call skip_sp
         cmp byte [si], 0
         jne .arg
         mov si, msg_echoon
@@ -840,6 +863,33 @@ do_cd:
         jmp crlf
 .chg:
         call cut_arg
+        cmp byte [si+1], ':'
+        jne .cd
+        cmp byte [si+2], 0
+        jne .cd
+        ; «CD X:» muestra la carpeta actual de esa unidad
+        mov al, [si]
+        call upcase
+        push ax
+        mov dl, al
+        sub dl, 'A' - 1
+        mov si, curdir
+        mov ah, 0x47
+        int 0x21
+        pop ax
+        jnc .shw
+        mov si, msg_baddrv
+        jmp puts
+.shw:
+        call putc
+        mov al, ':'
+        call putc
+        mov al, '\'
+        call putc
+        mov si, curdir
+        call puts
+        jmp crlf
+.cd:
         mov dx, si
         mov ah, 0x3B
         int 0x21
@@ -2768,6 +2818,55 @@ mem_debug:
         ret
 
 do_date:
+        cmp byte [si], 0
+        je .show
+        ; FECHA dd-mm-aaaa (también con «/» o «.»; año de dos cifras: 80-99
+        ; = 19xx, 00-79 = 20xx)
+        call parse_u16
+        jc .bad
+        mov [dt_tmp], al
+        call .sep
+        jc .bad
+        call parse_u16
+        jc .bad
+        mov [dt_tmp+1], al
+        call .sep
+        jc .bad
+        call parse_u16
+        jc .bad
+        cmp ax, 100
+        jae .y4
+        add ax, 1900
+        cmp ax, 1980
+        jae .y4
+        add ax, 100
+.y4:
+        mov cx, ax
+        mov dl, [dt_tmp]
+        mov dh, [dt_tmp+1]
+        mov ah, 0x2B
+        int 0x21
+        test al, al
+        jz .r
+.bad:
+        mov si, msg_baddate
+        jmp puts
+.sep:
+        mov al, [si]
+        cmp al, '-'
+        je .sy
+        cmp al, '/'
+        je .sy
+        cmp al, '.'
+        je .sy
+        stc
+        ret
+.sy:
+        inc si
+        clc
+.r:
+        ret
+.show:
         mov ah, 0x2A
         int 0x21
         push cx
@@ -2806,6 +2905,54 @@ put_year:
         jmp put2
 
 do_time:
+        cmp byte [si], 0
+        je .show
+        ; HORA hh:mm[:ss] (también con «.»)
+        mov word [dt_tmp], 0
+        call parse_u16
+        jc .bad
+        cmp ax, 23
+        ja .bad
+        mov [dt_tmp+1], al
+        call .sep
+        jc .bad
+        call parse_u16
+        jc .bad
+        cmp ax, 59
+        ja .bad
+        mov [dt_tmp], al
+        xor dx, dx
+        call .sep
+        jc .set
+        call parse_u16
+        jc .bad
+        cmp ax, 59
+        ja .bad
+        mov dh, al
+        xor dl, dl
+.set:
+        mov cx, [dt_tmp]
+        mov ah, 0x2D
+        int 0x21
+        test al, al
+        jz .r
+.bad:
+        mov si, msg_badtime
+        jmp puts
+.sep:
+        mov al, [si]
+        cmp al, ':'
+        je .sy
+        cmp al, '.'
+        je .sy
+        stc
+        ret
+.sy:
+        inc si
+        clc
+.r:
+        ret
+.show:
         mov ah, 0x2C
         int 0x21
         push dx
@@ -2968,6 +3115,8 @@ run_external:
         inc si
         cmp al, ';'
         je .pce2
+        cmp di, prefix + 77
+        jae .pc
         mov [di], al
         inc di
         jmp .pc
@@ -3402,19 +3551,22 @@ run_line:
         mov word [pl_out], 0
         jmp run_simple
 .pipe:
+        cmp byte [pl_depth], PIPE_MAX
+        jb .pok
+        mov si, msg_pipes
+        jmp puts
+.pok:
         mov byte [di], 0
         inc di
         push di
         ; nombre del fichero temporal según la profundidad
         movzx bx, byte [pl_depth]
         inc byte [pl_depth]
-        imul bx, bx, 16
-        add bx, pipe_names
+        mov al, bl
+        imul bx, bx, PIPE_LEN
+        add bx, pipe_tab
         push bx
-        mov ah, 0x19
-        int 0x21
-        add al, 'A'
-        mov [bx], al
+        call pipe_name
         mov [pl_out], bx
         call run_simple
         pop bx
@@ -3428,6 +3580,62 @@ run_line:
         int 0x21
         pop word [pl_in]
         dec byte [pl_depth]
+        ret
+
+; BX = búfer, AL = número -> «%TEMP%\~PIPEn.TMP» (sin TEMP, en la raíz de la
+; unidad actual). Conserva SI y BX.
+pipe_name:
+        push si
+        push di
+        push bx
+        push ax
+        mov si, s_temp
+        mov di, vval
+        call env_get
+        pop ax
+        pop bx
+        push bx
+        push ax
+        mov di, bx
+        jc .cur
+        mov si, vval
+        cmp byte [si], 0
+        je .cur
+        mov cx, 64
+.c:
+        lodsb
+        test al, al
+        jz .ce
+        stosb
+        loop .c
+.ce:
+        cmp byte [di-1], '\'
+        je .nm
+        cmp byte [di-1], ':'
+        je .nm
+        mov al, '\'
+        stosb
+        jmp .nm
+.cur:
+        mov ah, 0x19
+        int 0x21
+        add al, 'A'
+        stosb
+        mov ax, ':\'
+        stosw
+.nm:
+        mov si, s_pipe
+        mov cx, 5
+        rep movsb
+        pop ax
+        add al, '0'
+        stosb
+        mov si, s_tmp
+        mov cx, 5
+        rep movsb
+        pop bx
+        pop di
+        pop si
         ret
 
 ; SI = orden sin tuberías
@@ -3451,6 +3659,7 @@ run_simple:
         inc di
         mov bx, rin_name
         mov [r_in], bx
+        mov dx, rin_name + 79
         call .name
         jmp .scan
 .out:
@@ -3464,6 +3673,7 @@ run_simple:
 .o1:
         mov bx, rout_name
         mov [r_out], bx
+        mov dx, rout_name + 79
         call .name
         jmp .scan
 ; copiar el nombre que sigue a DI en BX y borrarlo de la línea
@@ -3482,10 +3692,12 @@ run_simple:
         je .ne
         cmp al, '>'
         je .ne
-        mov [bx], al
-        inc bx
         mov byte [di], ' '
         inc di
+        cmp bx, dx
+        jae .n1
+        mov [bx], al
+        inc bx
         jmp .n1
 .ne:
         mov byte [bx], 0
@@ -3623,6 +3835,8 @@ get_tok:
         call skip_sp
         cmp byte [si], 0
         je .none
+        push cx
+        mov cx, 127                 ; los búferes de destino son de 132
 .l:
         lodsb
         test al, al
@@ -3631,12 +3845,15 @@ get_tok:
         je .e
         cmp al, 9
         je .e
+        jcxz .l
         stosb
+        dec cx
         jmp .l
 .e0:
         dec si
 .e:
         mov byte [di], 0
+        pop cx
         clc
         ret
 .none:
@@ -3810,21 +4027,190 @@ msg_required:
         jmp puts
 
 ; -----------------------------------------------------------------------------
-;  COPY origen [destino]
+;  COPY [/Y | /-Y] [/V] [/A | /B] origen [/A | /B] [+ origen ...]
+;       [destino [/A | /B]]
+;   /Y   sobrescribir sin preguntar      /-Y  preguntar antes
+;   Por omisión se pregunta en la línea de órdenes y no en los archivos por
+;   lotes; la variable COPYCMD puede llevar /Y o /-Y (la línea manda).
+;   /V   se acepta (la escritura ya se comprueba)
+;   /A   texto: el origen se lee hasta Ctrl+Z; al destino se le añade
+;   /B   binario (lo normal, también al unir con «+»; en MS-DOS al unir lo
+;        normal es /A: aquí no, para no cortar archivos binarios sin avisar)
 ; -----------------------------------------------------------------------------
 do_copy:
-        mov di, c_src
-        call get_tok
-        jc msg_required
-        mov byte [c_nodst], 0
+        xor ax, ax
+        mov [c_src], al
+        mov [c_dst], al
+        mov [c_cur], al
+        mov [c_smode], al
+        mov [c_dmode], al
+        mov [c_plus], al
+        mov [c_nodst], al
+        mov [c_dwild], al
+        mov [c_asc], al
+        cmp byte [bdepth], 0
+        sete [c_ask]                ; fuera de los lotes se pregunta
+        ; COPYCMD: /Y o /-Y
+        push si
+        mov si, s_copycmd
+        mov di, vval
+        call env_get
+        jc .noenv
+        mov si, vval
+.ev:
+        lodsb
+        test al, al
+        jz .noenv
+        cmp al, '/'
+        jne .ev
+        mov ah, 0
+        cmp byte [si], '-'
+        jne .ev1
+        inc si
+        mov ah, 1
+.ev1:
+        mov al, [si]
+        call upcase
+        cmp al, 'Y'
+        jne .ev
+        mov [c_ask], ah
+        jmp .ev
+.noenv:
+        pop si
+        ; la línea: opciones, orígenes (con «+») y destino
+.arg:
+        mov al, [si]
+        cmp al, ' '
+        je .asp
+        cmp al, 9
+        je .asp
+        cmp al, ','
+        jne .a1
+.asp:
+        inc si
+        jmp .arg
+.a1:
+        test al, al
+        jz .parsed
+        cmp al, '/'
+        je .sw
+        cmp al, '+'
+        je .pl
+        ; un nombre: origen (el primero o tras «+») o destino
+        cmp byte [c_src], 0
+        je .tosrc
+        cmp byte [c_plus], 0
+        jne .tosrc
+        cmp byte [c_dst], 0
+        jne .many
         mov di, c_dst
-        call get_tok
-        jnc .hd
+        mov dx, c_dst + 130
+        mov al, [c_cur]
+        mov [c_dmode], al
+        jmp .cpname
+.tosrc:
+        mov di, c_src
+        call .eos
+        mov dx, c_src + 130
+        mov byte [c_plus], 0
+.cpname:
+        mov al, [si]
+        test al, al
+        jz .cpe
+        cmp al, ' '
+        je .cpe
+        cmp al, 9
+        je .cpe
+        cmp al, ','
+        je .cpe
+        cmp al, '/'
+        je .cpe
+        cmp al, '+'
+        je .cpe
+        inc si
+        cmp di, dx
+        jae .cpname
+        mov [di], al
+        inc di
+        jmp .cpname
+.cpe:
+        mov byte [di], 0
+        jmp .arg
+.pl:
+        inc si
+        mov di, c_src
+        call .eos
+        cmp di, c_src + 130
+        jae .arg
+        mov word [di], '+'
+        mov byte [c_plus], 1
+        jmp .arg
+.sw:
+        inc si
+        mov al, [si]
+        cmp al, '-'
+        jne .s1
+        inc si
+        mov al, [si]
+        call upcase
+        cmp al, 'Y'
+        jne .badsw
+        inc si
+        mov byte [c_ask], 1
+        jmp .arg
+.s1:
+        call upcase
+        test al, al
+        jz .badsw
+        inc si
+        cmp al, 'V'
+        je .arg
+        cmp al, 'Y'
+        jne .s2
+        mov byte [c_ask], 0
+        jmp .arg
+.s2:
+        mov ah, 1
+        cmp al, 'A'
+        je .mode
+        mov ah, 2
+        cmp al, 'B'
+        je .mode
+.badsw:
+        mov si, msg_badparam
+        jmp puts
+.mode:
+        mov [c_cur], ah
+        cmp byte [c_dst], 0
+        je .ms
+        mov [c_dmode], ah
+        jmp .arg
+.ms:
+        mov [c_smode], ah
+        jmp .arg
+.many:
+        mov si, msg_cmany
+        jmp puts
+; DI -> el cero final de la cadena
+.eos:
+        cmp byte [di], 0
+        je .eosr
+        inc di
+        jmp .eos
+.eosr:
+        ret
+.parsed:
+        cmp byte [c_src], 0
+        je msg_required
+        cmp byte [c_dst], 0
+        jne .hd
         mov word [c_dst], '.'
         mov byte [c_nodst], 1
 .hd:
         mov dword [c_count], 0
         mov byte [c_open], 0
+        cmp byte [c_smode], 1
+        sete [c_asc]
         ; ¿concatenación A+B[+C...]?
         mov si, c_src
 .plus:
@@ -3870,6 +4256,23 @@ do_copy:
         mov si, c_src
         call has_wild
         setc [c_wild]
+        ; destino con comodines (COPY *.TXT *.BAK): máscara como en REN
+        mov si, c_dst
+        call has_wild
+        jnc .nd3
+        mov byte [c_dwild], 1
+        mov si, c_dst
+        mov di, c_dpre
+        call path_prefix
+        mov si, c_dpre
+        call strlen
+        mov si, c_dst
+        add si, cx
+        mov di, m_mask
+        call to11
+        jmp .nd4
+.nd3:
+.nd4:
         call set_dta
         mov dx, c_src
         xor cx, cx
@@ -3890,6 +4293,17 @@ do_copy:
         call puts
         call crlf
 .nw:
+        cmp byte [c_dwild], 0
+        je .nomask
+        ; destino = carpeta del destino + nombre con la máscara
+        mov si, dta+0x1E
+        call mask_name
+        mov si, c_dpre
+        mov bx, m_new
+        mov di, c_dpath
+        call join_path
+        jmp .todir
+.nomask:
         cmp byte [c_dstdir], 0
         je .tofile
         ; destino carpeta: destino\nombre
@@ -3914,9 +4328,13 @@ do_copy:
         mov bx, dta+0x1E
         mov di, c_dpath
         call join_path
+.todir:
         mov si, c_spath
         mov di, c_dpath
         call same_file
+        jc .next
+        mov dx, c_dpath
+        call copy_ask
         jc .next
         mov dx, c_dpath
         mov ah, 0x3C
@@ -3925,9 +4343,7 @@ do_copy:
         jc .cerr
         mov [c_dh], ax
         call copy_one
-        mov bx, [c_dh]
-        mov ah, 0x3E
-        int 0x21
+        call copy_close
         jmp .next
 .tofile:
         cmp byte [c_open], 0
@@ -3936,6 +4352,9 @@ do_copy:
         mov di, c_dst
         call same_file
         jc .next
+        mov dx, c_dst
+        call copy_ask
+        jc .summary
         mov dx, c_dst
         mov ah, 0x3C
         xor cx, cx
@@ -3957,9 +4376,7 @@ do_copy:
 .close:
         cmp byte [c_open], 0
         je .summary
-        mov bx, [c_dh]
-        mov ah, 0x3E
-        int 0x21
+        call copy_close
 .summary:
         mov eax, [c_count]
         mov cl, 9
@@ -3970,6 +4387,9 @@ do_copy:
         mov si, c_dst
         call is_dir
         jnc .devbad
+        mov dx, c_dst
+        call copy_ask
+        jc .summary
         mov dx, c_dst
         mov ah, 0x3C
         xor cx, cx
@@ -3993,6 +4413,99 @@ do_copy:
         mov si, msg_cantcreate
         call puts
         jmp .summary
+
+; cerrar el destino (con /A en el destino, añade Ctrl+Z)
+copy_close:
+        mov bx, [c_dh]
+        cmp byte [c_dmode], 1
+        jne .c
+        mov byte [cbuf], 0x1A
+        mov dx, cbuf
+        mov cx, 1
+        mov ah, 0x40
+        int 0x21
+.c:
+        mov ah, 0x3E
+        int 0x21
+        mov byte [c_open], 0
+        ret
+
+; DX = destino: si ya existe (y no es un dispositivo) y hay que preguntar,
+; «¿Sobrescribir X (Sí/No/Todos)?». CF=1 si no se debe escribir.
+copy_ask:
+        cmp byte [c_ask], 0
+        je .ok
+        push dx
+        mov ax, 0x3D00
+        int 0x21
+        pop dx
+        jc .ok
+        mov bx, ax
+        push dx
+        mov ax, 0x4400
+        int 0x21
+        mov cx, dx
+        mov ah, 0x3E
+        int 0x21
+        pop dx
+        test cl, 0x80
+        jnz .ok
+.q:
+        mov si, msg_over1
+        call puts
+        mov si, dx
+        call puts
+        mov si, msg_over2
+        call puts
+        push dx
+        mov dx, ynbuf
+        mov byte [ynbuf], 4
+        mov ah, 0x0A
+        int 0x21
+        call crlf
+        pop dx
+        cmp byte [ynbuf+1], 0
+        je .no
+        mov al, [ynbuf+2]
+        call upcase
+        cmp al, 'S'
+        je .ok
+        cmp al, 'Y'
+        je .ok
+        cmp al, 'N'
+        je .no
+        cmp al, 'T'
+        je .all
+        cmp al, 'A'
+        jne .q
+.all:
+        mov byte [c_ask], 0
+.ok:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; SI = nombre -> m_new = el nombre con la máscara m_mask aplicada
+mask_name:
+        mov di, m_name
+        call to11
+        mov si, m_mask
+        mov di, m_name
+        mov cx, 11
+.m:
+        mov al, [si]
+        cmp al, '?'
+        je .keep
+        mov [di], al
+.keep:
+        inc si
+        inc di
+        loop .m
+        mov si, m_name
+        mov di, m_new
+        jmp from11
 
 ; COPY A+B[+C] [destino]: unir ficheros (sin destino, se añade a A)
 do_concat:
@@ -4035,22 +4548,31 @@ do_concat:
         jmp .more
 .newdst:
         mov dx, c_dst
+        call copy_ask
+        jc .sum
+        mov dx, c_dst
         mov ah, 0x3C
         xor cx, cx
         int 0x21
         jc .err
         mov [c_dh], ax
         mov byte [c_open], 1
+        inc dword [c_count]
 .add:
+        cmp byte [c_spath], 0       ; «A+,,»: parte vacía
+        je .more
         call copy_one
 .more:
         mov si, [c_next]
         cmp byte [c_last], 0
         jne .part
-        mov bx, [c_dh]
-        mov ah, 0x3E
-        int 0x21
+        call copy_close
+.sum:
+        mov eax, [c_count]
+        cmp eax, 1
+        jbe .s1
         mov eax, 1
+.s1:
         mov cl, 9
         call putnum_w
         mov si, msg_copied
@@ -4090,6 +4612,7 @@ copy_one:
 
 ; BX = origen -> c_dh; CF si el disco se llena
 copy_data:
+        mov byte [c_eof], 0
 .l:
         mov dx, cbuf
         mov cx, CBUF_LEN
@@ -4099,9 +4622,10 @@ copy_data:
         test ax, ax
         jz .ok
         mov cx, ax
-        cmp byte [c_isdev], 0
-        je .w
-        ; de un dispositivo: parar en Ctrl+Z
+        mov al, [c_isdev]
+        or al, [c_asc]
+        jz .w
+        ; de un dispositivo o como texto (/A): parar en Ctrl+Z
         push di
         mov di, cbuf
         push cx
@@ -4115,6 +4639,7 @@ copy_data:
         mov byte [c_eof], 1
 .noz:
         pop di
+        jcxz .ok                    ; nada antes del Ctrl+Z (CX=0 truncaría)
 .w:
         push bx
         push cx
@@ -4129,8 +4654,8 @@ copy_data:
         jb .err
         cmp byte [c_eof], 0
         je .l
-        mov byte [c_eof], 0
 .ok:
+        mov byte [c_eof], 0
         clc
         ret
 .err:
@@ -4141,9 +4666,54 @@ copy_data:
 ;  DEL / ERASE patrón
 ; -----------------------------------------------------------------------------
 do_del:
+        mov byte [c_src], 0
+        mov byte [dl_p], 0
+.arg:
+        call skip_sp
+        mov al, [si]
+        test al, al
+        jz .parsed
+        cmp al, '/'
+        jne .name
+        mov al, [si+1]
+        call upcase
+        cmp al, 'P'
+        jne .bad
+        add si, 2
+        mov byte [dl_p], 1
+        jmp .arg
+.bad:
+        mov si, msg_badparam
+        jmp puts
+.name:
+        cmp byte [c_src], 0
+        je .n1
+        mov si, msg_cmany
+        jmp puts
+.n1:
         mov di, c_src
-        call get_tok
-        jc msg_required
+.cn:
+        mov al, [si]
+        test al, al
+        jz .ce
+        cmp al, ' '
+        je .ce
+        cmp al, 9
+        je .ce
+        cmp al, '/'
+        je .ce
+        inc si
+        cmp di, c_src + 127
+        jae .cn
+        mov [di], al
+        inc di
+        jmp .cn
+.ce:
+        mov byte [di], 0
+        jmp .arg
+.parsed:
+        cmp byte [c_src], 0
+        je msg_required
         mov si, c_src
         call is_dir
         jc .nd
@@ -4171,6 +4741,8 @@ do_del:
         je .all
         jmp .go
 .all:
+        cmp byte [dl_p], 0          ; con /P ya se pregunta por cada uno
+        jne .go
         mov si, msg_delall
         call puts
         call ask_yn
@@ -4189,6 +4761,15 @@ do_del:
         mov bx, dta+0x1E
         mov di, c_spath
         call join_path
+        cmp byte [dl_p], 0
+        je .del
+        mov si, c_spath
+        call puts
+        mov si, msg_delp
+        call puts
+        call ask_yn
+        jc .n
+.del:
         mov dx, c_spath
         mov ah, 0x41
         int 0x21
@@ -4261,6 +4842,8 @@ do_ren:
         mov si, msg_dupnf
         jmp puts
 .l:
+        cmp byte [dta+0x1E], '.'    ; «.» y «..» no se renombran (REN *.* ...)
+        je .n
         mov si, dta+0x1E
         mov di, m_name
         call to11
@@ -4660,44 +5243,87 @@ do_pause:
 msg_redir   db "Error al crear el archivo", 13, 10, 0
 msg_self    db "No se puede copiar un archivo sobre sí mismo", 13, 10, 0
 msg_cantcreate db "No se puede crear el destino", 13, 10, 0
+msg_cmany   db "Demasiados parámetros", 13, 10, 0
+msg_over1   db "¿Sobrescribir ", 0
+msg_over2   db " (Sí/No/Todos)? ", 0
+s_copycmd   db "COPYCMD", 0
 msg_copied  db " archivo(s) copiado(s)", 13, 10, 0
 msg_full    db "Espacio insuficiente en el disco", 13, 10, 0
 msg_delall  db "¡Se borrarán todos los archivos del directorio!", 13, 10
             db "¿Está seguro (S/N)? ", 0
+msg_delp    db ",    ¿Eliminar (S/N)? ", 0
 msg_accden  db "Acceso denegado", 13, 10, 0
 msg_badparam db "Parámetro no válido", 13, 10, 0
 msg_dupnf   db "Nombre de archivo duplicado o archivo no encontrado", 13, 10, 0
 msg_mderr   db "No se puede crear el directorio", 13, 10, 0
 msg_rderr   db "Ruta no válida, no es un directorio", 13, 10, "o el directorio no está vacío", 13, 10, 0
 msg_pause   db "Pulse una tecla para continuar . . .", 0
-pipe_names  db "A:\~PIPE0.TMP", 0, 0, 0
-            db "A:\~PIPE1.TMP", 0, 0, 0
-            db "A:\~PIPE2.TMP", 0, 0, 0
-            db "A:\~PIPE3.TMP", 0, 0, 0
+PIPE_MAX    equ 10                  ; tuberías en una línea
+PIPE_LEN    equ 80
+s_pipe      db "~PIPE"
+s_tmp       db ".TMP", 0
+s_temp      db "TEMP", 0
+msg_pipes   db "Demasiadas tuberías en la línea", 13, 10, 0
 CBUF_LEN    equ 4096
 
 ; -----------------------------------------------------------------------------
-;  Entorno propio (1 KB) para SET, PATH y PROMPT
+;  Entorno propio para SET, PATH y PROMPT: 1 KB, o lo que diga /E:nnnn
+;  (COMMAND /E:2048 /P, lo habitual en SHELL= de CONFIG.SYS)
 ; -----------------------------------------------------------------------------
 ENV_SIZE    equ 1024
 
 env_init:
-        mov bx, ENV_SIZE / 16
+        mov word [env_size], ENV_SIZE
+        mov si, 0x81
+.o:
+        lodsb
+        cmp al, 13
+        je .od
+        cmp al, '/'
+        jne .o
+        mov al, [si]
+        call upcase
+        cmp al, 'C'                 ; lo que sigue a /C es la orden
+        je .od
+        cmp al, 'E'
+        jne .o
+        cmp byte [si+1], ':'
+        jne .o
+        add si, 2
+        call parse_u16
+        jc .o
+        cmp ax, 256
+        jae .o1
+        mov ax, 256
+.o1:
+        cmp ax, 32752
+        jbe .o2
+        mov ax, 32752
+.o2:
+        add ax, 15
+        and ax, 0xFFF0
+        mov [env_size], ax
+        jmp .o
+.od:
+        mov bx, [env_size]
+        shr bx, 4
         mov ah, 0x48
         int 0x21
         jc .r
         mov es, ax
         xor di, di
-        mov cx, ENV_SIZE / 2
+        mov cx, [env_size]
+        shr cx, 1
         push ax
         xor ax, ax
         rep stosw
         pop ax
         xor di, di
+        mov cx, [env_size]
+        sub cx, 2
         push ds
         mov ds, [0x2C]
         xor si, si
-        mov cx, ENV_SIZE - 2
 .l:
         cmp byte [si], 0
         je .end
@@ -4782,13 +5408,19 @@ env_get:
         jmp .s
 .v:
         inc di
+        mov cx, 255                 ; tope: los búferes son de 256 o más
 .c:
         mov al, [es:di]
-        mov [bx], al
         inc di
-        inc bx
         test al, al
-        jnz .c
+        jz .ce
+        jcxz .c
+        mov [bx], al
+        inc bx
+        dec cx
+        jmp .c
+.ce:
+        mov byte [bx], 0
         push ds
         pop es
         clc
@@ -4847,7 +5479,7 @@ env_set:
         add bx, cx
         add bx, 3
         add bx, di
-        cmp bx, ENV_SIZE
+        cmp bx, [env_size]
         ja .full
         mov si, [es_name]
 .cn:
@@ -4924,6 +5556,7 @@ word_is:
         ret
 
 do_path:
+        call skip_eq                ; «PATH=C:\DOS» como en MS-DOS
         cmp byte [si], 0
         jne .set
         mov si, s_pathvar
@@ -4949,7 +5582,17 @@ do_path:
         mov si, s_pathvar
         jmp env_set
 
+; saltar un «=» pegado a la orden (PATH=..., PROMPT=...)
+skip_eq:
+        cmp byte [si], '='
+        jne .r
+        inc si
+        call skip_sp
+.r:
+        ret
+
 do_prompt:
+        call skip_eq
         mov di, si
         mov si, s_promptvar
         jmp env_set
@@ -5192,6 +5835,12 @@ expand:
         sub al, '0'
         push si
         call get_arg
+        mov ax, eline + BLINE - 1   ; lo que queda en eline
+        sub ax, di
+        cmp cx, ax
+        jbe .fits
+        mov cx, ax
+.fits:
         rep movsb
         pop si
         jmp .l
@@ -5223,6 +5872,8 @@ expand:
         je .vne
         lodsb
         call upcase
+        cmp di, vname + 63
+        jae .vn
         stosb
         jmp .vn
 .vne:
@@ -5338,9 +5989,56 @@ do_shift:
         ret
 
 do_call:
+        mov al, [bdepth]
+        push ax
         mov byte [call_flag], 1
         call execute_line
         mov byte [call_flag], 0
+        pop ax
+        ; Dentro de un FOR (FOR %%A IN (...) DO CALL OTRO %%A) el lote llamado
+        ; se ejecuta ahora mismo, antes del elemento siguiente; si no, los
+        ; lotes se apilarían y correrían después y al revés.
+        cmp byte [in_for], 0
+        je .r
+        cmp byte [pl_depth], 0      ; no dentro de una tubería
+        jne .r
+        cmp [bdepth], al
+        jbe .r
+        push ax                     ; profundidad a la que hay que volver
+        push word [sv_in]
+        push word [sv_out]
+        push word [pl_in]
+        push word [pl_out]
+        sub sp, FOR_STLEN           ; el estado del FOR, a la pila
+        mov di, sp
+        mov si, for_state
+        mov cx, FOR_STLEN
+        rep movsb
+.loop:
+        mov bx, sp
+        mov al, [bx+FOR_STLEN+8]
+        cmp [bdepth], al
+        jbe .done
+        call batch_line
+        jc .loop
+        mov si, eline
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
+        jmp .loop
+.done:
+        mov si, sp
+        mov di, for_state
+        mov cx, FOR_STLEN
+        rep movsb
+        add sp, FOR_STLEN
+        mov byte [pl_depth], 0
+        pop word [pl_out]
+        pop word [pl_in]
+        pop word [sv_out]
+        pop word [sv_in]
+        pop ax
+.r:
         ret
 
 do_goto:
@@ -5353,6 +6051,7 @@ do_goto:
         mov di, glabel
         call get_tok
         jc .r
+        mov byte [glabel+8], 0      ; como MS-DOS: cuentan los 8 primeros
         call cur_ctx
         xor eax, eax
 .l:
@@ -5385,6 +6084,8 @@ do_goto:
         inc di
         jmp .c
 .end:
+        cmp di, glabel + 8          ; iguales los 8 primeros: vale
+        je .ok
         cmp dl, 0
         je .ok
         cmp dl, ' '
@@ -5399,6 +6100,8 @@ do_goto:
         mov si, msg_nolabel
         call puts
         dec byte [bdepth]
+        jnz .r
+        mov byte [echo_on], 1       ; el lote acaba aquí: vuelve el indicador
         ret
 
 ; IF [NOT] ERRORLEVEL n | EXIST fichero | a==b  orden
@@ -5501,6 +6204,9 @@ do_if:
         mov cx, 0x06
         mov ah, 0x4E
         int 0x21
+        jnc .exy
+        call if_device              ; IF EXIST carpeta\NUL
+.exy:
         pop si
         mov al, 1
         jnc .res
@@ -5513,6 +6219,71 @@ do_if:
         mov si, msg_syntax
         jmp puts
 .r:
+        ret
+
+; if_a = «[carpeta\]dispositivo» (NUL, CON...): CF=0 si la carpeta existe.
+; Es la forma clásica de saber si existe una carpeta: IF EXIST C:\DOS\NUL
+if_device:
+        mov si, if_a
+        mov di, truebuf
+        call path_prefix
+        ; ¿el nombre es un dispositivo?
+        mov si, truebuf
+        call strlen
+        mov dx, if_a
+        add dx, cx
+        mov si, dx
+        call has_wild
+        jc .no
+        mov ax, 0x3D00
+        int 0x21
+        jc .no
+        mov bx, ax
+        mov ax, 0x4400
+        int 0x21
+        push dx
+        mov ah, 0x3E
+        int 0x21
+        pop dx
+        test dl, 0x80
+        jz .no
+        ; ¿y la carpeta existe?
+        mov si, truebuf
+        call strlen
+        jcxz .yes
+        mov bx, cx
+        cmp byte [si+bx-1], ':'
+        je .yes
+        cmp bx, 1
+        je .yes                     ; «\»
+        cmp byte [si+bx-2], ':'
+        je .yes                     ; «X:\»
+        mov byte [si+bx-1], 0
+        jmp is_dir
+.yes:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; SI -> AX = número decimal; CF si no hay cifras
+parse_u16:
+        xor ax, ax
+        xor cx, cx
+.l:
+        movzx bx, byte [si]
+        sub bl, '0'
+        jb .e
+        cmp bl, 9
+        ja .e
+        imul ax, ax, 10
+        add ax, bx
+        inc si
+        inc cx
+        jmp .l
+.e:
+        cmp cx, 1
         ret
 
 ; SI -> AL = número decimal (0-255); CF si no hay cifras
@@ -5576,6 +6347,7 @@ do_for:
         test al, al
         jnz .ct
         ; recorrer el conjunto
+        mov byte [in_for], 1
         mov word [for_pos], for_set
 .item:
         mov si, [for_pos]
@@ -5634,6 +6406,7 @@ do_for:
         jnc .wl
         jmp .item
 .done:
+        mov byte [in_for], 0
         ret
 .syn:
         mov si, msg_syntax
@@ -5664,12 +6437,16 @@ for_run:
         lodsb
         test al, al
         jz .cpe
+        cmp di, for_cmd + 255
+        jae .cp
         stosb
         jmp .cp
 .cpe:
         pop si
         jmp .l
 .st:
+        cmp di, for_cmd + 255
+        jae .l
         stosb
         jmp .l
 .e:
@@ -5764,6 +6541,8 @@ msg_free    db " bytes libres", 13, 10, 0
 msg_mtotal  db " bytes de memoria convencional en total", 13, 10, 0
 msg_mfree   db " bytes libres", 13, 10, 0
 msg_mlarge  db " bytes del mayor programa ejecutable", 13, 10, 0
+msg_baddate db "Fecha no válida (dd-mm-aaaa)", 13, 10, 0
+msg_badtime db "Hora no válida (hh:mm[:ss])", 13, 10, 0
 msg_date    db "La fecha actual es ", 0
 msg_time    db "La hora actual es ", 0
 msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):", 13, 10
@@ -5850,7 +6629,7 @@ h_mem       db "Muestra la memoria usada y la libre.", 13, 10
             db "  /M  un programa en detalle  /D  todo en detalle  /P  pausa por pantallas", 13, 10, 0
 h_date      db "Muestra o cambia la fecha.", 13, 10
             db "", 13, 10
-            db "FECHA (DATE) [dd-mm-aa]", 13, 10, 0
+            db "FECHA (DATE) [dd-mm-aaaa]", 13, 10, 0
 h_time      db "Muestra o cambia la hora.", 13, 10
             db "", 13, 10
             db "HORA (TIME) [hh:mm[:ss]]", 13, 10, 0
@@ -5872,10 +6651,16 @@ h_copy      db "Copia uno o más archivos.", 13, 10
             db "COPIAR (COPY) origen [destino]", 13, 10
             db "COPIAR origen1+origen2[+...] destino   (une archivos)", 13, 10
             db "COPIAR CON archivo   (escribe desde el teclado; termina con Ctrl+Z)", 13, 10
-            db "El origen admite comodines (* y ?).", 13, 10, 0
+            db "El origen y el destino admiten comodines (* y ?): COPY *.TXT *.BAK", 13, 10
+            db "", 13, 10
+            db "  /Y   sobrescribe sin preguntar       /-Y  pregunta antes", 13, 10
+            db "       (por omisión pregunta, salvo en los archivos por lotes; la", 13, 10
+            db "       variable COPYCMD puede llevar /Y o /-Y)", 13, 10
+            db "  /A   texto (hasta Ctrl+Z)   /B  binario   /V  comprobar (se acepta)", 13, 10, 0
 h_del       db "Borra uno o más archivos.", 13, 10
             db "", 13, 10
-            db "BORRAR (DEL, ERASE) [unidad:][ruta]archivo", 13, 10
+            db "BORRAR (DEL, ERASE) [unidad:][ruta]archivo [/P]", 13, 10
+            db "  /P  pregunta antes de borrar cada archivo", 13, 10
             db "Con *.* pregunta antes de borrar.", 13, 10, 0
 h_ren       db "Cambia el nombre de uno o más archivos.", 13, 10
             db "", 13, 10
@@ -6021,6 +6806,7 @@ pblock      resb 14
 pl_in       resw 1
 pl_out      resw 1
 pl_depth    resb 1
+pipe_tab    resb PIPE_MAX*PIPE_LEN
 r_app       resb 1
 r_in        resw 1
 r_out       resw 1
@@ -6048,6 +6834,16 @@ c_nodst     resb 1
 c_first     resb 1
 c_last      resb 1
 c_next      resw 1
+c_cur       resb 1                  ; COPY: modo en curso (1 = /A, 2 = /B)
+c_smode     resb 1                  ; modo de los orígenes
+c_dmode     resb 1                  ; modo del destino
+c_plus      resb 1                  ; se acaba de leer un «+»
+c_ask       resb 1                  ; preguntar antes de sobrescribir
+c_asc       resb 1                  ; leer los orígenes hasta Ctrl+Z
+c_dwild     resb 1
+env_size    resw 1                  ; bytes del entorno (/E:nnnn)
+dt_tmp      resw 1                  ; DATE / TIME
+dl_p        resb 1                  ; DEL /P                  ; el destino lleva comodines
 ynbuf       resb 8
 mm_mode     resb 1
 mm_page     resb 1
@@ -6081,29 +6877,32 @@ errlvl      resb 1
 bdepth      resb 1
 call_flag   resb 1
 if_not      resb 1
-for_var     resb 1
 es_name     resw 1
 es_val      resw 1
-for_pos     resw 1
 br_pos      resd 1
 sname       resb 64
-pbuf        resb 132
+pbuf        resb 258
 vname       resb 64
-vval        resb 132
-glabel      resb 40
+vval        resb 258
+glabel      resb 132
 if_a        resb 132
 if_b        resb 132
-for_set     resb 132
-for_tmpl    resb 132
-for_cmd     resb 200
-for_item    resb 80
-for_pre     resb 80
-for_full    resb 132
-for_dta     resb 128
+for_state:                          ; lo que CALL guarda dentro de un FOR
+for_var     resb 1
+in_for      resb 1
+for_pos     resw 1
+for_set     resb BLINE+2
+for_tmpl    resb BLINE+2
+for_pre     resb BLINE+2
+for_dta     resb 44
+FOR_STLEN   equ $ - for_state
+for_cmd     resb 258
+for_item    resb BLINE+2
+for_full    resb BLINE+16
 rbuf        resb BLINE+2
 bline       resb BLINE+2
 eline       resb BLINE+2
 bctx        resb BC_LEN*BMAX
-            resb 2048
+            resb 6144
 stack_top:
 prog_end:

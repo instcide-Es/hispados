@@ -26,6 +26,10 @@ start:
         mov dx, ctrlc_handler
         mov ax, 0x2523
         int 0x21
+        ; error crítico: «¿Anular, Reintentar, Ignorar, Descartar?»
+        mov dx, crit_handler
+        mov ax, 0x2524
+        int 0x21
         ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT) y /C orden
         mov si, 0x81
 .opt:
@@ -133,6 +137,193 @@ main_loop:
 
 ; Ctrl+C: si corre un programa, terminarlo; si no, cancelar el lote y la
 ; línea y volver al indicador
+; -----------------------------------------------------------------------------
+;  Error crítico (INT 24h). AH = tipo (bit 7: dispositivo de caracteres;
+;  bit 0: escritura; bits 3-5: se puede descartar, reintentar, ignorar),
+;  AL = unidad, DI = código, BP:SI = cabecera del dispositivo.
+;  Solo se usan las funciones 01h-0Ch de INT 21h. -> AL = acción.
+; -----------------------------------------------------------------------------
+crit_handler:
+        sti
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push bp
+        push ds
+        push es
+        push cs
+        pop ds
+        mov [ce_ah], ah
+        mov [ce_al], al
+        mov es, bp                  ; ES:SI = cabecera del dispositivo
+        call ce_crlf
+        mov bx, di
+        and bx, 0xFF
+        cmp bx, 15
+        jbe .k
+        mov bx, 12
+.k:
+        shl bx, 1
+        mov dx, [ce_msgs+bx]
+        test byte [ce_ah], 0x80
+        jnz .dev
+        ; «Error al leer la unidad A: ...»
+        push dx
+        mov dx, ce_rd
+        test byte [ce_ah], 1
+        jz .rw
+        mov dx, ce_wr
+.rw:
+        call ce_puts
+        mov dl, [ce_al]
+        add dl, 'A'
+        call ce_putc
+        mov dl, ':'
+        call ce_putc
+        mov dl, ' '
+        call ce_putc
+        pop dx
+        call ce_puts
+        jmp .ask
+.dev:
+        ; «Error en el dispositivo PRN: ...»
+        push dx
+        mov dx, ce_dev
+        call ce_puts
+        mov cx, 8
+        add si, 10
+.dn:
+        mov dl, [es:si]
+        cmp dl, ' '
+        je .dne
+        call ce_putc
+        inc si
+        loop .dn
+.dne:
+        mov dl, ':'
+        call ce_putc
+        mov dl, ' '
+        call ce_putc
+        pop dx
+        call ce_puts
+.ask:
+        call ce_crlf
+        mov dx, ce_q_a
+        call ce_puts
+        test byte [ce_ah], 0x10
+        jz .q1
+        mov dx, ce_q_r
+        call ce_puts
+.q1:
+        test byte [ce_ah], 0x20
+        jz .q2
+        mov dx, ce_q_i
+        call ce_puts
+.q2:
+        test byte [ce_ah], 0x08
+        jz .q3
+        mov dx, ce_q_d
+        call ce_puts
+.q3:
+        mov dx, ce_q_end
+        call ce_puts
+.key:
+        mov ah, 0x07                ; sin eco ni Ctrl+C
+        int 0x21
+        mov dl, al
+        and al, 0xDF
+        mov bl, 2
+        cmp al, 'A'
+        je .ok
+        mov bl, 1
+        cmp al, 'R'
+        jne .ni
+        test byte [ce_ah], 0x10
+        jnz .ok
+.ni:
+        mov bl, 0
+        cmp al, 'I'
+        jne .nd
+        test byte [ce_ah], 0x20
+        jnz .ok
+.nd:
+        mov bl, 3
+        cmp al, 'D'
+        jne .key
+        test byte [ce_ah], 0x08
+        jz .key
+.ok:
+        mov dl, al
+        call ce_putc
+        call ce_crlf
+        mov al, bl
+        pop es
+        pop ds
+        pop bp
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        iret
+ce_putc:
+        push ax
+        mov ah, 0x02
+        int 0x21
+        pop ax
+        ret
+ce_puts:
+        push si
+        push dx
+        mov si, dx
+.l:
+        mov dl, [si]
+        test dl, dl
+        jz .e
+        call ce_putc
+        inc si
+        jmp .l
+.e:
+        pop dx
+        pop si
+        ret
+ce_crlf:
+        push dx
+        mov dl, 13
+        call ce_putc
+        mov dl, 10
+        call ce_putc
+        pop dx
+        ret
+ce_ah       db 0
+ce_al       db 0
+ce_rd       db "Error al leer la unidad ", 0
+ce_wr       db "Error al escribir en la unidad ", 0
+ce_dev      db "Error en el dispositivo ", 0
+ce_q_a      db "¿Anular", 0
+ce_q_r      db ", Reintentar", 0
+ce_q_i      db ", Ignorar", 0
+ce_q_d      db ", Descartar", 0
+ce_q_end    db "? ", 0
+ce_e0       db "el disco está protegido contra escritura", 0
+ce_e1       db "unidad desconocida", 0
+ce_e2       db "la unidad no está preparada", 0
+ce_e3       db "orden desconocida", 0
+ce_e4       db "error en los datos (CRC)", 0
+ce_e5       db "petición incorrecta", 0
+ce_e6       db "error de búsqueda", 0
+ce_e7       db "tipo de disco desconocido", 0
+ce_e8       db "no se encuentra el sector", 0
+ce_e9       db "no queda papel", 0
+ce_e10      db "fallo de escritura", 0
+ce_e11      db "fallo de lectura", 0
+ce_e12      db "error general", 0
+ce_e15      db "cambio de disco no válido", 0
+ce_msgs     dw ce_e0, ce_e1, ce_e2, ce_e3, ce_e4, ce_e5, ce_e6, ce_e7
+            dw ce_e8, ce_e9, ce_e10, ce_e11, ce_e12, ce_e12, ce_e12, ce_e15
+
 ctrlc_handler:
         push ax
         push bx
@@ -153,6 +344,7 @@ ctrlc_handler:
         mov ss, ax
         mov sp, stack_top
         sti
+        call dir_free
         call redir_restore
         mov byte [bdepth], 0
         mov byte [echo_on], 1
@@ -353,6 +545,8 @@ execute_line:
         jc .ext
         mov si, [argp]
         call skip_sp
+        cmp word [si], '/?'
+        je int_help
         jmp bx
 .ext:
         jmp run_external
@@ -688,7 +882,7 @@ do_type:
         ret
 .nf:
         mov si, msg_nofile
-        jmp puts
+        jmp err_puts
 
 do_vol:
         call arg_drive
@@ -770,9 +964,283 @@ set_dta:
         int 0x21
         ret
 
+; -----------------------------------------------------------------------------
+;  LISTAR / DIR [unidad:][ruta][archivo] [/P] [/W] [/A[[:]atributos]]
+;               [/O[[:]orden]] [/S] [/B] [/L] [/C]
+;   /P  pausa en cada pantalla        /W  formato ancho (5 columnas)
+;   /A  atributos: D H S R A, «-» = sin ese atributo (/A solo = todos)
+;   /O  orden: N E G S D, «-» = al revés (/O solo = G N)
+;   /S  también las subcarpetas       /B  solo los nombres
+;   /L  minúsculas                    /C, /CH  aceptadas, sin efecto
+;   Las opciones van pegadas o no y en cualquier sitio; /-X anula /X.
+;   DIRCMD (entorno) tiene las opciones por omisión.
+; -----------------------------------------------------------------------------
+DIR_MAX     equ 1500                ; entradas que caben en la tabla de /O
+DE_SZ       equ 34                  ; bytes por entrada de la tabla
+DE_11       equ 22                  ; nombre 8+3 dentro de la entrada
+DIR_PTRS    equ DIR_MAX*DE_SZ       ; después, los punteros (dw) para ordenar
+DIR_LVLS    equ 32                  ; niveles de subcarpetas con /S
+DIR_DTA     equ 44                  ; DTA por nivel
+
 do_dir:
-        call cut_arg
+        mov [d_args], si
+        ; opciones por omisión: ninguna
+        mov di, d_opts
+        mov cx, d_opts_end - d_opts
+        xor al, al
+        rep stosb
+        mov byte [d_arg], 0
+        ; primero las de DIRCMD, luego las de la línea
+        mov si, s_dircmd
+        mov di, d_env
+        call env_get
+        jc .noenv
+        mov byte [d_inenv], 1
+        mov si, d_env
+        call dir_opts
+        jnc .noenv
+        mov byte [d_inenv], 0
+        mov si, msg_denv
+        jmp puts
+.noenv:
+        mov byte [d_inenv], 0
+        mov si, [d_args]
+        call dir_opts
+        jc .r
+        ; /O: tabla en memoria propia (si no hay, se lista sin ordenar)
+        mov word [d_seg], 0
+        cmp byte [d_sort], 0
+        je .go
+        mov bx, (DIR_MAX * (DE_SZ + 2) + 15) / 16
+        mov ah, 0x48
+        int 0x21
+        jc .go
+        mov [d_seg], ax
+.go:
+        call dir_main
+        call dir_free
+.r:
+        ret
+
+; liberar la tabla de /O (también tras Ctrl+C)
+dir_free:
+        cmp word [d_seg], 0
+        je .r
+        push es
+        mov es, [d_seg]
+        mov ah, 0x49
+        int 0x21
+        pop es
+        mov word [d_seg], 0
+.r:
+        ret
+
+; ¿fin de palabra? (espacio, tabulador, «/» o fin) -> ZF
+d_isend:
+        cmp al, ' '
+        je .r
+        cmp al, 9
+        je .r
+        cmp al, '/'
+        je .r
+        test al, al
+.r:
+        ret
+
+; SI = opciones (y el patrón) -> d_opts, d_arg; CF y mensaje si hay error
+dir_opts:
+.l:
+        call skip_sp
+        lodsb
+        test al, al
+        jz .ok
+        cmp al, '/'
+        je .sw
+        ; una palabra: el patrón
+        dec si
+        mov [d_tok], si
+        cmp byte [d_arg], 0
+        jne .many
+        mov di, d_arg
+.w:
+        lodsb
+        call d_isend
+        je .we
+        cmp di, d_arg + 127
+        jae .w
+        stosb
+        jmp .w
+.we:
+        dec si
+        mov byte [di], 0
+        cmp byte [d_inenv], 0
+        je .l
+        mov byte [d_arg], 0         ; en DIRCMD solo cuentan las opciones
+        jmp .l
+.many:
+        mov si, msg_dmany
+        jmp .err
+.sw:
+        lea bx, [si-1]
+        mov [d_tok], bx
+        mov dl, 1                   ; 1 = activar, 0 = «/-» (anular)
+        cmp byte [si], '-'
+        jne .s1
+        inc si
+        mov dl, 0
+.s1:
+        lodsb
+        call upcase
+        cmp al, 'A'
+        je .sa
+        cmp al, 'O'
+        je .so
+        cmp al, 'C'
+        je .sc
+        ; las de una letra: P W S B L
+        mov bx, d_ftab
+.ft:
+        cmp byte [bx], 0
+        je .bad
+        cmp al, [bx]
+        je .ff
+        add bx, 3
+        jmp .ft
+.ff:
+        mov al, [si]
+        call d_isend
+        jne .bad
+        mov di, [bx+1]
+        mov [di], dl
+        jmp .l
+.sc:
+        ; /C y /CH (compresión): sin efecto
+        mov al, [si]
+        call upcase
+        cmp al, 'H'
+        jne .end
+        inc si
+.end:
+        mov al, [si]
+        call d_isend
+        jne .bad
+        jmp .l
+        ; /A[[:]atributos]
+.sa:
+        mov byte [d_aset], 0
+        mov byte [d_aclr], 0
+        mov [d_attr], dl
+        test dl, dl
+        jz .end
+        cmp byte [si], ':'
+        jne .sal
+        inc si
+.sal:
+        mov al, [si]
+        call d_isend
+        je .l
+        inc si
+        xor dh, dh
+        cmp al, '-'
+        jne .sa2
+        mov dh, 1
+        lodsb
+.sa2:
+        call upcase
+        mov bx, d_atab
+.sa3:
+        cmp byte [bx], 0
+        je .bad
+        cmp al, [bx]
+        je .sa4
+        add bx, 2
+        jmp .sa3
+.sa4:
+        mov ah, [bx+1]
+        test dh, dh
+        jnz .sa5
+        or [d_aset], ah
+        not ah
+        and [d_aclr], ah
+        jmp .sal
+.sa5:
+        or [d_aclr], ah
+        not ah
+        and [d_aset], ah
+        jmp .sal
+        ; /O[[:]orden]
+.so:
+        mov byte [d_nkeys], 0
+        mov [d_sort], dl
+        test dl, dl
+        jz .end
+        cmp byte [si], ':'
+        jne .sol
+        inc si
+.sol:
+        mov al, [si]
+        call d_isend
+        je .soe
+        inc si
+        xor dh, dh
+        cmp al, '-'
+        jne .so2
+        mov dh, 0x80
+        lodsb
+.so2:
+        call upcase
+        cmp al, 'C'                 ; por compresión: sin efecto
+        je .sol
+        mov bx, s_okeys
+.so3:
+        cmp byte [bx], 0
+        je .bad
+        cmp al, [bx]
+        je .so4
+        inc bx
+        jmp .so3
+.so4:
+        movzx bx, byte [d_nkeys]
+        cmp bx, 8
+        jae .sol
+        or al, dh
+        mov [d_keys+bx], al
+        inc byte [d_nkeys]
+        jmp .sol
+.soe:
+        cmp byte [d_nkeys], 0
+        jne .l
+        mov word [d_keys], 'G' | ('N' << 8)
+        mov byte [d_nkeys], 2
+        jmp .l
+.bad:
+        mov si, msg_dbad
+.err:
+        call puts
+        mov si, [d_tok]
+        call dir_puttok
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+; escribir la palabra de SI (la opción o el parámetro que sobra)
+dir_puttok:
+        lodsb
+        call putc
+.l:
+        lodsb
+        call d_isend
+        je .e
+        call putc
+        jmp .l
+.e:
+        jmp crlf
+
+dir_main:
         ; construir el patrón
+        mov si, d_arg
         mov di, pattern
         cmp byte [si], 0
         jne .copy
@@ -867,9 +1335,7 @@ do_dir:
         mov si, msg_baddrv
         jmp err_puts
 .tn:
-        call crlf
-        mov al, [truebuf]
-        call print_label
+        ; carpeta (d_path) y nombre (d_spec)
         mov si, truebuf
         mov di, si
 .ls:
@@ -881,32 +1347,84 @@ do_dir:
         mov di, si
         jmp .ls
 .lse:
+        mov si, di
+        mov bx, d_spec
+.cs:
+        lodsb
+        mov [bx], al
+        inc bx
+        test al, al
+        jnz .cs
         cmp di, truebuf+3
         jbe .root
         dec di
 .root:
         mov byte [di], 0
-        mov si, msg_dirof
-        call puts
         mov si, truebuf
-        call puts
-        call crlf
-        call crlf
+        mov di, d_path
+.cp:
+        lodsb
+        stosb
+        test al, al
+        jnz .cp
         xor eax, eax
         mov [nfiles], eax
         mov [nbytes], eax
-        call set_dta
-        mov dx, pattern
-        mov cx, 0x10
-        mov ah, 0x4E
-        int 0x21
-        jc .empty
-.entry:
-        call dir_line
-        mov ah, 0x4F
-        int 0x21
-        jnc .entry
-        ; resumen
+        mov [d_tfiles], eax
+        mov [d_tbytes], eax
+        mov byte [d_lines], 0
+        mov byte [d_lvl], 0
+        cmp byte [d_bare], 0
+        jne .nohdr
+        call crlf
+        mov al, [truebuf]
+        call print_label
+        mov byte [d_lines], 2
+        cmp byte [d_sub], 0
+        jne .nohdr
+        call dir_header
+.nohdr:
+        cmp byte [d_sub], 0
+        jne .tree
+        call dir_list
+        cmp dword [nfiles], 0
+        je .empty
+        cmp byte [d_bare], 0
+        jne .r
+        call dir_sum
+        jmp dir_freeln
+.tree:
+        call dir_tree
+        cmp dword [d_tfiles], 0
+        je .empty
+        cmp byte [d_bare], 0
+        jne .r
+        mov si, msg_dtotal
+        call puts
+        call d_nl
+        mov eax, [d_tfiles]
+        mov [nfiles], eax
+        mov eax, [d_tbytes]
+        mov [nbytes], eax
+        call dir_sum
+        jmp dir_freeln
+.empty:
+        mov si, msg_nofile
+        jmp puts
+.r:
+        ret
+
+; " Directorio de X" y una línea en blanco
+dir_header:
+        mov si, msg_dirof
+        call puts
+        mov si, d_path
+        call puts
+        call d_nl
+        jmp d_nl
+
+; "n archivo(s)  n bytes"
+dir_sum:
         mov eax, [nfiles]
         mov cl, 9
         call putnum_w
@@ -917,6 +1435,10 @@ do_dir:
         call putnum_w
         mov si, msg_bytes
         call puts
+        jmp d_line
+
+; "n bytes libres" de la unidad listada
+dir_freeln:
         mov ah, 0x36
         mov dl, [truebuf]
         sub dl, 'A' - 1
@@ -929,13 +1451,472 @@ do_dir:
         mov cl, 25
         call putnum_w
         mov si, msg_free
-        jmp puts
-.empty:
-        mov si, msg_nofile
-        jmp puts
+        call puts
+        jmp d_line
 
-dir_line:
+; salto de línea de DIR (cuenta las líneas para /P)
+d_nl:
+        call crlf
+d_line:
+        cmp byte [d_page], 0
+        je .r
+        inc byte [d_lines]
+        cmp byte [d_lines], 23
+        jb .r
+        push si
+        push ax
+        mov si, msg_pause
+        call puts
+        mov ah, 0x08
+        int 0x21
+        call crlf
+        mov byte [d_lines], 0
+        cmp byte [d_bare], 0
+        jne .p
+        mov si, msg_dcont
+        call puts
+        mov si, d_path
+        call puts
+        mov al, ')'
+        call putc
+        call crlf
+        mov byte [d_lines], 1
+.p:
+        pop ax
+        pop si
+.r:
+        ret
+
+; carácter de un nombre (en minúsculas con /L)
+d_putn:
+        cmp byte [d_lower], 0
+        je .p
+        cmp al, 'A'
+        jb .p
+        cmp al, 'Z'
+        ja .p
+        add al, 32
+.p:
+        jmp putc
+
+; SI = carpeta -> copiada en DI con «\» al final; DI = fin
+d_join:
+        lodsb
+        stosb
+        test al, al
+        jnz d_join
+        dec di
+        cmp byte [di-1], '\'
+        je .r
+        mov byte [di], '\'
+        inc di
+.r:
+        ret
+
+; ¿la entrada de la DTA pasa el filtro de /A (y de /B)? CF si no
+dir_ok:
+        mov al, [dta+0x15]
+        cmp byte [d_attr], 0
+        je .b
+        mov ah, al
+        and ah, [d_aset]
+        cmp ah, [d_aset]
+        jne .no
+        test al, [d_aclr]
+        jnz .no
+.b:
+        cmp byte [d_bare], 0
+        je .ok
+        cmp byte [dta+0x1E], '.'    ; con /B, sin «.» ni «..»
+        je .no
+.ok:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; listar los archivos de d_path que encajan con d_spec
+dir_list:
+        xor eax, eax
+        mov [nfiles], eax
+        mov [nbytes], eax
+        mov byte [d_col], 0
+        mov si, d_path
+        mov di, d_srch
+        call d_join
+        mov [d_sname], di
+        mov si, d_spec
+.cs:
+        lodsb
+        stosb
+        test al, al
+        jnz .cs
+        call set_dta
+        mov word [d_sattr], 0x10
+        cmp byte [d_attr], 0
+        je .a
+        mov word [d_sattr], 0x16    ; con /A, también ocultos y de sistema
+.a:
+        cmp word [d_seg], 0
+        je .stream
+        ; leer todas en la tabla
+        mov fs, [d_seg]
+        mov word [d_n], 0
+        mov dx, d_srch
+        mov cx, [d_sattr]
+        mov ah, 0x4E
+        int 0x21
+        jc .done
+.tl:
+        call dir_ok
+        jc .tn
+        mov bx, [d_n]
+        cmp bx, DIR_MAX
+        jae .stream                 ; no caben: sin ordenar
+        imul di, bx, DE_SZ
+        shl bx, 1
+        mov [fs:bx+DIR_PTRS], di
+        inc word [d_n]
+        mov si, dta+0x15
+        mov cx, 22
+.c1:
+        lodsb
+        mov [fs:di], al
+        inc di
+        loop .c1
+        call d_mk11
+        mov si, nm11
+        mov cx, 11
+.c2:
+        lodsb
+        mov [fs:di], al
+        inc di
+        loop .c2
+.tn:
+        mov ah, 0x4F
+        int 0x21
+        jnc .tl
+        call dir_sortt
+        xor bx, bx
+.pl:
+        cmp bx, [d_n]
+        jae .done
+        push bx
+        shl bx, 1
+        mov si, [fs:bx+DIR_PTRS]
+        mov di, dta+0x15
+        mov cx, 22
+.c3:
+        mov al, [fs:si]
+        inc si
+        mov [di], al
+        inc di
+        loop .c3
+        call dir_out
+        pop bx
+        inc bx
+        jmp .pl
+.stream:
+        mov dx, d_srch
+        mov cx, [d_sattr]
+        mov ah, 0x4E
+        int 0x21
+        jc .done
+.sl:
+        call dir_ok
+        jc .sn
+        call dir_out
+.sn:
+        mov ah, 0x4F
+        int 0x21
+        jnc .sl
+.done:
+        ; /W: terminar la última fila
+        cmp byte [d_col], 0
+        je .r
+        mov byte [d_col], 0
+        call d_nl
+.r:
+        ret
+
+; ordenar la tabla (inserción, estable) según d_keys
+dir_sortt:
+        mov bx, 1
+.i:
+        cmp bx, [d_n]
+        jae .r
+        push bx
+        shl bx, 1
+        mov dx, [fs:bx+DIR_PTRS]
+.j:
+        test bx, bx
+        jz .put
+        mov si, [fs:bx+DIR_PTRS-2]
+        mov di, dx
+        call d_cmp
+        cmp al, 0
+        jle .put
+        mov [fs:bx+DIR_PTRS], si
+        sub bx, 2
+        jmp .j
+.put:
+        mov [fs:bx+DIR_PTRS], dx
+        pop bx
+        inc bx
+        jmp .i
+.r:
+        ret
+
+; FS:SI y FS:DI = entradas -> AL = 1 si SI va después, -1 si antes, 0 igual
+d_cmp:
+        push bx
+        push cx
+        xor bx, bx
+.k:
+        cmp bl, [d_nkeys]
+        jae .eq
+        mov ah, [d_keys+bx]
+        mov al, ah
+        and al, 0x7F
+        cmp al, 'N'
+        je .kn
+        cmp al, 'E'
+        je .ke
+        cmp al, 'G'
+        je .kg
+        cmp al, 'S'
+        je .ks
+        ; D: fecha y hora juntas (la hora en la palabra baja)
+        mov ecx, [fs:si+1]
+        cmp ecx, [fs:di+1]
+        jmp .res
+.ks:
+        mov ecx, [fs:si+5]
+        cmp ecx, [fs:di+5]
+        jmp .res
+.kg:
+        ; carpetas primero
+        mov cl, [fs:si]
+        and cl, 0x10
+        mov ch, [fs:di]
+        and ch, 0x10
+        cmp ch, cl
+        jmp .res
+.kn:
+        mov cx, 8
+        push si
+        push di
+        add si, DE_11
+        add di, DE_11
+        jmp .fc
+.ke:
+        mov cx, 3
+        push si
+        push di
+        add si, DE_11 + 8
+        add di, DE_11 + 8
+.fc:
+        mov al, [fs:si]
+        cmp al, [fs:di]
+        jne .fce
+        inc si
+        inc di
+        loop .fc
+        cmp al, al
+.fce:
+        pop di
+        pop si
+.res:
+        je .nx
+        mov al, 1
+        ja .sg
+        mov al, -1
+.sg:
+        test ah, 0x80
+        jz .out
+        neg al
+        jmp .out
+.nx:
+        inc bx
+        jmp .k
+.eq:
+        xor al, al
+.out:
+        pop cx
+        pop bx
+        ret
+
+; una entrada (en la DTA): contar y escribir en el formato pedido
+dir_out:
+        cmp byte [d_sub], 0
+        je .c
+        cmp byte [d_bare], 0
+        jne .c
+        cmp dword [nfiles], 0
+        jne .c
+        call dir_header             ; con /S, solo las carpetas con algo
+.c:
         inc dword [nfiles]
+        inc dword [d_tfiles]
+        test byte [dta+0x15], 0x10
+        jnz .nd
+        mov eax, [dta+0x1A]
+        add [nbytes], eax
+        add [d_tbytes], eax
+.nd:
+        cmp byte [d_bare], 0
+        jne dir_bare
+        cmp byte [d_wide], 0
+        jne dir_wide
+        jmp dir_line
+
+; /B: NOMBRE.EXT (con /S, con la ruta)
+dir_bare:
+        cmp byte [d_sub], 0
+        je .n
+        mov si, d_srch
+.p:
+        cmp si, [d_sname]
+        jae .n
+        lodsb
+        call d_putn
+        jmp .p
+.n:
+        mov si, dta+0x1E
+.l:
+        lodsb
+        test al, al
+        jz .e
+        call d_putn
+        jmp .l
+.e:
+        jmp d_nl
+
+; /W: 5 columnas de 15, las carpetas entre corchetes
+dir_wide:
+        xor cx, cx
+        test byte [dta+0x15], 0x10
+        jz .n
+        mov al, '['
+        call putc
+        inc cx
+.n:
+        mov si, dta+0x1E
+.l:
+        lodsb
+        test al, al
+        jz .e
+        call d_putn
+        inc cx
+        jmp .l
+.e:
+        test byte [dta+0x15], 0x10
+        jz .p
+        mov al, ']'
+        call putc
+        inc cx
+.p:
+        inc byte [d_col]
+        cmp byte [d_col], 5
+        jae .nl
+        mov al, ' '
+.pad:
+        cmp cx, 15
+        jae .r
+        call putc
+        inc cx
+        jmp .pad
+.r:
+        ret
+.nl:
+        mov byte [d_col], 0
+        jmp d_nl
+
+; /S: d_path y sus subcarpetas
+dir_tree:
+        call dir_list
+        cmp dword [nfiles], 0
+        je .sub
+        cmp byte [d_bare], 0
+        jne .sub
+        call dir_sum
+        call d_nl
+.sub:
+        cmp byte [d_lvl], DIR_LVLS
+        jae .r
+        call d_lvldta
+        mov ah, 0x1A
+        int 0x21
+        mov si, d_path
+        mov di, d_srch
+        call d_join
+        mov si, s_all
+.cs:
+        lodsb
+        stosb
+        test al, al
+        jnz .cs
+        mov dx, d_srch
+        mov cx, 0x16
+        mov ah, 0x4E
+        int 0x21
+        jc .r
+.l:
+        call d_lvldta
+        mov bx, dx
+        test byte [bx+0x15], 0x10
+        jz .n
+        cmp byte [bx+0x1E], '.'
+        je .n
+        ; d_path\NOMBRE
+        mov di, d_path
+.e:
+        cmp byte [di], 0
+        je .ee
+        inc di
+        jmp .e
+.ee:
+        push di
+        cmp byte [di-1], '\'
+        je .j
+        mov byte [di], '\'
+        inc di
+.j:
+        lea si, [bx+0x1E]
+.jc:
+        lodsb
+        stosb
+        test al, al
+        jnz .jc
+        inc byte [d_lvl]
+        call dir_tree
+        dec byte [d_lvl]
+        pop di
+        mov byte [di], 0
+        call d_lvldta
+        mov ah, 0x1A
+        int 0x21
+.n:
+        mov ah, 0x4F
+        int 0x21
+        jnc .l
+.r:
+        ret
+
+; DX = DTA del nivel d_lvl
+d_lvldta:
+        movzx dx, byte [d_lvl]
+        imul dx, dx, DIR_DTA
+        add dx, d_dtas
+        ret
+
+; nombre de la DTA -> nm11 (8+3, con espacios)
+d_mk11:
+        push ax
+        push cx
+        push si
+        push di
         mov di, nm11
         mov cx, 11
         mov al, ' '
@@ -967,18 +1948,26 @@ dir_line:
         stosb
         jmp .dots
 .out:
+        pop di
+        pop si
+        pop cx
+        pop ax
+        ret
+
+dir_line:
+        call d_mk11
         mov si, nm11
         mov cx, 8
 .p1:
         lodsb
-        call putc
+        call d_putn
         loop .p1
         mov al, ' '
         call putc
         mov cx, 3
 .p2:
         lodsb
-        call putc
+        call d_putn
         loop .p2
 .size:
         test byte [dta+0x15], 0x10
@@ -988,7 +1977,6 @@ dir_line:
         jmp .date
 .file:
         mov eax, [dta+0x1A]
-        add [nbytes], eax
         mov cl, 14
         call putnum_w
 .date:
@@ -1026,7 +2014,7 @@ dir_line:
         shr ax, 5
         and ax, 63
         call put2
-        jmp crlf
+        jmp d_nl
 
 ; -----------------------------------------------------------------------------
 ;  MEM [/C | /F | /D | /M nombre] [/P]
@@ -1841,8 +2829,43 @@ do_time:
         call put2
         jmp crlf
 
+; AYUDA            lista de órdenes
+; AYUDA orden      lo mismo que «orden /?» (internas y programas)
 do_help:
+        cmp byte [si], 0
+        je .list
+        mov di, help_line
+        mov cx, 100
+.c:
+        lodsb
+        cmp al, ' '
+        jbe .e
+        cmp al, '/'
+        je .e
+        stosb
+        loop .c
+.e:
+        mov dword [di], ' /?' ; (con el cero final)
+        mov si, help_line
+        jmp execute_line
+.list:
         mov si, msg_help
+        jmp puts
+
+; «orden /?» de una orden interna (BX = su rutina)
+int_help:
+        mov si, help_tab
+.l:
+        lodsw
+        test ax, ax
+        jz .none
+        cmp ax, bx
+        lodsw
+        jne .l
+        mov si, ax
+        jmp puts
+.none:
+        mov si, h_none
         jmp puts
 
 ; -----------------------------------------------------------------------------
@@ -4753,8 +5776,161 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  SET  PROMPT  REM  IF  FOR  GOTO  SHIFT", 13, 10
             db "Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.", 13, 10
             db "Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y", 13, 10
-            db "después en PATH. Utilidades: FDISK, FORMAT, SYS, INSTALAR, KEYB, PLAYWAV.", 13, 10
+            db "después en PATH. Programas en \HISPADOS (también con su nombre clásico):", 13, 10
+            db "  PARTIR (FDISK), FORMATEA, SISTEMA, INSTALAR, TECLADO, SONAR, EDITAR,", 13, 10
+            db "  GESTOR, INFO, MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR,", 13, 10
+            db "  EXPANDIR, ETIQUETA, XCOPIAR, REVISAR (CHKDSK).", 13, 10
+            db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
             db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10, 0
+help_tab:
+        dw do_dir, h_dir
+        dw do_type, h_type
+        dw do_cd, h_cd
+        dw do_echo, h_echo
+        dw do_set, h_set
+        dw do_mem, h_mem
+        dw do_date, h_date
+        dw do_time, h_time
+        dw do_vol, h_vol
+        dw do_help, h_help
+        dw do_rem, h_rem
+        dw do_exit, h_exit
+        dw do_copy, h_copy
+        dw do_del, h_del
+        dw do_ren, h_ren
+        dw do_md, h_md
+        dw do_rd, h_rd
+        dw do_deltree, h_deltree
+        dw do_pause, h_pause
+        dw do_if, h_if
+        dw do_goto, h_goto
+        dw do_for, h_for
+        dw do_shift, h_shift
+        dw do_call, h_call
+        dw do_path, h_path
+        dw do_prompt, h_prompt
+        dw do_cls, h_cls
+        dw do_ver, h_ver
+        dw 0
+h_dir       db "Muestra los archivos y carpetas de una carpeta.", 13, 10
+            db "", 13, 10
+            db "LISTAR (DIR) [unidad:][ruta][archivo] [/P] [/W] [/A[[:]atributos]]", 13, 10
+            db "      [/O[[:]orden]] [/S] [/B] [/L]", 13, 10
+            db "", 13, 10
+            db "  /P  pausa en cada pantalla llena     /W  formato ancho", 13, 10
+            db "  /A  atributos: D carpetas, H ocultos, S de sistema, R solo lectura,", 13, 10
+            db "      A para archivar; «-» delante = los que no lo tienen", 13, 10
+            db "  /O  orden: N nombre, E extensión, G carpetas primero, S tamaño,", 13, 10
+            db "      D fecha y hora; «-» delante = al revés", 13, 10
+            db "  /S  también las subcarpetas   /B  solo los nombres   /L  en minúsculas", 13, 10
+            db "Las opciones de la variable DIRCMD se aplican antes; /-W anula /W, etc.", 13, 10, 0
+h_type      db "Muestra el contenido de un archivo de texto.", 13, 10
+            db "", 13, 10
+            db "MOSTRAR (TYPE) [unidad:][ruta]archivo", 13, 10, 0
+h_cd        db "Muestra o cambia la carpeta actual.", 13, 10
+            db "", 13, 10
+            db "CD [unidad:][ruta]", 13, 10
+            db "CD ..   sube a la carpeta anterior", 13, 10
+            db "CD \    va a la raíz", 13, 10
+            db "Sin parámetros muestra la carpeta actual.", 13, 10, 0
+h_echo      db "Muestra un mensaje o activa y desactiva el eco de las órdenes.", 13, 10
+            db "", 13, 10
+            db "ECO (ECHO) [ON | OFF]", 13, 10
+            db "ECO (ECHO) mensaje", 13, 10
+            db "ECHO.   escribe una línea vacía", 13, 10, 0
+h_set       db "Muestra, pone o quita variables de entorno.", 13, 10
+            db "", 13, 10
+            db "SET [variable=[texto]]", 13, 10
+            db "Sin parámetros muestra todas las variables.", 13, 10, 0
+h_mem       db "Muestra la memoria usada y la libre.", 13, 10
+            db "", 13, 10
+            db "MEMORIA (MEM) [/C] [/F] [/M programa] [/D] [/P]", 13, 10
+            db "", 13, 10
+            db "  /C  programas en memoria    /F  bloques libres", 13, 10
+            db "  /M  un programa en detalle  /D  todo en detalle  /P  pausa por pantallas", 13, 10, 0
+h_date      db "Muestra o cambia la fecha.", 13, 10
+            db "", 13, 10
+            db "FECHA (DATE) [dd-mm-aa]", 13, 10, 0
+h_time      db "Muestra o cambia la hora.", 13, 10
+            db "", 13, 10
+            db "HORA (TIME) [hh:mm[:ss]]", 13, 10, 0
+h_vol       db "Muestra la etiqueta y el número de serie de un disco.", 13, 10
+            db "", 13, 10
+            db "VOLUMEN (VOL) [unidad:]", 13, 10, 0
+h_help      db "Muestra la lista de órdenes o la ayuda de una orden.", 13, 10
+            db "", 13, 10
+            db "AYUDA (HELP) [orden]", 13, 10
+            db "AYUDA orden es lo mismo que «orden /?».", 13, 10, 0
+h_rem       db "Comentario en un archivo por lotes o en CONFIG.SYS.", 13, 10
+            db "", 13, 10
+            db "REM [comentario]", 13, 10, 0
+h_exit      db "Sale del intérprete de órdenes (si se abrió desde un programa).", 13, 10
+            db "", 13, 10
+            db "SALIR (EXIT)", 13, 10, 0
+h_copy      db "Copia uno o más archivos.", 13, 10
+            db "", 13, 10
+            db "COPIAR (COPY) origen [destino]", 13, 10
+            db "COPIAR origen1+origen2[+...] destino   (une archivos)", 13, 10
+            db "COPIAR CON archivo   (escribe desde el teclado; termina con Ctrl+Z)", 13, 10
+            db "El origen admite comodines (* y ?).", 13, 10, 0
+h_del       db "Borra uno o más archivos.", 13, 10
+            db "", 13, 10
+            db "BORRAR (DEL, ERASE) [unidad:][ruta]archivo", 13, 10
+            db "Con *.* pregunta antes de borrar.", 13, 10, 0
+h_ren       db "Cambia el nombre de uno o más archivos.", 13, 10
+            db "", 13, 10
+            db "RENOMBRAR (REN, RENAME) archivo nombre_nuevo", 13, 10
+            db "Admite comodines: REN *.TXT *.BAK", 13, 10, 0
+h_md        db "Crea una carpeta.", 13, 10
+            db "", 13, 10
+            db "CREARDIR (MD, MKDIR) [unidad:]ruta", 13, 10, 0
+h_rd        db "Borra una carpeta vacía.", 13, 10
+            db "", 13, 10
+            db "BORRARDIR (RD, RMDIR) [unidad:]ruta", 13, 10
+            db "Para borrar una carpeta con todo su contenido: BORRARARBOL.", 13, 10, 0
+h_deltree   db "Borra una carpeta con todos sus archivos y subcarpetas.", 13, 10
+            db "", 13, 10
+            db "BORRARARBOL (DELTREE) [/Y] [unidad:]ruta", 13, 10
+            db "  /Y  no preguntar", 13, 10, 0
+h_pause     db "Espera a que se pulse una tecla (en archivos por lotes).", 13, 10
+            db "", 13, 10
+            db "PAUSA (PAUSE)", 13, 10, 0
+h_if        db "Ejecuta una orden según una condición (archivos por lotes).", 13, 10
+            db "", 13, 10
+            db "IF [NOT] ERRORLEVEL número orden", 13, 10
+            db "IF [NOT] texto1==texto2 orden", 13, 10
+            db "IF [NOT] EXIST archivo orden", 13, 10, 0
+h_goto      db "Salta a una etiqueta de un archivo por lotes.", 13, 10
+            db "", 13, 10
+            db "GOTO etiqueta", 13, 10
+            db "La etiqueta es una línea que empieza por dos puntos (:etiqueta).", 13, 10, 0
+h_for       db "Repite una orden para cada elemento de una lista.", 13, 10
+            db "", 13, 10
+            db "FOR %variable IN (lista) DO orden", 13, 10
+            db "(en archivos por lotes, %%variable)", 13, 10, 0
+h_shift     db "Desplaza los parámetros de un archivo por lotes (%1 pasa a %0...).", 13, 10
+            db "", 13, 10
+            db "SHIFT", 13, 10, 0
+h_call      db "Ejecuta un archivo por lotes desde otro y vuelve después.", 13, 10
+            db "", 13, 10
+            db "LLAMAR (CALL) archivo [parámetros]", 13, 10, 0
+h_path      db "Muestra o cambia las carpetas donde se buscan los programas.", 13, 10
+            db "", 13, 10
+            db "RUTA (PATH) [[unidad:]ruta[;...]]", 13, 10
+            db "PATH ;   borra la lista", 13, 10, 0
+h_prompt    db "Cambia el indicador de órdenes.", 13, 10
+            db "", 13, 10
+            db "PROMPT [texto]", 13, 10
+            db "", 13, 10
+            db "  $P unidad y carpeta  $G >  $L <  $N unidad  $D fecha  $T hora", 13, 10
+            db "  $V versión  $_ salto de línea  $$ $  $E Esc", 13, 10, 0
+h_cls       db "Borra la pantalla.", 13, 10
+            db "", 13, 10
+            db "LIMPIAR (CLS)", 13, 10, 0
+h_ver       db "Muestra la versión de Hispa-DOS.", 13, 10
+            db "", 13, 10
+            db "VERSION (VER)", 13, 10, 0
+h_none      db "No hay ayuda para esta orden.", 13, 10, 0
 days        db "Dom", 0, "Lun", 0, "Mar", 0, "Mié", 0, "Jue", 0, "Vie", 0, "Sáb", 0
 s_drive     db "A:\", 0
 s_all       db "*.*", 0
@@ -4763,6 +5939,25 @@ s_com       db ".COM", 0
 s_exe       db ".EXE", 0
 s_bat       db ".BAT", 0
 s_dirtag    db "    <DIR>     ", 0
+s_dircmd    db "DIRCMD", 0
+msg_dbad    db "Parámetro no válido - ", 0
+msg_dmany   db "Demasiados parámetros - ", 0
+msg_denv    db "(Error en la variable de entorno DIRCMD)", 13, 10, 0
+msg_dtotal  db "Total de archivos listados:", 0
+msg_dcont   db "(continuando ", 0
+s_okeys     db "NEGSD", 0
+d_ftab      db 'P'
+            dw d_page
+            db 'W'
+            dw d_wide
+            db 'S'
+            dw d_sub
+            db 'B'
+            dw d_bare
+            db 'L'
+            dw d_lower
+            db 0
+d_atab      db 'D', 0x10, 'H', 0x02, 'S', 0x04, 'R', 0x01, 'A', 0x20, 0
 s_crlf      db 13, 10, 0
 
 prog_end_data:
@@ -4774,6 +5969,7 @@ argp        resw 1
 curdir         resb 68
 dta         resb 128
 lbl         resb 14
+help_line   resb 108
 pattern     resb 132
 pat_end     resw 1
 truebuf     resb 132
@@ -4781,6 +5977,37 @@ nfiles      resd 1
 nbytes      resd 1
 numbuf      resb 16
 nm11        resb 12
+d_args      resw 1
+d_opts:                             ; opciones de DIR (se ponen a cero)
+d_page      resb 1
+d_wide      resb 1
+d_sub       resb 1
+d_bare      resb 1
+d_lower     resb 1
+d_attr      resb 1
+d_aset      resb 1
+d_aclr      resb 1
+d_sort      resb 1
+d_nkeys     resb 1
+d_keys      resb 8
+d_opts_end:
+d_inenv     resb 1
+d_lines     resb 1
+d_col       resb 1
+d_lvl       resb 1
+d_tok       resw 1
+d_sname     resw 1
+d_sattr     resw 1
+d_seg       resw 1
+d_n         resw 1
+d_tfiles    resd 1
+d_tbytes    resd 1
+d_arg       resb 128
+d_env       resb 256
+d_spec      resb 80
+d_path      resb 264
+d_srch      resb 352
+d_dtas      resb DIR_LVLS*DIR_DTA
 iobuf       resb 512
 hasext      resb 1
 haspath     resb 1
