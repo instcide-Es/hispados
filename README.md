@@ -73,6 +73,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Funciones FCB (DOS 1.x), SDA (5D06h/5D0Bh), EXEC 4B01h/4B03h, 26h/55h, 65h (país CP437), Ctrl+C | ✅ |
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
 | `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
+| `HSPDPMI.COM`: servidor DPMI 0.9 propio (clientes de 16 y 32 bits, memoria de XMS; los programas de DJGPP funcionan sin CWSDPMI) | ✅ |
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
 | Sonido: `HSPSND` (Sound Blaster 2.0/Pro/16, Intel HD Audio y AC'97; pone la variable `BLASTER`) y `PLAYWAV`/`SONAR` | ✅ |
 | Imagen para memoria USB (arrancar o instalar con `INSTALL`) | ✅ |

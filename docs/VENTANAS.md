@@ -27,6 +27,17 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    HSPXMS: descriptores, memoria, interrupciones reflejadas a DOS.
    *Se ve:* programas DPMI de terceros (por ejemplo de FreeDOS o DJGPP)
    funcionando sin CWSDPMI ni el DOSX de Windows.
+   *Estado:* hecho (`drivers/hspdpmi.asm`, `HSPDPMI.COM` en `\HISPADOS`; se
+   carga a mano o desde AUTOEXEC.BAT, después de HSPXMS.SYS). El cliente corre
+   en anillo 3 sin paginación y las interrupciones y llamadas a DOS/BIOS se
+   reflejan volviendo a modo real de verdad. Servicios de INT 31h: 0000h-000Dh,
+   0100h-0102h, 0200h-0205h, 0300h-0306h, 0400h, 0500h-0503h, 0600h-0604h,
+   0702h/0703h, 0800h/0801h y 0900h-0902h. Pruebas: `tests/run_dpmi_tests.sh`
+   (clientes propios de 16 y 32 bits y, si se descargan con
+   `tests/thirdparty/fetch_dpmi.sh`, NASM, SED y LUA de DJGPP). Pendiente: la
+   traducción de punteros de la API de DOS (INT 21h con DS:DX desde modo
+   protegido; hoy los clientes usan 0300h con memoria de DOS, como DJGPP),
+   VCPI (para convivir con un EMM386) y memoria virtual.
 2. **Gráficos y ratón.** Driver de pantalla VGA 640×480 16 colores y VESA
    (800×600 y 1024×768, 256 colores y color verdadero); primitivas de dibujo,
    fuentes propias de mapa de bits, cursor del ratón (HSPRATON).

@@ -50,6 +50,12 @@ $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPSND.COM: drivers/hspsnd.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPDPMI.COM: drivers/hspdpmi.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/DPMI16.COM: tests/progs/dpmi16.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/DPMI32.COM: tests/progs/dpmi32.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/INSTALAR.COM: utils/instalar.asm | $(B)
@@ -103,7 +109,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
-        $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
+        $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM
 
@@ -143,6 +149,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/HSPTEST.SYS ::HISPADOS/HSPTEST.SYS
 	mcopy -i $@ $(B)/HSPXMS.SYS ::HISPADOS/HSPXMS.SYS
 	mcopy -i $@ $(B)/HSPSND.COM ::HISPADOS/HSPSND.COM
+	mcopy -i $@ $(B)/HSPDPMI.COM ::HISPADOS/HSPDPMI.COM
 	mcopy -i $@ $(B)/HSPUSB.SYS ::HISPADOS/HSPUSB.SYS
 	mcopy -i $@ $(B)/HSPCD.SYS ::HISPADOS/HSPCD.SYS
 	mcopy -i $@ $(B)/HSPRATON.COM ::HISPADOS/HSPRATON.COM
@@ -180,7 +187,7 @@ run-hdd: $(IMG) $(HDD)
 
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
-NUCPROGS = $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS
+NUCPROGS = $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS
 $(B)/NUCTEST.COM: tests/progs/nuctest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/NUCHIJO.COM: tests/progs/nuchijo.asm | $(B)
@@ -203,6 +210,7 @@ test: $(IMG) usb nucprogs
 	tests/run_batch_tests.sh $(IMG)
 	tests/run_config_tests.sh $(IMG)
 	tests/run_xms_tests.sh $(IMG)
+	tests/run_dpmi_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)

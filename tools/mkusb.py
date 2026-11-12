@@ -63,7 +63,7 @@ def main():
                      ('INSTALAR.COM', 'INSTALAR.COM'), ('MOVER.COM', 'MOVER.COM'), ('ATRIBUTO.COM', 'ATRIBUTO.COM'), ('ARBOL.COM', 'ARBOL.COM'), ('BUSCAR.COM', 'BUSCAR.COM'), ('ORDENAR.COM', 'ORDENAR.COM'), ('PAGINAR.COM', 'PAGINAR.COM'), ('ELEGIR.COM', 'ELEGIR.COM'), ('EXPANDIR.COM', 'EXPANDIR.COM'), ('ETIQUETA.COM', 'ETIQUETA.COM'), ('XCOPIAR.COM', 'XCOPIAR.COM'), ('REVISAR.COM', 'REVISAR.COM'),
                      ('ALIAS.INI', 'ALIAS.INI'),
                      ('HSPXMS.SYS', 'HSPXMS.SYS'), ('HSPRAM.SYS', 'HSPRAM.SYS'),
-                     ('HSPSND.COM', 'HSPSND.COM'), ('HSPUSB.SYS', 'HSPUSB.SYS'),
+                     ('HSPSND.COM', 'HSPSND.COM'), ('HSPDPMI.COM', 'HSPDPMI.COM'), ('HSPUSB.SYS', 'HSPUSB.SYS'),
                      ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
     print(OUT)
