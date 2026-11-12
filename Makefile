@@ -187,7 +187,9 @@ run-hdd: $(IMG) $(HDD)
 
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
-NUCPROGS = $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS
+NUCPROGS = $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM
+$(B)/PILTEST.COM: tests/progs/piltest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/NUCTEST.COM: tests/progs/nuctest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/NUCHIJO.COM: tests/progs/nuchijo.asm | $(B)
@@ -238,6 +240,9 @@ test: $(IMG) usb nucprogs
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
+	tests/run_pila_tests.sh $(IMG)
+	tests/run_reloj_tests.sh $(IMG)
+	tests/run_logicas_tests.sh $(IMG)
 	tests/run_fs_tests.sh $(IMG)
 	tests/run_rev_revisar_tests.sh $(IMG)
 	tests/run_rev_utilidades_tests.sh $(IMG)

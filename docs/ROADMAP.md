@@ -14,7 +14,7 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - ✅ `FDISK` (menú y línea de órdenes), `FORMAT` (FAT12/FAT16, `/S`, `/V`), MBR y arranque FAT16 propios.
 - ✅ INT 25h/26h e IOCTL 440Dh; el núcleo relee las particiones tras FDISK sin reiniciar.
 - ✅ Escritura FAT12/FAT16: crear, escribir, truncar, borrar, renombrar, `MKDIR`/`RMDIR`, atributos, fecha y hora (comprobada con `fsck.fat`).
-- Particiones extendidas y unidades lógicas; `SYS` para hacer arrancable una unidad ya formateada.
+- ✅ Particiones extendidas (05h, 0Fh, 85h) y unidades lógicas FAT12/FAT16 en la cadena de EBR, con las letras de MS-DOS (primarias de cada disco y después las lógicas de cada disco). `PARTIR` todavía no las crea.
 - ✅ Funciones FCB (0Fh-28h) para programas antiguos, también con FCB extendidos y etiquetas de volumen.
 - ✅ Compatibilidad comprobada con programas de FreeDOS (EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE).
 - ✅ `COMMAND.COM`: redirecciones `<`, `>`, `>>`, tuberías `|`, `COPY`, `DEL`, `REN`, `MD`, `RD`, `PAUSE`.

@@ -26,6 +26,7 @@ El instalador del CD español se llama `INSTALAR.EXE` (como nuestro
 | «No se ha aceptado esta versión de MS-DOS» | INT 2Fh 1605h/1606h (inicio y fin de Windows, datos de instancia) y 1607h BX=15h (DOSMGR): ver abajo |
 | Cuelgue en el logotipo y reinicio al abrir una sesión MS-DOS | La SFT va en dos bloques (5 + 35 entradas) con el segundo fuera del segmento del núcleo; tabla SFT de FCB en la lista de listas |
 | SMARTDRV: «no se puede cargar cuando se ejecuta Windows» | INT 21h 2Bh/2Dh validan la fecha y la hora (AL=FFh si no valen): SMARTDRV detecta DESQview con una fecha imposible |
+| Programas con poca pila dentro de una sesión MS-DOS | INT 21h trabaja en pilas propias del núcleo (como MS-DOS), que van en los datos de instancia: cada máquina virtual tiene las suyas (ver abajo) |
 | VSHARE.386 escribe en los datos internos de MS-DOS | El núcleo deja 0FFh en el octeto 4 de su segmento: VSHARE se niega a cargarse (ver «Limitaciones») |
 
 ### INT 2Fh 1607h BX=0015h (DOSMGR)
@@ -43,6 +44,20 @@ Con un DOS 5 o posterior, DOSMGR de WIN386 consulta al núcleo con CX:
 - **CX=2 y CX=4:** no se contestan (tampoco lo hace MS-DOS 6.22). DOSMGR
   instancia entonces él mismo la CDS, la SDA (INT 21h 5D06h), el enlace de la
   SFT y la lista de dispositivos.
+
+### Datos de instancia (INT 2Fh 1605h)
+
+Además de lo que DOSMGR instancia por su cuenta (CDS, SDA, enlace de la SFT,
+lista de dispositivos), el núcleo declara en `win_inst` lo que solo él
+conoce y debe ser propio de cada máquina virtual:
+
+- las carpetas actuales de cada unidad (`cur_paths`);
+- la columna de la consola y la tecla pendiente;
+- **las pilas de INT 21h** (`k_inst`: disco, consola y auxiliar, sus marcas
+  «en uso» y los punteros de pila guardados durante INT 24h e INT 25h/26h).
+  Una máquina virtual puede quedarse parada dentro del DOS (esperando una
+  tecla, por ejemplo) mientras otra lo llama: si compartieran la pila, la
+  segunda pisaría la de la primera.
 
 El formato se obtuvo observando las respuestas de un MS-DOS 6.22 original
 (sala limpia: solo comportamiento de la interfaz, nada de su código) y el

@@ -39,6 +39,36 @@ DOS_MINOR       equ 22
 %define F_IP bp+18
 %define F_CS bp+20
 %define F_FL bp+22
+; (solo en la copia del marco en la pila del núcleo)
+%define F_USP bp+24                 ; pila del llamante (su marco)
+%define F_USS bp+26
+%define F_OWN bp+28                 ; marca «en uso» de la pila tomada o 0
+KS_DISK         equ 0
+KS_IO           equ 2
+KS_AUX          equ 4
+KS_DISK_LEN     equ 1024
+KS_IO_LEN       equ 768
+KS_AUX_LEN      equ 512
+
+; salir de INT 21h: soltar la pila del núcleo, devolver el marco a la pila
+; del llamante y volver a ella (quedan por sacar los registros). BP = marco.
+%macro K_LEAVE 0
+        cli
+        dec byte [indos]
+        mov bx, [F_OWN]
+        test bx, bx
+        jz %%n
+        mov byte [bx], 0
+%%n:
+        les di, [F_USP]
+        mov si, bp
+        mov cx, 12
+        rep ss movsw
+        sub di, 24
+        mov ax, es
+        mov ss, ax
+        mov sp, di
+%endmacro
 
 ; --- tabla de ficheros del sistema (SFT), formato de DOS 4+ ---
 ; (Windows la recorre desde la lista de listas y la modifica directamente)
@@ -147,10 +177,11 @@ D_HINT          equ 44
 D_DRVHDR        equ 48
 D_UNIT          equ 52
 D_BPBPTR        equ 56
+D_HIDDEN        equ 60              ; sectores ocultos que se declaran (BPB)
 DF_DRIVER       equ 32
 NEXT            equ 6
 DRV_LEN         equ 64
-NDRV            equ 8
+NDRV            equ 16
 
 DF_EXISTS       equ 1
 DF_MOUNTED      equ 2
@@ -210,6 +241,7 @@ start:
 .bootok:
         mov byte [crit_gave], 0xFF
         call vectors_init
+        call clock_init
         call mem_init
         call root_psp_init
         call config_run
@@ -353,6 +385,13 @@ drives_scan:
         mov al, [bg_count]
         test al, al
         jz .done
+        mov [hd_total], al
+        ; Letras como en MS-DOS: primero las particiones primarias de cada
+        ; disco y después las unidades lógicas (las de la partición
+        ; extendida) de cada disco. Dos pasadas por los discos.
+        mov byte [scan_pass], 0
+.pass:
+        mov al, [hd_total]
         mov [hd_count], al
         mov byte [hd_cur], 0x80
 .disk:
@@ -401,6 +440,8 @@ drives_scan:
         cmp byte [secbuf+0x10], 2
         ja .ptab
         ; todo el disco es una unidad FAT
+        cmp byte [scan_pass], 0
+        jne .nextdisk
         mov si, sf_entry
         mov byte [si+4], 0x06
         mov dword [si+8], 0
@@ -410,6 +451,8 @@ drives_scan:
         mov al, 0x06
         jmp .add
 .ptab:
+        cmp byte [scan_pass], 0
+        jne .logs
         mov si, secbuf+0x1BE
         mov cx, 4
 .part:
@@ -432,9 +475,111 @@ drives_scan:
         je .add
         jmp .np
 .add:
+        mov edx, [si+8]             ; sectores ocultos = inicio absoluto
+        call drv_add
+.np:
+        add si, 16
+        loop .part
+        jmp .nextdisk
+        ; ---- unidades lógicas: la primera partición extendida del disco
+        ; (05h, 0Fh con LBA, 85h de Linux) es una cadena de sectores (EBR)
+        ; con una tabla cada uno: la entrada 1 es una unidad lógica, que
+        ; empieza a tantos sectores de ese EBR, y la 2 lleva al siguiente
+        ; EBR, contado desde el principio de la partición extendida
+.logs:
+        mov si, secbuf+0x1BE
+        mov cx, 4
+.le:
+        mov al, [si]
+        and al, 0x7F
+        jnz .ln
+        mov al, [si+4]
+        call is_ext_type
+        je .lfound
+.ln:
+        add si, 16
+        loop .le
+        jmp .nextdisk
+.lfound:
+        mov eax, [si+8]
+        test eax, eax
+        jz .nextdisk
+        mov [ebr_base], eax
+        mov [ebr_cur], eax
+        mov byte [ebr_n], 64        ; (tope, por si la cadena hace un bucle)
+.ebr:
+        mov eax, [ebr_cur]
+        mov bx, secbuf
+        call read_sector
+        mov dword [cache_lba], 0xFFFFFFFF
+        jc .nextdisk
+        cmp word [secbuf+510], 0xAA55
+        jne .nextdisk
+        mov si, secbuf+0x1BE
+        mov al, [si+4]
+        cmp al, 0x01
+        je .ladd
+        cmp al, 0x04
+        je .ladd
+        cmp al, 0x06
+        je .ladd
+        cmp al, 0x0E
+        jne .lnext
+.ladd:
+        mov edx, [si+8]             ; sectores ocultos: desde su EBR
+        test edx, edx
+        jz .lnext
+        cmp dword [si+12], 0
+        je .lnext
+        mov ecx, [ebr_cur]
+        add [si+8], ecx             ; inicio absoluto
+        call drv_add
+.lnext:
+        mov si, secbuf+0x1CE
+        mov al, [si+4]
+        call is_ext_type
+        jne .nextdisk
+        mov eax, [si+8]
+        test eax, eax
+        jz .nextdisk
+        add eax, [ebr_base]
+        mov [ebr_cur], eax
+        dec byte [ebr_n]
+        jnz .ebr
+.nextdisk:
+        inc byte [hd_cur]
+        dec byte [hd_count]
+        jnz .disk
+        inc byte [scan_pass]
+        cmp byte [scan_pass], 2
+        jb .pass
+.done:
+        mov al, [ndrives]
+        mov [bios_nd], al
+        call append_ext
+        pop es
+        popad
+        ret
+
+; AL = tipo de partición: ZF si es una extendida
+is_ext_type:
+        cmp al, 0x05
+        je .r
+        cmp al, 0x0F
+        je .r
+        cmp al, 0x85
+.r:
+        ret
+
+; nueva unidad de disco duro: copia de cur_drv (el disco) con AL = tipo,
+; [SI+8] = primer sector (absoluto), [SI+12] = sectores y EDX = sectores
+; ocultos que se declaran. No hace nada si la tabla está llena.
+drv_add:
+        push bx
+        push di
         movzx bx, byte [ndrives]
         cmp bx, NDRV
-        jae .np
+        jae .r
         shl bx, 6
         add bx, drv_tab
         push si
@@ -450,20 +595,11 @@ drives_scan:
         mov [bx+D_START], eax
         mov eax, [si+12]
         mov [bx+D_SIZE], eax
+        mov [bx+D_HIDDEN], edx
         inc byte [ndrives]
-.np:
-        add si, 16
-        loop .part
-.nextdisk:
-        inc byte [hd_cur]
-        dec byte [hd_count]
-        jnz .disk
-.done:
-        mov al, [ndrives]
-        mov [bios_nd], al
-        call append_ext
-        pop es
-        popad
+.r:
+        pop di
+        pop bx
         ret
 
 ; añadir las unidades de los drivers de bloque tras las de la BIOS
@@ -747,6 +883,14 @@ crit_ask:
         push ds
         push es
         mov byte [crit_on], 1
+        ; la pila del programa (su marco de INT 21h) para llamar a INT 24h;
+        ; 0 si esta llamada ya se atiende sobre la pila del llamante
+        xor eax, eax
+        cmp word [F_OWN], 0
+        je .nousr
+        mov eax, [F_USP]
+.nousr:
+        mov [crit_usp], eax
         ; código de error de DOS
         mov bl, [io_derr]
         cmp byte [io_isdrv], 0
@@ -802,7 +946,27 @@ crit_ask:
         mov es, [cs:cur_psp]
         push word [es:0x2E]
         push word [es:0x30]
+        ; como MS-DOS, INT 24h se llama sobre la pila del programa, justo en
+        ; el marco de registros de su INT 21h (un manejador puede volver al
+        ; programa retirando ese marco); las funciones 01h-0Ch que llame
+        ; van a la pila auxiliar
+        cmp dword [crit_usp], 0
+        je .i24
+        mov [crit_ksp], sp
+        mov [crit_ksp+2], ss
+        cli
+        mov ss, [crit_usp+2]
+        mov sp, [crit_usp]
+        sti
         int 0x24
+        cli
+        mov ss, [cs:crit_ksp+2]
+        mov sp, [cs:crit_ksp]
+        sti
+        jmp short .i24b
+.i24:
+        int 0x24
+.i24b:
         mov es, [cs:cur_psp]
         pop word [es:0x30]
         pop word [es:0x2E]
@@ -4221,57 +4385,42 @@ zero_cluster:
 
 ; -> AX = hora DOS, DX = fecha DOS
 dos_now:
-        push bx
-        push cx
-        push bp
-        mov ah, 2
-        int 0x1A
-        jnc .t
-        xor cx, cx
-        xor dx, dx
-.t:
-        mov al, ch
-        call bcd2bin
-        movzx bx, al
-        shl bx, 6
-        mov al, cl
-        call bcd2bin
-        or bl, al
-        shl bx, 5
-        mov al, dh
-        call bcd2bin
-        shr al, 1
-        or bl, al
-        push bx
-        mov ah, 4
-        int 0x1A
-        jnc .d
-        mov cx, 0x2026
-        mov dx, 0x0101
-.d:
-        mov al, ch
-        call bcd2bin
-        mov bl, 100
-        mul bl
-        mov bx, ax
-        mov al, cl
-        call bcd2bin
-        xor ah, ah
-        add bx, ax
-        sub bx, 1980
-        shl bx, 4
-        mov al, dh
-        call bcd2bin
-        or bl, al
-        shl bx, 5
-        mov al, dl
-        call bcd2bin
-        or bl, al
-        mov dx, bx
-        pop ax
-        pop bp
-        pop cx
-        pop bx
+        push ebx
+        push ecx
+        push esi
+        push eax                    ; (se conservan las mitades altas)
+        push edx
+        call clock_cs
+        xor edx, edx
+        mov ecx, 200
+        div ecx                     ; EAX = pares de segundos
+        xor edx, edx
+        mov ecx, 30
+        div ecx
+        mov bx, dx                  ; segundos / 2
+        xor edx, edx
+        mov ecx, 60
+        div ecx                     ; EAX = horas, EDX = minutos
+        shl dx, 5
+        or bx, dx
+        shl ax, 11
+        or bx, ax
+        mov ax, [k_days]
+        call days_ymd
+        sub cx, 1980
+        shl cx, 9
+        movzx si, dh
+        shl si, 5
+        xor dh, dh
+        or si, dx
+        or si, cx
+        pop edx
+        mov dx, si
+        pop eax
+        mov ax, bx
+        pop esi
+        pop ecx
+        pop ebx
         ret
 
 ; AX = directorio -> CX = índice de una entrada libre (amplía subdirectorios)
@@ -6938,8 +7087,23 @@ install_run:
 ; =============================================================================
 ;  INT 21h
 ; =============================================================================
+; Como MS-DOS, el núcleo no trabaja sobre la pila del programa: en ella solo
+; quedan los registros del llamante (18 octetos, además de los 6 de la
+; interrupción), en el orden de MS-DOS (AX BX CX DX SI DI BP DS ES IP CS
+; indicadores), y PSP:2Eh apunta a ese marco. El trabajo se hace en una de
+; las tres pilas del núcleo:
+;   - k_stk_io:   funciones 01h-0Ch (consola); desde ella se llama a INT 28h
+;   - k_stk_aux:  funciones 01h-0Ch llamadas desde un manejador de INT 24h
+;   - k_stk_disk: las demás (y INT 25h/26h)
+; con una copia del marco (F_AX...F_FL, que al salir vuelve a la pila del
+; programa) seguida de F_USP/F_USS (la pila del programa) y F_OWN (la marca
+; «en uso» de la pila tomada). Si la pila que toca está en uso (reentrada:
+; un residente desde INT 28h, un manejador de INT 24h que llama a otra
+; función, un controlador de dispositivo), la llamada se atiende sobre la
+; pila del llamante, como se hacía antes. Las funciones 33h, 50h, 51h, 62h
+; y 64h se atienden sin cambiar de pila ni tocar InDOS (los residentes las
+; llaman en cualquier momento).
 int21:
-        sti
         cld
         push es
         push ds
@@ -6951,17 +7115,94 @@ int21:
         push bx
         push ax
         mov bp, sp
-        mov ax, KSEG
-        mov ds, ax
+        mov bx, KSEG
+        mov ds, bx
+        cmp ah, 0x33
+        je .light
+        cmp ah, 0x50
+        je .light
+        cmp ah, 0x51
+        je .light
+        cmp ah, 0x62
+        je .light
+        cmp ah, 0x64
+        jne .heavy
+.light:
+        sti
+        and byte [F_FL], 0xFE
+        movzx bx, ah
+        shl bx, 1
+        call [fntable+bx]
+        pop ax
+        pop bx
+        pop cx
+        pop dx
+        pop si
+        pop di
+        pop bp
+        pop ds
+        pop es
+        iret
+.heavy:
+        cli
+        cmp byte [indos], 0
+        jne .inuse
+        mov word [k_busy], 0        ; fuera del DOS no hay ninguna en uso
+        mov word [k_busy+2], 0
+        mov word [k_busy+4], 0
+.inuse:
+        mov si, KS_DISK
+        test ah, ah
+        jz .pick
+        cmp ah, 0x0C
+        ja .pick
+        mov si, KS_IO
+        cmp byte [crit_on], 0
+        je .pick
+        mov si, KS_AUX
+.pick:
+        mov cx, ss                  ; CX:DX = marco en la pila del llamante
+        mov dx, sp
+        xor di, di                  ; DI = marca de la pila tomada (0: ninguna)
+        cmp byte [k_busy+si], 0
+        jne .same
+        ; (un error de división dentro del núcleo vuelve a entrar desde la
+        ; propia pila: no se puede volver a tomar)
+        cmp cx, bx
+        jne .take
+        cmp dx, [cs:k_base+si]
+        jb .take
+        cmp dx, [cs:k_tops+si]
+        jbe .same
+.take:
+        lea di, [k_busy+si]
+        mov byte [di], 1
+        mov ss, bx
+        mov sp, [cs:k_tops+si]
+.same:
+        push di                     ; F_OWN
+        push cx                     ; F_USS
+        push dx                     ; F_USP
+        sub sp, 24
+        mov di, sp
+        push ss
+        pop es
+        mov ds, cx
+        mov si, dx
+        mov cx, 12
+        rep movsw
+        mov ds, bx
+        mov bp, sp
         inc byte [indos]
+        sti
         mov ax, [cur_psp]
         cmp ax, 0x40
         jb .nosave
-        push es
         mov es, ax
-        mov [es:0x2E], bp
-        mov [es:0x30], ss
-        pop es
+        mov ax, [F_USP]
+        mov [es:0x2E], ax
+        mov ax, [F_USS]
+        mov [es:0x30], ax
 .nosave:
         and byte [F_FL], 0xFE
         cmp byte [indos], 1         ; (no en las llamadas desde INT 24h)
@@ -7083,7 +7324,7 @@ i21_ret:
         call fat_flush
         call wr_check
 .nofl:
-        dec byte [indos]
+        K_LEAVE
         pop ax
         pop bx
         pop cx
@@ -7377,15 +7618,181 @@ bcd2bin:
         pop cx
         ret
 
-fn_2a:
+; -----------------------------------------------------------------------------
+;  Reloj. Como en MS-DOS, la fecha la lleva el núcleo (k_days, días desde el
+;  1-1-1980, tomada del reloj de tiempo real al arrancar) y la hora sale de
+;  los tics de la BIOS (0040:006Ch, 18,2 por segundo: así hay centésimas).
+;  Al pasar la medianoche la BIOS pone a cero los tics y lo anota en
+;  0040:0070h; INT 1Ah AH=00h devuelve esa marca en AL (y la borra) y aquí
+;  se suma a la fecha. 2Bh y 2Dh cambian la fecha del núcleo, los tics y el
+;  reloj de tiempo real (INT 1Ah AH=05h/03h).
+; -----------------------------------------------------------------------------
+; -> EAX = centésimas desde medianoche; pone al día k_days
+clock_cs:
+        push ecx
+        push edx
+        push bp
+        xor ah, ah
+        int 0x1A                    ; CX:DX = tics, AL = medianoches pasadas
+        pop bp
+        xor ah, ah
+        add ax, [k_days]
+        cmp ax, DAYS_MAX
+        jbe .d
+        mov ax, DAYS_MAX
+.d:
+        mov [k_days], ax
+        mov ax, cx
+        shl eax, 16
+        mov ax, dx
+        cmp eax, 1573040            ; un día
+        jb .ok
+        mov eax, 1573039
+.ok:
+        mov edx, 8640000            ; centésimas de un día
+        mul edx
+        mov ecx, 1573040
+        div ecx
+        pop edx
+        pop ecx
+        ret
+
+; CX = año (1980-2099), DH = mes, DL = día -> AX = días desde el 1-1-1980;
+; CF si la fecha no existe
+ymd_days:
+        push bx
+        push cx
+        push dx
+        push si
+        cmp cx, 1980
+        jb .bad
+        cmp cx, 2099
+        ja .bad
+        cmp dh, 1
+        jb .bad
+        cmp dh, 12
+        ja .bad
+        cmp dl, 1
+        jb .bad
+        movzx bx, dh
+        mov al, [mdays+bx-1]
+        cmp bl, 2
+        jne .nf
+        test cl, 3                  ; (de 1980 a 2099, bisiesto = múltiplo de 4)
+        jnz .nf
+        inc al
+.nf:
+        cmp dl, al
+        ja .bad
+        sub cx, 1980
+        mov ax, 365
+        push dx
+        mul cx
+        pop dx
+        mov si, cx
+        add si, 3
+        shr si, 2                   ; bisiestos anteriores
+        add ax, si
+        ; meses anteriores
+        mov si, 1
+.m:
+        cmp si, bx
+        jae .md
+        push bx
+        movzx bx, byte [mdays+si-1]
+        add ax, bx
+        pop bx
+        cmp si, 2
+        jne .mn
+        test cl, 3
+        jnz .mn
+        inc ax
+.mn:
+        inc si
+        jmp .m
+.md:
+        xor dh, dh
+        add ax, dx
+        dec ax
+        clc
+        jmp .r
+.bad:
+        stc
+.r:
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        ret
+
+; AX = días desde el 1-1-1980 -> CX = año, DH = mes, DL = día
+days_ymd:
+        push ax
+        push bx
+        push si
+        xor dx, dx
+        mov bx, 1461                ; cuatro años (el primero, bisiesto)
+        div bx
+        shl ax, 2
+        mov cx, ax
+        add cx, 1980
+        mov ax, dx
+        cmp ax, 366
+        jb .y
+        sub ax, 366
+        xor dx, dx
+        mov bx, 365
+        div bx
+        inc ax
+        add cx, ax
+        mov ax, dx
+.y:
+        ; AX = día del año (desde 0)
+        mov si, 1
+.m:
+        movzx bx, byte [mdays+si-1]
+        cmp si, 2
+        jne .n
+        test cl, 3
+        jnz .n
+        inc bx
+.n:
+        cmp ax, bx
+        jb .d
+        sub ax, bx
+        inc si
+        jmp .m
+.d:
+        mov dx, si
+        mov dh, dl
+        mov dl, al
+        inc dl
+        pop si
+        pop bx
+        pop ax
+        ret
+mdays   db 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+DAYS_MAX equ 43829                  ; 31-12-2099
+
+; AL -> BCD
+bin2bcd:
+        push cx
+        xor ah, ah
+        mov cl, 10
+        div cl
+        shl al, 4
+        or al, ah
+        pop cx
+        ret
+
+; al arrancar: la fecha del reloj de tiempo real (si la hay y vale)
+clock_init:
+        mov word [k_days], 16802    ; 1-1-2026
         push bp
         mov ah, 4
         int 0x1A
         pop bp
-        jnc .ok
-        mov cx, 0x2026
-        mov dx, 0x0101
-.ok:
+        jc .r
         mov al, ch
         call bcd2bin
         mov bl, 100
@@ -7395,67 +7802,48 @@ fn_2a:
         call bcd2bin
         xor ah, ah
         add bx, ax
-        mov [F_CX], bx
+        ; si el siglo no vale (hay relojes que no lo llevan), se deduce del
+        ; año: 80-99 = 19xx, 00-79 = 20xx
+        cmp bx, 1980
+        jb .cen
+        cmp bx, 2099
+        jbe .cok
+.cen:
+        mov bx, 1900
+        cmp al, 80
+        jae .c19
+        mov bx, 2000
+.c19:
+        add bx, ax
+.cok:
         mov al, dh
         call bcd2bin
-        mov [F_DH], al
+        mov dh, al
         mov al, dl
         call bcd2bin
-        mov [F_DL], al
-        ; día de la semana (Sakamoto)
-        movzx cx, byte [F_DH]
-        mov ax, bx
-        cmp cx, 3
-        jae .y
-        dec ax
-.y:
-        mov bx, ax
-        mov si, ax
-        shr ax, 2
-        add si, ax
-        mov ax, bx
-        xor dx, dx
-        push cx
-        mov cx, 100
-        div cx
-        sub si, ax
-        mov ax, bx
-        xor dx, dx
-        mov cx, 400
-        div cx
-        add si, ax
-        pop cx
-        mov bx, cx
-        dec bx
-        movzx ax, byte [sak+bx]
-        add si, ax
-        movzx ax, byte [F_DL]
-        add ax, si
+        mov dl, al
+        mov cx, bx
+        call ymd_days
+        jc .r
+        mov [k_days], ax
+.r:
+        ret
+
+fn_2a:
+        call clock_cs
+        mov ax, [k_days]
+        call days_ymd
+        mov [F_CX], cx
+        mov [F_DX], dx
+        add ax, 2                   ; el 1-1-1980 fue martes
         xor dx, dx
         mov cx, 7
         div cx
         mov [F_AL], dl
         ret
-sak     db 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4
 
 fn_2c:
-        ; como MS-DOS, la hora sale de los tics de la BIOS (18,2 por
-        ; segundo): así hay centésimas. El RTC solo da segundos, y los
-        ; programas que esperan fracciones de segundo con esta función se
-        ; quedaban parados un segundo entero cada vez.
-        push bp
-        xor ah, ah
-        int 0x1A                    ; CX:DX = tics desde medianoche
-        pop bp
-        mov ax, cx
-        shl eax, 16
-        mov ax, dx
-        cmp eax, 1573040            ; un día
-        jae .rtc
-        mov edx, 8640000            ; centésimas de un día
-        mul edx
-        mov ecx, 1573040
-        div ecx                     ; EAX = centésimas desde medianoche
+        call clock_cs
         xor edx, edx
         mov ecx, 100
         div ecx
@@ -7469,48 +7857,42 @@ fn_2c:
         mov [F_CL], dl
         mov [F_CH], al
         ret
-.rtc:
-        push bp
-        mov ah, 2
-        int 0x1A
-        pop bp
-        jnc .ok
-        xor cx, cx
-        xor dx, dx
-.ok:
-        mov al, ch
-        call bcd2bin
-        mov [F_CH], al
-        mov al, cl
-        call bcd2bin
-        mov [F_CL], al
-        mov al, dh
-        call bcd2bin
-        mov [F_DH], al
-        mov byte [F_DL], 0
-        ret
 fn_set_ok:
         mov byte [F_AL], 0
         ret
 
-; ---- 2Bh / 2Dh: poner fecha y hora. No se cambia el reloj, pero los valores
-; se validan como en MS-DOS (AL=FFh si no valen): hay programas que detectan
-; DESQview con una fecha imposible (AX=2B01h, CX='DE', DX='SQ') y esperan FFh
+; ---- 2Bh / 2Dh: poner fecha y hora. Los valores se validan como en MS-DOS
+; (AL=FFh si no valen): hay programas que detectan DESQview con una fecha
+; imposible (AX=2B01h, CX='DE', DX='SQ') y esperan FFh
 fn_2b:
         mov cx, [F_CX]
         mov dx, [F_DX]
-        cmp cx, 1980
-        jb fn_set_bad
-        cmp cx, 2099
-        ja fn_set_bad
-        cmp dh, 1
-        jb fn_set_bad
-        cmp dh, 12
-        ja fn_set_bad
-        cmp dl, 1
-        jb fn_set_bad
-        cmp dl, 31
-        ja fn_set_bad
+        call ymd_days
+        jc fn_set_bad
+        push ax
+        call clock_cs               ; (una medianoche pendiente no cuenta ya)
+        pop ax
+        mov [k_days], ax
+        ; reloj de tiempo real
+        mov ax, cx
+        mov bl, 100
+        div bl                      ; AL = siglo, AH = año
+        mov bh, ah
+        call bin2bcd
+        mov ch, al
+        mov al, bh
+        call bin2bcd
+        mov cl, al
+        mov al, dh
+        call bin2bcd
+        mov dh, al
+        mov al, dl
+        call bin2bcd
+        mov dl, al
+        push bp
+        mov ah, 5
+        int 0x1A
+        pop bp
         jmp fn_set_ok
 fn_2d:
         mov cx, [F_CX]
@@ -7523,6 +7905,51 @@ fn_2d:
         ja fn_set_bad
         cmp dl, 99
         ja fn_set_bad
+        call clock_cs               ; la medianoche pendiente pasa a la fecha
+        ; tics de la BIOS = centésimas * 1573040 / 8640000, hacia arriba (la
+        ; hora leída después no queda por debajo de la puesta)
+        movzx eax, ch
+        imul eax, eax, 60
+        movzx ebx, cl
+        add eax, ebx
+        imul eax, eax, 60
+        movzx ebx, dh
+        add eax, ebx
+        imul eax, eax, 100
+        movzx ebx, dl
+        add eax, ebx
+        mov edx, 1573040
+        mul edx
+        add eax, 8640000 - 1
+        adc edx, 0
+        mov ebx, 8640000
+        div ebx
+        cmp eax, 1573040
+        jb .t
+        mov eax, 1573039
+.t:
+        mov dx, ax
+        shr eax, 16
+        mov cx, ax
+        push bp
+        mov ah, 1
+        int 0x1A                    ; (borra también la marca de medianoche)
+        pop bp
+        ; reloj de tiempo real
+        mov al, [F_CH]
+        call bin2bcd
+        mov ch, al
+        mov al, [F_CL]
+        call bin2bcd
+        mov cl, al
+        mov al, [F_DH]
+        call bin2bcd
+        mov dh, al
+        xor dl, dl                  ; sin horario de verano
+        push bp
+        mov ah, 3
+        int 0x1A
+        pop bp
         jmp fn_set_ok
 fn_set_bad:
         mov byte [F_AL], 0xFF
@@ -8342,7 +8769,7 @@ fn_44:
         mov [es:di+7+13], ax
         mov ax, [cur_drv+D_HEADS]
         mov [es:di+7+15], ax
-        mov eax, [cur_drv+D_START]
+        mov eax, [cur_drv+D_HIDDEN]
         mov [es:di+7+17], eax
         ; cilindros
         mov eax, [cur_drv+D_SIZE]
@@ -9047,8 +9474,7 @@ do_ctrlc:
         mov word [conq_len], 0
         mov word [conq_pos], 0
         call fat_flush
-        mov sp, bp
-        dec byte [indos]
+        K_LEAVE
         pop ax
         pop bx
         pop cx
@@ -9058,6 +9484,7 @@ do_ctrlc:
         pop bp
         pop ds
         pop es
+        sti
         ; El manejador puede volver con IRET (se repite la función) o con
         ; RETF, que deja los indicadores en la pila: entonces CF=1 pide
         ; terminar el programa y CF=0 seguir, como en MS-DOS.
@@ -9633,8 +10060,10 @@ fn_4b:
 .launch:
         ; guardar la pila del padre y su DTA
         mov es, [cur_psp]
-        mov [es:0x2E], bp
-        mov [es:0x30], ss
+        mov ax, [F_USP]
+        mov [es:0x2E], ax
+        mov ax, [F_USS]
+        mov [es:0x30], ax
         mov es, [ex_psp]
         mov ax, [dta_off]
         mov [es:0x3C], ax
@@ -9675,11 +10104,22 @@ fn_4b:
         mov [cur_psp], ax
         mov [dta_seg], ax
         mov word [dta_off], 0x80
+        ; dejar el marco del padre en su pila (al terminar el hijo se vuelve
+        ; por él) y soltar la pila del núcleo
+        les di, [F_USP]
+        mov si, bp
+        mov cx, 12
+        rep ss movsw
+        cli
+        mov bx, [F_OWN]
+        test bx, bx
+        jz .nown
+        mov byte [bx], 0
+.nown:
         dec byte [indos]
         mov dx, [ex_psp]
         mov ax, [ex_ss]
         mov bx, [ex_sp]
-        cli
         mov ss, ax
         mov sp, bx
         sti
@@ -10063,11 +10503,20 @@ do_term:
         mov word [conq_len], 0
         mov word [conq_pos], 0
         mov es, cx
-        cli
-        mov ss, [es:0x32-2]
-        mov sp, [es:0x2E]
-        sti
-        mov bp, sp
+        ; el marco del padre (el de su EXEC, en su pila) pasa a ser el de
+        ; esta llamada: se vuelve por él
+        mov sp, bp
+        push ds
+        lds si, [es:0x2E]
+        mov [F_USP], si
+        mov [F_USS], ds
+        push ss
+        pop es
+        mov di, bp
+        mov cx, 12
+        rep movsw
+        pop ds
+        mov byte [indos], 1         ; (lo que el proceso dejara a medias)
         and byte [F_FL], 0xFE
         mov eax, [term_addr]
         test eax, eax
@@ -10939,33 +11388,65 @@ int25:
 int26:
         push ax
         mov al, 3
-abs_io:
+; Como INT 21h, trabajan en la pila de disco del núcleo (si no se llaman
+; desde dentro del DOS) y cuentan en InDOS.
+%macro ABS_LEAVE 0
+        cli
+        dec byte [indos]
+        pop ax                      ; ¿se tomó la pila de disco?
+        test ax, ax
+        jz %%n
+        mov byte [k_busy+KS_DISK], 0
+        mov ss, [abs_usp+2]
+        mov sp, [abs_usp]
+%%n:
         sti
+%endmacro
+abs_io:
         cld
         pushad
         push ds
         push es
         mov bp, sp
-        mov cx, KSEG
-        mov ds, cx
+        push ds
+        pop es                      ; ES:BX = búfer o paquete del llamante
+        mov si, KSEG
+        mov ds, si
         mov [abs_cmd], al
+        mov al, [bp+36]             ; unidad
+        xor di, di
+        cli
+        cmp byte [indos], 0
+        jne .ns
+        mov [abs_usp], sp
+        mov [abs_usp+2], ss
+        mov ss, si
+        mov sp, k_top_disk
+        mov byte [k_busy+KS_DISK], 1
+        inc di
+.ns:
+        push di
+        inc byte [indos]
+        sti
         mov byte [crit_off], 1
-        mov al, [bp+36]
+        push es
+        push bx
+        push cx
+        push dx
         call select_raw
+        pop dx
+        pop cx
+        pop bx
+        pop es
         jc .bdrv
-        mov cx, [bp+28]
         cmp cx, 0xFFFF
         jne .short
-        mov es, [bp+2]
-        mov bx, [bp+20]
         mov eax, [es:bx]
         mov cx, [es:bx+4]
         les bx, [es:bx+6]
         jmp .go
 .short:
-        movzx eax, word [bp+24]
-        mov es, [bp+2]
-        mov bx, [bp+20]
+        movzx eax, dx
 .go:
         jcxz .ok
 .l:
@@ -10994,6 +11475,7 @@ abs_io:
         and byte [cur_drv+D_FLAGS], 0xFF ^ DF_MOUNTED
         call drv_store
 .ok2:
+        ABS_LEAVE
         pop es
         pop ds
         popad
@@ -11016,6 +11498,7 @@ abs_io:
         call drv_store
 .fail:
         mov byte [crit_off], 0
+        ABS_LEAVE
         pop es
         pop ds
         popad
@@ -11184,6 +11667,9 @@ i2f_1302:
 ;  Datos
 ; =============================================================================
 MAXFN   equ 0x6C
+; pilas del núcleo (índices KS_*): fondo y tope
+k_base      dw k_stk_disk, k_stk_io, k_stk_aux
+k_tops      dw k_top_disk, k_top_io, k_top_aux
 fntable:
         dw fn_00, fn_01, fn_02, fn_unsup, fn_unsup, fn_unsup, fn_06, fn_07  ; 00
         dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_0f       ; 08
@@ -11405,6 +11891,7 @@ win_info:   db 3, 0                     ; version de la estructura
 ; (la CDS y la SDA las instancia DOSMGR; aqui, lo que solo conoce el nucleo)
 win_inst:   dw cur_paths, KSEG, PATHLEN*NDRV
             dw col, KSEG, 4             ; consola: columna y tecla pendiente
+            dw k_inst, KSEG, k_inst_end - k_inst  ; pilas de INT 21h
             dd 0
             dw 0
 ; tabla de variables del DOS para DOSMGR (desplazamientos en KSEG)
@@ -11431,6 +11918,11 @@ op_drv      resb 1
 ndrives     resb 1
 bg_count    resb 1
 hd_count    resb 1
+hd_total    resb 1
+scan_pass   resb 1
+ebr_n       resb 1
+ebr_base    resd 1
+ebr_cur     resd 1
 hd_cur      resb 1
 io_cmd      resb 1
 abs_cmd     resb 1
@@ -11629,5 +12121,21 @@ fatsec      resb 512
             alignb 2
 kstack      resb 1024
 kstack_top:
+k_days      resw 1                  ; fecha: días desde el 1-1-1980
+; ---- pilas del núcleo para INT 21h y su estado: cada máquina virtual de
+;      Windows tiene su copia (win_inst) ----
+k_inst:
+k_busy      resb 6                  ; «en uso»: disco, consola, auxiliar (KS_*)
+crit_usp    resd 1                  ; pila del programa durante INT 24h
+crit_ksp    resd 1                  ; y la del núcleo
+abs_usp     resd 1                  ; pila del llamante de INT 25h/26h
+abs_own     resw 1
+k_stk_disk  resb KS_DISK_LEN
+k_top_disk:
+k_stk_io    resb KS_IO_LEN
+k_top_io:
+k_stk_aux   resb KS_AUX_LEN
+k_top_aux:
+k_inst_end:
             alignb 16
 kernel_end:
