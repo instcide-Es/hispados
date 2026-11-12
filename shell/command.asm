@@ -26,6 +26,10 @@ start:
         mov dx, ctrlc_handler
         mov ax, 0x2523
         int 0x21
+        ; error crítico: «¿Anular, Reintentar, Ignorar, Descartar?»
+        mov dx, crit_handler
+        mov ax, 0x2524
+        int 0x21
         ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT) y /C orden
         mov si, 0x81
 .opt:
@@ -133,6 +137,193 @@ main_loop:
 
 ; Ctrl+C: si corre un programa, terminarlo; si no, cancelar el lote y la
 ; línea y volver al indicador
+; -----------------------------------------------------------------------------
+;  Error crítico (INT 24h). AH = tipo (bit 7: dispositivo de caracteres;
+;  bit 0: escritura; bits 3-5: se puede descartar, reintentar, ignorar),
+;  AL = unidad, DI = código, BP:SI = cabecera del dispositivo.
+;  Solo se usan las funciones 01h-0Ch de INT 21h. -> AL = acción.
+; -----------------------------------------------------------------------------
+crit_handler:
+        sti
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push bp
+        push ds
+        push es
+        push cs
+        pop ds
+        mov [ce_ah], ah
+        mov [ce_al], al
+        mov es, bp                  ; ES:SI = cabecera del dispositivo
+        call ce_crlf
+        mov bx, di
+        and bx, 0xFF
+        cmp bx, 15
+        jbe .k
+        mov bx, 12
+.k:
+        shl bx, 1
+        mov dx, [ce_msgs+bx]
+        test byte [ce_ah], 0x80
+        jnz .dev
+        ; «Error al leer la unidad A: ...»
+        push dx
+        mov dx, ce_rd
+        test byte [ce_ah], 1
+        jz .rw
+        mov dx, ce_wr
+.rw:
+        call ce_puts
+        mov dl, [ce_al]
+        add dl, 'A'
+        call ce_putc
+        mov dl, ':'
+        call ce_putc
+        mov dl, ' '
+        call ce_putc
+        pop dx
+        call ce_puts
+        jmp .ask
+.dev:
+        ; «Error en el dispositivo PRN: ...»
+        push dx
+        mov dx, ce_dev
+        call ce_puts
+        mov cx, 8
+        add si, 10
+.dn:
+        mov dl, [es:si]
+        cmp dl, ' '
+        je .dne
+        call ce_putc
+        inc si
+        loop .dn
+.dne:
+        mov dl, ':'
+        call ce_putc
+        mov dl, ' '
+        call ce_putc
+        pop dx
+        call ce_puts
+.ask:
+        call ce_crlf
+        mov dx, ce_q_a
+        call ce_puts
+        test byte [ce_ah], 0x10
+        jz .q1
+        mov dx, ce_q_r
+        call ce_puts
+.q1:
+        test byte [ce_ah], 0x20
+        jz .q2
+        mov dx, ce_q_i
+        call ce_puts
+.q2:
+        test byte [ce_ah], 0x08
+        jz .q3
+        mov dx, ce_q_d
+        call ce_puts
+.q3:
+        mov dx, ce_q_end
+        call ce_puts
+.key:
+        mov ah, 0x07                ; sin eco ni Ctrl+C
+        int 0x21
+        mov dl, al
+        and al, 0xDF
+        mov bl, 2
+        cmp al, 'A'
+        je .ok
+        mov bl, 1
+        cmp al, 'R'
+        jne .ni
+        test byte [ce_ah], 0x10
+        jnz .ok
+.ni:
+        mov bl, 0
+        cmp al, 'I'
+        jne .nd
+        test byte [ce_ah], 0x20
+        jnz .ok
+.nd:
+        mov bl, 3
+        cmp al, 'D'
+        jne .key
+        test byte [ce_ah], 0x08
+        jz .key
+.ok:
+        mov dl, al
+        call ce_putc
+        call ce_crlf
+        mov al, bl
+        pop es
+        pop ds
+        pop bp
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        iret
+ce_putc:
+        push ax
+        mov ah, 0x02
+        int 0x21
+        pop ax
+        ret
+ce_puts:
+        push si
+        push dx
+        mov si, dx
+.l:
+        mov dl, [si]
+        test dl, dl
+        jz .e
+        call ce_putc
+        inc si
+        jmp .l
+.e:
+        pop dx
+        pop si
+        ret
+ce_crlf:
+        push dx
+        mov dl, 13
+        call ce_putc
+        mov dl, 10
+        call ce_putc
+        pop dx
+        ret
+ce_ah       db 0
+ce_al       db 0
+ce_rd       db "Error al leer la unidad ", 0
+ce_wr       db "Error al escribir en la unidad ", 0
+ce_dev      db "Error en el dispositivo ", 0
+ce_q_a      db "¿Anular", 0
+ce_q_r      db ", Reintentar", 0
+ce_q_i      db ", Ignorar", 0
+ce_q_d      db ", Descartar", 0
+ce_q_end    db "? ", 0
+ce_e0       db "el disco está protegido contra escritura", 0
+ce_e1       db "unidad desconocida", 0
+ce_e2       db "la unidad no está preparada", 0
+ce_e3       db "orden desconocida", 0
+ce_e4       db "error en los datos (CRC)", 0
+ce_e5       db "petición incorrecta", 0
+ce_e6       db "error de búsqueda", 0
+ce_e7       db "tipo de disco desconocido", 0
+ce_e8       db "no se encuentra el sector", 0
+ce_e9       db "no queda papel", 0
+ce_e10      db "fallo de escritura", 0
+ce_e11      db "fallo de lectura", 0
+ce_e12      db "error general", 0
+ce_e15      db "cambio de disco no válido", 0
+ce_msgs     dw ce_e0, ce_e1, ce_e2, ce_e3, ce_e4, ce_e5, ce_e6, ce_e7
+            dw ce_e8, ce_e9, ce_e10, ce_e11, ce_e12, ce_e12, ce_e12, ce_e15
+
 ctrlc_handler:
         push ax
         push bx
@@ -691,7 +882,7 @@ do_type:
         ret
 .nf:
         mov si, msg_nofile
-        jmp puts
+        jmp err_puts
 
 do_vol:
         call arg_drive

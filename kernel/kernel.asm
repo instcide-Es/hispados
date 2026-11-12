@@ -204,6 +204,7 @@ start:
         call kputs
         jmp halt
 .bootok:
+        mov byte [crit_gave], 0xFF
         call vectors_init
         call mem_init
         call root_psp_init
@@ -721,6 +722,133 @@ media_check:
         popad
 .r:
         ret
+
+; ---- error crítico ----
+; Pregunta a INT 24h qué hacer con el error de la última E/S de disco.
+; -> AL = 0 ignorar, 1 reintentar, 2 anular, 3 descartar
+crit_ask:
+        mov al, 3
+        cmp byte [crit_on], 0       ; ya estamos en uno
+        jne .r
+        cmp byte [crit_off], 0      ; INT 25h/26h
+        jne .r
+        cmp byte [indos], 0         ; fuera de INT 21h (arranque, drivers)
+        je .r
+        push ax
+        mov al, [sel_drv]
+        cmp al, [crit_gave]         ; ya dijeron «descartar» con esta unidad
+        pop ax
+        je .r
+        pushad
+        push ds
+        push es
+        mov byte [crit_on], 1
+        ; código de error de DOS
+        mov bl, [io_derr]
+        cmp byte [io_isdrv], 0
+        jne .code
+        mov al, [io_st]             ; estado de INT 13h
+        mov bl, 2                   ; no preparada
+        cmp al, 0x80
+        je .code
+        cmp al, 0xAA
+        je .code
+        cmp al, 0xC0
+        je .code
+        cmp byte [io_nrdy], 0       ; (20h en una disquetera)
+        jne .code
+        mov bl, 0                   ; protegido contra escritura
+        cmp al, 0x03
+        je .code
+        mov bl, 15                  ; cambio de disco no válido
+        cmp al, 0x06
+        je .code
+        mov bl, 8                   ; sector no encontrado
+        cmp al, 0x04
+        je .code
+        mov bl, 4                   ; CRC
+        cmp al, 0x10
+        je .code
+        mov bl, 6                   ; búsqueda
+        cmp al, 0x40
+        je .code
+        mov bl, 11                  ; lectura
+        cmp byte [io_cmd], 3
+        jne .code
+        mov bl, 10                  ; escritura
+.code:
+        movzx di, bl
+        ; AH: zona de datos (3), se permite descartar, reintentar e ignorar
+        mov ah, 0x38 | (3 << 1)
+        cmp byte [io_cmd], 3
+        jne .rd
+        or ah, 1
+.rd:
+        mov al, [sel_drv]
+        mov si, crit_hdr
+        cmp byte [io_isdrv], 0
+        je .h
+        mov si, [cur_drv+D_DRVHDR]
+        mov bp, [cur_drv+D_DRVHDR+2]
+        jmp .hd
+.h:
+        mov bp, cs
+.hd:
+        ; las llamadas anidadas a INT 21h pisan la pila guardada en el PSP
+        mov es, [cs:cur_psp]
+        push word [es:0x2E]
+        push word [es:0x30]
+        int 0x24
+        mov es, [cs:cur_psp]
+        pop word [es:0x30]
+        pop word [es:0x2E]
+        mov [cs:crit_res], al
+        mov byte [cs:crit_on], 0
+        pop es
+        pop ds
+        popad
+        mov al, [crit_res]
+        cmp al, 3
+        jbe .g
+        mov al, 3
+.g:
+        cmp al, 2
+        jb .r
+        push ax
+        mov al, [sel_drv]
+        mov [crit_gave], al         ; anular o descartar: no insistir
+        pop ax
+.r:
+        ret
+
+; anular: terminar el programa (tipo 2, error crítico); el intérprete
+; principal no se puede terminar: para él es «descartar»
+crit_abort:
+        push es
+        push ax
+        mov es, [cur_psp]
+        mov ax, [es:0x16]
+        cmp ax, [cur_psp]           ; su propio padre
+        je .shell
+        cmp ax, [root_psp]          ; el intérprete principal de Hispa-DOS
+        je .shell
+        pop ax
+        pop es
+        jmp .term
+.shell:
+        pop ax
+        pop es
+        stc
+        ret
+.term:
+        mov sp, bp                  ; volver al marco de INT 21h
+        mov ax, 0x0200
+        jmp do_term
+
+; cabecera de dispositivo de bloque del núcleo (para BP:SI de INT 24h)
+crit_hdr    dd 0xFFFFFFFF
+            dw 0x0000, 0, 0
+            db 1, "HSPDISK"
 
 ; guardar cur_drv en su entrada de la tabla
 drv_store:
@@ -2384,9 +2512,29 @@ write_sector:
         jz disk_io
         stc                         ; un CD/DVD no se puede escribir
         ret
+; con aviso de error crítico (INT 24h) si falla dentro de INT 21h
 disk_io:
+        call disk_io_raw
+        jnc .r
+        call crit_ask               ; -> AL: 0 ignorar, 1 reintentar, 2 anular, 3 descartar
+        cmp al, 1
+        je disk_io
+        cmp al, 0
+        je .ign
+        cmp al, 2
+        je crit_abort
+        stc
+.r:
+        ret
+.ign:
+        clc
+        ret
+
+disk_io_raw:
+        mov byte [io_isdrv], 0
         test byte [cur_drv+D_FLAGS], DF_DRIVER
         jz .bios
+        mov byte [io_isdrv], 1
         jmp drv_block_io
 .bios:
         pushad
@@ -2447,7 +2595,13 @@ disk_io:
         cmp byte [io_st], 0x80      ; sin respuesta: no hay disco
         je .nr
         cmp byte [io_st], 0xAA
+        je .nr
+        cmp byte [io_st], 0xC0      ; sin disco (algunas BIOS)
+        je .nr
+        cmp byte [io_st], 0x20      ; SeaBIOS: disquetera vacía
         jne .er
+        cmp byte [cur_drv+D_BIOS], 0x80
+        jae .er
 .nr:
         mov byte [io_nrdy], 1
 .er:
@@ -4734,7 +4888,9 @@ drv_block_io:
         clc
         ret
 .err:
-        cmp byte [dreq+3], 2
+        mov al, [dreq+3]
+        mov [io_derr], al
+        cmp al, 2
         jne .e2
         mov byte [io_nrdy], 1
 .e2:
@@ -6479,7 +6635,10 @@ i21_ret:
         mov al, ']'
         call ser_putc
 %endif
+        cmp byte [indos], 1
+        jne .nofl
         call fat_flush
+.nofl:
         dec byte [indos]
         pop ax
         pop bx
@@ -6587,6 +6746,7 @@ fn_09:
         mov byte [F_AL], '$'
         ret
 fn_0a:
+        mov byte [crit_gave], 0xFF  ; orden nueva: se vuelve a preguntar
         mov es, [F_DS]
         mov di, [F_DX]
         call std_in_is_con
@@ -8527,6 +8687,7 @@ find_step:
 
 ; ---- 4Bh: cargar y ejecutar ----
 fn_4b:
+        mov byte [crit_gave], 0xFF
         mov al, [F_AL]
         mov [ex_mode], al
         cmp al, 0
@@ -10000,6 +10161,7 @@ abs_io:
         mov cx, KSEG
         mov ds, cx
         mov [abs_cmd], al
+        mov byte [crit_off], 1
         mov al, [bp+36]
         call select_raw
         jc .bdrv
@@ -10035,6 +10197,7 @@ abs_io:
         mov es, dx
         loop .l
 .ok:
+        mov byte [crit_off], 0
         cmp byte [abs_cmd], 3
         jne .ok2
         mov dword [cache_lba], 0xFFFFFFFF
@@ -10056,6 +10219,7 @@ abs_io:
 .bsec:
         mov word [abs_err], 0x0408
 .fail:
+        mov byte [crit_off], 0
         pop es
         pop ds
         popad
@@ -10495,7 +10659,13 @@ rn_ent      resb 32
 mnt_try     resb 1
 mc_old      resd 1
 vol_ser     resd NDRV               ; huella (serie + etiqueta) de cada unidad montada
-io_nrdy     resb 1                  ; la última E/S: «no preparada»
+io_nrdy     resb 1
+io_isdrv    resb 1                  ; la última E/S fue por un driver
+io_derr     resb 1                  ; código de error del driver
+crit_on     resb 1                  ; dentro de INT 24h
+crit_off    resb 1                  ; sin INT 24h (INT 25h/26h)
+crit_res    resb 1
+crit_gave   resb 1                  ; unidad con «descartar» en esta orden                  ; la última E/S: «no preparada»
 io_st       resb 1                  ; estado de la última INT 13h
 isob_drv    resb 1
 iso_next    resb 1

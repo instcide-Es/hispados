@@ -38,7 +38,7 @@ sleep 8
 typ "DIR D:"; sleep 2
 mon "device_del m1"; sleep 2
 typ "DIR D:"; sleep 2
-typ "A"; sleep 1
+printf 'sendkey d\n' | socat - UNIX-CONNECT:$T/mon >/dev/null 2>&1; sleep 1   # «Descartar»
 mon "drive_add 0 if=none,id=u2,format=raw,file=$T/DOS.img"
 mon "device_add usb-storage,bus=xhci.0,drive=u2,id=m2"; sleep 3
 typ "DIR D:"; sleep 3
