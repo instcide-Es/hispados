@@ -84,7 +84,8 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `HSPUSB.SYS`: concentradores USB (hubs, también encadenados), `/INFO` (árbol de dispositivos) y arranque desde memoria USB sin perder el disco (`/U`) | ✅ |
 | `HSPCD.SYS`: lectores de CD/DVD (ATAPI) e ISO 9660 en el núcleo (solo lectura) | ✅ |
 | `SYS.COM`, `INSTALAR` (instalar en un disco duro), `KEYB SP` (teclado español, AltGr) | ✅ |
-| Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes | ✅ |
+| Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes y edición de la línea (flechas, Inicio, Fin, Supr, Insertar, Ctrl+flechas por palabras, Tab) | ✅ |
+| Teclas que faltan en los portátiles de Apple (`TECLADO SP /MAC`, automático si el equipo es de Apple): Ctrl+Retroceso = Supr, Alt+Retroceso = Insertar, Alt+←/→ = Inicio/Fin, Alt+↑/↓ = RePág/AvPág | ✅ |
 | `EDIT`/`EDITAR` (editor), `GESTOR` (gestor de archivos), `SYSINFO`/`INFO` (propiedades del sistema) | ✅ |
 | Teclado y ratón USB nativos (HID) y ratón PS/2 y touchpads de portátil (`HSPRATON`, INT 33h: por la BIOS o, si no lo ofrece, directamente por el controlador 8042; `HSPRATON /INFO` enseña el diagnóstico y `/BIOS` o `/DIRECTO` fuerzan la vía) | ✅ |
 | CD/DVD también en SATA (AHCI); menú de arranque propio con F5 y F8 | ✅ |

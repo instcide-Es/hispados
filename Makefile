@@ -80,6 +80,8 @@ $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/TECLAS.COM: tests/progs/teclas.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MOUSETST.COM: tests/progs/mousetst.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/NOC2.COM: tests/progs/noc2.asm | $(B)
@@ -124,7 +126,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
+        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM \
         $(B)/VENTANAS.COM
 
@@ -181,6 +183,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/UPPER.COM ::BIN/UPPER.COM
 	mcopy -i $@ $(B)/HELLOEXE.EXE ::HELLOEXE.EXE
 	mcopy -i $@ $(B)/MOUSETST.COM ::BIN/MOUSETST.COM
+	mcopy -i $@ $(B)/TECLAS.COM ::BIN/TECLAS.COM
 	mcopy -i $@ $(B)/NOC2.COM ::BIN/NOC2.COM
 	mcopy -i $@ $(B)/SHARETST.COM ::BIN/SHARETST.COM
 	mcopy -i $@ $(B)/FSTEST.COM ::BIN/FSTEST.COM
@@ -262,6 +265,8 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_tab_tests.sh $(IMG)
+	tests/run_editlinea_tests.sh $(IMG)
+	tests/run_mackeys_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
 	tests/run_pila_tests.sh $(IMG)
 	tests/run_reloj_tests.sh $(IMG)

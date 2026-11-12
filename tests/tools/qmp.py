@@ -4,6 +4,7 @@
 uso: qmp.py SOCKET ORDEN...
   type DISPOSITIVO TEXTO   teclea el texto (letras, cifras, espacio, . \\ :)
   key DISPOSITIVO QCODE    pulsa y suelta una tecla (ret, esc, f2...)
+  combo DISPOSITIVO A+B    pulsa varias a la vez (ctrl+backspace, alt+left...)
   move DISPOSITIVO DX DY   movimiento relativo del ratón
   btn DISPOSITIVO 0|1      botón izquierdo soltado / pulsado
   (DISPOSITIVO "-": sin dispositivo, al que QEMU tenga activo)
@@ -65,6 +66,9 @@ def main():
             i += 3
         elif op == 'key':
             tap(a[i + 1], [a[i + 2]])
+            i += 3
+        elif op == 'combo':
+            tap(a[i + 1], a[i + 2].split('+'))
             i += 3
         elif op == 'move':
             ev(a[i + 1], [{'type': 'rel', 'data': {'axis': 'x', 'value': int(a[i + 2])}},

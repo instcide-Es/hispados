@@ -1978,17 +1978,71 @@ con_getc_bios:
 .r:
         ret
 
+; mover el cursor un sitio atrás. Con la BIOS, el retroceso (08h) no sube de
+; línea al llegar a la columna 0: en una línea que ha pasado del ancho de la
+; pantalla hay que colocar el cursor al final de la fila de arriba. Por el
+; puerto serie (y con un driver CON) va un retroceso normal.
+con_back:
+        push ax
+        cmp word [con_hdr+2], 0
+        jne .bs
+        push bx
+        push cx
+        push dx
+        push bp
+        mov ah, 0x0F                ; AH = columnas, BH = página
+        int 0x10
+        push ax
+        mov ah, 3                   ; DH = fila, DL = columna
+        int 0x10
+        pop ax
+        test dl, dl
+        jnz .nb
+        test dh, dh
+        jz .nb
+        dec dh
+        mov dl, ah
+        dec dl
+        mov ah, 2
+        int 0x10
+        pop bp
+        pop dx
+        pop cx
+        pop bx
+        mov al, 8
+        call ser_putc
+        call con_col
+        pop ax
+        ret
+.nb:
+        pop bp
+        pop dx
+        pop cx
+        pop bx
+.bs:
+        mov al, 8
+        call con_raw
+        pop ax
+        ret
+
 ; ES:DI = búfer estilo 0Ah ([max][cuenta][datos...])
+; Edición de la línea (como DOSKEY): BX = longitud, SI = posición del cursor.
+;   flechas izquierda/derecha, Inicio, Fin, Ctrl+flechas (por palabras),
+;   Supr, Retroceso, Insertar (insertar/sobrescribir; empieza insertando),
+;   flechas arriba/abajo y F3 (historial), Esc (borrar la línea), Tab.
 line_input:
         push ax
         push bx
         push cx
         push dx
+        push si
         movzx cx, byte [es:di]
         test cx, cx
         jz .out
         xor bx, bx
+        xor si, si
         mov byte [hist_pos], 0
+        mov byte [le_ovr], 0
 .l:
         call con_getc
         cmp al, 9
@@ -1996,7 +2050,7 @@ line_input:
         mov byte [tab_on], 0        ; otra tecla: se acaba el autocompletado
         test al, al
         jnz .nx
-        ; tecla extendida: historial de órdenes (como DOSKEY)
+        ; tecla extendida: historial de órdenes y edición (como DOSKEY)
         call con_getc
         cmp al, 0x48                ; flecha arriba
         je .up
@@ -2004,6 +2058,22 @@ line_input:
         je .down
         cmp al, 0x3D                ; F3: repetir la última
         je .f3
+        cmp al, 0x4B                ; flecha izquierda
+        je .left
+        cmp al, 0x4D                ; flecha derecha
+        je .right
+        cmp al, 0x47                ; Inicio
+        je .home
+        cmp al, 0x4F                ; Fin
+        je .end
+        cmp al, 0x53                ; Supr
+        je .del
+        cmp al, 0x52                ; Insertar
+        je .insk
+        cmp al, 0x73                ; Ctrl+flecha izquierda
+        je .wleft
+        cmp al, 0x74                ; Ctrl+flecha derecha
+        je .wright
         jmp .l
 .up:
         mov al, [hist_pos]
@@ -2028,6 +2098,60 @@ line_input:
         mov byte [hist_pos], 1
         call .recall
         jmp .l
+.left:
+        call .left1
+        jmp .l
+.right:
+        call .right1
+        jmp .l
+.home:
+        call .left1
+        jnc .home
+        jmp .l
+.end:
+        call .right1
+        jnc .end
+        jmp .l
+.del:
+        call .delc
+        jmp .l
+.insk:
+        xor byte [le_ovr], 1
+        jmp .l
+; una palabra atrás: salta los espacios y luego la palabra
+.wleft:
+        test si, si
+        jz .l
+        call .prev
+        cmp al, ' '
+        jne .wl2
+        call .left1
+        jmp .wleft
+.wl2:
+        test si, si
+        jz .l
+        call .prev
+        cmp al, ' '
+        je .l
+        call .left1
+        jmp .wl2
+; una palabra adelante: salta la palabra y luego los espacios
+.wright:
+        cmp si, bx
+        jae .l
+        call .at
+        cmp al, ' '
+        je .wr2
+        call .right1
+        jmp .wright
+.wr2:
+        cmp si, bx
+        jae .l
+        call .at
+        cmp al, ' '
+        jne .l
+        call .right1
+        jmp .wr2
 .nx:
         cmp al, 13
         je .cr
@@ -2045,13 +2169,37 @@ line_input:
         cmp al, 32
         jb .l
 .store:
+        cmp si, bx
+        jae .ins
+        cmp byte [le_ovr], 0
+        je .ins
+        ; sobrescribir el carácter de debajo del cursor
+        call .set
+        inc si
+        call con_out
+        jmp .l
+.ins:
         mov dx, bx
         inc dx
         cmp dx, cx
         jae .bell
-        mov [es:di+2+bx], al
+        ; hacer sitio: lo que hay desde el cursor, un lugar a la derecha
+        push bx
+.i1:
+        cmp bx, si
+        jbe .i2
+        mov ah, [es:di+1+bx]
+        mov [es:di+2+bx], ah
+        dec bx
+        jmp .i1
+.i2:
+        pop bx
+        call .set
         inc bx
+        inc si
         call con_out
+        xor dx, dx
+        call .tail
         jmp .l
 .bell:
         mov al, 7
@@ -2061,35 +2209,126 @@ line_input:
         call line_tab
         jmp .l
 .bs:
-        test bx, bx
-        jz .l
-        dec bx
-        call .rub
+        call .left1
+        jc .l
+        call .delc
         jmp .l
 .esc:
-        test bx, bx
-        jz .l
-        dec bx
-        call .rub
-        jmp .esc
-.rub:
+        call .clear
+        jmp .l
+; AL = el carácter de debajo del cursor / el de antes / ponerlo
+.at:
+        push bx
+        mov bx, si
+        mov al, [es:di+2+bx]
+        pop bx
+        ret
+.prev:
+        push bx
+        mov bx, si
+        mov al, [es:di+1+bx]
+        pop bx
+        ret
+.set:
+        push bx
+        mov bx, si
+        mov [es:di+2+bx], al
+        pop bx
+        ret
+; el cursor un sitio a la izquierda (CF=1 si ya está al principio)
+.left1:
+        test si, si
+        jz .no1
+        dec si
+        call con_back
+        clc
+        ret
+.no1:
+        stc
+        ret
+; el cursor un sitio a la derecha (CF=1 si ya está al final): se vuelve a
+; escribir el carácter, que es lo que avanza en la pantalla y en el eco
+.right1:
+        cmp si, bx
+        jae .no1
         push ax
-        mov al, 8
-        call con_raw
-        mov al, ' '
-        call con_raw
-        mov al, 8
-        call con_raw
+        call .at
+        call con_out
         pop ax
+        inc si
+        clc
+        ret
+; volver a escribir desde el cursor hasta el final, tapar DX caracteres
+; sobrantes con espacios y dejar el cursor donde estaba
+.tail:
+        push ax
+        push cx
+        push dx
+        push si
+        xor cx, cx
+.t1:
+        cmp si, bx
+        jae .t2
+        call .at
+        call con_out
+        inc si
+        inc cx
+        jmp .t1
+.t2:
+        test dx, dx
+        jz .t3
+        mov al, ' '
+        call con_out
+        inc cx
+        dec dx
+        jmp .t2
+.t3:
+        jcxz .t4
+.t3l:
+        call con_back
+        loop .t3l
+.t4:
+        pop si
+        pop dx
+        pop cx
+        pop ax
+        ret
+; borrar el carácter de debajo del cursor
+.delc:
+        cmp si, bx
+        jae .dr
+        push ax
+        push dx
+        push si
+.d1:
+        mov dx, si
+        inc dx
+        cmp dx, bx
+        jae .d2
+        inc si
+        call .at
+        dec si
+        call .set
+        inc si
+        jmp .d1
+.d2:
+        pop si
+        dec bx
+        mov dx, 1
+        call .tail
+        pop dx
+        pop ax
+.dr:
         ret
 ; borrar la línea escrita
 .clear:
-        test bx, bx
-        jz .cr0
-        dec bx
-        call .rub
-        jmp .clear
-.cr0:
+        call .left1
+        jnc .clear
+        push dx
+        mov dx, bx
+        xor bx, bx
+        call .tail
+        pop dx
         ret
 ; poner en la línea la entrada del historial hist_pos (1 = la última)
 .recall:
@@ -2121,16 +2360,85 @@ line_input:
         jmp .rc
 .rd:
         pop si
+        mov si, bx                  ; el cursor, al final
         ret
 .cr:
+        call .right1                ; el cursor al final: el salto de línea
+        jnc .cr                     ; tiene que salir de la última fila
         mov byte [es:di+2+bx], 13
         mov [es:di+1], bl
+        mov al, 13
         call con_out
         call hist_save
 .out:
+        pop si
         pop dx
         pop cx
         pop bx
+        pop ax
+        ret
+
+; ---- Tab con el cursor en medio de la línea ----
+; ES:DI = búfer de 0Ah, BX = longitud, SI = cursor, CX = máximo (con el CR).
+; Se completa la palabra que acaba en el cursor: lo que hay detrás se aparta
+; al fondo del búfer, se completa como si la línea acabara en el cursor
+; (line_tab_fin) y se vuelve a poner detrás de la palabra completada.
+; -> BX = longitud nueva, SI = cursor (detrás de lo completado)
+line_tab:
+        push ax
+        push cx
+        push dx
+        mov [tab_cur], si
+        mov dx, bx
+        sub dx, si                  ; lo que hay detrás del cursor
+        mov [tab_tl], dx
+        mov [tab_ol], bx
+        mov si, cx
+        dec si
+        sub si, bx                  ; cuánto se aparta
+        mov [tab_dlt], si
+        add si, di
+        test dx, dx
+        jz .go
+        push cx
+        mov cx, dx
+.m1:
+        dec bx
+        mov al, [es:di+2+bx]
+        mov [es:bx+si+2], al
+        loop .m1
+        pop cx
+.go:
+        sub cx, dx                  ; sitio que queda para la palabra
+        mov bx, [tab_cur]
+        call line_tab_fin           ; -> BX = dónde acaba lo completado
+        mov cx, [tab_tl]
+        jcxz .r0
+        ; lo de detrás, a continuación de lo completado
+        mov si, [tab_dlt]
+        add si, [tab_cur]
+        sub si, bx
+        add si, di                  ; BX+SI apunta a lo apartado
+        push bx
+.m2:
+        mov al, [es:bx+si+2]
+        mov [es:di+2+bx], al
+        inc bx
+        loop .m2
+        pop si                      ; el cursor, detrás de lo completado
+        ; repintar lo de detrás y tapar lo que sobre si la línea ha encogido
+        mov dx, [tab_ol]
+        sub dx, bx
+        jnc .rp
+        xor dx, dx
+.rp:
+        call line_input.tail
+        jmp .r
+.r0:
+        mov si, bx
+.r:
+        pop dx
+        pop cx
         pop ax
         ret
 
@@ -2138,7 +2446,7 @@ line_input:
 ; ES:DI = búfer de 0Ah, BX = longitud escrita, CX = máximo (con el CR).
 ; Usa las búsquedas del propio núcleo (4Eh/4Fh) con una DTA propia; los
 ; registros del programa (marco F_) y su DTA quedan como estaban.
-line_tab:
+line_tab_fin:
         push ax
         push cx
         push dx
@@ -2247,12 +2555,10 @@ line_tab:
         cmp bx, [tab_ws]
         jbe .erd
         dec bx
-        mov al, 8
-        call con_raw
+        call con_back
         mov al, ' '
         call con_raw
-        mov al, 8
-        call con_raw
+        call con_back
         jmp .er
 .erd:
         ; la carpeta tal como se escribió y el nombre encontrado
@@ -12309,6 +12615,11 @@ ife_dsize   resd 1
 ih_new      resw 1
 hist_pos    resb 1
 tab_on      resb 1                  ; autocompletado en curso (Tab seguidos)
+le_ovr      resb 1                  ; edición de línea: 1 = sobrescribir
+tab_tl      resw 1                  ; Tab: lo que hay detrás del cursor
+tab_ol      resw 1                  ; Tab: longitud de la línea antes
+tab_cur     resw 1                  ; Tab: dónde estaba el cursor
+tab_dlt     resw 1                  ; Tab: cuánto se apartó lo de detrás
 tab_dot     resb 1
 tab_wrap    resb 1
 tab_isdir   resb 1
