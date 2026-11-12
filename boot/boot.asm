@@ -57,6 +57,29 @@ reloc:
         sti
         mov ax, cs
         mov ds, ax
+        ; ¿386 o mejor? (solo instrucciones del 8086 hasta saberlo)
+        ; 8086/186: los bits 12-15 de FLAGS valen siempre 1; 286: siempre 0
+        pushf
+        pop ax
+        mov cx, ax
+        and ax, 0x0FFF
+        push ax
+        popf
+        pushf
+        pop ax
+        and ax, 0xF000
+        cmp ax, 0xF000
+        je cpu_vieja
+        mov ax, cx
+        or ax, 0x7000
+        push ax
+        popf
+        pushf
+        pop ax
+        push cx
+        popf
+        test ax, 0x7000
+        jz cpu_vieja
         mov [drive], dl
 
         mov al, [nfats]
@@ -183,6 +206,9 @@ read_sector:
         popa
         ret
 
+cpu_vieja:
+        mov si, msg_cpu
+        jmp fail.p
 fail:
         mov si, msg_fail
 .p:     lodsb
@@ -199,6 +225,7 @@ fail:
 
 kname       db "KERNEL  SYS"
 msg_fail    db "KERNEL.SYS?", 13, 10, 0
+msg_cpu     db "Hispa-DOS necesita un 386", 13, 10, 0
 
         times 0x1F0 - ($-$$) db 0
 root_lba    dw 0

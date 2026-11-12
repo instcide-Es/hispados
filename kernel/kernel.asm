@@ -211,6 +211,45 @@ start:
 .go:
         cli
         cld
+        ; ¿386 o mejor? Hasta saberlo, solo instrucciones del 8086
+        pushf
+        pop ax
+        mov bx, ax
+        and ax, 0x0FFF
+        push ax
+        popf
+        pushf
+        pop ax
+        and ax, 0xF000
+        cmp ax, 0xF000
+        je .vieja                   ; 8086/186: bits 12-15 siempre a 1
+        mov ax, bx
+        or ax, 0x7000
+        push ax
+        popf
+        pushf
+        pop ax
+        push bx
+        popf
+        test ax, 0x7000
+        jnz .cpu_ok                 ; 286: no se pueden poner a 1
+.vieja:
+        sti
+        push cs
+        pop ds
+        mov si, msg_cpu386
+.vm:
+        lodsb
+        test al, al
+        jz .vh
+        mov ah, 0x0E
+        mov bx, 7
+        int 0x10
+        jmp .vm
+.vh:
+        hlt
+        jmp .vh
+.cpu_ok:
         mov ax, KSEG
         mov es, ax
         ; poner a cero la zona .bss (la BIOS no la deja limpia)
@@ -12028,6 +12067,8 @@ shell_pb    dw 0
             dw shell_fcb, KSEG
             dw shell_fcb, KSEG
 
+msg_cpu386  db 13, 10, "Hispa-DOS necesita un procesador 386 o superior.", 13, 10
+            db "Este equipo tiene un 8086, 186 o 286.", 13, 10, 0
 msg_banner  db 13, 10, "Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22", 13, 10
             db "(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 13, 10, 0
 msg_fatbad  db "No se puede leer el sistema de archivos de la unidad de arranque", 13, 10, 0

@@ -44,6 +44,8 @@ Las imágenes listas para usar están en **[Releases](https://github.com/instcid
 
 Probar en QEMU: `qemu-system-i386 -fda hispados-disquete.img`.
 
+**Requisitos:** procesador **386 o superior** (386, 486, Pentium...) y 640 KB de memoria; para Hispa Ventanas, además memoria extendida (2 MB o más). En un 8086, 186 o 286 Hispa-DOS lo dice al arrancar en vez de colgarse. Una versión para 8086/286 está en la lista de ideas.
+
 La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáticas en emuladores, pero falta probarla en más PCs reales. Si encuentras un fallo, abre una *issue* contando el equipo (o el emulador) y qué pasó.
 
 ## Estado (versión 0.9 de pruebas)
