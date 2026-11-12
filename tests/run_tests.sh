@@ -31,8 +31,8 @@ check() {
   if grep -qF -- "$1" "$LOG.txt"; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 echo "== Hispa-DOS tests =="
-check "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
-check "Intérprete de órdenes de Hispa-DOS 0.2"
+check "Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22"
+check "Intérprete de órdenes de Hispa-DOS 0.9"
 check "Versión de DOS notificada: 6.22"
 check " El volumen de la unidad A es HISPADOS"
 check " Directorio de A:\\"

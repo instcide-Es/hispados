@@ -745,7 +745,7 @@ l_audio     db "Audio", 0
 l_usb       db "USB", 0
 l_cd        db "CD/DVD", 0
 l_net       db "Red", 0
-v_os        db "Hispa-DOS 0.2 (DOS ", 0
+v_os        db "Hispa-DOS 0.9 (DOS ", 0
 v_os2       db ")", 0
 v_cpu486    db "386/486 (sin CPUID)", 0
 v_kbconv    db " KB convencional, ", 0

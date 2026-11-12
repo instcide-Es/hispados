@@ -1044,7 +1044,7 @@ fs12        db "FAT12   "
 fs16        db "FAT16   "
 label       db "           "
 
-msg_title   db 13, 10, "Hispa-DOS FORMAT 0.2", 13, 10, 0
+msg_title   db 13, 10, "Hispa-DOS FORMAT 0.9", 13, 10, 0
 msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/Q] [/U] [/AUTOTEST]", 13, 10
             db "  /F:tamaño  capacidad del disquete: 360, 720, 1200, 1440 o 2880 (KB)", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0

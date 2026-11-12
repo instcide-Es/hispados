@@ -43,7 +43,7 @@ check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
 }
 echo "== Hispa-DOS USB image tests =="
-check $T/l1.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l1.txt "Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22"
 check $T/l1.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l1.txt "Bienvenido a Hispa-DOS"
 check $T/l1.txt " El volumen de la unidad C es HISPADOS"
@@ -53,7 +53,7 @@ check $T/l1.txt "Sistema transferido"
 check $T/l1.txt "Hispa-DOS esta instalado."
 check $T/l1.txt " Directorio de D:\\"
 echo "-- arranque desde el disco duro --"
-check $T/l2.txt "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "Bienvenido a Hispa-DOS"
 check $T/l2.txt " Directorio de C:\\"
 check $T/l2.txt "HISPADOS"

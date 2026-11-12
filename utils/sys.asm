@@ -300,7 +300,7 @@ src_k       times 80 db 0
 src_c       times 80 db 0
 dst_k       db "A:\KERNEL.SYS", 0
 dst_c       db "A:\COMMAND.COM", 0
-msg_title   db "Hispa-DOS SYS 0.2", 13, 10, 0
+msg_title   db "Hispa-DOS SYS 0.9", 13, 10, 0
 msg_usage   db "Uso: SYS [origen:[ruta]] unidad:", 13, 10, 0
 msg_same    db "No se puede transferir el sistema a la unidad de arranque.", 13, 10, 0
 msg_ioerr   db "Error al leer o escribir el disco.", 13, 10, 0

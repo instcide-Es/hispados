@@ -4,17 +4,24 @@
 *A free, from-scratch MS-DOS 6.22 compatible operating system with drivers for modern hardware.* — [English below](#english)
 
 ```
-Hispa-DOS 0.1 - MS-DOS 6.22 compatible kernel
+Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22
+(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior
 
-A:\>DIR
+Iniciando Hispa-DOS...  F5 = arranque limpio  ·  F8 = menú de arranque
+HSPXMS 0.1: gestor XMS 3.0, 129856 KB de memoria extendida
 
- Volume in drive A is HISPADOS
- Directory of A:\
+Intérprete de órdenes de Hispa-DOS 0.9
+Escriba AYUDA para ver la lista de órdenes.
 
-KERNEL   SYS         7,288 11-11-26   4:37a
-COMMAND  COM         2,839 11-11-26   4:37a
-DOCS            <DIR>      11-11-26   4:37a
-HELLOEXE EXE           368 11-11-26   4:37a
+A:\>DIR /W
+
+ El volumen de la unidad A es HISPADOS
+ Directorio de A:\
+
+KERNEL.SYS     COMMAND.COM    README.TXT     AUTOEXEC.BAT   [HISPADOS]
+[BAT]          [DOCS]         [BIN]          HELLOEXE.EXE   CONFIG.SYS
+       10 archivo(s)         48.931 bytes
+                1.296.384 bytes libres
 ```
 
 ## Objetivos
@@ -26,7 +33,20 @@ HELLOEXE EXE           368 11-11-26   4:37a
 
 El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Estado (versión 0.2 en desarrollo)
+## Descargar y probar
+
+Las imágenes listas para usar están en **[Releases](https://github.com/instcide-Es/hispados/releases)**:
+
+| Archivo | Para qué |
+|---|---|
+| `hispados-disquete.img` | Disquete de arranque de 1,44 MB. En VirtualBox, VMware, 86Box o QEMU, como disquete; en un PC antiguo, grábalo en un disquete (Rufus o `dd`). |
+| `hispados-usb.zip` | Imagen de 64 MB para memoria USB: descomprímela y grábala con Rufus (modo DD), balenaEtcher o `dd`. Arranca en PCs con BIOS (o UEFI con CSM/Legacy) y permite instalar en el disco duro con `INSTALAR`. |
+
+Probar en QEMU: `qemu-system-i386 -fda hispados-disquete.img`.
+
+La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáticas en emuladores, pero falta probarla en más PCs reales. Si encuentras un fallo, abre una *issue* contando el equipo (o el emulador) y qué pasó.
+
+## Estado (versión 0.9 de pruebas)
 
 | Pieza | Estado |
 |---|---|
@@ -133,7 +153,7 @@ Hispa-DOS is a free operating system written from scratch that aims to be **comp
 
 It contains no Microsoft code: everything is implemented from public documentation.
 
-**Status (0.2, in progress):** boots from floppy or hard disk (own MBR and FAT12/FAT16 boot sectors); kernel with console, read-only FAT12/FAT16 with subdirectories, several drives (MBR partitions, LBA), file handles, MCB memory management and `.COM`/`.EXE` loading; `COMMAND.COM` with the basic internal commands and PATH search; `FDISK` and `FORMAT /S` to install Hispa-DOS on a hard disk. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
+**Status (0.9, test release):** MS-DOS 6.22 compatible kernel and shell (FAT12/FAT16, hard disks, CD/DVD, native USB, SHARE, critical error handler, batch files, CONFIG.SYS and `.SYS` drivers), XMS, Sound Blaster/HD Audio/AC'97, PS/2 and USB mouse and keyboard, and the usual utilities with Spanish names (and the classic ones). Windows for Workgroups 3.11 runs in 386 enhanced mode. Ready-to-use images are in [Releases](https://github.com/instcide-Es/hispados/releases). See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/VENTANAS.md](docs/VENTANAS.md) for what comes next.
 
 ```sh
 make && make run     # build the floppy image and boot it in QEMU

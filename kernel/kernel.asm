@@ -11298,7 +11298,7 @@ shell_pb    dw 0
             dw shell_fcb, KSEG
             dw shell_fcb, KSEG
 
-msg_banner  db 13, 10, "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22", 13, 10
+msg_banner  db 13, 10, "Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22", 13, 10
             db "(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 13, 10, 0
 msg_fatbad  db "No se puede leer el sistema de archivos de la unidad de arranque", 13, 10, 0
 msg_noshell db 13, 10, "No se puede cargar el intérprete de órdenes: sistema detenido", 13, 10, 0
