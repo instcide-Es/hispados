@@ -1927,8 +1927,14 @@ con_getc_bios:
         ; llama a INT 28h (los residentes trabajan ahí y los programas de
         ; ahorro de energía y Windows saben que el sistema está parado)
         cmp byte [indos], 0
-        je .wait
+        je .idle
         int 0x28
+.idle:
+        ; sin tecla: el procesador descansa hasta la próxima interrupción
+        ; (reloj 18 veces por segundo, teclado, ratón...) en vez de dar
+        ; vueltas al 100 %: los portátiles van más frescos y gastan menos
+        sti
+        hlt
         jmp .wait
 .r:
         ret
