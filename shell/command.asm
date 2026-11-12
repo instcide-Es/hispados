@@ -3102,6 +3102,31 @@ run_external:
         jne .le
         mov byte [hasext], 1
 .lee:
+        ; con extensión, solo se ejecutan .COM, .EXE y .BAT (como MS-DOS):
+        ; «CONFIG.SYS» o «KERNEL.SYS» no son programas
+        cmp byte [hasext], 0
+        je .extok
+        cmp byte [di+3], 0
+        jne .extmal
+        mov ax, [di]
+        mov dl, [di+2]
+        cmp ax, 'CO'
+        jne .x1
+        cmp dl, 'M'
+        je .extok
+.x1:
+        cmp ax, 'EX'
+        jne .x2
+        cmp dl, 'E'
+        je .extok
+.x2:
+        cmp ax, 'BA'
+        jne .extmal
+        cmp dl, 'T'
+        je .extok
+.extmal:
+        jmp .badmsg
+.extok:
         ; cola de órdenes: argumentos tal cual (con el espacio inicial)
         mov si, [argp]
         mov di, tail+1
