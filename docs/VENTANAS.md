@@ -13,11 +13,11 @@ Microsoft), GPL, español primero, pruebas automáticas y equipos reales
 
 | Tema | Decisión | Por qué |
 |---|---|---|
-| Lenguaje | C (Open Watcom, 16 y 32 bits, sin su biblioteca) + NASM para lo de bajo nivel | Un entorno gráfico entero en ensamblador sería lentísimo de escribir y de revisar; Open Watcom compila además programas de Windows 16 bits para las pruebas |
+| Lenguaje | Ensamblador (NASM), como Hispa-DOS | Ocupa mucho menos y va más rápido en los 386/486 a los que está destinado (decisión de Carlos, 12/11/2026) |
 | Modo del procesador | Modo protegido de 16 bits (como el «modo estándar»), con un servidor DPMI propio sobre HSPXMS | Es lo que esperan las aplicaciones de Windows 3.x y funciona desde el 286/386 |
 | Aspecto | Diseño propio: colores, iconos, fuentes de mapa de bits y nombres en español hechos aquí | Que se reconozca como nuestro, no como una copia |
 | Compatibilidad | API de Windows 3.1 documentada (KERNEL, USER, GDI, KEYBOARD, MOUSE, DISPLAY, COMMDLG, SHELL) implementada desde cero | Así las aplicaciones de la época funcionan sin cambios |
-| Programas propios | Hechos como aplicaciones de Windows 16 bits normales | Cada programa propio prueba también la compatibilidad |
+| Programas propios | Hechos como aplicaciones de Windows 16 bits normales, en NASM, con una herramienta propia que escribe la cabecera NE | Cada programa propio prueba también la compatibilidad |
 
 ## Etapas
 
@@ -39,8 +39,8 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
 4. **Cargador de ejecutables de Windows (NE) y KERNEL.** Módulos, DLL,
    recursos (iconos, menús, diálogos, cadenas), memoria global y local,
    segmentos móviles y descartables, archivos .INI (perfiles).
-   *Se ve:* programas de Windows 3.1 sencillos (de prueba, compilados con Open
-   Watcom) funcionando en Hispa Ventanas.
+   *Se ve:* programas de Windows 3.1 sencillos (los nuestros de prueba)
+   funcionando en Hispa Ventanas.
 5. **Compatibilidad ampliada.** GDI completo (mapas de bits, paletas,
    regiones, metarchivos, impresoras), cuadros de diálogo comunes (Abrir,
    Guardar, Imprimir, Fuente, Color), SHELL, DDE, OLE 1 básico, ayuda.
@@ -58,7 +58,8 @@ Al final de la etapa 5 sale la primera versión estable de Hispa Ventanas.
 
 - Capturas de pantalla automáticas en QEMU (tests/tools/screen.sh) comparadas
   con lo esperado, y órdenes de prueba por el puerto serie.
-- Programas de prueba de Windows 16 bits propios (Open Watcom) para cada
-  función de la API, con su resultado escrito en un archivo.
+- Programas de prueba de Windows 16 bits propios (NASM + nuestra
+  herramienta de cabeceras NE) para cada función de la API, con su
+  resultado escrito en un archivo.
 - Las aplicaciones de terceros (Windows 3.11, Word, Excel) solo en local, con
   las copias de cada uno; nunca en el repositorio.
