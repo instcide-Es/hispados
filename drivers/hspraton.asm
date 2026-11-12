@@ -1248,6 +1248,7 @@ o_help      db 0
 ; -----------------------------------------------------------------------------
 bios_init:
         or word [i_have], H_BIOS
+        call aux_quiet
         mov byte [i_biosstep], 0x05
         mov byte [tries], 3
 .rst:
@@ -1476,6 +1477,28 @@ k_query:
         popf
         pop cx
         pop bx
+        ret
+; Callar al ratón antes de pedirle nada a la BIOS: tras Ctrl+Alt+Supr el
+; ratón sigue mandando movimientos (lo dejamos activado) y la BIOS, al
+; reiniciarlo, recibe un trozo de paquete en vez de FAh; la de VirtualBox se
+; detiene entonces con «FATAL: Mouse reset returned ...». Orden F5h (no
+; enviar) por D4h y fuera lo pendiente del auxiliar.
+aux_quiet:
+        in al, 0x64
+        cmp al, 0xFF                ; sin controlador de teclado
+        je .r
+        mov al, 0xD4
+        call k_cmd
+        jc .r
+        mov al, 0xF5
+        call k_dat
+        jc .r
+        push cx
+        mov cx, 2
+        call pause                  ; que llegue su FAh (y lo que quedara)
+        pop cx
+        call k_flush
+.r:
         ret
 k_flush:                            ; tirar lo que haya pendiente del auxiliar
         push cx                     ; (lo del teclado es de INT 09h)
