@@ -173,6 +173,18 @@ int09:
 .notfound:
         cmp byte [cs:dead], 0
         je .chain
+        ; Mayús, Ctrl, Alt y Bloq Mayús no deshacen la tecla muerta
+        ; (´ y luego Mayús+E = É)
+        cmp ah, 0x2A
+        je .chain
+        cmp ah, 0x36
+        je .chain
+        cmp ah, 0x1D
+        je .chain
+        cmp ah, 0x38
+        je .chain
+        cmp ah, 0x3A
+        je .chain
         ; ¿vocal o espacio tras una tecla muerta?
         cmp ah, 0x39
         jne .vow

@@ -141,6 +141,7 @@ start:
         cmp al, 6
         je .c_empty
         call install_mbr
+        jc exit_err
         jmp exit_ok
 .c_empty:
         mov si, mbrbuf+0x1BE
@@ -422,8 +423,9 @@ load_disk:
         call disk_io
         jc .err
         mov byte [newmbr], 0
+        mov byte [superfl], 0
         cmp word [mbrbuf+510], 0xAA55
-        je .ok
+        je .sf
         ; sin tabla válida: empezar de cero
         mov di, mbrbuf
         mov cx, 256
@@ -436,6 +438,31 @@ load_disk:
 .err:
         stc
         ret
+.sf:
+        ; ¿disco sin tabla de particiones, con el sector de arranque FAT en el
+        ; sector 0? (lo mismo que mira el núcleo). Lo que hay en el sitio de la
+        ; tabla es código de arranque: se presenta como una sola partición que
+        ; ocupa todo el disco; al eliminarla se escribe un MBR nuevo.
+        cmp word [mbrbuf+0x0B], 512
+        jne .ok
+        cmp byte [mbrbuf+0x0D], 0
+        je .ok
+        cmp byte [mbrbuf+0x15], 0xF0
+        jb .ok
+        mov al, [mbrbuf+0x10]
+        dec al
+        cmp al, 1
+        ja .ok
+        mov di, mbrbuf
+        mov cx, 256
+        xor ax, ax
+        rep stosw
+        mov byte [mbrbuf+0x1BE+4], 0x06
+        mov eax, [total]
+        mov [mbrbuf+0x1BE+12], eax
+        mov byte [newmbr], 1
+        mov byte [superfl], 1
+        jmp .ok
 
 ; EAX = LBA, ES:BX = búfer, [io_cmd] = 2 leer / 3 escribir
 disk_io:
@@ -544,6 +571,7 @@ write_mbr:
         call disk_io
         jc .err
         mov byte [newmbr], 0
+        mov byte [superfl], 0
         mov ah, 0x0D                ; el núcleo relee las particiones
         int 0x21
         clc
@@ -554,6 +582,18 @@ write_mbr:
         stc
         ret
 
+; CF (y mensaje) si el disco no tiene tabla de particiones
+no_superfl:
+        cmp byte [superfl], 0
+        je .r                           ; CF = 0
+        mov si, msg_superfl
+        call puts
+        mov si, msg_sfdel
+        call puts
+        stc
+.r:
+        ret
+
 copy_mbr_code:
         mov si, mbr_code
         mov di, mbrbuf
@@ -562,6 +602,8 @@ copy_mbr_code:
         ret
 
 install_mbr:
+        call no_superfl                 ; ahí no hay MBR: es el arranque FAT
+        jc .r
         call copy_mbr_code
         call write_mbr
         jc .r
@@ -669,6 +711,8 @@ create_primary:
 .c1:
         mov ecx, [req_mb]
         jecxz .c2
+        cmp ecx, 2048                   ; más que el máximo = el máximo
+        jae .c2
         shl ecx, 11
         cmp ecx, eax
         ja .c2
@@ -679,6 +723,11 @@ create_primary:
         jae .big
         mov si, msg_nospace
         call puts
+        cmp byte [superfl], 0
+        je .nsp
+        mov si, msg_sfdel
+        call puts
+.nsp:
         stc
         ret
 .big:
@@ -725,6 +774,25 @@ create_primary:
         loop .act
         mov byte [di], 0x80
 .hasact:
+        ; el primer sector de la partición, a cero: si ahí quedaba el arranque
+        ; de una partición anterior (quizá mayor), el núcleo y FORMATEA lo
+        ; tomarían por bueno y se escribiría fuera de la partición nueva
+        push di
+        mov di, iobuf
+        mov cx, 256
+        xor ax, ax
+        rep stosw
+        pop di
+        mov eax, [p_start]
+        mov bx, iobuf
+        mov byte [io_cmd], 3
+        call disk_io
+        jnc .wm
+        mov si, msg_ioerr
+        call puts
+        stc
+        ret
+.wm:
         call write_mbr
         jc .r
         mov si, msg_created
@@ -757,6 +825,8 @@ part_entry:
 
 set_active:
         call part_entry
+        jc .r
+        call no_superfl
         jc .r
         mov di, mbrbuf+0x1BE
         mov cx, 4
@@ -961,6 +1031,11 @@ show_table:
         cmp cx, 4
         jbe .row
 .free:
+        cmp byte [superfl], 0
+        je .nsf
+        mov si, msg_superfl
+        call puts
+.nsf:
         call crlf
         mov si, msg_freesp
         call puts
@@ -1052,6 +1127,8 @@ msg_noparts db "No hay particiones definidas.", 13, 10, 0
 msg_thead   db "Partición Estado  Tipo                 Inicio MB Tamaño MB  Unidad", 13, 10, 0
 msg_sp4     db "    ", 0
 msg_freesp  db "Espacio libre: ", 0
+msg_superfl db "Este disco no tiene tabla de particiones: todo él es una unidad FAT.", 13, 10, 0
+msg_sfdel   db "Para particionarlo hay que eliminar antes esa unidad (partición 1).", 13, 10, 0
 
 mbr_code:
         incbin "build/mbr.bin", 0, 446
@@ -1067,6 +1144,7 @@ lba         resb 1
             resb 1
 io_cmd      resb 1
 newmbr      resb 1
+superfl     resb 1
 letter      resb 1
             alignb 4
 req_mb      resd 1

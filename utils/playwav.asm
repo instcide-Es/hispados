@@ -85,6 +85,8 @@ tone:
         call parse_num
         test eax, eax
         jz usage
+        cmp eax, 11025              ; más de la mitad de 22050 Hz no se puede
+        ja usage                    ; tocar (y 32768 o 65536 dividían por cero)
         mov [freq], ax
         call skip_sp
         mov eax, 1000
@@ -170,6 +172,7 @@ playfile:
         jne .bad
         cmp dword [hdr+8], 'WAVE'
         jne .bad
+        mov word [fmt], 0           ; aún no se ha leído el bloque «fmt »
 .chunk:
         mov bx, [handle]
         mov dx, hdr
@@ -186,6 +189,8 @@ playfile:
         mov edx, [hdr+4]
         inc edx
         and dl, 0xFE
+        test edx, edx               ; tamaño falso (negativo): retrocedería
+        js .bad                     ; y no acabaría nunca
         mov cx, [hdr+6+0]
         mov ecx, edx
         shr ecx, 16
@@ -204,6 +209,8 @@ playfile:
         jbe .chunk
         inc edx
         and dl, 0xFE
+        test edx, edx               ; tamaño falso (negativo)
+        js .bad
         mov ecx, edx
         shr ecx, 16
         mov ax, 0x4201
@@ -213,13 +220,22 @@ playfile:
 .data:
         cmp word [fmt], 1
         jne .unsup
+        ; solo 8 o 16 bits, mono o estéreo, y de 1 a 65535 Hz
+        cmp word [fmt+6], 0
+        jne .unsup
+        cmp word [fmt+4], 0
+        je .unsup
         mov al, 0
+        cmp word [fmt+14], 8
+        je .b8
         cmp word [fmt+14], 16
-        jne .b8
+        jne .unsup
         or al, 1
 .b8:
+        cmp word [fmt+2], 1
+        je .m
         cmp word [fmt+2], 2
-        jne .m
+        jne .unsup
         or al, 2
 .m:
         mov [wfmt], al

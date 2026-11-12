@@ -11,6 +11,12 @@ uso: fatimg.py IMG[@OFF] orden [args]
   dotdot RUTA CLUSTER       pone CLUSTER en la entrada «..» de la carpeta RUTA
   fragment RUTA             mueve el 2.º clúster del archivo al final del disco
   chain RUTA                imprime la cadena de clústeres
+  setclus RUTA CLUSTER      cambia el primer clúster en la entrada del directorio
+  setattr RUTA ATRIBUTOS    cambia los atributos de la entrada
+  fillroot                  llena el directorio raíz de archivos vacíos (Znnnn)
+  get CLUSTER               imprime el valor de la FAT de ese clúster
+  manyfiles N               añade al raíz carpetas Mnnn llenas de archivos vacíos
+                            hasta sumar N entradas (carpetas y archivos)
 """
 import struct, sys
 
@@ -181,6 +187,49 @@ def main():
         fs.save_fat()
     elif cmd == 'chain':
         print(' '.join(map(str, fs.chain(struct.unpack_from('<H', fs.find(a[0])[2], 26)[0]))))
+    elif cmd == 'setclus':
+        s, o, e = fs.find(a[0])
+        fs.wr(s * 512 + o + 26, struct.pack('<H', int(a[1])))
+    elif cmd == 'setattr':
+        s, o, e = fs.find(a[0])
+        fs.wr(s * 512 + o + 11, bytes([int(a[1], 0)]))
+    elif cmd == 'fillroot':
+        n = 0
+        for s in fs.dir_sectors(0):
+            b = bytearray(fs.rd(s * 512, 512))
+            for o in range(0, 512, 32):
+                if b[o] in (0, 0xE5):
+                    b[o:o + 32] = b'Z%04d   TXT' % n + bytes([0x20]) + bytes(20)
+                    n += 1
+            fs.wr(s * 512, bytes(b))
+        print(n)
+    elif cmd == 'manyfiles':
+        left, nd = int(a[0]), 0
+        free = [c for c in range(2, fs.nclus + 2) if fs.get(c) == 0]
+        root = [(s, o) for s in fs.dir_sectors(0) for o in range(0, 512, 32)
+                if fs.rd(s * 512 + o, 1)[0] in (0, 0xE5)]
+        per = 2000
+        while left > 0:
+            n = min(per, left - 1)
+            left -= n + 1
+            ncl = ((n + 2) * 32 + fs.bpc - 1) // fs.bpc
+            cl, free = free[:ncl], free[ncl:]
+            for i, c in enumerate(cl):
+                fs.set(c, cl[i + 1] if i + 1 < ncl else 0xFFFF)
+            def ent(name, attr, clus):
+                return name + bytes([attr]) + bytes(14) + struct.pack('<HI', clus, 0)
+            data = ent(b'.          ', 0x10, cl[0]) + ent(b'..         ', 0x10, 0)
+            data += b''.join(ent(b'F%07dTXT' % i, 0x20, 0) for i in range(n))
+            data += bytes(ncl * fs.bpc - len(data))
+            for i, c in enumerate(cl):
+                fs.wr(fs.clus_lba(c) * 512, data[i * fs.bpc:(i + 1) * fs.bpc])
+            s, o = root[nd]
+            fs.wr(s * 512 + o, ent(b'M%03d       ' % nd, 0x10, cl[0]))
+            nd += 1
+        fs.save_fat()
+        print(nd)
+    elif cmd == 'get':
+        print(fs.get(int(a[0])))
     else:
         raise SystemExit(__doc__)
 

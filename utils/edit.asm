@@ -194,6 +194,8 @@ k_tab:
         mov al, ' '
         call ins_char
         call set_pref
+        cmp word [tlen], MAXTEXT    ; texto lleno: ins_char ya no inserta
+        jae main                    ; (sin esto, bucle sin fin)
         mov ax, [pref]
         test ax, 7
         jnz k_tab
@@ -375,8 +377,22 @@ load:
         mov dx, fname
         mov ax, 0x3D00
         int 0x21
-        jc .new
+        jc .noopen
         mov bx, ax
+        ; si no cabe entero no se abre: al guardar se perdería el resto
+        xor cx, cx
+        xor dx, dx
+        mov ax, 0x4202
+        int 0x21
+        jc .rderr
+        test dx, dx
+        jnz .big
+        cmp ax, MAXTEXT
+        ja .big
+        xor cx, cx
+        xor dx, dx
+        mov ax, 0x4200
+        int 0x21
         push ds
         mov ds, [tseg]
         xor dx, dx
@@ -384,9 +400,11 @@ load:
         mov ah, 0x3F
         int 0x21
         pop ds
-        jc .close
+        jc .rderr                   ; no abrirlo vacío: guardar lo borraría
         mov cx, ax
-        ; quitar los CR (y un Ctrl+Z final)
+        ; quitar los CR de los CR LF (y un Ctrl+Z final). Un CR suelto o un
+        ; Ctrl+Z a mitad del archivo se conservan: quitarlos (o cortar ahí)
+        ; perdería datos al guardar.
         xor si, si
         xor di, di
 .l:
@@ -395,9 +413,16 @@ load:
         inc si
         dec cx
         cmp al, 13
+        jne .nocr
+        jcxz .keep
+        cmp byte [es:si], 10
         je .l
+        jmp .keep
+.nocr:
         cmp al, 0x1A
-        je .done
+        jne .keep
+        jcxz .done
+.keep:
         mov [es:di], al
         inc di
         jmp .l
@@ -407,11 +432,30 @@ load:
         mov ah, 0x3E
         int 0x21
         ret
+.noopen:
+        cmp ax, 2                   ; solo «no existe» es un archivo nuevo
+        je .new
+        mov si, msg_noopen
+        jmp .fatal
+.big:
+        mov si, msg_big
+        jmp .fatalc
+.rderr:
+        mov si, msg_rderr
+.fatalc:
+        mov ah, 0x3E
+        int 0x21
+.fatal:
+        call puts
+        mov ax, 0x4C01
+        int 0x21
 .new:
         mov byte [newfile], 1
         ret
 
 save:
+        call save_room              ; antes de truncar el original
+        jc .full
         mov dx, fname
         mov ah, 0x3C
         xor cx, cx
@@ -443,6 +487,7 @@ save:
         mov bx, [fh]
         mov ah, 0x3E
         int 0x21
+        jc .err
         mov byte [modified], 0
         mov byte [newfile], 0
         mov si, msg_saved
@@ -472,6 +517,79 @@ save:
 .err:
         mov si, msg_saveerr
         jmp status_msg
+.full:
+        mov si, msg_diskfull
+        jmp status_msg
+
+; ¿Cabe el texto en el disco? Cuenta también lo que ocupa ya el archivo, que
+; queda libre al sobrescribirlo. CF si no cabe: así no se trunca el original
+; para luego no poder escribir el texto nuevo.
+save_room:
+        movzx eax, word [tlen]
+        mov [need], eax
+        xor si, si
+.c:
+        cmp si, [tlen]
+        jae .cd
+        cmp byte [es:si], 10
+        jne .n
+        inc dword [need]            ; el CR de cada salto de línea
+.n:
+        inc si
+        jmp .c
+.cd:
+        mov dword [oldsz], 0
+        mov dx, fname
+        mov ax, 0x3D00
+        int 0x21
+        jc .nofile
+        mov bx, ax
+        xor cx, cx
+        xor dx, dx
+        mov ax, 0x4202
+        int 0x21
+        jc .cl
+        mov [oldsz], ax
+        mov [oldsz+2], dx
+.cl:
+        mov ah, 0x3E
+        int 0x21
+.nofile:
+        mov dl, 0
+        cmp byte [fname+1], ':'
+        jne .drv
+        mov al, [fname]
+        call upcase
+        sub al, 'A' - 1
+        mov dl, al
+.drv:
+        mov ah, 0x36
+        int 0x21
+        cmp ax, 0xFFFF
+        je .ok                      ; unidad no válida: fallará al crear
+        movzx eax, ax
+        movzx ecx, cx
+        mul ecx
+        mov ecx, eax                ; bytes por clúster
+        jecxz .ok
+        movzx ebx, bx               ; clústeres libres
+        mov eax, [oldsz]
+        add eax, ecx
+        dec eax
+        xor edx, edx
+        div ecx                     ; clústeres del archivo actual
+        add eax, ebx
+        mul ecx
+        test edx, edx
+        jnz .ok
+        cmp eax, [need]
+        jb .no
+.ok:
+        clc
+        ret
+.no:
+        stc
+        ret
 
 status_msg:
         mov [msgptr], si
@@ -569,12 +687,16 @@ render:
 .cd:
         cmp cx, ROWS
         jb .vis
-        ; bajar top una línea
+        ; bajar top las líneas que sobran, de una vez (de una en una y
+        ; recontando, Ctrl+Fin tardaba minutos en un texto de miles de líneas)
+        sub cx, ROWS - 1
         mov ax, [top]
+.adv:
         call line_end
         inc ax
+        loop .adv
         mov [top], ax
-        jmp .below
+        mov cx, ROWS - 1
 .vis:
         mov [crow], cl
         ; columna y desplazamiento horizontal
@@ -747,6 +869,10 @@ msg_mod     db "  [modificado]", 0
 msg_keys    db "    F2 Guardar   Esc Salir", 0
 msg_saved   db "Archivo guardado.", 0
 msg_saveerr db "No se ha podido guardar el archivo.", 0
+msg_diskfull db "No cabe en el disco: no se ha guardado (el archivo sigue como estaba).", 0
+msg_big     db "El archivo es demasiado grande para EDIT (máximo 60 KB).", 13, 10, 0
+msg_noopen  db "No se puede abrir el archivo.", 13, 10, 0
+msg_rderr   db "Error al leer el archivo.", 13, 10, 0
 msg_full    db "El texto ha llegado al tamaño máximo (60 KB).", 0
 msg_ask     db "Hay cambios sin guardar. ¿Guardar los cambios? (S/N/Esc)", 0
 
@@ -768,6 +894,8 @@ tmpdl       resb 1
 msgptr      resw 1
 vn_pos      resw 1
 fh          resw 1
+need        resd 1
+oldsz       resd 1
 fname       resb 80
 obuf        resb 1024
             resb 1024

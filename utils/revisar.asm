@@ -160,7 +160,12 @@ start:
         jmp .wf
 .nowr:
         call summary
+        ; como CHKDSK de MS-DOS 6.2x: ERRORLEVEL 255 si se encontraron errores
         mov ax, 0x4C00
+        cmp byte [errors], 0
+        je .ex
+        mov al, 255
+.ex:
         int 0x21
 
 usage:
@@ -182,6 +187,9 @@ not_fat:
         jmp fail
 no_mem:
         mov si, msg_mem
+        jmp fail
+too_many:
+        mov si, msg_many
         jmp fail
 rd_err:
         mov si, msg_rderr
@@ -935,6 +943,10 @@ do_entry:
         jmp .fl
 .norm:
         inc word [num]
+        ; los números de propietario son de 16 bits y los tres últimos son
+        ; marcas: con más entradas no se puede revisar (ni tocar) el disco
+        cmp word [num], OWN_REC
+        jae too_many
         call append_name
         cmp byte [pass], 1
         je .p1
@@ -948,6 +960,8 @@ do_entry:
         call get_own
         cmp ax, [num]
         jne .r
+        call dir_valid
+        jc .r
         jmp push_frame
 .p1:
         test byte [si+11], 0x10
@@ -980,7 +994,14 @@ do_entry:
         call flush_ent
         popf
         jc .r
-        jmp push_frame
+        ; si su primer sector no parece el de una carpeta («.» y «..»), no se
+        ; entra: serían datos de otro archivo y «corregirlos» los estropearía
+        call dir_valid
+        jnc push_frame
+        mov dx, msg_notdir
+        mov ax, [num]
+        call report
+        ret
 .fl:
         call flush_ent
 .r:
@@ -1044,6 +1065,42 @@ append_name:
 .tr:
         ret
 
+; ¿la carpeta de la entrada SI empieza por «.» o tiene «..» en segundo lugar?
+; CF si no (no es una carpeta). Deja dirbuf como estaba.
+dir_valid:
+        pushad
+        mov ebp, [dirbuf_lba]
+        movzx eax, word [si+0x1A]
+        sub eax, 2
+        movzx ecx, byte [boot+0x0D]
+        imul eax, ecx
+        add eax, [data_lba]
+        call load_dir
+        mov dl, 0                       ; DL = 1 si vale
+        mov si, dirbuf
+        mov di, s_dot
+        mov cx, 11
+        repe cmpsb
+        jne .d2
+        test byte [dirbuf+11], 0x10
+        jz .d2
+        mov dl, 1
+.d2:
+        mov si, dirbuf + 32
+        mov di, s_dotdot
+        mov cx, 11
+        repe cmpsb
+        jne .dd
+        test byte [dirbuf+32+11], 0x10
+        jz .dd
+        mov dl, 1
+.dd:
+        mov eax, ebp
+        call load_dir
+        cmp dl, 1                       ; CF si DL = 0
+        popad
+        ret
+
 ; nueva carpeta en la pila: la entrada SI (ruta en path hasta cur_end)
 push_frame:
         cmp word [depth], MAXDEPTH
@@ -1073,6 +1130,7 @@ push_frame:
         mov dx, msg_deep
         mov ax, [num]
         call report
+        mov byte [partial], 1
 .r:
         ret
 
@@ -1369,10 +1427,22 @@ chk_dir:
         cmp byte [fl_xl], 0
         jne .no
         cmp byte [fl_rep], 0
-        jne .no
+        jne .cv
         mov dx, msg_badch
         mov ax, [num]
         call report
+.cv:
+        ; sin ningún clúster válido: se convierte en un archivo vacío. Dejarla
+        ; como carpeta con el clúster 0 sería un segundo nombre del raíz (y
+        ; borrarla después con DELTREE borraría el raíz entero)
+        mov dx, msg_dir2f
+        mov ax, [num]
+        call report
+        and byte [si+11], 0xEF
+        mov word [si+0x1A], 0
+        mov dword [si+0x1C], 0
+        mov byte [ent_dirty], 1
+        inc dword [n_usr]
 .no:
         stc
         ret
@@ -1500,6 +1570,14 @@ lost:
 .m2:
         cmp dword [nlost], 0
         je .ret
+        ; si alguna carpeta no se ha recorrido (demasiados niveles), sus
+        ; archivos parecen perdidos sin serlo: ni se convierten ni se liberan
+        cmp byte [partial], 0
+        je .full_walk
+        mov si, msg_partial
+        call puts
+        jmp .ret
+.full_walk:
         call warn
         ; las apuntadas por otra perdida no empiezan cadena
         mov eax, 2
@@ -1600,12 +1678,13 @@ lost:
         pop eax
         jne .vn
         call make_chk
-        jc .v2
+        jc .v3                          ; raíz lleno: el resto se deja como está
 .vn:
         inc eax
         jmp .v
 .v2:
-        call free_lost                  ; lo que no se haya podido recuperar
+        call free_lost                  ; restos (bucles sin principio)
+.v3:
         mov eax, [b_rec]
         call putnum
         mov si, msg_rec1
@@ -1990,7 +2069,13 @@ msg_wrec2   db " bytes en ", 0
 msg_wrec3   db " archivos.", 13, 10, 0
 msg_rec1    db " bytes recuperados en ", 0
 msg_rec2    db " archivos.", 13, 10, 0
-msg_full    db "No queda sitio en el directorio raíz", 13, 10, 0
+msg_full    db "No queda sitio en el directorio raíz: las cadenas que faltan", 13, 10
+            db "se dejan como están. Mueva archivos del raíz y repita REVISAR /F.", 13, 10, 0
+msg_many    db "Hay demasiados archivos y carpetas para revisar este disco", 13, 10, 0
+msg_notdir  db "   No es un directorio válido: no se revisa su contenido.", 13, 10, 0
+msg_dir2f   db "   Directorio no válido: convertido en un archivo vacío.", 13, 10, 0
+msg_partial db 13, 10, "Hay carpetas que no se han podido revisar: las unidades de asignación", 13, 10
+            db "que parecen perdidas no se tocan.", 13, 10, 0
 msg_total   db " bytes de espacio total en disco", 13, 10, 0
 msg_en      db " bytes en ", 0
 msg_hid     db " archivos ocultos", 13, 10, 0
@@ -2029,6 +2114,7 @@ warned      resb 1
 noncontig   resb 1
 fl_xl       resb 1
 fl_rep      resb 1
+partial     resb 1
             alignb 4
 bpc         resd 1
 fat_lba     resd 1

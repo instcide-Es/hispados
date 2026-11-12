@@ -2,9 +2,12 @@
 ;  Hispa-DOS FORMAT.COM - dar formato FAT12/FAT16 a una unidad
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  FORMAT unidad: [/S] [/V:etiqueta] [/Q] [/U] [/AUTOTEST]
+;  FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/Q] [/U] [/AUTOTEST]
 ;     /S         copiar el sistema (KERNEL.SYS y COMMAND.COM): disco de arranque
 ;     /V:nombre  etiqueta de volumen (11 caracteres como máximo)
+;     /F:tamaño  capacidad del disquete: 360, 720, 1200 (1.2), 1440 (1.44)
+;                o 2880 (2.88); hace falta para un disquete nuevo de menos
+;                capacidad que la unidad
 ;     /Q /U      aceptadas por compatibilidad (el formato siempre es rápido)
 ;     /AUTOTEST  no pedir confirmación (para guiones y pruebas)
 ;
@@ -54,6 +57,13 @@ start:
         mov [spt], ax
         mov ax, [params+7+15]
         mov [heads], ax
+        ; en un disco duro, el tamaño que cuenta es el de la partición, no el
+        ; que diga el sector de arranque que haya ahora (puede ser de otra
+        ; partición mayor que estuvo en el mismo sitio)
+        cmp byte [fixed], 0
+        je .lay
+        call real_size
+.lay:
         call layout
         jc fail
         ; leer el sistema antes de escribir nada
@@ -91,6 +101,20 @@ start:
         call make_serial
         call write_boot
         jc ioerr
+        ; disquete: que el núcleo tome ya la geometría nueva (sectores por
+        ; pista) del sector de arranque; si no, con un disquete de menos
+        ; capacidad que la unidad el resto se escribiría en otro sitio
+        cmp byte [fixed], 0
+        jne .zs
+        mov ah, 0x0D
+        int 0x21
+        mov ax, 0x440D
+        mov bl, [drv]
+        inc bl
+        mov cx, 0x0860
+        mov dx, params
+        int 0x21
+.zs:
         call zero_system_area
         jc ioerr
         call init_tables
@@ -171,7 +195,54 @@ parse_args:
         je .auto
         cmp al, 'V'
         je .v
+        cmp al, 'F'
+        je .f
         jmp .bad
+.f:
+        ; /F:tamaño en KB (360, 720, 1200, 1440, 2880) o en MB (1.2, 1.44, 2.88)
+        cmp byte [si], ':'
+        jne .bad
+        inc si
+        call parse_num
+        jc .bad
+        cmp byte [si], '.'
+        jne .fk
+        cmp byte [si-1], '0'
+        jb .bad
+        inc si
+        mov bx, ax                  ; la parte entera
+        call parse_num
+        jc .bad
+        imul bx, bx, 100
+        cmp ax, 10                  ; «.2» son 20 centésimas
+        jae .fc
+        imul ax, ax, 10
+.fc:
+        add ax, bx                  ; centésimas de MB: 120, 144, 288
+        mov bx, 1200
+        cmp ax, 120
+        je .fs
+        mov bx, 1440
+        cmp ax, 144
+        je .fs
+        mov bx, 2880
+        cmp ax, 288
+        jne .bad
+.fs:
+        mov ax, bx
+.fk:
+        mov di, fsz_tab
+.ft:
+        cmp word [di], 0
+        je .bad
+        cmp ax, [di]
+        je .fok
+        add di, 2
+        jmp .ft
+.fok:
+        shl ax, 1                   ; KB -> sectores
+        mov [fsz], ax
+        jmp .skip                   ; (salta «K», «KB», «M», «MB»)
 .s:
         mov byte [opt_s], 1
         jmp .skip
@@ -234,6 +305,19 @@ layout:
         mov byte [nfats], 2
         cmp byte [fixed], 0
         jne .hd
+        ; /F:tamaño: vale si cabe en la unidad (cilindros x cabezas x sectores)
+        cmp word [fsz], 0
+        je .nfsz
+        movzx eax, word [params+4]
+        movzx ecx, word [spt]
+        imul eax, ecx
+        movzx ecx, word [heads]
+        imul eax, ecx
+        movzx ecx, word [fsz]
+        cmp ecx, eax
+        ja .badfl
+        mov [tot], ecx
+.nfsz:
         ; disquete: buscar el formato estándar
         mov si, floppy_tab
 .f:
@@ -329,6 +413,8 @@ layout:
         stc
         ret
 
+; tamaños que admite /F (en KB)
+fsz_tab     dw 360, 720, 1200, 1440, 2880, 0
 ; sectores, sec/clúster, entradas raíz, sec/FAT, medio, sec/pista
 floppy_tab:
         dw 2880
@@ -351,6 +437,11 @@ floppy_tab:
         dw 240, 9
         db 0xF0
         dw 36
+        dw 720
+        db 2
+        dw 112, 2
+        db 0xFD
+        dw 9
         dw 0
 
 ; -----------------------------------------------------------------------------
@@ -411,6 +502,58 @@ abs_write:
         int 0x26
         pop word [junk]             ; INT 26h deja los indicadores en la pila
         popad
+        ret
+
+; EAX = sector -> CF si no se puede leer (búfer: secb)
+abs_read:
+        pushad
+        mov [pk_sec], eax
+        mov word [pk_cnt], 1
+        mov word [pk_off], secb
+        mov [pk_seg], ds
+        mov al, [drv]
+        mov cx, 0xFFFF
+        mov bx, packet
+        int 0x25
+        pop word [junk]
+        popad
+        ret
+
+; tamaño real de la unidad -> [tot]. INT 25h no deja leer más allá del final
+; de la partición: se busca el primer sector que no se puede leer, entre el
+; último cilindro entero que dice el núcleo y el siguiente.
+real_size:
+        xor esi, esi                    ; ESI = seguro que existe hasta aquí
+        mov edi, 0xFFFFFFFF             ; EDI = seguro que no existe
+        movzx eax, word [params+4]      ; cilindros
+        test eax, eax
+        jz .l
+        cmp eax, 0xFFFF
+        je .l
+        movzx ecx, word [spt]
+        movzx edx, word [heads]
+        imul ecx, edx
+        jecxz .l
+        imul eax, ecx
+        mov esi, eax
+        add eax, ecx
+        mov edi, eax
+.l:
+        cmp esi, edi
+        jae .d
+        mov eax, edi
+        sub eax, esi
+        shr eax, 1
+        add eax, esi                    ; el del medio
+        call abs_read
+        jc .no
+        lea esi, [eax+1]
+        jmp .l
+.no:
+        mov edi, eax
+        jmp .l
+.d:
+        mov [tot], esi
         ret
 
 write_boot:
@@ -902,7 +1045,8 @@ fs16        db "FAT16   "
 label       db "           "
 
 msg_title   db 13, 10, "Hispa-DOS FORMAT 0.2", 13, 10, 0
-msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/Q] [/U] [/AUTOTEST]", 13, 10, 0
+msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/Q] [/U] [/AUTOTEST]", 13, 10
+            db "  /F:tamaño  capacidad del disquete: 360, 720, 1200, 1440 o 2880 (KB)", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_ioerr   db "Error de escritura en el disco: formato interrumpido", 13, 10, 0
 msg_badfl   db "Tamaño de disquete no admitido", 13, 10, 0
@@ -955,6 +1099,7 @@ rootent     resw 1
 rootsecs    resw 1
 spf         resw 1
 next_clus   resw 1
+fsz         resw 1
 dirpos      resw 1
 pf_n        resw 1
 lf_name     resw 1

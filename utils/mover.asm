@@ -51,6 +51,19 @@ start:
         jz .nodir
         mov byte [dst_isdir], 1
 .nodir:
+        ; «X:», «X:\» y «ruta\» también son carpetas (el raíz no tiene atributos)
+        mov si, dst
+.lc:
+        lodsb
+        cmp byte [si], 0
+        jne .lc
+        cmp al, ':'
+        je .isd
+        cmp al, '\'
+        jne .nisd
+.isd:
+        mov byte [dst_isdir], 1
+.nisd:
         ; varios archivos solo a una carpeta
         cmp byte [wild], 0
         je .one
@@ -119,6 +132,8 @@ one:
         je .named
         cmp byte [di-1], '\'
         je .sl
+        cmp byte [di-1], ':'
+        je .sl
         mov byte [di], '\'
         inc di
 .sl:
@@ -132,6 +147,33 @@ one:
         call puts
         mov si, fdst
         call puts
+        ; ¿origen y destino son el mismo archivo? (si se «sobrescribiera»,
+        ; se borraría el único ejemplar)
+        push ds
+        pop es
+        mov si, fsrc
+        mov di, tn1
+        mov ah, 0x60
+        int 0x21
+        jc .nsame
+        mov si, fdst
+        mov di, tn2
+        mov ah, 0x60
+        int 0x21
+        jc .nsame
+        mov si, tn1
+        mov di, tn2
+.cmp:
+        lodsb
+        cmp al, [di]
+        jne .nsame
+        inc di
+        test al, al
+        jnz .cmp
+        mov byte [errors], 1
+        mov si, msg_same
+        jmp puts
+.nsame:
         ; ¿existe el destino?
         mov dx, fdst
         mov ax, 0x4300
@@ -374,6 +416,7 @@ msg_arrow   db " => ", 0
 msg_ok      db " [correcto]", 13, 10, 0
 msg_fail    db " [error]", 13, 10, 0
 msg_skip    db " [no se mueve]", 13, 10, 0
+msg_same    db " [es el mismo archivo: no se mueve]", 13, 10, 0
 msg_ask     db 13, 10, "El archivo ya existe. ¿Sobrescribir? (S/N) ", 0
 msg_multi   db "Para mover varios archivos, el destino tiene que ser una carpeta.", 13, 10, 0
 
@@ -392,6 +435,8 @@ extra       resb 128
 sdir        resb 128
 fsrc        resb 160
 fdst        resb 160
+tn1         resb 160
+tn2         resb 160
 dta         resb 128
 u_numbuf    resb 16
 u_lbuf      resb 84

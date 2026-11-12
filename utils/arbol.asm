@@ -81,11 +81,22 @@ start:
         mov ah, 0x60
         int 0x21
         jnc .tn
+.badp:
         mov si, msg_bad
         call puts
         mov ax, 0x4C01
         int 0x21
 .tn:
+        ; la carpeta tiene que existir (la raíz existe siempre)
+        cmp byte [path+3], 0
+        je .exists
+        mov dx, path
+        mov ax, 0x4300
+        int 0x21
+        jc .badp
+        test cl, 0x10
+        jz .badp
+.exists:
         ; cabecera: etiqueta y número de serie
         mov al, [path]
         mov [s_vol], al

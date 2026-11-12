@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 fail=0
 T=$(mktemp -d)
-nasm -f bin -o $T/FSTEST.COM tests/progs/fstest.asm || exit 1
+nasm -f bin -o $T/FSGS.COM tests/progs/fsgs.asm || exit 1
 check() { if grep -qF -- "$1" $T/log.txt; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi; }
 checkn() { if grep -qF -- "$1" $T/log.txt; then echo "  FAIL (no debía salir) $1"; fail=1; else echo "  OK   sin \"$1\""; fi; }
 conv() { tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt; }
@@ -27,11 +27,11 @@ mkstick() {  # FAT16 sin particiones con HOLA.TXT
 
 # ---- 1) FS/GS con USB ----
 cp "$IMG" $T/f.img
-mcopy -o -i $T/f.img $T/FSTEST.COM ::BIN/FSTEST.COM
+mcopy -o -i $T/f.img $T/FSGS.COM ::BIN/FSGS.COM
 printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkstick
-{ sleep 7; printf 'A:\\BIN\\FSTEST D:\\HOLA.TXT\r'; sleep 3; } |
+{ sleep 7; printf 'A:\\BIN\\FSGS D:\\HOLA.TXT\r'; sleep 3; } |
   timeout 20 qemu-system-i386 -display none -serial stdio -monitor none \
     -device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img \
     -device usb-storage,bus=xhci.0,drive=u \
@@ -44,12 +44,12 @@ show
 
 # ---- 1b) FS/GS con el CD por AHCI ----
 cp "$IMG" $T/f.img
-mcopy -o -i $T/f.img $T/FSTEST.COM ::BIN/FSTEST.COM
+mcopy -o -i $T/f.img $T/FSGS.COM ::BIN/FSGS.COM
 printf 'DEVICE=A:\\HISPADOS\\HSPCD.SYS\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/iso; head -c 3000 /dev/urandom > $T/iso/DATOS.BIN
 genisoimage -quiet -V PRUEBA -o $T/cd.iso $T/iso 2>/dev/null
-{ sleep 6; printf 'A:\\BIN\\FSTEST C:\\DATOS.BIN\r'; sleep 3; } |
+{ sleep 6; printf 'A:\\BIN\\FSGS C:\\DATOS.BIN\r'; sleep 3; } |
   timeout 20 qemu-system-i386 -display none -serial stdio -monitor none \
     -device ahci,id=ahci -drive if=none,id=cd,file=$T/cd.iso,media=cdrom -device ide-cd,bus=ahci.0,drive=cd \
     -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1

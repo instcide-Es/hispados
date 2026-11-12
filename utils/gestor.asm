@@ -178,6 +178,10 @@ k_enter:
         int 0x21
         jmp reload
 .file:
+        call sel_ok
+        jc loop_
+        mov ax, [sel]
+        call ent_ptr
         ; ¿programa?
         call ext_of
         cmp eax, 'COM'
@@ -200,6 +204,8 @@ k_edit:
         call ent_ptr
         test byte [si+13], 0x10
         jnz loop_
+        call sel_ok
+        jc loop_
         mov di, cmdline
         mov si, s_edit
         call cat
@@ -214,13 +220,18 @@ k_copy:
         mov bx, ask_copy
         jmp two_names
 k_ren:
+        call sel_dotdot             ; «..» no se renombra
+        je loop_
         mov si, s_ren
         mov bx, ask_ren
 two_names:
         cmp word [nent], 0
         je loop_
         mov [op], si
-        mov si, bx
+        push bx
+        call sel_ok
+        pop si
+        jc loop_
         call ask
         jc redraw
         mov di, cmdline
@@ -251,6 +262,10 @@ k_mkdir:
 k_del:
         cmp word [nent], 0
         je loop_
+        call sel_dotdot             ; «..» (la carpeta superior) no se borra
+        je loop_
+        call sel_ok
+        jc loop_
         mov ax, [sel]
         call ent_ptr
         test byte [si+13], 0x10
@@ -289,6 +304,37 @@ k_drive:
         int 0x21
         jmp reload
 
+; ¿Se puede pasar el nombre seleccionado a COMMAND.COM? Un nombre con
+; espacios («WA WB.TXT») se partiría en dos y la orden actuaría sobre OTROS
+; archivos (WA y WB.TXT). -> CF si no se puede (con aviso)
+sel_ok:
+        mov ax, [sel]
+        call ent_ptr
+.l:
+        lodsb
+        test al, al
+        jz .r                       ; CF = 0
+        cmp al, ' '
+        jne .l
+        mov si, msg_space
+        mov dh, 24
+        mov dl, 0
+        mov ah, A_SEL
+        call vputs
+        call vfill
+        xor ah, ah
+        int 0x16
+        stc
+.r:
+        ret
+
+; ¿el elemento seleccionado es «..»? -> ZF
+sel_dotdot:
+        mov ax, [sel]
+        call ent_ptr
+        cmp word [si], '..'
+        ret
+
 ; ---- ejecutar con COMMAND /C cmdline (DI = final de la orden) ----
 run_cmd:
         mov byte [quiet], 0
@@ -324,8 +370,20 @@ run_any:
         mov bx, pblock
         mov ax, 0x4B00
         int 0x21
+        mov bx, 0xB800              ; GS no sobrevive a la orden ejecutada: sin
+        mov gs, bx                  ; esto se dibujaría en otro segmento
+        jnc .ran
+        mov si, msg_noexec          ; no se ha hecho nada: decirlo
+        call puts
+        jmp .key
+.ran:
         cmp byte [quiet], 0
-        jne .r
+        je .key
+        mov ah, 0x4D                ; EDITAR ha salido con error (no ha abierto
+        int 0x21                    ; el archivo): dejar leer su mensaje
+        test al, al
+        jz .r
+.key:
         mov si, msg_key
         call puts
         xor ah, ah
@@ -1077,6 +1135,8 @@ msg_bytes   db " bytes", 0
 msg_attr    db "Atributos: ", 0
 msg_keys1   db " Intro Abrir/Ejecutar  Retroceso Subir  Letra Ir a  F9 Unidad  Esc Salir", 0
 msg_keys2   db " F4 Editar  F5 Copiar  F6 Renombrar/Mover  F7 Crear carpeta  F8 Borrar", 0
+msg_noexec  db "No se ha podido ejecutar la orden (falta COMMAND.COM o memoria).", 13, 10, 0
+msg_space   db " Nombre con espacios: use la línea de órdenes. Pulse una tecla...", 0
 msg_key     db 13, 10, "Pulse una tecla para volver al gestor...", 0
 ask_copy    db " Copiar en (carpeta o nombre): ", 0
 ask_ren     db " Nuevo nombre: ", 0

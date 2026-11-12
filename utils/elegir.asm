@@ -21,6 +21,10 @@ start:
         mov cx, stack_top - bss_start
         xor al, al
         rep stosb
+        ; Ctrl+C: terminar con ERRORLEVEL 0, como el CHOICE de MS-DOS
+        mov dx, on_break
+        mov ax, 0x2523
+        int 0x21
         mov word [keys], 'SN'
         mov byte [keys+2], 0
         mov si, 0x81
@@ -206,6 +210,10 @@ start:
         call crlf
         pop ax
         mov ah, 0x4C
+        int 0x21
+
+on_break:
+        mov ax, 0x4C00
         int 0x21
 
 usage:

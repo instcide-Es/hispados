@@ -5,6 +5,9 @@
 ;  SYS unidad:     copia KERNEL.SYS y COMMAND.COM desde la unidad de arranque
 ;                  y escribe el código de arranque de Hispa-DOS (FAT12/FAT16),
 ;                  conservando los parámetros (BPB) de la unidad.
+;  SYS origen: unidad:   como en MS-DOS: con dos parámetros el primero es el
+;                  origen (unidad y, si se quiere, carpeta) y el segundo el
+;                  destino.
 ; =============================================================================
         cpu 386
         bits 16
@@ -13,14 +16,65 @@
 start:
         mov si, msg_title
         call puts
-        ; unidad de destino
+        cld
+        ; origen por omisión: el raíz de la unidad de arranque
+        mov ax, 0x3305
+        int 0x21
+        add dl, 'A' - 1
+        mov [srcp], dl
+        mov word [srcp+1], ':\'
+        mov byte [srcp+3], 0
+        ; parámetros: «destino» u «origen destino» (como SYS de MS-DOS)
         mov si, 0x81
 .sk:
         lodsb
         cmp al, ' '
         je .sk
+        cmp al, 9
+        je .sk
         cmp al, 13
         je usage
+        dec si
+        mov bx, si                  ; BX = primer parámetro
+.t1:
+        lodsb
+        cmp al, ' '
+        ja .t1
+        dec si
+        mov dx, si                  ; DX = su final
+.sk2:
+        lodsb
+        cmp al, ' '
+        je .sk2
+        cmp al, 9
+        je .sk2
+        cmp al, 13
+        je .one
+        ; hay dos: el primero es el origen (unidad:[ruta])
+        dec si
+        push si
+        mov cx, dx
+        sub cx, bx
+        cmp cx, 2
+        jb usage
+        cmp cx, 64
+        ja usage
+        cmp byte [bx+1], ':'
+        jne usage
+        mov si, bx
+        mov di, srcp
+        rep movsb
+        and byte [srcp], 0xDF
+        cmp byte [di-1], '\'
+        je .sz
+        mov al, '\'
+        stosb
+.sz:
+        mov byte [di], 0
+        pop bx                      ; el segundo, el destino
+.one:
+        mov si, bx
+        lodsb
         and al, 0xDF
         sub al, 'A'
         jb usage
@@ -33,12 +87,18 @@ start:
         mov [dst_k], al
         mov [dst_c], al
         mov [msg_drv], al
-        ; unidad de arranque (origen)
-        mov ax, 0x3305
-        int 0x21
-        add dl, 'A' - 1
-        mov [src_k], dl
-        mov [src_c], dl
+        ; rutas completas de los dos archivos del origen
+        mov si, srcp
+        mov di, src_k
+        call strcpy
+        mov si, s_kernel
+        call strcpy
+        mov si, srcp
+        mov di, src_c
+        call strcpy
+        mov si, s_command
+        call strcpy
+        mov dl, [srcp]
         cmp dl, [dst_k]
         jne .diff
         mov si, msg_same
@@ -213,6 +273,17 @@ puts:
 .r:
         ret
 
+; DI <- SI (ASCIIZ); DI queda sobre el cero
+strcpy:
+        lodsb
+        mov [di], al
+        test al, al
+        jz .e
+        inc di
+        jmp strcpy
+.e:
+        ret
+
 drv         db 0
 junk        dw 0
 hsrc        dw 0
@@ -222,12 +293,15 @@ pk_sec      dd 0
 pk_cnt      dw 0
 pk_off      dw 0
 pk_seg      dw 0
-src_k       db "A:\KERNEL.SYS", 0
-src_c       db "A:\COMMAND.COM", 0
+s_kernel    db "KERNEL.SYS", 0
+s_command   db "COMMAND.COM", 0
+srcp        times 68 db 0
+src_k       times 80 db 0
+src_c       times 80 db 0
 dst_k       db "A:\KERNEL.SYS", 0
 dst_c       db "A:\COMMAND.COM", 0
 msg_title   db "Hispa-DOS SYS 0.2", 13, 10, 0
-msg_usage   db "Uso: SYS unidad:", 13, 10, 0
+msg_usage   db "Uso: SYS [origen:[ruta]] unidad:", 13, 10, 0
 msg_same    db "No se puede transferir el sistema a la unidad de arranque.", 13, 10, 0
 msg_ioerr   db "Error al leer o escribir el disco.", 13, 10, 0
 msg_nofat   db "La unidad no tiene un sistema de ficheros FAT12/FAT16.", 13, 10, 0

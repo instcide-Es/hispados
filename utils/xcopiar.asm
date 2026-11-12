@@ -220,12 +220,14 @@ start:
         call puts
         mov si, msg_fd2
         call puts
-        call readline
+        call ask_line
         mov al, [u_line]
         call upcase
         cmp al, 'D'
         je .dirmode
         cmp al, 'A'
+        je .filemode
+        cmp al, 'F'                 ; como XCOPY: «ECHO F| XCOPY...» en los lotes
         jne .ask
 .filemode:
         mov byte [filemode], 1
@@ -321,6 +323,57 @@ usage:
         call puts
         mov ax, 0x4C00
         int 0x21
+
+; leer una respuesta. Si la entrada viene de un archivo o de una tubería y
+; se ha acabado, salir (ERRORLEVEL 2) en vez de preguntar sin fin
+ask_line:
+        call readline
+        test cx, cx
+        jnz .r
+        push ax
+        push bx
+        push dx
+        mov ax, 0x4400
+        xor bx, bx
+        int 0x21
+        jc .k
+        test dl, 0x80
+        jnz .k                      ; el teclado: se vuelve a preguntar
+        ; un archivo: ¿se ha llegado al final? (posición = tamaño)
+        push cx
+        push si
+        push di
+        mov ax, 0x4201
+        xor cx, cx
+        xor dx, dx
+        int 0x21
+        jc .k2
+        mov si, ax                  ; DI:SI = posición
+        mov di, dx
+        mov ax, 0x4202
+        xor cx, cx
+        xor dx, dx
+        int 0x21
+        jc .k2
+        cmp dx, di
+        jne .back
+        cmp ax, si
+        je on_break                 ; no queda nada que leer
+.back:
+        mov ax, 0x4200
+        mov cx, di
+        mov dx, si
+        int 0x21
+.k2:
+        pop di
+        pop si
+        pop cx
+.k:
+        pop dx
+        pop bx
+        pop ax
+.r:
+        ret
 
 ; ---- argumentos ----
 parse_args:
@@ -713,7 +766,7 @@ do_file:
         call puts
         mov si, msg_yn
         call puts
-        call readline
+        call ask_line
         mov al, [u_line]
         call upcase
         cmp al, 'N'
@@ -747,7 +800,7 @@ do_file:
         call puts
         mov si, msg_ow2
         call puts
-        call readline
+        call ask_line
         mov al, [u_line]
         call upcase
         cmp al, 'N'
@@ -756,8 +809,11 @@ do_file:
         je .new
         cmp al, 'Y'
         je .new
+        cmp al, 'A'                 ; «All» de XCOPY
+        je .all
         cmp al, 'T'
         jne .ow
+.all:
         mov byte [opt_y], 1         ; todos
 .new:
         cmp byte [opt_p], 0

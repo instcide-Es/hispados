@@ -112,6 +112,18 @@ start:
         mov si, s_leeme
         mov di, s_root
         call copy_set
+        cmp word [nfailed], 0
+        je .allok
+        ; alguno no se ha copiado (disco lleno...): no decir que está instalado
+        mov si, msg_fail
+        call puts
+        movzx eax, word [nfailed]
+        call putnum
+        mov si, msg_fail2
+        call puts
+        mov ax, 0x4C04
+        int 0x21
+.allok:
         mov si, msg_done
         call puts
         movzx eax, word [ncopied]
@@ -227,7 +239,10 @@ copy_set:
         jnc .next
 .cp:
         call copy_file
-        jc .next
+        jnc .cok
+        inc word [nfailed]
+        jmp .next
+.cok:
         inc word [ncopied]
 .next:
         mov ah, 0x4F
@@ -306,6 +321,9 @@ copy_file:
         mov bx, [hd]
         mov ah, 0x3E
         int 0x21
+        mov dx, path_d              ; no dejar un archivo a medias
+        mov ah, 0x41
+        int 0x21
 .cl:
         mov bx, [hs]
         mov ah, 0x3E
@@ -322,6 +340,7 @@ fix_drive:
         mov si, buf
         dec cx
         jle .r
+        mov ah, ' '                 ; AH = el carácter anterior
 .l:
         cmp byte [si+1], ':'
         jne .n
@@ -329,8 +348,24 @@ fix_drive:
         and al, 0xDF
         cmp al, [src]
         jne .n
+        ; solo si es una letra suelta: «Fecha:» o «Nota:» no son la unidad A:
+        cmp ah, '0'
+        jb .fx
+        cmp ah, '9'
+        jbe .n
+        cmp ah, 'A'
+        jb .fx
+        or ah, 0x20
+        cmp ah, 'z'
+        jbe .n2
+        jmp .n                      ; letras acentuadas (CP437)
+.n2:
+        cmp ah, 'a'
+        jae .n
+.fx:
         mov byte [si], 'C'
 .n:
+        mov ah, [si]
         inc si
         loop .l
 .r:
@@ -372,6 +407,7 @@ dst         db 0
 keep        db 0
 fix         db 0
 ncopied     dw 0
+nfailed     dw 0
 hs          dw 0
 hd          dw 0
 cs_dir      dw 0
@@ -394,6 +430,8 @@ msg_drv1    db "C: no existe o no tiene formato.", 13, 10
             db "Prepárela con PARTIR y FORMATEA y vuelva a ejecutar INSTALAR.", 13, 10, 0
 msg_syserr  db "No se ha podido transferir el sistema (SYS).", 13, 10, 0
 msg_copying db "Copiando los archivos de Hispa-DOS...", 13, 10, 0
+msg_fail    db "La instalación NO está completa: no se han podido copiar ", 0
+msg_fail2   db " archivos", 13, 10, "(¿disco lleno?).", 13, 10, 0
 msg_done    db "Hispa-DOS instalado en la unidad "
 msg_drv2    db "C: (", 0
 msg_done2   db " archivos copiados). Ya puede arrancar desde ella.", 13, 10, 0

@@ -5,14 +5,16 @@
 ;  ORDENAR [/R] [/+n] [archivo]     (sin archivo: la entrada estándar)
 ;     /R   orden inverso
 ;     /+n  ordenar a partir de la columna n
-;  Hasta 64 KB de texto y 8000 líneas, como el SORT de MS-DOS. No distingue
-;  mayúsculas de minúsculas.
+;  Hasta 64 KB de texto, como el SORT de MS-DOS, y 24000 líneas; si hay más,
+;  lo avisa (por la salida de errores) y termina con ERRORLEVEL 1. No
+;  distingue mayúsculas de minúsculas.
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
 
-MAXLINES equ 8000
+MAXLINES equ 24000
+OBUFSZ   equ 2048
 
 start:
         mov sp, stack_top
@@ -73,7 +75,7 @@ start:
         int 0x21
         jnc .op
         mov si, msg_nofile
-        call puts
+        call eputs
         mov ax, 0x4C01
         int 0x21
 .op:
@@ -85,7 +87,7 @@ start:
         int 0x21
         jnc .gotm
         mov si, msg_nomem
-        call puts
+        call eputs
         mov ax, 0x4C01
         int 0x21
 .gotm:
@@ -113,8 +115,10 @@ start:
         add di, ax
         jmp .rd
 .full:
+        ; el aviso, a la salida de errores: la normal puede ser un archivo
+        mov byte [trunc], 1
         mov si, msg_big
-        call puts
+        call eputs
 .rdd:
         mov [tlen], di
         ; partir en líneas: cada una termina en 0
@@ -125,8 +129,13 @@ start:
 .ln:
         cmp si, [tlen]
         jae .lnd
+        cmp byte [es:si], 0x1A      ; Ctrl+Z tras el último salto: no es
+        je .lnd                     ; una línea vacía más
         cmp bx, MAXLINES
-        jae .lnd
+        jb .lnok
+        mov byte [many], 1          ; no caben más líneas: se avisa luego
+        jmp .lnd
+.lnok:
         push bx
         shl bx, 1
         mov [lines+bx], si
@@ -154,14 +163,19 @@ start:
         inc si
         jmp .ln
 .lce:
-        ; la última línea sin salto: terminarla (si cabe)
-        cmp si, 0xFFF0
-        jae .lnd
+        ; la última línea sin salto: terminarla (el bloque es de 64 KB
+        ; enteros y el texto no pasa de FFF0h, así que siempre cabe)
         mov byte [es:si], 0
 .lnd:
         pop es
         ; la última «línea» vacía tras el último salto no cuenta
         mov [nlines], bx
+        cmp byte [many], 0
+        je .sort
+        mov byte [trunc], 1
+        mov si, msg_many
+        call eputs
+.sort:
         ; ordenar (Shell)
         call shell_sort
         ; escribir
@@ -177,7 +191,9 @@ start:
         inc bx
         jmp .w
 .end:
-        mov ax, 0x4C00
+        call flush_out
+        mov al, [trunc]             ; 1 si no se pudo ordenar todo
+        mov ah, 0x4C
         int 0x21
 
 usage:
@@ -186,28 +202,56 @@ usage:
         mov ax, 0x4C01
         int 0x21
 
-; escribir la línea [tseg]:SI y CR LF
-write_line:
-        push ds
-        mov ds, [cs:tseg]
+; DS:SI = mensaje ASCIIZ -> salida de errores (no se redirige con > ni |)
+eputs:
         mov dx, si
         xor cx, cx
 .l:
         cmp byte [si], 0
-        je .e
+        je .w
         inc si
         inc cx
         jmp .l
+.w:
+        mov bx, 2
+        mov ah, 0x40
+        int 0x21
+        ret
+
+; escribir la línea [tseg]:SI y CR LF. Pasa por un búfer: con dos llamadas
+; a DOS por línea, ordenar 9000 líneas a un archivo tardaba casi un minuto.
+write_line:
+        push es
+        mov es, [tseg]
+.l:
+        mov al, [es:si]
+        test al, al
+        jz .e
+        inc si
+        call out_byte
+        jmp .l
 .e:
+        pop es
+        mov al, 13
+        call out_byte
+        mov al, 10
+; AL -> búfer de salida (se vacía al llenarse)
+out_byte:
+        mov di, [opos]
+        mov [obuf+di], al
+        inc word [opos]
+        cmp word [opos], OBUFSZ
+        jb out_ret
+; vaciar el búfer en la salida estándar
+flush_out:
+        mov cx, [opos]
+        jcxz out_ret
+        mov dx, obuf
         mov bx, 1
         mov ah, 0x40
         int 0x21
-        pop ds
-        mov dx, s_crlf
-        mov cx, 2
-        mov bx, 1
-        mov ah, 0x40
-        int 0x21
+        mov word [opos], 0
+out_ret:
         ret
 
 ; ordenar lines[0..nlines) (Shell, huecos n/2, n/4...)
@@ -322,11 +366,13 @@ msg_usage   db "Uso: ORDENAR [/R] [/+n] [archivo]", 13, 10
 msg_nofile  db "No se encontró el archivo.", 13, 10, 0
 msg_nomem   db "No hay memoria suficiente.", 13, 10, 0
 msg_big     db "El texto tiene más de 64 KB: se ordena solo el principio.", 13, 10, 0
-s_crlf      db 13, 10
+msg_many    db "El texto tiene más de 24000 líneas: se ordena solo el principio.", 13, 10, 0
 
         section .bss
 bss_start:
 opt_r       resb 1
+trunc       resb 1
+many        resb 1
             resb 1
 col         resw 1
 handle      resw 1
@@ -335,6 +381,8 @@ tlen        resw 1
 nlines      resw 1
 gap         resw 1
 tmp         resw 1
+opos        resw 1
+obuf        resb OBUFSZ
 fname       resb 128
 u_numbuf    resb 16
 u_lbuf      resb 84

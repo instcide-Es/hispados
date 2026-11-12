@@ -84,6 +84,34 @@ start:
         mov ax, di
         sub ax, text
         mov [tlen], ax
+        ; las opciones también valen detrás del texto, como en MS-DOS
+        ; (FIND "texto" /C archivo)
+        push si
+.po:
+        lodsb
+        cmp al, 13
+        je .pod
+        cmp al, '/'
+        jne .po
+        lodsb
+        call upcase
+        mov bx, opt_v
+        cmp al, 'V'
+        je .pos
+        mov bx, opt_c
+        cmp al, 'C'
+        je .pos
+        mov bx, opt_n
+        cmp al, 'N'
+        je .pos
+        mov bx, opt_i
+        cmp al, 'I'
+        jne usage
+.pos:
+        mov byte [bx], 1
+        jmp .po
+.pod:
+        pop si
         cmp byte [opt_i], 0
         je .files
         push si
@@ -104,13 +132,21 @@ start:
         je .fs
         cmp al, 13
         je .fend
+        cmp al, '/'                 ; una opción (ya apuntada): saltarla
+        jne .f1
+        inc si
+        jmp .fs
+.f1:
         mov di, fname
 .fn:
         call upcase
         stosb
         lodsb
         cmp al, ' '
-        ja .fn
+        jbe .fne
+        cmp al, '/'
+        jne .fn
+.fne:
         dec si
         mov byte [di], 0
         mov [argp], si
@@ -161,6 +197,7 @@ scan:
         mov dword [hits], 0
         mov word [bpos], 0
         mov word [blen], 0
+        mov byte [ateof], 0
         cmp byte [opt_c], 0
         jne .l
         cmp byte [stdin], 0
@@ -210,6 +247,11 @@ scan:
 
 ; leer una línea de [handle] -> line (ASCIIZ, sin CR LF); CF al final
 getline:
+        cmp byte [ateof], 0         ; tras Ctrl+Z no se lee más
+        je .go
+        stc
+        ret
+.go:
         mov di, line
         xor cx, cx                  ; caracteres
         mov byte [gotany], 0
@@ -240,7 +282,7 @@ getline:
         cmp al, 13
         je .l
         cmp al, 0x1A                ; fin de texto
-        je .eof
+        je .ctrlz
         mov cx, di
         sub cx, line
         cmp cx, LINEMAX - 1
@@ -251,6 +293,8 @@ getline:
         mov byte [di], 0
         clc
         ret
+.ctrlz:
+        mov byte [ateof], 1
 .eof:
         mov byte [di], 0
         mov word [blen], 0
@@ -266,8 +310,8 @@ getline:
 ; ¿line contiene text? -> CF = 1 si sí
 match:
         mov si, line
-        cmp word [tlen], 0
-        je .yes
+        cmp word [tlen], 0          ; el texto vacío no está en ninguna línea
+        je .no                      ; (FIND /V /C "" cuenta las líneas)
 .o:
         cmp byte [si], 0
         je .no
@@ -337,6 +381,8 @@ stdin       resb 1
 result      resb 1
 nfiles      resb 1
 gotany      resb 1
+ateof       resb 1
+            resb 1
 tlen        resw 1
 argp        resw 1
 handle      resw 1

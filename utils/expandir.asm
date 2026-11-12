@@ -55,11 +55,45 @@ start:
         mov dx, dst
         mov ax, 0x4300
         int 0x21
-        jc .nodst
+        jc .root
         test cl, 0x10
         jz .nodst
+.isdir:
         mov byte [dst_isdir], 1
+        jmp .nodst
+.root:
+        ; «B:\» y «B:» son carpetas aunque no se puedan consultar sus atributos
+        mov si, dst
+.re:
+        lodsb
+        test al, al
+        jnz .re
+        mov al, [si-2]
+        cmp al, '\'
+        je .isdir
+        cmp al, ':'
+        je .isdir
 .nodst:
+        ; varios archivos (comodines) a un solo nombre: se pisarían unos a otros
+        cmp byte [dst], 0
+        je .wok
+        cmp byte [dst_isdir], 0
+        jne .wok
+        mov si, src
+.wc:
+        lodsb
+        test al, al
+        jz .wok
+        cmp al, '*'
+        je .wbad
+        cmp al, '?'
+        jne .wc
+.wbad:
+        mov si, msg_multi
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.wok:
         mov si, src
         mov di, sdir
         call dir_prefix
@@ -81,14 +115,6 @@ start:
         mov ah, 0x4F
         int 0x21
         jnc .f
-        ; varios archivos a un solo nombre
-        cmp word [count], 1
-        jbe .end
-        cmp byte [dst], 0
-        je .end
-        cmp byte [dst_isdir], 0
-        jne .end
-.end:
         mov al, [errors]
         mov ah, 0x4C
         int 0x21
@@ -116,6 +142,8 @@ one:
         mov word [ipos], 0
         mov word [ilen], 0
         mov byte [ieof], 0
+        mov byte [haslen], 0        ; el tamaño del archivo anterior no vale
+        mov byte [plain], 0
         ; cabecera
         mov di, hdr
         mov cx, 14
@@ -129,10 +157,22 @@ one:
         cmp dword [hdr], 'KWAJ'
         je kwaj
 .notc:
-        ; no está comprimido: se copia tal cual
-        mov si, msg_notc
-        call say_name
-        jmp close_in
+        ; no está comprimido: se copia tal cual (como EXPAND de MS-DOS)
+        mov byte [plain], 1
+        mov byte [kname], 0
+        call name_kwaj              ; destino con el nombre del origen
+        call open_out               ; (si es el propio origen, aviso)
+        jc close_in
+        mov bx, [hin]
+        xor cx, cx
+        xor dx, dx
+        mov ax, 0x4200
+        int 0x21
+        mov word [ipos], 0
+        mov word [ilen], 0
+        mov byte [ieof], 0
+        mov byte [xorv], 0
+        jmp kwaj.copy
 
 ; ---- SZDD: 'SZDD' 88 F0 27 33, 'A', letra que falta, tamaño (4) ----
 szdd:
@@ -188,6 +228,10 @@ kwaj:
         add si, 2
         add si, ax
 .f3:
+        mov ax, si                  ; los campos no pueden salirse de la cabecera
+        sub ax, hdr
+        cmp ax, [dataoff]
+        ja .bad
         ; nombre y extensión originales
         mov byte [kname], 0
         test byte [flags], 8
@@ -266,6 +310,14 @@ kwaj:
 ; ---- terminar: vaciar, fecha del original y cerrar ----
 finish:
         call flush_out
+        ; salida más corta que el tamaño de la cabecera: entrada cortada
+        cmp byte [haslen], 0
+        je .len
+        mov eax, [outcnt]
+        cmp eax, [outlen]
+        je .len
+        or byte [derr], 1
+.len:
         mov bx, [hin]
         mov ax, 0x5700
         int 0x21
@@ -274,6 +326,9 @@ finish:
         int 0x21
         mov ah, 0x3E
         int 0x21
+        jnc .cl
+        or byte [derr], 2           ; no se ha podido cerrar (escribir) bien
+.cl:
         cmp byte [derr], 0
         jne .bad
         mov si, fsrc
@@ -286,6 +341,10 @@ finish:
         jmp close_in
 .bad:
         mov si, msg_bad
+        test byte [derr], 2
+        jz .say
+        mov si, msg_full            ; error al escribir: disco lleno
+.say:
         call say_name
         mov dx, fdst
         mov ah, 0x41
@@ -363,6 +422,8 @@ build_dst:
         je .r
         cmp byte [di-1], '\'
         je .name
+        cmp byte [di-1], ':'
+        je .name
         mov byte [di], '\'
         inc di
 .name:
@@ -372,9 +433,16 @@ build_dst:
         ret
 
 open_out:
-        ; el destino no puede ser el propio origen (se perdería)
+        ; el destino no puede ser el propio origen (se perdería); se comparan
+        ; las rutas completas (.\X, X y A:\X son el mismo archivo)
         mov si, fsrc
-        mov di, fdst
+        mov di, tn1
+        call truename
+        mov si, fdst
+        mov di, tn2
+        call truename
+        mov si, tn1
+        mov di, tn2
 .cmp:
         mov al, [si]
         call upcase
@@ -390,6 +458,10 @@ open_out:
         jmp .cmp
 .same:
         mov si, msg_needdst
+        cmp byte [plain], 0
+        je .ss
+        mov si, msg_notc
+.ss:
         call say_name
         stc
         ret
@@ -411,6 +483,19 @@ open_out:
         stc
         ret
 
+; SI = ruta -> DI = ruta completa (o la misma, si el núcleo no la resuelve)
+truename:
+        push si
+        push di
+        mov ah, 0x60
+        int 0x21
+        pop di
+        pop si
+        jnc .r
+        call strcpy
+.r:
+        ret
+
 ; ---- entrada y salida con búfer ----
 ; -> AL; CF al final
 get_byte:
@@ -429,7 +514,7 @@ get_byte:
         int 0x21
         pop dx
         pop cx
-        jc .seteof
+        jc .rerr
         test ax, ax
         jz .seteof
         mov [ilen], ax
@@ -441,6 +526,8 @@ get_byte:
         pop bx
         clc
         ret
+.rerr:
+        or byte [derr], 1           ; error de lectura: no es un final normal
 .seteof:
         mov byte [ieof], 1
 .eof:
@@ -449,6 +536,8 @@ get_byte:
         ret
 ; AL -> salida; CF cuando ya se ha escrito todo (si se sabe el tamaño)
 put_byte:
+        test byte [derr], 2         ; ya no se puede escribir: terminar
+        jnz .stop
         cmp byte [haslen], 0
         je .w
         push eax
@@ -456,6 +545,7 @@ put_byte:
         cmp eax, [outlen]
         pop eax
         jb .w
+.stop:
         stc
         ret
 .w:
@@ -484,7 +574,7 @@ flush_out:
         cmp ax, cx
         je .ok
 .e:
-        mov byte [derr], 1
+        or byte [derr], 2
 .ok:
         mov word [opos], 0
 .r:
@@ -685,7 +775,7 @@ lzh:
         jnz .lc
         jmp .loop
 .bad:
-        mov byte [derr], 1
+        or byte [derr], 1
 .r:
         ret
 
@@ -959,6 +1049,8 @@ msg_notc    db "no está comprimido.", 13, 10, 0
 msg_method  db "método de compresión desconocido.", 13, 10, 0
 msg_bad     db "los datos comprimidos están dañados.", 13, 10, 0
 msg_needdst db "no guarda su nombre original: indique el destino (EXPANDIR origen destino).", 13, 10, 0
+msg_full    db "no cabe en el disco de destino.", 13, 10, 0
+msg_multi   db "Con varios archivos de origen el destino tiene que ser una carpeta.", 13, 10, 0
 msg_create  db "no se puede crear el archivo de destino.", 13, 10, 0
 
         section .bss
@@ -970,6 +1062,7 @@ ieof        resb 1
 ieof2       resb 1
 derr        resb 1
 miss        resb 1
+plain       resb 1
 xorv        resb 1
 ctl         resb 1
 cbits       resb 1
@@ -1002,6 +1095,8 @@ extra       resb 128
 sdir        resb 128
 fsrc        resb 160
 fdst        resb 160
+tn1         resb 160
+tn2         resb 160
 oname       resb 16
 kname       resb 16
 dta         resb 64

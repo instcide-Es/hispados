@@ -231,6 +231,10 @@ test: $(IMG) usb nucprogs
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
 	tests/run_fs_tests.sh $(IMG)
+	tests/run_rev_revisar_tests.sh $(IMG)
+	tests/run_rev_utilidades_tests.sh $(IMG)
+	tests/run_rev_editar_tests.sh $(IMG)
+	tests/run_rev_filtros_tests.sh $(IMG)
 	tests/run_drivers_tests.sh $(IMG)
 	tests/run_sbload_tests.sh $(IMG)
 	tests/run_bootfat12_tests.sh
