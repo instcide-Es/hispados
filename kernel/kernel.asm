@@ -115,6 +115,8 @@ SDA_LEN         equ 0x80
 %define cur_psp   sda+0x10
 %define last_ret  sda+0x14
 %define cur_drive sda+0x16
+%define brk_sp    sda+0x12          ; SP al llamar a INT 23h
+%define term_type sda+0x7F          ; 1 = el proceso termina por Ctrl+C
 CFG_MAX         equ 4096
 SET_MAX         equ 512
 INST_MAX        equ 256
@@ -1051,6 +1053,8 @@ vectors_init:
         ret
 
 vec_table:
+        db 0x00
+        dw int00
         db 0x20
         dw int20
         db 0x21
@@ -1279,6 +1283,11 @@ mcb_resize:
         mov ax, E_NOMEM
         jmp .err
 .toosmall:
+        ; como MS-DOS: aunque no llegue, el bloque se queda con todo el
+        ; hueco que le sigue (hay programas que piden FFFFh y dan por suyo
+        ; el máximo que se les devuelve en BX)
+        mov [es:0], al
+        mov [es:3], dx
         mov bx, dx
         mov ax, E_NOMEM
         jmp .err
@@ -1514,6 +1523,7 @@ con_raw:
         push bx
         push cx
         push dx
+        call dreq_keep
         mov [so_ch+1], al
         mov eax, [dc_hdr]
         push eax
@@ -1526,11 +1536,14 @@ con_raw:
         call dev_rw
         pop eax
         mov [dc_hdr], eax
+        call dreq_back
         pop dx
         pop cx
         pop bx
         pop eax
-        ret
+        ; la columna se sigue llevando (los tabuladores dependen de ella:
+        ; si no avanzaba, un TAB podía no acabar nunca)
+        jmp short con_col
 con_out_bios:
         push ax
         push bx
@@ -1542,6 +1555,7 @@ con_out_bios:
         pop bp
         pop bx
         pop ax
+con_col:
         cmp al, 13
         je .cr
         cmp al, 8
@@ -1558,6 +1572,36 @@ con_out_bios:
         cmp byte [col], 0
         je .r
         dec byte [col]
+        ret
+
+; Guardar / reponer la petición en curso alrededor de una llamada al driver
+; CON: puede estar a medias la de otro driver (su INIT escribe el rótulo con
+; INT 21h y después lee de la petición su línea de CONFIG.SYS).
+dreq_keep:
+        push si
+        push di
+        mov si, dreq
+        mov di, dreq_sav
+        jmp short dreq_copy
+dreq_back:
+        push si
+        push di
+        mov si, dreq_sav
+        mov di, dreq
+dreq_copy:
+        push cx
+        push es
+        pushf
+        push ds
+        pop es
+        cld
+        mov cx, 16
+        rep movsw
+        popf
+        pop es
+        pop cx
+        pop di
+        pop si
         ret
 
 ; mirar sin esperar: CF=1 si hay carácter, AL = carácter (lo consume)
@@ -1627,8 +1671,47 @@ con_poll:
         clc
         ret
 
-; ZF=0 si hay un carácter esperando (no lo consume)
+; ZF=0 si hay un carácter esperando (no lo consume); queda en [peek_ch]
 con_check:
+        cmp word [con_hdr+2], 0
+        je con_check_bios
+        ; con un driver CON (DEVICE=) se le pregunta a él (orden 5, leer sin
+        ; retirar): si se miraba la BIOS, la tecla se quedaba aquí y el
+        ; driver, que es quien lee, no la veía nunca
+        call dreq_keep
+        push eax
+        push cx
+        push di
+        push es
+        push dword [dc_hdr]
+        mov eax, [con_hdr]
+        mov [dc_hdr], eax
+        push ds
+        pop es
+        mov di, dreq
+        mov cx, 15
+        xor ax, ax
+        rep stosw
+        mov byte [dreq], 0x0E
+        mov byte [dreq+2], 5
+        call dev_call
+        pop dword [dc_hdr]
+        pop es
+        pop di
+        pop cx
+        pop eax
+        mov al, [dreq+0x0D]
+        mov [peek_ch], al
+        mov ax, [dreq+3]
+        call dreq_back
+        test ax, 0x8200                 ; error u ocupado: no hay tecla
+        jnz .none
+        or al, 1
+        ret
+.none:
+        xor al, al
+        ret
+con_check_bios:
         cmp byte [peek_ok], 0
         jne .yes
         call con_poll
@@ -1649,6 +1732,8 @@ con_getc:
         push bx
         push cx
         push dx
+        call dreq_keep
+        push dword [dc_hdr]
         mov eax, [con_hdr]
         mov [dc_hdr], eax
         mov al, 4
@@ -1656,6 +1741,8 @@ con_getc:
         mov bx, so_ch+1
         mov cx, 1
         call dev_rw
+        pop dword [dc_hdr]
+        call dreq_back
         mov al, [so_ch+1]
         pop dx
         pop cx
@@ -1670,6 +1757,12 @@ con_getc_bios:
 .wait:
         call con_poll
         jc .r
+        ; como MS-DOS: mientras una función de INT 21h espera una tecla se
+        ; llama a INT 28h (los residentes trabajan ahí y los programas de
+        ; ahorro de energía y Windows saben que el sistema está parado)
+        cmp byte [indos], 0
+        je .wait
+        int 0x28
         jmp .wait
 .r:
         ret
@@ -2058,9 +2151,11 @@ cds_all:
 
 ; ---- 1Fh / 32h: DPB de la unidad por defecto / de DL ----
 fn_1f:
-        mov byte [F_DL], 0
+        xor al, al                  ; (sin tocar el DL del llamante)
+        jmp short fn_32.u
 fn_32:
         mov al, [F_DL]
+.u:
         test al, al
         jnz .d
         mov al, [cur_drive]
@@ -4949,7 +5044,7 @@ dev_intr_con:
         pop es
         jmp .r
 .peek:
-        call con_check
+        call con_check_bios
         jz .busy
         mov al, [peek_ch]
         mov [es:bx+0x0D], al
@@ -6692,6 +6787,7 @@ fn_00:
 fn_4c:
         mov al, [F_AL]
         xor ah, ah
+        xchg ah, [term_type]        ; tipo 1 si lo ha terminado Ctrl+C
         jmp do_term
 fn_31:
         mov al, [F_AL]
@@ -6706,6 +6802,7 @@ fn_01:
         mov [F_AL], al
         jmp std_out
 fn_02:
+        call brk_check
         mov al, [F_DL]
         jmp std_out
 fn_06:
@@ -6733,6 +6830,7 @@ fn_07:
         mov [F_AL], al
         ret
 fn_09:
+        call brk_check
         mov es, [F_DS]
         mov si, [F_DX]
 .l:
@@ -6775,6 +6873,7 @@ fn_0a:
         mov [es:di+1], bl
         ret
 fn_0b:
+        call brk_check
         call std_check
         mov byte [F_AL], 0
         jz .r
@@ -6991,6 +7090,37 @@ fn_2a:
 sak     db 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4
 
 fn_2c:
+        ; como MS-DOS, la hora sale de los tics de la BIOS (18,2 por
+        ; segundo): así hay centésimas. El RTC solo da segundos, y los
+        ; programas que esperan fracciones de segundo con esta función se
+        ; quedaban parados un segundo entero cada vez.
+        push bp
+        xor ah, ah
+        int 0x1A                    ; CX:DX = tics desde medianoche
+        pop bp
+        mov ax, cx
+        shl eax, 16
+        mov ax, dx
+        cmp eax, 1573040            ; un día
+        jae .rtc
+        mov edx, 8640000            ; centésimas de un día
+        mul edx
+        mov ecx, 1573040
+        div ecx                     ; EAX = centésimas desde medianoche
+        xor edx, edx
+        mov ecx, 100
+        div ecx
+        mov [F_DL], dl
+        xor edx, edx
+        mov ecx, 60
+        div ecx
+        mov [F_DH], dl
+        xor edx, edx
+        div ecx
+        mov [F_CL], dl
+        mov [F_CH], al
+        ret
+.rtc:
         push bp
         mov ah, 2
         int 0x1A
@@ -7051,8 +7181,15 @@ fn_set_bad:
 
 ; ---- versión y varios ----
 fn_30:
+        ; AL=0: BH = número de OEM. AL=1: BH = indicador de versión (08h =
+        ; DOS en ROM, 10h = en la HMA): ninguno de los dos
+        mov bx, 0xEE00
+        cmp byte [F_AL], 1
+        jne .oem
+        xor bx, bx
+.oem:
         mov word [F_AX], DOS_MAJOR | (DOS_MINOR << 8)
-        mov word [F_BX], 0xEE00
+        mov [F_BX], bx
         mov word [F_CX], 0
         ret
 fn_33:
@@ -7096,6 +7233,21 @@ fn_37:
 .r:
         ret
 fn_38:
+        ; país pedido: AL (FFh: en BX); 0 = el actual. Solo hay uno (34)
+        movzx ax, byte [F_AL]
+        test al, al
+        jz .cur
+        cmp al, 0xFF
+        jne .code
+        mov ax, [F_BX]
+.code:
+        cmp ax, 34
+        jne .nf
+.cur:
+        ; DX = FFFFh: fijar el país (no hay nada que copiar: antes se
+        ; escribía la tabla en DS:FFFFh, encima del PSP del llamante)
+        cmp word [F_DX], 0xFFFF
+        je .r
         mov es, [F_DS]
         mov di, [F_DX]
         mov si, country
@@ -7103,7 +7255,21 @@ fn_38:
         rep movsb
         mov word [F_BX], 34
         mov word [F_AX], 34
+.r:
         ret
+.nf:
+        mov ax, E_NOFILE
+        jmp ret_err
+; rutina de mayúsculas del país (llamada lejana, AL >= 80h -> AL)
+country_upcase:
+        cmp al, 0x80
+        jb .r
+        push bx
+        movzx bx, al
+        mov al, [cs:upper_tbl+2+bx-0x80]
+        pop bx
+.r:
+        retf
 country:
         dw 1                    ; fecha: dd/mm/aa
         db "EUR", 0, 0
@@ -7113,8 +7279,8 @@ country:
         db ":", 0
         db 0                    ; símbolo delante
         db 2                    ; decimales
-        db 0                    ; 24 h
-        dd 0
+        db 1                    ; 24 h
+        dw country_upcase, KSEG ; rutina de mayúsculas
         db ";", 0
         times 10 db 0
 
@@ -7453,6 +7619,22 @@ con_read:
         pop es
         mov al, 10
         call con_out
+        ; como MS-DOS: una línea que empieza por Ctrl+Z es el fin de fichero
+        ; (0 octetos leídos); sin esto, COPY CON, SORT o MORE leyendo del
+        ; teclado no acababan nunca
+        cmp byte [conline+1], 0
+        je .line
+        cmp byte [conline+2], 0x1A
+        jne .line
+        mov word [conq_len], 0
+        mov word [conq_pos], 0
+        xor ax, ax
+        pop es
+        pop di
+        pop cx
+        pop bx
+        ret
+.line:
         movzx ax, byte [conline+1]
         mov di, conline+2
         add di, ax
@@ -7525,6 +7707,7 @@ fn_40:
         mov ax, E_ACCESS
         jmp ret_err
 .con:
+        call brk_check
         mov es, [F_DS]
         mov si, [F_DX]
         mov cx, [F_CX]
@@ -8370,16 +8553,40 @@ fn_65:
         mov word [F_CX], 5
         ret
 .ext:
-        mov byte [es:di], 1
-        mov word [es:di+1], 38
-        mov word [es:di+3], 34
-        mov word [es:di+5], 437
-        add di, 7
-        mov si, country
-        mov cx, 34
+        ; como mucho CX octetos (antes se escribían siempre 41, aunque el
+        ; búfer del programa fuera menor: hay quien pide solo 7 para saber
+        ; el país y la página de códigos)
+        mov cx, [F_CX]
+        cmp cx, 5
+        jb .short
+        cmp cx, 41
+        jbe .len
+        mov cx, 41
+.len:
+        mov [F_CX], cx
+        mov bx, cx
+        mov si, .ext_head
+        cmp cx, 7
+        jbe .e1
+        mov cx, 7
+.e1:
+        sub bx, cx
+        push di
         rep movsb
-        mov word [F_CX], 41
+        mov cx, bx
+        mov si, country
+        rep movsb
+        pop di
+        mov ax, [F_CX]
+        sub ax, 3
+        mov [es:di+1], ax           ; tamaño de lo que sigue
         ret
+.short:
+        mov ax, E_FUNC
+        jmp ret_err
+.ext_head:
+        db 1
+        dw 38, 34, 437
 .caps:
         cmp al, 0x20
         je .c1
@@ -8476,8 +8683,46 @@ do_ctrlc:
         pop bp
         pop ds
         pop es
+        ; El manejador puede volver con IRET (se repite la función) o con
+        ; RETF, que deja los indicadores en la pila: entonces CF=1 pide
+        ; terminar el programa y CF=0 seguir, como en MS-DOS.
+        ; sin proceso (un controlador o el núcleo durante CONFIG.SYS): no
+        ; hay a quién avisar ni qué terminar; solo se repite la función
+        push ax
+        mov ax, [cs:cur_psp]
+        cmp ax, [cs:root_psp]
+        pop ax
+        je int21
+        mov [cs:brk_sp], sp
+        clc
         int 0x23
+        jc .cf
+.again:
+        mov sp, [cs:brk_sp]
         jmp int21
+.cf:
+        cmp sp, [cs:brk_sp]
+        je .again                   ; IRET o RETF 2: se repite
+        mov sp, [cs:brk_sp]
+        mov byte [cs:term_type], 1
+        mov ax, 0x4C03
+        jmp int21
+
+; ¿hay un Ctrl+C esperando en el teclado? MS-DOS lo mira en cada función de
+; salida por consola (02h, 09h, 40h) y en la 0Bh: así se puede cortar un
+; programa que escribe sin parar o que calcula mirando el teclado con 0Bh.
+; Solo dentro de INT 21h (BP = marco del llamante).
+brk_check:
+        push ax
+        call con_check
+        jz .r
+        cmp byte [peek_ch], 3
+        jne .r
+        call con_getc               ; retirarlo
+        jmp do_ctrlc                ; (rehace la pila desde BP)
+.r:
+        pop ax
+        ret
 
 ; ---- 5Dh: SDA (06h) y lista de zonas de la SDA (0Bh) ----
 fn_5d:
@@ -8571,6 +8816,12 @@ fn_4a:
         mov bx, [F_BX]
         call mcb_resize
         jc .err
+        ; como MS-DOS: el bloque pasa a ser del proceso actual
+        mov ax, es
+        dec ax
+        mov es, ax
+        mov ax, [cur_psp]
+        mov [es:1], ax
         ret
 .err:
         mov [F_BX], bx
@@ -8698,7 +8949,8 @@ fn_4b:
         jne .bad
         jmp exec_overlay
 .bad:
-        jmp fn_unsup
+        mov ax, E_FUNC
+        jmp ret_err
 .go:
         mov ax, [F_BX]
         mov [ex_pb], ax
@@ -8768,8 +9020,8 @@ fn_4b:
         mov eax, [ex_sft+SFT_SIZE]
         cmp eax, 0xFF00
         ja .toobig
-        add ax, 0x100 + 0x100 + 15
-        shr ax, 4
+        add eax, 0x100 + 0x100 + 15 ; (en 32 bits: con 16 se desbordaba)
+        shr eax, 4
         cmp bx, ax
         jb .nomem
         call mcb_alloc
@@ -8828,6 +9080,11 @@ fn_4b:
         jbe .mx
         mov eax, 0xFFFF
 .mx:
+        ; MAXALLOC menor que MINALLOC: manda MINALLOC
+        cmp ax, [ex_min]
+        jae .mx2
+        mov ax, [ex_min]
+.mx2:
         mov bx, ax
         call mcb_alloc
         jnc .gotexe
@@ -9181,7 +9438,7 @@ build_env:
 .len0:
         mov [ex_elen], cx
         mov bx, cx
-        add bx, 3
+        add bx, 4
         add bx, [ex_plen]
         add bx, 15
         shr bx, 4
@@ -9201,6 +9458,12 @@ build_env:
         pop ds
         xor al, al
         stosb
+        ; un entorno vacío son dos ceros (los programas buscan el doble
+        ; cero para encontrar su nombre)
+        cmp word [ex_elen], 0
+        jne .ne
+        stosb
+.ne:
         mov ax, 1
         stosw
         mov si, ex_path
@@ -9226,6 +9489,24 @@ build_psp:
         mov ax, [ex_psp]
         add ax, [ex_size]
         mov [es:2], ax
+        ; +05: llamada lejana de CP/M; su desplazamiento (+06) es el tamaño
+        ; utilizable del segmento, y los programas antiguos lo leen para
+        ; saber cuánta memoria tienen (con 0 creen que no hay ninguna)
+        mov ax, [ex_size]
+        cmp ax, 0x20
+        jb .nop6
+        cmp ax, 0x1000
+        jb .p6
+        mov ax, 0x1000
+.p6:
+        sub ax, 0x11
+        mov bx, 0x000C              ; (1000Ch - AX: segmento:desplazamiento
+        sub bx, ax                  ;  = 10000Ch, que con la A20 es 0000:00C0)
+        shl ax, 4
+        mov byte [es:5], 0x9A
+        mov [es:6], ax
+        mov [es:8], bx
+.nop6:
         push ds
         xor ax, ax
         mov ds, ax
@@ -10124,17 +10405,32 @@ fn_24:
 ; =============================================================================
 ;  Otras interrupciones
 ; =============================================================================
+; INT 00h: error de división. Como MS-DOS, se avisa y se termina el programa
+; (con el manejador de la BIOS, un IRET, la división se repetía sin fin y el
+; equipo se quedaba colgado).
+int00:
+        sti
+        cld
+        mov ax, KSEG
+        mov ds, ax
+        mov si, msg_div0
+        call kputs
+        mov byte [indos], 0
+        mov ax, 0x4CFF
+        jmp int21
 int20:
         mov ax, 0x4C00
         jmp int21
 int27:
         add dx, 15
-        shr dx, 4
+        rcr dx, 1                   ; (con el acarreo: DX puede pasar de FFF0h)
+        shr dx, 3
         mov ax, 0x3100
         jmp int21
 int22:
         jmp int_iret
 int23:
+        mov byte [cs:term_type], 1
         mov ax, 0x4C03
         jmp int21
 int24:
@@ -10507,6 +10803,7 @@ msg_banner  db 13, 10, "Hispa-DOS 0.2 - núcleo compatible con MS-DOS 6.22", 13,
 msg_fatbad  db "No se puede leer el sistema de archivos de la unidad de arranque", 13, 10, 0
 msg_noshell db 13, 10, "No se puede cargar el intérprete de órdenes: sistema detenido", 13, 10, 0
 msg_reshell db 13, 10, "Reiniciando el intérprete de órdenes...", 13, 10, 0
+msg_div0    db 13, 10, "Error de división (desbordamiento): programa terminado", 13, 10, 0
 msg_rootterm db 13, 10, "El proceso raíz ha terminado: sistema detenido", 13, 10, 0
 
 ; lista de listas (INT 21h AH=52h); la palabra anterior es el primer MCB
@@ -10746,6 +11043,7 @@ set_end     resw 1
 inst_end    resw 1
 ext_tab     resb 9*4
 dreq        resb 32
+dreq_sav    resb 32
 cfg_key     resb 16
 dpath       resb 84
 ipath       resb 84

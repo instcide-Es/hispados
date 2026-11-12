@@ -332,7 +332,8 @@ ctrlc_handler:
         mov ds, ax
         mov ah, 0x62
         int 0x21
-        cmp bx, ax
+        mov ax, cs                  ; (AH=62h había estropeado AX: nunca
+        cmp bx, ax                  ;  coincidía y Ctrl+C mataba al intérprete)
         jne .child
         pop ds
         pop bx

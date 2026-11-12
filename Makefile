@@ -175,7 +175,24 @@ run-hdd: $(IMG) $(HDD)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy \
 	        -drive file=$(HDD),format=raw,if=ide -boot a
 
-test: $(IMG) usb
+# programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
+# a una copia de la imagen; no van en el disco de distribución)
+NUCPROGS = $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS
+$(B)/NUCTEST.COM: tests/progs/nuctest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/NUCHIJO.COM: tests/progs/nuchijo.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/NUCEXE.EXE: tests/progs/nucexe.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/NUCBRK.COM: tests/progs/nucbrk.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/NUCCON.SYS: tests/progs/nuccon.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/NUCDRV.SYS: tests/progs/nucdrv.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+nucprogs: $(NUCPROGS)
+
+test: $(IMG) usb nucprogs
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -209,10 +226,11 @@ test: $(IMG) usb
 	tests/run_ayuda_tests.sh $(IMG)
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
+	tests/run_nucleo_tests.sh $(IMG)
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test clean
+.PHONY: all usb run run-hdd test clean nucprogs
