@@ -4,6 +4,7 @@
 ;
 ;  PLAYWAV fichero.wav           reproduce un WAV PCM (8/16 bits, mono/estéreo)
 ;  PLAYWAV /TONE hz [ms]         tono de prueba (onda cuadrada, 22050 Hz)
+;  PLAYWAV /VOL:n ...            antes, pone el volumen (0 a 100 %)
 ; =============================================================================
         cpu 386
         bits 16
@@ -43,11 +44,42 @@ start:
         pop ds
         ; argumentos
         mov si, 0x81
+.arg:
         call skip_sp
         cmp byte [si], 13
-        je usage
+        je .noarg
         cmp byte [si], '/'
-        je tone
+        jne .file
+        mov eax, [si+1]
+        and eax, 0xFFDFDFDF
+        cmp eax, 'VOL:'
+        jne tone
+        ; /VOL:n: volumen del 0 al 100 %
+        add si, 5
+        call parse_num
+        cmp eax, 100
+        jbe .v
+        mov eax, 100
+.v:
+        mov ah, 5
+        call far [drv]
+        jc .arg                     ; (un HSPSND antiguo no lo tiene)
+        mov byte [volset], 1
+        jmp .arg
+.noarg:
+        cmp byte [volset], 0
+        je usage
+        mov si, msg_vol
+        call puts
+        mov ah, 6
+        call far [drv]
+        movzx eax, al
+        call putnum
+        mov si, msg_pct
+        call puts
+        mov ax, 0x4C00
+        int 0x21
+.file:
         ; nombre de fichero
         mov di, fname
 .fn:
@@ -390,7 +422,11 @@ puts:
         ret
 
 msg_title   db "PLAYWAV 0.1 - Hispa-DOS", 13, 10, 0
-msg_usage   db "Uso: PLAYWAV archivo.wav | PLAYWAV /TONE hz [ms]", 13, 10, 0
+msg_usage   db "Uso: PLAYWAV [/VOL:n] archivo.wav | PLAYWAV [/VOL:n] /TONE hz [ms]", 13, 10
+            db "  /VOL:n  volumen del 0 al 100 % (queda puesto; véase también SONIDO)", 13, 10, 0
+msg_vol     db "Volumen: ", 0
+msg_pct     db " %", 13, 10, 0
+volset      db 0
 msg_nodrv   db "HSPSND no está cargado.", 13, 10, 0
 msg_nocard  db "No hay tarjeta de sonido.", 13, 10, 0
 msg_tone    db "Tono ", 0

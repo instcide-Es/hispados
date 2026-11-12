@@ -103,8 +103,12 @@ start:
         mov si, v_ac97
         call pci_count_named
         call none_if_empty
-        mov ax, 0xD700
+        push es                     ; (devuelve en ES:BX la entrada de HSPSND:
+        push di                     ; sin esto, el resto de las líneas se
+        mov ax, 0xD700              ; escribían encima del driver residente)
         int 0x2F
+        pop di
+        pop es
         cmp al, 0xFF
         jne .nosnd
         mov si, v_hspsnd

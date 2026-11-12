@@ -2,9 +2,13 @@ REM CONFIG.SYS de Hispa-DOS (disquete de arranque)
 REM Memoria extendida (XMS) y lectores de CD/DVD (IDE y SATA):
 DEVICE=A:\HISPADOS\HSPXMS.SYS
 DEVICE=A:\HISPADOS\HSPCD.SYS
-REM USB propio (memorias, teclado y ratón USB) sin la BIOS: quite el REM.
-REM Añada /F si la BIOS está usando el USB (teclado USB, arranque por USB).
-REM DEVICE=A:\HISPADOS\HSPUSB.SYS
+REM USB propio (memorias, teclado y ratón USB, también detrás de concentradores).
+REM Así, sin opciones, es seguro: si la BIOS está usando el USB (teclado USB,
+REM arranque por USB) no lo toca y todo sigue como estaba.
+DEVICE=A:\HISPADOS\HSPUSB.SYS
+REM Para quitarle el USB a la BIOS añada /F (el teclado y el ratón USB pasan a
+REM HSPUSB) y /INFO para ver en pantalla qué ha encontrado:
+REM DEVICE=A:\HISPADOS\HSPUSB.SYS /F /INFO
 NUMLOCK=ON
 FILES=30
 BUFFERS=20

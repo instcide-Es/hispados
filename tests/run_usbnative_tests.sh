@@ -10,7 +10,7 @@ fail=0
 for KIND in super mbr; do
   T=$(mktemp -d)
   cp "$IMG" $T/f.img
-  printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+  printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   dd if=/dev/zero of=$T/usb.img bs=1M count=32 status=none
   if [ $KIND = super ]; then

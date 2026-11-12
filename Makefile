@@ -58,6 +58,8 @@ $(B)/DPMI32.COM: tests/progs/dpmi32.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/SONIDO.COM: utils/sonido.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/INSTALAR.COM: utils/instalar.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EDIT.COM: utils/edit.asm | $(B)
@@ -119,7 +121,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
-        $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
+        $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM \
         $(B)/VENTANAS.COM
@@ -140,6 +142,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/SYS.COM ::HISPADOS/SISTEMA.COM
 	mcopy -i $@ $(B)/KEYB.COM ::HISPADOS/TECLADO.COM
 	mcopy -i $@ $(B)/PLAYWAV.COM ::HISPADOS/SONAR.COM
+	mcopy -i $@ $(B)/SONIDO.COM ::HISPADOS/SONIDO.COM
 	mcopy -i $@ $(B)/SYSINFO.COM ::HISPADOS/INFO.COM
 	mcopy -i $@ $(B)/GESTOR.COM ::HISPADOS/GESTOR.COM
 	mcopy -i $@ $(B)/INSTALAR.COM ::HISPADOS/INSTALAR.COM
@@ -232,6 +235,7 @@ test: $(IMG) usb nucprogs
 	tests/run_keyb_tests.sh $(IMG)
 	tests/run_usbnative_tests.sh $(IMG)
 	tests/run_usbhid_tests.sh $(IMG)
+	tests/run_usbhub_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG) ahci

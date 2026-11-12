@@ -6591,7 +6591,7 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.", 13, 10
             db "Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y", 13, 10
             db "después en PATH. Programas en \HISPADOS (también con su nombre clásico):", 13, 10
-            db "  PARTIR (FDISK), FORMATEA, SISTEMA, INSTALAR, TECLADO, SONAR, EDITAR,", 13, 10
+            db "  PARTIR (FDISK), FORMATEA, SISTEMA, INSTALAR, TECLADO, SONAR, SONIDO, EDITAR,", 13, 10
             db "  GESTOR, INFO, MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR,", 13, 10
             db "  EXPANDIR, ETIQUETA, XCOPIAR, REVISAR (CHKDSK).", 13, 10
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10

@@ -28,6 +28,7 @@ start:
 
 old09       dd 0
 old2f       dd 0
+soft        db 0                    ; la tecla llegó por INT 2Fh AX=AD81h
 active      db 1
 dead        db 0
 e0          db 0                    ; último código fue E0h
@@ -81,7 +82,22 @@ int2f:
         mov di, active
         iret
 .chain:
+        cmp ax, 0xAD81
+        je .soft
         jmp far [cs:old2f]
+; código de tecla que no viene del 8042 (HSPUSB en equipos sin controlador
+; de teclado): BL = código -> AX = 4B01h atendida, 4B00h sin cambios
+.soft:
+        push ax
+        push bx
+        push cx
+        push si
+        push ds
+        mov byte [cs:soft], 1
+        mov al, bl
+        cmp byte [cs:active], 0
+        je int09.chain
+        jmp int09.have
 
 int09:
         cmp ah, 0x4F                ; ¿aviso de tecla? AL=código
@@ -95,6 +111,7 @@ int09:
         push ds
         cmp byte [cs:active], 0
         je .chain
+.have:
         mov ah, al
         ; seguir AltGr (E0 38 / E0 B8) por nuestra cuenta
         cmp al, 0xE0
@@ -236,6 +253,8 @@ int09:
         call emit
         jmp .eat
 .eat:
+        cmp byte [cs:soft], 0
+        jne .seat
         pop ds
         pop si
         pop cx
@@ -247,12 +266,32 @@ int09:
         pop bp
         iret
 .chain:
+        cmp byte [cs:soft], 0
+        jne .schain
         pop ds
         pop si
         pop cx
         pop bx
         pop ax
         jmp far [cs:old09]
+.seat:
+        mov byte [cs:soft], 0
+        pop ds
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        mov ax, 0x4B01              ; atendida
+        iret
+.schain:
+        mov byte [cs:soft], 0
+        pop ds
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        mov ax, 0x4B00              ; sin cambios: la pone quien la envía
+        iret
 
 ; AL = carácter, AH = código de tecla -> búfer de la BIOS
 emit:

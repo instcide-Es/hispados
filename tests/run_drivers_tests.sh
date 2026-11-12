@@ -28,7 +28,7 @@ mkstick() {  # FAT16 sin particiones con HOLA.TXT
 # ---- 1) FS/GS con USB ----
 cp "$IMG" $T/f.img
 mcopy -o -i $T/f.img $T/FSGS.COM ::BIN/FSGS.COM
-printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkstick
 { sleep 7; printf 'A:\\BIN\\FSGS D:\\HOLA.TXT\r'; sleep 3; } |
@@ -61,7 +61,7 @@ show
 # ---- 2) memoria USB con FAT32 sin particiones ----
 cp "$IMG" $T/f.img
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
-printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/usb.img bs=1M count=64 status=none
 mkfs.fat -F 32 -n FAT32 $T/usb.img > /dev/null
@@ -99,9 +99,9 @@ if nasm -f bin -i build/gen/lib/ -i lib/ -DFORCE_SCRATCH=37 -o $T/HSPUSB.SYS $T/
     cp "$IMG" $T/f.img
     mcopy -o -i $T/f.img $T/HSPUSB.SYS ::HISPADOS/HSPUSB.SYS
     if [ $XMS = con ]; then
-      printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+      printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
     else
-      printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+      printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
     fi
     mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
     mkstick
@@ -133,7 +133,7 @@ for DEV in usb ahci hda; do
   cp "$IMG" $T/f.img
   mcopy -o -i $T/f.img $T/A20OFF.COM ::BIN/A20OFF.COM
   if [ $DEV = usb ]; then
-    printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+    printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
     mkstick
     QDEV="-device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img -device usb-storage,bus=xhci.0,drive=u"
     SRC='D:\HOLA.TXT'; REF=$T/HOLA.TXT; DST=HOLA.TXT

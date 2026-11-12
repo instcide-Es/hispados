@@ -23,3 +23,29 @@ Raton y touchpad
   touchpad PS/2. Si el raton no va, escribe HSPRATON /INFO y haz una foto
   de la pantalla. Para forzar una via: en AUTOEXEC.BAT, HSPRATON /DIRECTO
   o HSPRATON /BIOS (HSPRATON /? ensena las opciones).
+
+Sonido
+  HSPSND se carga al arrancar (AUTOEXEC.BAT) con el volumen al 80 %.
+  SONAR /TONE 440 toca un tono de prueba. SONIDO muestra el volumen;
+  SONIDO 60 lo pone, SONIDO + y SONIDO - lo cambian, SONIDO /M lo silencia
+  y SONIDO /A lo ajusta con las flechas. Tambien con el teclado:
+  Ctrl+Alt+flecha arriba o abajo y Ctrl+Alt+Fin (silencio).
+  Si no suena, HSPSND /INFO muestra la tarjeta y las salidas que ha
+  encontrado; en algunos portatiles hay que probar HSPSND /GPIO:0,
+  HSPSND /GPIO:1, HSPSND /GPIO:2 o HSPSND /EAPD:0.
+
+USB propio (HSPUSB): raton o panel tactil USB, por ejemplo en un MacBook
+  De serie HSPUSB no le quita el USB a la BIOS (arrancando desde la memoria
+  USB la BIOS lo esta usando), asi que el teclado sigue como siempre y el
+  raton USB solo va si la BIOS lo ofrece.
+  Para que lo lleve HSPUSB: EDITAR C:\CONFIG.SYS, poner REM delante de
+      DEVICE=C:\HISPADOS\HSPUSB.SYS
+  y quitar el REM de
+      DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO
+  /U    toma el USB de la BIOS y atiende el mismo la memoria de arranque.
+        Sirve con controladores xHCI (USB 3). Si algo falla, el equipo se
+        puede quedar sin teclado o sin disco hasta reiniciar.
+  /INFO ensena el controlador y el arbol de dispositivos y espera 15 s
+        (para hacer una foto).
+  Si el teclado no responde: reiniciar y pulsar F5 al ver "Iniciando
+  Hispa-DOS" (arranque limpio, sin CONFIG.SYS) y deshacer el cambio.

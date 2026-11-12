@@ -76,8 +76,10 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `HSPDPMI.COM`: servidor DPMI 0.9 propio (clientes de 16 y 32 bits, memoria de XMS; los programas de DJGPP funcionan sin CWSDPMI) | ✅ |
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
 | Sonido: `HSPSND` (Sound Blaster 2.0/Pro/16, Intel HD Audio y AC'97; pone la variable `BLASTER`) y `PLAYWAV`/`SONAR` | ✅ |
+| Volumen: `HSPSND /VOL:n`, `SONIDO` (`n`, `+`, `-`, `/M` silencio, `/A` con las flechas) y teclas Ctrl+Alt+↑/↓/Fin y multimedia; `HSPSND /INFO` diagnostica la tarjeta (códec HD Audio, salidas, EAPD, GPIO, camino elegido) | ✅ |
 | Imagen para memoria USB (arrancar o instalar con `INSTALL`) | ✅ |
 | `HSPUSB.SYS`: memorias USB nativas (controladora xHCI, almacenamiento masivo) | ✅ |
+| `HSPUSB.SYS`: concentradores USB (hubs, también encadenados), `/INFO` (árbol de dispositivos) y arranque desde memoria USB sin perder el disco (`/U`) | ✅ |
 | `HSPCD.SYS`: lectores de CD/DVD (ATAPI) e ISO 9660 en el núcleo (solo lectura) | ✅ |
 | `SYS.COM`, `INSTALAR` (instalar en un disco duro), `KEYB SP` (teclado español, AltGr) | ✅ |
 | Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes | ✅ |
@@ -91,6 +93,21 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
 | **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas, Bloc de notas, Calculadora y Reloj. Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
 | UMB/EMS (EMM386 propio), Sound Blaster emulada en tarjetas modernas, EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
+
+## Sonido y volumen
+
+`HSPSND` (lo carga `AUTOEXEC.BAT`) detecta una Sound Blaster, Intel HD Audio o AC'97. En HD Audio saca el sonido a la vez por los altavoces internos, los auriculares y la salida de línea, enciende el amplificador externo (EAPD y las patillas GPIO del códec) y, si el códec no admite la frecuencia del archivo, la cambia él.
+
+| Orden | Qué hace |
+|---|---|
+| `HSPSND /VOL:n` | Volumen del 0 al 100 % (80 si no se dice). Con el driver ya cargado cambia el volumen sin cargar otro. |
+| `HSPSND /INFO` | Muestra en una pantalla la tarjeta, el códec, cada salida (altavoz, auriculares, línea…), EAPD, GPIO, el camino y el amplificador elegidos. Si no suena, una foto de esta pantalla dice por qué. |
+| `HSPSND /GPIO:hh` `/NOGPIO` `/EAPD:0` | HD Audio: valor de las GPIO (por omisión todas a 1), no tocarlas, o EAPD apagado, para los portátiles que lo tienen al revés. Se pueden cambiar con el driver ya cargado. |
+| `HSPSND /NOTECLAS` | Sin teclas de volumen. |
+| `SONIDO` | Muestra el volumen. `SONIDO 60` lo pone; `SONIDO +` y `SONIDO -` lo cambian un 10 %; `SONIDO /M` silencia y otra vez lo devuelve; `SONIDO /A` lo ajusta con las flechas. |
+| `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
+
+Teclas, en cualquier programa: **Ctrl+Alt+↑** y **Ctrl+Alt+↓** suben y bajan el volumen un 10 %, **Ctrl+Alt+Fin** lo silencia, y también valen las teclas de volumen de los teclados multimedia (las de Fn de muchos portátiles).
 
 ## Compilar y probar
 

@@ -2,7 +2,7 @@
 """Utilidades de audio para las pruebas de Hispa-DOS.
 
   audio.py make  fichero.wav hz ms rate bits canales   -> genera un tono
-  audio.py check grabacion.wav                         -> tramos con sonido
+  audio.py check grabacion.wav [umbral]                -> tramos con sonido
                                                           y su frecuencia
 """
 import sys, wave, struct, math
@@ -21,7 +21,7 @@ def make(path, hz, ms, rate, bits, ch):
                 frames += struct.pack('<h', int(v * 32767))
     w.writeframes(bytes(frames)); w.close()
 
-def check(path):
+def check(path, umbral=1500):
     w = wave.open(path, 'rb')
     ch, sw, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
     raw = w.readframes(n)
@@ -33,7 +33,7 @@ def check(path):
     active = []
     for i in range(0, len(vals) - win, win):
         seg = vals[i:i + win]
-        active.append(max(abs(x) for x in seg) > 1500)
+        active.append(max(abs(x) for x in seg) > umbral)
     segs, start = [], None
     for j, a in enumerate(active + [False]):
         if a and start is None:
@@ -65,4 +65,4 @@ if __name__ == '__main__':
     if sys.argv[1] == 'make':
         make(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7]))
     else:
-        check(sys.argv[2])
+        check(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 1500)

@@ -272,7 +272,7 @@ g_usb() {
 }
 t_usb() {
   caso "usb"
-  printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS\r\n' > $T/CONFIG.SYS
+  printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   qemu g_usb 40 -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0,id=ukbd -device usb-mouse,bus=xhci.0,id=umouse
   check "HSPRATON 0.1 - ratón de Hispa-DOS (INT 33h)"

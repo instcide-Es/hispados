@@ -2,8 +2,19 @@
 ;  HSPSND.COM - driver de sonido de Hispa-DOS (residente)
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  Uso:  HSPSND [/NOSB]  (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
-;        /NOSB  no buscar una Sound Blaster
+;  Uso:  HSPSND [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO] [/EAPD:0]
+;               [/NOTECLAS]   (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
+;        /NOSB      no buscar una Sound Blaster
+;        /VOL:n     volumen del 0 al 100 % (80 si no se dice); con el driver
+;                   ya instalado cambia el volumen del residente
+;        /INFO      (o /DIAG) muestra la tarjeta, el códec, las salidas y el
+;                   camino elegido; también con el driver ya instalado
+;        /GPIO:hh   HD Audio: valor (hex) de las patillas GPIO del códec, que
+;                   en muchos portátiles encienden el amplificador de los
+;                   altavoces (si no se dice, todas a 1); /NOGPIO no las toca
+;        /EAPD:0    HD Audio: apagar EAPD en vez de encenderlo
+;        /NOTECLAS  sin teclas de volumen (Ctrl+Alt+flecha arriba/abajo,
+;                   Ctrl+Alt+Fin = silencio, y las teclas multimedia)
 ;
 ;  Tarjetas: Sound Blaster 2.0/Pro/16 (ISA; variable BLASTER o sondeo en
 ;  220h-280h; si no está BLASTER, la pone), Intel HD Audio (HDA, PCs
@@ -23,10 +34,15 @@
 ;    02h esperar a que termine
 ;    03h parar
 ;    04h volumen      AL = 0 (silencio) .. 31 (máximo)
+;    05h volumen      AL = 0 .. 100 (%); quita el silencio
+;    06h leer volumen -> AL = volumen (0..100 %), AH = 1 si está en silencio
+;    07h silencio     AL = 0 quitar, 1 poner, 2 cambiar -> como 06h
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
+
+VERSION     equ 0x0002
 
 NBUF        equ 4                   ; búferes de DMA
 BUFSZ       equ 8192                ; bytes por búfer (16 bits estéreo)
@@ -53,7 +69,33 @@ name_hda    db "Intel HD Audio", 0
 hda_base    dd 0
 hda_sd      dw 0                    ; registros del primer flujo de salida
 hda_cad     db 0
-hda_dac     db 0
+hda_dac     db 0                    ; primer DAC (informativo)
+hda_afg     db 0
+hda_dacs    times 4 db 0            ; DAC en uso (0 = fin)
+hda_npin    db 0
+hda_pins    times 4 * 5 db 0        ; caminos: pin, intermedios..., DAC, ceros
+hda_nvol    db 0
+hda_vols    times 8 * 6 db 0        ; nodo, 80h salida | índice de entrada,
+                                    ; paso de 0 dB, pasos, tamaño (1/4 dB), -
+pci_bdf     dw 0
+hda_rates   dw 0x0040               ; frecuencias que admiten los DAC (bits
+                                    ; del parámetro 0Ah: 8, 11,025, 16,
+                                    ; 22,05, 32, 44,1, 48 kHz...)
+hw_rate     dw 48000                ; frecuencia a la que toca la tarjeta
+rs_acc      dd 0                    ; fase del cambio de frecuencia
+fb_bpf      dw 0
+; volumen
+vol_pct     db 80                   ; 0..100 %
+vol_mute    db 0
+vol_dirty   db 0                    ; hay que llevarlo a la tarjeta
+busy        db 0                    ; dentro de la API
+att_q       db 0                    ; atenuación en cuartos de dB (0..187)
+vol_zero    db 0                    ; silencio efectivo
+hw_vol      db 1                    ; la tarjeta tiene control de volumen
+soft_mul    dw 256                  ; factor por programa (256 = sin cambio)
+kb_e0       db 0
+keys_on     db 0
+old15       dd 0
 hda_fmt     dw 0
 hda_written dd 0                    ; bytes encolados
 hda_played  dd 0
@@ -80,6 +122,19 @@ int2f:
         jmp far [cs:old2f]
 
 entry:
+        inc byte [cs:busy]
+        push cs
+        call .disp
+        pushf
+        dec byte [cs:busy]
+        jnz .x
+        cmp byte [cs:vol_dirty], 0
+        je .x
+        call vol_apply
+.x:
+        popf
+        retf
+.disp:
         cmp byte [cs:dev_type], 4
         jne .go
         cmp ah, 1
@@ -115,12 +170,18 @@ entry:
         je f_stop
         cmp ah, 4
         je f_volume
+        cmp ah, 5
+        je f_setpct
+        cmp ah, 6
+        je f_getvol
+        cmp ah, 7
+        je f_mute
         stc
         retf
 
 f_info:
         mov al, [cs:dev_type]
-        mov bx, 0x0001
+        mov bx, VERSION
         push cs
         pop es
         mov di, name_none
@@ -228,66 +289,257 @@ f_stop:
         clc
         retf
 
+; 04h: AL = 0..31
 f_volume:
-        cmp byte [cs:dev_type], 2
-        ja .nsb
-        cmp byte [cs:dev_type], 0
-        je .r
-        call sb_volume
-        jmp .r
-.nsb:
-        cmp byte [cs:dev_type], 3
-        jne .r
         push ax
-        push dx
         and al, 31
-        jz .mute
+        mov ah, 100
+        mul ah
+        add ax, 15
         mov ah, 31
-        sub ah, al
-        mov al, ah                  ; misma atenuación en los dos canales
-        jmp .set
-.mute:
-        mov ax, 0x8000
-.set:
-        mov dx, [cs:nam]
-        add dx, 0x02
-        out dx, ax
-        pop dx
+        div ah
+        mov [cs:vol_pct], al
         pop ax
-.r:
+        jmp f_setpct.set
+; 05h: AL = 0..100
+f_setpct:
+        push ax
+        cmp al, 100
+        jbe .ok
+        mov al, 100
+.ok:
+        mov [cs:vol_pct], al
+        pop ax
+.set:
+        mov byte [cs:vol_mute], 0
+        mov byte [cs:vol_dirty], 1  ; se aplica al salir de la API
+        clc
+        retf
+; 07h: AL = 0 quitar el silencio, 1 ponerlo, 2 cambiarlo
+f_mute:
+        cmp al, 2
+        jb .put
+        mov al, [cs:vol_mute]
+        xor al, 1
+.put:
+        mov [cs:vol_mute], al
+        mov byte [cs:vol_dirty], 1
+; 06h: -> AL = volumen, AH = silencio
+f_getvol:
+        mov al, [cs:vol_pct]
+        mov ah, [cs:vol_mute]
         clc
         retf
 
+; llevar el volumen (vol_pct, vol_mute) a la tarjeta. Conserva todo.
+; La escala es la del AC'97: 100 % = 0 dB y 46,5 dB menos en el 1 %.
+vol_apply:
+        pushad
+        mov al, [cs:vol_pct]
+        mov byte [cs:vol_zero], 0
+        cmp byte [cs:vol_mute], 0
+        jne .zero
+        test al, al
+        jnz .nz
+.zero:
+        mov byte [cs:vol_zero], 1
+        xor al, al
+.nz:
+        mov ah, 100
+        sub ah, al
+        mov al, ah
+        mov ah, 15
+        mul ah
+        shr ax, 3                   ; (100 - %) * 15 / 8 cuartos de dB
+        mov [cs:att_q], al
+        ; factor por programa: silencio, o tarjetas sin control de volumen
+        mov bx, 256
+        cmp byte [cs:vol_zero], 0
+        je .sm1
+        xor bx, bx
+        jmp .sm
+.sm1:
+        cmp byte [cs:hw_vol], 0
+        jne .sm
+        xor ah, ah
+        mov cl, 24                  ; 6 dB = la mitad
+        div cl
+        mov cl, al
+        shr bx, cl
+        mov al, ah
+        xor ah, ah
+        mul bx
+        mov cx, 48
+        div cx
+        sub bx, ax
+.sm:
+        mov [cs:soft_mul], bx
+        mov byte [cs:vol_dirty], 0
+        mov al, [cs:dev_type]
+        test al, al
+        jz .r
+        cmp al, 2
+        jbe .sb
+        cmp al, 3
+        je .ac
+        ; HD Audio: hace falta el modo irreal; en modo protegido o V86 queda
+        ; pendiente para la próxima llamada
+        smsw ax
+        test al, 1
+        jz .h
+        mov byte [cs:vol_dirty], 1
+        jmp .r
+.h:
+        push fs
+        call a20_open
+        call unreal
+        call hda_volume
+        call a20_restore
+        pop fs
+        jmp .r
+.sb:
+        call sb_volume
+        jmp .r
+.ac:
+        ; maestro y auriculares: 1,5 dB por paso
+        mov ax, 0x8000
+        cmp byte [cs:vol_zero], 0
+        jne .aw
+        movzx ax, byte [cs:att_q]
+        add al, 3
+        mov cl, 6
+        div cl
+        mov ah, al
+.aw:
+        mov dx, [cs:nam]
+        add dx, 0x02
+        out dx, ax
+        add dx, 0x02
+        out dx, ax
+.r:
+        popad
+        ret
+
+; AX = muestra de 16 bits -> por el factor de volumen por programa
+vol_scale:
+        cmp word [cs:soft_mul], 256
+        je .r
+        push dx
+        imul word [cs:soft_mul]
+        mov al, ah
+        mov ah, dl
+        pop dx
+.r:
+        ret
+
+; ---- teclas de volumen: INT 15h AH=4Fh (la BIOS la llama desde INT 09h con
+; el código de la tecla en AL; se vuelve con CF=0 para que no la procese) ----
+int15:
+        cmp ah, 0x4F
+        je .key
+.chain:
+        jmp far [cs:old15]
+.key:
+        push ax
+        push bx
+        push ds
+        mov bx, 0x40
+        mov ds, bx
+        cmp al, 0xE0
+        jne .ne0
+        mov byte [cs:kb_e0], 1
+        jmp .pass
+.ne0:
+        mov ah, [cs:kb_e0]
+        mov byte [cs:kb_e0], 0
+        test ah, ah
+        jz .arrows
+        ; teclas multimedia: E0 30 subir, E0 2E bajar, E0 20 silencio
+        mov bl, al
+        and bl, 0x7F
+        cmp bl, 0x30
+        je .mm
+        cmp bl, 0x2E
+        je .mm
+        cmp bl, 0x20
+        jne .arrows
+.mm:
+        test al, 0x80               ; al soltarla: solo se consume
+        jnz .eat
+        cmp bl, 0x30
+        je .up
+        cmp bl, 0x2E
+        je .down
+        jmp .mute
+.arrows:
+        mov bl, [0x17]
+        and bl, 0x0C                ; Ctrl y Alt
+        cmp bl, 0x0C
+        jne .pass
+        cmp al, 0x48
+        je .up
+        cmp al, 0x50
+        je .down
+        cmp al, 0x4F
+        je .mute
+.pass:
+        pop ds
+        pop bx
+        pop ax
+        stc
+        jmp .chain
+.up:
+        mov al, 10
+        jmp .step
+.down:
+        mov al, -10
+.step:
+        mov byte [cs:vol_mute], 0
+        add al, [cs:vol_pct]
+        jns .s1
+        xor al, al
+.s1:
+        cmp al, 100
+        jbe .s2
+        mov al, 100
+.s2:
+        mov [cs:vol_pct], al
+        jmp .apply
+.mute:
+        xor byte [cs:vol_mute], 1
+.apply:
+        mov byte [cs:vol_dirty], 1
+        cmp byte [cs:busy], 0       ; en mitad de una llamada: al acabar
+        jne .eat
+        call vol_apply
+.eat:
+        and byte [0x96], 0xFD       ; la BIOS ya vio el prefijo E0
+        pop ds
+        pop bx
+        pop ax
+        push bp
+        mov bp, sp
+        and byte [bp+6], 0xFE       ; CF = 0: tecla consumida
+        pop bp
+        iret
+
 ; ---- conversión: p_src -> búfer de DMA wr_idx&3 (16 bits estéreo) ----
 ; -> BX = tramas escritas
+; Si la tarjeta no toca a la frecuencia de los datos (cur_rate != hw_rate:
+; códecs HD Audio que solo admiten 44,1 y 48 kHz, AC'97 de 48 kHz fijos) se
+; repiten o se saltan muestras con un acumulador de fase.
 fill_buffer:
+        push bp
         ; bytes por trama de entrada
-        mov cl, 1
+        mov cx, 1
         test byte [cs:p_fmt], 1
         jz .b
-        shl cl, 1
+        shl cx, 1
 .b:
         test byte [cs:p_fmt], 2
         jz .c
-        shl cl, 1
+        shl cx, 1
 .c:
-        movzx cx, cl
-        mov ax, [cs:p_left]
-        xor dx, dx
-        div cx                      ; AX = tramas disponibles
-        cmp ax, FRAMES
-        jbe .n
-        mov ax, FRAMES
-.n:
-        mov bx, ax
-        test ax, ax
-        jnz .go
-        mov word [cs:p_left], 0
-        ret
-.go:
-        push bx
-        mul cx
-        sub [cs:p_left], ax         ; bytes consumidos
         ; destino
         movzx di, byte [cs:wr_idx]
         and di, NBUF - 1
@@ -296,10 +548,15 @@ fill_buffer:
         push cs
         pop es
         lds si, [cs:p_src]
-        mov cx, bx
         mov dl, [cs:p_fmt]
+        xor bp, bp                  ; tramas escritas
         cld
 .l:
+        cmp [cs:p_left], cx
+        jb .eof
+        cmp bp, FRAMES
+        jae .end
+        push si
         test dl, 1
         jnz .s16
         lodsb
@@ -324,11 +581,32 @@ fill_buffer:
 .mono:
         mov ax, bx
 .st:
+        pop si
         xchg ax, bx
+        call vol_scale
         stosw                       ; izquierdo
         mov ax, bx
+        call vol_scale
         stosw                       ; derecho
-        loop .l
+        inc bp
+        ; avanzar en los datos: cur_rate tramas por cada hw_rate de salida
+        movzx eax, word [cs:cur_rate]
+        add eax, [cs:rs_acc]
+        movzx ebx, word [cs:hw_rate]
+.adv:
+        cmp eax, ebx
+        jb .na
+        sub eax, ebx
+        add si, cx
+        sub [cs:p_left], cx
+        cmp [cs:p_left], cx
+        jae .adv
+.na:
+        mov [cs:rs_acc], eax
+        jmp .l
+.eof:
+        mov word [cs:p_left], 0
+.end:
         ; normalizar el puntero de origen
         mov ax, ds
         mov bx, si
@@ -337,7 +615,8 @@ fill_buffer:
         and si, 15
         mov [cs:p_src], si
         mov [cs:p_src+2], ax
-        pop bx
+        mov bx, bp
+        pop bp
         ret
 
 ; ---- AC'97 ----
@@ -480,12 +759,18 @@ ac_stop:
 ac_set_rate:
         push ax
         push dx
+        mov word [cs:hw_rate], 48000
+        mov dword [cs:rs_acc], 0
         cmp byte [cs:vra], 0
-        je .r
+        je .r                       ; 48 kHz fijos: se cambia por programa
         mov ax, [cs:cur_rate]
         mov dx, [cs:nam]
         add dx, 0x2C
         out dx, ax
+        in ax, dx                   ; la que el códec ha puesto de verdad
+        test ax, ax
+        jz .r
+        mov [cs:hw_rate], ax
 .r:
         pop dx
         pop ax
@@ -761,21 +1046,45 @@ hda_param:
         mov ax, 0xF00
         jmp hda_verb
 
-; formato del flujo para la frecuencia DX (16 bits estéreo)
+; formato del flujo para los datos de frecuencia DX (16 bits estéreo): esa
+; misma si los DAC la admiten (hda_rates); si no, 44,1 kHz para 11,025 y
+; 22,05 kHz y 48 kHz para las demás, y fill_buffer cambia la frecuencia
 hda_rate_fmt:
         push si
+        push bx
+        mov bx, [cs:hda_rates]
         mov si, rate_tab
 .l:
         mov ax, [cs:si]
         test ax, ax
-        jz .last
-        cmp dx, ax
-        jbe .got
-        add si, 4
+        jz .alt
+        cmp ax, dx
+        jne .n
+        test bx, [cs:si+4]
+        jnz .got
+.n:
+        add si, 6
         jmp .l
-.last:
-        sub si, 4
+.alt:
+        mov si, rt_441
+        cmp dx, 11025
+        je .a1
+        cmp dx, 22050
+        jne .a2
+.a1:
+        test bl, 0x20
+        jnz .got
+.a2:
+        mov si, rt_48
+        test bl, 0x40
+        jnz .got
+        test bl, 0x20
+        jz .got
+        mov si, rt_441
 .got:
+        mov ax, [cs:si]
+        mov [cs:hw_rate], ax
+        mov dword [cs:rs_acc], 0
         ; ticks de una vuelta: NBUF*BUFSZ/4 tramas / Hz * 18,2
         push dx
         mov dx, 2
@@ -786,10 +1095,14 @@ hda_rate_fmt:
         mov ax, [cs:si+2]
         or ax, 0x0011
         mov [cs:hda_fmt], ax
+        pop bx
         pop si
         ret
-rate_tab    dw 8000, 0x0500, 11025, 0x4300, 16000, 0x0200, 22050, 0x4100
-            dw 24000, 0x0100, 32000, 0x0A00, 44100, 0x4000, 48000, 0x0000
+; frecuencia, formato del flujo, bit del parámetro 0Ah
+rate_tab    dw 8000, 0x0500, 0x01, 11025, 0x4300, 0x02, 16000, 0x0200, 0x04
+            dw 22050, 0x4100, 0x08, 32000, 0x0A00, 0x10
+rt_441      dw 44100, 0x4000, 0x20
+rt_48       dw 48000, 0x0000, 0x40
             dw 0
 
 ; posición reproducida (bytes, sin vueltas perdidas si se consulta a menudo)
@@ -841,10 +1154,7 @@ hda_play:
         call hda_stop
         mov [cs:cur_rate], dx
         call hda_rate_fmt
-        mov bl, [cs:hda_dac]
-        mov al, 2
-        mov cx, [cs:hda_fmt]
-        call hda_verb4
+        call hda_setfmt
 .loop:
         cmp word [cs:p_left], 0
         je .done
@@ -965,6 +1275,76 @@ hda_start:
         mov ax, [0x46C]
         pop ds
         mov [cs:hda_tick], ax
+        popad
+        ret
+
+; formato del flujo en todos los DAC en uso
+hda_setfmt:
+        push ax
+        push bx
+        push cx
+        push si
+        mov si, hda_dacs
+.l:
+        mov bl, [cs:si]
+        test bl, bl
+        jz .r
+        mov al, 2
+        mov cx, [cs:hda_fmt]
+        call hda_verb4
+        inc si
+        cmp si, hda_dacs + 4
+        jb .l
+.r:
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; volumen (att_q, vol_zero) a los amplificadores elegidos (hda_vols)
+hda_volume:
+        pushad
+        mov si, hda_vols
+        movzx di, byte [cs:hda_nvol]
+.l:
+        test di, di
+        jz .r
+        movzx ax, byte [cs:att_q]
+        mov bl, [cs:si+4]           ; tamaño del paso en cuartos de dB
+        mov bh, bl
+        shr bh, 1
+        add al, bh
+        adc ah, 0
+        div bl                      ; pasos por debajo de 0 dB
+        mov ah, [cs:si+2]
+        sub ah, al
+        jnc .g
+        xor ah, ah
+.g:
+        mov al, ah
+        cmp byte [cs:vol_zero], 0
+        je .nm
+        mov al, 0x80                ; silencio (y ganancia mínima)
+.nm:
+        movzx cx, al
+        mov al, [cs:si+1]
+        test al, 0x80
+        jz .in
+        or cx, 0xB000               ; salida, izquierdo y derecho
+        jmp .w
+.in:
+        mov ch, al
+        and ch, 0x0F
+        or ch, 0x70                 ; entrada n, izquierdo y derecho
+.w:
+        mov bl, [cs:si]
+        mov al, 3
+        call hda_verb4
+        add si, 6
+        dec di
+        jmp .l
+.r:
         popad
         ret
 
@@ -1680,6 +2060,10 @@ sb_fill:
 .mono:
         mov ax, bx
 .put:
+        call vol_scale
+        xchg ax, bx
+        call vol_scale
+        xchg ax, bx
         cmp dh, 2
         jne .p8
         stosw
@@ -1706,29 +2090,54 @@ sb_fill:
         pop bx
         ret
 
-; volumen AL = 0..31 (SB16: maestro 30h/31h; SB Pro: 22h)
+; volumen (att_q, vol_zero): SB16 maestro 30h/31h (2 dB por paso); SB Pro 22h.
+; Las SB sin mezclador (DSP 1.x y 2.x) van con el factor por programa.
 sb_volume:
         push ax
-        and al, 31
+        push cx
+        movzx ax, byte [cs:att_q]
         cmp byte [cs:dev_type], 2
         jne .pro
+        add al, 4
+        mov cl, 8
+        div cl
+        mov ah, 31
+        sub ah, al
+        jnc .v
+        xor ah, ah
+.v:
+        cmp byte [cs:vol_zero], 0
+        je .w
+        xor ah, ah
+.w:
+        mov al, ah
         shl al, 3
         mov ah, 0x30
         call sb_mix
         mov ah, 0x31
         call sb_mix
-        pop ax
-        ret
+        jmp .r
 .pro:
         cmp byte [cs:sb_major], 3
         jne .r
-        shr al, 1
-        mov ah, al
+        mov cl, 12
+        div cl
+        mov ah, 15
+        sub ah, al
+        jnc .p
+        xor ah, ah
+.p:
+        cmp byte [cs:vol_zero], 0
+        je .q
+        xor ah, ah
+.q:
+        mov al, ah
         shl ah, 4
         or al, ah
         mov ah, 0x22
         call sb_mix
 .r:
+        pop cx
         pop ax
         ret
 
@@ -1740,14 +2149,22 @@ resident_end:
 init:
         mov si, msg_title
         call puts
+        call parse_opts
+        cmp byte [opt_help], 0
+        je .nh
+        mov si, msg_usage
+        call puts
+        mov ax, 0x4C00
+        int 0x21
+.nh:
         mov ax, 0xD700
         int 0x2F
         cmp al, 0xFF
-        jne .notinst
-        mov si, msg_already
-        call puts
-        mov ax, 0x4C01
-        int 0x21
+        je installed
+        cmp byte [have_vol], 0
+        je .notinst
+        mov al, [opt_vol]
+        mov [vol_pct], al
 .notinst:
         ; búferes de DMA y lista de descriptores tras el código residente
         ; HDA pide 128 bytes de alineación en la dirección física
@@ -1764,8 +2181,8 @@ init:
         add ax, NBUF * BUFSZ
         mov [tsr_end], ax
         ; Sound Blaster (ISA) primero, salvo con /NOSB
-        call opt_nosb
-        jc .pci
+        cmp byte [opt_nosb], 0
+        jne .pci
         call sb_detect
         jc .pci
         call sb_install
@@ -1844,19 +2261,51 @@ init:
         call hex4
         mov si, msg_codec
         call puts
-        mov al, [hda_dac]
-        movzx ax, al
-        call hex4
+        mov al, [hda_cad]
+        add al, '0'
+        call putc
         mov si, msg_pin
         call puts
-        mov al, [pin_nid]
-        movzx ax, al
-        call hex4
+        mov si, hda_pins
+        movzx cx, byte [hda_npin]
+        jcxz .np
+.pl:
+        mov al, ' '
+        call putc
+        mov al, [si]
+        call hex2
+        add si, 5
+        loop .pl
+.np:
         mov si, msg_crlf2
         call puts
         jmp .install
 .hfail:
         mov si, msg_hdafail
+        call puts
+        ; datos para el diagnóstico: controlador, registros y códecs vistos
+        mov si, msg_i_pci + 2
+        call puts
+        mov bx, [pci_bdf]
+        mov ax, 0xB10A
+        xor di, di
+        int 0x1A
+        mov ax, cx
+        call hex4
+        mov al, ':'
+        call putc
+        shr ecx, 16
+        mov ax, cx
+        call hex4
+        mov si, msg_i_reg
+        call puts
+        mov eax, [hda_base]
+        call hex8
+        mov si, msg_i_sts
+        call puts
+        mov ax, [statests]
+        call hex4
+        mov si, msg_crlf2
         call puts
         jmp .nocard2
 .nocard:
@@ -1877,6 +2326,35 @@ init:
         mov ax, 0x4C03
         int 0x21
 .install:
+        ; volumen inicial (las SB sin mezclador, por programa)
+        cmp byte [dev_type], 2
+        ja .hw
+        cmp byte [sb_major], 3
+        jae .hw
+        mov byte [hw_vol], 0
+.hw:
+        call vol_apply
+        mov al, [opt_nokeys]
+        xor al, 1
+        mov [keys_on], al
+        cmp byte [opt_info], 0
+        je .ni
+        call show_info
+        jmp .keys
+.ni:
+        call show_vol
+.keys:
+        ; teclas de volumen
+        cmp byte [opt_nokeys], 0
+        jne .nk
+        mov ax, 0x3515
+        int 0x21
+        mov [old15], bx
+        mov [old15+2], es
+        mov dx, int15
+        mov ax, 0x2515
+        int 0x21
+.nk:
         ; enganchar INT 2Fh y quedar residente
         mov ax, 0x352F
         int 0x21
@@ -1898,6 +2376,717 @@ init:
         je sb_tsr
         mov ax, 0x3100
         int 0x21
+
+; ---- ya hay un HSPSND residente (INT 2Fh ha dejado ES:BX = su entrada) ----
+installed:
+        mov [drv], bx
+        mov [drv+2], es
+        mov ah, 0
+        call far [drv]
+        cmp bx, VERSION
+        je .vok
+        mov si, msg_oldver
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.vok:
+        mov al, [have_vol]
+        or al, [opt_info]
+        or al, [have_gpio]
+        or al, [have_eapd]
+        jnz .do
+        mov si, msg_already
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.do:
+        cmp byte [have_vol], 0
+        je .nv
+        mov al, [opt_vol]
+        mov ah, 5
+        call far [drv]
+.nv:
+        ; los datos del residente (mismo programa: mismas direcciones)
+        push ds
+        push cs
+        pop es
+        mov ds, [drv+2]
+        mov si, old2f
+        mov di, si
+        mov cx, resident_end - old2f
+        cld
+        rep movsb
+        pop ds
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        add eax, gdt_tbl
+        mov [gdtr+2], eax
+        ; GPIO y EAPD sobre la marcha
+        cmp byte [dev_type], 4
+        jne .ng
+        mov al, [have_gpio]
+        or al, [have_eapd]
+        jz .ng
+        smsw ax
+        test al, 1
+        jnz .ng
+        call a20_open
+        call unreal
+        cmp byte [have_gpio], 0
+        je .ne
+        call gpio_apply
+.ne:
+        cmp byte [have_eapd], 0
+        je .nx
+        call eapd_apply
+.nx:
+        call a20_restore
+.ng:
+        cmp byte [opt_info], 0
+        je .sv
+        call show_info
+        jmp .x
+.sv:
+        call show_vol
+.x:
+        mov ax, 0x4C00
+        int 0x21
+
+; ---- opciones de la línea de órdenes ----
+parse_opts:
+        mov si, 0x81
+.l:
+        lodsb
+        cmp al, 13
+        je .end
+        cmp al, '/'
+        jne .l
+        mov bx, opt_tab
+.t:
+        mov di, [bx]
+        test di, di
+        jz .bad
+        push si
+.c:
+        mov ah, [di]
+        test ah, ah
+        jz .match
+        lodsb
+        cmp al, 'a'
+        jb .u
+        cmp al, 'z'
+        ja .u
+        sub al, 0x20
+.u:
+        cmp al, ah
+        jne .nomatch
+        inc di
+        jmp .c
+.nomatch:
+        pop si
+        add bx, 4
+        jmp .t
+.match:
+        add sp, 2
+        call [bx+2]
+        jmp .l
+.bad:
+        mov si, msg_badopt
+        call puts
+        mov si, msg_usage
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.end:
+        ret
+o_nosb:
+        mov byte [opt_nosb], 1
+        ret
+o_nogpio:
+        mov byte [opt_nogpio], 1
+        ret
+o_nokeys:
+        mov byte [opt_nokeys], 1
+        ret
+o_info:
+        mov byte [opt_info], 1
+        ret
+o_help:
+        mov byte [opt_help], 1
+        ret
+o_vol:
+        xor ax, ax
+        xor cx, cx
+.d:
+        mov cl, [si]
+        sub cl, '0'
+        jb .e
+        cmp cl, 9
+        ja .e
+        imul ax, ax, 10
+        add ax, cx
+        cmp ax, 100
+        jbe .k
+        mov ax, 100
+.k:
+        inc si
+        jmp .d
+.e:
+        mov [opt_vol], al
+        mov byte [have_vol], 1
+        ret
+o_gpio:
+        xor ax, ax
+.d:
+        mov cl, [si]
+        cmp cl, 'a'
+        jb .u
+        sub cl, 0x20
+.u:
+        sub cl, '0'
+        jb .e
+        cmp cl, 9
+        jbe .k
+        sub cl, 7
+        cmp cl, 10
+        jb .e
+        cmp cl, 15
+        ja .e
+.k:
+        shl al, 4
+        or al, cl
+        inc si
+        jmp .d
+.e:
+        mov [opt_gpio], al
+        mov byte [have_gpio], 1
+        ret
+o_eapd:
+        mov al, [si]
+        sub al, '0'
+        and al, 1
+        mov [opt_eapd], al
+        mov byte [have_eapd], 1
+        ret
+
+opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys
+            dw k_vol, o_vol, k_info, o_info, k_diag, o_info
+            dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, 0
+k_nosb      db "NOSB", 0
+k_nogpio    db "NOGPIO", 0
+k_nokeys    db "NOTECLAS", 0
+k_vol       db "VOL:", 0
+k_info      db "INFO", 0
+k_diag      db "DIAG", 0
+k_gpio      db "GPIO:", 0
+k_eapd      db "EAPD:", 0
+k_help      db "?", 0
+opt_nosb    db 0
+opt_nogpio  db 0
+opt_nokeys  db 0
+opt_info    db 0
+opt_help    db 0
+have_vol    db 0
+opt_vol     db 0
+have_gpio   db 0
+opt_gpio    db 0
+have_eapd   db 0
+opt_eapd    db 1
+drv         dd 0
+
+; ---- «Volumen: 80 %» ----
+show_vol:
+        mov si, msg_vol
+        call puts
+        movzx ax, byte [vol_pct]
+        call pdec
+        mov si, msg_pct
+        call puts
+        cmp byte [vol_mute], 0
+        je .n
+        mov si, msg_muted
+        call puts
+.n:
+        mov si, msg_crlf2
+        jmp puts
+
+; ---- /INFO ----
+show_info:
+        mov si, msg_i_card
+        call puts
+        movzx bx, byte [dev_type]
+        shl bx, 1
+        mov si, [i_names+bx]
+        cmp byte [dev_type], 2
+        ja .pci
+        cmp byte [dev_type], 0
+        je .none
+        call sb_print
+        cmp byte [sb_major], 3
+        jb .end
+        mov si, msg_i_sbmix
+        call puts
+        mov al, 0x30
+        cmp byte [dev_type], 2
+        je .m1
+        mov al, 0x22
+.m1:
+        call sb_mixrd
+        call hex2
+        mov si, msg_i_sbvoz
+        call puts
+        mov al, 0x32
+        cmp byte [dev_type], 2
+        je .m2
+        mov al, 0x04
+.m2:
+        call sb_mixrd
+        call hex2
+        mov si, msg_crlf2
+        call puts
+        jmp .end
+.none:
+        call puts
+        mov si, msg_crlf2
+        call puts
+        jmp .end
+.pci:
+        call puts
+        mov si, msg_i_pci
+        call puts
+        mov bx, [pci_bdf]
+        mov ax, 0xB10A
+        xor di, di
+        int 0x1A
+        mov ax, cx
+        call hex4
+        mov al, ':'
+        call putc
+        shr ecx, 16
+        mov ax, cx
+        call hex4
+        mov si, msg_i_en
+        call puts
+        mov al, [pci_bdf+1]
+        call hex2
+        mov al, ':'
+        call putc
+        mov al, [pci_bdf]
+        shr al, 3
+        call hex2
+        mov al, '.'
+        call putc
+        mov al, [pci_bdf]
+        and al, 7
+        add al, '0'
+        call putc
+        cmp byte [dev_type], 4
+        je .hda
+        ; AC'97
+        mov si, msg_i_io
+        call puts
+        mov ax, [nam]
+        call hex4
+        mov al, '/'
+        call putc
+        mov ax, [nabm]
+        call hex4
+        mov si, msg_i_accodec
+        call puts
+        mov dx, [nam]
+        add dx, 0x7C
+        in ax, dx
+        call hex4
+        mov al, ':'
+        call putc
+        mov dx, [nam]
+        add dx, 0x7E
+        in ax, dx
+        call hex4
+        mov si, msg_i_acmas
+        call puts
+        mov dx, [nam]
+        add dx, 0x02
+        in ax, dx
+        call hex4
+        mov si, msg_i_achp
+        call puts
+        mov dx, [nam]
+        add dx, 0x04
+        in ax, dx
+        call hex4
+        mov si, msg_i_acpcm
+        call puts
+        mov dx, [nam]
+        add dx, 0x18
+        in ax, dx
+        call hex4
+        mov si, msg_crlf2
+        call puts
+        jmp .end
+.hda:
+        mov si, msg_i_reg
+        call puts
+        mov eax, [hda_base]
+        call hex8
+        mov si, msg_crlf2
+        call puts
+        call hda_info
+.end:
+        call show_vol
+        mov si, msg_i_keys
+        cmp byte [keys_on], 0
+        jne .k
+        mov si, msg_i_nokeys
+.k:
+        jmp puts
+
+; códec HD Audio: lo que hay y lo que se ha elegido (lee el códec en vivo)
+hda_info:
+        smsw ax
+        test al, 1
+        jz .rm
+        mov si, msg_i_v86
+        jmp puts
+.rm:
+        call a20_open
+        call unreal
+        mov dx, 0x0E
+        call hrd16
+        mov [statests], ax
+        mov al, [hda_cad]
+        mov [sv_cad], al
+        xor cl, cl
+.c:
+        mov ax, [statests]
+        shr ax, cl
+        test al, 1
+        jz .cn
+        mov [hda_cad], cl
+        push cx
+        xor bl, bl
+        xor cl, cl
+        call hda_param
+        pop cx
+        jc .cn
+        push eax
+        mov si, msg_i_codec
+        call puts
+        mov al, cl
+        add al, '0'
+        call putc
+        mov al, ':'
+        call putc
+        mov al, ' '
+        call putc
+        pop eax
+        push eax
+        shr eax, 16
+        call hex4
+        mov al, ':'
+        call putc
+        pop eax
+        call hex4
+        cmp cl, [sv_cad]
+        jne .cl
+        mov si, msg_i_used
+        call puts
+        mov ax, [hda_rates]
+        call hex4
+.cl:
+        mov si, msg_crlf2
+        call puts
+.cn:
+        inc cl
+        cmp cl, 15
+        jb .c
+        mov al, [sv_cad]
+        mov [hda_cad], al
+        ; grupo de función de audio
+        call afg_range
+        mov si, msg_i_afg
+        call puts
+        mov al, [hda_afg]
+        call hex2
+        mov si, msg_i_nodes
+        call puts
+        mov al, [w_first]
+        call hex2
+        mov al, '-'
+        call putc
+        mov al, [w_first]
+        add al, [w_count]
+        dec al
+        call hex2
+        mov si, msg_i_subsys
+        call puts
+        mov bl, [hda_afg]
+        mov ax, 0xF20
+        xor cl, cl
+        call hda_verb
+        call hex8
+        mov si, msg_i_gpio
+        call puts
+        mov bl, [hda_afg]
+        mov cl, 0x11
+        call hda_param
+        movzx ax, al
+        push ax
+        call pdec
+        pop ax
+        test ax, ax
+        jz .nog
+        mov si, msg_i_gdat
+        call puts
+        mov ax, 0xF15
+        call .gp
+        mov si, msg_i_gmask
+        call puts
+        mov ax, 0xF16
+        call .gp
+        mov si, msg_i_gdir
+        call puts
+        mov ax, 0xF17
+        call .gp
+.nog:
+        mov si, msg_crlf2
+        call puts
+        ; pines que pueden sacar señal
+        mov byte [nc_cnt], 0
+        mov bl, [w_first]
+        movzx cx, byte [w_count]
+.w:
+        push cx
+        call w_type
+        cmp al, 4
+        jne .wn
+        mov cl, 0x0C
+        call hda_param
+        mov [pincaps], eax
+        test al, 0x10
+        jz .wn
+        mov ax, 0xF1C
+        xor cl, cl
+        call hda_verb
+        mov [pincfg], eax
+        ; ¿en uso?
+        mov si, hda_pins
+        movzx cx, byte [hda_npin]
+.u:
+        jcxz .unused
+        cmp [si], bl
+        je .used
+        add si, 5
+        dec cx
+        jmp .u
+.unused:
+        xor si, si
+        mov eax, [pincfg]
+        shr eax, 30
+        cmp al, 1
+        jne .used
+        movzx di, byte [nc_cnt]
+        cmp di, 16
+        jae .wn
+        mov [nc_buf+di], bl
+        inc byte [nc_cnt]
+        jmp .wn
+.used:
+        push si
+        mov si, msg_i_pin
+        call puts
+        mov al, bl
+        call hex2
+        mov al, ':'
+        call putc
+        mov al, ' '
+        call putc
+        mov eax, [pincfg]
+        shr eax, 20
+        and ax, 0x0F
+        shl ax, 1
+        mov si, ax
+        mov si, [i_devs+si]
+        call puts
+        mov al, ','
+        call putc
+        mov al, ' '
+        call putc
+        mov eax, [pincfg]
+        shr eax, 30
+        shl ax, 1
+        mov si, ax
+        mov si, [i_conns+si]
+        call puts
+        mov al, ' '
+        call putc
+        mov al, '('
+        call putc
+        mov eax, [pincfg]
+        call hex8
+        mov al, ')'
+        call putc
+        test dword [pincaps], 0x10000
+        jz .noe
+        mov si, msg_i_eapd
+        call puts
+        mov ax, 0xF0C
+        xor cl, cl
+        call hda_verb
+        shr al, 1
+        and al, 1
+        add al, '0'
+        call putc
+.noe:
+        pop si
+        test si, si
+        jnz .path
+        mov si, msg_i_unused
+        call puts
+        jmp .pe
+.path:
+        push si
+        mov si, msg_i_arrow
+        call puts
+        pop si
+        mov cx, 5
+.pp:
+        mov al, [si]
+        test al, al
+        jz .pe
+        call hex2
+        inc si
+        dec cx
+        jz .pe
+        cmp byte [si], 0
+        je .pe
+        mov al, '>'
+        call putc
+        jmp .pp
+.pe:
+        mov si, msg_crlf2
+        call puts
+.wn:
+        pop cx
+        inc bl
+        dec cx
+        jnz .w
+        ; pines sin conectar
+        cmp byte [nc_cnt], 0
+        je .vols
+        mov si, msg_i_nc
+        call puts
+        mov si, nc_buf
+        movzx cx, byte [nc_cnt]
+.ncl:
+        mov al, ' '
+        call putc
+        lodsb
+        call hex2
+        loop .ncl
+        mov si, msg_crlf2
+        call puts
+.vols:
+        mov si, hda_vols
+        movzx cx, byte [hda_nvol]
+        test cx, cx
+        jnz .vl
+        mov si, msg_i_soft
+        call puts
+        jmp .x
+.vl:
+        push cx
+        push si
+        mov si, msg_i_amp
+        call puts
+        pop si
+        mov al, [si]
+        call hex2
+        mov dx, msg_i_out
+        test byte [si+1], 0x80
+        jnz .vo
+        mov dx, msg_i_in
+.vo:
+        push si
+        mov si, dx
+        call puts
+        pop si
+        mov al, [si+2]
+        call hex2
+        push si
+        mov si, msg_i_of
+        call puts
+        pop si
+        mov al, [si+3]
+        call hex2
+        push si
+        mov si, msg_i_stp
+        call puts
+        pop si
+        movzx ax, byte [si+4]
+        mov bl, 4
+        div bl
+        push ax
+        xor ah, ah
+        call pdec
+        mov al, ','
+        call putc
+        pop ax
+        mov al, ah
+        mov ah, 25
+        mul ah
+        cmp ax, 10
+        jae .f2
+        push ax
+        mov al, '0'
+        call putc
+        pop ax
+.f2:
+        call pdec
+        push si
+        mov si, msg_i_now
+        call puts
+        pop si
+        ; valor actual (canal izquierdo)
+        mov bl, [si]
+        mov cx, 0xA000
+        mov al, [si+1]
+        test al, 0x80
+        jnz .rd
+        mov ch, al
+        and ch, 0x0F
+        or ch, 0x20
+        xor cl, cl
+.rd:
+        mov al, 0x0B
+        call hda_verb4
+        call hex2
+        push si
+        mov si, msg_crlf2
+        call puts
+        pop si
+        pop cx
+        add si, 6
+        dec cx
+        jnz .vl
+.x:
+        jmp a20_restore
+.gp:
+        mov bl, [hda_afg]
+        xor cl, cl
+        call hda_verb
+        jmp hex2
+
+; nodos del grupo de audio -> w_first, w_count
+afg_range:
+        mov bl, [hda_afg]
+        mov cl, 0x04
+        call hda_param
+        mov [w_count], al
+        shr eax, 16
+        mov [w_first], al
+        ret
 
 ; =============================================================================
 ;  Sound Blaster - detección e instalación (se descarta)
@@ -2286,7 +3475,27 @@ sb_install:
         mov ah, 0x25
         int 0x21
         call sb_unmask
-        ; «Sound Blaster 16 en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)»
+        ; la voz (PCM) al máximo: el reinicio del mezclador la deja a -14 dB;
+        ; el volumen se lleva con el maestro
+        cmp byte [sb_major], 3
+        jb .nomix
+        mov ax, 0x04FF              ; SB Pro: voz
+        cmp byte [dev_type], 2
+        jne .vz
+        mov ax, 0x32F8              ; SB16: voz izquierda y derecha
+        call sb_mix
+        mov ax, 0x33F8
+.vz:
+        call sb_mix
+.nomix:
+        call sb_print
+        cmp byte [bl_have], 0
+        jne .r
+        call sb_set_blaster
+.r:
+        ret
+; «Sound Blaster 16 en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)»
+sb_print:
         mov si, name_sb
         cmp byte [dev_type], 2
         jne .n
@@ -2326,12 +3535,7 @@ sb_install:
         mov al, ah
         call putc
         mov si, msg_sb_end
-        call puts
-        cmp byte [bl_have], 0
-        jne .r
-        call sb_set_blaster
-.r:
-        ret
+        jmp puts
 
 ; BLASTER=A220 I5 D1 [H5] T6 en el entorno del intérprete que nos ejecuta
 sb_set_blaster:
@@ -2566,26 +3770,7 @@ bl_len      dw 0
 bl_size     dw 0
 bl_text     times 40 db 0
 
-; ¿/NOSB en la línea de órdenes? -> CF
-opt_nosb:
-        mov si, 0x81
-.l:
-        lodsb
-        cmp al, 13
-        je .no
-        cmp al, '/'
-        jne .l
-        mov al, [si]
-        and al, 0xDF
-        cmp al, 'N'
-        jne .l
-        stc
-        ret
-.no:
-        clc
-        ret
-
-; poner en marcha el controlador HD Audio y buscar una salida en el códec
+; poner en marcha el controlador HD Audio y buscar las salidas del códec
 hda_init:
         smsw ax
         test al, 1
@@ -2660,17 +3845,9 @@ hda_init:
         call delay
         mov dx, 0x0E
         call hrd16
+        mov [statests], ax
         test ax, ax
         jz .fail
-        xor cl, cl
-.cad:
-        test al, 1
-        jnz .gotcad
-        shr ax, 1
-        inc cl
-        jmp .cad
-.gotcad:
-        mov [hda_cad], cl
         ; primer flujo de salida
         mov dx, 0x00
         call hrd16
@@ -2679,237 +3856,678 @@ hda_init:
         shl ax, 5
         add ax, 0x80
         mov [hda_sd], ax
-        ; grupo de función de audio
+        mov dx, 48000
+        mov [cur_rate], dx
+        call hda_rate_fmt
+        ; el primer códec con un grupo de audio y una salida analógica (puede
+        ; haber también un módem o el HDMI)
+        xor cl, cl
+.cad:
+        mov ax, [statests]
+        shr ax, cl
+        test al, 1
+        jz .cn
+        mov [hda_cad], cl
+        push cx
+        call codec_setup
+        pop cx
+        jnc .ok
+.cn:
+        inc cl
+        cmp cl, 15
+        jb .cad
+.fail:
+        call a20_restore
+        stc
+        ret
+.ok:
+        call a20_restore
+        clc
+        ret
+
+; preparar el códec hda_cad -> CF si no tiene salida analógica
+codec_setup:
+        ; grupo de función de audio (tipo 1) entre los del códec
         xor bl, bl
         mov cl, 0x04
         call hda_param
-        jc .fail
-        mov bl, al                  ; (los grupos son pocos: primer nodo)
+        jc .no
+        mov ch, al
         shr eax, 16
         mov bl, al
-        mov [afg_nid], bl
+.fg:
+        test ch, ch
+        jz .no
+        mov cl, 0x05
+        call hda_param
+        jc .no
+        cmp al, 1
+        je .afg
+        inc bl
+        dec ch
+        jmp .fg
+.no:
+        stc
+        ret
+.afg:
+        mov [hda_afg], bl
         mov ax, 0x705
         xor cl, cl
         call hda_verb               ; encendido D0
         call delay                  ; el códec tarda en despertar
         call delay
-        mov bl, [afg_nid]
-        mov cl, 0x04
-        call hda_param
-        mov [w_count], al
-        shr eax, 16
-        mov [w_first], al
-        ; recorrer los widgets: primer DAC y primer pin de salida conectado
-        mov byte [hda_dac], 0
-        mov byte [pin_nid], 0
+        call afg_range
+        ; GPIO: en muchos portátiles encienden el amplificador de altavoces
+        call gpio_apply
+        ; salidas: altavoces internos, auriculares y línea, todas a la vez
+        xor al, al
+        mov [hda_npin], al
+        mov [hda_nvol], al
+        mov [hda_dac], al
+        mov [no_hw], al
+        mov dword [hda_dacs], 0
+        mov word [new_rates], 0x7FF
+        mov byte [prio], 0
+.pr:
         mov bl, [w_first]
         movzx cx, byte [w_count]
-.wl:
+        jcxz .prn
+.w:
         push cx
+        cmp byte [hda_npin], 4
+        jae .wn
+        call pin_class
+        cmp al, [prio]
+        jne .wn
+        mov [p_node], bl
+        mov byte [lvl], 0
         push bx
-        mov cl, 0x09
-        call hda_param
-        shr eax, 20
-        and al, 0x0F
+        call find_dac
         pop bx
-        cmp al, 0
-        jne .notdac
-        cmp byte [hda_dac], 0
-        jne .next
-        mov [hda_dac], bl
-        jmp .next
-.notdac:
-        cmp al, 4
-        jne .next
-        cmp byte [pin_nid], 0
-        jne .next
-        push bx
-        mov cl, 0x0C
-        call hda_param
-        pop bx
-        test al, 0x10               ; puede sacar señal
-        jz .next
-        push bx
-        mov ax, 0xF1C
-        xor cl, cl
-        call hda_verb
-        pop bx
-        mov ecx, eax
-        shr eax, 30
-        cmp al, 1                   ; sin conexión física
-        je .next
-        ; solo línea (0), altavoz (1) o auriculares (2): el primer pin de
-        ; muchos códecs es la salida digital (S/PDIF) o un conector de
-        ; entrada que también puede sacar señal
-        shr ecx, 20
-        and cl, 0x0F
-        cmp cl, 2
-        ja .next
-        mov [pin_nid], bl
-.next:
+        jc .wn
+        call path_apply
+        mov bl, [p_node]
+.wn:
         pop cx
         inc bl
-        loop .wl
-        cmp byte [hda_dac], 0
-        je .fail
-        ; ruta pin -> DAC (directa o a través de un mezclador/selector)
-        cmp byte [pin_nid], 0
-        je .dacs
-        call hda_route
-.dacs:
-        ; DAC: encendido, flujo 1 canal 0, formato y amplificador abierto
-        mov bl, [hda_dac]
-        mov ax, 0x705
-        xor cl, cl
-        call hda_verb
-        mov bl, [hda_dac]
-        mov ax, 0x706
-        mov cl, 0x10
-        call hda_verb
-        mov dx, 48000
-        mov [cur_rate], dx
-        call hda_rate_fmt
-        mov bl, [hda_dac]
-        mov al, 2
-        mov cx, [hda_fmt]
-        call hda_verb4
-        mov bl, [hda_dac]
-        call hda_unmute_out
-        mov bl, [pin_nid]
-        test bl, bl
-        jz .ok
-        mov ax, 0x705
-        xor cl, cl
-        call hda_verb
-        mov bl, [pin_nid]
-        mov ax, 0x707
-        mov cl, 0xC0                ; salida activa (y de auriculares)
-        call hda_verb
-        mov bl, [pin_nid]
-        mov ax, 0x70C
-        mov cl, 0x02                ; EAPD
-        call hda_verb
-        mov bl, [pin_nid]
-        call hda_unmute_out
-.ok:
-        call a20_restore
+        loop .w
+.prn:
+        inc byte [prio]
+        cmp byte [prio], 3
+        jb .pr
+        ja .picked
+        cmp byte [hda_npin], 0      ; sin ninguna «conectada»: las demás
+        je .pr
+.picked:
+        cmp byte [hda_npin], 0
+        jne .vol
+        ; sin pin utilizable: al menos el primer DAC analógico
+        mov bl, [w_first]
+        movzx cx, byte [w_count]
+        test cx, cx
+        jz .no
+.d:
+        call w_type
+        test ax, ax
+        jz .dac
+        inc bl
+        loop .d
+        jmp .no
+.dac:
+        call dac_add
+        mov byte [path_vol], 0
+        test byte [cur_caps], 0x04
+        jz .dv
+        mov dl, 0x80
+        call amp_setup
+.dv:
+        cmp byte [path_vol], 0
+        jne .vol
+        mov byte [no_hw], 1
+.vol:
+        ; si algún camino no tiene amplificador regulable, el volumen se
+        ; hace por programa y los amplificadores quedan en 0 dB
+        mov byte [hw_vol], 1
+        cmp byte [no_hw], 0
+        je .eapd
+        mov byte [hw_vol], 0
+        mov si, hda_vols
+        movzx cx, byte [hda_nvol]
+        jcxz .nv
+.fx:
+        push cx
+        mov bl, [si]
+        mov dl, [si+1]
+        mov al, [si+2]
+        mov [ac_off], al
+        call amp_fixed
+        pop cx
+        add si, 6
+        loop .fx
+.nv:
+        mov byte [hda_nvol], 0
+.eapd:
+        call eapd_apply
+        ; frecuencias comunes a los DAC en uso (si no dicen nada: 44,1 y 48)
+        mov ax, [new_rates]
+        test ax, ax
+        jnz .rs
+        mov ax, 0x0060
+.rs:
+        mov [hda_rates], ax
+        mov word [cur_rate], 0      ; el formato se pone al empezar a tocar
         clc
         ret
-.fail:
-        call a20_restore
-        stc
-        ret
 
-; BL = nodo: abrir su amplificador de salida (ganancia 0 dB)
-hda_unmute_out:
-        push bx
-        mov cl, 0x12
+; GPIO del grupo de audio: salidas y con el valor pedido (todas a 1)
+gpio_apply:
+        cmp byte [opt_nogpio], 0
+        jne .r
+        mov bl, [hda_afg]
+        mov cl, 0x11
         call hda_param
-        and ax, 0x7F                ; desplazamiento = 0 dB
-        mov cx, 0xB000
-        or cx, ax
-        pop bx
-        mov al, 3
-        jmp hda_verb4
-
-; buscar el DAC en la lista de conexiones del pin (o un nivel más abajo)
-hda_route:
-        mov bl, [pin_nid]
-        mov ax, 0xF02
-        xor cl, cl
-        call hda_verb
-        mov [conn], eax
-        xor si, si
-.e:
-        cmp si, 4
-        jae .r
-        mov bl, [conn+si]
-        test bl, bl
-        jz .r
-        push si
-        mov cl, 0x09
-        call hda_param
-        pop si
-        shr eax, 20
-        and al, 0x0F
+        jc .r
         test al, al
-        jnz .mix
-        ; conexión directa al DAC
-        mov [hda_dac], bl
-        mov bl, [pin_nid]
-        mov ax, 0x701
-        mov cx, si
+        jz .r
+        mov cl, al
+        cmp cl, 8
+        jbe .c
+        mov cl, 8
+.c:
+        mov dx, 1
+        shl dx, cl
+        dec dx                      ; DL = máscara de las que hay
+        mov dh, dl
+        cmp byte [have_gpio], 0
+        je .d
+        and dh, [opt_gpio]
+.d:
+        mov ax, 0x716               ; máscara de activación
+        mov cl, dl
         call hda_verb
-        ret
-.mix:
-        cmp al, 2
-        je .level2
-        cmp al, 3
-        jne .n
-.level2:
-        ; mezclador o selector: ¿lleva a un DAC?
-        mov [mid], bl
-        push si
-        mov ax, 0xF02
-        xor cl, cl
+        mov ax, 0x717               ; dirección: salidas
+        mov cl, dl
         call hda_verb
-        mov [conn2], eax
-        pop si
-        xor di, di
-.e2:
-        cmp di, 4
-        jae .n
-        mov bl, [conn2+di]
-        test bl, bl
-        jz .n
-        push si
-        push di
-        mov cl, 0x09
-        call hda_param
-        pop di
-        pop si
-        shr eax, 20
-        and al, 0x0F
-        jnz .n2
-        mov [hda_dac], bl
-        mov bl, [pin_nid]
-        mov ax, 0x701
-        mov cx, si
+        mov ax, 0x715               ; datos
+        mov cl, dh
         call hda_verb
-        mov bl, [mid]
-        mov ax, 0x701
-        mov cx, di
-        call hda_verb
-        mov bl, [mid]
-        mov ax, 0x705
-        xor cl, cl
-        call hda_verb
-        ; entrada del mezclador abierta y su salida también
-        mov bl, [mid]
-        mov al, 3
-        mov cx, di
-        shl cx, 8
-        or cx, 0x7000
-        call hda_verb4
-        mov bl, [mid]
-        call hda_unmute_out
-        ret
-.n2:
-        inc di
-        jmp .e2
-.n:
-        inc si
-        jmp .e
 .r:
         ret
 
-afg_nid     db 0
-pin_nid     db 0
+; EAPD (amplificador externo) en todos los pines de salida que lo tengan
+eapd_apply:
+        call afg_range
+        mov bl, [w_first]
+        movzx cx, byte [w_count]
+        jcxz .r
+.w:
+        push cx
+        call w_type
+        cmp al, 4
+        jne .n
+        mov cl, 0x0C
+        call hda_param
+        test eax, 0x10000
+        jz .n
+        test al, 0x10
+        jz .n
+        mov ax, 0xF0C
+        xor cl, cl
+        call hda_verb
+        jc .n
+        and al, 0x05                ; BTL e intercambio, como estén
+        cmp byte [opt_eapd], 0
+        je .wr
+        or al, 0x02
+.wr:
+        mov cl, al
+        mov ax, 0x70C
+        call hda_verb
+.n:
+        pop cx
+        inc bl
+        loop .w
+.r:
+        ret
+
+; BL = nodo -> AL = tipo (FFh si falla), AH = 1 si es digital; cur_caps
+w_type:
+        push cx
+        mov cl, 0x09
+        call hda_param
+        pop cx
+        jc .e
+        mov [cur_caps], eax
+        shr eax, 20
+        and ax, 0x0F
+        test byte [cur_caps+1], 0x02
+        jz .x
+        mov ah, 1
+.x:
+        ret
+.e:
+        mov ax, 0xFFFF
+        ret
+
+; BL = nodo -> AL = clase de salida: 0 altavoz, 1 auriculares, 2 línea,
+; 3 de reserva (sin conectar o sin configurar), FFh no vale
+pin_class:
+        call w_type
+        cmp ax, 4                   ; pin analógico
+        jne .no
+        mov cl, 0x0C
+        call hda_param
+        jc .no
+        test al, 0x10               ; puede sacar señal
+        jz .no
+        mov ax, 0xF1C
+        xor cl, cl
+        call hda_verb
+        jc .no
+        mov ecx, eax
+        shr ecx, 20
+        and cl, 0x0F                ; dispositivo
+        cmp cl, 2
+        jbe .dev
+        test eax, eax               ; sin configurar: de reserva
+        jnz .no
+        mov al, 3
+        ret
+.dev:
+        shr eax, 30
+        cmp al, 1                   ; «sin conexión física»
+        mov al, 3
+        je .r
+        mov al, 0
+        cmp cl, 1
+        je .r
+        mov al, 1
+        cmp cl, 2
+        je .r
+        mov al, 2
+.r:
+        ret
+.no:
+        mov al, 0xFF
+        ret
+
+; lista de conexiones del nodo BL en DI (hasta CONNMAX) -> CX = cuántas
+CONNMAX     equ 24
+get_conn:
+        push bx
+        push dx
+        push si
+        push bp
+        xor bp, bp
+        mov cl, 0x0E
+        call hda_param
+        jc .done
+        mov dl, al
+        and dl, 0x7F                ; entradas
+        mov dh, al
+        and dh, 0x80                ; forma larga (16 bits por entrada)
+        xor si, si
+        mov byte [gc_prev], 0
+.blk:
+        mov cx, si
+        cmp cl, dl
+        jae .done
+        mov ax, 0xF02
+        call hda_verb
+        jc .done
+        mov byte [gc_k], 4
+        test dh, dh
+        jz .ent
+        mov byte [gc_k], 2
+.ent:
+        push eax
+        test dh, dh
+        jnz .long
+        mov ah, al
+        and ax, 0x807F
+        jmp .have
+.long:
+        and ah, 0x80
+.have:
+        test ah, ah                 ; rango: desde la anterior hasta esta
+        jz .one
+        test bp, bp
+        jz .one
+        mov ah, [gc_prev]
+.rg:
+        inc ah
+        cmp ah, al
+        jae .one
+        xchg al, ah
+        call .add
+        xchg al, ah
+        jmp .rg
+.one:
+        call .add
+        mov [gc_prev], al
+        pop eax
+        shr eax, 8
+        test dh, dh
+        jz .sh
+        shr eax, 8
+.sh:
+        inc si
+        mov cx, si
+        cmp cl, dl
+        jae .done
+        dec byte [gc_k]
+        jnz .ent
+        jmp .blk
+.add:
+        cmp bp, CONNMAX
+        jae .ar
+        mov [ds:di+bp], al
+        inc bp
+.ar:
+        ret
+.done:
+        mov cx, bp
+        pop bp
+        pop si
+        pop dx
+        pop bx
+        ret
+
+; camino desde el nodo BL (nivel lvl; el pin es el 0) hasta un DAC analógico,
+; directo o por mezcladores y selectores -> CF=0: p_node, p_idx, plen
+find_dac:
+        push si
+        push di
+        push dx
+        movzx di, byte [lvl]
+        imul di, di, CONNMAX
+        add di, conn_bufs
+        call get_conn
+        mov dx, cx
+        ; primero, un DAC conectado directamente
+        xor si, si
+.d:
+        cmp si, dx
+        jae .m0
+        mov bx, di
+        mov bl, [bx+si]
+        call w_type
+        test ax, ax
+        jnz .dn
+        call .take
+        mov al, [lvl]
+        add al, 2
+        mov [plen], al
+        clc
+        jmp .out
+.dn:
+        inc si
+        jmp .d
+.m0:
+        cmp byte [lvl], 2
+        jae .nf
+        xor si, si
+.m:
+        cmp si, dx
+        jae .nf
+        mov bx, di
+        mov bl, [bx+si]
+        call w_type
+        cmp al, 2
+        je .rec
+        cmp al, 3
+        jne .mn
+.rec:
+        call .take
+        inc byte [lvl]
+        call find_dac
+        dec byte [lvl]              ; (no toca CF)
+        jnc .out
+.mn:
+        inc si
+        jmp .m
+.nf:
+        stc
+.out:
+        pop dx
+        pop di
+        pop si
+        ret
+.take:
+        push di
+        movzx di, byte [lvl]
+        mov [p_node+di+1], bl
+        mov ax, si
+        mov [p_idx+di], al
+        pop di
+        ret
+
+; BL = DAC: apuntarlo y prepararlo (encendido, flujo 1 canal 0, formato)
+dac_add:
+        push si
+        mov si, hda_dacs
+.l:
+        cmp [si], bl
+        je .r
+        cmp byte [si], 0
+        je .new
+        inc si
+        cmp si, hda_dacs + 4
+        jb .l
+        jmp .r
+.new:
+        mov [si], bl
+        cmp byte [hda_dac], 0
+        jne .c
+        mov [hda_dac], bl
+.c:
+        mov ax, 0x705
+        xor cl, cl
+        call hda_verb
+        mov ax, 0x706
+        mov cl, 0x10
+        call hda_verb
+        mov al, 2
+        mov cx, [hda_fmt]
+        call hda_verb4
+        ; frecuencias que admite (las del grupo de audio si no trae las suyas)
+        mov cl, 0x0A
+        call hda_param
+        jc .r
+        test ax, 0x7FF
+        jnz .rt
+        push bx
+        mov bl, [hda_afg]
+        call hda_param
+        pop bx
+        jc .r
+.rt:
+        and [new_rates], ax
+.r:
+        pop si
+        ret
+
+; poner en marcha el camino p_node[0..plen-1]: encendido D0, selección de
+; conexión, amplificadores (uno hace de volumen; los demás, 0 dB y sin
+; silencio) y el pin como salida
+path_apply:
+        movzx di, byte [hda_npin]
+        imul di, di, 5
+        add di, hda_pins
+        mov dword [di], 0
+        mov byte [di+4], 0
+        movzx cx, byte [plen]
+        mov si, p_node
+        push cs
+        pop es
+        cld
+        rep movsb
+        movzx si, byte [plen]
+        mov bl, [p_node+si-1]
+        call dac_add
+        mov byte [path_vol], 0
+.k:
+        dec si
+        js .end
+        mov bl, [p_node+si]
+        mov ax, 0x705
+        xor cl, cl
+        call hda_verb
+        call w_type
+        mov [cur_type], al
+        movzx ax, byte [plen]
+        dec ax
+        cmp si, ax
+        jae .out                    ; el DAC no tiene entradas
+        mov cl, [p_idx+si]
+        cmp byte [cur_type], 2      ; el mezclador no elige: mezcla
+        je .inamp
+        mov ax, 0x701
+        call hda_verb
+.inamp:
+        cmp byte [cur_type], 4
+        je .out
+        test byte [cur_caps], 0x02  ; amplificador de entrada
+        jz .out
+        mov dl, [p_idx+si]
+        cmp dl, 15
+        ja .out
+        call amp_setup
+.out:
+        test byte [cur_caps], 0x04  ; amplificador de salida
+        jz .pin
+        mov dl, 0x80
+        call amp_setup
+.pin:
+        cmp byte [cur_type], 4
+        jne .k
+        mov cl, 0x0C
+        call hda_param
+        mov cl, 0x40                ; salida activa
+        test al, 0x08
+        jz .w
+        mov cl, 0xC0                ; y con amplificador de auriculares
+.w:
+        mov ax, 0x707
+        call hda_verb
+        jmp .k
+.end:
+        inc byte [hda_npin]
+        cmp byte [path_vol], 0
+        jne .r
+        mov byte [no_hw], 1
+.r:
+        ret
+
+; capacidades del amplificador (CL = 12h salida, 0Dh entrada) del nodo BL;
+; si el nodo no trae las suyas valen las del grupo de audio
+amp_caps:
+        push bx
+        test byte [cur_caps], 0x08
+        jnz .own
+        mov bl, [hda_afg]
+.own:
+        call hda_param
+        pop bx
+        ret
+
+; amplificador del nodo BL (DL = 80h salida, o el índice de la entrada):
+; el primero regulable del camino lleva el volumen; los demás, a 0 dB
+amp_setup:
+        push si
+        mov cl, 0x12
+        test dl, 0x80
+        jnz .c
+        mov cl, 0x0D
+.c:
+        call amp_caps
+        mov cl, al
+        and cl, 0x7F
+        mov [ac_off], cl            ; paso que da 0 dB
+        shr eax, 8
+        mov cl, al
+        and cl, 0x7F
+        mov [ac_steps], cl
+        shr eax, 8
+        and al, 0x7F
+        inc al
+        mov [ac_stepq], al          ; tamaño del paso en cuartos de dB
+        mov si, hda_vols
+        movzx cx, byte [hda_nvol]
+.f:
+        jcxz .nf
+        cmp [si], bl
+        jne .fn
+        cmp [si+1], dl
+        je .isvol
+.fn:
+        add si, 6
+        dec cx
+        jmp .f
+.nf:
+        cmp byte [path_vol], 0
+        jne .fixed
+        cmp byte [ac_steps], 0
+        je .fixed
+        cmp byte [ac_off], 0
+        je .fixed
+        cmp byte [hda_nvol], 8
+        jae .fixed
+        mov [si], bl
+        mov [si+1], dl
+        mov al, [ac_off]
+        mov [si+2], al
+        mov al, [ac_steps]
+        mov [si+3], al
+        mov al, [ac_stepq]
+        mov [si+4], al
+        inc byte [hda_nvol]
+.isvol:
+        mov byte [path_vol], 1
+        jmp .r
+.fixed:
+        call amp_fixed
+.r:
+        pop si
+        ret
+; amplificador a 0 dB (ac_off) y sin silencio
+amp_fixed:
+        movzx cx, byte [ac_off]
+        test dl, 0x80
+        jz .in
+        or cx, 0xB000
+        jmp .w
+.in:
+        mov ch, dl
+        or ch, 0x70
+.w:
+        mov al, 3
+        jmp hda_verb4
+
 w_first     db 0
 w_count     db 0
-mid         db 0
-conn        dd 0
-conn2       dd 0
+statests    dw 0
+sv_cad      db 0
+prio        db 0
+lvl         db 0
+plen        db 0
+p_node      times 6 db 0
+p_idx       times 6 db 0
+cur_caps    dd 0
+cur_type    db 0
+path_vol    db 0
+no_hw       db 0
+new_rates   dw 0
+ac_off      db 0
+ac_steps    db 0
+ac_stepq    db 0
+gc_prev     db 0
+gc_k        db 0
+pincaps     dd 0
+pincfg      dd 0
+nc_cnt      db 0
+nc_buf      times 16 db 0
+conn_bufs   times 4 * CONNMAX db 0
 
 ; poner en marcha el controlador AC'97 y el códec
 ac97_init:
@@ -3010,6 +4628,7 @@ delay:
         ret
 
 hex4:
+        push ax
         push cx
         mov cx, 4
 .h:
@@ -3025,6 +4644,7 @@ hex4:
         pop ax
         loop .h
         pop cx
+        pop ax
         ret
 putc:
         push ax
@@ -3044,7 +4664,45 @@ puts:
 .r:
         ret
 
-pci_bdf     dw 0
+; AL en hexadecimal (2 cifras); EAX (8 cifras)
+hex2:
+        push ax
+        push cx
+        mov ah, al
+        mov cx, 2
+        jmp hex4.h
+hex8:
+        push eax
+        shr eax, 16
+        call hex4
+        pop eax
+        jmp hex4
+; AX en decimal
+pdec:
+        push ax
+        push bx
+        push cx
+        push dx
+        mov bx, 10
+        xor cx, cx
+.l:
+        xor dx, dx
+        div bx
+        push dx
+        inc cx
+        test ax, ax
+        jnz .l
+.p:
+        pop ax
+        add al, '0'
+        call putc
+        loop .p
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
 hda_idx     dw 0
 tsr_end     dw 0
 msg_title   db "HSPSND 0.1 - controlador de sonido de Hispa-DOS", 13, 10, 0
@@ -3053,8 +4711,83 @@ msg_ac97    db "Audio Intel AC'97 en E/S ", 0
 msg_vra     db ", frecuencia variable", 13, 10, 0
 msg_novra   db ", 48 kHz fijos", 13, 10, 0
 msg_hda     db "Intel HD Audio en ", 0
-msg_codec   db ", nodo DAC ", 0
-msg_pin     db ", salida ", 0
+msg_codec   db ", códec ", 0
+msg_pin     db ", salidas:", 0
+msg_oldver  db "Hay cargado un HSPSND de otra versión.", 13, 10, 0
+msg_badopt  db "Opción no válida.", 13, 10, 0
+msg_usage   db "Uso: HSPSND [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh] [/NOGPIO] [/EAPD:0]", 13, 10
+            db "  /VOL:n     volumen del 0 al 100 % (también con el driver ya cargado)", 13, 10
+            db "  /INFO      muestra la tarjeta, el códec, las salidas y el camino elegido", 13, 10
+            db "  /NOSB      no buscar una Sound Blaster", 13, 10
+            db "  /NOTECLAS  sin teclas de volumen (Ctrl+Alt+flechas arriba y abajo,", 13, 10
+            db "             Ctrl+Alt+Fin para el silencio y las teclas multimedia)", 13, 10
+            db "  /GPIO:hh   HD Audio: valor (hex) de las patillas GPIO del códec, que en", 13, 10
+            db "             muchos portátiles encienden los altavoces (si no, todas a 1)", 13, 10
+            db "  /NOGPIO    HD Audio: no tocar las GPIO", 13, 10
+            db "  /EAPD:0    HD Audio: apagar EAPD en vez de encenderlo", 13, 10
+            db "El volumen se cambia después con SONIDO.", 13, 10, 0
+msg_vol     db "Volumen: ", 0
+msg_pct     db " %", 0
+msg_muted   db " (en silencio)", 0
+msg_i_card  db "Tarjeta: ", 0
+msg_i_sbmix db "Mezclador: maestro ", 0
+msg_i_sbvoz db ", voz ", 0
+msg_i_pci   db ", PCI ", 0
+msg_i_en    db " en ", 0
+msg_i_io    db ", E/S ", 0
+msg_i_reg   db ", registros ", 0
+msg_i_sts   db ", códecs que responden (STATESTS) ", 0
+msg_i_accodec db 13, 10, "Códec AC'97 ", 0
+msg_i_acmas db "; maestro ", 0
+msg_i_achp  db ", auriculares ", 0
+msg_i_acpcm db ", PCM ", 0
+msg_i_keys  db "Teclas de volumen: Ctrl+Alt+flecha arriba/abajo, Ctrl+Alt+Fin (silencio).", 13, 10, 0
+msg_i_nokeys db "Teclas de volumen: no.", 13, 10, 0
+msg_i_v86   db "En modo protegido (EMM386) no se puede consultar el códec.", 13, 10, 0
+msg_i_codec db "Códec ", 0
+msg_i_used  db " (en uso), frecuencias ", 0
+msg_i_afg   db "AFG ", 0
+msg_i_nodes db ", nodos ", 0
+msg_i_subsys db ", subsistema ", 0
+msg_i_gpio  db ", GPIO ", 0
+msg_i_gdat  db ": datos ", 0
+msg_i_gmask db " másc. ", 0
+msg_i_gdir  db " dir. ", 0
+msg_i_pin   db "Pin ", 0
+msg_i_eapd  db " EAPD=", 0
+msg_i_unused db " (no usado)", 0
+msg_i_arrow db " -> ", 0
+msg_i_nc    db "Pines sin conectar:", 0
+msg_i_soft  db "Volumen por programa (el camino no tiene amplificador regulable).", 13, 10, 0
+msg_i_amp   db "Amplificador de volumen: nodo ", 0
+msg_i_out   db " (salida), 0 dB=", 0
+msg_i_in    db " (entrada), 0 dB=", 0
+msg_i_of    db " de ", 0
+msg_i_stp   db " pasos de ", 0
+msg_i_now   db " dB, ahora ", 0
+i_names     dw name_none, name_sb, name_sb16, name_ac97, name_hda
+i_devs      dw d_0, d_1, d_2, d_3, d_4, d_5, d_6, d_7, d_8, d_9, d_a, d_b, d_c, d_d, d_e, d_f
+i_conns     dw c_0, c_1, c_2, c_3
+d_0         db "línea", 0
+d_1         db "altavoz", 0
+d_2         db "auriculares", 0
+d_3         db "CD", 0
+d_4         db "S/PDIF", 0
+d_5         db "salida digital", 0
+d_6         db "módem (línea)", 0
+d_7         db "módem (teléfono)", 0
+d_8         db "entrada de línea", 0
+d_9         db "auxiliar", 0
+d_a         db "micrófono", 0
+d_b         db "telefonía", 0
+d_c         db "entrada S/PDIF", 0
+d_d         db "entrada digital", 0
+d_e         db "reservado", 0
+d_f         db "otro", 0
+c_0         db "conector", 0
+c_1         db "sin conectar", 0
+c_2         db "interno", 0
+c_3         db "conector e interno", 0
 msg_crlf2   db 13, 10, 0
 msg_hdafail db "Hay un controlador HD Audio, pero no se ha podido poner en marcha.", 13, 10, 0
 msg_nocard  db "No se ha encontrado ninguna tarjeta de sonido compatible.", 13, 10, 0

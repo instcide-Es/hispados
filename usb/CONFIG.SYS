@@ -1,8 +1,15 @@
 REM CONFIG.SYS de Hispa-DOS
 DEVICE=C:\HISPADOS\HSPXMS.SYS
 DEVICE=C:\HISPADOS\HSPCD.SYS
-REM USB propio (memorias, teclado y ratón USB) sin la BIOS: quite el REM.
-REM DEVICE=C:\HISPADOS\HSPUSB.SYS /F
+REM USB propio (memorias, teclado y ratón USB, también detrás de concentradores).
+REM Así, sin opciones, es seguro: arrancando desde esta memoria USB la BIOS
+REM está usando el USB, HSPUSB no lo toca y todo sigue como estaba.
+DEVICE=C:\HISPADOS\HSPUSB.SYS
+REM Para que HSPUSB lleve el USB (ratón o panel táctil USB, por ejemplo en un
+REM MacBook) ponga REM en la línea de arriba y quítelo de la de abajo. /U toma
+REM el USB de la BIOS y atiende él esta memoria; /INFO enseña lo que encuentra.
+REM Si el teclado dejara de ir: reinicie y pulse F5 al ver «Iniciando Hispa-DOS».
+REM DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO
 NUMLOCK=ON
 FILES=30
 BUFFERS=20
