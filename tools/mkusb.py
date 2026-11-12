@@ -64,7 +64,8 @@ def main():
                      ('ALIAS.INI', 'ALIAS.INI'),
                      ('HSPXMS.SYS', 'HSPXMS.SYS'), ('HSPRAM.SYS', 'HSPRAM.SYS'),
                      ('HSPSND.COM', 'HSPSND.COM'), ('HSPDPMI.COM', 'HSPDPMI.COM'), ('HSPUSB.SYS', 'HSPUSB.SYS'),
-                     ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM')):
+                     ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM'),
+                     ('VENTANAS.COM', 'VENTANAS.COM')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
     print(OUT)
     mkfloppy()

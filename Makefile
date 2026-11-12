@@ -105,13 +105,22 @@ $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
+# Hispa Ventanas (docs/VENTANAS.md): el entorno gráfico, en ventanas/.
+# La fuente de mapa de bits sale del diseño en texto ventanas/fuente.txt.
+VENSRC = $(wildcard ventanas/*.asm ventanas/*.inc)
+$(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py | $(B)
+	for f in $(VENSRC); do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
+	python3 tools/mkfuente.py ventanas/fuente.txt $(B)/gen/ventanas/fuente.inc $(B)/gen/ventanas/fuente.ppm
+	$(NASM) -f bin -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
+
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
-        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM
+        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM \
+        $(B)/VENTANAS.COM
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -153,6 +162,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/HSPUSB.SYS ::HISPADOS/HSPUSB.SYS
 	mcopy -i $@ $(B)/HSPCD.SYS ::HISPADOS/HSPCD.SYS
 	mcopy -i $@ $(B)/HSPRATON.COM ::HISPADOS/HSPRATON.COM
+	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
 	# pruebas
 	mmd   -i $@ ::BAT
 	mcopy -i $@ tests/disk/BAT/PRUEBA.BAT ::BAT/PRUEBA.BAT
@@ -253,6 +263,7 @@ test: $(IMG) usb nucprogs
 	tests/run_bootfat12_tests.sh
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
+	tests/run_ventanas_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)
