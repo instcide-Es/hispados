@@ -61,6 +61,7 @@ SFT_DRV         equ 0x2C            ; propio: unidad
 SFT_FLAGS       equ 0x2D            ; propio
 SFT_PSP         equ 0x31            ; PSP propietario
 SFT_CCL         equ 0x35            ; cluster absoluto en caché
+SFT_VSER        equ 0x37            ; propio: huella del disco al abrir (dword)
 E_EXISTS        equ 80
 E_CURDIR        equ 16
 E_NOTSAME       equ 17
@@ -158,6 +159,7 @@ DF_FIXED        equ 8
 DF_FAT16        equ 16
 DF_ISO          equ 64
 ISO_ND          equ 24
+ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 
 %define spcw    cur_drv+D_SPCW
 %define epc     cur_drv+D_EPC
@@ -2210,6 +2212,38 @@ iso_mount:
         mov eax, [secbuf+80]        ; bloques del volumen
         shl eax, 2
         mov [cur_drv+D_SIZE], eax
+        ; huella del disco (nombre del volumen, tamaño y fecha de creación):
+        ; como el número de serie en FAT, sirve para saber si un aviso de
+        ; «disco cambiado» es otro disco de verdad. Sin ella, el primer aviso
+        ; del lector (siempre llega uno) devolvía la carpeta actual a la raíz.
+        mov eax, [secbuf+80]
+        mov si, secbuf+40
+        mov cx, 32
+.h1:
+        rol eax, 5
+        xor al, [si]
+        inc si
+        loop .h1
+        push eax
+        mov eax, 16 * 4 + 1
+        call cache_read
+        pop eax
+        jc .hd
+        mov si, secbuf+813-512
+        mov cx, 17
+.h2:
+        rol eax, 5
+        xor al, [si]
+        inc si
+        loop .h2
+.hd:
+        test eax, eax
+        jnz .hs
+        inc eax
+.hs:
+        movzx di, byte [sel_drv]
+        shl di, 2
+        mov [vol_ser+di], eax
         and byte [cur_drv+D_FLAGS], 0xFF ^ DF_FAT16
         or byte [cur_drv+D_FLAGS], DF_ISO | DF_MOUNTED
         mov word [cur_drv+D_SPCW], 4
@@ -2275,16 +2309,24 @@ iso_dir:
         push bx
         movzx bx, al
         dec bx
-        imul bx, bx, 9
+        imul bx, bx, ISO_DL
         add bx, iso_dirs
         mov eax, [bx]
         mov [ife_ext], eax
         mov eax, [bx+4]
         mov [ife_size], eax
+        inc dword [iso_tick]        ; recién usada
+        mov eax, [iso_tick]
+        mov [bx+9], eax
         pop bx
         ret
 
 ; EAX = extensión, EDX = tamaño -> AX = manejador
+; La tabla tiene ISO_ND entradas {extensión, tamaño, unidad, último uso}. Solo
+; se apunta la carpeta en la que se entra (walk), no las que salen al listar,
+; y cuando no cabe se quita la que lleva más tiempo sin usarse: así una
+; carpeta que se está recorriendo no pierde su manejador aunque tenga
+; decenas de subcarpetas.
 iso_handle:
         cmp eax, [cur_drv+D_ROOTLBA]
         jne .s
@@ -2294,44 +2336,64 @@ iso_handle:
         push bx
         push cx
         push si
+        push edi
         mov si, iso_dirs
         mov cx, 1
+        mov edi, 0xFFFFFFFF
 .l:
-        cmp cx, ISO_ND
-        ja .new
         cmp [si], eax
         jne .n
         push ax
         mov al, [sel_drv]
         cmp [si+8], al
         pop ax
-        jne .n
-        mov ax, cx
-        jmp .r
+        je .hit
 .n:
-        add si, 9
+        cmp [si+9], edi
+        jae .n2
+        mov edi, [si+9]             ; candidata a salir
+        mov bx, si
+        mov [ih_new], cx
+.n2:
+        add si, ISO_DL
         inc cx
-        jmp .l
-.new:
-        movzx cx, byte [iso_next]
-        inc byte [iso_next]
-        cmp byte [iso_next], ISO_ND
-        jb .w
-        mov byte [iso_next], 0
-.w:
-        mov si, cx
-        imul si, si, 9
-        add si, iso_dirs
+        cmp cx, ISO_ND
+        jbe .l
+        mov si, bx
+        mov cx, [ih_new]
         mov [si], eax
-        mov [si+4], edx
         mov al, [sel_drv]
         mov [si+8], al
+.hit:
+        mov [si+4], edx
+        inc dword [iso_tick]
+        mov eax, [iso_tick]
+        mov [si+9], eax
         mov ax, cx
-        inc ax
-.r:
+        pop edi
         pop si
         pop cx
         pop bx
+        ret
+
+; fentry es una carpeta ISO recién encontrada -> AX = manejador
+iso_dirh:
+        push edx
+        movzx eax, word [fentry+20]
+        shl eax, 16
+        mov ax, [fentry+26]
+        mov edx, [ife_dsize]
+        call iso_handle
+        pop edx
+        ret
+
+; fentry es una carpeta -> AX = su clúster (FAT) o su manejador (ISO)
+dir_clus:
+        mov ax, [fentry+26]
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .r
+        call iso_dirh
+.r:
         ret
 
 ; como find_entry: AX = carpeta, CX = índice inicial, SI = patrón, DL = atrib.
@@ -2528,15 +2590,12 @@ iso_record:
         mov [fentry+28], edx
         test byte [fentry+11], 0x10
         jz .file
-        call iso_handle
-        mov [fentry+26], ax
+        mov [ife_dsize], edx        ; carpeta: el tamaño va aparte (se enseña 0)
         mov dword [fentry+28], 0
-        jmp .r
 .file:
         mov [fentry+26], ax
         shr eax, 16
         mov [fentry+20], ax
-.r:
         pop di
         pop si
         pop cx
@@ -2562,7 +2621,7 @@ iso_file_read:
         add eax, edx
         call cache_read
         pop eax
-        jc .out
+        jc .err
         mov si, [di+SFT_POS]
         and si, 511
         mov cx, 512
@@ -2592,6 +2651,10 @@ iso_file_read:
         add [fr_done], cx
         jmp .loop
 .out:
+        clc
+        ret
+.err:
+        stc
         ret
 
 ; -----------------------------------------------------------------------------
@@ -2604,9 +2667,103 @@ read_sector:
 write_sector:
         mov byte [io_cmd], 3
         test byte [cur_drv+D_FLAGS], DF_ISO
-        jz disk_io
+        jz .w
         stc                         ; un CD/DVD no se puede escribir
         ret
+.w:
+        call disk_io
+        jnc .r
+        ; No se ha podido escribir (disco protegido, quitado o estropeado).
+        ; Se apunta para que la función de INT 21h en curso termine con
+        ; error en vez de decir que todo fue bien (wr_check), y la caché se
+        ; da por mala: lo que hay en memoria ya no es lo que hay en el disco.
+        mov dword [cache_lba], 0xFFFFFFFF
+        push ax
+        mov al, 0x1D                ; fallo de escritura
+        test byte [cur_drv+D_FLAGS], DF_DRIVER
+        jnz .drv
+        cmp byte [io_st], 3
+        jne .c
+        mov al, 0x13                ; protegido contra escritura
+        jmp .c
+.drv:
+        cmp byte [dreq+3], 0
+        jne .c
+        mov al, 0x13
+.c:
+        cmp byte [io_nrdy], 0
+        je .s
+        mov al, 0x15                ; unidad no preparada
+.s:
+        mov [wr_fail], al
+        pop ax
+        stc
+.r:
+        ret
+
+; Al acabar una función de INT 21h: si alguna escritura en disco falló y la
+; función iba a decir que todo fue bien, devuelve el error (CF y AX = 13h
+; protegido, 15h no preparada, 1Dh fallo de escritura; AL = FFh o 1 en las
+; de FCB). MS-DOS lo avisa con el error crítico (Anular, Repetir, Fallo).
+wr_check:
+        cmp byte [wr_fail], 0
+        jne .f
+        ret
+.f:
+        mov al, [wr_fn]
+        mov si, wr_fns
+.l:
+        mov ah, [si]
+        inc si
+        test ah, ah
+        jz .fcb
+        cmp al, ah
+        jne .l
+        test byte [F_FL], 1
+        jnz .r                      ; ya salía con error
+        cmp al, 0x3C
+        je .cl
+        cmp al, 0x5A
+        je .cl
+        cmp al, 0x5B
+        je .cl
+        cmp al, 0x6C
+        jne .err
+.cl:
+        ; se creó (o se vació) a medias: el handle no se entrega
+        mov bx, [F_AX]
+        call get_sft
+        jc .err
+        mov al, 0xFF
+        call jft_set
+        mov byte [di+SFT_REF], 0
+.err:
+        movzx ax, byte [wr_fail]
+        jmp ret_err
+.fcb:
+        cmp al, 0x10
+        je .ff
+        cmp al, 0x13
+        je .ff
+        cmp al, 0x16
+        je .ff
+        cmp al, 0x17
+        je .ff
+        cmp al, 0x15
+        je .f1
+        cmp al, 0x22
+        je .f1
+        cmp al, 0x28
+        jne .r
+        mov word [F_CX], 0
+.f1:
+        mov byte [F_AL], 1
+        ret
+.ff:
+        mov byte [F_AL], 0xFF
+.r:
+        ret
+wr_fns      db 0x39, 0x3A, 0x3C, 0x3E, 0x40, 0x41, 0x43, 0x56, 0x5A, 0x5B, 0x68, 0x6C, 0
 ; con aviso de error crítico (INT 24h) si falla dentro de INT 21h
 disk_io:
         call disk_io_raw
@@ -3111,6 +3268,11 @@ to11:
         cmp al, '\'
         je .done
         inc si
+        cmp al, '.'                 ; otro punto: lo que sigue no cabe en 8.3
+        jne .e1                     ; (y un '.' dentro del nombre lo estropea)
+        xor cx, cx
+        jmp .e
+.e1:
         cmp al, '*'
         jne .ec
 .ef:
@@ -3196,12 +3358,7 @@ normalize:
         jne .c1
         mov al, '\'
 .c1:
-        cmp al, 'a'
-        jb .c2
-        cmp al, 'z'
-        ja .c2
-        sub al, 32
-.c2:
+        call upcase437              ; también ñ, ç, vocales con acento...
         mov [di], al
         inc di
         test al, al
@@ -3274,6 +3431,8 @@ normalize:
         jmp .loop
 .dotdot:
         add si, 2
+        cmp di, npath               ; por encima de la raíz no hay nada
+        je .badpath
 .rb:
         cmp di, npath
         je .rbd
@@ -3354,7 +3513,7 @@ walk:
         jc .nf
         test byte [fentry+11], 0x10
         jz .nf
-        mov ax, [fentry+26]
+        call dir_clus
         mov [w_dir], ax
         jmp .comp
 .last:
@@ -3399,7 +3558,7 @@ resolve_dir:
         jc .nf
         test byte [fentry+11], 0x10
         jz .nf
-        mov ax, [fentry+26]
+        call dir_clus
 .ok:
         clc
 .r:
@@ -3581,10 +3740,13 @@ file_read:
         mov al, [di+SFT_DRV]
         call select_drive
         pop ax
-        jc .out
+        jc .err
+        call sft_disk_ok
+        jc .err
         test byte [cur_drv+D_FLAGS], DF_ISO
         jz .loop
         call iso_file_read
+        jc .err
         jmp .out
 .loop:
         cmp word [fr_left], 0
@@ -3636,6 +3798,7 @@ file_read:
         jmp .loop
 .errp:
         pop eax
+.err:
         mov ax, [fr_done]
         pop si
         pop dx
@@ -3695,6 +3858,14 @@ sft_seek_clus:
 ; rellenar la SFT DI con fentry (índice CX en w_dir)
 sft_fill_file:
         mov byte [di+SFT_REF], 1
+        ; huella del disco en el que está: si luego cambian el disquete con
+        ; el fichero abierto, no se toca el disco nuevo (sft_disk_ok)
+        push bx
+        movzx bx, byte [sel_drv]
+        shl bx, 2
+        mov eax, [vol_ser+bx]
+        mov [di+SFT_VSER], eax
+        pop bx
         mov al, [sel_drv]
         mov [di+SFT_DRV], al
         ; formato DOS: unidad + "no escrito", DPB, nombre y propietario
@@ -3742,6 +3913,26 @@ sft_fill_file:
         mov [di+SFT_DATE], ax
         ret
 
+; DI = SFT de un fichero cuya unidad se acaba de seleccionar -> CF si el
+; disco que hay ahora no es el que había al abrirlo. MS-DOS pide que se
+; vuelva a poner («cambio de disco no válido»); aquí la operación falla, que
+; es lo que importa: no se lee ni se escribe en el disco equivocado.
+sft_disk_ok:
+        push eax
+        push bx
+        movzx bx, byte [di+SFT_DRV]
+        shl bx, 2
+        mov eax, [vol_ser+bx]
+        cmp eax, [di+SFT_VSER]
+        pop bx
+        pop eax
+        je .ok
+        stc
+        ret
+.ok:
+        clc
+        ret
+
 ; abrir ES:SI -> DI = SFT rellena (no asigna handle). CF/AX
 open_path:
         call normalize
@@ -3750,6 +3941,8 @@ open_path:
         jc .r
         cmp byte [w_has], 0
         je .nf
+        call name_nowild
+        jc .nf
         call sft_alloc
         jc .r
         call check_device
@@ -3767,13 +3960,19 @@ open_path:
         mov ax, [w_dir]
         xor cx, cx
         mov si, w_name
-        mov dl, 0x06
+        mov dl, 0x16
         call find_entry
         pop si
         jc .nf
+        test byte [fentry+11], 0x10
+        jnz .acc                    ; una carpeta no se abre: acceso denegado
         call sft_fill_file
         clc
 .r:
+        ret
+.acc:
+        mov ax, E_ACCESS
+        stc
         ret
 .nf:
         mov ax, E_NOFILE
@@ -3845,6 +4044,9 @@ fat_flush:
         mov bx, fatsec
 .l:
         call write_sector
+        jnc .wok
+        mov dword [fatc_lba], 0xFFFFFFFF    ; la copia en memoria no vale
+.wok:
         movzx edx, word [cur_drv+D_SPF]
         add eax, edx
         loop .l
@@ -4167,7 +4369,15 @@ dir_update:
         pushad
         mov al, [di+SFT_DRV]
         call select_drive
-        jc .r
+        jnc .sel
+        mov byte [wr_fail], 0x15    ; no hay disco: la entrada no se guarda
+        jmp .r
+.sel:
+        call sft_disk_ok
+        jnc .same
+        mov byte [wr_fail], 0x22    ; es otro disco: no se toca
+        jmp .r
+.same:
         mov ax, [di+SFT_DIRC]
         mov cx, [di+SFT_DIRI]
         call dir_get
@@ -4348,6 +4558,8 @@ fn_5c:
         mov si, bx
         jmp .n
 .used:
+        call lk_same                ; los bloqueos de otros ficheros no cuentan
+        jne .n
         mov eax, [lk_start]
         cmp eax, [bx+8]
         jae .n
@@ -4397,6 +4609,29 @@ fn_5c:
 .func:
         mov ax, 1
         jmp ret_err
+
+; BX = bloqueo en uso, DI = SFT -> ZF si el bloqueo es del mismo fichero
+; (la misma entrada de directorio, aunque sea otra apertura)
+lk_same:
+        push si
+        push ax
+        movzx si, byte [bx]
+        dec si
+        imul si, si, SFT_LEN
+        SFT_GAP si
+        add si, sft_table
+        mov al, [si+SFT_DRV]
+        cmp al, [di+SFT_DRV]
+        jne .r
+        mov ax, [si+SFT_DIRC]
+        cmp ax, [di+SFT_DIRC]
+        jne .r
+        mov ax, [si+SFT_DIRI]
+        cmp ax, [di+SFT_DIRI]
+.r:
+        pop ax
+        pop si
+        ret
 
 sft_release:
         cmp byte [di+SFT_REF], 0
@@ -4502,6 +4737,11 @@ file_write:
         mov al, [di+SFT_DRV]
         call select_drive
         jc .out
+        call sft_disk_ok
+        jnc .same
+        mov byte [wr_fail], 0x22    ; han cambiado el disco
+        jmp .out
+.same:
         call sft_touch
 .loop:
         cmp word [fr_left], 0
@@ -4511,7 +4751,7 @@ file_write:
         movzx ecx, word [cur_drv+D_BPC]
         div ecx
         call sft_seek_alloc
-        jc .out
+        jc .full
         mov si, dx
         movzx ecx, si
         shr ecx, 9
@@ -4552,6 +4792,7 @@ file_write:
         pop ds
         add [fr_off], cx
         call cache_write
+        jc .out                     ; no se pudo escribir (wr_check da el error)
         movzx ecx, cx
         add [di+SFT_POS], ecx
         mov eax, [di+SFT_POS]
@@ -4562,6 +4803,13 @@ file_write:
         sub [fr_left], cx
         add [fr_done], cx
         jmp .loop
+.full:
+        ; disco lleno. Si se escribía más allá del final, el hueco quedó a
+        ; medio reservar: se devuelve para que la cadena case con el tamaño
+        mov eax, [di+SFT_POS]
+        cmp eax, [di+SFT_SIZE]
+        jbe .out
+        call sft_trim
 .out:
         mov ax, [fr_done]
         pop si
@@ -4576,44 +4824,65 @@ file_truncate:
         mov al, [di+SFT_DRV]
         call select_drive
         jc .r
+        call sft_disk_ok
+        jnc .same
+        mov byte [wr_fail], 0x22    ; han cambiado el disco
+        jmp .r
+.same:
         call sft_touch
         mov eax, [di+SFT_POS]
         cmp eax, [di+SFT_SIZE]
-        jae .grow
+        ja .grow
+        mov [di+SFT_SIZE], eax
+        call sft_trim
+        jmp .r
+.grow:
+        dec eax
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_BPC]
+        div ecx
+        call sft_seek_alloc
+        jc .full
+        mov word [di+SFT_CIX], 0xFFFF
+        mov eax, [di+SFT_POS]
+        mov [di+SFT_SIZE], eax
+        jmp .r
+.full:
+        call sft_trim               ; disco lleno: se queda como estaba
+.r:
+        popad
+        ret
+
+; DI = SFT (unidad seleccionada) -> la cadena queda con los clústeres
+; justos para SFT_SIZE; lo que sobre se libera
+sft_trim:
+        pushad
+        mov eax, [di+SFT_SIZE]
         test eax, eax
         jnz .part
         mov ax, [di+SFT_CLUS]
         call fat_free_chain
         mov word [di+SFT_CLUS], 0
-        jmp .set
+        jmp .r
 .part:
         dec eax
         xor edx, edx
         movzx ecx, word [cur_drv+D_BPC]
         div ecx
         call sft_seek_clus
-        jc .set
+        jc .r
         mov bx, ax
         call fat_next
+        cmp ax, 0xFFF7
+        jae .r                      ; ya termina ahí
         push ax
         mov ax, bx
         mov dx, 0xFFFF
         call fat_set
         pop ax
         call fat_free_chain
-        jmp .set
-.grow:
-        je .set
-        dec eax
-        xor edx, edx
-        movzx ecx, word [cur_drv+D_BPC]
-        div ecx
-        call sft_seek_alloc
-.set:
-        mov word [di+SFT_CIX], 0xFFFF
-        mov eax, [di+SFT_POS]
-        mov [di+SFT_SIZE], eax
 .r:
+        mov word [di+SFT_CIX], 0xFFFF
         popad
         ret
 
@@ -4723,6 +4992,77 @@ create_file:
         stc
         ret
 
+; ¿alguien tiene abierto el fichero de la entrada CX de [w_dir] (unidad
+; seleccionada)? -> CF si sí. Borrarlo o moverlo entonces rompería el disco:
+; sus clústeres pasarían a otro fichero y al cerrar se reescribiría una
+; entrada de directorio que ya no es suya. Con SHARE, MS-DOS lo niega.
+file_is_open:
+        push si
+        push ax
+        push bx
+        mov si, sft_table
+        xor bl, bl
+.l:
+        cmp byte [si+SFT_REF], 0
+        je .n
+        cmp byte [si+SFT_TYPE], T_FILE
+        jne .n
+        mov al, [sel_drv]
+        cmp al, [si+SFT_DRV]
+        jne .n
+        mov ax, [w_dir]
+        cmp ax, [si+SFT_DIRC]
+        jne .n
+        cmp cx, [si+SFT_DIRI]
+        jne .n
+        pop bx
+        pop ax
+        pop si
+        stc
+        ret
+.n:
+        add si, SFT_LEN
+        inc bl
+        cmp bl, SFT_N1
+        jne .nb
+        add si, 6
+.nb:
+        cmp bl, NSFT
+        jb .l
+        pop bx
+        pop ax
+        pop si
+        clc
+        ret
+
+; w_name sirve para crear: no está vacío ni lleva comodines -> CF si no
+name_ok:
+        cmp byte [w_name], ' '
+        jne name_nowild
+        stc
+        ret
+; w_name sin comodines -> CF si los lleva (abrir, borrar, renombrar... no
+; los admiten: con ellos se tocaría el primer fichero que coincidiera)
+name_nowild:
+        push si
+        push cx
+        mov si, w_name
+        mov cx, 11
+.c:
+        cmp byte [si], '?'
+        je .bad
+        inc si
+        loop .c
+        pop cx
+        pop si
+        clc
+        ret
+.bad:
+        pop cx
+        pop si
+        stc
+        ret
+
 ; ruta ES:SI -> fentry, CX = índice, [w_dir]; CF/AX (atributos DL)
 find_path:
         call normalize
@@ -4731,6 +5071,8 @@ find_path:
         jc .r
         cmp byte [w_has], 0
         je .nf
+        call name_nowild
+        jc .nf
         mov ax, [w_dir]
         xor cx, cx
         mov si, w_name
@@ -6622,6 +6964,12 @@ int21:
         pop es
 .nosave:
         and byte [F_FL], 0xFE
+        cmp byte [indos], 1         ; (no en las llamadas desde INT 24h)
+        jne .nowr
+        mov byte [wr_fail], 0       ; fallos de escritura en disco (wr_check)
+        mov al, [F_AH]
+        mov [wr_fn], al
+.nowr:
 %ifdef TRACE
         mov al, '['
         call ser_putc
@@ -6733,6 +7081,7 @@ i21_ret:
         cmp byte [indos], 1
         jne .nofl
         call fat_flush
+        call wr_check
 .nofl:
         dec byte [indos]
         pop ax
@@ -7337,6 +7686,11 @@ fn_67:
 
 ; ---- 29h: analizar nombre a FCB ----
 fn_29:
+        push gs                     ; GS es del programa: se conserva
+        call .body
+        pop gs
+        ret
+.body:
         mov es, [F_DS]
         mov si, [F_SI]
         mov ax, [F_ES]
@@ -7591,6 +7945,16 @@ fn_3f:
         mov bx, [F_DX]
         mov cx, [F_CX]
         call file_read
+        jnc .rok
+        test ax, ax
+        jnz .rok                    ; algo se leyó antes del error: se entrega
+        ; error de disco sin nada leído: no es un fin de fichero
+        mov ax, 0x1E                ; fallo de lectura
+        cmp byte [io_nrdy], 0
+        je ret_err
+        mov ax, E_NOTREADY
+        jmp ret_err
+.rok:
         mov [F_AX], ax
         ret
 .con:
@@ -7767,6 +8131,8 @@ fn_43:
         jc ret_err
         cmp byte [w_has], 0
         je .nf
+        call name_nowild
+        jc .nf
         mov ax, [w_dir]
         xor cx, cx
         mov si, w_name
@@ -7785,6 +8151,8 @@ fn_43:
         mov si, [F_DX]
         mov dl, 0x16
         call find_path
+        jc ret_err
+        call iso_deny
         jc ret_err
         test byte [fentry+11], 0x08
         jnz .sacc
@@ -8101,12 +8469,19 @@ fn_57:
         ret
 
 fn_6c:
+        ; el nombre va en DS:SI: se pasa por DX a 3Dh/3Ch y al volver el
+        ; llamante recupera su DX (MS-DOS lo conserva)
+        push word [F_DX]
+        call .body
+        pop word [F_DX]
+        ret
+.body:
+        mov al, [F_DL]              ; la acción, antes de pisar DX
+        mov [x6c_act], al
         mov ax, [F_SI]
         mov [F_DX], ax
         mov al, [F_BL]
         mov [F_AL], al
-        mov al, [F_DL]
-        mov [x6c_act], al
         call fn_3d
         test byte [F_FL], 1
         jnz .notopen
@@ -8179,13 +8554,15 @@ fn_create:
 fn_41:
         mov es, [F_DS]
         mov si, [F_DX]
-        mov dl, 0x06
+        mov dl, 0x16
         call find_path
         jc ret_err
         call iso_deny
         jc ret_err
-        test byte [fentry+11], 0x01
+        test byte [fentry+11], 0x11 ; solo lectura o carpeta: acceso denegado
         jnz .acc
+        call file_is_open
+        jc .shr
         mov ax, [fentry+26]
         call fat_free_chain
         mov ax, [w_dir]
@@ -8194,6 +8571,9 @@ fn_41:
         mov byte [si], 0xE5
         call cache_write
         ret
+.shr:
+        mov ax, E_SHARE
+        jmp ret_err
 .acc:
         mov ax, E_ACCESS
         jmp ret_err
@@ -8210,13 +8590,8 @@ fn_39:
         jc ret_err
         cmp byte [w_has], 0
         je .acc
-        mov si, w_name
-        mov cx, 11
-.chk:
-        cmp byte [si], '?'
-        je .acc
-        inc si
-        loop .chk
+        call name_ok
+        jc .acc
         mov ax, [w_dir]
         xor cx, cx
         mov si, w_name
@@ -8371,6 +8746,8 @@ fn_56:
         jc ret_err
         test byte [fentry+11], 0x08
         jnz .acc
+        call file_is_open
+        jc .shr
         mov [rn_idx], cx
         mov ax, [w_dir]
         mov [rn_dir], ax
@@ -8396,13 +8773,8 @@ fn_56:
         jc ret_err
         cmp byte [w_has], 0
         je .acc
-        mov si, w_name
-        mov cx, 11
-.chk:
-        cmp byte [si], '?'
-        je .acc
-        inc si
-        loop .chk
+        call name_ok
+        jc .acc
         mov ax, [w_dir]
         xor cx, cx
         mov si, w_name
@@ -8457,6 +8829,9 @@ fn_56:
         ret
 .nsame:
         mov ax, E_NOTSAME
+        jmp ret_err
+.shr:
+        mov ax, E_SHARE
         jmp ret_err
 .acc:
         mov ax, E_ACCESS
@@ -8842,6 +9217,11 @@ fn_4e:
         jc ret_err
         call walk
         jc ret_err
+        ; la etiqueta de volumen se busca siempre en la raíz
+        cmp byte [F_CL], 0x08
+        jne .nolab
+        mov word [w_dir], 0
+.nolab:
         les di, [dta_off]
         mov al, [op_drv]
         inc al
@@ -8851,6 +9231,29 @@ fn_4e:
         mov si, all11
         jmp .cpp
 .pat:
+        ; nombre de dispositivo (NUL, CON...): existe en cualquier carpeta
+        ; que exista (el clásico IF EXIST carpeta\NUL); 4Fh no da más
+        call check_device
+        jnc .nodev
+        mov word [es:di+17], 0
+        mov byte [es:di+0x15], 0x40
+        xor eax, eax
+        mov [es:di+0x16], eax
+        mov [es:di+0x1A], eax
+        mov si, w_name
+        add di, 0x1E
+        mov cx, 8
+.dn:
+        lodsb
+        cmp al, ' '
+        je .dne
+        stosb
+        loop .dn
+.dne:
+        xor al, al
+        stosb
+        ret
+.nodev:
         mov si, w_name
 .cpp:
         push di
@@ -8866,7 +9269,7 @@ fn_4e:
         mov word [es:di+17], 0x444E
         call find_step
         jnc .r
-        mov ax, E_NOFILE
+        mov ax, E_NOMORE            ; como MS-DOS: 12h si nada coincide
         jmp ret_err
 .r:
         ret
@@ -9634,6 +10037,7 @@ do_term:
         inc di
         loop .cl
         pop cx
+        call fcb_term               ; y lo que abrió con FCB sin cerrar
         mov ax, [cur_psp]
         call mcb_free_owner
 .rest:
@@ -9739,6 +10143,11 @@ fcb_resolve:
         jc .r
         cmp byte [w_has], 0
         je .bad
+        ; la etiqueta de volumen vive siempre en la raíz
+        cmp byte [fcb_attr], 0x08
+        jne .nolab
+        mov word [w_dir], 0
+.nolab:
         ; el nombre conserva los '?' del FCB
         push es
         push ds
@@ -9890,8 +10299,8 @@ fcb_read_recs:
 .full:
         mov dx, ax
         mov al, 0
-        test dx, dx
-        jnz .r
+        cmp dx, [fcb_n]             ; menos de los pedidos: fin de fichero
+        jae .r
         mov al, 1
 .r:
         ret
@@ -9954,6 +10363,7 @@ noname11    db "NO NAME    "
 
 fn_0f:
         call fcb_setup
+        call fcb_reuse
         call fcb_resolve
         jc .fail
         ; ¿dispositivo (CON, NUL...)?
@@ -9968,6 +10378,7 @@ fn_0f:
         mov byte [di+SFT_MODE], 2
         mov eax, [cd_hdr]
         mov [di+SFT_SIZE], eax
+        call fcb_mark
         call fcb_fill
         mov es, [F_DS]
         mov bx, [fcb_off]
@@ -9987,11 +10398,74 @@ fn_0f:
         jc .fail
         call sft_fill_file
         mov byte [di+SFT_MODE], 2
+        call fcb_mark
         call fcb_fill
         mov byte [F_AL], 0
         ret
 .fail:
         mov byte [F_AL], 0xFF
+        ret
+
+; marcar la SFT DI como abierta con FCB por el proceso actual
+fcb_mark:
+        push ax
+        or byte [di+SFT_FLAGS], 2
+        mov ax, [cur_psp]
+        mov [di+SFT_PSP], ax
+        pop ax
+        ret
+
+; antes de abrir o crear con un FCB: si ese mismo FCB ya tenía una SFT
+; abierta (mismo proceso y mismo nombre), se suelta. Los programas de FCB
+; abren muchas veces sin cerrar y MS-DOS recicla esas entradas.
+fcb_reuse:
+        call fcb_sft
+        jc .r
+        test byte [di+SFT_FLAGS], 2
+        jz .r
+        mov ax, [cur_psp]
+        cmp [di+SFT_PSP], ax
+        jne .r
+        push di
+        lea si, [di+SFT_NAME]
+        lea di, [bx+1]
+        mov cx, 11
+        repe cmpsb                  ; DS:SI (SFT) con ES:DI (FCB)
+        pop di
+        jne .r
+        mov byte [es:bx+0x18], 0
+        call sft_release
+.r:
+        ret
+
+; al terminar un proceso: soltar las SFT que abrió con FCB y no cerró
+; (no están en su tabla de handles; sin esto se quedan ocupadas para siempre)
+fcb_term:
+        pushad
+        push es
+        mov dx, [cur_psp]
+        mov di, sft_table
+        xor cl, cl
+.l:
+        cmp byte [di+SFT_REF], 0
+        je .n
+        test byte [di+SFT_FLAGS], 2
+        jz .n
+        cmp [di+SFT_PSP], dx
+        jne .n
+        mov byte [di+SFT_REF], 1
+        call sft_release
+.n:
+        add di, SFT_LEN
+        inc cl
+        cmp cl, SFT_N1
+        jne .nb
+        add di, 6
+.nb:
+        cmp cl, NSFT
+        jb .l
+        pop es
+        popad
         ret
 
 fn_10:
@@ -10010,6 +10484,7 @@ fn_16:
         call fcb_setup
         test byte [fcb_attr], 0x08
         jnz .label
+        call fcb_reuse
         call fcb_resolve
         jc .fail
         push ds
@@ -10019,6 +10494,7 @@ fn_16:
         xor al, al
         call create_file
         jc .fail
+        call fcb_mark
         cmp byte [di+SFT_TYPE], T_FILE
         jne .dev
         call fcb_fill
@@ -10029,6 +10505,15 @@ fn_16:
         ; etiqueta de volumen: entrada con atributo 08h en la raíz
         call fcb_resolve
         jc .fail
+        call iso_deny
+        jc .fail
+        ; solo puede haber una
+        mov ax, [w_dir]
+        xor cx, cx
+        mov si, all11
+        mov dl, 0x08
+        call find_entry
+        jnc .fail
         mov ax, [w_dir]
         call dir_free_slot
         jc .fail
@@ -10049,6 +10534,8 @@ fn_13:
         call fcb_setup
         call fcb_resolve
         jc .fail
+        call iso_deny
+        jc .fail
         mov word [fcb_cnt], 0
         xor cx, cx
 .l:
@@ -10063,15 +10550,18 @@ fn_13:
         jnz .del
         test byte [fentry+11], 0x01
         jnz .n
+        call file_is_open
+        jc .n
         mov ax, [fentry+26]
         call fat_free_chain
 .del:
         mov ax, [w_dir]
         call dir_get
         jc .end
-        test byte [si+11], 0x08
+        mov bl, [si+11]             ; (cache_write no conserva los indicadores)
         mov byte [si], 0xE5
         call cache_write
+        test bl, 0x08
         jz .nolab
         push si
         mov si, noname11
@@ -10109,6 +10599,8 @@ fn_17:
         pop es
         pop ds
         call fcb_resolve
+        jc .fail
+        call iso_deny
         jc .fail
         mov word [fcb_cnt], 0
         xor cx, cx
@@ -10514,6 +11006,14 @@ abs_io:
         jmp .fail
 .bsec:
         mov word [abs_err], 0x0408
+        cmp byte [abs_cmd], 3
+        jne .fail
+        ; escritura a medias: lo que hubiera en las cachés ya no vale
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        mov byte [fat_dirty], 0
+        and byte [cur_drv+D_FLAGS], 0xFF ^ DF_MOUNTED
+        call drv_store
 .fail:
         mov byte [crit_off], 0
         pop es
@@ -10957,6 +11457,8 @@ mnt_try     resb 1
 mc_old      resd 1
 vol_ser     resd NDRV               ; huella (serie + etiqueta) de cada unidad montada
 io_nrdy     resb 1
+wr_fail     resb 1                  ; error de la escritura que falló (0 = ninguna)
+wr_fn       resb 1                  ; función de INT 21h en curso
 io_isdrv    resb 1                  ; la última E/S fue por un driver
 io_derr     resb 1                  ; código de error del driver
 crit_on     resb 1                  ; dentro de INT 24h
@@ -10974,7 +11476,10 @@ ife_size    resd 1
 ife_pat     resw 1
 ife_start   resw 1
 ife_n       resw 1
-iso_dirs    resb 9*ISO_ND
+iso_dirs    resb ISO_DL*ISO_ND
+iso_tick    resd 1
+ife_dsize   resd 1
+ih_new      resw 1
 hist_pos    resb 1
 hist_head   resb 1
 hist_count  resb 1

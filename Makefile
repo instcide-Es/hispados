@@ -68,6 +68,8 @@ $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPRATON.COM: drivers/hspraton.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MOUSETST.COM: tests/progs/mousetst.asm | $(B)
@@ -102,7 +104,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/PLAYWAV.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/SHARETST.COM \
+        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
@@ -156,6 +158,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/HELLOEXE.EXE ::HELLOEXE.EXE
 	mcopy -i $@ $(B)/MOUSETST.COM ::BIN/MOUSETST.COM
 	mcopy -i $@ $(B)/SHARETST.COM ::BIN/SHARETST.COM
+	mcopy -i $@ $(B)/FSTEST.COM ::BIN/FSTEST.COM
 	mcopy -i $@ $(B)/XMSTEST.COM ::BIN/XMSTEST.COM
 	mcopy -i $@ $(B)/MCBWALK.COM ::BIN/MCBWALK.COM
 	mcopy -i $@ $(B)/LOLTEST.COM ::BIN/LOLTEST.COM
@@ -227,6 +230,7 @@ test: $(IMG) usb nucprogs
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
+	tests/run_fs_tests.sh $(IMG)
 	tests/run_drivers_tests.sh $(IMG)
 	tests/run_sbload_tests.sh $(IMG)
 	tests/run_bootfat12_tests.sh
