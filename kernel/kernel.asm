@@ -8107,8 +8107,58 @@ clock_init:
         mov dl, al
         mov cx, bx
         call ymd_days
-        jc .r
+        jc .hora
         mov [k_days], ax
+.hora:
+        ; la hora: hay BIOS que ponen mal los tics al encender (la de QEMU
+        ; pierde la parte alta del contador según la hora del día): se toman
+        ; del reloj de tiempo real, que es el que vale
+        push bp
+        mov ah, 2
+        int 0x1A                    ; CH:CL:DH = hora en BCD
+        pop bp
+        jc .r
+        mov al, ch
+        call bcd2bin
+        cmp al, 23
+        ja .r
+        movzx eax, al
+        imul eax, eax, 60
+        push eax
+        mov al, cl
+        call bcd2bin
+        cmp al, 59
+        ja .rp
+        movzx ebx, al
+        pop eax
+        add eax, ebx
+        imul eax, eax, 60
+        push eax
+        mov al, dh
+        call bcd2bin
+        cmp al, 59
+        ja .rp
+        movzx ebx, al
+        pop eax
+        add eax, ebx                ; segundos desde medianoche
+        mov edx, 1573040            ; tics = segundos * 1573040 / 86400
+        mul edx
+        mov ebx, 86400
+        div ebx
+        cmp eax, 1573040
+        jb .t
+        mov eax, 1573039
+.t:
+        mov dx, ax
+        shr eax, 16
+        mov cx, ax
+        push bp
+        mov ah, 1
+        int 0x1A
+        pop bp
+        jmp .r
+.rp:
+        pop eax
 .r:
         ret
 
