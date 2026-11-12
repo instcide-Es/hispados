@@ -7,8 +7,12 @@
 ;  KEYB US             teclado estadounidense (el de la BIOS)
 ;  KEYB                muestra el teclado activo
 ;
-;  Se engancha a INT 09h: traduce las teclas que cambian y pone el carácter
-;  (página de códigos 437) en el búfer de la BIOS con INT 16h AH=05h.
+;  Se engancha al aviso de teclado de la BIOS (INT 15h, AH=4Fh: la BIOS lo
+;  llama desde INT 09h con cada código de tecla): traduce las teclas que
+;  cambian y pone el carácter (página de códigos 437) en el búfer de la BIOS
+;  con INT 16h AH=05h; las demás las deja pasar. No lee el puerto del teclado:
+;  si lo leyera antes que la BIOS, las teclas de dos códigos (flechas, Inicio,
+;  Fin...) podían llegar repetidas.
 ; =============================================================================
         cpu 386
         bits 16
@@ -80,6 +84,10 @@ int2f:
         jmp far [cs:old2f]
 
 int09:
+        cmp ah, 0x4F                ; ¿aviso de tecla? AL=código
+        je .tecla
+        jmp far [cs:old09]
+.tecla:
         push ax
         push bx
         push cx
@@ -87,7 +95,6 @@ int09:
         push ds
         cmp byte [cs:active], 0
         je .chain
-        in al, 0x60
         mov ah, al
         ; seguir AltGr (E0 38 / E0 B8) por nuestra cuenta
         cmp al, 0xE0
@@ -229,13 +236,15 @@ int09:
         call emit
         jmp .eat
 .eat:
-        mov al, 0x20                ; fin de interrupción
-        out 0x20, al
         pop ds
         pop si
         pop cx
         pop bx
         pop ax
+        push bp                     ; acarreo a 0: la BIOS no hace nada más
+        mov bp, sp
+        and byte [bp+6], 0xFE
+        pop bp
         iret
 .chain:
         pop ds
@@ -336,7 +345,7 @@ init:
 .install:
         push cs
         pop es
-        mov ax, 0x3509
+        mov ax, 0x3515
         int 0x21
         mov [old09], bx
         mov [old09+2], es
@@ -345,7 +354,7 @@ init:
         mov [old2f], bx
         mov [old2f+2], es
         mov dx, int09
-        mov ax, 0x2509
+        mov ax, 0x2515
         int 0x21
         mov dx, int2f
         mov ax, 0x252F

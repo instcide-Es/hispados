@@ -5,10 +5,13 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
   tam ANCHO ALTO                    tamaño de la captura
   px X Y COLOR [nombre]             el punto es de ese color de la paleta
   ventana X Y ANCHO ALTO activa|no  marco, barra de título, interior y sombra
+  marco X Y ANCHO ALTO activa|no    lo mismo sin mirar el interior (ventanas
+                                    con controles o maximizadas)
   titulo X Y activa|no TEXTO        el título de la ventana que está en X,Y
   texto X Y COLOR FONDO fina|negrita TEXTO   texto dibujado con la fuente propia
   cursor X Y                        el cursor del ratón tiene la punta ahí
   igual X Y ANCHO ALTO OTRA.ppm X2 Y2 MAXDIF   la zona es igual que en OTRA
+  cambia X Y ANCHO ALTO OTRA.ppm MINDIF        la zona ha cambiado respecto a OTRA
 Los colores se dan por su número (0-15) en la paleta de ventanas/datos.inc y
 se comparan con un margen (las pantallas de 15/16 bits y el DAC de 6 bits
 redondean). La fuente esperada se lee de build/gen/ventanas/fuente.inc.
@@ -117,18 +120,21 @@ def main():
             res(es(c, n), '%s: %s (%d,%d)%s' % (nombre, a[i + 4], x, y,
                 '' if es(c, n) else ' es %s y no %s' % (c, PAL[n])))
             i += 5
-        elif op == 'ventana':
+        elif op in ('ventana', 'marco'):
             x, y, w, h = (int(v) for v in a[i + 1:i + 5])
             act = a[i + 5] == 'activa'
             p = [
                 (es(cap.px(x, y + h // 2), MARRON), 'marco izquierdo'),
                 (es(cap.px(x + w - 1, y + h // 2), MARRON), 'marco derecho'),
                 (es(cap.px(x + w // 2, y + h - 1), MARRON), 'marco inferior'),
-                (es(cap.px(x + w - 8, y + BORDE + 3), TERRACOTA if act else ARENA), 'barra de título'),
+                (es(cap.px(x + BORDE + 3, y + BORDE + 3), TERRACOTA if act else ARENA), 'barra de título'),
                 (es(cap.px(x + w - 8, y + BORDE + TIT_H), MARRON), 'línea bajo el título'),
-                (es(cap.px(x + w - 8, y + h - 8), CREMA), 'interior'),
                 (es(cap.px(x + BORDE + 13, y + BORDE + TIT_H // 2), OCRE if act else 7), 'rombo'),
             ]
+            if op == 'ventana':
+                p.append((es(cap.px(x + w - 8, y + BORDE + 3), TERRACOTA if act else ARENA),
+                          'barra de título (derecha)'))
+                p.append((es(cap.px(x + w - 8, y + h - 8), CREMA), 'interior'))
             mal = [t for ok, t in p if not ok]
             res(not mal, '%s: ventana %s en (%d,%d) de %dx%d%s' % (
                 nombre, 'activa' if act else 'no activa', x, y, w, h,
@@ -164,6 +170,15 @@ def main():
             res(dif <= maxdif, '%s: zona (%d,%d) %dx%d igual que en %s (%d,%d): %d puntos distintos' % (
                 nombre, x, y, w, h, os.path.basename(a[i + 5]).replace('.ppm', ''), x2, y2, dif))
             i += 9
+        elif op == 'cambia':
+            x, y, w, h = (int(v) for v in a[i + 1:i + 5])
+            otra = Captura(a[i + 5])
+            mindif = int(a[i + 6])
+            dif = sum(1 for yy in range(h) for xx in range(w)
+                      if cap.px(x + xx, y + yy) != otra.px(x + xx, y + yy))
+            res(dif >= mindif, '%s: zona (%d,%d) %dx%d distinta de la de %s: %d puntos' % (
+                nombre, x, y, w, h, os.path.basename(a[i + 5]).replace('.ppm', ''), dif))
+            i += 7
         else:
             raise SystemExit('comprobación desconocida: ' + op)
     sys.exit(1 if fallos else 0)

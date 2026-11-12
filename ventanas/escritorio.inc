@@ -1,20 +1,27 @@
 ; =============================================================================
-;  Hispa Ventanas - el escritorio y las ventanas de ejemplo de la etapa 2
+;  Hispa Ventanas - el escritorio y las ventanas de muestra
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  Aspecto propio: fondo de mosaico (un azulejo de rombos) en azul petróleo,
-;  barra superior marrón con filete ocre, ventanas de color crema con la
-;  barra de título terracota (arena si no es la activa), marco marrón y
-;  sombra dura.
-;    esc_iniciar    prepara el mosaico y los textos y crea las ventanas
-;    esc_pintar     pinta el fondo y la barra superior (con el recorte puesto)
-;    esc_en_salir   EAX=x EBX=y -> CF=1 si el punto está en el botón «Salir»
-;    esc_inv_salir  marca el botón para repintarlo
+;  El escritorio es una ventana más (la del fondo, de la tarea del sistema):
+;  mosaico de rombos en azul petróleo, barra superior marrón con filete ocre y
+;  el botón «Salir», y abajo los iconos de las ventanas minimizadas (un clic
+;  las restaura).
+;    esc_iniciar     prepara el mosaico y los textos y crea el escritorio
+;    esc_inv_iconos  hay que repintar la fila de iconos
+;    esc_muestra     crea las tres ventanas de muestra de la etapa 2
+;                    (VENTANAS /DEMO): Tab, flechas y Esc como entonces
 ; =============================================================================
 
 SALIR_AN    equ 64
 SALIR_AL    equ 18
 SALIR_Y     equ 4
+ICO_PASO    equ 96                  ; de un icono minimizado al siguiente
+ICO_ALTO    equ 62
+
+c_escritorio dd esc_proc
+            db SIN_FONDO, 0, 0, 0
+c_demo      dd demo_proc
+            db C_CREMA, 0, 0, 0
 
 esc_iniciar:
         pushad
@@ -110,7 +117,31 @@ esc_iniciar:
         call pon_cad
         mov byte [edi], 0
 
-        ; ---- las ventanas (la última queda delante) ----
+        ; ---- la ventana del escritorio ----
+        mov edi, plant_tmp
+        mov dword [edi+P_CLASE], c_escritorio
+        xor eax, eax
+        mov [edi+P_TEXTO], eax
+        mov [edi+P_ESTILO], eax
+        mov [edi+P_X], eax
+        mov [edi+P_Y], eax
+        mov [edi+P_ID], eax
+        mov eax, [vid_ancho]
+        mov [edi+P_AN], eax
+        mov eax, [vid_alto]
+        mov [edi+P_AL], eax
+        mov esi, edi
+        xor ebp, ebp
+        call ven_crear
+        mov [escritorio], eax
+        mov ebp, eax
+        call orden_quitar           ; no está en el orden: es el fondo
+        popad
+        ret
+
+; las tres ventanas de muestra (la última queda delante)
+esc_muestra:
+        pushad
         mov eax, 60
         mov ebx, [vid_alto]
         sub ebx, 160
@@ -118,7 +149,7 @@ esc_iniciar:
         mov edx, 150
         mov esi, tit_sistema
         mov edi, pinta_sistema
-        call ges_crear
+        call esc_crear_demo
         mov eax, [vid_ancho]
         sub eax, 380
         mov ebx, 110
@@ -126,14 +157,34 @@ esc_iniciar:
         mov edx, 200
         mov esi, tit_paleta
         mov edi, pinta_paleta
-        call ges_crear
+        call esc_crear_demo
         mov eax, 30
         mov ebx, 50
         mov ecx, 440
         mov edx, 160
         mov esi, tit_bienvenida
         mov edi, pinta_bienvenida
-        call ges_crear
+        call esc_crear_demo
+        popad
+        ret
+
+; (interna) EAX=x EBX=y ECX=ancho EDX=alto ESI=título EDI=pintor
+esc_crear_demo:
+        pushad
+        mov dword [plant_tmp+P_CLASE], c_demo
+        mov [plant_tmp+P_TEXTO], esi
+        mov dword [plant_tmp+P_ESTILO], E_TITULO
+        mov [plant_tmp+P_X], eax
+        mov [plant_tmp+P_Y], ebx
+        mov [plant_tmp+P_AN], ecx
+        mov [plant_tmp+P_AL], edx
+        mov esi, plant_tmp
+        xor ebp, ebp
+        call ven_crear
+        test eax, eax
+        jz .x
+        mov [eax+V_D0], edi
+.x:
         popad
         ret
 
@@ -171,57 +222,34 @@ pon_num:
         pop ebx
         ret
 
-esc_pintar:
+esc_inv_iconos:
         pushad
-        xor eax, eax                ; el fondo
-        mov ebx, BARRA_H
+        mov ebp, [escritorio]
+        test ebp, ebp
+        jz .x
+        xor eax, eax
+        mov ebx, [vid_alto]
+        sub ebx, ICO_ALTO
         mov ecx, [vid_ancho]
-        mov edx, [vid_alto]
-        mov esi, mosaico
-        call gdi_mosaico
-        cmp dword [rec_y0], BARRA_H
-        jge .x
-        COLOR C_MARRON              ; la barra superior
-        xor ebx, ebx
-        mov edx, BARRA_H - 2
-        call gdi_rect
-        COLOR C_OCRE
-        mov ebx, BARRA_H - 2
-        mov edx, 2
-        call gdi_rect
-        COLOR C_CREMA
-        mov byte [gdi_negrita], 1
-        mov eax, 12
-        mov ebx, 5
-        mov esi, tit_barra
-        call gdi_texto
-        mov byte [gdi_negrita], 0
-        ; el botón «Salir» (se oscurece mientras está pulsado)
-        COLOR C_TERRACOTA
-        cmp byte [sal_armado], 0
-        je .b1
-        COLOR C_OCRE
-.b1:
+        mov edx, ICO_ALTO
+        call ven_invalidar_rect
+.x:
+        popad
+        ret
+
+; (interna) el botón «Salir», a repintar
+esc_inv_salir:
+        pushad
         mov eax, [vid_ancho]
         sub eax, SALIR_AN + 12
         mov ebx, SALIR_Y
         mov ecx, SALIR_AN
         mov edx, SALIR_AL
-        call gdi_rect
-        COLOR C_CREMA
-        call gdi_marco
-        cmp byte [sal_armado], 0
-        je .b2
-        COLOR C_TINTA
-.b2:
-        add eax, (SALIR_AN - 5*8) / 2
-        inc ebx
-        mov esi, tit_salir
-        call gdi_texto
-.x:
+        call ven_invalidar_rect
         popad
         ret
 
+; (interna) EAX=x EBX=y -> CF=1 si el punto está en el botón «Salir»
 esc_en_salir:
         push eax
         sub eax, [vid_ancho]
@@ -241,18 +269,249 @@ esc_en_salir:
         clc
         ret
 
-esc_inv_salir:
-        pushad
+; (interna) ECX=número -> ESI=la ventana minimizada que hace ese número
+; (CF=1 si no hay tantas)
+esc_minimizada:
+        push eax
+        push ecx
+        push edx
+        mov esi, [ven_tabla]
+        mov edx, MAX_VEN
+.b:
+        cmp dword [esi+V_USO], 1
+        jne .s
+        cmp dword [esi+V_PADRE], 0
+        jne .s
+        mov eax, [esi+V_ESTADO]
+        and eax, S_VISIBLE | S_MINIM
+        cmp eax, S_VISIBLE | S_MINIM
+        jne .s
+        dec ecx
+        js .si
+.s:
+        add esi, V_TAM
+        dec edx
+        jnz .b
+        stc
+        jmp .x
+.si:
+        clc
+.x:
+        pop edx
+        pop ecx
+        pop eax
+        ret
+
+esc_proc:
+        cmp eax, WM_PAINT
+        je .pintar
+        cmp eax, WM_LBUTTONDOWN
+        je .pulsa
+        cmp eax, WM_LBUTTONDBLCLK
+        je .pulsa
+        cmp eax, WM_LBUTTONUP
+        je .suelta
+        xor eax, eax
+        ret
+.pulsa:
+        movsx eax, dx
+        mov ebx, edx
+        sar ebx, 16
+        call esc_en_salir
+        jnc .iconos
+        mov byte [sal_armado], 1
+        call esc_inv_salir
+        jmp .fin
+.iconos:
+        mov ecx, [vid_alto]
+        sub ecx, ICO_ALTO
+        cmp ebx, ecx
+        jl .fin
+        sub eax, 16
+        js .fin
+        xor edx, edx
+        mov ecx, ICO_PASO
+        div ecx
+        mov ecx, eax
+        call esc_minimizada
+        jc .fin
+        mov ebp, esi
+        mov eax, 4
+        call ven_mostrar
+        jmp .fin
+.suelta:
+        cmp byte [sal_armado], 0
+        je .fin
+        mov byte [sal_armado], 0
+        call esc_inv_salir
+        movsx eax, dx
+        mov ebx, edx
+        sar ebx, 16
+        call esc_en_salir
+        jnc .fin
+        mov byte [salir], 1
+.fin:
+        xor eax, eax
+        ret
+.pintar:
+        call dc_pintar
+        xor eax, eax                ; el fondo
+        mov ebx, BARRA_H
+        mov ecx, [vid_ancho]
+        mov edx, [vid_alto]
+        mov esi, mosaico
+        call dc_mosaico
+        COLOR C_MARRON              ; la barra superior
+        xor ebx, ebx
+        mov edx, BARRA_H - 2
+        call dc_rect
+        COLOR C_OCRE
+        mov ebx, BARRA_H - 2
+        mov edx, 2
+        call dc_rect
+        COLOR C_CREMA
+        mov byte [gdi_negrita], 1
+        mov eax, 12
+        mov ebx, 5
+        mov esi, tit_barra
+        call dc_texto
+        mov byte [gdi_negrita], 0
+        ; el botón «Salir» (se oscurece mientras está pulsado)
+        COLOR C_TERRACOTA
+        cmp byte [sal_armado], 0
+        je .b1
+        COLOR C_OCRE
+.b1:
         mov eax, [vid_ancho]
         sub eax, SALIR_AN + 12
         mov ebx, SALIR_Y
         mov ecx, SALIR_AN
         mov edx, SALIR_AL
-        call ges_invalidar
-        popad
+        call dc_rect
+        COLOR C_CREMA
+        call dc_marco
+        cmp byte [sal_armado], 0
+        je .b2
+        COLOR C_TINTA
+.b2:
+        add eax, (SALIR_AN - 5*8) / 2
+        inc ebx
+        mov esi, tit_salir
+        call dc_texto
+        ; los iconos de las ventanas minimizadas
+        xor ecx, ecx
+.ico:
+        call esc_minimizada
+        jc .pf
+        mov edi, esi
+        mov eax, ecx
+        imul eax, ICO_PASO
+        add eax, 16 + (ICO_PASO - 32) / 2
+        mov ebx, [vid_alto]
+        sub ebx, ICO_ALTO - 4
+        mov esi, [edi+V_ICONO]
+        test esi, esi
+        jnz .i1
+        mov esi, ico_ventana
+.i1:
+        call dc_icono
+        ; el nombre, debajo (hasta 11 letras)
+        mov esi, [edi+V_TEXTO]
+        test esi, esi
+        jz .i4
+        xor edx, edx
+.i2:
+        cmp byte [esi+edx], 0
+        je .i3
+        inc edx
+        cmp edx, 11
+        jb .i2
+.i3:
+        push ecx
+        mov eax, ecx
+        imul eax, ICO_PASO
+        add eax, 16 + ICO_PASO / 2
+        lea ecx, [edx*4]
+        sub eax, ecx
+        add ebx, 36
+        push edx
+        COLOR C_PETROLEO
+        sub eax, 3
+        lea ecx, [edx*8+6]
+        mov edx, 17
+        call dc_rect
+        add eax, 3
+        pop ecx
+        COLOR C_CREMA
+        call dc_texto_n
+        pop ecx
+.i4:
+        inc ecx
+        jmp .ico
+.pf:
+        call dc_cerrar
+        xor eax, eax
         ret
 
-; ---- pintores de las ventanas de ejemplo: EAX=x EBX=y ECX=ancho EDX=alto ----
+; ---- las ventanas de muestra ----
+demo_proc:
+        cmp eax, WM_PAINT
+        je .pintar
+        cmp eax, WM_CLOSE
+        je .salir
+        cmp eax, WM_KEYDOWN
+        jne ven_defecto
+        cmp ecx, TC_ESC
+        je .salir
+        cmp ecx, TC_TAB
+        jne .flechas
+        call ges_siguiente
+        jmp .fin
+.flechas:
+        mov eax, [ebp+V_X]
+        mov ebx, [ebp+V_Y]
+        cmp ecx, TC_ARRIBA
+        jne .t1
+        sub ebx, 8
+.t1:
+        cmp ecx, TC_ABAJO
+        jne .t2
+        add ebx, 8
+.t2:
+        cmp ecx, TC_IZQ
+        jne .t3
+        sub eax, 8
+.t3:
+        cmp ecx, TC_DER
+        jne .t4
+        add eax, 8
+.t4:
+        mov ecx, [ebp+V_AN]
+        mov edx, [ebp+V_AL]
+        call ges_acotar
+        cmp eax, [ebp+V_X]
+        jne .mueve
+        cmp ebx, [ebp+V_Y]
+        je .fin
+.mueve:
+        call ven_mover
+        jmp .fin
+.salir:
+        mov byte [salir], 1
+.fin:
+        xor eax, eax
+        ret
+.pintar:
+        call dc_pintar
+        call ven_cli
+        xor eax, eax
+        xor ebx, ebx
+        call [ebp+V_D0]
+        call dc_cerrar
+        xor eax, eax
+        ret
+
+; pintores: EAX=x EBX=y ECX=ancho EDX=alto de la zona de la ventana
 ; escribe varias líneas: ESI -> (dx, dy, color, negrita, texto, 0)..., 0xFF
 esc_lineas:
         pushad
@@ -270,13 +529,14 @@ esc_lineas:
         mov dl, [esi+3]
         mov [gdi_negrita], dl
         add esi, 4
-        call gdi_texto
+        call dc_texto
 .s:
         lodsb
         test al, al
         jnz .s
         jmp .l
 .x:
+        mov byte [gdi_negrita], 0
         popad
         ret
 
@@ -296,20 +556,20 @@ pinta_sistema:
         add eax, 14
         add ebx, 10
         mov esi, t_pantalla
-        call gdi_texto
+        call dc_texto
         add ebx, 20
         mov esi, t_video
-        call gdi_texto
+        call dc_texto
         add ebx, 20
         mov esi, s_raton_si
         cmp byte [hay_rat], 0
         jne .r
         mov esi, s_raton_no
 .r:
-        call gdi_texto
+        call dc_texto
         add ebx, 20
         mov esi, t_dpmi
-        call gdi_texto
+        call dc_texto
         pop esi
         pop ebx
         pop eax
@@ -333,9 +593,9 @@ pinta_paleta:
         mov ecx, 30
         mov edx, 24
         mov [gdi_color], esi
-        call gdi_rect
+        call dc_rect
         COLOR C_TINTA
-        call gdi_marco
+        call dc_marco
         inc esi
         cmp esi, 16
         jb .c
@@ -350,7 +610,7 @@ pinta_paleta:
         imul ecx, 13
         lea ecx, [ecx+ebp+12]
         lea edx, [edi+74]
-        call gdi_linea
+        call dc_linea
         inc esi
         cmp esi, 11
         jb .l
@@ -374,7 +634,7 @@ pinta_paleta:
         sub edx, ebx
         sub edx, ebx
         lea ebx, [ebx+edi+74]
-        call gdi_marco
+        call dc_marco
         inc esi
         cmp esi, 5
         jb .m
@@ -383,6 +643,6 @@ pinta_paleta:
         lea ebx, [edi+104]
         mov ecx, 44
         mov edx, 28
-        call gdi_rect
+        call dc_rect
         popad
         ret

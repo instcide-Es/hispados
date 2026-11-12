@@ -2,11 +2,15 @@
 ;  Hispa Ventanas - ratón y cursor
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  El ratón llega por INT 33h (HSPRATON u otro driver): en cada vuelta del
-;  bucle, rm_sondeo lee en modo real el movimiento (función 0Bh) y los
-;  botones (03h). La posición la lleva Hispa Ventanas, en puntos de pantalla.
+;  El ratón llega por INT 33h (HSPRATON u otro driver) y por interrupciones:
+;  el driver llama a rm_raton (ventanas.asm, en modo real) en cada movimiento
+;  y en cada cambio del botón izquierdo (función 0Ch), y esa rutina lo apunta
+;  en una cola que el sistema vacía en cada vuelta (eventos). La posición la
+;  lleva Hispa Ventanas, en puntos de pantalla, con los contadores de
+;  movimiento del driver.
 ;  El cursor se dibuja por software en la superficie, guardando lo que tapa:
-;    rat_iniciar    prepara el dibujo del cursor y lo centra
+;    rat_iniciar    prepara el dibujo del cursor, lo centra y pide los avisos
+;    rat_quitar     deja de recibir avisos del driver
 ;    rat_mover      EAX=x EBX=y: nueva posición (acotada a la pantalla)
 ;    cur_ocultar    repone lo que había debajo
 ;    cur_mostrar    guarda lo que hay debajo y dibuja el cursor en rat_x, rat_y
@@ -40,7 +44,30 @@ rat_iniciar:
         mov eax, [vid_alto]
         shr eax, 1
         mov [rat_y], eax
+        cmp byte [hay_rat], 0
+        je .x
+        mov eax, 0x000B             ; contadores de movimiento, a cero
+        int 0x33
+        mov dword [rmcs+0x1C], 0x000C
+        mov dword [rmcs+0x18], 7    ; movimiento y botón izquierdo
+        mov dword [rmcs+0x14], rm_raton
+        mov bl, 0x33
+        call rm_int
+.x:
         popad
+        ret
+
+rat_quitar:
+        cmp byte [hay_rat], 0
+        je .x
+        pushad
+        mov dword [rmcs+0x1C], 0x000C
+        mov dword [rmcs+0x18], 0
+        mov dword [rmcs+0x14], 0
+        mov bl, 0x33
+        call rm_int
+        popad
+.x:
         ret
 
 rat_mover:

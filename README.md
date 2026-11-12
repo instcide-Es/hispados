@@ -89,7 +89,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
-| **Hispa Ventanas**, etapa 2: `VENTANAS` abre el escritorio gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios; ventanas que se arrastran con el ratón). Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
+| **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas, Bloc de notas, Calculadora y Reloj. Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
 | UMB/EMS (EMM386 propio), Sound Blaster emulada en tarjetas modernas, EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
 
 ## Compilar y probar

@@ -1,8 +1,9 @@
 ; =============================================================================
-;  VENTANAS.COM - Hispa Ventanas, etapa 2: gráficos, ratón y ventanas
+;  VENTANAS.COM - Hispa Ventanas, etapa 3: ventanas, mensajes y programas
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Uso:  VENTANAS [/1024] [/640] [/8] [/15] [/16] [/24] [/32] [/COLOR] [/VGA]
+;                 [/DEMO]
 ;
 ;  El entorno gráfico propio que va encima de Hispa-DOS (docs/VENTANAS.md).
 ;  Todo está hecho aquí desde cero: el código, la paleta, el cursor, el
@@ -19,19 +20,33 @@
 ;    video.inc      driver de pantalla: elegir y poner el modo, paleta y
 ;                   llevar un rectángulo de la superficie a la pantalla
 ;    gdi.inc        dibujo sobre la superficie (8 bits por punto), con recorte
-;    raton.inc      ratón (INT 33h por sondeo) y cursor por software
-;    gestor.inc     gestor de ventanas: orden Z, zona sucia, arrastre
-;    escritorio.inc el fondo y las ventanas de ejemplo de esta etapa
+;    dc.inc         regiones de recorte y contexto de dispositivo por ventana
+;    raton.inc      cursor por software
+;    nucleo.inc     memoria, tareas (multitarea cooperativa), colas de
+;                   mensajes y temporizadores
+;    gestor.inc     ventanas, orden, activa, foco, zona no cliente, reparto
+;                   del ratón y del teclado
+;    menus.inc, controles.inc, dialogos.inc, dos.inc
+;    escritorio.inc el fondo, la barra y los iconos de lo minimizado
+;    centro.inc, bloc.inc, calc.inc, reloj.inc    los programas
+;
+;  La entrada llega por interrupciones: el driver de ratón llama a rm_raton
+;  (INT 33h, función 0Ch), que apunta cada suceso en una cola; las teclas las
+;  encola la BIOS (IRQ 1, con el teclado que haya dejado KEYB). El bucle del
+;  sistema duerme con HLT en modo real hasta la siguiente interrupción.
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
+%define CON_PROGRAMAS
+%include "defs.inc"
+RAT_COLA    equ 64                  ; sucesos de ratón que caben en la cola
 
 inicio:
         cld
         mov sp, pila_fin
         mov di, bss_ini
-        mov cx, bss_fin - bss_ini
+        mov cx, pila_fin - bss_ini
         xor al, al
         rep stosb
         mov [rmseg], cs
@@ -78,7 +93,12 @@ inicio:
         je .ocolor
         cmp al, 5
         je .ofallo
+        cmp al, 6
+        je .odemo
         jmp .ayuda
+.odemo:
+        mov byte [op_demo], 1
+        jmp .arg
 .ovga:
         mov byte [op_vga], 1
         jmp .arg
@@ -318,36 +338,65 @@ cargar:
         ret
 
 ; ---- sondeo en modo real (se llama con la función 0301h del DPMI) ----
-; Espera a la próxima interrupción si no había nada que hacer, y recoge de
-; una vez el movimiento y los botones del ratón y una tecla.
+; Espera a la próxima interrupción si no hay nada que hacer, y recoge las
+; teclas que haya en la cola de la BIOS (hasta 8).
 rm_sondeo:
         push ds
         push cs
         pop ds
         cmp byte [son_esperar], 0
         je .ya
+        mov ah, 0x11
+        int 0x16
+        jnz .ya
+        cli
+        mov al, [rc_cab]
+        cmp al, [rc_cola]
+        jne .ya
         sti
         hlt
 .ya:
-        cmp byte [hay_rat], 0
-        je .tecla
-        mov ax, 0x000B              ; movimiento desde la última vez
-        int 0x33
-        mov [son_dx], cx
-        mov [son_dy], dx
-        mov ax, 0x0003
-        int 0x33
-        mov [son_bot], bx
+        sti
+        mov byte [son_nteclas], 0
+        mov di, son_teclas
 .tecla:
-        mov byte [son_haytecla], 0
         mov ah, 0x11
         int 0x16
         jz .fin
         mov ah, 0x10
         int 0x16
-        mov [son_tecla], ax
-        mov byte [son_haytecla], 1
+        mov [di], ax
+        add di, 2
+        inc byte [son_nteclas]
+        cmp byte [son_nteclas], 8
+        jb .tecla
 .fin:
+        pop ds
+        retf
+
+; ---- sucesos del ratón (la llama el driver: INT 33h, función 0Ch) ----
+; AX=qué ha pasado BX=botones SI, DI=contadores de movimiento. Solo apunta.
+rm_raton:
+        push ds
+        push bp
+        push dx
+        push cs
+        pop ds
+        movzx bp, byte [rc_cab]
+        mov dx, bp
+        inc dx
+        and dx, RAT_COLA - 1
+        cmp dl, [rc_cola]
+        je .x                       ; cola llena
+        shl bp, 3
+        mov [ds:rat_cola+bp], ax
+        mov [ds:rat_cola+bp+2], bx
+        mov [ds:rat_cola+bp+4], si
+        mov [ds:rat_cola+bp+6], di
+        mov [rc_cab], dl
+.x:
+        pop dx
+        pop bp
         pop ds
         retf
 
@@ -359,7 +408,14 @@ rm_sondeo:
         bits 32
 principal:
         cld
+        mov edi, pila_fin           ; el resto de las variables, a cero
+        mov ecx, bss_fin - pila_fin
+        xor al, al
+        rep stosb
         call exc_instalar
+        mov eax, [base]
+        neg eax
+        mov [cero], eax             ; puntero a la dirección lineal 0
         ; la superficie de dibujo: un byte por punto
         mov eax, [vid_ancho]
         imul eax, [vid_alto]
@@ -375,25 +431,46 @@ principal:
         mov bx, cx
         sub ebx, [base]
         mov [sup_ptr], ebx
+        call mem_iniciar
+        jc .sinmem
         call vid_abrir
         jc .sinvideo
         mov byte [en_grafico], 1
         call gdi_iniciar
         call rat_iniciar
-        call esc_iniciar
+        call tar_iniciar
         call ges_iniciar
+        call esc_iniciar
+        call programas_iniciar
         cmp byte [op_fallo], 0
         je .bucle
-        call ges_actualizar
+        call sis_mensajes
+        call ges_presentar
         mov eax, 0x0FF4             ; (prueba) fallo de protección en gráficos
         mov es, eax
 .bucle:
-        call ges_actualizar
+        mov al, [actividad]         ; si no ha pasado nada, a dormir
+        xor al, 1
+        mov [son_esperar], al
+        mov byte [actividad], 0
         call sondeo
         call eventos
+        mov ecx, 4
+.ronda:
+        call sis_mensajes           ; el escritorio y los menús
+        call tar_ceder              ; y un turno para cada programa
+        call sis_mensajes
+        call ges_pendiente
+        jnc .pres
+        dec ecx
+        jnz .ronda
+.pres:
+        call tar_limpiar
+        call ges_presentar
         cmp byte [salir], 0
         je .bucle
 
+        call rat_quitar
         call vid_cerrar
         mov esi, m_adios
         xor al, al
@@ -418,6 +495,60 @@ principal:
         mov ah, 0x4C
         int 0x21
 
+; lo que se pone en marcha al entrar
+programas_iniciar:
+        cmp byte [op_demo], 0
+        jne esc_muestra
+%ifdef CON_PROGRAMAS
+        mov eax, centro_tarea
+        call tar_crear
+%endif
+        ret
+
+; (sistema) despacha la cola de la tarea 0: el escritorio y los menús
+sis_mensajes:
+        push edi
+        sub esp, M_TAM
+        mov edi, esp
+.l:
+        call msg_mirar
+        jc .x
+        call msg_despachar
+        jmp .l
+.x:
+        add esp, M_TAM
+        pop edi
+        ret
+
+; (sistema) CF=1 si queda alguna ventana por pintar
+ges_pendiente:
+        push eax
+        push ebx
+        push ecx
+        mov ebx, [ven_tabla]
+        mov ecx, MAX_VEN
+.b:
+        cmp dword [ebx+V_USO], 1
+        jne .s
+        test dword [ebx+V_ESTADO], S_NCSUCIO
+        jnz .si
+        mov eax, [ebx+V_UX0]
+        cmp eax, [ebx+V_UX1]
+        jl .si
+.s:
+        add ebx, V_TAM
+        dec ecx
+        jnz .b
+        clc
+        jmp .x
+.si:
+        stc
+.x:
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
 ; escribe en la consola de DOS la cadena ESI (acabada en 0)
 escribe:
         lodsb
@@ -430,61 +561,152 @@ escribe:
 .x:
         ret
 
-; ---- una vuelta de sondeo: ratón y teclado, en modo real ----
-sondeo:
-        mov edi, rmcs
-        xor eax, eax
-        mov ecx, 0x32 / 2
-        rep stosw
-        mov ax, [rmseg]
-        mov [rmcs+0x2C], ax
-        mov word [rmcs+0x2A], rm_sondeo
+; ---- llamada a modo real ----
+; rm_llamar: llama (0301h) a la rutina de modo real de este programa que
+; está en [rmcs+0x2A]. rm_int: BL=interrupción (0300h). Los registros van y
+; vuelven en rmcs; aquí se ponen los segmentos y la pila (la del servidor).
+rm_llamar:
         mov ax, 0x0301
-        xor ebx, ebx
+        jmp rm_ir
+rm_int:
+        mov ax, 0x0300
+rm_ir:
+        push ecx
+        push edi
+        push eax
+        mov ax, [rmseg]
+        mov [rmcs+0x22], ax         ; ES
+        mov [rmcs+0x24], ax         ; DS
+        mov [rmcs+0x2C], ax         ; CS
+        xor eax, eax
+        mov [rmcs+0x20], ax         ; banderas
+        mov [rmcs+0x2E], eax        ; SS:SP
+        pop eax
         xor ecx, ecx
+        mov bh, 0
         mov edi, rmcs
         int 0x31
+        pop edi
+        pop ecx
         ret
 
-; ---- reparto de lo que ha encontrado el sondeo ----
+; ---- una vuelta de sondeo, en modo real ----
+sondeo:
+        pushad
+        mov word [rmcs+0x2A], rm_sondeo
+        call rm_llamar
+        popad
+        ret
+
+; ---- reparto de lo que ha llegado: ratón (de la cola) y teclas ----
 eventos:
-        mov byte [son_esperar], 1
+        pushad
+        mov eax, [cero]
+        mov al, [eax+0x417]         ; mayúsculas, Ctrl y Alt (datos de la BIOS)
+        mov [tec_mayus], al
         cmp byte [hay_rat], 0
-        je .tecla
-        movsx eax, word [son_dx]
-        movsx ebx, word [son_dy]
-        mov ecx, eax
-        or ecx, ebx
-        jz .botones
-        mov byte [son_esperar], 0
+        je .teclas
+.r:
+        movzx esi, byte [rc_cola]
+        mov eax, esi
+        cmp al, [rc_cab]
+        je .teclas
+        lea edi, [rat_cola+esi*8]
+        mov ax, [edi+4]             ; lo que se ha movido desde el anterior
+        mov cx, ax
+        sub cx, [ult_si]
+        mov [ult_si], ax
+        movsx ecx, cx
+        mov ax, [edi+6]
+        mov dx, ax
+        sub dx, [ult_di]
+        mov [ult_di], ax
+        movsx edx, dx
+        mov bl, [edi+2]
+        and bl, 1
+        inc esi
+        and esi, RAT_COLA - 1
+        mov eax, esi
+        mov [rc_cola], al
+        mov eax, ecx
+        or eax, edx
+        jz .bot
+        mov eax, ecx
         add eax, [rat_x]
+        push ebx
+        mov ebx, edx
         add ebx, [rat_y]
         call rat_mover              ; (acota a la pantalla)
+        pop ebx
+        mov byte [ev_movido], 1
+        mov byte [actividad], 1
+.bot:
+        cmp bl, [rat_boton]
+        jne .cambia
+        mov al, [rc_cola]           ; varios movimientos seguidos cuentan por uno
+        cmp al, [rc_cab]
+        jne .r
+.cambia:
+        cmp byte [ev_movido], 0
+        je .c2
+        mov byte [ev_movido], 0
+        push ebx
         mov eax, [rat_x]
         mov ebx, [rat_y]
         call ges_raton_mueve
-.botones:
-        mov al, [son_bot]
-        and al, 1
-        cmp al, [rat_boton]
-        je .tecla
-        mov [rat_boton], al
-        mov byte [son_esperar], 0
+        pop ebx
+.c2:
+        cmp bl, [rat_boton]
+        je .r
+        mov [rat_boton], bl
+        mov byte [actividad], 1
+        test bl, bl
+        jz .suelta
+        call tics                   ; ¿doble clic?
+        mov ecx, eax
+        sub ecx, [dbl_tics]
+        mov [dbl_tics], eax
+        mov byte [rat_doble], 0
+        cmp ecx, 8
+        ja .nd
+        mov eax, [rat_x]
+        sub eax, [dbl_x]
+        add eax, 4
+        cmp eax, 8
+        ja .nd
+        mov eax, [rat_y]
+        sub eax, [dbl_y]
+        add eax, 4
+        cmp eax, 8
+        ja .nd
+        mov byte [rat_doble], 1
+        sub dword [dbl_tics], 100
+.nd:
         mov eax, [rat_x]
         mov ebx, [rat_y]
-        cmp byte [rat_boton], 0
-        je .suelta
+        mov [dbl_x], eax
+        mov [dbl_y], ebx
         call ges_raton_pulsa
-        jmp .tecla
+        jmp .r
 .suelta:
+        mov eax, [rat_x]
+        mov ebx, [rat_y]
         call ges_raton_suelta
-.tecla:
-        cmp byte [son_haytecla], 0
-        je .x
-        mov byte [son_esperar], 0
-        mov ax, [son_tecla]
+        jmp .r
+.teclas:
+        movzx ecx, byte [son_nteclas]
+        mov esi, son_teclas
+.t:
+        test ecx, ecx
+        jz .x
+        lodsw
         call ges_tecla
+        mov byte [actividad], 1
+        dec ecx
+        jmp .t
 .x:
+        mov byte [son_nteclas], 0
+        popad
         ret
 
 ; ---- excepciones: antes de que el servidor escriba su mensaje, a texto ----
@@ -507,6 +729,10 @@ exc_texto:
         mov byte [en_grafico], 0
         mov eax, 0x0003
         int 0x10
+        cmp byte [hay_rat], 0
+        je .x
+        xor eax, eax                ; (y el driver de ratón suelta rm_raton)
+        int 0x33
 .x:
         pop es
         pop ds
@@ -534,15 +760,27 @@ exc_instalar:
 
 %include "video.inc"
 %include "gdi.inc"
+%include "dc.inc"
 %include "raton.inc"
+%include "nucleo.inc"
 %include "gestor.inc"
+%include "menus.inc"
 %include "escritorio.inc"
+%ifdef CON_PROGRAMAS
+%include "controles.inc"
+%include "dialogos.inc"
+%include "dos.inc"
+%include "centro.inc"
+%include "bloc.inc"
+%include "calc.inc"
+%include "reloj.inc"
+%endif
 
 ; =============================================================================
 ;  Datos
 ; =============================================================================
 ; opciones: longitud, texto, clase (0 VGA, 1 ancho, 2 bits, 3 color, 4 ayuda,
-; 5 prueba de fallo) y valor
+; 5 prueba de fallo, 6 ventanas de muestra) y valor
 opciones:
         db 3, "VGA", 0
         dw 0
@@ -566,22 +804,27 @@ opciones:
         dw 0
         db 5, "FALLO", 5
         dw 0
+        db 4, "DEMO", 6
+        dw 0
         db 1, "?", 4
         dw 0
         db 0
 
-m_ayuda     db "Hispa Ventanas 0.2 - entorno gráfico de Hispa-DOS (etapa 2)", 13, 10
+m_ayuda     db "Hispa Ventanas 0.3 - entorno gráfico de Hispa-DOS (etapa 3)", 13, 10
             db 13, 10
             db "VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA]", 13, 10
+            db "         [/DEMO]", 13, 10
             db 13, 10
             db "  /1024 /800 /640  resolución VESA: 1024x768, 800x600 (la normal) o 640x480", 13, 10
             db "  /8 ... /32       bits por punto (lo normal: 8, es decir, 256 colores)", 13, 10
             db "  /COLOR           color verdadero: el modo con más colores que haya", 13, 10
             db "  /VGA             no usar VESA: VGA de 640x480 y 16 colores", 13, 10
+            db "  /DEMO            solo las ventanas de muestra (Tab, flechas y Esc)", 13, 10
             db 13, 10
             db "Necesita HSPXMS.SYS (CONFIG.SYS) y HSPDPMI; con HSPRATON hay ratón.", 13, 10
-            db "Dentro: arrastre las ventanas por la barra de título; Tab cambia de", 13, 10
-            db "ventana, las flechas la mueven y Esc (o Alt+F4, o el botón Salir) sale.", 13, 10, "$"
+            db "Dentro: doble clic en un icono del Centro de programas para abrirlo;", 13, 10
+            db "Alt+F4 cierra la ventana, Ctrl+Tab pasa a otra, F10 abre el menú y el", 13, 10
+            db "botón Salir de la barra de arriba vuelve a Hispa-DOS.", 13, 10, "$"
 m_noxms     db "Hispa Ventanas necesita memoria extendida: añada a CONFIG.SYS la línea", 13, 10
             db "  DEVICE=A:\HISPADOS\HSPXMS.SYS", 13, 10
             db "(con la unidad de arranque) y reinicie.", 13, 10, "$"
@@ -603,6 +846,7 @@ op_bpp      db 0
 son_esperar db 0
 
 %include "datos.inc"
+%include "iconos.inc"
 %include "fuente.inc"
 
 ; ---- datos sin valor inicial (se ponen a cero al arrancar) ----
@@ -624,11 +868,13 @@ op_fallo    resb 1
 hay_rat     resb 1
 en_grafico  resb 1
 salir       resb 1
-son_haytecla resb 1
-son_dx      resw 1
-son_dy      resw 1
-son_bot     resw 1
-son_tecla   resw 1
+op_demo     resb 1
+son_nteclas resb 1
+rc_cab      resb 1                  ; cola de sucesos del ratón
+rc_cola     resb 1
+            alignb 2
+son_teclas  resw 8
+rat_cola    resb RAT_COLA * 8
             alignb 4
 exc_ant_00  resb 8
 exc_ant_06  resb 8
@@ -639,6 +885,11 @@ rmcs        resb 0x34
 ruta        resb 128
 %include "bss.inc"
             alignb 4
-            resb 3072
+            resb 4096
 pila_fin:
+%include "bss2.inc"
+%ifdef CON_PROGRAMAS
+%include "bss3.inc"
+%endif
+            alignb 16
 bss_fin:

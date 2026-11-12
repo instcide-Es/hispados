@@ -1,4 +1,5 @@
-; Hispa Ventanas - variables sin valor inicial de cada capa
+; Hispa Ventanas - variables sin valor inicial que también usa la parte de
+; modo real (tienen que estar en los primeros 64 KB del programa)
 ; ---- driver de pantalla ----
             alignb 4
 vid_ancho   resd 1
@@ -52,32 +53,5 @@ rat_boton   resb 1
 cur_puesto  resb 1
 cur_img     resb CUR_ANCHO * CUR_ALTO
 cur_fondo   resb CUR_ANCHO * CUR_ALTO
-; ---- gestor de ventanas ----
-            alignb 4
-n_ven       resd 1
-suc_x0      resd 1                  ; zona sucia
-suc_y0      resd 1
-suc_x1      resd 1
-suc_y1      resd 1
-act_x       resd 1
-act_y       resd 1
-gd_x        resd 1
-gd_y        resd 1
-gd_an       resd 1
-gd_al       resd 1
-gd_cy       resd 1
-gd_cal      resd 1
-arr_dx      resd 1
-arr_dy      resd 1
-ventanas    resb MAX_VEN * VEN_TAM
-orden       resb MAX_VEN            ; de la del fondo a la de delante
-act_puesto  resb 1
-gd_activa   resb 1
-arrastre    resb 1
-sal_armado  resb 1
-; ---- escritorio ----
-mosaico     resb 256
-t_pantalla  resb 64
-t_video     resb 64
-t_dpmi      resb 64
-mem_info    resb 0x30
+; ---- archivos ----
+dos_buf     resb 2048 + 16          ; búfer de paso de las llamadas a DOS

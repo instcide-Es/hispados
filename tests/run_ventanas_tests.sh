@@ -1,5 +1,7 @@
 #!/bin/bash
-# Prueba de Hispa Ventanas (VENTANAS.COM, etapa 2: gráficos, ratón y ventanas).
+# Prueba de Hispa Ventanas (VENTANAS.COM): gráficos, ratón y ventanas, con las
+# ventanas de muestra de la etapa 2 (VENTANAS /DEMO). Los programas y los
+# controles de la etapa 3 se prueban en tests/run_ventanas3_tests.sh.
 # Arranca en QEMU, maneja el escritorio con el ratón y el teclado del monitor
 # de QEMU (mouse_move, mouse_button, sendkey), saca capturas (screendump) y
 # las comprueba punto a punto con tests/tools/ventanas_check.py:
@@ -70,7 +72,7 @@ config "$XMS"
   send 'A:\HISPADOS\HSPRATON' 2
   send 'BIN\XMSTEST' 2.5
   send 'MEM' 2
-  send 'VENTANAS' 4
+  send 'VENTANAS /DEMO' 4
   shot s1
   # el ratón, a la esquina y de ahí a la barra de título de «Bienvenida»
   mon "mouse_move -500 -400"; mon "mouse_move -500 -400"
@@ -89,22 +91,22 @@ config "$XMS"
   tecla esc; sleep 1.5
   shot s6
   send 'ECHO TRAS-ESC'
-  send 'VENTANAS' 4
+  send 'VENTANAS /DEMO' 4
   mon "mouse_move 190 -141"; mon "mouse_move 190 -141" 0.8
   mon "mouse_button 1" 1
   shot s7                                   # botón «Salir» apretado
   mon "mouse_button 0" 2
   send 'ECHO TRAS-SALIR'
-  send 'VENTANAS' 4
+  send 'VENTANAS /DEMO' 4
   tecla alt-f4; sleep 1.5
   send 'ECHO TRAS-ALT-F4'
-  send 'VENTANAS /VGA' 4; shot m_vga; tecla esc; sleep 1.5
-  send 'VENTANAS /15' 4; shot m_15; tecla esc; sleep 1.5
-  send 'VENTANAS /16' 4; shot m_16; tecla esc; sleep 1.5
-  send 'VENTANAS /24' 4; shot m_24; tecla esc; sleep 1.5
-  send 'VENTANAS /32' 4; shot m_32; tecla esc; sleep 1.5
-  send 'VENTANAS /1024 /COLOR' 4; shot m_1024; tecla esc; sleep 1.5
-  send 'VENTANAS /640' 4; shot m_640; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /VGA' 4; shot m_vga; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /15' 4; shot m_15; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /16' 4; shot m_16; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /24' 4; shot m_24; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /32' 4; shot m_32; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /1024 /COLOR' 4; shot m_1024; tecla esc; sleep 1.5
+  send 'VENTANAS /DEMO /640' 4; shot m_640; tecla esc; sleep 1.5
   send 'BIN\XMSTEST' 2.5
   send 'MEM' 2
   send 'ECHO SIGUE-VIVO'
@@ -173,10 +175,10 @@ echo "== Hispa Ventanas: Cirrus, carga de HSPDPMI y HSPRATON, ayuda y fallo =="
 config "$XMS"
 { sleep 6
   send 'VENTANAS /?' 2
-  send 'VENTANAS' 5
+  send 'VENTANAS /DEMO' 5
   shot c1
   tecla esc; sleep 1.5
-  send 'VENTANAS /VGA' 4
+  send 'VENTANAS /DEMO /VGA' 4
   shot c2
   tecla esc; sleep 1.5
   send 'VENTANAS /FALLO' 4
@@ -199,7 +201,7 @@ if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/lo
 
 echo "== Hispa Ventanas: sin XMS, sin servidor DPMI y sin ratón =="
 config ""
-{ sleep 6; send 'VENTANAS' 2; send 'ECHO SIGUE-VIVO'; mon quit; } | run 30 -vga std
+{ sleep 6; send 'VENTANAS /DEMO' 2; send 'ECHO SIGUE-VIVO'; mon quit; } | run 30 -vga std
 check "Hispa Ventanas necesita memoria extendida: añada a CONFIG.SYS la línea"
 check "DEVICE=A:\\HISPADOS\\HSPXMS.SYS"
 check "SIGUE-VIVO"
@@ -207,10 +209,10 @@ config "$XMS"
 mren -i $T/f.img ::HISPADOS/HSPDPMI.COM ::HISPADOS/OTRO.COM
 mdel -i $T/f.img ::HISPADOS/HSPRATON.COM
 { sleep 6
-  send 'VENTANAS' 3
+  send 'VENTANAS /DEMO' 3
   send 'ECHO SIN-DPMI'
   send 'A:\HISPADOS\OTRO' 2
-  send 'VENTANAS' 4
+  send 'VENTANAS /DEMO' 4
   shot n1
   tecla tab; tecla left; tecla up
   shot n2

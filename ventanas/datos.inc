@@ -114,3 +114,41 @@ s_raton_no      db "Ratón: no hay (cargue HSPRATON)", 0
 s_dpmi          db "DPMI ", 0
 s_dpmi2         db " (32 bits); memoria libre: ", 0
 s_kb            db " KB", 0
+
+; ---- textos de los controles, los diálogos y los programas ----
+t_aceptar       db "Aceptar", 0
+t_cancelar      db "Cancelar", 0
+t_si            db "Sí", 0
+t_no            db "No", 0
+t_nombre        db "Nombre del archivo:", 0
+t_carpeta       db "Carpeta: ", 0
+t_todos         db "*.*", 0
+t_centro        db "Centro de programas", 0
+t_centro_pista  db "Doble clic o Intro para abrir un programa.", 0
+t_bloc          db "Bloc de notas", 0
+t_calc          db "Calculadora", 0
+t_reloj         db "Reloj", 0
+t_acerca_tit    db "Acerca de Hispa Ventanas", 0
+t_acerca        db "Hispa Ventanas 0.3", 10
+                db "El entorno gráfico de Hispa-DOS.", 10
+                db "Hecho desde cero, en ensamblador y en español.", 10
+                db "Software libre (GPL).", 0
+t_salir_preg    db "¿Salir de Hispa Ventanas y volver a Hispa-DOS?", 0
+t_guion         db " - ", 0
+t_sin_nombre    db "(sin nombre)", 0
+t_bloc_acerca   db "Bloc de notas de Hispa Ventanas.", 10
+                db "Para textos sencillos de hasta 60.000 letras.", 0
+t_bloc_cambios  db "El texto ha cambiado.", 10
+                db "¿Quiere guardar los cambios?", 0
+t_abrir         db "Abrir", 0
+t_guardar_como  db "Guardar como", 0
+t_ext_txt       db ".TXT", 0
+t_no_guardar    db "No se ha podido guardar el archivo.", 0
+t_no_abrir      db "No se ha podido abrir el archivo.", 0
+t_buscar        db "Buscar", 0
+t_buscar_preg   db "Texto que se busca:", 0
+t_no_encontrado db "No se ha encontrado el texto.", 0
+t_reloj_op      db "Opciones del reloj", 0
+t_ro_seg        db "Aguja de los segundos", 0
+t_ro_agujas     db "Esfera con agujas", 0
+t_ro_cifras     db "Solo las cifras", 0

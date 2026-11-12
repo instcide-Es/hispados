@@ -265,6 +265,7 @@ test: $(IMG) usb nucprogs
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 	tests/run_ventanas_tests.sh $(IMG)
+	tests/run_ventanas3_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)
