@@ -67,6 +67,11 @@ def main():
                      ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM'),
                      ('VENTANAS.COM', 'VENTANAS.COM')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
+    # los juegos de Hispa Ventanas (.HVP), en \HISPADOS\JUEGOS
+    md('HISPADOS/JUEGOS')
+    for f in sorted(os.listdir(B)):
+        if f.endswith('.HVP'):
+            cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
     print(OUT)
     mkfloppy()
 

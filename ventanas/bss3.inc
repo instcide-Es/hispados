@@ -88,8 +88,16 @@ cfg_ruta    resb 96
 dir_propia  resb 80
 cen_txt     resb 200
 cen_nom     resb 32
-cen_arch    resb 80
+cen_arch    resb 100
 cen_mapa    resb BP_MAXCAND
 cen_lista   resb BP_MAXCAND * 13 + 120
 bp_dir      resb 64
 bp_dirs     resb BP_MAXDIR * 13
+; ---- módulos .HVP ----
+            alignb 4
+azar_x      resd 1
+hvp_vistos  resd 1                  ; los .HVP que había en JUEGOS la última vez
+hvi_sig     resd 1
+hvi_de      resd HVI_N              ; de qué acceso es cada icono guardado
+hvp_tabla   resb HVP_MAX * HS_TAM
+hvi_buf     resb HVI_N * 512

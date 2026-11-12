@@ -31,7 +31,8 @@
 ;    ven_hija_id     EBP=madre ECX=id -> EAX=ventana hija (0 si no hay)
 ;    ven_defecto     procedimiento por defecto (DefWindowProc)
 ;  Del sistema: ges_iniciar, ges_presentar, ges_raton_mueve, ges_raton_pulsa,
-;  ges_raton_suelta (EAX=x EBX=y), ges_tecla (AX=tecla de INT 16h).
+;  ges_raton_suelta (EAX=x EBX=y), ges_raton_der, ges_tecla (AX=tecla de
+;  INT 16h).
 ; =============================================================================
 
 ges_iniciar:
@@ -1404,6 +1405,27 @@ ges_raton_pulsa:
         je .p1
         mov eax, WM_LBUTTONDBLCLK
 .p1:
+        call ges_msg_raton
+.x:
+        popad
+        ret
+
+; el botón derecho, apretado: WM_RBUTTONDOWN a la ventana que hay debajo
+ges_raton_der:
+        pushad
+        mov eax, [menu_ven]
+        or eax, [captura]
+        jnz .x
+        mov eax, [rat_x]
+        mov ebx, [rat_y]
+        call ges_donde
+        cmp ecx, Z_CLIENTE
+        jne .x
+        mov eax, [ebp+V_ESTADO]
+        or eax, [edi+V_ESTADO]
+        test al, S_INACTIVA
+        jnz .x
+        mov eax, WM_RBUTTONDOWN
         call ges_msg_raton
 .x:
         popad

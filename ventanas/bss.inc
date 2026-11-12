@@ -48,7 +48,5 @@ cur_x       resd 1
 cur_y       resd 1
 rat_boton   resb 1
 cur_puesto  resb 1
-cur_img     resb CUR_ANCHO * CUR_ALTO
-cur_fondo   resb CUR_ANCHO * CUR_ALTO
 ; ---- archivos ----
 dos_buf     resb 2048 + 16          ; búfer de paso de las llamadas a DOS

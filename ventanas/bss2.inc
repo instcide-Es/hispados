@@ -4,6 +4,10 @@
 ; ---- driver de pantalla (lo que no usa la parte de modo real) ----
 pal_rgb     resb 1024               ; la paleta: rojo, verde, azul, 0
 pal_nat     resd 256                ; cada color en el formato de la pantalla
+; ---- cursor del ratón (el dibujo y lo que tapa) ----
+cur_img     resb CUR_ANCHO * CUR_ALTO
+cur_fondo   resb CUR_ANCHO * CUR_ALTO
+            alignb 4
 ; ---- núcleo ----
 mon_mango   resd 1
 mon_ini     resd 1
@@ -53,6 +57,7 @@ rat_doble   resb 1
 tec_mayus   resb 1
 sal_armado  resb 1
 ev_movido   resb 1
+rat_der     resb 1                  ; el botón derecho está apretado
 actividad   resb 1
             alignb 4
 ; ---- menús ----

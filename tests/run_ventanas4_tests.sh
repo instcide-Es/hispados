@@ -24,6 +24,8 @@
 #  - las ventanas salen donde dice el archivo; MEM desde un acceso directo
 #    (la memoria libre para un juego); un acceso roto avisa; un acceso sin
 #    «volver» deja en Hispa-DOS.
+# El grupo «Juegos» se prueba vacío: los juegos propios (.HVP) se quitan de la
+# copia de la imagen; tienen su prueba en tests/run_juegos_tests.sh.
 # Deja capturas en build/ventanas4_*.png.
 # Hispa Ventanas test: program groups, shortcuts, launching DOS programs, volume.
 set -u
@@ -86,6 +88,7 @@ libres() { grep "bytes libres" $T/log.txt | sed -n "$1p" | tr -dc '0-9'; }
 
 echo "== Hispa Ventanas: grupos, accesos directos, lanzar programas y volumen =="
 cp "$IMG" $T/f.img
+mdel -i $T/f.img '::HISPADOS/JUEGOS/*.HVP'    # (sin los juegos propios: los prueba run_juegos_tests.sh)
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 printf '@ECHO OFF\r\nECHO BAT-EN-MARCHA\r\nA:\\JUEGOS\\PRUEBA\\PRUEBA.COM /N DESDE-BAT\r\n' > $T/JUGAR.BAT
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
@@ -277,6 +280,7 @@ if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/lo
 
 echo "== Hispa Ventanas: CENTRO.INI a mano, MEM desde un acceso y accesos sin vuelta =="
 cp "$IMG" $T/f.img
+mdel -i $T/f.img '::HISPADOS/JUEGOS/*.HVP'    # (sin los juegos propios: los prueba run_juegos_tests.sh)
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mmd -i $T/f.img ::JUEGOS ::JUEGOS/PRUEBA
 mcopy -i $T/f.img $B/LANZTEST.COM ::JUEGOS/PRUEBA/PRUEBA.COM

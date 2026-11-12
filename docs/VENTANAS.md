@@ -72,8 +72,11 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    Centro de programas (con grupos y accesos directos, también a programas
    de Hispa-DOS: juegos), Bloc de notas (abre y guarda archivos),
    Calculadora, Reloj y Sistema, y el volumen en la barra superior. Pruebas:
-   `tests/run_ventanas3_tests.sh` y `tests/run_ventanas4_tests.sh`. Pendiente (se
-   hará según haga falta en las etapas 4 y 5): un juego propio; avisar de los
+   `tests/run_ventanas3_tests.sh` y `tests/run_ventanas4_tests.sh`. Los
+   programas nuevos van aparte, en módulos .HVP: los primeros, los juegos
+   Culebra y Campo de minas (ver «Programas aparte: los módulos .HVP»;
+   `tests/run_juegos_tests.sh`). Pendiente (se
+   hará según haga falta en las etapas 4 y 5): avisar de los
    textos sin guardar al salir con el botón «Salir»; arrastrar solo el
    contorno en los equipos lentos y cambiar el cursor en los bordes; órdenes
    de menú desactivadas o con marca; barra de desplazamiento horizontal,
@@ -99,11 +102,12 @@ Al final de la etapa 5 sale la primera versión estable de Hispa Ventanas.
 
 ## Arquitectura
 
-Hispa Ventanas es hoy un solo programa, `VENTANAS.COM` (unos 56 KB), hecho
-entero en NASM. Arranca en modo real, comprueba lo que necesita, elige el modo
+Hispa Ventanas es `VENTANAS.COM` (unos 58 KB) y los programas aparte que
+carga (módulos .HVP, más abajo), todo hecho en NASM. Arranca en modo real, comprueba lo que necesita, elige el modo
 de vídeo y entra en modo protegido como **cliente DPMI de 32 bits**. Los
-programas (Centro, Bloc de notas…) van dentro, cada uno en su archivo y como
-una tarea; en la etapa 4 saldrán a ejecutables propios.
+programas de siempre (Centro, Bloc de notas…) van dentro, cada uno en su
+archivo y como una tarea; los nuevos (los juegos) van aparte, en archivos
+.HVP que se cargan como una tarea más.
 
 `VENTANAS.COM` se ejecuta dos veces: la primera copia es el **lanzador**
 (2 KB que se quedan en memoria convencional) y ejecuta la segunda, que es el
@@ -115,8 +119,8 @@ que estar en los primeros 64 KB del programa. Por eso los iconos se guardan
 a 4 bits por punto (`tools/icopack.py` los empaqueta al compilar; en los
 fuentes siguen en texto) y la pila y las variables que solo usa el modo
 protegido van detrás, donde llegan los punteros de 32 bits. Si lo de modo
-real se sale de los 64 KB, la compilación falla. Quedan unos 4 KB de margen:
-los programas saldrán a ejecutables propios en la etapa 4.
+real se sale de los 64 KB, la compilación falla. Quedan unos 2,7 KB de
+margen: por eso lo nuevo va en módulos .HVP, que no gastan de ahí.
 
 ### Cómo se arranca y se usa
 
@@ -165,7 +169,16 @@ propia ventana (se mueve, se cambia de tamaño, se minimiza) con un icono por
 **acceso directo**. Por omisión hay tres grupos: «Principal» (los programas
 de Hispa-DOS que haya en la carpeta de VENTANAS.COM: Editar, Gestor,
 Información, y el intérprete de órdenes), «Accesorios» (los programas
-internos: Bloc de notas, Calculadora, Reloj y Sistema) y «Juegos» (vacío).
+internos: Bloc de notas, Calculadora, Reloj y Sistema) y «Juegos» (los
+juegos propios: un acceso por cada módulo .HVP de la carpeta `JUEGOS` que
+hay al lado de VENTANAS.COM, `\HISPADOS\JUEGOS`).
+
+Los juegos nuevos entran solos: al arrancar, si los .HVP de esa carpeta no
+son los mismos que la última vez (se cuenta cuántos hay, `Modulos` en
+CENTRO.INI), los que no tengan acceso directo se añaden al grupo que se
+llame «Juegos» (si no lo hay, se crea), con el nombre que lleva el módulo.
+No se toca nada más de un CENTRO.INI que ya exista, y un acceso que se
+borre a mano no vuelve mientras no cambie el número de módulos.
 
 El menú **Archivo** es el mismo en el Centro y en los grupos y actúa sobre el
 icono marcado de la ventana que lo tiene:
@@ -184,7 +197,9 @@ Un acceso directo también se lleva a otro grupo **arrastrando su icono** a la
 ventana de ese grupo o al icono del grupo en el Centro.
 
 Un **acceso directo** tiene: nombre; programa (un .COM, .EXE o .BAT con su
-ruta, o un programa interno: `:BLOC`, `:CALC`, `:RELOJ`, `:SISTEMA`);
+ruta, un programa de Hispa Ventanas —un módulo .HVP, que se abre como una
+ventana y sale con su propio icono— o un programa interno: `:BLOC`,
+`:CALC`, `:RELOJ`, `:SISTEMA`);
 carpeta de trabajo (si se deja vacía, la del programa); parámetros; icono
 (se elige con un clic en la fila de dibujos: programa, juego, disco,
 documento, herramienta, música, órdenes, bloc, calculadora, reloj, sistema,
@@ -208,11 +223,15 @@ nombre de la carpeta, al programa principal de cada una de sus subcarpetas
 3. si quedan varios de la misma clase, pregunta con una lista («Cancelar»
    salta esa carpeta).
 
+Además añade un acceso por cada programa de Hispa Ventanas (.HVP) que haya
+en la carpeta misma, con el nombre que lleva el módulo (un archivo que se
+llame .HVP sin serlo no cuenta).
+
 No repite un programa que ya tenga acceso directo, y al final dice cuántos
 ha añadido.
 
 Límites: 12 grupos, 96 accesos directos en total; el nombre de un acceso se
-ve hasta 13 letras debajo del icono; una ventana de grupo no tiene barra de
+ve hasta 14 letras debajo del icono; una ventana de grupo no tiene barra de
 desplazamiento (se agranda).
 
 ### CENTRO.INI
@@ -232,6 +251,7 @@ Ventana=36,52,452,190
 Volumen=80
 Silencio=0
 Activo=0
+Modulos=2
 
 [Grupo]
 Nombre=Juegos
@@ -255,7 +275,8 @@ Pausa=0
 - `[Centro]`: `Ventana` = x, y, ancho y alto de la ventana del Centro;
   `Volumen` = 0-100 y `Silencio` = 0/1 (no están hasta que se toca el
   volumen); `Activo` = el grupo cuya ventana estaba delante (0 el primero;
-  -1, la del Centro).
+  -1, la del Centro); `Modulos` = cuántos .HVP había en la carpeta `JUEGOS`
+  la última vez que se miró (no está si no hay ninguno).
 - `[Grupo]`: empieza un grupo. `Nombre` (27 letras); `Ventana`, la de su
   ventana; `Estado` = 0 cerrado, 1 abierto, 2 minimizado, 3 maximizado;
   `Marcado` = el icono que tiene marcado (0 el primero).
@@ -266,8 +287,8 @@ Pausa=0
 
 ### Programas de Hispa-DOS desde Hispa Ventanas (juegos)
 
-Los programas internos siguen siendo ventanas. Un acceso directo a un
-programa de Hispa-DOS lo ejecuta **fuera** de Hispa Ventanas, con la pantalla
+Los programas internos y los módulos .HVP son ventanas. Un acceso directo a
+un programa de Hispa-DOS lo ejecuta **fuera** de Hispa Ventanas, con la pantalla
 en modo texto y toda la memoria convencional para él, y después vuelve:
 
 1. `VENTANAS.COM` se ejecuta dos veces. La primera copia es el **lanzador**:
@@ -345,9 +366,11 @@ y la ventanita lo dice. Con el volumen en silencio, el altavoz lleva un aspa.
 ### Memoria y modo del procesador
 
 El núcleo gráfico es de 32 bits (386 o superior, que es lo que exige HSPDPMI):
-un segmento de código de 32 bits y un único segmento de datos y pila de 4 GB,
-los dos con la base del programa. Así un puntero «cercano» llega a toda la
-memoria: *puntero = dirección lineal − base*. La superficie de dibujo y el
+un segmento de código de 32 bits y un único segmento de datos y pila, los dos
+de 4 GB y con la base del programa. Así un puntero «cercano» llega a toda la
+memoria: *puntero = dirección lineal − base* (y el código de un módulo .HVP,
+que se carga en memoria extendida, se ejecuta con el mismo segmento). La
+superficie de dibujo y el
 «montón» de donde salen las fichas de las ventanas, las pilas de las tareas y
 los búferes de los controles (memoria extendida, función 0501h), el marco
 lineal de la tarjeta (0800h) y los datos de la BIOS (el reloj y el estado de
@@ -372,6 +395,8 @@ cabecera de cada archivo). Todas conservan los registros, salvo EAX cuando
 devuelven algo.
 
 ```
+  (módulos .HVP: juegos/*.asm con hvp.inc y hvplib.inc)
+  api.inc modulos.inc    la interfaz y el cargador de los módulos
   centro.inc bloc.inc calc.inc reloj.inc    los programas
   config.inc     CENTRO.INI: grupos, accesos directos, ventanas
   volumen.inc    el altavoz de la barra y su ventanita (HSPSND)
@@ -437,7 +462,7 @@ iconos).
 La entrada llega **por interrupciones**. Al arrancar, Hispa Ventanas pide al
 driver de ratón (INT 33h, función 0Ch) que llame a `rm_raton` —una rutina de
 modo real que está dentro de VENTANAS.COM— en cada movimiento y en cada
-cambio del botón izquierdo; `rm_raton` solo apunta el suceso (botones y
+cambio de los botones izquierdo y derecho; `rm_raton` solo apunta el suceso (botones y
 contadores de movimiento) en una cola de 64. Las teclas las encola la BIOS
 (IRQ 1), ya traducidas por KEYB: de ahí salen la ñ y los acentos. El bucle
 del sistema, cuando no hay nada que hacer, duerme con `HLT` en modo real
@@ -547,6 +572,7 @@ ECX=ancho, EDX=alto.
 | `WM_KEYDOWN` | tecla que no escribe (flechas, Intro, Tab, Esc, Supr, F1…) | ECX=tecla (`TC_*`; Ctrl+letra = `TC_CTRL`+1…26), EDX=mayúsculas (`TM_*`) |
 | `WM_CHAR` | carácter (página 437, con el teclado de KEYB) | ECX=carácter |
 | `WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, `WM_LBUTTONUP`, `WM_LBUTTONDBLCLK` | ratón sobre la zona de la ventana (o capturado) | EDX=x + y×65536 (con signo, en la zona), ECX=mayúsculas |
+| `WM_RBUTTONDOWN` | se aprieta el botón derecho sobre la zona de la ventana (sin captura; no la activa) | lo mismo |
 | `WM_COMMAND` | orden de menú o aviso de un control | menú: ECX=número. Control: ECX=id + aviso×65536, EDX=el control |
 | `WM_TIMER` | vence un temporizador | ECX=su número |
 | `WM_QUIT` | lo pone `msg_salir`: `msg_tomar` devuelve 0 | |
@@ -724,8 +750,12 @@ menú, poniendo `V_MENU`; los temporizadores, con `tmp_poner` (ver
 `reloj.inc`). Mientras un programa hace algo largo no cede el turno: lo
 largo se parte con un temporizador.
 
-Límites de hoy: 160 ventanas (contando controles), 32 de primer nivel, 8
-tareas, 16 temporizadores, una copia de cada programa a la vez.
+Límites de hoy: 160 ventanas (contando controles), 32 de primer nivel, 12
+tareas, 16 temporizadores, una copia de cada programa a la vez, 6 módulos
+.HVP abiertos.
+
+Un programa nuevo ya no hace falta meterlo en VENTANAS.COM: se hace igual,
+pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
 
 ### Los programas
 
@@ -743,6 +773,225 @@ tareas, 16 temporizadores, una copia de cada programa a la vez.
   ventana y hora en cifras; opciones (sin segundero, solo cifras).
 - **Sistema** (`centro.inc`): pantalla, vídeo, ratón y memoria que ha
   encontrado.
+- **Culebra** y **Campo de minas**: los juegos, en módulos .HVP (ver «Los
+  juegos», más abajo).
+
+## Programas aparte: los módulos .HVP
+
+`VENTANAS.COM` no puede crecer mucho más (lo que usa el modo real tiene que
+caber en 64 KB), así que los programas nuevos van **aparte**, cada uno en su
+archivo `.HVP` («programa de Hispa Ventanas»). Los primeros son los juegos:
+`CULEBRA.HVP` y `MINAS.HVP`, en `\HISPADOS\JUEGOS`.
+
+Un acceso directo cuyo programa acaba en `.HVP` **se abre como una ventana**
+(no se sale a Hispa-DOS como con un .COM o un .EXE): Hispa Ventanas carga el
+archivo en su memoria y lo pone en marcha como una tarea más, con multitarea
+cooperativa, igual que el Bloc de notas o la Calculadora. Al cerrar su
+ventana, el programa termina y su memoria se suelta. Si ya está abierto,
+abrir otra vez el acceso trae su ventana delante (una copia de cada módulo a
+la vez). En el Centro, el acceso sale con el **icono que lleva el módulo**
+dentro.
+
+### El formato
+
+Un .HVP es un **binario plano de 32 bits**: una cabecera, el icono, un hueco
+para la tabla de la interfaz, el código y los datos; y detrás, la tabla de
+reubicaciones.
+
+| Sitio | Tamaño | Qué es |
+|---|---|---|
+| 0 | 4 | la firma `HVP1` |
+| 4 | 2 | versión del formato (1) |
+| 6 | 2 | cuántas entradas de la interfaz conoce el módulo |
+| 8 | 4 | tamaño del archivo |
+| 12 | 4 | memoria que necesita (imagen y variables sin valor inicial) |
+| 16 | 4 | punto de entrada (desde el principio del módulo) |
+| 20 | 4 | tamaño de la imagen: ahí empiezan las reubicaciones |
+| 24 | 4 | cuántas reubicaciones hay |
+| 28 | 4 | 0 (reservado) |
+| 32 | 32 | el nombre del programa, acabado en 0 (página 437) |
+| 64 | 512 | el icono: 32×32 a 4 bits por punto, como los de `iconos.inc` |
+| 576 | 4 × entradas | la tabla de la interfaz (en el archivo, a cero) |
+| … | | código y datos |
+| imagen | 4 × reubicaciones | las reubicaciones: el sitio de cada puntero de 32 bits |
+
+El cargador (`hvp_abrir`, en `ventanas/modulos.inc`):
+
+1. lee la cabecera y comprueba la firma y que el módulo no pida más entradas
+   de la interfaz de las que hay (si no, avisa: «Este programa necesita un
+   Hispa Ventanas más nuevo»);
+2. pide al servidor DPMI un bloque de memoria extendida del tamaño que dice
+   la cabecera (función 0501h) y lee en él el archivo entero;
+3. **reubica**: el módulo está ensamblado para la dirección 0, así que a cada
+   puntero de la tabla le suma la dirección donde ha quedado (un puntero
+   «cercano», como todos los de Hispa Ventanas: el segmento de código y el de
+   datos llegan a los 4 GB con la base del programa);
+4. pone a cero lo que no viene en el archivo (las variables de `.bss`) y
+   **copia la tabla de la interfaz** en el sitio 576: las direcciones de las
+   funciones de Hispa Ventanas que el módulo conoce, en el orden de
+   `ventanas/api.inc`;
+5. crea la tarea. La entrada del módulo recibe **EBX** = su base (la
+   cabecera), **ESI** = su ruta completa (`C:\HISPADOS\JUEGOS\CULEBRA.HVP`),
+   **EDI** = los parámetros del acceso directo y **ECX** = las entradas de
+   la interfaz que tiene este Hispa Ventanas. Cuando la entrada vuelve
+   (`ret`), se destruyen sus ventanas y se suelta la memoria (0502h).
+
+Un módulo corre dentro de Hispa Ventanas, sin protección: como cualquier
+programa interno, un error suyo es un error del entorno.
+
+### La interfaz y sus versiones
+
+La interfaz es la lista de `ventanas/api.inc`: una línea por función, **en
+orden**, y solo se añade al final. Nunca se quita una entrada, se cambia de
+sitio ni cambia lo que hace. Así:
+
+- un módulo ya compilado funciona con cualquier Hispa Ventanas posterior
+  (usa las primeras entradas, que siguen siendo las mismas);
+- un módulo hecho para una interfaz más nueva que el Hispa Ventanas que hay
+  no se carga, y lo dice;
+- un módulo que quiera funcionar con varias versiones puede mirar ECX al
+  entrar y no usar lo que falte.
+
+El módulo llama con `HV nombre` (`call` por la tabla; `HVJ nombre` para
+saltar), con **los mismos registros que dentro de VENTANAS.COM** (ver «La
+interfaz de la etapa 3»): EBP = la ventana, EAX = el mensaje o el resultado,
+ECX y EDX los parámetros; las funciones conservan los registros salvo EAX
+cuando devuelven algo. Las constantes (mensajes `WM_*`, estilos `E_*`, la
+ficha `V_*`, las teclas `TC_*`, los colores `C_*`) son las de
+`ventanas/defs.inc`. Versión 1 (63 entradas):
+
+| Entradas | Para qué |
+|---|---|
+| `ven_crear`, `ven_lista`, `ven_destruir`, `ven_mover`, `ven_mostrar`, `ven_activar`, `ven_enfocar`, `ven_capturar`, `ven_soltar`, `ven_invalidar`, `ven_invalidar_rect`, `ven_texto`, `ven_cli`, `ven_hija_id`, `ven_defecto` | ventanas (la clase y la plantilla están en el módulo; el menú se pone en `V_MENU` y el icono de la ventana minimizada en `V_ICONO`) |
+| `msg_tomar`, `msg_mirar`, `msg_despachar`, `msg_poner`, `msg_enviar`, `msg_salir`, `app_bucle` | mensajes; `app_bucle` es el bucle normal de un programa: toma y despacha hasta `WM_QUIT` |
+| `tmp_poner`, `tmp_quitar`, `tics` | temporizadores (`WM_TIMER`) y el reloj de la BIOS (18,2 tics por segundo) |
+| `mem_pedir`, `mem_soltar` | memoria del montón de Hispa Ventanas |
+| `dc_pintar`, `dc_abrir`, `dc_cerrar`, `dc_cortar`, `dc_color` (EAX=color), `dc_negrita` (EAX=0/1), `dc_rect`, `dc_marco`, `dc_linea`, `dc_punto`, `dc_texto`, `dc_texto_n`, `dc_texto_m`, `dc_icono`, `dc_rombo`, `dc_copiar_clave`, `dc_mosaico` | dibujo en la ventana (las macros `COLOR c` y `NEGRITA n` de `hvp.inc` llaman a `dc_color` y `dc_negrita` conservando EAX) |
+| `dlg_mensaje`, `dlg_pedir`, `dlg_modal` | diálogos: mensaje, pedir un texto y diálogo a medida |
+| `dos_abrir`, `dos_crear`, `dos_cerrar`, `dos_leer`, `dos_escribir`, `dos_puntero`, `dos_borrar` | archivos (para guardar los récords) |
+| `azar` (EAX=n → EAX de 0 a n-1), `azar_semilla` (EAX) | números aleatorios |
+| `tec_estado` (→ EAX = mayúsculas, Ctrl y Alt: `TM_*`) | teclado (las teclas llegan como `WM_KEYDOWN` y `WM_CHAR`) |
+| `pantalla` (→ EAX=ancho, EBX=alto) | tamaño de la pantalla |
+| `c_boton`, `c_estatico`, `c_edit`, `c_lista`, `c_dialogo` | (datos, no funciones) las clases de los controles, para las plantillas del módulo: se pone `HV_c_boton` como clase y `hvl_clases` lo cambia por la dirección |
+
+El ratón llega como siempre (`WM_LBUTTONDOWN`, `WM_MOUSEMOVE`…, con las
+mayúsculas en ECX) y, desde ahora, también el **botón derecho**:
+`WM_RBUTTONDOWN`.
+
+`ventanas/hvplib.inc` son rutinas que se ensamblan **dentro** del módulo
+(no gastan sitio en VENTANAS.COM): `hvl_cad` y `hvl_num` (componer textos),
+`hvl_lee_num`, `hvl_opcion` (buscar `/X` en los parámetros), `hvl_ruta` (la
+ruta del módulo con otra extensión: el archivo de datos), `hvl_leer` y
+`hvl_escribir` (un archivo entero), `hvl_clave` (buscar `Clave=` en un
+texto) y `hvl_clases`.
+
+### Cómo se hace un programa
+
+El fuente va en `juegos/` (o donde se quiera) e incluye `hvp.inc`. El más
+corto, completo:
+
+```nasm
+%include "hvp.inc"
+HVP_CABECERA "Hola", entrada            ; nombre (31 letras) y entrada
+        db "................................"   ; el icono: 32 filas de 32
+        ...                                     ; («.» transparente, 0-9 a-f
+        db "................................"   ; los colores; el 3 no vale)
+HVP_CODIGO
+
+c_hola      dd hola_proc
+            db C_CREMA, 0, 0, 0
+hola_plant:
+        PLANTILLA c_hola, t_hola, E_NORMAL, 100, 100, 300, 160, 0
+t_hola      db "Hola", 0
+t_hola_txt  db "¡Hola desde un módulo!", 0
+
+entrada:                                ; EBX=base ESI=ruta EDI=parámetros
+        mov esi, hola_plant
+        xor ebp, ebp
+        HV ven_crear
+        HV app_bucle
+        ret                             ; fin del programa
+
+hola_proc:                              ; EBP=ventana EAX=mensaje ECX EDX
+        cmp eax, WM_PAINT
+        je .pintar
+        cmp eax, WM_CREATE
+        je .crear
+        cmp eax, WM_DESTROY
+        je .destruir
+        HVJ ven_defecto
+.crear:
+        mov dword [ebp+V_ICONO], hvp_icono      ; el icono de la cabecera
+        jmp .hecho
+.destruir:
+        HV msg_salir                    ; acaba app_bucle
+        jmp .hecho
+.pintar:
+        HV dc_pintar
+        COLOR C_TINTA
+        mov eax, 20
+        mov ebx, 20
+        mov esi, t_hola_txt
+        HV dc_texto
+        HV dc_cerrar
+.hecho:
+        xor eax, eax
+        ret
+
+%include "hvplib.inc"                   ; (si se usan sus rutinas)
+        section .bss                    ; variables sin valor inicial: a cero
+veces       resd 1
+HVP_FIN
+```
+
+Las direcciones son absolutas, como en cualquier programa (`mov esi,
+hola_plant`): `tools/mkhvp.py` ensambla el fuente dos veces, con dos
+direcciones de carga, y de la diferencia saca la tabla de reubicaciones;
+también pasa los textos a la página 437, empaqueta el icono y rellena la
+cabecera. En el Makefile es una regla de dos líneas (como `CULEBRA.HVP`) y
+el nombre del archivo en `HVPS`: con eso va a `\HISPADOS\JUEGOS` del
+disquete y de la imagen USB, `INSTALAR` lo copia al disco duro y, la próxima
+vez que arranque Hispa Ventanas, aparece su acceso en el grupo «Juegos».
+
+A mano:
+
+```
+python3 tools/mkhvp.py juegos/hola.asm build/HOLA.HVP
+```
+
+Reglas para un módulo: lo largo se parte con un temporizador (no se cede el
+turno más que en `msg_tomar`); los textos que se le dan a un diálogo o a una
+ventana tienen que seguir existiendo mientras se usan (un búfer para pintar
+y otro para los diálogos); los archivos de datos, al lado del módulo
+(`hvl_ruta`), y se escriben cuando cambian, no al salir.
+
+### Los juegos
+
+- **Culebra** (`juegos/culebra.asm`, `CULEBRA.HVP`): la culebra anda sola y
+  se lleva con las flechas hasta la fruta; cada fruta la alarga dos casillas
+  y cada cinco va más deprisa (niveles). Acaba al tocar el borde, un muro o
+  su cuerpo. P o Espacio: pausa (también al minimizar). Intro: otra partida.
+  Menú Juego: muros (obstáculos) sí o no, tres velocidades y las mejores
+  puntuaciones (cinco sin muros y cinco con muros). Se guardan, con la
+  velocidad y los muros elegidos, en `CULEBRA.REC` (texto: `Sin=10,0,0,0,0`).
+- **Campo de minas** (`juegos/minas.asm`, `MINAS.HVP`): tableros Pequeño
+  (9×9, 10 minas), Mediano (16×16, 40), Grande (30×16, 99) y Personalizado
+  (hasta 30×24, según la pantalla). La primera losa nunca tiene mina (ni las
+  de alrededor, si caben). Clic: levantar; botón derecho, Mayús+clic o la
+  tecla B: banderín; doble clic en un número: levantar las de alrededor.
+  Teclado: flechas, Intro o Espacio y F2 (otra partida). Arriba, los
+  banderines que faltan, el tiempo y un rombo (añil mientras se juega, verde
+  con una marca al ganar, granate con un aspa al perder) que con un clic
+  empieza otra partida. Los mejores tiempos, el tablero elegido y el
+  personalizado se guardan en `MINAS.REC` (texto: `Pequeño=47`).
+
+Los dos aceptan en los parámetros del acceso directo `/S=n` (semilla fija
+de los números aleatorios) y `/P` (Culebra: paso a paso, avanza una casilla
+con cada flecha; Campo de minas: un tablero de 9×9 con dos minas en dos
+esquinas, cuyo tiempo se guarda aparte, como `Prueba=`). Son para las
+pruebas automáticas.
+
+Segunda tanda prevista: Bloques, Solitario, Tragabolas y Almacén.
 
 ## Pruebas
 
@@ -767,6 +1016,19 @@ tareas, 16 temporizadores, una copia de cada programa a la vez.
   arranca con un CENTRO.INI escrito a mano, mide la memoria con MEM desde
   un acceso directo y prueba un acceso roto y otro sin «volver». Capturas
   de muestra en `build/ventanas4_*.png`.
+- `tests/run_juegos_tests.sh`: los módulos .HVP y los dos juegos. Primera
+  sesión, sin CENTRO.INI: el grupo «Juegos» sale con un acceso por módulo
+  (nombre e icono propios), cada juego se abre como ventana, se dibuja, la
+  culebra anda y se para con P, se cierran, se vuelve a abrir y al salir la
+  memoria extendida queda como al entrar. Segunda sesión, con los
+  parámetros de prueba: Culebra paso a paso con la semilla fija llega a la
+  fruta, choca con el borde y deja el récord en `CULEBRA.REC` (se mira con
+  mtools); Campo de minas abre la primera losa, pone banderines con el botón
+  derecho y con Mayús+clic, gana el tablero de prueba y deja el tiempo en
+  `MINAS.REC`; «Buscar programas...» añade los .HVP sueltos y no el archivo
+  que no es un módulo; el módulo que pide una interfaz más nueva no se
+  carga; dos juegos abiertos a la vez y salir con ellos abiertos. Capturas
+  de muestra en `build/juegos_*.png`.
 - Programas de prueba de Windows 16 bits propios (NASM + nuestra
   herramienta de cabeceras NE) para cada función de la API, con su
   resultado escrito en un archivo (etapa 4).

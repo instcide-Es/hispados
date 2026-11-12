@@ -30,6 +30,7 @@ WM_MOUSEMOVE    equ 0x0200
 WM_LBUTTONDOWN  equ 0x0201
 WM_LBUTTONUP    equ 0x0202
 WM_LBUTTONDBLCLK equ 0x0203
+WM_RBUTTONDOWN  equ 0x0204          ; botón derecho (solo en la zona de la ventana)
 WM_CUT          equ 0x0300
 WM_COPY         equ 0x0301
 WM_PASTE        equ 0x0302
@@ -208,3 +209,22 @@ Z_MAXIM         equ 4
 Z_MINIM         equ 5
 Z_MENU          equ 6
 Z_BORDE         equ 16              ; + 1 izquierda, 2 derecha, 4 arriba, 8 abajo
+
+; ---- los 16 colores de Hispa Ventanas (la paleta, en datos.inc) ----
+C_TINTA         equ 0
+C_MARRON        equ 1
+C_PETROLEO      equ 2
+C_PETROLEO_CL   equ 3
+C_TERRACOTA     equ 4
+C_TERRACOTA_CL  equ 5
+C_ARENA         equ 6
+C_ARENA_OSC     equ 7
+C_CREMA         equ 8
+C_BLANCO        equ 9
+C_OCRE          equ 10
+C_OLIVA         equ 11
+C_ANIL          equ 12
+C_GRANATE       equ 13
+C_TURQUESA      equ 14
+C_PIEDRA        equ 15
+CLAVE           equ 0xFF            ; «transparente» en dc_copiar_clave

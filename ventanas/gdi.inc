@@ -29,7 +29,6 @@
 ;    gdi_ancho_texto    ESI=cadena -> EAX=ancho en puntos
 ; =============================================================================
 
-CLAVE       equ 0xFF                ; «transparente» en gdi_copiar_clave
 %macro COLOR 1
         mov byte [gdi_color], %1
 %endmacro

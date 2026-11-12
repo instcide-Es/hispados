@@ -90,6 +90,8 @@ cfg_claves:
         dd vol_mudo, k_silencio
         db 1, T_NUM, 0, 0
         dd cen_activo, k_activo
+        db 1, T_NUM, 0, 0
+        dd hvp_vistos, k_modulos
         db 2, T_CAD, 27, 0
         dd GR_NOMBRE, k_nombre
         db 2, T_RECT, 0, 0
@@ -117,6 +119,7 @@ k_ventana   db "Ventana", 0
 k_volumen   db "Volumen", 0
 k_silencio  db "Silencio", 0
 k_activo    db "Activo", 0
+k_modulos   db "Modulos", 0
 k_nombre    db "Nombre", 0
 k_estado    db "Estado", 0
 k_marcado   db "Marcado", 0
@@ -493,13 +496,35 @@ cfg_cargar:
         mov ecx, MAX_GR
 .g:
         cmp byte [eax+GR_USO], 0
-        jne .x
+        jne .hvp
         add eax, GR_TAM
         dec ecx
         jnz .g
 .defecto:
         call cfg_defecto
         mov dword [cfg_len], 0
+.hvp:
+        ; los programas de Hispa Ventanas (.HVP) de la carpeta JUEGOS: si no
+        ; son los mismos que la última vez, los que no tengan acceso directo
+        ; entran en el grupo «Juegos»
+        mov edi, cen_arch
+        mov esi, dir_propia
+        call pon_cad
+        mov esi, t_hvp_dir
+        call pon_cad
+        xor ecx, ecx
+        mov [edi], cl
+        call hvp_buscar
+        cmp eax, [hvp_vistos]
+        je .h2
+        mov [hvp_vistos], eax
+        inc ecx
+        or edx, -1
+        call hvp_buscar
+        mov dword [cfg_len], 0
+.h2:
+        cmp dword [cfg_len], 0
+        jne .x
         call cfg_guardar
 .x:
         popad
@@ -937,6 +962,12 @@ cfg_guardar:
         mov esi, k_activo
         mov eax, [cen_activo]
         call pon_clave_num
+        mov eax, [hvp_vistos]
+        test eax, eax
+        jz .sinmod
+        mov esi, k_modulos
+        call pon_clave_num
+.sinmod:
         mov ebx, [gr_tabla]
         xor ecx, ecx
 .g:

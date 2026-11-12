@@ -4,7 +4,7 @@
 ;
 ;  El ratón llega por INT 33h (HSPRATON u otro driver) y por interrupciones:
 ;  el driver llama a rm_raton (ventanas.asm, en modo real) en cada movimiento
-;  y en cada cambio del botón izquierdo (función 0Ch), y esa rutina lo apunta
+;  y en cada cambio de los botones izquierdo y derecho (función 0Ch), y esa rutina lo apunta
 ;  en una cola que el sistema vacía en cada vuelta (eventos). La posición la
 ;  lleva Hispa Ventanas, en puntos de pantalla, con los contadores de
 ;  movimiento del driver.
@@ -49,7 +49,7 @@ rat_iniciar:
         mov eax, 0x000B             ; contadores de movimiento, a cero
         int 0x33
         mov dword [rmcs+0x1C], 0x000C
-        mov dword [rmcs+0x18], 7    ; movimiento y botón izquierdo
+        mov dword [rmcs+0x18], 0x1F ; movimiento y los botones izquierdo y derecho
         mov dword [rmcs+0x14], rm_raton
         mov bl, 0x33
         call rm_int

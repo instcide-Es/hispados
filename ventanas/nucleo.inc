@@ -34,7 +34,7 @@
 
 MONTON_TAM  equ 640 * 1024
 PILA_TAM    equ 8192
-TAR_MAX     equ 8
+TAR_MAX     equ 12
 COLA_MAX    equ 48
 T_USO       equ 0                   ; 0 libre, 1 en marcha, 2 terminada
 T_ESP       equ 4

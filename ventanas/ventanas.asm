@@ -29,6 +29,7 @@
 ;    menus.inc, controles.inc, dialogos.inc, dos.inc
 ;    escritorio.inc el fondo, la barra y los iconos de lo minimizado
 ;    centro.inc, bloc.inc, calc.inc, reloj.inc    los programas
+;    api.inc, modulos.inc   los programas aparte (.HVP) y su interfaz
 ;
 ;  La entrada llega por interrupciones: el driver de ratón llama a rm_raton
 ;  (INT 33h, función 0Ch), que apunta cada suceso en una cola; las teclas las
@@ -703,7 +704,8 @@ grafico:
         mov edi, desc
         int 0x31
         jc .f
-        or byte [desc+6], 0x40      ; código de 32 bits
+        mov word [desc], 0xFFFF     ; código de 32 bits y 4 GB: los módulos
+        or byte [desc+6], 0xCF      ; (.HVP) se cargan fuera del programa
         mov bx, [sel_cod]
         mov ax, 0x000C
         int 0x31
@@ -976,6 +978,9 @@ principal:
         jnz .ronda
 .pres:
         call tar_limpiar
+%ifdef CON_PROGRAMAS
+        call hvp_limpiar
+%endif
         call ges_presentar
         cmp byte [salir], 0
         je .bucle
@@ -1145,7 +1150,8 @@ eventos:
         mov [ult_di], ax
         movsx edx, dx
         mov bl, [edi+2]
-        and bl, 1
+        mov bh, bl
+        and bx, 0x0201              ; BL=el izquierdo, BH=el derecho
         inc esi
         and esi, RAT_COLA - 1
         mov eax, esi
@@ -1165,6 +1171,8 @@ eventos:
 .bot:
         cmp bl, [rat_boton]
         jne .cambia
+        cmp bh, [rat_der]
+        jne .cambia
         mov al, [rc_cola]           ; varios movimientos seguidos cuentan por uno
         cmp al, [rc_cab]
         jne .r
@@ -1178,6 +1186,13 @@ eventos:
         call ges_raton_mueve
         pop ebx
 .c2:
+        cmp bh, [rat_der]
+        je .c3
+        mov [rat_der], bh
+        test bh, bh
+        jz .c3
+        call ges_raton_der
+.c3:
         cmp bl, [rat_boton]
         je .r
         mov [rat_boton], bl
@@ -1298,6 +1313,8 @@ exc_instalar:
 %include "bloc.inc"
 %include "calc.inc"
 %include "reloj.inc"
+%include "api.inc"
+%include "modulos.inc"
 %endif
 
 ; =============================================================================

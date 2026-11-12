@@ -420,6 +420,10 @@ vista_en:
 ; (interna) todas las vistas, a repintar
 vistas_repintar:
         pushad
+        mov edi, hvi_de             ; (y los iconos de los .HVP se leen otra vez)
+        mov ecx, HVI_N
+        xor eax, eax
+        rep stosd
         mov ebp, [ven_tabla]
         mov ecx, MAX_VEN
 .b:
@@ -689,6 +693,7 @@ vista_pintar:
         xor eax, eax
 .ia:
         mov esi, [ico_tabla+eax*8]
+        call hvp_icono              ; (un .HVP trae el suyo)
         lea edx, [ebx+AC_NOMBRE]
 .i0:
         mov [vis_nom], edx
@@ -703,11 +708,11 @@ vista_pintar:
         lea ebx, [eax+16]
         lea eax, [edx+(CEN_PASO-32)/2]
         call dc_icono
-        mov esi, [vis_nom]          ; el nombre, centrado (hasta 13 letras)
+        mov esi, [vis_nom]          ; el nombre, centrado (hasta 14 letras)
         call cad_largo
-        cmp eax, 13
+        cmp eax, 14
         jbe .i1
-        mov eax, 13
+        mov eax, 14
 .i1:
         mov ecx, eax
         shl eax, 2
@@ -1079,6 +1084,11 @@ acc_lanzar:
         call tar_crear
         jmp .x
 .externo:
+        call es_hvp                 ; un programa de Hispa Ventanas (módulo)
+        jne .ex
+        call hvp_abrir
+        jmp .x
+.ex:
         cmp byte [esi], 0
         jne .e0
         mov esi, t_no_programa
@@ -1635,7 +1645,14 @@ buscar_programas:
         jmp .d
 .df:
         mov [bp_ndir], ebx
-        mov dword [bp_nuevos], 0
+        mov edi, cen_arch           ; los programas de Hispa Ventanas (.HVP)
+        mov esi, bp_dir             ; que haya en la carpeta misma
+        call pon_cad
+        mov word [edi], '\'
+        mov ecx, 1
+        mov edx, [bp_grupo]
+        call hvp_buscar
+        mov [bp_nuevos], eax
         xor ebx, ebx
 .c:
         cmp ebx, [bp_ndir]

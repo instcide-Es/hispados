@@ -5,23 +5,7 @@
 ; =============================================================================
 
 ; ---- los 16 colores de Hispa Ventanas (rojo, verde, azul) ----
-C_TINTA         equ 0
-C_MARRON        equ 1
-C_PETROLEO      equ 2
-C_PETROLEO_CL   equ 3
-C_TERRACOTA     equ 4
-C_TERRACOTA_CL  equ 5
-C_ARENA         equ 6
-C_ARENA_OSC     equ 7
-C_CREMA         equ 8
-C_BLANCO        equ 9
-C_OCRE          equ 10
-C_OLIVA         equ 11
-C_ANIL          equ 12
-C_GRANATE       equ 13
-C_TURQUESA      equ 14
-C_PIEDRA        equ 15
-
+; (los nombres C_TINTA ... C_PIEDRA están en defs.inc)
 paleta16:
         db 0x1A, 0x14, 0x10         ;  0 tinta
         db 0x3B, 0x2A, 0x20         ;  1 marrón
