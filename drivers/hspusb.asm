@@ -20,7 +20,7 @@
 ;  reloj (INT 08h). Usa el modo real "irreal" para los registros del xHCI, así
 ;  que no funciona en modo V86 (EMM386, Windows en modo extendido).
 ; =============================================================================
-        cpu 486
+        cpu 386                     ; (sin BSWAP)
         bits 16
         org 0
 
@@ -137,8 +137,10 @@ interrupt:
         pushad
         push ds
         push es
+        push fs                     ; el modo irreal lo cambia: es del programa
         mov byte [cs:busy], 1
         call unreal
+        call a20_open
         lds bx, [cs:req]
         mov al, [bx+2]
         cmp al, 0
@@ -156,7 +158,9 @@ interrupt:
 .done:
         mov word [bx+3], 0x0100
 .out:
+        call a20_restore
         mov byte [cs:busy], 0
+        pop fs
         pop es
         pop ds
         popad
@@ -227,6 +231,12 @@ interrupt:
         mov [cs:rw_off], ax
         mov ax, [bx+0x10]
         mov [cs:rw_seg], ax
+        ; normalizado ya antes del primer trozo (4 KB no caben si el
+        ; desplazamiento pasa de F000h: la copia daría la vuelta al segmento)
+        mov ax, [cs:rw_off]
+        shr ax, 4
+        add [cs:rw_seg], ax
+        and word [cs:rw_off], 15
 .chunk:
         mov cx, [cs:rw_left]
         jcxz .ok
@@ -415,6 +425,7 @@ port_enable:
         call tmo_check
         jnc .pr
 .prd:
+        call reset_rest
         call clr_csc
         call mrd
         test al, 2
@@ -427,6 +438,18 @@ port_enable:
         ret
 .no:
         stc
+        ret
+
+; pausa tras reiniciar un puerto: el dispositivo tiene 10 ms para reponerse
+; antes de la primera orden (aquí entre 55 y 110 ms)
+reset_rest:
+        push cx
+        mov cx, 2
+        call tmo_start
+.l:
+        call tmo_check
+        jnc .l
+        pop cx
         ret
 
 dport       db 0
@@ -529,6 +552,93 @@ unreal:
         pop bx
         pop eax
         ret
+
+; EAX con los octetos al revés (BSWAP es del 486)
+bswap_eax:
+        xchg al, ah
+        rol eax, 16
+        xchg al, ah
+        ret
+
+
+; ---- línea A20 ----
+; Los registros del controlador están por encima de 1 MB, casi siempre en una
+; dirección con el bit 20 a uno: con A20 cerrada (la deja así cualquier
+; programa que la abra y la cierre por el XMS, y hay BIOS que arrancan con
+; ella cerrada) se leería y se escribiría en otra dirección. Se abre mientras
+; el driver trabaja y se deja como estaba. Conservan todos los registros y
+; los indicadores.
+a20_open:
+        pushf
+        push ax
+        cli
+        inc byte [cs:a20_depth]
+        cmp byte [cs:a20_depth], 1
+        jne .r
+        call a20_test
+        jnz .r
+        mov byte [cs:a20_closed], 1
+        in al, 0x92
+        or al, 2
+        and al, 0xFE
+        out 0x92, al
+        call a20_test
+        jnz .r
+        mov ax, 0x2401
+        int 0x15
+.r:
+        pop ax
+        popf
+        ret
+a20_restore:
+        pushf
+        push ax
+        cli
+        dec byte [cs:a20_depth]
+        jnz .r
+        cmp byte [cs:a20_closed], 0
+        je .r
+        mov byte [cs:a20_closed], 0
+        in al, 0x92
+        and al, 0xFC
+        out 0x92, al
+        call a20_test
+        jz .r
+        mov ax, 0x2400
+        int 0x15
+.r:
+        pop ax
+        popf
+        ret
+; ZF = 1 si A20 está cerrada (0000:0500 y FFFF:0510 son el mismo octeto)
+a20_test:
+        push ds
+        push es
+        push ax
+        xor ax, ax
+        mov ds, ax
+        dec ax
+        mov es, ax
+        mov al, [0x500]
+        mov ah, al
+        not al
+        mov [0x500], al
+        cmp al, [es:0x510]
+        mov [0x500], ah
+        jne .open
+        cmp ah, [es:0x510]
+        jne .open
+        xor al, al                  ; ZF = 1
+        jmp .x
+.open:
+        or al, 1                    ; ZF = 0
+.x:
+        pop ax
+        pop es
+        pop ds
+        ret
+a20_depth   db 0
+a20_closed  db 0
 
 ; ESI = dirección absoluta
 mrd:
@@ -680,7 +790,7 @@ wait_event:
         push ax
         push cx
         mov [cs:want], al
-        mov cx, 40                  ; ~2 s
+        mov cx, [cs:ev_tmo]
         call tmo_start
 .l:
         call get_event
@@ -707,6 +817,7 @@ wait_event:
         clc
         ret
 want        db 0
+ev_tmo      dw 40                   ; ~2 s (órdenes y control)
 
 ; timbre: AL = destino, AH = slot (0 = controlador)
 doorbell:
@@ -837,7 +948,11 @@ bulk:
 .ring:
         mov ah, [cs:slot]
         call doorbell
+        ; un disco USB de verdad puede tardar segundos (arranque del motor,
+        ; borrado de bloques de una memoria llena): 5 s, no 2
+        mov word [cs:ev_tmo], 91
         call wait_xfer
+        mov word [cs:ev_tmo], 40
         pop di
         pop si
         ret
@@ -931,7 +1046,7 @@ scsi_rw:
         mov byte [cs:scsi_cblen], 10
         mov byte [cs:scsi_cb+1], 0
         mov eax, [cs:rw_lba]
-        bswap eax
+        call bswap_eax
         mov [cs:scsi_cb+2], eax
         mov byte [cs:scsi_cb+6], 0
         mov ax, [cs:rw_n]
@@ -1199,6 +1314,10 @@ kbc_aux:
         pop bx
         ret
 kbc_out:
+        cmp byte [cs:kbc_ok], 0
+        jne .go
+        ret
+.go:
         push cx
         push ax
         sti
@@ -1214,6 +1333,7 @@ kbc_out:
         pop ax
         pop cx
         ret
+kbc_ok      db 1                    ; hay controlador de teclado (8042)
 kbc_ibf:
         push ax
         mov cx, 0xFFFF
@@ -1296,6 +1416,15 @@ int08:
         cmp byte [cs:busy], 0
         jne .ret
         mov byte [cs:busy], 1
+        ; pila propia: lo que sigue (los informes, INT 33h con la rutina del
+        ; programa, las interrupciones que entren mientras tanto) gasta
+        ; bastante más de lo que se le puede pedir a la pila del programa
+        ; interrumpido. busy impide que se entre dos veces.
+        mov [cs:sv_ss], ss
+        mov [cs:sv_sp], sp
+        push cs
+        pop ss
+        mov sp, istack_top
         sti
         pushad
         push ds
@@ -1306,6 +1435,7 @@ int08:
         jnz .out                    ; modo V86: no se puede
         sgdt [cs:sv_gdtr]
         call unreal
+        call a20_open
 .ev:
         call get_event
         jc .rep
@@ -1324,6 +1454,7 @@ int08:
         xor ah, ah
         call send_key
 .g:
+        call a20_restore
         cli
         lgdt [cs:sv_gdtr]
 .out:
@@ -1331,9 +1462,17 @@ int08:
         pop es
         pop ds
         popad
+        cli
+        mov ss, [cs:sv_ss]
+        mov sp, [cs:sv_sp]
         mov byte [cs:busy], 0
 .ret:
         iret
+sv_ss       dw 0
+sv_sp       dw 0
+            align 2
+istack      times 1024 db 0
+istack_top:
 
 ; códigos de tecla (juego 1 del PC) de los usos HID 04h-65h; bit 7 = E0h
 keytab:
@@ -1440,6 +1579,14 @@ init:
         je .h1
         mov si, msg_kbd
         call puts
+        ; las teclas se entregan por el controlador de teclado (8042)
+        in al, 0x64
+        cmp al, 0xFF
+        jne .k8042
+        mov byte [kbc_ok], 0
+        mov si, msg_no8042
+        call puts
+.k8042:
         call kbd_queue
 .h1:
         cmp byte [m_on], 0
@@ -1473,6 +1620,9 @@ init:
         pop ds
         mov si, [fail_msg]
         call puts
+        ; el driver se descarga: el controlador no puede seguir en marcha
+        ; con sus anillos y contextos en una memoria que ya no es nuestra
+        call xhci_stop
         lds bx, [cs:req]
         mov byte [bx+0x0D], 0
         mov word [bx+0x0E], 0
@@ -1480,7 +1630,9 @@ init:
 .done:
         lds bx, [cs:req]
         mov word [bx+3], 0x0100
+        call a20_restore
         mov byte [cs:busy], 0
+        pop fs
         pop es
         pop ds
         popad
@@ -1511,8 +1663,16 @@ xhci_setup:
         mov ax, 0xB10A
         mov di, 0x10
         int 0x1A
+        mov [bar_lo], cl
         and ecx, 0xFFFFFFF0
         mov [xbase], ecx
+        jz .no
+        ; la mitad alta solo existe si el BAR es de 64 bits (tipo 10b); en
+        ; uno de 32 bits lo que hay en 14h es otro BAR distinto
+        mov al, [bar_lo]
+        and al, 6
+        cmp al, 4
+        jne .lo
         mov bx, [bdf]
         mov ax, 0xB10A
         mov di, 0x14
@@ -1634,6 +1794,7 @@ xhci_setup:
         stc
         ret
 .rsd:
+        mov byte [hc_ours], 1
         mov esi, [op_base]
         add esi, 4
 .cnr:
@@ -1657,6 +1818,9 @@ xhci_setup:
         add esi, 4
         xor eax, eax
         call mwr
+        call scratch_setup
+        jc .r
+        call intel_routes
         mov bx, CMD_RING
         call zone
         call phys
@@ -1718,6 +1882,145 @@ xhci_setup:
         stc
         ret
 
+; parar el controlador (si lo hemos reiniciado nosotros)
+xhci_stop:
+        cmp byte [hc_ours], 0
+        je .r
+        mov esi, [op_base]
+        call mrd
+        and al, 0xFE
+        call mwr
+        mov cx, 10
+        call tmo_start
+.h:
+        mov esi, [op_base]
+        add esi, 4
+        call mrd
+        test al, 1
+        jnz .r
+        call tmo_check
+        jnc .h
+.r:
+        ret
+hc_ours     db 0
+bar_lo      db 0
+
+; Páginas de trabajo del controlador («scratchpad»). Los xHCI de verdad (los
+; de Intel entre ellos) piden en HCSPARAMS2 un número de páginas de 4 KB para
+; su uso; hay que dárselas en DCBAA[0] o no arrancan, o escriben donde apunte
+; la dirección 0. El de QEMU no pide ninguna. Se toman de la memoria
+; extendida (XMS), que el controlador alcanza por dirección física.
+scratch_setup:
+        mov esi, [xbase]
+        add esi, 0x08
+        call mrd
+        mov ebx, eax
+        shr ebx, 27                 ; bits 31-27: parte baja
+        mov ecx, eax
+        shr ecx, 21
+        and ecx, 0x1F               ; bits 25-21: parte alta
+        shl ecx, 5
+        or ebx, ecx
+%ifdef FORCE_SCRATCH
+        mov ebx, FORCE_SCRATCH      ; (para probar este camino en QEMU)
+%endif
+        test ebx, ebx
+        jz .ok
+        mov [n_scratch], bx
+        mov word [fail_msg], msg_scratch
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .err
+        push es
+        mov ax, 0x4310
+        int 0x2F
+        mov [xms], bx
+        mov [xms+2], es
+        pop es
+        ; 2 páginas para la tabla + n páginas + 4 KB para alinear
+        mov dx, [n_scratch]
+        add dx, 3
+        shl dx, 2
+        mov ah, 0x09
+        call far [xms]
+        test ax, ax
+        jz .err
+        mov ah, 0x0C                ; bloquear: DX:BX = dirección lineal
+        call far [xms]
+        test ax, ax
+        jz .err
+        shl edx, 16
+        mov dx, bx
+        add edx, 0xFFF
+        and edx, 0xFFFFF000
+        mov [scr_base], edx
+        call unreal                 ; (A20 ya está abierta: a20_open)
+        mov edi, [scr_base]
+        movzx ecx, word [n_scratch]
+        add ecx, 2
+        shl ecx, 10
+        xor eax, eax
+.z:
+        mov [fs:edi], eax
+        add edi, 4
+        dec ecx
+        jnz .z
+        mov edi, [scr_base]
+        mov eax, edi
+        add eax, 0x2000
+        movzx ecx, word [n_scratch]
+.t:
+        mov [fs:edi], eax
+        mov dword [fs:edi+4], 0
+        add edi, 8
+        add eax, 0x1000
+        dec ecx
+        jnz .t
+        mov bx, DCBAA
+        call zone
+        mov eax, [scr_base]
+        mov [cs:bx], eax
+        mov dword [cs:bx+4], 0
+.ok:
+        clc
+        ret
+.err:
+        stc
+        ret
+n_scratch   dw 0
+xms         dd 0
+scr_base    dd 0
+
+; Intel (series 7 y 8, Bay Trail): los puertos USB 2 salen de fábrica por el
+; controlador EHCI; hay que pasarlos al xHCI (registros XUSB2PR y USB3_PSSEN
+; con sus máscaras), como hacen los demás sistemas.
+intel_routes:
+        mov bx, [bdf]
+        mov ax, 0xB109
+        xor di, di
+        int 0x1A
+        cmp cx, 0x8086
+        jne .r
+        mov bx, [bdf]
+        mov ax, 0xB10A
+        mov di, 0xDC                ; USB3PRM
+        int 0x1A
+        mov bx, [bdf]
+        mov ax, 0xB10D
+        mov di, 0xD8                ; USB3_PSSEN
+        int 0x1A
+        mov bx, [bdf]
+        mov ax, 0xB10A
+        mov di, 0xD4                ; USB2PRM
+        int 0x1A
+        mov bx, [bdf]
+        mov ax, 0xB10D
+        mov di, 0xD0                ; XUSB2PR
+        int 0x1A
+.r:
+        ret
+
 ; ceder la propiedad del controlador desde la BIOS (si la tiene)
 legacy_handoff:
         mov eax, [hcc1]
@@ -1773,6 +2076,31 @@ usb_enum:
 .wt:
         call tmo_check
         jnc .wt
+        ; si aún no hay nada conectado, hasta un segundo más: tras reiniciar
+        ; el controlador los puertos vuelven a dar corriente y una memoria
+        ; de verdad tarda en presentarse (más aún si cambia de EHCI a xHCI)
+        mov cx, 18
+        call tmo_start
+.wc:
+        xor cl, cl
+.wp:
+        inc cl
+        cmp cl, [maxports]
+        ja .wn
+        movzx esi, cl
+        call port_sc
+        test al, 1
+        jz .wp
+        mov cx, 3                   ; algo hay: un poco más para los demás
+        call tmo_start
+.wd:
+        call tmo_check
+        jnc .wd
+        jmp .wgo
+.wn:
+        call tmo_check
+        jnc .wc
+.wgo:
         mov byte [npool], 0
         xor cl, cl
 .pl:
@@ -1805,6 +2133,7 @@ usb_enum:
         call tmo_check
         jnc .pr
 .prd:
+        call reset_rest
         pop cx
         call mrd
         and eax, 0x0E00C3E0
@@ -2526,8 +2855,10 @@ pm_mps      dw 0
 ; ---- disco: capacidad, partición y BPB ----
 disk_setup:
         mov word [fail_msg], msg_scsi
-        ; TEST UNIT READY (hasta 5 intentos)
-        mov cx, 5
+        ; TEST UNIT READY. Si falla se pide el motivo (REQUEST SENSE: borra
+        ; el aviso de «recién conectado») y se espera un poco: un lector de
+        ; tarjetas o un disco duro USB tardan en estar preparados.
+        mov cx, 12
 .tur:
         push cx
         mov dword [scsi_cb], 0
@@ -2539,6 +2870,23 @@ disk_setup:
         call scsi
         pop cx
         jnc .ready
+        push cx
+        mov dword [scsi_cb], 0x03
+        mov dword [scsi_cb+4], 18
+        mov byte [scsi_cblen], 6
+        mov bx, DATA
+        call zone
+        call phys
+        mov ebx, eax
+        mov ecx, 18
+        mov al, 1
+        call scsi
+        mov cx, 4
+        call tmo_start
+.tw:
+        call tmo_check
+        jnc .tw
+        pop cx
         loop .tur
 .ready:
         ; READ CAPACITY(10)
@@ -2557,12 +2905,12 @@ disk_setup:
         mov bx, DATA
         call zone
         mov eax, [cs:bx]
-        bswap eax
+        call bswap_eax
         inc eax
         shr eax, 11
         mov [cap_mb], eax
         mov eax, [cs:bx+4]
-        bswap eax
+        call bswap_eax
         cmp eax, 512
         mov word [fail_msg], msg_bsize
         jne .err
@@ -2615,6 +2963,21 @@ disk_setup:
         cmp word [cs:bx+0x0B], 512
         jne .err
 .bpb:
+        ; ¿de verdad FAT12/FAT16? Un FAT32 o un NTFS sin particiones también
+        ; llevan 512 en +0Bh y F8h en +15h, pero no tienen sectores por FAT
+        ; de 16 bits ni entradas de directorio raíz: al núcleo no se le da
+        ; un BPB así
+        mov word [fail_msg], msg_nofat
+        cmp byte [cs:bx+0x0D], 0            ; sectores por clúster
+        je .err
+        cmp word [cs:bx+0x0E], 0            ; sectores reservados
+        je .err
+        cmp byte [cs:bx+0x10], 0            ; número de FAT
+        je .err
+        cmp word [cs:bx+0x11], 0            ; entradas del directorio raíz
+        je .err
+        cmp word [cs:bx+0x16], 0            ; sectores por FAT
+        je .err
         mov si, bx
         add si, 0x0B
         mov di, bpb
@@ -2714,6 +3077,10 @@ msg_mouse   db "Ratón USB preparado.", 13, 10, 0
 units       db 0
 msg_mbas    db " MB en la unidad "
 msg_drv     db "?:", 13, 10, 0
+msg_no8042  db "Aviso: este PC no tiene controlador de teclado (8042); el teclado USB", 13, 10
+            db "no puede entregar las teclas por HSPUSB (use el de la BIOS, sin /F).", 13, 10, 0
+msg_scratch db "El controlador xHCI necesita memoria extendida: cargue HSPXMS.SYS", 13, 10
+            db "antes que HSPUSB.SYS en CONFIG.SYS.", 13, 10, 0
 msg_nox     db "No se ha encontrado ningún controlador xHCI (USB 3).", 13, 10, 0
 msg_v86     db "No funciona con EMM386 (modo V86).", 13, 10, 0
 msg_high    db "Los registros del xHCI están por encima de 4 GB: no se admite.", 13, 10, 0

@@ -105,6 +105,13 @@ do_read:
         cld
 .l:
         jcxz .d
+        ; puntero normalizado: un sector no puede dar la vuelta al segmento
+        mov dx, di
+        shr dx, 4
+        mov si, es
+        add si, dx
+        mov es, si
+        and di, 15
         push ds
         push cx
         mov dx, ax
@@ -130,6 +137,12 @@ do_write:
         cld
 .l:
         jcxz .d
+        mov dx, si
+        shr dx, 4
+        mov di, ds
+        add di, dx
+        mov ds, di
+        and si, 15
         push cx
         mov dx, ax
         shl dx, 5
@@ -201,6 +214,47 @@ init:
         jbe .max
         mov dx, 512
 .max:
+        ; ¿cabe? El núcleo deja, en el campo de la dirección de corte, el
+        ; final de la memoria disponible (como MS-DOS 5+). Sin esta
+        ; comprobación el borrado del disco seguía más allá: la zona de datos
+        ; de la BIOS extendida, la pantalla y, al dar la vuelta el segmento,
+        ; la tabla de interrupciones.
+        mov cx, [bx+0x0E]
+        or cx, [bx+0x10]
+        jz .fits                    ; (un DOS que no lo dice)
+        mov ax, file_end + 15
+        shr ax, 4
+        mov cx, cs
+        add ax, cx                  ; primer párrafo del disco
+        mov cx, [bx+0x0E]
+        shr cx, 4
+        add cx, [bx+0x10]           ; primer párrafo que ya no es nuestro
+        sub cx, ax
+        jbe .nomem
+        shr cx, 6                   ; KB que quedan
+        cmp cx, dx
+        jae .fits
+.nomem:
+        mov byte [bx+0x0D], 0
+        mov word [bx+0x0E], 0
+        mov [bx+0x10], cs
+        mov [cs:kb], dx
+        push ds
+        push bx
+        push cs
+        pop ds
+        mov dx, msg_nomem1
+        mov ah, 9
+        int 0x21
+        mov ax, [kb]
+        call print_dec
+        mov dx, msg_nomem2
+        mov ah, 9
+        int 0x21
+        pop bx
+        pop ds
+        jmp done
+.fits:
         mov [cs:kb], dx
         shl dx, 1
         mov [cs:nsec], dx
@@ -324,6 +378,8 @@ print_dec:
 kb          dw 0
 vlabel      db "HSPRAMDISK "
 msg1        db "Disco RAM de Hispa-DOS: $"
+msg_nomem1  db "Disco RAM de Hispa-DOS: no hay memoria para $"
+msg_nomem2  db " KB; no se instala.", 13, 10, "$"
 msg2        db " KB en la unidad "
 msg_drive   db "?:", 13, 10, "$"
 file_end:

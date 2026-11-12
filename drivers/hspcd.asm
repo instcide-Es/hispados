@@ -11,7 +11,7 @@
 ;  (cada sector de 2048 bytes del disco son cuatro). El núcleo de Hispa-DOS
 ;  reconoce el sistema de archivos ISO 9660 de los CD y DVD de datos.
 ; =============================================================================
-        cpu 486
+        cpu 386                     ; (sin BSWAP: también arranca en un 386)
         bits 16
         org 0
 
@@ -111,6 +111,13 @@ interrupt:
         cld
 .l:
         jcxz .done
+        ; ES:DI normalizado: el sector no puede dar la vuelta al segmento
+        mov ax, di
+        shr ax, 4
+        mov dx, es
+        add dx, ax
+        mov es, dx
+        and di, 15
         ; bloque de 2048 bytes que contiene el sector de 512
         mov eax, [cs:r_lba]
         shr eax, 2
@@ -128,13 +135,6 @@ interrupt:
         rep movsw
         pop cx
         pop ds
-        ; normalizar ES:DI
-        mov ax, di
-        shr ax, 4
-        mov dx, es
-        add dx, ax
-        mov es, dx
-        and di, 15
         inc dword [cs:r_lba]
         dec cx
         jmp .l
@@ -168,10 +168,15 @@ media:
         shl di, 1
         mov cx, ax
         sub cx, [cs:m_tick+di]
-        mov [cs:m_tick+di], ax
         cmp cx, 18
+        jae .chk
         mov al, 1
-        jb .r
+        jmp .r
+.chk:
+        ; (la hora se apunta solo cuando se comprueba: si se apuntaba en
+        ; cada llamada, un programa que leyera sin parar no llegaba nunca
+        ; al segundo y el cambio de disco no se veía)
+        mov [cs:m_tick+di], ax
         ; leer el bloque 16 sin caché
         mov byte [cs:buf_unit], 0xFF
         mov eax, 16
@@ -242,6 +247,7 @@ get_block:
         mov [cs:buf_lba], eax
         mov [cs:buf_unit], dl
         mov cx, 3
+        mov byte [cs:gb_wait], 15
 .try:
         push cx
         call atapi_read
@@ -250,6 +256,27 @@ get_block:
         push cx
         call atapi_sense            ; borrar el aviso de la unidad
         pop cx
+        ; «NOT READY, becoming ready» (02h/04h): el disco está cogiendo
+        ; velocidad (recién metido, o la unidad estaba dormida). Se espera
+        ; hasta 15 s sin gastar intentos.
+        mov al, [cs:sense+2]
+        and al, 0x0F
+        cmp al, 2
+        jne .cnt
+        cmp byte [cs:sense+12], 4
+        jne .cnt
+        cmp byte [cs:gb_wait], 0
+        je .cnt
+        dec byte [cs:gb_wait]
+        push cx
+        mov cx, 18
+        call wait_begin
+.w1:
+        call wait_tick
+        jnc .w1
+        pop cx
+        jmp .try
+.cnt:
         loop .try
         mov byte [cs:buf_unit], 0xFF
         pop es
@@ -266,6 +293,55 @@ get_block:
 .ok:
         clc
         ret
+
+gb_wait     db 0
+sense       times 18 db 0
+
+; EAX con los octetos al revés (BSWAP es del 486)
+bswap_eax:
+        xchg al, ah
+        rol eax, 16
+        xchg al, ah
+        ret
+
+; plazos por el reloj de la BIOS (0040:006C) y no por vueltas de bucle: una
+; unidad real tarda segundos en arrancar el disco, y las vueltas duran lo que
+; quiera la máquina. CX = ticks. Si el reloj no corre (interrupciones
+; cerradas) vence por número de consultas.
+W_TICKS     equ 182                 ; 10 s
+wait_begin:
+        push ax
+        push ds
+        xor ax, ax
+        mov ds, ax
+        mov ax, [0x46C]
+        pop ds
+        mov [cs:w_t0], ax
+        mov [cs:w_len], cx
+        mov dword [cs:w_cnt], 0x1000000
+        pop ax
+        ret
+; -> CF si ha vencido
+wait_tick:
+        dec dword [cs:w_cnt]
+        jz .to
+        push ax
+        push ds
+        xor ax, ax
+        mov ds, ax
+        mov ax, [0x46C]
+        pop ds
+        sub ax, [cs:w_t0]
+        cmp ax, [cs:w_len]
+        pop ax
+        cmc
+        ret
+.to:
+        stc
+        ret
+w_t0        dw 0
+w_len       dw 0
+w_cnt       dd 0
 
 ; leer el bloque [buf_lba] de la unidad [buf_unit] con READ(10) por PIO
 atapi_read:
@@ -298,7 +374,7 @@ atapi_read:
         jc .r
         ; paquete READ(10) de un bloque
         mov eax, [cs:buf_lba]
-        bswap eax
+        call bswap_eax
         mov [cs:pkt+2], eax
         mov word [cs:pkt+7], 0x0100
         mov dx, [cs:port]
@@ -309,16 +385,46 @@ atapi_read:
         out dx, ax
         add si, 2
         loop .p
-        call delay400
-        call wait_drq
-        jc .r
-        mov dx, [cs:port]
         push cs
         pop es
         mov di, cdbuf
-        mov cx, 1024
+        mov bx, 1024                ; palabras que faltan
         cld
+.blk:
+        call delay400
+        call wait_drq
+        jc .r
+        ; la unidad dice cuántos octetos da en este DRQ (puede repartir el
+        ; bloque en varios aunque el límite pedido sea 2048)
+        mov dx, [cs:port]
+        add dx, 4
+        in al, dx
+        mov cl, al
+        inc dx
+        in al, dx
+        mov ch, al
+        inc cx
+        shr cx, 1
+        jnz .have
+        mov cx, bx
+.have:
+        mov ax, cx                  ; palabras de este DRQ
+        cmp cx, bx
+        jbe .fit
+        mov cx, bx
+.fit:
+        sub ax, cx                  ; las que sobran se leen y se tiran
+        sub bx, cx
+        mov dx, [cs:port]
         rep insw
+        mov cx, ax
+        jcxz .nx
+.dis:
+        in ax, dx
+        loop .dis
+.nx:
+        test bx, bx
+        jnz .blk
         call delay400
         call wait_nbsy
 .r:
@@ -336,6 +442,13 @@ atapi_sense:
         push si
         push di
         push es
+        push cs
+        pop es
+        mov di, sense
+        mov cx, 9
+        xor ax, ax
+        cld
+        rep stosw
         movzx bx, byte [cs:buf_unit]
         cmp bx, 3
         ja .r
@@ -348,6 +461,16 @@ atapi_sense:
         mov al, 0xA0
         mov ecx, 18
         call ahci_cmd
+        jc .r
+        mov si, cdbuf               ; (ahci_cmd deja los datos en cdbuf)
+        mov di, sense
+        mov cx, 9
+.cs:
+        mov ax, [cs:si]
+        mov [cs:di], ax
+        add si, 2
+        add di, 2
+        loop .cs
         jmp .r
 .ide:
         mov al, [cs:cd_sel+bx]
@@ -387,9 +510,12 @@ atapi_sense:
         call wait_drq
         jc .r
         mov dx, [cs:port]
+        mov di, sense
         mov cx, 9
 .i:
-        in ax, dx                   ; el estado no hace falta guardarlo
+        in ax, dx
+        mov [cs:di], ax
+        add di, 2
         loop .i
         call delay400
         call wait_nbsy
@@ -422,12 +548,14 @@ wait_nbsy:
         push dx
         mov dx, [cs:port]
         add dx, 7
-        mov ecx, 0x200000
+        mov cx, W_TICKS
+        call wait_begin
 .l:
         in al, dx
         test al, 0x80
         jz .ok
-        loop .l, ecx
+        call wait_tick
+        jnc .l
         stc
         jmp .r
 .ok:
@@ -447,12 +575,14 @@ wait_idle:
         push dx
         mov dx, [cs:port]
         add dx, 7
-        mov ecx, 0x200000
+        mov cx, W_TICKS
+        call wait_begin
 .l:
         in al, dx
         test al, 0x88               ; BSY y DRQ
         jz .ok
-        loop .l, ecx
+        call wait_tick
+        jnc .l
         stc
         jmp .r
 .ok:
@@ -468,7 +598,8 @@ wait_drq:
         push dx
         mov dx, [cs:port]
         add dx, 7
-        mov ecx, 0x200000
+        mov cx, W_TICKS
+        call wait_begin
 .l:
         in al, dx
         test al, 0x80
@@ -478,7 +609,8 @@ wait_drq:
         test al, 8
         jnz .ok
 .n:
-        loop .l, ecx
+        call wait_tick
+        jnc .l
 .e:
         stc
         jmp .r
@@ -489,6 +621,86 @@ wait_drq:
         pop cx
         ret
 
+
+; ---- línea A20 ----
+; Los registros del controlador están por encima de 1 MB, casi siempre en una
+; dirección con el bit 20 a uno: con A20 cerrada (la deja así cualquier
+; programa que la abra y la cierre por el XMS, y hay BIOS que arrancan con
+; ella cerrada) se leería y se escribiría en otra dirección. Se abre mientras
+; el driver trabaja y se deja como estaba. Conservan todos los registros y
+; los indicadores.
+a20_open:
+        pushf
+        push ax
+        cli
+        inc byte [cs:a20_depth]
+        cmp byte [cs:a20_depth], 1
+        jne .r
+        call a20_test
+        jnz .r
+        mov byte [cs:a20_closed], 1
+        in al, 0x92
+        or al, 2
+        and al, 0xFE
+        out 0x92, al
+        call a20_test
+        jnz .r
+        mov ax, 0x2401
+        int 0x15
+.r:
+        pop ax
+        popf
+        ret
+a20_restore:
+        pushf
+        push ax
+        cli
+        dec byte [cs:a20_depth]
+        jnz .r
+        cmp byte [cs:a20_closed], 0
+        je .r
+        mov byte [cs:a20_closed], 0
+        in al, 0x92
+        and al, 0xFC
+        out 0x92, al
+        call a20_test
+        jz .r
+        mov ax, 0x2400
+        int 0x15
+.r:
+        pop ax
+        popf
+        ret
+; ZF = 1 si A20 está cerrada (0000:0500 y FFFF:0510 son el mismo octeto)
+a20_test:
+        push ds
+        push es
+        push ax
+        xor ax, ax
+        mov ds, ax
+        dec ax
+        mov es, ax
+        mov al, [0x500]
+        mov ah, al
+        not al
+        mov [0x500], al
+        cmp al, [es:0x510]
+        mov [0x500], ah
+        jne .open
+        cmp ah, [es:0x510]
+        jne .open
+        xor al, al                  ; ZF = 1
+        jmp .x
+.open:
+        or al, 1                    ; ZF = 0
+.x:
+        pop ax
+        pop es
+        pop ds
+        ret
+a20_depth   db 0
+a20_closed  db 0
+
 ; ---- AHCI ----
 ; modo irreal: FS con base 0 y límite de 4 GB (CF si estamos en modo V86)
 unreal:
@@ -497,6 +709,7 @@ unreal:
         smsw ax
         test al, 1
         jnz .v86
+        pushf
         cli
         lgdt [cs:gdtr]
         mov eax, cr0
@@ -512,7 +725,7 @@ unreal:
 .rm:
         xor bx, bx
         mov fs, bx
-        sti
+        popf                        ; (antes un STI a secas)
         pop bx
         pop eax
         clc
@@ -544,6 +757,7 @@ ahci_cmd:
         mov [cs:ac_len], ecx
         call unreal
         jc .fail0
+        call a20_open
         mov di, bx
         shl di, 1
         mov di, [cs:cd_mem+di]      ; zona del puerto
@@ -612,18 +826,20 @@ ahci_cmd:
         mov dword [fs:esi+0x10], 0xFFFFFFFF ; borrar IS
         mov dword [fs:esi+0x30], 0xFFFFFFFF ; borrar SERR
         mov dword [fs:esi+0x38], 1          ; CI: orden 0
-        mov ecx, 0x2000000
+        mov cx, W_TICKS
+        call wait_begin
 .w:
         test dword [fs:esi+0x10], 0x40000000    ; TFES: error
         jnz .fail
         test dword [fs:esi+0x38], 1
         jz .done
-        dec ecx
-        jnz .w
+        call wait_tick
+        jnc .w
         jmp .fail
 .done:
         test byte [fs:esi+0x20], 1          ; ERR
         jnz .fail
+        call a20_restore
         pop fs
         pop edi
         pop esi
@@ -642,6 +858,7 @@ ahci_cmd:
         mov dword [fs:esi+0x30], 0xFFFFFFFF ; SERR
         mov dword [fs:esi+0x10], 0xFFFFFFFF ; IS
         or dword [fs:esi+0x18], 1
+        call a20_restore
 .fail0:
         pop fs
         pop edi
@@ -654,7 +871,7 @@ ac_len      dd 0
 ; READ(10) del bloque [buf_lba] por AHCI (BX = unidad)
 ahci_read:
         mov eax, [cs:buf_lba]
-        bswap eax
+        call bswap_eax
         mov dword [cs:pkt], 0x28
         mov [cs:pkt+2], eax
         mov dword [cs:pkt+6], 0
@@ -839,6 +1056,7 @@ ahci_probe:
         call unreal
         jc .r
         push fs
+        call a20_open
         mov esi, [abar]
         or dword [fs:esi+4], 0x80000000     ; GHC.AE: modo AHCI
         mov eax, [fs:esi+0x0C]              ; puertos implementados
@@ -869,6 +1087,7 @@ ahci_probe:
         inc cx
         jmp .port
 .pd:
+        call a20_restore
         pop fs
         jmp .hba
 .r:
@@ -924,6 +1143,7 @@ ahci_port:
         add eax, 0x100
         mov [fs:esi+0x08], eax              ; FB
         mov dword [fs:esi+0x0C], 0
+        mov dword [fs:esi+0x14], 0          ; sin interrupciones: se consulta
         mov dword [fs:esi+0x30], 0xFFFFFFFF
         mov dword [fs:esi+0x10], 0xFFFFFFFF
         or dword [fs:esi+0x18], 0x10        ; FRE
@@ -944,6 +1164,9 @@ ahci_port:
         call print_model
         ret
 .fail:
+        ; parado: su zona de memoria se devuelve y el controlador no debe
+        ; seguir escribiendo en ella las tramas que reciba
+        and dword [fs:esi+0x18], ~0x11
         sub word [res_end], 0x400
         ret
 

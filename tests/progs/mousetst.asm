@@ -16,6 +16,44 @@
         int 0x21
 .ok:
         push bx
+        ; INT 33h no debe cambiar SI, DI ni (en estas funciones) CX
+        mov si, 0x1234
+        mov di, 0x5678
+        mov cx, 0x9ABC
+        xor ax, ax
+        int 0x33
+        cmp si, 0x1234
+        jne .rbad
+        cmp di, 0x5678
+        jne .rbad
+        cmp cx, 0x9ABC
+        jne .rbad
+        mov ax, 5
+        xor bx, bx
+        int 0x33
+        cmp si, 0x1234
+        jne .rbad
+        cmp di, 0x5678
+        jne .rbad
+        push cs
+        pop es
+        mov dx, stbuf
+        mov cx, 0x9ABC
+        mov ax, 0x16
+        int 0x33
+        cmp si, 0x1234
+        jne .rbad
+        cmp di, 0x5678
+        jne .rbad
+        cmp cx, 0x9ABC
+        jne .rbad
+        mov dx, m_regs
+        jmp .rpr
+.rbad:
+        mov dx, m_regsf
+.rpr:
+        mov ah, 9
+        int 0x21
         mov dx, m_reset
         mov ah, 9
         int 0x21
@@ -155,6 +193,9 @@ m_none  db "No hay driver de ratón.", 13, 10, "$"
 m_reset db "Ratón: botones $"
 m_ver   db "Versión del driver: $"
 m_x     db "X=$"
+m_regs  db "Registros conservados", 13, 10, "$"
+m_regsf db "INT 33h cambia registros (SI, DI o CX)", 13, 10, "$"
+stbuf   times 512 db 0
 m_y     db " Y=$"
 m_b     db " B=$"
 m_cnt   db "Pulsaciones del botón izquierdo: $"

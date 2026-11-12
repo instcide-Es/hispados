@@ -37,6 +37,10 @@ checkn "Error al iniciar"
 check "XMS version 0300"
 check "Locked at linear 00110000"
 if [ "$(grep -c 'XMS test OK' "$LOG.txt")" -ge 2 ]; then echo "  OK   XMS test OK (dos veces)"; else echo "  FAIL XMS test OK (dos veces)"; fail=1; fi
+check "XMS realloc OK"
+check "XMS overlap OK"
+check "XMS errors OK"
+check "XMS registers OK"
 [ $HAVEMEM = 1 ] && check "Extended (XMS)"
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- salida ---"; cat "$LOG.txt"; fi
 rm -f "$FLP" "$LOG" "$LOG.txt"

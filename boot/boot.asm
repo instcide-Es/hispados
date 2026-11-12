@@ -152,7 +152,12 @@ read_sector:
         mov di, 5
 .retry:
         push ax
+        ; sector absoluto = relativo + sectores ocultos: en un disquete son 0,
+        ; pero una partición FAT12 de un disco duro (menos de 16 MB, una
+        ; tarjeta CF pequeña) empieza después de la tabla de particiones
         xor dx, dx
+        add ax, [hidden]
+        adc dx, [hidden+2]
         div word [spt]
         mov cx, dx
         inc cx

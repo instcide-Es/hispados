@@ -43,6 +43,7 @@ echo "== Hispa-DOS ratón ($MODE) =="
 check "HSPRATON 0.1 - ratón de Hispa-DOS (INT 33h)"
 if [ "$MODE" = ps2 ]; then check "Ratón PS/2 preparado."; fi
 check "Ratón: botones 2"
+check "Registros conservados"
 check "Versión del driver: 8.20"
 check "X=320 Y=100 B=0"
 # el ratón se ha movido a la derecha y hacia abajo, y vuelve a la esquina

@@ -227,6 +227,9 @@ test: $(IMG) usb nucprogs
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
+	tests/run_drivers_tests.sh $(IMG)
+	tests/run_sbload_tests.sh $(IMG)
+	tests/run_bootfat12_tests.sh
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 

@@ -80,6 +80,31 @@ int2f:
         jmp far [cs:old2f]
 
 entry:
+        cmp byte [cs:dev_type], 4
+        jne .go
+        cmp ah, 1
+        jb .go
+        cmp ah, 3
+        ja .go
+        ; HD Audio: las funciones usan FS (modo irreal) y hay que devolverlo
+        ; como estaba; en modo V86 (EMM386 o Windows cargados después) no
+        ; se puede llegar a los registros
+        push ax
+        smsw ax
+        test al, 1
+        pop ax
+        jnz .v86
+        push fs
+        call a20_open
+        push cs
+        call .go
+        call a20_restore
+        pop fs
+        retf
+.v86:
+        stc
+        retf
+.go:
         cmp ah, 0
         je f_info
         cmp ah, 1
@@ -522,6 +547,86 @@ unreal:
         pop eax
         ret
 
+
+; ---- línea A20 ----
+; Los registros del controlador están por encima de 1 MB, casi siempre en una
+; dirección con el bit 20 a uno: con A20 cerrada (la deja así cualquier
+; programa que la abra y la cierre por el XMS, y hay BIOS que arrancan con
+; ella cerrada) se leería y se escribiría en otra dirección. Se abre mientras
+; el driver trabaja y se deja como estaba. Conservan todos los registros y
+; los indicadores.
+a20_open:
+        pushf
+        push ax
+        cli
+        inc byte [cs:a20_depth]
+        cmp byte [cs:a20_depth], 1
+        jne .r
+        call a20_test
+        jnz .r
+        mov byte [cs:a20_closed], 1
+        in al, 0x92
+        or al, 2
+        and al, 0xFE
+        out 0x92, al
+        call a20_test
+        jnz .r
+        mov ax, 0x2401
+        int 0x15
+.r:
+        pop ax
+        popf
+        ret
+a20_restore:
+        pushf
+        push ax
+        cli
+        dec byte [cs:a20_depth]
+        jnz .r
+        cmp byte [cs:a20_closed], 0
+        je .r
+        mov byte [cs:a20_closed], 0
+        in al, 0x92
+        and al, 0xFC
+        out 0x92, al
+        call a20_test
+        jz .r
+        mov ax, 0x2400
+        int 0x15
+.r:
+        pop ax
+        popf
+        ret
+; ZF = 1 si A20 está cerrada (0000:0500 y FFFF:0510 son el mismo octeto)
+a20_test:
+        push ds
+        push es
+        push ax
+        xor ax, ax
+        mov ds, ax
+        dec ax
+        mov es, ax
+        mov al, [0x500]
+        mov ah, al
+        not al
+        mov [0x500], al
+        cmp al, [es:0x510]
+        mov [0x500], ah
+        jne .open
+        cmp ah, [es:0x510]
+        jne .open
+        xor al, al                  ; ZF = 1
+        jmp .x
+.open:
+        or al, 1                    ; ZF = 0
+.x:
+        pop ax
+        pop es
+        pop ds
+        ret
+a20_depth   db 0
+a20_closed  db 0
+
 ; registros: DX = desplazamiento
 hrd32:
         push esi
@@ -671,6 +776,13 @@ hda_rate_fmt:
 .last:
         sub si, 4
 .got:
+        ; ticks de una vuelta: NBUF*BUFSZ/4 tramas / Hz * 18,2
+        push dx
+        mov dx, 2
+        mov ax, 0x466D              ; 149101
+        div word [cs:si]
+        mov [cs:hda_lapt], ax
+        pop dx
         mov ax, [cs:si+2]
         or ax, 0x0011
         mov [cs:hda_fmt], ax
@@ -684,6 +796,22 @@ rate_tab    dw 8000, 0x0500, 11025, 0x4300, 16000, 0x0200, 22050, 0x4100
 hda_update:
         push eax
         push dx
+        ; si ha pasado una vuelta entera del anillo sin consultar, la cuenta
+        ; de vueltas ya no vale: se da todo por reproducido
+        push ds
+        xor ax, ax
+        mov ds, ax
+        mov ax, [0x46C]
+        pop ds
+        mov dx, ax
+        sub dx, [cs:hda_tick]
+        mov [cs:hda_tick], ax
+        cmp dx, [cs:hda_lapt]
+        jb .pos
+        mov eax, [cs:hda_written]
+        mov [cs:hda_played], eax
+        jmp .r
+.pos:
         mov dx, [cs:hda_sd]
         add dx, 4
         call hrd32
@@ -694,9 +822,12 @@ hda_update:
         mov [cs:hda_last], eax
         add eax, [cs:hda_cycles]
         mov [cs:hda_played], eax
+.r:
         pop dx
         pop eax
         ret
+hda_tick    dw 0
+hda_lapt    dw 3                    ; ticks de una vuelta del anillo
 
 hda_play:
         call unreal
@@ -725,10 +856,17 @@ hda_play:
         call hda_update
         mov eax, [cs:hda_written]
         sub eax, [cs:hda_played]
+        jbe .under
         cmp eax, (NBUF - 1) * BUFSZ
         jbe .fill
         call tmo_check
         jnc .ws
+        jmp .fill
+.under:
+        ; el flujo ya ha pasado por todo lo encolado (el programa ha tardado
+        ; en traer más: un disquete, un CD): se para y se empieza de nuevo.
+        ; Antes la resta salía «negativa» y se esperaba el plazo entero (20 s)
+        call hda_stop
 .fill:
         mov eax, [cs:hda_written]
         shr eax, 13
@@ -822,12 +960,18 @@ hda_start:
         mov [cs:hda_played], eax
         mov [cs:hda_last], eax
         mov [cs:hda_cycles], eax
+        push ds
+        mov ds, ax
+        mov ax, [0x46C]
+        pop ds
+        mov [cs:hda_tick], ax
         popad
         ret
 
 hda_wait:
         cmp byte [cs:started], 0
         je .r
+        push eax
         call tmo_start
 .l:
         call hda_update
@@ -838,6 +982,7 @@ hda_wait:
         jnc .l
 .end:
         call hda_stop
+        pop eax
 .r:
         ret
 
@@ -881,8 +1026,8 @@ sb_base     dw 0
 sb_irq      db 0
 sb_dma      db 1
 sb_hdma     db 0                    ; 0 = sin DMA de 16 bits
+sb_minor    db 0                    ; (seguidos: se comparan como palabra)
 sb_major    db 0
-sb_minor    db 0
 sb_vec      db 0
 sb_play     db 0                    ; bloque que suena
 sb_wr       db 0                    ; siguiente bloque que se llena
@@ -1065,6 +1210,9 @@ sb_start:
         pushad
         call sb_reset
         jc .r
+        ; la IRQ puede estar tapada: lo hacen los juegos al salir, y la rutina
+        ; por omisión de la BIOS con una interrupción que llegue estando parados
+        call sb_unmask
         xor eax, eax
         mov ax, cs
         shl eax, 4
@@ -1122,6 +1270,11 @@ sb_start:
         call sb_out
         pop ax
         call sb_out
+        cmp byte [cs:sb_major], 2
+        jae .auto
+        call sb_single              ; DSP 1.x: no tiene autoinicio
+        jmp .on
+.auto:
         mov al, 0x48                ; tamaño del bloque
         call sb_out
         mov al, (SB_BLK - 1) & 0xFF
@@ -1199,6 +1352,60 @@ sb_start:
 pg8         db 0x87, 0x83, 0x81, 0x82
 pg16        db 0x8F, 0x8B, 0x89, 0x8A
 
+; DSP 1.x (SB 1.0/1.5): un bloque de ciclo único (orden 14h); la interrupción
+; pide el siguiente. La DMA sí va en autoinicio sobre los 4 bloques.
+sb_single:
+        push ax
+        mov al, 0x14
+        call sb_out
+        mov al, (SB_BLK - 1) & 0xFF
+        call sb_out
+        mov al, (SB_BLK - 1) >> 8
+        call sb_out
+        pop ax
+        ret
+
+; destapar la IRQ de la tarjeta en el PIC
+sb_unmask:
+        push ax
+        push cx
+        pushf
+        cli
+        mov cl, [cs:sb_irq]
+        cmp cl, 8
+        jae .slave
+        mov ah, 1
+        shl ah, cl
+        not ah
+        in al, 0x21
+        and al, ah
+        out 0x21, al
+        jmp .r
+.slave:
+        sub cl, 8
+        mov ah, 1
+        shl ah, cl
+        not ah
+        in al, 0xA1
+        and al, ah
+        out 0xA1, al
+        in al, 0x21
+        and al, 0xFB                ; cascada
+        out 0x21, al
+.r:
+        popf
+        pop cx
+        pop ax
+        ret
+
+; quedar residente (DX = párrafos). Los bloques de DMA pueden caer encima del
+; código de instalación (se alinean a 16 KB desde resident_end): se llenan de
+; silencio aquí, cuando ese código ya ha terminado, y no antes.
+sb_tsr:
+        call sb_halt
+        mov ax, 0x3100
+        int 0x21
+
 ; ---- interrupción de la tarjeta: ha acabado el bloque sb_play ----
 sb_isr:
         cmp byte [cs:started], 0
@@ -1207,6 +1414,37 @@ sb_isr:
 .ours:
         push ax
         push dx
+        ; IRQ 7 / 15 espuria (el PIC la inventa si la petición desaparece):
+        ; no está «en servicio» y no lleva EOI (quitaría el de otra)
+        cmp byte [cs:sb_irq], 7
+        jne .n7
+        mov al, 0x0B
+        out 0x20, al
+        in al, 0x20
+        mov ah, al
+        mov al, 0x0A                ; dejar el PIC leyendo IRR, como estaba
+        out 0x20, al
+        test ah, 0x80
+        jnz .real
+        jmp .spur
+.n7:
+        cmp byte [cs:sb_irq], 15
+        jne .real
+        mov al, 0x0B
+        out 0xA0, al
+        in al, 0xA0
+        mov ah, al
+        mov al, 0x0A
+        out 0xA0, al
+        test ah, 0x80
+        jnz .real
+        mov al, 0x20
+        out 0x20, al                ; solo al maestro
+.spur:
+        pop dx
+        pop ax
+        iret
+.real:
         mov dx, [cs:sb_base]
         add dx, 0x0E                ; acuse de 8 bits
         cmp byte [cs:dev_type], 2
@@ -1241,8 +1479,15 @@ sb_isr:
 .k:
         pop bx
         cmp byte [cs:sb_idle], SB_IDLE
-        jb .eoi
+        jb .more
         call sb_halt                ; un rato sin datos: a descansar
+        jmp .eoi
+.more:
+        cmp byte [cs:dev_type], 1
+        jne .eoi
+        cmp byte [cs:sb_major], 2
+        jae .eoi
+        call sb_single              ; DSP 1.x: pedir el bloque siguiente
 .eoi:
         mov al, 0x20
         cmp byte [cs:sb_irq], 8
@@ -1280,8 +1525,8 @@ sb_play_f:
         je .rok
         cmp dx, 22050
         jbe .rok
-        cmp byte [cs:sb_major], 2
-        jb .slow                    ; DSP 1.x: sin alta velocidad
+        cmp word [cs:sb_minor], 0x0201  ; (menor, mayor)
+        jb .slow                    ; DSP 1.x y 2.00: sin alta velocidad
         mov byte [cs:sb_hs], 1
         jmp .rok
 .slow:
@@ -1543,6 +1788,14 @@ init:
         int 0x1A
         jc .nopci
         mov [pci_bdf], bx
+        ; VIA y SiS tienen otros registros: no son «compatibles con ICH»
+        mov ax, 0xB109
+        xor di, di
+        int 0x1A
+        cmp cx, 0x1106
+        je .nopci
+        cmp cx, 0x1039
+        je .nopci
         call ac97_init
         jc .fail
         mov byte [dev_type], 3
@@ -1562,14 +1815,25 @@ init:
         call puts
         jmp .install
 .noac97:
+        ; puede haber varios (el de la placa y el HDMI de la gráfica): se
+        ; toma el primero que tenga un códec con salida
         mov ax, 0xB103
         mov ecx, 0x040300
-        xor si, si
+        mov si, [hda_idx]
         int 0x1A
-        jc .try_ac97
+        jc .nohda
         mov [pci_bdf], bx
         call hda_init
-        jc .hfail
+        jnc .hok
+        inc word [hda_idx]
+        cmp word [hda_idx], 4
+        jb .noac97
+        jmp .hfail
+.nohda:
+        cmp word [hda_idx], 0
+        je .try_ac97
+        jmp .hfail
+.hok:
         mov byte [dev_type], 4
         mov si, msg_hda
         call puts
@@ -1628,6 +1892,10 @@ init:
         mov dx, [tsr_end]
         add dx, 15
         shr dx, 4
+        cmp byte [dev_type], 1
+        je sb_tsr
+        cmp byte [dev_type], 2
+        je sb_tsr
         mov ax, 0x3100
         int 0x21
 
@@ -1852,6 +2120,14 @@ sb_detect:
         je .u3
         mov [sb_hdma], al
 .u3:
+        ; SB 1.x/2.0/Pro sin BLASTER: la IRQ está en puentes de la tarjeta
+        ; (de fábrica la 7 en muchas, no la 5): se pregunta al DSP
+        cmp byte [sb_major], 4
+        jae .u4
+        cmp byte [bl_i], 0xFF
+        jne .u4
+        call sb_probe_irq
+.u4:
         cmp byte [sb_irq], 2
         jne .i9
         mov byte [sb_irq], 9        ; la IRQ 2 llega por la 9
@@ -1881,6 +2157,101 @@ sb_detect:
         stc
         ret
 
+; ¿qué IRQ usa la tarjeta? Se pide al DSP una interrupción (orden F2h) con
+; cada candidata destapada y una rutina de prueba en su vector.
+; -> sb_irq (no cambia si ninguna contesta)
+sb_probe_irq:
+        mov si, pr_list
+.n:
+        lodsb
+        test al, al
+        jz .r
+        mov [pr_irq], al
+        add al, 8
+        cmp byte [pr_irq], 8
+        jb .v
+        add al, 0x70 - 16
+.v:
+        mov [pr_vec], al
+        push si
+        push es
+        mov ah, 0x35
+        int 0x21
+        mov [pr_old], bx
+        mov [pr_old+2], es
+        pop es
+        mov al, [pr_vec]
+        mov dx, sb_pisr
+        mov ah, 0x25
+        int 0x21
+        ; destapar (guardando las máscaras)
+        cli
+        in al, 0x21
+        mov [pr_m1], al
+        in al, 0xA1
+        mov [pr_m2], al
+        mov al, [sb_irq]
+        push ax
+        mov al, [pr_irq]
+        mov [sb_irq], al
+        call sb_unmask
+        pop ax
+        mov [sb_irq], al
+        sti
+        call delay                  ; lo que hubiera pendiente no cuenta
+        mov byte [pr_hit], 0
+        mov al, 0xF2
+        call sb_out
+        mov cx, 8
+.w:
+        call delay
+        cmp byte [pr_hit], 0
+        jne .wd
+        loop .w
+.wd:
+        cli
+        mov al, [pr_m2]
+        out 0xA1, al
+        mov al, [pr_m1]
+        out 0x21, al
+        sti
+        push ds
+        lds dx, [pr_old]
+        mov al, [cs:pr_vec]
+        mov ah, 0x25
+        int 0x21
+        pop ds
+        pop si
+        cmp byte [pr_hit], 0
+        je .n
+        mov al, [pr_irq]
+        mov [sb_irq], al
+.r:
+        ret
+sb_pisr:
+        push ax
+        push dx
+        mov byte [cs:pr_hit], 1
+        mov dx, [cs:sb_base]
+        add dx, 0x0E
+        in al, dx
+        mov al, 0x20
+        cmp byte [cs:pr_irq], 8
+        jb .m
+        out 0xA0, al
+.m:
+        out 0x20, al
+        pop dx
+        pop ax
+        iret
+pr_list     db 5, 7, 9, 10, 0
+pr_irq      db 0
+pr_vec      db 0
+pr_hit      db 0
+pr_m1       db 0
+pr_m2       db 0
+pr_old      dd 0
+
 ; instalar: bloques alineados, IRQ y BLASTER en el entorno
 sb_install:
         ; bloques en una zona de 16 KB alineada (no cruza 64 KB)
@@ -1894,7 +2265,10 @@ sb_install:
         mov [buf_off], ax
         add ax, 4 * SB_BLK
         mov [tsr_end], ax
-        call sb_halt
+        ; (sin tocar aún los bloques: pueden estar encima de este código;
+        ; sb_tsr los deja en silencio al final)
+        call sb_reset
+        call sb_dma_mask
         ; vector de la IRQ
         mov al, [sb_irq]
         add al, 8
@@ -1911,29 +2285,7 @@ sb_install:
         mov dx, sb_isr
         mov ah, 0x25
         int 0x21
-        ; destapar la IRQ en el PIC
-        mov cl, [sb_irq]
-        cmp cl, 8
-        jae .slave
-        mov ah, 1
-        shl ah, cl
-        not ah
-        in al, 0x21
-        and al, ah
-        out 0x21, al
-        jmp .msg
-.slave:
-        sub cl, 8
-        mov ah, 1
-        shl ah, cl
-        not ah
-        in al, 0xA1
-        and al, ah
-        out 0xA1, al
-        in al, 0x21
-        and al, 0xFB                ; cascada
-        out 0x21, al
-.msg:
+        call sb_unmask
         ; «Sound Blaster 16 en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)»
         mov si, name_sb
         cmp byte [dev_type], 2
@@ -2241,6 +2593,7 @@ hda_init:
         stc                         ; modo V86 (EMM386): sin acceso a los registros
         ret
 .rm:
+        call a20_open
         ; GDT del modo irreal
         xor eax, eax
         mov ax, cs
@@ -2263,6 +2616,26 @@ hda_init:
         mov ax, 0xB10C
         mov di, 0x04
         int 0x1A
+        ; Intel: clase de tráfico 0 (TCSEL), o el flujo puede no salir limpio
+        mov bx, [pci_bdf]
+        mov ax, 0xB109
+        xor di, di
+        int 0x1A
+        cmp cx, 0x8086
+        jne .ntc
+        mov bx, [pci_bdf]
+        mov ax, 0xB108
+        mov di, 0x44
+        int 0x1A
+        jc .ntc
+        and cl, 0xF8
+        mov bx, [pci_bdf]
+        mov ax, 0xB10B
+        mov di, 0x44
+        int 0x1A
+.ntc:
+        cmp dword [hda_base], 0
+        je .fail
         call unreal
         ; reinicio del controlador (GCTL.CRST)
         mov dx, 0x08
@@ -2318,6 +2691,8 @@ hda_init:
         mov ax, 0x705
         xor cl, cl
         call hda_verb               ; encendido D0
+        call delay                  ; el códec tarda en despertar
+        call delay
         mov bl, [afg_nid]
         mov cl, 0x04
         call hda_param
@@ -2359,9 +2734,17 @@ hda_init:
         xor cl, cl
         call hda_verb
         pop bx
+        mov ecx, eax
         shr eax, 30
         cmp al, 1                   ; sin conexión física
         je .next
+        ; solo línea (0), altavoz (1) o auriculares (2): el primer pin de
+        ; muchos códecs es la salida digital (S/PDIF) o un conector de
+        ; entrada que también puede sacar señal
+        shr ecx, 20
+        and cl, 0x0F
+        cmp cl, 2
+        ja .next
         mov [pin_nid], bl
 .next:
         pop cx
@@ -2409,9 +2792,11 @@ hda_init:
         mov bl, [pin_nid]
         call hda_unmute_out
 .ok:
+        call a20_restore
         clc
         ret
 .fail:
+        call a20_restore
         stc
         ret
 
@@ -2541,6 +2926,15 @@ ac97_init:
         int 0x1A
         and cx, 0xFFFE
         mov [nabm], cx
+        ; sin puertos asignados (ICH6/7 con solo los BAR de memoria): nada
+        ; de escribir en los puertos 0..3Fh, que son del controlador de DMA
+        jz .nobar
+        cmp word [nam], 0
+        jne .bars
+.nobar:
+        stc
+        ret
+.bars:
         ; activar E/S y bus master
         mov bx, [pci_bdf]
         mov ax, 0xB109
@@ -2560,14 +2954,15 @@ ac97_init:
         mov eax, 2
         out dx, eax
         call delay
-        ; esperar al códec
-        mov cx, 0xFFFF
+        ; esperar al códec: en frío puede tardar medio segundo largo
+        mov cx, 64                  ; ~1 s
         mov dx, [nabm]
         add dx, 0x30
 .w:
         in eax, dx
         test ax, 0x0100
         jnz .ready
+        call delay
         loop .w
         stc
         ret
@@ -2650,6 +3045,7 @@ puts:
         ret
 
 pci_bdf     dw 0
+hda_idx     dw 0
 tsr_end     dw 0
 msg_title   db "HSPSND 0.1 - controlador de sonido de Hispa-DOS", 13, 10, 0
 msg_already db "Ya está instalado.", 13, 10, 0

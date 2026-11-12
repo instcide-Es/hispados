@@ -96,11 +96,17 @@ int33:
         mov bx, [cs:ftab+bx]
         mov [cs:fjmp], bx
         pop bx
+        ; INT 33h solo cambia los registros en los que devuelve algo: SI y
+        ; DI (que varias funciones usan para copiar) se conservan aquí
         push ds
+        push si
+        push di
         push cs
         pop ds
         cld
         call [fjmp]
+        pop di
+        pop si
         pop ds
         iret
 .old:
@@ -134,6 +140,7 @@ f21:
         ret
 
 reset_all:
+        push cx
         call hide_now
         mov word [cflag], -1
         call mode_info
@@ -172,6 +179,7 @@ reset_all:
         mov cx, 32
         rep movsw
         pop es
+        pop cx
         ret
 
 ; límites por defecto según el modo de vídeo de la BIOS
@@ -317,6 +325,7 @@ f09:
         call hide_now
         mov [hotx], bx
         mov [hoty], cx
+        push cx
         push ds
         push es
         push es
@@ -329,6 +338,7 @@ f09:
         rep movsw
         pop es
         pop ds
+        pop cx
         call show_now
         ret
 ; 0Ah: cursor de texto (BX = 0 software: CX y DX máscaras)
@@ -380,15 +390,16 @@ f15:
         mov bx, STATE_LEN
         ret
 f16:
-        push es
+        push cx
         mov di, dx
         mov si, state
         mov cx, STATE_LEN
         rep movsb
-        pop es
+        pop cx
         ret
 f17:
         call hide_now
+        push cx
         push ds
         push es
         push es
@@ -401,6 +412,7 @@ f17:
         rep movsb
         pop es
         pop ds
+        pop cx
         cmp word [cflag], 0
         jne .r
         call show_now
@@ -850,14 +862,19 @@ init:
         mov ax, 0x4C01
         int 0x21
 .new:
-        ; ratón PS/2 de la BIOS
-        int 0x11
-        test al, 4                  ; dispositivo señalador
-        jz .nops2
+        ; ratón PS/2 de la BIOS. No se mira el bit de INT 11h (hay BIOS que
+        ; no lo ponen) y se reintenta: en máquinas reales la primera orden
+        ; al ratón falla a menudo (AH = 04h, «reenviar»)
+        mov si, 3
+.rst:
         mov ax, 0xC205              ; inicializar, paquetes de 3 bytes
         mov bh, 3
         int 0x15
-        jc .nops2
+        jnc .rok
+        dec si
+        jnz .rst
+        jmp .nops2
+.rok:
         mov ax, 0xC203              ; resolución: 4 puntos/mm
         mov bh, 2
         int 0x15
@@ -867,10 +884,16 @@ init:
         mov ax, 0xC207
         int 0x15
         jc .nops2
+        mov si, 3
+.ren:
         mov ax, 0xC200              ; activar
         mov bh, 1
         int 0x15
-        jc .nops2
+        jnc .eok
+        dec si
+        jnz .ren
+        jmp .nops2
+.eok:
         mov byte [ps2], 1
         mov si, msg_ps2
         call puts
