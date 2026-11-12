@@ -4,6 +4,11 @@
 ;
 ;  Uso:  HSPDPMI        instalar (en AUTOEXEC.BAT; necesita HSPXMS.SYS u otro
 ;                       gestor XMS y un 386 o superior)
+;        HSPDPMI /D     descargar: lo quita de la memoria si no hay clientes
+;                       (para los programas que traen su propio extensor);
+;                       si después se cargó otro residente que usa INT 2Fh,
+;                       no se puede quitar y queda desactivado hasta que se
+;                       ejecute HSPDPMI otra vez
 ;
 ;  Primera etapa de Hispa Ventanas (docs/VENTANAS.md). Escrito desde cero a
 ;  partir de la especificación pública de DPMI 0.9/1.0.
@@ -112,6 +117,8 @@ hostseg     dw 0
 level       db 0                    ; clientes activos (anidados)
 cputype     db 3
 hb_handle   dw 0
+oculto      db 0                    ; 1: desactivado (HSPDPMI /D sin poder descargar)
+            db 0
 hb_fresh    db 0
 cs_big      db 0
 hb_base     dd 0
@@ -240,8 +247,85 @@ rmhook_stubs:
 int2f:
         cmp ax, 0x1687
         je .det
+        cmp ax, 0xD600
+        je .priv
+.pasa:
         jmp far [cs:old2f]
+; ---- interfaz propia: AX=D600h BX=4844h ("HD"), DL=función ----
+;   DL=0  ¿está?     -> AX=4450h ("DP"), BL=1 si está desactivado, BH=clientes
+;   DL=1  descargar  -> AX=4450h, BL=2: hecho, y ES=segmento que hay que
+;                       liberar (INT 21h, 49h); BL=1: no se ha podido quitar
+;                       de la cadena de INT 2Fh (otro residente detrás) y
+;                       queda desactivado: no responde a 1687h; BL=FFh: hay
+;                       clientes y no se toca
+;   DL=2  activar de nuevo -> como DL=0
+;   DL=3  desactivar (sin moverlo de la memoria) -> como DL=0; BL=FFh si
+;         hay clientes
+.priv:
+        cmp bx, 0x4844
+        jne .pasa
+        cmp dl, 3
+        ja .pasa
+        je .ocultar
+        cmp dl, 2
+        je .activar
+        cmp dl, 1
+        je .quitar
+.info:
+        mov ax, 0x4450
+        mov bl, [cs:oculto]
+        mov bh, [cs:level]
+        push cs
+        pop es
+        iret
+.activar:
+        mov byte [cs:oculto], 0
+        jmp .info
+.ocultar:
+        cmp byte [cs:level], 0
+        je .oc1
+        mov ax, 0x4450
+        mov bh, [cs:level]
+        mov bl, 0xFF
+        jmp .q9
+.oc1:
+        mov byte [cs:oculto], 1
+        jmp .info
+.quitar:
+        mov ax, 0x4450
+        mov bh, [cs:level]
+        mov bl, 0xFF
+        test bh, bh
+        jnz .q9
+        push ds
+        push si
+        push cx
+        xor si, si
+        mov ds, si
+        mov bl, 1
+        mov cx, cs
+        cmp word [0x2F*4], int2f
+        jne .q1
+        cmp [0x2F*4+2], cx
+        jne .q1
+        cli
+        mov cx, [cs:old2f]
+        mov [0x2F*4], cx
+        mov cx, [cs:old2f+2]
+        mov [0x2F*4+2], cx
+        mov bl, 2
+.q1:
+        mov [cs:oculto], bl         ; (1: desactivado; si se descarga, da igual)
+        pop cx
+        pop si
+        pop ds
+.q9:
+        push cs
+        pop es
+        iret
 .det:
+        cmp byte [cs:oculto], 0
+        jne .pasa
         xor ax, ax
         mov bx, 1                   ; admite clientes de 32 bits
         mov cl, [cs:cputype]
@@ -3539,8 +3623,46 @@ resident_end:
 ; =============================================================================
 install:
         cld
+        ; ¿/D? (descargar; sin el título, para quien lo llama desde un programa)
+        mov si, 0x81
+.arg:
+        lodsb
+        cmp al, 13
+        je .noarg
+        cmp al, '/'
+        jne .arg
+        lodsb
+        cmp al, 13
+        je .noarg
+        and al, 0xDF
+        cmp al, 'D'
+        je descargar
+        jmp .arg
+.noarg:
         mov dx, msg_title
         call print
+        ; ¿hay una copia desactivada? Se activa de nuevo
+        mov ax, 0xD600
+        mov bx, 0x4844
+        xor dl, dl
+        int 0x2F
+        push cs
+        pop es
+        cmp ax, 0x4450
+        jne .nueva
+        cmp bl, 1
+        jne .nueva
+        mov ax, 0xD600
+        mov bx, 0x4844
+        mov dl, 2
+        int 0x2F
+        push cs
+        pop es
+        mov dx, msg_react
+        call print
+        mov ax, 0x4C00
+        int 0x21
+.nueva:
         ; ¿386 o superior? (solo instrucciones del 8086 hasta saberlo)
         cpu 8086
         pushf
@@ -3701,12 +3823,48 @@ install:
         mov ax, 0x4C01
         int 0x21
 
+; HSPDPMI /D: quita el servidor de la memoria (o, si no puede, lo desactiva)
+descargar:
+        mov ax, 0xD600
+        mov bx, 0x4844
+        mov dl, 1
+        int 0x2F
+        mov dx, msg_noinst
+        cmp ax, 0x4450
+        jne .mal
+        mov dx, msg_ocupado
+        cmp bl, 0xFF
+        je .mal
+        mov dx, msg_desact
+        cmp bl, 2
+        jne .bien
+        mov ah, 0x49                ; ES = el segmento del residente
+        int 0x21
+        mov dx, msg_desc
+.bien:
+        push cs
+        pop es
+        call print
+        mov ax, 0x4C00
+        int 0x21
+.mal:
+        push cs
+        pop es
+        call print
+        mov ax, 0x4C01
+        int 0x21
+
 print:
         mov ah, 0x09
         int 0x21
         ret
 
 msg_title   db "HSPDPMI 0.1 - servidor DPMI 0.9 de Hispa-DOS", 13, 10, "$"
+msg_react   db "HSPDPMI: estaba desactivado en memoria; activado de nuevo.", 13, 10, "$"
+msg_noinst  db "HSPDPMI no está en memoria.", 13, 10, "$"
+msg_ocupado db "HSPDPMI: no se puede descargar mientras haya programas usándolo.", 13, 10, "$"
+msg_desc    db "HSPDPMI: descargado; la memoria queda libre.", 13, 10, "$"
+msg_desact  db "HSPDPMI: desactivado (sigue en memoria: hay otro residente cargado después).", 13, 10, "$"
 msg_ok      db "Instalado: clientes de 16 y de 32 bits, memoria de XMS.", 13, 10, "$"
 msg_no386   db "HSPDPMI: hace falta un procesador 386 o superior.", 13, 10, "$"
 msg_v86     db "HSPDPMI: el procesador ya está en modo protegido (¿un EMM386?); no se instala.", 13, 10, "$"

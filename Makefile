@@ -112,10 +112,12 @@ $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
 # Hispa Ventanas (docs/VENTANAS.md): el entorno gráfico, en ventanas/.
 # La fuente de mapa de bits sale del diseño en texto ventanas/fuente.txt.
 VENSRC = $(wildcard ventanas/*.asm ventanas/*.inc)
-$(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py | $(B)
+$(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack.py | $(B)
 	for f in $(VENSRC); do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
 	python3 tools/mkfuente.py ventanas/fuente.txt $(B)/gen/ventanas/fuente.inc $(B)/gen/ventanas/fuente.ppm
-	$(NASM) -f bin -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
+	python3 tools/icopack.py $(B)/gen/ventanas/iconos.inc $(B)/gen/ventanas/iconos2.inc
+	# (lo que usa la parte de modo real tiene que caber en 64 KB: si no, error)
+	$(NASM) -f bin -w+error=number-overflow -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
@@ -219,8 +221,11 @@ $(B)/NUCCON.SYS: tests/progs/nuccon.asm | $(B)
 $(B)/NUCDRV.SYS: tests/progs/nucdrv.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 nucprogs: $(NUCPROGS)
+# el «juego» de prueba de los accesos directos (tests/run_ventanas4_tests.sh)
+$(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs
+test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -273,6 +278,7 @@ test: $(IMG) usb nucprogs
 	tests/run_compat_tests.sh
 	tests/run_ventanas_tests.sh $(IMG)
 	tests/run_ventanas3_tests.sh $(IMG)
+	tests/run_ventanas4_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)

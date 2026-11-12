@@ -20,9 +20,6 @@ vid_tipo    resb 1                  ; 1 VESA, 0 VGA de 16 colores
 vid_bits    resb 1                  ; 4, 8, 15, 16, 24 o 32
 vid_octetos resb 1                  ; octetos por punto en la pantalla
 vid_masc    resb 6                  ; tamaño y posición de rojo, verde y azul
-            alignb 4
-pal_rgb     resb 1024               ; la paleta: rojo, verde, azul, 0
-pal_nat     resd 256                ; cada color en el formato de la pantalla
 vbe_info    resb 512
 modo_info   resb 256
 ; ---- dibujo ----

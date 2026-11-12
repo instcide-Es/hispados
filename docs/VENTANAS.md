@@ -34,7 +34,10 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    0100h-0102h, 0200h-0205h, 0300h-0306h, 0400h, 0500h-0503h, 0600h-0604h,
    0702h/0703h, 0800h/0801h y 0900h-0902h. Pruebas: `tests/run_dpmi_tests.sh`
    (clientes propios de 16 y 32 bits y, si se descargan con
-   `tests/thirdparty/fetch_dpmi.sh`, NASM, SED y LUA de DJGPP). Pendiente: la
+   `tests/thirdparty/fetch_dpmi.sh`, NASM, SED y LUA de DJGPP). `HSPDPMI /D`
+   lo quita de la memoria cuando no tiene clientes (lo usa el lanzador de
+   Hispa Ventanas antes de ejecutar un juego; ver «Programas de Hispa-DOS»).
+   Pendiente: la
    traducción de punteros de la API de DOS (INT 21h con DS:DX desde modo
    protegido; hoy los clientes usan 0300h con memoria de DOS, como DJGPP y
    como Hispa Ventanas, ver «Archivos»), VCPI (para convivir con un EMM386) y
@@ -66,8 +69,10 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    selección y portapapeles, lista con barra de desplazamiento), menús
    desplegables, diálogos modales (mensaje, pedir un texto, elegir un
    archivo), temporizadores, teclado español de KEYB con acentos. Programas:
-   Centro de programas, Bloc de notas (abre y guarda archivos), Calculadora,
-   Reloj y Sistema. Pruebas: `tests/run_ventanas3_tests.sh`. Pendiente (se
+   Centro de programas (con grupos y accesos directos, también a programas
+   de Hispa-DOS: juegos), Bloc de notas (abre y guarda archivos),
+   Calculadora, Reloj y Sistema, y el volumen en la barra superior. Pruebas:
+   `tests/run_ventanas3_tests.sh` y `tests/run_ventanas4_tests.sh`. Pendiente (se
    hará según haga falta en las etapas 4 y 5): un juego propio; avisar de los
    textos sin guardar al salir con el botón «Salir»; arrastrar solo el
    contorno en los equipos lentos y cambiar el cursor en los bordes; órdenes
@@ -94,11 +99,24 @@ Al final de la etapa 5 sale la primera versión estable de Hispa Ventanas.
 
 ## Arquitectura
 
-Hispa Ventanas es hoy un solo programa, `VENTANAS.COM` (unos 41 KB), hecho
+Hispa Ventanas es hoy un solo programa, `VENTANAS.COM` (unos 56 KB), hecho
 entero en NASM. Arranca en modo real, comprueba lo que necesita, elige el modo
 de vídeo y entra en modo protegido como **cliente DPMI de 32 bits**. Los
 programas (Centro, Bloc de notas…) van dentro, cada uno en su archivo y como
 una tarea; en la etapa 4 saldrán a ejecutables propios.
+
+`VENTANAS.COM` se ejecuta dos veces: la primera copia es el **lanzador**
+(2 KB que se quedan en memoria convencional) y ejecuta la segunda, que es el
+entorno gráfico (ver «Programas de Hispa-DOS desde Hispa Ventanas»).
+
+Un .COM no pasa de 64 KB y lo que usa la parte de modo real (el código de
+arranque, el búfer de paso de DOS, las colas del ratón y del teclado) tiene
+que estar en los primeros 64 KB del programa. Por eso los iconos se guardan
+a 4 bits por punto (`tools/icopack.py` los empaqueta al compilar; en los
+fuentes siguen en texto) y la pila y las variables que solo usa el modo
+protegido van detrás, donde llegan los punteros de 32 bits. Si lo de modo
+real se sale de los 64 KB, la compilación falla. Quedan unos 4 KB de margen:
+los programas saldrán a ejecutables propios en la etapa 4.
 
 ### Cómo se arranca y se usa
 
@@ -109,15 +127,18 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
 ```
 
 - Hace falta HSPXMS.SYS (si no está, lo dice y termina).
-- Si no hay servidor DPMI, carga HSPDPMI.COM de su misma carpeta (queda
-  residente); si no lo encuentra, pide que se ejecute antes.
-- Si no hay driver de ratón (INT 33h), carga HSPRATON.COM de su misma carpeta;
-  sin ratón funciona igual con el teclado.
+- Si no hay servidor DPMI, carga HSPDPMI.COM de su misma carpeta y al salir
+  lo quita de la memoria (si ya estaba cargado, lo deja); si no lo
+  encuentra, pide que se ejecute antes.
+- Si no hay driver de ratón (INT 33h), carga HSPRATON.COM de su misma carpeta
+  (queda residente); sin ratón funciona igual con el teclado.
 - Sin opciones: VESA 800×600 de 256 colores; si la tarjeta no tiene VESA 2.0
   con marco lineal, VGA de 640×480 y 16 colores.
-- Al entrar se abre el **Centro de programas**: doble clic en un icono (o
-  flechas e Intro) abre el programa. `/DEMO` pone solo las ventanas de
-  muestra de la etapa 2.
+- Al entrar se abre el **Centro de programas** con sus grupos (Principal,
+  Accesorios, Juegos): doble clic en un icono (o flechas e Intro) abre el
+  grupo en su ventana y, dentro, el programa. `/DEMO` pone solo las ventanas
+  de muestra de la etapa 2.
+- El altavoz de la barra de arriba abre el volumen.
 - Ventanas: se arrastran por la barra de título; los botones de la derecha
   minimizan (a un icono abajo; un clic lo recupera), maximizan o restauran
   (también doble clic en el título) y cierran; se cambia el tamaño tirando de
@@ -129,10 +150,197 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   Ctrl+Fin, Mayús con cualquiera de ellas para seleccionar, Ctrl+C / Ctrl+X /
   Ctrl+V (o Ctrl+Ins, Mayús+Supr, Mayús+Ins) y Ctrl+A.
 - Para volver a Hispa-DOS: el botón «Salir» de la barra de arriba, o cerrar
-  el Centro de programas (pregunta antes).
-- Al salir deja el modo de texto, el ratón y la memoria como estaban. No
-  cambia ningún vector de interrupción. Si el programa falla estando en
-  gráficos, vuelve antes a modo texto para que se lea el mensaje de HSPDPMI.
+  el Centro de programas (pregunta antes). Los grupos abiertos y el sitio de
+  cada ventana se guardan en CENTRO.INI y la próxima vez salen igual.
+- Al salir deja el modo de texto, el ratón y la memoria como estaban. Mientras
+  está el entorno gráfico, un error crítico de disco (INT 24h) hace fallar la
+  llamada sin preguntar en la pantalla; no cambia ningún otro vector de
+  interrupción. Si el programa falla estando en gráficos, vuelve antes a modo
+  texto para que se lea el mensaje de HSPDPMI.
+
+### El Centro de programas: grupos y accesos directos
+
+La ventana del Centro tiene un icono por **grupo**. Cada grupo se abre en su
+propia ventana (se mueve, se cambia de tamaño, se minimiza) con un icono por
+**acceso directo**. Por omisión hay tres grupos: «Principal» (los programas
+de Hispa-DOS que haya en la carpeta de VENTANAS.COM: Editar, Gestor,
+Información, y el intérprete de órdenes), «Accesorios» (los programas
+internos: Bloc de notas, Calculadora, Reloj y Sistema) y «Juegos» (vacío).
+
+El menú **Archivo** es el mismo en el Centro y en los grupos y actúa sobre el
+icono marcado de la ventana que lo tiene:
+
+| Orden | En el Centro (un grupo marcado) | En un grupo (un acceso marcado) |
+|---|---|---|
+| Abrir (Intro, doble clic) | abre el grupo | abre el programa |
+| Nuevo acceso directo... | en el grupo marcado | en este grupo |
+| Nuevo grupo... | pide el nombre y lo abre | lo mismo |
+| Propiedades... | cambia el nombre del grupo | el diálogo del acceso |
+| Mover a otro grupo... | — | lista de grupos |
+| Borrar (Supr) | el grupo con sus accesos (pregunta) | el acceso (pregunta) |
+| Buscar programas... | añade al grupo marcado | añade a este grupo |
+
+Un acceso directo también se lleva a otro grupo **arrastrando su icono** a la
+ventana de ese grupo o al icono del grupo en el Centro.
+
+Un **acceso directo** tiene: nombre; programa (un .COM, .EXE o .BAT con su
+ruta, o un programa interno: `:BLOC`, `:CALC`, `:RELOJ`, `:SISTEMA`);
+carpeta de trabajo (si se deja vacía, la del programa); parámetros; icono
+(se elige con un clic en la fila de dibujos: programa, juego, disco,
+documento, herramienta, música, órdenes, bloc, calculadora, reloj, sistema,
+carpeta; todos dibujados aquí, en `ventanas/iconos.inc` e `iconos2.inc`, con
+`tools/mkiconos.py` de plantilla); «Volver a Hispa Ventanas al terminar»
+(si no, al acabar el programa se queda en Hispa-DOS) y «Esperar una tecla al
+terminar» (para leer lo que deja escrito un programa que acaba enseguida).
+«Examinar...» abre el diálogo de elegir archivo y rellena el programa, la
+carpeta y, si falta, el nombre.
+
+**Buscar programas...** pide una carpeta (por omisión `\JUEGOS` de la unidad
+de Hispa Ventanas) y crea un acceso directo, con el icono de juego y el
+nombre de la carpeta, al programa principal de cada una de sus subcarpetas
+(hasta 64). La regla, por este orden:
+
+1. el .EXE, .COM o .BAT que se llama como la subcarpeta (`DOOM\DOOM.EXE`);
+2. si no, el único .EXE; si no hay ninguno, el único .COM; si tampoco, el
+   único .BAT. No cuentan los que empiezan por SETUP, INSTALL, INSTALAR,
+   CONFIG, SETSOUND, SNDSETUP, UNINSTAL, README, LEEME, DOS4GW, CWSDPMI,
+   DOS32A, PMODEW o UNIVBE;
+3. si quedan varios de la misma clase, pregunta con una lista («Cancelar»
+   salta esa carpeta).
+
+No repite un programa que ya tenga acceso directo, y al final dice cuántos
+ha añadido.
+
+Límites: 12 grupos, 96 accesos directos en total; el nombre de un acceso se
+ve hasta 13 letras debajo del icono; una ventana de grupo no tiene barra de
+desplazamiento (se agranda).
+
+### CENTRO.INI
+
+Los grupos, los accesos directos, el sitio de las ventanas y el volumen se
+guardan en `CENTRO.INI`, en la carpeta de VENTANAS.COM (`C:\HISPADOS`). Es
+texto (página 437, líneas con CR+LF) con un formato propio parecido a un
+.INI; se puede cambiar a mano con Hispa Ventanas cerrado. Si no existe (o no
+tiene ningún grupo) se crea con los grupos por omisión. Se escribe cuando
+cambia algo: al crear, cambiar, mover o borrar, al cerrar el volumen, al
+abrir un programa de Hispa-DOS y al salir.
+
+```
+; un comentario
+[Centro]
+Ventana=36,52,452,190
+Volumen=80
+Silencio=0
+Activo=0
+
+[Grupo]
+Nombre=Juegos
+Ventana=248,188,452,190
+Estado=1
+Marcado=0
+
+[Acceso]
+Nombre=Doom
+Icono=juego
+Programa=C:\JUEGOS\DOOM\DOOM.EXE
+Carpeta=C:\JUEGOS\DOOM
+Parametros=
+Volver=1
+Pausa=0
+```
+
+- Las líneas son `clave=valor`; no importan las mayúsculas de las claves ni
+  de los nombres de sección, ni los espacios alrededor. Las líneas que
+  empiezan por `;`, las vacías y las claves desconocidas se saltan.
+- `[Centro]`: `Ventana` = x, y, ancho y alto de la ventana del Centro;
+  `Volumen` = 0-100 y `Silencio` = 0/1 (no están hasta que se toca el
+  volumen); `Activo` = el grupo cuya ventana estaba delante (0 el primero;
+  -1, la del Centro).
+- `[Grupo]`: empieza un grupo. `Nombre` (27 letras); `Ventana`, la de su
+  ventana; `Estado` = 0 cerrado, 1 abierto, 2 minimizado, 3 maximizado;
+  `Marcado` = el icono que tiene marcado (0 el primero).
+- `[Acceso]`: un acceso directo del último `[Grupo]`. `Nombre` (31 letras);
+  `Icono` (uno de los nombres de la lista de arriba, sin acentos: `musica`,
+  `ordenes`; si falta, `programa`); `Programa` (79 letras); `Carpeta` (67);
+  `Parametros` (71); `Volver` = 0/1 (si falta, 1); `Pausa` = 0/1 (0).
+
+### Programas de Hispa-DOS desde Hispa Ventanas (juegos)
+
+Los programas internos siguen siendo ventanas. Un acceso directo a un
+programa de Hispa-DOS lo ejecuta **fuera** de Hispa Ventanas, con la pantalla
+en modo texto y toda la memoria convencional para él, y después vuelve:
+
+1. `VENTANAS.COM` se ejecuta dos veces. La primera copia es el **lanzador**:
+   suelta toda su memoria menos los primeros 2 KB (PSP incluido), carga
+   HSPRATON y HSPDPMI si faltan (por ese orden, para que HSPDPMI quede el
+   último) y ejecuta otra vez VENTANAS.COM con la opción interna `/@`: esa
+   segunda copia es el entorno gráfico.
+2. Al abrir el acceso, el entorno gráfico comprueba que el programa existe
+   (y avisa si el Bloc de notas tiene cambios sin guardar), guarda en
+   CENTRO.INI los grupos abiertos, el sitio de cada ventana y cuál está
+   delante, deja el **encargo** (programa, parámetros, carpeta y las dos
+   casillas) en la memoria del lanzador, vuelve a modo texto y termina con
+   el código FEh.
+3. El lanzador quita **HSPDPMI** de la memoria (su interfaz propia,
+   INT 2Fh AX=D600h BX=4844h DL=1: restaura el vector y entrega el segmento
+   que hay que liberar; si HSPDPMI ya estaba cargado antes de entrar en
+   Hispa Ventanas no lo descarga, lo desactiva con DL=3, para no dejarlo
+   luego en otro sitio de la memoria), cambia a la unidad y la carpeta de
+   trabajo y ejecuta
+   el programa (función 4B00h) con sus parámetros; un .BAT, con
+   `%COMSPEC% /C`. El programa encuentra un DOS limpio: sin servidor DPMI
+   (los juegos con DOS4GW, CWSDPMI u otro extensor usan el suyo), con la
+   memoria extendida de XMS entera, la variable BLASTER y el driver de ratón
+   como estaban, y HSPSND sin tocar.
+4. Cuando el programa acaba, el lanzador espera una tecla si se pidió, pone
+   el modo de texto si el programa dejó otro, vuelve a la unidad y la
+   carpeta de antes y, si el acceso dice «volver», carga otra vez HSPDPMI y
+   el entorno gráfico, que se reconstruye desde CENTRO.INI: mismas
+   ventanas, mismo sitio, misma ventana delante. Si no, termina y queda
+   Hispa-DOS.
+
+Por qué así y no de otra manera: un `VENTANAS.BAT` depende de que nadie lo
+toque y deja al intérprete de órdenes en medio; ejecutar el programa desde
+dentro (EXEC por la función 0300h) lo dejaría con el servidor DPMI y la
+memoria del entorno gráfico cargados. Con el lanzador no hace falta ningún
+archivo temporal, funciona desde cualquier carpeta o intérprete y el programa
+solo pierde 2 KB de memoria convencional.
+
+Memoria medida en QEMU (16 MB, HSPXMS.SYS y KEYB SP, sin más residentes;
+12/11/2026):
+
+| | Bytes libres |
+|---|---|
+| En Hispa-DOS, antes de entrar (MEM) | 549.920 |
+| Un programa abierto desde un acceso directo (su bloque de memoria) | unos 544.800 (532 KB) |
+| `A:\COMMAND.COM /C MEM` desde un acceso directo (con ese segundo COMMAND.COM, de 46 KB, cargado) | 498.592 |
+| En Hispa-DOS, al salir (queda HSPRATON, 2.400 bytes) | 547.504 |
+
+Es decir: el programa recibe toda la memoria libre de Hispa-DOS menos unos
+5 KB (2 KB del lanzador, 2,4 KB de HSPRATON si no estaba cargado y la copia
+del entorno). Lo que hoy limita esa cifra no es Hispa Ventanas sino lo que
+ocupan el núcleo (57 KB) y COMMAND.COM (46 KB) en memoria convencional.
+`tests/run_ventanas4_tests.sh` comprueba en cada pasada que el programa
+recibe la memoria libre menos 4 KB como mucho.
+
+Si HSPDPMI se cargó a mano antes de entrar (en AUTOEXEC.BAT), no se
+descarga: queda **desactivado** (no responde a 1687h, pero sigue ocupando
+sus 17 KB) mientras corre el programa y se activa de nuevo al volver. Para
+que los juegos tengan esos 17 KB, lo mejor es no cargarlo y dejar que lo
+haga Hispa Ventanas, que lo pone el último y lo quita de verdad. Lo mismo
+pasa con `HSPDPMI /D` a mano si después de HSPDPMI se cargó otro residente
+que también usa INT 2Fh: no se puede sacar de la cadena y se desactiva.
+
+### El volumen
+
+El altavoz de la barra superior (a la izquierda de «Salir») abre y cierra una
+ventanita con una barra deslizante de 0 a 100 % (con el ratón o con las
+flechas izquierda y derecha) y la casilla «Silencio». El volumen se le da al
+driver HSPSND por su interfaz (INT 2Fh AX=D700h, función 04h, AL=0..31),
+llamándolo en modo real. HSPSND no tiene función para leer el volumen, así
+que el último valor se guarda en CENTRO.INI y se vuelve a poner al entrar.
+Si HSPSND no está cargado, o no ha encontrado tarjeta, el altavoz sale gris
+y la ventanita lo dice. Con el volumen en silencio, el altavoz lleva un aspa.
 
 ### Memoria y modo del procesador
 
@@ -165,6 +373,8 @@ devuelven algo.
 
 ```
   centro.inc bloc.inc calc.inc reloj.inc    los programas
+  config.inc     CENTRO.INI: grupos, accesos directos, ventanas
+  volumen.inc    el altavoz de la barra y su ventanita (HSPSND)
         |
   dialogos.inc   mensaje, pedir texto, elegir archivo (modales)
   controles.inc  botón, casilla, opción, texto, cuadros de texto, lista
@@ -215,9 +425,12 @@ Tiene ASCII completo y las letras acentuadas y los signos de la página 437
 que usan el español, el catalán, el gallego y el francés. La negrita la hace
 `gdi_texto`. `make` deja una vista en `build/gen/ventanas/fuente.ppm`.
 
-Los **iconos** (32×32) también están en texto, en `ventanas/iconos.inc`: un
-carácter por punto, `.` transparente y `0`-`9`, `a`-`f` los 16 colores. La
-plantilla la dibuja `tools/mkiconos.py`; luego se retocan a mano.
+Los **iconos** (32×32) también están en texto, en `ventanas/iconos.inc` y
+`ventanas/iconos2.inc`: un carácter por punto, `.` transparente y `0`-`9`,
+`a`-`f` los 16 colores. La plantilla la dibuja `tools/mkiconos.py`; luego se
+retocan a mano. Al compilar, `tools/icopack.py` los deja a 4 bits por punto
+(el transparente ocupa el sitio del color 3, que por eso no se usa en los
+iconos).
 
 **Ratón y teclado** (`raton.inc`, `ventanas.asm`)
 
@@ -450,6 +663,7 @@ Al elegir una orden, la ventana recibe `WM_COMMAND` con ECX=número.
 | `dlg_mensaje` | EBP=dueña ESI=texto EDI=título EAX=`DM_ACEPTAR`, `DM_ACEPTAR_CANCELAR` o `DM_SI_NO_CANCELAR` → EAX=`ID_ACEPTAR`, `ID_CANCELAR`, `ID_SI`, `ID_NO` |
 | `dlg_pedir` | EBP=dueña ESI=pregunta EDI=título EBX=búfer ECX=tamaño → EAX=1 si se acepta |
 | `dlg_archivo` | EBP=dueña EDI=título EBX=búfer del nombre → EAX=1; lista la carpeta actual y deja entrar en las carpetas |
+| `dlg_lista` | (en `centro.inc`) EBP=dueña EDI=título ESI=pregunta EBX=textos, uno cada EDX octetos, ECX=cuántos → EAX=el elegido (-1: ninguno) |
 | `dlg_modal` | EBP=dueña ESI=plantilla del diálogo EDI=plantillas de los controles EBX=gancho EDX=parámetro → EAX=id del botón que lo cierra |
 
 En `dlg_modal`, cualquier botón con id menor que 16 cierra el diálogo y su id
@@ -499,9 +713,12 @@ hola_proc:                                  ; EBP=ventana EAX=mensaje ECX EDX
         ret
 ```
 
-Para que aparezca en el Centro de programas se añade una línea a
-`centro_tabla` (icono, nombre, entrada y la variable de su ventana) y se
-sube `CEN_N`; el `%include` va en `ventanas.asm`. Los controles se crean en
+Para que se pueda abrir desde el Centro de programas se añade una línea a
+`int_tabla` en `centro.inc` (su nombre interno, como `:HOLA`, la entrada y
+la variable de su ventana) y se sube `INT_N`; con un acceso directo cuyo
+programa sea `:HOLA` ya se abre (para que salga en «Accesorios» en una
+instalación nueva, otra línea en `def_accesorios`, en `config.inc`); el
+`%include` va en `ventanas.asm`. Los controles se crean en
 `WM_CREATE` con `ven_lista` y una lista de plantillas (ver `calc_hijos`); el
 menú, poniendo `V_MENU`; los temporizadores, con `tmp_poner` (ver
 `reloj.inc`). Mientras un programa hace algo largo no cede el turno: lo
@@ -512,8 +729,9 @@ tareas, 16 temporizadores, una copia de cada programa a la vez.
 
 ### Los programas
 
-- **Centro de programas** (`centro.inc`): los iconos de los programas; menú
-  Programas y Ayuda. Cerrarlo es salir de Hispa Ventanas.
+- **Centro de programas** (`centro.inc`, `config.inc`): los grupos, cada uno
+  en su ventana, y sus accesos directos; menú Archivo y Ayuda. Cerrarlo es
+  salir de Hispa Ventanas.
 - **Bloc de notas** (`bloc.inc`): texto de hasta 60.000 caracteres. Archivo:
   Nuevo, Abrir, Guardar, Guardar como, Salir. Edición: Cortar, Copiar, Pegar,
   Seleccionar todo, Buscar. Pregunta antes de perder cambios. Sin extensión,
@@ -538,6 +756,17 @@ tareas, 16 temporizadores, una copia de cada programa a la vez.
   temporizador del Reloj. Las capturas se comparan punto a punto con
   `tests/tools/ventanas_check.py` (que conoce la paleta y la fuente) y se
   dejan de muestra en `build/ventanas3_*.png`.
+- `tests/run_ventanas4_tests.sh`: el Centro con grupos y el lanzador, con
+  una Sound Blaster 16: crea un grupo, busca programas en `A:\JUEGOS` (las
+  tres reglas y un .BAT), cambia las propiedades de un acceso, lo lanza (el
+  programa de prueba `tests/progs/lanztest.asm` apunta sus parámetros, su
+  carpeta, su memoria, si hay DPMI y el volumen del mezclador), comprueba
+  que Hispa Ventanas vuelve con el grupo abierto y delante, mueve accesos
+  arrastrando y por el menú, cambia el volumen y el silencio, y al salir
+  mira CENTRO.INI, la memoria y que HSPDPMI ya no está. Una segunda sesión
+  arranca con un CENTRO.INI escrito a mano, mide la memoria con MEM desde
+  un acceso directo y prueba un acceso roto y otro sin «volver». Capturas
+  de muestra en `build/ventanas4_*.png`.
 - Programas de prueba de Windows 16 bits propios (NASM + nuestra
   herramienta de cabeceras NE) para cada función de la API, con su
   resultado escrito en un archivo (etapa 4).

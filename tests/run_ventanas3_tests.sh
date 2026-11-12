@@ -3,7 +3,9 @@
 # primeros programas). Arranca en QEMU con el teclado español (KEYB SP),
 # maneja el entorno con el ratón y el teclado del monitor de QEMU, saca
 # capturas y las comprueba punto a punto (tests/tools/ventanas_check.py):
-#  - Centro de programas: iconos, menú y abrir cada programa;
+#  - Centro de programas: iconos de los grupos, menú, abrir el grupo
+#    «Accesorios» y, desde él, cada programa (los grupos y los accesos
+#    directos se prueban a fondo en tests/run_ventanas4_tests.sh);
 #  - Bloc de notas: escribir (con ñ y acentos), menús con ratón y teclado,
 #    «Guardar como» (diálogo con cuadro de texto y lista), portapapeles,
 #    buscar (diálogo de pedir texto), aviso de cambios sin guardar, abrir un
@@ -88,7 +90,9 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   send 'VENTANAS' 4
   shot t1
   # ---- Bloc de notas ----
-  doble 102 129; sleep 1
+  tecla right ret; sleep 1                  # el grupo «Accesorios», con el teclado
+  shot t1b
+  tecla ret; sleep 1.2; aparca              # y su primer icono
   shot t2
   escribe "Hola mundo"; tecla ret; escribe "año está"
   shot t3
@@ -136,7 +140,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   clic 64 556
   shot t20
   # ---- Calculadora ----
-  clic 200 64; tecla right ret; sleep 1.2
+  clic 200 64; tecla ret right ret; sleep 1.2   # Centro > Accesorios > Calculadora
   shot t21
   tecla 1 2 kp_add 3 0 kp_enter
   shot t22
@@ -148,7 +152,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   shot t24
   clic 532 149
   # ---- Reloj ----
-  clic 200 64; tecla right ret; sleep 1.2
+  clic 200 64; tecla ret right ret; sleep 1.2   # Centro > Accesorios > Reloj
   shot t25
   sleep 2.2
   shot t26
@@ -164,7 +168,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   shot t30
   clic 560 72; tecla alt-f4; sleep 1        # y la Calculadora con Alt+F4
   shot t31
-  tecla alt-p up up ret; sleep 1.2          # Programas > Sistema, por el menú
+  tecla right; tecla alt-a ret; sleep 1.2   # «Sistema», con Archivo > Abrir
   shot t31b
   tecla alt-f4; sleep 0.8
   # ---- diálogos de mensaje y salida ----
@@ -192,11 +196,16 @@ check "Instalado: clientes de 16 y de 32 bits, memoria de XMS."
 # -- el Centro de programas --
 chk $T/t1.ppm tam 800 600 cursor 400 300 \
   marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
-  texto 60 79 0 15 fina "rogramas" texto 156 79 0 15 fina "uda" \
-  texto 50 155 9 12 fina "Bloc de notas" texto 162 155 0 8 fina "Calculadora" \
-  texto 290 155 0 8 fina "Reloj" texto 54 197 7 8 fina "Doble clic o Intro para abrir un programa." \
+  texto 60 79 0 15 fina "rchivo" texto 140 79 0 15 fina "uda" \
+  texto 66 155 9 12 fina "Principal" texto 166 155 0 8 fina "Accesorios" \
+  texto 286 155 0 8 fina "Juegos" texto 54 197 7 8 fina "Doble clic o Intro para abrir un grupo." \
+  px 690 12 7 "altavoz gris: no hay HSPSND" \
   px 468 60 8 "botón de cerrar del Centro" px 475 65 13 "aspa del botón de cerrar" \
   px 300 10 1 "barra superior" texto 736 5 8 4 fina "Salir" px 491 150 0 "sombra del Centro"
+# -- el grupo «Accesorios», en su ventana --
+chk $T/t1b.ppm marco 224 164 452 190 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
+  texto 238 267 9 12 fina "Bloc de notas" texto 350 267 0 8 fina "Calculadora" \
+  texto 478 267 0 8 fina "Reloj" texto 574 267 0 8 fina "Sistema" texto 166 155 9 7 fina "Acceso"
 # -- Bloc de notas: escribir --
 chk $T/t2.ppm marco 150 90 520 340 activa titulo 150 90 activa "Bloc de notas - (sin nombre)" \
   titulo 36 52 no "Centro de programas" texto 174 117 0 15 fina "rchivo" \
@@ -243,7 +252,7 @@ chk $T/t17.ppm marco 190 130 520 340 activa titulo 190 130 activa "Bloc de notas
 chk $T/t18.ppm marco 190 130 479 299 activa px 675 439 2 "fondo donde llegaba la ventana" \
   px 659 300 15 "la barra de desplazamiento sigue al borde"
 # -- minimizar y recuperar --
-chk $T/t19.ppm titulo 36 52 activa "Centro de programas" px 403 343 2 "fondo donde estaba el Bloc" \
+chk $T/t19.ppm titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" px 403 400 2 "fondo donde estaba el Bloc" \
   texto 20 578 8 2 fina "Bloc de not" px 58 554 9 "icono del Bloc minimizado"
 chk $T/t20.ppm marco 190 130 479 299 activa titulo 190 130 activa "Bloc de notas - README.TXT" \
   px 67 583 2 "el icono ya no está"
@@ -264,7 +273,7 @@ chk $T/t28.ppm px 297 259 9 "casilla sin marcar" px 297 289 9 "opción «Esfera 
   px 297 313 4 "opción «Solo las cifras» elegida"
 chk $T/t29.ppm marco 560 330 200 252 activa px 660 383 8 "ya no hay esfera"
 chk $T/t30.ppm px 707 471 2 "fondo donde estaba el Reloj"
-chk $T/t31.ppm px 515 87 2 "fondo donde estaba la Calculadora" titulo 36 52 activa "Centro de programas"
+chk $T/t31.ppm px 515 87 2 "fondo donde estaba la Calculadora" titulo 224 164 activa "Accesorios"
 chk $T/t31b.ppm marco 300 330 400 150 activa titulo 300 330 activa "Sistema" \
   texto 316 365 0 8 fina "Pantalla: 800 x 600, 256 colores" texto 316 405 0 8 fina "Ratón: driver INT 33h (HSPRATON)"
 # -- mensajes y salida --
@@ -276,7 +285,7 @@ chk $T/t34.ppm tam 720 400
 check "TRAS-SALIR"
 # -- VGA de 16 colores --
 chk $T/v1.ppm tam 640 480 cursor 320 240 marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
-  texto 162 155 0 8 fina "Calculadora"
+  texto 166 155 0 8 fina "Accesorios" px 600 300 8 "el grupo «Accesorios» sigue abierto"
 n=$(grep -c "Hispa Ventanas ha terminado." $T/log.txt)
 if [ "$n" = 2 ]; then ok "dos sesiones terminadas con su mensaje"; else ko "sesiones terminadas: $n (esperadas 2)"; fi
 # -- el archivo guardado, en la imagen --

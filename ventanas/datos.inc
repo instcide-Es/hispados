@@ -124,7 +124,59 @@ t_nombre        db "Nombre del archivo:", 0
 t_carpeta       db "Carpeta: ", 0
 t_todos         db "*.*", 0
 t_centro        db "Centro de programas", 0
-t_centro_pista  db "Doble clic o Intro para abrir un programa.", 0
+t_centro_pista  db "Doble clic o Intro para abrir un grupo.", 0
+t_grupo_vacio   db "Este grupo está vacío.", 0
+t_grupo_vacio2  db "Archivo > Nuevo acceso directo...", 0
+t_borrar_acc    db "¿Borrar el acceso directo «", 0
+t_borrar_fin    db "»?", 0
+t_borrar_gr     db "¿Borrar el grupo «", 0
+t_borrar_gr2    db "»", 10, "con todos sus accesos directos?", 0
+t_ad_prop       db "Propiedades del acceso directo", 0
+t_ad_nuevo      db "Nuevo acceso directo", 0
+t_ad_nombre     db "Nombre:", 0
+t_ad_prog       db "Programa:", 0
+t_ad_examinar   db "Examinar...", 0
+t_ad_dir        db "Carpeta:", 0
+t_ad_param      db "Parámetros:", 0
+t_ad_icono      db "Icono:", 0
+t_ad_volver     db "Volver a Hispa Ventanas al terminar", 0
+t_ad_pausa      db "Esperar una tecla al terminar", 0
+t_ad_elegir     db "Elegir el programa", 0
+t_gr_preg       db "Nombre del grupo:", 0
+t_gr_renombrar  db "Cambiar el nombre del grupo", 0
+t_gr_nuevo      db "Nuevo grupo", 0
+t_no_caben      db "No caben más.", 0
+t_sin_grupo     db "Elija antes un grupo.", 0
+t_mover_tit     db "Mover a otro grupo", 0
+t_mover_preg    db "Grupo al que se lleva:", 0
+t_mover_no      db "Abra un grupo y marque el acceso directo", 10
+                db "que quiere mover.", 0
+t_no_interno    db "Hispa Ventanas no tiene ese programa.", 0
+t_no_programa   db "El acceso directo no dice qué programa abre.", 10
+                db "Póngalo en Archivo > Propiedades.", 0
+t_sin_lanzador  db "Para abrir programas de Hispa-DOS hay que entrar", 10
+                db "en Hispa Ventanas con la orden VENTANAS.", 0
+t_no_esta       db "No se encuentra el programa del acceso directo.", 10
+                db "Mire la ruta en Archivo > Propiedades.", 0
+t_lanzar_bloc   db "Para ejecutar un programa de Hispa-DOS, Hispa Ventanas", 10
+                db "se cierra y vuelve al terminar el programa.", 10
+                db "El Bloc de notas tiene cambios sin guardar y se perderán.", 10
+                db "¿Continuar?", 0
+t_bp_tit        db "Buscar programas", 0
+t_bp_preg       db "Carpeta donde están los juegos:", 0
+t_bp_defecto    db "C:\JUEGOS", 0
+t_bp_todo       db "\*.*", 0
+t_bp_exe        db "\*.EXE", 0
+t_bp_com        db "\*.COM", 0
+t_bp_bat        db "\*.BAT", 0
+t_bp_cual       db "Programa principal de ", 0
+t_bp_hecho      db "Accesos directos añadidos: ", 0
+t_volumen       db "Volumen", 0
+t_vol_pct       db "Volumen: ", 0
+t_vol_mudo      db "Silencio", 0
+t_vol_no        db "No hay driver de sonido.", 0
+t_vol_no2       db "Cargue antes HSPSND", 0
+t_vol_no3       db "(está en \HISPADOS).", 0
 t_bloc          db "Bloc de notas", 0
 t_calc          db "Calculadora", 0
 t_reloj         db "Reloj", 0

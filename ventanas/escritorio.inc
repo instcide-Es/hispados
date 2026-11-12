@@ -4,8 +4,8 @@
 ;
 ;  El escritorio es una ventana más (la del fondo, de la tarea del sistema):
 ;  mosaico de rombos en azul petróleo, barra superior marrón con filete ocre y
-;  el botón «Salir», y abajo los iconos de las ventanas minimizadas (un clic
-;  las restaura).
+;  el botón «Salir» y el altavoz del volumen (volumen.inc), y abajo los iconos
+;  de las ventanas minimizadas (un clic las restaura).
 ;    esc_iniciar     prepara el mosaico y los textos y crea el escritorio
 ;    esc_inv_iconos  hay que repintar la fila de iconos
 ;    esc_muestra     crea las tres ventanas de muestra de la etapa 2
@@ -323,6 +323,13 @@ esc_proc:
         call esc_inv_salir
         jmp .fin
 .iconos:
+%ifdef CON_PROGRAMAS
+        call vol_en_icono           ; el altavoz: abre o cierra el volumen
+        jnc .ic2
+        call vol_alternar
+        jmp .fin
+.ic2:
+%endif
         mov ecx, [vid_alto]
         sub ecx, ICO_ALTO
         cmp ebx, ecx
@@ -398,6 +405,9 @@ esc_proc:
         inc ebx
         mov esi, tit_salir
         call dc_texto
+%ifdef CON_PROGRAMAS
+        call vol_pintar_icono
+%endif
         ; los iconos de las ventanas minimizadas
         xor ecx, ecx
 .ico:

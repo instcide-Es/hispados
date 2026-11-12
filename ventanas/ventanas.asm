@@ -43,13 +43,501 @@
 RAT_COLA    equ 64                  ; sucesos de ratón que caben en la cola
 
 inicio:
+        jmp near arranque
+
+; =============================================================================
+;  El lanzador: lo único de VENTANAS.COM que se queda en la memoria
+;  convencional (unos 2 KB) mientras Hispa Ventanas está en marcha.
+;
+;  VENTANAS.COM se ejecuta dos veces. La primera copia (esta) suelta toda su
+;  memoria menos este trozo, carga HSPRATON y HSPDPMI si faltan y ejecuta
+;  otra vez VENTANAS.COM con «/@» delante de las opciones: esa segunda copia
+;  es el entorno gráfico. Para abrir un programa de Hispa-DOS (un juego), el
+;  entorno gráfico guarda su estado en CENTRO.INI, deja aquí el encargo
+;  (programa, parámetros, carpeta) y termina con el código FEh; el lanzador
+;  quita HSPDPMI de la memoria (o lo desactiva, si ya estaba cargado antes de
+;  entrar), ejecuta el programa con toda la memoria convencional menos este
+;  trozo y, cuando acaba, vuelve a cargar el entorno gráfico, que se
+;  reconstruye desde CENTRO.INI.
+; =============================================================================
+lz_firma    db "HVLZ"
+lz_orden    db 0                    ; 1: hay un encargo (lo pone la parte gráfica)
+lz_band     db 0                    ; bit 0 volver a Hispa Ventanas, bit 1 esperar una tecla
+lz_dpmi     db 0                    ; HSPDPMI: 1 lo ha cargado el lanzador, 2 ya estaba
+lz_ayuda    db 0                    ; «/?»: no hace falta cargar nada
+lz_unidad   db 0
+            align 2
+lz_old24    dd 0
+lz_sp       dw 0
+lz_nom      dw 0                    ; dónde empieza el nombre dentro de lz_ruta
+lz_blq      dw 0, 0x80, 0, 0x5C, 0, 0x6C, 0     ; bloque de EXEC: la cola, en PSP:80h
+lz_prog     times 80 db 0           ; el encargo: programa,
+lz_param    times 80 db 0           ;   parámetros
+lz_dir      times 68 db 0           ;   y carpeta de trabajo
+lz_ruta     times 80 db 0           ; VENTANAS.COM, con su carpeta
+lz_cola     times 48 db 0           ; la cola de órdenes de la parte gráfica
+lz_dir0     times 68 db 0           ; la carpeta en la que se estaba
+lz_aux      times 80 db 0
+lz_n_raton  db "HSPRATON.COM", 0
+lz_n_dpmi   db "HSPDPMI.COM", 0
+lz_s_comspec db "COMSPEC="
+lz_s_command db "C:\COMMAND.COM", 0
+lz_m_dpmi   db "Hispa Ventanas: cargando el servidor DPMI (HSPDPMI)...", 13, 10, "$"
+lz_m_noexec db "Hispa Ventanas: no se ha podido cargar VENTANAS.COM.", 13, 10, "$"
+lz_m_noprog db "Hispa Ventanas: no se ha podido ejecutar el programa.", 13, 10, "$"
+lz_m_tecla  db 13, 10, "Pulse una tecla para continuar...$"
+lz_m_nl     db 13, 10, "$"
+
+; error crítico mientras está el entorno gráfico: la llamada falla, sin
+; preguntar en la pantalla
+lz_int24:
+        mov al, 3
+        iret
+
+; ejecuta el programa DS:DX con la cola de PSP:80h -> CF=1 si no se puede
+lz_exec:
+        mov [lz_blq+4], cs
+        mov [lz_blq+8], cs
+        mov [lz_blq+12], cs
+        mov [lz_sp], sp
+        mov bx, lz_blq
+        mov ax, 0x4B00
+        int 0x21
+        cli
+        mov bx, cs
+        mov ss, bx
+        mov sp, [cs:lz_sp]
+        sti
+        mov ds, bx
+        mov es, bx
         cld
-        mov sp, pila_fin
+        ret
+
+; ejecuta, sin parámetros, el programa SI de la carpeta de VENTANAS.COM
+lz_hermano:
+        push si
+        mov si, lz_ruta
+        mov di, lz_aux
+        mov cx, [lz_nom]
+        sub cx, si
+        rep movsb
+        pop si
+.c:
+        lodsb
+        stosb
+        test al, al
+        jnz .c
+        mov word [0x80], 0x0D00
+        mov dx, lz_aux
+        jmp lz_exec
+
+; carga HSPRATON y HSPDPMI si faltan (primero el ratón: HSPDPMI tiene que
+; ser el último residente para poder quitarlo)
+lz_residentes:
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x33*4]
+        or ax, [es:0x33*4+2]
+        push cs
+        pop es
+        jz .cr
+        xor ax, ax
+        int 0x33
+        cmp ax, 0xFFFF
+        je .dpmi
+.cr:
+        mov si, lz_n_raton
+        call lz_hermano
+.dpmi:
+        mov ax, 0x4300              ; sin XMS no hay nada que cargar
+        int 0x2F
+        cmp al, 0x80
+        jne .x
+        call lz_hay_dpmi
+        jnz .falta
+        cmp byte [lz_dpmi], 0
+        jne .x
+        mov byte [lz_dpmi], 2       ; ya estaba: se deja al salir
+        jmp .x
+.falta:
+        mov ax, 0xD600              ; ¿HSPDPMI desactivado? Se activa
+        mov bx, 0x4844
+        xor dl, dl
+        int 0x2F
+        push cs
+        pop es
+        cmp ax, 0x4450
+        jne .carga
+        mov ax, 0xD600
+        mov bx, 0x4844
+        mov dl, 2
+        int 0x2F
+        push cs
+        pop es
+        mov byte [lz_dpmi], 2
+        jmp .x
+.carga:
+        mov dx, lz_m_dpmi
+        mov ah, 0x09
+        int 0x21
+        mov si, lz_n_dpmi
+        call lz_hermano
+        call lz_hay_dpmi
+        jnz .x
+        cmp byte [lz_dpmi], 0
+        jne .x
+        mov byte [lz_dpmi], 1
+.x:
+        ret
+
+; ZF=1 si hay un servidor DPMI
+lz_hay_dpmi:
+        mov ax, 0x1687
+        int 0x2F
+        push cs
+        pop es
+        test ax, ax
+        ret
+
+; quita HSPDPMI de la memoria (si es el nuestro y se deja). Si ya estaba
+; cargado al entrar no se descarga, solo se desactiva: volver a cargarlo lo
+; dejaría en otro sitio y partiría la memoria del usuario
+lz_quitar_dpmi:
+        mov ax, 0xD600
+        mov bx, 0x4844
+        mov dl, 1
+        cmp byte [lz_dpmi], 2
+        jne .q
+        mov dl, 3
+.q:
+        int 0x2F
+        cmp ax, 0x4450
+        jne .x
+        cmp bl, 2
+        jne .x
+        mov ah, 0x49                ; ES = el segmento del residente
+        int 0x21
+.x:
+        push cs
+        pop es
+        ret
+
+; el encargo: ejecuta lz_prog con lz_param en la carpeta lz_dir
+lz_programa:
+        call lz_quitar_dpmi
+        mov ah, 0x19
+        int 0x21
+        mov [lz_unidad], al
+        mov byte [lz_dir0], '\'
+        mov si, lz_dir0 + 1
+        xor dl, dl
+        mov ah, 0x47
+        int 0x21
+        mov si, lz_dir              ; la carpeta de trabajo
+        cmp byte [si], 0
+        je .sindir
+        cmp byte [si+1], ':'
+        jne .cd
+        mov dl, [si]
+        and dl, 0xDF
+        sub dl, 'A'
+        mov ah, 0x0E
+        int 0x21
+        cmp byte [si+2], 0
+        je .sindir
+.cd:
+        mov dx, si
+        mov ah, 0x3B
+        int 0x21
+.sindir:
+        mov si, lz_prog             ; ¿un archivo de órdenes (.BAT)?
+.f:
+        lodsb
+        test al, al
+        jnz .f
+        mov di, 0x81
+        mov dx, lz_prog
+        cmp byte [si-5], '.'
+        jne .cola
+        mov ax, [si-4]
+        and ax, 0xDFDF
+        cmp ax, 'BA'
+        jne .cola
+        mov al, [si-2]
+        and al, 0xDF
+        cmp al, 'T'
+        jne .cola
+        call lz_comspec             ; COMSPEC /C programa parámetros
+        mov ax, ' /'
+        stosw
+        mov ax, 'C '
+        stosw
+        mov si, lz_prog
+.b1:
+        lodsb
+        test al, al
+        jz .b2
+        stosb
+        jmp .b1
+.b2:
+        mov dx, lz_aux
+.cola:
+        mov si, lz_param
+        cmp byte [si], 0
+        je .c2
+        mov al, ' '
+        stosb
+.c1:
+        lodsb
+        test al, al
+        jz .c2
+        cmp di, 0x80 + 126
+        jae .c2
+        stosb
+        jmp .c1
+.c2:
+        mov byte [di], 13
+        mov ax, di
+        sub ax, 0x81
+        mov [0x80], al
+        call lz_exec
+        jnc .ok
+        mov dx, lz_m_noprog
+        mov ah, 0x09
+        int 0x21
+        or byte [lz_band], 2
+.ok:
+        test byte [lz_band], 2
+        jz .sinpausa
+        mov dx, lz_m_tecla
+        mov ah, 0x09
+        int 0x21
+        mov ax, 0x0C08              ; vacía el teclado y espera una tecla
+        int 0x21
+        test al, al
+        jnz .t2
+        mov ah, 0x08
+        int 0x21
+.t2:
+        mov dx, lz_m_nl
+        mov ah, 0x09
+        int 0x21
+.sinpausa:
+        mov ah, 0x0F                ; si el programa ha dejado otro modo, a texto
+        int 0x10
+        cmp al, 3
+        je .m
+        cmp al, 7
+        je .m
+        mov ax, 0x0003
+        int 0x10
+.m:
+        mov dl, [lz_unidad]         ; la unidad y la carpeta de antes
+        mov ah, 0x0E
+        int 0x21
+        mov dx, lz_dir0
+        mov ah, 0x3B
+        int 0x21
+        ret
+
+; lz_aux = el intérprete de órdenes (COMSPEC del entorno, o C:\COMMAND.COM)
+lz_comspec:
+        push di
+        mov es, [0x2C]
+        xor di, di
+.v:
+        cmp byte [es:di], 0
+        je .no
+        mov si, lz_s_comspec
+        mov cx, 8
+        mov bx, di
+        repe cmpsb
+        je .hay
+        mov di, bx
+        xor al, al
+        mov cx, 0xFFFF
+        repne scasb
+        jmp .v
+.hay:
+        mov bx, lz_aux
+.c:
+        mov al, [es:di]
+        inc di
+        mov [bx], al
+        inc bx
+        cmp bx, lz_aux + 79
+        jae .f
+        test al, al
+        jnz .c
+.f:
+        mov byte [bx], 0
+        jmp .x
+.no:
+        push cs
+        pop es
+        mov si, lz_s_command
+        mov di, lz_aux
+        mov cx, 15
+        rep movsb
+.x:
+        push cs
+        pop es
+        pop di
+        ret
+
+; el ciclo: entorno gráfico, programa encargado, entorno gráfico...
+lz_ciclo:
+        cmp byte [lz_ayuda], 0
+        jne .sinres
+        call lz_residentes
+.sinres:
+        mov dx, lz_int24
+        mov ax, 0x2524
+        int 0x21
+        mov si, lz_cola
+        mov di, 0x80
+        mov cx, 48
+        rep movsb
+        mov dx, lz_ruta
+        call lz_exec
+        pushf
+        push ds
+        lds dx, [lz_old24]
+        mov ax, 0x2524
+        int 0x21
+        pop ds
+        popf
+        jc .noexec
+        mov ah, 0x4D
+        int 0x21
+        cmp al, 0xFE
+        jne .fin
+        cmp byte [lz_orden], 1
+        jne .fin
+        mov byte [lz_orden], 0
+        call lz_programa
+        test byte [lz_band], 1
+        jnz lz_ciclo
+        cmp byte [lz_dpmi], 2       ; sin vuelta: si HSPDPMI ya estaba al
+        jne .f0                     ; entrar, se deja cargado otra vez
+        call lz_residentes
+.f0:
+        xor al, al
+.fin:
+        push ax
+        cmp byte [lz_dpmi], 1       ; la memoria, como estaba al entrar
+        jne .f2
+        call lz_quitar_dpmi
+.f2:
+        pop ax
+        mov ah, 0x4C
+        int 0x21
+.noexec:
+        mov dx, lz_m_noexec
+        mov ah, 0x09
+        int 0x21
+        mov al, 1
+        jmp .fin
+
+            align 2
+            times 384 db 0          ; la pila del lanzador
+lz_pila_fin:
+            align 16
+lz_fin:
+
+; ---- arranque: ¿soy el lanzador o el entorno gráfico («/@»)? ----
+arranque:
+        cld
+        mov si, 0x81
+.b:
+        lodsb
+        cmp al, 13
+        je lanzador
+        cmp al, '/'
+        jne .b
+        cmp byte [si], '@'
+        jne .b
+        jmp grafico
+
+lanzador:
+        mov sp, lz_pila_fin
+        mov es, [0x2C]              ; entorno: tras el doble cero, la ruta propia
+        xor di, di
+        xor al, al
+.e1:
+        mov cx, 0xFFFF
+        repne scasb
+        cmp [es:di], al
+        jne .e1
+        add di, 3
+        mov bx, lz_ruta
+        mov dx, bx
+.c1:
+        mov al, [es:di]
+        inc di
+        mov [bx], al
+        inc bx
+        cmp al, '\'
+        jne .c2
+        mov dx, bx
+.c2:
+        cmp bx, lz_ruta + 79
+        jae .c4
+        test al, al
+        jnz .c1
+.c4:
+        mov byte [bx], 0
+        mov [lz_nom], dx
+        push cs
+        pop es
+        mov di, lz_cola + 1         ; la cola de la parte gráfica: « /@» y la nuestra
+        mov al, ' '
+        stosb
+        mov ax, '/@'
+        stosw
+        mov si, 0x81
+        movzx cx, byte [0x80]
+        cmp cx, 40
+        jbe .cc
+        mov cx, 40
+.cc:
+        jcxz .cf
+        lodsb
+        cmp al, '?'
+        jne .c5
+        mov byte [lz_ayuda], 1
+.c5:
+        stosb
+        loop .cc
+.cf:
+        mov byte [di], 13
+        mov ax, di
+        sub ax, lz_cola + 1
+        mov [lz_cola], al
+        mov ax, 0x3524
+        int 0x21
+        mov [lz_old24], bx
+        mov [lz_old24+2], es
+        push cs
+        pop es
+        mov bx, (lz_fin - inicio + 0x100 + 15) / 16
+        mov ah, 0x4A                ; soltar todo menos el lanzador
+        int 0x21
+        jmp lz_ciclo
+
+; =============================================================================
+;  El entorno gráfico (la segunda copia)
+; =============================================================================
+grafico:
+        cld
+        mov sp, pila_rm_fin
         mov di, bss_ini
-        mov cx, pila_fin - bss_ini
+        mov cx, pila_rm - bss_ini
         xor al, al
         rep stosb
         mov [rmseg], cs
+        mov ax, [0x2C]              ; el entorno (el servidor DPMI cambia
+        mov [env_seg], ax           ; luego esta palabra del PSP por un selector)
         mov bx, (bss_fin - inicio + 0x100 + 15) / 16
         mov ah, 0x4A                ; soltar la memoria que no se usa
         int 0x21
@@ -95,7 +583,18 @@ inicio:
         je .ofallo
         cmp al, 6
         je .odemo
+        cmp al, 7
+        je .ohijo
         jmp .ayuda
+.ohijo:
+        mov ax, [0x16]              ; el PSP del padre: ¿es el lanzador?
+        mov es, ax
+        cmp dword [es:lz_firma], 'HVLZ'
+        push cs
+        pop es
+        jne .arg
+        mov [lz_seg], ax
+        jmp .arg
 .odemo:
         mov byte [op_demo], 1
         jmp .arg
@@ -139,6 +638,8 @@ inicio:
 .xms:
         call hay_dpmi
         jnc .dpmi
+        cmp word [lz_seg], 0        ; (el lanzador ya lo ha intentado)
+        jne .sindpmi
         mov dx, m_carga_dpmi
         mov ah, 0x09
         int 0x21
@@ -146,12 +647,15 @@ inicio:
         call cargar
         call hay_dpmi
         jnc .dpmi
+.sindpmi:
         mov dx, m_nodpmi
         jmp morir
 .dpmi:
         ; (a partir de aquí hay un 386 seguro: lo exige el servidor DPMI)
         call hay_raton
         jnc .raton
+        cmp word [lz_seg], 0
+        jne .raton
         mov si, n_hspraton
         call cargar
         call hay_raton
@@ -400,6 +904,11 @@ rm_raton:
         pop ds
         retf
 
+; ---- llamada al driver de sonido (HSPSND): AX y lo demás, en rmcs ----
+rm_snd:
+        call far [cs:snd_entrada]
+        retf
+
 %include "video16.inc"
 
 ; =============================================================================
@@ -408,6 +917,7 @@ rm_raton:
         bits 32
 principal:
         cld
+        mov esp, pila_fin           ; la pila de modo protegido (tarea del sistema)
         mov edi, pila_fin           ; el resto de las variables, a cero
         mov ecx, bss_fin - pila_fin
         xor al, al
@@ -470,10 +980,20 @@ principal:
         cmp byte [salir], 0
         je .bucle
 
+%ifdef CON_PROGRAMAS
+        cmp byte [op_demo], 0
+        jne .sincfg
+        call cfg_guardar            ; grupos abiertos y posiciones, a CENTRO.INI
+.sincfg:
+%endif
         call rat_quitar
         call vid_cerrar
         mov esi, m_adios
         xor al, al
+        cmp byte [salir], 2         ; hay un encargo para el lanzador
+        jne .fin
+        mov esi, m_nada
+        mov al, 0xFE
         jmp .fin
 .sinmem:
         mov esi, m_nomem
@@ -500,6 +1020,8 @@ programas_iniciar:
         cmp byte [op_demo], 0
         jne esc_muestra
 %ifdef CON_PROGRAMAS
+        call cfg_cargar             ; CENTRO.INI: grupos, accesos y volumen
+        call snd_iniciar
         mov eax, centro_tarea
         call tar_crear
 %endif
@@ -770,7 +1292,9 @@ exc_instalar:
 %include "controles.inc"
 %include "dialogos.inc"
 %include "dos.inc"
+%include "config.inc"
 %include "centro.inc"
+%include "volumen.inc"
 %include "bloc.inc"
 %include "calc.inc"
 %include "reloj.inc"
@@ -806,6 +1330,8 @@ opciones:
         dw 0
         db 4, "DEMO", 6
         dw 0
+        db 1, "@", 7                ; (interna: la pone el lanzador)
+        dw 0
         db 1, "?", 4
         dw 0
         db 0
@@ -836,6 +1362,7 @@ m_nopm      db "Hispa Ventanas: no se ha podido entrar en modo protegido.", 13, 
 m_nomem     db "Hispa Ventanas: no hay memoria extendida suficiente.", 13, 10, 0
 m_novideo2  db "Hispa Ventanas: no se ha podido poner el modo gráfico.", 13, 10, 0
 m_adios     db "Hispa Ventanas ha terminado.", 13, 10, 0
+m_nada      db 0
 n_hspdpmi   db "HSPDPMI.COM", 0
 n_hspraton  db "HSPRATON.COM", 0
 cola_vacia  db 0, 13
@@ -847,6 +1374,7 @@ son_esperar db 0
 
 %include "datos.inc"
 %include "iconos.inc"
+%include "iconos2.inc"
 %include "fuente.inc"
 
 ; ---- datos sin valor inicial (se ponen a cero al arrancar) ----
@@ -854,6 +1382,9 @@ son_esperar db 0
         absolute $
 bss_ini:
 rmseg       resw 1
+lz_seg      resw 1                  ; el PSP del lanzador (0: no hay)
+env_seg     resw 1                  ; el segmento del entorno
+snd_entrada resd 1                  ; punto de entrada de HSPSND (modo real)
 exec_sp     resw 1
 dpmi_entrada resd 1
 dpmi_priv   resw 1
@@ -885,6 +1416,11 @@ rmcs        resb 0x34
 ruta        resb 128
 %include "bss.inc"
             alignb 4
+pila_rm:
+            resb 1024               ; la pila del arranque, en modo real
+pila_rm_fin:
+; ---- hasta aquí, dentro de los primeros 64 KB (lo usa la parte de modo
+; real); lo que sigue solo se usa en modo protegido, con punteros de 32 bits
             resb 4096
 pila_fin:
 %include "bss2.inc"

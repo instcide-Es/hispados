@@ -465,22 +465,27 @@ dc_linea:
         pop ecx
         ret
 
+; (el icono está a 4 bits por punto, el de la izquierda en los bajos, y el
+; color 3 es el transparente: lo deja así tools/icopack.py al compilar)
 dc_icono:
         pushad
         mov edi, ico_tmp
-        mov ecx, 32 * 32
+        mov ecx, 16 * 32
 .c:
         lodsb
-        cmp al, '.'
+        mov ah, al
+        and al, 0x0F
+        cmp al, 3
         jne .c1
         mov al, CLAVE
-        jmp .c3
 .c1:
-        sub al, '0'
-        cmp al, 9
-        jbe .c3
-        sub al, 'a' - '0' - 10
-.c3:
+        stosb
+        mov al, ah
+        shr al, 4
+        cmp al, 3
+        jne .c2
+        mov al, CLAVE
+.c2:
         stosb
         dec ecx
         jnz .c

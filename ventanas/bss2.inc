@@ -1,6 +1,9 @@
 ; Hispa Ventanas - variables sin valor inicial de las capas de 32 bits (van
 ; detrás de la pila; se ponen a cero al entrar en modo protegido)
             alignb 4
+; ---- driver de pantalla (lo que no usa la parte de modo real) ----
+pal_rgb     resb 1024               ; la paleta: rojo, verde, azul, 0
+pal_nat     resd 256                ; cada color en el formato de la pantalla
 ; ---- núcleo ----
 mon_mango   resd 1
 mon_ini     resd 1

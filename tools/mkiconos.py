@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dibuja los iconos de Hispa Ventanas y escribe ventanas/iconos.inc.
 
-uso: mkiconos.py SALIDA.inc
+uso: mkiconos.py SALIDA.inc [SALIDA2.inc]
 
 Los iconos son diseños propios de 32x32 puntos hechos aquí con rectángulos,
 círculos y líneas. Se guardan en texto (una fila de 32 caracteres por línea):
@@ -142,6 +142,137 @@ def reloj():
     return i
 
 
+# ---- iconos del Centro de programas con grupos (ventanas/iconos2.inc) ----
+def carpeta():
+    """un grupo: carpeta de cartón con pestaña"""
+    i = Icono()
+    i.rect(3, 6, 11, 4, MARRON)
+    i.rect(4, 7, 9, 3, OCRE)
+    i.rect(2, 9, 26, 18, MARRON)
+    i.rect(3, 10, 24, 16, OCRE)
+    i.rect(3, 13, 24, 1, MARRON)
+    i.rect(3, 14, 24, 12, ARENA)
+    i.rombo(15, 20, 3, TERRACOTA)
+    i.sombra()
+    return i
+
+
+def programa():
+    """un programa de Hispa-DOS cualquiera: pantalla de texto"""
+    i = Icono()
+    i.rect(2, 4, 26, 21, MARRON)
+    i.rect(3, 5, 24, 19, PETROLEO)
+    i.rect(5, 8, 10, 1, TURQUESA)
+    i.rect(5, 11, 16, 1, TURQUESA)
+    i.rect(5, 14, 7, 1, TURQUESA)
+    i.rect(5, 17, 13, 1, TURQUESA)
+    i.rect(5, 20, 4, 2, OCRE)
+    i.sombra()
+    return i
+
+
+def juego():
+    """un juego: palanca con su bola y dos botones"""
+    i = Icono()
+    i.rect(3, 19, 25, 8, MARRON)
+    i.rect(4, 20, 23, 6, ARENA)
+    i.rect(12, 9, 6, 11, MARRON)
+    i.rect(13, 9, 4, 11, ARENA_OSC)
+    i.rect(14, 9, 1, 11, PIEDRA)
+    i.disco(15, 6, 4, MARRON)
+    i.disco(15, 6, 3, TERRACOTA)
+    i.punto(14, 5, TERRACOTA_CL)
+    i.punto(13, 5, TERRACOTA_CL)
+    i.punto(14, 4, TERRACOTA_CL)
+    i.rect(6, 22, 4, 3, GRANATE)
+    i.rect(21, 22, 4, 3, ANIL)
+    i.sombra()
+    return i
+
+
+def disco():
+    """un disquete"""
+    i = Icono()
+    i.rect(4, 3, 23, 24, MARRON)
+    i.rect(5, 4, 21, 22, ANIL)
+    i.punto(25, 4, MARRON)
+    i.rect(9, 4, 12, 8, PIEDRA)
+    i.rect(17, 5, 3, 6, ANIL)
+    i.rect(8, 15, 15, 11, BLANCO)
+    i.rect(10, 18, 11, 1, ARENA_OSC)
+    i.rect(10, 21, 11, 1, ARENA_OSC)
+    i.sombra()
+    return i
+
+
+def documento():
+    """una hoja con la esquina doblada"""
+    i = Icono()
+    i.rect(6, 2, 19, 26, MARRON)
+    i.rect(7, 3, 17, 24, BLANCO)
+    for n in range(6):
+        for x in range(19 + n, 25):
+            i.p[2 + n][x] = None if x > 19 + n else MARRON
+    i.rect(19, 2, 1, 6, MARRON)
+    i.rect(19, 7, 6, 1, MARRON)
+    i.linea(19, 2, 24, 7, MARRON)
+    for y in range(4, 7):
+        for x in range(20, 20 + (y - 3)):
+            i.punto(x, y, ARENA)
+    for y in range(11, 25, 3):
+        i.rect(9, y, 13 if y != 23 else 7, 1, ANIL)
+    i.sombra()
+    return i
+
+
+def herramienta():
+    """un martillo"""
+    i = Icono()
+    i.rect(13, 9, 6, 19, MARRON)
+    i.rect(14, 10, 4, 17, OCRE)
+    i.rect(14, 10, 1, 17, CREMA)
+    i.rect(6, 3, 20, 9, MARRON)
+    i.rect(7, 4, 18, 7, PIEDRA)
+    i.rect(7, 9, 18, 2, ARENA_OSC)
+    i.rect(22, 4, 3, 7, ARENA_OSC)
+    i.sombra()
+    return i
+
+
+def musica():
+    """dos corcheas unidas"""
+    i = Icono()
+    i.rect(10, 5, 2, 17, TINTA)
+    i.rect(22, 3, 2, 17, TINTA)
+    for n in range(4):
+        i.linea(10, 5 + n, 23, 3 + n, TINTA)
+    i.disco(8, 22, 4, TINTA)
+    i.disco(20, 20, 4, TINTA)
+    i.disco(8, 22, 2, GRANATE)
+    i.disco(20, 20, 2, GRANATE)
+    i.sombra()
+    return i
+
+
+def ordenes():
+    """el intérprete de órdenes: pantalla negra con el indicador"""
+    i = Icono()
+    i.rect(2, 4, 26, 21, MARRON)
+    i.rect(3, 5, 24, 19, TINTA)
+    i.linea(6, 9, 10, 13, OCRE)
+    i.linea(10, 13, 6, 17, OCRE)
+    i.linea(7, 9, 11, 13, OCRE)
+    i.linea(11, 13, 7, 17, OCRE)
+    i.rect(13, 17, 7, 2, CREMA)
+    i.sombra()
+    return i
+
+
+NUEVOS = (('carpeta', carpeta), ('programa', programa), ('juego', juego), ('disco', disco),
+          ('documento', documento), ('herramienta', herramienta), ('musica', musica),
+          ('ordenes', ordenes))
+
+
 def main():
     with open(sys.argv[1], 'w', encoding='utf-8') as f:
         f.write('; Hispa Ventanas - iconos (32x32). Diseños propios, hechos aquí.\n'
@@ -153,6 +284,15 @@ def main():
             f.write('\nico_%s:\n' % nombre)
             for fila in fn().texto():
                 f.write('        db "%s"\n' % fila)
+    if len(sys.argv) > 2:
+        with open(sys.argv[2], 'w', encoding='utf-8') as f:
+            f.write('; Hispa Ventanas - iconos de los grupos y de los accesos directos (32x32).\n'
+                    '; Diseños propios, hechos aquí. GPL-2.0-or-later. Plantilla generada por\n'
+                    '; tools/mkiconos.py (segundo argumento); se pueden retocar a mano.\n')
+            for nombre, fn in NUEVOS:
+                f.write('\nico_%s:\n' % nombre)
+                for fila in fn().texto():
+                    f.write('        db "%s"\n' % fila)
 
 
 if __name__ == '__main__':

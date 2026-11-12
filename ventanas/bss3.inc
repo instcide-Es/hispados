@@ -47,3 +47,49 @@ reloj_h     resb 1
 reloj_m     resb 1
 reloj_s     resb 1
 bloc_busca  resb 44
+            alignb 4
+; ---- Centro de programas: grupos, accesos directos y CENTRO.INI ----
+gr_tabla    resd 1                  ; los grupos (MAX_GR de GR_TAM)
+ac_tabla    resd 1                  ; los accesos directos (MAX_AC de AC_TAM)
+cfg_buf     resd 1                  ; el texto de CENTRO.INI
+cfg_len     resd 1                  ; largo y suma de lo que hay en el disco
+cfg_suma    resd 1
+cfg_secc    resd 1
+cfg_grupo   resd 1
+cfg_base    resd 1
+cfg_sig     resd 1
+cen_ven     resd 1                  ; la ventana del Centro
+cen_rect    resd 4
+cen_activo  resd 1
+vis_cols    resd 1
+vis_alto    resd 1
+vis_n       resd 1
+vis_nom     resd 1
+vis_x       resd 1
+vis_y       resd 1
+arr_acc     resd 1                  ; el acceso que se está arrastrando
+bp_grupo    resd 1
+bp_ndir     resd 1
+bp_nuevos   resd 1
+bp_sub      resd 1
+bp_n        resd 1
+; ---- volumen ----
+vol_pct     resd 1                  ; 0-100 (-1: no se sabe)
+vol_mudo    resd 1
+vol_ven     resd 1
+vol_i       resd 1
+snd_hay     resb 1
+            alignb 2
+snd_ver     resw 1                  ; versión de la API de HSPSND
+vol_arr     resb 1
+cfg_term    resb 1
+vol_txt     resb 24
+cfg_ruta    resb 96
+dir_propia  resb 80
+cen_txt     resb 200
+cen_nom     resb 32
+cen_arch    resb 80
+cen_mapa    resb BP_MAXCAND
+cen_lista   resb BP_MAXCAND * 13 + 120
+bp_dir      resb 64
+bp_dirs     resb BP_MAXDIR * 13
