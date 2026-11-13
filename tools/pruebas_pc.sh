@@ -35,7 +35,12 @@ $SSH 'command -v make >/dev/null && command -v nasm >/dev/null && command -v mco
 #    de terceros descargados para las pruebas de compatibilidad)
 tar --exclude=./build --exclude=./.git -cf - . | $SSH "rm -rf /dev/shm/$NOMBRE && mkdir -p /dev/shm/$NOMBRE && tar -xf - -C /dev/shm/$NOMBRE"
 # 3) compilar y lanzar las pruebas en paralelo
-$SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/hsptmp TZ=UTC && mkdir -p \$TMPDIR build/pc && \
+# QEMU_MAS: opciones que se añaden a TODAS las máquinas de las pruebas (p. ej.
+# '-cpu 486' o '-m 16'), con un envoltorio de qemu-system-i386 por delante
+# en el PATH: así la misma batería se pasa en otras máquinas.
+$SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC && mkdir -p \$TMPDIR build/pc qbin && \
+  printf '#!/bin/sh\\nexec /usr/bin/qemu-system-i386 \"\$@\" %s\\n' '${QEMU_MAS:-}' > qbin/qemu-system-i386 && chmod +x qbin/qemu-system-i386 && \
+  export PATH=/dev/shm/$NOMBRE/qbin:\$PATH && \
   make -s 2>&1 | tail -3 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM 2>&1 | tail -3 && \
   sed -n '/^test:/,/^\$/p' Makefile | grep 'tests/' | sed 's/^\t//; s/\$(IMG)/build\/hispados.img/g' | grep -E -- '${SOLO:-.}' > build/pc/lista.txt && \
   echo \"\$(wc -l < build/pc/lista.txt) pruebas, $J a la vez\" && \
