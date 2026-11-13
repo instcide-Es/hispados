@@ -661,6 +661,8 @@ cmd_table:
         dw n_for, do_for
         dw n_shift, do_shift
         dw n_call, do_call
+        dw n_lh, do_lh
+        dw n_loadhigh, do_lh
         dw n_path, do_path
         dw n_prompt, do_prompt
         dw e_ayuda, do_help
@@ -716,6 +718,8 @@ n_goto  db "GOTO", 0
 n_for   db "FOR", 0
 n_shift db "SHIFT", 0
 n_call  db "CALL", 0
+n_lh    db "LH", 0
+n_loadhigh db "LOADHIGH", 0
 n_path  db "PATH", 0
 n_prompt db "PROMPT", 0
 e_ayuda     db "AYUDA", 0
@@ -2110,7 +2114,27 @@ dir_line:
 ;   /P (/PAGE)      pausa en cada pantalla
 ; -----------------------------------------------------------------------------
 MM_MAXN     equ 20                  ; nombres distintos en /C
+; (con la memoria superior enlazada mientras dura, para que salga en las
+; listas)
 do_mem:
+        push si
+        mov ax, 0x5802
+        int 0x21
+        mov [lh_link], al
+        mov byte [mm_hasumb], 0
+        mov ax, 0x5803
+        mov bx, 1
+        int 0x21
+        jc .nu
+        mov byte [mm_hasumb], 1
+.nu:
+        pop si
+        call do_mem2
+        mov ax, 0x5803
+        movzx bx, byte [lh_link]
+        int 0x21
+        ret
+do_mem2:
         mov byte [mm_mode], 0
         mov byte [mm_page], 0
         mov byte [mm_lines], 0
@@ -2219,7 +2243,14 @@ mem_summary:
         xor ebx, ebx            ; libre total
         xor edx, edx            ; mayor libre
         xor edi, edi            ; fin
+        mov dword [mu_tot], 0
+        mov dword [mu_free], 0
+        mov dword [mu_large], 0
 .l:
+        cmp ax, 0xA000
+        jae .upper
+        call mm_isbridge
+        je .upper
         push ds
         mov ds, ax
         mov cl, [0]
@@ -2244,7 +2275,68 @@ mem_summary:
         add ax, si
         inc ax
         jmp .l
+; memoria superior (UMB): los puentes (dueño 8, «SC») no cuentan
+.upper:
+        push ds
+        mov ds, ax
+        mov cl, [0]
+        movzx esi, word [3]
+        mov bp, [1]
+        cmp dword [8], 'SC'
+        pop ds
+        jne .u1
+        cmp bp, 8
+        je .unext
+.u1:
+        push eax
+        mov eax, esi
+        inc eax
+        shl eax, 4
+        add [mu_tot], eax
+        test bp, bp
+        jnz .u2
+        mov eax, esi
+        shl eax, 4
+        add [mu_free], eax
+        cmp eax, [mu_large]
+        jbe .u2
+        mov [mu_large], eax
+.u2:
+        pop eax
+.unext:
+        cmp cl, 'M'
+        jne .done
+        add ax, si
+        inc ax
+        jmp .l
 .done:
+        cmp dword [mu_tot], 0
+        je .noupper
+        push edx
+        push ebx
+        push edi
+        call .conv
+        pop edi
+        pop ebx
+        pop edx
+        call crlf
+        mov eax, [mu_tot]
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mutotal
+        call puts
+        mov eax, [mu_free]
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mfree
+        call puts
+        mov eax, [mu_large]
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mularge
+        jmp puts
+.noupper:
+.conv:
         push edx
         push ebx
         shl edi, 4
@@ -2370,6 +2462,25 @@ mm_nametrim:
         pop cx
         pop si
         ret
+; aviso de que no hay memoria superior (si no la hay)
+mm_noumb:
+        cmp byte [mm_hasumb], 0
+        jne .r
+        mov si, msg_mmnoumb
+        call puts
+.r:
+        ret
+; MCB AX: ZF = 1 si es un «puente» de la memoria superior (dueño 8, «SC»):
+; tapa el hueco entre la memoria convencional y un UMB, o entre dos UMB
+mm_isbridge:
+        push es
+        mov es, ax
+        cmp word [es:1], 8
+        jne .r
+        cmp dword [es:8], 'SC'
+.r:
+        pop es
+        ret
 ; primer MCB -> AX
 mm_first:
         push es
@@ -2472,6 +2583,8 @@ mm_typename:
 
 ; ---- MEM /C ----
 mem_classify:
+        mov byte [mm_up], 0
+        mov word [mm_upseg], 0
         mov word [mm_n], 0
         ; el núcleo y las tablas de la BIOS, antes del primer MCB
         call mm_first
@@ -2483,6 +2596,24 @@ mem_classify:
         call mm_add
         pop ax
 .l:
+        call mm_isbridge
+        jne .norm
+        ; un puente: en la primera pasada, ahí acaba la memoria convencional
+        push es
+        mov es, ax
+        mov dl, [es:0]
+        add ax, [es:3]
+        inc ax
+        pop es
+        cmp byte [mm_up], 0
+        jne .skip
+        mov [mm_upseg], ax
+        jmp .show
+.skip:
+        cmp dl, 'M'
+        je .l
+        jmp .show
+.norm:
         push ax
         call mm_class
         call mm_add
@@ -2498,6 +2629,10 @@ mem_classify:
 .show:
         call mm_nl
         mov si, msg_mmc1
+        cmp byte [mm_up], 0
+        je .t1
+        mov si, msg_mmc1u
+.t1:
         call puts
         call mm_nl
         call mm_nl
@@ -2539,9 +2674,18 @@ mem_classify:
         mov cl, 12
         call mm_bytes
         call mm_nl
+        ; segunda pasada: la memoria superior
+        cmp byte [mm_up], 0
+        jne .fin
+        mov ax, [mm_upseg]
+        test ax, ax
+        jz .fin
+        mov byte [mm_up], 1
+        mov word [mm_n], 0
+        jmp .l
+.fin:
         call mm_nl
-        mov si, msg_mmnoumb
-        call puts
+        call mm_noumb
         jmp mm_nl
 ; sumar ECX bytes al nombre de mm_nbuf
 mm_add:
@@ -2645,8 +2789,7 @@ mem_free:
         call mm_bytes
         call mm_nl
         call mm_nl
-        mov si, msg_mmnoumb
-        call puts
+        call mm_noumb
         jmp mm_nl
 
 ; ---- MEM /M nombre ----
@@ -3409,11 +3552,45 @@ try_one:
         mov [pblock+8], ds
         mov word [pblock+10], fcb2
         mov [pblock+12], ds
+        cmp byte [lh_flag], 0
+        je .low
+        ; LH: enlazar la memoria superior y reservar solo en ella; si no hay
+        ; o el programa no cabe (error 8), se carga abajo
+        mov byte [lh_flag], 0
+        mov ax, 0x5802
+        int 0x21
+        mov [lh_link], al
+        mov ax, 0x5803
+        mov bx, 1
+        int 0x21
+        jc .low
+        mov ax, 0x5801
+        mov bx, 0x40
+        int 0x21
+        mov dx, progpath
+        mov bx, pblock
+        mov ax, 0x4B00
+        int 0x21
+        pushf
+        push ax
+        mov ax, 0x5801
+        xor bx, bx
+        int 0x21
+        mov ax, 0x5803
+        movzx bx, byte [lh_link]
+        int 0x21
+        pop ax
+        popf
+        jnc .ran
+        cmp ax, 8
+        jne .xerr
+.low:
         mov dx, progpath
         mov bx, pblock
         mov ax, 0x4B00
         int 0x21
         jnc .ran
+.xerr:
         mov si, msg_execerr
         call puts
         jmp .ok
@@ -6058,6 +6235,14 @@ do_shift:
 .r:
         ret
 
+; LH / LOADHIGH programa: lo carga en la memoria superior (UMB) si la hay y
+; cabe; si no, en la convencional, como siempre
+do_lh:
+        mov byte [lh_flag], 1
+        call execute_line
+        mov byte [lh_flag], 0
+        ret
+
 do_call:
         mov al, [bdepth]
         push ax
@@ -6572,6 +6757,7 @@ msg_dtnf    db "No se encontró el archivo", 13, 10, 0
 msg_mmbad   db "Parámetro no válido. Uso: MEM [/C | /F | /D | /M nombre] [/P]", 13, 10, 0
 msg_mmmore  db "Pulse una tecla para continuar . . .", 0
 msg_mmc1    db "Programas en la memoria convencional:", 0
+msg_mmc1u   db "Programas en la memoria superior (UMB):", 0
 msg_mmc2    db "  Nombre                 Total", 0
 msg_mmc3    db "  --------  ------------------------", 0
 msg_mmtot   db "  Total     ", 0
@@ -6610,6 +6796,8 @@ msg_bytes   db " bytes", 13, 10, 0
 msg_free    db " bytes libres", 13, 10, 0
 msg_mtotal  db " bytes de memoria convencional en total", 13, 10, 0
 msg_mfree   db " bytes libres", 13, 10, 0
+msg_mutotal db " bytes de memoria superior (UMB) en total", 13, 10, 0
+msg_mularge db " bytes del mayor bloque superior libre", 13, 10, 0
 msg_mlarge  db " bytes del mayor programa ejecutable", 13, 10, 0
 msg_mhma    db "Hispa-DOS está cargado en la memoria alta (HMA)", 13, 10, 0
 msg_baddate db "Fecha no válida (dd-mm-aaaa)", 13, 10, 0
@@ -6945,6 +7133,14 @@ cbuf        resb CBUF_LEN
 echo_on     resb 1
 primary     resb 1
 al_tried    resb 1
+lh_flag     resb 1
+mm_hasumb   resb 1
+mm_up       resb 1
+mm_upseg    resw 1
+lh_link     resb 1
+mu_tot      resd 1
+mu_free     resd 1
+mu_large    resd 1
 alias_buf   resb ALIAS_MAX
 no_auto     resb 1
 exit_after  resb 1

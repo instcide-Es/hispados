@@ -1,6 +1,12 @@
 REM CONFIG.SYS de Hispa-DOS (disquete de arranque)
 REM Memoria extendida (XMS) y lectores de CD/DVD (IDE y SATA):
 DEVICE=A:\HISPADOS\HSPXMS.SYS
+REM Memoria expandida (EMS), VCPI y memoria superior (UMB), para los juegos y
+REM programas que piden EMS. Quite el REM de las dos lineas. Con HSPEMM el
+REM procesador va en modo V86: no funcionan HSPUSB con /U o /F, el CD en SATA
+REM (AHCI) ni el sonido HD Audio, y Windows 386 mejorado no arranca con DOS=UMB.
+REM DEVICE=A:\HISPADOS\HSPEMM.SYS
+REM DOS=UMB
 REM El núcleo de Hispa-DOS, en la memoria alta (HMA): deja unos 33 KB más de
 REM memoria convencional. Necesita HSPXMS (la línea de arriba).
 DOS=HIGH

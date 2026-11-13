@@ -909,6 +909,7 @@ config_run:
         push si
         call config_line
         call hma_try                ; (como MS-DOS: en cuanto haya XMS)
+        call umb_try                ; DOS=UMB: ¿ya hay quien dé memoria superior?
         pop si
         jmp .line
 .done:
@@ -941,6 +942,7 @@ config_run:
 ; buscar DOS=HIGH entre las líneas activas de CONFIG.SYS -> dos_want
 dos_scan:
         mov byte [dos_want], 0
+        mov byte [dos_umb], 0
 %ifdef FORCEHIGH
         ; (pruebas: como si todos los CONFIG.SYS llevaran DOS=HIGH)
         mov byte [dos_want], 1
@@ -981,6 +983,10 @@ dos_scan:
         mov byte [dos_want], 1
 .nh:
         and eax, 0x00FFFFFF
+        cmp eax, 'UMB'              ; DOS=UMB, DOS=HIGH,UMB (NOUMB: nada)
+        jne .nu
+        mov byte [dos_umb], 1
+.nu:
         cmp eax, 'LOW'
         jne .next
         mov al, [cs:si+3]
@@ -1220,6 +1226,7 @@ hma_final:
 .stay:
         pop es
         popad
+        call umb_try
         ret
 
 ; devolver a la cadena de MCB el sitio provisional del código
@@ -2254,8 +2261,37 @@ cfg_install:
         mov [inst_end], di
         ret
 
-; DEVICE=ruta argumentos
+; DEVICE=ruta argumentos. DEVICEHIGH: lo mismo, pero en la memoria superior
+; si la hay y el controlador cabe.
 cfg_device:
+        mov byte [dh_on], 0
+        cmp byte [cfg_key+6], 'H'
+        jne .go
+        cmp word [umb_first], 0
+        je .go
+        mov byte [dh_on], 1
+        mov al, 1
+        call umb_setlink
+        mov byte [alloc_strat], 0x40
+.go:
+        call cfg_device_do
+        cmp byte [dh_on], 0
+        je .r
+        mov al, [alloc_strat]       ; 40h: se cargó arriba
+        push ax
+        mov byte [alloc_strat], 0
+        xor al, al
+        call umb_setlink
+        pop ax
+        cmp al, 0x40
+        jne .r
+        cmp byte [ld_ok], 0
+        jne .r
+        jmp cfg_device_do           ; arriba no ha podido instalarse: abajo
+.r:
+        ret
+cfg_device_do:
+        mov byte [ld_ok], 0
         mov si, [cfg_val]
         mov di, dpath
         mov cx, 79
@@ -2287,6 +2323,17 @@ cfg_device:
         ; memoria: el bloque libre más grande
         mov bx, 0xFFFF
         call mcb_alloc
+        cmp byte [alloc_strat], 0x40
+        jne .al2
+        mov ax, [ld_size]           ; DEVICEHIGH: ¿cabe arriba?
+        shr ax, 4
+        add ax, 2
+        cmp bx, ax
+        jae .al2
+        mov byte [alloc_strat], 0
+        mov bx, 0xFFFF
+        call mcb_alloc
+.al2:
         call mcb_alloc
         jc .missing
         mov [ld_seg], ax
@@ -2460,6 +2507,7 @@ cfg_device:
         jmp .drv
 .fin:
         ; dejar solo la memoria que el driver necesita
+        mov byte [ld_ok], 1
         mov es, [ld_seg]
         mov bx, [ld_used]
         call mcb_resize
@@ -2481,6 +2529,7 @@ cfg_device:
         mov si, msg_crlf
         jmp kputs
 .missing:
+        mov byte [ld_ok], 1
         mov si, msg_missing
         call kputs
         mov si, dpath
@@ -3237,34 +3286,97 @@ mem_init:
         ret
 
 ; BX = párrafos -> CF=0: AX = segmento | CF=1: AX=8, BX = mayor bloque
+; Con memoria superior enlazada (INT 21h AX=5803h) manda la estrategia de
+; AX=5801h: 4xh = solo en la superior, 8xh = primero en la superior y, si no
+; cabe, en la convencional; si no, la cadena entera de abajo arriba.
 mcb_alloc:
         push cx
         push dx
         push si
+        push di
+        push bp
         push es
-        xor dx, dx
+        xor dx, dx                  ; el mayor libre
+        xor bp, bp                  ; el elegido
+        xor di, di                  ; 0 = todo, 1 = solo arriba, 2 = solo abajo
+        cmp word [umb_first], 0
+        je .scan
+        cmp byte [umb_link], 0
+        je .scan
+        test byte [alloc_strat], 0xC0
+        jz .scan
+        mov di, 1
+.scan:
         mov ax, [first_mcb]
 .l:
         mov es, ax
         cmp word [es:1], 0
         jne .next
+        cmp di, 1
+        jne .f2
+        cmp ax, [umb_first]
+        jb .next
+.f2:
+        cmp di, 2
+        jne .f3
+        cmp ax, [umb_first]
+        jae .next
+.f3:
         mov cx, [es:3]
-        cmp cx, bx
-        jae .fit
         cmp cx, dx
-        jbe .next
+        jbe .nl
         mov dx, cx
+.nl:
+        cmp cx, bx
+        jb .next
+        ; cabe: según la estrategia (bits 0-1: 0 el primero, 1 el más
+        ; ajustado, 2 el último)
+        mov cl, [alloc_strat]
+        and cl, 3
+        cmp cl, 2
+        je .cand
+        cmp cl, 1
+        je .best
+        mov bp, ax
+        jmp .found
+.best:
+        test bp, bp
+        jz .cand
+        push es
+        mov es, bp
+        mov si, [es:3]
+        pop es
+        cmp [es:3], si
+        jae .next
+.cand:
+        mov bp, ax
 .next:
         cmp byte [es:0], 'Z'
-        je .fail
+        je .end
         cmp byte [es:0], 'M'
         jne .corrupt
         add ax, [es:3]
         inc ax
         jmp .l
-.fit:
+.end:
+        test bp, bp
+        jnz .found
+        cmp di, 1                   ; arriba no cabe: ¿se puede abajo?
+        jne .fail
+        test byte [alloc_strat], 0x80
+        jz .fail
+        mov di, 2
+        jmp .scan
+.found:
+        mov ax, bp
+        mov es, ax
+        mov cx, [es:3]
         cmp cx, bx
         je .take
+        mov dl, [alloc_strat]
+        and dl, 3
+        cmp dl, 2
+        je .lastfit
         push ax
         mov si, ax
         add si, bx
@@ -3281,11 +3393,26 @@ mcb_alloc:
         mov byte [es:0], 'M'
         mov [es:3], bx
         pop ax
+        jmp .take
+.lastfit:
+        ; último ajuste: el bloque sale del final del hueco (como MS-DOS)
+        mov dl, [es:0]
+        sub cx, bx
+        dec cx
+        mov [es:3], cx
+        mov byte [es:0], 'M'
+        add ax, cx
+        inc ax
+        mov es, ax
+        mov [es:0], dl
+        mov [es:3], bx
 .take:
         mov si, [cur_psp]
         mov [es:1], si
         inc ax
         pop es
+        pop bp
+        pop di
         pop si
         pop dx
         pop cx
@@ -3300,10 +3427,192 @@ mcb_alloc:
         mov ax, E_NOMEM
 .out:
         pop es
+        pop bp
+        pop di
         pop si
         pop dx
         pop cx
         stc
+        ret
+
+; ES = MCB: ZF = 1 si la cadena sigue tras él (también por el puente a la
+; memoria superior cuando no está enlazada: al liberar y al unir se recorre
+; entera)
+mcb_more:
+        cmp byte [es:0], 'M'
+        je .r
+        push ax
+        mov ax, es
+        add ax, [es:3]
+        inc ax
+        cmp ax, [umb_first]
+        pop ax
+.r:
+        ret
+
+; AL = 1 enlazar / 0 desenlazar la memoria superior: el último MCB
+; convencional pasa a 'M' o a 'Z' (como MS-DOS)
+umb_setlink:
+        push ax
+        push bx
+        push es
+        mov [umb_link], al
+        mov bx, [first_mcb]
+.l:
+        mov es, bx
+        mov ax, bx
+        add ax, [es:3]
+        inc ax
+        cmp ax, [umb_first]
+        je .found
+        cmp byte [es:0], 'M'
+        jne .out
+        mov bx, ax
+        jmp .l
+.found:
+        mov al, 'Z'
+        cmp byte [umb_link], 0
+        je .set
+        mov al, 'M'
+.set:
+        mov [es:0], al
+.out:
+        pop es
+        pop bx
+        pop ax
+        ret
+
+; DOS=UMB: en cuanto hay un gestor XMS que da memoria superior (HSPEMM), se
+; le pide toda y se cuelga de la cadena de MCB. Tras el último bloque
+; convencional va un MCB «puente» (dueño 8, nombre SC) que tapa el hueco hasta
+; el primer UMB, y otro al final de cada zona hasta la siguiente.
+umb_try:
+        cmp byte [dos_umb], 0
+        je .r0
+        cmp word [umb_first], 0
+        jne .r0
+        ; con DOS=HIGH, mientras el código del núcleo espera en lo alto de
+        ; la memoria convencional (dos_tmp) el final de la cadena de MCB aún
+        ; va a cambiar: se deja para cuando esté en la HMA o en su sitio
+        cmp byte [dos_tmp], 0
+        jne .r0
+        pushad
+        push es
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .out
+        mov ax, 0x4310
+        int 0x2F
+        mov [umb_xms], bx
+        mov [umb_xms+2], es
+        mov word [umb_n], 0
+.get:
+        cmp word [umb_n], 8
+        jae .got
+        mov ah, 0x10
+        mov dx, 0xFFFF
+        call far [umb_xms]
+        cmp ax, 1
+        je .have
+        cmp bl, 0xB0
+        jne .got
+        cmp dx, 4
+        jb .got
+        mov ah, 0x10
+        call far [umb_xms]
+        cmp ax, 1
+        jne .got
+.have:
+        mov si, [umb_n]
+        shl si, 2
+        mov [umb_reg+si], bx
+        mov [umb_reg+si+2], dx
+        inc word [umb_n]
+        jmp .get
+.got:
+        mov cx, [umb_n]
+        test cx, cx
+        jz .out
+        ; ordenar por segmento
+.sort:
+        xor dx, dx
+        xor si, si
+        mov cx, [umb_n]
+        dec cx
+        jz .sorted
+.s1:
+        mov eax, [umb_reg+si]
+        mov ebx, [umb_reg+si+4]
+        cmp ax, bx
+        jbe .s2
+        mov [umb_reg+si], ebx
+        mov [umb_reg+si+4], eax
+        inc dx
+.s2:
+        add si, 4
+        loop .s1
+        test dx, dx
+        jnz .sort
+.sorted:
+        ; el último bloque convencional tiene que estar libre: cede un párrafo
+        mov ax, [first_mcb]
+.z:
+        mov es, ax
+        cmp byte [es:0], 'M'
+        jne .zend
+        add ax, [es:3]
+        inc ax
+        jmp .z
+.zend:
+        cmp word [es:1], 0
+        jne .giveup
+        cmp word [es:3], 1
+        jb .giveup
+        dec word [es:3]
+        add ax, [es:3]
+        inc ax                      ; AX = el puente
+        mov [umb_first], ax
+        mov [win_umbhead], ax
+        mov di, ax
+        xor si, si
+        mov cx, [umb_n]
+.reg:
+        mov es, di
+        mov byte [es:0], 'M'
+        mov word [es:1], 8
+        mov bx, [umb_reg+si]
+        mov ax, bx
+        sub ax, di
+        dec ax
+        mov [es:3], ax
+        mov dword [es:8], 'SC'
+        mov dword [es:12], 0
+        mov es, bx
+        mov word [es:1], 0
+        mov dword [es:8], 0
+        mov dword [es:12], 0
+        mov ax, [umb_reg+si+2]
+        cmp cx, 1
+        je .last
+        sub ax, 2
+        mov [es:3], ax
+        mov byte [es:0], 'M'
+        lea di, [bx+1]
+        add di, ax                  ; último párrafo de la zona: otro puente
+        add si, 4
+        loop .reg
+.last:
+        dec ax
+        mov [es:3], ax
+        mov byte [es:0], 'Z'
+        jmp .out
+.giveup:
+        mov byte [dos_umb], 0
+.out:
+        pop es
+        popad
+.r0:
         ret
 
 ; unir bloques libres contiguos
@@ -3315,7 +3624,7 @@ mcb_coalesce:
         mov ax, [first_mcb]
 .l:
         mov es, ax
-        cmp byte [es:0], 'M'
+        call mcb_more
         jne .done
         mov bx, ax
         add bx, [es:3]
@@ -3470,7 +3779,7 @@ mcb_free_owner:
         jne .n
         mov word [es:1], 0
 .n:
-        cmp byte [es:0], 'M'
+        call mcb_more
         jne .done
         add bx, [es:3]
         inc bx
@@ -5476,6 +5785,62 @@ disk_io_raw:
         mov byte [io_isdrv], 1
         jmp drv_block_io
 .bios:
+        ; Destino en la memoria superior o en el marco EMS (con HSPEMM son
+        ; páginas que apuntan a otra RAM): la BIOS trabaja con direcciones
+        ; físicas (DMA de la disquetera, controladoras USB/AHCI), así que el
+        ; sector pasa por un búfer del núcleo, en memoria convencional.
+        push ax
+        mov ax, es
+        cmp ax, 0x9FE0
+        pop ax
+        jb .lowbuf
+        push es
+        push bx
+        push si
+        push di
+        push cx
+        cld
+        cmp byte [io_cmd], 3
+        jne .bn1
+        push ds
+        mov si, bx
+        mov di, bnc_buf
+        push es
+        push ds
+        pop es
+        pop ds
+        mov cx, 256
+        rep movsw
+        pop ds
+.bn1:
+        push ds
+        pop es
+        mov bx, bnc_buf
+        call disk_io_raw
+        pop cx
+        pop di
+        pop si
+        pop bx
+        pop es
+        jc .bnr
+        cmp byte [io_cmd], 2
+        jne .bnok
+        push si
+        push di
+        push cx
+        mov si, bnc_buf
+        mov di, bx
+        mov cx, 256
+        cld
+        rep movsw
+        pop cx
+        pop di
+        pop si
+.bnok:
+        clc
+.bnr:
+        ret
+.lowbuf:
         pushad
         add eax, [cur_drv+D_START]
         mov di, 3
@@ -9173,24 +9538,48 @@ country:
 fn_54:
         mov byte [F_AL], 0
         ret
+; 5800h/5801h: estrategia de reserva; 5802h/5803h: enlace de la memoria
+; superior (UMB) a la cadena de MCB
 fn_58:
         mov al, [F_AL]
         test al, al
         jz .g
+        cmp al, 1
+        je .s
         cmp al, 2
         je .link
         cmp al, 3
-        je .nolink
+        je .setlink
+        ret
+.s:
+        mov bl, [F_BL]
+        mov al, bl
+        and al, 0x3F
+        cmp al, 2
+        ja .bad
+        cmp bl, 0xC0
+        jae .bad
+        mov [alloc_strat], bl
         ret
 .link:
-        mov byte [F_AL], 0
+        mov al, [umb_link]
+        mov [F_AL], al
         ret
-.nolink:
+.setlink:
         ; sin memoria superior (UMB) no se puede enlazar
+        cmp word [umb_first], 0
+        je .bad
+        mov al, [F_BL]
+        cmp al, 1
+        ja .bad
+        call umb_setlink
+        ret
+.bad:
         mov ax, E_FUNC
         jmp ret_err
 .g:
-        mov word [F_AX], 0
+        movzx ax, byte [alloc_strat]
+        mov [F_AX], ax
 .r:
         ret
 fn_59:
@@ -13428,6 +13817,19 @@ k_top_io:
 k_stk_aux   resb KS_AUX_LEN
 k_top_aux:
 k_inst_end:
+; memoria superior (UMB)
+umb_xms     resd 1
+umb_n       resw 1
+umb_reg     resd 8                  ; zonas: segmento, párrafos
+umb_first   resw 1                  ; MCB puente tras la memoria convencional
+umb_link    resb 1
+alloc_strat resb 1
+dos_umb     resb 1
+dh_on       resb 1
+ld_ok       resb 1
+; búfer de paso de los sectores con destino por encima de A000 (para la BIOS
+; tiene que estar en memoria convencional)
+bnc_buf     resb 512
             alignb 16
 bss_end:
 

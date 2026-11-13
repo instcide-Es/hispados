@@ -24,6 +24,8 @@
 # Hispa Ventanas stage 3 test: windows, messages, controls and first programs.
 set -u
 cd "$(dirname "$0")/.."
+# EMM=1: con HSPEMM cargado (modo V86; HSPDPMI pasa a ser cliente VCPI)
+EMMLINE=""; [ -n "${EMM:-}" ] && EMMLINE='DEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\n'
 IMG=${1:-build/hispados.img}
 B=build
 T=$(mktemp -d)
@@ -79,7 +81,7 @@ run() {
 
 echo "== Hispa Ventanas, etapa 3: ventanas, controles y programas =="
 cp "$IMG" $T/f.img
-printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n'"$EMMLINE"'FILES=30\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 { sleep 6
   send 'KEYB SP' 2

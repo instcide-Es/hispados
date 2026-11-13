@@ -77,6 +77,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
 | `DOS=HIGH`: el código del núcleo en la memoria alta (HMA); unos 33 KB más de memoria convencional. INT 2Fh 4A01h/4A02h (HMA libre) y `MEM` lo dice | ✅ |
 | `HSPDPMI.COM`: servidor DPMI 0.9 propio (clientes de 16 y 32 bits, memoria de XMS; los programas de DJGPP funcionan sin CWSDPMI) | ✅ |
+| `HSPEMM.SYS`: monitor V86 propio (como EMM386): EMS 4.0, VCPI 1.0 (DOS/4GW: Doom, Duke Nukem 3D…) y memoria superior (`DOS=UMB`, `DEVICEHIGH`, `LH`); `HSPDPMI` pasa a cliente VCPI. Ver [docs/HSPEMM.md](docs/HSPEMM.md) | ✅ en pruebas |
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
 | Sonido: `HSPSND` (Sound Blaster 2.0/Pro/16, Intel HD Audio y AC'97; pone la variable `BLASTER`) y `PLAYWAV`/`SONAR` | ✅ |
 | Volumen: `HSPSND /VOL:n`, `SONIDO` (`n`, `+`, `-`, `/M` silencio, `/A` con las flechas) y teclas Ctrl+Alt+↑/↓/Fin y multimedia; `HSPSND /INFO` diagnostica la tarjeta (códec HD Audio, salidas, EAPD, GPIO, camino elegido) | ✅ |
@@ -96,7 +97,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
 | **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas (con grupos y accesos directos, también a los juegos y programas de Hispa-DOS, que se ejecutan con toda la memoria y vuelven a Hispa Ventanas), Bloc de notas, Calculadora y Reloj, el volumen en la barra y, como programas aparte (módulos .HVP que se abren como ventanas), los primeros juegos propios, Culebra y Campo de minas, y Pintura, el programa de dibujo (lee y guarda BMP). Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
-| UMB/EMS (EMM386 propio), Sound Blaster emulada en tarjetas modernas, EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
+| Sound Blaster emulada en tarjetas modernas, EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
 
 ## Sonido y volumen
 

@@ -7,10 +7,20 @@ set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 fail=0
-for CARD in hda ac97 sb16 sb8 sb240; do
+# EMM=1: con HSPEMM cargado (modo V86) y HSPSND en la memoria superior (LH):
+# el búfer de DMA queda en páginas que apuntan a otra RAM y el monitor tiene
+# que dar al 8237 la dirección física. Solo las Sound Blaster (HD Audio y
+# AC'97 necesitan el modo irreal, que en modo V86 no existe).
+CARDS="hda ac97 sb16 sb8 sb240"; LOAD='A:\\HISPADOS\\HSPSND'
+if [ -n "${EMM:-}" ]; then CARDS="sb16 sb8 sb240"; LOAD='LH A:\\HISPADOS\\HSPSND'; fi
+for CARD in $CARDS; do
   PRE="REM"
   T=$(mktemp -d)
   cp "$IMG" $T/f.img
+  if [ -n "${EMM:-}" ]; then
+    printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS NOEMS\r\nDOS=UMB\r\n' > $T/CONFIG.SYS
+    mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
+  fi
   python3 tests/tools/audio.py make $T/TEST.WAV 1000 700 22050 8 1
   mcopy -o -i $T/f.img $T/TEST.WAV ::TEST.WAV
   if [ $CARD = hda ]; then
@@ -28,17 +38,23 @@ for CARD in hda ac97 sb16 sb8 sb240; do
   {
     sleep 4
     printf '%s\r' "$PRE"; sleep 1
-    printf 'A:\\HISPADOS\\HSPSND\r'; sleep 3
+    printf "$LOAD"'\r'; sleep 3
     printf 'PLAYWAV /TONE 440 800\r'; sleep 4
     printf 'PLAYWAV TEST.WAV\r'; sleep 4
     printf 'A:\\HISPADOS\\HSPSND\r'; sleep 2
     printf 'SET\r'; sleep 1
-  } | timeout 34 qemu-system-i386 -display none -serial stdio -monitor none \
+    [ -n "${EMM:-}" ] && { printf 'MEM /C\r'; sleep 1; }
+  } | timeout 36 qemu-system-i386 -display none -serial stdio -monitor none \
         -audiodev wav,id=snd0,path=$T/out.wav $DEV \
         -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
   tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 | grep -v '^audio:' > $T/log.txt
   python3 tests/tools/audio.py check $T/out.wav > $T/audio.txt 2>&1
-  echo "== Hispa-DOS sound tests ($NAME) =="
+  echo "== Hispa-DOS sound tests ($NAME)${EMM:+ con HSPEMM y HSPSND en memoria superior} =="
+  if [ -n "${EMM:-}" ]; then
+    if awk '/Programas en la memoria superior/{u=1} u && /HSPSND/{f=1} END{exit !f}' $T/log.txt; then
+      echo "  OK   HSPSND cargado en la memoria superior"
+    else echo "  FAIL HSPSND cargado en la memoria superior"; fail=1; fi
+  fi
   EXTRA=""
   [ $CARD = sb16 ] && EXTRA="Sound Blaster 16 en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)|BLASTER=A220 I5 D1 H5 T6"
   [ $CARD = sb8 ] && EXTRA="Sound Blaster en 220h, IRQ 5, DMA 1 (DSP 4.05)"
@@ -63,6 +79,7 @@ EOF
   if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; cat $T/audio.txt; fi
   rm -rf $T
 done
+[ -n "${EMM:-}" ] && exit $fail
 
 # ---- Volumen: HSPSND /VOL, SONIDO, SONAR /VOL, teclas y /INFO ----
 # En cada tarjeta se tocan tonos de frecuencias distintas con volúmenes

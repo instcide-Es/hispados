@@ -31,6 +31,8 @@
 # Hispa Ventanas test: program groups, shortcuts, launching DOS programs, volume.
 set -u
 cd "$(dirname "$0")/.."
+# EMM=1: con HSPEMM cargado (modo V86; HSPDPMI pasa a ser cliente VCPI)
+EMMLINE=""; [ -n "${EMM:-}" ] && EMMLINE='DEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\n'
 IMG=${1:-build/hispados.img}
 B=build
 # el «juego» de prueba no va en la imagen: lo compila «make test» (o a mano)
@@ -91,7 +93,7 @@ echo "== Hispa Ventanas: grupos, accesos directos, lanzar programas y volumen ==
 cp "$IMG" $T/f.img
 mdel -i $T/f.img '::HISPADOS/JUEGOS/*.HVP'    # (sin los juegos propios: los prueba run_juegos_tests.sh)
 mdel -i $T/f.img '::HISPADOS/PROGS/*.HVP'     # (ni Pintura: la prueba run_pintura_tests.sh)
-printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n'"$EMMLINE"'FILES=30\r\n' > $T/CONFIG.SYS
 printf '@ECHO OFF\r\nECHO BAT-EN-MARCHA\r\nA:\\JUEGOS\\PRUEBA\\PRUEBA.COM /N DESDE-BAT\r\n' > $T/JUGAR.BAT
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mmd -i $T/f.img ::JUEGOS ::JUEGOS/PRUEBA ::JUEGOS/DOS ::JUEGOS/TRES ::JUEGOS/BAT ::JUEGOS/VACIA

@@ -45,6 +45,16 @@ $(B)/HSPTEST.SYS: drivers/hsptest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPXMS.SYS: drivers/hspxms.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPEMM.SYS: drivers/hspemm.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/EMSTEST.COM: tests/progs/emstest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/VCPITEST.COM: tests/progs/vcpitest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/UMBTEST.COM: tests/progs/umbtest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/EMMMISC.COM: tests/progs/emmmisc.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XMSTEST.COM: tests/progs/xmstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
@@ -147,7 +157,7 @@ $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
-        $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS \
+        $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS $(B)/HSPEMM.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
@@ -190,6 +200,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/HSPRAM.SYS ::HISPADOS/HSPRAM.SYS
 	mcopy -i $@ $(B)/HSPTEST.SYS ::HISPADOS/HSPTEST.SYS
 	mcopy -i $@ $(B)/HSPXMS.SYS ::HISPADOS/HSPXMS.SYS
+	mcopy -i $@ $(B)/HSPEMM.SYS ::HISPADOS/HSPEMM.SYS
 	mcopy -i $@ $(B)/HSPSND.COM ::HISPADOS/HSPSND.COM
 	mcopy -i $@ $(B)/HSPDPMI.COM ::HISPADOS/HSPDPMI.COM
 	mcopy -i $@ $(B)/HSPUSB.SYS ::HISPADOS/HSPUSB.SYS
@@ -239,7 +250,10 @@ run-hdd: $(IMG) $(HDD)
 
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
-NUCPROGS = $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS
+# programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
+EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM
+emmprogs: $(EMMPROGS)
+NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS
 $(B)/HMATEST.COM: tests/progs/hmatest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HMAUSO.SYS: tests/progs/hmauso.asm | $(B)
@@ -263,7 +277,7 @@ nucprogs: $(NUCPROGS)
 $(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
+test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -274,6 +288,11 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_hma_tests.sh $(IMG)
 	tests/run_dpmi_tests.sh $(IMG)
 	DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
+	tests/run_emm_tests.sh $(IMG)
+	tests/run_emmhigh_tests.sh $(IMG)
+	EMM=1 tests/run_dpmi_tests.sh $(IMG)
+	EMM=1 DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
+	EMM=1 tests/run_sound_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)
@@ -325,8 +344,10 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
 	tests/run_pintura_tests.sh $(IMG)
+	EMM=1 tests/run_ventanas_tests.sh $(IMG)
+	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test clean nucprogs
+.PHONY: all usb run run-hdd test clean nucprogs emmprogs

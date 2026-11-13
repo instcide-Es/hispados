@@ -47,7 +47,8 @@ SEL_BIOS    equ 0x40                ; datos de la BIOS (segmento 40h), anillo 3
 SEL_R3      equ 0x48+3              ; trampolines de anillo 3
 SEL_LPM     equ 0x50+3              ; pila bloqueada del cliente
 SEL_RMSTK   equ 0x58+3              ; pila de modo real (en los callbacks)
-GDT_SIZE    equ 0x60
+SEL_VCPI    equ 0x60                ; tres descriptores del servidor VCPI
+GDT_SIZE    equ 0x78
 
 ; ---- bloque del servidor (memoria extendida) ----
 HB_IDT      equ 0x0000              ; 256 puertas
@@ -154,6 +155,27 @@ gdt         dq 0
             db 0, 0xF2, 0, 0        ; 50 pila bloqueada
             dw 0xFFFF, 0
             db 0, 0xF2, 0, 0        ; 58 pila de modo real
+            dq 0, 0, 0              ; 60-70 los del servidor VCPI (HSPEMM)
+
+; ---- cliente VCPI: cuando el procesador ya está en modo V86 (HSPEMM u otro
+;      EMM386), el modo protegido se pide al servidor VCPI (INT 67h DE0Ch) ----
+vcpi        db 0                    ; 1 = conmutar por VCPI
+            align 4
+vcpi_entry  dd 0                    ; entrada del servidor en modo protegido
+            dw SEL_VCPI
+            align 4
+vsw_cr3     dd 0                    ; lo que pide DE0Ch: CR3,
+vsw_gdtr    dd 0                    ; dirección lineal del GDTR,
+vsw_idtr    dd 0                    ; del IDTR,
+            dw SEL_LDT              ; LDTR,
+            dw SEL_TSS              ; TR
+            dd go_pm.vpm            ; y CS:EIP
+            dw SEL_HCODE
+            align 4
+vsw_lin     dd 0                    ; dirección lineal de vsw_cr3
+vsw_esi     dd 0
+            times 80 db 0           ; pila para volver al modo V86
+vcpi_stk:
 
 ; ---- estado de cada cliente (se guarda entero al entrar otro) ----
 state_begin:
@@ -704,6 +726,8 @@ term_stub:
 ; =============================================================================
 ; -> modo real. BX = continuación, DX:SI = pila. Allí DS = ES = servidor.
 go_rm:
+        cmp byte [cs:vcpi], 0
+        jne go_rm_vcpi
         mov ax, SEL_HDATA
         mov ds, ax
         mov es, ax
@@ -727,6 +751,30 @@ go_rm_real:
         mov fs, ax
         mov gs, ax
         jmp bx
+; por VCPI: en una pila del primer mega, el marco del modo V86 (EIP, CS,
+; EFLAGS, ESP, SS, ES, DS, FS, GS) y llamada lejana al servidor
+go_rm_vcpi:
+        mov ax, SEL_HDATA
+        mov ds, ax
+        mov ss, ax
+        mov esp, vcpi_stk
+        movzx eax, word [go_rm_seg]
+        push dword 0                ; GS
+        push dword 0                ; FS
+        push eax                    ; DS
+        push eax                    ; ES
+        movzx edx, dx
+        push edx                    ; SS
+        movzx esi, si
+        push esi                    ; ESP
+        push dword 0                ; EFLAGS: los pone el servidor
+        push eax                    ; CS
+        movzx ebx, bx
+        push ebx                    ; EIP
+        mov ax, SEL_FLAT
+        mov ds, ax
+        mov ax, 0xDE0C
+        call dword far [cs:vcpi_entry]
 
 ; ¿está abierta la A20? ZF = 1 si parece cerrada (0000:0000 = FFFF:0010)
 a20_test:
@@ -785,6 +833,31 @@ go_pm:
         jne .a20
         call a20_force
 .a20:
+        cmp byte [cs:vcpi], 0
+        je .raw
+        mov [cs:vsw_esi], esi       ; (el servidor no conserva EAX ni ESI)
+        mov esi, [cs:vsw_lin]
+        mov ax, 0xDE0C
+        int 0x67
+; llegada por VCPI: GDT, IDT, LDT y TSS ya están cargadas; la paginación es
+; la identidad (páginas de 4 MB), salvo el primer mega, que es el del servidor
+.vpm:
+        mov ax, SEL_HDATA
+        mov ds, ax
+        mov es, ax
+        mov eax, cr4
+        or al, 0x10                 ; PSE
+        mov cr4, eax
+        mov esi, [vsw_esi]
+        mov ax, SEL_HB
+        mov ss, ax
+        mov esp, [tss+4]
+        mov ax, SEL_FLAT
+        mov fs, ax
+        mov ax, SEL_LDTA
+        mov gs, ax
+        jmp .flags
+.raw:
         o32 lgdt [cs:gdtr]
         o32 lidt [cs:pm_idtr]
         mov eax, cr0
@@ -807,6 +880,7 @@ go_pm:
         and byte [gdt+SEL_TSS+5], 0xFD      ; TSS libre otra vez
         mov ax, SEL_TSS
         ltr ax
+.flags:
         pushfd
         and dword [esp], 0xFFFFBFFF         ; sin NT
         popfd
@@ -3691,6 +3765,20 @@ install:
         smsw ax
         test al, 1
         jz .real
+        ; modo V86: solo con un servidor VCPI (HSPEMM)
+        mov byte [vcpi], 1
+        xor ax, ax
+        mov es, ax
+        mov eax, [es:0x67*4]
+        push cs
+        pop es
+        test eax, eax
+        jz .nov
+        mov ax, 0xDE00
+        int 0x67
+        test ah, ah
+        jz .real
+.nov:
         mov dx, msg_v86
         jmp .fail
 .real:
@@ -3781,6 +3869,12 @@ install:
         call gdt_base
         mov word [tss+8], SEL_HB    ; SS0
         mov word [tss+102], 104     ; sin mapa de E/S
+        cmp byte [vcpi], 0
+        je .novcpi
+        call vcpi_setup
+        jnc .novcpi
+        jmp .fail
+.novcpi:
         ; vectores por defecto: los trampolines de anillo 3
         mov di, pmvec
         xor eax, eax
@@ -3816,12 +3910,129 @@ install:
         call print
         mov dx, resident_end + 15
         shr dx, 4
+        cmp byte [vcpi], 0
+        je .tsr
+        mov dx, msg_vcpi
+        call print
+        mov dx, [vcpi_top]          ; con las tablas de páginas
+.tsr:
         mov ax, 0x3100
         int 0x21
 .fail:
         call print
         mov ax, 0x4C01
         int 0x21
+
+; Preparar la conmutación por VCPI. El directorio y la primera tabla de
+; páginas quedan residentes, tras el programa (alineados a 4 KB). La primera
+; tabla la rellena el servidor (el primer mega y lo suyo); el resto del
+; espacio lineal es la identidad con páginas de 4 MB (hace falta un Pentium).
+; CF y DX = mensaje si no se puede.
+vcpi_setup:
+        mov dx, msg_vnopse
+        cmp byte [cputype], 5
+        jb .err
+        mov eax, 1
+        cpuid
+        test dl, 0x08               ; PSE
+        jz .err
+        mov ax, cs
+        add ax, ((image_end - $$) + 0x200 + 15) >> 4
+        add ax, 0xFF
+        and ax, 0xFF00
+        mov [vdir], ax
+        add ax, 0x200
+        mov bx, cs
+        sub ax, bx
+        mov [vcpi_top], ax          ; párrafos que quedan residentes
+        ; a cero
+        mov es, [vdir]
+        xor di, di
+        xor ax, ax
+        mov cx, 0x1000
+        rep stosw
+        ; la tabla 0 y los descriptores, del servidor
+        mov ax, [vdir]
+        add ax, 0x100
+        mov es, ax
+        xor di, di
+        mov si, gdt + SEL_VCPI
+        mov ax, 0xDE01
+        int 0x67
+        mov dx, msg_v86
+        test ah, ah
+        jnz .err
+        mov [vcpi_entry], ebx
+        ; lo del servidor por encima de la HMA tiene que ser la identidad
+        ; (lo es con HSPEMM cargado justo tras HSPXMS): si no, habría memoria
+        ; física que aquí no se vería
+        mov dx, msg_vorder
+        mov bx, 0x110 * 4
+.chk:
+        cmp bx, di
+        jae .fill
+        mov eax, [es:bx]
+        shr eax, 12
+        shl eax, 2
+        cmp ax, bx
+        jne .err
+        add bx, 4
+        jmp .chk
+.fill:
+        ; el resto de la tabla 0: identidad
+        movzx eax, di
+        shl eax, 10                 ; entrada -> dirección
+        or al, 7
+.f0:
+        cmp di, 0x1000
+        jae .dir
+        stosd
+        add eax, 0x1000
+        jmp .f0
+.dir:
+        ; directorio: la tabla 0 y páginas de 4 MB
+        mov cx, es
+        shr cx, 8
+        mov ax, 0xDE06
+        int 0x67
+        or dl, 7
+        mov es, [vdir]
+        mov [es:0], edx
+        mov di, 4
+        mov eax, 0x00400087
+.f1:
+        stosd
+        add eax, 0x00400000
+        cmp di, 0x1000
+        jb .f1
+        mov cx, [vdir]
+        shr cx, 8
+        mov ax, 0xDE06
+        int 0x67
+        mov [vsw_cr3], edx
+        push cs
+        pop es
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        mov ebx, eax
+        add eax, gdtr
+        mov [vsw_gdtr], eax
+        mov eax, ebx
+        add eax, pm_idtr
+        mov [vsw_idtr], eax
+        add ebx, vsw_cr3
+        mov [vsw_lin], ebx
+        clc
+        ret
+.err:
+        push cs
+        pop es
+        mov byte [vcpi], 0
+        stc
+        ret
+vdir        dw 0
+vcpi_top    dw 0
 
 ; HSPDPMI /D: quita el servidor de la memoria (o, si no puede, lo desactiva)
 descargar:
@@ -3867,6 +4078,10 @@ msg_desc    db "HSPDPMI: descargado; la memoria queda libre.", 13, 10, "$"
 msg_desact  db "HSPDPMI: desactivado (sigue en memoria: hay otro residente cargado después).", 13, 10, "$"
 msg_ok      db "Instalado: clientes de 16 y de 32 bits, memoria de XMS.", 13, 10, "$"
 msg_no386   db "HSPDPMI: hace falta un procesador 386 o superior.", 13, 10, "$"
-msg_v86     db "HSPDPMI: el procesador ya está en modo protegido (¿un EMM386?); no se instala.", 13, 10, "$"
+msg_v86     db "HSPDPMI: el procesador ya está en modo protegido y no hay un servidor VCPI (HSPEMM); no se instala.", 13, 10, "$"
+msg_vcpi    db "Con HSPEMM cargado: el modo protegido se pide por VCPI.", 13, 10, "$"
+msg_vnopse  db "HSPDPMI: con HSPEMM (modo V86) hace falta un Pentium o superior; no se instala.", 13, 10, "$"
+msg_vorder  db "HSPDPMI: cargue HSPEMM.SYS justo después de HSPXMS.SYS en CONFIG.SYS; no se instala.", 13, 10, "$"
 msg_already db "HSPDPMI: ya hay un servidor DPMI instalado.", 13, 10, "$"
 msg_noxms   db "HSPDPMI: hace falta un gestor XMS (HSPXMS.SYS en CONFIG.SYS).", 13, 10, "$"
+image_end:

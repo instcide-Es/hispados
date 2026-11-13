@@ -46,6 +46,8 @@ config() {
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 }
 XMS='DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n'
+# EMM=1: con HSPEMM cargado (modo V86; HSPDPMI pasa a ser cliente VCPI)
+[ -n "${EMM:-}" ] && XMS="$XMS"'DEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\n'
 # DOSHIGH=1: las mismas pruebas con el núcleo en la HMA (DOS=HIGH)
 [ -n "${DOSHIGH:-}" ] && XMS="$XMS"'DOS=HIGH\r\n'
 
