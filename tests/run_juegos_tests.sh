@@ -138,7 +138,7 @@ fi
 
 check "Teclado español instalado."
 # -- el grupo: un acceso por módulo, con su nombre y su icono --
-chk $T/j1.ppm tam 800 600 marco 248 188 452 190 activa titulo 248 188 activa "Juegos" \
+chk $T/j1.ppm tam 800 600 marco 248 188 452 207 activa titulo 248 188 activa "Juegos" \
   texto 286 291 9 12 fina "Culebra" texto 362 291 0 8 fina "Campo de minas" \
   px 303 255 11 "icono de Culebra: el cuerpo, verde oliva" px 317 255 2 "icono de Culebra: la cabeza" \
   px 405 253 11 "icono de Campo de minas: una losa" px 426 251 10 "icono de Campo de minas: el banderín"
@@ -157,7 +157,7 @@ chk $T/j4.ppm texto 183 119 9 12 fina "ueva partida" texto 183 187 0 8 fina "elo
 chk $T/j5.ppm marco 120 60 204 283 activa titulo 120 60 activa "Campo de minas" \
   texto 156 118 0 9 negrita "10" px 222 126 10 "el rombo de arriba: centro ocre" px 222 118 12 "el rombo: añil (jugando)" \
   px 142 161 11 "una losa tapada" px 222 241 11 "otra losa tapada" px 131 150 1 "el marco del tablero"
-chk $T/j6.ppm marco 248 188 452 190 activa titulo 248 188 activa "Juegos" texto 362 291 9 12 fina "Campo de minas" \
+chk $T/j6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 362 291 9 12 fina "Campo de minas" \
   px 300 70 6 "donde estaba Campo de minas se ve otra vez el Centro"
 chk $T/j7.ppm marco 150 70 468 377 activa titulo 150 70 activa "Culebra" texto 160 123 0 8 fina "Puntos: 0"
 # -- salida --
@@ -167,10 +167,10 @@ check "TRAS-SALIR"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
-ini "Modulos=3"; ini "Nombre=Juegos"; ini "Nombre=Culebra"; ini "Programa=A:\\HISPADOS\\JUEGOS\\CULEBRA.HVP"
+ini "Modulos=7"; ini "Nombre=Juegos"; ini "Nombre=Culebra"; ini "Programa=A:\\HISPADOS\\JUEGOS\\CULEBRA.HVP"
 ini "Nombre=Campo de minas"; ini "Programa=A:\\HISPADOS\\JUEGOS\\MINAS.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas " ]; then
-  ok "CENTRO.INI: los dos juegos, en el grupo Juegos (y Pintura, en Accesorios)"
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén " ]; then
+  ok "CENTRO.INI: los juegos, en el grupo Juegos (y Pintura, en Accesorios)"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"
 fi
@@ -189,7 +189,7 @@ cp $B/CULEBRA.HVP $T/FUTURO.HVP
 printf '\347\003' | dd of=$T/FUTURO.HVP bs=1 seek=6 conv=notrunc status=none
 printf 'Del futuro\0' | dd of=$T/FUTURO.HVP bs=1 seek=32 conv=notrunc status=none
 mcopy -i $T/f.img $T/ROTA.HVP $T/FUTURO.HVP ::JUEGOS/
-printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=3' '' \
+printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=7' '' \
   '[Grupo]' 'Nombre=Juegos' 'Ventana=300,380,452,190' 'Estado=1' '' \
   '[Acceso]' 'Nombre=Culebra' 'Programa=A:\HISPADOS\JUEGOS\CULEBRA.HVP' 'Parametros=/S=7 /P' '' \
   '[Acceso]' 'Nombre=Minas 5' 'Programa=A:\HISPADOS\JUEGOS\MINAS.HVP' 'Parametros=/S=5' '' \
@@ -314,7 +314,7 @@ check "TRAS-SALIR"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
-ini "Programa=A:\\JUEGOS\\OTRA.HVP"; ini "Nombre=Del futuro"; ini "Programa=A:\\JUEGOS\\FUTURO.HVP"; ini "Parametros=/S=7 /P"; ini "Modulos=3"
+ini "Programa=A:\\JUEGOS\\OTRA.HVP"; ini "Nombre=Del futuro"; ini "Programa=A:\\JUEGOS\\FUTURO.HVP"; ini "Parametros=/S=7 /P"; ini "Modulos=7"
 muestra k3 culebra_fruta; muestra k4 culebra_record; muestra m3 minas_banderines; muestra n2 minas_prueba
 muestra n3 minas_ganada; muestra z1 dos_a_la_vez
 if grep -q 'ROTA.HVP' $T/ini.txt; then ko "CENTRO.INI: ROTA.HVP no es un módulo y tiene acceso directo"; else ok "CENTRO.INI: sin acceso para ROTA.HVP"; fi

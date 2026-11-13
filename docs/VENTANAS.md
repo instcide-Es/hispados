@@ -79,8 +79,9 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    (`tests/run_pintura_tests.sh`). Próximos programas propios (nombres de
    Carlos): **Pluma-Ventanas**, el procesador de textos (letra con formato,
    párrafos, imprimir), y **Cuentas-Ventanas**, la hoja de cálculo (fórmulas, formatos de
-   número, gráficos sencillos); además el Administrador de archivos y la
-   segunda tanda de juegos. Pendiente (se
+   número, gráficos sencillos); además el Administrador de archivos. La
+   segunda tanda de juegos (Bloques, Solitario, Tragabolas y Almacén) ya
+   está (`tests/run_juegos2_tests.sh`). Pendiente (se
    hará según haga falta en las etapas 4 y 5): avisar de los
    textos sin guardar al salir con el botón «Salir»; arrastrar solo el
    contorno en los equipos lentos y cambiar el cursor en los bordes; órdenes
@@ -261,7 +262,7 @@ Ventana=36,52,452,190
 Volumen=80
 Silencio=0
 Activo=0
-Modulos=3
+Modulos=7
 
 [Grupo]
 Nombre=Juegos
@@ -882,7 +883,8 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
   ventana y hora en cifras; opciones (sin segundero, solo cifras).
 - **Sistema** (`centro.inc`): pantalla, vídeo, ratón y memoria que ha
   encontrado.
-- **Culebra** y **Campo de minas**: los juegos, en módulos .HVP (ver «Los
+- **Culebra**, **Campo de minas**, **Bloques**, **Solitario**,
+  **Tragabolas** y **Almacén**: los juegos, en módulos .HVP (ver «Los
   juegos», más abajo).
 - **Configuración** (`programas/config.asm`, `CONFIG.HVP`): los ajustes y
   el salvapantallas (ver «Configuración y VENTANAS.INI»).
@@ -894,8 +896,9 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
 `VENTANAS.COM` no puede crecer mucho más (lo que usa el modo real tiene que
 caber en 64 KB), así que los programas nuevos van **aparte**, cada uno en su
 archivo `.HVP` («programa de Hispa Ventanas»). Los primeros son los juegos,
-`CULEBRA.HVP` y `MINAS.HVP`, en `\HISPADOS\JUEGOS`, y Pintura,
-`PINTURA.HVP`, en `\HISPADOS\PROGS`.
+`CULEBRA.HVP` y `MINAS.HVP` (y la segunda tanda: `BLOQUES.HVP`,
+`SOLITARI.HVP`, `TRAGABOL.HVP` y `ALMACEN.HVP`), en `\HISPADOS\JUEGOS`, y
+Pintura, `PINTURA.HVP`, en `\HISPADOS\PROGS`.
 
 Un acceso directo cuyo programa acaba en `.HVP` **se abre como una ventana**
 (no se sale a Hispa-DOS como con un .COM o un .EXE): Hispa Ventanas carga el
@@ -1139,7 +1142,67 @@ con cada flecha; Campo de minas: un tablero de 9×9 con dos minas en dos
 esquinas, cuyo tiempo se guarda aparte, como `Prueba=`). Son para las
 pruebas automáticas.
 
-Segunda tanda prevista: Bloques, Solitario, Tragabolas y Almacén.
+**Segunda tanda** (también en `\HISPADOS\JUEGOS`; todos con diseño propio,
+menú Juego —partida nueva, récords, salir— y Ayuda, y solo con las 72
+entradas de la interfaz que ya había):
+
+- **Bloques** (`juegos/bloques.asm`, `BLOQUES.HVP`): piezas que caen en un
+  pozo de 11×18 y se encajan; las filas completas desaparecen. Once piezas
+  propias: dos de tres casillas (Barrita, Codo), siete de cuatro (Losa,
+  Viga, Gancho, Garfio, Peldaño, Escalón, Pico) y dos de cinco (Cruz, Cazo),
+  dibujadas como azulejos con un rombo; un recuadro marca dónde caería la
+  pieza. Puntos: uno por casilla encajada y por fila bajada al soltar de
+  golpe; 20, 50, 90 o 140 por quitar 1, 2, 3 o 4 filas a la vez, por el
+  nivel. Sube un nivel cada 8 filas (hasta el 12) y cae más deprisa; desde
+  el nivel 5, cada 10 piezas sube del fondo una **fila de piedra** con un
+  hueco. Flechas (mover, arriba girar, abajo bajar), Espacio suelta, P
+  pausa (y sola al minimizar), F2 otra partida; clic gira y el botón
+  derecho suelta. Menú: empezar en el nivel 1, 4 o 7. Las cinco mejores
+  puntuaciones y el nivel inicial, en `BLOQUES.REC` (`Puntos=194,0,0,0,0`).
+- **Solitario** (`juegos/solitario.asm`, `SOLITARI.HVP`): un solitario de
+  columnas de la familia del «Klondike» con **baraja española de 40
+  cartas** dibujada aquí (oros, copas, espadas y bastos; as, 2 a 7, sota
+  10, caballo 11 y rey 12), sobre tapete azul petróleo. Seis columnas de 1
+  a 6 cartas, tapadas menos la de encima; las otras 19 son el mazo, que se
+  pasa de una en una y se le da la vuelta las veces que se quiera. En las
+  columnas se baja de una en una (rey, caballo, sota, 7… as) alternando
+  palos claros (oros y copas) y oscuros (espadas y bastos); a un hueco solo
+  va un rey. Arriba, cuatro montones de salida, uno por palo, del as al
+  rey: se gana con las 40. Ratón: arrastrar una carta o una escalera (si la
+  jugada no vale, vuelve a su sitio), clic en el mazo, doble clic o botón
+  derecho para subir una carta. Teclado: F2 nueva, Retroceso o Ctrl+Z
+  deshacer (512 pasos), Espacio sacar carta, S subir las que se puedan. A
+  la vista, movimientos, tiempo (corre desde el primer movimiento; no,
+  minimizada) y cartas del mazo. `SOLITARI.REC`: `Jugadas=`, `Ganadas=`,
+  `Tiempo=` (el mejor, en segundos) y `Movimientos=` (los menos).
+- **Tragabolas** (`juegos/tragabolas.asm`, `TRAGABOL.HVP`): el Tragón, una
+  bola azul petróleo, recoge las bolitas de un jardín de setos (25×17
+  casillas) esquivando a tres erizos: el granate va a por él, el añil anda
+  al azar y el marrón le sale al paso. Tres jardines propios que se turnan;
+  cada vuelta va más deprisa. Cuatro **campanas** por jardín: al coger una,
+  los erizos se duermen un rato (grises) y no pinchan. Tres vidas. Puntos:
+  10 por bolita, 50 por campana y 100 × el jardín al dejarlo limpio.
+  Flechas (la pedida se recuerda hasta que se puede girar), P o Espacio
+  pausa (y sola al minimizar), F2 partida nueva. Las cinco mejores
+  puntuaciones, en `TRAGABOL.REC` (`Puntos=40,0,0,0,0`).
+- **Almacén** (`juegos/almacen.asm`, `ALMACEN.HVP`): el mozo empuja las
+  cajas (de una en una; no puede tirar) hasta las marcas del suelo, entre
+  estanterías. **24 niveles propios** de hasta 16×11 casillas, de 1 a 6
+  cajas; se puede ir al primero, a los ya resueltos y al siguiente de uno
+  resuelto. Flechas; Retroceso, U o Ctrl+Z deshacen (todo el nivel); R o F2
+  empiezan el nivel otra vez; Av Pág y Re Pág cambian de nivel; un clic en
+  la fila o la columna del mozo da un paso hacia allí. Arriba, nivel,
+  movimientos, empujones y la mejor marca. `ALMACEN.REC`: `Nivel=` (donde
+  se quedó), `Mejor=` y `Empujones=` (24 valores; 0, sin resolver).
+  `tools/almacen_niveles.py` lee los niveles del fuente, comprueba que
+  están bien formados y **resuelve cada uno** (unos 3,5 minutos los 24;
+  `-n N` uno solo, `-s` escribe la solución).
+
+Parámetros de prueba: Bloques, `/S=n` y `/P` (la pieza no cae sola);
+Solitario, `/S=n` (reparto fijo) y `/P` (partida casi acabada: faltan
+cuatro cartas); Tragabolas, `/S=n`, `/P` (todo avanza un paso con cada
+flecha) y `/N=n` (jardín inicial); Almacén, `/N=n` (empieza en el nivel n,
+con todos abiertos).
 
 ### Pintura
 
@@ -1233,6 +1296,18 @@ salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
   que no es un módulo; el módulo que pide una interfaz más nueva no se
   carga; dos juegos abiertos a la vez y salir con ellos abiertos. Capturas
   de muestra en `build/juegos_*.png`.
+- `tests/run_juegos2_tests.sh`: la segunda tanda de juegos, por partes
+  (`tests/juegos2/*.sh`; `SOLO="bloques almacen"` pasa solo algunas).
+  «grupo»: sin CENTRO.INI, el grupo «Juegos» trae los seis accesos en dos
+  filas (la ventana se alarga sola), cada juego nuevo se abre y se cierra, y
+  caben en el disquete. Después, una sesión por juego con sus parámetros de
+  prueba: Bloques completa una fila, llena el pozo y deja el récord;
+  Solitario pasa cartas, arrastra (también una jugada que no vale),
+  deshace, gana la partida de prueba y deja `SOLITARI.REC`; Tragabolas
+  recoge bolitas, lo para un seto, lo pinchan hasta acabar, coge una campana
+  y deja el récord; Almacén empuja, deshace, resuelve el nivel 1, pasa al 2
+  y lo recuerda al volver a abrir. Los récords se miran con mtools.
+  Capturas de muestra en `build/juegos2_*.png`.
 - `tests/run_configuracion_tests.sh`: Configuración y VENTANAS.INI. Primera
   sesión, sin VENTANAS.INI: el acceso directo en «Principal», la ventana y
   sus apartados; un tema, un dibujo y un color cambian el escritorio al

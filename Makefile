@@ -140,10 +140,20 @@ $(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack
 # saca las reubicaciones.
 HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/defs.inc ventanas/api.inc \
          tools/mkhvp.py tools/icopack.py tools/cp437.py
-HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP
+HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP \
+       $(B)/BLOQUES.HVP $(B)/SOLITARI.HVP $(B)/TRAGABOL.HVP $(B)/ALMACEN.HVP
 $(B)/CULEBRA.HVP: juegos/culebra.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/MINAS.HVP: juegos/minas.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# la segunda tanda de juegos: Bloques, Solitario, Tragabolas y Almacén
+$(B)/BLOQUES.HVP: juegos/bloques.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/SOLITARI.HVP: juegos/solitario.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/TRAGABOL.HVP: juegos/tragabolas.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/ALMACEN.HVP: juegos/almacen.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
@@ -342,6 +352,7 @@ test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
+	tests/run_juegos2_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
 	tests/run_pintura_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
