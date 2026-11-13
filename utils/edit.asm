@@ -31,10 +31,33 @@ start:
         je .sk
         cmp al, 13
         jne .name
-        mov si, msg_usage
+        ; sin archivo (p. ej. desde Hispa Ventanas): se pregunta cuál; con
+        ; Intro a secas, uno nuevo (NUEVO.TXT)
+        mov si, msg_quearch
         call puts
-        mov ax, 0x4C01
+        mov byte [kbuf], 76
+        mov byte [kbuf+1], 0
+        mov dx, kbuf
+        mov ah, 0x0A
         int 0x21
+        mov si, msg_crlf
+        call puts
+        movzx cx, byte [kbuf+1]
+        mov si, kbuf+2
+        add si, cx
+        mov byte [si], 13           ; terminar en CR, como la línea de órdenes
+        mov si, kbuf+2
+.ka:
+        cmp byte [si], ' '          ; saltar espacios del principio
+        jne .kb
+        inc si
+        jmp .ka
+.kb:
+        lodsb
+        cmp al, 13
+        jne .name
+        mov si, def_name
+        lodsb
 .name:
         mov di, fname
 .n:
@@ -861,6 +884,9 @@ puts:
         ret
 
 msg_usage   db "Uso: EDIT archivo", 13, 10, 0
+msg_quearch db "¿Qué archivo quiere editar? (Intro: uno nuevo, NUEVO.TXT)", 13, 10, "> ", 0
+msg_crlf    db 13, 10, 0
+def_name    db "NUEVO.TXT", 13
 msg_nomem   db "No hay memoria suficiente.", 13, 10, 0
 msg_title   db " Hispa-DOS EDIT - ", 0
 msg_line    db " Línea ", 0
@@ -897,6 +923,7 @@ fh          resw 1
 need        resd 1
 oldsz       resd 1
 fname       resb 80
+kbuf        resb 80
 obuf        resb 1024
             resb 1024
 stack_top:
