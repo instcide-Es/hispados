@@ -75,6 +75,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Funciones FCB (DOS 1.x), SDA (5D06h/5D0Bh), EXEC 4B01h/4B03h, 26h/55h, 65h (país CP437), Ctrl+C | ✅ |
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
 | `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
+| `DOS=HIGH`: el código del núcleo en la memoria alta (HMA); unos 33 KB más de memoria convencional. INT 2Fh 4A01h/4A02h (HMA libre) y `MEM` lo dice | ✅ |
 | `HSPDPMI.COM`: servidor DPMI 0.9 propio (clientes de 16 y 32 bits, memoria de XMS; los programas de DJGPP funcionan sin CWSDPMI) | ✅ |
 | Estructuras internas de DOS 4+: SDA, CDS, cadena de DPB, lista de listas; 1Fh/32h | ✅ |
 | Sonido: `HSPSND` (Sound Blaster 2.0/Pro/16, Intel HD Audio y AC'97; pone la variable `BLASTER`) y `PLAYWAV`/`SONAR` | ✅ |
@@ -111,6 +112,19 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
 
 Teclas, en cualquier programa: **Ctrl+Alt+↑** y **Ctrl+Alt+↓** suben y bajan el volumen un 10 %, **Ctrl+Alt+Fin** lo silencia, y también valen las teclas de volumen de los teclados multimedia (las de Fn de muchos portátiles).
+
+## Memoria: `DOS=HIGH`
+
+Con estas dos líneas en `CONFIG.SYS` (vienen puestas en el disquete y en la memoria USB), el código del núcleo se va a la memoria alta (HMA, los primeros 64 KB por encima de 1 MB) y deja **unos 33 KB más de memoria convencional** (de los 52 KB que ocupa el núcleo se quedan 20 abajo):
+
+```
+DEVICE=A:\HISPADOS\HSPXMS.SYS
+DOS=HIGH
+```
+
+`MEM` lo confirma («Hispa-DOS está cargado en la memoria alta (HMA)»). También se aceptan `DOS=LOW` (lo de siempre) y `DOS=HIGH,UMB` (la parte `UMB` aún no hace nada). Si no hay gestor XMS o la HMA ya es de otro, Hispa-DOS lo dice y se queda en la memoria convencional. Con F5 (arranque limpio) no se usa.
+
+En la memoria convencional se queda lo que tienen que ver los programas, la BIOS y Windows: los vectores y unos trozos de entrada (INT 20h, 21h, 25h-27h, 29h, 2Fh), la lista de listas, la SDA, la CDS, los DPB, la tabla de ficheros (SFT), las cabeceras de los dispositivos, los búferes de sector (la BIOS no puede llevar un disquete por DMA por encima de 1 MB), las pilas del núcleo y los datos de instancia de Windows. La línea A20 queda abierta; si un programa la cierra, el núcleo la vuelve a abrir en cuanto se le llama. Los 28 KB de HMA que sobran se ofrecen a otros programas por INT 2Fh AX=4A01h/4A02h, como en MS-DOS.
 
 ## Compilar y probar
 
@@ -175,7 +189,7 @@ Hispa-DOS is a free operating system written from scratch that aims to be **comp
 
 It contains no Microsoft code: everything is implemented from public documentation.
 
-**Status (0.9, test release):** MS-DOS 6.22 compatible kernel and shell (FAT12/FAT16, hard disks, CD/DVD, native USB, SHARE, critical error handler, batch files, CONFIG.SYS and `.SYS` drivers), XMS, Sound Blaster/HD Audio/AC'97, PS/2 and USB mouse and keyboard, and the usual utilities with Spanish names (and the classic ones). Windows for Workgroups 3.11 runs in 386 enhanced mode. Ready-to-use images are in [Releases](https://github.com/instcide-Es/hispados/releases). See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/VENTANAS.md](docs/VENTANAS.md) for what comes next.
+**Status (0.9, test release):** MS-DOS 6.22 compatible kernel and shell (FAT12/FAT16, hard disks, CD/DVD, native USB, SHARE, critical error handler, batch files, CONFIG.SYS and `.SYS` drivers), XMS, `DOS=HIGH` (kernel code in the HMA, about 33 KB more conventional memory), Sound Blaster/HD Audio/AC'97, PS/2 and USB mouse and keyboard, and the usual utilities with Spanish names (and the classic ones). Windows for Workgroups 3.11 runs in 386 enhanced mode. Ready-to-use images are in [Releases](https://github.com/instcide-Es/hispados/releases). See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/VENTANAS.md](docs/VENTANAS.md) for what comes next.
 
 ```sh
 make && make run     # build the floppy image and boot it in QEMU

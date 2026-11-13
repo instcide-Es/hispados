@@ -199,7 +199,38 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %define rootent cur_drv+D_ROOTENT
 
 ; =============================================================================
-        section .text
+        section .low start=0 vstart=0
+        section .bss nobits follows=.low align=16
+        section .ibss nobits follows=.bss align=16
+        section .text follows=.low vfollows=.ibss align=16 valign=16
+; Disposición (ver «DOS=HIGH» más abajo):
+;   .low   datos con valor inicial y trozos de entrada: siempre en KSEG
+;   .bss   datos sin valor inicial: siempre en KSEG, detrás de .low
+;   .ibss  datos que solo hacen falta al arrancar (el texto de CONFIG.SYS,
+;          el sector de arranque): van delante del código y con él.
+;   .text  el código. En el fichero va detrás de .low; al arrancar se sube
+;          detrás de .ibss. Corre en el segmento [code_seg]: KSEG (DOS=LOW),
+;          la HMA (DOS=HIGH) o, mientras tanto, lo alto de la memoria
+;          convencional. Sus desplazamientos son los mismos en los tres.
+;   HRES   datos «altos» sin valor inicial: van detrás del código, en su
+;          mismo segmento, y se leen con CS:. Solo lo que nadie de fuera
+;          mira ni la BIOS llena.
+; Lo que se mueve junto («la imagen») va de img_start a hbss_end:
+;   .ibss + .text + HRES. Empieza y acaba con más de 4 KB que ni se ejecutan
+;   ni se escriben a menudo (por delante .ibss; por detrás los textos del
+;   arranque, la tabla de funciones y HRES): así ninguna página de 4 KB tiene
+;   a la vez código del núcleo y datos que cambian sin parar (las pilas, la
+;   memoria del programa que venga detrás). Escribir en una página con
+;   código sale muy caro en los emuladores (QEMU vuelve a comprobar el
+;   código traducido en cada escritura: DIR tardaba diez veces más) y
+;   tampoco es gratis en los procesadores de verdad.
+%assign HOFF 0
+%macro HRES 2                       ; nombre, octetos
+%1      equ text_end + HOFF
+%assign HOFF HOFF + %2
+%endmacro
+HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
+        section .low
 start:
         jmp short .go
         db 0, 0
@@ -250,22 +281,47 @@ start:
         hlt
         jmp .vh
 .cpu_ok:
+        ; pila propia por encima de la imagen y copia del sector de arranque
+        ; (DS:SI) fuera del sitio adonde va a subir el código
         mov ax, KSEG
         mov es, ax
-        ; poner a cero la zona .bss (la BIOS no la deja limpia)
-        push ax
-        mov di, bss_start
-        mov cx, (kernel_end - bss_start) / 2
-        xor ax, ax
-        rep stosw
-        pop ax
-        mov di, bootsec
+        mov ss, ax
+        xor sp, sp
+        mov di, BOOT_TMP
         mov cx, 256
         rep movsw
         mov ds, ax
-        mov ss, ax
+        ; subir el código detrás de la zona .bss (de arriba abajo: se solapan)
+        std
+        mov si, section..text.start + (text_end - text_start) - 1
+        mov di, text_end - 1
+        mov cx, text_end - text_start
+        rep movsb
+        cld
+        ; poner a cero las zonas .bss e .ibss y los datos altos (la BIOS no
+        ; las deja limpias)
+        mov di, bss_start
+        mov cx, text_start
+        sub cx, di
+        shr cx, 1
+        xor ax, ax
+        rep stosw
+        mov di, hbss_start
+        mov cx, (hbss_end - hbss_start) / 2
+        rep stosw
+        mov dword [img_start], HMA_SIG
+        mov si, BOOT_TMP
+        mov di, bootsec
+        mov cx, 256
+        rep movsw
         mov sp, kstack_top
         sti
+        jmp kinit
+BOOT_TMP        equ 0xFC00
+
+        section .text
+text_start:
+kinit:
         mov [boot_drive], dl
 
         call serial_init
@@ -281,9 +337,11 @@ start:
         mov byte [crit_gave], 0xFF
         call vectors_init
         call clock_init
-        call mem_init
+        call config_load            ; CONFIG.SYS, F5/F8 y DOS=HIGH: antes de
+        call mem_init               ; repartir la memoria
         call root_psp_init
         call config_run
+        call hma_final
         call build_root_env
         call install_run
 
@@ -321,7 +379,7 @@ bios_geom:
         mov ah, 8
         xor di, di
         mov es, di
-        int 0x13
+        call KSEG:l_int13
         pop bp
         pop es
         pop di
@@ -349,7 +407,7 @@ check_ext:
         mov ah, 0x41
         mov bx, 0x55AA
         push bp
-        int 0x13
+        call KSEG:l_int13
         pop bp
         jc .no
         cmp bx, 0xAA55
@@ -777,6 +835,1837 @@ boot_select:
         sub al, 'A'
         jmp select_drive
 
+; (Lo que sigue hasta select_raw solo se usa al arrancar: va junto, al
+; principio del código, para que las páginas vecinas -datos por delante-
+; no compartan página con código que se ejecuta a menudo: un emulador
+; como QEMU, y también los procesadores, penalizan escribir en una página
+; de la que se está ejecutando código.)
+; -----------------------------------------------------------------------------
+;  CONFIG.SYS
+; -----------------------------------------------------------------------------
+config_load:
+        mov word [cur_psp], 8
+        mov al, [cur_drive]
+        add al, 'A'
+        mov [cfg_path], al
+        push ds
+        pop es
+        mov byte [cfgbuf], 0
+        mov si, cfg_path
+        call open_path
+        jc .choose
+        mov byte [di+SFT_REF], 0
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .choose
+        mov bx, cfgbuf
+        mov cx, CFG_MAX - 1
+        call file_read
+        mov bx, ax
+        mov byte [cfgbuf+bx], 0
+.choose:
+        call boot_choice            ; F5 / F8
+        jmp dos_scan                ; DOS=HIGH
+
+config_run:
+        mov byte [lastdrive], 5
+        cmp byte [boot_clean], 0
+        jne .none
+        mov word [cfg_line], 0
+        mov byte [cfg_inmenu], 0
+        mov si, cfgbuf
+.line:
+        cmp byte [cs:si], 0
+        je .done
+        inc word [cfg_line]
+        ; copiar la línea en cfgl (terminada en CR LF 0)
+        mov di, cfgl
+.cl:
+        cs lodsb
+        test al, al
+        jz .ce0
+        cmp al, 10
+        je .ce
+        cmp al, 13
+        je .cl
+        cmp al, 0x1A
+        je .ce0
+        cmp di, cfgl + 160
+        jae .cl
+        mov [di], al
+        inc di
+        jmp .cl
+.ce0:
+        dec si
+.ce:
+        mov word [di], 0x0A0D
+        mov byte [di+2], 0
+        ; ¿desactivada en el menú de arranque?
+        mov bx, [cfg_line]
+        cmp bx, MAXCL
+        jae .on
+        cmp byte [cs:cfg_dis+bx], 0
+        jne .line
+.on:
+        push si
+        call config_line
+        call hma_try                ; (como MS-DOS: en cuanto haya XMS)
+        pop si
+        jmp .line
+.done:
+.none:
+        ret
+
+; -----------------------------------------------------------------------------
+;  DOS=HIGH: el código del núcleo, en la HMA
+; -----------------------------------------------------------------------------
+; Con DOS=HIGH en CONFIG.SYS el código (.text) y sus datos altos (HRES) acaban en
+; la HMA (FFFF:0010-FFFF:FFFF), que se pide al gestor XMS (función 01h) en
+; cuanto lo carga un DEVICE=, como hace MS-DOS. Abajo, en KSEG, se queda lo
+; que tienen que ver los programas, la BIOS y Windows: los vectores y los
+; trozos de entrada (l_int21...), la lista de listas, la SDA, la CDS, los
+; DPB, la SFT, las cabeceras de los dispositivos, los búferes de sector
+; (la BIOS no puede llevar un disquete por DMA por encima de 1 MB), las
+; pilas del núcleo y los datos de instancia de Windows.
+;
+; El código se ensambla una sola vez: en la HMA corre con CS = F000h+algo
+; y los mismos desplazamientos que abajo (img_start cae en FFFF:0010). Por
+; eso el código no puede dar por hecho que CS = DS: los datos se leen por DS
+; (= KSEG) y los datos altos, con CS:.
+;
+; La línea A20 tiene que estar abierta mientras se ejecuta código de la HMA:
+; el núcleo se apunta una apertura local (XMS 05h) y, como los programas
+; pueden cerrarla, cada entrada desde fuera (a20_gate) lo comprueba y la
+; vuelve a abrir. Lo mismo al volver de un controlador de dispositivo, de
+; INT 13h, INT 23h, INT 24h e INT 28h, que se llaman desde abajo.
+
+; buscar DOS=HIGH entre las líneas activas de CONFIG.SYS -> dos_want
+dos_scan:
+        mov byte [dos_want], 0
+%ifdef FORCEHIGH
+        ; (pruebas: como si todos los CONFIG.SYS llevaran DOS=HIGH)
+        mov byte [dos_want], 1
+        ret
+%endif
+%ifdef TRACE
+        ret                         ; (la traza de INT 2Fh llama al código)
+%endif
+        cmp byte [boot_clean], 0
+        jne .r
+        xor bx, bx                  ; línea
+        mov si, cfgbuf
+.line:
+        cmp byte [cs:si], 0
+        je .r
+        inc bx
+        call .skip
+        cmp bx, MAXCL
+        jae .on
+        cmp byte [cs:cfg_dis+bx], 0
+        jne .eol
+.on:
+        mov eax, [cs:si]
+        and eax, 0x00DFDFDF
+        cmp eax, 'DOS'
+        jne .eol
+        add si, 3
+        call .skip
+        cmp byte [cs:si], '='
+        jne .eol
+        inc si
+.arg:
+        call .skip
+        mov eax, [cs:si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'HIGH'
+        jne .nh
+        mov byte [dos_want], 1
+.nh:
+        and eax, 0x00FFFFFF
+        cmp eax, 'LOW'
+        jne .next
+        mov al, [cs:si+3]
+        cmp al, ','
+        je .lo
+        cmp al, ' '
+        ja .next
+.lo:
+        mov byte [dos_want], 0
+.next:
+        mov al, [cs:si]
+        cmp al, ','
+        je .comma
+        cmp al, ' '
+        jb .eol
+        inc si
+        jmp .next
+.comma:
+        inc si
+        jmp .arg
+.eol:
+        mov al, [cs:si]
+        test al, al
+        jz .r
+        inc si
+        cmp al, 10
+        jne .eol
+        jmp .line
+.r:
+        ret
+.skip:
+        cmp byte [cs:si], ' '
+        je .s
+        cmp byte [cs:si], 9
+        jne .sr
+.s:
+        inc si
+        jmp .skip
+.sr:
+        ret
+
+; copiar el código y sus datos a ES:DI y seguir corriendo allí, con CS = DX
+; (DX:img_start = ES:DI). CF=1 si la copia no queda igual (no se cambia).
+code_move:
+        push ds
+        push si
+        push di
+        push cx
+        pushf
+        cli
+        cld
+        mov cx, hbss_end + 1
+        sub cx, img_start
+        shr cx, 1
+        push cx
+        push di
+        mov ds, [code_seg]
+        mov si, img_start
+        rep movsw
+        pop di
+        pop cx
+        mov si, img_start
+        repe cmpsw
+        jne .bad
+        mov cx, KSEG
+        mov ds, cx
+        mov [code_seg], dx
+        push dx
+        push word .here
+        retf
+.here:
+        popf
+        pop cx
+        pop di
+        pop si
+        pop ds
+        clc
+        ret
+.bad:
+        popf
+        pop cx
+        pop di
+        pop si
+        pop ds
+        stc
+        ret
+
+; ¿está abierta A20? CF=1 si no: lo que se escribe en FFFF:0010 aparece
+; en 0000:0000. Se prueba con dos valores y se deja todo como estaba.
+a20_check:
+        push ds
+        push es
+        push ax
+        push bx
+        pushf
+        cli
+        xor ax, ax
+        mov ds, ax
+        dec ax
+        mov es, ax
+        mov ah, [es:0x0010]         ; AH = lo que había
+        xor bx, bx                  ; BX = veces que coincide
+        mov al, ah
+        not al
+        mov [es:0x0010], al
+        cmp [0x0000], al
+        jne .n1
+        inc bx
+.n1:
+        mov al, ah
+        xor al, 0x55
+        mov [es:0x0010], al
+        cmp [0x0000], al
+        jne .n2
+        inc bx
+.n2:
+        mov [es:0x0010], ah
+        popf
+        cmp bx, 2                   ; las dos veces: es la misma memoria
+        pop bx
+        pop ax
+        pop es
+        pop ds
+        je .closed
+        clc
+        ret
+.closed:
+        stc
+        ret
+
+; ¿hay ya gestor XMS? Entonces pedirle la HMA y pasar allí el código
+hma_try:
+        cmp byte [dos_tmp], 0
+        jne .go
+        ret
+.go:
+        pushad
+        push es
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .r
+        mov ax, 0x4310
+        int 0x2F
+        mov [xms_entry], bx
+        mov [xms_entry+2], es
+        mov ah, 0x01                ; pedir la HMA entera
+        mov dx, 0xFFFF
+        call far [xms_entry]
+        cmp ax, 1
+        jne .busy
+        mov ah, 0x05                ; A20 abierta (cuenta local)
+        call far [xms_entry]
+        cmp ax, 1
+        jne .rel
+        mov ah, 0x07                ; ¿abierta de verdad?
+        call far [xms_entry]
+        cmp ax, 1
+        jne .rel6
+        call a20_check              ; (y se comprueba aquí también: con
+        jc .rel6                    ; A20 cerrada la copia pisaría 0000:0000)
+        mov ax, 0xFFFF
+        mov es, ax
+        mov di, 0x0010
+        mov dx, img_start
+        shr dx, 4
+        neg dx                      ; DX:img_start = FFFF:0010
+        call code_move
+        jc .rel6
+        ; el resto, para INT 2Fh 4A01h/4A02h: desde la página siguiente
+        ; (los datos de otros no comparten página con el final del código)
+        mov ax, hbss_end + 0x0FFF
+        sub ax, img_start
+        and ax, 0xF000
+        add ax, 0x0010
+        mov [hma_free], ax
+        mov byte [dos_high], 1
+        mov byte [dos_tmp], 0
+        call tmp_release
+        jmp .r
+.rel6:
+        mov ah, 0x06
+        call far [xms_entry]
+.rel:
+        mov ah, 0x02
+        call far [xms_entry]
+.busy:
+        mov byte [hma_busy], 1      ; hay XMS, pero no da la HMA
+.r:
+        pop es
+        popad
+        ret
+
+; fin de CONFIG.SYS sin HMA: aviso y el código se queda en la memoria
+; convencional, en un bloque del sistema detrás de los controladores
+hma_final:
+        call hma_try
+        cmp byte [dos_tmp], 0
+        jne .go
+        ret
+.go:
+        pushad
+        push es
+%ifndef FORCEHIGH
+        mov si, msg_nohma_x
+        cmp byte [hma_busy], 0
+        je .m
+        mov si, msg_nohma_b
+.m:
+        call kputs
+        mov si, msg_nohma
+        call kputs
+%endif
+        mov byte [dos_tmp], 0
+        mov bx, [tmp_paras]
+        call mcb_alloc
+        jc .stay                    ; (sin sitio: se queda arriba)
+        push ax
+        dec ax
+        mov es, ax
+        mov word [es:1], 8          ; del sistema
+        mov dword [es:8], 'HISP'
+        mov dword [es:12], 'ADOS'
+        pop ax
+        mov es, ax
+        xor di, di
+        mov dx, img_start
+        shr dx, 4
+        neg dx
+        add dx, ax
+        call code_move
+        jnc .moved
+        call mcb_free               ; (ES = el bloque) se queda arriba
+        jmp short .stay
+.moved:
+        call tmp_release
+.stay:
+        pop es
+        popad
+        ret
+
+; devolver a la cadena de MCB el sitio provisional del código
+tmp_release:
+        push ax
+        push bx
+        push es
+        mov bx, [tmp_paras]
+        mov ax, [first_mcb]
+.l:
+        mov es, ax
+        cmp byte [es:0], 'Z'
+        je .last
+        add ax, [es:3]
+        inc ax
+        jmp .l
+.last:
+        cmp word [es:1], 0
+        jne .new
+        add [es:3], bx              ; el último bloque está libre: crece
+        jmp .top
+.new:
+        mov byte [es:0], 'M'
+        mov es, [mem_top]
+        mov byte [es:0], 'Z'
+        mov word [es:1], 0
+        dec bx
+        mov [es:3], bx
+        inc bx
+.top:
+        add [mem_top], bx
+        mov ax, [mem_top]
+        mov es, [root_psp]
+        mov [es:2], ax
+        pop es
+        pop bx
+        pop ax
+        ret
+
+
+; =============================================================================
+;  Arranque: F5 = limpio (sin CONFIG.SYS ni AUTOEXEC.BAT), F8 = menú propio.
+;  SWITCHES=/N las desactiva y SWITCHES=/F quita la espera, como en MS-DOS.
+; =============================================================================
+MAXCL       equ 64                  ; líneas de CONFIG.SYS que se pueden desactivar
+MAXIT       equ 16                  ; elementos visibles del menú
+BOOT_WAIT   equ 27                  ; ~1,5 s
+
+boot_choice:
+        mov byte [boot_clean], 0
+        mov byte [boot_noauto], 0
+        call cfg_switches
+        test byte [sw_flags], 2     ; /N
+        jnz .r
+        mov si, msg_bootkeys
+        call kputs
+        mov cx, BOOT_WAIT
+        test byte [sw_flags], 1     ; /F
+        jz .w
+        mov cx, 1
+.w:
+        push es
+        xor ax, ax
+        mov es, ax
+        mov dx, [es:0x46C]
+        pop es
+.l:
+        mov ah, 1
+        int 0x16
+        jnz .key
+        ; ¿llega algo por el puerto serie? (no esperar más)
+        cmp byte [ser_ok], 0
+        je .t
+        push dx
+        mov dx, 0x3FD
+        in al, dx
+        pop dx
+        test al, 1
+        jnz .r
+.t:
+        push es
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x46C]
+        pop es
+        sub ax, dx
+        cmp ax, cx
+        jb .l
+.r:
+        ret
+.key:
+        cmp ah, 0x3F                ; F5
+        je .f5
+        cmp ah, 0x42                ; F8
+        jne .r                      ; otra tecla: se queda para después
+        xor ah, ah
+        int 0x16
+        jmp boot_menu
+.f5:
+        xor ah, ah
+        int 0x16
+        mov byte [boot_clean], 1
+        call no_autoexec
+        mov si, msg_clean
+        jmp kputs
+
+; añadir /D a la línea del intérprete: no ejecutará AUTOEXEC.BAT
+no_autoexec:
+        cmp byte [boot_noauto], 0
+        jne .r
+        mov byte [boot_noauto], 1
+        movzx bx, byte [shell_tail]
+        cmp bx, 120
+        ja .r
+        mov dword [shell_tail+1+bx], 0x0D442F20     ; " /D", CR
+        add byte [shell_tail], 3
+.r:
+        ret
+
+; buscar SWITCHES= en CONFIG.SYS: /F -> bit 0, /N -> bit 1
+cfg_switches:
+        mov byte [sw_flags], 0
+        mov si, cfgbuf
+.line:
+        call cfg_skip
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'SWIT'
+        jne .next
+        mov eax, [si+4]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'CHES'
+        jne .next
+.o:
+        lodsb
+        cmp al, 13
+        je .line
+        cmp al, 10
+        je .line
+        test al, al
+        jz .r
+        cmp al, '/'
+        jne .o
+        mov al, [si]
+        and al, 0xDF
+        cmp al, 'F'
+        jne .on
+        or byte [sw_flags], 1
+.on:
+        cmp al, 'N'
+        jne .o
+        or byte [sw_flags], 2
+        jmp .o
+.next:
+        lodsb
+        test al, al
+        jz .r
+        cmp al, 10
+        jne .next
+        jmp .line
+.r:
+        ret
+
+; ---- menú F8 ----
+boot_menu:
+        ; líneas de CONFIG.SYS que se muestran (ni vacías, ni REM, ni secciones)
+        xor cx, cx                  ; elementos
+        mov si, cfgbuf
+        mov word [bm_num], 0
+.scan:
+        cmp byte [si], 0
+        je .sd
+        inc word [bm_num]
+        push si
+        call cfg_skip
+        mov al, [si]
+        cmp al, 13
+        je .skip
+        cmp al, 10
+        je .skip
+        cmp al, ';'
+        je .skip
+        cmp al, '['
+        je .skip
+        mov eax, [si]
+        and eax, 0x00DFDFDF
+        cmp eax, 'REM'
+        je .skip
+        cmp cx, MAXIT - 1
+        jae .skip
+        cmp word [bm_num], MAXCL
+        jae .skip
+        mov bx, cx
+        shl bx, 1
+        mov [bm_off+bx], si
+        mov ax, [bm_num]
+        mov [bm_line+bx], ax
+        inc cx
+.skip:
+        pop si
+.eol:
+        lodsb
+        test al, al
+        jz .sd0
+        cmp al, 10
+        jne .eol
+        jmp .scan
+.sd0:
+        dec si
+.sd:
+        mov [bm_n], cx              ; + AUTOEXEC.BAT al final
+        mov word [bm_sel], 0
+        mov ax, 0x0003
+        int 0x10
+        mov ah, 1                   ; sin cursor
+        mov cx, 0x2000
+        int 0x10
+.draw:
+        call bm_draw
+        xor ah, ah
+        int 0x16
+        cmp ah, 0x48
+        je .up
+        cmp ah, 0x50
+        je .down
+        cmp al, ' '
+        je .toggle
+        cmp al, 13
+        je .go
+        cmp ah, 0x3F                ; F5: limpio
+        je .clean
+        cmp al, 27                  ; Esc: normal (todo activado)
+        je .normal
+        jmp .draw
+.up:
+        cmp word [bm_sel], 0
+        je .draw
+        dec word [bm_sel]
+        jmp .draw
+.down:
+        mov ax, [bm_sel]
+        cmp ax, [bm_n]
+        jae .draw
+        inc word [bm_sel]
+        jmp .draw
+.toggle:
+        mov bx, [bm_sel]
+        cmp bx, [bm_n]
+        je .ta
+        shl bx, 1
+        mov bx, [bm_line+bx]
+        xor byte [cfg_dis+bx], 1
+        jmp .draw
+.ta:
+        xor byte [bm_noauto], 1
+        jmp .draw
+.clean:
+        mov byte [boot_clean], 1
+        call no_autoexec
+        jmp .end
+.normal:
+        push di
+        push es
+        push ds
+        pop es
+        mov di, cfg_dis
+        mov cx, MAXCL
+        xor al, al
+        rep stosb
+        pop es
+        pop di
+        mov byte [bm_noauto], 0
+.go:
+        cmp byte [bm_noauto], 0
+        je .end
+        call no_autoexec
+.end:
+        mov ax, 0x0003
+        int 0x10
+        cmp byte [boot_clean], 0
+        je .r
+        mov si, msg_clean
+        call kputs
+.r:
+        ret
+
+; dibujar el menú directamente en la memoria de vídeo
+BM_TITLE    equ 0x4E                ; amarillo sobre rojo
+BM_TEXT     equ 0x07
+BM_ON       equ 0x0F
+BM_OFF      equ 0x08
+BM_HEAD     equ 0x0E
+BM_SEL      equ 0x1F
+BM_INFO     equ 0x0B
+BM_KEYS     equ 0x70
+bm_draw:
+        push es
+        mov ax, 0xB800
+        mov es, ax
+        ; fondo
+        xor di, di
+        mov cx, 80*25
+        mov ax, (BM_TEXT << 8) | ' '
+        rep stosw
+        ; título
+        xor di, di
+        mov cx, 80
+        mov ax, (BM_TITLE << 8) | ' '
+        rep stosw
+        mov di, 2
+        mov ah, BM_TITLE
+        mov si, bm_t1
+        call bm_puts
+        ; cabeceras
+        mov di, (2*80 + 2) * 2
+        mov ah, BM_HEAD
+        mov si, bm_hcfg
+        call bm_puts
+        mov di, (2*80 + 56) * 2
+        mov si, bm_hmem
+        call bm_puts
+        ; panel derecho: memoria
+        mov di, (4*80 + 56) * 2
+        mov ah, BM_TEXT
+        mov si, bm_conv
+        call bm_puts
+        int 0x12
+        movzx eax, ax
+        mov di, (4*80 + 69) * 2
+        call bm_kb
+        mov di, (5*80 + 56) * 2
+        mov si, bm_ext
+        call bm_puts
+        call bm_extkb
+        mov di, (5*80 + 69) * 2
+        call bm_kb
+        mov di, (6*80 + 56) * 2
+        mov si, bm_upp
+        call bm_puts
+        xor eax, eax
+        mov di, (6*80 + 69) * 2
+        call bm_kb
+        ; línea vertical
+        mov di, (2*80 + 53) * 2
+        mov cx, 21
+.vl:
+        mov word [es:di], (BM_OFF << 8) | 0xB3
+        add di, 160
+        loop .vl
+        ; elementos
+        xor cx, cx
+        mov word [bm_count], 0
+.it:
+        cmp cx, [bm_n]
+        ja .ite
+        mov ax, cx
+        add ax, 4
+        cmp cx, [bm_n]
+        jne .row
+        inc ax                      ; AUTOEXEC.BAT: una fila más abajo
+        push ax
+        mov di, ax
+        dec di
+        imul di, di, 160
+        add di, 4
+        push cx
+        mov ah, BM_HEAD
+        mov si, bm_hauto
+        call bm_puts
+        pop cx
+        pop ax
+.row:
+        imul di, ax, 160
+        add di, 4
+        ; activado / desactivado
+        mov bl, 1
+        cmp cx, [bm_n]
+        je .ia
+        mov bx, cx
+        shl bx, 1
+        mov bx, [bm_line+bx]
+        mov bl, [cfg_dis+bx]
+        xor bl, 1
+        jmp .ib
+.ia:
+        mov bl, [bm_noauto]
+        xor bl, 1
+.ib:
+        mov ah, BM_ON
+        test bl, bl
+        jnz .ic
+        mov ah, BM_OFF
+.ic:
+        test bl, bl
+        jz .id
+        inc word [bm_count]
+.id:
+        cmp cx, [bm_sel]
+        jne .ie
+        mov ah, BM_SEL
+        ; barra de selección
+        push di
+        push cx
+        push ax
+        sub di, 2
+        mov cx, 50
+        mov al, ' '
+        rep stosw
+        pop ax
+        pop cx
+        pop di
+.ie:
+        mov al, '['
+        stosw
+        mov al, 0xFE                ; ■
+        test bl, bl
+        jnz .if
+        mov al, ' '
+.if:
+        stosw
+        mov al, ']'
+        stosw
+        mov al, ' '
+        stosw
+        ; texto
+        push cx
+        cmp cx, [bm_n]
+        je .ta
+        mov bx, cx
+        shl bx, 1
+        mov si, [bm_off+bx]
+        mov cx, 45
+.tl:
+        mov al, [si]
+        cmp al, 13
+        je .tle
+        cmp al, 10
+        je .tle
+        test al, al
+        jz .tle
+        cmp al, 9
+        jne .tc
+        mov al, ' '
+.tc:
+        stosw
+        inc si
+        loop .tl
+.tle:
+        pop cx
+        jmp .nx
+.ta:
+        mov si, bm_tauto
+        call bm_puts
+        pop cx
+.nx:
+        inc cx
+        jmp .it
+.ite:
+        ; descripción de la línea elegida
+        mov di, (9*80 + 56) * 2
+        mov ah, BM_HEAD
+        mov si, bm_hdesc
+        call bm_puts
+        call bm_desc                ; SI = descripción
+        mov di, (11*80 + 56) * 2
+        mov ah, BM_INFO
+        call bm_wrap
+        ; resumen
+        mov di, (22*80 + 2) * 2
+        mov ah, 0x0A
+        mov si, bm_s1
+        call bm_puts
+        mov ax, [bm_count]
+        add al, '0'
+        cmp ax, '9'
+        jbe .n1
+        mov al, '+'
+.n1:
+        mov ah, 0x0A
+        stosw
+        mov si, bm_s2
+        call bm_puts
+        mov ax, [bm_n]
+        inc ax
+        add al, '0'
+        cmp al, '9'
+        jbe .n2
+        mov al, '+'
+.n2:
+        mov ah, 0x0A
+        stosw
+        mov si, bm_s3
+        call bm_puts
+        ; teclas
+        mov di, 24*160
+        mov cx, 80
+        mov ax, (BM_KEYS << 8) | ' '
+        rep stosw
+        mov di, 24*160 + 2
+        mov ah, BM_KEYS
+        mov si, bm_keys
+        call bm_puts
+        pop es
+        ret
+
+; SI = texto (0) -> ES:DI con atributo AH
+bm_puts:
+        lodsb
+        test al, al
+        jz .r
+        stosw
+        jmp bm_puts
+.r:
+        ret
+; SI = texto -> líneas de 23 columnas desde ES:DI (columna 56)
+bm_wrap:
+        mov cx, 23
+.l:
+        lodsb
+        test al, al
+        jz .r
+        cmp al, '|'                 ; salto de línea
+        je .nl
+        stosw
+        loop .l
+.nl:
+        add di, 160 - 46
+        add di, cx
+        add di, cx
+        cmp byte [si], '|'          ; línea llena justo antes de un salto
+        jne bm_wrap
+        cmp cx, 0
+        jne bm_wrap
+        inc si
+        jmp bm_wrap
+.r:
+        ret
+
+; EAX KB -> "31.552 KB" alineado a la derecha (8 columnas) en ES:DI
+bm_kb:
+        push ebx
+        push ecx
+        push edx
+        push si
+        mov si, bm_num_e
+        mov ebx, 10
+        xor cl, cl
+.d:
+        xor edx, edx
+        div ebx
+        cmp cl, 3
+        jne .nc
+        dec si
+        mov byte [si], '.'
+        xor cl, cl
+.nc:
+        add dl, '0'
+        dec si
+        mov [si], dl
+        inc cl
+        test eax, eax
+        jnz .d
+        ; relleno
+        mov cx, bm_num_e
+        sub cx, si
+        neg cx
+        add cx, 7
+        jle .p
+        mov ax, (BM_TEXT << 8) | ' '
+        rep stosw
+.p:
+        mov ah, BM_ON
+        call bm_puts
+        mov ah, BM_TEXT
+        mov si, bm_kbs
+        call bm_puts
+        pop si
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
+; memoria extendida de la BIOS (KB) -> EAX
+bm_extkb:
+        push ebx
+        push ecx
+        push edx
+        mov ax, 0xE801
+        int 0x15
+        jc .old
+        test ax, ax
+        jnz .e
+        mov ax, cx
+        mov bx, dx
+.e:
+        movzx eax, ax
+        movzx ebx, bx
+        shl ebx, 6
+        add eax, ebx
+        jmp .r
+.old:
+        mov ah, 0x88
+        int 0x15
+        movzx eax, ax
+.r:
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
+; descripción de la línea elegida -> SI
+bm_desc:
+        push es
+        push di
+        push ds
+        pop es
+        call .d
+        pop di
+        pop es
+        ret
+.d:
+        mov bx, [bm_sel]
+        cmp bx, [bm_n]
+        jne .c
+        mov si, d_auto
+        ret
+.c:
+        shl bx, 1
+        mov si, [bm_off+bx]
+        call cfg_skip
+        ; palabra clave en mayúsculas en bm_key (8)
+        mov di, bm_key
+        mov cx, 8
+.k:
+        mov al, [si]
+        cmp al, 'a'
+        jb .k1
+        cmp al, 'z'
+        ja .k1
+        sub al, 32
+.k1:
+        mov [di], al
+        inc si
+        inc di
+        loop .k
+        mov bx, d_tab
+.f:
+        mov si, [bx]
+        test si, si
+        jz .other
+        mov di, bm_key
+        mov cx, [bx+2]
+        push si
+        repe cmpsb
+        pop si
+        je .hit
+        add bx, 6
+        jmp .f
+.hit:
+        mov si, [bx+4]
+        cmp si, d_device
+        jne .r
+        call bm_drvdesc
+.r:
+        ret
+.other:
+        mov si, d_other
+        ret
+
+; DEVICE=: según el nombre del driver
+bm_drvdesc:
+        mov bx, [bm_sel]
+        shl bx, 1
+        mov si, [bm_off+bx]
+.l:
+        mov al, [si]
+        cmp al, 13
+        je .gen
+        test al, al
+        jz .gen
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'HSPX'
+        je .xms
+        cmp eax, 'HSPC'
+        je .cd
+        cmp eax, 'HSPU'
+        je .usb
+        cmp eax, 'HSPR'
+        je .ram
+        inc si
+        jmp .l
+.xms:
+        mov si, d_xms
+        ret
+.cd:
+        mov si, d_cd
+        ret
+.usb:
+        mov si, d_usb
+        ret
+.ram:
+        mov si, d_ram
+        ret
+.gen:
+        mov si, d_device
+        ret
+
+; una línea de CONFIG.SYS en cfgl
+config_line:
+        mov si, cfgl
+        call cfg_skip
+        mov al, [si]
+        cmp al, 13
+        je .r
+        cmp al, ';'
+        je .r
+        cmp al, '['
+        je .section
+        cmp byte [cfg_inmenu], 0
+        jne .r
+        ; palabra clave
+        mov di, cfg_key
+        mov cx, 15
+.k:
+        mov al, [si]
+        cmp al, '='
+        je .ke
+        cmp al, ' '
+        je .ke
+        cmp al, 9
+        je .ke
+        cmp al, 13
+        je .ke
+        cmp al, 'a'
+        jb .k1
+        cmp al, 'z'
+        ja .k1
+        sub al, 32
+.k1:
+        mov [di], al
+        inc di
+        inc si
+        loop .k
+.ke:
+        mov byte [di], 0
+        call cfg_skip
+        cmp byte [si], '='
+        jne .nv
+        inc si
+.nv:
+        call cfg_skip
+        mov [cfg_val], si
+        ; buscar en la tabla
+        mov bx, cfg_cmds
+.find:
+        mov di, [bx]
+        test di, di
+        jz .unk
+        push si
+        mov si, cfg_key
+.c:
+        mov al, [si]
+        cmp al, [di]
+        jne .n
+        test al, al
+        jz .hit
+        inc si
+        inc di
+        jmp .c
+.n:
+        pop si
+        add bx, 4
+        jmp .find
+.hit:
+        pop si
+        jmp [bx+2]
+.unk:
+        mov si, msg_cfgunk
+        call kputs
+        call cfg_lineerr
+.r:
+        ret
+.section:
+        ; [MENU] no se admite: sus líneas se ignoran; las demás secciones se procesan
+        mov byte [cfg_inmenu], 0
+        cmp dword [si+1], 'MENU'
+        je .menu
+        cmp dword [si+1], 'menu'
+        jne .r
+.menu:
+        mov byte [cfg_inmenu], 1
+        ret
+
+cfg_skip:
+        cmp byte [si], ' '
+        je .s
+        cmp byte [si], 9
+        jne .r
+.s:
+        inc si
+        jmp cfg_skip
+.r:
+        ret
+
+cfg_lineerr:
+        mov si, msg_cfgline
+        call kputs
+        movzx eax, word [cfg_line]
+        call kputnum
+        mov si, msg_crlf
+        jmp kputs
+
+; EAX -> decimal por la consola
+kputnum:
+        push eax
+        push ebx
+        push edx
+        push cx
+        mov ebx, 10
+        xor cx, cx
+.l:
+        xor edx, edx
+        div ebx
+        push dx
+        inc cx
+        test eax, eax
+        jnz .l
+.p:
+        pop ax
+        add al, '0'
+        call con_out
+        loop .p
+        pop cx
+        pop edx
+        pop ebx
+        pop eax
+        ret
+
+        section .low
+cfg_cmds:
+        dw k_device, cfg_device
+        dw k_devhigh, cfg_device
+        dw k_install, cfg_install
+        dw k_insthigh, cfg_install
+        dw k_shell, cfg_shell
+        dw k_set, cfg_set
+        dw k_lastdrive, cfg_lastdrive
+        dw k_rem, cfg_ignore
+        dw k_files, cfg_ignore
+        dw k_buffers, cfg_ignore
+        dw k_stacks, cfg_ignore
+        dw k_fcbs, cfg_ignore
+        dw k_break, cfg_ignore
+        dw k_dos, cfg_ignore
+        dw k_country, cfg_ignore
+        dw k_numlock, cfg_numlock
+        dw k_switches, cfg_ignore
+        dw k_menuitem, cfg_ignore
+        dw k_menudef, cfg_ignore
+        dw k_include, cfg_ignore
+        dw 0, 0
+k_device    db "DEVICE", 0
+k_devhigh   db "DEVICEHIGH", 0
+k_install   db "INSTALL", 0
+k_insthigh  db "INSTALLHIGH", 0
+k_shell     db "SHELL", 0
+k_set       db "SET", 0
+k_lastdrive db "LASTDRIVE", 0
+k_rem       db "REM", 0
+k_files     db "FILES", 0
+k_buffers   db "BUFFERS", 0
+k_stacks    db "STACKS", 0
+k_fcbs      db "FCBS", 0
+k_break     db "BREAK", 0
+k_dos       db "DOS", 0
+k_country   db "COUNTRY", 0
+k_numlock   db "NUMLOCK", 0
+k_switches  db "SWITCHES", 0
+k_menuitem  db "MENUITEM", 0
+k_menudef   db "MENUDEFAULT", 0
+k_include   db "INCLUDE", 0
+        section .text
+
+cfg_ignore:
+        ret
+
+cfg_lastdrive:
+        mov si, [cfg_val]
+        mov al, [si]
+        and al, 0xDF
+        sub al, 'A' - 1
+        cmp al, 1
+        jb .r
+        cmp al, 26
+        ja .r
+        mov [lastdrive], al
+.r:
+        ret
+
+; NUMLOCK=ON|OFF: Bloq Num al arrancar (la BIOS enciende la luz en la
+; siguiente llamada a INT 16h)
+cfg_numlock:
+        mov si, [cfg_val]
+        mov al, [si+1]
+        and al, 0xDF
+        push es
+        push word 0x40
+        pop es
+        cmp al, 'N'                 ; ON
+        jne .off
+        or byte [es:0x17], 0x20
+        jmp .r
+.off:
+        cmp al, 'F'                 ; OFF
+        jne .r
+        and byte [es:0x17], 0xDF
+.r:
+        pop es
+        ret
+
+; SET NOMBRE=valor -> setbuf
+cfg_set:
+        mov si, [cfg_val]
+        mov di, [set_end]
+        test di, di
+        jnz .h
+        mov di, setbuf
+.h:
+        mov bx, di
+.n:
+        lodsb
+        cmp al, 13
+        je .bad
+        cmp al, '='
+        je .eq
+        cmp al, 'a'
+        jb .n1
+        cmp al, 'z'
+        ja .n1
+        sub al, 32
+.n1:
+        cmp di, setbuf + SET_MAX - 2
+        jae .bad
+        mov [cs:di], al
+        inc di
+        jmp .n
+.eq:
+        mov byte [cs:di], '='
+        inc di
+.v:
+        lodsb
+        cmp al, 13
+        je .ve
+        cmp di, setbuf + SET_MAX - 2
+        jae .bad
+        mov [cs:di], al
+        inc di
+        jmp .v
+.ve:
+        mov byte [cs:di], 0
+        inc di
+        mov [set_end], di
+        ret
+.bad:
+        mov [set_end], bx
+        ret
+
+; SHELL=ruta argumentos
+cfg_shell:
+        mov si, [cfg_val]
+        mov di, shell_path
+        mov cx, 63
+.p:
+        lodsb
+        cmp al, ' '
+        je .pe
+        cmp al, 13
+        je .pe0
+        mov [di], al
+        inc di
+        loop .p
+.pe0:
+        dec si
+.pe:
+        mov byte [di], 0
+        ; argumentos
+        mov di, shell_tail + 1
+        xor cx, cx
+.a:
+        lodsb
+        cmp al, 13
+        je .ae
+        cmp cx, 120
+        jae .a
+        mov [di], al
+        inc di
+        inc cx
+        jmp .a
+.ae:
+        cmp cx, 0
+        je .noargs
+        ; DOS pasa la cola con un espacio delante
+        mov byte [di], 13
+        mov [shell_tail], cl
+        ret
+.noargs:
+        mov byte [shell_tail], 0
+        mov byte [shell_tail+1], 13
+        ret
+
+; INSTALL=programa argumentos -> se ejecutan tras los drivers
+cfg_install:
+        mov si, [cfg_val]
+        mov di, [inst_end]
+        test di, di
+        jnz .h
+        mov di, instbuf
+.h:
+.c:
+        lodsb
+        cmp al, 13
+        je .e
+        cmp di, instbuf + INST_MAX - 2
+        jae .e
+        mov [cs:di], al
+        inc di
+        jmp .c
+.e:
+        mov byte [cs:di], 0
+        inc di
+        mov [inst_end], di
+        ret
+
+; DEVICE=ruta argumentos
+cfg_device:
+        mov si, [cfg_val]
+        mov di, dpath
+        mov cx, 79
+.p:
+        lodsb
+        cmp al, ' '
+        je .pe
+        cmp al, 13
+        je .pe
+        cmp al, 9
+        je .pe
+        mov [di], al
+        inc di
+        loop .p
+.pe:
+        mov byte [di], 0
+        push ds
+        pop es
+        mov si, dpath
+        call open_path
+        jc .missing
+        mov byte [di+SFT_REF], 0
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .missing
+        mov eax, [di+SFT_SIZE]
+        cmp eax, 0xFFF0
+        ja .missing
+        mov [ld_size], ax
+        ; memoria: el bloque libre más grande
+        mov bx, 0xFFFF
+        call mcb_alloc
+        call mcb_alloc
+        jc .missing
+        mov [ld_seg], ax
+        mov [ld_paras], bx
+        push es
+        dec ax
+        mov es, ax
+        mov word [es:1], 8
+        ; nombre del bloque = nombre del fichero
+        push di
+        mov di, 8
+        mov cx, 8
+        xor al, al
+        rep stosb
+        pop di
+        mov si, dpath
+        mov bx, si
+.bn:
+        lodsb
+        test al, al
+        jz .bne
+        cmp al, '\'
+        je .bs
+        cmp al, ':'
+        jne .bn
+.bs:
+        mov bx, si
+        jmp .bn
+.bne:
+        mov si, bx
+        mov di, 8
+.bc:
+        lodsb
+        test al, al
+        jz .bce
+        cmp al, '.'
+        je .bce
+        cmp di, 16
+        jae .bce
+        mov [es:di], al
+        inc di
+        jmp .bc
+.bce:
+        pop es
+        ; leer el fichero
+        push ds
+        pop es
+        mov si, dpath
+        call open_path
+        mov byte [di+SFT_REF], 0
+        mov es, [ld_seg]
+        xor bx, bx
+        mov cx, [ld_size]
+        call file_read
+        ; ¿formato MZ?
+        mov es, [ld_seg]
+        mov ax, [ld_seg]
+        mov [ld_img], ax
+        cmp word [es:0], 'MZ'
+        jne .raw
+        mov ax, [es:8]
+        add ax, [ld_seg]
+        mov [ld_img], ax
+        mov cx, [es:6]
+        mov si, [es:0x18]
+.rl:
+        jcxz .raw
+        push es
+        mov bx, [es:si]
+        mov ax, [es:si+2]
+        add ax, [ld_img]
+        mov es, ax
+        mov ax, [ld_img]
+        add [es:bx], ax
+        pop es
+        add si, 4
+        dec cx
+        jmp .rl
+.raw:
+        ; inicializar cada driver del fichero
+        mov ax, [ld_seg]
+        add ax, [ld_paras]
+        mov [ld_end], ax
+        mov word [ld_used], 0
+        mov word [dc_hdr], 0
+        mov ax, [ld_img]
+        mov [dc_hdr+2], ax
+.drv:
+        les di, [dc_hdr]
+        mov ax, [es:di]
+        mov [ld_next], ax
+        ; petición INIT
+        push ds
+        pop es
+        mov di, dreq
+        mov cx, 15
+        xor ax, ax
+        rep stosw
+        mov byte [dreq], 0x17
+        mov byte [dreq+2], 0
+        mov word [dreq+0x0E], 0
+        mov ax, [ld_end]
+        mov [dreq+0x10], ax
+        mov ax, [cfg_val]
+        mov [dreq+0x12], ax
+        mov [dreq+0x14], ds
+        mov al, [ndrives]
+        mov [dreq+0x16], al
+        call dev_call
+        test word [dreq+3], 0x8000
+        jnz .initerr
+        ; memoria usada hasta la dirección de corte
+        mov ax, [dreq+0x0E]
+        add ax, 15
+        shr ax, 4
+        add ax, [dreq+0x10]
+        sub ax, [ld_seg]
+        jbe .decline
+        cmp ax, [ld_paras]
+        ja .initerr
+        cmp ax, [ld_used]
+        jbe .nu
+        mov [ld_used], ax
+.nu:
+        les di, [dc_hdr]
+        test word [es:di+4], 0x8000
+        jz .block
+        ; carácter: enlazar tras NUL
+        mov eax, [dev_nul]
+        mov [es:di], eax
+        mov eax, [dc_hdr]
+        mov [dev_nul], eax
+        cmp dword [es:di+10], 'CON '
+        jne .nc
+        mov [con_hdr], eax
+.nc:
+        test word [es:di+4], 0x0008
+        jz .nextdrv
+        mov [lol+8], eax
+        jmp .nextdrv
+.block:
+        mov dword [es:di], 0xFFFFFFFF
+        movzx cx, byte [dreq+0x0D]
+        les si, [dreq+0x12]
+.unit:
+        jcxz .bdone
+        movzx bx, byte [ext_count]
+        cmp bx, 4
+        jae .bdone
+        imul bx, bx, 9
+        add bx, ext_tab
+        mov eax, [dc_hdr]
+        mov [bx], eax
+        mov al, [dreq+0x0D]
+        sub al, cl
+        mov [bx+4], al
+        mov ax, [es:si]
+        mov [bx+5], ax
+        mov [bx+7], es
+        inc byte [ext_count]
+        add si, 2
+        dec cx
+        jmp .unit
+.bdone:
+        call drives_ext
+.nextdrv:
+        mov ax, [ld_next]
+        cmp ax, 0xFFFF
+        je .fin
+        mov [dc_hdr], ax
+        jmp .drv
+.fin:
+        ; dejar solo la memoria que el driver necesita
+        mov es, [ld_seg]
+        mov bx, [ld_used]
+        call mcb_resize
+        ret
+.decline:
+        ; el driver no quiere quedarse residente: se descarga sin mensaje
+        cmp word [ld_used], 0
+        jne .fin
+        mov es, [ld_seg]
+        call mcb_free
+        ret
+.initerr:
+        mov es, [ld_seg]
+        call mcb_free
+        mov si, msg_drverr
+        call kputs
+        mov si, dpath
+        call kputs
+        mov si, msg_crlf
+        jmp kputs
+.missing:
+        mov si, msg_missing
+        call kputs
+        mov si, dpath
+        call kputs
+        mov si, msg_crlf
+        call kputs
+        jmp cfg_lineerr
+
+; entorno inicial: COMSPEC, PATH y PROMPT (si CONFIG.SYS no los fija) + SET
+build_root_env:
+        mov es, [root_psp]
+        push es
+        mov es, [es:0x2C]
+        call mcb_free
+        pop es
+        mov bx, (ENV_ROOT + 15) / 16
+        call mcb_alloc
+        jc .r
+        mov es, [root_psp]
+        mov [es:0x2C], ax
+        push ax
+        dec ax
+        mov es, ax
+        mov ax, [root_psp]
+        mov [es:1], ax
+        pop es
+        xor di, di
+        mov si, s_comspec
+        call .str
+        mov si, shell_path
+        call .strz
+        mov si, s_path
+        call .has
+        jnc .np
+        mov si, s_path
+        call .str
+        mov al, [cur_drive]
+        add al, 'A'
+        stosb
+        mov ax, '\:'
+        xchg al, ah
+        stosw
+        xor al, al
+        stosb
+.np:
+        mov si, s_prompt
+        call .has
+        jnc .npr
+        mov si, s_prompt
+        call .str
+        mov si, s_pg
+        call .strz
+.npr:
+        ; variables de SET
+        mov si, setbuf
+.sv:
+        cmp si, [set_end]
+        jae .end
+        call .strzh
+        jmp .sv
+.end:
+        xor al, al
+        stosb
+.r:
+        push ds
+        pop es
+        ret
+; copiar SI sin el cero final / con el cero final
+.str:
+        lodsb
+        test al, al
+        jz .sr
+        stosb
+        jmp .str
+.sr:
+        ret
+.strz:
+        lodsb
+        stosb
+        test al, al
+        jnz .strz
+        ret
+.strzh:                             ; (de setbuf: con el código, CS:)
+        cs lodsb
+        stosb
+        test al, al
+        jnz .strzh
+        ret
+; ¿setbuf define la variable SI (con "=")? CF=0 si sí
+.has:
+        push di
+        mov bx, setbuf
+.hl:
+        cmp bx, [set_end]
+        jae .hno
+        push si
+        mov di, bx
+.hc:
+        mov al, [si]
+        test al, al
+        jz .hyes
+        cmp al, [cs:di]
+        jne .hn
+        inc si
+        inc di
+        jmp .hc
+.hn:
+        pop si
+.hs:
+        inc bx
+        cmp byte [cs:bx-1], 0
+        jne .hs
+        jmp .hl
+.hyes:
+        pop si
+        pop di
+        clc
+        ret
+.hno:
+        pop di
+        stc
+        ret
+
+; ejecutar las líneas INSTALL=
+install_run:
+        mov si, instbuf
+.l:
+        cmp si, [inst_end]
+        jae .r
+        ; ruta
+        mov di, ipath
+.p:
+        cs lodsb
+        test al, al
+        jz .pe0
+        cmp al, ' '
+        je .pe
+        mov [di], al
+        inc di
+        jmp .p
+.pe0:
+        dec si
+.pe:
+        mov byte [di], 0
+        mov di, itail + 1
+        xor cx, cx
+        mov byte [di], ' '
+        inc di
+        inc cx
+.a:
+        cs lodsb
+        test al, al
+        jz .ae
+        mov [di], al
+        inc di
+        inc cx
+        jmp .a
+.ae:
+        mov byte [di], 13
+        mov [itail], cl
+        push si
+        mov ax, KSEG
+        mov ds, ax
+        mov es, ax
+        mov dx, ipath
+        mov bx, inst_pb
+        mov ax, 0x4B00
+        int 0x21
+        mov ax, KSEG
+        mov ds, ax
+        mov es, ax
+        pop si
+        jnc .l
+        push si
+        mov si, msg_missing
+        call kputs
+        mov si, ipath
+        call kputs
+        mov si, msg_crlf
+        call kputs
+        pop si
+        jmp .l
+.r:
+        ret
+
 ; AL = unidad -> cur_drv = copia de su entrada (sin montarla); CF si no existe
 select_raw:
         cmp al, NDRV
@@ -842,7 +2731,7 @@ media_check:
         mov dl, [cur_drv+D_BIOS]
         mov ah, 0x16
         push ds
-        int 0x13
+        call KSEG:l_int13
         pop ds
         cmp ah, 6                   ; «cambiado»
         je .changed
@@ -979,10 +2868,10 @@ crit_ask:
         mov bp, [cur_drv+D_DRVHDR+2]
         jmp .hd
 .h:
-        mov bp, cs
+        mov bp, KSEG
 .hd:
         ; las llamadas anidadas a INT 21h pisan la pila guardada en el PSP
-        mov es, [cs:cur_psp]
+        mov es, [cur_psp]
         push word [es:0x2E]
         push word [es:0x30]
         ; como MS-DOS, INT 24h se llama sobre la pila del programa, justo en
@@ -997,20 +2886,19 @@ crit_ask:
         mov ss, [crit_usp+2]
         mov sp, [crit_usp]
         sti
-        int 0x24
-        cli
-        mov ss, [cs:crit_ksp+2]
-        mov sp, [cs:crit_ksp]
-        sti
-        jmp short .i24b
+        ; (INT 24h se hace desde abajo, sin dejar nada más en la pila del
+        ; programa; a la vuelta se comprueba A20 y se sigue en .i24b)
+        jmp KSEG:l_i24_user
 .i24:
-        int 0x24
+        jmp KSEG:l_i24_same
 .i24b:
-        mov es, [cs:cur_psp]
+        mov bx, KSEG                ; (el manejador pudo cambiar DS)
+        mov ds, bx
+        mov es, [cur_psp]
         pop word [es:0x30]
         pop word [es:0x2E]
-        mov [cs:crit_res], al
-        mov byte [cs:crit_on], 0
+        mov [crit_res], al
+        mov byte [crit_on], 0
         pop es
         pop ds
         popad
@@ -1053,9 +2941,11 @@ crit_abort:
         jmp do_term
 
 ; cabecera de dispositivo de bloque del núcleo (para BP:SI de INT 24h)
+        section .low
 crit_hdr    dd 0xFFFFFFFF
             dw 0x0000, 0, 0
             db 1, "HSPDISK"
+        section .text
 
 ; guardar cur_drv en su entrada de la tabla
 drv_store:
@@ -1257,13 +3147,14 @@ vectors_init:
         pop es
         ret
 
+        section .low
 vec_table:
         db 0x00
-        dw int00
+        dw l_int00
         db 0x20
         dw int20
         db 0x21
-        dw int21
+        dw l_int21
         db 0x22
         dw int22
         db 0x23
@@ -1271,33 +3162,72 @@ vec_table:
         db 0x24
         dw int24
         db 0x25
-        dw int25
+        dw l_int25
         db 0x26
-        dw int26
+        dw l_int26
         db 0x27
         dw int27
         db 0x28
         dw int_iret
         db 0x29
-        dw int29
+        dw l_int29
         db 0x2A
         dw int_iret
         db 0x2F
         dw int2f
         db 0xFF
+        section .text
 
 ; -----------------------------------------------------------------------------
 ;  Memoria: cadena de MCB (Memory Control Blocks)
 ; -----------------------------------------------------------------------------
 mem_init:
-        mov ax, kernel_end + 15
-        shr ax, 4
-        add ax, KSEG
-        mov [first_mcb], ax
         int 0x12                    ; AX = KB de memoria convencional
         shl ax, 6
         mov [mem_top], ax
+        mov bx, hbss_end + 15       ; DOS=LOW: la memoria libre empieza
+        shr bx, 4                   ; detrás del código y sus datos
+        add bx, KSEG
+        cmp byte [dos_want], 0
+        je .low
+        ; DOS=HIGH: el código sale ya de en medio, a lo más alto de la
+        ; memoria convencional, hasta que haya HMA (hma_try) o se vea que
+        ; no la hay (hma_final); la memoria libre empieza detrás de .bss
+        mov cx, hbss_end + 15
+        sub cx, img_start
+        shr cx, 4                   ; CX = párrafos del código y sus datos
+        mov dx, ax
+        sub dx, cx                  ; DX = adonde va
+        mov si, img_start
+        shr si, 4
+        add si, KSEG                ; SI = primer párrafo libre
+        mov di, si
+        add di, 0x1000              ; (si no quedan ni 64 KB, no se intenta)
+        cmp dx, di
+        jbe .low
+        mov [tmp_paras], cx
+        mov [mem_top], dx
+        mov [first_mcb], si
+        mov es, dx
+        xor di, di
+        mov ax, img_start
+        shr ax, 4
+        sub dx, ax                  ; el segmento con el que corre allí
+        call code_move
+        jnc .moved
+        mov ax, [mem_top]           ; (la copia no sale igual: como DOS=LOW)
+        add ax, [tmp_paras]
+        mov [mem_top], ax
+        mov bx, hbss_end + 15
+        shr bx, 4
+        add bx, KSEG
+        jmp short .low
+.moved:
+        mov byte [dos_tmp], 1
+        mov ax, [mem_top]
         mov bx, [first_mcb]
+.low:
+        mov [first_mcb], bx
         mov es, bx
         mov byte [es:0], 'Z'
         mov word [es:1], 0
@@ -1640,6 +3570,7 @@ root_psp_init:
         pop es
         ret
 
+        section .low
 root_env:
         db "COMSPEC="
 env_l1: db "A:\COMMAND.COM", 0
@@ -1648,6 +3579,7 @@ env_l2: db "A:\", 0
         db "PROMPT=$P$G", 0
         db 0
 root_env_end:
+        section .text
 
 ; -----------------------------------------------------------------------------
 ;  Consola: BIOS (INT 10h / INT 16h) + espejo en el puerto serie COM1
@@ -1967,7 +3899,7 @@ con_getc_bios:
         ; ahorro de energía y Windows saben que el sistema está parado)
         cmp byte [indos], 0
         je .idle
-        int 0x28
+        call KSEG:l_int28
 .idle:
         ; sin tecla: el procesador descansa hasta la próxima interrupción
         ; (reloj 18 veces por segundo, teclado, ratón...) en vez de dar
@@ -2342,7 +4274,7 @@ line_input:
 .rpos:
         shl si, 7
         add si, hist_buf
-        movzx dx, byte [si]         ; longitud
+        movzx dx, byte [cs:si]      ; longitud
         inc si
 .rc:
         test dx, dx
@@ -2351,7 +4283,7 @@ line_input:
         inc ax
         cmp ax, cx
         jae .rd
-        mov al, [si]
+        mov al, [cs:si]
         mov [es:di+2+bx], al
         call con_out
         inc bx
@@ -2692,14 +4624,14 @@ hist_save:
 .p:
         shl si, 7
         add si, hist_buf
-        cmp [si], bl
+        cmp [cs:si], bl
         jne .new
         mov cx, bx
         push di
         add di, 2
         inc si
 .cmp:
-        mov al, [si]
+        mov al, [cs:si]
         cmp al, [es:di]
         jne .diff
         inc si
@@ -2713,14 +4645,14 @@ hist_save:
         movzx si, byte [hist_head]
         shl si, 7
         add si, hist_buf
-        mov [si], bl
+        mov [cs:si], bl
         inc si
         mov cx, bx
         push di
         add di, 2
 .cp:
         mov al, [es:di]
-        mov [si], al
+        mov [cs:si], al
         inc si
         inc di
         loop .cp
@@ -3516,7 +5448,9 @@ wr_check:
         mov byte [F_AL], 0xFF
 .r:
         ret
+        section .low
 wr_fns      db 0x39, 0x3A, 0x3C, 0x3E, 0x40, 0x41, 0x43, 0x56, 0x5A, 0x5B, 0x68, 0x6C, 0
+        section .text
 ; con aviso de error crítico (INT 24h) si falla dentro de INT 21h
 disk_io:
         call disk_io_raw
@@ -3562,7 +5496,7 @@ disk_io_raw:
         mov dl, [cur_drv+D_BIOS]
         mov si, dap
         push bp
-        int 0x13
+        call KSEG:l_int13
         pop bp
         mov [io_st], ah
         pop eax
@@ -3572,7 +5506,8 @@ disk_io_raw:
         push eax
         xor edx, edx
         movzx ecx, word [cur_drv+D_SPT]
-        jecxz .chsbad
+        test ecx, ecx
+        jz .chsbad
         div ecx
         inc dx
         mov cx, dx
@@ -3591,7 +5526,7 @@ disk_io_raw:
         mov ah, [io_cmd]
         mov al, 1
         push bp
-        int 0x13
+        call KSEG:l_int13
         pop bp
         mov [io_st], ah
         pop eax
@@ -3614,7 +5549,7 @@ disk_io_raw:
         xor ax, ax
         mov dl, [cur_drv+D_BIOS]
         push bp
-        int 0x13
+        call KSEG:l_int13
         pop bp
         pop eax
         dec di
@@ -5244,9 +7179,9 @@ share_close:
         mov bx, lock_tab
         mov cx, NLOCKS
 .l:
-        cmp [bx], al
+        cmp [cs:bx], al
         jne .n
-        mov byte [bx], 0
+        mov byte [cs:bx], 0
 .n:
         add bx, LK_LEN
         loop .l
@@ -5289,7 +7224,7 @@ fn_5c:
         mov cx, NLOCKS
         xor si, si                  ; primera entrada libre
 .l:
-        cmp byte [bx], 0
+        cmp byte [cs:bx], 0
         jne .used
         test si, si
         jnz .n
@@ -5299,9 +7234,9 @@ fn_5c:
         call lk_same                ; los bloqueos de otros ficheros no cuentan
         jne .n
         mov eax, [lk_start]
-        cmp eax, [bx+8]
+        cmp eax, [cs:bx+8]
         jae .n
-        mov eax, [bx+4]
+        mov eax, [cs:bx+4]
         cmp eax, [lk_end]
         jb .viol
 .n:
@@ -5310,13 +7245,13 @@ fn_5c:
         test si, si
         jz .full
         mov al, [lk_sft]
-        mov [si], al
+        mov [cs:si], al
         mov ax, [cur_psp]
-        mov [si+2], ax
+        mov [cs:si+2], ax
         mov eax, [lk_start]
-        mov [si+4], eax
+        mov [cs:si+4], eax
         mov eax, [lk_end]
-        mov [si+8], eax
+        mov [cs:si+8], eax
 .done:
         ret
 .unlock:
@@ -5325,15 +7260,15 @@ fn_5c:
         mov cx, NLOCKS
         mov al, [lk_sft]
 .ul:
-        cmp [bx], al
+        cmp [cs:bx], al
         jne .un
         mov edx, [lk_start]
-        cmp edx, [bx+4]
+        cmp edx, [cs:bx+4]
         jne .un
         mov edx, [lk_end]
-        cmp edx, [bx+8]
+        cmp edx, [cs:bx+8]
         jne .un
-        mov byte [bx], 0
+        mov byte [cs:bx], 0
         ret
 .un:
         add bx, LK_LEN
@@ -5353,7 +7288,7 @@ fn_5c:
 lk_same:
         push si
         push ax
-        movzx si, byte [bx]
+        movzx si, byte [cs:bx]
         dec si
         imul si, si, SFT_LEN
         SFT_GAP si
@@ -5974,12 +7909,7 @@ dev_call:
         mov ax, KSEG
         mov es, ax
         mov bx, dreq
-        call far [dc_far]
-        mov ax, KSEG
-        mov ds, ax
-        mov es, ax
-        mov bx, dreq
-        call far [dc_far2]
+        call KSEG:l_devcall         ; estrategia e interrupción, desde abajo
         mov ax, KSEG
         mov ds, ax
         pop es
@@ -6074,6 +8004,7 @@ drv_block_io:
         ret
 
 ; rutinas de los dispositivos propios del núcleo
+        section .low
 dev_strat:
         mov [cs:dev_reqp], bx
         mov [cs:dev_reqp+2], es
@@ -6090,6 +8021,7 @@ dev_intr_null:
         pop bx
         pop ds
         retf
+        section .text
 dev_intr_con:
         pushad
         push ds
@@ -6204,1475 +8136,6 @@ check_device:
         clc
         ret
 
-; -----------------------------------------------------------------------------
-;  CONFIG.SYS
-; -----------------------------------------------------------------------------
-config_run:
-        mov byte [lastdrive], 5
-        mov al, [cur_drive]
-        add al, 'A'
-        mov [cfg_path], al
-        push ds
-        pop es
-        mov byte [cfgbuf], 0
-        mov si, cfg_path
-        call open_path
-        jc .choose
-        mov byte [di+SFT_REF], 0
-        cmp byte [di+SFT_TYPE], T_FILE
-        jne .choose
-        mov bx, cfgbuf
-        mov cx, CFG_MAX - 1
-        call file_read
-        mov bx, ax
-        mov byte [cfgbuf+bx], 0
-.choose:
-        call boot_choice            ; F5 / F8
-        cmp byte [boot_clean], 0
-        jne .none
-        mov word [cfg_line], 0
-        mov byte [cfg_inmenu], 0
-        mov si, cfgbuf
-.line:
-        cmp byte [si], 0
-        je .done
-        inc word [cfg_line]
-        ; copiar la línea en cfgl (terminada en CR LF 0)
-        mov di, cfgl
-.cl:
-        lodsb
-        test al, al
-        jz .ce0
-        cmp al, 10
-        je .ce
-        cmp al, 13
-        je .cl
-        cmp al, 0x1A
-        je .ce0
-        cmp di, cfgl + 160
-        jae .cl
-        mov [di], al
-        inc di
-        jmp .cl
-.ce0:
-        dec si
-.ce:
-        mov word [di], 0x0A0D
-        mov byte [di+2], 0
-        ; ¿desactivada en el menú de arranque?
-        mov bx, [cfg_line]
-        cmp bx, MAXCL
-        jae .on
-        cmp byte [cfg_dis+bx], 0
-        jne .line
-.on:
-        push si
-        call config_line
-        pop si
-        jmp .line
-.done:
-.none:
-        ret
-
-
-; =============================================================================
-;  Arranque: F5 = limpio (sin CONFIG.SYS ni AUTOEXEC.BAT), F8 = menú propio.
-;  SWITCHES=/N las desactiva y SWITCHES=/F quita la espera, como en MS-DOS.
-; =============================================================================
-MAXCL       equ 64                  ; líneas de CONFIG.SYS que se pueden desactivar
-MAXIT       equ 16                  ; elementos visibles del menú
-BOOT_WAIT   equ 27                  ; ~1,5 s
-
-boot_choice:
-        mov byte [boot_clean], 0
-        mov byte [boot_noauto], 0
-        call cfg_switches
-        test byte [sw_flags], 2     ; /N
-        jnz .r
-        mov si, msg_bootkeys
-        call kputs
-        mov cx, BOOT_WAIT
-        test byte [sw_flags], 1     ; /F
-        jz .w
-        mov cx, 1
-.w:
-        push es
-        xor ax, ax
-        mov es, ax
-        mov dx, [es:0x46C]
-        pop es
-.l:
-        mov ah, 1
-        int 0x16
-        jnz .key
-        ; ¿llega algo por el puerto serie? (no esperar más)
-        cmp byte [ser_ok], 0
-        je .t
-        push dx
-        mov dx, 0x3FD
-        in al, dx
-        pop dx
-        test al, 1
-        jnz .r
-.t:
-        push es
-        xor ax, ax
-        mov es, ax
-        mov ax, [es:0x46C]
-        pop es
-        sub ax, dx
-        cmp ax, cx
-        jb .l
-.r:
-        ret
-.key:
-        cmp ah, 0x3F                ; F5
-        je .f5
-        cmp ah, 0x42                ; F8
-        jne .r                      ; otra tecla: se queda para después
-        xor ah, ah
-        int 0x16
-        jmp boot_menu
-.f5:
-        xor ah, ah
-        int 0x16
-        mov byte [boot_clean], 1
-        call no_autoexec
-        mov si, msg_clean
-        jmp kputs
-
-; añadir /D a la línea del intérprete: no ejecutará AUTOEXEC.BAT
-no_autoexec:
-        cmp byte [boot_noauto], 0
-        jne .r
-        mov byte [boot_noauto], 1
-        movzx bx, byte [shell_tail]
-        cmp bx, 120
-        ja .r
-        mov dword [shell_tail+1+bx], 0x0D442F20     ; " /D", CR
-        add byte [shell_tail], 3
-.r:
-        ret
-
-; buscar SWITCHES= en CONFIG.SYS: /F -> bit 0, /N -> bit 1
-cfg_switches:
-        mov byte [sw_flags], 0
-        mov si, cfgbuf
-.line:
-        call cfg_skip
-        mov eax, [si]
-        and eax, 0xDFDFDFDF
-        cmp eax, 'SWIT'
-        jne .next
-        mov eax, [si+4]
-        and eax, 0xDFDFDFDF
-        cmp eax, 'CHES'
-        jne .next
-.o:
-        lodsb
-        cmp al, 13
-        je .line
-        cmp al, 10
-        je .line
-        test al, al
-        jz .r
-        cmp al, '/'
-        jne .o
-        mov al, [si]
-        and al, 0xDF
-        cmp al, 'F'
-        jne .on
-        or byte [sw_flags], 1
-.on:
-        cmp al, 'N'
-        jne .o
-        or byte [sw_flags], 2
-        jmp .o
-.next:
-        lodsb
-        test al, al
-        jz .r
-        cmp al, 10
-        jne .next
-        jmp .line
-.r:
-        ret
-
-; ---- menú F8 ----
-boot_menu:
-        ; líneas de CONFIG.SYS que se muestran (ni vacías, ni REM, ni secciones)
-        xor cx, cx                  ; elementos
-        mov si, cfgbuf
-        mov word [bm_num], 0
-.scan:
-        cmp byte [si], 0
-        je .sd
-        inc word [bm_num]
-        push si
-        call cfg_skip
-        mov al, [si]
-        cmp al, 13
-        je .skip
-        cmp al, 10
-        je .skip
-        cmp al, ';'
-        je .skip
-        cmp al, '['
-        je .skip
-        mov eax, [si]
-        and eax, 0x00DFDFDF
-        cmp eax, 'REM'
-        je .skip
-        cmp cx, MAXIT - 1
-        jae .skip
-        cmp word [bm_num], MAXCL
-        jae .skip
-        mov bx, cx
-        shl bx, 1
-        mov [bm_off+bx], si
-        mov ax, [bm_num]
-        mov [bm_line+bx], ax
-        inc cx
-.skip:
-        pop si
-.eol:
-        lodsb
-        test al, al
-        jz .sd0
-        cmp al, 10
-        jne .eol
-        jmp .scan
-.sd0:
-        dec si
-.sd:
-        mov [bm_n], cx              ; + AUTOEXEC.BAT al final
-        mov word [bm_sel], 0
-        mov ax, 0x0003
-        int 0x10
-        mov ah, 1                   ; sin cursor
-        mov cx, 0x2000
-        int 0x10
-.draw:
-        call bm_draw
-        xor ah, ah
-        int 0x16
-        cmp ah, 0x48
-        je .up
-        cmp ah, 0x50
-        je .down
-        cmp al, ' '
-        je .toggle
-        cmp al, 13
-        je .go
-        cmp ah, 0x3F                ; F5: limpio
-        je .clean
-        cmp al, 27                  ; Esc: normal (todo activado)
-        je .normal
-        jmp .draw
-.up:
-        cmp word [bm_sel], 0
-        je .draw
-        dec word [bm_sel]
-        jmp .draw
-.down:
-        mov ax, [bm_sel]
-        cmp ax, [bm_n]
-        jae .draw
-        inc word [bm_sel]
-        jmp .draw
-.toggle:
-        mov bx, [bm_sel]
-        cmp bx, [bm_n]
-        je .ta
-        shl bx, 1
-        mov bx, [bm_line+bx]
-        xor byte [cfg_dis+bx], 1
-        jmp .draw
-.ta:
-        xor byte [bm_noauto], 1
-        jmp .draw
-.clean:
-        mov byte [boot_clean], 1
-        call no_autoexec
-        jmp .end
-.normal:
-        push di
-        push es
-        push ds
-        pop es
-        mov di, cfg_dis
-        mov cx, MAXCL
-        xor al, al
-        rep stosb
-        pop es
-        pop di
-        mov byte [bm_noauto], 0
-.go:
-        cmp byte [bm_noauto], 0
-        je .end
-        call no_autoexec
-.end:
-        mov ax, 0x0003
-        int 0x10
-        cmp byte [boot_clean], 0
-        je .r
-        mov si, msg_clean
-        call kputs
-.r:
-        ret
-
-; dibujar el menú directamente en la memoria de vídeo
-BM_TITLE    equ 0x4E                ; amarillo sobre rojo
-BM_TEXT     equ 0x07
-BM_ON       equ 0x0F
-BM_OFF      equ 0x08
-BM_HEAD     equ 0x0E
-BM_SEL      equ 0x1F
-BM_INFO     equ 0x0B
-BM_KEYS     equ 0x70
-bm_draw:
-        push es
-        mov ax, 0xB800
-        mov es, ax
-        ; fondo
-        xor di, di
-        mov cx, 80*25
-        mov ax, (BM_TEXT << 8) | ' '
-        rep stosw
-        ; título
-        xor di, di
-        mov cx, 80
-        mov ax, (BM_TITLE << 8) | ' '
-        rep stosw
-        mov di, 2
-        mov ah, BM_TITLE
-        mov si, bm_t1
-        call bm_puts
-        ; cabeceras
-        mov di, (2*80 + 2) * 2
-        mov ah, BM_HEAD
-        mov si, bm_hcfg
-        call bm_puts
-        mov di, (2*80 + 56) * 2
-        mov si, bm_hmem
-        call bm_puts
-        ; panel derecho: memoria
-        mov di, (4*80 + 56) * 2
-        mov ah, BM_TEXT
-        mov si, bm_conv
-        call bm_puts
-        int 0x12
-        movzx eax, ax
-        mov di, (4*80 + 69) * 2
-        call bm_kb
-        mov di, (5*80 + 56) * 2
-        mov si, bm_ext
-        call bm_puts
-        call bm_extkb
-        mov di, (5*80 + 69) * 2
-        call bm_kb
-        mov di, (6*80 + 56) * 2
-        mov si, bm_upp
-        call bm_puts
-        xor eax, eax
-        mov di, (6*80 + 69) * 2
-        call bm_kb
-        ; línea vertical
-        mov di, (2*80 + 53) * 2
-        mov cx, 21
-.vl:
-        mov word [es:di], (BM_OFF << 8) | 0xB3
-        add di, 160
-        loop .vl
-        ; elementos
-        xor cx, cx
-        mov word [bm_count], 0
-.it:
-        cmp cx, [bm_n]
-        ja .ite
-        mov ax, cx
-        add ax, 4
-        cmp cx, [bm_n]
-        jne .row
-        inc ax                      ; AUTOEXEC.BAT: una fila más abajo
-        push ax
-        mov di, ax
-        dec di
-        imul di, di, 160
-        add di, 4
-        push cx
-        mov ah, BM_HEAD
-        mov si, bm_hauto
-        call bm_puts
-        pop cx
-        pop ax
-.row:
-        imul di, ax, 160
-        add di, 4
-        ; activado / desactivado
-        mov bl, 1
-        cmp cx, [bm_n]
-        je .ia
-        mov bx, cx
-        shl bx, 1
-        mov bx, [bm_line+bx]
-        mov bl, [cfg_dis+bx]
-        xor bl, 1
-        jmp .ib
-.ia:
-        mov bl, [bm_noauto]
-        xor bl, 1
-.ib:
-        mov ah, BM_ON
-        test bl, bl
-        jnz .ic
-        mov ah, BM_OFF
-.ic:
-        test bl, bl
-        jz .id
-        inc word [bm_count]
-.id:
-        cmp cx, [bm_sel]
-        jne .ie
-        mov ah, BM_SEL
-        ; barra de selección
-        push di
-        push cx
-        push ax
-        sub di, 2
-        mov cx, 50
-        mov al, ' '
-        rep stosw
-        pop ax
-        pop cx
-        pop di
-.ie:
-        mov al, '['
-        stosw
-        mov al, 0xFE                ; ■
-        test bl, bl
-        jnz .if
-        mov al, ' '
-.if:
-        stosw
-        mov al, ']'
-        stosw
-        mov al, ' '
-        stosw
-        ; texto
-        push cx
-        cmp cx, [bm_n]
-        je .ta
-        mov bx, cx
-        shl bx, 1
-        mov si, [bm_off+bx]
-        mov cx, 45
-.tl:
-        mov al, [si]
-        cmp al, 13
-        je .tle
-        cmp al, 10
-        je .tle
-        test al, al
-        jz .tle
-        cmp al, 9
-        jne .tc
-        mov al, ' '
-.tc:
-        stosw
-        inc si
-        loop .tl
-.tle:
-        pop cx
-        jmp .nx
-.ta:
-        mov si, bm_tauto
-        call bm_puts
-        pop cx
-.nx:
-        inc cx
-        jmp .it
-.ite:
-        ; descripción de la línea elegida
-        mov di, (9*80 + 56) * 2
-        mov ah, BM_HEAD
-        mov si, bm_hdesc
-        call bm_puts
-        call bm_desc                ; SI = descripción
-        mov di, (11*80 + 56) * 2
-        mov ah, BM_INFO
-        call bm_wrap
-        ; resumen
-        mov di, (22*80 + 2) * 2
-        mov ah, 0x0A
-        mov si, bm_s1
-        call bm_puts
-        mov ax, [bm_count]
-        add al, '0'
-        cmp ax, '9'
-        jbe .n1
-        mov al, '+'
-.n1:
-        mov ah, 0x0A
-        stosw
-        mov si, bm_s2
-        call bm_puts
-        mov ax, [bm_n]
-        inc ax
-        add al, '0'
-        cmp al, '9'
-        jbe .n2
-        mov al, '+'
-.n2:
-        mov ah, 0x0A
-        stosw
-        mov si, bm_s3
-        call bm_puts
-        ; teclas
-        mov di, 24*160
-        mov cx, 80
-        mov ax, (BM_KEYS << 8) | ' '
-        rep stosw
-        mov di, 24*160 + 2
-        mov ah, BM_KEYS
-        mov si, bm_keys
-        call bm_puts
-        pop es
-        ret
-
-; SI = texto (0) -> ES:DI con atributo AH
-bm_puts:
-        lodsb
-        test al, al
-        jz .r
-        stosw
-        jmp bm_puts
-.r:
-        ret
-; SI = texto -> líneas de 23 columnas desde ES:DI (columna 56)
-bm_wrap:
-        mov cx, 23
-.l:
-        lodsb
-        test al, al
-        jz .r
-        cmp al, '|'                 ; salto de línea
-        je .nl
-        stosw
-        loop .l
-.nl:
-        add di, 160 - 46
-        add di, cx
-        add di, cx
-        cmp byte [si], '|'          ; línea llena justo antes de un salto
-        jne bm_wrap
-        cmp cx, 0
-        jne bm_wrap
-        inc si
-        jmp bm_wrap
-.r:
-        ret
-
-; EAX KB -> "31.552 KB" alineado a la derecha (8 columnas) en ES:DI
-bm_kb:
-        push ebx
-        push ecx
-        push edx
-        push si
-        mov si, bm_num_e
-        mov ebx, 10
-        xor cl, cl
-.d:
-        xor edx, edx
-        div ebx
-        cmp cl, 3
-        jne .nc
-        dec si
-        mov byte [si], '.'
-        xor cl, cl
-.nc:
-        add dl, '0'
-        dec si
-        mov [si], dl
-        inc cl
-        test eax, eax
-        jnz .d
-        ; relleno
-        mov cx, bm_num_e
-        sub cx, si
-        neg cx
-        add cx, 7
-        jle .p
-        mov ax, (BM_TEXT << 8) | ' '
-        rep stosw
-.p:
-        mov ah, BM_ON
-        call bm_puts
-        mov ah, BM_TEXT
-        mov si, bm_kbs
-        call bm_puts
-        pop si
-        pop edx
-        pop ecx
-        pop ebx
-        ret
-
-; memoria extendida de la BIOS (KB) -> EAX
-bm_extkb:
-        push ebx
-        push ecx
-        push edx
-        mov ax, 0xE801
-        int 0x15
-        jc .old
-        test ax, ax
-        jnz .e
-        mov ax, cx
-        mov bx, dx
-.e:
-        movzx eax, ax
-        movzx ebx, bx
-        shl ebx, 6
-        add eax, ebx
-        jmp .r
-.old:
-        mov ah, 0x88
-        int 0x15
-        movzx eax, ax
-.r:
-        pop edx
-        pop ecx
-        pop ebx
-        ret
-
-; descripción de la línea elegida -> SI
-bm_desc:
-        push es
-        push di
-        push ds
-        pop es
-        call .d
-        pop di
-        pop es
-        ret
-.d:
-        mov bx, [bm_sel]
-        cmp bx, [bm_n]
-        jne .c
-        mov si, d_auto
-        ret
-.c:
-        shl bx, 1
-        mov si, [bm_off+bx]
-        call cfg_skip
-        ; palabra clave en mayúsculas en bm_key (8)
-        mov di, bm_key
-        mov cx, 8
-.k:
-        mov al, [si]
-        cmp al, 'a'
-        jb .k1
-        cmp al, 'z'
-        ja .k1
-        sub al, 32
-.k1:
-        mov [di], al
-        inc si
-        inc di
-        loop .k
-        mov bx, d_tab
-.f:
-        mov si, [bx]
-        test si, si
-        jz .other
-        mov di, bm_key
-        mov cx, [bx+2]
-        push si
-        repe cmpsb
-        pop si
-        je .hit
-        add bx, 6
-        jmp .f
-.hit:
-        mov si, [bx+4]
-        cmp si, d_device
-        jne .r
-        call bm_drvdesc
-.r:
-        ret
-.other:
-        mov si, d_other
-        ret
-
-; DEVICE=: según el nombre del driver
-bm_drvdesc:
-        mov bx, [bm_sel]
-        shl bx, 1
-        mov si, [bm_off+bx]
-.l:
-        mov al, [si]
-        cmp al, 13
-        je .gen
-        test al, al
-        jz .gen
-        mov eax, [si]
-        and eax, 0xDFDFDFDF
-        cmp eax, 'HSPX'
-        je .xms
-        cmp eax, 'HSPC'
-        je .cd
-        cmp eax, 'HSPU'
-        je .usb
-        cmp eax, 'HSPR'
-        je .ram
-        inc si
-        jmp .l
-.xms:
-        mov si, d_xms
-        ret
-.cd:
-        mov si, d_cd
-        ret
-.usb:
-        mov si, d_usb
-        ret
-.ram:
-        mov si, d_ram
-        ret
-.gen:
-        mov si, d_device
-        ret
-
-; una línea de CONFIG.SYS en cfgl
-config_line:
-        mov si, cfgl
-        call cfg_skip
-        mov al, [si]
-        cmp al, 13
-        je .r
-        cmp al, ';'
-        je .r
-        cmp al, '['
-        je .section
-        cmp byte [cfg_inmenu], 0
-        jne .r
-        ; palabra clave
-        mov di, cfg_key
-        mov cx, 15
-.k:
-        mov al, [si]
-        cmp al, '='
-        je .ke
-        cmp al, ' '
-        je .ke
-        cmp al, 9
-        je .ke
-        cmp al, 13
-        je .ke
-        cmp al, 'a'
-        jb .k1
-        cmp al, 'z'
-        ja .k1
-        sub al, 32
-.k1:
-        mov [di], al
-        inc di
-        inc si
-        loop .k
-.ke:
-        mov byte [di], 0
-        call cfg_skip
-        cmp byte [si], '='
-        jne .nv
-        inc si
-.nv:
-        call cfg_skip
-        mov [cfg_val], si
-        ; buscar en la tabla
-        mov bx, cfg_cmds
-.find:
-        mov di, [bx]
-        test di, di
-        jz .unk
-        push si
-        mov si, cfg_key
-.c:
-        mov al, [si]
-        cmp al, [di]
-        jne .n
-        test al, al
-        jz .hit
-        inc si
-        inc di
-        jmp .c
-.n:
-        pop si
-        add bx, 4
-        jmp .find
-.hit:
-        pop si
-        jmp [bx+2]
-.unk:
-        mov si, msg_cfgunk
-        call kputs
-        call cfg_lineerr
-.r:
-        ret
-.section:
-        ; [MENU] no se admite: sus líneas se ignoran; las demás secciones se procesan
-        mov byte [cfg_inmenu], 0
-        cmp dword [si+1], 'MENU'
-        je .menu
-        cmp dword [si+1], 'menu'
-        jne .r
-.menu:
-        mov byte [cfg_inmenu], 1
-        ret
-
-cfg_skip:
-        cmp byte [si], ' '
-        je .s
-        cmp byte [si], 9
-        jne .r
-.s:
-        inc si
-        jmp cfg_skip
-.r:
-        ret
-
-cfg_lineerr:
-        mov si, msg_cfgline
-        call kputs
-        movzx eax, word [cfg_line]
-        call kputnum
-        mov si, msg_crlf
-        jmp kputs
-
-; EAX -> decimal por la consola
-kputnum:
-        push eax
-        push ebx
-        push edx
-        push cx
-        mov ebx, 10
-        xor cx, cx
-.l:
-        xor edx, edx
-        div ebx
-        push dx
-        inc cx
-        test eax, eax
-        jnz .l
-.p:
-        pop ax
-        add al, '0'
-        call con_out
-        loop .p
-        pop cx
-        pop edx
-        pop ebx
-        pop eax
-        ret
-
-cfg_cmds:
-        dw k_device, cfg_device
-        dw k_devhigh, cfg_device
-        dw k_install, cfg_install
-        dw k_insthigh, cfg_install
-        dw k_shell, cfg_shell
-        dw k_set, cfg_set
-        dw k_lastdrive, cfg_lastdrive
-        dw k_rem, cfg_ignore
-        dw k_files, cfg_ignore
-        dw k_buffers, cfg_ignore
-        dw k_stacks, cfg_ignore
-        dw k_fcbs, cfg_ignore
-        dw k_break, cfg_ignore
-        dw k_dos, cfg_ignore
-        dw k_country, cfg_ignore
-        dw k_numlock, cfg_numlock
-        dw k_switches, cfg_ignore
-        dw k_menuitem, cfg_ignore
-        dw k_menudef, cfg_ignore
-        dw k_include, cfg_ignore
-        dw 0, 0
-k_device    db "DEVICE", 0
-k_devhigh   db "DEVICEHIGH", 0
-k_install   db "INSTALL", 0
-k_insthigh  db "INSTALLHIGH", 0
-k_shell     db "SHELL", 0
-k_set       db "SET", 0
-k_lastdrive db "LASTDRIVE", 0
-k_rem       db "REM", 0
-k_files     db "FILES", 0
-k_buffers   db "BUFFERS", 0
-k_stacks    db "STACKS", 0
-k_fcbs      db "FCBS", 0
-k_break     db "BREAK", 0
-k_dos       db "DOS", 0
-k_country   db "COUNTRY", 0
-k_numlock   db "NUMLOCK", 0
-k_switches  db "SWITCHES", 0
-k_menuitem  db "MENUITEM", 0
-k_menudef   db "MENUDEFAULT", 0
-k_include   db "INCLUDE", 0
-
-cfg_ignore:
-        ret
-
-cfg_lastdrive:
-        mov si, [cfg_val]
-        mov al, [si]
-        and al, 0xDF
-        sub al, 'A' - 1
-        cmp al, 1
-        jb .r
-        cmp al, 26
-        ja .r
-        mov [lastdrive], al
-.r:
-        ret
-
-; NUMLOCK=ON|OFF: Bloq Num al arrancar (la BIOS enciende la luz en la
-; siguiente llamada a INT 16h)
-cfg_numlock:
-        mov si, [cfg_val]
-        mov al, [si+1]
-        and al, 0xDF
-        push es
-        push word 0x40
-        pop es
-        cmp al, 'N'                 ; ON
-        jne .off
-        or byte [es:0x17], 0x20
-        jmp .r
-.off:
-        cmp al, 'F'                 ; OFF
-        jne .r
-        and byte [es:0x17], 0xDF
-.r:
-        pop es
-        ret
-
-; SET NOMBRE=valor -> setbuf
-cfg_set:
-        mov si, [cfg_val]
-        mov di, [set_end]
-        test di, di
-        jnz .h
-        mov di, setbuf
-.h:
-        mov bx, di
-.n:
-        lodsb
-        cmp al, 13
-        je .bad
-        cmp al, '='
-        je .eq
-        cmp al, 'a'
-        jb .n1
-        cmp al, 'z'
-        ja .n1
-        sub al, 32
-.n1:
-        cmp di, setbuf + SET_MAX - 2
-        jae .bad
-        mov [di], al
-        inc di
-        jmp .n
-.eq:
-        mov byte [di], '='
-        inc di
-.v:
-        lodsb
-        cmp al, 13
-        je .ve
-        cmp di, setbuf + SET_MAX - 2
-        jae .bad
-        mov [di], al
-        inc di
-        jmp .v
-.ve:
-        mov byte [di], 0
-        inc di
-        mov [set_end], di
-        ret
-.bad:
-        mov [set_end], bx
-        ret
-
-; SHELL=ruta argumentos
-cfg_shell:
-        mov si, [cfg_val]
-        mov di, shell_path
-        mov cx, 63
-.p:
-        lodsb
-        cmp al, ' '
-        je .pe
-        cmp al, 13
-        je .pe0
-        mov [di], al
-        inc di
-        loop .p
-.pe0:
-        dec si
-.pe:
-        mov byte [di], 0
-        ; argumentos
-        mov di, shell_tail + 1
-        xor cx, cx
-.a:
-        lodsb
-        cmp al, 13
-        je .ae
-        cmp cx, 120
-        jae .a
-        mov [di], al
-        inc di
-        inc cx
-        jmp .a
-.ae:
-        cmp cx, 0
-        je .noargs
-        ; DOS pasa la cola con un espacio delante
-        mov byte [di], 13
-        mov [shell_tail], cl
-        ret
-.noargs:
-        mov byte [shell_tail], 0
-        mov byte [shell_tail+1], 13
-        ret
-
-; INSTALL=programa argumentos -> se ejecutan tras los drivers
-cfg_install:
-        mov si, [cfg_val]
-        mov di, [inst_end]
-        test di, di
-        jnz .h
-        mov di, instbuf
-.h:
-.c:
-        lodsb
-        cmp al, 13
-        je .e
-        cmp di, instbuf + INST_MAX - 2
-        jae .e
-        mov [di], al
-        inc di
-        jmp .c
-.e:
-        mov byte [di], 0
-        inc di
-        mov [inst_end], di
-        ret
-
-; DEVICE=ruta argumentos
-cfg_device:
-        mov si, [cfg_val]
-        mov di, dpath
-        mov cx, 79
-.p:
-        lodsb
-        cmp al, ' '
-        je .pe
-        cmp al, 13
-        je .pe
-        cmp al, 9
-        je .pe
-        mov [di], al
-        inc di
-        loop .p
-.pe:
-        mov byte [di], 0
-        push ds
-        pop es
-        mov si, dpath
-        call open_path
-        jc .missing
-        mov byte [di+SFT_REF], 0
-        cmp byte [di+SFT_TYPE], T_FILE
-        jne .missing
-        mov eax, [di+SFT_SIZE]
-        cmp eax, 0xFFF0
-        ja .missing
-        mov [ld_size], ax
-        ; memoria: el bloque libre más grande
-        mov bx, 0xFFFF
-        call mcb_alloc
-        call mcb_alloc
-        jc .missing
-        mov [ld_seg], ax
-        mov [ld_paras], bx
-        push es
-        dec ax
-        mov es, ax
-        mov word [es:1], 8
-        ; nombre del bloque = nombre del fichero
-        push di
-        mov di, 8
-        mov cx, 8
-        xor al, al
-        rep stosb
-        pop di
-        mov si, dpath
-        mov bx, si
-.bn:
-        lodsb
-        test al, al
-        jz .bne
-        cmp al, '\'
-        je .bs
-        cmp al, ':'
-        jne .bn
-.bs:
-        mov bx, si
-        jmp .bn
-.bne:
-        mov si, bx
-        mov di, 8
-.bc:
-        lodsb
-        test al, al
-        jz .bce
-        cmp al, '.'
-        je .bce
-        cmp di, 16
-        jae .bce
-        mov [es:di], al
-        inc di
-        jmp .bc
-.bce:
-        pop es
-        ; leer el fichero
-        push ds
-        pop es
-        mov si, dpath
-        call open_path
-        mov byte [di+SFT_REF], 0
-        mov es, [ld_seg]
-        xor bx, bx
-        mov cx, [ld_size]
-        call file_read
-        ; ¿formato MZ?
-        mov es, [ld_seg]
-        mov ax, [ld_seg]
-        mov [ld_img], ax
-        cmp word [es:0], 'MZ'
-        jne .raw
-        mov ax, [es:8]
-        add ax, [ld_seg]
-        mov [ld_img], ax
-        mov cx, [es:6]
-        mov si, [es:0x18]
-.rl:
-        jcxz .raw
-        push es
-        mov bx, [es:si]
-        mov ax, [es:si+2]
-        add ax, [ld_img]
-        mov es, ax
-        mov ax, [ld_img]
-        add [es:bx], ax
-        pop es
-        add si, 4
-        dec cx
-        jmp .rl
-.raw:
-        ; inicializar cada driver del fichero
-        mov ax, [ld_seg]
-        add ax, [ld_paras]
-        mov [ld_end], ax
-        mov word [ld_used], 0
-        mov word [dc_hdr], 0
-        mov ax, [ld_img]
-        mov [dc_hdr+2], ax
-.drv:
-        les di, [dc_hdr]
-        mov ax, [es:di]
-        mov [ld_next], ax
-        ; petición INIT
-        push ds
-        pop es
-        mov di, dreq
-        mov cx, 15
-        xor ax, ax
-        rep stosw
-        mov byte [dreq], 0x17
-        mov byte [dreq+2], 0
-        mov word [dreq+0x0E], 0
-        mov ax, [ld_end]
-        mov [dreq+0x10], ax
-        mov ax, [cfg_val]
-        mov [dreq+0x12], ax
-        mov [dreq+0x14], ds
-        mov al, [ndrives]
-        mov [dreq+0x16], al
-        call dev_call
-        test word [dreq+3], 0x8000
-        jnz .initerr
-        ; memoria usada hasta la dirección de corte
-        mov ax, [dreq+0x0E]
-        add ax, 15
-        shr ax, 4
-        add ax, [dreq+0x10]
-        sub ax, [ld_seg]
-        jbe .decline
-        cmp ax, [ld_paras]
-        ja .initerr
-        cmp ax, [ld_used]
-        jbe .nu
-        mov [ld_used], ax
-.nu:
-        les di, [dc_hdr]
-        test word [es:di+4], 0x8000
-        jz .block
-        ; carácter: enlazar tras NUL
-        mov eax, [dev_nul]
-        mov [es:di], eax
-        mov eax, [dc_hdr]
-        mov [dev_nul], eax
-        cmp dword [es:di+10], 'CON '
-        jne .nc
-        mov [con_hdr], eax
-.nc:
-        test word [es:di+4], 0x0008
-        jz .nextdrv
-        mov [lol+8], eax
-        jmp .nextdrv
-.block:
-        mov dword [es:di], 0xFFFFFFFF
-        movzx cx, byte [dreq+0x0D]
-        les si, [dreq+0x12]
-.unit:
-        jcxz .bdone
-        movzx bx, byte [ext_count]
-        cmp bx, 4
-        jae .bdone
-        imul bx, bx, 9
-        add bx, ext_tab
-        mov eax, [dc_hdr]
-        mov [bx], eax
-        mov al, [dreq+0x0D]
-        sub al, cl
-        mov [bx+4], al
-        mov ax, [es:si]
-        mov [bx+5], ax
-        mov [bx+7], es
-        inc byte [ext_count]
-        add si, 2
-        dec cx
-        jmp .unit
-.bdone:
-        call drives_ext
-.nextdrv:
-        mov ax, [ld_next]
-        cmp ax, 0xFFFF
-        je .fin
-        mov [dc_hdr], ax
-        jmp .drv
-.fin:
-        ; dejar solo la memoria que el driver necesita
-        mov es, [ld_seg]
-        mov bx, [ld_used]
-        call mcb_resize
-        ret
-.decline:
-        ; el driver no quiere quedarse residente: se descarga sin mensaje
-        cmp word [ld_used], 0
-        jne .fin
-        mov es, [ld_seg]
-        call mcb_free
-        ret
-.initerr:
-        mov es, [ld_seg]
-        call mcb_free
-        mov si, msg_drverr
-        call kputs
-        mov si, dpath
-        call kputs
-        mov si, msg_crlf
-        jmp kputs
-.missing:
-        mov si, msg_missing
-        call kputs
-        mov si, dpath
-        call kputs
-        mov si, msg_crlf
-        call kputs
-        jmp cfg_lineerr
-
-; entorno inicial: COMSPEC, PATH y PROMPT (si CONFIG.SYS no los fija) + SET
-build_root_env:
-        mov es, [root_psp]
-        push es
-        mov es, [es:0x2C]
-        call mcb_free
-        pop es
-        mov bx, (ENV_ROOT + 15) / 16
-        call mcb_alloc
-        jc .r
-        mov es, [root_psp]
-        mov [es:0x2C], ax
-        push ax
-        dec ax
-        mov es, ax
-        mov ax, [root_psp]
-        mov [es:1], ax
-        pop es
-        xor di, di
-        mov si, s_comspec
-        call .str
-        mov si, shell_path
-        call .strz
-        mov si, s_path
-        call .has
-        jnc .np
-        mov si, s_path
-        call .str
-        mov al, [cur_drive]
-        add al, 'A'
-        stosb
-        mov ax, '\:'
-        xchg al, ah
-        stosw
-        xor al, al
-        stosb
-.np:
-        mov si, s_prompt
-        call .has
-        jnc .npr
-        mov si, s_prompt
-        call .str
-        mov si, s_pg
-        call .strz
-.npr:
-        ; variables de SET
-        mov si, setbuf
-.sv:
-        cmp si, [set_end]
-        jae .end
-        call .strz
-        jmp .sv
-.end:
-        xor al, al
-        stosb
-.r:
-        push ds
-        pop es
-        ret
-; copiar SI sin el cero final / con el cero final
-.str:
-        lodsb
-        test al, al
-        jz .sr
-        stosb
-        jmp .str
-.sr:
-        ret
-.strz:
-        lodsb
-        stosb
-        test al, al
-        jnz .strz
-        ret
-; ¿setbuf define la variable SI (con "=")? CF=0 si sí
-.has:
-        push di
-        mov bx, setbuf
-.hl:
-        cmp bx, [set_end]
-        jae .hno
-        push si
-        mov di, bx
-.hc:
-        mov al, [si]
-        test al, al
-        jz .hyes
-        cmp al, [di]
-        jne .hn
-        inc si
-        inc di
-        jmp .hc
-.hn:
-        pop si
-.hs:
-        inc bx
-        cmp byte [bx-1], 0
-        jne .hs
-        jmp .hl
-.hyes:
-        pop si
-        pop di
-        clc
-        ret
-.hno:
-        pop di
-        stc
-        ret
-
-; ejecutar las líneas INSTALL=
-install_run:
-        mov si, instbuf
-.l:
-        cmp si, [inst_end]
-        jae .r
-        ; ruta
-        mov di, ipath
-.p:
-        lodsb
-        test al, al
-        jz .pe0
-        cmp al, ' '
-        je .pe
-        mov [di], al
-        inc di
-        jmp .p
-.pe0:
-        dec si
-.pe:
-        mov byte [di], 0
-        mov di, itail + 1
-        xor cx, cx
-        mov byte [di], ' '
-        inc di
-        inc cx
-.a:
-        lodsb
-        test al, al
-        jz .ae
-        mov [di], al
-        inc di
-        inc cx
-        jmp .a
-.ae:
-        mov byte [di], 13
-        mov [itail], cl
-        push si
-        mov ax, KSEG
-        mov ds, ax
-        mov es, ax
-        mov dx, ipath
-        mov bx, inst_pb
-        mov ax, 0x4B00
-        int 0x21
-        mov ax, KSEG
-        mov ds, ax
-        mov es, ax
-        pop si
-        jnc .l
-        push si
-        mov si, msg_missing
-        call kputs
-        mov si, ipath
-        call kputs
-        mov si, msg_crlf
-        call kputs
-        pop si
-        jmp .l
-.r:
-        ret
-
 ; =============================================================================
 ;  INT 21h
 ; =============================================================================
@@ -7721,7 +8184,7 @@ int21:
         and byte [F_FL], 0xFE
         movzx bx, ah
         shl bx, 1
-        call [fntable+bx]
+        call [cs:fntable+bx]
         pop ax
         pop bx
         pop cx
@@ -7759,15 +8222,15 @@ int21:
         ; propia pila: no se puede volver a tomar)
         cmp cx, bx
         jne .take
-        cmp dx, [cs:k_base+si]
+        cmp dx, [k_base+si]
         jb .take
-        cmp dx, [cs:k_tops+si]
+        cmp dx, [k_tops+si]
         jbe .same
 .take:
         lea di, [k_busy+si]
         mov byte [di], 1
         mov ss, bx
-        mov sp, [cs:k_tops+si]
+        mov sp, [k_tops+si]
 .same:
         push di                     ; F_OWN
         push cx                     ; F_USS
@@ -7888,7 +8351,7 @@ int21:
         cmp bx, MAXFN
         ja .bad
         shl bx, 1
-        call [fntable+bx]
+        call [cs:fntable+bx]
         jmp i21_ret
 .bad:
         call fn_unsup
@@ -8360,7 +8823,9 @@ days_ymd:
         pop bx
         pop ax
         ret
+        section .low
 mdays   db 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+        section .text
 DAYS_MAX equ 43829                  ; 31-12-2099
 
 ; AL -> BCD
@@ -8635,6 +9100,10 @@ fn_33:
 .ver:
         mov word [F_BX], DOS_MAJOR | (DOS_MINOR << 8)
         mov word [F_DX], 0
+        cmp byte [dos_high], 0
+        je .vr
+        mov byte [F_DH], 0x10       ; el DOS está en la HMA
+.vr:
         ret
 fn_34:
         mov word [F_ES], KSEG
@@ -8675,6 +9144,7 @@ fn_38:
 .nf:
         mov ax, E_NOFILE
         jmp ret_err
+        section .low
 ; rutina de mayúsculas del país (llamada lejana, AL >= 80h -> AL)
 country_upcase:
         cmp al, 0x80
@@ -8698,6 +9168,7 @@ country:
         dw country_upcase, KSEG ; rutina de mayúsculas
         db ";", 0
         times 10 db 0
+        section .text
 
 fn_54:
         mov byte [F_AL], 0
@@ -10025,9 +10496,11 @@ fn_65:
 .short:
         mov ax, E_FUNC
         jmp ret_err
+        section .low
 .ext_head:
         db 1
         dw 38, 34, 437
+        section .text
 .caps:
         cmp al, 0x20
         je .c1
@@ -10129,25 +10602,29 @@ do_ctrlc:
         ; terminar el programa y CF=0 seguir, como en MS-DOS.
         ; sin proceso (un controlador o el núcleo durante CONFIG.SYS): no
         ; hay a quién avisar ni qué terminar; solo se repite la función
+        jmp KSEG:l_ctrlc            ; (sigue abajo: INT 23h es del programa)
+        section .low
+l_ctrlc:
         push ax
         mov ax, [cs:cur_psp]
         cmp ax, [cs:root_psp]
         pop ax
-        je int21
+        je l_int21
         mov [cs:brk_sp], sp
         clc
         int 0x23
         jc .cf
 .again:
         mov sp, [cs:brk_sp]
-        jmp int21
+        jmp l_int21
 .cf:
         cmp sp, [cs:brk_sp]
         je .again                   ; IRET o RETF 2: se repite
         mov sp, [cs:brk_sp]
         mov byte [cs:term_type], 1
         mov ax, 0x4C03
-        jmp int21
+        jmp l_int21
+        section .text
 
 ; ¿hay un Ctrl+C esperando en el teclado? MS-DOS lo mira en cada función de
 ; salida por consola (02h, 09h, 40h) y en la 0Bh: así se puede cortar un
@@ -11447,7 +11924,9 @@ boot_label:
         pop es
         popad
         ret
+        section .low
 noname11    db "NO NAME    "
+        section .text
 
 fn_0f:
         call fcb_setup
@@ -11998,24 +12477,26 @@ int00:
         mov byte [indos], 0
         mov ax, 0x4CFF
         jmp int21
+        section .low
 int20:
         mov ax, 0x4C00
-        jmp int21
+        jmp l_int21
 int27:
         add dx, 15
         rcr dx, 1                   ; (con el acarreo: DX puede pasar de FFF0h)
         shr dx, 3
         mov ax, 0x3100
-        jmp int21
+        jmp l_int21
 int22:
         jmp int_iret
 int23:
         mov byte [cs:term_type], 1
         mov ax, 0x4C03
-        jmp int21
+        jmp l_int21
 int24:
         mov al, 3
         iret
+        section .text
 ; INT 25h / INT 26h: leer / escribir sectores absolutos de una unidad.
 ; AL = unidad, CX = sectores, DX = primer sector, DS:BX = búfer;
 ; CX = FFFFh: DS:BX -> paquete {dd sector, dw cuenta, dd búfer}.
@@ -12138,11 +12619,13 @@ abs_io:
 .fail:
         mov byte [crit_off], 0
         ABS_LEAVE
+        mov ax, [abs_err]           ; AX de vuelta, en el hueco del AX guardado
+        mov bp, sp
+        mov [bp+36], ax
         pop es
         pop ds
         popad
         pop ax
-        mov ax, [cs:abs_err]
         stc
         retf
 int29:
@@ -12154,6 +12637,7 @@ int29:
         call con_out
         pop ds
         iret
+        section .low
 int2f:
 %ifdef TRACE
         ; traza: {AX} de cada llamada al multiplex
@@ -12186,6 +12670,10 @@ int2f:
 %endif
         cmp ax, 0x1302
         je i2f_1302
+        cmp ax, 0x4A01
+        je i2f_hmaq
+        cmp ax, 0x4A02
+        je i2f_hmaa
         cmp ax, 0x1000              ; ¿SHARE instalado? -> sí (lo hace el núcleo)
         jne .nsh
         mov al, 0xFF
@@ -12286,6 +12774,42 @@ i2f_16:
         mov byte [cs:win_active], 0
         iret
 
+; INT 2Fh AX=4A01h: HMA libre (BX = octetos, ES:DI -> el primero) y
+; AX=4A02h: reservar BX octetos de la HMA (ES:DI -> la zona, BX redondeado a
+; 16). Como en MS-DOS 5+: lo que el DOS no ocupa de la HMA es para otros
+; (búferes, controladores). Sin DOS en la HMA: BX = 0 y ES:DI = FFFF:FFFF.
+i2f_hmaq:
+        mov di, [cs:hma_free]
+        xor bx, bx
+        test di, di
+        jz i2f_hmano
+        sub bx, di                  ; hasta FFFF:FFFF
+i2f_hmaes:
+        push ax
+        mov ax, 0xFFFF
+        mov es, ax
+        pop ax
+        iret
+i2f_hmano:
+        xor bx, bx
+        mov di, 0xFFFF
+        jmp i2f_hmaes
+i2f_hmaa:
+        mov di, [cs:hma_free]
+        test di, di
+        jz i2f_hmano
+        add bx, 15
+        jc i2f_hmano
+        and bx, 0xFFF0
+        push ax
+        mov ax, di
+        neg ax                      ; AX = octetos libres
+        cmp bx, ax
+        pop ax
+        ja i2f_hmano
+        add [cs:hma_free], bx       ; (si se acaba, queda 0: no hay más)
+        jmp i2f_hmaes
+
 ; INT 2Fh AX=1302h (DOS 3.2+): cambiar el manejador de disco de DOS.
 ; DS:DX = nuevo, ES:BX = el de apagado -> DS:DX y ES:BX = los anteriores
 ; (Windows en modo mejorado lo usa para llamar al INT 13h original)
@@ -12301,6 +12825,111 @@ i2f_1302:
         xchg bx, [cs:i13_halt]
         pop ax
         iret
+        section .text
+
+        section .low
+; =============================================================================
+;  Trozos de entrada (siempre en KSEG): por aquí entra todo lo que llama al
+;  código del núcleo desde fuera, y por aquí sale el código a llamar a otros
+; =============================================================================
+; con el DOS en la HMA: ¿sigue abierta A20? Si no, abrirla (XMS 05h).
+; No cambia registros (sí los indicadores).
+a20_gate:
+        cmp byte [cs:dos_high], 0
+        je .r
+        push ds
+        push word 0xFFFF
+        pop ds
+        cmp dword [0x0010], HMA_SIG
+        pop ds
+        je .r
+        push ax
+        push bx
+        mov ah, 0x05
+        call far [cs:xms_entry]
+        pop bx
+        ; ¿y ahora? Si el gestor no ha podido, el puerto 92h («A20 rápida»)
+        push ds
+        push word 0xFFFF
+        pop ds
+        cmp dword [0x0010], HMA_SIG
+        pop ds
+        je .x
+        in al, 0x92
+        test al, 2
+        jnz .x
+        or al, 2
+        and al, 0xFE
+        out 0x92, al
+.x:
+        pop ax
+.r:
+        ret
+
+; entrada al código: %1 = etiqueta de aquí, %2 = destino en el código
+%macro LSTUB 2
+%1:
+        call a20_gate
+        push word [cs:code_seg]
+        push word %2
+        retf
+%endmacro
+        LSTUB l_int00, int00
+        LSTUB l_int21, int21
+        LSTUB l_int25, int25
+        LSTUB l_int26, int26
+        LSTUB l_int29, int29
+        LSTUB l_dev_con, dev_intr_con
+
+; salidas: el código llama aquí (CALL/JMP lejano a KSEG) y a la vuelta se
+; comprueba A20 antes de volver a él
+l_devcall:
+        call far [cs:dc_far]
+        mov ax, KSEG
+        mov ds, ax
+        mov es, ax
+        mov bx, dreq
+        call far [cs:dc_far2]
+        call a20_gate
+        retf
+l_int13:
+        int 0x13
+        pushf
+        call a20_gate
+        popf
+        retf
+l_int28:
+        int 0x28
+        call a20_gate
+        retf
+; INT 24h, sobre la pila del programa (crit_ask); vuelve a crit_ask.i24b
+l_i24_user:
+        int 0x24
+        cli
+        mov ss, [cs:crit_ksp+2]
+        mov sp, [cs:crit_ksp]
+        sti
+        jmp short l_i24_back
+l_i24_same:
+        int 0x24
+l_i24_back:
+        call a20_gate
+        push word [cs:code_seg]
+        push word crit_ask.i24b
+        retf
+
+low_code_end:
+code_seg    dw KSEG                 ; segmento en el que corre el código
+xms_entry   dd 0                    ; gestor XMS (con el DOS en la HMA)
+hma_free    dw 0                    ; HMA: primer octeto libre (FFFF:hma_free)
+tmp_paras   dw 0                    ; párrafos del código y sus datos
+dos_want    db 0                    ; CONFIG.SYS pide DOS=HIGH
+dos_tmp     db 0                    ; el código espera arriba a que haya HMA
+dos_high    db 0                    ; el código está en la HMA
+hma_busy    db 0
+msg_nohma_x db "No hay gestor de memoria extendida (XMS): ", 0
+msg_nohma_b db "La memoria alta (HMA) no está disponible: ", 0
+msg_nohma   db "Hispa-DOS se carga en la memoria convencional.", 13, 10, 0
 
 ; =============================================================================
 ;  Datos
@@ -12309,21 +12938,7 @@ MAXFN   equ 0x6C
 ; pilas del núcleo (índices KS_*): fondo y tope
 k_base      dw k_stk_disk, k_stk_io, k_stk_aux
 k_tops      dw k_top_disk, k_top_io, k_top_aux
-fntable:
-        dw fn_00, fn_01, fn_02, fn_unsup, fn_unsup, fn_unsup, fn_06, fn_07  ; 00
-        dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_0f       ; 08
-        dw fn_10, fn_11, fn_12, fn_13, fn_14, fn_15, fn_16, fn_17 ; 10
-        dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_1f ; 18
-        dw fn_unsup, fn_21, fn_22, fn_23, fn_24, fn_25, fn_26, fn_27 ; 20
-        dw fn_28, fn_29, fn_2a, fn_2b, fn_2c, fn_2d, fn_nop, fn_2f ; 28
-        dw fn_30, fn_31, fn_32, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
-        dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
-        dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
-        dw fn_48, fn_49, fn_4a, fn_4b, fn_4c, fn_4d, fn_4e, fn_4f           ; 48
-        dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_55, fn_56, fn_57 ; 50
-        dw fn_58, fn_59, fn_5a, fn_5b, fn_5c, fn_5d, fn_unsup, fn_unsup ; 58
-        dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_65, fn_66, fn_67 ; 60
-        dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c                       ; 68
+; (fntable, la tabla de funciones de INT 21h, va con el código: CS:)
 
 ; tablas de país (página de códigos 437) para INT 21h AH=65h
 upper_tbl   dw 128
@@ -12361,6 +12976,27 @@ shell_path  db "A:\COMMAND.COM", 0
             times 64 db 0
 shell_tail  db 3, " /P", 13
             times 130 db 0      ; sitio para SHELL= y /D
+; ---- textos del arranque (F5/F8 y el menú): solo se usan antes de repartir
+;      la memoria, con el código todavía en KSEG (CS = DS), así que van con
+;      el código y no ocupan sitio en la zona baja ----
+        section .text
+text_code_end:                      ; (de aquí en adelante, nada se ejecuta)
+fntable:
+        dw fn_00, fn_01, fn_02, fn_unsup, fn_unsup, fn_unsup, fn_06, fn_07  ; 00
+        dw fn_08, fn_09, fn_0a, fn_0b, fn_0c, fn_0d, fn_0e, fn_0f       ; 08
+        dw fn_10, fn_11, fn_12, fn_13, fn_14, fn_15, fn_16, fn_17 ; 10
+        dw fn_unsup, fn_19, fn_1a, fn_unsup, fn_unsup, fn_unsup, fn_unsup, fn_1f ; 18
+        dw fn_unsup, fn_21, fn_22, fn_23, fn_24, fn_25, fn_26, fn_27 ; 20
+        dw fn_28, fn_29, fn_2a, fn_2b, fn_2c, fn_2d, fn_nop, fn_2f ; 28
+        dw fn_30, fn_31, fn_32, fn_33, fn_34, fn_35, fn_36, fn_37     ; 30
+        dw fn_38, fn_39, fn_3a, fn_3b, fn_3c, fn_3d, fn_3e, fn_3f ; 38
+        dw fn_40, fn_41, fn_42, fn_43, fn_44, fn_45, fn_46, fn_47       ; 40
+        dw fn_48, fn_49, fn_4a, fn_4b, fn_4c, fn_4d, fn_4e, fn_4f           ; 48
+        dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_55, fn_56, fn_57 ; 50
+        dw fn_58, fn_59, fn_5a, fn_5b, fn_5c, fn_5d, fn_unsup, fn_unsup ; 58
+        dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_65, fn_66, fn_67 ; 60
+        dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c                       ; 68
+
 msg_bootkeys db "Iniciando Hispa-DOS...  F5 = arranque limpio  ", 0xFA, "  F8 = men", 0xA3, " de arranque", 13, 10, 0
 msg_clean   db "Arranque limpio: sin CONFIG.SYS ni AUTOEXEC.BAT.", 13, 10, 0
 bm_t1       db 0xDD, " Hispa-DOS ", 0xDE, "  Men", 0xA3, " de arranque", 0
@@ -12389,6 +13025,7 @@ d_tab       dw dk_device, 6, d_device
             dw dk_set, 3, d_set
             dw dk_install, 7, d_install
             dw dk_switches, 8, d_switches
+            dw dk_dos, 3, d_dos
             dw 0
 dk_device   db "DEVICE"
 dk_devhigh  db "DEVICEHI"
@@ -12400,6 +13037,7 @@ dk_shell    db "SHELL"
 dk_set      db "SET"
 dk_install  db "INSTALL"
 dk_switches db "SWITCHES"
+dk_dos      db "DOS"
 d_device    db "Controlador de|dispositivo.", 0
 d_xms       db "Memoria extendida|(XMS 3.0): la usan|Windows y muchos|programas.", 0
 d_cd        db "Lectores de CD y DVD|(IDE y SATA).", 0
@@ -12413,8 +13051,10 @@ d_shell     db "Int", 0x82, "rprete de", 0xA2, "rdenes.", 0
 d_set       db "Variable de entorno.", 0
 d_install   db "Programa residente.", 0
 d_switches  db "Opciones de arranque.", 0
+d_dos       db "El n", 0xA3, "cleo, en la|memoria alta (HMA):|m", 0xA0, "s memoria|convencional libre.", 0
 d_other     db "Ajuste del sistema.", 0
 d_auto      db "Ordenes de inicio:|teclado, rat", 0xA2, "n,|sonido, ruta...", 0
+        section .low
 
             times 124 db 0
 shell_fcb   times 16 db 0
@@ -12454,7 +13094,7 @@ dev_nul:    dw dev_con, KSEG        ; +22 cabecera del dispositivo NUL
 lol_end:
 dev_con:    dw dev_aux, KSEG
             dw 0x8013
-            dw dev_strat, dev_intr_con
+            dw dev_strat, l_dev_con
             db "CON     "
 dev_aux:    dw dev_prn, KSEG
             dw 0x8000
@@ -12552,7 +13192,6 @@ win_umbhead dw 0xFFFF                   ; sin memoria superior
 ; =============================================================================
         section .bss
 bss_start:
-bootsec     resb 512
 boot_drive  resb 1
 sel_drv     resb 1
 op_drv      resb 1
@@ -12677,7 +13316,6 @@ ld_end      resw 1
 ld_used     resw 1
 ld_next     resw 1
 cfg_line    resw 1
-lock_tab    resb NLOCKS*LK_LEN
 lk_sft      resb 1
 lk_start    resd 1
 lk_end      resd 1
@@ -12687,13 +13325,10 @@ boot_clean  resb 1
 boot_noauto resb 1
 bm_noauto   resb 1
 sw_flags    resb 1
-cfg_dis     resb MAXCL
 bm_n        resw 1
 bm_sel      resw 1
 bm_num      resw 1
 bm_count    resw 1
-bm_off      resw MAXIT
-bm_line     resw MAXIT
 bm_key      resb 8
 cfg_val     resw 1
 set_end     resw 1
@@ -12706,11 +13341,7 @@ dpath       resb 84
 ipath       resb 84
 itail       resb 130
 cfgl        resb 168
-setbuf      resb SET_MAX
-instbuf     resb INST_MAX
-cfgbuf      resb CFG_MAX
 isobuf      resb 2048
-hist_buf    resb HIST_N*HIST_LEN
 cds_tab     resb CDS_LEN*NCDS
 dpb_tab     resb DPB_LEN*NCDS
 abs_err     resw 1
@@ -12798,4 +13429,45 @@ k_stk_aux   resb KS_AUX_LEN
 k_top_aux:
 k_inst_end:
             alignb 16
-kernel_end:
+bss_end:
+
+        section .ibss
+; ---- datos que solo hacen falta al arrancar: van delante del código y se
+;      mueven con él (se leen con CS:; bootsec, cfgbuf, cfg_dis y bm_* se
+;      usan además antes de repartir la memoria, con el código todavía en
+;      KSEG, donde CS = DS). Los primeros octetos son la firma que mira
+;      a20_gate en FFFF:0010. Más de 4 KB: ver «Disposición». ----
+img_start:  resd 1
+            alignb 16
+bootsec     resb 512
+cfg_dis     resb MAXCL
+bm_off      resw MAXIT
+bm_line     resw MAXIT
+cfgbuf      resb CFG_MAX
+            alignb 16
+
+; datos «altos»: van detrás del código, en su segmento (CS:)
+HRES_LEN    equ (NLOCKS*LK_LEN + SET_MAX + INST_MAX + HIST_N*HIST_LEN + 15) & ~15
+        section .text
+        ; relleno: desde text_code_end hasta el final de la imagen, 4 KB
+        times (4096 - HRES_LEN - ($ - text_code_end)) * ((4096 - HRES_LEN - ($ - text_code_end)) > 0) db 0
+        align 16
+text_end:
+hbss_start  equ text_end
+        HRES lock_tab, NLOCKS*LK_LEN
+        HRES setbuf, SET_MAX
+        HRES instbuf, INST_MAX
+        HRES hist_buf, HIST_N*HIST_LEN
+%assign HOFF (HOFF + 15) & ~15
+hbss_end    equ text_end + HOFF
+        ; todo tiene que caber por debajo de la copia provisional del
+        ; sector de arranque (BOOT_TMP) al arrancar
+        section .low
+low_end:
+        times -(((low_end - start) + (bss_end - bss_start) + CFG_MAX + 1024 + (text_end - text_start) + (hbss_end - hbss_start) + 64) > BOOT_TMP) db 0
+        ; los trozos de entrada (código) tienen que caber en la primera
+        ; página de 4 KB (hasta KSEG:0900h) y los datos que cambian sin parar
+        ; (la SDA, y detrás .bss) tienen que empezar en la siguiente
+        times -((low_code_end - start) > 0x0900) db 0
+        times -((sda - start) < 0x0900) db 0
+

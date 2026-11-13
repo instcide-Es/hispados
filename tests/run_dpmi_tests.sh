@@ -16,8 +16,10 @@ for f in DPMI16.COM DPMI32.COM; do
   [ -f $B/$f ] || { echo "falta $B/$f (make nucprogs)"; exit 1; }
 done
 T=$(mktemp -d)
+# DOSHIGH=1: las mismas pruebas con el núcleo en la HMA (DOS=HIGH)
+HI=''; [ -n "${DOSHIGH:-}" ] && HI='DOS=HIGH\r\n'
 cp "$IMG" $T/f.img
-printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n'"$HI"'FILES=30\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mcopy -o -i $T/f.img $B/DPMI16.COM ::BIN/DPMI16.COM
 mcopy -o -i $T/f.img $B/DPMI32.COM ::BIN/DPMI32.COM
@@ -139,7 +141,7 @@ check "No hay servidor DPMI"
 DL=tests/thirdparty/dl
 if [ -f $DL/dpmi-nasm/.ok ] && [ -f $DL/dpmi-gnused/.ok ] && [ -f $DL/dpmi-lua/.ok ]; then
   echo "== HSPDPMI con programas de DJGPP (NASM, SED, LUA de FreeDOS) =="
-  printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
+  printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n'"$HI"'FILES=30\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   dd if=/dev/zero of=$T/b.img bs=1k count=1440 status=none
   mformat -i $T/b.img -f 1440 ::

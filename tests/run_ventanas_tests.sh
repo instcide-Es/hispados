@@ -46,6 +46,8 @@ config() {
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 }
 XMS='DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n'
+# DOSHIGH=1: las mismas pruebas con el núcleo en la HMA (DOS=HIGH)
+[ -n "${DOSHIGH:-}" ] && XMS="$XMS"'DOS=HIGH\r\n'
 
 # lo que tiene que haber nada más entrar, con una pantalla de $2 x $3
 basico() {

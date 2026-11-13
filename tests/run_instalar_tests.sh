@@ -9,7 +9,7 @@ IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
 # CONFIG.SYS con la letra del disquete: INSTALAR la cambia a C:
-printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\n' > $T/CONFIG.SYS
+printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDOS=HIGH\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/hdd.img bs=1M count=32 status=none
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }

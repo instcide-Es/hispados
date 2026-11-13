@@ -29,6 +29,16 @@ El instalador del CD español se llama `INSTALAR.EXE` (como nuestro
 | Programas con poca pila dentro de una sesión MS-DOS | INT 21h trabaja en pilas propias del núcleo (como MS-DOS), que van en los datos de instancia: cada máquina virtual tiene las suyas (ver abajo) |
 | VSHARE.386 escribe en los datos internos de MS-DOS | El núcleo deja 0FFh en el octeto 4 de su segmento: VSHARE se niega a cargarse (ver «Limitaciones») |
 
+### Con `DOS=HIGH`
+
+Windows arranca igual con el núcleo en la HMA (`DOS=HIGH`): Administrador de
+programas, una sesión MS-DOS (en ella `MEM` dice que el DOS está en la HMA),
+salir de la sesión y salir de Windows. Dentro de la sesión, un programa que
+cierra la línea A20 por XMS (HMATEST /A, de las pruebas) no estorba: el
+núcleo la vuelve a abrir, por el XMS de Windows, en cada llamada. Todos los
+datos que Windows instancia o recorre (SDA, CDS, SFT, pilas, `win_inst`)
+siguen en la memoria convencional, en el segmento del DOS.
+
 ### INT 2Fh 1607h BX=0015h (DOSMGR)
 
 Con un DOS 5 o posterior, DOSMGR de WIN386 consulta al núcleo con CX:

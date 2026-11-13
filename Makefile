@@ -10,6 +10,9 @@ ASM = python3 tools/cp437.py lib/util.inc $(B)/gen/lib/util.inc && python3 tools
 ifdef TRACE
 KFLAGS = -DTRACE
 endif
+# Para probar el núcleo con el código fuera de su segmento de datos en todas
+# las pruebas (como con DOS=HIGH, haya o no gestor XMS), en otra carpeta:
+#   make B=build_fh KFLAGS=-DFORCEHIGH && tests/run_xxx_tests.sh build_fh/hispados.img
 
 all: $(IMG)
 
@@ -221,7 +224,11 @@ run-hdd: $(IMG) $(HDD)
 
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
-NUCPROGS = $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM
+NUCPROGS = $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS
+$(B)/HMATEST.COM: tests/progs/hmatest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HMAUSO.SYS: tests/progs/hmauso.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PILTEST.COM: tests/progs/piltest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/NUCTEST.COM: tests/progs/nuctest.asm | $(B)
@@ -249,7 +256,9 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_batch_tests.sh $(IMG)
 	tests/run_config_tests.sh $(IMG)
 	tests/run_xms_tests.sh $(IMG)
+	tests/run_hma_tests.sh $(IMG)
 	tests/run_dpmi_tests.sh $(IMG)
+	DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)
@@ -295,6 +304,7 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 	tests/run_ventanas_tests.sh $(IMG)
+	DOSHIGH=1 tests/run_ventanas_tests.sh $(IMG)
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)

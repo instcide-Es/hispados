@@ -2263,7 +2263,17 @@ mem_summary:
         mov cl, 12
         call putnum_w
         mov si, msg_mlarge
-        jmp puts
+        call puts
+        ; ¿el DOS está en la HMA? (INT 21h AX=3306h: bit 4 de DH)
+        mov ax, 0x3306
+        xor dx, dx
+        int 0x21
+        test dh, 0x10
+        jz .r
+        mov si, msg_mhma
+        call puts
+.r:
+        ret
 
 ; ---- ayudas de MEM ----
 ; salto de línea con pausa en cada pantalla si /P
@@ -6601,6 +6611,7 @@ msg_free    db " bytes libres", 13, 10, 0
 msg_mtotal  db " bytes de memoria convencional en total", 13, 10, 0
 msg_mfree   db " bytes libres", 13, 10, 0
 msg_mlarge  db " bytes del mayor programa ejecutable", 13, 10, 0
+msg_mhma    db "Hispa-DOS está cargado en la memoria alta (HMA)", 13, 10, 0
 msg_baddate db "Fecha no válida (dd-mm-aaaa)", 13, 10, 0
 msg_badtime db "Hora no válida (hh:mm[:ss])", 13, 10, 0
 msg_date    db "La fecha actual es ", 0
