@@ -67,6 +67,7 @@ def main():
                      ('HSPXMS.SYS', 'HSPXMS.SYS'), ('HSPEMM.SYS', 'HSPEMM.SYS'), ('HSPRAM.SYS', 'HSPRAM.SYS'),
                      ('HSPSND.COM', 'HSPSND.COM'), ('HSPDPMI.COM', 'HSPDPMI.COM'), ('HSPUSB.SYS', 'HSPUSB.SYS'),
                      ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM'),
+                     ('HSPJOY.COM', 'HSPJOY.COM'), ('MANDO.COM', 'MANDO.COM'), ('MANDO.INI', 'MANDO.INI'),
                      ('VENTANAS.COM', 'VENTANAS.COM')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
     # los programas de Hispa Ventanas (.HVP): los juegos, en \HISPADOS\JUEGOS;

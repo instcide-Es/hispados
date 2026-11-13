@@ -35,7 +35,17 @@
 ;   - un ratón USB (o un panel táctil que ofrezca una interfaz de ratón de
 ;     arranque, 03/01/02; en un dispositivo con varias interfaces se elige
 ;     esa): se entrega a HSPRATON (INT 33h AX=48D0h) o, si no está, como
-;     paquetes PS/2 (orden D3h del 8042).
+;     paquetes PS/2 (orden D3h del 8042);
+;   - hasta JOY_N mandos de juego: los HID genéricos (gamepads y joysticks;
+;     se lee su descriptor de informe, lib/hidjoyp.inc, para saber dónde van
+;     los ejes, la cruceta y los botones) y los de tipo Xbox 360 con cable
+;     (interfaz FFh/5Dh/01h, formato fijo). El estado de cada mando (HJS_*,
+;     lib/hidjoyx.inc) se entrega a HSPJOY por INT 2Fh AX=D903h (DL = mando,
+;     ES:DI = estado) con cada informe y unas cuatro veces por segundo; lo
+;     demás (INT 15h 84h, mando a teclado) lo hace HSPJOY (docs/MANDOS.md).
+;     Tras atender el informe de un mando, si HSPJOY está, se espera al
+;     siguiente (lo que dure su intervalo, 10 ms como mucho, medido con
+;     MFINDEX) para entregar un estado reciente y no el de hace un tic.
 ;  Los informes del teclado y del ratón se recogen con la interrupción del
 ;  reloj (INT 08h). Usa el modo real "irreal" para los registros del xHCI, así
 ;  que no funciona en modo V86 (EMM386, Windows en modo extendido).
@@ -49,11 +59,14 @@
 ;  Los de USB 3 se tratan según la norma (descriptor 2Ah, SET_HUB_DEPTH),
 ;  sin haberse podido probar: QEMU solo ofrece un concentrador de USB 1.1.
 ;
-;  Lo que NO hace (haría falta para un panel táctil sin interfaz de ratón de
-;  arranque): leer el descriptor de informe HID (HID 1.11, 6.2.2) para saber
-;  dónde van X, Y y los botones en un informe que no sea el de arranque. Los
-;  modos multitáctiles propios de cada fabricante no están publicados y no se
-;  usan. Tampoco hay EHCI/UHCI/OHCI: solo xHCI.
+;  Lo que NO hace: usar el descriptor de informe HID para un panel táctil sin
+;  interfaz de ratón de arranque (el análisis ya está, para los mandos; falta
+;  aplicarlo a los punteros). Los modos multitáctiles propios de cada
+;  fabricante no están publicados y no se usan. Los mandos tienen que estar
+;  conectados al cargar el driver (no se buscan después), no se encienden los
+;  LED ni la vibración, y no se admiten los que necesitan un saludo propio
+;  antes de dar informes (Xbox One/Series por cable, Switch Pro por USB, el
+;  receptor inalámbrico de Xbox 360). Tampoco hay EHCI/UHCI/OHCI: solo xHCI.
 ; =============================================================================
         cpu 386                     ; (sin BSWAP)
         bits 16
@@ -76,6 +89,9 @@ DESC        equ 0x1880
 KBD_BUF     equ 0x1980
 MOU_BUF     equ 0x19C0
 BOOT_SEC    equ 0x1A00                ; sector 0 del disco de arranque de la BIOS (/U)
+JINT_RING   equ 0x1C00                ; mandos: un anillo (100h) por mando
+JOY_BUF     equ 0x1E00                ; y un búfer de informe (40h)
+JOY_N       equ 2                     ; mandos de juego a la vez
 DATA        equ 0x2000
 OUT_CTXS    equ 0x3000                ; contextos de salida: 800h por dispositivo
 MEM_FIXED   equ 0x3000
@@ -143,6 +159,17 @@ m_dci       db 0
 m_len       dw 4
 mint_idx    db 0
 mint_cyc    db 1
+; mandos de juego
+j_on        times JOY_N db 0
+j_slot      times JOY_N db 0
+j_dci       times JOY_N db 0
+j_len       times JOY_N dw 0
+jint_idx    times JOY_N db 0, 1     ; índice y ciclo del anillo de cada uno
+j_ev        db 0                    ; bit n: se acaba de atender un informe del mando n
+j_tick      db 0
+j_ack       db 0                    ; HSPJOY recogió el último estado entregado
+j_wait      dw 16                   ; espera del informe reciente (microtramas)
+ctl_buf     dw DESC                 ; adónde van los datos de una petición de control
 oldrep      times 8 db 0
 newrep      times 8 db 0
 rep_key     db 0
@@ -1484,7 +1511,7 @@ control:
         call put_trb
         cmp word [cs:ctl_setup+6], 0
         je .status
-        mov bx, DESC
+        mov bx, [cs:ctl_buf]
         call zone
         call phys
         xor edx, edx
@@ -1736,9 +1763,160 @@ hid_event:
         clc
         ret
 .no:
+        push bx
+        xor bx, bx
+.j:
+        cmp byte [cs:j_on+bx], 0
+        je .jn
+        cmp ah, [cs:j_slot+bx]
+        jne .jn
+        cmp al, [cs:j_dci+bx]
+        jne .jn
+        call ev_ok
+        jc .jq
+        call joy_report
+.jq:
+        call joy_queue
+        pop bx
+        pop ax
+        clc
+        ret
+.jn:
+        inc bx
+        cmp bx, JOY_N
+        jb .j
+        pop bx
         pop ax
         stc
         ret
+
+; ---- mandos de juego ----
+; pedir el siguiente informe del mando BX
+joy_queue:
+        pushad
+        mov di, bx
+        shl bx, 6
+        add bx, JOY_BUF
+        call zone
+        call phys
+        xor edx, edx
+        mov si, di
+        shl si, 1
+        movzx ecx, word [cs:j_len+si]
+        add si, jint_idx
+        mov bx, di
+        shl bx, 8
+        add bx, JINT_RING
+        mov ebp, (1 << 10) | (1 << 5) | (1 << 2)    ; Normal, IOC, ISP
+        call put_trb
+        mov al, [cs:j_dci+di]
+        mov ah, [cs:j_slot+di]
+        call doorbell
+        popad
+        ret
+
+; ha llegado un informe del mando BX (evento en evt): pasarlo al estado con
+; su mapa y entregarlo a HSPJOY
+joy_report:
+        pushad
+        push ds
+        push cs
+        pop ds
+        mov di, bx
+        shl di, 1
+        mov cx, [j_len+di]
+        mov eax, [evt+8]
+        and eax, 0x00FFFFFF         ; lo que ha faltado por llegar
+        cmp eax, 0xFFFF
+        ja .r
+        sub cx, ax
+        jbe .r
+        mov si, bx
+        imul si, HJM_SZ
+        add si, j_map
+        mov di, bx
+        imul di, HJS_SZ
+        add di, j_est
+        push bx
+        shl bx, 6
+        add bx, JOY_BUF
+        call zone
+        call hj_extract
+        pop bx
+        jc .r
+        bts word [j_ev], bx
+        call joy_push
+.r:
+        pop ds
+        popad
+        ret
+
+; entregar a HSPJOY el estado del mando BX: INT 2Fh AX=D903h, DL = mando,
+; ES:DI = estado (HJS_SZ bytes). Si HSPJOY no está, nadie contesta.
+joy_push:
+        pushad
+        push ds
+        push es
+        xor ax, ax
+        mov es, ax
+        cmp dword [es:0x2F*4], 0
+        je .r
+        push cs
+        pop es
+        mov di, bx
+        imul di, HJS_SZ
+        add di, j_est
+        mov dl, bl
+        mov ax, 0xD903
+        int 0x2F
+        cmp al, 0xFF                ; ¿lo ha recogido HSPJOY?
+        sete [cs:j_ack]
+.r:
+        pop es
+        pop ds
+        popad
+        ret
+
+; Tras atender el informe de algún mando (j_ev) ya está pedido el siguiente:
+; se le espera lo que dura su intervalo (j_wait microtramas del controlador,
+; registro MFINDEX) para entregar un estado de ahora mismo. El que acaba de
+; atenderse puede llevar esperando desde el tic anterior (55 ms).
+joy_fresh:
+        pushad
+        mov bl, [cs:j_ev]
+        mov byte [cs:j_ev], 0
+        mov esi, [cs:rt_base]
+        call mrd
+        mov di, ax
+        mov ecx, 200000             ; (por si MFINDEX no avanzara)
+.l:
+        call get_event
+        jc .t
+        cmp al, 32
+        jne .l
+        call hid_event
+        mov al, [cs:j_ev]
+        and al, bl
+        cmp al, bl
+        je .r
+        jmp .l
+.t:
+        dec ecx
+        jz .r
+        mov esi, [cs:rt_base]
+        call mrd
+        sub ax, di
+        and ax, 0x3FFF
+        cmp ax, [cs:j_wait]
+        jb .l
+.r:
+        mov byte [cs:j_ev], 0
+        popad
+        ret
+
+%include "hidjoyx.inc"
+j_est       times JOY_N * HJS_SZ db 0   ; estado de cada mando (lo que va a HSPJOY)
+j_map       times JOY_N * HJM_SZ db 0xFF ; dónde va cada cosa en su informe
 ; ¿transferencia correcta? (éxito o paquete corto)
 ev_ok:
         cmp byte [cs:evt+11], 1
@@ -2366,6 +2544,30 @@ int08:
         call hid_event
         jmp .ev
 .rep:
+        ; mandos: el informe reciente y, cada 4 tics, su estado a HSPJOY
+        ; (para que sepa que están aunque no se muevan)
+        cmp byte [cs:j_ev], 0
+        je .jk
+        cmp byte [cs:j_ack], 0
+        jne .jf
+        mov byte [cs:j_ev], 0       ; nadie los recoge: no hay prisa
+        jmp .jk
+.jf:
+        call joy_fresh
+.jk:
+        inc byte [cs:j_tick]
+        test byte [cs:j_tick], 3
+        jnz .jd
+        xor bx, bx
+.jl:
+        cmp byte [cs:j_on+bx], 0
+        je .jn
+        call joy_push
+.jn:
+        inc bx
+        cmp bx, JOY_N
+        jb .jl
+.jd:
         cmp byte [cs:rep_key], 0
         je .g
         dec byte [cs:rep_cnt]
@@ -2524,6 +2726,8 @@ init:
 .hid:
         mov al, [k_on]
         or al, [m_on]
+        or al, [j_on]
+        or al, [j_on+1]
         jnz .hok
         mov al, [units]
         or al, [boot_match]
@@ -2550,6 +2754,41 @@ init:
         call puts
         call mou_queue
 .h2:
+        ; mandos de juego
+        xor bx, bx
+.hj:
+        cmp byte [j_on+bx], 0
+        je .hjn
+        mov si, msg_joy
+        call puts
+        mov di, bx
+        imul di, HJS_SZ
+        add di, j_est
+        mov ax, [di+HJS_VID]
+        call puthex4
+        mov dl, ':'
+        call putc
+        mov ax, [di+HJS_PID]
+        call puthex4
+        mov si, msg_joy2
+        call puts
+        movzx eax, byte [di+HJS_NAX]
+        call putdec
+        mov si, msg_joy3
+        call puts
+        movzx eax, byte [di+HJS_NBTN]
+        call putdec
+        mov si, msg_joy4
+        cmp byte [di+HJS_TIPO], 2
+        jne .hjt
+        mov si, msg_joy5
+.hjt:
+        call puts
+        call joy_queue
+.hjn:
+        inc bx
+        cmp bx, JOY_N
+        jb .hj
         ; reloj: recoger los informes
         mov ax, 0x3508
         int 0x21
@@ -3526,6 +3765,8 @@ usb_enum.end:
         mov al, [disk_found]
         or al, [k_on]
         or al, [m_on]
+        or al, [j_on]
+        or al, [j_on+1]
         jz .none
         clc
         ret
@@ -3754,7 +3995,19 @@ enum_one:
 .hc:
         mov al, [want_k]
         or al, [want_m]
-        jz .dis
+        jnz .hkm
+        ; ni teclado ni ratón: ¿un mando de juego?
+        cmp byte [p_joy], 0
+        je .dis
+        call role_joy
+        jnc .joy
+        cmp byte [j_notpad], 0
+        jne .dis
+        jmp .bad
+.joy:
+        mov byte [d_role], 7
+        jmp .used
+.hkm:
         call role_hid
         jc .bad
         mov al, [want_k]
@@ -4135,7 +4388,7 @@ d_pid       dw 0
 IF_MAX      equ 8
 if_tab      times IF_MAX * 3 db 0
 spd_tab     db "??", "FS", "LS", "HS", "SS"
-role_tab    dw msg_r0, msg_r1, msg_r2, msg_r3, msg_r4, msg_r5, msg_r6
+role_tab    dw msg_r0, msg_r1, msg_r2, msg_r3, msg_r4, msg_r5, msg_r6, msg_r7
 msg_arrow   db " -> ", 0
 msg_r0      db "sin uso", 0
 msg_r1      db "disco", 0
@@ -4144,6 +4397,7 @@ msg_r3      db "ratón", 0
 msg_r4      db "teclado y ratón", 0
 msg_r5      db "concentrador de ", 0
 msg_r6      db "ERROR", 0
+msg_r7      db "mando de juego", 0
 msg_nports  db " puertos", 0
 msg_iports  db "Puertos con algo conectado:", 0
 msg_iports2 db " (de ", 0
@@ -4536,6 +4790,7 @@ parse_config:
         mov [t_out], al
         mov [ifk], al
         mov [p_hub], al
+        mov [p_joy], al
 .l:
         cmp si, cx
         jae .end
@@ -4575,18 +4830,50 @@ parse_config:
         jmp .n
 .hid:
         cmp byte [cs:si+5], 3
-        jne .n
+        jne .xb
         cmp byte [cs:si+6], 1       ; subclase de arranque
-        jne .n
+        jne .hj
         mov al, [cs:si+7]
         cmp al, 1
-        jb .n
+        jb .hj
         cmp al, 2
-        ja .n
+        ja .hj
         inc al
         mov [ifk], al               ; 2 teclado, 3 ratón
         jmp .n
+.hj:
+        ; un HID que no es teclado ni ratón de arranque: puede ser un mando
+        ; (lo dirá su descriptor de informe)
+        cmp byte [p_joy], 0
+        jne .n
+        cmp byte [cs:si+3], 0       ; sin interfaces alternativas
+        jne .n
+        mov byte [ifk], 4
+        mov word [pj_rlen], 0
+        jmp .n
+.xb:
+        ; mando tipo Xbox 360 con cable: FFh/5Dh/01h
+        cmp byte [cs:si+5], 0xFF
+        jne .n
+        cmp word [cs:si+6], 0x015D
+        jne .n
+        cmp byte [p_joy], 0
+        jne .n
+        mov byte [ifk], 5
+        jmp .n
 .ep:
+        cmp ah, 0x21                ; descriptor HID: longitud del de informe
+        jne .ep5
+        cmp byte [ifk], 4
+        jne .n
+        cmp al, 9
+        jb .n
+        cmp byte [cs:si+6], 0x22
+        jne .n
+        mov ax, [cs:si+7]
+        mov [pj_rlen], ax
+        jmp .n
+.ep5:
         cmp ah, 5                   ; endpoint
         jne .n
         mov dl, [cs:si+2]           ; dirección
@@ -4633,7 +4920,7 @@ parse_config:
         jmp .n
 .em:
         cmp byte [ifk], 3
-        jne .n
+        jne .ej
         cmp byte [p_mou], 0
         jne .n
         mov [pm_dci], dh
@@ -4642,6 +4929,20 @@ parse_config:
         mov ah, [ifn]
         mov [pm_if], ah
         mov byte [p_mou], 1
+        jmp .n
+.ej:
+        cmp byte [ifk], 4           ; candidato a mando (4 HID, 5 tipo Xbox 360)
+        jb .n
+        cmp byte [p_joy], 0
+        jne .n
+        mov [pj_dci], dh
+        mov [pj_mps], di
+        mov [pj_ival], al
+        mov ah, [ifn]
+        mov [pj_if], ah
+        mov ah, [ifk]
+        sub ah, 3
+        mov [p_joy], ah             ; 1 HID, 2 tipo Xbox 360
 .n:
         movzx ax, byte [cs:si]
         add si, ax
@@ -4675,6 +4976,177 @@ pm_ival     db 0
 pm_if       db 0
             db 0
 pm_mps      dw 0
+p_joy       db 0                    ; 1 = HID que puede ser un mando, 2 = tipo Xbox 360
+pj_dci      db 0
+pj_ival     db 0
+pj_if       db 0
+pj_mps      dw 0
+pj_rlen     dw 0                    ; longitud de su descriptor de informe
+j_new       dw 0
+j_caps      dw 0
+j_notpad    db 0
+
+; mando de juego: leer su descriptor de informe y sacar el mapa (o poner el
+; fijo de los de tipo Xbox 360), y su endpoint de interrupción. CF si no se
+; usa: con [j_notpad] = 1 porque no es un mando (otro HID), si no por un fallo.
+role_joy:
+        mov byte [j_notpad], 1
+        xor bx, bx
+.f:
+        cmp byte [j_on+bx], 0
+        je .got
+        inc bx
+        cmp bx, JOY_N
+        jb .f
+        stc
+        ret
+.got:
+        mov [j_new], bx
+        cmp byte [p_joy], 2
+        jne .hid
+        call set_config
+        jc .err
+        mov di, [j_new]
+        imul di, HJM_SZ
+        add di, j_map
+        call hj_xbox360
+        mov al, [di+HJM_NAX]
+        mov ah, [di+HJM_NBTN]
+        jmp .ep
+.hid:
+        cmp word [pj_rlen], 0
+        je .np
+        call set_config
+        jc .err
+        ; el descriptor de informe (hasta 1 KB), a la zona de datos
+        mov bx, DATA
+        mov cx, 1024
+        call zero_zone
+        mov cx, [pj_rlen]
+        cmp cx, 1024
+        jbe .l1
+        mov cx, 1024
+.l1:
+        mov [pj_rlen], cx
+        mov dword [ctl_setup], 0x22000681
+        movzx ax, byte [pj_if]
+        mov [ctl_setup+4], ax
+        mov [ctl_setup+6], cx
+        mov word [ctl_buf], DATA
+        call control
+        mov word [ctl_buf], DESC
+        mov word [fail_msg], msg_desc
+        jc .err
+        mov bx, DATA
+        call zone
+        mov si, bx
+        mov cx, [pj_rlen]
+        mov di, [j_new]
+        imul di, HJM_SZ
+        add di, j_map
+        call hj_parse
+        jc .np
+.ep:
+        mov [j_caps], ax
+        ; su anillo, vacío
+        mov bx, [j_new]
+        shl bx, 8
+        add bx, JINT_RING
+        mov cx, 0x100
+        call zero_zone
+        mov bx, [j_new]
+        shl bx, 1
+        mov word [jint_idx+bx], 0x0100
+        ; el endpoint de interrupción
+        call clear_in
+        mov bx, IN_CTX
+        call zone
+        mov eax, 1
+        movzx ecx, byte [pj_dci]
+        bts eax, ecx
+        mov [cs:bx+4], eax
+        add bx, [ctx_sz]
+        movzx eax, byte [pj_dci]
+        call slot_fill
+        mov al, [pj_ival]
+        call calc_ival
+        mov [ep_ival], al
+        movzx eax, word [pj_mps]
+        mov edx, eax
+        shl edx, 16
+        or eax, edx
+        mov [ep_d4], eax
+        mov al, [pj_dci]
+        mov dx, [j_new]
+        shl dx, 8
+        add dx, JINT_RING
+        mov cx, [pj_mps]
+        mov ah, 7                               ; interrupción IN
+        call set_ep
+        call cfg_ep_cmd
+        mov word [fail_msg], msg_epcfg
+        jc .err
+        mov bx, [j_new]
+        mov al, [cur_slot]
+        mov [j_slot+bx], al
+        mov al, [pj_dci]
+        mov [j_dci+bx], al
+        mov cx, [pj_mps]
+        call cap_len
+        mov di, bx
+        shl di, 1
+        mov [j_len+di], cx
+        ; el estado: en reposo hasta que llegue el primer informe
+        mov di, bx
+        imul di, HJS_SZ
+        add di, j_est
+        mov al, [p_joy]
+        mov [di+HJS_TIPO], al
+        mov byte [di+HJS_FLAGS], 1
+        mov ax, [j_caps]
+        mov [di+HJS_NAX], ax
+        mov ax, [d_vid]
+        mov [di+HJS_VID], ax
+        mov ax, [d_pid]
+        mov [di+HJS_PID], ax
+        mov dword [di+HJS_EJES], 0x80808080
+        mov word [di+HJS_EJES+4], 0
+        mov word [di+HJS_CRUZ], 0
+        mov word [di+HJS_BTN], 0
+        ; espera del informe reciente: su intervalo y 1 ms, en microtramas
+        movzx ax, byte [pj_ival]
+        cmp byte [speed], 3
+        jae .hs
+        shl ax, 3
+        jmp .w
+.hs:
+        mov cl, al
+        dec cl
+        and cl, 15
+        mov ax, 1
+        shl ax, cl
+.w:
+        add ax, 8
+        cmp ax, 80
+        jbe .w1
+        mov ax, 80
+.w1:
+        cmp ax, [j_wait]
+        jbe .w2
+        mov [j_wait], ax
+.w2:
+        mov byte [j_on+bx], 1
+        clc
+        ret
+.np:
+        stc
+        ret
+.err:
+        mov byte [j_notpad], 0
+        stc
+        ret
+
+%include "hidjoyp.inc"
 
 ; ---- disco: capacidad, partición y BPB ----
 disk_setup:
@@ -4913,6 +5385,11 @@ msg_disk    db "Disco USB: ", 0
 msg_cc      db "xHCI: código de finalización ", 0
 msg_kbd     db "Teclado USB preparado.", 13, 10, 0
 msg_mouse   db "Ratón USB preparado.", 13, 10, 0
+msg_joy     db "Mando USB preparado: ", 0
+msg_joy2    db ", ", 0
+msg_joy3    db " ejes y ", 0
+msg_joy4    db " botones.", 13, 10, 0
+msg_joy5    db " botones (tipo Xbox 360).", 13, 10, 0
 units       db 0
 msg_mbas    db " MB en la unidad "
 msg_drv     db "?:", 13, 10, 0
@@ -4936,7 +5413,7 @@ msg_hubmax  db "USB: demasiados concentradores encadenados.", 13, 10, 0
 msg_hubdesc db "USB: el concentrador no da su descriptor.", 13, 10, 0
 msg_pause   db "Pausa de 15 s para la foto (una tecla la acorta)...", 13, 10, 0
 msg_reset   db "El controlador xHCI no se reinicia.", 13, 10, 0
-msg_nodev   db "No hay ninguna memoria, teclado ni ratón USB que se pueda usar.", 13, 10, 0
+msg_nodev   db "No hay ninguna memoria, teclado, ratón ni mando USB que se pueda usar.", 13, 10, 0
 msg_slot    db "USB: ha fallado Enable Slot.", 13, 10, 0
 msg_addr    db "USB: ha fallado Address Device.", 13, 10, 0
 msg_desc    db "USB: no se pueden leer los descriptores.", 13, 10, 0

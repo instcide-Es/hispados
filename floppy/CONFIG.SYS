@@ -11,7 +11,8 @@ REM El núcleo de Hispa-DOS, en la memoria alta (HMA): deja unos 33 KB más de
 REM memoria convencional. Necesita HSPXMS (la línea de arriba).
 DOS=HIGH
 DEVICE=A:\HISPADOS\HSPCD.SYS
-REM USB propio (memorias, teclado y ratón USB, también detrás de concentradores).
+REM USB propio (memorias, teclado, ratón y mandos de juego USB, también detrás
+REM de concentradores).
 REM Así, sin opciones, es seguro: si la BIOS está usando el USB (teclado USB,
 REM arranque por USB) no lo toca y todo sigue como estaba.
 DEVICE=A:\HISPADOS\HSPUSB.SYS

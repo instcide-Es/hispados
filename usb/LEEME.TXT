@@ -49,6 +49,16 @@ Juegos antiguos que fallan en equipos rapidos
   Se pueden juntar: VELOCIDAD 386 LOADFIX JUEGO.EXE. VELOCIDAD /? y
   LOADFIX /? lo explican.
 
+Mandos de juego
+  HSPJOY se carga al arrancar si encuentra algun mando: los USB (con
+  HSPUSB llevando el USB: mira el apartado siguiente; el mando tiene que
+  estar conectado al arrancar) y el del puerto de juegos. Los juegos lo
+  ven como el mando clasico. MANDO ensena los mandos que hay; MANDO /VER,
+  lo que hacen; MANDO /CALIBRAR calibra el del puerto de juegos. En
+  C:\HISPADOS\MANDO.INI se puede dar una tecla a cada boton (para los
+  juegos sin mando) y poner un mando de consola en el puerto de impresora
+  con un cable casero. Despues de cambiarlo, escribe HSPJOY.
+
 USB propio (HSPUSB): raton o panel tactil USB, por ejemplo en un MacBook
   De serie HSPUSB no le quita el USB a la BIOS (arrancando desde la memoria
   USB la BIOS lo esta usando), asi que el teclado sigue como siempre y el

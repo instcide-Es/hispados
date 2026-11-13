@@ -7142,7 +7142,8 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "después en PATH. Programas en \HISPADOS (también con su nombre clásico):", 13, 10
             db "  PARTIR (FDISK), FORMATEA, SISTEMA, INSTALAR, TECLADO, SONAR, SONIDO, EDITAR,", 13, 10
             db "  GESTOR, INFO, MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR,", 13, 10
-            db "  EXPANDIR, ETIQUETA, XCOPIAR, REVISAR (CHKDSK).", 13, 10
+            db "  EXPANDIR, ETIQUETA, XCOPIAR, REVISAR (CHKDSK), MANDO (mandos de juego),", 13, 10
+            db "  VELOCIDAD (frenar el procesador para juegos antiguos), LOADFIX.", 13, 10
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
             db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
             db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10

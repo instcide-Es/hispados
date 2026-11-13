@@ -91,6 +91,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Teclas que faltan en los portátiles de Apple (`TECLADO SP /MAC`, automático si el equipo es de Apple): Ctrl+Retroceso = Supr, Alt+Retroceso = Insertar, Alt+←/→ = Inicio/Fin, Alt+↑/↓ = RePág/AvPág | ✅ |
 | `EDIT`/`EDITAR` (editor), `GESTOR` (gestor de archivos), `SYSINFO`/`INFO` (propiedades del sistema) | ✅ |
 | Teclado y ratón USB nativos (HID) y ratón PS/2 y touchpads de portátil (`HSPRATON`, INT 33h: por la BIOS o, si no lo ofrece, directamente por el controlador 8042; `HSPRATON /INFO` enseña el diagnóstico y `/BIOS` o `/DIRECTO` fuerzan la vía) | ✅ |
+| Mandos de juego: `HSPJOY` y `MANDO`. USB (HID genéricos, con su descriptor de informe, y tipo Xbox 360, por `HSPUSB`), puerto de juegos analógico (201h, con calibración) y mandos de NES, Super Nintendo, PlayStation, Mega Drive y joysticks Atari/Commodore por el puerto de impresora con un cable casero. Los juegos los ven por INT 15h 84h o como teclas (`MANDO.INI`). Ver [docs/MANDOS.md](docs/MANDOS.md) | ✅ en pruebas (falta hardware real) |
 | CD/DVD también en SATA (AHCI); menú de arranque propio con F5 y F8 | ✅ |
 | SHARE en el núcleo (bloqueos y modos de compartición) | ✅ |
 | Sistema en `\HISPADOS` con nombres en español y `ALIAS.INI` con los clásicos (EDIT, FORMAT, XCOPY…) | ✅ |
@@ -115,6 +116,30 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
 
 Teclas, en cualquier programa: **Ctrl+Alt+↑** y **Ctrl+Alt+↓** suben y bajan el volumen un 10 %, **Ctrl+Alt+Fin** lo silencia, y también valen las teclas de volumen de los teclados multimedia (las de Fn de muchos portátiles).
+
+## Mandos de juego
+
+`HSPJOY` (lo carga `AUTOEXEC.BAT`; si no encuentra ningún mando no se queda en la memoria) junta los mandos USB que lleva `HSPUSB`, el del puerto de juegos y los que se conecten al puerto de impresora con un cable casero, y se los da a los juegos como el mando clásico (INT 15h AH=84h) o como teclas. Los esquemas de los cables, `MANDO.INI` y la interfaz para otros programas están en [docs/MANDOS.md](docs/MANDOS.md).
+
+| Orden | Qué hace |
+|---|---|
+| `MANDO` | Lista de los mandos y quién es cada jugador. |
+| `MANDO /VER` | Ejes, cruceta y botones de cada mando, en vivo. |
+| `MANDO /PROBAR` | Lo que ve un juego por INT 15h, en vivo. |
+| `MANDO /CALIBRAR` | Calibra el mando del puerto de juegos y lo guarda en `MANDO.INI`. |
+| `HSPJOY` | Con el driver ya cargado, vuelve a leer `MANDO.INI`. `/R` lo deja cargado aunque no haya mandos; `/D` lo descarga. |
+
+Para los juegos sin mando, `MANDO.INI` da una tecla a cada botón:
+
+```ini
+[teclas1]
+arriba=ARRIBA
+boton1=CTRL
+boton2=ALT
+boton4=INTRO
+```
+
+Los mandos USB necesitan que `HSPUSB` lleve el USB (`/F` o `/U`) y estar conectados al arrancar. Está probado en QEMU con mandos simulados (los descriptores de mandos reales); falta probarlo con mandos, puertos y cables de verdad.
 
 ## Memoria: `DOS=HIGH`
 

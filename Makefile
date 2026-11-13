@@ -121,7 +121,7 @@ $(B)/REVISAR.COM: utils/revisar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
+$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # VELOCIDAD (en el disco VELOCIDA.COM: 8 letras) y LOADFIX: para los juegos
 # antiguos que fallan en equipos rápidos o cargados en los primeros 64 KB
@@ -129,6 +129,24 @@ $(B)/VELOCIDAD.COM: utils/velocidad.asm lib/util.inc lib/ejecutar.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LOADFIX.COM: utils/loadfix.asm lib/util.inc lib/ejecutar.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# Mandos de juego (docs/MANDOS.md): HSPJOY.COM (residente) y MANDO.COM
+$(B)/HSPJOY.COM: drivers/hspjoy.asm lib/hidjoyx.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/MANDO.COM: utils/mando.asm lib/util.inc lib/hidjoyx.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+# programas de las pruebas de los mandos (tests/run_joy_tests.sh los copia a
+# una copia de la imagen; no van en el disco de distribución): el analizador
+# de descriptores HID con mandos reales, lo que ve un juego (INT 15h 84h y la
+# interfaz de HSPJOY) y HSPJOY con los puertos simulados (el 201h y las
+# entradas del puerto de impresora no se pueden mover en QEMU)
+JOYPROGS = $(B)/HIDTEST.COM $(B)/JOYTEST.COM $(B)/HSPJOYT.COM
+$(B)/HIDTEST.COM: tests/progs/hidtest.asm tests/progs/hidmandos.inc lib/hidjoyx.inc lib/hidjoyp.inc lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/JOYTEST.COM: tests/progs/joytest.asm lib/util.inc lib/hidjoyx.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPJOYT.COM: drivers/hspjoy.asm tests/progs/joysim.inc lib/hidjoyx.inc | $(B)
+	$(ASM) -DPRUEBA -o $@ $(B)/gen/$<
+joyprogs: $(JOYPROGS)
 
 # Hispa Ventanas (docs/VENTANAS.md): el entorno gráfico, en ventanas/.
 # La fuente de mapa de bits sale del diseño en texto ventanas/fuente.txt.
@@ -176,11 +194,11 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS $(B)/HSPEMM.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
+        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA)
 
-$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
+$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
@@ -224,6 +242,11 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/HSPUSB.SYS ::HISPADOS/HSPUSB.SYS
 	mcopy -i $@ $(B)/HSPCD.SYS ::HISPADOS/HSPCD.SYS
 	mcopy -i $@ $(B)/HSPRATON.COM ::HISPADOS/HSPRATON.COM
+	# mandos de juego: el residente, la utilidad y su configuración de ejemplo
+	mcopy -i $@ $(B)/HSPJOY.COM ::HISPADOS/HSPJOY.COM
+	mcopy -i $@ $(B)/MANDO.COM ::HISPADOS/MANDO.COM
+	iconv -f UTF-8 -t CP437 sistema/MANDO.INI | sed 's/$$/\r/' > $(B)/MANDO.INI
+	mcopy -i $@ $(B)/MANDO.INI ::HISPADOS/MANDO.INI
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
 	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
@@ -308,7 +331,7 @@ nucprogs: $(NUCPROGS)
 $(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
+test: $(IMG) usb nucprogs emmprogs joyprogs $(B)/LANZTEST.COM
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -331,6 +354,7 @@ test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
 	tests/run_usbnative_tests.sh $(IMG)
 	tests/run_usbhid_tests.sh $(IMG)
 	tests/run_usbhub_tests.sh $(IMG)
+	tests/run_joy_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG) ahci
@@ -384,4 +408,4 @@ test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test clean nucprogs emmprogs
+.PHONY: all usb run run-hdd test clean nucprogs emmprogs joyprogs

@@ -3,6 +3,9 @@ PROMPT $P$G
 PATH C:\HISPADOS
 TECLADO SP
 C:\HISPADOS\HSPRATON
+REM Mandos de juego (USB, puerto de juegos...): solo se queda si hay alguno.
+REM Se configuran en C:\HISPADOS\MANDO.INI; MANDO los enseña.
+C:\HISPADOS\HSPJOY
 C:\HISPADOS\HSPSND /VOL:80
 SYSINFO
 ECHO.
