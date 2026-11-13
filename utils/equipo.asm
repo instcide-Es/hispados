@@ -6713,6 +6713,17 @@ informe:
         mov si, dir_path
         call puts
         PR ". Suba esa carpeta al FTP en HispaDOS/informes", NL
+        ; sin HSPSND (la opción «Prueba» del menú no lo carga, a propósito):
+        ; que nadie piense que el equipo no tiene sonido
+        push es
+        mov ax, 0xD700
+        int 0x2F
+        pop es
+        cmp al, 0xFF
+        je .consnd
+        PR NL, "Para tener sonido (también en Hispa Ventanas), reinicie y elija", NL
+        PR "«Normal» o «Juegos» en el menú de arranque.", NL
+.consnd:
         call flush
         mov ax, 0x4C00
         int 0x21
