@@ -62,7 +62,7 @@ Windows 3.1 se apoya en estructuras internas de DOS, no solo en la API pública.
 |---|---|---|
 | Vídeo | `HSPVBE.DRV` + VxD | Driver de pantalla de Windows 3.1 sobre VBE: alta resolución y color de 16/24/32 bits. |
 | Ratón | `HSPMOUSE.DRV` | Usa INT 33h de Hispa-DOS; puntero absoluto en máquinas virtuales. |
-| Sonido | `HSPWAVE.DRV` | Driver MMSYSTEM (wave y MIDI por software) para HDA/AC'97. |
+| Sonido | `HSPWAVE.DRV` (+ mezclador) | Driver MMSYSTEM (wave y MIDI por software) para HDA/AC'97 que habla con HSPSND, y driver de mezclador para que el control de volumen de Windows mueva el de HSPSND. Criterio de Carlos (13/11/2026): **convivir con los originales** — la tarjeta original con los controladores de Creative (instalador, utilidades de DOS y drivers de Windows 3.11) tiene que funcionar sobre Hispa-DOS como en MS-DOS, HSPSND no debe estorbarles (si están cargados o Windows toma la tarjeta, se aparta), y el usuario tiene que poder usar lo nuestro tanto en Hispa Ventanas como en Windows 3.11. |
 | Red | `WINSOCK.DLL` (Winsock 1.1) | TCP/IP sobre los *packet drivers* de la fase 0.5, para navegadores y clientes de correo de la época. |
 
 Herramientas previstas para el código Win16: **Open Watcom** (libre), que genera ejecutables y drivers de 16 bits para Windows 3.x.
