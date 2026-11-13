@@ -1475,7 +1475,7 @@ suena. Diseño, textos y sonidos propios.
 - **Sonido de prueba**: toca `\HISPADOS\HISPA.WAV` (si no está ahí, lo busca
   al lado del módulo), una melodía de 4,6 s hecha por `tools/mksample.py`
   (un arpegio de do mayor, una frase y un acorde; 22.050 Hz, 16 bits,
-  estéreo con los dos canales iguales; 402 KB). **Izquierda** y **Derecha**:
+  mono, para que quepa holgado en el disquete; 201 KB). **Izquierda** y **Derecha**:
   el mismo sonido por un solo altavoz (con una Sound Blaster de 8 bits, que
   es mono, lo dice y suena por los dos). La primera vez se lee del disco
   («Cargando... 40 %», sin parar la ventana) y se queda en memoria.

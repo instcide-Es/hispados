@@ -1,8 +1,9 @@
 @ECHO OFF
 PROMPT $P$G
 PATH C:\HISPADOS
-REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL o JUEGOS)
+REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL, JUEGOS o PRUEBA)
 IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS
+IF "%CONFIG%"=="PRUEBA" GOTO PRUEBA
 
 REM ---- Normal ----
 TECLADO SP
@@ -22,6 +23,15 @@ LH C:\HISPADOS\HSPSND /SB /VOL:80
 LH C:\HISPADOS\HSPJOY
 LH C:\HISPADOS\HSPRATON
 LH TECLADO SP
+GOTO COMUN
+
+:PRUEBA
+REM ---- Prueba del equipo y del sonido: DIAGNOSTICO guarda el informe del
+REM equipo y después ofrece la prueba de sonido (AUDICION), con preguntas
+REM de sí o no. Luego hay que subir la carpeta INFORMES al FTP. ----
+TECLADO SP
+C:\HISPADOS\DIAGNOST
+GOTO FIN
 
 :COMUN
 SYSINFO
@@ -29,3 +39,4 @@ ECHO.
 ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.
 IF EXIST C:\INSTALL.BAT ECHO Para instalarlo en un disco duro vacío escriba INSTALL;
 IF EXIST C:\INSTALL.BAT ECHO en una unidad ya formateada, INSTALAR unidad: (por ejemplo INSTALAR D:).
+:FIN

@@ -104,7 +104,9 @@ def campana(hz, dura=0.3):
 def main():
     carpeta = sys.argv[1] if len(sys.argv) > 1 else '.'
     os.makedirs(carpeta, exist_ok=True)
-    wav(os.path.join(carpeta, 'HISPA.WAV'), 22050, 16, 2, melodia(22050))
+    # mono: los dos canales eran iguales (el Reproductor hace izquierda y
+    # derecha al vuelo) y así ocupa la mitad (206 KB) en el disquete
+    wav(os.path.join(carpeta, 'HISPA.WAV'), 22050, 16, 1, melodia(22050))
     wav(os.path.join(carpeta, 'CAMPANA.WAV'), 11025, 8, 1, campana(11025))
 
 

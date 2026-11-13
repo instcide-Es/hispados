@@ -7,6 +7,7 @@ REM La elegida queda en la variable CONFIG, que mira AUTOEXEC.BAT.
 [menu]
 MENUITEM=NORMAL,Normal
 MENUITEM=JUEGOS,Juegos (memoria expandida EMS y la mayor memoria libre)
+MENUITEM=PRUEBA,Prueba del equipo y del sonido (guarda un informe)
 MENUDEFAULT=NORMAL,5
 
 [common]
@@ -49,6 +50,12 @@ REM la línea de arriba (ver las notas de la configuración «Normal»).
 REM Para tener más memoria superior puede probar a añadir I=E000-EFFF a la
 REM línea de HSPEMM (hasta 64 KB más, si el equipo tiene esa zona vacía). Si
 REM después algo falla al arrancar, quítelo (F5 arranca en limpio).
+
+[prueba]
+REM ---- Prueba del equipo y del sonido: sin controladores de sonido ni
+REM residentes, para que DIAGNOSTICO y AUDICION vean el equipo como lo deja
+REM la BIOS. Guarda un informe en \INFORMES\EQUIPOnn de esta unidad. ----
+DOS=HIGH
 
 [common]
 NUMLOCK=ON

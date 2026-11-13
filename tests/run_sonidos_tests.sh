@@ -105,11 +105,11 @@ done
 python3 - $B/HISPA.WAV $B/CAMPANA.WAV <<'EOF' || fail=1
 import sys, wave
 bien = True
-for ruta, quiero in ((sys.argv[1], (2, 2, 22050)), (sys.argv[2], (1, 1, 11025))):
+for ruta, quiero in ((sys.argv[1], (1, 2, 22050)), (sys.argv[2], (1, 1, 11025))):
     w = wave.open(ruta, 'rb')
     es = (w.getnchannels(), w.getsampwidth(), w.getframerate())
     dura = w.getnframes() / w.getframerate()
-    lim = (4.0, 6.0) if quiero[0] == 2 else (0.25, 0.35)
+    lim = (4.0, 6.0) if quiero[1] == 2 else (0.25, 0.35)
     if es == quiero and lim[0] <= dura <= lim[1]:
         print("  OK   %s: %d canales, %d bits, %d Hz, %.2f s" % (ruta, es[0], es[1] * 8, es[2], dura))
     else:
@@ -220,7 +220,7 @@ EOF
     texto 174 168 0 8 negrita "Tarjeta: $NAME" $EST "Listo." \
     texto 174 412 0 8 fina "Volumen:" texto 474 412 0 8 fina "100 %"
   chk $T/a2.ppm $EST "Sonando... tono de 440 Hz (2 segundos)"
-  chk $T/a3.ppm $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, estéreo)" px 180 446 12 "la barra de por dónde va, empezada" px 600 446 9 "y sin acabar"
+  chk $T/a3.ppm $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)" px 180 446 12 "la barra de por dónde va, empezada" px 600 446 9 "y sin acabar"
   chk $T/a4.ppm $EST "Terminado." px 180 446 9 "la barra de por dónde va, vacía"
   [ $CARD = sb8 ] && LADO="la tarjeta es mono: igual por los dos lados"
   chk $T/a5.ppm $EST "Sonando... $LADO"

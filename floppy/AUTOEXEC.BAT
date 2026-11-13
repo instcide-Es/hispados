@@ -1,8 +1,9 @@
 @ECHO OFF
 PROMPT $P$G
 PATH A:\HISPADOS
-REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL o JUEGOS)
+REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL, JUEGOS o PRUEBA)
 IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS
+IF "%CONFIG%"=="PRUEBA" GOTO PRUEBA
 
 REM ---- Normal ----
 TECLADO SP
@@ -22,8 +23,18 @@ LH A:\HISPADOS\HSPSND /SB /VOL:80
 LH A:\HISPADOS\HSPJOY
 LH A:\HISPADOS\HSPRATON
 LH TECLADO SP
+GOTO COMUN
+
+:PRUEBA
+REM ---- Prueba del equipo y del sonido: DIAGNOSTICO guarda el informe del
+REM equipo y después ofrece la prueba de sonido (AUDICION), con preguntas
+REM de sí o no. Luego hay que subir la carpeta INFORMES al FTP. ----
+TECLADO SP
+A:\HISPADOS\DIAGNOST
+GOTO FIN
 
 :COMUN
 SYSINFO
 ECHO.
 ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.
+:FIN
