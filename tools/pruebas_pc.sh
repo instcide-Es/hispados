@@ -38,7 +38,7 @@ tar --exclude=./build --exclude=./.git -cf - . | $SSH "rm -rf /dev/shm/$NOMBRE &
 # QEMU_MAS: opciones que se añaden a TODAS las máquinas de las pruebas (p. ej.
 # '-cpu 486' o '-m 16'), con un envoltorio de qemu-system-i386 por delante
 # en el PATH: así la misma batería se pasa en otras máquinas.
-$SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC && mkdir -p \$TMPDIR build/pc qbin && \
+$SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS='${QEMU_MAS:-}' && mkdir -p \$TMPDIR build/pc qbin && \
   printf '#!/bin/sh\\nexec /usr/bin/qemu-system-i386 \"\$@\" %s\\n' '${QEMU_MAS:-}' > qbin/qemu-system-i386 && chmod +x qbin/qemu-system-i386 && \
   export PATH=/dev/shm/$NOMBRE/qbin:\$PATH && \
   make -s 2>&1 | tail -3 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM 2>&1 | tail -3 && \

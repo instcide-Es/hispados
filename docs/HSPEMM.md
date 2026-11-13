@@ -59,8 +59,14 @@ que necesita el modo real «de verdad» no puede funcionar, y lo dice:
 - Programas que pasan a modo protegido por su cuenta (sin VCPI ni DPMI): el
   monitor los termina con «HSPEMM: el programa quiere pasar a modo
   protegido por su cuenta…».
-- `HSPDPMI` necesita con HSPEMM un Pentium o superior (páginas de 4 MB) y que
-  HSPEMM esté cargado justo tras HSPXMS.
+- `HSPDPMI` con HSPEMM necesita que HSPEMM esté cargado justo tras HSPXMS.
+  En un Pentium identifica la memoria con páginas de 4 MB; en un 386 o 486
+  (sin PSE), con tablas de páginas de 4 KB que pone en un bloque de XMS: 4 KB
+  por cada 4 MB de RAM pasados los 4 primeros, más 32 KB de reserva para la
+  memoria física que piden los programas con DPMI 0800h (el marco lineal de
+  VESA de Hispa Ventanas), y hasta 3 KB para alinearlas (con 8 MB, 39 KB; con
+  32 MB, 63 KB; con 64 MB, 95 KB). En memoria convencional, lo mismo que en
+  el Pentium (el directorio y la primera tabla).
 - **Windows en modo 386 mejorado** arranca con HSPEMM cargado (probado con
   Windows para Trabajo en Grupo 3.11): al arrancar pregunta (INT 2Fh
   AX=1605h) y HSPEMM le entrega la rutina que apaga el modo V86 y lo vuelve

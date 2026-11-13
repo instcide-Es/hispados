@@ -49,6 +49,10 @@ checke() { if grep -qE -- "$1" $T/log.txt; then ok "$2"; else ko "$2"; fi; }
 ini() { if grep -qxF -- "$1" $T/ini.txt; then ok "VENTANAS.INI: $1"; else ko "VENTANAS.INI sin la línea «$1»"; fi; }
 inin() { if grep -q -- "^$1" $T/ini.txt; then ko "VENTANAS.INI: sobra «$1»"; else ok "VENTANAS.INI: sin «$1»"; fi; }
 chk() { $CHK "$@" || fail=1; }
+# memoria extendida que se ve: la de la máquina (16 MB; otra con QEMU_MAS='-m N'
+# en tools/pruebas_pc.sh) menos el primer mega y 128 KB
+MEGAS=$(echo " ${QEMU_MAS:-} " | sed -n 's/.* -m \([0-9]*\)[ M].*/\1/p'); MEGAS=${MEGAS:-16}
+MEMEXT=$(printf "%d" $((MEGAS * 1024 - 1152)) | sed ':a;s/\B[0-9]\{3\}\>/.&/;ta')
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.3}"; }
 tecla() { local k; for k in "$@"; do mon "sendkey $k" 0.3; done; }
 shot() { sleep 0.4; mon "screendump $T/$1.ppm" 0.6; }
@@ -225,7 +229,7 @@ chk $T/s12.ppm texto 278 175 0 8 negrita "martes, 24 de diciembre de 2030" texto
 # -- Sistema --
 chk $T/s13.ppm texto 278 145 4 8 negrita "Sistema" texto 278 175 0 8 fina "Hispa Ventanas 0.3" \
   texto 278 193 0 8 fina "Sistema: Hispa-DOS (compatible con MS-DOS 6.22)" texto 278 211 0 8 fina "Procesador:" \
-  texto 278 247 0 8 fina "Memoria convencional: 639 KB" texto 278 265 0 8 fina "Memoria extendida: 15.232 KB" \
+  texto 278 247 0 8 fina "Memoria convencional: 639 KB" texto 278 265 0 8 fina "Memoria extendida: $MEMEXT KB" \
   texto 278 301 0 8 fina "Pantalla: 800 x 600, 256 colores" texto 278 337 0 8 fina "Ratón: driver INT 33h (HSPRATON)" \
   texto 278 373 0 8 fina "Teclado: español (TECLADO)" texto 278 391 0 8 fina "País: España (página de códigos 437)"
 # -- Teclado --

@@ -82,7 +82,11 @@ if mtype -i $T/f.img ::E.TXT > $T/E.TXT 2>/dev/null; then texto $T/E.TXT; else :
 E=$T/E.TXT.u8
 check $E "==== PROCESADOR ====" "EQUIPO > E.TXT: el archivo tiene el informe"
 check $E "Fabricante: "
-check $E "Familia 6, modelo"
+# con otra CPU (QEMU_MAS='-cpu 486' en tools/pruebas_pc.sh) la familia cambia
+case " ${QEMU_MAS:-} " in
+  *" -cpu "*) check $E "Familia " ;;
+  *) check $E "Familia 6, modelo" ;;
+esac
 check $E "Banderas: FPU "
 check $E "Fecha de la BIOS (F000:FFF5): "
 check $E "Sistema, fabricante: QEMU" "SMBIOS: sistema"

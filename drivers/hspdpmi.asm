@@ -174,6 +174,15 @@ vsw_idtr    dd 0                    ; del IDTR,
             align 4
 vsw_lin     dd 0                    ; dirección lineal de vsw_cr3
 vsw_esi     dd 0
+; el espacio lineal por VCPI: con PSE (Pentium), páginas de 4 MB; sin PSE
+; (386 y 486), tablas de 4 KB en un bloque XMS bloqueado: las de la RAM y un
+; fondo de VT_EXTRA para la memoria física de fuera (0800h: marcos lineales)
+vpse        db 0                    ; 1 = páginas de 4 MB (CR4.PSE)
+            align 4
+vt_dir      dd 0                    ; dirección del directorio (primer mega)
+vt_next     dd 0                    ; siguiente tabla libre del fondo
+vt_end      dd 0                    ; fin del fondo
+vt_handle   dw 0                    ; bloque XMS de las tablas (0: ninguno)
             times 80 db 0           ; pila para volver al modo V86
 vcpi_stk:
 
@@ -266,6 +275,26 @@ rmhook_stubs:
 ; =============================================================================
 ;  Modo real: INT 2Fh y entrada de los clientes
 ; =============================================================================
+; al descargar: soltar el bloque XMS de las tablas de páginas (VCPI sin PSE)
+vt_free:
+        cmp word [cs:vt_handle], 0
+        je .r
+        push ax
+        push bx
+        push dx
+        mov dx, [cs:vt_handle]
+        mov ah, 0x0D
+        call far [cs:xms]
+        mov dx, [cs:vt_handle]
+        mov ah, 0x0A
+        call far [cs:xms]
+        mov word [cs:vt_handle], 0
+        pop dx
+        pop bx
+        pop ax
+.r:
+        ret
+
 int2f:
         cmp ax, 0x1687
         je .det
@@ -336,6 +365,7 @@ int2f:
         mov cx, [cs:old2f+2]
         mov [0x2F*4+2], cx
         mov bl, 2
+        call vt_free
 .q1:
         mov [cs:oculto], bl         ; (1: desactivado; si se descarga, da igual)
         pop cx
@@ -840,14 +870,18 @@ go_pm:
         mov ax, 0xDE0C
         int 0x67
 ; llegada por VCPI: GDT, IDT, LDT y TSS ya están cargadas; la paginación es
-; la identidad (páginas de 4 MB), salvo el primer mega, que es el del servidor
+; la identidad (páginas de 4 MB, o de 4 KB sin PSE), salvo el primer mega,
+; que es el del servidor
 .vpm:
         mov ax, SEL_HDATA
         mov ds, ax
         mov es, ax
+        cmp byte [vpse], 0          ; (un 386 no tiene CR4)
+        je .vpm2
         mov eax, cr4
         or al, 0x10                 ; PSE
         mov cr4, eax
+.vpm2:
         mov esi, [vsw_esi]
         mov ax, SEL_HB
         mov ss, ax
@@ -3627,12 +3661,74 @@ s0604:
         clc
         ret
 
-; ---- 0800h: dirección física -> lineal (sin paginación es la misma) ----
+; ---- 0800h: dirección física -> lineal (siempre la misma: sin paginación,
+;      o con la identidad de VCPI). Sin PSE, la memoria de fuera de la RAM
+;      (marcos lineales de vídeo...) no tiene tablas: se sacan del fondo y se
+;      quedan puestas (0801h no hace nada) ----
 s0800:
         mov ax, [bp+CF_ESI]
         or ax, [bp+CF_EDI]
         jz s_bad
+        cmp byte [vcpi], 0
+        je .ok
+        cmp byte [vpse], 0
+        jne .ok
+        mov ax, [bp+CF_EBX]
+        shl eax, 16
+        mov ax, [bp+CF_ECX]         ; EAX = dirección física
+        mov dx, [bp+CF_ESI]
+        shl edx, 16
+        mov dx, [bp+CF_EDI]         ; EDX = tamaño
+        dec edx
+        add edx, eax                ; último octeto
+        jc s_bad
+        shr eax, 22                 ; entradas del directorio
+        shr edx, 22
+        xor ch, ch                  ; 1: hay que vaciar la TLB
+        mov ebx, [vt_dir]
+.l:
+        cmp dword [fs:ebx+eax*4], 0
+        jne .n
+        mov edi, [vt_next]
+        cmp edi, [vt_end]
+        jae .full
+        add dword [vt_next], 0x1000
+        mov esi, eax
+        shl esi, 22
+        or si, 7                    ; identidad: presente, escritura, usuario
+        push edi
+        mov cl, 0                   ; 256 x 4 = 1024 entradas
+.f:
+%rep 4
+        mov [fs:edi], esi
+        add edi, 4
+        add esi, 0x1000
+%endrep
+        dec cl
+        jnz .f
+        pop edi
+        or di, 7
+        mov [fs:ebx+eax*4], edi
+        mov ch, 1
+.n:
+        inc eax
+        cmp eax, edx
+        jbe .l
+        call .tlb
+.ok:
         clc
+        ret
+.full:
+        call .tlb
+        mov ax, 0x8012              ; no queda espacio lineal
+        stc
+        ret
+.tlb:
+        test ch, ch
+        jz .t
+        mov esi, cr3
+        mov cr3, esi
+.t:
         ret
 
 ; ---- 0900h-0902h: interrupciones virtuales (aquí, las de verdad) ----
@@ -3926,16 +4022,19 @@ install:
 ; Preparar la conmutación por VCPI. El directorio y la primera tabla de
 ; páginas quedan residentes, tras el programa (alineados a 4 KB). La primera
 ; tabla la rellena el servidor (el primer mega y lo suyo); el resto del
-; espacio lineal es la identidad con páginas de 4 MB (hace falta un Pentium).
+; espacio lineal es la identidad: con PSE (Pentium), páginas de 4 MB; sin
+; PSE (386, 486), tablas de 4 KB en memoria extendida (vt_build).
 ; CF y DX = mensaje si no se puede.
 vcpi_setup:
-        mov dx, msg_vnopse
+        mov byte [vpse], 0
         cmp byte [cputype], 5
-        jb .err
+        jb .nopse
         mov eax, 1
         cpuid
         test dl, 0x08               ; PSE
-        jz .err
+        jz .nopse
+        mov byte [vpse], 1
+.nopse:
         mov ax, cs
         add ax, ((image_end - $$) + 0x200 + 15) >> 4
         add ax, 0xFF
@@ -3990,14 +4089,24 @@ vcpi_setup:
         add eax, 0x1000
         jmp .f0
 .dir:
-        ; directorio: la tabla 0 y páginas de 4 MB
-        mov cx, es
+        push cs
+        pop es
+        cmp byte [vpse], 0
+        jne .pse
+        call vt_build               ; (usa la página del directorio de paso)
+        jc .err
+.pse:
+        ; directorio: la tabla 0 y, con PSE, páginas de 4 MB
+        mov cx, [vdir]
+        add cx, 0x100
         shr cx, 8
         mov ax, 0xDE06
         int 0x67
         or dl, 7
         mov es, [vdir]
         mov [es:0], edx
+        cmp byte [vpse], 0
+        je .cr3
         mov di, 4
         mov eax, 0x00400087
 .f1:
@@ -4005,6 +4114,7 @@ vcpi_setup:
         add eax, 0x00400000
         cmp di, 0x1000
         jb .f1
+.cr3:
         mov cx, [vdir]
         shr cx, 8
         mov ax, 0xDE06
@@ -4031,6 +4141,244 @@ vcpi_setup:
         mov byte [vcpi], 0
         stc
         ret
+
+; Sin PSE: tablas de páginas de 4 KB para la identidad de toda la RAM, en un
+; bloque XMS bloqueado (más VT_EXTRA de reserva para 0800h). Se rellenan
+; desde aquí con XMS 0Bh, usando de paso la página del directorio, y luego
+; se deja el directorio apuntando a ellas (la entrada 0 la pone vcpi_setup).
+; La memoria por encima de la HMA es la identidad también en HSPEMM (.chk),
+; así que la dirección del bloque bloqueado es la física.
+; CF y DX = mensaje si no se puede.
+VT_EXTRA    equ 8                   ; 32 MB de memoria física de fuera
+vt_build:
+        call mem_top                ; EAX = fin de la RAM
+        add eax, 0x3FFFFF
+        jnc .nc
+        mov eax, 0xFFFFFFFF
+.nc:
+        shr eax, 22                 ; entradas de 4 MB con RAM
+        cmp ax, 1
+        jae .n1
+        mov ax, 1
+.n1:
+        mov [vt_n], ax
+        ; KB del bloque: (n - 1 + VT_EXTRA) tablas, y 3 KB para alinear
+        add ax, VT_EXTRA - 1
+        shl ax, 2
+        add ax, 3
+        mov [vt_kb], ax
+        mov dx, ax
+        mov ah, 0x09
+        call far [xms]
+        test ax, ax
+        jz .nomem
+        mov [vt_handle], dx
+        mov ah, 0x0C
+        call far [xms]
+        test ax, ax
+        jz .nomem_free
+        shl edx, 16
+        mov dx, bx                  ; EDX = dirección física del bloque
+        mov ebx, edx
+        add ebx, 0xFFF
+        and bx, 0xF000              ; EBX = primera tabla
+        mov eax, ebx
+        sub eax, edx
+        mov [vt_off], eax           ; su desplazamiento dentro del bloque
+        ; el bloque tiene que caer en la RAM que cubren las tablas
+        movzx ecx, word [vt_kb]
+        shl ecx, 10
+        add ecx, edx
+        dec ecx
+        shr ecx, 22
+        mov dx, msg_vtop
+        cmp cx, [vt_n]
+        jae .bad
+        ; tabla a tabla: identidad de los 4 MB de la entrada i (1..n-1)
+        mov word [vt_i], 1
+.t:
+        mov ax, [vt_i]
+        cmp ax, [vt_n]
+        jae .tdir
+        movzx eax, ax
+        shl eax, 22
+        or al, 7
+        mov es, [vdir]
+        xor di, di
+.te:
+        stosd
+        add eax, 0x1000
+        cmp di, 0x1000
+        jb .te
+        push cs
+        pop es
+        mov dword [vt_mv], 0x1000   ; longitud
+        mov word [vt_mv+4], 0       ; origen: memoria convencional
+        mov word [vt_mv+6], 0
+        mov ax, [vdir]
+        mov [vt_mv+8], ax
+        mov ax, [vt_handle]
+        mov [vt_mv+10], ax          ; destino: el bloque
+        movzx eax, word [vt_i]
+        dec ax
+        shl eax, 12
+        add eax, [vt_off]
+        mov [vt_mv+12], eax
+        mov si, vt_mv
+        mov ah, 0x0B
+        call far [xms]
+        mov dx, msg_vmove
+        test ax, ax
+        jz .bad
+        inc word [vt_i]
+        jmp .t
+.tdir:
+        ; directorio: a cero (la página ha servido de paso) y las entradas
+        mov es, [vdir]
+        xor di, di
+        xor ax, ax
+        mov cx, 0x800
+        rep stosw
+        mov di, 4
+        mov eax, ebx
+        or al, 7
+        mov cx, [vt_n]
+.d:
+        dec cx
+        jz .dfin
+        stosd
+        add eax, 0x1000
+        jmp .d
+.dfin:
+        push cs
+        pop es
+        and al, 0xF8
+        mov [vt_next], eax          ; el fondo, tras las de la RAM
+        add eax, VT_EXTRA * 0x1000
+        mov [vt_end], eax
+        movzx eax, word [vdir]
+        shl eax, 4
+        mov [vt_dir], eax
+        clc
+        ret
+.bad:
+        push dx
+        mov dx, [vt_handle]
+        mov ah, 0x0D
+        call far [xms]
+        pop dx
+.nomem_free:
+        push dx
+        mov dx, [vt_handle]
+        mov ah, 0x0A
+        call far [xms]
+        pop dx
+        mov word [vt_handle], 0
+        cmp dx, msg_vtop
+        je .e
+        cmp dx, msg_vmove
+        je .e
+.nomem:
+        ; no hay memoria extendida: decir cuánta hace falta
+        mov dx, msg_vnomem
+        call print
+        mov ax, [vt_kb]
+        call print_dec
+        mov dx, msg_vnomem2
+.e:
+        push cs
+        pop es
+        stc
+        ret
+
+; -> EAX = dirección del fin de la RAM (lo mayor de INT 15h E801h y de lo
+;    que diga el XMS: función 88h o, si no la tiene, 08h)
+mem_top:
+        mov dword [vt_top], 0
+        mov ax, 0xE801
+        xor bx, bx
+        xor cx, cx
+        xor dx, dx
+        int 0x15
+        jc .xms
+        test ax, ax
+        jnz .e8
+        mov ax, cx
+        mov bx, dx
+.e8:
+        movzx eax, ax
+        shl eax, 10
+        add eax, 0x100000           ; de 1 MB a 16 MB
+        mov [vt_top], eax
+        test bx, bx
+        jz .xms
+        movzx eax, bx
+        shl eax, 16
+        add eax, 0x1000000          ; encima de 16 MB
+        cmp eax, [vt_top]
+        jbe .xms
+        mov [vt_top], eax
+.xms:
+        mov ah, 0x00
+        call far [xms]
+        cmp ah, 3
+        jb .x08
+        mov ah, 0x88
+        xor bl, bl
+        call far [xms]
+        test bl, bl
+        jz .x88
+        cmp bl, 0xA0                ; (sin libre: ECX vale igual)
+        jne .x08
+.x88:
+        inc ecx
+        jmp .max
+.x08:
+        mov ah, 0x08
+        call far [xms]
+        movzx ecx, dx
+        shl ecx, 10
+        add ecx, 0x110000
+.max:
+        mov eax, [vt_top]
+        cmp ecx, eax
+        jbe .r
+        mov eax, ecx
+.r:
+        ret
+
+; AX -> en decimal por la salida estándar
+print_dec:
+        push bx
+        push cx
+        push dx
+        mov bx, 10
+        xor cx, cx
+.d:
+        xor dx, dx
+        div bx
+        push dx
+        inc cx
+        test ax, ax
+        jnz .d
+.p:
+        pop dx
+        add dl, '0'
+        mov ah, 0x02
+        int 0x21
+        loop .p
+        pop dx
+        pop cx
+        pop bx
+        ret
+
+            align 4
+vt_off      dd 0
+vt_top      dd 0
+vt_mv       times 16 db 0           ; movimiento de XMS (0Bh)
+vt_n        dw 0
+vt_kb       dw 0
+vt_i        dw 0
 vdir        dw 0
 vcpi_top    dw 0
 
@@ -4080,7 +4428,10 @@ msg_ok      db "Instalado: clientes de 16 y de 32 bits, memoria de XMS.", 13, 10
 msg_no386   db "HSPDPMI: hace falta un procesador 386 o superior.", 13, 10, "$"
 msg_v86     db "HSPDPMI: el procesador ya está en modo protegido y no hay un servidor VCPI (HSPEMM); no se instala.", 13, 10, "$"
 msg_vcpi    db "Con HSPEMM cargado: el modo protegido se pide por VCPI.", 13, 10, "$"
-msg_vnopse  db "HSPDPMI: con HSPEMM (modo V86) hace falta un Pentium o superior; no se instala.", 13, 10, "$"
+msg_vnomem  db "HSPDPMI: con HSPEMM (modo V86) y sin páginas de 4 MB, las tablas de páginas van en memoria extendida y no queda bastante: hacen falta $"
+msg_vnomem2 db " KB de XMS; no se instala.", 13, 10, "$"
+msg_vtop    db "HSPDPMI: no se ha podido medir la memoria (INT 15h E801h y XMS) para las tablas de páginas; no se instala.", 13, 10, "$"
+msg_vmove   db "HSPDPMI: el gestor XMS no ha podido copiar las tablas de páginas; no se instala.", 13, 10, "$"
 msg_vorder  db "HSPDPMI: cargue HSPEMM.SYS justo después de HSPXMS.SYS en CONFIG.SYS; no se instala.", 13, 10, "$"
 msg_already db "HSPDPMI: ya hay un servidor DPMI instalado.", 13, 10, "$"
 msg_noxms   db "HSPDPMI: hace falta un gestor XMS (HSPXMS.SYS en CONFIG.SYS).", 13, 10, "$"

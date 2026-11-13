@@ -54,7 +54,11 @@ check "No se puede crear el directorio"
 check "IDE"
 check "Propiedades del sistema"
 check "QEMU DVD-ROM"
-check "Procesador   QEMU Virtual CPU"
+# con otra CPU (QEMU_MAS='-cpu 486' en tools/pruebas_pc.sh) el nombre cambia
+case " ${QEMU_MAS:-} " in
+  *" -cpu "*) check "Procesador   " ;;
+  *) check "Procesador   QEMU Virtual CPU" ;;
+esac
 if cmp -s <(mtype -i $T/f.img ::GRANDE.BIN) $T/iso/GRANDE.BIN; then echo "  OK   GRANDE.BIN copiado del DVD sin errores"; else echo "  FAIL contenido de GRANDE.BIN"; fail=1; fi
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; fi
 rm -rf $T
