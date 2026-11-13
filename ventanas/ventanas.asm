@@ -911,6 +911,26 @@ rm_snd:
         call far [cs:snd_entrada]
         retf
 
+; ---- [Hispa-Nes] INT 15h: qué teclas están pulsadas ----
+; La BIOS avisa de cada código que llega del teclado (AH=4Fh, AL=código; el
+; bit 7 dice que se suelta) antes de traducirlo. Aquí solo se apunta, en
+; tec_mapa (un octeto por tecla: lo leen los módulos que necesitan saber qué
+; teclas siguen pulsadas, que con WM_KEYDOWN no se sabe), y se deja seguir.
+rm_int15:
+        cmp ah, 0x4F
+        jne .c
+        push bx
+        mov bl, al
+        and bx, 0x007F
+        test al, 0x80
+        setz [cs:tec_mapa+bx]
+        pop bx
+        stc
+.c:
+        jmp far [cs:tec_ant15]
+tec_ant15   dd 0
+tec_mapa    times 128 db 0
+
 %include "video16.inc"
 
 ; =============================================================================
@@ -928,6 +948,7 @@ principal:
         mov eax, [base]
         neg eax
         mov [cero], eax             ; puntero a la dirección lineal 0
+        call tec_instalar           ; [Hispa-Nes]
         ; la superficie de dibujo: un byte por punto
         mov eax, [vid_ancho]
         imul eax, [vid_alto]
@@ -1009,6 +1030,7 @@ principal:
         mov esi, m_novideo2
         mov al, 1
 .fin:
+        call tec_quitar             ; [Hispa-Nes]
         push eax
         call escribe
         cmp byte [hay_rat], 0
@@ -1115,6 +1137,34 @@ rm_ir:
         int 0x31
         pop edi
         pop ecx
+        ret
+
+; ---- [Hispa-Nes] el vector de INT 15h de modo real: ponerlo y quitarlo ----
+; (un vector es «segmento:desplazamiento» en la dirección lineal 15h*4)
+tec_instalar:
+        pushad
+        mov eax, [cero]
+        mov edx, [eax+0x15*4]
+        mov [tec_ant15], edx
+        movzx edx, word [rmseg]
+        shl edx, 16
+        mov dx, rm_int15
+        mov [eax+0x15*4], edx
+        mov byte [tec_puesto], 1
+        popad
+        ret
+tec_quitar:
+        cmp byte [tec_puesto], 0
+        je .x
+        push eax
+        push edx
+        mov eax, [cero]
+        mov edx, [tec_ant15]
+        mov [eax+0x15*4], edx
+        mov byte [tec_puesto], 0
+        pop edx
+        pop eax
+.x:
         ret
 
 ; ---- una vuelta de sondeo, en modo real ----
@@ -1273,6 +1323,7 @@ exc_texto:
         push ds
         push es
         mov ds, [cs:sel_dat]
+        call tec_quitar             ; [Hispa-Nes]
         cmp byte [en_grafico], 0
         je .x
         mov byte [en_grafico], 0

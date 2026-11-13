@@ -90,4 +90,9 @@
         HVF mem_bloque_soltar       ; 69
         HVF pal_rgb                 ; 70  (datos) la paleta: 256 de rojo, verde, azul, 0
         HVF fuente8x16              ; 71  (datos) la fuente: 256 caracteres de 16 filas
+        ; ---- [Hispa-Nes] turno, teclas mantenidas, sonido seguido y carpeta (76 entradas) ----
+        HVF ceder                   ; 72  da el turno a los demás programas y vuelve
+        HVF tec_mapa                ; 73  (datos) 128 octetos: 1 = esa tecla está pulsada
+        HVF snd_pcm                 ; 74  un trozo de sonido para HSPSND
+        HVF dos_dir_actual          ; 75  la carpeta de trabajo: «A:\CARPETA»
 %endmacro

@@ -99,6 +99,9 @@ los juega desde su biblioteca personal; las ROM nunca van en el proyecto.
   compatible cada emulador.
 - Empezamos por Hispa-Nes como programa .HVP de Hispa Ventanas, con sus
   juegos (plataformas, naves, puzles), y luego Hispa-Boy.
+- **Hispa-Nes ya está** (docs/HISPANES.md): `HISPANES.HVP`, con el primer
+  juego propio, Cometas (naves). Faltan los otros juegos y probarlo en
+  equipos de verdad.
 
 ## Estado
 

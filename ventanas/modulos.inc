@@ -94,6 +94,38 @@ pantalla:
         mov ebx, [vid_alto]
         ret
 
+; [Hispa-Nes] da el turno a los demás programas y al sistema (ratón, teclas,
+; pantalla) y vuelve en cuanto le toca otra vez, sin esperar a un mensaje:
+; para los programas que tienen algo que hacer todo el rato (un emulador)
+ceder:
+        mov byte [actividad], 1
+        jmp tar_ceder
+; [Hispa-Nes] ESI=muestras ECX=octetos (2048 como mucho) EDX=Hz AL=formato
+; (bit 0: 16 bits, bit 1: estéreo): las pone en la cola de HSPSND, que las
+; hace sonar a continuación de las anteriores. CF=1 si no hay sonido
+snd_pcm:
+        cmp byte [snd_hay], 0
+        je .no
+        pushad
+        cmp ecx, DOS_TRANS
+        jbe .c
+        mov ecx, DOS_TRANS
+.c:
+        mov [rmcs+0x18], ecx
+        mov [rmcs+0x14], edx
+        mov dword [rmcs+4], dos_buf
+        mov edi, dos_buf
+        rep movsb
+        movzx eax, al
+        mov ah, 0x01
+        call snd_llamar
+        popad
+        clc
+        ret
+.no:
+        stc
+        ret
+
 ; ECX=octetos -> EAX=puntero EDX=mango; CF=1 si no hay memoria
 mem_bloque:
         push ebx

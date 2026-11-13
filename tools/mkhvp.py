@@ -5,7 +5,9 @@ uso: mkhvp.py FUENTE.asm SALIDA.HVP
 
 El fuente usa ventanas/hvp.inc (docs/VENTANAS.md, «Programas aparte»). Pasos:
  1. pasa el fuente y los .inc de ventanas/ que usa a la página 437 en
-    build/gen/hvp/ y empaqueta el icono (tools/icopack.py);
+    build/gen/hvp/ y empaqueta el icono (tools/icopack.py); un programa
+    grande puede tener sus propios .inc en una carpeta con su nombre, al
+    lado del fuente (programas/hispanes.asm y programas/hispanes/*.inc);
  2. lo ensambla dos veces, con dos direcciones de carga distintas: los
     cuatro octetos que cambian de una a otra son los punteros que hay que
     reubicar al cargar;
@@ -15,7 +17,7 @@ El fuente usa ventanas/hvp.inc (docs/VENTANAS.md, «Programas aparte»). Pasos:
     reubicaciones hay.
 Builds an Hispa Ventanas program module (flat 32-bit image + relocations).
 """
-import os, struct, subprocess, sys
+import os, re, struct, subprocess, sys
 
 RAIZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 INCS = ('hvp.inc', 'hvplib.inc', 'defs.inc', 'api.inc')
@@ -35,6 +37,11 @@ def main():
     for inc in INCS:
         subprocess.run([sys.executable, cp437, os.path.join(RAIZ, 'ventanas', inc),
                         os.path.join(gen, inc)], check=True)
+    # los .inc propios del programa: en su carpeta (FUENTE sin «.asm»)
+    propios = os.path.splitext(fuente)[0]
+    for inc in re.findall(r'^\s*%include\s+"([^"]+)"', open(fuente, encoding='utf-8').read(), re.M):
+        if inc not in INCS and os.path.isfile(os.path.join(propios, inc)):
+            subprocess.run([sys.executable, cp437, os.path.join(propios, inc), os.path.join(gen, inc)], check=True)
     subprocess.run([sys.executable, os.path.join(RAIZ, 'tools', 'icopack.py'), asm], check=True)
     img = []
     for org in (0, DELTA):

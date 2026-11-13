@@ -890,6 +890,9 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
   el salvapantallas (ver «Configuración y VENTANAS.INI»).
 - **Pintura**: el programa de dibujo, también un módulo .HVP (ver
   «Pintura», más abajo).
+- **Hispa-Nes** (`programas/hispanes.asm`, `HISPANES.HVP`, en «Juegos»): el
+  emulador compatible con los cartuchos de la NES, con su juego Cometas
+  (`HISPA1.NES`). Tiene su documento: [HISPANES.md](HISPANES.md).
 
 ## Programas aparte: los módulos .HVP
 
@@ -1010,7 +1013,16 @@ Añadidas para Pintura (72 entradas: seis más, de la 66 a la 71):
 | `pal_rgb` | (datos) la paleta: 256 colores de cuatro octetos (rojo, verde, azul, 0): los 16 propios, el cubo de 6×6×6 y los 24 grises |
 | `fuente8x16` | (datos) la fuente: 256 caracteres de 16 octetos, una fila por octeto, el bit de más peso a la izquierda |
 
-Un módulo compilado con menos entradas en su cabecera (63 o 66) sigue
+Añadidas para Hispa-Nes (76 entradas: cuatro más, de la 72 a la 75):
+
+| Entradas | Para qué |
+|---|---|
+| `ceder` | da el turno a los demás programas y al sistema (ratón, teclas, pantalla) y vuelve en cuanto le toca otra vez, sin esperar a un mensaje. Para un programa que tiene algo que hacer todo el rato (un emulador): su bucle mira los mensajes con `msg_mirar`, hace un poco de lo suyo y llama a `ceder`. Mientras alguien la usa, Hispa Ventanas no duerme entre interrupciones: cuando no haya nada que hacer hay que volver a `msg_tomar` |
+| `tec_mapa` | (datos) 128 octetos, uno por tecla (su código de teclado): 1 mientras está pulsada. Con `WM_KEYDOWN` no se sabe cuándo se suelta una tecla; aquí sí. Hispa Ventanas lo apunta en modo real (INT 15h, AH=4Fh: el aviso de la BIOS por cada código que llega del teclado, que también reciben las teclas que mandan HSPUSB y HSPJOY). Las teclas con prefijo (las flechas) usan el mismo sitio que las del teclado numérico. Vale para todas las ventanas: quien lo lee mira antes si tiene el foco (`WM_SETFOCUS`, `WM_KILLFOCUS`) |
+| `snd_pcm` (ESI=muestras ECX=octetos, 2.048 como mucho, EDX=Hz, AL=formato: bit 0, 16 bits; bit 1, estéreo → CF=1 si no hay sonido) | pone un trozo de sonido en la cola de HSPSND (su función 01h), que lo toca a continuación de los anteriores. HSPSND tiene sitio para cuatro trozos y, si no cabe, la llamada espera: quien no pueda esperar tiene que llevar la cuenta de lo que ha mandado (ver docs/HISPANES.md) |
+| `dos_dir_actual` (EDI=búfer de 80) | la carpeta de trabajo, con su unidad (`A:\CARPETA`): para hacer una ruta completa con el nombre que devuelve `dlg_archivo` |
+
+Un módulo compilado con menos entradas en su cabecera (63, 66 o 72) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
 
@@ -1109,6 +1121,10 @@ A mano:
 ```
 python3 tools/mkhvp.py juegos/hola.asm build/HOLA.HVP
 ```
+
+Un programa grande puede partirse en varios archivos: los `%include` que no
+son de `ventanas/` se buscan en una carpeta con el nombre del fuente, a su
+lado (`programas/hispanes.asm` y `programas/hispanes/*.inc`).
 
 Reglas para un módulo: lo largo se parte con un temporizador (no se cede el
 turno más que en `msg_tomar`); los textos que se le dan a un diálogo o a una
@@ -1324,6 +1340,10 @@ salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
   botones intercambiados y teclado estadounidense al arrancar, y «De
   fábrica». Cuarta: en VGA de 640×480 y 16 colores. Capturas de muestra en
   `build/config_*.png`. (`tests/run_config_tests.sh` es la de CONFIG.SYS.)
+- `tests/run_hispanes_tests.sh`: Hispa-Nes (ver [HISPANES.md](HISPANES.md)):
+  el núcleo fuera de QEMU con ROM de prueba, Cometas paso a paso comparando
+  la pantalla punto por punto, a su velocidad con sonido y la velocidad.
+  Capturas de muestra en `build/hispanes_*.png`.
 - `tests/run_pintura_tests.sh`: Pintura. Primera sesión, sin CENTRO.INI: su
   acceso sale en «Accesorios»; se abre, se dibuja con el ratón con cada
   herramienta y con los dos botones, se eligen colores, grosores y formas,

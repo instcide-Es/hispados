@@ -309,8 +309,8 @@ check "TRAS-SALIR"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
-ini "Modulos=7"; ini "Nombre=Pintura"; ini "Programa=A:\\HISPADOS\\PROGS\\PINTURA.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén " ]; then
+ini "Modulos=8"; ini "Nombre=Pintura"; ini "Programa=A:\\HISPADOS\\PROGS\\PINTURA.HVP"
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes " ]; then
   ok "CENTRO.INI: Pintura, en el grupo Accesorios, y los juegos en el suyo"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"
@@ -327,7 +327,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/bmp
 $BMP crea $T/bmp
 mcopy -i $T/f.img $T/bmp/*.BMP ::
-printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=7' '' \
+printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=8' '' \
   '[Grupo]' 'Nombre=Imagenes' 'Ventana=120,420,560,150' 'Estado=1' '' \
   '[Acceso]' 'Nombre=Uno' 'Programa=A:\HISPADOS\PROGS\PINTURA.HVP' 'Parametros=A:\T1.BMP' '' \
   '[Acceso]' 'Nombre=Cuatro' 'Programa=A:\HISPADOS\PROGS\PINTURA.HVP' 'Parametros=A:\T4.BMP' '' \

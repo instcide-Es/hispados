@@ -168,7 +168,8 @@ $(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack
 HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/defs.inc ventanas/api.inc \
          tools/mkhvp.py tools/icopack.py tools/cp437.py
 HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP \
-       $(B)/BLOQUES.HVP $(B)/SOLITARI.HVP $(B)/TRAGABOL.HVP $(B)/ALMACEN.HVP
+       $(B)/BLOQUES.HVP $(B)/SOLITARI.HVP $(B)/TRAGABOL.HVP $(B)/ALMACEN.HVP \
+       $(B)/HISPANES.HVP
 $(B)/CULEBRA.HVP: juegos/culebra.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/MINAS.HVP: juegos/minas.asm $(HVPDEP) | $(B)
@@ -182,6 +183,27 @@ $(B)/TRAGABOL.HVP: juegos/tragabolas.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/ALMACEN.HVP: juegos/almacen.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# Hispa-Nes (docs/HISPANES.md): el emulador, con sus piezas en
+# programas/hispanes/, y sus juegos propios, hechos para la consola y
+# ensamblados aquí con tools/asm6502.py (NESROMS: van a \HISPADOS\JUEGOS)
+$(B)/HISPANES.HVP: programas/hispanes.asm $(wildcard programas/hispanes/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+NESROMS = $(B)/HISPA1.NES
+$(B)/HISPA1.NES: nes/hispa1/hispa1.s nes/hispa1/dibujos.s tools/asm6502.py | $(B)
+	python3 tools/asm6502.py $< $@
+# el núcleo de Hispa-Nes como programa de Linux y sus ROM de prueba
+# (tests/run_hispanes_tests.sh)
+NESNAT = tests/hispanes/nesnativo.asm $(wildcard programas/hispanes/*.inc)
+$(B)/nesnativo: $(NESNAT) | $(B)
+	$(NASM) -f bin -i programas/hispanes/ -o $@ $< && chmod +x $@
+$(B)/nesnativo_t: $(NESNAT) | $(B)
+	$(NASM) -f bin -DTRAZA -i programas/hispanes/ -o $@ $< && chmod +x $@
+$(B)/CPUTEST.NES: tests/hispanes/cputest.s tools/asm6502.py | $(B)
+	python3 tools/asm6502.py $< $@
+# (un mando «pulsado» para HSPJOY: lo que ve Hispa-Nes sin tocar el teclado)
+$(B)/NESJOY.COM: tests/progs/nesjoy.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+nesprogs: $(B)/nesnativo $(B)/nesnativo_t $(B)/CPUTEST.NES $(B)/NESJOY.COM
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP
@@ -199,7 +221,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
-        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA)
+        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -254,7 +276,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard te
 	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
 	mmd   -i $@ ::HISPADOS/JUEGOS
-	for f in $(HVPS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
+	for f in $(HVPS) $(NESROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
 	# y los accesorios (Pintura), en \HISPADOS\PROGS
 	mmd   -i $@ ::HISPADOS/PROGS
 	for f in $(HVPA); do mcopy -i $@ $$f ::HISPADOS/PROGS/ || exit 1; done
@@ -334,7 +356,7 @@ nucprogs: $(NUCPROGS)
 $(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs emmprogs joyprogs $(B)/LANZTEST.COM
+test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -406,10 +428,11 @@ test: $(IMG) usb nucprogs emmprogs joyprogs $(B)/LANZTEST.COM
 	tests/run_juegos2_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
 	tests/run_pintura_tests.sh $(IMG)
+	tests/run_hispanes_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test clean nucprogs emmprogs joyprogs
+.PHONY: all usb run run-hdd test clean nucprogs emmprogs joyprogs nesprogs

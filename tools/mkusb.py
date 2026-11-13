@@ -15,6 +15,7 @@ SIZE_MB = 64
 START = 2048
 HEADS, SPT = 255, 63
 HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
+NESROMS = ('HISPA1.NES',)           # los juegos propios de Hispa-Nes (NESROMS del Makefile)
 
 def chs(lba):
     c, rem = divmod(lba, HEADS * SPT)
@@ -84,6 +85,8 @@ def main():
                 cab = open(os.path.join(B, f), 'rb').read(32)
                 carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] == 1 else 'JUEGOS'
                 cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
+    for f in NESROMS:
+        cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
     print(OUT)
     mkfloppy()
 
