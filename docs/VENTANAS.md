@@ -1484,22 +1484,40 @@ entradas de la interfaz que ya había):
   pausa (y sola al minimizar), F2 otra partida; clic gira y el botón
   derecho suelta. Menú: empezar en el nivel 1, 4 o 7. Las cinco mejores
   puntuaciones y el nivel inicial, en `BLOQUES.REC` (`Puntos=194,0,0,0,0`).
-- **Solitario** (`juegos/solitario.asm`, `SOLITARI.HVP`): un solitario de
-  columnas de la familia del «Klondike» con **baraja española de 40
-  cartas** dibujada aquí (oros, copas, espadas y bastos; as, 2 a 7, sota
-  10, caballo 11 y rey 12), sobre tapete azul petróleo. Seis columnas de 1
-  a 6 cartas, tapadas menos la de encima; las otras 19 son el mazo, que se
-  pasa de una en una y se le da la vuelta las veces que se quiera. En las
-  columnas se baja de una en una (rey, caballo, sota, 7… as) alternando
-  palos claros (oros y copas) y oscuros (espadas y bastos); a un hueco solo
-  va un rey. Arriba, cuatro montones de salida, uno por palo, del as al
-  rey: se gana con las 40. Ratón: arrastrar una carta o una escalera (si la
-  jugada no vale, vuelve a su sitio), clic en el mazo, doble clic o botón
-  derecho para subir una carta. Teclado: F2 nueva, Retroceso o Ctrl+Z
-  deshacer (512 pasos), Espacio sacar carta, S subir las que se puedan. A
-  la vista, movimientos, tiempo (corre desde el primer movimiento; no,
-  minimizada) y cartas del mazo. `SOLITARI.REC`: `Jugadas=`, `Ganadas=`,
-  `Tiempo=` (el mejor, en segundos) y `Movimientos=` (los menos).
+- **Solitario** (`juegos/solitario.asm`, `SOLITARI.HVP`): el solitario
+  de columnas («Klondike») con dos barajas dibujadas aquí, a elegir en
+  «Juego > Baraja francesa / Baraja española» (la elegida lleva «»» en el
+  menú, se recuerda en `SOLITARI.REC` y al cambiarla empieza otra partida).
+  Por omisión, la **baraja francesa de 52 cartas** (corazones y diamantes
+  en rojo, picas y tréboles en negro; A, 2 a 10, J, Q y K): siete columnas
+  de 1 a 7 cartas, tapadas menos la de encima, y las otras 24 en el mazo.
+  La **española de 40** (oros y copas, claros, con el número en terracota;
+  espadas y bastos, oscuros, en tinta; as, 2 a 7, sota 10, caballo 11 y
+  rey 12): seis columnas (21 cartas, 19 en el mazo). El mazo se pasa de una
+  en una y se le da la vuelta las veces que se quiera. En las columnas se
+  baja de una en una, del rey al as, alternando los colores (rojo y negro;
+  claros y oscuros); a un hueco solo va un rey. Arriba, cuatro montones de
+  salida, uno por palo, del as al rey: se gana con todas. Las cartas
+  (72×100, sobre tapete azul petróleo) imitan las de verdad con diseño
+  propio: blancas, esquinas redondeadas y filete gris; el índice (número o
+  letra en negrita y la pinta pequeña) arriba a la izquierda y, girado,
+  abajo a la derecha; las pintas en su sitio de siempre, las de la mitad de
+  abajo del revés; el as, con una pinta grande; las figuras, en un
+  recuadro (las francesas, de dos cabezas; las españolas, de cuerpo entero
+  con su palo debajo); el dorso, añil con margen blanco, celosía y un
+  rombo ocre. El rojo y el negro de la francesa son los puros del cubo de
+  la paleta de 256 colores (en la de 16, terracota y tinta). Si una
+  columna no cabe, sus cartas se juntan. Ratón: arrastrar una carta o una
+  escalera (si la jugada no vale, vuelve a su sitio), clic en el mazo,
+  doble clic o botón derecho para subir una carta. Teclado: F2 nueva,
+  Retroceso o Ctrl+Z deshacer (512 pasos), Espacio sacar carta, S subir las
+  que se puedan. A la vista, movimientos, tiempo (corre desde el primer
+  movimiento; no, minimizada) y cartas del mazo. `SOLITARI.REC`:
+  `Baraja=francesa` (o `española`), y los récords de cada baraja: los de la
+  española con las claves de antes, `Jugadas=`, `Ganadas=`, `Tiempo=` (el
+  mejor, en segundos) y `Movimientos=` (los menos), y los de la francesa
+  con `Francesa jugadas=`, `Francesa ganadas=`, `Francesa tiempo=` y
+  `Francesa movimientos=`.
 - **Tragabolas** (`juegos/tragabolas.asm`, `TRAGABOL.HVP`): el Tragón, una
   bola azul petróleo, recoge las bolitas de un jardín de setos (25×17
   casillas) esquivando a tres erizos: el granate va a por él, el añil anda
@@ -1524,8 +1542,8 @@ entradas de la interfaz que ya había):
   `-n N` uno solo, `-s` escribe la solución).
 
 Parámetros de prueba: Bloques, `/S=n` y `/P` (la pieza no cae sola);
-Solitario, `/S=n` (reparto fijo) y `/P` (partida casi acabada: faltan
-cuatro cartas); Tragabolas, `/S=n`, `/P` (todo avanza un paso con cada
+Solitario, `/S=n` (reparto fijo) y `/P` (partida casi acabada, con la
+baraja elegida: faltan cuatro cartas); Tragabolas, `/S=n`, `/P` (todo avanza un paso con cada
 flecha) y `/N=n` (jardín inicial); Almacén, `/N=n` (empieza en el nivel n,
 con todos abiertos).
 
@@ -1734,8 +1752,10 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   filas (la ventana se alarga sola), cada juego nuevo se abre y se cierra, y
   caben en el disquete. Después, una sesión por juego con sus parámetros de
   prueba: Bloques completa una fila, llena el pozo y deja el récord;
-  Solitario pasa cartas, arrastra (también una jugada que no vale),
-  deshace, gana la partida de prueba y deja `SOLITARI.REC`; Tragabolas
+  Solitario, con la francesa, reparte, pasa cartas, arrastra (también
+  rojo sobre rojo y una dama a un hueco, que no valen; un rey a un hueco),
+  deshace, sube un as, gana la partida de prueba y deja `SOLITARI.REC`, y
+  con la española, elegida en el menú y recordada, gana la suya; Tragabolas
   recoge bolitas, lo para un seto, lo pinchan hasta acabar, coge una campana
   y deja el récord; Almacén empuja, deshace, resuelve el nivel 1, pasa al 2
   y lo recuerda al volver a abrir. Los récords se miran con mtools.

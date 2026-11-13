@@ -48,12 +48,12 @@ chk $T/g1.ppm tam 800 600 marco 248 188 452 207 activa titulo 248 188 activa "Ju
   texto 286 291 9 12 fina "Culebra" texto 362 291 0 8 fina "Campo de minas" \
   texto 494 291 0 8 fina "Bloques" texto 590 291 0 8 fina "Solitario" \
   texto 274 367 0 8 fina "Tragabolas" texto 390 367 0 8 fina "Almacén" texto 486 367 0 8 fina "Hispa-Nes" texto 578 367 0 8 fina "Hispa-System" \
-  px 521 257 0 "icono de Bloques" px 619 265 12 "icono de Solitario: el dorso añil" px 631 265 10 "icono de Solitario: el oro" \
+  px 521 257 0 "icono de Bloques" px 619 265 12 "icono de Solitario: el dorso añil" px 631 265 4 "icono de Solitario: el corazón" \
   px 313 341 2 "icono de Tragabolas: el Tragón" px 417 341 10 "icono de Almacén: la caja" \
   px 508 343 15 "icono de Hispa-Nes: el mando" px 519 337 13 "icono de Hispa-Nes: un botón"
 # -- cada juego se abre como una ventana --
 chk $T/g2.ppm marco 150 60 412 431 activa titulo 150 60 activa "Bloques"
-chk $T/g3.ppm marco 90 40 462 429 activa titulo 90 40 activa "Solitario"
+chk $T/g3.ppm marco 106 30 588 567 activa titulo 106 30 activa "Solitario"
 chk $T/g4.ppm marco 40 30 520 449 activa titulo 40 30 activa "Tragabolas"
 chk $T/g5.ppm marco 140 60 468 397 activa titulo 140 60 activa "Almacén"
 chk $T/g6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 390 367 9 12 fina "Almacén"

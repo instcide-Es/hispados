@@ -10,11 +10,15 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
                                     con controles o maximizadas)
   titulo X Y activa|no TEXTO        el título de la ventana que está en X,Y
   texto X Y COLOR FONDO fina|negrita TEXTO   texto dibujado con la fuente propia
+  indice X Y COLOR TEXTO            el índice de una carta del Solitario (14x9
+                                    puntos: las filas 3 a 11 de la fuente, en
+                                    negrita; dos cifras, juntas) sobre blanco
+  indice_rev X Y COLOR TEXTO        el mismo, girado media vuelta (el de abajo)
   cursor X Y                        el cursor del ratón tiene la punta ahí
   igual X Y ANCHO ALTO OTRA.ppm X2 Y2 MAXDIF   la zona es igual que en OTRA
   cambia X Y ANCHO ALTO OTRA.ppm MINDIF        la zona ha cambiado respecto a OTRA
-Los colores se dan por su número (0-15) en la paleta de ventanas/datos.inc y
-se comparan con un margen (las pantallas de 15/16 bits y el DAC de 6 bits
+Los colores se dan por su número (0-15) en la paleta de ventanas/datos.inc (o
+16-255: el cubo de 6x6x6 y los grises de ventanas/video.inc) y se comparan con un margen (las pantallas de 15/16 bits y el DAC de 6 bits
 redondean). La fuente esperada se lee de build/gen/ventanas/fuente.inc.
 Escribe una línea «  OK   ...» o «  FAIL ...» por comprobación.
 Pixel checks on Hispa Ventanas screenshots.
@@ -41,6 +45,9 @@ def paleta():
             elif cols:
                 break
     assert len(cols) == 16, 'no se ha podido leer la paleta'
+    # el cubo de 6x6x6 (16-231) y los grises (232-255), como vid_paleta
+    cols += [(r * 51, g * 51, b * 51) for r in range(6) for g in range(6) for b in range(6)]
+    cols += [(i * 11,) * 3 for i in range(24)]
     return cols
 
 
@@ -101,6 +108,25 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto):
                 if not es(c, fg if enc else bg):
                     mal += 1
     return mal
+
+
+def indice_ok(cap, x, y, fg, texto, girado=False):
+    """El índice de una carta (juegos/solitario.asm, hacer_indices)."""
+    F = fuente()
+    marca = [[False] * 14 for _ in range(9)]
+    x0 = 3 if len(texto) == 1 else 0
+    for ch in texto.encode('cp437'):
+        for fila in range(9):
+            b = F[ch][3 + fila]
+            b |= b >> 1
+            for col in range(8):
+                if b & (0x80 >> col) and x0 + col < 14:
+                    marca[fila][x0 + col] = True
+        x0 += 6
+    if girado:
+        marca = [f[::-1] for f in marca[::-1]]
+    return sum(1 for f in range(9) for c in range(14)
+               if not es(cap.px(x + c, y + f), fg if marca[f][c] else 9))
 
 
 def main():
@@ -164,6 +190,13 @@ def main():
             mal = texto_ok(cap, x, y, fg, bg, a[i + 5] == 'negrita', t)
             res(mal == 0, '%s: texto «%s»%s' % (nombre, t, '' if mal == 0 else ' (%d puntos distintos)' % mal))
             i += 7
+        elif op in ('indice', 'indice_rev'):
+            x, y, fg = (int(v) for v in a[i + 1:i + 4])
+            t = a[i + 4]
+            mal = indice_ok(cap, x, y, fg, t, op == 'indice_rev')
+            res(mal == 0, '%s: índice «%s»%s en (%d,%d)%s' % (nombre, t, ' (girado)' if op == 'indice_rev' else '', x, y,
+                                                          '' if mal == 0 else ' (%d puntos distintos)' % mal))
+            i += 5
         elif op == 'cursor':
             x, y = int(a[i + 1]), int(a[i + 2])
             ok = (es(cap.px(x, y), TINTA) and es(cap.px(x + 1, y + 3), OCRE) and
