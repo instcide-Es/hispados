@@ -12,6 +12,8 @@
 set -u
 # SRC: carpeta del proyecto a probar (por omisión, la de este guion); NOMBRE:
 # carpeta en la RAM del PC (para que varias copias puedan probarse a la vez).
+# SOLO: expresión (grep -E) para lanzar solo algunas pruebas de `make test`,
+# p. ej. SOLO='audicion|sound' (por omisión, todas).
 # Límite acordado con Carlos: como mucho el 80 % del PC (16 de 20 hilos).
 cd "${SRC:-$(dirname "$0")/..}"
 NOMBRE=${NOMBRE:-hispados}
@@ -35,7 +37,7 @@ tar --exclude=./build --exclude=./.git -cf - . | $SSH "rm -rf /dev/shm/$NOMBRE &
 # 3) compilar y lanzar las pruebas en paralelo
 $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/hsptmp TZ=UTC && mkdir -p \$TMPDIR build/pc && \
   make -s 2>&1 | tail -3 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM 2>&1 | tail -3 && \
-  sed -n '/^test:/,/^\$/p' Makefile | grep 'tests/' | sed 's/^\t//; s/\$(IMG)/build\/hispados.img/g' > build/pc/lista.txt && \
+  sed -n '/^test:/,/^\$/p' Makefile | grep 'tests/' | sed 's/^\t//; s/\$(IMG)/build\/hispados.img/g' | grep -E -- '${SOLO:-.}' > build/pc/lista.txt && \
   echo \"\$(wc -l < build/pc/lista.txt) pruebas, $J a la vez\" && \
   date +%s > build/pc/inicio && \
   cat -n build/pc/lista.txt | xargs -P $J -L 1 bash -c 'n=\$0; bash -c \"\$*\" > build/pc/\$(printf %02d \$n).log 2>&1; echo \"\$? \$*\" > build/pc/\$(printf %02d \$n).rc' ; \
