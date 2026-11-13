@@ -1075,6 +1075,11 @@ rm_raton:
 rm_snd:
         call far [cs:snd_entrada]
         retf
+; [CAMPANITA] (lo mismo con los datos en snd_tb, que está más allá de los 64 KB)
+rm_snd2:
+        mov ds, [cs:snd_tbseg]
+        call far [cs:snd_entrada]
+        retf
 
 ; ---- [Hispa-Nes] INT 15h: qué teclas están pulsadas ----
 ; La BIOS avisa de cada código que llega del teclado (AH=4Fh, AL=código; el
@@ -1166,6 +1171,7 @@ principal:
         call tar_limpiar
 %ifdef CON_PROGRAMAS
         call hvp_limpiar
+        call cam_bomba              ; [CAMPANITA] la campanita del volumen
 %endif
         call ges_presentar
         cmp byte [salir], 0
@@ -1628,6 +1634,7 @@ rmseg       resw 1
 lz_seg      resw 1                  ; el PSP del lanzador (0: no hay)
 env_seg     resw 1                  ; el segmento del entorno
 snd_entrada resd 1                  ; punto de entrada de HSPSND (modo real)
+snd_tbseg   resw 1                  ; [CAMPANITA] el segmento de snd_tb
 exec_sp     resw 1
 dpmi_entrada resd 1
 dpmi_priv   resw 1

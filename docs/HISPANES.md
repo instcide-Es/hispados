@@ -121,6 +121,8 @@ Lo de Hispa Ventanas (`hispanes.asm`):
   de una vez: se oye entrecortado, y por eso ahí Hispa-Nes empieza sin
   sonido (se puede poner en el menú). Arreglarlo es cosa de HSPSND (una
   función que diga cuánto sitio queda y trozos del tamaño que se le dé).
+  (Esa función ya existe, la 08h de HSPSND, y con `snd_pcm2` caben trozos
+  de 8.192 octetos: las usa el Reproductor de sonido; Hispa-Nes, todavía no.)
 
 Para esto Hispa Ventanas tiene cuatro entradas más en su interfaz (76; ver
 docs/VENTANAS.md): `ceder`, `tec_mapa`, `snd_pcm` y `dos_dir_actual`.
@@ -204,8 +206,9 @@ del procesador, ni la de tiempos del contador de líneas.
 
 - Probarlo en equipos de verdad (un Pentium y un 486) y con cartuchos
   propios volcados; afinar con lo que salga.
-- Sonido sin cortes con cualquier tarjeta (hace falta una función nueva en
-  HSPSND) y con menos retraso.
+- Sonido sin cortes con cualquier tarjeta y con menos retraso: usar la
+  función 08h de HSPSND (cuántos trozos caben) y `snd_pcm2`, como el
+  Reproductor de sonido.
 - Colores reforzados y grises; efectos a mitad de línea.
 - Más cartuchos (los siguientes más usados: 9, 10, 11, 71) y guardar el
   estado de la consola en cualquier momento.

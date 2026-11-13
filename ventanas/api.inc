@@ -95,4 +95,9 @@
         HVF tec_mapa                ; 73  (datos) 128 octetos: 1 = esa tecla está pulsada
         HVF snd_pcm                 ; 74  un trozo de sonido para HSPSND
         HVF dos_dir_actual          ; 75  la carpeta de trabajo: «A:\CARPETA»
+        ; ---- [CAMPANITA] [Reproductor de sonido] la tarjeta, trozos grandes y la campanita (80 entradas) ----
+        HVF snd_info                ; 76  -> EAX=tarjeta de HSPSND (-1: no está) ESI=su nombre
+        HVF snd_pcm2                ; 77  como snd_pcm, con trozos de hasta 8.192 octetos
+        HVF snd_orden               ; 78  AH=función de HSPSND (03h parar...) AL=dato -> EAX
+        HVF snd_campana             ; 79  la campanita del volumen (si no hay silencio)
 %endmacro

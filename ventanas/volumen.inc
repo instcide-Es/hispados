@@ -14,6 +14,9 @@
 ;  ventanita lo explica.
 ;
 ;    snd_iniciar      busca HSPSND y pone el volumen guardado
+;  Al cambiar el volumen (al soltar la barra, con las flechas o al quitar el
+;  silencio) suena la campanita con el volumen nuevo (snd_campana, en
+;  modulos.inc).
 ;    vol_pintar_icono (escritorio) dibuja el altavoz
 ;    vol_en_icono     EAX=x EBX=y -> CF=1 si el punto está en el altavoz
 ;    vol_alternar     abre o cierra la ventanita
@@ -43,6 +46,7 @@ snd_iniciar:
         call snd_llamar
         test al, al
         jz .x
+        mov [snd_tipo], al          ; [CAMPANITA]
         mov byte [snd_hay], 1
         mov ax, [rmcs+0x10]         ; BX = versión de la API de HSPSND
         mov [snd_ver], ax
@@ -312,10 +316,16 @@ vol_proc:
         call vol_aplicar
         call ven_invalidar
         call vol_inv_icono
+        cmp byte [vol_arr], 0       ; [CAMPANITA] arrastrando, suena al soltar
+        jne .nada
+.campana:
+        call snd_campana
         jmp .nada
 .suelta:
+        cmp byte [vol_arr], 0       ; [CAMPANITA]
+        je .nada
         mov byte [vol_arr], 0
-        jmp .nada
+        jmp .campana
 .tecla:
         cmp ecx, TC_ESC
         jne .t1

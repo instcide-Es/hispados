@@ -196,8 +196,8 @@ propia ventana (se mueve, se cambia de tamaño, se minimiza) con un icono por
 de Hispa-DOS que haya en la carpeta de VENTANAS.COM: Editar, Gestor,
 Información, el intérprete de órdenes y, el último, Configuración, que es un
 módulo .HVP que está en `\HISPADOS`: ver «Configuración y VENTANAS.INI»), «Accesorios» (los programas
-internos: Bloc de notas, Calculadora, Reloj y Sistema, y Pintura, que es un
-módulo .HVP) y «Juegos» (los juegos propios). Los módulos .HVP están en dos
+internos: Bloc de notas, Calculadora, Reloj y Sistema, y Pintura y el
+Reproductor de sonido, que son módulos .HVP) y «Juegos» (los juegos propios). Los módulos .HVP están en dos
 carpetas al lado de VENTANAS.COM: los juegos en `\HISPADOS\JUEGOS` y los
 demás programas en `\HISPADOS\PROGS`.
 
@@ -521,6 +521,28 @@ llamándolo en modo real. HSPSND no tiene función para leer el volumen, así
 que el último valor se guarda en CENTRO.INI y se vuelve a poner al entrar.
 Si HSPSND no está cargado, o no ha encontrado tarjeta, el altavoz sale gris
 y la ventanita lo dice. Con el volumen en silencio, el altavoz lleva un aspa.
+
+**La campanita.** Al cambiar el volumen (al soltar la barra, con las flechas
+o al quitar el silencio; también en Configuración › Sonido y en el
+Reproductor de sonido) suena una campanita corta con el volumen nuevo, para
+oír cómo queda. En silencio no suena, ni mientras un programa está sonando
+(Hispa-Nes, el Reproductor: ya se oye el volumen). Es `\HISPADOS\CAMPANA.WAV`
+(0,3 s a 11.025 Hz, 8 bits, mono: 3 KB; la hace `tools/mksample.py` con
+cuatro parciales de campana y caída exponencial), que Hispa Ventanas lee la
+primera vez que hace falta: así no ocupa sitio en VENTANAS.COM (si el archivo
+no está, no suena y ya). La ventana nunca espera al sonido: `snd_campana`
+solo la prepara y `cam_bomba`, desde el bucle del sistema, le va dando a
+HSPSND trozos de la medida exacta que la tarjeta toca de una vez (2.048
+muestras a 48.000 Hz con HD Audio y AC'97, repitiendo muestras; 1.024 o
+4.096 a 11.025 Hz con las Sound Blaster), y solo los que caben en su cola en
+ese momento: se lo pregunta con la **función 08h** de HSPSND (versión 3 de
+su interfaz: devuelve en AL cuántos trozos caben sin esperar; con un HSPSND
+anterior no hay campanita). Detrás van unos trozos de silencio y, cuando
+HSPSND dice que la cola está vacía, se le manda parar (función 03h): HD
+Audio da vueltas a sus cuatro trozos y, si no, repetiría el final sin
+parar. Si ya estaba sonando, se corta y empieza otra vez; si un programa
+empieza a sonar, se deja. Las teclas de volumen de HSPSND (Ctrl+Alt+flechas)
+no pasan por Hispa Ventanas: con ellas no suena.
 
 ### Configuración y VENTANAS.INI
 
@@ -1040,6 +1062,9 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
   el salvapantallas (ver «Configuración y VENTANAS.INI»).
 - **Pintura**: el programa de dibujo, también un módulo .HVP (ver
   «Pintura», más abajo).
+- **Reproductor de sonido** (`programas/sonidos.asm`, `SONIDOS.HVP`, en
+  «Accesorios»): para saber enseguida si un equipo suena (ver «Reproductor
+  de sonido», más abajo).
 - **Hispa-Nes** (`programas/hispanes.asm`, `HISPANES.HVP`, en «Juegos»): el
   emulador compatible con los cartuchos de la NES, con su juego Cometas
   (`HISPA1.NES`). Tiene su documento: [HISPANES.md](HISPANES.md).
@@ -1051,7 +1076,8 @@ caber en 64 KB), así que los programas nuevos van **aparte**, cada uno en su
 archivo `.HVP` («programa de Hispa Ventanas»). Los primeros son los juegos,
 `CULEBRA.HVP` y `MINAS.HVP` (y la segunda tanda: `BLOQUES.HVP`,
 `SOLITARI.HVP`, `TRAGABOL.HVP` y `ALMACEN.HVP`), en `\HISPADOS\JUEGOS`, y
-Pintura, `PINTURA.HVP`, en `\HISPADOS\PROGS`.
+Pintura, `PINTURA.HVP`, y el Reproductor de sonido, `SONIDOS.HVP`, en
+`\HISPADOS\PROGS`.
 
 Un acceso directo cuyo programa acaba en `.HVP` **se abre como una ventana**
 (no se sale a Hispa-DOS como con un .COM o un .EXE): Hispa Ventanas carga el
@@ -1172,7 +1198,17 @@ Añadidas para Hispa-Nes (76 entradas: cuatro más, de la 72 a la 75):
 | `snd_pcm` (ESI=muestras ECX=octetos, 2.048 como mucho, EDX=Hz, AL=formato: bit 0, 16 bits; bit 1, estéreo → CF=1 si no hay sonido) | pone un trozo de sonido en la cola de HSPSND (su función 01h), que lo toca a continuación de los anteriores. HSPSND tiene sitio para cuatro trozos y, si no cabe, la llamada espera: quien no pueda esperar tiene que llevar la cuenta de lo que ha mandado (ver docs/HISPANES.md) |
 | `dos_dir_actual` (EDI=búfer de 80) | la carpeta de trabajo, con su unidad (`A:\CARPETA`): para hacer una ruta completa con el nombre que devuelve `dlg_archivo` |
 
-Un módulo compilado con menos entradas en su cabecera (63, 66 o 72) sigue
+Añadidas para el Reproductor de sonido (80 entradas: cuatro más, de la 76 a
+la 79):
+
+| Entradas | Para qué |
+|---|---|
+| `snd_info` (→ EAX=tarjeta, ESI=su nombre, EDX=versión de la interfaz de HSPSND) | la tarjeta que lleva HSPSND (su función 00h): 0 ninguna, 1 Sound Blaster de 8 bits, 2 Sound Blaster 16, 3 AC'97, 4 HD Audio; -1 si HSPSND no está cargado (y ESI y EDX no se tocan) |
+| `snd_pcm2` (como `snd_pcm`, con ECX de hasta 8.192 octetos) | un trozo grande para la cola de HSPSND: lo que HD Audio y AC'97 tocan de una vez (2.048 tramas de 16 bits en estéreo). Como `snd_pcm`, espera si no cabe: para no esperar, trozos de la medida de la tarjeta (2.048 tramas a 48.000 Hz con HD Audio y AC'97, 1.024 con Sound Blaster 16, 4.096 muestras de 8 bits y un canal con las anteriores) y preguntar antes si cabe (`snd_orden` con AH=08h; ver `programas/sonidos.asm`) |
+| `snd_orden` (AH=función de HSPSND, AL=dato → EAX; CF=1 si no hay sonido) | las demás funciones de HSPSND: 03h parar, 02h esperar a que acabe, 06h leer el volumen y, con la versión 3 de su interfaz, 08h: cuántos trozos caben en la cola sin esperar (AL, de 0 a 4). El volumen y el silencio se cambian con `aj_poner`, que además los apunta y repinta el altavoz |
+| `snd_campana` | toca la campanita del volumen (ver «El volumen»); no espera |
+
+Un módulo compilado con menos entradas en su cabecera (63, 66, 72 o 76) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
 
@@ -1426,6 +1462,62 @@ Pendiente: ampliar la vista (lupa), voltear y girar, líneas a 45° con
 Mayús, elegir la fuente del texto y avisar de los cambios sin guardar al
 salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
 
+### Reproductor de sonido
+
+`programas/sonidos.asm`, `SONIDOS.HVP` (en `\HISPADOS\PROGS`; acceso en
+«Accesorios»). Para probar el sonido de un equipo y saber enseguida si
+suena. Diseño, textos y sonidos propios.
+
+- Arriba dice **qué tarjeta** lleva HSPSND y cómo suena con ella, o avisa:
+  «HSPSND no está cargado» (con lo que hay que hacer: «Cargue HSPSND antes
+  de abrir Hispa Ventanas...») o «HSPSND no ha encontrado ninguna tarjeta de
+  sonido».
+- **Sonido de prueba**: toca `\HISPADOS\HISPA.WAV` (si no está ahí, lo busca
+  al lado del módulo), una melodía de 4,6 s hecha por `tools/mksample.py`
+  (un arpegio de do mayor, una frase y un acorde; 22.050 Hz, 16 bits,
+  estéreo con los dos canales iguales; 402 KB). **Izquierda** y **Derecha**:
+  el mismo sonido por un solo altavoz (con una Sound Blaster de 8 bits, que
+  es mono, lo dice y suena por los dos). La primera vez se lee del disco
+  («Cargando... 40 %», sin parar la ventana) y se queda en memoria.
+- **Tono 440 Hz**: dos segundos de un «la» que se hace en el momento (no
+  necesita ningún archivo: suena aunque falte HISPA.WAV).
+- **Abrir WAV...**: cualquier WAV PCM de 8 o 16 bits, mono o estéreo, de
+  8.000 a 48.000 Hz (se salta las partes que no son `fmt ` ni `data`). Si no
+  es un WAV, no es de esos formatos o no hay memoria para él, lo dice en la
+  barra de estado.
+- **Parar**, el **volumen** (un deslizador y la casilla «Silencio»: son los
+  de Hispa Ventanas, `aj_leer` y `aj_poner`; al soltarlo suena la campanita
+  si no está sonando otra cosa) y, abajo, una barra con por dónde va y la
+  **barra de estado**: «Sonando... sonido de prueba (22050 Hz, 16 bits,
+  estéreo)», «Terminado.», «Parado.» o el error.
+
+**Sin esperar al sonido.** HSPSND toca trozos uno detrás de otro (tiene
+sitio para cuatro) y hace esperar a quien le manda otro si no cabe; además,
+cada trozo que no llena lo que la tarjeta toca de una vez se completa con
+silencio. Por eso el Reproductor tiene el sonido entero en memoria (un
+`mem_bloque`) y lo manda con `snd_pcm2` en trozos **de la medida exacta y en
+el formato de la tarjeta**: 2.048 tramas de 16 bits en estéreo a 48.000 Hz
+con HD Audio y AC'97 (el paso a 48.000 Hz se hace aquí, interpolando entre
+muestras), 1.024 tramas con una Sound Blaster 16 (a la frecuencia del sonido,
+44.100 Hz como mucho) y 4.096 muestras de 8 bits y un canal con las
+anteriores (22.050 Hz como mucho). Antes de cada trozo pregunta a HSPSND si
+cabe (función 08h) y, si no, lo deja para la vuelta siguiente: nunca espera
+y la cola va llena. Detrás del sonido manda un tercio de segundo de silencio
+y, cuando ha sonado todo, le dice a HSPSND que pare (HD Audio, si no,
+repetiría sus últimos cuatro trozos sin parar). (Con un HSPSND anterior, sin esa función, lleva la
+cuenta con el reloj —el contador 8254, como Hispa-Nes— de cuánto queda en
+la cola y solo manda otro cuando quedan tres trozos o menos.) Con `HSPSND
+/SB` (la Sound Blaster emulada) la interfaz de HSPSND espera siempre a que
+suene cada trozo: suena bien, pero la ventana va a tirones. Las variables
+del módulo están a más de una página de su código: se escriben en cada
+trama y, pegadas al código, el procesador (y QEMU más) lo toma por código
+que se cambia a sí mismo y va lentísimo. Mientras
+suena o carga, su bucle es `msg_mirar`, un paso y `ceder`; parado,
+`msg_tomar`.
+
+Pendiente: una lista de los últimos archivos, repetir, y los WAV de 24 bits
+o comprimidos.
+
 ## Pruebas
 
 - `tests/run_ventanas_tests.sh`: gráficos y modos de pantalla con las
@@ -1531,6 +1623,16 @@ salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
   tamaño; y una imagen que no cabe: barras, flechas, Av Pág, arrastrar el
   tirador, dibujar con el lienzo desplazado y guardar. Capturas de muestra
   en `build/pintura_*.png`.
+- `tests/run_sonidos_tests.sh`: el Reproductor de sonido y la campanita del
+  volumen, con AC'97, HD Audio y Sound Blaster 16. QEMU graba lo que sale
+  por la tarjeta y se mide cada sonido (`tests/tools/audio.py rafagas`): el
+  tono (2 s a 440 Hz), el sonido de prueba (4,6 s, empieza a 523 Hz, igual
+  por los dos canales), «Izquierda» y «Derecha» (todo por un canal),
+  «Parar», un WAV de 8.000 Hz y 8 bits, uno que no se admite, y las
+  campanitas al cambiar el volumen desde el Reproductor, desde la barra del
+  altavoz y desde Configuración › Sonido (más fuertes al 100 % que al 20 %;
+  ninguna en silencio). Y sin HSPSND: el aviso. Capturas de muestra en
+  `build/sonidos_*.png`.
 - Programas de prueba de Windows 16 bits propios (NASM + nuestra
   herramienta de cabeceras NE) para cada función de la API, con su
   resultado escrito en un archivo (etapa 4).

@@ -861,10 +861,15 @@ ordenes:
 .s1:
         cmp ecx, 130
         jne .s2
+        push dword [edx+V_D3]
         mov edx, [edx+V_D0]
         mov eax, AJ_VOLUMEN
         HV aj_poner
         call sonido_textos
+        pop eax
+        test eax, eax               ; arrastrando: la campanita, al soltar
+        jnz .hecho                  ; (des_proc)
+        HV snd_campana
         jmp .hecho
 .s2:
         cmp ecx, 132
@@ -873,6 +878,7 @@ ordenes:
         mov edx, eax
         mov eax, AJ_SILENCIO
         HV aj_poner
+        HV snd_campana              ; (al quitar el silencio; con él, no suena)
         jmp .hecho
         ; ---- Fecha y hora ----
 .f1:
@@ -2532,7 +2538,14 @@ des_proc:
         jmp .inv
 .sinfoco:
         mov dword [ebp+V_D6], 0
+        jmp .s0
 .suelta:
+        cmp dword [ebp+V_D3], 0
+        je .inv
+        cmp dword [ebp+V_ID], 130   ; el del volumen: al soltarlo suena la
+        jne .s0                     ; campanita con el volumen nuevo
+        HV snd_campana
+.s0:
         mov dword [ebp+V_D3], 0
 .inv:
         HV ven_invalidar

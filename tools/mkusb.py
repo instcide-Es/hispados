@@ -16,6 +16,7 @@ START = 2048
 HEADS, SPT = 255, 63
 HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
 NESROMS = ('HISPA1.NES',)           # los juegos propios de Hispa-Nes (NESROMS del Makefile)
+SONS = ('HISPA.WAV', 'CAMPANA.WAV')  # el sonido de prueba y la campanita (SONS del Makefile)
 
 def chs(lba):
     c, rem = divmod(lba, HEADS * SPT)
@@ -87,6 +88,8 @@ def main():
                 cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
     for f in NESROMS:
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
+    for f in SONS:
+        cp(os.path.join(B, f), 'HISPADOS/' + f)
     print(OUT)
     mkfloppy()
 

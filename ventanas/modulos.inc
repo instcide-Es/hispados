@@ -100,30 +100,235 @@ pantalla:
 ceder:
         mov byte [actividad], 1
         jmp tar_ceder
+; [CAMPANITA] desde aquí hasta mem_bloque: snd_pcm pasa por snd_pcm2 (el
+; búfer grande), snd_orden, snd_info, snd_campana y cam_bomba
 ; [Hispa-Nes] ESI=muestras ECX=octetos (2048 como mucho) EDX=Hz AL=formato
 ; (bit 0: 16 bits, bit 1: estéreo): las pone en la cola de HSPSND, que las
 ; hace sonar a continuación de las anteriores. CF=1 si no hay sonido
 snd_pcm:
-        cmp byte [snd_hay], 0
-        je .no
-        pushad
+        push ecx
         cmp ecx, DOS_TRANS
         jbe .c
         mov ecx, DOS_TRANS
 .c:
+        call snd_pcm2
+        pop ecx
+        ret
+; [Reproductor de sonido] lo mismo con trozos de hasta SND_TB octetos (lo que
+; HD Audio y AC'97 tocan de una vez: 2.048 tramas de 16 bits en estéreo). El
+; búfer de paso (snd_tb) está en este programa, pero más allá de sus primeros
+; 64 KB: HSPSND lo recibe con su propio segmento (rm_snd2, snd_tbseg)
+snd_pcm2:
+        push eax
+        call tics
+        mov [snd_ult], eax          ; (mientras un programa suena, no hay
+        pop eax                     ; campanita; si sonaba, se deja)
+        mov dword [cam_pos], 0
+snd_trozo:
+        cmp byte [snd_hay], 0
+        je .no
+        pushad
+        cmp ecx, SND_TB
+        jbe .c
+        mov ecx, SND_TB
+.c:
         mov [rmcs+0x18], ecx
         mov [rmcs+0x14], edx
-        mov dword [rmcs+4], dos_buf
-        mov edi, dos_buf
+        mov edi, snd_tb
+        mov edx, edi
+        and edx, 15
+        mov [rmcs+4], edx           ; SI
+        mov edx, edi
+        shr edx, 4
+        add dx, [rmseg]
+        mov [snd_tbseg], dx         ; DS
         rep movsb
-        movzx eax, al
         mov ah, 0x01
-        call snd_llamar
+        movzx eax, ax
+        mov [rmcs+0x1C], eax
+        mov word [rmcs+0x2A], rm_snd2
+        call rm_llamar
         popad
         clc
         ret
 .no:
         stc
+        ret
+; [Reproductor de sonido] AH=función de HSPSND (02h esperar, 03h parar, 06h
+; leer el volumen, 08h cuántos trozos caben...) AL=dato -> EAX como lo deja. CF=1 si no hay sonido.
+; (El volumen y el silencio se cambian con aj_poner, que además los apunta)
+snd_orden:
+        cmp byte [snd_hay], 0
+        je snd_trozo.no
+        movzx eax, ax
+        call snd_llamar
+        clc
+        ret
+; [Reproductor de sonido] -> EAX=la tarjeta que lleva HSPSND (0 ninguna, 1
+; Sound Blaster de 8 bits, 2 Sound Blaster 16, 3 AC'97, 4 HD Audio; -1 si
+; HSPSND no está cargado: ESI y EDX no se tocan), ESI=su nombre (acabado en
+; 0) y EDX=la versión de la interfaz de HSPSND (3: tiene la función 08h)
+snd_info:
+        or eax, -1
+        cmp dword [snd_entrada], 0
+        je .x
+        xor eax, eax
+        call snd_llamar
+        movzx edx, word [rmcs+0x10]
+        movzx esi, word [rmcs+0x22] ; ES:DI = el nombre
+        shl esi, 4
+        movzx eax, word [rmcs]
+        add esi, eax
+        add esi, [cero]
+        movzx eax, byte [rmcs+0x1C]
+.x:
+        ret
+
+; ---- [CAMPANITA] la campanita del volumen ----
+; Es \HISPADOS\CAMPANA.WAV (tools/mksample.py: 8 bits, mono, cabecera de 44
+; octetos), que se lee la primera vez. Suena por trozos de lo que la tarjeta
+; toca de una vez (así HSPSND no mete silencios): 2.048 muestras a 48.000 Hz
+; con HD Audio y AC'97 (se repiten muestras para llegar) y 1.024 o 4.096 a su
+; frecuencia con las Sound Blaster. cam_bomba, desde el bucle del sistema,
+; pregunta a HSPSND cuántos caben sin esperar (su función 08h, de la versión
+; 3) y manda esos: la ventana nunca espera al sonido.
+CAM_MAX     equ 4096
+t_campana   db "CAMPANA.WAV", 0
+; toca la campanita con el volumen que hay (nada si está en silencio, si no
+; hay sonido o si un programa está sonando). Si ya sonaba, empieza otra vez
+snd_campana:
+        pushad
+        cmp byte [snd_hay], 0
+        je near .x
+        cmp word [snd_ver], 3
+        jb near .x
+        cmp dword [vol_mudo], 0
+        jne near .x
+        call tics
+        mov [cam_tic], eax
+        sub eax, [snd_ult]
+        cmp eax, 6
+        jb near .x
+        cmp dword [cam_n], 0
+        jne .ya
+        inc dword [cam_n]           ; (si no está, no se busca más)
+        mov edi, cam_dat
+        mov esi, dir_propia
+        call pon_cad
+        mov esi, t_campana
+        call pon_cad
+        mov byte [edi], 0
+        mov esi, cam_dat
+        xor al, al
+        call dos_abrir
+        jc .x
+        mov ebx, eax
+        mov edi, cam_dat
+        mov ecx, CAM_MAX
+        call dos_leer
+        jc .mal
+        cmp dword [cam_dat], 'RIFF'
+        jne .mal
+        mov edx, [cam_dat+24]       ; (Hz: con cualquier cosa no se divide)
+        sub edx, 4000
+        cmp edx, 44000
+        ja .mal
+        mov [cam_n], eax
+.mal:
+        call dos_cerrar
+.ya:
+        cmp dword [cam_n], 44
+        jbe .x
+        cmp dword [cam_pos], 0
+        je .libre
+        mov eax, 0x0300             ; la anterior, fuera
+        call snd_llamar
+.libre:
+        mov ebx, 48000              ; EBX=Hz ECX=muestras de un trozo
+        mov ecx, 2048
+        cmp byte [snd_tipo], 3
+        jae .t
+        mov ebx, [cam_dat+24]
+        mov ecx, 1024
+        cmp byte [snd_tipo], 2
+        je .t
+        shl ecx, 2
+.t:
+        mov [cam_hz], ebx
+        mov [cam_blq], ecx
+        mov dword [cam_cola], 8     ; el silencio de detrás: 8 trozos (un
+        cmp ecx, 4096               ; tercio de segundo largo), o 2 de los
+        jb .c8                      ; de 4.096 muestras
+        mov dword [cam_cola], 2
+.c8:
+        mov eax, [cam_dat+24]       ; el paso: Hz del archivo / Hz de la tarjeta
+        shl eax, 16
+        xor edx, edx
+        div ebx
+        mov [cam_paso], eax
+        mov dword [cam_pos], 44 << 16
+        mov byte [actividad], 1
+.x:
+        popad
+        ret
+
+; (bucle del sistema) manda los trozos de la campanita que quepan. Detrás
+; van unos de silencio (cam_cola) y, cuando ha sonado todo, se le dice a
+; HSPSND que pare: HD Audio da vueltas a sus cuatro trozos y, si no,
+; repetiría el final de la campanita sin parar
+cam_bomba:
+        cmp dword [cam_pos], 0
+        je .r
+        pushad
+        call tics                   ; (si HSPSND no acaba, se deja)
+        sub eax, [cam_tic]
+        cmp eax, 40
+        ja .para
+.l:
+        mov eax, 0x0800             ; ¿cabe otro trozo sin esperar?
+        call snd_llamar
+        test al, al
+        jz .x
+        mov ebx, [cam_pos]
+        mov edx, ebx
+        shr edx, 16
+        cmp edx, [cam_n]
+        jb .da
+        cmp dword [cam_cola], 0
+        je .fin
+        dec dword [cam_cola]
+.da:
+        mov ecx, [cam_blq]
+        mov edi, snd_tb
+.m:
+        mov edx, ebx
+        shr edx, 16
+        mov al, 0x80                ; detrás del final, silencio
+        cmp edx, [cam_n]
+        jae .s
+        mov al, [cam_dat+edx]
+        add ebx, [cam_paso]
+.s:
+        stosb
+        dec ecx
+        jnz .m
+        mov [cam_pos], ebx
+        mov esi, snd_tb
+        mov ecx, [cam_blq]
+        mov edx, [cam_hz]
+        xor eax, eax                ; 8 bits, un canal
+        call snd_trozo
+        jmp .l
+.fin:
+        cmp al, 4                   ; ¿ha sonado todo? (la cola, vacía)
+        jb .x
+.para:
+        mov eax, 0x0300
+        call snd_llamar
+        mov dword [cam_pos], 0
+.x:
+        popad
+.r:
         ret
 
 ; ECX=octetos -> EAX=puntero EDX=mango; CF=1 si no hay memoria

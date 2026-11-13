@@ -50,12 +50,19 @@
 ;    05h volumen      AL = 0 .. 100 (%); quita el silencio
 ;    06h leer volumen -> AL = volumen (0..100 %), AH = 1 si está en silencio
 ;    07h silencio     AL = 0 quitar, 1 poner, 2 cambiar -> como 06h
+;    08h sitio        -> AL = trozos que caben ahora en la cola sin que 01h
+;                     espere (de 0 a 4). Un trozo es lo que la tarjeta toca de
+;                     una vez: 2.048 tramas a la frecuencia de la tarjeta con
+;                     HD Audio y AC'97, 1.024 con Sound Blaster 16 y 4.096
+;                     muestras con las de 8 bits. Para quien no puede esperar
+;                     (una ventana): preguntar y mandar solo lo que cabe.
+;                     (Versión 3 de la interfaz.)
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
 
-VERSION     equ 0x0002
+VERSION     equ 0x0003
 
 NBUF        equ 4                   ; búferes de DMA
 BUFSZ       equ 8192                ; bytes por búfer (16 bits estéreo)
@@ -178,6 +185,8 @@ entry:
         popf
         retf
 .disp:
+        cmp ah, 8                   ; (el sitio de HD Audio se mira en la tarjeta)
+        je .hw
         cmp ah, 1
         jb .go
         cmp ah, 3
@@ -185,6 +194,7 @@ entry:
         ; con la Sound Blaster emulada, la API es una voz más de su anillo
         cmp byte [cs:e_on], 0
         jne e_api
+.hw:
         cmp byte [cs:dev_type], 4
         jne .go
         ; HD Audio: las funciones usan FS (modo irreal) y hay que devolverlo
@@ -219,7 +229,81 @@ entry:
         je f_getvol
         cmp ah, 7
         je f_mute
+        cmp ah, 8
+        je f_room
         stc
+        retf
+
+; 08h: -> AL = trozos que caben en la cola sin esperar
+f_room:
+        mov al, 1                   ; Sound Blaster emulada: la API es una voz
+        cmp byte [cs:e_on], 0       ; de su anillo, que siempre espera al trozo
+        jne .r
+        mov al, NBUF                ; parado: cabe todo
+        cmp byte [cs:started], 0
+        je .r
+        cmp byte [cs:dev_type], 3
+        je .ac
+        ja .hda
+        ; Sound Blaster: los bloques libres seguidos desde el que toca llenar
+        ; hasta el que suena (como sb_wait_slot)
+        push bx
+        pushf
+        cli
+        xor al, al
+        movzx bx, byte [cs:sb_wr]
+.s:
+        cmp byte [cs:sb_full+bx], 0
+        jne .sx
+        cmp bl, [cs:sb_play]
+        je .sx
+        inc al
+        inc bl
+        and bl, 3
+        jmp .s
+.sx:
+        popf
+        pop bx
+        jmp .r
+.ac:
+        push dx                     ; AC'97: los que hay entre el que suena
+        mov dx, [cs:nabm]           ; (CIV) y el último puesto (como ac_wait_slot)
+        add dx, 0x16
+        in ax, dx
+        test al, 1                  ; DMA parado: todo libre
+        mov al, NBUF
+        jnz .acx
+        mov dx, [cs:nabm]
+        add dx, 0x14
+        in al, dx
+        mov ah, [cs:wr_idx]
+        sub ah, al
+        and ah, 31
+        mov al, NBUF
+        sub al, ah
+        jnc .acx
+        xor al, al
+.acx:
+        pop dx
+        jmp .r
+.hda:
+        push ebx                    ; HD Audio: lo encolado menos lo tocado
+        call unreal                 ; (como hda_play)
+        call hda_update
+        mov ebx, [cs:hda_written]
+        sub ebx, [cs:hda_played]
+        mov al, NBUF
+        jbe .hx                     ; (se ha acabado: 01h empieza de nuevo)
+        neg ebx
+        add ebx, NBUF * BUFSZ
+        mov al, 0
+        js .hx
+        shr ebx, 13
+        mov al, bl
+.hx:
+        pop ebx
+.r:
+        clc
         retf
 
 f_info:

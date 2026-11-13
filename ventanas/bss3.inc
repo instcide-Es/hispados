@@ -83,6 +83,7 @@ tec_puesto  resb 1                  ; [Hispa-Nes] INT 15h apunta a rm_int15
             alignb 2
 snd_ver     resw 1                  ; versión de la API de HSPSND
 vol_arr     resb 1
+snd_tipo    resb 1                  ; [CAMPANITA] la tarjeta: 1 SB, 2 SB16, 3 AC'97, 4 HD Audio
 cfg_term    resb 1
 vol_txt     resb 24
 cfg_ruta    resb 96
@@ -124,3 +125,16 @@ aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados
 aj_ult_act  resd 1                  ; tics del último ratón o teclado
 aj_resto    resd 2                  ; lo que sobra del movimiento (x, y)
 aj_acc      resb AC_TAM             ; el «acceso directo» con el que se abre CONFIG.HVP
+; ---- [CAMPANITA] [Reproductor de sonido] trozos grandes para HSPSND y la campanita ----
+SND_TB      equ 8192
+            alignb 16
+snd_tb      resb SND_TB             ; búfer de paso (HSPSND lo lee en modo real)
+snd_ult     resd 1                  ; tics del último trozo de un programa
+cam_n       resd 1                  ; octetos de CAMPANA.WAV (0: sin leer; 1: no vale)
+cam_pos     resd 1                  ; por dónde va, en 65536 avos (0: no suena)
+cam_paso    resd 1
+cam_hz      resd 1                  ; Hz y muestras de cada trozo
+cam_blq     resd 1
+cam_tic     resd 1                  ; cuándo se pidió
+cam_cola    resd 1                  ; trozos de silencio que faltan, al final
+cam_dat     resb CAM_MAX

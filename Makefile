@@ -211,9 +211,18 @@ HVPSIS = $(B)/CONFIG.HVP
 $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS
-HVPA = $(B)/PINTURA.HVP
+HVPA = $(B)/PINTURA.HVP $(B)/SONIDOS.HVP
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# el Reproductor de sonido y los sonidos propios (tools/mksample.py): HISPA.WAV,
+# su sonido de prueba, y CAMPANA.WAV, la campanita del volumen de Hispa
+# Ventanas (SONS: van a \HISPADOS)
+$(B)/SONIDOS.HVP: programas/sonidos.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+SONS = $(B)/HISPA.WAV $(B)/CAMPANA.WAV
+$(B)/HISPA.WAV: tools/mksample.py | $(B)
+	python3 tools/mksample.py $(B)
+$(B)/CAMPANA.WAV: $(B)/HISPA.WAV
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
@@ -222,7 +231,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
-        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS)
+        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SONS)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -275,10 +284,11 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard te
 	mcopy -i $@ $(B)/MANDO.INI ::HISPADOS/MANDO.INI
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
 	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
+	for f in $(SONS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# el sonido de prueba y la campanita
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
 	mmd   -i $@ ::HISPADOS/JUEGOS
 	for f in $(HVPS) $(NESROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
-	# y los accesorios (Pintura), en \HISPADOS\PROGS
+	# y los accesorios (Pintura y el Reproductor de sonido), en \HISPADOS\PROGS
 	mmd   -i $@ ::HISPADOS/PROGS
 	for f in $(HVPA); do mcopy -i $@ $$f ::HISPADOS/PROGS/ || exit 1; done
 	# pruebas
@@ -439,6 +449,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	tests/run_juegos2_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
 	tests/run_pintura_tests.sh $(IMG)
+	tests/run_sonidos_tests.sh $(IMG)
 	tests/run_hispanes_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
