@@ -185,3 +185,102 @@ rec SOLITARI.REC "Jugadas=1"; rec SOLITARI.REC "Ganadas=1"; rec SOLITARI.REC "Mo
 rec SOLITARI.REC "Francesa jugadas=0"
 muestra e1 solitario_espanola; muestra e6 solitario_espanola_reparto
 salida_bien
+
+# ---- el tamaño de la ventana: se cambia con el ratón, las cartas cambian de
+# escala (grande 72x100, mediana 64x88, pequeña 56x76), se sigue jugando, se
+# recuerda y se maximiza. La mediana: cada 72 desde x = 108 + (zona - 496)/2,
+# arriba en y=103 y las columnas en y=199. La pequeña: cada 62 desde x = 108 +
+# (zona - 428)/2, arriba en y=99 y las columnas en y=183 ----
+echo "== Solitario: cambiar el tamaño de la ventana (escalas), recordarlo y maximizar =="
+disco
+centro_ini '[Acceso]' 'Nombre=Solitario prueba' 'Programa=A:\HISPADOS\JUEGOS\SOLITARI.HVP' 'Parametros=/P'
+{ entrar
+  tecla ret; sleep 3
+  aparca
+  shot z1
+  arrastra 691 594 646 490; aparca          # la esquina: 541x461, la mediana
+  shot z2
+  arrastra 233 240 161 260; aparca          # la dama de diamantes sobre el rey de picas
+  shot z3
+  arrastra 646 490 566 450; aparca          # 460x420: la pequeña
+  shot z4
+  doble 153 247; aparca                     # la dama, arriba
+  derecho 215 220; aparca                   # el rey de diamantes
+  doble 153 220; aparca                     # el de picas
+  clic 153 137                              # el mazo: el de corazones
+  ir 300 450
+  doble 215 137; sleep 1.5; aparca          # y arriba: ganada
+  shot z5
+  tecla ret; sleep 0.8
+  arrastra 569 453 300 300; aparca          # lo más pequeño: 444x415
+  shot z6
+  tecla alt-f4; sleep 1
+  tecla ret; sleep 3                        # otra vez: con el tamaño de antes
+  aparca
+  shot z7
+  doble 300 41; sleep 1.5; aparca           # doble clic en el título: maximizada
+  shot z8
+  tecla alt-f4; sleep 1
+  salir
+} | run 300 -vga std
+
+chk $T/z1.ppm marco 106 30 588 567 activa indice 120 219 $N "K"
+chk $T/z2.ppm marco 106 30 541 461 activa texto 128 81 8 2 fina "Movimientos: 0" \
+  indice 130 203 $N "K" indice 202 208 $R "Q" indice 346 107 $R "Q" px 160 147 10 "el mazo: el rombo del dorso"
+chk $T/z3.ppm texto 128 81 8 2 fina "Movimientos: 1" indice 130 229 $R "Q" indice 202 203 $R "K"
+chk $T/z4.ppm marco 106 30 460 420 activa texto 122 81 8 2 fina "Movimientos: 1" \
+  indice 124 187 $N "K" indice 124 211 $R "Q" indice 186 187 $R "K" indice 310 103 $R "Q"
+chk $T/z5.ppm titulo 202 216 activa "Solitario resuelto" texto 228 257 0 8 fina "¡Las cincuenta y dos arriba!"
+chk $T/z6.ppm marco 106 30 444 415 activa texto 114 81 8 2 fina "Movimientos: 6"
+chk $T/z7.ppm marco 106 30 444 415 activa texto 114 81 8 2 fina "Movimientos: 0" indice 116 187 $N "K"
+chk $T/z8.ppm texto 118 79 8 2 fina "Movimientos: 0" indice 120 217 $N "K" indice 202 223 $R "Q"
+rec SOLITARI.REC "Ventana=106,30,444,415"; rec SOLITARI.REC "Francesa ganadas=1"; rec SOLITARI.REC "Francesa movimientos=6"
+muestra z2 solitario_mediana; muestra z4 solitario_pequena; muestra z8 solitario_maximizada
+salida_bien
+
+# ---- en 640x480 (VENTANAS /640): se abre entera, con la escala mediana, en
+# (62,30) de 516x450; la zona empieza en (64,75) y las columnas, en x=72 ----
+echo "== Solitario: en una pantalla de 640x480 =="
+disco
+printf '%s\r\n' '[Centro]' 'Ventana=20,40,300,150' 'Activo=0' "Modulos=$NMOD" '' \
+  '[Grupo]' 'Nombre=Juegos' 'Ventana=200,300,300,150' 'Estado=1' '' \
+  '[Acceso]' 'Nombre=Solitario prueba' 'Programa=A:\HISPADOS\JUEGOS\SOLITARI.HVP' 'Parametros=/P' > $T/CENTRO.INI
+mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
+{ sleep 6
+  send 'KEYB SP' 2
+  send 'A:\HISPADOS\HSPRATON' 2
+  send 'BIN\XMSTEST' 2.5
+  send 'VENTANAS /640' 5
+  RX=320; RY=240
+  aparca
+  tecla ret; sleep 3
+  aparca
+  shot v1
+  clic 104 147; aparca                      # el mazo: el rey de corazones
+  arrastra 176 147 248 260; aparca          # a la tercera columna, vacía
+  arrastra 176 245 104 265; aparca          # la dama de diamantes sobre el rey de picas
+  shot v2
+  doble 104 280; aparca                     # y arriba las cuatro
+  derecho 176 240; aparca
+  doble 104 240; aparca
+  ir 300 400
+  doble 248 240; sleep 1.5; aparca
+  shot v3
+  tecla ret; sleep 0.8
+  tecla alt-f4; sleep 1
+  clic 596 13; sleep 1; tecla ret; sleep 2.5
+  shot zz
+  send 'ECHO TRAS-SALIR'
+  send 'BIN\XMSTEST' 2.5
+  send 'ECHO SIGUE-VIVO'
+  mon quit
+} | run 300 -vga std
+
+chk $T/v1.ppm tam 640 480 marco 62 30 516 450 activa titulo 62 30 activa "Solitario" \
+  texto 72 81 8 2 fina "Movimientos: 0" texto 504 81 8 2 fina "Mazo: 1" \
+  indice 74 203 $N "K" indice 146 208 $R "Q" indice 290 107 $R "Q" indice 506 107 $N "K"
+chk $T/v2.ppm texto 72 81 8 2 fina "Movimientos: 3" indice 74 229 $R "Q" indice 218 203 $R "K" indice 146 203 $R "K"
+chk $T/v3.ppm titulo 122 156 activa "Solitario resuelto"
+rec SOLITARI.REC "Ventana=62,30,516,450"; rec SOLITARI.REC "Francesa movimientos=7"
+muestra v1 solitario_640
+salida_bien

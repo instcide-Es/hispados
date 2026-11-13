@@ -210,8 +210,8 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
 probándolo en un ThinkPad con touchpad.
 
 - **Bordes y esquinas.** Las ventanas con `E_TAMANO` (las de los grupos y el
-  Centro, el Bloc de notas, el Reloj, Pintura, Hispa-Nes, Hispa-System; los
-  diálogos no)
+  Centro, el Bloc de notas, el Reloj, Pintura, Hispa-Nes, Hispa-System, el
+  Solitario; los diálogos no)
   se agarran por cualquiera de los cuatro bordes y las cuatro esquinas, con
   holgura para un touchpad: 5 puntos por dentro del borde y 4 por fuera
   (`AGARRE`, `AGARRE_FUERA`); a menos de 20 puntos de una esquina
@@ -223,7 +223,8 @@ probándolo en un ThinkPad con touchpad.
 - **Tamaño mínimo.** Al empezar a tirar se pregunta a la ventana
   `WM_GETMINMAXINFO`: devuelve en EAX el ancho mínimo + el alto mínimo×65536
   (0: los normales, 140×70). Los grupos piden 150×110 (una columna y la
-  barra), el Bloc 220×130 y Pintura 320×260.
+  barra), el Bloc 220×130, Pintura 320×260 y el Solitario 444×415 (su
+  escala pequeña).
 - **El programa se entera**: `WM_SIZE` en cada paso (EDX=ancho + alto×65536
   de la zona), para recolocar lo de dentro, y, al soltar,
   `WM_EXITSIZEMOVE` (ECX=1 si ha cambiado el tamaño, 0 si solo se movió).
@@ -1506,8 +1507,18 @@ entradas de la interfaz que ya había):
   recuadro (las francesas, de dos cabezas; las españolas, de cuerpo entero
   con su palo debajo); el dorso, añil con margen blanco, celosía y un
   rombo ocre. El rojo y el negro de la francesa son los puros del cubo de
-  la paleta de 256 colores (en la de 16, terracota y tinta). Si una
-  columna no cabe, sus cartas se juntan. Ratón: arrastrar una carta o una
+  la paleta de 256 colores (en la de 16, terracota y tinta). **La ventana
+  es como las demás** ([TAMAÑO]): se cambia de tamaño por los bordes y las
+  esquinas (lo más pequeño, 444×415) y se maximiza, y las cartas tienen tres
+  escalas: grande (72×100), mediana (64×88, pintas de 9 y figuras a 1,5) y
+  pequeña (56×76, pintas de 7 y figuras a su tamaño); se usa la mayor con
+  la que caben las siete columnas a lo ancho y, a lo alto, una columna de
+  seis tapadas y trece destapadas que asomen 13 puntos. Si una columna no
+  cabe, sus cartas se juntan. Al abrirla, el sitio y el tamaño guardados
+  (`Ventana=x,y,ancho,alto` en `SOLITARI.REC`, al soltarla tras moverla o
+  cambiarla y al cerrarla; si estaba maximizada, los de antes) si caben en
+  la pantalla; si no, la mayor escala que quepa, arriba y centrada (en
+  800×600, 588×567 con la grande; en 640×480, 516×450 con la mediana). Ratón: arrastrar una carta o una
   escalera (si la jugada no vale, vuelve a su sitio), clic en el mazo,
   doble clic o botón derecho para subir una carta. Teclado: F2 nueva,
   Retroceso o Ctrl+Z deshacer (512 pasos), Espacio sacar carta, S subir las
@@ -1755,7 +1766,10 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   Solitario, con la francesa, reparte, pasa cartas, arrastra (también
   rojo sobre rojo y una dama a un hueco, que no valen; un rey a un hueco),
   deshace, sube un as, gana la partida de prueba y deja `SOLITARI.REC`, y
-  con la española, elegida en el menú y recordada, gana la suya; Tragabolas
+  con la española, elegida en el menú y recordada, gana la suya; se le
+  cambia el tamaño con el ratón (de la grande a la mediana y a la pequeña,
+  siguiendo la partida hasta ganarla), se recuerda y se maximiza, y en
+  640×480 se abre entera y se gana; Tragabolas
   recoge bolitas, lo para un seto, lo pinchan hasta acabar, coge una campana
   y deja el récord; Almacén empuja, deshace, resuelve el nivel 1, pasa al 2
   y lo recuerda al volver a abrir. Los récords se miran con mtools.

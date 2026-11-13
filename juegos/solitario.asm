@@ -27,8 +27,16 @@
 ;  deshacer (todos los pasos), Espacio sacar carta del mazo, S subir todas
 ;  las que se puedan. El tiempo empieza con el primer movimiento. Los
 ;  récords (partidas jugadas y ganadas, mejor tiempo y menos movimientos),
-;  uno por baraja, y la baraja elegida se guardan en SOLITARI.REC (al lado
-;  de SOLITARI.HVP; texto).
+;  uno por baraja, la baraja elegida y el sitio y el tamaño de la ventana se
+;  guardan en SOLITARI.REC (al lado de SOLITARI.HVP; texto).
+;
+;  La ventana es como las demás ([TAMAÑO]): se cambia de tamaño por los
+;  bordes y las esquinas y se maximiza. Las cartas tienen tres tamaños
+;  (escalas): grande (72x100), mediana (64x88) y pequeña (56x76); se usa el
+;  mayor con el que las siete columnas caben a lo ancho y una columna larga
+;  (seis tapadas y trece destapadas) cabe a lo alto; las columnas largas se
+;  juntan más si hace falta. Al abrirla, el último tamaño guardado si cabe
+;  en la pantalla; si no, el mayor que quepa (en 640x480, la mediana).
 ;
 ;  Todo está dibujado aquí, con diseño propio: las cartas (blancas, con las
 ;  esquinas redondeadas y un filete gris; el índice arriba a la izquierda y,
@@ -51,19 +59,7 @@
 ; =============================================================================
 %include "hvp.inc"
 
-CAR_AN      equ 72                  ; una carta
-CAR_AL      equ 100
-GAP         equ 10                  ; entre cartas
-PASO        equ CAR_AN + GAP
 N_COL       equ 7                   ; las columnas (con la española, 6)
-FILA_Y      equ 28                  ; mazo, descarte y montones de salida
-COL_Y       equ FILA_Y + CAR_AL + 12 ; las columnas
-D_TAP       equ 6                   ; lo que asoma una carta tapada
-D_VIS       equ 26                  ; y una destapada (el índice entero)
-CLI_AN      equ N_COL * PASO + GAP
-CLI_AL      equ 520
-COL_MAX     equ CLI_AL - COL_Y - 6  ; hasta dónde llega una columna (si no
-                                    ; cabe, sus cartas se juntan más)
 PILA_T      equ 56                  ; una pila: cuántas y hasta 52 cartas
 P_MAZO      equ 0
 P_DESC      equ 1
@@ -78,18 +74,23 @@ E_GANADA    equ 2
 WM_FINAL    equ WM_USER + 100       ; (propio) decir que se ha ganado
 B_FRA       equ 0                   ; las barajas
 B_ESP       equ 1
-; los dibujos ya hechos (un octeto por punto)
-PIP_T       equ 13 * 13             ; una pinta
-PEQ_T       equ 9 * 9               ; la pinta pequeña del índice
+MARCO_AN    equ 2*BORDE             ; lo que la ventana tiene de más que su zona
+MARCO_AL    equ 2*BORDE + TIT_H + 1 + MENU_H
+PASO_MIN    equ 13                  ; lo menos que asoma una carta destapada
+; las escalas: 0 grande, 1 mediana, 2 pequeña (ver t_esc)
+N_ESC       equ 3
+; los dibujos ya hechos (un octeto por punto; sitio para la escala grande)
+CAR_MAX_AN  equ 72
+CAR_MAX_AL  equ 100
+PIP_T       equ 13 * 13             ; una pinta (hasta 13x13)
+PEQ_T       equ 9 * 9               ; la pinta pequeña del índice (hasta 9x9)
 P26_T       equ 26 * 26             ; la pinta al doble (montón de salida vacío)
-AS_T        equ 39 * 39             ; y al triple (el as)
+AS_T        equ 39 * 39             ; la del as (hasta el triple)
 IDX_AN      equ 14                  ; el número o la letra del índice
 IDX_AL      equ 9
 IDX_T       equ IDX_AN * IDX_AL
-FIG_AN      equ 38                  ; una figura, dentro de su recuadro
-FIG_AL      equ 82
-FIG_T       equ FIG_AN * FIG_AL
-CARTA_T     equ CAR_AN * CAR_AL
+FIG_T       equ 38 * 82             ; una figura, dentro de su recuadro (hasta)
+CARTA_T     equ CAR_MAX_AN * CAR_MAX_AL
 ; colores del cubo de la paleta de 256 (16 + 36 rojo + 6 verde + azul, de 0 a
 ; 5; ventanas/video.inc). En la pantalla de 16 colores se ven como el de su
 ; cifra baja: el rojo, terracota; el negro, tinta; la piel, piedra; el gris,
@@ -134,11 +135,11 @@ HVP_CABECERA "Solitario", entrada
         db "................................"
 HVP_CODIGO
 
+
 c_sol       dd sol_proc
             db C_PETROLEO, 0, 0, 0
-sol_plant:
-        PLANTILLA c_sol, t_titulo, E_TITULO | E_CERRAR | E_MINIM, 106, 30, \
-                  CLI_AN + 2*BORDE, CLI_AL + 2*BORDE + TIT_H + 1 + MENU_H, 0
+sol_plant:                          ; (el sitio y el tamaño, en entrada)
+        PLANTILLA c_sol, t_titulo, E_NORMAL, 106, 30, 588, 567, 0
 
 sol_menu:
         db "&Juego", 0
@@ -540,23 +541,110 @@ fig_colf    db ROJO, C_OCRE, C_ANIL,        ROJO, C_OCRE, C_OLIVA
 fig_cole    db C_OCRE, C_MARRON, C_TERRACOTA,     C_TERRACOTA, C_GRANATE, C_OCRE
             db C_PETROLEO, C_TURQUESA, C_ANIL,    C_OLIVA, C_ARENA_OSC, C_MARRON
 
-; dónde van las pintas del 2 al 10 (cuántas; x, y de cada una en la carta,
-; +128 en x si va del revés). Columnas en 16, 30 y 44; filas en 8 (arriba) y
-; 80 (abajo)
+; las pintas de la escala pequeña (7x7): las cuatro francesas y las cuatro
+; españolas
+d_p7f:
+        db ".xx.xx."
+        db "xxxxxxx"
+        db "xxxxxxx"
+        db "xxxxxxx"
+        db ".xxxxx."
+        db "..xxx.."
+        db "...x..."
+
+        db "...x..."
+        db "..xxx.."
+        db ".xxxxx."
+        db "xxxxxxx"
+        db ".xxxxx."
+        db "..xxx.."
+        db "...x..."
+
+        db "...x..."
+        db "..xxx.."
+        db ".xxxxx."
+        db "xxxxxxx"
+        db "xxxxxxx"
+        db ".x.x.x."
+        db "..xxx.."
+
+        db "..xxx.."
+        db "..xxx.."
+        db "xx.x.xx"
+        db "xxxxxxx"
+        db "xx.x.xx"
+        db "...x..."
+        db "..xxx.."
+d_p7e:
+        db ".11111."
+        db "1aaaaa1"
+        db "1aa9aa1"
+        db "1a9a9a1"
+        db "1aa9aa1"
+        db "1aaaaa1"
+        db ".11111."
+
+        db "ddddddd"
+        db ".d444d."
+        db ".d454d."
+        db "..ddd.."
+        db "...d..."
+        db "...d..."
+        db ".ddddd."
+
+        db "...2..."
+        db "..2e2.."
+        db "..2e2.."
+        db "..2e2.."
+        db ".ccccc."
+        db "...1..."
+        db "...a..."
+
+        db "..111.."
+        db ".1bbb1."
+        db ".1b1b1."
+        db ".1bbb1."
+        db "..1bb1."
+        db "...1b1."
+        db "...111."
+%if ($ - d_p7f) != 8 * 49
+%error "las pintas pequeñas no miden 7x7"
+%endif
+
+; las escalas (grande, mediana y pequeña): una fila de dd cada una
+ES_AN       equ 0                   ; la carta
+ES_AL       equ 4
+ES_GAP      equ 8                   ; entre cartas
+ES_FILA     equ 12                  ; dónde empieza la fila de arriba
+ES_SEP      equ 16                  ; entre la fila de arriba y las columnas
+ES_TAP      equ 20                  ; lo que asoma una tapada
+ES_PIP      equ 24                  ; las pintas: 13, 9 o 7 (sus dibujos: 0, 1, 2)
+ES_PEQ      equ 28                  ; la del índice: 9 o 7
+ES_T        equ 32                  ; la primera fila de pintas
+ES_AS       equ 36                  ; el as: la pinta de 13, por esto
+ES_FNUM     equ 40                  ; las figuras: los dibujos, por esto...
+ES_FDEN     equ 44                  ; ...entre esto
+ES_FPIP     equ 48                  ; debajo de las españolas: 26, 13 o 9
+ES_ALTO     equ 52                  ; el alto de la zona al abrirla (si cabe)
+ES_TAM      equ 56
+t_esc       dd 72, 100, 10, 28, 12, 6, 13, 9, 8, 3, 2, 1, 26, 520
+            dd 64,  88,  8, 28,  8, 5,  9, 9, 8, 2, 3, 2, 13, 470
+            dd 56,  76,  6, 24,  8, 4,  7, 7, 7, 2, 1, 1,  9, 420
+; dónde van las pintas del 2 al 10: cuántas y, de cada una, la columna (0
+; izquierda, 1 centro, 2 derecha; +128 si va del revés) y la fila, en doceavos
+; de lo que va de la primera (0) a la última (12)
 INV         equ 128
 t_pintas    dd pin2, pin3, pin4, pin5, pin6, pin7, pin8, pin9, pin10
-pin2        db 2,  30, 8,  30+INV, 80
-pin3        db 3,  30, 8,  30, 44,  30+INV, 80
-pin4        db 4,  16, 8,  44, 8,  16+INV, 80,  44+INV, 80
-pin5        db 5,  16, 8,  44, 8,  30, 44,  16+INV, 80,  44+INV, 80
-pin6        db 6,  16, 8,  44, 8,  16, 44,  44, 44,  16+INV, 80,  44+INV, 80
-pin7        db 7,  16, 8,  44, 8,  30, 26,  16, 44,  44, 44,  16+INV, 80,  44+INV, 80
-pin8        db 8,  16, 8,  44, 8,  30, 26,  16, 44,  44, 44,  30+INV, 62
-            db     16+INV, 80,  44+INV, 80
-pin9        db 9,  16, 8,  44, 8,  16, 32,  44, 32,  30, 44
-            db     16+INV, 56,  44+INV, 56,  16+INV, 80,  44+INV, 80
-pin10       db 10, 16, 8,  44, 8,  30, 20,  16, 32,  44, 32
-            db     16+INV, 56,  44+INV, 56,  30+INV, 68,  16+INV, 80,  44+INV, 80
+pin2        db 2,  1, 0,  1+INV, 12
+pin3        db 3,  1, 0,  1, 6,  1+INV, 12
+pin4        db 4,  0, 0,  2, 0,  0+INV, 12,  2+INV, 12
+pin5        db 5,  0, 0,  2, 0,  1, 6,  0+INV, 12,  2+INV, 12
+pin6        db 6,  0, 0,  2, 0,  0, 6,  2, 6,  0+INV, 12,  2+INV, 12
+pin7        db 7,  0, 0,  2, 0,  1, 3,  0, 6,  2, 6,  0+INV, 12,  2+INV, 12
+pin8        db 8,  0, 0,  2, 0,  1, 3,  0, 6,  2, 6,  1+INV, 9,  0+INV, 12,  2+INV, 12
+pin9        db 9,  0, 0,  2, 0,  0, 4,  2, 4,  1, 6,  0+INV, 8,  2+INV, 8,  0+INV, 12,  2+INV, 12
+pin10       db 10, 0, 0,  2, 0,  0, 4,  2, 4,  1, 2,  0+INV, 8,  2+INV, 8,  1+INV, 10
+            db     0+INV, 12,  2+INV, 12
 ; lo que se escribe en el índice (tres octetos cada uno)
 t_numf      db "A", 0, 0, "2", 0, 0, "3", 0, 0, "4", 0, 0, "5", 0, 0, "6", 0, 0
             db "7", 0, 0, "8", 0, 0, "9", 0, 0, "10", 0, "J", 0, 0, "Q", 0, 0, "K", 0, 0
@@ -566,7 +654,6 @@ t_nume      db "1", 0, 0, "2", 0, 0, "3", 0, 0, "4", 0, 0, "5", 0, 0, "6", 0, 0
 ; puntos no son de la carta y cuántos del filete
 esq_fuera   db 4, 2, 1, 1
 esq_filete  db 200, 2, 1, 1
-; los rombos del montón del mazo vacío
 ; la partida de prueba: pila, cuántas y sus cartas
 d_pruebaf   db P_SAL, 12,     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
             db P_SAL + 1, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
@@ -589,10 +676,9 @@ d_pruebae   db P_SAL, 9,      0, 1, 2, 3, 4, 5, 6, 7, 8
 b_ord       dd 13, 10               ; cartas por palo
 b_cartas    dd 52, 40
 b_cols      dd 7, 6                 ; columnas
-b_col_x0    dd GAP, GAP + PASO / 2  ; dónde empieza la primera (centradas)
 b_mazo      dd 52 - 28, 40 - 21     ; lo que queda para el mazo
-b_pip       dd d_pipf, d_pipe
-b_peq       dd d_peqf, d_peqe
+b_pips      dd d_pipf, d_peqf, d_p7f    ; los dibujos de las pintas: 13, 9 y 7
+            dd d_pipe, d_peqe, d_p7e
 b_num       dd t_numf, t_nume
 b_figcol    dd fig_colf, fig_cole
 b_prueba    dd d_pruebaf, d_pruebae
@@ -648,6 +734,8 @@ k_jugf      db "Francesa jugadas=", 0
 k_ganf      db "Francesa ganadas=", 0
 k_tief      db "Francesa tiempo=", 0
 k_movf      db "Francesa movimientos=", 0
+k_ventana   db "Ventana=", 0
+
 
 ; ---- la entrada: EBX=base ESI=ruta del módulo EDI=parámetros ----
 entrada:
@@ -670,8 +758,8 @@ entrada:
         mov al, 'P'
         call hvl_opcion
         setnc byte [a_prueba]
-        call rec_leer               ; (también la baraja)
-        call preparar
+        call rec_leer               ; (también la baraja y la ventana)
+        call medir_ventana          ; el sitio y el tamaño, y la escala
         call poner_baraja
         mov esi, sol_plant
         xor ebp, ebp
@@ -680,6 +768,186 @@ entrada:
         jz .x
         HV app_bucle
 .x:
+        ret
+
+; ---- la ventana al abrirla: la guardada si cabe en la pantalla; si no, la
+; mayor escala que quepa, arriba y centrada ----
+medir_ventana:
+        pushad
+        HV pantalla                 ; EAX=ancho EBX=alto
+        mov [scr_an], eax
+        mov [scr_al], ebx
+        mov ecx, [vent+8]           ; ¿la guardada?
+        test ecx, ecx
+        jz .nueva
+        mov eax, [vent]
+        add eax, ecx
+        cmp eax, [scr_an]
+        ja .nueva
+        mov eax, [vent+4]
+        add eax, [vent+12]
+        cmp eax, [scr_al]
+        ja .nueva
+        mov eax, N_ESC - 1          ; (y no más pequeña de lo que se puede)
+        call esc_min
+        add ecx, MARCO_AN
+        add edx, MARCO_AL
+        cmp [vent+8], ecx
+        jb .nueva
+        cmp [vent+12], edx
+        jb .nueva
+        mov esi, vent
+        jmp .pon
+.nueva:
+        mov ebp, [scr_al]           ; EBP=el alto que hay debajo de la barra
+        sub ebp, BARRA_H + 2
+        xor eax, eax
+.e:
+        call esc_min                ; ECX, EDX=la zona más pequeña de esta escala
+        add ecx, MARCO_AN
+        add edx, MARCO_AL
+        cmp ecx, [scr_an]
+        ja .sig
+        cmp edx, ebp
+        jbe .cabe
+.sig:
+        inc eax
+        cmp eax, N_ESC - 1
+        jb .e
+.cabe:
+        call esc_min
+        add ecx, MARCO_AN
+        imul esi, eax, ES_TAM
+        mov edx, [t_esc+esi+ES_ALTO]
+        add edx, MARCO_AL
+        cmp edx, ebp
+        jbe .a
+        mov edx, ebp
+.a:
+        mov [vent+8], ecx
+        mov [vent+12], edx
+        mov eax, [scr_an]
+        sub eax, ecx
+        sar eax, 1
+        jns .x0
+        xor eax, eax
+.x0:
+        mov [vent], eax
+        mov dword [vent+4], BARRA_H + 2
+        mov esi, vent
+.pon:
+        mov edi, sol_plant + P_X
+        movsd
+        movsd
+        movsd
+        movsd
+        mov ecx, [vent+8]           ; la zona y su escala
+        sub ecx, MARCO_AN
+        mov edx, [vent+12]
+        sub edx, MARCO_AL
+        call medidas
+        popad
+        ret
+
+; EAX=escala -> ECX=ancho EDX=alto de la zona más pequeña en que cabe: las
+; siete columnas y una columna larga (seis tapadas y trece destapadas que
+; asoman PASO_MIN)
+esc_min:
+        push esi
+        imul esi, eax, ES_TAM
+        add esi, t_esc
+        mov ecx, [esi+ES_AN]
+        add ecx, [esi+ES_GAP]
+        imul ecx, N_COL
+        add ecx, [esi+ES_GAP]
+        mov edx, [esi+ES_TAP]
+        imul edx, 6
+        add edx, [esi+ES_FILA]
+        add edx, [esi+ES_SEP]
+        add edx, [esi+ES_AL]
+        add edx, [esi+ES_AL]
+        add edx, 12 * PASO_MIN + 4
+        pop esi
+        ret
+
+; ECX=ancho EDX=alto de la zona: la escala que toca (la mayor que cabe) y
+; dónde va todo. CF=1 si ha cambiado la escala (hay que hacer los dibujos)
+medidas:
+        pushad
+        mov [cli_an], ecx
+        mov [cli_al], edx
+        mov ebx, ecx
+        mov edi, edx
+        xor eax, eax
+.e:
+        call esc_min
+        cmp ecx, ebx
+        ja .sig
+        cmp edx, edi
+        jbe .ya
+.sig:
+        inc eax
+        cmp eax, N_ESC - 1
+        jb .e
+.ya:
+        mov byte [cambia], 0
+        cmp eax, [esc]
+        je .m
+        mov byte [cambia], 1
+.m:
+        mov [esc], eax
+        imul esi, eax, ES_TAM
+        add esi, t_esc
+        mov eax, [esi+ES_AN]
+        mov [c_an], eax
+        mov eax, [esi+ES_AL]
+        mov [c_al], eax
+        mov eax, [esi+ES_GAP]
+        mov [gap], eax
+        add eax, [c_an]
+        mov [paso], eax
+        mov eax, [esi+ES_FILA]
+        mov [fila_y], eax
+        add eax, [c_al]
+        add eax, [esi+ES_SEP]
+        mov [col_y], eax
+        mov eax, [esi+ES_TAP]
+        mov [d_tap], eax
+        mov eax, [esi+ES_PEQ]
+        mov [peq], eax
+        add eax, 15 + 2             ; el índice entero
+        mov [d_vis], eax
+        mov eax, [cli_al]           ; hasta dónde llega una columna
+        sub eax, [col_y]
+        sub eax, 4
+        mov [col_max], eax
+        mov eax, [paso]             ; las siete, centradas
+        imul eax, N_COL
+        sub eax, [gap]
+        neg eax
+        add eax, [cli_an]
+        sar eax, 1
+        mov [grid_x0], eax
+        call pon_col_x0
+        popad
+        cmp byte [cambia], 1
+        cmc
+        ret
+
+; dónde empieza la primera columna (las seis de la española, centradas)
+pon_col_x0:
+        push eax
+        mov eax, [grid_x0]
+        cmp dword [baraja], B_ESP
+        jne .x
+        push edx
+        mov edx, [paso]
+        shr edx, 1
+        add eax, edx
+        pop edx
+.x:
+        mov [col_x0], eax
+        pop eax
         ret
 
 ; ---- el procedimiento de la ventana ----
@@ -706,6 +974,12 @@ sol_proc:
         je .orden
         cmp eax, WM_FINAL
         je .final
+        cmp eax, WM_SIZE
+        je .tam
+        cmp eax, WM_GETMINMAXINFO   ; [TAMAÑO] lo más pequeño: la escala pequeña
+        je .min
+        cmp eax, WM_EXITSIZEMOVE
+        je .soltada
         cmp eax, WM_CREATE
         je .crear
         cmp eax, WM_DESTROY
@@ -718,7 +992,41 @@ sol_proc:
         call nueva
         jmp .hecho
 .destruir:
+        call rec_guardar            ; (el sitio y el tamaño)
+        mov dword [ven], 0
         HV msg_salir
+        jmp .hecho
+.min:
+        mov eax, N_ESC - 1
+        call esc_min
+        lea eax, [edx+MARCO_AL]
+        shl eax, 16
+        lea eax, [eax+ecx+MARCO_AN]
+        ret
+.tam:
+        cmp byte [arr_on], 0        ; (si se llevaba algo, vuelve a su sitio)
+        je .t0
+        mov byte [arr_on], 0
+        HV ven_soltar
+.t0:
+        push ecx
+        push edx
+        movzx ecx, dx
+        shr edx, 16
+        cmp ecx, 40                 ; (minimizada: nada)
+        jb .t9
+        call medidas
+        jnc .t1
+        call hacer_dibujos          ; otra escala: las cartas, a su tamaño
+.t1:
+        HV ven_invalidar
+.t9:
+        pop edx
+        pop ecx
+        mov eax, WM_SIZE
+        HVJ ven_defecto
+.soltada:
+        call rec_guardar            ; se ha movido o cambiado: a SOLITARI.REC
         jmp .hecho
 .reloj:
         cmp dword [estado], E_JUEGA
@@ -818,10 +1126,10 @@ sol_proc:
         jmp .hecho
 .tecla:
         cmp ecx, TC_F1 + 1          ; F2
-        jne .t1
+        jne .t1b
         call nueva
         jmp .hecho
-.t1:
+.t1b:
         cmp ecx, TC_RETRO
         je .t2
         cmp ecx, TC_CTRL + 26       ; Ctrl+Z
@@ -975,8 +1283,9 @@ inv_arriba:
         mov ebp, [ven]
         xor eax, eax
         xor ebx, ebx
-        mov ecx, CLI_AN
-        mov edx, FILA_Y - 4
+        mov ecx, [cli_an]
+        mov edx, [fila_y]
+        sub edx, 4
         HV ven_invalidar_rect
         popad
         ret
@@ -987,11 +1296,12 @@ inv_arr:
         mov ebp, [ven]
         mov eax, [arr_x]
         mov ebx, [arr_y]
-        mov ecx, CAR_AN
+        mov ecx, [c_an]
         mov edx, [arr_n]
         dec edx
-        imul edx, D_VIS
-        add edx, CAR_AL
+        imul edx, [d_vis]
+        add edx, [c_al]
+        add edx, 4
         HV ven_invalidar_rect
         popad
         ret
@@ -1005,18 +1315,18 @@ pila_pos:
         jb .a
         inc eax                     ; (después del hueco)
 .a:
-        imul eax, PASO
-        add eax, GAP
-        mov ebx, FILA_Y
+        imul eax, [paso]
+        add eax, [grid_x0]
+        mov ebx, [fila_y]
         ret
 .col:
         sub eax, P_COL
-        imul eax, PASO
+        imul eax, [paso]
         add eax, [col_x0]
-        mov ebx, COL_Y
+        mov ebx, [col_y]
         ret
 
-; ESI=una columna -> EAX=lo que asoma cada carta destapada (D_VIS, o menos si
+; ESI=una columna -> EAX=lo que asoma cada carta destapada (d_vis, o menos si
 ; la columna no cabe entera)
 col_paso:
         push ebx
@@ -1033,25 +1343,34 @@ col_paso:
         jmp .t
 .c:
         sub ecx, ebx                ; ECX=las destapadas
-        mov eax, D_VIS
+        mov eax, [d_vis]
         cmp ecx, 2
         jb .x
         dec ecx
-        imul ebx, D_TAP
-        mov eax, COL_MAX - CAR_AL
+        imul ebx, [d_tap]
+        mov eax, [col_max]
+        sub eax, [c_al]
         sub eax, ebx
+        jg .d
+        mov eax, 1
+        jmp .x
+.d:
         xor edx, edx
         div ecx
-        cmp eax, D_VIS
-        jbe .x
-        mov eax, D_VIS
+        cmp eax, [d_vis]
+        jbe .x1
+        mov eax, [d_vis]
+.x1:
+        test eax, eax
+        jnz .x
+        inc eax
 .x:
         pop edx
         pop ecx
         pop ebx
         ret
 
-; ESI=una columna ECX=carta -> EBX=lo que baja desde COL_Y
+; ESI=una columna ECX=carta -> EBX=lo que baja desde col_y
 carta_y:
         push eax
         push edx
@@ -1063,7 +1382,7 @@ carta_y:
         jae .x
         test byte [esi+1+edx], TAPADA
         jz .v
-        add ebx, D_TAP
+        add ebx, [d_tap]
         jmp .s
 .v:
         add ebx, eax
@@ -1084,28 +1403,31 @@ donde:
         push edi
         movsx eax, dx
         sar edx, 16                 ; EAX=x EDX=y
-        cmp edx, FILA_Y
+        cmp edx, [fila_y]
         jl .no
-        cmp edx, FILA_Y + CAR_AL
+        mov ebx, [fila_y]
+        add ebx, [c_al]
+        cmp edx, ebx
         jge .cols
-        sub eax, GAP                ; arriba
+        sub eax, [grid_x0]          ; arriba
         js .no
         push edx
         xor edx, edx
-        mov ecx, PASO
-        div ecx
+        div dword [paso]
         mov ebx, edx
         pop edx
-        cmp ebx, CAR_AN             ; (entre dos cartas)
+        cmp ebx, [c_an]             ; (entre dos cartas)
         jae .no
         cmp eax, N_COL - 1
         ja .no
         cmp eax, 2                  ; (el hueco)
         je .no
-        imul ebx, eax, PASO
-        add ebx, GAP
+        imul ebx, eax, 1
+        imul ebx, [paso]
+        add ebx, [grid_x0]
         mov [g_x], ebx
-        mov dword [g_y], FILA_Y
+        mov ebx, [fila_y]
+        mov [g_y], ebx
         cmp eax, 2
         jb .arr
         dec eax                     ; un montón de salida
@@ -1119,28 +1441,30 @@ donde:
         js .no
         push edx
         xor edx, edx
-        mov ecx, PASO
-        div ecx
+        div dword [paso]
         mov ebx, edx
         pop edx
-        cmp ebx, CAR_AN
+        cmp ebx, [c_an]
         jae .no
         cmp eax, [n_cols]
         jae .no
-        imul ebx, eax, PASO
+        mov ebx, eax
+        imul ebx, [paso]
         add ebx, [col_x0]
         mov [g_x], ebx
-        sub edx, COL_Y
+        sub edx, [col_y]
         js .no
         add eax, P_COL
         imul esi, eax, PILA_T
         add esi, pilas
-        mov dword [g_y], COL_Y
+        mov ebx, [col_y]
+        mov [g_y], ebx
         movzx ecx, byte [esi]
         dec ecx
         js .x                       ; vacía
         call carta_y                ; la de encima, entera
-        lea edi, [ebx+CAR_AL]
+        mov edi, ebx
+        add edi, [c_al]
         cmp edx, edi
         jge .no
 .b:
@@ -1150,7 +1474,7 @@ donde:
         call carta_y
         jmp .b
 .esa:
-        add ebx, COL_Y
+        add ebx, [col_y]
         mov [g_y], ebx
         jmp .x
 .no:
@@ -1165,12 +1489,10 @@ donde:
 
 ; AL=carta -> EAX=palo EDX=orden (sin la marca de tapada)
 palo_orden:
-        push ecx
         movzx eax, al
         and eax, 0x3F
         xor edx, edx
         div dword [n_ord]
-        pop ecx
         ret
 
 ; AL=carta -> EBX=su montón de salida; CF=0 si le toca subir
@@ -1519,16 +1841,20 @@ soltar:
         add esi, pilas
         mov ecx, [arr_desde]
         mov cl, [esi+1+ecx]         ; CL=la de abajo de las que se llevan
-        mov edx, [arr_y]
-        add edx, CAR_AL / 2
-        cmp edx, COL_Y - 6
+        mov eax, [c_al]             ; ¿arriba o en las columnas?
+        shr eax, 1
+        add eax, [arr_y]
+        mov edx, [col_y]
+        sub edx, 6
+        cmp eax, edx
         jge .col
-        mov eax, [arr_x]            ; arriba: a su montón de salida
-        add eax, CAR_AN / 2 - GAP / 2
+        mov eax, [paso]             ; arriba: a su montón de salida
+        shr eax, 1
+        add eax, [arr_x]
+        sub eax, [grid_x0]
         js .x
         xor edx, edx
-        mov ebx, PASO
-        div ebx
+        div dword [paso]
         cmp eax, 3
         jb .x
         cmp eax, N_COL - 1
@@ -1540,13 +1866,13 @@ soltar:
         jc .x
         jmp .mov
 .col:
-        mov eax, [arr_x]
-        add eax, CAR_AN / 2 + GAP / 2
+        mov eax, [paso]
+        shr eax, 1
+        add eax, [arr_x]
         sub eax, [col_x0]
         js .x
         xor edx, edx
-        mov ebx, PASO
-        div ebx
+        div dword [paso]
         cmp eax, [n_cols]
         jae .x
         lea ebx, [eax+P_COL]
@@ -1643,9 +1969,25 @@ nueva:
         popad
         ret
 
-; ---- los récords y la baraja ----
+; ---- los récords, la baraja y la ventana ----
 rec_guardar:
         pushad
+        mov ebp, [ven]              ; el sitio y el tamaño de la ventana (si
+        test ebp, ebp               ; está maximizada, los de antes)
+        jz .v
+        lea esi, [ebp+V_X]
+        test dword [ebp+V_ESTADO], S_MINIM | S_MAXIM
+        jz .v0
+        lea esi, [ebp+V_RX]
+        test dword [ebp+V_ESTADO], S_MAXIM
+        jz .v                       ; (minimizada: lo que había)
+.v0:
+        mov edi, vent
+        movsd
+        movsd
+        movsd
+        movsd
+.v:
         mov edi, txt
         mov esi, k_cab
         call hvl_cad
@@ -1659,6 +2001,23 @@ rec_guardar:
         call hvl_cad
         mov ax, 0x0A0D
         stosw
+        cmp dword [vent+8], 0
+        je .sv
+        mov esi, k_ventana          ; Ventana=x,y,ancho,alto
+        call hvl_cad
+        xor ecx, ecx
+.vn:
+        mov eax, [vent+ecx*4]
+        call hvl_num
+        mov al, ','
+        stosb
+        inc ecx
+        cmp ecx, 4
+        jb .vn
+        dec edi
+        mov ax, 0x0A0D
+        stosw
+.sv:
         mov ebx, recs + 16          ; los de la española (las claves de siempre)
         mov ebp, k_claves + 16
         call .baraja
@@ -1706,6 +2065,27 @@ rec_leer:
         inc ecx
         cmp ecx, 8
         jb .f
+        mov esi, txt                ; la ventana: cuatro números
+        mov edi, k_ventana
+        call hvl_clave
+        jc .b
+        xor ecx, ecx
+.v:
+        call hvl_lee_num
+        mov [vent_l+ecx*4], eax
+        inc ecx
+        cmp ecx, 4
+        je .v1
+        cmp byte [esi], ','
+        jne .b
+        inc esi
+        jmp .v
+.v1:
+        mov esi, vent_l
+        mov edi, vent
+        mov cl, 4
+        rep movsd
+.b:
         mov esi, txt
         mov edi, k_baraja
         call hvl_clave
@@ -1729,8 +2109,7 @@ poner_baraja:
         mov [n_cartas], ebx
         mov ebx, [b_cols+eax*4]
         mov [n_cols], ebx
-        mov ebx, [b_col_x0+eax*4]
-        mov [col_x0], ebx
+        call pon_col_x0
         mov byte [m_fra], '»'
         mov byte [m_esp], ' '
         test eax, eax
@@ -1738,62 +2117,158 @@ poner_baraja:
         mov byte [m_fra], ' '
         mov byte [m_esp], '»'
 .m:
-        ; las pintas: normales, del revés, al doble y al triple
-        mov esi, [b_pip+eax*4]
-        xor ebp, ebp
+        call hacer_dibujos
+        mov ebp, [ven]
+        test ebp, ebp
+        jz .x
+        HV ven_invalidar
+.x:
+        popad
+        ret
+
+; ---- los dibujos de la baraja y la escala de ahora ----
+hacer_dibujos:
+        pushad
+        mov edi, cara               ; la cara y el dorso
+        mov al, C_BLANCO
+        call hacer_carta
+        mov edi, dorso
+        call hacer_carta
+        call hacer_dorso
+        imul ebp, [esc], ES_TAM     ; las medidas de las pintas
+        add ebp, t_esc
+        mov eax, [ebp+ES_PIP]
+        mov [pip], eax
+        mov ecx, [c_an]             ; sus columnas: 16, en medio y a 16 del
+        sub ecx, eax                ; otro lado
+        mov edx, ecx
+        shr ecx, 1
+        mov dword [pcol], 16
+        mov [pcol+4], ecx
+        sub edx, 16
+        mov [pcol+8], edx
+        mov ecx, [ebp+ES_T]         ; y sus filas
+        mov [pip_t], ecx
+        mov edx, [c_al]
+        sub edx, ecx
+        sub edx, eax
+        mov [pip_b], edx
+        mov eax, [peq]              ; la pinta del índice, en medio del número
+        shr eax, 1
+        neg eax
+        add eax, 8
+        mov [peq_x], eax
+        ; las pintas: de 13 (para el as y el montón vacío), de 9 (debajo de
+        ; las figuras españolas pequeñas), las de esta escala y las del índice
+        mov eax, [baraja]
+        lea esi, [eax+eax*2]
+        lea esi, [b_pips+esi*4]     ; ESI=los tres dibujos de esta baraja
+        mov ebx, [esi]
+        mov ecx, 13
+        mov edi, pip13n
+        xor edx, edx
+        call hacer_pintas
+        mov ebx, [esi+4]
+        mov ecx, 9
+        mov edi, pip9n
+        call hacer_pintas
+        mov ecx, [pip]              ; las de esta escala: 13, 9 o 7
+        mov edx, 0                  ; (el dibujo: 0, 1 o 2)
+        cmp ecx, 13
+        je .c
+        inc edx
+        cmp ecx, 9
+        je .c
+        inc edx
+.c:
+        mov ebx, [esi+edx*4]
+        mov edi, pipc
+        mov edx, pipcr
+        call hacer_pintas
+        mov ecx, [peq]              ; las del índice: 9 o 7
+        mov edx, 1
+        cmp ecx, 9
+        je .i
+        inc edx
+.i:
+        mov ebx, [esi+edx*4]
+        mov edi, pipi
+        mov edx, pipir
+        call hacer_pintas
+        mov dword [e_num], 2        ; la de 13 al doble (los montones vacíos)
+        mov dword [e_den], 1
+        xor ebx, ebx
+.d:
+        imul esi, ebx, PIP_T
+        add esi, pip13n
+        imul edi, ebx, P26_T
+        add edi, pip26
+        push ebx
+        mov ebx, 13
+        mov ecx, 13
+        call escalar
+        pop ebx
+        inc ebx
+        cmp ebx, 4
+        jb .d
+        mov eax, [ebp+ES_AS]        ; y la del as
+        mov [e_num], eax
+        imul eax, 13
+        mov [as_t], eax
+        xor ebx, ebx
+.a:
+        imul esi, ebx, PIP_T
+        add esi, pip13n
+        imul edi, ebx, AS_T
+        add edi, pipas
+        push ebx
+        mov ebx, 13
+        mov ecx, 13
+        call escalar
+        pop ebx
+        inc ebx
+        cmp ebx, 4
+        jb .a
+        call hacer_indices
+        call hacer_figuras
+        popad
+        ret
+
+; EBX=los dibujos de los cuatro palos ECX=su lado EDI=los mapas EDX=los
+; mismos, girados (0: no hacen falta). Cada palo, de su color
+hacer_pintas:
+        pushad
+        mov ebp, edx
+        mov eax, ecx
+        mul ecx
+        mov ecx, eax                ; ECX=puntos de cada una
+        mov esi, ebx
+        xor ebx, ebx                ; EBX=el palo
 .p:
+        mov eax, [baraja]
         mov dl, [b_color+eax*2]     ; (las francesas, de su color)
-        cmp ebp, 2
+        cmp ebx, 2
         jb .p1
         mov dl, [b_color+eax*2+1]
 .p1:
-        imul edi, ebp, PIP_T
-        add edi, pip13
-        mov ecx, PIP_T
+        push ebx
         call convertir              ; (ESI avanza)
+        pop ebx
+        test ebp, ebp
+        jz .s
         push esi
+        push edi
         mov esi, edi
-        imul edi, ebp, PIP_T
-        add edi, pip13r
+        mov edi, ebp
         call girar
-        imul edi, ebp, P26_T
-        add edi, pip26
-        mov ebx, 13
-        mov ecx, 13
-        mov edx, 2
-        call ampliar
-        imul edi, ebp, AS_T
-        add edi, pip39
-        mov edx, 3
-        call ampliar
+        pop edi
         pop esi
-        inc ebp
-        cmp ebp, 4
+        add ebp, ecx
+.s:
+        add edi, ecx
+        inc ebx
+        cmp ebx, 4
         jb .p
-        ; las pequeñas, normales y del revés
-        mov esi, [b_peq+eax*4]
-        xor ebp, ebp
-.q:
-        mov dl, [b_color+eax*2]
-        cmp ebp, 2
-        jb .q1
-        mov dl, [b_color+eax*2+1]
-.q1:
-        imul edi, ebp, PEQ_T
-        add edi, pip9
-        mov ecx, PEQ_T
-        call convertir
-        push esi
-        mov esi, edi
-        imul edi, ebp, PEQ_T
-        add edi, pip9r
-        call girar
-        pop esi
-        inc ebp
-        cmp ebp, 4
-        jb .q
-        call hacer_indices
-        call hacer_figuras
         popad
         ret
 
@@ -1881,9 +2356,25 @@ idx_letra:
         popad
         ret
 
-; las figuras de cada palo, con sus colores, en su recuadro (38x82)
+; las figuras de cada palo, con sus colores, a la escala de ahora: las
+; francesas, la mitad de arriba y la de abajo girada; las españolas, la
+; figura y debajo su palo. fig_an x fig_al (el recuadro, un punto más por
+; cada lado)
 hacer_figuras:
         pushad
+        imul eax, [esc], ES_TAM
+        mov ecx, [t_esc+eax+ES_FNUM]
+        mov [e_num], ecx
+        mov ecx, [t_esc+eax+ES_FDEN]
+        mov [e_den], ecx
+        mov ecx, [t_esc+eax+ES_FPIP]
+        mov [fig_pip], ecx
+        mov eax, 19                 ; el ancho
+        call por_escala
+        mov [fig_an], eax
+        mov eax, 20                 ; la mitad de una francesa
+        call por_escala
+        mov [fig_mitad], eax
         xor ebp, ebp                ; EBP=palo*3 + figura
 .f:
         imul edi, ebp, FIG_T
@@ -1897,23 +2388,17 @@ hacer_figuras:
         xor edx, edx
         mov ecx, 3
         div ecx                     ; EAX=palo EDX=figura
+        mov [hf_palo], eax
+        mov [hf_fig], edx
         mov ecx, [baraja]
         mov esi, [b_figcol+ecx*4]
         add esi, eax
         lea esi, [esi+eax*2]
-        push eax
         mov dx, [esi]               ; DL, DH, BL=los colores x, y, z
         mov bl, [esi+2]
-        mov eax, ebp
-        push edx
-        xor edx, edx
-        mov ecx, 3
-        div ecx
-        mov eax, edx                ; EAX=figura
-        pop edx
         cmp dword [baraja], B_ESP
         je .esp
-        imul esi, eax, 19 * 20      ; la francesa: la mitad de arriba...
+        imul esi, [hf_fig], 19 * 20 ; la francesa: la mitad de arriba...
         add esi, d_figf
         push edi
         mov edi, fig_tmp
@@ -1923,16 +2408,21 @@ hacer_figuras:
         mov esi, fig_tmp
         mov ebx, 19
         mov ecx, 20
-        mov edx, 2
-        call ampliar
-        mov esi, edi                ; ...y la de abajo, girada
-        add edi, 42 * FIG_AN
-        mov ecx, 40 * FIG_AN
+        call escalar
+        mov eax, [fig_mitad]        ; ...y la de abajo, girada
+        imul eax, [fig_an]
+        mov esi, edi
+        mov ecx, eax
+        add edi, eax
+        mov eax, [fig_an]
+        lea edi, [edi+eax*2]
         call girar
-        pop eax
+        mov eax, [fig_mitad]
+        lea eax, [eax*2+2]
+        mov [fig_al], eax
         jmp .sig
 .esp:
-        imul esi, eax, 19 * 26      ; la española: la figura...
+        imul esi, [hf_fig], 19 * 26 ; la española: la figura...
         add esi, d_fige
         push edi
         mov edi, fig_tmp
@@ -1942,19 +2432,43 @@ hacer_figuras:
         mov esi, fig_tmp
         mov ebx, 19
         mov ecx, 26
-        mov edx, 2
-        call ampliar
-        pop eax                     ; ...y debajo, su palo al doble
-        imul esi, eax, P26_T
+        call escalar
+        mov eax, 26
+        call por_escala
+        add eax, 3                  ; ...y debajo, su palo
+        mov ecx, [fig_pip]
+        lea edx, [eax+ecx]
+        mov [fig_al], edx
+        imul eax, [fig_an]
+        add edi, eax
+        mov eax, [fig_an]
+        sub eax, ecx
+        shr eax, 1
+        add edi, eax
+        cmp ecx, 26                 ; (el mapa del palo, del tamaño que toca)
+        jne .e13
+        imul esi, [hf_palo], P26_T
         add esi, pip26
-        add edi, 56 * FIG_AN + (FIG_AN - 26) / 2
-        mov edx, 26
+        jmp .e
+.e13:
+        cmp ecx, 13
+        jne .e9
+        imul esi, [hf_palo], PIP_T
+        add esi, pip13n
+        jmp .e
+.e9:
+        imul esi, [hf_palo], PEQ_T
+        add esi, pip9n
 .e:
-        mov ecx, 26
+        mov edx, ecx
+.e1:
+        push ecx
         rep movsb
-        add edi, FIG_AN - 26
+        pop ecx
+        add edi, [fig_an]
+        sub edi, ecx
         dec edx
-        jnz .e
+        jnz .e1
 .sig:
         inc ebp
         cmp ebp, 12
@@ -1962,26 +2476,86 @@ hacer_figuras:
         popad
         ret
 
-; ---- los dibujos de siempre (una vez, al empezar): la cara y el dorso ----
-preparar:
+; EAX=medida de un dibujo -> EAX=la misma a la escala de las figuras
+por_escala:
+        push edx
+        imul eax, [e_num]
+        xor edx, edx
+        div dword [e_den]
+        pop edx
+        ret
+
+; EDI=una carta (c_an x c_al) AL=su color: las esquinas redondeadas y el
+; filete gris
+hacer_carta:
         pushad
-        mov edi, cara
-        mov al, C_BLANCO
-        call hacer_carta
-        mov edi, dorso
-        call hacer_carta
-        mov edi, dorso + 4 * CAR_AN + 4   ; el dorso: dentro del margen blanco
+        mov [hc_color], al
+        xor ebx, ebx                ; EBX=y
+.f:
+        mov eax, ebx                ; lo cerca que está de arriba o de abajo
+        mov edx, [c_al]
+        dec edx
+        sub edx, ebx
+        cmp edx, eax
+        jae .f1
+        mov eax, edx
+.f1:
+        xor esi, esi                ; ESI=puntos de fuera EBP=del filete
+        mov ebp, 1
+        cmp eax, 4
+        jae .f2
+        movzx esi, byte [esq_fuera+eax]
+        movzx ebp, byte [esq_filete+eax]
+.f2:
+        xor ecx, ecx                ; ECX=x
+.p:
+        mov eax, ecx
+        mov edx, [c_an]
+        dec edx
+        sub edx, ecx
+        cmp edx, eax
+        jae .p1
+        mov eax, edx
+.p1:
+        mov dl, CLAVE
+        cmp eax, esi
+        jb .w
+        mov dl, GRIS
+        sub eax, esi
+        cmp eax, ebp
+        jb .w
+        mov dl, [hc_color]
+.w:
+        mov [edi], dl
+        inc edi
+        inc ecx
+        cmp ecx, [c_an]
+        jb .p
+        inc ebx
+        cmp ebx, [c_al]
+        jb .f
+        popad
+        ret
+
+; el dorso: dentro del margen blanco, añil con celosía y el rombo ocre
+hacer_dorso:
+        pushad
+        mov edi, [c_an]
+        imul edi, 4
+        add edi, dorso + 4
         mov ebx, 4                  ; EBX=y
 .f:
         mov ecx, 4                  ; ECX=x
 .p:
-        mov eax, ecx                ; EDX=|x-36| + |y-50|: el rombo del centro
-        sub eax, CAR_AN / 2
+        mov eax, [c_an]             ; EDX=|x-an/2| + |y-al/2|: el rombo
+        shr eax, 1
+        sub eax, ecx
         jns .p1
         neg eax
 .p1:
-        mov edx, ebx
-        sub edx, CAR_AL / 2
+        mov edx, [c_al]
+        shr edx, 1
+        sub edx, ebx
         jns .p2
         neg edx
 .p2:
@@ -2011,61 +2585,15 @@ preparar:
         mov [edi], al
         inc edi
         inc ecx
-        cmp ecx, CAR_AN - 4
+        mov eax, [c_an]
+        sub eax, 4
+        cmp ecx, eax
         jb .p
         add edi, 8
         inc ebx
-        cmp ebx, CAR_AL - 4
-        jb .f
-        popad
-        ret
-
-; EDI=una carta (CAR_AN x CAR_AL) AL=su color: las esquinas redondeadas y el
-; filete gris
-hacer_carta:
-        pushad
-        mov [hc_color], al
-        xor ebx, ebx                ; EBX=y
-.f:
-        mov eax, ebx                ; lo cerca que está de arriba o de abajo
-        mov edx, CAR_AL - 1
-        sub edx, ebx
-        cmp edx, eax
-        jae .f1
-        mov eax, edx
-.f1:
-        xor esi, esi                ; ESI=puntos de fuera EBP=del filete
-        mov ebp, 1
-        cmp eax, 4
-        jae .f2
-        movzx esi, byte [esq_fuera+eax]
-        movzx ebp, byte [esq_filete+eax]
-.f2:
-        xor ecx, ecx                ; ECX=x
-.p:
-        mov eax, ecx
-        mov edx, CAR_AN - 1
-        sub edx, ecx
-        cmp edx, eax
-        jae .p1
-        mov eax, edx
-.p1:
-        mov dl, CLAVE
-        cmp eax, esi
-        jb .w
-        mov dl, GRIS
-        sub eax, esi
-        cmp eax, ebp
-        jb .w
-        mov dl, [hc_color]
-.w:
-        mov [edi], dl
-        inc edi
-        inc ecx
-        cmp ecx, CAR_AN
-        jb .p
-        inc ebx
-        cmp ebx, CAR_AL
+        mov eax, [c_al]
+        sub eax, 4
+        cmp ebx, eax
         jb .f
         popad
         ret
@@ -2141,31 +2669,41 @@ girar:
         popad
         ret
 
-; ESI=mapa de EBX x ECX -> EDI=el mismo, EDX veces más grande
-ampliar:
+; ESI=mapa de EBX x ECX -> EDI=el mismo, e_num/e_den veces más grande (cada
+; punto, el más cercano)
+escalar:
         pushad
-        mov [amp_n], edx
+        mov [es_an], ebx
+        mov eax, ebx
+        call por_escala
+        mov [es_nan], eax
+        mov eax, ecx
+        call por_escala
+        mov ebp, eax                ; EBP=filas que salen
+        xor ebx, ebx                ; EBX=fila
 .f:
-        mov edx, [amp_n]            ; cada fila, EDX veces
-.r:
-        push esi
-        push ecx
-        mov ecx, ebx
+        mov eax, ebx                ; la de origen
+        imul eax, [e_den]
+        xor edx, edx
+        div dword [e_num]
+        imul eax, [es_an]
+        lea edx, [esi+eax]          ; EDX=su principio
+        xor ecx, ecx
 .p:
-        lodsb
-        push ecx
-        mov ecx, [amp_n]
-        rep stosb
-        pop ecx
-        dec ecx
-        jnz .p
-        pop ecx
-        pop esi
-        dec edx
-        jnz .r
-        add esi, ebx
-        dec ecx
-        jnz .f
+        mov eax, ecx
+        imul eax, [e_den]
+        push edx
+        xor edx, edx
+        div dword [e_num]
+        pop edx
+        mov al, [edx+eax]
+        stosb
+        inc ecx
+        cmp ecx, [es_nan]
+        jb .p
+        inc ebx
+        cmp ebx, ebp
+        jb .f
         popad
         ret
 
@@ -2185,7 +2723,9 @@ pintar:
         sub ecx, ebx
         mov [p_y1], ecx
         HV dc_pintar
-        cmp dword [p_y0], FILA_Y - 4
+        mov eax, [fila_y]
+        sub eax, 4
+        cmp [p_y0], eax
         jge .pilas
         COLOR C_CREMA               ; los rótulos
         mov edi, rot
@@ -2193,21 +2733,27 @@ pintar:
         call hvl_cad
         mov eax, [movs]
         call hvl_num
-        mov eax, GAP
+        mov eax, [grid_x0]
         call .rotulo
         mov edi, rot
         mov esi, t_tiempo
         call hvl_cad
         mov eax, [segundos]
         call pon_tiempo
-        mov eax, GAP + 3 * PASO
+        mov eax, [paso]
+        imul eax, 3
+        add eax, [grid_x0]
         call .rotulo
         mov edi, rot
         mov esi, t_mazo
         call hvl_cad
         movzx eax, byte [pilas+P_MAZO*PILA_T]
         call hvl_num
-        mov eax, CLI_AN - GAP - 8 * 8
+        mov eax, [paso]
+        imul eax, N_COL
+        sub eax, [gap]
+        add eax, [grid_x0]
+        sub eax, 8 * 8
         call .rotulo
 .pilas:
         xor edi, edi
@@ -2228,14 +2774,14 @@ pintar:
         mov edi, [arr_n]
 .a:
         mov cl, [esi]
-        mov edx, D_VIS
+        mov edx, [d_vis]
         cmp edi, 1
         jne .a1
-        mov edx, CAR_AL
+        mov edx, [c_al]
 .a1:
         call dib_carta
         inc esi
-        add ebx, D_VIS
+        add ebx, [d_vis]
         dec edi
         jnz .a
 .x:
@@ -2273,7 +2819,7 @@ dib_pila:
         cmp edi, P_COL
         jae .col
         mov cl, [esi+ecx]           ; arriba solo se ve la de encima
-        mov edx, CAR_AL
+        mov edx, [c_al]
         test edi, edi
         jnz .c1
         or cl, TAPADA               ; (el mazo, boca abajo)
@@ -2288,14 +2834,14 @@ dib_pila:
         xor edi, edi
 .cb:
         mov cl, [esi+1+edi]
-        mov edx, CAR_AL
+        mov edx, [c_al]
         inc edi
         cmp edi, [d_n]
         jae .cd                     ; la de encima, entera
         mov edx, [d_paso]
         test cl, TAPADA
         jz .cd
-        mov edx, D_TAP
+        mov edx, [d_tap]
 .cd:
         call dib_carta
         add ebx, edx
@@ -2309,13 +2855,15 @@ dib_pila:
 dib_hueco:
         pushad
         COLOR C_PETROLEO_CL
-        mov ecx, CAR_AN
-        mov edx, CAR_AL
+        mov ecx, [c_an]
+        mov edx, [c_al]
         HV dc_marco
+        shr ecx, 1                  ; (el centro)
+        shr edx, 1
         test edi, edi
         jnz .sal
-        add eax, CAR_AN / 2         ; el mazo: un rombo hueco (darle la vuelta)
-        add ebx, CAR_AL / 2
+        add eax, ecx                ; el mazo: un rombo hueco (darle la vuelta)
+        add ebx, edx
         mov ecx, 11
         HV dc_rombo
         COLOR C_PETROLEO
@@ -2330,8 +2878,8 @@ dib_hueco:
         sub edi, P_SAL              ; un montón de salida: su palo
         imul esi, edi, P26_T
         add esi, pip26
-        add eax, (CAR_AN - 26) / 2
-        add ebx, (CAR_AL - 26) / 2
+        lea eax, [eax+ecx-13]
+        lea ebx, [ebx+edx-13]
         mov ecx, 26
         mov edx, 26
         HV dc_copiar_clave
@@ -2346,14 +2894,15 @@ copia:
         HV dc_copiar_clave
         ret
 
-; dibuja una carta: EAX=x EBX=y CL=carta EDX=el alto que se ve (CAR_AL: entera)
+; dibuja una carta: EAX=x EBX=y CL=carta EDX=el alto que se ve (c_al: entera)
 dib_carta:
         pushad
         cmp eax, [p_x1]             ; ¿cae en lo que hay que repintar?
         jge .x
         cmp ebx, [p_y1]
         jge .x
-        lea esi, [eax+CAR_AN]
+        mov esi, eax
+        add esi, [c_an]
         cmp esi, [p_x0]
         jle .x
         lea esi, [ebx+edx+4]        ; (asoma también por las esquinas de la
@@ -2364,11 +2913,11 @@ dib_carta:
         mov [c_h], edx
         movzx edi, cl
         add edx, 4                  ; el fondo: cara o dorso
-        cmp edx, CAR_AL
+        cmp edx, [c_al]
         jbe .h
-        mov edx, CAR_AL
+        mov edx, [c_al]
 .h:
-        mov ecx, CAR_AN
+        mov ecx, [c_an]
         mov esi, cara
         test edi, TAPADA
         jz .f
@@ -2392,28 +2941,39 @@ dib_carta:
         mov ecx, IDX_AN
         mov edx, IDX_AL
         call copia
-        imul esi, [c_palo], PEQ_T   ; y la pinta pequeña
-        add esi, pip9
-        mov eax, 4
+        mov esi, [c_palo]           ; y la pinta pequeña
+        imul esi, [peq]
+        imul esi, [peq]
+        add esi, pipi
+        mov eax, [peq_x]
         mov ebx, 15
-        mov ecx, 9
-        mov edx, 9
+        mov ecx, [peq]
+        mov edx, ecx
         call copia
-        cmp dword [c_h], CAR_AL
+        mov eax, [c_h]
+        cmp eax, [c_al]
         jne .x
         mov esi, [c_idx]            ; el de abajo, del revés
         add esi, idx_r
-        mov eax, CAR_AN - 2 - IDX_AN
-        mov ebx, CAR_AL - 4 - IDX_AL
+        mov eax, [c_an]
+        sub eax, 2 + IDX_AN
+        mov ebx, [c_al]
+        sub ebx, 4 + IDX_AL
         mov ecx, IDX_AN
         mov edx, IDX_AL
         call copia
-        imul esi, [c_palo], PEQ_T
-        add esi, pip9r
-        mov eax, CAR_AN - 4 - 9
-        mov ebx, CAR_AL - 15 - 9
-        mov ecx, 9
-        mov edx, 9
+        mov esi, [c_palo]
+        imul esi, [peq]
+        imul esi, [peq]
+        add esi, pipir
+        mov eax, [c_an]
+        sub eax, [peq_x]
+        sub eax, [peq]
+        mov ebx, [c_al]
+        sub ebx, 15
+        sub ebx, [peq]
+        mov ecx, [peq]
+        mov edx, ecx
         call copia
         mov edx, [c_ord]
         mov eax, [n_ord]
@@ -2422,12 +2982,17 @@ dib_carta:
         jae .figura
         test edx, edx
         jnz .pintas
-        imul esi, [c_palo], AS_T    ; el as: el palo, grande
-        add esi, pip39
-        mov eax, (CAR_AN - 39) / 2
-        mov ebx, (CAR_AL - 39) / 2
-        mov ecx, 39
-        mov edx, 39
+        mov esi, [c_palo]           ; el as: el palo, grande
+        imul esi, AS_T
+        add esi, pipas
+        mov ecx, [as_t]
+        mov edx, ecx
+        mov eax, [c_an]
+        sub eax, ecx
+        shr eax, 1
+        mov ebx, [c_al]
+        sub ebx, ecx
+        shr ebx, 1
         call copia
         jmp .x
 .pintas:
@@ -2435,18 +3000,31 @@ dib_carta:
         movzx edi, byte [esi]
         inc esi
 .pb:
-        movzx eax, byte [esi]
-        movzx ebx, byte [esi+1]
+        movzx eax, byte [esi]       ; la columna (y si va del revés)
+        movzx ebx, byte [esi+1]     ; la fila, en doceavos
         add esi, 2
         push esi
-        imul esi, [c_palo], PIP_T
+        mov esi, [c_palo]
+        imul esi, [pip]
+        imul esi, [pip]
         btr eax, 7                  ; (+128: del revés)
         jnc .pd
-        add esi, pip13r - pip13
+        add esi, pipcr - pipc
 .pd:
-        add esi, pip13
-        mov ecx, 13
-        mov edx, 13
+        add esi, pipc
+        mov eax, [pcol+eax*4]
+        push eax
+        mov eax, [pip_b]
+        sub eax, [pip_t]
+        imul eax, ebx
+        xor edx, edx
+        mov ebx, 12
+        div ebx
+        add eax, [pip_t]
+        mov ebx, eax
+        pop eax
+        mov ecx, [pip]
+        mov edx, ecx
         call copia
         pop esi
         dec edi
@@ -2460,12 +3038,20 @@ dib_carta:
         mov ecx, [baraja]
         movzx eax, byte [b_color+ecx*2+eax]
         COLOR eax
-        mov eax, [c_x]
-        add eax, 16
-        mov ebx, [c_y]
-        add ebx, 8
-        mov ecx, FIG_AN + 2
-        mov edx, FIG_AL + 2
+        mov ecx, [fig_an]
+        add ecx, 2
+        mov edx, [fig_al]
+        add edx, 2
+        mov eax, [c_an]
+        sub eax, ecx
+        shr eax, 1
+        mov [c_fx], eax
+        add eax, [c_x]
+        mov ebx, [c_al]
+        sub ebx, edx
+        shr ebx, 1
+        mov [c_fy], ebx
+        add ebx, [c_y]
         HV dc_marco
         pop edx
         mov eax, [c_palo]
@@ -2473,10 +3059,12 @@ dib_carta:
         add eax, edx
         imul esi, eax, FIG_T
         add esi, figs
-        mov eax, 17
-        mov ebx, 9
-        mov ecx, FIG_AN
-        mov edx, FIG_AL
+        mov eax, [c_fx]
+        inc eax
+        mov ebx, [c_fy]
+        inc ebx
+        mov ecx, [fig_an]
+        mov edx, [fig_al]
         call copia
 .x:
         popad
@@ -2511,30 +3099,69 @@ c_h         resd 1
 c_palo      resd 1
 c_ord       resd 1
 c_idx       resd 1
-amp_n       resd 1
+c_fx        resd 1
+c_fy        resd 1
 baraja      resd 1                  ; B_FRA (0, la de por omisión) o B_ESP
 n_ord       resd 1                  ; y sus medidas
 n_cartas    resd 1
 n_cols      resd 1
-col_x0      resd 1
 recs        resd 8                  ; los récords: jugadas, ganadas, tiempo y
                                     ; movimientos de la francesa y la española
+scr_an      resd 1                  ; la pantalla
+scr_al      resd 1
+vent        resd 4                  ; la ventana: x, y, ancho y alto (guardados)
+vent_l      resd 4                  ; (al leerlos)
+cli_an      resd 1                  ; su zona
+cli_al      resd 1
+esc         resd 1                  ; la escala y sus medidas
+c_an        resd 1                  ; la carta
+c_al        resd 1
+gap         resd 1
+paso        resd 1
+fila_y      resd 1
+col_y       resd 1
+d_tap       resd 1
+d_vis       resd 1
+col_max     resd 1
+grid_x0     resd 1                  ; dónde empiezan las siete columnas
+col_x0      resd 1                  ; y la primera de las de verdad
+pip         resd 1                  ; el lado de las pintas
+peq         resd 1                  ; y el de la del índice
+peq_x       resd 1
+pip_t       resd 1                  ; la primera fila de pintas y la última
+pip_b       resd 1
+pcol        resd 3                  ; sus tres columnas
+as_t        resd 1                  ; el lado de la pinta del as
+fig_an      resd 1                  ; las figuras
+fig_al      resd 1
+fig_mitad   resd 1
+fig_pip     resd 1
+hf_palo     resd 1
+hf_fig      resd 1
+e_num       resd 1                  ; (escalar)
+e_den       resd 1
+es_an       resd 1
+es_nan      resd 1
 arr_on      resb 1
 a_prueba    resb 1
 nuevo_rec   resb 1                  ; 1 el tiempo, 2 los movimientos
 hc_color    resb 1
+cambia      resb 1
+            resb 3
 ruta_rec    resb 80
 rot         resb 32                 ; el rótulo que se está pintando
 txt         resb 404
 mezcla      resb 52
 pilas       resb N_PILAS * PILA_T
 des         resd DES_MAX
-pip13       resb 4 * PIP_T          ; las pintas
-pip13r      resb 4 * PIP_T          ; del revés
-pip26       resb 4 * P26_T          ; al doble
-pip39       resb 4 * AS_T           ; al triple
-pip9        resb 4 * PEQ_T          ; las pequeñas
-pip9r       resb 4 * PEQ_T
+pip13n      resb 4 * PIP_T          ; las pintas de 13
+pip9n       resb 4 * PEQ_T          ; y las de 9
+pipc        resb 4 * PIP_T          ; las de las cartas, a esta escala
+pipcr       resb 4 * PIP_T          ; del revés
+pipi        resb 4 * PEQ_T          ; las del índice
+pipir       resb 4 * PEQ_T
+pip26       resb 4 * P26_T          ; al doble (los montones vacíos)
+pipas       resb 4 * AS_T           ; la del as
 idx         resb 2 * 13 * IDX_T     ; los índices (color, orden)
 idx_r       resb 2 * 13 * IDX_T
 fig_tmp     resb 19 * 26
