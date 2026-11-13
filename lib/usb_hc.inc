@@ -207,8 +207,9 @@ c_dev_open:
 .tt:
         mov [dv_tthub+bx], cl
         mov [dv_ttport+bx], ch
-        movzx eax, bl
-        inc eax
+        call c_new_addr
+        mov [c_addr_new], al
+        movzx eax, al
         shl eax, 16
         or eax, 0x0500              ; SET_ADDRESS
         mov [ctl_setup], eax
@@ -216,8 +217,7 @@ c_dev_open:
         call control
         jc .r
         movzx bx, byte [cur_pool]
-        mov al, bl
-        inc al
+        mov al, [c_addr_new]
         mov [dv_addr+bx], al
         mov [cur_slot], al
         mov cx, 1                   ; (2 ms para que tome la dirección)
@@ -225,6 +225,39 @@ c_dev_open:
         clc
 .r:
         ret
+
+; una dirección USB nueva para la controladora actual -> AL. Las de los
+; aparatos que no se usan (una cámara, el Bluetooth...) siguen siendo suyas
+; aunque su entrada de la reserva se libere: por eso no se reutiliza la
+; dirección de la entrada, sino que se van dando una tras otra (1-127),
+; saltando las de los aparatos en uso de esa controladora.
+c_new_addr:
+        push bx
+.l:
+        mov al, [cs:c_addr]
+        inc al
+        cmp al, 127
+        jbe .a
+        mov al, 1
+.a:
+        mov [cs:c_addr], al
+        xor bx, bx
+.c:
+        cmp byte [cs:pool_used+bx], 0
+        je .n
+        cmp [cs:dv_addr+bx], al
+        jne .n
+        mov ah, [cs:dv_hc+bx]
+        cmp ah, [cs:cur_hc]
+        je .l
+.n:
+        inc bx
+        cmp bx, POOL_N
+        jb .c
+        pop bx
+        ret
+c_addr      db 0
+c_addr_new  db 0
 
 section .init                   ; (solo al arrancar)
 ; la tubería BX ya está rellena: si la controladora actual es clásica, abrirla

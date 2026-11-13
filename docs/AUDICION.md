@@ -326,6 +326,49 @@ En el primer arranque desde el disco, HSPSND (en `AUTOEXEC.BAT`) encuentra
   auriculares), las `Conexiones`, las `GPIO ahora` como las dejó la BIOS y
   el `EAPD/BTL`.
 
+## Los Cirrus Logic de los Mac [CIRRUS]
+
+Los MacBook, MacBook Air, MacBook Pro e iMac con códec Cirrus Logic CS4206,
+CS4207 o CS4208 (subsistema del códec `106Bxxxx`) no suenan con lo que deja
+el firmware de Apple: los amplificadores de los altavoces y de los
+auriculares están fuera del códec y se encienden con sus GPIO, y el widget de
+proceso del fabricante (nodo 11h; 24h en el CS4208) tiene que estar en marcha
+con sus coeficientes. AUDICION y HSPSND lo saben (`lib/cirrus.inc`):
+
+| Códec | Altavoces | Auriculares | Widget |
+|---|---|---|---|
+| CS4206/CS4207 (MacBook Air 4,x y 5,x, MacBook Pro 8,x...) | GPIO 3 (08h) | GPIO 1 (02h) | 11h |
+| CS4206/CS4207 del MacBook Pro 10,1 y los iMac 12,x y 14,1 | GPIO 3 (08h) | GPIO 2 (04h) | 11h |
+| CS4208 (MacBook Air 6,x en adelante) | GPIO 0 (01h) | - | 24h |
+
+AUDICION pone en marcha el widget al empezar con ese códec (lo dice en el
+informe, con el estado y el coeficiente del DAC leídos después) y el primer
+intento de cada salida es con las GPIO de Apple («GPIO de Apple (los
+amplificadores): máscara 0Ah dirección 0Ah datos 0Ah»); después, las
+variantes de siempre. Si suena así, la línea sugerida es `HSPSND` a secas.
+HSPSND, sin opciones, hace lo mismo (las dos GPIO encendidas: suenan los
+altavoces y los auriculares); `/GPIO:hh`, `/NOGPIO` y lo aprendido mandan
+sobre eso, pero el widget de proceso se pone en marcha siempre. `/INFO` lo
+dice: «Cirrus CS4206 de Apple (subsistema del códec 106B:5600): amplificador
+de los altavoces por la GPIO 3 y el de los auriculares por la GPIO 1; widget
+de proceso 11h puesto en marcha.» y de dónde han salido las GPIO.
+
+## El arranque del flujo [CIRRUS]
+
+Cada sonido para el flujo como pide la norma (RUN a 0 y esperar a que la
+controladora lo lea 0), lo reinicia (SRST a 1 hasta leerlo 1, SRST a 0 hasta
+leerlo 0, con una pausa en cada paso), lo programa, lo suelta de SSYNC y lo
+arranca; si en un cuarto de segundo la posición no se mueve, apunta los
+registros del flujo y lo repite una vez desde el reinicio. El informe dice
+«a la primera no arrancó; se ha reiniciado el flujo y a la segunda sí» con
+los registros, o, si tampoco, «NO AVANZA» con los registros de las dos veces.
+(En el MacBook Air 2012 la mitad de los intentos, alternos, no arrancaban;
+antes no se esperaba a que el flujo estuviera parado, no había pausas en el
+reinicio ni segundo intento, y el informe no decía cómo estaban los
+registros.) HSPSND para y reinicia el flujo de la misma manera: antes, al
+quedarse sin datos o cambiar de frecuencia, volvía a arrancar justo después
+de escribir RUN a 0, sin esperar a que parase.
+
 ## Pruebas
 
 `tests/run_audicion_tests.sh`: en QEMU, con las respuestas simuladas por la
@@ -334,7 +377,12 @@ y la salida de audio grabada. Intel HD Audio (hda-duplex, hda-output,
 hda-micro y un ICH9 con el códec en la dirección 2), AC'97, Sound Blaster 16
 y sin tarjeta. La opción `/SIM` (solo para las pruebas) hace como si el códec
 tuviera tres GPIO, EAPD, «snoop» y una salida de auriculares, para recorrer
-todas las variantes y comprobar la línea sugerida.
+todas las variantes y comprobar la línea sugerida. `/SIM:MAC` contesta por
+el códec 0 como el Cirrus CS4206 del MacBook Air 2012 (con su volcado real;
+el formato y el flujo de sus DAC van también al DAC de QEMU, para que suene)
+y hace que el flujo no arranque a la primera, para probar el segundo
+intento; `HSPSND /SIMMAC /INFO` (solo para las pruebas: no se queda
+residente) usa el mismo códec simulado.
 
 `tests/run_aprendido_tests.sh`: lo aprendido (`SONIDO.INI`). AUDICION /SIM
 que suena por un camino que HSPSND no elegiría solo (GPIO 02h, control

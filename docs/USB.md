@@ -29,7 +29,7 @@ DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/?]
 
 | Opción | Qué hace |
 |---|---|
-| (ninguna) | Seguro: si la BIOS está usando **alguna** controladora USB (es suya o la tiene en marcha), o el sistema ha arrancado de un disco USB de la BIOS, no se toca nada. |
+| (ninguna) | Seguro: si la BIOS está usando **alguna** controladora USB (es suya o la tiene en marcha), o el sistema ha arrancado de un disco USB de la BIOS, no se toca nada. **Salvo** en los equipos sin ratón PS/2 (ver «Equipos sin ratón PS/2»): ahí lo toma él solo. |
 | `/F` | Tomar el USB aunque lo use la BIOS (teclado y ratón pasan a HSPUSB). |
 | `/U` | Como `/F`, también cuando se ha arrancado de una memoria USB de la BIOS: HSPUSB la reconoce y atiende él la unidad 80h (INT 13h). |
 | `/INFO` | Enseña las controladoras (clase, fabricante:modelo, uso que les da la BIOS), los puertos con algo conectado de cada una y el árbol de aparatos. Espera 15 s. |
@@ -38,6 +38,97 @@ DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/?]
 
 Se toman **todas** las controladoras o ninguna: no tendría sentido quitarle a
 la BIOS el EHCI y dejarle sus compañeras.
+
+## Equipos sin ratón PS/2 (MacBook): HSPUSB toma el USB él solo
+
+`[USB-AUTO]` En un MacBook con Intel arrancado en modo BIOS (CSM) no hay
+controlador de teclado 8042 (el puerto 64h lee FFh) y la BIOS solo emula el
+teclado USB (por SMI, al búfer de la BIOS): ni el panel táctil ni un ratón
+USB llegan a ningún sitio. Sin `/F`, HSPUSB no tocaba el USB (la BIOS lo
+estaba usando) y no había ratón.
+
+Ahora, sin `/F` ni `/U`, si la BIOS usa el USB se mira si hay ratón PS/2
+(`auto_take`, `ps2_probe`):
+
+| Equipo | Qué hace HSPUSB sin opciones |
+|---|---|
+| Sin 8042 (Mac, PC «sin legado») | Toma el USB (como `/F`) y, si se ha arrancado de una memoria USB, también ella (como `/U`). El teclado va como con la BIOS: al búfer de la BIOS. |
+| Con 8042, sin nada en el puerto auxiliar (INT 11h sin ratón y INT 15h C201h falla) | Toma el USB como `/F`, salvo si se ha arrancado de una memoria USB (ahí el teclado ya va por la BIOS y perder el disco sería peor: `/U`). |
+| Con ratón PS/2 (o la BIOS emula uno con el ratón USB) | Nada, como siempre. |
+
+Criterio: donde la BIOS emula bien (hay 8042, real o emulado, y ratón PS/2
+o su emulación) no cambia nada. Solo se toma donde nadie más puede dar un
+ratón. Se dice en una línea al arrancar, y otra dice por qué controladora
+van el teclado y el ratón («USB: teclado por EHCI 8086:1E26, ratón por xHCI
+8086:1E31.»). Si sin 8042 no aparece el teclado USB, un AVISO dice que se
+reinicie con F5.
+
+## Intel series 7, 8 y 9: los puertos del EHCI, al xHCI
+
+`[USB-INTEL]` En los PCH de Intel con xHCI y EHCI (Panther Point 1E31, Lynx
+Point 8C31/9C31, Wildcat Point 8CB1/9CB1, Wellsburg 8D31, Bay Trail 0F35)
+los puertos salen de fábrica por los EHCI. Con todas las controladoras ya
+tomadas y antes de enumerar (`intel_routes`), los que también llegan al xHCI
+se le pasan, como hacen los sistemas actuales (hojas de datos de Intel:
+registros del espacio PCI del xHCI):
+
+| Registro | Qué es |
+|---|---|
+| `D8h` USB3_PSSEN (máscara `DCh` USB3PRM) | terminaciones de USB 3 de cada puerto (se escribe primero) |
+| `D0h` XUSB2PR (máscara `D4h` USB2PRM) | puerto de USB 2 por el xHCI (1) o por el EHCI (0) |
+
+Después se espera (hasta 0,7 s) a que lo que había en esos puertos aparezca
+en el xHCI. Con `/INFO` sale «Intel: puertos pasados del EHCI al xHCI: USB 2
+XUSB2PR=… (de …), USB 3 USB3_PSSEN=… (de …)». Si HSPUSB no se queda, los
+registros vuelven a como estaban (`intel_unroute`). `EQUIPO` enseña los
+valores y las máscaras.
+
+**Ojo**: en esos PCH el xHCI solo llega a **4** puertos de USB 2 (máscara
+0Fh). Lo demás solo puede ir por un EHCI, detrás de su concentrador interno
+(«rate matching hub», 8087:0024), y los aparatos de USB 1.x de ahí necesitan
+**transacciones partidas**. En el MacBook Air de 2012 (MacBookAir5,2) las
+tablas ACPI lo dicen: los puertos de fuera (A y B) se pueden pasar
+(`MUXS`), pero el teclado y el panel, la cámara y el Bluetooth (puertos
+internos, `_UPC` tipo FFh) cuelgan del puerto 8 del concentrador interno del
+EHCI 00:1D.0 y del puerto 1 del de 00:1A.0, sin camino al xHCI. Así que en
+el Mac el ratón de fuera y la memoria de arranque van por el xHCI y el
+teclado y el panel por el EHCI, con transacciones partidas.
+
+Para que en el EHCI no se repitan direcciones USB (los aparatos que no se
+usan, como la cámara, se quedan con la suya), las controladoras clásicas dan
+las direcciones una tras otra (`c_new_addr`), no la de la entrada de la
+reserva.
+
+## Paneles y ratones que no dan informes de arranque
+
+`[USB-RATON]` Un ratón de arranque (03/01/02) da, tras SET_PROTOCOL
+(arranque), botones, X e Y en los bytes 0-2. Tras pedírselo, HSPUSB lo
+comprueba con GET_PROTOCOL; si no lo confirma, o la interfaz dice ser de
+ratón (protocolo 2) sin la subclase de arranque, se lee su descriptor de
+informe y se usa lo que diga (`lib/hidraton.inc`: X e Y relativas y botones
+1-3 en el mismo informe, con su identificador de informe; la lectura de cada
+informe, en `lib/hidratx.inc`, residente). Sin esto, el identificador de
+informe que llevan delante algunos paneles saldría como el botón izquierdo
+siempre pulsado. Lo absoluto (tabletas) no vale. `RATONTST` lo prueba con
+varios descriptores.
+
+El panel de los MacBook: por USB, el teclado y el panel son un aparato
+(05AC:02xx) con una interfaz de teclado de arranque (03/01/01) y otra de
+ratón (protocolo 2). Recién encendido el panel está en su modo HID de ratón
+(movimiento relativo y el botón del clic físico; el modo multitáctil hay que
+pedírselo con una orden propia de Apple, que no se usa). HSPUSB lleva las
+dos interfaces del mismo aparato («teclado y ratón»). Tocar para hacer clic
+y el desplazamiento con dos dedos no van (son del modo multitáctil).
+
+## Receptores de Bluetooth («HID proxy»)
+
+`[USB-BT]` El Bluetooth de los Mac (y otros de Broadcom) se presenta, recién
+encendido, como un teclado y un ratón USB de arranque (05AC:820A/820B,
+0A5C:4502/4503) para los teclados y ratones Bluetooth emparejados, y en el
+Mac cuelga del mismo concentrador interno que el teclado y el panel. Como
+HSPUSB lleva un teclado y un ratón, se dejan para el final: solo se usan si
+no ha aparecido otro (`proxy_retry` vuelve a reiniciar su puerto y los
+enumera). Con `/INFO`: «Bluetooth (HID proxy): para después».
 
 ## Diseño: una capa común y cuatro controladoras
 
@@ -119,6 +210,28 @@ dirección y el puerto del concentrador; en las tuberías de interrupción,
 inicio en la microtrama 0 y fin en las 2 a 4), pero **no se ha podido
 probar**: QEMU solo tiene un concentrador de USB 1.1.
 
+Revisado con la especificación EHCI 1.0 (3.6 y 4.12; noviembre de 2026),
+punto por punto:
+
+| Qué | Norma | HSPUSB |
+|---|---|---|
+| EPS (velocidad) | 0 plena, 1 baja, 2 alta | igual (`e_qh_set`) |
+| C (endpoint de control) | 1 en el control de plena o baja | igual |
+| DTC | 1 en control (el testigo, del qTD) | 1 en control y bulk, 0 en interrupción |
+| RL (NAK) | 0 en las colas periódicas | 0 en todas (Linux también lo pone a 0 con traductor) |
+| Mult | 1 a 3 (1 con traductor) | 1 |
+| Hub Addr, Port Number | dirección del concentrador de alta velocidad y su puerto | igual; lo que cuelga de un concentrador de USB 1.x detrás lo hereda (`hub_port`) |
+| S-mask en la lista asíncrona | 0 | 0 |
+| S-mask / C-mask periódicas | inicio en X, fin en X+2..X+4 | 01h / 1Ch |
+| estado de split y C-prog-mask | a 0 al empezar | el qTD se escribe con el estado a 0 y la cola, al reanudarla tras un error, conserva solo el testigo |
+
+No se hace Clear_TT_Buffer tras abortar una transferencia por tiempo (solo
+hace falta si se corta una transferencia de control o bulk a medias; en la
+enumeración los fallos son STALL, que no dejan nada en el traductor).
+Es el camino del teclado y del panel de un MacBook (y del Intel de la serie
+6, que no tiene xHCI).
+
+
 ### xHCI
 
 Como hasta ahora (anillos, contextos, Configure Endpoint, concentradores con
@@ -132,8 +245,8 @@ memoria USB conectada después: unos 16 KB) y, detrás, **la zona de trabajo**,
 alineada a una página, con todo lo que ven las controladoras. La
 **inicialización** (sección `.init`: buscar y tomar las controladoras,
 ponerlas en marcha, el teclado, el ratón y los mandos, el análisis del
-descriptor de informe HID, `/INFO` y los mensajes; unos 11,5 KB) va en el
-fichero detrás de `.text`, pero se ejecuta en `CS:INIT_ORG` (C000h), por
+descriptor de informe HID, `/INFO` y los mensajes; unos 14 KB) va en el
+fichero detrás de `.text`, pero se ejecuta en `CS:INIT_ORG` (B000h), por
 encima de donde irá la zona, y **se descarta**: la zona se monta justo
 encima de lo residente, donde estaba `.init` en el fichero.
 
@@ -151,8 +264,8 @@ Cuando hace falta memoria «de reserva» para lo que se conecte después (una
 lista de tramas para una UHCI aparcada, o dos aparatos más en el xHCI), se
 reserva al final de la inicialización, detrás de lo demás.
 
-Mientras se inicializa hace falta memoria hasta `CS:init_end` (unos 59 KB
-desde el principio del driver). Con `DEVICEHIGH` en un bloque de memoria
+Mientras se inicializa hace falta memoria hasta `CS:init_end` (unos 58 KB
+desde el principio del driver; `.init` se ejecuta en `CS:B000h`). Con `DEVICEHIGH` en un bloque de memoria
 superior más pequeño, HSPUSB dice «no me quedo, me falta memoria» sin tocar
 nada (estado de INIT con el bit 9 puesto) y el núcleo lo carga abajo.
 
@@ -196,7 +309,7 @@ Dos reglas para quien toque el código:
 ## Límites
 
 - Un solo xHCI (el primero), 8 controladoras en total, 8 aparatos a la vez
-  (concentradores incluidos), 4 concentradores, una memoria USB, un teclado,
+  (concentradores incluidos), 6 concentradores, una memoria USB, un teclado,
   un ratón y dos mandos.
 - Teclado, ratón y mandos tienen que estar conectados al cargar el driver;
   la memoria USB se puede cambiar después (si no había ninguna al cargar, no
@@ -217,6 +330,20 @@ Dos reglas para quien toque el código:
 - Las cuatro controladoras se sondean; no se usan sus interrupciones.
 
 ## Cómo probar
+
+`tests/run_usbauto_tests.sh build/hispados.img [modo]`: RATONTST (el
+descriptor de informe de los ratones), PC sin 8042 con xHCI y con EHCI
+(HSPUSB sin opciones toma el USB; teclado al búfer de la BIOS, ratón con
+HSPRATON y MOUSETST), el ratón leído según su descriptor (`-DHR_FORZAR`),
+arranque de la imagen USB sin 8042 (toma también la memoria de arranque),
+con 8042 y ratón PS/2 (no se toca nada), con 8042 sin ratón (`-DSIN_PS2=1`),
+el traspaso de puertos de Intel (`-DINTEL_FAKE`: QEMU no tiene esos
+registros; se simula un xHCI 8086:1E31 con máscaras 0Fh) y los receptores de
+Bluetooth (`-DPROXY_TEST`: los aparatos de QEMU hacen de receptor). Lo que
+**solo se puede probar en el equipo de verdad**: los registros de Intel en
+sí (qué hace el PCH al pasar un puerto), la BIOS de Apple soltando el EHCI,
+las transacciones partidas a través del concentrador interno, y el panel de
+Apple en su modo HID.
 
 En QEMU (tiene las cuatro):
 

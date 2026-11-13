@@ -98,9 +98,12 @@ Mandos de juego
 USB propio (HSPUSB): raton o panel tactil USB, por ejemplo en un MacBook
   De serie HSPUSB no le quita el USB a la BIOS (arrancando desde la memoria
   USB la BIOS lo esta usando), asi que el teclado sigue como siempre y el
-  raton USB solo va si la BIOS lo ofrece.
-  Para que lo lleve HSPUSB: EDITAR C:\CONFIG.SYS y, en la parte [normal],
-  poner REM delante de
+  raton USB solo va si la BIOS lo ofrece. Salvo en los equipos sin raton
+  PS/2 (un MacBook, por ejemplo): ahi la BIOS no da raton y HSPUSB lleva el
+  USB el solo (teclado, raton, panel tactil y la memoria de arranque), sin
+  tocar nada.
+  Para que lo lleve HSPUSB en cualquier equipo: EDITAR C:\CONFIG.SYS y,
+  en la parte [normal], poner REM delante de
       DEVICE=C:\HISPADOS\HSPUSB.SYS
   y quitar el REM de
       DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO

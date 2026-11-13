@@ -75,7 +75,7 @@ $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPSND.COM: drivers/hspsnd.asm lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc lib/hspmez.inc lib/hspmezi.inc | $(B)
+$(B)/HSPSND.COM: drivers/hspsnd.asm lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc lib/hspmez.inc lib/hspmezi.inc lib/cirrus.inc lib/macsim.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPDPMI.COM: drivers/hspdpmi.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -88,7 +88,7 @@ $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # AUDICION: prueba de sonido con preguntas de sí o no (docs/AUDICION.md)
-$(B)/AUDICION.COM: utils/audicion.asm | $(B)
+$(B)/AUDICION.COM: utils/audicion.asm lib/cirrus.inc lib/macsim.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/INSTALAR.COM: utils/instalar.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -147,7 +147,7 @@ $(B)/REVISAR.COM: utils/revisar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc lib/usb_hc.inc lib/usb_uhci.inc lib/usb_ohci.inc lib/usb_ehci.inc lib/usb_hcini.inc | $(B)
+$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc lib/hidraton.inc lib/hidratx.inc lib/usb_hc.inc lib/usb_uhci.inc lib/usb_ohci.inc lib/usb_ehci.inc lib/usb_hcini.inc | $(B)
 	for f in lib/usb_*.inc; do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
 	$(ASM) -l $(B)/gen/HSPUSB.lst -o $@ $(B)/gen/$<
 	@# lo residente no puede usar nada de la inicialización, que se descarta
@@ -169,7 +169,9 @@ $(B)/MANDO.COM: utils/mando.asm lib/util.inc lib/hidjoyx.inc | $(B)
 # de descriptores HID con mandos reales, lo que ve un juego (INT 15h 84h y la
 # interfaz de HSPJOY) y HSPJOY con los puertos simulados (el 201h y las
 # entradas del puerto de impresora no se pueden mover en QEMU)
-JOYPROGS = $(B)/HIDTEST.COM $(B)/JOYTEST.COM $(B)/HSPJOYT.COM
+JOYPROGS = $(B)/HIDTEST.COM $(B)/JOYTEST.COM $(B)/HSPJOYT.COM $(B)/RATONTST.COM
+$(B)/RATONTST.COM: tests/progs/ratontst.asm lib/hidraton.inc lib/hidratx.inc lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HIDTEST.COM: tests/progs/hidtest.asm tests/progs/hidmandos.inc lib/hidjoyx.inc lib/hidjoyp.inc lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/JOYTEST.COM: tests/progs/joytest.asm lib/util.inc lib/hidjoyx.inc | $(B)
@@ -468,6 +470,15 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_usbhc_tests.sh $(IMG) xhci
 	tests/run_usbhc_tests.sh $(IMG) mezcla
 	tests/run_usbhc_tests.sh $(IMG) aparcar
+	tests/run_usbauto_tests.sh $(IMG) raton
+	tests/run_usbauto_tests.sh $(IMG) sin8042
+	tests/run_usbauto_tests.sh $(IMG) ehci
+	tests/run_usbauto_tests.sh $(IMG) descr
+	tests/run_usbauto_tests.sh $(IMG) arranque
+	tests/run_usbauto_tests.sh $(IMG) con8042
+	tests/run_usbauto_tests.sh $(IMG) sinaux
+	tests/run_usbauto_tests.sh $(IMG) intel
+	tests/run_usbauto_tests.sh $(IMG) proxy
 	tests/run_joy_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
 	tests/run_instalar_sonido_tests.sh $(IMG)

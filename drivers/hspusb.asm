@@ -7,8 +7,11 @@
 ;     (sin opciones) seguro: si la BIOS está usando el USB no se toca nada. Se
 ;         entiende que lo usa si el controlador es suyo (USB Legacy Support),
 ;         si lo tiene en marcha, o si el sistema ha arrancado desde un disco
-;         USB de la BIOS. Tampoco se pasan al xHCI los puertos de un EHCI que
-;         la BIOS esté usando (Intel).
+;         USB de la BIOS. Salvo [USB-AUTO] en los equipos sin ratón PS/2
+;         (sin 8042, como los MacBook; o con 8042 sin nada en el puerto
+;         auxiliar y sin arranque por USB): ahí solo HSPUSB puede dar un
+;         ratón y lo toma como con /F (sin 8042, como con /U si se ha
+;         arrancado de una memoria USB). Ver auto_take.
 ;     /F  tomar el controlador aunque lo esté usando la BIOS (la BIOS dejará
 ;         de atender sus dispositivos USB: el teclado y el ratón pasan a
 ;         HSPUSB). No vale si el sistema ha arrancado desde un disco USB.
@@ -82,16 +85,28 @@
 ;  Los de USB 3 se tratan según la norma (descriptor 2Ah, SET_HUB_DEPTH),
 ;  sin haberse podido probar: QEMU solo ofrece un concentrador de USB 1.1.
 ;
+;  [USB-INTEL] En los Intel de las series 7, 8 y 9 los puertos que pueden ir
+;  por el xHCI se le pasan (XUSB2PR, USB3_PSSEN; intel_routes); lo que solo
+;  llega a un EHCI (el teclado y el panel de un MacBook) va por él, detrás
+;  de su concentrador interno, con transacciones partidas.
+;  [USB-RATON] Un ratón que no confirma el protocolo de arranque
+;  (GET_PROTOCOL), o que dice ser de ratón sin la subclase de arranque, se
+;  lee según su descriptor de informe (lib/hidraton.inc): X e Y relativas y
+;  los botones 1-3, con su identificador de informe.
+;  [USB-BT] Los receptores de Bluetooth en modo «HID proxy» (los de Apple y
+;  Broadcom) se dejan para el final: solo se usan si no hay otro teclado o
+;  ratón (proxy_retry).
 ;  Lo que NO hace: usar el descriptor de informe HID para un panel táctil sin
-;  interfaz de ratón de arranque (el análisis ya está, para los mandos; falta
-;  aplicarlo a los punteros). Los modos multitáctiles propios de cada
+;  ninguna interfaz de ratón (protocolo 2): un HID genérico con X e Y que no
+;  sea un mando no se usa como ratón. Los modos multitáctiles propios de cada
 ;  fabricante no están publicados y no se usan. Los mandos tienen que estar
 ;  conectados al cargar el driver (no se buscan después), no se encienden los
 ;  LED ni la vibración, y no se admiten los que necesitan un saludo propio
 ;  antes de dar informes (Xbox One/Series por cable, Switch Pro por USB, el
 ;  receptor inalámbrico de Xbox 360). Los aparatos de USB 1.x detrás de un
 ;  concentrador de USB 2.0 en un EHCI (transacciones partidas) están hechos
-;  según la norma pero sin probar (QEMU no tiene concentrador de USB 2.0).
+;  según la norma (revisados con EHCI 1.0, 4.12) pero sin probar (QEMU no
+;  tiene concentrador de USB 2.0).
 ; =============================================================================
         cpu 386                     ; (sin BSWAP)
         bits 16
@@ -136,9 +151,9 @@ X_END       equ 0x2D00                ; fin de lo del xHCI
 JOY_N       equ 2                     ; mandos de juego a la vez
 PIPE_N      equ 2 + JOY_N             ; tuberías de interrupción: teclado, ratón y mandos
 POOL_N      equ 8                     ; dispositivos a la vez (concentradores incluidos)
-INIT_ORG    equ 0xC000                ; dónde se ejecuta la inicialización (.init)
+INIT_ORG    equ 0xB000                ; dónde se ejecuta la inicialización (.init)
 MAX_SLOTS   equ POOL_N
-HUB_N       equ 4                     ; concentradores a la vez
+HUB_N       equ 6                     ; concentradores a la vez
 HUB_DEPTH   equ 3                     ; niveles de concentradores encadenados
 REP_DELAY   equ 9                   ; repetición: 0,5 s y unas 9 por segundo
 REP_RATE    equ 2
@@ -2794,10 +2809,18 @@ mouse_report:
         mov bx, MOU_BUF
         call zone
         mov si, bx
+        cmp byte [cs:hr_on], 0
+        je .boot
+        ; [USB-RATON] informes «de informe»: según su descriptor
+        call hr_extract
+        jc .r                       ; otro informe del mismo aparato
+        jmp .have
+.boot:
         movzx bx, byte [cs:si]      ; botones
         and bl, 7
         movsx cx, byte [cs:si+1]    ; x
         movsx dx, byte [cs:si+2]    ; y (positivo hacia abajo)
+.have:
         ; ¿está HSPRATON?
         xor ax, ax
         mov es, ax
@@ -2818,6 +2841,10 @@ mouse_report:
         jmp .r
 .ps2:
         ; paquete PS/2: botones | 08h | signos, x, y (positivo hacia arriba)
+        call clamp127
+        xchg cx, dx
+        call clamp127
+        xchg cx, dx
         neg dx
         mov al, bl
         or al, 8
@@ -2838,6 +2865,19 @@ mouse_report:
         pop es
         popad
         ret
+
+; CX -> CX entre -127 y 127 (lo que cabe en un paquete PS/2)
+clamp127:
+        cmp cx, 127
+        jle .a
+        mov cx, 127
+.a:
+        cmp cx, -127
+        jge .b
+        mov cx, -127
+.b:
+        ret
+%include "hidratx.inc"
 
 ; ---- INT 08h: recoger informes y repetir la tecla mantenida ----
 int08:
@@ -3014,14 +3054,17 @@ init:
         ; sistema ha arrancado de una memoria USB de la BIOS, solo con /U.
         cmp byte [opt_boot], 0
         jne .take
-        mov word [fail_msg], msg_bootusb
         cmp byte [boot_usb], 0
-        jne .fail
+        jne .busy
         cmp byte [opt_force], 0
         jne .take
-        mov word [fail_msg], msg_bios
         cmp byte [any_busy], 0
-        jne .fail
+        je .take
+.busy:
+        ; [USB-AUTO] la BIOS usa el USB: sin /F ni /U se le deja, salvo que
+        ; el equipo no tenga ratón PS/2 (entonces solo HSPUSB puede darlo)
+        call auto_take
+        jc .fail
 .take:
         call mem_setup
         mov word [fail_msg], msg_nomem
@@ -3033,6 +3076,8 @@ init:
         mov word [fail_msg], msg_notake
         call hc_setup_all
         jc .fail
+        ; Intel 7/8/9: los puertos del EHCI, al xHCI (con todo ya tomado)
+        call intel_routes
         call usb_enum
         jc .fail
         ; los cambios de conexión de ahora ya están vistos
@@ -3100,6 +3145,17 @@ init:
         mov si, msg_mbas
         call puts
 .hid:
+        ; [USB-AUTO] sin 8042, el teclado solo puede ser USB: si no ha
+        ; aparecido, que se sepa qué hacer
+        cmp byte [auto_on], 0
+        je .hk
+        cmp byte [ps2_st], 0
+        jne .hk
+        cmp byte [k_on], 0
+        jne .hk
+        mov si, msg_autonok
+        call puts
+.hk:
         mov al, [k_on]
         or al, [m_on]
         or al, [j_on]
@@ -3130,6 +3186,7 @@ init:
         call puts
         call mou_queue
 .h2:
+        call hid_where
         ; mandos de juego
         xor bx, bx
 .hj:
@@ -3215,6 +3272,180 @@ init:
         pop ds
         popad
         retf
+
+; [USB-AUTO] La BIOS usa el USB y no se ha dicho /F ni /U. ¿Se toma igual?
+; Solo si el equipo no tiene ratón PS/2, porque entonces nadie más que
+; HSPUSB puede dar un ratón (ni la BIOS, que en estos equipos solo emula el
+; teclado):
+;  - sin controlador de teclado 8042 (el puerto 64h lee FFh: los Mac con
+;    Intel arrancados en modo BIOS, los PC «sin legado»). Ahí la BIOS
+;    tampoco da el teclado a los programas que leen el 8042, y HSPUSB lo
+;    lleva igual que ella (al búfer de la BIOS). Se toma todo, también la
+;    memoria USB de arranque si se ha arrancado de una (como /U): no se
+;    puede quitar a la BIOS solo una parte del USB.
+;  - con 8042 pero sin nada en su puerto auxiliar (ni la BIOS dice que hay
+;    ratón en INT 11h, ni responde al reinicio de INT 15h C201h): se toma
+;    como con /F, pero no si se ha arrancado de una memoria USB (ahí el
+;    teclado ya va bien por la BIOS y perder el disco sería peor: /U).
+; Donde hay ratón PS/2 (o la BIOS emula uno con el ratón USB) no se toca
+; nada, como siempre. -> CF si no se toma (fail_msg)
+auto_take:
+        call ps2_probe
+        mov [ps2_st], al
+        cmp al, 2
+        je .no
+        test al, al
+        jz .yes
+        cmp byte [boot_usb], 0
+        jne .no
+.yes:
+        mov byte [opt_force], 1
+        mov byte [auto_on], 1
+        mov al, [boot_usb]
+        or [opt_boot], al
+        mov si, msg_auto0
+        cmp byte [ps2_st], 0
+        je .m
+        mov si, msg_auto1
+.m:
+        call puts
+        cmp byte [boot_usb], 0
+        je .ok
+        mov si, msg_autou
+        call puts
+.ok:
+        clc
+        ret
+.no:
+        mov word [fail_msg], msg_bootusb
+        cmp byte [boot_usb], 0
+        jne .f
+        mov word [fail_msg], msg_bios
+.f:
+        stc
+        ret
+
+; ¿Hay ratón PS/2? -> AL = 0 sin 8042, 1 con 8042 y sin ratón, 2 con ratón
+ps2_probe:
+%ifdef SIN_PS2
+        mov al, SIN_PS2             ; (pruebas: como si fuera así)
+        ret
+%endif
+        in al, 0x64
+        cmp al, 0xFF
+        jne .k
+        xor al, al
+        ret
+.k:
+        int 0x11
+        test al, 4                  ; la BIOS ha visto un ratón
+        jnz .si
+        mov ax, 0xC201              ; reiniciarlo: sin ratón, error
+        int 0x15
+        jc .nada
+        mov ax, 0xC200              ; y dejarlo parado (HSPRATON lo prepara)
+        xor bh, bh
+        int 0x15
+.si:
+        call unreal
+        mov al, 2
+        ret
+.nada:
+        call unreal
+        mov al, 1
+        ret
+ps2_st      db 2
+auto_on     db 0
+msg_auto0   db "La BIOS usa el USB, pero este equipo no tiene controlador de teclado", 13, 10
+            db "(8042) ni ratón PS/2: HSPUSB lleva el USB (teclado, ratón y panel).", 13, 10, 0
+msg_auto1   db "La BIOS usa el USB y no hay ratón PS/2: HSPUSB lleva el USB (ratón USB).", 13, 10, 0
+msg_autou   db "También atiende la memoria USB de arranque (como con /U).", 13, 10, 0
+
+; [USB-BT] los receptores de Bluetooth que se han dejado para después: si
+; falta el teclado o el ratón, se vuelve a reiniciar su puerto y se
+; enumeran (ahora ya valen)
+proxy_retry:
+        mov byte [px_ok], 1
+        xor si, si
+.l:
+        movzx ax, byte [px_n]
+        cmp si, ax
+        jae .r
+        mov al, [k_on]
+        and al, [m_on]
+        jnz .r
+        mov bx, si
+        shl bx, 1
+        mov cl, [px_tab+bx+1]
+        mov bl, [px_tab+bx]
+        xor bh, bh
+        push si
+        call hub_port
+        pop si
+        inc si
+        jmp .l
+.r:
+        ret
+
+; qué controladora lleva el teclado y el ratón (para saber en un equipo
+; de verdad por dónde va cada uno)
+hid_where:
+        mov al, [k_on]
+        or al, [m_on]
+        jz .r
+        mov si, msg_where
+        call puts
+        xor bx, bx
+        cmp byte [k_on], 0
+        je .m
+        mov si, msg_wk
+        call puts
+        call .hc
+        cmp byte [m_on], 0
+        je .e
+        mov dl, ','
+        call putc
+        mov dl, ' '
+        call putc
+.m:
+        cmp byte [m_on], 0
+        je .e
+        mov bx, 1
+        mov si, msg_wm
+        call puts
+        call .hc
+.e:
+        mov dl, '.'
+        call putc
+        call crlf
+.r:
+        ret
+; la controladora de la tubería BX: clase y fabricante:modelo
+.hc:
+        mov al, [ip_pool+bx]
+        call dev_hc
+        movzx si, byte [cur_type]
+        shl si, 1
+        mov si, [hc_tags+si]
+        call puts
+        call cur_bdf
+        xor di, di
+        call pci_rw
+        mov ax, cx
+        call puthex4
+        mov dl, ':'
+        call putc
+        call cur_bdf
+        mov di, 2
+        call pci_rw
+        mov ax, cx
+        call puthex4
+        ret
+msg_where   db "USB: ", 0
+msg_wk      db "teclado por ", 0
+msg_wm      db "ratón por ", 0
+msg_autonok db "AVISO: no ha aparecido el teclado USB. Si no responde, reinicie y pulse F5", 13, 10
+            db "al ver el menú de arranque (arranque sin CONFIG.SYS).", 13, 10, 0
 
 ; /INFO: dejar el informe en pantalla unos segundos (para la foto)
 info_pause:
@@ -3565,7 +3796,6 @@ xhci_take:
         mov word [fail_msg], msg_scratch
         call scratch_setup
         jc .r
-        call intel_routes
         mov bx, CMD_RING
         call zone
         call phys
@@ -3771,41 +4001,185 @@ n_scratch   dw 0
 xms         dd 0
 scr_base    dd 0
 
-; Intel (series 7 y 8, Bay Trail): los puertos USB 2 salen de fábrica por el
-; controlador EHCI; hay que pasarlos al xHCI (registros XUSB2PR y USB3_PSSEN
-; con sus máscaras), como hacen los demás sistemas.
+; [USB-INTEL] Intel series 7, 8 y 9 (Panther Point, Lynx Point, Wildcat
+; Point; también Wellsburg y Bay Trail): de fábrica los puertos USB salen por
+; los EHCI. Los que también llegan al xHCI (máscaras XUSB2PRM, D4h, y
+; USB3PRM, DCh, del espacio PCI del xHCI; hojas de datos de Intel) se pasan
+; al xHCI con XUSB2PR (D0h), y USB3_PSSEN (D8h) enciende sus terminaciones
+; de USB 3, como hacen los sistemas actuales (primero USB3_PSSEN). Así lo de
+; esos puertos va por el xHCI, sin transacciones partidas. Lo demás (en esos
+; PCH el xHCI solo llega a 4 puertos de USB 2; en un MacBook, por ejemplo,
+; el teclado y el panel, la cámara y el Bluetooth van por el concentrador
+; interno de uno de los EHCI) se queda en el EHCI.
+; Se hace con todas las controladoras ya tomadas (la BIOS ya no usa los
+; EHCI: no se le quita nada que siga usando) y antes de enumerar. Después se
+; espera a que lo que haya en esos puertos aparezca en el xHCI. Si HSPUSB
+; no se queda, se deja como estaba (hc_stop_all).
 intel_routes:
-        ; si la BIOS está usando el EHCI (su teclado o su disco USB), los
-        ; puertos se quedan donde están salvo que se pida con /F o /U
-        cmp byte [opt_force], 0
-        jne .go
-        cmp byte [ehci_busy], 0
-        jne .r
-.go:
+        cmp byte [x_have], 0        ; el xHCI es nuestro (y está en marcha)
+        je .r
+        movzx bx, byte [x_hc]
+        test byte [hc_flags+bx], HCF_OURS
+        jz .r
+        cmp byte [n_hc+HCT_EHCI], 0 ; y hay algún EHCI de donde traerlos
+        je .r
         mov bx, [bdf]
-        mov ax, 0xB109
         xor di, di
-        int 0x1A
+        call ir_rd
         cmp cx, 0x8086
         jne .r
-        mov bx, [bdf]
-        mov ax, 0xB10A
+        shr ecx, 16
+        mov si, intel_xids
+.id:
+        lodsw
+        test ax, ax
+        jz .r
+        cmp ax, cx
+        jne .id
+        mov di, 0xD4                ; XUSB2PRM: los que se pueden pasar
+        call ir_rd
+        and ecx, 0x7FFF
+        mov [ir_u2m], ecx
         mov di, 0xDC                ; USB3PRM
-        int 0x1A
-        mov bx, [bdf]
-        mov ax, 0xB10D
+        call ir_rd
+        and ecx, 0x3F
+        mov [ir_u3m], ecx
+        mov eax, [ir_u2m]
+        or eax, ecx
+        jz .r
+        mov di, 0xD0                ; cómo están (para dejarlos así si no
+        call ir_rd                  ; nos quedamos)
+        mov [ir_u2o], ecx
+        mov di, 0xD8
+        call ir_rd
+        mov [ir_u3o], ecx
+        mov ecx, [ir_u3m]
         mov di, 0xD8                ; USB3_PSSEN
-        int 0x1A
-        mov bx, [bdf]
-        mov ax, 0xB10A
-        mov di, 0xD4                ; USB2PRM
-        int 0x1A
-        mov bx, [bdf]
-        mov ax, 0xB10D
+        call ir_wr
+        mov ecx, [ir_u2m]
         mov di, 0xD0                ; XUSB2PR
-        int 0x1A
+        call ir_wr
+        mov byte [ir_done], 1
+        mov di, 0xD0
+        call ir_rd
+        mov [ir_u2n], ecx
+        mov di, 0xD8
+        call ir_rd
+        mov [ir_u3n], ecx
+        cmp byte [opt_info], 0
+        je .w
+        mov si, msg_ir1
+        call puts
+        mov eax, [ir_u2n]
+        call puthex8
+        mov si, msg_ir2
+        call puts
+        mov eax, [ir_u2m]
+        call puthex8
+        mov si, msg_ir3
+        call puts
+        mov eax, [ir_u3n]
+        call puthex8
+        mov si, msg_ir2
+        call puts
+        mov eax, [ir_u3m]
+        call puthex8
+        mov si, msg_ir4
+        call puts
+.w:
+        ; ¿ha cambiado algo? Lo que estuviera conectado en esos puertos se
+        ; desconecta del EHCI y aparece en el xHCI: hasta unos 0,7 s para
+        ; que aparezca algo y, cuando aparece, unos 0,15 s para lo demás
+        mov eax, [ir_u2n]
+        not dword [ir_u2o]
+        and eax, [ir_u2o]
+        mov edx, [ir_u3n]
+        not dword [ir_u3o]
+        and edx, [ir_u3o]
+        not dword [ir_u2o]
+        not dword [ir_u3o]
+        or eax, edx
+        jz .r
+        mov al, [x_hc]
+        call hc_sel
+        mov cx, 13
+        call tmo_start
+.wl:
+        xor cl, cl
+.wp:
+        inc cl
+        cmp cl, [maxports]
+        ja .wn
+        call rp_get
+        test al, 1
+        jz .wp
+        mov cx, 3
+        call tick_wait
+        jmp .r
+.wn:
+        call tmo_check
+        jnc .wl
 .r:
         ret
+; dejar los puertos como estaban (HSPUSB no se queda)
+intel_unroute:
+        cmp byte [ir_done], 0
+        je .r
+        mov bx, [bdf]
+        mov ecx, [ir_u2o]
+        mov di, 0xD0
+        call ir_wr
+        mov ecx, [ir_u3o]
+        mov di, 0xD8
+        call ir_wr
+        mov byte [ir_done], 0
+.r:
+        ret
+; registro DI del espacio PCI del xHCI (BX) -> ECX; escribirlo
+ir_rd:
+%ifdef INTEL_FAKE
+        ; (pruebas en QEMU, que no tiene estos registros: como un xHCI
+        ; 8086:1E31 con 4 puertos de USB 2 y 4 de USB 3 que se pueden pasar)
+        push di
+        call ir_fi
+        mov ecx, [ir_fake+di]
+        pop di
+        ret
+%endif
+        call pci_rd
+        ret
+ir_wr:
+%ifdef INTEL_FAKE
+        push di
+        call ir_fi
+        mov [ir_fake+di], ecx
+        pop di
+        ret
+%endif
+        call pci_wd
+        ret
+%ifdef INTEL_FAKE
+; registro DI (00h, D0h, D4h, D8h, DCh) -> DI = su sitio en ir_fake
+ir_fi:
+        test di, di
+        jz .r
+        sub di, 0xD0 - 4
+.r:
+        ret
+ir_fake     dd 0x1E318086, 0, 0x0F, 0, 0x0F
+%endif
+intel_xids  dw 0x1E31, 0x8C31, 0x9C31, 0x8CB1, 0x9CB1, 0x8D31, 0x0F35, 0
+ir_done     db 0
+ir_u2m      dd 0
+ir_u3m      dd 0
+ir_u2o      dd 0
+ir_u3o      dd 0
+ir_u2n      dd 0
+ir_u3n      dd 0
+msg_ir1     db "Intel: puertos pasados del EHCI al xHCI: USB 2 XUSB2PR=", 0
+msg_ir2     db " (de ", 0
+msg_ir3     db "),", 13, 10, "  USB 3 USB3_PSSEN=", 0
+msg_ir4     db ")", 13, 10, 0
 
 ; registro USBLEGSUP del controlador -> ESI; CF si no lo tiene
 legacy_find:
@@ -3837,10 +4211,10 @@ legacy_handoff:
         call legacy_find
         jc .ok
         call mrd
-        test eax, 0x10000           ; propiedad de la BIOS
-        jz .ok
-        or eax, 0x1000000           ; propiedad del sistema
-        call mwr
+        or eax, 0x1000000           ; propiedad del sistema (siempre: hay
+        call mwr                    ; BIOS que usan sus SMI sin decirlo)
+        test eax, 0x10000           ; propiedad de la BIOS: que la suelte
+        jz .done
         mov cx, 20
         call tmo_start
 .w:
@@ -4079,6 +4453,28 @@ enum_one:
 .hid:
         cmp byte [only_disk], 0
         jne .dis
+        ; [USB-BT] un receptor de Bluetooth que se hace pasar por teclado o
+        ; ratón (HID proxy: el de los Mac va por el mismo concentrador
+        ; interno que el teclado y el panel): se deja para el final, por si
+        ; aparece el de verdad (proxy_retry)
+        call is_proxy
+        jnc .np0
+        cmp byte [px_ok], 0
+        jne .np0
+        cmp byte [par_hub], 0xFF
+        je .np0
+        movzx bx, byte [px_n]
+        cmp bx, PX_N
+        jae .np0
+        inc byte [px_n]
+        shl bx, 1
+        mov al, [par_hub]
+        mov [px_tab+bx], al
+        mov al, [par_port]
+        mov [px_tab+bx+1], al
+        mov byte [d_role], 8
+        jmp .dis
+.np0:
         mov byte [want_k], 0
         mov byte [want_m], 0
         cmp byte [p_kbd], 0
@@ -4136,6 +4532,38 @@ enum_one:
         call dev_free
 .err:
         ret
+
+; ¿es [d_vid]:[d_pid] un receptor de Bluetooth en modo HID proxy? CF si sí
+is_proxy:
+        push si
+        mov si, px_ids
+.l:
+        mov ax, [si]
+        test ax, ax
+        jz .no
+        add si, 4
+        cmp ax, [d_vid]
+        jne .l
+        mov ax, [si-2]
+        cmp ax, [d_pid]
+        jne .l
+        pop si
+        stc
+        ret
+.no:
+        pop si
+        clc
+        ret
+PX_N        equ 2
+px_ids      dw 0x05AC, 0x820A, 0x05AC, 0x820B   ; Apple: teclado y ratón por Bluetooth
+            dw 0x0A5C, 0x4502, 0x0A5C, 0x4503   ; Broadcom (BCM2045/2046)
+%ifdef PROXY_TEST
+            dw 0x0627, 0x0001                   ; (pruebas: los de QEMU)
+%endif
+            dw 0
+px_ok       db 0
+px_n        db 0
+px_tab      times PX_N * 2 db 0                 ; concentrador y puerto
 
 ; una entrada libre de la reserva para un aparato de la controladora actual
 ; -> BX; CF si no hay. Los del xHCI necesitan memoria para su contexto de
@@ -4519,7 +4947,7 @@ IF_MAX      equ 8
 if_tab      times IF_MAX * 3 db 0
 section .init
 spd_tab     db "??", "FS", "LS", "HS", "SS"
-role_tab    dw msg_r0, msg_r1, msg_r2, msg_r3, msg_r4, msg_r5, msg_r6, msg_r7
+role_tab    dw msg_r0, msg_r1, msg_r2, msg_r3, msg_r4, msg_r5, msg_r6, msg_r7, msg_r8
 msg_arrow   db " -> ", 0
 msg_r0      db "sin uso", 0
 msg_r1      db "disco", 0
@@ -4529,6 +4957,7 @@ msg_r4      db "teclado y ratón", 0
 msg_r5      db "concentrador de ", 0
 msg_r6      db "ERROR", 0
 msg_r7      db "mando de juego", 0
+msg_r8      db "Bluetooth (HID proxy): para después", 0
 msg_nports  db " puertos", 0
 msg_iports  db "puertos con algo conectado:", 0
 msg_iports2 db " (de ", 0
@@ -4713,6 +5142,7 @@ role_hid:
         je .m2
         movzx eax, byte [pm_if]
         call set_boot
+        call m_layout
 .m2:
         cmp byte [cur_type], HCT_XHCI
         jne .cfgd
@@ -4809,6 +5239,69 @@ role_hid:
         clc
 .err:
         ret
+; [USB-RATON] el ratón (interfaz pm_if): ¿da los informes de arranque que
+; se le acaban de pedir? GET_PROTOCOL = 0, sí. Si no lo dice, o no es de
+; arranque, se leen sus informes según su descriptor de informe (hr_parse),
+; si en él están X e Y relativas; si no, como los de arranque.
+m_layout:
+        mov byte [hr_on], 0
+%ifndef HR_FORZAR
+        cmp byte [pm_boot], 0
+        je .desc
+        mov dword [ctl_setup], 0x000003A1
+        movzx eax, byte [pm_if]
+        or eax, 0x00010000
+        mov [ctl_setup+4], eax
+        mov bx, DESC
+        call zone
+        mov byte [cs:bx], 0xFF
+        call control
+        jc .desc
+        mov bx, DESC
+        call zone
+        cmp byte [cs:bx], 0
+        je .r                       ; de arranque: bytes 0, 1 y 2
+.desc:
+%endif
+        mov cx, [pm_rlen]
+        jcxz .r
+        cmp cx, 1024
+        jbe .l1
+        mov cx, 1024
+.l1:
+        push cx
+        mov bx, [data_rel]
+        push cx
+        mov cx, 1024
+        call zero_zone
+        pop cx
+        mov dword [ctl_setup], 0x22000681
+        movzx ax, byte [pm_if]
+        mov [ctl_setup+4], ax
+        mov [ctl_setup+6], cx
+        mov ax, [data_rel]
+        mov [ctl_buf], ax
+        call control
+        mov word [ctl_buf], DESC
+        pop cx
+        jc .r
+        mov bx, [data_rel]
+        call zone
+        mov si, bx
+        call hr_parse
+        jc .r
+        mov byte [hr_on], 1
+        cmp byte [opt_info], 0
+        je .r
+        mov si, msg_hron
+        call puts
+        movzx eax, byte [hr_rid]
+        call putdec
+        call crlf
+.r:
+        ret
+msg_hron    db "Ratón: informes según su descriptor (no de arranque); identificador ", 0
+
 cap_len:
         cmp cx, 64
         jbe .r
@@ -4990,8 +5483,11 @@ parse_config:
 .hid:
         cmp byte [cs:si+5], 3
         jne .xb
+        mov byte [if_rlen], 0
+        mov byte [if_rlen+1], 0
+        mov byte [if_boot], 1
         cmp byte [cs:si+6], 1       ; subclase de arranque
-        jne .hj
+        jne .hr
         mov al, [cs:si+7]
         cmp al, 1
         jb .hj
@@ -4999,6 +5495,16 @@ parse_config:
         ja .hj
         inc al
         mov [ifk], al               ; 2 teclado, 3 ratón
+        jmp .n
+.hr:
+        ; [USB-RATON] protocolo de ratón sin la subclase de arranque (hay
+        ; paneles así): ratón, con los informes según su descriptor
+        cmp byte [cs:si+6], 0
+        jne .hj
+        cmp byte [cs:si+7], 2
+        jne .hj
+        mov byte [if_boot], 0
+        mov byte [ifk], 3
         jmp .n
 .hj:
         ; un HID que no es teclado ni ratón de arranque: puede ser un mando
@@ -5023,13 +5529,18 @@ parse_config:
 .ep:
         cmp ah, 0x21                ; descriptor HID: longitud del de informe
         jne .ep5
-        cmp byte [ifk], 4
-        jne .n
         cmp al, 9
         jb .n
         cmp byte [cs:si+6], 0x22
         jne .n
         mov ax, [cs:si+7]
+        cmp byte [ifk], 3
+        jne .ep4
+        mov [if_rlen], ax           ; (el de un ratón: por si hace falta)
+        jmp .n
+.ep4:
+        cmp byte [ifk], 4
+        jne .n
         mov [pj_rlen], ax
         jmp .n
 .ep5:
@@ -5087,6 +5598,10 @@ parse_config:
         mov [pm_ival], al
         mov ah, [ifn]
         mov [pm_if], ah
+        mov ax, [if_rlen]
+        mov [pm_rlen], ax
+        mov al, [if_boot]
+        mov [pm_boot], al
         mov byte [p_mou], 1
         jmp .n
 .ej:
@@ -5136,6 +5651,10 @@ pm_ival     db 0
 pm_if       db 0
             db 0
 pm_mps      dw 0
+pm_rlen     dw 0                    ; ratón: longitud de su descriptor de informe
+pm_boot     db 0                    ; ratón: interfaz de arranque (subclase 1)
+if_boot     db 0
+if_rlen     dw 0
 p_joy       db 0                    ; 1 = HID que puede ser un mando, 2 = tipo Xbox 360
 pj_dci      db 0
 pj_ival     db 0
@@ -5322,6 +5841,7 @@ role_joy:
         ret
 
 %include "hidjoyp.inc"
+%include "hidraton.inc"
 
 section .text
 ; ---- disco: capacidad, partición y BPB ----
@@ -5558,7 +6078,6 @@ fail_msg    dw 0
 data_rel    dw 0                    ; el búfer de datos del disco (4 KB), en la zona
 boot_sec    dw 0                    ; /U: sector 0 del disco de arranque de la BIOS
 opt_help    db 0
-ehci_busy   db 0
 ; Desde aquí, solo mensajes y código de inicialización: nada se usa después
 ; del arranque (init_fin puede poner encima el búfer de datos del disco).
 section .init
@@ -5591,7 +6110,8 @@ msg_bootusb db "El sistema ha arrancado desde una memoria USB que maneja la BIOS
             db "Con /U lo toma y atiende él ese disco; si algo falla habrá que reiniciar.", 13, 10, 0
 msg_bootok  db "Disco de arranque USB atendido por HSPUSB (INT 13h).", 13, 10, 0
 msg_bootlost db "AVISO: la memoria de arranque no aparece entre los dispositivos USB.", 13, 10
-            db "Si era USB, el sistema ya no puede leerla: reinicie sin /U.", 13, 10, 0
+            db "Si era USB, el sistema ya no puede leerla: reinicie y pulse F5 al ver", 13, 10
+            db "el menú de arranque (o quite /U).", 13, 10, 0
 msg_notboot db "no es la memoria de arranque.", 13, 10, 0
 msg_full    db "USB: demasiados dispositivos.", 13, 10, 0
 msg_hubmax  db "USB: demasiados concentradores encadenados.", 13, 10, 0

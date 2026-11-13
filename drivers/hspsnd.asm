@@ -186,6 +186,17 @@ lrn_snoop   db 0
 lrn_44      db 0
 lrn_soft    db 0
 lrn_smb     db 0                    ; 1 mismo equipo (SMBIOS), 2 otro modelo
+; [CIRRUS] Cirrus CS4206/4207/4208 de un Mac (lib/cirrus.inc), para /INFO
+cr_kind     db 0                    ; 0 no, 1 CS4206/7, 2 CS4208
+cr_dev      dw 0                    ; 4206h...
+cr_ssid     dw 0                    ; parte baja del subsistema (5600h...)
+cr_gspk     db 0                    ; GPIO del amplificador de los altavoces
+cr_ghp      db 0                    ; ... y del de los auriculares
+cr_gm       db 0
+cr_vpw      db 0                    ; widget de proceso puesto en marcha
+cr_how      db 0                    ; GPIO: 1 las de Apple, 2 las aprendidas,
+                                    ; 3 las de /GPIO, 4 /NOGPIO
+sim_mac     db 0                    ; /SIMMAC (pruebas): el códec del Mac
 hda_nvol    db 0
 hda_vols    times 8 * 6 db 0        ; nodo, 80h salida | índice de entrada,
                                     ; paso de 0 dB, pasos, tamaño (1/4 dB), -
@@ -1165,6 +1176,9 @@ hda_cmd:
         movzx ebx, byte [cs:hda_cad]
         shl ebx, 28
         or eax, ebx
+        cmp byte [cs:sim_mac], 0    ; [CIRRUS] pruebas: el códec 0 simulado
+        jne .sim                    ; (con /SIMMAC no se queda residente)
+.real:
         mov ebx, eax
         mov ecx, 0x100000
 .w1:
@@ -1210,6 +1224,15 @@ hda_cmd:
         pop edx
         pop ecx
         stc
+        ret
+.sim:
+        test eax, 0xF0000000
+        jnz .real
+        call mac_cmd
+        pop ebx
+        pop edx
+        pop ecx
+        clc
         ret
 
 ; BL = nodo, AX = verbo de 12 bits, CL = dato -> EAX = respuesta
@@ -1406,9 +1429,11 @@ hda_play:
 ; arrancar el flujo de salida sobre el anillo de NBUF búferes
 hda_start:
         pushad
+        ; [CIRRUS] parado de verdad (RUN leído a 0) antes del reinicio: si
+        ; se venía de hda_stop sin pausa (el anillo vacío, un cambio de
+        ; frecuencia), el reinicio podía no hacerse y el flujo no arrancaba
+        call hda_halt
         mov dx, [cs:hda_sd]
-        xor al, al
-        call hwr8
         mov al, 1                   ; reinicio del flujo
         call hwr8
         mov cx, 0xFFFF
@@ -1416,6 +1441,7 @@ hda_start:
         call hrd8
         test al, 1
         loopz .r1
+        call hda_pause              ; [CIRRUS]
         xor al, al
         call hwr8
         mov cx, 0xFFFF
@@ -1423,6 +1449,7 @@ hda_start:
         call hrd8
         test al, 1
         loopnz .r2
+        call hda_pause              ; [CIRRUS]
         ; lista de descriptores: 32 entradas de 1 KB sobre el anillo (así
         ; ninguna cruza una página: en modo V86 las páginas pueden no ir
         ; seguidas en la memoria física). Con la Sound Blaster emulada, cada
@@ -1530,9 +1557,7 @@ hda_wait:
 hda_stop:
         push ax
         push dx
-        mov dx, [cs:hda_sd]
-        xor al, al
-        call hwr8
+        call hda_halt               ; [CIRRUS] y esperar a que pare
         mov byte [cs:started], 0
         mov dword [cs:hda_written], 0
         ; vaciar el anillo para que no suene lo viejo al volver a empezar
@@ -1549,6 +1574,41 @@ hda_stop:
         pop di
         pop cx
         pop dx
+        pop ax
+        ret
+
+; [CIRRUS] parar el flujo como pide la norma (HD Audio 1.0a, 3.3.35): RUN a
+; 0 (y sin avisos), esperar a que la controladora lo lea 0 (la DMA parada de
+; verdad) y borrar su estado. Antes se escribía 0 y se seguía sin esperar.
+hda_halt:
+        push ax
+        push cx
+        push dx
+        mov dx, [cs:hda_sd]
+        call hrd8
+        and al, 0xE0                ; fuera RUN, IOCE, FEIE, DEIE y SRST
+        call hwr8
+        mov cx, 0xFFFF
+.w:
+        call hrd8
+        test al, 2
+        loopnz .w
+        add dx, 3
+        mov al, 0x1C                ; BCIS, FIFOE y DESE
+        call hwr8
+        pop dx
+        pop cx
+        pop ax
+        ret
+; unos microsegundos entre los pasos del reinicio del flujo
+hda_pause:
+        push ax
+        push cx
+        mov cx, 32
+.l:
+        in al, 0x80
+        loop .l
+        pop cx
         pop ax
         ret
 
@@ -2518,6 +2578,12 @@ init:
 .ni:
         call show_vol
 .keys:
+        ; [CIRRUS] /SIMMAC: era una prueba; no se queda residente
+        cmp byte [sim_mac], 0
+        je .nsim
+        mov ax, 0x4C00
+        int 0x21
+.nsim:
         ; teclas de volumen
         cmp byte [opt_nokeys], 0
         jne .nk
@@ -2916,6 +2982,9 @@ o_nokeys:
 o_info:
         mov byte [opt_info], 1
         ret
+o_simmac:                           ; [CIRRUS]
+        mov byte [sim_mac], 1
+        jmp mac_reset
 o_help:
         mov byte [opt_help], 1
         ret
@@ -2976,8 +3045,11 @@ o_eapd:
 
 opt_tab     dw k_noapr, o_noapr, k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb8, o_sb8, k_sb, o_sb
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
-            dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde, 0
+            dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde
+            dw k_simmac, o_simmac   ; [CIRRUS]
+            dw 0
 k_tilde     db "~", 0
+k_simmac    db "SIMMAC", 0          ; [CIRRUS] (solo para las pruebas)
 k_nosb      db "NOSB", 0
 k_noapr     db "NOAPRENDIDO", 0
 opt_noapr   db 0
@@ -3145,6 +3217,7 @@ show_info:
         mov si, msg_crlf2
         call puts
         call hda_info
+        call cr_info                ; [CIRRUS]
 .end:
         call lrn_info
         call show_vol
@@ -3287,6 +3360,7 @@ hda_info:
         mov ax, 0xF1C
         xor cl, cl
         call hda_verb
+        call cr_pincfg              ; [CIRRUS]
         mov [pincfg], eax
         ; ¿en uso?
         mov si, hda_pins
@@ -4607,6 +4681,7 @@ codec_setup:
         call delay                  ; el códec tarda en despertar
         call delay
         call afg_range
+        call cr_setup               ; [CIRRUS]
         ; GPIO: en muchos portátiles encienden el amplificador de altavoces
         call gpio_apply
         ; salidas: altavoces internos, auriculares y línea, todas a la vez
@@ -4746,8 +4821,30 @@ find_afg:
 ; GPIO del grupo de audio: salidas y con el valor pedido (todas a 1)
 gpio_apply:
         cmp byte [opt_nogpio], 0
-        jne .r
+        jne .no
         mov bl, [hda_afg]
+        ; [CIRRUS] un Cirrus de Mac sin /GPIO: solo las de los amplificadores
+        cmp byte [have_gpio], 0
+        jne .cg
+        cmp byte [cr_gm], 0
+        je .cg
+        mov byte [cr_how], 1
+        mov cl, [cr_gm]
+        mov ax, 0x716
+        call hda_verb
+        mov ax, 0x717
+        call hda_verb
+        mov ax, 0x715
+        jmp hda_verb
+.no:
+        mov byte [cr_how], 4
+        ret
+.cg:
+        mov byte [cr_how], 3
+        cmp byte [have_gpio], 0
+        jne .cg2
+        mov byte [cr_how], 5
+.cg2:
         mov cl, 0x11
         call hda_param
         jc .r
@@ -4848,6 +4945,7 @@ pin_class:
         xor cl, cl
         call hda_verb
         jc .no
+        call cr_pincfg              ; [CIRRUS]
         mov ecx, eax
         shr ecx, 20
         and cl, 0x0F                ; dispositivo
@@ -5901,6 +5999,7 @@ codec_learn:
         call hda_verb
         call delay
         call delay
+        call cr_setup               ; [CIRRUS] (el widget de proceso, siempre)
         xor al, al
         mov [hda_npin], al
         mov [hda_nvol], al
@@ -5917,7 +6016,7 @@ codec_learn:
 .lg:
         mov si, i_gpio
         call ini_get
-        jc .ge
+        jc .lcg
         call ini_hex
         jc .ge
         mov [lrn_g], al
@@ -5928,6 +6027,7 @@ codec_learn:
         jc .ge
         mov [lrn_g+2], al
         mov byte [lrn_gpio], 1
+        mov byte [cr_how], 2        ; [CIRRUS]
         mov bl, [hda_afg]
         mov ax, 0x716
         mov cl, [lrn_g]
@@ -5938,6 +6038,12 @@ codec_learn:
         mov ax, 0x715
         mov cl, [lrn_g+2]
         call hda_verb
+        jmp .ge
+.lcg:
+        ; [CIRRUS] sin GPIO en lo aprendido: en un Cirrus de Mac, las suyas
+        cmp byte [cr_gm], 0
+        je .ge
+        call gpio_apply
 .ge:
         ; los caminos, con el control del pin de la prueba
         mov si, lr_r1
@@ -6865,6 +6971,126 @@ mz_info:
         ret
 
 %include "hspmezi.inc"
+
+; =============================================================================
+;  [CIRRUS] Cirrus Logic CS4206/CS4207/CS4208 de los Mac (ver lib/cirrus.inc)
+; =============================================================================
+; ¿lo es el códec hda_cad? -> cr_*; si lo es, pone en marcha su widget de
+; proceso (también con lo aprendido: es parte de encender el códec)
+cr_setup:
+        pushad
+        xor al, al
+        mov [cr_kind], al
+        mov [cr_gm], al
+        mov [cr_vpw], al
+        mov [cr_how], al
+        xor bl, bl
+        xor cl, cl
+        call hda_param
+        jc .r
+        mov esi, eax
+        mov bl, [hda_afg]
+        mov ax, 0xF20
+        xor cl, cl
+        call hda_verb
+        jc .r
+        mov edx, eax
+        mov cl, 0x11
+        call hda_param              ; las GPIO que hay
+        jc .r
+        mov cl, al
+        mov al, 0xFF
+        cmp cl, 8
+        jae .m
+        mov al, 1
+        shl al, cl
+        dec al
+.m:
+        mov cl, al
+        mov eax, esi
+        call cr_ids
+        call cr_start
+.r:
+        popad
+        ret
+
+; /INFO: qué se ha hecho con él
+cr_info:
+        cmp byte [cr_kind], 0
+        jne .go
+        ret
+.go:
+        mov si, msg_cr1
+        call puts
+        mov ax, [cr_dev]
+        call hex4
+        mov si, msg_cr2
+        call puts
+        mov ax, [cr_ssid]
+        call hex4
+        mov si, msg_cr3
+        call puts
+        mov al, [cr_gspk]
+        call .bit
+        cmp byte [cr_ghp], 0
+        je .nh
+        mov si, msg_cr4
+        call puts
+        mov al, [cr_ghp]
+        call .bit
+.nh:
+        cmp byte [cr_vpw], 0
+        je .nv
+        mov si, msg_cr5
+        call puts
+        mov al, [cr_vpw]
+        call hex2
+        mov si, msg_cr6
+        call puts
+.nv:
+        mov si, msg_cr7
+        call puts
+        movzx bx, byte [cr_how]
+        cmp bx, 5
+        jbe .h
+        xor bx, bx
+.h:
+        shl bx, 1
+        mov si, [cr_hows+bx]
+        call puts
+        cmp byte [cr_how], 1
+        jne .r
+        mov al, [cr_gm]
+        call hex2
+        mov si, msg_cr_h1b
+        call puts
+.r:
+        ret
+.bit:
+        movzx ax, al
+        bsf ax, ax
+        jmp pdec
+cr_hows     dw msg_cr_h0, msg_cr_h1, msg_cr_h2, msg_cr_h3, msg_cr_h4, msg_cr_h5
+msg_cr1     db "Cirrus CS", 0
+msg_cr2     db " de Apple (subsistema del códec 106B:", 0
+msg_cr3     db "): amplificador de los altavoces por la GPIO ", 0
+msg_cr4     db " y el de los auriculares por la GPIO ", 0
+msg_cr5     db "; widget de proceso ", 0
+msg_cr6     db "h puesto en marcha", 0
+msg_cr7     db ".", 13, 10, 0
+msg_cr_h0   db "  GPIO: no se han tocado.", 13, 10, 0
+msg_cr_h1   db "  GPIO: las de los amplificadores, encendidos (máscara, dirección y datos ", 0
+msg_cr_h1b  db "h).", 13, 10, 0
+msg_cr_h2   db "  GPIO: las de la prueba de sonido (SONIDO.INI).", 13, 10, 0
+msg_cr_h3   db "  GPIO: las de /GPIO.", 13, 10, 0
+msg_cr_h4   db "  GPIO: sin tocar (/NOGPIO).", 13, 10, 0
+msg_cr_h5   db "  GPIO: todas encendidas.", 13, 10, 0
+%include "cirrus.inc"
+; /SIMMAC (solo para las pruebas): el códec simulado del MacBook Air 2012
+%include "macsim.inc"
+mac_fwd_cmd:
+        ret
+            MACSIM_DATA
 file_end:
 ; (el anillo de la Sound Blaster emulada tiene que tapar todo el código de
 ; instalación: la ventana de los registros va detrás)

@@ -16,6 +16,11 @@
 #   v86    con HSPEMM (modo V86): solo el altavoz del PC
 #   sim1-4 /SIM: las variantes de GPIO, EAPD y «snoop», los auriculares y
 #          «todo abierto»
+#   mac1-2 [CIRRUS] /SIM:MAC: el códec Cirrus CS4206 del MacBook Air 2012
+#          (simulado con su volcado real) y una controladora que a la primera
+#          no arranca el flujo: todos los intentos tienen que avanzar; el
+#          widget de proceso y las GPIO de Apple, primero; y HSPSND /SIMMAC
+#          con ese códec (sin lo aprendido, con /NOGPIO y con lo aprendido)
 # AUDICION test: simulated answers over the serial console, recorded audio.
 set -u
 cd "$(dirname "$0")/.."
@@ -101,6 +106,9 @@ lote; run sim1 "default=N;P01=S;P07=S;$SI" --cmd 'AUDICION /SIM' -- $HDA &
 lote; run sim2 "default=N;P10=S" --cmd 'AUDICION /sim' -- $HDA &
 lote; run sim3 "default=N;P03=S" --cmd 'AUDICION /SIM' -- $HDA &
 lote; run sim4 "default=N;P13=S;/segundo/=S" --cmd 'AUDICION /SIM' -- $HDA &
+# [CIRRUS] el MacBook Air 2012 de Carlos, simulado
+lote; run mac1 "default=N;P01=S" --cmd 'AUDICION /SIM:MAC' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO /NOGPIO' -- $HDA &
+lote; run mac2 "default=S" --cmd 'AUDICION /SIM:MAC' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO' -- $HDA &
 # con HSPSND cargado (avisa y sigue) y con HSPEMM (modo V86: no hay HD Audio)
 lote; run hsp "default=S;P02=E" --pre 'A:\HISPADOS\HSPSND' -- $HDA &
 mkdir -p $T/v86; cp "$IMG" $T/v86/f.img
@@ -184,6 +192,7 @@ has $R "44100 Hz 16 bits estéreo" "informe: "
 has $R "Intento: HD Audio 00:04.0 códec 2, TODO ABIERTO (todas las salidas, todos los DAC, EAPD encendido), GPIO no hay" "informe: "
 has $R "NO suena: HD Audio 00:04.0 códec 2 (3 intentos)" "informe: "
 has $R "HD Audio: NINGUNA salida analógica ha sonado con las combinaciones probadas." "informe: "
+hasnt $R "NO AVANZA" "informe: "
 hasnt $R "SUENA:" "informe: "
 hasnt $R "Línea sugerida" "informe: "
 audio ich9; entre ich9 hz 430 450 "aun así el tono salió (440 Hz)"; entre ich9 ambos 45 75 "tres intentos de 1 s"
@@ -272,6 +281,51 @@ has $R "Volumen: el camino no tiene amplificador regulable; se prueba por progra
 has $R "FALTA en HSPSND: solo ha sonado con TODO ABIERTO" "sim4: "
 audio sim4; entre sim4 bajo 30 60 "sim4: el volumen por programa baja (dos segundos más bajo)"; entre sim4 fuerte 15 30 "sim4: y sube"
 
+echo "== [CIRRUS] AUDICION /SIM:MAC: el Cirrus CS4206 del MacBook Air 2012, todo que no =="
+informe mac1 SONIDO01.TXT; R=$T/mac1/rep.txt; L=$T/mac1/log.txt
+for w in "Identificador (fabricante:dispositivo) 1013:4206 (Cirrus Logic)  revisión 00100302h" \
+  "Grupo de audio 01h: subsistema 106B5600h" "GPIO ahora: máscara 08h dirección 08h datos 00h" \
+  "Nodo 0Bh [Pin] caps 00410101h" "Configuración por defecto 90100120h: fijo (interno) | ALTAVOZ" \
+  "Nodo 11h [Del fabricante] caps 00F00040h: proceso" "   00: 001E 0008 000A 106A 0007 0000 0000 0000" \
+  "Cirrus Logic CS4206 de Apple (subsistema del códec 106B5600h): widget de proceso 11h puesto en marcha (estado 01h, DAC (coef. 03h) 146Ah)" \
+  "Amplificador de los altavoces por la GPIO 3; el de los auriculares, por la GPIO 1 (se prueba primero)" \
+  "Intento: HD Audio 00:04.0 códec 0, pin 0Bh (altavoz interno), ruta 0Bh 04h (el último es el DAC), control del pin 40h, EAPD no hay, GPIO de Apple (los amplificadores): máscara 0Ah dirección 0Ah datos 0Ah, 48000 Hz 16 bits estéreo" \
+  "GPIO como la BIOS: máscara 08h dirección 08h datos 00h" "GPIO máscara 0Fh dirección 0Fh datos 08h" \
+  "(a la primera no arrancó; se ha reiniciado el flujo y a la segunda sí." \
+  "NO suena: HD Audio 00:04.0 códec 0 (9 intentos)"; do has $R "$w" "mac1: "; done
+hasnt $R "NO AVANZA" "mac1: "
+hasnt $R "AVISO: en algún intento la posición del flujo no avanzó" "mac1: "
+# el primer intento, con las GPIO de Apple
+if grep -m1 "^Intento:" $R | grep -q "GPIO de Apple"; then ok "mac1: las GPIO de Apple, las primeras"; else ko "mac1: las GPIO de Apple, las primeras"; fi
+n=$(grep -c "^Intento: .*Hz 16 bits estéreo$" $R); a=$(grep -c "(la posición del flujo avanza)" $R)
+if [ "$n" -ge 9 ] && [ "$a" = "$n" ]; then ok "mac1: los $n intentos seguidos avanzan todos"; else ko "mac1: intentos $n, avanzan $a"; fi
+audio mac1; entre mac1 hz 430 450 "mac1: el tono sale por QEMU (440 Hz)"
+has $L "Cirrus CS4206 de Apple (subsistema del códec 106B:5600): amplificador de los altavoces por la GPIO 3 y el de los auriculares por la GPIO 1; widget de proceso 11h puesto en marcha." "HSPSND /SIMMAC: "
+has $L "  GPIO: las de los amplificadores, encendidos (máscara, dirección y datos 0Ah)." "HSPSND /SIMMAC: "
+has $L "subsistema 106B5600, GPIO 4: datos 0A másc. 0A dir. 0A" "HSPSND /SIMMAC: "
+has $L "Intel HD Audio en FEBB0000, códec 0, salidas: 0B 09" "HSPSND /SIMMAC: "
+has $L "Pin 0B: altavoz, interno (90100120) -> 0B>04" "HSPSND /SIMMAC: "
+has $L "  GPIO: sin tocar (/NOGPIO)." "HSPSND /SIMMAC /NOGPIO: "
+has $L "subsistema 106B5600, GPIO 4: datos 00 másc. 08 dir. 08" "HSPSND /SIMMAC /NOGPIO: "
+hasnt $L "Configuración aprendida en la prueba" "HSPSND /SIMMAC (no sonó nada): "
+hasnt $L "Ya está instalado" "HSPSND /SIMMAC no queda residente: "
+
+echo "== [CIRRUS] AUDICION /SIM:MAC: suena a la primera; lo aprendido, a HSPSND =="
+informe mac2 SONIDO01.TXT; R=$T/mac2/rep.txt; L=$T/mac2/log.txt
+has $R "P02. ¿Lo oye? (S/N/R) S" "mac2: "
+has $R "SUENA: HD Audio 00:04.0 códec 0, pin 0Bh (altavoz interno), ruta 0Bh 04h (el último es el DAC), control del pin 40h, EAPD no hay, GPIO de Apple (los amplificadores): máscara 0Ah dirección 0Ah datos 0Ah, 48000 Hz 16 bits estéreo" "mac2: "
+has $R "Auriculares: suenan por el pin 09h" "mac2: "
+if grep -qx "Línea sugerida: HSPSND" $R; then ok "mac2: Línea sugerida: HSPSND (sin /GPIO: ya lo sabe)"; else ko "mac2: Línea sugerida: HSPSND (sin /GPIO)"; fi
+hasnt $R "NO AVANZA" "mac2: "
+MTOOLS_SKIP_CHECK=1 mtype -i $T/mac2/f.img ::HISPADOS/SONIDO.INI 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/mac2/ini.txt
+has $T/mac2/ini.txt "[HDA 8086:2668 1AF4:1100 1013:4206 106B:5600]" "mac2: SONIDO.INI: "
+has $T/mac2/ini.txt "GPIO=0Ah 0Ah 0Ah" "mac2: SONIDO.INI: "
+has $L "Configuración aprendida en la prueba (" "HSPSND /SIMMAC con lo aprendido: "
+has $L "  GPIO: las de la prueba de sonido (SONIDO.INI)." "HSPSND /SIMMAC con lo aprendido: "
+has $L "widget de proceso 11h puesto en marcha." "HSPSND /SIMMAC con lo aprendido: "
+has $L "  EAPD como siempre, GPIO máscara 0Ah dirección 0Ah datos 0Ah" "HSPSND /SIMMAC con lo aprendido: "
+audio mac2; entre mac2 hz 430 450 "mac2: suena a 440 Hz"
+
 echo "== AUDICION con HSPSND cargado y en modo V86 (HSPEMM) =="
 L=$T/hsp/log.txt; informe hsp SONIDO01.TXT; R=$T/hsp/rep.txt
 has $L "HSPSND está cargado. Esta prueba maneja la tarjeta directamente y" "HSPSND: "
@@ -291,7 +345,7 @@ hasnt $R "Intento:" "V86: "
 has $L "Informe guardado en A:\\SONIDO01.TXT." "V86: "
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then
-  for n in dup out ich9 micro ac97 sb16 nada sim1 sim2 sim3 sim4 hsp v86; do
+  for n in dup out ich9 micro ac97 sb16 nada sim1 sim2 sim3 sim4 mac1 mac2 hsp v86; do
     echo "---- $n ----"; cat $T/$n/log.txt; cat $T/$n/audio.txt 2>/dev/null
     MTOOLS_SKIP_CHECK=1 mtype -i $T/$n/f.img ::SONIDO01.TXT 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 | grep -v '^   [0-9A-F][0-9A-F]: '
   done

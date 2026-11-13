@@ -91,9 +91,6 @@ pci_survey:
         jnz .pn
         and al, HCF_OWNED | HCF_RUN
         or [any_busy], al
-        cmp byte [hc_type+bx], HCT_EHCI
-        jne .pn
-        or [ehci_busy], al
 .pn:
         inc bx
         jmp .pl
@@ -831,11 +828,15 @@ e_setup:
         call pci_rd
         cmp cl, 1
         jne .own
-        test ecx, 0x10000           ; es de la BIOS: pedírsela
-        jz .smi
+        ; propiedad del sistema, siempre: hay BIOS (la de los Mac) que usan
+        ; el EHCI con sus SMI sin decir que es suyo
+        push ecx
         add di, 3
         mov cl, 1
         call pci_wb
+        pop ecx
+        test ecx, 0x10000           ; es de la BIOS: esperar a que lo suelte
+        jz .smi
         mov cx, 20                  ; hasta 1 s
         call tmo_start
 .ow:
@@ -848,7 +849,7 @@ e_setup:
 .smi:
         movzx di, byte [e_eecp]
         add di, 4
-        xor ecx, ecx                ; sin SMI
+        mov ecx, 0xE0000000         ; sin SMI (y sus avisos pendientes, borrados)
         call pci_wd
 .own:
         call unreal
@@ -947,6 +948,7 @@ e_setup:
 
 ; parar todas las controladoras tomadas (el driver no se queda)
 hc_stop_all:
+        call intel_unroute
         xor bx, bx
 .l:
         cmp bl, [hc_n]
@@ -1046,6 +1048,9 @@ usb_enum:
         pop cx
         loop .bw
 .end:
+        ; los receptores de Bluetooth que se hacen pasar por teclado o ratón
+        ; (HID proxy), solo si no ha aparecido uno de verdad
+        call proxy_retry
         mov al, [disk_found]
         or al, [k_on]
         or al, [m_on]

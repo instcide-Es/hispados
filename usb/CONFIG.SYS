@@ -23,12 +23,15 @@ REM Lectores de CD/DVD (IDE y SATA):
 DEVICE=C:\HISPADOS\HSPCD.SYS
 REM USB propio (memorias, teclado, ratón y mandos de juego USB, también detrás
 REM de concentradores).
-REM Así, sin opciones, es seguro: arrancando desde esta memoria USB la BIOS
-REM está usando el USB, HSPUSB no lo toca y todo sigue como estaba.
+REM Así, sin opciones: si la BIOS está usando el USB (arrancando desde esta
+REM memoria USB, por ejemplo) HSPUSB no lo toca y todo sigue como estaba...
+REM salvo en los equipos sin ratón PS/2 (un MacBook, por ejemplo): ahí solo
+REM HSPUSB puede dar el ratón o el panel táctil, y lo lleva él solo (también
+REM esta memoria de arranque).
 DEVICE=C:\HISPADOS\HSPUSB.SYS
-REM Para que HSPUSB lleve el USB (ratón o panel táctil USB, por ejemplo en un
-REM MacBook) ponga REM en la línea de arriba y quítelo de la de abajo. /U toma
-REM el USB de la BIOS y atiende él esta memoria; /INFO enseña lo que encuentra.
+REM Para que HSPUSB lleve el USB en cualquier caso ponga REM en la línea de
+REM arriba y quítelo de la de abajo. /U toma el USB de la BIOS y atiende él
+REM esta memoria; /INFO enseña lo que encuentra.
 REM Si el teclado dejara de ir: reinicie y pulse F5 al ver el menú de arranque.
 REM DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO
 

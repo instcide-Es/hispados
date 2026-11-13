@@ -320,6 +320,16 @@ parse_args:
         cmp eax, 'SIM'
         jne .q
         add si, 3
+        ; [CIRRUS] /SIM:MAC: el códec Cirrus del MacBook Air 2012 (simulado)
+        mov eax, [si]
+        and eax, 0xDFDFDFFF
+        cmp eax, ':MAC'
+        jne .sm
+        add si, 4
+        mov byte [simmac], 1
+        call mac_reset
+        jmp .sp
+.sm:
         mov byte [sim], 1
         jmp .sp
 .q:
@@ -1803,6 +1813,15 @@ hda_cmd:
         shl ebx, 28
         or eax, ebx
         mov [last_cmd], eax
+        ; [CIRRUS] /SIM:MAC: el códec 0 lo contesta la simulación
+        cmp byte [simmac], 0
+        je .real
+        test eax, 0xF0000000
+        jnz .real
+        call mac_cmd
+        clc
+        jmp .res
+.real:
         call unreal
         cmp byte [use_corb], 0
         je .pio
@@ -2154,6 +2173,15 @@ hda_open:
         mov dx, 0x5C
         call hrd8
         call phex2
+        ; [CIRRUS] sincronización de flujos y búfer de posiciones de la DMA
+        PR " SSYNC="
+        mov dx, 0x38
+        call hrd32
+        call phex8
+        PR " DPLBASE="
+        mov dx, 0x70
+        call hrd32
+        call phex8
         PR NL
 .rst:
         mov byte [was_reset], 1
@@ -2226,6 +2254,15 @@ hda_open:
         mov dx, 0x0C
         xor ax, ax
         call hwr16
+        ; [CIRRUS] sin el búfer de posiciones de la DMA (DPLBASE) que pudo
+        ; dejar puesto el firmware: escribiría en memoria que ahora es de DOS
+        mov dx, 0x70
+        call hrd32
+        test al, 1
+        jz .ndp
+        and al, 0xFE
+        call hwr32
+.ndp:
         ; primer flujo de salida
         mov dx, 0x00
         call hrd16
@@ -2632,33 +2669,45 @@ gen_tone:
         popad
         ret
 
-; parar el flujo de salida
+; [CIRRUS] parar el flujo de salida como pide la norma (HD Audio 1.0a,
+; 3.3.35): RUN a 0 (y sin avisos) y esperar a que la controladora lea 0, que
+; es cuando la DMA se ha parado de verdad; solo entonces se borra el estado.
+; Antes se escribía 0 y se seguía sin esperar.
 hda_stream_stop:
         push ax
         push dx
         call unreal
         mov dx, [hda_sd]
-        xor al, al
+        call hrd8
+        and al, 0xE0                ; fuera RUN, IOCE, FEIE, DEIE (y SRST)
         call hwr8
+        call tmo_start
+.w:
+        mov dx, [hda_sd]
+        call hrd8
+        test al, 2
+        jz .st
+        call tmo_check
+        jnc .w
+.st:
         mov dx, [hda_sd]
         add dx, 3
-        mov al, 0x1C
+        mov al, 0x1C                ; BCIS, FIFOE y DESE (se borran con 1)
         call hwr8
         pop dx
         pop ax
         ret
 
-; tocar el tono durante [t_ms] milisegundos por el flujo 1 -> [lpib_ok] = 1
-; si la posición del flujo avanzó (el controlador está leyendo la memoria)
-hda_tone:
-        pushad
-        mov word [t_off], D_ABUF
-        call gen_tone
-        call unreal
-        ; parar y reiniciar el flujo
+; [CIRRUS] reinicio del flujo (SRST): primero parado del todo (lo anterior),
+; después SRST a 1 hasta que lo lea 1, una pausa, SRST a 0 hasta que lo lea
+; 0 y otra pausa antes de tocar sus registros -> [sd_rst] bit 0: no entró en
+; el reinicio; bit 1: no salió
+sd_reset:
+        push ax
+        push dx
+        call hda_stream_stop
+        mov byte [sd_rst], 0
         mov dx, [hda_sd]
-        xor al, al
-        call hwr8
         mov al, 1
         call hwr8
         call tmo_start
@@ -2669,7 +2718,9 @@ hda_tone:
         jnz .r1d
         call tmo_check
         jnc .r1
+        or byte [sd_rst], 1
 .r1d:
+        call sd_pause
         mov dx, [hda_sd]
         xor al, al
         call hwr8
@@ -2681,7 +2732,28 @@ hda_tone:
         jz .r2d
         call tmo_check
         jnc .r2
+        or byte [sd_rst], 2
 .r2d:
+        call sd_pause
+        pop dx
+        pop ax
+        ret
+; unos microsegundos (lecturas del puerto 80h: ~1 µs cada una)
+sd_pause:
+        push cx
+        push ax
+        mov cx, 64
+.l:
+        in al, 0x80
+        loop .l
+        pop ax
+        pop cx
+        ret
+
+; [CIRRUS] lista de descriptores y registros del flujo (recién reiniciado),
+; y el formato y el número de flujo en los DAC en uso
+sd_program:
+        pushad
         ; lista de descriptores: dos entradas (el mínimo que pide la norma)
         push es
         mov es, [dseg]
@@ -2711,8 +2783,10 @@ hda_tone:
         mov [es:D_BDL+24], eax
         mov dword [es:D_BDL+28], 0
         pop es
+        call unreal
         mov bx, D_BDL
         call dphys
+        mov [sd_bdl], eax
         mov dx, [hda_sd]
         add dx, 0x18
         call hwr32
@@ -2752,16 +2826,125 @@ hda_tone:
         cmp si, dacs + 8
         jb .df
 .dfe:
+        popad
+        ret
+
+; [CIRRUS] RUN y esperar (hasta 5 ticks, unos 275 ms) a que la posición del
+; flujo se mueva -> CF = 1 si no se mueve. El flujo no se para aquí.
+sd_run:
+        pushad
         call unreal
-        mov dx, [hda_sd]
-        mov al, 2                   ; RUN
-        call hwr8
-        mov byte [lpib_ok], 0
+        ; que el flujo no esté retenido por la sincronización (SSYNC)
+        mov dx, 0x38
+        call hrd32
+        movzx ecx, byte [gcap+1]
+        and cl, 0x0F                ; el primer flujo de salida = nº de entrada
+        btr eax, ecx
+        jnc .ns
+        call hwr32
+        or byte [sd_ssync], 1
+.ns:
+        ; lo escrito por el procesador, a la memoria (por si la controladora
+        ; lee sin pasar por la caché)
+        wbinvd
         mov dx, [hda_sd]
         add dx, 4
         call hrd32
         mov ebp, eax
-        ; esperar mirando la posición
+        ; /SIM:MAC: la controladora del Mac de Carlos, que a veces no arranca
+        ; a la primera (para probar el segundo intento)
+        cmp byte [simmac], 0
+        je .go
+        inc byte [sm_starts]
+        test byte [sm_starts], 1
+        jz .go
+        cmp byte [sd_retry], 0
+        je .wt0
+.go:
+        mov dx, [hda_sd]
+        mov al, 2                   ; RUN
+        call hwr8
+.wt0:
+        call ticks
+        mov di, ax
+.wt:
+        call unreal
+        mov dx, [hda_sd]
+        add dx, 4
+        call hrd32
+        cmp eax, ebp
+        jne .mv
+        in al, 0x80
+        call ticks
+        sub ax, di
+        cmp ax, 5
+        jb .wt
+        popad
+        stc
+        ret
+.mv:
+        popad
+        clc
+        ret
+
+; [CIRRUS] cómo está el flujo -> sd_snap (CTL+STS, LPIB, CBL, LVI, BDPL)
+sd_take:
+        pushad
+        call unreal
+        mov dx, [hda_sd]
+        call hrd32
+        mov [di], eax
+        mov dx, [hda_sd]
+        add dx, 4
+        call hrd32
+        mov [di+4], eax
+        mov dx, [hda_sd]
+        add dx, 8
+        call hrd32
+        mov [di+8], eax
+        mov dx, [hda_sd]
+        add dx, 0x0C
+        call hrd16
+        mov [di+12], ax
+        mov dx, [hda_sd]
+        add dx, 0x18
+        call hrd32
+        mov [di+14], eax
+        popad
+        ret
+
+; tocar el tono durante [t_ms] milisegundos por el flujo 1 -> [lpib_ok] = 1
+; si la posición del flujo avanzó (el controlador está leyendo la memoria).
+; [CIRRUS] Parar, reiniciar, programar y arrancar el flujo siguiendo la
+; norma paso a paso; si a pesar de todo la posición no se mueve, se apunta
+; cómo estaba (para el informe) y se repite una vez desde el reinicio.
+hda_tone:
+        pushad
+        mov word [t_off], D_ABUF
+        call gen_tone
+        mov byte [lpib_ok], 0
+        mov byte [sd_retry], 0
+        mov byte [sd_ssync], 0
+        call sd_reset
+        mov al, [sd_rst]
+        mov [sd_rst1], al
+        call sd_program
+        call sd_run
+        jnc .go
+        mov di, sd_snap1
+        call sd_take
+        mov byte [sd_retry], 1
+        call sd_reset
+        call sd_program
+        call sd_run
+        jnc .go
+        mov di, sd_snap2
+        call sd_take
+        mov byte [sd_retry], 2
+        jmp .end
+.go:
+        mov byte [lpib_ok], 1
+        ; el resto del tiempo, sonando
         mov ax, [t_ms]
         mov cx, 91
         mul cx
@@ -2771,14 +2954,8 @@ hda_tone:
         inc cx
 .wt:
         call wait_tick1
-        mov dx, [hda_sd]
-        add dx, 4
-        call hrd32
-        cmp eax, ebp
-        je .same
-        mov byte [lpib_ok], 1
-.same:
         loop .wt
+.end:
         call hda_stream_stop
         mov ax, 60
         call wait_ms
@@ -3820,6 +3997,7 @@ build_cands:
         mov ax, 0xF1C
         xor cl, cl
         call hda_verb
+        call cr_pincfg              ; [CIRRUS]
         mov [dw_cfg], eax
         mov dl, [bc_dig]
         test byte [dw_pc], 0x04
@@ -3908,6 +4086,8 @@ sweep_codec:
         call hda_verb
         mov cx, 2
         call wait_ticks
+        call cr_detect              ; [CIRRUS]
+        call cr_init
         call build_cands
         cmp byte [sim], 0
         je .nsim
@@ -4090,7 +4270,7 @@ sweep_codec:
 ; valores de partida de un intento: como lo hace HSPSND sin opciones
 combo_base:
         mov byte [c_eapd], 1
-        mov byte [c_gmode], 1
+        call gmode_base             ; [CIRRUS]
         mov al, [g_all]
         mov [c_gdata], al
         mov byte [c_ri], RI_48K
@@ -4098,6 +4278,16 @@ combo_base:
         mov [c_alt], al
         mov [c_snoop], al
         mov [c_brute], al
+        ret
+
+; [CIRRUS] modo de las GPIO de partida: 2 (las de Apple) en un Cirrus de
+; Mac, 1 (todas a [c_gdata]) en los demás
+gmode_base:
+        mov byte [c_gmode], 1
+        cmp byte [cr_gm], 0
+        je .r
+        mov byte [c_gmode], 2
+.r:
         ret
 
 ; SI -> candidato. Prueba el pin: la primera vez en el códec, con todas las
@@ -4150,6 +4340,7 @@ sweep_pin:
         je .found
         mov byte [c_gmode], 1
 .g0:
+        mov byte [c_gmode], 1       ; [CIRRUS] (en un Mac se venía del modo 2)
         mov byte [c_gdata], 0
         call try
         je .found
@@ -4170,6 +4361,7 @@ sweep_pin:
 .ge:
         mov al, [g_all]
         mov [c_gdata], al
+        call gmode_base             ; [CIRRUS]
 .eapd:
         cmp byte [any_eapd], 0
         je .r44
@@ -4183,7 +4375,7 @@ sweep_pin:
         mov byte [c_gmode], 0
         call try
         je .found
-        mov byte [c_gmode], 1
+        call gmode_base             ; [CIRRUS]
 .e1:
         mov byte [c_eapd], 1
 .r44:
@@ -4319,10 +4511,63 @@ plpib:
         cmp byte [lpib_ok], 0
         je .bad
         PR "  (la posición del flujo avanza)", NL
-        ret
+        ; [CIRRUS] si hizo falta reiniciar el flujo otra vez, queda dicho
+        cmp byte [sd_retry], 0
+        je .x
+        PR "  (a la primera no arrancó; se ha reiniciado el flujo y a la segunda sí."
+        mov di, sd_snap1
+        call psnap
+        PR ")", NL
+        jmp .x
 .bad:
         mov byte [lpib_bad], 1
         PR "  (LA POSICION DEL FLUJO NO AVANZA: la controladora no está tocando)", NL
+        ; [CIRRUS] los registros del flujo, las dos veces
+        PR "  (primera vez:"
+        mov di, sd_snap1
+        call psnap
+        PR "; segunda:"
+        mov di, sd_snap2
+        call psnap
+        PR ")", NL
+.x:
+        cmp byte [sd_rst1], 0
+        je .x2
+        PR "  (el reinicio del flujo (SRST) no respondió en el plazo: "
+        mov al, [sd_rst1]
+        call phex2
+        PR "h)", NL
+.x2:
+        cmp byte [sd_ssync], 0
+        je .x3
+        PR "  (el flujo estaba retenido por SSYNC: se ha soltado)", NL
+.x3:
+        ret
+; [CIRRUS] DI -> registros del flujo apuntados por sd_take, en una línea
+psnap:
+        PR " CTL="
+        mov eax, [di]
+        and eax, 0x00FFFFFF
+        call phex8
+        PR "h STS="
+        mov al, [di+3]
+        call phex2
+        PR "h LPIB="
+        mov eax, [di+4]
+        call phex8
+        PR "h CBL="
+        mov eax, [di+8]
+        call phex8
+        PR "h LVI="
+        mov ax, [di+12]
+        call phex4
+        PR "h BDL="
+        mov eax, [di+14]
+        call phex8
+        PR "h (escrita "
+        mov eax, [sd_bdl]
+        call phex8
+        PR "h)"
         ret
 
 ; la combinación actual, en una línea
@@ -4384,8 +4629,12 @@ combo_print:
         jmp .fm
 .g1:
         cmp byte [c_gmode], 0
-        jne .g2
+        jne .g3
         PR "como la BIOS: "
+.g3:
+        cmp byte [c_gmode], 2       ; [CIRRUS]
+        jne .g2
+        PR "de Apple (los amplificadores): "
 .g2:
         PR "máscara "
         mov al, [g_em]
@@ -4425,9 +4674,17 @@ combo_apply:
         mov ah, al
         mov dl, [c_gdata]
         cmp byte [c_gmode], 0
-        jne .gw
+        jne .gc
         mov ax, [gs_m]
         mov dl, [gs_v]
+        jmp .gw
+.gc:
+        ; [CIRRUS] las de Apple: solo las de los amplificadores, encendidas
+        cmp byte [c_gmode], 2
+        jne .gw
+        mov al, [cr_gm]
+        mov ah, al
+        mov dl, al
 .gw:
         mov [g_em], al
         mov [g_ed], ah
@@ -7137,6 +7394,103 @@ b_cpy:
 .r:
         ret
 
+;  [CIRRUS] Cirrus Logic CS4206/CS4207/CS4208 de los Mac (ver lib/cirrus.inc)
+; después de codec_afg: ¿es uno de esos? -> cr_kind, cr_gspk, cr_ghp, cr_gm
+cr_detect:
+        pushad
+        xor eax, eax
+        mov [cr_id], eax
+        mov [cr_ssidf], eax
+        mov [cr_kind], al
+        mov [cr_gm], al
+        xor bl, bl
+        xor cl, cl
+        call hda_param
+        jc .r
+        mov [cr_id], eax
+        mov bl, [afg]
+        mov ax, 0xF20
+        xor cl, cl
+        call hda_verb
+        jc .r
+        mov [cr_ssidf], eax
+        mov edx, eax
+        mov eax, [cr_id]
+        mov cl, [g_all]
+        call cr_ids
+.r:
+        popad
+        ret
+
+; poner en marcha el widget de proceso (si es uno de esos) y decirlo
+cr_init:
+        cmp byte [cr_kind], 0
+        jne .go
+        ret
+.go:
+        pushad
+        call cr_start
+        MODE O_REP
+        PR "Cirrus Logic CS"
+        mov ax, [cr_dev]
+        call phex4
+        PR " de Apple (subsistema del códec "
+        mov eax, [cr_ssidf]
+        call phex8
+        PR "h): widget de proceso "
+        mov bl, [cr_vpw]
+        mov al, bl
+        call phex2
+        PR "h puesto en marcha (estado "
+        mov ax, 0xF03
+        xor cl, cl
+        call hda_verb
+        call phex2
+        PR "h"
+        cmp byte [cr_kind], 1
+        jne .e
+        PR ", DAC (coef. 03h) "
+        mov al, 0x05
+        mov cx, 3
+        call hda_verb4
+        mov al, 0x0C
+        xor cx, cx
+        call hda_verb4
+        call phex4
+        PR "h"
+.e:
+        PR ")", NL
+        PR "  Amplificador de los altavoces por la GPIO "
+        mov al, [cr_gspk]
+        call pbitn
+        cmp byte [cr_ghp], 0
+        je .nh
+        PR "; el de los auriculares, por la GPIO "
+        mov al, [cr_ghp]
+        call pbitn
+.nh:
+        PR " (se prueba primero)", NL
+        popad
+        ret
+; AL = un solo bit -> su número
+pbitn:
+        push eax
+        movzx eax, al
+        bsf eax, eax
+        call pdec
+        pop eax
+        ret
+%include "cirrus.inc"
+; /SIM:MAC: el códec simulado; lo que va a los DAC, también al de QEMU
+%include "macsim.inc"
+mac_fwd_cmd:
+        call unreal
+        cmp byte [use_corb], 0
+        je .p
+        jmp corb_cmd
+.p:
+        jmp pio_cmd
+
 st_suena    db "SUENA", 0
 st_nosuena  db "NO SUENA", 0
 st_todo     db "SOLO CON TODO ABIERTO", 0
@@ -7216,6 +7570,8 @@ summary:
         PR " /NOGPIO"
         jmp .se
 .sg:
+        cmp byte [w_blk + c_gmode - c_blk], 2   ; [CIRRUS] HSPSND ya lo sabe
+        je .se
         mov al, [w_blk + c_gdata - c_blk]
         cmp al, [w_gall]
         je .se
@@ -7456,6 +7812,27 @@ dacs        resb 8
             resb 1
 lpib_ok     resb 1
 lpib_bad    resb 1
+; [CIRRUS] arranque del flujo: reintento, estado del reinicio y registros
+sd_retry    resb 1                  ; 0 a la primera, 1 a la segunda, 2 nunca
+sd_rst      resb 1
+sd_rst1     resb 1
+sd_ssync    resb 1
+sd_bdl      resd 1
+sd_snap1    resb 18
+sd_snap2    resb 18
+simmac      resb 1                  ; /SIM:MAC: el códec del MacBook Air 2012
+sm_starts   resb 1
+; [CIRRUS] Cirrus CS420x de Apple y el códec simulado del Mac
+cr_kind     resb 1
+cr_gm       resb 1
+cr_gspk     resb 1
+cr_ghp      resb 1
+cr_vpw      resb 1
+cr_dev      resw 1
+cr_ssid     resw 1
+cr_id       resd 1
+cr_ssidf    resd 1
+            MACSIM_VARS
 n_hda       resb 1
 dc_id       resd 1
 dc_gp       resd 1

@@ -24,7 +24,9 @@ DEVICE=A:\HISPADOS\HSPCD.SYS
 REM USB propio (memorias, teclado, ratón y mandos de juego USB, también detrás
 REM de concentradores).
 REM Así, sin opciones, es seguro: si la BIOS está usando el USB (teclado USB,
-REM arranque por USB) no lo toca y todo sigue como estaba.
+REM arranque por USB) no lo toca y todo sigue como estaba; salvo en los
+REM equipos sin ratón PS/2 (un MacBook, por ejemplo), donde lo lleva él solo
+REM para dar el ratón o el panel táctil.
 DEVICE=A:\HISPADOS\HSPUSB.SYS
 REM Para quitarle el USB a la BIOS añada /F (el teclado y el ratón USB pasan a
 REM HSPUSB) y /INFO para ver en pantalla qué ha encontrado:

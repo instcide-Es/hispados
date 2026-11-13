@@ -3952,6 +3952,17 @@ usb_xhci:
         call pci_rd
         call hex8
         PR " (puertos pasados del EHCI al xHCI)", NL
+        ; las máscaras: qué puertos se pueden pasar (los demás solo van por
+        ; el EHCI; HSPUSB pasa estos al xHCI cuando lleva el USB)
+        PR SANGRIA, "  se pueden pasar: XUSB2PRM="
+        mov al, 0xD4
+        call pci_rd
+        call hex8
+        PR " USB3PRM="
+        mov al, 0xDC
+        call pci_rd
+        call hex8
+        PR " (el resto, solo por el EHCI)", NL
 .r:
         ret
 
@@ -5706,13 +5717,14 @@ sec_res:
         ; ---- HSPUSB ----
         cmp byte [usb_res], 0
         je .nousb
-        PR "HSPUSB: residente (lleva él un controlador xHCI). Su /INFO solo sale al", NL
+        PR "HSPUSB: residente (lleva él el USB). Su /INFO solo sale al", NL
         PR "  arrancar (DEVICE=...HSPUSB.SYS /INFO en CONFIG.SYS): no tiene interfaz", NL
         PR "  de consulta; el estado de cada controlador USB está en el apartado PCI.", NL
         jmp .rat
 .nousb:
-        PR "HSPUSB: no está residente (no se ha cargado, no hay xHCI, o la BIOS usa", NL
-        PR "  el USB y no se le ha quitado con /F o /U). Ver el apartado PCI.", NL
+        PR "HSPUSB: no está residente (no se ha cargado, no hay controladora USB, o", NL
+        PR "  la BIOS usa el USB, hay ratón PS/2 y no se le ha quitado con /F o /U).", NL
+        PR "  Ver el apartado PCI.", NL
 .rat:
         ; ---- ratón ----
         call raton_check
