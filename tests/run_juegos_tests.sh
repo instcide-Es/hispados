@@ -168,7 +168,7 @@ checkn "HSPDPMI: excepción"
 xms_igual
 ini "Modulos=2"; ini "Nombre=Juegos"; ini "Nombre=Culebra"; ini "Programa=A:\\HISPADOS\\JUEGOS\\CULEBRA.HVP"
 ini "Nombre=Campo de minas"; ini "Programa=A:\\HISPADOS\\JUEGOS\\MINAS.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas " ]; then
   ok "CENTRO.INI: los dos juegos, en el grupo Juegos"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

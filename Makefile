@@ -133,6 +133,11 @@ $(B)/CULEBRA.HVP: juegos/culebra.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/MINAS.HVP: juegos/minas.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# [Configuración] los programas de Hispa Ventanas que no son juegos van en
+# \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
+HVPSIS = $(B)/CONFIG.HVP
+$(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
@@ -141,7 +146,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM \
-        $(B)/VENTANAS.COM $(HVPS)
+        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -185,6 +190,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/HSPCD.SYS ::HISPADOS/HSPCD.SYS
 	mcopy -i $@ $(B)/HSPRATON.COM ::HISPADOS/HSPRATON.COM
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
+	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
 	mmd   -i $@ ::HISPADOS/JUEGOS
 	for f in $(HVPS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
@@ -308,6 +314,7 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
+	tests/run_configuracion_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)

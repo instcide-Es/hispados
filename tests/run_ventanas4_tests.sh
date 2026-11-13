@@ -268,7 +268,7 @@ ini "Programa=A:\\JUEGOS\\PRUEBA\\PRUEBA.COM"; ini "Carpeta=A:\\JUEGOS\\PRUEBA";
 ini "Icono=musica"; ini "Pausa=1"; ini "Programa=A:\\JUEGOS\\DOS\\JUEGO.EXE"; ini "Programa=A:\\JUEGOS\\TRES\\OTRO.EXE"
 ini "Programa=A:\\JUEGOS\\BAT\\JUGAR.BAT"; ini "Programa=:BLOC"; ini "Programa=A:\\HISPADOS\\EDITAR.COM"
 # «Dos» y «Tres» han pasado al grupo Juegos; «Prueba» y «Bat» siguen en Pruebas
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema [Grupo] Nombre=Juegos Nombre=Dos Nombre=Tres [Grupo] Nombre=Pruebas Nombre=Prueba Nombre=Bat " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema [Grupo] Nombre=Juegos Nombre=Dos Nombre=Tres [Grupo] Nombre=Pruebas Nombre=Prueba Nombre=Bat " ]; then
   ok "CENTRO.INI: cada acceso, en su grupo"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

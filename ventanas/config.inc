@@ -144,6 +144,8 @@ def_principal:
         dd td_editar, 3, tn_editar, AB_VOLVER
         dd td_gestor, 2, tn_gestor, AB_VOLVER
         dd td_info, 4, tn_info, AB_VOLVER | AB_PAUSA
+        dd 1                        ; [Configuración] (1: aquí, el intérprete de órdenes)
+        dd td_config, 4, tn_config, AB_VOLVER   ; [Configuración] CONFIG.HVP
         dd 0
 def_accesorios:
         dd t_bloc, 7, ti_bloc, AB_VOLVER
@@ -158,6 +160,7 @@ td_editar   db "Editar", 0
 td_gestor   db "Gestor", 0
 td_info     db "Información", 0
 td_ordenes  db "Hispa-DOS", 0
+td_config   db "Configuración", 0   ; [Configuración]
 tn_editar   db "EDITAR.COM", 0
 tn_gestor   db "GESTOR.COM", 0
 tn_info     db "INFO.COM", 0
@@ -742,13 +745,15 @@ cfg_defecto:
         rep stosd
         ; Principal: los programas de Hispa-DOS que haya en la carpeta propia
         call gr_nuevo
+        mov dword [eax+GR_AL], 260  ; [Configuración] (dos filas de iconos)
         lea edi, [eax+GR_NOMBRE]
         mov esi, tg_principal
         mov ecx, 27
         call cad_copiar
         mov ebx, def_principal
 .p:
-        cmp dword [ebx], 0
+        cmp dword [ebx], 1          ; [Configuración] 0: fin; 1: el intérprete
+        jb .acc
         je .ordenes
         xor edx, edx
         call ac_nuevo
@@ -781,7 +786,7 @@ cfg_defecto:
         mov esi, s_comspec          ; el intérprete de órdenes
         call env_valor
         test eax, eax
-        jz .acc
+        jz .ofin
         mov esi, eax
         xor edx, edx
         call ac_nuevo
@@ -797,6 +802,9 @@ cfg_defecto:
         mov eax, [ebp+AC_PROG]
         and eax, 0x00FFFFFF
         mov [ebp+AC_DIR], eax
+.ofin:
+        add ebx, 4                  ; [Configuración] y sigue la lista
+        jmp .p
 .acc:
         call gr_nuevo
         lea edi, [eax+GR_NOMBRE]

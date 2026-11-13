@@ -228,3 +228,25 @@ C_GRANATE       equ 13
 C_TURQUESA      equ 14
 C_PIEDRA        equ 15
 CLAVE           equ 0xFF            ; «transparente» en dc_copiar_clave
+
+; ---- [Configuración] ajustes del entorno: aj_leer y aj_poner (ajustes.inc) ----
+; EAX=número del ajuste (y EDX=valor en aj_poner). Los que se pueden cambiar:
+AJ_RAT_VEL      equ 0               ; velocidad del ratón, en mitades (2 = normal)
+AJ_RAT_DOBLE    equ 1               ; doble clic: tics de reloj como mucho (8)
+AJ_RAT_ZURDO    equ 2               ; 1: botones del ratón intercambiados
+AJ_VOLUMEN      equ 3               ; 0-100 (-1: no se sabe); se le da a HSPSND
+AJ_SILENCIO     equ 4               ; 0/1
+AJ_ULT_ACT      equ 5               ; tics del último movimiento, clic o tecla
+AJ_N_RW         equ 6
+; solo se leen (un octeto):
+AJ_VID_BITS     equ 6               ; bits por punto de la pantalla
+AJ_VID_TIPO     equ 7               ; 1 VESA, 0 VGA de 16 colores
+AJ_HAY_RATON    equ 8
+AJ_HAY_SONIDO   equ 9               ; HSPSND está y ha encontrado tarjeta
+AJ_N_OCT        equ 10
+; solo se leen (-> EAX=puntero a un texto acabado en 0):
+AJ_TXT_PANTALLA equ 10              ; "Pantalla: 800 x 600, 256 colores"
+AJ_TXT_VIDEO    equ 11              ; "Vídeo: VESA 3.0 con marco lineal"
+AJ_TXT_DPMI     equ 12              ; "DPMI 0.90 (32 bits); memoria libre: ..."
+AJ_TXT_VERSION  equ 13              ; "Hispa Ventanas 0.3" (hasta el carácter 10)
+AJ_N            equ 14

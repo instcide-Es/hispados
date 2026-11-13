@@ -101,3 +101,9 @@ hvi_sig     resd 1
 hvi_de      resd HVI_N              ; de qué acceso es cada icono guardado
 hvp_tabla   resb HVP_MAX * HS_TAM
 hvi_buf     resb HVI_N * 512
+; ---- [Configuración] ajustes (ajustes.inc) ----
+            alignb 4
+aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados
+aj_ult_act  resd 1                  ; tics del último ratón o teclado
+aj_resto    resd 2                  ; lo que sobra del movimiento (x, y)
+aj_acc      resb AC_TAM             ; el «acceso directo» con el que se abre CONFIG.HVP

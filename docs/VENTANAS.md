@@ -119,7 +119,7 @@ que estar en los primeros 64 KB del programa. Por eso los iconos se guardan
 a 4 bits por punto (`tools/icopack.py` los empaqueta al compilar; en los
 fuentes siguen en texto) y la pila y las variables que solo usa el modo
 protegido van detrás, donde llegan los punteros de 32 bits. Si lo de modo
-real se sale de los 64 KB, la compilación falla. Quedan unos 2,7 KB de
+real se sale de los 64 KB, la compilación falla. Quedan unos 2,3 KB de
 margen: por eso lo nuevo va en módulos .HVP, que no gastan de ahí.
 
 ### Cómo se arranca y se usa
@@ -168,7 +168,8 @@ La ventana del Centro tiene un icono por **grupo**. Cada grupo se abre en su
 propia ventana (se mueve, se cambia de tamaño, se minimiza) con un icono por
 **acceso directo**. Por omisión hay tres grupos: «Principal» (los programas
 de Hispa-DOS que haya en la carpeta de VENTANAS.COM: Editar, Gestor,
-Información, y el intérprete de órdenes), «Accesorios» (los programas
+Información, el intérprete de órdenes y, el último, Configuración, que es un
+módulo .HVP: ver «Configuración y VENTANAS.INI»), «Accesorios» (los programas
 internos: Bloc de notas, Calculadora, Reloj y Sistema) y «Juegos» (los
 juegos propios: un acceso por cada módulo .HVP de la carpeta `JUEGOS` que
 hay al lado de VENTANAS.COM, `\HISPADOS\JUEGOS`).
@@ -363,6 +364,104 @@ que el último valor se guarda en CENTRO.INI y se vuelve a poner al entrar.
 Si HSPSND no está cargado, o no ha encontrado tarjeta, el altavoz sale gris
 y la ventanita lo dice. Con el volumen en silencio, el altavoz lleva un aspa.
 
+### Configuración y VENTANAS.INI
+
+**Configuración** (`programas/config.asm`, `CONFIG.HVP`, en `\HISPADOS`, al
+lado de VENTANAS.COM; acceso directo en el grupo «Principal») es el programa
+de los ajustes. Es un módulo .HVP con diseño propio: los apartados a la
+izquierda (un rombo y su nombre; el elegido, en añil) y, a la derecha, el
+apartado elegido. Abajo, lo que pasa con los cambios y los botones «De
+fábrica» (pregunta antes), «Guardar» y «Cerrar».
+
+| Apartado | Qué tiene |
+|---|---|
+| Pantalla | Tema (ocho combinaciones hechas: Hispa, Noche, Mar, Campo, Vino, Duna, Pizarra, Ladrillo), dibujo del fondo (diez: rombos, liso, puntos, rayas, cuadros, ladrillos, olas, damero, trama, zigzag; se ven con los colores puestos), color del fondo y color del dibujo (los 16 de la paleta), y el salvapantallas: casilla, minutos (1 a 60) y «Probar» |
+| Ratón | Velocidad del puntero (de x0,5 a x3), tiempo máximo del doble clic (165 a 990 ms, con una zona para probarlo) e intercambiar los botones (para zurdos) |
+| Teclado | Espera antes de repetir (250 a 1000 ms) y velocidad de repetición (2 a 30 por segundo), con un cuadro para probarlas; distribución española o estadounidense, si TECLADO (KEYB) está cargado |
+| Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice) |
+| Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
+| Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país |
+
+Todo se aplica **al momento**. Lo de Pantalla, Ratón y Teclado se guarda en
+`VENTANAS.INI`: con «Guardar», al cerrar la ventana y, solo, unos tres
+segundos después del último cambio (así no se pierde si se sale de Hispa
+Ventanas con la ventana abierta). El volumen no va ahí: lo sigue llevando
+Hispa Ventanas (ver «El volumen»). La fecha y la hora se le dan a Hispa-DOS
+(INT 21h, funciones 2Bh y 2Dh), que las pone también en el reloj del equipo.
+Hispa-DOS solo tiene un país (España, página 437), así que no hay nada que
+elegir de idioma ni de país: sale en «Sistema».
+
+**Cómo se reparte el trabajo.** En VENTANAS.COM apenas queda sitio, así que
+dentro solo está lo mínimo (`ventanas/ajustes.inc`, unos 400 octetos): los
+valores y cómo se aplican (la velocidad y los botones del ratón y el doble
+clic, en `eventos`; el fondo, en el escritorio). Leer y escribir
+VENTANAS.INI, los dibujos del fondo y el salvapantallas los hace CONFIG.HVP:
+
+1. Al arrancar, el Centro de programas carga `CONFIG.HVP` de su carpeta con
+   el parámetro `/A` (`aj_iniciar`). El módulo lee VENTANAS.INI, aplica los
+   ajustes por la interfaz (`aj_poner`, `esc_fondo`) y **se queda en
+   marcha con la ventana oculta**. Si CONFIG.HVP no está, todo queda como
+   viene de fábrica.
+2. Abrir el acceso directo «Configuración» enseña esa ventana (un módulo ya
+   abierto no se carga otra vez: `hvp_abrir` trae su ventana delante, y
+   ahora también si está oculta). Cerrarla la vuelve a ocultar.
+3. Mientras está en marcha mira una vez por segundo cuánto hace del último
+   movimiento del ratón, clic o tecla (`AJ_ULT_ACT`); pasado el tiempo
+   puesto, abre el **salvapantallas**: una ventana que ocupa toda la
+   pantalla, en negro, con un letrero («Hispa Ventanas» y la hora) que se
+   pasea. Se quita con el ratón o con una tecla (que no llega a la ventana
+   de debajo).
+
+Ocupa una de las 6 plazas de módulos, una tarea y 6 ventanas (con la
+ventana oculta, los controles del apartado no existen).
+
+`VENTANAS.INI` está en la carpeta de VENTANAS.COM (`C:\HISPADOS`). Es texto
+(página 437, líneas con CR+LF), con el mismo aire que CENTRO.INI; se puede
+cambiar a mano con Hispa Ventanas cerrado. Si no existe, vale lo de fábrica,
+y no se crea hasta que se cambia algo.
+
+```
+; Hispa Ventanas - ajustes del programa Configuración (CONFIG.HVP).
+; Se puede cambiar a mano con Hispa Ventanas cerrado (docs/VENTANAS.md).
+
+[Pantalla]
+Dibujo=rombos
+ColorFondo=2
+ColorDibujo=3
+Salvapantallas=0
+Minutos=5
+
+[Raton]
+Velocidad=2
+DobleClic=440
+Zurdo=0
+
+[Teclado]
+Espera=500
+Repeticion=20
+Distribucion=SP
+```
+
+- Líneas `clave=valor`; no importan las mayúsculas de las claves ni los
+  espacios alrededor del `=`. Las líneas que empiezan por `;`, las vacías,
+  los nombres de sección (están para quien lo lee: cada clave tiene un
+  nombre distinto), las claves desconocidas y los valores fuera de sus
+  límites se saltan (queda el valor de fábrica).
+- `Dibujo`: `rombos`, `liso`, `puntos`, `rayas`, `cuadros`, `ladrillos`,
+  `olas`, `damero`, `trama` o `zigzag` (o su número, de 0 a 9).
+  `ColorFondo` y `ColorDibujo`: de 0 a 15, los colores de la paleta
+  (0 tinta, 1 marrón, 2 azul petróleo, 3 petróleo claro, 4 terracota,
+  5 terracota claro, 6 arena, 7 arena oscura, 8 crema, 9 blanco, 10 ocre,
+  11 verde oliva, 12 añil, 13 granate, 14 turquesa, 15 piedra).
+  `Salvapantallas` = 0/1 y `Minutos` = 1-60.
+- `Velocidad`: del ratón, en mitades (1 = x0,5; 2 = normal; 6 = x3).
+  `DobleClic`: milisegundos como mucho entre los dos clics (165-990; se
+  redondea a tics de reloj, de 55 ms). `Zurdo` = 0/1.
+- `Espera` (250, 500, 750 o 1000 ms) y `Repeticion` (0-31; 31, la más
+  rápida: 30 por segundo) se dan a la BIOS (INT 16h, función 03h);
+  `Distribucion` = `SP` o `US`, al residente TECLADO. Las tres **solo están
+  si se han tocado**: sin ellas, Hispa Ventanas no cambia nada del teclado.
+
 ### Memoria y modo del procesador
 
 El núcleo gráfico es de 32 bits (386 o superior, que es lo que exige HSPDPMI):
@@ -395,8 +494,9 @@ cabecera de cada archivo). Todas conservan los registros, salvo EAX cuando
 devuelven algo.
 
 ```
-  (módulos .HVP: juegos/*.asm con hvp.inc y hvplib.inc)
+  (módulos .HVP: juegos/*.asm y programas/*.asm con hvp.inc y hvplib.inc)
   api.inc modulos.inc    la interfaz y el cargador de los módulos
+  ajustes.inc    los ajustes que cambia Configuración (CONFIG.HVP)
   centro.inc bloc.inc calc.inc reloj.inc    los programas
   config.inc     CENTRO.INI: grupos, accesos directos, ventanas
   volumen.inc    el altavoz de la barra y su ventanita (HSPSND)
@@ -775,6 +875,8 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
   encontrado.
 - **Culebra** y **Campo de minas**: los juegos, en módulos .HVP (ver «Los
   juegos», más abajo).
+- **Configuración** (`programas/config.asm`, `CONFIG.HVP`): los ajustes y
+  el salvapantallas (ver «Configuración y VENTANAS.INI»).
 
 ## Programas aparte: los módulos .HVP
 
@@ -874,9 +976,19 @@ ficha `V_*`, las teclas `TC_*`, los colores `C_*`) son las de
 | `pantalla` (→ EAX=ancho, EBX=alto) | tamaño de la pantalla |
 | `c_boton`, `c_estatico`, `c_edit`, `c_lista`, `c_dialogo` | (datos, no funciones) las clases de los controles, para las plantillas del módulo: se pone `HV_c_boton` como clase y `hvl_clases` lo cambia por la dirección |
 
+Añadidas para Configuración (66 entradas; los módulos de 63 siguen
+funcionando igual):
+
+| Entradas | Para qué |
+|---|---|
+| `aj_leer` (EAX=número del ajuste → EAX=su valor) | leer un ajuste o un dato del entorno. Los números (`AJ_*`, en `defs.inc`): `AJ_RAT_VEL` (velocidad del ratón en mitades; 2 = normal), `AJ_RAT_DOBLE` (tics de reloj del doble clic; 8), `AJ_RAT_ZURDO` (0/1), `AJ_VOLUMEN` (0-100; -1 si no se sabe), `AJ_SILENCIO` (0/1), `AJ_ULT_ACT` (los tics del último ratón o teclado); solo para leer: `AJ_VID_BITS`, `AJ_VID_TIPO` (1 VESA, 0 VGA), `AJ_HAY_RATON`, `AJ_HAY_SONIDO` y, como punteros a un texto, `AJ_TXT_PANTALLA`, `AJ_TXT_VIDEO`, `AJ_TXT_DPMI` y `AJ_TXT_VERSION`. Con un número que no existe devuelve 0 |
+| `aj_poner` (EAX=número, EDX=valor) | cambiar uno de los seis primeros: vale desde ese momento (el volumen y el silencio se le dan a HSPSND y se repinta el altavoz). No comprueba los límites: es cosa de quien llama |
+| `esc_fondo` (ESI=mosaico de 16×16: 256 octetos, un color por punto) | cambiar el fondo del escritorio, que se repinta |
+
 El ratón llega como siempre (`WM_LBUTTONDOWN`, `WM_MOUSEMOVE`…, con las
 mayúsculas en ECX) y, desde ahora, también el **botón derecho**:
-`WM_RBUTTONDOWN`.
+`WM_RBUTTONDOWN`. Con los botones intercambiados (`AJ_RAT_ZURDO`), el
+cambio se hace antes de repartir: los programas no se enteran.
 
 `ventanas/hvplib.inc` son rutinas que se ensamblan **dentro** del módulo
 (no gastan sitio en VENTANAS.COM): `hvl_cad` y `hvl_num` (componer textos),
@@ -952,6 +1064,10 @@ cabecera. En el Makefile es una regla de dos líneas (como `CULEBRA.HVP`) y
 el nombre del archivo en `HVPS`: con eso va a `\HISPADOS\JUEGOS` del
 disquete y de la imagen USB, `INSTALAR` lo copia al disco duro y, la próxima
 vez que arranque Hispa Ventanas, aparece su acceso en el grupo «Juegos».
+Un módulo que no es un juego va en `HVPSIS` (y en `HVPSIS` de
+`tools/mkusb.py`): se copia a `\HISPADOS`, al lado de VENTANAS.COM, como
+`CONFIG.HVP`; su acceso directo se pone en `def_principal` (`config.inc`) o
+lo añade el usuario («Buscar programas...» en `C:\HISPADOS` lo encuentra).
 
 A mano:
 
@@ -1029,6 +1145,22 @@ Segunda tanda prevista: Bloques, Solitario, Tragabolas y Almacén.
   que no es un módulo; el módulo que pide una interfaz más nueva no se
   carga; dos juegos abiertos a la vez y salir con ellos abiertos. Capturas
   de muestra en `build/juegos_*.png`.
+- `tests/run_configuracion_tests.sh`: Configuración y VENTANAS.INI. Primera
+  sesión, sin VENTANAS.INI: el acceso directo en «Principal», la ventana y
+  sus apartados; un tema, un dibujo y un color cambian el escritorio al
+  momento y se guardan solos; salvapantallas con «Probar» (y la tecla que
+  lo quita no llega a la ventana de debajo); doble clic más largo y zona
+  de prueba; fecha y hora cambiadas (y, al salir, FECHA y HORA de
+  Hispa-DOS dan las nuevas, también tras reiniciar el equipo); Sistema;
+  teclado estadounidense y español con la tecla de la ñ; ocultar y volver
+  a enseñar; al salir, VENTANAS.INI se mira con mtools y la memoria
+  extendida queda como al entrar. Segunda sesión, con el mismo disco: el
+  fondo guardado sale al arrancar y el doble clic lento vale. Tercera, con
+  un VENTANAS.INI hecho a mano (mayúsculas, espacios, una clave
+  desconocida, un valor imposible): fondo, ratón el doble de rápido,
+  botones intercambiados y teclado estadounidense al arrancar, y «De
+  fábrica». Cuarta: en VGA de 640×480 y 16 colores. Capturas de muestra en
+  `build/config_*.png`. (`tests/run_config_tests.sh` es la de CONFIG.SYS.)
 - Programas de prueba de Windows 16 bits propios (NASM + nuestra
   herramienta de cabeceras NE) para cada función de la API, con su
   resultado escrito en un archivo (etapa 4).

@@ -55,6 +55,7 @@ check $T/l2.txt "HISPADOS"
 check $T/l2.txt "TECLADO  COM"
 check $T/l2.txt "INSTALAR COM"
 check $T/l2.txt "ALIAS    INI"
+check $T/l2.txt "CONFIG   HVP"       # [Configuración] el programa de ajustes de Hispa Ventanas
 # el historial: "uno" debe salir tres veces (la orden, flecha arriba x2 y F3)
 n=$(grep -c "^uno$" $T/l2.txt)
 if [ "$n" -ge 3 ]; then echo "  OK   historial: ECO uno repetido ($n veces)"; else echo "  FAIL historial: ECO uno salió $n veces"; fail=1; fi

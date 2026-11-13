@@ -1149,9 +1149,23 @@ eventos:
         sub dx, [ult_di]
         mov [ult_di], ax
         movsx edx, dx
+        mov eax, ecx                ; [Configuración] la velocidad del ratón
+        mov ebx, aj_resto
+        call rat_escala
+        mov ecx, eax
+        mov eax, edx
+        add ebx, 4
+        call rat_escala
+        mov edx, eax
         mov bl, [edi+2]
         mov bh, bl
         and bx, 0x0201              ; BL=el izquierdo, BH=el derecho
+        cmp byte [aj_rat_zurdo], 0  ; [Configuración] botones intercambiados
+        je .diestro
+        shr bh, 1
+        shl bl, 1
+        xchg bl, bh
+.diestro:
         inc esi
         and esi, RAT_COLA - 1
         mov eax, esi
@@ -1167,7 +1181,7 @@ eventos:
         call rat_mover              ; (acota a la pantalla)
         pop ebx
         mov byte [ev_movido], 1
-        mov byte [actividad], 1
+        call ev_act                 ; [Configuración] (actividad y cuándo)
 .bot:
         cmp bl, [rat_boton]
         jne .cambia
@@ -1196,7 +1210,7 @@ eventos:
         cmp bl, [rat_boton]
         je .r
         mov [rat_boton], bl
-        mov byte [actividad], 1
+        call ev_act                 ; [Configuración]
         test bl, bl
         jz .suelta
         call tics                   ; ¿doble clic?
@@ -1204,7 +1218,7 @@ eventos:
         sub ecx, [dbl_tics]
         mov [dbl_tics], eax
         mov byte [rat_doble], 0
-        cmp ecx, 8
+        cmp ecx, [aj_rat_doble]     ; [Configuración] (antes, 8 tics)
         ja .nd
         mov eax, [rat_x]
         sub eax, [dbl_x]
@@ -1238,7 +1252,7 @@ eventos:
         jz .x
         lodsw
         call ges_tecla
-        mov byte [actividad], 1
+        call ev_act                 ; [Configuración]
         dec ecx
         jmp .t
 .x:
@@ -1315,6 +1329,7 @@ exc_instalar:
 %include "reloj.inc"
 %include "api.inc"
 %include "modulos.inc"
+%include "ajustes.inc"              ; [Configuración]
 %endif
 
 ; =============================================================================

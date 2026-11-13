@@ -144,6 +144,7 @@ centro_tarea:
         call ven_crear
         mov [cen_ven], eax
         add esp, P_TAM
+        call aj_iniciar             ; [Configuración] CONFIG.HVP aplica VENTANAS.INI
         mov ebx, [gr_tabla]
         mov ecx, MAX_GR
 .g:

@@ -14,6 +14,7 @@ OUT = os.path.join(B, 'hispados-usb.img')
 SIZE_MB = 64
 START = 2048
 HEADS, SPT = 255, 63
+HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
 
 def chs(lba):
     c, rem = divmod(lba, HEADS * SPT)
@@ -71,7 +72,8 @@ def main():
     md('HISPADOS/JUEGOS')
     for f in sorted(os.listdir(B)):
         if f.endswith('.HVP'):
-            cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
+            # [Configuración] los que no son juegos (HVPSIS del Makefile), en \HISPADOS
+            cp(os.path.join(B, f), ('HISPADOS/' if f in HVPSIS else 'HISPADOS/JUEGOS/') + f)
     print(OUT)
     mkfloppy()
 

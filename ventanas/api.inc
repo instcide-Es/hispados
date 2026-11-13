@@ -79,4 +79,8 @@
         HVF c_edit                  ; 60
         HVF c_lista
         HVF c_dialogo               ; 62
+        ; ---- [Configuración] añadidas para CONFIG.HVP (66 entradas) ----
+        HVF aj_leer                 ; 63  ajustes: EAX=número (AJ_*) -> EAX
+        HVF aj_poner                ; 64  EAX=número EDX=valor: lo pone y lo aplica
+        HVF esc_fondo               ; 65  ESI=mosaico de 16x16 (256 octetos): fondo nuevo
 %endmacro

@@ -219,6 +219,8 @@ hvp_abrir:
         jne .vs
         cmp dword [ebp+V_PADRE], 0
         jne .vs
+        mov eax, 1                  ; [Configuración] (por si está oculta)
+        call ven_mostrar
         mov eax, 4
         call ven_mostrar
         call ven_activar
