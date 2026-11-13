@@ -432,6 +432,10 @@ ven_destruir:
         jne .c1
         mov dword [captura], 0
 .c1:
+        cmp ebp, [cur_duena]        ; [TAMAÑO] la forma del cursor que pidió
+        jne .c1b
+        mov dword [cur_duena], 0
+.c1b:
         cmp ebp, [foco]
         jne .c2
         mov dword [foco], 0
@@ -889,6 +893,8 @@ ven_defecto:
         je .tecla
         cmp eax, WM_CHAR
         je .sube
+        cmp eax, WM_MOUSEWHEEL      ; [TAMAÑO] la rueda que no quiere una hija
+        je .rueda
         xor eax, eax
         ret
 .pintar:
@@ -900,6 +906,10 @@ ven_defecto:
         call ven_destruir
         xor eax, eax
         ret
+.rueda:
+        cmp dword [ebp+V_PADRE], 0
+        je .nada
+        jmp .sube
 .tecla:
         cmp dword [ebp+V_PADRE], 0
         je .nada
@@ -1150,15 +1160,36 @@ ges_donde:
         and ecx, S_VISIBLE | S_MINIM
         cmp ecx, S_VISIBLE
         jne .b
+        xor edi, edi                ; [TAMAÑO] las que cambian de tamaño se
+        test dword [ebp+V_ESTILO], E_TAMANO ; agarran también un poco por fuera
+        jz .m0
+        test dword [ebp+V_ESTILO], E_TITULO
+        jz .m0
+        test dword [ebp+V_ESTADO], S_MAXIM
+        jnz .m0
+        mov edi, AGARRE_FUERA
+.m0:
         mov ecx, eax
         sub ecx, [ebp+V_X]
+        lea edx, [ecx+edi]
+        test edx, edx
         js .b
-        cmp ecx, [ebp+V_AN]
+        mov edx, [ebp+V_AN]
+        add edx, edi
+        cmp ecx, edx
         jge .b
         mov edx, ebx
         sub edx, [ebp+V_Y]
+        push eax
+        lea eax, [edx+edi]
+        test eax, eax
+        pop eax
         js .b
-        cmp edx, [ebp+V_AL]
+        push eax
+        mov eax, [ebp+V_AL]
+        add eax, edi
+        cmp edx, eax
+        pop eax
         jge .b
         test dword [ebp+V_ESTILO], E_TITULO
         jz .cli
@@ -1191,24 +1222,24 @@ ges_donde:
         jz .tit
         test esi, 12                ; cerca de una esquina: en diagonal
         jz .b6
-        cmp ecx, 16
+        cmp ecx, AGARRE_ESQ         ; [TAMAÑO] (antes 16)
         jge .b5
         or esi, 1
 .b5:
         mov edi, [ebp+V_AN]
         sub edi, ecx
-        cmp edi, 16
+        cmp edi, AGARRE_ESQ
         jg .b8
         or esi, 2
         jmp .b8
 .b6:
-        cmp edx, 16
+        cmp edx, AGARRE_ESQ
         jge .b7
         or esi, 4
 .b7:
         mov edi, [ebp+V_AL]
         sub edi, edx
-        cmp edi, 16
+        cmp edi, AGARRE_ESQ
         jg .b8
         or esi, 8
 .b8:
@@ -1366,6 +1397,7 @@ ges_raton_pulsa:
         sub ecx, Z_BORDE
         mov [arr_bordes], cl
         mov byte [arrastre], 2
+        call tam_empezar            ; [TAMAÑO] tamaño mínimo y contorno
         jmp .x
 .titulo:
         cmp byte [rat_doble], 0
@@ -1383,6 +1415,7 @@ ges_raton_pulsa:
         sub ebx, [ebp+V_Y]
         mov [arr_dx], eax
         mov [arr_dy], ebx
+        call tam_empezar            ; [TAMAÑO] ¿solo el contorno?
         jmp .x
 .menu:
         call menu_barra_clic
@@ -1509,6 +1542,7 @@ ges_raton_mueve:
         test edi, edi
         jnz .post
         call ges_donde
+        call tam_cursor_zona        ; [TAMAÑO] la forma del cursor
         cmp ecx, Z_CLIENTE
         jne .x
         test dword [ebp+V_ESTADO], S_INACTIVA
@@ -1526,12 +1560,7 @@ ges_raton_mueve:
         mov ecx, [ebp+V_AN]
         mov edx, [ebp+V_AL]
         call ges_acotar
-        cmp eax, [ebp+V_X]
-        jne .m1
-        cmp ebx, [ebp+V_Y]
-        je .x
-.m1:
-        call ven_mover
+        call tam_aplicar            ; [TAMAÑO] (la ventana o su contorno)
         jmp .x
 .tam:
         mov ebp, [arr_ven]
@@ -1544,7 +1573,8 @@ ges_raton_mueve:
         test byte [arr_bordes], 1
         jz .t2
         mov esi, eax
-        lea eax, [ecx-MIN_AN]
+        mov eax, ecx                ; [TAMAÑO] el mínimo de la ventana
+        sub eax, [arr_min_an]
         cmp esi, eax
         jle .t2
         mov esi, eax
@@ -1553,7 +1583,8 @@ ges_raton_mueve:
         test byte [arr_bordes], 2
         jz .t3
         lea ecx, [eax+1]
-        lea eax, [esi+MIN_AN]
+        mov eax, esi
+        add eax, [arr_min_an]
         cmp ecx, eax
         jge .t3
         mov ecx, eax
@@ -1565,7 +1596,8 @@ ges_raton_mueve:
         jge .t3b
         mov edi, BARRA_H
 .t3b:
-        lea eax, [edx-MIN_AL]
+        mov eax, edx
+        sub eax, [arr_min_al]
         cmp edi, eax
         jle .t4
         mov edi, eax
@@ -1573,7 +1605,8 @@ ges_raton_mueve:
         test byte [arr_bordes], 8
         jz .t5
         lea edx, [ebx+1]
-        lea eax, [edi+MIN_AL]
+        mov eax, edi
+        add eax, [arr_min_al]
         cmp edx, eax
         jge .t5
         mov edx, eax
@@ -1582,16 +1615,7 @@ ges_raton_mueve:
         mov ebx, edi
         sub ecx, eax
         sub edx, ebx
-        cmp eax, [ebp+V_X]
-        jne .t6
-        cmp ebx, [ebp+V_Y]
-        jne .t6
-        cmp ecx, [ebp+V_AN]
-        jne .t6
-        cmp edx, [ebp+V_AL]
-        je .x
-.t6:
-        call ven_mover
+        call tam_aplicar            ; [TAMAÑO] (la ventana o su contorno)
         jmp .x
 .boton:
         call ges_donde              ; ¿sigue encima del botón?
@@ -1619,7 +1643,11 @@ ges_raton_suelta:
         cmp cl, 3
         je .boton
         test cl, cl
-        jnz .x
+        jz .s0
+        call tam_acabar             ; [TAMAÑO] contorno y WM_EXITSIZEMOVE
+        jmp .x
+.s0:
+        call con_quitar             ; [TAMAÑO] (por si quedaba un contorno)
         cmp dword [menu_ven], 0
         je .nm
         call menu_raton_suelta
@@ -1782,9 +1810,11 @@ ges_presentar:
         cmp byte [cur_puesto], 0
         je .hay
         mov eax, [rat_x]
+        sub eax, [cur_hx]           ; [TAMAÑO] (la punta de la forma)
         cmp eax, [cur_x]
         jne .hay
         mov eax, [rat_y]
+        sub eax, [cur_hy]
         cmp eax, [cur_y]
         je .x
 .hay:

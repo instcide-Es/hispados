@@ -521,6 +521,11 @@ pin_proc:
         je orden
         cmp eax, WM_SIZE
         je .tam
+        cmp eax, WM_GETMINMAXINFO   ; [TAMAÑO] lo más pequeño: herramientas y colores
+        jne .nmin
+        mov eax, 320 + 260 * 65536
+        ret
+.nmin:
         cmp eax, WM_CREATE
         je .crear
         cmp eax, WM_CLOSE

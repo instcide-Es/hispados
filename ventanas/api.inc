@@ -100,4 +100,7 @@
         HVF snd_pcm2                ; 77  como snd_pcm, con trozos de hasta 8.192 octetos
         HVF snd_orden               ; 78  AH=función de HSPSND (03h parar...) AL=dato -> EAX
         HVF snd_campana             ; 79  la campanita del volumen (si no hay silencio)
+        ; ---- [TAMAÑO] barras de desplazamiento y forma del cursor (82 entradas) ----
+        HVF c_barra                 ; 80  (datos) la clase de la barra de desplazamiento
+        HVF cur_forma               ; 81  EAX=CUR_* : la forma del cursor sobre la ventana EBP
 %endmacro

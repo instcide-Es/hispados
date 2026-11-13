@@ -25,6 +25,8 @@ MAX_GR      equ 12
 GR_TAM      equ 64
 GR_USO      equ 0
 GR_ESTADO   equ 1                   ; 0 cerrado, 1 abierto, 2 minimizado, 3 maximizado
+GR_BAND     equ 2                   ; [TAMAÑO] banderas del grupo:
+GRB_MEDIDA  equ 1                   ;   el usuario le ha dado el tamaño (no se alarga sola)
 GR_NOMBRE   equ 4                   ; 27 letras
 GR_X        equ 32
 GR_Y        equ 36
@@ -119,6 +121,8 @@ cfg_claves:
         dd GR_ESTADO, k_estado
         db 2, T_NUM, 0, 0
         dd GR_SEL, k_marcado
+        db 2, T_BIT, GRB_MEDIDA, 0  ; [TAMAÑO]
+        dd GR_BAND, k_medida
         db 3, T_CAD, 31, 0
         dd AC_NOMBRE, k_nombre
         db 3, T_ICONO, 0, 0
@@ -154,6 +158,7 @@ k_modulos   db "Modulos", 0
 k_nombre    db "Nombre", 0
 k_estado    db "Estado", 0
 k_marcado   db "Marcado", 0
+k_medida    db "Medida", 0          ; [TAMAÑO]
 k_icono     db "Icono", 0
 k_programa  db "Programa", 0
 k_carpeta   db "Carpeta", 0
@@ -1042,6 +1047,12 @@ cfg_guardar:
         mov esi, k_marcado
         mov eax, [ebx+GR_SEL]
         call pon_clave_num
+        test byte [ebx+GR_BAND], GRB_MEDIDA ; [TAMAÑO] solo si se la ha dado
+        jz .sinmedida
+        mov esi, k_medida
+        mov eax, 1
+        call pon_clave_num
+.sinmedida:
         imul edx, ecx, JD_DIRTAM    ; su carpeta de juegos, si la tiene
         add edx, gr_dirs
         cmp byte [edx], 0

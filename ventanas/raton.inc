@@ -17,27 +17,12 @@
 ;    cur_x, cur_y, cur_puesto   dónde está dibujado, si lo está
 ; =============================================================================
 
-CUR_ANCHO   equ 12
+CUR_ANCHO   equ 16                  ; [TAMAÑO] (antes 12: caben las dobles flechas)
 CUR_ALTO    equ 18
 
 rat_iniciar:
         pushad
-        mov esi, cursor_dib         ; el diseño en texto, a colores
-        mov edi, cur_img
-        mov ecx, CUR_ANCHO * CUR_ALTO
-.c:
-        lodsb
-        mov ah, CLAVE
-        cmp al, '.'
-        je .p
-        mov ah, C_TINTA
-        cmp al, 'X'
-        je .p
-        mov ah, C_OCRE
-.p:
-        mov [edi], ah
-        inc edi
-        loop .c
+        call cur_preparar           ; [TAMAÑO] los dibujos, a colores (tamano.inc)
         mov eax, [vid_ancho]
         shr eax, 1
         mov [rat_x], eax
@@ -50,6 +35,7 @@ rat_iniciar:
         int 0x33
         mov dword [rmcs+0x1C], 0x000C
         mov dword [rmcs+0x18], 0x1F ; movimiento y los botones izquierdo y derecho
+        call rueda_mascara          ; [TAMAÑO] y la rueda, si el driver la da
         mov dword [rmcs+0x14], rm_raton
         mov bl, 0x33
         call rm_int
@@ -116,13 +102,15 @@ cur_mostrar:
         call gdi_recorte_total
         mov eax, [rat_x]
         mov ebx, [rat_y]
+        sub eax, [cur_hx]           ; [TAMAÑO] la punta de cada forma
+        sub ebx, [cur_hy]
         mov [cur_x], eax
         mov [cur_y], ebx
         mov ecx, CUR_ANCHO
         mov edx, CUR_ALTO
         mov edi, cur_fondo
         call gdi_leer
-        mov esi, cur_img
+        mov esi, [cur_img_p]        ; [TAMAÑO] la forma que toca
         call gdi_copiar_clave
         mov byte [cur_puesto], 1
         popad

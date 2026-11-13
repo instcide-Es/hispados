@@ -5,8 +5,7 @@
 pal_rgb     resb 1024               ; la paleta: rojo, verde, azul, 0
 pal_nat     resd 256                ; cada color en el formato de la pantalla
 ; ---- cursor del ratón (el dibujo y lo que tapa) ----
-cur_img     resb CUR_ANCHO * CUR_ALTO
-cur_fondo   resb CUR_ANCHO * CUR_ALTO
+cur_fondo   resb CUR_ANCHO * CUR_ALTO    ; [TAMAÑO] (los dibujos, en bsstam.inc)
             alignb 4
 ; ---- núcleo ----
 mon_mango   resd 1

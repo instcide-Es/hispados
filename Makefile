@@ -478,6 +478,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	DOSHIGH=1 tests/run_ventanas_tests.sh $(IMG)
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
+	tests/run_tamano_tests.sh $(IMG)
 	tests/run_accesos_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_juegos2_tests.sh $(IMG)

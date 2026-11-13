@@ -27,6 +27,8 @@ aj_rat_doble dd 8
 tn_config   db "CONFIG.HVP", 0
 
 aj_leer:
+        cmp eax, AJ_CONTORNO        ; [TAMAÑO]
+        je .cont
         cmp eax, AJ_N
         jae .no
         push ebx
@@ -47,8 +49,16 @@ aj_leer:
 .no:
         xor eax, eax
         ret
+.cont:
+        movzx eax, byte [aj_contorno]
+        ret
 
 aj_poner:
+        cmp eax, AJ_CONTORNO        ; [TAMAÑO]
+        jne .n
+        mov [aj_contorno], dl
+        ret
+.n:
         cmp eax, AJ_N_RW
         jae .x
         push eax

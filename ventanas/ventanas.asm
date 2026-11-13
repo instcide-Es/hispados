@@ -3,7 +3,7 @@
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Uso:  VENTANAS [/1024] [/640] [/8] [/15] [/16] [/24] [/32] [/COLOR] [/VGA]
-;                 [/DEMO]
+;                 [/DEMO] [/CONTORNO]
 ;
 ;  El entorno gráfico propio que va encima de Hispa-DOS (docs/VENTANAS.md).
 ;  Todo está hecho aquí desde cero: el código, la paleta, el cursor, el
@@ -752,7 +752,12 @@ grafico:
         je .odemo
         cmp al, 7
         je .ohijo
+        cmp al, 8                   ; [TAMAÑO]
+        je .ocont
         jmp .ayuda
+.ocont:
+        mov byte [op_contorno], 1
+        jmp .arg
 .ohijo:
         mov ax, [0x16]              ; el PSP del padre: ¿es el lanzador?
         mov es, ax
@@ -1361,6 +1366,11 @@ eventos:
         cmp al, [rc_cab]
         je .teclas
         lea edi, [rat_cola+esi*8]
+        test byte [edi], 0x80       ; [TAMAÑO] la rueda (BH, con signo: tamano.inc)
+        jz .nrueda
+        movsx eax, byte [edi+3]
+        call ges_rueda
+.nrueda:
         mov ax, [edi+4]             ; lo que se ha movido desde el anterior
         mov cx, ax
         sub cx, [ult_si]
@@ -1583,6 +1593,8 @@ opciones:
         dw 0
         db 4, "DEMO", 6
         dw 0
+        db 8, "CONTORNO", 8         ; [TAMAÑO] arrastrar solo el contorno
+        dw 0
         db 1, "@", 7                ; (interna: la pone el lanzador)
         dw 0
         db 1, "?", 4
@@ -1592,13 +1604,14 @@ opciones:
 m_ayuda     db "Hispa Ventanas 0.3 - entorno gráfico de Hispa-DOS (etapa 3)", 13, 10
             db 13, 10
             db "VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA]", 13, 10
-            db "         [/DEMO]", 13, 10
+            db "         [/DEMO] [/CONTORNO]", 13, 10
             db 13, 10
             db "  /1024 /800 /640  resolución VESA: 1024x768, 800x600 (la normal) o 640x480", 13, 10
             db "  /8 ... /32       bits por punto (lo normal: 8, es decir, 256 colores)", 13, 10
             db "  /COLOR           color verdadero: el modo con más colores que haya", 13, 10
             db "  /VGA             no usar VESA: VGA de 640x480 y 16 colores", 13, 10
             db "  /DEMO            solo las ventanas de muestra (Tab, flechas y Esc)", 13, 10
+            db "  /CONTORNO        al mover o cambiar el tamaño, arrastrar solo el contorno", 13, 10
             db 13, 10
             db "Necesita HSPXMS.SYS (CONFIG.SYS) y HSPDPMI; con HSPRATON hay ratón.", 13, 10
             db "Dentro: doble clic en un icono del Centro de programas para abrirlo;", 13, 10
@@ -1651,6 +1664,7 @@ hay_rat     resb 1
 en_grafico  resb 1
 salir       resb 1
 op_demo     resb 1
+op_contorno resb 1                  ; [TAMAÑO] /CONTORNO
 son_nteclas resb 1
 rc_cab      resb 1                  ; cola de sucesos del ratón
 rc_cola     resb 1
@@ -1682,6 +1696,7 @@ alto_ini:
         bits 32
 %include "accesos.inc"
 %include "apagado.inc"                ; [APAGAR] salir: volver, reiniciar o apagar
+%include "tamano.inc"               ; [TAMAÑO] tamaño, cursores, barras y rueda
         align 16
 fin_archivo:
         absolute $
@@ -1691,5 +1706,6 @@ pila_fin:
 %ifdef CON_PROGRAMAS
 %include "bss3.inc"
 %endif
+%include "bsstam.inc"               ; [TAMAÑO]
             alignb 16
 bss_fin:

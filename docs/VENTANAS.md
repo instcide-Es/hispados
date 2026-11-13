@@ -83,11 +83,14 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    segunda tanda de juegos (Bloques, Solitario, Tragabolas y Almacén) ya
    está (`tests/run_juegos2_tests.sh`). Pendiente (se
    hará según haga falta en las etapas 4 y 5): avisar de los
-   textos sin guardar al salir con el botón «Salir»; arrastrar solo el
-   contorno en los equipos lentos y cambiar el cursor en los bordes; órdenes
-   de menú desactivadas o con marca; barra de desplazamiento horizontal,
-   tabuladores y ajuste de línea en el cuadro de texto; varias copias del
-   mismo programa a la vez.
+   textos sin guardar al salir con el botón «Salir»; órdenes
+   de menú desactivadas o con marca; tabuladores y ajuste de línea en el
+   cuadro de texto; varias copias del mismo programa a la vez; elegir el
+   «solo el contorno» (`AJ_CONTORNO`) desde Configuración. Hecho después
+   ([TAMAÑO], «Cambiar el tamaño y desplazarse»): bordes que se agarran con
+   holgura, cursor que cambia de forma, contorno en los equipos lentos,
+   barras de desplazamiento vertical y horizontal como control (`c_barra`) y
+   rueda del ratón.
 4. **Cargador de ejecutables de Windows (NE) y KERNEL.** Módulos, DLL,
    recursos (iconos, menús, diálogos, cadenas), memoria global y local,
    segmentos móviles y descartables, archivos .INI (perfiles).
@@ -154,6 +157,7 @@ texto).
 DEVICE=A:\HISPADOS\HSPXMS.SYS        (en CONFIG.SYS)
 KEYB SP                              (en AUTOEXEC.BAT, para el teclado español)
 VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DEMO]
+         [/CONTORNO]
 ```
 
 - Hace falta HSPXMS.SYS (si no está, lo dice y termina).
@@ -172,7 +176,7 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
 - Ventanas: se arrastran por la barra de título; los botones de la derecha
   minimizan (a un icono abajo; un clic lo recupera), maximizan o restauran
   (también doble clic en el título) y cierran; se cambia el tamaño tirando de
-  un borde o de una esquina.
+  un borde o de una esquina (ver «Cambiar el tamaño y desplazarse»).
 - Teclado: Alt+F4 cierra la ventana activa, Ctrl+Tab (o Alt+Tab) pasa a otra,
   F10 o Alt+letra abre un menú (flechas, Intro, Esc), Tab y Mayús+Tab pasan
   de un control a otro, Intro y Esc aceptan y cancelan un diálogo. En los
@@ -199,6 +203,65 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   llamada sin preguntar en la pantalla; no cambia ningún otro vector de
   interrupción. Si el programa falla estando en gráficos, vuelve antes a modo
   texto para que se lea el mensaje de HSPDPMI.
+
+### Cambiar el tamaño y desplazarse
+
+[TAMAÑO] (`ventanas/tamano.inc`, en la parte alta). Pedido de Carlos,
+probándolo en un ThinkPad con touchpad.
+
+- **Bordes y esquinas.** Las ventanas con `E_TAMANO` (las de los grupos y el
+  Centro, el Bloc de notas, el Reloj, Pintura, Hispa-Nes; los diálogos no)
+  se agarran por cualquiera de los cuatro bordes y las cuatro esquinas, con
+  holgura para un touchpad: 5 puntos por dentro del borde y 4 por fuera
+  (`AGARRE`, `AGARRE_FUERA`); a menos de 20 puntos de una esquina
+  (`AGARRE_ESQ`) se tira en diagonal. Una ventana maximizada no se agarra.
+- **El cursor cambia de forma** encima de un borde: doble flecha ↔ en los
+  lados, ↕ arriba y abajo y en diagonal en las esquinas (dibujos propios de
+  16×16, en `tamano.inc`; la punta es el centro). Un programa puede pedir
+  una forma para su zona con `cur_forma`.
+- **Tamaño mínimo.** Al empezar a tirar se pregunta a la ventana
+  `WM_GETMINMAXINFO`: devuelve en EAX el ancho mínimo + el alto mínimo×65536
+  (0: los normales, 140×70). Los grupos piden 150×110 (una columna y la
+  barra), el Bloc 220×130 y Pintura 320×260.
+- **El programa se entera**: `WM_SIZE` en cada paso (EDX=ancho + alto×65536
+  de la zona), para recolocar lo de dentro, y, al soltar,
+  `WM_EXITSIZEMOVE` (ECX=1 si ha cambiado el tamaño, 0 si solo se movió).
+- **Solo el contorno.** En un equipo lento repintar a cada paso parpadea y
+  se queda atrás: entonces, al mover o cambiar el tamaño, solo se dibuja un
+  contorno (tres filetes, tinta, ocre y tinta, puestos en la superficie
+  guardando lo que tapan) y la ventana cambia una vez, al soltar. Lo decide
+  `AJ_CONTORNO` (`aj_leer`/`aj_poner`): 0 automático (lo normal: la primera
+  vez que se arrastra se mide cuántas veces se lleva la pantalla entera en
+  dos tics de reloj; menos de 4, es lenta), 1 siempre el contorno (también
+  `VENTANAS /CONTORNO`, que el lanzador conserva) y 2 nunca.
+- **Barras de desplazamiento** (`c_barra`, vertical o, con `BDS_HORIZ`,
+  horizontal): flechas en las puntas, pulgar proporcional (lo que se ve
+  respecto a todo) que se arrastra, clic en la pista para avanzar una página,
+  flechas y pista que repiten mientras se tienen apretadas y la rueda del
+  ratón encima. Avisan a su madre con `WM_VSCROLL` / `WM_HSCROLL` (ECX=la
+  posición nueva, EDX=la barra). Ver «Controles».
+  - En las ventanas de los **grupos** y en el **Centro**, cuando los iconos no
+    caben sale la barra vertical a la derecha (y se quita cuando vuelven a
+    caber); los iconos se colocan en las columnas que quedan. Se desplaza
+    con la barra, con la rueda (media fila por paso), y con el teclado:
+    flechas, **Re Pág / Av Pág** (una página de filas), **Inicio** y **Fin**
+    (el primero y el último); lo marcado siempre queda a la vista.
+  - El **Bloc de notas** tiene, además de la vertical del cuadro de texto,
+    una horizontal debajo para las líneas largas.
+  - Las listas (`c_lista`) y el cuadro de texto de varias líneas se
+    desplazan también con la rueda (tres filas por paso).
+- **La rueda del ratón** llega como `WM_MOUSEWHEEL` (ECX=pasos, positivo
+  hacia abajo; EDX=x,y en la zona) a la ventana que hay debajo del cursor;
+  la que no la quiere la pasa a su madre (`ven_defecto`). Hispa Ventanas la
+  pide con la interfaz de CuteMouse (INT 33h AX=11h y el bit 7 de la máscara
+  de sucesos, con los pasos en BH): la da HSPRATON por la vía directa con un
+  ratón IntelliMouse (PS/2 con rueda; ver su cabecera) y la dan otros
+  drivers como CuteMouse. Un touchpad sin rueda se desplaza con la barra o
+  el teclado.
+- **Se recuerda.** El sitio y el tamaño de las ventanas de los grupos y del
+  Centro van a CENTRO.INI (`Ventana=`) al cerrarlas y al salir. Un grupo al
+  que el usuario ha dado el tamaño con el ratón lleva `Medida=1` y ya no se
+  alarga solo al abrirse cuando no caben sus iconos (sale la barra).
 
 ### El Centro de programas: grupos y accesos directos
 
@@ -360,6 +423,7 @@ Nombre=Juegos
 Ventana=248,188,452,190
 Estado=1
 Marcado=0
+Medida=1
 
 [Acceso]
 Nombre=Doom
@@ -370,6 +434,10 @@ Parametros=
 Volver=1
 Pausa=0
 ```
+
+`Medida=1` ([TAMAÑO]) solo se escribe si el usuario ha cambiado el tamaño
+del grupo con el ratón: entonces no se alarga solo al abrirse aunque no
+quepan sus iconos.
 
 Un grupo ligado a una carpeta de juegos y un acceso con opciones de juego
 llevan además estas claves (**solo se escriben cuando hacen falta**: un
@@ -862,6 +930,10 @@ ECX=ancho, EDX=alto.
 | `WM_CLOSE` | botón de cerrar, Alt+F4 (por defecto: se destruye) | |
 | `WM_PAINT` | hay algo que repintar | |
 | `WM_SIZE`, `WM_MOVE` | ha cambiado de tamaño / de sitio | `WM_SIZE`: EDX=ancho + alto×65536 de la zona |
+| `WM_GETMINMAXINFO` | [TAMAÑO] antes de cambiar el tamaño con el ratón | → EAX=ancho mínimo + alto mínimo×65536 (0: 140×70) |
+| `WM_EXITSIZEMOVE` | [TAMAÑO] se suelta la ventana que se movía o cambiaba de tamaño con el ratón | ECX=1 si ha cambiado el tamaño |
+| `WM_VSCROLL`, `WM_HSCROLL` | [TAMAÑO] se ha movido una barra de desplazamiento hija | ECX=posición nueva, EDX=la barra |
+| `WM_MOUSEWHEEL` | [TAMAÑO] la rueda del ratón, sobre la zona (la que no lo quiere lo pasa a su madre) | ECX=pasos (positivo: hacia abajo), EDX=x + y×65536 |
 | `WM_SETFOCUS`, `WM_KILLFOCUS` | toma o pierde el foco del teclado | |
 | `WM_KEYDOWN` | tecla que no escribe (flechas, Intro, Tab, Esc, Supr, F1…) | ECX=tecla (`TC_*`; Ctrl+letra = `TC_CTRL`+1…26), EDX=mayúsculas (`TM_*`) |
 | `WM_CHAR` | carácter (página 437, con el teclado de KEYB) | ECX=carácter |
@@ -952,6 +1024,7 @@ Son clases de ventana hija. Avisan a su madre con `WM_COMMAND`.
 | `c_estatico` | texto fijo (el carácter 10 cambia de línea); `SS_DERECHA`, `SS_HUNDIDO`, `SS_NEGRITA` | |
 | `c_edit` | cuadro de texto de una línea (255 caracteres); con `ES_MULTI`, de varias (60.000) con barra de desplazamiento | `WM_SETTEXT` (EDX=texto), `WM_GETTEXT` (ECX=tamaño, EDX=búfer), `WM_CUT`, `WM_COPY`, `WM_PASTE`, `EM_SEL_TODO`, `EM_MODIFICADO`, `EM_PONER_MODIF`, `EM_LARGO`; `ed_poner`, `ed_datos`, `ed_seleccionar` |
 | `c_lista` | lista de textos (200 de 39 letras) con barra de desplazamiento | `LM_ANADIR` (EDX=texto), `LM_VACIAR`, `LM_SELEC`, `LM_PONER_SELEC`, `LM_TEXTO`, `LM_CUENTA`; avisos `LN_SELEC` y `LN_DOBLE` |
+| `c_barra` | [TAMAÑO] barra de desplazamiento (en `tamano.inc`), vertical o con `BDS_HORIZ` horizontal, de `BD_AN` (16) de grueso; la posición va de 0 al máximo | `BDM_PONER` (ECX=máximo, EDX=página: lo que se ve), `BDM_POS` (ECX=posición, sin aviso), `BDM_LEER` (→ EAX), `BDM_MOVER` (ECX=`BD_LIN_ARR`, `BD_LIN_ABA`, `BD_PAG_ARR`, `BD_PAG_ABA`, `BD_INICIO`, `BD_FIN`: como si se pulsara, con aviso: para las teclas), `BDM_LINEA` (ECX=lo que avanza una flecha o un paso de la rueda; 1); avisa con `WM_VSCROLL` / `WM_HSCROLL` |
 
 El **portapapeles** guarda texto (hasta 64 KB): `pp_poner` (ESI, ECX) y
 `pp_buf`, `pp_len`. Dentro, el texto de varias líneas lleva solo LF; el Bloc
@@ -1220,7 +1293,20 @@ la 79):
 | `snd_orden` (AH=función de HSPSND, AL=dato → EAX; CF=1 si no hay sonido) | las demás funciones de HSPSND: 03h parar, 02h esperar a que acabe, 06h leer el volumen y, con la versión 3 de su interfaz, 08h: cuántos trozos caben en la cola sin esperar (AL, de 0 a 4). El volumen y el silencio se cambian con `aj_poner`, que además los apunta y repinta el altavoz |
 | `snd_campana` | toca la campanita del volumen (ver «El volumen»); no espera |
 
-Un módulo compilado con menos entradas en su cabecera (63, 66, 72 o 76) sigue
+Añadidas para cambiar el tamaño y desplazarse ([TAMAÑO]; 82 entradas: dos
+más, la 80 y la 81):
+
+| Entradas | Para qué |
+|---|---|
+| `c_barra` | (datos) la clase de la barra de desplazamiento (ver «Controles»): `HV_c_barra` en la plantilla y `hvl_clases` |
+| `cur_forma` (EBP=ventana, EAX=`CUR_FLECHA`, `CUR_HORIZ`, `CUR_VERT`, `CUR_DIAG1` o `CUR_DIAG2`) | la forma del cursor mientras está sobre la zona de esa ventana (hasta que se pida otra o se destruya la ventana) |
+
+Los mensajes nuevos (`WM_GETMINMAXINFO`, `WM_EXITSIZEMOVE`, `WM_VSCROLL`,
+`WM_HSCROLL`, `WM_MOUSEWHEEL`, `BDM_*`) no gastan entradas: un módulo que no
+los conoce los manda a `ven_defecto`, que devuelve 0 (los tamaños mínimos
+normales) o pasa la rueda a la madre.
+
+Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76 u 80) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
 
@@ -1558,6 +1644,18 @@ o comprimidos.
   Hispa-DOS», y «Apagar el equipo» (-M pc y -M q35) y «Reiniciar el equipo»
   (-M q35), que terminan QEMU con CENTRO.INI ya guardado. Capturas en
   `build/apagar_*.png`.
+- `tests/run_tamano_tests.sh` ([TAMAÑO]): con HSPRATON por la vía directa
+  (rueda) y un CENTRO.INI con un grupo de 14 accesos: el grupo sale
+  alargado y con la barra; el cursor cambia de forma en un borde (agarrado
+  por fuera) y en una esquina; se arrastran el borde derecho y la esquina de
+  arriba a la izquierda (tamaño nuevo, iconos en dos columnas); se desplaza
+  arrastrando el pulgar (se ve el icono que estaba oculto), con Inicio, la
+  rueda, Fin y Re Pág; CENTRO.INI guarda el tamaño y `Medida=1`. Segunda
+  sesión con `/CONTORNO`: el grupo sale con el tamaño de antes, al tirar de
+  un borde solo se mueve el contorno y la ventana cambia al soltar; en el
+  Bloc de notas, una línea larga mueve la barra horizontal, Inicio la
+  devuelve y sus flechas desplazan el texto. Capturas en
+  `build/tamano_*.png`.
 - `tests/run_accesos_tests.sh`: los grupos ligados a una carpeta de juegos
   y las opciones de juego, con un disco duro que trae `C:\JUEGOS` y QEMU en
   modo `-icount` (las velocidades medidas no dependen de la carga del

@@ -96,6 +96,15 @@ bloc_poner_titulo:
         ret
 
 bloc_proc:
+        cmp eax, WM_GETMINMAXINFO   ; [TAMAÑO] lo más pequeño: menú y unas líneas
+        jne .nmin
+        mov eax, 220 + 130 * 65536
+        ret
+.nmin:
+        call bloc_hb_msg            ; [TAMAÑO] la barra horizontal (tamano.inc)
+        jnc .nhb
+        ret
+.nhb:
         cmp eax, WM_COMMAND
         je .orden
         cmp eax, WM_SIZE
@@ -117,12 +126,18 @@ bloc_proc:
         mov esi, bloc_edit_plant
         call ven_crear
         mov [bloc_edit], eax
+        call bloc_hb_crear          ; [TAMAÑO]
         call ven_cli
         shl edx, 16
         mov dx, cx
 .tam:
         movzx ecx, dx               ; el cuadro de texto ocupa toda la zona
         shr edx, 16
+        call bloc_hb_mover          ; [TAMAÑO] menos la barra horizontal, abajo
+        sub edx, BD_AN
+        jns .t1
+        xor edx, edx
+.t1:
         xor eax, eax
         xor ebx, ebx
         mov ebp, [bloc_edit]

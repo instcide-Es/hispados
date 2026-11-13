@@ -1079,6 +1079,8 @@ ed_pos_de_xy:
 ed_proc:
         cmp eax, WM_PAINT
         je ed_pintar
+        cmp eax, WM_MOUSEWHEEL      ; [TAMAÑO] la rueda: tres líneas por paso
+        je .rueda
         cmp eax, WM_CHAR
         je .car
         cmp eax, WM_KEYDOWN
@@ -1204,6 +1206,23 @@ ed_proc:
         call ven_invalidar
         xor eax, eax
         ret
+.rueda:
+        test dword [ebp+V_ESTILO], ES_MULTI
+        jz ven_defecto
+        push ecx
+        call ed_barra
+        pop eax
+        imul eax, 3
+        add eax, [ebp+V_D5]
+        jns .r1
+        xor eax, eax
+.r1:
+        cmp eax, edi
+        jle .r2
+        mov eax, edi
+.r2:
+        mov [ebp+V_D5], eax
+        jmp .inv
 .pulsa:
         call raton_xy
         test dword [ebp+V_ESTILO], ES_MULTI
@@ -1613,6 +1632,8 @@ lis_ver:
 lis_proc:
         cmp eax, WM_PAINT
         je lis_pintar
+        cmp eax, WM_MOUSEWHEEL      ; [TAMAÑO] la rueda: tres filas por paso
+        je .rueda
         cmp eax, WM_LBUTTONDOWN
         je .pulsa
         cmp eax, WM_LBUTTONDBLCLK
@@ -1785,6 +1806,21 @@ lis_proc:
 .suelta:
         mov dword [ebp+V_D4], 0
         jmp .nada
+.rueda:
+        push ecx
+        call lis_barra
+        pop eax
+        imul eax, 3
+        add eax, [ebp+V_D3]
+        jns .r1
+        xor eax, eax
+.r1:
+        cmp eax, edi
+        jle .r2
+        mov eax, edi
+.r2:
+        mov [ebp+V_D3], eax
+        jmp .inv
 .tecla:
         mov eax, [ebp+V_D2]
         mov edx, [ebp+V_D1]

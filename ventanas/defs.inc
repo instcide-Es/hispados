@@ -32,6 +32,14 @@ WM_LBUTTONUP    equ 0x0202
 WM_LBUTTONDBLCLK equ 0x0203
 WM_RBUTTONDOWN  equ 0x0204          ; botón derecho (solo en la zona de la ventana)
 WM_RBUTTONUP    equ 0x0205          ; se suelta (a la ventana donde se apretó)
+; [TAMAÑO] cambiar el tamaño, barras de desplazamiento y rueda (tamano.inc)
+WM_GETMINMAXINFO equ 0x0024         ; antes de cambiar el tamaño con el ratón: -> EAX =
+                                    ; ancho mínimo + alto mínimo*65536 (0: los normales)
+WM_HSCROLL      equ 0x0114          ; de una barra horizontal: ECX=posición nueva EDX=la barra
+WM_VSCROLL      equ 0x0115          ; de una barra vertical: lo mismo
+WM_MOUSEWHEEL   equ 0x020A          ; la rueda: ECX=pasos (positivo: hacia abajo), EDX=x,y
+WM_EXITSIZEMOVE equ 0x0232          ; se ha soltado la ventana que se movía o cambiaba de
+                                    ; tamaño con el ratón: ECX=1 si ha cambiado el tamaño
 WM_CUT          equ 0x0300
 WM_COPY         equ 0x0301
 WM_PASTE        equ 0x0302
@@ -51,6 +59,19 @@ LM_PONER_SELEC  equ WM_USER+23      ; ECX=índice
 LM_TEXTO        equ WM_USER+24      ; ECX=índice -> puntero al texto
 LM_CUENTA       equ WM_USER+25
 DM_INICIO       equ WM_USER+40      ; diálogo: ya están creados los controles
+; [TAMAÑO] barra de desplazamiento (c_barra): avisa a su madre con WM_VSCROLL
+; o WM_HSCROLL (ECX=posición nueva, EDX=la barra) cada vez que se mueve
+BDM_PONER       equ WM_USER+50      ; ECX=máximo (la posición más alta) EDX=página
+BDM_POS         equ WM_USER+51      ; ECX=posición (sin avisar)
+BDM_LEER        equ WM_USER+52      ; -> EAX=posición
+BDM_MOVER       equ WM_USER+53      ; ECX=BD_* (como si se pulsara; avisa) -> EAX=posición
+BDM_LINEA       equ WM_USER+54      ; ECX=lo que avanza una flecha o un paso de la rueda
+BD_LIN_ARR      equ 0               ; (los números de SB_LINEUP...)
+BD_LIN_ABA      equ 1
+BD_PAG_ARR      equ 2
+BD_PAG_ABA      equ 3
+BD_INICIO       equ 6
+BD_FIN          equ 7
 
 ; avisos de los controles: WM_COMMAND con ECX = id + aviso*65536, EDX=control
 LN_SELEC        equ 1               ; lista: ha cambiado el elegido
@@ -115,6 +136,7 @@ SS_DERECHA      equ 0x10000         ; texto: pegado a la derecha
 SS_HUNDIDO      equ 0x20000         ; texto: en un recuadro blanco
 SS_NEGRITA      equ 0x40000
 ES_MULTI        equ 0x10000         ; cuadro de texto de varias líneas
+BDS_HORIZ       equ 0x10000         ; [TAMAÑO] barra de desplazamiento horizontal
 
 ; ---- estado de una ventana ----
 S_VISIBLE       equ 0x01
@@ -200,11 +222,21 @@ VELR_CACHE      equ 0x10C           ; se quieren las cachés desactivadas
 VELR_CD         equ 0x12B           ; CR0.CD puesto por VELOCIDAD
 BARRA_H         equ 28              ; barra superior del escritorio
 MENU_H          equ 20              ; barra de menús de una ventana
-AGARRE          equ 4               ; borde que se agarra para cambiar el tamaño
+AGARRE          equ 5               ; [TAMAÑO] borde que se agarra para cambiar el tamaño (dentro)
+AGARRE_FUERA    equ 4               ; [TAMAÑO] y fuera de la ventana (en total, 9 puntos)
+AGARRE_ESQ      equ 20              ; [TAMAÑO] a menos de esto de una esquina: en diagonal
 BOT_NC          equ 18              ; botones de la barra de título
 MIN_AN          equ 140             ; tamaño mínimo de una ventana
 MIN_AL          equ 70
 BD_AN           equ 16              ; ancho de la barra de desplazamiento
+
+; ---- [TAMAÑO] formas del cursor del ratón (cur_forma) ----
+CUR_FLECHA      equ 0               ; la flecha de siempre
+CUR_HORIZ       equ 1               ; doble flecha izquierda-derecha (bordes de los lados)
+CUR_VERT        equ 2               ; doble flecha arriba-abajo (bordes de arriba y abajo)
+CUR_DIAG1       equ 3               ; en diagonal, arriba a la izquierda-abajo a la derecha
+CUR_DIAG2       equ 4               ; en diagonal, arriba a la derecha-abajo a la izquierda
+CUR_N           equ 5
 
 ; ---- zonas de una ventana (ges_donde) ----
 Z_NADA          equ 0
@@ -256,3 +288,6 @@ AJ_TXT_VIDEO    equ 11              ; "Vídeo: VESA 3.0 con marco lineal"
 AJ_TXT_DPMI     equ 12              ; "DPMI 0.90 (32 bits); memoria libre: ..."
 AJ_TXT_VERSION  equ 13              ; "Hispa Ventanas 0.3" (hasta el carácter 10)
 AJ_N            equ 14
+; [TAMAÑO] (se lee y se cambia) arrastrar las ventanas: 0 automático (solo el
+; contorno si la pantalla es lenta), 1 siempre solo el contorno, 2 enteras
+AJ_CONTORNO     equ 14

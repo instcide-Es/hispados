@@ -24,15 +24,19 @@
 ;  y se activa (F4h). La IRQ 12 (INT 74h) pasa a ser nuestra: solo lee del
 ;  puerto 60h los bytes marcados como del auxiliar (bit 5 del estado), así
 ;  que no quita teclas al teclado, ni a la emulación USB de la BIOS, ni a
-;  HSPUSB (órdenes D2h/D3h). Paquetes de 3 bytes (4 con IntelliMouse; la
-;  rueda no se entrega), sincronizados por el bit 3 del primer byte y por
+;  HSPUSB (órdenes D2h/D3h). Paquetes de 3 bytes (4 con IntelliMouse: la
+;  rueda se entrega como en CuteMouse, ver f11), sincronizados por el bit 3 del primer byte y por
 ;  tiempo. Todos los plazos van por el reloj de la BIOS: en un PC sin 8042
 ;  se avisa y no se cuelga.
 ;
 ;  Los ratones USB llegan por HSPUSB.SYS: como paquetes PS/2 (controlador
 ;  8042) o, si no hay ratón PS/2, por la entrada privada INT 33h AX=48D0h.
 ;  Cursor por software en los modos de texto y en el modo 13h (320x200x256).
-;  Funciones: 00h-0Fh, 10h, 13h-1Fh, 20h-24h, 26h, 2Ah.
+;  Funciones: 00h-0Fh, 10h, 11h, 13h-1Fh, 20h-24h, 26h, 2Ah.
+;  [TAMAÑO] La rueda (solo por la vía directa, con IntelliMouse), con la interfaz de
+;  CuteMouse: 11h -> AX=574Dh y CX bit 0 si la hay; suceso 80h en la máscara
+;  de la rutina del usuario, con los pasos en BH (positivo: hacia el
+;  usuario); 03h da en BH los pasos desde la última vez.
 ;  Privadas: AX=48D0h (movimiento de HSPUSB), 48D2h (¿está?), 48D3h (ES:BX =
 ;  datos del diagnóstico).
 ; =============================================================================
@@ -193,7 +197,7 @@ fjmp        dw 0
 
 ftab        dw f00, f01, f02, f03, f04, f05, f06, f07
             dw f08, f09, f0a, f0b, f0c, fnop, fnop, f0f
-            dw f10, fnop, fnop, fnop, f14, f15, f16, f17
+            dw f10, f11, fnop, fnop, f14, f15, f16, f17
             dw fbad, fbad, f1a, f1b, fnop, f1d, f1e, f1f
             dw f20, f21, fnop, f23, f24, fnop, f26, fnop
             dw fnop, fnop, f2a
@@ -337,11 +341,23 @@ f02:
 f10:
         jmp f02
 
-; 03h: estado
+; 03h: estado (BH: los pasos de la rueda desde la última vez)
 f03:
         mov bx, [btn]
+        mov bh, [whacc]
+        mov byte [whacc], 0
         mov cx, [mx]
         mov dx, [my]
+        ret
+; 11h: ¿hay rueda? (la interfaz de CuteMouse) -> AX=574Dh «WM», CX bit 0
+f11:
+        mov ax, 0x574D
+        xor cx, cx
+        cmp byte [pk_len], 4
+        jne .r
+        inc cx
+.r:
+        xor bx, bx
         ret
 ; 04h: colocar
 f04:
@@ -649,6 +665,12 @@ motion:
         cmp si, 3
         jb .bl
 .nob:
+        mov al, [whd]               ; la rueda: suceso 80h y BH con los pasos
+        test al, al
+        jz .now
+        or word [ev], 0x80
+        add [whacc], al
+.now:
         cmp word [cflag], 0
         jne .user
         call show_now
@@ -660,6 +682,7 @@ motion:
         cmp dword [uhand], 0
         je .done
         mov bx, [btn]
+        mov bh, [whd]
         mov cx, [mx]
         mov dx, [my]
         mov si, [mickx]
@@ -668,11 +691,14 @@ motion:
         call far [uhand]
         pop ds
 .done:
+        mov byte [whd], 0
         mov byte [busy], 0
 .r:
         ret
 ev          dw 0
 chg         dw 0
+whd         db 0                    ; pasos de la rueda de este paquete (con signo)
+whacc       db 0                    ; los de la función 03h
 mickd       dw 0
 
 ; entrada privada de HSPUSB: BX botones, CX dx, DX dy (hacia abajo)
@@ -807,6 +833,11 @@ irq12:
         mov bl, [pk_buf]
         mov cl, [pk_buf+1]
         mov dl, [pk_buf+2]
+        cmp byte [pk_len], 4        ; IntelliMouse: el cuarto, la rueda
+        jne .p3
+        mov al, [pk_buf+3]
+        mov [whd], al
+.p3:
         call packet
         jmp .ret
 .eoi:

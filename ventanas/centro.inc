@@ -303,6 +303,8 @@ grupo_abrir:
         jz .x
         mov ecx, [ebx+GR_SEL]       ; con el icono que estaba marcado
         mov [eax+V_D0], ecx
+        test byte [ebx+GR_BAND], GRB_MEDIDA ; [TAMAÑO] si el usuario le ha dado
+        jnz .x                      ; el tamaño, se queda (y sale la barra)
         mov ebp, eax                ; si no caben todos los iconos (ha entrado
         call vista_cuenta           ; un programa nuevo), la ventana se alarga
         add eax, [vis_cols]
@@ -339,6 +341,13 @@ vista_cols:
         push edx
         call ven_cli
         mov [vis_alto], edx
+        mov eax, [ebp+V_D1]         ; [TAMAÑO] sin el sitio de la barra
+        test eax, eax
+        jz .sb
+        test dword [eax+V_ESTADO], S_VISIBLE
+        jz .sb
+        sub ecx, BD_AN
+.sb:
         mov eax, ecx
         sub eax, 12
         jns .a
@@ -434,6 +443,7 @@ vista_en:
         push ecx
         push edx
         push esi
+        add ebx, [ebp+V_D2]         ; [TAMAÑO] lo que se ha desplazado
         call vista_cols
         sub eax, 12
         js .no
@@ -489,6 +499,10 @@ vistas_repintar:
         ret
 
 vista_proc:
+        call vt_mensaje             ; [TAMAÑO] tamaño, barra y rueda (tamano.inc)
+        jnc .propio
+        ret
+.propio:
         cmp eax, WM_PAINT
         je vista_pintar
         cmp eax, WM_CREATE
@@ -514,6 +528,7 @@ vista_proc:
         jmp ven_defecto
 .crear:
         mov dword [ebp+V_MENU], menu_centro
+        call vt_crear               ; [TAMAÑO] su barra de desplazamiento
         mov dword [ebp+V_ICONO], ico_centro
         cmp dword [ebp+V_ID], 0
         je .nada
@@ -590,6 +605,8 @@ vista_proc:
         mov edi, eax
         pop ecx
         mov eax, [ebp+V_D0]
+        call vt_tecla               ; [TAMAÑO] RePág, AvPág, Inicio y Fin
+        jc .tm
         cmp ecx, TC_DER
         jne .t1
         inc eax
@@ -632,6 +649,7 @@ vista_proc:
         jmp .nada
 .tm:
         mov [ebp+V_D0], eax
+        call vista_ver              ; [TAMAÑO] que se vea lo marcado
 .inv:
         call ven_invalidar
         jmp .nada
@@ -713,6 +731,7 @@ vista_proc:
         ret
 
 vista_pintar:
+        call vista_disponer         ; [TAMAÑO] la barra, si no caben los iconos
         call dc_pintar
         call vista_cuenta
         mov [vis_n], eax
@@ -750,6 +769,7 @@ vista_pintar:
         xor edx, edx
         div dword [vis_cols]        ; EAX=fila EDX=columna
         imul eax, CEN_FILA
+        sub eax, [ebp+V_D2]         ; [TAMAÑO] lo desplazado
         mov [vis_y], eax
         imul edx, CEN_PASO
         add edx, 12
@@ -799,8 +819,7 @@ vista_pintar:
         mov eax, 16
         cmp dword [ebp+V_ID], 0
         jne .grupo
-        mov ebx, [vis_alto]         ; el Centro: la pista, abajo
-        sub ebx, 43
+        call vt_pista_y             ; [TAMAÑO] el Centro: la pista, abajo (de todo)
         mov esi, t_centro_pista
         call dc_texto
         jmp .x
