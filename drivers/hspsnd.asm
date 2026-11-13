@@ -3,7 +3,7 @@
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Uso:  HSPSND [/SB] [/SB8] [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO]
-;               [/EAPD:0]
+;               [/EAPD:0] [/NOAPRENDIDO]
 ;               [/NOTECLAS]   (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
 ;        /SB        Sound Blaster 16 emulada sobre el HD Audio o el AC'97,
 ;                   para los juegos (hace falta HSPEMM; si hay una Sound
@@ -19,6 +19,8 @@
 ;                   en muchos portátiles encienden el amplificador de los
 ;                   altavoces (si no se dice, todas a 1); /NOGPIO no las toca
 ;        /EAPD:0    HD Audio: apagar EAPD en vez de encenderlo
+;        /NOAPRENDIDO  no usar \HISPADOS\SONIDO.INI (lo aprendido en la
+;                   prueba de sonido: ver más abajo)
 ;        /NOTECLAS  sin teclas de volumen (Ctrl+Alt+flecha arriba/abajo,
 ;                   Ctrl+Alt+Fin = silencio, y las teclas multimedia)
 ;
@@ -29,6 +31,19 @@
 ;  4 GB) para llegar a sus registros. En modo V86 solo funciona con HSPEMM,
 ;  que le mapea los registros en una página de su propia memoria (hda_wseg);
 ;  bajo otros EMM386 no.
+;
+;  Lo aprendido (SONIDO.INI): AUDICION, cuando se contesta que SÍ suena,
+;  guarda en \HISPADOS\SONIDO.INI de la unidad de arranque una sección por
+;  tarjeta (cabecera [HDA pci subsistema códec subsistema-del-códec] o
+;  [AC97 pci subsistema códec]) con el camino exacto que sonó. Al cargarse,
+;  antes de buscar, HSPSND lee ese fichero (de su unidad o de la de arranque)
+;  y, si está la tarjeta de este equipo, pone ese camino: pin, ruta con la
+;  entrada de cada nodo, control del pin, EAPD, GPIO, «snoop», 44,1 kHz y
+;  volumen por programa (codec_learn, que comprueba antes que la ruta existe
+;  en el códec). Si no está, no cuadra o falla, busca como siempre y lo dice.
+;  Las opciones /GPIO, /NOGPIO y /EAPD mandan sobre lo aprendido. El análisis
+;  del fichero va en la instalación (se descarta); residente quedan solo
+;  unos 50 octetos para /INFO (lrn_*). Ver docs/AUDICION.md.
 ;
 ;  Con LH: si los búferes de DMA (van detrás del código residente) no caben
 ;  en el bloque de memoria superior, el programa se carga otra vez a sí mismo
@@ -101,6 +116,19 @@ hda_afg     db 0
 hda_dacs    times 4 db 0            ; DAC en uso (0 = fin)
 hda_npin    db 0
 hda_pins    times 4 * 5 db 0        ; caminos: pin, intermedios..., DAC, ceros
+hda_pidx    times 4 * 4 db 0        ; ... la entrada elegida en cada nodo
+hda_pctl    times 4 db 0            ; ... y el control del pin
+; lo aprendido en la prueba de sonido (SONIDO.INI), para /INFO
+lrn_why     db 0                    ; 0 nada, 1 en uso, 2 de otra tarjeta, 3 no
+                                    ; sonó, 4 no cuadra, 5 /NOAPRENDIDO
+lrn_date    times 17 db 0
+lrn_gpio    db 0                    ; GPIO aprendidas (y sus valores)
+lrn_g       times 3 db 0
+lrn_eapd    db 0                    ; 1 encendido, 2 apagado (AC'97: invertido)
+lrn_snoop   db 0
+lrn_44      db 0
+lrn_soft    db 0
+lrn_smb     db 0                    ; 1 mismo equipo (SMBIOS), 2 otro modelo
 hda_nvol    db 0
 hda_vols    times 8 * 6 db 0        ; nodo, 80h salida | índice de entrada,
                                     ; paso de 0 dB, pasos, tamaño (1/4 dB), -
@@ -2401,6 +2429,12 @@ init:
         jc .nopci
         cmp edx, 0x20494350
         jne .nopci
+        ; lo aprendido en la prueba de sonido (SONIDO.INI) va primero: si la
+        ; tarjeta de este equipo está, se pone exactamente ese camino
+        call ini_load
+        call hda_learn_pass
+        jnc .hok
+        call lrn_say
         ; buscar primero HD Audio y después AC'97
         jmp .noac97
 .try_ac97:
@@ -2421,6 +2455,7 @@ init:
         je .nopci
         call ac97_init
         jc .fail
+        call ac97_learn
         mov byte [dev_type], 3
         ; sin ventana para los registros del HD Audio
         mov byte [lay_win], 0
@@ -2461,6 +2496,7 @@ init:
         jmp .hfail
 .hok:
         mov byte [dev_type], 4
+        call lrn_say
         mov si, msg_hda
         call puts
         mov eax, [hda_base]
@@ -2675,9 +2711,9 @@ layout:
         mov [tsr_end], ax
         cmp byte [lay_win], 0
         je .r
-        cmp ax, file_end
+        cmp ax, file_end + INIMAX   ; (detrás de SONIDO.INI: ini_buf)
         jae .w
-        mov ax, file_end
+        mov ax, file_end + INIMAX
 .w:
         movzx eax, ax
         add eax, ebx
@@ -2935,6 +2971,9 @@ parse_opts:
         int 0x21
 .end:
         ret
+o_noapr:
+        mov byte [opt_noapr], 1
+        ret
 o_nosb:
         mov byte [opt_nosb], 1
 o_tilde:
@@ -3012,11 +3051,13 @@ o_eapd:
         mov byte [have_eapd], 1
         ret
 
-opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb8, o_sb8, k_sb, o_sb
+opt_tab     dw k_noapr, o_noapr, k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb8, o_sb8, k_sb, o_sb
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
             dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde, 0
 k_tilde     db "~", 0
 k_nosb      db "NOSB", 0
+k_noapr     db "NOAPRENDIDO", 0
+opt_noapr   db 0
 k_sb        db "SB", 0
 k_sb8       db "SB8", 0           ; (antes que SB en opt_tab: se compara por prefijo)
 opt_sb8     db 0
@@ -3182,6 +3223,7 @@ show_info:
         call puts
         call hda_info
 .end:
+        call lrn_info
         call show_vol
         cmp byte [e_on], 0
         je .nsb
@@ -4482,6 +4524,17 @@ hda_init:
         shl eax, 4
         add eax, gdt_tbl
         mov [gdtr+2], eax
+        ; identificadores (para lo aprendido en la prueba de sonido)
+        mov bx, [pci_bdf]
+        mov ax, 0xB10A
+        xor di, di
+        int 0x1A
+        mov [lr_pid], ecx
+        mov bx, [pci_bdf]
+        mov ax, 0xB10A
+        mov di, 0x2C
+        int 0x1A
+        mov [lr_psub], ecx
         ; BAR0 (memoria)
         mov bx, [pci_bdf]
         mov ax, 0xB10A
@@ -4593,7 +4646,13 @@ hda_init:
         jz .cn
         mov [hda_cad], cl
         push cx
+        cmp byte [lrn_mode], 0
+        jne .lm
         call codec_setup
+        jmp .cr
+.lm:
+        call codec_learn            ; (solo lo aprendido en la prueba)
+.cr:
         pop cx
         jnc .ok
 .cn:
@@ -4612,30 +4671,12 @@ hda_init:
 
 ; preparar el códec hda_cad -> CF si no tiene salida analógica
 codec_setup:
-        ; grupo de función de audio (tipo 1) entre los del códec
-        xor bl, bl
-        mov cl, 0x04
-        call hda_param
-        jc .no
-        mov ch, al
-        shr eax, 16
-        mov bl, al
-.fg:
-        test ch, ch
-        jz .no
-        mov cl, 0x05
-        call hda_param
-        jc .no
-        cmp al, 1
-        je .afg
-        inc bl
-        dec ch
-        jmp .fg
+        call find_afg
+        jnc .afg
 .no:
         stc
         ret
 .afg:
-        mov [hda_afg], bl
         mov ax, 0x705
         xor cl, cl
         call hda_verb               ; encendido D0
@@ -4710,6 +4751,13 @@ codec_setup:
         jne .vol
         mov byte [no_hw], 1
 .vol:
+        call setup_tail
+        clc
+        ret
+
+; lo común al final: volumen (por los amplificadores o por programa), EAPD
+; y las frecuencias de los DAC en uso
+setup_tail:
         ; si algún camino no tiene amplificador regulable, el volumen se
         ; hace por programa y los amplificadores quedan en 0 dB
         mov byte [hw_vol], 1
@@ -4741,9 +4789,36 @@ codec_setup:
 .rs:
         mov [hda_rates], ax
         mov word [cur_rate], 0      ; el formato se pone al empezar a tocar
-        clc
         ret
 
+; grupo de función de audio (tipo 1) entre los del códec -> BL y hda_afg; CF
+; si no hay
+find_afg:
+        xor bl, bl
+        mov cl, 0x04
+        call hda_param
+        jc .no
+        mov ch, al
+        shr eax, 16
+        mov bl, al
+.fg:
+        test ch, ch
+        jz .no
+        mov cl, 0x05
+        call hda_param
+        jc .no
+        cmp al, 1
+        je .afg
+        inc bl
+        dec ch
+        jmp .fg
+.no:
+        stc
+        ret
+.afg:
+        mov [hda_afg], bl
+        clc
+        ret
 ; GPIO del grupo de audio: salidas y con el valor pedido (todas a 1)
 gpio_apply:
         cmp byte [opt_nogpio], 0
@@ -5087,6 +5162,12 @@ path_apply:
         pop es
         cld
         rep movsb
+        ; (para /INFO: las entradas elegidas)
+        movzx di, byte [hda_npin]
+        shl di, 2
+        add di, hda_pidx
+        mov eax, [p_idx]
+        mov [di], eax
         movzx si, byte [plen]
         mov bl, [p_node+si-1]
         call dac_add
@@ -5133,6 +5214,12 @@ path_apply:
         jz .w
         mov cl, 0xC0                ; y con amplificador de auriculares
 .w:
+        cmp byte [lrn_ctlv], 0xFF   ; lo aprendido en la prueba manda
+        je .w2
+        mov cl, [lrn_ctlv]
+.w2:
+        movzx di, byte [hda_npin]
+        mov [hda_pctl+di], cl
         mov ax, 0x707
         call hda_verb
         jmp .k
@@ -5428,6 +5515,1232 @@ pdec:
         pop ax
         ret
 
+; =============================================================================
+;  Lo aprendido en la prueba de sonido: \HISPADOS\SONIDO.INI (lo escribe
+;  AUDICION cuando se contesta que SÍ se oye). Todo esto se descarta.
+; =============================================================================
+INIMAX      equ 8192
+ini_buf     equ file_end            ; (detrás del programa: ver layout)
+
+; ---- leer SONIDO.INI: de la unidad de HSPSND o de la de arranque ----
+ini_load:
+        cmp byte [opt_noapr], 0
+        je .go
+        mov byte [lrn_why], 5
+        ret
+.go:
+        ; sitio: hasta 1 KB antes de lo que ocupará el programa (la pila)
+        mov ax, [tsr_end]
+        sub ax, file_end + 1024
+        jbe .r
+        cmp ax, INIMAX
+        jbe .rm
+        mov ax, INIMAX
+.rm:
+        mov [ini_room], ax
+        ; la unidad del programa: su nombre va detrás del entorno
+        push es
+        mov es, [0x2C]
+        xor di, di
+.e:
+        cmp word [es:di], 0
+        je .f
+        inc di
+        cmp di, 0x7FF0
+        jb .e
+        pop es
+        jmp .boot
+.f:
+        mov al, [es:di+4]
+        cmp byte [es:di+5], ':'
+        pop es
+        jne .boot
+        call .try
+        jnc .ok
+.boot:
+        mov ax, 0x3305
+        int 0x21
+        mov al, dl
+        add al, 'A' - 1
+        call .try
+        jnc .ok
+.r:
+        ret
+.ok:
+        mov byte [ini_ok], 1
+        ; cuántas secciones hay
+        mov si, ini_buf
+.l:
+        call ini_skipsp
+        cmp byte [si], '['
+        jne .n
+        inc byte [ini_nsec]
+.n:
+        call ini_nextline
+        jnc .l
+        ret
+; AL = unidad -> CF si no se puede leer
+.try:
+        and al, 0xDF
+        mov [ini_path], al
+        mov ax, 0x3D00
+        mov dx, ini_path
+        int 0x21
+        jc .tr
+        mov bx, ax
+        mov cx, [ini_room]
+        dec cx
+        mov dx, ini_buf
+        mov ah, 0x3F
+        int 0x21
+        jnc .rd
+        xor ax, ax
+.rd:
+        mov si, ax
+        mov byte [ini_buf+si], 0
+        mov ah, 0x3E
+        int 0x21
+        clc
+.tr:
+        ret
+
+; SI -> saltar espacios y tabuladores
+ini_skipsp:
+        cmp byte [si], ' '
+        je .s
+        cmp byte [si], 9
+        jne .r
+.s:
+        inc si
+        jmp ini_skipsp
+.r:
+        ret
+; SI -> principio de la línea siguiente; CF si se acaba el fichero
+ini_nextline:
+        lodsb
+        test al, al
+        jz .end
+        cmp al, 10
+        jne ini_nextline
+        cmp byte [si], 0
+        je .end
+        clc
+        ret
+.end:
+        stc
+        ret
+; AL -> mayúscula
+ini_up:
+        cmp al, 'a'
+        jb .r
+        cmp al, 'z'
+        ja .r
+        sub al, 0x20
+.r:
+        ret
+
+; ---- buscar la sección cuya cabecera es key_buf -> CF si no está ----
+; -> [sec_ptr] = la línea siguiente a la cabecera
+ini_find:
+        mov si, ini_buf
+.l:
+        push si
+        call ini_skipsp
+        cmp byte [si], '['
+        jne .no
+        mov di, key_buf
+.c:
+        mov al, [si]
+        call ini_up
+        cmp al, [di]
+        jne .no
+        inc si
+        inc di
+        cmp al, ']'
+        jne .c
+        pop ax
+        call ini_nextline
+        jc .nf
+        mov [sec_ptr], si
+        clc
+        ret
+.no:
+        pop si
+        call ini_nextline
+        jnc .l
+.nf:
+        stc
+        ret
+
+; ---- SI = nombre con su «=», en mayúsculas -> SI = el valor, CF si no está ----
+ini_get:
+        mov di, si
+        mov si, [sec_ptr]
+.l:
+        push si
+        push di
+        call ini_skipsp
+        cmp byte [si], '['
+        je .end
+.c:
+        mov al, [si]
+        call ini_up
+        cmp al, [di]
+        jne .no
+        inc si
+        inc di
+        cmp al, '='
+        jne .c
+        add sp, 4
+        call ini_skipsp
+        clc
+        ret
+.no:
+        pop di
+        pop si
+        call ini_nextline
+        jnc .l
+        stc
+        ret
+.end:
+        pop di
+        pop si
+        stc
+        ret
+
+; SI -> número en hexadecimal (con o sin «h») -> AL; CF si no hay
+ini_hex:
+        call ini_skipsp
+        xor ah, ah
+        xor cx, cx
+.l:
+        mov al, [si]
+        call ini_up
+        sub al, '0'
+        jb .e
+        cmp al, 9
+        jbe .d
+        sub al, 7
+        cmp al, 10
+        jb .e
+        cmp al, 15
+        ja .e
+.d:
+        shl ah, 4
+        or ah, al
+        inc si
+        inc cx
+        jmp .l
+.e:
+        mov al, [si]
+        call ini_up
+        cmp al, 'H'
+        jne .x
+        inc si
+.x:
+        mov al, ah
+        cmp cx, 1
+        jb .r                       ; (CF = 1: ni una cifra)
+        cmp cx, 3
+        cmc                         ; (más de dos cifras: CF = 1)
+.r:
+        ret
+; SI -> número en decimal -> AX; CF si no hay
+ini_dec:
+        call ini_skipsp
+        xor ax, ax
+        xor cx, cx
+.l:
+        movzx bx, byte [si]
+        sub bl, '0'
+        jb .e
+        cmp bl, 9
+        ja .e
+        imul ax, ax, 10
+        add ax, bx
+        inc si
+        inc cx
+        jmp .l
+.e:
+        cmp cx, 1
+        ret
+
+; SI -> ruta «14h(0) 0Ch(1) 02h» -> p_node, p_idx, plen; CF si está mal
+ini_route:
+        xor di, di
+.l:
+        cmp di, 5
+        jae .bad
+        call ini_hex
+        jc .bad
+        mov [p_node+di], al
+        inc di
+        mov ax, di
+        mov [plen], al
+        call ini_skipsp
+        cmp byte [si], '('
+        jne .end
+        inc si
+        call ini_dec
+        jc .bad
+        cmp byte [si], ')'
+        jne .bad
+        inc si
+        cmp ax, 15
+        ja .bad
+        mov [p_idx+di-1], al
+        jmp .l
+.end:
+        cmp byte [plen], 2
+        jb .bad
+        clc
+        ret
+.bad:
+        stc
+        ret
+
+; ---- la cabecera de la tarjeta: «[HDA ffff:dddd ffff:ssss ffff:cccc ffff:ssss]»
+; (lr_pid, lr_psub: PCI 00h y 2Ch; lr_cid, lr_csub: el códec) -> key_buf
+; (DI = detrás de «[HDA » o «[AC97 »)
+mk_key:
+        mov eax, [lr_pid]
+        call .lohi
+        mov eax, [lr_psub]
+        call .lohi
+        mov eax, [lr_cid]
+        call .hilo
+        cmp byte [key_buf+1], 'A'   ; (AC'97: sin el subsistema del códec)
+        je .end
+        mov eax, [lr_csub]
+        call .hilo
+.end:
+        mov byte [di-1], ']'
+        mov byte [di], 0
+        ret
+.lohi:
+        rol eax, 16
+.hilo:
+        push eax
+        shr eax, 16
+        call .h4
+        mov byte [di], ':'
+        inc di
+        pop eax
+        call .h4
+        mov byte [di], ' '
+        inc di
+        ret
+.h4:
+        mov cx, 4
+.h:
+        rol ax, 4
+        push ax
+        and al, 15
+        add al, '0'
+        cmp al, '9'
+        jbe .d
+        add al, 7
+.d:
+        mov [di], al
+        inc di
+        pop ax
+        loop .h
+        ret
+
+; ---- las secciones de HD Audio: primero, solo lo aprendido ----
+; Por cada controladora HD Audio, hda_init con lrn_mode: cada códec busca su
+; sección (codec_learn). CF si ninguna sirve (y lrn_why dice por qué).
+hda_learn_pass:
+        cmp byte [ini_ok], 0
+        je .no
+        call smb_read
+        mov byte [lrn_mode], 1
+        mov word [lr_idx], 0
+.l:
+        mov ax, 0xB103
+        mov ecx, 0x040300
+        mov si, [lr_idx]
+        int 0x1A
+        jc .end
+        mov [pci_bdf], bx
+        call hda_init
+        jnc .ok
+        inc word [lr_idx]
+        cmp word [lr_idx], 4
+        jb .l
+.end:
+        mov byte [lrn_mode], 0
+        cmp word [lr_idx], 0        ; sin HD Audio: lo dirá el AC'97
+        je .no
+        call lrn_reason
+.no:
+        stc
+        ret
+.ok:
+        mov byte [lrn_mode], 0
+        mov byte [lrn_why], 1
+        clc
+        ret
+
+; por qué no se ha usado lo aprendido -> lrn_why
+lrn_reason:
+        mov al, 4
+        cmp byte [lr_bad], 0
+        jne .w
+        mov al, 3
+        cmp byte [lr_nos], 0
+        jne .w
+        mov al, 2
+        cmp byte [ini_nsec], 0
+        jne .w
+        xor al, al
+.w:
+        mov [lrn_why], al
+        ret
+
+; ---- el códec hda_cad, con su sección de SONIDO.INI -> CF si no ----
+codec_learn:
+        call find_afg
+        jc .r0
+        ; la cabecera: el identificador y el subsistema del códec
+        push bx
+        xor bl, bl
+        xor cl, cl
+        call hda_param
+        pop bx
+        jc .r0
+        mov [lr_cid], eax
+        mov ax, 0xF20
+        xor cl, cl
+        call hda_verb
+        jc .r0
+        mov [lr_csub], eax
+        mov dword [key_buf], '[HDA'
+        mov byte [key_buf+4], ' '
+        mov di, key_buf + 5
+        call mk_key
+        call ini_find
+        jc .r0
+        mov si, i_estado
+        call ini_get
+        jc .nos
+        mov di, i_suena
+        call ini_word
+        jne .nos
+        ; las rutas: primero se comprueba todo, sin tocar nada
+        call afg_range
+        mov si, i_ruta
+        call ini_get
+        jc .bad
+        call ini_route
+        jc .bad
+        call route_check
+        jc .bad
+        call .save1
+        mov byte [lr_hp], 0
+        mov si, i_rutah
+        call ini_get
+        jc .nh
+        call ini_route
+        jc .bad
+        call route_check
+        jc .bad
+        mov al, [p_node]
+        cmp al, [lr_r1+1]           ; (el mismo pin: ya está)
+        je .nh
+        mov byte [lr_hp], 1
+        mov si, plen
+        mov di, lr_r2
+        mov cx, 13
+        push cs
+        pop es
+        rep movsb
+.nh:
+        ; adelante: encendido D0, como codec_setup
+        mov bl, [hda_afg]
+        mov ax, 0x705
+        xor cl, cl
+        call hda_verb
+        call delay
+        call delay
+        xor al, al
+        mov [hda_npin], al
+        mov [hda_nvol], al
+        mov [hda_dac], al
+        mov [no_hw], al
+        mov dword [hda_dacs], 0
+        mov word [new_rates], 0x7FF
+        ; GPIO: las de la prueba (salvo que se den /GPIO o /NOGPIO)
+        mov al, [have_gpio]
+        or al, [opt_nogpio]
+        jz .lg
+        call gpio_apply
+        jmp .ge
+.lg:
+        mov si, i_gpio
+        call ini_get
+        jc .ge
+        call ini_hex
+        jc .ge
+        mov [lrn_g], al
+        call ini_hex
+        jc .ge
+        mov [lrn_g+1], al
+        call ini_hex
+        jc .ge
+        mov [lrn_g+2], al
+        mov byte [lrn_gpio], 1
+        mov bl, [hda_afg]
+        mov ax, 0x716
+        mov cl, [lrn_g]
+        call hda_verb
+        mov ax, 0x717
+        mov cl, [lrn_g+1]
+        call hda_verb
+        mov ax, 0x715
+        mov cl, [lrn_g+2]
+        call hda_verb
+.ge:
+        ; los caminos, con el control del pin de la prueba
+        mov si, lr_r1
+        call .load
+        mov si, i_control
+        call .ctl
+        call path_apply
+        cmp byte [lr_hp], 0
+        je .p2
+        mov si, lr_r2
+        call .load
+        mov si, i_controlh
+        call .ctl
+        call path_apply
+.p2:
+        mov byte [lrn_ctlv], 0xFF
+        call pins_off
+        ; EAPD (salvo /EAPD:n)
+        cmp byte [have_eapd], 0
+        jne .eo
+        mov si, i_eapd
+        call ini_get
+        jc .eo
+        mov al, [si]
+        call ini_up
+        cmp al, 'E'
+        jne .e0
+        mov byte [opt_eapd], 1
+        mov byte [lrn_eapd], 1
+        jmp .eo
+.e0:
+        cmp al, 'A'
+        jne .eo
+        mov byte [opt_eapd], 0
+        mov byte [lrn_eapd], 2
+.eo:
+        ; volumen por programa, si en la prueba no bajaba
+        mov si, i_volumen
+        call ini_get
+        jc .vo
+        mov al, [si]
+        call ini_up
+        cmp al, 'P'
+        jne .vo
+        mov byte [no_hw], 1
+        mov byte [lrn_soft], 1
+.vo:
+        call setup_tail
+        ; 44,1 kHz si fue así como sonó
+        mov si, i_frec
+        call ini_get
+        jc .fo
+        call ini_dec
+        jc .fo
+        cmp ax, 44100
+        jne .fo
+        mov word [hda_rates], 0x0020
+        mov byte [lrn_44], 1
+.fo:
+        ; AMD/ATI: «snoop» (registro PCI 42h)
+        mov si, i_snoop
+        call ini_get
+        jc .so
+        mov al, [si]
+        call ini_up
+        cmp al, 'A'
+        jne .so
+        mov bx, [pci_bdf]
+        mov ax, 0xB108
+        mov di, 0x42
+        int 0x1A
+        and cl, 0xF8
+        or cl, 2
+        mov bx, [pci_bdf]
+        mov ax, 0xB10B
+        mov di, 0x42
+        int 0x1A
+        mov byte [lrn_snoop], 1
+.so:
+        call lrn_common
+        clc
+        ret
+.nos:
+        mov byte [lr_nos], 1
+        stc
+        ret
+.bad:
+        mov byte [lr_bad], 1
+.r0:
+        stc
+        ret
+; la ruta comprobada, a lr_r1 (plen, p_node y p_idx, seguidos: 13 octetos)
+.save1:
+        mov si, plen
+        mov di, lr_r1
+        mov cx, 13
+        push cs
+        pop es
+        rep movsb
+        ret
+.load:
+        mov di, plen
+        mov cx, 13
+        push cs
+        pop es
+        rep movsb
+        ret
+; SI = «Control=» -> lrn_ctlv (FFh si no está: el de siempre)
+.ctl:
+        mov byte [lrn_ctlv], 0xFF
+        call ini_get
+        jc .cr
+        call ini_hex
+        jc .cr
+        mov [lrn_ctlv], al
+.cr:
+        ret
+
+; SI = valor, DI = palabra en mayúsculas -> ZF si el valor es esa palabra
+ini_word:
+.l:
+        mov al, [di]
+        test al, al
+        jz .end
+        mov al, [si]
+        call ini_up
+        cmp al, [di]
+        jne .r
+        inc si
+        inc di
+        jmp .l
+.end:
+        mov al, [si]                ; detrás: fin de línea, espacio o «;»
+        cmp al, ' '
+        jbe .y
+        cmp al, ';'
+.r:
+        ret
+.y:
+        cmp al, al
+        ret
+
+; la fecha y el equipo de la sección
+lrn_common:
+        mov si, i_fecha
+        call ini_get
+        jc .nf
+        mov di, lrn_date
+        mov cx, 16
+.f:
+        lodsb
+        cmp al, ' '
+        jb .fe
+        mov [di], al
+        inc di
+        loop .f
+.fe:
+        mov byte [di], 0
+.nf:
+        ; ¿el mismo modelo de equipo? (SMBIOS: solo como ayuda)
+        cmp byte [smb_ok], 0
+        je .r
+        mov si, i_equipo
+        call ini_get
+        jc .r
+        mov di, smb_buf
+        mov byte [lrn_smb], 2
+.c:
+        mov al, [di]
+        test al, al
+        jz .ce
+        cmp al, [si]
+        jne .r
+        inc si
+        inc di
+        jmp .c
+.ce:
+        mov al, [si]
+        inc si
+        cmp al, ' '
+        je .ce
+        cmp al, 9
+        je .ce
+        cmp al, 13
+        je .same
+        cmp al, 10
+        je .same
+        test al, al
+        jnz .r
+.same:
+        mov byte [lrn_smb], 1
+.r:
+        ret
+
+; ---- p_node/p_idx/plen: ¿es un camino de verdad en este códec? CF si no ----
+; pin con salida, nodos del grupo de audio, mezcladores o selectores en
+; medio, un DAC analógico al final y cada nodo unido al siguiente por la
+; entrada que dice la ruta
+route_check:
+        xor si, si
+.l:
+        mov bl, [p_node+si]
+        mov al, bl
+        sub al, [w_first]
+        jb .bad
+        cmp al, [w_count]
+        jae .bad
+        call w_type
+        movzx cx, byte [plen]
+        dec cx
+        test si, si
+        jnz .mid
+        cmp ax, 4                   ; el primero, un pin analógico
+        jne .bad
+        push ax
+        mov cl, 0x0C
+        call hda_param
+        mov dl, al
+        pop ax
+        jc .bad
+        test dl, 0x10               ; que pueda sacar señal
+        jz .bad
+        jmp .conn
+.mid:
+        cmp si, cx
+        je .last
+        cmp al, 2
+        je .conn
+        cmp al, 3
+        jne .bad
+.conn:
+        ; la entrada elegida tiene que ser el nodo siguiente
+        push si
+        mov di, conn_bufs
+        call get_conn
+        pop si
+        movzx di, byte [p_idx+si]
+        cmp di, cx
+        jae .bad
+        mov al, [conn_bufs+di]
+        cmp al, [p_node+si+1]
+        jne .bad
+        inc si
+        jmp .l
+.last:
+        test ax, ax                 ; un DAC analógico
+        jnz .bad
+        clc
+        ret
+.bad:
+        stc
+        ret
+
+; los pines con salida que no están en ningún camino: apagados (como en la
+; prueba)
+pins_off:
+        mov bl, [w_first]
+        movzx cx, byte [w_count]
+        jcxz .r
+.w:
+        push cx
+        call w_type
+        cmp ax, 4
+        jne .n
+        mov cl, 0x0C
+        call hda_param
+        jc .n
+        test al, 0x10
+        jz .n
+        mov si, hda_pins
+        movzx cx, byte [hda_npin]
+.u:
+        jcxz .off
+        cmp [si], bl
+        je .n
+        add si, 5
+        dec cx
+        jmp .u
+.off:
+        mov ax, 0xF07
+        xor cl, cl
+        call hda_verb
+        jc .n
+        and al, 0x3F
+        mov cl, al
+        mov ax, 0x707
+        call hda_verb
+.n:
+        pop cx
+        inc bl
+        loop .w
+.r:
+        ret
+
+; ---- AC'97 (después de ac97_init): ¿hay una sección suya? ----
+ac97_learn:
+        cmp byte [ini_ok], 0
+        je .r
+        mov bx, [pci_bdf]
+        mov ax, 0xB10A
+        xor di, di
+        int 0x1A
+        mov [lr_pid], ecx
+        mov bx, [pci_bdf]
+        mov ax, 0xB10A
+        mov di, 0x2C
+        int 0x1A
+        mov [lr_psub], ecx
+        mov dx, [nam]
+        add dx, 0x7C
+        in ax, dx
+        shl eax, 16
+        add dx, 2
+        in ax, dx
+        mov [lr_cid], eax
+        mov dword [key_buf], '[AC9'
+        mov word [key_buf+4], '7 '
+        mov di, key_buf + 6
+        call mk_key
+        call ini_find
+        jc .other
+        mov si, i_estado
+        call ini_get
+        jc .nos
+        mov di, i_suena
+        call ini_word
+        jne .nos
+        call smb_read
+        mov byte [lrn_eapd], 1
+        mov si, i_eapd
+        call ini_get
+        jc .ok
+        mov al, [si]
+        call ini_up
+        cmp al, 'I'
+        jne .ok
+        ; EAPD al revés y las salidas mono, central y traseras abiertas
+        mov byte [lrn_eapd], 2
+        mov dx, [nam]
+        add dx, 0x26
+        in ax, dx
+        xor ax, 0x8000
+        out dx, ax
+        xor ax, ax
+        mov dx, [nam]
+        add dx, 0x06
+        out dx, ax
+        mov dx, [nam]
+        add dx, 0x36
+        out dx, ax
+        mov dx, [nam]
+        add dx, 0x38
+        out dx, ax
+.ok:
+        call lrn_common
+        mov byte [lrn_why], 1
+        jmp lrn_say
+.nos:
+        mov byte [lr_nos], 1
+.other:
+        call lrn_reason
+.r:
+        jmp lrn_say
+
+; ---- lo que se ha hecho con lo aprendido, en una línea ----
+lrn_say:
+        cmp byte [lrn_said], 0
+        jne .r
+        movzx bx, byte [lrn_why]
+        test bx, bx
+        jz .r
+        mov byte [lrn_said], 1
+        cmp bx, 1
+        jne .w
+        mov si, msg_l_used
+        call puts
+        mov si, lrn_date
+        call puts
+        mov si, msg_l_used2
+        call puts
+        cmp byte [lrn_smb], 2
+        jne .r
+        mov si, msg_l_other
+        jmp puts
+.w:
+        shl bx, 1
+        mov si, [l_whys+bx]
+        jmp puts
+.r:
+        ret
+
+; ---- /INFO: lo aprendido ----
+lrn_info:
+        cmp byte [lrn_why], 1
+        je .used
+        jmp lrn_say
+.used:
+        mov si, msg_l_used
+        call puts
+        mov si, lrn_date
+        call puts
+        mov si, msg_l_colon
+        call puts
+        cmp byte [dev_type], 4
+        je .hda
+        mov si, msg_l_acn
+        cmp byte [lrn_eapd], 2
+        jne .ac
+        mov si, msg_l_aci
+.ac:
+        call puts
+        jmp .smb
+.hda:
+        ; cada camino: ruta (con la entrada elegida) y control del pin
+        xor bx, bx
+.p:
+        cmp bl, [hda_npin]
+        jae .opt
+        mov si, msg_l_ruta
+        call puts
+        mov di, bx
+        imul di, di, 5
+        add di, hda_pins
+        mov si, bx
+        shl si, 2
+        add si, hda_pidx
+        mov cx, 5
+.n:
+        mov al, [di]
+        call hex2
+        mov al, 'h'
+        call putc
+        dec cx
+        jz .ne
+        cmp byte [di+1], 0
+        je .ne
+        mov al, '('
+        call putc
+        mov al, [si]
+        call hex1
+        mov al, ')'
+        call putc
+        mov al, ' '
+        call putc
+        inc si
+        inc di
+        jmp .n
+.ne:
+        mov si, msg_l_ctl
+        call puts
+        mov al, [hda_pctl+bx]
+        call hex2
+        mov si, msg_l_h
+        call puts
+        inc bx
+        jmp .p
+.opt:
+        mov si, msg_l_sp
+        call puts
+        mov si, msg_l_eapd0
+        cmp byte [lrn_eapd], 0
+        je .e
+        mov si, msg_l_eapd1
+        cmp byte [lrn_eapd], 1
+        je .e
+        mov si, msg_l_eapd2
+.e:
+        call puts
+        mov si, msg_l_gnone
+        cmp byte [lrn_gpio], 0
+        je .g0
+        mov si, msg_l_gm
+        call puts
+        mov al, [lrn_g]
+        call hex2
+        mov si, msg_l_gd
+        call puts
+        mov al, [lrn_g+1]
+        call hex2
+        mov si, msg_l_gv
+        call puts
+        mov al, [lrn_g+2]
+        call hex2
+        mov si, msg_l_h0
+.g0:
+        call puts
+        cmp byte [lrn_snoop], 0
+        je .s0
+        mov si, msg_l_snoop
+        call puts
+.s0:
+        cmp byte [lrn_44], 0
+        je .f0
+        mov si, msg_l_44
+        call puts
+.f0:
+        cmp byte [lrn_soft], 0
+        je .v0
+        mov si, msg_l_soft
+        call puts
+.v0:
+        mov si, msg_crlf2
+        call puts
+.smb:
+        cmp byte [lrn_smb], 2
+        jne .x
+        mov si, msg_l_other
+        call puts
+.x:
+        ret
+hex1:
+        and al, 15
+        add al, '0'
+        cmp al, '9'
+        jbe .d
+        add al, 7
+.d:
+        jmp putc
+
+; ---- SMBIOS: «fabricante | modelo | versión» del equipo (tipo 1) -> smb_buf
+; (igual que AUDICION, para comparar con «Equipo=»). Solo en modo real.
+smb_read:
+        cmp byte [smb_done], 0
+        jne .r
+        mov byte [smb_done], 1
+        smsw ax
+        test al, 1
+        jnz .r
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        add eax, gdt_tbl
+        mov [gdtr+2], eax
+        call a20_open
+        call unreal
+        push es
+        mov ax, 0xF000
+        mov es, ax
+        xor di, di
+.f:
+        cmp dword [es:di], '_SM_'
+        jne .n
+        cmp dword [es:di+0x10], '_DMI'
+        je .got
+.n:
+        add di, 16
+        jnz .f
+.f3:
+        cmp dword [es:di], '_SM3'
+        jne .n3
+        cmp byte [es:di+4], '_'
+        jne .n3
+        cmp dword [es:di+0x14], 0
+        jne .n3
+        mov eax, [es:di+0x10]
+        mov [sm_addr], eax
+        mov eax, [es:di+0x0C]
+        cmp eax, 0xFFFF
+        jbe .l3
+        mov eax, 0xFFFF
+.l3:
+        mov [sm_len], ax
+        mov word [sm_cnt], 0xFFFF
+        jmp .walk
+.n3:
+        add di, 16
+        jnz .f3
+        pop es
+        jmp .x
+.got:
+        mov eax, [es:di+0x18]
+        mov [sm_addr], eax
+        mov ax, [es:di+0x16]
+        mov [sm_len], ax
+        mov ax, [es:di+0x1C]
+        mov [sm_cnt], ax
+.walk:
+        pop es
+        mov ebx, [sm_addr]
+        movzx edx, word [sm_len]
+        add edx, ebx
+        mov cx, [sm_cnt]
+.st:
+        test cx, cx
+        jz .x
+        lea eax, [ebx+4]
+        cmp eax, edx
+        jae .x
+        mov al, [fs:ebx]
+        cmp al, 127
+        je .x
+        cmp al, 1
+        je .t1
+        ; la siguiente: la parte con formato y las cadenas (acaban en 00 00)
+        movzx eax, byte [fs:ebx+1]
+        cmp al, 4
+        jb .x
+        add ebx, eax
+.z:
+        cmp ebx, edx
+        jae .x
+        mov ax, [fs:ebx]
+        inc ebx
+        test ax, ax
+        jnz .z
+        inc ebx
+        dec cx
+        jmp .st
+.t1:
+        mov di, smb_buf
+        mov al, [fs:ebx+4]
+        call .str
+        call .bar
+        mov al, [fs:ebx+5]
+        call .str
+        call .bar
+        mov al, [fs:ebx+6]
+        call .str
+        mov byte [di], 0
+        mov byte [smb_ok], 1
+.x:
+        call a20_restore
+.r:
+        ret
+.bar:
+        mov byte [di], ' '
+        mov word [di+1], '| '
+        add di, 3
+        ret
+; AL = número de cadena de la estructura EBX -> a DI (como AUDICION: «-» si
+; no hay, hasta 64 caracteres, sin los de fuera de 20h-7Eh)
+.str:
+        push ebx
+        push cx
+        mov dl, al
+        test dl, dl
+        jz .none
+        movzx eax, byte [fs:ebx+1]
+        add ebx, eax
+.sk:
+        dec dl
+        jz .p
+        mov cx, 200
+.k:
+        mov al, [fs:ebx]
+        inc ebx
+        test al, al
+        loopnz .k
+        cmp byte [fs:ebx], 0
+        je .none
+        jmp .sk
+.p:
+        mov cx, 64
+.pl:
+        mov al, [fs:ebx]
+        inc ebx
+        cmp al, ' '
+        jb .sr
+        cmp al, 126
+        ja .q
+        mov [di], al
+        inc di
+.q:
+        loop .pl
+        jmp .sr
+.none:
+        mov byte [di], '-'
+        inc di
+.sr:
+        pop cx
+        pop ebx
+        ret
+
+i_estado    db "ESTADO=", 0
+i_suena     db "SUENA", 0
+i_ruta      db "RUTA=", 0
+i_rutah     db "RUTAAURICULARES=", 0
+i_control   db "CONTROL=", 0
+i_controlh  db "CONTROLAURICULARES=", 0
+i_gpio      db "GPIO=", 0
+i_eapd      db "EAPD=", 0
+i_snoop     db "SNOOP=", 0
+i_frec      db "FRECUENCIA=", 0
+i_volumen   db "VOLUMEN=", 0
+i_fecha     db "FECHA=", 0
+i_equipo    db "EQUIPO=", 0
+ini_path    db "?:\HISPADOS\SONIDO.INI", 0
+ini_room    dw 0
+ini_ok      db 0
+ini_nsec    db 0
+sec_ptr     dw 0
+key_buf     times 64 db 0
+lrn_mode    db 0
+lrn_ctlv    db 0xFF
+lrn_said    db 0
+lr_idx      dw 0
+lr_pid      dd 0
+lr_psub     dd 0
+lr_cid      dd 0
+lr_csub     dd 0
+lr_bad      db 0
+lr_nos      db 0
+lr_hp       db 0
+lr_r1       times 13 db 0
+lr_r2       times 13 db 0
+smb_done    db 0
+smb_ok      db 0
+sm_addr     dd 0
+sm_len      dw 0
+sm_cnt      dw 0
+smb_buf     times 3 * 64 + 8 db 0
+l_whys      dw 0, 0, msg_l_otra, msg_l_nos, msg_l_bad, msg_l_noapr
+msg_l_used  db "Configuración aprendida en la prueba (", 0
+msg_l_used2 db ").", 13, 10, 0
+msg_l_colon db "):", 13, 10, 0
+msg_l_other db "  (La prueba se hizo en otro modelo de equipo con la misma tarjeta.)", 13, 10, 0
+msg_l_otra  db "Lo aprendido en la prueba de sonido (SONIDO.INI) es de otra tarjeta:", 13, 10
+            db "se busca la salida automáticamente.", 13, 10, 0
+msg_l_nos   db "En la prueba de sonido no se encontró un camino para esta tarjeta:", 13, 10
+            db "se busca la salida automáticamente.", 13, 10, 0
+msg_l_bad   db "Lo aprendido en la prueba de sonido (SONIDO.INI) no cuadra con esta", 13, 10
+            db "tarjeta: se busca la salida automáticamente.", 13, 10, 0
+msg_l_noapr db "/NOAPRENDIDO: no se usa lo aprendido en la prueba de sonido.", 13, 10, 0
+msg_l_ruta  db "  ruta ", 0
+msg_l_ctl   db ", control del pin ", 0
+msg_l_h     db "h", 13, 10, 0
+msg_l_h0    db "h", 0
+msg_l_sp    db "  ", 0
+msg_l_eapd0 db "EAPD como siempre", 0
+msg_l_eapd1 db "EAPD encendido", 0
+msg_l_eapd2 db "EAPD apagado", 0
+msg_l_gnone db ", GPIO sin tocar", 0
+msg_l_gm    db ", GPIO máscara ", 0
+msg_l_gd    db "h dirección ", 0
+msg_l_gv    db "h datos ", 0
+msg_l_snoop db ", «snoop» activado", 0
+msg_l_44    db ", siempre a 44100 Hz", 0
+msg_l_soft  db ", volumen por programa", 0
+msg_l_acn   db "  EAPD normal", 13, 10, 0
+msg_l_aci   db "  EAPD invertido (y las salidas mono, central y traseras abiertas)", 13, 10, 0
+
 hda_idx     dw 0
 tsr_end     dw 0
 msg_title   db "HSPSND 0.1 - controlador de sonido de Hispa-DOS", 13, 10, 0
@@ -5443,7 +6756,8 @@ msg_badopt  db "Opción no válida.", 13, 10, 0
 msg_sb_noemm db "/SB: hace falta HSPEMM.SYS (en CONFIG.SYS) para emular la Sound Blaster.", 13, 10, 0
 msg_sb_real db "/SB: hay una Sound Blaster de verdad; no se emula.", 13, 10, 0
 msg_sb_emu  db "Sound Blaster 16 emulada", 0
-msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh] [/NOGPIO] [/EAPD:0]", 13, 10
+msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh] [/NOGPIO]", 13, 10
+            db "            [/EAPD:0] [/NOAPRENDIDO]", 13, 10
             db "  /SB        Sound Blaster 16 emulada para los juegos, sobre el HD Audio o el", 13, 10
             db "             AC'97 (hace falta HSPEMM.SYS)", 13, 10
             db "  /VOL:n     volumen del 0 al 100 % (también con el driver ya cargado)", 13, 10
@@ -5456,6 +6770,9 @@ msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh
             db "             muchos portátiles encienden los altavoces (si no, todas a 1)", 13, 10
             db "  /NOGPIO    HD Audio: no tocar las GPIO", 13, 10
             db "  /EAPD:0    HD Audio: apagar EAPD en vez de encenderlo", 13, 10
+            db "  /NOAPRENDIDO  no usar lo aprendido en la prueba de sonido", 13, 10
+            db "Si la prueba de sonido (AUDICION) hizo sonar este equipo, HSPSND pone ese", 13, 10
+            db "mismo camino (\HISPADOS\SONIDO.INI) en vez de buscarlo.", 13, 10
             db "El volumen se cambia después con SONIDO.", 13, 10, 0
 msg_vol     db "Volumen: ", 0
 msg_pct     db " %", 0

@@ -132,14 +132,17 @@ Se elige con las flechas o el número, e Intro. **F5** arranca en limpio y **F8*
 
 `HSPSND` (lo carga `AUTOEXEC.BAT`) detecta una Sound Blaster, Intel HD Audio o AC'97. En HD Audio saca el sonido a la vez por los altavoces internos, los auriculares y la salida de línea, enciende el amplificador externo (EAPD y las patillas GPIO del códec) y, si el códec no admite la frecuencia del archivo, la cambia él.
 
+**Lo aprendido en la prueba de sonido tiene preferencia.** Si en la prueba (`AUDICION`, opción «Prueba» del menú de arranque) se contesta que sí suena, `AUDICION` guarda ese camino en `\HISPADOS\SONIDO.INI` (una sección por equipo, identificada por los números de la tarjeta y del códec). Al cargarse, `HSPSND` busca primero ahí la tarjeta del equipo y, si está, pone exactamente ese camino (pin, ruta, control del pin, EAPD, GPIO, «snoop», frecuencia, volumen); si es de otra tarjeta o no cuadra, busca él solo y lo dice. `HSPSND /INFO` enseña «Configuración aprendida en la prueba (fecha)» y la ruta. Ver [docs/AUDICION.md](docs/AUDICION.md#lo-que-aprende-sonidoini).
+
 | Orden | Qué hace |
 |---|---|
 | `HSPSND /VOL:n` | Volumen del 0 al 100 % (80 si no se dice). Con el driver ya cargado cambia el volumen sin cargar otro. |
 | `HSPSND /INFO` | Muestra en una pantalla la tarjeta, el códec, cada salida (altavoz, auriculares, línea…), EAPD, GPIO, el camino y el amplificador elegidos. Si no suena, una foto de esta pantalla dice por qué. |
 | `HSPSND /GPIO:hh` `/NOGPIO` `/EAPD:0` | HD Audio: valor de las GPIO (por omisión todas a 1), no tocarlas, o EAPD apagado, para los portátiles que lo tienen al revés. Se pueden cambiar con el driver ya cargado. |
+| `HSPSND /NOAPRENDIDO` | No usar lo aprendido en la prueba de sonido (`\HISPADOS\SONIDO.INI`): busca la salida él solo. |
 | `HSPSND /NOTECLAS` | Sin teclas de volumen. |
 | `HSPSND /SB` | Con `HSPEMM.SYS` cargado y sin Sound Blaster de verdad: emula una Sound Blaster 16 con AdLib (220h, IRQ 5, DMA 1 y 5) sobre el HD Audio o el AC'97 y pone `BLASTER`, para los juegos de DOS. Ver [docs/HSPSB.md](docs/HSPSB.md). |
-| `AUDICION` | Prueba de sonido con preguntas de sí o no: recoge los datos del equipo (controladoras, volcado de los códecs HD Audio), toca un tono por cada salida y cada variante (EAPD, GPIO, frecuencia) y guarda el informe en `\SONIDO01.TXT`. Ver [docs/AUDICION.md](docs/AUDICION.md). |
+| `AUDICION` | Prueba de sonido con preguntas de sí o no: recoge los datos del equipo (controladoras, volcado de los códecs HD Audio), toca un tono por cada salida y cada variante (EAPD, GPIO, frecuencia) y guarda el informe en `\SONIDO01.TXT`. **Aprende**: lo que suena (se contesta «S») lo guarda en `\HISPADOS\SONIDO.INI` y desde entonces `HSPSND` pone en ese equipo exactamente ese camino, en este arranque y en los siguientes. Ver [docs/AUDICION.md](docs/AUDICION.md). |
 | `SONIDO` | Muestra el volumen. `SONIDO 60` lo pone; `SONIDO +` y `SONIDO -` lo cambian un 10 %; `SONIDO /M` silencia y otra vez lo devuelve; `SONIDO /A` lo ajusta con las flechas. |
 | `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
 
@@ -243,6 +246,8 @@ Para saber qué hay dentro de un equipo sin estar delante. Los dos **solo leen**
 | `DIAGNOSTICO` | Crea en la unidad de arranque una carpeta nueva cada vez (`\INFORMES\EQUIPO01`, `EQUIPO02`…) con `INFORME.TXT` —`VER`, fecha y hora, todo `EQUIPO`, `MEM /C`, `SET`, `HSPSND /INFO`, `HSPRATON /INFO`, `MANDO`, `CONFIG.SYS` y `AUTOEXEC.BAT`— y los volcados en binario: el espacio de configuración de cada función PCI (`PCI\BB_DD_F.BIN`; con MMCONFIG también los 4 KB, `.EXT`), todas las tablas ACPI (`ACPI\DSDT.BIN`, `FACP.BIN`, `SSDT1.BIN`…), SMBIOS, los registros de cada controlador USB (`USB\`), VBE y sus modos, el EDID de la pantalla, CMOS, IVT, BDA, EBDA, la identificación ATA de los discos y los textos de las ROM. Al acabar dice la carpeta: súbala entera al FTP, a `HispaDOS/informes`. |
 | `DIAGNOSTICO /NOISA` | Lo mismo sin sondear los puertos ISA ni el ratón PS/2, por si un equipo se quedara parado ahí (también `/NOPCI`, `/NOVESA`, `/NODISCOS`, `/NOBIOS`). El archivo se cierra antes de cada sondeo delicado: lo escrito queda en el disco y la última línea dice dónde fue. |
 
+Si en `\HISPADOS` está `AUDICION` (la prueba de sonido), `DIAGNOSTICO` ofrece lanzarla al final y su informe va a la misma carpeta (`AUDICION carpeta`, que guarda en ella `SONIDO.TXT`); `/NOSONIDO` no lo pregunta. Si en la prueba algo suena, `DIAGNOSTICO` carga `HSPSND` en ese momento con lo aprendido («Sonido configurado con lo aprendido: ya puede usarlo, también en Hispa Ventanas»): con la opción «Prueba» del menú de arranque ya no hace falta reiniciar para tener sonido.
+
 ### Apagar y reiniciar: `APAGAR` y `REINICIAR`
 
 | Orden | Qué hace |
@@ -251,7 +256,6 @@ Para saber qué hay dentro de un equipo sin estar delante. Los dos **solo leen**
 | `REINICIAR` (en el disco `REINICIA.COM`) | Lo mismo antes y después reinicia: el `RESET_REG` de la FADT, el controlador del teclado (FEh), el puerto CF9h y, si nada funciona, un triple fallo. |
 | `APAGAR /INFO`, `REINICIAR /INFO` | No apagan: dicen qué han encontrado (RSDP, FADT, `SMI_CMD`, puertos PM1, `\_S5` y dónde está, `RESET_REG`, APM) y qué harían. `/NOACPI`, `/NOAPM` quitan un método y `/SOLO:ACPI`, `/SOLO:APM`, `/SOLO:MENSAJE` (APAGAR) o `/SOLO:TECLADO`, `/SOLO:CF9`, `/SOLO:FALLO` (REINICIAR) prueban uno solo, para buscar el que sirve en un equipo. |
 
-Si en `\HISPADOS` está `AUDICION` (la prueba de sonido), `DIAGNOSTICO` ofrece lanzarla al final y su informe va a la misma carpeta (`AUDICION ruta\AUDICION.TXT`); `/NOSONIDO` no lo pregunta.
 
 ### Memoria USB
 

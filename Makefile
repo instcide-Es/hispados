@@ -416,6 +416,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	EMM=1 tests/run_sound_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
 	tests/run_audicion_tests.sh $(IMG)
+	tests/run_aprendido_tests.sh $(IMG)
 	tests/run_sbemu_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)

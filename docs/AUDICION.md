@@ -4,6 +4,9 @@
 (o por qué no suena) y qué opciones necesita `HSPSND`. Recoge todos los datos
 de sonido del equipo, toca sonidos por cada salida y pregunta si se oyen.
 Todo queda en un informe de texto que se sube al FTP, a `HispaDOS/informes`.
+Y **aprende**: lo que suena (se contesta «S») lo guarda en
+`\HISPADOS\SONIDO.INI`, y `HSPSND` usa ese camino con preferencia, en el
+arranque actual y en los siguientes (ver [Lo que aprende](#lo-que-aprende-sonidoini)).
 
 Escrito desde cero (sala limpia) con la documentación pública: *High
 Definition Audio Specification 1.0a* (Intel), *Audio Codec '97 2.3*, las hojas
@@ -34,8 +37,11 @@ códecs imita la del «codec#0» de Linux, que es la referencia para comparar.
   va a `carpeta\SONIDO.TXT`; si ya existe, `SONIDO02.TXT`, `SONIDO03.TXT`...
   Es texto CP437 con CR+LF. Se guarda cada dos respuestas, por si el equipo
   se cuelga.
-- Código de salida: 0 (también con Esc); 1 si no hay memoria (128 KB libres) o
-  si se contesta N a «¿Continuar?» con HSPSND cargado.
+- Código de salida: **2** si algo ha sonado y HSPSND puede usarlo ya (lo
+  aprendido está guardado en `SONIDO.INI`, o es una Sound Blaster, que HSPSND
+  encuentra sola); 0 si no (también con Esc sin que haya sonado nada, o si
+  HSPSND estaba cargado); 1 si no hay memoria (128 KB libres) o si se
+  contesta N a «¿Continuar?» con HSPSND cargado.
 
 Para `DIAGNOSTICO`: `AUDICION X:\INFORMES\EQUIPO01` deja `SONIDO.TXT` junto al
 resto del volcado del equipo. No escribe más archivos: el volcado de los
@@ -110,6 +116,103 @@ No se cuelga: todas las órdenes al códec tienen un plazo de un cuarto de
 segundo (`[sin respuesta a la orden ...]` en el informe); al cuarto fallo
 seguido el códec se da por perdido y se sigue con lo demás.
 
+## Lo que aprende: SONIDO.INI
+
+Cuando una combinación **suena**, AUDICION escribe en la unidad de arranque
+`\HISPADOS\SONIDO.INI` (texto CP437 con CR+LF, comentado) una sección para
+la tarjeta de ese equipo. HSPSND la lee al cargarse y, si es la de su
+tarjeta, pone exactamente ese camino en vez de buscarlo. Lo pidió Carlos: «si
+el usuario consigue hacer sonar su equipo en la Prueba, que sea dicha
+configuración la que tenga preferencia en el arranque actual y en el
+próximo».
+
+- **La cabecera identifica la tarjeta**, por números que no cambian: la
+  controladora PCI (fabricante:dispositivo y subsistema) y el códec
+  (fabricante:dispositivo y subsistema):
+  `[HDA 1022:157A 17AA:511F 10EC:0298 17AA:511F]` (HD Audio) o
+  `[AC97 8086:2415 8086:0000 8384:7600]` (AC'97). El fabricante y el modelo
+  SMBIOS (`Equipo=`) van dentro, como ayuda; bus:disp.fun (`Posicion=`) y la
+  dirección del códec (`Codec=`), solo como pista: pueden cambiar.
+- **Contenido** (HD Audio): `Estado`, `Fecha`, `Equipo`, `Tipo`, los
+  identificadores, el pin que sonó (`Altavoz`) y su `Ruta` hasta el DAC con la
+  entrada elegida en cada mezclador o selector (`14h(0) 0Ch(0) 02h`: el pin
+  14h toma su entrada 0, que es el nodo 0Ch; este, su entrada 0, que es el DAC
+  02h), el `Control` del pin, los auriculares si se probaron y sonaron
+  (`Auriculares`, `RutaAuriculares`, `ControlAuriculares`), `EAPD`, `GPIO`
+  (máscara, dirección y datos, o «no hay»), `Snoop`, `Frecuencia`, `Formato`
+  y `Volumen` (el amplificador que lo hace, o «por programa» si en la prueba
+  no bajaba o no lo hay). AC'97: `EAPD=normal` o `invertido`.
+- **Una prueba nueva en el mismo equipo reemplaza su sección** (la de la
+  misma cabecera, y también la que tenga el mismo `Equipo=` y la misma
+  controladora con otro códec); las de los demás equipos no se tocan. La
+  sección nueva va la primera, detrás de los comentarios del principio.
+- **Si no suena nada**, el códec queda como `Estado=NO SUENA` (y `SOLO CON
+  TODO ABIERTO` si solo sonó con todo abierto, que HSPSND no sabe hacer):
+  HSPSND no usa esas secciones y busca él solo.
+- Sound Blaster de verdad (ISA): no se apunta nada; HSPSND la encuentra sola.
+- Si el fichero pasa de 32 KB, AUDICION solo conserva los primeros; HSPSND
+  lee los primeros 8 KB (por eso la sección nueva va al principio).
+
+Ejemplo (QEMU con `AUDICION /SIM`: suena con las GPIO a 02h y el pin con el
+amplificador de auriculares, que no es lo que haría HSPSND sin más):
+
+    [HDA 8086:2668 1AF4:1100 1AF4:0022 1AF4:0022]
+    ; Prueba de sonido del 13/11/2026 13:51: SUENA.
+    Estado=SUENA
+    Fecha=13/11/2026 13:51
+    Equipo=Prueba | Portatil | 1
+    Tipo=HDA
+    Controladora=8086:2668
+    Subsistema=1AF4:1100
+    Posicion=00:04.0
+    Codec=0
+    IdCodec=1AF4:0022
+    SubCodec=1AF4:0022
+    Altavoz=03h (salida de línea)
+    Ruta=03h(0) 02h
+    Control=C0h
+    Auriculares=03h
+    RutaAuriculares=03h(0) 02h
+    ControlAuriculares=C0h
+    EAPD=encendido
+    GPIO=07h 07h 02h
+    Snoop=no
+    Frecuencia=48000
+    Formato=16 bits estéreo
+    Volumen=amplificador 02h salida
+
+### Cómo lo usa HSPSND
+
+Al cargarse, antes de la búsqueda automática, HSPSND lee `\HISPADOS\SONIDO.INI`
+de la unidad de la que se carga (o de la de arranque) y, por cada
+controladora HD Audio y cada códec, busca la sección con su cabecera. Si la
+hay y dice `SUENA`, primero **comprueba** que la ruta existe en ese códec
+(un pin con salida, mezcladores o selectores, un DAC analógico al final y
+cada nodo unido al siguiente por la entrada que dice la ruta) y después pone
+justo eso: la ruta y el control del pin (y los auriculares), los demás pines
+de salida apagados, las GPIO, el EAPD, el «snoop» de AMD/ATI, 44,1 kHz si fue
+así como sonó y el volumen por programa si hace falta. Lo dice al cargarse
+(«Configuración aprendida en la prueba (fecha).») y en `HSPSND /INFO`, con la
+ruta (`ruta 03h(0) 02h, control del pin C0h`), EAPD y GPIO. Si `Equipo=` no
+es el de este equipo (la misma tarjeta en otro modelo), la usa y lo avisa.
+
+Si no hay sección de su tarjeta («es de otra tarjeta»), si dice que no sonó o
+si la ruta no cuadra con el códec, HSPSND busca la salida él solo, como
+siempre, y lo dice. `HSPSND /NOAPRENDIDO` no lo usa; `/GPIO:hh`, `/NOGPIO` y
+`/EAPD:0` mandan sobre lo aprendido. Lo del fichero se analiza en la parte de
+instalación, que se descarta: en el residente quedan unos 50 octetos para
+`/INFO`.
+
+### En el arranque actual: la opción «Prueba»
+
+En la opción «Prueba» del menú de arranque, `DIAGNOSTICO` (`DIAGNOST.BAT`)
+llama a `EQUIPO /INFORME`, que ofrece AUDICION al final. Si AUDICION sale con
+el código 2, EQUIPO sale también con 2 (y ya no dice «reinicie y elija
+Normal o Juegos») y `DIAGNOST.BAT` carga `HSPSND /VOL:80` en ese momento, con
+lo aprendido: «Sonido configurado con lo aprendido: ya puede usarlo, también
+en Hispa Ventanas». Si HSPSND no se pudiera cargar, sale el aviso de
+reiniciar.
+
 ## Cómo leer el informe
 
 - **`=== RESUMEN ===`** (al final) es lo primero que hay que mirar:
@@ -143,6 +246,16 @@ hda-micro y un ICH9 con el códec en la dirección 2), AC'97, Sound Blaster 16
 y sin tarjeta. La opción `/SIM` (solo para las pruebas) hace como si el códec
 tuviera tres GPIO, EAPD, «snoop» y una salida de auriculares, para recorrer
 todas las variantes y comprobar la línea sugerida.
+
+`tests/run_aprendido_tests.sh`: lo aprendido (`SONIDO.INI`). AUDICION /SIM
+que suena por un camino que HSPSND no elegiría solo (GPIO 02h, control
+C0h), con un SONIDO.INI previo de otros equipos que debe quedar igual; el
+disquete de uso en «Normal» con ese fichero (HSPSND dice «aprendida», /INFO
+enseña la ruta y suena); la misma tarjeta en otro modelo (SMBIOS); otra
+tarjeta (hda-output y AC'97: no lo usa); `/NOAPRENDIDO`; una segunda prueba
+que reemplaza la sección; AUDICION y HSPSND con AC'97; y la opción «Prueba»
+del menú, con y sin sonido: HSPSND queda cargado y `SONAR` suena sin
+reiniciar.
 
 **Falta probarlo en hardware real**; en QEMU no hay GPIO, EAPD, detección de
 presencia ni HDMI de verdad.

@@ -41,6 +41,9 @@
 ;  delicado): si el equipo se colgara, lo escrito hasta ahí queda en el disco
 ;  y la última línea dice dónde fue. Si \HISPADOS\AUDICION existe, al final
 ;  se ofrece la prueba de sonido: «AUDICION carpeta» (guarda SONIDO.TXT).
+;  Si AUDICION sale con el código 2 (algo ha sonado y está guardado en
+;  \HISPADOS\SONIDO.INI), EQUIPO sale también con 2 y DIAGNOST.BAT carga
+;  HSPSND en ese momento, con lo aprendido.
 ;
 ;  No se cuelga: todas las esperas tienen un tope y lo que no responde se
 ;  salta con su aviso. Solo se LEEN los registros de los dispositivos. Las
@@ -6714,7 +6717,11 @@ informe:
         call puts
         PR ". Suba esa carpeta al FTP en HispaDOS/informes", NL
         ; sin HSPSND (la opción «Prueba» del menú no lo carga, a propósito):
-        ; que nadie piense que el equipo no tiene sonido
+        ; que nadie piense que el equipo no tiene sonido. Si AUDICION ha
+        ; hecho sonar algo (código 2), no hace falta reiniciar: se sale con
+        ; el código 2 y DIAGNOST.BAT carga HSPSND con lo aprendido.
+        cmp byte [aud_rc], 2
+        je .aprendido
         push es
         mov ax, 0xD700
         int 0x2F
@@ -6726,6 +6733,10 @@ informe:
 .consnd:
         call flush
         mov ax, 0x4C00
+        int 0x21
+.aprendido:
+        call flush
+        mov ax, 0x4C02
         int 0x21
 
 ; ---- la prueba de sonido (AUDICION), si está en \HISPADOS de la unidad de
@@ -6798,7 +6809,13 @@ audicion:
         mov byte [aud_ext-1], '.'
         mov si, strcmd
         mov byte [redir], 0
-        jmp ejecuta
+        call ejecuta
+        ; su código de salida (el intérprete lo devuelve con /C): 2 = ha
+        ; sonado y lo aprendido está en SONIDO.INI (HSPSND puede cargarse ya)
+        mov ah, 0x4D
+        int 0x21
+        mov [aud_rc], al
+        ret
 .cp:
         lodsb
         stosb
@@ -6942,6 +6959,7 @@ n_dusb      db "USB", 0
 c_aud       db "AUDICION (prueba de sonido)", 0
 m_audno     db "AUDICION está, pero no se ha querido hacer la prueba de sonido.", 13, 10, 0
 m_audsi     db "Prueba de sonido lanzada: su informe es SONIDO.TXT, en esta carpeta.", 13, 10, 0
+aud_rc      db 0
 aud_path    db "?:\HISPADOS\AUDICION."
 aud_ext     db "COM", 0
 
@@ -6987,7 +7005,8 @@ m_usod:
         db "y los volcados en binario del equipo: PCI, ACPI, SMBIOS, USB, vídeo (VBE y", 13, 10
         db "EDID), CMOS, discos y los textos de las ROM. Solo lee: no cambia nada.", 13, 10
         db "Al acabar dice dónde lo ha dejado: suba esa carpeta al FTP, a", 13, 10
-        db "HispaDOS/informes. Si está AUDICION, ofrece hacer la prueba de sonido.", 13, 10
+        db "HispaDOS/informes. Si está AUDICION, ofrece hacer la prueba de sonido;", 13, 10
+        db "si en ella algo suena, carga HSPSND con lo aprendido (sin reiniciar).", 13, 10
         db 13, 10
         db "Si el equipo se quedara parado, lo escrito hasta ese momento queda en el", 13, 10
         db "archivo. Repita entonces sin ese apartado: DIAGNOSTICO /NOISA (sin sondear", 13, 10
