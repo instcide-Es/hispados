@@ -117,7 +117,7 @@ entrar() {
   aparca
 }
 salir() {
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot zz
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5

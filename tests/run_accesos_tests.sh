@@ -215,7 +215,7 @@ vuelta() { espera 'cargando el servidor DPMI' 60 $1; sleep 6; centro; aparca; }
   shot a9
   tecla esc; sleep 1
   # ---- salir ----
-  clic 756 13; sleep 4
+  clic 756 13; sleep 1; tecla ret; sleep 4
   send 'ECHO TRAS-SALIR' 2
   send 'C:\JUEGOS\DOS\JUEGO' 4                 # (9)
   send 'A:\HISPADOS\VELOCIDA' 5
@@ -332,7 +332,7 @@ RX=400; RY=300
   clic 650 292
   tecla ret
   espera '^JUEGO PROG' 40 5; vuelta 4
-  clic 756 13; sleep 4
+  clic 756 13; sleep 1; tecla ret; sleep 4
   send 'ECHO TRAS-SALIR' 2
   send 'A:\HISPADOS\VELOCIDA' 5
   send 'ECHO SIGUE-VIVO' 2
@@ -389,7 +389,7 @@ RX=400; RY=300
   tecla ret; sleep 1.5
   tecla right ret                             # (2) «Arriba»: LOADFIX solo
   espera '^JUEGO PROG' 40 2; vuelta 3
-  clic 756 13; sleep 4
+  clic 756 13; sleep 1; tecla ret; sleep 4
   send 'ECHO SIGUE-VIVO' 2
   mon quit
 } | run 300
@@ -444,7 +444,7 @@ RX=400; RY=300
   shot d2
   tecla ret                                   # (2) otra vez: HSPSND ya está
   espera '^JUEGO PROG' 60 2; vuelta 3
-  clic 756 13; sleep 4
+  clic 756 13; sleep 1; tecla ret; sleep 4
   send 'ECHO SIGUE-VIVO' 2
   mon quit
 } | run 300 -audiodev none,id=snd0 -device AC97,audiodev=snd0

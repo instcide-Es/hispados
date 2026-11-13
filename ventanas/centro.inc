@@ -689,13 +689,7 @@ vista_proc:
         cmp dword [ebp+V_ID], 0
         jne ven_defecto             ; un grupo: se cierra sin más
 .salir:
-        mov esi, t_salir_preg
-        mov edi, tit_barra
-        mov eax, DM_ACEPTAR_CANCELAR
-        call dlg_mensaje
-        cmp eax, ID_ACEPTAR
-        jne .nada
-        mov byte [salir], 1
+        call apa_dialogo            ; [APAGAR] volver a Hispa-DOS, reiniciar o apagar
         jmp .nada
 .destruir:
         mov eax, [ebp+V_ID]

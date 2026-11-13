@@ -356,7 +356,7 @@ esc_proc:
         sar ebx, 16
         call esc_en_salir
         jnc .fin
-        mov byte [salir], 1
+        call apa_pedir              ; [APAGAR] ¿volver, reiniciar o apagar?
 .fin:
         xor eax, eax
         ret

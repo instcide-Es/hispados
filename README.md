@@ -97,6 +97,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Menú de configuraciones en `CONFIG.SYS` (`[menu]`, `MENUITEM`, `SUBMENU`, `MENUDEFAULT`, `MENUCOLOR`, `[common]`, `INCLUDE`, variable `CONFIG`) y opción «Juegos» en el disquete y la memoria USB | ✅ en pruebas |
 | SHARE en el núcleo (bloqueos y modos de compartición) | ✅ |
 | Sistema en `\HISPADOS` con nombres en español y `ALIAS.INI` con los clásicos (EDIT, FORMAT, XCOPY…) | ✅ |
+| `APAGAR` y `REINICIAR`: escriben antes lo pendiente en el disco; apagan por ACPI (S5, con el `\_S5` de la DSDT o las SSDT), por APM o, si no se puede, dejan «Ya puede apagar el equipo.» en letras grandes; reinician por el `RESET_REG` de ACPI, el 8042, el puerto CF9h o un triple fallo. `/INFO` dice qué han encontrado. También desde el botón «Salir» de Hispa Ventanas | ✅ en pruebas (QEMU; falta hardware real) |
 | Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
 | `VELOCIDAD` (frena el procesador para los juegos antiguos: `25%`, `486`, `386`, `XT`, o solo mientras corre un programa) y `LOADFIX` (carga un programa por encima de los primeros 64 KB) | ✅ |
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
@@ -241,6 +242,14 @@ Para saber qué hay dentro de un equipo sin estar delante. Los dos **solo leen**
 | `EQUIPO /PCI` (`/CPU` `/BIOS` `/VESA` `/DISCOS` `/RES` `/ISA`) | Solo ese apartado; `/NOISA`, `/NOPCI`… quitan uno. |
 | `DIAGNOSTICO` | Crea en la unidad de arranque una carpeta nueva cada vez (`\INFORMES\EQUIPO01`, `EQUIPO02`…) con `INFORME.TXT` —`VER`, fecha y hora, todo `EQUIPO`, `MEM /C`, `SET`, `HSPSND /INFO`, `HSPRATON /INFO`, `MANDO`, `CONFIG.SYS` y `AUTOEXEC.BAT`— y los volcados en binario: el espacio de configuración de cada función PCI (`PCI\BB_DD_F.BIN`; con MMCONFIG también los 4 KB, `.EXT`), todas las tablas ACPI (`ACPI\DSDT.BIN`, `FACP.BIN`, `SSDT1.BIN`…), SMBIOS, los registros de cada controlador USB (`USB\`), VBE y sus modos, el EDID de la pantalla, CMOS, IVT, BDA, EBDA, la identificación ATA de los discos y los textos de las ROM. Al acabar dice la carpeta: súbala entera al FTP, a `HispaDOS/informes`. |
 | `DIAGNOSTICO /NOISA` | Lo mismo sin sondear los puertos ISA ni el ratón PS/2, por si un equipo se quedara parado ahí (también `/NOPCI`, `/NOVESA`, `/NODISCOS`, `/NOBIOS`). El archivo se cierra antes de cada sondeo delicado: lo escrito queda en el disco y la última línea dice dónde fue. |
+
+### Apagar y reiniciar: `APAGAR` y `REINICIAR`
+
+| Orden | Qué hace |
+|---|---|
+| `APAGAR` | Escribe en el disco lo que quede pendiente (búferes de DOS y, si la hay, una caché con la interfaz de SMARTDRV), espera 2 s y apaga: por ACPI (activa ACPI con `SMI_CMD` si hace falta y escribe `SLP_TYP` y `SLP_EN` en `PM1a_CNT`/`PM1b_CNT` con los valores del paquete `\_S5`), si no por APM (INT 15h 5307h) y, si tampoco, deja en la pantalla «Ya puede apagar el equipo.» en letras grandes y para el procesador. |
+| `REINICIAR` (en el disco `REINICIA.COM`) | Lo mismo antes y después reinicia: el `RESET_REG` de la FADT, el controlador del teclado (FEh), el puerto CF9h y, si nada funciona, un triple fallo. |
+| `APAGAR /INFO`, `REINICIAR /INFO` | No apagan: dicen qué han encontrado (RSDP, FADT, `SMI_CMD`, puertos PM1, `\_S5` y dónde está, `RESET_REG`, APM) y qué harían. `/NOACPI`, `/NOAPM` quitan un método y `/SOLO:ACPI`, `/SOLO:APM`, `/SOLO:MENSAJE` (APAGAR) o `/SOLO:TECLADO`, `/SOLO:CF9`, `/SOLO:FALLO` (REINICIAR) prueban uno solo, para buscar el que sirve en un equipo. |
 
 Si en `\HISPADOS` está `AUDICION` (la prueba de sonido), `DIAGNOSTICO` ofrece lanzarla al final y su informe va a la misma carpeta (`AUDICION ruta\AUDICION.TXT`); `/NOSONIDO` no lo pregunta.
 

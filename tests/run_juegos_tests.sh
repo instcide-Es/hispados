@@ -128,7 +128,7 @@ fi
   shot j7
   tecla alt-f4; sleep 1
   # ---- salir ----
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot j8
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5
@@ -260,7 +260,7 @@ RX=400; RY=300
   tecla left left ret; sleep 2              # Culebra
   aparca
   shot z1
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot z2
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5

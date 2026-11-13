@@ -178,7 +178,7 @@ mcopy -i $T/f.img $T/JUGAR.BAT ::JUEGOS/BAT/JUGAR.BAT
   centro; aparca
   shot g22
   # ---- salir ----
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot g23
   send 'ECHO TRAS-SALIR'
   send 'A:\HISPADOS\HSPDPMI /D' 2

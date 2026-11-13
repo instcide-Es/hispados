@@ -169,7 +169,7 @@ t_acerca        db "Hispa Ventanas 0.3", 10
                 db "El entorno gráfico de Hispa-DOS.", 10
                 db "Hecho desde cero, en ensamblador y en español.", 10
                 db "Software libre (GPL).", 0
-t_salir_preg    db "¿Salir de Hispa Ventanas y volver a Hispa-DOS?", 0
+; [APAGAR] (t_salir_preg, la pregunta de salir, ya no hace falta: ver apagado.inc)
 t_guion         db " - ", 0
 t_sin_nombre    db "(sin nombre)", 0
 t_bloc_acerca   db "Bloc de notas de Hispa Ventanas.", 10

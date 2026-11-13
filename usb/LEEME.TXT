@@ -40,6 +40,12 @@ Informe del equipo (para enviarlo)
   reinicia y prueba DIAGNOSTICO /NOISA (o /NOPCI, /NOVESA, /NODISCOS).
   EQUIPO ensena lo mismo en pantalla (EQUIPO /PCI, EQUIPO /? ...).
 
+Apagar y reiniciar
+  APAGAR guarda en el disco lo pendiente y apaga el equipo (ACPI o APM); si
+  no puede, dice "Ya puede apagar el equipo." y se apaga con el boton.
+  REINICIAR lo reinicia. APAGAR /INFO y REINICIAR /INFO dicen que metodo
+  usarian, sin hacer nada. En Hispa Ventanas, el boton "Salir" lo ofrece.
+
 Raton y touchpad
   HSPRATON se carga solo al arrancar: usa el raton de la BIOS y, si la BIOS
   no lo ofrece (pasa en algunos portatiles), habla directamente con el

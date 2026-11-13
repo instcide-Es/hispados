@@ -210,7 +210,7 @@ EOF
     aparca
     shot a12
     tecla esc; sleep 1
-    clic 756 13; sleep 2.5
+    clic 756 13; sleep 1; tecla ret; sleep 2.5
     send 'ECHO SIGUE-VIVO'
     mon quit
   } | run 170 -vga std -audiodev wav,id=snd0,path=$T/out.wav $DEV
@@ -325,7 +325,7 @@ RX=400; RY=300
   clic $TONO; sleep 1
   clic $(VOLX 50) $VOLY; sleep 1
   tecla esc; sleep 1
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 60 -vga std -audiodev wav,id=snd0,path=$T/out.wav -device AC97,audiodev=snd0

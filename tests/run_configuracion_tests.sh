@@ -172,7 +172,7 @@ fi
   tecla ret; sleep 1.5
   shot s18
   # ---- salir con ella abierta ----
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot s19
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5
@@ -286,7 +286,7 @@ RX=400; RY=300
   mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.55; mon "mouse_button 1" 0.1; mon "mouse_button 0" 1.2
   aparca
   shot r1
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 120 -vga std -no-reboot -audiodev none,id=snd0 -device sb16,audiodev=snd0
@@ -340,7 +340,7 @@ RX=400; RY=300; VEL=4
   shot m6
   clic 527 491; aparca
   shot m7
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 120 -vga std -no-reboot
@@ -381,7 +381,7 @@ RX=320; RY=240; VEL=2
   ir 16 320
   shot v0
   tecla esc; sleep 1
-  clic 596 13; sleep 2.5
+  clic 596 13; sleep 1; tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 90 -vga std -no-reboot

@@ -99,7 +99,8 @@ config "$XMS"
   mon "mouse_move 190 -141"; mon "mouse_move 190 -141" 0.8
   mon "mouse_button 1" 1
   shot s7                                   # botón «Salir» apretado
-  mon "mouse_button 0" 2
+  mon "mouse_button 0" 1.5
+  tecla ret; sleep 2                        # el cuadro «Salir»: Volver a Hispa-DOS
   send 'ECHO TRAS-SALIR'
   send 'VENTANAS /DEMO' 4
   tecla alt-f4; sleep 1.5

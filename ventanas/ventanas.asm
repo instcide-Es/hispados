@@ -31,6 +31,7 @@
 ;    centro.inc, bloc.inc, calc.inc, reloj.inc    los programas
 ;    accesos.inc    (Centro) grupos ligados a una carpeta de juegos y opciones
 ;                   de juego de un acceso: velocidad, LOADFIX y sonido
+;    apagado.inc    [APAGAR] el cuadro «Salir»: volver a Hispa-DOS, reiniciar o apagar
 ;    api.inc, modulos.inc   los programas aparte (.HVP) y su interfaz
 ;
 ;  La entrada llega por interrupciones: el driver de ratón llama a rm_raton
@@ -1680,6 +1681,7 @@ alto_ini:
 %include "fuente.inc"
         bits 32
 %include "accesos.inc"
+%include "apagado.inc"                ; [APAGAR] salir: volver, reiniciar o apagar
         align 16
 fin_archivo:
         absolute $

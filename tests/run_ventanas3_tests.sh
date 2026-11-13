@@ -186,7 +186,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   send 'VENTANAS /VGA' 4
   RX=320; RY=240
   shot v1
-  clic 596 13; sleep 2
+  clic 596 13; sleep 1; tecla ret; sleep 2
   send 'BIN\XMSTEST' 2.5
   send 'MEM' 2
   send 'ECHO SIGUE-VIVO'
@@ -283,8 +283,8 @@ chk $T/t31b.ppm marco 300 330 400 150 activa titulo 300 330 activa "Sistema" \
 # -- mensajes y salida --
 chk $T/t32.ppm marco 190 216 420 167 activa titulo 190 216 activa "Acerca de Hispa Ventanas" \
   texto 216 257 0 8 fina "Hispa Ventanas 0.3" texto 216 293 0 8 fina "Hecho desde cero, en ensamblador y en español."
-chk $T/t33.ppm marco 190 243 420 113 activa titulo 190 243 activa "Hispa Ventanas" \
-  texto 216 284 0 8 fina "¿Salir de Hispa Ventanas y volver a Hispa-DOS?"
+chk $T/t33.ppm marco 212 171 376 257 activa titulo 212 171 activa "Salir de Hispa Ventanas" \
+  texto 238 210 0 8 negrita "¿Qué quiere hacer?" texto 350 249 0 6 fina "Volver a Hispa-DOS"
 chk $T/t34.ppm tam 720 400
 check "TRAS-SALIR"
 # -- VGA de 16 colores --

@@ -91,6 +91,11 @@ $(B)/SYSINFO.COM: utils/sysinfo.asm | $(B)
 # guarda con lo demás en INFORME.TXT (tests/run_equipo_tests.sh)
 $(B)/EQUIPO.COM: utils/equipo.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# APAGAR y REINICIAR (en el disco REINICIA.COM): el mismo fuente
+$(B)/APAGAR.COM: utils/apagar.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/REINICIAR.COM: utils/apagar.asm lib/util.inc | $(B)
+	$(ASM) -DREINICIAR -o $@ $(B)/gen/$<
 $(B)/HSPCD.SYS: drivers/hspcd.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/KEYB.COM: utils/keyb.asm | $(B)
@@ -168,7 +173,7 @@ VENSRC = $(wildcard ventanas/*.asm ventanas/*.inc)
 $(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack.py | $(B)
 	for f in $(VENSRC); do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
 	python3 tools/mkfuente.py ventanas/fuente.txt $(B)/gen/ventanas/fuente.inc $(B)/gen/ventanas/fuente.ppm
-	python3 tools/icopack.py $(B)/gen/ventanas/iconos.inc $(B)/gen/ventanas/iconos2.inc
+	python3 tools/icopack.py $(B)/gen/ventanas/iconos.inc $(B)/gen/ventanas/iconos2.inc $(B)/gen/ventanas/apagado.inc
 	# (lo que usa la parte de modo real tiene que caber en 64 KB: si no, error)
 	# (-w-zeroing: las variables de la parte de modo real van en el archivo, a cero)
 	$(NASM) -f bin -w+error=number-overflow -w-zeroing -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
@@ -240,7 +245,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS $(B)/HSPEMM.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
+        $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SONS)
 
@@ -269,6 +274,8 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGN
 	iconv -f UTF-8 -t CP437 sistema/DIAGNOST.BAT | sed 's/$$/\r/' > $(B)/DIAGNOST.BAT
 	mcopy -i $@ $(B)/DIAGNOST.BAT ::HISPADOS/DIAGNOST.BAT
 	mcopy -i $@ $(B)/INSTALAR.COM ::HISPADOS/INSTALAR.COM
+	mcopy -i $@ $(B)/APAGAR.COM ::HISPADOS/APAGAR.COM
+	mcopy -i $@ $(B)/REINICIAR.COM ::HISPADOS/REINICIA.COM
 	mcopy -i $@ $(B)/MOVER.COM ::HISPADOS/MOVER.COM
 	mcopy -i $@ $(B)/ATRIBUTO.COM ::HISPADOS/ATRIBUTO.COM
 	mcopy -i $@ $(B)/ARBOL.COM ::HISPADOS/ARBOL.COM
@@ -444,6 +451,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	tests/run_revisar_tests.sh $(IMG)
 	tests/run_ayuda_tests.sh $(IMG)
 	tests/run_equipo_tests.sh $(IMG)
+	tests/run_apagar_tests.sh $(IMG)
 	tests/run_velocidad_tests.sh $(IMG)
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)

@@ -179,9 +179,21 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   cuadros de texto: flechas, Inicio, Fin, Re Pág, Av Pág, Ctrl+Inicio,
   Ctrl+Fin, Mayús con cualquiera de ellas para seleccionar, Ctrl+C / Ctrl+X /
   Ctrl+V (o Ctrl+Ins, Mayús+Supr, Mayús+Ins) y Ctrl+A.
-- Para volver a Hispa-DOS: el botón «Salir» de la barra de arriba, o cerrar
-  el Centro de programas (pregunta antes). Los grupos abiertos y el sitio de
-  cada ventana se guardan en CENTRO.INI y la próxima vez salen igual.
+- Para salir: el botón «Salir» de la barra de arriba, Alt+F4 en el
+  escritorio (sin ninguna ventana activa), cerrar el Centro de programas o su
+  «Archivo > Salir a Hispa-DOS». Todos abren el mismo cuadro, «¿Qué quiere
+  hacer?», con tres botones grandes con su dibujo: **Volver a Hispa-DOS**
+  (Intro), **Reiniciar el equipo** y **Apagar el equipo**, y Cancelar (Esc);
+  las flechas pasan de uno a otro (`ventanas/apagado.inc`). Los grupos
+  abiertos y el sitio de cada ventana se guardan en CENTRO.INI y la próxima
+  vez salen igual; VENTANAS.INI ya lo escribe Configuración cuando cambia.
+  Reiniciar y apagar van como un juego (ver «Programas de Hispa-DOS desde
+  Hispa Ventanas»): Hispa Ventanas guarda CENTRO.INI, deja al lanzador el
+  encargo de ejecutar `REINICIA.COM` o `APAGAR.COM` de su carpeta, sin
+  «volver», vuelve a modo texto y termina; el lanzador quita HSPDPMI de la
+  memoria y ejecuta el programa, que escribe en el disco lo pendiente y
+  reinicia o apaga (si el Bloc de notas tiene cambios sin guardar, pregunta
+  antes). Si falta el programa, lo dice y no sale.
 - Al salir deja el modo de texto, el ratón y la memoria como estaban. Mientras
   está el entorno gráfico, un error crítico de disco (INT 24h) hace fallar la
   llamada sin preguntar en la pantalla; no cambia ningún otro vector de
@@ -1541,6 +1553,11 @@ o comprimidos.
   arranca con un CENTRO.INI escrito a mano, mide la memoria con MEM desde
   un acceso directo y prueba un acceso roto y otro sin «volver». Capturas
   de muestra en `build/ventanas4_*.png`.
+- `tests/run_apagar_tests.sh` (con APAGAR y REINICIAR): el cuadro «Salir»
+  (captura), Esc, Alt+F4 en el escritorio, las flechas, «Volver a
+  Hispa-DOS», y «Apagar el equipo» (-M pc y -M q35) y «Reiniciar el equipo»
+  (-M q35), que terminan QEMU con CENTRO.INI ya guardado. Capturas en
+  `build/apagar_*.png`.
 - `tests/run_accesos_tests.sh`: los grupos ligados a una carpeta de juegos
   y las opciones de juego, con un disco duro que trae `C:\JUEGOS` y QEMU en
   modo `-icount` (las velocidades medidas no dependen de la carga del

@@ -222,7 +222,7 @@ fi
   clic 264 185; derecho 344 185             # el quinto y el decimotercero de los propios
   aparca
   shot a20
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot a21
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5
@@ -407,7 +407,7 @@ RX=400; RY=300
   tecla alt-a down down down ret; sleep 1.2
   escribe "g2"; tecla ret; sleep 25
   shot c6
-  clic 756 13; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 2.5
   shot c7
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5

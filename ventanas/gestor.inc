@@ -1676,7 +1676,10 @@ ges_tecla:
         cmp ah, 0x6B                ; Alt+F4: cerrar la ventana activa
         jne .n1
         test ebp, ebp
-        jz .x
+        jnz .af4                    ; [APAGAR]
+        call apa_pedir              ; [APAGAR] (en el escritorio: salir, apagar...)
+        jmp .x
+.af4:
         test dword [ebp+V_ESTADO], S_INACTIVA
         jnz .x
         mov eax, WM_CLOSE
