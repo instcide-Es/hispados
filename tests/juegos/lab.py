@@ -309,7 +309,7 @@ def prueba(juego, orden, a, iso, sal):
         if not a.sin_raton:
             bat.append(('LH ' if a.lh else '') + 'A:\\HISPADOS\\HSPRATON')
         if not a.sin_sonido:
-            bat.append(('LH ' if a.lh else '') + 'A:\\HISPADOS\\HSPSND /VOL:80')
+            bat.append(('LH ' if a.lh else '') + 'A:\\HISPADOS\\HSPSND /VOL:80' + (' /SB' if a.sb else ''))
         if a.dpmi:
             bat.append('A:\\HISPADOS\\HSPDPMI')
         bat += a.antes or []
@@ -326,7 +326,8 @@ def prueba(juego, orden, a, iso, sal):
         vga = a.vga if a.vga.startswith('std') else a.vga.split(',')[0]
         args = [a.qemu, '-display', 'none', '-M', 'pc', '-m', str(a.mem), '-vga', vga,
                 '-rtc', 'base=localtime', '-parallel', 'none', '-no-reboot',
-                '-audiodev', 'none,id=snd', '-machine', 'pcspk-audiodev=snd',
+                '-audiodev', ('wav,id=snd,path=' + a.wav) if a.wav else 'none,id=snd',
+                '-machine', 'pcspk-audiodev=snd',
                 '-serial', 'file:' + log]
         if 'sb16' in a.tarjeta:
             args += ['-device', 'sb16,audiodev=snd']
@@ -334,6 +335,8 @@ def prueba(juego, orden, a, iso, sal):
             args += ['-device', 'adlib,audiodev=snd']
         if 'ac97' in a.tarjeta:
             args += ['-device', 'AC97,audiodev=snd']
+        if 'hda' in a.tarjeta:
+            args += ['-device', 'intel-hda', '-device', 'hda-duplex,audiodev=snd']
         if a.ref:
             # otro DOS (p. ej. MS-DOS 6.22) instalado en una imagen de disco
             # duro, que no se toca (-snapshot); el juego va en D:
@@ -555,7 +558,11 @@ def main():
     ap.add_argument('--lh', action='store_true', help='con --emm: HSPRATON y HSPSND con LH')
     ap.add_argument('--sin-sonido', action='store_true', help='no cargar HSPSND')
     ap.add_argument('--tarjeta', default='sb16,adlib',
-                    help='tarjetas de sonido de la máquina: sb16, adlib, ac97 (o «no»)')
+                    help='tarjetas de sonido de la máquina: sb16, adlib, ac97, hda (o «no»)')
+    ap.add_argument('--sb', action='store_true',
+                    help='HSPSND /SB: Sound Blaster emulada sobre HD Audio o AC\'97 (con --emm y\n'
+                         '--tarjeta hda o ac97, sin sb16)')
+    ap.add_argument('--wav', help='grabar en este .wav lo que suena (con un solo juego)')
     ap.add_argument('--sin-raton', action='store_true')
     ap.add_argument('--config', action='append', help='línea extra de CONFIG.SYS')
     ap.add_argument('--antes', action='append', help='orden extra en AUTOEXEC antes del juego')

@@ -1719,6 +1719,7 @@ trap_ports  dw 0x60, 0x64, 0x92, 0x43
             dw 0, 1, 2, 3, 4, 5, 6, 7, 0x0C, 0x0D
             dw 0x81, 0x82, 0x83, 0x87, 0x89, 0x8A, 0x8B
             dw 0xC0, 0xC2, 0xC4, 0xC6, 0xC8, 0xCA, 0xCC, 0xCE, 0xD8, 0xDA
+            dw 0x0A, 0x0B, 0x0F, 0xD4, 0xD6, 0xDE   ; [SB] modo y máscara del 8237
             dw 0xFFFF
 
 ; -----------------------------------------------------------------------------
@@ -2029,6 +2030,8 @@ gp_fault:
 .indx:
         movzx edx, word [ebp+P_EDX]
 .in2:
+        xor ah, ah                  ; [SB] ¿puerto de la Sound Blaster emulada?
+        call sb_upcall              ; [SB] (si lo es, no vuelve)
         test al, 1
         jnz .inw
         call port_in
@@ -2066,6 +2069,8 @@ gp_fault:
 .outdx:
         movzx edx, word [ebp+P_EDX]
 .out2:
+        mov ah, 1                   ; [SB]
+        call sb_upcall              ; [SB]
         mov ecx, [ebp+P_EAX]
         test al, 1
         jnz .outw
@@ -2287,6 +2292,7 @@ port_out:
         je .p92
         cmp edx, 0x43
         je .p43
+        call sb_dma_ctl             ; [SB] modo y máscara de los canales cedidos
         call dma_port
         jnc dma_out
         out dx, al
@@ -2472,18 +2478,28 @@ dma_out:
         mov al, cl
         out dx, al
         cmp byte [dma_class], 1
-        je .r
+        je .cnt                     ; [SB] (antes: je .r)
         movzx eax, bl
         lea eax, [eax+edi*2]
         mov [dma_addr+eax], cl
         test bl, bl
         jz .r
         call dma_fix
+        call sb_note_addr           ; [SB]
         jmp .r
+.cnt:                               ; [SB] la cuenta también se anota
+        movzx eax, bl               ; [SB]
+        lea eax, [eax+edi*2]        ; [SB]
+        mov [dma_cnt+eax], cl       ; [SB]
+        test bl, bl                 ; [SB]
+        jz .r                       ; [SB]
+        call sb_note_cnt            ; [SB]
+        jmp .r                      ; [SB]
 .pagew:
         mov [dma_page+edi], cl
         out dx, al
         call dma_fix
+        call sb_note_addr           ; [SB]
         jmp .r
 .ffw:
         DMAFF
@@ -2507,6 +2523,20 @@ dma_in:
         mov esi, eax
         mov bl, [esi]
         xor byte [esi], 1
+        ; [SB] canal cedido a la Sound Blaster emulada: la dirección y la
+        ; cuenta «actuales» las lleva HSPSND en su estructura
+        mov ecx, [sb_dmaptr+edi*4]  ; [SB]
+        test ecx, ecx               ; [SB]
+        jz .nsb                     ; [SB]
+        in al, dx                   ; [SB] (el biestable de verdad, a la par)
+        movzx ebx, bl               ; [SB]
+        cmp byte [dma_class], 1     ; [SB]
+        jne .sba                    ; [SB]
+        add ecx, 2                  ; [SB]
+.sba:                               ; [SB]
+        mov al, [ecx+ebx+SBD_CURADDR] ; [SB]
+        jmp .r                      ; [SB]
+.nsb:                               ; [SB]
         cmp byte [dma_class], 1
         je .raw
         cmp dword [dma_delta+edi*4], 0
@@ -2613,6 +2643,296 @@ dma_fix:
         popad
         ret
 
+; =============================================================================
+;  [SB] Apoyo a la emulación de Sound Blaster de HSPSND (HSPSND /SB).
+;  El monitor solo atrapa: la emulación (DSP, mezclador, FM, salida por HD
+;  Audio o AC'97) está en HSPSND, en modo V86. Servicios (INT 67h, AH=DDh):
+;    AL=00h  ¿está? -> AH=0, BX=5342h («SB»), CX=versión de la interfaz
+;    AL=01h  vigilar puertos: DS:SI = pares (primero, último) acabados en
+;            FFFFh (8 como mucho), ES:BX = rutina de HSPSND (0:0 = ninguna).
+;            Cada IN/OUT de un programa a esos puertos se convierte en una
+;            llamada a la rutina, como una interrupción: en la pila del
+;            programa quedan [SP]=datos (bit 0: OUT; bit 1: 16 bits; bit 2:
+;            32 bits), [SP+2]=puerto y después IP, CS e indicadores (la
+;            rutina quita las dos palabras y acaba con IRET). El valor va en
+;            AL/AX/EAX (el del programa en OUT; en IN lo pone la rutina). La
+;            E/S hecha desde el segmento de la rutina no se desvía.
+;    AL=02h  mapear memoria física: BX = primera página lineal (por debajo
+;            de 100h), CX = páginas, EDX = dirección física; con el bit 0 a
+;            uno es RAM (con caché: para deshacerlo, con la dirección que
+;            daba antes VCPI DE06h) y si no, registros de un dispositivo
+;            (sin caché). Para los registros del HD Audio.
+;    AL=03h  ceder un canal de DMA: BL = canal, ES:DI = estructura (0:0 =
+;            devolverlo). El monitor anota en ella lo que el programa
+;            escribe en el 8237 y contesta con ella sus lecturas:
+;              +0  dd dirección lineal programada (página y dirección)
+;              +4  dw cuenta programada      +6 db modo (puerto 0Bh/D6h)
+;              +8  dw dirección actual (tal cual se lee del registro)
+;              +10 dw cuenta actual          +12 db 1 = canal tapado
+; =============================================================================
+SBD_BASE    equ 0
+SBD_COUNT   equ 4
+SBD_MODE    equ 6
+SBD_CURADDR equ 8
+SBD_CURCNT  equ 10
+SBD_MASK    equ 12
+
+sb_svc:
+        movzx eax, byte [ebp+P_EAX]
+        test al, al
+        jz .chk
+        cmp al, 1
+        je .trap
+        cmp al, 2
+        je .map
+        cmp al, 3
+        je .dma
+        mov ah, 0x8F
+        ret
+.chk:
+        mov word [ebp+P_EBX], 0x5342
+        mov word [ebp+P_ECX], 0x0100
+        xor ah, ah
+        ret
+.trap:
+        mov dword [sb_handler], 0
+        V86PTR esi, F_DS, P_ESI
+        mov edi, sb_ranges
+        mov ecx, 8
+.tl:
+        movzx eax, word [esi]
+        cmp ax, 0xFFFF
+        je .te
+        movzx edx, word [esi+2]
+        mov [edi], ax
+        mov [edi+2], dx
+.tb:
+        bts [tss+104], eax
+        inc eax
+        cmp eax, edx
+        jbe .tb
+        add esi, 4
+        add edi, 4
+        loop .tl
+.te:
+        mov word [edi], 0xFFFF
+        movzx eax, word [ebp+F_ES]
+        shl eax, 16
+        mov ax, [ebp+P_EBX]
+        mov [sb_handler], eax
+        xor ah, ah
+        ret
+.map:
+        movzx ebx, word [ebp+P_EBX]
+        movzx ecx, word [ebp+P_ECX]
+        lea eax, [ebx+ecx]
+        cmp eax, 0x100
+        ja .bad
+        jecxz .bad
+        mov edx, [ebp+P_EDX]
+.ml:
+        mov eax, edx
+        and eax, ~0xFFF
+        or eax, 7                   ; presente, escritura, usuario
+        test dl, 1
+        jnz .mw
+        or eax, 0x18                ; registros: sin caché
+.mw:
+        add edx, 0x1000
+        mov [PT0_LIN+ebx*4], eax
+        inc ebx
+        loop .ml
+        mov byte [need_flush], 1
+        xor ah, ah
+        ret
+.bad:
+        mov ah, 0x8F
+        ret
+.dma:
+        movzx ebx, byte [ebp+P_EBX]
+        and ebx, 7
+        V86PTR edi, F_ES, P_EDI
+        test edi, edi
+        mov [sb_dmaptr+ebx*4], edi
+        jz .dok
+        mov word [edi+SBD_MODE], 0
+        mov byte [edi+SBD_MASK], 0
+        mov edi, ebx
+        call sb_note_addr
+        call sb_note_cnt
+.dok:
+        xor ah, ah
+        ret
+
+; el programa ha escrito la dirección (o la página) del canal EDI
+sb_note_addr:
+        push eax
+        push ecx
+        push esi
+        mov esi, [sb_dmaptr+edi*4]
+        test esi, esi
+        jz .r
+        movzx eax, word [dma_addr+edi*2]
+        mov [esi+SBD_CURADDR], ax
+        movzx ecx, byte [dma_page+edi]
+        cmp edi, 4
+        jb .a8
+        shl eax, 1
+        and cl, 0xFE
+.a8:
+        shl ecx, 16
+        add eax, ecx
+        mov [esi+SBD_BASE], eax
+.r:
+        pop esi
+        pop ecx
+        pop eax
+        ret
+; ... o la cuenta
+sb_note_cnt:
+        push eax
+        push esi
+        mov esi, [sb_dmaptr+edi*4]
+        test esi, esi
+        jz .r
+        mov ax, [dma_cnt+edi*2]
+        mov [esi+SBD_COUNT], ax
+        mov [esi+SBD_CURCNT], ax
+.r:
+        pop esi
+        pop eax
+        ret
+
+; OUT a los registros de modo (0Bh, D6h) y de máscara (0Ah, 0Fh, D4h, DEh):
+; se anota en los canales cedidos y sigue su camino. Conserva todo.
+sb_dma_ctl:
+        push ebx
+        push ecx
+        push esi
+        xor ebx, ebx
+        cmp edx, 0x0B
+        je .mode
+        cmp edx, 0x0A
+        je .mask1
+        cmp edx, 0x0F
+        je .maskall
+        mov ebx, 4
+        cmp edx, 0xD6
+        je .mode
+        cmp edx, 0xD4
+        je .mask1
+        cmp edx, 0xDE
+        je .maskall
+        jmp .r
+.mode:
+        movzx ecx, al
+        and ecx, 3
+        add ecx, ebx
+        mov esi, [sb_dmaptr+ecx*4]
+        test esi, esi
+        jz .r
+        mov [esi+SBD_MODE], al
+        jmp .r
+.mask1:
+        movzx ecx, al
+        and ecx, 3
+        add ecx, ebx
+        mov esi, [sb_dmaptr+ecx*4]
+        test esi, esi
+        jz .r
+        mov cl, al
+        shr cl, 2
+        and cl, 1
+        mov [esi+SBD_MASK], cl
+        jmp .r
+.maskall:
+        mov ch, al
+        mov cl, 4
+.ma:
+        mov esi, [sb_dmaptr+ebx*4]
+        test esi, esi
+        jz .mn
+        push eax
+        mov al, ch
+        and al, 1
+        mov [esi+SBD_MASK], al
+        pop eax
+.mn:
+        shr ch, 1
+        inc ebx
+        dec cl
+        jnz .ma
+.r:
+        pop esi
+        pop ecx
+        pop ebx
+        ret
+
+; E/S a un puerto atrapado: ¿es de los que vigila HSPSND? AL = código de la
+; instrucción (bit 0: palabra), AH = 1 si es OUT, BL bit 0 = operando de 32
+; bits, EDX = puerto, ESI = tras la instrucción. Si lo es, el programa sigue
+; en la rutina de HSPSND (y esta llamada no vuelve); si no, conserva todo
+; menos AH.
+sb_upcall:
+        cmp dword [sb_handler], 0
+        je .no
+        push ecx
+        mov ecx, [sb_handler]
+        shr ecx, 16
+        cmp cx, [ebp+F_CS]
+        pop ecx
+        je .no
+        push esi
+        mov esi, sb_ranges
+.l:
+        cmp word [esi], 0xFFFF
+        je .nor
+        cmp dx, [esi]
+        jb .n
+        cmp dx, [esi+2]
+        jbe .hit
+.n:
+        add esi, 4
+        jmp .l
+.nor:
+        pop esi
+.no:
+        ret
+.hit:
+        pop esi
+        add esp, 4                  ; no se vuelve a gp_fault
+        sub esi, [gp_base]
+        movzx ecx, ah
+        test al, 1
+        jz .b
+        or cl, 2
+        test bl, 1
+        jz .b
+        xor cl, 6
+.b:
+        movzx edi, word [ebp+F_SS]
+        shl edi, 4
+        mov eax, [ebp+F_ESP]
+        sub ax, 10
+        mov [ebp+F_ESP], ax
+        movzx eax, ax
+        add edi, eax
+        mov [edi], cx
+        mov [edi+2], dx
+        mov [edi+4], si
+        mov ax, [ebp+F_CS]
+        mov [edi+6], ax
+        mov ax, [ebp+F_EFL]
+        mov [edi+8], ax
+        and dword [ebp+F_EFL], ~0x0300
+        mov eax, [sb_handler]
+        movzx ecx, ax
+        mov [ebp+F_EIP], ecx
+        shr eax, 16
+        mov [ebp+F_CS], eax
+        jmp mon_exit
+; ======================== [SB] fin del apoyo a HSPSND /SB =====================
+
 ; -----------------------------------------------------------------------------
 ;  INT 15h AH=87h: copiar CX palabras entre direcciones físicas
 ;  (ES:SI = tabla de descriptores; origen en +10h y destino en +18h)
@@ -2713,6 +3033,11 @@ ems_dispatch:
         call vcpi_v86
         jmp .done
 .ems:
+        cmp al, 0xDD                ; [SB] servicios para HSPSND /SB
+        jne .ems1                   ; [SB]
+        call sb_svc                 ; [SB]
+        jmp .done                   ; [SB]
+.ems1:                              ; [SB]
         cmp dword [p_framepg], 0
         je .undef
         sub al, 0x40
@@ -4088,6 +4413,11 @@ in_hlt      resb 1
 kbc_state   resb 1
 dma_class   resb 1
 os_key      resb 1
+            alignb 4                ; [SB]
+sb_handler  resd 1                  ; [SB] seg:desp de la rutina de HSPSND
+sb_dmaptr   resd 8                  ; [SB] estructura de cada canal cedido
+sb_ranges   resw 2*8 + 1            ; [SB] puertos (primero, último), FFFFh
+dma_cnt     resw 8                  ; [SB] cuenta programada de cada canal
             alignb 4
             resb 4096               ; pila de anillo 0
 STKTOP:

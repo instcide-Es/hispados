@@ -3,8 +3,10 @@ REM Memoria extendida (XMS) y lectores de CD/DVD (IDE y SATA):
 DEVICE=A:\HISPADOS\HSPXMS.SYS
 REM Memoria expandida (EMS), VCPI y memoria superior (UMB), para los juegos y
 REM programas que piden EMS. Quite el REM de las dos lineas. Con HSPEMM el
-REM procesador va en modo V86: no funcionan HSPUSB con /U o /F, el CD en SATA
-REM (AHCI) ni el sonido HD Audio, y Windows 386 mejorado no arranca con DOS=UMB.
+REM procesador va en modo V86: no funcionan HSPUSB con /U o /F ni el CD en SATA
+REM (AHCI), y Windows 386 mejorado no arranca con DOS=UMB. Con HSPEMM cargado,
+REM HSPSND /SB (en AUTOEXEC.BAT) da a los juegos una Sound Blaster 16 emulada
+REM sobre el sonido HD Audio o AC'97 del equipo.
 REM DEVICE=A:\HISPADOS\HSPEMM.SYS
 REM DOS=UMB
 REM El núcleo de Hispa-DOS, en la memoria alta (HMA): deja unos 33 KB más de

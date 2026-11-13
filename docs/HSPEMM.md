@@ -45,8 +45,10 @@ que necesita el modo real «de verdad» no puede funcionar, y lo dice:
 - `HSPUSB` llevando él el USB (`/U`, `/F`): usa el modo irreal. Sin opciones
   (USB por la BIOS) sigue igual.
 - `HSPCD` con lectores **SATA (AHCI)**; los IDE funcionan.
-- `HSPSND` con **Intel HD Audio**; Sound Blaster funciona (también con
-  `LH HSPSND`).
+- (`HSPSND` con **Intel HD Audio** ya funciona en modo V86: HSPEMM le
+  mapea los registros de la tarjeta en una página de su memoria. Y con
+  `HSPSND /SB` emula una Sound Blaster para los juegos: ver
+  [HSPSB.md](HSPSB.md).)
 - Programas que pasan a modo protegido por su cuenta (sin VCPI ni DPMI): el
   monitor los termina con «HSPEMM: el programa quiere pasar a modo
   protegido por su cuenta…».
@@ -104,6 +106,12 @@ Un solo fichero, `drivers/hspemm.asm`, con tres partes:
      por encima de A000 (DMA de la disquetera, controladoras USB/AHCI).
    - **8254**: los modos 6 y 7 se escriben como 2 y 3 (son lo mismo, pero
      QEMU deja el temporizador parado con ellos; Aladdin usa el 7).
+   - **Apoyo a `HSPSND /SB`** (lo marcado con `[SB]`; INT 67h AH=DDh):
+     puertos vigilados que se convierten en llamadas a una rutina del modo
+     V86, páginas del primer mega que apuntan a memoria física (registros
+     del HD Audio) y canales de DMA «cedidos» (el monitor anota modo,
+     máscara, dirección y cuenta, y contesta las lecturas). La emulación
+     está en HSPSND: ver [HSPSB.md](HSPSB.md).
    - **EMS**: 40h-48h, 4Bh-54h, 57h-5Dh. `pagemap` es una permutación de las
      páginas: tramos de cada handle, libres y, al final, las de VCPI.
    - **VCPI**: DE00h-DE0Ch y la entrada de modo protegido (DE03h-DE05h,
@@ -149,6 +157,8 @@ da igual en qué línea esté.
 - `tests/run_emmhigh_tests.sh`: `DOS=HIGH,UMB` + HSPEMM + `DEVICEHIGH` + `LH`,
   A20 cerrada con el núcleo en la HMA, y la estrategia de reserva
   (`EMMMISC S`), con y sin memoria superior.
+- `tests/run_sbemu_tests.sh`: la Sound Blaster emulada (`HSPSND /SB`) con
+  HD Audio y con AC'97, y HD Audio en modo V86 sin `/SB`.
 - `EMM=1 tests/run_dpmi_tests.sh`, `EMM=1 tests/run_sound_tests.sh` (Sound
   Blaster con `LH HSPSND`: el búfer de DMA en un UMB),
   `EMM=1 tests/run_ventanas_tests.sh` (y `_ventanas3_`, `_ventanas4_`).

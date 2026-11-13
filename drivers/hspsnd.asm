@@ -2,8 +2,11 @@
 ;  HSPSND.COM - driver de sonido de Hispa-DOS (residente)
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  Uso:  HSPSND [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO] [/EAPD:0]
+;  Uso:  HSPSND [/SB] [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO] [/EAPD:0]
 ;               [/NOTECLAS]   (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
+;        /SB        Sound Blaster 16 emulada sobre el HD Audio o el AC'97,
+;                   para los juegos (hace falta HSPEMM; si hay una Sound
+;                   Blaster de verdad, no hace nada). Ver docs/HSPSB.md
 ;        /NOSB      no buscar una Sound Blaster
 ;        /VOL:n     volumen del 0 al 100 % (80 si no se dice); con el driver
 ;                   ya instalado cambia el volumen del residente
@@ -20,7 +23,9 @@
 ;  220h-280h; si no está BLASTER, la pone), Intel HD Audio (HDA, PCs
 ;  actuales) e Intel AC'97 (ICH y
 ;  compatibles). HD Audio necesita el modo real "irreal" (FS con límite de
-;  4 GB) para llegar a sus registros; no funciona bajo EMM386 (modo V86).
+;  4 GB) para llegar a sus registros. En modo V86 solo funciona con HSPEMM,
+;  que le mapea los registros en una página de su propia memoria (hda_wseg);
+;  bajo otros EMM386 no.
 ;
 ;  API: INT 2Fh AX=D700h -> AL=FFh si está instalado, ES:BX = punto de entrada
 ;  (llamada lejana, AH = función):
@@ -67,6 +72,13 @@ p_src       dd 0
 name_ac97   db "Intel AC'97", 0
 name_hda    db "Intel HD Audio", 0
 hda_base    dd 0
+hda_reg     dd 0                    ; lo que se suma al registro: hda_base en
+                                    ; modo real; en modo V86, lo que pasa de
+                                    ; la página (la ventana empieza en FS:0)
+hda_wseg    dw 0                    ; modo V86: segmento de la ventana
+v86_xlat    db 0                    ; modo V86 con VCPI: lineal != física
+e_on        db 0                    ; Sound Blaster emulada en marcha (/SB)
+e_sbres     db 0                    ; ... y su código está residente
 hda_sd      dw 0                    ; registros del primer flujo de salida
 hda_cad     db 0
 hda_dac     db 0                    ; primer DAC (informativo)
@@ -112,12 +124,35 @@ buf_off     dw 0
 
 int2f:
         cmp ax, 0xD700
-        jne .chain
+        jne .win
         mov al, 0xFF
         push cs
         pop es
         mov bx, entry
         iret
+.win:
+        ; Windows en modo 386 mejorado (DX bit 0 = 0) arranca o termina: la
+        ; Sound Blaster emulada se para mientras tanto (ver hspsb.inc)
+        cmp ax, 0x1605
+        jne .w6
+        test dl, 1
+        jnz .chain
+        cmp byte [cs:e_on], 0
+        je .chain
+        call e_winoff
+        jmp .chain
+.w6:
+        cmp ax, 0x1606
+        jne .chain
+        test dl, 1
+        jnz .chain
+        cmp byte [cs:e_on], 0       ; (e_wason solo existe si hubo /SB)
+        jne .chain
+        cmp byte [cs:e_sbres], 0
+        je .chain
+        cmp byte [cs:e_wason], 0
+        je .chain
+        call e_winon
 .chain:
         jmp far [cs:old2f]
 
@@ -135,20 +170,20 @@ entry:
         popf
         retf
 .disp:
-        cmp byte [cs:dev_type], 4
-        jne .go
         cmp ah, 1
         jb .go
         cmp ah, 3
         ja .go
+        ; con la Sound Blaster emulada, la API es una voz más de su anillo
+        cmp byte [cs:e_on], 0
+        jne e_api
+        cmp byte [cs:dev_type], 4
+        jne .go
         ; HD Audio: las funciones usan FS (modo irreal) y hay que devolverlo
         ; como estaba; en modo V86 (EMM386 o Windows cargados después) no
-        ; se puede llegar a los registros
-        push ax
-        smsw ax
-        test al, 1
-        pop ax
-        jnz .v86
+        ; se puede llegar a los registros, salvo por la ventana de HSPEMM
+        call hda_reach
+        jc .v86
         push fs
         call a20_open
         push cs
@@ -382,11 +417,10 @@ vol_apply:
         jbe .sb
         cmp al, 3
         je .ac
-        ; HD Audio: hace falta el modo irreal; en modo protegido o V86 queda
-        ; pendiente para la próxima llamada
-        smsw ax
-        test al, 1
-        jz .h
+        ; HD Audio: hace falta el modo irreal; en modo protegido o V86 (sin
+        ; la ventana de HSPEMM) queda pendiente para la próxima llamada
+        call hda_reach
+        jnc .h
         mov byte [cs:vol_dirty], 1
         jmp .r
 .h:
@@ -629,6 +663,39 @@ phys:
         shl eax, 4
         add eax, ebx
         pop ebx
+        cmp byte [cs:v86_xlat], 0
+        je .r
+        ; modo V86: la página puede estar en otra RAM (HSPSND cargado en la
+        ; memoria superior): VCPI DE06h da su dirección física
+        push ecx
+        push edx
+        push eax
+        mov ecx, eax
+        shr ecx, 12
+        mov ax, 0xDE06
+        int 0x67
+        test ah, ah
+        pop eax
+        jnz .x
+        and eax, 0xFFF
+        and edx, 0xFFFFF000
+        or eax, edx
+.x:
+        pop edx
+        pop ecx
+.r:
+        ret
+
+; CF = 1 si no se puede llegar a los registros del HD Audio (modo V86 sin la
+; ventana de HSPEMM). Conserva todo.
+hda_reach:
+        push ax
+        smsw ax
+        test al, 1
+        pop ax
+        jz .r
+        cmp word [cs:hda_wseg], 1
+.r:
         ret
 
 ; poner en cola el búfer wr_idx con BX tramas
@@ -809,8 +876,8 @@ unreal:
         push eax
         push bx
         smsw ax
-        test al, 1                  ; en modo V86 no se puede
-        jnz .r
+        test al, 1                  ; en modo V86: la ventana de HSPEMM
+        jnz .v86
         cli
         lgdt [cs:gdtr]
         mov eax, cr0
@@ -831,6 +898,11 @@ unreal:
         pop bx
         pop eax
         ret
+.v86:
+        cmp word [cs:hda_wseg], 0
+        je .r
+        mov fs, [cs:hda_wseg]
+        jmp .r
 
 
 ; ---- línea A20 ----
@@ -916,42 +988,42 @@ a20_closed  db 0
 hrd32:
         push esi
         movzx esi, dx
-        add esi, [cs:hda_base]
+        add esi, [cs:hda_reg]
         mov eax, [fs:esi]
         pop esi
         ret
 hwr32:
         push esi
         movzx esi, dx
-        add esi, [cs:hda_base]
+        add esi, [cs:hda_reg]
         mov [fs:esi], eax
         pop esi
         ret
 hrd16:
         push esi
         movzx esi, dx
-        add esi, [cs:hda_base]
+        add esi, [cs:hda_reg]
         mov ax, [fs:esi]
         pop esi
         ret
 hwr16:
         push esi
         movzx esi, dx
-        add esi, [cs:hda_base]
+        add esi, [cs:hda_reg]
         mov [fs:esi], ax
         pop esi
         ret
 hrd8:
         push esi
         movzx esi, dx
-        add esi, [cs:hda_base]
+        add esi, [cs:hda_reg]
         mov al, [fs:esi]
         pop esi
         ret
 hwr8:
         push esi
         movzx esi, dx
-        add esi, [cs:hda_base]
+        add esi, [cs:hda_reg]
         mov [fs:esi], al
         pop esi
         ret
@@ -1222,21 +1294,25 @@ hda_start:
         call hrd8
         test al, 1
         loopnz .r2
-        ; lista de descriptores: NBUF entradas de BUFSZ
+        ; lista de descriptores: 32 entradas de 1 KB sobre el anillo (así
+        ; ninguna cruza una página: en modo V86 las páginas pueden no ir
+        ; seguidas en la memoria física). Con la Sound Blaster emulada, cada
+        ; una avisa al acabar (IOC).
         mov di, [cs:bdl_off]
         xor si, si
 .bd:
         mov bx, si
-        shl bx, 13
+        shl bx, 10
         add bx, [cs:buf_off]
         call phys
         mov [cs:di], eax
         mov dword [cs:di+4], 0
-        mov dword [cs:di+8], BUFSZ
-        mov dword [cs:di+12], 0
+        mov dword [cs:di+8], 1024
+        movzx eax, byte [cs:e_on]
+        mov [cs:di+12], eax
         add di, 16
         inc si
-        cmp si, NBUF
+        cmp si, 32
         jb .bd
         mov bx, [cs:bdl_off]
         call phys
@@ -1252,7 +1328,7 @@ hda_start:
         call hwr32
         mov dx, [cs:hda_sd]
         add dx, 0x0C
-        mov ax, NBUF - 1
+        mov ax, 31
         call hwr16
         mov dx, [cs:hda_sd]
         add dx, 0x12
@@ -1263,7 +1339,9 @@ hda_start:
         mov al, 0x10                ; flujo número 1
         call hwr8
         mov dx, [cs:hda_sd]
-        mov al, 2                   ; RUN
+        mov al, [cs:e_on]
+        shl al, 2                   ; IOCE (Sound Blaster emulada)
+        or al, 2                    ; RUN
         call hwr8
         mov byte [cs:started], 1
         xor eax, eax
@@ -2144,6 +2222,14 @@ sb_volume:
 resident_end:
 
 ; =============================================================================
+;  Sound Blaster emulada (/SB): solo queda residente si se activa; si no, los
+;  búferes van encima
+; =============================================================================
+%include "hspsb.inc"
+%include "hspopl.inc"
+sbemu_end:
+
+; =============================================================================
 ;  Instalación (lo que sigue se descarta)
 ; =============================================================================
 init:
@@ -2166,20 +2252,17 @@ init:
         mov al, [opt_vol]
         mov [vol_pct], al
 .notinst:
-        ; búferes de DMA y lista de descriptores tras el código residente
-        ; HDA pide 128 bytes de alineación en la dirección física
-        xor eax, eax
-        mov ax, cs
-        shl eax, 4
-        mov ebx, eax
-        add eax, resident_end + 127
-        and eax, 0xFFFFFF80
-        sub eax, ebx
-        mov [bdl_off], ax
-        add ax, 32 * 8
-        mov [buf_off], ax
-        add ax, NBUF * BUFSZ
-        mov [tsr_end], ax
+        ; ¿modo V86? ¿con HSPEMM y sus servicios para HSPSND?
+        call v86_probe
+        cmp byte [opt_sb], 0
+        je .lay
+        cmp byte [v86_svc], 0
+        jne .lay
+        mov byte [opt_sb], 0
+        mov si, msg_sb_noemm
+        call puts
+.lay:
+        call layout
         ; Sound Blaster (ISA) primero, salvo con /NOSB
         cmp byte [opt_nosb], 0
         jne .pci
@@ -2216,6 +2299,9 @@ init:
         call ac97_init
         jc .fail
         mov byte [dev_type], 3
+        ; sin ventana para los registros del HD Audio
+        mov byte [lay_win], 0
+        call layout
         mov si, msg_ac97
         call puts
         mov ax, [nam]
@@ -2326,6 +2412,22 @@ init:
         mov ax, 0x4C03
         int 0x21
 .install:
+        ; Sound Blaster emulada: solo si no hay una de verdad
+        cmp byte [dev_type], 3
+        jae .sbe
+        cmp byte [opt_sb], 0
+        je .sbe
+        mov byte [opt_sb], 0
+        mov si, msg_sb_real
+        call puts
+.sbe:
+        ; (con /NOSB no se ha mirado si BLASTER ya está en el entorno)
+        cmp byte [opt_sb], 0
+        je .sbe2
+        cmp byte [opt_nosb], 0
+        je .sbe2
+        call sb_parse_env
+.sbe2:
         ; volumen inicial (las SB sin mezclador, por programa)
         cmp byte [dev_type], 2
         ja .hw
@@ -2374,8 +2476,219 @@ init:
         je sb_tsr
         cmp byte [dev_type], 2
         je sb_tsr
+        cmp byte [opt_sb], 0
+        je .tsr
+        mov [e_tsrpar], dx
+        mov byte [e_sbres], 1
+        call e_prepare
+        jmp e_go                    ; (residente: el anillo cae encima de esto)
+.tsr:
         mov ax, 0x3100
         int 0x21
+
+; ---- modo V86: ¿está HSPEMM con sus servicios (INT 67h AH=DDh)? ¿VCPI? ----
+v86_probe:
+        smsw ax
+        test al, 1
+        jz .r
+        push es
+        xor ax, ax
+        mov es, ax
+        mov eax, [es:0x67*4]
+        pop es
+        test eax, eax
+        jz .r
+        mov ax, 0xDD00
+        xor bx, bx
+        int 0x67
+        test ah, ah
+        jnz .vcpi
+        cmp bx, 0x5342
+        jne .vcpi
+        mov byte [v86_svc], 1
+        mov byte [v86_xlat], 1
+        ret
+.vcpi:
+        mov ax, 0xDE00
+        int 0x67
+        test ah, ah
+        jnz .r
+        mov byte [v86_xlat], 1
+.r:
+        ret
+
+; ---- dónde van la lista de descriptores y el anillo (tras lo residente) ----
+; HD Audio pide 128 bytes de alineación en la dirección física.
+; Con HSPEMM (modo V86): la lista y el anillo alineados a 1 KB (ninguna
+; entrada cruza una página) y, detrás (más allá del final de este programa:
+; no puede caer encima del código que se está ejecutando), una página entera
+; para la ventana de los registros del HD Audio (lay_win).
+; Con la Sound Blaster emulada, todo en páginas enteras: el estado (3 KB) y
+; la lista (1 KB) en una, el anillo en las ocho siguientes y la ventana.
+; Así ninguna de esas páginas tiene código: escribir a cada muestra en una
+; página con código (o que lo tuvo: los emuladores guardan su traducción
+; hasta que se pisa) es lentísimo.
+layout:
+        ; si ya no hace falta la ventana, se deshace
+        cmp byte [lay_win], 0
+        jne .k
+        call win_unmap
+.k:
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        mov ebx, eax
+        cmp byte [v86_svc], 0
+        je .real
+        cmp byte [opt_sb], 0
+        jne .sb
+        add eax, resident_end + 1023
+        and eax, 0xFFFFFC00
+        sub eax, ebx
+        mov [bdl_off], ax
+        add ax, 1024
+        mov [buf_off], ax
+        add ax, NBUF * BUFSZ
+        mov [tsr_end], ax
+        cmp byte [lay_win], 0
+        je .r
+        cmp ax, file_end
+        jae .w
+        mov ax, file_end
+.w:
+        movzx eax, ax
+        add eax, ebx
+        add eax, 4095
+        and eax, 0xFFFFF000
+        jmp .win
+.sb:
+        add eax, sbemu_end + 4095
+        and eax, 0xFFFFF000
+        mov edx, eax
+        shr edx, 4
+        mov [e_seg], dx
+        sub eax, ebx
+        add ax, ST_MAX
+        mov [bdl_off], ax
+        add ax, 4096 - ST_MAX
+        mov [buf_off], ax
+        add ax, NBUF * BUFSZ
+        mov [tsr_end], ax
+        cmp byte [lay_win], 0
+        je .r
+        movzx eax, ax
+        add eax, ebx
+.win:
+        mov edx, eax
+        shr edx, 4
+        mov [win_seg], dx
+        add eax, 4096
+        sub eax, ebx
+        mov [tsr_end], ax
+.r:
+        ret
+.real:
+        add eax, resident_end + 127
+        and eax, 0xFFFFFF80
+        sub eax, ebx
+        mov [bdl_off], ax
+        add ax, 32 * 16
+        mov [buf_off], ax
+        add ax, NBUF * BUFSZ
+        mov [tsr_end], ax
+        ret
+; deshacer la ventana de los registros del HD Audio (si la hay)
+win_unmap:
+        cmp word [hda_wseg], 0
+        je .r
+        pushad
+        mov bx, [hda_wseg]
+        shr bx, 8
+        mov cx, 1
+        mov edx, [win_phys]         ; (con el bit 0: RAM)
+        mov ax, 0xDD02
+        int 0x67
+        popad
+        mov word [hda_wseg], 0
+.r:
+        ret
+lay_win     db 1
+v86_svc     db 0
+win_seg     dw 0
+win_phys    dd 0
+opt_sb      db 0
+
+; ---- preparar la Sound Blaster emulada: IRQ de la tarjeta de verdad,
+; vectores, BLASTER y el aviso. El anillo y los puertos, en e_go ----
+e_prepare:
+        ; IRQ del HD Audio / AC'97 (registro 3Ch de PCI)
+        mov bx, [pci_bdf]
+        mov ax, 0xB108
+        mov di, 0x3C
+        int 0x1A
+        jc .noirq
+        cmp cl, 3
+        jb .noirq
+        cmp cl, 15
+        ja .noirq
+        cmp cl, 8
+        je .noirq
+        cmp cl, 13
+        je .noirq
+        mov [e_hwirq], cl
+        ; si es la 5, la tarjeta emulada va en la 7
+        cmp cl, 5
+        jne .noirq
+        mov byte [e_irq], 7
+.noirq:
+        mov ax, 0x3508
+        int 0x21
+        mov [e_old08], bx
+        mov [e_old08+2], es
+        mov dx, e_int08
+        mov ax, 0x2508
+        int 0x21
+        mov al, [e_hwirq]
+        test al, al
+        jz .nohw
+        add al, 8
+        cmp al, 16
+        jb .v
+        add al, 0x70 - 16
+.v:
+        push ax
+        mov ah, 0x35
+        int 0x21
+        mov [e_oldhw], bx
+        mov [e_oldhw+2], es
+        pop ax
+        mov dx, e_hwisr
+        mov ah, 0x25
+        int 0x21
+.nohw:
+        push ds
+        pop es
+        ; «Sound Blaster 16 emulada en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)»
+        mov al, [dev_type]
+        push ax
+        mov byte [dev_type], 2
+        mov word [sb_base], 0x220
+        mov al, [e_irq]
+        mov [sb_irq], al
+        mov byte [sb_dma], 1
+        mov byte [sb_hdma], 5
+        mov word [sb_minor], 0x0405
+        mov si, msg_sb_emu
+        call puts
+        call sb_print.en
+        ; BLASTER, si no está ya
+        cmp byte [bl_have], 0
+        jne .hb
+        call sb_set_blaster
+.hb:
+        pop ax
+        mov [dev_type], al
+        ret
 
 ; ---- ya hay un HSPSND residente (INT 2Fh ha dejado ES:BX = su entrada) ----
 installed:
@@ -2428,9 +2741,8 @@ installed:
         mov al, [have_gpio]
         or al, [have_eapd]
         jz .ng
-        smsw ax
-        test al, 1
-        jnz .ng
+        call hda_reach
+        jc .ng
         call a20_open
         call unreal
         cmp byte [have_gpio], 0
@@ -2503,6 +2815,9 @@ parse_opts:
 o_nosb:
         mov byte [opt_nosb], 1
         ret
+o_sb:
+        mov byte [opt_sb], 1
+        ret
 o_nogpio:
         mov byte [opt_nogpio], 1
         ret
@@ -2570,10 +2885,11 @@ o_eapd:
         mov byte [have_eapd], 1
         ret
 
-opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys
+opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb, o_sb
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
             dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, 0
 k_nosb      db "NOSB", 0
+k_sb        db "SB", 0
 k_nogpio    db "NOGPIO", 0
 k_nokeys    db "NOTECLAS", 0
 k_vol       db "VOL:", 0
@@ -2735,6 +3051,11 @@ show_info:
         call hda_info
 .end:
         call show_vol
+        cmp byte [e_on], 0
+        je .nsb
+        mov si, msg_i_sbemu
+        call puts
+.nsb:
         mov si, msg_i_keys
         cmp byte [keys_on], 0
         jne .k
@@ -2744,9 +3065,8 @@ show_info:
 
 ; códec HD Audio: lo que hay y lo que se ha elegido (lee el códec en vivo)
 hda_info:
-        smsw ax
-        test al, 1
-        jz .rm
+        call hda_reach
+        jnc .rm
         mov si, msg_i_v86
         jmp puts
 .rm:
@@ -3513,6 +3833,7 @@ sb_print:
         mov si, name_sb16
 .n:
         call puts
+.en:
         mov si, msg_sb_en
         call puts
         mov ax, [sb_base]
@@ -3786,7 +4107,9 @@ hda_init:
         smsw ax
         test al, 1
         jz .rm
-        stc                         ; modo V86 (EMM386): sin acceso a los registros
+        cmp byte [v86_svc], 0       ; modo V86: solo con la ventana de HSPEMM
+        jne .rm
+        stc
         ret
 .rm:
         call a20_open
@@ -3830,8 +4153,35 @@ hda_init:
         mov di, 0x44
         int 0x1A
 .ntc:
-        cmp dword [hda_base], 0
-        je .fail
+        mov eax, [hda_base]
+        mov [hda_reg], eax
+        test eax, eax
+        jz .fail
+        cmp byte [v86_svc], 0
+        je .nw
+        ; modo V86 con HSPEMM: los registros, en la página win_seg (antes
+        ; se apunta la RAM que había en ella, para poder deshacerlo)
+        movzx ecx, word [win_seg]
+        shr cx, 8
+        mov ax, 0xDE06
+        int 0x67
+        test ah, ah
+        jnz .fail
+        or dl, 1
+        mov [win_phys], edx
+        mov bx, [win_seg]
+        shr bx, 8
+        mov cx, 1
+        mov edx, [hda_base]
+        and edx, 0xFFFFF000
+        mov ax, 0xDD02
+        int 0x67
+        test ah, ah
+        jnz .fail
+        mov ax, [win_seg]
+        mov [hda_wseg], ax
+        and dword [hda_reg], 0xFFF
+.nw:
         call unreal
         ; reinicio del controlador (GCTL.CRST)
         mov dx, 0x08
@@ -3889,6 +4239,7 @@ hda_init:
         jb .cad
 .fail:
         call a20_restore
+        call win_unmap              ; (modo V86: la página vuelve a ser RAM)
         stc
         ret
 .ok:
@@ -4726,7 +5077,12 @@ msg_codec   db ", códec ", 0
 msg_pin     db ", salidas:", 0
 msg_oldver  db "Hay cargado un HSPSND de otra versión.", 13, 10, 0
 msg_badopt  db "Opción no válida.", 13, 10, 0
-msg_usage   db "Uso: HSPSND [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh] [/NOGPIO] [/EAPD:0]", 13, 10
+msg_sb_noemm db "/SB: hace falta HSPEMM.SYS (en CONFIG.SYS) para emular la Sound Blaster.", 13, 10, 0
+msg_sb_real db "/SB: hay una Sound Blaster de verdad; no se emula.", 13, 10, 0
+msg_sb_emu  db "Sound Blaster 16 emulada", 0
+msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh] [/NOGPIO] [/EAPD:0]", 13, 10
+            db "  /SB        Sound Blaster 16 emulada para los juegos, sobre el HD Audio o el", 13, 10
+            db "             AC'97 (hace falta HSPEMM.SYS)", 13, 10
             db "  /VOL:n     volumen del 0 al 100 % (también con el driver ya cargado)", 13, 10
             db "  /INFO      muestra la tarjeta, el códec, las salidas y el camino elegido", 13, 10
             db "  /NOSB      no buscar una Sound Blaster", 13, 10
@@ -4752,9 +5108,10 @@ msg_i_accodec db 13, 10, "Códec AC'97 ", 0
 msg_i_acmas db "; maestro ", 0
 msg_i_achp  db ", auriculares ", 0
 msg_i_acpcm db ", PCM ", 0
+msg_i_sbemu db "Sound Blaster 16 emulada para los juegos (/SB): en marcha.", 13, 10, 0
 msg_i_keys  db "Teclas de volumen: Ctrl+Alt+flecha arriba/abajo, Ctrl+Alt+Fin (silencio).", 13, 10, 0
 msg_i_nokeys db "Teclas de volumen: no.", 13, 10, 0
-msg_i_v86   db "En modo protegido (EMM386) no se puede consultar el códec.", 13, 10, 0
+msg_i_v86   db "En modo protegido (EMM386 que no es HSPEMM) no se puede consultar el códec.", 13, 10, 0
 msg_i_codec db "Códec ", 0
 msg_i_used  db " (en uso), frecuencias ", 0
 msg_i_afg   db "AFG ", 0
@@ -4803,3 +5160,9 @@ msg_crlf2   db 13, 10, 0
 msg_hdafail db "Hay un controlador HD Audio, pero no se ha podido poner en marcha.", 13, 10, 0
 msg_nocard  db "No se ha encontrado ninguna tarjeta de sonido compatible.", 13, 10, 0
 msg_fail    db "El códec AC'97 no responde.", 13, 10, 0
+file_end:
+; (el anillo de la Sound Blaster emulada tiene que tapar todo el código de
+; instalación: la ventana de los registros va detrás)
+%if file_end - sbemu_end > NBUF * BUFSZ
+%error "la instalación no cabe bajo el anillo"
+%endif

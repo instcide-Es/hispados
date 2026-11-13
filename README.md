@@ -100,7 +100,8 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
 | **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas (con grupos y accesos directos, también a los juegos y programas de Hispa-DOS, que se ejecutan con toda la memoria y vuelven a Hispa Ventanas), Bloc de notas, Calculadora y Reloj, el volumen en la barra y, como programas aparte (módulos .HVP que se abren como ventanas), los primeros juegos propios, Culebra, Campo de minas, Bloques, Solitario (baraja española), Tragabolas y Almacén, y Pintura, el programa de dibujo (lee y guarda BMP). Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
-| Sound Blaster emulada en tarjetas modernas, EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
+| **Sound Blaster 16 emulada** (`HSPSND /SB`, con HSPEMM) para que los juegos de DOS suenen en equipos con solo HD Audio o AC'97: DSP, DMA, IRQ, mezclador y FM AdLib (OPL2). Ver [docs/HSPSB.md](docs/HSPSB.md) | ✅ en pruebas (QEMU; falta hardware real y los juegos en modo protegido) |
+| EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
 
 ## Sonido y volumen
 
@@ -112,6 +113,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `HSPSND /INFO` | Muestra en una pantalla la tarjeta, el códec, cada salida (altavoz, auriculares, línea…), EAPD, GPIO, el camino y el amplificador elegidos. Si no suena, una foto de esta pantalla dice por qué. |
 | `HSPSND /GPIO:hh` `/NOGPIO` `/EAPD:0` | HD Audio: valor de las GPIO (por omisión todas a 1), no tocarlas, o EAPD apagado, para los portátiles que lo tienen al revés. Se pueden cambiar con el driver ya cargado. |
 | `HSPSND /NOTECLAS` | Sin teclas de volumen. |
+| `HSPSND /SB` | Con `HSPEMM.SYS` cargado y sin Sound Blaster de verdad: emula una Sound Blaster 16 con AdLib (220h, IRQ 5, DMA 1 y 5) sobre el HD Audio o el AC'97 y pone `BLASTER`, para los juegos de DOS. Ver [docs/HSPSB.md](docs/HSPSB.md). |
 | `SONIDO` | Muestra el volumen. `SONIDO 60` lo pone; `SONIDO +` y `SONIDO -` lo cambian un 10 %; `SONIDO /M` silencia y otra vez lo devuelve; `SONIDO /A` lo ajusta con las flechas. |
 | `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
 

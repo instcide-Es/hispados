@@ -49,7 +49,7 @@ Windows 3.1 se apoya en estructuras internas de DOS, no solo en la API pública.
 |---|---|---|
 | Vídeo | `HSPVBE` | VESA VBE 2.0/3.0, framebuffer lineal y modos panorámicos; API VBE para juegos y programas. |
 | Ratón | `HSPMOUSE.COM` (INT 33h) | PS/2; USB a través de la emulación *legacy* de la BIOS y, más adelante, pila USB propia (UHCI/OHCI/EHCI/xHCI, HID). |
-| Sonido | `HSPSB` | Tarjetas HDA y AC'97 con emulación de Sound Blaster 16 en modo V86 (atrapando puertos de E/S), para que los juegos de DOS suenen. |
+| Sonido | `HSPSB` | **Primera versión hecha (13/11/2026), en pruebas: `HSPSND /SB`, ver [HSPSB.md](HSPSB.md).** Tarjetas HDA y AC'97 con emulación de Sound Blaster 16 en modo V86 (HSPEMM atrapa los puertos de E/S y virtualiza el DMA), para que los juegos de DOS suenen: DSP 4.05 (8 y 16 bits, mono y estéreo, bloque único y autoinicio), IRQ, mezclador y FM OPL2 por síntesis. Falta: hardware real, los juegos en modo protegido (atrapar la E/S en HSPDPMI), OPL3, ADPCM y MPU-401. |
 | Red | Packet drivers | Especificación de *packet driver* para Intel e1000/e1000e, Realtek 8139/8169 y virtio-net. TCP/IP con aplicaciones compatibles (como mTCP) y una pila propia `HSPNET`. |
 | Discos | `HSPAHCI`, `HSPNVME` | Acceso a SATA (AHCI) y NVMe cuando la BIOS no los ofrece por INT 13h. |
 | USB almacenamiento | `HSPUSB` | Memorias USB como unidades de DOS. |

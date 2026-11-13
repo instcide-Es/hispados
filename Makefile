@@ -55,13 +55,16 @@ $(B)/UMBTEST.COM: tests/progs/umbtest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EMMMISC.COM: tests/progs/emmmisc.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# SBTEST: lo que hace un juego con la Sound Blaster (tests/run_sbemu_tests.sh)
+$(B)/SBTEST.COM: tests/progs/sbtest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XMSTEST.COM: tests/progs/xmstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPSND.COM: drivers/hspsnd.asm | $(B)
+$(B)/HSPSND.COM: drivers/hspsnd.asm lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPDPMI.COM: drivers/hspdpmi.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -292,7 +295,7 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
-EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM
+EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM
 emmprogs: $(EMMPROGS)
 NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
 $(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
@@ -348,6 +351,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs $(B)/LANZTEST.COM
 	EMM=1 DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	EMM=1 tests/run_sound_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
+	tests/run_sbemu_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)
 	tests/run_keyb_tests.sh $(IMG)
