@@ -21,6 +21,7 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - ✅ `COMMAND.COM`: ficheros `.BAT` y `AUTOEXEC.BAT`, `SET` con asignación, `IF`, `GOTO`, `FOR`, `CALL`, `SHIFT`, `PROMPT`, `PATH`, `/C`, `/P`.
 - ✅ Ctrl+C con INT 23h como DOS. Pendiente: Ctrl+Break (INT 1Bh) e INT 24h interactiva («Abort, Retry, Fail?»).
 - Mensajes en español además de en inglés.
+- ✅ `VELOCIDAD` (frenar el procesador para juegos antiguos: por el temporizador y, en 486 o superior, desactivando las cachés) y `LOADFIX` (cargar por encima de los primeros 64 KB); `tests/run_velocidad_tests.sh`. Pendiente en el intérprete: nombrarlas en la lista de programas de `AYUDA` (`msg_help` de `shell/command.asm`); `AYUDA VELOCIDAD` y `AYUDA LOADFIX` ya funcionan.
 
 ## 0.3 — Drivers y memoria
 

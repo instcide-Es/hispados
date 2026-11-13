@@ -95,6 +95,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | SHARE en el núcleo (bloqueos y modos de compartición) | ✅ |
 | Sistema en `\HISPADOS` con nombres en español y `ALIAS.INI` con los clásicos (EDIT, FORMAT, XCOPY…) | ✅ |
 | Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
+| `VELOCIDAD` (frena el procesador para los juegos antiguos: `25%`, `486`, `386`, `XT`, o solo mientras corre un programa) y `LOADFIX` (carga un programa por encima de los primeros 64 KB) | ✅ |
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
 | **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas (con grupos y accesos directos, también a los juegos y programas de Hispa-DOS, que se ejecutan con toda la memoria y vuelven a Hispa Ventanas), Bloc de notas, Calculadora y Reloj, el volumen en la barra y, como programas aparte (módulos .HVP que se abren como ventanas), los primeros juegos propios, Culebra, Campo de minas, Bloques, Solitario (baraja española), Tragabolas y Almacén, y Pintura, el programa de dibujo (lee y guarda BMP). Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
@@ -127,6 +128,26 @@ DOS=HIGH
 `MEM` lo confirma («Hispa-DOS está cargado en la memoria alta (HMA)»). También se aceptan `DOS=LOW` (lo de siempre) y `DOS=HIGH,UMB` (la parte `UMB` aún no hace nada). Si no hay gestor XMS o la HMA ya es de otro, Hispa-DOS lo dice y se queda en la memoria convencional. Con F5 (arranque limpio) no se usa.
 
 En la memoria convencional se queda lo que tienen que ver los programas, la BIOS y Windows: los vectores y unos trozos de entrada (INT 20h, 21h, 25h-27h, 29h, 2Fh), la lista de listas, la SDA, la CDS, los DPB, la tabla de ficheros (SFT), las cabeceras de los dispositivos, los búferes de sector (la BIOS no puede llevar un disquete por DMA por encima de 1 MB), las pilas del núcleo y los datos de instancia de Windows. La línea A20 queda abierta; si un programa la cierra, el núcleo la vuelve a abrir en cuanto se le llama. Los 28 KB de HMA que sobran se ofrecen a otros programas por INT 2Fh AX=4A01h/4A02h, como en MS-DOS.
+
+## Juegos antiguos en equipos rápidos: `VELOCIDAD` y `LOADFIX`
+
+Algunos juegos y programas de los años 80 y 90 calculan al arrancar lo rápido que es el equipo con un bucle, y en un procesador moderno la cuenta se sale: «división por cero», pantalla negra, o el juego va tan deprisa que no se puede jugar. `VELOCIDAD` frena el procesador:
+
+| Orden | Qué hace |
+|---|---|
+| `VELOCIDAD 25%` | Deja el equipo a un 25 % de su velocidad (del 1 al 99). |
+| `VELOCIDAD 486` | Parecida a la de un 486 a 66 MHz. También `PENTIUM` (100 MHz), `386` (33 MHz), `286` (12 MHz) y `XT` (8088 a 4,77 MHz). |
+| `VELOCIDAD 386 JUEGO.EXE /S` | Frena solo mientras se ejecuta ese programa; al volver, todo queda como estaba. |
+| `VELOCIDAD` | Dice cómo está, lo que mide ahora y el índice de velocidad del equipo (XT = 240; 386 = 3.200; 486 = 16.600; Pentium = 100.000). |
+| `VELOCIDAD NORMAL` | Quita el freno y, si puede, el programa de la memoria. |
+| `/C` | Desactiva además las cachés del procesador (486 o superior, en modo real). `XT` lo hace de serie; `/S` lo evita. |
+| `/1` | Frena una vez por tic del reloj (18,2 Hz), sin reprogramar el temporizador. |
+
+Cómo lo hace: deja en la memoria un programa residente de 656 octetos que toma la interrupción del temporizador (INT 08h), lo pone hasta 32 veces más deprisa y en cada interrupción gasta una parte fija del tiempo; el resto es para el programa. La hora de DOS y lo demás que cuelga del temporizador siguen a sus 18,2 Hz. Al poner el freno mide el resultado con un bucle contra el reloj y lo corrige; lo que ha conseguido lo dice («medido: 98 % del objetivo»). Los niveles con nombre de procesador salen de los ciclos por instrucción de sus manuales para ese bucle: se parecen en lo que cuentan los bucles de espera de los programas antiguos, no en el vídeo ni en el disco.
+
+Si un juego usa el temporizador (lo reprograma para la música o toma la INT 08h), `VELOCIDAD` lo nota, le deja el temporizador y sigue frenando una vez por tic de 18,2 Hz, que es más brusco pero no le estorba. Si un juego pierde el freno del todo (toma la INT 08h y no llama a la anterior), queda `/C`, que no depende del temporizador. Cárguelo después de los demás programas residentes: si otro toma el temporizador después, `VELOCIDAD NORMAL` quita el freno pero el programa se queda en la memoria, inactivo.
+
+`LOADFIX programa [argumentos]` es para otro fallo de la misma época: programas que se rompen si se cargan en los primeros 64 KB de la memoria («Packed file corrupt», cuelgues). Ocupa lo que quede libre por debajo de esos 64 KB, ejecuta el programa (que así se carga por encima) y al volver lo libera; devuelve el mismo código de retorno. Se pueden combinar: `VELOCIDAD 386 LOADFIX JUEGO.EXE`.
 
 ## Compilar y probar
 

@@ -54,6 +54,8 @@ check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l2.txt "HISPADOS"
 check $T/l2.txt "TECLADO  COM"
 check $T/l2.txt "INSTALAR COM"
+check $T/l2.txt "VELOCIDA COM"      # VELOCIDAD (8 letras en el disco)
+check $T/l2.txt "LOADFIX  COM"
 check $T/l2.txt "ALIAS    INI"
 check $T/l2.txt "CONFIG   HVP"       # [Configuración] el programa de ajustes de Hispa Ventanas
 # los programas de Hispa Ventanas (.HVP) también se copian: los juegos y Pintura

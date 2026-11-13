@@ -34,6 +34,21 @@ Sonido
   encontrado; en algunos portatiles hay que probar HSPSND /GPIO:0,
   HSPSND /GPIO:1, HSPSND /GPIO:2 o HSPSND /EAPD:0.
 
+Juegos antiguos que fallan en equipos rapidos
+  Si un juego da "division por cero", se queda en negro o va demasiado
+  deprisa, frena el procesador con VELOCIDAD:
+      VELOCIDAD 386            parecida a la de un 386 (tambien PENTIUM,
+                               486, 286 y XT, o un porcentaje: 25%)
+      VELOCIDAD 386 JUEGO.EXE  frena solo mientras corre el juego
+      VELOCIDAD                dice como esta
+      VELOCIDAD NORMAL         quita el freno
+  Si no basta, anade /C (desactiva las caches del procesador).
+  Si un programa falla con "Packed file corrupt" o se cuelga al arrancar,
+  cargalo con LOADFIX (lo pone por encima de los primeros 64 KB):
+      LOADFIX JUEGO.EXE
+  Se pueden juntar: VELOCIDAD 386 LOADFIX JUEGO.EXE. VELOCIDAD /? y
+  LOADFIX /? lo explican.
+
 USB propio (HSPUSB): raton o panel tactil USB, por ejemplo en un MacBook
   De serie HSPUSB no le quita el USB a la BIOS (arrancando desde la memoria
   USB la BIOS lo esta usando), asi que el teclado sigue como siempre y el

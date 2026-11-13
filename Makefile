@@ -123,6 +123,12 @@ $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPUSB.SYS: drivers/hspusb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# VELOCIDAD (en el disco VELOCIDA.COM: 8 letras) y LOADFIX: para los juegos
+# antiguos que fallan en equipos rápidos o cargados en los primeros 64 KB
+$(B)/VELOCIDAD.COM: utils/velocidad.asm lib/util.inc lib/ejecutar.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/LOADFIX.COM: utils/loadfix.asm lib/util.inc lib/ejecutar.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 
 # Hispa Ventanas (docs/VENTANAS.md): el entorno gráfico, en ventanas/.
 # La fuente de mapa de bits sale del diseño en texto ventanas/fuente.txt.
@@ -171,7 +177,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
-        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM \
+        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
@@ -205,6 +211,8 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	mcopy -i $@ $(B)/ETIQUETA.COM ::HISPADOS/ETIQUETA.COM
 	mcopy -i $@ $(B)/XCOPIAR.COM ::HISPADOS/XCOPIAR.COM
 	mcopy -i $@ $(B)/REVISAR.COM ::HISPADOS/REVISAR.COM
+	mcopy -i $@ $(B)/VELOCIDAD.COM ::HISPADOS/VELOCIDA.COM
+	mcopy -i $@ $(B)/LOADFIX.COM ::HISPADOS/LOADFIX.COM
 	iconv -f UTF-8 -t CP437 sistema/ALIAS.INI | sed 's/$$/\r/' > $(B)/ALIAS.INI
 	mcopy -i $@ $(B)/ALIAS.INI ::HISPADOS/ALIAS.INI
 	mcopy -i $@ $(B)/HSPRAM.SYS ::HISPADOS/HSPRAM.SYS
@@ -263,12 +271,19 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
 EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM
 emmprogs: $(EMMPROGS)
-NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM
+NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
 $(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXEPILA.EXE: tests/progs/exepila.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LEETEST.COM: tests/progs/leetest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+# (VELTEST, PSPTEST y PSPSH: tests/run_velocidad_tests.sh)
+$(B)/PSPSH.COM: tests/progs/pspsh.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/VELTEST.COM: tests/progs/veltest.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/PSPTEST.COM: tests/progs/psptest.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HMATEST.COM: tests/progs/hmatest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -335,6 +350,7 @@ test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
 	tests/run_xcopiar_tests.sh $(IMG)
 	tests/run_revisar_tests.sh $(IMG)
 	tests/run_ayuda_tests.sh $(IMG)
+	tests/run_velocidad_tests.sh $(IMG)
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)
 	tests/run_tab_tests.sh $(IMG)
