@@ -122,7 +122,10 @@ class Mando:
         self.info()
         dev = self.p['dev']
         vid, pid, ver = struct.unpack_from('<HHH', dev, 8)
-        self.send(DEV_CONNECT, 0, struct.pack('<BBBBHHH', 1, dev[4], dev[5], dev[6], vid, pid, ver))
+        # velocidad: 1 plena (lo normal en un mando); USBMANDO_VEL=2, alta (para
+        # un EHCI sin controladoras compañeras, que solo admite esa)
+        vel = int(os.environ.get('USBMANDO_VEL', '1'))
+        self.send(DEV_CONNECT, 0, struct.pack('<BBBBHHH', vel, dev[4], dev[5], dev[6], vid, pid, ver))
 
     def control(self, ident, d):
         ep, req, rt, st, val, idx, ln = struct.unpack_from('<BBBBHHH', d)

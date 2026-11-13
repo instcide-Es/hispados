@@ -1,8 +1,9 @@
 ; =============================================================================
-;  HSPUSB.SYS - USB nativo de Hispa-DOS: controlador xHCI + memorias USB
+;  HSPUSB.SYS - USB nativo de Hispa-DOS: controladoras UHCI, OHCI, EHCI y
+;  xHCI; memorias USB, teclado, ratón, mandos de juego y concentradores
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  CONFIG.SYS:  DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V]
+;  CONFIG.SYS:  DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/?]
 ;     (sin opciones) seguro: si la BIOS está usando el USB no se toca nada. Se
 ;         entiende que lo usa si el controlador es suyo (USB Legacy Support),
 ;         si lo tiene en marcha, o si el sistema ha arrancado desde un disco
@@ -24,8 +25,15 @@
 ;         espera 15 s para poder hacer una foto.
 ;     /V  mensajes detallados
 ;
-;  Busca un controlador xHCI (USB 3, el de los PCs actuales), lo inicializa y
-;  enumera los dispositivos de los puertos y los que cuelgan de concentradores
+;  Busca las controladoras USB del equipo, de las cuatro clases que hay (UHCI
+;  y OHCI de USB 1.x, EHCI de USB 2.0 y xHCI de USB 3; varias a la vez, hasta
+;  HC_N, pero un solo xHCI), se las quita a la BIOS, las inicializa y enumera
+;  los dispositivos. Lo que sigue funciona igual con cualquiera de ellas: hay
+;  una capa común de «controladora» (lib/usb_hc.inc: control, bulk, tuberías
+;  de interrupción y puertos raíz) con cuatro implementaciones (el xHCI en
+;  este fichero; lib/usb_uhci.inc, usb_ohci.inc y usb_ehci.inc; el inicio de
+;  todas, en lib/usb_hcini.inc). Ver docs/USB.md.
+;  Se enumeran los dispositivos de los puertos y los que cuelgan de concentradores
 ;  (hubs; hasta HUB_DEPTH encadenados, HUB_N a la vez, POOL_N dispositivos):
 ;   - la primera memoria USB (clase 08h, SCSI, Bulk-Only Transport), que se
 ;     ofrece a DOS como una unidad nueva (FAT12/FAT16, con o sin particiones);
@@ -56,6 +64,15 @@
 ;  de modo que también vale cargado en la memoria superior (DEVICEHIGH).
 ;  En V86 sin VCPI (Windows en modo 386 mejorado) no funciona.
 ;
+;  Memoria: se queda residente la sección .text (transferencias, puertos,
+;  informes, INT 13h, el reloj y lo que hace falta para reconocer una
+;  memoria USB conectada después) y, detrás, la zona de trabajo. La
+;  inicialización (sección .init: buscar y tomar las controladoras, ponerlas
+;  en marcha, el teclado, el ratón y los mandos, /INFO y los mensajes) va en
+;  el fichero detrás de .text, se ejecuta en CS:INIT_ORG (init_go) y se
+;  descarta. Ojo: lo de .text no puede usar nada de .init después del
+;  arranque (los mensajes solo con /V o /INFO, que se apagan en rescan).
+;
 ;  Concentradores (USB 2.0 cap. 11, xHCI 4.5/6.2.2): descriptor de
 ;  concentrador, Configure Endpoint con Hub = 1, número de puertos y TT Think
 ;  Time (un solo traductor: MTT = 0), PORT_POWER, GET_STATUS, PORT_RESET y,
@@ -72,37 +89,54 @@
 ;  conectados al cargar el driver (no se buscan después), no se encienden los
 ;  LED ni la vibración, y no se admiten los que necesitan un saludo propio
 ;  antes de dar informes (Xbox One/Series por cable, Switch Pro por USB, el
-;  receptor inalámbrico de Xbox 360). Tampoco hay EHCI/UHCI/OHCI: solo xHCI.
+;  receptor inalámbrico de Xbox 360). Los aparatos de USB 1.x detrás de un
+;  concentrador de USB 2.0 en un EHCI (transacciones partidas) están hechos
+;  según la norma pero sin probar (QEMU no tiene concentrador de USB 2.0).
 ; =============================================================================
         cpu 386                     ; (sin BSWAP)
         bits 16
         org 0
+; Dos secciones: .text, lo residente, e .init, la inicialización, que va en
+; el fichero detrás de .text pero se ejecuta en CS:INIT_ORG (init_go) y no se
+; queda en la memoria.
+        section .text
+        section .init follows=.text vstart=INIT_ORG
+init_start:
+        section .text
 
-; desplazamientos en la zona de memoria alineada a 4 KB (mem_off)
-IN_CTX      equ 0x0000
-CMD_RING    equ 0x0900
-EVT_RING    equ 0x0A00
-BIN_RING    equ 0x0B00
-BOUT_RING   equ 0x0C00
-KINT_RING   equ 0x0D00
-MINT_RING   equ 0x0E00
-ERST        equ 0x0F00
-DCBAA       equ 0x0F40                ; MAX_SLOTS + 1 entradas de 8 bytes
-EP0_RINGS   equ 0x1000                ; un anillo de EP0 por dispositivo
-CBW_BUF     equ 0x1800
-CSW_BUF     equ 0x1840
-DESC        equ 0x1880
-KBD_BUF     equ 0x1980
-MOU_BUF     equ 0x19C0
-BOOT_SEC    equ 0x1A00                ; sector 0 del disco de arranque de la BIOS (/U)
-JINT_RING   equ 0x1C00                ; mandos: un anillo (100h) por mando
-JOY_BUF     equ 0x1E00                ; y un búfer de informe (40h)
+; Zona de memoria tras lo residente (res_end), en una página física (mem_off),
+; donde estaba la inicialización en el fichero (se ejecuta en CS:INIT_ORG,
+; por encima: ver init_go). Lo fijo:
+; el búfer de datos del disco (4 KB, [data_rel]: al principio de la zona
+; durante el inicio), los búferes comunes y, si hay xHCI, sus anillos y
+; contextos. Lo demás (colas de las controladoras clásicas, contextos de
+; salida de cada aparato del xHCI, listas de tramas) se reserva detrás según
+; hace falta (zalloc, fl_alloc: lib/usb_hc.inc).
+DESC        equ 0x1000
+PIPE_BUF    equ 0x1100                ; un búfer de informe (40h) por tubería
+KBD_BUF     equ PIPE_BUF
+MOU_BUF     equ PIPE_BUF + 0x40
+JOY_BUF     equ PIPE_BUF + 0x80
+CBW_BUF     equ 0x1200
+CSW_BUF     equ 0x1240
+COM_END     equ 0x1280                ; fin de lo común
+IN_CTX      equ 0x1300                ; xHCI (900h: no cruza de página)
+CMD_RING    equ 0x1C00
+EVT_RING    equ 0x1D00
+BIN_RING    equ 0x1E00
+BOUT_RING   equ 0x1F00
+PINT_RING   equ 0x2000                ; un anillo (100h) por tubería
+KINT_RING   equ PINT_RING
+MINT_RING   equ PINT_RING + 0x100
+JINT_RING   equ PINT_RING + 0x200
+EP0_RINGS   equ 0x2400                ; un anillo de EP0 por dispositivo
+ERST        equ 0x2C00
+DCBAA       equ 0x2C40                ; MAX_SLOTS + 1 entradas de 8 bytes
+X_END       equ 0x2D00                ; fin de lo del xHCI
 JOY_N       equ 2                     ; mandos de juego a la vez
-DATA        equ 0x2000
-OUT_CTXS    equ 0x3000                ; contextos de salida: 800h por dispositivo
-MEM_FIXED   equ 0x3000
+PIPE_N      equ 2 + JOY_N             ; tuberías de interrupción: teclado, ratón y mandos
 POOL_N      equ 8                     ; dispositivos a la vez (concentradores incluidos)
-MEM_SIZE    equ MEM_FIXED + POOL_N * 0x800
+INIT_ORG    equ 0xC000                ; dónde se ejecuta la inicialización (.init)
 MAX_SLOTS   equ POOL_N
 HUB_N       equ 4                     ; concentradores a la vez
 HUB_DEPTH   equ 3                     ; niveles de concentradores encadenados
@@ -130,6 +164,7 @@ port        db 0
 speed       db 0
 dci_in      db 0
 dci_out     db 0
+d_if        db 0                    ; su interfaz (Bulk-Only Mass Storage Reset)
             db 0
 mps_in      dw 0
 mps_out     dw 0
@@ -152,25 +187,31 @@ cur_ep0     dw EP0_RINGS
 cur_st      dw pool_st
 ; teclado y ratón USB
 busy        db 1
-k_on        db 0
-k_slot      db 0
-k_dci       db 0
-k_len       dw 8
-kint_idx    db 0
-kint_cyc    db 1
-m_on        db 0
-m_slot      db 0
-m_dci       db 0
-            db 0
-m_len       dw 4
-mint_idx    db 0
-mint_cyc    db 1
-; mandos de juego
-j_on        times JOY_N db 0
-j_slot      times JOY_N db 0
-j_dci       times JOY_N db 0
-j_len       times JOY_N dw 0
-jint_idx    times JOY_N db 0, 1     ; índice y ciclo del anillo de cada uno
+; tuberías de interrupción: 0 teclado, 1 ratón, 2... mandos de juego
+ip_on       times PIPE_N db 0
+ip_slot     times PIPE_N db 0       ; xHCI: slot
+ip_dci      times PIPE_N db 0       ; endpoint: 2 * número + 1 (entrada)
+ip_pool     times PIPE_N db 0       ; su aparato en la reserva
+ip_tog      times PIPE_N db 0       ; UHCI: testigo de alternancia
+            align 2
+ip_len      dw 8, 4
+            times JOY_N dw 0        ; bytes que se piden
+ip_mps      times PIPE_N dw 0
+ip_ring     times PIPE_N db 0, 1    ; xHCI: índice y ciclo de su anillo
+ip_got      dw 0                    ; bytes del informe que acaba de llegar
+k_on        equ ip_on
+m_on        equ ip_on + 1
+j_on        equ ip_on + 2
+k_slot      equ ip_slot
+m_slot      equ ip_slot + 1
+j_slot      equ ip_slot + 2
+k_dci       equ ip_dci
+m_dci       equ ip_dci + 1
+j_dci       equ ip_dci + 2
+k_len       equ ip_len
+m_len       equ ip_len + 2
+j_len       equ ip_len + 4
+jint_idx    equ ip_ring + 4
 j_ev        db 0                    ; bit n: se acaba de atender un informe del mando n
 j_tick      db 0
 j_ack       db 0                    ; HSPJOY recogió el último estado entregado
@@ -215,7 +256,7 @@ interrupt:
         lds bx, [cs:req]
         mov al, [bx+2]
         cmp al, 0
-        je init
+        je init_go
         cmp byte [cs:iomode], 2     ; V86 sin VCPI: no se llega al xHCI
         jne .can
         mov word [bx+3], 0x8102     ; unidad no preparada
@@ -595,10 +636,13 @@ usb_media:
         je .same
         cmp byte [gone], 0
         jne .look
-        call dport_sc
+        mov al, [bk_pool]
+        call dev_hc
+        mov cl, [dport]
+        call rp_get
         test al, 1                  ; conectada
         jz .lost
-        test eax, 1 << 17           ; CSC: se ha desconectado y conectado
+        test al, 0x80               ; se ha desconectado y conectado
         jnz .lost
         ; detrás de un concentrador: el estado de su puerto
         cmp byte [d_hub], 0xFF
@@ -652,6 +696,50 @@ clr_csc:
         call mwr
         ret
 
+; xHCI: las operaciones de puerto raíz de la capa común (lib/usb_hc.inc)
+x_rp_get:
+        push esi
+        push edx
+        movzx esi, cl
+        call port_sc
+        mov edx, eax
+        and al, 3
+        test edx, 1 << 17
+        jz .a
+        or al, 0x80
+.a:
+        pop edx
+        pop esi
+        ret
+x_rp_ack:
+        push esi
+        push eax
+        movzx esi, cl
+        call port_sc
+        call clr_csc
+        pop eax
+        pop esi
+        ret
+x_time:
+        push esi
+        mov esi, [cs:rt_base]
+        call mrd
+        and ax, 0x3FFF
+        pop esi
+        ret
+
+; la controladora actual, si es una UHCI que se ha quedado sin aparatos en
+; uso: se aparca (deja libre su lista de tramas)
+park_idle:
+        cmp byte [cs:cur_type], HCT_UHCI
+        jne .r
+        mov al, [cs:cur_hc]
+        call hc_idle
+        jnz .r
+        call u_park
+.r:
+        ret
+
 ; liberar el slot AL (Disable Slot) y su entrada de la tabla de contextos
 slot_free:
         push bx
@@ -679,12 +767,13 @@ slot_free:
 
 ; la memoria ya no está: liberar su slot
 drop_disk:
-        mov al, [slot]
-        call slot_free
+        mov al, [dpool]
+        call dev_free
         movzx bx, byte [dpool]
         mov byte [pool_used+bx], 0
         mov byte [gone], 1
         mov byte [disk_found], 0
+        call park_idle
         ret
 
 ; buscar una memoria en los puertos que acaban de conectarse (CSC) y en los
@@ -696,22 +785,45 @@ rescan:
         mov byte [opt_verbose], 0   ; sin mensajes: estamos dentro de DOS
         mov byte [opt_info], 0
         mov byte [only_disk], 1
+        xor bx, bx
+.cl:
+        cmp bl, [hc_n]
+        jae .hubs
+        cmp byte [gone], 0
+        je .r
+        test byte [hc_flags+bx], HCF_OURS
+        jz .cn
+        mov al, bl
+        call hc_sel
+        mov al, [hc_flags+bx]
+        and al, HCF_PARK
+        mov [rs_park], al
+        jz .ports
+        ; UHCI aparcada: solo se arranca (con la lista de tramas de
+        ; reserva) si le han conectado algo
+        push bx
+        call u_any
+        pop bx
+        jz .cn
+        call u_start
+        jc .cn
+.ports:
         xor cl, cl
 .pl:
         inc cl
-        cmp cl, [maxports]
-        ja .hubs
+        cmp cl, [hc_np+bx]
+        ja .cd
         cmp byte [gone], 0
-        je .r
-        movzx esi, cl
-        call port_sc
-        test eax, 1 << 17
+        je .cd
+        call rp_get
+        test al, 0x80
         jz .pl
+        push bx
         push cx
-        call clr_csc
+        call rp_ack
         ; lo que colgaba de este puerto ya no está: sus concentradores
         call hubs_drop
-        call mrd
+        call rp_get
         test al, 1
         jz .nx
         call port_enable
@@ -721,7 +833,17 @@ rescan:
         call disk_back
 .nx:
         pop cx
+        pop bx
+        mov al, bl
+        call hc_sel
         jmp .pl
+.cd:
+        cmp byte [rs_park], 0
+        je .cn
+        call park_idle              ; no era una memoria: se vuelve a aparcar
+.cn:
+        inc bx
+        jmp .cl
 .hubs:
         xor bx, bx
 .hl:
@@ -744,6 +866,7 @@ rescan:
         mov [opt_verbose], al
         mov [opt_info], ah
         ret
+rs_park     db 0
 
 ; tras enumerar en rescan: si ha aparecido una memoria, prepararla
 disk_back:
@@ -760,7 +883,8 @@ disk_back:
 .r:
         ret
 
-; dar de baja los concentradores que colgaban del puerto raíz CL
+; dar de baja los concentradores que colgaban del puerto raíz CL de la
+; controladora actual
 hubs_drop:
         push bx
         push cx
@@ -770,13 +894,16 @@ hubs_drop:
         je .n
         cmp cl, [h_root+bx]
         jne .n
+        mov al, [cur_hc]
+        cmp al, [h_hc+bx]
+        jne .n
         mov byte [h_used+bx], 0
         push bx
         push cx
-        mov al, [h_slot+bx]
-        movzx bx, byte [h_pool+bx]
+        mov al, [h_pool+bx]
+        movzx bx, al
         mov byte [pool_used+bx], 0
-        call slot_free
+        call dev_free
         pop cx
         pop bx
 .n:
@@ -821,6 +948,7 @@ hub_sel:
 pool_sel:
         push bx
         mov [cur_pool], al
+        call dev_hc                 ; y su controladora pasa a ser la actual
         movzx bx, al
         shl bx, 1
         add bx, pool_st
@@ -830,8 +958,8 @@ pool_sel:
         add bx, EP0_RINGS
         mov [cur_ep0], bx
         movzx bx, al
-        shl bx, 11
-        add bx, OUT_CTXS
+        shl bx, 1
+        mov bx, [pool_mem+bx]
         mov [cur_out], bx
         pop bx
         ret
@@ -1017,6 +1145,7 @@ h_depth     times HUB_N db 0
 h_ttslot    times HUB_N db 0
 h_ttport    times HUB_N db 0
 h_route     times HUB_N dd 0
+h_hc        times HUB_N db 0        ; su controladora
 ; el dispositivo que se enumera: dónde cuelga
 route       dd 0
 depth       db 0
@@ -1028,13 +1157,13 @@ tt_port     db 0
 d_hub       db 0xFF
 d_hport     db 0
 ; reserva de dispositivos: anillo de EP0 y contexto de salida de cada uno
-pool_max    db POOL_N
+pool_mem    times POOL_N dw 0xFFFF  ; xHCI: su contexto de salida (32 * ctx_sz; FFFFh = sin él)
+dv_slot     times POOL_N db 0       ; xHCI: su slot
 pool_used   times POOL_N db 0
 pool_st     times POOL_N db 0, 1
 
-; dejar el puerto CL habilitado (reiniciarlo si es USB 2) -> port, speed
-port_enable:
-        mov [port], cl
+; xHCI: dejar el puerto CL habilitado (reiniciarlo si es USB 2) -> speed
+x_rp_reset:
         movzx esi, cl
         call port_sc
         test al, 1
@@ -1126,7 +1255,7 @@ copy_to_dos:
         mov cx, [cs:rw_n]
         shl cx, 8
         mov si, [cs:mem_off]
-        add si, DATA
+        add si, [cs:data_rel]
         push cs
         pop ds
         les di, [cs:rw_off]
@@ -1141,7 +1270,7 @@ copy_from_dos:
         mov cx, [cs:rw_n]
         shl cx, 8
         mov di, [cs:mem_off]
-        add di, DATA
+        add di, [cs:data_rel]
         push cs
         pop es
         lds si, [cs:rw_off]
@@ -1397,8 +1526,12 @@ phys:
         mov ax, cs
         shl eax, 4
         add eax, ebx
+        pop ebx
+; EAX = dirección lineal -> EAX física
+lphys:
         cmp byte [cs:iomode], 1
         jne .r
+        push ebx
         push ecx
         push edx
         mov ebx, eax
@@ -1413,8 +1546,8 @@ phys:
         or eax, ebx
         pop edx
         pop ecx
-.r:
         pop ebx
+.r:
         ret
 
 ; BX = desplazamiento dentro de la zona -> BX = desplazamiento en CS
@@ -1635,9 +1768,9 @@ wait_xfer:
 .r:
         ret
 
-; transferencia de control: setup en ctl_setup (8 bytes), datos en DESC
-; (entrada, ctl_len bytes)
-control:
+; xHCI: transferencia de control: setup en ctl_setup (8 bytes), datos en
+; [ctl_buf] (entrada). La entrada común es «control» (lib/usb_hc.inc).
+x_control:
         push bx
         push si
         mov eax, [cs:ctl_setup]
@@ -1687,6 +1820,7 @@ control:
         pop si
         pop bx
         ret
+            align 8                 ; (que no cruce de página: va a las controladoras)
 ctl_setup   dd 0, 0
 xf_code     db 0
 
@@ -1719,9 +1853,9 @@ ep0_recover:
         popad
         ret
 
-; transferencia bulk: AL = 1 entrada / 0 salida, EBX = dirección física,
-; CX = bytes
-bulk:
+; xHCI: transferencia bulk: AL = 1 entrada / 0 salida, EBX = dirección
+; física, CX = bytes. La entrada común es «bulk» (lib/usb_hc.inc).
+x_bulk:
         push si
         push di
         mov edi, ebx
@@ -1755,14 +1889,89 @@ bulk:
         ret
 bk_dir      db 0
 
+%include "usb_hc.inc"
+%include "usb_uhci.inc"
+%include "usb_ohci.inc"
+%include "usb_ehci.inc"
+
 ; =============================================================================
 ;  Almacenamiento masivo (Bulk-Only Transport + SCSI)
 ; =============================================================================
 ; orden SCSI en scsi_cb (scsi_cblen bytes), datos: EBX física, ECX bytes,
-; AL = 1 entrada -> CF si falla
+; AL = 1 entrada -> CF si falla. En las controladoras clásicas, si falla
+; (un paquete perdido, un STALL, los testigos de alternancia desacompasados)
+; se hace la recuperación de Bulk-Only (reinicio de la memoria y
+; CLEAR_FEATURE de los dos endpoints, testigos a DATA0) y se repite una vez.
+; (En el xHCI no: el endpoint parado pediría Reset Endpoint.)
 scsi:
+        mov [cs:sc_a], eax
+        mov [cs:sc_b], ebx
+        mov [cs:sc_c], ecx
+        call scsi_once
+        jnc .ok
+        cmp byte [cs:sc_tr], 0
+        je .ko
+        cmp byte [cs:cur_type], HCT_XHCI
+        je .ko
+        call bot_reset
+        mov eax, [cs:sc_a]
+        mov ebx, [cs:sc_b]
+        mov ecx, [cs:sc_c]
+        call scsi_once
+        jnc .ok
+.ko:
+        mov eax, [cs:sc_a]
+        mov ebx, [cs:sc_b]
+        mov ecx, [cs:sc_c]
+        stc
+        ret
+.ok:
+        mov eax, [cs:sc_a]
+        mov ebx, [cs:sc_b]
+        mov ecx, [cs:sc_c]
+        ret
+sc_a        dd 0
+sc_b        dd 0
+sc_c        dd 0
+
+; recuperación de Bulk-Only (BOT 1.0, 5.3.4) de la memoria USB [bk_pool]
+bot_reset:
+        pushad
+        push ds
+        push cs
+        pop ds
+        mov al, [cur_pool]
+        push ax
+        mov al, [bk_pool]
+        call pool_sel
+        ; Bulk-Only Mass Storage Reset: 21h FFh, wIndex = la interfaz
+        mov dword [ctl_setup], 0x0000FF21
+        movzx eax, byte [d_if]
+        mov [ctl_setup+4], eax
+        call control
+        ; CLEAR_FEATURE(ENDPOINT_HALT) de bulk IN y de bulk OUT
+        mov dword [ctl_setup], 0x00000102
+        movzx eax, byte [dci_in]
+        shr al, 1
+        or al, 0x80
+        mov [ctl_setup+4], eax
+        call control
+        mov dword [ctl_setup], 0x00000102
+        movzx eax, byte [dci_out]
+        shr al, 1
+        mov [ctl_setup+4], eax
+        call control
+        mov word [tog_in], 0        ; (y tog_out)
+        pop ax
+        call pool_sel
+        pop ds
+        popad
+        ret
+
+scsi_once:
         push bx
         push di
+        mov byte [cs:sc_tr], 1
         mov [cs:sc_dir], al
         mov [cs:sc_len], ecx
         mov [cs:sc_buf], ebx
@@ -1819,17 +2028,20 @@ scsi:
         call bulk
         jc .r
         cmp dword [cs:di], 0x53425355       ; "USBS"
-        jne .bad
+        jne .bad                            ; (sc_tr = 1)
+        mov byte [cs:sc_tr], 0
+        cmp byte [cs:di+12], 1
+        je .bad                             ; la orden ha fallado: no es del transporte
         cmp byte [cs:di+12], 0
-        jne .bad
-        clc
-        jmp .r
+        je .r                               ; (CF = 0)
+        mov byte [cs:sc_tr], 1              ; error de fase
 .bad:
         stc
 .r:
         pop di
         pop bx
         ret
+sc_tr       db 0                            ; ha fallado el transporte: hay que recuperar
 sc_dir      db 0
 sc_len      dd 0
 sc_buf      dd 0
@@ -1850,7 +2062,7 @@ scsi_rw:
         xchg al, ah
         mov [cs:scsi_cb+7], ax
         mov byte [cs:scsi_cb+9], 0
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         call phys
         mov ebx, eax
@@ -1872,61 +2084,51 @@ scsi_rw:
 ; se vuelve a pedir el siguiente informe; CF si no es suyo
 hid_event:
         push ax
+        push bx
         mov al, [cs:evt+14]
         and al, 0x1F                ; endpoint
         mov ah, [cs:evt+15]         ; slot
-        cmp byte [cs:k_on], 0
-        je .m
-        cmp ah, [cs:k_slot]
-        jne .m
-        cmp al, [cs:k_dci]
-        jne .m
-        call ev_ok
-        jc .kq
-        call kbd_report
-.kq:
-        call kbd_queue
-        pop ax
-        clc
-        ret
-.m:
-        cmp byte [cs:m_on], 0
-        je .no
-        cmp ah, [cs:m_slot]
-        jne .no
-        cmp al, [cs:m_dci]
-        jne .no
-        call ev_ok
-        jc .mq
-        call mouse_report
-.mq:
-        call mou_queue
-        pop ax
-        clc
-        ret
-.no:
-        push bx
         xor bx, bx
-.j:
-        cmp byte [cs:j_on+bx], 0
-        je .jn
-        cmp ah, [cs:j_slot+bx]
-        jne .jn
-        cmp al, [cs:j_dci+bx]
-        jne .jn
+.l:
+        cmp byte [cs:ip_on+bx], 0
+        je .n
+        cmp ah, [cs:ip_slot+bx]
+        jne .n
+        cmp al, [cs:ip_dci+bx]
+        jne .n
+        push bx                     ; (que la tubería sea del xHCI)
+        movzx bx, byte [cs:ip_pool+bx]
+        movzx bx, byte [cs:dv_hc+bx]
+        cmp byte [cs:hc_type+bx], HCT_XHCI
+        pop bx
+        jne .n
         call ev_ok
-        jc .jq
-        call joy_report
-.jq:
-        call joy_queue
+        jc .q
+        push eax
+        push esi
+        mov si, bx
+        shl si, 1
+        mov eax, [cs:evt+8]
+        and eax, 0x00FFFFFF         ; lo que ha faltado por llegar
+        movzx esi, word [cs:ip_len+si]
+        sub esi, eax
+        jae .g
+        xor si, si
+.g:
+        mov [cs:ip_got], si
+        pop esi
+        pop eax
+        call pipe_done
+.q:
+        call pipe_queue
         pop bx
         pop ax
         clc
         ret
-.jn:
+.n:
         inc bx
-        cmp bx, JOY_N
-        jb .j
+        cmp bx, PIPE_N
+        jb .l
         pop bx
         pop ax
         stc
@@ -1935,44 +2137,45 @@ hid_event:
 ; ---- mandos de juego ----
 ; pedir el siguiente informe del mando BX
 joy_queue:
+        push bx
+        add bx, 2
+        call pipe_queue
+        pop bx
+        ret
+
+; xHCI: pedir el siguiente informe de la tubería BX
+x_pipe_queue:
         pushad
         mov di, bx
         shl bx, 6
-        add bx, JOY_BUF
+        add bx, PIPE_BUF
         call zone
         call phys
         xor edx, edx
         mov si, di
         shl si, 1
-        movzx ecx, word [cs:j_len+si]
-        add si, jint_idx
+        movzx ecx, word [cs:ip_len+si]
+        add si, ip_ring
         mov bx, di
         shl bx, 8
-        add bx, JINT_RING
+        add bx, PINT_RING
         mov ebp, (1 << 10) | (1 << 5) | (1 << 2)    ; Normal, IOC, ISP
         call put_trb
-        mov al, [cs:j_dci+di]
-        mov ah, [cs:j_slot+di]
+        mov al, [cs:ip_dci+di]
+        mov ah, [cs:ip_slot+di]
         call doorbell
         popad
         ret
 
-; ha llegado un informe del mando BX (evento en evt): pasarlo al estado con
+; ha llegado un informe del mando BX ([ip_got] bytes): pasarlo al estado con
 ; su mapa y entregarlo a HSPJOY
 joy_report:
         pushad
         push ds
         push cs
         pop ds
-        mov di, bx
-        shl di, 1
-        mov cx, [j_len+di]
-        mov eax, [evt+8]
-        and eax, 0x00FFFFFF         ; lo que ha faltado por llegar
-        cmp eax, 0xFFFF
-        ja .r
-        sub cx, ax
-        jbe .r
+        mov cx, [ip_got]
+        jcxz .r
         mov si, bx
         imul si, HJM_SZ
         add si, j_map
@@ -2020,33 +2223,37 @@ joy_push:
         ret
 
 ; Tras atender el informe de algún mando (j_ev) ya está pedido el siguiente:
-; se le espera lo que dura su intervalo (j_wait microtramas del controlador,
-; registro MFINDEX) para entregar un estado de ahora mismo. El que acaba de
+; se le espera lo que dura su intervalo (j_wait microtramas del reloj de su
+; controladora, hc_time) para entregar un estado de ahora mismo. El que acaba de
 ; atenderse puede llevar esperando desde el tic anterior (55 ms).
 joy_fresh:
         pushad
         mov bl, [cs:j_ev]
         mov byte [cs:j_ev], 0
-        mov esi, [cs:rt_base]
-        call mrd
+        ; el reloj: el de la controladora del primero de esos mandos
+        xor si, si
+        test bl, 1
+        jnz .h
+        inc si
+.h:
+        movzx si, byte [cs:ip_pool+si+2]
+        mov al, [cs:dv_hc+si]
+        mov [cs:jf_hc], al
+        call hc_sel
+        call hc_time
         mov di, ax
-        mov ecx, 200000             ; (por si MFINDEX no avanzara)
+        mov ecx, 200000             ; (por si el reloj no avanzara)
 .l:
-        call get_event
-        jc .t
-        cmp al, 32
-        jne .l
-        call hid_event
+        call usb_poll
         mov al, [cs:j_ev]
         and al, bl
         cmp al, bl
         je .r
-        jmp .l
-.t:
         dec ecx
         jz .r
-        mov esi, [cs:rt_base]
-        call mrd
+        mov al, [cs:jf_hc]
+        call hc_sel
+        call hc_time
         sub ax, di
         and ax, 0x3FFF
         cmp ax, [cs:j_wait]
@@ -2055,6 +2262,7 @@ joy_fresh:
         mov byte [cs:j_ev], 0
         popad
         ret
+jf_hc       db 0
 
 %include "hidjoyx.inc"
 j_est       times JOY_N * HJS_SZ db 0   ; estado de cada mando (lo que va a HSPJOY)
@@ -2073,36 +2281,16 @@ ev_ok:
 
 ; pedir el siguiente informe
 kbd_queue:
-        pushad
-        mov bx, KBD_BUF
-        call zone
-        call phys
-        xor edx, edx
-        movzx ecx, word [cs:k_len]
-        mov ebp, (1 << 10) | (1 << 5) | (1 << 2)    ; Normal, IOC, ISP
-        mov bx, KINT_RING
-        mov si, kint_idx
-        call put_trb
-        mov al, [cs:k_dci]
-        mov ah, [cs:k_slot]
-        call doorbell
-        popad
+        push bx
+        xor bx, bx
+        call pipe_queue
+        pop bx
         ret
 mou_queue:
-        pushad
-        mov bx, MOU_BUF
-        call zone
-        call phys
-        xor edx, edx
-        movzx ecx, word [cs:m_len]
-        mov ebp, (1 << 10) | (1 << 5) | (1 << 2)
-        mov bx, MINT_RING
-        mov si, mint_idx
-        call put_trb
-        mov al, [cs:m_dci]
-        mov ah, [cs:m_slot]
-        call doorbell
-        popad
+        push bx
+        mov bx, 1
+        call pipe_queue
+        pop bx
         ret
 
 ; ---- teclado: comparar el informe con el anterior ----
@@ -2680,14 +2868,7 @@ int08:
         call unreal
 .v86:
         call a20_open
-.ev:
-        call get_event
-        jc .rep
-        cmp al, 32
-        jne .ev
-        call hid_event
-        jmp .ev
-.rep:
+        call usb_poll
         ; mandos: el informe reciente y, cada 4 tics, su estado a HSPJOY
         ; (para que sepa que están aunque no se muevan)
         cmp byte [cs:j_ev], 0
@@ -2763,7 +2944,7 @@ keytab:
         db 0x56, 0xDD                                      ; < > (teclado español), Aplicación
 modtab  db 0x1D, 0x2A, 0x38, 0xDB, 0x9D, 0x36, 0xB8, 0xDC  ; Ctrl Mayús Alt Win (izq, der)
 
-resident_end:
+section .init
 
 ; =============================================================================
 ;  Inicialización (se descarta)
@@ -2784,6 +2965,10 @@ init:
         cmp al, '/'
         jne .opt
         lodsb
+        cmp al, '?'
+        jne .nh
+        mov byte [cs:opt_help], 1
+.nh:
         and al, 0xDF
         cmp al, 'F'
         jne .nf
@@ -2806,59 +2991,68 @@ init:
 .optd:
         pop bx
         pop ds
-        ; ¿Cabe la zona de trabajo (anillos, contextos y búferes, tras el
-        ; fichero) en la memoria que nos dan? El núcleo deja el final de la
-        ; memoria disponible en el campo de la dirección de corte (como
-        ; MS-DOS 5+). Con DEVICEHIGH en un bloque de memoria superior
-        ; pequeño no cabe: sin tocar nada se dice «no me quedo, me falta
-        ; memoria» (estado «ocupado») y el núcleo lo carga abajo.
-        mov cx, [bx+0x0E]
-        or cx, [bx+0x10]
-        jz .mok                     ; (un DOS que no lo dice)
-        movzx eax, word [bx+0x10]
-        shl eax, 4
-        movzx ecx, word [bx+0x0E]
-        add eax, ecx                ; final de la memoria disponible
-        xor ecx, ecx
-        mov cx, cs
-        shl ecx, 4
-        add ecx, file_end + 4095
-        and ecx, 0xFFFFF000
-        add ecx, MEM_SIZE           ; final de la zona
-        cmp ecx, eax
-        jbe .mok
-        mov byte [bx+0x0D], 0
-        mov word [bx+0x0E], 0
-        mov [bx+0x10], cs
-        mov word [bx+3], 0x0300
-        mov ax, cs
-        cmp ax, 0xA000
-        jae interrupt.out           ; arriba: sin mensajes, se probará abajo
-        push cs
-        pop ds
-        mov si, msg_title
-        call puts
-        mov si, msg_nomem
-        call puts
-        jmp interrupt.out
 .mok:
         push cs
         pop ds
         mov si, msg_title
         call puts
+        mov word [fail_msg], msg_usage
+        cmp byte [opt_help], 0
+        jne .fail
+        mov word [fail_msg], msg_v86
+        cmp byte [iomode], 2
+        je .fail
+        ; qué controladoras hay y si las usa la BIOS
         call pci_survey
-        call xhci_setup
+        mov word [fail_msg], msg_nohc
+        cmp byte [hc_n], 0
+        je .fail
+        call bios_usbdisk
+        call info_all
+        ; ¿La BIOS usa el USB? Alguna controladora es suya (USB Legacy
+        ; Support) o la tiene en marcha: sin /F no se toca ninguna. Y si el
+        ; sistema ha arrancado de una memoria USB de la BIOS, solo con /U.
+        cmp byte [opt_boot], 0
+        jne .take
+        mov word [fail_msg], msg_bootusb
+        cmp byte [boot_usb], 0
+        jne .fail
+        cmp byte [opt_force], 0
+        jne .take
+        mov word [fail_msg], msg_bios
+        cmp byte [any_busy], 0
+        jne .fail
+.take:
+        call mem_setup
+        mov word [fail_msg], msg_nomem
+        jc .fail
+        cmp byte [boot_usb], 0
+        je .tk
+        call boot_save
+.tk:
+        mov word [fail_msg], msg_notake
+        call hc_setup_all
         jc .fail
         call usb_enum
         jc .fail
-        xor cl, cl
+        ; los cambios de conexión de ahora ya están vistos
+        xor bx, bx
 .cc:
+        cmp bl, [hc_n]
+        jae .ccd
+        test byte [hc_flags+bx], HCF_OURS
+        jz .ccn
+        mov al, bl
+        call hc_sel
+        xor cl, cl
+.cc1:
         inc cl
-        cmp cl, [maxports]
-        ja .ccd
-        movzx esi, cl
-        call port_sc
-        call clr_csc
+        cmp cl, [hc_np+bx]
+        ja .ccn
+        call rp_ack
+        jmp .cc1
+.ccn:
+        inc bx
         jmp .cc
 .ccd:
         mov byte [units], 0
@@ -2981,39 +3175,20 @@ init:
         int 0x21
 .resp:
         ; respuesta al núcleo: unidades, BPB y memoria residente
-        ; memoria residente: los contextos de los dispositivos en uso y una
-        ; entrada libre (dos si no hay memoria USB: ella y su concentrador)
-        ; para lo que se conecte después
-        xor bx, bx
-        xor al, al
-.pm:
-        cmp byte [cs:pool_used+bx], 0
-        je .pn
-        mov al, bl
-        inc al
-.pn:
-        inc bx
-        cmp bx, POOL_N
-        jb .pm
-        inc al
-        cmp byte [cs:disk_found], 0
-        jne .pk
-        inc al
-.pk:
-        cmp al, POOL_N
-        jbe .pj
-        mov al, POOL_N
-.pj:
-        mov [cs:pool_max], al
-        movzx dx, al
-        shl dx, 11
-        add dx, MEM_FIXED
-        add dx, [cs:mem_off]
+        ; memoria residente: hasta donde se haya reservado (init_fin hace
+        ; el reparto final)
+        call init_fin
+        mov eax, [cs:ztop]
+        mov dx, ax
+        and dx, 15
+        shr eax, 4
+        mov cx, cs
+        add cx, ax
         lds bx, [cs:req]
         mov al, [cs:units]
         mov [bx+0x0D], al
         mov [bx+0x0E], dx
-        mov [bx+0x10], cs
+        mov [bx+0x10], cx
         mov word [bx+0x12], bpbarr
         mov [bx+0x14], cs
         jmp .done
@@ -3022,9 +3197,9 @@ init:
         pop ds
         mov si, [fail_msg]
         call puts
-        ; el driver se descarga: el controlador no puede seguir en marcha
-        ; con sus anillos y contextos en una memoria que ya no es nuestra
-        call xhci_stop
+        ; el driver se descarga: las controladoras no pueden seguir en marcha
+        ; con sus colas y contextos en una memoria que ya no es nuestra
+        call hc_stop_all
         lds bx, [cs:req]
         mov byte [bx+0x0D], 0
         mov word [bx+0x0E], 0
@@ -3067,135 +3242,6 @@ info_pause:
 .r:
         call unreal
         ret
-
-; ---- qué controladores USB hay (y si la BIOS usa los EHCI) ----
-pci_survey:
-        mov ax, 0xB101
-        xor edi, edi
-        int 0x1A
-        jc .r
-        cmp edx, 0x20494350
-        jne .r
-        mov ecx, 0x0C0300
-        call .count
-        mov [n_hc], al
-        mov ecx, 0x0C0310
-        call .count
-        mov [n_hc+1], al
-        mov ecx, 0x0C0320
-        call .count
-        mov [n_hc+2], al
-        mov ecx, 0x0C0330
-        call .count
-        mov [n_hc+3], al
-        call unreal
-        cmp byte [opt_info], 0
-        je .r
-        mov si, msg_hcs
-        call puts
-        xor bx, bx
-.p:
-        mov si, [hc_names+bx]
-        call puts
-        shr bx, 1
-        movzx eax, byte [n_hc+bx]
-        shl bx, 1
-        call putdec
-        add bx, 2
-        cmp bx, 8
-        jb .p
-        cmp byte [ehci_busy], 0
-        je .nl
-        mov si, msg_ehcibusy
-        call puts
-.nl:
-        call crlf
-.r:
-        ret
-; ECX = clase -> AL = cuántos hay
-.count:
-        xor si, si
-.cl:
-        push ecx
-        push si
-        mov ax, 0xB103
-        int 0x1A
-        pop si
-        pop ecx
-        jc .cd
-        test ah, ah
-        jnz .cd
-        cmp ecx, 0x0C0320
-        jne .cn
-        push ecx
-        push si
-        call ehci_one
-        pop si
-        pop ecx
-.cn:
-        inc si
-        cmp si, 8
-        jb .cl
-.cd:
-        mov ax, si
-        ret
-
-; EHCI en BX (bus/dispositivo/función): ¿lo tiene en marcha la BIOS, o es
-; suyo (USBLEGSUP)? -> ehci_busy
-ehci_one:
-        mov [e_bdf], bx
-        mov ax, 0xB109
-        mov di, 0x04
-        int 0x1A
-        jc .r
-        test cl, 2                  ; sin acceso a memoria: no está en uso
-        jz .r
-        mov bx, [e_bdf]
-        mov ax, 0xB10A
-        mov di, 0x10
-        int 0x1A
-        jc .r
-        and ecx, 0xFFFFFFF0
-        jz .r
-        call unreal
-        mov esi, ecx
-        call mrd
-        movzx ebx, al               ; CAPLENGTH
-        push esi
-        add esi, 8
-        call mrd                    ; HCCPARAMS: EECP en los bits 15-8
-        pop esi
-        mov [e_eecp], ah
-        add esi, ebx
-        call mrd                    ; USBCMD
-        test al, 1                  ; Run/Stop
-        jnz .busy
-        movzx di, byte [e_eecp]
-        cmp di, 0x40
-        jb .r
-        mov bx, [e_bdf]
-        mov ax, 0xB10A
-        int 0x1A
-        jc .r
-        cmp cl, 1
-        jne .r
-        test ecx, 0x10000
-        jz .r
-.busy:
-        mov byte [ehci_busy], 1
-.r:
-        ret
-e_bdf       dw 0
-e_eecp      db 0
-ehci_busy   db 0
-n_hc        db 0, 0, 0, 0
-hc_names    dw msg_hc0, msg_hc1, msg_hc2, msg_hc3
-msg_hcs     db "Controladores USB:", 0
-msg_hc0     db " UHCI ", 0
-msg_hc1     db ", OHCI ", 0
-msg_hc2     db ", EHCI ", 0
-msg_hc3     db ", xHCI ", 0
-msg_ehcibusy db " (la BIOS usa el EHCI)", 0
 
 ; ¿Ha arrancado el sistema desde un disco USB que maneja la BIOS? Si HSPUSB
 ; le quita el controlador a la BIOS, ese disco deja de existir y el sistema
@@ -3244,10 +3290,8 @@ bios_usbdisk:
         cmp al, 'A'                 ; "ATA", "SATA", "SCSI"...: no es USB
         jae .r
 .unk:
-        mov al, [hc_running]
-        or al, [hc_owned]
-        or al, [ehci_busy]
-        jz .r
+        cmp byte [any_busy], 0
+        je .r
 .usb:
         mov byte [boot_usb], 1
 .r:
@@ -3257,11 +3301,14 @@ bios_usbdisk:
 ; /U: guardar el sector 0 y la geometría del disco de arranque de la BIOS
 ; (para reconocerlo después entre las memorias USB y seguir sirviéndolo)
 boot_save:
+        mov cx, 512
+        mov dx, 16
+        call zalloc
+        jc .r
+        mov [boot_sec], bx
         push es
         push cs
         pop es
-        mov bx, BOOT_SEC
-        add bx, [mem_off]
         mov ax, 0x0201
         mov cx, 1
         mov dx, 0x0080
@@ -3347,41 +3394,22 @@ msg_no      db "no", 0
 hc_running  db 0
 hc_owned    db 0
 boot_usb    db 0
-boot_saved  db 0
-boot_match  db 0
 opt_boot    db 0
-opt_info    db 0
             align 2
 edd_buf     times 0x4A db 0
 
 ; ---- encontrar e inicializar el controlador xHCI ----
-xhci_setup:
-        mov word [fail_msg], msg_nox
-        cmp byte [iomode], 2
-        jne .rm
-        mov word [fail_msg], msg_v86
-        stc
-        ret
-.rm:
-        mov ax, 0xB101
-        xor edi, edi
-        int 0x1A
-        jc .no
-        cmp edx, 0x20494350
-        jne .no
-        mov ax, 0xB103
-        mov ecx, 0x0C0330
-        xor si, si
-        int 0x1A
-        jc .no
-        mov [bdf], bx
+; xHCI en [bdf]: dirección, registros de capacidad y si lo usa la BIOS
+; (hc_running, hc_owned). CF si no vale.
+xhci_probe:
+        mov bx, [bdf]
         mov ax, 0xB10A
         mov di, 0x10
         int 0x1A
         mov [bar_lo], cl
         and ecx, 0xFFFFFFF0
         mov [xbase], ecx
-        jz .no
+        jz .bad
         ; la mitad alta solo existe si el BAR es de 64 bits (tipo 10b); en
         ; uno de 32 bits lo que hay en 14h es otro BAR distinto
         mov al, [bar_lo]
@@ -3407,27 +3435,6 @@ xhci_setup:
         mov ax, 0xB10C
         mov di, 0x04
         int 0x1A
-        ; GDT del modo irreal y zona de memoria alineada a 4 KB
-        xor eax, eax
-        mov ax, cs
-        shl eax, 4
-        mov ebx, eax
-        add eax, gdt_tbl
-        mov [gdtr+2], eax
-        mov eax, ebx
-        add eax, file_end + 4095        ; tras todo el fichero: el código de inicio sigue en uso
-        and eax, 0xFFFFF000
-        sub eax, ebx
-        mov [mem_off], ax
-        mov di, ax
-        mov cx, MEM_SIZE / 2
-        xor ax, ax
-        push es
-        push cs
-        pop es
-        cld
-        rep stosw
-        pop es
         call unreal
         mov si, msg_found
         call puts
@@ -3480,27 +3487,16 @@ xhci_setup:
         jz .nown
         mov byte [hc_owned], 1
 .nown:
-        call bios_usbdisk
-        call info_ctrl
-        cmp byte [opt_boot], 0
-        jne .take
-        mov word [fail_msg], msg_bootusb
-        cmp byte [boot_usb], 0
-        jne .refuse
-        cmp byte [opt_force], 0
-        jne .take
-        mov word [fail_msg], msg_bios
-        mov al, [hc_running]
-        or al, [hc_owned]
-        jz .take
-.refuse:
+        clc
+        ret
+.bad:
         stc
         ret
-.take:
-        cmp byte [boot_usb], 0
-        je .tk
-        call boot_save
-.tk:
+
+; tomar el xHCI: traspaso desde la BIOS, reinicio, anillos y en marcha
+xhci_take:
+        mov al, [x_hc]
+        call hc_sel
         call legacy_handoff
         ; parar y reiniciar
         mov esi, [op_base]
@@ -3566,6 +3562,7 @@ xhci_setup:
         add esi, 4
         xor eax, eax
         call mwr
+        mov word [fail_msg], msg_scratch
         call scratch_setup
         jc .r
         call intel_routes
@@ -3650,7 +3647,6 @@ xhci_stop:
         jnc .h
 .r:
         ret
-hc_ours     db 0
 bar_lo      db 0
 
 ; Páginas de trabajo del controlador («scratchpad»). Los xHCI de verdad (los
@@ -3732,7 +3728,7 @@ scratch_setup:
         ; modo V86: lo mismo con INT 15h AH=87h. Las páginas se ponen a
         ; cero copiando la zona DATA (4 KB, todavía a cero) y la tabla se
         ; escribe palabra a palabra. La memoria de XMS es física = lineal.
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         xor esi, esi
         mov si, cs
@@ -3861,157 +3857,26 @@ legacy_handoff:
 .ok:
         ret
 
-; ---- puertos: enumerar todos los dispositivos conectados ----
-usb_enum:
-        mov word [fail_msg], msg_nodev
-        ; dar tiempo a que los puertos se estabilicen
-        mov cx, 4
-        call tmo_start
-.wt:
-        call tmo_check
-        jnc .wt
-        ; si aún no hay nada conectado, hasta un segundo más: tras reiniciar
-        ; el controlador los puertos vuelven a dar corriente y una memoria
-        ; de verdad tarda en presentarse (más aún si cambia de EHCI a xHCI)
-        mov cx, 18
-        call tmo_start
-.wc:
-        xor cl, cl
-.wp:
-        inc cl
-        cmp cl, [maxports]
-        ja .wn
-        movzx esi, cl
-        call port_sc
-        test al, 1
-        jz .wp
-        mov cx, 3                   ; algo hay: un poco más para los demás
-        call tmo_start
-.wd:
-        call tmo_check
-        jnc .wd
-        jmp .wgo
-.wn:
-        call tmo_check
-        jnc .wc
-.wgo:
-        call info_ports
-        call enum_ports
-        ; /U: la memoria de arranque tiene que aparecer. Puede tardar (vuelve
-        ; a conectarse tras reiniciar el controlador, o pasa del EHCI al
-        ; xHCI): se la espera hasta unos 4 s mirando los puertos nuevos.
-        cmp byte [boot_saved], 0
-        je .end
-        mov cx, 8
-.bw:
-        cmp byte [boot_match], 0
-        jne .end
-        push cx
-        mov cx, 9
-        call tmo_start
-.bt:
-        call tmo_check
-        jnc .bt
-        call enum_ports
-        pop cx
-        loop .bw
-        jmp .end
-
-; enumerar los puertos del controlador con algo conectado que no se hayan
-; visto ya (port_done)
-enum_ports:
-        xor cl, cl
-.pl:
-        inc cl
-        cmp cl, [maxports]
-        ja .end
-        movzx bx, cl
-        bt [port_done], bx
-        jc .pl
-        movzx esi, cl
-        dec esi
-        shl esi, 4
-        add esi, [op_base]
-        add esi, 0x400
-        call mrd
-        test al, 1                  ; conectado
-        jz .pl
-        test al, 2                  ; habilitado (USB 3 lo hace solo)
-        jnz .enabled
-        ; reiniciar el puerto (USB 2)
-        and eax, 0x0E00C3E0
-        or eax, (1 << 9) | (1 << 4) ; PP | PR
-        call mwr
-        push cx
-        mov cx, 10
-        call tmo_start
-.pr:
-        call mrd
-        test eax, 1 << 21           ; PRC
-        jnz .prd
-        call tmo_check
-        jnc .pr
-.prd:
-        call reset_rest
-        pop cx
-        call mrd
-        and eax, 0x0E00C3E0
-        or eax, (1 << 9) | 0x00FE0000   ; borrar los cambios
-        call mwr
-        call mrd
-        test al, 2
-        jz .pl
-.enabled:
-        mov [port], cl
-        shr eax, 10
-        and al, 0x0F
-        mov [speed], al
-        movzx bx, cl
-        bts [port_done], bx
-        push cx
-        call root_dev
-        call enum_one
-        pop cx
-        jmp .pl
-.end:
-        ret
-port_done   times 32 db 0
-
-usb_enum.end:
-        mov al, [disk_found]
-        or al, [k_on]
-        or al, [m_on]
-        or al, [j_on]
-        or al, [j_on+1]
-        jz .none
-        clc
-        ret
-.none:
-        stc
-        ret
-
 ; enumerar el dispositivo que acaba de habilitarse: [port] (puerto del
 ; controlador), [speed], [route], [depth], [tt_slot], [tt_port]. Si es un
 ; concentrador se enumera también lo que cuelga de él.
+section .text
 enum_one:
         mov byte [d_have], 0
         mov byte [d_role], 6
         ; una entrada libre de la reserva
-        xor bx, bx
-.pf:
-        cmp bl, [pool_max]
-        jae .full
-        cmp byte [pool_used+bx], 0
-        je .pg
-        inc bx
-        jmp .pf
-.full:
+        call pool_find
+        jnc .pg
         mov word [fail_msg], msg_full
         call info_line
         ret
 .pg:
+        mov al, [cur_hc]
+        mov [dv_hc+bx], al
         mov al, bl
         call pool_sel
+        cmp byte [cur_type], HCT_XHCI
+        jne .q0
         mov si, [cur_st]
         mov byte [si], 0
         mov byte [si+1], 1
@@ -4019,8 +3884,10 @@ enum_one:
         mov cx, 0x100
         call zero_zone
         mov bx, [cur_out]
-        mov cx, 0x800
+        mov cx, [ctx_sz]
+        shl cx, 5
         call zero_zone
+.q0:
         cmp byte [opt_verbose], 0
         je .q1
         mov si, msg_port
@@ -4033,6 +3900,15 @@ enum_one:
         call putdec
         call crlf
 .q1:
+        cmp byte [cur_type], HCT_XHCI
+        je .xh
+        ; controladora clásica: darle dirección (SET_ADDRESS)
+        call c_dev_open
+        mov word [fail_msg], msg_addr
+        jnc .adok
+        call info_line
+        jmp .err
+.xh:
         ; Enable Slot
         xor eax, eax
         xor edx, edx
@@ -4046,6 +3922,8 @@ enum_one:
         jmp .err
 .slok:
         mov [cur_slot], ah
+        movzx bx, byte [cur_pool]
+        mov [dv_slot+bx], ah
         ; DCBAA[slot] = contexto de salida
         mov bx, [cur_out]
         call zone
@@ -4119,6 +3997,12 @@ enum_one:
         cmp ax, [mps0]
         je .fulld
         mov [mps0], ax
+        cmp byte [cur_type], HCT_XHCI
+        je .ev
+        movzx bx, byte [cur_pool]
+        mov [dv_mps0+bx], al
+        jmp .fulld
+.ev:
         ; Evaluate Context con el tamaño de paquete real
         call clear_in
         mov bx, IN_CTX
@@ -4248,9 +4132,66 @@ enum_one:
 .dis:
         ; no se usa: liberar el slot
         call info_line
-        mov al, [cur_slot]
-        call slot_free
+        mov al, [cur_pool]
+        call dev_free
 .err:
+        ret
+
+; una entrada libre de la reserva para un aparato de la controladora actual
+; -> BX; CF si no hay. Los del xHCI necesitan memoria para su contexto de
+; salida (400h u 800h): primero una entrada que ya la tenga y, si no, se reserva
+; (solo durante el inicio). Los de las clásicas no gastan memoria: se toman
+; por el final.
+pool_find:
+        cmp byte [cur_type], HCT_XHCI
+        je .x
+        mov bx, POOL_N
+.c:
+        test bx, bx
+        jz .full
+        dec bx
+        cmp byte [pool_used+bx], 0
+        jne .c
+        clc
+        ret
+.x:
+        xor bx, bx
+.x1:
+        cmp byte [pool_used+bx], 0
+        jne .x2
+        mov si, bx
+        shl si, 1
+        cmp word [pool_mem+si], 0xFFFF
+        jne .ok
+.x2:
+        inc bx
+        cmp bx, POOL_N
+        jb .x1
+        xor bx, bx
+.x3:
+        cmp byte [pool_used+bx], 0
+        je .x4
+        inc bx
+        cmp bx, POOL_N
+        jb .x3
+.full:
+        stc
+        ret
+.x4:
+        push bx
+        mov cx, [ctx_sz]            ; 32 contextos de 32 o de 64 bytes
+        shl cx, 5
+        mov dx, cx
+        call zalloc
+        mov ax, bx
+        pop bx
+        jc .full
+        sub ax, [mem_off]
+        mov si, bx
+        shl si, 1
+        mov [pool_mem+si], ax
+.ok:
+        clc
         ret
 
 ; contexto del slot (CS:BX) del dispositivo que se enumera: EAX = número de
@@ -4347,6 +4288,8 @@ role_hub:
         xor al, al
 .tt:
         mov [hub_ttt], al
+        cmp byte [cur_type], HCT_XHCI
+        jne .cok                    ; (lo del contexto es cosa del xHCI)
         call clear_in
         mov bx, IN_CTX
         call zone
@@ -4365,6 +4308,8 @@ role_hub:
 .cok:
         movzx bx, byte [new_hub]
         mov byte [h_used+bx], 1
+        mov al, [cur_hc]
+        mov [h_hc+bx], al
         mov al, [cur_slot]
         mov [h_slot+bx], al
         mov al, [cur_pool]
@@ -4429,9 +4374,10 @@ role_hub:
 ; ---- /INFO: una línea por dispositivo ----
 info_line:
         cmp byte [opt_info], 0
-        jne .go
+        jne info_line_go
         ret
-.go:
+section .init
+info_line_go:
         pushad
         mov cl, [depth]
         inc cl
@@ -4529,39 +4475,7 @@ info_line:
         popad
         ret
 
-; /INFO: puertos del controlador con algo conectado
-info_ports:
-        cmp byte [opt_info], 0
-        jne .go
-        ret
-.go:
-        pushad
-        mov si, msg_iports
-        call puts
-        xor cl, cl
-.l:
-        inc cl
-        cmp cl, [maxports]
-        ja .d
-        movzx esi, cl
-        call port_sc
-        test al, 1
-        jz .l
-        mov dl, ' '
-        call putc
-        movzx eax, cl
-        call putdec
-        jmp .l
-.d:
-        mov si, msg_iports2
-        call puts
-        movzx eax, byte [maxports]
-        call putdec
-        mov si, msg_iports3
-        call puts
-        popad
-        ret
-
+section .text
 putc:
         push ax
         mov ah, 2
@@ -4603,6 +4517,7 @@ d_vid       dw 0
 d_pid       dw 0
 IF_MAX      equ 8
 if_tab      times IF_MAX * 3 db 0
+section .init
 spd_tab     db "??", "FS", "LS", "HS", "SS"
 role_tab    dw msg_r0, msg_r1, msg_r2, msg_r3, msg_r4, msg_r5, msg_r6, msg_r7
 msg_arrow   db " -> ", 0
@@ -4615,10 +4530,11 @@ msg_r5      db "concentrador de ", 0
 msg_r6      db "ERROR", 0
 msg_r7      db "mando de juego", 0
 msg_nports  db " puertos", 0
-msg_iports  db "Puertos con algo conectado:", 0
+msg_iports  db "puertos con algo conectado:", 0
 msg_iports2 db " (de ", 0
 msg_iports3 db "). Velocidad: LS baja, FS plena, HS alta, SS súper.", 13, 10, 0
 
+section .text
 ; /V: código de finalización de la orden que ha fallado (AL; FFh = sin respuesta)
 show_cc:
         jnc .r
@@ -4656,6 +4572,11 @@ role_disk:
         call set_config
         mov word [fail_msg], msg_cfg
         jc .err
+        mov al, [cur_pool]
+        mov [bk_pool], al
+        mov word [tog_in], 0        ; (y tog_out)
+        cmp byte [cur_type], HCT_XHCI
+        jne .nr
         ; anillos bulk desde el principio (puede haberlos usado otra memoria)
         mov word [bin_idx], 0x0100  ; índice 0, ciclo 1
         mov word [bout_idx], 0x0100
@@ -4665,16 +4586,21 @@ role_disk:
         mov bx, BOUT_RING
         mov cx, 0x100
         call zero_zone
+.nr:
         mov al, [cur_slot]
         mov [slot], al
         mov al, [t_in]
         mov [dci_in], al
         mov al, [t_out]
         mov [dci_out], al
+        mov al, [t_if]
+        mov [d_if], al
         mov ax, [t_mps_in]
         mov [mps_in], ax
         mov ax, [t_mps_out]
         mov [mps_out], ax
+        cmp byte [cur_type], HCT_XHCI
+        jne .cfgd
         ; Configure Endpoint: bulk IN y bulk OUT
         call clear_in
         mov bx, IN_CTX
@@ -4711,6 +4637,7 @@ role_disk:
         call cfg_ep_cmd
         mov word [fail_msg], msg_epcfg
         jc .err
+.cfgd:
         ; con /U solo vale la memoria de la que arrancó el sistema
         cmp byte [boot_saved], 0
         je .any
@@ -4730,8 +4657,8 @@ role_disk:
         mov [d_hub], al
         mov al, [par_port]
         mov [d_hport], al
-        call dport_sc
-        call clr_csc                ; la conexión de ahora ya está vista
+        mov cl, [port]
+        call rp_ack                 ; la conexión de ahora ya está vista
         clc
 .err:
         ret
@@ -4744,10 +4671,9 @@ boot_cmp:
         push es
         push cs
         pop es
-        mov si, DATA
+        mov si, [data_rel]
         add si, [mem_off]
-        mov di, BOOT_SEC
-        add di, [mem_off]
+        mov di, [boot_sec]
         mov cx, 256
         cld
         repe cmpsw
@@ -4774,6 +4700,7 @@ cfg_ep_cmd:
         ret
 
 ; teclado y/o ratón (want_k, want_m): protocolo de arranque y endpoints
+section .init
 role_hid:
         call set_config
         jc .err
@@ -4787,6 +4714,8 @@ role_hid:
         movzx eax, byte [pm_if]
         call set_boot
 .m2:
+        cmp byte [cur_type], HCT_XHCI
+        jne .cfgd
         ; endpoints de interrupción
         call clear_in
         mov bx, IN_CTX
@@ -4845,6 +4774,7 @@ role_hid:
 .e2:
         call cfg_ep_cmd
         jc .err
+.cfgd:
         mov al, [cur_slot]
         cmp byte [want_k], 0
         je .o1
@@ -4852,8 +4782,13 @@ role_hid:
         mov ah, [pk_dci]
         mov [k_dci], ah
         mov cx, [pk_mps]
+        mov [ip_mps], cx
         call cap_len
         mov [k_len], cx
+        mov ah, [cur_pool]
+        mov [ip_pool], ah
+        xor bx, bx
+        call pipe_ready
         mov byte [k_on], 1
 .o1:
         cmp byte [want_m], 0
@@ -4862,8 +4797,13 @@ role_hid:
         mov ah, [pm_dci]
         mov [m_dci], ah
         mov cx, [pm_mps]
+        mov [ip_mps+2], cx
         call cap_len
         mov [m_len], cx
+        mov ah, [cur_pool]
+        mov [ip_pool+1], ah
+        mov bx, 1
+        call pipe_ready
         mov byte [m_on], 1
 .o2:
         clc
@@ -4919,6 +4859,7 @@ calc_ival:
         ret
 
 ; poner a cero CX bytes de la zona desde BX
+section .text
 zero_zone:
         push di
         push es
@@ -4938,7 +4879,7 @@ want_m      db 0
 disk_found  db 0
             db 0
 mps0        dw 8
-cur_out     dw OUT_CTXS
+cur_out     dw 0
 ep_ival     db 0
             db 0
 ep_d4       dd 1024
@@ -5043,6 +4984,8 @@ parse_config:
         cmp byte [cs:si+7], 0x50
         jne .n
         mov byte [ifk], 1
+        mov al, [ifn]
+        mov [t_if], al
         jmp .n
 .hid:
         cmp byte [cs:si+5], 3
@@ -5179,6 +5122,7 @@ p_kbd       db 0
 p_mou       db 0
 t_in        db 0
 t_out       db 0
+t_if        db 0                    ; interfaz de la memoria USB
             db 0
 t_mps_in    dw 0
 t_mps_out   dw 0
@@ -5202,6 +5146,7 @@ j_new       dw 0
 j_caps      dw 0
 j_notpad    db 0
 
+section .init
 ; mando de juego: leer su descriptor de informe y sacar el mapa (o poner el
 ; fijo de los de tipo Xbox 360), y su endpoint de interrupción. CF si no se
 ; usa: con [j_notpad] = 1 porque no es un mando (otro HID), si no por un fallo.
@@ -5235,7 +5180,7 @@ role_joy:
         call set_config
         jc .err
         ; el descriptor de informe (hasta 1 KB), a la zona de datos
-        mov bx, DATA
+        mov bx, [data_rel]
         mov cx, 1024
         call zero_zone
         mov cx, [pj_rlen]
@@ -5248,12 +5193,13 @@ role_joy:
         movzx ax, byte [pj_if]
         mov [ctl_setup+4], ax
         mov [ctl_setup+6], cx
-        mov word [ctl_buf], DATA
+        mov ax, [data_rel]
+        mov [ctl_buf], ax
         call control
         mov word [ctl_buf], DESC
         mov word [fail_msg], msg_desc
         jc .err
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         mov si, bx
         mov cx, [pj_rlen]
@@ -5264,6 +5210,8 @@ role_joy:
         jc .np
 .ep:
         mov [j_caps], ax
+        cmp byte [cur_type], HCT_XHCI
+        jne .cfgd
         ; su anillo, vacío
         mov bx, [j_new]
         shl bx, 8
@@ -5302,6 +5250,7 @@ role_joy:
         call cfg_ep_cmd
         mov word [fail_msg], msg_epcfg
         jc .err
+.cfgd:
         mov bx, [j_new]
         mov al, [cur_slot]
         mov [j_slot+bx], al
@@ -5351,6 +5300,16 @@ role_joy:
         jbe .w2
         mov [j_wait], ax
 .w2:
+        mov al, [cur_pool]
+        mov [ip_pool+bx+2], al
+        mov di, bx
+        shl di, 1
+        mov ax, [pj_mps]
+        mov [ip_mps+di+4], ax
+        push bx
+        add bx, 2
+        call pipe_ready
+        pop bx
         mov byte [j_on+bx], 1
         clc
         ret
@@ -5364,11 +5323,12 @@ role_joy:
 
 %include "hidjoyp.inc"
 
+section .text
 ; ---- disco: capacidad, partición y BPB ----
 disk_setup:
         call disk_ready
         jc .err
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         jmp disk_sec0
 .err:
@@ -5396,7 +5356,7 @@ disk_ready:
         mov dword [scsi_cb], 0x03
         mov dword [scsi_cb+4], 18
         mov byte [scsi_cblen], 6
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         call phys
         mov ebx, eax
@@ -5416,7 +5376,7 @@ disk_ready:
         mov dword [scsi_cb+4], 0
         mov word [scsi_cb+8], 0
         mov byte [scsi_cblen], 10
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         call phys
         mov ebx, eax
@@ -5424,7 +5384,7 @@ disk_ready:
         mov al, 1
         call scsi
         jc .err
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         mov eax, [cs:bx]
         call bswap_eax
@@ -5485,7 +5445,7 @@ disk_sec0:
         mov al, 0x28
         call scsi_rw
         jc .err
-        mov bx, DATA
+        mov bx, [cs:data_rel]
         call zone
         cmp word [cs:bx+0x0B], 512
         jne .err
@@ -5566,6 +5526,7 @@ putdec:
         pop ecx
         pop ebx
         ret
+section .init
 puthex8:
         push cx
         mov cx, 8
@@ -5586,6 +5547,7 @@ puthex8:
         pop cx
         ret
 
+section .text
 bdf         dw 0
 maxports    db 0
 opt_force   db 0
@@ -5593,7 +5555,14 @@ opt_verbose db 0
 hcc1        dd 0
 cap_mb      dd 0
 fail_msg    dw 0
-msg_title   db "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)", 13, 10, 0
+data_rel    dw 0                    ; el búfer de datos del disco (4 KB), en la zona
+boot_sec    dw 0                    ; /U: sector 0 del disco de arranque de la BIOS
+opt_help    db 0
+ehci_busy   db 0
+; Desde aquí, solo mensajes y código de inicialización: nada se usa después
+; del arranque (init_fin puede poner encima el búfer de datos del disco).
+section .init
+msg_title   db "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)", 13, 10, 0
 msg_found   db "Controlador xHCI en ", 0
 msg_port    db "Dispositivo en el puerto ", 0
 msg_speed   db ", velocidad ", 0
@@ -5613,7 +5582,6 @@ msg_no8042  db "Sin controlador de teclado (8042): las teclas van al búfer de l
 msg_scratch db "El controlador xHCI necesita memoria extendida: cargue HSPXMS.SYS", 13, 10
             db "antes que HSPUSB.SYS en CONFIG.SYS.", 13, 10, 0
 msg_nomem   db "No hay memoria suficiente para HSPUSB.", 13, 10, 0
-msg_nox     db "No se ha encontrado ningún controlador xHCI (USB 3).", 13, 10, 0
 msg_v86     db "No funciona en modo V86 sin VCPI (Windows 386 mejorado).", 13, 10, 0
 msg_high    db "Los registros del xHCI están por encima de 4 GB: no se admite.", 13, 10, 0
 msg_bios    db "La BIOS está usando el controlador USB (teclado USB o unidad de", 13, 10
@@ -5639,5 +5607,78 @@ msg_epcfg   db "USB: ha fallado Configure Endpoint.", 13, 10, 0
 msg_scsi    db "El disco USB no responde.", 13, 10, 0
 msg_bsize   db "El disco USB no tiene sectores de 512 bytes.", 13, 10, 0
 msg_nofat   db "El disco USB no tiene un sistema de archivos FAT12/FAT16.", 13, 10, 0
+%include "usb_hcini.inc"
+section .text
+boot_saved  db 0
+boot_match  db 0
+opt_info    db 0
+hc_ours     db 0
 msg_crlf    db 13, 10, 0
-file_end:
+; ---- INIT: la inicialización está en el fichero detrás de lo residente
+; (sección .init), pero se ejecuta en CS:INIT_ORG, por encima de donde irá la
+; zona de trabajo. Se lleva allí y, al acabar, solo se queda lo residente y
+; la zona: la inicialización se descarta. Hace falta memoria hasta
+; CS:init_end mientras tanto; si no la hay (DEVICEHIGH en un bloque de
+; memoria superior pequeño), sin tocar nada se dice «no me quedo, me falta
+; memoria» (estado «ocupado»; el núcleo deja el final de la memoria
+; disponible en el campo de la dirección de corte, como MS-DOS 5+) y el
+; núcleo lo carga abajo. DS:BX = la petición.
+init_go:
+        mov cx, [bx+0x0E]
+        or cx, [bx+0x10]
+        jz .ok                      ; (un DOS que no lo dice)
+        movzx eax, word [bx+0x10]
+        shl eax, 4
+        movzx ecx, word [bx+0x0E]
+        add eax, ecx                ; final de la memoria disponible
+        xor ecx, ecx
+        mov cx, cs
+        shl ecx, 4
+        add ecx, init_end
+        cmp ecx, eax
+        jbe .ok
+        mov byte [bx+0x0D], 0
+        mov word [bx+0x0E], 0
+        mov [bx+0x10], cs
+        mov word [bx+3], 0x0300
+        mov ax, cs
+        cmp ax, 0xA000
+        jae interrupt.out           ; arriba: sin mensajes, se probará abajo
+        push cs
+        pop ds
+        ; (los mensajes, de la copia de .init que hay en el fichero)
+        mov si, msg_title
+        add si, section..init.start - INIT_ORG
+        call puts
+        mov si, msg_nomem
+        add si, section..init.start - INIT_ORG
+        call puts
+        jmp interrupt.out
+.ok:
+        push ds
+        push es
+        push cs
+        pop ds
+        push cs
+        pop es
+        mov si, init_end - 1
+        add si, section..init.start - INIT_ORG
+        mov di, init_end - 1
+        mov cx, init_end - INIT_ORG
+        std                         ; (de atrás adelante, por si se pisan)
+        rep movsb
+        cld
+        pop es
+        pop ds
+        jmp init
+res_end:
+section .init
+init_end:
+; La inicialización tiene que acabar por debajo de F000h (si no, bajar
+; INIT_ORG). Las llamadas y saltos entre .init y .text son relativos de 16
+; bits y dan la vuelta a los 64 KB (IP se queda en 16 bits, como manda la
+; norma); con 4 KB de margen, origen y destino «sin la vuelta» nunca caen en
+; la misma página de 4 KB, que es cuando QEMU (10.x, con CF_PCREL) se salta la
+; vuelta y sigue en CS:1xxxxh (se vio con HSPEMM: HSPUSB cargado abajo en
+; 0681h). En un procesador de verdad daría igual.
+        times -((init_end - init_start) > (0xF000 - INIT_ORG)) db 0

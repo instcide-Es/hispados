@@ -131,8 +131,12 @@ $(B)/REVISAR.COM: utils/revisar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc | $(B)
-	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc lib/usb_hc.inc lib/usb_uhci.inc lib/usb_ohci.inc lib/usb_ehci.inc lib/usb_hcini.inc | $(B)
+	for f in lib/usb_*.inc; do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
+	$(ASM) -l $(B)/gen/HSPUSB.lst -o $@ $(B)/gen/$<
+	@# lo residente no puede usar nada de la inicialización, que se descarta
+	@# (las permitidas: solo al arrancar, o con /V o /INFO; ver hspusb.asm)
+	python3 tools/initcheck.py $(B)/gen/HSPUSB.lst init,init_end,info_line_go,role_hid,role_joy 'msg_*' || { rm -f $@; exit 1; }
 # VELOCIDAD (en el disco VELOCIDA.COM: 8 letras) y LOADFIX: para los juegos
 # antiguos que fallan en equipos rápidos o cargados en los primeros 64 KB
 $(B)/VELOCIDAD.COM: utils/velocidad.asm lib/util.inc lib/ejecutar.inc | $(B)
@@ -412,6 +416,13 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	tests/run_usbnative_tests.sh $(IMG)
 	tests/run_usbhid_tests.sh $(IMG)
 	tests/run_usbhub_tests.sh $(IMG)
+	tests/run_usbhc_tests.sh $(IMG) uhci
+	tests/run_usbhc_tests.sh $(IMG) ohci
+	tests/run_usbhc_tests.sh $(IMG) ehci
+	tests/run_usbhc_tests.sh $(IMG) ehcicomp
+	tests/run_usbhc_tests.sh $(IMG) xhci
+	tests/run_usbhc_tests.sh $(IMG) mezcla
+	tests/run_usbhc_tests.sh $(IMG) aparcar
 	tests/run_joy_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)

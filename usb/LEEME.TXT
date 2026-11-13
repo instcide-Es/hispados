@@ -97,7 +97,8 @@ USB propio (HSPUSB): raton o panel tactil USB, por ejemplo en un MacBook
       DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO
   (en la parte [juegos], anadir /U /INFO a la linea DEVICEHIGH de HSPUSB).
   /U    toma el USB de la BIOS y atiende el mismo la memoria de arranque.
-        Sirve con controladores xHCI (USB 3). Si algo falla, el equipo se
+        Sirve con cualquier controladora USB (UHCI, OHCI, EHCI, xHCI).
+        Si algo falla, el equipo se
         puede quedar sin teclado o sin disco hasta reiniciar.
   /INFO ensena el controlador y el arbol de dispositivos y espera 15 s
         (para hacer una foto).

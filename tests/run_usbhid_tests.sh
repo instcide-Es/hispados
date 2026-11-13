@@ -33,7 +33,7 @@ check() {
   if grep -qF -- "$1" $T/log.txt; then echo "  OK   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 echo "== Hispa-DOS teclado y ratón USB =="
-check "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)"
+check "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)"
 check "Teclado USB preparado."
 check "Ratón USB preparado."
 check "A:\\>VER"

@@ -251,7 +251,7 @@ c_normal() {
   check "HSPXMS 0.1: gestor XMS 3.0"
   nocheck "HSPEMM 0.1"
   check "HSPCD 0.1 - lectores de CD/DVD de Hispa-DOS"
-  check "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)"
+  check "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)"
   check "Teclado español instalado."
   check "HSPRATON 0.1 - ratón de Hispa-DOS (INT 33h)"
   check "HSPJOY 0.1 - mandos de juego de Hispa-DOS"
@@ -285,7 +285,7 @@ c_memoria() {
   check "HSPEMM 0.1: EMS 4.0 y VCPI"
   check "marco de página en "
   check "HSPCD 0.1 - lectores de CD/DVD de Hispa-DOS"
-  check "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)"
+  check "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)"
   check "Teclado español instalado."
   check "HSPRATON 0.1 - ratón de Hispa-DOS (INT 33h)"
   check "Sound Blaster 16 en 220h, IRQ 5, DMA 1 y 5"
@@ -494,7 +494,7 @@ fi
 veces_txt() { grep -cF -- "$1" $T/log.txt; }
 c_pequeno() {
   check "HSPEMM 0.1: VCPI"
-  n=$(veces_txt "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)")
+  n=$(veces_txt "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)")
   if [ "$n" = 1 ]; then ok "HSPUSB se presenta una sola vez"; else ko "HSPUSB se presenta $n veces"; fi
   check "Disco USB: 32 MB en la unidad D:"
   check "Hola desde la memoria USB"
@@ -515,7 +515,7 @@ c_pequeno() {
   fi
 }
 c_pequeno2() {
-  n=$(veces_txt "No se ha encontrado ningún controlador xHCI (USB 3).")
+  n=$(veces_txt "No se ha encontrado ninguna controladora USB.")
   if [ "$n" = 1 ]; then ok "sin xHCI, HSPUSB con DEVICEHIGH lo dice una sola vez"; else ko "sin xHCI, HSPUSB lo dice $n veces"; fi
   # HSPRAM sí se vuelve a cargar abajo cuando arriba no le llega la memoria
   check "Disco RAM de Hispa-DOS: 64 KB en la unidad C:"
@@ -550,7 +550,7 @@ fi
 c_usb() {
   check "    2. Juegos (memoria expandida EMS y la mayor memoria libre)"
   check "HSPEMM 0.1: EMS 4.0 y VCPI"
-  check "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)"
+  check "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)"
   check "HSPUSB no toma el controlador"
   check "Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes."
   check "CONFIG=JUEGOS"

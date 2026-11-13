@@ -5,7 +5,7 @@ programas de DOS como si fueran el mando clásico del PC, o como teclas.
 
 | De dónde | Qué mandos | Estado |
 |---|---|---|
-| USB (con `HSPUSB.SYS`, controladora xHCI) | Mandos y joysticks HID genéricos (se lee su descriptor de informe) y mandos tipo Xbox 360 con cable | Hecho; probado en QEMU con un mando simulado que lleva los descriptores de mandos reales. Falta probarlo con mandos de verdad |
+| USB (con `HSPUSB.SYS`, cualquier controladora: UHCI, OHCI, EHCI o xHCI; ver [USB.md](USB.md)) | Mandos y joysticks HID genéricos (se lee su descriptor de informe) y mandos tipo Xbox 360 con cable | Hecho; probado en QEMU con un mando simulado que lleva los descriptores de mandos reales. Falta probarlo con mandos de verdad |
 | Puerto de juegos (201h; tarjeta de sonido o tarjeta suelta) | Analógicos de 2 ejes y 4 botones, o de 4 ejes (dos mandos, o uno con timón y gases) | Hecho; probado con un puerto simulado (QEMU no lo tiene). Falta probarlo en un PC con puerto de juegos |
 | Puerto de impresora con un cable casero | Joystick Atari/Commodore/Amstrad/MSX de 9 patillas, mando de Mega Drive (3 botones), NES, Super Nintendo y PlayStation (digital y analógico); hasta dos de NES/SNES/PlayStation | Hecho; probado con un puerto simulado. Falta probarlo con cables de verdad |
 | Puerto de juegos, mandos digitales (Gravis GamePad Pro «GrIP», Microsoft SideWinder) | | Siguiente paso (ver [más abajo](#lo-que-falta)) |

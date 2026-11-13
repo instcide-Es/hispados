@@ -103,6 +103,11 @@ modo V86 no puede, y hace esto otro, sin nada especial en HSPEMM:
   Nada de lo que entrega cruza una página de 4 KB (la zona está alineada y
   los datos van en trozos de 4 KB), así que no hace falta que las páginas
   del UMB sean contiguas.
+- **UHCI, OHCI y EHCI** ([USB.md](USB.md)): igual. OHCI y EHCI tienen sus
+  registros en memoria y pasan por las mismas dos rutinas (`mrd`/`mwr`); la
+  UHCI usa puertos de E/S, que el monitor deja pasar. Sus colas,
+  descriptores y listas de tramas salen de la misma traducción (`phys`,
+  `lphys`).
 - **Páginas de trabajo del xHCI** (los controladores de verdad las piden):
   salen de XMS, bloqueadas; la memoria de XMS es física = lineal también
   bajo el monitor. Se ponen a cero y se apuntan con INT 15h AH=87h.

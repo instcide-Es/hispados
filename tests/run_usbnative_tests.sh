@@ -41,7 +41,7 @@ EOF
         -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
   tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
   echo "== Hispa-DOS native USB tests ($KIND) =="
-  for want in "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)" "Disco USB: 32 MB en la unidad D:" \
+  for want in "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)" "Disco USB: 32 MB en la unidad D:" \
               "Hola desde la memoria USB" " Directorio de D:\\HISPA" "EDITAR   COM" "TECLADO  COM"; do
     if grep -qF -- "$want" $T/log.txt; then echo "  OK   $want"; else echo "  FAIL $want"; fail=1; fi
   done

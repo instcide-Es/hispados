@@ -254,7 +254,7 @@ for MODE in serie U; do
   dd if=$T/usb.img of=$T/p.img bs=1M skip=1 status=none
   if [ $MODE = serie ]; then
     echo "== Hispa-DOS arranque desde USB, CONFIG.SYS de serie (HSPUSB no toma el controlador) =="
-    check "HSPUSB 0.1 - USB nativo de Hispa-DOS (xHCI)"
+    check "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)"
     check "HSPUSB no toma el controlador"
     nocheck "Teclado USB preparado."
   else
