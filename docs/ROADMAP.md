@@ -31,6 +31,7 @@ Cada fase termina con pruebas automáticas en QEMU (`make test`) y, cuando toque
 - ✅ Interfaz de drivers de DOS (`.SYS` de carácter y de bloque, *strategy*/*interrupt*, también en formato MZ), cabeceras y cadena de dispositivos reales; drivers propios `HSPRAM.SYS` y `HSPTEST.SYS`.
 - INT 2Fh multiplex completo.
 - ✅ **HSPXMS.SYS**: gestor XMS 3.0 (compatible con HIMEM), A20 y HMA; probado con XMSTEST y con MEM de FreeDOS. También funciona HIMEMX de FreeDOS.
+- ✅ **Menú de configuraciones de CONFIG.SYS** como MS-DOS 6.22 (`[menu]`, `MENUITEM`, `SUBMENU`, `MENUDEFAULT`, `MENUCOLOR`, `[common]`, `INCLUDE`, variable `CONFIG`) y opción **«Juegos»** en el disquete y la memoria USB (HSPEMM, `DOS=HIGH,UMB`, `DEVICEHIGH`/`LH`). `HSPUSB` funciona también en modo V86 (INT 15h AH=87h y VCPI). Pendiente: probarlo en equipos de verdad.
 - ✅ **HSPEMM.SYS**: monitor V86 propio: EMS 4.0, VCPI 1.0 y UMB (`DOS=UMB`, `DEVICEHIGH`, `LH`), ver [HSPEMM.md](HSPEMM.md). Pendiente: importación global de EMM para Windows 386 mejorado con UMB en uso.
 
 ## 0.4 — Compatibilidad con Windows 3.1

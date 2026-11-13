@@ -1,0 +1,32 @@
+REM CONFIG.SYS con menú (tests/run_modojuegos_tests.sh)
+SET ANTES=si
+[menu]
+MENUITEM=NORMAL,Normal (como siempre)
+MENUITEM = JUEGOS , Juegos (EMS y memoria superior)
+MENUITEM=NOEXISTE,No debe salir
+submenu=OTROS,Otras opciones
+MENUDEFAULT=NORMAL,4
+MENUCOLOR=15,1
+[otros]
+MENUITEM=RARO,Una rara
+MENUITEM=NORMAL,Volver a lo normal
+[COMMON]
+DEVICE=A:\HISPADOS\HSPXMS.SYS
+[normal]
+SET MODO=normal
+DOS=HIGH
+[Juegos]
+DEVICE=A:\HISPADOS\HSPEMM.SYS
+include=base
+SET MODO=juegos
+[raro]
+SET MODO=raro
+INCLUDE=BASE
+ORDENRARA=1
+[base]
+DOS=HIGH,UMB
+INCLUDE=masbase
+[masbase]
+SET BASE=si
+[common]
+SET FINAL=si

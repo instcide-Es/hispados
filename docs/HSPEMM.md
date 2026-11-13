@@ -35,15 +35,22 @@ Al arrancar dice lo que ha encontrado:
 
 `MEM` y `MEM /C` enseñan la memoria superior; `LH programa` carga un programa
 en ella (si no cabe, abajo, como siempre) y `DEVICEHIGH=` un controlador (si
-al instalarse arriba falla o no cabe, se carga abajo).
+no cabe o al instalarse arriba falla, se carga abajo).
+
+Un controlador cargado con `DEVICEHIGH` que decide no quedarse residente (no
+encuentra su aparato) no se vuelve a cargar abajo: repetiría sus mensajes.
+Solo se repite si dice que lo que le falta es memoria: devuelve el estado de
+INIT con el bit 9 («ocupado») puesto, como hacen `HSPUSB` (su zona de trabajo
+no cabe en el bloque) y `HSPRAM`. El núcleo le da el final de la memoria
+disponible en el campo de la dirección de corte, como MS-DOS 5+. `HSPSND`,
+que es un programa, hace lo equivalente con `LH`: si sus bloques de DMA no
+caben en el bloque de memoria superior, se carga él mismo abajo.
 
 ## Lo que no funciona en modo V86
 
 Con HSPEMM el procesador está en modo protegido y DOS corre en modo V86. Lo
 que necesita el modo real «de verdad» no puede funcionar, y lo dice:
 
-- `HSPUSB` llevando él el USB (`/U`, `/F`): usa el modo irreal. Sin opciones
-  (USB por la BIOS) sigue igual.
 - `HSPCD` con lectores **SATA (AHCI)**; los IDE funcionan.
 - (`HSPSND` con **Intel HD Audio** ya funciona en modo V86: HSPEMM le
   mapea los registros de la tarjeta en una página de su memoria. Y con
@@ -66,7 +73,42 @@ que necesita el modo real «de verdad» no puede funcionar, y lo dice:
   las hay, HSPEMM lo avisa y Windows no arranca: quite `DOS=UMB` para usar
   Windows con HSPEMM.
 
-Por lo anterior, en los `CONFIG.SYS` de la distribución HSPEMM viene con `REM`.
+Por lo anterior, en los `CONFIG.SYS` de la distribución HSPEMM solo se carga
+en la opción «Juegos» del menú de arranque; «Normal» sigue en modo real.
+
+## HSPUSB en modo V86
+
+`HSPUSB` sí funciona con HSPEMM (memorias, teclado, ratón y mandos USB, con
+o sin `/F` y `/U`, y cargado con `DEVICEHIGH`). En modo real llega a los
+registros del xHCI (que están por encima de 1 MB) con el modo «irreal»; en
+modo V86 no puede, y hace esto otro, sin nada especial en HSPEMM:
+
+- **Registros (MMIO)**: cada lectura o escritura es una llamada a
+  **INT 15h AH=87h** con dos palabras, que el monitor atiende (`phys_copy`):
+  mapea la página física en su ventana y hace un único acceso de 32 bits
+  (`MOVSD`), que es lo que piden los registros. Se llama con las
+  interrupciones cerradas y el monitor no se interrumpe, así que vale igual
+  desde el manejador del reloj (INT 08h), que es donde HSPUSB recoge los
+  informes del teclado, el ratón y los mandos.
+- **Direcciones físicas de DMA**: los anillos, los contextos y los búferes
+  están en la memoria del propio driver. Abajo la dirección lineal es la
+  física, pero en un UMB no: HSPUSB pregunta la de cada página por **VCPI
+  (INT 67h AX=DE06h)** cada vez que entrega una dirección al controlador.
+  Nada de lo que entrega cruza una página de 4 KB (la zona está alineada y
+  los datos van en trozos de 4 KB), así que no hace falta que las páginas
+  del UMB sean contiguas.
+- **Páginas de trabajo del xHCI** (los controladores de verdad las piden):
+  salen de XMS, bloqueadas; la memoria de XMS es física = lineal también
+  bajo el monitor. Se ponen a cero y se apuntan con INT 15h AH=87h.
+- El modo se mira en cada entrada al driver: modo real → irreal; V86 con
+  VCPI → lo anterior; V86 sin VCPI (una sesión de MS-DOS de Windows 386
+  mejorado) → no hace nada, como antes.
+
+No depende de HSPEMM: INT 15h AH=87h y VCPI son interfaces estándar, así que
+debería ir igual con otros gestores (EMM386, QEMM), aunque solo se ha probado
+con HSPEMM y en QEMU. Cada acceso a un registro cuesta dos entradas al
+monitor: de sobra para el teclado, el ratón y los mandos; leer una memoria
+USB va algo más lento que en modo real.
 
 ## Diseño
 
@@ -152,6 +194,10 @@ da igual en qué línea esté.
 
 ## Pruebas
 
+- `tests/run_modojuegos_tests.sh`: el menú de arranque y la opción «Juegos»
+  del disquete y de la memoria USB; HSPUSB en modo V86 con una memoria, un
+  teclado, un ratón y un mando USB (también cargado en un UMB y con páginas
+  de trabajo), a la vez que EMS y la Sound Blaster.
 - `tests/run_emm_tests.sh`: EMSTEST, VCPITEST, UMBTEST y EMMMISC
   (`tests/progs/`), opciones, HSPDPMI sobre VCPI, avisos.
 - `tests/run_emmhigh_tests.sh`: `DOS=HIGH,UMB` + HSPEMM + `DEVICEHIGH` + `LH`,

@@ -13,6 +13,20 @@ Arrancar
 Solo probar
   Hispa-DOS arranca desde la memoria USB, que es la unidad C:.
 
+Menu de arranque: Normal o Juegos
+  Al arrancar sale un menu con dos opciones. Se elige con las flechas o
+  con el numero y se pulsa Intro; si no se toca nada, a los 5 segundos
+  arranca "Normal".
+    1. Normal  Lo de siempre: todo el hardware funciona (CD en SATA,
+               sonido HD Audio, Windows).
+    2. Juegos  Para los juegos de MS-DOS: memoria expandida (EMS), VCPI
+               (Doom, Duke Nukem 3D...), memoria superior y la mayor
+               memoria convencional libre. El sonido tiene que ser Sound
+               Blaster (HD Audio no va en este modo) y el CD, IDE.
+  F5 arranca en limpio (sin CONFIG.SYS ni AUTOEXEC.BAT) y F8 deja elegir
+  linea a linea. Para que arranque sola la opcion Juegos, o cambiar la
+  espera: EDITAR C:\CONFIG.SYS y poner MENUDEFAULT=JUEGOS,5
+
 Instalar en el disco duro
   Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);
   si tiene particiones no toca nada. Despues quita la memoria y reinicia.
@@ -63,14 +77,16 @@ USB propio (HSPUSB): raton o panel tactil USB, por ejemplo en un MacBook
   De serie HSPUSB no le quita el USB a la BIOS (arrancando desde la memoria
   USB la BIOS lo esta usando), asi que el teclado sigue como siempre y el
   raton USB solo va si la BIOS lo ofrece.
-  Para que lo lleve HSPUSB: EDITAR C:\CONFIG.SYS, poner REM delante de
+  Para que lo lleve HSPUSB: EDITAR C:\CONFIG.SYS y, en la parte [normal],
+  poner REM delante de
       DEVICE=C:\HISPADOS\HSPUSB.SYS
   y quitar el REM de
       DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO
+  (en la parte [juegos], anadir /U /INFO a la linea DEVICEHIGH de HSPUSB).
   /U    toma el USB de la BIOS y atiende el mismo la memoria de arranque.
         Sirve con controladores xHCI (USB 3). Si algo falla, el equipo se
         puede quedar sin teclado o sin disco hasta reiniciar.
   /INFO ensena el controlador y el arbol de dispositivos y espera 15 s
         (para hacer una foto).
-  Si el teclado no responde: reiniciar y pulsar F5 al ver "Iniciando
-  Hispa-DOS" (arranque limpio, sin CONFIG.SYS) y deshacer el cambio.
+  Si el teclado no responde: reiniciar y pulsar F5 al ver el menu de
+  arranque (arranque limpio, sin CONFIG.SYS) y deshacer el cambio.

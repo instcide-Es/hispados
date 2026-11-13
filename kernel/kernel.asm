@@ -217,6 +217,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
         section .bss nobits follows=.low align=16
         section .ibss nobits follows=.bss align=16
         section .text follows=.low vfollows=.ibss align=16 valign=16
+        section .init follows=.text vstart=INIT_ORG
 ; Disposición (ver «DOS=HIGH» más abajo):
 ;   .low   datos con valor inicial y trozos de entrada: siempre en KSEG
 ;   .bss   datos sin valor inicial: siempre en KSEG, detrás de .low
@@ -229,6 +230,11 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 ;   HRES   datos «altos» sin valor inicial: van detrás del código, en su
 ;          mismo segmento, y se leen con CS:. Solo lo que nadie de fuera
 ;          mira ni la BIOS llena.
+;   .init  código y datos que solo hacen falta al arrancar, antes de repartir
+;          la memoria (el menú de configuraciones de CONFIG.SYS). En el
+;          fichero va detrás de .text; al arrancar se copia a KSEG:INIT_ORG,
+;          por encima de todo lo demás, y ahí se ejecuta (CS = DS = KSEG).
+;          No se queda en la memoria: ni abajo (DOS=LOW) ni en la HMA.
 ; Lo que se mueve junto («la imagen») va de img_start a hbss_end:
 ;   .ibss + .text + HRES. Empieza y acaba con más de 4 KB que ni se ejecutan
 ;   ni se escriben a menudo (por delante .ibss; por detrás los textos del
@@ -244,6 +250,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
+INIT_ORG        equ 0xE000          ; .init, al arrancar (por debajo de BOOT_TMP)
         section .low
 start:
         jmp short .go
@@ -305,6 +312,12 @@ start:
         mov cx, 256
         rep movsw
         mov ds, ax
+        ; el código de arranque (.init), a su sitio: en el fichero está
+        ; donde va a caer el código al subir
+        mov si, section..init.start
+        mov di, INIT_ORG
+        mov cx, init_end - init_start
+        rep movsb
         ; subir el código detrás de la zona .bss (de arriba abajo: se solapan)
         std
         mov si, section..text.start + (text_end - text_start) - 1
@@ -877,7 +890,24 @@ config_load:
         mov bx, ax
         mov byte [cfgbuf+bx], 0
 .choose:
+        mov byte [bm_want], 0
+        mov bx, s_menu              ; ¿CONFIG.SYS con menú ([menu])?
+        call blk_find
+        jc .plain
+        mov byte [boot_clean], 0
+        mov byte [boot_noauto], 0
+        call cfg_switches
+        call cfg_menu               ; elegir y dejar solo las líneas elegidas
+        jmp .f8
+.plain:
         call boot_choice            ; F5 / F8
+.f8:
+        cmp byte [boot_clean], 0
+        jne .scan
+        cmp byte [bm_want], 0
+        je .scan
+        call boot_menu              ; F8: el menú paso a paso
+.scan:
         jmp dos_scan                ; DOS=HIGH
 
 config_run:
@@ -1285,7 +1315,7 @@ tmp_release:
 ;  Arranque: F5 = limpio (sin CONFIG.SYS ni AUTOEXEC.BAT), F8 = menú propio.
 ;  SWITCHES=/N las desactiva y SWITCHES=/F quita la espera, como en MS-DOS.
 ; =============================================================================
-MAXCL       equ 64                  ; líneas de CONFIG.SYS que se pueden desactivar
+MAXCL       equ 160                 ; líneas de CONFIG.SYS que se pueden desactivar
 MAXIT       equ 16                  ; elementos visibles del menú
 BOOT_WAIT   equ 27                  ; ~1,5 s
 
@@ -1338,7 +1368,8 @@ boot_choice:
         jne .r                      ; otra tecla: se queda para después
         xor ah, ah
         int 0x16
-        jmp boot_menu
+        mov byte [bm_want], 1       ; (el menú paso a paso: config_load)
+        ret
 .f5:
         xor ah, ah
         int 0x16
@@ -1403,6 +1434,802 @@ cfg_switches:
         jmp .line
 .r:
         ret
+
+; =============================================================================
+;  Menú de configuraciones de CONFIG.SYS, como en MS-DOS 6.22:
+;
+;       [menu]
+;       MENUITEM=bloque[,texto]         una opción (si el bloque existe)
+;       SUBMENU=bloque[,texto]          otro bloque de menú
+;       MENUDEFAULT=bloque[,segundos]   la opción por omisión y la espera
+;       MENUCOLOR=texto[,fondo]         colores (0-15)
+;       NUMLOCK=ON|OFF
+;       [common]                        líneas para todas las opciones
+;       [bloque]                        líneas de esa opción
+;       INCLUDE=bloque                  las líneas de otro bloque, aquí
+;
+;  Las líneas de antes del primer bloque son comunes. La opción elegida queda
+;  en la variable de entorno CONFIG (para AUTOEXEC.BAT: GOTO %CONFIG%).
+;  En el menú, F5 = arranque limpio y F8 = además, el menú paso a paso.
+;
+;  Todo esto va en la sección .init (ver «Disposición»): no ocupa memoria
+;  después de arrancar.
+;
+;  Se hace antes de repartir la memoria (CS = DS = KSEG): se elige la opción
+;  y se rehace el texto de CONFIG.SYS en cfgbuf solo con las líneas que le
+;  tocan (las demás se dejan vacías, para que los números de línea de los
+;  mensajes de error sigan valiendo; los INCLUDE se sustituyen por las líneas
+;  de su bloque). El resto del arranque (DOS=HIGH, el menú F8, config_run)
+;  no sabe nada de bloques.
+; =============================================================================
+CFG_TMPSEG  equ 0x3000              ; 4 KB de paso: memoria todavía sin dueño
+MN_MAX      equ 9
+MN_ROW      equ 4                   ; fila de la primera opción
+
+        section .init
+init_start:
+; AL: ¿acaba un nombre de bloque? (ZF = 1)
+mn_term:
+        test al, al
+        jz .r
+        cmp al, 13
+        je .r
+        cmp al, 10
+        je .r
+        cmp al, ' '
+        je .r
+        cmp al, 9
+        je .r
+        cmp al, ','
+        je .r
+        cmp al, '='
+        je .r
+        cmp al, ']'
+.r:
+        ret
+mn_up:
+        cmp al, 'a'
+        jb .r
+        cmp al, 'z'
+        ja .r
+        sub al, 32
+.r:
+        ret
+; SI, BX = nombres de bloque: ¿el mismo? (ZF = 1), sin distinguir mayúsculas
+mn_same:
+        push si
+        push bx
+        push ax
+.l:
+        mov al, [si]
+        call mn_term
+        je .e
+        call mn_up
+        mov ah, al
+        mov al, [bx]
+        call mn_up
+        cmp al, ah
+        jne .x
+        inc si
+        inc bx
+        jmp .l
+.e:
+        mov al, [bx]
+        call mn_term
+.x:
+        pop ax
+        pop bx
+        pop si
+        ret
+; SI -> principio de la línea siguiente (o el cero final)
+mn_eol:
+        lodsb
+        test al, al
+        jz .z
+        cmp al, 10
+        jne mn_eol
+        ret
+.z:
+        dec si
+        ret
+; BX = nombre -> SI = la línea que sigue a su cabecera [nombre]; CF si no hay
+blk_find:
+        mov si, cfgbuf
+.line:
+        cmp byte [si], 0
+        je .no
+        call cfg_skip
+        cmp byte [si], '['
+        jne .next
+        inc si
+        call mn_same
+        jne .next
+        call mn_eol
+        clc
+        ret
+.next:
+        call mn_eol
+        jmp .line
+.no:
+        stc
+        ret
+; SI = línea (sin espacios delante), BX = palabra clave en mayúsculas ->
+; CF = 0 y BX = su valor (tras el «=») si la línea es de esa palabra
+mn_kw:
+        push si
+        push ax
+.l:
+        mov ah, [bx]
+        test ah, ah
+        jz .end
+        mov al, [si]
+        call mn_up
+        cmp al, ah
+        jne .no
+        inc si
+        inc bx
+        jmp .l
+.end:
+        mov al, [si]
+        cmp al, '='
+        je .ok
+        cmp al, ' '
+        je .ok
+        cmp al, 9
+        jne .no
+.ok:
+        call cfg_skip
+        cmp byte [si], '='
+        jne .v
+        inc si
+        call cfg_skip
+.v:
+        mov bx, si
+        pop ax
+        pop si
+        clc
+        ret
+.no:
+        pop ax
+        pop si
+        stc
+        ret
+; SI = cifras -> AX = número, SI detrás
+mn_num:
+        push bx
+        xor ax, ax
+.l:
+        mov bl, [si]
+        sub bl, '0'
+        cmp bl, 9
+        ja .r
+        xor bh, bh
+        imul ax, ax, 10
+        add ax, bx
+        inc si
+        jmp .l
+.r:
+        pop bx
+        ret
+; SI = valor -> SI = lo que sigue a la coma (CF si no hay coma)
+mn_comma:
+        mov al, [si]
+        test al, al
+        jz .no
+        cmp al, 13
+        je .no
+        cmp al, 10
+        je .no
+        inc si
+        cmp al, ','
+        jne mn_comma
+        call cfg_skip
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; elegir la opción (con los submenús) y rehacer cfgbuf
+cfg_menu:
+        mov byte [mn_attr], 0x07
+        mov word [mn_blk], s_menu
+.again:
+        call mn_parse
+        mov word [mn_chosen], s_none
+        cmp word [mn_n], 0
+        je .flat                    ; sin opciones: solo lo común
+        call mn_choose
+        cmp byte [boot_clean], 0
+        jne .r
+        mov bx, [mn_sel]
+        mov al, [mn_type+bx]
+        shl bx, 1
+        mov bx, [mn_name+bx]
+        mov [mn_chosen], bx
+        test al, al
+        jz .flat
+        mov [mn_blk], bx            ; un submenú
+        jmp .again
+.flat:
+        call cfg_flatten
+.r:
+        ret
+
+; las opciones del bloque de menú [mn_blk]
+mn_parse:
+        mov word [mn_n], 0
+        mov word [mn_def], 0
+        mov word [mn_tmo], 0xFFFF   ; sin cuenta atrás
+        mov bx, [mn_blk]
+        call blk_find
+        jc .r
+.line:
+        cmp byte [si], 0
+        je .r
+        call cfg_skip
+        cmp byte [si], '['
+        je .r
+        xor dl, dl
+        mov bx, k_menuitem
+        call mn_kw
+        jnc .item
+        inc dl
+        mov bx, k_submenu
+        call mn_kw
+        jnc .item
+        mov bx, k_menudef
+        call mn_kw
+        jnc .def
+        mov bx, k_menucolor
+        call mn_kw
+        jnc .color
+        mov bx, k_numlock
+        call mn_kw
+        jnc .numlock
+.next:
+        call mn_eol
+        jmp .line
+.item:
+        cmp word [mn_n], MN_MAX
+        jae .next
+        mov di, bx                  ; el bloque tiene que existir
+        push si
+        call blk_find
+        pop si
+        jc .next
+        mov bx, [mn_n]
+        mov [mn_type+bx], dl
+        shl bx, 1
+        mov [mn_name+bx], di
+        push si
+        mov si, di
+        call mn_comma
+        jc .notext
+        mov di, si
+.notext:
+        pop si
+        mov [mn_text+bx], di
+        inc word [mn_n]
+        jmp .next
+.def:
+        mov [mn_def], bx
+        push si
+        mov si, bx
+        call mn_comma
+        jc .dn
+        mov al, [si]
+        sub al, '0'
+        cmp al, 9
+        ja .dn
+        call mn_num
+        cmp ax, 90
+        jbe .d90
+        mov ax, 90
+.d90:
+        mov [mn_tmo], ax
+.dn:
+        pop si
+        jmp .next
+.color:
+        push si
+        mov si, bx
+        call mn_num
+        and al, 0x0F
+        mov dl, al
+        call mn_comma
+        jc .c1
+        call mn_num
+        and al, 0x07
+        shl al, 4
+        or dl, al
+.c1:
+        mov al, dl                  ; texto y fondo iguales: no se vería
+        shr al, 4
+        xor al, dl
+        test al, 0x0F
+        jz .c2
+        mov [mn_attr], dl
+.c2:
+        pop si
+        jmp .next
+.numlock:
+        mov al, [bx+1]
+        and al, 0xDF
+        push es
+        push word 0x40
+        pop es
+        cmp al, 'N'
+        jne .nf
+        or byte [es:0x17], 0x20
+.nf:
+        cmp al, 'F'
+        jne .nx
+        and byte [es:0x17], 0xDF
+.nx:
+        pop es
+        jmp .next
+.r:
+        ret
+
+; enseñar el menú y esperar la elección -> mn_sel (o boot_clean con F5)
+mn_choose:
+        mov word [mn_sel], 0
+        mov bx, [mn_def]
+        test bx, bx
+        jz .d0
+        xor cx, cx
+.df:
+        cmp cx, [mn_n]
+        jae .d0
+        mov si, cx
+        shl si, 1
+        mov si, [mn_name+si]
+        call mn_same
+        je .dh
+        inc cx
+        jmp .df
+.dh:
+        mov [mn_sel], cx
+.d0:
+        cmp word [mn_tmo], 0        ; MENUDEFAULT=bloque,0: sin preguntar
+        je .ret
+        call mn_draw
+        call mn_tick
+        mov [mn_t0], ax
+.loop:
+        mov ah, 1
+        int 0x16
+        jnz .key
+        cmp byte [ser_ok], 0        ; la consola por el puerto serie
+        je .tm
+        mov dx, 0x3FD
+        in al, dx
+        test al, 1
+        jz .tm
+        mov dx, 0x3F8
+        in al, dx
+        xor ah, ah
+        cmp al, 10
+        jne .k
+        mov al, 13
+        jmp .k
+.tm:
+        cmp word [mn_tmo], 0xFFFF
+        je .loop
+        call mn_tick
+        sub ax, [mn_t0]
+        cmp ax, 18
+        jb .loop
+        add word [mn_t0], 18
+        dec word [mn_tmo]
+        jz .done
+        call mn_showtime
+        jmp .loop
+.key:
+        xor ah, ah
+        int 0x16
+.k:
+        mov word [mn_tmo], 0xFFFF   ; cualquier tecla para la cuenta atrás
+        test al, al
+        jz .ext
+        cmp al, 0xE0
+        je .ext
+        cmp al, 13
+        je .done
+        sub al, '1'
+        movzx cx, al
+        cmp cx, [mn_n]
+        jae .loop
+        jmp .set
+.ext:
+        mov cx, [mn_sel]
+        cmp ah, 0x48                ; flecha arriba
+        jne .e1
+        jcxz .loop
+        dec cx
+        jmp .set
+.e1:
+        cmp ah, 0x50                ; flecha abajo
+        jne .e2
+        inc cx
+        cmp cx, [mn_n]
+        jae .loop
+        jmp .set
+.e2:
+        test byte [sw_flags], 2     ; SWITCHES=/N: sin F5 ni F8
+        jnz .loop
+        cmp ah, 0x3F                ; F5
+        je .f5
+        cmp ah, 0x42                ; F8
+        jne .loop
+        xor byte [bm_want], 1
+        call mn_showf8
+        jmp .loop
+.set:
+        mov ah, [mn_attr]
+        call mn_hl
+        mov [mn_sel], cx
+        call mn_showsel
+        jmp .loop
+.f5:
+        mov byte [boot_clean], 1
+        call no_autoexec
+.done:
+        mov ax, 0x0003
+        int 0x10
+        mov al, 13                  ; (en la consola serie: línea nueva)
+        call ser_putc
+        mov al, 10
+        call ser_putc
+        cmp byte [boot_clean], 0
+        je .ret
+        mov si, msg_clean
+        call kputs
+.ret:
+        ret
+
+; contador de tics de la BIOS -> AX
+mn_tick:
+        push es
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x46C]
+        pop es
+        ret
+
+mn_draw:
+        mov ax, 0x0003
+        int 0x10
+        mov bh, [mn_attr]
+        cmp bh, 0x07
+        je .nc
+        mov ax, 0x0600              ; toda la pantalla con los colores pedidos
+        xor cx, cx
+        mov dx, 0x184F
+        int 0x10
+.nc:
+        mov si, mn_title
+        call kputs
+        xor cx, cx
+.it:
+        cmp cx, [mn_n]
+        jae .ite
+        mov si, mn_ind
+        call kputs
+        mov al, cl
+        add al, '1'
+        call con_out
+        mov si, mn_dot
+        call kputs
+        mov bx, cx
+        shl bx, 1
+        mov si, [mn_text+bx]
+        mov dx, 66
+.tx:
+        lodsb
+        test al, al
+        jz .txe
+        cmp al, 13
+        je .txe
+        cmp al, 10
+        je .txe
+        call con_out
+        dec dx
+        jnz .tx
+.txe:
+        mov si, msg_crlf
+        call kputs
+        inc cx
+        jmp .it
+.ite:
+        mov si, mn_ask
+        call kputs
+        call mn_getcur
+        mov [mn_cur], dx
+        mov al, ' '
+        call con_out
+        cmp word [mn_tmo], 0xFFFF
+        je .nt
+        mov si, mn_time
+        call kputs
+        call mn_getcur
+        mov [mn_curt], dx
+.nt:
+        test byte [sw_flags], 2
+        jnz .nk
+        mov si, msg_crlf
+        call kputs
+        mov dx, 0x1800
+        call mn_setcur
+        mov si, mn_keys
+        call kputs
+        call mn_getcur
+        sub dl, 2
+        mov [mn_curf], dx
+.nk:
+        cmp word [mn_tmo], 0xFFFF
+        je mn_showsel
+        call mn_showtime
+; marcar la opción elegida y poner su número tras la pregunta
+mn_showsel:
+        mov ah, [mn_attr]
+        ror ah, 4
+        and ah, 0x7F
+        call mn_hl
+        mov al, [mn_sel]
+        add al, '1'
+        mov dx, [mn_cur]
+        ; AL en la posición DX (solo en la pantalla), y el cursor tras la
+        ; pregunta
+mn_at:
+        call mn_setcur
+        push bx
+        push bp
+        mov ah, 0x0E
+        mov bx, 0x0007
+        int 0x10
+        pop bp
+        pop bx
+        mov dx, [mn_cur]
+mn_setcur:
+        push ax
+        push bx
+        push bp
+        mov ah, 2
+        xor bh, bh
+        int 0x10
+        pop bp
+        pop bx
+        pop ax
+        ret
+mn_getcur:
+        push ax
+        push bx
+        push cx
+        push bp
+        mov ah, 3
+        xor bh, bh
+        int 0x10
+        pop bp
+        pop cx
+        pop bx
+        pop ax
+        ret
+mn_showtime:
+        mov ax, [mn_tmo]
+        mov bl, 10
+        div bl
+        push ax
+        add al, '0'
+        mov dx, [mn_curt]
+        call mn_at
+        pop ax
+        mov al, ah
+        add al, '0'
+        mov dx, [mn_curt]
+        inc dl
+        jmp mn_at
+mn_showf8:
+        mov al, 'N'
+        cmp byte [bm_want], 0
+        je .n
+        mov al, 'S'
+.n:
+        mov dx, [mn_curf]
+        jmp mn_at
+; AH = atributo para la fila de la opción mn_sel
+mn_hl:
+        push es
+        push di
+        push cx
+        imul di, [mn_sel], 160
+        add di, MN_ROW * 160 + 2 * 2 + 1
+        mov cx, 0xB800
+        mov es, cx
+        mov cx, 76
+.l:
+        mov [es:di], ah
+        add di, 2
+        loop .l
+        pop cx
+        pop di
+        pop es
+        ret
+
+; rehacer cfgbuf: lo común y el bloque [mn_chosen], con los INCLUDE puestos
+cfg_flatten:
+        push es
+        mov ax, CFG_TMPSEG
+        mov es, ax
+        xor di, di
+        mov byte [mn_act], 1
+        mov si, cfgbuf
+.line:
+        cmp byte [si], 0
+        je .end
+        mov bp, si
+        call cfg_skip
+        cmp byte [si], '['
+        jne .nohdr
+        inc si
+        mov byte [mn_act], 1
+        mov bx, s_common
+        call mn_same
+        je .drop
+        mov bx, [mn_chosen]
+        call mn_same
+        je .drop
+        mov byte [mn_act], 0
+.drop:
+        mov si, bp
+        call mn_eol
+        mov al, 10
+        call cfg_put
+        jmp .line
+.nohdr:
+        cmp byte [mn_act], 0
+        je .drop
+        mov bx, k_include
+        call mn_kw
+        jc .copy
+        mov byte [mn_depth], 0
+        call cfg_incl
+        jmp .drop
+.copy:
+        mov si, bp
+.c:
+        lodsb
+        test al, al
+        jz .ce
+        call cfg_put
+        cmp al, 10
+        jne .c
+        jmp .line
+.ce:
+        dec si
+        mov al, 10
+        call cfg_put
+.end:
+        mov si, [mn_chosen]         ; SET CONFIG=bloque
+        cmp byte [si], 0
+        je .ns
+        mov si, mn_setcfg
+.s1:
+        lodsb
+        test al, al
+        jz .s2
+        call cfg_put
+        jmp .s1
+.s2:
+        mov si, [mn_chosen]
+.s3:
+        lodsb
+        call mn_term
+        je .s4
+        call cfg_put
+        jmp .s3
+.s4:
+        mov al, 10
+        call cfg_put
+.ns:
+        xor al, al
+        stosb
+        mov cx, di
+        push ds
+        push es
+        pop ds
+        pop es
+        xor si, si
+        mov di, cfgbuf
+        rep movsb
+        push es
+        pop ds
+        pop es
+        ret
+cfg_put:
+        cmp di, CFG_MAX - 2
+        jae .r
+        stosb
+.r:
+        ret
+; las líneas del bloque BX (INCLUDE=), con sus propios INCLUDE
+cfg_incl:
+        cmp byte [mn_depth], 4
+        jae .r
+        inc byte [mn_depth]
+        push si
+        push bp
+        call blk_find
+        jc .x
+.line:
+        cmp byte [si], 0
+        je .x
+        mov bp, si
+        call cfg_skip
+        cmp byte [si], '['
+        je .x
+        mov bx, k_include
+        call mn_kw
+        jc .copy
+        call cfg_incl
+        mov si, bp
+        call mn_eol
+        jmp .line
+.copy:
+        mov si, bp
+.c:
+        lodsb
+        test al, al
+        jz .x0
+        call cfg_put
+        cmp al, 10
+        jne .c
+        jmp .line
+.x0:
+        mov al, 10
+        call cfg_put
+.x:
+        pop bp
+        pop si
+        dec byte [mn_depth]
+.r:
+        ret
+
+; ---- textos y variables del menú ----
+s_menu      db "MENU", 0
+s_common    db "COMMON", 0
+s_none      db 0
+k_submenu   db "SUBMENU", 0
+k_menucolor db "MENUCOLOR", 0
+mn_setcfg   db "SET CONFIG=", 0
+mn_title    db 13, 10, "  Men", 0xA3, " de arranque de Hispa-DOS", 13, 10
+            db "  ", 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD
+            db 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 13, 10, 13, 10, 0
+mn_ind      db "    ", 0
+mn_dot      db ". ", 0
+mn_ask      db 13, 10, "  Elija una opci", 0xA2, "n y pulse Intro: ", 0
+mn_time     db "    Tiempo restante: ", 0
+mn_keys     db "F5=Arranque limpio   F8=Men", 0xA3, " paso a paso [N]", 0
+bm_want     db 0                    ; F8: enseñar el menú paso a paso
+mn_act      db 0
+mn_depth    db 0
+mn_attr     db 0
+mn_n        dw 0
+mn_sel      dw 0
+mn_def      dw 0
+mn_tmo      dw 0
+mn_t0       dw 0
+mn_blk      dw 0
+mn_chosen   dw 0
+mn_cur      dw 0
+mn_curt     dw 0
+mn_curf     dw 0
+mn_name     times MN_MAX dw 0
+mn_text     times MN_MAX dw 0
+mn_type     times MN_MAX db 0
+init_end:
+        section .text
 
 ; ---- menú F8 ----
 boot_menu:
@@ -1714,24 +2541,12 @@ bm_draw:
         mov si, bm_s1
         call bm_puts
         mov ax, [bm_count]
-        add al, '0'
-        cmp ax, '9'
-        jbe .n1
-        mov al, '+'
-.n1:
-        mov ah, 0x0A
-        stosw
+        call bm_2dig
         mov si, bm_s2
         call bm_puts
         mov ax, [bm_n]
         inc ax
-        add al, '0'
-        cmp al, '9'
-        jbe .n2
-        mov al, '+'
-.n2:
-        mov ah, 0x0A
-        stosw
+        call bm_2dig
         mov si, bm_s3
         call bm_puts
         ; teclas
@@ -1744,6 +2559,24 @@ bm_draw:
         mov si, bm_keys
         call bm_puts
         pop es
+        ret
+
+; AX = número (hasta 99) -> ES:DI en verde
+bm_2dig:
+        mov bl, 10
+        div bl
+        test al, al
+        jz .u
+        push ax
+        add al, '0'
+        mov ah, 0x0A
+        stosw
+        pop ax
+.u:
+        mov al, ah
+        add al, '0'
+        mov ah, 0x0A
+        stosw
         ret
 
 ; SI = texto (0) -> ES:DI con atributo AH
@@ -2025,7 +2858,8 @@ config_line:
 .r:
         ret
 .section:
-        ; [MENU] no se admite: sus líneas se ignoran; las demás secciones se procesan
+        ; (solo en un CONFIG.SYS con bloques y sin [menu]: si hay menú,
+        ; cfg_menu ya ha dejado solo las líneas de la opción elegida)
         mov byte [cfg_inmenu], 0
         cmp dword [si+1], 'MENU'
         je .menu
@@ -2530,6 +3364,15 @@ cfg_device_do:
         ; el driver no quiere quedarse residente: se descarga sin mensaje
         cmp word [ld_used], 0
         jne .fin
+        ; Con DEVICEHIGH solo se vuelve a probar abajo si el controlador
+        ; dice que lo que le falta es memoria (bit 9, «ocupado», en el
+        ; estado de INIT: lo ponen los de Hispa-DOS). Si no se queda porque
+        ; no encuentra su aparato, cargarlo otra vez solo repetiría sus
+        ; mensajes.
+        test word [dreq+3], 0x0200
+        jnz .dfree
+        mov byte [ld_ok], 1
+.dfree:
         mov es, [ld_seg]
         call mcb_free
         ret
@@ -5812,11 +6655,22 @@ disk_io_raw:
         ; páginas que apuntan a otra RAM): la BIOS trabaja con direcciones
         ; físicas (DMA de la disquetera, controladoras USB/AHCI), así que el
         ; sector pasa por un búfer del núcleo, en memoria convencional.
+        ; Lo mismo si el sector cruza una frontera de 64 KB: el DMA de la
+        ; disquetera no puede (la BIOS da el error 09h). Los búferes del
+        ; núcleo no la cruzan, pero INT 25h/26h y las lecturas directas van
+        ; al búfer del programa, esté donde esté.
         push ax
         mov ax, es
         cmp ax, 0x9FE0
+        jae .bnc
+        shl ax, 4
+        add ax, bx
+        cmp ax, 0xFE00
+        ja .bnc
         pop ax
-        jb .lowbuf
+        jmp .lowbuf
+.bnc:
+        pop ax
         push es
         push bx
         push si
@@ -14008,6 +14862,9 @@ hbss_end    equ text_end + HOFF
         section .low
 low_end:
         times -(((low_end - start) + (bss_end - bss_start) + CFG_MAX + 1024 + (text_end - text_start) + (hbss_end - hbss_start) + 64) > BOOT_TMP) db 0
+        ; .init va por encima de todo eso y por debajo de BOOT_TMP
+        times -(((low_end - start) + (bss_end - bss_start) + CFG_MAX + 1024 + (text_end - text_start) + (hbss_end - hbss_start) + 64) > INIT_ORG) db 0
+        times -((init_end - init_start) > (BOOT_TMP - INIT_ORG)) db 0
         ; los trozos de entrada (código) tienen que caber en la primera
         ; página de 4 KB (hasta KSEG:0900h) y los datos que cambian sin parar
         ; (la SDA, y detrás .bss) tienen que empezar en la siguiente

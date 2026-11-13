@@ -22,7 +22,7 @@ programas de DOS como si fueran el mando clásico del PC, o como teclas.
 
 **Por qué este reparto.** La parte USB va dentro de HSPUSB porque solo él
 puede hablar con el controlador xHCI (sus anillos, sus contextos, el modo
-«irreal», el bucle de eventos del reloj): un segundo programa tendría que
+«irreal» o las llamadas al monitor en modo V86, el bucle de eventos del reloj): un segundo programa tendría que
 repetir o compartir todo eso. El análisis del descriptor de informe (lo más
 voluminoso) va en la parte de inicialización de HSPUSB, que se descarta: en
 la memoria solo queda el «mapa» de cada mando (124 bytes) y la rutina que
@@ -224,9 +224,10 @@ Con un mando de verdad en un puerto de juegos de verdad lo natural es no
 virtualizar (dejar pasar el 201h); el monitor puede saberlo mirando la tabla:
 tipo 3 en el jugador 1.
 
-Hoy HSPUSB no funciona en modo V86 (usa el modo «irreal» para los registros
-del xHCI y lo dice al cargarse), así que con HSPEMM cargado no habrá mandos
-USB hasta que eso se resuelva en HSPUSB; los del puerto de impresora sí.
+HSPUSB funciona también en modo V86 (con HSPEMM cargado llega a los
+registros del xHCI por INT 15h AH=87h; ver [HSPEMM.md](HSPEMM.md), «HSPUSB en
+modo V86»), así que los mandos USB van igual en la opción «Juegos» del menú
+de arranque, lo mismo que los del puerto de impresora.
 
 ## Mandos USB
 

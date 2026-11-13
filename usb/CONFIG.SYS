@@ -1,16 +1,24 @@
 REM CONFIG.SYS de Hispa-DOS
+REM
+REM Al arrancar sale un menú con dos configuraciones. Se elige con las
+REM flechas o con el número, e Intro; si no se toca nada, a los 5 segundos
+REM arranca «Normal». (F5 = arranque limpio, F8 = elegir línea a línea.)
+REM La elegida queda en la variable CONFIG, que mira AUTOEXEC.BAT.
+[menu]
+MENUITEM=NORMAL,Normal
+MENUITEM=JUEGOS,Juegos (memoria expandida EMS y la mayor memoria libre)
+MENUDEFAULT=NORMAL,5
+
+[common]
+REM Memoria extendida (XMS). El núcleo de Hispa-DOS va en la memoria alta
+REM (HMA) en las dos configuraciones: unos 33 KB más de memoria convencional.
 DEVICE=C:\HISPADOS\HSPXMS.SYS
-REM Memoria expandida (EMS), VCPI y memoria superior (UMB), para los juegos y
-REM programas que piden EMS. Quite el REM de las dos lineas. Con HSPEMM el
-REM procesador va en modo V86: no funcionan HSPUSB con /U o /F ni el CD en SATA
-REM (AHCI), y Windows 386 mejorado no arranca con DOS=UMB. Con HSPEMM cargado,
-REM HSPSND /SB (en AUTOEXEC.BAT) da a los juegos una Sound Blaster 16 emulada
-REM sobre el sonido HD Audio o AC'97 del equipo.
-REM DEVICE=C:\HISPADOS\HSPEMM.SYS
-REM DOS=UMB
-REM El núcleo de Hispa-DOS, en la memoria alta (HMA): deja unos 33 KB más de
-REM memoria convencional. Necesita HSPXMS (la línea de arriba).
+
+[normal]
+REM ---- Normal: el procesador en modo real. Todo el hardware funciona
+REM (CD en SATA, sonido HD Audio, Windows en modo 386 mejorado). ----
 DOS=HIGH
+REM Lectores de CD/DVD (IDE y SATA):
 DEVICE=C:\HISPADOS\HSPCD.SYS
 REM USB propio (memorias, teclado, ratón y mandos de juego USB, también detrás
 REM de concentradores).
@@ -20,8 +28,29 @@ DEVICE=C:\HISPADOS\HSPUSB.SYS
 REM Para que HSPUSB lleve el USB (ratón o panel táctil USB, por ejemplo en un
 REM MacBook) ponga REM en la línea de arriba y quítelo de la de abajo. /U toma
 REM el USB de la BIOS y atiende él esta memoria; /INFO enseña lo que encuentra.
-REM Si el teclado dejara de ir: reinicie y pulse F5 al ver «Iniciando Hispa-DOS».
+REM Si el teclado dejara de ir: reinicie y pulse F5 al ver el menú de arranque.
 REM DEVICE=C:\HISPADOS\HSPUSB.SYS /U /INFO
+
+[juegos]
+REM ---- Juegos: como un PC de los 90 preparado para jugar. HSPEMM da memoria
+REM expandida (EMS), VCPI (DOS/4GW: Doom, Duke Nukem 3D...) y memoria
+REM superior (UMB), donde se cargan los controladores para dejar libre la
+REM memoria convencional. El procesador va en modo V86: no funciona el CD
+REM en SATA (AHCI), y Windows en modo 386 mejorado no arranca (use
+REM «Normal»). HSPUSB sí funciona. En los equipos sin Sound Blaster (HD
+REM Audio o AC'97), HSPSND /SB (en AUTOEXEC.BAT) da a los juegos una Sound
+REM Blaster 16 con AdLib emulada. ----
+DEVICE=C:\HISPADOS\HSPEMM.SYS
+DOS=HIGH,UMB
+DEVICEHIGH=C:\HISPADOS\HSPCD.SYS
+DEVICEHIGH=C:\HISPADOS\HSPUSB.SYS
+REM Para los mandos de juego USB, HSPUSB tiene que llevar el USB: añada /F a
+REM la línea de arriba (ver las notas de la configuración «Normal»).
+REM Para tener más memoria superior puede probar a añadir I=E000-EFFF a la
+REM línea de HSPEMM (hasta 64 KB más, si el equipo tiene esa zona vacía). Si
+REM después algo falla al arrancar, quítelo (F5 arranca en limpio).
+
+[common]
 NUMLOCK=ON
 FILES=30
 BUFFERS=20

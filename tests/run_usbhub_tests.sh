@@ -224,6 +224,8 @@ rm -rf $T
 for MODE in serie U; do
   T=$(mktemp -d)
   cp "$USBIMG" $T/usb.img
+  # (el menú de arranque de CONFIG.SYS, sin espera: opción «Normal»)
+  tests/tools/sinmenu.sh $T/usb.img || fail=1
   # sin TECLADO SP: las teclas de QEMU son las del teclado americano
   printf '@ECHO OFF\r\nPROMPT $P$G\r\nPATH C:\\HISPADOS\r\n' > $T/AUTOEXEC.BAT
   mcopy -o -i $T/usb.img@@1048576 $T/AUTOEXEC.BAT ::AUTOEXEC.BAT

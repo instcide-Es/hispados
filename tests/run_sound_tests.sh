@@ -195,6 +195,8 @@ echo "== Hispa-DOS volume tests (imagen USB, Intel HD Audio) =="
 if [ -f $USBIMG ]; then
   T=$(mktemp -d)
   cp $USBIMG $T/usb.img
+  # (el menú de arranque de CONFIG.SYS, sin espera: opción «Normal»)
+  tests/tools/sinmenu.sh $T/usb.img
   {
     sleep 9
     printf 'SONIDO\r'; sleep 1

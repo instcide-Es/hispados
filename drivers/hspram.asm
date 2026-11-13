@@ -253,7 +253,10 @@ init:
         int 0x21
         pop bx
         pop ds
-        jmp done
+        ; (estado «ocupado»: lo que falta es memoria; con DEVICEHIGH el
+        ; núcleo lo vuelve a intentar en la memoria convencional)
+        mov word [bx+3], 0x0300
+        jmp exit
 .fits:
         mov [cs:kb], dx
         shl dx, 1

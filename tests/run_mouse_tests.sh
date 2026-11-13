@@ -248,6 +248,8 @@ t_imgusb() {
   echo "== Hispa-DOS ratón (imagen USB, AUTOEXEC.BAT) =="
   if [ ! -f "$USBIMG" ]; then echo "  FAIL falta $USBIMG (make usb)"; fail=1; rm -rf $T; return; fi
   cp "$USBIMG" $T/usb.img
+  # (el menú de arranque de CONFIG.SYS, sin espera: opción «Normal»)
+  tests/tools/sinmenu.sh $T/usb.img || cfail=1
   mcopy -o -i $T/usb.img@@$((2048*512)) build/MOUSETST.COM ::HISPADOS/MOUSETST.COM || cfail=1
   g_imgusb | timeout 50 qemu-system-i386 -display none -serial stdio \
       -monitor unix:$T/mon,server,nowait -device qemu-xhci,id=xhci \

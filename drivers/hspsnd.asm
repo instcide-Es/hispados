@@ -27,6 +27,11 @@
 ;  que le mapea los registros en una página de su propia memoria (hda_wseg);
 ;  bajo otros EMM386 no.
 ;
+;  Con LH: si los búferes de DMA (van detrás del código residente) no caben
+;  en el bloque de memoria superior, el programa se carga otra vez a sí mismo
+;  en la memoria convencional (fit_check; la opción interna /~ es de esa
+;  segunda copia).
+;
 ;  API: INT 2Fh AX=D700h -> AL=FFh si está instalado, ES:BX = punto de entrada
 ;  (llamada lejana, AH = función):
 ;    00h información  -> AL = tarjeta (0 ninguna, 1 Sound Blaster,
@@ -2233,7 +2238,33 @@ sbemu_end:
 ;  Instalación (lo que sigue se descarta)
 ; =============================================================================
 init:
+        ; Cargado con LH en un bloque de memoria superior pequeño, los
+        ; bloques de DMA (que van detrás del código residente) pueden no
+        ; caber: antes de escribir nada, si los de la Sound Blaster no caben,
+        ; el programa se vuelve a cargar a sí mismo en la memoria
+        ; convencional. (Sin esto pisaba lo que hubiera detrás de su bloque:
+        ; la cadena de bloques de memoria, y el sistema se detenía.)
+        call sb_layout
+        call fit_check
+        ; (la copia que se carga abajo lleva la opción interna /~: el
+        ; intérprete, a quien hay que ponerle BLASTER, es su abuelo; con
+        ; /~~, además, el título ya está puesto y no lo repite)
+        mov si, 0x81
+.tl:
+        lodsb
+        cmp al, 13
+        je .title
+        cmp al, '~'
+        jne .tl
+        mov byte [relaunched], 1
+        cmp byte [si], '~'
+        je .notitle
+.title:
         mov si, msg_title
+        call puts
+.notitle:
+        mov byte [title_done], 1
+        mov si, msg_empty
         call puts
         call parse_opts
         cmp byte [opt_help], 0
@@ -2271,6 +2302,9 @@ init:
         call sb_install
         jmp .install
 .pci:
+        ; (los búferes de HD Audio y AC'97 son mayores: ¿caben?)
+        call layout
+        call fit_check
         ; ¿hay BIOS PCI?
         mov ax, 0xB101
         xor edi, edi
@@ -2814,6 +2848,7 @@ parse_opts:
         ret
 o_nosb:
         mov byte [opt_nosb], 1
+o_tilde:
         ret
 o_sb:
         mov byte [opt_sb], 1
@@ -2887,7 +2922,8 @@ o_eapd:
 
 opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb, o_sb
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
-            dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, 0
+            dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde, 0
+k_tilde     db "~", 0
 k_nosb      db "NOSB", 0
 k_sb        db "SB", 0
 k_nogpio    db "NOGPIO", 0
@@ -3762,7 +3798,128 @@ pr_m2       db 0
 pr_old      dd 0
 
 ; instalar: bloques alineados, IRQ y BLASTER en el entorno
+; ¿Cabe lo que va a quedar residente (hasta tsr_end) en el bloque de memoria
+; del programa (de CS:0 al párrafo que dice el PSP en 0002h)? Si no cabe y
+; el programa está en la memoria superior (LH), se carga otra vez a sí mismo
+; en la convencional y termina con su resultado; si ya está abajo, no hay
+; memoria: lo dice y termina.
+fit_check:
+        mov ax, [0x0002]
+        mov bx, cs
+        sub ax, bx                  ; párrafos del bloque
+        mov bx, [tsr_end]
+        add bx, 15
+        jc .no
+        shr bx, 4
+        cmp bx, ax
+        ja .no
+        ret
+.no:
+        mov ax, cs
+        cmp ax, 0xA000
+        jb .nomem
+        ; estrategia de reserva: abajo, y sin enlazar la memoria superior
+        mov ax, 0x5801
+        xor bx, bx
+        int 0x21
+        mov ax, 0x5803
+        xor bx, bx
+        int 0x21
+        ; el nombre del programa: detrás del entorno (00 00, una palabra)
+        mov es, [0x2C]
+        xor di, di
+.e:
+        cmp word [es:di], 0
+        je .f
+        inc di
+        cmp di, 0x7FF0
+        jb .e
+        jmp .nomem
+.f:
+        add di, 4
+        ; la misma línea de órdenes, con /~ (o /~~ si el título ya está puesto)
+        push es
+        push di
+        push cs
+        pop es
+        mov si, 0x80
+        mov di, rl_tail
+        movzx cx, byte [si]
+        cmp cx, 120
+        jbe .tk
+        mov cx, 120
+.tk:
+        inc si
+        mov bx, di
+        inc di
+        rep movsb
+        mov ax, ' /'
+        stosw
+        mov al, '~'
+        stosb
+        cmp byte [title_done], 0
+        je .tn
+        stosb
+.tn:
+        mov ax, di
+        sub ax, bx
+        dec ax
+        mov [bx], al
+        mov byte [di], 13
+        pop di
+        pop es
+        mov word [rl_pb], 0         ; el mismo entorno
+        mov word [rl_pb+2], rl_tail
+        mov [rl_pb+4], cs
+        mov word [rl_pb+6], 0x5C
+        mov [rl_pb+8], cs
+        mov word [rl_pb+10], 0x6C
+        mov [rl_pb+12], cs
+        mov [rl_sp], sp
+        mov dx, di
+        push es
+        pop ds
+        push cs
+        pop es
+        mov bx, rl_pb
+        mov ax, 0x4B00
+        int 0x21
+        cli
+        mov bx, cs
+        mov ss, bx
+        mov sp, [cs:rl_sp]
+        sti
+        mov ds, bx
+        mov es, bx
+        cld
+        jc .nomem
+        mov ah, 0x4D
+        int 0x21
+        mov ah, 0x4C
+        int 0x21
+.nomem:
+        cmp byte [title_done], 0
+        jne .nm2
+        mov si, msg_title
+        call puts
+.nm2:
+        mov si, msg_nofit
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+rl_sp       dw 0
+rl_pb       times 14 db 0
+rl_tail     times 128 db 0
+title_done  db 0
+relaunched  db 0
+msg_empty   db 0
+msg_nofit   db "No hay memoria suficiente para cargar HSPSND.", 13, 10, 0
+
 sb_install:
+        call sb_layout
+        jmp sb_install2
+; bloques de DMA de la Sound Blaster -> buf_off, tsr_end
+sb_layout:
         ; bloques (16 KB) justo detrás del código residente, salvo que así
         ; crucen una frontera de 64 KB (la DMA del ISA no puede): entonces
         ; empiezan en la frontera. (Antes se alineaban a 16 KB: se perdían
@@ -3785,6 +3942,8 @@ sb_install:
         mov [buf_off], ax
         add ax, 4 * SB_BLK
         mov [tsr_end], ax
+        ret
+sb_install2:
         ; (sin tocar aún los bloques: pueden estar encima de este código;
         ; sb_tsr los deja en silencio al final)
         call sb_reset
@@ -3919,11 +4078,18 @@ sb_set_blaster:
         add di, 4
         sub di, bl_text
         mov [bl_len], di            ; con el cero
-        ; entorno del padre
+        ; entorno del padre (o del abuelo: fit_check)
         mov ax, [0x16]
         test ax, ax
         jz .fail
         mov es, ax
+        cmp byte [relaunched], 0
+        je .par
+        mov ax, [es:0x16]
+        test ax, ax
+        jz .fail
+        mov es, ax
+.par:
         mov ax, [es:0x2C]
         test ax, ax
         jz .fail

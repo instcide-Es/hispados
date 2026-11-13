@@ -8,6 +8,8 @@ cd "$(dirname "$0")/.."
 USBIMG=${1:-build/hispados-usb.img}
 T=$(mktemp -d)
 cp "$USBIMG" $T/usb.img
+# (el menú de arranque de CONFIG.SYS, sin espera: opción «Normal»)
+tests/tools/sinmenu.sh $T/usb.img || exit 1
 dd if=/dev/zero of=$T/hdd.img bs=1M count=64 status=none
 USBDEV="-device qemu-xhci,id=xhci -drive if=none,id=usbd,format=raw,file=$T/usb.img -device usb-storage,bus=xhci.0,drive=usbd,bootindex=0"
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }

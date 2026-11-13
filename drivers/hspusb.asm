@@ -47,8 +47,14 @@
 ;     siguiente (lo que dure su intervalo, 10 ms como mucho, medido con
 ;     MFINDEX) para entregar un estado reciente y no el de hace un tic.
 ;  Los informes del teclado y del ratón se recogen con la interrupción del
-;  reloj (INT 08h). Usa el modo real "irreal" para los registros del xHCI, así
-;  que no funciona en modo V86 (EMM386, Windows en modo extendido).
+;  reloj (INT 08h). En modo real usa el modo "irreal" para los registros del
+;  xHCI. En modo V86 con un gestor de memoria que dé VCPI (HSPEMM, EMM386) no
+;  puede (el límite de los segmentos es de 64 KB y la dirección lineal no es
+;  la física): entonces llega a los registros con INT 15h AH=87h (un acceso de
+;  32 bits por llamada; lo atiende el monitor) y pregunta la dirección física
+;  de sus anillos y contextos por VCPI (INT 67h AX=DE06h), página a página,
+;  de modo que también vale cargado en la memoria superior (DEVICEHIGH).
+;  En V86 sin VCPI (Windows en modo 386 mejorado) no funciona.
 ;
 ;  Concentradores (USB 2.0 cap. 11, xHCI 4.5/6.2.2): descriptor de
 ;  concentrador, Configure Endpoint con Hub = 1, número de puertos y TT Think
@@ -203,12 +209,18 @@ interrupt:
         shl eax, 4
         add eax, gdt_tbl
         mov [cs:gdtr+2], eax
+        call io_mode
         call unreal
         call a20_open
         lds bx, [cs:req]
         mov al, [bx+2]
         cmp al, 0
         je init
+        cmp byte [cs:iomode], 2     ; V86 sin VCPI: no se llega al xHCI
+        jne .can
+        mov word [bx+3], 0x8102     ; unidad no preparada
+        jmp .out
+.can:
         cmp al, 1
         je .media
         cmp al, 2
@@ -375,10 +387,10 @@ int13:
         mov al, [cs:busy]
         push ax
         mov byte [cs:busy], 1
-        smsw ax
-        test al, 1
-        jz .rm
-        mov ah, 0x80                ; modo V86: no se puede
+        call io_mode
+        cmp byte [cs:iomode], 2
+        jne .rm
+        mov ah, 0x80                ; modo V86 sin VCPI: no se puede
         jmp .ret
 .rm:
         call unreal
@@ -1256,15 +1268,128 @@ a20_test:
 a20_depth   db 0
 a20_closed  db 0
 
-; ESI = dirección absoluta
-mrd:
-        mov eax, [fs:esi]
-        ret
-mwr:
-        mov [fs:esi], eax
+; ---- modo V86 (HSPEMM, EMM386) ----
+; iomode: cómo se llega a los registros del xHCI y a la memoria física.
+;   0  modo real: modo irreal (FS con límite de 4 GB); lineal = física
+;   1  modo V86 con VCPI: INT 15h AH=87h y INT 67h AX=DE06h
+;   2  modo V86 sin VCPI (Windows 386 mejorado): no se puede
+; Se mira en cada entrada al driver (io_mode): Windows apaga y enciende el
+; modo V86 de HSPEMM.
+iomode      db 0
+            align 4
+io_val      dd 0
+; tabla de descriptores de INT 15h AH=87h: origen en +10h y destino en +18h
+i15_tbl     times 16 db 0
+            dw 0xFFFF, 0, 0x9300, 0
+            dw 0xFFFF, 0, 0x9300, 0
+            times 16 db 0
+
+io_mode:
+        push eax
+        push ebx
+        push ds
+        mov byte [cs:iomode], 0
+        smsw ax
+        test al, 1
+        jz .r
+        mov byte [cs:iomode], 2
+        xor ax, ax
+        mov ds, ax
+        cmp dword [0x67*4], 0
+        je .r
+        mov ax, 0xDE00              ; ¿VCPI?
+        int 0x67
+        test ah, ah
+        jnz .r
+        mov byte [cs:iomode], 1
+.r:
+        pop ds
+        pop ebx
+        pop eax
         ret
 
-; CS:BX -> EAX física
+; copiar CX palabras de la dirección física ESI a la EDI (modo V86). Las
+; direcciones del primer mega son las lineales (las que ve el programa). Con
+; CX = 2 es un solo acceso de 32 bits: vale para los registros.
+pcopy:
+        pushf
+        cli
+        push eax
+        push si
+        push es
+        mov [cs:i15_tbl+0x12], esi
+        mov eax, esi
+        shr eax, 24
+        mov byte [cs:i15_tbl+0x15], 0x93
+        mov byte [cs:i15_tbl+0x16], 0
+        mov [cs:i15_tbl+0x17], al
+        mov [cs:i15_tbl+0x1A], edi
+        mov eax, edi
+        shr eax, 24
+        mov byte [cs:i15_tbl+0x1D], 0x93
+        mov byte [cs:i15_tbl+0x1E], 0
+        mov [cs:i15_tbl+0x1F], al
+        push cs
+        pop es
+        mov si, i15_tbl
+        mov ah, 0x87
+        int 0x15
+        pop es
+        pop si
+        pop eax
+        popf
+        ret
+
+; EAX = dirección lineal de CS:io_val
+io_lin:
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        add eax, io_val
+        ret
+
+; ESI = dirección absoluta
+mrd:
+        cmp byte [cs:iomode], 0
+        jne .v
+        mov eax, [fs:esi]
+        ret
+.v:
+        push edi
+        push cx
+        call io_lin
+        mov edi, eax
+        mov cx, 2
+        call pcopy
+        mov eax, [cs:io_val]
+        pop cx
+        pop edi
+        ret
+mwr:
+        cmp byte [cs:iomode], 0
+        jne .v
+        mov [fs:esi], eax
+        ret
+.v:
+        push eax
+        push esi
+        push edi
+        push cx
+        mov edi, esi
+        mov [cs:io_val], eax
+        call io_lin
+        mov esi, eax
+        mov cx, 2
+        call pcopy
+        pop cx
+        pop edi
+        pop esi
+        pop eax
+        ret
+
+; CS:BX -> EAX física. En modo V86 la lineal no es la física (el driver
+; puede estar en la memoria superior): se pregunta página a página por VCPI.
+; Nada de lo que se entrega al controlador cruza una página de 4 KB.
 phys:
         push ebx
         movzx ebx, bx
@@ -1272,6 +1397,23 @@ phys:
         mov ax, cs
         shl eax, 4
         add eax, ebx
+        cmp byte [cs:iomode], 1
+        jne .r
+        push ecx
+        push edx
+        mov ebx, eax
+        mov ecx, eax
+        shr ecx, 12
+        mov edx, eax
+        mov ax, 0xDE06
+        int 0x67
+        mov eax, edx
+        and eax, 0xFFFFF000
+        and ebx, 0xFFF
+        or eax, ebx
+        pop edx
+        pop ecx
+.r:
         pop ebx
         ret
 
@@ -2530,11 +2672,13 @@ int08:
         push ds
         push es
         push fs
-        smsw ax
-        test al, 1
-        jnz .out                    ; modo V86: no se puede
+        call io_mode
+        cmp byte [cs:iomode], 1
+        je .v86                     ; modo V86 con VCPI: sin modo irreal
+        ja .out                     ; modo V86 sin VCPI: no se puede
         sgdt [cs:sv_gdtr]
         call unreal
+.v86:
         call a20_open
 .ev:
         call get_event
@@ -2579,6 +2723,8 @@ int08:
         call send_key
 .g:
         call a20_restore
+        cmp byte [cs:iomode], 0
+        jne .out
         cli
         lgdt [cs:sv_gdtr]
 .out:
@@ -2660,6 +2806,42 @@ init:
 .optd:
         pop bx
         pop ds
+        ; ¿Cabe la zona de trabajo (anillos, contextos y búferes, tras el
+        ; fichero) en la memoria que nos dan? El núcleo deja el final de la
+        ; memoria disponible en el campo de la dirección de corte (como
+        ; MS-DOS 5+). Con DEVICEHIGH en un bloque de memoria superior
+        ; pequeño no cabe: sin tocar nada se dice «no me quedo, me falta
+        ; memoria» (estado «ocupado») y el núcleo lo carga abajo.
+        mov cx, [bx+0x0E]
+        or cx, [bx+0x10]
+        jz .mok                     ; (un DOS que no lo dice)
+        movzx eax, word [bx+0x10]
+        shl eax, 4
+        movzx ecx, word [bx+0x0E]
+        add eax, ecx                ; final de la memoria disponible
+        xor ecx, ecx
+        mov cx, cs
+        shl ecx, 4
+        add ecx, file_end + 4095
+        and ecx, 0xFFFFF000
+        add ecx, MEM_SIZE           ; final de la zona
+        cmp ecx, eax
+        jbe .mok
+        mov byte [bx+0x0D], 0
+        mov word [bx+0x0E], 0
+        mov [bx+0x10], cs
+        mov word [bx+3], 0x0300
+        mov ax, cs
+        cmp ax, 0xA000
+        jae interrupt.out           ; arriba: sin mensajes, se probará abajo
+        push cs
+        pop ds
+        mov si, msg_title
+        call puts
+        mov si, msg_nomem
+        call puts
+        jmp interrupt.out
+.mok:
         push cs
         pop ds
         mov si, msg_title
@@ -3175,9 +3357,8 @@ edd_buf     times 0x4A db 0
 ; ---- encontrar e inicializar el controlador xHCI ----
 xhci_setup:
         mov word [fail_msg], msg_nox
-        smsw ax
-        test al, 1
-        jz .rm
+        cmp byte [iomode], 2
+        jne .rm
         mov word [fail_msg], msg_v86
         stc
         ret
@@ -3523,6 +3704,8 @@ scratch_setup:
         and edx, 0xFFFFF000
         mov [scr_base], edx
         call unreal                 ; (A20 ya está abierta: a20_open)
+        cmp byte [iomode], 0
+        jne .v86
         mov edi, [scr_base]
         movzx ecx, word [n_scratch]
         add ecx, 2
@@ -3544,6 +3727,39 @@ scratch_setup:
         add eax, 0x1000
         dec ecx
         jnz .t
+        jmp .tab
+.v86:
+        ; modo V86: lo mismo con INT 15h AH=87h. Las páginas se ponen a
+        ; cero copiando la zona DATA (4 KB, todavía a cero) y la tabla se
+        ; escribe palabra a palabra. La memoria de XMS es física = lineal.
+        mov bx, DATA
+        call zone
+        xor esi, esi
+        mov si, cs
+        shl esi, 4
+        movzx ebx, bx
+        add esi, ebx
+        mov edi, [scr_base]
+        mov cx, [n_scratch]
+        add cx, 2
+.vz:
+        push cx
+        mov cx, 0x800
+        call pcopy
+        pop cx
+        add edi, 0x1000
+        loop .vz
+        mov esi, [scr_base]
+        mov edx, esi
+        add edx, 0x2000
+        mov cx, [n_scratch]
+.vt:
+        mov eax, edx
+        call mwr
+        add esi, 8
+        add edx, 0x1000
+        loop .vt
+.tab:
         mov bx, DCBAA
         call zone
         mov eax, [scr_base]
@@ -5396,8 +5612,9 @@ msg_drv     db "?:", 13, 10, 0
 msg_no8042  db "Sin controlador de teclado (8042): las teclas van al búfer de la BIOS.", 13, 10, 0
 msg_scratch db "El controlador xHCI necesita memoria extendida: cargue HSPXMS.SYS", 13, 10
             db "antes que HSPUSB.SYS en CONFIG.SYS.", 13, 10, 0
+msg_nomem   db "No hay memoria suficiente para HSPUSB.", 13, 10, 0
 msg_nox     db "No se ha encontrado ningún controlador xHCI (USB 3).", 13, 10, 0
-msg_v86     db "No funciona con EMM386 (modo V86).", 13, 10, 0
+msg_v86     db "No funciona en modo V86 sin VCPI (Windows 386 mejorado).", 13, 10, 0
 msg_high    db "Los registros del xHCI están por encima de 4 GB: no se admite.", 13, 10, 0
 msg_bios    db "La BIOS está usando el controlador USB (teclado USB o unidad de", 13, 10
             db "arranque): no se toca. Use /F para tomarlo igualmente.", 13, 10, 0

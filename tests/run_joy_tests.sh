@@ -503,6 +503,8 @@ if quiere imagen; then
   else
     T=$(mktemp -d)
     cp $B/hispados-disquete.img $T/f.img
+    # (el menú de arranque de CONFIG.SYS, sin espera: opción «Normal»)
+    tests/tools/sinmenu.sh $T/f.img
     cfail=0
     echo "== Hispa-DOS mandos de juego (imagen) =="
     arranca

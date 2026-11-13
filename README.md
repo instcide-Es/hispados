@@ -93,6 +93,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Teclado y ratón USB nativos (HID) y ratón PS/2 y touchpads de portátil (`HSPRATON`, INT 33h: por la BIOS o, si no lo ofrece, directamente por el controlador 8042; `HSPRATON /INFO` enseña el diagnóstico y `/BIOS` o `/DIRECTO` fuerzan la vía) | ✅ |
 | Mandos de juego: `HSPJOY` y `MANDO`. USB (HID genéricos, con su descriptor de informe, y tipo Xbox 360, por `HSPUSB`), puerto de juegos analógico (201h, con calibración) y mandos de NES, Super Nintendo, PlayStation, Mega Drive y joysticks Atari/Commodore por el puerto de impresora con un cable casero. Los juegos los ven por INT 15h 84h o como teclas (`MANDO.INI`). Ver [docs/MANDOS.md](docs/MANDOS.md) | ✅ en pruebas (falta hardware real) |
 | CD/DVD también en SATA (AHCI); menú de arranque propio con F5 y F8 | ✅ |
+| Menú de configuraciones en `CONFIG.SYS` (`[menu]`, `MENUITEM`, `SUBMENU`, `MENUDEFAULT`, `MENUCOLOR`, `[common]`, `INCLUDE`, variable `CONFIG`) y opción «Juegos» en el disquete y la memoria USB | ✅ en pruebas |
 | SHARE en el núcleo (bloqueos y modos de compartición) | ✅ |
 | Sistema en `\HISPADOS` con nombres en español y `ALIAS.INI` con los clásicos (EDIT, FORMAT, XCOPY…) | ✅ |
 | Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
@@ -103,6 +104,27 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | **Sound Blaster 16 emulada** (`HSPSND /SB`, con HSPEMM) para que los juegos de DOS suenen en equipos con solo HD Audio o AC'97: DSP, DMA, IRQ, mezclador y FM AdLib (OPL2). Ver [docs/HSPSB.md](docs/HSPSB.md) | ✅ en pruebas (QEMU; falta hardware real y los juegos en modo protegido) |
 | **Hispa-Nes**: la primera de las consolas de cada época. Emulador propio (código de sala limpia), compatible con los cartuchos de la NES en formato iNES: procesador 6502 completo, imagen por líneas, sonido por HSPSND, teclado y mandos de HSPJOY, cartuchos de los tipos 0, 1, 2, 3, 4, 7 y 66 y partidas con pila en archivos .SAV. Es un módulo de Hispa Ventanas (`HISPANES.HVP`) y trae un juego nuestro, Cometas (`HISPA1.NES`), escrito en ensamblador de 6502 y ensamblado aquí (`tools/asm6502.py`). Las ROM comerciales no van en el proyecto. Ver [docs/HISPANES.md](docs/HISPANES.md) | ✅ en pruebas (falta probarlo en equipos de verdad) |
 | EHCI/UHCI, vídeo VESA y red TCP/IP | 🔜 ver hoja de ruta |
+
+## Arranque: «Normal» o «Juegos»
+
+El disquete y la memoria USB arrancan con un menú (el de `CONFIG.SYS` de MS-DOS 6.22: `[menu]`, `MENUITEM`, `MENUDEFAULT`, `[common]`, `INCLUDE`…):
+
+```
+  Menú de arranque de Hispa-DOS
+  ═════════════════════════════
+
+    1. Normal
+    2. Juegos (memoria expandida EMS y la mayor memoria libre)
+
+  Elija una opción y pulse Intro: 1    Tiempo restante: 05
+```
+
+| Opción | Qué carga |
+|---|---|
+| **Normal** (la de siempre; arranca sola a los 5 segundos) | El procesador en modo real: `HSPXMS`, `DOS=HIGH`, `HSPCD`, `HSPUSB`. Todo el hardware funciona (CD en SATA, HD Audio, Windows en modo 386 mejorado). |
+| **Juegos** | Como un PC de los 90 preparado para jugar: `HSPXMS` + `HSPEMM` (EMS, VCPI para DOS/4GW y memoria superior), `DOS=HIGH,UMB`, `DEVICEHIGH` para `HSPCD` y `HSPUSB`, y `LH` para `HSPSND` (pone `BLASTER`), `HSPJOY`, `HSPRATON` y el teclado. `HSPUSB` funciona también así (memorias, teclado, ratón y mandos USB). No funcionan el CD en SATA ni HD Audio (ver [docs/HSPEMM.md](docs/HSPEMM.md)). |
+
+Se elige con las flechas o el número, e Intro. **F5** arranca en limpio y **F8** enseña además el menú paso a paso de la opción elegida. La opción queda en la variable `CONFIG`, y `AUTOEXEC.BAT` carga lo de cada una (`IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS`). Para cambiar la opción por omisión o la espera: `MENUDEFAULT=JUEGOS,10` en `CONFIG.SYS`.
 
 ## Sonido y volumen
 

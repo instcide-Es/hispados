@@ -369,6 +369,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM
 	DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
+	tests/run_modojuegos_tests.sh $(IMG)
 	EMM=1 tests/run_dpmi_tests.sh $(IMG)
 	EMM=1 DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	EMM=1 tests/run_sound_tests.sh $(IMG)

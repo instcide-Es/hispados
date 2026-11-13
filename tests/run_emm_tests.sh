@@ -8,7 +8,7 @@
 #  2. NOEMS y tamaño: sin EMS (dispositivo EMMQXXX0) pero con VCPI; sin UMB en
 #     uso, «Windows» apaga y enciende el modo V86.
 #  3. FRAME=, X= y NOUMB; sin HSPXMS y cargado dos veces.
-#  4. HSPDPMI como cliente VCPI (DPMI16 y DPMI32), HSPCD y HSPUSB con aviso.
+#  4. HSPDPMI como cliente VCPI (DPMI16 y DPMI32), HSPCD y HSPUSB (que también funciona).
 # HSPEMM test: V86 monitor, EMS, VCPI, UMB.
 set -u
 cd "$(dirname "$0")/.."
@@ -125,7 +125,9 @@ check "DPMI32 terminado, fallos: 00"
 check "EMS test OK"
 check "HSPDPMI: descargado; la memoria queda libre."
 check "VCPI test OK"
-check "No funciona con EMM386 (modo V86)."
+# HSPUSB funciona también en modo V86 (tests/run_modojuegos_tests.sh)
+check "Controlador xHCI en "
+checkn "No funciona"
 checkn "error interno"
 
 rm -rf $T
