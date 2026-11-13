@@ -76,6 +76,9 @@ $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# AUDICION: prueba de sonido con preguntas de sí o no (docs/AUDICION.md)
+$(B)/AUDICION.COM: utils/audicion.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/INSTALAR.COM: utils/instalar.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EDIT.COM: utils/edit.asm | $(B)
@@ -83,6 +86,10 @@ $(B)/EDIT.COM: utils/edit.asm | $(B)
 $(B)/GESTOR.COM: utils/gestor.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SYSINFO.COM: utils/sysinfo.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+# EQUIPO: informe del hardware en texto; DIAGNOSTICO (sistema/DIAGNOST.BAT) lo
+# guarda con lo demás en INFORME.TXT (tests/run_equipo_tests.sh)
+$(B)/EQUIPO.COM: utils/equipo.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPCD.SYS: drivers/hspcd.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -228,12 +235,12 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS $(B)/HSPEMM.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
-        $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
+        $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
+        $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SONS)
 
-$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
+$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
@@ -250,8 +257,13 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI $(wildcard te
 	mcopy -i $@ $(B)/KEYB.COM ::HISPADOS/TECLADO.COM
 	mcopy -i $@ $(B)/PLAYWAV.COM ::HISPADOS/SONAR.COM
 	mcopy -i $@ $(B)/SONIDO.COM ::HISPADOS/SONIDO.COM
+	mcopy -i $@ $(B)/AUDICION.COM ::HISPADOS/AUDICION.COM
 	mcopy -i $@ $(B)/SYSINFO.COM ::HISPADOS/INFO.COM
 	mcopy -i $@ $(B)/GESTOR.COM ::HISPADOS/GESTOR.COM
+	# informe del equipo: EQUIPO y DIAGNOSTICO (DIAGNOST.BAT, 8 letras)
+	mcopy -i $@ $(B)/EQUIPO.COM ::HISPADOS/EQUIPO.COM
+	iconv -f UTF-8 -t CP437 sistema/DIAGNOST.BAT | sed 's/$$/\r/' > $(B)/DIAGNOST.BAT
+	mcopy -i $@ $(B)/DIAGNOST.BAT ::HISPADOS/DIAGNOST.BAT
 	mcopy -i $@ $(B)/INSTALAR.COM ::HISPADOS/INSTALAR.COM
 	mcopy -i $@ $(B)/MOVER.COM ::HISPADOS/MOVER.COM
 	mcopy -i $@ $(B)/ATRIBUTO.COM ::HISPADOS/ATRIBUTO.COM
@@ -392,6 +404,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	EMM=1 DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	EMM=1 tests/run_sound_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
+	tests/run_audicion_tests.sh $(IMG)
 	tests/run_sbemu_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)
@@ -419,6 +432,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	tests/run_xcopiar_tests.sh $(IMG)
 	tests/run_revisar_tests.sh $(IMG)
 	tests/run_ayuda_tests.sh $(IMG)
+	tests/run_equipo_tests.sh $(IMG)
 	tests/run_velocidad_tests.sh $(IMG)
 	tests/run_interprete_tests.sh $(IMG)
 	tests/run_criterr_tests.sh $(IMG)

@@ -90,6 +90,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Órdenes y mensajes en español (AYUDA, COPIAR, BORRAR, LISTAR…), historial de órdenes y edición de la línea (flechas, Inicio, Fin, Supr, Insertar, Ctrl+flechas por palabras, Tab) | ✅ |
 | Teclas que faltan en los portátiles de Apple (`TECLADO SP /MAC`, automático si el equipo es de Apple): Ctrl+Retroceso = Supr, Alt+Retroceso = Insertar, Alt+←/→ = Inicio/Fin, Alt+↑/↓ = RePág/AvPág | ✅ |
 | `EDIT`/`EDITAR` (editor), `GESTOR` (gestor de archivos), `SYSINFO`/`INFO` (propiedades del sistema) | ✅ |
+| `EQUIPO` (informe del hardware en texto: procesador, BIOS, SMBIOS, ACPI, memoria, VESA y EDID, PCI con el nombre de cada clase, de quién es cada controlador USB, discos, residentes, Sound Blaster, puertos) y `DIAGNOSTICO` (lo guarda con los volcados en binario en `\INFORMES\EQUIPOnn` de la unidad de arranque). Ver [«Informe del equipo»](#informe-del-equipo-equipo-y-diagnostico) | ✅ en pruebas (QEMU; falta hardware real) |
 | Teclado y ratón USB nativos (HID) y ratón PS/2 y touchpads de portátil (`HSPRATON`, INT 33h: por la BIOS o, si no lo ofrece, directamente por el controlador 8042; `HSPRATON /INFO` enseña el diagnóstico y `/BIOS` o `/DIRECTO` fuerzan la vía) | ✅ |
 | Mandos de juego: `HSPJOY` y `MANDO`. USB (HID genéricos, con su descriptor de informe, y tipo Xbox 360, por `HSPUSB`), puerto de juegos analógico (201h, con calibración) y mandos de NES, Super Nintendo, PlayStation, Mega Drive y joysticks Atari/Commodore por el puerto de impresora con un cable casero. Los juegos los ven por INT 15h 84h o como teclas (`MANDO.INI`). Ver [docs/MANDOS.md](docs/MANDOS.md) | ✅ en pruebas (falta hardware real) |
 | CD/DVD también en SATA (AHCI); menú de arranque propio con F5 y F8 | ✅ |
@@ -137,6 +138,7 @@ Se elige con las flechas o el número, e Intro. **F5** arranca en limpio y **F8*
 | `HSPSND /GPIO:hh` `/NOGPIO` `/EAPD:0` | HD Audio: valor de las GPIO (por omisión todas a 1), no tocarlas, o EAPD apagado, para los portátiles que lo tienen al revés. Se pueden cambiar con el driver ya cargado. |
 | `HSPSND /NOTECLAS` | Sin teclas de volumen. |
 | `HSPSND /SB` | Con `HSPEMM.SYS` cargado y sin Sound Blaster de verdad: emula una Sound Blaster 16 con AdLib (220h, IRQ 5, DMA 1 y 5) sobre el HD Audio o el AC'97 y pone `BLASTER`, para los juegos de DOS. Ver [docs/HSPSB.md](docs/HSPSB.md). |
+| `AUDICION` | Prueba de sonido con preguntas de sí o no: recoge los datos del equipo (controladoras, volcado de los códecs HD Audio), toca un tono por cada salida y cada variante (EAPD, GPIO, frecuencia) y guarda el informe en `\SONIDO01.TXT`. Ver [docs/AUDICION.md](docs/AUDICION.md). |
 | `SONIDO` | Muestra el volumen. `SONIDO 60` lo pone; `SONIDO +` y `SONIDO -` lo cambian un 10 %; `SONIDO /M` silencia y otra vez lo devuelve; `SONIDO /A` lo ajusta con las flechas. |
 | `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
 
@@ -229,6 +231,19 @@ FORMAT C: /S
 
 Después el disco arranca solo.
 
+### Informe del equipo: `EQUIPO` y `DIAGNOSTICO`
+
+Para saber qué hay dentro de un equipo sin estar delante. Los dos **solo leen** (las únicas escrituras son las clásicas de detección, que no dejan nada cambiado) y todas las esperas tienen un tope: lo que no contesta se salta con su aviso.
+
+| Orden | Qué hace |
+|---|---|
+| `EQUIPO` | Escribe el informe por la salida estándar (texto corrido, sin dibujar en pantalla): `EQUIPO > EQUIPO.TXT` lo guarda. |
+| `EQUIPO /PCI` (`/CPU` `/BIOS` `/VESA` `/DISCOS` `/RES` `/ISA`) | Solo ese apartado; `/NOISA`, `/NOPCI`… quitan uno. |
+| `DIAGNOSTICO` | Crea en la unidad de arranque una carpeta nueva cada vez (`\INFORMES\EQUIPO01`, `EQUIPO02`…) con `INFORME.TXT` —`VER`, fecha y hora, todo `EQUIPO`, `MEM /C`, `SET`, `HSPSND /INFO`, `HSPRATON /INFO`, `MANDO`, `CONFIG.SYS` y `AUTOEXEC.BAT`— y los volcados en binario: el espacio de configuración de cada función PCI (`PCI\BB_DD_F.BIN`; con MMCONFIG también los 4 KB, `.EXT`), todas las tablas ACPI (`ACPI\DSDT.BIN`, `FACP.BIN`, `SSDT1.BIN`…), SMBIOS, los registros de cada controlador USB (`USB\`), VBE y sus modos, el EDID de la pantalla, CMOS, IVT, BDA, EBDA, la identificación ATA de los discos y los textos de las ROM. Al acabar dice la carpeta: súbala entera al FTP, a `HispaDOS/informes`. |
+| `DIAGNOSTICO /NOISA` | Lo mismo sin sondear los puertos ISA ni el ratón PS/2, por si un equipo se quedara parado ahí (también `/NOPCI`, `/NOVESA`, `/NODISCOS`, `/NOBIOS`). El archivo se cierra antes de cada sondeo delicado: lo escrito queda en el disco y la última línea dice dónde fue. |
+
+Si en `\HISPADOS` está `AUDICION` (la prueba de sonido), `DIAGNOSTICO` ofrece lanzarla al final y su informe va a la misma carpeta (`AUDICION ruta\AUDICION.TXT`); `/NOSONIDO` no lo pregunta.
+
 ### Memoria USB
 
 `make usb` crea `build/hispados-usb.img` (64 MB). Grábala con Rufus (modo DD), balenaEtcher o `dd` y arranca el PC desde la memoria (en equipos UEFI, con el modo *Legacy/CSM*). Sirve para **probar** Hispa-DOS sin tocar el disco duro o para **instalarlo** con `INSTALL`, que solo actúa sobre un disco duro vacío.
@@ -241,7 +256,7 @@ La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS 
 boot/      MBR y sectores de arranque FAT12/FAT16
 kernel/    núcleo (KERNEL.SYS): INT 21h, FAT, memoria, ejecución de programas
 shell/     intérprete de órdenes (COMMAND.COM)
-utils/     utilidades: FDISK, FORMAT, SYS, KEYB, INSTALAR, EDIT, GESTOR, SYSINFO…
+utils/     utilidades: FDISK, FORMAT, SYS, KEYB, INSTALAR, EDIT, GESTOR, SYSINFO, EQUIPO…
 drivers/   drivers de dispositivo (.SYS)
 lib/       rutinas comunes de las utilidades
 tests/     programas y disco de prueba, prueba automática

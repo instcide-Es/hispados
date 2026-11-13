@@ -31,6 +31,15 @@ Instalar en el disco duro
   Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);
   si tiene particiones no toca nada. Despues quita la memoria y reinicia.
 
+Informe del equipo (para enviarlo)
+  Escribe DIAGNOSTICO. Crea en esta memoria la carpeta \INFORMES\EQUIPO01
+  (EQUIPO02 la vez siguiente...) con INFORME.TXT y los volcados del equipo:
+  procesador, BIOS, memoria, video, PCI, USB, discos, sonido y puertos.
+  Solo lee; no cambia nada del equipo. Al acabar dice la carpeta: subela
+  entera al FTP, a HispaDOS/informes. Si el equipo se quedara parado,
+  reinicia y prueba DIAGNOSTICO /NOISA (o /NOPCI, /NOVESA, /NODISCOS).
+  EQUIPO ensena lo mismo en pantalla (EQUIPO /PCI, EQUIPO /? ...).
+
 Raton y touchpad
   HSPRATON se carga solo al arrancar: usa el raton de la BIOS y, si la BIOS
   no lo ofrece (pasa en algunos portatiles), habla directamente con el
@@ -47,6 +56,10 @@ Sonido
   Si no suena, HSPSND /INFO muestra la tarjeta y las salidas que ha
   encontrado; en algunos portatiles hay que probar HSPSND /GPIO:0,
   HSPSND /GPIO:1, HSPSND /GPIO:2 o HSPSND /EAPD:0.
+  AUDICION es la prueba de sonido: toca sonidos por cada salida y pregunta
+  si se oyen (S = si, N = no, R = repetir, Esc = terminar). Guarda todo en
+  C:\SONIDO01.TXT (SONIDO02.TXT la siguiente vez...). Ese archivo se sube
+  al FTP, a HispaDOS/informes. Lo mejor es hacerla sin HSPSND cargado.
 
 Juegos antiguos que fallan en equipos rapidos
   Si un juego da "division por cero", se queda en negro o va demasiado
