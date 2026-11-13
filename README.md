@@ -142,7 +142,7 @@ Se elige con las flechas o el número, e Intro. **F5** arranca en limpio y **F8*
 | `HSPSND /NOAPRENDIDO` | No usar lo aprendido en la prueba de sonido (`\HISPADOS\SONIDO.INI`): busca la salida él solo. |
 | `HSPSND /NOTECLAS` | Sin teclas de volumen. |
 | `HSPSND /SB` | Con `HSPEMM.SYS` cargado y sin Sound Blaster de verdad: emula una Sound Blaster 16 con AdLib (220h, IRQ 5, DMA 1 y 5) sobre el HD Audio o el AC'97 y pone `BLASTER`, para los juegos de DOS. Ver [docs/HSPSB.md](docs/HSPSB.md). |
-| `AUDICION` | Prueba de sonido con preguntas de sí o no: recoge los datos del equipo (controladoras, volcado de los códecs HD Audio), toca un tono por cada salida y cada variante (EAPD, GPIO, frecuencia) y guarda el informe en `\SONIDO01.TXT`. **Aprende**: lo que suena (se contesta «S») lo guarda en `\HISPADOS\SONIDO.INI` y desde entonces `HSPSND` pone en ese equipo exactamente ese camino, en este arranque y en los siguientes. Ver [docs/AUDICION.md](docs/AUDICION.md). |
+| `AUDICION` | Prueba de sonido con preguntas de sí o no: recoge los datos del equipo (controladoras, volcado de los códecs HD Audio), toca un tono por cada salida y cada variante (EAPD, GPIO, frecuencia) y guarda el informe en `\SONIDO01.TXT`. **Aprende**: lo que suena (se contesta «S») lo guarda en `\HISPADOS\SONIDO.INI` y desde entonces `HSPSND` pone en ese equipo exactamente ese camino, en este arranque y en los siguientes. `AUDICION /RAPIDA` es la versión corta que hace `INSTALAR` al final de la instalación. Ver [docs/AUDICION.md](docs/AUDICION.md). |
 | `SONIDO` | Muestra el volumen. `SONIDO 60` lo pone; `SONIDO +` y `SONIDO -` lo cambian un 10 %; `SONIDO /M` silencia y otra vez lo devuelve; `SONIDO /A` lo ajusta con las flechas. |
 | `SONAR [/VOL:n] archivo.wav` | Toca un WAV; `SONAR /TONE 440` un tono de prueba. |
 
@@ -233,7 +233,7 @@ FDISK /PRI          (o FDISK para el menú)
 FORMAT C: /S
 ```
 
-Después el disco arranca solo.
+Después el disco arranca solo. Con `INSTALAR unidad:` (o `INSTALL` desde la memoria USB) se copia además todo el sistema, y el último paso es la **comprobación del sonido**: la versión corta de la prueba de sonido (`AUDICION /RAPIDA`) toca un pitido y la primera salida que suene, pregunta si baja el volumen y si se oye por cada lado, y guarda lo que suena en `\HISPADOS\SONIDO.INI` del disco instalado (no en el disquete ni en la memoria USB). Así `HSPSND` usa ese camino desde el primer arranque. `Esc` salta el paso sin apuntar nada; `INSTALAR unidad: /NOSONIDO` no lo hace. Ver [docs/AUDICION.md](docs/AUDICION.md#en-la-instalación-audicion-rapida).
 
 ### Informe del equipo: `EQUIPO` y `DIAGNOSTICO`
 

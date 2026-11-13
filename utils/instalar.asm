@@ -13,6 +13,10 @@
 ;                     la que tendrá el disco al arrancar desde él.
 ;  Para preparar un disco nuevo: PARTIR, reiniciar si hace falta, FORMATEA
 ;  unidad: y después INSTALAR unidad:.
+;  Último paso, la comprobación del sonido: AUDICION /RAPIDA (la versión
+;  corta de la prueba de sonido) guarda lo que suena en el SONIDO.INI del
+;  disco instalado (unidad:\HISPADOS\SONIDO.INI, con su informe SONIDO.TXT
+;  al lado); así HSPSND lo usa desde el primer arranque. /NOSONIDO no la hace.
 ; =============================================================================
         cpu 386
         bits 16
@@ -45,6 +49,29 @@ start:
         mov [tail_drv], al
         mov [msg_drv1], al
         mov [msg_drv2], al
+        mov [aud_path], al
+        mov [aud_d1], al
+        mov [aud_d2], al
+        ; opciones: /NOSONIDO
+        inc si
+.op:
+        lodsb
+        cmp al, 13
+        je .ope
+        cmp al, '/'
+        jne .op
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'NOSO'
+        jne .op
+        mov eax, [si+4]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'NIDO'
+        jne .op
+        mov byte [nosnd], 1
+        add si, 8
+        jmp .op
+.ope:
         ; unidad de origen: la de arranque
         mov ax, 0x3305
         int 0x21
@@ -140,8 +167,45 @@ start:
         call putnum
         mov si, msg_done2
         call puts
+        ; 3) la comprobación del sonido, con el disco recién instalado
+        cmp byte [nosnd], 0
+        jne .end
+        call sound_check
+.end:
+        mov si, msg_boot
+        call puts
         mov ax, 0x4C00
         int 0x21
+
+; AUDICION /RAPIDA del disco instalado: lo aprendido, en su SONIDO.INI
+; (AUDICION dice ella misma cómo ha ido; aquí, solo si no ha podido empezar)
+sound_check:
+        mov si, msg_snd
+        call puts
+        mov word [pblock], 0
+        mov word [pblock+2], aud_tail
+        mov [pblock+4], cs
+        mov dword [pblock+6], 0
+        mov dword [pblock+10], 0
+        mov dx, aud_path
+        mov bx, pblock
+        mov ax, 0x4B00
+        int 0x21
+        push cs
+        pop ds
+        push cs
+        pop es
+        jc .fail
+        mov ah, 0x4D
+        int 0x21
+        cmp al, 1                   ; 1: sin memoria (0 y 2 los explica ella)
+        jne .r
+.fail:
+        mov si, msg_sndko
+        call puts
+.r:
+        mov si, msg_crlf
+        jmp puts
 
 usage:
         mov si, msg_usage
@@ -421,6 +485,12 @@ nfailed     dw 0
 hs          dw 0
 hd          dw 0
 cs_dir      dw 0
+nosnd       db 0
+aud_path    db "C:\HISPADOS\AUDICION.COM", 0
+aud_tail    db aud_te - aud_tail - 1, " /RAPIDA "
+aud_d1      db "C:\HISPADOS /INI:"
+aud_d2      db "C:\HISPADOS\SONIDO.INI"
+aud_te      db 13
 sys_path    db "A:\HISPADOS\SISTEMA.COM", 0
 sys_tail    db 3, " "
 tail_drv    db "C:", 13
@@ -435,9 +505,12 @@ s_autoexec  db "\AUTOEXEC.BAT", 0
 s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0
 msg_title   db "Instalador de Hispa-DOS", 13, 10, 0
-msg_usage   db "Uso: INSTALAR unidad:", 13, 10
+msg_usage   db "Uso: INSTALAR unidad: [/NOSONIDO]", 13, 10
             db "Instala Hispa-DOS en una unidad que ya tiene formato.", 13, 10
-            db "Para un disco nuevo: PARTIR, FORMATEA unidad: y después INSTALAR unidad:", 13, 10, 0
+            db "Para un disco nuevo: PARTIR, FORMATEA unidad: y después INSTALAR unidad:", 13, 10
+            db "Al final comprueba el sonido (AUDICION /RAPIDA): lo que suena queda en", 13, 10
+            db "unidad:\HISPADOS\SONIDO.INI y HSPSND lo usa desde el primer arranque.", 13, 10
+            db "Esc salta ese paso; /NOSONIDO no lo hace.", 13, 10, 0
 msg_same    db "No se puede instalar sobre la unidad de arranque.", 13, 10, 0
 msg_nofmt   db "La unidad "
 msg_drv1    db "C: no existe o no tiene formato.", 13, 10
@@ -448,7 +521,13 @@ msg_fail    db "La instalación NO está completa: no se han podido copiar ", 0
 msg_fail2   db " archivos", 13, 10, "(¿disco lleno?).", 13, 10, 0
 msg_done    db "Hispa-DOS instalado en la unidad "
 msg_drv2    db "C: (", 0
-msg_done2   db " archivos copiados). Ya puede arrancar desde ella.", 13, 10, 0
+msg_done2   db " archivos copiados).", 13, 10, 0
+msg_crlf    db 13, 10, 0
+msg_boot    db "Ya puede arrancar desde ella.", 13, 10, 0
+msg_snd     db 13, 10, "Por último, la comprobación del sonido", 13, 10
+            db "--------------------------------------", 13, 10, 0
+msg_sndko   db "No se ha podido comprobar el sonido. Puede hacerlo después con la", 13, 10
+            db "opción «Prueba» del menú de arranque o con la orden AUDICION.", 13, 10, 0
 
         section .bss
 pblock      resb 14

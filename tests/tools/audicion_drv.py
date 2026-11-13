@@ -9,6 +9,9 @@ el puerto serie, escribe la orden y contesta a cada pregunta cuando aparece.
 «Prueba» del menú); se contesta desde el principio.
 --post: órdenes que se escriben, de una en una, en cada indicador del sistema
 que sale después del informe (para ver lo que queda tras AUDICION).
+--fin TEXTO: otro texto que marca el final de la prueba, además de «Informe
+guardado» (la versión corta, AUDICION /RAPIDA, no lo dice; p. ej. el «Ya
+puede arrancar desde ella.» de INSTALAR).
 
 respuestas: reglas separadas por «;»:
   default=S      lo que se contesta si ninguna otra regla vale
@@ -25,6 +28,7 @@ def main():
     log, spec = sys.argv[1], sys.argv[2]
     rest = sys.argv[3:]
     cmd, pre, post, nada = 'AUDICION', [], [], False
+    fins = [b'Informe guardado', b'NO se ha podido guardar']
     while rest and rest[0] != '--':
         if rest[0] == '--nada':
             nada = True
@@ -36,6 +40,8 @@ def main():
             pre.append(rest[1])
         elif rest[0] == '--post':
             post.append(rest[1])
+        elif rest[0] == '--fin':
+            fins.append(rest[1].encode('cp437'))
         rest = rest[2:]
     qemu = rest[1:]
     bynum, bytext, default = {}, [], 'S'
@@ -127,7 +133,7 @@ def main():
             time.sleep(0.15)
             send(b'\x1b' if ch == 'E' else ch.encode())
             continue
-        if tend is None and (b'Informe guardado' in new or b'NO se ha podido guardar' in new):
+        if tend is None and any(f in new for f in fins):
             if post:
                 stage = 2
                 after = len(buf)

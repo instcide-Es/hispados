@@ -433,6 +433,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	tests/run_usbhc_tests.sh $(IMG) aparcar
 	tests/run_joy_tests.sh $(IMG)
 	tests/run_instalar_tests.sh $(IMG)
+	tests/run_instalar_sonido_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG) ahci
 	tests/run_edit_tests.sh $(IMG)

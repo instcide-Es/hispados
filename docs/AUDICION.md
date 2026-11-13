@@ -19,6 +19,8 @@ códecs imita la del «codec#0» de Linux, que es la referencia para comparar.
 
     AUDICION               informe en X:\SONIDO01.TXT, SONIDO02.TXT...
     AUDICION carpeta       informe en carpeta\SONIDO.TXT
+    AUDICION /RAPIDA [carpeta] [/INI:ruta]
+                           la versión corta (la de INSTALAR, ver abajo)
     AUDICION /?            ayuda (también AYUDA AUDICION)
 
 - **Teclas**: `S` = sí, `N` = no, `R` = repetir el sonido, `Esc` = terminar y
@@ -213,6 +215,89 @@ lo aprendido: «Sonido configurado con lo aprendido: ya puede usarlo, también
 en Hispa Ventanas». Si HSPSND no se pudiera cargar, sale el aviso de
 reiniciar.
 
+## En la instalación: AUDICION /RAPIDA
+
+Idea de Carlos: «Si ponemos la prueba de sonido en la instalación de
+Hispa-DOS, obligamos al usuario final a configurarlo bien desde un principio
+de forma involuntaria». `INSTALAR unidad:` (y `INSTALL` desde la memoria
+USB, que lo llama) termina con la **comprobación del sonido**:
+
+    AUDICION /RAPIDA D:\HISPADOS /INI:D:\HISPADOS\SONIDO.INI
+
+(con la unidad de destino, ejecutando el `AUDICION.COM` recién copiado). La
+versión corta:
+
+- **No vuelca nada en pantalla**: los datos del equipo, los intentos y el
+  resumen van enteros al informe, como siempre. En pantalla solo salen tres
+  líneas de explicación, las preguntas y una frase final.
+- Pitido de control por el altavoz del PC; el **barrido** del HD Audio igual
+  que la prueba completa, pero solo de las salidas analógicas y **hasta el
+  primer camino que suene** (después el AC'97 y la Sound Blaster, si no ha
+  sonado nada antes); y con ese camino, solo **el volumen** («¿El segundo ha
+  sonado más bajo...?») y **izquierda y derecha**. Nada de frecuencias, 8
+  bits, sonido largo, auriculares ni salidas digitales.
+- Lo aprendido va al `SONIDO.INI` de `/INI:` (el del disco instalado, no el
+  de la unidad de arranque: ni el disquete ni la memoria USB se tocan); el
+  informe, a `carpeta\SONIDO.TXT` (si ya está, `SONIDO02.TXT`...). Como
+  INSTALAR copia antes `\HISPADOS` entero, un `SONIDO.INI` que viniera en la
+  memoria pasa al disco y la sección nueva se mezcla con él como siempre.
+- **Esc** (en «Pulse una tecla para empezar» o en cualquier pregunta) salta
+  el paso: si todavía no había sonado nada **no se toca `SONIDO.INI`**; el
+  informe lo apunta. Si ya había sonado, lo que sonó se guarda.
+- Sin tarjeta de sonido que se pueda probar (o solo HD Audio en modo V86):
+  lo dice y no pregunta nada.
+- Si HSPSND está cargado (arranque «Normal» desde la memoria USB) lo para
+  sin preguntar y lo dice: «HSPSND se ha detenido para la prueba: volverá a
+  sonar al reiniciar» (la instalación termina con un reinicio).
+- Código de salida: **2** si ha sonado y queda guardado (o es una Sound
+  Blaster), 0 si no o si se ha saltado, 1 si no hay memoria.
+
+Así se ve la instalación (en QEMU):
+
+    Hispa-DOS instalado en la unidad C: (57 archivos copiados).
+
+    Por último, la comprobación del sonido
+    --------------------------------------
+    (HSPSND está cargado: se detiene durante la prueba; volverá al reiniciar.)
+    Recogiendo los datos del equipo (no toque nada)...
+
+    Vamos a comprobar que su equipo suena. Pulse S si oye el sonido,
+    N si no lo oye (R lo repite). Suba el volumen si tiene rueda o teclas.
+    Si no tiene altavoces ni auriculares, pulse Esc para saltar este paso.
+    Pulse una tecla para empezar.
+
+    Primero, el altavoz interno del PC (un pitido).
+    P01. ¿Ha oído el pitido? (S/N/R) S
+
+    Ahora, la tarjeta de sonido del equipo (HD Audio).
+      Salida: salida de línea
+    P02. ¿Lo oye? (S/N/R) S
+
+    Bien. Ahora unas pruebas más con ese sonido.
+
+    Volumen: sonará dos veces seguidas.
+    P03. ¿El segundo ha sonado más bajo que el primero? (S/N/R) S
+
+    Canales: izquierda y derecha.
+    P04. ¿Suena solo por la izquierda? (S/N/R) S
+    P05. ¿Suena solo por la derecha? (S/N/R) S
+
+    El sonido de su equipo ha quedado configurado.
+    (HSPSND se ha detenido para la prueba: volverá a sonar al reiniciar.)
+
+    Ya puede arrancar desde ella.
+
+Si no suena nada: «No se ha podido comprobar el sonido. Puede hacerlo
+después con la opción «Prueba» del menú de arranque o con la orden
+AUDICION.» (con Esc: «Se ha saltado la comprobación del sonido...»). La
+instalación termina igual en todos los casos. `INSTALAR unidad: /NOSONIDO`
+no hace la comprobación (para instalar sin nadie delante: INSTALAR no tiene
+otro modo desatendido).
+
+En el primer arranque desde el disco, HSPSND (en `AUTOEXEC.BAT`) encuentra
+`C:\HISPADOS\SONIDO.INI` con la sección de la tarjeta y pone ese camino:
+«Configuración aprendida en la prueba (fecha).».
+
 ## Cómo leer el informe
 
 - **`=== RESUMEN ===`** (al final) es lo primero que hay que mirar:
@@ -256,6 +341,16 @@ tarjeta (hda-output y AC'97: no lo usa); `/NOAPRENDIDO`; una segunda prueba
 que reemplaza la sección; AUDICION y HSPSND con AC'97; y la opción «Prueba»
 del menú, con y sin sonido: HSPSND queda cargado y `SONAR` suena sin
 reiniciar.
+
+`tests/run_instalar_sonido_tests.sh`: la comprobación del sonido de
+INSTALAR en un disco vacío de 32 MB con hda-duplex. Desde el disquete de uso
+en «Normal» (HSPSND cargado) y desde la memoria USB (disco D:, con un
+`SONIDO.INI` de otro equipo en la memoria): las cinco preguntas y nada más,
+sin el volcado en pantalla, `SONIDO.INI` y `SONIDO.TXT` en el `\HISPADOS` del
+disco (la memoria y el disquete, sin tocar); después, arrancando solo desde
+el disco, HSPSND dice «aprendida», `/INFO` enseña la ruta y `SONAR` suena
+(grabación de QEMU). Y Esc en la primera pregunta (el `SONIDO.INI` copiado
+queda igual y la instalación acaba), `/NOSONIDO` y sin tarjeta de sonido.
 
 **Falta probarlo en hardware real**; en QEMU no hay GPIO, EAPD, detección de
 presencia ni HDMI de verdad.

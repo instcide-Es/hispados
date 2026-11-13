@@ -3,6 +3,7 @@
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
 ;  Uso:  AUDICION [carpeta]
+;        AUDICION /RAPIDA [carpeta] [/INI:ruta]   (la versión corta, para INSTALAR)
 ;        AUDICION /?
 ;
 ;  Maneja el hardware directamente (no usa HSPSND). Primero recoge, sin
@@ -63,7 +64,10 @@ start:
         mov [sp0], sp
         call parse_args
         MODE O_SCR
+        cmp byte [quick], 0
+        jne .ttl
         PR "AUDICION 1.0 - prueba de sonido de Hispa-DOS", NL, NL
+.ttl:
         ; memoria para la DMA: los 64 KB que siguen al programa
         mov ax, cs
         add ax, 0x1007
@@ -91,12 +95,17 @@ start:
         mov byte [a20_on], 1
         MODE O_SCR
         PR "Recogiendo los datos del equipo (no toque nada)...", NL
+        mov al, [quick]             ; versión corta: el volcado, solo al informe
+        mov [hush], al
         call rep_header
         call collect_sys
         call pci_scan
         call collect_cards
         call rflush
+        mov byte [hush], 0
         ; ---- las pruebas ----
+        cmp byte [quick], 0
+        jne quick_run
         MODE O_SCR
         PR NL, "COMO FUNCIONA", NL
         PR "  Se oirán sonidos. Después de cada uno, pulse:", NL
@@ -119,25 +128,93 @@ start:
         call sb_test
         jmp finish
 
+; ---- AUDICION /RAPIDA: la versión corta (la de INSTALAR) ----
+; Una explicación de tres líneas, el pitido de control, el barrido hasta el
+; primer camino que suene y, con él, solo el volumen y los dos canales. Sin
+; el volcado en pantalla (va entero al informe). Esc salta la prueba.
+quick_run:
+        MODE O_SCR
+        ; ¿hay algo que probar? (HD Audio fuera del modo V86, AC'97 o SB)
+        cmp word [nabm], 0
+        jne .go
+        cmp word [sb_base], 0
+        jne .go
+        cmp byte [n_hda], 0
+        je .none
+        cmp byte [v86], 0
+        je .go
+.none:
+        PR "No se ha encontrado ninguna tarjeta de sonido que se pueda probar.", NL
+        MODE O_REP
+        PR NL, "(Versión corta: no hay ninguna tarjeta de sonido que se pueda probar.)", NL
+        jmp finish
+.go:
+        PR NL, "Vamos a comprobar que su equipo suena. Pulse S si oye el sonido,", NL
+        PR "N si no lo oye (R lo repite). Suba el volumen si tiene rueda o teclas.", NL
+        PR "Si no tiene altavoces ni auriculares, pulse Esc para saltar este paso.", NL
+        PR "Pulse una tecla para empezar.", NL
+        call kflush
+        mov ah, 7
+        int 0x21
+        test al, al
+        jnz .k
+        mov ah, 7                   ; tecla extendida: se descarta el código
+        int 0x21
+.k:
+        cmp al, 27
+        je abort
+        MODE O_REP
+        PR NL, "=== PRUEBAS (versión corta, AUDICION /RAPIDA) ===", NL
+        call test_pcspk
+        call hda_tests
+        cmp byte [found_an], 0
+        jne finish
+        call ac97_test
+        cmp byte [ac_res], 1
+        je finish
+        cmp byte [ac_res], 2
+        je finish
+        call sb_test
+        jmp finish
+
 abort:
         mov sp, [cs:sp0]
         push cs
         pop ds
         mov byte [aborted], 1
+        mov al, [quick]
+        mov [hush], al
         MODE O_SCR | O_REP
         PR NL, "(Esc: prueba terminada antes de acabar)", NL
 finish:
         mov sp, [sp0]
         cld
         call all_quiet
+        mov al, [quick]             ; versión corta: el resumen y lo de
+        mov [hush], al              ; SONIDO.INI, solo al informe
         call summary
+        ; versión corta con Esc antes de que sonara nada: no se apunta nada
+        cmp byte [quick], 0
+        je .sv
+        cmp byte [aborted], 0
+        je .sv
+        cmp byte [w_ok], 0
+        jne .sv
+        MODE O_REP
+        PR NL, "(Versión corta saltada con Esc: no se toca SONIDO.INI.)", NL
+        jmp .nsv
+.sv:
         call ini_save
+.nsv:
         call rflush
+        mov byte [hush], 0
         cmp byte [a20_on], 0
         je .na
         call a20_restore
 .na:
         MODE O_SCR
+        cmp byte [quick], 0
+        jne quick_end
         cmp byte [rep_ok], 0
         je .nofile
         PR NL, "Informe guardado en "
@@ -164,6 +241,40 @@ finish:
 .x3:
         mov al, 2
 .x4:
+        int 0x21
+
+; final de la versión corta: una frase y el código de salida (2: ha sonado y
+; queda guardado para HSPSND; 0: no, o se ha saltado)
+quick_end:
+        PR NL
+        cmp byte [ini_good], 0
+        jne .ok
+        cmp byte [sb_res], 0
+        jne .ok
+        cmp byte [aborted], 0
+        je .no
+        PR "Se ha saltado la comprobación del sonido. Puede hacerla después con la", NL
+        jmp .later
+.no:
+        PR "No se ha podido comprobar el sonido. Puede hacerlo después con la", NL
+.later:
+        PR "opción «Prueba» del menú de arranque o con la orden AUDICION.", NL
+        mov byte [qexit], 0
+        jmp .h
+.ok:
+        PR "El sonido de su equipo ha quedado configurado.", NL
+        mov byte [qexit], 2
+.h:
+        cmp byte [hsp_was], 0
+        je .x
+        PR "(HSPSND se ha detenido para la prueba: volverá a sonar al reiniciar.)", NL
+.x:
+        cmp byte [rep_ok], 0
+        jne .x2
+        PR "ATENCION: el informe de la prueba NO se ha podido guardar.", NL
+.x2:
+        mov al, [qexit]
+        mov ah, 0x4C
         int 0x21
 
 ; callar todo lo que pueda estar sonando
@@ -212,6 +323,44 @@ parse_args:
         mov byte [sim], 1
         jmp .sp
 .q:
+        ; /RAPIDA: la versión corta (la que lanza INSTALAR)
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'RAPI'
+        jne .q1
+        mov ax, [si+4]
+        and ax, 0xDFDF
+        cmp ax, 'DA'
+        jne .q1
+        add si, 6
+        mov byte [quick], 1
+        jmp .sp
+.q1:
+        ; /INI:ruta: dónde guardar lo aprendido (por omisión, \HISPADOS\SONIDO.INI
+        ; de la unidad de arranque)
+        mov eax, [si]
+        and eax, 0xFFDFDFDF
+        cmp eax, 'INI:'
+        jne .q2
+        add si, 4
+        mov di, ini_name
+.qi:
+        mov al, [si]
+        cmp al, ' '
+        jbe .qe
+        inc si
+        cmp di, ini_name + INIMAX - 1
+        jae .qi
+        mov [di], al
+        inc di
+        jmp .qi
+.qe:
+        mov byte [di], 0
+        cmp di, ini_name
+        je .q2
+        mov byte [has_ini], 1
+        jmp .sp
+.q2:
         cmp byte [si], '?'
         jne .dir
         MODE O_SCR
@@ -225,20 +374,24 @@ parse_args:
         cmp al, ' '
         jbe .e
         cmp di, outdir + 60
-        jae .e
+        jae .c2
         mov [di], al
         inc di
+.c2:
         lodsb
         jmp .c
 .e:
         cmp di, outdir
-        je .r
+        je .e2
         cmp byte [di-1], '\'
         jne .z
         dec di
 .z:
         mov byte [di], 0
         mov byte [has_dir], 1
+.e2:
+        cmp al, 13                  ; detrás de la carpeta puede haber más
+        jne .sp                     ; opciones (/RAPIDA, /INI:)
 .r:
         ret
 
@@ -262,6 +415,11 @@ chk_hspsnd:
         cld
         mov byte [hsp_was], 1
         MODE O_SCR
+        cmp byte [quick], 0
+        je .long
+        PR "(HSPSND está cargado: se detiene durante la prueba; volverá al reiniciar.)", NL
+        jmp .r
+.long:
         PR "HSPSND está cargado. Esta prueba maneja la tarjeta directamente y", NL
         PR "HSPSND dejará de sonar hasta reiniciar. Es mejor arrancar con la", NL
         PR "opción «Prueba de sonido» del menú de arranque.", NL
@@ -375,6 +533,8 @@ pchar:
 .t:
         test byte [omode], O_SCR
         jz .r
+        cmp byte [hush], 0          ; versión corta: sin el volcado
+        jne .r
         mov dl, al
         mov ah, 2
         int 0x21
@@ -631,7 +791,9 @@ ask:
         mov byte [reps], 0
         call kflush
         mov al, [omode]
+        mov ah, [hush]
         push ax
+        mov byte [hush], 0          ; las preguntas siempre se ven
         MODE O_SCR | O_REP
         PR "P"
         mov al, [qnum]
@@ -696,6 +858,7 @@ ask:
 .nf:
         pop bx
         mov [omode], bl
+        mov [hush], bh
         pop dx
         pop cx
         pop bx
@@ -3534,6 +3697,8 @@ hda_tests:
         mov byte [found_an], 1
         call post_tests
 .dig:
+        cmp byte [quick], 0         ; la versión corta no prueba las digitales
+        jne .r
         ; salidas digitales (HDMI, DisplayPort, SPDIF) con algo enchufado
         mov byte [found], 0
         mov byte [pass], 1
@@ -4822,6 +4987,8 @@ post_tests:
         je .vok
         mov byte [w_vsoft], 1       ; no baja: en SONIDO.INI, «por programa»
 .vok:
+        cmp byte [quick], 0         ; versión corta: el volumen que baja y los
+        jne .ch                     ; dos canales, nada más
         mov word [replay], rv_max
         call rv_max
         mov si, q_max
@@ -4855,6 +5022,10 @@ post_tests:
         mov di, l_right
         call askrec
         mov byte [t_ch], 3
+        cmp byte [quick], 0
+        je .rates
+        ret
+.rates:
         ; frecuencias de muestreo
         MODE O_SCR
         PR NL, "Frecuencias: cada vez sonarán dos tonos seguidos.", NL
@@ -6569,7 +6740,9 @@ ini_save:
 .hq:
         call b_cpy
         mov byte [di], 0
-        ; el nombre: X:\HISPADOS\SONIDO.INI
+        ; el nombre: X:\HISPADOS\SONIDO.INI (o el de /INI:)
+        cmp byte [has_ini], 0
+        jne .dr2
         mov ax, 0x3305
         int 0x21
         add dl, 'A' - 1
@@ -6581,6 +6754,7 @@ ini_save:
         add dl, 'A'
 .dr:
         mov [ini_name], dl
+.dr2:
         ; el que hay (hasta 32 KB)
         mov word [olen], 0
         mov ax, 0x3D00
@@ -6968,7 +7142,9 @@ st_nosuena  db "NO SUENA", 0
 st_todo     db "SOLO CON TODO ABIERTO", 0
 s_dash      db "-", 0
 s_equipo    db "Equipo=", 0
+INIMAX      equ 80
 ini_name    db "?:\HISPADOS\SONIDO.INI", 0
+            times INIMAX - ($ - ini_name) db 0
 ini_head    db "; SONIDO.INI - lo que ha aprendido la prueba de sonido de Hispa-DOS", 13, 10
             db ";", 13, 10
             db "; Lo escribe AUDICION (la prueba de sonido: opción «Prueba» del menú de", 13, 10
@@ -7134,6 +7310,7 @@ summary:
 msg_usage   db "AUDICION - prueba de sonido con preguntas de sí o no", 13, 10
             db 13, 10
             db "  AUDICION [carpeta]", 13, 10
+            db "  AUDICION /RAPIDA [carpeta] [/INI:ruta]", 13, 10
             db 13, 10
             db "Recoge los datos de sonido del equipo (controladoras, códecs, pines),", 13, 10
             db "toca sonidos por cada salida y pregunta si se oyen: S = sí, N = no,", 13, 10
@@ -7144,6 +7321,9 @@ msg_usage   db "AUDICION - prueba de sonido con preguntas de sí o no", 13, 10
             db "en ella como SONIDO.TXT: AUDICION C:\INFORMES\EQUIPO01", 13, 10
             db "Lo que suena lo guarda en \HISPADOS\SONIDO.INI de la unidad de arranque:", 13, 10
             db "HSPSND lo usa al cargarse (código de salida 2: ha sonado y está guardado).", 13, 10
+            db "/RAPIDA: la versión corta (la de INSTALAR): pitido, la primera salida que", 13, 10
+            db "suene, el volumen y los dos canales; Esc la salta sin apuntar nada.", 13, 10
+            db "/INI:ruta: guarda lo aprendido en ese SONIDO.INI (C:\HISPADOS\SONIDO.INI).", 13, 10
             db "El informe se sube al FTP, a HispaDOS/informes. Ver docs/AUDICION.md.", 13, 10, 0
 s_sonido    db "\SONIDO", 0
 q_beep      db "¿Ha oído el pitido?", 0
@@ -7373,6 +7553,10 @@ w_ctl       resb 1
 w_g         resb 3
 w_eap       resb 1
 w_ok        resb 1
+quick       resb 1                  ; /RAPIDA: la versión corta
+hush        resb 1                  ; 1: nada a la pantalla (salvo las preguntas)
+has_ini     resb 1                  ; /INI:ruta dada
+qexit       resb 1                  ; código de salida de la versión corta
 w_vsoft     resb 1
 w_vamp      resw 1
 w_hp        resb 1

@@ -29,7 +29,10 @@ Menu de arranque: Normal o Juegos
 
 Instalar en el disco duro
   Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);
-  si tiene particiones no toca nada. Despues quita la memoria y reinicia.
+  si tiene particiones no toca nada. Al final comprueba el sonido: pulsa S
+  si oyes el sonido y N si no (Esc salta este paso). Lo que suena queda
+  guardado en el disco duro y se usa desde el primer arranque. Despues
+  quita la memoria y reinicia.
 
 Informe del equipo (para enviarlo)
   Escribe DIAGNOSTICO. Crea en esta memoria la carpeta \INFORMES\EQUIPO01
