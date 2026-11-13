@@ -2669,6 +2669,12 @@ dma_fix:
 ;              +4  dw cuenta programada      +6 db modo (puerto 0Bh/D6h)
 ;              +8  dw dirección actual (tal cual se lee del registro)
 ;              +10 dw cuenta actual          +12 db 1 = canal tapado
+;    AL=04h  [SB-PM] puertos que atrapar a los clientes DPMI (HSPDPMI):
+;            ES:DI = 13 pares (primero, último) + FFFFh; CX = cuántos;
+;            EDX = lo dado con AL=05h
+;    AL=05h  [SB-PM] EDX = dirección lineal del octeto de estado de la FM
+;            (HSPSND, después de AL=01h; 0 = ninguno): HSPDPMI contesta
+;            con él las lecturas del estado de la AdLib sin ir a modo V86
 ; =============================================================================
 SBD_BASE    equ 0
 SBD_COUNT   equ 4
@@ -2687,6 +2693,10 @@ sb_svc:
         je .map
         cmp al, 3
         je .dma
+        cmp al, 4                   ; [SB-PM]
+        je sb_pmlist                ; [SB-PM]
+        cmp al, 5                   ; [SB-PM]
+        je .fmst                    ; [SB-PM]
         mov ah, 0x8F
         ret
 .chk:
@@ -2694,8 +2704,14 @@ sb_svc:
         mov word [ebp+P_ECX], 0x0100
         xor ah, ah
         ret
+.fmst:                              ; [SB-PM]
+        mov eax, [ebp+P_EDX]        ; [SB-PM]
+        mov [sb_fmstat], eax        ; [SB-PM]
+        xor ah, ah                  ; [SB-PM]
+        ret                         ; [SB-PM]
 .trap:
         mov dword [sb_handler], 0
+        mov dword [sb_fmstat], 0    ; [SB-PM]
         V86PTR esi, F_DS, P_ESI
         mov edi, sb_ranges
         mov ecx, 8
@@ -2761,6 +2777,53 @@ sb_svc:
         call sb_note_addr
         call sb_note_cnt
 .dok:
+        xor ah, ah
+        ret
+
+; [SB-PM] AL=04h: puertos que hay que atrapar también a los programas en modo
+; protegido (los clientes de HSPDPMI, en anillo 3): ES:DI = sitio para 13
+; pares (primero, último), que se devuelven acabados en FFFFh; CX = cuántos
+; (0: no hay emulación). Son los que vigila HSPSND y, si tiene cedido algún
+; canal de DMA, los del 8237 que virtualiza el monitor (para que la E/S se
+; haga en modo V86 y pase por aquí como la de los programas de modo real).
+sb_pmlist:
+        V86PTR edi, F_ES, P_EDI
+        xor ecx, ecx
+        cmp dword [sb_handler], 0
+        je .end
+        mov esi, sb_ranges
+.l:
+        mov eax, [esi]
+        cmp ax, 0xFFFF
+        je .dma
+        mov [edi+ecx*4], eax
+        inc ecx
+        add esi, 4
+        jmp .l
+.dma:
+        mov eax, [sb_dmaptr]
+        or eax, [sb_dmaptr+4]
+        or eax, [sb_dmaptr+8]
+        or eax, [sb_dmaptr+12]
+        jz .d16
+        mov dword [edi+ecx*4], 0x000F0000       ; 00h-0Fh
+        mov dword [edi+ecx*4+4], 0x00830081     ; 81h-83h
+        mov dword [edi+ecx*4+8], 0x00870087     ; 87h
+        add ecx, 3
+.d16:
+        mov eax, [sb_dmaptr+16]
+        or eax, [sb_dmaptr+20]
+        or eax, [sb_dmaptr+24]
+        or eax, [sb_dmaptr+28]
+        jz .end
+        mov dword [edi+ecx*4], 0x00DF00C0       ; C0h-DFh
+        mov dword [edi+ecx*4+4], 0x008B0089     ; 89h-8Bh
+        add ecx, 2
+.end:
+        mov word [edi+ecx*4], 0xFFFF
+        mov [ebp+P_ECX], cx
+        mov eax, [sb_fmstat]
+        mov [ebp+P_EDX], eax
         xor ah, ah
         ret
 
@@ -4417,6 +4480,8 @@ os_key      resb 1
 sb_handler  resd 1                  ; [SB] seg:desp de la rutina de HSPSND
 sb_dmaptr   resd 8                  ; [SB] estructura de cada canal cedido
 sb_ranges   resw 2*8 + 1            ; [SB] puertos (primero, último), FFFFh
+            alignb 4                ; [SB-PM]
+sb_fmstat   resd 1                  ; [SB-PM] estado de la FM (lineal) o 0
 dma_cnt     resw 8                  ; [SB] cuenta programada de cada canal
             alignb 4
             resb 4096               ; pila de anillo 0

@@ -100,6 +100,12 @@ d_args      resb 4
 d_spk       resb 1
 d_test      resb 1
 d_last      resb 1
+d_wbusy     resb 1                  ; [SB-EOI] lecturas de 22Ch (el bit de ocupado)
+e_irqqh     resb 1                  ; [SB-EOI] primera de la cola de IRQ
+e_dirq      resb 1                  ; [SB-EOI] IRQ en la que se ha entregado
+            alignb 4
+e_irqq      resd 8                  ; [SB-EOI] cuándo suena el final de cada
+                                    ; bloque (trama absoluta; 0 = ya)
 d_qh        resb 1
 d_qn        resb 1
 d_q         resb 16
@@ -125,6 +131,7 @@ ST_MAX      equ 3072                ; el bloque de estado (y detras, en la
 e_seg       dw 0                    ; segmento del bloque de estado
 e_irq       db 5                    ; IRQ de la tarjeta emulada
 e_hwirq     db 0                    ; IRQ del HD Audio / AC'97 (0 = ninguna)
+e_rtc       db 0                    ; [SB-EOI] 1: sin IRQ de la tarjeta, el RTC
 e_doinj     db 0
 e_wason     db 0                    ; parada por Windows
 e_tsrpar    dw 0
@@ -225,20 +232,52 @@ e_decide:
         je .r
         cmp byte [gs:e_virq], 0
         jne .r
+        ; [SB-EOI] la IRQ de un bloque, cuando suena su final (no cuando se
+        ; ha leído del DMA, que es hasta 100 ms antes): si no, al leer de
+        ; golpe salían varias seguidas y, si el manejador del programa abre
+        ; las interrupciones, se anidaban (con DOS/4GW: «pila de modo real
+        ; agotada» en HSPDPMI)
+        movzx bx, byte [gs:e_irqqh]
+        shl bx, 2
+        mov eax, [gs:e_irqq+bx]
+        test eax, eax
+        jz .now
+        sub eax, [gs:p_abs]
+        jg .r
+.now:
         les bx, [e_sp]
         test byte [es:bx+5], 2      ; IF del programa
         jz .r
         in al, 0x21
+        mov ah, al
         mov cl, [e_irq]
         shr al, cl
         test al, 1                  ; tapada en el 8259
+        jz .use
+        ; [SB-EOI] tapada: si el programa tiene abierta la otra de siempre
+        ; de la SB (la 7, o la 5 si la nuestra es la 7), la espera allí (Doom
+        ; y Duke Nukem 3D vienen configurados con la 7): se entrega en esa
+        mov cl, 7
+        cmp byte [e_irq], 7
+        jne .alt
+        mov cl, 5
+.alt:
+        cmp cl, [e_hwirq]
+        je .r
+        mov al, ah
+        shr al, cl
+        test al, 1
         jnz .r
+.use:
+        mov [gs:e_dirq], cl         ; [SB-EOI]
         dec byte [gs:e_irqedge]
+        inc byte [gs:e_irqqh]       ; [SB-EOI]
+        and byte [gs:e_irqqh], 7    ; [SB-EOI]
         mov byte [gs:e_virq], 1
         mov byte [gs:e_virqage], 0
         xor ax, ax
         mov es, ax
-        movzx bx, byte [e_irq]
+        movzx bx, cl                ; [SB-EOI] (antes, siempre e_irq)
         add bx, 8
         shl bx, 2
         mov eax, [es:bx]
@@ -270,6 +309,7 @@ e_int08:
         jb .nv
         mov byte [gs:e_virq], 0
 .nv:
+        call e_rtc_arm              ; [SB-EOI]
         call e_gains
         call e_pump
         E_LEAVE
@@ -304,6 +344,131 @@ e_hwisr:
         mov sp, [cs:e_sp]
 .chain:
         jmp far [cs:e_oldhw]
+
+; ---- [SB-EOI] el reloj de tiempo real (IRQ 8, interrupción periódica a
+; 256 Hz), cuando la tarjeta no tiene IRQ (BIOS que no se la dan: el HD
+; Audio del ThinkPad A275). Sin él, HSPSND solo tiene el control 18 veces
+; por segundo, en el reloj, y si el programa lo engancha y llama al de antes
+; desde su manejador (con las interrupciones cerradas), la IRQ de la tarjeta
+; emulada no se podía entregar hasta que tocara un puerto de la SB con las
+; interrupciones abiertas: los sonidos acababan tarde o nunca. Así llega
+; con las interrupciones abiertas cada 3,9 ms: se entrega enseguida.
+; Si la BIOS está esperando con el RTC (INT 15h AH=83h/86h), se le deja
+; (y a 1024 Hz) ----
+e_rtcisr:
+        cmp byte [cs:e_on], 0
+        je .chain
+        push ax
+        push ds
+        xor ax, ax
+        mov ds, ax
+        test byte [0x4A0], 1        ; espera de la BIOS en curso
+        pop ds
+        jnz .bios
+        mov al, 0x0C
+        out 0x70, al
+        in al, 0x71                 ; (leer C quita el aviso)
+        mov al, 0x20
+        out 0xA0, al
+        out 0x20, al
+        pop ax
+        E_ENTER
+        inc word [gs:e_irqcnt]
+        call e_pump
+        E_LEAVE
+        jmp e_exit
+.bios:
+        mov al, 6                   ; la BIOS cuenta con 1024 Hz
+        call e_rtc_rate
+        pop ax
+.chain:
+        jmp far [cs:e_oldhw]
+
+; [SB-EOI] frecuencia del RTC: AL = 6 (1024 Hz) u 8 (256 Hz). Usa AX.
+e_rtc_rate:
+        mov ah, al
+        mov al, 0x0A
+        out 0x70, al
+        in al, 0x71
+        and al, 0x0F
+        cmp al, ah
+        je .r
+        mov al, 0x0A
+        out 0x70, al
+        in al, 0x71
+        and al, 0xF0
+        or ah, al
+        mov al, 0x0A
+        out 0x70, al
+        mov al, ah
+        out 0x71, al
+.r:
+        ret
+
+; [SB-EOI] (re)encender la interrupción periódica del RTC, a 256 Hz (cada
+; 3,9 ms: más deprisa se anidan las interrupciones en los equipos lentos)
+; si no hay una espera de la BIOS (INT 15h AH=83h/86h, que la quiere a
+; 1024 Hz y la apaga al acabar). Desde el reloj (INT 08h) y al arrancar,
+; con las interrupciones cerradas.
+e_rtc_arm:
+        cmp byte [e_rtc], 0
+        je .r
+        push ds
+        xor ax, ax
+        mov ds, ax
+        test byte [0x4A0], 1
+        pop ds
+        jnz .r
+        mov al, 8
+        call e_rtc_rate
+        mov al, 0x0B
+        out 0x70, al
+        in al, 0x71
+        test al, 0x40
+        jnz .r
+        or al, 0x40
+        mov ah, al
+        mov al, 0x0B
+        out 0x70, al
+        mov al, ah
+        out 0x71, al
+        mov al, 0x0C
+        out 0x70, al
+        in al, 0x71
+        in al, 0xA1                 ; IRQ 8 y la cascada (IRQ 2), abiertas
+        and al, 0xFE
+        out 0xA1, al
+        in al, 0x21
+        and al, 0xFB
+        out 0x21, al
+.r:
+        ret
+; [SB-EOI] apagarla (al parar la emulación)
+e_rtc_off:
+        cmp byte [e_rtc], 0
+        je .r
+        push ds
+        xor ax, ax
+        mov ds, ax
+        test byte [0x4A0], 1
+        pop ds
+        jnz .r
+        mov al, 0x0B
+        out 0x70, al
+        in al, 0x71
+        and al, 0xBF
+        mov ah, al
+        mov al, 0x0B
+        out 0x70, al
+        mov al, ah
+        out 0x71, al
+        mov al, 0x0C
+        out 0x70, al
+        in al, 0x71
+        mov al, 6                   ; como la deja la BIOS
+        call e_rtc_rate
+.r:
+        ret
 
 ; CF = 1 si la interrupcion no es del flujo de salida; si lo es, la apaga
 e_hw_ack:
@@ -724,7 +889,18 @@ e_in:
         mov al, [gs:d_last]
         ret
 .wst:
-        mov al, 0x7F                ; siempre listo para recibir
+        ; [SB-EOI] listo para recibir, pero el bit 7 (ocupado) se enciende una
+        ; de cada cuatro lecturas, como en la tarjeta de verdad, donde parpadea
+        ; aunque esté libre: hay juegos que esperan a verlo encendido y luego
+        ; apagado antes de escribir (Prince of Persia, para parar un sonido; con
+        ; el bit siempre apagado se quedaba esperando a que el sonido acabara)
+        inc byte [gs:d_wbusy]
+        mov al, [gs:d_wbusy]
+        and al, 3
+        cmp al, 3
+        mov al, 0x7F
+        jne .r
+        mov al, 0xFF
         ret
 .rst:
         and byte [gs:e_irqpend], ~1
@@ -746,7 +922,7 @@ e_in:
         je .r
         push cx
         mov ah, 1
-        mov cl, [e_irq]
+        mov cl, [gs:e_dirq]         ; [SB-EOI]
         shl ah, cl
         or al, ah
         pop cx
@@ -816,7 +992,7 @@ e_out:
 .eoi:
         cmp byte [gs:e_virq], 0
         je .pass
-        mov ah, [e_irq]
+        mov ah, [gs:e_dirq]         ; [SB-EOI]
         or ah, 0x60
         cmp al, ah                  ; EOI especifico de la nuestra
         je .eat
@@ -832,7 +1008,7 @@ e_out:
         mov al, 0x0A
         add al, [gs:e_ocw3]
         out 0x20, al
-        mov cl, [e_irq]
+        mov cl, [gs:e_dirq]         ; [SB-EOI]
         mov al, 1
         shl al, cl
         dec al
@@ -858,6 +1034,7 @@ dsp_reset:
         mov [gs:d_spk], al
         mov [gs:e_irqpend], al
         mov [gs:e_irqedge], al
+        mov [gs:e_irqqh], al        ; [SB-EOI]
         mov [gs:d_qh], al
         mov [gs:d_qn], al
         mov al, 0xAA
@@ -1076,6 +1253,14 @@ dsp_exec:
         jmp dsp_queue
 .xauto:
         mov byte [gs:d_auto], 0
+        ; [SB-EOI] si ya hay bloques leídos del DMA cuya IRQ aún no se ha
+        ; entregado (no han sonado), para el programa el bloque en curso es
+        ; el primero de ellos: su IRQ será la última (como en la tarjeta)
+        cmp byte [gs:e_irqedge], 0
+        je .xr
+        mov byte [gs:e_irqedge], 1
+        mov byte [gs:v_pcm+V_ACTIVE], 0
+.xr:
         ret
 .e0:
         mov al, [gs:d_args]
@@ -1105,12 +1290,32 @@ dsp_exec:
         jmp irq_raise
 .f3:
         or byte [gs:e_irqpend], 2
-; una IRQ mas por entregar (si se acumulan, se entregan una tras otra)
+; una IRQ mas por entregar (si se acumulan, se entregan una tras otra).
+; [SB-EOI] irq_raise: ya; irq_raise_v: cuando suene la trama V_CUR de la voz
+; BX. Conservan todo.
+irq_raise_v:
+        push eax
+        mov eax, [gs:bx+V_CUR]
+        test eax, eax
+        jnz irq_raise.st
+        inc eax
+        jmp irq_raise.st
 irq_raise:
+        push eax
+        xor eax, eax
+.st:
         cmp byte [gs:e_irqedge], 8
         jae .r
+        push bx
+        movzx bx, byte [gs:e_irqqh]
+        add bl, [gs:e_irqedge]
+        and bx, 7
+        shl bx, 2
+        mov [gs:e_irqq+bx], eax
+        pop bx
         inc byte [gs:e_irqedge]
 .r:
+        pop eax
         ret
 
 ; arrancar la voz de la SB: AL = V_FLAGS, AH = autoinicio, ECX = Hz,
@@ -1255,7 +1460,7 @@ pcm_fetch:
         mov dl, 2
 .i8:
         or [gs:e_irqpend], dl
-        call irq_raise
+        call irq_raise_v            ; [SB-EOI]
         cmp byte [gs:d_auto], 0
         je .stop
         mov dx, [gs:d_blk]
@@ -1308,7 +1513,7 @@ mix_write:
 .pair:
         mov ah, al
         and al, 0xF0
-        or al, 0x08
+        or al, 0x06
         mov [gs:m_reg+bx], al
         shl ah, 4
         or ah, 0x08
@@ -1428,6 +1633,7 @@ e_winon:
 ; parar la tarjeta emulada: flujo, interrupciones, puertos y canales de DMA
 e_stop:
         mov byte [e_on], 0
+        call e_rtc_off              ; [SB-EOI]
         cmp byte [dev_type], 4
         jne .ac
         push fs
@@ -1591,6 +1797,15 @@ e_start:
         mov si, e_ranges
         mov ax, 0xDD01
         int 0x67
+        ; [SB-PM] el estado de la FM, para que HSPDPMI conteste él mismo las
+        ; lecturas del estado de la AdLib de los programas en modo protegido
+        ; (los juegos leen el 388h decenas de veces por cada escritura)
+        movzx edx, word [e_seg]
+        shl edx, 4
+        add edx, fm_stat
+        mov ax, 0xDD05
+        int 0x67
+        call e_rtc_arm              ; [SB-EOI] (sin IRQ de la tarjeta)
         ; abrir la IRQ de la tarjeta de verdad
         mov cl, [e_hwirq]
         test cl, cl

@@ -4,6 +4,9 @@
 ;
 ;  Uso:  HSPDPMI        instalar (en AUTOEXEC.BAT; necesita HSPXMS.SYS u otro
 ;                       gestor XMS y un 386 o superior)
+;        HSPDPMI /SB    [SB-PM] instalar solo si HSPSND emula la Sound Blaster
+;                       (HSPEMM + HSPSND /SB): es lo que da sonido a los juegos
+;                       con DOS/4GW; si no, no gasta memoria
 ;        HSPDPMI /D     descargar: lo quita de la memoria si no hay clientes
 ;                       (para los programas que traen su propio extensor);
 ;                       si después se cargó otro residente que usa INT 2Fh,
@@ -17,6 +20,9 @@
 ;  - Sin paginación ni V86: el cliente corre en modo protegido (anillo 3, con
 ;    IOPL 3) y, para las interrupciones y las llamadas a DOS/BIOS, se vuelve a
 ;    modo real de verdad (conmutación «en crudo» por CR0) y se regresa.
+;  - [SB-PM] Con HSPEMM y HSPSND /SB (Sound Blaster emulada), IOPL 0 y el
+;    mapa de E/S de la TSS: la E/S de la SB del cliente se hace en modo V86
+;    (ver sbpm_gp y docs/HSPSB.md).
 ;  - El servidor corre en anillo 0, siempre con las interrupciones cerradas.
 ;    Toda entrada desde el anillo 3 es por una puerta de interrupción de la
 ;    IDT, que cambia a la pila de anillo 0 de la TSS.
@@ -132,6 +138,11 @@ rm_idtr     dw 0x3FF
             dd 0
             align 4
 tss         times 104 db 0
+; [SB-PM] mapa de permisos de E/S (puertos 0-3FFh) para atrapar los de la
+; Sound Blaster emulada; los de encima de 3FFh caen fuera (también fallan)
+tss_iomap   times 128 db 0
+            db 0xFF
+TSS_LIM     equ tss_iomap + 128 - tss
 gdt         dq 0
             dw 0xFFFF, 0
             db 0, 0x9A, 0, 0        ; 08 código del servidor
@@ -143,7 +154,7 @@ gdt         dq 0
             db 0, 0x92, 0, 0        ; 20 bloque del servidor
             dw 0xFFFF, 0
             db 0, 0x92, 0, 0        ; 28 LDT como datos
-            dw 103, 0
+            dw TSS_LIM, 0           ; [SB-PM] (con el mapa de E/S)
             db 0, 0x89, 0, 0        ; 30 TSS
             dw 0xFFFF, 0
             db 0, 0x82, 0, 0        ; 38 LDT
@@ -183,8 +194,24 @@ vt_dir      dd 0                    ; dirección del directorio (primer mega)
 vt_next     dd 0                    ; siguiente tabla libre del fondo
 vt_end      dd 0                    ; fin del fondo
 vt_handle   dw 0                    ; bloque XMS de las tablas (0: ninguno)
+vt_seg      dw 0                    ; [SB-PM] bloque de DOS del directorio (0: tras el programa)
             times 80 db 0           ; pila para volver al modo V86
 vcpi_stk:
+
+; ---- [SB-PM] Sound Blaster emulada (HSPSND /SB) para los clientes: con
+;      HSPEMM, si HSPSND emula la tarjeta, los clientes corren con IOPL 0 y el
+;      mapa de E/S de la TSS marca sus puertos (y los del 8237 cedidos). El
+;      fallo de protección que da cada IN/OUT se atiende aquí: la E/S se hace
+;      en modo V86 (sbpm_rmio), donde la atrapa el monitor de HSPEMM y la
+;      lleva a HSPSND como la de un programa de modo real. Con IOPL 0 también
+;      fallan CLI y STI: se emulan (cambian IF en el marco) ----
+sbpm_on     db 0                    ; 1 = clientes con IOPL 0
+sbpm_step   db 0                    ; 1 = paso a paso tras un CLI
+sbpm_pend   db 0                    ; 1 = la instrucción de antes era POPF/IRET
+sbpm_pif    db 0                    ;     y este es el IF que sacaba
+            align 4
+sbpm_fm     dd 0                    ; estado de la FM de HSPSND (lineal) o 0
+sbpm_list   times 13*2+1 dw 0xFFFF  ; pares (primero, último) de HSPEMM
 
 ; ---- estado de cada cliente (se guarda entero al entrar otro) ----
 state_begin:
@@ -366,6 +393,15 @@ int2f:
         mov [0x2F*4+2], cx
         mov bl, 2
         call vt_free
+        mov cx, [cs:vt_seg]         ; [SB-PM] el bloque aparte del directorio
+        jcxz .q1
+        push es
+        push ax
+        mov es, cx
+        mov ah, 0x49
+        int 0x21
+        pop ax
+        pop es
 .q1:
         mov [cs:oculto], bl         ; (1: desactivado; si se descarga, da igual)
         pop cx
@@ -410,6 +446,7 @@ dpmi_entry:
 .have:
         cmp byte [level], MAXLEVEL
         jae .fail
+        call sbpm_query             ; [SB-PM]
         mov ah, 0x51
         int 0x21                    ; BX = PSP del cliente
         cli
@@ -1282,6 +1319,7 @@ hook_pm:
         jae .s
         mov [rm_free], si
 .s:
+        push dword [lpm_free]       ; [SB-PM]
         push dword [tss+4]
         movzx eax, sp
         mov [tss+4], eax
@@ -1292,6 +1330,7 @@ hook_pm:
         jb lpm_overflow
         mov dx, R3_HOOKRET
         call lpm_iret_frame
+        mov [lpm_free], ecx         ; [SB-PM] (en uso hasta que vuelva)
         push dword SEL_LPM
         push ecx
         push dword 0x3002
@@ -1351,6 +1390,7 @@ hook_ret:       ; BP -> marco; encima: ESP0 anterior, rm_free, vector, SI, DX
 .nc:
         lea sp, [bp+CF_SIZE]
         pop dword [tss+4]
+        pop dword [lpm_free]        ; [SB-PM]
         pop word [rm_free]
         pop ax
         pop si
@@ -1434,6 +1474,7 @@ cb_pm:
         mov di, gdt+(SEL_RMSTK & ~7)
         call gdt_base
         pop di
+        push dword [lpm_free]       ; [SB-PM]
         push dword [tss+4]
         movzx eax, sp
         mov [tss+4], eax
@@ -1444,6 +1485,7 @@ cb_pm:
         jb lpm_overflow
         mov dx, R3_CBRET
         call lpm_iret_frame
+        mov [lpm_free], ecx         ; [SB-PM] (en uso hasta que vuelva)
         push dword SEL_LPM
         push ecx
         push dword 0x3002
@@ -1481,6 +1523,7 @@ cb_ret:         ; BP -> marco; ES:(E)DI del cliente = registros de modo real
         pop es
         lea sp, [bp+CF_SIZE]
         pop dword [tss+4]
+        pop dword [lpm_free]        ; [SB-PM]
         pop dword [gdt+(SEL_RMSTK & ~7)+4]
         pop dword [gdt+(SEL_RMSTK & ~7)]
         pop word [rm_free]
@@ -1567,6 +1610,10 @@ raw_rm2pm:
         movzx eax, word [raw_fl]
         and ax, 0x0200
         or ax, 0x3002
+        cmp byte [sbpm_on], 0       ; [SB-PM]
+        je .io3                     ; [SB-PM]
+        and ah, 0xCF                ; [SB-PM] IOPL 0
+.io3:                               ; [SB-PM]
         push eax
         movzx eax, si
         push eax
@@ -1642,6 +1689,9 @@ int_entry:
 ; salir al anillo 3 con el marco de BP
 frame_exit:
         mov sp, bp
+        cmp byte [sbpm_on], 0       ; [SB-PM] IOPL 0: la E/S de la SB falla
+        je fx_segs                  ; [SB-PM]
+        and byte [bp+CF_EFL+1], 0xCF ; [SB-PM]
 fx_segs:
         pop gs
         pop fs
@@ -1781,6 +1831,26 @@ get_lpm:
 .x:
         cmp cx, 0x100
         jb lpm_overflow
+        ; [SB-PM] lo de encima queda en uso hasta que el manejador vuelva:
+        ; si cambia de pila y le llega otra interrupción, la nueva va debajo
+        ; (antes se ponía otra vez en la cima y pisaba el marco de vuelta del
+        ; primero: con DOS/4GW y el sonido, «pila de modo real agotada» o un
+        ; fallo en el servidor). El valor de antes, justo encima del marco.
+        sub cx, 4
+        push eax
+        mov eax, [lpm_free]
+        mov [ss:ecx+HB_LPM], eax
+        mov [lpm_free], ecx
+        pop eax
+        ret
+; [SB-PM] el manejador ha vuelto: su marco ya no está y ESI (16 bits) apunta
+; al valor de lpm_free de antes
+lpm_pop:
+        push eax
+        movzx esi, si
+        mov eax, [ss:esi+HB_LPM]
+        mov [lpm_free], eax
+        pop eax
         ret
 
 ; guardar el marco actual (su parte IRET se queda arriba, con el ESP0
@@ -1933,6 +2003,8 @@ chain_default:
         jmp frame_exit
 
 lpm_ret:
+        mov si, [bp+CF_ESP]         ; [SB-PM]
+        call lpm_pop                ; [SB-PM]
         call unnest_frame
         jmp frame_exit
 
@@ -2013,6 +2085,18 @@ restore_env:
 ;  Excepciones
 ; =============================================================================
 exception:      ; BP -> marco, [exc_err]
+        cmp byte [bp+CF_VEC], 13    ; [SB-PM] ¿IN/OUT, CLI o STI con IOPL 0?
+        jne .nsb                    ; [SB-PM]
+        cmp byte [sbpm_on], 0       ; [SB-PM]
+        je .nsb                     ; [SB-PM]
+        call sbpm_gp                ; [SB-PM]
+        jnc frame_exit              ; [SB-PM]
+.nsb:                               ; [SB-PM]
+        cmp byte [bp+CF_VEC], 1     ; [SB-PM] paso a paso tras un CLI
+        jne .ndb                    ; [SB-PM]
+        call sbpm_db                ; [SB-PM]
+        jnc frame_exit              ; [SB-PM]
+.ndb:                               ; [SB-PM]
         movzx bx, byte [bp+CF_VEC]
         imul si, bx, 6
         add si, excvec
@@ -2072,6 +2156,13 @@ exception:      ; BP -> marco, [exc_err]
 ; en su pila dice dónde seguir
 exc_ret:
         call client_stack
+        mov si, di                  ; [SB-PM] lpm_free de antes: encima
+        add si, 24                  ; [SB-PM] del marco (32 octetos, o 16)
+        cmp byte [is32], 0          ; [SB-PM]
+        jne .s32                    ; [SB-PM]
+        sub si, 12                  ; [SB-PM]
+.s32:                               ; [SB-PM]
+        call lpm_pop                ; [SB-PM]
         cmp byte [is32], 0
         je .w
         mov eax, [es:edi+4]
@@ -3750,6 +3841,420 @@ s0902:
         clc
         ret
 
+; =============================================================================
+;  [SB-PM] E/S de los clientes con IOPL 0 (Sound Blaster emulada)
+; =============================================================================
+; (modo real/V86) consultar a HSPEMM qué puertos atrapar. DS = servidor.
+sbpm_query:
+        pusha
+        push es
+        mov byte [sbpm_on], 0
+        mov dword [sbpm_fm], 0
+        push cs
+        pop es
+        mov di, tss_iomap
+        mov cx, 64
+        xor ax, ax
+        rep stosw
+        cmp byte [vcpi], 0
+        je .r
+        mov di, sbpm_list
+        mov word [di], 0xFFFF
+        xor cx, cx
+        xor edx, edx
+        mov ax, 0xDD04
+        int 0x67
+        test ah, ah
+        jnz .off
+        jcxz .off
+        mov [sbpm_fm], edx
+        mov si, sbpm_list
+.p:
+        lodsw
+        cmp ax, 0xFFFF
+        je .done
+        mov bx, ax
+        lodsw
+        mov dx, ax
+.b:
+        cmp bx, 0x400
+        jae .p
+        bts [tss_iomap], bx
+        cmp bx, dx
+        jae .p
+        inc bx
+        jmp .b
+.done:
+        mov byte [sbpm_on], 1
+        jmp .r
+.off:
+        mov word [sbpm_list], 0xFFFF
+.r:
+        pop es
+        popa
+        ret
+
+; (modo V86) la E/S del cliente: CL = 1 OUT, 2 16 bits, 4 32 bits; DX =
+; puerto; EAX = valor. El monitor de HSPEMM la atrapa (este segmento no es
+; el de HSPSND) y la lleva a HSPSND.
+sbpm_rmio:
+        test cl, 1
+        jnz .out
+        test cl, 4
+        jnz .i32
+        test cl, 2
+        jnz .i16
+        in al, dx
+        retf
+.i16:
+        in ax, dx
+        retf
+.i32:
+        in eax, dx
+        retf
+.out:
+        test cl, 4
+        jnz .o32
+        test cl, 2
+        jnz .o16
+        out dx, al
+        retf
+.o16:
+        out dx, ax
+        retf
+.o32:
+        out dx, eax
+        retf
+
+; fallo de protección general del cliente (BP -> marco): si es un IN/OUT, un
+; CLI o un STI, se hace aquí y se sigue tras la instrucción. CF = 1 si no.
+; la instrucción del cliente en CS:EIP (BP -> marco): ESI = tras los
+; prefijos, EDI = su comienzo (lineal), AL = código, CL bit 0 = operando de
+; 32 bits, CH = 1 si el código es de 32 bits. CF = 1 si no se puede.
+sbpm_dec:
+        movzx ebx, word [bp+CF_CS]
+        test bl, 4
+        jz .no
+        lar eax, ebx
+        jnz .no
+        shr eax, 22
+        and al, 1
+        mov ch, al
+        mov si, bx
+        and si, 0xFFF8
+        call desc_base
+        mov esi, [bp+CF_EIP]
+        test ch, ch
+        jnz .e32
+        movzx esi, si
+.e32:
+        add esi, eax
+        mov edi, esi
+        mov cl, ch
+        mov ah, 15
+.pre:
+        mov al, [fs:esi]
+        inc esi
+        cmp al, 0x66
+        je .p66
+        cmp al, 0x67
+        je .pn
+        cmp al, 0xF0
+        je .pn
+        cmp al, 0xF2
+        je .pn
+        cmp al, 0xF3
+        je .pn
+        cmp al, 0x26
+        je .pn
+        cmp al, 0x2E
+        je .pn
+        cmp al, 0x36
+        je .pn
+        cmp al, 0x3E
+        je .pn
+        cmp al, 0x64
+        je .pn
+        cmp al, 0x65
+        je .pn
+        clc
+        ret
+.p66:
+        xor cl, 1
+.pn:
+        dec ah
+        jnz .pre
+.no:
+        stc
+        ret
+
+; [SB-PM] Con IOPL 0, POPF e IRET no cambian IF: tras PUSHF / CLI / ... /
+; POPF (lo hacen las bibliotecas de sonido de Apogee —Duke Nukem 3D— y
+; otras) el cliente seguiría sin interrupciones para siempre (se cuelga
+; esperando al reloj). Por eso, tras emular un CLI se va paso a paso
+; (TF) hasta que vuelvan a abrirse: antes de cada POPF o IRET se mira el IF
+; que van a sacar de la pila y, después, se pone en el marco.
+; Excepción de depuración (1) del cliente (BP -> marco); CF = 1 si no es
+; nuestra.
+sbpm_db:
+        ; (con IOPL 0 en marcha, toda excepción de depuración es nuestra: un
+        ; marco guardado con TF puede volver cuando ya no se iba paso a paso)
+        mov byte [sbpm_step], 1
+        cmp byte [sbpm_pend], 0
+        je .np
+        mov byte [sbpm_pend], 0
+        and byte [bp+CF_EFL+1], 0xFD
+        cmp byte [sbpm_pif], 0
+        je .np
+        or byte [bp+CF_EFL+1], 0x02
+.np:
+        test byte [bp+CF_EFL+1], 0x02
+        jz .step
+        mov byte [sbpm_step], 0     ; abiertas otra vez: se acabó el paso a paso
+        and byte [bp+CF_EFL+1], 0xFE
+        clc
+        ret
+.step:
+        or byte [bp+CF_EFL+1], 0x01
+        call sbpm_dec
+        jc .ok
+        cmp al, 0x9D                ; POPF: IF en [ESP]
+        mov dx, 0
+        je .pk
+        cmp al, 0xCF                ; IRET: IF en [ESP+4] u [ESP+8]
+        jne .ok
+        mov dx, 4
+        test cl, 1
+        jz .pk
+        mov dx, 8
+.pk:
+        movzx ebx, word [bp+CF_SS]
+        mov si, bx
+        and si, 0xFFF8
+        lar eax, ebx
+        jnz .ok
+        test eax, 0x400000
+        push eax
+        mov si, bx
+        and si, 0xFFF8
+        test bl, 4
+        jz .gdt
+        call desc_base
+        jmp .base
+.gdt:
+        pop eax
+        jmp .ok
+.base:
+        mov ebx, eax                ; base de la pila
+        pop eax
+        mov esi, [bp+CF_ESP]
+        test eax, 0x400000
+        jnz .b32
+        movzx esi, si
+.b32:
+        movzx edx, dx
+        add esi, edx
+        add esi, ebx
+        mov al, [fs:esi+1]
+        shr al, 1
+        and al, 1
+        mov [sbpm_pif], al
+        mov byte [sbpm_pend], 1
+.ok:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+sbpm_gp:
+        cmp dword [exc_err], 0
+        jne .no
+        call sbpm_dec
+        jc .no
+.op:
+        cmp al, 0xFA
+        je .cli
+        cmp al, 0xFB
+        je .sti
+        mov bl, al
+        and bl, 0xF4
+        cmp bl, 0xE4
+        jne .no                     ; E4-E7, EC-EF
+        movzx edx, byte [fs:esi]
+        test al, 8
+        jnz .dx
+        inc esi
+        jmp .pt
+.dx:
+        movzx edx, word [bp+CF_EDX]
+.pt:
+        ; CL = tipo como en HSPEMM: bit 0 OUT, bit 1 16 bits, bit 2 32 bits
+        mov bl, cl
+        xor cl, cl
+        test al, 1
+        jz .k8
+        mov cl, 2
+        test bl, 1
+        jz .k8
+        mov cl, 4
+.k8:
+        test al, 2
+        jz .kin
+        or cl, 1
+.kin:
+        ; lectura del estado de la AdLib (220h, 228h, 388h): sin ir a V86
+        test cl, cl
+        jnz .nfm
+        cmp dword [sbpm_fm], 0
+        je .nfm
+        cmp dx, 0x388
+        je .fm
+        cmp dx, 0x228
+        je .fm
+        cmp dx, 0x220
+        jne .nfm
+.fm:
+        mov ebx, [sbpm_fm]
+        mov al, [fs:ebx]
+        or al, 6
+        mov [bp+CF_EAX], al
+        jmp .adv
+.nfm:
+        push esi
+        push edi
+        mov eax, [bp+CF_EAX]
+        call sbpm_listed
+        jc .direct
+        call sbpm_v86io
+        jmp .res
+.direct:
+        call sbpm_r0io
+.res:
+        pop edi
+        pop esi
+        test cl, 1
+        jnz .adv
+        test cl, 4
+        jnz .r32
+        test cl, 2
+        jnz .r16
+        mov [bp+CF_EAX], al
+        jmp .adv
+.r16:
+        mov [bp+CF_EAX], ax
+        jmp .adv
+.r32:
+        mov [bp+CF_EAX], eax
+        jmp .adv
+.cli:
+        and byte [bp+CF_EFL+1], 0xFD
+        or byte [bp+CF_EFL+1], 0x01 ; paso a paso (ver sbpm_db)
+        mov byte [sbpm_step], 1
+        mov byte [sbpm_pend], 0
+        jmp .adv
+.sti:
+        or byte [bp+CF_EFL+1], 0x02
+        cmp byte [sbpm_step], 0
+        je .adv
+        mov byte [sbpm_step], 0
+        and byte [bp+CF_EFL+1], 0xFE
+.adv:
+        sub esi, edi
+        add [bp+CF_EIP], si         ; (con 32 bits, sin pasar de 64 KB)
+        jnc .ok
+        movzx ebx, word [bp+CF_CS]
+        lar eax, ebx
+        test eax, 0x400000
+        jz .ok
+        add word [bp+CF_EIP+2], 1
+.ok:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; ¿el puerto DX es de los que lleva HSPEMM? CF = 1 si no. Conserva todo.
+sbpm_listed:
+        push si
+        mov si, sbpm_list
+.l:
+        cmp word [si], 0xFFFF
+        je .n
+        cmp dx, [si]
+        jb .s
+        cmp dx, [si+2]
+        jbe .y
+.s:
+        add si, 4
+        jmp .l
+.n:
+        pop si
+        stc
+        ret
+.y:
+        pop si
+        clc
+        ret
+
+; E/S de verdad desde el anillo 0 (los puertos de encima de 3FFh, fuera del
+; mapa). CL = tipo, DX = puerto, EAX = valor -> EAX
+sbpm_r0io:
+        test cl, 1
+        jnz .out
+        test cl, 4
+        jnz .i32
+        test cl, 2
+        jnz .i16
+        in al, dx
+        ret
+.i16:
+        in ax, dx
+        ret
+.i32:
+        in eax, dx
+        ret
+.out:
+        test cl, 4
+        jnz .o32
+        test cl, 2
+        jnz .o16
+        out dx, al
+        ret
+.o16:
+        out dx, ax
+        ret
+.o32:
+        out dx, eax
+        ret
+
+; la E/S en modo V86 (sbpm_rmio), sin interrupciones. CL = tipo, DX =
+; puerto, EAX = valor -> EAX. Conserva CL.
+sbpm_v86io:
+        mov [hrm+0x1C], eax
+        movzx edx, dx
+        mov [hrm+0x14], edx
+        movzx ecx, cl
+        mov [hrm+0x18], ecx
+        push cx
+        ; sin interrupciones: así no se anidan (cada nivel gasta pila de modo
+        ; real) y HSPSND no entrega su IRQ al volver del puerto; la entrega
+        ; en la interrupción de la tarjeta, en la del RTC o en el reloj
+        mov word [hrm+0x20], 0x0002
+        mov word [hrm+0x2A], sbpm_rmio
+        mov ax, [hostseg]
+        mov [hrm+0x2C], ax
+        mov [hrm+0x22], ax
+        mov [hrm+0x24], ax
+        mov dword [hrm+0x26], 0
+        mov al, 1
+        call host_rm_call
+        pop cx
+        jc rm_overflow
+        mov eax, [hrm+0x1C]
+        ret
+
 ; ---- textos residentes ----
 m_exc       db 13, 10, "HSPDPMI: excepción ", 0
 m_exc2      db "h (", 0
@@ -3807,10 +4312,39 @@ install:
         and al, 0xDF
         cmp al, 'D'
         je descargar
+        cmp al, 'S'                 ; [SB-PM] /SB
+        jne .arg
+        mov byte [opt_sb], 1
         jmp .arg
 .noarg:
         mov dx, msg_title
         call print
+        ; [SB-PM] /SB: solo si hay Sound Blaster emulada (HSPEMM + HSPSND /SB)
+        cmp byte [opt_sb], 0
+        je .sbok
+        push es
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x67*4]
+        or ax, [es:0x67*4+2]
+        pop es
+        jz .nosb
+        mov di, sb_tmp
+        xor cx, cx
+        mov ax, 0xDD04
+        int 0x67
+        push cs
+        pop es
+        test ah, ah
+        jnz .nosb
+        test cx, cx
+        jnz .sbok
+.nosb:
+        mov dx, msg_nosb
+        call print
+        mov ax, 0x4C00
+        int 0x21
+.sbok:
         ; ¿hay una copia desactivada? Se activa de nuevo
         mov ax, 0xD600
         mov bx, 0x4844
@@ -3964,7 +4498,7 @@ install:
         mov di, gdt+(SEL_R3 & ~7)
         call gdt_base
         mov word [tss+8], SEL_HB    ; SS0
-        mov word [tss+102], 104     ; sin mapa de E/S
+        mov word [tss+102], tss_iomap - tss ; [SB-PM] mapa de E/S
         cmp byte [vcpi], 0
         je .novcpi
         call vcpi_setup
@@ -4041,9 +4575,57 @@ vcpi_setup:
         and ax, 0xFF00
         mov [vdir], ax
         add ax, 0x200
+        ; [SB-PM] ¿cabe en el bloque de memoria del programa? Con LH, en un
+        ; bloque de memoria superior pequeño, no siempre: el directorio se
+        ; ponía encima de la pila (al final del bloque) o detrás, en lo de
+        ; otro. Entonces, en un bloque aparte
+        mov bx, [cs:2]
+        sub bx, 0x40                ; (y 1 KB para la pila, que está al final)
+        cmp ax, bx
+        jbe .cabe
+        mov ax, 0x5800              ; (con LH la estrategia puede ser
+        int 0x21                    ; «solo arriba»: se pide abajo)
+        push ax
+        mov ax, 0x5802
+        int 0x21
+        push ax
+        mov ax, 0x5803
+        xor bx, bx
+        int 0x21
+        mov ax, 0x5801
+        xor bx, bx
+        int 0x21
+        mov ah, 0x48
+        mov bx, 0x300
+        int 0x21
+        pushf
+        pop si
+        mov di, ax
+        pop bx                      ; enlace de la memoria superior
+        xor bh, bh
+        mov ax, 0x5803
+        int 0x21
+        pop bx                      ; estrategia
+        mov ax, 0x5801
+        int 0x21
+        mov ax, di
+        push si
+        popf
+        mov dx, msg_nomem
+        jc .err
+        mov [vt_seg], ax
+        add ax, 0xFF
+        and ax, 0xFF00
+        mov [vdir], ax
+        mov ax, resident_end + 15
+        shr ax, 4
+        mov [vcpi_top], ax
+        jmp .cero
+.cabe:
         mov bx, cs
         sub ax, bx
         mov [vcpi_top], ax          ; párrafos que quedan residentes
+.cero:
         ; a cero
         mov es, [vdir]
         xor di, di
@@ -4419,6 +5001,9 @@ print:
         ret
 
 msg_title   db "HSPDPMI 0.1 - servidor DPMI 0.9 de Hispa-DOS", 13, 10, "$"
+msg_nosb    db "/SB: no hay Sound Blaster emulada (HSPEMM y HSPSND /SB); no hace falta: no se instala.", 13, 10, "$"
+opt_sb      db 0                    ; [SB-PM]
+sb_tmp      times 13*4+2 db 0       ; [SB-PM]
 msg_react   db "HSPDPMI: estaba desactivado en memoria; activado de nuevo.", 13, 10, "$"
 msg_noinst  db "HSPDPMI no está en memoria.", 13, 10, "$"
 msg_ocupado db "HSPDPMI: no se puede descargar mientras haya programas usándolo.", 13, 10, "$"
@@ -4428,6 +5013,7 @@ msg_ok      db "Instalado: clientes de 16 y de 32 bits, memoria de XMS.", 13, 10
 msg_no386   db "HSPDPMI: hace falta un procesador 386 o superior.", 13, 10, "$"
 msg_v86     db "HSPDPMI: el procesador ya está en modo protegido y no hay un servidor VCPI (HSPEMM); no se instala.", 13, 10, "$"
 msg_vcpi    db "Con HSPEMM cargado: el modo protegido se pide por VCPI.", 13, 10, "$"
+msg_nomem   db "HSPDPMI: no hay memoria para las tablas de páginas (12 KB).", 13, 10, "$"
 msg_vnomem  db "HSPDPMI: con HSPEMM (modo V86) y sin páginas de 4 MB, las tablas de páginas van en memoria extendida y no queda bastante: hacen falta $"
 msg_vnomem2 db " KB de XMS; no se instala.", 13, 10, "$"
 msg_vtop    db "HSPDPMI: no se ha podido medir la memoria (INT 15h E801h y XMS) para las tablas de páginas; no se instala.", 13, 10, "$"

@@ -311,6 +311,8 @@ def prueba(juego, orden, a, iso, sal):
         hdd = os.path.join(tmp, 'c.img')
         if a.modo == 'hdd':
             n = iso.extrae(d, os.path.join(tmp, 'x', carpeta))
+            for f in a.fichero or []:      # [SB-PM] p. ej. un .CFG propio
+                shutil.copy(f, os.path.join(tmp, 'x', carpeta, os.path.basename(f).upper()))
             haz_disco(hdd, os.path.join(tmp, 'x', carpeta), carpeta, n)
             shutil.rmtree(os.path.join(tmp, 'x'))
         else:
@@ -328,6 +330,8 @@ def prueba(juego, orden, a, iso, sal):
             cfg = cfg.replace(b'REM DOS=UMB', b'DOS=UMB')
             if b'\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS' not in cfg:
                 raise RuntimeError('el CONFIG.SYS del disquete no trae HSPEMM')
+            # [SB-PM] el disquete de uso trae menú: HSPEMM va en «Juegos»
+            cfg = cfg.replace(b'MENUDEFAULT=NORMAL', b'MENUDEFAULT=JUEGOS')
         for l in a.config or []:
             cfg += l.encode('cp437') + b'\r\n'
         open(os.path.join(tmp, 'CONFIG.SYS'), 'wb').write(cfg)
@@ -372,10 +376,12 @@ def prueba(juego, orden, a, iso, sal):
             args += ['-device', 'sb16,audiodev=' + voz('sb')]
         if 'adlib' in a.tarjeta:
             args += ['-device', 'adlib,audiodev=' + voz('fm')]
+        # [SB-PM] con --audio, también lo que sale por el HD Audio o el AC'97
+        # (la Sound Blaster emulada de HSPSND /SB): columna «hda»
         if 'ac97' in a.tarjeta:
-            args += ['-device', 'AC97,audiodev=snd']
+            args += ['-device', 'AC97,audiodev=' + voz('hda')]
         if 'hda' in a.tarjeta:
-            args += ['-device', 'intel-hda', '-device', 'hda-duplex,audiodev=snd']
+            args += ['-device', 'intel-hda', '-device', 'hda-duplex,audiodev=' + voz('hda')]
         if a.ref:
             # otro DOS (p. ej. MS-DOS 6.22) instalado en una imagen de disco
             # duro, que no se toca (-snapshot); el juego va en D:
@@ -621,6 +627,8 @@ def main():
     ap.add_argument('--conserva-wav', action='store_true', help='con --audio: dejar los .wav en --sal')
     ap.add_argument('--config', action='append', help='línea extra de CONFIG.SYS')
     ap.add_argument('--antes', action='append', help='orden extra en AUTOEXEC antes del juego')
+    ap.add_argument('--fichero', action='append',
+                    help='[SB-PM] fichero local que se copia (encima) en la carpeta del juego (--modo hdd)')
     ap.add_argument('--orden', help='orden a lanzar (con un solo juego)')
     ap.add_argument('--teclas', default='ret,spc,ret,ret,spc',
                     help='teclas (nombres de sendkey) que se pulsan, una por captura')
@@ -689,12 +697,12 @@ def main():
     with ThreadPoolExecutor(max_workers=a.j) as ex:
         resultados = list(ex.map(una, tareas))
     with open(os.path.join(sal, 'tabla.tsv'), 'w', encoding='utf-8') as f:
-        f.write('juego\torden\testado\tdetalle%s\n' % ('\tsb_s\tsb_pico\tfm_s\tfm_pico' if a.audio else ''))
+        f.write('juego\torden\testado\tdetalle%s\n' % ('\tsb_s\tsb_pico\tfm_s\tfm_pico\thda_s\thda_pico' if a.audio else ''))
         for r in resultados:
             au = ''
             if a.audio:
                 x = r.get('audio', {})
-                au = '\t%.2f\t%d\t%.2f\t%d' % (x.get('sb', (0, 0)) + x.get('fm', (0, 0)))
+                au = '\t%.2f\t%d\t%.2f\t%d\t%.2f\t%d' % (x.get('sb', (0, 0)) + x.get('fm', (0, 0)) + x.get('hda', (0, 0)))
             f.write('%s\t%s\t%s\t%s%s\n' % (r['juego'], r['orden'], r['estado'], r['detalle'].replace('\t', ' ').replace('\n', ' '), au))
     cuenta = {}
     for r in resultados:

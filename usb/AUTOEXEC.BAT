@@ -20,6 +20,10 @@ REM la variable BLASTER; con /SB, si el equipo no tiene Sound Blaster (HD
 REM Audio o AC'97), da a los juegos una emulada (si la tiene, usa la real). ----
 REM (El mayor, primero: así caben más en la memoria superior.)
 LH C:\HISPADOS\HSPSND /SB /VOL:80
+REM [SB-PM] Los juegos con DOS/4GW (Doom, Duke Nukem 3D, Mortal Kombat...)
+REM solo oyen la Sound Blaster emulada a través de HSPDPMI. Con /SB solo se
+REM queda si HSPSND la está emulando (si no, no gasta memoria).
+LH C:\HISPADOS\HSPDPMI /SB
 LH C:\HISPADOS\HSPJOY
 LH C:\HISPADOS\HSPRATON
 LH TECLADO SP

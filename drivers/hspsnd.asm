@@ -2809,7 +2809,17 @@ e_prepare:
         int 0x21
         mov al, [e_hwirq]
         test al, al
-        jz .nohw
+        jnz .hwv                    ; [SB-EOI] sin IRQ: el RTC (INT 70h)
+        mov byte [e_rtc], 1         ; [SB-EOI]
+        mov ax, 0x3570              ; [SB-EOI]
+        int 0x21                    ; [SB-EOI]
+        mov [e_oldhw], bx           ; [SB-EOI]
+        mov [e_oldhw+2], es         ; [SB-EOI]
+        mov dx, e_rtcisr            ; [SB-EOI]
+        mov ax, 0x2570              ; [SB-EOI]
+        int 0x21                    ; [SB-EOI]
+        jmp .nohw                   ; [SB-EOI]
+.hwv:                               ; [SB-EOI]
         add al, 8
         cmp al, 16
         jb .v

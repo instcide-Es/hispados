@@ -17,6 +17,7 @@ Hace falta `HSPEMM.SYS` (los puertos solo se pueden atrapar en modo V86):
     CONFIG.SYS     DEVICE=C:\HISPADOS\HSPXMS.SYS
                    DEVICE=C:\HISPADOS\HSPEMM.SYS
     AUTOEXEC.BAT   C:\HISPADOS\HSPSND /SB
+                   C:\HISPADOS\HSPDPMI /SB    (juegos con DOS/4GW)
 
     HSPSND 0.1 - controlador de sonido de Hispa-DOS
     Intel HD Audio en FEBB0000, códec 0, salidas: 03
@@ -25,6 +26,13 @@ Hace falta `HSPEMM.SYS` (los puertos solo se pueden atrapar en modo V86):
     Variable puesta: BLASTER=A220 I5 D1 H5 T6
 
 - Si hay una Sound Blaster de verdad, `/SB` no hace nada (lo dice).
+- `HSPDPMI /SB` ([SB-PM]) solo se queda residente si HSPSND está emulando la
+  tarjeta (32 KB; con `LH`, arriba si cabe). Hace falta para los juegos con
+  DOS/4GW (Doom, Duke Nukem 3D, Mortal Kombat…): sin él van por VCPI y no
+  suenan. La opción «Juegos» del disquete y de la memoria USB ya lo carga.
+- Si el juego está configurado con la IRQ 7 (Doom y Duke Nukem 3D vienen
+  así) y deja la 5 tapada, la IRQ se le entrega en la 7. Mejor configurarlo
+  con la 5.
 - Sin HSPEMM lo dice y HSPSND queda cargado sin emular.
 - La tarjeta emulada va siempre en 220h, DMA 1 y 5, IRQ 5 (IRQ 7 si la 5 es
   la del HD Audio o el AC'97). En el programa de configuración del juego:
@@ -57,13 +65,12 @@ y el puerto de juegos.
 
 ## Límites
 
-- **Programas en modo protegido**: los juegos con extensor de DOS (DOS/4GW:
-  Doom, Duke Nukem 3D…) hacen la E/S de sonido desde modo protegido y, como
-  clientes VCPI, corren en anillo 0: el monitor no puede atraparles los
-  puertos. Con ellos no suena todavía. Siguiente paso: atrapar la E/S en
-  `HSPDPMI` (sus clientes corren en anillo 3; hay que darles un mapa de
-  puertos en su TSS) y que los extensores usen DPMI en vez de VCPI. Es lo
-  que hacen SBEMU y VSBHDA con su servidor DPMI.
+- **Programas en modo protegido** (DOS/4GW: Doom, Duke Nukem 3D, Mortal
+  Kombat…): suenan si usan **DPMI**, es decir, con `HSPDPMI` cargado
+  (DOS/4GW lo prefiere a VCPI si lo encuentra). Sin HSPDPMI van por VCPI,
+  en anillo 0, y no hay forma de atraparles los puertos: en silencio. Ver
+  «Programas en modo protegido (DPMI)». Los extensores que no usan DPMI
+  aunque lo haya (o que traen su propio servidor) siguen sin sonido.
 - **Windows 3.x en modo 386 mejorado** apaga el modo V86 de HSPEMM: sin
   monitor no hay puertos atrapados ni ventana para los registros del HD
   Audio. HSPSND lo ve venir (INT 2Fh AX=1605h), para la tarjeta emulada (una
@@ -72,9 +79,11 @@ y el puerto de juegos.
   Probado con `EMMMISC W`, que hace de Windows; con Windows de verdad, no.
 - La IRQ se entrega cuando HSPSND tiene el control: en la interrupción del
   HD Audio o del AC'97 (cada 5 ms), en el reloj (18 veces por segundo) o al
-  volver de un puerto atrapado. Si el BIOS no ha dado IRQ a la tarjeta (o
-  no llega), solo queda el reloj: suena con más retraso (unos 100 ms) y los
-  bloques de menos de 55 ms llegan a trompicones.
+  volver de un puerto atrapado. Si la BIOS no ha dado IRQ a la tarjeta (el
+  HD Audio Realtek del ThinkPad A275: «IRQ sin asignar»), HSPSND enciende la
+  interrupción periódica del reloj de tiempo real (IRQ 8) a 256 Hz y la usa
+  en su lugar ([SB-EOI], ver «La IRQ»). Si la BIOS está esperando con el RTC
+  (INT 15h AH=83h/86h) se le deja y a 1024 Hz, como espera.
 - El sonido sale con un adelanto fijo de unos 30 ms (lo que tarda en sonar
   lo escrito en el anillo).
 - Probado solo en QEMU (intel-hda + hda-duplex y AC97). **Falta probarlo en
@@ -144,6 +153,79 @@ programa es una interrupción recién llegada. El puerto 20h está vigilado: el
 primer EOI (20h, o 60h+IRQ) que no corresponda a una interrupción de verdad
 de más prioridad se da por el de la IRQ emulada y no llega al 8259.
 
+Además ([SB-EOI], 13/11/2026, por Prince of Persia en el ThinkPad A275):
+
+- **El final de cada bloque, cuando suena.** La voz lee del DMA hasta
+  100 ms antes de que suene; si la IRQ se apuntara entonces, al leer de golpe
+  saldrían varias seguidas y, si el manejador del programa abre las
+  interrupciones, se anidarían (con DOS/4GW, «pila de modo real agotada»).
+  Cada bloque deja apuntada en una cola (8) la trama del anillo en la que
+  acaba, y su IRQ se entrega cuando esa trama ya ha sonado.
+- **Sin IRQ de la tarjeta, el RTC.** Antes solo quedaba el reloj, y si el
+  programa lo engancha y llama al de antes desde su manejador (con las
+  interrupciones cerradas, como Prince of Persia), la IRQ no se podía
+  entregar hasta que el programa tocara un puerto de la SB con las
+  interrupciones abiertas: los sonidos acababan tarde o nunca. La
+  interrupción del RTC llega con las interrupciones abiertas cada 3,9 ms.
+- **El bit de ocupado del DSP parpadea.** En una Sound Blaster de verdad el
+  bit 7 de 22Ch se enciende y se apaga aunque el DSP esté libre. Prince of
+  Persia, para parar un sonido, espera a verlo encendido y luego apagado; con
+  el bit siempre apagado se quedaba esperando a que el sonido acabara (el
+  príncipe, agachado, no se levantaba). Ahora se enciende una de cada cuatro
+  lecturas.
+
+El EOI no era el problema: el que se da por el de la IRQ emulada solo se
+traga si en el 8259 no hay en servicio ninguna IRQ de más prioridad (0-4,
+también la cascada), y la prueba del teclado (KBSB) no pierde ninguna tecla
+ni con el HD Audio sin IRQ.
+
+### Programas en modo protegido (DPMI) [SB-PM]
+
+Los juegos con DOS/4GW (y los demás extensores que usan DPMI) corren como
+clientes de `HSPDPMI` en anillo 3. Si HSPSND emula la tarjeta (HSPEMM se lo
+dice a HSPDPMI con INT 67h AX=DD04h al entrar cada cliente):
+
+1. Los clientes corren con **IOPL 0** y el **mapa de E/S de la TSS** de
+   HSPDPMI marca los puertos que HSPEMM atrapa para HSPSND (220h-22Fh,
+   388h-38Bh, 20h) y los del 8237 de los canales cedidos (00h-0Fh, 81h-83h,
+   87h, 89h-8Bh, C0h-DFh). Los de encima de 3FFh quedan fuera del mapa (se
+   hacen desde el anillo 0, tal cual).
+2. Cada IN/OUT a esos puertos da un fallo de protección; HSPDPMI descodifica
+   la instrucción (con prefijos 66h, de 8, 16 y 32 bits) y la **hace en modo
+   V86** desde un trozo suyo (`sbpm_rmio`), donde el monitor de HSPEMM la
+   atrapa y la lleva a HSPSND igual que la de un programa de modo real (y
+   las del 8237 a la estructura del canal cedido). La dirección del búfer
+   que el juego da al 8237 es la de su memoria de DOS (DPMI 0100h), que en
+   el espacio lineal del cliente y en el de V86 es la misma.
+3. Las lecturas del **estado de la AdLib** (220h, 228h, 388h) las contesta
+   HSPDPMI sin ir a V86, leyendo el octeto de estado de la FM de HSPSND
+   (HSPSND le da su dirección a HSPEMM con AX=DD05h): los juegos leen el
+   388h decenas de veces por cada escritura (en QEMU, 1000 escrituras de la
+   FM pasaron de 3,6 s a 0,2 s).
+4. La **IRQ** la entrega HSPSND como siempre, saltando al vector de modo
+   real; si el cliente tiene manejador de modo protegido (DPMI 0205h),
+   HSPDPMI tiene enganchado ese vector y lo lleva a él.
+5. Con IOPL 0 también fallan **CLI y STI**: se emulan cambiando IF en el
+   marco. Y como POPF e IRET no pueden cambiar IF con IOPL 0, tras emular un
+   CLI se va **paso a paso** (TF) hasta que vuelvan a abrirse: antes de cada
+   POPF o IRET se mira en la pila el IF que van a sacar y después se pone en
+   el marco. Sin esto Duke Nukem 3D (bibliotecas de Apogee: `pushfd / cli /
+   ... / popfd`) se quedaba sin interrupciones y colgado. Los trozos con las
+   interrupciones cerradas son cortos; un bucle largo con CLI iría lento.
+
+Y un fallo de HSPDPMI que salía con cualquier Sound Blaster (también con la
+de verdad, con DOS/4GW y Doom): al llegar una IRQ con el cliente fuera de
+la pila bloqueada, el manejador se ponía otra vez en la cima de esa pila y
+pisaba el marco de vuelta de otro manejador aún en marcha (DOS/4GW cambia de
+pila en sus manejadores): «pila de modo real agotada» o «error interno».
+Ahora lo que está en uso queda reservado hasta que el manejador vuelve.
+
+Y otro, al cargarlo con `LH` en un 386/486 (sin PSE): el directorio de
+páginas de VCPI (8 KB, tras el programa) no se miraba si cabía en el bloque
+de memoria superior y se ponía encima de la pila: se colgaba al instalarse.
+Ahora, si no cabe, va en un bloque de 12 KB aparte, abajo (se suelta con
+`HSPDPMI /D`).
+
 ### Rendimiento: el estado, lejos del código
 
 El estado que cambia a cada muestra (voces, DSP, FM, estructuras de DMA) y
@@ -191,12 +273,45 @@ con HD Audio y sin `sb16` ni `adlib` (13/11/2026):
   cruces por segundo frente a 1500-3000; en la partida, 9000-13000 frente a
   12000-15000).
 - **Prince of Persia**: suena la música de la presentación.
-- **Doom** (DOS/4GW): arranca y se juega, pero en silencio (ver «Límites»).
+- **Doom** (DOS/4GW): sin HSPDPMI, en silencio (VCPI). Con HSPDPMI, ver
+  abajo.
+
+`tests/run_sbpm_tests.sh` ([SB-PM]): `SBPM.COM` (`tests/progs/sbpm.asm`) es
+SBTEST en modo protegido de 32 bits por DPMI, con el manejador de la IRQ de
+modo protegido: con HD Audio, AC'97, `LH` y HD Audio sin IRQ (`SINIRQ.COM`
+le quita la IRQ como la BIOS del A275), y de referencia con una `sb16` de
+verdad (con y sin HSPEMM: IOPL 3). Además del sonido medido: IOPL 0, CLI,
+STI, PUSHFD/CLI/POPFD y 1000 escrituras FM en menos de un segundo.
+
+`tests/run_sbeoi_tests.sh` ([SB-EOI]): `KBSB.COM` (`tests/progs/kbsb.asm`)
+hace como un juego (INT 9 propio, IRQ 5 en autoinicio con bloques cortos y
+un manejador que abre las interrupciones, la FM sonando y el reloj
+enganchado al estilo de Prince of Persia); por QMP se pulsan y sueltan 240
+teclas (flechas con E0) y no se puede perder ninguna. Comprueba también que
+el bit de ocupado parpadea y que la IRQ de un bloque único de 0,1 s llega a
+su hora sin tocar puertos. Con HD Audio, HD Audio sin IRQ, AC'97, `LH`, una
+`sb16` de verdad y sin sonido.
+
+Juegos con DOS/4GW, con HSPEMM + HSPSND /SB + HSPDPMI, HD Audio sin `sb16`
+(QEMU, 13/11/2026; segundos con sonido en ~33 s de grabación):
+
+| Juego | Con IRQ del HD Audio | Sin IRQ (como el A275) | Notas |
+|---|---|---|---|
+| Doom | 8-16 s | 9-11 s | config. con SB 220/5/1 (`-config`) |
+| Doom II | 8 s | — | igual; con su `DEFAULT.CFG` (IRQ 7) arranca pero en silencio |
+| Duke Nukem 3D | 17-19 s | 18 s | con su `DUKE3D.CFG` (IRQ 7) también: 18 s; música FM |
+| Mortal Kombat | 13 s | 13 s | su SETUP: «Sound Blaster (SB)» |
+| Prince of Persia (modo real) | sí | sí | ya no se queda agachado |
+
+Con todos los juegos de la colección en «Juegos» (HSPEMM + HSPSND /SB, HD
+Audio), con HSPDPMI cargado y sin él, salen igual salvo los que necesitan
+más memoria convencional (The Incredible Machine pide 550 KB: HSPDPMI ocupa
+32 KB si no cabe arriba) y los que ya fallaban a ratos por la velocidad.
 
 ## Pendiente
 
 - Probar en hardware real (HD Audio de portátiles: IRQ de PCI, LPIB).
-- Programas en modo protegido: E/S atrapada en HSPDPMI (ver «Límites»).
+- Extensores que no usan DPMI aunque lo haya (o con su propio servidor).
 - OPL3 (estéreo, 18 canales, 4 operadores) y percusión con el ruido real.
 - ADPCM (74h-77h, 16h/17h), DAC directo (10h), grabación.
 - Elegir puerto, IRQ y DMA (`/SB:A240,I7…` o respetar una `BLASTER` ya
@@ -204,5 +319,6 @@ con HD Audio y sin `sb16` ni `adlib` (13/11/2026):
 - Un filtro paso bajo al remuestrear (ahora, interpolación lineal).
 - Anillo más pequeño cuando hay interrupciones de la tarjeta (ahorrar
   memoria convencional).
-- Entregar la IRQ en cuanto el programa abra las interrupciones (hoy espera
+- Entregar la IRQ en cuanto el programa abra las interrupciones (con el RTC
+  ya es como mucho 3,9 ms después; antes podía esperar
   a la siguiente entrada en HSPSND).
