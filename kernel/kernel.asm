@@ -53,6 +53,20 @@ KS_AUX_LEN      equ 512
 ; salir de INT 21h: soltar la pila del núcleo, devolver el marco a la pila
 ; del llamante y volver a ella (quedan por sacar los registros). BP = marco.
 %macro K_LEAVE 0
+        ; las mitades altas de los registros de 32 bits, como llegaron (las
+        ; guarda la entrada de INT 21h justo debajo del marco). MS-DOS no las
+        ; toca nunca; este núcleo y sus drivers sí usan EAX, ECX... y los
+        ; extensores de DOS de 32 bits (DOS/4GW) cuentan con que vuelvan
+        ; intactas: DOOM lanzado desde el CD se quedaba colgado al cargar.
+        mov eax, [bp-4]
+        mov ebx, [bp-8]
+        mov ecx, [bp-12]
+        mov edx, [bp-16]
+        mov esi, [bp-20]
+        mov edi, [bp-24]
+        push word [bp-26]
+        push bp
+        pop ebp                     ; (BP sigue siendo el marco)
         cli
         dec byte [indos]
         mov bx, [F_OWN]
@@ -3776,7 +3790,16 @@ mcb_free_owner:
 .l:
         mov es, bx
         cmp [es:1], ax
+        je .f
+        ; ¿el relleno de un .EXE de este proceso? (ver fn_4b: «RELLENO»)
+        cmp word [es:1], 8
         jne .n
+        cmp [es:5], ax
+        jne .n
+        cmp dword [es:8], 'RELL'
+        jne .n
+        mov word [es:5], 0
+.f:
         mov word [es:1], 0
 .n:
         call mcb_more
@@ -8610,6 +8633,15 @@ int21:
         rep movsw
         mov ds, bx
         mov bp, sp
+        ; mitades altas de los registros de 32 bits (ver K_LEAVE); hasta aquí
+        ; solo se han tocado registros de 16 bits. Quedan en [bp-4]...[bp-28]
+        push eax
+        push ebx
+        push ecx
+        push edx
+        push esi
+        push edi
+        push ebp
         inc byte [indos]
         sti
         mov ax, [cur_psp]
@@ -8635,6 +8667,32 @@ int21:
         call trace_hex
         mov al, [F_AL]
         call trace_hex
+        ; memoria y procesos (48h-4Ah, 26h, 31h, 55h): BX, DX y ES
+        mov al, [F_AH]
+        cmp al, 0x26
+        je .tm
+        cmp al, 0x31
+        je .tm
+        cmp al, 0x55
+        je .tm
+        cmp al, 0x48
+        jb .tm0
+        cmp al, 0x4A
+        ja .tm0
+.tm:
+        mov al, ' '
+        call ser_putc
+        mov ax, [F_BX]
+        call trace_hex16
+        mov al, ' '
+        call ser_putc
+        mov ax, [F_DX]
+        call trace_hex16
+        mov al, ' '
+        call ser_putc
+        mov ax, [F_ES]
+        call trace_hex16
+.tm0:
         ; nombre de fichero en DS:DX
         mov al, [F_AH]
         cmp al, 0x09
@@ -8728,6 +8786,15 @@ i21_ret:
         call trace_hex
         mov al, [F_AL]
         call trace_hex
+        cmp byte [F_AH], 0x48       ; (48h/4Ah con error: BX = mayor bloque)
+        jb .tnb
+        cmp byte [F_AH], 0x4A
+        ja .tnb
+        mov al, ' '
+        call ser_putc
+        mov ax, [F_BX]
+        call trace_hex16
+.tnb:
         test byte [F_FL], 1
         jz .tnc
         mov al, 'C'
@@ -8754,6 +8821,12 @@ i21_ret:
         iret
 
 %ifdef TRACE
+; AX -> cuatro cifras hexadecimales por el puerto serie
+trace_hex16:
+        push ax
+        mov al, ah
+        call trace_hex
+        pop ax
 ; AL -> dos cifras hexadecimales por el puerto serie
 trace_hex:
         push ax
@@ -9820,6 +9893,18 @@ fn_3d:
         jne .ok
         test byte [di+SFT_ATTR], 1
         jz .ok
+        ; En un CD/DVD todo es de solo lectura, pero muchos juegos abren sus
+        ; datos para leer y escribir (AL=2) aunque solo lean: se les deja, con
+        ; el handle de solo lectura (lo que se intente escribir da «acceso
+        ; denegado»). Abrir solo para escribir (AL=1) sigue sin poderse.
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .deny
+        and al, 3
+        cmp al, 2
+        jne .deny
+        and byte [di+SFT_MODE], 0xFC
+        jmp .ok
+.deny:
         mov byte [di+SFT_REF], 0
         mov ax, E_ACCESS
         jmp ret_err
@@ -11368,6 +11453,7 @@ fn_4b:
         mov ax, E_FORMAT
         jmp .fail_env
 .exe_alloc:
+        mov word [ex_pad], 0
         ; tamaño de la imagen
         movzx eax, word [ex_hdr+4]
         shl eax, 9
@@ -11391,6 +11477,7 @@ fn_4b:
         cmp eax, 0xFFFF
         ja .nomem_e
         mov [ex_min], ax
+.exe_again:
         ; MINALLOC = MAXALLOC = 0: como MS-DOS, el programa recibe el bloque
         ; libre mayor entero y la imagen se carga al final (el PSP queda al
         ; principio). KRNL386.EXE de Windows 3.1x depende de ello: da por
@@ -11428,8 +11515,44 @@ fn_4b:
         call mcb_alloc
         jc .nomem
 .gotexe:
+        ; Ningún .EXE se carga en los primeros 64 KB (lo que hace LOADFIX en
+        ; MS-DOS): los comprimidos con EXEPACK y algunos cargadores de juegos
+        ; salen con «Packed file is corrupt» si su segmento es menor que
+        ; 1000h, y con el núcleo en la HMA y el intérprete partido los
+        ; programas ya quedan tan abajo. El hueco hasta 1000h se queda como
+        ; un bloque del sistema («RELLENO») apuntado al programa: se libera
+        ; cuando termina (mcb_free_owner). No puede ser del propio programa:
+        ; hay cargadores que liberan todos sus bloques y luego reservan, y lo
+        ; que piden caería en ese hueco pequeño.
+        cmp ax, 0x1000
+        jae .segok
+        cmp word [ex_pad], 0
+        jne .segok
+        mov es, ax
+        mov dx, ax
+        call mcb_free
+        mov bx, 0x1000
+        sub bx, dx
+        call mcb_alloc
+        jc .exe_again               ; (no debería: se acaba de liberar más)
+        mov [ex_pad], ax
+        jmp .exe_again
+.segok:
         mov [ex_psp], ax
         mov [ex_size], bx
+        ; el relleno: bloque del sistema con el PSP del programa apuntado
+        mov dx, [ex_pad]
+        test dx, dx
+        jz .nopad
+        push es
+        dec dx
+        mov es, dx
+        mov word [es:1], 8
+        mov [es:5], ax
+        mov dword [es:8], 'RELL'
+        mov dword [es:12], 'ENO'
+        pop es
+.nopad:
         jmp .allocd
 .bad_exe:
         mov ax, E_FORMAT
@@ -11438,6 +11561,16 @@ fn_4b:
 .nomem:
         mov ax, E_NOMEM
 .fail_env:
+        cmp word [ex_isexe], 0
+        je .fe2
+        cmp word [ex_pad], 0
+        je .fe2
+        push ax
+        mov es, [ex_pad]
+        call mcb_free
+        mov word [ex_pad], 0
+        pop ax
+.fe2:
         push ax
         mov es, [ex_env]
         call mcb_free
@@ -11616,6 +11749,14 @@ fn_4b:
         mov cx, 12
         rep ss movsw
         cli
+        jmp KSEG:.exe_go
+        ; El salto al programa se da desde un trozo que siempre está abajo
+        ; (este código puede correr en la HMA), y sin tocar la pila del
+        ; programa, como MS-DOS: hay .EXE que empiezan con SP = 2 (lanzadores
+        ; de juegos); apilar ahí CS:IP para un RETF daba la vuelta a SP,
+        ; pisaba SS:0000 y podía saltar a 0000:0000.
+        section .low
+.exe_go:
         mov bx, [F_OWN]
         test bx, bx
         jz .nown
@@ -11628,8 +11769,6 @@ fn_4b:
         mov ss, ax
         mov sp, bx
         sti
-        push word [ex_cs]
-        push word [ex_ip]
         mov es, dx
         xor ax, ax
         xor bx, bx
@@ -11638,7 +11777,8 @@ fn_4b:
         xor di, di
         xor bp, bp
         mov ds, dx
-        retf
+        jmp far [cs:ex_ip]
+        section .text
 .ioerr:
         mov ax, [ex_psp]
         call mcb_free_owner
@@ -13782,10 +13922,11 @@ ex_img      resd 1
 ex_need     resd 1
 ex_min      resw 1
 ex_load     resw 1
+ex_pad      resw 1                  ; relleno para no cargar un .EXE bajo 64 KB
 ex_high     resb 1
 ex_cur      resw 1
+ex_ip       resw 1                  ; (IP y CS seguidos: se salta por aquí)
 ex_cs       resw 1
-ex_ip       resw 1
 ex_ss       resw 1
 ex_sp       resw 1
 ex_rel      resd 1

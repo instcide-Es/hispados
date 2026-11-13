@@ -8,135 +8,199 @@
         org 0x100
 
 start:
-        mov sp, stack_top
+        jmp boot
+
+; =============================================================================
+;  PARTE RESIDENTE. Para dejar a los programas casi toda la memoria
+;  convencional (muchos juegos piden más de 500 KB libres), el intérprete se
+;  parte en dos como el de MS-DOS:
+;   - esto (unos 2 KB junto al PSP): los manejadores de Ctrl+C y de error
+;     crítico y la rutina que lanza los programas;
+;   - el resto («el cuerpo»): se copia al arrancar al final de la memoria
+;     convencional y allí trabaja. Al lanzar un programa el cuerpo entero
+;     (código, datos y pila) se guarda en memoria extendida (XMS), se libera
+;     su bloque y al volver se recupera.
+;  Sin gestor XMS (o si falla algo) no se parte: todo se queda aquí, como
+;  antes (r_body = r_psp). El cuerpo es el mismo binario en otro segmento: no
+;  guarda segmentos propios de una orden a otra.
+; =============================================================================
+R_STACK     equ 384
+r_psp       dw 0                    ; segmento del PSP (y de esta parte)
+r_body      dw 0                    ; segmento del cuerpo
+r_swap      db 0                    ; 1 = el cuerpo está aparte y se guarda en XMS
+r_fuera     db 0                    ; el cuerpo está fuera (guardado en XMS)
+r_inexec    db 0                    ; lanzando un programa
+r_cf        db 0
+r_res       dw 0
+r_strat     dw 0
+r_handle    dw 0                    ; bloque de XMS para el cuerpo
+r_paras     dw 0                    ; párrafos del cuerpo
+r_xms       dd 0                    ; entrada del gestor XMS
+r_mv        times 16 db 0           ; estructura de XMS 0Bh (mover)
+r_pb        times 14 db 0           ; bloque de parámetros de EXEC
+r_fcb1      times 16 db 0
+r_fcb2      times 16 db 0
+r_path      times 160 db 0
+r_tail      times 130 db 0
+r_msg_dead  db 13, 10, "No hay memoria para recargar el int", 0x82, "rprete de ", 0xA2, "rdenes. Sistema detenido.", 13, 10, 0
+            times R_STACK db 0
+r_stack_top:
+
+; Lanza r_path con r_tail/r_fcb1/r_fcb2 (los deja run_prog). Se entra con un
+; salto lejano desde el cuerpo y se vuelve a exec_ret (del cuerpo) con
+; AX = resultado de AH=4Bh y BL = FFh si hubo error.
+r_exec:
+        cli
+        mov ax, cs
+        mov ss, ax
+        mov sp, r_stack_top
+        sti
+        mov ds, ax
+        mov es, ax
+        mov byte [r_inexec], 1
+        mov byte [r_fuera], 0
+        cmp byte [r_swap], 0
+        je .run
+        ; cuerpo -> XMS
+        mov ax, prog_end + 1
+        and ax, 0xFFFE
+        mov [r_mv+0], ax
+        mov word [r_mv+2], 0
+        mov word [r_mv+4], 0
+        mov word [r_mv+6], 0
+        mov ax, [r_body]
+        mov [r_mv+8], ax
+        mov ax, [r_handle]
+        mov [r_mv+10], ax
+        mov dword [r_mv+12], 0
+        mov si, r_mv
+        mov ah, 0x0B
+        call far [r_xms]
+        cmp ax, 1
+        jne .run
+        mov es, [r_body]
+        mov ah, 0x49
+        int 0x21
+        jc .run
+        mov byte [r_fuera], 1
+.run:
+        mov ax, cs
+        mov ds, ax
+        mov es, ax
+        mov word [r_pb], 0
+        mov word [r_pb+2], r_tail
+        mov [r_pb+4], ax
+        mov word [r_pb+6], r_fcb1
+        mov [r_pb+8], ax
+        mov word [r_pb+10], r_fcb2
+        mov [r_pb+12], ax
+        mov dx, r_path
+        mov bx, r_pb
+        mov ax, 0x4B00
+        int 0x21
+        ; (los MOV, CLI, STI y CLD no tocan CF)
+        cli
+        mov bx, cs
+        mov ss, bx
+        mov sp, r_stack_top
+        sti
+        mov ds, bx
+        mov es, bx
         cld
-        mov di, bss_start
-        mov cx, (stack_top - bss_start) / 2
-        xor ax, ax
-        rep stosw
-        mov bx, prog_end + 15
-        shr bx, 4
-        mov ah, 0x4A                ; reducir nuestro bloque y dejar memoria
+        sbb bl, bl
+        mov [r_cf], bl
+        mov [r_res], ax
+        cmp byte [r_fuera], 0
+        je .back
+        ; recuperar el cuerpo: bloque al final de la memoria (último ajuste)
+        mov ax, 0x5800
         int 0x21
-        mov byte [echo_on], 1
-        mov word [sv_in], 0xFFFF
-        mov word [sv_out], 0xFFFF
-        call env_init
-        ; Ctrl+C: nuestro manejador (lo heredan los programas que lanzamos)
-        mov dx, ctrlc_handler
-        mov ax, 0x2523
+        mov [r_strat], ax
+        mov ax, 0x5801
+        mov bx, 2
         int 0x21
-        ; error crítico: «¿Anular, Reintentar, Ignorar, Descartar?»
-        mov dx, crit_handler
-        mov ax, 0x2524
+        mov bx, [r_paras]
+        mov ah, 0x48
         int 0x21
-        ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT) y /C orden
-        mov si, 0x81
-.opt:
-        lodsb
-        cmp al, 13
-        je .optd
-        cmp al, '/'
-        jne .opt
-        mov al, [si]
-        call upcase
-        cmp al, 'P'
-        jne .notp
-        mov byte [primary], 1
-        jmp .opt
-.notp:
-        cmp al, 'D'
-        jne .notd
-        mov byte [no_auto], 1
-        jmp .opt
-.notd:
-        cmp al, 'C'
-        jne .opt
-        inc si
-        mov di, inbuf+2
-.cc:
-        lodsb
-        cmp al, 13
-        je .cce
-        stosb
-        jmp .cc
-.cce:
-        mov byte [di], 0
-        mov byte [exit_after], 1
-        mov si, inbuf+2
-        mov word [pl_in], 0
-        mov byte [pl_depth], 0
-        call run_line
-        jmp main_loop
-.optd:
-        mov si, msg_hello
-        call puts
-        cmp byte [primary], 0
-        je main_loop
-        cmp byte [no_auto], 0
-        jne main_loop
-        ; AUTOEXEC.BAT de la unidad de arranque
-        mov ax, 0x3305
+        pushf
+        push ax
+        mov ax, 0x5801
+        mov bx, [r_strat]
         int 0x21
-        add dl, 'A' - 1
-        mov [s_autoexec], dl
-        call set_dta
-        mov dx, s_autoexec
-        xor cx, cx
-        mov ah, 0x4E
-        int 0x21
-        jc main_loop
-        mov si, s_autoexec
-        mov di, progpath
-.ca:
-        lodsb
-        stosb
-        test al, al
-        jnz .ca
-        mov dword [cmdword], 'AUTO'
-        mov dword [cmdword+4], 'EXEC'
-        mov byte [cmdword+8], 0
-        mov word [argp], s_empty
-        call start_batch
+        pop ax
+        popf
+        jc .dead
+        mov [r_body], ax
+        mov [r_mv+14], ax
+        mov ax, prog_end + 1
+        and ax, 0xFFFE
+        mov [r_mv+0], ax
+        mov word [r_mv+2], 0
+        mov bx, [r_handle]
+        mov [r_mv+4], bx
+        mov dword [r_mv+6], 0
+        mov word [r_mv+10], 0
+        mov word [r_mv+12], 0
+        mov si, r_mv
+        mov ah, 0x0B
+        call far [r_xms]
+        cmp ax, 1
+        jne .dead
+        mov byte [r_fuera], 0
+.back:
+        mov byte [r_inexec], 0
+        mov ax, [r_res]
+        mov bl, [r_cf]
+        mov dx, [r_body]
+        mov ds, dx
+        mov es, dx
+        cli
+        mov ss, dx
+        mov sp, [exec_sp]           ; (la pila del cuerpo, donde la dejó)
+        sti
+        push dx
+        push word exec_ret
+        retf
+.dead:
+        mov dx, r_msg_dead
+        call ce_puts
+.halt:
+        hlt
+        jmp .halt
 
-main_loop:
-        cmp byte [bdepth], 0
-        jne .batch
-        cmp byte [exit_after], 0
-        jne .exit
-        cmp byte [echo_on], 0
-        je .noprompt
-        call prompt
-.noprompt:
-        mov dx, inbuf
-        mov byte [inbuf], 127
-        mov ah, 0x0A
+; Ctrl+C (INT 23h): si corre un programa, terminarlo; si no, cancelar el lote
+; y la línea y volver al indicador (ctrlc_body, en el cuerpo)
+ctrlc_handler:
+        push ax
+        push bx
+        mov ah, 0x62
         int 0x21
-        mov dl, 10
-        mov ah, 2
-        int 0x21
-        movzx bx, byte [inbuf+1]
-        mov byte [inbuf+2+bx], 0
-        mov si, inbuf+2
-        mov word [pl_in], 0
-        mov byte [pl_depth], 0
-        call run_line
-        jmp main_loop
-.batch:
-        call batch_line
-        jc main_loop
-        mov si, eline
-        mov word [pl_in], 0
-        mov byte [pl_depth], 0
-        call run_line
-        jmp main_loop
-.exit:
-        mov al, [errlvl]
-        mov ah, 0x4C
+        cmp bx, [cs:r_psp]
+        jne .child
+        cmp byte [cs:r_inexec], 0
+        jne .ign
+        pop bx
+        pop ax
+        mov ax, [cs:r_body]
+        mov ds, ax
+        mov es, ax
+        cli
+        mov ss, ax
+        mov sp, stack_top
+        sti
+        push ax
+        push word ctrlc_body
+        retf
+.ign:
+        pop bx
+        pop ax
+        iret
+.child:
+        pop bx
+        pop ax
+        mov ax, 0x4C03
         int 0x21
 
-; Ctrl+C: si corre un programa, terminarlo; si no, cancelar el lote y la
-; línea y volver al indicador
 ; -----------------------------------------------------------------------------
 ;  Error crítico (INT 24h). AH = tipo (bit 7: dispositivo de caracteres;
 ;  bit 0: escritura; bits 3-5: se puede descartar, reintentar, ignorar),
@@ -324,6 +388,224 @@ ce_e15      db "cambio de disco no válido", 0
 ce_msgs     dw ce_e0, ce_e1, ce_e2, ce_e3, ce_e4, ce_e5, ce_e6, ce_e7
             dw ce_e8, ce_e9, ce_e10, ce_e11, ce_e12, ce_e12, ce_e12, ce_e15
 
+resident_end:
+; =============================================================================
+;  Fin de la parte residente
+; =============================================================================
+
+; Arranque: decidir si el cuerpo va aparte (hace falta un gestor XMS)
+boot:
+        mov sp, stack_top
+        cld
+        mov di, bss_start
+        mov cx, (stack_top - bss_start) / 2
+        xor ax, ax
+        rep stosw
+        mov [r_psp], cs
+        mov [r_body], cs
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .classic
+        mov ax, 0x4310
+        int 0x2F
+        mov [r_xms], bx
+        mov [r_xms+2], es
+        push cs
+        pop es
+        mov dx, prog_end + 1023
+        shr dx, 10
+        mov ah, 0x09
+        call far [r_xms]
+        cmp ax, 1
+        jne .classic
+        mov [r_handle], dx
+        ; el bloque del PSP se queda con la parte residente...
+        mov bx, resident_end + 15
+        shr bx, 4
+        mov ah, 0x4A
+        int 0x21
+        jc .undo
+        ; ...y el cuerpo va al final de la memoria convencional
+        mov ax, 0x5800
+        int 0x21
+        mov [r_strat], ax
+        mov ax, 0x5801
+        mov bx, 2
+        int 0x21
+        jc .undo                    ; (un DOS sin estrategias: no se parte)
+        mov bx, prog_end + 15
+        shr bx, 4
+        mov [r_paras], bx
+        mov ah, 0x48
+        int 0x21
+        pushf
+        push ax
+        mov ax, 0x5801
+        mov bx, [r_strat]
+        int 0x21
+        pop ax
+        popf
+        jc .undo
+        ; (no puede pisar la copia de aquí, que todavía se está usando)
+        mov bx, cs
+        add bx, [r_paras]
+        cmp ax, bx
+        jb .undo_free
+        mov [r_body], ax
+        mov byte [r_swap], 1
+        mov es, ax
+        xor si, si
+        xor di, di
+        mov cx, prog_end + 1
+        shr cx, 1
+        rep movsw
+        cli
+        mov ss, ax
+        sti
+        mov ds, ax
+        push ax
+        push word .go
+        retf
+.undo_free:
+        mov es, ax
+        mov ah, 0x49
+        int 0x21
+.undo:
+        push cs
+        pop es
+        mov dx, [r_handle]
+        mov ah, 0x0A
+        call far [r_xms]
+.classic:
+        push cs
+        pop es
+        mov bx, prog_end + 15
+        shr bx, 4
+        mov ah, 0x4A                ; reducir nuestro bloque y dejar memoria
+        int 0x21
+.go:
+        mov byte [echo_on], 1
+        mov word [sv_in], 0xFFFF
+        mov word [sv_out], 0xFFFF
+        call env_init
+        ; Ctrl+C y error crítico («¿Anular, Reintentar, Ignorar, Descartar?»):
+        ; los manejadores de la parte residente (los heredan los programas)
+        push ds
+        mov ds, [r_psp]
+        mov dx, ctrlc_handler
+        mov ax, 0x2523
+        int 0x21
+        mov dx, crit_handler
+        mov ax, 0x2524
+        int 0x21
+        pop ds
+        ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT) y /C orden
+        mov si, 0x81
+.opt:
+        lodsb
+        cmp al, 13
+        je .optd
+        cmp al, '/'
+        jne .opt
+        mov al, [si]
+        call upcase
+        cmp al, 'P'
+        jne .notp
+        mov byte [primary], 1
+        jmp .opt
+.notp:
+        cmp al, 'D'
+        jne .notd
+        mov byte [no_auto], 1
+        jmp .opt
+.notd:
+        cmp al, 'C'
+        jne .opt
+        inc si
+        mov di, inbuf+2
+.cc:
+        lodsb
+        cmp al, 13
+        je .cce
+        stosb
+        jmp .cc
+.cce:
+        mov byte [di], 0
+        mov byte [exit_after], 1
+        mov si, inbuf+2
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
+        jmp main_loop
+.optd:
+        mov si, msg_hello
+        call puts
+        cmp byte [primary], 0
+        je main_loop
+        cmp byte [no_auto], 0
+        jne main_loop
+        ; AUTOEXEC.BAT de la unidad de arranque
+        mov ax, 0x3305
+        int 0x21
+        add dl, 'A' - 1
+        mov [s_autoexec], dl
+        call set_dta
+        mov dx, s_autoexec
+        xor cx, cx
+        mov ah, 0x4E
+        int 0x21
+        jc main_loop
+        mov si, s_autoexec
+        mov di, progpath
+.ca:
+        lodsb
+        stosb
+        test al, al
+        jnz .ca
+        mov dword [cmdword], 'AUTO'
+        mov dword [cmdword+4], 'EXEC'
+        mov byte [cmdword+8], 0
+        mov word [argp], s_empty
+        call start_batch
+
+main_loop:
+        cmp byte [bdepth], 0
+        jne .batch
+        cmp byte [exit_after], 0
+        jne .exit
+        cmp byte [echo_on], 0
+        je .noprompt
+        call prompt
+.noprompt:
+        mov dx, inbuf
+        mov byte [inbuf], 127
+        mov ah, 0x0A
+        int 0x21
+        mov dl, 10
+        mov ah, 2
+        int 0x21
+        movzx bx, byte [inbuf+1]
+        mov byte [inbuf+2+bx], 0
+        mov si, inbuf+2
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
+        jmp main_loop
+.batch:
+        call batch_line
+        jc main_loop
+        mov si, eline
+        mov word [pl_in], 0
+        mov byte [pl_depth], 0
+        call run_line
+        jmp main_loop
+.exit:
+        call xms_release
+        mov al, [errlvl]
+        mov ah, 0x4C
+        int 0x21
+
 ; mayúsculas para el nombre de una orden, sin acentos (CP437 no tiene Ó, Á...)
 ; así «Versión» o «VERSIÓN» son VERSION
 cw_upcase:
@@ -347,27 +629,10 @@ cw_fold     db 0xA0, 'A', 0x82, 'E', 0x90, 'E', 0xA1, 'I', 0xA2, 'O', 0xA3, 'U'
             db 0x81, 'U', 0x9A, 'U', 0x85, 'A', 0x8A, 'E', 0x8D, 'I', 0x95, 'O'
             db 0x97, 'U', 0xA4, 0xA5
             db 0xB5, 'A', 0xD6, 'I', 0xE0, 'O', 0xE9, 'U', 0   ; Á Í Ó Ú de CP850
-ctrlc_handler:
-        push ax
-        push bx
-        push ds
-        mov ax, cs
-        mov ds, ax
-        mov ah, 0x62
-        int 0x21
-        mov ax, cs                  ; (AH=62h había estropeado AX: nunca
-        cmp bx, ax                  ;  coincidía y Ctrl+C mataba al intérprete)
-        jne .child
-        pop ds
-        pop bx
-        pop ax
-        mov ax, cs
-        mov ds, ax
-        mov es, ax
-        cli
-        mov ss, ax
-        mov sp, stack_top
-        sti
+; Ctrl+C en el intérprete (viene de ctrlc_handler, con DS=ES=SS y la pila ya
+; puestos): cancelar el lote y la línea y volver al indicador
+ctrlc_body:
+        cld
         call dir_free
         call redir_restore
         mov byte [bdepth], 0
@@ -375,12 +640,54 @@ ctrlc_handler:
         mov byte [call_flag], 0
         mov byte [in_for], 0
         jmp main_loop
-.child:
-        pop ds
-        pop bx
-        pop ax
-        mov ax, 0x4C03
-        int 0x21
+
+; Lanza progpath con tail/fcb1/fcb2 por la parte residente (que guarda el
+; cuerpo en XMS mientras corre el programa). -> CF y AX como AH=4Bh
+run_prog:
+        pusha                       ; (como AH=4Bh: solo cambia AX)
+        push es
+        mov es, [r_psp]
+        mov si, progpath
+        mov di, r_path
+        mov cx, 160
+        rep movsb
+        mov si, tail
+        mov di, r_tail
+        mov cx, 130
+        rep movsb
+        mov si, fcb1
+        mov di, r_fcb1
+        mov cx, 16
+        rep movsb
+        mov si, fcb2
+        mov di, r_fcb2
+        mov cx, 16
+        rep movsb
+        pop es
+        mov [exec_sp], sp
+        push word [r_psp]
+        push word r_exec
+        retf
+exec_ret:
+        mov sp, [exec_sp]
+        cld
+        mov [exec_ax], ax
+        mov [exec_cf], bl
+        popa
+        mov ax, [exec_ax]
+        cmp byte [exec_cf], 1       ; CF = no hubo error...
+        cmc                         ; ...y al revés: CF = hubo error
+        ret
+
+; al salir: devolver el bloque de XMS del cuerpo
+xms_release:
+        cmp byte [r_swap], 0
+        je .r
+        mov dx, [r_handle]
+        mov ah, 0x0A
+        call far [r_xms]
+.r:
+        ret
 
 ; -----------------------------------------------------------------------------
 prompt:
@@ -752,6 +1059,7 @@ do_rem:
 do_exit:
         cmp byte [primary], 0
         jne .r
+        call xms_release
         mov al, [errlvl]
         mov ah, 0x4C
         int 0x21
@@ -2261,10 +2569,35 @@ mem_summary:
         mov ebp, esi
         shl ebp, 4
         add ebx, ebp
+        mov [mm_prev], ebp
         cmp ebp, edx
-        jbe .used
+        jbe .cont
         mov edx, ebp
+        jmp .cont
 .used:
+        ; el cuerpo del intérprete (al final de la memoria) cuenta como
+        ; libre: se quita de en medio mientras corre un programa
+        cmp byte [r_swap], 0
+        je .nb
+        push ax
+        push es
+        inc ax
+        mov es, [r_psp]
+        cmp ax, [es:r_body]
+        pop es
+        pop ax
+        jne .nb
+        mov ebp, esi
+        inc ebp
+        shl ebp, 4
+        add ebx, ebp
+        add ebp, [mm_prev]
+        cmp ebp, edx
+        jbe .nb
+        mov edx, ebp
+.nb:
+        mov dword [mm_prev], 0
+.cont:
         movzx edi, ax
         add edi, esi
         inc edi
@@ -3545,13 +3878,7 @@ try_one:
         clc
         ret
 .notbat:
-        mov word [pblock], 0
-        mov word [pblock+2], tail
-        mov [pblock+4], ds
-        mov word [pblock+6], fcb1
-        mov [pblock+8], ds
-        mov word [pblock+10], fcb2
-        mov [pblock+12], ds
+        ; (el bloque de parámetros lo monta la parte residente: run_prog)
         cmp byte [lh_flag], 0
         je .low
         ; LH: enlazar la memoria superior y reservar solo en ella; si no hay
@@ -3567,10 +3894,7 @@ try_one:
         mov ax, 0x5801
         mov bx, 0x40
         int 0x21
-        mov dx, progpath
-        mov bx, pblock
-        mov ax, 0x4B00
-        int 0x21
+        call run_prog
         pushf
         push ax
         mov ax, 0x5801
@@ -3585,10 +3909,7 @@ try_one:
         cmp ax, 8
         jne .xerr
 .low:
-        mov dx, progpath
-        mov bx, pblock
-        mov ax, 0x4B00
-        int 0x21
+        call run_prog
         jnc .ran
 .xerr:
         mov si, msg_execerr
@@ -5597,6 +5918,10 @@ env_init:
         pop es
         pop bx
         mov [0x2C], bx
+        push es
+        mov es, [r_psp]             ; (el PSP de verdad; aquí hay una copia)
+        mov [es:0x2C], bx
+        pop es
 .r:
         push ds
         pop es
@@ -7066,6 +7391,11 @@ tail        resb 130
 fcb1        resb 37
 fcb2        resb 37
 pblock      resb 14
+exec_sp     resw 1
+exec_ax     resw 1
+exec_cf     resb 1
+            resb 1
+mm_prev     resd 1
 pl_in       resw 1
 pl_out      resw 1
 pl_depth    resb 1

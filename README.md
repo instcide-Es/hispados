@@ -75,6 +75,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Funciones FCB (DOS 1.x), SDA (5D06h/5D0Bh), EXEC 4B01h/4B03h, 26h/55h, 65h (país CP437), Ctrl+C | ✅ |
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
 | `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
+| Memoria para los programas (juegos): con XMS, `COMMAND.COM` solo deja 2 KB residentes (el resto se guarda en memoria extendida mientras corre el programa); `tests/juegos/lab.sh`, laboratorio de compatibilidad con un ISO propio de juegos | ✅ |
 | `DOS=HIGH`: el código del núcleo en la memoria alta (HMA); unos 33 KB más de memoria convencional. INT 2Fh 4A01h/4A02h (HMA libre) y `MEM` lo dice | ✅ |
 | `HSPDPMI.COM`: servidor DPMI 0.9 propio (clientes de 16 y 32 bits, memoria de XMS; los programas de DJGPP funcionan sin CWSDPMI) | ✅ |
 | `HSPEMM.SYS`: monitor V86 propio (como EMM386): EMS 4.0, VCPI 1.0 (DOS/4GW: Doom, Duke Nukem 3D…) y memoria superior (`DOS=UMB`, `DEVICEHIGH`, `LH`); `HSPDPMI` pasa a cliente VCPI. Ver [docs/HSPEMM.md](docs/HSPEMM.md) | ✅ en pruebas |

@@ -263,7 +263,13 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
 EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM
 emmprogs: $(EMMPROGS)
-NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS
+NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM
+$(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/EXEPILA.EXE: tests/progs/exepila.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/LEETEST.COM: tests/progs/leetest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HMATEST.COM: tests/progs/hmatest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HMAUSO.SYS: tests/progs/hmauso.asm | $(B)
@@ -317,6 +323,7 @@ test: $(IMG) usb nucprogs emmprogs $(B)/LANZTEST.COM
 	tests/run_deltree_tests.sh $(IMG)
 	tests/run_share_tests.sh $(IMG)
 	tests/run_mem_tests.sh $(IMG)
+	tests/run_memprog_tests.sh $(IMG)
 	tests/run_ordenes_tests.sh $(IMG)
 	tests/run_expandir_tests.sh $(IMG)
 	tests/run_mediachange_tests.sh $(IMG)

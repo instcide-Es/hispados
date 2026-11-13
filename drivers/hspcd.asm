@@ -184,7 +184,12 @@ media:
         mov al, 0xFF
         jc .r
         ; huella: 32 octetos del nombre (+28h) y 17 de la fecha (+32Dh)
-        mov di, si
+        ; (la unidad se vuelve a leer: get_block no conserva SI, y con lo que
+        ; quedara en él la huella se escribía en cualquier sitio de los 64 KB
+        ; que siguen al controlador: memoria de los programas. DOOM lanzado
+        ; desde el CD se colgaba al cargar y ARBOL en un CD rompía la cadena
+        ; de bloques de memoria.)
+        movzx di, byte [cs:r_unit]
         imul di, di, 49
         add di, m_fp
         push cs

@@ -1,0 +1,17 @@
+# Ejemplo de lista para el laboratorio de juegos (tests/juegos/lab.sh).
+# La lista de verdad describe una colección concreta y NO va en el proyecto:
+# se da con JUEGOS_TXT=/ruta/juegos.txt (o --lista), o se deja junto al ISO
+# con su mismo nombre (Juegos.ISO -> Juegos.txt).
+#
+#   CARPETA[/SUBCARPETA] = orden [| teclas]      («-» = no es un juego: se salta)
+#
+# orden:  lo que se teclearía en la carpeta del juego, con sus parámetros.
+# teclas: nombres de sendkey de QEMU separados por comas (la opción del menú
+#         de tarjeta gráfica, por ejemplo); se pulsan antes de Intro, Espacio...
+# Las carpetas que no salgan aquí se adivinan: un .BAT que no sea de instalar,
+# el ejecutable que se llama como la carpeta o el más grande.
+# (Las tres entradas de abajo son inventadas.)
+LABERINTO      = LABER
+CARRERAS       = CARR /VGA | 2,ret      # pregunta la tarjeta: «2» y sigue
+SAGA/PARTE2    = JUEGO2
+UTILIDADES     = -

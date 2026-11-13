@@ -1394,8 +1394,8 @@ hda_stop:
 ; =============================================================================
 ;  Sound Blaster (2.0, Pro y 16) - parte residente
 ; =============================================================================
-; 4 bloques de SB_BLK octetos en una zona alineada a 16 KB (la DMA del ISA no
-; puede cruzar 64 KB). DMA de autoinicio sobre los 4 bloques; la tarjeta
+; 4 bloques de SB_BLK octetos seguidos que no cruzan una frontera de 64 KB (la
+; DMA del ISA no puede). DMA de autoinicio sobre los 4 bloques; la tarjeta
 ; avisa (IRQ) al acabar cada bloque: se llena de silencio y queda libre.
 ; Sin datos durante SB_IDLE bloques se para (reset del DSP), así la tarjeta
 ; queda libre para los juegos.
@@ -1779,7 +1779,7 @@ sb_unmask:
         ret
 
 ; quedar residente (DX = párrafos). Los bloques de DMA pueden caer encima del
-; código de instalación (se alinean a 16 KB desde resident_end): se llenan de
+; código de instalación (van justo detrás de resident_end): se llenan de
 ; silencio aquí, cuando ese código ya ha terminado, y no antes.
 sb_tsr:
         call sb_halt
@@ -3443,13 +3443,24 @@ pr_old      dd 0
 
 ; instalar: bloques alineados, IRQ y BLASTER en el entorno
 sb_install:
-        ; bloques en una zona de 16 KB alineada (no cruza 64 KB)
+        ; bloques (16 KB) justo detrás del código residente, salvo que así
+        ; crucen una frontera de 64 KB (la DMA del ISA no puede): entonces
+        ; empiezan en la frontera. (Antes se alineaban a 16 KB: se perdían
+        ; hasta 16 KB de memoria convencional, que a los juegos les hace falta.)
         xor eax, eax
         mov ax, cs
         shl eax, 4
         mov ebx, eax
-        add eax, resident_end + 16383
-        and eax, 0xFFFFC000
+        add eax, resident_end + 15
+        and eax, 0xFFFFFFF0
+        mov ecx, eax
+        and ecx, 0xFFFF
+        add ecx, 4 * SB_BLK
+        cmp ecx, 0x10000
+        jbe .cabe
+        add eax, 0xFFFF
+        and eax, 0xFFFF0000
+.cabe:
         sub eax, ebx
         mov [buf_off], ax
         add ax, 4 * SB_BLK

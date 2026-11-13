@@ -104,9 +104,12 @@ check "Hello from a .COM program! Args:[ abajo]"
 check "100% hecho"
 NOX=$(num LIBRE $OUT)
 # sin HMA el código ocupa como con DOS=LOW o algo menos (se sueltan los datos
-# de arranque, unos 5 KB; y aquí no está HSPXMS, otros 2 KB)
-D=$(( ${NOX:-0} - ${LOW:-0} ))
-if [ -n "$NOX" ] && [ $D -ge 0 ] && [ $D -le 9000 ]; then echo "  OK   sin HMA no se pierde memoria ($NOX bytes libres)"
+# de arranque, unos 5 KB; y aquí no está HSPXMS, otros 2 KB). Pero sin XMS el
+# intérprete no puede guardar su cuerpo en memoria extendida mientras corre
+# un programa y se queda entero abajo (unos 46 KB, que con XMS son 2 KB): se
+# descuentan.
+D=$(( ${NOX:-0} + 46000 - ${LOW:-0} ))
+if [ -n "$NOX" ] && [ $D -ge 0 ] && [ $D -le 12000 ]; then echo "  OK   sin HMA no se pierde memoria ($NOX bytes libres)"
 else echo "  FAIL sin HMA no se pierde memoria ($NOX frente a $LOW)"; fail=1; fi
 
 echo "== Hispa-DOS DOS=HIGH con la HMA en uso =="
