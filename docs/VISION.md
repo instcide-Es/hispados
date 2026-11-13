@@ -45,6 +45,52 @@ documentación y sus imágenes listas para usar, antes de empezar la siguiente.
 - **Pruebas automáticas** en cada pieza y auditorías periódicas antes de cada
   versión estable.
 
+## Cómo prepararemos Hispa 32
+
+Acordado con Carlos (13/11/2026) para cuando empiece la época de 32 bits:
+
+- **KolibriOS** (GPL v2), como estudio de arquitectura: un sistema de 32 bits
+  escrito en ensamblador, con interfaz gráfica, USB, red y sonido, que cabe
+  en un disquete. Sirve para ver cómo organizar núcleo, controladores y
+  ventanas en poco espacio. Su interfaz (`int 40h`) no es la de Windows, así
+  que no nos dice qué funciones dar. Se estudia, no se copia.
+- **Windows 95**, como objetivo de comportamiento, igual que MS-DOS 6.22 lo
+  es de Hispa-DOS: se observa y se prueban programas, nunca su código.
+- **Documentación pública** del API Win32 (manuales y libros de la época) y
+  la de los proyectos libres que ya la reimplementaron (Wine, ReactOS), para
+  saber qué hace cada función.
+- **Qué funciones primero**: `tools/importaciones.py` lee la tabla de
+  importaciones de programas Win32 (la lista de funciones del sistema que
+  cada uno usa, sin código de nadie) y ordena las funciones por cuántos
+  programas las necesitan. Los programas los aporta cada usuario y no se
+  suben al proyecto; solo se publica la lista resultante de nombres.
+- **Puente desde Hispa-DOS**: ejecutar programas Win32 sencillos (de consola
+  primero) encima de Hispa-DOS y HSPDPMI, al estilo de HX DOS Extender, para
+  ir probando esas funciones antes de tener el sistema nuevo.
+
+## Consolas de cada época
+
+Idea de Carlos (13/11/2026): cada época trae emuladores de las consolas de
+su tiempo, con **3 o 4 juegos hechos por nosotros** (diseño propio, GPL,
+escritos para el hardware de la consola, así que funcionan también en otros
+emuladores y en consolas reales). Quien conserve sus cartuchos originales
+los juega desde su biblioteca personal; las ROM nunca van en el proyecto.
+
+| Época | Emuladores |
+|---|---|
+| Hispa-DOS / Hispa Ventanas (486) | **Hispa-Nes**, **Hispa-System**, **Hispa-Boy** |
+| Hispa 32 (Pentium) | **Hispa-Drive**, **Hispa-SNes**, **Hispa-BoyColor** |
+| Hispa XXI | **Hispa-PSX**, **Hispa-BoyAdvance**, **Hispa-Nin64** |
+
+- Código propio, a partir de la documentación pública del hardware (sala
+  limpia, como el resto del proyecto).
+- Primero, consolas que arrancan el cartucho sin BIOS del fabricante; para
+  las que la necesitan (PlayStation), BIOS propia.
+- Las marcas de las consolas solo se citan para decir con qué cartuchos es
+  compatible cada emulador.
+- Empezamos por Hispa-Nes como programa .HVP de Hispa Ventanas, con sus
+  juegos (plataformas, naves, puzles), y luego Hispa-Boy.
+
 ## Estado
 
 - Hispa-DOS (1994): casi completo. Ver el [README](../README.md), la
