@@ -279,6 +279,28 @@ grupo_abrir:
         jz .x
         mov ecx, [ebx+GR_SEL]       ; con el icono que estaba marcado
         mov [eax+V_D0], ecx
+        mov ebp, eax                ; si no caben todos los iconos (ha entrado
+        call vista_cuenta           ; un programa nuevo), la ventana se alarga
+        add eax, [vis_cols]
+        dec eax
+        xor edx, edx
+        div dword [vis_cols]
+        imul eax, eax, CEN_FILA
+        add eax, 8
+        sub eax, [vis_alto]
+        jle .x
+        mov edx, [ebp+V_AL]
+        add edx, eax
+        mov eax, [ebp+V_X]
+        mov ebx, [ebp+V_Y]
+        mov ecx, [vid_alto]         ; (sin salirse de la pantalla)
+        sub ecx, ebx
+        cmp edx, ecx
+        jle .cabe
+        mov edx, ecx
+.cabe:
+        mov ecx, [ebp+V_AN]
+        call ven_mover
 .x:
         popad
         ret

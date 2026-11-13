@@ -14,7 +14,8 @@
 ;    dc_cerrar    (EndPaint / ReleaseDC)
 ;    dc_cortar    EAX=x EBX=y ECX=ancho EDX=alto: estrecha el contexto
 ;    dc_rect, dc_marco, dc_mosaico, dc_texto, dc_texto_m, dc_punto, dc_linea,
-;    dc_copiar_clave, dc_caracter      como las gdi_*, en coordenadas de ventana
+;    dc_copiar_clave, dc_copiar, dc_caracter   como las gdi_*, en coordenadas
+;                 de ventana
 ;    dc_icono     EAX=x EBX=y ESI=icono (32x32 en texto, ver iconos.inc)
 ;    dc_texto_n   EAX=x EBX=y ESI=texto ECX=caracteres
 ;  Estado: gdi_color (macro COLOR) y gdi_negrita.
@@ -416,6 +417,7 @@ dc_%1:
         DCFN texto_n, gdi_texto_n
         DCFN punto, gdi_punto
         DCFN copiar_clave, gdi_copiar_clave
+        DCFN copiar, gdi_copiar
         DCFN caracter, gdi_caracter
         DCFN linea0, gdi_linea
 

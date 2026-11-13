@@ -31,6 +31,7 @@ WM_LBUTTONDOWN  equ 0x0201
 WM_LBUTTONUP    equ 0x0202
 WM_LBUTTONDBLCLK equ 0x0203
 WM_RBUTTONDOWN  equ 0x0204          ; botón derecho (solo en la zona de la ventana)
+WM_RBUTTONUP    equ 0x0205          ; se suelta (a la ventana donde se apretó)
 WM_CUT          equ 0x0300
 WM_COPY         equ 0x0301
 WM_PASTE        equ 0x0302

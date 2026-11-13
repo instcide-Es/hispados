@@ -68,6 +68,15 @@ Acordado con Carlos (13/11/2026) para cuando empiece la época de 32 bits:
   primero) encima de Hispa-DOS y HSPDPMI, al estilo de HX DOS Extender, para
   ir probando esas funciones antes de tener el sistema nuevo.
 
+## Programas de oficina de cada sistema
+
+Cada sistema tiene sus propios programas de gestión, con el nombre del
+sistema detrás (Carlos, 13/11/2026): **Pluma** (procesador de textos) y
+**Cuentas** (hoja de cálculo). En Hispa Ventanas son **Pluma-Ventanas** y
+**Cuentas-Ventanas**; las épocas siguientes tendrán los suyos, pensados
+para lo que daban aquellos equipos, y cada uno abrirá los documentos de
+los anteriores.
+
 ## Consolas de cada época
 
 Idea de Carlos (13/11/2026): cada época trae emuladores de las consolas de

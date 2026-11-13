@@ -58,6 +58,7 @@ tec_mayus   resb 1
 sal_armado  resb 1
 ev_movido   resb 1
 rat_der     resb 1                  ; el botón derecho está apretado
+cap_der     resb 1                  ; la captura es del botón derecho
 actividad   resb 1
             alignb 4
 ; ---- menús ----

@@ -4,8 +4,9 @@
 ;
 ;  INSTALAR unidad:   hace la unidad arrancable (SYS) y copia desde la unidad
 ;                     de arranque la carpeta del sistema (\HISPADOS:
-;                     programas, drivers y ALIAS.INI, y \HISPADOS\JUEGOS:
-;                     los juegos de Hispa Ventanas), AUTOEXEC.BAT,
+;                     programas, drivers y ALIAS.INI; \HISPADOS\JUEGOS:
+;                     los juegos de Hispa Ventanas; y
+;                     \HISPADOS\PROGS: sus accesorios), AUTOEXEC.BAT,
 ;                     CONFIG.SYS y LEEME.TXT. Si la unidad ya tiene un
 ;                     AUTOEXEC.BAT o un CONFIG.SYS, se respetan. En los que
 ;                     se copian, la letra de origen (A: o la USB) pasa a C:,
@@ -102,6 +103,10 @@ start:
         call copy_set
         mov si, s_hspj              ; y los juegos de Hispa Ventanas
         mov di, s_hjdir
+        call make_dir
+        call copy_set
+        mov si, s_hspp              ; y sus accesorios (Pintura)
+        mov di, s_hpdir
         call make_dir
         call copy_set
         mov si, s_autoexec
@@ -424,6 +429,8 @@ s_hdir      db "\HISPADOS\", 0
 s_hsp       db "\HISPADOS\*.*", 0
 s_hjdir     db "\HISPADOS\JUEGOS\", 0
 s_hspj      db "\HISPADOS\JUEGOS\*.*", 0
+s_hpdir     db "\HISPADOS\PROGS\", 0
+s_hspp      db "\HISPADOS\PROGS\*.*", 0
 s_autoexec  db "\AUTOEXEC.BAT", 0
 s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0

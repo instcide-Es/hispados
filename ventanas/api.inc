@@ -83,4 +83,11 @@
         HVF aj_leer                 ; 63  ajustes: EAX=número (AJ_*) -> EAX
         HVF aj_poner                ; 64  EAX=número EDX=valor: lo pone y lo aplica
         HVF esc_fondo               ; 65  ESI=mosaico de 16x16 (256 octetos): fondo nuevo
+        ; ---- [Pintura] mapas de bits, archivos y memoria grande (72 entradas) ----
+        HVF dc_copiar               ; 66  dibuja un mapa de bits (un octeto por punto)
+        HVF dlg_archivo             ; 67  diálogo de elegir un archivo
+        HVF mem_bloque              ; 68  memoria extendida aparte del montón
+        HVF mem_bloque_soltar       ; 69
+        HVF pal_rgb                 ; 70  (datos) la paleta: 256 de rojo, verde, azul, 0
+        HVF fuente8x16              ; 71  (datos) la fuente: 256 caracteres de 16 filas
 %endmacro

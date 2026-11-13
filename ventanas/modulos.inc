@@ -14,8 +14,10 @@
 ;    hvp_limpiar  (sistema) suelta la memoria de los módulos que han acabado
 ;    hvp_icono    EBX=acceso ESI=icono -> ESI=el icono propio si es un .HVP
 ;    hvp_buscar   cen_arch=carpeta acabada en «\», ECX=0 contar / 1 crear los
-;                 accesos que falten en el grupo EDX (-1: «Juegos»)
+;                 accesos que falten en el grupo EDX (-1: cada uno en el
+;                 que dice su cabecera, «Juegos» o «Accesorios»)
 ;                 -> EAX=cuántos .HVP hay / cuántos accesos ha creado
+;    mem_bloque, mem_bloque_soltar   memoria extendida para un módulo
 ;    es_hvp       ESI=ruta: ZF=1 si acaba en .HVP
 ;  Al entrar en el módulo: EBX=su base (la cabecera), ESI=su ruta completa,
 ;  EDI=los parámetros del acceso directo, ECX=entradas de la interfaz que hay.
@@ -28,6 +30,7 @@ H_MEM       equ 12                  ; memoria que necesita
 H_ENTRADA   equ 16
 H_IMG       equ 20                  ; tamaño de la imagen; detrás, las reubicaciones
 H_NREUB     equ 24
+H_GRUPO     equ 28                  ; 0 juego, 1 accesorio
 H_NOMBRE    equ 32
 H_ICONO     equ 64
 H_TABLA     equ 576                 ; aquí se copia la tabla de la interfaz
@@ -53,6 +56,7 @@ API_N       equ ($ - api_tabla) / 4
 t_ext_hvp   db ".HVP", 0
 t_hvp_pat   db "*.HVP", 0
 t_hvp_dir   db "JUEGOS\", 0
+t_hvp_dir2  db "PROGS\", 0
 t_hvp_mal   db "No se ha podido cargar el programa.", 0
 t_hvp_viejo db "Este programa necesita un Hispa Ventanas más nuevo.", 0
 t_hvp_muchos db "Hay demasiados programas abiertos.", 0
@@ -89,6 +93,71 @@ pantalla:
         mov eax, [vid_ancho]
         mov ebx, [vid_alto]
         ret
+
+; ECX=octetos -> EAX=puntero EDX=mango; CF=1 si no hay memoria
+mem_bloque:
+        push ebx
+        push ecx
+        push esi
+        push edi
+        mov ebx, ecx
+        shr ebx, 16
+        mov ax, 0x0501
+        int 0x31
+        jc .x
+        shl ebx, 16
+        mov bx, cx
+        sub ebx, [base]
+        mov eax, ebx
+        mov edx, esi
+        shl edx, 16
+        mov dx, di
+        clc
+.x:
+        pop edi
+        pop esi
+        pop ecx
+        pop ebx
+        ret
+; EDX=mango de mem_bloque
+mem_bloque_soltar:
+        pushad
+        mov edi, edx
+        mov esi, edx
+        shr esi, 16
+        mov ax, 0x0502
+        int 0x31
+        popad
+        ret
+
+; (interna) ECX=0 contar / 1 crear los accesos de los módulos de las dos
+; carpetas que hay al lado de VENTANAS.COM (JUEGOS y PROGS) -> EAX
+hvp_las_dos:
+        push ebx
+        push edx
+        push esi
+        mov esi, t_hvp_dir
+        call .una
+        mov ebx, eax
+        mov esi, t_hvp_dir2
+        call .una
+        add eax, ebx
+        pop esi
+        pop edx
+        pop ebx
+        ret
+.una:
+        push edi
+        push esi
+        mov edi, cen_arch
+        mov esi, dir_propia
+        call pon_cad
+        pop esi
+        call pon_cad
+        mov byte [edi], 0
+        pop edi
+        or edx, -1
+        jmp hvp_buscar
 
 es_hvp:
         push eax
@@ -383,13 +452,18 @@ hvp_buscar:
         jne .sig
         test edx, edx
         jns .g2
-        mov eax, [gr_tabla]         ; el grupo «Juegos» (si no está, se crea)
+        mov ebx, tg_juegos          ; su grupo: «Juegos» o, si la cabecera lo
+        cmp byte [edi+H_GRUPO], 1   ; dice, «Accesorios» (si no está, se crea)
+        jne .g0
+        mov ebx, tg_accesorios
+.g0:
+        mov eax, [gr_tabla]
         xor edx, edx
 .g:
         cmp byte [eax+GR_USO], 0
         je .gs
         lea esi, [eax+GR_NOMBRE]
-        mov edi, tg_juegos
+        mov edi, ebx
         call cad_igual_i
         je .g2
 .gs:
@@ -401,7 +475,7 @@ hvp_buscar:
         test eax, eax
         jz .fin
         lea edi, [eax+GR_NOMBRE]
-        mov esi, tg_juegos
+        mov esi, ebx
         call pon_cad
 .g2:
         call ac_nuevo
@@ -421,6 +495,7 @@ hvp_buscar:
 .cuenta:
         inc ebp
 .sig:
+        mov edx, [esp+20]           ; (el grupo que se pidió: cada módulo, al suyo)
         call dos_siguiente
         jmp .f
 .fin:

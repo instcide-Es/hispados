@@ -8,6 +8,8 @@
 ;
 ;       %include "hvp.inc"
 ;       HVP_CABECERA "Nombre", entrada      ; nombre (31 letras) y entrada
+;                                           ; (un tercer dato, 1: va al grupo
+;                                           ; «Accesorios» y no a «Juegos»)
 ;               db "................................"    ; el icono: 32 filas
 ;               ...                                     ; de 32 caracteres
 ;       HVP_CODIGO
@@ -46,9 +48,9 @@ HV_API_N    equ hv_n                ; las entradas de la interfaz que se conocen
 ;   8 dd tamaño del archivo        12 dd memoria que necesita
 ;  16 dd entrada                   20 dd tamaño de la imagen (detrás van las
 ;  24 dd reubicaciones             reubicaciones: un dd por puntero)
-;  28 dd 0                         32 nombre (32 octetos, acabado en 0)
+;  28 dd grupo                       32 nombre (32 octetos, acabado en 0)
 ;  64 icono de 32x32 a 4 bits     576 tabla de la interfaz (la rellena el cargador)
-%macro HVP_CABECERA 2
+%macro HVP_CABECERA 2-3 0
         cpu 386
         bits 32
         org HVP_ORG
@@ -60,7 +62,8 @@ hvp_base:
         dd 0
         dd hvp_fin
         dd %2
-        dd 0, 0, 0
+        dd 0, 0
+        dd %3                       ; el grupo: 0 «Juegos», 1 «Accesorios»
 %%n:    db %1
         times 32 - ($ - %%n) db 0
 hvp_icono:

@@ -56,6 +56,12 @@ check $T/l2.txt "TECLADO  COM"
 check $T/l2.txt "INSTALAR COM"
 check $T/l2.txt "ALIAS    INI"
 check $T/l2.txt "CONFIG   HVP"       # [Configuración] el programa de ajustes de Hispa Ventanas
+# los programas de Hispa Ventanas (.HVP) también se copian: los juegos y Pintura
+hvp=0
+for off in 32256 1048576; do
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/JUEGOS/CULEBRA.HVP ::HISPADOS/PROGS/PINTURA.HVP > /dev/null 2>&1 && hvp=1
+done
+if [ $hvp = 1 ]; then echo "  OK   \\HISPADOS\\JUEGOS y \\HISPADOS\\PROGS, con sus .HVP, en el disco instalado"; else echo "  FAIL faltan los .HVP de \\HISPADOS\\JUEGOS o \\HISPADOS\\PROGS en el disco instalado"; fail=1; fi
 # el historial: "uno" debe salir tres veces (la orden, flecha arriba x2 y F3)
 n=$(grep -c "^uno$" $T/l2.txt)
 if [ "$n" -ge 3 ]; then echo "  OK   historial: ECO uno repetido ($n veces)"; else echo "  FAIL historial: ECO uno salió $n veces"; fail=1; fi

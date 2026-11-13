@@ -1203,8 +1203,6 @@ eventos:
         cmp bh, [rat_der]
         je .c3
         mov [rat_der], bh
-        test bh, bh
-        jz .c3
         call ges_raton_der
 .c3:
         cmp bl, [rat_boton]

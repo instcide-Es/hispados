@@ -125,7 +125,9 @@ $(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack
 	$(NASM) -f bin -w+error=number-overflow -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
 
 # Programas de Hispa Ventanas (.HVP, docs/VENTANAS.md «Programas aparte»): los
-# juegos, en juegos/. tools/mkhvp.py los ensambla y saca las reubicaciones.
+# juegos, en juegos/ (HVPS: van a \HISPADOS\JUEGOS), y los accesorios, en
+# programas/ (HVPA: a \HISPADOS\PROGS). tools/mkhvp.py los ensambla y
+# saca las reubicaciones.
 HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/defs.inc ventanas/api.inc \
          tools/mkhvp.py tools/icopack.py tools/cp437.py
 HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP
@@ -138,6 +140,10 @@ $(B)/MINAS.HVP: juegos/minas.asm $(HVPDEP) | $(B)
 HVPSIS = $(B)/CONFIG.HVP
 $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS
+HVPA = $(B)/PINTURA.HVP
+$(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 
 FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HELLO.COM $(B)/HELLOEXE.EXE $(B)/UPPER.COM \
@@ -146,7 +152,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM \
-        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS)
+        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -194,6 +200,9 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI $(wildcard tests/disk/*.* tests
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
 	mmd   -i $@ ::HISPADOS/JUEGOS
 	for f in $(HVPS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
+	# y los accesorios (Pintura), en \HISPADOS\PROGS
+	mmd   -i $@ ::HISPADOS/PROGS
+	for f in $(HVPA); do mcopy -i $@ $$f ::HISPADOS/PROGS/ || exit 1; done
 	# pruebas
 	mmd   -i $@ ::BAT
 	mcopy -i $@ tests/disk/BAT/PRUEBA.BAT ::BAT/PRUEBA.BAT
@@ -315,6 +324,7 @@ test: $(IMG) usb nucprogs $(B)/LANZTEST.COM
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
+	tests/run_pintura_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)

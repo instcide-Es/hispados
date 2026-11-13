@@ -202,10 +202,12 @@ chk $T/t1.ppm tam 800 600 cursor 400 300 \
   px 690 12 7 "altavoz gris: no hay HSPSND" \
   px 468 60 8 "botón de cerrar del Centro" px 475 65 13 "aspa del botón de cerrar" \
   px 300 10 1 "barra superior" texto 736 5 8 4 fina "Salir" px 491 150 0 "sombra del Centro"
-# -- el grupo «Accesorios», en su ventana --
-chk $T/t1b.ppm marco 224 164 452 190 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
+# -- el grupo «Accesorios», en su ventana (alargada para que quepa la segunda
+# fila: Pintura, que es un módulo .HVP y entra sola) --
+chk $T/t1b.ppm marco 224 164 452 207 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
   texto 238 267 9 12 fina "Bloc de notas" texto 350 267 0 8 fina "Calculadora" \
-  texto 478 267 0 8 fina "Reloj" texto 574 267 0 8 fina "Sistema" texto 166 155 9 7 fina "Acceso"
+  texto 478 267 0 8 fina "Reloj" texto 574 267 0 8 fina "Sistema" texto 166 155 9 7 fina "Acceso" \
+  texto 262 343 0 8 fina "Pintura"
 # -- Bloc de notas: escribir --
 chk $T/t2.ppm marco 150 90 520 340 activa titulo 150 90 activa "Bloc de notas - (sin nombre)" \
   titulo 36 52 no "Centro de programas" texto 174 117 0 15 fina "rchivo" \

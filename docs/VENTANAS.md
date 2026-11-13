@@ -75,7 +75,12 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    `tests/run_ventanas3_tests.sh` y `tests/run_ventanas4_tests.sh`. Los
    programas nuevos van aparte, en módulos .HVP: los primeros, los juegos
    Culebra y Campo de minas (ver «Programas aparte: los módulos .HVP»;
-   `tests/run_juegos_tests.sh`). Pendiente (se
+   `tests/run_juegos_tests.sh`), y después Pintura, el programa de dibujo
+   (`tests/run_pintura_tests.sh`). Próximos programas propios (nombres de
+   Carlos): **Pluma-Ventanas**, el procesador de textos (letra con formato,
+   párrafos, imprimir), y **Cuentas-Ventanas**, la hoja de cálculo (fórmulas, formatos de
+   número, gráficos sencillos); además el Administrador de archivos y la
+   segunda tanda de juegos. Pendiente (se
    hará según haga falta en las etapas 4 y 5): avisar de los
    textos sin guardar al salir con el botón «Salir»; arrastrar solo el
    contorno en los equipos lentos y cambiar el cursor en los bordes; órdenes
@@ -106,8 +111,8 @@ Hispa Ventanas es `VENTANAS.COM` (unos 58 KB) y los programas aparte que
 carga (módulos .HVP, más abajo), todo hecho en NASM. Arranca en modo real, comprueba lo que necesita, elige el modo
 de vídeo y entra en modo protegido como **cliente DPMI de 32 bits**. Los
 programas de siempre (Centro, Bloc de notas…) van dentro, cada uno en su
-archivo y como una tarea; los nuevos (los juegos) van aparte, en archivos
-.HVP que se cargan como una tarea más.
+archivo y como una tarea; los nuevos (los juegos y Pintura) van aparte, en
+archivos .HVP que se cargan como una tarea más.
 
 `VENTANAS.COM` se ejecuta dos veces: la primera copia es el **lanzador**
 (2 KB que se quedan en memoria convencional) y ejecuta la segunda, que es el
@@ -119,7 +124,7 @@ que estar en los primeros 64 KB del programa. Por eso los iconos se guardan
 a 4 bits por punto (`tools/icopack.py` los empaqueta al compilar; en los
 fuentes siguen en texto) y la pila y las variables que solo usa el modo
 protegido van detrás, donde llegan los punteros de 32 bits. Si lo de modo
-real se sale de los 64 KB, la compilación falla. Quedan unos 2,3 KB de
+real se sale de los 64 KB, la compilación falla. Quedan unos 2 KB de
 margen: por eso lo nuevo va en módulos .HVP, que no gastan de ahí.
 
 ### Cómo se arranca y se usa
@@ -169,17 +174,21 @@ propia ventana (se mueve, se cambia de tamaño, se minimiza) con un icono por
 **acceso directo**. Por omisión hay tres grupos: «Principal» (los programas
 de Hispa-DOS que haya en la carpeta de VENTANAS.COM: Editar, Gestor,
 Información, el intérprete de órdenes y, el último, Configuración, que es un
-módulo .HVP: ver «Configuración y VENTANAS.INI»), «Accesorios» (los programas
-internos: Bloc de notas, Calculadora, Reloj y Sistema) y «Juegos» (los
-juegos propios: un acceso por cada módulo .HVP de la carpeta `JUEGOS` que
-hay al lado de VENTANAS.COM, `\HISPADOS\JUEGOS`).
+módulo .HVP que está en `\HISPADOS`: ver «Configuración y VENTANAS.INI»), «Accesorios» (los programas
+internos: Bloc de notas, Calculadora, Reloj y Sistema, y Pintura, que es un
+módulo .HVP) y «Juegos» (los juegos propios). Los módulos .HVP están en dos
+carpetas al lado de VENTANAS.COM: los juegos en `\HISPADOS\JUEGOS` y los
+demás programas en `\HISPADOS\PROGS`.
 
-Los juegos nuevos entran solos: al arrancar, si los .HVP de esa carpeta no
-son los mismos que la última vez (se cuenta cuántos hay, `Modulos` en
-CENTRO.INI), los que no tengan acceso directo se añaden al grupo que se
-llame «Juegos» (si no lo hay, se crea), con el nombre que lleva el módulo.
-No se toca nada más de un CENTRO.INI que ya exista, y un acceso que se
-borre a mano no vuelve mientras no cambie el número de módulos.
+Los programas nuevos entran solos: al arrancar, si los .HVP de esas dos
+carpetas no son los mismos que la última vez (se cuenta cuántos hay entre
+las dos, `Modulos` en CENTRO.INI), los que no tengan acceso directo se
+añaden a su grupo, con el nombre que lleva el módulo. El grupo lo dice el
+propio módulo en su cabecera (ver «El formato»): «Juegos» o «Accesorios»
+(si no lo hay, se crea); la carpeta solo sirve para tenerlos ordenados. No
+se toca nada más de un CENTRO.INI que ya exista (al que se hizo antes de que
+existiera Pintura se le añade su acceso en «Accesorios»), y un acceso que
+se borre a mano no vuelve mientras no cambie el número de módulos.
 
 El menú **Archivo** es el mismo en el Centro y en los grupos y actúa sobre el
 icono marcado de la ventana que lo tiene:
@@ -252,7 +261,7 @@ Ventana=36,52,452,190
 Volumen=80
 Silencio=0
 Activo=0
-Modulos=2
+Modulos=3
 
 [Grupo]
 Nombre=Juegos
@@ -276,8 +285,8 @@ Pausa=0
 - `[Centro]`: `Ventana` = x, y, ancho y alto de la ventana del Centro;
   `Volumen` = 0-100 y `Silencio` = 0/1 (no están hasta que se toca el
   volumen); `Activo` = el grupo cuya ventana estaba delante (0 el primero;
-  -1, la del Centro); `Modulos` = cuántos .HVP había en la carpeta `JUEGOS`
-  la última vez que se miró (no está si no hay ninguno).
+  -1, la del Centro); `Modulos` = cuántos .HVP había en las carpetas `JUEGOS`
+  y `PROGS` la última vez que se miró (no está si no hay ninguno).
 - `[Grupo]`: empieza un grupo. `Nombre` (27 letras); `Ventana`, la de su
   ventana; `Estado` = 0 cerrado, 1 abierto, 2 minimizado, 3 maximizado;
   `Marcado` = el icono que tiene marcado (0 el primero).
@@ -494,7 +503,7 @@ cabecera de cada archivo). Todas conservan los registros, salvo EAX cuando
 devuelven algo.
 
 ```
-  (módulos .HVP: juegos/*.asm y programas/*.asm con hvp.inc y hvplib.inc)
+  (módulos .HVP: juegos/*.asm y programas/*.asm, con hvp.inc y hvplib.inc)
   api.inc modulos.inc    la interfaz y el cargador de los módulos
   ajustes.inc    los ajustes que cambia Configuración (CONFIG.HVP)
   centro.inc bloc.inc calc.inc reloj.inc    los programas
@@ -672,7 +681,7 @@ ECX=ancho, EDX=alto.
 | `WM_KEYDOWN` | tecla que no escribe (flechas, Intro, Tab, Esc, Supr, F1…) | ECX=tecla (`TC_*`; Ctrl+letra = `TC_CTRL`+1…26), EDX=mayúsculas (`TM_*`) |
 | `WM_CHAR` | carácter (página 437, con el teclado de KEYB) | ECX=carácter |
 | `WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, `WM_LBUTTONUP`, `WM_LBUTTONDBLCLK` | ratón sobre la zona de la ventana (o capturado) | EDX=x + y×65536 (con signo, en la zona), ECX=mayúsculas |
-| `WM_RBUTTONDOWN` | se aprieta el botón derecho sobre la zona de la ventana (sin captura; no la activa) | lo mismo |
+| `WM_RBUTTONDOWN`, `WM_RBUTTONUP` | se aprieta el botón derecho sobre la zona de la ventana (no la activa) y se suelta. Mientras está apretado, el ratón es de esa ventana (recibe los `WM_MOUSEMOVE` aunque salga de ella), como con el izquierdo | lo mismo |
 | `WM_COMMAND` | orden de menú o aviso de un control | menú: ECX=número. Control: ECX=id + aviso×65536, EDX=el control |
 | `WM_TIMER` | vence un temporizador | ECX=su número |
 | `WM_QUIT` | lo pone `msg_salir`: `msg_tomar` devuelve 0 | |
@@ -681,7 +690,7 @@ ECX=ancho, EDX=alto.
 
 Las teclas que no quiere una ventana hija suben a su madre (así Intro y Esc
 llegan al diálogo); Tab lo atiende `ven_defecto` pasando el foco a la hermana
-siguiente con `E_TABULA`. Mientras el botón está apretado, el ratón es de la
+siguiente con `E_TABULA`. Mientras un botón está apretado, el ratón es de la
 ventana donde se apretó (captura), hasta que se suelta.
 
 ### Ventanas
@@ -746,7 +755,7 @@ coordenadas de la zona de su madre).
 | `dc_texto`, `dc_texto_m`, `dc_texto_n` | EAX=x EBX=y ESI=texto (con `&` de menú / de ECX caracteres) |
 | `dc_icono` | EAX=x EBX=y ESI=icono |
 | `dc_rombo` | EAX=x EBX=y del centro, ECX=radio |
-| `dc_mosaico`, `dc_copiar_clave` | como las de `gdi.inc` |
+| `dc_mosaico`, `dc_copiar_clave`, `dc_copiar` | como las de `gdi.inc` |
 
 ### Controles (`controles.inc`)
 
@@ -877,13 +886,16 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
   juegos», más abajo).
 - **Configuración** (`programas/config.asm`, `CONFIG.HVP`): los ajustes y
   el salvapantallas (ver «Configuración y VENTANAS.INI»).
+- **Pintura**: el programa de dibujo, también un módulo .HVP (ver
+  «Pintura», más abajo).
 
 ## Programas aparte: los módulos .HVP
 
 `VENTANAS.COM` no puede crecer mucho más (lo que usa el modo real tiene que
 caber en 64 KB), así que los programas nuevos van **aparte**, cada uno en su
-archivo `.HVP` («programa de Hispa Ventanas»). Los primeros son los juegos:
-`CULEBRA.HVP` y `MINAS.HVP`, en `\HISPADOS\JUEGOS`.
+archivo `.HVP` («programa de Hispa Ventanas»). Los primeros son los juegos,
+`CULEBRA.HVP` y `MINAS.HVP`, en `\HISPADOS\JUEGOS`, y Pintura,
+`PINTURA.HVP`, en `\HISPADOS\PROGS`.
 
 Un acceso directo cuyo programa acaba en `.HVP` **se abre como una ventana**
 (no se sale a Hispa-DOS como con un .COM o un .EXE): Hispa Ventanas carga el
@@ -910,7 +922,7 @@ reubicaciones.
 | 16 | 4 | punto de entrada (desde el principio del módulo) |
 | 20 | 4 | tamaño de la imagen: ahí empiezan las reubicaciones |
 | 24 | 4 | cuántas reubicaciones hay |
-| 28 | 4 | 0 (reservado) |
+| 28 | 4 | el grupo del Centro al que va su acceso directo: 0 «Juegos», 1 «Accesorios» |
 | 32 | 32 | el nombre del programa, acabado en 0 (página 437) |
 | 64 | 512 | el icono: 32×32 a 4 bits por punto, como los de `iconos.inc` |
 | 576 | 4 × entradas | la tabla de la interfaz (en el archivo, a cero) |
@@ -960,7 +972,7 @@ interfaz de la etapa 3»): EBP = la ventana, EAX = el mensaje o el resultado,
 ECX y EDX los parámetros; las funciones conservan los registros salvo EAX
 cuando devuelven algo. Las constantes (mensajes `WM_*`, estilos `E_*`, la
 ficha `V_*`, las teclas `TC_*`, los colores `C_*`) son las de
-`ventanas/defs.inc`. Versión 1 (63 entradas):
+`ventanas/defs.inc`. Versión 1 (63 entradas, de la 0 a la 62):
 
 | Entradas | Para qué |
 |---|---|
@@ -985,10 +997,27 @@ funcionando igual):
 | `aj_poner` (EAX=número, EDX=valor) | cambiar uno de los seis primeros: vale desde ese momento (el volumen y el silencio se le dan a HSPSND y se repinta el altavoz). No comprueba los límites: es cosa de quien llama |
 | `esc_fondo` (ESI=mosaico de 16×16: 256 octetos, un color por punto) | cambiar el fondo del escritorio, que se repinta |
 
+Añadidas para Pintura (72 entradas: seis más, de la 66 a la 71):
+
+| Entradas | Para qué |
+|---|---|
+| `dc_copiar` (EAX=x EBX=y ECX=ancho EDX=alto ESI=mapa) | dibuja en la ventana un mapa de bits de un octeto por punto (índices de la paleta), `ancho` × `alto`, sin color transparente. Con `dc_cortar` antes, de un mapa grande solo se copia lo que cae dentro: así se enseña un trozo de un lienzo desplazado |
+| `dlg_archivo` (EBP=dueña EDI=título EBX=búfer de 80 con el nombre → EAX=1 si se acepta) | el diálogo de elegir un archivo (el de Abrir y Guardar como del Bloc de notas) |
+| `mem_bloque` (ECX=octetos → EAX=puntero, EDX=mango; CF=1 si no hay), `mem_bloque_soltar` (EDX=mango) | un bloque de memoria extendida propio (función 0501h del DPMI), para lo que no cabe en el montón de 640 KB: el lienzo y los pasos de deshacer. No viene a cero. El módulo lo suelta antes de acabar (al salir de Hispa Ventanas lo suelta el servidor DPMI) |
+| `pal_rgb` | (datos) la paleta: 256 colores de cuatro octetos (rojo, verde, azul, 0): los 16 propios, el cubo de 6×6×6 y los 24 grises |
+| `fuente8x16` | (datos) la fuente: 256 caracteres de 16 octetos, una fila por octeto, el bit de más peso a la izquierda |
+
+Un módulo compilado con menos entradas en su cabecera (63 o 66) sigue
+cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
+anterior no se carga y lo dice.
+
 El ratón llega como siempre (`WM_LBUTTONDOWN`, `WM_MOUSEMOVE`…, con las
-mayúsculas en ECX) y, desde ahora, también el **botón derecho**:
-`WM_RBUTTONDOWN`. Con los botones intercambiados (`AJ_RAT_ZURDO`), el
-cambio se hace antes de repartir: los programas no se enteran.
+mayúsculas en ECX) y también el **botón derecho**: `WM_RBUTTONDOWN` y, desde
+que existe Pintura, `WM_RBUTTONUP`; mientras está apretado, la ventana recibe los
+movimientos del ratón aunque salga de ella (como con el izquierdo), para
+poder dibujar arrastrando con cualquiera de los dos botones. Con los
+botones intercambiados (`AJ_RAT_ZURDO`), el cambio se hace antes de
+repartir: los programas no se enteran.
 
 `ventanas/hvplib.inc` son rutinas que se ensamblan **dentro** del módulo
 (no gastan sitio en VENTANAS.COM): `hvl_cad` y `hvl_num` (componer textos),
@@ -999,12 +1028,13 @@ texto) y `hvl_clases`.
 
 ### Cómo se hace un programa
 
-El fuente va en `juegos/` (o donde se quiera) e incluye `hvp.inc`. El más
-corto, completo:
+El fuente va en `juegos/` o en `programas/` (o donde se quiera) e incluye
+`hvp.inc`. El más corto, completo:
 
 ```nasm
 %include "hvp.inc"
-HVP_CABECERA "Hola", entrada            ; nombre (31 letras) y entrada
+HVP_CABECERA "Hola", entrada            ; nombre (31 letras) y entrada (y,
+                                        ; si va a «Accesorios», un 1 detrás)
         db "................................"   ; el icono: 32 filas de 32
         ...                                     ; («.» transparente, 0-9 a-f
         db "................................"   ; los colores; el 3 no vale)
@@ -1061,13 +1091,15 @@ hola_plant`): `tools/mkhvp.py` ensambla el fuente dos veces, con dos
 direcciones de carga, y de la diferencia saca la tabla de reubicaciones;
 también pasa los textos a la página 437, empaqueta el icono y rellena la
 cabecera. En el Makefile es una regla de dos líneas (como `CULEBRA.HVP`) y
-el nombre del archivo en `HVPS`: con eso va a `\HISPADOS\JUEGOS` del
-disquete y de la imagen USB, `INSTALAR` lo copia al disco duro y, la próxima
-vez que arranque Hispa Ventanas, aparece su acceso en el grupo «Juegos».
-Un módulo que no es un juego va en `HVPSIS` (y en `HVPSIS` de
-`tools/mkusb.py`): se copia a `\HISPADOS`, al lado de VENTANAS.COM, como
-`CONFIG.HVP`; su acceso directo se pone en `def_principal` (`config.inc`) o
-lo añade el usuario («Buscar programas...» en `C:\HISPADOS` lo encuentra).
+el nombre del archivo en `HVPS` (un juego: va a `\HISPADOS\JUEGOS`) o en
+`HVPA` (un accesorio, con el 1 en `HVP_CABECERA`: va a `\HISPADOS\PROGS`):
+con eso está en el disquete y en la imagen USB, `INSTALAR` lo copia al disco
+duro y, la próxima vez que arranque Hispa Ventanas, aparece su acceso en el
+grupo «Juegos» o en «Accesorios». Un módulo del sistema va en `HVPSIS` (y en
+`HVPSIS` de `tools/mkusb.py`): se copia a `\HISPADOS`, al lado de
+VENTANAS.COM, como `CONFIG.HVP`; su acceso directo se pone en
+`def_principal` (`config.inc`) o lo añade el usuario («Buscar programas...»
+en `C:\HISPADOS` lo encuentra).
 
 A mano:
 
@@ -1108,6 +1140,62 @@ esquinas, cuyo tiempo se guarda aparte, como `Prueba=`). Son para las
 pruebas automáticas.
 
 Segunda tanda prevista: Bloques, Solitario, Tragabolas y Almacén.
+
+### Pintura
+
+`programas/pintura.asm`, `PINTURA.HVP` (19 KB), en `\HISPADOS\PROGS`; su
+acceso sale en «Accesorios». Es el programa de dibujo, con diseño propio:
+
+- **Arriba, la barra de herramientas**: lápiz, pincel, goma, línea,
+  rectángulo, elipse, relleno, cuentagotas, texto y selección (teclas L, P,
+  G, N, R, E, B, C, T y S); al lado, los cuatro **grosores** (1, 2, 4 y 8
+  puntos; teclas + y -) y las tres **formas** del rectángulo y la elipse:
+  contorno, lleno y contorno con fondo.
+- **A la derecha, los colores**: dos rombos, el primario delante y el
+  secundario detrás (un clic en ellos los intercambia), y la paleta: los 16
+  colores de Hispa Ventanas y 40 más. El botón izquierdo elige el primario y
+  el derecho el secundario. Colores › Todos los colores abre una ventana con
+  los 256.
+- **El botón izquierdo dibuja con el primario y el derecho con el
+  secundario** (en las formas con fondo, el otro color es el fondo). La goma
+  pone el secundario; lo que deja una selección al moverla o borrarla,
+  también. El cuentagotas toma el color del lienzo para el botón con que se
+  pulsa. El texto se pide en un diálogo y se escribe con la fuente de Hispa
+  Ventanas (al doble y al triple con los grosores 4 y 8).
+- **Selección**: se marca un recuadro; arrastrándolo se mueve; Ctrl+X,
+  Ctrl+C y Ctrl+V cortan, copian y pegan (lo pegado queda flotando para
+  colocarlo); Supr borra; Esc, otra herramienta o un clic fuera lo dejan
+  donde está; Ctrl+A lo selecciona todo. El portapapeles de imágenes es de
+  Pintura (el de Hispa Ventanas solo lleva texto).
+- **Deshacer y rehacer** (Ctrl+Z, Ctrl+Y): hasta 8 pasos; menos si el lienzo
+  es grande (cada paso guarda el lienzo entero y no se pasa de 2,5 MB: con
+  640×480 son 6 y con 1024×768, 1).
+- **El lienzo**: de 8×8 a 1024×768 puntos (480×320 al empezar; Archivo ›
+  Nuevo pide el tamaño), un octeto por punto con los 256 colores de Hispa
+  Ventanas. Si no cabe en la ventana salen **barras de desplazamiento**
+  propias (se arrastra el tirador o se pulsa en la pista; también las
+  flechas, Re Pág y Av Pág).
+- **Archivo**: Nuevo, Abrir, Guardar (Ctrl+G) y Guardar como, en **BMP**. Lee
+  los BMP de 1, 4, 8 y 24 bits sin compresión (también con la primera fila
+  arriba); cada color pasa al más parecido de la paleta: uno de los 16
+  propios si es exacto y, si no, el del cubo o el gris más cercano. Guarda
+  en el modo de color de Hispa Ventanas: BMP de 8 bits con su paleta de 256
+  colores (lo que se guarda y se vuelve a abrir queda igual). Sin extensión,
+  guarda como `.BMP`. Pregunta antes de perder cambios (al cerrar, con
+  Nuevo y con Abrir).
+- En los **parámetros** del acceso directo se puede poner un BMP, que se
+  abre al entrar.
+- Abajo, la **barra de estado**: la herramienta, el tamaño del lienzo y el
+  punto donde está el ratón.
+
+Memoria: un bloque de memoria extendida (`mem_bloque`) con el lienzo, la
+zona flotante (lo que se mueve o se pega; también es la pila del relleno) y
+los pasos de deshacer; otro, del tamaño justo, para lo copiado. El relleno
+va por tramos de fila, sin recursión.
+
+Pendiente: ampliar la vista (lupa), voltear y girar, líneas a 45° con
+Mayús, elegir la fuente del texto y avisar de los cambios sin guardar al
+salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
 
 ## Pruebas
 
@@ -1161,6 +1249,21 @@ Segunda tanda prevista: Bloques, Solitario, Tragabolas y Almacén.
   botones intercambiados y teclado estadounidense al arrancar, y «De
   fábrica». Cuarta: en VGA de 640×480 y 16 colores. Capturas de muestra en
   `build/config_*.png`. (`tests/run_config_tests.sh` es la de CONFIG.SYS.)
+- `tests/run_pintura_tests.sh`: Pintura. Primera sesión, sin CENTRO.INI: su
+  acceso sale en «Accesorios»; se abre, se dibuja con el ratón con cada
+  herramienta y con los dos botones, se eligen colores, grosores y formas,
+  se rellena, se deshace y se rehace, se escribe un texto, se mueve, se
+  copia y se pega una selección; se guarda y el BMP del disco se saca con
+  mtools y se mira octeto a octeto (`tests/tools/pintura_bmp.py`: cabecera,
+  paleta y el color de cada punto dibujado); cerrar con cambios pregunta;
+  salir con Pintura abierta deja la memoria como al entrar. Segunda sesión:
+  abre BMP de 1, 4, 8 y 24 bits hechos por la prueba (el nombre va en los
+  parámetros del acceso) y comprueba los colores en la pantalla; guarda el
+  de 24 bits y compara todos sus puntos; un archivo que no es un BMP, uno
+  comprimido, uno demasiado grande y uno que no existe; lienzo nuevo de otro
+  tamaño; y una imagen que no cabe: barras, flechas, Av Pág, arrastrar el
+  tirador, dibujar con el lienzo desplazado y guardar. Capturas de muestra
+  en `build/pintura_*.png`.
 - Programas de prueba de Windows 16 bits propios (NASM + nuestra
   herramienta de cabeceras NE) para cada función de la API, con su
   resultado escrito en un archivo (etapa 4).

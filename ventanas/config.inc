@@ -507,23 +507,16 @@ cfg_cargar:
         call cfg_defecto
         mov dword [cfg_len], 0
 .hvp:
-        ; los programas de Hispa Ventanas (.HVP) de la carpeta JUEGOS: si no
-        ; son los mismos que la última vez, los que no tengan acceso directo
-        ; entran en el grupo «Juegos»
-        mov edi, cen_arch
-        mov esi, dir_propia
-        call pon_cad
-        mov esi, t_hvp_dir
-        call pon_cad
+        ; los programas de Hispa Ventanas (.HVP) de las carpetas JUEGOS y
+        ; PROGS: si no son los mismos que la última vez, los que no tengan
+        ; acceso directo entran en su grupo («Juegos» o «Accesorios»)
         xor ecx, ecx
-        mov [edi], cl
-        call hvp_buscar
+        call hvp_las_dos
         cmp eax, [hvp_vistos]
         je .h2
         mov [hvp_vistos], eax
         inc ecx
-        or edx, -1
-        call hvp_buscar
+        call hvp_las_dos
         mov dword [cfg_len], 0
 .h2:
         cmp dword [cfg_len], 0

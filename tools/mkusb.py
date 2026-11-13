@@ -68,12 +68,20 @@ def main():
                      ('HSPCD.SYS', 'HSPCD.SYS'), ('HSPRATON.COM', 'HSPRATON.COM'),
                      ('VENTANAS.COM', 'VENTANAS.COM')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
-    # los juegos de Hispa Ventanas (.HVP), en \HISPADOS\JUEGOS
+    # los programas de Hispa Ventanas (.HVP): los juegos, en \HISPADOS\JUEGOS;
+    # los accesorios (los que dicen grupo 1 en la cabecera), en
+    # \HISPADOS\PROGS
     md('HISPADOS/JUEGOS')
+    md('HISPADOS/PROGS')
     for f in sorted(os.listdir(B)):
         if f.endswith('.HVP'):
-            # [Configuración] los que no son juegos (HVPSIS del Makefile), en \HISPADOS
-            cp(os.path.join(B, f), ('HISPADOS/' if f in HVPSIS else 'HISPADOS/JUEGOS/') + f)
+            if f in HVPSIS:
+                # [Configuración] los que no son juegos ni accesorios (HVPSIS del Makefile), en \HISPADOS
+                cp(os.path.join(B, f), 'HISPADOS/' + f)
+            else:
+                cab = open(os.path.join(B, f), 'rb').read(32)
+                carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] == 1 else 'JUEGOS'
+                cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
     print(OUT)
     mkfloppy()
 

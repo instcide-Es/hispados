@@ -1410,9 +1410,13 @@ ges_raton_pulsa:
         popad
         ret
 
-; el botón derecho, apretado: WM_RBUTTONDOWN a la ventana que hay debajo
+; el botón derecho (BH=1 apretado, 0 soltado): WM_RBUTTONDOWN a la ventana
+; que hay debajo, que se queda con el ratón hasta que se suelta; entonces
+; recibe WM_RBUTTONUP
 ges_raton_der:
         pushad
+        test bh, bh
+        jz .sube
         mov eax, [menu_ven]
         or eax, [captura]
         jnz .x
@@ -1426,6 +1430,21 @@ ges_raton_der:
         test al, S_INACTIVA
         jnz .x
         mov eax, WM_RBUTTONDOWN
+        call ges_msg_raton
+        mov [captura], edi
+        mov byte [cap_der], 1
+        jmp .x
+.sube:
+        cmp byte [cap_der], 0
+        je .x
+        mov byte [cap_der], 0
+        mov edi, [captura]
+        test edi, edi
+        jz .x
+        cmp byte [rat_boton], 0     ; (con el izquierdo apretado, la captura es suya)
+        jne .x
+        mov dword [captura], 0
+        mov eax, WM_RBUTTONUP
         call ges_msg_raton
 .x:
         popad
