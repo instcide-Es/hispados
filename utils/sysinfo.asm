@@ -102,15 +102,46 @@ start:
         mov ecx, 0x040100
         mov si, v_ac97
         call pci_count_named
-        call none_if_empty
+        ; las Sound Blaster (ISA) no están en el PCI: se le pregunta a HSPSND
+        ; qué tarjeta usa (función 00h: AL = 1 Sound Blaster, 2 SB16)
+        mov byte [snd_on], 0
         push es                     ; (devuelve en ES:BX la entrada de HSPSND:
         push di                     ; sin esto, el resto de las líneas se
         mov ax, 0xD700              ; escribían encima del driver residente)
         int 0x2F
+        cmp al, 0xFF
+        jne .nosb
+        mov byte [snd_on], 1
+        mov [snd_ent], bx
+        mov [snd_ent+2], es
+        mov ah, 0x00
+        call far [snd_ent]          ; -> AL = tarjeta (ES:DI = nombre)
+        mov [snd_card], al
+.nosb:
         pop di
         pop es
-        cmp al, 0xFF
-        jne .nosnd
+        cmp byte [snd_on], 0
+        je .nosb2
+        mov si, v_sb16
+        cmp byte [snd_card], 2
+        je .sb
+        mov si, v_sb
+        cmp byte [snd_card], 1
+        jne .nosb2
+.sb:
+        cmp byte [any], 0
+        je .sb1
+        push si
+        mov si, v_sep
+        call app
+        pop si
+.sb1:
+        call app
+        mov byte [any], 1
+.nosb2:
+        call none_if_empty
+        cmp byte [snd_on], 0
+        je .nosnd
         mov si, v_hspsnd
         call app
 .nosnd:
@@ -765,6 +796,8 @@ v_ahci      db "SATA (AHCI)", 0
 v_nvme      db "NVMe", 0
 v_hda       db "HD Audio", 0
 v_ac97      db "AC'97", 0
+v_sb        db "Sound Blaster", 0
+v_sb16      db "Sound Blaster 16", 0
 v_hspsnd    db " - HSPSND cargado", 0
 v_xhci      db "xHCI (USB 3)", 0
 v_ehci      db "EHCI (USB 2)", 0
@@ -810,6 +843,9 @@ vendors     dw 0x8086
 
         section .bss
 any         resb 1
+snd_on      resb 1
+snd_card    resb 1
+snd_ent     resd 1
 dnum        resb 1
 ide_base    resw 1
 pci_id      resd 1
