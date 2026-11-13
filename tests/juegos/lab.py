@@ -268,6 +268,34 @@ ERRORES = re.compile(
     r'missing|invalid|incorrect|requires|necesita|excepci[oó]n|exception|divide|overflow|'
     r'no v[aá]lid|desconocid|protecci[oó]n|page fault|general protection)[^\n]*)', re.I)
 
+def mide_wav(f, umbral=400):
+    """[SONIDO-JUEGOS] (segundos con sonido, pico) de una grabación de QEMU
+    (-audiodev wav). Con sonido = ventanas de 10 ms cuyo pico pasa del umbral
+    (sobre 32767) una vez quitada la componente continua de la ventana (hay
+    tarjetas que en reposo dejan un nivel fijo, que no suena)."""
+    try:
+        d = open(f, 'rb').read()
+    except OSError:
+        return 0.0, 0
+    if len(d) < 46 or d[:4] != b'RIFF':
+        return 0.0, 0
+    ch, rate = struct.unpack_from('<HI', d, 22)
+    bits = struct.unpack_from('<H', d, 34)[0]
+    if bits != 16 or not ch or not rate:
+        return 0.0, 0
+    cuerpo = d[44:len(d) - (len(d) - 44) % (2 * ch)]
+    v = struct.unpack('<%dh' % (len(cuerpo) // 2), cuerpo)[::ch]
+    win = max(rate // 100, 1)
+    con, pico = 0, 0
+    for i in range(0, len(v) - win + 1, win):
+        seg = v[i:i + win]
+        m = sum(seg) // win
+        p = max(max(seg) - m, m - min(seg))
+        if p > umbral:
+            con += 1
+        pico = max(pico, p)
+    return con / 100.0, pico
+
 def prueba(juego, orden, a, iso, sal):
     """Una pasada con un juego. Devuelve un dict con el resultado."""
     nombre = juego.replace('/', '_')
@@ -308,6 +336,8 @@ def prueba(juego, orden, a, iso, sal):
         bat = ['@ECHO OFF', 'PROMPT $P$G', 'PATH A:\\HISPADOS', 'TECLADO SP']
         if not a.sin_raton:
             bat.append(('LH ' if a.lh else '') + 'A:\\HISPADOS\\HSPRATON')
+        if a.joy:                           # [SONIDO-JUEGOS] como el disquete de uso
+            bat.append('A:\\HISPADOS\\HSPJOY')
         if not a.sin_sonido:
             bat.append(('LH ' if a.lh else '') + 'A:\\HISPADOS\\HSPSND /VOL:80' + (' /SB' if a.sb else ''))
         if a.dpmi:
@@ -329,10 +359,19 @@ def prueba(juego, orden, a, iso, sal):
                 '-audiodev', ('wav,id=snd,path=' + a.wav) if a.wav else 'none,id=snd',
                 '-machine', 'pcspk-audiodev=snd',
                 '-serial', 'file:' + log]
+        # [SONIDO-JUEGOS] --audio: lo que sale por la Sound Blaster (voz
+        # digital) y por la AdLib (música FM) se graba aparte y se mide
+        wavs = {}
+        def voz(nombre):
+            if not a.audio:
+                return 'snd'
+            wavs[nombre] = os.path.join(tmp, nombre + '.wav')
+            args.extend(['-audiodev', 'wav,id=w%s,path=%s' % (nombre, wavs[nombre])])
+            return 'w' + nombre
         if 'sb16' in a.tarjeta:
-            args += ['-device', 'sb16,audiodev=snd']
+            args += ['-device', 'sb16,audiodev=' + voz('sb')]
         if 'adlib' in a.tarjeta:
-            args += ['-device', 'adlib,audiodev=snd']
+            args += ['-device', 'adlib,audiodev=' + voz('fm')]
         if 'ac97' in a.tarjeta:
             args += ['-device', 'AC97,audiodev=snd']
         if 'hda' in a.tarjeta:
@@ -460,6 +499,15 @@ def prueba(juego, orden, a, iso, sal):
         if a.ref:
             tras = '\n'.join(obs[-1]['texto'])
         res['serie'] = tras
+        if a.audio:
+            # [SONIDO-JUEGOS] QEMU cierra los .wav (y pone su cabecera) al salir
+            q.fin()
+            q = None
+            res['audio'] = {k: mide_wav(f) for k, f in wavs.items()}
+            if a.conserva_wav:
+                for k, f in wavs.items():
+                    if os.path.exists(f):
+                        shutil.copy(f, os.path.join(sal, '%s_%s.wav' % (nombre, k)))
         m = re.search(r'Memoria convencional[^\n]*|[^\n]*libres?[^\n]*', s)
         clasifica(res, obs, tras)
         with open(os.path.join(sal, nombre + '.txt'), 'w', encoding='utf-8') as f:
@@ -471,6 +519,8 @@ def prueba(juego, orden, a, iso, sal):
                            o['eip'], o['hlt'], o['pm'], o['fin']))
                 for l in o['texto']:
                     f.write('    | ' + l + '\n')
+            for k, (seg, pico) in sorted(res.get('audio', {}).items()):
+                f.write('audio %s: %.2f s con sonido, pico %d\n' % (k, seg, pico))
             f.write('\nvectores: %s\n%s\n' % (vect, '\n'.join(volc)))
             f.write('\n--- puerto serie (todo) ---\n' + s)
         return res
@@ -564,6 +614,11 @@ def main():
                          '--tarjeta hda o ac97, sin sb16)')
     ap.add_argument('--wav', help='grabar en este .wav lo que suena (con un solo juego)')
     ap.add_argument('--sin-raton', action='store_true')
+    ap.add_argument('--joy', action='store_true', help='cargar también HSPJOY (como el disquete de uso)')
+    ap.add_argument('--audio', action='store_true',
+                    help='grabar (-audiodev wav) lo que sale por la Sound Blaster y por la AdLib y\n'
+                         'medirlo: columnas «sb» y «fm» = segundos con sonido y pico')
+    ap.add_argument('--conserva-wav', action='store_true', help='con --audio: dejar los .wav en --sal')
     ap.add_argument('--config', action='append', help='línea extra de CONFIG.SYS')
     ap.add_argument('--antes', action='append', help='orden extra en AUTOEXEC antes del juego')
     ap.add_argument('--orden', help='orden a lanzar (con un solo juego)')
@@ -628,14 +683,19 @@ def main():
 
     def una(t):
         r = prueba(t[0], t[1], a, Iso(a.iso), sal)
-        print('%-16s %-10s %-16s %s' % (r['juego'], r['orden'][:10], r['estado'], r['detalle'][:120]), flush=True)
+        au = ''.join(' %s=%.1fs/%d' % (k, v[0], v[1]) for k, v in sorted(r.get('audio', {}).items()))
+        print('%-16s %-10s %-16s%s %s' % (r['juego'], r['orden'][:10], r['estado'], au, r['detalle'][:120]), flush=True)
         return r
     with ThreadPoolExecutor(max_workers=a.j) as ex:
         resultados = list(ex.map(una, tareas))
     with open(os.path.join(sal, 'tabla.tsv'), 'w', encoding='utf-8') as f:
-        f.write('juego\torden\testado\tdetalle\n')
+        f.write('juego\torden\testado\tdetalle%s\n' % ('\tsb_s\tsb_pico\tfm_s\tfm_pico' if a.audio else ''))
         for r in resultados:
-            f.write('%s\t%s\t%s\t%s\n' % (r['juego'], r['orden'], r['estado'], r['detalle'].replace('\t', ' ').replace('\n', ' ')))
+            au = ''
+            if a.audio:
+                x = r.get('audio', {})
+                au = '\t%.2f\t%d\t%.2f\t%d' % (x.get('sb', (0, 0)) + x.get('fm', (0, 0)))
+            f.write('%s\t%s\t%s\t%s%s\n' % (r['juego'], r['orden'], r['estado'], r['detalle'].replace('\t', ' ').replace('\n', ' '), au))
     cuenta = {}
     for r in resultados:
         cuenta[r['estado']] = cuenta.get(r['estado'], 0) + 1

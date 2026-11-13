@@ -355,6 +355,9 @@ nucprogs: $(NUCPROGS)
 # el «juego» de prueba de los accesos directos (tests/run_ventanas4_tests.sh)
 $(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# [SONIDO-JUEGOS] (SBJUEGO: tests/run_sbjuego_tests.sh)
+$(B)/SBJUEGO.COM: tests/progs/sbjuego.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 
 test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM
 	tests/run_tests.sh $(IMG)
@@ -418,6 +421,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM
 	tests/run_rev_filtros_tests.sh $(IMG)
 	tests/run_drivers_tests.sh $(IMG)
 	tests/run_sbload_tests.sh $(IMG)
+	tests/run_sbjuego_tests.sh $(IMG)
 	tests/run_bootfat12_tests.sh
 	tests/run_mouse_tests.sh $(IMG)
 	tests/run_compat_tests.sh

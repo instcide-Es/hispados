@@ -2,11 +2,14 @@
 ;  HSPSND.COM - driver de sonido de Hispa-DOS (residente)
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  Uso:  HSPSND [/SB] [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO] [/EAPD:0]
+;  Uso:  HSPSND [/SB] [/SB8] [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO]
+;               [/EAPD:0]
 ;               [/NOTECLAS]   (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
 ;        /SB        Sound Blaster 16 emulada sobre el HD Audio o el AC'97,
 ;                   para los juegos (hace falta HSPEMM; si hay una Sound
 ;                   Blaster de verdad, no hace nada). Ver docs/HSPSB.md
+;        /SB8       [SONIDO-JUEGOS] Sound Blaster 16: tocar por la vía de 8
+;                   bits (DMA baja), como una SB Pro, y no por la de 16
 ;        /NOSB      no buscar una Sound Blaster
 ;        /VOL:n     volumen del 0 al 100 % (80 si no se dice); con el driver
 ;                   ya instalado cambia el volumen del residente
@@ -1500,6 +1503,7 @@ sb_full     db 0, 0, 0, 0
 sb_hs       db 0                    ; modo de alta velocidad (8 bits)
 sb_old      dd 0
 sb_req      dw 0
+sb_nirq     dw 0                    ; [SONIDO-JUEGOS] interrupciones atendidas (/INFO)
 name_sb     db "Sound Blaster", 0
 name_sb16   db "Sound Blaster 16", 0
 
@@ -1915,6 +1919,7 @@ sb_isr:
         inc dx                      ; acuse de 16 bits
 .ack:
         in al, dx
+        inc word [cs:sb_nirq]       ; [SONIDO-JUEGOS] para el diagnóstico de /INFO
         push bx
         movzx bx, byte [cs:sb_play]
         cmp byte [cs:sb_full+bx], 0
@@ -2853,6 +2858,9 @@ o_tilde:
 o_sb:
         mov byte [opt_sb], 1
         ret
+o_sb8:                              ; [SONIDO-JUEGOS]
+        mov byte [opt_sb8], 1
+        ret
 o_nogpio:
         mov byte [opt_nogpio], 1
         ret
@@ -2920,12 +2928,15 @@ o_eapd:
         mov byte [have_eapd], 1
         ret
 
-opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb, o_sb
+opt_tab     dw k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o_nokeys, k_sb8, o_sb8, k_sb, o_sb
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
             dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde, 0
 k_tilde     db "~", 0
 k_nosb      db "NOSB", 0
 k_sb        db "SB", 0
+k_sb8       db "SB8", 0           ; (antes que SB en opt_tab: se compara por prefijo)
+opt_sb8     db 0
+sb_hw_h     db 0
 k_nogpio    db "NOGPIO", 0
 k_nokeys    db "NOTECLAS", 0
 k_vol       db "VOL:", 0
@@ -2975,6 +2986,7 @@ show_info:
         cmp byte [dev_type], 0
         je .none
         call sb_print
+        call sb_info_extra          ; [SONIDO-JUEGOS]
         cmp byte [sb_major], 3
         jb .end
         mov si, msg_i_sbmix
@@ -3665,6 +3677,14 @@ sb_detect:
         je .u3
         mov [sb_hdma], al
 .u3:
+        ; [SONIDO-JUEGOS] /SB8: la SB16 se usa por la vía de 8 bits; la DMA
+        ; alta se guarda para decirla en BLASTER (los juegos sí la usan)
+        cmp byte [opt_sb8], 0
+        je .u3b
+        mov al, [sb_hdma]
+        mov [sb_hw_h], al
+        mov byte [sb_hdma], 0
+.u3b:
         ; SB 1.x/2.0/Pro sin BLASTER: la IRQ está en puentes de la tarjeta
         ; (de fábrica la 7 en muchas, no la 5): se pregunta al DSP
         cmp byte [sb_major], 4
@@ -4053,11 +4073,18 @@ sb_set_blaster:
         add di, 2
         movzx ax, byte [sb_dma]
         call dec_di
+        ; [SONIDO-JUEGOS] con /SB8 la DMA alta sigue en la variable
+        movzx ax, byte [sb_hdma]
         cmp byte [dev_type], 2
-        jne .t
+        je .hh
+        movzx ax, byte [sb_hw_h]
+        cmp al, 5
+        jb .t
+        cmp al, 7
+        ja .t
+.hh:
         mov dword [di], ' H'
         add di, 2
-        movzx ax, byte [sb_hdma]
         call dec_di
 .t:
         mov al, '1'
@@ -4173,8 +4200,87 @@ sb_set_blaster:
         call puts
         mov si, msg_crlf2
         call puts
-.fail:
         ret
+.fail:
+        ; [SONIDO-JUEGOS] antes no se decía nada: los juegos se quedaban sin
+        ; la variable y sin sonido, y no había pista de por qué
+        mov si, msg_sb_noenv
+        call puts
+        mov si, bl_text
+        call puts
+        mov si, msg_crlf2
+        call puts
+        ret
+
+; [SONIDO-JUEGOS] /INFO: interrupciones atendidas, máscara del PIC y la
+; variable BLASTER que ven los programas
+sb_info_extra:
+        mov si, msg_i_sbirq
+        call puts
+        mov ax, [sb_nirq]
+        call pdec
+        mov si, msg_i_sbirq2
+        call puts
+        movzx ax, byte [sb_irq]
+        call dec2
+        mov cl, [sb_irq]
+        mov dx, 0x21
+        cmp cl, 8
+        jb .m
+        mov dx, 0xA1
+        sub cl, 8
+.m:
+        in al, dx
+        shr al, cl
+        mov si, msg_i_dest
+        test al, 1
+        jz .p
+        mov si, msg_i_tap
+.p:
+        call puts
+        ; BLASTER en el entorno de este programa (copia del de quien lo lanza)
+        push es
+        mov es, [0x2C]
+        xor di, di
+.v:
+        cmp byte [es:di], 0
+        je .no
+        mov si, s_blaster
+        mov bx, di
+.c:
+        lodsb
+        test al, al
+        jz .si
+        cmp al, [es:di]
+        jne .nx
+        inc di
+        jmp .c
+.nx:
+        cmp byte [es:di], 0
+        je .n2
+        inc di
+        jmp .nx
+.n2:
+        inc di
+        jmp .v
+.si:
+        mov si, msg_i_env
+        call puts
+.e:
+        mov al, [es:bx]
+        test al, al
+        jz .ef
+        call putc
+        inc bx
+        jmp .e
+.ef:
+        pop es
+        mov si, msg_crlf2
+        jmp puts
+.no:
+        pop es
+        mov si, msg_i_noenv
+        jmp puts
 
 ; AX -> 3 cifras hexadecimales (puerto)
 hex3:
@@ -4259,6 +4365,13 @@ msg_sb_dsp  db " (DSP ", 0
 msg_sb_end  db ")", 13, 10, 0
 msg_sb_set  db "Variable puesta: ", 0
 msg_sb_full db "No cabe en el entorno; póngala en AUTOEXEC.BAT: SET ", 0
+msg_sb_noenv db "No se ha podido poner la variable; escriba: SET ", 0
+msg_i_sbirq db "Interrupciones de la tarjeta atendidas: ", 0
+msg_i_sbirq2 db "; IRQ ", 0
+msg_i_dest  db " destapada", 13, 10, 0
+msg_i_tap   db " tapada (se destapa al tocar)", 13, 10, 0
+msg_i_env   db "Variable para los juegos: ", 0
+msg_i_noenv db "Variable BLASTER: no está puesta (los juegos no verán la tarjeta)", 13, 10, 0
 bl_have     db 0
 bl_i        db 0
 bl_d        db 0
@@ -5252,6 +5365,7 @@ msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh
             db "  /VOL:n     volumen del 0 al 100 % (también con el driver ya cargado)", 13, 10
             db "  /INFO      muestra la tarjeta, el códec, las salidas y el camino elegido", 13, 10
             db "  /NOSB      no buscar una Sound Blaster", 13, 10
+            db "  /SB8       Sound Blaster 16: tocar por la vía de 8 bits (como una SB Pro)", 13, 10
             db "  /NOTECLAS  sin teclas de volumen (Ctrl+Alt+flechas arriba y abajo,", 13, 10
             db "             Ctrl+Alt+Fin para el silencio y las teclas multimedia)", 13, 10
             db "  /GPIO:hh   HD Audio: valor (hex) de las patillas GPIO del códec, que en", 13, 10
