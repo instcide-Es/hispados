@@ -108,7 +108,7 @@ Al final de la etapa 5 sale la primera versión estable de Hispa Ventanas.
 
 ## Arquitectura
 
-Hispa Ventanas es `VENTANAS.COM` (unos 58 KB) y los programas aparte que
+Hispa Ventanas es `VENTANAS.COM` (unos 70 KB) y los programas aparte que
 carga (módulos .HVP, más abajo), todo hecho en NASM. Arranca en modo real, comprueba lo que necesita, elige el modo
 de vídeo y entra en modo protegido como **cliente DPMI de 32 bits**. Los
 programas de siempre (Centro, Bloc de notas…) van dentro, cada uno en su
@@ -119,14 +119,34 @@ archivos .HVP que se cargan como una tarea más.
 (2 KB que se quedan en memoria convencional) y ejecuta la segunda, que es el
 entorno gráfico (ver «Programas de Hispa-DOS desde Hispa Ventanas»).
 
-Un .COM no pasa de 64 KB y lo que usa la parte de modo real (el código de
-arranque, el búfer de paso de DOS, las colas del ratón y del teclado) tiene
-que estar en los primeros 64 KB del programa. Por eso los iconos se guardan
-a 4 bits por punto (`tools/icopack.py` los empaqueta al compilar; en los
-fuentes siguen en texto) y la pila y las variables que solo usa el modo
-protegido van detrás, donde llegan los punteros de 32 bits. Si lo de modo
-real se sale de los 64 KB, la compilación falla. Quedan unos 2 KB de
-margen: por eso lo nuevo va en módulos .HVP, que no gastan de ahí.
+Lo que usa la parte de modo real (el código de arranque, el búfer de paso
+de DOS, las colas del ratón y del teclado) tiene que estar en los primeros
+64 KB del programa, y un .COM de verdad no pasa de 64 KB. Por eso
+`VENTANAS.COM` **tiene formato .EXE** (cabecera «MZ») aunque se llame .COM:
+el núcleo mira la cabecera, no el nombre, y carga la imagen entera, mida lo
+que mida. La cabecera (32 octetos, la escribe el propio `ventanas.asm`) no
+lleva reubicaciones y pide CS = SS = PSP (FFF0h: el segmento de carga menos
+10h) e IP = 100h: el programa arranca exactamente como un .COM (ORG 100h,
+DS = ES = CS = PSP). Un .EXE así el núcleo lo carga donde cargaría un .COM,
+sin el relleno hasta 1000h que pone a los demás .EXE (el lanzador se queda
+residente: ese relleno sería memoria perdida para los juegos).
+
+El archivo tiene dos partes:
+
+- la **parte baja**, hasta los 64 KB: todo el código de 16 bits, el código
+  de 32 bits de siempre, los textos y las variables que usa el modo real
+  (`bss.inc`, que van en el archivo como ceros). Si se sale de los 64 KB,
+  la compilación falla (`-w+error=number-overflow`). Quedan unos 11 KB;
+- la **parte alta** (`alto_ini`, detrás de la baja): los iconos, la fuente
+  y el código de 32 bits que no cabe abajo (`accesos.inc`). El modo
+  protegido llega a ella con punteros de 32 bits; desde el código de
+  16 bits no se puede nombrar nada de ahí (da el mismo error al compilar).
+  No tiene límite: lo nuevo que solo sea de 32 bits va ahí.
+
+Detrás del archivo, en memoria, siguen la pila y las variables que solo usa
+el modo protegido. Los iconos se guardan a 4 bits por punto
+(`tools/icopack.py` los empaqueta al compilar; en los fuentes siguen en
+texto).
 
 ### Cómo se arranca y se usa
 
@@ -202,6 +222,7 @@ icono marcado de la ventana que lo tiene:
 | Propiedades... | cambia el nombre del grupo | el diálogo del acceso |
 | Mover a otro grupo... | — | lista de grupos |
 | Borrar (Supr) | el grupo con sus accesos (pregunta) | el acceso (pregunta) |
+| Carpeta de juegos... | liga el grupo marcado a una carpeta | liga este grupo |
 | Buscar programas... | añade al grupo marcado | añade a este grupo |
 
 Un acceso directo también se lleva a otro grupo **arrastrando su icono** a la
@@ -219,7 +240,8 @@ carpeta; todos dibujados aquí, en `ventanas/iconos.inc` e `iconos2.inc`, con
 (si no, al acabar el programa se queda en Hispa-DOS) y «Esperar una tecla al
 terminar» (para leer lo que deja escrito un programa que acaba enseguida).
 «Examinar...» abre el diálogo de elegir archivo y rellena el programa, la
-carpeta y, si falta, el nombre.
+carpeta y, si falta, el nombre. Debajo están las **opciones para juegos de
+DOS** (velocidad, LOADFIX y sonido: ver «Opciones de juego»).
 
 **Buscar programas...** pide una carpeta (por omisión `\JUEGOS` de la unidad
 de Hispa Ventanas) y crea un acceso directo, con el icono de juego y el
@@ -230,7 +252,8 @@ nombre de la carpeta, al programa principal de cada una de sus subcarpetas
 2. si no, el único .EXE; si no hay ninguno, el único .COM; si tampoco, el
    único .BAT. No cuentan los que empiezan por SETUP, INSTALL, INSTALAR,
    CONFIG, SETSOUND, SNDSETUP, UNINSTAL, README, LEEME, DOS4GW, CWSDPMI,
-   DOS32A, PMODEW o UNIVBE;
+   DOS32A, PMODEW o UNIVBE (salvo que la subcarpeta no tenga más que un
+   programa y sea uno de esos: entonces, ese);
 3. si quedan varios de la misma clase, pregunta con una lista («Cancelar»
    salta esa carpeta).
 
@@ -240,6 +263,62 @@ llame .HVP sin serlo no cuenta).
 
 No repite un programa que ya tenga acceso directo, y al final dice cuántos
 ha añadido.
+
+#### Grupos ligados a una carpeta de juegos
+
+Un grupo se puede **ligar a una carpeta** (`C:\JUEGOS`): Hispa Ventanas le
+pone solo un acceso directo por cada juego que haya en ella, sin tener que
+buscar nada. Se hace con **Archivo > Carpeta de juegos...**, que pide la
+carpeta (propone `\JUEGOS` del disco duro en que está Hispa Ventanas, o
+`C:\JUEGOS`; «Examinar...» abre el diálogo de archivos en modo de elegir
+carpeta: se entra en ella con doble clic y se acepta). Con la carpeta en
+blanco el grupo deja de estar ligado (sus accesos se quedan).
+
+La primera vez que Hispa Ventanas encuentra esa carpeta de juegos (`\JUEGOS`
+de su unidad si es un disco duro, o `C:\JUEGOS`) crea él mismo el grupo
+**«Juegos de DOS»** ligado a ella, también en un CENTRO.INI de antes. Solo
+una vez (`JuegosDOS=1` en CENTRO.INI): si el grupo se borra o se le quita la
+carpeta, no vuelve.
+
+**Al arrancar** (también al volver de un juego) **y al abrir el grupo**, el
+grupo se pone al día con su carpeta:
+
+- cada **subcarpeta** sin acceso directo recibe uno a su programa principal,
+  con las reglas de «Buscar programas...» pero sin preguntar: si quedan
+  varios programas de la misma clase, se elige el de mayor tamaño (se puede
+  cambiar luego en «Propiedades»). Si ya hay un acceso, en cualquier grupo,
+  a algún programa de esa subcarpeta, el juego se da por puesto;
+- cada **programa suelto** (.EXE, .COM o .BAT de la carpeta misma, sin
+  contar los de instalar y configurar) recibe también el suyo;
+- los accesos cuyo programa **ya no está** se quitan... si los puso Hispa
+  Ventanas y nadie los ha tocado. Uno que se cambió en «Propiedades» (por
+  ejemplo, se le puso la velocidad) no se quita: se queda con un **aspa**
+  granate sobre el icono, y la pierde si el programa vuelve. Los accesos
+  creados a mano no se miran;
+- un acceso de la carpeta que se **borra a mano** no vuelve a salir mientras
+  su juego siga ahí (se guarda oculto); aceptar otra vez «Carpeta de
+  juegos...» en el grupo los recupera todos;
+- si la carpeta no se puede leer (un disco que no está puesto), no se toca
+  nada.
+
+Hasta 64 subcarpetas y 32 programas sueltos por carpeta.
+
+#### Opciones de juego
+
+En las propiedades de un acceso directo a un programa de Hispa-DOS:
+
+- **Velocidad**: Normal, Pentium, 486, 386, 286, XT u «Otra» (un tanto por
+  ciento de la velocidad del equipo, del 1 al 100). Si no es «Normal», el
+  programa se abre con `VELOCIDAD nivel programa`, que frena el equipo solo
+  mientras corre (ver «Juegos antiguos en equipos rápidos» en el README).
+- **LOADFIX**: lo abre con `LOADFIX`, por encima de los primeros 64 KB de la
+  memoria (para los «Packed file corrupt»).
+- **Sonido: Sound Blaster emulada**: antes del programa se carga
+  `HSPSND /SB` (docs/HSPSB.md) si no hay ya un HSPSND en la memoria, y queda
+  cargado. Solo se puede marcar si HSPEMM está cargado (hace falta para
+  emular la tarjeta); si no, la casilla sale en gris y lo dice.
+
+Cómo se lanza, en «Programas de Hispa-DOS desde Hispa Ventanas».
 
 Límites: 12 grupos, 96 accesos directos en total; el nombre de un acceso se
 ve hasta 14 letras debajo del icono; una ventana de grupo no tiene barra de
@@ -280,6 +359,29 @@ Volver=1
 Pausa=0
 ```
 
+Un grupo ligado a una carpeta de juegos y un acceso con opciones de juego
+llevan además estas claves (**solo se escriben cuando hacen falta**: un
+CENTRO.INI sin juegos queda como siempre, y los de antes siguen valiendo
+porque las claves que faltan valen lo normal):
+
+```
+[Centro]
+JuegosDOS=1
+
+[Grupo]
+Nombre=Juegos de DOS
+Carpeta=C:\JUEGOS
+
+[Acceso]
+Nombre=Doom
+Programa=C:\JUEGOS\DOOM\DOOM.EXE
+Velocidad=486
+Loadfix=1
+Sonido=sb
+Auto=1
+Cambiado=1
+```
+
 - Las líneas son `clave=valor`; no importan las mayúsculas de las claves ni
   de los nombres de sección, ni los espacios alrededor. Las líneas que
   empiezan por `;`, las vacías y las claves desconocidas se saltan.
@@ -295,6 +397,16 @@ Pausa=0
   `Icono` (uno de los nombres de la lista de arriba, sin acentos: `musica`,
   `ordenes`; si falta, `programa`); `Programa` (79 letras); `Carpeta` (67);
   `Parametros` (71); `Volver` = 0/1 (si falta, 1); `Pausa` = 0/1 (0).
+- Juegos: en `[Centro]`, `JuegosDOS` = 1 cuando ya se creó (o se ligó a
+  mano) un grupo de juegos de DOS: no se vuelve a crear solo. En `[Grupo]`,
+  `Carpeta` = la carpeta de juegos a la que está ligado (67 letras; si
+  falta, a ninguna). En `[Acceso]`: `Velocidad` = `Normal`, `Pentium`,
+  `486`, `386`, `286`, `XT` o un tanto por ciento (`50%`; si falta,
+  Normal); `Loadfix` = 0/1 (0); `Sonido` = `sb` para la Sound Blaster
+  emulada (si falta, el sonido normal); `Auto` = 1 si lo puso Hispa Ventanas
+  desde la carpeta de su grupo; `Cambiado` = 1 si después se cambió en
+  «Propiedades» (ya no se quita solo); `Oculto` = 1 si se borró a mano (no
+  se enseña ni vuelve a salir mientras el juego siga en la carpeta).
 
 ### Programas de Hispa-DOS desde Hispa Ventanas (juegos)
 
@@ -330,6 +442,42 @@ en modo texto y toda la memoria convencional para él, y después vuelve:
    el entorno gráfico, que se reconstruye desde CENTRO.INI: mismas
    ventanas, mismo sitio, misma ventana delante. Si no, termina y queda
    Hispa-DOS.
+
+Con **opciones de juego** (velocidad o LOADFIX), lo que el lanzador ejecuta
+es `VELOCIDA.COM` (o `LOADFIX.COM`), de la carpeta de Hispa Ventanas, con el
+juego en los parámetros:
+
+    C:\HISPADOS\VELOCIDA.COM  386 C:\HISPADOS\LOADFIX.COM DOOM.EXE parámetros
+
+(el juego va solo con su nombre si está en la carpeta de trabajo; un .BAT
+lo ejecuta VELOCIDAD con `%COMSPEC% /C`). La orden entera no puede pasar de
+126 letras: si no cabe, Hispa Ventanas lo dice en vez de lanzarla. Si falta
+`VELOCIDA.COM` (o `LOADFIX.COM`) en la carpeta de Hispa Ventanas, avisa y no
+lanza el juego. El juego recibe la misma memoria menos lo que ocupan
+VELOCIDAD (unos 8 KB mientras corre) y LOADFIX (unos 3 KB, más lo que rellena
+por debajo de 1000h).
+
+**Al cerrar el juego el equipo vuelve a su velocidad normal.** `VELOCIDAD
+nivel programa` ya quita el freno cuando el programa acaba, también si
+acaba con Ctrl+C, con un error crítico (Abortar) o con un código de error.
+Además el lanzador hace de **segunda red**: después de un juego abierto con
+velocidad busca el residente de VELOCIDAD en la memoria (por su firma en la
+cadena de bloques, como hace el propio VELOCIDAD) y, si aún frena o tiene
+las cachés desactivadas, ejecuta `VELOCIDAD NORMAL`. Eso incluye un freno
+que el usuario hubiera puesto a mano antes de entrar en Hispa Ventanas: tras
+un juego con velocidad, el equipo queda siempre al 100 %. Lo que no tiene
+arreglo se avisa al volver, en una ventana:
+
+- si el juego deja un residente que toma la INT 08h, VELOCIDAD quita el
+  freno (el equipo va a su velocidad normal) pero no puede soltar el
+  temporizador ni salir de la memoria: se queda, sin frenar, hasta reiniciar;
+- si VELOCIDAD siguiera frenando (no se ha podido ejecutar `VELOCIDAD
+  NORMAL`), se dice cómo quitarlo a mano.
+
+Con **Sound Blaster emulada**, el lanzador ejecuta antes `HSPSND.COM /SB`.
+HSPSND apunta la variable `BLASTER` en el entorno de quien lo ejecuta, que
+es el lanzador (de él la hereda el juego): antes le hace sitio agrandando
+su entorno 64 octetos.
 
 Por qué así y no de otra manera: un `VENTANAS.BAT` depende de que nadie lo
 toque y deja al intérprete de órdenes en medio; ejecutar el programa desde
@@ -508,6 +656,8 @@ devuelven algo.
   api.inc modulos.inc    la interfaz y el cargador de los módulos
   ajustes.inc    los ajustes que cambia Configuración (CONFIG.HVP)
   centro.inc bloc.inc calc.inc reloj.inc    los programas
+  accesos.inc    grupos ligados a una carpeta de juegos y opciones de
+                 juego de un acceso (va en la parte alta del archivo)
   config.inc     CENTRO.INI: grupos, accesos directos, ventanas
   volumen.inc    el altavoz de la barra y su ventanita (HSPSND)
         |
@@ -1299,6 +1449,28 @@ salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
   arranca con un CENTRO.INI escrito a mano, mide la memoria con MEM desde
   un acceso directo y prueba un acceso roto y otro sin «volver». Capturas
   de muestra en `build/ventanas4_*.png`.
+- `tests/run_accesos_tests.sh`: los grupos ligados a una carpeta de juegos
+  y las opciones de juego, con un disco duro que trae `C:\JUEGOS` y QEMU en
+  modo `-icount` (las velocidades medidas no dependen de la carga del
+  equipo). Los «juegos» son copias de `tests/progs/accjuego.asm`, que dice
+  su ruta, su PSP, sus parámetros, la velocidad que mide con un bucle y si
+  hay un VELOCIDAD frenando. Primera sesión, sin CENTRO.INI: el grupo
+  «Juegos de DOS» sale solo con un acceso por juego (el que se llama como
+  su carpeta, el único .COM, el mayor de dos .EXE, un SETUP que es lo único
+  que hay y un programa suelto); se pone velocidad 386 y LOADFIX a uno y se
+  lanza (corre frenado y por encima de 1000h; al volver, la velocidad es la
+  normal ±10 % y VELOCIDAD no queda en memoria); otro al 25 % se acaba con
+  Ctrl+C y otro deja un residente en la INT 08h (Hispa Ventanas avisa): en
+  los dos la velocidad vuelve a ser la normal ±10 %; se borra un acceso a
+  mano y se mira «Carpeta de juegos...». Segunda sesión, con dos juegos
+  menos y uno más en el disco y un `VELOCIDAD 25%` puesto a mano antes de
+  entrar: sale el nuevo, desaparece el que nadie tocó, el cambiado a mano
+  se queda con el aspa, el borrado no vuelve, y tras un juego con velocidad
+  el lanzador quita el freno que quedaba. Tercera sesión, con un CENTRO.INI
+  de antes y sin VELOCIDA.COM: los grupos de antes siguen igual, se añade
+  «Juegos de DOS» sin repetir juegos, un acceso con velocidad avisa de que
+  falta VELOCIDA.COM y uno con LOADFIX solo se carga por encima de 1000h.
+  Capturas en `build/accesos_*.png`.
 - `tests/run_juegos_tests.sh`: los módulos .HVP y los dos juegos. Primera
   sesión, sin CENTRO.INI: el grupo «Juegos» sale con un acceso por módulo
   (nombre e icono propios), cada juego se abre como ventana, se dibuja, la

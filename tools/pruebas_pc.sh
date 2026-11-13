@@ -34,7 +34,7 @@ $SSH 'command -v make >/dev/null && command -v nasm >/dev/null && command -v mco
 tar --exclude=./build --exclude=./.git -cf - . | $SSH "rm -rf /dev/shm/$NOMBRE && mkdir -p /dev/shm/$NOMBRE && tar -xf - -C /dev/shm/$NOMBRE"
 # 3) compilar y lanzar las pruebas en paralelo
 $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/hsptmp TZ=UTC && mkdir -p \$TMPDIR build/pc && \
-  make -s 2>&1 | tail -3 && make -s usb nucprogs joyprogs build/LANZTEST.COM 2>&1 | tail -3 && \
+  make -s 2>&1 | tail -3 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM 2>&1 | tail -3 && \
   sed -n '/^test:/,/^\$/p' Makefile | grep 'tests/' | sed 's/^\t//; s/\$(IMG)/build\/hispados.img/g' > build/pc/lista.txt && \
   echo \"\$(wc -l < build/pc/lista.txt) pruebas, $J a la vez\" && \
   date +%s > build/pc/inicio && \

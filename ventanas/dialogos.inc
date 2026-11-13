@@ -83,6 +83,10 @@ dlg_modal:
         mov eax, [vid_alto]
         sub eax, [esp+P_AL]
         sar eax, 1
+        cmp eax, BARRA_H            ; (uno muy alto: debajo de la barra)
+        jge .y
+        mov eax, BARRA_H
+.y:
         mov [esp+P_Y], eax
         or dword [esp+P_ESTILO], E_OCULTA
         mov esi, ebp                ; la dueña, fuera de juego
@@ -429,10 +433,14 @@ da_gancho:
         mov edx, edi
         call msg_enviar
         pop ebp
+        cmp byte [edi], '['
+        je .ac1
+        cmp byte [da_carpeta], 0    ; eligiendo carpeta: vale la que se ve
+        jne .no
         cmp byte [edi], 0
         je .si                      ; vacío: no se acepta
-        cmp byte [edi], '['
-        jne .no
+        jmp .no
+.ac1:
         mov esi, edi
         call da_entrar
         jmp .si
@@ -456,13 +464,20 @@ da_gancho:
         cmp ecx, LN_DOBLE
         je .doble
         cmp byte [esi], '['
+        jne .l1
+        cmp byte [da_carpeta], 0    ; (eligiendo carpeta, también al cuadro)
         je .si
+.l1:
         call da_al_cuadro
         jmp .si
 .doble:
         cmp byte [esi], '['
         jne .d2
         call da_entrar
+        cmp byte [da_carpeta], 0
+        je .si
+        mov esi, da_nada
+        call da_al_cuadro
         jmp .si
 .d2:
         call da_al_cuadro
@@ -485,6 +500,11 @@ da_gancho:
         call da_llenar
         mov esi, [ebp+V_D3]
         call da_al_cuadro
+        cmp byte [da_carpeta], 0
+        je .no
+        mov ecx, 100                ; eligiendo carpeta: lo que hay que hacer
+        call ven_hija_id
+        mov dword [eax+V_TEXTO], tj_dc_nombre
 .no:
         xor eax, eax
         ret
@@ -492,6 +512,7 @@ da_gancho:
         mov eax, 1
         ret
 
+da_nada     db 0
 ; (interna) pone el texto ESI en el cuadro del nombre del diálogo EBP
 da_al_cuadro:
         pushad
@@ -559,7 +580,11 @@ da_llenar:
         mov edi, esp
         mov esi, dos_dta + 0x1E
         test byte [dos_dta+0x15], 0x10
-        jz .n
+        jnz .d
+        cmp byte [da_carpeta], 0    ; eligiendo carpeta: solo las carpetas
+        jne .s
+        jmp .n
+.d:
         cmp word [esi], '.'         ; la propia carpeta no se lista
         je .s
         mov al, '['

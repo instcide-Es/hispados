@@ -12382,6 +12382,10 @@ fn_4b:
         jae .segok
         cmp word [ex_pad], 0
         jne .segok
+        ; (un .EXE con CS = FFF0h, es decir, CS = PSP, es un .COM con
+        ; cabecera, como VENTANAS.COM: se carga donde iría un .COM)
+        cmp word [ex_hdr+0x16], 0xFFF0
+        je .segok
         mov es, ax
         mov dx, ax
         call mcb_free

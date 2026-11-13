@@ -133,8 +133,8 @@ mcopy -i $T/f.img $T/JUGAR.BAT ::JUEGOS/BAT/JUGAR.BAT
   tecla alt-a down down down ret; sleep 1   # Archivo > Propiedades...
   tecla tab tab tab tab
   escribe "uno dos"
-  clic 382 337                              # el icono de música
-  clic 184 401                              # casilla «Esperar una tecla»
+  clic 382 281                              # el icono de música
+  clic 184 345                              # casilla «Esperar una tecla»
   aparca
   shot g8
   tecla ret; sleep 1
@@ -210,10 +210,12 @@ chk $T/g6.ppm titulo 262 243 activa "Buscar programas" texto 288 284 0 8 fina "A
 chk $T/g7.ppm marco 272 212 452 190 activa titulo 272 212 activa "Pruebas" \
   texto 314 315 9 12 fina "Prueba" texto 430 315 0 8 fina "Dos" texto 530 315 0 8 fina "Tres" texto 638 315 0 8 fina "Bat"
 # -- propiedades --
-chk $T/g8.ppm marco 158 132 484 336 activa titulo 158 132 activa "Propiedades del acceso directo" \
-  texto 176 175 0 8 fina "Nombre:" texto 176 207 0 8 fina "Programa:" texto 176 271 0 8 fina "Parámetros:" \
-  px 184 377 4 "casilla «Volver» marcada" px 184 401 4 "casilla «Esperar una tecla» marcada" \
-  px 364 322 12 "marco del icono de música elegido" px 184 322 8 "el primer icono ya no está marcado"
+chk $T/g8.ppm marco 158 76 484 448 activa titulo 158 76 activa "Propiedades del acceso directo" \
+  texto 176 119 0 8 fina "Nombre:" texto 176 151 0 8 fina "Programa:" texto 176 215 0 8 fina "Parámetros:" \
+  px 184 321 4 "casilla «Volver» marcada" px 184 345 4 "casilla «Esperar una tecla» marcada" \
+  px 364 266 12 "marco del icono de música elegido" px 184 266 8 "el primer icono ya no está marcado" \
+  texto 176 363 0 8 negrita "Opciones para juegos de DOS" texto 176 385 0 8 fina "Velocidad:" \
+  px 283 394 4 "velocidad «Normal» marcada" px 184 445 9 "casilla LOADFIX sin marcar"
 chk $T/g9.ppm marco 272 212 452 190 activa texto 314 315 9 12 fina "Prueba" px 345 285 0 "icono de música en «Prueba»"
 # -- el programa, en modo texto, y la vuelta --
 chk $T/g10.ppm tam 720 400

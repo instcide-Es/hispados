@@ -29,6 +29,8 @@
 ;    menus.inc, controles.inc, dialogos.inc, dos.inc
 ;    escritorio.inc el fondo, la barra y los iconos de lo minimizado
 ;    centro.inc, bloc.inc, calc.inc, reloj.inc    los programas
+;    accesos.inc    (Centro) grupos ligados a una carpeta de juegos y opciones
+;                   de juego de un acceso: velocidad, LOADFIX y sonido
 ;    api.inc, modulos.inc   los programas aparte (.HVP) y su interfaz
 ;
 ;  La entrada llega por interrupciones: el driver de ratón llama a rm_raton
@@ -38,7 +40,32 @@
 ; =============================================================================
         cpu 386
         bits 16
-        org 0x100
+; VENTANAS.COM tiene formato .EXE (cabecera «MZ») aunque se llame .COM: el
+; núcleo mira la cabecera, no el nombre. Así el archivo puede pasar de 64 KB:
+; lo que usa la parte de modo real (todo el código de 16 bits, y las
+; variables de bss.inc) sigue en los primeros 64 KB, y detrás va la «parte
+; alta» (alto_ini): datos y código que solo usa la parte de 32 bits, que
+; llega a todo con punteros de 32 bits. La cabecera pide CS = SS = PSP
+; (FFF0h: el segmento de carga menos 10h) e IP = 100h, es decir, el programa
+; arranca igual que un .COM (ORG 100h, DS = ES = CS = PSP); el núcleo carga
+; un .EXE así donde cargaría un .COM (sin el relleno hasta 1000h).
+MZ_CAB      equ 32
+        org 0x100 - MZ_CAB
+mz_cab:
+        db "MZ"
+        dw (fin_archivo - mz_cab) % 512             ; octetos de la última página
+        dw (fin_archivo - mz_cab + 511) / 512       ; páginas de 512
+        dw 0                                        ; reubicaciones
+        dw MZ_CAB / 16                              ; párrafos de la cabecera
+        dw (bss_fin - fin_archivo + 15) / 16        ; memoria detrás de la imagen
+        dw 0xFFFF
+        dw 0xFFF0                                   ; SS = PSP
+        dw pila_rm_fin                              ; SP (la parte gráfica pone la suya)
+        dw 0
+        dw 0x100                                    ; IP
+        dw 0xFFF0                                   ; CS = PSP
+        dw 0x1C, 0
+        times MZ_CAB - ($ - mz_cab) db 0
 %define CON_PROGRAMAS
 %include "defs.inc"
 RAT_COLA    equ 64                  ; sucesos de ratón que caben en la cola
@@ -60,10 +87,19 @@ inicio:
 ;  entrar), ejecuta el programa con toda la memoria convencional menos este
 ;  trozo y, cuando acaba, vuelve a cargar el entorno gráfico, que se
 ;  reconstruye desde CENTRO.INI.
+;  Un juego con opciones (accesos.inc) llega aquí ya compuesto: el programa
+;  es VELOCIDA.COM o LOADFIX.COM y el juego va en los parámetros. El lanzador
+;  solo añade dos cosas: cargar antes HSPSND /SB si se pide (lz_sb) y, al
+;  volver de un juego con velocidad, comprobar que el equipo no se queda
+;  frenado (lz_vel_red).
 ; =============================================================================
 lz_firma    db "HVLZ"
 lz_orden    db 0                    ; 1: hay un encargo (lo pone la parte gráfica)
-lz_band     db 0                    ; bit 0 volver a Hispa Ventanas, bit 1 esperar una tecla
+lz_band     db 0                    ; bit 0 volver a Hispa Ventanas, bit 1 esperar una tecla,
+                                    ; bit 2 va con VELOCIDAD (al volver se mira que no
+                                    ; quede frenando), bit 3 cargar antes HSPSND /SB
+lz_velst    db 0                    ; cómo quedó VELOCIDAD tras el programa (LZV_*):
+                                    ; lo lee y lo borra la parte gráfica al volver
 lz_dpmi     db 0                    ; HSPDPMI: 1 lo ha cargado el lanzador, 2 ya estaba
 lz_ayuda    db 0                    ; «/?»: no hace falta cargar nada
 lz_unidad   db 0
@@ -73,7 +109,8 @@ lz_sp       dw 0
 lz_nom      dw 0                    ; dónde empieza el nombre dentro de lz_ruta
 lz_blq      dw 0, 0x80, 0, 0x5C, 0, 0x6C, 0     ; bloque de EXEC: la cola, en PSP:80h
 lz_prog     times 80 db 0           ; el encargo: programa,
-lz_param    times 80 db 0           ;   parámetros
+lz_param    times 128 db 0          ;   parámetros (hasta 126 letras: con VELOCIDAD
+                                    ;   y LOADFIX delante llevan también el programa)
 lz_dir      times 68 db 0           ;   y carpeta de trabajo
 lz_ruta     times 80 db 0           ; VENTANAS.COM, con su carpeta
 lz_cola     times 48 db 0           ; la cola de órdenes de la parte gráfica
@@ -81,6 +118,13 @@ lz_dir0     times 68 db 0           ; la carpeta en la que se estaba
 lz_aux      times 80 db 0
 lz_n_raton  db "HSPRATON.COM", 0
 lz_n_dpmi   db "HSPDPMI.COM", 0
+lz_n_vel    db "VELOCIDA.COM", 0
+lz_n_snd    db "HSPSND.COM", 0
+lz_c_nada   db 0, 13                ; colas de órdenes para lz_hermano
+lz_c_normal db 7, " NORMAL", 13
+lz_c_sb     db 4, " /SB", 13
+            align 2
+lz_velpre   dw 0                    ; el residente de VELOCIDAD que había antes
 lz_s_comspec db "COMSPEC="
 lz_s_command db "C:\COMMAND.COM", 0
 lz_m_dpmi   db "Hispa Ventanas: cargando el servidor DPMI (HSPDPMI)...", 13, 10, "$"
@@ -114,9 +158,14 @@ lz_exec:
         cld
         ret
 
-; ejecuta, sin parámetros, el programa SI de la carpeta de VENTANAS.COM
+; ejecuta el programa SI de la carpeta de VENTANAS.COM con la cola de
+; órdenes BX (largo, texto y 13)
 lz_hermano:
         push si
+        mov si, bx
+        mov di, 0x80
+        mov cx, 10
+        rep movsb
         mov si, lz_ruta
         mov di, lz_aux
         mov cx, [lz_nom]
@@ -128,9 +177,109 @@ lz_hermano:
         stosb
         test al, al
         jnz .c
-        mov word [0x80], 0x0D00
         mov dx, lz_aux
         jmp lz_exec
+
+; ¿hay un residente de VELOCIDAD (utils/velocidad.asm)? Recorre la cadena de
+; bloques de memoria buscando su firma, como hace VELOCIDAD.
+; -> AX = su segmento (0: no hay) y DL distinto de 0 si está frenando (el
+; freno del temporizador puesto o las cachés desactivadas)
+lz_vel_res:
+        mov ah, 0x52
+        int 0x21
+        mov ax, [es:bx-2]
+.l:
+        mov es, ax
+        inc ax
+        cmp [es:1], ax              ; un bloque que es su propio dueño: un PSP
+        jne .nx
+        cmp dword [es:0x10+VELR_FIRMA], 'HSPV'
+        jne .nx
+        cmp dword [es:0x10+VELR_FIRMA+4], 'EL1'
+        jne .nx
+        mov dl, [es:0x10+VELR_ACTIVO]
+        or dl, [es:0x10+VELR_CACHE]
+        or dl, [es:0x10+VELR_CD]
+        jmp .x
+.nx:
+        cmp byte [es:0], 'M'
+        jne .no
+        add ax, [es:3]
+        jmp .l
+.no:
+        xor ax, ax
+        xor dl, dl
+.x:
+        push cs
+        pop es
+        ret
+
+; Tras un programa lanzado con VELOCIDAD: el equipo tiene que quedar a su
+; velocidad normal. «VELOCIDAD x programa» ya lo deja todo como estaba al
+; acabar el programa (también si acaba con Ctrl+C o con un error); esta es la
+; segunda red: si aun así queda un residente frenando (o con las cachés
+; desactivadas), se ejecuta VELOCIDAD NORMAL. En lz_velst queda lo que ha
+; pasado, para que lo cuente la parte gráfica.
+LZV_NORMAL  equ 1                   ; seguía frenando: se ha puesto NORMAL
+LZV_FRENA   equ 2                   ; sigue frenando: no se ha podido quitar
+LZV_QUEDA   equ 3                   ; sin frenar, pero VELOCIDAD se ha quedado en la
+                                    ; memoria (otro residente tomó la INT 08h después)
+lz_vel_red:
+        call lz_vel_res
+        test ax, ax
+        jz .x
+        test dl, dl
+        jz .queda
+        mov byte [lz_velst], LZV_NORMAL
+        mov si, lz_n_vel
+        mov bx, lz_c_normal
+        call lz_hermano
+        call lz_vel_res
+        test ax, ax
+        jz .x
+        test dl, dl
+        jz .queda
+        mov byte [lz_velst], LZV_FRENA
+        ret
+.queda:
+        cmp ax, [lz_velpre]         ; (si ya estaba antes, es cosa del usuario)
+        je .x
+        mov byte [lz_velst], LZV_QUEDA
+.x:
+        ret
+
+; La Sound Blaster emulada: carga HSPSND /SB (se queda residente). HSPSND
+; apunta la variable BLASTER en el entorno de quien lo ejecuta, que es este
+; lanzador, y de él la hereda el juego: antes se le hace sitio (64 octetos).
+lz_sb:
+        mov ax, [0x2C]
+        dec ax
+        mov es, ax
+        mov cx, [es:3]              ; párrafos del entorno de ahora
+        mov bx, cx
+        add bx, 4
+        mov ah, 0x48
+        int 0x21
+        jc .carga
+        push ds
+        mov es, ax
+        mov ds, [0x2C]
+        xor si, si
+        xor di, di
+        shl cx, 3
+        rep movsw
+        pop ds
+        push es
+        mov es, [0x2C]
+        mov ah, 0x49
+        int 0x21
+        pop word [0x2C]
+.carga:
+        push cs
+        pop es
+        mov si, lz_n_snd
+        mov bx, lz_c_sb
+        jmp lz_hermano
 
 ; carga HSPRATON y HSPDPMI si faltan (primero el ratón: HSPDPMI tiene que
 ; ser el último residente para poder quitarlo)
@@ -148,6 +297,7 @@ lz_residentes:
         je .dpmi
 .cr:
         mov si, lz_n_raton
+        mov bx, lz_c_nada
         call lz_hermano
 .dpmi:
         mov ax, 0x4300              ; sin XMS no hay nada que cargar
@@ -182,6 +332,7 @@ lz_residentes:
         mov ah, 0x09
         int 0x21
         mov si, lz_n_dpmi
+        mov bx, lz_c_nada
         call lz_hermano
         call lz_hay_dpmi
         jnz .x
@@ -226,6 +377,16 @@ lz_quitar_dpmi:
 ; el encargo: ejecuta lz_prog con lz_param en la carpeta lz_dir
 lz_programa:
         call lz_quitar_dpmi
+        mov byte [lz_velst], 0
+        test byte [lz_band], 8
+        jz .sinsb
+        call lz_sb
+.sinsb:
+        test byte [lz_band], 4
+        jz .sinvel0
+        call lz_vel_res
+        mov [lz_velpre], ax
+.sinvel0:
         mov ah, 0x19
         int 0x21
         mov [lz_unidad], al
@@ -308,6 +469,10 @@ lz_programa:
         int 0x21
         or byte [lz_band], 2
 .ok:
+        test byte [lz_band], 4
+        jz .sinvel
+        call lz_vel_red
+.sinvel:
         test byte [lz_band], 2
         jz .sinpausa
         mov dx, lz_m_tecla
@@ -1454,13 +1619,10 @@ op_bpp      db 0
 son_esperar db 0
 
 %include "datos.inc"
-%include "iconos.inc"
-%include "iconos2.inc"
-%include "fuente.inc"
 
-; ---- datos sin valor inicial (se ponen a cero al arrancar) ----
+; ---- datos sin valor inicial de la parte de modo real (se ponen a cero al
+; arrancar). Están en el archivo, como ceros, porque detrás va la parte alta
         align 16
-        absolute $
 bss_ini:
 rmseg       resw 1
 lz_seg      resw 1                  ; el PSP del lanzador (0: no hay)
@@ -1502,6 +1664,18 @@ pila_rm:
 pila_rm_fin:
 ; ---- hasta aquí, dentro de los primeros 64 KB (lo usa la parte de modo
 ; real); lo que sigue solo se usa en modo protegido, con punteros de 32 bits
+; ---- la parte alta: los dibujos, la fuente y el código de 32 bits que no
+; cabe abajo (nada de esto se puede nombrar desde el código de 16 bits)
+        align 16
+alto_ini:
+%include "iconos.inc"
+%include "iconos2.inc"
+%include "fuente.inc"
+        bits 32
+%include "accesos.inc"
+        align 16
+fin_archivo:
+        absolute $
             resb 4096
 pila_fin:
 %include "bss2.inc"

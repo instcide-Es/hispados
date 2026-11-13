@@ -20,6 +20,8 @@
 ;    dlg_lista       EBP=dueña EDI=título ESI=pregunta EBX=textos (uno cada
 ;                    EDX octetos) ECX=cuántos -> EAX=el elegido (-1: ninguno)
 ;  Todo lo demás es interno. Los datos (grupos, accesos) están en config.inc.
+;  Los grupos ligados a una carpeta de juegos y las opciones de juego de un
+;  acceso (velocidad, LOADFIX, sonido) están en accesos.inc (jd_*).
 ; =============================================================================
 
 CEN_PASO    equ 104                 ; de un icono al siguiente
@@ -27,6 +29,7 @@ CEN_FILA    equ 76                  ; de una fila de iconos a la siguiente
 INT_N       equ 4
 BP_MAXDIR   equ 64                  ; subcarpetas que mira «Buscar programas»
 BP_MAXCAND  equ 40
+JD_MAXSUEL  equ 32                  ; programas sueltos de una carpeta de juegos
 
 c_centro    dd vista_proc
             db C_CREMA, 0, 0, 0
@@ -60,6 +63,8 @@ menu_centro:
         db "&Mover a otro grupo...", 0
         dw 306
         db "&Borrar", 0
+        dw 308
+        db "Carpeta de &juegos...", 0
         dw 0
         db 0
         dw 307
@@ -77,7 +82,7 @@ menu_centro:
 
 ; diálogo de un acceso directo
 ad_ventana:
-        PLANTILLA c_dialogo, 0, E_DIALOGO, 0, 0, 484, 336, 0
+        PLANTILLA c_dialogo, 0, E_DIALOGO, 0, 0, 484, 448, 0
 ad_hijos:
         PLANTILLA c_estatico, t_ad_nombre, E_HIJA, 16, 18, 96, 18, 100
         PLANTILLA c_edit, 0, E_HIJA | E_TABULA, 116, 14, 348, 24, 110
@@ -91,8 +96,24 @@ ad_hijos:
         PLANTILLA c_estatico, t_ad_icono, E_HIJA, 16, 142, 96, 18, 104
         PLANTILLA c_boton, t_ad_volver, E_HIJA | E_TABULA | BS_CASILLA, 16, 210, 340, 20, 114
         PLANTILLA c_boton, t_ad_pausa, E_HIJA | E_TABULA | BS_CASILLA, 16, 234, 340, 20, 115
-        PLANTILLA c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 148, 266, 80, 26, ID_ACEPTAR
-        PLANTILLA c_boton, t_cancelar, E_HIJA | E_TABULA, 240, 266, 80, 26, ID_CANCELAR
+        ; opciones para los juegos de DOS (accesos.inc): velocidad (opciones
+        ; 130 normal, 131-135 un procesador, 136 un tanto por ciento, en el
+        ; cuadro 116), LOADFIX y Sound Blaster emulada
+        PLANTILLA c_estatico, tj_ad_juego, E_HIJA | SS_NEGRITA, 16, 262, 448, 18, 105
+        PLANTILLA c_estatico, tj_ad_vel, E_HIJA, 16, 284, 96, 18, 106
+        PLANTILLA c_boton, tv_normal, E_HIJA | E_TABULA | BS_OPCION, 116, 283, 72, 20, 130
+        PLANTILLA c_boton, tv_pentium, E_HIJA | E_TABULA | BS_OPCION, 190, 283, 80, 20, 131
+        PLANTILLA c_boton, tv_486, E_HIJA | E_TABULA | BS_OPCION, 272, 283, 48, 20, 132
+        PLANTILLA c_boton, tv_386, E_HIJA | E_TABULA | BS_OPCION, 322, 283, 48, 20, 133
+        PLANTILLA c_boton, tv_286, E_HIJA | E_TABULA | BS_OPCION, 372, 283, 48, 20, 134
+        PLANTILLA c_boton, tv_xt, E_HIJA | E_TABULA | BS_OPCION, 422, 283, 42, 20, 135
+        PLANTILLA c_boton, tj_ad_otra, E_HIJA | E_TABULA | BS_OPCION, 116, 307, 64, 20, 136
+        PLANTILLA c_edit, 0, E_HIJA | E_TABULA, 184, 305, 40, 24, 116
+        PLANTILLA c_estatico, tj_ad_pct, E_HIJA, 230, 309, 234, 18, 107
+        PLANTILLA c_boton, tj_ad_loadfix, E_HIJA | E_TABULA | BS_CASILLA, 16, 334, 448, 20, 117
+        PLANTILLA c_boton, tj_ad_sb, E_HIJA | E_TABULA | BS_CASILLA, 16, 358, 448, 20, 118
+        PLANTILLA c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 148, 386, 80, 26, ID_ACEPTAR
+        PLANTILLA c_boton, t_cancelar, E_HIJA | E_TABULA, 240, 386, 80, 26, ID_CANCELAR
         dd 0
 ; diálogo de elegir de una lista
 dl_ventana:
@@ -180,6 +201,8 @@ centro_tarea:
         mov ebp, [cen_ven]
 .act:
         call ven_activar
+        mov byte [jd_arr], 0
+        call jd_tras_volver         ; (VELOCIDAD, tras un juego: accesos.inc)
         jmp app_bucle
 
 ; (interna) deja el rectángulo de la plantilla ESI dentro de la pantalla
@@ -251,6 +274,7 @@ grupo_abrir:
         call ven_activar
         jmp .x
 .nueva:
+        call jd_sinc_abrir          ; el grupo, al día con su carpeta de juegos
         sub esp, P_TAM
         mov esi, esp
         mov dword [esi+P_CLASE], c_grupo
@@ -351,6 +375,8 @@ vista_ficha:
         je .as
         cmp [eax+AC_GRUPO], dl
         jne .as
+        test byte [eax+AC_BAND2], AB2_OCULTO
+        jnz .as
         dec ecx
         js .x
 .as:
@@ -645,8 +671,13 @@ vista_proc:
         jmp .nada
 .o7:
         cmp ecx, 307
-        jne .nada
+        jne .o8
         call buscar_programas
+        jmp .nada
+.o8:
+        cmp ecx, 308
+        jne .nada
+        call jd_carpeta_dlg
         jmp .nada
 .acerca:
         mov esi, t_acerca
@@ -706,6 +737,7 @@ vista_pintar:
         test eax, eax
         jz .fin
         mov ebx, eax
+        mov [vis_ficha_p], eax
         mov esi, ico_carpeta        ; el icono y el nombre
         lea edx, [ebx+GR_NOMBRE]
         cmp dword [ebp+V_ID], 0
@@ -731,6 +763,7 @@ vista_pintar:
         lea ebx, [eax+16]
         lea eax, [edx+(CEN_PASO-32)/2]
         call dc_icono
+        call jd_marca_falta         ; (un aspa si su programa ya no está)
         mov esi, [vis_nom]          ; el nombre, centrado (hasta 14 letras)
         call cad_largo
         cmp eax, 14
@@ -856,7 +889,7 @@ vista_borrar:
         mov byte [edi], 0
         call cen_preguntar
         jne .x
-        mov byte [ebx+AC_USO], 0
+        call jd_borrar_acc          ; (el de una carpeta de juegos se oculta)
         jmp .hecho
 .grupo:
         mov esi, t_borrar_gr
@@ -1179,6 +1212,8 @@ acc_lanzar:
         mov al, [ebx+AC_BAND]
         and al, AB_VOLVER | AB_PAUSA
         mov [edx+lz_band], al
+        call jd_componer            ; VELOCIDAD y LOADFIX delante, y el sonido
+        jc .aviso
         mov byte [edx+lz_orden], 1
         mov byte [salir], 2
         jmp .x
@@ -1333,6 +1368,8 @@ ad_gancho:
         je .examinar
         cmp ecx, ID_ACEPTAR
         jne .no
+        call jd_ad_validar          ; (el tanto por ciento de la velocidad)
+        jc .si
         ; Aceptar: sin programa no vale
         mov ecx, 111
         mov edx, cen_txt
@@ -1376,6 +1413,7 @@ ad_gancho:
         mov [edi+AC_BAND], al
         mov eax, [ebp+V_D5]
         mov [edi+AC_ICONO], al
+        call jd_ad_guardar
         jmp .no
 .examinar:
         mov byte [cen_arch], 0
@@ -1454,6 +1492,7 @@ ad_gancho:
         call ro_poner
         movzx eax, byte [edi+AC_ICONO]
         mov [ebp+V_D5], eax
+        call jd_ad_inicio
         jmp .no
 .pulsa:
         call raton_xy               ; ¿en la fila de iconos?
@@ -1502,6 +1541,12 @@ ad_gancho:
         inc edi
         cmp edi, ICO_N
         jb .pi
+        COLOR C_ARENA_OSC           ; la raya de las opciones de juego
+        mov eax, 16
+        mov ebx, 256
+        mov ecx, 448
+        mov edx, 1
+        call dc_rect
         call dc_cerrar
 .si:
         mov eax, 1
@@ -1738,6 +1783,8 @@ bp_carpeta:
         mov ecx, 12
         call cad_copiar
         mov [cen_mapa+ebx], dl
+        mov eax, [dos_dta+0x1A]
+        mov [jd_tam+ebx*4], eax
         inc ebx
 .fs:
         call dos_siguiente
@@ -1768,9 +1815,17 @@ bp_carpeta:
         inc edx
         cmp edx, 3
         jb .u
+        xor ecx, ecx                ; solo hay de instalar o configurar: si es
+        cmp dword [bp_n], 1         ; uno solo, ese
+        je .elegido
         jmp .x
 .preguntar:
-        mov edi, cen_txt            ; 3) varios: que lo diga el usuario
+        cmp byte [bp_auto], 0       ; 3) varios: que lo diga el usuario (para
+        je .p1                      ; la carpeta de un grupo no se pregunta:
+        call jd_elegir              ; el mayor)
+        jmp .elegido
+.p1:
+        mov edi, cen_txt
         mov esi, t_bp_cual
         call pon_cad
         mov esi, [bp_sub]
@@ -1802,7 +1857,7 @@ bp_carpeta:
         lea esi, [eax+AC_PROG]
         mov edi, cen_txt
         call cad_igual_i
-        je .x
+        je .ya
 .rs:
         add eax, AC_TAM
         dec edx
@@ -1822,10 +1877,25 @@ bp_carpeta:
         lea edi, [ebx+AC_NOMBRE]
         call nombre_de_ruta
         mov byte [ebx+AC_ICONO], 1  ; el icono de juego
+        mov al, [bp_auto]           ; (AB2_AUTO si lo pone la carpeta del grupo)
+        shl al, 2
+        mov [ebx+AC_BAND2], al
         inc dword [bp_nuevos]
 .x:
         popad
         ret
+.ya:
+        ; ya lo tiene. Si estaba oculto (borrado a mano) y se busca a mano,
+        ; vuelve a salir
+        cmp byte [bp_auto], 0
+        jne .x
+        test byte [eax+AC_BAND2], AB2_OCULTO
+        jz .x
+        and byte [eax+AC_BAND2], ~AB2_OCULTO
+        mov edx, [bp_grupo]
+        mov [eax+AC_GRUPO], dl
+        inc dword [bp_nuevos]
+        jmp .x
 
 ; (interna) ZF=1 si el archivo ESI («DOOM.EXE») se llama como la carpeta EDI
 bp_mismo:

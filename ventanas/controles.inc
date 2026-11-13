@@ -345,6 +345,10 @@ bot_pintar:
         call dc_rombo
 .texto:
         COLOR C_TINTA
+        test dword [ebp+V_ESTADO], S_INACTIVA
+        jz .tx1
+        COLOR C_ARENA_OSC
+.tx1:
         mov eax, 22
         lea ebx, [edi-1]
         mov esi, [ebp+V_TEXTO]

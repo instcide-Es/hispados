@@ -33,7 +33,7 @@ GR_AL       equ 44
 GR_VEN      equ 48                  ; su ventana (0: cerrado)
 GR_SEL      equ 52                  ; el icono marcado
 MAX_AC      equ 96
-AC_TAM      equ 256
+AC_TAM      equ 320
 AC_USO      equ 0
 AC_GRUPO    equ 1
 AC_ICONO    equ 2
@@ -44,6 +44,18 @@ AC_DIR      equ 116                 ; 67
 AC_PARAM    equ 184                 ; 71
 AB_VOLVER   equ 1                   ; volver a Hispa Ventanas al terminar
 AB_PAUSA    equ 2                   ; esperar una tecla al terminar
+; opciones de juego y accesos de un grupo ligado a una carpeta (accesos.inc)
+AC_VEL      equ 256                 ; velocidad: 0 normal, 1-99 %, VEL_NIV+1.. un procesador
+AC_BAND2    equ 257
+AB2_LOADFIX equ 1                   ; cargarlo con LOADFIX
+AB2_SB      equ 2                   ; con la Sound Blaster emulada (HSPSND /SB)
+AB2_AUTO    equ 4                   ; lo ha puesto Hispa Ventanas (carpeta del grupo)
+AB2_MANO    equ 8                   ;   y el usuario lo ha cambiado después
+AB2_OCULTO  equ 16                  ;   o lo ha borrado: no se enseña ni vuelve a salir
+AB2_FALTA   equ 32                  ; (no se guarda) su programa ya no está
+VEL_NIV     equ 100                 ; 101 Pentium, 102 486, 103 386, 104 286, 105 XT
+VEL_NIVELES equ 5
+JD_DIRTAM   equ 68                  ; la carpeta de un grupo: 67 letras
 CFG_MAX     equ 49152
 ICO_N       equ 12
 T_CAD       equ 1
@@ -52,6 +64,9 @@ T_OCT       equ 3
 T_RECT      equ 4
 T_BIT       equ 5
 T_ICONO     equ 6
+T_GDIR      equ 7                   ; (estos tres, en accesos.inc) carpeta del grupo
+T_VEL       equ 8                   ; velocidad: «386», «50%»...
+T_SON       equ 9                   ; sonido: «sb»
 
 ; los iconos que se pueden elegir: dibujo y nombre en CENTRO.INI
 ico_tabla:
@@ -92,6 +107,10 @@ cfg_claves:
         dd cen_activo, k_activo
         db 1, T_NUM, 0, 0
         dd hvp_vistos, k_modulos
+        db 1, T_NUM, 0, 0
+        dd jd_hecho, k_juegosdos
+        db 2, T_GDIR, 0, 0
+        dd 0, k_carpeta
         db 2, T_CAD, 27, 0
         dd GR_NOMBRE, k_nombre
         db 2, T_RECT, 0, 0
@@ -114,6 +133,18 @@ cfg_claves:
         dd AC_BAND, k_volver
         db 3, T_BIT, AB_PAUSA, 0
         dd AC_BAND, k_pausa
+        db 3, T_VEL, 0, 0
+        dd AC_VEL, k_velocidad
+        db 3, T_BIT, AB2_LOADFIX, 0
+        dd AC_BAND2, k_loadfix
+        db 3, T_SON, AB2_SB, 0
+        dd AC_BAND2, k_sonido
+        db 3, T_BIT, AB2_AUTO, 0
+        dd AC_BAND2, k_auto
+        db 3, T_BIT, AB2_MANO, 0
+        dd AC_BAND2, k_cambiado
+        db 3, T_BIT, AB2_OCULTO, 0
+        dd AC_BAND2, k_oculto
         db 0
 k_ventana   db "Ventana", 0
 k_volumen   db "Volumen", 0
@@ -362,6 +393,8 @@ gr_nuevo:
         rep stosd
         pop eax
         mov byte [eax+GR_USO], 1
+        imul ecx, edx, JD_DIRTAM    ; sin carpeta de juegos
+        mov byte [gr_dirs+ecx], 0
         imul ecx, edx, 24
         add ecx, 200
         mov [eax+GR_X], ecx
@@ -519,6 +552,13 @@ cfg_cargar:
         call hvp_las_dos
         mov dword [cfg_len], 0
 .h2:
+        ; los grupos ligados a una carpeta de juegos: los accesos de los
+        ; juegos nuevos entran solos y salen los que ya no están
+        call jd_arranque
+        test eax, eax
+        jz .h3
+        mov dword [cfg_len], 0
+.h3:
         cmp dword [cfg_len], 0
         jne .x
         call cfg_guardar
@@ -709,7 +749,12 @@ cfg_clave:
         jmp .x
 .n4:
         cmp al, T_BIT
-        jne .n5
+        je .n4b
+        cmp al, T_GDIR
+        jb .n5
+        call cfg_clave_alta
+        jmp .x
+.n4b:
         call lee_num
         test eax, eax
         jz .b0
@@ -969,6 +1014,12 @@ cfg_guardar:
         mov esi, k_modulos
         call pon_clave_num
 .sinmod:
+        mov eax, [jd_hecho]
+        test eax, eax
+        jz .sinjd
+        mov esi, k_juegosdos
+        call pon_clave_num
+.sinjd:
         mov ebx, [gr_tabla]
         xor ecx, ecx
 .g:
@@ -991,6 +1042,13 @@ cfg_guardar:
         mov esi, k_marcado
         mov eax, [ebx+GR_SEL]
         call pon_clave_num
+        imul edx, ecx, JD_DIRTAM    ; su carpeta de juegos, si la tiene
+        add edx, gr_dirs
+        cmp byte [edx], 0
+        je .sindir
+        mov esi, k_carpeta
+        call pon_clave_cad
+.sindir:
         mov ebp, [ac_tabla]
         mov edx, MAX_AC
 .a:
@@ -1032,6 +1090,7 @@ cfg_guardar:
         shr eax, 1
         and eax, 1
         call pon_clave_num
+        call cfg_acc_juego          ; velocidad, LOADFIX... si no son lo normal
         pop edx
 .as:
         add ebp, AC_TAM

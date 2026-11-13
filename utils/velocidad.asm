@@ -109,6 +109,18 @@ r_prev      dw 0                ; última cuenta leída mientras se quema
 r_acc       dw 0                ; cuentas quemadas en este trozo
 r_resto     dd 0                ; «bucle»: unidades que quedan por quemar
 r_old08     dd 0
+; El lanzador de Hispa Ventanas (ventanas/ventanas.asm, lz_vel_res) mira
+; aquí si el residente está frenando: si se mueve algo de esto hay que
+; cambiar allí VELR_* (ventanas/defs.inc). Estas líneas no ensamblan si no
+; coinciden.
+        times (firma - start) - 3 db 0
+        times 3 - (firma - start) db 0
+        times (r_activo - start) - 0x0B db 0
+        times 0x0B - (r_activo - start) db 0
+        times (r_cache - start) - 0x0C db 0
+        times 0x0C - (r_cache - start) db 0
+        times (r_cd - start) - 0x2B db 0
+        times 0x2B - (r_cd - start) db 0
 
 int08h:
         cmp byte [cs:r_activo], 0

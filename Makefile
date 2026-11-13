@@ -159,7 +159,8 @@ $(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack
 	python3 tools/mkfuente.py ventanas/fuente.txt $(B)/gen/ventanas/fuente.inc $(B)/gen/ventanas/fuente.ppm
 	python3 tools/icopack.py $(B)/gen/ventanas/iconos.inc $(B)/gen/ventanas/iconos2.inc
 	# (lo que usa la parte de modo real tiene que caber en 64 KB: si no, error)
-	$(NASM) -f bin -w+error=number-overflow -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
+	# (-w-zeroing: las variables de la parte de modo real van en el archivo, a cero)
+	$(NASM) -f bin -w+error=number-overflow -w-zeroing -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
 
 # Programas de Hispa Ventanas (.HVP, docs/VENTANAS.md «Programas aparte»): los
 # juegos, en juegos/ (HVPS: van a \HISPADOS\JUEGOS), y los accesorios, en
@@ -359,7 +360,11 @@ $(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
 $(B)/SBJUEGO.COM: tests/progs/sbjuego.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM
+# y el de las opciones de juego: velocidad, LOADFIX... (tests/run_accesos_tests.sh)
+$(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+
+test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -429,6 +434,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM
 	DOSHIGH=1 tests/run_ventanas_tests.sh $(IMG)
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
+	tests/run_accesos_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_juegos2_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)

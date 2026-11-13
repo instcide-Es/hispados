@@ -193,6 +193,11 @@ M_TAM           equ 16
 BORDE           equ 2               ; marco
 TIT_H           equ 22              ; barra de título
 SOMBRA          equ 5               ; sombra, abajo y a la derecha
+; el residente de VELOCIDAD (utils/velocidad.asm), visto desde su PSP
+VELR_FIRMA      equ 0x103           ; «HSPVEL1», 0
+VELR_ACTIVO     equ 0x10B           ; el freno del temporizador está puesto
+VELR_CACHE      equ 0x10C           ; se quieren las cachés desactivadas
+VELR_CD         equ 0x12B           ; CR0.CD puesto por VELOCIDAD
 BARRA_H         equ 28              ; barra superior del escritorio
 MENU_H          equ 20              ; barra de menús de una ventana
 AGARRE          equ 4               ; borde que se agarra para cambiar el tamaño

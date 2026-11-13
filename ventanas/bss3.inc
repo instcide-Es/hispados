@@ -94,6 +94,22 @@ cen_mapa    resb BP_MAXCAND
 cen_lista   resb BP_MAXCAND * 13 + 120
 bp_dir      resb 64
 bp_dirs     resb BP_MAXDIR * 13
+; ---- grupos ligados a una carpeta y opciones de juego (accesos.inc) ----
+            alignb 4
+jd_hecho    resd 1                  ; ya se creó (o se ligó) el grupo de juegos de DOS
+jd_tam      resd BP_MAXCAND         ; tamaño de cada candidato de bp_carpeta
+jd_nsuel    resd 1
+jd_quita    resd 1
+vis_ficha_p resd 1                  ; el acceso que se está pintando
+bp_auto     resb 1                  ; 1: bp_carpeta sin preguntar (carpeta del grupo)
+jd_arr      resb 1                  ; arrancando: los grupos ya están al día
+da_carpeta  resb 1                  ; dlg_archivo en modo «elegir carpeta»
+jd_emm      resb 1
+gr_dirs     resb MAX_GR * JD_DIRTAM ; la carpeta de juegos de cada grupo («»: ninguna)
+jd_buf      resb 100
+jd_dir0     resb 64
+jd_sueltos  resb JD_MAXSUEL * 13
+jd_copia    resb AC_TAM
 ; ---- módulos .HVP ----
             alignb 4
 azar_x      resd 1
