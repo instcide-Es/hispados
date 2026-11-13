@@ -194,7 +194,7 @@ HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/defs.inc ventanas/api.inc
          tools/mkhvp.py tools/icopack.py tools/cp437.py
 HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP \
        $(B)/BLOQUES.HVP $(B)/SOLITARI.HVP $(B)/TRAGABOL.HVP $(B)/ALMACEN.HVP \
-       $(B)/HISPANES.HVP
+       $(B)/HISPANES.HVP $(B)/HISPASMS.HVP
 $(B)/CULEBRA.HVP: juegos/culebra.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/MINAS.HVP: juegos/minas.asm $(HVPDEP) | $(B)
@@ -229,6 +229,26 @@ $(B)/CPUTEST.NES: tests/hispanes/cputest.s tools/asm6502.py | $(B)
 $(B)/NESJOY.COM: tests/progs/nesjoy.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 nesprogs: $(B)/nesnativo $(B)/nesnativo_t $(B)/CPUTEST.NES $(B)/NESJOY.COM
+# Hispa-System (docs/HISPASYS.md): el emulador, con sus piezas en
+# programas/hispasms/, y sus juegos propios, hechos para la consola y
+# ensamblados aquí con tools/asmz80.py (SMSROMS: van a \HISPADOS\JUEGOS)
+$(B)/HISPASMS.HVP: programas/hispasms.asm $(wildcard programas/hispasms/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+SMSROMS = $(B)/BUZO.SMS
+$(B)/BUZO.SMS: sms/buzo/buzo.s $(wildcard sms/buzo/*.s sms/comun/*.s) tools/asmz80.py | $(B)
+	python3 tools/asmz80.py $< $@
+# el núcleo de Hispa-System como programa de Linux y sus ROM de prueba
+# (tests/run_hispasms_tests.sh)
+SMSNAT = tests/hispasms/smsnativo.asm $(wildcard programas/hispasms/*.inc)
+$(B)/smsnativo: $(SMSNAT) | $(B)
+	$(NASM) -f bin -i programas/hispasms/ -o $@ $< && chmod +x $@
+$(B)/smsnativo_t: $(SMSNAT) | $(B)
+	$(NASM) -f bin -DTRAZA -i programas/hispasms/ -o $@ $< && chmod +x $@
+$(B)/VDPTEST.SMS: tests/hispasms/vdptest.s sms/comun/letras.s tools/asmz80.py | $(B)
+	python3 tools/asmz80.py $< $@
+$(B)/TMSTEST.SMS: tests/hispasms/tmstest.s sms/comun/letras.s tools/asmz80.py | $(B)
+	python3 tools/asmz80.py $< $@
+smsprogs: $(B)/smsnativo $(B)/smsnativo_t $(B)/VDPTEST.SMS $(B)/TMSTEST.SMS
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP
@@ -255,7 +275,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
-        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SONS)
+        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
@@ -318,7 +338,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGN
 	for f in $(SONS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# el sonido de prueba y la campanita
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
 	mmd   -i $@ ::HISPADOS/JUEGOS
-	for f in $(HVPS) $(NESROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
+	for f in $(HVPS) $(NESROMS) $(SMSROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
 	# y los accesorios (Pintura y el Reproductor de sonido), en \HISPADOS\PROGS
 	mmd   -i $@ ::HISPADOS/PROGS
 	for f in $(HVPA); do mcopy -i $@ $$f ::HISPADOS/PROGS/ || exit 1; done
@@ -405,7 +425,7 @@ $(B)/SBJUEGO.COM: tests/progs/sbjuego.asm lib/util.inc | $(B)
 $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM
+test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -497,10 +517,11 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs $(B)/LANZTEST.COM $(B)/ACCJ
 	tests/run_pintura_tests.sh $(IMG)
 	tests/run_sonidos_tests.sh $(IMG)
 	tests/run_hispanes_tests.sh $(IMG)
+	tests/run_hispasms_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test clean nucprogs emmprogs joyprogs nesprogs
+.PHONY: all usb run run-hdd test clean nucprogs emmprogs joyprogs nesprogs smsprogs

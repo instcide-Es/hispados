@@ -102,6 +102,11 @@ los juega desde su biblioteca personal; las ROM nunca van en el proyecto.
 - **Hispa-Nes ya está** (docs/HISPANES.md): `HISPANES.HVP`, con el primer
   juego propio, Cometas (naves). Faltan los otros juegos y probarlo en
   equipos de verdad.
+- **Hispa-System ya está** (docs/HISPASMS.md): `HISPASMS.HVP`, compatible
+  con los cartuchos de la Master System (la Game Gear, pendiente), con su
+  primer juego propio, Buzo (un buzo con arpón en el fondo del mar), escrito
+  en Z80 con un ensamblador propio (`tools/asmz80.py`). Faltan los otros
+  juegos y probarlo en equipos de verdad. Sigue Hispa-Boy.
 
 ## Estado
 

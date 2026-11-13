@@ -16,6 +16,7 @@ START = 2048
 HEADS, SPT = 255, 63
 HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
 NESROMS = ('HISPA1.NES',)           # los juegos propios de Hispa-Nes (NESROMS del Makefile)
+SMSROMS = ('BUZO.SMS',)             # y los de Hispa-System (SMSROMS del Makefile)
 SONS = ('HISPA.WAV', 'CAMPANA.WAV')  # el sonido de prueba y la campanita (SONS del Makefile)
 
 def chs(lba):
@@ -87,7 +88,7 @@ def main():
                 cab = open(os.path.join(B, f), 'rb').read(32)
                 carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] == 1 else 'JUEGOS'
                 cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
-    for f in NESROMS:
+    for f in NESROMS + SMSROMS:
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
     for f in SONS:
         cp(os.path.join(B, f), 'HISPADOS/' + f)

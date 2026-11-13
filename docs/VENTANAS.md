@@ -210,7 +210,8 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
 probándolo en un ThinkPad con touchpad.
 
 - **Bordes y esquinas.** Las ventanas con `E_TAMANO` (las de los grupos y el
-  Centro, el Bloc de notas, el Reloj, Pintura, Hispa-Nes; los diálogos no)
+  Centro, el Bloc de notas, el Reloj, Pintura, Hispa-Nes, Hispa-System; los
+  diálogos no)
   se agarran por cualquiera de los cuatro bordes y las cuatro esquinas, con
   holgura para un touchpad: 5 puntos por dentro del borde y 4 por fuera
   (`AGARRE`, `AGARRE_FUERA`); a menos de 20 puntos de una esquina
@@ -1153,6 +1154,9 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
 - **Hispa-Nes** (`programas/hispanes.asm`, `HISPANES.HVP`, en «Juegos»): el
   emulador compatible con los cartuchos de la NES, con su juego Cometas
   (`HISPA1.NES`). Tiene su documento: [HISPANES.md](HISPANES.md).
+- **Hispa-System** (`programas/hispasms.asm`, `HISPASMS.HVP`, en «Juegos»):
+  el emulador compatible con los cartuchos de la Master System, con su juego
+  Buzo (`BUZO.SMS`). Tiene su documento: [HISPASMS.md](HISPASMS.md).
 
 ## Programas aparte: los módulos .HVP
 
@@ -1723,6 +1727,11 @@ o comprimidos.
   el núcleo fuera de QEMU con ROM de prueba, Cometas paso a paso comparando
   la pantalla punto por punto, a su velocidad con sonido y la velocidad.
   Capturas de muestra en `build/hispanes_*.png`.
+- `tests/run_hispasms_tests.sh`: Hispa-System (ver [HISPASMS.md](HISPASMS.md)):
+  el núcleo fuera de QEMU (zexdoc, zexall y las ROM de prueba propias), Buzo
+  paso a paso comparando la pantalla punto por punto, a su velocidad con
+  sonido, con un mando y la velocidad. Capturas de muestra en
+  `build/hispasms_*.png`.
 - `tests/run_pintura_tests.sh`: Pintura. Primera sesión, sin CENTRO.INI: su
   acceso sale en «Accesorios»; se abre, se dibuja con el ratón con cada
   herramienta y con los dos botones, se eligen colores, grosores y formas,

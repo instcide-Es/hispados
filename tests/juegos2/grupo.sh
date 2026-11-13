@@ -1,10 +1,10 @@
 # El grupo «Juegos» por omisión (tests/run_juegos2_tests.sh): sin CENTRO.INI,
 # sale un acceso por cada .HVP de \HISPADOS\JUEGOS (los dos de la primera
-# tanda, los cuatro de la segunda e Hispa-Nes), con el nombre y el icono que
-# lleva cada módulo;
+# tanda, los cuatro de la segunda, Hispa-Nes e Hispa-System), con el nombre y
+# el icono que lleva cada módulo;
 # como no caben en una fila, la ventana del grupo se alarga sola. Cada juego
 # nuevo se abre como una ventana y se cierra; al salir, CENTRO.INI tiene los
-# siete accesos y la memoria extendida queda como al entrar.
+# ocho accesos y la memoria extendida queda como al entrar.
 echo "== Juegos (segunda tanda): el grupo Juegos por omisión, abrir y cerrar cada uno =="
 disco
 if mdir -i "$IMG" ::HISPADOS/JUEGOS/BLOQUES.HVP ::HISPADOS/JUEGOS/SOLITARI.HVP \
@@ -43,11 +43,11 @@ if [ "${libre:-0}" -ge 200000 ]; then ok "caben en el disquete: quedan $libre oc
   shot g6
   salir
 } | run 150 -vga std
-# -- el grupo: siete accesos en dos filas, con su nombre y su icono; la ventana se ha alargado --
+# -- el grupo: ocho accesos en dos filas, con su nombre y su icono; la ventana se ha alargado --
 chk $T/g1.ppm tam 800 600 marco 248 188 452 207 activa titulo 248 188 activa "Juegos" \
   texto 286 291 9 12 fina "Culebra" texto 362 291 0 8 fina "Campo de minas" \
   texto 494 291 0 8 fina "Bloques" texto 590 291 0 8 fina "Solitario" \
-  texto 274 367 0 8 fina "Tragabolas" texto 390 367 0 8 fina "Almacén" texto 486 367 0 8 fina "Hispa-Nes" \
+  texto 274 367 0 8 fina "Tragabolas" texto 390 367 0 8 fina "Almacén" texto 486 367 0 8 fina "Hispa-Nes" texto 578 367 0 8 fina "Hispa-System" \
   px 521 257 0 "icono de Bloques" px 619 265 12 "icono de Solitario: el dorso añil" px 631 265 10 "icono de Solitario: el oro" \
   px 313 341 2 "icono de Tragabolas: el Tragón" px 417 341 10 "icono de Almacén: la caja" \
   px 508 343 15 "icono de Hispa-Nes: el mando" px 519 337 13 "icono de Hispa-Nes: un botón"
@@ -57,11 +57,11 @@ chk $T/g3.ppm marco 90 40 462 429 activa titulo 90 40 activa "Solitario"
 chk $T/g4.ppm marco 40 30 520 449 activa titulo 40 30 activa "Tragabolas"
 chk $T/g5.ppm marco 140 60 468 397 activa titulo 140 60 activa "Almacén"
 chk $T/g6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 390 367 9 12 fina "Almacén"
-ini "Modulos=9"
+ini "Modulos=10"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\BLOQUES.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\SOLITARI.HVP"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\TRAGABOL.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\ALMACEN.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Reproductor de sonido [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes " ]; then
-  ok "CENTRO.INI: los seis juegos e Hispa-Nes, en el grupo Juegos"
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Reproductor de sonido [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System " ]; then
+  ok "CENTRO.INI: los seis juegos, Hispa-Nes e Hispa-System, en el grupo Juegos"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"
 fi
