@@ -5026,6 +5026,29 @@ con_check:
 con_check_bios:
         cmp byte [peek_ok], 0
         jne .yes
+        ; como el CON de MS-DOS: si la BIOS tiene una tecla, solo se MIRA
+        ; (INT 16h 01h) y se deja en su búfer. Muchos programas preguntan por
+        ; INT 21h 0Bh y después la leen directamente con INT 16h 00h (el
+        ; instalador de Creative, los de Microsoft C y Borland C): si aquí se
+        ; retiraba, no la encontraban nunca y se colgaban o iban una tecla por
+        ; detrás. (Lo mismo para Ctrl+C: brk_check mira por aquí.)
+        cmp byte [pend_scan], 0     ; segunda mitad de una tecla extendida
+        jne .yes
+        push bp
+        mov ah, 1
+        int 0x16
+        pop bp
+        jz .viejo
+        cmp al, 0xE0
+        jne .pk
+        test ah, ah
+        jz .pk
+        xor al, al
+.pk:
+        mov [peek_ch], al
+        jmp .yes
+.viejo:
+        ; sin tecla de la BIOS: la consola serie, como siempre
         call con_poll
         jnc .no
         mov [peek_ch], al
