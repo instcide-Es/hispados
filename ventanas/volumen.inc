@@ -20,6 +20,9 @@
 ;    vol_pintar_icono (escritorio) dibuja el altavoz
 ;    vol_en_icono     EAX=x EBX=y -> CF=1 si el punto está en el altavoz
 ;    vol_alternar     abre o cierra la ventanita
+;  [MEZCLADOR] Debajo de la casilla, el botón «Mezclador...» abre el
+;  Mezclador (MEZCLAD.HVP, ventanas/mezvol.inc) en la vista Completa; el
+;  doble clic en el altavoz, también (escritorio.inc).
 ; =============================================================================
 
 VOL_X       equ SALIR_AN + 12 + 36  ; del borde derecho al altavoz
@@ -28,6 +31,7 @@ c_volumen   dd vol_proc
             db C_CREMA, 0, 0, 0
 vol_hijo:
         PLANTILLA c_boton, t_vol_mudo, E_HIJA | E_TABULA | BS_CASILLA, 16, 56, 150, 20, 20
+        PLANTILLA c_boton, t_vol_mez, E_HIJA | E_TABULA, 16, 84, 202, 24, 21  ; [MEZCLADOR]
         dd 0
 
 snd_iniciar:
@@ -245,7 +249,7 @@ vol_alternar:
         mov [esi+P_X], eax
         mov dword [esi+P_Y], BARRA_H + 6
         mov dword [esi+P_AN], 236
-        mov dword [esi+P_AL], 116
+        mov dword [esi+P_AL], 146   ; [MEZCLADOR] (con el botón «Mezclador...»)
         mov dword [esi+P_ID], 0
         xor ebp, ebp
         call ven_crear
@@ -352,6 +356,13 @@ vol_proc:
         mov [vol_pct], eax
         jmp .cambio
 .orden:
+        cmp cx, 21                  ; [MEZCLADOR] «Mezclador...»: se cierra
+        jne .o20                    ; esto y se abre el Mezclador completo
+        call ven_destruir
+        mov eax, 1
+        call mez_abrir
+        jmp .nada
+.o20:
         cmp cx, 20
         jne .nada
         mov ecx, 20

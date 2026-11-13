@@ -11,9 +11,15 @@
 ;    Teclado        espera y velocidad de repetición (INT 16h, función 03h) y
 ;                   distribución española o estadounidense (se le pide al
 ;                   residente TECLADO, KEYB: INT 2Fh AX=AD80h)
-;    Sonido         volumen y silencio (los mismos del altavoz de la barra)
+;    Sonido         volumen y silencio (los mismos del altavoz de la barra),
+;                   la tarjeta, si está la Sound Blaster para juegos (HSPSND
+;                   /SB) y el botón «Mezclador...» ([MEZCLADOR])
 ;    Fecha y hora   las enseña y las cambia (INT 21h, 2Ah-2Dh)
 ;    Sistema        versión, procesador, memoria, pantalla, ratón, sonido
+;  [MEZCLADOR] Mientras está en marcha (siempre, con la ventana oculta),
+;  cada segundo mira si el mezclador de HSPSND ha cambiado y, si es así, lo
+;  guarda en \HISPADOS\SONIDO.INI (ventanas/hvpmez.inc): el estado del sonido
+;  está en un solo sitio y se guarda siempre, sin preguntar.
 ;  Lo que se cambia se aplica al momento y se guarda en VENTANAS.INI (al lado
 ;  de CONFIG.HVP; texto, formato en docs/VENTANAS.md): con «Guardar», al
 ;  cerrar la ventana o, solo, unos segundos después del último cambio.
@@ -191,7 +197,11 @@ pl_sonido:
         PLANTILLA c_desliza, 0, HT, PX, 62, 300, 21, 130
         PLANTILLA EST, l_vol, H, PX + 308, 64, 80, 18, 131
         PLANTILLA BOT, t_silencio, HT | BS_CASILLA, PX, 100, 150, 20, 132
-        PLANTILLA EST, t_s_nota, H, PX, 140, PAN_AN, 40, ID_FIJO
+        PLANTILLA BOT, t_s_mez, HT, PX + 220, 97, 168, 26, 133   ; [MEZCLADOR]
+        PLANTILLA EST, t_s_nota, H, PX, 132, PAN_AN, 36, ID_FIJO
+        PLANTILLA EST, l_tarj, H | SS_NEGRITA, PX, 178, PAN_AN, 18, 134
+        PLANTILLA EST, l_sbj, H | SS_NEGRITA, PX, 202, PAN_AN, 18, 135
+        PLANTILLA EST, 0, H, PX, 224, PAN_AN, 84, 136
         dd 0
 pl_sonido_no:
         PLANTILLA EST, t_s_no, H, PX, 40, PAN_AN, 40, ID_FIJO
@@ -392,8 +402,26 @@ t_t_no      db "TECLADO (KEYB) no está cargado: ponga TECLADO SP", 10
 t_s_vol     db "Volumen:", 0
 t_pct       db " %", 0
 t_silencio  db "Silencio", 0
-t_s_nota    db "También se cambia con el altavoz de la barra de", 10
-            db "arriba.", 0
+t_s_nota    db "También se cambia con el altavoz de la barra.", 10
+            db "Cada fuente por separado, en el Mezclador.", 0
+t_s_mez     db "Mezclador...", 0            ; [MEZCLADOR]
+t_s_tarj    db "Tarjeta: ", 0
+t_s_ninguna db "Tarjeta: HSPSND no ha encontrado ninguna", 0
+t_s_sbj     db "Sound Blaster para juegos: ", 0
+t_s_sbsi    db "sí (HSPSND /SB)", 0
+t_s_sbno    db "no", 0
+t_s_sbreal  db "es la propia tarjeta", 0
+t_s_nsi     db "Los juegos de DOS la ven en 220h, IRQ 5 y DMA 1", 10
+            db "y 5, con su música FM (la «Música» del", 10
+            db "Mezclador). Para quitarla hay que reiniciar el", 10
+            db "equipo sin la opción /SB de HSPSND.", 0
+t_s_nno     db "Para los juegos de DOS que piden una Sound", 10
+            db "Blaster: HSPSND /SB (con HSPEMM en CONFIG.SYS).", 10
+            db "No se puede poner sin volver a cargar HSPSND:", 10
+            db "márquela en las propiedades del juego («Sound", 10
+            db "Blaster emulada») o póngala en AUTOEXEC.BAT.", 0
+t_s_nreal   db "Los juegos de DOS usan la tarjeta directamente;", 10
+            db "el Mezclador lleva su mezclador de verdad.", 0
 t_s_no      db "No hay driver de sonido.", 10
             db "Cargue antes HSPSND (está en \HISPADOS).", 0
 t_f_fecha   db "Cambiar la fecha:", 0
@@ -453,6 +481,7 @@ t_i_pais    db "País: España (página de códigos 437)", 0
 ;  La entrada: EBX=base ESI=ruta del módulo EDI=parámetros
 ; =============================================================================
 entrada:
+        call mz_ruta                ; [MEZCLADOR] SONIDO.INI, en \HISPADOS de su unidad
         push edi
         mov edi, ini_ruta           ; VENTANAS.INI, al lado del módulo
         xor ebx, ebx
@@ -560,6 +589,7 @@ cfg_proc:
         mov dword [ebp+V_ICONO], hvp_icono
         jmp .hecho
 .destruir:
+        call mz_vigila              ; [MEZCLADOR] lo que falte, a SONIDO.INI
         mov dword [ven], 0
         HV msg_salir
         jmp .hecho
@@ -651,6 +681,9 @@ cfg_proc:
 
 ; ---- el segundero: salvapantallas, guardar solo y lo que cambia a la vista ----
 reloj:
+        ; [MEZCLADOR] el mezclador de HSPSND se guarda solo, sin preguntar: si
+        ; ha cambiado algo (lo cambie quien lo cambie), a SONIDO.INI
+        call mz_vigila
         HV tics
         mov ebx, eax
         mov eax, AJ_ULT_ACT
@@ -872,6 +905,12 @@ ordenes:
         HV snd_campana
         jmp .hecho
 .s2:
+        cmp ecx, 133                ; [MEZCLADOR] «Mezclador...»
+        jne .s3
+        mov eax, 1
+        HV mez_abrir
+        jmp .hecho
+.s3:
         cmp ecx, 132
         jne .f1
         call marca_de
@@ -1452,6 +1491,7 @@ pan_sonido:
         mov esi, pl_sonido
 .l:
         HV ven_lista
+        call sonido_info            ; [MEZCLADOR] la tarjeta y la SB para juegos
         ; sigue: el volumen que hay puesto (también lo mira el segundero, por
         ; si se cambia con el altavoz de la barra)
 sonido_refrescar:
@@ -1486,6 +1526,77 @@ sonido_refrescar:
         cmp eax, edx
         je .x
         call marca_poner
+.x:
+        popad
+        ret
+
+; [MEZCLADOR] la tarjeta que lleva HSPSND y si está la Sound Blaster para
+; juegos (HSPSND /SB: con HD Audio o AC'97, la Música del mezclador está)
+sonido_info:
+        pushad
+        mov ecx, 134
+        call hija
+        test eax, eax
+        jz .x
+        xor edx, edx
+        HV snd_info                 ; -> EAX tarjeta, ESI nombre, EDX versión
+        mov ebx, eax
+        mov edi, l_tarj
+        test eax, eax
+        jg .t
+        mov esi, t_s_ninguna
+        call hvl_cad
+        jmp .t2
+.t:
+        push esi
+        mov esi, t_s_tarj
+        call hvl_cad
+        pop esi
+        mov ecx, 36
+.n:
+        lodsb
+        test al, al
+        jz .t2
+        stosb
+        loop .n
+.t2:
+        mov byte [edi], 0
+        mov byte [l_sbj], 0
+        xor edx, edx
+        test ebx, ebx
+        jle .pon
+        mov edi, l_sbj
+        mov esi, t_s_sbj
+        call hvl_cad
+        mov esi, t_s_sbreal
+        mov edx, t_s_nreal
+        cmp ebx, 2
+        jle .sb
+        mov esi, t_s_sbno
+        mov edx, t_s_nno
+        call mz_leer
+        jc .sb
+        test byte [mzs_src], 4
+        jz .sb
+        mov esi, t_s_sbsi
+        mov edx, t_s_nsi
+.sb:
+        call hvl_cad
+        mov byte [edi], 0
+.pon:
+        mov ecx, 134
+        mov esi, l_tarj
+        call texto_poner
+        mov ecx, 135
+        mov esi, l_sbj
+        call texto_poner
+        mov ecx, 136
+        mov esi, edx
+        test esi, esi
+        jnz .p2
+        mov esi, l_sbj
+.p2:
+        call texto_poner
 .x:
         popad
         ret
@@ -2890,6 +3001,7 @@ sal_proc:
         ret
 
 %include "hvplib.inc"
+%include "hvpmez.inc"               ; [MEZCLADOR]
 
 ; =============================================================================
 ;  Variables (a cero al cargar)
@@ -2946,6 +3058,8 @@ l_dbl       resb 12
 l_esp       resb 12
 l_rep       resb 16
 l_vol       resb 12
+l_tarj      resb 64                 ; [MEZCLADOR]
+l_sbj       resb 64
 l_fecha     resb 48
 l_hora      resb 12
 l_res       resb 40

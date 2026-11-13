@@ -154,6 +154,10 @@ próximo».
 - Sound Blaster de verdad (ISA): no se apunta nada; HSPSND la encuentra sola.
 - Si el fichero pasa de 32 KB, AUDICION solo conserva los primeros; HSPSND
   lee los primeros 8 KB (por eso la sección nueva va al principio).
+- [MEZCLADOR] En el mismo fichero va la sección `[Mezclador]`: el volumen de
+  cada fuente, sus casillas y los ajustes, que guarda Hispa Ventanas y pone
+  HSPSND al cargarse (docs/MEZCLADOR.md). AUDICION no la toca: no es la
+  sección de ninguna tarjeta.
 
 Ejemplo (QEMU con `AUDICION /SIM`: suena con las GPIO a 02h y el pin con el
 amplificador de auriculares, que no es lo que haría HSPSND sin más):

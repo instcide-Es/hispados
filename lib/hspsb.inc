@@ -521,8 +521,9 @@ e_api:
         movzx ecx, word [cs:hw_rate]
         div ecx
         mov [gs:v_api+V_STEP], eax
-        mov ax, [cs:soft_mul]
+        mov ax, [cs:soft_l]
         mov [gs:v_api+V_GL], ax
+        mov ax, [cs:soft_r]
         mov [gs:v_api+V_GR], ax
         mov byte [gs:v_api+V_ACTIVE], 1
         popf
@@ -785,25 +786,39 @@ v_render:
         ret
 
 ; ganancias de la voz de la SB y de la FM: maestro x voz (o FM) del
-; mezclador x volumen por programa de HSPSND
+; mezclador emulado (lo que escribe el juego) x lo del usuario en el
+; mezclador de HSPSND (Sonidos o Musica, con General si va por programa:
+; soft_l/r y mus_l/r, lib/hspmez.inc). Lo del juego y lo del usuario se
+; multiplican: ninguno pisa al otro. La voz de la API, Sonidos.
 e_gains:
+        push si
+        mov ax, [soft_l]
+        mov [gs:v_api+V_GL], ax
+        mov ax, [soft_r]
+        mov [gs:v_api+V_GR], ax
         mov al, [gs:m_reg+0x30]
         mov ah, [gs:m_reg+0x32]
+        mov si, soft_l
         call .g
         mov [gs:v_pcm+V_GL], ax
         mov al, [gs:m_reg+0x31]
         mov ah, [gs:m_reg+0x33]
+        mov si, soft_r
         call .g
         mov [gs:v_pcm+V_GR], ax
         mov al, [gs:m_reg+0x30]
         mov ah, [gs:m_reg+0x34]
+        mov si, mus_l
         call .g
         mov [gs:fm_gl], ax
         mov al, [gs:m_reg+0x31]
         mov ah, [gs:m_reg+0x35]
+        mov si, mus_r
         call .g
         mov [gs:fm_gr], ax
+        pop si
         ret
+; AL, AH = registros del juego, SI = factor del usuario -> AX = ganancia
 .g:
         call .lut
         xchg al, ah
@@ -817,7 +832,7 @@ e_gains:
         jb .g1
         inc ax
 .g1:
-        mul word [soft_mul]
+        mul word [si]
         mov al, ah
         mov ah, dl
         ret

@@ -20,7 +20,7 @@ Builds an Hispa Ventanas program module (flat 32-bit image + relocations).
 import os, re, struct, subprocess, sys
 
 RAIZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-INCS = ('hvp.inc', 'hvplib.inc', 'defs.inc', 'api.inc')
+INCS = ('hvp.inc', 'hvplib.inc', 'defs.inc', 'api.inc', 'hvpmez.inc')
 DELTA = 0x00100000
 CAB = 64                                # la cabecera no se reubica
 

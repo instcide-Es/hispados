@@ -1697,6 +1697,9 @@ alto_ini:
 %include "accesos.inc"
 %include "apagado.inc"                ; [APAGAR] salir: volver, reiniciar o apagar
 %include "tamano.inc"               ; [TAMAÑO] tamaño, cursores, barras y rueda
+%ifdef CON_PROGRAMAS
+%include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
+%endif
         align 16
 fin_archivo:
         absolute $

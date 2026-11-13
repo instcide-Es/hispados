@@ -167,9 +167,9 @@ check "TRAS-SALIR"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
-ini "Modulos=10"; ini "Nombre=Juegos"; ini "Nombre=Culebra"; ini "Programa=A:\\HISPADOS\\JUEGOS\\CULEBRA.HVP"
+ini "Modulos=11"; ini "Nombre=Juegos"; ini "Nombre=Culebra"; ini "Programa=A:\\HISPADOS\\JUEGOS\\CULEBRA.HVP"
 ini "Nombre=Campo de minas"; ini "Programa=A:\\HISPADOS\\JUEGOS\\MINAS.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Reproductor de sonido [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
   ok "CENTRO.INI: los juegos, en el grupo Juegos (y Pintura, en Accesorios)"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"
@@ -189,7 +189,7 @@ cp $B/CULEBRA.HVP $T/FUTURO.HVP
 printf '\347\003' | dd of=$T/FUTURO.HVP bs=1 seek=6 conv=notrunc status=none
 printf 'Del futuro\0' | dd of=$T/FUTURO.HVP bs=1 seek=32 conv=notrunc status=none
 mcopy -i $T/f.img $T/ROTA.HVP $T/FUTURO.HVP ::JUEGOS/
-printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=10' '' \
+printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=11' '' \
   '[Grupo]' 'Nombre=Juegos' 'Ventana=300,380,452,190' 'Estado=1' '' \
   '[Acceso]' 'Nombre=Culebra' 'Programa=A:\HISPADOS\JUEGOS\CULEBRA.HVP' 'Parametros=/S=7 /P' '' \
   '[Acceso]' 'Nombre=Minas 5' 'Programa=A:\HISPADOS\JUEGOS\MINAS.HVP' 'Parametros=/S=5' '' \
@@ -314,7 +314,7 @@ check "TRAS-SALIR"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
-ini "Programa=A:\\JUEGOS\\OTRA.HVP"; ini "Nombre=Del futuro"; ini "Programa=A:\\JUEGOS\\FUTURO.HVP"; ini "Parametros=/S=7 /P"; ini "Modulos=10"
+ini "Programa=A:\\JUEGOS\\OTRA.HVP"; ini "Nombre=Del futuro"; ini "Programa=A:\\JUEGOS\\FUTURO.HVP"; ini "Parametros=/S=7 /P"; ini "Modulos=11"
 muestra k3 culebra_fruta; muestra k4 culebra_record; muestra m3 minas_banderines; muestra n2 minas_prueba
 muestra n3 minas_ganada; muestra z1 dos_a_la_vez
 if grep -q 'ROTA.HVP' $T/ini.txt; then ko "CENTRO.INI: ROTA.HVP no es un módulo y tiene acceso directo"; else ok "CENTRO.INI: sin acceso para ROTA.HVP"; fi

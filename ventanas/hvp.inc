@@ -9,7 +9,8 @@
 ;       %include "hvp.inc"
 ;       HVP_CABECERA "Nombre", entrada      ; nombre (31 letras) y entrada
 ;                                           ; (un tercer dato, 1: va al grupo
-;                                           ; «Accesorios» y no a «Juegos»)
+;                                           ; «Accesorios» y no a «Juegos»;
+;                                           ; 2: al grupo «Sonido»)
 ;               db "................................"    ; el icono: 32 filas
 ;               ...                                     ; de 32 caracteres
 ;       HVP_CODIGO
@@ -63,7 +64,7 @@ hvp_base:
         dd hvp_fin
         dd %2
         dd 0, 0
-        dd %3                       ; el grupo: 0 «Juegos», 1 «Accesorios»
+        dd %3                       ; el grupo: 0 «Juegos», 1 «Accesorios», 2 «Sonido»
 %%n:    db %1
         times 32 - ($ - %%n) db 0
 hvp_icono:

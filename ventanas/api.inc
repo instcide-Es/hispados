@@ -103,4 +103,7 @@
         ; ---- [TAMAÑO] barras de desplazamiento y forma del cursor (82 entradas) ----
         HVF c_barra                 ; 80  (datos) la clase de la barra de desplazamiento
         HVF cur_forma               ; 81  EAX=CUR_* : la forma del cursor sobre la ventana EBP
+        ; ---- [MEZCLADOR] el mezclador de HSPSND (84 entradas) ----
+        HVF snd_mezcla              ; 82  EAX EBX ECX EDX a HSPSND (AH=función) -> los cuatro; CF=1 si no hay sonido
+        HVF mez_abrir               ; 83  abre el Mezclador (MEZCLAD.HVP); EAX=1: en la vista Completa
 %endmacro

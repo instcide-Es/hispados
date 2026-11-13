@@ -239,7 +239,7 @@ check "BAT-EN-MARCHA"
 check "ARGS=[ /N DESDE-BAT]"
 chk $T/g16.ppm tam 800 600 marco 272 212 452 190 activa titulo 272 212 activa "Pruebas" texto 430 315 9 12 fina "Bat"
 # -- volumen --
-chk $T/g17.ppm marco 550 34 236 116 activa titulo 550 34 activa "Volumen" \
+chk $T/g17.ppm marco 550 34 236 146 activa titulo 550 34 activa "Volumen" \
   texto 568 63 0 8 fina "Volumen: 80 %" px 660 92 12 "barra al 80 % (lo que dice HSPSND al entrar)" px 750 92 7 "el final de la barra, sin poner"
 chk $T/g18.ppm texto 568 63 0 8 fina "Volumen: 50 %" px 600 92 12 "media barra puesta" px 740 92 7 "media barra sin poner"
 chk $T/g19.ppm px 576 125 4 "casilla «Silencio» marcada" px 706 15 5 "altavoz con el aspa de silencio"

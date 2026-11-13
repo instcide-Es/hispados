@@ -72,12 +72,69 @@
 ;                     muestras con las de 8 bits. Para quien no puede esperar
 ;                     (una ventana): preguntar y mandar solo lo que cabe.
 ;                     (Versión 3 de la interfaz.)
+;  El mezclador por fuentes (versión 4; lib/hspmez.inc, docs/MEZCLADOR.md).
+;  Fuentes: 0 General (el volumen de 05h-07h), 1 Sonidos (la onda: lo que
+;  se toca con 01h y la voz de la Sound Blaster emulada), 2 Música (FM),
+;  3 CD, 4 Línea, 5 Micrófono, 6 Altavoz del PC. Volumen 0..100 %, balance
+;  0..100 (50 en medio) y casillas: bit 0 silencio, bit 1 «Sonar» (CD,
+;  Línea y Micrófono pasan a los altavoces), bit 2 «Grabar».
+;    09h controles    -> AL = fuentes que hay (bit n = fuente n), AH = las
+;                     que lleva la tarjeta (las demás, por programa),
+;                     BX = ajustes que hay (bit 0 balance, 1 graves,
+;                     2 agudos, 3 ganancia de entrada, 4 ganancia de
+;                     salida, 5 ajuste automático del micrófono, 6 se graba
+;                     de una sola fuente a la vez, 7 el altavoz en cuatro
+;                     pasos, 8 refuerzo del micrófono), CX = fuentes que se
+;                     pueden grabar, DX = fuentes con «Sonar»
+;    0Ah leer fuente  AL = fuente -> AL = volumen, AH = casillas, BL = balance
+;    0Bh poner fuente AL = fuente, BL = volumen, BH = casillas, CL = balance
+;                     (FFh: no se cambia) -> como 0Ah. Si la tarjeta graba
+;                     de una sola fuente, marcar «Grabar» quita las demás
+;    0Ch leer ajuste  AL = ajuste (0 graves, 1 agudos: 0..100, 50 en medio;
+;                     2 ganancia de entrada, 3 de salida: 0..3 = x1 x2 x4
+;                     x8; 4 ajuste automático del micrófono, 5 refuerzo del
+;                     micrófono: 0/1) -> AL = valor
+;    0Dh poner ajuste AL = ajuste, BL = valor
+;    0Eh AL = 0: todo a los valores de fábrica; 1: volver a escribirlo todo
+;                     en la tarjeta (por si otro programa lo ha cambiado)
+;    0Fh cambios      AL = 0 -> AL = 1 si hay cambios sin guardar en
+;                     SONIDO.INI; AL = 1 ya están guardados; AL = 2 los hay
+;  Al cargarse, HSPSND pone lo de la sección [Mezclador] de SONIDO.INI (lo
+;  guardan Hispa Ventanas y su Mezclador); /VOL:n manda sobre «General».
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
 
-VERSION     equ 0x0003
+VERSION     equ 0x0004
+
+; el mezclador por fuentes (lib/hspmez.inc)
+MZ_N        equ 7                   ; fuentes
+MZ_GEN      equ 0
+MZ_SON      equ 1
+MZ_MUS      equ 2
+MZ_CD       equ 3
+MZ_LIN      equ 4
+MZ_MIC      equ 5
+MZ_ALT      equ 6
+MZ_NAJ      equ 6                   ; ajustes
+MZF_MUDO    equ 1                   ; casillas de cada fuente
+MZF_SONAR   equ 2
+MZF_GRABAR  equ 4
+MZC_BAL     equ 0x0001              ; ajustes que tiene la tarjeta (función 09h)
+MZC_GRAVES  equ 0x0002
+MZC_AGUDOS  equ 0x0004
+MZC_GENT    equ 0x0008
+MZC_GSAL    equ 0x0010
+MZC_AGC     equ 0x0020
+MZC_UNA     equ 0x0040              ; se graba de una sola fuente a la vez
+MZC_ALT4    equ 0x0080              ; el altavoz del PC, en cuatro pasos
+MZC_REFUERZO equ 0x0100
+MZA_CD      equ 0x01                ; AC'97: registros que tiene
+MZA_LIN     equ 0x02
+MZA_MIC     equ 0x04
+MZA_BEEP    equ 0x08
+MZA_TONO    equ 0x10
 
 NBUF        equ 4                   ; búferes de DMA
 BUFSZ       equ 8192                ; bytes por búfer (16 bits estéreo)
@@ -139,15 +196,48 @@ hda_rates   dw 0x0040               ; frecuencias que admiten los DAC (bits
 hw_rate     dw 48000                ; frecuencia a la que toca la tarjeta
 rs_acc      dd 0                    ; fase del cambio de frecuencia
 fb_bpf      dw 0
-; volumen
+; volumen y mezclador por fuentes (lib/hspmez.inc). Cada fuente tiene su
+; volumen (0..100 %), sus casillas (MZF_*) y su balance (0..100, 50 en
+; medio). La fuente 0, «General», es el volumen de siempre: vol_pct y
+; vol_mute son su volumen y su silencio. Orden: General, Sonidos, Música,
+; CD, Línea, Micrófono y Altavoz del PC.
+mz_vol:
 vol_pct     db 80                   ; 0..100 %
+            db 90, 85, 85, 85, 85, 50
+mz_flg:
 vol_mute    db 0
+            db 0, 0, MZF_SONAR, 0, MZF_GRABAR, 0
+mz_bal      times MZ_N db 50
+mz_ajv      db 50, 50, 0, 0, 1, 0   ; graves, agudos, ganancia de entrada y
+                                    ; de salida (0..3: x1 x2 x4 x8), ajuste
+                                    ; automático y refuerzo del micrófono
+MZ_EST      equ $ - mz_vol          ; (lo que vuelve a los valores de fábrica)
+mz_fab      db 80, 90, 85, 85, 85, 85, 50
+            db 0, 0, 0, MZF_SONAR, 0, MZF_GRABAR, 0
+            times MZ_N db 50
+            db 50, 50, 0, 0, 1, 0
+mz_src      db 0                    ; las fuentes que hay en esta tarjeta (bits)
+mz_hwsrc    db 0                    ; ... las que lleva la tarjeta (las demás, por programa)
+mz_rec      db 0                    ; ... las que se pueden grabar
+mz_son      db 0                    ; ... las que tienen la casilla «Sonar»
+mz_ajs      dw 0                    ; los ajustes que hay (MZC_*)
+mz_chg      db 0                    ; hay cambios sin guardar (función 0Fh)
+mz_ac       db 0                    ; AC'97: registros que tiene (MZA_*)
+mz_ct1335   db 0                    ; Sound Blaster 2.0 con el mezclador CT1335
 vol_dirty   db 0                    ; hay que llevarlo a la tarjeta
 busy        db 0                    ; dentro de la API
-att_q       db 0                    ; atenuación en cuartos de dB (0..187)
-vol_zero    db 0                    ; silencio efectivo
+att_q       db 0                    ; General, izquierda: atenuación en
+att_r       db 0                    ; cuartos de dB (0..187); y derecha
+vol_zero    db 0                    ; silencio efectivo (General)
 hw_vol      db 1                    ; la tarjeta tiene control de volumen
-soft_mul    dw 256                  ; factor por programa (256 = sin cambio)
+soft_mul    dw 256                  ; (de antes: lo que pone soft_l)
+soft_l      dw 256                  ; factor por programa de los Sonidos (256
+soft_r      dw 256                  ; = sin cambio), izquierda y derecha
+mus_l       dw 256                  ; ... y de la Música (la FM emulada)
+mus_r       dw 256
+hda_nin     db 0                    ; HD Audio: entradas del mezclador del
+hda_in      times 6 * 6 db 0        ; códec (nodo, entrada, fuente, paso de
+                                    ; 0 dB, pasos, tamaño en 1/4 dB)
 kb_e0       db 0
 keys_on     db 0
 old15       dd 0
@@ -259,6 +349,20 @@ entry:
         je f_mute
         cmp ah, 8
         je f_room
+        cmp ah, 0x09
+        je f_mzcaps
+        cmp ah, 0x0A
+        je f_mzget
+        cmp ah, 0x0B
+        je f_mzset
+        cmp ah, 0x0C
+        je f_mzaget
+        cmp ah, 0x0D
+        je f_mzaset
+        cmp ah, 0x0E
+        je f_mzfab
+        cmp ah, 0x0F
+        je f_mzchg
         stc
         retf
 
@@ -468,6 +572,7 @@ f_setpct:
 .set:
         mov byte [cs:vol_mute], 0
         mov byte [cs:vol_dirty], 1  ; se aplica al salir de la API
+        mov byte [cs:mz_chg], 1
         clc
         retf
 ; 07h: AL = 0 quitar el silencio, 1 ponerlo, 2 cambiarlo
@@ -479,6 +584,7 @@ f_mute:
 .put:
         mov [cs:vol_mute], al
         mov byte [cs:vol_dirty], 1
+        mov byte [cs:mz_chg], 1
 ; 06h: -> AL = volumen, AH = silencio
 f_getvol:
         mov al, [cs:vol_pct]
@@ -486,105 +592,7 @@ f_getvol:
         clc
         retf
 
-; llevar el volumen (vol_pct, vol_mute) a la tarjeta. Conserva todo.
-; La escala es la del AC'97: 100 % = 0 dB y 46,5 dB menos en el 1 %.
-vol_apply:
-        pushad
-        mov al, [cs:vol_pct]
-        mov byte [cs:vol_zero], 0
-        cmp byte [cs:vol_mute], 0
-        jne .zero
-        test al, al
-        jnz .nz
-.zero:
-        mov byte [cs:vol_zero], 1
-        xor al, al
-.nz:
-        mov ah, 100
-        sub ah, al
-        mov al, ah
-        mov ah, 15
-        mul ah
-        shr ax, 3                   ; (100 - %) * 15 / 8 cuartos de dB
-        mov [cs:att_q], al
-        ; factor por programa: silencio, o tarjetas sin control de volumen
-        mov bx, 256
-        cmp byte [cs:vol_zero], 0
-        je .sm1
-        xor bx, bx
-        jmp .sm
-.sm1:
-        cmp byte [cs:hw_vol], 0
-        jne .sm
-        xor ah, ah
-        mov cl, 24                  ; 6 dB = la mitad
-        div cl
-        mov cl, al
-        shr bx, cl
-        mov al, ah
-        xor ah, ah
-        mul bx
-        mov cx, 48
-        div cx
-        sub bx, ax
-.sm:
-        mov [cs:soft_mul], bx
-        mov byte [cs:vol_dirty], 0
-        mov al, [cs:dev_type]
-        test al, al
-        jz .r
-        cmp al, 2
-        jbe .sb
-        cmp al, 3
-        je .ac
-        ; HD Audio: hace falta el modo irreal; en modo protegido o V86 (sin
-        ; la ventana de HSPEMM) queda pendiente para la próxima llamada
-        call hda_reach
-        jnc .h
-        mov byte [cs:vol_dirty], 1
-        jmp .r
-.h:
-        push fs
-        call a20_open
-        call unreal
-        call hda_volume
-        call a20_restore
-        pop fs
-        jmp .r
-.sb:
-        call sb_volume
-        jmp .r
-.ac:
-        ; maestro y auriculares: 1,5 dB por paso
-        mov ax, 0x8000
-        cmp byte [cs:vol_zero], 0
-        jne .aw
-        movzx ax, byte [cs:att_q]
-        add al, 3
-        mov cl, 6
-        div cl
-        mov ah, al
-.aw:
-        mov dx, [cs:nam]
-        add dx, 0x02
-        out dx, ax
-        add dx, 0x02
-        out dx, ax
-.r:
-        popad
-        ret
-
-; AX = muestra de 16 bits -> por el factor de volumen por programa
-vol_scale:
-        cmp word [cs:soft_mul], 256
-        je .r
-        push dx
-        imul word [cs:soft_mul]
-        mov al, ah
-        mov ah, dl
-        pop dx
-.r:
-        ret
+%include "hspmez.inc"
 
 ; ---- teclas de volumen: INT 15h AH=4Fh (la BIOS la llama desde INT 09h con
 ; el código de la tecla en AL; se vuelve con CF=0 para que no la procese) ----
@@ -663,6 +671,7 @@ int15:
         xor byte [cs:vol_mute], 1
 .apply:
         mov byte [cs:vol_dirty], 1
+        mov byte [cs:mz_chg], 1
         cmp byte [cs:busy], 0       ; en mitad de una llamada: al acabar
         jne .eat
         call vol_apply
@@ -740,7 +749,7 @@ fill_buffer:
         call vol_scale
         stosw                       ; izquierdo
         mov ax, bx
-        call vol_scale
+        call vol_scale_r
         stosw                       ; derecho
         inc bp
         ; avanzar en los datos: cur_rate tramas por cada hw_rate de salida
@@ -1500,52 +1509,6 @@ hda_setfmt:
         pop ax
         ret
 
-; volumen (att_q, vol_zero) a los amplificadores elegidos (hda_vols)
-hda_volume:
-        pushad
-        mov si, hda_vols
-        movzx di, byte [cs:hda_nvol]
-.l:
-        test di, di
-        jz .r
-        movzx ax, byte [cs:att_q]
-        mov bl, [cs:si+4]           ; tamaño del paso en cuartos de dB
-        mov bh, bl
-        shr bh, 1
-        add al, bh
-        adc ah, 0
-        div bl                      ; pasos por debajo de 0 dB
-        mov ah, [cs:si+2]
-        sub ah, al
-        jnc .g
-        xor ah, ah
-.g:
-        mov al, ah
-        cmp byte [cs:vol_zero], 0
-        je .nm
-        mov al, 0x80                ; silencio (y ganancia mínima)
-.nm:
-        movzx cx, al
-        mov al, [cs:si+1]
-        test al, 0x80
-        jz .in
-        or cx, 0xB000               ; salida, izquierdo y derecho
-        jmp .w
-.in:
-        mov ch, al
-        and ch, 0x0F
-        or ch, 0x70                 ; entrada n, izquierdo y derecho
-.w:
-        mov bl, [cs:si]
-        mov al, 3
-        call hda_verb4
-        add si, 6
-        dec di
-        jmp .l
-.r:
-        popad
-        ret
-
 hda_wait:
         cmp byte [cs:started], 0
         je .r
@@ -2262,7 +2225,7 @@ sb_fill:
 .put:
         call vol_scale
         xchg ax, bx
-        call vol_scale
+        call vol_scale_r
         xchg ax, bx
         cmp dh, 2
         jne .p8
@@ -2288,57 +2251,6 @@ sb_fill:
         mov [cs:p_src], si
         mov [cs:p_src+2], ax
         pop bx
-        ret
-
-; volumen (att_q, vol_zero): SB16 maestro 30h/31h (2 dB por paso); SB Pro 22h.
-; Las SB sin mezclador (DSP 1.x y 2.x) van con el factor por programa.
-sb_volume:
-        push ax
-        push cx
-        movzx ax, byte [cs:att_q]
-        cmp byte [cs:dev_type], 2
-        jne .pro
-        add al, 4
-        mov cl, 8
-        div cl
-        mov ah, 31
-        sub ah, al
-        jnc .v
-        xor ah, ah
-.v:
-        cmp byte [cs:vol_zero], 0
-        je .w
-        xor ah, ah
-.w:
-        mov al, ah
-        shl al, 3
-        mov ah, 0x30
-        call sb_mix
-        mov ah, 0x31
-        call sb_mix
-        jmp .r
-.pro:
-        cmp byte [cs:sb_major], 3
-        jne .r
-        mov cl, 12
-        div cl
-        mov ah, 15
-        sub ah, al
-        jnc .p
-        xor ah, ah
-.p:
-        cmp byte [cs:vol_zero], 0
-        je .q
-        xor ah, ah
-.q:
-        mov al, ah
-        shl ah, 4
-        or al, ah
-        mov ah, 0x22
-        call sb_mix
-.r:
-        pop cx
-        pop ax
         ret
 
 resident_end:
@@ -2594,6 +2506,7 @@ init:
         jae .hw
         mov byte [hw_vol], 0
 .hw:
+        call mz_iniciar             ; el mezclador: lo que hay y SONIDO.INI
         call vol_apply
         mov al, [opt_nokeys]
         xor al, 1
@@ -3235,6 +3148,7 @@ show_info:
 .end:
         call lrn_info
         call show_vol
+        call mz_info
         cmp byte [e_on], 0
         je .nsb
         mov si, msg_i_sbemu
@@ -4799,7 +4713,7 @@ setup_tail:
 .rs:
         mov [hda_rates], ax
         mov word [cur_rate], 0      ; el formato se pone al empezar a tocar
-        ret
+        jmp hda_inputs              ; CD, línea y micrófono (hspmezi.inc)
 
 ; grupo de función de audio (tipo 1) entre los del códec -> BL y hda_afg; CF
 ; si no hay
@@ -5534,13 +5448,23 @@ ini_buf     equ file_end            ; (detrás del programa: ver layout)
 
 ; ---- leer SONIDO.INI: de la unidad de HSPSND o de la de arranque ----
 ini_load:
+        cmp byte [ini_tried], 0     ; (una vez: con la Sound Blaster se lee
+        jne .r                      ; al final, por el mezclador)
+        mov byte [ini_tried], 1
         cmp byte [opt_noapr], 0
         je .go
-        mov byte [lrn_why], 5
-        ret
+        mov byte [lrn_why], 5       ; (/NOAPRENDIDO: solo el mezclador)
 .go:
-        ; sitio: hasta 1 KB antes de lo que ocupará el programa (la pila)
-        mov ax, [tsr_end]
+        ; sitio: detrás del programa, hasta 1 KB antes del final de su
+        ; bloque de memoria (la pila); los búferes de DMA aún no se usan
+        mov ax, [0x0002]
+        mov bx, cs
+        sub ax, bx
+        cmp ax, 0x0FFF
+        jb .bl
+        mov ax, 0x0FFF
+.bl:
+        shl ax, 4
         sub ax, file_end + 1024
         jbe .r
         cmp ax, INIMAX
@@ -5577,7 +5501,11 @@ ini_load:
 .r:
         ret
 .ok:
+        mov byte [ini_lei], 1
+        cmp byte [opt_noapr], 0
+        jne .cs
         mov byte [ini_ok], 1
+.cs:
         ; cuántas secciones hay
         mov si, ini_buf
 .l:
@@ -6698,7 +6626,9 @@ i_fecha     db "FECHA=", 0
 i_equipo    db "EQUIPO=", 0
 ini_path    db "?:\HISPADOS\SONIDO.INI", 0
 ini_room    dw 0
-ini_ok      db 0
+ini_ok      db 0                    ; leído y se puede usar lo aprendido
+ini_lei     db 0                    ; leído (para el mezclador)
+ini_tried   db 0
 ini_nsec    db 0
 sec_ptr     dw 0
 key_buf     times 64 db 0
@@ -6851,6 +6781,90 @@ msg_crlf2   db 13, 10, 0
 msg_hdafail db "Hay un controlador HD Audio, pero no se ha podido poner en marcha.", 13, 10, 0
 msg_nocard  db "No se ha encontrado ninguna tarjeta de sonido compatible.", 13, 10, 0
 msg_fail    db "El códec AC'97 no responde.", 13, 10, 0
+msg_mz      db "Mezclador:", 0
+msg_mz_sil  db " (silencio)", 0
+msg_mz_son  db " suena", 0
+msg_mz_gra  db " graba", 0
+msg_mz_sep  db ",", 0
+msg_mz_nl   db 13, 10, "          ", 0
+mz_nombres  dw mzn0, mzn1, mzn2, mzn3, mzn4, mzn5, mzn6
+mzn0        db " General ", 0
+mzn1        db " Sonidos ", 0
+mzn2        db " Música ", 0
+mzn3        db " CD ", 0
+mzn4        db " Línea ", 0
+mzn5        db " Micrófono ", 0
+mzn6        db " Altavoz ", 0
+
+; ---- /INFO: el mezclador («Mezclador: General 80 %, Sonidos 90 %, ...») ----
+mz_info:
+        cmp byte [mz_src], 0
+        je .r
+        mov si, msg_mz
+        call puts
+        xor bx, bx
+        xor dx, dx                  ; DL = cuántas en esta línea
+.f:
+        mov al, [mz_src]
+        mov cl, bl
+        shr al, cl
+        test al, 1
+        jz .n
+        test dh, dh
+        jz .p
+        mov si, msg_mz_sep
+        call puts
+        cmp dl, 4
+        jb .p
+        mov si, msg_mz_nl
+        call puts
+        xor dl, dl
+.p:
+        mov dh, 1
+        inc dl
+        push bx
+        shl bx, 1
+        mov si, [mz_nombres+bx]
+        pop bx
+        call puts
+        movzx ax, byte [mz_vol+bx]
+        call pdec
+        mov si, msg_pct
+        call puts
+        mov al, [mz_flg+bx]
+        test al, MZF_MUDO
+        jz .s
+        mov si, msg_mz_sil
+        call puts
+.s:
+        mov cl, bl
+        mov ah, [mz_son]
+        shr ah, cl
+        test ah, 1
+        jz .g
+        test byte [mz_flg+bx], MZF_SONAR
+        jz .g
+        mov si, msg_mz_son
+        call puts
+.g:
+        mov ah, [mz_rec]
+        shr ah, cl
+        test ah, 1
+        jz .n
+        test byte [mz_flg+bx], MZF_GRABAR
+        jz .n
+        mov si, msg_mz_gra
+        call puts
+.n:
+        inc bx
+        cmp bx, MZ_N
+        jb .f
+        mov si, msg_crlf2
+        call puts
+.r:
+        ret
+
+%include "hspmezi.inc"
 file_end:
 ; (el anillo de la Sound Blaster emulada tiene que tapar todo el código de
 ; instalación: la ventana de los registros va detrás)

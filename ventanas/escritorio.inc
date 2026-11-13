@@ -314,6 +314,7 @@ esc_proc:
         xor eax, eax
         ret
 .pulsa:
+        mov edi, eax                ; [MEZCLADOR] (el mensaje: ¿doble clic?)
         movsx eax, dx
         mov ebx, edx
         sar ebx, 16
@@ -326,7 +327,17 @@ esc_proc:
 %ifdef CON_PROGRAMAS
         call vol_en_icono           ; el altavoz: abre o cierra el volumen
         jnc .ic2
+        cmp edi, WM_LBUTTONDBLCLK   ; [MEZCLADOR] con doble clic, el Mezclador
+        je .mez
         call vol_alternar
+        jmp .fin
+.mez:
+        cmp dword [vol_ven], 0      ; (el primer clic abrió la ventanita)
+        je .mz
+        call vol_alternar
+.mz:
+        mov eax, 1
+        call mez_abrir
         jmp .fin
 .ic2:
 %endif

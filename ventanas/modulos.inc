@@ -30,7 +30,7 @@ H_MEM       equ 12                  ; memoria que necesita
 H_ENTRADA   equ 16
 H_IMG       equ 20                  ; tamaño de la imagen; detrás, las reubicaciones
 H_NREUB     equ 24
-H_GRUPO     equ 28                  ; 0 juego, 1 accesorio
+H_GRUPO     equ 28                  ; 0 juego, 1 accesorio, 2 sonido
 H_NOMBRE    equ 32
 H_ICONO     equ 64
 H_TABLA     equ 576                 ; aquí se copia la tabla de la interfaz
@@ -690,9 +690,11 @@ hvp_buscar:
         test edx, edx
         jns .g2
         mov ebx, tg_juegos          ; su grupo: «Juegos» o, si la cabecera lo
-        cmp byte [edi+H_GRUPO], 1   ; dice, «Accesorios» (si no está, se crea)
-        jne .g0
+        cmp byte [edi+H_GRUPO], 1   ; dice, «Accesorios» o [MEZCLADOR] «Sonido»
+        jb .g0                      ; (si no está, se crea)
         mov ebx, tg_accesorios
+        je .g0
+        mov ebx, tg_sonido
 .g0:
         mov eax, [gr_tabla]
         xor edx, edx

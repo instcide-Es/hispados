@@ -158,6 +158,7 @@ t_bp_hecho      db "Accesos directos añadidos: ", 0
 t_volumen       db "Volumen", 0
 t_vol_pct       db "Volumen: ", 0
 t_vol_mudo      db "Silencio", 0
+t_vol_mez       db "Mezclador...", 0     ; [MEZCLADOR]
 t_vol_no        db "No hay driver de sonido.", 0
 t_vol_no2       db "Cargue antes HSPSND", 0
 t_vol_no3       db "(está en \HISPADOS).", 0

@@ -8,7 +8,8 @@
 # (tests/tools/ventanas_check.py).
 #  Con Intel AC'97, con Intel HD Audio y con una Sound Blaster 16:
 #  - SONIDOS.HVP está en \HISPADOS\PROGS, y HISPA.WAV y CAMPANA.WAV en
-#    \HISPADOS (disquete e imagen USB); su acceso sale en «Accesorios»;
+#    \HISPADOS (disquete e imagen USB); su acceso sale en el grupo «Sonido»
+#    ([MEZCLADOR], con el Mezclador);
 #  - la ventana dice qué tarjeta lleva HSPSND;
 #  - «Tono 440 Hz»: dos segundos a 440 Hz por los dos canales;
 #  - «Sonido de prueba»: HISPA.WAV entero (4,6 s), que empieza con un do de
@@ -147,11 +148,11 @@ EOF
     send "$PRE" 1
     send 'A:\HISPADOS\HSPSND /VOL:100' 3
     send 'VENTANAS' 6
-    # ---- el grupo Accesorios: el Reproductor es el sexto ----
-    doble 206 129; sleep 1
+    # ---- [MEZCLADOR] el grupo Sonido: el Reproductor es el primero ----
+    doble 414 129; sleep 1
     aparca
     shot a0
-    tecla right right right right right ret; sleep 3
+    tecla ret; sleep 3
     aparca
     shot a1
     # ---- tono, sonido de prueba, izquierda y derecha ----
@@ -215,7 +216,7 @@ EOF
     mon quit
   } | run 170 -vga std -audiodev wav,id=snd0,path=$T/out.wav $DEV
   python3 tests/tools/audio.py rafagas $T/out.wav $UMB 20 > $T/audio.txt 2>&1
-  chk $T/a0.ppm titulo 224 164 activa "Accesorios"
+  chk $T/a0.ppm titulo 272 212 activa "Sonido"
   chk $T/a1.ppm tam 800 600 marco 158 135 484 353 activa titulo 158 135 activa "Reproductor de sonido" \
     texto 174 168 0 8 negrita "Tarjeta: $NAME" $EST "Listo." \
     texto 174 412 0 8 fina "Volumen:" texto 474 412 0 8 fina "100 %"
@@ -315,8 +316,8 @@ RX=400; RY=300
   send 'KEYB SP' 2
   send 'A:\HISPADOS\HSPRATON' 2
   send 'VENTANAS' 6
-  doble 206 129; sleep 1
-  tecla right right right right right ret; sleep 3
+  doble 414 129; sleep 1
+  tecla ret; sleep 3
   aparca
   shot n1
   clic $PRUEBA; sleep 1

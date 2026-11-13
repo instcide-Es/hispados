@@ -55,7 +55,7 @@ Hace falta `HSPEMM.SYS` (los puertos solo se pueden atrapar en modo V86):
 | SB16 (Bxh/Cxh) | 8 y 16 bits, mono y estéreo, con y sin signo, bloque único y autoinicio, por el DMA de 8 bits (Cxh) o el de 16 (Bxh, canal 5); D5h/D6h/D9h |
 | DMA (8237) | Canales 1 y 5 «cedidos»: dirección, cuenta, modo (autoinicio) y máscara; las lecturas de dirección y cuenta avanzan como en una tarjeta de verdad |
 | IRQ | 5 (o 7): se entrega al vector del programa como si llegara del 8259; su EOI no llega al controlador de verdad; el ISR del 8259 (OCW3) la enseña «en servicio» |
-| Mezclador (224h/225h) | Maestro, voz y FM (registros de la SB Pro 22h/04h/26h y de la SB16 30h-35h), reinicio, IRQ/DMA (80h/81h) y estado de IRQ (82h) |
+| Mezclador (224h/225h) | Maestro, voz y FM (registros de la SB Pro 22h/04h/26h y de la SB16 30h-35h), reinicio, IRQ/DMA (80h/81h) y estado de IRQ (82h). [MEZCLADOR] Lo que escribe el juego se queda en el mezclador emulado (es lo que lee) y **se multiplica** por lo del usuario en el mezclador de HSPSND (Sonidos para la voz, Música para la FM y General si va por programa; docs/MEZCLADOR.md): ninguno pisa al otro |
 | FM OPL2 / AdLib (388h/389h, 220h/221h, 228h/229h) | 9 canales de 2 operadores: 4 formas de onda, envolventes, KSL, KSR, realimentación, trémolo, vibrato y percusión simplificada; los temporizadores vencen al arrancar (detección) |
 | Salida | Remuestreo con interpolación lineal a los 48 kHz (o 44,1) de la tarjeta, 16 bits estéreo |
 

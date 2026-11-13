@@ -115,6 +115,12 @@ printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 
 echo "== Pintura: el grupo Accesorios, dibujar con cada herramienta, deshacer y guardar un BMP =="
 cp "$IMG" $T/f.img
+# sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
+# los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
+# comprueba)
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/BUZO.SMS ::HISPADOS/JUEGOS/HISPA1.NES; do
+  mdel -i $T/f.img $f > /dev/null 2>&1
+done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 if mdir -i $T/f.img ::HISPADOS/PROGS/PINTURA.HVP > /dev/null 2>&1; then
   ok "PINTURA.HVP está en \\HISPADOS\\PROGS del disquete"
@@ -309,8 +315,8 @@ check "TRAS-SALIR"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
-ini "Modulos=10"; ini "Nombre=Pintura"; ini "Programa=A:\\HISPADOS\\PROGS\\PINTURA.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Reproductor de sonido [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System " ]; then
+ini "Modulos=11"; ini "Nombre=Pintura"; ini "Programa=A:\\HISPADOS\\PROGS\\PINTURA.HVP"
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
   ok "CENTRO.INI: Pintura, en el grupo Accesorios, y los juegos en el suyo"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"
@@ -323,11 +329,17 @@ if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/lo
 
 echo "== Pintura: abrir BMP de 1, 4, 8 y 24 bits, lienzo nuevo y una imagen que no cabe =="
 cp "$IMG" $T/f.img
+# sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
+# los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
+# comprueba)
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/BUZO.SMS ::HISPADOS/JUEGOS/HISPA1.NES; do
+  mdel -i $T/f.img $f > /dev/null 2>&1
+done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/bmp
 $BMP crea $T/bmp
 mcopy -i $T/f.img $T/bmp/*.BMP ::
-printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=10' '' \
+printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=11' '' \
   '[Grupo]' 'Nombre=Imagenes' 'Ventana=120,420,560,150' 'Estado=1' '' \
   '[Acceso]' 'Nombre=Uno' 'Programa=A:\HISPADOS\PROGS\PINTURA.HVP' 'Parametros=A:\T1.BMP' '' \
   '[Acceso]' 'Nombre=Cuatro' 'Programa=A:\HISPADOS\PROGS\PINTURA.HVP' 'Parametros=A:\T4.BMP' '' \

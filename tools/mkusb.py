@@ -75,7 +75,7 @@ def main():
                      ('VENTANAS.COM', 'VENTANAS.COM')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
     # los programas de Hispa Ventanas (.HVP): los juegos, en \HISPADOS\JUEGOS;
-    # los accesorios (los que dicen grupo 1 en la cabecera), en
+    # los accesorios (los que dicen grupo 1 o 2, «Sonido», en la cabecera), en
     # \HISPADOS\PROGS
     md('HISPADOS/JUEGOS')
     md('HISPADOS/PROGS')
@@ -86,7 +86,7 @@ def main():
                 cp(os.path.join(B, f), 'HISPADOS/' + f)
             else:
                 cab = open(os.path.join(B, f), 'rb').read(32)
-                carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] == 1 else 'JUEGOS'
+                carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] in (1, 2) else 'JUEGOS'  # [MEZCLADOR] 2: «Sonido»
                 cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
     for f in NESROMS + SMSROMS:
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)

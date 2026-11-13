@@ -272,8 +272,11 @@ propia ventana (se mueve, se cambia de tamaño, se minimiza) con un icono por
 de Hispa-DOS que haya en la carpeta de VENTANAS.COM: Editar, Gestor,
 Información, el intérprete de órdenes y, el último, Configuración, que es un
 módulo .HVP que está en `\HISPADOS`: ver «Configuración y VENTANAS.INI»), «Accesorios» (los programas
-internos: Bloc de notas, Calculadora, Reloj y Sistema, y Pintura y el
-Reproductor de sonido, que son módulos .HVP) y «Juegos» (los juegos propios). Los módulos .HVP están en dos
+internos: Bloc de notas, Calculadora, Reloj y Sistema, y Pintura, que es un
+módulo .HVP) y «Juegos» (los juegos propios). [MEZCLADOR] El grupo **«Sonido»**
+(el Reproductor de sonido y el Mezclador, módulos .HVP con el grupo 2 en la
+cabecera) se crea solo la primera vez que aparecen; en un CENTRO.INI de antes,
+el Reproductor se queda en «Accesorios» y el Mezclador va a «Sonido». Los módulos .HVP están en dos
 carpetas al lado de VENTANAS.COM: los juegos en `\HISPADOS\JUEGOS` y los
 demás programas en `\HISPADOS\PROGS`.
 
@@ -594,6 +597,13 @@ que también usa INT 2Fh: no se puede sacar de la cadena y se desactiva.
 
 ### El volumen
 
+[MEZCLADOR] Debajo de la casilla «Silencio», el botón **«Mezclador...»** cierra
+la ventanita y abre el Mezclador (`MEZCLAD.HVP`, docs/MEZCLADOR.md) en la vista
+Completa; un **doble clic en el altavoz** hace lo mismo. Con HSPSND de la
+versión 4 el volumen es la fuente «General» de su mezclador y se guarda,
+con lo demás del mezclador, en `\HISPADOS\SONIDO.INI` (lo escribe
+Configuración en cuanto cambia); CENTRO.INI lo sigue apuntando como antes.
+
 El altavoz de la barra superior (a la izquierda de «Salir») abre y cierra una
 ventanita con una barra deslizante de 0 a 100 % (con el ratón o con las
 flechas izquierda y derecha) y la casilla «Silencio». El volumen se le da al
@@ -639,7 +649,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Pantalla | Tema (ocho combinaciones hechas: Hispa, Noche, Mar, Campo, Vino, Duna, Pizarra, Ladrillo), dibujo del fondo (diez: rombos, liso, puntos, rayas, cuadros, ladrillos, olas, damero, trama, zigzag; se ven con los colores puestos), color del fondo y color del dibujo (los 16 de la paleta), y el salvapantallas: casilla, minutos (1 a 60) y «Probar» |
 | Ratón | Velocidad del puntero (de x0,5 a x3), tiempo máximo del doble clic (165 a 990 ms, con una zona para probarlo) e intercambiar los botones (para zurdos) |
 | Teclado | Espera antes de repetir (250 a 1000 ms) y velocidad de repetición (2 a 30 por segundo), con un cuadro para probarlas; distribución española o estadounidense, si TECLADO (KEYB) está cargado |
-| Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice) |
+| Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice); [MEZCLADOR] el botón «Mezclador...», la tarjeta que lleva HSPSND y si está la «Sound Blaster para juegos» (`HSPSND /SB`: sí, no o «es la propia tarjeta»), con lo que hay que hacer para ponerla o quitarla (no se puede sin volver a cargar HSPSND, así que lo explica). Además, Configuración guarda cada segundo el mezclador de HSPSND en `\HISPADOS\SONIDO.INI` si ha cambiado (docs/MEZCLADOR.md) |
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
 | Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país |
 
@@ -1193,7 +1203,7 @@ reubicaciones.
 | 16 | 4 | punto de entrada (desde el principio del módulo) |
 | 20 | 4 | tamaño de la imagen: ahí empiezan las reubicaciones |
 | 24 | 4 | cuántas reubicaciones hay |
-| 28 | 4 | el grupo del Centro al que va su acceso directo: 0 «Juegos», 1 «Accesorios» |
+| 28 | 4 | el grupo del Centro al que va su acceso directo: 0 «Juegos», 1 «Accesorios», 2 «Sonido» ([MEZCLADOR]) |
 | 32 | 32 | el nombre del programa, acabado en 0 (página 437) |
 | 64 | 512 | el icono: 32×32 a 4 bits por punto, como los de `iconos.inc` |
 | 576 | 4 × entradas | la tabla de la interfaz (en el archivo, a cero) |
@@ -1310,7 +1320,18 @@ Los mensajes nuevos (`WM_GETMINMAXINFO`, `WM_EXITSIZEMOVE`, `WM_VSCROLL`,
 los conoce los manda a `ven_defecto`, que devuelve 0 (los tamaños mínimos
 normales) o pasa la rueda a la madre.
 
-Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76 u 80) sigue
+Añadidas para el Mezclador ([MEZCLADOR]; 84 entradas: dos más, la 82 y la 83):
+
+| Entradas | Para qué |
+|---|---|
+| `snd_mezcla` (EAX, EBX, ECX, EDX → los mismos; CF=1 si no hay sonido o HSPSND dice que no) | las funciones 09h-0Fh de HSPSND, el mezclador por fuentes (docs/MEZCLADOR.md). Con 0Bh (poner una fuente) y 0Eh (valores de fábrica), Hispa Ventanas vuelve a leer el volumen de General y repinta el altavoz |
+| `mez_abrir` (EAX=1: en la vista Completa) | abre el Mezclador (`PROGS\MEZCLAD.HVP` al lado de VENTANAS.COM) o trae su ventana delante |
+
+`ventanas/hvpmez.inc` (como `hvplib.inc`, dentro del módulo) tiene lo común
+del mezclador para los módulos: leerlo todo, poner una fuente o un ajuste y
+guardar la sección `[Mezclador]` de `\HISPADOS\SONIDO.INI`.
+
+Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80 u 82) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
 
@@ -1567,7 +1588,7 @@ salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
 ### Reproductor de sonido
 
 `programas/sonidos.asm`, `SONIDOS.HVP` (en `\HISPADOS\PROGS`; acceso en
-«Accesorios»). Para probar el sonido de un equipo y saber enseguida si
+el grupo «Sonido»; en un CENTRO.INI de antes, en «Accesorios»). Para probar el sonido de un equipo y saber enseguida si
 suena. Diseño, textos y sonidos propios.
 
 - Arriba dice **qué tarjeta** lleva HSPSND y cómo suena con ella, o avisa:
@@ -1619,6 +1640,18 @@ suena o carga, su bucle es `msg_mirar`, un paso y `ceder`; parado,
 
 Pendiente: una lista de los últimos archivos, repetir, y los WAV de 24 bits
 o comprimidos.
+
+### Mezclador
+
+`programas/mezclad.asm`, `MEZCLAD.HVP` (en `\HISPADOS\PROGS`; acceso en el
+grupo «Sonido»). El volumen de cada fuente (General, Sonidos, Música, CD,
+Línea, Micrófono, Altavoz del PC) con el mezclador por fuentes de HSPSND:
+columnas con deslizador vertical y balance, casillas con texto («Silencio»,
+«Sonar», «Grabar»), graves y agudos si la tarjeta los tiene y una frase con
+lo que falta; vistas Sencilla y Completa, Avanzado y el recorrido «Cómo se
+usa». Se guarda solo en `\HISPADOS\SONIDO.INI`. Todo, en docs/MEZCLADOR.md.
+También se abre con doble clic en el altavoz de la barra, con el botón
+«Mezclador...» de su ventanita y con el de Configuración > Sonido.
 
 ## Pruebas
 

@@ -192,6 +192,7 @@ def_accesorios:
 tg_principal db "Principal", 0
 tg_accesorios db "Accesorios", 0
 tg_juegos   db "Juegos", 0
+tg_sonido   db "Sonido", 0          ; [MEZCLADOR] el Reproductor y el Mezclador
 td_editar   db "Editar", 0
 td_gestor   db "Gestor", 0
 td_info     db "Información", 0

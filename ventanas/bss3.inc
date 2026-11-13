@@ -125,6 +125,7 @@ aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados
 aj_ult_act  resd 1                  ; tics del último ratón o teclado
 aj_resto    resd 2                  ; lo que sobra del movimiento (x, y)
 aj_acc      resb AC_TAM             ; el «acceso directo» con el que se abre CONFIG.HVP
+mez_acc     resb AC_TAM             ; [MEZCLADOR] ... y el Mezclador (MEZCLAD.HVP)
 ; ---- [CAMPANITA] [Reproductor de sonido] trozos grandes para HSPSND y la campanita ----
 SND_TB      equ 8192
             alignb 16

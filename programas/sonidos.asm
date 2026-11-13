@@ -70,7 +70,7 @@ E_CARGA     equ 1                   ; leyendo el archivo
 E_SUENA     equ 2                   ; mandando trozos
 E_ACABA     equ 3                   ; mandado: falta el silencio de detrás y que acabe
 
-HVP_CABECERA "Reproductor de sonido", entrada, 1
+HVP_CABECERA "Reproductor de sonido", entrada, 2  ; [MEZCLADOR] grupo «Sonido»
         db "................................"
         db "................1..............."
         db "................1..............."
