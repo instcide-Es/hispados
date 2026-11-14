@@ -162,6 +162,10 @@ $(B)/VELOCIDAD.COM: utils/velocidad.asm lib/util.inc lib/ejecutar.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LOADFIX.COM: utils/loadfix.asm lib/util.inc lib/ejecutar.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# PROTECTOR (en el disco PROTECTO.COM: 8 letras): protector de pantalla en
+# modo texto, residente («Lluvia verde»; tests/run_protector_tests.sh)
+$(B)/PROTECTOR.COM: utils/protector.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 # Mandos de juego (docs/MANDOS.md): HSPJOY.COM (residente) y MANDO.COM
 $(B)/HSPJOY.COM: drivers/hspjoy.asm lib/hidjoyx.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -286,7 +290,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
-        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM \
+        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM $(B)/PROTECTOR.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
@@ -329,6 +333,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGN
 	mcopy -i $@ $(B)/REVISAR.COM ::HISPADOS/REVISAR.COM
 	mcopy -i $@ $(B)/VELOCIDAD.COM ::HISPADOS/VELOCIDA.COM
 	mcopy -i $@ $(B)/LOADFIX.COM ::HISPADOS/LOADFIX.COM
+	mcopy -i $@ $(B)/PROTECTOR.COM ::HISPADOS/PROTECTO.COM
 	iconv -f UTF-8 -t CP437 sistema/ALIAS.INI | sed 's/$$/\r/' > $(B)/ALIAS.INI
 	mcopy -i $@ $(B)/ALIAS.INI ::HISPADOS/ALIAS.INI
 	mcopy -i $@ $(B)/HSPRAM.SYS ::HISPADOS/HSPRAM.SYS
@@ -537,6 +542,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_juegos2_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
+	tests/run_protector_tests.sh $(IMG)
 	tests/run_pintura_tests.sh $(IMG)
 	tests/run_sonidos_tests.sh $(IMG)
 	tests/run_mezclador_tests.sh $(IMG)

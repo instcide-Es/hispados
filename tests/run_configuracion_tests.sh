@@ -49,6 +49,21 @@ checke() { if grep -qE -- "$1" $T/log.txt; then ok "$2"; else ko "$2"; fi; }
 ini() { if grep -qxF -- "$1" $T/ini.txt; then ok "VENTANAS.INI: $1"; else ko "VENTANAS.INI sin la línea «$1»"; fi; }
 inin() { if grep -q -- "^$1" $T/ini.txt; then ko "VENTANAS.INI: sobra «$1»"; else ok "VENTANAS.INI: sin «$1»"; fi; }
 chk() { $CHK "$@" || fail=1; }
+# la «Lluvia verde» del salvapantallas: muchos puntos verdes claros y oscuros
+verde() {
+  local v; v=$(python3 -c '
+import re, sys
+d = open(sys.argv[1], "rb").read()
+m = re.match(rb"P6\s+(\d+)\s+(\d+)\s+(\d+)\s", d); d = d[m.end():]
+claro = oscuro = 0
+for i in range(0, len(d), 3):
+    r, g, b = d[i], d[i + 1], d[i + 2]
+    if g > 150 and r < g - 60 and b < g - 60: claro += 1
+    elif 30 < g <= 150 and r < g * 2 // 3 and b < g * 2 // 3 + 20: oscuro += 1
+print(claro, oscuro)' "$1")
+  set -- "$1" "$2" $v
+  if [ "$3" -gt "${MINCLARO:-3000}" ] && [ "$4" -gt 1000 ]; then ok "$2: verde ($3 puntos claros, $4 oscuros)"; else ko "$2: no se ve verde ($3 claros, $4 oscuros)"; fi
+}
 # memoria extendida que se ve: la de la máquina (16 MB; otra con QEMU_MAS='-m N'
 # en tools/pruebas_pc.sh) menos el primer mega y 128 KB
 MEGAS=$(echo " ${QEMU_MAS:-} " | sed -n 's/.* -m \([0-9]*\)[ M].*/\1/p'); MEGAS=${MEGAS:-16}
@@ -129,18 +144,27 @@ fi
   # ---- Pantalla: tema «Mar», dibujo «damero», fondo granate ----
   clic 318 237; aparca
   shot s3
-  clic 544 258; clic 575 321
+  clic 544 258; clic 575 317
   shot s4                                   # (enseguida: todavía sin guardar)
   aparca
   sleep 4                                   # se guarda solo
   shot s5
   # ---- salvapantallas: casilla, minutos y «Probar» ----
-  clic 286 407; clic 482 407; aparca
+  clic 286 397; clic 482 397; aparca
   shot s6
-  clic 318 439; sleep 2
+  clic 318 451; sleep 2
   shot s7
   tecla spc; sleep 1
   shot s8
+  # ---- el dibujo del salvapantallas: «Lluvia verde» y «Probar» ----
+  clic 512 423; aparca
+  shot sl0
+  clic 318 451; sleep 2.5
+  shot sl1
+  sleep 1
+  shot sl2
+  tecla spc; sleep 1
+  shot sl3
   # ---- Ratón: el doble clic más largo, la zona de prueba y «Guardar» ----
   clic 196 196
   clic 508 271
@@ -199,23 +223,32 @@ chk $T/s2.ppm marco 124 110 552 403 activa titulo 124 110 activa "Configuración
   texto 164 151 8 12 negrita "Pantalla" texto 164 185 0 8 fina "Ratón" texto 164 219 0 8 fina "Teclado" \
   texto 164 253 0 8 fina "Sonido" texto 164 287 0 8 fina "Fecha y hora" texto 164 321 0 8 fina "Sistema" \
   texto 278 145 4 8 negrita "Pantalla" texto 278 175 0 8 fina "Tema:" texto 424 175 0 8 fina "Dibujo del fondo: rombos" \
-  texto 278 289 0 8 fina "Color del fondo: azul petróleo" texto 278 339 0 8 fina "Color del dibujo: petróleo claro" \
-  texto 300 399 0 8 fina "Salvapantallas tras" texto 584 399 0 8 fina "5 minutos" \
-  texto 134 483 0 8 fina "Se aplica al momento." px 333 321 2 "color del fondo elegido: azul petróleo" \
-  px 289 321 0 "la muestra de la tinta" px 575 321 13 "la muestra del granate"
+  texto 278 285 0 8 fina "Color del fondo: azul petróleo" texto 278 335 0 8 fina "Color del dibujo: petróleo claro" \
+  texto 300 389 0 8 fina "Salvapantallas tras" texto 584 389 0 8 fina "5 minutos" \
+  texto 278 415 0 8 fina "Dibujo:" texto 368 415 0 8 fina "Letrero de Hispa" texto 526 415 0 8 fina "Lluvia verde" \
+  px 354 423 4 "«Letrero de Hispa», el de fábrica" px 512 423 9 "«Lluvia verde», sin marcar" \
+  texto 134 483 0 8 fina "Se aplica al momento." px 333 317 2 "color del fondo elegido: azul petróleo" \
+  px 289 317 0 "la muestra de la tinta" px 575 317 13 "la muestra del granate"
 # -- el tema, el dibujo y el color cambian el escritorio al momento --
-chk $T/s3.ppm texto 424 175 0 8 fina "Dibujo del fondo: olas" texto 278 289 0 8 fina "Color del fondo: añil" \
+chk $T/s3.ppm texto 424 175 0 8 fina "Dibujo del fondo: olas" texto 278 285 0 8 fina "Color del fondo: añil" \
   px 720 475 14 "escritorio: una ola turquesa" px 720 473 12 "escritorio: fondo añil" px 60 402 12 "y a la izquierda"
-chk $T/s4.ppm texto 424 175 0 8 fina "Dibujo del fondo: damero" texto 278 289 0 8 fina "Color del fondo: granate" \
+chk $T/s4.ppm texto 424 175 0 8 fina "Dibujo del fondo: damero" texto 278 285 0 8 fina "Color del fondo: granate" \
   px 724 476 13 "escritorio: un cuadro granate" px 724 468 14 "escritorio: un cuadro turquesa" \
   texto 134 483 0 8 fina "Hay cambios sin guardar."
 chk $T/s5.ppm texto 134 483 0 8 fina "Guardado en VENTANAS.INI."
 # -- salvapantallas --
-chk $T/s6.ppm texto 584 399 0 8 fina "10 minutos" px 286 407 4 "la casilla del salvapantallas, marcada"
+chk $T/s6.ppm texto 584 389 0 8 fina "10 minutos" px 286 397 4 "la casilla del salvapantallas, marcada"
 chk $T/s7.ppm tam 800 600 px 5 5 0 "salvapantallas: la pantalla, en negro" px 400 14 0 "la barra de arriba, tapada" \
   px 795 595 0 "hasta la esquina" cambia 0 0 800 600 $T/s6.ppm 300000
 chk $T/s8.ppm marco 124 110 552 403 activa titulo 124 110 activa "Configuración" px 5 5 1 "la barra de arriba, otra vez" \
-  texto 584 399 0 8 fina "10 minutos" px 286 407 4 "la tecla no ha llegado a la ventana (la casilla sigue marcada)"
+  texto 584 389 0 8 fina "10 minutos" px 286 397 4 "la tecla no ha llegado a la ventana (la casilla sigue marcada)"
+# -- la «Lluvia verde» --
+chk $T/sl0.ppm px 512 423 4 "«Lluvia verde», marcada" px 354 423 9 "«Letrero de Hispa», ya no" \
+  texto 134 483 0 8 fina "Hay cambios sin guardar."
+verde $T/sl1.ppm "«Probar» con la «Lluvia verde»"
+verde $T/sl2.ppm "y un momento después"
+chk $T/sl2.ppm cambia 0 0 800 600 $T/sl1.ppm 2000
+chk $T/sl3.ppm marco 124 110 552 403 activa titulo 124 110 activa "Configuración" px 512 423 4 "una tecla la quita (y no le llega a la ventana)"
 # -- Ratón --
 chk $T/s9.ppm texto 164 185 8 12 negrita "Ratón" texto 278 145 4 8 negrita "Ratón" texto 278 175 0 8 fina "Velocidad del puntero:" \
   texto 584 199 0 8 fina "x1" texto 584 263 0 8 fina "990 ms" px 526 306 12 "el doble clic en la zona de prueba: rombo añil" \
@@ -256,10 +289,10 @@ else
   ko "tras reiniciar el equipo, la fecha puesta"
 fi
 check "SIGUE-VIVO"
-ini "[Pantalla]"; ini "Dibujo=damero"; ini "ColorFondo=13"; ini "ColorDibujo=14"; ini "Salvapantallas=1"; ini "Minutos=10"
+ini "[Pantalla]"; ini "Dibujo=damero"; ini "ColorFondo=13"; ini "ColorDibujo=14"; ini "Salvapantallas=1"; ini "Minutos=10"; ini "SalvaDibujo=lluvia"
 ini "[Raton]"; ini "Velocidad=2"; ini "DobleClic=990"; ini "Zurdo=0"
 ini "[Teclado]"; ini "Espera=500"; ini "Repeticion=31"; ini "Distribucion=SP"
-muestra s1 grupo; muestra s2 pantalla; muestra s4 fondo; muestra s7 salvapantallas; muestra s9 raton
+muestra s1 grupo; muestra s2 pantalla; muestra sl0 dibujo; muestra sl1 lluvia_1; muestra sl2 lluvia_2; muestra s4 fondo; muestra s7 salvapantallas; muestra s9 raton
 muestra s12 fecha; muestra s13 sistema; muestra s15 teclado
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; cat $T/ini.txt; fi
 [ -n "${GUARDAR:-}" ] && cp $T/*.ppm "$GUARDAR"/
@@ -310,7 +343,7 @@ if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/lo
 echo "== Configuración: VENTANAS.INI a mano, botones intercambiados y «De fábrica» =="
 cp "$IMG" $T/f.img
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
-printf '%s\r\n' '; a mano' '[pantalla]' 'DIBUJO = Zigzag' 'colorfondo=11' 'ColorDibujo = 10' 'Salvapantallas=1' 'Minutos=99' \
+printf '%s\r\n' '; a mano' '[pantalla]' 'DIBUJO = Zigzag' 'colorfondo=11' 'ColorDibujo = 10' 'Salvapantallas=1' 'Minutos=99' 'salvadibujo = LLUVIA' \
   'Inventada=7' '' '[Raton]' 'Velocidad=4' 'DobleClic=440' 'Zurdo=1' '' '[Teclado]' 'Distribucion=us' > $T/VENTANAS.INI
 mcopy -o -i $T/f.img $T/VENTANAS.INI ::HISPADOS/VENTANAS.INI
 RX=400; RY=300; VEL=4
@@ -360,7 +393,7 @@ chk $T/m7.ppm texto 134 483 0 8 fina "Guardado en VENTANAS.INI."
 check "Hispa Ventanas ha terminado."
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
-ini "Dibujo=rombos"; ini "ColorFondo=2"; ini "ColorDibujo=3"; ini "Salvapantallas=0"; ini "Minutos=5"
+ini "Dibujo=rombos"; ini "ColorFondo=2"; ini "ColorDibujo=3"; ini "Salvapantallas=0"; ini "Minutos=5"; ini "SalvaDibujo=letrero"
 ini "Velocidad=2"; ini "DobleClic=440"; ini "Zurdo=0"
 inin "Espera="; inin "Repeticion="; inin "Distribucion="; inin "Inventada"
 muestra m0 ini_a_mano; muestra m4 de_fabrica
@@ -370,7 +403,7 @@ if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/lo
 echo "== Configuración: en VGA de 640x480 y 16 colores =="
 cp "$IMG" $T/f.img
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
-printf '%s\r\n' '[Pantalla]' 'Dibujo=ladrillos' 'ColorFondo=4' 'ColorDibujo=8' > $T/VENTANAS.INI
+printf '%s\r\n' '[Pantalla]' 'Dibujo=ladrillos' 'ColorFondo=4' 'ColorDibujo=8' 'SalvaDibujo=1' > $T/VENTANAS.INI
 mcopy -o -i $T/f.img $T/VENTANAS.INI ::HISPADOS/VENTANAS.INI
 RX=320; RY=240; VEL=2
 { sleep 6
@@ -381,6 +414,9 @@ RX=320; RY=240; VEL=2
   tecla right right right right ret; sleep 2.5
   ir 16 320
   shot v0
+  clic 238 391; sleep 2.5                   # «Probar»: la lluvia en 16 colores
+  shot v1
+  tecla spc; sleep 1
   tecla esc; sleep 1
   clic 596 13; sleep 1; tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
@@ -390,11 +426,25 @@ RX=320; RY=240; VEL=2
 # (640x480: la ventana, en (44,50); el fondo, ladrillos terracota con la junta crema)
 chk $T/v0.ppm tam 640 480 marco 44 50 552 403 activa titulo 44 50 activa "Configuración" \
   texto 198 85 4 8 negrita "Pantalla" texto 344 115 0 8 fina "Dibujo del fondo: ladrillos" \
-  px 20 464 8 "la junta de los ladrillos, crema" px 20 468 4 "un ladrillo terracota"
+  px 20 464 8 "la junta de los ladrillos, crema" px 20 468 4 "un ladrillo terracota" \
+  px 432 363 4 "«Lluvia verde», elegida en VENTANAS.INI (SalvaDibujo=1)"
+# (en 16 colores, la lluvia es de verde oliva y turquesa sobre tinta)
+n=$(python3 -c '
+import re, sys
+d = open(sys.argv[1], "rb").read()
+m = re.match(rb"P6\s+(\d+)\s+(\d+)\s+(\d+)\s", d); d = d[m.end():]
+def cerca(i, c): return all(abs(d[i + k] - c[k]) < 16 for k in range(3))
+o = t = 0
+for i in range(0, len(d), 3):
+    if cerca(i, (0x6B, 0x8E, 0x3D)): o += 1
+    elif cerca(i, (0x7F, 0xC6, 0xBF)): t += 1
+print(o, t)' $T/v1.ppm)
+set -- $n
+if [ "$1" -gt 1500 ] && [ "$2" -gt 300 ]; then ok "en VGA de 16 colores, la lluvia: $1 puntos verde oliva, $2 turquesa"; else ko "en VGA de 16 colores no se ve la lluvia ($1 oliva, $2 turquesa)"; fi
 check "Hispa Ventanas ha terminado."
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
-muestra v0 vga
+muestra v0 vga; muestra v1 vga_lluvia
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; fi
 [ -n "${GUARDAR:-}" ] && cp $T/*.ppm "$GUARDAR"/
 rm -rf $T

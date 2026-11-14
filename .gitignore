@@ -3,3 +3,5 @@ build/
 tests/thirdparty/dl/
 *.orig
 *.rej
+__pycache__/
+*.pyc

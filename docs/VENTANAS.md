@@ -647,7 +647,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 
 | Apartado | Qué tiene |
 |---|---|
-| Pantalla | Tema (ocho combinaciones hechas: Hispa, Noche, Mar, Campo, Vino, Duna, Pizarra, Ladrillo), dibujo del fondo (diez: rombos, liso, puntos, rayas, cuadros, ladrillos, olas, damero, trama, zigzag; se ven con los colores puestos), color del fondo y color del dibujo (los 16 de la paleta), y el salvapantallas: casilla, minutos (1 a 60) y «Probar» |
+| Pantalla | Tema (ocho combinaciones hechas: Hispa, Noche, Mar, Campo, Vino, Duna, Pizarra, Ladrillo), dibujo del fondo (diez: rombos, liso, puntos, rayas, cuadros, ladrillos, olas, damero, trama, zigzag; se ven con los colores puestos), color del fondo y color del dibujo (los 16 de la paleta), y el salvapantallas: casilla, minutos (1 a 60), dibujo («Letrero de Hispa» o «Lluvia verde») y «Probar», que enseña el elegido |
 | Ratón | Velocidad del puntero (de x0,5 a x3), tiempo máximo del doble clic (165 a 990 ms, con una zona para probarlo) e intercambiar los botones (para zurdos); [CONTEXTO] «Ctrl+clic como botón derecho» (para los Mac y los touchpads de un botón; activado por omisión) |
 | Teclado | Espera antes de repetir (250 a 1000 ms) y velocidad de repetición (2 a 30 por segundo), con un cuadro para probarlas; distribución española o estadounidense, si TECLADO (KEYB) está cargado |
 | Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice); [MEZCLADOR] el botón «Mezclador...», la tarjeta que lleva HSPSND y si está la «Sound Blaster para juegos» (`HSPSND /SB`: sí, no o «es la propia tarjeta»), con lo que hay que hacer para ponerla o quitarla (no se puede sin volver a cargar HSPSND, así que lo explica). Además, Configuración guarda cada segundo el mezclador de HSPSND en `\HISPADOS\SONIDO.INI` si ha cambiado (docs/MEZCLADOR.md) |
@@ -680,9 +680,20 @@ VENTANAS.INI, los dibujos del fondo y el salvapantallas los hace CONFIG.HVP:
 3. Mientras está en marcha mira una vez por segundo cuánto hace del último
    movimiento del ratón, clic o tecla (`AJ_ULT_ACT`); pasado el tiempo
    puesto, abre el **salvapantallas**: una ventana que ocupa toda la
-   pantalla, en negro, con un letrero («Hispa Ventanas» y la hora) que se
-   pasea. Se quita con el ratón o con una tecla (que no llega a la ventana
-   de debajo).
+   pantalla con uno de sus dibujos: el **letrero** («Hispa Ventanas» y la
+   hora, que se pasea sobre negro) o la **lluvia verde** (columnas de
+   letras que caen a distintas velocidades, con la cabeza casi blanca y la
+   estela que se apaga de verde claro a verde oscuro; las letras de la
+   estela cambian y las columnas vuelven a empezar arriba). La lluvia usa
+   los verdes del cubo de la paleta con VESA (256 colores o color
+   verdadero) y, en la VGA de 16 colores, los que hay (turquesa, verde
+   oliva y petróleo). Se repinta solo lo que cambia, una vez por tic de
+   reloj. Para añadir otro dibujo: `SALVA_*` y `N_SALVA`, su nombre en
+   `sal_nombres`, su opción en `pl_pantalla` y lo suyo en `sal_proc`.
+   Se quita con el ratón o con una tecla (que no llega a la ventana de
+   debajo). (En el modo texto de Hispa-DOS la lluvia la pone `PROTECTOR`,
+   ver README.md; no salta dentro de Hispa Ventanas, que va en modo
+   gráfico.)
 
 Ocupa una de las 6 plazas de módulos, una tarea y 6 ventanas (con la
 ventana oculta, los controles del apartado no existen).
@@ -702,6 +713,7 @@ ColorFondo=2
 ColorDibujo=3
 Salvapantallas=0
 Minutos=5
+SalvaDibujo=letrero
 
 [Raton]
 Velocidad=2
@@ -726,7 +738,9 @@ Distribucion=SP
   (0 tinta, 1 marrón, 2 azul petróleo, 3 petróleo claro, 4 terracota,
   5 terracota claro, 6 arena, 7 arena oscura, 8 crema, 9 blanco, 10 ocre,
   11 verde oliva, 12 añil, 13 granate, 14 turquesa, 15 piedra).
-  `Salvapantallas` = 0/1 y `Minutos` = 1-60.
+  `Salvapantallas` = 0/1, `Minutos` = 1-60 y `SalvaDibujo` = `letrero`
+  o `lluvia` (o su número, 0 o 1; no se llama `Dibujo` porque ese es el
+  del fondo y las claves no miran la sección).
 - `Velocidad`: del ratón, en mitades (1 = x0,5; 2 = normal; 6 = x3).
   `DobleClic`: milisegundos como mucho entre los dos clics (165-990; se
   redondea a tics de reloj, de 55 ms). `Zurdo` = 0/1. `CtrlClic` = 1 (lo

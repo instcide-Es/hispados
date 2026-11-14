@@ -27,6 +27,9 @@ LH C:\HISPADOS\HSPDPMI /SB
 LH C:\HISPADOS\HSPJOY
 LH C:\HISPADOS\HSPRATON
 LH TECLADO SP
+REM Protector de pantalla en modo texto (la «Lluvia verde») tras 5 minutos
+REM sin tocar nada; quite el REM para ponerlo (PROTECTOR /? explica más):
+REM LH C:\HISPADOS\PROTECTO 5
 GOTO COMUN
 
 :PRUEBA

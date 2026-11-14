@@ -7147,6 +7147,7 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  EQUIPO (informe del hardware), DIAGNOSTICO (lo guarda para enviarlo).", 13, 10
             db "  AUDICION (prueba de sonido con preguntas de sí o no).", 13, 10
             db "  APAGAR y REINICIAR (apagar o reiniciar el equipo).", 13, 10
+            db "  PROTECTOR (protector de pantalla en modo texto: la «Lluvia verde»).", 13, 10
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
             db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
             db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10

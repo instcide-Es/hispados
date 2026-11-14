@@ -5,7 +5,8 @@
 ;  Los ajustes del entorno, en una ventana con los apartados a la izquierda y
 ;  el apartado elegido a la derecha:
 ;    Pantalla       tema, dibujo y colores del fondo del escritorio, y un
-;                   salvapantallas con su tiempo de espera
+;                   salvapantallas con su tiempo de espera y su dibujo
+;                   («Letrero de Hispa» o «Lluvia verde»)
 ;    Ratón          velocidad del puntero, tiempo del doble clic (con una
 ;                   zona para probarlo) y botones intercambiados
 ;    Teclado        espera y velocidad de repetición (INT 16h, función 03h) y
@@ -55,6 +56,19 @@ WM_MONTAR   equ WM_USER + 60
 WM_APARTADO equ WM_USER + 61        ; [CONTEXTO] (del escritorio) ECX=apartado que se enseña
 LOGO_AN     equ 176                 ; el letrero del salvapantallas
 LOGO_AL     equ 44
+; los dibujos del salvapantallas (para añadir otro: su nombre en sal_nombres,
+; su opción en pl_pantalla con el id ID_SDIB + n, y lo suyo en sal_proc)
+N_SALVA     equ 2
+SALVA_LETRERO equ 0
+SALVA_LLUVIA  equ 1
+ID_SDIB     equ 117                 ; las opciones: 117 letrero, 118 lluvia (119 libre;
+                                    ; los ids de los apartados no se pueden repetir)
+; la lluvia verde: columnas de caracteres que caen
+LL_AN       equ 10                  ; ancho de cada columna, en puntos
+LL_AL       equ 16                  ; alto de cada fila (la fuente es de 8x16)
+LL_MAXC     equ 128                 ; columnas como mucho (1280 puntos)
+LL_MAXF     equ 64                  ; filas como mucho (1024 puntos)
+LL_NEGRO    equ 7                   ; el último de los colores: el fondo
 INI_MAX     equ 2048
 ; tipos de las claves de VENTANAS.INI
 T_NUM       equ 0
@@ -62,6 +76,7 @@ T_DIB       equ 1                   ; nombre de un dibujo
 T_MS55      equ 2                   ; milisegundos <-> tics de reloj
 T_MS250     equ 3                   ; milisegundos <-> 0-3 (250 ms cada uno)
 T_DIST      equ 4                   ; SP o US
+T_SAL       equ 5                   ; nombre de un dibujo del salvapantallas
 
 HVP_CABECERA "Configuración", entrada
         db "................................"
@@ -135,15 +150,18 @@ pl_pantalla:
         PLANTILLA LIS, 0, HT, PX, 60, 134, 84, 100
         PLANTILLA EST, l_dib, H, PX + 146, 40, 242, 18, 108
         PLANTILLA c_selector, 0, HT, PX + 146, 60, 240, 84, 101
-        PLANTILLA EST, l_cf, H, PX, 154, PAN_AN, 18, 109
-        PLANTILLA c_selector, 0, HT, PX, 174, 352, 24, 102
-        PLANTILLA EST, l_cd, H, PX, 204, PAN_AN, 18, 110
-        PLANTILLA c_selector, 0, HT, PX, 224, 352, 24, 103
-        PLANTILLA BOT, t_salva, HT | BS_CASILLA, PX, 262, 176, 20, 104
-        PLANTILLA c_desliza, 0, HT, PX + 178, 262, 124, 21, 105
-        PLANTILLA EST, l_min, H, PX + 306, 264, 82, 18, 106
-        PLANTILLA BOT, t_probar, HT, PX, 292, 80, 24, 107
-        PLANTILLA EST, t_salva_nota, H, PX + 90, 296, 298, 18, ID_FIJO
+        PLANTILLA EST, l_cf, H, PX, 150, PAN_AN, 18, 109
+        PLANTILLA c_selector, 0, HT, PX, 170, 352, 24, 102
+        PLANTILLA EST, l_cd, H, PX, 200, PAN_AN, 18, 110
+        PLANTILLA c_selector, 0, HT, PX, 220, 352, 24, 103
+        PLANTILLA BOT, t_salva, HT | BS_CASILLA, PX, 252, 176, 20, 104
+        PLANTILLA c_desliza, 0, HT, PX + 178, 252, 124, 21, 105
+        PLANTILLA EST, l_min, H, PX + 306, 254, 82, 18, 106
+        PLANTILLA EST, t_sdib, H, PX, 280, 66, 18, ID_FIJO
+        PLANTILLA BOT, t_sdib0, HT | BS_OPCION, PX + 68, 278, 150, 20, ID_SDIB
+        PLANTILLA BOT, t_sdib1, HT | BS_OPCION, PX + 226, 278, 140, 20, ID_SDIB + 1
+        PLANTILLA BOT, t_probar, HT, PX, 304, 80, 24, 107
+        PLANTILLA EST, t_salva_nota, H, PX + 90, 308, 298, 18, ID_FIJO
         dd 0
 ; los selectores: id, cuántos, columnas, ancho y alto de la casilla, clase
 ; de dibujo (0 colores, 1 dibujos del fondo, 2 apartados)
@@ -251,6 +269,7 @@ ini_tabla:
         dd k_cdibujo, a_cdibujo, 0, 15, T_NUM, 0
         dd k_salva, a_salva, 0, 1, T_NUM, 0
         dd k_minutos, a_minutos, 1, 60, T_NUM, 0
+        dd k_sdib, a_sdib, 0, N_SALVA - 1, T_SAL, 0
         dd k_vel, a_vel, 1, 6, T_NUM, s_raton
         dd k_doble, a_doble, 3, 18, T_MS55, 0
         dd k_zurdo, a_zurdo, 0, 1, T_NUM, 0
@@ -261,8 +280,8 @@ ini_tabla:
         dd 0
 INI_E       equ 24
 ; los ajustes de fábrica, en el orden de las variables a_*
-fabrica     dd 0, C_PETROLEO, C_PETROLEO_CL, 0, 5, 2, 8, 0, 1, -1, -1, -1
-N_AJ        equ 12
+fabrica     dd 0, C_PETROLEO, C_PETROLEO_CL, 0, 5, SALVA_LETRERO, 2, 8, 0, 1, -1, -1, -1
+N_AJ        equ 13
 
 k_cab       db "; Hispa Ventanas - ajustes del programa Configuración (CONFIG.HVP).", 13, 10
             db "; Se puede cambiar a mano con Hispa Ventanas cerrado (docs/VENTANAS.md).", 13, 10, 0
@@ -274,6 +293,7 @@ k_cfondo    db "ColorFondo", 0
 k_cdibujo   db "ColorDibujo", 0
 k_salva     db "Salvapantallas", 0
 k_minutos   db "Minutos", 0
+k_sdib      db "SalvaDibujo", 0     ; (no «Dibujo»: ese es el del fondo)
 k_vel       db "Velocidad", 0
 k_doble     db "DobleClic", 0
 k_zurdo     db "Zurdo", 0
@@ -314,6 +334,10 @@ n_d6        db "olas", 0
 n_d7        db "damero", 0
 n_d8        db "trama", 0
 n_d9        db "zigzag", 0
+; los dibujos del salvapantallas, en VENTANAS.INI
+sal_nombres dd n_sal0, n_sal1
+n_sal0      db "letrero", 0
+n_sal1      db "lluvia", 0
 ; los temas: dibujo, color del fondo, color del dibujo
 temas       db 0, C_PETROLEO, C_PETROLEO_CL
             db 2, C_TINTA, C_ANIL
@@ -380,6 +404,9 @@ t_minuto    db " minuto", 0
 t_probar    db "Probar", 0
 t_salva_nota db "Se quita con el ratón o una tecla.", 0
 t_salva_tit db "Salvapantallas", 0
+t_sdib      db "Dibujo:", 0
+t_sdib0     db "Letrero de Hispa", 0
+t_sdib1     db "Lluvia verde", 0
 t_logo      db "Hispa Ventanas", 0
 t_r_vel     db "Velocidad del puntero:", 0
 t_lenta     db "Lenta", 0
@@ -858,9 +885,17 @@ ordenes:
         jmp .cambio
 .p5:
         cmp ecx, 107
-        jne .r1
+        jne .p6
         call salva_abrir
         jmp .hecho
+.p6:
+        cmp ecx, ID_SDIB            ; el dibujo del salvapantallas
+        jb .r1
+        cmp ecx, ID_SDIB + N_SALVA
+        jae .r1
+        sub ecx, ID_SDIB
+        mov [a_sdib], ecx
+        jmp .cambio
         ; ---- Ratón ----
 .r1:
         cmp ecx, 110
@@ -1208,6 +1243,16 @@ pan_pantalla:
         mov ebx, 60
         mov edx, [a_minutos]
         call des_poner
+        xor ebx, ebx                ; el dibujo del salvapantallas
+.sd:
+        lea ecx, [ebx+ID_SDIB]
+        xor edx, edx
+        cmp ebx, [a_sdib]
+        sete dl
+        call marca_poner
+        inc ebx
+        cmp ebx, N_SALVA
+        jb .sd
         ; sigue: los textos y el tema que coincide
 
 ; los textos que dicen lo elegido, y en la lista el tema que es (si es uno)
@@ -2267,11 +2312,16 @@ ini_valor:
         mov ecx, [ebx+16]
         cmp ecx, T_DIST
         je .dist
-        cmp ecx, T_DIB
+        mov ebp, dib_nombres        ; el nombre de un dibujo (del fondo
+        cmp ecx, T_DIB              ; o del salvapantallas)
+        je .d0
+        mov ebp, sal_nombres
+        cmp ecx, T_SAL
         jne .num
-        xor eax, eax                ; el nombre de un dibujo
+.d0:
+        xor eax, eax
 .d:
-        mov edi, [dib_nombres+eax*4]
+        mov edi, [ebp+eax*4]
         mov edx, esi
 .dc:
         mov cl, [edi]
@@ -2289,8 +2339,8 @@ ini_valor:
         jbe .pon
 .ds:
         inc eax
-        cmp eax, N_DIB
-        jb .d
+        cmp eax, [ebx+12]           ; (los nombres, hasta el máximo)
+        jbe .d
         mov ecx, T_NUM              ; (o su número)
 .num:
         mov al, [esi]
@@ -2365,9 +2415,13 @@ ini_escribir:
         mov byte [edi], '='
         inc edi
         mov ecx, [ebx+16]
-        cmp ecx, T_DIB
-        jne .t2
         mov esi, [dib_nombres+eax*4]
+        cmp ecx, T_DIB
+        je .t1
+        cmp ecx, T_SAL
+        jne .t2
+        mov esi, [sal_nombres+eax*4]
+.t1:
         call hvl_cad
         jmp .nl
 .t2:
@@ -2860,10 +2914,14 @@ pru_proc:
         ret
 
 ; =============================================================================
-;  El salvapantallas: la pantalla en negro y un letrero que se pasea. Es una
-;  ventana con título que ocupa toda la pantalla (el título queda fuera, por
-;  arriba): al ser la activa, las teclas le llegan a ella. Se quita con
-;  cualquier movimiento del ratón, clic o tecla.
+;  El salvapantallas: una ventana con título que ocupa toda la pantalla (el
+;  título queda fuera, por arriba): al ser la activa, las teclas le llegan a
+;  ella. Se quita con cualquier movimiento del ratón, clic o tecla. Tiene
+;  dos dibujos (a_sdib, se elige en Pantalla; «Probar» enseña el elegido):
+;    SALVA_LETRERO  la pantalla en negro y un letrero que se pasea
+;    SALVA_LLUVIA   «Lluvia verde»: columnas de letras verdes que caen
+;  Para añadir otro: SALVA_*, N_SALVA, su nombre en sal_nombres, su opción en
+;  pl_pantalla y, aquí, lo que hace al crearse, con el reloj y al pintar.
 ; =============================================================================
 salva_abrir:
         pushad
@@ -2906,6 +2964,19 @@ sal_proc:
         HVJ ven_defecto
 .crear:
         mov [salva_ven], ebp
+        HV tics
+        mov [salva_t0], eax
+        mov byte [salva_listo], 0
+        mov eax, [a_sdib]           ; el dibujo, el elegido al abrirse
+        mov [salva_tipo], eax
+        cmp eax, SALVA_LLUVIA
+        jne .cr_letrero
+        call ll_crear
+        mov ecx, 1
+        mov edx, 55                 ; un paso por tic de reloj
+        HV tmp_poner
+        jmp .nada
+.cr_letrero:
         mov eax, [salva_an]
         sub eax, LOGO_AN
         HV azar
@@ -2916,9 +2987,6 @@ sal_proc:
         mov [salva_y], eax
         mov dword [salva_dx], 2
         mov dword [salva_dy], 1
-        HV tics
-        mov [salva_t0], eax
-        mov byte [salva_listo], 0
         mov byte [salva_hora], 0
         mov ecx, 1
         mov edx, 110
@@ -2949,6 +3017,11 @@ sal_proc:
         HV ven_destruir             ; ratón o teclado: se acabó
         jmp .nada
 .mueve:
+        cmp dword [salva_tipo], SALVA_LLUVIA
+        jne .m_letrero
+        call ll_marco
+        jmp .nada
+.m_letrero:
         mov eax, ebx                ; la hora del letrero, una vez por segundo
         sub eax, [salva_th]
         cmp eax, 18
@@ -2991,6 +3064,11 @@ sal_proc:
         HV ven_invalidar_rect
         ret
 .pintar:
+        cmp dword [salva_tipo], SALVA_LLUVIA
+        jne .p_letrero
+        call ll_pintar
+        jmp .nada
+.p_letrero:
         HV dc_pintar
         cmp byte [salva_hora], 0
         jne .p1
@@ -3034,6 +3112,342 @@ sal_proc:
         xor eax, eax
         ret
 
+; -----------------------------------------------------------------------------
+;  «Lluvia verde». La pantalla se parte en columnas de LL_AN puntos y filas
+;  de 16. En cada columna cae una gota: la cabeza (casi blanca) baja una fila
+;  cada pocos tics, a su velocidad, y deja una estela de «largo» letras que
+;  se va apagando de verde claro a verde oscuro; las letras de la estela
+;  cambian de vez en cuando. Cuando la estela sale por abajo, la columna
+;  espera un poco y empieza otra gota arriba, con otra velocidad y otro largo.
+;  Cada columna (ll_col, 8 octetos):
+;    +0 dd fila de la cabeza (con signo: negativa, todavía por encima)
+;    +4 db dieciseisavos de fila acumulados   +5 db velocidad (por tic)
+;    +6 db largo de la estela                 +7 db tics de espera
+;  Las letras de cada casilla, en ll_car (LL_MAXF por columna). Con cada tic
+;  solo se repintan las casillas que cambian de color o de letra.
+;  Los colores (ll_colores): la cabeza, seis verdes y el negro del fondo; con
+;  VESA (256 colores o color verdadero), del cubo de la paleta; en la VGA de
+;  16 colores, los que hay (blanco, turquesa, verde oliva, petróleo).
+; -----------------------------------------------------------------------------
+ll_col_vesa db 194, 83, 46, 40, 34, 28, 22, 16
+ll_col_vga  db C_BLANCO, C_TURQUESA, C_OLIVA, C_OLIVA, C_OLIVA, C_PETROLEO_CL, C_PETROLEO, C_TINTA
+; las letras: cifras, mayúsculas, la Ñ, vocales con tilde, ¿ ¡ « » º ª,
+; signos, y letras griegas y signos matemáticos de la fuente (página 437)
+ll_letras:
+        db "0123456789"
+        db "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        db "ÑÑñÉÜáéíóúüçÇ¿¡«»ºª"
+        db "$%&@#*+=<>?!/\:;"
+        db "ßπΣµΩδ≡±÷"
+LL_NLET     equ $ - ll_letras
+
+ll_crear:
+        pushad
+        mov eax, [salva_an]         ; columnas y filas
+        xor edx, edx
+        mov ecx, LL_AN
+        div ecx
+        cmp eax, LL_MAXC
+        jbe .c1
+        mov eax, LL_MAXC
+.c1:
+        mov [ll_nc], eax
+        imul eax, LL_AN             ; centradas
+        mov edx, [salva_an]
+        sub edx, eax
+        sar edx, 1
+        inc edx
+        mov [ll_x0], edx
+        mov eax, [salva_al]
+        add eax, LL_AL - 1
+        shr eax, 4
+        cmp eax, LL_MAXF
+        jbe .f1
+        mov eax, LL_MAXF
+.f1:
+        mov [ll_nf], eax
+        mov eax, AJ_VID_TIPO        ; los colores
+        HV aj_leer
+        mov esi, ll_col_vga
+        test eax, eax
+        jz .p
+        mov esi, ll_col_vesa
+.p:
+        mov [ll_colores], esi
+        mov edi, ll_car
+        mov ecx, LL_MAXC * LL_MAXF
+.g:
+        call ll_letra
+        stosb
+        loop .g
+        xor ebx, ebx
+.k:
+        mov esi, ebx
+        shl esi, 3
+        add esi, ll_col
+        mov cl, 1
+        call ll_nueva
+        inc ebx
+        cmp ebx, [ll_nc]
+        jb .k
+        popad
+        ret
+
+; -> AL=una letra al azar
+ll_letra:
+        mov eax, LL_NLET
+        HV azar
+        movzx eax, byte [ll_letras+eax]
+        ret
+
+; ESI=la columna CL=1 la primera vez (las gotas salen escalonadas): una gota
+; nueva, por encima de la pantalla
+ll_nueva:
+        pushad
+        mov eax, [ll_nf]            ; largo: de 6 a 6 + 2/3 de las filas
+        add eax, eax
+        xor edx, edx
+        mov ebx, 3
+        div ebx
+        HV azar
+        add eax, 6
+        mov [esi+6], al
+        mov eax, 12                 ; de 4/16 a 15/16 de fila por tic
+        HV azar
+        add eax, 4
+        mov [esi+5], al
+        mov byte [esi+4], 0
+        test cl, cl
+        jz .otra
+        mov eax, [ll_nf]
+        HV azar
+        not eax                     ; de -1 a -filas
+        mov [esi], eax
+        mov eax, 20
+        HV azar
+        mov [esi+7], al
+        popad
+        ret
+.otra:
+        mov eax, 6
+        HV azar
+        not eax
+        mov [esi], eax
+        mov eax, 40
+        HV azar
+        mov [esi+7], al
+        popad
+        ret
+
+; ESI=la columna EDX=distancia a la cabeza -> EAX=nivel (0 la cabeza, 1-6
+; la estela, LL_NEGRO fuera)
+ll_nivel:
+        xor eax, eax
+        test edx, edx
+        jz .x
+        push ecx
+        push edx
+        movzx ecx, byte [esi+6]
+        mov eax, LL_NEGRO
+        cmp edx, ecx
+        jae .y
+        lea eax, [edx-1]
+        imul eax, 6
+        xor edx, edx
+        div ecx
+        inc eax
+.y:
+        pop edx
+        pop ecx
+.x:
+        ret
+
+; EBX=columna EDI=fila EAX=nivel: pinta la casilla (con un contexto abierto)
+ll_celda:
+        pushad
+        mov esi, [ll_colores]
+        movzx ebp, byte [esi+eax]
+        movzx eax, byte [esi+LL_NEGRO]
+        HV dc_color
+        mov esi, ebx
+        shl esi, 6                  ; (LL_MAXF = 64)
+        add esi, edi
+        add esi, ll_car
+        imul eax, ebx, LL_AN
+        add eax, [ll_x0]
+        mov ebx, edi
+        shl ebx, 4
+        mov ecx, LL_AN
+        mov edx, LL_AL
+        dec eax
+        HV dc_rect
+        inc eax
+        mov edx, [esp+28]           ; el nivel
+        cmp edx, LL_NEGRO
+        je .x
+        push eax
+        mov eax, ebp
+        HV dc_color
+        xor eax, eax
+        test edx, edx
+        setz al                     ; la cabeza, en negrita
+        HV dc_negrita
+        pop eax
+        mov ecx, 1
+        HV dc_texto_n
+        NEGRITA 0
+.x:
+        popad
+        ret
+
+; EBX=número de la columna ESI=la columna: la cabeza baja una fila
+ll_paso:
+        pushad
+        inc dword [esi]
+        mov edi, [esi]
+        test edi, edi
+        js .d0
+        cmp edi, [ll_nf]
+        jge .d0
+        call ll_letra               ; la cabeza, con una letra nueva
+        mov ecx, ebx
+        shl ecx, 6
+        mov [ll_car+ecx+edi], al
+.d0:
+        xor edx, edx
+        or ebp, -1                  ; el nivel de la casilla de encima
+.d:
+        mov edi, [esi]
+        sub edi, edx
+        js .fin                     ; de aquí para arriba, fuera
+        call ll_nivel
+        cmp edi, [ll_nf]
+        jge .s
+        cmp eax, ebp                ; esta casilla tenía el nivel de la de
+        je .s                       ; encima: si es el mismo, no cambia
+        call ll_celda
+.s:
+        mov ebp, eax
+        inc edx
+        movzx ecx, byte [esi+6]
+        cmp edx, ecx
+        jbe .d
+.fin:
+        mov eax, [esi]              ; ¿la estela ha salido por abajo?
+        movzx ecx, byte [esi+6]
+        sub eax, ecx
+        cmp eax, [ll_nf]
+        jl .x
+        xor ecx, ecx
+        call ll_nueva
+.x:
+        popad
+        ret
+
+; con cada tic: las gotas bajan y algunas letras de las estelas cambian
+ll_marco:
+        pushad
+        mov ebp, [salva_ven]
+        HV dc_abrir
+        xor ebx, ebx
+.c:
+        mov esi, ebx
+        shl esi, 3
+        add esi, ll_col
+        cmp byte [esi+7], 0
+        je .baja
+        dec byte [esi+7]
+        jmp .sig
+.baja:
+        mov al, [esi+4]
+        add al, [esi+5]
+        mov [esi+4], al
+        cmp al, 16
+        jb .sig
+        sub byte [esi+4], 16
+        call ll_paso
+.sig:
+        inc ebx
+        cmp ebx, [ll_nc]
+        jb .c
+        mov eax, [ll_nc]            ; una letra cambiada por cada 12 columnas
+        xor edx, edx
+        mov ecx, 12
+        div ecx
+        lea ecx, [eax+1]
+.m:
+        push ecx
+        mov eax, [ll_nc]
+        HV azar
+        mov ebx, eax
+        mov esi, ebx
+        shl esi, 3
+        add esi, ll_col
+        cmp byte [esi+7], 0
+        jne .ms
+        movzx eax, byte [esi+6]
+        dec eax
+        HV azar
+        lea edx, [eax+1]            ; en la estela, sin la cabeza
+        mov edi, [esi]
+        sub edi, edx
+        js .ms
+        cmp edi, [ll_nf]
+        jge .ms
+        call ll_letra
+        mov ecx, ebx
+        shl ecx, 6
+        mov [ll_car+ecx+edi], al
+        call ll_nivel
+        call ll_celda
+.ms:
+        pop ecx
+        loop .m
+        HV dc_cerrar
+        popad
+        ret
+
+; WM_PAINT: todo en negro y lo que hay de cada gota
+ll_pintar:
+        pushad
+        HV dc_pintar
+        mov esi, [ll_colores]
+        movzx eax, byte [esi+LL_NEGRO]
+        HV dc_color
+        xor eax, eax
+        xor ebx, ebx
+        mov ecx, [salva_an]
+        mov edx, [salva_al]
+        HV dc_rect
+        xor ebx, ebx
+.c:
+        mov esi, ebx
+        shl esi, 3
+        add esi, ll_col
+        cmp byte [esi+7], 0
+        jne .sig
+        xor edx, edx
+.d:
+        mov edi, [esi]
+        sub edi, edx
+        js .sig
+        call ll_nivel
+        cmp eax, LL_NEGRO
+        je .sig
+        cmp edi, [ll_nf]
+        jge .s
+        call ll_celda
+.s:
+        inc edx
+        jmp .d
+.sig:
+        inc ebx
+        cmp ebx, [ll_nc]
+        jb .c
+        HV dc_cerrar
+        popad
+        ret
+
 %include "hvplib.inc"
 %include "hvpmez.inc"               ; [MEZCLADOR]
 
@@ -3050,6 +3464,7 @@ a_cfondo    resd 1                  ; colores del fondo y del dibujo (0-15)
 a_cdibujo   resd 1
 a_salva     resd 1                  ; salvapantallas: 0/1
 a_minutos   resd 1                  ; y cuántos minutos espera
+a_sdib      resd 1                  ; y su dibujo (SALVA_*)
 a_vel       resd 1                  ; ratón: velocidad en mitades (2 = normal)
 a_doble     resd 1                  ; doble clic, en tics de reloj
 a_zurdo     resd 1
@@ -3068,6 +3483,11 @@ salva_dy    resd 1
 salva_t0    resd 1
 salva_th    resd 1
 salva_base  resd 1
+salva_tipo  resd 1                  ; el dibujo que se está enseñando
+ll_nc       resd 1                  ; la lluvia: columnas y filas,
+ll_nf       resd 1
+ll_x0       resd 1                  ; dónde empieza la primera columna
+ll_colores  resd 1                  ; y sus colores (ll_col_vesa o ll_col_vga)
 montado     resb 1                  ; los controles del apartado están puestos
 pedido      resb 1                  ; (va detrás de «montado»: se miran juntos)
 residente   resb 1                  ; cargado al arrancar («/A»): no se cierra
@@ -3100,4 +3520,6 @@ l_hora      resb 12
 l_res       resb 40
 sis_txt     resb 800
 ini_buf     resb INI_MAX + 16
+ll_col      resb LL_MAXC * 8        ; la lluvia: las columnas
+ll_car      resb LL_MAXC * LL_MAXF  ; y las letras de cada casilla
 HVP_FIN

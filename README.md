@@ -101,6 +101,7 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | `APAGAR` y `REINICIAR`: escriben antes lo pendiente en el disco; apagan por ACPI (S5, con el `\_S5` de la DSDT o las SSDT), por APM o, si no se puede, dejan «Ya puede apagar el equipo.» en letras grandes; reinician por el `RESET_REG` de ACPI, el 8042, el puerto CF9h o un triple fallo. `/INFO` dice qué han encontrado. También desde el botón «Salir» de Hispa Ventanas | ✅ en pruebas (QEMU; falta hardware real) |
 | Órdenes: MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR, BORRARARBOL, EXPANDIR, ETIQUETA; MEM `/C /F /M /D /P` | ✅ |
 | `VELOCIDAD` (frena el procesador para los juegos antiguos: `25%`, `486`, `386`, `XT`, o solo mientras corre un programa) y `LOADFIX` (carga un programa por encima de los primeros 64 KB) | ✅ |
+| `PROTECTOR` (protector de pantalla en modo texto, residente, de 2,4 KB: la «Lluvia verde», columnas de letras verdes que caen; `PROTECTOR 5` salta tras 5 minutos sin tocar el teclado ni el ratón, `/YA` lo enseña, `/NO` lo quita; una tecla o el ratón lo quita sin que la tecla llegue al programa y la pantalla queda exactamente igual; nunca con gráficos ni dentro de Hispa Ventanas, que tiene el suyo con el mismo dibujo) | ✅ en pruebas |
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
 | **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas (con grupos y accesos directos, también a los juegos y programas de Hispa-DOS, que se ejecutan con toda la memoria y vuelven a Hispa Ventanas; el grupo «Juegos de DOS» se llena solo con los juegos de `C:\JUEGOS`, y cada acceso puede llevar su velocidad, LOADFIX y Sound Blaster emulada), Bloc de notas, Calculadora y Reloj, el volumen en la barra y, como programas aparte (módulos .HVP que se abren como ventanas), los primeros juegos propios, Culebra, Campo de minas, Bloques, Solitario (baraja francesa o española), Tragabolas y Almacén, Pintura, el programa de dibujo (lee y guarda BMP), y el Reproductor de sonido (para probar la tarjeta: sonido de prueba propio, izquierda y derecha, tono de 440 Hz y archivos WAV; al cambiar el volumen suena una campanita). **Botón derecho**: menús contextuales en los iconos y el fondo de los grupos, la barra de título, el escritorio y los cuadros de texto; también con Mayús+F10, la tecla de menú y, para los Mac y los touchpads de un botón, Ctrl+clic. Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
@@ -186,6 +187,19 @@ DOS=HIGH
 `MEM` lo confirma («Hispa-DOS está cargado en la memoria alta (HMA)»). También se aceptan `DOS=LOW` (lo de siempre) y `DOS=HIGH,UMB` (la parte `UMB` aún no hace nada). Si no hay gestor XMS o la HMA ya es de otro, Hispa-DOS lo dice y se queda en la memoria convencional. Con F5 (arranque limpio) no se usa.
 
 En la memoria convencional se queda lo que tienen que ver los programas, la BIOS y Windows: los vectores y unos trozos de entrada (INT 20h, 21h, 25h-27h, 29h, 2Fh), la lista de listas, la SDA, la CDS, los DPB, la tabla de ficheros (SFT), las cabeceras de los dispositivos, los búferes de sector (la BIOS no puede llevar un disquete por DMA por encima de 1 MB), las pilas del núcleo y los datos de instancia de Windows. La línea A20 queda abierta; si un programa la cierra, el núcleo la vuelve a abrir en cuanto se le llama. Los 28 KB de HMA que sobran se ofrecen a otros programas por INT 2Fh AX=4A01h/4A02h, como en MS-DOS.
+
+## Protector de pantalla: `PROTECTOR`
+
+`PROTECTOR` (en el disco `PROTECTO.COM`, como `VELOCIDA.COM`: el intérprete corta a 8 letras) es un protector de pantalla para el modo texto: la **«Lluvia verde»**, columnas de letras verdes (cifras, mayúsculas, la Ñ, ¿, ¡, vocales con tilde, letras griegas y algún semigráfico) que caen a distintas velocidades, con la cabeza blanca y la estela apagándose de verde claro a verde oscuro, letras que cambian dentro de la estela y columnas que vuelven a empezar.
+
+| Orden | Qué hace |
+|---|---|
+| `PROTECTOR 5` | Se queda en la memoria y salta tras 5 minutos (de 1 a 60) sin tocar el teclado ni el ratón. Si ya está, cambia los minutos. |
+| `PROTECTOR /YA` | Lo enseña ahora. |
+| `PROTECTOR /NO` | Lo quita de la memoria (si otro residente se ha cargado después, lo deja desactivado). |
+| `PROTECTOR` | Dice cómo está. |
+
+Una tecla o mover el ratón lo quita: la pantalla queda **exactamente** como estaba y la tecla no le llega al programa. Solo salta con la pantalla de texto de 80×25 (modos 03h y 07h): nunca con gráficos ni dentro de Hispa Ventanas (que tiene su propio salvapantallas, con el mismo dibujo, en Configuración › Pantalla), ni con Hispa-DOS a medias ni con una disquetera en marcha. No toca la pantalla del programa: dibuja en otra página de la memoria de texto de la VGA y le dice a la tarjeta que enseñe esa; lo que escriba el programa mientras tanto sigue en la suya. Ocupa 2,4 KB y se puede cargar con `LH`; para que el ratón lo quite, cárguelo después de `HSPRATON` (los `AUTOEXEC.BAT` del disquete y de la memoria USB traen la línea, con `REM`).
 
 ## Juegos antiguos en equipos rápidos: `VELOCIDAD` y `LOADFIX`
 
