@@ -936,6 +936,11 @@ hda_volume:
         pushad
         cmp byte [cs:hw_vol], 0     ; (por programa: nada que mandar)
         je .r
+        ; [TOSHIBA] con el flujo parado, se vuelve a escribir al arrancar
+        cmp byte [cs:started], 0
+        jne .ya
+        mov byte [cs:vol_pend], 1
+.ya:
         mov si, hda_vols
         movzx di, byte [cs:hda_nvol]
 .l:

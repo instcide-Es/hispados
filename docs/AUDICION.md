@@ -369,6 +369,51 @@ registros.) HSPSND para y reinicia el flujo de la misma manera: antes, al
 quedarse sin datos o cambiar de frecuencia, volvía a arrancar justo después
 de escribir RUN a 0, sin esperar a que parase.
 
+## Equipos probados por Carlos
+
+Con su informe (`SONIDO.TXT`) en el FTP, `HispaDOS/Pruebas Sonido/`:
+
+| Equipo | Códec (identificador, revisión) | Camino que suena | Volumen (amplificador) | Estado |
+|---|---|---|---|---|
+| HP Mini 5103 | IDT 92HD75 (111D:7608, 00100202h) | pin 0Dh ← DAC 10h | DAC 10h, 127 pasos de 0,75 dB (con silencio) | suena; bajar y subir el volumen: sí |
+| ThinkPad A275 | Realtek ALC298 (10EC:0298) | pin 14h ← 0Ch ← DAC 02h | DAC 02h, 127 pasos de 0,5 dB | suena; bajar y subir el volumen: sí |
+| MacBook Air 13" 2012 (A1466) | Cirrus Logic CS4206 (1013:4206, 00100302h) | (pin 0Bh ← DAC 04h) | DAC 04h, 127 pasos de 0,5 dB (0 dB en el 115) | NO sonó en la prueba del 13/11 (9 intentos); los arreglos [CIRRUS] están por probar en el equipo |
+| Toshiba NB250-10N | Realtek ALC269VB (10EC:0269, 00100100h; subsistema 1179:FF6C) | pin 14h ← 0Ch ← DAC 02h, EAPD, GPIO 03h | DAC 02h, 87 pasos de 0,75 dB | suena; bajar y subir el volumen: NO (11/11) → arreglo [TOSHIBA], por probar en el equipo |
+
+## El volumen del Toshiba NB250 (Realtek ALC269) [TOSHIBA]
+
+En el Toshiba NB250 sonaba el camino del altavoz, pero «más bajo» y «más
+fuerte» sonaban igual. Con el códec simulado a partir de su volcado
+(`/SIM:ALC269`, abajo) se ve que las órdenes eran correctas: «más bajo» es
+`0023B03Dh` (salida, izquierdo y derecho, paso 61 de 87: 19,5 dB menos), en
+la escala de este DAC (0 dB en el paso 87, pasos de 0,75 dB; la hoja de datos
+pública del ALC269 dice lo mismo: de -65,25 a 0 dB) y sin pasarse del último
+paso; el mezclador 0Ch y el pin 14h solo tienen silencio, así que el único
+volumen del camino es el del DAC (también es el que usa Linux en esta
+familia). Lo que no se hacía: el volumen se escribía con el flujo parado y,
+justo después, cada sonido volvía a programar el formato y el flujo del DAC
+(órdenes 2h y 706h). Si el códec deja el amplificador del DAC en 0 dB al
+programarle el formato o el flujo, o no aplica lo escrito mientras está
+parado, las dos preguntas suenan igual, que es lo que pasó (con el ALC298
+del A275, igual camino y mismas órdenes, sí cambiaba).
+
+Desde ahora:
+- AUDICION vuelve a escribir el volumen de la prueba con el flujo ya
+  programado y otra vez cuando ya suena; y en la primera prueba de volumen
+  lee el amplificador (orden Bh) al escribirlo, con el flujo programado y al
+  volver a escribirlo, y lo pone en el informe: «Comprobación: escrito el
+  paso 61 (19,5 dB menos); el códec dice 3Dh/3Dh al escribirlo, 57h/57h con
+  el flujo ya programado...». Si al programar el flujo el códec lo ha
+  cambiado, lo dice; si no guarda el paso escrito, también. Así el próximo
+  informe dirá cuál de las dos cosas era.
+- HSPSND vuelve a escribir el volumen al arrancar el flujo si se cambió con el
+  flujo parado o si se acaba de cambiar el formato (otra frecuencia). Las
+  cuentas del volumen ya valían para cualquier número de pasos y tamaño del
+  paso: al 100, 50 y 10 % el DAC del ALC269 recibe los pasos 87, 56 y 31
+  (0; 23,25; 42 dB menos, con la curva de HSPSND: 0; 23,4; 42,2).
+- Si aun así se contesta que no baja, como antes: `Volumen=por programa` en
+  `SONIDO.INI` y HSPSND baja el volumen en las muestras.
+
 ## Pruebas
 
 `tests/run_audicion_tests.sh`: en QEMU, con las respuestas simuladas por la
@@ -383,6 +428,18 @@ el formato y el flujo de sus DAC van también al DAC de QEMU, para que suene)
 y hace que el flujo no arranque a la primera, para probar el segundo
 intento; `HSPSND /SIMMAC /INFO` (solo para las pruebas: no se queda
 residente) usa el mismo códec simulado.
+`/SIM:ALC269` [TOSHIBA] contesta como el Realtek ALC269 del Toshiba NB250
+(`lib/alcsim.asm`, con su volcado real: el volcado del informe sale igual
+que el de Carlos); el formato y el flujo de sus DAC van al DAC de QEMU y la
+ganancia del camino del altavoz, pasada a dB, a su amplificador, así que en
+la grabación se mide cuánto baja (19,5 dB: x0,106). Cada orden de ganancia
+sale por COM1 («ALCSIM 0023B03D»). `/SIM:ALC269R` añade la hipótesis «el DAC
+vuelve a 0 dB cada vez que se le programa el formato o el flujo»: con la
+AUDICION de antes no bajaba nada (como en el Toshiba); ahora baja igual.
+`HSPSND /SIMALC` (y `/SIMALC:R`) usa el mismo códec simulado y sí se queda
+residente (detrás de lo residente, solo sin la Sound Blaster), para probar el
+volumen con `/VOL`, las teclas, Hispa Ventanas o el mezclador:
+`tests/run_volumen_tests.sh`, parte (d).
 
 `tests/run_aprendido_tests.sh`: lo aprendido (`SONIDO.INI`). AUDICION /SIM
 que suena por un camino que HSPSND no elegiría solo (GPIO 02h, control

@@ -21,6 +21,14 @@
 #          no arranca el flujo: todos los intentos tienen que avanzar; el
 #          widget de proceso y las GPIO de Apple, primero; y HSPSND /SIMMAC
 #          con ese códec (sin lo aprendido, con /NOGPIO y con lo aprendido)
+#   alc1-3 [TOSHIBA] /SIM:ALC269: el Realtek ALC269 del Toshiba NB250
+#          (lib/alcsim.asm, con su volcado real): el volcado sale igual que
+#          el de Carlos, las órdenes de ganancia (por COM1, «ALCSIM ...») van
+#          dentro de 0..87 y el «más bajo» es el paso 61 (19,5 dB menos); en
+#          la grabación de QEMU el segundo tono baja de verdad (x0,106);
+#          alc2 con la hipótesis «el DAC vuelve a 0 dB al programarle el
+#          flujo» (/SIM:ALC269R): también baja; alc3 contesta como Carlos
+#          (no baja) y HSPSND /SIMALC lo hace por programa
 # AUDICION test: simulated answers over the serial console, recorded audio.
 set -u
 cd "$(dirname "$0")/.."
@@ -109,6 +117,10 @@ lote; run sim4 "default=N;P13=S;/segundo/=S" --cmd 'AUDICION /SIM' -- $HDA &
 # [CIRRUS] el MacBook Air 2012 de Carlos, simulado
 lote; run mac1 "default=N;P01=S" --cmd 'AUDICION /SIM:MAC' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO /NOGPIO' -- $HDA &
 lote; run mac2 "default=S" --cmd 'AUDICION /SIM:MAC' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO' -- $HDA &
+# [TOSHIBA] el Toshiba NB250 de Carlos (Realtek ALC269), simulado
+lote; run alc1 "default=S" --cmd 'AUDICION /SIM:ALC269' --post 'A:\HISPADOS\HSPSND /SIMALC /INFO' -- $HDA &
+lote; run alc2 "default=S" --cmd 'AUDICION /SIM:ALC269R' -- $HDA &
+lote; run alc3 "default=S;P03=N;P04=N" --cmd 'AUDICION /SIM:ALC269' --post 'A:\HISPADOS\HSPSND /SIMALC /INFO' -- $HDA &
 # con HSPSND cargado (avisa y sigue) y con HSPEMM (modo V86: no hay HD Audio)
 lote; run hsp "default=S;P02=E" --pre 'A:\HISPADOS\HSPSND' -- $HDA &
 mkdir -p $T/v86; cp "$IMG" $T/v86/f.img
@@ -326,6 +338,66 @@ has $L "widget de proceso 11h puesto en marcha." "HSPSND /SIMMAC con lo aprendid
 has $L "  EAPD como siempre, GPIO máscara 0Ah dirección 0Ah datos 0Ah" "HSPSND /SIMMAC con lo aprendido: "
 audio mac2; entre mac2 hz 430 450 "mac2: suena a 440 Hz"
 
+echo "== [TOSHIBA] AUDICION /SIM:ALC269: el Realtek ALC269 del Toshiba NB250 =="
+# bajada nombre texto: en la grabación, tramos al nivel normal y al «más
+# bajo»: el bajo tiene que ser 19,5 dB menos (x0,106: entre 0,08 y 0,14)
+bajada() {
+  python3 - $T/$1/out.wav "$2" <<'EOF' || fail=1
+import sys, wave, struct
+w = wave.open(sys.argv[1], 'rb')
+ch, rate, n = w.getnchannels(), w.getframerate(), w.getnframes()
+v = struct.unpack('<%dh' % (n * ch), w.readframes(n))
+L = v[0::ch]
+win = rate // 20
+p = [max(abs(x) for x in L[i:i + win]) for i in range(0, n - win, win)]
+m = sorted(p)[len(p) * 3 // 4] if p else 0
+bajo = sorted(x for x in p if 0.05 * m < x < 0.2 * m)
+r = bajo[len(bajo) // 2] / m if bajo and m else 0
+bien = m > 8000 and len(bajo) >= 30 and 0.08 < r < 0.14
+print("  %s %s (normal %d, bajo %s en %d ventanas: x%.3f)" % ("OK  " if bien else "FAIL", sys.argv[2], m,
+      bajo[len(bajo) // 2] if bajo else '-', len(bajo), r))
+sys.exit(0 if bien else 1)
+EOF
+}
+# ganancia nombre: las órdenes de ganancia (3h) a la salida del nodo 02h ->
+# sus pasos; todos dentro de 0..87 (57h) y el «más bajo», 61 (3Dh)
+ganancia() {
+  local g; g=$(sed -n 's/^ALCSIM 0023[89AB]0\([0-9A-F][0-9A-F]\)$/\1/p' $T/$1/log.txt | sort -u | tr '\n' ' ')
+  local malos=0 x
+  for x in $g; do [ $((16#$x & 0x7F)) -le 87 ] || malos=1; done
+  if [ -n "$g" ] && [ $malos = 0 ]; then ok "$1: las ganancias del DAC 02h, dentro de 0..87 ($g)"; else ko "$1: ganancias del DAC 02h: «$g»"; fi
+  if echo " $g" | grep -q " 3D "; then ok "$1: el «más bajo» es el paso 61 (3Dh)"; else ko "$1: no se manda el paso 61"; fi
+}
+informe alc1 SONIDO01.TXT; R=$T/alc1/rep.txt; L=$T/alc1/log.txt
+for w in "Identificador (fabricante:dispositivo) 10EC:0269 (Realtek)  revisión 00100100h" \
+  "Grupo de audio 01h: subsistema 1179FF6Ch  capacidades 00010F0Fh" "Nodos: del 02h, 34 en total" \
+  "Amp. salida: 00025757h (0 dB en el paso 87, 87 pasos de 3/4 dB, silencio NO)  ahora izq/der 57/57" \
+  "Nodo 14h [Pin] caps 0040018Dh" "Conexiones (2): 0Ch* 0Dh" "Conexiones (7): 18h* 19h 1Ah 1Bh 1Dh 0Bh 12h" \
+  "   08: 0310 0000 BBCC BBCC 0210 4040 8814 B60B" \
+  "Intento: HD Audio 00:04.0 códec 0, pin 14h (altavoz interno), ruta 14h 0Ch 02h (el último es el DAC), control del pin 40h, EAPD encendido, GPIO máscara 03h dirección 03h datos 03h, 48000 Hz 16 bits estéreo" \
+  "Amplificadores a 0 dB y sin silencio: 02h/salida=paso 87 0Ch/entrada 0=paso 0 14h/salida=paso 0" \
+  "Volumen: amplificador del nodo 02h (salida), 0 dB en el paso 87 de 87, silencio NO" \
+  "  Comprobación: escrito el paso 61 (19,5 dB menos); el códec dice 3Dh/3Dh al escribirlo, 3Dh/3Dh con el flujo ya programado y 3Dh/3Dh al volver a escribirlo" \
+  "  Bajar el volumen: sí" "  Subir el volumen: sí"; do has $R "$w" "alc1: "; done
+hasnt $R "NO GUARDA" "alc1: "
+ganancia alc1
+bajada alc1 "alc1: en QEMU, el «más bajo» suena 19,5 dB más bajo"
+has $L "Pin 14: altavoz, interno (99131110) EAPD=1 -> 14>0C>02" "HSPSND /SIMALC: "
+has $L "Configuración aprendida en la prueba (" "HSPSND /SIMALC con lo aprendido: "
+has $L "Amplificador de volumen: nodo 02 (salida), 0 dB=57 de 57 pasos de 0,75 dB" "HSPSND /SIMALC: "
+informe alc2 SONIDO01.TXT; R=$T/alc2/rep.txt
+has $R "  Comprobación: escrito el paso 61 (19,5 dB menos); el códec dice 3Dh/3Dh al escribirlo, 57h/57h con el flujo ya programado y 3Dh/3Dh al volver a escribirlo" "alc2: "
+has $R "  (al programar el flujo el códec lo ha cambiado: se vuelve a escribir cada vez)" "alc2: "
+ganancia alc2
+bajada alc2 "alc2 (el DAC vuelve a 0 dB al programarle el flujo): baja igual"
+informe alc3 SONIDO01.TXT; R=$T/alc3/rep.txt; L=$T/alc3/log.txt
+has $R "  Bajar el volumen: NO" "alc3: "
+MTOOLS_SKIP_CHECK=1 mtype -i $T/alc3/f.img ::HISPADOS/SONIDO.INI 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/alc3/ini.txt
+has $T/alc3/ini.txt "[HDA 8086:2668 1AF4:1100 10EC:0269 1179:FF6C]" "alc3: SONIDO.INI: "
+has $T/alc3/ini.txt "Volumen=por programa" "alc3: SONIDO.INI: "
+has $L "Configuración aprendida en la prueba (" "HSPSND /SIMALC con lo aprendido: "
+has $L ", volumen por programa" "HSPSND /SIMALC con «Volumen=por programa»: "
+
 echo "== AUDICION con HSPSND cargado y en modo V86 (HSPEMM) =="
 L=$T/hsp/log.txt; informe hsp SONIDO01.TXT; R=$T/hsp/rep.txt
 has $L "HSPSND está cargado. Esta prueba maneja la tarjeta directamente y" "HSPSND: "
@@ -345,7 +417,7 @@ hasnt $R "Intento:" "V86: "
 has $L "Informe guardado en A:\\SONIDO01.TXT." "V86: "
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then
-  for n in dup out ich9 micro ac97 sb16 nada sim1 sim2 sim3 sim4 mac1 mac2 hsp v86; do
+  for n in dup out ich9 micro ac97 sb16 nada sim1 sim2 sim3 sim4 mac1 mac2 alc1 alc2 alc3 hsp v86; do
     echo "---- $n ----"; cat $T/$n/log.txt; cat $T/$n/audio.txt 2>/dev/null
     MTOOLS_SKIP_CHECK=1 mtype -i $T/$n/f.img ::SONIDO01.TXT 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 | grep -v '^   [0-9A-F][0-9A-F]: '
   done

@@ -81,7 +81,11 @@ $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPSND.COM: drivers/hspsnd.asm lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc lib/hspmez.inc lib/hspmezi.inc lib/cirrus.inc lib/macsim.inc | $(B)
+# el Realtek ALC269 del Toshiba NB250, simulado (AUDICION /SIM:ALC269, HSPSND /SIMALC)
+$(B)/gen/lib/alcsim.bin: lib/alcsim.asm | $(B)
+	mkdir -p $(B)/gen/lib
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPSND.COM: drivers/hspsnd.asm lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc lib/hspmez.inc lib/hspmezi.inc lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPDPMI.COM: drivers/hspdpmi.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -94,7 +98,7 @@ $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # AUDICION: prueba de sonido con preguntas de sí o no (docs/AUDICION.md)
-$(B)/AUDICION.COM: utils/audicion.asm lib/cirrus.inc lib/macsim.inc | $(B)
+$(B)/AUDICION.COM: utils/audicion.asm lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/INSTALAR.COM: utils/instalar.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<

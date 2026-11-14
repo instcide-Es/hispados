@@ -15,6 +15,13 @@
 #  (c) Hispa Ventanas con ese mismo códec: se arrastra la barra del volumen
 #      con el ratón y, nada más soltar, la ventanita ya dice el valor nuevo
 #      (la pantalla no se ha quedado esperando a la tarjeta) y HSPSND lo tiene.
+#  (d) [TOSHIBA] el Realtek ALC269 del Toshiba NB250, simulado (HSPSND
+#      /SIMALC, residente; lib/alcsim.asm): su DAC tiene 87 pasos de 0,75 dB
+#      (0 dB en el 87), no los 127 de otros. Al 100 %, 50 % y 10 % las órdenes
+#      de ganancia (salen por COM1: «ALCSIM xxxxxxxx») van dentro de 0..87, a
+#      los dos lados, y con los dB de la curva de HSPSND ((100 - %) * 15/32
+#      dB, ±0,75); y en la grabación de QEMU (hda-duplex) el tono baja de
+#      verdad. Con las teclas de volumen, lo mismo y sin órdenes perdidas.
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
@@ -24,7 +31,7 @@ CHK="python3 tests/tools/ventanas_check.py"
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
 fail=0
-P=${PARTES:-abc}             # (para repetir solo una parte)
+P=${PARTES:-abcd}             # (para repetir solo una parte)
 ok() { echo "  OK   $1"; }
 ko() { echo "  FAIL $1"; fail=1; }
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -185,6 +192,84 @@ else
   ko "sin captura de la ventanita del volumen"
 fi
 if grep -q 'Volumen: 20 %' $T/log.txt; then ok "HSPSND tiene el 20 % al acabar de arrastrar"; else ko "HSPSND no tiene el 20 %"; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; fi
+
+}
+[[ $P == *d* ]] && {
+echo "== (d) [TOSHIBA] HD Audio con el Realtek ALC269 del Toshiba NB250 (/SIMALC) =="
+nueva
+{ sleep 6
+  send 'A:\HISPADOS\HSPSND /SIMALC /VOL:100' 4
+  send 'ECHO cien' 0.5
+  send 'SONAR /TONE 525 600' 3
+  send 'A:\HISPADOS\HSPSND /VOL:50' 2
+  send 'ECHO cincuenta' 0.5
+  send 'SONAR /TONE 735 600' 3
+  send 'A:\HISPADOS\HSPSND /VOL:10' 2
+  send 'ECHO diez' 0.5
+  send 'SONAR /TONE 1050 600' 3
+  send 'ECHO teclas' 0.5
+  send 'VOLTIME 20 T' 6
+  send 'A:\HISPADOS\HSPSND /INFO' 3
+  mon quit
+} | run 80 -device intel-hda -device hda-duplex,audiodev=snd0
+python3 - $T/log.txt $T/out.wav <<'EOF' || fail=1
+import re, struct, sys, wave
+log = open(sys.argv[1], encoding='utf-8', errors='replace').read().split('\n')
+fail = 0
+def res(bien, txt):
+    global fail
+    print("  %s %s" % ("OK  " if bien else "FAIL", txt))
+    if not bien:
+        fail = 1
+# las órdenes de ganancia a la salida del DAC 02h tras cada «ECHO»
+tramo, g = None, {}
+for l in log:
+    l = l.strip()
+    if l in ('cien', 'cincuenta', 'diez', 'teclas'):
+        tramo = l
+        g[tramo] = []
+    m = re.match(r'ALCSIM 0023([89AB])0([0-9A-F]{2})$', l)
+    if m and tramo:
+        g[tramo].append((int(m.group(1), 16), int(m.group(2), 16)))
+todas = [v for t in g.values() for _, v in t]
+res(todas and all((v & 0x7F) <= 87 for v in todas), "todas las ganancias del DAC dentro de 0..87 (%d órdenes)" % len(todas))
+for t, pc in (('cien', 100), ('cincuenta', 50), ('diez', 10)):
+    o = g.get(t, [])[:2]            # (las de SONAR: el volumen de ese momento)
+    lados = set(k & 3 for k, _ in o)            # A: izquierdo, 9: derecho
+    v = [x for _, x in o]
+    ok = len(o) >= 2 and lados == {1, 2} and len(set(v)) == 1 and not (v[0] & 0x80)
+    att = (87 - v[0]) * 0.75 if ok else -1
+    nom = (100 - pc) * 15 / 32
+    res(ok and abs(att - nom) <= 0.75, "al %d %%: paso %s a los dos lados = %.2f dB menos (la curva: %.2f dB)" % (pc, v[0] if v else '-', att, nom))
+res(len(g.get('teclas', [])) >= 4, "las teclas de volumen mandan la ganancia al DAC 02h (%d órdenes)" % len(g.get('teclas', [])))
+for l in log:
+    if l.startswith('VOLTIME llamadas='):
+        d = dict((k, int(x)) for k, x in re.findall(r'(\w+)=(\d+)', l))
+        res(d.get('fallos', 1) == 0 and d.get('media_us', 99999) < 3000, "teclas: ninguna orden sin respuesta y rápidas (%s)" % l[8:])
+res(any('Amplificador de volumen: nodo 02 (salida), 0 dB=57 de 57 pasos de 0,75 dB' in l for l in log), "HSPSND /INFO: el amplificador del DAC, 87 pasos de 0,75 dB")
+# la grabación: los tres tonos (525, 735 y 1050 Hz), cada vez más bajos
+w = wave.open(sys.argv[2], 'rb')
+ch, rate, n = w.getnchannels(), w.getframerate(), w.getnframes()
+s = struct.unpack('<%dh' % (n * ch), w.readframes(n))[0::ch]
+ven = rate // 20
+tr = []
+for i in range(0, n - ven, ven):
+    a = s[i:i + ven]
+    p = max(abs(x) for x in a)
+    if p < 20:
+        continue
+    zc = sum(1 for k in range(1, len(a)) if (a[k - 1] < 0) != (a[k] < 0))
+    tr.append((zc / 2 / (ven / rate), p))
+niv = {}
+for f0 in (525, 735, 1050):
+    ps = sorted(p for f, p in tr if abs(f - f0) < 0.06 * f0)
+    niv[f0] = ps[len(ps) // 2] if len(ps) >= 3 else 0
+a, b, c = niv[525], niv[735], niv[1050]
+res(a > 2000 and 0 < b < a / 5 and 0 < c < b / 2,
+    "en QEMU el tono baja de verdad: picos %d (100 %%), %d (50 %%), %d (10 %%)" % (a, b, c))
+sys.exit(fail)
+EOF
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; fi
 
 }

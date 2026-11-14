@@ -197,6 +197,12 @@ cr_vpw      db 0                    ; widget de proceso puesto en marcha
 cr_how      db 0                    ; GPIO: 1 las de Apple, 2 las aprendidas,
                                     ; 3 las de /GPIO, 4 /NOGPIO
 sim_mac     db 0                    ; /SIMMAC (pruebas): el códec del Mac
+sim_alc     db 0                    ; [TOSHIBA] /SIMALC (pruebas): el Realtek
+alc_in      db 0                    ; ALC269 del Toshiba NB250 (lib/alcsim.asm,
+alc_cmdp    dd 0                    ; con CALL FAR; residente si se pide)
+vol_pend    db 0                    ; [TOSHIBA] el volumen, otra vez al arrancar
+                                    ; el flujo (escrito parado o con el formato
+                                    ; recién cambiado)
 ; HD Audio: contadores de las órdenes al códec (los lee VOLTIME, pruebas)
             db "HDACNT"
 hda_ncmd    dd 0                    ; órdenes mandadas
@@ -1199,6 +1205,8 @@ hda_cmd:
         or eax, ebx
         cmp byte [cs:sim_mac], 0    ; [CIRRUS] pruebas: el códec 0 simulado
         jne .sim                    ; (con /SIMMAC no se queda residente)
+        cmp byte [cs:sim_alc], 0    ; [TOSHIBA] /SIMALC: el ALC269 simulado
+        jne .salc
 .real:
         mov ebx, eax                ; EBX = la orden
         shr eax, 20
@@ -1278,6 +1286,23 @@ hda_cmd:
         pop ecx
         clc
         ret
+.salc:
+        cmp byte [cs:alc_in], 0     ; (lo que la simulación manda a QEMU)
+        jne .real
+        test eax, 0xF0000000
+        jnz .real
+        call far [cs:alc_cmdp]
+        pop ebx
+        pop edx
+        pop ecx
+        clc
+        ret
+; [TOSHIBA] /SIMALC: lo que la simulación manda al códec de QEMU (su DAC 02h)
+alc_fwd_far:
+        inc byte [cs:alc_in]
+        call hda_cmd
+        dec byte [cs:alc_in]
+        retf
 
 ; AL = máscara de ICS (68h), AH = el valor que se espera -> CF si no llega
 ; en unas HDA_PLAZO cuentas del temporizador (canal 0: 1 ms si cuenta de dos
@@ -1605,6 +1630,14 @@ hda_start:
         or al, 2                    ; RUN
         call hwr8
         mov byte [cs:started], 1
+        ; [TOSHIBA] el volumen escrito con el flujo parado o antes de cambiar
+        ; el formato, otra vez ahora que suena (en el Realtek ALC269 del
+        ; Toshiba NB250 el volumen no cambiaba: docs/AUDICION.md)
+        cmp byte [cs:vol_pend], 0
+        je .vp
+        mov byte [cs:vol_pend], 0
+        call hda_volume
+.vp:
         xor eax, eax
         mov [cs:hda_played], eax
         mov [cs:hda_last], eax
@@ -1617,12 +1650,14 @@ hda_start:
         popad
         ret
 
-; formato del flujo en todos los DAC en uso
+; formato del flujo en todos los DAC en uso (y el volumen, otra vez al
+; arrancar: vol_pend)
 hda_setfmt:
         push ax
         push bx
         push cx
         push si
+        mov byte [cs:vol_pend], 1
         mov si, hda_dacs
 .l:
         mov bl, [cs:si]
@@ -2716,6 +2751,20 @@ init:
         mov es, [0x2C]
         mov ah, 0x49
         int 0x21
+        ; [TOSHIBA] /SIMALC: la simulación solo se queda residente sin la
+        ; Sound Blaster (la emulada o una de verdad)
+        cmp byte [sim_alc], 0
+        je .sa0
+        mov al, [opt_sb]
+        cmp byte [dev_type], 1
+        je .sa1
+        cmp byte [dev_type], 2
+        je .sa1
+        test al, al
+        jz .sa0
+.sa1:
+        mov byte [sim_alc], 0
+.sa0:
         mov dx, [tsr_end]
         add dx, 15
         shr dx, 4
@@ -2730,6 +2779,33 @@ init:
         call e_prepare
         jmp e_go                    ; (residente: el anillo cae encima de esto)
 .tsr:
+        ; [TOSHIBA] /SIMALC: la simulación, detrás de lo residente (la copia
+        ; y el final los hace ella misma: está fuera de esta zona)
+        cmp byte [sim_alc], 0
+        je .tsr2
+        mov ax, [tsr_end]
+        add ax, 15
+        and ax, 0xFFF0
+        mov bx, ax
+        add bx, ALCSZ + 15
+        jc .tsr1
+        cmp bx, 0xFFF0
+        ja .tsr1
+        mov dx, bx
+        shr dx, 4
+        shr ax, 4
+        mov bx, cs
+        add ax, bx
+        cli
+        mov [alc_cmdp+2], ax
+        mov es, ax
+        xor di, di
+        mov cx, ALCSZ
+        mov word [alc_tmp], 8
+        jmp far [alc_tmp]
+.tsr1:
+        mov byte [sim_alc], 0
+.tsr2:
         mov ax, 0x3100
         int 0x21
 
@@ -3094,6 +3170,51 @@ o_info:
 o_simmac:                           ; [CIRRUS]
         mov byte [sim_mac], 1
         jmp mac_reset
+; [TOSHIBA] /SIMALC (/SIMALC:R con la hipótesis de lib/alcsim.asm): la
+; simulación, copiada 64 KB más arriba mientras se instala (en la memoria de
+; este programa); al quedarse residente va detrás de lo residente
+o_simalc:
+        mov byte [opt_simalc], 2
+        cmp byte [si], ':'
+        jne .c
+        mov al, [si+1]
+        and al, 0xDF
+        cmp al, 'R'
+        jne .c
+        add si, 2
+        mov byte [opt_simalc], 3
+.c:
+        cmp byte [sim_alc], 0
+        jne .r
+        push es
+        mov ax, cs
+        add ax, 0x1000
+        mov bx, ax
+        add bx, (ALCSZ + 15) / 16
+        cmp bx, [0x02]              ; (el final de la memoria, en el PSP)
+        ja .x
+        mov es, ax
+        push si
+        mov si, alc_blob
+        xor di, di
+        mov cx, ALCSZ
+        cld
+        rep movsb
+        pop si
+        mov word [es:0x0C], alc_fwd_far
+        mov [es:0x0E], cs
+        mov dl, [opt_simalc]
+        mov [es:0x10], dl
+        mov word [alc_cmdp], 4
+        mov [alc_cmdp+2], ax
+        mov word [alc_tmp], 0
+        mov [alc_tmp+2], ax
+        call far [alc_tmp]
+        mov byte [sim_alc], 1
+.x:
+        pop es
+.r:
+        ret
 o_help:
         mov byte [opt_help], 1
         ret
@@ -3170,10 +3291,14 @@ opt_tab     dw k_noapr, o_noapr, k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
             dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde
             dw k_simmac, o_simmac   ; [CIRRUS]
+            dw k_simalc, o_simalc   ; [TOSHIBA]
             dw k_sordo, o_sordo
             dw 0
 k_tilde     db "~", 0
 k_simmac    db "SIMMAC", 0          ; [CIRRUS] (solo para las pruebas)
+k_simalc    db "SIMALC", 0          ; [TOSHIBA] (solo para las pruebas)
+opt_simalc  db 0
+alc_tmp     dd 0
 k_sordo     db "SIMSORDO:", 0       ; (solo para las pruebas)
 opt_sordo   db 0
 k_nosb      db "NOSB", 0
@@ -7217,6 +7342,10 @@ msg_cr_h5   db "  GPIO: todas encendidas.", 13, 10, 0
 mac_fwd_cmd:
         ret
             MACSIM_DATA
+; /SIMALC (solo para las pruebas): el Realtek ALC269 del Toshiba NB250
+alc_blob:
+        incbin "alcsim.bin"
+ALCSZ       equ $ - alc_blob
 file_end:
 ; (el anillo de la Sound Blaster emulada tiene que tapar todo el código de
 ; instalación: la ventana de los registros va detrás)

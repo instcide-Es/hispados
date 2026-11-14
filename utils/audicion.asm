@@ -330,6 +330,29 @@ parse_args:
         call mac_reset
         jmp .sp
 .sm:
+        ; [TOSHIBA] /SIM:ALC269: el Realtek ALC269 del Toshiba NB250 (simulado);
+        ; /SIM:ALC269R, con la hipótesis «el DAC vuelve a 0 dB cada vez que se
+        ; le programa el formato o el flujo»
+        mov eax, [si]
+        and eax, 0xDFDFDFFF
+        cmp eax, ':ALC'
+        jne .sm2
+        cmp word [si+4], '26'
+        jne .sm2
+        cmp byte [si+6], '9'
+        jne .sm2
+        add si, 7
+        mov byte [alc_mq], 2
+        mov al, [si]
+        and al, 0xDF
+        cmp al, 'R'
+        jne .sa
+        inc si
+        mov byte [alc_mq], 3
+.sa:
+        call alc_start
+        jmp .sp
+.sm2:
         mov byte [sim], 1
         jmp .sp
 .q:
@@ -1815,10 +1838,19 @@ hda_cmd:
         mov [last_cmd], eax
         ; [CIRRUS] /SIM:MAC: el códec 0 lo contesta la simulación
         cmp byte [simmac], 0
-        je .real
+        je .nmac
         test eax, 0xF0000000
         jnz .real
         call mac_cmd
+        clc
+        jmp .res
+.nmac:
+        ; [TOSHIBA] /SIM:ALC269: el códec 0 lo contesta la simulación
+        cmp byte [simalc], 0
+        je .real
+        test eax, 0xF0000000
+        jnz .real
+        call far [alc_cmdp]
         clc
         jmp .res
 .real:
@@ -2929,6 +2961,7 @@ hda_tone:
         mov al, [sd_rst]
         mov [sd_rst1], al
         call sd_program
+        call va_again               ; [TOSHIBA]
         call sd_run
         jnc .go
         mov di, sd_snap1
@@ -2936,6 +2969,7 @@ hda_tone:
         mov byte [sd_retry], 1
         call sd_reset
         call sd_program
+        call va_again               ; [TOSHIBA]
         call sd_run
         jnc .go
         mov di, sd_snap2
@@ -2944,6 +2978,7 @@ hda_tone:
         jmp .end
 .go:
         mov byte [lpib_ok], 1
+        call va_again               ; [TOSHIBA] y ya sonando
         ; el resto del tiempo, sonando
         mov ax, [t_ms]
         mov cx, 91
@@ -4842,6 +4877,7 @@ hdmi_if     db 0x84, 0x01, 0x0A, 0x70, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0
 ; [want_dig], [alt_k] (0: la primera ruta; 1: la segunda...), [pinctl]
 ; -> CF si no hay ruta; [path], [plen], [p_dac]
 route_pin:
+        mov byte [va_cur], 0xFF     ; [TOSHIBA] (otro camino: sin volumen de prueba)
         mov [path], bl
         mov byte [lvl], 0
         mov al, [alt_k]
@@ -5193,6 +5229,8 @@ post_tests:
         PR NL, "-- Pruebas con el camino que suena --", NL
         ; amplificador que hará de volumen: el primero regulable desde el DAC
         mov word [va], 0
+        mov byte [va_cur], 0xFF
+        mov byte [vchk], 0
         mov si, pamps
         movzx cx, byte [pamps_n]
         jcxz .nova
@@ -5238,6 +5276,7 @@ post_tests:
         PR NL, "Volumen: sonará dos veces seguidas.", NL
         mov word [replay], rv_low
         call rv_low
+        call vchk_rep               ; [TOSHIBA] lo que dice el códec
         mov si, q_low
         mov di, l_low
         call askrec
@@ -5361,7 +5400,13 @@ rt_list     db RI_8K
             db 0xFF
 
 ; volumen: AL = paso (bit 7: mudo) al amplificador [va]
+; [TOSHIBA] se apunta (va_cur): hda_tone lo vuelve a escribir cuando el flujo
+; ya está programado y otra vez sonando (va_again). En el Toshiba NB250
+; (Realtek ALC269) el volumen no cambiaba: la orden era correcta (paso 61 de
+; 87, 19,5 dB menos), pero se escribía con el flujo parado, antes de que
+; hda_tone volviera a programar el formato y el flujo del DAC.
 va_set:
+        mov [va_cur], al
         push si
         push bx
         push dx
@@ -5388,7 +5433,16 @@ vol_low:
         cmp ah, [si+2]
         je .soft
         mov al, ah
-        jmp va_set
+        call va_set
+        ; [TOSHIBA] la primera vez, lo que dice el códec (vchk_rep)
+        cmp byte [vchk], 0
+        jne .x
+        mov [vwr], al
+        call va_get
+        mov [vrb], ax
+        mov byte [vchk], 1
+.x:
+        ret
 .soft:
         mov word [t_amp], AMP_STD / 10
         ret
@@ -5410,6 +5464,136 @@ vol_norm:
         mov al, [si+2]
         jmp va_set
 .r:
+        ret
+; [TOSHIBA] -> AL = izquierdo, AH = derecho: lo que dice el códec del
+; amplificador [va] (orden Bh)
+va_get:
+        push bx
+        push cx
+        push dx
+        push si
+        mov si, [va]
+        mov bl, [si]
+        mov dl, [si+1]
+        mov cx, 0xA000              ; salida, izquierdo
+        test dl, 0x80
+        jnz .o
+        movzx cx, dl
+        and cl, 0x0F
+        or ch, 0x20                 ; entrada n, izquierdo
+.o:
+        mov al, 0x0B
+        call hda_verb4
+        push ax
+        and ch, 0xDF                ; derecho
+        mov al, 0x0B
+        call hda_verb4
+        mov ah, al
+        pop dx
+        mov al, dl
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        ret
+; [TOSHIBA] el volumen de la prueba, otra vez (con el flujo ya programado,
+; y después sonando): la primera vez, con lo que dice el códec antes y después
+va_again:
+        cmp word [va], 0
+        je .r
+        cmp byte [va_cur], 0xFF
+        je .r
+        push ax
+        cmp byte [vchk], 1
+        jne .w
+        call va_get
+        mov [vrb+2], ax
+.w:
+        mov al, [va_cur]
+        call va_set
+        cmp byte [vchk], 1
+        jne .x
+        call va_get
+        mov [vrb+4], ax
+        mov byte [vchk], 2
+.x:
+        pop ax
+.r:
+        ret
+; [TOSHIBA] al informe: el paso escrito para «más bajo» y lo que dijo el códec
+vchk_rep:
+        cmp byte [vchk], 2
+        jne .r
+        mov byte [vchk], 3
+        mov al, [omode]
+        push ax
+        MODE O_REP
+        PR "  Comprobación: escrito el paso "
+        movzx eax, byte [vwr]
+        call pdec
+        PR " ("
+        mov si, [va]
+        movzx eax, byte [si+2]
+        movzx ecx, byte [vwr]
+        sub eax, ecx
+        movzx ecx, byte [si+4]
+        imul eax, ecx               ; cuartos de dB
+        call pqdb
+        PR " menos); el códec dice "
+        mov ax, [vrb]
+        call plr
+        PR " al escribirlo, "
+        mov ax, [vrb+2]
+        call plr
+        PR " con el flujo ya programado y "
+        mov ax, [vrb+4]
+        call plr
+        PR " al volver a escribirlo", NL
+        mov al, [vwr]
+        mov ah, al
+        cmp [vrb], ax
+        jne .mal
+        cmp [vrb+2], ax
+        je .bien
+        PR "  (al programar el flujo el códec lo ha cambiado: se vuelve a escribir cada vez)", NL
+        jmp .bien
+.mal:
+        PR "  (EL CODEC NO GUARDA EL PASO ESCRITO)", NL
+.bien:
+        pop ax
+        mov [omode], al
+.r:
+        ret
+; AL/AH -> «izquierdo/derecho» en hexadecimal
+plr:
+        push ax
+        call phex2
+        PR "h/"
+        pop ax
+        mov al, ah
+        call phex2
+        PR "h"
+        ret
+; EAX = cuartos de dB -> «19,5 dB» (o «19,25», «19,75»)
+pqdb:
+        push eax
+        shr eax, 2
+        call pdec
+        pop eax
+        and al, 3
+        jz .e
+        cmp al, 2
+        je .m
+        jb .q1
+        PR ",75"
+        jmp .e
+.q1:
+        PR ",25"
+        jmp .e
+.m:
+        PR ",5"
+.e:
+        PR " dB"
         ret
 rv_low:
         call tone_std
@@ -7490,6 +7674,34 @@ mac_fwd_cmd:
         jmp corb_cmd
 .p:
         jmp pio_cmd
+; [TOSHIBA] /SIM:ALC269: el Realtek ALC269 del Toshiba NB250, simulado
+; (lib/alcsim.asm, ensamblado aparte: se llama con CALL FAR en su segmento)
+alc_start:
+        push es
+        mov byte [simalc], 1
+        mov ax, alc_blob
+        shr ax, 4
+        mov bx, cs
+        add ax, bx
+        mov [alc_cmdp+2], ax
+        mov word [alc_cmdp], 4
+        mov [alc_rstp+2], ax
+        mov word [alc_rstp], 0
+        mov es, ax
+        mov word [es:0x0C], alc_fwd_far
+        mov [es:0x0E], cs
+        mov al, [alc_mq]
+        mov [es:0x10], al
+        pop es
+        call far [alc_rstp]
+        ret
+; lo que la simulación manda al códec de QEMU (su DAC 02h)
+alc_fwd_far:
+        call mac_fwd_cmd
+        retf
+        align 16, db 0
+alc_blob:
+        incbin "alcsim.bin"
 
 st_suena    db "SUENA", 0
 st_nosuena  db "NO SUENA", 0
@@ -7821,6 +8033,10 @@ sd_bdl      resd 1
 sd_snap1    resb 18
 sd_snap2    resb 18
 simmac      resb 1                  ; /SIM:MAC: el códec del MacBook Air 2012
+simalc      resb 1                  ; [TOSHIBA] /SIM:ALC269: el del Toshiba NB250
+alc_mq      resb 1                  ; su modo (lib/alcsim.asm, desplazamiento 10h)
+alc_cmdp    resd 1
+alc_rstp    resd 1
 sm_starts   resb 1
 ; [CIRRUS] Cirrus CS420x de Apple y el códec simulado del Mac
 cr_kind     resb 1
@@ -7907,6 +8123,11 @@ skipn       resb 1
 cur_type    resb 1
 conn_bufs   resb 5 * CONNMAX
 va          resw 1
+va_cur      resb 1                  ; [TOSHIBA] el paso puesto en [va] (FFh: ninguno)
+vchk        resb 1                  ; la comprobación: 0 por hacer, 1 a medias, 2 hecha
+vwr         resb 1                  ; el paso escrito
+vrb         resw 3                  ; lo leído: al escribirlo, con el flujo
+                                    ; programado y al volver a escribirlo
 test_ri     resb 1
 pres0       resb NCAND
 pres1       resb NCAND
