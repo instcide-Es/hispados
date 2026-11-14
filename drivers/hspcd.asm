@@ -1048,15 +1048,21 @@ ahci_probe:
         jc .r
         mov [bdf], bx
         inc word [hba_idx]
-        ; memoria y bus master
+        ; memoria y bus master: solo se escriben si no estaban ya puestos
+        ; (hay BIOS, como la del Toshiba, que se trastocan si se reescribe el
+        ; registro de orden del controlador que tiene el disco de arranque)
         mov ax, 0xB109
         mov di, 0x04
         int 0x1A
+        mov dx, cx
         or cx, 0x0006
+        cmp cx, dx
+        je .cmd_ok
         mov bx, [bdf]
         mov ax, 0xB10C
         mov di, 0x04
         int 0x1A
+.cmd_ok:
         mov bx, [bdf]
         mov ax, 0xB10A
         mov di, 0x24                ; BAR5 = ABAR
@@ -1075,7 +1081,12 @@ ahci_probe:
         push fs
         call a20_open
         mov esi, [abar]
-        or dword [fs:esi+4], 0x80000000     ; GHC.AE: modo AHCI
+        mov eax, [fs:esi+4]                 ; GHC: solo se pone AE si no estaba
+        test eax, 0x80000000                ; (no tocar el HBA del disco de
+        jnz .ae_ok                          ;  arranque si ya está en AHCI)
+        or eax, 0x80000000
+        mov [fs:esi+4], eax
+.ae_ok:
         mov eax, [fs:esi+0x0C]              ; puertos implementados
         mov [pi], eax
         xor cx, cx
