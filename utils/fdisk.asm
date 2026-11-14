@@ -21,6 +21,15 @@
 ;                         sale con el nivel de error = código ASCII de la letra
 ;                         de la unidad (67 = C:...); 0 si no se hace nada, 1 si
 ;                         no se puede
+;  PARTIR ... /SINMODELO  no preguntar el modelo a los discos (si al leerlo
+;                         tarda, sale «Esc lo salta»; Esc hace lo mismo)
+;  PARTIR ... /IDE:b,c,u  (para las pruebas) preguntar el modelo del disco 1
+;                         por los puertos b y c (hex) y la unidad u (0 o 10)
+;
+;  El modelo se lee con IDENTIFY por los puertos de la DPTE (EDD) solo si son
+;  los de un canal de una controladora IDE del PCI (clase 0101h, en modo
+;  compatible o nativo); en modo AHCI no se tocan. Todas las esperas tienen
+;  un tope de medio segundo con el reloj de la BIOS (40:6Ch).
 ;  PARTIR /ARRANQUE:X:    (para INSTALAR) deja arrancable la partición de X:
 ;                         (activa y, si el disco no tiene, con el MBR propio)
 ;
@@ -74,6 +83,7 @@ start:
         mov dx, dta
         mov ah, 0x1A
         int 0x21
+        call prescan
         call find_boot
         call info_all
         mov byte [disk], 0x80
@@ -120,6 +130,10 @@ start:
         je .o_inst
         cmp dword [di], 'ARRA'
         je .o_arr
+        cmp dword [di], 'SINM'
+        je .arg
+        cmp dword [di], 'IDE:'
+        je .arg
         cmp word [di], 'PR'
         jne .n1
         cmp byte [di+2], 'I'
@@ -572,8 +586,30 @@ info_all:
         je .n
         cmp cl, IF_OTHER
         je .n
+        cmp byte [nomodel], 0
+        jne .n
+        cmp byte [f_ide], 0
+        je .val
+        cmp byte [disk], 0x80
+        jne .n
+        mov ax, [f_base]
+        mov [at_base], ax
+        mov ax, [f_ctl]
+        mov [at_ctl], ax
+        mov al, [f_dev]
+        mov [at_dev], al
+        jmp .id
+.val:
         cmp byte [dpte_ok], 0
         je .n
+        ; los puertos de la DPTE solo se usan si son los de un canal de una
+        ; controladora IDE (clase 0101h) del PCI: en modo AHCI, o con una
+        ; DPTE equivocada, no se pregunta el modelo
+        push di
+        call pci_ide_ok
+        pop di
+        jc .n
+.id:
         call ata_identify
 .n:
         pop ax
@@ -785,6 +821,172 @@ ata_drq:
         clc
         ret
 
+; ¿son [at_base]/[at_ctl] los puertos de un canal de una controladora IDE
+; (clase 01h, subclase 01h) del PCI? -> CF=0 si sí. Canal primario: 1F0h/3F6h
+; en modo compatible (interfaz bit 0 = 0) o BAR0 / BAR1+2 en modo nativo;
+; secundario: 170h/376h o BAR2 / BAR3+2. Mecanismo 1 (CF8h/CFCh), los 256
+; buses; se deja CF8h como estaba.
+pci_ide_ok:
+        pushad
+        mov dx, 0xCF8
+        in eax, dx
+        mov [pci_save], eax
+        mov ecx, 0x80000000
+.l:
+        mov eax, ecx
+        mov al, 0x08
+        call pci_rd
+        shr eax, 8                  ; clase, subclase, interfaz
+        mov ebx, eax
+        shr ebx, 8
+        cmp bx, 0x0101
+        jne .next
+        mov [pci_if], al
+        ; canal primario
+        mov si, 0x1F0
+        mov di, 0x3F6
+        test byte [pci_if], 1
+        jz .p
+        mov eax, ecx
+        mov al, 0x10
+        call pci_rd
+        and ax, 0xFFFC
+        mov si, ax
+        mov eax, ecx
+        mov al, 0x14
+        call pci_rd
+        and ax, 0xFFFC
+        add ax, 2
+        mov di, ax
+.p:
+        call .match
+        je .yes
+        ; secundario
+        mov si, 0x170
+        mov di, 0x376
+        test byte [pci_if], 4
+        jz .s
+        mov eax, ecx
+        mov al, 0x18
+        call pci_rd
+        and ax, 0xFFFC
+        mov si, ax
+        mov eax, ecx
+        mov al, 0x1C
+        call pci_rd
+        and ax, 0xFFFC
+        add ax, 2
+        mov di, ax
+.s:
+        call .match
+        je .yes
+.next:
+        add ecx, 0x100
+        cmp ecx, 0x81000000
+        jb .l
+        call .restore
+        popad
+        stc
+        ret
+.yes:
+        call .restore
+        popad
+        clc
+        ret
+.match:
+        cmp si, 2                   ; (un BAR vacío no vale)
+        jb .mr
+        cmp si, [at_base]
+        jne .mr
+        cmp di, [at_ctl]
+.mr:
+        ret
+.restore:
+        mov eax, [pci_save]
+        mov dx, 0xCF8
+        out dx, eax
+        ret
+
+; EAX = dirección de configuración (con el registro en AL) -> EAX = su valor
+pci_rd:
+        push dx
+        and al, 0xFC
+        mov dx, 0xCF8
+        out dx, eax
+        mov dx, 0xCFC
+        in eax, dx
+        pop dx
+        ret
+
+; ver en la línea de órdenes, antes de mirar los discos, /SINMODELO (no
+; preguntar el modelo a los discos) y /IDE:base,control,unidad (en hex; para
+; las pruebas: preguntar el modelo del disco 1 por esos puertos sin más)
+prescan:
+        mov si, cmdline + 1
+.l:
+        lodsb
+        cmp al, 13
+        je .r
+        test al, al
+        jz .r
+        cmp al, '/'
+        jne .l
+        mov di, si
+        push si
+        call opt_word
+        pop si
+        cmp dword [optbuf], 'SINM'
+        jne .i
+        mov byte [nomodel], 1
+        jmp .l
+.i:
+        cmp dword [optbuf], 'IDE:'
+        jne .l
+        push si
+        mov si, optbuf + 4
+        call parse_hex
+        mov [f_base], ax
+        cmp byte [si], ','
+        jne .ib
+        inc si
+        call parse_hex
+        mov [f_ctl], ax
+        cmp byte [si], ','
+        jne .ib
+        inc si
+        call parse_hex
+        mov [f_dev], al
+        mov byte [f_ide], 1
+.ib:
+        pop si
+        jmp .l
+.r:
+        ret
+
+; DS:SI = número hexadecimal -> AX (SI avanza)
+parse_hex:
+        xor dx, dx
+.l:
+        mov al, [si]
+        call upcase
+        sub al, '0'
+        jb .e
+        cmp al, 9
+        jbe .d
+        sub al, 'A' - '0' - 10
+        cmp al, 10
+        jb .e
+        cmp al, 15
+        ja .e
+.d:
+        shl dx, 4
+        or dl, al
+        inc si
+        jmp .l
+.e:
+        mov ax, dx
+        ret
+
 tick0:
         push es
         push ax
@@ -792,22 +994,54 @@ tick0:
         mov es, ax
         mov ax, [es:0x6C]
         mov [t_start], ax
-        pop ax
+        mov dword [t_spin], 4000000 ; (tope de vueltas, por si el reloj de
+        pop ax                      ; la BIOS no avanza: unos segundos)
         pop es
         ret
 
-; CF si han pasado más de 10 tics (medio segundo)
+; CF si han pasado más de 10 tics (medio segundo) del reloj de la BIOS
+; (40:6Ch), o el tope de vueltas, o se ha pulsado Esc (deja [nomodel] = 1:
+; no se pregunta a ningún disco más). Pasados 3 tics avisa una vez.
+; Conserva todos los registros salvo las banderas.
 tick_over:
         push es
         push ax
+        sti
+        dec dword [t_spin]
+        jz .over
         mov ax, 0x40
         mov es, ax
         mov ax, [es:0x6C]
-        pop es
         sub ax, [t_start]
+        cmp ax, 3
+        jb .key
+        cmp byte [t_told], 0
+        jne .key
+        mov byte [t_told], 1
+        push si
+        mov si, msg_slow
+        call puts
+        pop si
+.key:
         cmp ax, 10
-        cmc
+        jae .over
+        mov ah, 1                   ; ¿Esc?
+        int 0x16
+        jz .no
+        cmp al, 27
+        jne .no
+        xor ah, ah
+        int 0x16
+        mov byte [nomodel], 1
+.over:
         pop ax
+        pop es
+        stc
+        ret
+.no:
+        pop ax
+        pop es
+        clc
         ret
 
 ; -----------------------------------------------------------------------------
@@ -2944,6 +3178,7 @@ msg_g_usb   db " es la MEMORIA USB DE ARRANQUE: desde ella funciona", 13, 10
 msg_g_hd    db " es el DISCO DE ARRANQUE: desde él funciona Hispa-DOS", 13, 10
             db "ahora mismo. Si lo cambia puede perder lo que tiene y dejar de arrancar.", 13, 10
             db "Para cambiarlo de todos modos escriba SI y pulse Intro: ", 0
+msg_slow    db "(Leyendo el modelo de los discos; Esc lo salta)", 13, 10, 0
 msg_untouched db "No se ha cambiado nada.", 13, 10, 0
 msg_noother db "No hay ningún disco duro aparte del de arranque: no hay dónde instalar.", 13, 10, 0
 msg_inst_all db "Se puede crear una partición para Hispa-DOS con todo el disco (hasta", 13, 10
@@ -3037,6 +3272,17 @@ dap         resb 16
 edd         resb 0x42
 edd3        resb 0x4A
 optbuf      resb 20
+f_base      resw 1
+f_ctl       resw 1
+f_dev       resb 1
+f_ide       resb 1
+nomodel     resb 1
+t_told      resb 1
+            alignb 4
+t_spin      resd 1
+pci_if      resb 1
+            alignb 4
+pci_save    resd 1
 u_numbuf    resb 16
 u_lbuf      resb 84
 cmdline     resb 128

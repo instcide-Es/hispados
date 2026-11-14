@@ -122,7 +122,7 @@ El disquete y la memoria USB arrancan con un menú (el de `CONFIG.SYS` de MS-DOS
     1. Normal
     2. Juegos (memoria expandida EMS y la mayor memoria libre)
 
-  Elija una opción y pulse Intro: 1    Tiempo restante: 05
+  Elija una opción (pulse su número): 1    Sin tocar nada, la marcada en: 05 s
 ```
 
 | Opción | Qué carga |
@@ -254,7 +254,7 @@ Después el disco arranca solo.
 
 **Desde la memoria USB** (equipos sin disquetera): al arrancar de ella, la BIOS la pone como disco 1 (C:) y el disco duro como disco 2 (D: o la letra que toque). `INSTALL` (o `INSTALAR` sin unidad) busca el disco duro —nunca la memoria de arranque—: si no tiene particiones ofrece crear una con todo el disco (hasta 2 GB, avisando de que borra lo que haya); si tiene particiones de otro sistema y sitio libre, ofrece crear ahí la de Hispa-DOS sin borrar nada. Después dice la unidad y pregunta, le da formato si hace falta, copia el sistema, deja la partición **activa**, pone el MBR de Hispa-DOS si el disco no tiene código de arranque y cambia `CONFIG.SYS` y `AUTOEXEC.BAT` para C: (la letra que tendrá al arrancar solo). El sector de arranque lleva la unidad 80h y la geometría de ese disco. Quitar la memoria y reiniciar.
 
-`PARTIR` (FDISK) trabaja con todos los discos que da la BIOS, como el FDISK de MS-DOS 6.22: la cabecera dice «Disco actual: 2/2» con su tamaño y modelo, la opción **5** cambia de disco y `PARTIR n` o `PARTIR /DISCO:n` lo eligen por la línea de órdenes. Crea particiones primarias, la extendida y unidades lógicas (`/PRI`, `/EXT`, `/LOG`, `/DEL:n`, `/DELLOG:n`, `/ACT:n`, `/STATUS`). Arrancando desde una memoria USB **empieza por el disco duro** y enseña la memoria como «Memoria USB de arranque (no tocar)»; cualquier cambio en el disco de arranque pide escribir `SI`.
+`PARTIR` (FDISK) trabaja con todos los discos que da la BIOS, como el FDISK de MS-DOS 6.22: la cabecera dice «Disco actual: 2/2» con su tamaño y modelo, la opción **5** cambia de disco y `PARTIR n` o `PARTIR /DISCO:n` lo eligen por la línea de órdenes. Crea particiones primarias, la extendida y unidades lógicas (`/PRI`, `/EXT`, `/LOG`, `/DEL:n`, `/DELLOG:n`, `/ACT:n`, `/STATUS`). Arrancando desde una memoria USB **empieza por el disco duro** y enseña la memoria como «Memoria USB de arranque (no tocar)»; cualquier cambio en el disco de arranque pide escribir `SI`. El modelo de cada disco se lee solo en controladoras IDE (no en AHCI), con un tope de tiempo; `PARTIR /SINMODELO` no lo lee y `Esc` lo salta.
 
 Con `INSTALAR unidad:` (o `INSTALL` desde la memoria USB) se copia además todo el sistema, y el último paso es la **comprobación del sonido**: la versión corta de la prueba de sonido (`AUDICION /RAPIDA`) toca un pitido y la primera salida que suene, pregunta si baja el volumen y si se oye por cada lado, y guarda lo que suena en `\HISPADOS\SONIDO.INI` del disco instalado (no en el disquete ni en la memoria USB). Así `HSPSND` usa ese camino desde el primer arranque. `Esc` salta el paso sin apuntar nada; `INSTALAR unidad: /NOSONIDO` no lo hace. Ver [docs/AUDICION.md](docs/AUDICION.md#en-la-instalación-audicion-rapida).
 

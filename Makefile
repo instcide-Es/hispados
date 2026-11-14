@@ -525,6 +525,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_sbvga_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_instalar_usb_tests.sh
+	tests/run_partir_modelo_tests.sh $(IMG)
 	tests/run_hispabios_tests.sh
 	tests/run_sys_tests.sh $(IMG)
 	tests/run_keyb_tests.sh $(IMG)
