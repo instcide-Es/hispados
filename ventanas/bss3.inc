@@ -78,11 +78,13 @@ vol_pct     resd 1                  ; 0-100 (-1: no se sabe)
 vol_mudo    resd 1
 vol_ven     resd 1
 vol_i       resd 1
+vol_tic     resd 1                  ; cuándo se dio por última vez
 snd_hay     resb 1
 tec_puesto  resb 1                  ; [Hispa-Nes] INT 15h apunta a rm_int15
             alignb 2
 snd_ver     resw 1                  ; versión de la API de HSPSND
 vol_arr     resb 1
+vol_pend    resb 1                  ; volumen sin dar a HSPSND (arrastrando)
 snd_tipo    resb 1                  ; [CAMPANITA] la tarjeta: 1 SB, 2 SB16, 3 AC'97, 4 HD Audio
 cfg_term    resb 1
 vol_txt     resb 24

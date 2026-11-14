@@ -298,6 +298,7 @@ vol_proc:
         cmp ebx, 48
         jge .nada
         mov byte [vol_arr], 1
+        mov dword [vol_tic], 0      ; (el primer punto se aplica ya)
         jmp .pon
 .mueve:
         cmp byte [vol_arr], 0
@@ -314,9 +315,29 @@ vol_proc:
         mov eax, 100
 .p2:
         cmp eax, [vol_pct]
-        je .nada
+        je .arr
         mov [vol_pct], eax
+        mov byte [vol_pend], 1
+        call ven_invalidar
+        call vol_inv_icono
+.arr:
+        ; arrastrando, a HSPSND como mucho cada dos vueltas del reloj (55 a
+        ; 110 ms; lo último, al soltar): la barra y el ratón siguen al
+        ; momento aunque la tarjeta tarde (antes, cada movimiento esperaba
+        ; a la tarjeta y con HD Audio en un equipo real se quedaba parado)
+        cmp byte [vol_pend], 0
+        je .nada
+        call tics
+        mov ecx, eax
+        sub eax, [vol_tic]
+        cmp eax, 2
+        jb .nada
+        mov [vol_tic], ecx
+        mov byte [vol_pend], 0
+        call vol_aplicar
+        jmp .nada
 .cambio:
+        mov byte [vol_pend], 0
         call vol_aplicar
         call ven_invalidar
         call vol_inv_icono
@@ -329,6 +350,10 @@ vol_proc:
         cmp byte [vol_arr], 0       ; [CAMPANITA]
         je .nada
         mov byte [vol_arr], 0
+        cmp byte [vol_pend], 0      ; lo último que se dejó al arrastrar
+        je .campana
+        mov byte [vol_pend], 0
+        call vol_aplicar
         jmp .campana
 .tecla:
         cmp ecx, TC_ESC
@@ -373,6 +398,11 @@ vol_proc:
 .destruir:
         mov dword [vol_ven], 0
         mov byte [vol_arr], 0
+        cmp byte [vol_pend], 0      ; (cerrada arrastrando)
+        je .dg
+        mov byte [vol_pend], 0
+        call vol_aplicar
+.dg:
         call cfg_guardar            ; el volumen, a CENTRO.INI
 .nada:
         xor eax, eax

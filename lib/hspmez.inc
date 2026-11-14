@@ -100,6 +100,7 @@ f_mzset:
         mov [cs:mz_bal+si], cl
 .x:
         mov byte [cs:vol_dirty], 1  ; (se aplica al salir de la API)
+        mov byte [cs:mz_todo], 1    ; (también lo que no es General)
         mov byte [cs:mz_chg], 1
         jmp mz_lee
 
@@ -133,6 +134,7 @@ f_mzaset:
 .p:
         mov [cs:mz_ajv+si], al
         mov byte [cs:vol_dirty], 1
+        mov byte [cs:mz_todo], 1    ; (también lo que no es General)
         mov byte [cs:mz_chg], 1
         pop si
         clc
@@ -155,8 +157,31 @@ f_mzfab:
         pop di
         pop si
         mov byte [cs:mz_chg], 1
+        jmp .todo
 .ap:
+        ; volver a escribirlo todo: también a los nodos de HD Audio que
+        ; habían dejado de contestar (hda_cmd)
+        push di
+        push cx
+        push es
+        push cs
+        pop es
+        mov di, hda_fallo1
+        mov cx, 64
+        xor al, al
+        cld
+        rep stosb
+        pop es
+        pop cx
+        pop di
+        cmp byte [cs:dev_type], 4   ; y General otra vez por el amplificador
+        jne .todo                   ; si lo había
+        cmp byte [cs:hda_nvol], 0
+        je .todo
+        mov byte [cs:hw_vol], 1
+.todo:
         mov byte [cs:vol_dirty], 1
+        mov byte [cs:mz_todo], 1
         clc
         retf
 
@@ -289,6 +314,7 @@ mz_fsoft:
 ; llevar el volumen y el mezclador a la tarjeta. Conserva todo.
 vol_apply:
         pushad
+.otra:
         mov byte [cs:vol_dirty], 0
         ; General, por lados: att_q (izquierdo), att_r (derecho), vol_zero
         mov byte [cs:vol_zero], 0
@@ -338,11 +364,21 @@ vol_apply:
         push fs
         call a20_open
         call unreal
+        mov byte [cs:hda_vfail], 0
         call hda_volume
-        call hda_mzin
+        cmp byte [cs:mz_todo], 0    ; las entradas del mezclador, solo si
+        je .hx                      ; han cambiado (no con 05h-07h ni con
+        call hda_mzin               ; las teclas de volumen)
+        mov byte [cs:mz_todo], 0
+.hx:
         call a20_restore
         pop fs
-        jmp .r
+        ; si el amplificador no contesta, General va por programa (en la
+        ; mezcla de HSPSND) y se vuelven a hacer las cuentas
+        cmp byte [cs:hda_vfail], 0
+        je .r
+        mov byte [cs:hw_vol], 0
+        jmp .otra
 .sb16:
         call mz_sb16
         jmp .r
@@ -898,6 +934,8 @@ mz_ac97:
 ; General a los amplificadores elegidos (hda_vols), cada lado con lo suyo
 hda_volume:
         pushad
+        cmp byte [cs:hw_vol], 0     ; (por programa: nada que mandar)
+        je .r
         mov si, hda_vols
         movzx di, byte [cs:hda_nvol]
 .l:
@@ -944,6 +982,9 @@ hda_volume:
         mov bl, [cs:si]
         mov al, 3
         call hda_verb4
+        jnc .ok
+        mov byte [cs:hda_vfail], 1  ; (no contesta: vol_apply)
+.ok:
         inc bp
         cmp bp, 2
         jb .lado
@@ -953,6 +994,7 @@ hda_volume:
 .r:
         popad
         ret
+hda_vfail   db 0
 
 ; CD, Línea y Micrófono: las entradas del mezclador del códec que llevan a
 ; ellos (hda_in; las busca hda_inputs al instalarse). Sin «Sonar», o en

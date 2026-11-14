@@ -197,6 +197,16 @@ cr_vpw      db 0                    ; widget de proceso puesto en marcha
 cr_how      db 0                    ; GPIO: 1 las de Apple, 2 las aprendidas,
                                     ; 3 las de /GPIO, 4 /NOGPIO
 sim_mac     db 0                    ; /SIMMAC (pruebas): el códec del Mac
+; HD Audio: contadores de las órdenes al códec (los lee VOLTIME, pruebas)
+            db "HDACNT"
+hda_ncmd    dd 0                    ; órdenes mandadas
+hda_nfail   dd 0                    ; ... que no han contestado
+hda_nskip   dd 0                    ; ... no mandadas (ese nodo no contesta)
+sim_sordo   db 0                    ; /SIMSORDO:nn (pruebas): el nodo nn no
+sim_sordo_n db 0                    ; contesta (ya residente)
+hda_recordar db 0                   ; 1 ya residente: se apuntan los nodos
+hda_fallo1  times 32 db 0           ; nodos cuya última orden no contestó
+hda_sordos  times 32 db 0           ; ... y los que ya no se usan (hda_cmd)
 hda_nvol    db 0
 hda_vols    times 8 * 6 db 0        ; nodo, 80h salida | índice de entrada,
                                     ; paso de 0 dB, pasos, tamaño (1/4 dB), -
@@ -236,6 +246,8 @@ mz_chg      db 0                    ; hay cambios sin guardar (función 0Fh)
 mz_ac       db 0                    ; AC'97: registros que tiene (MZA_*)
 mz_ct1335   db 0                    ; Sound Blaster 2.0 con el mezclador CT1335
 vol_dirty   db 0                    ; hay que llevarlo a la tarjeta
+mz_todo     db 1                    ; ... y no solo General (HD Audio: las
+                                    ; entradas del mezclador del códec)
 busy        db 0                    ; dentro de la API
 att_q       db 0                    ; General, izquierda: atenuación en
 att_r       db 0                    ; cuartos de dB (0..187); y derecha
@@ -1169,6 +1181,15 @@ hwr8:
         ret
 
 ; EAX = orden para el códec (sin la dirección) -> EAX = respuesta; CF si falla
+; Por la interfaz de órdenes inmediata (ICOI 60h, IRII 64h, ICS 68h). Las
+; esperas se miden en tiempo (hda_ics: de 1 a 2 ms; el códec contesta en el
+; cuadro siguiente, 21 us) y no en vueltas: antes eran 0x100000 lecturas,
+; casi un segundo en un equipo real por cada orden sin respuesta, y Hispa
+; Ventanas se quedaba parada dos segundos al mover el volumen (las dos
+; órdenes, izquierda y derecha, del amplificador). Si la interfaz se queda
+; ocupada se limpia (ICB e IRV a 0) y se prueba otra vez; un nodo que falla
+; dos veces seguidas queda apuntado (hda_sordos) y ya no se le manda nada
+; (CF enseguida) hasta la función 0Eh (AL = 1: volver a escribirlo todo).
 hda_cmd:
         push ecx
         push edx
@@ -1179,40 +1200,50 @@ hda_cmd:
         cmp byte [cs:sim_mac], 0    ; [CIRRUS] pruebas: el códec 0 simulado
         jne .sim                    ; (con /SIMMAC no se queda residente)
 .real:
-        mov ebx, eax
-        mov ecx, 0x100000
-.w1:
-        mov dx, 0x68
-        call hrd16
-        test al, 1
-        jz .free
-        loop .w1, ecx
-        jmp .fail
+        mov ebx, eax                ; EBX = la orden
+        shr eax, 20
+        movzx cx, al                ; CX = el nodo
+        cmp byte [cs:hda_recordar], 0
+        je .nr
+        bt [cs:hda_sordos], cx      ; ¿ya no contesta?
+        jc .salta
+.nr:
+        inc dword [cs:hda_ncmd]
+        mov ax, 0x0001              ; ICB a 0: la interfaz, libre
+        call hda_ics
+        jnc .free
+        mov dx, 0x68                ; ocupada: se limpia y otra vez
+        mov ax, 2
+        call hwr16
+        mov ax, 0x0001
+        call hda_ics
+        jc .fail
 .free:
         mov dx, 0x68
-        mov ax, 2
+        mov ax, 2                   ; IRV a 0 (se borra escribiendo 1)
         call hwr16
         mov eax, ebx
         mov dx, 0x60
         call hwr32
+        cmp byte [cs:sim_sordo], 0  ; /SIMSORDO: ese nodo no contesta
+        je .icb
+        cmp cl, [cs:sim_sordo_n]
+        je .w2
+.icb:
         mov dx, 0x68
-        mov ax, 1
+        mov ax, 1                   ; ICB: que se mande
         call hwr16
-        mov ecx, 0x100000
 .w2:
-        mov dx, 0x68
-        call hrd16
-        test al, 2
-        jnz .got
-        loop .w2, ecx
-        jmp .fail
-.got:
+        mov ax, 0x0202              ; IRV a 1: la respuesta
+        call hda_ics
+        jc .fail
         mov dx, 0x64
         call hrd32
         push eax
         mov dx, 0x68
         mov ax, 2
         call hwr16
+        btr [cs:hda_fallo1], cx     ; (contesta: lo de antes no cuenta)
         pop eax
         pop ebx
         pop edx
@@ -1220,11 +1251,24 @@ hda_cmd:
         clc
         ret
 .fail:
+        inc dword [cs:hda_nfail]
+        mov dx, 0x68                ; la interfaz, limpia para la próxima
+        mov ax, 2
+        call hwr16
+        cmp byte [cs:hda_recordar], 0
+        je .f
+        bts [cs:hda_fallo1], cx     ; la segunda vez seguida, apuntado
+        jnc .f
+        bts [cs:hda_sordos], cx
+.f:
         pop ebx
         pop edx
         pop ecx
         stc
         ret
+.salta:
+        inc dword [cs:hda_nskip]
+        jmp .f
 .sim:
         test eax, 0xF0000000
         jnz .real
@@ -1233,6 +1277,67 @@ hda_cmd:
         pop edx
         pop ecx
         clc
+        ret
+
+; AL = máscara de ICS (68h), AH = el valor que se espera -> CF si no llega
+; en unas HDA_PLAZO cuentas del temporizador (canal 0: 1 ms si cuenta de dos
+; en dos, el modo 3 de la BIOS; 2 ms en el modo 2). Por si el
+; temporizador no avanza, como mucho 65.535 vueltas. Conserva todo.
+HDA_PLAZO   equ 2400
+hda_ics:
+        push ax
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        mov bx, ax                  ; BL = máscara, BH = valor
+        call pit_leer
+        mov si, ax                  ; SI = la lectura anterior
+        xor di, di                  ; DI = cuentas pasadas
+        mov cx, 0xFFFF
+.l:
+        mov dx, 0x68
+        call hrd16
+        and al, bl
+        cmp al, bh
+        je .ok
+        call pit_leer
+        mov dx, si
+        sub dx, ax                  ; lo que ha bajado
+        jae .d
+        mov dx, si                  ; (ha vuelto a empezar: hasta el 0)
+.d:
+        mov si, ax
+        add di, dx
+        jc .no
+        cmp di, HDA_PLAZO
+        jae .no
+        loop .l
+.no:
+        stc
+        jmp .r
+.ok:
+        clc
+.r:
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+; -> AX = el contador del canal 0 del temporizador
+pit_leer:
+        pushf
+        cli
+        xor al, al                  ; congelarlo para leerlo
+        out 0x43, al
+        in al, 0x40
+        mov ah, al
+        in al, 0x40
+        xchg al, ah
+        popf
         ret
 
 ; BL = nodo, AX = verbo de 12 bits, CL = dato -> EAX = respuesta
@@ -2595,6 +2700,10 @@ init:
         mov ax, 0x2515
         int 0x21
 .nk:
+        mov al, [opt_sordo]         ; /SIMSORDO (pruebas), desde ahora
+        mov [sim_sordo], al
+        mov byte [hda_recordar], 1  ; (al instalarse se prueban códecs
+                                    ; que pueden no estar: no se apuntan)
         ; enganchar INT 2Fh y quedar residente
         mov ax, 0x352F
         int 0x21
@@ -3035,6 +3144,20 @@ o_gpio:
         mov [opt_gpio], al
         mov byte [have_gpio], 1
         ret
+o_sordo:                            ; /SIMSORDO:nn (hex): ese nodo no contesta
+        mov al, [opt_gpio]
+        push ax
+        mov al, [have_gpio]
+        push ax
+        call o_gpio
+        mov al, [opt_gpio]
+        mov [sim_sordo_n], al
+        mov byte [opt_sordo], 1
+        pop ax
+        mov [have_gpio], al
+        pop ax
+        mov [opt_gpio], al
+        ret
 o_eapd:
         mov al, [si]
         sub al, '0'
@@ -3047,9 +3170,12 @@ opt_tab     dw k_noapr, o_noapr, k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
             dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde
             dw k_simmac, o_simmac   ; [CIRRUS]
+            dw k_sordo, o_sordo
             dw 0
 k_tilde     db "~", 0
 k_simmac    db "SIMMAC", 0          ; [CIRRUS] (solo para las pruebas)
+k_sordo     db "SIMSORDO:", 0       ; (solo para las pruebas)
+opt_sordo   db 0
 k_nosb      db "NOSB", 0
 k_noapr     db "NOAPRENDIDO", 0
 opt_noapr   db 0

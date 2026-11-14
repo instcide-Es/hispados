@@ -61,6 +61,9 @@ $(B)/MEZTEST.COM: tests/progs/meztest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SBTEST.COM: tests/progs/sbtest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# VOLTIME: cuánto tarda un cambio de volumen en HSPSND (tests/run_volumen_tests.sh)
+$(B)/VOLTIME.COM: tests/progs/voltime.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 # [SB-EOI] KBSB: el teclado mientras suena la SB (tests/run_sbeoi_tests.sh)
 $(B)/KBSB.COM: tests/progs/kbsb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -418,7 +421,7 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
-EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM $(B)/SBVGA.COM $(B)/MEMJUEGO.COM
+EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM $(B)/SBVGA.COM $(B)/MEMJUEGO.COM $(B)/VOLTIME.COM
 emmprogs: $(EMMPROGS)
 NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
 $(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
@@ -573,6 +576,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_pintura_tests.sh $(IMG)
 	tests/run_sonidos_tests.sh $(IMG)
 	tests/run_mezclador_tests.sh $(IMG)
+	tests/run_volumen_tests.sh $(IMG)
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)

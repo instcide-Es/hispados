@@ -71,6 +71,19 @@ Lo que hay:
   su alimentación) y lleva su volumen y «Sonar» en el amplificador de esa
   entrada del mezclador. Con HD Audio, HSPSND no elige de dónde se graba (no
   graba): «Grabar» no sale.
+  Un cambio de General (05h, 07h, las teclas de volumen, SONIDO, la barra de
+  Ventanas) son solo dos órdenes al códec (el amplificador, izquierda y
+  derecha); las entradas del mezclador del códec se escriben solo cuando cambia
+  algo que no es General (0Bh, 0Dh, 0Eh). Cada orden espera la respuesta como
+  mucho de 1 a 2 ms, medidos con el temporizador (antes eran 0x100000
+  vueltas: casi un segundo en un equipo real por cada orden sin respuesta, y
+  Ventanas se quedaba parada dos segundos al mover el volumen). Si la
+  interfaz de órdenes se queda ocupada, se limpia; un nodo que no contesta
+  dos veces seguidas ya no se usa (hasta 0Eh con AL=1) y, si es el del
+  volumen, General pasa a hacerse por programa.
+- **Hispa Ventanas**, mientras se arrastra la barra del volumen, se lo da a
+  HSPSND como mucho cada dos vueltas del reloj (55-110 ms) y lo último al
+  soltar: la barra y el ratón siguen al momento.
 - **Sound Blaster emulada** (`/SB`, docs/HSPSB.md): lo que el juego escribe en
   el mezclador emulado (22h, 04h, 26h, 30h-35h) **se multiplica** por lo del
   usuario (Sonidos para la voz digital, Música para la FM, General si va por
@@ -206,3 +219,12 @@ Vista=completa
   (`MEZTEST P`) y no cambia lo del usuario.
 - Y Configuración > Sonido, el grupo «Sonido» y la frase de lo que falta con
   HD Audio. Capturas en `build/mezclador_*.png`.
+
+`tests/run_volumen_tests.sh` (VOLTIME, `make emmprogs`): lo que tarda un cambio
+de volumen. (a) 50 llamadas a 05h y 50 teclas de volumen con HD Audio, AC'97 y
+Sound Blaster 16: decenas de microsegundos cada una y, con HD Audio, dos
+órdenes por cambio. (b) Con un nodo que no contesta (`HSPSND /SIMSORDO:nn`,
+solo para pruebas) el primer cambio tarda unos milisegundos (antes, en QEMU,
+0,6-0,7 s cada uno) y los demás nada, y el volumen sigue funcionando por
+programa (en la grabación). (c) En Ventanas, con ese códec, se arrastra la
+barra y al soltar ya dice el valor nuevo (`build/volumen_arrastre.png`).
