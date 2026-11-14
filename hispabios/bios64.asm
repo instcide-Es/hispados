@@ -442,7 +442,7 @@ reloj_fw:
         jnz .x2
         and eax, 0FFFFF000h
         mov ebx, eax
-        mov eax, [L(sv_lint0)]
+        call lint0_fw
         mov [ebx + 350h], eax
         mov eax, [L(sv_lvtt)]
         mov [ebx + 320h], eax
@@ -451,7 +451,7 @@ reloj_fw:
         jmp .pic
 .x2:    xor edx, edx
         mov ecx, 835h
-        mov eax, [L(sv_lint0)]
+        call lint0_fw
         wrmsr
         mov ecx, 832h
         mov eax, [L(sv_lvtt)]
@@ -472,6 +472,16 @@ reloj_fw:
         pop ebx
         pop eax
         ret
+
+; lint0_fw -> EAX = LINT0 para el firmware: el suyo; si no usa el 8259, además
+; enmascarado, para que una IRQ del 8259 que estuviera a punto de llegar (o
+; una falsa, la 7) no le entre por un vector suyo de excepción y lo cuelgue
+lint0_fw:
+        mov eax, [L(sv_lint0)]
+        cmp byte [L(T_VEC0)], 0
+        jne .r
+        or eax, 10000h
+.r:     ret
 
 ; pic_vectores: BL = vector de la IRQ 0 (el esclavo, a BL + 8); todo enmascarado
 pic_vectores:
