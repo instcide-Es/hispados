@@ -405,12 +405,13 @@ pausa)
     tecla ret; sleep 4                        # se abre: Cometas, en pausa
     aparca
     shot a1; sleep 1; shot a2                 # quieta, con el letrero
-    clic 400 300; sleep 1                     # un clic en la imagen: a jugar
+    clic 400 300                              # un clic en la imagen: a jugar
+    tamano $T/s0                              # (desde aquí se mide si suena:
+    sleep 1                                   # unos 5 s, no solo el último trozo)
     aparca
     shot a3
     tecla ret; sleep 2                        # Intro (Start): empieza la partida
     shot a4; sleep 0.5; shot a5               # se mueve
-    tamano $T/s0
     clic 254 65; sleep 0.8                    # el menú Tamaño: se para y calla
     shot b1
     tamano $T/s1; sleep 2; tamano $T/s2
