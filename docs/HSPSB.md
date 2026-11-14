@@ -348,10 +348,20 @@ protegido se queda colgado con la Sound Blaster emulada:
 - Escribe en pantalla, y en **\HISPADOS\CUELGUE.TXT** de la unidad de
   arranque (o en su raíz), el estado en el momento: dónde estaba el
   programa (CS:EIP, banderas), dónde se vio la tecla (modo protegido o V86),
-  la pila bloqueada y la de modo real en uso, los clientes, si iba paso a
-  paso, las IRQ con su manejador sin volver, las interrupciones por segundo
-  de cada IRQ, las excepciones del programa y las E/S emuladas por segundo,
-  y la última excepción (número, código, CS:EIP).
+  la pila bloqueada y la de modo real en uso, las IRQ con su manejador sin
+  volver, las interrupciones por segundo de cada IRQ, las excepciones del
+  programa y las E/S emuladas por segundo, y la última excepción (número,
+  código, CS:EIP).
+- Memoria: lo nuevo apenas ocupa memoria convencional. La foto de los
+  vectores, las cuentas por segundo y los trampolines de anillo 3 van al
+  bloque del servidor (XMS, `HB_IVT`, `HB_CNT`, `HB_R3`); el informe se
+  escribe al fondo de la pila de modo real, que al terminar ya no se usa;
+  las puertas de la IDT son de 3 octetos. Lo residente (20.4 KB con el PSP)
+  cabe con sus tablas de páginas en los 32 KB de B000-B7FF del HP Mini
+  (`run_memjuegos_tests.sh`, caso hpmini: 561.616 octetos libres, como antes
+  de Ctrl+Alt+Fin). Para eso, al instalarse, la pila pasa a `rm_stack` antes
+  de bajar las tablas, que así pueden llegar al final del bloque. Si lo
+  residente crece por encima de 4F50h octetos, NASM avisa.
 - Cómo ve la tecla: con IOPL 0, el `IN 60h` de los clientes se atrapa (el
   octeto se lee una sola vez, el del programa: leerlo aparte se lo quitaría
   al programa); lo que lee la BIOS en modo V86 lo apunta HSPEMM en un anillo

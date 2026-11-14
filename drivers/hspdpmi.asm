@@ -64,6 +64,11 @@ HB_OWN      equ 0x1A00              ; dueño de cada descriptor de la LDT
 HB_R0TOP    equ 0x5000              ; cima de la pila de anillo 0
 HB_LPM      equ 0x5000              ; pila bloqueada (anillo 3)
 LPM_SIZE    equ 0x2000
+HB_IVT      equ 0x7000              ; [SB-VGA2] foto de los vectores (Ctrl+Alt+Fin)
+HB_R3       equ 0x7400              ; [SB-VGA2] trampolines de anillo 3 (SEL_R3)
+HB_CNT      equ 0x7700              ; [SB-VGA2] cuentas por segundo: 16 IRQ,
+                                    ; excepciones y E/S emuladas; y la ventana
+                                    ; anterior en HB_CNT+72
 HB_LDT      equ 0x10000
 HB_SIZE     equ 0x20000
 HB_KB       equ 128
@@ -216,7 +221,7 @@ irq_busy    times 16 db 0           ; [SB-VGA] manejadores en curso de cada IRQ
 lpm_irq     db 0                    ; [SB-VGA] (para get_lpm)
 ; [SB-VGA] dónde quedó, en la pila bloqueada, el lpm_free de antes de cada
 ; excepción que se está atendiendo (las de dentro de otra, encima)
-EXC_MAX     equ 16
+EXC_MAX     equ 4
 exc_n       db 0
             align 2
 exc_res     times EXC_MAX dw 0
@@ -288,15 +293,13 @@ rm_stack_top:
 ; =============================================================================
 ;  Trampolines: anillo 3, IDT, callbacks y vectores de modo real
 ; =============================================================================
-r3stubs:
-        times 256+32+5 db 0xCD, 0x31    ; int 31h
-        retf                            ; R3_SAVE16
-        o32 retf                        ; R3_SAVE32
+; [SB-VGA2] los trampolines de anillo 3 (SEL_R3: 293 INT 31h, RETF y O32
+; RETF) ya no van aquí: se escriben en el bloque del servidor (HB_R3, XMS) al
+; pedirlo, y así no ocupan memoria convencional (ver dpmi_entry)
 
-idt_stubs:
+idt_stubs:                          ; [SB-VGA2] (3 octetos cada una: sin NOP)
 %rep 256
         call int_entry
-        nop
 %endrep
 
 cb_stubs:
@@ -509,6 +512,19 @@ dpmi_entry:
         a32 rep stosd
         mov ax, ds
         mov es, ax
+        ; [SB-VGA2] los trampolines de anillo 3, aquí (HB_R3)
+        mov di, HB_R3
+        mov cx, 256+32+5
+.r3:
+        mov word [ss:di], 0x31CD    ; int 31h
+        add di, 2
+        loop .r3
+        mov byte [ss:di], 0xCB      ; retf (R3_SAVE16)
+        mov word [ss:di+1], 0xCB66  ; o32 retf (R3_SAVE32)
+        mov eax, [hb_base]
+        add eax, HB_R3
+        mov di, gdt+(SEL_R3 & ~7)
+        call gdt_base
         mov di, HB_IDT
         mov ax, idt_stubs
         mov cx, 256
@@ -517,10 +533,33 @@ dpmi_entry:
         mov word [ss:di+2], SEL_HCODE
         mov word [ss:di+4], 0xEE00  ; puerta de interrupción de 32 bits, DPL 3
         mov word [ss:di+6], 0
-        add ax, 4
+        add ax, 3
         add di, 8
         loop .idt
 .ready:
+        cmp byte [kb_snapp], 0      ; [SB-VGA2] la foto de los vectores, al
+        je .nsn                     ; bloque del servidor (XMS)
+        mov byte [kb_snapp], 0
+        push ds
+        push es
+        push esi
+        push edi
+        push ecx
+        mov edi, [hb_base]
+        add edi, HB_IVT
+        mov ax, SEL_FLAT
+        mov ds, ax
+        mov es, ax
+        xor esi, esi
+        mov ecx, 256
+        cld
+        a32 rep movsd
+        pop ecx
+        pop edi
+        pop esi
+        pop es
+        pop ds
+.nsn:
         mov [e_ss], dx
         mov [e_sp], si
         movzx ebx, dx
@@ -1357,7 +1396,7 @@ hook_pm:
         inc byte [irq_busy+di]
         push di                     ; [SB-VGA2] y contada
         shl di, 2
-        inc dword [irq_cnt+di]
+        inc dword [ss:HB_CNT+di]
         pop di
 .nb:
         movzx di, byte [hookvec+di]
@@ -1706,7 +1745,9 @@ int_entry:
         cld
         movzx eax, word [bp+CF_VEC+2]
         sub ax, idt_stubs+3
-        shr ax, 2
+        mov dl, 3
+        div dl
+        movzx eax, al
         mov [bp+CF_VEC], eax
         mov bx, [tss+4]
         sub bx, bp
@@ -2538,6 +2579,22 @@ kill_msg:
 kill_client:
         mov sp, [tss+4]
         mov byte [kb_kill], 0       ; [SB-VGA2]
+        cmp byte [kb_killed], 0     ; [SB-VGA2] Ctrl+Alt+Fin: los vectores de
+        je .nv                      ; modo real como antes del programa
+        push ds
+        push es
+        mov esi, [hb_base]
+        add esi, HB_IVT
+        mov ax, SEL_FLAT
+        mov ds, ax
+        mov es, ax
+        xor edi, edi
+        mov ecx, 256
+        cld
+        a32 rep movsd
+        pop es
+        pop ds
+.nv:
         call restore_env
         mov dx, [hostseg]
         mov si, [rm_free]
@@ -2563,11 +2620,12 @@ kill_client:
         mov ax, 0x0003
         int 0x10
 .txt:
+        mov dx, msgbuf
         cmp byte [kb_killed], 0     ; [SB-VGA2] Ctrl+Alt+Fin: el informe
         je .msg                     ; también a CUELGUE.TXT
         call kb_rmclean
+        mov dx, [kb_buf]
 .msg:
-        mov dx, msgbuf
         mov ah, 0x09
         int 0x21
         mov ax, 0x4CFF
@@ -2590,15 +2648,8 @@ kb_snapshot:
         push ds
         push es
         push cs
-        pop es
-        xor si, si
-        mov ds, si
-        mov di, ivt_save
-        mov cx, 512
-        cld
-        rep movsw
-        push cs
         pop ds
+        mov byte [kb_snapp], 1      ; (la foto, en modo protegido: dpmi_entry)
         in al, 0xA1
         mov ah, al
         in al, 0x21
@@ -2616,7 +2667,6 @@ kb_snapshot:
         mov [kb_e0], ax             ; (y kb_kill)
         mov [kb_killed], ax         ; (y kb_ri)
         mov byte [kb_ndel], 0
-        mov word [cnt_len], 0
         pop es
         pop ds
         popad
@@ -2798,7 +2848,7 @@ cnt_irq:
 .c:
         movzx bx, bl
         shl bx, 2
-        inc dword [irq_cnt+bx]
+        inc dword [ss:HB_CNT+bx]
 .no:
         pop bx
         pop eax
@@ -2807,7 +2857,7 @@ cnt_irq:
 cnt_exc:
         push eax
         call cnt_tick
-        inc dword [exc_cnt]
+        inc dword [ss:HB_CNT+16*4]
         mov al, [bp+CF_VEC]
         mov [lx_vec], al
         mov ax, [bp+CF_CS]
@@ -2829,18 +2879,22 @@ cnt_tick:
         push di
         push cx
         push es
-        push ds
-        pop es
         mov [cnt_len], ax
-        mov si, irq_cnt
-        mov di, cnt_prev
+        push ds
+        push ss
+        pop ds
+        push ss
+        pop es
+        mov si, HB_CNT
+        mov di, HB_CNT + 18 * 4
         mov cx, 18 * 2
         cld
         rep movsw
-        mov di, irq_cnt
+        mov di, HB_CNT
         mov cx, 18 * 2
         xor ax, ax
         rep stosw
+        pop ds
         mov ax, [fs:0x46C]
         mov [cnt_t0], ax
         pop es
@@ -2858,7 +2912,16 @@ kb_emergency:
         push ds
         pop es
         cld
+        ; el informe, al fondo de la pila de modo real (al terminar ya no se
+        ; usa: se baja desde rm_free); si está muy llena, en msgbuf (corto)
         mov di, msgbuf
+        mov ax, [rm_free]
+        sub ax, rm_stack
+        cmp ax, KB_MAX + 1024
+        jb .bf
+        mov di, rm_stack
+.bf:
+        mov [kb_buf], di
         mov si, m_kb0
         call cpy
         mov si, m_kbP
@@ -2877,18 +2940,6 @@ kb_emergency:
         call cpy
         mov eax, [kb_efl]
         call hex_eax
-        mov si, m_kbnow
-        call cpy
-        mov ax, [bp+CF_CS]
-        call hex_ax
-        mov al, ':'
-        stosb
-        mov eax, [bp+CF_EIP]
-        call hex_eax
-        mov si, m_kbefl
-        call cpy
-        mov eax, [bp+CF_EFL]
-        call hex_eax
         mov si, m_kblpm
         call cpy
         mov eax, LPM_SIZE
@@ -2899,14 +2950,6 @@ kb_emergency:
         movzx eax, word [rm_free]
         neg eax
         add eax, rm_stack_top
-        call dec_eax
-        mov si, m_kblev
-        call cpy
-        movzx eax, byte [level]
-        call dec_eax
-        mov si, m_kbstep
-        call cpy
-        movzx eax, byte [sbpm_step]
         call dec_eax
         mov si, m_kbbusy
         call cpy
@@ -2923,13 +2966,15 @@ kb_emergency:
         cmp bx, 16
         jb .b
         ; por segundo: la ventana anterior (o, si no la hay, la de ahora)
+        cmp word [kb_buf], msgbuf   ; (en msgbuf no cabe: sin esto)
+        je .nx
         mov si, m_kbrate
         call cpy
-        mov si, cnt_prev
+        mov si, HB_CNT + 18 * 4
         mov cx, [cnt_len]
         test cx, cx
         jnz .rt
-        mov si, irq_cnt
+        mov si, HB_CNT
         mov cx, [fs:0x46C]
         sub cx, [cnt_t0]
         jnz .rt
@@ -2937,9 +2982,13 @@ kb_emergency:
 .rt:
         xor bx, bx
 .ri:
-        mov eax, [si+bx]
+        mov eax, [ss:si+bx]
         test eax, eax
         jz .rn
+        mov dx, di                  ; (que quepa)
+        sub dx, [kb_buf]
+        cmp dx, 300
+        ja .rn
         push eax                    ; (cpy cambia AL)
         push si
         mov si, m_kbirq
@@ -2960,13 +3009,13 @@ kb_emergency:
         mov si, m_kbexc
         call cpy
         pop si
-        mov eax, [si+16 * 4]
+        mov eax, [ss:si+16 * 4]
         call kb_rate
         push si
         mov si, m_kbio
         call cpy
         pop si
-        mov eax, [si+17 * 4]
+        mov eax, [ss:si+17 * 4]
         call kb_rate
         cmp byte [lx_vec], 0xFF
         je .nx
@@ -2992,6 +3041,7 @@ kb_emergency:
         mov si, m_fin
         call cpy
         jmp kill_client
+KB_MAX      equ 520                 ; lo más largo del informe
 ; EAX = cuenta en CX tics -> por segundo, en decimal
 kb_rate:
         push edx
@@ -3076,14 +3126,8 @@ kb_rmstop:
         out 0x21, al
         mov al, ah
         out 0xA1, al
-        ; los vectores (DOS/4GW ya no los va a quitar)
-        xor ax, ax
-        mov es, ax
-        xor di, di
-        mov si, ivt_save
-        mov cx, 512
-        cld
-        rep movsw
+        ; (los vectores ya los ha puesto kill_client, desde el bloque del
+        ; servidor)
         pop es
         pop ds
         ret
@@ -3112,14 +3156,15 @@ kb_rmclean:
         jc .r
 .ok:
         mov bx, ax
-        mov di, msgbuf              ; hasta el '$'
-        mov cx, 900
+        mov di, [kb_buf]            ; hasta el '$'
+        mov cx, KB_MAX + 100
         mov al, '$'
         cld
         repne scasb
         mov cx, di
-        sub cx, msgbuf + 1
-        mov dx, msgbuf
+        mov dx, [kb_buf]
+        sub cx, dx
+        dec cx
         mov ah, 0x40
         int 0x21
         mov ah, 0x3E
@@ -3130,24 +3175,21 @@ kb_rmclean:
         ret
 kb_path     db "A:\HISPADOS\CUELGUE.TXT", 0
 kb_path2    db "A:\CUELGUE.TXT", 0
-m_kb0       db 13, 10, "HSPDPMI: Ctrl+Alt+Fin: el programa se termina. Estado:", 13, 10, 0
-m_kbP       db "  tecla vista en modo protegido; el programa en CS:EIP=", 0
-m_kbR       db "  tecla vista en modo V86 (BIOS); el programa en CS:EIP=", 0
-m_kbefl     db " EFL=", 0
-m_kbnow     db 13, 10, "  al terminar: CS:EIP=", 0
-m_kblpm     db 13, 10, "  pila bloqueada en uso: ", 0
-m_kbrm      db " octetos; de modo real: ", 0
-m_kblev     db "; clientes: ", 0
-m_kbstep    db "; paso a paso: ", 0
-m_kbbusy    db 13, 10, "  IRQ con su manejador sin volver:", 0
-m_kbrate    db 13, 10, "  interrupciones al programa por segundo:", 0
+m_kb0       db 13, 10, "HSPDPMI: Ctrl+Alt+Fin. Estado:", 13, 10, 0
+m_kbP       db " (en modo prot.) en ", 0
+m_kbR       db " (en V86) en ", 0
+m_kbefl     db " EFL ", 0
+m_kblpm     db 13, 10, " pila bloqueada ", 0
+m_kbrm      db ", real ", 0
+m_kbbusy    db 13, 10, " IRQ a medias:", 0
+m_kbrate    db 13, 10, " por segundo:", 0
 m_kbirq     db " IRQ", 0
-m_kbexc     db 13, 10, "  excepciones del programa: ", 0
-m_kbio      db "; E/S emuladas (IN/OUT/CLI/STI): ", 0
-m_kblx      db 13, 10, "  la última excepción: ", 0
-m_kblx2     db "h, código ", 0
-m_kblx3     db ", en ", 0
-m_kbend     db 13, 10, "  (guardado en \HISPADOS\CUELGUE.TXT de la unidad de arranque)", 0
+m_kbexc     db "; excep. ", 0
+m_kbio      db "; E/S ", 0
+m_kblx      db 13, 10, " excepción ", 0
+m_kblx2     db "h cód. ", 0
+m_kblx3     db " en ", 0
+m_kbend     db 13, 10, " (en CUELGUE.TXT)", 0
 
 ; copiar la cadena SI (acabada en 0) a ES:DI
 cpy:
@@ -5065,7 +5107,7 @@ sbpm_gp:
         jz .ok
         add word [bp+CF_EIP+2], 1
 .ok:
-        inc dword [io_cnt]          ; [SB-VGA2]
+        inc dword [ss:HB_CNT+17*4]  ; [SB-VGA2]
         ; [SB-VGA] con el paso a paso en marcha, la instrucción emulada no da
         ; excepción de depuración: mirar ya la siguiente (ver sbpm_peek)
         mov al, [bp+CF_EFL+1]
@@ -5194,7 +5236,8 @@ n_e12       db "fallo de pila", 0
 n_e13       db "fallo de protección general", 0
 n_e14       db "fallo de página", 0
 n_ex        db "desconocida", 0
-msgbuf      times 900 db 0
+msgbuf      times 300 db 0
+kb_buf      dw msgbuf               ; [SB-VGA2] dónde está el informe
 ; [SB-VGA2] tecla de emergencia (Ctrl+Alt+Fin) y lo que se cuenta para su
 ; informe
 kb_ctrl     db 0
@@ -5213,18 +5256,22 @@ kb_indos    dd 0                    ; dirección lineal del indicador InDOS
 kb_ring     dd 0                    ; el anillo del teclado de HSPEMM (lineal)
 cnt_t0      dw 0
 cnt_len     dw 0
-irq_cnt     times 16 dd 0           ; IRQ que llegan en modo protegido
-exc_cnt     dd 0                    ; excepciones del cliente (no emuladas)
-io_cnt      dd 0                    ; IN/OUT/CLI/STI emulados
-cnt_prev    times 18 dd 0           ; lo mismo, la ventana anterior
 lx_vec      db 0xFF                 ; la última excepción del cliente
 lx_cs       dw 0
 lx_err      dd 0
 lx_eip      dd 0
 pic_save    dw 0
-ivt_save    times 1024 db 0
+kb_snapp    db 0                    ; 1 = foto de los vectores pendiente
 
 resident_end:
+; [SB-VGA2] con LH en 32 KB de memoria superior (B000-B7FF, como el HP Mini
+; 5103), las tablas (8 KB, alineadas a 4 KB) solo caben detrás si lo
+; residente (con el PSP) no pasa de 4F50h octetos (delante quedan el
+; entorno y su hueco, 10 párrafos): si crece, más memoria
+; convencional (tests/run_memjuegos_tests.sh, caso hpmini)
+%if (resident_end - $$) + 0x100 > 0x4F50
+%warning "HSPDPMI: lo residente ya no cabe con sus tablas en 32 KB de memoria superior"
+%endif
 
 ; =============================================================================
 ;  Instalación
@@ -5427,9 +5474,6 @@ install:
         mov di, gdt+SEL_TSS
         call gdt_base
         pop eax
-        add eax, r3stubs
-        mov di, gdt+(SEL_R3 & ~7)
-        call gdt_base
         mov word [tss+8], SEL_HB    ; SS0
         mov word [tss+102], tss_iomap - tss ; [SB-PM] mapa de E/S
         cmp byte [vcpi], 0
@@ -5743,10 +5787,9 @@ vfinal:
         and ax, 0xFF00
         mov [vfin], ax
         add ax, 0x200
-        mov bx, [cs:2]
-        sub bx, 0x40
-        cmp ax, bx
-        ja .no
+        mov bx, [cs:2]              ; [SB-VGA2] hasta el final del bloque: la
+        cmp ax, bx                  ; pila de instalación (que está ahí) se
+        ja .no                      ; pasa a rm_stack en vmover_go
         ; (y que no esté más arriba que el sitio de paso tras el programa)
         mov ax, [vfin]
         cmp ax, [vdir]
@@ -5787,6 +5830,14 @@ vmover_go:
         xor di, di
         mov cx, 0x1000
         mov ds, ax
+        ; [SB-VGA2] la pila, a rm_stack (residente y sin usar aún): la de
+        ; instalación está al final del bloque, donde pueden ir las tablas
+        cli
+        mov ax, cs
+        mov ss, ax
+        mov sp, rm_stack_top
+        sti
+        mov ax, ds
         push cs
         push word 0x80
         retf

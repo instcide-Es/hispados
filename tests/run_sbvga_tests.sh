@@ -111,9 +111,9 @@ for CASO in hda hdanoirq; do
   echo "== Hispa-DOS: Ctrl+Alt+Fin con un programa colgado ($CASO) =="
   TECLAS="24:ctrl-alt-end:1" run "$EMM" "$HDA -vga std" 90 "$PRE" '4|A:\HISPADOS\HSPSND /SB' '2|A:\HISPADOS\HSPDPMI' \
       '14|A:\SBVGA /C' '2|TYPE A:\HISPADOS\CUELGUE.TXT' '2|ECHO VUELTA-OK' '30|A:\SBVGA' '2|ECHO FIN-OK'
-  check "HSPDPMI: Ctrl+Alt+Fin: el programa se termina. Estado:"
-  checkre "tecla vista en modo .*; el programa en CS:EIP=" "el informe dice dónde estaba"
-  checkre "interrupciones al programa por segundo:.* IRQ0=" "el informe cuenta las IRQ por segundo"
+  check "HSPDPMI: Ctrl+Alt+Fin. Estado:"
+  checkre "(en [^)]*) en [0-9A-F]\{4\}:[0-9A-F]\{8\} EFL" "el informe dice dónde estaba"
+  checkre "por segundo:.* IRQ0=[0-9]" "el informe cuenta las IRQ por segundo"
   check "VUELTA-OK"
   if [ $(grep -c "HSPDPMI: Ctrl+Alt+Fin" $T/log.txt) -ge 2 ]; then ok "CUELGUE.TXT guardado"; else ko "CUELGUE.TXT guardado"; fi
   check "SBVGA terminado, fallos: 0"
