@@ -1081,12 +1081,13 @@ ahci_probe:
         push fs
         call a20_open
         mov esi, [abar]
-        mov eax, [fs:esi+4]                 ; GHC: solo se pone AE si no estaba
-        test eax, 0x80000000                ; (no tocar el HBA del disco de
-        jnz .ae_ok                          ;  arranque si ya está en AHCI)
-        or eax, 0x80000000
-        mov [fs:esi+4], eax
-.ae_ok:
+        mov eax, [fs:esi+4]                 ; GHC
+        test eax, 0x80000000                ; ¿ya en modo AHCI (AE)?
+        jz .legacy                          ; no: la BIOS lo usa en modo IDE/
+                                            ; compatible (así lee el disco de
+                                            ; arranque); no se toca ni se pasa
+                                            ; a AHCI (lo colgaría). Lo ve la
+                                            ; búsqueda por IDE.
         mov eax, [fs:esi+0x0C]              ; puertos implementados
         mov [pi], eax
         xor cx, cx
@@ -1115,6 +1116,7 @@ ahci_probe:
         inc cx
         jmp .port
 .pd:
+.legacy:
         call a20_restore
         pop fs
         jmp .hba
