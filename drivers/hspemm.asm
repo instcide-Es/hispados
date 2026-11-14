@@ -11,7 +11,8 @@
 ;    NOUMB        no ofrece memoria superior (UMB)
 ;    FRAME=xxxx   segmento del marco de página (D000, E000...)
 ;    I=xxxx-yyyy  incluir esa zona en la búsqueda de memoria superior libre
-;                 (por omisión, C000-DFFF)
+;                 (por omisión, C000-DFFF, B000-B7FF con vídeo en color y
+;                 lo que el mapa E820h de la BIOS no reserva en E000-EFFF)
 ;    X=xxxx-yyyy  excluirla (una tarjeta con memoria propia, por ejemplo)
 ;
 ;  Qué hace (como EMM386 en MS-DOS), en un 386 o superior:
@@ -605,6 +606,14 @@ mv          times 16 db 0
 ; 2 = marco EMS, 3 = UMB
 pgmap       times 0x60 db 0
 pgforce     times 0x60 db 0         ; 1 = incluida (I=), 2 = excluida (X=)
+mono_ok     db 0                    ; [MEM-JUEGOS] B000-B7FF se puede mirar
+eseg_ok     times 16 db 0           ; ... y las páginas de E000-EFFF
+eseg_res    times 16 db 0
+e820_n      db 0
+            align 4
+e820_buf    times 20 db 0
+fr_score    dd 0
+fr_best     dw 0
 
 init:
         pushad
@@ -1148,17 +1157,50 @@ k_exc       db "X=", 0
 ; ---- memoria superior libre ----
 ; Una página de 4 KB se da por libre si no la ocupa una ROM de ampliación
 ; (firma 55 AA cada 2 KB) y todo su contenido es FFh (o 00h). Por omisión
-; solo se mira C000-DFFF.
+; [MEM-JUEGOS] se mira:
+;   C000-DFFF   siempre;
+;   B000-B7FF   la zona del vídeo monocromo, si el vídeo es de color (INT 11h)
+;               y no está en un modo monocromo (7 o 0Fh): una VGA en color no
+;               la usa (como I=B000-B7FF en EMM386). X=B000-B7FF la quita;
+;   E000-EFFF   las páginas que el mapa de memoria de la BIOS (INT 15h E820h)
+;               no reserva; si la BIOS no da el mapa, ninguna.
 scan_upper:
+        call e820_eseg
+        ; ¿vídeo en color? (si no, B000-B7FF es la memoria del monocromo)
+        mov byte [mono_ok], 0
+        int 0x11
+        and al, 0x30
+        cmp al, 0x30
+        je .vm
+        mov ah, 0x0F
+        int 0x10
+        and al, 0x7F
+        cmp al, 7
+        je .vm
+        cmp al, 0x0F
+        je .vm
+        mov byte [mono_ok], 1
+.vm:
         ; candidatas
         mov bx, 0xA0
 .c:
         xor al, al
+        cmp bx, 0xB0
+        jb .c1
+        cmp bx, 0xB8
+        jae .c0
+        mov al, [mono_ok]
+        jmp .c1
+.c0:
         cmp bx, 0xC0
         jb .c1
-        cmp bx, 0xE0
-        jae .c1
         mov al, 1
+        cmp bx, 0xE0
+        jb .c1
+        xor al, al
+        cmp bx, 0xF0
+        jae .c1
+        mov al, [eseg_ok+bx-0xE0]
 .c1:
         cmp byte [pgforce+bx-0xA0], 1
         jne .c2
@@ -1249,23 +1291,34 @@ pick_frame:
         ja .auto
         jmp .take                   ; lo manda el usuario
 .auto:
-        mov bx, 0xF000
+        ; [MEM-JUEGOS] de los sitios posibles, el que deja el mayor bloque
+        ; de memoria superior seguido (y, si empatan, el segundo mayor; y si
+        ; no, el más bajo, que suele ser D000): así cabe arriba lo más
+        ; grande que se pueda
+        mov word [fr_best], 0
+        mov dword [fr_score], 0
+        mov bx, 0xEC00
 .l:
         mov si, bx
         shr si, 8
         mov cx, 16
 .f:
-        cmp si, 0x100
-        jae .next
         cmp byte [pgmap+si-0xA0], 1
         jne .next
         inc si
         loop .f
-        jmp .take
+        call frame_score            ; -> EAX
+        cmp eax, [fr_score]
+        jb .next                    ; (si empatan, el más bajo: D000 antes que E000)
+        mov [fr_score], eax
+        mov [fr_best], bx
 .next:
         sub bx, 0x400
         cmp bx, 0xC000
         jae .l
+        mov bx, [fr_best]
+        test bx, bx
+        jnz .take
         mov byte [opt_noems], 2     ; no hay sitio para el marco
         ret
 .take:
@@ -1278,6 +1331,135 @@ pick_frame:
         inc si
         loop .m
 .r:
+        ret
+
+; [MEM-JUEGOS] con el marco en BX (64 KB): EAX = mayor zona libre que queda
+; (páginas) * 65536 + la segunda mayor * 256 + 1 (para que cuente siempre)
+frame_score:
+        push bx
+        push cx
+        push dx
+        push si
+        mov dx, bx
+        shr dx, 8                   ; primera página del marco
+        xor cx, cx                  ; CL = mayor, CH = segunda
+        xor ah, ah                  ; la zona en curso
+        mov si, 0xA0
+.p:
+        cmp byte [pgmap+si-0xA0], 1
+        jne .corte
+        mov bx, si
+        sub bx, dx
+        cmp bx, 16
+        jb .corte                   ; (dentro del marco)
+        inc ah
+        jmp .s
+.corte:
+        call .apunta
+        xor ah, ah
+.s:
+        inc si
+        cmp si, 0x100
+        jb .p
+        call .apunta
+        movzx eax, cl
+        shl eax, 16
+        mov al, 1
+        mov ah, ch
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        ret
+.apunta:                            ; la zona AH entre las dos mayores
+        cmp ah, cl
+        jbe .a1
+        mov ch, cl
+        mov cl, ah
+        ret
+.a1:
+        cmp ah, ch
+        jbe .a2
+        mov ch, ah
+.a2:
+        ret
+
+; [MEM-JUEGOS] eseg_ok[n] = 1 si la página E000h + n*100h no la reserva el
+; mapa de memoria de la BIOS (INT 15h E820h); todo a 0 si no hay mapa
+e820_eseg:
+        push es
+        pushad
+        push cs
+        pop es
+        mov di, eseg_ok
+        mov cx, 32                  ; (eseg_ok y eseg_res)
+        xor al, al
+        rep stosb
+        xor ebx, ebx
+        mov byte [e820_n], 0
+.l:
+        mov eax, 0xE820
+        mov edx, 0x534D4150         ; 'SMAP'
+        mov ecx, 20
+        mov di, e820_buf
+        mov dword [e820_buf+16], 1
+        int 0x15
+        jc .fin
+        cmp eax, 0x534D4150
+        jne .fin
+        inc byte [e820_n]
+        cmp dword [e820_buf+16], 1  ; memoria libre: no reserva nada
+        je .sig
+        cmp dword [e820_buf+12], 0  ; base por encima de 4 GB: no toca
+        jne .sig
+        mov eax, [e820_buf+8]
+        or eax, [e820_buf+12]
+        jz .sig
+        ; ¿se solapa con [E0000h, F0000h)? las páginas que toca, reservadas
+        mov esi, [e820_buf]         ; principio
+        mov eax, [e820_buf+8]
+        cmp dword [e820_buf+12], 0
+        je .lg
+        mov eax, 0xFFFFFFFF
+.lg:
+        add eax, esi
+        jnc .lf
+        mov eax, 0xFFFFFFFF
+.lf:                                ; EAX = final (exclusivo)
+        mov edx, 0xE0000
+.pg:
+        lea ebp, [edx+0x1000]
+        cmp esi, ebp
+        jae .pn
+        cmp eax, edx
+        jbe .pn
+        mov di, dx
+        shr di, 12
+        and di, 15
+        mov byte [eseg_res+di], 1
+.pn:
+        add edx, 0x1000
+        cmp edx, 0xF0000
+        jb .pg
+.sig:
+        test ebx, ebx
+        jz .fin
+        cmp byte [e820_n], 64
+        jb .l
+.fin:
+        cmp byte [e820_n], 0
+        je .x
+        xor bx, bx
+.m:
+        mov al, [eseg_res+bx]
+        xor al, 1
+        mov [eseg_ok+bx], al
+        inc bx
+        cmp bx, 16
+        jb .m
+.x:
+        popad
+        pop es
         ret
 
 pick_umbs:

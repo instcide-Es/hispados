@@ -52,11 +52,15 @@ run "$X$E"'\r\nDOS=UMB\r\nDEVICEHIGH=A:\\HISPADOS\\HSPTEST.SYS\r\nFILES=30\r\n' 
   '1|IF ERRORLEVEL 255 ECHO NIVEL-255' '2|A:\BIN\EMMMISC W' '2|MEM' '2|MEM /C' \
   '2|A:\BIN\EMSTEST' '2|A:\BIN\VCPITEST'
 check "HSPEMM 0.1: EMS 4.0 y VCPI, "
-check "marco de página en D000"
+# (el marco va donde deje el mayor bloque de memoria superior seguido: D000
+# con la SeaBIOS de QEMU 8, D800 con la de QEMU 10; tiene que ser el mismo
+# que ve EMSTEST)
+fr=$(grep -o "marco de página en [CDE][0-9A-F]00" $T/log.txt | head -1 | sed 's/.* //')
+if [ -n "$fr" ]; then ok "marco de página en $fr"; else ko "marco de página en C000-EC00"; fi
 check "memoria superior: "
 check "HSPTEST.SYS: dispositivo de prueba instalado"
 check "EMS detectado OK"
-check "EMS marco en D000"
+check "EMS marco en ${fr:-D000}"
 for s in mapear errores contexto "mapa multiple" nombres reasignar mover; do check "EMS $s OK"; done
 count "EMS test OK" 2
 check "VCPI detectado OK"
@@ -96,7 +100,8 @@ check "XMS test OK"
 checkn "FALLO"
 
 echo "== HSPEMM FRAME=D000 X=C000-CFFF 1024, y NOUMB =="
-run "$X$E"' frame=d000 x=c000-cfff 1024\r\nFILES=30\r\n' 30 '2|A:\BIN\EMSTEST' '2|A:\BIN\UMBTEST'
+# (B000-B7FF y E000-EFFF también se miran por omisión: fuera)
+run "$X$E"' frame=d000 x=c000-cfff x=b000-b7ff x=e000-efff 1024\r\nFILES=30\r\n' 30 '2|A:\BIN\EMSTEST' '2|A:\BIN\UMBTEST'
 check "HSPEMM 0.1: EMS 4.0 y VCPI, 1024 KB; marco de página en D000"
 checkn "memoria superior: "
 check "EMS test OK"

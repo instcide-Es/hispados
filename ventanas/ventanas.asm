@@ -76,7 +76,9 @@ inicio:
 
 ; =============================================================================
 ;  El lanzador: lo único de VENTANAS.COM que se queda en la memoria
-;  convencional (unos 2 KB) mientras Hispa Ventanas está en marcha.
+;  convencional (unos 2 KB) mientras Hispa Ventanas está en marcha; si hay
+;  memoria superior libre, se muda a ella (lz_arriba) y un juego tiene la
+;  misma memoria convencional que desde la línea de órdenes.
 ;
 ;  VENTANAS.COM se ejecuta dos veces. La primera copia (esta) suelta toda su
 ;  memoria menos este trozo, carga HSPRATON y HSPDPMI si faltan y ejecuta
@@ -259,8 +261,10 @@ lz_sb:
         mov cx, [es:3]              ; párrafos del entorno de ahora
         mov bx, cx
         add bx, 4
+        call lz_alto                ; [MEM-JUEGOS] arriba si cabe
         mov ah, 0x48
         int 0x21
+        call lz_bajo
         jc .carga
         push ds
         mov es, ax
@@ -281,6 +285,44 @@ lz_sb:
         mov si, lz_n_snd
         mov bx, lz_c_sb
         jmp lz_hermano
+
+; [MEM-JUEGOS] reservar memoria primero en la superior (si la hay) y si no
+; abajo; lz_bajo deja la estrategia y el enlace como estaban (conserva CF y AX)
+lz_alto:
+        push ax
+        push bx
+        mov ax, 0x5800
+        int 0x21
+        mov [lz_estr0], ax
+        mov ax, 0x5802
+        int 0x21
+        mov [lz_enl0], al
+        mov ax, 0x5803
+        mov bx, 1
+        int 0x21
+        mov ax, 0x5801
+        mov bx, 0x81
+        int 0x21
+        pop bx
+        pop ax
+        ret
+lz_bajo:
+        pushf
+        push ax
+        push bx
+        mov bx, [lz_estr0]
+        mov ax, 0x5801
+        int 0x21
+        movzx bx, byte [lz_enl0]
+        mov ax, 0x5803
+        int 0x21
+        pop bx
+        pop ax
+        popf
+        ret
+lz_estr0    dw 0
+lz_enl0     db 0
+            align 2
 
 ; carga HSPRATON y HSPDPMI si faltan (primero el ratón: HSPDPMI tiene que
 ; ser el último residente para poder quitarlo)
@@ -690,7 +732,148 @@ lanzador:
         mov bx, (lz_fin - inicio + 0x100 + 15) / 16
         mov ah, 0x4A                ; soltar todo menos el lanzador
         int 0x21
+        call lz_arriba              ; (si cabe, sigue en la memoria superior)
         jmp lz_ciclo
+
+; [MEM-JUEGOS] El lanzador (con su PSP) y su entorno se mudan a la memoria
+; superior si hay sitio: así el juego tiene la misma memoria convencional que
+; desde la línea de órdenes. Se copia el PSP entero (con la tabla de
+; archivos abiertos), se ponen la copia como dueña de sus dos bloques y como
+; programa en curso (INT 21h AH=50h), se sueltan los bloques de abajo y se
+; sigue en lz_ciclo, ya en la copia. Si no hay sitio, vuelve y todo sigue
+; como siempre (abajo).
+LZ_PARR     equ (lz_fin - inicio + 0x100 + 15) / 16
+lz_arriba:
+        mov ax, 0x5800              ; la estrategia y el enlace, para dejarlos
+        int 0x21
+        mov [lz_estr], ax
+        mov ax, 0x5802
+        int 0x21
+        mov [lz_enl], al
+        mov ax, 0x5803
+        mov bx, 1
+        int 0x21
+        jc .nada                    ; (no hay memoria superior)
+        mov ax, 0x5801
+        mov bx, 0x41                ; solo arriba, el que mejor se ajuste
+        int 0x21
+        mov bx, LZ_PARR
+        mov ah, 0x48
+        int 0x21
+        jc .deja
+        mov [lz_nuevo], ax
+        ; el entorno (si lo hay), también arriba
+        mov word [lz_nent], 0
+        mov ax, [0x2C]
+        test ax, ax
+        jz .copia
+        dec ax
+        mov es, ax
+        mov bx, [es:3]
+        mov ah, 0x48
+        int 0x21
+        jc .copia                   ; (no cabe: se queda abajo)
+        mov [lz_nent], ax
+        push ds
+        mov es, ax
+        mov cx, bx
+        shl cx, 3                   ; párrafos -> palabras
+        mov ds, [0x2C]
+        xor si, si
+        xor di, di
+        rep movsw
+        pop ds
+.copia:
+        mov es, [lz_nuevo]
+        xor si, si
+        xor di, di
+        mov cx, LZ_PARR * 8
+        rep movsw
+        mov ax, es
+        ; la tabla de archivos: si es la del PSP, la de la copia
+        cmp word [es:0x34], 0x18
+        jne .jft
+        mov bx, cs
+        cmp [es:0x36], bx
+        jne .jft
+        mov [es:0x36], ax
+.jft:
+        mov bx, [lz_nent]
+        test bx, bx
+        jnz .e1
+        mov bx, [es:0x2C]           ; (el de abajo, que pasa a ser de la copia)
+        test bx, bx
+        jz .s1
+        jmp .e2
+.e1:
+        mov [es:0x2C], bx
+.e2:
+        dec bx
+        mov es, bx
+        mov [es:1], ax              ; dueño del entorno
+.s1:
+        ; el bloque nuevo: su dueño (él mismo) y el nombre del de abajo
+        mov bx, ax
+        dec bx
+        mov es, bx
+        mov [es:1], ax
+        mov bx, cs
+        dec bx
+        push ds
+        mov ds, bx
+        mov si, 8
+        mov di, 8
+        mov cx, 4
+        rep movsw
+        pop ds
+        ; la estrategia y el enlace, como estaban
+        mov bx, [lz_estr]
+        mov ax, 0x5801
+        int 0x21
+        movzx bx, byte [lz_enl]
+        mov ax, 0x5803
+        int 0x21
+        ; el programa en curso es ya la copia
+        mov bx, [lz_nuevo]
+        mov ah, 0x50
+        int 0x21
+        ; soltar el entorno de abajo (si se ha copiado) y el propio bloque
+        cmp word [lz_nent], 0
+        je .s2
+        mov es, [0x2C]
+        mov ah, 0x49
+        int 0x21
+.s2:
+        push cs
+        pop es
+        mov ah, 0x49
+        int 0x21
+        ; seguir en la copia (este código ya no es de nadie, pero sigue ahí)
+        mov ax, [lz_nuevo]
+        cli
+        mov ss, ax
+        mov sp, lz_pila_fin
+        sti
+        mov ds, ax
+        mov es, ax
+        push ax
+        push word lz_ciclo
+        retf
+.deja:
+        mov bx, [lz_estr]
+        mov ax, 0x5801
+        int 0x21
+        movzx bx, byte [lz_enl]
+        mov ax, 0x5803
+        int 0x21
+.nada:
+        push cs
+        pop es
+        ret
+lz_estr     dw 0
+lz_enl      db 0
+lz_nuevo    dw 0
+lz_nent     dw 0
 
 ; =============================================================================
 ;  El entorno gráfico (la segunda copia)

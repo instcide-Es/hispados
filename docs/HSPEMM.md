@@ -25,13 +25,29 @@ En `CONFIG.SYS`, justo después de `HSPXMS.SYS`:
 | *número* | KB para EMS y VCPI (por omisión, la mitad de la memoria extendida libre, 32 MB como mucho) |
 | `NOEMS` | sin marco de página: no hay EMS (el dispositivo se llama `EMMQXXX0`), pero sí VCPI y 64 KB más de memoria superior |
 | `NOUMB` | no ofrece memoria superior |
-| `FRAME=xxxx` | segmento del marco de página (por omisión, los 64 KB libres más altos de C000-DFFF; normalmente D000) |
-| `I=xxxx-yyyy` | incluir esa zona en la búsqueda de memoria superior libre (por omisión solo C000-DFFF) |
-| `X=xxxx-yyyy` | excluirla (una tarjeta con memoria propia) |
+| `FRAME=xxxx` | segmento del marco de página (por omisión, el sitio de 64 KB libres que deja el mayor bloque de memoria superior seguido; normalmente D000) |
+| `I=xxxx-yyyy` | incluir esa zona en la búsqueda de memoria superior libre (por omisión C000-DFFF; B000-B7FF si el vídeo es de color; y las páginas de E000-EFFF que el mapa de memoria de la BIOS, INT 15h E820h, no reserva) |
+| `X=xxxx-yyyy` | excluirla (una tarjeta con memoria propia; `X=B000-B7FF` si se usa una pantalla monocromo o un programa que la busca) |
+
+Zonas que se miran por omisión (en cada página de 4 KB se comprueba además
+que no haya una ROM y que esté vacía: toda a FFh o a 00h):
+
+- **C000-DFFF**, como siempre.
+- **B000-B7FF**, la memoria del vídeo monocromo (MDA, Hercules): una VGA en
+  color no la usa. Solo si la BIOS dice vídeo en color (INT 11h) y no está en
+  un modo monocromo (7 o 0Fh). Como `I=B000-B7FF` en EMM386: si un programa
+  pone el modo 7 o busca una tarjeta monocromo escribiendo ahí, se para el
+  equipo; para esos, `X=B000-B7FF`.
+- **E000-EFFF**, solo las páginas que la BIOS no reserva en su mapa de memoria
+  (INT 15h E820h); sin mapa, ninguna. En los portátiles y PC con BIOS de
+  128 KB (E0000-FFFFF reservada) no se toca; en QEMU (SeaBIOS) salen unos 28 KB.
+
+El marco de página EMS se pone donde deje el mayor bloque de memoria superior
+seguido (si empatan, el segundo mayor; si no, el más bajo: normalmente D000).
 
 Al arrancar dice lo que ha encontrado:
 
-    HSPEMM 0.1: EMS 4.0 y VCPI, 15696 KB; marco de página en D000; memoria superior: 12 KB ( CD00-CFFF)
+    HSPEMM 0.1: EMS 4.0 y VCPI, 15664 KB; marco de página en D000; memoria superior: 68 KB ( B000-B7FF CE00-CFFF E000-E6FF)
 
 `MEM` y `MEM /C` enseñan la memoria superior; `LH programa` carga un programa
 en ella (si no cabe, abajo, como siempre) y `DEVICEHIGH=` un controlador (si

@@ -119,7 +119,8 @@ archivo y como una tarea; los nuevos (los juegos y Pintura) van aparte, en
 archivos .HVP que se cargan como una tarea más.
 
 `VENTANAS.COM` se ejecuta dos veces: la primera copia es el **lanzador**
-(2 KB que se quedan en memoria convencional) y ejecuta la segunda, que es el
+(unos 2,5 KB con su entorno; si hay memoria superior libre, se muda a ella
+y no gasta nada de la convencional) y ejecuta la segunda, que es el
 entorno gráfico (ver «Programas de Hispa-DOS desde Hispa Ventanas»).
 
 Lo que usa la parte de modo real (el código de arranque, el búfer de paso
@@ -500,7 +501,12 @@ un programa de Hispa-DOS lo ejecuta **fuera** de Hispa Ventanas, con la pantalla
 en modo texto y toda la memoria convencional para él, y después vuelve:
 
 1. `VENTANAS.COM` se ejecuta dos veces. La primera copia es el **lanzador**:
-   suelta toda su memoria menos los primeros 2 KB (PSP incluido), carga
+   suelta toda su memoria menos los primeros 2 KB (PSP incluido); si hay
+   memoria superior (`DOS=UMB`) donde quepan, se muda a ella con su entorno
+   (copia el PSP, se hace dueño de los bloques nuevos, INT 21h AH=50h y suelta
+   los de abajo): así un juego lanzado desde Hispa Ventanas tiene la misma
+   memoria convencional que desde la línea de órdenes
+   (`tests/run_memjuegos_tests.sh`). Después carga
    HSPRATON y HSPDPMI si faltan (por ese orden, para que HSPDPMI quede el
    último) y ejecuta otra vez VENTANAS.COM con la opción interna `/@`: esa
    segunda copia es el entorno gráfico.

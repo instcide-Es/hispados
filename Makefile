@@ -418,7 +418,7 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
-EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM $(B)/SBVGA.COM
+EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM $(B)/SBVGA.COM $(B)/MEMJUEGO.COM
 emmprogs: $(EMMPROGS)
 NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
 $(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
@@ -460,6 +460,10 @@ $(B)/LANZTEST.COM: tests/progs/lanztest.asm | $(B)
 $(B)/SBJUEGO.COM: tests/progs/sbjuego.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
+# el que mide la memoria que ve un juego (tests/run_memjuegos_tests.sh)
+$(B)/MEMJUEGO.COM: tests/progs/memjuego.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+
 # y el de las opciones de juego: velocidad, LOADFIX... (tests/run_accesos_tests.sh)
 $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -478,6 +482,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)
+	tests/run_memjuegos_tests.sh $(IMG)
 	EMM=1 tests/run_dpmi_tests.sh $(IMG)
 	EMM=1 DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	EMM=1 tests/run_sound_tests.sh $(IMG)

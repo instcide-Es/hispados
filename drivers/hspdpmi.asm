@@ -4815,6 +4815,8 @@ install:
         mov dx, msg_vcpi
         call print
         mov dx, [vcpi_top]          ; con las tablas de páginas
+        cmp byte [vmover], 0        ; [MEM-JUEGOS] ¿se bajan junto al código?
+        jne vmover_go
 .tsr:
         mov ax, 0x3100
         int 0x21
@@ -4845,6 +4847,63 @@ vcpi_setup:
         and ax, 0xFF00
         mov [vdir], ax
         add ax, 0x200
+        ; [MEM-JUEGOS] el sitio definitivo de las tablas: justo tras el código
+        ; residente (alineado a 4 KB), encima del de instalación, que entonces
+        ; ya no hace falta. Se montan en un sitio de paso (tras el programa,
+        ; si cabe en su bloque, o en un bloque aparte) y al quedar residente
+        ; las baja vmover_go. Así no queda el hueco del código de instalación
+        ; (unos 4 KB) y con LH caben más veces en el bloque de arriba.
+        call vfinal
+        jc .sinmover
+        ; ¿el sitio de paso tras el programa cabe en el bloque?
+        mov bx, [cs:2]
+        sub bx, 0x40
+        cmp ax, bx
+        jbe .mover
+        ; si no, un bloque de paso (donde sea; se suelta al quedar residente)
+        push ax
+        mov ax, 0x5800
+        int 0x21
+        push ax
+        mov ax, 0x5802
+        int 0x21
+        push ax
+        mov ax, 0x5803
+        mov bx, 1
+        int 0x21
+        mov ax, 0x5801
+        mov bx, 0x80
+        int 0x21
+        mov ah, 0x48
+        mov bx, 0x2FF
+        int 0x21
+        pushf
+        pop si
+        mov di, ax
+        pop bx
+        xor bh, bh
+        mov ax, 0x5803
+        int 0x21
+        pop bx
+        mov ax, 0x5801
+        int 0x21
+        pop ax
+        push si
+        popf
+        jc .sinmover
+        mov [vtmp], di
+        add di, 0xFF
+        and di, 0xFF00
+        mov [vdir], di
+.mover:
+        mov byte [vmover], 1
+        mov ax, [vfin]
+        add ax, 0x200
+        mov bx, cs
+        sub ax, bx
+        mov [vcpi_top], ax
+        jmp .cero
+.sinmover:
         ; [SB-PM] ¿cabe en el bloque de memoria del programa? Con LH, en un
         ; bloque de memoria superior pequeño, no siempre: el directorio se
         ; ponía encima de la pila (al final del bloque) o detrás, en lo de
@@ -4853,21 +4912,36 @@ vcpi_setup:
         sub bx, 0x40                ; (y 1 KB para la pila, que está al final)
         cmp ax, bx
         jbe .cabe
-        mov ax, 0x5800              ; (con LH la estrategia puede ser
-        int 0x21                    ; «solo arriba»: se pide abajo)
+        ; [MEM-JUEGOS] en la memoria superior si cabe (el bloque que mejor
+        ; se ajuste) y si no, abajo: las tablas se buscan por su dirección
+        ; física (DE06h), estén donde estén. 2FFh párrafos bastan para dos
+        ; páginas de 4 KB alineadas empiece donde empiece el bloque
+        mov ax, 0x5800
+        int 0x21
         push ax
         mov ax, 0x5802
         int 0x21
         push ax
         mov ax, 0x5803
+        mov bx, 1
+        int 0x21
+        mov ax, 0x5801
+        mov bx, 0x81
+        int 0x21
+        mov ah, 0x48
+        mov bx, 0x2FF
+        int 0x21
+        jnc .umbok
+        mov ax, 0x5803              ; (sin memoria superior: abajo)
         xor bx, bx
         int 0x21
         mov ax, 0x5801
         xor bx, bx
         int 0x21
         mov ah, 0x48
-        mov bx, 0x300
+        mov bx, 0x2FF
         int 0x21
+.umbok:
         pushf
         pop si
         mov di, ax
@@ -4993,6 +5067,97 @@ vcpi_setup:
         mov byte [vcpi], 0
         stc
         ret
+
+; [MEM-JUEGOS] vfin = el sitio definitivo del directorio y la tabla 0: tras
+; resident_end, alineado a 4 KB. CF=1 si no cabe en el bloque del programa
+; (conserva AX)
+vfinal:
+        push ax
+        push bx
+        mov ax, cs
+        add ax, ((resident_end - $$) + 0x100 + 15) >> 4
+        add ax, 0xFF
+        and ax, 0xFF00
+        mov [vfin], ax
+        add ax, 0x200
+        mov bx, [cs:2]
+        sub bx, 0x40
+        cmp ax, bx
+        ja .no
+        ; (y que no esté más arriba que el sitio de paso tras el programa)
+        mov ax, [vfin]
+        cmp ax, [vdir]
+        ja .no
+        pop bx
+        pop ax
+        clc
+        ret
+.no:
+        pop bx
+        pop ax
+        stc
+        ret
+
+; [MEM-JUEGOS] Al quedar residente (DX = párrafos): copia el directorio y la
+; tabla 0 a vfin, pone en el directorio la dirección física nueva de la
+; tabla 0 y en vsw_cr3 la del directorio, suelta el bloque de paso y termina
+; (INT 21h AX=3100h). Lo último se hace desde una copia de vm_stub en el PSP
+; (80h: la cola de órdenes ya no hace falta), porque vfin cae encima de este
+; código.
+vmover_go:
+        cmp byte [vpse], 0
+        jne .pse
+        movzx eax, word [vfin]      ; (sin PSE el directorio se usa luego)
+        shl eax, 4
+        mov [vt_dir], eax
+.pse:
+        push cs
+        pop es
+        mov si, vm_stub
+        mov di, 0x80
+        mov cx, vm_stub_fin - vm_stub
+        rep movsb
+        mov bp, [vtmp]
+        mov ax, [vdir]
+        mov es, [vfin]
+        xor si, si
+        xor di, di
+        mov cx, 0x1000
+        mov ds, ax
+        push cs
+        push word 0x80
+        retf
+vm_stub:
+        cld
+        rep movsw
+        push cs
+        pop ds
+        push dx
+        mov cx, es
+        shr cx, 8
+        inc cx                      ; la tabla 0
+        mov ax, 0xDE06
+        int 0x67
+        or dl, 7
+        mov [es:0], edx
+        mov cx, es
+        shr cx, 8
+        mov ax, 0xDE06
+        int 0x67
+        mov [vsw_cr3], edx
+        pop dx
+        test bp, bp
+        jz .t
+        mov es, bp
+        mov ah, 0x49
+        int 0x21
+.t:
+        mov ax, 0x3100
+        int 0x21
+vm_stub_fin:
+%if vm_stub_fin - vm_stub > 120
+%error "vm_stub no cabe en la cola de órdenes del PSP"
+%endif
 
 ; Sin PSE: tablas de páginas de 4 KB para la identidad de toda la RAM, en un
 ; bloque XMS bloqueado (más VT_EXTRA de reserva para 0800h). Se rellenan
@@ -5233,6 +5398,9 @@ vt_kb       dw 0
 vt_i        dw 0
 vdir        dw 0
 vcpi_top    dw 0
+vfin        dw 0                    ; [MEM-JUEGOS] sitio definitivo de las tablas
+vtmp        dw 0                    ; ... bloque de paso (0: tras el programa)
+vmover      db 0                    ; ... 1: bajarlas al quedar residente
 
 ; HSPDPMI /D: quita el servidor de la memoria (o, si no puede, lo desactiva)
 descargar:
