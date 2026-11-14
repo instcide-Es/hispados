@@ -23,6 +23,7 @@
 
 ; ---- tablas de UEFI (IA32: punteros de 4 octetos) ----
 ST_CONIN        equ 36
+ST_CONINH       equ 32
 ST_CONOUT       equ 44
 ST_RUNTIME      equ 56
 ST_BOOTSERV     equ 60
@@ -473,17 +474,66 @@ despachador:
         sti
         call [eax + BS_STALL]
         add esp, 4
+        cli
+        cmp dword [V(coninex)], 0       ; SimpleTextInputEx: estado de Ctrl/Alt
+        jg .ex
+        jl .plano
+        mov dword [V(coninex)], -1      ; primera vez: localizarlo
+        lea eax, [V(coninex)]
+        push eax
+        lea eax, [V(guid_inex)]
+        push eax
+        mov eax, [V(sistema)]
+        mov eax, [eax + ST_CONINH]
+        push eax
+        mov eax, [V(bootserv)]
+        call [eax + BS_HANDLEPROT]
+        add esp, 12
+        test eax, eax
+        jz .ex
+        mov dword [V(coninex)], -1
+        jmp .plano
+.ex:
+        sti
+        lea eax, [V(keydata)]
+        push eax
+        mov eax, [V(coninex)]
+        push eax
+        call [eax + 4]                  ; ReadKeyStrokeEx
+        add esp, 8
+        cli
+        test eax, eax
+        jnz .sin_tecla
+        mov eax, [V(keydata) + 4]       ; estado de las modificadoras
+        test eax, 0x80000000
+        jz .devolver
+        test eax, 0x0C                  ; algún Ctrl
+        jz .devolver
+        test eax, 0x30                  ; algún Alt
+        jz .devolver
+        cmp word [V(keydata)], 0x08     ; Supr -> reiniciar
+        jne .devolver
+        xor edx, edx
+        jmp .reiniciar
+.devolver:
+        movzx eax, word [V(keydata)]
+        movzx edx, word [V(keydata) + 2]
+        shl edx, 16
+        or eax, edx
+        jmp .fin
+.plano:
+        sti
         lea eax, [V(tecla_efi)]
         push eax
         mov eax, [V(sistema)]
         mov eax, [eax + ST_CONIN]
         push eax
         call [eax + TXT_READKEY]
-        cli
         add esp, 8
+        cli
         test eax, eax
         jnz .sin_tecla
-        mov eax, [V(tecla_efi)]         ; ScanCode (bajo) y UnicodeChar (alto)
+        mov eax, [V(tecla_efi)]
         jmp .fin
 .sin_tecla:
         mov eax, -1
@@ -785,6 +835,11 @@ n_manejadores   dd 0
 manejadores     dd 0
 bajo_tope       dd 0
 tecla_efi       dd 0
+coninex         dd 0
+keydata         times 12 db 0
+guid_inex       dd 0DD9E7534h
+                dw 7762h, 4698h
+                db 8Ch, 14h, 0F5h, 85h, 17h, 0A6h, 25h, 0AAh
 ndiscos         db 0
 borrada         db 0
         align 8

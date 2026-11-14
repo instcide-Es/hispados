@@ -20,6 +20,7 @@ BS_LOCATEPROT   equ 320
 BS_HANDLEPROT   equ 152
 BS_LOCATEHBUF   equ 312
 ST_CONIN        equ 48
+ST_CONINH       equ 40           ; ConsoleInHandle (para SimpleTextInputEx)
 ST_RUNTIME      equ 88
 RT_RESET        equ 104
 
@@ -471,10 +472,52 @@ despachador:
         mov ecx, 1000                   ; atienda el teclado (USB)
         sti
         call [rax + BS_STALL]
+        cli
+        cmp qword [rel coninex], 0      ; el protocolo con el estado de Ctrl/Alt
+        jg .ex                          ; (SimpleTextInputEx): localizado y hay
+        jl .plano                       ; localizado y no hay -> sin modificadores
+        mov qword [rel coninex], -1     ; primera vez: localizarlo
+        mov rax, [rel sistema]
+        mov rcx, [rax + ST_CONINH]
+        lea rdx, [rel guid_inex]
+        lea r8, [rel coninex]
+        mov rax, [rel bootserv]
+        call [rax + BS_HANDLEPROT]
+        test rax, rax
+        jz .ex
+        mov qword [rel coninex], -1
+        jmp .plano
+.ex:
+        sti
+        mov rcx, [rel coninex]
+        lea rdx, [rel keydata]
+        call [rcx + 8]                  ; ReadKeyStrokeEx (tecla + Ctrl/Alt/...)
+        cli
+        test rax, rax
+        jnz .sin_tecla
+        mov eax, [rel keydata + 4]      ; estado de las teclas modificadoras
+        test eax, 0x80000000            ; ¿válido?
+        jz .devolver
+        test eax, 0x0C                  ; ¿algún Ctrl?
+        jz .devolver
+        test eax, 0x30                  ; ¿algún Alt?
+        jz .devolver
+        cmp word [rel keydata], 0x08    ; ¿Supr? (código de UEFI) -> reiniciar
+        jne .devolver
+        xor edx, edx                    ; EfiResetCold
+        jmp .reiniciar
+.devolver:
+        movzx eax, word [rel keydata]   ; ScanCode (bajo)
+        movzx edx, word [rel keydata + 2]  ; UnicodeChar (alto)
+        shl edx, 16
+        or eax, edx
+        jmp .fin
+.plano:
+        sti
         mov rax, [rel sistema]
         mov rcx, [rax + ST_CONIN]
         lea rdx, [rel tecla_efi]
-        call [rcx + 8]                  ; ReadKeyStroke
+        call [rcx + 8]                  ; ReadKeyStroke (sin modificadores)
         cli
         test rax, rax
         jnz .sin_tecla
@@ -825,6 +868,11 @@ n_manejadores   dq 0
 manejadores     dq 0
 bajo_tope       dq 0
 tecla_efi       dd 0
+coninex         dq 0                    ; SimpleTextInputEx (0 = sin mirar, -1 = no hay)
+keydata         times 12 db 0           ; tecla + estado de Ctrl/Alt/...
+guid_inex       dd 0DD9E7534h           ; EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL
+                dw 7762h, 4698h
+                db 8Ch, 14h, 0F5h, 85h, 17h, 0A6h, 25h, 0AAh
 ndiscos         db 0
 borrada         db 0
         align 8
