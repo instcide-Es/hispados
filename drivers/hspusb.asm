@@ -3042,6 +3042,15 @@ init:
         mov word [fail_msg], msg_v86
         cmp byte [iomode], 2
         je .fail
+        ; Con HispaBIOS (Hispa-DOS sobre UEFI) el USB es del firmware: por
+        ; él se leen la memoria de arranque y el teclado. No se toca nunca.
+        mov word [fail_msg], msg_uefi
+        mov ax, 4842h
+        int 15h
+        jc .no_hb
+        cmp ax, 6862h
+        je .fail
+.no_hb:
         ; qué controladoras hay y si las usa la BIOS
         call pci_survey
         mov word [fail_msg], msg_nohc
@@ -6100,6 +6109,7 @@ msg_drv     db "?:", 13, 10, 0
 msg_no8042  db "Sin controlador de teclado (8042): las teclas van al búfer de la BIOS.", 13, 10, 0
 msg_scratch db "El controlador xHCI necesita memoria extendida: cargue HSPXMS.SYS", 13, 10
             db "antes que HSPUSB.SYS en CONFIG.SYS.", 13, 10, 0
+msg_uefi    db "Equipo UEFI (HispaBIOS): el USB lo lleva el firmware y HSPUSB no se carga.", 13, 10, 0
 msg_nomem   db "No hay memoria suficiente para HSPUSB.", 13, 10, 0
 msg_v86     db "No funciona en modo V86 sin VCPI (Windows 386 mejorado).", 13, 10, 0
 msg_high    db "Los registros del xHCI están por encima de 4 GB: no se admite.", 13, 10, 0

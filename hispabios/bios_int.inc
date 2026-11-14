@@ -685,6 +685,12 @@ k_sondear:
 ; =============================================================================
 int15:
         sti
+        cmp ax, 4842h                   ; 'HB': ¿es HispaBIOS? -> AX = 'hb',
+        jne .no_hb                      ; BX = versión (0.1), CF = 0
+        mov ax, 6862h
+        mov bx, 0001h
+        jmp d_bien
+.no_hb:
         cmp ah, 88h
         je s_ext
         cmp ax, 0E801h
