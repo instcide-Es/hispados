@@ -21,9 +21,8 @@ BS_LOCATEPROT   equ 320
 ALLOC_ADDRESS   equ 2           ; AllocateAddress
 MEM_LOADERDATA  equ 2           ; EfiLoaderData
 MAPA_MAX        equ 16384       ; octetos para el mapa de memoria
-TR_BASE         equ 8000h       ; donde va el trampolín (tramp64.asm)
-TR_MARCA        equ TR_BASE + 0E00h
-TX_BASE         equ 9000h       ; pantalla de texto de DOS (80x25x2)
+BIOS_BASE       equ 90000h      ; la BIOS de modo real (bios64.asm)
+TX_BASE         equ BIOS_BASE + 8000h   ; su pantalla de texto (80x25x2)
 
 pe_entrada:
         push rbx
@@ -126,27 +125,24 @@ pe_entrada:
         lea rsi, [rel t_de160]
         call escribir
 
-        ; ---- paso 3: ida y vuelta al modo real con el trampolín ----
-        lea rsi, [rel t_viaje]
-        call escribir
-        lea rsi, [rel trampolin]
-        mov edi, TR_BASE
-        mov ecx, trampolin_fin - trampolin
-        cld
-        rep movsb
-        mov word [TR_MARCA], 0
-        mov eax, TR_BASE
-        call rax
-        lea rsi, [rel t_vuelta]
-        call escribir
-        movzx eax, word [TR_MARCA]
-        call hex64
-        lea rsi, [rel t_nl]
-        call escribir
-        ; ---- paso 4: la pantalla gráfica (GOP) y el texto dibujado ----
+        ; ---- paso 5: la BIOS de modo real ----
         call gop_buscar
         jc .sin_gop
-        call pantalla_dibujar
+        lea rsi, [rel t_viaje]
+        call escribir
+        mov edi, BIOS_BASE              ; la zona de la BIOS, a cero
+        mov ecx, 0F000h / 8
+        xor eax, eax
+        cld
+        rep stosq
+        lea rsi, [rel bios]             ; la BIOS, a su sitio
+        mov edi, BIOS_BASE
+        mov ecx, bios_finbin - bios
+        rep movsb
+        lea rax, [rel despachador]
+        mov [BIOS_BASE + 8], rax        ; T_DESPACHADOR
+        mov eax, BIOS_BASE
+        call rax                        ; (no vuelve mientras DOS funcione)
         jmp .fin
 .sin_gop:
         lea rsi, [rel t_sin_gop]
@@ -166,6 +162,30 @@ pe_entrada:
         pop rbx
         ret
 
+
+
+; ---- despachador: las peticiones de la BIOS (ECX = petición, EDX = argumento) ----
+despachador:
+        push rbx
+        sub rsp, 32
+        cmp ecx, 1                      ; PET_DIBUJAR
+        je .dibujar
+        cmp ecx, 2                      ; PET_ESPERAR (EDX segundos)
+        je .esperar
+        xor eax, eax
+        jmp .fin
+.dibujar:
+        call pantalla_dibujar
+        xor eax, eax
+        jmp .fin
+.esperar:
+        mov rax, [rel bootserv]
+        imul ecx, edx, 1000000
+        call [rax + BS_STALL]
+        xor eax, eax
+.fin:   add rsp, 32
+        pop rbx
+        ret
 
 ; ---- gop_buscar: localiza la salida gráfica -> fb, ancho, alto, línea; CF si no ----
 gop_buscar:
@@ -368,7 +388,7 @@ t_pide          db 'Pidiendo al firmware las paginas de 0 a 9F000h...', 13, 10, 
 t_no_dada       db '  no la da: ', 0
 t_dadas         db 'Paginas dadas: ', 0
 t_de160         db ' (de 00000000000000A0)', 13, 10, 0
-t_viaje         db 'Bajando al modo real y volviendo...', 13, 10, 0
+t_viaje         db 'Arrancando la BIOS de modo real...', 13, 10, 0
 t_sin_gop       db 'No hay salida grafica (GOP) de 640x400 o mas.', 13, 10, 0
 t_vuelta        db 'De vuelta en el firmware. Marca del modo real: ', 0
 
@@ -402,7 +422,7 @@ buf_hex         times 16 db '0'
                 align 8
 buf16           times 256 dw 0
 mapa            times MAPA_MAX db 0
-trampolin:      incbin "TRAMP64.BIN"
-trampolin_fin:
+bios:           incbin "BIOS64.BIN"
+bios_finbin:
 
 PE_FIN
