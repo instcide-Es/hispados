@@ -23,6 +23,11 @@ Menu de arranque: Normal o Juegos
                (Doom, Duke Nukem 3D...), memoria superior y la mayor
                memoria convencional libre. El sonido tiene que ser Sound
                Blaster (HD Audio no va en este modo) y el CD, IDE.
+  Si un juego se queda colgado (en la opcion Juegos, con la Sound Blaster
+  emulada): Ctrl+Alt+Fin (o Ctrl+Alt+Retroceso, si no hay tecla Fin) lo
+  termina, vuelve a la pantalla de texto y deja un informe en
+  \HISPADOS\CUELGUE.TXT de esta memoria (para enviarlo). Si ni asi:
+  Ctrl+Alt+Supr tres veces seguidas reinicia el equipo.
   F5 arranca en limpio (sin CONFIG.SYS ni AUTOEXEC.BAT) y F8 deja elegir
   linea a linea. Para que arranque sola la opcion Juegos, o cambiar la
   espera: EDITAR C:\CONFIG.SYS y poner MENUDEFAULT=JUEGOS,5

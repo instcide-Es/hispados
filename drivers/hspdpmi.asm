@@ -455,6 +455,7 @@ dpmi_entry:
         jne .have
         call hb_alloc
         jc .fail
+        call kb_snapshot            ; [SB-VGA2]
 .have:
         cmp byte [level], MAXLEVEL
         jae .fail
@@ -798,6 +799,7 @@ term_stub:
         mov es, ax
         mov eax, [t_term]
         mov [es:0x22*4], eax        ; INT 22h, como lo habría dejado DOS
+        mov byte [kb_killed], 0     ; [SB-VGA2]
         cmp byte [level], 0
         jne .out
         call hb_free
@@ -1308,6 +1310,10 @@ rmhook_entry:
         je .go
         cmp bx, 7
         je .go
+        cmp bx, 1                   ; [SB-VGA2] (ver irq_again)
+        je .go
+        cmp bx, 12
+        je .go
         cmp byte [cs:irq_busy+bx], 0
         jne .pass
         bt [cs:sbpm_irqres], bx     ; [SB-VGA] las de HSPSND, tampoco
@@ -1349,6 +1355,10 @@ hook_pm:
         cmp di, 16                  ; [SB-VGA] en curso (ver irq_again)
         jae .nb
         inc byte [irq_busy+di]
+        push di                     ; [SB-VGA2] y contada
+        shl di, 2
+        inc dword [irq_cnt+di]
+        pop di
 .nb:
         movzx di, byte [hookvec+di]
         push dx
@@ -1367,7 +1377,7 @@ hook_pm:
         mov [tss+4], eax
         imul di, di, 6
         add di, pmvec
-        mov ecx, [lpm_free]
+        call lpm_base               ; [SB-VGA2]
         cmp cx, 0x100
         jb lpm_overflow
         mov dx, R3_HOOKRET
@@ -1530,7 +1540,7 @@ cb_pm:
         mov [tss+4], eax
         movzx ebx, si
         add bx, 44                  ; ESI del procedimiento = SP de modo real
-        mov ecx, [lpm_free]
+        call lpm_base               ; [SB-VGA2]
         cmp cx, 0x100
         jb lpm_overflow
         mov dx, R3_CBRET
@@ -1812,6 +1822,8 @@ ring0_fault:
 
 ; ---- interrupción (software o IRQ) AL ----
 interrupt:
+        call kb_check               ; [SB-VGA2] (no vuelve si hay que terminar)
+        call cnt_irq                ; [SB-VGA2]
         cmp al, 0x31
         jne .n
         cmp word [bp+CF_CS], SEL_R3
@@ -1893,7 +1905,7 @@ enter_locked:
 
 ; ECX = ESP para un manejador en la pila bloqueada
 get_lpm:
-        mov ecx, [lpm_free]
+        call lpm_base               ; [SB-VGA2]
         cmp word [bp+CF_SS], SEL_LPM
         jne .x
         movzx ecx, word [bp+CF_ESP]
@@ -1915,6 +1927,28 @@ get_lpm:
         mov [lpm_free], ecx
         pop eax
         ret
+; [SB-VGA2] ECX = dónde poner el marco de un manejador nuevo en la pila
+; bloqueada cuando el cliente no está en ella (o se viene de modo real).
+; Si hay otro manejador a medias (lpm_free por debajo de la cima), un hueco
+; de LPM_GAP octetos por debajo de su marco: el manejador de DOS/4GW guarda
+; sus registros en la pila bloqueada, por debajo de su marco, se va a su
+; propia pila, abre las interrupciones y al final vuelve a sacarlos de ahí
+; (POP DS/ES/FS/GS, POPAD, IRETD). Si llegaba otra IRQ mientras tanto, su
+; marco iba justo debajo del de antes y pisaba esos registros: el primero
+; volvía con segmentos de otro («Divide by zero», DS=0) o con FS=C7h, que
+; daba un fallo de protección en su POP FS una y otra vez: Doom congelado
+; con la música sonando y sin teclado (HP Mini 5103, 14/11/2026).
+LPM_GAP     equ 0x200
+lpm_base:
+        mov ecx, [lpm_free]
+        cmp ecx, LPM_SIZE
+        jae .r
+        sub ecx, LPM_GAP
+        jnc .r
+        xor ecx, ecx                ; (y lo de abajo da «agotada»)
+.r:
+        ret
+
 ; [SB-PM] el manejador ha vuelto: su marco ya no está y ESI (16 bits) apunta
 ; al valor de lpm_free de antes
 lpm_pop:
@@ -1952,6 +1986,10 @@ irq_again:
         je .no
         cmp al, 0x0F
         je .no
+        cmp al, 0x09                ; [SB-VGA2] ni el teclado ni el ratón PS/2:
+        je .free                    ; sus octetos son del programa (a la BIOS
+        cmp al, 0x74                ; se perdían teclas, y Ctrl+Alt+Fin)
+        je .free
         cmp byte [irq_busy+bx], 0
         je .free
         push eax
@@ -2235,6 +2273,7 @@ restore_env:
 ;  Excepciones
 ; =============================================================================
 exception:      ; BP -> marco, [exc_err]
+        call kb_check               ; [SB-VGA2]
         cmp byte [bp+CF_VEC], 13    ; [SB-PM] ¿IN/OUT, CLI o STI con IOPL 0?
         jne .nsb                    ; [SB-PM]
         cmp byte [sbpm_on], 0       ; [SB-PM]
@@ -2247,6 +2286,7 @@ exception:      ; BP -> marco, [exc_err]
         call sbpm_db                ; [SB-PM]
         jnc frame_exit              ; [SB-PM]
 .ndb:                               ; [SB-PM]
+        call cnt_exc                ; [SB-VGA2]
         movzx bx, byte [bp+CF_VEC]
         imul si, bx, 6
         add si, excvec
@@ -2497,12 +2537,17 @@ kill_msg:
 ; vuelve por term_stub, que lo libera todo.
 kill_client:
         mov sp, [tss+4]
+        mov byte [kb_kill], 0       ; [SB-VGA2]
         call restore_env
         mov dx, [hostseg]
         mov si, [rm_free]
         mov bx, .rm
         jmp go_rm
 .rm:
+        cmp byte [kb_killed], 0     ; [SB-VGA2] antes de abrir las
+        je .si                      ; interrupciones: la SB callada y los
+        call kb_rmstop              ; vectores y el 8259 como antes del programa
+.si:
         sti
         ; [SB-VGA] si el programa estaba en modo gráfico (Doom: 320x200 sin
         ; encadenar), el mensaje escrito y el desplazamiento de la pantalla
@@ -2518,11 +2563,591 @@ kill_client:
         mov ax, 0x0003
         int 0x10
 .txt:
+        cmp byte [kb_killed], 0     ; [SB-VGA2] Ctrl+Alt+Fin: el informe
+        je .msg                     ; también a CUELGUE.TXT
+        call kb_rmclean
+.msg:
         mov dx, msgbuf
         mov ah, 0x09
         int 0x21
         mov ax, 0x4CFF
         int 0x21
+
+; =============================================================================
+;  [SB-VGA2] Tecla de emergencia: Ctrl+Alt+Fin (o Ctrl+Alt+Retroceso, para
+;  los portátiles sin Fin) termina el programa de modo protegido en curso,
+;  como un «finalizar tarea»: modo de texto, la Sound Blaster emulada
+;  callada, los vectores y el 8259 como estaban antes del programa, un
+;  informe del estado en pantalla y en \HISPADOS\CUELGUE.TXT de la unidad de
+;  arranque, y vuelta al intérprete. La IRQ 1 se mira aquí, antes que el
+;  programa (en modo protegido siempre; en modo V86 si el cliente la ha
+;  enganchado, como hacen los juegos), así que sirve aunque el programa no
+;  avance. Ctrl+Alt+Supr tres veces seguidas (en 3 s) reinicia el equipo.
+; =============================================================================
+; (modo real) foto de los vectores y del 8259 al entrar el primer cliente
+kb_snapshot:
+        pushad
+        push ds
+        push es
+        push cs
+        pop es
+        xor si, si
+        mov ds, si
+        mov di, ivt_save
+        mov cx, 512
+        cld
+        rep movsw
+        push cs
+        pop ds
+        in al, 0xA1
+        mov ah, al
+        in al, 0x21
+        mov [pic_save], ax
+        mov ah, 0x34                ; ES:BX = InDOS
+        int 0x21
+        mov ax, es
+        movzx eax, ax
+        shl eax, 4
+        movzx ebx, bx
+        add eax, ebx
+        mov [kb_indos], eax
+        xor ax, ax
+        mov [kb_ctrl], ax           ; (y kb_alt)
+        mov [kb_e0], ax             ; (y kb_kill)
+        mov [kb_killed], ax         ; (y kb_ri)
+        mov byte [kb_ndel], 0
+        mov word [cnt_len], 0
+        pop es
+        pop ds
+        popad
+        ret
+
+; AL = octeto del teclado, CX = tics del reloj (40h:6Ch), DS = datos.
+; CF = 1: hay que terminar el programa. Conserva todo menos las banderas.
+kb_look:
+        push ax
+        push bx
+        cmp al, 0xE0
+        jne .n0
+        mov byte [kb_e0], 1
+        jmp .no
+.n0:
+        mov byte [kb_e0], 0
+        mov bl, al
+        and bl, 0x7F
+        mov ah, 1
+        test al, 0x80
+        jz .mk
+        xor ah, ah                  ; soltada
+.mk:
+        cmp bl, 0x1D
+        jne .n1
+        mov [kb_ctrl], ah
+        jmp .no
+.n1:
+        cmp bl, 0x38
+        jne .n2
+        mov [kb_alt], ah
+        jmp .no
+.n2:
+        test ah, ah
+        jz .no
+        cmp byte [kb_ctrl], 0
+        je .no
+        cmp byte [kb_alt], 0
+        je .no
+        cmp bl, 0x4F                ; Fin (E0 4F; o el 1 del teclado numérico)
+        je .kill
+        cmp bl, 0x0E                ; Retroceso
+        je .kill
+        cmp bl, 0x53                ; Supr
+        jne .no
+        mov ax, cx
+        sub ax, [kb_tdel]
+        cmp ax, 2                   ; (el mismo, visto dos veces)
+        jb .no
+        cmp ax, 55                  ; 3 s
+        jb .d1
+        mov byte [kb_ndel], 0
+.d1:
+        mov [kb_tdel], cx
+        inc byte [kb_ndel]
+        cmp byte [kb_ndel], 3
+        jb .no
+        ; tres veces: reiniciar (el 8042 y, si no, el puerto CF9h)
+        cli
+        mov al, 0xFE
+        out 0x64, al
+        mov cx, 0xFFFF
+.w:
+        in al, 0x80
+        loop .w
+        mov dx, 0xCF9
+        mov al, 0x06
+        out dx, al
+.hlt:
+        hlt
+        jmp .hlt
+.kill:
+        pop bx
+        pop ax
+        stc
+        ret
+.no:
+        pop bx
+        pop ax
+        clc
+        ret
+
+; (anillo 0) un octeto del teclado leído por el programa en modo protegido
+; (IN 60h, atrapado: ver sbpm_gp). AL = octeto, BP -> marco. Conserva todo.
+kb_byte:
+        call kb_poll                ; (antes, lo que haya leído la BIOS: en orden)
+        push cx
+        mov cx, [fs:0x46C]
+        call kb_look
+        jnc .r
+        mov byte [kb_where], 'P'
+        call kb_here
+.r:
+        pop cx
+        ret
+; (anillo 0) los octetos que ha leído del teclado el código de modo V86 (la
+; BIOS, TECLADO...): HSPEMM los apunta en un anillo de 8 (kb_ring: índice
+; de escritura y los 8). Conserva todo.
+kb_poll:
+        push eax
+        push ebx
+        push cx
+        mov ebx, [kb_ring]
+        test ebx, ebx
+        jz .r
+        mov cx, [fs:0x46C]
+.l:
+        mov al, [fs:ebx]
+        and al, 7
+        cmp al, [kb_ri]
+        je .r
+        push ebx
+        movzx eax, byte [kb_ri]
+        add ebx, eax
+        mov al, [fs:ebx+1]
+        pop ebx
+        inc byte [kb_ri]
+        and byte [kb_ri], 7
+        call kb_look
+        jnc .l
+        mov byte [kb_where], 'R'
+        call kb_here
+        jmp .l
+.r:
+        pop cx
+        pop ebx
+        pop eax
+        ret
+; (anillo 0, BP -> marco) apuntar dónde estaba el programa y pedir el final
+kb_here:
+        push eax
+        mov ax, [bp+CF_CS]
+        mov [kb_cs], ax
+        mov eax, [bp+CF_EIP]
+        mov [kb_eip], eax
+        mov eax, [bp+CF_EFL]
+        mov [kb_efl], eax
+        mov byte [kb_kill], 1
+        pop eax
+        ret
+
+; (anillo 0) ¿terminar ya? Solo si DOS no está a medias (InDOS a cero); si
+; lo está, en la siguiente entrada. Si no, conserva todo.
+kb_check:
+        call kb_poll
+        cmp byte [kb_kill], 0
+        jne .k
+        ret
+.k:
+        push ebx
+        mov ebx, [kb_indos]
+        test ebx, ebx
+        jz .go
+        cmp byte [fs:ebx], 0
+        jne .no
+.go:
+        pop ebx
+        jmp kb_emergency
+.no:
+        pop ebx
+        ret
+
+; (anillo 0) contar las IRQ que llegan en modo protegido. AL = vector.
+; Conserva todo.
+cnt_irq:
+        push eax
+        push bx
+        call cnt_tick
+        mov bl, al
+        sub bl, 8
+        cmp bl, 8
+        jb .c
+        mov bl, al
+        sub bl, 0x68
+        cmp bl, 8
+        jb .no
+        cmp bl, 16
+        jae .no
+.c:
+        movzx bx, bl
+        shl bx, 2
+        inc dword [irq_cnt+bx]
+.no:
+        pop bx
+        pop eax
+        ret
+; las excepciones del cliente (las que no emula HSPDPMI)
+cnt_exc:
+        push eax
+        call cnt_tick
+        inc dword [exc_cnt]
+        mov al, [bp+CF_VEC]
+        mov [lx_vec], al
+        mov ax, [bp+CF_CS]
+        mov [lx_cs], ax
+        mov eax, [bp+CF_EIP]
+        mov [lx_eip], eax
+        mov eax, [exc_err]
+        mov [lx_err], eax
+        pop eax
+        ret
+; cada segundo, la cuenta a la ventana anterior
+cnt_tick:
+        push ax
+        mov ax, [fs:0x46C]
+        sub ax, [cnt_t0]
+        cmp ax, 18
+        jb .r
+        push si
+        push di
+        push cx
+        push es
+        push ds
+        pop es
+        mov [cnt_len], ax
+        mov si, irq_cnt
+        mov di, cnt_prev
+        mov cx, 18 * 2
+        cld
+        rep movsw
+        mov di, irq_cnt
+        mov cx, 18 * 2
+        xor ax, ax
+        rep stosw
+        mov ax, [fs:0x46C]
+        mov [cnt_t0], ax
+        pop es
+        pop cx
+        pop di
+        pop si
+.r:
+        pop ax
+        ret
+
+; (anillo 0, BP -> marco) el informe en msgbuf y a terminar
+kb_emergency:
+        mov byte [kb_kill], 0
+        mov byte [kb_killed], 1
+        push ds
+        pop es
+        cld
+        mov di, msgbuf
+        mov si, m_kb0
+        call cpy
+        mov si, m_kbP
+        cmp byte [kb_where], 'P'
+        je .w
+        mov si, m_kbR
+.w:
+        call cpy
+        mov ax, [kb_cs]
+        call hex_ax
+        mov al, ':'
+        stosb
+        mov eax, [kb_eip]
+        call hex_eax
+        mov si, m_kbefl
+        call cpy
+        mov eax, [kb_efl]
+        call hex_eax
+        mov si, m_kbnow
+        call cpy
+        mov ax, [bp+CF_CS]
+        call hex_ax
+        mov al, ':'
+        stosb
+        mov eax, [bp+CF_EIP]
+        call hex_eax
+        mov si, m_kbefl
+        call cpy
+        mov eax, [bp+CF_EFL]
+        call hex_eax
+        mov si, m_kblpm
+        call cpy
+        mov eax, LPM_SIZE
+        sub eax, [lpm_free]
+        call dec_eax
+        mov si, m_kbrm
+        call cpy
+        movzx eax, word [rm_free]
+        neg eax
+        add eax, rm_stack_top
+        call dec_eax
+        mov si, m_kblev
+        call cpy
+        movzx eax, byte [level]
+        call dec_eax
+        mov si, m_kbstep
+        call cpy
+        movzx eax, byte [sbpm_step]
+        call dec_eax
+        mov si, m_kbbusy
+        call cpy
+        xor bx, bx
+.b:
+        cmp byte [irq_busy+bx], 0
+        je .bn
+        mov al, ' '
+        stosb
+        movzx eax, bx
+        call dec_eax
+.bn:
+        inc bx
+        cmp bx, 16
+        jb .b
+        ; por segundo: la ventana anterior (o, si no la hay, la de ahora)
+        mov si, m_kbrate
+        call cpy
+        mov si, cnt_prev
+        mov cx, [cnt_len]
+        test cx, cx
+        jnz .rt
+        mov si, irq_cnt
+        mov cx, [fs:0x46C]
+        sub cx, [cnt_t0]
+        jnz .rt
+        inc cx
+.rt:
+        xor bx, bx
+.ri:
+        mov eax, [si+bx]
+        test eax, eax
+        jz .rn
+        push eax                    ; (cpy cambia AL)
+        push si
+        mov si, m_kbirq
+        call cpy
+        pop si
+        movzx eax, bx
+        shr eax, 2
+        call dec_eax
+        mov al, '='
+        stosb
+        pop eax
+        call kb_rate
+.rn:
+        add bx, 4
+        cmp bx, 16 * 4
+        jb .ri
+        push si
+        mov si, m_kbexc
+        call cpy
+        pop si
+        mov eax, [si+16 * 4]
+        call kb_rate
+        push si
+        mov si, m_kbio
+        call cpy
+        pop si
+        mov eax, [si+17 * 4]
+        call kb_rate
+        cmp byte [lx_vec], 0xFF
+        je .nx
+        mov si, m_kblx
+        call cpy
+        mov al, [lx_vec]
+        call hex_al
+        mov si, m_kblx2
+        call cpy
+        mov eax, [lx_err]
+        call hex_eax
+        mov si, m_kblx3
+        call cpy
+        mov ax, [lx_cs]
+        call hex_ax
+        mov al, ':'
+        stosb
+        mov eax, [lx_eip]
+        call hex_eax
+.nx:
+        mov si, m_kbend
+        call cpy
+        mov si, m_fin
+        call cpy
+        jmp kill_client
+; EAX = cuenta en CX tics -> por segundo, en decimal
+kb_rate:
+        push edx
+        push ecx
+        mov edx, 182
+        mul edx
+        movzx ecx, cx
+        imul ecx, ecx, 10
+        div ecx
+        call dec_eax
+        pop ecx
+        pop edx
+        ret
+; EAX en decimal en ES:DI
+dec_eax:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        mov ebx, 10
+        xor ecx, ecx
+.l:
+        xor edx, edx
+        div ebx
+        push dx
+        inc cx
+        test eax, eax
+        jnz .l
+.p:
+        pop ax
+        add al, '0'
+        stosb
+        loop .p
+        pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
+; (modo real, en kill_client, con las interrupciones cerradas) la Sound
+; Blaster emulada callada (DSP reiniciado y la FM sin notas: así no llegan
+; más IRQ 5) y los vectores y el 8259 como antes del programa
+kb_rmstop:
+        push ds
+        push es
+        mov dx, 0x226               ; reinicio del DSP (lo atrapa HSPEMM y
+        mov al, 1                   ; lo lleva a HSPSND)
+        out dx, al
+        mov cx, 100
+.d:
+        in al, 0x80
+        loop .d
+        xor al, al
+        out dx, al
+        mov ah, 0xB0                ; FM: soltar las 9 notas
+.fm:
+        mov dx, 0x388
+        mov al, ah
+        out dx, al
+        in al, dx
+        in al, dx
+        inc dx
+        xor al, al
+        out dx, al
+        dec dx
+        mov cx, 8
+.fd:
+        in al, dx
+        loop .fd
+        inc ah
+        cmp ah, 0xB9
+        jb .fm
+        ; el 8259: lo que quede en servicio (los manejadores que no van a
+        ; volver), y sus máscaras
+        mov cx, 8
+.eoi:
+        mov al, 0x20
+        out 0xA0, al
+        out 0x20, al
+        loop .eoi
+        mov ax, [pic_save]
+        out 0x21, al
+        mov al, ah
+        out 0xA1, al
+        ; los vectores (DOS/4GW ya no los va a quitar)
+        xor ax, ax
+        mov es, ax
+        xor di, di
+        mov si, ivt_save
+        mov cx, 512
+        cld
+        rep movsw
+        pop es
+        pop ds
+        ret
+
+; (modo real, interrupciones abiertas) el informe a \HISPADOS\CUELGUE.TXT
+; de la unidad de arranque (o a su raíz)
+kb_rmclean:
+        pusha
+        push es
+        push ds
+        pop es
+        mov ax, 0x3305              ; DL = unidad de arranque (1 = A:)
+        int 0x21
+        add dl, 'A' - 1
+        mov [kb_path], dl
+        mov [kb_path2], dl
+        mov dx, kb_path
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jnc .ok
+        mov dx, kb_path2
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .r
+.ok:
+        mov bx, ax
+        mov di, msgbuf              ; hasta el '$'
+        mov cx, 900
+        mov al, '$'
+        cld
+        repne scasb
+        mov cx, di
+        sub cx, msgbuf + 1
+        mov dx, msgbuf
+        mov ah, 0x40
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+.r:
+        pop es
+        popa
+        ret
+kb_path     db "A:\HISPADOS\CUELGUE.TXT", 0
+kb_path2    db "A:\CUELGUE.TXT", 0
+m_kb0       db 13, 10, "HSPDPMI: Ctrl+Alt+Fin: el programa se termina. Estado:", 13, 10, 0
+m_kbP       db "  tecla vista en modo protegido; el programa en CS:EIP=", 0
+m_kbR       db "  tecla vista en modo V86 (BIOS); el programa en CS:EIP=", 0
+m_kbefl     db " EFL=", 0
+m_kbnow     db 13, 10, "  al terminar: CS:EIP=", 0
+m_kblpm     db 13, 10, "  pila bloqueada en uso: ", 0
+m_kbrm      db " octetos; de modo real: ", 0
+m_kblev     db "; clientes: ", 0
+m_kbstep    db "; paso a paso: ", 0
+m_kbbusy    db 13, 10, "  IRQ con su manejador sin volver:", 0
+m_kbrate    db 13, 10, "  interrupciones al programa por segundo:", 0
+m_kbirq     db " IRQ", 0
+m_kbexc     db 13, 10, "  excepciones del programa: ", 0
+m_kbio      db "; E/S emuladas (IN/OUT/CLI/STI): ", 0
+m_kblx      db 13, 10, "  la última excepción: ", 0
+m_kblx2     db "h, código ", 0
+m_kblx3     db ", en ", 0
+m_kbend     db 13, 10, "  (guardado en \HISPADOS\CUELGUE.TXT de la unidad de arranque)", 0
 
 ; copiar la cadena SI (acabada en 0) a ES:DI
 cpy:
@@ -4050,6 +4675,7 @@ sbpm_query:
         xor cx, cx
         xor edx, edx
         xor bx, bx
+        xor esi, esi
         mov ax, 0xDD04
         int 0x67
         test ah, ah
@@ -4057,6 +4683,9 @@ sbpm_query:
         jcxz .off
         mov [sbpm_fm], edx
         mov [sbpm_irqres], bx       ; [SB-VGA] las IRQ de HSPSND
+        mov [kb_ring], esi          ; [SB-VGA2] el anillo del teclado
+        mov bx, 0x60                ; [SB-VGA2] y el IN 60h de los clientes,
+        bts [tss_iomap], bx         ; para ver Ctrl+Alt+Fin
         mov si, sbpm_list
 .p:
         lodsw
@@ -4380,6 +5009,11 @@ sbpm_gp:
         jmp .res
 .direct:
         call sbpm_r0io
+        cmp dx, 0x60                ; [SB-VGA2] el teclado: Ctrl+Alt+Fin
+        jne .res
+        test cl, 7
+        jnz .res
+        call kb_byte
 .res:
         pop edi
         pop esi
@@ -4431,6 +5065,7 @@ sbpm_gp:
         jz .ok
         add word [bp+CF_EIP+2], 1
 .ok:
+        inc dword [io_cnt]          ; [SB-VGA2]
         ; [SB-VGA] con el paso a paso en marcha, la instrucción emulada no da
         ; excepción de depuración: mirar ya la siguiente (ver sbpm_peek)
         mov al, [bp+CF_EFL+1]
@@ -4559,7 +5194,35 @@ n_e12       db "fallo de pila", 0
 n_e13       db "fallo de protección general", 0
 n_e14       db "fallo de página", 0
 n_ex        db "desconocida", 0
-msgbuf      times 420 db 0
+msgbuf      times 900 db 0
+; [SB-VGA2] tecla de emergencia (Ctrl+Alt+Fin) y lo que se cuenta para su
+; informe
+kb_ctrl     db 0
+kb_alt      db 0
+kb_e0       db 0
+kb_kill     db 0                    ; 1 = pedido, sin hacer aún
+kb_killed   db 0                    ; 1 = el cliente se termina así
+kb_ri       db 0                    ; lo leído del anillo de HSPEMM
+kb_ndel     db 0                    ; Ctrl+Alt+Supr seguidos
+kb_where    db 0                    ; 'P' modo protegido, 'R' modo V86
+kb_tdel     dw 0
+kb_cs       dw 0
+kb_eip      dd 0
+kb_efl      dd 0
+kb_indos    dd 0                    ; dirección lineal del indicador InDOS
+kb_ring     dd 0                    ; el anillo del teclado de HSPEMM (lineal)
+cnt_t0      dw 0
+cnt_len     dw 0
+irq_cnt     times 16 dd 0           ; IRQ que llegan en modo protegido
+exc_cnt     dd 0                    ; excepciones del cliente (no emuladas)
+io_cnt      dd 0                    ; IN/OUT/CLI/STI emulados
+cnt_prev    times 18 dd 0           ; lo mismo, la ventana anterior
+lx_vec      db 0xFF                 ; la última excepción del cliente
+lx_cs       dw 0
+lx_err      dd 0
+lx_eip      dd 0
+pic_save    dw 0
+ivt_save    times 1024 db 0
 
 resident_end:
 
@@ -5450,7 +6113,8 @@ msg_desact  db "HSPDPMI: desactivado (sigue en memoria: hay otro residente carga
 msg_ok      db "Instalado: clientes de 16 y de 32 bits, memoria de XMS.", 13, 10, "$"
 msg_no386   db "HSPDPMI: hace falta un procesador 386 o superior.", 13, 10, "$"
 msg_v86     db "HSPDPMI: el procesador ya está en modo protegido y no hay un servidor VCPI (HSPEMM); no se instala.", 13, 10, "$"
-msg_vcpi    db "Con HSPEMM cargado: el modo protegido se pide por VCPI.", 13, 10, "$"
+msg_vcpi    db "Con HSPEMM cargado: el modo protegido se pide por VCPI.", 13, 10
+            db "Con la Sound Blaster emulada, Ctrl+Alt+Fin termina un programa colgado.", 13, 10, "$"
 msg_nomem   db "HSPDPMI: no hay memoria para las tablas de páginas (12 KB).", 13, 10, "$"
 msg_vnomem  db "HSPDPMI: con HSPEMM (modo V86) y sin páginas de 4 MB, las tablas de páginas van en memoria extendida y no queda bastante: hacen falta $"
 msg_vnomem2 db " KB de XMS; no se instala.", 13, 10, "$"

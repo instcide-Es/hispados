@@ -2460,6 +2460,13 @@ port_in:
         ret
 .p60:
         in al, 0x60
+        push ebx                    ; [SB-VGA2] apuntado para HSPDPMI
+        movzx ebx, byte [kbd_wi]    ; (Ctrl+Alt+Fin)
+        mov [kbd_ring+ebx], al
+        inc bl
+        and bl, 7
+        mov [kbd_wi], bl
+        pop ebx
         cmp byte [kbc_state], 2     ; respuesta a D0h: el puerto de salida
         jne .r
         mov byte [kbc_state], 0
@@ -2853,7 +2860,10 @@ dma_fix:
 ;              +10 dw cuenta actual          +12 db 1 = canal tapado
 ;    AL=04h  [SB-PM] puertos que atrapar a los clientes DPMI (HSPDPMI):
 ;            ES:DI = 13 pares (primero, último) + FFFFh; CX = cuántos;
-;            EDX = lo dado con AL=05h; [SB-VGA] BX = sus IRQ
+;            EDX = lo dado con AL=05h; [SB-VGA] BX = sus IRQ;
+;            [SB-VGA2] ESI = dirección lineal de un octeto (índice de
+;            escritura, 0-7) y 8 más: lo último que ha leído del puerto 60h
+;            el código de modo V86 (HSPDPMI mira ahí Ctrl+Alt+Fin)
 ;    AL=05h  [SB-PM] EDX = dirección lineal del octeto de estado de la FM
 ;            (HSPSND, después de AL=01h; 0 = ninguno): HSPDPMI contesta
 ;            con él las lecturas del estado de la AdLib sin ir a modo V86.
@@ -3018,6 +3028,7 @@ sb_pmlist:
         mov [ebp+P_EDX], eax
         mov ax, [sb_irqres]         ; [SB-VGA] IRQ de HSPSND (ver AL=05h)
         mov [ebp+P_EBX], ax         ; [SB-VGA]
+        mov dword [ebp+P_ESI], kbd_wi ; [SB-VGA2] anillo del teclado (lineal)
         xor ah, ah
         ret
 
@@ -4677,6 +4688,8 @@ sb_ranges   resw 2*8 + 1            ; [SB] puertos (primero, último), FFFFh
             alignb 4                ; [SB-PM]
 sb_fmstat   resd 1                  ; [SB-PM] estado de la FM (lineal) o 0
 sb_irqres   resw 1                  ; [SB-VGA] IRQ de HSPSND (bit n = IRQ n)
+kbd_wi      resb 1                  ; [SB-VGA2] lo leído del 60h en modo V86:
+kbd_ring    resb 8                  ; [SB-VGA2] los 8 últimos (ver DD04h)
 dma_cnt     resw 8                  ; [SB] cuenta programada de cada canal
             alignb 4
             resb 4096               ; pila de anillo 0

@@ -30,7 +30,7 @@ MODE=${2:-todo}
 B=$(dirname "$IMG")
 DISQ=$B/hispados-disquete.img
 MIN_QEMU=${MIN_QEMU:-560000}
-MIN_HP=${MIN_HP:-558000}
+MIN_HP=${MIN_HP:-550000}   # (14/11: 558000 antes de Ctrl+Alt+Fin en HSPDPMI; pendiente adelgazarlo)
 for f in $DISQ $B/MEMJUEGO.COM $B/SBTEST.COM $B/SBPM.COM $B/DPMI16.COM; do
   [ -f $f ] || { echo "== Hispa-DOS memoria para juegos =="; echo "  FAIL falta $f (make usb emmprogs nucprogs)"; exit 1; }
 done

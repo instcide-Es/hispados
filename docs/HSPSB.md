@@ -293,6 +293,76 @@ De paso, HSPJOY: con `LH` en un hueco de memoria superior pequeño leía
 MANDO.INI más allá del final de su bloque, pisaba su pila y el arranque de
 «Juegos» se colgaba al cargarlo (a veces, según cómo quedara la memoria).
 
+### Doom se congelaba, con la música sonando y sin teclado [SB-VGA2]
+
+En el HP Mini 5103 (0.9.8, «Juegos», Doom): a los 4 minutos de juego la
+imagen se quedó quieta (la cara del marine, mirando a un lado), la música
+seguía, el teclado no respondía y hubo que apagar con el botón (14/11/2026).
+Era el «quieto» que quedaba pendiente en [SB-VGA]: no era cosa de QEMU.
+
+Reproducido en QEMU **jugando** (teclas por el monitor de QEMU; la demo
+mueve menos): con 0.9.8 se congeló en 7 de 15 pasadas (varias cortadas
+antes de los 15 minutos), entre el segundo 30 y el minuto 4. La traza de HSPDPMI enseñó qué pasaba:
+
+1. Doom estaba en el manejador de la IRQ 5 (la de la Sound Blaster, que
+   DOS/4GW recibe por un callback de modo real y entrega con un INT 0Dh).
+   El manejador de DOS/4GW guarda los registros del programa en la **pila
+   bloqueada**, por debajo de su marco, se va a su propia pila, abre las
+   interrupciones y, al acabar, vuelve a la bloqueada y los saca de ahí
+   (`STI / POP DS / POP ES / POP FS / POP GS / POPAD / IRETD`).
+2. Entre medias llegaba la IRQ 0 (el reloj de Doom). Como el programa no
+   estaba en la pila bloqueada, HSPDPMI ponía su marco justo debajo del de
+   la IRQ 5 (`lpm_free`): encima de los registros guardados. El manejador
+   de la IRQ 0 los pisaba.
+3. Al volver, el `POP FS` de DOS/4GW sacaba basura (C7h): fallo de
+   protección; su manejador de excepciones volvía a la misma instrucción,
+   otra vez y otra: miles de fallos por segundo. La imagen, parada; la
+   música (el reloj de DMX y HSPSND) seguía; el teclado, perdido. Otras
+   veces la basura iba a DS y salía «Divide by zero» o «Unexpected
+   interrupt 06» con DS=0, o la pila bloqueada se quedaba casi llena.
+
+**Arreglo**: cuando hay un manejador a medias y el programa no está en la
+pila bloqueada (o se viene de modo real), el marco nuevo va **512 octetos
+por debajo** (`lpm_base`, `LPM_GAP`), en `get_lpm`, `hook_pm` y `cb_pm`.
+Pasaba también con una Sound Blaster de verdad (con IOPL 3): la prueba
+nueva fallaba igual (y HSPDPMI daba «excepción») sin emular nada.
+
+Con el arreglo: 14 pasadas de 15 minutos jugando sin congelarse (QEMU, HD Audio
+con IRQ), y Ctrl+Alt+Fin terminó Doom en las 5 en que se probó al final.
+
+**Teclas perdidas.** La regla de [SB-VGA] (punto 6: la misma IRQ otra vez,
+con su manejador a medias, a modo real) mandaba a la BIOS octetos del
+teclado que eran del juego (QEMU manda los de una tecla seguidos: E0 4F...):
+teclas perdidas o «pegadas». Ya no se aplica a la IRQ 1 ni a la 12 (ratón
+PS/2).
+
+**Tecla de emergencia (Ctrl+Alt+Fin).** Si aun así un programa de modo
+protegido se queda colgado con la Sound Blaster emulada:
+
+- **Ctrl+Alt+Fin** (o **Ctrl+Alt+Retroceso**, para los portátiles sin Fin;
+  vale también el Fin del teclado numérico) termina el programa: modo de
+  texto, la SB emulada callada (DSP reiniciado, notas de la FM soltadas),
+  los vectores de interrupción y las máscaras del 8259 como estaban antes
+  del programa (DOS/4GW ya no los va a quitar), EOI al 8259 de lo que
+  quedara en servicio, y vuelta al intérprete o a Ventanas.
+- Escribe en pantalla, y en **\HISPADOS\CUELGUE.TXT** de la unidad de
+  arranque (o en su raíz), el estado en el momento: dónde estaba el
+  programa (CS:EIP, banderas), dónde se vio la tecla (modo protegido o V86),
+  la pila bloqueada y la de modo real en uso, los clientes, si iba paso a
+  paso, las IRQ con su manejador sin volver, las interrupciones por segundo
+  de cada IRQ, las excepciones del programa y las E/S emuladas por segundo,
+  y la última excepción (número, código, CS:EIP).
+- Cómo ve la tecla: con IOPL 0, el `IN 60h` de los clientes se atrapa (el
+  octeto se lee una sola vez, el del programa: leerlo aparte se lo quitaría
+  al programa); lo que lee la BIOS en modo V86 lo apunta HSPEMM en un anillo
+  de 8 octetos (INT 67h AX=DD04h, ESI) y HSPDPMI lo mira en cada entrada.
+  En el bucle de fallos de arriba hay miles de entradas por segundo, así
+  que se ve enseguida. Si DOS está a medias (InDOS), espera a que acabe.
+- **Ctrl+Alt+Supr tres veces** en 3 segundos reinicia el equipo (8042 y, si
+  no, el puerto CF9h), por si ni eso.
+- Solo con la Sound Blaster emulada (clientes con IOPL 0); con una de
+  verdad los programas leen el teclado sin pasar por HSPDPMI.
+
 ### Rendimiento: el estado, lejos del código
 
 El estado que cambia a cada muestra (voces, DSP, FM, estructuras de DMA) y
@@ -370,6 +440,18 @@ el reloj y las IRQ siguen llegando, y que con un manejador de la IRQ 5 lento
 `-vga cirrus`, `LH` y la CPU frenada (`-icount`), y de referencia una `sb16`
 de verdad. Con el HSPDPMI de antes, SBVGA se quedaba colgado.
 
+[SB-VGA2] Además, en SBVGA el manejador lento de la IRQ 5 hace como el de
+DOS/4GW (deja 64 octetos en la pila bloqueada, se va a su pila, abre las
+interrupciones, espera un tic y los comprueba) y el de la IRQ 0 gasta 256
+octetos de la suya: «Datos del manejador en la pila bloqueada, pisados por
+otra IRQ: 0». Con el HSPDPMI de 0.9.8 falla (y salta «HSPDPMI: excepción»),
+también con una `sb16` de verdad. Se pulsan 120 Mayúsculas por el monitor
+de QEMU mientras dibuja y suena (la IRQ 1 tiene que llegar). Y `SBVGA /C`
+se cuelga a propósito (bucle con las interrupciones abiertas, en modo X y
+con la SB sonando): Ctrl+Alt+Fin lo termina, sale el informe, se guarda
+CUELGUE.TXT, el intérprete responde y otro SBVGA va bien después (con HD
+Audio y sin IRQ); Ctrl+Alt+Supr tres veces reinicia.
+
 Juegos con DOS/4GW, con HSPEMM + HSPSND /SB + HSPDPMI, HD Audio sin `sb16`
 (QEMU, 13/11/2026; segundos con sonido en ~33 s de grabación):
 
@@ -395,13 +477,6 @@ más memoria convencional (The Incredible Machine pide 550 KB: HSPDPMI ocupa
 
 ## Pendiente
 
-- [SB-VGA] En QEMU, con Doom muchos minutos, aún se ha visto alguna vez (2 de
-  unas 12 pasadas largas) que se queda quieto: todo el tiempo atendiendo
-  interrupciones (DOS/4GW, su STI justo antes del IRETD de sus manejadores, y
-  el RTC o el HD Audio con HSPSND detrás) y el programa sin avanzar. QEMU va
-  mucho más lento que un equipo de verdad en los cambios de modo; falta
-  verlo en el HP Mini 5103. Lo siguiente sería abaratar la entrega de la IRQ
-  5 (sin pasar por el callback de DOS/4GW) y el remuestreo.
 - Probar en hardware real (HD Audio de portátiles: IRQ de PCI, LPIB).
 - Extensores que no usan DPMI aunque lo haya (o con su propio servidor).
 - OPL3 (estéreo, 18 canales, 4 operadores) y percusión con el ruido real.

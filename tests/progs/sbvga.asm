@@ -198,6 +198,23 @@ main32:
         in al, dx
         or al, 0x40
         out dx, al
+        ; [SB-VGA2] SBVGA /C: colgarse aquí, con las interrupciones abiertas
+        ; y la SB sonando (para probar Ctrl+Alt+Fin)
+        mov esi, 0x81
+.cl:
+        mov al, [esi]
+        inc esi
+        cmp al, 13
+        je .nocolg
+        and al, 0xDF
+        cmp al, 'C'
+        jne .cl
+        mov byte [colgar], 1
+        sti
+.colg:
+        jmp .colg
+.nocolg:
+        mov dword [k9], 0
         mov dword [irqs], 1         ; (la primera, sin manejador lento)
         mov dword [t8], 0
         mov byte [maxdepth], 0
@@ -276,6 +293,8 @@ main32:
         mov [irqdraw], eax
         mov eax, [t8]
         mov [t8draw], eax
+        mov eax, [k9]
+        mov [k9draw], eax
         ; ---- fin: texto, la SB callada, todo como estaba ----
         mov al, 0xDA
         call dsp_out
@@ -362,6 +381,22 @@ main32:
         movzx eax, byte [maxdepth]
         call pdec
         SAY m_nl
+        ; el teclado (las teclas las pulsa run_sbvga_tests.sh por el monitor
+        ; de QEMU mientras se dibuja): lo mira el guion
+        SAY m_k9
+        mov eax, [k9draw]
+        call pdec
+        SAY m_nl
+        SAY m_lpm
+        mov eax, [badlpm]
+        call pdec
+        mov esi, m_ok
+        cmp dword [badlpm], 0
+        je .c7
+        inc byte [nfail]
+        mov esi, m_bad
+.c7:
+        call puts
         SAY m_isr
         mov eax, [badisr]
         call pdec
@@ -563,6 +598,17 @@ hook:
         mov edx, isr8
         int 0x31
         jc .ko
+        mov ax, 0x0204              ; [SB-VGA2] y el teclado
+        mov bl, 0x09
+        int 0x31
+        mov [old9], edx
+        mov [old9+4], cx
+        mov ax, 0x0205
+        mov bl, 0x09
+        mov cx, cs
+        mov edx, isr9
+        int 0x31
+        jc .ko
         in al, 0x21
         mov [oldmask], al
         and al, 0xDF
@@ -586,6 +632,11 @@ unhook:
         mov bl, 0x08
         mov cx, [old8+4]
         mov edx, [old8]
+        int 0x31
+        mov ax, 0x0205
+        mov bl, 0x09
+        mov cx, [old9+4]
+        mov edx, [old9]
         int 0x31
         ret
 ; la de la SB: como la de un juego (cierra el bloque, EOI, abre las
@@ -625,6 +676,22 @@ isr5:
         ; abiertas: la IRQ siguiente no tiene que entrar mientras tanto
         test byte [irqs], 7
         jnz .nos
+        cli
+        ; [SB-VGA2] como el manejador de DOS/4GW: deja datos en la pila
+        ; bloqueada (por debajo de su marco), se va a su propia pila, abre
+        ; las interrupciones y, al volver, los saca de la bloqueada. Una
+        ; interrupción que llegue entre medias no los puede pisar
+        push ecx
+        mov ecx, 16
+.mk:
+        lea eax, [ecx+0x5A5A0000]
+        push eax
+        loop .mk
+        mov [isr_ss], ss
+        mov [isr_esp], esp
+        mov ss, [sssel]
+        mov esp, isr_stack_top
+        sti
         push gs
         mov gs, [lowsel]
         mov ax, [gs:0x46C]
@@ -636,6 +703,20 @@ isr5:
         jnz .sp
 .spx:
         pop gs
+        cli
+        lss esp, [isr_esp]
+        xor ecx, ecx
+.ck:
+        inc ecx
+        pop eax
+        lea edx, [ecx+0x5A5A0000]
+        cmp eax, edx
+        je .ck2
+        inc dword [badlpm]
+.ck2:
+        cmp ecx, 16
+        jb .ck
+        pop ecx
 .nos:
         cli
         dec byte [depth]
@@ -643,12 +724,48 @@ isr5:
         pop edx
         pop eax
         iretd
+; [SB-VGA2] la del teclado: cuenta y sigue con la de antes
+isr9:
+        push ds
+        push eax
+        mov ds, [cs:dssel]
+        inc dword [k9]
+        in al, 0x60                 ; (como un juego: el octeto, aquí)
+        cmp byte [colgar], 0
+        jne .propia
+        pop eax
+        pop ds
+        jmp far [cs:old9]
+.propia:                            ; (SBVGA /C: como Doom, sin la BIOS)
+        mov al, 0x20
+        out 0x20, al
+        pop eax
+        pop ds
+        iretd
 ; la del reloj: cuenta y sigue con la de antes
 isr8:
         push ds
         mov ds, [cs:dssel]
         inc dword [t8]
         pop ds
+        ; [SB-VGA2] y gasta pila (como el de DOS/4GW): 256 octetos de basura
+        push es
+        push edi
+        push ecx
+        push eax
+        sub esp, 256
+        mov edi, esp
+        push ss
+        pop es
+        mov ecx, 64
+        mov eax, 0xEEEEEEEE
+        cld
+        rep stosd
+        add esp, 256
+        pop eax
+        pop ecx
+        pop edi
+        pop es
         jmp far [cs:old8]
 
 ticks:
@@ -780,6 +897,8 @@ m_irq       db "IRQ 5 de la SB durante el dibujo: ", 0
 m_crit      db "PUSHFD/CLI/OUT/POPFD: ", 0
 m_crit2     db " vueltas, interrupciones cerradas después: ", 0
 m_nest      db "IRQ 5 con un manejador lento: anidadas como mucho ", 0
+m_k9        db "IRQ 1 (teclado) durante el dibujo: ", 0
+m_lpm       db "Datos del manejador en la pila bloqueada, pisados por otra IRQ: ", 0
 m_isr       db "PUSHFD/CLI/OUT/POPFD en el manejador de la IRQ 5, cerradas después: ", 0
 m_ok        db ", correcto", 13, 10, 0
 m_bad       db ", MAL", 13, 10, 0
@@ -807,16 +926,26 @@ mixed       dd 0
 ncrit       dd 0
 badif       dd 0
 badisr      dd 0
+badlpm      dd 0
+isr_esp     dd 0
+isr_ss      dw 0
 tdraw       dd 0
 irqdraw     dd 0
 t8draw      dd 0
 oldpm       dd 0
             dw 0
+old9        dd 0
+            dw 0
+k9          dd 0
+colgar      db 0
+k9draw      dd 0
 old8        dd 0
             dw 0
 dbuf        times 8 db 0
             align 16
             times 0x800 db 0
 stack_top:
+            times 0x400 db 0
+isr_stack_top:
 buf:        times 16384 + 2 db 0
 prog_end:

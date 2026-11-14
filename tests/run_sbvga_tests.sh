@@ -30,6 +30,8 @@ check() { if grep -qF -- "$1" $T/log.txt; then ok "$1"; else ko "$1"; fi; }
 checkn() { if grep -qF -- "$1" $T/log.txt; then ko "(no debía salir) $1"; else ok "sin \"$1\""; fi; }
 checkre() { if grep -q -- "$1" $T/log.txt; then ok "$2"; else ko "$2"; fi; }
 # run "CONFIG.SYS" "DISPOSITIVOS" TIEMPO orden...   (cada orden: «segundos|texto»)
+# [SB-VGA2] TECLAS="espera:tecla,tecla,...:pausa": teclas de verdad (IRQ 1)
+# por el monitor de QEMU, desde los «espera» segundos, cada «pausa»
 run() {
   local cfg=$1 dev=$2 tmo=$3; shift 3
   T=$(mktemp -d)
@@ -38,13 +40,25 @@ run() {
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   mcopy -o -i $T/f.img $B/SBVGA.COM ::SBVGA.COM
   mcopy -o -i $T/f.img $B/SINIRQ.COM ::SINIRQ.COM
+  if [ -n "${TECLAS:-}" ]; then
+    ( IFS=: read -r esp lista pausa <<< "$TECLAS"
+      sleep $esp
+      for k in ${lista//,/ }; do
+        echo "sendkey $k" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1
+        sleep $pausa
+      done ) &
+  fi
   { sleep 6
     for c in "$@"; do printf '%s\r' "${c#*|}"; sleep "${c%%|*}"; done
-  } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
+  } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait -parallel none \
         -m 32 -net none -audiodev none,id=snd0 $dev \
         -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot > $T/raw 2>&1
+  RC=$?
+  wait
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 | grep -v '^audio:' > $T/log.txt
 }
+# [SB-VGA2] N mayúsculas pulsadas (teclas sin carácter)
+mayus() { local i l=""; for i in $(seq 1 $1); do l="$l,shift"; done; echo "${l#,}"; }
 fin() {
   if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; fi
   rm -rf $T
@@ -59,6 +73,7 @@ comunes() {
   checkre "PUSHFD/CLI/OUT/POPFD: [0-9]* vueltas, interrupciones cerradas después: 0, correcto" \
           "PUSHFD/CLI/OUT|IN/POPFD: las interrupciones vuelven a abrirse"
   check "PUSHFD/CLI/OUT/POPFD en el manejador de la IRQ 5, cerradas después: 0, correcto"
+  check "Datos del manejador en la pila bloqueada, pisados por otra IRQ: 0, correcto"
   check "SBVGA terminado, fallos: 0"
   checkn "HSPDPMI: excepción"
   checkn "HSPDPMI: pila"
@@ -78,13 +93,39 @@ for CASO in ${CASOS:-hda hdanoirq cirrus lh lenta}; do
   [ $CASO = lh ] && { CFG=$EMMNOEMS; LOAD='LH A:\HISPADOS\HSPSND /SB'; DP='LH A:\HISPADOS\HSPDPMI /SB'; }
   [ $CASO = lenta ] && { PRE='2|A:\SINIRQ'; DEV="$HDA -vga std -icount shift=5"; TMO=150; ESPERA=100; }
   echo "== Hispa-DOS: modo X con la Sound Blaster emulada ($CASO) =="
-  run "$CFG" "$DEV" $TMO "$PRE" "4|$LOAD" "2|$DP" "$ESPERA|A:\\SBVGA"
+  TECLAS="10:$(mayus 120):0.2" run "$CFG" "$DEV" $TMO "$PRE" "4|$LOAD" "2|$DP" "$ESPERA|A:\\SBVGA"
   check "Sound Blaster 16 emulada en 220h, IRQ 5, DMA 1 y 5 (DSP 4.05)"
   check "SBVGA: IOPL 0"
   checkre "IRQ 5 con un manejador lento: anidadas como mucho 1$" "IRQ 5 con un manejador lento: no se anida (como mucho 1)"
+  # [SB-VGA2] el teclado sigue llegando con todo sonando
+  checkre "IRQ 1 (teclado) durante el dibujo: \([4-9]\|[1-9][0-9]\+\)$" "IRQ 1 (teclado) llega mientras se dibuja y suena"
   comunes
   fin
 done
+
+# ---- [SB-VGA2] Ctrl+Alt+Fin: el programa colgado (SBVGA /C: un bucle con
+# las interrupciones abiertas y la SB sonando, en modo X) se termina, sale
+# el informe (y en CUELGUE.TXT), y después otro programa va bien ----
+for CASO in hda hdanoirq; do
+  PRE='1|REM'; [ $CASO = hdanoirq ] && PRE='2|A:\SINIRQ'
+  echo "== Hispa-DOS: Ctrl+Alt+Fin con un programa colgado ($CASO) =="
+  TECLAS="24:ctrl-alt-end:1" run "$EMM" "$HDA -vga std" 90 "$PRE" '4|A:\HISPADOS\HSPSND /SB' '2|A:\HISPADOS\HSPDPMI' \
+      '14|A:\SBVGA /C' '2|TYPE A:\HISPADOS\CUELGUE.TXT' '2|ECHO VUELTA-OK' '30|A:\SBVGA' '2|ECHO FIN-OK'
+  check "HSPDPMI: Ctrl+Alt+Fin: el programa se termina. Estado:"
+  checkre "tecla vista en modo .*; el programa en CS:EIP=" "el informe dice dónde estaba"
+  checkre "interrupciones al programa por segundo:.* IRQ0=" "el informe cuenta las IRQ por segundo"
+  check "VUELTA-OK"
+  if [ $(grep -c "HSPDPMI: Ctrl+Alt+Fin" $T/log.txt) -ge 2 ]; then ok "CUELGUE.TXT guardado"; else ko "CUELGUE.TXT guardado"; fi
+  check "SBVGA terminado, fallos: 0"
+  check "FIN-OK"
+  checkn "HSPDPMI: excepción"
+  checkn "HSPDPMI: pila"
+  fin
+done
+echo "== Hispa-DOS: Ctrl+Alt+Supr tres veces reinicia (programa colgado) =="
+TECLAS="24:ctrl-alt-delete,ctrl-alt-delete,ctrl-alt-delete:0.5" run "$EMM" "$HDA -vga std" 60 '1|REM' '4|A:\HISPADOS\HSPSND /SB' '2|A:\HISPADOS\HSPDPMI' '14|A:\SBVGA /C'
+if [ $RC -ne 124 ]; then ok "el equipo se reinicia (QEMU sale)"; else ko "el equipo se reinicia (QEMU sale)"; fi
+fin
 
 # ---- una Sound Blaster de verdad: HSPDPMI no atrapa (IOPL 3) ----
 echo "== Hispa-DOS: modo X con una Sound Blaster 16 de verdad (HSPEMM, sin emular) =="
