@@ -311,6 +311,12 @@ esc_proc:
         je .pulsa
         cmp eax, WM_LBUTTONUP
         je .suelta
+        cmp eax, WM_RBUTTONUP       ; [CONTEXTO] el menú del escritorio
+        je ctx_def_rup
+        cmp eax, WM_CONTEXTMENU
+        je ctx_escritorio
+        cmp eax, WM_COMMAND
+        je ctx_esc_orden
         xor eax, eax
         ret
 .pulsa:

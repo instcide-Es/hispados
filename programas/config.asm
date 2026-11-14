@@ -52,6 +52,7 @@ ID_ESTADO   equ 14
 ID_PAN      equ 100                 ; los controles del apartado: 100-159
 ID_FIJO     equ 159                 ; (un texto que no cambia)
 WM_MONTAR   equ WM_USER + 60
+WM_APARTADO equ WM_USER + 61        ; [CONTEXTO] (del escritorio) ECX=apartado que se enseña
 LOGO_AN     equ 176                 ; el letrero del salvapantallas
 LOGO_AL     equ 44
 INI_MAX     equ 2048
@@ -165,7 +166,9 @@ pl_raton:
         PLANTILLA EST, t_r_prueba, H, PX, 172, 210, 18, ID_FIJO
         PLANTILLA c_prueba, 0, H, PX + 216, 160, 64, 42, 114
         PLANTILLA BOT, t_zurdo, HT | BS_CASILLA, PX, 222, 380, 20, 115
-        PLANTILLA EST, t_zurdo_nota, H, PX, 248, PAN_AN, 40, ID_FIJO
+        PLANTILLA EST, t_zurdo_nota, H, PX, 248, PAN_AN, 34, ID_FIJO
+        PLANTILLA BOT, t_ctrlclic, HT | BS_CASILLA, PX, 286, 380, 20, 116  ; [CONTEXTO]
+        PLANTILLA EST, t_ctrlclic_nota, H, PX, 308, PAN_AN, 20, ID_FIJO
         dd 0
 
 pl_teclado:
@@ -251,14 +254,15 @@ ini_tabla:
         dd k_vel, a_vel, 1, 6, T_NUM, s_raton
         dd k_doble, a_doble, 3, 18, T_MS55, 0
         dd k_zurdo, a_zurdo, 0, 1, T_NUM, 0
+        dd k_ctrlclic, a_ctrlclic, 0, 1, T_NUM, 0   ; [CONTEXTO]
         dd k_espera, a_espera, 0, 3, T_MS250, s_teclado
         dd k_repet, a_repet, 0, 31, T_NUM, 0
         dd k_dist, a_dist, 0, 1, T_DIST, 0
         dd 0
 INI_E       equ 24
 ; los ajustes de fábrica, en el orden de las variables a_*
-fabrica     dd 0, C_PETROLEO, C_PETROLEO_CL, 0, 5, 2, 8, 0, -1, -1, -1
-N_AJ        equ 11
+fabrica     dd 0, C_PETROLEO, C_PETROLEO_CL, 0, 5, 2, 8, 0, 1, -1, -1, -1
+N_AJ        equ 12
 
 k_cab       db "; Hispa Ventanas - ajustes del programa Configuración (CONFIG.HVP).", 13, 10
             db "; Se puede cambiar a mano con Hispa Ventanas cerrado (docs/VENTANAS.md).", 13, 10, 0
@@ -273,6 +277,7 @@ k_minutos   db "Minutos", 0
 k_vel       db "Velocidad", 0
 k_doble     db "DobleClic", 0
 k_zurdo     db "Zurdo", 0
+k_ctrlclic  db "CtrlClic", 0        ; [CONTEXTO] Ctrl+clic = botón derecho
 k_espera    db "Espera", 0
 k_repet     db "Repeticion", 0
 k_dist      db "Distribucion", 0
@@ -387,6 +392,8 @@ t_r_prueba  db "Pruebe aquí el doble clic:", 0
 t_zurdo     db "Intercambiar los botones (para zurdos)", 0
 t_zurdo_nota db "Con los botones intercambiados, el principal es", 10
             db "el botón derecho.", 0
+t_ctrlclic  db "Ctrl+clic como botón derecho", 0
+t_ctrlclic_nota db "Para los Mac y los touchpads de un solo botón.", 0
 t_t_esp     db "Espera antes de repetir una tecla:", 0
 t_corta     db "Corta", 0
 t_larga     db "Larga", 0
@@ -579,6 +586,8 @@ cfg_proc:
         je .cerrar
         cmp eax, WM_MONTAR
         je .montar
+        cmp eax, WM_APARTADO
+        je .apartado
         cmp eax, WM_CREATE
         je .crear
         cmp eax, WM_DESTROY
@@ -617,6 +626,19 @@ cfg_proc:
         mov byte [pedido], 0
         xor eax, eax
         HV ven_mostrar
+        jmp .hecho
+.apartado:                          ; [CONTEXTO] «Fondo del escritorio...»
+        cmp ecx, N_SEC
+        jae .hecho
+        mov [seccion], ecx
+        mov edx, ecx
+        mov esi, sel_sec
+        call sel_ini
+        HV ven_invalidar
+        cmp byte [montado], 0
+        je .hecho
+        call panel_desmontar
+        call panel_montar
         jmp .hecho
 .montar:
         mov byte [pedido], 0
@@ -854,9 +876,15 @@ ordenes:
         jmp .raton
 .r3:
         cmp ecx, 115
-        jne .t1
+        jne .r4
         call marca_de
         mov [a_zurdo], eax
+        jmp .raton
+.r4:
+        cmp ecx, 116                ; [CONTEXTO]
+        jne .t1
+        call marca_de
+        mov [a_ctrlclic], eax
 .raton:
         call raton_aplicar
         call raton_textos
@@ -1283,6 +1311,9 @@ pan_raton:
         mov ecx, 115
         mov edx, [a_zurdo]
         call marca_poner
+        mov ecx, 116                ; [CONTEXTO]
+        mov edx, [a_ctrlclic]
+        call marca_poner
         ; sigue: los textos
 raton_textos:
         pushad
@@ -1323,6 +1354,9 @@ raton_aplicar:
         HV aj_poner
         mov eax, AJ_RAT_ZURDO
         mov edx, [a_zurdo]
+        HV aj_poner
+        mov eax, AJ_CTRL_DER        ; [CONTEXTO]
+        mov edx, [a_ctrlclic]
         HV aj_poner
         popad
         ret
@@ -3019,6 +3053,7 @@ a_minutos   resd 1                  ; y cuántos minutos espera
 a_vel       resd 1                  ; ratón: velocidad en mitades (2 = normal)
 a_doble     resd 1                  ; doble clic, en tics de reloj
 a_zurdo     resd 1
+a_ctrlclic  resd 1                  ; [CONTEXTO] Ctrl+clic = botón derecho (0/1)
 a_espera    resd 1                  ; teclado: 0-3 (-1: no se toca)
 a_repet     resd 1                  ; 0-31, 31 lo más rápido (-1: no se toca)
 a_dist      resd 1                  ; 1 española, 0 estadounidense (-1: no se toca)

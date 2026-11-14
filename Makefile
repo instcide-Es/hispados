@@ -528,6 +528,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_tamano_tests.sh $(IMG)
+	tests/run_contexto_tests.sh $(IMG)
 	tests/run_accesos_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_juegos2_tests.sh $(IMG)

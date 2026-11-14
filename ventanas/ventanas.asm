@@ -1398,6 +1398,7 @@ eventos:
         shl bl, 1
         xchg bl, bh
 .diestro:
+        call ctx_ctrl_clic          ; [CONTEXTO] Ctrl+clic izquierdo = derecho
         inc esi
         and esi, RAT_COLA - 1
         mov eax, esi
@@ -1475,6 +1476,7 @@ eventos:
         call ges_raton_suelta
         jmp .r
 .teclas:
+        call ctx_tecla_menu         ; [CONTEXTO] la tecla de menú
         movzx ecx, byte [son_nteclas]
         mov esi, son_teclas
 .t:
@@ -1616,7 +1618,8 @@ m_ayuda     db "Hispa Ventanas 0.3 - entorno gráfico de Hispa-DOS (etapa 3)", 1
             db "Necesita HSPXMS.SYS (CONFIG.SYS) y HSPDPMI; con HSPRATON hay ratón.", 13, 10
             db "Dentro: doble clic en un icono del Centro de programas para abrirlo;", 13, 10
             db "Alt+F4 cierra la ventana, Ctrl+Tab pasa a otra, F10 abre el menú y el", 13, 10
-            db "botón Salir de la barra de arriba vuelve a Hispa-DOS.", 13, 10, "$"
+            db "botón Salir de la barra de arriba vuelve a Hispa-DOS. El botón derecho", 13, 10
+            db "(o Mayús+F10, o Ctrl+clic) abre el menú contextual.", 13, 10, "$"
 m_noxms     db "Hispa Ventanas necesita memoria extendida: añada a CONFIG.SYS la línea", 13, 10
             db "  DEVICE=A:\HISPADOS\HSPXMS.SYS", 13, 10
             db "(con la unidad de arranque) y reinicie.", 13, 10, "$"
@@ -1697,6 +1700,7 @@ alto_ini:
 %include "accesos.inc"
 %include "apagado.inc"                ; [APAGAR] salir: volver, reiniciar o apagar
 %include "tamano.inc"               ; [TAMAÑO] tamaño, cursores, barras y rueda
+%include "contexto.inc"             ; [CONTEXTO] el botón derecho: menús contextuales
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %endif
@@ -1710,5 +1714,6 @@ pila_fin:
 %include "bss3.inc"
 %endif
 %include "bsstam.inc"               ; [TAMAÑO]
+%include "bssctx.inc"               ; [CONTEXTO]
             alignb 16
 bss_fin:

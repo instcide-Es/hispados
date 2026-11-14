@@ -106,4 +106,6 @@
         ; ---- [MEZCLADOR] el mezclador de HSPSND (84 entradas) ----
         HVF snd_mezcla              ; 82  EAX EBX ECX EDX a HSPSND (AH=función) -> los cuatro; CF=1 si no hay sonido
         HVF mez_abrir               ; 83  abre el Mezclador (MEZCLAD.HVP); EAX=1: en la vista Completa
+        ; ---- [CONTEXTO] el menú contextual (85 entradas) ----
+        HVF ctx_menu                ; 84  EBP=dueña ESI=órdenes EAX=x EBX=y (-1: donde se pidió) ECX=en gris
 %endmacro

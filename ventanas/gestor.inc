@@ -895,6 +895,10 @@ ven_defecto:
         je .sube
         cmp eax, WM_MOUSEWHEEL      ; [TAMAÑO] la rueda que no quiere una hija
         je .rueda
+        cmp eax, WM_RBUTTONUP       ; [CONTEXTO] el botón derecho: WM_CONTEXTMENU
+        je ctx_def_rup
+        cmp eax, WM_CONTEXTMENU     ; [CONTEXTO] a la madre, o el menú de la ventana
+        je ctx_def_menu
         xor eax, eax
         ret
 .pintar:
@@ -1443,45 +1447,9 @@ ges_raton_pulsa:
         popad
         ret
 
-; el botón derecho (BH=1 apretado, 0 soltado): WM_RBUTTONDOWN a la ventana
-; que hay debajo, que se queda con el ratón hasta que se suelta; entonces
-; recibe WM_RBUTTONUP
+; el botón derecho (BH=1 apretado, 0 soltado): ver contexto.inc
 ges_raton_der:
-        pushad
-        test bh, bh
-        jz .sube
-        mov eax, [menu_ven]
-        or eax, [captura]
-        jnz .x
-        mov eax, [rat_x]
-        mov ebx, [rat_y]
-        call ges_donde
-        cmp ecx, Z_CLIENTE
-        jne .x
-        mov eax, [ebp+V_ESTADO]
-        or eax, [edi+V_ESTADO]
-        test al, S_INACTIVA
-        jnz .x
-        mov eax, WM_RBUTTONDOWN
-        call ges_msg_raton
-        mov [captura], edi
-        mov byte [cap_der], 1
-        jmp .x
-.sube:
-        cmp byte [cap_der], 0
-        je .x
-        mov byte [cap_der], 0
-        mov edi, [captura]
-        test edi, edi
-        jz .x
-        cmp byte [rat_boton], 0     ; (con el izquierdo apretado, la captura es suya)
-        jne .x
-        mov dword [captura], 0
-        mov eax, WM_RBUTTONUP
-        call ges_msg_raton
-.x:
-        popad
-        ret
+        jmp ctx_raton_der           ; [CONTEXTO]
 
 ; (interna) EBP: maximiza o restaura
 ges_alternar_max:
@@ -1698,6 +1666,8 @@ ges_tecla:
         call menu_tecla
         jmp .x
 .nm:
+        call ctx_tecla              ; [CONTEXTO] Mayús+F10
+        jc .x
         mov ebp, [activa]
         test al, al
         jnz .normal

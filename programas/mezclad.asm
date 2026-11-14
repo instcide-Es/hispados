@@ -126,6 +126,19 @@ c_tut       dd tut_proc
 H           equ E_HIJA
 HT          equ E_HIJA | E_TABULA
 
+mez_ctx:                                ; [CONTEXTO] el menú contextual
+        dw O_SENC
+        db "Vista &sencilla", 0
+        dw O_COMP
+        db "Vista &completa", 0
+        dw 0
+        db 0
+        dw O_AVZ
+        db "&Avanzado...", 0
+        dw O_FAB
+        db "Valores de &fábrica...", 0
+        dw 0xFFFF
+
 mez_menu:
         db "&Ver", 0
         dw O_SENC
@@ -1012,7 +1025,20 @@ mez_proc:
         je .crear
         cmp eax, WM_DESTROY
         je .destruir
+        cmp eax, WM_CONTEXTMENU         ; [CONTEXTO] el botón derecho
+        je .ctx
         HVJ ven_defecto
+.ctx:
+        mov ebp, [ven]
+        mov esi, mez_ctx
+        mov ecx, 1                      ; la vista que se ve, en gris
+        cmp byte [vista], 'S'
+        je .ctx1
+        mov ecx, 2
+.ctx1:
+        mov eax, -1
+        HV ctx_menu
+        jmp .hecho
 .crear:
         mov [ven], ebp
         mov dword [ebp+V_ICONO], hvp_icono

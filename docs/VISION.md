@@ -54,6 +54,7 @@ Acordado con Carlos (13/11/2026) para cuando empiece la época de 32 bits:
   en un disquete. Sirve para ver cómo organizar núcleo, controladores y
   ventanas en poco espacio. Su interfaz (`int 40h`) no es la de Windows, así
   que no nos dice qué funciones dar. Se estudia, no se copia.
+- **Arranque UEFI nativo** (además de BIOS): Hispa 32 será la primera de la familia que arranque en PCs que solo tienen UEFI (ver docs/ROADMAP.md).
 - **Windows 95**, como objetivo de comportamiento, igual que MS-DOS 6.22 lo
   es de Hispa-DOS: se observa y se prueban programas, nunca su código.
 - **Documentación pública** del API Win32 (manuales y libros de la época) y

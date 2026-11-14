@@ -525,6 +525,8 @@ vista_proc:
         je .cerrar
         cmp eax, WM_DESTROY
         je .destruir
+        cmp eax, WM_CONTEXTMENU     ; [CONTEXTO] el botón derecho
+        je ctx_vista
         jmp ven_defecto
 .crear:
         mov dword [ebp+V_MENU], menu_centro
@@ -694,8 +696,11 @@ vista_proc:
         jmp .nada
 .o8:
         cmp ecx, 308
-        jne .nada
+        jne .o9
         call jd_carpeta_dlg
+        jmp .nada
+.o9:
+        call ctx_vista_orden        ; [CONTEXTO] Cambiar nombre, Organizar iconos
         jmp .nada
 .acerca:
         mov esi, t_acerca

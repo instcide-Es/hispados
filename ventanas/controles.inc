@@ -1117,6 +1117,10 @@ ed_proc:
         je .largo
         cmp eax, EM_MODIFICADO
         je .modif
+        cmp eax, WM_CONTEXTMENU     ; [CONTEXTO] su menú
+        je ctx_edit
+        cmp eax, WM_COMMAND
+        je ctx_ed_orden
         cmp eax, EM_PONER_MODIF
         jne ven_defecto
         and dword [ebp+V_D7], ~1

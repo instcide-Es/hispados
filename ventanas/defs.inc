@@ -32,6 +32,9 @@ WM_LBUTTONUP    equ 0x0202
 WM_LBUTTONDBLCLK equ 0x0203
 WM_RBUTTONDOWN  equ 0x0204          ; botón derecho (solo en la zona de la ventana)
 WM_RBUTTONUP    equ 0x0205          ; se suelta (a la ventana donde se apretó)
+WM_CONTEXTMENU  equ 0x007B          ; [CONTEXTO] se pide el menú contextual: ECX=la ventana
+                                    ; donde se pidió, EDX=x + y*65536 de la pantalla
+                                    ; (-1: con el teclado, Mayús+F10 o la tecla de menú)
 ; [TAMAÑO] cambiar el tamaño, barras de desplazamiento y rueda (tamano.inc)
 WM_GETMINMAXINFO equ 0x0024         ; antes de cambiar el tamaño con el ratón: -> EAX =
                                     ; ancho mínimo + alto mínimo*65536 (0: los normales)
@@ -291,3 +294,6 @@ AJ_N            equ 14
 ; [TAMAÑO] (se lee y se cambia) arrastrar las ventanas: 0 automático (solo el
 ; contorno si la pantalla es lenta), 1 siempre solo el contorno, 2 enteras
 AJ_CONTORNO     equ 14
+; [CONTEXTO] (se lee y se cambia) 1: Ctrl+clic izquierdo hace de botón derecho
+; (lo normal; para los Mac y los touchpads de un botón), 0: no
+AJ_CTRL_DER     equ 15

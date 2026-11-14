@@ -7,6 +7,8 @@ uso: qmp.py SOCKET ORDEN...
   combo DISPOSITIVO A+B    pulsa varias a la vez (ctrl+backspace, alt+left...)
   move DISPOSITIVO DX DY   movimiento relativo del ratón
   btn DISPOSITIVO 0|1      botón izquierdo soltado / pulsado
+  down DISPOSITIVO QCODE   aprieta una tecla y la deja apretada (ctrl...)
+  up DISPOSITIVO QCODE     la suelta
   (DISPOSITIVO "-": sin dispositivo, al que QEMU tenga activo)
   wait SEGUNDOS
 Sends input events to a specific QEMU device through QMP.
@@ -66,6 +68,10 @@ def main():
             i += 3
         elif op == 'key':
             tap(a[i + 1], [a[i + 2]])
+            i += 3
+        elif op in ('down', 'up'):
+            key(a[i + 1], a[i + 2], op == 'down')
+            time.sleep(0.12)
             i += 3
         elif op == 'combo':
             tap(a[i + 1], a[i + 2].split('+'))

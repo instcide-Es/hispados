@@ -228,6 +228,7 @@ menu_cerrar:
         mov dword [menu_duena], 0
         or dword [ebp+V_ESTADO], S_NCSUCIO
         mov byte [actividad], 1
+        call ctx_cerrado            ; [CONTEXTO]
         pop ebp
 .x:
         ret
@@ -256,7 +257,7 @@ menu_proc:
         add ebx, MENU_SEP_H - 3
         jmp .o3
 .o1:
-        COLOR C_TINTA
+        call ctx_tinta              ; [CONTEXTO] (C_TINTA, o en gris)
         cmp edi, [menu_sel]
         jne .o2
         COLOR C_ANIL
@@ -346,6 +347,7 @@ menu_en:
 
 ; (interna) EAX=orden elegida (o -1): la marca
 menu_marcar:
+        call ctx_filtrar            ; [CONTEXTO] (las de gris no se marcan)
         cmp eax, [menu_sel]
         je .x
         mov [menu_sel], eax
@@ -366,10 +368,18 @@ menu_elegir:
         jc .x
         movzx ecx, word [esi]
         mov ebp, [menu_duena]
+        mov al, [ctx_sis]           ; [CONTEXTO] ¿el menú de la ventana?
+        push eax
         call menu_cerrar
+        pop eax
+        test al, al
+        jnz .sis
         mov eax, WM_COMMAND
         xor edx, edx
         call msg_poner
+        jmp .x
+.sis:
+        call ctx_sis_orden
 .x:
         popad
         ret
@@ -463,12 +473,14 @@ menu_tecla:
         test al, al
         jz .ext
         cmp al, 0xE0
-        jne .x
+        jne .letra
 .ext:
         cmp ah, TC_ABAJO
         je .abajo
         cmp ah, TC_ARRIBA
         je .arriba
+        cmp byte [ctx_activo], 0    ; [CONTEXTO] (el emergente no tiene barra)
+        jne .x
         mov ebp, [menu_duena]
         mov ecx, [menu_idx]
         cmp ah, TC_DER
@@ -526,8 +538,8 @@ menu_tecla:
 .m3:
         call menu_orden
         jc .x
-        cmp word [esi], 0
-        jne .m4
+        call ctx_saltable           ; [CONTEXTO] una raya o una en gris
+        jnz .m4
         dec ebx
         jnz .m1
         jmp .x
@@ -537,6 +549,9 @@ menu_tecla:
         jmp .x
 .elegir:
         call menu_elegir
+        jmp .x
+.letra:
+        call ctx_letra              ; [CONTEXTO] la letra subrayada
         jmp .x
 .cerrar:
         call menu_cerrar

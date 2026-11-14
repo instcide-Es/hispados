@@ -91,6 +91,30 @@ pin_plant:
 col_plant:
         PLANTILLA c_colores, t_col_tit, E_DIALOGO, 214, 150, 372, 163, 0
 
+; [CONTEXTO] el menú contextual (Mayús+F10): lo de Edición y Colores
+pin_ctx:
+        dw 111
+        db "&Deshacer          Ctrl+Z", 0
+        dw 112
+        db "&Rehacer           Ctrl+Y", 0
+        dw 0
+        db 0
+        dw 113
+        db "Cor&tar            Ctrl+X", 0
+        dw 114
+        db "&Copiar            Ctrl+C", 0
+        dw 115
+        db "&Pegar             Ctrl+V", 0
+        dw 116
+        db "&Borrar            Supr", 0
+        dw 0
+        db 0
+        dw 117
+        db "&Seleccionar todo  Ctrl+A", 0
+        dw 122
+        db "&Intercambiar primario y secundario", 0
+        dw 0xFFFF
+
 pin_menu:
         db "&Archivo", 0
         dw 101
@@ -519,6 +543,8 @@ pin_proc:
         je letra
         cmp eax, WM_COMMAND
         je orden
+        cmp eax, WM_CONTEXTMENU     ; [CONTEXTO] (el botón derecho es el color
+        je .ctx                     ; secundario: el menú, solo con el teclado)
         cmp eax, WM_SIZE
         je .tam
         cmp eax, WM_GETMINMAXINFO   ; [TAMAÑO] lo más pequeño: herramientas y colores
@@ -533,6 +559,15 @@ pin_proc:
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
+.ctx:
+        cmp edx, -1                 ; Mayús+F10 o la tecla de menú
+        jne hecho
+        mov ebp, [ven]
+        mov esi, pin_ctx
+        mov eax, -1
+        xor ecx, ecx
+        HV ctx_menu
+        jmp hecho
 .crear:
         mov [ven], ebp
         mov dword [ebp+V_MENU], pin_menu

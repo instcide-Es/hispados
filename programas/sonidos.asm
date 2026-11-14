@@ -49,6 +49,7 @@ ID_DER      equ 12
 ID_TONO     equ 13
 ID_PARAR    equ 14
 ID_ABRIR    equ 15
+ID_MEZ      equ 16                  ; [CONTEXTO] (solo en el menú contextual)
 ID_TARJETA  equ 20
 ID_DETALLE  equ 21
 ID_VOL      equ 30
@@ -383,7 +384,20 @@ son_proc:
         je .crear
         cmp eax, WM_DESTROY
         je .destruir
+        cmp eax, WM_CONTEXTMENU         ; [CONTEXTO] el botón derecho
+        je .ctx
         HVJ ven_defecto
+.ctx:
+        mov ebp, [ven]
+        mov esi, son_ctx
+        xor ecx, ecx
+        cmp dword [estado], E_NADA      ; parado: «Parar», en gris
+        jne .ctx1
+        mov ecx, 1 << 4
+.ctx1:
+        mov eax, -1
+        HV ctx_menu
+        jmp .hecho
 .crear:
         mov [ven], ebp
         mov dword [ebp+V_ICONO], hvp_icono
@@ -476,8 +490,14 @@ ordenes:
         jmp .hecho
 .o5:
         cmp ecx, ID_ABRIR
-        jne .o6
+        jne .o5b
         call abrir
+        jmp .hecho
+.o5b:
+        cmp ecx, ID_MEZ                 ; [CONTEXTO]
+        jne .o6
+        xor eax, eax
+        HV mez_abrir
         jmp .hecho
 .o6:
         cmp ecx, ID_VOL
@@ -510,6 +530,24 @@ ordenes:
 .hecho:
         xor eax, eax
         ret
+
+; [CONTEXTO] el menú contextual (las órdenes de los botones)
+son_ctx:
+        dw ID_PRUEBA
+        db "Sonido de &prueba", 0
+        dw ID_TONO
+        db "&Tono 440 Hz", 0
+        dw ID_ABRIR
+        db "&Abrir WAV...", 0
+        dw 0
+        db 0
+        dw ID_PARAR
+        db "Pa&rar", 0
+        dw 0
+        db 0
+        dw ID_MEZ
+        db "&Mezclador...", 0
+        dw 0xFFFF
 
 ; la campanita del volumen, si no está sonando otra cosa (que ya se oye)
 campana:

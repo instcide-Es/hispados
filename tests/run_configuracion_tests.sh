@@ -321,8 +321,9 @@ RX=400; RY=300; VEL=4
   mon "mouse_move 50 40" 0.5                # el ratón va el doble de rápido
   shot m0
   RX=500; RY=380
-  clic 206 129; aparca                      # el botón izquierdo ya no elige
-  shot m1
+  clic 206 129; aparca                      # el botón izquierdo es el secundario:
+  shot m1                                   # [CONTEXTO] el menú contextual del grupo
+  tecla esc; sleep 0.5
   derecho 206 129; aparca                   # el derecho, sí
   shot m2
   tecla left ret; sleep 1                   # «Principal» y, dentro, Configuración
@@ -347,7 +348,7 @@ RX=400; RY=300; VEL=4
 
 chk $T/m0.ppm tam 800 600 cursor 500 380 px 721 464 10 "al arrancar, el fondo del VENTANAS.INI hecho a mano: zigzag ocre" \
   px 724 464 11 "sobre verde oliva" texto 66 155 9 12 fina "Principal"
-chk $T/m1.ppm texto 66 155 9 12 fina "Principal" texto 166 155 0 8 fina "Accesorios"
+chk $T/m1.ppm texto 66 155 0 8 fina "Principal" texto 231 163 0 8 fina "ropiedades..."
 chk $T/m2.ppm texto 166 155 9 12 fina "Accesorios" texto 66 155 0 8 fina "Principal"
 chk $T/m3.ppm titulo 124 110 activa "Configuración" texto 278 145 4 8 negrita "Teclado" \
   px 426 393 4 "teclado estadounidense, puesto al arrancar" px 286 393 9 "«Española», sin marcar"

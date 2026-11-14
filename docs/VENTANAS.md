@@ -648,7 +648,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Apartado | Qué tiene |
 |---|---|
 | Pantalla | Tema (ocho combinaciones hechas: Hispa, Noche, Mar, Campo, Vino, Duna, Pizarra, Ladrillo), dibujo del fondo (diez: rombos, liso, puntos, rayas, cuadros, ladrillos, olas, damero, trama, zigzag; se ven con los colores puestos), color del fondo y color del dibujo (los 16 de la paleta), y el salvapantallas: casilla, minutos (1 a 60) y «Probar» |
-| Ratón | Velocidad del puntero (de x0,5 a x3), tiempo máximo del doble clic (165 a 990 ms, con una zona para probarlo) e intercambiar los botones (para zurdos) |
+| Ratón | Velocidad del puntero (de x0,5 a x3), tiempo máximo del doble clic (165 a 990 ms, con una zona para probarlo) e intercambiar los botones (para zurdos); [CONTEXTO] «Ctrl+clic como botón derecho» (para los Mac y los touchpads de un botón; activado por omisión) |
 | Teclado | Espera antes de repetir (250 a 1000 ms) y velocidad de repetición (2 a 30 por segundo), con un cuadro para probarlas; distribución española o estadounidense, si TECLADO (KEYB) está cargado |
 | Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice); [MEZCLADOR] el botón «Mezclador...», la tarjeta que lleva HSPSND y si está la «Sound Blaster para juegos» (`HSPSND /SB`: sí, no o «es la propia tarjeta»), con lo que hay que hacer para ponerla o quitarla (no se puede sin volver a cargar HSPSND, así que lo explica). Además, Configuración guarda cada segundo el mezclador de HSPSND en `\HISPADOS\SONIDO.INI` si ha cambiado (docs/MEZCLADOR.md) |
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
@@ -707,6 +707,7 @@ Minutos=5
 Velocidad=2
 DobleClic=440
 Zurdo=0
+CtrlClic=1
 
 [Teclado]
 Espera=500
@@ -728,7 +729,8 @@ Distribucion=SP
   `Salvapantallas` = 0/1 y `Minutos` = 1-60.
 - `Velocidad`: del ratón, en mitades (1 = x0,5; 2 = normal; 6 = x3).
   `DobleClic`: milisegundos como mucho entre los dos clics (165-990; se
-  redondea a tics de reloj, de 55 ms). `Zurdo` = 0/1.
+  redondea a tics de reloj, de 55 ms). `Zurdo` = 0/1. `CtrlClic` = 1 (lo
+  normal: Ctrl+clic izquierdo hace de botón derecho) o 0.
 - `Espera` (250, 500, 750 o 1000 ms) y `Repeticion` (0-31; 31, la más
   rápida: 30 por segundo) se dan a la BIOS (INT 16h, función 03h);
   `Distribucion` = `SP` o `US`, al residente TECLADO. Las tres **solo están
@@ -911,6 +913,80 @@ opciones en forma de rombo, con la marca terracota; cursor de texto
 terracota; cursor del ratón ocre con borde de tinta. La paleta y los dibujos
 están en `ventanas/datos.inc` y `ventanas/iconos.inc`.
 
+### Botón derecho
+
+[CONTEXTO] (`ventanas/contexto.inc`, en la parte alta). Pedido de Carlos:
+«No tenemos botón secundario en Ventanas». Los menús contextuales llegaron
+a mediados de los 90; aquí tienen el aspecto de los menús de siempre.
+
+- **El menú emergente** es el mismo desplegable de los menús de la barra
+  (`menus.inc`), abierto donde está el ratón. Se maneja igual: flechas,
+  Intro, Esc, la **letra subrayada** (que ahora vale también en los
+  desplegables de la barra) y el ratón; un clic fuera lo cierra. Si no cabe
+  a la derecha o debajo del punto, sale al otro lado (se ajusta a los
+  bordes de la pantalla). Las órdenes que no se pueden hacer salen en gris
+  y no se marcan.
+- **Cuándo sale**: al soltar el botón derecho sobre una ventana (que se
+  activa al apretarlo). Con el botón apretado se puede ir hasta una orden y
+  soltar encima. Sin ratón, **Mayús+F10** o la **tecla de menú** (la de la
+  lista, junto a Ctrl derecho: Hispa Ventanas la mira en `tec_mapa`, porque
+  la BIOS no la da como tecla) lo abren en la ventana que tiene el foco.
+- **Mac y touchpads de un botón**: **Ctrl+clic izquierdo** hace de clic
+  derecho en todo Hispa Ventanas (también para los módulos: lo cambia antes
+  de repartir, como los botones de los zurdos). Se quita en Configuración >
+  Ratón, «Ctrl+clic como botón derecho» (`CtrlClic=` en `[Raton]` de
+  VENTANAS.INI; activado por omisión; `AJ_CTRL_DER`).
+
+| Dónde | Menú |
+|---|---|
+| Un icono del Centro (un grupo) | Abrir, Propiedades..., Cambiar nombre..., Eliminar (pregunta antes) |
+| Un icono de un grupo (un acceso) | Abrir, Propiedades... (el diálogo del acceso), Cambiar nombre..., Mover a otro grupo..., Eliminar (pregunta antes). El icono queda marcado |
+| El fondo de un grupo | Nuevo acceso directo..., Buscar programas..., Organizar iconos (por orden alfabético; se guarda en CENTRO.INI) |
+| El fondo del Centro | Nuevo grupo..., Buscar programas... |
+| La barra de título (o sus botones) de cualquier ventana | Restaurar, Minimizar, Maximizar y Cerrar: las que tiene la ventana; en gris la que no toca (Restaurar si no está maximizada ni minimizada...) |
+| El icono de una ventana minimizada (abajo) | el mismo de la barra de título |
+| El escritorio | Configuración..., Fondo del escritorio... (Configuración en el apartado Pantalla), Mezclador..., Ventanas en cascada, Ventanas en mosaico |
+| Un cuadro de texto (Bloc de notas, campos de los diálogos) | Cortar, Copiar, Pegar, Borrar, Seleccionar todo (con sus teclas al lado; en gris lo que no se puede: sin selección, con el portapapeles vacío o sin texto). Deshacer no está: los cuadros de texto no lo tienen |
+| Pintura | el botón derecho sigue siendo el color secundario: no hay menú con el ratón; con Mayús+F10, Deshacer, Rehacer, Cortar, Copiar, Pegar, Borrar, Seleccionar todo e Intercambiar los colores |
+| Mezclador | Vista sencilla / completa (en gris la que se ve), Avanzado..., Valores de fábrica... |
+| Reproductor de sonido | Sonido de prueba, Tono 440 Hz, Abrir WAV..., Parar (en gris si no suena), Mezclador... |
+| Las demás ventanas (los juegos, la Calculadora...) | con el ratón, nada (el botón derecho es suyo: el Campo de minas pone banderas); con el teclado, el de la barra de título |
+
+**Ventanas en cascada** pone las ventanas visibles en escalera, de 26 en 26
+puntos, sin cambiar cuál está delante (las que cambian de tamaño, dentro de
+la pantalla); **en mosaico** reparte la pantalla en una cuadrícula (tantas
+columnas como la raíz del número de ventanas, por arriba): las que cambian
+de tamaño ocupan su casilla (sin bajar de su tamaño mínimo) y las demás
+solo se ponen en su sitio. Las maximizadas se restauran antes; las
+minimizadas y las ocultas no se tocan.
+
+**Cómo funciona** (y cómo lo usa un programa):
+
+1. El botón derecho llega a la ventana como `WM_RBUTTONDOWN` y
+   `WM_RBUTTONUP` (como antes). Si la ventana manda `WM_RBUTTONUP` a
+   `ven_defecto` (lo normal: no lo atiende), `ven_defecto` le manda
+   **`WM_CONTEXTMENU`** (0x007B): ECX = la ventana donde se pidió, EDX =
+   x + y×65536 **de la pantalla**. Con el teclado, `WM_CONTEXTMENU` va a la
+   ventana con el foco con **EDX = -1**.
+2. Una hija que no lo atiende lo pasa a su madre (`ven_defecto`), con el
+   mismo ECX: el Mezclador recibe el de sus columnas. Una ventana de primer
+   nivel que no lo atiende no hace nada con el ratón y, con el teclado,
+   abre el menú de su barra de título.
+3. Quien lo atiende abre su menú con **`ctx_menu`** (EBP = la ventana a la
+   que irá la orden, ESI = las órdenes con el formato de un desplegable de
+   la barra: `dw número`, `db "&Texto", 0`, ..., `dw 0` + `db 0` para una
+   raya y `dw 0xFFFF` al final; EAX = x, EBX = y de la pantalla, o **EAX =
+   -1**: donde se pidió, el ratón o, con el teclado, la esquina de la zona
+   de la ventana; ECX = las órdenes en gris, un bit por orden contando las
+   rayas). No espera: la orden elegida llega después como **`WM_COMMAND`**
+   con ECX = su número, igual que las de la barra (así un menú contextual
+   puede usar los mismos números que el menú de la ventana). Con Esc o un
+   clic fuera no llega nada.
+
+Las órdenes del menú de la barra de título (números `SC_*`) y las del
+escritorio, de los cuadros de texto y de los grupos las atiende Hispa
+Ventanas; un programa no las ve.
+
 ## La interfaz de la etapa 3
 
 Es interna (ensamblador, registros): la base sobre la que la etapa 4 pondrá
@@ -950,7 +1026,8 @@ ECX=ancho, EDX=alto.
 | `WM_KEYDOWN` | tecla que no escribe (flechas, Intro, Tab, Esc, Supr, F1…) | ECX=tecla (`TC_*`; Ctrl+letra = `TC_CTRL`+1…26), EDX=mayúsculas (`TM_*`) |
 | `WM_CHAR` | carácter (página 437, con el teclado de KEYB) | ECX=carácter |
 | `WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, `WM_LBUTTONUP`, `WM_LBUTTONDBLCLK` | ratón sobre la zona de la ventana (o capturado) | EDX=x + y×65536 (con signo, en la zona), ECX=mayúsculas |
-| `WM_RBUTTONDOWN`, `WM_RBUTTONUP` | se aprieta el botón derecho sobre la zona de la ventana (no la activa) y se suelta. Mientras está apretado, el ratón es de esa ventana (recibe los `WM_MOUSEMOVE` aunque salga de ella), como con el izquierdo | lo mismo |
+| `WM_RBUTTONDOWN`, `WM_RBUTTONUP` | se aprieta el botón derecho sobre la zona de la ventana (desde [CONTEXTO], la activa) y se suelta; `ven_defecto` convierte `WM_RBUTTONUP` en `WM_CONTEXTMENU`. Mientras está apretado, el ratón es de esa ventana (recibe los `WM_MOUSEMOVE` aunque salga de ella), como con el izquierdo | lo mismo |
+| `WM_CONTEXTMENU` | [CONTEXTO] se pide el menú contextual (botón derecho que no atiende la ventana, Mayús+F10, tecla de menú); la hija que no lo quiere lo pasa a su madre | ECX=la ventana donde se pidió, EDX=x + y×65536 de la pantalla (-1: con el teclado) |
 | `WM_COMMAND` | orden de menú o aviso de un control | menú: ECX=número. Control: ECX=id + aviso×65536, EDX=el control |
 | `WM_TIMER` | vence un temporizador | ECX=su número |
 | `WM_QUIT` | lo pone `msg_salir`: `msg_tomar` devuelve 0 | |
@@ -1328,11 +1405,21 @@ Añadidas para el Mezclador ([MEZCLADOR]; 84 entradas: dos más, la 82 y la 83):
 | `snd_mezcla` (EAX, EBX, ECX, EDX → los mismos; CF=1 si no hay sonido o HSPSND dice que no) | las funciones 09h-0Fh de HSPSND, el mezclador por fuentes (docs/MEZCLADOR.md). Con 0Bh (poner una fuente) y 0Eh (valores de fábrica), Hispa Ventanas vuelve a leer el volumen de General y repinta el altavoz |
 | `mez_abrir` (EAX=1: en la vista Completa) | abre el Mezclador (`PROGS\MEZCLAD.HVP` al lado de VENTANAS.COM) o trae su ventana delante |
 
+Añadida para el botón derecho ([CONTEXTO]; 85 entradas: una más, la 84):
+
+| Entradas | Para qué |
+|---|---|
+| `ctx_menu` (EBP=dueña ESI=órdenes EAX=x EBX=y de la pantalla, EAX=-1: donde se pidió; ECX=las que van en gris, un bit por orden) | abre un menú contextual (ver «Botón derecho»); la orden elegida llega a la dueña como `WM_COMMAND` (ECX=número) |
+
+El mensaje `WM_CONTEXTMENU` no gasta entrada: un módulo que no lo conoce lo
+manda a `ven_defecto` (a la madre o, con el teclado, el menú de la ventana).
+`AJ_CTRL_DER` (15) se lee y se cambia con `aj_leer` y `aj_poner`.
+
 `ventanas/hvpmez.inc` (como `hvplib.inc`, dentro del módulo) tiene lo común
 del mezclador para los módulos: leerlo todo, poner una fuente o un ajuste y
 guardar la sección `[Mezclador]` de `\HISPADOS\SONIDO.INI`.
 
-Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80 u 82) sigue
+Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80, 82 u 84) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
 
@@ -1722,6 +1809,22 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   Bloc de notas, una línea larga mueve la barra horizontal, Inicio la
   devuelve y sus flechas desplazan el texto. Capturas en
   `build/tamano_*.png`.
+- `tests/run_contexto_tests.sh` ([CONTEXTO]): el botón derecho. En un
+  icono de un grupo, su menú; «Propiedades» abre el diálogo del acceso;
+  «Cambiar nombre» (con la letra subrayada) y «Eliminar» (con las flechas e
+  Intro; pregunta antes); en el fondo del grupo, «Organizar iconos» (y
+  CENTRO.INI con el orden nuevo); Ctrl+clic izquierdo igual que el derecho
+  (por QMP, con Ctrl apretado); Esc y un clic fuera lo cierran; Mayús+F10 y
+  la tecla de menú; en la barra de título, Maximizar y, con Ctrl+clic,
+  Restaurar; en un icono del Centro; en el Bloc de notas, Seleccionar todo,
+  Copiar y Pegar (con lo demás en gris); en el escritorio, cerca de la
+  esquina (el menú sale hacia arriba y a la izquierda), «Fondo del
+  escritorio...» (Configuración en Pantalla), cascada, mosaico y el menú de
+  una ventana minimizada. Segunda sesión con `CtrlClic=0`: Ctrl+clic es un
+  clic normal; en Pintura el derecho pinta y Mayús+F10 da su menú; los
+  menús del Mezclador y del Reproductor; la casilla de Configuración >
+  Ratón (que lo vuelve a poner y se guarda). Capturas en
+  `build/contexto_*.png`.
 - `tests/run_accesos_tests.sh`: los grupos ligados a una carpeta de juegos
   y las opciones de juego, con un disco duro que trae `C:\JUEGOS` y QEMU en
   modo `-icount` (las velocidades medidas no dependen de la carga del
