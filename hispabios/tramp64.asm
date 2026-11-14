@@ -13,6 +13,7 @@
 ;  entre modo real y protegido).
 ; =============================================================================
 TR_BASE         equ 8000h
+TX_BASE         equ 9000h           ; pantalla de texto de DOS (80x25x2)
 
         org TR_BASE
 
@@ -97,9 +98,28 @@ real:
         mov sp, TR_PILA
         lidt [idtr_real]
 
-        ; ===== el trabajo de modo real (paso 3: una marca) =====
+        ; ===== el trabajo de modo real =====
         mov word [TR_MARCA], 1234h
-        ; =========================================================
+        ; paso 4: rellena la pantalla de texto (80x25 en TX_BASE, como B800h)
+        ; con espacios grises y escribe un letrero en azul en la fila 0
+        push es
+        mov ax, TX_BASE >> 4
+        mov es, ax
+        xor di, di
+        mov ax, 0720h
+        mov cx, 80 * 25
+        cld
+        rep stosw
+        xor di, di
+        mov si, letrero_real
+        mov ah, 1Fh
+.l:     lodsb
+        test al, al
+        jz .f
+        stosw
+        jmp .l
+.f:     pop es
+        ; ====================================
 
 ; ---- subida: real -> protegido de 32 -> largo ----
         cli
@@ -158,6 +178,7 @@ vuelta:
         ret
 
 ; ---- datos ----
+letrero_real    db ' Hispa-DOS: este texto lo ha escrito el modo real; la BIOS lo dibuja en UEFI ', 0
         align 16
 gdt:
         dq 0
