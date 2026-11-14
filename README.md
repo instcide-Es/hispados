@@ -40,7 +40,7 @@ Las imágenes listas para usar están en **[Releases](https://github.com/instcid
 | Archivo | Para qué |
 |---|---|
 | `hispados-disquete.img` | Disquete de arranque de 1,44 MB. En VirtualBox, VMware, 86Box o QEMU, como disquete; en un PC antiguo, grábalo en un disquete (Rufus o `dd`). |
-| `hispados-usb.zip` | Imagen de 64 MB para memoria USB: descomprímela y grábala con Rufus (modo DD), balenaEtcher o `dd`. Arranca en PCs con BIOS (o UEFI con CSM/Legacy) y permite instalar en el disco duro con `INSTALAR`. |
+| `hispados-usb.zip` | Imagen de 512 MB para memoria USB (FAT16, con unos 510 MB libres para juegos y programas propios; la descarga sigue pesando alrededor de 1 MB): descomprímela y grábala con Rufus (modo DD), balenaEtcher o `dd`. Arranca en PCs con BIOS (o UEFI con CSM/Legacy) y permite instalar en el disco duro con `INSTALAR`. |
 
 Probar en QEMU: `qemu-system-i386 -fda hispados-disquete.img`.
 
@@ -276,7 +276,7 @@ Si en `\HISPADOS` está `AUDICION` (la prueba de sonido), `DIAGNOSTICO` ofrece l
 
 ### Memoria USB
 
-`make usb` crea `build/hispados-usb.img` (64 MB). Grábala con Rufus (modo DD), balenaEtcher o `dd` y arranca el PC desde la memoria (en equipos UEFI, con el modo *Legacy/CSM*). Sirve para **probar** Hispa-DOS sin tocar el disco duro o para **instalarlo** con `INSTALL`, que solo actúa sobre un disco duro vacío.
+`make usb` crea `build/hispados-usb.img` (512 MB, FAT16; otro tamaño con `USB_MB=n make usb`). En el resto de la memoria se puede crear una segunda partición FAT de hasta 2 GB (en Windows, «Administración de discos» › «Nuevo volumen simple», sistema de archivos FAT): Hispa-DOS la ve como D:. Grábala con Rufus (modo DD), balenaEtcher o `dd` y arranca el PC desde la memoria (en equipos UEFI, con el modo *Legacy/CSM*). Sirve para **probar** Hispa-DOS sin tocar el disco duro o para **instalarlo** con `INSTALL`, que solo actúa sobre un disco duro vacío.
 
 La imagen también arranca en VirtualBox, 86Box, Bochs o en un PC real con BIOS (o UEFI con CSM) desde disquete o USB en modo disquete.
 

@@ -11,7 +11,7 @@ import os, struct, subprocess, sys
 
 B = 'build'
 OUT = os.path.join(B, 'hispados-usb.img')
-SIZE_MB = 64
+SIZE_MB = int(os.environ.get('USB_MB', '512'))   # Carlos 14/11: 512 MB (el .zip apenas crece)
 START = 2048
 HEADS, SPT = 255, 63
 HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
@@ -42,8 +42,12 @@ def main():
     with open(OUT, 'r+b') as f:
         f.write(mbr)
     img = '%s@@%d' % (OUT, START * 512)
+    # sectores por clúster: el menor que deje FAT16 por debajo de 65.525 clústeres
+    spc = 4
+    while psize // spc >= 65000:
+        spc *= 2
     run('mformat', '-i', img, '-T', str(psize), '-h', str(HEADS), '-s', str(SPT),
-        '-H', str(START), '-c', '4', '-v', 'HISPADOS', '-B', os.path.join(B, 'boot16.bin'), '::')
+        '-H', str(START), '-c', str(spc), '-v', 'HISPADOS', '-B', os.path.join(B, 'boot16.bin'), '::')
     def cp(src, dst):
         run('mcopy', '-o', '-i', img, src, '::' + dst)
     def md(d):
