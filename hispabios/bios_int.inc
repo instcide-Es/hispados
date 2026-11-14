@@ -83,6 +83,40 @@ irq_esclavo:                            ; IRQ 8-15 sin dueño: fin en los dos
         iret
 
 int08:                                  ; IRQ 0: el tic de DOS
+        ; En un equipo real la IRQ 0 se pierde mientras el firmware trabaja
+        ; (dibujar, disco, teclado) con las interrupciones cerradas: los tics
+        ; se cuentan con el TSC y aquí se dan todos los que falten.
+        push eax
+        push edx
+        push ds
+        mov ax, SEG_BIOS
+        mov ds, ax
+        cmp dword [T_TSC_TICK], 0
+        je .uno
+        rdtsc
+        sub eax, [tsc0]
+        sbb edx, [tsc0 + 4]
+        cmp edx, [T_TSC_TICK]           ; (si no cabe, un tic y ya)
+        jae .uno
+        div dword [T_TSC_TICK]          ; EAX = tics desde el arranque
+        cmp eax, [tics_dados]
+        jbe .nada                       ; (IRQ adelantada: este no cuenta)
+        mov [tics_tope], eax
+.otro:  mov eax, [tics_dados]
+        cmp eax, [tics_tope]
+        jae .nada
+        inc dword [tics_dados]
+        call un_tic
+        jmp .otro
+.uno:   inc dword [tics_dados]
+        call un_tic
+.nada:  pop ds
+        pop edx
+        pop eax
+        jmp tic_fin
+
+; un_tic: un tic de DOS (40:6C y INT 1Ch)
+un_tic:
         push ds
         push ax
         mov ax, 40h
@@ -99,6 +133,9 @@ int08:                                  ; IRQ 0: el tic de DOS
 .s:     pop ax
         pop ds
         int 1Ch
+        ret
+
+tic_fin:
         push eax
         push ds
         mov al, 20h                     ; fin de interrupción
@@ -1191,6 +1228,7 @@ d_n             dw 0
 d_buf           dd 0
 d_lba           dq 0
 tics_dados      dd 0
+tics_tope       dd 0
 tsc0            dq 0
 en_fw           db 0
 pci_buscar      dd 0

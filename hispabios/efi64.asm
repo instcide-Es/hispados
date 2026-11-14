@@ -546,13 +546,24 @@ pantalla_dibujar:
         push r13
         push r14
         push r15
-        ; borra todo en negro
+        ; la primera vez se borra todo en negro; después solo se pintan las
+        ; celdas que han cambiado (escribir en la memoria de vídeo real es
+        ; lento y mientras tanto el reloj de DOS no corre)
+        cld
+        cmp byte [rel borrada], 0
+        jne .ya_borrada
+        mov byte [rel borrada], 1
         mov rdi, [rel fb]
         mov eax, [rel fb_linea]
         imul eax, [rel fb_alto]
         mov ecx, eax
         xor eax, eax
         rep stosd
+        lea rdi, [rel sombra]           ; nada pintado todavía
+        mov ecx, 2000
+        mov ax, 0FFFFh
+        rep stosw
+.ya_borrada:
         ; origen: centrado
         mov eax, [rel fb_ancho]
         sub eax, 640
@@ -570,6 +581,10 @@ pantalla_dibujar:
         imul eax, 80
         add eax, r13d
         movzx ebx, word [TX_BASE + rax * 2]  ; BL = carácter, BH = atributo
+        lea rsi, [rel sombra]
+        cmp bx, [rsi + rax * 2]
+        je .siguiente                   ; igual que la última vez
+        mov [rsi + rax * 2], bx
         movzx eax, bh
         and eax, 0Fh
         lea rsi, [rel paleta]
@@ -616,6 +631,7 @@ pantalla_dibujar:
         sub eax, 8
         lea rdi, [rdi + rax * 4]
         loop .linea
+.siguiente:
         inc r13d
         cmp r13d, 80
         jb .celda
@@ -730,6 +746,7 @@ manejadores     dq 0
 bajo_tope       dq 0
 tecla_efi       dd 0
 ndiscos         db 0
+borrada         db 0
         align 8
 discos          times 16 dq 0           ; Block I/O y MediaId de cada disco (8)
         align 8
@@ -760,6 +777,7 @@ buf_hex         times 16 db '0'
                 db 0
                 align 8
 buf16           times 256 dw 0
+sombra          times 2000 dw 0         ; lo que hay pintado (carácter y atributo)
 mapa            times MAPA_MAX db 0
 bios:           incbin "BIOS64.BIN"
 bios_finbin:
