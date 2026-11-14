@@ -912,7 +912,19 @@ init:
         add si, 3
         jmp .l
 .end:
+        ; con HispaBIOS (equipos UEFI) la controladora SATA (AHCI) la lleva el
+        ; firmware, que lee por ella los discos: no se toca
+        mov ax, 0x4842
+        int 0x15
+        jc .ahci
+        cmp ax, 0x6862
+        jne .ahci
+        mov si, msg_uefi
+        call puts
+        jmp .sin_ahci
+.ahci:
         call ahci_probe
+.sin_ahci:
         pop ds
         lds bx, [cs:req]
         cmp byte [cs:ncd], 0
@@ -1199,6 +1211,7 @@ msg_title   db "HSPCD 0.1 - lectores de CD/DVD de Hispa-DOS", 13, 10, 0
 msg_model   db "Lector: ", 0
 msg_units   db "Primera unidad de CD/DVD: "
 msg_drv     db "?:", 13, 10, 0
+msg_uefi    db "Equipo UEFI (HispaBIOS): los lectores SATA (AHCI) los lleva el firmware.", 13, 10, 0
 msg_none    db "No se ha encontrado ningún lector de CD/DVD (ATAPI).", 13, 10, 0
 msg_crlf    db 13, 10, 0
 file_end:

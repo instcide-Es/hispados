@@ -55,6 +55,13 @@ def main():
     cp(os.path.join(B, 'KERNEL.SYS'), 'KERNEL.SYS')
     run('mattrib', '-i', img, '+h', '+s', '+r', '::KERNEL.SYS')
     cp(os.path.join(B, 'COMMAND.COM'), 'COMMAND.COM')
+    # HispaBIOS: para los equipos que solo arrancan por UEFI (sin CSM); en los
+    # que tienen BIOS la memoria arranca igual que siempre por el MBR
+    if os.path.exists(os.path.join(B, 'BOOTX64.EFI')):
+        md('EFI')
+        md('EFI/BOOT')
+        for f in ('BOOTX64.EFI', 'BOOTIA32.EFI'):
+            cp(os.path.join(B, f), 'EFI/BOOT/' + f)
     os.makedirs(os.path.join(B, 'usb'), exist_ok=True)
     for f in ('AUTOEXEC.BAT', 'CONFIG.SYS', 'INSTALL.BAT', 'LEEME.TXT'):
         txt = open(os.path.join('usb', f), encoding='utf-8').read()

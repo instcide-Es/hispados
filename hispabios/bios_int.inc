@@ -1245,6 +1245,9 @@ e820:   times 3 * 20 db 0
 
 ; [depuración] dbg: AL por COM1 (3F8h); dbg_hex: AL en hexadecimal
 dbg:
+%ifndef DEPURA                          ; solo con nasm -DDEPURA: en las imágenes
+        ret                             ; normales no se toca el puerto serie
+%endif
         push dx
         push ax
         mov dx, 3FDh

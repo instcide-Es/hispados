@@ -418,7 +418,24 @@ $(HDD): | $(B)
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 
 # imagen para memorias USB (arrancar o instalar)
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(wildcard usb/* floppy/*)
+# ---- HispaBIOS: Hispa-DOS en equipos que solo tienen UEFI (docs/HISPABIOS.md) ----
+# BOOTX64.EFI y BOOTIA32.EFI van en \EFI\BOOT de la imagen USB (tools/mkusb.py).
+# Con «make HBFLAGS=-DDEPURA» la BIOS cuenta lo que hace por el puerto serie.
+HBSRC = hispabios/bios64.asm hispabios/bios_int.inc
+HBEFI = $(B)/BOOTX64.EFI $(B)/BOOTIA32.EFI
+$(B)/FUENTE16.BIN: $(B)/VENTANAS.COM tools/mkfuentebios.py
+	python3 tools/mkfuentebios.py $(B)/gen/ventanas/fuente.inc $@
+$(B)/BIOS64.BIN: $(HBSRC) | $(B)
+	$(NASM) -f bin $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm
+$(B)/BIOS32.BIN: $(HBSRC) | $(B)
+	$(NASM) -f bin -DARQ32 $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm
+$(B)/BOOTX64.EFI: hispabios/efi64.asm hispabios/pe.inc $(B)/BIOS64.BIN $(B)/FUENTE16.BIN
+	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi64.asm
+$(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUENTE16.BIN
+	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
+hispabios: $(HBEFI)
+
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(wildcard usb/* floppy/*)
 	python3 tools/mkusb.py
 
 run: $(IMG)
@@ -508,6 +525,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_sbvga_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_instalar_usb_tests.sh
+	tests/run_hispabios_tests.sh
 	tests/run_sys_tests.sh $(IMG)
 	tests/run_keyb_tests.sh $(IMG)
 	tests/run_usbnative_tests.sh $(IMG)
