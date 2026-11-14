@@ -630,6 +630,18 @@ init:
         mov dx, msg_pm
         jmp .fail
 .rm:
+        ; con HispaBIOS (Hispa-DOS sobre UEFI) la BIOS cambia de modo para
+        ; hablar con el firmware (disco, teclado): desde V86 no puede, y el
+        ; equipo se reiniciaría. Hasta que HSPEMM sepa llevarle esas llamadas
+        ; al modo real, no se instala.
+        mov ax, 0x4842
+        int 0x15
+        jc .no_hb
+        cmp ax, 0x6862
+        jne .no_hb
+        mov dx, msg_uefi
+        jmp .fail
+.no_hb:
         mov ax, 0x4300
         int 0x2F
         cmp al, 0x80
@@ -1693,6 +1705,8 @@ a20_test:
         ret
 
 msg_pm      db "HSPEMM: el procesador ya está en modo protegido; no se instala.", 13, 10, "$"
+msg_uefi    db "HSPEMM: equipo UEFI (HispaBIOS): todavía no se puede usar el modo V86;", 13, 10
+            db "        no se instala (sin memoria expandida EMS).", 13, 10, "$"
 msg_noxms   db "HSPEMM: falta el gestor XMS (cargue antes HSPXMS.SYS); no se instala.", 13, 10, "$"
 msg_nomem   db "HSPEMM: no hay memoria convencional para arrancar; no se instala.", 13, 10, "$"
 msg_noext   db "HSPEMM: no hay memoria extendida libre; no se instala.", 13, 10, "$"
