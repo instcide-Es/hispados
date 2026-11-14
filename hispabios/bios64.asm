@@ -45,9 +45,14 @@ PET_ESPERAR     equ 2
 
 ; ---- tabla de traspaso (la rellena efi64.asm antes de llamar) ----
 cabecera:
-        jmp near entrada_64             ; +0 (5 octetos, en modo largo)
+        db 0E9h                         ; +0 jmp near de 32 bits (se ejecuta
+%ifdef ARQ32                            ;    en 32 o 64 bits; NASM aquí está en 16)
+        dd entrada_32 - 5
+%else
+        dd entrada_64 - 5
+%endif
         times 8 - ($ - cabecera) db 0
-T_DESPACHADOR   dq 0                    ; +8  dirección del despachador (64 bits)
+T_DESPACHADOR   dq 0                    ; +8  dirección del despachador (64 o 32 bits)
 T_PETICION      dd 0                    ; +16 código de la petición
 T_ARG           dd 0                    ; +20 argumento
 T_RESULTADO     dd 0                    ; +24 resultado
@@ -64,6 +69,53 @@ P_LBA           dq 0                    ; +172 primer sector
 T_CURSOR        dw 0                    ; +180 posición del cursor (para dibujarlo)
 T_VEC0          db 0                    ; +182 vector de la IRQ 0 del firmware (0: no usa el 8259)
 
+%ifdef ARQ32
+; =============================================================================
+;  Entrada desde el firmware IA32 (modo protegido de 32 bits, plano)
+; =============================================================================
+;  Con ARQ32 (BIOS32.BIN, para efi32.asm) el firmware vive en 32 bits: no hay
+;  modo largo ni EFER. Se baja quitando la paginación (si el firmware la usa,
+;  la memoria está mapeada uno a uno, como pide UEFI) y se sube devolviéndole
+;  CR4, CR3 y CR0, su GDT, su IDT y sus segmentos.
+        bits 32
+entrada_32:
+        push ebx
+        push ebp
+        push esi
+        push edi
+        pushfd
+        cli
+        mov [L(sv_rsp)], esp
+        sgdt [L(sv_gdt)]
+        sidt [L(sv_idt)]
+        mov eax, cr0
+        mov [L(sv_cr0)], eax
+        mov eax, cr3
+        mov [L(sv_cr3)], eax
+        mov eax, cr4
+        mov [L(sv_cr4)], eax
+        mov [L(sv_ds)], ds
+        mov [L(sv_es)], es
+        mov [L(sv_ss)], ss
+        mov [L(sv_fs)], fs
+        mov [L(sv_gs)], gs
+        mov [L(sv_cs)], cs
+        mov byte [L(primera)], 1
+
+; ---- bajar: modo protegido del firmware -> real ----
+baja_fw:
+        lgdt [L(gdtr_real)]
+        jmp SEL_C32:L(baja_32)
+
+baja_32:
+        mov ax, SEL_D32
+        mov ds, ax
+        mov es, ax
+        mov ss, ax
+        mov eax, cr0
+        and eax, 7FFFFFFFh              ; sin paginación
+        mov cr0, eax
+%else
 ; =============================================================================
 ;  Entrada desde el firmware (modo largo)
 ; =============================================================================
@@ -120,6 +172,7 @@ baja_32:
         rdmsr
         and eax, ~100h
         wrmsr
+%endif
         cld                             ; la página 0: la del firmware se guarda
         xor esi, esi                    ; y se pone la de DOS
         mov edi, L(PAG0_FW)
@@ -220,6 +273,37 @@ sube_32:
         mov cr4, eax
         mov eax, [L(sv_cr3)]
         mov cr3, eax
+%ifdef ARQ32
+        mov eax, [L(sv_cr0)]
+        mov cr0, eax                    ; la paginación del firmware, si la usa
+        jmp .cr0
+.cr0:   lgdt [L(sv_gdt)]
+        lidt [L(sv_idt)]
+        mov ax, [L(sv_ds)]
+        mov ds, ax
+        mov ax, [L(sv_es)]
+        mov es, ax
+        mov ax, [L(sv_ss)]
+        mov ss, ax
+        mov ax, [L(sv_fs)]
+        mov fs, ax
+        mov ax, [L(sv_gs)]
+        mov gs, ax
+        mov esp, [L(sv_rsp)]
+        and esp, -16
+        sub esp, 64
+        movzx eax, word [L(sv_cs)]      ; al selector de código del firmware
+        push eax
+        push dword L(.fw)
+        retf
+.fw:
+        mov ecx, [L(T_PETICION)]
+        mov edx, [L(T_ARG)]
+        call [L(T_DESPACHADOR)]         ; (cierra las interrupciones al volver)
+        cli
+        mov [L(T_RESULTADO)], eax
+        jmp baja_fw
+%else
         mov ecx, EFER
         mov eax, [L(sv_efer)]
         mov edx, [L(sv_efer) + 4]
@@ -257,6 +341,7 @@ sube_64:
         cli
         mov [rel T_RESULTADO], eax
         jmp baja_64
+%endif
 
 
 ; =============================================================================
