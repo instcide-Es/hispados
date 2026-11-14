@@ -537,15 +537,70 @@ gop_buscar:
         stc
         ret
 
-; ---- pantalla_dibujar: pinta la pantalla de texto TX_BASE (80x25) centrada ----
+; ---- escala: tablas de dónde cae cada punto de 640x400 en la pantalla real ----
+; Se amplía lo más posible sin deformar (8:5): en 1920x1080, a 1728x1080.
+escala:
+        push rbx
+        push rsi
+        push rdi
+        mov eax, [rel fb_ancho]
+        mov ecx, [rel fb_alto]
+        lea edx, [eax * 4 + eax]        ; An*5 <= Al*8: manda el ancho
+        lea ebx, [ecx * 8]
+        cmp edx, ebx
+        ja .alto
+        mov [rel dib_an], eax
+        shr edx, 3
+        mov [rel dib_al], edx
+        jmp .origen
+.alto:  mov [rel dib_al], ecx
+        mov eax, ebx                    ; Al*8/5
+        xor edx, edx
+        mov ebx, 5
+        div ebx
+        mov [rel dib_an], eax
+.origen:
+        lea rdi, [rel tab_x]
+        mov eax, [rel fb_ancho]
+        sub eax, [rel dib_an]
+        shr eax, 1
+        mov esi, eax
+        xor ecx, ecx
+.tx:    mov eax, ecx
+        mul dword [rel dib_an]
+        mov ebx, 640
+        div ebx
+        add eax, esi
+        mov [rdi + rcx * 4], eax
+        inc ecx
+        cmp ecx, 640
+        jbe .tx
+        lea rdi, [rel tab_y]
+        mov eax, [rel fb_alto]
+        sub eax, [rel dib_al]
+        shr eax, 1
+        mov esi, eax
+        xor ecx, ecx
+.ty:    mov eax, ecx
+        mul dword [rel dib_al]
+        mov ebx, 400
+        div ebx
+        add eax, esi
+        mov [rdi + rcx * 4], eax
+        inc ecx
+        cmp ecx, 400
+        jbe .ty
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; ---- pantalla_dibujar: pinta la pantalla de texto TX_BASE (80x25), ampliada ----
 pantalla_dibujar:
         push rbx
         push rsi
         push rdi
         push r12
-        push r13
-        push r14
-        push r15
         ; la primera vez se borra todo en negro; después solo se pintan las
         ; celdas que han cambiado (escribir en la memoria de vídeo real es
         ; lento y mientras tanto el reloj de DOS no corre)
@@ -553,6 +608,7 @@ pantalla_dibujar:
         cmp byte [rel borrada], 0
         jne .ya_borrada
         mov byte [rel borrada], 1
+        call escala
         mov rdi, [rel fb]
         mov eax, [rel fb_linea]
         imul eax, [rel fb_alto]
@@ -564,80 +620,104 @@ pantalla_dibujar:
         mov ax, 0FFFFh
         rep stosw
 .ya_borrada:
-        ; origen: centrado
-        mov eax, [rel fb_ancho]
-        sub eax, 640
-        shr eax, 1
-        mov r14d, eax                   ; R14 = x de origen
-        mov eax, [rel fb_alto]
-        sub eax, 400
-        shr eax, 1
-        mov r15d, eax                   ; R15 = y de origen
-        xor r12d, r12d                  ; R12 = fila
-.fila:
-        xor r13d, r13d                  ; R13 = columna
+        xor r12d, r12d                  ; R12 = número de celda (0..1999)
 .celda:
-        mov eax, r12d
-        imul eax, 80
-        add eax, r13d
-        movzx ebx, word [TX_BASE + rax * 2]  ; BL = carácter, BH = atributo
+        movzx ebx, word [TX_BASE + r12 * 2]  ; BL = carácter, BH = atributo
         lea rsi, [rel sombra]
-        cmp bx, [rsi + rax * 2]
-        je .siguiente                   ; igual que la última vez
-        mov [rsi + rax * 2], bx
+        cmp bx, [rsi + r12 * 2]
+        je .siguiente
+        mov [rsi + r12 * 2], bx
+        lea rsi, [rel paleta]
         movzx eax, bh
         and eax, 0Fh
-        lea rsi, [rel paleta]
-        mov r8d, [rsi + rax * 4]        ; R8 = color de la letra
+        mov ecx, [rsi + rax * 4]        ; color de la letra
         movzx eax, bh
         shr eax, 4
         and eax, 7
-        mov r9d, [rsi + rax * 4]        ; R9 = color del fondo
+        mov edx, [rsi + rax * 4]        ; color del fondo
         cmp dword [rel fb_formato], 0
         jne .bgr
-        bswap r8d                       ; RGBX: R y B cambiados (de 00RRGGBB a BBGGRR00)
-        shr r8d, 8
-        bswap r9d
-        shr r9d, 8
-.bgr:
-        movzx eax, bl
+        bswap ecx
+        shr ecx, 8
+        bswap edx
+        shr edx, 8
+.bgr:   movzx eax, bl
         shl eax, 4
         lea rsi, [rel fuente]
-        add rsi, rax                    ; RSI = las 16 filas del carácter
-        ; RDI = fb + ((y0 + fila*16) * línea + x0 + col*8) * 4
+        add rsi, rax
+        mov r8d, edx
         mov eax, r12d
-        shl eax, 4
-        add eax, r15d
-        imul eax, [rel fb_linea]
-        mov edx, r13d
-        shl edx, 3
-        add eax, edx
-        add eax, r14d
-        mov rdi, [rel fb]
-        lea rdi, [rdi + rax * 4]
-        mov ecx, 16
-.linea:
-        movzx edx, byte [rsi]
-        inc rsi
-        mov r10d, 8
-.punto:
-        shl dl, 1
-        mov eax, r9d
-        cmovc eax, r8d
-        stosd
-        dec r10d
-        jnz .punto
-        mov eax, [rel fb_linea]
-        sub eax, 8
-        lea rdi, [rdi + rax * 4]
-        loop .linea
+        xor edx, edx
+        mov ebx, 80
+        div ebx                         ; EAX = fila, EDX = columna
+        mov ebx, edx
+        mov edx, r8d
+        call pintar_celda
 .siguiente:
-        inc r13d
-        cmp r13d, 80
-        jb .celda
         inc r12d
-        cmp r12d, 25
-        jb .fila
+        cmp r12d, 2000
+        jb .celda
+        pop r12
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; pintar_celda: EAX = fila, EBX = columna, RSI = letra, ECX = tinta, EDX = fondo
+pintar_celda:
+        push rbx
+        push rsi
+        push rdi
+        push r12
+        push r13
+        push r14
+        push r15
+        mov r14d, ecx                   ; R14 = tinta, R15 = fondo
+        mov r15d, edx
+        lea r12, [rel tab_x]
+        lea r13, [rel tab_y]
+        shl eax, 4
+        mov r8d, eax                    ; R8 = fila de puntos
+        shl ebx, 3
+        mov r9d, ebx                    ; R9 = primera columna de puntos
+        mov r10d, 16
+.fila:  mov r11b, [rsi]
+        inc rsi
+        push rsi
+        mov esi, [r13 + r8 * 4]         ; ESI = y0
+        mov ebx, r9d
+        mov ecx, 8
+.punto: mov eax, r15d
+        shl r11b, 1
+        cmovc eax, r14d
+        push rcx
+        mov ecx, [r12 + rbx * 4]        ; x
+        mov edx, [r12 + rbx * 4 + 4]
+        sub edx, ecx                    ; ancho
+        jz .sig
+        push rsi
+.y:     cmp esi, [r13 + r8 * 4 + 4]
+        jae .ya
+        mov edi, esi
+        imul edi, [rel fb_linea]
+        add edi, ecx
+        shl rdi, 2
+        add rdi, [rel fb]
+        push rcx
+        mov ecx, edx
+        rep stosd
+        pop rcx
+        inc esi
+        jmp .y
+.ya:    pop rsi
+.sig:   pop rcx
+        inc ebx
+        dec ecx
+        jnz .punto
+        pop rsi
+        inc r8d
+        dec r10d
+        jnz .fila
         pop r15
         pop r14
         pop r13
@@ -778,6 +858,10 @@ buf_hex         times 16 db '0'
                 align 8
 buf16           times 256 dw 0
 sombra          times 2000 dw 0         ; lo que hay pintado (carácter y atributo)
+tab_x           times 641 dd 0
+tab_y           times 401 dd 0
+dib_an          dd 0
+dib_al          dd 0
 mapa            times MAPA_MAX db 0
 bios:           incbin "BIOS64.BIN"
 bios_finbin:

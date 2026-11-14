@@ -545,19 +545,62 @@ gop_buscar:
         stc
         ret
 
-; ---- pantalla_dibujar: pinta la pantalla de texto TX_BASE (80x25) centrada ----
-; variables locales en la pila
-PD_X0   equ 0                           ; x de origen
-PD_Y0   equ 4                           ; y de origen
-PD_FIL  equ 8                           ; fila
-PD_COL  equ 12                          ; columna
-PD_TIN  equ 16                          ; color de la letra
-PD_FON  equ 20                          ; color del fondo
+; ---- escala: tablas de dónde cae cada punto de 640x400 en la pantalla real ----
+; Se amplía lo más posible sin deformar (8:5): en 1920x1080, a 1728x1080.
+; tab_x[i] = x0 + i*An/640 (i = 0..640) y tab_y[j] = y0 + j*Al/400 (j = 0..400)
+escala:
+        pushad
+        mov eax, [V(fb_ancho)]
+        mov ecx, [V(fb_alto)]
+        lea edx, [eax * 4 + eax]        ; An*5 <= Al*8: manda el ancho
+        lea ebx, [ecx * 8]
+        cmp edx, ebx
+        ja .alto
+        mov [V(dib_an)], eax
+        shr edx, 3
+        mov [V(dib_al)], edx
+        jmp .origen
+.alto:  mov [V(dib_al)], ecx
+        mov eax, ebx                    ; Al*8/5
+        xor edx, edx
+        mov ebx, 5
+        div ebx
+        mov [V(dib_an)], eax
+.origen:
+        mov eax, [V(fb_ancho)]
+        sub eax, [V(dib_an)]
+        shr eax, 1
+        mov esi, eax                    ; ESI = x0
+        xor ecx, ecx
+.tx:    mov eax, ecx
+        mul dword [V(dib_an)]
+        mov ebx, 640
+        div ebx
+        add eax, esi
+        mov [V(tab_x) + ecx * 4], eax
+        inc ecx
+        cmp ecx, 640
+        jbe .tx
+        mov eax, [V(fb_alto)]
+        sub eax, [V(dib_al)]
+        shr eax, 1
+        mov esi, eax                    ; ESI = y0
+        xor ecx, ecx
+.ty:    mov eax, ecx
+        mul dword [V(dib_al)]
+        mov ebx, 400
+        div ebx
+        add eax, esi
+        mov [V(tab_y) + ecx * 4], eax
+        inc ecx
+        cmp ecx, 400
+        jbe .ty
+        popad
+        ret
+
+; ---- pantalla_dibujar: pinta la pantalla de texto TX_BASE (80x25), ampliada ----
 pantalla_dibujar:
-        push ebx
-        push esi
-        push edi
-        sub esp, 24
+        pushad
         ; la primera vez se borra todo en negro; después solo se pintan las
         ; celdas que han cambiado (escribir en la memoria de vídeo real es
         ; lento y mientras tanto el reloj de DOS no corre)
@@ -565,6 +608,7 @@ pantalla_dibujar:
         cmp byte [V(borrada)], 0
         jne .ya_borrada
         mov byte [V(borrada)], 1
+        call escala
         mov edi, [V(fb)]
         mov eax, [V(fb_linea)]
         imul eax, [V(fb_alto)]
@@ -576,26 +620,12 @@ pantalla_dibujar:
         mov ax, 0FFFFh
         rep stosw
 .ya_borrada:
-        ; origen: centrado
-        mov eax, [V(fb_ancho)]
-        sub eax, 640
-        shr eax, 1
-        mov [esp + PD_X0], eax
-        mov eax, [V(fb_alto)]
-        sub eax, 400
-        shr eax, 1
-        mov [esp + PD_Y0], eax
-        mov dword [esp + PD_FIL], 0
-.fila:
-        mov dword [esp + PD_COL], 0
+        xor edi, edi                    ; EDI = número de celda (0..1999)
 .celda:
-        mov eax, [esp + PD_FIL]
-        imul eax, 80
-        add eax, [esp + PD_COL]
-        movzx ebx, word [TX_BASE + eax * 2]  ; BL = carácter, BH = atributo
-        cmp bx, [V(sombra) + eax * 2]
+        movzx ebx, word [TX_BASE + edi * 2]  ; BL = carácter, BH = atributo
+        cmp bx, [V(sombra) + edi * 2]
         je .siguiente                   ; igual que la última vez
-        mov [V(sombra) + eax * 2], bx
+        mov [V(sombra) + edi * 2], bx
         movzx eax, bh
         and eax, 0Fh
         mov ecx, [V(paleta) + eax * 4]  ; color de la letra
@@ -609,50 +639,77 @@ pantalla_dibujar:
         shr ecx, 8
         bswap edx
         shr edx, 8
-.bgr:   mov [esp + PD_TIN], ecx
-        mov [esp + PD_FON], edx
-        movzx eax, bl
+.bgr:   movzx eax, bl
         shl eax, 4
         lea esi, [V(fuente) + eax]      ; ESI = las 16 filas del carácter
-        ; EDI = fb + ((y0 + fila*16) * línea + x0 + col*8) * 4
-        mov eax, [esp + PD_FIL]
-        shl eax, 4
-        add eax, [esp + PD_Y0]
-        imul eax, [V(fb_linea)]
-        mov edx, [esp + PD_COL]
-        shl edx, 3
-        add eax, edx
-        add eax, [esp + PD_X0]
-        mov edi, [V(fb)]
-        lea edi, [edi + eax * 4]
-        mov ecx, 16
-.linea:
-        movzx edx, byte [esi]
-        inc esi
-        mov ebx, 8
-.punto:
-        shl dl, 1
-        mov eax, [esp + PD_FON]
-        jnc .pon
-        mov eax, [esp + PD_TIN]
-.pon:   stosd
-        dec ebx
-        jnz .punto
-        mov eax, [V(fb_linea)]
-        sub eax, 8
-        lea edi, [edi + eax * 4]
-        loop .linea
+        mov eax, edi
+        push edx
+        xor edx, edx
+        mov ebx, 80
+        div ebx                         ; EAX = fila, EDX = columna
+        mov ebx, edx
+        pop edx
+        call pintar_celda
 .siguiente:
-        inc dword [esp + PD_COL]
-        cmp dword [esp + PD_COL], 80
+        inc edi
+        cmp edi, 2000
         jb .celda
-        inc dword [esp + PD_FIL]
-        cmp dword [esp + PD_FIL], 25
-        jb .fila
-        add esp, 24
-        pop edi
-        pop esi
-        pop ebx
+        popad
+        ret
+
+; pintar_celda: EAX = fila, EBX = columna, ESI = letra (16 octetos),
+; ECX = color de la letra, EDX = del fondo. Cada punto de 640x400 es un
+; rectángulo de la pantalla real (tab_x, tab_y).
+pintar_celda:
+        pushad
+        mov [V(pc_tin)], ecx
+        mov [V(pc_fon)], edx
+        shl eax, 4
+        mov [V(pc_y)], eax
+        shl ebx, 3
+        mov [V(pc_x)], ebx
+        mov dword [V(pc_gy)], 16
+.fila:  mov al, [esi]
+        inc esi
+        mov [V(pc_bits)], al
+        mov eax, [V(pc_y)]
+        mov ecx, [V(tab_y) + eax * 4]
+        mov [V(pc_y0)], ecx
+        mov ecx, [V(tab_y) + eax * 4 + 4]
+        mov [V(pc_y1)], ecx
+        mov ebx, [V(pc_x)]
+        mov dword [V(pc_gx)], 8
+.punto: mov eax, [V(pc_fon)]
+        shl byte [V(pc_bits)], 1
+        jnc .color
+        mov eax, [V(pc_tin)]
+.color: mov ecx, [V(tab_x) + ebx * 4]   ; ECX = x, EDX = ancho
+        mov edx, [V(tab_x) + ebx * 4 + 4]
+        sub edx, ecx
+        jz .sig
+        push ebx
+        mov ebx, [V(pc_y0)]
+.y:     cmp ebx, [V(pc_y1)]
+        jae .ya
+        mov edi, ebx
+        imul edi, [V(fb_linea)]
+        add edi, ecx
+        shl edi, 2
+        add edi, [V(fb)]
+        push ecx
+        mov ecx, edx
+        rep stosd
+        pop ecx
+        inc ebx
+        jmp .y
+.ya:    pop ebx
+.sig:   inc ebx
+        dec dword [V(pc_gx)]
+        jnz .punto
+        inc dword [V(pc_y)]
+        dec dword [V(pc_gy)]
+        jnz .fila
+        popad
         ret
 
 ; ---- escribir: ESI = texto ASCII terminado en 0 -> por el servicio de texto ----
@@ -754,6 +811,19 @@ buf_hex         times 8 db '0'
                 align 4
 buf16           times 256 dw 0
 sombra          times 2000 dw 0         ; lo que hay pintado (carácter y atributo)
+tab_x           times 641 dd 0
+tab_y           times 401 dd 0
+dib_an          dd 0
+dib_al          dd 0
+pc_tin          dd 0
+pc_fon          dd 0
+pc_x            dd 0
+pc_y            dd 0
+pc_y0           dd 0
+pc_y1           dd 0
+pc_gx           dd 0
+pc_gy           dd 0
+pc_bits         db 0
 bios:           incbin "BIOS32.BIN"
 bios_finbin:
 
