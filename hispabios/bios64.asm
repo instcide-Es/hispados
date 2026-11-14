@@ -34,6 +34,7 @@ PILA_REAL       equ 7FF0h           ; pila de la BIOS en modo real
 TX              equ 8000h           ; pantalla de texto 80x25 (4000 octetos)
 PAG0_FW         equ 0A000h          ; la página 0 del firmware, guardada
 PAG0_DOS        equ 0B000h          ; la página 0 de DOS, guardada
+PILA32          equ 0EFF0h          ; pila de los tramos de 32 bits
 
 ; peticiones al firmware
 PET_DIBUJAR     equ 1
@@ -112,6 +113,8 @@ baja_32:
         mov ds, ax
         mov es, ax
         mov ss, ax
+        mov esp, L(PILA32)              ; pila propia: la de DOS o la del firmware
+                                        ; no valen aquí (otra base, o > 4 GB)
         mov eax, cr0
         and eax, 7FFFFFFFh              ; sin paginación
         mov cr0, eax
@@ -165,6 +168,8 @@ baja_32:
         mov ds, ax
         mov es, ax
         mov ss, ax
+        mov esp, L(PILA32)              ; pila propia: la de DOS o la del firmware
+                                        ; no valen aquí (otra base, o > 4 GB)
         mov eax, cr0
         and eax, 7FFFFFFFh              ; sin paginación: fuera del modo largo
         mov cr0, eax
@@ -259,6 +264,8 @@ sube_32:
         mov ds, ax
         mov es, ax
         mov ss, ax
+        mov esp, L(PILA32)              ; pila propia: la de DOS o la del firmware
+                                        ; no valen aquí (otra base, o > 4 GB)
         call reloj_fw
         cld                             ; la página 0: la de DOS se guarda y
         xor esi, esi                    ; vuelve la del firmware
