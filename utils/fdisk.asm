@@ -1560,6 +1560,14 @@ disk_geom:
         movzx ecx, word [heads]
         imul eax, ecx
         mov [total], eax
+        ; hasta dónde llega CHS: cabezas * sectores * 1024 cilindros. El
+        ; principio del disco se lee por CHS (hay BIOS, como la del Toshiba,
+        ; que cuelgan la lectura por LBA (AH=42h) de su disco SATA)
+        movzx eax, word [spt]
+        movzx ecx, word [heads]
+        imul eax, ecx
+        shl eax, 10
+        mov [chsmax], eax
         mov byte [lba], 0
         mov ah, 0x41
         mov bx, 0x55AA
@@ -1677,6 +1685,8 @@ disk_io:
 .retry:
         cmp byte [lba], 0
         je .chs
+        cmp eax, [chsmax]               ; dentro del alcance de CHS -> por CHS
+        jb .chs
         mov byte [dap], 16
         mov byte [dap+1], 0
         mov word [dap+2], 1
@@ -3190,7 +3200,7 @@ tn_log12    db "LOG DOS  FAT12      ", 0
 s_instbat   db "C:\INSTALL.BAT", 0
 
 msg_title   db 13, 10, "Programa de configuración del disco duro de Hispa-DOS 0.9", 13, 10
-            db "(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 0
+            db "(C) 2026 Carlos Sanz y colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 0
 msg_nodisk  db "No hay discos duros.", 13, 10, 0
 msg_baddisk db "Número de disco duro no válido.", 13, 10, 0
 msg_badopt  db "Opción no válida. Use /STATUS /PRI[:MB] /EXT[:MB] /LOG[:MB] /ACT:n /DEL:n", 13, 10
@@ -3338,6 +3348,7 @@ wl_guard    resb 1
             alignb 4
 req_mb      resd 1
 total       resd 1
+chsmax      resd 1
 p_start     resd 1
 p_size      resd 1
 ext_start   resd 1

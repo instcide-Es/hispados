@@ -5,7 +5,7 @@
 
 ```
 Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22
-(C) 2026 colaboradores de Hispa-DOS - GPL-2.0 o posterior
+(C) 2026 Carlos Sanz y colaboradores de Hispa-DOS - GPL-2.0 o posterior
 
 Iniciando Hispa-DOS...  F5 = arranque limpio  ·  F8 = menú de arranque
 HSPXMS 0.1: gestor XMS 3.0, 129856 KB de memoria extendida
