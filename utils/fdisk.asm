@@ -1171,7 +1171,13 @@ menu_loop:
         jbe .one
         mov si, msg_menu5
         call puts
+        mov si, msg_salir6
+        call puts
+        jmp .choice
 .one:
+        mov si, msg_salir5
+        call puts
+.choice:
         mov si, msg_choice
         call puts
 .key:
@@ -1180,8 +1186,14 @@ menu_loop:
         je exit_ok
         cmp al, '1'
         jb .key
-        cmp al, '5'
+        mov ah, '5'                 ; con un disco: la 5 es Salir
+        cmp byte [ndisks], 1
+        jbe .lim
+        mov ah, '6'                 ; con varios: la 6 es Salir, la 5 Cambiar
+.lim:
+        cmp al, ah
         ja .key
+        je exit_ok                  ; la última opción: Salir a Hispa-DOS
         call putc
         call crlf
         call crlf
@@ -1193,9 +1205,7 @@ menu_loop:
         je .delete
         cmp al, '4'
         je .display
-        cmp byte [ndisks], 1
-        jbe menu_loop
-        ; cambiar de disco
+        ; al = '5' y hay varios discos: cambiar de disco
         call list_disks
         mov si, msg_whichdisk
         call puts
@@ -1716,12 +1726,9 @@ disk_io:
         pop eax
         jnc .ok
 .again:
-        push eax
-        xor ax, ax
-        mov dl, [disk]
-        call paso13
-        int 0x13
-        pop eax
+        ; no se reinicia el disco (AH=00h): hay BIOS, como la del Toshiba, que
+        ; cuelgan ese reinicio en su disco SATA. Si la lectura falla, se
+        ; devuelve el error y PARTIR lo dice, en vez de quedarse clavado.
         dec di
         jnz .retry
         popad
@@ -3215,7 +3222,9 @@ msg_menu2   db 13, 10, "Elija una de las siguientes opciones:", 13, 10, 13, 10
             db "3. Eliminar una partición o una unidad lógica DOS", 13, 10
             db "4. Mostrar la información de las particiones", 13, 10, 0
 msg_menu5   db "5. Cambiar la unidad de disco actual", 13, 10, 0
-msg_choice  db 13, 10, "Escriba su opción (Esc para salir): ", 0
+msg_salir5  db "5. Salir a Hispa-DOS", 13, 10, 0
+msg_salir6  db "6. Salir a Hispa-DOS", 13, 10, 0
+msg_choice  db 13, 10, "Escriba su opción: ", 0
 msg_subchoice db 13, 10, "Escriba su opción (Esc para volver): ", 0
 msg_cmenu   db "Crear una partición o una unidad lógica DOS", 13, 10, 13, 10
             db "1. Crear una partición DOS primaria", 13, 10
