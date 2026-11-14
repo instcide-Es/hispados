@@ -300,3 +300,19 @@ AJ_CONTORNO     equ 14
 ; [CONTEXTO] (se lee y se cambia) 1: Ctrl+clic izquierdo hace de botón derecho
 ; (lo normal; para los Mac y los touchpads de un botón), 0: no
 AJ_CTRL_DER     equ 15
+
+; ---- [ARCHIVOS] el Administrador de archivos (archapi.inc) ----
+; el bloque de registros de rm_interrup (ESI): lo que se da y lo que vuelve
+RL_EAX          equ 0
+RL_EBX          equ 4
+RL_ECX          equ 8
+RL_EDX          equ 12
+RL_ESI          equ 16
+RL_EDI          equ 20
+RL_INT          equ 24              ; (octeto) la interrupción: 21h, 11h...
+RL_BAND         equ 28              ; (a la vuelta) las banderas: bit 0 el acarreo
+RL_TAM          equ 32
+; a un programa que ya está abierto le llega un archivo que abrir (un acceso
+; directo o prog_abrir con parámetros): EDX=los parámetros. El Bloc de notas,
+; Pintura y el Reproductor de sonido lo abren; los demás no hacen nada
+WM_HV_ABRIR     equ WM_USER + 200

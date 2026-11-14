@@ -16,6 +16,9 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
   indice_rev X Y COLOR TEXTO        el mismo, girado media vuelta (el de abajo)
   cursor X Y                        el cursor del ratón tiene la punta ahí
   igual X Y ANCHO ALTO OTRA.ppm X2 Y2 MAXDIF   la zona es igual que en OTRA
+  busca X0 Y0 X1 Y1 COLOR FONDO TEXTO   el texto (fino) está en algún sitio con
+                                    la esquina dentro del rectángulo
+  nobusca X0 Y0 X1 Y1 COLOR FONDO TEXTO  y que no está
   cambia X Y ANCHO ALTO OTRA.ppm MINDIF        la zona ha cambiado respecto a OTRA
 Los colores se dan por su número (0-15) en la paleta de ventanas/datos.inc (o
 16-255: el cubo de 6x6x6 y los grises de ventanas/video.inc) y se comparan con un margen (las pantallas de 15/16 bits y el DAC de 6 bits
@@ -51,13 +54,19 @@ def paleta():
     return cols
 
 
+_fuente = []
+
+
 def fuente():
+    if _fuente:
+        return _fuente[0]
     tabla = []
     for l in open(os.path.join(RAIZ, 'build', 'gen', 'ventanas', 'fuente.inc'), encoding='utf-8'):
         m = re.match(r'\s+db\s+([0-9A-Fa-fx, ]+)', l)
         if m:
             tabla.append([int(x, 16) for x in m.group(1).replace(' ', '').split(',')])
     assert len(tabla) == 256
+    _fuente.append(tabla)
     return tabla
 
 
@@ -108,6 +117,46 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto):
                 if not es(c, fg if enc else bg):
                     mal += 1
     return mal
+
+
+def texto_en(cap, x, y, fg, bg, cod):
+    """Como texto_ok, fino, parando en el primer punto distinto."""
+    F = fuente()
+    for fila in range(16):
+        for i, ch in enumerate(cod):
+            bits = F[ch][fila] << 1
+            for col in range(8):
+                if not es(cap.px(x + i * 8 + col, y + fila), fg if bits & (0x100 >> col) else bg):
+                    return False
+    return True
+
+
+def busca(cap, x0, y0, x1, y1, fg, bg, texto):
+    F = fuente()
+    cod = texto.encode('cp437')
+    # los puntos del texto (primero los de tinta: descartan antes)
+    pts = []
+    for fila in range(16):
+        for i, ch in enumerate(cod):
+            bits = F[ch][fila] << 1
+            for col in range(8):
+                pts.append((i * 8 + col, fila, bool(bits & (0x100 >> col))))
+    pts.sort(key=lambda p: not p[2])
+    ancho, alto = 8 * len(cod), 16
+    clase = {}
+    def c(x, y):
+        k = (x, y)
+        v = clase.get(k)
+        if v is None:
+            q = cap.px(x, y)
+            v = 1 if es(q, fg) else (2 if es(q, bg) else 0)
+            clase[k] = v
+        return v
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1 + 1):
+            if all(c(x + dx, y + dy) == (1 if f else 2) for dx, dy, f in pts):
+                return (x, y)
+    return None
 
 
 def indice_ok(cap, x, y, fg, texto, girado=False):
@@ -190,6 +239,16 @@ def main():
             mal = texto_ok(cap, x, y, fg, bg, a[i + 5] == 'negrita', t)
             res(mal == 0, '%s: texto «%s»%s' % (nombre, t, '' if mal == 0 else ' (%d puntos distintos)' % mal))
             i += 7
+        elif op in ('busca', 'nobusca'):
+            x0, y0, x1, y1, fg, bg = (int(v) for v in a[i + 1:i + 7])
+            t = a[i + 7]
+            donde = busca(cap, x0, y0, x1, y1, fg, bg, t)
+            if op == 'busca':
+                res(donde is not None, '%s: «%s» está%s' % (nombre, t, ' (en %d,%d)' % donde if donde else
+                                                           ' (no, entre %d,%d y %d,%d)' % (x0, y0, x1, y1)))
+            else:
+                res(donde is None, '%s: «%s» no está%s' % (nombre, t, '' if donde is None else ' (sí: en %d,%d)' % donde))
+            i += 8
         elif op in ('indice', 'indice_rev'):
             x, y, fg = (int(v) for v in a[i + 1:i + 4])
             t = a[i + 4]

@@ -79,7 +79,8 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    (`tests/run_pintura_tests.sh`). Próximos programas propios (nombres de
    Carlos): **Pluma-Ventanas**, el procesador de textos (letra con formato,
    párrafos, imprimir), y **Cuentas-Ventanas**, la hoja de cálculo (fórmulas, formatos de
-   número, gráficos sencillos); además el Administrador de archivos. La
+   número, gráficos sencillos); el Administrador de archivos ya está
+   ([ARCHIVOS], `programas/archivos.asm`, ver «Administrador de archivos»). La
    segunda tanda de juegos (Bloques, Solitario, Tragabolas y Almacén) ya
    está (`tests/run_juegos2_tests.sh`). Pendiente (se
    hará según haga falta en las etapas 4 y 5): avisar de los
@@ -965,7 +966,7 @@ a mediados de los 90; aquí tienen el aspecto de los menús de siempre.
 | El fondo del Centro | Nuevo grupo..., Buscar programas... |
 | La barra de título (o sus botones) de cualquier ventana | Restaurar, Minimizar, Maximizar y Cerrar: las que tiene la ventana; en gris la que no toca (Restaurar si no está maximizada ni minimizada...) |
 | El icono de una ventana minimizada (abajo) | el mismo de la barra de título |
-| El escritorio | Configuración..., Fondo del escritorio... (Configuración en el apartado Pantalla), Mezclador..., Ventanas en cascada, Ventanas en mosaico |
+| El escritorio | Configuración..., Fondo del escritorio... (Configuración en el apartado Pantalla), Mezclador..., [ARCHIVOS] Administrador de archivos..., Ventanas en cascada, Ventanas en mosaico |
 | Un cuadro de texto (Bloc de notas, campos de los diálogos) | Cortar, Copiar, Pegar, Borrar, Seleccionar todo (con sus teclas al lado; en gris lo que no se puede: sin selección, con el portapapeles vacío o sin texto). Deshacer no está: los cuadros de texto no lo tienen |
 | Pintura | el botón derecho sigue siendo el color secundario: no hay menú con el ratón; con Mayús+F10, Deshacer, Rehacer, Cortar, Copiar, Pegar, Borrar, Seleccionar todo e Intercambiar los colores |
 | Mezclador | Vista sencilla / completa (en gris la que se ve), Avanzado..., Valores de fábrica... |
@@ -1460,7 +1461,26 @@ manda a `ven_defecto` (a la madre o, con el teclado, el menú de la ventana).
 del mezclador para los módulos: leerlo todo, poner una fuente o un ajuste y
 guardar la sección `[Mezclador]` de `\HISPADOS\SONIDO.INI`.
 
-Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80, 82 u 84) sigue
+Añadidas para el Administrador de archivos ([ARCHIVOS]; 90 entradas: cuatro
+más, de la 86 a la 89, detrás de `dos_ir_carpeta`, la 85, que viene de los
+emuladores; `ventanas/archapi.inc`, en la parte alta):
+
+| Entradas | Para qué |
+|---|---|
+| `rm_interrup` (ESI=bloque de registros `RL_*` de `defs.inc`: `RL_EAX`, `RL_EBX`, `RL_ECX`, `RL_EDX`, `RL_ESI`, `RL_EDI` y el octeto `RL_INT`) | una interrupción de modo real (INT 21h, INT 11h...) con esos registros y DS=ES=Hispa Ventanas: los punteros van dentro de `dos_buf`. A la vuelta el bloque trae los registros que deja la interrupción y `RL_BAND` sus banderas; CF=1 si deja el acarreo (el error de DOS, en `RL_EAX`). Con ella el módulo hace lo que no tiene `dos.inc`: atributos (43h), cambiar de nombre y mover (56h), carpetas (39h, 3Ah), buscar con su propia DTA (1Ah, 4Eh, 4Fh), espacio libre (36h), fecha de un archivo (57h), unidades (4408h) |
+| `dos_buf` | (datos) el búfer de paso de DOS (2.048 octetos, en memoria convencional): un puntero a él vale igual en modo real |
+| `dos_crit` (→ EAX) | el último error crítico de disco (INT 24h) desde la última vez que se preguntó: el código que da DOS a INT 24h (0 protegido contra escritura, 2 unidad no preparada...) o -1 si no ha habido. El manejador de INT 24h del lanzador sigue haciendo fallar la llamada sin preguntar, pero ahora apunta el error |
+| `prog_abrir` (EBP=ventana ESI=programa EDI=parámetros (0: ninguno) EDX=carpeta de trabajo (0: la del programa) ECX=banderas: 1 volver a Hispa Ventanas, 2 esperar una tecla; EBX=qué abrir al volver o 0) | abre un programa como un acceso directo: un .COM, .EXE o .BAT (Hispa Ventanas sale a Hispa-DOS por el lanzador y vuelve), un .HVP (con los parámetros) o un interno (`:BLOC`). EBX es «ruta del .HVP y parámetros»: si se sale a Hispa-DOS y se vuelve, se guarda en CENTRO.INI (`Reabrir=` en `[Centro]`) y al volver se abre ese módulo (y la clave se borra) |
+
+Además, un acceso directo con parámetros a un programa que **ya está
+abierto** le manda el mensaje `WM_HV_ABRIR` (`WM_USER`+200, EDX=los
+parámetros) en vez de no hacer nada: el Bloc de notas (`:BLOC`, que ahora
+abre el archivo de los parámetros también al empezar), Pintura y el
+Reproductor de sonido (que ahora también acepta un WAV en los parámetros y
+lo toca) abren ese archivo; los demás lo pasan a `ven_defecto`, que no hace
+nada. El grupo 3 de la cabecera de un módulo es «Principal».
+
+Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80, 82, 84, 85 u 86) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
 
@@ -1798,6 +1818,111 @@ suena o carga, su bucle es `msg_mirar`, un paso y `ceder`; parado,
 Pendiente: una lista de los últimos archivos, repetir, y los WAV de 24 bits
 o comprimidos.
 
+### Administrador de archivos
+
+[ARCHIVOS] `programas/archivos.asm` (y `programas/archivos/*.inc`),
+`ARCHIVOS.HVP` (unos 50 KB, 12 de ellos los iconos), en `\HISPADOS\PROGS`;
+su acceso sale en «Principal» (el 3 de la cabecera), y también se abre desde
+el menú del botón derecho del escritorio («Administrador de archivos...»).
+Pedido de Carlos: «En ventanas, ¿tenemos explorador de archivos?».
+
+- **La ventana** se cambia de tamaño y se maximiza (mínimo 380×260), y
+  recuerda en `ARCHIVOS.INI` (al lado del módulo) su sitio, su tamaño, si
+  estaba maximizada, la vista, el orden, el ancho del árbol y la carpeta.
+  Arriba, la barra de menús (Archivo, Edición, Ver, Ayuda) y la de
+  dirección: la ruta, que se puede escribir (Intro va, Esc la deja como
+  estaba), y el botón «Subir». Abajo, la barra de estado: cuántos objetos
+  (o cuántos elegidos) y lo que ocupan, y el espacio libre de la unidad.
+- **A la izquierda, el árbol**: las unidades (A:; B: si la BIOS dice que hay
+  dos disqueteras; de C: a Z: las que da DOS con 4408h: «Disco» las fijas y
+  «Extraíble» las demás, que pasan a llamarse «CD» cuando se ve que son de
+  ISO 9660) y sus carpetas. El cuadradito (o doble clic, Intro, + y -, las
+  flechas izquierda y derecha) despliega o pliega; un clic en una carpeta
+  la enseña en la lista. El separador entre los dos paneles se arrastra.
+- **A la derecha, la lista**: vista **Iconos** (iconos propios de 32×32:
+  carpeta, programa, por lotes, texto, imagen, sonido, cartucho, módulo y
+  desconocido) o **Detalles** (iconos de 16×16; nombre, tamaño, tipo y
+  fecha con la hora si cabe; un clic en la cabecera ordena por esa columna
+  y otro, al revés). Las carpetas, siempre delante. Barras de
+  desplazamiento y rueda en los dos paneles.
+- **Elegir**: clic; Mayús+clic o Mayús+flechas, un trozo; Ctrl+Espacio, uno
+  más o uno menos; Ctrl+clic también, si en Configuración > Ratón está
+  quitado «Ctrl+clic como botón derecho» (si no, Ctrl+clic es el menú,
+  como en todo Hispa Ventanas); Ctrl+E (como en el Windows en español) o
+  Ctrl+A (como en los cuadros de texto y Pintura), todo; Edición > Invertir.
+- **Teclado**: flechas, Inicio, Fin, Re Pág, Av Pág, Intro (abrir),
+  Retroceso (subir), Tab (árbol, lista, dirección, «Subir»), una letra (al
+  siguiente que empieza por ella), F2 cambiar el nombre, F3 (o Ctrl+B)
+  buscar, F7 carpeta nueva (como en GESTOR), F5 actualizar, Supr eliminar (y Ctrl+Retroceso en los Mac, que
+  TECLADO ya da como Supr), Ctrl+C, Ctrl+X, Ctrl+V (y Ctrl+Ins, Mayús+Ins),
+  Esc deja de arrastrar. Mayús+F10 o la tecla de menú, el menú contextual.
+- **Copiar, cortar y pegar** (el portapapeles de archivos es del
+  Administrador: hasta 512); lo cortado sale más claro hasta que se pega.
+  Pegar en la lista va a la carpeta que se ve; en el árbol, a la carpeta
+  elegida. Pegar en la misma carpeta hace una copia con otro nombre
+  (`NOMBR~1.TXT`).
+- **Arrastrar y soltar**, con el botón izquierdo, de la lista a una carpeta
+  de la lista o del árbol, y del árbol (una carpeta) a otra del árbol o a la
+  lista (la carpeta que se ve). El destino sale enmarcado en terracota y la
+  barra de estado dice «Mover a ...» o «Copiar a ...»: en la misma unidad se
+  mueve, a otra se copia; con Ctrl apretado al soltar, se copia siempre.
+- **Mover** en la misma unidad cambia de sitio cada archivo (56h, sin copiar
+  los datos); una carpeta se crea en el destino, se le pasa lo de dentro y
+  se quita la de antes. A otra unidad se copia y, si todo ha ido bien, se
+  borra el origen (si algo se ha omitido, el origen se queda entero).
+- **Copiar** guarda la fecha y los atributos. La **ventana de progreso**
+  dice qué se copia y adónde, con una barra (por octetos, contados antes) y
+  «3 de 10 archivos», y se cancela con su botón, Esc o su aspa (lo que se
+  estaba copiando a medias se borra). Mientras está, la ventana del
+  Administrador no atiende. Si el destino ya existe pregunta **Sí, No, Sí a
+  todo o Cancelar**. Un error de disco se dice con palabras («El disco está
+  protegido contra escritura», «La unidad no está preparada: ¿falta el
+  disquete o el CD?», «El disco está lleno», un archivo de solo lectura...)
+  con **Reintentar, Omitir o Cancelar**.
+- **Eliminar** (Supr) pregunta antes («¿Quiere eliminar «X»?» o «estos N
+  elementos», y avisa de que se borra lo de dentro de las carpetas); borra
+  también los de solo lectura, ocultos y de sistema. No hay papelera.
+- **Cambiar nombre** (F2) y **Nueva carpeta** piden el nombre (propone
+  NUEVA, NUEVA2...) y comprueban que vale en DOS (8.3, sin espacios ni
+  signos que no valen; lo pasa a mayúsculas, también la ñ y la ç).
+- **Propiedades**: nombre, tipo, carpeta, tamaño (las carpetas, con lo que
+  tienen dentro: archivos y carpetas), fecha y los atributos **Solo
+  lectura, Oculto, Sistema y Archivo**, que se cambian (con varios
+  elegidos, solo los que se tocan). De una unidad: el espacio total, libre
+  y ocupado.
+- **Buscar** (F3): un nombre con * y ? (en cualquier sitio: `*NOTA*.T?T`), en
+  la carpeta que se ve y todas las de dentro, con la ventana de progreso;
+  los resultados salen en la lista (en Detalles, la columna «Carpeta» en vez
+  de «Tipo»; la dirección dice «Búsqueda de ... en ...») y con ellos se
+  puede hacer todo lo demás. «Subir» vuelve a la carpeta; F5 busca otra vez.
+- **Abrir** (doble clic, Intro): una carpeta entra en ella; un .COM, .EXE o
+  .BAT se ejecuta con `prog_abrir`, como un acceso directo (un .BAT espera
+  una tecla al acabar); antes se guarda `ARCHIVOS.INI` y, al volver, el
+  Administrador se abre otra vez solo (`/R`: con lo que se ejecutó
+  marcado). Un texto (TXT, INI, LOG, CFG, ASM, INC, DIZ, NFO, LST, CSV, ME,
+  1ST, MD) va al Bloc de notas; un .BMP a Pintura; un .WAV al Reproductor
+  de sonido; un .NES a Hispa-Nes y un .SMS a Hispa-System (los buscan en
+  `\HISPADOS\PROGS` y `\HISPADOS\JUEGOS`); un .HVP se abre. Lo demás
+  pregunta si se quiere ver en el Bloc de notas. «Editar» abre cualquier
+  archivo en el Bloc de notas (también un .BAT).
+- **Botón derecho** (y Mayús+F10, y Ctrl+clic): en un archivo o carpeta,
+  Abrir, Editar, Cortar, Copiar, Pegar, Eliminar, Cambiar nombre y
+  Propiedades; en el fondo de la lista, las vistas, los órdenes, Pegar,
+  Nueva carpeta, Seleccionar todo y Actualizar; en el árbol, Desplegar o
+  plegar, Nueva carpeta, Cortar, Copiar, Pegar, Eliminar, Cambiar nombre y
+  Propiedades (en una unidad, lo que no se puede, en gris).
+- Funciona en VESA y en la VGA de 16 colores (solo usa los 16 colores
+  propios), también en 640×480.
+
+Límites: 1.000 objetos por carpeta (lo demás no se ve), 600 filas en el
+árbol, 512 elementos en una operación, 32 carpetas una dentro de otra al
+recorrer, rutas de 66 letras (la de DOS) y, para abrir un archivo con otro
+programa, 71 letras de parámetros (los de un acceso directo). Pendiente:
+renombrar en el sitio (hoy es un diálogo), seleccionar arrastrando un
+recuadro, desplazar solo al arrastrar cerca del borde, la etiqueta del
+disco, una papelera y abrir un archivo en un programa que ya está abierto
+con otro (Hispa-Nes y Hispa-System solo se traen delante).
+
 ### Mezclador
 
 `programas/mezclad.asm`, `MEZCLAD.HVP` (en `\HISPADOS\PROGS`; acceso en el
@@ -1811,6 +1936,18 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 «Mezclador...» de su ventanita y con el de Configuración > Sonido.
 
 ## Pruebas
+
+- `tests/run_archivos_tests.sh` ([ARCHIVOS]): el Administrador de archivos
+  con un disquete y un disco duro hecho por la prueba: abrir, navegar por
+  el árbol, vista Detalles y orden, carpeta nueva, copiar y pegar,
+  arrastrar a otra carpeta (mover) y una carpeta al árbol (a otra unidad:
+  copia), cortar y pegar, cambiar el nombre, la ventana de progreso, «Ya
+  existe», el disco lleno, eliminar con confirmación, propiedades (solo
+  lectura), buscar, abrir un texto en el Bloc de notas, el menú contextual,
+  Ctrl+E, ejecutar un .COM y volver, el disquete fuera, cambiar el tamaño,
+  maximizar y el menú del escritorio; los discos se miran con mtools y
+  `fsck.fat`. Segunda sesión en VGA de 640×480 con el teclado. Capturas en
+  `build/archivos_*.png`.
 
 - `tests/run_ventanas_tests.sh`: gráficos y modos de pantalla con las
   ventanas de muestra (`VENTANAS /DEMO`).

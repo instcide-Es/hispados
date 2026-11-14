@@ -201,6 +201,7 @@ centro_tarea:
         mov ebp, [cen_ven]
 .act:
         call ven_activar
+        call arch_reabrir           ; [ARCHIVOS] lo que se pidió abrir al volver
         mov byte [jd_arr], 0
         call jd_tras_volver         ; (VELOCIDAD, tras un juego: accesos.inc)
         jmp app_bucle
@@ -788,6 +789,11 @@ vista_pintar:
         cmp eax, 14
         jbe .i1
         mov eax, 14
+.i1b:                               ; [ARCHIVOS] sin el espacio del final
+        cmp byte [esi+eax-1], ' '   ; («Administrador »: no pisa al de al lado)
+        jne .i1
+        dec eax
+        jnz .i1b
 .i1:
         mov ecx, eax
         shl eax, 2
@@ -1145,6 +1151,12 @@ acc_lanzar:
         mov esi, t_no_interno
         jmp .aviso
 .ihay:
+        lea esi, [ebx+AC_PARAM]     ; [ARCHIVOS] los parámetros: el archivo
+        mov edi, int_param          ; que abre el Bloc de notas
+        push ecx
+        mov ecx, 71
+        call cad_copiar
+        pop ecx
         mov eax, [int_tabla+ecx+8]
         mov ebp, [eax]
         test ebp, ebp
@@ -1152,6 +1164,11 @@ acc_lanzar:
         mov eax, 4
         call ven_mostrar
         call ven_activar
+        cmp byte [int_param], 0     ; [ARCHIVOS] ya abierto: que abra el archivo
+        je .x
+        mov eax, WM_HV_ABRIR
+        mov edx, int_param
+        call msg_poner
         jmp .x
 .inuevo:
         mov eax, [int_tabla+ecx+4]

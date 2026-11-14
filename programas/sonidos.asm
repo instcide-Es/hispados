@@ -198,6 +198,7 @@ seno        dw 0, 2464, 4889, 7237, 9471, 11556, 13458, 15148, 16599, 17789
 ;  La entrada y el bucle
 ; =============================================================================
 entrada:                                ; EBX=base ESI=ruta EDI=parámetros
+        mov [param], edi                ; [ARCHIVOS] un WAV en los parámetros
         call rutas
         call cero_busca
         mov esi, pl_hijos
@@ -232,6 +233,8 @@ entrada:                                ; EBX=base ESI=ruta EDI=parámetros
         mov ecx, 1
         mov edx, 1000
         HV tmp_poner
+        mov esi, [param]                ; [ARCHIVOS] el WAV de los parámetros
+        call abrir_nombre
 bucle:
         mov edi, msg
         cmp dword [estado], E_NADA
@@ -374,6 +377,13 @@ tarjeta_mira:
 son_proc:
         cmp eax, WM_PAINT
         je .pintar
+        cmp eax, WM_HV_ABRIR            ; [ARCHIVOS] un WAV que le mandan
+        jne .nabrir
+        mov esi, edx
+        call abrir_nombre
+        xor eax, eax
+        ret
+.nabrir:
         cmp eax, WM_COMMAND
         je ordenes
         cmp eax, WM_TIMER
@@ -773,6 +783,42 @@ tono:
         mov dword [c_que], t_q_tono
         mov byte [c_canal], 0
         call sonar
+.x:
+        popad
+        ret
+
+; [ARCHIVOS] ESI=parámetros: si empiezan por un nombre (no por «/»), ese WAV
+; se abre y suena (desde el Administrador de archivos)
+abrir_nombre:
+        pushad
+        test esi, esi
+        jz .x
+.e:
+        lodsb
+        cmp al, ' '
+        je .e
+        cmp al, '/'
+        je .x
+        cmp al, ' '
+        jb .x
+        dec esi
+        mov edi, nom_tmp
+        mov ecx, 79
+.c:
+        lodsb
+        cmp al, ' '
+        jbe .f
+        stosb
+        loop .c
+.f:
+        mov byte [edi], 0
+        call hay_sonido
+        jc .x
+        mov dword [c_id], 2
+        mov byte [c_canal], 0
+        mov dword [c_que], nom_tmp
+        mov esi, nom_tmp
+        call abrir_wav
 .x:
         popad
         ret
@@ -1552,6 +1598,7 @@ des_proc:
 ; y escribir en la página del código que corre es lentísimo: el procesador
 ; cree que el programa se cambia a sí mismo; en QEMU, más todavía)
             resb 4096
+param       resd 1                      ; [ARCHIVOS] los parámetros de la entrada
             alignb 4
 ven         resd 1
 cero        resd 1

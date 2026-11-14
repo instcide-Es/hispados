@@ -94,7 +94,7 @@ def main():
                 cp(os.path.join(B, f), 'HISPADOS/' + f)
             else:
                 cab = open(os.path.join(B, f), 'rb').read(32)
-                carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] in (1, 2) else 'JUEGOS'  # [MEZCLADOR] 2: «Sonido»
+                carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] in (1, 2, 3) else 'JUEGOS'  # [MEZCLADOR] 2: «Sonido»
                 cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
     # los cartuchos de los emuladores, cada uno en su carpeta
     md('HISPADOS/JUEGOS/NES')

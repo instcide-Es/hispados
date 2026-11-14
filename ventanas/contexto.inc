@@ -50,6 +50,7 @@ CE_FONDO    equ 0xE102
 CE_MEZ      equ 0xE103
 CE_CASCADA  equ 0xE104
 CE_MOSAICO  equ 0xE105
+CE_ARCH     equ 0xE106              ; [ARCHIVOS] el Administrador de archivos
 CT_CORTAR   equ 0xE201              ; los cuadros de texto
 CT_COPIAR   equ 0xE202
 CT_PEGAR    equ 0xE203
@@ -114,6 +115,8 @@ ctx_l_esc:                          ; el escritorio
         db "&Fondo del escritorio...", 0
         dw CE_MEZ
         db "&Mezclador...", 0
+        dw CE_ARCH
+        db "Administrador de a&rchivos...", 0
         dw 0
         db 0
         dw CE_CASCADA
@@ -809,8 +812,13 @@ ctx_esc_orden:
         jmp .x
 .e4:
         cmp ecx, CE_MOSAICO
-        jne .x
+        jne .e5
         call ctx_mosaico
+        jmp .x
+.e5:
+        cmp ecx, CE_ARCH
+        jne .x
+        call arch_abrir
 .x:
         xor eax, eax
         ret

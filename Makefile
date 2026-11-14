@@ -285,7 +285,10 @@ HVPSIS = $(B)/CONFIG.HVP
 $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS
-HVPA = $(B)/PINTURA.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP
+HVPA = $(B)/PINTURA.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP
+# [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
+$(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # el Reproductor de sonido y los sonidos propios (tools/mksample.py): HISPA.WAV,
@@ -580,6 +583,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_sonidos_tests.sh $(IMG)
 	tests/run_mezclador_tests.sh $(IMG)
 	tests/run_volumen_tests.sh $(IMG)
+	tests/run_archivos_tests.sh $(IMG)
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)

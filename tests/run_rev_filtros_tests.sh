@@ -32,6 +32,11 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 #  1. Filtros (consola por el puerto serie)
 # ----------------------------------------------------------------------------
 cp "$IMG" $T/f.img
+# sitio para los archivos grandes de ORDENAR (el disquete va casi lleno): fuera
+# los módulos de Ventanas, que esta prueba no usa
+for d in ::HISPADOS/JUEGOS ::HISPADOS/PROGS; do
+  MTOOLS_SKIP_CHECK=1 mdeltree -i $T/f.img $d > /dev/null 2>&1
+done
 python3 - $T <<'EOF'
 import sys, os
 d = sys.argv[1]

@@ -69,6 +69,11 @@ bloc_tarea:
         xor ebp, ebp
         call ven_crear
         mov [bloc_ven], eax
+        cmp byte [int_param], 0     ; [ARCHIVOS] un archivo en los parámetros
+        je app_bucle
+        mov esi, int_param
+        call bloc_cargar
+        mov byte [int_param], 0
         jmp app_bucle
 
 ; (interna) el título: «Bloc de notas - NOMBRE»
@@ -107,6 +112,8 @@ bloc_proc:
 .nhb:
         cmp eax, WM_COMMAND
         je .orden
+        cmp eax, WM_HV_ABRIR        ; [ARCHIVOS] abrir un archivo que le mandan
+        je .hvabrir
         cmp eax, WM_SIZE
         je .tam
         cmp eax, WM_SETFOCUS
@@ -197,6 +204,13 @@ bloc_proc:
         mov esi, bloc_nombre
         call ed_poner
         call bloc_poner_titulo
+        jmp .nada
+.hvabrir:
+        call bloc_preguntar
+        jc .nada
+        mov esi, edx
+        call bloc_cargar
+        mov byte [int_param], 0
         jmp .nada
 .abrir:
         call bloc_preguntar

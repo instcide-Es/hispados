@@ -525,6 +525,8 @@ pon_titulo:
 pin_proc:
         cmp eax, WM_PAINT
         je pintar
+        cmp eax, WM_HV_ABRIR        ; [ARCHIVOS] un BMP que le mandan
+        je .hvabrir
         cmp eax, WM_MOUSEMOVE
         je raton_mueve
         cmp eax, WM_LBUTTONDOWN
@@ -596,6 +598,32 @@ pin_proc:
 .d1:
         call pp_soltar
         HV msg_salir
+        jmp hecho
+.hvabrir:
+        push edx
+        call preguntar
+        pop esi
+        jc hecho
+.ha:
+        lodsb                       ; el primer nombre de los parámetros
+        cmp al, ' '
+        je .ha
+        jb hecho
+        cmp al, '/'
+        je hecho
+        dec esi
+        mov edi, nom_tmp
+        mov ecx, 79
+.hc:
+        lodsb
+        cmp al, ' '
+        jbe .hf
+        stosb
+        loop .hc
+.hf:
+        mov byte [edi], 0
+        mov esi, nom_tmp
+        call cargar
         jmp hecho
 .izq:
         xor esi, esi

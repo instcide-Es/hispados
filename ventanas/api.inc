@@ -108,6 +108,11 @@
         HVF mez_abrir               ; 83  abre el Mezclador (MEZCLAD.HVP); EAX=1: en la vista Completa
         ; ---- [CONTEXTO] el menú contextual (85 entradas) ----
         HVF ctx_menu                ; 84  EBP=dueña ESI=órdenes EAX=x EBX=y (-1: donde se pidió) ECX=en gris
-        ; ---- [EMULADORES] la carpeta de cada uno (86 entradas) ----
+        ; ---- [EMULADORES] (86 entradas; viene de esa rama) ----
         HVF dos_ir_carpeta          ; 85  ESI=ruta (con unidad o sin ella): la carpeta de trabajo -> CF=1 si no
+        ; ---- [ARCHIVOS] el Administrador de archivos (90 entradas) ----
+        HVF rm_interrup             ; 86  ESI=bloque RL_*: interrupción de modo real (punteros en dos_buf)
+        HVF dos_buf                 ; 87  (datos) el búfer de paso de DOS (2.048 octetos)
+        HVF dos_crit                ; 88  -> EAX=el último error crítico de disco (-1: ninguno)
+        HVF prog_abrir              ; 89  ESI=programa EDI=parámetros EDX=carpeta ECX=banderas EBX=al volver
 %endmacro

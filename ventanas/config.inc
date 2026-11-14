@@ -111,6 +111,8 @@ cfg_claves:
         dd hvp_vistos, k_modulos
         db 1, T_NUM, 0, 0
         dd jd_hecho, k_juegosdos
+        db 1, T_CAD, 119, 0         ; [ARCHIVOS] el módulo que se abre al volver
+        dd cen_reabrir, k_reabrir
         db 2, T_GDIR, 0, 0
         dd 0, k_carpeta
         db 2, T_CAD, 27, 0
@@ -1026,6 +1028,12 @@ cfg_guardar:
         mov esi, k_juegosdos
         call pon_clave_num
 .sinjd:
+        cmp byte [cen_reabrir], 0   ; [ARCHIVOS] solo si hay algo que reabrir
+        je .sinre
+        mov esi, k_reabrir
+        mov edx, cen_reabrir
+        call pon_clave_cad
+.sinre:
         mov ebx, [gr_tabla]
         xor ecx, ecx
 .g:

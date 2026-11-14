@@ -106,6 +106,7 @@ lz_velst    db 0                    ; cómo quedó VELOCIDAD tras el programa (L
 lz_dpmi     db 0                    ; HSPDPMI: 1 lo ha cargado el lanzador, 2 ya estaba
 lz_ayuda    db 0                    ; «/?»: no hace falta cargar nada
 lz_unidad   db 0
+lz_crit     db 0                    ; [ARCHIVOS] el último error crítico + 1 (0: ninguno)
             align 2
 lz_old24    dd 0
 lz_sp       dw 0
@@ -139,6 +140,11 @@ lz_m_nl     db 13, 10, "$"
 ; error crítico mientras está el entorno gráfico: la llamada falla, sin
 ; preguntar en la pantalla
 lz_int24:
+        push ax                     ; [ARCHIVOS] se apunta el error (DI) para
+        mov ax, di                  ; quien quiera saberlo (dos_crit)
+        inc ax
+        mov [cs:lz_crit], al
+        pop ax
         mov al, 3
         iret
 
@@ -1884,6 +1890,7 @@ alto_ini:
 %include "apagado.inc"                ; [APAGAR] salir: volver, reiniciar o apagar
 %include "tamano.inc"               ; [TAMAÑO] tamaño, cursores, barras y rueda
 %include "contexto.inc"             ; [CONTEXTO] el botón derecho: menús contextuales
+%include "archapi.inc"              ; [ARCHIVOS] lo que pide el Administrador de archivos
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %endif
@@ -1898,5 +1905,6 @@ pila_fin:
 %endif
 %include "bsstam.inc"               ; [TAMAÑO]
 %include "bssctx.inc"               ; [CONTEXTO]
+%include "bssarch.inc"              ; [ARCHIVOS]
             alignb 16
 bss_fin:

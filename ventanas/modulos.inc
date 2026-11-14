@@ -30,7 +30,7 @@ H_MEM       equ 12                  ; memoria que necesita
 H_ENTRADA   equ 16
 H_IMG       equ 20                  ; tamaño de la imagen; detrás, las reubicaciones
 H_NREUB     equ 24
-H_GRUPO     equ 28                  ; 0 juego, 1 accesorio, 2 sonido
+H_GRUPO     equ 28                  ; 0 juego, 1 accesorio, 2 sonido, 3 [ARCHIVOS] Principal
 H_NOMBRE    equ 32
 H_ICONO     equ 64
 H_TABLA     equ 576                 ; aquí se copia la tabla de la interfaz
@@ -530,6 +530,15 @@ hvp_abrir:
         mov eax, 4
         call ven_mostrar
         call ven_activar
+        cmp byte [ebx+AC_PARAM], 0  ; [ARCHIVOS] con parámetros: el archivo,
+        je .x                       ; a la ventana que ya está abierta
+        lea esi, [ebx+AC_PARAM]
+        lea edi, [edx+HS_PARAM]
+        mov ecx, 71
+        call cad_copiar
+        mov eax, WM_HV_ABRIR
+        mov edx, edi
+        call msg_poner
         jmp .x
 .vs:
         add ebp, V_TAM
@@ -695,6 +704,9 @@ hvp_buscar:
         mov ebx, tg_accesorios
         je .g0
         mov ebx, tg_sonido
+        cmp byte [edi+H_GRUPO], 3   ; [ARCHIVOS] 3: «Principal»
+        jne .g0
+        mov ebx, tg_principal
 .g0:
         mov eax, [gr_tabla]
         xor edx, edx

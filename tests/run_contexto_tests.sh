@@ -230,9 +230,10 @@ chk $T/e2.ppm texto 156 138 9 12 fina "hola mund" texto 417 255 0 8 fina "Cor" t
   texto 425 295 7 8 fina "egar"
 chk $T/e3.ppm texto 156 138 0 9 fina "hola mundohola mund"
 # -- el escritorio, en la esquina: el menú, arriba y a la izquierda del punto --
-chk $T/f1.ppm texto 507 451 0 8 fina "onfiguración..." texto 507 471 0 8 fina "ondo del escritorio..." \
-  texto 507 491 0 8 fina "ezclador..." texto 499 519 0 8 fina "Ventanas en c" texto 499 539 0 8 fina "Ventanas en m" \
-  px 482 500 1 "el filete del menú, a la izquierda"
+chk $T/f1.ppm texto 467 431 0 8 fina "onfiguración..." texto 467 451 0 8 fina "ondo del escritorio..." \
+  texto 467 471 0 8 fina "ezclador..." texto 459 491 0 8 fina "Administrador de a" \
+  texto 459 519 0 8 fina "Ventanas en c" texto 459 539 0 8 fina "Ventanas en m" \
+  px 442 500 1 "el filete del menú, a la izquierda"
 chk $T/f2.ppm titulo 124 110 activa "Configuración" texto 278 145 4 8 negrita "Pantalla"
 # -- cascada --
 chk $T/f3.ppm titulo 8 36 no "Centro de programas" titulo 34 62 no "Pruebas" titulo 60 88 activa "Bloc de notas - (sin nombre)"
