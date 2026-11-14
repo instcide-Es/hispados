@@ -21,6 +21,8 @@
 ;                         sale con el nivel de error = código ASCII de la letra
 ;                         de la unidad (67 = C:...); 0 si no se hace nada, 1 si
 ;                         no se puede
+;  PARTIR ... /PASOS     escribir cada llamada a la BIOS antes de hacerla
+;                        (para ver en qué paso se para un equipo)
 ;  PARTIR ... /SINMODELO  no preguntar el modelo a los discos (si al leerlo
 ;                         tarda, sale «Esc lo salta»; Esc hace lo mismo)
 ;  PARTIR ... /IDE:b,c,u  (para las pruebas) preguntar el modelo del disco 1
@@ -131,6 +133,8 @@ start:
         cmp dword [di], 'ARRA'
         je .o_arr
         cmp dword [di], 'SINM'
+        je .arg
+        cmp dword [di], 'PASO'          ; (ya leída en prescan)
         je .arg
         cmp dword [di], 'IDE:'
         je .arg
@@ -417,6 +421,7 @@ count_disks:
         mov dl, 0x80
         xor di, di
         mov es, di
+        call paso13
         int 0x13
         pop es
         jc .probe
@@ -434,6 +439,7 @@ count_disks:
         mov dl, al
         add dl, 0x80
         mov ah, 0x15
+        call paso13
         int 0x13
         jc .r
         cmp ah, 3
@@ -462,6 +468,7 @@ find_boot:
         mov cx, 0xFFFF
         mov bx, packet
         push bp
+        call paso25
         int 0x25
         pop ax                      ; (las banderas que deja INT 25h)
         pop bp
@@ -628,10 +635,23 @@ edd_info:
         mov cx, 0x4A / 2
         xor ax, ax
         rep stosw
+        mov ah, 0x41                    ; ¿qué versión de EDD? (como XFDISK: la
+        mov bx, 0x55AA                  ; estructura de 42h solo con EDD 3.0;
+        mov dl, [disk]                  ; las BIOS antiguas, la de 1Eh)
+        call paso13
+        int 0x13
+        jc .r
+        cmp bx, 0xAA55
+        jne .r
+        mov word [edd3], 0x1E
+        cmp ah, 0x30
+        jb .ver
         mov word [edd3], 0x42
+.ver:
         mov ah, 0x48
         mov dl, [disk]
         mov si, edd3
+        call paso13
         int 0x13
         jc .r
         cmp word [edd3], 0x1E
@@ -918,6 +938,73 @@ pci_rd:
         pop dx
         ret
 
+; [PASOS] con /PASOS se escribe cada llamada a la BIOS antes de hacerla:
+; «[13 AH DL]» o «[25 AL]» (para ver dónde se cuelga en un equipo concreto)
+paso13:
+        cmp byte [cs:pasos], 0
+        je .r
+        pushad
+        push ax
+        mov al, '['
+        call paso_car
+        mov al, '1'
+        call paso_car
+        mov al, '3'
+        call paso_car
+        mov al, ' '
+        call paso_car
+        pop ax
+        push dx
+        mov al, ah
+        call paso_hex
+        mov al, ' '
+        call paso_car
+        pop dx
+        mov al, dl
+        call paso_hex
+        mov al, ']'
+        call paso_car
+        popad
+.r:     ret
+paso25:
+        cmp byte [cs:pasos], 0
+        je .r
+        pushad
+        push ax
+        mov al, '['
+        call paso_car
+        mov al, '2'
+        call paso_car
+        mov al, '5'
+        call paso_car
+        mov al, ' '
+        call paso_car
+        pop ax
+        call paso_hex
+        mov al, ']'
+        call paso_car
+        popad
+.r:     ret
+paso_hex:
+        push ax
+        shr al, 4
+        call .d
+        pop ax
+        and al, 0x0F
+.d:     add al, '0'
+        cmp al, '9'
+        jbe paso_car
+        add al, 7
+paso_car:
+        push dx
+        push ax
+        mov dl, al
+        mov ah, 2
+        int 0x21
+        pop ax
+        pop dx
+        ret
+
 ; ver en la línea de órdenes, antes de mirar los discos, /SINMODELO (no
 ; preguntar el modelo a los discos) y /IDE:base,control,unidad (en hex; para
 ; las pruebas: preguntar el modelo del disco 1 por esos puertos sin más)
@@ -936,8 +1023,13 @@ prescan:
         call opt_word
         pop si
         cmp dword [optbuf], 'SINM'
-        jne .i
+        jne .p
         mov byte [nomodel], 1
+        jmp .l
+.p:
+        cmp dword [optbuf], 'PASO'      ; /PASOS: cada llamada a la BIOS, a la vista
+        jne .i
+        mov byte [pasos], 1
         jmp .l
 .i:
         cmp dword [optbuf], 'IDE:'
@@ -1446,6 +1538,7 @@ disk_geom:
         mov dl, [disk]
         xor di, di
         mov es, di
+        call paso13
         int 0x13
         pop es
         jc .err
@@ -1471,6 +1564,7 @@ disk_geom:
         mov ah, 0x41
         mov bx, 0x55AA
         mov dl, [disk]
+        call paso13
         int 0x13
         jc .ok
         cmp bx, 0xAA55
@@ -1482,6 +1576,7 @@ disk_geom:
         mov ah, 0x48
         mov dl, [disk]
         mov si, edd
+        call paso13
         int 0x13
         jc .ok
         mov eax, [edd+0x10]
@@ -1595,6 +1690,7 @@ disk_io:
         xor al, al
         mov dl, [disk]
         mov si, dap
+        call paso13
         int 0x13
         pop eax
         jnc .ok
@@ -1605,6 +1701,7 @@ disk_io:
         mov ah, [io_cmd]
         mov al, 1
         mov dl, [disk]
+        call paso13
         int 0x13
         pop eax
         jnc .ok
@@ -1612,6 +1709,7 @@ disk_io:
         push eax
         xor ax, ax
         mov dl, [disk]
+        call paso13
         int 0x13
         pop eax
         dec di
@@ -2641,6 +2739,7 @@ c_arr:
         mov cx, 0xFFFF
         mov bx, packet
         push bp
+        call paso25
         int 0x25
         pop ax
         pop bp
@@ -3277,6 +3376,7 @@ f_ctl       resw 1
 f_dev       resb 1
 f_ide       resb 1
 nomodel     resb 1
+pasos       resb 1
 t_told      resb 1
             alignb 4
 t_spin      resd 1
