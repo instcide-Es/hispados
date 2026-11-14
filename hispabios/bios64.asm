@@ -52,6 +52,17 @@ T_PETICION      dd 0                    ; +16 código de la petición
 T_ARG           dd 0                    ; +20 argumento
 T_RESULTADO     dd 0                    ; +24 resultado
 T_MEMKB         dw 576                  ; +28 memoria convencional para DOS (KB)
+T_NDISCOS       db 0                    ; +30 discos (el 0 es el de arranque, 80h)
+                db 0
+T_EXTKB         dd 0                    ; +32 KB seguidos desde 1 MB
+T_TSC_TICK      dd 0                    ; +36 cuentas del TSC por tic (1/18,2 s)
+T_DISCOS        times 8 * 16 db 0       ; +40 por disco: sectores (8), tamaño (4), -
+P_DISCO         db 0                    ; +168 petición de disco: número (0 = 80h)
+                db 0
+P_N             dw 0                    ; +170 sectores (como mucho TROZO)
+P_LBA           dq 0                    ; +172 primer sector
+T_CURSOR        dw 0                    ; +180 posición del cursor (para dibujarlo)
+T_VEC0          db 0                    ; +182 vector de la IRQ 0 del firmware (0: no usa el 8259)
 
 ; =============================================================================
 ;  Entrada desde el firmware (modo largo)
@@ -118,6 +129,7 @@ baja_32:
         xor edi, edi
         mov ecx, 1024
         rep movsd
+        call reloj_dos
         jmp SEL_C16:baja_16
 
         bits 16
@@ -159,12 +171,18 @@ llamar_fw:
         push gs
         pushad
         cli
-        mov dx, SEG_BIOS
+        xor dx, dx                      ; el cursor, para dibujarlo
         mov ds, dx
+        mov dx, [450h]
+        mov cx, SEG_BIOS
+        mov ds, cx
+        mov [T_CURSOR], dx
+        mov byte [en_fw], 1
         movzx eax, ax
         mov [T_PETICION], eax
         mov [T_ARG], ebx
         call .sube                      ; vuelve aquí al bajar otra vez
+        mov byte [cs:en_fw], 0
         popad
         mov eax, [cs:T_RESULTADO]
         pop gs
@@ -188,6 +206,7 @@ sube_32:
         mov ds, ax
         mov es, ax
         mov ss, ax
+        call reloj_fw
         cld                             ; la página 0: la de DOS se guarda y
         xor esi, esi                    ; vuelve la del firmware
         mov edi, L(PAG0_DOS)
@@ -239,6 +258,154 @@ sube_64:
         mov [rel T_RESULTADO], eax
         jmp baja_64
 
+
+; =============================================================================
+;  Las interrupciones al cambiar de modo (32 bits, sin paginación)
+; =============================================================================
+;  En modo DOS manda el temporizador clásico: PIT a 18,2 Hz por el 8259
+;  (vectores 08h y 70h), que llega al procesador por LINT0 del APIC local
+;  como ExtINT (el cableado virtual de siempre). El temporizador del APIC
+;  local del firmware se enmascara y el TPR se pone a F0h, para que no llegue
+;  ninguna otra interrupción del firmware al modo real (ExtINT no depende del
+;  TPR). Al volver al firmware se calla el 8259 y todo queda como estaba.
+;  (Intel SDM vol. 3, 11.5 y 11.8.3.1; 8259A: hoja de datos de Intel.)
+        bits 32
+reloj_dos:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        cmp byte [L(T_VEC0)], 0         ; ¿el firmware usa el 8259?
+        je .apic
+        in al, 21h                      ; sí: se guardan sus máscaras y se
+        mov [L(mask_fw)], al            ; ponen los vectores de DOS
+        in al, 0A1h
+        mov [L(mask_fw + 1)], al
+        mov bl, 08h
+        call pic_vectores
+.apic:  mov al, [L(mask_dos)]           ; las máscaras de DOS
+        out 21h, al
+        mov al, [L(mask_dos + 1)]
+        out 0A1h, al
+        mov ecx, 1Bh                    ; IA32_APIC_BASE
+        rdmsr
+        test eax, 800h                  ; ¿APIC activado?
+        jz .fin
+        test eax, 400h                  ; ¿x2APIC?
+        jnz .x2
+        and eax, 0FFFFF000h
+        mov ebx, eax
+        mov eax, [ebx + 80h]            ; TPR
+        mov [L(sv_tpr)], eax
+        mov dword [ebx + 80h], 0F0h
+        mov eax, [ebx + 320h]           ; temporizador: enmascarado
+        mov [L(sv_lvtt)], eax
+        or eax, 10000h
+        mov [ebx + 320h], eax
+        mov eax, [ebx + 350h]           ; LINT0: ExtINT
+        mov [L(sv_lint0)], eax
+        mov dword [ebx + 350h], 700h
+        jmp .fin
+.x2:    mov ecx, 808h
+        rdmsr
+        mov [L(sv_tpr)], eax
+        mov eax, 0F0h
+        xor edx, edx
+        wrmsr
+        mov ecx, 832h
+        rdmsr
+        mov [L(sv_lvtt)], eax
+        or eax, 10000h
+        xor edx, edx
+        wrmsr
+        mov ecx, 835h
+        rdmsr
+        mov [L(sv_lint0)], eax
+        mov eax, 700h
+        xor edx, edx
+        wrmsr
+.fin:   pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
+reloj_fw:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        in al, 21h                      ; las máscaras de DOS se guardan y
+        mov [L(mask_dos)], al           ; el 8259 se calla
+        in al, 0A1h
+        mov [L(mask_dos + 1)], al
+        mov al, 0FFh
+        out 21h, al
+        out 0A1h, al
+        mov ecx, 1Bh
+        rdmsr
+        test eax, 800h
+        jz .pic
+        test eax, 400h
+        jnz .x2
+        and eax, 0FFFFF000h
+        mov ebx, eax
+        mov eax, [L(sv_lint0)]
+        mov [ebx + 350h], eax
+        mov eax, [L(sv_lvtt)]
+        mov [ebx + 320h], eax
+        mov eax, [L(sv_tpr)]
+        mov [ebx + 80h], eax
+        jmp .pic
+.x2:    xor edx, edx
+        mov ecx, 835h
+        mov eax, [L(sv_lint0)]
+        wrmsr
+        mov ecx, 832h
+        mov eax, [L(sv_lvtt)]
+        wrmsr
+        mov ecx, 808h
+        mov eax, [L(sv_tpr)]
+        wrmsr
+.pic:   cmp byte [L(T_VEC0)], 0         ; si el firmware usa el 8259: sus
+        je .fin                         ; vectores y sus máscaras
+        mov bl, [L(T_VEC0)]
+        call pic_vectores
+        mov al, [L(mask_fw)]
+        out 21h, al
+        mov al, [L(mask_fw + 1)]
+        out 0A1h, al
+.fin:   pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
+; pic_vectores: BL = vector de la IRQ 0 (el esclavo, a BL + 8); todo enmascarado
+pic_vectores:
+        mov al, 11h                     ; ICW1: flanco, cascada, con ICW4
+        out 20h, al
+        out 0A0h, al
+        mov al, bl                      ; ICW2
+        out 21h, al
+        add al, 8
+        cmp bl, 08h                     ; (DOS: el esclavo en 70h)
+        jne .e
+        mov al, 70h
+.e:     out 0A1h, al
+        mov al, 4                       ; ICW3
+        out 21h, al
+        mov al, 2
+        out 0A1h, al
+        mov al, 1                       ; ICW4: 8086
+        out 21h, al
+        out 0A1h, al
+        mov al, 0FFh
+        out 21h, al
+        out 0A1h, al
+        ret
+        bits 16
+
 ; =============================================================================
 ;  La BIOS de modo real
 ; =============================================================================
@@ -254,7 +421,72 @@ bios_inicio:
         mov ax, SEG_BIOS
         stosw
         loop .v
+        mov word [es:08h * 4], int08
         mov word [es:10h * 4], int10
+        mov word [es:11h * 4], int11
+        mov word [es:12h * 4], int12
+        mov word [es:13h * 4], int13
+        mov word [es:14h * 4], int14
+        mov word [es:15h * 4], int15
+        mov word [es:16h * 4], int16
+        mov word [es:17h * 4], int17
+        mov word [es:18h * 4], int18
+        mov word [es:19h * 4], int19
+        mov word [es:1Ah * 4], int1a
+        mov al, 'V'                     ; [depuración] el vector, por COM1
+        call dbg
+        mov al, [T_VEC0]
+        call dbg_hex
+        mov di, 70h * 4                 ; IRQ 8-15
+        mov cx, 8
+.e:     mov word [es:di], irq_esclavo
+        add di, 4
+        loop .e
+        ; ---- el reloj de DOS: 8259 en 08h/70h y PIT a 18,2 Hz ----
+        mov al, 11h
+        out 20h, al
+        out 0A0h, al
+        mov al, 08h
+        out 21h, al
+        mov al, 70h
+        out 0A1h, al
+        mov al, 4
+        out 21h, al
+        mov al, 2
+        out 0A1h, al
+        mov al, 1
+        out 21h, al
+        out 0A1h, al
+        mov al, [mask_dos]
+        out 21h, al
+        mov al, [mask_dos + 1]
+        out 0A1h, al
+        mov al, 36h                     ; canal 0, modo 3, cuenta 65536
+        out 43h, al
+        xor al, al
+        out 40h, al
+        out 40h, al
+        ; ---- el reloj: el TSC de ahora es el tic 0 ----
+        rdtsc
+        mov [tsc0], eax
+        mov [tsc0 + 4], edx
+        ; ---- el mapa de memoria (E820): DOS, la BIOS y la extendida ----
+        movzx eax, word [T_MEMKB]
+        shl eax, 10
+        mov dword [e820 + 8], eax       ; 0 - tope de DOS: libre
+        mov dword [e820 + 16], 1
+        mov [e820 + 20], eax            ; tope de DOS - 1 MB: reservado
+        mov ecx, 100000h
+        sub ecx, eax
+        mov [e820 + 28], ecx
+        mov dword [e820 + 36], 2
+        mov dword [e820 + 40], 100000h  ; 1 MB + extendida: libre
+        mov eax, [T_EXTKB]
+        shl eax, 10
+        mov [e820 + 48], eax
+        mov dword [e820 + 56], 1
+        xor ax, ax
+        mov es, ax
         ; ---- datos de la BIOS (40:xx) ----
         mov ax, 40h
         mov es, ax
@@ -272,14 +504,16 @@ bios_inicio:
         ; ---- pantalla limpia ----
         mov ax, 0003h
         int 10h
-        ; ---- prueba del paso 5: escribir con INT 10h ----
+        mov word [es:1Ah], 1Eh          ; búfer del teclado vacío
+        mov word [es:1Ch], 1Eh
+        mov dword [es:6Ch], 0           ; tics
+        ; ---- letrero y a arrancar el disco ----
         mov si, t_prueba
         call escribir_bios
         mov ax, PET_DIBUJAR
         call llamar_fw
-        mov ax, PET_ESPERAR
-        mov ebx, 60
-        call llamar_fw
+        sti
+        int 19h
 .para:  cli
         hlt
         jmp .para
@@ -707,10 +941,14 @@ pantalla_cambiada:
 ; =============================================================================
 ;  Datos
 ; =============================================================================
-t_prueba        db 'HispaBIOS 0.1 - la BIOS de modo real funciona sobre UEFI.', 13, 10
-                db 'Esta linea y la de arriba las escribe INT 10h (AH=0Eh).', 13, 10, 13, 10
-                db 'Linea 4: dentro de poco, aqui arrancara Hispa-DOS.', 13, 10, 0
+t_prueba        db 'HispaBIOS 0.1 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
 primera         db 0
+mask_dos        db 0FAh, 0FFh          ; DOS: IRQ 0 y la cascada
+mask_fw         db 0FFh, 0FFh
+        align 4
+sv_tpr          dd 0
+sv_lvtt         dd 0
+sv_lint0        dd 0
 v_ini           dw 0
 v_fin           dw 0
 v_atr           db 0
@@ -752,6 +990,8 @@ sv_ss   dw 0
 sv_fs   dw 0
 sv_gs   dw 0
 sv_cs   dw 0
+
+%include "bios_int.inc"
 
 bios_fin:
         times (PILA_REAL - 400h) - (bios_fin - cabecera) db 0   ; (falla si no cabe)
