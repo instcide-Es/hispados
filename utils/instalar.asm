@@ -602,7 +602,11 @@ fix_drive:
         jne .n
         mov al, [si]
         and al, 0xDF
-        cmp al, [src]
+        cmp al, 'A'                 ; A: y B: (el disquete arranca con A:\, y
+        je .let                     ; en un disco duro nunca valen; hay BIOS
+        cmp al, 'B'                 ; que arrancan el USB-disquete como disco
+        je .let                     ; duro, así que la de arranque es otra)
+        cmp al, [src]               ; la unidad de arranque (USB, disquete...)
         je .let
         cmp al, [dst]               ; (la que tiene ahora el disco duro)
         jne .n
