@@ -1877,8 +1877,27 @@ ini_leer:
         ret
 .ok:
         mov bx, ax
-        mov ah, 0x3F
+        ; [SB-VGA] lo que quepa en el bloque de memoria: con LH en un hueco
+        ; de memoria superior pequeño (12 KB en QEMU con HSPSND y HSPDPMI
+        ; arriba), los 6000 octetos de detrás del programa pasaban del final
+        ; del bloque, MANDO.INI pisaba la pila (que DOS pone al final) y el
+        ; arranque de «Juegos» se colgaba al cargar HSPJOY
         mov cx, INI_MAX
+        mov ax, [2]                 ; fin del bloque (PSP)
+        mov dx, cs
+        sub ax, dx                  ; párrafos del bloque
+        cmp ax, 0x1000
+        jae .cabe
+        shl ax, 4                   ; octetos
+        sub ax, ini_buf + 0x301     ; (la pila, al final, y el 0 de detrás)
+        jnc .hay
+        xor ax, ax
+.hay:
+        cmp ax, cx
+        jae .cabe
+        mov cx, ax
+.cabe:
+        mov ah, 0x3F
         mov dx, ini_buf
         int 0x21
         jnc .rd

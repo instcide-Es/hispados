@@ -2671,10 +2671,13 @@ dma_fix:
 ;              +10 dw cuenta actual          +12 db 1 = canal tapado
 ;    AL=04h  [SB-PM] puertos que atrapar a los clientes DPMI (HSPDPMI):
 ;            ES:DI = 13 pares (primero, último) + FFFFh; CX = cuántos;
-;            EDX = lo dado con AL=05h
+;            EDX = lo dado con AL=05h; [SB-VGA] BX = sus IRQ
 ;    AL=05h  [SB-PM] EDX = dirección lineal del octeto de estado de la FM
 ;            (HSPSND, después de AL=01h; 0 = ninguno): HSPDPMI contesta
-;            con él las lecturas del estado de la AdLib sin ir a modo V86
+;            con él las lecturas del estado de la AdLib sin ir a modo V86.
+;            [SB-VGA] Con BX=5352h, CX = las IRQ que usa HSPSND (la de la
+;            tarjeta y la 8 si tira del RTC): HSPDPMI las lleva directas a
+;            modo real, sin pasar por los manejadores de los clientes
 ; =============================================================================
 SBD_BASE    equ 0
 SBD_COUNT   equ 4
@@ -2707,11 +2710,18 @@ sb_svc:
 .fmst:                              ; [SB-PM]
         mov eax, [ebp+P_EDX]        ; [SB-PM]
         mov [sb_fmstat], eax        ; [SB-PM]
+        mov word [sb_irqres], 0     ; [SB-VGA] y, con BX=5352h, en CX las
+        cmp word [ebp+P_EBX], 0x5352 ; [SB-VGA] IRQ que son de HSPSND
+        jne .fm2                    ; [SB-VGA]
+        mov ax, [ebp+P_ECX]         ; [SB-VGA]
+        mov [sb_irqres], ax         ; [SB-VGA]
+.fm2:                               ; [SB-VGA]
         xor ah, ah                  ; [SB-PM]
         ret                         ; [SB-PM]
 .trap:
         mov dword [sb_handler], 0
         mov dword [sb_fmstat], 0    ; [SB-PM]
+        mov word [sb_irqres], 0     ; [SB-VGA]
         V86PTR esi, F_DS, P_ESI
         mov edi, sb_ranges
         mov ecx, 8
@@ -2824,6 +2834,8 @@ sb_pmlist:
         mov [ebp+P_ECX], cx
         mov eax, [sb_fmstat]
         mov [ebp+P_EDX], eax
+        mov ax, [sb_irqres]         ; [SB-VGA] IRQ de HSPSND (ver AL=05h)
+        mov [ebp+P_EBX], ax         ; [SB-VGA]
         xor ah, ah
         ret
 
@@ -4482,6 +4494,7 @@ sb_dmaptr   resd 8                  ; [SB] estructura de cada canal cedido
 sb_ranges   resw 2*8 + 1            ; [SB] puertos (primero, último), FFFFh
             alignb 4                ; [SB-PM]
 sb_fmstat   resd 1                  ; [SB-PM] estado de la FM (lineal) o 0
+sb_irqres   resw 1                  ; [SB-VGA] IRQ de HSPSND (bit n = IRQ n)
 dma_cnt     resw 8                  ; [SB] cuenta programada de cada canal
             alignb 4
             resb 4096               ; pila de anillo 0

@@ -133,6 +133,8 @@ e_irq       db 5                    ; IRQ de la tarjeta emulada
 e_hwirq     db 0                    ; IRQ del HD Audio / AC'97 (0 = ninguna)
 e_rtc       db 0                    ; [SB-EOI] 1: sin IRQ de la tarjeta, el RTC
 e_doinj     db 0
+e_insvc     db 0                    ; [SB-VGA] manejadores de la IRQ emulada sin volver
+e_insage    db 0                    ; [SB-VGA] tics que lleva así
 e_wason     db 0                    ; parada por Windows
 e_tsrpar    dw 0
 e_sp        dw 0                    ; (seguidos: se cargan con LES)
@@ -222,8 +224,21 @@ e_io:
 e_exit:
         cmp byte [cs:e_doinj], 0
         je .iret
+        ; [SB-VGA] el manejador del programa vuelve a e_injret (y de ahí,
+        ; con el IRET, al programa interrumpido): así se sabe cuándo ha
+        ; acabado y no se le entrega otra mientras tanto (ver e_decide)
+        inc byte [cs:e_insvc]
+        pushf
+        push cs
+        push word e_injret
         jmp far [cs:e_vec]
 .iret:
+        iret
+e_injret:
+        cmp byte [cs:e_insvc], 0
+        je .r
+        dec byte [cs:e_insvc]
+.r:
         iret
 
 e_decide:
@@ -231,6 +246,18 @@ e_decide:
         cmp byte [gs:e_irqedge], 0
         je .r
         cmp byte [gs:e_virq], 0
+        jne .r
+        ; [SB-VGA] ni mientras el manejador de la anterior no haya vuelto
+        ; (aunque ya haya dado el EOI y abierto las interrupciones). Una
+        ; Sound Blaster de verdad sí la anidaría, pero su manejador acaba en
+        ; microsegundos; aquí cada IN/OUT es un viaje a modo V86 y, con
+        ; DOS/4GW, cada IRQ dos cambios de modo más: en un equipo lento (el
+        ; Atom del HP Mini 5103) o en QEMU, la siguiente llegaba antes de que
+        ; acabara la anterior, se anidaban sin fin y Doom acababa en «DOS/4GW
+        ; Fatal error: Transfer stack overflow» o «HSPDPMI: pila de modo real
+        ; agotada» (con la pantalla en modo X: rayas). Queda pendiente y se
+        ; entrega en cuanto vuelve (en la siguiente entrada en HSPSND)
+        cmp byte [e_insvc], 0
         jne .r
         ; [SB-EOI] la IRQ de un bloque, cuando suena su final (no cuando se
         ; ha leído del DMA, que es hasta 100 ms antes): si no, al leer de
@@ -309,6 +336,19 @@ e_int08:
         jb .nv
         mov byte [gs:e_virq], 0
 .nv:
+        ; [SB-VGA] un manejador que no vuelve en un segundo (el programa ha
+        ; salido de él de otra manera): se olvida
+        cmp byte [e_insvc], 0
+        jne .ns
+        mov byte [e_insage], 0
+        jmp .ns2
+.ns:
+        inc byte [e_insage]
+        cmp byte [e_insage], 18
+        jb .ns2
+        mov byte [e_insvc], 0
+        mov byte [e_insage], 0
+.ns2:
         call e_rtc_arm              ; [SB-EOI]
         call e_gains
         call e_pump
@@ -1818,6 +1858,24 @@ e_start:
         movzx edx, word [e_seg]
         shl edx, 4
         add edx, fm_stat
+        ; [SB-VGA] y las IRQ que son nuestras (la de la tarjeta, y la 8 si
+        ; tiramos del RTC): HSPDPMI no se las pasa a los clientes (DOS/4GW
+        ; las pasaba él a modo real, con dos cambios de modo más cada una y
+        ; anidándose: ver docs/HSPSB.md, [SB-VGA])
+        xor cx, cx
+        mov al, [e_hwirq]
+        test al, al
+        jz .nh
+        mov cl, al
+        mov ax, 1
+        shl ax, cl
+        mov cx, ax
+.nh:
+        cmp byte [e_rtc], 0
+        je .nr
+        or ch, 1                    ; IRQ 8
+.nr:
+        mov bx, 0x5352
         mov ax, 0xDD05
         int 0x67
         call e_rtc_arm              ; [SB-EOI] (sin IRQ de la tarjeta)

@@ -210,7 +210,19 @@ sbpm_step   db 0                    ; 1 = paso a paso tras un CLI
 sbpm_pend   db 0                    ; 1 = la instrucción de antes era POPF/IRET
 sbpm_pif    db 0                    ;     y este es el IF que sacaba
             align 4
+sbpm_pesp   dd 0                    ; [SB-VGA] y la pila (SS:ESP) que quedará
+sbpm_pss    dw 0                    ;     tras ella
+irq_busy    times 16 db 0           ; [SB-VGA] manejadores en curso de cada IRQ
+lpm_irq     db 0                    ; [SB-VGA] (para get_lpm)
+; [SB-VGA] dónde quedó, en la pila bloqueada, el lpm_free de antes de cada
+; excepción que se está atendiendo (las de dentro de otra, encima)
+EXC_MAX     equ 16
+exc_n       db 0
+            align 2
+exc_res     times EXC_MAX dw 0
+            align 4
 sbpm_fm     dd 0                    ; estado de la FM de HSPSND (lineal) o 0
+sbpm_irqres dw 0                    ; [SB-VGA] IRQ de HSPSND (bit n = IRQ n)
 sbpm_list   times 13*2+1 dw 0xFFFF  ; pares (primero, último) de HSPEMM
 
 ; ---- estado de cada cliente (se guarda entero al entrar otro) ----
@@ -641,6 +653,19 @@ hb_alloc:
         call gdt_base
         mov dword [tss+4], HB_R0TOP
         mov dword [lpm_free], LPM_SIZE
+        mov byte [exc_n], 0         ; [SB-VGA]
+        push di
+        push cx
+        push es
+        push ds
+        pop es
+        mov di, irq_busy
+        mov cx, 17
+        xor al, al
+        rep stosb
+        pop es
+        pop cx
+        pop di
         mov word [rm_free], rm_stack_top
         mov dword [pool_total], 0
         mov byte [hb_fresh], 1
@@ -1275,6 +1300,19 @@ rmhook_entry:
         je .pass
         cmp byte [cs:level], 0
         je .pass
+        cmp bx, 16                  ; [SB-VGA] la misma IRQ en curso en el
+        jae .go                     ; cliente: a lo de antes (ver irq_again)
+        cmp byte [cs:sbpm_on], 0
+        je .go
+        cmp bx, 5
+        je .go
+        cmp bx, 7
+        je .go
+        cmp byte [cs:irq_busy+bx], 0
+        jne .pass
+        bt [cs:sbpm_irqres], bx     ; [SB-VGA] las de HSPSND, tampoco
+        jc .pass
+.go:
         pop bx
         pushad
         push ds
@@ -1308,6 +1346,10 @@ hook_pm:
         sub ax, rmhook_stubs+3
         shr ax, 2
         mov di, ax
+        cmp di, 16                  ; [SB-VGA] en curso (ver irq_again)
+        jae .nb
+        inc byte [irq_busy+di]
+.nb:
         movzx di, byte [hookvec+di]
         push dx
         push si
@@ -1395,6 +1437,14 @@ hook_ret:       ; BP -> marco; encima: ESP0 anterior, rm_free, vector, SI, DX
         pop ax
         pop si
         pop dx
+        push ax                     ; [SB-VGA] ya no está en curso
+        call hook_idx
+        jc .nb
+        mov al, bl
+        inc al
+        call irq_done
+.nb:
+        pop ax
         mov bx, .rm
         jmp go_rm
 .rm:
@@ -1779,6 +1829,25 @@ interrupt:
         jc to_client_soft
         cmp bx, 16
         jae to_client_soft
+        ; [SB-VGA] las IRQ de HSPSND (la de la tarjeta de verdad, la 8 si
+        ; tira del RTC) van directas a modo real, sin pasar por el cliente:
+        ; DOS/4GW tiene manejadores para todas que solo las pasan a modo real
+        ; (dos cambios de modo más por cada una, cientos por segundo, y
+        ; anidándose con las demás hasta agotar sus pilas)
+        cmp byte [sbpm_on], 0
+        je .nres
+        bt [sbpm_irqres], bx
+        jnc .nres
+        call default_int
+        jmp frame_exit
+.nres:
+        ; [SB-VGA] la misma IRQ otra vez mientras su manejador no ha vuelto
+        ; (ver irq_again): a modo real, a lo de antes (HSPSND, la BIOS)
+        call irq_again
+        jnc .nb
+        call default_int
+        jmp frame_exit
+.nb:
         ; IRQ con manejador del cliente: en la pila bloqueada
         call get_lpm
         cmp byte [is32], 0
@@ -1838,8 +1907,11 @@ get_lpm:
         ; fallo en el servidor). El valor de antes, justo encima del marco.
         sub cx, 4
         push eax
-        mov eax, [lpm_free]
+        movzx eax, byte [lpm_irq]   ; [SB-VGA] (arriba, la IRQ + 1 o 0)
+        shl eax, 16
+        mov ax, [lpm_free]
         mov [ss:ecx+HB_LPM], eax
+        mov byte [lpm_irq], 0
         mov [lpm_free], ecx
         pop eax
         ret
@@ -1849,8 +1921,86 @@ lpm_pop:
         push eax
         movzx esi, si
         mov eax, [ss:esi+HB_LPM]
+        push eax
+        movzx eax, ax
         mov [lpm_free], eax
         pop eax
+        shr eax, 16                 ; [SB-VGA] la IRQ que ya no está en curso
+        call irq_done
+        pop eax
+        ret
+
+; [SB-VGA] Con la Sound Blaster emulada todo va más despacio (cada IN/OUT a
+; la tarjeta es un viaje a modo V86, cada IRQ que pasa DOS/4GW a modo real
+; son dos cambios de modo más) y, si el manejador de una IRQ abre las
+; interrupciones, la misma IRQ podía volver a entrar antes de que acabara:
+; la del HD Audio (HSPSND da el EOI enseguida) o la del RTC, dentro de su
+; propio manejador de DOS/4GW, que no es reentrante para la misma IRQ (la
+; segunda le pisaba lo guardado y volvía al programa con DS=0: «Unexpected
+; interrupt 06», «Divide by zero» o «Transfer stack overflow» en Doom). Un
+; 8259 de verdad tampoco la daría hasta su EOI, que en esos manejadores llega
+; antes, desde modo real. Así que mientras el manejador de una IRQ
+; (0-15) no ha vuelto, otra igual va a modo real, a lo de antes (HSPSND, la
+; BIOS: dan el EOI), sin pasar por él. Solo con la SB emulada (sbpm_on) y
+; nunca la de la SB (de esa se encarga HSPSND), ni una INT de programa (DOS/4GW
+; entrega así las IRQ que le llegan en modo real: CD xx justo antes).
+; AL = vector, BX = índice (0-15). CF = 1: a modo real. Conserva AX, BX, SI.
+irq_again:
+        cmp byte [sbpm_on], 0
+        je .no
+        cmp al, 0x0D                ; IRQ 5 y 7: las de la SB emulada
+        je .no
+        cmp al, 0x0F
+        je .no
+        cmp byte [irq_busy+bx], 0
+        je .free
+        push eax
+        push esi
+        movzx esi, word [bp+CF_CS]  ; ¿INT xx del programa?
+        test si, 4
+        jz .hw
+        and si, 0xFFF8
+        call desc_base
+        mov esi, [bp+CF_EIP]
+        sub esi, 2
+        jb .hw
+        add esi, eax
+        mov ax, [fs:esi]
+        cmp al, 0xCD
+        jne .hw
+        mov al, [esp+4]             ; (el vector, de la pila)
+        cmp ah, al
+        jne .hw
+        pop esi
+        pop eax
+        jmp .free
+.hw:
+        pop esi
+        pop eax
+        stc
+        ret
+.free:
+        inc byte [irq_busy+bx]
+        mov [lpm_irq], bl
+        inc byte [lpm_irq]
+.no:
+        clc
+        ret
+; [SB-VGA] AL = IRQ + 1 (0 = ninguna): su manejador ha vuelto. Conserva todo
+irq_done:
+        test al, al
+        jz .r
+        push bx
+        movzx bx, al
+        dec bx
+        cmp bx, 16
+        jae .x
+        cmp byte [irq_busy+bx], 0
+        je .x
+        dec byte [irq_busy+bx]
+.x:
+        pop bx
+.r:
         ret
 
 ; guardar el marco actual (su parte IRET se queda arriba, con el ESP0
@@ -2103,6 +2253,19 @@ exception:      ; BP -> marco, [exc_err]
         cmp word [si+4], SEL_R3
         je .def
         call get_lpm
+        ; [SB-VGA] apuntar dónde se ha guardado el lpm_free de antes: al
+        ; volver (exc_ret) se sacaba de la pila del cliente (ESP + 24), pero
+        ; el manejador de DOS/4GW puede volver desde otra pila y entonces se
+        ; leía cualquier cosa: con Doom, lpm_free = 0117h, la pila bloqueada
+        ; casi agotada y a la siguiente ráfaga de interrupciones «HSPDPMI:
+        ; pila de interrupciones agotada» (o de modo real)
+        movzx bx, byte [exc_n]
+        cmp bl, EXC_MAX
+        jae .xf
+        add bx, bx
+        mov [exc_res+bx], cx
+.xf:
+        inc byte [exc_n]
         cmp byte [is32], 0
         je .w
         sub cx, 32
@@ -2162,6 +2325,15 @@ exc_ret:
         jne .s32                    ; [SB-PM]
         sub si, 12                  ; [SB-PM]
 .s32:                               ; [SB-PM]
+        cmp byte [exc_n], 0         ; [SB-VGA] mejor, lo apuntado
+        je .s0
+        dec byte [exc_n]
+        movzx bx, byte [exc_n]
+        cmp bl, EXC_MAX
+        jae .s0
+        add bx, bx
+        mov si, [exc_res+bx]
+.s0:
         call lpm_pop                ; [SB-PM]
         cmp byte [is32], 0
         je .w
@@ -2332,6 +2504,20 @@ kill_client:
         jmp go_rm
 .rm:
         sti
+        ; [SB-VGA] si el programa estaba en modo gráfico (Doom: 320x200 sin
+        ; encadenar), el mensaje escrito y el desplazamiento de la pantalla
+        ; por la BIOS revolvían los planos (rayas verticales) y no se leía:
+        ; antes, el modo de texto
+        xor ax, ax
+        mov es, ax
+        mov al, [es:0x449]
+        cmp al, 3
+        jbe .txt
+        cmp al, 7
+        je .txt
+        mov ax, 0x0003
+        int 0x10
+.txt:
         mov dx, msgbuf
         mov ah, 0x09
         int 0x21
@@ -3850,6 +4036,7 @@ sbpm_query:
         push es
         mov byte [sbpm_on], 0
         mov dword [sbpm_fm], 0
+        mov word [sbpm_irqres], 0   ; [SB-VGA]
         push cs
         pop es
         mov di, tss_iomap
@@ -3862,12 +4049,14 @@ sbpm_query:
         mov word [di], 0xFFFF
         xor cx, cx
         xor edx, edx
+        xor bx, bx
         mov ax, 0xDD04
         int 0x67
         test ah, ah
         jnz .off
         jcxz .off
         mov [sbpm_fm], edx
+        mov [sbpm_irqres], bx       ; [SB-VGA] las IRQ de HSPSND
         mov si, sbpm_list
 .p:
         lodsw
@@ -4003,6 +4192,15 @@ sbpm_db:
         cmp byte [sbpm_pend], 0
         je .np
         mov byte [sbpm_pend], 0
+        ; [SB-VGA] solo si es la misma pila que se esperaba tras ese POPF o
+        ; IRET: si entre medias ha entrado otro (una interrupción, un
+        ; manejador...) no se le pone a él el IF de otro
+        mov ax, [bp+CF_SS]
+        cmp ax, [sbpm_pss]
+        jne .np
+        mov eax, [bp+CF_ESP]
+        cmp eax, [sbpm_pesp]
+        jne .np
         and byte [bp+CF_EFL+1], 0xFD
         cmp byte [sbpm_pif], 0
         je .np
@@ -4016,18 +4214,51 @@ sbpm_db:
         ret
 .step:
         or byte [bp+CF_EFL+1], 0x01
+        call sbpm_peek              ; [SB-VGA]
+.ok:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; [SB-VGA] Paso a paso: mirar la instrucción que va a ejecutarse (en CS:EIP
+; del marco de BP); si es POPF o IRET, apuntar el IF que va a sacar de la
+; pila para ponerlo en el marco después (en la excepción de depuración que
+; sigue). Se llama tras cada paso y también tras cada instrucción que se
+; emula aquí con el paso a paso en marcha (IN/OUT atrapados, CLI): esas no
+; dan excepción de depuración, así que sin mirar aquí, en
+; «PUSHFD / CLI / OUT 22Ch / POPFD» (lo que hacen las bibliotecas de sonido
+; para escribir en el DSP) el POPFD no se veía venir, el cliente se quedaba
+; con las interrupciones cerradas y paso a paso hasta el siguiente STI: el
+; reloj se paraba, todo iba a pasos de tortuga y, al volver a abrirse, se
+; amontonaban las interrupciones («pila de modo real agotada» o «de
+; interrupciones agotada»). En el HP Mini 5103, Doom se colgaba al rato y,
+; al terminarlo HSPDPMI con el mensaje en modo gráfico, la pantalla
+; quedaba con rayas. Conserva BP.
+sbpm_peek:
+        mov byte [sbpm_pend], 0
         call sbpm_dec
         jc .ok
         cmp al, 0x9D                ; POPF: IF en [ESP]
         mov dx, 0
-        je .pk
+        mov di, 2                   ; [SB-VGA] (lo que sube la pila)
+        je .pk0
         cmp al, 0xCF                ; IRET: IF en [ESP+4] u [ESP+8]
         jne .ok
         mov dx, 4
+        mov di, 6
+.pk0:
         test cl, 1
         jz .pk
-        mov dx, 8
+        add dx, dx
+        add di, di
 .pk:
+        movzx edi, di               ; [SB-VGA] la pila tras la instrucción
+        add edi, [bp+CF_ESP]
+        mov [sbpm_pesp], edi
+        mov ax, [bp+CF_SS]
+        mov [sbpm_pss], ax
         movzx ebx, word [bp+CF_SS]
         mov si, bx
         and si, 0xFFF8
@@ -4042,8 +4273,14 @@ sbpm_db:
         call desc_base
         jmp .base
 .gdt:
-        pop eax
-        jmp .ok
+        ; [SB-VGA] una pila de la GDT: la bloqueada (SEL_LPM), la de los
+        ; manejadores de IRQ. Antes se daba por perdida: en un manejador,
+        ; tras STI / PUSHFD / CLI / ... / POPFD seguía con las interrupciones
+        ; cerradas y paso a paso hasta el final
+        mov ah, [gdt+si+7]
+        mov al, [gdt+si+4]
+        shl eax, 16
+        mov ax, [gdt+si+2]
 .base:
         mov ebx, eax                ; base de la pila
         pop eax
@@ -4113,7 +4350,20 @@ sbpm_gp:
         cmp dx, 0x228
         je .fm
         cmp dx, 0x220
+        je .fm
+        ; [SB-VGA] y las del puerto de datos (389h, 221h, 229h), que HSPSND
+        ; contesta siempre con FFh: Doom (DMX) lee el 389h varias veces tras
+        ; cada escritura de la FM, para esperar; cada una era un viaje a modo
+        ; V86 (ocho por registro escrito, cientos por segundo con la música)
+        cmp dx, 0x389
+        je .ff
+        cmp dx, 0x221
+        je .ff
+        cmp dx, 0x229
         jne .nfm
+.ff:
+        mov byte [bp+CF_EAX], 0xFF
+        jmp .adv
 .fm:
         mov ebx, [sbpm_fm]
         mov al, [fs:ebx]
@@ -4148,16 +4398,28 @@ sbpm_gp:
         mov [bp+CF_EAX], eax
         jmp .adv
 .cli:
+        ; [SB-VGA] con las interrupciones ya cerradas (un manejador de IRQ,
+        ; que entra así; o dentro de otro PUSHFD / CLI), CLI no cambia nada
+        ; y no hace falta ir paso a paso: el IF que saque luego un POPF de
+        ; aquí es 0. Antes, en los manejadores de Doom (DMX: música y
+        ; efectos, 140 veces por segundo) todo lo que seguía a su primer CLI
+        ; iba paso a paso: millones de excepciones por minuto, demasiado
+        ; para un Atom
+        test byte [bp+CF_EFL+1], 0x02
+        jz .adv
         and byte [bp+CF_EFL+1], 0xFD
         or byte [bp+CF_EFL+1], 0x01 ; paso a paso (ver sbpm_db)
         mov byte [sbpm_step], 1
         mov byte [sbpm_pend], 0
         jmp .adv
 .sti:
+        ; [SB-VGA] abiertas: se acabó el paso a paso, también con un TF que
+        ; venga de un marco guardado (antes solo si sbpm_step: con TF e IF
+        ; a la vez, una interrupción podía colarse antes de la excepción de
+        ; depuración y llevarse el IF apuntado para otro)
         or byte [bp+CF_EFL+1], 0x02
-        cmp byte [sbpm_step], 0
-        je .adv
         mov byte [sbpm_step], 0
+        mov byte [sbpm_pend], 0
         and byte [bp+CF_EFL+1], 0xFE
 .adv:
         sub esi, edi
@@ -4169,6 +4431,14 @@ sbpm_gp:
         jz .ok
         add word [bp+CF_EIP+2], 1
 .ok:
+        ; [SB-VGA] con el paso a paso en marcha, la instrucción emulada no da
+        ; excepción de depuración: mirar ya la siguiente (ver sbpm_peek)
+        mov al, [bp+CF_EFL+1]
+        and al, 0x03
+        cmp al, 0x01                ; TF sin IF
+        jne .ok2
+        call sbpm_peek
+.ok2:
         clc
         ret
 .no:

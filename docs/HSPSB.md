@@ -226,6 +226,73 @@ de memoria superior y se ponía encima de la pila: se colgaba al instalarse.
 Ahora, si no cabe, va en un bloque de 12 KB aparte, abajo (se suelta con
 `HSPDPMI /D`).
 
+### Doom se colgaba al rato, con rayas en la pantalla [SB-VGA]
+
+En el HP Mini 5103 de Carlos (Atom N455, ICH7, HD Audio con IRQ 11, GMA
+3150), con la opción «Juegos», Doom sonaba bien pero al rato se colgaba y la
+pantalla quedaba con rayas verticales finas, como si se mezclaran los cuatro
+planos del modo X (13/11/2026). Reproducido en QEMU (HD Audio con y sin IRQ,
+`-vga std` y `cirrus`): con el HSPDPMI de antes, Doom no pasaba del primer
+minuto («HSPDPMI: pila de modo real agotada», «pila de interrupciones
+agotada», o DOS/4GW con «Divide by zero»/«Unexpected interrupt 06» y DS=0).
+
+**Las rayas no eran de la VGA**: el mapa de E/S de la TSS no toca 3C0h-3DFh y
+nadie entre medias cambia los índices de 3C4h/3CEh (lo comprueba
+`run_sbvga_tests.sh`). Eran el final: HSPDPMI terminaba el programa y
+escribía su mensaje con la pantalla todavía en modo X; la BIOS, que cree
+estar en el 13h, escribía y desplazaba la pantalla revolviendo los planos.
+Ahora, si el programa estaba en modo gráfico, se pone antes el modo de texto
+y el mensaje se lee.
+
+Las causas del cuelgue, todas en el camino de las interrupciones con IOPL 0:
+
+1. **PUSHFD / CLI / OUT / POPFD.** Tras un CLI emulado se va paso a paso para
+   ver venir el POPF (o IRET) que vuelve a abrir las interrupciones; pero un
+   IN/OUT atrapado (que se emula, sin excepción de depuración) justo antes
+   del POPFD hacía que no se mirara: el programa seguía con las
+   interrupciones cerradas y paso a paso hasta el siguiente STI. Es lo que
+   hacen las bibliotecas de sonido para escribir en el DSP. Ahora se mira
+   la instrucción siguiente también tras cada instrucción emulada.
+2. **La pila bloqueada está en la GDT.** El IF que iba a sacar un POPF de una
+   pila de la GDT (la bloqueada, la de los manejadores de IRQ) no se leía.
+3. **El IF apuntado se lo llevaba otro**: ahora se comprueba que la excepción
+   de depuración llega con la pila (SS:ESP) que dejaría ese POPF/IRET, y STI
+   quita siempre el paso a paso.
+4. **Menos paso a paso**: un CLI con las interrupciones ya cerradas (un
+   manejador de IRQ entra así) no cambia nada y no se va paso a paso: el IF
+   que saque luego un POPF de ahí es 0.
+5. **La IRQ emulada no se anida**: HSPSND no entrega otra mientras el
+   manejador de la anterior no ha vuelto (vuelve a `e_injret`; si en un
+   segundo no ha vuelto, se olvida). Con cada IN/OUT por modo V86 y cada IRQ
+   pasando por un callback de DOS/4GW, la siguiente llegaba antes de acabar
+   la anterior y se amontonaban hasta «Transfer stack overflow» de DOS/4GW.
+6. **Ni las otras IRQ dentro de sí mismas**: mientras el manejador de una IRQ
+   (0-15, salvo la de la SB) no ha vuelto, otra igual va directa a modo real
+   (HSPSND, la BIOS) sin pasar por él. Los de DOS/4GW que pasan la IRQ a modo
+   real no son reentrantes para la misma IRQ, y la del HD Audio o la del RTC
+   (HSPSND da el EOI enseguida) volvían a entrar: la segunda pisaba lo
+   guardado por la primera y Doom volvía con DS=0.
+7. **Las IRQ de HSPSND no pasan por el cliente**: DOS/4GW tiene manejadores
+   de modo protegido para todas las IRQ que solo las pasan a modo real. La
+   del HD Audio (cada 5 ms) y la del RTC (cada 3,9 ms, si la tarjeta no
+   tiene IRQ) daban así cuatro cambios de modo cada una y gastaban las pilas
+   de DOS/4GW anidándose con el reloj y la IRQ 5 («Transfer stack
+   overflow»). HSPSND le dice a HSPEMM cuáles son suyas (INT 67h AX=DD05h,
+   BX=5352h, CX = máscara) y HSPDPMI (DD04h, en BX) las lleva directas a
+   modo real.
+8. **Menos viajes a modo V86**: las lecturas del puerto de datos de la FM
+   (389h, 221h, 229h), que HSPSND contesta siempre con FFh, las contesta
+   HSPDPMI directamente, como ya hacía con el estado (388h). Doom lee el 389h
+   varias veces tras cada escritura de la FM: eran ocho viajes por registro.
+9. **Las excepciones** (las del cliente que atiende DOS/4GW): al volver, el
+   sitio de la pila bloqueada se sacaba de la pila del manejador, que puede
+   ser otra; ahora se apunta al entrar. Antes dejaba la pila bloqueada casi
+   llena para siempre.
+
+De paso, HSPJOY: con `LH` en un hueco de memoria superior pequeño leía
+MANDO.INI más allá del final de su bloque, pisaba su pila y el arranque de
+«Juegos» se colgaba al cargarlo (a veces, según cómo quedara la memoria).
+
 ### Rendimiento: el estado, lejos del código
 
 El estado que cambia a cada muestra (voces, DSP, FM, estructuras de DMA) y
@@ -292,6 +359,17 @@ el bit de ocupado parpadea y que la IRQ de un bloque único de 0,1 s llega a
 su hora sin tocar puertos. Con HD Audio, HD Audio sin IRQ, AC'97, `LH`, una
 `sb16` de verdad y sin sonido.
 
+`tests/run_sbvga_tests.sh` ([SB-VGA]): `SBVGA.COM` (`tests/progs/sbvga.asm`)
+es un cliente DPMI de 32 bits que pinta en modo X (máscara del secuenciador,
+3C4h/3C5h) durante 2 s de reloj con la IRQ 5 en autoinicio, la FM sonando y
+la IRQ 0 enganchada en modo protegido, y lee los cuatro planos (3CEh/3CFh)
+tras cada vuelta: no se mezclan. Comprueba además que tras PUSHFD / CLI /
+OUT (o IN) atrapado / POPFD las interrupciones vuelven a estar abiertas, que
+el reloj y las IRQ siguen llegando, y que con un manejador de la IRQ 5 lento
+(abre las interrupciones y espera un tic) no se anida. Con HD Audio, sin IRQ,
+`-vga cirrus`, `LH` y la CPU frenada (`-icount`), y de referencia una `sb16`
+de verdad. Con el HSPDPMI de antes, SBVGA se quedaba colgado.
+
 Juegos con DOS/4GW, con HSPEMM + HSPSND /SB + HSPDPMI, HD Audio sin `sb16`
 (QEMU, 13/11/2026; segundos con sonido en ~33 s de grabación):
 
@@ -303,6 +381,13 @@ Juegos con DOS/4GW, con HSPEMM + HSPSND /SB + HSPDPMI, HD Audio sin `sb16`
 | Mortal Kombat | 13 s | 13 s | su SETUP: «Sound Blaster (SB)» |
 | Prince of Persia (modo real) | sí | sí | ya no se queda agachado |
 
+[SB-VGA] Doom dejado en la demo (sin tocar teclas) con la opción «Juegos»
+tal cual (LH HSPSND /SB, LH HSPDPMI /SB, HSPJOY, HSPRATON, TECLADO), QEMU
+con HD Audio y sin `sb16` (14/11/2026): antes, en menos de un minuto «pila de
+modo real agotada», «pila de interrupciones agotada» o DOS/4GW con DS=0 (y,
+en modo X, las rayas); ahora, 8 minutos con IRQ del HD Audio, sin ella (RTC)
+y con `-vga cirrus`, sin cuelgues, con sonido unos 415 s de los ~480.
+
 Con todos los juegos de la colección en «Juegos» (HSPEMM + HSPSND /SB, HD
 Audio), con HSPDPMI cargado y sin él, salen igual salvo los que necesitan
 más memoria convencional (The Incredible Machine pide 550 KB: HSPDPMI ocupa
@@ -310,6 +395,13 @@ más memoria convencional (The Incredible Machine pide 550 KB: HSPDPMI ocupa
 
 ## Pendiente
 
+- [SB-VGA] En QEMU, con Doom muchos minutos, aún se ha visto alguna vez (2 de
+  unas 12 pasadas largas) que se queda quieto: todo el tiempo atendiendo
+  interrupciones (DOS/4GW, su STI justo antes del IRETD de sus manejadores, y
+  el RTC o el HD Audio con HSPSND detrás) y el programa sin avanzar. QEMU va
+  mucho más lento que un equipo de verdad en los cambios de modo; falta
+  verlo en el HP Mini 5103. Lo siguiente sería abaratar la entrega de la IRQ
+  5 (sin pasar por el callback de DOS/4GW) y el remuestreo.
 - Probar en hardware real (HD Audio de portátiles: IRQ de PCI, LPIB).
 - Extensores que no usan DPMI aunque lo haya (o con su propio servidor).
 - OPL3 (estéreo, 18 canales, 4 operadores) y percusión con el ruido real.

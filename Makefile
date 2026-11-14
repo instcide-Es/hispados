@@ -69,6 +69,9 @@ $(B)/SINIRQ.COM: tests/progs/sinirq.asm | $(B)
 # [SB-PM] SBPM: lo mismo desde modo protegido por DPMI (tests/run_sbpm_tests.sh)
 $(B)/SBPM.COM: tests/progs/sbpm.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# [SB-VGA] SBVGA: modo X mientras suena la SB, por DPMI (tests/run_sbvga_tests.sh)
+$(B)/SBVGA.COM: tests/progs/sbvga.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XMSTEST.COM: tests/progs/xmstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MCBWALK.COM: tests/progs/mcbwalk.asm | $(B)
@@ -388,7 +391,7 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas del núcleo (tests/run_nucleo_tests.sh los copia
 # a una copia de la imagen; no van en el disco de distribución)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
-EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM
+EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM $(B)/SBVGA.COM
 emmprogs: $(EMMPROGS)
 NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
 $(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
@@ -457,6 +460,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_sbemu_tests.sh $(IMG)
 	tests/run_sbpm_tests.sh $(IMG)
 	tests/run_sbeoi_tests.sh $(IMG)
+	tests/run_sbvga_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_sys_tests.sh $(IMG)
 	tests/run_keyb_tests.sh $(IMG)
