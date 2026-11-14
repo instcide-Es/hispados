@@ -1862,12 +1862,19 @@ mn_choose:
         movzx cx, al
         cmp cx, [mn_n]
         jae .loop
-        jmp .set
+        ; un número basta: se marca esa opción y se arranca (sin Intro;
+        ; Carlos: «da a confusión pensando que solo hay que pulsar una tecla»)
+        mov ah, [mn_attr]
+        call mn_hl
+        mov [mn_sel], cx
+        call mn_showsel
+        jmp .done
 .ext:
         mov cx, [mn_sel]
         cmp ah, 0x48                ; flecha arriba
         jne .e1
-        jcxz .loop
+        test cx, cx                 ; (jcxz no llega: salto corto)
+        jz .loop
         dec cx
         jmp .set
 .e1:
@@ -1976,6 +1983,8 @@ mn_draw:
         call kputs
         call mn_getcur
         mov [mn_curt], dx
+        mov si, mn_seg                  ; «00 s»: las cifras se pintan encima
+        call kputs
 .nt:
         test byte [sw_flags], 2
         jnz .nk
@@ -2229,8 +2238,9 @@ mn_title    db 13, 10, "  Men", 0xA3, " de arranque de Hispa-DOS", 13, 10
             db 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 13, 10, 13, 10, 0
 mn_ind      db "    ", 0
 mn_dot      db ". ", 0
-mn_ask      db 13, 10, "  Elija una opci", 0xA2, "n y pulse Intro: ", 0
-mn_time     db "    Tiempo restante: ", 0
+mn_ask      db 13, 10, "  Elija una opci", 0xA2, "n (pulse su n", 0xA3, "mero): ", 0
+mn_time     db "    Sin tocar nada, la marcada en: ", 0
+mn_seg      db "00 s", 0
 mn_keys     db "F5=Arranque limpio   F8=Men", 0xA3, " paso a paso [N]", 0
 bm_want     db 0                    ; F8: enseñar el menú paso a paso
 mn_act      db 0

@@ -129,7 +129,7 @@ if quiere menu; then
     check "    2. Juegos (EMS y memoria superior)"
     check "    3. Otras opciones"
     nocheck "No debe salir"
-    check "Tiempo restante:"
+    check "la marcada en:"
     check "F5=Arranque limpio   F8=Menú paso a paso [N]"
     check "HSPEMM 0.1: EMS 4.0 y VCPI"
     check "CONFIG=JUEGOS"
@@ -197,7 +197,7 @@ if quiere menu; then
     case $K in
       flechas) $Q key - down wait 0.3 key - ret ;;
       f5)      $Q key - f5 ;;
-      f8)      $Q key - f8 wait 0.3 key - 2 wait 0.3 key - ret wait 1.5 key - spc wait 0.3 key - ret ;;
+      f8)      $Q key - f8 wait 0.3 key - 2 wait 1.5 key - spc wait 0.3 key - ret ;;   # (el número ya arranca: sin Intro)
       arriba)  $Q key - down wait 0.2 key - down wait 0.2 key - down wait 0.2 key - up wait 0.2 key - up wait 0.2 key - up wait 0.2 key - ret ;;
     esac
     espera "$P"
@@ -247,7 +247,7 @@ fi
 c_normal() {
   check "    1. Normal"
   check "    2. Juegos (memoria expandida EMS y la mayor memoria libre)"
-  check "Tiempo restante:"
+  check "la marcada en:"
   check "HSPXMS 0.1: gestor XMS 3.0"
   nocheck "HSPEMM 0.1"
   check "HSPCD 0.1 - lectores de CD/DVD de Hispa-DOS"
