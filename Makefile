@@ -118,6 +118,21 @@ $(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPRATON.COM: drivers/hspraton.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# Red (docs/RED.md): HSPRED (packet driver residente) y las órdenes CONFRED
+# (IPCONFIG), PING y DESCARGAR (en el disco DESCARGA.COM), con la pila TCP/IP
+# propia de lib/red.inc
+$(B)/HSPRED.COM: drivers/hspred.asm | $(B)
+	$(ASM) -l $(B)/gen/HSPRED.lst -o $@ $(B)/gen/$<
+	@# lo residente no puede usar nada de la instalación (se descarta)
+	python3 tools/initcheck.py $(B)/gen/HSPRED.lst init || { rm -f $@; exit 1; }
+RED_DEP = lib/red.inc lib/util.inc
+$(B)/CONFRED.COM: utils/confred.asm $(RED_DEP) | $(B)
+	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+$(B)/PING.COM: utils/ping.asm $(RED_DEP) | $(B)
+	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+$(B)/DESCARGAR.COM: utils/descargar.asm $(RED_DEP) | $(B)
+	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
@@ -291,9 +306,9 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM $(B)/PROTECTOR.COM \
-        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS)
+        $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS) $(RED)
 
-$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
+$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
@@ -350,6 +365,13 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/DIAGN
 	mcopy -i $@ $(B)/MANDO.COM ::HISPADOS/MANDO.COM
 	iconv -f UTF-8 -t CP437 sistema/MANDO.INI | sed 's/$$/\r/' > $(B)/MANDO.INI
 	mcopy -i $@ $(B)/MANDO.INI ::HISPADOS/MANDO.INI
+	# la red: el controlador, las órdenes y su configuración (docs/RED.md)
+	mcopy -i $@ $(B)/HSPRED.COM ::HISPADOS/HSPRED.COM
+	mcopy -i $@ $(B)/CONFRED.COM ::HISPADOS/CONFRED.COM
+	mcopy -i $@ $(B)/PING.COM ::HISPADOS/PING.COM
+	mcopy -i $@ $(B)/DESCARGAR.COM ::HISPADOS/DESCARGA.COM
+	iconv -f UTF-8 -t CP437 sistema/RED.INI | sed 's/$$/\r/' > $(B)/RED.INI
+	mcopy -i $@ $(B)/RED.INI ::HISPADOS/RED.INI
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
 	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
 	for f in $(SONS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# el sonido de prueba y la campanita
@@ -548,6 +570,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_mezclador_tests.sh $(IMG)
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
+	tests/run_red_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
 

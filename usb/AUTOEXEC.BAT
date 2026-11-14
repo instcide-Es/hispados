@@ -41,6 +41,9 @@ C:\HISPADOS\DIAGNOST
 GOTO FIN
 
 :COMUN
+REM Red por cable (docs/RED.md): quitando el REM de la línea de abajo se carga
+REM el controlador de la tarjeta; después, CONFRED (IPCONFIG), PING y DESCARGAR.
+REM C:\HISPADOS\HSPRED
 SYSINFO
 ECHO.
 ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.

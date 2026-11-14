@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
-CMDS=("AYUDA" "AYUDA DIR" "copy /?" "cd/?" "AYUDA ETIQUETA" "AYUDA XCOPY" "REVISAR /?" "AYUDA SHIFT" "Versi\xa2n" "/ver" "/?" "kernel.sys" "readme.txt" "ECHO fin")
+CMDS=("AYUDA" "AYUDA DIR" "copy /?" "cd/?" "AYUDA ETIQUETA" "AYUDA XCOPY" "REVISAR /?" "AYUDA SHIFT" "Versi\xa2n" "/ver" "/?" "kernel.sys" "readme.txt" "AYUDA IPCONFIG" "DESCARGAR /?" "PING /?" "ECHO fin")
 { sleep 6; for c in "${CMDS[@]}"; do printf '%b\r' "$c"; sleep 2; done; } | \
   timeout 60 qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
   -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
@@ -25,6 +25,10 @@ check "Uso: XCOPIAR origen [destino]"
 check "Desplaza los parámetros de un archivo por lotes"
 check "Tab: completar nombres de archivos y carpetas"
 check "solo salen programas:"
+check "CONFRED (IPCONFIG), PING y DESCARGAR: la red (HSPRED es el controlador)."
+check "CONFRED (IPCONFIG) [/RENOVAR | /LIBERAR]"
+check "DESCARGAR [http://]servidor[:puerto]/ruta [archivo]"
+check "PING nombre|dirección [/N:n] [/T]"
 n=$(grep -c "Hispa-DOS versión 0.9 (compatible con MS-DOS 6.22)" $T/log.txt)
 if [ "$n" -ge 2 ]; then echo "  OK   Versión (con tilde) y /ver"; else echo "  FAIL Versión y /ver ($n)"; fail=1; fi
 n=$(grep -c "Lista de órdenes internas" $T/log.txt)
