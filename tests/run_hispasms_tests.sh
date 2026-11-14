@@ -30,6 +30,18 @@
 #     partida empieza sin tocar el teclado.
 #  5. /T: VDPTEST.SMS dentro de HISPASMS.HVP da lo mismo que fuera, y cuántos
 #     cuadros por segundo salen en QEMU con Buzo, pintando en la ventana.
+#  Y a su velocidad (partes pausa, raton y carpeta):
+#   - pausa: al abrirse, Buzo está en pausa (dos capturas iguales, el letrero
+#     y «Pausa -» en la barra); un clic en la imagen sigue; con la partida en
+#     marcha, el menú Tamaño abierto la para (capturas iguales) y la calla
+#     (no entra nada en la grabación de QEMU); al cerrarlo sigue; con P y un
+#     menú abierto y cerrado sigue en pausa; P otra vez, sigue;
+#   - raton: con el juego en marcha, un clic en cada título de la barra
+#     (Archivo, Tamaño, Sonido, Ayuda) abre su menú a la primera y un clic en
+#     una orden de cada uno la hace; Abrir ROM empieza en JUEGOS\SMS;
+#   - carpeta: con Carpeta=A:\ROMS en HISPASMS.INI, Abrir ROM empieza en \ROMS,
+#     abre OTRA.SMS de allí y vuelve a empezar allí.
+#  Los cartuchos van en \HISPADOS\JUEGOS\SMS (también VDPTEST.SMS, para Abrir ROM).
 # uso: run_hispasms_tests.sh [imagen]     SOLO="nucleo pasos" para algunas
 #      ACTUALIZA=1 vuelve a guardar las imágenes esperadas
 # Deja capturas en build/hispasms_*.png.
@@ -95,6 +107,17 @@ disco() {
   cp "$IMG" $T/f.img
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   mcopy -o -i $T/f.img $B/VDPTEST.SMS ::VDPTEST.SMS
+  # los cartuchos van en \HISPADOS\JUEGOS\SMS: allí también VDPTEST.SMS y
+  # un archivo que no es una ROM; y otra carpeta, \ROMS, con OTRA.SMS
+  mcopy -o -i $T/f.img $B/VDPTEST.SMS ::HISPADOS/JUEGOS/SMS/VDPTEST.SMS
+  mcopy -o -i $T/f.img $T/CONFIG.SYS ::HISPADOS/JUEGOS/SMS/NOROM.TXT
+  mmd -i $T/f.img ::ROMS 2> /dev/null
+  mcopy -o -i $T/f.img $B/VDPTEST.SMS ::ROMS/OTRA.SMS
+  # HISPASMS.INI: la última carpeta de Abrir ROM (si se da)
+  if [ -n "${2:-}" ]; then
+    printf 'Carpeta=%s\r\n' "$2" > $T/HISPASMS.INI
+    mcopy -o -i $T/f.img $T/HISPASMS.INI ::HISPADOS/JUEGOS/HISPASMS.INI
+  fi
   local nmod=$(mdir -b -i $T/f.img ::HISPADOS/JUEGOS ::HISPADOS/PROGS 2>/dev/null | grep -c '\.HVP')
   printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' "Modulos=$nmod" '' \
     '[Grupo]' 'Nombre=Juegos' 'Ventana=300,380,452,190' 'Estado=1' '' \
@@ -129,6 +152,40 @@ salida_bien() {
   if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; fi
   [ -n "${GUARDAR:-}" ] && cp $T/*.ppm "$GUARDAR"/
   rm -f $T/*.ppm
+}
+# el letrero de la pausa, en medio de la imagen al doble (144,75; 512x384):
+# una caja de 240x44 con «En pausa» en negrita y debajo lo que hay que hacer
+CX=240; CY=237; TTX=126; TTY=180  # (el cuadro de Abrir ROM: «Carpeta: ...»; el de Teclas y mandos)
+LX1=$((144 + (512 - 240) / 2 + (240 - 64) / 2)); LY1=$((75 + (384 - 44) / 2 + 5))
+LX2=$((144 + (512 - 240) / 2 + 12)); LY2=$((75 + (384 - 44) / 2 + 23))
+# tamano ARCHIVO: lo que mide ahora la grabación del sonido (sin salir por la tubería)
+tamano() { stat -c %s $T/sms.wav > "$1" 2> /dev/null || echo 44 > "$1"; }
+# el sonido de la grabación entre dos medidas: silencio_wav WAV DESDE HASTA TEXTO
+# (todo por debajo de 600) o sonido_wav (algo por encima de 2.000)
+trozo_wav() {
+  python3 -c "
+import sys, struct
+d = open(sys.argv[1], 'rb').read()
+a, b = int(open(sys.argv[2]).read()), int(open(sys.argv[3]).read())
+a = max(44, a) & ~3; b = min(len(d), b) & ~3
+s = struct.unpack('<%dh' % ((b - a) // 2), d[a:b]) if b > a else ()
+print(len(s), max((abs(v) for v in s), default=0))" "$@"
+}
+silencio_wav() {
+  local r; r=$(trozo_wav $1 $2 $3); set -- $r "$4"
+  if [ "$2" -lt 600 ]; then ok "en silencio $3 ($1 muestras grabadas, la mayor $2)"; else ko "suena $3: $1 muestras, la mayor $2"; fi
+}
+sonido_wav() {
+  local r; r=$(trozo_wav $1 $2 $3); set -- $r "$4"
+  if [ "$2" -gt 2000 ]; then ok "suena $3 ($1 muestras, la mayor $2)"; else ko "no suena $3: $1 muestras, la mayor $2"; fi
+}
+# en_barra CAPTURA TEXTO DESCRIPCIÓN: el texto está en la barra de estado (y 460)
+en_barra() {
+  local x
+  for x in $(seq 150 8 470); do
+    if $CHK $1 texto $x 460 0 6 fina "$2" > /dev/null 2>&1; then ok "$3"; return; fi
+  done
+  ko "$3: no está «$2» en la barra de estado"
 }
 # el valor de CLAVE= en HISPASMS.LOG (sacado del disco a $T/sms.log)
 del_log() { sed -n "s/^$1=//p" $T/sms.log | head -1; }
@@ -166,7 +223,7 @@ make -s smsprogs > $T/make.txt 2>&1 || { cat $T/make.txt; ko "no se han podido h
 nativo=0
 if [ -x $NAT ] && $NAT $B/VDPTEST.SMS 1 $T/x.pgm 2> /dev/null; then nativo=1; fi
 
-for parte in ${SOLO:-nucleo pasos vivo mando prueba}; do
+for parte in ${SOLO:-nucleo pasos vivo mando pausa raton carpeta prueba}; do
 case $parte in
 nucleo)
   echo "== El núcleo de Hispa-System, fuera de QEMU: el ensamblador, el Z80, las ROM de prueba e imágenes esperadas =="
@@ -246,7 +303,7 @@ print(len(s), con, len(seg))" $T/son.raw > $T/son.txt
 
 pasos)
   echo "== Hispa-System paso a paso: Buzo con el teclado, punto por punto, menús, diálogos y la partida guardada =="
-  disco '/P'
+  disco '/P' 'A:\NOEXISTE'                  # (una carpeta que ya no está)
   { entrar
     shot p0
     tecla ret; sleep 4                        # se abre y arranca Buzo
@@ -281,13 +338,14 @@ pasos)
     escribe vdptest.sms; tecla ret; sleep 3
     shot p12
     tecla alt-a ret; sleep 1.2
-    escribe autoexec.bat; tecla ret; sleep 1.5  # no es una ROM
+    escribe norom.txt; tecla ret; sleep 1.5   # no es una ROM
     shot p13
     tecla ret; sleep 0.6
     shot p14
     salir
   } | run 300 -vga std
-  mcopy -n -i $T/f.img ::HISPADOS/JUEGOS/BUZO.SAV $T/b.sav 2> /dev/null
+  mcopy -n -i $T/f.img ::HISPADOS/JUEGOS/SMS/BUZO.SAV $T/b.sav 2> /dev/null
+  ini=$(mtype -i $T/f.img ::HISPADOS/JUEGOS/HISPASMS.INI 2> /dev/null | tr -d '\r')
   chk $T/p0.ppm tam 800 600 marco 300 380 452 190 activa titulo 300 380 activa "Juegos" \
     texto 318 483 9 12 fina "Hispa-System"
   chk $T/p1.ppm marco 142 30 516 449 activa titulo 142 30 activa "Hispa-System" texto 150 460 0 6 fina "BUZO.SMS"
@@ -310,7 +368,13 @@ pasos)
     ko "BUZO.SAV: $(xxd -l 8 -p $T/b.sav 2>&1)"
   fi
   hs pantalla $T/p10.ppm 144 75 2 $(esperada b_titulo2) "al abrirlo otra vez, el título con la mejor puntuación (de BUZO.SAV)"
-  chk $T/p11.ppm titulo 222 150 activa "Abrir ROM (.SMS)"
+  chk $T/p11.ppm titulo 222 150 activa "Abrir ROM (.SMS)" \
+    texto $CX $CY 0 8 fina "Carpeta: A:\HISPADOS\JUEGOS\SMS"
+  if [ "$ini" = 'Carpeta=A:\HISPADOS\JUEGOS\SMS' ]; then
+    ok "la carpeta del INI ya no estaba: Abrir ROM empieza en la de los cartuchos y apunta la nueva en HISPASMS.INI"
+  else
+    ko "HISPASMS.INI: «$ini»"
+  fi
   chk $T/p12.ppm texto 150 460 0 6 fina "VDPTEST.SMS"
   hs pantalla $T/p12.ppm 144 75 2 $(esperada vdptest) "Abrir ROM: VDPTEST.SMS dentro de la ventana, la pantalla verde"
   chk $T/p13.ppm titulo 182 243 activa "Hispa-System" texto 208 284 0 8 fina "Este archivo no es una ROM de la consola (.SMS)."
@@ -398,6 +462,125 @@ mando)
   hs pantalla $T/m1.ppm 144 75 2 $(esperada b_juego) "el marcador de la partida" 0 0 56 8
   chk $T/m1.ppm texto 150 460 0 6 fina "Pausa - BUZO.SMS"
   muestra m1 mando
+  salida_bien
+  ;;
+
+pausa)
+  echo "== Hispa-System a su velocidad: empieza en pausa, se para con los menús (callado) y sigue como estaba =="
+  disco ''
+  { entrar 'A:\HISPADOS\HSPSND'
+    tecla ret; sleep 4                        # se abre: Buzo, en pausa
+    aparca
+    shot a1; sleep 1; shot a2                 # quieta, con el letrero
+    clic 400 300; sleep 1                     # un clic en la imagen: a jugar
+    aparca
+    shot a3
+    tecla ret; sleep 2                        # Intro: empieza la partida
+    shot a4; sleep 0.5; shot a5               # se mueve
+    tamano $T/s0
+    clic 254 65; sleep 0.8                    # el menú Tamaño: se para y calla
+    shot b1
+    tamano $T/s1; sleep 2; tamano $T/s2
+    shot b2
+    tecla esc; sleep 1                        # se cierra: sigue
+    shot b3; sleep 0.5; shot b4
+    tecla p; sleep 0.8                        # P: la pausa, con el letrero
+    shot c1
+    clic 186 65; sleep 0.8                    # el menú Archivo, con la pausa
+    shot c2
+    tecla esc; sleep 1                        # al cerrarlo, sigue en pausa
+    aparca
+    shot c3; sleep 0.5; shot c4
+    tecla p; sleep 1                          # P otra vez: sigue
+    shot c5; sleep 0.5; shot c6
+    salir
+  } | run 200 -vga std -audiodev wav,id=snd0,path=$T/sms.wav -device sb16,audiodev=snd0
+  chk $T/a1.ppm texto $LX1 $LY1 0 8 negrita "En pausa" texto $LX2 $LY2 0 8 fina "Pulse una tecla o haga clic" \
+    texto 150 460 0 6 fina "Pausa - BUZO.SMS" igual 144 75 512 384 $T/a2.ppm 144 75 0
+  hs pantalla $T/a1.ppm 144 75 2 $(esperada b_titulo) "al abrirse, en pausa: el título (sin el letrero)" 0 0 256 80
+  chk $T/a3.ppm cambia 280 245 240 44 $T/a2.ppm 1000 texto 150 460 0 6 fina "BUZO.SMS  "
+  chk $T/a4.ppm cambia 144 75 512 384 $T/a5.ppm 200
+  chk $T/b1.ppm texto 247 99 0 8 fina "amaño x" igual 380 80 270 370 $T/b2.ppm 380 80 0
+  chk $T/b3.ppm cambia 144 75 512 384 $T/b4.ppm 200
+  chk $T/c1.ppm texto $LX1 $LY1 0 8 negrita "En pausa" texto 150 460 0 6 fina "Pausa - BUZO.SMS"
+  chk $T/c2.ppm texto 215 79 0 8 fina "ROM..."
+  chk $T/c3.ppm texto $LX1 $LY1 0 8 negrita "En pausa" texto 150 460 0 6 fina "Pausa - BUZO.SMS" \
+    igual 144 75 512 384 $T/c4.ppm 144 75 0
+  chk $T/c5.ppm cambia 144 75 512 384 $T/c6.ppm 200 texto 150 460 0 6 fina "BUZO.SMS  "
+  silencio_wav $T/sms.wav $T/s1 $T/s2 "con el menú abierto"
+  sonido_wav $T/sms.wav $T/s0 $T/s1 "jugando, antes de abrir el menú"
+  muestra a1 en_pausa; muestra b1 menu_parada
+  salida_bien
+  ;;
+
+raton)
+  echo "== Hispa-System con el juego en marcha: cada menú de la barra con el ratón y una orden de cada uno, a la primera =="
+  disco ''
+  { entrar 'A:\HISPADOS\HSPSND'
+    tecla ret; sleep 4
+    aparca
+    tecla ret; sleep 1.5                      # sigue y empieza la partida
+    clic 254 65                               # Tamaño
+    shot r1
+    clic 262 87; sleep 1.2                    # Tamaño x1
+    shot r2
+    clic 254 65
+    clic 262 107; sleep 1.2                   # Tamaño x2
+    shot r3
+    clic 318 65                               # Sonido
+    shot r4
+    clic 340 87; sleep 1                      # Poner o quitar el sonido
+    shot r5
+    clic 378 65                               # Ayuda
+    shot r6
+    clic 400 87; sleep 1                      # Teclas y mandos...
+    shot r7
+    tecla ret; sleep 0.6
+    clic 186 65                               # Archivo
+    shot r8
+    clic 200 155; sleep 1                     # Pausa o continuar
+    shot r9
+    clic 186 65
+    clic 200 87; sleep 1.2                    # Abrir ROM...
+    shot r10
+    tecla esc; sleep 0.6
+    salir
+  } | run 200 -vga std -audiodev wav,id=snd0,path=$T/sms.wav -device sb16,audiodev=snd0
+  chk $T/r1.ppm texto 247 99 0 8 fina "amaño x"
+  chk $T/r2.ppm marco 142 30 260 257 activa
+  chk $T/r3.ppm marco 142 30 516 449 activa
+  chk $T/r4.ppm texto 367 79 0 8 fina "quitar el "
+  en_barra $T/r5.ppm "sin sonido" "Sonido: el sonido se quita (la barra dice «sin sonido»)"
+  chk $T/r6.ppm texto 375 99 0 8 fina "cerca de Hispa-System..."
+  chk $T/r7.ppm titulo $TTX $TTY activa "Teclas y mandos"
+  chk $T/r8.ppm texto 215 79 0 8 fina "ROM..." texto 175 147 0 8 fina "ausa o continuar (P)"
+  chk $T/r9.ppm texto 150 460 0 6 fina "Pausa - BUZO.SMS" texto $LX1 $LY1 0 8 negrita "En pausa"
+  chk $T/r10.ppm titulo 222 150 activa "Abrir ROM (.SMS)" \
+    texto $CX $CY 0 8 fina "Carpeta: A:\HISPADOS\JUEGOS\SMS"
+  muestra r1 menu_tamano; muestra r4 menu_sonido; muestra r6 menu_ayuda; muestra r8 menu_archivo
+  muestra r10 abrir_carpeta
+  salida_bien
+  ;;
+
+carpeta)
+  echo "== Hispa-System: Abrir ROM recuerda la última carpeta (HISPASMS.INI) =="
+  disco '/P' 'A:\ROMS'
+  { entrar
+    tecla ret; sleep 4
+    aparca
+    tecla alt-a ret; sleep 1.2                # Abrir ROM: en \ROMS
+    shot k1
+    escribe otra.sms; tecla ret; sleep 3
+    shot k2
+    tecla alt-a ret; sleep 1.2                # y otra vez en \ROMS
+    shot k3
+    tecla esc; sleep 0.6
+    salir
+  } | run 200 -vga std
+  chk $T/k1.ppm titulo 222 150 activa "Abrir ROM (.SMS)" texto $CX $CY 0 8 fina "Carpeta: A:\ROMS"
+  chk $T/k2.ppm texto 150 460 0 6 fina "OTRA.SMS"
+  hs pantalla $T/k2.ppm 144 75 2 $(esperada vdptest) "OTRA.SMS, de \\ROMS: la pantalla verde"
+  chk $T/k3.ppm texto $CX $CY 0 8 fina "Carpeta: A:\ROMS"
   salida_bien
   ;;
 

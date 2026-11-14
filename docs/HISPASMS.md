@@ -20,16 +20,37 @@ nuestro, **Buzo** (`BUZO.SMS`).
 
 ## Cómo se usa
 
-Se abre desde el grupo «Juegos». Si `BUZO.SMS` está en su carpeta
-(`\HISPADOS\JUEGOS`), arranca Buzo; si no, la ventana queda en negro con
-«Sin cartucho».
+Se abre desde el grupo «Juegos». Los cartuchos de Hispa-System van en su
+propia carpeta, **`\HISPADOS\JUEGOS\SMS`** (la del módulo, `HISPASMS.HVP`,
+y dentro `SMS`; los de Hispa-Nes van en `JUEGOS\NES`). Si `BUZO.SMS` está
+allí (o, de antes, al lado del módulo), arranca Buzo; si no, la ventana queda
+en negro con «Sin cartucho». Los `.SAV` van siempre al lado de su cartucho.
+
+**Empieza en pausa**: al abrir un cartucho (Buzo al entrar, Archivo › Buzo
+o Abrir ROM) corre un segundo, para que se vea su pantalla, y se queda
+quieto con un letrero en medio: «En pausa — Pulse una tecla o haga clic».
+Sigue con cualquier tecla (que también le llega a la consola: Intro empieza
+la partida de Buzo), con un clic en la imagen o con un botón del mando; con
+P o con Archivo › Pausa o continuar se para y se sigue cuando se quiera.
+
+Además se para solo, sin letrero y **callado** (sin repetir el último trozo
+de sonido), mientras uno de sus menús está abierto, mientras hay un diálogo,
+cuando la ventana pierde el foco (se pasa a otra) y minimizada; al cerrar el
+menú o volver a la ventana sigue como estaba: jugando si se estaba jugando y
+en pausa si estaba en pausa.
+
+**Abrir ROM** empieza en la carpeta de los cartuchos y luego en la última de
+la que se abrió uno (se apunta en `HISPASMS.INI`, al lado del módulo:
+`Carpeta=A:\...`; si esa carpeta ya no está, vuelve a la de los
+cartuchos). Al cerrar el diálogo, la carpeta de trabajo de Hispa Ventanas
+vuelve a ser la de antes (los demás programas no notan nada).
 
 | Menú | Qué hace |
 |---|---|
 | Archivo › Abrir ROM... | El diálogo de archivos de Hispa Ventanas: se elige un `.SMS` |
 | Archivo › Buzo | Abre el juego de muestra |
 | Archivo › Reiniciar (F2) | El botón de «reset» de la consola |
-| Archivo › Pausa (P) | Para y sigue el emulador (también se para solo al minimizar) |
+| Archivo › Pausa o continuar (P) | Para y sigue el emulador (con el letrero). En pausa, cualquier tecla, un clic en la imagen o un botón del mando también sigue |
 | Tamaño › x1, x2 | La ventana, a la medida de la imagen: 256×192 o el doble. Si la ventana se estira, la imagen sale al doble si cabe, centrada |
 | Sonido | Lo pone o lo quita |
 | Ayuda | Teclas y mandos; Acerca de |
@@ -185,8 +206,10 @@ Los siguientes juegos irán en `sms/` y en `SMSROMS` del Makefile.
      RAM del cartucho al acabar.
 2. **En Hispa Ventanas, paso a paso**: se juega con el teclado y cada
    pantalla es, punto por punto, la esperada (al doble y a tamaño normal);
-   la pausa de la consola; menús y diálogos; abrir ROM; un archivo que no
-   vale; la partida guardada (`BUZO.SAV`) y la mejor puntuación al volver.
+   la pausa de la consola; menús y diálogos; abrir ROM (el diálogo empieza
+   en `\HISPADOS\JUEGOS\SMS` porque la carpeta de `HISPASMS.INI` ya no
+   está, y la nueva queda apuntada); un archivo que no vale; la partida
+   guardada (`JUEGOS\SMS\BUZO.SAV`) y la mejor puntuación al volver.
 3. **A su velocidad**, con una Sound Blaster 16: Intro (Pausa) empieza la
    partida, los arpones y la música suenan por HSPSND (en la grabación de
    QEMU) y se sale con el juego en marcha; y otra vez con HD Audio (48.000 Hz
@@ -196,7 +219,22 @@ Los siguientes juegos irán en `sms/` y en `SMSROMS` del Makefile.
    tocar el teclado. (La pausa del mando no se prueba así: es la NMI, que
    salta al pulsar, y este mando está pulsado desde antes de abrir el
    cartucho.)
-5. **`/T`**: `VDPTEST.SMS` dentro del módulo da lo mismo que fuera, y la
+5. **La pausa** (`pausa`), a su velocidad y con sonido: al abrirse está
+   en pausa (dos capturas iguales, el letrero y «Pausa -» en la barra); un
+   clic en la imagen sigue; con la partida en marcha, abrir el menú Tamaño
+   la para (dos capturas iguales con el desplegable abierto) y la calla (en
+   la grabación de QEMU no entra nada mientras está abierto, y antes sí
+   sonaba); al cerrarlo sigue; con P y el menú Archivo abierto y cerrado,
+   sigue en pausa; P otra vez, sigue.
+6. **Los menús con el ratón** (`raton`), con el juego en marcha: un clic en
+   cada título de la barra (Archivo, Tamaño, Sonido y Ayuda) abre su
+   desplegable a la primera y un clic en una orden de cada uno la hace
+   (Tamaño x1 y x2, quitar el sonido, Teclas y mandos, Pausa o continuar y
+   Abrir ROM, que empieza en `\HISPADOS\JUEGOS\SMS`).
+7. **La última carpeta** (`carpeta`): con `Carpeta=A:\ROMS` en
+   `HISPASMS.INI`, Abrir ROM empieza en `\ROMS`, abre `OTRA.SMS` de allí y
+   la vez siguiente vuelve a empezar en `\ROMS`.
+8. **`/T`**: `VDPTEST.SMS` dentro del módulo da lo mismo que fuera, y la
    velocidad en QEMU con Buzo.
 
 ## Pendiente

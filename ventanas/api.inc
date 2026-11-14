@@ -108,4 +108,6 @@
         HVF mez_abrir               ; 83  abre el Mezclador (MEZCLAD.HVP); EAX=1: en la vista Completa
         ; ---- [CONTEXTO] el menú contextual (85 entradas) ----
         HVF ctx_menu                ; 84  EBP=dueña ESI=órdenes EAX=x EBX=y (-1: donde se pidió) ECX=en gris
+        ; ---- [EMULADORES] la carpeta de cada uno (86 entradas) ----
+        HVF dos_ir_carpeta          ; 85  ESI=ruta (con unidad o sin ella): la carpeta de trabajo -> CF=1 si no
 %endmacro

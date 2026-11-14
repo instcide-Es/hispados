@@ -33,6 +33,18 @@
 #     empieza sin tocar el teclado.
 #  5. /T: CPUTEST.NES dentro de HISPANES.HVP da lo mismo que fuera, y cuántos
 #     cuadros por segundo salen en QEMU pintando en la ventana.
+#  Y a su velocidad (partes pausa, raton y carpeta):
+#   - pausa: al abrirse, Cometas está en pausa (dos capturas iguales, el letrero
+#     y «Pausa -» en la barra); un clic en la imagen sigue; con la partida en
+#     marcha, el menú Tamaño abierto la para (capturas iguales) y la calla
+#     (no entra nada en la grabación de QEMU); al cerrarlo sigue; con P y un
+#     menú abierto y cerrado sigue en pausa; P otra vez, sigue;
+#   - raton: con el juego en marcha, un clic en cada título de la barra
+#     (Archivo, Tamaño, Sonido, Ayuda) abre su menú a la primera y un clic en
+#     una orden de cada uno la hace; Abrir ROM empieza en JUEGOS\NES;
+#   - carpeta: con Carpeta=A:\ROMS en HISPANES.INI, Abrir ROM empieza en \ROMS,
+#     abre OTRA.NES de allí y vuelve a empezar allí.
+#  Los cartuchos van en \HISPADOS\JUEGOS\NES (también CPUTEST.NES, para Abrir ROM).
 # uso: run_hispanes_tests.sh [imagen]     SOLO="nucleo pasos" para algunas
 #      ACTUALIZA=1 vuelve a guardar las imágenes esperadas
 # Deja capturas en build/hispanes_*.png.
@@ -100,6 +112,16 @@ disco() {
   mcopy -o -i $T/f.img $B/CPUTEST.NES ::CPUTEST.NES
   { printf 'NES\x1a\x01\x01\x30\x60'; head -c 8 /dev/zero; head -c 24576 /dev/zero; } > $T/MAPA99.NES
   mcopy -o -i $T/f.img $T/MAPA99.NES ::MAPA99.NES
+  # los cartuchos van en \HISPADOS\JUEGOS\NES (allí también CPUTEST.NES) y
+  # otra carpeta, \ROMS, con OTRA.NES
+  mcopy -o -i $T/f.img $B/CPUTEST.NES ::HISPADOS/JUEGOS/NES/CPUTEST.NES
+  mmd -i $T/f.img ::ROMS 2> /dev/null
+  mcopy -o -i $T/f.img $B/CPUTEST.NES ::ROMS/OTRA.NES
+  # HISPANES.INI: la última carpeta de Abrir ROM (si se da)
+  if [ -n "${2:-}" ]; then
+    printf 'Carpeta=%s\r\n' "$2" > $T/HISPANES.INI
+    mcopy -o -i $T/f.img $T/HISPANES.INI ::HISPADOS/JUEGOS/HISPANES.INI
+  fi
   local nmod=$(mdir -b -i $T/f.img ::HISPADOS/JUEGOS ::HISPADOS/PROGS 2>/dev/null | grep -c '\.HVP')
   printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' "Modulos=$nmod" '' \
     '[Grupo]' 'Nombre=Juegos' 'Ventana=300,380,452,190' 'Estado=1' '' \
@@ -135,6 +157,40 @@ salida_bien() {
   [ -n "${GUARDAR:-}" ] && cp $T/*.ppm "$GUARDAR"/
   rm -f $T/*.ppm
 }
+# el letrero de la pausa, en medio de la imagen al doble (144,75; 512x480):
+# una caja de 240x44 con «En pausa» en negrita y debajo lo que hay que hacer
+CX=240; CY=237; TTX=126; TTY=180  # (el cuadro de Abrir ROM: «Carpeta: ...»; el de Teclas y mandos)
+LX1=$((144 + (512 - 240) / 2 + (240 - 64) / 2)); LY1=$((75 + (480 - 44) / 2 + 5))
+LX2=$((144 + (512 - 240) / 2 + 12)); LY2=$((75 + (480 - 44) / 2 + 23))
+# tamano ARCHIVO: lo que mide ahora la grabación del sonido (sin salir por la tubería)
+tamano() { stat -c %s $T/nes.wav > "$1" 2> /dev/null || echo 44 > "$1"; }
+# el sonido de la grabación entre dos medidas: silencio_wav WAV DESDE HASTA TEXTO
+# (todo por debajo de 600) o sonido_wav (algo por encima de 2.000)
+trozo_wav() {
+  python3 -c "
+import sys, struct
+d = open(sys.argv[1], 'rb').read()
+a, b = int(open(sys.argv[2]).read()), int(open(sys.argv[3]).read())
+a = max(44, a) & ~3; b = min(len(d), b) & ~3
+s = struct.unpack('<%dh' % ((b - a) // 2), d[a:b]) if b > a else ()
+print(len(s), max((abs(v) for v in s), default=0))" "$@"
+}
+silencio_wav() {
+  local r; r=$(trozo_wav $1 $2 $3); set -- $r "$4"
+  if [ "$2" -lt 600 ]; then ok "en silencio $3 ($1 muestras grabadas, la mayor $2)"; else ko "suena $3: $1 muestras, la mayor $2"; fi
+}
+sonido_wav() {
+  local r; r=$(trozo_wav $1 $2 $3); set -- $r "$4"
+  if [ "$2" -gt 2000 ]; then ok "suena $3 ($1 muestras, la mayor $2)"; else ko "no suena $3: $1 muestras, la mayor $2"; fi
+}
+# en_barra CAPTURA TEXTO DESCRIPCIÓN: el texto está en la barra de estado (y 556)
+en_barra() {
+  local x
+  for x in $(seq 150 8 470); do
+    if $CHK $1 texto $x 556 0 6 fina "$2" > /dev/null 2>&1; then ok "$3"; return; fi
+  done
+  ko "$3: no está «$2» en la barra de estado"
+}
 # el valor de CLAVE= en HISPANES.LOG (sacado del disco a $T/nes.log)
 del_log() { sed -n "s/^$1=//p" $T/nes.log | head -1; }
 
@@ -167,7 +223,7 @@ make -s nesprogs > $T/make.txt 2>&1 || { cat $T/make.txt; ko "no se han podido h
 nativo=0
 if [ -x $NAT ] && $NAT $B/CPUTEST.NES 1 $T/x.pgm 2> /dev/null; then nativo=1; fi
 
-for parte in ${SOLO:-nucleo pasos vivo mando prueba}; do
+for parte in ${SOLO:-nucleo pasos vivo mando pausa raton carpeta prueba}; do
 case $parte in
 nucleo)
   echo "== El núcleo de Hispa-Nes, fuera de QEMU: ROM de prueba e imágenes esperadas =="
@@ -214,7 +270,7 @@ nucleo)
 
 pasos)
   echo "== Hispa-Nes paso a paso: Cometas con el teclado, punto por punto, menús, diálogos y la partida guardada =="
-  disco '/P'
+  disco '/P' 'A:\'                          # (Abrir ROM empieza en la raíz)
   { entrar
     shot p0
     tecla ret; sleep 4                        # se abre y arranca Cometas
@@ -258,7 +314,7 @@ pasos)
     shot p15
     salir
   } | run 300 -vga std
-  mcopy -n -i $T/f.img ::HISPADOS/JUEGOS/HISPA1.SAV $T/h1.sav 2> /dev/null
+  mcopy -n -i $T/f.img ::HISPADOS/JUEGOS/NES/HISPA1.SAV $T/h1.sav 2> /dev/null
   chk $T/p0.ppm tam 800 600 marco 300 380 452 190 activa titulo 300 380 activa "Juegos" \
     texto 330 483 9 12 fina "Hispa-Nes" px 352 459 15 "icono de Hispa-Nes: el mando" px 363 453 13 "icono: un botón granate"
   chk $T/p1.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes" texto 150 556 0 6 fina "HISPA1.NES"
@@ -280,7 +336,7 @@ pasos)
     ko "HISPA1.SAV: $(xxd -l 8 -p $T/h1.sav 2>&1)"
   fi
   chk $T/p10.ppm igual 496 91 80 16 $T/p9.ppm 288 91 0 texto 150 556 0 6 fina "HISPA1.NES"
-  chk $T/p11.ppm titulo 222 150 activa "Abrir ROM (.NES)"
+  chk $T/p11.ppm titulo 222 150 activa "Abrir ROM (.NES)" texto $CX $CY 0 8 fina "Carpeta: A:\\"
   chk $T/p12.ppm texto 150 556 0 6 fina "CPUTEST.NES"
   hn pantalla $T/p12.ppm 144 75 2 $(esperada cputest) "Abrir ROM: CPUTEST.NES dentro de la ventana, pantalla verde"
   chk $T/p13.ppm titulo 174 243 activa "Hispa-Nes" texto 200 284 0 8 fina "Este archivo no es una ROM en formato iNES (.NES)."
@@ -311,7 +367,7 @@ vivo)
   } | run 200 -vga std -audiodev wav,id=snd0,path=$T/nes.wav -device sb16,audiodev=snd0
   check "Sound Blaster 16"
   chk $T/v1.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes" px 690 12 8 "altavoz encendido: hay HSPSND"
-  hn pantalla $T/v1.ppm 144 75 2 $(esperada h1_titulo) "el título, quieto, a 60 cuadros por segundo"
+  hn pantalla $T/v1.ppm 144 75 2 $(esperada h1_titulo) "el título, quieto, en pausa (sin el letrero)" 0 0 256 104
   hn pantalla $T/v2.ppm 144 75 2 $(esperada h1_juego) "Start con la tecla mantenida: el marcador de la partida" 0 8 256 8
   chk $T/v3.ppm texto 150 556 0 6 fina "Pausa - HISPA1.NES" igual 144 75 512 480 $T/v4.ppm 144 75 0
   python3 tests/tools/audio.py check $T/nes.wav > $T/audio.txt 2>&1
@@ -339,6 +395,125 @@ mando)
   check "NESJOY: mando de prueba entregado a HSPJOY."
   hn pantalla $T/m1.ppm 144 75 2 $(esperada h1_juego) "Start del mando: el marcador de la partida, sin teclado" 0 8 256 8
   chk $T/m1.ppm texto 150 556 0 6 fina "Pausa - HISPA1.NES"
+  salida_bien
+  ;;
+
+pausa)
+  echo "== Hispa-Nes a su velocidad: empieza en pausa, se para con los menús (callado) y sigue como estaba =="
+  disco ''
+  { entrar 'A:\HISPADOS\HSPSND'
+    tecla ret; sleep 4                        # se abre: Cometas, en pausa
+    aparca
+    shot a1; sleep 1; shot a2                 # quieta, con el letrero
+    clic 400 300; sleep 1                     # un clic en la imagen: a jugar
+    aparca
+    shot a3
+    tecla ret; sleep 2                        # Intro (Start): empieza la partida
+    shot a4; sleep 0.5; shot a5               # se mueve
+    tamano $T/s0
+    clic 254 65; sleep 0.8                    # el menú Tamaño: se para y calla
+    shot b1
+    tamano $T/s1; sleep 2; tamano $T/s2
+    shot b2
+    tecla esc; sleep 1                        # se cierra: sigue
+    shot b3; sleep 0.5; shot b4
+    tecla p; sleep 0.8                        # P: la pausa, con el letrero
+    shot c1
+    clic 186 65; sleep 0.8                    # el menú Archivo, con la pausa
+    shot c2
+    tecla esc; sleep 1                        # al cerrarlo, sigue en pausa
+    aparca
+    shot c3; sleep 0.5; shot c4
+    tecla p; sleep 1                          # P otra vez: sigue
+    shot c5; sleep 0.5; shot c6
+    salir
+  } | run 200 -vga std -audiodev wav,id=snd0,path=$T/nes.wav -device sb16,audiodev=snd0
+  chk $T/a1.ppm texto $LX1 $LY1 0 8 negrita "En pausa" texto $LX2 $LY2 0 8 fina "Pulse una tecla o haga clic" \
+    texto 150 556 0 6 fina "Pausa - HISPA1.NES" igual 144 75 512 480 $T/a2.ppm 144 75 0
+  hn pantalla $T/a1.ppm 144 75 2 $(esperada h1_titulo) "al abrirse, en pausa: el título (sin el letrero)" 0 0 256 100
+  chk $T/a3.ppm cambia 280 293 240 44 $T/a2.ppm 1000 texto 150 556 0 6 fina "HISPA1.NES  "
+  chk $T/a4.ppm cambia 144 75 512 480 $T/a5.ppm 200
+  chk $T/b1.ppm texto 247 99 0 8 fina "amaño x" igual 380 80 270 470 $T/b2.ppm 380 80 0
+  chk $T/b3.ppm cambia 144 75 512 480 $T/b4.ppm 200
+  chk $T/c1.ppm texto $LX1 $LY1 0 8 negrita "En pausa" texto 150 556 0 6 fina "Pausa - HISPA1.NES"
+  chk $T/c2.ppm texto 215 79 0 8 fina "ROM..."
+  chk $T/c3.ppm texto $LX1 $LY1 0 8 negrita "En pausa" texto 150 556 0 6 fina "Pausa - HISPA1.NES" \
+    igual 144 75 512 480 $T/c4.ppm 144 75 0
+  chk $T/c5.ppm texto 150 556 0 6 fina "HISPA1.NES  " cambia 280 293 240 44 $T/c4.ppm 1000   # (sin letrero; la partida puede haber acabado)
+  silencio_wav $T/nes.wav $T/s1 $T/s2 "con el menú abierto"
+  sonido_wav $T/nes.wav $T/s0 $T/s1 "jugando, antes de abrir el menú"
+  muestra a1 en_pausa; muestra b1 menu_parada
+  salida_bien
+  ;;
+
+raton)
+  echo "== Hispa-Nes con el juego en marcha: cada menú de la barra con el ratón y una orden de cada uno, a la primera =="
+  disco ''
+  { entrar 'A:\HISPADOS\HSPSND'
+    tecla ret; sleep 4
+    aparca
+    tecla ret; sleep 1.5                      # sigue y empieza la partida
+    clic 254 65                               # Tamaño
+    shot r1
+    clic 262 87; sleep 1.2                    # Tamaño x1
+    shot r2
+    clic 254 65
+    clic 262 107; sleep 1.2                   # Tamaño x2
+    shot r3
+    clic 318 65                               # Sonido
+    shot r4
+    clic 340 87; sleep 1                      # Poner o quitar el sonido
+    shot r5
+    clic 378 65                               # Ayuda
+    shot r6
+    clic 400 87; sleep 1                      # Teclas y mandos...
+    shot r7
+    tecla ret; sleep 0.6
+    clic 186 65                               # Archivo
+    shot r8
+    clic 200 155; sleep 1                     # Pausa o continuar
+    shot r9
+    clic 186 65
+    clic 200 87; sleep 1.2                    # Abrir ROM...
+    shot r10
+    tecla esc; sleep 0.6
+    salir
+  } | run 200 -vga std -audiodev wav,id=snd0,path=$T/nes.wav -device sb16,audiodev=snd0
+  chk $T/r1.ppm texto 247 99 0 8 fina "amaño x"
+  chk $T/r2.ppm marco 142 30 260 305 activa
+  chk $T/r3.ppm marco 142 30 516 545 activa
+  chk $T/r4.ppm texto 367 79 0 8 fina "quitar el "
+  en_barra $T/r5.ppm "sin sonido" "Sonido: el sonido se quita (la barra dice «sin sonido»)"
+  chk $T/r6.ppm texto 375 99 0 8 fina "cerca de Hispa-Nes..."
+  chk $T/r7.ppm titulo $TTX $TTY activa "Teclas y mandos"
+  chk $T/r8.ppm texto 215 79 0 8 fina "ROM..." texto 175 147 0 8 fina "ausa o continuar (P)"
+  chk $T/r9.ppm texto 150 556 0 6 fina "Pausa - HISPA1.NES" texto $LX1 $LY1 0 8 negrita "En pausa"
+  chk $T/r10.ppm titulo 222 150 activa "Abrir ROM (.NES)" \
+    texto $CX $CY 0 8 fina "Carpeta: A:\HISPADOS\JUEGOS\NES"
+  muestra r1 menu_tamano; muestra r4 menu_sonido; muestra r6 menu_ayuda; muestra r8 menu_archivo
+  muestra r10 abrir_carpeta
+  salida_bien
+  ;;
+
+carpeta)
+  echo "== Hispa-Nes: Abrir ROM recuerda la última carpeta (HISPANES.INI) =="
+  disco '/P' 'A:\ROMS'
+  { entrar
+    tecla ret; sleep 4
+    aparca
+    tecla alt-a ret; sleep 1.2                # Abrir ROM: en \ROMS
+    shot k1
+    escribe otra.nes; tecla ret; sleep 3
+    shot k2
+    tecla alt-a ret; sleep 1.2                # y otra vez en \ROMS
+    shot k3
+    tecla esc; sleep 0.6
+    salir
+  } | run 200 -vga std
+  chk $T/k1.ppm titulo 222 150 activa "Abrir ROM (.NES)" texto $CX $CY 0 8 fina "Carpeta: A:\ROMS"
+  chk $T/k2.ppm texto 150 556 0 6 fina "OTRA.NES"
+  hn pantalla $T/k2.ppm 144 75 2 $(esperada cputest) "OTRA.NES, de \\ROMS: pantalla verde"
+  chk $T/k3.ppm texto $CX $CY 0 8 fina "Carpeta: A:\ROMS"
   salida_bien
   ;;
 

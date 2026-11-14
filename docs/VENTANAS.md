@@ -1040,6 +1040,7 @@ ECX=ancho, EDX=alto.
 | `WM_SIZE`, `WM_MOVE` | ha cambiado de tamaño / de sitio | `WM_SIZE`: EDX=ancho + alto×65536 de la zona |
 | `WM_GETMINMAXINFO` | [TAMAÑO] antes de cambiar el tamaño con el ratón | → EAX=ancho mínimo + alto mínimo×65536 (0: 140×70) |
 | `WM_EXITSIZEMOVE` | [TAMAÑO] se suelta la ventana que se movía o cambiaba de tamaño con el ratón | ECX=1 si ha cambiado el tamaño |
+| `WM_ENTERMENULOOP`, `WM_EXITMENULOOP` | se abre y se cierra un menú de la ventana (de la barra o contextual) | |
 | `WM_VSCROLL`, `WM_HSCROLL` | [TAMAÑO] se ha movido una barra de desplazamiento hija | ECX=posición nueva, EDX=la barra |
 | `WM_MOUSEWHEEL` | [TAMAÑO] la rueda del ratón, sobre la zona (la que no lo quiere lo pasa a su madre) | ECX=pasos (positivo: hacia abajo), EDX=x + y×65536 |
 | `WM_SETFOCUS`, `WM_KILLFOCUS` | toma o pierde el foco del teclado | |
@@ -1157,6 +1158,16 @@ menu_mio:
 ```
 
 Al elegir una orden, la ventana recibe `WM_COMMAND` con ECX=número.
+Cuando se abre un menú suyo (de la barra o contextual) recibe
+`WM_ENTERMENULOOP`, y cuando se cierra, `WM_EXITMENULOOP` (antes que el
+`WM_COMMAND` de la orden elegida, si se ha elegido alguna). El desplegable
+es una ventana del sistema y la tarea de la ventana sigue a lo suyo: un
+programa que trabaja todo el rato (un emulador) se para con el primero y
+sigue con el segundo. Los dos van a la cola, como `WM_COMMAND`.
+
+Con el ratón, un clic en cualquier título de la barra abre su desplegable
+(hasta noviembre de 2026 solo el primero respondía bien: `menu_saltar`
+estropeaba la x del clic).
 
 ### Diálogos (`dialogos.inc`)
 
@@ -1430,6 +1441,16 @@ Añadida para el botón derecho ([CONTEXTO]; 85 entradas: una más, la 84):
 | Entradas | Para qué |
 |---|---|
 | `ctx_menu` (EBP=dueña ESI=órdenes EAX=x EBX=y de la pantalla, EAX=-1: donde se pidió; ECX=las que van en gris, un bit por orden) | abre un menú contextual (ver «Botón derecho»); la orden elegida llega a la dueña como `WM_COMMAND` (ECX=número) |
+
+Añadida para los emuladores ([EMULADORES]; 86 entradas: una más, la 85):
+
+| Entradas | Para qué |
+|---|---|
+| `dos_ir_carpeta` (ESI=ruta, con unidad o sin ella → CF=1 si no se puede, y entonces no cambia nada) | la carpeta de trabajo (y la unidad, si la ruta la lleva) pasa a ser esa: así `dlg_archivo` empieza donde se quiera. Quien la cambia la deja luego como estaba (`dos_dir_actual` antes): es de todos los programas |
+
+Los mensajes `WM_ENTERMENULOOP` y `WM_EXITMENULOOP` (un menú de la ventana se
+abre y se cierra) tampoco gastan entrada: quien no los conoce los manda a
+`ven_defecto`, que no hace nada.
 
 El mensaje `WM_CONTEXTMENU` no gasta entrada: un módulo que no lo conoce lo
 manda a `ven_defecto` (a la madre o, con el teclado, el menú de la ventana).

@@ -13,7 +13,9 @@
 ;      db 0                         fin de la barra
 ;  El desplegable es una ventana emergente del sistema (tarea 0). Mientras
 ;  está abierto, el ratón y el teclado son del menú: flechas, Intro y Esc.
-;  Al elegir, la ventana recibe WM_COMMAND con ECX=número y EDX=0.
+;  Al elegir, la ventana recibe WM_COMMAND con ECX=número y EDX=0. Al abrirse
+;  un menú suyo (de la barra o contextual), WM_ENTERMENULOOP, y al cerrarse,
+;  WM_EXITMENULOOP (antes que el WM_COMMAND de la orden elegida).
 ;
 ;    menu_abrir        EBP=ventana ECX=número de título
 ;    menu_cerrar
@@ -43,8 +45,12 @@ menu_ancho_txt:
         inc esi
         ret
 
-; (interna) ESI=primera orden de un desplegable -> ESI, tras su final
+; (interna) ESI=primera orden de un desplegable -> ESI, tras su final.
+; Guarda EAX: menu_barra_clic lleva en él la x del clic (antes el LODSB le
+; ponía AL a 0 y, con el ratón, solo se abría el primer menú de la barra)
 menu_saltar:
+        push eax
+.b:
         cmp word [esi], 0xFFFF
         je .x
         add esi, 2
@@ -52,9 +58,10 @@ menu_saltar:
         lodsb
         test al, al
         jnz .c
-        jmp menu_saltar
+        jmp .b
 .x:
         add esi, 2
+        pop eax
         ret
 
 ; (interna) ECX=número de orden del desplegable abierto -> ESI (CF=1: no hay)
@@ -210,7 +217,11 @@ menu_abrir:
         test eax, eax
         jnz .ok
         mov dword [menu_duena], 0
+        jmp .ok2
 .ok:
+        mov eax, WM_ENTERMENULOOP   ; a la dueña: tiene un menú abierto
+        call menu_avisar
+.ok2:
         or dword [ebp+V_ESTADO], S_NCSUCIO
         mov byte [actividad], 1
 .x:
@@ -226,11 +237,27 @@ menu_cerrar:
         call ven_destruir
         mov ebp, [menu_duena]
         mov dword [menu_duena], 0
+        push eax
+        mov eax, WM_EXITMENULOOP    ; y ya no lo tiene
+        call menu_avisar
+        pop eax
         or dword [ebp+V_ESTADO], S_NCSUCIO
         mov byte [actividad], 1
         call ctx_cerrado            ; [CONTEXTO]
         pop ebp
 .x:
+        ret
+
+; (interna) EAX=WM_ENTERMENULOOP o WM_EXITMENULOOP: a la ventana EBP, en su
+; cola (un emulador se para mientras su menú está abierto)
+menu_avisar:
+        push ecx
+        push edx
+        xor ecx, ecx
+        xor edx, edx
+        call msg_poner
+        pop edx
+        pop ecx
         ret
 
 ; el desplegable

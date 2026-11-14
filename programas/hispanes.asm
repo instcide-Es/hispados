@@ -7,7 +7,11 @@
 ;  documentación pública del hardware: no lleva nada del fabricante de la
 ;  consola ni de otros emuladores, y las ROM comerciales no van en el
 ;  proyecto (quien tenga sus cartuchos usa sus volcados). Con él va un juego
-;  propio, Cometas (HISPA1.NES), que se abre solo si está al lado.
+;  propio, Cometas (HISPA1.NES), que se abre solo si está en su carpeta: NES,
+;  al lado del módulo (allí van los cartuchos; Abrir ROM empieza en la última
+;  carpeta, apuntada en HISPANES.INI). Al abrir un cartucho empieza en pausa,
+;  con un letrero, hasta una tecla, un clic o un botón del mando; y se para
+;  sola (callada) con un menú abierto, un diálogo, sin el foco o minimizada.
 ;
 ;  Las piezas (programas/hispanes/):
 ;    cpu.inc    el procesador (6502 sin modo decimal), con sus ciclos
@@ -21,7 +25,7 @@
 ;  archivos (la ROM y la partida guardada, .SAV, de los cartuchos con pila).
 ;
 ;  Teclas: flechas = cruceta, X = A, Z = B, Intro = Start, Mayús = Select;
-;  P pausa y F2 reinicia. Mandos (si está HSPJOY): el del jugador 1 y el del
+;  P pone o quita la pausa y F2 reinicia. Mandos (si está HSPJOY): el del jugador 1 y el del
 ;  jugador 2; con cuatro botones o menos son A, B, Select y Start.
 ;
 ;  Parámetros del acceso directo: el nombre de una ROM, que se abre al
@@ -114,7 +118,7 @@ menu:
         dw 103
         db "&Reiniciar (F2)", 0
         dw 104
-        db "&Pausa (P)", 0
+        db "&Pausa o continuar (P)", 0
         dw 0
         db 0
         dw 109
@@ -140,7 +144,12 @@ menu:
 
 titulo      db "Hispa-Nes", 0
 t_abrir     db "Abrir ROM (.NES)", 0
-t_h1        db "HISPA1.NES", 0
+t_h1        db "NES\HISPA1.NES", 0   ; (en su carpeta, al lado del módulo)
+t_viejo     db "HISPA1.NES", 0         ; (donde iba antes: al lado del módulo)
+t_sub       db "NES", 0
+t_clave     db "Carpeta=", 0
+t_letrero1  db "En pausa", 0
+t_letrero2  db "Pulse una tecla o haga clic", 0
 t_sin       db "Sin cartucho. Archivo, Abrir ROM...", 0
 t_pausa     db "Pausa - ", 0
 t_cs        db " c/s", 0
@@ -154,7 +163,8 @@ t_nosnd     db "No hay sonido: falta HSPSND o no ha encontrado tarjeta.", 0
 t_tec_tit   db "Teclas y mandos", 0
 t_tec       db "Flechas: la cruceta.    X: botón A.    Z: botón B.", 10
             db "Intro: Start.    Mayúsculas: Select.", 10
-            db "P: pausa.    F2: reiniciar la consola.", 10
+            db "P: pausa (o seguir).    F2: reiniciar la consola.", 10
+            db "En pausa, cualquier tecla, un clic o un botón del mando sigue.", 10
             db 10
             db "Con HSPJOY cargado valen los mandos del jugador 1 y del 2:", 10
             db "cruceta o palanca y los botones 1 y 2 (A y B); Select y Start", 10
@@ -214,6 +224,9 @@ entrada:
         mov edi, ruta_log           ; HISPANES.LOG, al lado del módulo
         mov eax, 'LOG'
         call hvl_ruta
+        mov edi, ruta_ini           ; HISPANES.INI: la carpeta de Abrir ROM
+        mov eax, 'INI'
+        call hvl_ruta
         mov edi, ruta_h1            ; y HISPA1.NES: la carpeta y el nombre
         xor edx, edx
 .c:
@@ -227,11 +240,28 @@ entrada:
         jnz .c
         test edx, edx
         jz .c2
+        mov ecx, edx                ; la carpeta del módulo, con la barra: a
+        sub ecx, ruta_h1           ; la ruta vieja del juego propio y a la
+        mov esi, ruta_h1           ; carpeta de los cartuchos (NES)
+        mov edi, ruta_vieja
+        rep movsb
+        mov esi, t_viejo
+        call hvl_cad
+        mov byte [edi], 0
+        mov ecx, edx
+        sub ecx, ruta_h1
+        mov esi, ruta_h1
+        mov edi, dir_roms
+        rep movsb
+        mov esi, t_sub
+        call hvl_cad
+        mov byte [edi], 0
         mov edi, edx
         mov esi, t_h1
         call hvl_cad
         mov byte [edi], 0
 .c2:
+        call carpeta_lee            ; la última de Abrir ROM (HISPANES.INI)
         pop edi
         ; los parámetros
         mov esi, edi
@@ -325,12 +355,13 @@ entrada:
         ; el cartucho del principio: el de los parámetros o Cometas
         mov esi, nom_tmp
         cmp byte [esi], 0
-        jne .abre
-        mov esi, ruta_h1
-        mov byte [callado], 1       ; (si no está, no pasa nada)
-.abre:
+        je .propio
         call rom_abrir
-        mov byte [callado], 0
+        jmp .abierto
+.propio:
+        mov al, 1                   ; (si no está, no pasa nada)
+        call abre_propio
+.abierto:
         cmp dword [a_prueba], 0
         je bucle
         call prueba
@@ -347,9 +378,22 @@ bucle:
         jmp bucle
 .nada:
         call corre
+        setnz al
+        cmp al, [corriendo]
+        je .igual
+        mov [corriendo], al         ; arranca o se para (pausa, menú abierto,
+        test al, al                 ; sin el foco, minimizada...)
+        jz .para
+        call al_empezar             ; sigue: el reloj empieza ahora
+        jmp .igual
+.para:
+        call silencio               ; parada: sin sonido (y sin repetir trozos)
+.igual:
+        test al, al
         jnz .emula
-        mov edi, msg                ; parada: a esperar un mensaje
-        HV msg_tomar
+        call pausa_mando            ; en pausa con un mando: se mira con un
+        mov edi, msg                ; temporizador si aprieta un botón; parada:
+        HV msg_tomar                ; a esperar un mensaje
         jmp .msg
 .emula:
         call reloj
@@ -402,6 +446,10 @@ corre:
         jz .no
         test dword [eax+V_ESTADO], S_MINIM
         jnz .no
+        cmp byte [foco], 0          ; sin el foco (otra ventana, un diálogo)
+        je .no
+        cmp byte [en_menu], 0       ; con un menú suyo abierto
+        jne .no
         or eax, 1
         ret
 .no:
@@ -439,7 +487,22 @@ nes_proc:
         je .crear
         cmp eax, WM_DESTROY
         je .destruir
+        cmp eax, WM_LBUTTONDOWN
+        je .clic
+        cmp eax, WM_ENTERMENULOOP
+        je .menu_si
+        cmp eax, WM_EXITMENULOOP
+        je .menu_no
         HVJ ven_defecto
+.clic:
+        call despierta              ; en pausa: un clic en la imagen, a jugar
+        jmp hecho
+.menu_si:
+        mov byte [en_menu], 1       ; con el menú abierto, quieta y callada
+        jmp hecho
+.menu_no:
+        mov byte [en_menu], 0       ; (y luego, como estaba)
+        jmp hecho
 .crear:
         mov [ven], ebp
         mov dword [ebp+V_MENU], menu
@@ -464,6 +527,8 @@ nes_proc:
 .tecla:
         cmp ecx, 0x3C               ; F2
         je .reinicia
+        call despierta              ; en pausa: cualquier tecla, a jugar (y
+                                    ; vale también para la consola)
         mov eax, ecx
         mov esi, teclas
         mov ecx, N_TECLAS
@@ -487,6 +552,7 @@ nes_proc:
 .l0:
         cmp al, 'P'
         je .pausa
+        call despierta
         cmp al, 'X'
         jne .l1
         mov eax, B_A
@@ -533,20 +599,13 @@ nes_proc:
         cmp ecx, 101
         jne .o2
         call sram_guarda
-        mov ebx, nom_tmp
-        mov byte [ebx], 0
-        mov edi, t_abrir
-        HV dlg_archivo
-        test eax, eax
-        jz hecho
-        mov esi, nom_tmp
-        call rom_abrir
+        call abrir_dlg
         jmp hecho
 .o2:
         cmp ecx, 102
         jne .o3
-        mov esi, ruta_h1
-        call rom_abrir
+        xor eax, eax
+        call abre_propio
         jmp hecho
 .o3:
         cmp ecx, 103
@@ -564,7 +623,10 @@ nes_proc:
 .pausa:
         cmp byte [cargada], 0
         je hecho
-        xor byte [pausa], 1
+        mov al, [pausa]
+        xor al, 1
+        call pausa_pon
+        jmp hecho
 .estado:
         call estado_cambia
         jmp hecho
@@ -610,10 +672,354 @@ nes_proc:
         cmp ecx, 132
         jne hecho
 .dlg:
+        call silencio               ; (el diálogo no deja correr la consola)
         mov eax, DM_ACEPTAR
         HV dlg_mensaje
 hecho:
         xor eax, eax
+        ret
+
+; =============================================================================
+;  La pausa: al abrir un cartucho, con P o con Archivo, Pausa o continuar. Se
+;  sigue con una tecla, un clic en la imagen o un botón del mando. Aparte, la
+;  consola se para sola (sin letrero) con un menú suyo abierto, sin el foco
+;  o minimizada, y sigue como estaba al volver (corre y el bucle)
+; =============================================================================
+; AL=1 en pausa, 0 a jugar
+pausa_pon:
+        pushad
+        cmp al, [pausa]
+        je .x
+        mov [pausa], al
+        test al, al
+        jz .pinta
+        call botones_mando          ; los que ya están apretados no la quitan
+        mov [joy_ant], al
+.pinta:
+        mov ebp, [ven]              ; el letrero y la barra de estado
+        test ebp, ebp
+        jz .x
+        HV ven_invalidar
+.x:
+        popad
+        ret
+
+; una tecla o un clic: si está en pausa (la de verdad, no paso a paso), sigue
+despierta:
+        cmp byte [pausa], 0
+        je .x
+        cmp byte [cargada], 0
+        je .x
+        cmp byte [a_pasos], 0
+        jne .x
+        push eax
+        xor al, al
+        call pausa_pon
+        pop eax
+.x:
+        ret
+
+; (bucle, parado) en pausa con un mando: ¿un botón recién apretado? Entonces
+; sigue. Mientras tanto, un temporizador (cada tic de 55 ms) despierta el
+; bucle para mirarlo otra vez sin gastar el procesador; si no hace falta, se
+; quita
+PAUSA_TMP   equ 7
+pausa_mando:
+        pushad
+        call .mira
+        jc .x
+        cmp byte [tmp_puesto], 0
+        je .x
+        mov byte [tmp_puesto], 0
+        mov ebp, [ven]
+        test ebp, ebp
+        jz .x
+        mov ecx, PAUSA_TMP
+        HV tmp_quitar
+.x:
+        popad
+        ret
+; -> CF=1 si toca mirar el mando (y ya se ha mirado)
+.mira:
+        pushad
+        cmp dword [joy], 0
+        je .no
+        cmp byte [pausa], 0
+        je .no
+        cmp byte [cargada], 0
+        je .no
+        cmp byte [a_pasos], 0
+        jne .no
+        cmp byte [foco], 0
+        je .no
+        cmp byte [en_menu], 0
+        jne .no
+        mov eax, [ven]
+        test eax, eax
+        jz .no
+        test dword [eax+V_ESTADO], S_MINIM
+        jnz .no
+        cmp byte [tmp_puesto], 0
+        jne .m1
+        mov byte [tmp_puesto], 1
+        mov ebp, eax
+        mov ecx, PAUSA_TMP
+        mov edx, 55
+        HV tmp_poner
+.m1:
+        call botones_mando
+        mov ah, [joy_ant]
+        mov [joy_ant], al
+        not ah
+        and al, ah
+        jz .si
+        xor al, al
+        call pausa_pon
+.si:
+        popad
+        stc
+        ret
+.no:
+        popad
+        clc
+        ret
+
+; -> AL=los botones (no la cruceta) de los dos mandos de HSPJOY, juntos
+botones_mando:
+        push esi
+        push ebx
+        xor ebx, ebx
+        mov esi, [joy]
+        test esi, esi
+        jz .x
+        movzx eax, byte [esi+HJD_J1E]
+        call mandos_lee.uno
+        mov bl, al
+        movzx eax, byte [esi+HJD_J2E]
+        call mandos_lee.uno
+        or bl, al
+        and bl, B_A | B_B | B_SELECT | B_START
+.x:
+        mov al, bl
+        pop ebx
+        pop esi
+        ret
+
+; (con el contexto abierto) en pausa, el letrero en medio de la imagen
+LETRERO_AN  equ 27 * 8 + 24
+LETRERO_AL  equ 44
+letrero:
+        pushad
+        cmp byte [pausa], 0
+        je .x
+        cmp byte [a_pasos], 0
+        jne .x
+        mov eax, [escala]
+        shl eax, 8
+        sub eax, LETRERO_AN
+        sar eax, 1
+        add eax, [img_x]
+        imul ebx, [escala], 240
+        sub ebx, LETRERO_AL
+        sar ebx, 1
+        add ebx, [img_y]
+        mov ecx, LETRERO_AN
+        mov edx, LETRERO_AL
+        COLOR C_CREMA
+        HV dc_rect
+        COLOR C_TINTA
+        HV dc_marco
+        push eax
+        push ebx
+        inc eax
+        inc ebx
+        sub ecx, 2
+        sub edx, 2
+        COLOR C_OCRE
+        HV dc_marco
+        pop ebx
+        pop eax
+        COLOR C_TINTA
+        push eax
+        push ebx
+        add eax, (LETRERO_AN - 8 * 8) / 2
+        add ebx, 5
+        NEGRITA 1
+        mov esi, t_letrero1
+        HV dc_texto
+        NEGRITA 0
+        pop ebx
+        pop eax
+        add eax, 12
+        add ebx, 23
+        mov esi, t_letrero2
+        HV dc_texto
+.x:
+        popad
+        ret
+
+; sin sonido: lo juntado, fuera, y HSPSND parado (HD Audio, si no, repetiría
+; sus últimos trozos mientras la consola está quieta)
+silencio:
+        pushad
+        xor eax, eax
+        mov [apu_n], eax
+        mov [snd_n], eax
+        mov [snd_ult], eax
+        mov edi, snd_fin
+        mov ecx, 4
+        rep stosd
+        cmp byte [snd_si], 0
+        je .x
+        mov eax, 0x0300             ; HSPSND, función 03h: parar
+        HV snd_orden
+.x:
+        popad
+        ret
+
+; =============================================================================
+;  Las carpetas: los cartuchos van en NES, al lado del módulo; Abrir ROM
+;  empieza en la última carpeta de la que se abrió uno (apuntada en el .INI)
+; =============================================================================
+; el juego propio: en su carpeta o, si no está, donde iba antes. AL=1 callado
+abre_propio:
+        pushad
+        mov byte [callado], 1
+        mov esi, ruta_h1
+        call rom_abrir
+        cmp byte [rom_ok], 0
+        jne .x
+        mov [callado], al
+        mov esi, ruta_vieja
+        call rom_abrir
+.x:
+        mov byte [callado], 0
+        popad
+        ret
+
+; Archivo, Abrir ROM: el diálogo, en la última carpeta (si ya no está, en la
+; de los cartuchos); luego la carpeta de trabajo vuelve a ser la de antes
+abrir_dlg:
+        pushad
+        call silencio
+        mov edi, dir_ant
+        HV dos_dir_actual
+        mov esi, dir_ult
+        HV dos_ir_carpeta
+        jnc .en
+        mov esi, dir_roms
+        HV dos_ir_carpeta
+.en:
+        mov ebp, [ven]
+        mov ebx, nom_tmp
+        mov byte [ebx], 0
+        mov edi, t_abrir
+        HV dlg_archivo
+        test eax, eax
+        jz .vuelve
+        mov esi, nom_tmp            ; (con la carpeta del diálogo)
+        call rom_abrir
+        cmp byte [rom_ok], 0
+        je .vuelve
+        mov esi, rom_ruta           ; la carpeta del cartucho: la última
+        mov edi, dir_tmp
+        mov ecx, [rom_nom]
+        sub ecx, esi
+        dec ecx                     ; (sin la barra del final...
+        cmp ecx, 2
+        ja .c
+        inc ecx                     ; ...salvo en la raíz: «A:\»)
+.c:
+        rep movsb
+        mov byte [edi], 0
+        mov esi, dir_tmp
+        mov edi, dir_ult
+        call cad_igual
+        je .vuelve
+        call cad0
+        call carpeta_guarda
+.vuelve:
+        mov esi, dir_ant
+        HV dos_ir_carpeta
+        popad
+        ret
+
+; ESI, EDI: dos cadenas -> ZF=1 si son iguales
+cad_igual:
+        push eax
+        push esi
+        push edi
+.c:
+        mov al, [esi]
+        cmp al, [edi]
+        jne .x
+        inc esi
+        inc edi
+        test al, al
+        jnz .c
+.x:
+        pop edi
+        pop esi
+        pop eax
+        ret
+
+; copia ESI a EDI con su 0
+cad0:
+        push edi
+        call hvl_cad
+        mov byte [edi], 0
+        pop edi
+        ret
+
+; dir_ult: la del .INI («Carpeta=») o, si no hay, la de los cartuchos
+carpeta_lee:
+        pushad
+        mov esi, dir_roms
+        mov edi, dir_ult
+        call cad0
+        mov esi, ruta_ini
+        mov edi, txt_ini
+        mov ecx, 128
+        call hvl_leer
+        test eax, eax
+        jz .x
+        mov esi, txt_ini
+        mov edi, t_clave
+        call hvl_clave
+        jc .x
+        cmp byte [esi], ' '
+        jb .x
+        mov edi, dir_ult
+        mov ecx, 79
+.c:
+        lodsb
+        cmp al, ' '
+        jb .f
+        stosb
+        dec ecx
+        jnz .c
+.f:
+        mov byte [edi], 0
+.x:
+        popad
+        ret
+
+; apunta dir_ult en el .INI
+carpeta_guarda:
+        pushad
+        mov edi, txt_ini
+        mov esi, t_clave
+        call hvl_cad
+        mov esi, dir_ult
+        call hvl_cad
+        mov ax, 0x0A0D
+        stosw
+        mov ecx, edi
+        mov edx, txt_ini
+        sub ecx, edx
+        mov esi, ruta_ini
+        call hvl_escribir
+        popad
         ret
 
 ; (paso a paso) AL=botones: ECX cuadros con ellos y EDX sin ellos, y se pinta
@@ -709,6 +1115,7 @@ pintar:
         jmp .barra
 .img:
         call img_copia
+        call letrero
 .barra:
         COLOR C_ARENA
         xor eax, eax
@@ -1332,6 +1739,7 @@ snd_busca:
 ; (salvo con [callado]) y sigue lo que había
 rom_abrir:
         pushad
+        mov byte [rom_ok], 0
         mov edi, ruta_tmp           ; la ruta entera (el .SAV va al lado y la
         call ruta_entera            ; carpeta de trabajo puede cambiar luego)
         mov esi, ruta_tmp
@@ -1446,16 +1854,24 @@ rom_abrir:
         call hvl_ruta
         call sram_lee
         mov byte [cargada], 1
+        mov byte [rom_ok], 1
         mov byte [pausa], 0
         call al_empezar
         mov ebp, [ven]
         HV ven_invalidar
-        cmp byte [a_pasos], 0
-        je .x
-        xor eax, eax                ; paso a paso: un segundo para arrancar
+        cmp dword [a_prueba], 0     ; (/T: la prueba, enseguida)
+        jne .x
+        xor eax, eax                ; un segundo para arrancar (el título)
         mov ecx, 60
         xor edx, edx
         call pasos
+        cmp byte [a_pasos], 0
+        jne .x
+        mov byte [joy_ant], 0       ; y en pausa, hasta una tecla, un clic o
+        mov al, 1                   ; un botón del mando
+        call pausa_pon
+        mov byte [joy_ant], 0       ; (un botón ya apretado también vale)
+        call al_empezar
         jmp .x
 .mapa:
         HV dos_cerrar
@@ -1846,6 +2262,18 @@ col_host    resb 64
             alignb 2
 col_doble   resw 64
 nom_tmp     resb 80
+dir_roms    resb 80                 ; la carpeta de los cartuchos (NES)
+dir_ult     resb 80                 ; la última de Abrir ROM
+dir_ant     resb 80                 ; la de trabajo, mientras está el diálogo
+dir_tmp     resb 80
+ruta_ini    resb 80
+ruta_vieja  resb 96
+txt_ini     resb 160
+en_menu     resb 1                  ; un menú suyo está abierto
+corriendo   resb 1                  ; la consola corría en la vuelta anterior
+joy_ant     resb 1                  ; (en pausa) los botones de los mandos
+rom_ok      resb 1                  ; rom_abrir ha podido
+tmp_puesto  resb 1                  ; el temporizador de mirar el mando en pausa
 ruta_tmp    resb 160
 rom_ruta    resb 160
 sav_ruta    resb 160

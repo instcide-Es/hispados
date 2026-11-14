@@ -219,7 +219,11 @@ ctx_menu:
         mov dword [menu_duena], 0
         mov byte [ctx_activo], 0
         mov byte [ctx_sis], 0
+        jmp .ok2
 .ok:
+        mov eax, WM_ENTERMENULOOP   ; a la dueña, como los de la barra
+        call menu_avisar
+.ok2:
         mov byte [actividad], 1
 .x:
         popad

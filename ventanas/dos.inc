@@ -20,6 +20,8 @@
 ;    dos_borrar     ESI=nombre (41h)
 ;    dos_cambiar_dir, dos_crear_dir   ESI=ruta (3Bh, 39h)
 ;    dos_dir_actual EDI=búfer (80 octetos): «A:\CARPETA» (19h y 47h)
+;    dos_ir_carpeta ESI=ruta, con unidad o sin ella: la unidad y la carpeta
+;                   de trabajo pasan a ser esas (0Eh y 3Bh)
 ;    dos_primero    ESI=patrón ECX=atributos (4Eh); dos_siguiente (4Fh)
 ;                   el resultado queda en dos_dta: +0x15 atributo, +0x1A
 ;                   tamaño, +0x1E nombre
@@ -97,6 +99,52 @@ dos_cambiar_dir:
 dos_crear_dir:
         mov ah, 0x39
         jmp dos_ruta
+
+; ESI=ruta, con su unidad o sin ella («A:\JUEGOS\SMS», «\JUEGOS», «SMS»): la
+; carpeta de trabajo pasa a ser esa, y también la unidad (0Eh y 3Bh). CF=1 si
+; no se puede (y entonces no cambia nada: ni la unidad)
+dos_ir_carpeta:
+        pushad
+        mov eax, 0x1900             ; la unidad de ahora, por si hay que volver
+        call dos_int
+        mov [esp+28], eax
+        cmp byte [esi], 0
+        je .mal
+        cmp byte [esi+1], ':'
+        jne .dir
+        movzx edx, byte [esi]
+        or dl, 0x20                 ; (a minúscula)
+        sub dl, 'a'
+        cmp dl, 25
+        ja .mal
+        mov eax, 0x0E00
+        call dos_int
+        mov eax, 0x1900             ; ¿ha cambiado de verdad?
+        call dos_int
+        movzx edx, byte [esi]
+        or dl, 0x20
+        sub dl, 'a'
+        cmp al, dl
+        jne .vuelve
+        add esi, 2
+        cmp byte [esi], 0           ; «A:» solo: la unidad, y basta
+        je .bien
+.dir:
+        mov eax, 0x3B00
+        call dos_ruta
+        jnc .bien
+.vuelve:
+        movzx edx, byte [esp+28]    ; la unidad de antes
+        mov eax, 0x0E00
+        call dos_int
+.mal:
+        popad
+        stc
+        ret
+.bien:
+        popad
+        clc
+        ret
 
 dos_cerrar:
         push eax

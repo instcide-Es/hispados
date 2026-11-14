@@ -240,7 +240,7 @@ $(B)/ALMACEN.HVP: juegos/almacen.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Hispa-Nes (docs/HISPANES.md): el emulador, con sus piezas en
 # programas/hispanes/, y sus juegos propios, hechos para la consola y
-# ensamblados aquí con tools/asm6502.py (NESROMS: van a \HISPADOS\JUEGOS)
+# ensamblados aquí con tools/asm6502.py (NESROMS: van a \HISPADOS\JUEGOS\NES)
 $(B)/HISPANES.HVP: programas/hispanes.asm $(wildcard programas/hispanes/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 NESROMS = $(B)/HISPA1.NES
@@ -261,7 +261,7 @@ $(B)/NESJOY.COM: tests/progs/nesjoy.asm | $(B)
 nesprogs: $(B)/nesnativo $(B)/nesnativo_t $(B)/CPUTEST.NES $(B)/NESJOY.COM
 # Hispa-System (docs/HISPASYS.md): el emulador, con sus piezas en
 # programas/hispasms/, y sus juegos propios, hechos para la consola y
-# ensamblados aquí con tools/asmz80.py (SMSROMS: van a \HISPADOS\JUEGOS)
+# ensamblados aquí con tools/asmz80.py (SMSROMS: van a \HISPADOS\JUEGOS\SMS)
 $(B)/HISPASMS.HVP: programas/hispasms.asm $(wildcard programas/hispasms/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 SMSROMS = $(B)/BUZO.SMS
@@ -378,9 +378,12 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.I
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
 	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
 	for f in $(SONS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# el sonido de prueba y la campanita
-	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS
-	mmd   -i $@ ::HISPADOS/JUEGOS
-	for f in $(HVPS) $(NESROMS) $(SMSROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
+	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS, y los cartuchos de
+	# sus emuladores, cada uno en su carpeta: JUEGOS\NES y JUEGOS\SMS
+	mmd   -i $@ ::HISPADOS/JUEGOS ::HISPADOS/JUEGOS/NES ::HISPADOS/JUEGOS/SMS
+	for f in $(HVPS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/ || exit 1; done
+	for f in $(NESROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/NES/ || exit 1; done
+	for f in $(SMSROMS); do mcopy -i $@ $$f ::HISPADOS/JUEGOS/SMS/ || exit 1; done
 	# y los accesorios (Pintura, el Reproductor de sonido y el Mezclador), en \HISPADOS\PROGS
 	mmd   -i $@ ::HISPADOS/PROGS
 	for f in $(HVPA); do mcopy -i $@ $$f ::HISPADOS/PROGS/ || exit 1; done

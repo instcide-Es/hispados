@@ -18,16 +18,39 @@ de Hispa Ventanas (`HISPANES.HVP`, grupo «Juegos»), con un juego nuestro,
 
 ## Cómo se usa
 
-Se abre desde el grupo «Juegos». Si `HISPA1.NES` está en su carpeta
-(`\HISPADOS\JUEGOS`), arranca Cometas; si no, la ventana queda en negro con
-«Sin cartucho».
+Se abre desde el grupo «Juegos». Los cartuchos de Hispa-Nes van en su
+propia carpeta, **`\HISPADOS\JUEGOS\NES`** (la del módulo, `HISPANES.HVP`,
+y dentro `NES`; los de Hispa-System van en `JUEGOS\SMS`). Si `HISPA1.NES`
+está allí (o, de antes, al lado del módulo), arranca Cometas; si no, la
+ventana queda en negro con «Sin cartucho». Los `.SAV` van siempre al lado de
+su cartucho.
+
+**Empieza en pausa**: al abrir un cartucho (Cometas al entrar, Archivo ›
+Cometas o Abrir ROM) corre un segundo, para que se vea su pantalla, y se
+queda quieto con un letrero en medio: «En pausa — Pulse una tecla o haga
+clic». Sigue con cualquier tecla (que también le llega a la consola: Intro,
+Start, empieza la partida), con un clic en la imagen o con un botón del
+mando; con P o con Archivo › Pausa o continuar se para y se sigue cuando se
+quiera.
+
+Además se para sola, sin letrero y **callada** (sin repetir el último trozo
+de sonido), mientras uno de sus menús está abierto, mientras hay un diálogo,
+cuando la ventana pierde el foco y minimizada; al cerrar el menú o volver a
+la ventana sigue como estaba: jugando si se estaba jugando y en pausa si
+estaba en pausa.
+
+**Abrir ROM** empieza en la carpeta de los cartuchos y luego en la última de
+la que se abrió uno (se apunta en `HISPANES.INI`, al lado del módulo:
+`Carpeta=A:\...`; si esa carpeta ya no está, vuelve a la de los
+cartuchos). Al cerrar el diálogo, la carpeta de trabajo de Hispa Ventanas
+vuelve a ser la de antes.
 
 | Menú | Qué hace |
 |---|---|
 | Archivo › Abrir ROM... | El diálogo de archivos de Hispa Ventanas: se elige un `.NES` |
 | Archivo › Cometas | Abre el juego de muestra |
 | Archivo › Reiniciar (F2) | El botón de «reset» de la consola |
-| Archivo › Pausa (P) | Para y sigue (también se para sola al minimizar) |
+| Archivo › Pausa o continuar (P) | Para y sigue (con el letrero). En pausa, cualquier tecla, un clic en la imagen o un botón del mando también sigue |
 | Tamaño › x1, x2 | La ventana, a la medida de la imagen: 256×240 o el doble. La ventana también se puede estirar: la imagen sale al doble si cabe, centrada |
 | Sonido | Lo pone o lo quita |
 | Ayuda | Teclas y mandos; Acerca de |
@@ -186,14 +209,26 @@ Makefile.
      verse, que están guardadas en `tests/hispanes/esperado/`.
 2. **En Hispa Ventanas, paso a paso**: se juega con el teclado y cada
    pantalla es, punto por punto, la esperada (al doble y a tamaño normal);
-   menús, diálogos, abrir ROM, archivos que no valen, la partida guardada.
+   menús, diálogos, abrir ROM (con `Carpeta=A:\` en `HISPANES.INI`, el
+   diálogo empieza en la raíz), archivos que no valen, la partida guardada
+   (`JUEGOS\NES\HISPA1.SAV`).
 3. **A su velocidad**, con una Sound Blaster 16: teclas mantenidas, el
    sonido en la grabación de QEMU y salir con el juego en marcha.
 4. **Con un mando**: QEMU no tiene mandos que se puedan mover, así que un
    programa de prueba (`tests/progs/nesjoy.asm`) le entrega a HSPJOY un mando
    con la cruceta a la derecha y el botón 4 pulsado, como hace HSPUSB; la
    partida tiene que empezar sin tocar el teclado.
-5. **`/T`**: `CPUTEST.NES` dentro del módulo da lo mismo que fuera, y la
+5. **La pausa** (`pausa`), a su velocidad y con sonido: al abrirse está
+   en pausa (dos capturas iguales y el letrero); un clic sigue; con la
+   partida en marcha, el menú Tamaño abierto la para y la calla (en la
+   grabación de QEMU no entra nada mientras está abierto); al cerrarlo
+   sigue; con P y un menú abierto y cerrado, sigue en pausa.
+6. **Los menús con el ratón** (`raton`), con el juego en marcha: cada título
+   de la barra abre su desplegable al primer clic y una orden de cada uno se
+   hace al primer clic (Abrir ROM empieza en `\HISPADOS\JUEGOS\NES`).
+7. **La última carpeta** (`carpeta`): con `Carpeta=A:\ROMS` en
+   `HISPANES.INI`, Abrir ROM empieza allí y vuelve a empezar allí.
+8. **`/T`**: `CPUTEST.NES` dentro del módulo da lo mismo que fuera, y la
    velocidad en QEMU.
 
 Otras ROM de prueba públicas con las que se ha mirado a mano: pasan las once

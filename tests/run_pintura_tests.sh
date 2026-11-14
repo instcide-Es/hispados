@@ -118,7 +118,7 @@ cp "$IMG" $T/f.img
 # sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
 # los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
 # comprueba)
-for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/BUZO.SMS ::HISPADOS/JUEGOS/HISPA1.NES; do
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES; do
   mdel -i $T/f.img $f > /dev/null 2>&1
 done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
@@ -332,7 +332,7 @@ cp "$IMG" $T/f.img
 # sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
 # los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
 # comprueba)
-for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/BUZO.SMS ::HISPADOS/JUEGOS/HISPA1.NES; do
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES; do
   mdel -i $T/f.img $f > /dev/null 2>&1
 done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS

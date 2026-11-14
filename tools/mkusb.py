@@ -15,8 +15,8 @@ SIZE_MB = int(os.environ.get('USB_MB', '512'))   # Carlos 14/11: 512 MB (el .zip
 START = 2048
 HEADS, SPT = 255, 63
 HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
-NESROMS = ('HISPA1.NES',)           # los juegos propios de Hispa-Nes (NESROMS del Makefile)
-SMSROMS = ('BUZO.SMS',)             # y los de Hispa-System (SMSROMS del Makefile)
+NESROMS = ('HISPA1.NES',)           # los juegos propios de Hispa-Nes (NESROMS del Makefile), en JUEGOS\NES
+SMSROMS = ('BUZO.SMS',)             # y los de Hispa-System (SMSROMS del Makefile), en JUEGOS\SMS
 SONS = ('HISPA.WAV', 'CAMPANA.WAV')  # el sonido de prueba y la campanita (SONS del Makefile)
 
 def chs(lba):
@@ -96,8 +96,13 @@ def main():
                 cab = open(os.path.join(B, f), 'rb').read(32)
                 carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] in (1, 2) else 'JUEGOS'  # [MEZCLADOR] 2: «Sonido»
                 cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
-    for f in NESROMS + SMSROMS:
-        cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
+    # los cartuchos de los emuladores, cada uno en su carpeta
+    md('HISPADOS/JUEGOS/NES')
+    md('HISPADOS/JUEGOS/SMS')
+    for f in NESROMS:
+        cp(os.path.join(B, f), 'HISPADOS/JUEGOS/NES/' + f)
+    for f in SMSROMS:
+        cp(os.path.join(B, f), 'HISPADOS/JUEGOS/SMS/' + f)
     for f in SONS:
         cp(os.path.join(B, f), 'HISPADOS/' + f)
     print(OUT)

@@ -43,6 +43,9 @@ WM_VSCROLL      equ 0x0115          ; de una barra vertical: lo mismo
 WM_MOUSEWHEEL   equ 0x020A          ; la rueda: ECX=pasos (positivo: hacia abajo), EDX=x,y
 WM_EXITSIZEMOVE equ 0x0232          ; se ha soltado la ventana que se movía o cambiaba de
                                     ; tamaño con el ratón: ECX=1 si ha cambiado el tamaño
+WM_ENTERMENULOOP equ 0x0211         ; se ha abierto un menú de la ventana (de la barra o
+                                    ; contextual: el desplegable es del sistema)
+WM_EXITMENULOOP equ 0x0212          ; y se ha cerrado (antes que el WM_COMMAND de la orden)
 WM_CUT          equ 0x0300
 WM_COPY         equ 0x0301
 WM_PASTE        equ 0x0302

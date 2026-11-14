@@ -5,7 +5,8 @@
 ;  INSTALAR unidad:   hace la unidad arrancable (SYS) y copia desde la unidad
 ;                     de arranque la carpeta del sistema (\HISPADOS:
 ;                     programas, drivers y ALIAS.INI; \HISPADOS\JUEGOS:
-;                     los juegos de Hispa Ventanas; y
+;                     los juegos de Hispa Ventanas, con los cartuchos de
+;                     sus emuladores en JUEGOS\NES y JUEGOS\SMS; y
 ;                     \HISPADOS\PROGS: sus accesorios), AUTOEXEC.BAT,
 ;                     CONFIG.SYS y LEEME.TXT. Si la unidad ya tiene un
 ;                     AUTOEXEC.BAT o un CONFIG.SYS, se respetan. En los que
@@ -130,6 +131,14 @@ start:
         call copy_set
         mov si, s_hspj              ; y los juegos de Hispa Ventanas
         mov di, s_hjdir
+        call make_dir
+        call copy_set
+        mov si, s_hspn              ; con los cartuchos de los emuladores,
+        mov di, s_hndir             ; cada uno en su carpeta
+        call make_dir
+        call copy_set
+        mov si, s_hsps
+        mov di, s_hsdir
         call make_dir
         call copy_set
         mov si, s_hspp              ; y sus accesorios (Pintura)
@@ -499,6 +508,10 @@ s_hdir      db "\HISPADOS\", 0
 s_hsp       db "\HISPADOS\*.*", 0
 s_hjdir     db "\HISPADOS\JUEGOS\", 0
 s_hspj      db "\HISPADOS\JUEGOS\*.*", 0
+s_hndir     db "\HISPADOS\JUEGOS\NES\", 0
+s_hspn      db "\HISPADOS\JUEGOS\NES\*.*", 0
+s_hsdir     db "\HISPADOS\JUEGOS\SMS\", 0
+s_hsps      db "\HISPADOS\JUEGOS\SMS\*.*", 0
 s_hpdir     db "\HISPADOS\PROGS\", 0
 s_hspp      db "\HISPADOS\PROGS\*.*", 0
 s_autoexec  db "\AUTOEXEC.BAT", 0

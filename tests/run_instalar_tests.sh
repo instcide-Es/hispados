@@ -65,6 +65,12 @@ for off in 32256 1048576; do
   MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/JUEGOS/CULEBRA.HVP ::HISPADOS/PROGS/PINTURA.HVP > /dev/null 2>&1 && hvp=1
 done
 if [ $hvp = 1 ]; then echo "  OK   \\HISPADOS\\JUEGOS y \\HISPADOS\\PROGS, con sus .HVP, en el disco instalado"; else echo "  FAIL faltan los .HVP de \\HISPADOS\\JUEGOS o \\HISPADOS\\PROGS en el disco instalado"; fail=1; fi
+# y los cartuchos de los emuladores, cada uno en su carpeta (JUEGOS\NES y JUEGOS\SMS)
+car=0
+for off in 32256 1048576; do
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/JUEGOS/SMS/BUZO.SMS > /dev/null 2>&1 && car=1
+done
+if [ $car = 1 ]; then echo "  OK   HISPA1.NES en \\HISPADOS\\JUEGOS\\NES y BUZO.SMS en \\HISPADOS\\JUEGOS\\SMS, en el disco instalado"; else echo "  FAIL faltan los cartuchos de JUEGOS\\NES o JUEGOS\\SMS en el disco instalado"; fail=1; fi
 # el historial: "uno" debe salir tres veces (la orden, flecha arriba x2 y F3)
 n=$(grep -c "^uno$" $T/l2.txt)
 if [ "$n" -ge 3 ]; then echo "  OK   historial: ECO uno repetido ($n veces)"; else echo "  FAIL historial: ECO uno salió $n veces"; fail=1; fi
