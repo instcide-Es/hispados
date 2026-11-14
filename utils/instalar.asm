@@ -1,8 +1,15 @@
 ; =============================================================================
-;  Hispa-DOS INSTALAR.COM - instalar Hispa-DOS en una unidad ya formateada
+;  Hispa-DOS INSTALAR.COM - instalar Hispa-DOS en un disco duro (o disquete)
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  INSTALAR unidad:   hace la unidad arrancable (SYS) y copia desde la unidad
+;  INSTALAR           sin unidad, guiado: PARTIR /INSTALAR propone el disco
+;                     duro (nunca la memoria USB ni el disco de arranque) y,
+;                     si no tiene una partición DOS, ofrece crearla (con
+;                     todo el disco si está vacío, o en el espacio libre).
+;                     Después pregunta antes de seguir.
+;  INSTALAR unidad:   en esa unidad. Si no tiene formato, pregunta y se lo da
+;                     (FORMATEA unidad: /V:HISPADOS). Hace la unidad
+;                     arrancable (SYS) y copia desde la unidad
 ;                     de arranque la carpeta del sistema (\HISPADOS:
 ;                     programas, drivers y ALIAS.INI; \HISPADOS\JUEGOS:
 ;                     los juegos de Hispa Ventanas, con los cartuchos de
@@ -10,14 +17,19 @@
 ;                     \HISPADOS\PROGS: sus accesorios), AUTOEXEC.BAT,
 ;                     CONFIG.SYS y LEEME.TXT. Si la unidad ya tiene un
 ;                     AUTOEXEC.BAT o un CONFIG.SYS, se respetan. En los que
-;                     se copian, la letra de origen (A: o la USB) pasa a C:,
-;                     la que tendrá el disco al arrancar desde él.
-;  Para preparar un disco nuevo: PARTIR, reiniciar si hace falta, FORMATEA
-;  unidad: y después INSTALAR unidad:.
+;                     se copian, la letra de origen (A: o la USB) y la que
+;                     tiene ahora la unidad de destino (D: arrancando desde
+;                     una memoria USB) pasan a C:, la que tendrá el disco al
+;                     arrancar desde él.
+;                     En un disco duro deja además la partición activa y,
+;                     si el disco no tiene, el MBR de Hispa-DOS (PARTIR
+;                     /ARRANQUE:unidad:). El sector de arranque lleva la
+;                     unidad 80h y la geometría de ESE disco (SYS).
 ;  Último paso, la comprobación del sonido: AUDICION /RAPIDA (la versión
 ;  corta de la prueba de sonido) guarda lo que suena en el SONIDO.INI del
 ;  disco instalado (unidad:\HISPADOS\SONIDO.INI, con su informe SONIDO.TXT
 ;  al lado); así HSPSND lo usa desde el primer arranque. /NOSONIDO no la hace.
+;  Nivel de error: 0 instalado, 1-5 error, 6 cancelado por el usuario.
 ; =============================================================================
         cpu 386
         bits 16
@@ -31,14 +43,26 @@ start:
         int 0x21
         mov si, msg_title
         call puts
-        ; unidad de destino
+        ; unidad de destino (sin ella: la propone PARTIR /INSTALAR)
         mov si, 0x81
 .sk:
         lodsb
         cmp al, ' '
         je .sk
+        cmp al, 9
+        je .sk
         cmp al, 13
+        je .guided
+        cmp al, '/'
+        jne .unit
+        cmp byte [si], '?'
         je usage
+        dec si
+.guided:
+        dec si
+        mov byte [guided], 1
+        jmp .op
+.unit:
         and al, 0xDF
         cmp al, 'A'
         jb usage
@@ -46,13 +70,7 @@ start:
         ja usage
         cmp byte [si], ':'
         jne usage
-        mov [dst], al
-        mov [tail_drv], al
-        mov [msg_drv1], al
-        mov [msg_drv2], al
-        mov [aud_path], al
-        mov [aud_d1], al
-        mov [aud_d2], al
+        call set_dst
         ; opciones: /NOSONIDO
         inc si
 .op:
@@ -78,6 +96,14 @@ start:
         int 0x21
         add dl, 'A' - 1
         mov [src], dl
+        mov [sys_path], dl
+        mov [part_path], dl
+        mov [fmt_path], dl
+        cmp byte [guided], 0
+        je .chk
+        call guided_pick
+.chk:
+        mov dl, [src]
         cmp dl, [dst]
         jne .ok
         mov si, msg_same
@@ -85,33 +111,62 @@ start:
         mov ax, 0x4C01
         int 0x21
 .ok:
-        ; ¿existe y tiene formato?
+        ; ¿existe? ¿es un disco duro?
+        call drv_params
+        jnc .ex
+        mov si, msg_nofmt
+        call puts
+        mov ax, 0x4C02
+        int 0x21
+.ex:
+        ; ¿tiene formato?
+        mov dl, [dst]
+        sub dl, 'A' - 1
+        mov ah, 0x36
+        int 0x21
+        cmp ax, 0xFFFF
+        jne .hasfmt
+        ; sin formato: se le da (preguntando antes)
+        mov si, msg_askfmt1
+        call puts
+        mov si, msg_askfmt2
+        call puts
+        call ask_yes
+        jc cancel
+        mov si, msg_crlf
+        call puts
+        mov dx, fmt_path
+        mov bx, fmt_tail
+        call run
+        jc .fmterr
+        test al, al
+        jnz .fmterr
         mov dl, [dst]
         sub dl, 'A' - 1
         mov ah, 0x36
         int 0x21
         cmp ax, 0xFFFF
         jne .fmt
-        mov si, msg_nofmt
+.fmterr:
+        mov si, msg_fmterr
         call puts
         mov ax, 0x4C02
         int 0x21
+.hasfmt:
+        cmp byte [guided], 0
+        je .fmt
+        mov si, msg_askins1
+        call puts
+        mov si, msg_askins2
+        call puts
+        call ask_yes
+        jc cancel
 .fmt:
         ; 1) sistema: SYS unidad:
-        mov al, [src]
-        mov [sys_path], al
-        mov word [pblock], 0
-        mov word [pblock+2], sys_tail
-        mov [pblock+4], cs
-        mov dword [pblock+6], 0
-        mov dword [pblock+10], 0
         mov dx, sys_path
-        mov bx, pblock
-        mov ax, 0x4B00
-        int 0x21
+        mov bx, sys_tail
+        call run
         jc .syserr
-        mov ah, 0x4D
-        int 0x21
         test al, al
         jz .copy
 .syserr:
@@ -176,27 +231,109 @@ start:
         call putnum
         mov si, msg_done2
         call puts
-        ; 3) la comprobación del sonido, con el disco recién instalado
+        ; 3) disco duro: la partición, activa, y el MBR si no tiene
+        ; (PARTIR /ARRANQUE:X:; en el disco de arranque pide escribir SI)
+        cmp byte [fixed], 0
+        je .snd
+        mov dx, part_path
+        mov bx, arr_tail
+        call run
+        jc .arrerr
+        test al, al
+        jz .snd
+.arrerr:
+        mov si, msg_arrerr
+        call puts
+        mov ax, 0x4C05
+        int 0x21
+.snd:
+        ; 4) la comprobación del sonido, con el disco recién instalado
         cmp byte [nosnd], 0
         jne .end
         call sound_check
 .end:
         mov si, msg_boot
         call puts
+        cmp byte [guided], 0
+        je .e2
+        mov si, msg_reboot
+        call puts
+.e2:
         mov ax, 0x4C00
         int 0x21
 
-; AUDICION /RAPIDA del disco instalado: lo aprendido, en su SONIDO.INI
-; (AUDICION dice ella misma cómo ha ido; aquí, solo si no ha podido empezar)
-sound_check:
-        mov si, msg_snd
+cancel:
+        mov si, msg_nothing
         call puts
+        mov ax, 0x4C06
+        int 0x21
+
+; AL = letra de la unidad de destino
+set_dst:
+        mov [dst], al
+        mov [tail_drv], al
+        mov [msg_drv1], al
+        mov [msg_drv2], al
+        mov [msg_drv3], al
+        mov [msg_drv4], al
+        mov [aud_path], al
+        mov [aud_d1], al
+        mov [aud_d2], al
+        mov [fmt_drv], al
+        mov [arr_drv], al
+        ret
+
+; sin unidad: PARTIR /INSTALAR elige el disco duro (nunca el de arranque),
+; ofrece crear la partición y devuelve su letra como nivel de error
+guided_pick:
+        mov dx, part_path
+        mov bx, inst_tail
+        call run
+        jc .noprog
+        cmp al, 'C'
+        jb .none
+        cmp al, 'Z'
+        ja .none
+        call set_dst
+        ret
+.none:
+        test al, al
+        jz cancel
+        mov si, msg_nothing
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.noprog:
+        mov si, msg_nopart
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+
+; parámetros de la unidad de destino -> [fixed]; CF si no existe
+drv_params:
+        mov ax, 0x440D
+        mov bl, [dst]
+        sub bl, 'A' - 1
+        mov cx, 0x0860
+        mov dx, params
+        int 0x21
+        jc .r
+        mov byte [fixed], 0
+        cmp byte [params+1], 5
+        jne .r
+        mov byte [fixed], 1
+        clc
+.r:
+        ret
+
+; DX = programa, BX = su cola de órdenes -> AL = su nivel de error; CF si no
+; se ha podido ejecutar
+run:
         mov word [pblock], 0
-        mov word [pblock+2], aud_tail
+        mov [pblock+2], bx
         mov [pblock+4], cs
         mov dword [pblock+6], 0
         mov dword [pblock+10], 0
-        mov dx, aud_path
         mov bx, pblock
         mov ax, 0x4B00
         int 0x21
@@ -204,9 +341,45 @@ sound_check:
         pop ds
         push cs
         pop es
-        jc .fail
+        jc .r
         mov ah, 0x4D
         int 0x21
+        clc
+.r:
+        ret
+
+; ¿S/N? (se escribe la respuesta y se pulsa Intro) -> CF=0 si es que sí
+ask_yes:
+        mov byte [lbuf], 8
+        mov dx, lbuf
+        mov ah, 0x0A
+        int 0x21
+        mov si, msg_crlf
+        call puts
+        cmp byte [lbuf+1], 0
+        je .no
+        mov al, [lbuf+2]
+        and al, 0xDF
+        cmp al, 'S'
+        je .y
+        cmp al, 'Y'
+        je .y
+.no:
+        stc
+        ret
+.y:
+        clc
+        ret
+
+; AUDICION /RAPIDA del disco instalado: lo aprendido, en su SONIDO.INI
+; (AUDICION dice ella misma cómo ha ido; aquí, solo si no ha podido empezar)
+sound_check:
+        mov si, msg_snd
+        call puts
+        mov dx, aud_path
+        mov bx, aud_tail
+        call run
+        jc .fail
         cmp al, 1                   ; 1: sin memoria (0 y 2 los explica ella)
         jne .r
 .fail:
@@ -430,7 +603,10 @@ fix_drive:
         mov al, [si]
         and al, 0xDF
         cmp al, [src]
+        je .let
+        cmp al, [dst]               ; (la que tiene ahora el disco duro)
         jne .n
+.let:
         ; solo si es una letra suelta: «Fecha:» o «Nota:» no son la unidad A:
         cmp ah, '0'
         jb .fx
@@ -500,6 +676,16 @@ aud_tail    db aud_te - aud_tail - 1, " /RAPIDA "
 aud_d1      db "C:\HISPADOS /INI:"
 aud_d2      db "C:\HISPADOS\SONIDO.INI"
 aud_te      db 13
+guided      db 0
+fixed       db 0
+part_path   db "A:\HISPADOS\PARTIR.COM", 0
+inst_tail   db 10, " /INSTALAR", 13
+arr_tail    db 13, " /ARRANQUE:"
+arr_drv     db "C:", 13
+fmt_path    db "A:\HISPADOS\FORMATEA.COM", 0
+fmt_tail    db fmt_te - fmt_tail - 1, " "
+fmt_drv     db "C: /V:HISPADOS /AUTOTEST"
+fmt_te      db 13
 sys_path    db "A:\HISPADOS\SISTEMA.COM", 0
 sys_tail    db 3, " "
 tail_drv    db "C:", 13
@@ -518,16 +704,31 @@ s_autoexec  db "\AUTOEXEC.BAT", 0
 s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0
 msg_title   db "Instalador de Hispa-DOS", 13, 10, 0
-msg_usage   db "Uso: INSTALAR unidad: [/NOSONIDO]", 13, 10
-            db "Instala Hispa-DOS en una unidad que ya tiene formato.", 13, 10
-            db "Para un disco nuevo: PARTIR, FORMATEA unidad: y después INSTALAR unidad:", 13, 10
+msg_usage   db "Uso: INSTALAR unidad: [/NOSONIDO]   o   INSTALAR [/NOSONIDO]", 13, 10
+            db "Sin unidad busca el disco duro (nunca la memoria USB de arranque), ofrece", 13, 10
+            db "crear la partición si no tiene y pregunta antes de seguir.", 13, 10
+            db "Con unidad instala en esa (si no tiene formato, pregunta y se lo da).", 13, 10
             db "Al final comprueba el sonido (AUDICION /RAPIDA): lo que suena queda en", 13, 10
             db "unidad:\HISPADOS\SONIDO.INI y HSPSND lo usa desde el primer arranque.", 13, 10
             db "Esc salta ese paso; /NOSONIDO no lo hace.", 13, 10, 0
 msg_same    db "No se puede instalar sobre la unidad de arranque.", 13, 10, 0
 msg_nofmt   db "La unidad "
-msg_drv1    db "C: no existe o no tiene formato.", 13, 10
-            db "Prepárela con PARTIR y FORMATEA y vuelva a ejecutar INSTALAR.", 13, 10, 0
+msg_drv1    db "C: no existe.", 13, 10
+            db "Cree la partición con PARTIR y vuelva a escribir INSTALAR.", 13, 10, 0
+msg_askfmt1 db 13, 10, "La unidad "
+msg_drv3    db "C: no tiene formato: se le dará formato (se borra todo lo que", 13, 10
+            db "tenga) y se instalará Hispa-DOS en ella.", 13, 10, 0
+msg_askfmt2 db "¿Continuar (S/N)? ", 0
+msg_askins1 db 13, 10, "Se va a instalar Hispa-DOS en la unidad "
+msg_drv4    db "C:. Lo que ya tenga se conserva", 13, 10
+            db "(solo se ponen o se cambian los archivos de Hispa-DOS).", 13, 10, 0
+msg_askins2 equ msg_askfmt2
+msg_fmterr  db "No se ha podido dar formato a la unidad: no se ha instalado nada.", 13, 10, 0
+msg_nothing db "No se ha instalado nada.", 13, 10, 0
+msg_nopart  db "No se encuentra \HISPADOS\PARTIR.COM en la unidad de arranque.", 13, 10, 0
+msg_arrerr  db "Los archivos están copiados, pero el disco duro NO ha quedado listo para", 13, 10
+            db "arrancar (partición activa y MBR). Pruebe con PARTIR: opción 2.", 13, 10, 0
+msg_reboot  db "Quite la memoria USB (o el disquete) y reinicie el ordenador.", 13, 10, 0
 msg_syserr  db "No se ha podido transferir el sistema (SYS).", 13, 10, 0
 msg_copying db "Copiando los archivos de Hispa-DOS...", 13, 10, 0
 msg_fail    db "La instalación NO está completa: no se han podido copiar ", 0
@@ -550,6 +751,8 @@ path_s      resb 128
 path_d      resb 128
 dta         resb 128
 dta2        resb 128
+params      resb 40
+lbuf        resb 12
 buf         resb BUFSZ
             resb 512
 stack_top:

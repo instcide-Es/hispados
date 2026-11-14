@@ -1,7 +1,7 @@
 #!/bin/bash
 # Prueba de la imagen USB: arranque desde una memoria USB (xHCI) con un disco
 # duro vacío, INSTALL, y arranque posterior solo desde el disco duro. También
-# comprueba que INSTALL no toca un disco que ya tiene particiones.
+# comprueba que INSTALL no toca un disco ya instalado si se contesta que no.
 # USB image test: boot from USB, install to the hard disk, boot from the disk.
 set -u
 cd "$(dirname "$0")/.."
@@ -19,8 +19,8 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
   send "VER"
   send "DIR" 1.5
   send "INSTALL" 4
-  send "" 4                 # PAUSE
-  send "Y" 6                # FORMAT: Proceed (Y/N)?
+  send "S" 4                # crear la partición con todo el disco
+  send "S" 6                # darle formato e instalar
   sleep 12
   send "DIR D:\\" 2
 } | timeout 60 qemu-system-i386 -display none -serial stdio -monitor none $USBDEV \
@@ -34,9 +34,11 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 } | timeout 25 qemu-system-i386 -display none -serial stdio -monitor none \
       -drive file=$T/hdd.img,format=raw,if=ide -boot c -no-reboot > $T/log2 2>&1
 # 3) volver a arrancar desde USB: el disco ya tiene particiones -> no se toca
+cp $T/hdd.img $T/hdd_antes.img
 {
   sleep 6
   send "INSTALL" 4
+  send "N" 3                # ya instalado en D:: no se toca nada
 } | timeout 20 qemu-system-i386 -display none -serial stdio -monitor none $USBDEV \
       -drive if=none,id=hd,format=raw,file=$T/hdd.img -device ide-hd,drive=hd,bootindex=1 -no-reboot > $T/log3 2>&1
 for i in 1 2 3; do tr -d '\r' < $T/log$i | iconv -f CP437 -t UTF-8 > $T/l$i.txt; done
@@ -60,7 +62,9 @@ check $T/l2.txt "Bienvenido a Hispa-DOS"
 check $T/l2.txt " Directorio de C:\\"
 check $T/l2.txt "HISPADOS"
 echo "-- INSTALL con el disco ya ocupado --"
-check $T/l3.txt "El disco duro ya tiene particiones: no se toca nada."
+check $T/l3.txt "Unidad para Hispa-DOS: D: (disco 2, partición 1"
+check $T/l3.txt "No se ha instalado nada."
+if cmp -s $T/hdd.img $T/hdd_antes.img; then echo "  OK   el disco duro no ha cambiado"; else echo "  FAIL el disco duro ha cambiado"; fail=1; fi
 P=$(mktemp --suffix=.img)
 dd if=$T/hdd.img of=$P bs=512 skip=63 status=none
 if fsck.fat -n $P > $T/fsck 2>&1; then echo "  OK   fsck.fat del disco instalado"; else echo "  FAIL fsck.fat"; cat $T/fsck; fail=1; fi

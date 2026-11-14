@@ -18,7 +18,7 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
   sleep 4
   send "FDISK /PRI" 2
   send "FORMAT C: /V:DESTINO /AUTOTEST" 4
-  send "INSTALAR" 2
+  send "INSTALAR /?" 2
   send "INSTALAR A:" 2
   send "INSTALAR C:" 8
 } | timeout 40 qemu-system-i386 -display none -serial stdio -monitor none \

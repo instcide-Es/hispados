@@ -47,6 +47,6 @@ REM C:\HISPADOS\HSPRED
 SYSINFO
 ECHO.
 ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.
-IF EXIST C:\INSTALL.BAT ECHO Para instalarlo en un disco duro vacío escriba INSTALL;
-IF EXIST C:\INSTALL.BAT ECHO en una unidad ya formateada, INSTALAR unidad: (por ejemplo INSTALAR D:).
+IF EXIST C:\INSTALL.BAT ECHO Para instalarlo en el disco duro escriba INSTALL: le guía paso a paso
+IF EXIST C:\INSTALL.BAT ECHO y no toca esta memoria USB. Las particiones, a mano: PARTIR.
 :FIN

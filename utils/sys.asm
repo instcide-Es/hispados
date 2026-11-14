@@ -142,8 +142,33 @@ start:
         div ecx
         mov si, boot12
         cmp eax, 4085
-        jb .copy
+        jb .geo
         mov si, boot16
+.geo:
+        ; disco duro: la geometría y los sectores ocultos que da la BIOS para
+        ; ESE disco (los de ahora, aunque otro programa le diera formato) y la
+        ; unidad 80h, la que tendrá al arrancar solo desde él (el código de
+        ; arranque usa la que le pasa la BIOS en DL; esto es para los demás)
+        push si
+        mov ax, 0x440D
+        mov bl, [drv]
+        inc bl
+        mov cx, 0x0860
+        mov dx, params
+        int 0x21
+        pop si
+        jc .copy
+        cmp byte [params+1], 5
+        jne .copy
+        mov ax, [params+7+13]
+        test ax, ax
+        jz .copy
+        mov [boot+0x18], ax
+        mov ax, [params+7+15]
+        mov [boot+0x1A], ax
+        mov eax, [params+7+17]
+        mov [boot+0x1C], eax
+        mov byte [boot+0x24], 0x80
 .copy:
         ; código de arranque nuevo sin tocar el BPB (0Bh-3Dh)
         mov di, boot
@@ -312,4 +337,5 @@ msg_drv     db "?:", 13, 10, 0
 boot12:     incbin "build/boot.bin"
 boot16:     incbin "build/boot16.bin"
 boot:       times 512 db 0
+params:     times 40 db 0
 buf:

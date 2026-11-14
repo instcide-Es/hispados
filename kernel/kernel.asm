@@ -509,6 +509,27 @@ drives_scan:
         mov al, [bg_count]
         test al, al
         jz .done
+        ; Algunas BIOS, arrancando desde una memoria USB, cuentan solo esa
+        ; memoria en INT 13h 08h: se pregunta a los siguientes (80h+n...) con
+        ; AH=15h, que dice «disco duro» (AH=3) solo si existe.
+.probe:
+        cmp al, 8
+        jae .counted
+        push ax
+        mov dl, al
+        add dl, 0x80
+        mov ah, 0x15
+        push bp
+        call KSEG:l_int13
+        pop bp
+        mov bl, ah
+        pop ax
+        jc .counted
+        cmp bl, 3
+        jne .counted
+        inc al
+        jmp .probe
+.counted:
         mov [hd_total], al
         ; Letras como en MS-DOS: primero las particiones primarias de cada
         ; disco y después las unidades lógicas (las de la partición

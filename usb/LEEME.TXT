@@ -33,11 +33,24 @@ Menu de arranque: Normal o Juegos
   espera: EDITAR C:\CONFIG.SYS y poner MENUDEFAULT=JUEGOS,5
 
 Instalar en el disco duro
-  Escribe INSTALL. Solo instala en un disco duro vacio (sin particiones);
-  si tiene particiones no toca nada. Al final comprueba el sonido: pulsa S
-  si oyes el sonido y N si no (Esc salta este paso). Lo que suena queda
-  guardado en el disco duro y se usa desde el primer arranque. Despues
-  quita la memoria y reinicia.
+  Escribe INSTALL (o INSTALAR). Al arrancar desde la memoria USB, la BIOS
+  la pone como disco 1 (C:) y el disco duro como disco 2 (D: o la letra
+  que toque). INSTALL busca el disco duro, nunca esta memoria:
+    1. Si el disco duro no tiene particiones, ofrece crear una con todo
+       el disco (hasta 2 GB): se borra lo que tuviera. Pulsa S e Intro.
+       Si tiene particiones de otro sistema y espacio libre, ofrece crear
+       la de Hispa-DOS en ese espacio (sin borrar nada).
+    2. Dice en que unidad lo va a instalar y pregunta otra vez (S e Intro).
+       Si no tiene formato, se lo da.
+    3. Copia el sistema, deja la particion activa (y el MBR de Hispa-DOS si
+       el disco no tiene) y cambia CONFIG.SYS y AUTOEXEC.BAT para C:.
+    4. Comprueba el sonido: pulsa S si oyes el sonido y N si no (Esc salta
+       este paso). Lo que suena queda guardado en el disco duro.
+    5. Quita la memoria y reinicia: arranca desde el disco duro, como C:.
+  Para hacer las particiones a mano: PARTIR. Empieza por el disco duro; la
+  opcion 5 cambia de disco y la memoria sale como "Memoria USB de arranque
+  (no tocar)": para cambiar algo en ella hay que escribir SI. Despues,
+  INSTALAR D: (la letra que tenga la particion).
 
 Informe del equipo (para enviarlo)
   Escribe DIAGNOSTICO. Crea en esta memoria la carpeta \INFORMES\EQUIPO01
