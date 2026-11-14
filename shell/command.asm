@@ -7150,6 +7150,8 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
             db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
             db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10
+            db "  En la orden (la primera palabra, o tras «|») solo salen programas:", 13, 10
+            db "  .COM, .EXE y .BAT (con una ruta, también las carpetas para llegar).", 13, 10
             db "Flechas izquierda/derecha, Inicio, Fin y Ctrl+flechas (por palabras): mover el", 13, 10
             db "cursor por la línea. Supr y Retroceso: borrar. Insertar: insertar/sobrescribir.", 13, 10
             db "En un Mac (TECLADO /MAC): Ctrl+Retroceso = Supr, Alt+flechas = Inicio/Fin.", 13, 10, 0

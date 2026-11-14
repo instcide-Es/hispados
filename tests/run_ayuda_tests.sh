@@ -24,6 +24,7 @@ check "ETIQUETA [unidad:][etiqueta]"
 check "Uso: XCOPIAR origen [destino]"
 check "Desplaza los parámetros de un archivo por lotes"
 check "Tab: completar nombres de archivos y carpetas"
+check "solo salen programas:"
 n=$(grep -c "Hispa-DOS versión 0.9 (compatible con MS-DOS 6.22)" $T/log.txt)
 if [ "$n" -ge 2 ]; then echo "  OK   Versión (con tilde) y /ver"; else echo "  FAIL Versión y /ver ($n)"; fail=1; fi
 n=$(grep -c "Lista de órdenes internas" $T/log.txt)

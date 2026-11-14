@@ -5584,7 +5584,7 @@ line_tab_fin:
         mov [tab_max], cx
         cmp byte [tab_on], 0
         jne .next
-        ; principio de la palabra: tras el último espacio
+        ; principio de la palabra: tras el último espacio (o «|»)
         mov si, bx
 .ws:
         test si, si
@@ -5592,13 +5592,36 @@ line_tab_fin:
         push bx
         mov bx, di
         add bx, si
-        cmp byte [es:bx+1], ' '
+        mov al, [es:bx+1]
         pop bx
+        cmp al, ' '
+        je .wsd
+        cmp al, '|'
         je .wsd
         dec si
         jmp .ws
 .wsd:
         mov [tab_ws], si
+        ; ¿es la orden (primera palabra de la línea o tras «|»)? Entonces
+        ; solo se ofrecen programas (.COM, .EXE, .BAT)
+        mov byte [tab_prog], 1
+        push si
+.fw:
+        test si, si
+        jz .fwd
+        push bx
+        mov bx, di
+        add bx, si
+        mov al, [es:bx+1]
+        pop bx
+        dec si
+        cmp al, ' '
+        je .fw
+        cmp al, '|'
+        je .fwd
+        mov byte [tab_prog], 0      ; hay algo antes: es un parámetro
+.fwd:
+        pop si
         ; copiar lo escrito a tab_pref y buscar dónde acaba la carpeta
         push di
         push bx
@@ -5636,6 +5659,13 @@ line_tab_fin:
         jmp .cp
 .cpd:
         mov byte [tab_pref+bx], 0
+        ; en la orden, las carpetas solo si se ha escrito una ruta (para
+        ; poder llegar al programa); sin ruta, solo programas
+        mov byte [tab_pdir], 0
+        cmp word [tab_dl], 0
+        je .cpd2
+        mov byte [tab_pdir], 1
+.cpd2:
         pop bx
         pop di
         ; patrón: lo escrito + «*.*» (o «*» si ya lleva punto)
@@ -5761,6 +5791,11 @@ tab_search:
         jnz .no
         cmp byte [tab_dta+0x1E], '.'
         je .nx                      ; «.» y «..»
+        cmp byte [tab_prog], 0
+        je .ok1
+        call tab_esprog             ; en la orden: solo programas
+        jc .nx
+.ok1:
         mov ax, [tab_cnt]           ; (4Fh no conserva los registros)
         cmp ax, [tab_idx]
         je .yes
@@ -5799,6 +5834,60 @@ tab_search:
         pop dx
         pop cx
         pop bx
+        pop ax
+        ret
+
+; ¿sirve el nombre de tab_dta para la orden? Programa (.COM, .EXE, .BAT)
+; o, si se ha escrito una ruta, carpeta. -> CF si no sirve
+tab_esprog:
+        push ax
+        push si
+        test byte [tab_dta+0x15], 0x10
+        jz .fi
+        cmp byte [tab_pdir], 0
+        jne .si
+        jmp .no
+.fi:
+        mov si, tab_dta+0x1E
+.pt:
+        lodsb
+        test al, al
+        jz .no
+        cmp al, '.'
+        jne .pt
+        cmp byte [si+3], 0
+        jne .no
+        mov ax, [si]
+        and ax, 0xDFDF              ; a mayúsculas
+        cmp ax, 'CO'
+        jne .e
+        mov al, [si+2]
+        and al, 0xDF
+        cmp al, 'M'
+        je .si
+        jmp .no
+.e:
+        cmp ax, 'EX'
+        jne .b
+        mov al, [si+2]
+        and al, 0xDF
+        cmp al, 'E'
+        je .si
+        jmp .no
+.b:
+        cmp ax, 'BA'
+        jne .no
+        mov al, [si+2]
+        and al, 0xDF
+        cmp al, 'T'
+        je .si
+.no:
+        stc
+        jmp .r
+.si:
+        clc
+.r:
+        pop si
         pop ax
         ret
 
@@ -14672,6 +14761,8 @@ tab_dlt     resw 1                  ; Tab: cuánto se apartó lo de detrás
 tab_dot     resb 1
 tab_wrap    resb 1
 tab_isdir   resb 1
+tab_prog    resb 1                  ; Tab en la orden: solo programas
+tab_pdir    resb 1                  ;   ...y carpetas (si hay ruta)
 tab_ws      resw 1                  ; principio de la palabra en la línea
 tab_pl      resw 1
 tab_dl      resw 1                  ; longitud de la parte de carpeta
