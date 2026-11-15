@@ -98,7 +98,7 @@ fi
 # -- la ventana del Terminal, abierta en (100,60) --
 chk $T/t1.ppm titulo 100 60 activa "Terminal"
 # -- VER: la versión, escrita en el área de texto (claro sobre negro) --
-chk $T/t2.ppm busca 106 105 656 414 15 0 "Hispa-DOS 0.9.15"
+chk $T/t2.ppm busca 106 105 656 414 15 0 "Hispa-DOS 0.9.16"
 # -- ECHO: su argumento --
 chk $T/t3.ppm busca 106 105 656 414 15 0 "hola terminal"
 # -- Hispa-DOS sigue vivo tras salir --
