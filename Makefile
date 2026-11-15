@@ -299,11 +299,14 @@ HVPSIS = $(B)/CONFIG.HVP
 $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS
-HVPA = $(B)/PINTURA.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP
+HVPA = $(B)/PINTURA.HVP $(B)/PLUMA.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP
 # [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
 $(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# Pluma, el procesador de textos (accesorio: el 1 de HVP_CABECERA)
+$(B)/PLUMA.HVP: programas/pluma.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # el Reproductor de sonido y los sonidos propios (tools/mksample.py): HISPA.WAV,
 # su sonido de prueba, y CAMPANA.WAV, la campanita del volumen de Hispa
