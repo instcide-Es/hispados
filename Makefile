@@ -337,7 +337,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM $(B)/PROTECTOR.COM $(B)/TECLA.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS) $(RED)
 
-$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
+$(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.INI sistema/TECLAS.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
@@ -381,6 +381,10 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.I
 	mcopy -i $@ $(B)/PROTECTOR.COM ::HISPADOS/PROTECTO.COM
 	iconv -f UTF-8 -t CP437 sistema/ALIAS.INI | sed 's/$$/\r/' > $(B)/ALIAS.INI
 	mcopy -i $@ $(B)/ALIAS.INI ::HISPADOS/ALIAS.INI
+	# remapeo de teclas para teclados raros (docs/TECLADO.md); ejemplo sin
+	# remapeos activos, el instalador por red lo conserva al actualizar
+	iconv -f UTF-8 -t CP437 sistema/TECLAS.INI | sed 's/$$/\r/' > $(B)/TECLAS.INI
+	mcopy -i $@ $(B)/TECLAS.INI ::HISPADOS/TECLAS.INI
 	mcopy -i $@ $(B)/HSPRAM.SYS ::HISPADOS/HSPRAM.SYS
 	mcopy -i $@ $(B)/HSPTEST.SYS ::HISPADOS/HSPTEST.SYS
 	mcopy -i $@ $(B)/HSPXMS.SYS ::HISPADOS/HSPXMS.SYS

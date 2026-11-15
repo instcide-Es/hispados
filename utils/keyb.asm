@@ -42,6 +42,7 @@ dead        db 0
 insdn       db 0                    ; Alt+Retroceso sigue pulsado (no repetir)
 e0          db 0                    ; último código fue E0h
 altgr       db 0                    ; Alt derecho pulsado
+remap_n     db 0                    ; remapeos activos de \HISPADOS\TECLAS.INI
 
 ; código de tecla, normal, Mayús, AltGr (0 = lo que dé la BIOS)
 keytab:
@@ -117,6 +118,7 @@ int09:
         push si
         push ds
 .have:
+        call remap_apply            ; TECLAS.INI: traducir el código entrante
         mov ah, al
         ; seguir AltGr (E0 38 / E0 B8) por nuestra cuenta
         cmp al, 0xE0
@@ -393,6 +395,64 @@ flush_dead:
 vtab        dw acute_lo, acute_up, grave_lo, grave_up
             dw circ_lo, circ_up, diaer_lo, diaer_up
 
+; =============================================================================
+;  Remapeo de teclas (lo configura \HISPADOS\TECLAS.INI; lo lee load_teclas al
+;  cargar KEYB). Traduce el código de rastreo ENTRANTE antes del procesado
+;  propio de KEYB, así la BIOS procesa el código de DESTINO y, si el destino es
+;  una tecla modificadora (1D Ctrl, 2A/36 Mayús, 38 Alt), actualiza sus
+;  banderas: una tecla rara se puede convertir en un Ctrl de verdad.
+;
+;  Entrada: AL = código de rastreo (make, o break = make|80h). [cs:e0] = 1 si
+;  el código anterior fue el prefijo E0h (tecla extendida), 0 si no.
+;  Cambia AL y la copia de AX guardada en la pila del gancho (la que .chain
+;  devolverá a la BIOS). No toca nada si no hay remapeos o la tecla no está.
+;
+;  Cada entrada de remap_tab ocupa 3 octetos: origen (make 00-7Fh),
+;  extendida (0 = normal, 1 = necesita el prefijo E0h) y destino (make 00-7Fh).
+; =============================================================================
+MAXREMAP    equ 32
+remap_apply:
+        cmp byte [cs:remap_n], 0
+        je .r                       ; sin remapeos: no se hace nada
+        cmp al, 0xE0                ; el propio prefijo E0h no se traduce
+        je .r
+        push bp
+        push bx
+        push cx
+        push si
+        mov bp, sp                  ; [bp+18] = octeto bajo del AX del gancho
+        mov bl, al
+        and bl, 0x7F                ; make del código entrante
+        mov bh, al
+        and bh, 0x80                ; 80h = soltar (break)
+        mov cl, [cs:e0]             ; 0 = normal, 1 = extendida (E0 xx)
+        mov si, remap_tab
+        mov ch, [cs:remap_n]
+.find:
+        cmp [cs:si], bl             ; ¿coincide el origen?
+        jne .next
+        mov al, [cs:si+1]           ; ¿y la condición de extendida?
+        cmp al, cl
+        jne .next
+        mov al, [cs:si+2]           ; destino (make)
+        or al, bh                   ; conservar el bit de make/break
+        mov [bp+18], al             ; que la BIOS reciba el destino al encadenar
+        jmp .done
+.next:
+        add si, 3
+        dec ch
+        jnz .find
+        mov al, [bp+18]             ; sin coincidencia: AL se queda igual
+.done:
+        pop si
+        pop cx
+        pop bx
+        pop bp
+.r:
+        ret
+
+remap_tab   times MAXREMAP*3 db 0   ; origen, extendida, destino (x MAXREMAP)
+
 resident_end:
 
 ; =============================================================================
@@ -495,6 +555,7 @@ init:
         int 0x21
         ; ---- sin instalar ----
 .nores:
+        call load_teclas            ; leer \HISPADOS\TECLAS.INI (remapeos)
         mov al, [macopt]
         cmp al, 2
         je .nomac
@@ -512,6 +573,7 @@ init:
         and al, 1
         mov [active], al
         or al, [mac]
+        or al, [remap_n]            ; con remapeos de TECLAS.INI también se instala
         jnz .install
         mov si, msg_cur_us          ; nada que dejar residente
         call puts
@@ -548,6 +610,11 @@ init:
         mov si, msg_mac
         call puts
 .i2:
+        cmp byte [remap_n], 0
+        je .i3
+        mov si, msg_remap
+        call puts
+.i3:
         mov es, [0x2C]
         mov ah, 0x49
         int 0x21
@@ -809,6 +876,175 @@ a20_reopen:
         pop bx
         ret
 
+; =============================================================================
+;  Leer \HISPADOS\TECLAS.INI (y, si no, TECLAS.INI de la carpeta actual) y
+;  llenar la tabla de remapeos antes de quedarse residente. Si no existe, no
+;  hay remapeos y KEYB funciona igual que siempre.
+;
+;  Formato de TECLAS.INI (el mismo que escribirá la ventana «Teclado»):
+;    - Una línea por remapeo: «origen=destino».
+;    - Origen y destino son códigos de rastreo «make» en HEXADECIMAL.
+;      Origen: 2 cifras (p. ej. 5B) o, para teclas extendidas, 4 cifras con el
+;      prefijo E0 (p. ej. E05B). Destino: 2 cifras (p. ej. 1D = Ctrl).
+;    - Ejemplo: 5B=1D  -> la tecla cuyo make es 5B actúa como Ctrl izquierdo.
+;    - Líneas en blanco y las que empiezan por ; o # se ignoran.
+;    - Hasta MAXREMAP (32) remapeos; los de más se descartan.
+;  TECLA.COM ayuda a averiguar el código de rastreo de una tecla.
+; =============================================================================
+TECLAS_BUF  equ 2048
+load_teclas:
+        push cs
+        pop es
+        mov dx, teclas_path         ; primero \HISPADOS\TECLAS.INI
+        mov ax, 0x3D00
+        int 0x21
+        jnc .ok
+        mov dx, teclas_name         ; si no, TECLAS.INI (carpeta actual)
+        mov ax, 0x3D00
+        int 0x21
+        jc .r                       ; no hay fichero: sin remapeos
+.ok:
+        mov bx, ax
+        mov ah, 0x3F
+        mov cx, TECLAS_BUF
+        mov dx, teclas_buf
+        int 0x21
+        jnc .rd
+        xor ax, ax
+.rd:
+        mov si, ax
+        mov byte [teclas_buf+si], 0 ; cerrar el texto
+        mov ah, 0x3E
+        int 0x21
+        mov si, teclas_buf
+.line:
+        mov al, [si]                ; saltar espacios y tabuladores iniciales
+        cmp al, ' '
+        je .sp
+        cmp al, 9
+        jne .first
+.sp:
+        inc si
+        jmp .line
+.first:
+        test al, al
+        jz .r
+        cmp al, 26                  ; fin de fichero
+        je .r
+        cmp al, ';'
+        je .skip
+        cmp al, '#'
+        je .skip
+        cmp al, 13
+        je .skip
+        cmp al, 10
+        je .skip
+        call get_hex                ; origen (2 o 4 cifras)
+        jc .skip
+        xor bh, bh                  ; bh = extendida (0/1)
+        cmp cx, 4
+        jne .noext
+        cmp dh, 0xE0                ; 4 cifras: el byte alto ha de ser E0
+        jne .skip
+        mov bh, 1
+.noext:
+        mov bl, dl                  ; make del origen
+        and bl, 0x7F
+.eq:
+        mov al, [si]                ; el separador «=» (admite espacios antes)
+        cmp al, '='
+        je .eqok
+        cmp al, ' '
+        je .eqs
+        cmp al, 9
+        je .eqs
+        jmp .skip
+.eqs:
+        inc si
+        jmp .eq
+.eqok:
+        inc si
+.ws:
+        mov al, [si]                ; espacios tras el «=»
+        cmp al, ' '
+        je .wss
+        cmp al, 9
+        jne .dest
+.wss:
+        inc si
+        jmp .ws
+.dest:
+        call get_hex                ; destino (2 cifras)
+        jc .skip
+        mov al, dl
+        and al, 0x7F                ; destino make
+        mov cl, [remap_n]
+        cmp cl, MAXREMAP            ; ¿cabe otro?
+        jae .skip
+        movzx di, cl
+        mov cx, di
+        add di, di
+        add di, cx                  ; di = n * 3
+        add di, remap_tab
+        mov [di], bl                ; origen
+        mov [di+1], bh              ; extendida
+        mov [di+2], al              ; destino
+        inc byte [remap_n]
+.skip:
+        mov al, [si]                ; consumir hasta el fin de la línea
+        test al, al
+        jz .r
+        cmp al, 26
+        je .r
+        inc si
+        cmp al, 10
+        jne .skip
+        jmp .line
+.r:
+        ret
+
+; Leer cifras hexadecimales desde SI -> DX = valor (hasta 4 cifras), CX = nº de
+; cifras, SI avanza tras ellas. CF = 1 si no había ninguna cifra.
+get_hex:
+        xor dx, dx
+        xor cx, cx
+.g:
+        mov al, [si]
+        cmp al, 'a'
+        jb .noup
+        cmp al, 'f'
+        ja .noup
+        sub al, 32                  ; a mayúscula
+.noup:
+        cmp al, '0'
+        jb .end
+        cmp al, '9'
+        jbe .dig
+        cmp al, 'A'
+        jb .end
+        cmp al, 'F'
+        ja .end
+        sub al, 'A' - 10
+        jmp .put
+.dig:
+        sub al, '0'
+.put:
+        shl dx, 4
+        and al, 0x0F
+        or dl, al
+        inc si
+        inc cx
+        cmp cx, 4                   ; como mucho 4 cifras (E0 xx)
+        jb .g
+.end:
+        test cx, cx
+        jz .nc
+        clc
+        ret
+.nc:
+        stc
+        ret
+
 sm_a20      db 0
 sm_xms      dd 0
 lay         db 0                    ; 1 = SP/ES, 2 = US
@@ -836,5 +1072,11 @@ msg_cur_us  db "Teclado activo: estadounidense (US).", 13, 10, 0
 msg_mac     db "Teclado de Mac: Ctrl+Retroceso = Supr, Alt+flechas = Inicio/Fin/RePág/AvPág,", 13, 10
             db "Alt+Retroceso = Insertar", 13, 10, 0
 msg_nomac   db "Teclado de Mac: desactivado.", 13, 10, 0
+msg_remap   db "Remapeo de teclas de TECLAS.INI activo.", 13, 10, 0
+
+teclas_path db "\HISPADOS\TECLAS.INI", 0
+teclas_name db "TECLAS.INI", 0
 
 smbuf:                              ; SM_BUF + 2 octetos, detrás del programa
+teclas_buf  equ smbuf + SM_BUF + 2  ; TECLAS_BUF octetos para TECLAS.INI (solo
+                                    ; al arrancar; detrás de smbuf, no residente)
