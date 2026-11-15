@@ -615,6 +615,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_juegos2_tests.sh $(IMG)
 	tests/run_configuracion_tests.sh $(IMG)
+	tests/run_configuracion_red_tests.sh $(IMG)
 	tests/run_sorpresa_tests.sh $(IMG)
 	tests/run_protector_tests.sh $(IMG)
 	tests/run_pintura_tests.sh $(IMG)
@@ -627,6 +628,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_red_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)
 	tests/run_actualizar_tests.sh $(IMG)
+	tests/run_actualizar_hspred_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
 

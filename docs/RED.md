@@ -158,6 +158,11 @@ proyecto). Claves (sin importar mayúsculas; `;` y `#` empiezan comentarios):
 | `DNS=` | el servidor de nombres; con `DHCP=SI` también, y manda sobre el que da el DHCP |
 | `ACTUALIZAR=` | la dirección HTTP del archivo de versión que mira `ACTUALIZAR` (si no, la de por omisión). Opcional. |
 
+También se puede poner con ratón en **Hispa Ventanas**: Configuración ›
+apartado **«Red»** (una casilla para el DHCP y, a mano, la IP, la máscara, la
+puerta y el DNS). Escribe estas mismas claves en `RED.INI` (ver
+docs/VENTANAS.md); los cambios se aplican al reiniciar o al recargar HSPRED.
+
 La configuración que se consigue (por DHCP o de `RED.INI`) se guarda en
 `HSPRED` y la usan todos los programas sin volver a pedirla, hasta
 `CONFRED /RENOVAR` o reiniciar. La concesión de DHCP no se renueva sola (en

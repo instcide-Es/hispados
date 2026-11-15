@@ -702,6 +702,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice); [MEZCLADOR] el botón «Mezclador...», la tarjeta que lleva HSPSND y si está la «Sound Blaster para juegos» (`HSPSND /SB`: sí, no o «es la propia tarjeta»), con lo que hay que hacer para ponerla o quitarla (no se puede sin volver a cargar HSPSND, así que lo explica). Además, Configuración guarda cada segundo el mezclador de HSPSND en `\HISPADOS\SONIDO.INI` si ha cambiado (docs/MEZCLADOR.md) |
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
 | Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país |
+| Red | La red local del equipo (como las «Propiedades de TCP/IP» de Windows). Una casilla **«Obtener la dirección automáticamente (DHCP)»**; al quitarla, cuatro cuadros para la **IP**, la **máscara de subred**, la **puerta de enlace** y el **servidor DNS** a mano (cada uno `a.b.c.d`, con octetos de 0 a 255; con DHCP puesto, no salen). Arriba, el estado en marcha si HSPRED está cargado: la MAC y la IP que tiene. Se guarda en `\HISPADOS\RED.INI` (no en VENTANAS.INI); los cambios se aplican al reiniciar o al recargar HSPRED (`CONFRED /RENOVAR`). Ver docs/RED.md |
 
 Todo se aplica **al momento**. Lo de Pantalla, Ratón y Teclado se guarda en
 `VENTANAS.INI`: con «Guardar», al cerrar la ventana y, solo, unos tres

@@ -68,7 +68,7 @@ check "Disco USB: 32 MB en la unidad D:"
 check "Teclado USB preparado."
 check "Ratón USB preparado."
 check "A:\\>VER"
-check "Hispa-DOS versión 0.9.12 (compatible con MS-DOS 6.22)"
+check "Hispa-DOS versión 0.9.13 (compatible con MS-DOS 6.22)"
 check "Hola desde la memoria USBHUB"
 check "X=320 Y=100 B=0"
 if grep -qE "^X=3[3-9][0-9] Y=1[0-9][0-9] B=0" $T/log.txt; then ok "movimiento del ratón USB"; else ko "movimiento del ratón USB"; fi
@@ -208,7 +208,7 @@ echo "== Hispa-DOS teclado y ratón USB sin controlador de teclado (8042) =="
 check "Teclado USB preparado."
 check "Sin controlador de teclado (8042): las teclas van al búfer de la BIOS."
 check "A:\\>VER"
-check "Hispa-DOS versión 0.9.12 (compatible con MS-DOS 6.22)"
+check "Hispa-DOS versión 0.9.13 (compatible con MS-DOS 6.22)"
 n=$(grep -c "^Hola: 1-2, a.b$" $T/log.txt)
 if [ "$n" -ge 2 ]; then ok "mayúsculas, signos y flecha arriba (historial)"; else ko "mayúsculas, signos y flecha arriba: $n"; fi
 check "X=320 Y=100 B=0"
@@ -265,7 +265,7 @@ for MODE in serie U; do
     nocheck "Disco USB:"
   fi
   check "C:\\>VER"
-  check "Hispa-DOS versión 0.9.12 (compatible con MS-DOS 6.22)"
+  check "Hispa-DOS versión 0.9.13 (compatible con MS-DOS 6.22)"
   check " Directorio de C:\\NUEVA"
   check "EDITAR   COM"
   if fsck.fat -n $T/p.img > $T/fsck 2>&1; then ok "fsck.fat de la memoria de arranque"; else ko "fsck.fat"; cat $T/fsck; fi

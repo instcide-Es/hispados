@@ -113,14 +113,54 @@ start:
 esperar:
         mov bx, [puerto]
         call tcp_escuchar
+        mov byte [est_ant], 3           ; (diag) estado de partida: escuchando
 .espl:
         call red_sondear
         call tcp_estado
+        ; diagnóstico: si el estado del saludo TCP cambia, escribirlo en pantalla
+        ; y en CONSOLA.LOG (así se ve si el SYN llega y si se contesta el SYN+ACK)
+        cmp al, [est_ant]
+        je .mira
+        mov [est_ant], al
+        push ax
+        call diag_estado
+        pop ax
+.mira:
         cmp al, 2
         je conectada
         call tecla_esc
         jc salir
         jmp .espl
+
+; (diag) AL = estado TCP nuevo. Lo anuncia en la pantalla del equipo:
+;   4 = ha llegado un SYN y se ha contestado SYN+ACK (con la IP de quien llama)
+;   2 = conexión establecida
+;   3 = vuelto a escuchar
+diag_estado:
+        pushad
+        cmp al, 4
+        jne .e2
+        mov si, m_diag_syn
+        call puts
+        mov eax, [t_ip]
+        call ip_poner                   ; la IP de quien llama
+        mov si, m_fin_linea
+        call puts
+        jmp .x
+.e2:
+        cmp al, 2
+        jne .e3
+        mov si, m_diag_est
+        call puts
+        jmp .x
+.e3:
+        cmp al, 3
+        jne .x
+        mov si, m_diag_esc
+        call puts
+.x:
+        popad
+        ret
 nored:
         mov si, m_necesita
         call puts
@@ -835,6 +875,11 @@ m_conectado db "CONECTADO desde ", 0
 m_conectado2 db ". Esc para cerrar la sesión.", 13, 10, 0
 m_cerrada   db "Sesión cerrada. Esperando conexión...  (Esc para cerrar)", 13, 10, 0
 m_fin       db "CONSOLA cerrada. Puerto liberado.", 13, 10, 0
+; diagnóstico del saludo TCP (en la pantalla del equipo)
+m_diag_syn  db "[red] Ha llegado un SYN, contesto SYN+ACK, de ", 0
+m_diag_est  db "[red] Conexión TCP establecida.", 13, 10, 0
+m_diag_esc  db "[red] (vuelvo a escuchar: el saludo TCP no se completó)", 13, 10, 0
+m_fin_linea db 13, 10, 0
 ; al cliente (por la conexión)
 m_pide      db "Hispa-DOS CONSOLA. Introduzca el código de acceso: ", 0
 m_malcod    db "Código no válido.", 13, 10, 0
@@ -871,6 +916,7 @@ m_uso       db "Consola remota de Hispa-DOS: deja que alguien entre por la red a
         section .bss
 puerto      resw 1
 intentos    resb 1
+est_ant     resb 1                  ; (diag) estado TCP anterior, para ver los cambios
 uni_prev    resb 1
 codigo      resd 1
 cod_exp     resd 1

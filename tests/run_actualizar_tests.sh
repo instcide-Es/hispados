@@ -3,8 +3,10 @@
 # nueva del sistema. Arranca Hispa-DOS en QEMU con la red de usuario y un
 # servidor HTTP propio (python3 -m http.server en 127.0.0.1, que el invitado
 # ve como 10.0.2.2), y comprueba:
-#   (c) SIN red (antes de HSPRED): ACTUALIZAR avisa de que cargue HSPRED.
-#   (a) version=0.9.12 (igual que la instalada): «está al día».
+#   (c) SIN HSPRED a mano: ACTUALIZAR carga HSPRED solo (hay tarjeta) y, tras
+#       hacer DHCP, consulta el servidor; NO pide «Cargue HSPRED» (ese aviso es
+#       lo de siempre sólo cuando, tras cargarlo, no hay tarjeta de red).
+#   (a) version=0.9.13 (igual que la instalada): «está al día».
 #   (b) version=0.9.99 (mayor) con nota y descarga: «Hay una versión nueva:
 #       0.9.99», la nota y la dirección de descarga.
 #   (d) la dirección tomada de la clave ACTUALIZAR= de \HISPADOS\RED.INI
@@ -34,7 +36,7 @@ T=$(mktemp -d)
 PORT=${PORT:-8080}
 mkdir -p $T/www
 # los archivos de versión que sirve el servidor HTTP
-printf 'version=0.9.12\n'                                           > $T/www/aldia.txt
+printf 'version=0.9.13\n'                                           > $T/www/aldia.txt
 # el fichero en CP437 (como lo serviría un servidor real de Hispa-DOS): así
 # los acentos de la nota cuadran al pasar la salida de CP437 a UTF-8
 { printf '; archivo de version de prueba\n\n'
@@ -72,7 +74,7 @@ ok() { echo "  OK   $1"; }
 ko() { echo "  FAIL $1"; fail=1; }
 check() { if grep -qF -- "$2" $T/$1.txt; then ok "$2"; else ko "$2"; fi; }
 
-CMDS=('4|ACTUALIZAR'                                 # (c) sin HSPRED -> avisa
+CMDS=("8|ACTUALIZAR $U/aldia.txt"                    # (c) sin HSPRED a mano -> lo carga solo
       '3|HSPRED' '4|CONFRED'
       "7|ACTUALIZAR $U/aldia.txt"                    # (a) al día
       "7|ACTUALIZAR $U/nueva.txt"                    # (b) versión nueva
@@ -85,10 +87,15 @@ CMDS=('4|ACTUALIZAR'                                 # (c) sin HSPRED -> avisa
 echo "== Hispa-DOS ACTUALIZAR: $NIC =="
 corre f 120 "${CMDS[@]}"
 
-# (c) sin HSPRED
-check f "Cargue HSPRED y configure la red (CONFRED) antes de buscar"
+# (c) sin HSPRED a mano: ACTUALIZAR lo carga solo y NO pide cargarlo
+check f "Cargando el controlador de red (HSPRED)"
+if grep -qF -- "Cargue HSPRED y configure la red (CONFRED) antes de buscar" $T/f.txt; then
+  ko "no debe pedir «Cargue HSPRED» (hay tarjeta: lo carga solo)"
+else
+  ok "no pide «Cargue HSPRED» (lo carga solo)"
+fi
 # (a) al día
-check f "Hispa-DOS 0.9.12 está al día."
+check f "Hispa-DOS 0.9.13 está al día."
 # (b) versión nueva, con nota y descarga
 check f "Hay una versión nueva: 0.9.99"
 check f "Batería en la barra y consola remota"

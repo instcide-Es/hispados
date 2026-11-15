@@ -42,7 +42,7 @@ CLI_AL      equ 376
 PX          equ 152                 ; donde empieza el apartado
 PAN_AN      equ 388
 SEC_AL      equ 34                  ; alto de cada apartado en el selector
-N_SEC       equ 6
+N_SEC       equ 7                   ; (Pantalla..Sistema y Red)
 N_DIB       equ 10                  ; dibujos del fondo
 N_TEMAS     equ 8
 ID_SEC      equ 10
@@ -54,6 +54,23 @@ ID_PAN      equ 100                 ; los controles del apartado: 100-159
 ID_FIJO     equ 159                 ; (un texto que no cambia)
 WM_MONTAR   equ WM_USER + 60
 WM_APARTADO equ WM_USER + 61        ; [CONTEXTO] (del escritorio) ECX=apartado que se enseña
+; [RED] los controles del apartado «Red» (ids libres, 100-159)
+RED_STATUS  equ 151                 ; el estado (MAC e IP) en marcha
+RED_DHCP    equ 152                 ; la casilla «Obtener la dirección... (DHCP)»
+RED_IP      equ 153                 ; los cuadros de las direcciones (DHCP=NO)
+RED_MASK    equ 154
+RED_GW      equ 155
+RED_DNS     equ 156
+RED_BUFSZ   equ 1024                ; RED.INI es pequeño
+; la configuración IP compartida que da HSPRED (INT 2Fh DA00h; ver drivers/
+; hspred.asm y docs/RED.md); la MAC sale de DA03h (los datos de /INFO)
+RC_FLAGS    equ 0                   ; bit 0 válida, bit 1 por DHCP
+RC_IP       equ 2
+RC_MASK     equ 6
+RC_GW       equ 10
+RC_DNS      equ 14
+RC_LEN      equ 30
+RC_MACOFF   equ 18                  ; la MAC dentro de los datos de /INFO
 LOGO_AN     equ 176                 ; el letrero del salvapantallas
 LOGO_AL     equ 44
 ; los dibujos del salvapantallas (para añadir otro: su nombre en sal_nombres,
@@ -254,9 +271,30 @@ pl_sistema:
         PLANTILLA EST, sis_txt, H, PX, 40, PAN_AN, 290, 150
         dd 0
 
+; ---- Red ----
+; lo que está siempre: el estado, la casilla de DHCP y la nota
+pl_red:
+        PLANTILLA EST, t_rd_est, H, PX, 40, PAN_AN, 18, ID_FIJO
+        PLANTILLA EST, 0, H, PX, 60, PAN_AN, 56, RED_STATUS
+        PLANTILLA BOT, t_rd_dhcp, HT | BS_CASILLA, PX, 122, 380, 20, RED_DHCP
+        PLANTILLA EST, t_rd_nota, H, PX, 300, PAN_AN, 34, ID_FIJO
+        dd 0
+; los cuadros de las direcciones, solo con DHCP=NO (IP a mano)
+pl_red_manual:
+        PLANTILLA EST, t_rd_ip, H, PX, 156, 160, 18, ID_FIJO
+        PLANTILLA EDT, 0, HT, PX + 168, 152, 180, 22, RED_IP
+        PLANTILLA EST, t_rd_mask, H, PX, 190, 160, 18, ID_FIJO
+        PLANTILLA EDT, 0, HT, PX + 168, 186, 180, 22, RED_MASK
+        PLANTILLA EST, t_rd_gw, H, PX, 224, 160, 18, ID_FIJO
+        PLANTILLA EDT, 0, HT, PX + 168, 220, 180, 22, RED_GW
+        PLANTILLA EST, t_rd_dns, H, PX, 258, 160, 18, ID_FIJO
+        PLANTILLA EDT, 0, HT, PX + 168, 254, 180, 22, RED_DNS
+        dd 0
+
 listas      dd pl_fijos, pl_pantalla, pl_raton, pl_teclado, pl_tecl_si, pl_tecl_no
-            dd pl_sonido, pl_sonido_no, pl_fecha, pl_sistema, 0
+            dd pl_sonido, pl_sonido_no, pl_fecha, pl_sistema, pl_red, pl_red_manual, 0
 paneles     dd pan_pantalla, pan_raton, pan_teclado, pan_sonido, pan_fecha, pan_sistema
+            dd pan_red
 sel_pintores dd pin_color, pin_dibujo, pin_seccion
 dib_tabla   dd dib_rombos, dib_liso, dib_puntos, dib_rayas, dib_cuadros
             dd dib_ladrillos, dib_olas, dib_damero, dib_trama, dib_zigzag
@@ -383,13 +421,14 @@ ritmos      dw 300, 267, 240, 218, 200, 185, 171, 160, 150, 133, 120, 109, 100, 
 
 ; ---- textos ----
 t_titulo    db "Configuración", 0
-secc_nombres dd n_s0, n_s1, n_s2, n_s3, n_s4, n_s5
+secc_nombres dd n_s0, n_s1, n_s2, n_s3, n_s4, n_s5, n_s6
 n_s0        db "Pantalla", 0
 n_s1        db "Ratón", 0
 n_s2        db "Teclado", 0
 n_s3        db "Sonido", 0
 n_s4        db "Fecha y hora", 0
 n_s5        db "Sistema", 0
+n_s6        db "Red", 0
 t_est0      db "Se aplica al momento.", 0
 t_est1      db "Hay cambios sin guardar.", 0
 t_est2      db "Guardado en VENTANAS.INI.", 0
@@ -513,6 +552,59 @@ t_i_tec_sp  db "Teclado: español (TECLADO)", 0
 t_i_tec_us  db "Teclado: estadounidense (TECLADO)", 0
 t_i_tec_no  db "Teclado: el de la BIOS (TECLADO no está cargado)", 0
 t_i_pais    db "País: España (página de códigos 437)", 0
+; ---- Red ----
+t_rd_est    db "Estado de la red:", 0
+t_rd_dhcp   db "Obtener la dirección automáticamente (DHCP)", 0
+t_rd_nota   db "Los cambios de red se aplican al reiniciar o al", 10
+            db "recargar HSPRED (CONFRED /RENOVAR).", 0
+t_rd_ip     db "Dirección IP:", 0
+t_rd_mask   db "Máscara de subred:", 0
+t_rd_gw     db "Puerta de enlace:", 0
+t_rd_dns    db "Servidor DNS:", 0
+t_rd_hay    db "Controlador de red cargado (HSPRED).", 0
+t_rd_nohay  db "No hay controlador de red cargado.", 10
+            db "Cargue HSPRED (está en \HISPADOS) para la red.", 0
+t_rd_mac    db "Dirección MAC: ", 0
+t_rd_ipact  db "Dirección IP actual: ", 0
+t_rd_sinip  db "Todavía sin dirección IP (ejecute CONFRED).", 0
+t_rd_guard  db "Configuración de red guardada.", 0
+t_rd_malip  db "La dirección IP no es válida.", 0
+t_rd_malmask db "La máscara de subred no es válida.", 0
+t_rd_malgw  db "La puerta de enlace no es válida.", 0
+t_rd_maldns db "El servidor DNS no es válido.", 0
+m_mask_def  db "255.255.255.0", 0
+; RED.INI (docs/RED.md): el encabezado y las claves que escribe
+k_red_cab   db "; RED.INI de Hispa-DOS: la configuración de la red (docs/RED.md).", 13, 10
+            db "; Lo escribe el apartado «Red» de Configuración; también a mano.", 13, 10
+            db "; Los cambios se aplican al reiniciar o al recargar HSPRED.", 13, 10, 0
+k_dhcp      db "DHCP=", 0
+k_ip        db "IP=", 0
+k_mask      db "MASCARA=", 0
+k_puerta    db "PUERTA=", 0
+k_dns       db "DNS=", 0
+k_act       db "ACTUALIZAR=", 0
+k_si        db "SI", 0
+k_no        db "NO", 0
+n_red       db "RED.INI", 0
+; las claves que reconoce la lectura de RED.INI: nombre, destino, tipo
+; (0 = DHCP SI/NO, 1 = dirección, 2 = texto libre)
+red_claves  dd kr_dhcp, a_dhcp, 0
+            dd kr_ip, r_ip_txt, 1
+            dd kr_mask, r_mask_txt, 1
+            dd kr_mask2, r_mask_txt, 1
+            dd kr_puerta, r_gw_txt, 1
+            dd kr_gw, r_gw_txt, 1
+            dd kr_dns, r_dns_txt, 1
+            dd kr_act, r_act_txt, 2
+            dd 0
+kr_dhcp     db "DHCP", 0
+kr_ip       db "IP", 0
+kr_mask     db "MASCARA", 0
+kr_mask2    db "MASK", 0
+kr_puerta   db "PUERTA", 0
+kr_gw       db "GATEWAY", 0
+kr_dns      db "DNS", 0
+kr_act      db "ACTUALIZAR", 0
 
 ; =============================================================================
 ;  La entrada: EBX=base ESI=ruta del módulo EDI=parámetros
@@ -539,6 +631,15 @@ entrada:
         mov esi, n_ini
         call hvl_cad
         mov byte [edi], 0
+        ; [RED] RED.INI, en la misma carpeta que CONFIG.HVP
+        mov esi, ini_ruta
+        mov edi, red_ruta
+        mov ecx, ebx
+        sub ecx, ini_ruta           ; lo que va hasta el último '\'
+        rep movsb
+        mov esi, n_red
+        call hvl_cad
+        mov byte [edi], 0
         pop edi
         mov esi, edi
         mov al, 'A'
@@ -560,6 +661,7 @@ entrada:
 .cl2:
         call de_fabrica
         call ini_leer
+        call red_ini_leer           ; [RED] la configuración de RED.INI
         ; «Sorpresa»: al arrancar (residente) se sortea un tema nuevo
         cmp byte [residente], 0
         je .sinsorp
@@ -662,6 +764,7 @@ cfg_proc:
         je .c1
         call guardar
 .c1:
+        call red_guardar            ; [RED] RED.INI al cerrar (si procede)
         cmp byte [residente], 0
         jne .c2
         mov eax, WM_CLOSE
@@ -804,6 +907,7 @@ ordenes:
         movzx ecx, cx
         cmp ecx, ID_SEC
         jne .o1
+        call red_capturar           ; [RED] guarda los campos antes de cambiar
         mov eax, [edx+V_D0]         ; otro apartado
         mov [seccion], eax
         call panel_desmontar
@@ -830,6 +934,7 @@ ordenes:
         cmp ecx, ID_GUARDAR
         jne .o3
         call guardar
+        call red_guardar            ; [RED] y RED.INI si estamos en «Red»
         jmp .hecho
 .o3:
         cmp ecx, ID_CERRAR
@@ -842,6 +947,17 @@ ordenes:
 .o4:
         cmp ecx, ID_PAN
         jb .hecho
+        ; ---- Red: la casilla de DHCP (los cuadros no avisan) ----
+        cmp ecx, RED_DHCP
+        jne .nored
+        call red_capturar           ; conserva lo escrito antes de recomponer
+        call marca_de
+        mov [a_dhcp], eax
+        call panel_desmontar
+        call panel_montar
+        mov byte [red_cambiado], 1
+        jmp .cambio
+.nored:
         ; ---- Pantalla ----
         cmp ecx, 100
         jne .p1
@@ -2491,6 +2607,560 @@ ini_escribir:
         ret
 
 ; =============================================================================
+;  Red (\HISPADOS\RED.INI, docs/RED.md). Elegir entre DHCP (automática) o una
+;  IP estática a mano (IP, máscara, puerta y DNS). RED.INI es otro fichero,
+;  con su propia lectura y escritura (no va en ini_tabla de VENTANAS.INI).
+; =============================================================================
+pan_red:
+        mov esi, pl_red
+        HV ven_lista
+        mov ecx, RED_DHCP
+        mov edx, [a_dhcp]
+        call marca_poner
+        cmp dword [a_dhcp], 0
+        jne .st                     ; con DHCP=SI, sin cuadros a mano
+        mov esi, pl_red_manual
+        HV ven_lista
+        mov ecx, RED_IP
+        mov esi, r_ip_txt
+        call red_put_txt
+        mov ecx, RED_MASK
+        mov esi, r_mask_txt
+        call red_put_txt
+        mov ecx, RED_GW
+        mov esi, r_gw_txt
+        call red_put_txt
+        mov ecx, RED_DNS
+        mov esi, r_dns_txt
+        call red_put_txt
+.st:
+        ; sigue: el estado (MAC e IP en marcha, si hay HSPRED)
+
+; arma el texto del estado de la red y lo pone en el control RED_STATUS
+red_estado:
+        pushad
+        call red_detectar
+        mov edi, red_txt
+        cmp byte [red_hay], 0
+        je .nohay
+        mov esi, t_rd_hay
+        call hvl_cad
+        mov al, 10
+        stosb
+        mov esi, t_rd_mac
+        call hvl_cad
+        mov esi, red_mac
+        call mac_fmt
+        mov al, 10
+        stosb
+        test byte [red_cfg + RC_FLAGS], 1
+        jz .sinip
+        mov esi, t_rd_ipact
+        call hvl_cad
+        mov esi, red_cfg + RC_IP
+        call ip_fmt
+        jmp .fin
+.sinip:
+        mov esi, t_rd_sinip
+        call hvl_cad
+        jmp .fin
+.nohay:
+        mov esi, t_rd_nohay
+        call hvl_cad
+.fin:
+        mov byte [edi], 0
+        mov ecx, RED_STATUS
+        mov esi, red_txt
+        call texto_poner
+        popad
+        ret
+
+; mira si HSPRED está cargado (INT 2Fh DA00h) y, si lo está, copia la
+; configuración IP compartida (red_cfg) y la MAC (red_mac, de DA03h). En modo
+; protegido la INT se hace en modo real por la función 0300h del DPMI, como
+; keyb_ptr (el puntero que da es de modo real y se pasa a plano con DA06h).
+red_detectar:
+        pushad
+        mov byte [red_hay], 0
+        ; --- DA00h: ¿está? y ES:DI = configuración IP compartida ---
+        mov edi, rmreg
+        mov ecx, 13
+        xor eax, eax
+        rep stosd
+        mov dword [rmreg + 0x1C], 0xDA00
+        mov edi, rmreg
+        mov eax, 0x0300
+        mov ebx, 0x002F
+        xor ecx, ecx
+        int 0x31
+        jc .x
+        cmp byte [rmreg + 0x1C], 0xFF
+        jne .x
+        cmp word [rmreg + 0x10], 0x5248     ; «HR»
+        jne .x
+        movzx esi, word [rmreg + 0x22]      ; ES
+        shl esi, 4
+        movzx eax, word [rmreg]             ; DI
+        add esi, eax
+        call red_flat
+        mov edi, red_cfg
+        mov ecx, RC_LEN
+        rep movsb
+        mov byte [red_hay], 1
+        ; --- DA03h: ES:BX = datos de /INFO; la MAC en +RC_MACOFF ---
+        mov edi, rmreg
+        mov ecx, 13
+        xor eax, eax
+        rep stosd
+        mov dword [rmreg + 0x1C], 0xDA03
+        mov edi, rmreg
+        mov eax, 0x0300
+        mov ebx, 0x002F
+        xor ecx, ecx
+        int 0x31
+        jc .x
+        movzx esi, word [rmreg + 0x22]      ; ES
+        shl esi, 4
+        movzx eax, word [rmreg + 0x10]      ; BX
+        add esi, eax
+        call red_flat
+        add esi, RC_MACOFF
+        mov edi, red_mac
+        mov ecx, 6
+        rep movsb
+.x:
+        popad
+        ret
+
+; ESI = dirección lineal de modo real -> ESI = puntero plano en DS (resta la
+; base del selector de datos, DPMI 0006h)
+red_flat:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        mov eax, 0x0006
+        mov ebx, ds
+        int 0x31
+        jc .x
+        shl ecx, 16
+        mov cx, dx
+        sub esi, ecx
+.x:
+        pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
+; ESI = 6 octetos -> «xx:xx:xx:xx:xx:xx» en EDI (que avanza)
+mac_fmt:
+        push eax
+        push ecx
+        push esi
+        mov ecx, 6
+.b:
+        mov al, [esi]
+        inc esi
+        push eax
+        shr al, 4
+        call .hex
+        pop eax
+        call .hex
+        dec ecx
+        jz .x
+        mov al, ':'
+        stosb
+        jmp .b
+.x:
+        pop esi
+        pop ecx
+        pop eax
+        ret
+.hex:
+        and al, 15
+        cmp al, 10
+        jb .d
+        add al, 7
+.d:
+        add al, '0'
+        stosb
+        ret
+
+; ESI = 4 octetos -> «a.b.c.d» en EDI (que avanza)
+ip_fmt:
+        push eax
+        push ecx
+        push esi
+        mov ecx, 4
+.b:
+        movzx eax, byte [esi]
+        inc esi
+        call hvl_num
+        dec ecx
+        jz .x
+        mov al, '.'
+        stosb
+        jmp .b
+.x:
+        pop esi
+        pop ecx
+        pop eax
+        ret
+
+; ECX = id, ESI = texto: lo pone en un cuadro de edición
+red_put_txt:
+        pushad
+        call hija
+        test eax, eax
+        jz .x
+        mov ebp, eax
+        mov eax, WM_SETTEXT
+        mov edx, esi
+        HV msg_enviar
+.x:
+        popad
+        ret
+
+; ECX = id, EDI = búfer (20): lee el texto de un cuadro de edición
+red_get_txt:
+        pushad
+        call hija
+        test eax, eax
+        jz .x
+        mov ebp, eax
+        mov byte [edi], 0
+        mov eax, WM_GETTEXT
+        mov ecx, 18
+        mov edx, edi
+        HV msg_enviar
+.x:
+        popad
+        ret
+
+; si el panel Red está a la vista y en modo manual, lee los cuatro cuadros al
+; modelo (los cuadros de edición no avisan de los cambios)
+red_capturar:
+        cmp byte [montado], 0
+        je .x
+        cmp dword [seccion], 6
+        jne .x
+        cmp dword [a_dhcp], 0
+        jne .x
+        push ecx
+        push edi
+        mov ecx, RED_IP
+        mov edi, r_ip_txt
+        call red_get_txt
+        mov ecx, RED_MASK
+        mov edi, r_mask_txt
+        call red_get_txt
+        mov ecx, RED_GW
+        mov edi, r_gw_txt
+        call red_get_txt
+        mov ecx, RED_DNS
+        mov edi, r_dns_txt
+        call red_get_txt
+        pop edi
+        pop ecx
+.x:
+        ret
+
+; lee RED.INI al modelo (a_dhcp y r_*_txt). Por omisión DHCP=SI.
+red_ini_leer:
+        pushad
+        mov dword [a_dhcp], 1
+        mov byte [r_ip_txt], 0
+        mov edi, r_mask_txt
+        mov esi, m_mask_def
+        call hvl_cad
+        mov byte [edi], 0
+        mov byte [r_gw_txt], 0
+        mov byte [r_dns_txt], 0
+        mov byte [r_act_txt], 0
+        mov esi, red_ruta
+        mov edi, red_buf
+        mov ecx, RED_BUFSZ
+        call hvl_leer
+        mov esi, red_buf
+.linea:
+        mov al, [esi]
+        test al, al
+        jz .fin
+        cmp al, ' '
+        ja .l1
+        inc esi
+        jmp .linea
+.l1:
+        cmp al, ';'
+        je .salta
+        cmp al, '#'
+        je .salta
+        cmp al, '['
+        je .salta
+        mov ebx, red_claves
+.t:
+        mov edi, [ebx]
+        test edi, edi
+        jz .salta
+        mov edx, esi
+.c:
+        mov al, [edi]
+        test al, al
+        jz .fk
+        mov ah, [edx]
+        or ax, 0x2020               ; sin mirar mayúsculas
+        cmp al, ah
+        jne .otra
+        inc edi
+        inc edx
+        jmp .c
+.fk:
+        cmp byte [edx], ' '
+        jne .fk2
+        inc edx
+        jmp .fk
+.fk2:
+        cmp byte [edx], '='
+        jne .otra
+        inc edx
+.fe:
+        cmp byte [edx], ' '
+        jne .val
+        inc edx
+        jmp .fe
+.val:
+        cmp dword [ebx + 8], 0      ; tipo 0 = DHCP
+        jne .txt
+        mov al, [edx]
+        or al, 0x20
+        mov dword [a_dhcp], 1       ; SI/SÍ/YES/1 -> 1
+        cmp al, 'n'
+        jne .salta
+        mov dword [a_dhcp], 0       ; NO -> 0
+        jmp .salta
+.txt:
+        mov edi, [ebx + 4]          ; el destino
+.cp:
+        mov al, [edx]
+        cmp al, ' '
+        jbe .cpf
+        mov [edi], al
+        inc edi
+        inc edx
+        jmp .cp
+.cpf:
+        mov byte [edi], 0
+        jmp .salta
+.otra:
+        add ebx, 12
+        jmp .t
+.salta:
+        mov al, [esi]
+        test al, al
+        jz .fin
+        inc esi
+        cmp al, 10
+        jne .salta
+        jmp .linea
+.fin:
+        popad
+        ret
+
+; guarda RED.INI cuando procede (al pulsar «Guardar» en «Red» o al cerrar)
+red_guardar:
+        pushad
+        call red_capturar
+        cmp byte [montado], 0
+        je .rc
+        cmp dword [seccion], 6
+        je .wr
+.rc:
+        cmp byte [red_cambiado], 0
+        je .x
+.wr:
+        call red_escribir_ini
+        jc .x
+        mov byte [red_cambiado], 0
+.x:
+        popad
+        ret
+
+; escribe RED.INI desde el modelo. Con DHCP=NO valida las direcciones; si
+; alguna no vale, avisa abajo y no escribe (CF=1).
+red_escribir_ini:
+        pushad
+        cmp dword [a_dhcp], 0
+        jne .ok                     ; DHCP=SI: nada que validar
+        mov esi, r_ip_txt
+        call ip_valida
+        mov esi, t_rd_malip
+        jc .error
+        mov esi, r_mask_txt
+        call ip_valida
+        mov esi, t_rd_malmask
+        jc .error
+        mov esi, r_gw_txt           ; puerta: opcional
+        call vacio
+        jc .dns
+        mov esi, r_gw_txt
+        call ip_valida
+        mov esi, t_rd_malgw
+        jc .error
+.dns:
+        mov esi, r_dns_txt          ; DNS: opcional
+        call vacio
+        jc .ok
+        mov esi, r_dns_txt
+        call ip_valida
+        mov esi, t_rd_maldns
+        jc .error
+.ok:
+        mov edi, red_buf
+        mov esi, k_red_cab
+        call hvl_cad
+        mov esi, k_dhcp
+        call hvl_cad
+        mov esi, k_si
+        cmp dword [a_dhcp], 0
+        jne .d1
+        mov esi, k_no
+.d1:
+        call hvl_cad
+        call .crlf
+        cmp dword [a_dhcp], 0
+        jne .act                    ; DHCP=SI: sin direcciones a mano
+        mov ebx, k_ip
+        mov edx, r_ip_txt
+        call .linea
+        mov ebx, k_mask
+        mov edx, r_mask_txt
+        call .linea
+        mov esi, r_gw_txt
+        call vacio
+        jc .l1
+        mov ebx, k_puerta
+        mov edx, r_gw_txt
+        call .linea
+.l1:
+        mov esi, r_dns_txt
+        call vacio
+        jc .act
+        mov ebx, k_dns
+        mov edx, r_dns_txt
+        call .linea
+.act:
+        mov esi, r_act_txt          ; conservar ACTUALIZAR= si existía
+        call vacio
+        jc .wr
+        mov esi, k_act
+        call hvl_cad
+        mov esi, r_act_txt
+        call app_trim
+        call .crlf
+.wr:
+        mov ecx, edi
+        mov edx, red_buf
+        sub ecx, edx
+        mov esi, red_ruta
+        call hvl_escribir
+        mov ecx, ID_ESTADO
+        mov esi, t_rd_guard
+        call texto_poner
+        popad
+        clc
+        ret
+.error:
+        mov ecx, ID_ESTADO
+        call texto_poner            ; ESI = el mensaje de error
+        popad
+        stc
+        ret
+; EBX = clave (con «=»), EDX = valor: escribe «clave=valor» y un salto
+.linea:
+        mov esi, ebx
+        call hvl_cad
+        mov esi, edx
+        call app_trim
+.crlf:
+        mov ax, 0x0A0D
+        stosw
+        ret
+
+; copia ESI -> EDI hasta un carácter <= espacio (recorta el final)
+app_trim:
+        push eax
+.c:
+        mov al, [esi]
+        cmp al, ' '
+        jbe .x
+        stosb
+        inc esi
+        jmp .c
+.x:
+        pop eax
+        ret
+
+; ESI = texto -> CF=1 si está vacío (el primer carácter es <= espacio)
+vacio:
+        push eax
+        movzx eax, byte [esi]
+        cmp eax, ' ' + 1
+        pop eax
+        ret
+
+; ESI = texto -> CF=0 si es «a.b.c.d» con cuatro octetos de 0 a 255
+ip_valida:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        push esi
+        mov ecx, 4
+.oct:
+        xor ebx, ebx                ; valor del octeto
+        xor edx, edx                ; cifras
+.dig:
+        movzx eax, byte [esi]
+        sub al, '0'
+        cmp al, 9
+        ja .enddig
+        imul ebx, 10
+        add ebx, eax
+        inc esi
+        inc edx
+        jmp .dig
+.enddig:
+        test edx, edx
+        jz .bad
+        cmp edx, 3
+        ja .bad
+        cmp ebx, 255
+        ja .bad
+        dec ecx
+        jz .last
+        cmp byte [esi], '.'
+        jne .bad
+        inc esi
+        jmp .oct
+.last:
+        mov al, [esi]               ; tras el 4.º octeto, el final
+        cmp al, ' '
+        jbe .okf
+.bad:
+        stc
+        jmp .x
+.okf:
+        clc
+.x:
+        pop esi
+        pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
+; =============================================================================
 ;  Controles propios
 ; =============================================================================
 ; ---- el selector: una rejilla de casillas de las que se elige una ----
@@ -3503,6 +4173,8 @@ a_ctrlclic  resd 1                  ; [CONTEXTO] Ctrl+clic = botón derecho (0/1
 a_espera    resd 1                  ; teclado: 0-3 (-1: no se toca)
 a_repet     resd 1                  ; 0-31, 31 lo más rápido (-1: no se toca)
 a_dist      resd 1                  ; 1 española, 0 estadounidense (-1: no se toca)
+; [RED] el modelo del apartado «Red» (RED.INI, aparte de VENTANAS.INI)
+a_dhcp      resd 1                  ; 1 DHCP (automática), 0 IP a mano
 ; el salvapantallas
 salva_ven   resd 1
 salva_an    resd 1
@@ -3526,6 +4198,8 @@ cambiado    resb 1
 ult_seg     resb 1
 salva_listo resb 1
 salva_hora  resb 1
+red_hay     resb 1                  ; [RED] HSPRED cargado
+red_cambiado resb 1                 ; hay cambios de red sin guardar
             alignb 4
 plant       resb P_TAM
 plant2      resb P_TAM
@@ -3550,6 +4224,18 @@ l_fecha     resb 48
 l_hora      resb 12
 l_res       resb 40
 sis_txt     resb 800
+; [RED] el apartado «Red»
+red_ruta    resb 100
+r_ip_txt    resb 20
+r_mask_txt  resb 20
+r_gw_txt    resb 20
+r_dns_txt   resb 20
+r_act_txt   resb 100                ; ACTUALIZAR= (se conserva)
+red_mac     resb 6
+            alignb 4
+red_cfg     resb 32                 ; configuración IP compartida (30 octetos)
+red_txt     resb 256               ; el texto del estado
+red_buf     resb RED_BUFSZ + 16
 ini_buf     resb INI_MAX + 16
 ll_col      resb LL_MAXC * 8        ; la lluvia: las columnas
 ll_car      resb LL_MAXC * LL_MAXF  ; y las letras de cada casilla

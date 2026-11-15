@@ -6,7 +6,7 @@
 ;  Mira por la red (HTTP, sin cifrar) si hay una versión más nueva de
 ;  Hispa-DOS que la instalada. Lee un archivo de texto con la última versión
 ;  (una cosa por línea):
-;      version=0.9.12
+;      version=0.9.13
 ;      descarga=http://ejemplo/hispados/
 ;      nota=Lo nuevo de esta versión
 ;  Compara «version=» con la versión del sistema (lib/version.inc) y avisa si
@@ -36,10 +36,17 @@ INI_MAX     equ 2048
 
 start:
         cld
+        mov sp, pila_tope           ; pila propia (abajo, fuera del bloque que se libera)
         mov di, red_bss
         mov cx, bss_fin - red_bss
         xor al, al
         rep stosb
+        ; encoger el bloque de memoria: por si hay que lanzar HSPRED (EXEC),
+        ; el hijo necesita sitio libre por encima de nuestro programa.
+        mov bx, prog_end + 15
+        shr bx, 4
+        mov ah, 0x4A
+        int 0x21
         mov word [t_rutina], act_datos
         ; ---- la dirección: ¿viene en la línea de órdenes? ----
         mov si, 0x81
@@ -68,9 +75,19 @@ start:
         test al, al
         jnz .cp
 .ya:
-        ; ---- la red: HSPRED cargado y con IP ----
+        ; ---- la red: ¿HSPRED cargado y con IP? ----
         call red_abrir
-        jc no_red
+        jnc .red_ok
+        ; red_abrir falló. Si fue porque NO hay ningún packet driver cargado
+        ; (SI apunta a m_nopkt), lo cargamos solos (como Windows al conectarse)
+        ; ejecutando HSPRED y reintentamos UNA vez. Cualquier otro fallo (hay
+        ; driver pero da error) va directo al aviso de siempre.
+        cmp si, m_nopkt
+        jne no_red
+        call carga_hspred
+        call red_abrir
+        jc no_red                   ; tras cargarlo sigue sin haber tarjeta de red
+.red_ok:
         xor al, al
         call red_config
         jc no_red
@@ -958,6 +975,44 @@ cabeceras:
         mov byte [abortar], 1
         ret
 
+; =============================================================================
+;  Cargar el controlador de red HSPRED (EXEC de \HISPADOS\HSPRED.COM de la
+;  unidad de arranque). Se queda residente (TSR) si encuentra tarjeta; si no,
+;  sale sin quedarse y el red_abrir de después volverá a fallar.
+;  Copia el patrón de EXEC de CONSOLA (ejecuta_orden): encoge ya hecho arriba,
+;  bloque de parámetros con cola vacía, y restaura SS:SP/DS/ES al volver.
+; =============================================================================
+carga_hspred:
+        mov si, m_cargando
+        call puts
+        ; la ruta: «X:\HISPADOS\HSPRED.COM» con la unidad de arranque
+        mov ax, 0x3305
+        int 0x21                    ; DL = unidad de arranque (1 = A)
+        add dl, 'A' - 1
+        mov [hspred_path], dl
+        ; el bloque de parámetros del EXEC
+        mov word [pblk], 0          ; entorno: una copia del nuestro
+        mov word [pblk + 2], hspred_tail
+        mov [pblk + 4], cs
+        mov word [pblk + 6], fcb0
+        mov [pblk + 8], cs
+        mov word [pblk + 10], fcb0
+        mov [pblk + 12], cs
+        mov [sv_sp], sp
+        mov dx, hspred_path
+        mov bx, pblk
+        mov ax, 0x4B00
+        int 0x21
+        cli
+        mov bx, cs
+        mov ss, bx
+        mov sp, [cs:sv_sp]
+        sti
+        mov ds, bx
+        mov es, bx
+        cld
+        ret
+
 %include "util.inc"
 %include "red.inc"
 
@@ -969,13 +1024,14 @@ m_uso       db "Mira por la red si hay una versión más nueva de Hispa-DOS que 
             db "Sin dirección, usa la clave ACTUALIZAR= de \HISPADOS\RED.INI y, si no", 13, 10
             db "está, una de por omisión. El servidor da un archivo de texto con la", 13, 10
             db "última versión:", 13, 10
-            db "  version=0.9.12", 13, 10
+            db "  version=0.9.13", 13, 10
             db "  descarga=http://ejemplo/hispados/   (opcional)", 13, 10
             db "  nota=Lo nuevo de esta versión        (opcional)", 13, 10
             db 13, 10
             db "Solo HTTP sin cifrar: las direcciones https:// todavía no funcionan, y", 13, 10
             db "GitHub es todo https, así que hace falta un servidor propio por HTTP.", 13, 10
             db "Necesita HSPRED y la red configurada (ver CONFRED).", 13, 10, 0
+m_cargando  db "Cargando el controlador de red (HSPRED)...", 13, 10, 0
 m_mirando   db "Buscando actualizaciones de Hispa-DOS ", VER_STR, "...", 13, 10, 0
 m_buscando  db "Servidor ", 0
 m_puntos    db ": ", 0
@@ -1004,6 +1060,10 @@ m_esc       db "Búsqueda interrumpida (Esc).", 0
 ;     ACTUALIZAR= de \HISPADOS\RED.INI ---
 s_url_def   db "http://actualiza.clicgest.es/ultima.txt", 0
 
+; ruta del controlador de red (la «A» se cambia por la unidad de arranque) y
+; cola de órdenes vacía para su EXEC
+hspred_path db "A:\HISPADOS\HSPRED.COM", 0
+hspred_tail db 0, 13
 s_clave_act db "ACTUALIZAR", 0
 k_version   db "VERSION", 0
 k_descarga  db "DESCARGA", 0
@@ -1052,4 +1112,12 @@ i_clave     resb 16
 num_txt     resb 8
 u_numbuf    resb 16
 u_lbuf      resb 84
+; para el EXEC de HSPRED (cargar el controlador de red solos)
+sv_sp       resw 1
+fcb0        resb 40
+pblk        resb 14
 bss_fin:
+            alignb 16
+            resb 2048               ; nuestra pila (sobrevive al encoger el bloque)
+pila_tope:
+prog_end:
