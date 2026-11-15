@@ -1,20 +1,22 @@
 #!/bin/bash
 # Prueba de ACTUALIZAR (docs/RED.md): busca por HTTP si hay una versión más
-# nueva del sistema. Arranca Hispa-DOS en QEMU con la red de usuario y un
-# servidor HTTP propio (python3 -m http.server en 127.0.0.1, que el invitado
-# ve como 10.0.2.2), y comprueba:
+# nueva o una edición más rica del sistema. Arranca Hispa-DOS en QEMU con la red
+# de usuario y un servidor HTTP propio (python3 -m http.server en 127.0.0.1, que
+# el invitado ve como 10.0.2.2), que sirve ficheros versiones.txt. Comprueba:
 #   (c) SIN HSPRED a mano: ACTUALIZAR carga HSPRED solo (hay tarjeta) y, tras
-#       hacer DHCP, consulta el servidor; NO pide «Cargue HSPRED» (ese aviso es
-#       lo de siempre sólo cuando, tras cargarlo, no hay tarjeta de red).
-#   (a) version=0.9.15 (igual que la instalada): «está al día».
-#   (b) version=0.9.99 (mayor) con nota y descarga: «Hay una versión nueva:
-#       0.9.99», la nota y la dirección de descarga.
-#   (d) la dirección tomada de la clave ACTUALIZAR= de \HISPADOS\RED.INI
-#       (otra versión y nota, para distinguirla de (b)).
+#       hacer DHCP, consulta el servidor; NO pide «Cargue HSPRED».
+#   (a) [0.9.15] (igual que la instalada, sin más rica): «está al día».
+#   (b) [0.9.99] (más nueva) con nota y descarga (sin paquete): «Hay una versión
+#       nueva: 0.9.99», la nota y la dirección de descarga.
+#   (e) recomendación por EDICIÓN: a igualdad de versión pero con nivel más alto
+#       (edición más rica) y requisitos que el equipo cumple, RECOMIENDA pasarse
+#       a esa edición y pregunta; contestamos N y queda en «solo mirar».
+#   (f) límite por hardware: una edición que pide 586 y mucha RAM no se puede;
+#       dice hasta dónde llega el equipo y por qué la otra no.
+#   (d) la dirección tomada de la clave ACTUALIZAR= de \HISPADOS\RED.INI.
 #   (+) una dirección https:// se rechaza con su mensaje.
-# Todo en un espacio de nombres de red propio (unshare -rn): no hace falta
-# Internet ni se toca la red del equipo. NO se usa la red de verdad.
-# ACTUALIZAR (update checker) test, with QEMU user networking + own HTTP server.
+# Todo en un espacio de nombres de red propio (unshare -rn): no usa Internet.
+# ACTUALIZAR (net installer) test, with QEMU user networking + own HTTP server.
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
@@ -35,20 +37,35 @@ fi
 T=$(mktemp -d)
 PORT=${PORT:-8080}
 mkdir -p $T/www
-# los archivos de versión que sirve el servidor HTTP
-printf 'version=0.9.15\n'                                           > $T/www/aldia.txt
-# el fichero en CP437 (como lo serviría un servidor real de Hispa-DOS): así
-# los acentos de la nota cuadran al pasar la salida de CP437 a UTF-8
-{ printf '; archivo de version de prueba\n\n'
-  printf 'version=0.9.99\n'
-  printf 'descarga=http://ejemplo/hispados/\n'
-  printf 'nota=Batería en la barra y consola remota\n'; } | iconv -f UTF-8 -t CP437 > $T/www/nueva.txt
-{ printf 'version=0.9.50\n'
+# --- los ficheros versiones.txt que sirve el servidor HTTP (en CP437, como un
+#     servidor real de Hispa-DOS, para que los acentos cuadren) ---
+printf '[0.9.15]\ncpu=386\n'                                        > $T/www/aldia.txt
+{ printf '; lista de versiones de prueba\n\n'
+  printf '[0.9.99]\n'
+  printf 'nota=Batería en la barra y consola remota\n'
+  printf 'descarga=http://ejemplo/hispados/\n'; } | iconv -f UTF-8 -t CP437 > $T/www/nueva.txt
+{ printf '[0.9.15]\n'
+  printf 'cpu=386\n'
+  printf 'disco=0\n'
+  printf 'nivel=1\n'
+  printf 'edicion=Hispa-DOS con Hispa Ventanas (grafico)\n'
+  printf 'paquete=http://10.0.2.2:%s/noexiste.paq\n' "$PORT"
+  printf 'nota=Da el salto al entorno grafico\n'; } | iconv -f UTF-8 -t CP437 > $T/www/recom.txt
+{ printf '[0.9.15]\n'
+  printf 'cpu=386\n'
+  printf 'nivel=0\n'
+  printf 'edicion=Hispa-DOS con Hispa Ventanas\n\n'
+  printf '[1.0.0]\n'
+  printf 'cpu=586\n'
+  printf 'ram=2000000\n'
+  printf 'nivel=2\n'
+  printf 'edicion=Edicion Total\n'
+  printf 'nota=Nueva edicion grafica superior\n'; } | iconv -f UTF-8 -t CP437 > $T/www/limite.txt
+{ printf '[0.9.50]\n'
   printf 'nota=Esta vino de RED.INI\n'; } | iconv -f UTF-8 -t CP437  > $T/www/redini.txt
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
 HTTP_PID=$!
 sleep 1
-# (GUARDAR=carpeta: deja allí los registros de QEMU)
 trap 'kill $HTTP_PID 2>/dev/null; [ -n "${GUARDAR:-}" ] && cp $T/*.txt "$GUARDAR"/ 2>/dev/null; rm -rf $T' EXIT
 
 U="http://10.0.2.2:$PORT"
@@ -77,7 +94,9 @@ check() { if grep -qF -- "$2" $T/$1.txt; then ok "$2"; else ko "$2"; fi; }
 CMDS=("8|ACTUALIZAR $U/aldia.txt"                    # (c) sin HSPRED a mano -> lo carga solo
       '3|HSPRED' '4|CONFRED'
       "7|ACTUALIZAR $U/aldia.txt"                    # (a) al día
-      "7|ACTUALIZAR $U/nueva.txt"                    # (b) versión nueva
+      "7|ACTUALIZAR $U/nueva.txt"                    # (b) versión nueva (avisa)
+      "7|ACTUALIZAR $U/recom.txt" '2|N'              # (e) recomienda edición más rica; N
+      "7|ACTUALIZAR $U/limite.txt"                   # (f) límite por hardware
       '3|ACTUALIZAR https://ejemplo.org/x.txt'       # (+) https:// rechazado
       '2|DEL A:\HISPADOS\RED.INI'
       '2|COPY A:\REDACT.INI A:\HISPADOS\RED.INI'
@@ -85,7 +104,7 @@ CMDS=("8|ACTUALIZAR $U/aldia.txt"                    # (c) sin HSPRED a mano -> 
       '2|ECHO fin-de-la-prueba')
 
 echo "== Hispa-DOS ACTUALIZAR: $NIC =="
-corre f 120 "${CMDS[@]}"
+corre f 150 "${CMDS[@]}"
 
 # (c) sin HSPRED a mano: ACTUALIZAR lo carga solo y NO pide cargarlo
 check f "Cargando el controlador de red (HSPRED)"
@@ -100,12 +119,22 @@ check f "Hispa-DOS 0.9.15 está al día."
 check f "Hay una versión nueva: 0.9.99"
 check f "Batería en la barra y consola remota"
 check f "Descárgala en: http://ejemplo/hispados/"
+# (e) recomendación por edición más rica; contestamos N
+check f "Tu equipo admite la edición"
+check f "Hispa-DOS con Hispa Ventanas (grafico)"
+check f "¿Descargar e instalar la 0.9.15?"
+check f "Da el salto al entorno grafico"
+check f "De acuerdo: solo mirar"
+# (f) límite por hardware
+check f "Tu equipo llega hasta la 0.9.15"
+check f "Edicion Total"
+check f "Pentium o superior"
 # (+) https:// rechazado
 check f "Las direcciones https:// (cifradas) todavía no funcionan"
-# (d) la URL tomada de RED.INI (otra versión y nota, para distinguirla de (b))
+# (d) la URL tomada de RED.INI
 check f "Hay una versión nueva: 0.9.50"
 check f "Esta vino de RED.INI"
 check f "fin-de-la-prueba"
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>ACTUALIZAR$/,$p' $T/f.txt | head -120; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>ACTUALIZAR$/,$p' $T/f.txt | head -160; fi
 exit $fail

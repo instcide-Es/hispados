@@ -17,3 +17,10 @@
 
 %define VER_STR "0.9.15"
 VER_NUM     equ 0*10000 + 9*100 + 15        ; 0.9.15 -> 915
+
+;  VER_EDI  nivel de "riqueza" de la EDICION instalada (0 = la unica edicion de
+;  hoy: Hispa-DOS con Hispa Ventanas, 386+). ACTUALIZAR lo usa para recomendar
+;  una edicion mas rica cuando el equipo da para mas (p.ej. pasar de una edicion
+;  basica de solo texto, nivel 0, a una con entorno grafico, nivel mayor). Al
+;  crear ediciones nuevas, suba este numero en la edicion que las traiga.
+VER_EDI     equ 0

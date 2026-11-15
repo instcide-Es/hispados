@@ -55,7 +55,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 | `PING destino [/N:n] [/T]` | Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
 | `CONSOLA [/PUERTO:n]` | Consola remota por red (servidor TCP, puerto 2323 por omisión): deja entrar a otra persona a este equipo, con un código de acceso de 6 cifras por conexión que solo se ve aquí. Abierta y controlada por el usuario. Ver [docs/CONSOLA.md](CONSOLA.md). |
-| `ACTUALIZAR [url]` | Mira por HTTP si hay una versión más nueva del sistema. Lee un archivo de texto con la última versión y la compara con la instalada (`lib/version.inc`): dice si está al día o avisa de la nueva (con la nota y dónde descargarla). **Solo avisa**: no descarga ni instala nada. La dirección sale, por orden, de lo que se escriba, de `ACTUALIZAR=` en `RED.INI`, o de la de por omisión. Ver más abajo. |
+| `ACTUALIZAR [url]` | Instalador por red. Mira por HTTP (`versiones.txt`) si hay una versión más nueva o una edición más rica que la instalada (`lib/version.inc`), según la CPU/RAM/disco del equipo; y, si el usuario quiere, **baja el paquete `.PAQ` y lo instala en el sitio** conservando `*.INI`/`*.REC`. La dirección sale, por orden, de lo que se escriba, de `ACTUALIZAR=` en `RED.INI`, o de la de por omisión. Ver más abajo. |
 
 **HTTPS no**: las direcciones `https://` (cifradas, hoy casi todas) se
 rechazan con un mensaje claro, y también una redirección a `https://`. Para
@@ -67,42 +67,116 @@ sitios de archivos antiguos que siguen dando HTTP.
 `AYUDA` las lista y `AYUDA CONFRED` (o `CONFRED /?`), `AYUDA PING`,
 `AYUDA DESCARGAR` y `AYUDA ACTUALIZAR` las explican.
 
-## ACTUALIZAR: buscar actualizaciones del sistema
+## ACTUALIZAR: instalador por red del sistema
 
-`ACTUALIZAR` mira por la red si hay una versión más nueva de Hispa-DOS que la
-instalada. No descarga ni instala nada: solo lo dice (instalar a ciegas sería
-peligroso; es trabajo futuro). La versión del sistema está en un solo sitio,
-`lib/version.inc` (`VER_STR` para enseñarla y `VER_NUM` para comparar), que
-usan también `VERSION`/`VER` y el saludo del intérprete.
+`ACTUALIZAR` mira por la red si hay una versión más nueva **o una edición más
+rica** de Hispa-DOS que la instalada y, si el equipo la aguanta y el usuario
+quiere, la **descarga y la instala en el sitio**, conservando los datos y
+ajustes del usuario (`*.INI`, `*.REC`) y sus carpetas. La versión del sistema
+está en un solo sitio, `lib/version.inc` (`VER_STR` para enseñarla, `VER_NUM`
+para comparar y `VER_EDI`, el nivel de riqueza de la edición instalada).
 
-El archivo remoto es texto plano, una cosa por línea (se saltan las líneas en
-blanco y las que empiezan por `;` o `#`):
+### Qué hace, paso a paso
+
+1. Detecta el equipo: nivel de CPU (386/486/586), KiB de memoria extendida y
+   MiB libres del disco de destino (rutinas sacadas de `EQUIPO`, en
+   `lib/equipodet.inc`).
+2. Baja del servidor el archivo `versiones.txt` (ver formato abajo).
+3. De las versiones del archivo, se queda con las que **mejoran** lo instalado
+   (más nuevas, o de una edición más rica) y que el equipo **cumple**
+   (`cpu ≤ detectada`, `ram ≤ detectada`, `disco ≤ libre`). La **recomendada**
+   es la de mayor edición/versión de ésas. La recomendación no es solo «no te
+   pases para tu hardware»: también «tu máquina da para más de lo que tienes»
+   (p. ej. aconsejar a un 486 con solo texto pasarse a la edición con Hispa
+   Ventanas).
+4. Enseña el equipo y el veredicto:
+   - al día, si no hay nada mejor;
+   - si hay algo mejor pero el equipo no llega, dice hasta qué versión/edición
+     llega y por qué la siguiente no (sus requisitos);
+   - si hay una recomendada instalable, la enseña con su nota y pregunta
+     `¿Descargar e instalar la X.Y? (S/N)`.
+5. Si se dice que **sí**: baja el `paquete=` a `C:\ACTUALIZA.PAQ`, lo
+   desempaqueta **del todo** en `C:\ACTUALIZA\` y, **solo si todo está bien**,
+   lo aplica en el sitio (reusa el motor de copia de `INSTALAR`,
+   `lib/copiaarbol.inc`): sobrescribe los ficheros del sistema, conserva
+   `*.INI`/`*.REC`, y guarda el `CONFIG.SYS`/`AUTOEXEC.BAT` del usuario como
+   `.ANT`. Nunca formatea. Al acabar borra el temporal y pide reiniciar.
+
+**Seguridad**: si falla la descarga o el desempaquetado, aborta sin tocar nada
+del sistema (primero baja y desempaqueta entero en el temporal; solo cuando
+está completo y la suma de control cuadra, aplica).
+
+### Formato de versiones.txt
+
+Texto plano (se saltan las líneas en blanco y las que empiezan por `;` o `#`),
+una sección por versión/edición, con `clave=valor`:
 
 ```
-version=0.9.11
-descarga=http://ejemplo/hispados/
-nota=Lo nuevo de esta versión
+[0.9.16]
+cpu=386            ; nivel mínimo: 386 / 486 / 586 (Pentium)
+ram=0              ; KiB mínimos de memoria extendida (0 = no exige)
+disco=4            ; MiB libres mínimos en el disco de destino
+nivel=0            ; "riqueza" de la edición (mayor = más completa)
+edicion=Hispa-DOS con Hispa Ventanas
+paquete=http://actualiza.clicgest.es/hispados-0.9.16.paq
+nota=Novedades de esta versión
 ```
 
-La única clave que hace falta es `version=` (`mayor.menor.parche`);
-`descarga=` y `nota=` son opcionales y solo sirven para enseñarlas. Según el
-número sea igual o menor, dice «está al día»; si es mayor, avisa de la versión
-nueva con la nota y dónde bajarla.
+El encabezado `[mayor.menor.parche]` es la versión. Todas las claves son
+opcionales: sin `cpu`/`ram`/`disco` no hay requisito; `nivel` por omisión 0;
+`edicion` y `nota` solo se enseñan; `paquete` es la URL del `.PAQ` (sin ella la
+versión solo se **avisa**, no se instala). Puede haber varias secciones (varias
+ediciones). **Compatibilidad**: si el archivo trae el formato viejo (solo
+`version=X`, con `descarga=`/`nota=` opcionales), se trata como una única
+versión sin requisitos y sin paquete (solo avisa, como antes).
 
-La dirección del archivo sale, por este orden: (1) la que se escriba en la
-línea de órdenes, (2) la clave `ACTUALIZAR=` de `RED.INI`, (3) una de por
-omisión compilada: `http://actualiza.clicgest.es/ultima.txt` (servidor propio
-por HTTP; se puede cambiar con la clave `ACTUALIZAR=` de `RED.INI`).
+Para subir una versión en el servidor: cambia `lib/version.inc` y
+`actualiza.clicgest.es/versiones.txt`, y sube el `.PAQ` generado con
+`tools/paquete.py`.
+
+### Formato del paquete .PAQ
+
+Lo genera `tools/paquete.py` a partir de una carpeta con la **misma estructura**
+que tendrá el sistema (`KERNEL.SYS`, `COMMAND.COM`, `CONFIG.SYS`,
+`AUTOEXEC.BAT` en la raíz y `HISPADOS\...` con sus subcarpetas). Sin compresión.
+Todos los enteros en *little-endian*:
+
+```
+Cabecera (12 octetos):
+   0  magia   4 octetos  = "PAQ1"
+   4  nfich   uint32     número de ficheros
+   8  suma    uint32     suma de TODOS los octetos de datos, módulo 2^32
+Por cada fichero, en orden:
+   uint16   long_nombre   longitud del nombre (1..80)
+   bytes    nombre        ruta relativa, separador '\' (sin cero final)
+   uint32   long_datos    longitud del contenido
+   bytes    datos         el contenido del fichero
+```
+
+`ACTUALIZAR` comprueba la magia, el número de ficheros y que la suma de control
+cuadra antes de aplicar nada. Uso:
+`python3 -I tools/paquete.py <carpeta> <salida.paq>`.
+
+### La dirección y los límites
+
+La dirección de `versiones.txt` sale, por este orden: (1) la que se escriba en
+la línea de órdenes, (2) la clave `ACTUALIZAR=` de `RED.INI`, (3) una de por
+omisión compilada: `http://actualiza.clicgest.es/versiones.txt` (servidor
+propio por HTTP).
 
 **Importante**: como no hay HTTPS (ver abajo) y **GitHub es todo HTTPS**, el
-archivo de versión no se puede leer de GitHub: tiene que estar en un servidor
-propio por HTTP. Las direcciones `https://` se rechazan con un mensaje claro,
-igual que en `DESCARGAR`. Si falta la red (sin `HSPRED` o sin IP), lo dice y
-no hace nada.
+archivo y los paquetes no se pueden leer de GitHub: tienen que estar en un
+servidor propio por HTTP. Las direcciones `https://` se rechazan con un mensaje
+claro. Si falta la red (sin `HSPRED` o sin IP), lo dice y no hace nada.
 
 En el disco el programa es `ACTUALIZ.COM` (los nombres de DOS tienen 8
 letras); al escribir `ACTUALIZAR` el intérprete lo recorta a `ACTUALIZ`, así
 que no hace falta alias.
+
+**Riesgo conocido** (aplicar en el sitio): se sobrescribe el sistema vivo. Si
+el `.PAQ` trae `COMMAND.COM` o `KERNEL.SYS` distintos del que corre, conviene
+reiniciar enseguida (DOS recarga la parte transitoria de `COMMAND.COM` del
+disco al volver al intérprete). Por eso el mensaje final pide reiniciar.
 
 ## Tarjetas
 
@@ -156,7 +230,7 @@ proyecto). Claves (sin importar mayúsculas; `;` y `#` empiezan comentarios):
 | `MASCARA=` (`MASK=`) | la máscara; si no se dice, 255.255.255.0 |
 | `PUERTA=` (`GATEWAY=`) | la puerta de enlace (el router) |
 | `DNS=` | el servidor de nombres; con `DHCP=SI` también, y manda sobre el que da el DHCP |
-| `ACTUALIZAR=` | la dirección HTTP del archivo de versión que mira `ACTUALIZAR` (si no, la de por omisión). Opcional. |
+| `ACTUALIZAR=` | la dirección HTTP del archivo `versiones.txt` que mira `ACTUALIZAR` (si no, la de por omisión). Opcional. |
 
 También se puede poner con ratón en **Hispa Ventanas**: Configuración ›
 apartado **«Red»** (una casilla para el DHCP y, a mano, la IP, la máscara, la

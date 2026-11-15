@@ -100,7 +100,7 @@ $(B)/SONIDO.COM: utils/sonido.asm | $(B)
 # AUDICION: prueba de sonido con preguntas de sí o no (docs/AUDICION.md)
 $(B)/AUDICION.COM: utils/audicion.asm lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/INSTALAR.COM: utils/instalar.asm | $(B)
+ $(B)/INSTALAR.COM: utils/instalar.asm lib/copiaarbol.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EDIT.COM: utils/edit.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -145,7 +145,7 @@ $(B)/CONSOLA.COM: utils/consola.asm $(RED_DEP) | $(B)
 	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
 # ACTUALIZAR (docs/RED.md): busca por HTTP si hay una versión más nueva del
 # sistema (lib/version.inc) y avisa. En el disco es ACTUALIZ.COM (8.3).
-$(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc | $(B)
+ $(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc lib/copiaarbol.inc lib/equipodet.inc | $(B)
 	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
 RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM $(B)/ACTUALIZAR.COM
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
@@ -548,6 +548,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_usb_tests.sh
 	tests/run_instalar_usb_tests.sh
 	tests/run_actualizar_disco_tests.sh
+	tests/run_actualizar_instala_tests.sh
 	tests/run_partir_modelo_tests.sh $(IMG)
 	tests/run_hispabios_tests.sh
 	tests/run_sys_tests.sh $(IMG)

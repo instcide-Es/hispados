@@ -28,7 +28,7 @@ fi
 T=$(mktemp -d)
 PORT=${PORT:-8080}
 mkdir -p $T/www
-printf 'version=0.9.15\n' > $T/www/aldia.txt
+printf '[0.9.15]\ncpu=386\n' > $T/www/aldia.txt
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
 HTTP_PID=$!
 sleep 1
