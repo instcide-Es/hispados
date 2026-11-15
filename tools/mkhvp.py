@@ -37,11 +37,16 @@ def main():
     for inc in INCS:
         subprocess.run([sys.executable, cp437, os.path.join(RAIZ, 'ventanas', inc),
                         os.path.join(gen, inc)], check=True)
-    # los .inc propios del programa: en su carpeta (FUENTE sin «.asm»)
+    # los .inc propios del programa: en su carpeta (FUENTE sin «.asm»); si no
+    # está ahí, se busca en lib/ (así TERMINAL.HVP incluye lib/version.inc)
     propios = os.path.splitext(fuente)[0]
     for inc in re.findall(r'^\s*%include\s+"([^"]+)"', open(fuente, encoding='utf-8').read(), re.M):
-        if inc not in INCS and os.path.isfile(os.path.join(propios, inc)):
-            subprocess.run([sys.executable, cp437, os.path.join(propios, inc), os.path.join(gen, inc)], check=True)
+        if inc in INCS:
+            continue
+        for cand in (os.path.join(propios, inc), os.path.join(RAIZ, 'lib', inc)):
+            if os.path.isfile(cand):
+                subprocess.run([sys.executable, cp437, cand, os.path.join(gen, inc)], check=True)
+                break
     subprocess.run([sys.executable, os.path.join(RAIZ, 'tools', 'icopack.py'), asm], check=True)
     img = []
     for org in (0, DELTA):
