@@ -223,7 +223,7 @@ make -s nesprogs > $T/make.txt 2>&1 || { cat $T/make.txt; ko "no se han podido h
 nativo=0
 if [ -x $NAT ] && $NAT $B/CPUTEST.NES 1 $T/x.pgm 2> /dev/null; then nativo=1; fi
 
-for parte in ${SOLO:-nucleo pasos vivo mando pausa raton carpeta prueba}; do
+for parte in ${SOLO:-nucleo pasos vivo mando pausa raton carpeta completa prueba}; do
 case $parte in
 nucleo)
   echo "== El núcleo de Hispa-Nes, fuera de QEMU: ROM de prueba e imágenes esperadas =="
@@ -515,6 +515,43 @@ carpeta)
   chk $T/k2.ppm texto 150 556 0 6 fina "OTRA.NES"
   hn pantalla $T/k2.ppm 144 75 2 $(esperada cputest) "OTRA.NES, de \\ROMS: pantalla verde"
   chk $T/k3.ppm texto $CX $CY 0 8 fina "Carpeta: A:\ROMS"
+  salida_bien
+  ;;
+
+completa)
+  echo "== Hispa-Nes en pantalla completa: Alt+Intro entra, Esc sale =="
+  disco ''
+  { entrar
+    tecla ret; sleep 4                        # Cometas se abre (en pausa: el título)
+    aparca
+    shot f0                                    # en ventana
+    tecla alt-ret; sleep 1.5                   # Alt+Intro: a pantalla completa
+    shot f1
+    tecla esc; sleep 1.5                       # Esc: vuelve a la ventana (no cierra)
+    aparca
+    shot f2
+    tecla alt-ret; sleep 1.5                   # otra vez, para salir con Alt+Intro
+    shot f3
+    tecla alt-ret; sleep 1.5
+    shot f4
+    salir
+  } | run 200 -vga std
+  # en ventana: marco, título y la imagen a x2 en (144,75)
+  chk $T/f0.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes" \
+    texto 150 556 0 6 fina "Pausa - HISPA1.NES"
+  # en pantalla completa: ni marco ni barra; el escritorio tapado de negro y la
+  # imagen centrada y a x2 (144,60; 512x480), llenando la pantalla
+  chk $T/f1.ppm tam 800 600 px 10 10 0 "el escritorio tapado (negro)" \
+    px 400 40 0 "borde negro encima de la imagen" px 60 300 0 "borde negro a la izquierda" \
+    px 740 560 0 "borde negro abajo a la derecha"
+  hn pantalla $T/f1.ppm 144 60 2 $(esperada h1_titulo) "Alt+Intro: la imagen llena la pantalla, centrada a x2" 0 0 256 104
+  # al salir con Esc: otra vez la ventana con su marco, título y la imagen en (144,75)
+  chk $T/f2.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes"
+  hn pantalla $T/f2.ppm 144 75 2 $(esperada h1_titulo) "Esc: vuelve a la ventana, misma imagen" 0 0 256 104
+  # y Alt+Intro también sale (de pantalla completa en f3 a ventana en f4)
+  chk $T/f3.ppm tam 800 600 px 10 10 0 "otra vez a pantalla completa"
+  chk $T/f4.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes"
+  muestra f1 pantalla_completa
   salida_bien
   ;;
 

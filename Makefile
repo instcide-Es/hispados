@@ -255,7 +255,7 @@ $(B)/ALMACEN.HVP: juegos/almacen.asm $(HVPDEP) | $(B)
 # Hispa-Nes (docs/HISPANES.md): el emulador, con sus piezas en
 # programas/hispanes/, y sus juegos propios, hechos para la consola y
 # ensamblados aquí con tools/asm6502.py (NESROMS: van a \HISPADOS\JUEGOS\NES)
-$(B)/HISPANES.HVP: programas/hispanes.asm $(wildcard programas/hispanes/*.inc) $(HVPDEP) | $(B)
+$(B)/HISPANES.HVP: programas/hispanes.asm $(wildcard programas/hispanes/*.inc) lib/emufull.inc $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 NESROMS = $(B)/HISPA1.NES
 $(B)/HISPA1.NES: nes/hispa1/hispa1.s nes/hispa1/dibujos.s tools/asm6502.py | $(B)
@@ -276,7 +276,7 @@ nesprogs: $(B)/nesnativo $(B)/nesnativo_t $(B)/CPUTEST.NES $(B)/NESJOY.COM
 # Hispa-System (docs/HISPASYS.md): el emulador, con sus piezas en
 # programas/hispasms/, y sus juegos propios, hechos para la consola y
 # ensamblados aquí con tools/asmz80.py (SMSROMS: van a \HISPADOS\JUEGOS\SMS)
-$(B)/HISPASMS.HVP: programas/hispasms.asm $(wildcard programas/hispasms/*.inc) $(HVPDEP) | $(B)
+$(B)/HISPASMS.HVP: programas/hispasms.asm $(wildcard programas/hispasms/*.inc) lib/emufull.inc $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 SMSROMS = $(B)/BUZO.SMS
 $(B)/BUZO.SMS: sms/buzo/buzo.s $(wildcard sms/buzo/*.s sms/comun/*.s) tools/asmz80.py | $(B)

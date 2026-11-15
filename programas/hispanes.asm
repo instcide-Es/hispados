@@ -40,6 +40,9 @@
 %include "hvp.inc"
 
 EST_AL      equ 18                  ; alto de la barra de estado
+JUEGO_AN    equ 256                 ; [PANTALLA COMPLETA] el cuadro de la consola
+JUEGO_AL    equ 240
+FULL_MAX    equ 3                   ; escala entera máxima (la medida de «pant»)
 TICS_SEG    equ 1193182             ; tics del reloj (el contador 8254) por segundo
 TICS_CUADRO equ 19854               ; y por cuadro (60,1 por segundo)
 TICS_MUESTRA equ 54                 ; y por muestra de sonido (22.050 Hz)
@@ -129,6 +132,11 @@ menu:
         db "Tamaño x&1", 0
         dw 112
         db "Tamaño x&2", 0
+        dw 0
+        db 0
+        dw 113
+pc_marca    db ' '                  ; [PANTALLA COMPLETA] la marca (* si activa)
+        db " &Pantalla completa (Alt+Intro)", 0
         dw 0xFFFF
         db "&Sonido", 0
         dw 121
@@ -525,6 +533,20 @@ nes_proc:
         mov eax, WM_SIZE
         HVJ ven_defecto
 .tecla:
+        cmp ecx, TC_INTRO           ; Alt+Intro: entra o sale de pantalla completa
+        jne .tnpc
+        test dl, TM_ALT
+        jz .tnpc
+        call pc_alterna
+        jmp hecho
+.tnpc:
+        cmp ecx, TC_ESC             ; Esc: si está en pantalla completa, a ventana
+        jne .tnesc                  ; (en ventana no cierra el emulador)
+        cmp byte [pantc], 0
+        je hecho
+        call pc_salir
+        jmp hecho
+.tnesc:
         cmp ecx, 0x3C               ; F2
         je .reinicia
         call despierta              ; en pausa: cualquier tecla, a jugar (y
@@ -639,6 +661,11 @@ nes_proc:
         HV msg_poner
         jmp hecho
 .o11:
+        cmp ecx, 113                ; Pantalla completa (entrar o salir)
+        jne .o11v
+        call pc_alterna
+        jmp hecho
+.o11v:
         cmp ecx, 111
         jb hecho
         cmp ecx, 112
@@ -1070,6 +1097,8 @@ estado_cambia:
 ; =============================================================================
 ; (interna) las medidas: la zona, la escala y dónde va la imagen
 medidas:
+        cmp byte [pantc], 0         ; en pantalla completa, otras medidas
+        jne medidas_full
         pushad
         mov ebp, [ven]
         HV ven_cli
@@ -1117,6 +1146,8 @@ pintar:
         call img_copia
         call letrero
 .barra:
+        cmp byte [pantc], 0         ; en pantalla completa no hay barra de estado
+        jne .cierra
         COLOR C_ARENA
         xor eax, eax
         mov ebx, [cli_al]
@@ -1130,6 +1161,7 @@ pintar:
         inc ebx
         mov esi, txt_est
         HV dc_texto
+.cierra:
         HV dc_cerrar
         jmp hecho
 
@@ -1197,6 +1229,8 @@ presenta:
 ; (interna, con el contexto abierto) pasa «imagen» a los colores de Hispa
 ; Ventanas, al doble si toca, y la dibuja
 img_copia:
+        cmp byte [pantc], 0         ; en pantalla completa, el escalado entero
+        jne img_copia_full
         pushad
         mov esi, imagen
         mov edi, pant
@@ -2200,6 +2234,7 @@ prueba:
 %include "apu.inc"
 %include "mapas.inc"
 %include "hvplib.inc"
+%include "emufull.inc"              ; [PANTALLA COMPLETA] compartido con Hispa-System
 %include "datos.inc"
 ROM_VARS    equ 8                   ; rom_prg ... rom_entren (dd seguidos)
             alignb 4
@@ -2214,6 +2249,15 @@ cli_an      resd 1
 cli_al      resd 1
 img_x       resd 1
 img_y       resd 1
+; [PANTALLA COMPLETA] estado y lo guardado de la ventana para devolverla
+pantc       resd 1                  ; 1 = en pantalla completa
+pc_n        resd 1                  ; la escala, para el escalado entero
+pc_estilo   resd 1                  ; V_ESTILO de antes de entrar
+pc_menu     resd 1                  ; su V_MENU
+pc_x        resd 1                  ; y su colocación
+pc_y        resd 1
+pc_an       resd 1
+pc_al       resd 1
 t_sig       resd 1                  ; cuándo toca el cuadro siguiente
 t_seg       resd 1
 reloj_ult   resd 1
@@ -2285,5 +2329,5 @@ txt_log     resb 512
 entren      resb 512
 snd_buf     resb SND_MAX + 16
 sram_copia  resb 0x2000
-pant        resb 512 * 480
+pant        resb 768 * 720          ; (JUEGO_AN*FULL_MAX por JUEGO_AL*FULL_MAX)
 HVP_FIN
