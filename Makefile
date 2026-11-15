@@ -25,11 +25,11 @@ $(B)/boot16.bin: boot/boot16.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/mbr.bin: boot/mbr.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/KERNEL.SYS: kernel/kernel.asm | $(B)
+$(B)/KERNEL.SYS: kernel/kernel.asm lib/version.inc | $(B)
 	$(ASM) $(KFLAGS) -o $@ $(B)/gen/$<
-$(B)/COMMAND.COM: shell/command.asm | $(B)
+$(B)/COMMAND.COM: shell/command.asm lib/version.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/FDISK.COM: utils/fdisk.asm lib/util.inc $(B)/mbr.bin | $(B)
+$(B)/FDISK.COM: utils/fdisk.asm lib/util.inc lib/version.inc $(B)/mbr.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/FORMAT.COM: utils/format.asm lib/util.inc $(B)/boot.bin $(B)/boot16.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -106,7 +106,7 @@ $(B)/EDIT.COM: utils/edit.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/GESTOR.COM: utils/gestor.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/SYSINFO.COM: utils/sysinfo.asm | $(B)
+$(B)/SYSINFO.COM: utils/sysinfo.asm lib/version.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # EQUIPO: informe del hardware en texto; DIAGNOSTICO (sistema/DIAGNOST.BAT) lo
 # guarda con lo demás en INFORME.TXT (tests/run_equipo_tests.sh)
@@ -535,6 +535,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_sbvga_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_instalar_usb_tests.sh
+	tests/run_actualizar_disco_tests.sh
 	tests/run_partir_modelo_tests.sh $(IMG)
 	tests/run_hispabios_tests.sh
 	tests/run_sys_tests.sh $(IMG)
@@ -607,6 +608,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_ventanas_bateria_tests.sh $(IMG)
+	tests/run_ventanas_red_tests.sh $(IMG)
 	tests/run_tamano_tests.sh $(IMG)
 	tests/run_contexto_tests.sh $(IMG)
 	tests/run_accesos_tests.sh $(IMG)

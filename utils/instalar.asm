@@ -119,18 +119,34 @@ start:
         mov ax, 0x4C02
         int 0x21
 .ex:
-        ; ¿tiene formato?
+        ; ¿tiene formato? (INT 21/36 es seguro aunque la unidad no valga;
+        ; sin formato no puede haber Hispa-DOS, así que ni se busca)
         mov dl, [dst]
         sub dl, 'A' - 1
         mov ah, 0x36
         int 0x21
         cmp ax, 0xFFFF
-        jne .hasfmt
-        ; sin formato: se le da (preguntando antes)
+        je .unformatted
+        ; con formato: ¿ya hay Hispa-DOS en el destino? (actualizar en el sitio)
+        call detect_hispados
+        jc .hasfmt                  ; no hay: flujo normal sobre disco formateado
+        ; ya hay Hispa-DOS: menú Actualizar / Nueva / Cancelar
+        call ask_mode               ; pone [updmode] y [donew], o cancela
+        cmp byte [updmode], 0
+        jne .upd_confirm
+        ; [N] instalación nueva: formatear aunque ya tuviera formato (borra todo)
+        mov si, msg_asknew1
+        call puts
+        mov si, msg_askfmt2
+        call puts
+        jmp .doformat
+.unformatted:
+        ; sin formato: se le da (preguntando antes), como siempre
         mov si, msg_askfmt1
         call puts
         mov si, msg_askfmt2
         call puts
+.doformat:
         call ask_yes
         jc cancel
         mov si, msg_crlf
@@ -161,6 +177,19 @@ start:
         call puts
         call ask_yes
         jc cancel
+        jmp .fmt
+.upd_confirm:
+        ; ACTUALIZAR en el sitio: resumen y confirmación; nunca se formatea
+        mov si, msg_upd1
+        call puts
+        mov si, msg_upd2
+        call puts
+        call ask_yes
+        jc cancel
+        mov si, msg_crlf
+        call puts
+        ; guardar el CONFIG.SYS y el AUTOEXEC.BAT del usuario como .ANT
+        call backup_user_cfg
 .fmt:
         ; 1) sistema: SYS unidad:
         mov dx, sys_path
@@ -178,7 +207,10 @@ start:
         ; 2) archivos
         mov si, msg_copying
         call puts
-        ; el sistema: \HISPADOS entero
+        ; el sistema: \HISPADOS entero. En ACTUALIZAR se conservan los
+        ; *.INI y *.REC que ya existan (datos y ajustes del usuario)
+        mov al, [updmode]
+        mov [keepdata], al
         mov byte [keep], 0
         mov si, s_hsp
         mov di, s_hdir
@@ -200,6 +232,11 @@ start:
         mov di, s_hpdir
         call make_dir
         call copy_set
+        mov byte [keepdata], 0
+        ; AUTOEXEC.BAT y CONFIG.SYS
+        cmp byte [updmode], 0
+        jne .cfg_upd
+        ; instalación nueva: se respetan los que ya tenga la unidad
         mov si, s_autoexec
         mov di, s_root
         mov byte [keep], 1
@@ -208,6 +245,18 @@ start:
         mov si, s_config
         mov di, s_root
         call copy_set
+        jmp .cfg_done
+.cfg_upd:
+        ; ACTUALIZAR: ya se guardaron como .ANT; se ponen los nuevos (a C:)
+        mov byte [keep], 0
+        mov byte [fix], 1
+        mov si, s_autoexec
+        mov di, s_root
+        call copy_set
+        mov si, s_config
+        mov di, s_root
+        call copy_set
+.cfg_done:
         mov byte [keep], 0
         mov byte [fix], 0
         mov si, s_leeme
@@ -225,13 +274,43 @@ start:
         mov ax, 0x4C04
         int 0x21
 .allok:
+        cmp byte [updmode], 0
+        jne .updmsg
         mov si, msg_done
         call puts
         movzx eax, word [ncopied]
         call putnum
         mov si, msg_done2
         call puts
-        ; 3) disco duro: la partición, activa, y el MBR si no tiene
+        jmp .after_msg
+.updmsg:
+        ; ACTUALIZAR: qué se cambió y qué se conservó
+        mov si, msg_updone
+        call puts
+        movzx eax, word [ncopied]
+        call putnum
+        mov si, msg_updone2
+        call puts
+        mov si, msg_updkept
+        call puts
+        movzx eax, word [nkept]
+        call putnum
+        mov si, msg_updkept2
+        call puts
+        cmp byte [bak_auto], 0
+        je .nba
+        mov si, msg_bak_a
+        call puts
+.nba:
+        cmp byte [bak_conf], 0
+        je .after_msg
+        mov si, msg_bak_c
+        call puts
+.after_msg:
+        ; 3) disco duro: la partición, activa, y el MBR si no tiene (solo en
+        ; instalación nueva; ACTUALIZAR no toca la tabla de particiones)
+        cmp byte [updmode], 0
+        jne .snd
         ; (PARTIR /ARRANQUE:X:; en el disco de arranque pide escribir SI)
         cmp byte [fixed], 0
         je .snd
@@ -247,11 +326,16 @@ start:
         mov ax, 0x4C05
         int 0x21
 .snd:
-        ; 4) la comprobación del sonido, con el disco recién instalado
+        ; 4) la comprobación del sonido, con el disco recién instalado. En
+        ; ACTUALIZAR no se re-sondea: se conserva el SONIDO.INI del usuario
+        cmp byte [updmode], 0
+        jne .end
         cmp byte [nosnd], 0
         jne .end
         call sound_check
 .end:
+        cmp byte [updmode], 0
+        jne .end_upd
         mov si, msg_boot
         call puts
         cmp byte [guided], 0
@@ -259,6 +343,11 @@ start:
         mov si, msg_reboot
         call puts
 .e2:
+        mov ax, 0x4C00
+        int 0x21
+.end_upd:
+        mov si, msg_updboot
+        call puts
         mov ax, 0x4C00
         int 0x21
 
@@ -281,6 +370,10 @@ set_dst:
         mov [aud_d2], al
         mov [fmt_drv], al
         mov [arr_drv], al
+        mov [msg_menu_drv], al
+        mov [msg_upd_drv], al
+        mov [msg_updone_d], al
+        mov [msg_asknew_drv], al
         ret
 
 ; sin unidad: PARTIR /INSTALAR elige el disco duro (nunca el de arranque),
@@ -479,20 +572,19 @@ copy_set:
         call strcpy
         ; ¿respetar el que ya existe?
         cmp byte [keep], 0
-        je .cp
-        mov dx, dta2
-        mov ah, 0x1A
-        int 0x21
-        mov dx, path_d
-        mov cx, 0x07
-        mov ah, 0x4E
-        int 0x21
-        pushf
-        mov dx, dta
-        mov ah, 0x1A
-        int 0x21
-        popf
-        jnc .next
+        jne .chk_exist          ; keep: respetar cualquier archivo que exista
+        cmp byte [keepdata], 0
+        je .cp                  ; ni keep ni keepdata: copiar (sobrescribir)
+        ; keepdata (ACTUALIZAR): respetar solo *.INI y *.REC que ya existan
+        call is_user_data       ; CF=0 si la fuente es *.INI/*.REC
+        jc .cp                  ; no es dato de usuario: sobrescribir
+        call dest_exists        ; CF=0 si ya está en el destino
+        jc .cp                  ; no existe aún: instalarlo
+        inc word [nkept]        ; existe: se conserva el del usuario
+        jmp .next
+.chk_exist:
+        call dest_exists
+        jnc .next               ; existe: respetar
 .cp:
         call copy_file
         jnc .cok
@@ -505,6 +597,175 @@ copy_set:
         int 0x21
         jnc .f
 .r:
+        pop di
+        pop si
+        ret
+
+; ¿existe ya path_d en el destino? CF=0 si existe. Usa dta2 para no estropear
+; la búsqueda que recorre copy_set (deja la DTA otra vez en dta)
+dest_exists:
+        mov dx, dta2
+        mov ah, 0x1A
+        int 0x21
+        mov dx, path_d
+        mov cx, 0x07
+        mov ah, 0x4E
+        int 0x21
+        pushf
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        popf
+        ret
+
+; ¿el nombre de la fuente (dta+0x1E) acaba en .INI o .REC? CF=0 si sí. Son los
+; datos y ajustes del usuario que ACTUALIZAR conserva (RED.INI, VENTANAS.INI,
+; SONIDO.INI, CENTRO.INI, SOLITARI.REC...)
+is_user_data:
+        push si
+        mov si, dta + 0x1E
+.find:
+        lodsb
+        test al, al
+        jz .no
+        cmp al, '.'
+        jne .find
+        ; SI -> extensión; tiene que ser justo tres letras
+        cmp byte [si+3], 0
+        jne .no
+        mov al, [si]
+        and al, 0xDF
+        mov ah, [si+1]
+        and ah, 0xDF
+        mov bl, [si+2]
+        and bl, 0xDF
+        cmp al, 'I'             ; ¿INI?
+        jne .rec
+        cmp ah, 'N'
+        jne .rec
+        cmp bl, 'I'
+        jne .rec
+        jmp .yes
+.rec:
+        cmp al, 'R'             ; ¿REC?
+        jne .no
+        cmp ah, 'E'
+        jne .no
+        cmp bl, 'C'
+        jne .no
+.yes:
+        pop si
+        clc
+        ret
+.no:
+        pop si
+        stc
+        ret
+
+; ¿ya hay Hispa-DOS en la unidad de destino? CF=0 si sí (hay \HISPADOS\ o
+; KERNEL.SYS en la raíz). La unidad ya tiene formato cuando se llama aquí.
+detect_hispados:
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        mov al, [dst]
+        mov [det_hdir], al
+        mov dx, det_hdir
+        mov cx, 0x10            ; carpetas
+        mov ah, 0x4E
+        int 0x21
+        jnc .yes
+        mov al, [dst]
+        mov [det_kern], al
+        mov dx, det_kern
+        mov cx, 0x07            ; sistema + oculto + solo lectura
+        mov ah, 0x4E
+        int 0x21
+        jnc .yes
+        stc
+        ret
+.yes:
+        clc
+        ret
+
+; menú al detectar un Hispa-DOS ya instalado: Actualizar / Nueva / Cancelar.
+; Pone [updmode]=1 (actualizar) o [donew]=1 (nueva), o salta a cancel.
+ask_mode:
+        mov si, msg_menu1
+        call puts
+        mov si, msg_menu_drv
+        call puts
+        mov si, msg_menu2
+        call puts
+        mov byte [lbuf], 8
+        mov dx, lbuf
+        mov ah, 0x0A
+        int 0x21
+        mov si, msg_crlf
+        call puts
+        cmp byte [lbuf+1], 0
+        je cancel               ; nada escrito: cancelar
+        mov al, [lbuf+2]
+        and al, 0xDF
+        cmp al, 'A'
+        je .upd
+        cmp al, 'N'
+        je .new
+        jmp cancel
+.upd:
+        mov byte [updmode], 1
+        ret
+.new:
+        mov byte [donew], 1
+        ret
+
+; ACTUALIZAR: guarda el CONFIG.SYS y el AUTOEXEC.BAT que tenga el usuario como
+; CONFIG.ANT y AUTOEXEC.ANT (para que pueda recuperar sus cambios), antes de
+; poner los nuevos. Avisa de lo que guarda.
+backup_user_cfg:
+        mov al, [dst]
+        mov [bk_ab], al
+        mov [bk_aa], al
+        mov [bk_cs], al
+        mov [bk_ca], al
+        mov si, bk_ab           ; AUTOEXEC.BAT -> AUTOEXEC.ANT
+        mov di, bk_aa
+        call backup_one
+        jc .conf
+        mov byte [bak_auto], 1
+        mov si, msg_bak_a
+        call puts
+.conf:
+        mov si, bk_cs           ; CONFIG.SYS -> CONFIG.ANT
+        mov di, bk_ca
+        call backup_one
+        jc .r
+        mov byte [bak_conf], 1
+        mov si, msg_bak_c
+        call puts
+.r:
+        ret
+
+; renombrar SI (origen) a DI (destino .ANT); borra antes un .ANT anterior.
+; CF=0 si lo renombró (había un archivo del usuario)
+backup_one:
+        push si
+        push di
+        mov dx, di              ; quitar atributos de un .ANT anterior
+        mov ax, 0x4301
+        xor cx, cx
+        int 0x21
+        mov dx, di              ; y borrarlo (si no está, no pasa nada)
+        mov ah, 0x41
+        int 0x21
+        pop di
+        pop si
+        push si
+        push di
+        mov dx, si              ; DS:DX = nombre antiguo
+                                ; ES:DI = nombre nuevo (DI ya apunta a él)
+        mov ah, 0x56
+        int 0x21                ; renombrar (CF si no existía el antiguo)
         pop di
         pop si
         ret
@@ -682,6 +943,18 @@ aud_d2      db "C:\HISPADOS\SONIDO.INI"
 aud_te      db 13
 guided      db 0
 fixed       db 0
+updmode     db 0                ; 1: ACTUALIZAR en el sitio (sin formatear)
+donew       db 0                ; 1: el usuario eligió instalación nueva en el menú
+keepdata    db 0                ; 1: conservar *.INI/*.REC del usuario que ya existan
+nkept       dw 0                ; cuántos datos/ajustes del usuario se conservaron
+bak_auto    db 0                ; se guardó AUTOEXEC.BAT como AUTOEXEC.ANT
+bak_conf    db 0                ; se guardó CONFIG.SYS como CONFIG.ANT
+det_hdir    db "C:\HISPADOS", 0
+det_kern    db "C:\KERNEL.SYS", 0
+bk_ab       db "C:\AUTOEXEC.BAT", 0
+bk_aa       db "C:\AUTOEXEC.ANT", 0
+bk_cs       db "C:\CONFIG.SYS", 0
+bk_ca       db "C:\CONFIG.ANT", 0
 part_path   db "A:\HISPADOS\PARTIR.COM", 0
 inst_tail   db 10, " /INSTALAR", 13
 arr_tail    db 13, " /ARRANQUE:"
@@ -714,7 +987,11 @@ msg_usage   db "Uso: INSTALAR unidad: [/NOSONIDO]   o   INSTALAR [/NOSONIDO]", 1
             db "Con unidad instala en esa (si no tiene formato, pregunta y se lo da).", 13, 10
             db "Al final comprueba el sonido (AUDICION /RAPIDA): lo que suena queda en", 13, 10
             db "unidad:\HISPADOS\SONIDO.INI y HSPSND lo usa desde el primer arranque.", 13, 10
-            db "Esc salta ese paso; /NOSONIDO no lo hace.", 13, 10, 0
+            db "Esc salta ese paso; /NOSONIDO no lo hace.", 13, 10
+            db "Si el destino ya tiene Hispa-DOS, ofrece ACTUALIZARLO en el sitio: cambia", 13, 10
+            db "los programas del sistema por los nuevos y conserva tus datos y ajustes", 13, 10
+            db "(*.INI, *.REC) y tus carpetas; no formatea nada. Lo normal: arranca desde", 13, 10
+            db "el USB nuevo y actualiza el disco interno.", 13, 10, 0
 msg_same    db "No se puede instalar sobre la unidad de arranque.", 13, 10, 0
 msg_nofmt   db "La unidad "
 msg_drv1    db "C: no existe.", 13, 10
@@ -746,6 +1023,35 @@ msg_snd     db 13, 10, "Por último, la comprobación del sonido", 13, 10
             db "--------------------------------------", 13, 10, 0
 msg_sndko   db "No se ha podido comprobar el sonido. Puede hacerlo después con la", 13, 10
             db "opción «Prueba» del menú de arranque o con la orden AUDICION.", 13, 10, 0
+; --- el menú cuando el destino ya tiene Hispa-DOS ---
+msg_menu1   db 13, 10, "La unidad "
+msg_menu_drv db "C: ya tiene Hispa-DOS instalado.", 13, 10, 0
+msg_menu2   db "¿Qué quieres hacer?", 13, 10
+            db "  [A] Actualizar (conserva tus datos y ajustes)", 13, 10
+            db "  [N] Instalación nueva (se FORMATEA: se borra TODO lo que haya)", 13, 10
+            db "  [C] Cancelar", 13, 10
+            db "Elige una opción y pulsa Intro (A/N/C): ", 0
+; --- [N] desde el menú: formatear aunque ya tuviera formato ---
+msg_asknew1 db 13, 10, "Instalación nueva en la unidad "
+msg_asknew_drv db "C:. Se dará formato y se borrará TODO lo que tenga", 13, 10
+            db "(tus datos y ajustes incluidos). ", 0
+; --- [A] actualizar: resumen y confirmación ---
+msg_upd1    db 13, 10, "Se va a ACTUALIZAR Hispa-DOS en la unidad "
+msg_upd_drv db "C: (no se formatea nada):", 13, 10
+            db "- Se cambian los programas del sistema por los nuevos.", 13, 10
+            db "- Se conservan tus datos y ajustes (*.INI, *.REC) y tus carpetas.", 13, 10
+            db "- CONFIG.SYS y AUTOEXEC.BAT: se ponen los nuevos y los tuyos se", 13, 10
+            db "  guardan como CONFIG.ANT y AUTOEXEC.ANT.", 13, 10, 0
+msg_upd2    db "¿Continuar (S/N)? ", 0
+msg_bak_a   db "Tu AUTOEXEC.BAT anterior se ha guardado como AUTOEXEC.ANT.", 13, 10, 0
+msg_bak_c   db "Tu CONFIG.SYS anterior se ha guardado como CONFIG.ANT.", 13, 10, 0
+msg_updone  db "Hispa-DOS actualizado en la unidad "
+msg_updone_d db "C: (", 0
+msg_updone2 db " archivos nuevos del sistema).", 13, 10, 0
+msg_updkept db "Conservados tus datos y ajustes: ", 0
+msg_updkept2 db " archivos (*.INI, *.REC); tus carpetas quedan intactas.", 13, 10, 0
+msg_updboot db "Actualización terminada. Quita el USB (o el disquete) y reinicia el", 13, 10
+            db "ordenador.", 13, 10, 0
 
         section .bss
 pblock      resb 14

@@ -92,8 +92,11 @@ vol_txt     resb 24
             alignb 4
 bat_pct     resd 1                  ; 0..100
 bat_ac      resd 1                  ; 1 enchufada o cargando
+vol_x       resd 1                  ; dist. del borde derecho al altavoz: con pila
+                                    ; a la izquierda del cuerpo, sin pila pegado a la hora
 barra_firma_ant resd 1              ; firma de lo visible a la derecha (batería y hora)
 bat_hay     resb 1                  ; 1 si hay batería válida (portátil con APM)
+red_hay     resb 1                  ; 1 si hay controlador de red (packet driver)
 bar_h       resb 1                  ; [RELOJ] hora (0..23)
 bar_m       resb 1                  ; minuto (0..59)
             alignb 4

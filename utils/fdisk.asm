@@ -3184,6 +3184,7 @@ type_name:
 
 ; -----------------------------------------------------------------------------
 %include "util.inc"
+%include "version.inc"          ; VER_STR: la versión del sistema (un solo sitio)
 
 types:
         db 0x01, "PRI DOS  FAT12      ", 0
@@ -3206,7 +3207,7 @@ tn_log12    db "LOG DOS  FAT12      ", 0
 
 s_instbat   db "C:\INSTALL.BAT", 0
 
-msg_title   db 13, 10, "Programa de configuración del disco duro de Hispa-DOS 0.9", 13, 10
+msg_title   db 13, 10, "Programa de configuración del disco duro de Hispa-DOS ", VER_STR, 13, 10
             db "(C) 2026 Carlos Sanz y colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 0
 msg_nodisk  db "No hay discos duros.", 13, 10, 0
 msg_baddisk db "Número de disco duro no válido.", 13, 10, 0

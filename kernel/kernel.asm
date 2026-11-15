@@ -11,6 +11,7 @@
         cpu 386
         bits 16
         org 0
+%include "version.inc"          ; VER_STR: la versión del sistema (un solo sitio)
 
 KSEG            equ 0x0070
 HISPA_MAJOR      equ 0
@@ -14595,7 +14596,7 @@ shell_pb    dw 0
 
 msg_cpu386  db 13, 10, "Hispa-DOS necesita un procesador 386 o superior.", 13, 10
             db "Este equipo tiene un 8086, 186 o 286.", 13, 10, 0
-msg_banner  db 13, 10, "Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22", 13, 10
+msg_banner  db 13, 10, "Hispa-DOS ", VER_STR, " - núcleo compatible con MS-DOS 6.22", 13, 10
             db "(C) 2026 Carlos Sanz y colaboradores de Hispa-DOS - GPL-2.0 o posterior", 13, 10, 13, 10, 0
 msg_fatbad  db "No se puede leer el sistema de archivos de la unidad de arranque", 13, 10, 0
 msg_noshell db 13, 10, "No se puede cargar el intérprete de órdenes: sistema detenido", 13, 10, 0

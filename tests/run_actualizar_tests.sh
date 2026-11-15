@@ -4,7 +4,7 @@
 # servidor HTTP propio (python3 -m http.server en 127.0.0.1, que el invitado
 # ve como 10.0.2.2), y comprueba:
 #   (c) SIN red (antes de HSPRED): ACTUALIZAR avisa de que cargue HSPRED.
-#   (a) version=0.9.11 (igual que la instalada): «está al día».
+#   (a) version=0.9.12 (igual que la instalada): «está al día».
 #   (b) version=0.9.99 (mayor) con nota y descarga: «Hay una versión nueva:
 #       0.9.99», la nota y la dirección de descarga.
 #   (d) la dirección tomada de la clave ACTUALIZAR= de \HISPADOS\RED.INI
@@ -34,7 +34,7 @@ T=$(mktemp -d)
 PORT=${PORT:-8080}
 mkdir -p $T/www
 # los archivos de versión que sirve el servidor HTTP
-printf 'version=0.9.11\n'                                           > $T/www/aldia.txt
+printf 'version=0.9.12\n'                                           > $T/www/aldia.txt
 # el fichero en CP437 (como lo serviría un servidor real de Hispa-DOS): así
 # los acentos de la nota cuadran al pasar la salida de CP437 a UTF-8
 { printf '; archivo de version de prueba\n\n'
@@ -88,7 +88,7 @@ corre f 120 "${CMDS[@]}"
 # (c) sin HSPRED
 check f "Cargue HSPRED y configure la red (CONFRED) antes de buscar"
 # (a) al día
-check f "Hispa-DOS 0.9.11 está al día."
+check f "Hispa-DOS 0.9.12 está al día."
 # (b) versión nueva, con nota y descarga
 check f "Hay una versión nueva: 0.9.99"
 check f "Batería en la barra y consola remota"

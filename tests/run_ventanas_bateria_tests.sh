@@ -92,7 +92,8 @@ run v4 ""
 chk $T/v4.ppm px 608 12 1 "sin pila (zona de barra, no hay batería)" \
   px 636 5 1 "sin número de batería" \
   texto 676 5 8 1 fina "23:58" \
-  px 582 12 8 "altavoz encendido" texto 736 5 8 4 fina "Salir"
+  px 582 12 1 "sin pila, el altavoz NO se queda a la izquierda (hueco cerrado)" \
+  px 650 12 8 "altavoz encendido, pegado a la hora" texto 736 5 8 4 fina "Salir"
 muestra v4 sobremesa
 [ -n "${CAPTURAS:-}" ] && { for n in v1 v2 v3 v4; do [ -f $T/$n.ppm ] && convert $T/$n.ppm "$CAPTURAS/ventanas_bateria_$n.png"; done; }
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; fi

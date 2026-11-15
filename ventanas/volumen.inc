@@ -25,10 +25,11 @@
 ;  doble clic en el altavoz, también (escritorio.inc).
 ; =============================================================================
 
-; del borde derecho al altavoz: a la izquierda del cuerpo de la batería (BAT_X,
-; escritorio.inc) más el ancho del altavoz (unos 20) y una separación de 8, para
-; que quede [altavoz] [batería] [hora] [Salir] sin pisarse
-VOL_X       equ BAT_X + 28
+; La posición del altavoz (distancia del borde derecho) ya NO es fija: la calcula
+; bat_leer (escritorio.inc) en la variable [vol_x] según haya batería o no:
+;   con pila  -> a la izquierda del cuerpo (BAT_X+28): [altavoz][pila][hora][Salir]
+;   sin pila  -> pegado a la hora (REL_X+28):          [altavoz][hora][Salir]
+; Así, en un equipo sin batería (APM) no queda un hueco en blanco.
 
 c_volumen   dd vol_proc
             db C_CREMA, 0, 0, 0
@@ -131,7 +132,8 @@ vol_en_icono:
         cmp byte [op_demo], 0
         jne .no
         mov ecx, [vid_ancho]
-        sub ecx, VOL_X + 2
+        sub ecx, [vol_x]
+        sub ecx, 2
         cmp eax, ecx
         jl .no
         add ecx, 26
@@ -156,7 +158,8 @@ vol_inv_icono:
         test ebp, ebp
         jz .x
         mov eax, [vid_ancho]
-        sub eax, VOL_X + 2
+        sub eax, [vol_x]
+        sub eax, 2
         xor ebx, ebx
         mov ecx, 28
         mov edx, BARRA_H - 2
@@ -171,7 +174,7 @@ vol_pintar_icono:
         cmp byte [op_demo], 0
         jne .x
         mov esi, [vid_ancho]
-        sub esi, VOL_X
+        sub esi, [vol_x]
         mov edi, 5
         COLOR C_CREMA
         cmp byte [snd_hay], 0

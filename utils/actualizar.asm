@@ -6,7 +6,7 @@
 ;  Mira por la red (HTTP, sin cifrar) si hay una versión más nueva de
 ;  Hispa-DOS que la instalada. Lee un archivo de texto con la última versión
 ;  (una cosa por línea):
-;      version=0.9.11
+;      version=0.9.12
 ;      descarga=http://ejemplo/hispados/
 ;      nota=Lo nuevo de esta versión
 ;  Compara «version=» con la versión del sistema (lib/version.inc) y avisa si
@@ -231,6 +231,8 @@ start:
         call puts
         call crlf
 .fin_nueva:
+        mov si, m_comoact
+        call puts
         xor al, al
         jmp red_salir
 .sin_version:
@@ -967,7 +969,7 @@ m_uso       db "Mira por la red si hay una versión más nueva de Hispa-DOS que 
             db "Sin dirección, usa la clave ACTUALIZAR= de \HISPADOS\RED.INI y, si no", 13, 10
             db "está, una de por omisión. El servidor da un archivo de texto con la", 13, 10
             db "última versión:", 13, 10
-            db "  version=0.9.11", 13, 10
+            db "  version=0.9.12", 13, 10
             db "  descarga=http://ejemplo/hispados/   (opcional)", 13, 10
             db "  nota=Lo nuevo de esta versión        (opcional)", 13, 10
             db 13, 10
@@ -981,6 +983,7 @@ m_aldia     db "Hispa-DOS ", VER_STR, " está al día.", 13, 10, 0
 m_nueva     db "Hay una versión nueva: ", 0
 m_punto     db ".", 13, 10, 0
 m_desc      db "Descárgala en: ", 0
+m_comoact   db "Para actualizar: arranca desde el USB nuevo y ejecuta INSTALAR.", 13, 10, 0
 m_sinver    db "El servidor contestó, pero el archivo no trae la versión (version=).", 13, 10, 0
 m_sinred    db "Cargue HSPRED y configure la red (CONFRED) antes de buscar", 13, 10
             db "actualizaciones.", 0

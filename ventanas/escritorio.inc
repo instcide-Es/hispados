@@ -342,6 +342,7 @@ esc_proc:
         cmp byte [op_demo], 0       ; [BATERÍA] [RELOJ] en la demo, la barra como estaba
         jne .fin
         call bat_leer               ; una ojeada a la batería (la hay o no)
+        call red_leer               ; [RED] ¿hay controlador de red cargado?
         call rel_leer               ; y a la hora de DOS
         call barra_firma            ; la firma de lo visible: la hora refresca
         mov [barra_firma_ant], eax
@@ -468,6 +469,7 @@ esc_proc:
         call vol_pintar_icono
 %endif
         call bat_pintar_icono       ; [BATERÍA] la pila, entre altavoz y «Salir»
+        call red_pintar_icono       ; [RED] el icono de red, a la izquierda del altavoz
         call rel_pintar             ; [RELOJ] la hora, a la derecha de la pila
         ; los iconos de las ventanas minimizadas
         xor ecx, ecx
@@ -782,6 +784,14 @@ bat_leer:
         mov [bat_ac], edx
         mov byte [bat_hay], 1
 .x:
+        ; el altavoz: con pila, a la izquierda del cuerpo (BAT_X+28); sin pila,
+        ; pegado a la hora (REL_X+28) para no dejar hueco en blanco.
+        mov eax, REL_X + 28
+        cmp byte [bat_hay], 0
+        je .setvx
+        mov eax, BAT_X + 28
+.setvx:
+        mov [vol_x], eax
         popad
         ret
 
@@ -869,6 +879,74 @@ bat_pintar_icono:
         mov ebx, 5
         mov esi, bat_txt
         call dc_texto
+.x:
+        popad
+        ret
+
+; (interna) ¿hay un controlador de red cargado? Mira si algún vector de los de
+; «packet driver» (INT 60h..80h) lleva la firma "PKT DRVR" 3 octetos después,
+; como hace red_abrir de lib/red.inc. Solo lee la tabla de interrupciones (no
+; llama al driver). Deja [red_hay]=1 si lo encuentra, 0 si no.
+red_leer:
+        pushad
+        mov byte [red_hay], 0
+        mov esi, [cero]                     ; la dirección lineal 0: la IVT
+        mov bl, 0x60
+.v:
+        movzx eax, bl
+        mov edx, [esi + eax*4]              ; el vector (segmento:desplazamiento)
+        test edx, edx
+        jz .sig
+        movzx edi, dx                       ; desplazamiento
+        shr edx, 16                         ; segmento
+        shl edx, 4
+        add edi, edx                        ; dirección lineal del manejador
+        add edi, esi                        ; -> dirección en el selector plano
+        cmp dword [edi+3], 'PKT '           ; "PKT DRVR", 3 octetos tras el vector
+        jne .sig
+        cmp dword [edi+7], 'DRVR'
+        jne .sig
+        mov byte [red_hay], 1
+        jmp .fin
+.sig:
+        inc bl
+        cmp bl, 0x80
+        jbe .v
+.fin:
+        popad
+        ret
+
+; (interna) el icono de red, a la izquierda del altavoz: dos nodos unidos por una
+; línea. En crema si hay controlador de red (HSPRED u otro packet driver), en
+; arena oscura si no hay. Nada en la demo.
+red_pintar_icono:
+        pushad
+        cmp byte [op_demo], 0
+        jne .x
+        mov esi, [vid_ancho]
+        sub esi, [vol_x]
+        sub esi, 24                         ; a la izquierda del altavoz
+        mov eax, C_ARENA_OSC                ; apagado si no hay red
+        cmp byte [red_hay], 0
+        je .c
+        mov eax, C_CREMA                    ; encendido si la hay
+.c:
+        mov [gdi_color], eax
+        mov eax, esi                        ; nodo 1 (arriba-izquierda)
+        mov ebx, 3
+        mov ecx, 5
+        mov edx, 4
+        call dc_rect
+        lea eax, [esi+8]                    ; nodo 2 (abajo-derecha)
+        mov ebx, 8
+        mov ecx, 5
+        mov edx, 4
+        call dc_rect
+        lea eax, [esi+2]                    ; la línea que los une
+        mov ebx, 6
+        lea ecx, [esi+10]
+        mov edx, 9
+        call dc_linea
 .x:
         popad
         ret

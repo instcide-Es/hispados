@@ -282,7 +282,7 @@ c_impresora() {
   # mando a teclado: el mando 1 teclea VER e Intro; el 2, DIR e Intro
   check "Mando a teclado activado (MANDO.INI)."
   check "Mando a teclado: jugador 1 jugador 2"
-  check "Hispa-DOS versión 0.9.11 (compatible con MS-DOS 6.22)"
+  check "Hispa-DOS versión 0.9.12 (compatible con MS-DOS 6.22)"
   check " Directorio de A:\\"
   nocheck "A:\\>VER"
   nocheck "A:\\>DIR"
@@ -338,7 +338,7 @@ c_usb() {
   check "  1  USB 054C:09CC, 6 ejes y 14 botones  <- jugador 1"
   check "Registros conservados"
   # el mando teclea VER e Intro (cruceta arriba, Cuadrado, Cruz, Círculo)
-  check "Hispa-DOS versión 0.9.11 (compatible con MS-DOS 6.22)"
+  check "Hispa-DOS versión 0.9.12 (compatible con MS-DOS 6.22)"
   nocheck "A:\\>VER"
   # y el teclado USB sigue yendo
   check "A:\\>ECHO Teclado"
