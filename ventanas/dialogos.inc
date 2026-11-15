@@ -527,7 +527,71 @@ da_al_cuadro:
         popad
         ret
 
-; (interna) entra en la carpeta ESI=«[NOMBRE]» y vuelve a llenar la lista
+; (interna) BL=unidad (1=A, 2=B ... 26=Z) -> CF=0 si la unidad existe. Usa
+; INT 21h 4408h (¿el disco es extraíble?), que no toca el soporte: solo
+; pregunta por el dispositivo; si da «unidad no válida» (AX=15), no existe.
+da_unidad_vale:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        movzx ebx, bl
+        xor ecx, ecx
+        xor edx, edx
+        mov eax, 0x4408
+        call dos_int
+        jnc .vale                   ; sin error: la unidad existe
+        cmp ax, 0x000F              ; 15 = unidad no válida
+        je .no
+.vale:
+        pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        clc
+        ret
+.no:
+        pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        stc
+        ret
+
+; (interna) añade a la lista EBP una entrada «[X:\]» por cada unidad que exista,
+; para poder cambiar de unidad desde el cuadro (antes no había forma de llegar a
+; D:). Se salta B: para no despertar la segunda disquetera fantasma.
+da_unidades:
+        pushad                      ; EBP (la lista) se conserva
+        mov ebx, 1
+.u:
+        cmp bl, 2                   ; B: no (disquetera fantasma)
+        je .sig
+        call da_unidad_vale
+        jc .sig
+        sub esp, 8
+        mov edi, esp
+        mov byte [edi], '['
+        lea eax, [ebx-1]
+        add al, 'A'
+        mov [edi+1], al
+        mov byte [edi+2], ':'
+        mov byte [edi+3], '\'
+        mov byte [edi+4], ']'
+        mov byte [edi+5], 0
+        mov eax, LM_ANADIR
+        mov edx, esp
+        call msg_enviar             ; EBP = la lista
+        add esp, 8
+.sig:
+        inc ebx
+        cmp ebx, 26
+        jbe .u
+        popad
+        ret
+
+; (interna) entra en la carpeta ESI=«[NOMBRE]» (o la unidad «[X:\]») y vuelve a
+; llenar la lista
 da_entrar:
         pushad
         sub esp, 16
@@ -544,7 +608,13 @@ da_entrar:
 .f:
         mov byte [edi], 0
         mov esi, esp
+        cmp byte [esi+1], ':'       ; «X:\»: cambiar de unidad y de carpeta
+        jne .solocarpeta
+        call dos_ir_carpeta
+        jmp .trasir
+.solocarpeta:
         call dos_cambiar_dir
+.trasir:
         add esp, 16
         call da_llenar
         popad
@@ -571,6 +641,7 @@ da_llenar:
         mov ebp, eax                ; la lista
         mov eax, LM_VACIAR
         call msg_enviar
+        call da_unidades            ; las unidades (A:, C:, D:...) al principio
         mov esi, t_todos
         mov ecx, 0x10
         call dos_primero
