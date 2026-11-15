@@ -10,9 +10,10 @@
 ;  Lo que hay: Ethernet II; ARP (pregunta, contesta y guarda RED_NARP
 ;  direcciones); IPv4 sin fragmentos; ICMP (contesta al eco y hace eco: PING);
 ;  UDP; DHCP (cliente: DISCOVER, OFFER, REQUEST, ACK); DNS (cliente, registros
-;  A, por UDP); TCP con una sola conexión de cliente (abrir, enviar con espera
-;  del acuse y reenvío cada segundo, recibir en orden con acuses inmediatos,
-;  cerrar con FIN; ventana fija de RED_VENT octetos, MSS 1460).
+;  A, por UDP); TCP con una sola conexión a la vez, de cliente (abrir) o de
+;  servidor (escuchar): enviar con espera del acuse y reenvío cada segundo,
+;  recibir en orden con acuses inmediatos, cerrar con FIN; ventana fija de
+;  RED_VENT octetos, MSS 1460.
 ;
 ;  Rutinas (DS = ES = CS; CF = 1 si falla y, si hay mensaje, SI = el texto):
 ;    red_abrir      buscar el packet driver, pedir los tipos IP y ARP, la MAC
@@ -26,9 +27,13 @@
 ;    ip_texto       DS:SI = «a.b.c.d» -> EAX = IP (SI avanza)
 ;    ip_poner       EAX = IP -> pantalla
 ;    icmp_eco       EAX = destino, BX = secuencia
-;    tcp_abrir      EAX = IP, BX = puerto
+;    tcp_abrir      EAX = IP, BX = puerto  (cliente: apertura activa)
+;    tcp_escuchar   BX = puerto           (servidor: apertura pasiva)
+;    tcp_estado     -> AL = estado TCP (ver abajo); 2 = conexión establecida
 ;    tcp_enviar     DS:SI = datos, CX = octetos (1460 como mucho)
 ;    tcp_cerrar
+;  Para recibir, el programa pone en [t_rutina] una rutina que llama tcp_in
+;  con DS:SI = datos y CX = octetos cada vez que llegan datos en orden.
 ;  Las IP se guardan en el orden de la red (el primer octeto, el más bajo).
 ; =============================================================================
 
@@ -553,6 +558,25 @@ ip_in:
         jnz .r
         cmp byte [bx+7], 0
         jne .r
+        ; aprender la MAC de quien envía si está en nuestra red (SI = la trama):
+        ; así se le puede contestar sin preguntar por ARP (p. ej. a un SYN que
+        ; llega mientras atendemos el sondeo, donde arp_resolver no espera)
+        push eax
+        push ecx
+        mov eax, [bx+12]            ; IP de origen
+        mov ecx, eax
+        xor ecx, [my_ip]
+        and ecx, [my_mask]
+        jnz .nolearn
+        cmp dword [my_ip], 0
+        je .nolearn
+        push si
+        add si, 6                   ; su MAC (origen de la trama Ethernet)
+        call arp_poner
+        pop si
+.nolearn:
+        pop ecx
+        pop eax
         ; ¿para nosotros?
         mov ecx, [bx+16]
         mov edi, [my_ip]
@@ -1602,7 +1626,19 @@ dns_nombre:
         ret
 
 ; =============================================================================
-;  TCP (una conexión de cliente)
+;  TCP (una sola conexión a la vez, de cliente o de servidor)
+;
+;  Estado en [t_est]:
+;    0 = cerrada        3 = escuchando (LISTEN, lado servidor)
+;    1 = SYN enviado    4 = SYN recibido (SYN-RECEIVED, lado servidor)
+;    2 = establecida
+;
+;  Cliente (tcp_abrir): manda el SYN y, con el SYN+ACK, pasa a establecida.
+;  Servidor (tcp_escuchar): queda en LISTEN; cuando llega un SYN a su puerto
+;  (de cualquiera), guarda el extremo, contesta SYN+ACK y pasa a SYN-RECEIVED;
+;  con el ACK del cliente, a establecida. Mientras hay una conexión (o a medio
+;  establecer), un SYN nuevo a ese puerto se descarta: una sola a la vez.
+;  Ya establecida, enviar/recibir/cerrar son iguales en los dos lados.
 ; =============================================================================
 TF_FIN      equ 0x01
 TF_SYN      equ 0x02
@@ -1699,6 +1735,29 @@ tcp_abrir:
         clc
         ret
 
+; BX = puerto -> escucha (apertura pasiva). Vuelve enseguida; la conexión la
+; acepta tcp_in cuando llega un SYN a ese puerto. El programa sondea con
+; red_sondear y mira tcp_estado (2 = establecida) o [t_est].
+tcp_escuchar:
+        mov [t_lpuerto], bx
+        mov dword [t_ip], 0
+        mov word [t_rpuerto], 0
+        mov dword [t_snd], 0
+        mov dword [t_una], 0
+        mov dword [t_rcv], 0
+        mov byte [t_fin], 0
+        mov byte [t_rst], 0
+        mov byte [t_cambio], 0
+        mov byte [t_acuse], 0
+        mov byte [t_est], 3         ; LISTEN
+        ret
+
+; -> AL = estado TCP (0 cerrada, 1 SYN enviado, 2 establecida, 3 escuchando,
+;    4 SYN recibido). ¿Hay conexión aceptada? AL = 2.
+tcp_estado:
+        mov al, [t_est]
+        ret
+
 ; DS:SI = datos, CX = octetos (hasta 1460) -> CF (SI = mensaje)
 tcp_enviar:
         push di
@@ -1774,16 +1833,21 @@ tcp_in:
         mov cx, [in_len]
         cmp cx, 20
         jb .r
+        ; el puerto de destino tiene que ser el nuestro en cualquier estado
+        mov ax, [si+2]
+        xchg ah, al
+        cmp ax, [t_lpuerto]
+        jne .r
+        ; en LISTEN (apertura pasiva) un SYN de cualquiera abre la conexión
+        cmp byte [t_est], 3
+        je .listen
+        ; en los demás estados el segmento viene del extremo ya conectado
         mov eax, [in_src]
         cmp eax, [t_ip]
         jne .r
         mov ax, [si]
         xchg ah, al
         cmp ax, [t_rpuerto]
-        jne .r
-        mov ax, [si+2]
-        xchg ah, al
-        cmp ax, [t_lpuerto]
         jne .r
         mov al, [si+12]
         shr al, 4
@@ -1809,8 +1873,21 @@ tcp_in:
         ret
 .nrst:
         cmp byte [t_est], 1
+        je .synsent
+        cmp byte [t_est], 4
         jne .est
-        ; esperando SYN+ACK
+        ; SYN-RECEIVED (servidor): esperamos el ACK de nuestro SYN+ACK
+        test bl, TF_ACK
+        jz .r
+        mov eax, [t_sack]
+        cmp eax, [t_snd]
+        jne .r
+        mov [t_una], eax
+        mov byte [t_est], 2
+        mov byte [t_cambio], 1
+        jmp .est                    ; puede traer datos pegados: como establecida
+.synsent:
+        ; cliente: esperando SYN+ACK
         mov al, bl
         and al, TF_SYN | TF_ACK
         cmp al, TF_SYN | TF_ACK
@@ -1883,6 +1960,44 @@ tcp_in:
         xor cx, cx
         call tcp_salir
 .r2:
+        ret
+.listen:
+        ; LISTEN: solo un SYN (sin ACK ni RST) abre la conexión pasiva
+        mov bl, [si+13]             ; indicadores
+        test bl, TF_RST
+        jnz .r
+        test bl, TF_SYN
+        jz .r
+        test bl, TF_ACK
+        jnz .r
+        ; guardar el extremo que llama
+        mov eax, [in_src]
+        mov [t_ip], eax
+        mov ax, [si]                ; su puerto de origen
+        xchg ah, al
+        mov [t_rpuerto], ax
+        mov eax, [si+4]
+        call bswap_eax              ; su ISN
+        mov [t_sseq], eax
+        inc eax
+        mov [t_rcv], eax            ; esperamos su ISN+1
+        ; nuestro ISN (del reloj, mezclado con su puerto)
+        call tic
+        movzx edx, word [t_rpuerto]
+        shl eax, 4
+        xor eax, edx
+        mov [t_una], eax
+        inc eax
+        mov [t_snd], eax
+        mov byte [t_fin], 0
+        mov byte [t_rst], 0
+        mov byte [t_est], 4         ; SYN-RECEIVED
+        mov byte [t_cambio], 1
+        ; contestar SYN+ACK (con la opción MSS, como el SYN del cliente)
+        mov edx, [t_una]
+        mov bl, TF_SYN | TF_ACK
+        xor cx, cx
+        call tcp_salir
         ret
 
 ; =============================================================================

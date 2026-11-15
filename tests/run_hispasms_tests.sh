@@ -403,7 +403,7 @@ vivo)
     salir                                     # con el juego en marcha
   } | run 200 -vga std -audiodev wav,id=snd0,path=$T/sms.wav -device sb16,audiodev=snd0
   check "Sound Blaster 16"
-  chk $T/v1.ppm marco 142 30 516 449 activa titulo 142 30 activa "Hispa-System" px 690 12 8 "altavoz encendido: hay HSPSND"
+  chk $T/v1.ppm marco 142 30 516 449 activa titulo 142 30 activa "Hispa-System" px 582 12 8 "altavoz encendido: hay HSPSND"
   hs pantalla $T/v1.ppm 144 75 2 $(esperada b_titulo) "el título a 60 cuadros por segundo (el agua quieta)" 0 0 256 80
   if $HS pantalla $T/v2.ppm 144 75 2 $(esperada b_titulo) "x" 0 24 256 56 > /dev/null; then
     ko "Intro no ha empezado la partida: sigue el título"

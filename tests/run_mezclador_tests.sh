@@ -168,12 +168,12 @@ RX=400; RY=300
   send 'MEZTEST C' 2
   send 'VENTANAS' 7
   # el volumen de la barra: el botón «Mezclador...»
-  clic 698 14; sleep 1
+  clic 590 14; sleep 1
   aparca
   shot v1
-  clic 698 14; sleep 1
+  clic 590 14; sleep 1
   # doble clic en el altavoz: el Mezclador, en la vista Completa
-  doble 698 14; sleep 3.5
+  doble 590 14; sleep 3.5
   aparca
   shot m1
   # con el teclado: General -15; Sonidos -20 y el balance a la derecha;

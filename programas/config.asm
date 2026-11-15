@@ -267,6 +267,7 @@ ini_tabla:
         dd k_dibujo, a_dibujo, 0, N_DIB - 1, T_DIB, s_pantalla
         dd k_cfondo, a_cfondo, 0, 15, T_NUM, 0
         dd k_cdibujo, a_cdibujo, 0, 15, T_NUM, 0
+        dd k_sorpresa, a_sorpresa, 0, 1, T_NUM, 0
         dd k_salva, a_salva, 0, 1, T_NUM, 0
         dd k_minutos, a_minutos, 1, 60, T_NUM, 0
         dd k_sdib, a_sdib, 0, N_SALVA - 1, T_SAL, 0
@@ -280,8 +281,8 @@ ini_tabla:
         dd 0
 INI_E       equ 24
 ; los ajustes de fábrica, en el orden de las variables a_*
-fabrica     dd 0, C_PETROLEO, C_PETROLEO_CL, 0, 5, SALVA_LETRERO, 2, 8, 0, 1, -1, -1, -1
-N_AJ        equ 13
+fabrica     dd 0, C_PETROLEO, C_PETROLEO_CL, 0, 5, 0, SALVA_LETRERO, 2, 8, 0, 1, -1, -1, -1
+N_AJ        equ 14              ; (incluye a_sorpresa, entre a_minutos y a_sdib)
 
 k_cab       db "; Hispa Ventanas - ajustes del programa Configuración (CONFIG.HVP).", 13, 10
             db "; Se puede cambiar a mano con Hispa Ventanas cerrado (docs/VENTANAS.md).", 13, 10, 0
@@ -291,6 +292,7 @@ s_teclado   db "[Teclado]", 0
 k_dibujo    db "Dibujo", 0
 k_cfondo    db "ColorFondo", 0
 k_cdibujo   db "ColorDibujo", 0
+k_sorpresa  db "Sorpresa", 0     ; «Sorpresa»: tema al azar en cada sesión
 k_salva     db "Salvapantallas", 0
 k_minutos   db "Minutos", 0
 k_sdib      db "SalvaDibujo", 0     ; (no «Dibujo»: ese es el del fondo)
@@ -347,7 +349,7 @@ temas       db 0, C_PETROLEO, C_PETROLEO_CL
             db 6, C_ARENA_OSC, C_ARENA
             db 4, C_TINTA, C_MARRON
             db 5, C_TERRACOTA, C_CREMA
-tema_nombres dd n_t0, n_t1, n_t2, n_t3, n_t4, n_t5, n_t6, n_t7
+tema_nombres dd n_t0, n_t1, n_t2, n_t3, n_t4, n_t5, n_t6, n_t7, n_t8
 n_t0        db "Hispa", 0
 n_t1        db "Noche", 0
 n_t2        db "Mar", 0
@@ -356,6 +358,7 @@ n_t4        db "Vino", 0
 n_t5        db "Duna", 0
 n_t6        db "Pizarra", 0
 n_t7        db "Ladrillo", 0
+n_t8        db "Sorpresa", 0
 col_nombres dd n_c0, n_c1, n_c2, n_c3, n_c4, n_c5, n_c6, n_c7
             dd n_c8, n_c9, n_c10, n_c11, n_c12, n_c13, n_c14, n_c15
 n_c0        db "tinta", 0
@@ -557,6 +560,21 @@ entrada:
 .cl2:
         call de_fabrica
         call ini_leer
+        ; «Sorpresa»: al arrancar (residente) se sortea un tema nuevo
+        cmp byte [residente], 0
+        je .sinsorp
+        cmp dword [a_sorpresa], 0
+        je .sinsorp
+        mov eax, N_TEMAS
+        HV azar
+        lea eax, [eax+eax*2]
+        movzx edx, byte [temas+eax]
+        mov [a_dibujo], edx
+        movzx edx, byte [temas+eax+1]
+        mov [a_cfondo], edx
+        movzx edx, byte [temas+eax+2]
+        mov [a_cdibujo], edx
+.sinsorp:
         call aplicar
         ; la ventana: centrada; oculta si se ha cargado al arrancar
         mov esi, cfg_plant
@@ -835,7 +853,15 @@ ordenes:
         HV msg_enviar
         pop ebp
         cmp eax, N_TEMAS
-        jae .hecho
+        jb .tfijo                   ; 0..7: un tema concreto
+        ja .hecho                   ; mayor: nada
+        mov dword [a_sorpresa], 1   ; «Sorpresa»: un tema al azar (y en cada
+        mov eax, N_TEMAS            ; inicio de sesión se vuelve a sortear)
+        HV azar
+        jmp .tap
+.tfijo:
+        mov dword [a_sorpresa], 0
+.tap:
         lea eax, [eax+eax*2]
         movzx edx, byte [temas+eax]
         mov [a_dibujo], edx
@@ -1223,7 +1249,7 @@ pan_pantalla:
         mov eax, LM_ANADIR
         HV msg_enviar
         inc ebx
-        cmp ebx, N_TEMAS
+        cmp ebx, N_TEMAS + 1         ; +1 por «Sorpresa»
         jb .t
         pop ebp
         mov esi, sel_dib
@@ -1322,9 +1348,13 @@ pant_refrescar:
         jmp .tf
 .ts:
         inc ebx
-        cmp ebx, N_TEMAS
+        cmp ebx, N_TEMAS             ; la tabla «temas» solo tiene los temas fijos
         jb .t
 .tf:
+        cmp dword [a_sorpresa], 0     ; si «Sorpresa» está activa, se marca ella
+        je .nosorp
+        mov edx, N_TEMAS              ; «Sorpresa» es la última opción de la lista
+.nosorp:
         mov ecx, 100
         call hija
         mov ebp, eax
@@ -3464,6 +3494,7 @@ a_cfondo    resd 1                  ; colores del fondo y del dibujo (0-15)
 a_cdibujo   resd 1
 a_salva     resd 1                  ; salvapantallas: 0/1
 a_minutos   resd 1                  ; y cuántos minutos espera
+a_sorpresa  resd 1                  ; tema «Sorpresa»: uno al azar cada sesión
 a_sdib      resd 1                  ; y su dibujo (SALVA_*)
 a_vel       resd 1                  ; ratón: velocidad en mitades (2 = normal)
 a_doble     resd 1                  ; doble clic, en tics de reloj

@@ -87,6 +87,7 @@ def main():
                      # la red (docs/RED.md)
                      ('HSPRED.COM', 'HSPRED.COM'), ('CONFRED.COM', 'CONFRED.COM'),
                      ('PING.COM', 'PING.COM'), ('DESCARGAR.COM', 'DESCARGA.COM'),
+                     ('CONSOLA.COM', 'CONSOLA.COM'),
                      ('RED.INI', 'RED.INI')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
     # los programas de Hispa Ventanas (.HVP): los juegos, en \HISPADOS\JUEGOS;

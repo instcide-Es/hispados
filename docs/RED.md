@@ -54,6 +54,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 | `CONFRED [/RENOVAR] [/LIBERAR]` | La configuración IP. `/RENOVAR` (`/RENEW`) la pide otra vez; `/LIBERAR` (`/RELEASE`) la olvida. `/ALL` se acepta (como en Windows) y hace lo mismo que sin nada. |
 | `PING destino [/N:n] [/T]` | Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
+| `CONSOLA [/PUERTO:n]` | Consola remota por red (servidor TCP, puerto 2323 por omisión): deja entrar a otra persona a este equipo, con un código de acceso de 6 cifras por conexión que solo se ve aquí. Abierta y controlada por el usuario. Ver [docs/CONSOLA.md](CONSOLA.md). |
 
 **HTTPS no**: las direcciones `https://` (cifradas, hoy casi todas) se
 rechazan con un mensaje claro, y también una redirección a `https://`. Para
@@ -172,15 +173,28 @@ el proyecto).
 Escrita aquí, desde las RFC (791 IP, 792 ICMP, 768 UDP, 793 TCP, 826 ARP,
 2131 DHCP, 1035 DNS, 1945 HTTP/1.0); se incluye en cada programa (unos 5 KB
 de código). Habla con cualquier packet driver. Tiene: Ethernet II; ARP
-(pregunta, contesta y recuerda 4 direcciones); IPv4 (sin fragmentos);
-ICMP (contesta al eco y hace eco); UDP; cliente de DHCP; cliente de DNS
-(registros A); TCP con una conexión de cliente: abrir (con reintentos del
-SYN), enviar esperando el acuse y reenviando cada segundo, recibir en orden
-con acuse inmediato (lo desordenado se tira y se repite el acuse, y el otro
-lado reenvía), cerrar con FIN y RST. Ventana fija de 5.840 octetos (4
-segmentos), MSS 1.460. Los paquetes que llegan esperan en una cola de 8
-(los rellena el receptor desde la interrupción) y el programa los atiende en
-`red_sondear`. Las rutinas están descritas al principio de `lib/red.inc`.
+(pregunta, contesta, recuerda 4 direcciones y **aprende** la MAC de quien
+envía si está en nuestra red, para poder contestarle sin preguntar); IPv4
+(sin fragmentos); ICMP (contesta al eco y hace eco); UDP; cliente de DHCP;
+cliente de DNS (registros A); TCP con **una conexión a la vez**, de cliente o
+de servidor: abrir (con reintentos del SYN), **escuchar** (apertura pasiva:
+acepta un SYN entrante, contesta SYN+ACK y espera el ACK), enviar esperando el
+acuse y reenviando cada segundo, recibir en orden con acuse inmediato (lo
+desordenado se tira y se repite el acuse, y el otro lado reenvía), cerrar con
+FIN y RST. Ventana fija de 5.840 octetos (4 segmentos), MSS 1.460. Los
+paquetes que llegan esperan en una cola de 8 (los rellena el receptor desde la
+interrupción) y el programa los atiende en `red_sondear`. Las rutinas están
+descritas al principio de `lib/red.inc`.
+
+**Lado servidor** (para `CONSOLA`): `tcp_escuchar BX=puerto` deja la conexión
+en LISTEN y vuelve enseguida; `tcp_estado` devuelve el estado (2 =
+establecida). Cuando llega un SYN a ese puerto (de cualquiera), `tcp_in` guarda
+el extremo, contesta SYN+ACK y pasa a SYN-RECEIVED; con el ACK del cliente, a
+establecida, y desde ahí `tcp_enviar`, la recepción por `[t_rutina]` y
+`tcp_cerrar` son iguales que en el cliente. Mientras hay una conexión (o a
+medio establecer), un SYN nuevo a ese puerto se descarta (una sola a la vez).
+Estas rutinas van en `lib/red.inc` (cada programa lleva su copia de la pila),
+igual que las del cliente: la pila no es residente.
 
 ## Memoria
 

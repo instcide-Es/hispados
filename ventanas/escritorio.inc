@@ -18,6 +18,21 @@ SALIR_Y     equ 4
 ICO_PASO    equ 96                  ; de un icono minimizado al siguiente
 ICO_ALTO    equ 62
 
+; [BATERÍA] [RELOJ] indicador de batería (APM) y hora, en la barra entre el
+; altavoz y «Salir». El orden, de izquierda a derecha, queda:
+;    [altavoz] [pila][85%] [23:58] [Salir]
+; La hora (HH:MM) se enseña siempre; la batería, solo si hay (portátil con
+; APM). Todas las distancias se miden desde el borde derecho de la pantalla.
+BAT_AN      equ 22                  ; ancho del cuerpo de la pila
+BAT_AL      equ 11                  ; alto del cuerpo
+BAT_BORNE   equ 2                   ; ancho del borne + (a la derecha)
+BAT_Y       equ 7                   ; arriba del cuerpo dentro de la barra
+BAT_NUM     equ 32                  ; hueco reservado para el número ("100%")
+REL_AN      equ 40                  ; ancho de "HH:MM" (5 x 8)
+REL_X       equ SALIR_AN + 12 + 8 + REL_AN                      ; = 124 (hora)
+BAT_NUM_X   equ REL_X + 8 + BAT_NUM                             ; = 164 (número)
+BAT_X       equ BAT_NUM_X + 4 + BAT_BORNE + BAT_AN              ; = 192 (cuerpo)
+
 c_escritorio dd esc_proc
             db SIN_FONDO, 0, 0, 0
 c_demo      dd demo_proc
@@ -305,6 +320,10 @@ esc_minimizada:
 esc_proc:
         cmp eax, WM_PAINT
         je .pintar
+        cmp eax, WM_CREATE          ; [BATERÍA] primer vistazo y temporizador
+        je .crear
+        cmp eax, WM_TIMER           ; [BATERÍA] releer la batería cada pocos s
+        je .timer
         cmp eax, WM_LBUTTONDOWN
         je .pulsa
         cmp eax, WM_LBUTTONDBLCLK
@@ -319,6 +338,29 @@ esc_proc:
         je ctx_esc_orden
         xor eax, eax
         ret
+.crear:
+        cmp byte [op_demo], 0       ; [BATERÍA] [RELOJ] en la demo, la barra como estaba
+        jne .fin
+        call bat_leer               ; una ojeada a la batería (la hay o no)
+        call rel_leer               ; y a la hora de DOS
+        call barra_firma            ; la firma de lo visible: la hora refresca
+        mov [barra_firma_ant], eax
+        mov ecx, 1                  ; temporizador nº 1 del escritorio
+        mov edx, 5000               ; cada 5 s (EBP ya es el escritorio)
+        call tmp_poner
+        jmp .fin
+.timer:
+        call rel_leer               ; la hora, siempre (barato: INT 21h 2Ch)
+        cmp byte [bat_hay], 0       ; la batería, solo si hay (no se gasta APM
+        je .tf                      ; en un sobremesa cada 5 s)
+        call bat_leer
+.tf:
+        call barra_firma
+        cmp eax, [barra_firma_ant]  ; ¿ha cambiado algo (minuto o batería)?
+        je .fin
+        mov [barra_firma_ant], eax
+        call barra_inv_dcha
+        jmp .fin
 .pulsa:
         mov edi, eax                ; [MEZCLADOR] (el mensaje: ¿doble clic?)
         movsx eax, dx
@@ -425,6 +467,8 @@ esc_proc:
 %ifdef CON_PROGRAMAS
         call vol_pintar_icono
 %endif
+        call bat_pintar_icono       ; [BATERÍA] la pila, entre altavoz y «Salir»
+        call rel_pintar             ; [RELOJ] la hora, a la derecha de la pila
         ; los iconos de las ventanas minimizadas
         xor ecx, ecx
 .ico:
@@ -671,5 +715,237 @@ pinta_paleta:
         mov ecx, 44
         mov edx, 28
         call dc_rect
+        popad
+        ret
+
+; =============================================================================
+;  [BATERÍA] indicador de nivel de batería (APM) en la barra superior
+; =============================================================================
+; (interna) lee el estado de la batería por APM (INT 15h) en modo real, con
+; rm_int. Deja [bat_hay]=1 si hay una batería válida (un portátil con APM),
+; con [bat_pct] (0..100) y [bat_ac] (1 si está enchufada o cargando). Si no
+; hay APM, es un equipo de sobremesa, el porcentaje es desconocido o no se
+; puede llamar a la BIOS en modo real, deja [bat_hay]=0 y no se dibuja nada.
+; Con la opción de depuración /BATnn[C] usa un valor fijo, sin tocar la BIOS.
+bat_leer:
+        pushad
+        cmp byte [op_bathay], 0     ; /BATnn[C]: valor forzado para las pruebas
+        je .apm
+        movzx eax, byte [op_bat]
+        cmp eax, 100
+        jbe .f1
+        mov eax, 100
+.f1:
+        mov [bat_pct], eax
+        movzx eax, byte [op_batac]
+        mov [bat_ac], eax
+        mov byte [bat_hay], 1
+        jmp .x
+.apm:
+        mov byte [bat_hay], 0
+        ; 1) ¿hay APM? INT 15h AX=5300h BX=0000h -> CF=0 y BX='PM'
+        mov dword [rmcs+0x1C], 0x5300       ; EAX
+        mov dword [rmcs+0x10], 0            ; EBX (dispositivo: la BIOS de APM)
+        mov dword [rmcs+0x18], 0            ; ECX
+        mov bl, 0x15
+        call rm_int
+        test byte [rmcs+0x20], 1            ; acarreo: no hay APM
+        jnz .x
+        cmp word [rmcs+0x10], 0x504D        ; BX = 'PM'
+        jne .x
+        ; 2) estado de todas las baterías: INT 15h AX=530Ah BX=0001h
+        mov dword [rmcs+0x1C], 0x530A
+        mov dword [rmcs+0x10], 1
+        mov bl, 0x15
+        call rm_int
+        test byte [rmcs+0x20], 1            ; acarreo: sin estado
+        jnz .x
+        mov eax, [rmcs+0x10]                ; BX: BH=línea de CA, BL=estado
+        mov edx, [rmcs+0x18]                ; CX: CH=bandera, CL=porcentaje
+        test dh, 0x80                       ; CH bit 7: no hay batería (sobremesa)
+        jnz .x
+        movzx ecx, dl                       ; CL = porcentaje que queda
+        cmp ecx, 0xFF                       ; desconocido
+        je .x
+        cmp ecx, 100
+        jbe .pct
+        mov ecx, 100
+.pct:
+        mov [bat_pct], ecx
+        xor edx, edx                        ; ¿enchufada o cargando?
+        cmp ah, 1                           ; BH=01h: hay línea de CA
+        sete dl
+        cmp al, 3                           ; BL=03h: cargando
+        jne .ac
+        mov dl, 1
+.ac:
+        mov [bat_ac], edx
+        mov byte [bat_hay], 1
+.x:
+        popad
+        ret
+
+; dibuja el indicador: la pila (cuerpo con marco crema, borne + y relleno
+; proporcional según el nivel —verde >50 %, ocre 20-50 %, rojo <20 %—) y el
+; porcentaje al lado. Si está enchufada o cargando, un rayo blanco encima.
+; Nada en la demo ni si no hay batería.
+bat_pintar_icono:
+        pushad
+        cmp byte [op_demo], 0
+        jne .x
+        cmp byte [bat_hay], 0
+        je .x
+        mov esi, [vid_ancho]
+        sub esi, BAT_X                      ; borde izquierdo del cuerpo
+        ; el cuerpo: fondo oscuro (lo que le falta de carga)
+        COLOR C_TINTA
+        mov eax, esi
+        mov ebx, BAT_Y
+        mov ecx, BAT_AN
+        mov edx, BAT_AL
+        call dc_rect
+        ; el relleno, proporcional (de izquierda a derecha)
+        mov eax, [bat_pct]
+        imul eax, BAT_AN - 2
+        xor edx, edx
+        mov ecx, 100
+        div ecx                             ; EAX = ancho del relleno
+        test eax, eax
+        jz .marco
+        mov ecx, eax                        ; ancho
+        mov eax, C_OLIVA                    ; verde: más del 50 %
+        cmp dword [bat_pct], 50
+        ja .col
+        mov eax, C_OCRE                     ; ocre: del 20 al 50 %
+        cmp dword [bat_pct], 20
+        jae .col
+        mov eax, C_TERRACOTA               ; rojo: menos del 20 %
+.col:
+        mov [gdi_color], eax
+        lea eax, [esi+1]
+        mov ebx, BAT_Y + 1
+        mov edx, BAT_AL - 2
+        call dc_rect
+.marco:
+        COLOR C_CREMA                       ; el cuerpo y el borne, con marco crema
+        mov eax, esi
+        mov ebx, BAT_Y
+        mov ecx, BAT_AN
+        mov edx, BAT_AL
+        call dc_marco
+        lea eax, [esi + BAT_AN]             ; el borne +, a la derecha
+        mov ebx, BAT_Y + 3
+        mov ecx, BAT_BORNE
+        mov edx, BAT_AL - 6
+        call dc_rect
+        cmp dword [bat_ac], 0               ; enchufada o cargando: un rayo
+        je .num
+        COLOR C_BLANCO
+        lea eax, [esi+13]
+        mov ebx, BAT_Y + 1
+        lea ecx, [esi+9]
+        mov edx, BAT_Y + 6
+        call dc_linea
+        lea eax, [esi+9]
+        mov ebx, BAT_Y + 6
+        lea ecx, [esi+12]
+        mov edx, BAT_Y + 6
+        call dc_linea
+        lea eax, [esi+12]
+        mov ebx, BAT_Y + 6
+        lea ecx, [esi+8]
+        mov edx, BAT_Y + 10
+        call dc_linea
+.num:
+        mov edi, bat_txt                    ; el porcentaje ("85%")
+        mov eax, [bat_pct]
+        call pon_num
+        mov al, '%'
+        stosb
+        mov byte [edi], 0
+        COLOR C_CREMA
+        mov eax, [vid_ancho]
+        sub eax, BAT_NUM_X
+        mov ebx, 5
+        mov esi, bat_txt
+        call dc_texto
+.x:
+        popad
+        ret
+
+; (interna) [RELOJ] lee la hora de DOS (INT 21h función 2Ch, como el Reloj) en
+; [bar_h] y [bar_m]
+rel_leer:
+        pushad
+        mov ah, 0x2C
+        int 0x21
+        mov [bar_h], ch
+        mov [bar_m], cl
+        popad
+        ret
+
+; [RELOJ] dibuja la hora "HH:MM" (24 h) a la derecha de la batería, en crema.
+; Se enseña siempre (también en un sobremesa sin batería). Nada en la demo.
+rel_pintar:
+        pushad
+        cmp byte [op_demo], 0
+        jne .x
+        mov edi, bar_txt
+        mov al, [bar_h]
+        call rel_dos
+        mov al, ':'
+        stosb
+        mov al, [bar_m]
+        call rel_dos
+        mov byte [edi], 0
+        COLOR C_CREMA
+        mov eax, [vid_ancho]
+        sub eax, REL_X
+        mov ebx, 5
+        mov esi, bar_txt
+        call dc_texto
+.x:
+        popad
+        ret
+
+; (interna) AL (0..59) en dos cifras decimales, a EDI (que avanza)
+rel_dos:
+        aam
+        add ax, 0x3030
+        xchg al, ah
+        stosw
+        ret
+
+; (interna) [BATERÍA] [RELOJ] firma de lo que se ve a la derecha de la barra
+; (batería y hora): si cambia, hay que repintar -> EAX
+barra_firma:
+        movzx eax, byte [bar_h]
+        shl eax, 8
+        mov al, [bar_m]
+        shl eax, 8
+        mov al, [bat_pct]           ; 0..100: cabe en un octeto
+        shl eax, 2
+        mov dl, [bat_hay]
+        and dl, 1
+        mov dh, [bat_ac]
+        and dh, 1
+        shl dh, 1
+        or dl, dh
+        or al, dl
+        ret
+
+; (interna) la zona de la derecha (pila, número y hora), a repintar
+barra_inv_dcha:
+        pushad
+        mov ebp, [escritorio]
+        test ebp, ebp
+        jz .x
+        mov eax, [vid_ancho]
+        sub eax, BAT_X
+        xor ebx, ebx
+        mov ecx, BAT_X - (SALIR_AN + 12)    ; del cuerpo hasta «Salir»
+        mov edx, BARRA_H - 2
+        call ven_invalidar_rect
+.x:
         popad
         ret

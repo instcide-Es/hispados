@@ -174,7 +174,9 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   Accesorios, Juegos): doble clic en un icono (o flechas e Intro) abre el
   grupo en su ventana y, dentro, el programa. `/DEMO` pone solo las ventanas
   de muestra de la etapa 2.
-- El altavoz de la barra de arriba abre el volumen.
+- El altavoz de la barra de arriba abre el volumen; a su derecha, la hora
+  (HH:MM) y, en los portátiles, un indicador de batería (APM) con el nivel y
+  si está cargando.
 - Ventanas: se arrastran por la barra de título; los botones de la derecha
   minimizan (a un icono abajo; un clic lo recupera), maximizan o restauran
   (también doble clic en el título) y cierran; se cambia el tamaño tirando de
@@ -642,6 +644,46 @@ Audio da vueltas a sus cuatro trozos y, si no, repetiría el final sin
 parar. Si ya estaba sonando, se corta y empieza otra vez; si un programa
 empieza a sonar, se deja. Las teclas de volumen de HSPSND (Ctrl+Alt+flechas)
 no pasan por Hispa Ventanas: con ellas no suena.
+
+### La batería y la hora
+
+[BATERÍA] [RELOJ] En la barra superior, **entre el altavoz y «Salir»**, van un
+indicador de batería y la hora (`bat_*`, `bar_*`, `rel_*` en `escritorio.inc`).
+El orden, de izquierda a derecha, es **[altavoz] [batería] [HH:MM] [Salir]**;
+el altavoz se corre a la izquierda para dejarles sitio (todo cuadra también a
+640x480).
+
+La **hora** se enseña siempre, en formato de 24 horas («23:58»), en crema y con
+la fuente de la barra. Se lee de DOS con `INT 21h` función 2Ch (como el Reloj,
+`reloj.inc`) y se guarda en `bar_h`/`bar_m`.
+
+El **indicador de batería** es una pila horizontal: el cuerpo con marco crema y
+un borne a la derecha, con un relleno proporcional de izquierda a derecha
+—**verde** por encima del 50 %, **ocre** del 20 al 50 % y **rojo** por debajo
+del 20 %— y el tanto por ciento al lado («85 %»). Si está **enchufada o
+cargando**, lleva un pequeño rayo blanco encima. Solo sale si hay una batería;
+en un **sobremesa** (sin APM) se ve únicamente la hora (una batería ahí no
+sirve de nada, un reloj sí).
+
+El nivel de batería se lee por **APM** (como en los 90), llamando a la BIOS en
+modo real (`rm_int`): primero `INT 15h AX=5300h` comprueba que hay APM
+(devuelve BX = «PM»); luego `INT 15h AX=530Ah BX=0001h` da el estado —la línea
+de CA (BH), si la batería carga (BL=03h), si no hay batería (CH bit 7: un
+equipo de sobremesa) y el tanto por ciento (CL)—. Si no hay APM, el nivel es
+desconocido o no se puede llamar a la BIOS en modo real (V86 sin VCPI), se
+toma como «sin batería» y no se dibuja la pila.
+
+Un **temporizador del escritorio** de cinco segundos (número 1, puesto en
+`WM_CREATE`) refresca la hora —y la batería, si la hay— y, comparando una
+«firma» de lo que se ve (hora, nivel y estado), solo repinta la zona de la
+derecha cuando algo cambia (al pasar el minuto, sobre todo). En un sobremesa no
+se gasta APM en cada vuelta: solo se vuelve a leer la batería si la había. En
+la demo (`/DEMO`) no aparece ni batería ni hora, y la barra queda como antes.
+
+Como QEMU no simula una batería APM, para las pruebas y las capturas hay una
+opción oculta de depuración, **`/BATnn[C]`**, que fija el nivel sin tocar la
+BIOS: `/BAT85` lo pone al 85 %, y una `C` al final («`/BAT100C`») lo marca
+enchufado/cargando. La usa `tests/run_ventanas_bateria_tests.sh`.
 
 ### Configuración y VENTANAS.INI
 

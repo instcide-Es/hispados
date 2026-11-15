@@ -88,6 +88,17 @@ vol_pend    resb 1                  ; volumen sin dar a HSPSND (arrastrando)
 snd_tipo    resb 1                  ; [CAMPANITA] la tarjeta: 1 SB, 2 SB16, 3 AC'97, 4 HD Audio
 cfg_term    resb 1
 vol_txt     resb 24
+; ---- [BATERÍA] indicador de nivel (APM) y [RELOJ] hora de la barra ----
+            alignb 4
+bat_pct     resd 1                  ; 0..100
+bat_ac      resd 1                  ; 1 enchufada o cargando
+barra_firma_ant resd 1              ; firma de lo visible a la derecha (batería y hora)
+bat_hay     resb 1                  ; 1 si hay batería válida (portátil con APM)
+bar_h       resb 1                  ; [RELOJ] hora (0..23)
+bar_m       resb 1                  ; minuto (0..59)
+            alignb 4
+bat_txt     resb 8
+bar_txt     resb 8
 cfg_ruta    resb 96
 dir_propia  resb 80
 cen_txt     resb 200

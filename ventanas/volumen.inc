@@ -25,7 +25,10 @@
 ;  doble clic en el altavoz, también (escritorio.inc).
 ; =============================================================================
 
-VOL_X       equ SALIR_AN + 12 + 36  ; del borde derecho al altavoz
+; del borde derecho al altavoz: a la izquierda del cuerpo de la batería (BAT_X,
+; escritorio.inc) más el ancho del altavoz (unos 20) y una separación de 8, para
+; que quede [altavoz] [batería] [hora] [Salir] sin pisarse
+VOL_X       equ BAT_X + 28
 
 c_volumen   dd vol_proc
             db C_CREMA, 0, 0, 0

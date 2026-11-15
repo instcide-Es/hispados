@@ -7149,6 +7149,7 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  APAGAR y REINICIAR (apagar o reiniciar el equipo).", 13, 10
             db "  PROTECTOR (protector de pantalla en modo texto: la «Lluvia verde»).", 13, 10
             db "  CONFRED (IPCONFIG), PING y DESCARGAR: la red (HSPRED es el controlador).", 13, 10
+            db "  CONSOLA: consola remota por red, abierta y con código de acceso.", 13, 10
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
             db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
             db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10

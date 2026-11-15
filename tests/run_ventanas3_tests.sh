@@ -201,7 +201,7 @@ chk $T/t1.ppm tam 800 600 cursor 400 300 \
   texto 60 79 0 15 fina "rchivo" texto 140 79 0 15 fina "uda" \
   texto 66 155 9 12 fina "Principal" texto 166 155 0 8 fina "Accesorios" \
   texto 286 155 0 8 fina "Juegos" texto 54 197 7 8 fina "Doble clic o Intro para abrir un grupo." \
-  px 690 12 7 "altavoz gris: no hay HSPSND" \
+  px 582 12 7 "altavoz gris: no hay HSPSND" \
   px 468 60 8 "botón de cerrar del Centro" px 475 65 13 "aspa del botón de cerrar" \
   px 300 10 1 "barra superior" texto 736 5 8 4 fina "Salir" px 491 150 0 "sombra del Centro"
 # -- el grupo «Accesorios», en su ventana (alargada para que quepa la segunda

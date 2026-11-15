@@ -943,9 +943,35 @@ grafico:
         je .ohijo
         cmp al, 8                   ; [TAMAÑO]
         je .ocont
+        cmp al, 9                   ; [BATERÍA] (depuración: fija el nivel)
+        je .obat
         jmp .ayuda
 .ocont:
         mov byte [op_contorno], 1
+        jmp .arg
+.obat:
+        mov byte [op_bathay], 1     ; [BATERÍA] /BATnn[C]: batería simulada
+        xor dx, dx                  ; (para las capturas: QEMU no da APM)
+.ob1:
+        lodsb
+        cmp al, '0'
+        jb .obz
+        cmp al, '9'
+        ja .obz
+        and ax, 0x000F
+        imul dx, dx, 10
+        add dx, ax
+        jmp .ob1
+.obz:
+        mov [op_bat], dl
+        cmp al, 'C'                 ; /BATnnC: enchufada o cargando
+        je .obc
+        cmp al, 'c'
+        je .obc
+        dec si                      ; el carácter no era mío: que lo vea .arg
+        jmp .arg
+.obc:
+        mov byte [op_batac], 1
         jmp .arg
 .ohijo:
         mov ax, [0x16]              ; el PSP del padre: ¿es el lanzador?
@@ -1758,7 +1784,8 @@ exc_instalar:
 ;  Datos
 ; =============================================================================
 ; opciones: longitud, texto, clase (0 VGA, 1 ancho, 2 bits, 3 color, 4 ayuda,
-; 5 prueba de fallo, 6 ventanas de muestra) y valor
+; 5 prueba de fallo, 6 ventanas de muestra, 7 hijo del lanzador, 8 contorno,
+; 9 [BATERÍA] batería simulada para las pruebas) y valor
 opciones:
         db 3, "VGA", 0
         dw 0
@@ -1785,6 +1812,8 @@ opciones:
         db 4, "DEMO", 6
         dw 0
         db 8, "CONTORNO", 8         ; [TAMAÑO] arrastrar solo el contorno
+        dw 0
+        db 3, "BAT", 9              ; [BATERÍA] (oculta, pruebas): /BATnn[C] fija el nivel
         dw 0
         db 1, "@", 7                ; (interna: la pone el lanzador)
         dw 0
@@ -1857,6 +1886,9 @@ en_grafico  resb 1
 salir       resb 1
 op_demo     resb 1
 op_contorno resb 1                  ; [TAMAÑO] /CONTORNO
+op_bat      resb 1                  ; [BATERÍA] % forzado para pruebas (/BATnn)
+op_batac    resb 1                  ; enchufada/cargando forzado (/BATnnC)
+op_bathay   resb 1                  ; 1: usar la batería forzada (no la BIOS)
 son_nteclas resb 1
 rc_cab      resb 1                  ; cola de sucesos del ratón
 rc_cola     resb 1
