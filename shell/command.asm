@@ -7,6 +7,8 @@
         bits 16
         org 0x100
 
+%include "version.inc"
+
 start:
         jmp boot
 
@@ -7041,7 +7043,7 @@ msg_envfull db "No queda espacio en el entorno", 13, 10, 0
 msg_nopath  db "Sin ruta", 13, 10, 0
 msg_nolabel db "No se encontró la etiqueta", 13, 10, 0
 msg_toodeep db "Demasiados archivos de proceso por lotes anidados", 13, 10, 0
-msg_vername db "Hispa-DOS versión 0.9", 0
+msg_vername db "Hispa-DOS versión ", VER_STR, 0
 s_on        db "ON", 0
 s_off       db "OFF", 0
 s_not       db "NOT", 0
@@ -7056,9 +7058,9 @@ s_autoexec  db "A:\AUTOEXEC.BAT", 0
 s_alias     db "A:\HISPADOS\ALIAS.INI", 0
 s_empty     db 0
 ; -----------------------------------------------------------------------------
-msg_hello   db 13, 10, "Intérprete de órdenes de Hispa-DOS 0.9", 13, 10
+msg_hello   db 13, 10, "Intérprete de órdenes de Hispa-DOS ", VER_STR, 13, 10
             db "Escriba AYUDA para ver la lista de órdenes.", 13, 10, 13, 10, 0
-msg_ver     db 13, 10, "Hispa-DOS versión 0.9 (compatible con MS-DOS 6.22)", 13, 10
+msg_ver     db 13, 10, "Hispa-DOS versión ", VER_STR, " (compatible con MS-DOS 6.22)", 13, 10
             db "Versión de DOS notificada: ", 0
 msg_badcmd  db "Comando o nombre de archivo incorrecto", 13, 10, 0
 msg_execerr db "No se puede ejecutar el programa", 13, 10, 0
@@ -7150,6 +7152,7 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  PROTECTOR (protector de pantalla en modo texto: la «Lluvia verde»).", 13, 10
             db "  CONFRED (IPCONFIG), PING y DESCARGAR: la red (HSPRED es el controlador).", 13, 10
             db "  CONSOLA: consola remota por red, abierta y con código de acceso.", 13, 10
+            db "  ACTUALIZAR: mira por la red si hay una versión más nueva del sistema.", 13, 10
             db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
             db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
             db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10

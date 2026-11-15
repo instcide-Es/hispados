@@ -29,7 +29,7 @@ check "CONFRED (IPCONFIG), PING y DESCARGAR: la red (HSPRED es el controlador)."
 check "CONFRED (IPCONFIG) [/RENOVAR | /LIBERAR]"
 check "DESCARGAR [http://]servidor[:puerto]/ruta [archivo]"
 check "PING nombre|dirección [/N:n] [/T]"
-n=$(grep -c "Hispa-DOS versión 0.9 (compatible con MS-DOS 6.22)" $T/log.txt)
+n=$(grep -c "Hispa-DOS versión 0.9.11 (compatible con MS-DOS 6.22)" $T/log.txt)
 if [ "$n" -ge 2 ]; then echo "  OK   Versión (con tilde) y /ver"; else echo "  FAIL Versión y /ver ($n)"; fail=1; fi
 n=$(grep -c "Lista de órdenes internas" $T/log.txt)
 if [ "$n" -ge 2 ]; then echo "  OK   /? solo muestra la ayuda"; else echo "  FAIL /? solo ($n)"; fail=1; fi

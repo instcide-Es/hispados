@@ -55,6 +55,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 | `PING destino [/N:n] [/T]` | Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
 | `CONSOLA [/PUERTO:n]` | Consola remota por red (servidor TCP, puerto 2323 por omisión): deja entrar a otra persona a este equipo, con un código de acceso de 6 cifras por conexión que solo se ve aquí. Abierta y controlada por el usuario. Ver [docs/CONSOLA.md](CONSOLA.md). |
+| `ACTUALIZAR [url]` | Mira por HTTP si hay una versión más nueva del sistema. Lee un archivo de texto con la última versión y la compara con la instalada (`lib/version.inc`): dice si está al día o avisa de la nueva (con la nota y dónde descargarla). **Solo avisa**: no descarga ni instala nada. La dirección sale, por orden, de lo que se escriba, de `ACTUALIZAR=` en `RED.INI`, o de la de por omisión. Ver más abajo. |
 
 **HTTPS no**: las direcciones `https://` (cifradas, hoy casi todas) se
 rechazan con un mensaje claro, y también una redirección a `https://`. Para
@@ -63,8 +64,45 @@ un trabajo grande, más propio de Hispa 32. `DESCARGAR` sirve para servidores
 de la red de casa (otro PC con `python3 -m http.server`, un NAS) y para los
 sitios de archivos antiguos que siguen dando HTTP.
 
-`AYUDA` las lista y `AYUDA CONFRED` (o `CONFRED /?`), `AYUDA PING` y
-`AYUDA DESCARGAR` las explican.
+`AYUDA` las lista y `AYUDA CONFRED` (o `CONFRED /?`), `AYUDA PING`,
+`AYUDA DESCARGAR` y `AYUDA ACTUALIZAR` las explican.
+
+## ACTUALIZAR: buscar actualizaciones del sistema
+
+`ACTUALIZAR` mira por la red si hay una versión más nueva de Hispa-DOS que la
+instalada. No descarga ni instala nada: solo lo dice (instalar a ciegas sería
+peligroso; es trabajo futuro). La versión del sistema está en un solo sitio,
+`lib/version.inc` (`VER_STR` para enseñarla y `VER_NUM` para comparar), que
+usan también `VERSION`/`VER` y el saludo del intérprete.
+
+El archivo remoto es texto plano, una cosa por línea (se saltan las líneas en
+blanco y las que empiezan por `;` o `#`):
+
+```
+version=0.9.11
+descarga=http://ejemplo/hispados/
+nota=Lo nuevo de esta versión
+```
+
+La única clave que hace falta es `version=` (`mayor.menor.parche`);
+`descarga=` y `nota=` son opcionales y solo sirven para enseñarlas. Según el
+número sea igual o menor, dice «está al día»; si es mayor, avisa de la versión
+nueva con la nota y dónde bajarla.
+
+La dirección del archivo sale, por este orden: (1) la que se escriba en la
+línea de órdenes, (2) la clave `ACTUALIZAR=` de `RED.INI`, (3) una de por
+omisión compilada: `http://actualiza.clicgest.es/ultima.txt` (servidor propio
+por HTTP; se puede cambiar con la clave `ACTUALIZAR=` de `RED.INI`).
+
+**Importante**: como no hay HTTPS (ver abajo) y **GitHub es todo HTTPS**, el
+archivo de versión no se puede leer de GitHub: tiene que estar en un servidor
+propio por HTTP. Las direcciones `https://` se rechazan con un mensaje claro,
+igual que en `DESCARGAR`. Si falta la red (sin `HSPRED` o sin IP), lo dice y
+no hace nada.
+
+En el disco el programa es `ACTUALIZ.COM` (los nombres de DOS tienen 8
+letras); al escribir `ACTUALIZAR` el intérprete lo recorta a `ACTUALIZ`, así
+que no hace falta alias.
 
 ## Tarjetas
 
@@ -118,6 +156,7 @@ proyecto). Claves (sin importar mayúsculas; `;` y `#` empiezan comentarios):
 | `MASCARA=` (`MASK=`) | la máscara; si no se dice, 255.255.255.0 |
 | `PUERTA=` (`GATEWAY=`) | la puerta de enlace (el router) |
 | `DNS=` | el servidor de nombres; con `DHCP=SI` también, y manda sobre el que da el DHCP |
+| `ACTUALIZAR=` | la dirección HTTP del archivo de versión que mira `ACTUALIZAR` (si no, la de por omisión). Opcional. |
 
 La configuración que se consigue (por DHCP o de `RED.INI`) se guarda en
 `HSPRED` y la usan todos los programas sin volver a pedirla, hasta

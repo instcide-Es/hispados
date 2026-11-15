@@ -143,7 +143,11 @@ $(B)/DESCARGAR.COM: utils/descargar.asm $(RED_DEP) | $(B)
 # acceso. Usa el modo servidor (tcp_escuchar) de la pila de lib/red.inc.
 $(B)/CONSOLA.COM: utils/consola.asm $(RED_DEP) | $(B)
 	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
-RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM
+# ACTUALIZAR (docs/RED.md): busca por HTTP si hay una versión más nueva del
+# sistema (lib/version.inc) y avisa. En el disco es ACTUALIZ.COM (8.3).
+$(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc | $(B)
+	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM $(B)/ACTUALIZAR.COM
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
@@ -385,6 +389,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.I
 	mcopy -i $@ $(B)/PING.COM ::HISPADOS/PING.COM
 	mcopy -i $@ $(B)/DESCARGAR.COM ::HISPADOS/DESCARGA.COM
 	mcopy -i $@ $(B)/CONSOLA.COM ::HISPADOS/CONSOLA.COM
+	mcopy -i $@ $(B)/ACTUALIZAR.COM ::HISPADOS/ACTUALIZ.COM
 	iconv -f UTF-8 -t CP437 sistema/RED.INI | sed 's/$$/\r/' > $(B)/RED.INI
 	mcopy -i $@ $(B)/RED.INI ::HISPADOS/RED.INI
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
@@ -619,6 +624,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)
+	tests/run_actualizar_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
 
