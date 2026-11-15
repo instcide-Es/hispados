@@ -33,6 +33,16 @@ KERNEL.SYS     COMMAND.COM    README.TXT     AUTOEXEC.BAT   [HISPADOS]
 
 El plan completo, por fases, está en [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## El proyecto: Rescoldo
+
+Hispa-DOS es la primera pieza de **Rescoldo**, la familia de programas libres en español para devolver a la vida los ordenadores viejos:
+
+- **Hispa-DOS** — el sistema operativo (este repositorio).
+- **Hispa Ventanas** — su entorno gráfico con ventanas.
+- **Castel** — el lenguaje de programación de sistemas, en español, de la familia Pascal/Oberon, con el que se escribirán los próximos sistemas (en diseño). El nombre **Castel** es un recorte de «**castel**lano».
+
+Web del proyecto, con una demostración que arranca Hispa-DOS en el propio navegador: **[hispados.es](https://hispados.es)**.
+
 ## Descargar y probar
 
 Las imágenes listas para usar están en **[Releases](https://github.com/instcide-Es/hispados/releases)**:
