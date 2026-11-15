@@ -7150,6 +7150,7 @@ msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):"
             db "  AUDICION (prueba de sonido con preguntas de sí o no).", 13, 10
             db "  APAGAR y REINICIAR (apagar o reiniciar el equipo).", 13, 10
             db "  PROTECTOR (protector de pantalla en modo texto: la «Lluvia verde»).", 13, 10
+            db "  TECLA (diagnóstico del teclado: enseña el código en crudo de cada tecla).", 13, 10
             db "  CONFRED (IPCONFIG), PING y DESCARGAR: la red (HSPRED es el controlador).", 13, 10
             db "  CONSOLA: consola remota por red, abierta y con código de acceso.", 13, 10
             db "  ACTUALIZAR: mira por la red si hay una versión más nueva del sistema.", 13, 10

@@ -15,5 +15,5 @@
 ;  Ojo: no es lo mismo que «Hispa Ventanas 0.3» (otro programa, otra versión).
 ; =============================================================================
 
-%define VER_STR "0.9.13"
-VER_NUM     equ 0*10000 + 9*100 + 13        ; 0.9.13 -> 913
+%define VER_STR "0.9.14"
+VER_NUM     equ 0*10000 + 9*100 + 14        ; 0.9.14 -> 914

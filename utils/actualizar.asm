@@ -6,7 +6,7 @@
 ;  Mira por la red (HTTP, sin cifrar) si hay una versión más nueva de
 ;  Hispa-DOS que la instalada. Lee un archivo de texto con la última versión
 ;  (una cosa por línea):
-;      version=0.9.13
+;      version=0.9.14
 ;      descarga=http://ejemplo/hispados/
 ;      nota=Lo nuevo de esta versión
 ;  Compara «version=» con la versión del sistema (lib/version.inc) y avisa si
@@ -1024,7 +1024,7 @@ m_uso       db "Mira por la red si hay una versión más nueva de Hispa-DOS que 
             db "Sin dirección, usa la clave ACTUALIZAR= de \HISPADOS\RED.INI y, si no", 13, 10
             db "está, una de por omisión. El servidor da un archivo de texto con la", 13, 10
             db "última versión:", 13, 10
-            db "  version=0.9.13", 13, 10
+            db "  version=0.9.14", 13, 10
             db "  descarga=http://ejemplo/hispados/   (opcional)", 13, 10
             db "  nota=Lo nuevo de esta versión        (opcional)", 13, 10
             db 13, 10

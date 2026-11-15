@@ -174,6 +174,8 @@ $(B)/ELEGIR.COM: utils/elegir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/ETIQUETA.COM: utils/etiqueta.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/TECLA.COM: utils/tecla.asm lib/util.inc | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XCOPIAR.COM: utils/xcopiar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/REVISAR.COM: utils/revisar.asm lib/util.inc | $(B)
@@ -323,7 +325,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
         $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
-        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM $(B)/PROTECTOR.COM \
+        $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM $(B)/PROTECTOR.COM $(B)/TECLA.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS) $(RED)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
@@ -362,6 +364,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/MANDO.INI sistema/RED.I
 	mcopy -i $@ $(B)/ELEGIR.COM ::HISPADOS/ELEGIR.COM
 	mcopy -i $@ $(B)/EXPANDIR.COM ::HISPADOS/EXPANDIR.COM
 	mcopy -i $@ $(B)/ETIQUETA.COM ::HISPADOS/ETIQUETA.COM
+	mcopy -i $@ $(B)/TECLA.COM ::HISPADOS/TECLA.COM
 	mcopy -i $@ $(B)/XCOPIAR.COM ::HISPADOS/XCOPIAR.COM
 	mcopy -i $@ $(B)/REVISAR.COM ::HISPADOS/REVISAR.COM
 	mcopy -i $@ $(B)/VELOCIDAD.COM ::HISPADOS/VELOCIDA.COM
@@ -588,6 +591,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_tab_tests.sh $(IMG)
 	tests/run_editlinea_tests.sh $(IMG)
 	tests/run_mackeys_tests.sh $(IMG)
+	tests/run_tecla_tests.sh $(IMG)
 	tests/run_nucleo_tests.sh $(IMG)
 	tests/run_pila_tests.sh $(IMG)
 	tests/run_reloj_tests.sh $(IMG)

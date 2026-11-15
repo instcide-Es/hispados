@@ -39,7 +39,10 @@
 
 RQ_N        equ 8                   ; paquetes que pueden esperar
 RQ_SZ       equ 1520                ; cada uno: longitud (2) y el paquete
-RED_NARP    equ 4
+RED_NARP    equ 16              ; (potencia de 2) caché ARP: con 4 la puerta de
+                                ; enlace se echaba enseguida en una red con varios
+                                ; equipos, y entonces no se podía contestar a un
+                                ; cliente de fuera (consola remota colgada)
 RED_VENT    equ 5840                ; ventana de TCP (4 segmentos)
 
         section .text
