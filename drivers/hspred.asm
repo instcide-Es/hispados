@@ -2,12 +2,15 @@
 ;  HSPRED.COM - controlador de red de Hispa-DOS (residente, «packet driver»)
 ;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
 ;
-;  Uso:  HSPRED [/INT:xx] [/INFO] [/U] [/?]      (en AUTOEXEC.BAT; vale LH)
+;  Uso:  HSPRED [/INT:xx] [/INFO] [/AUTO] [/U] [/?]  (en AUTOEXEC.BAT; vale LH)
 ;        /INT:xx  vector del packet driver, en hexadecimal (60 a 80); si no
 ;                 se dice, el primero libre desde el 60h (el 67h, el de la
 ;                 memoria expandida, nunca)
 ;        /INFO    tarjeta, MAC, enlace, IRQ, vector, contadores y la
 ;                 configuración IP; también con el controlador ya cargado
+;        /AUTO    silencioso si no hay tarjeta: sale sin avisar (errorlevel 1)
+;                 en vez de imprimir el aviso. Pensada para el AUTOEXEC.BAT,
+;                 para que no moleste en un equipo sin red. (/Q es lo mismo.)
 ;        /U       descargarlo de la memoria (si ningún programa lo usa)
 ;
 ;  Interfaz: la especificación pública de «packet drivers» de FTP Software
@@ -1893,8 +1896,6 @@ resident_end:
 
 init:
         cld
-        mov si, msg_title
-        call puts
         call parse
         jnc .pok
         mov si, msg_usage
@@ -1902,6 +1903,14 @@ init:
         mov ax, 0x4C01
         int 0x21
 .pok:
+        ; el banner (msg_title), salvo con /AUTO: así, en el AUTOEXEC.BAT de un
+        ; equipo sin red, no se imprime nada (ni el banner ni el aviso); si hay
+        ; tarjeta, igualmente se verá la línea «Tarjeta X, MAC...».
+        cmp byte [o_auto], 0
+        jne .no_banner
+        mov si, msg_title
+        call puts
+.no_banner:
         cmp byte [o_help], 0
         je .nh
         mov si, msg_usage
@@ -1977,9 +1986,14 @@ init:
         mov [v86], al
         call find_card
         jnc .found
+        ; no hay tarjeta de red. Con /AUTO (p. ej. en el AUTOEXEC.BAT), salir
+        ; en silencio con errorlevel 1; sin /AUTO, avisar como siempre.
+        cmp byte [o_auto], 0
+        jne .silent
         mov si, msg_nocard
         call puts
         call list_net
+.silent:
         mov ax, 0x4C01
         int 0x21
 .found:
@@ -2098,6 +2112,10 @@ parse:
         je .help
         cmp al, 'U'
         je .u
+        cmp al, 'A'                 ; /AUTO
+        je .auto
+        cmp al, 'Q'                 ; /Q, lo mismo que /AUTO
+        je .q
         cmp al, 'I'
         jne .bad
         lodsb
@@ -2133,6 +2151,25 @@ parse:
         jmp .end
 .u:
         mov byte [o_unload], 1
+        jmp .end
+.auto:
+        ; /AUTO: pensada para el AUTOEXEC.BAT. Si no hay tarjeta, HSPRED sale
+        ; en silencio (sin msg_nocard) con errorlevel 1, para no molestar en el
+        ; arranque de un equipo sin red. Se escribe entera «/AUTO».
+        lodsb
+        call upcase
+        cmp al, 'U'
+        jne .bad
+        lodsb
+        call upcase
+        cmp al, 'T'
+        jne .bad
+        lodsb
+        call upcase
+        cmp al, 'O'
+        jne .bad
+.q:
+        mov byte [o_auto], 1
         jmp .end
 .help:
         mov byte [o_help], 1
@@ -2192,6 +2229,7 @@ upcase:
 o_help      db 0
 o_info      db 0
 o_unload    db 0
+o_auto      db 0
 o_int       db 0
 v86         db 0
 i_link      dw 0
@@ -3324,10 +3362,11 @@ putdec:
         ret
 
 msg_title   db "HSPRED 0.1: controlador de red de Hispa-DOS (packet driver)", 13, 10, 0
-msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/U]", 13, 10
+msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/U]", 13, 10
             db "  /INT:xx  vector del packet driver (60 a 80, hexadecimal; si no, el", 13, 10
             db "           primero libre desde el 60)", 13, 10
             db "  /INFO    tarjeta, MAC, enlace, IRQ, vector y la configuración IP", 13, 10
+            db "  /AUTO    sin tarjeta, sale en silencio (para el AUTOEXEC.BAT)", 13, 10
             db "  /U       descargarlo de la memoria", 13, 10
             db "Tarjetas: NE2000 PCI (RTL8029), Realtek RTL8139, Intel PRO/1000 (e1000)", 13, 10
             db "y Realtek RTL8111/8168/8101 (sin probar). La IP: CONFRED (IPCONFIG).", 13, 10

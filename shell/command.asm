@@ -3615,6 +3615,9 @@ run_external:
 .extmal:
         jmp .badmsg
 .extok:
+        ; ¿la orden escrita pasa de 8 letras y solo cuadra por el recorte a 8?
+        ; (deja [warn_trunc]=1 y, si la hay, la sugerencia en [sugg_ptr])
+        call check_trunc
         ; cola de órdenes: argumentos tal cual (con el espacio inicial)
         mov si, [argp]
         mov di, tail+1
@@ -3810,6 +3813,183 @@ al_skip:
 .r:
         ret
 
+; ---- «punto de inteligencia» del recorte a 8 letras ----------------------
+; Las órdenes de DOS solo usan 8 letras: al abrir el ejecutable, el núcleo
+; recorta el nombre a 8. Por eso ACTUALIZAR (10) arranca ACTUALIZ.COM, pero
+; también lo haría un error como ACTUALIZQ. check_trunc mira cmdword (ya en
+; mayúsculas, sin argumentos): si la PARTE DEL NOMBRE (sin ruta ni extensión)
+; pasa de 8 letras y NO es un nombre largo legítimo conocido (tabla longcmds),
+; deja [warn_trunc]=1 para avisar antes de ejecutar, con la sugerencia (si la
+; hay) en [sugg_ptr]. Si el nombre es legítimo, no toca nada: corre en
+; silencio como siempre. No modifica cmdword ni los registros.
+check_trunc:
+        push ax
+        push bx
+        push cx
+        push si
+        push di
+        mov byte [warn_trunc], 0
+        mov word [sugg_ptr], 0
+        ; --- inicio de la base: tras el último '\' o ':' ---
+        mov si, cmdword
+        mov bx, si
+.fb:
+        mov al, [si]
+        test al, al
+        jz .fbd
+        inc si
+        cmp al, '\'
+        je .fbs
+        cmp al, ':'
+        jne .fb
+.fbs:
+        mov bx, si
+        jmp .fb
+.fbd:
+        mov [base_ptr], bx
+        ; --- longitud de la base (hasta '.' o fin) ---
+        mov si, bx
+        xor cx, cx
+.ln:
+        mov al, [si]
+        test al, al
+        jz .lnd
+        cmp al, '.'
+        je .lnd
+        inc si
+        inc cx
+        jmp .ln
+.lnd:
+        cmp cx, 8
+        jbe .done                   ; 8 o menos: no hay recorte, nada que avisar
+        ; --- ¿nombre largo legítimo? (comparación entera, sin mayús/minús) ---
+        mov di, longcmds
+.tl:
+        cmp byte [di], 0
+        je .noleg                   ; fin de la tabla: no es legítimo
+        mov si, bx
+.tc:
+        mov al, [di]
+        test al, al
+        jz .tce                     ; se agotó la entrada
+        mov ah, [si]
+        test ah, ah
+        jz .tnext                   ; la base acabó antes
+        cmp ah, '.'
+        je .tnext
+        cmp al, ah                  ; cmdword ya viene en mayúsculas
+        jne .tnext
+        inc di
+        inc si
+        jmp .tc
+.tce:
+        ; entrada agotada: la base debe acabar también aquí (fin o '.')
+        mov ah, [si]
+        test ah, ah
+        jz .done                    ; coincide del todo -> legítimo
+        cmp ah, '.'
+        je .done
+.tnext:
+        ; saltar al final de esta entrada y pasar a la siguiente
+        mov al, [di]
+        test al, al
+        jz .tgap
+        inc di
+        jmp .tnext
+.tgap:
+        inc di
+        jmp .tl
+.noleg:
+        ; no está en la tabla: hay que AVISAR
+        mov byte [warn_trunc], 1
+        ; trunc8 = las 8 primeras letras de la base (lo que se abre de verdad)
+        mov si, bx
+        mov di, trunc8
+        mov cx, 8
+.c8:
+        mov al, [si]
+        call upcase
+        mov [di], al
+        inc si
+        inc di
+        loop .c8
+        mov byte [di], 0
+        ; ¿alguna entrada de la tabla empieza por esas 8 letras? -> sugerencia
+        mov di, longcmds
+.sl:
+        cmp byte [di], 0
+        je .done
+        mov si, trunc8
+        mov cx, 8
+.scp:
+        mov al, [di]
+        cmp al, [si]
+        jne .snext
+        inc di
+        inc si
+        loop .scp
+        sub di, 8                   ; volver al inicio de la entrada
+        mov [sugg_ptr], di
+        jmp .done
+.snext:
+        mov al, [di]
+        test al, al
+        jz .sgap
+        inc di
+        jmp .snext
+.sgap:
+        inc di
+        jmp .sl
+.done:
+        pop di
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; imprime el aviso del recorte usando [base_ptr], trunc8 y [sugg_ptr]
+print_trunc_warn:
+        mov si, msg_trunc1
+        call puts
+        mov si, [base_ptr]          ; nombre tecleado (hasta '.' o fin)
+        call puts_base
+        mov si, msg_trunc2
+        call puts
+        mov si, trunc8              ; nombre recortado a 8
+        call puts
+        mov si, msg_trunc3
+        call puts
+        cmp word [sugg_ptr], 0
+        je .r
+        mov si, msg_trunc4
+        call puts
+        mov si, [sugg_ptr]          ; nombre largo correcto
+        call puts
+        mov si, msg_trunc5
+        call puts
+.r:
+        ret
+
+; como puts pero para hasta '.' o fin (el nombre sin la extensión)
+puts_base:
+        push ax
+        push dx
+.l:
+        lodsb
+        test al, al
+        jz .d
+        cmp al, '.'
+        je .d
+        mov dl, al
+        mov ah, 2
+        int 0x21
+        jmp .l
+.d:
+        pop dx
+        pop ax
+        ret
+
 ; prefix + cmdword (+ .COM/.EXE) -> ejecutar. CF=1 si no existe
 try_dir:
         cmp byte [hasext], 0
@@ -3880,6 +4060,14 @@ try_one:
         clc
         ret
 .notbat:
+        ; aviso del recorte sospechoso (una sola vez), justo antes de ejecutar;
+        ; aun así se ejecuta: si se nos escapó un nombre largo legítimo, no se
+        ; rompe nada. No se avisa de los .BAT (quedan arriba, en start_batch).
+        cmp byte [warn_trunc], 0
+        je .nowarn
+        mov byte [warn_trunc], 0
+        call print_trunc_warn
+.nowarn:
         ; (el bloque de parámetros lo monta la parte residente: run_prog)
         cmp byte [lh_flag], 0
         je .low
@@ -7064,6 +7252,22 @@ msg_ver     db 13, 10, "Hispa-DOS versión ", VER_STR, " (compatible con MS-DOS 
             db "Versión de DOS notificada: ", 0
 msg_badcmd  db "Comando o nombre de archivo incorrecto", 13, 10, 0
 msg_execerr db "No se puede ejecutar el programa", 13, 10, 0
+; aviso del recorte a 8 letras (ver check_trunc)
+msg_trunc1  db "Aviso: las órdenes solo usan 8 letras; «", 0
+msg_trunc2  db "» se ha tomado como «", 0
+msg_trunc3  db "».", 13, 10, 0
+msg_trunc4  db "  ¿Quería decir «", 0
+msg_trunc5  db "»?", 13, 10, 0
+; nombres largos legítimos (>8 letras) de órdenes que en el disco son 8.3 y
+; funcionan por el recorte a 8; evitan avisar de un recorte que es correcto.
+; En mayúsculas; el programa real es el nombre recortado a 8 (ACTUALIZ, etc.).
+longcmds    db "ACTUALIZAR", 0
+            db "VELOCIDAD", 0
+            db "PROTECTOR", 0
+            db "DESCARGAR", 0
+            db "REINICIAR", 0
+            db "DIAGNOSTICO", 0
+            db 0
 msg_baddir  db "Directorio no válido", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_nrdy    db "La unidad no está preparada", 13, 10, 0
@@ -7477,6 +7681,10 @@ echo_on     resb 1
 primary     resb 1
 al_tried    resb 1
 lh_flag     resb 1
+warn_trunc  resb 1                  ; 1 = avisar del recorte a 8 antes de ejecutar
+base_ptr    resw 1                  ; -> parte del nombre de cmdword (sin ruta)
+sugg_ptr    resw 1                  ; -> nombre largo sugerido, o 0
+trunc8      resb 9                  ; el nombre recortado a 8 letras (+0)
 mm_hasumb   resb 1
 mm_up       resb 1
 mm_upseg    resw 1

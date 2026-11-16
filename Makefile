@@ -587,6 +587,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_mem_tests.sh $(IMG)
 	tests/run_memprog_tests.sh $(IMG)
 	tests/run_ordenes_tests.sh $(IMG)
+	tests/run_recorte_tests.sh $(IMG)
 	tests/run_expandir_tests.sh $(IMG)
 	tests/run_mediachange_tests.sh $(IMG)
 	CDBUS=ahci tests/run_mediachange_tests.sh $(IMG)
