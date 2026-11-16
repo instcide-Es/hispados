@@ -189,8 +189,20 @@ cel_puntero:
         lea esi, [cel_txt+eax]
         pop eax
         ret
+; ALEATORIO(): aquí, siempre lo mismo
+azar_num:
+        mov eax, 12345678
+        ret
+; la ficha donde se apunta el valor de una fórmula: aquí, una por celda
+cel_cache:
+        imul edi, edx, NCOL
+        add edi, ecx
+        imul edi, CV_TAM
+        add edi, fichas
+        ret
 %include "calculo.inc"
         section .bss
+fichas      resb NCOL * NFIL * CV_TAM
 lin         resb 512
 salida      resb 512
 fmt_w       resd 1
@@ -392,6 +404,9 @@ def colnum(letras):
 
 def colnom(c):
     return chr(65 + c) if c < 26 else chr(64 + c // 26) + chr(65 + c % 26)
+
+
+NADA = object()        # (lo que contesta mas_funciones si el nombre no es suyo)
 
 
 class Hoja:
@@ -599,11 +614,14 @@ class Formula:
             if not (0 <= col < NCOL and 0 <= fil < NFIL):
                 raise Err(3)
             return self.h.valor(col, fil, self.pila, self.prof)
-        m = re.compile(r'[A-Za-z.]*').match(self.t, self.i)
+        m = re.compile(r'[A-Za-zñÑ.]*').match(self.t, self.i)
         self.i = m.end()
-        nom = m.group().upper()[:11]
-        if nom in ('SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR', 'CONTARA'):
+        nom = m.group().upper()[:15]
+        if nom in ('SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR', 'CONTARA', 'PRODUCTO', 'MEDIANA', 'VAR', 'DESVEST'):
             return self.rangos(nom)
+        r = self.mas_funciones(nom)
+        if r is not NADA:
+            return r
         if nom == 'ABS':
             return abs(self.args1())
         if nom == 'REDONDEAR':
@@ -686,6 +704,261 @@ class Formula:
             return len(s) * ESC if nom == 'LARGO' else s.translate(MAY if nom == 'MAYUSC' else MIN)
         raise Err()
 
+    def coma(self):
+        """gasta un «;», si viene"""
+        if self.car() == ';':
+            self.i += 1
+            return True
+        return False
+
+    def ent(self):
+        x = num(self.expr())
+        n = abs(x) // ESC
+        if n >= 2 ** 31:
+            raise Err()
+        return -n if x < 0 else n
+
+    @staticmethod
+    def a_dia(x):
+        if x < 0 or x // ESC > 2958465:
+            raise Err()
+        return x // ESC
+
+    def mas_funciones(self, nom):
+        if nom in ('PI', 'ALEATORIO'):
+            self.abre()
+            self.cierra()
+            return 314159265 if nom == 'PI' else 12345678
+        if nom == 'SIGNO':
+            x = self.args1()
+            return (x > 0) * ESC - (x < 0) * ESC
+        if nom in ('TRUNCAR', 'REDONDEAR.MENOS', 'REDONDEAR.MAS'):
+            self.abre()
+            x = num(self.expr())
+            if self.coma():
+                d = self.ent()
+            elif nom == 'TRUNCAR':
+                d = 0
+            else:
+                raise Err()
+            self.cierra()
+            if not 0 <= d <= 8:
+                raise Err()
+            p = 10 ** (8 - d)
+            q, r = divmod(abs(x), p)
+            if nom == 'REDONDEAR.MAS' and r:
+                q += 1
+            if q * p >= LIM:
+                raise Err()
+            return -q * p if x < 0 else q * p
+        if nom == 'PAGO':
+            self.abre()
+            tasa = num(self.expr())
+            if not self.coma():
+                raise Err()
+            plazos = num(self.expr())
+            if not self.coma():
+                raise Err()
+            capital = num(self.expr())
+            self.cierra()
+            if tasa == 0:
+                return -div(capital, plazos)
+            n = mul(capital, tasa)
+            return -div(n, ESC - self.potencia(suma(tasa + ESC), -plazos))
+        if nom == 'FECHA':
+            self.abre()
+            a = self.ent()
+            if not self.coma():
+                raise Err()
+            m = self.ent()
+            if not self.coma():
+                raise Err()
+            d = self.ent()
+            self.cierra()
+            try:
+                if not 1900 <= a <= 9999:
+                    raise ValueError
+                return (datetime.date(a, m, d) - DIA0).days * ESC
+            except ValueError:
+                raise Err()
+        if nom in ('AÑO', 'ANO', 'MES', 'DIA'):
+            f = DIA0 + datetime.timedelta(self.a_dia(self.args1()))
+            return (f.year if nom in ('AÑO', 'ANO') else f.month if nom == 'MES' else f.day) * ESC
+        if nom == 'DIASEM':
+            self.abre()
+            x = num(self.expr())
+            tipo = self.ent() if self.coma() else 1
+            self.cierra()
+            d = self.a_dia(x)
+            if tipo not in (1, 2):
+                raise Err()
+            return ((d + (6 if tipo == 1 else 5)) % 7 + 1) * ESC
+        if nom in ('ESNUMERO', 'ESTEXTO', 'ESBLANCO'):
+            self.abre()
+            x = self.expr()
+            self.cierra()
+            clase = 2 if x is None else 1 if isinstance(x, str) else 0
+            return ESC if clase == ('ESNUMERO', 'ESTEXTO', 'ESBLANCO').index(nom) else 0
+        if nom == 'SI.ERROR':
+            self.abre()
+            ini = self.i
+            try:
+                x = self.expr()
+            except Err:
+                self.i = ini
+                self.salta()
+                if not self.coma():
+                    raise Err()
+                x = self.expr()
+                self.cierra()
+                return x
+            if not self.coma():
+                raise Err()
+            self.salta()
+            self.cierra()
+            return x
+        if nom in ('IZQUIERDA', 'DERECHA'):
+            self.abre()
+            t = a_cad(self.expr())
+            n = self.ent() if self.coma() else 1
+            self.cierra()
+            if n < 0:
+                raise Err()
+            n = min(n, len(t))
+            return t[:n] if nom == 'IZQUIERDA' else t[len(t) - n:]
+        if nom == 'EXTRAE':
+            self.abre()
+            t = a_cad(self.expr())
+            if not self.coma():
+                raise Err()
+            ini = self.ent()
+            if not self.coma():
+                raise Err()
+            n = self.ent()
+            self.cierra()
+            if n < 0 or ini < 1:
+                raise Err()
+            return t[ini - 1:ini - 1 + n]
+        if nom == 'ENCONTRAR':
+            self.abre()
+            b = a_cad(self.expr())
+            if not self.coma():
+                raise Err()
+            t = a_cad(self.expr())
+            ini = self.ent() if self.coma() else 1
+            self.cierra()
+            if ini < 1 or ini - 1 > len(t):
+                raise Err()
+            k = t.find(b, ini - 1)
+            if k < 0:
+                raise Err()
+            return (k + 1) * ESC
+        if nom == 'ESPACIOS':
+            self.abre()
+            t = a_cad(self.expr())
+            self.cierra()
+            return ' '.join(x for x in t.split(' ') if x)
+        if nom == 'VALOR':
+            self.abre()
+            x = self.expr()
+            if isinstance(x, str):
+                x = cad_a_num(x)
+                if x is None:
+                    raise Err()
+            self.cierra()
+            return num(x)
+        if nom == 'TEXTO':
+            self.abre()
+            x = num(self.expr())
+            if not self.coma():
+                raise Err()
+            f = a_cad(self.expr())
+            self.cierra()
+            if f[:1].translate(MAY) == 'D':
+                return (DIA0 + datetime.timedelta(self.a_dia(x))).strftime('%d/%m/%Y')
+            dec, mil, pct, tras = 0, False, False, False
+            for c in f:
+                if c == '%':
+                    pct = True
+                elif c == ',':
+                    tras = True
+                elif not tras:
+                    mil = mil or c == '.'
+                elif dec < 8:
+                    dec += 1
+            if pct:
+                if abs(x) >> 32 >= 0x0147AE14:
+                    raise Err()
+                x *= 100
+            return num_fijo(x, dec, False, mil) + ('%' if pct else '')
+        if nom in ('BUSCARV', 'BUSCARH', 'COINCIDIR'):
+            return self.buscar(nom)
+        if nom == 'INDICE':
+            self.abre()
+            r = self.rango_lee()
+            if r is None or not self.coma():
+                raise Err()
+            f = self.ent()
+            c = self.ent() if self.coma() else None
+            self.cierra()
+            if c is None:
+                f, c = (1, f) if r[1] == r[3] else (f, 1)
+            if f < 1 or c < 1:
+                raise Err()
+            if r[1] + f - 1 > r[3] or r[0] + c - 1 > r[2]:
+                raise Err(3)
+            return self.h.valor(r[0] + c - 1, r[1] + f - 1, self.pila, self.prof)
+        return NADA
+
+    def buscar(self, nom):
+        self.abre()
+        v = self.expr()
+        if not self.coma():
+            raise Err()
+        r = self.rango_lee()
+        if r is None:
+            raise Err()
+        idx, exacto = 1, False
+        if nom == 'COINCIDIR':
+            if self.coma():
+                tipo = self.ent()
+                if tipo not in (0, 1):
+                    raise Err()
+                exacto = tipo == 0
+        else:
+            if not self.coma():
+                raise Err()
+            idx = self.ent()
+            if self.coma():
+                exacto = num(self.expr()) == 0
+        self.cierra()
+        filas, cols = r[3] - r[1], r[2] - r[0]
+        vert = nom == 'BUSCARV' or (nom == 'COINCIDIR' and cols == 0)
+        n, otro = (filas, cols) if vert else (cols, filas)
+        if idx < 1:
+            raise Err()
+        if idx - 1 > otro and nom != 'COINCIDIR':
+            raise Err(3)
+        enc = -1
+        for i in range(n + 1):
+            c, f = (r[0], r[1] + i) if vert else (r[0] + i, r[1])
+            x = self.h.valor(c, f, self.pila, self.prof)
+            if x is None:
+                continue
+            k = compara(v, x)
+            if k == 0 or (k > 0 and not exacto):
+                enc = i
+                if exacto:
+                    break
+            elif k < 0 and not exacto:
+                break
+        if enc < 0:
+            raise Err()
+        if nom == 'COINCIDIR':
+            return (enc + 1) * ESC
+        c, f = (r[0] + idx - 1, r[1] + enc) if vert else (r[0] + enc, r[1] + idx - 1)
+        return self.h.valor(c, f, self.pila, self.prof)
+
     def rango_lee(self):
         """-> (c1, f1, c2, f2), o None si lo que viene no es un rango ni una
         celda que sea el argumento entero (y entonces no gasta nada)"""
@@ -719,6 +992,7 @@ class Formula:
 
     def rangos(self, nom):
         e = {'n': 0, 'na': 0, 's': 0, 'ext': 0}
+        lista = []
 
         def cuenta(v):
             if v is None:
@@ -727,6 +1001,14 @@ class Formula:
             if isinstance(v, str):
                 return
             e['n'] += 1
+            if nom == 'PRODUCTO':
+                e['ext'] = v if e['n'] == 1 else mul(e['ext'], v)
+                return
+            if nom in ('MEDIANA', 'VAR', 'DESVEST'):
+                if e['n'] > 512:
+                    raise Err()
+                lista.append(v)
+                return
             e['s'] = suma(e['s'] + v)
             if e['n'] == 1 or (nom == 'MAX' and v > e['ext']) or (nom == 'MIN' and v < e['ext']):
                 e['ext'] = v
@@ -752,6 +1034,25 @@ class Formula:
             return e['n'] * ESC
         if nom == 'CONTARA':
             return e['na'] * ESC
+        if nom == 'MEDIANA':
+            lista.sort()
+            n = len(lista)
+            if n == 0:
+                raise Err()
+            return lista[n // 2] if n % 2 else div(suma(lista[n // 2] + lista[n // 2 - 1]), 2 * ESC)
+        if nom in ('VAR', 'DESVEST'):
+            n = len(lista)
+            if n < 2:
+                raise Err()
+            s = 0
+            for v in lista:
+                s = suma(s + v)
+            m, acc = div(s, n * ESC), 0
+            for v in lista:
+                d = suma(v - m)
+                acc = suma(acc + mul(d, d))
+            var = div(acc, (n - 1) * ESC)
+            return raiz(var) if nom == 'DESVEST' else var
         return e['ext']
 
     def si_rango(self, sumar):
@@ -1085,7 +1386,135 @@ CONTAR.SIX(A1:A3;1)
 A1&A2
 A1=""
 A1=0
-A1<>""'''.split('\n')
+A1<>""
+PI()
+PI()*2
+PI
+ALEATORIO()
+SIGNO(-3,5)
+SIGNO(0)
+SIGNO(7)
+TRUNCAR(2,789)
+TRUNCAR(-2,789)
+TRUNCAR(2,789;2)
+TRUNCAR(-2,789;1)
+TRUNCAR(5;9)
+REDONDEAR.MAS(2,001;2)
+REDONDEAR.MAS(-2,001;2)
+REDONDEAR.MAS(2;2)
+REDONDEAR.MAS(2,1)
+REDONDEAR.MENOS(2,999;2)
+REDONDEAR.MENOS(-2,999;0)
+REDONDEAR.MAS(92233720368,1;0)
+PAGO(0,05/12;120;10000)
+PAGO(0;10;1000)
+PAGO(0,1;1;100)
+PAGO(0,05;0;100)
+PAGO(1;2)
+REDONDEAR(PAGO(5%/12;12*20;150000);2)
+FECHA(2026;11;16)
+FECHA(2024;2;29)
+FECHA(2023;2;29)
+FECHA(1899;12;31)
+FECHA(2026;13;1)
+FECHA(2026;11)
+AÑO(FECHA(2026;11;16))
+año(46342)
+ANO(46342)
+MES(46342)
+DIA(46342)
+DIA(-1)
+MES(2958466)
+DIA(46342,9)
+DIASEM(46342)
+DIASEM(46342;2)
+DIASEM(46342;3)
+DIASEM(0)
+DIASEM(1)
+DIASEM(FECHA(2026;11;22);2)
+FECHA(AÑO(46342);MES(46342)+1;1)-1
+ESNUMERO(5)
+ESNUMERO("5")
+ESNUMERO(A1)
+ESTEXTO("a")
+ESTEXTO(1&2)
+ESBLANCO(A1)
+ESBLANCO("")
+ESBLANCO(0)
+SI.ERROR(1/0;7)
+SI.ERROR(5;7)
+SI.ERROR(1/0;"mal")
+SI.ERROR(RAIZ(-1);1/0)
+SI.ERROR(SI.ERROR(1/0;2/0);3)
+SI.ERROR(1/0)
+SI.ERROR((1;2);9)
+SI.ERROR("a;b)";1/0)
+SI.ERROR(BM1;4)
+SI.ERROR(1/0;2)+SI.ERROR(3;4)
+1/0+SI.ERROR(1;2)
+IZQUIERDA("Hispa";2)
+IZQUIERDA("Hispa")
+IZQUIERDA("Hispa";99)
+IZQUIERDA("Hispa";0)
+IZQUIERDA("Hispa";-1)
+DERECHA("Hispa";3)
+DERECHA("Hispa")
+DERECHA("Hispa";99)
+DERECHA(12345;2)
+EXTRAE("Hispa Ventanas";7;3)
+EXTRAE("Hispa";2;99)
+EXTRAE("Hispa";9;2)
+EXTRAE("Hispa";0;2)
+EXTRAE("Hispa";1;0)
+EXTRAE("Hispa";2)
+ENCONTRAR("pa";"Hispa")
+ENCONTRAR("PA";"Hispa")
+ENCONTRAR("a";"banana";3)
+ENCONTRAR("a";"banana";7)
+ENCONTRAR("";"abc")
+ENCONTRAR("";"abc";4)
+ENCONTRAR("";"abc";5)
+ENCONTRAR("ana";"banana";3)
+ENCONTRAR("x";"abc")
+ESPACIOS("  uno   dos  tres ")
+ESPACIOS("")
+ESPACIOS("   ")
+LARGO(ESPACIOS(" a  b "))
+VALOR("12,5")
+VALOR("16/11/2026")
+VALOR("doce")
+VALOR(7)
+VALOR("")
+TEXTO(1234,567;"0,00")
+TEXTO(1234,567;"#.##0,00")
+TEXTO(1234,567;"0")
+TEXTO(-1234567,5;"#.##0")
+TEXTO(0,215;"0%")
+TEXTO(0,215;"0,0%")
+TEXTO(46342;"dd/mm/aaaa")
+TEXTO(-1;"dd/mm/aaaa")
+TEXTO(5;"0,000000000000")
+TEXTO(92233720368;"0%")
+TEXTO(5)
+"Total: "&TEXTO(1234,5;"#.##0,00")&" EUR"
+PRODUCTO(2;3;4)
+PRODUCTO(1,5;"a";2)
+PRODUCTO()
+PRODUCTO(100000;100000;100000)
+MEDIANA(3;1;2)
+MEDIANA(4;1;3;2)
+MEDIANA(5)
+MEDIANA(-1;-5;7;0,5)
+MEDIANA("a")
+VAR(1;2;3;4)
+VAR(5)
+VAR(2;2;2)
+DESVEST(1;2;3;4)
+DESVEST(10;12;23;23;16;23;21;16)
+DESVEST(1)
+VAR(0,1;0,2;0,35)
+MEDIANA(A1:C6)
+PRODUCTO(A1:C6)'''.split('\n')
 
 # hojas enteras: celdas y lo que se pregunta
 HOJAS = [
@@ -1136,6 +1565,21 @@ HOJAS = [
     ['AA1 5', 'AB1 7', 'BL1000 9', 'AZ50 =AA1*AB1', 'BA1 =SUMA(AA1:AB1)', 'BL1 =BL1000+aa1', 'A1 =SUMA(A2:BL1000)',
      'B2 =BM1', 'B3 =A1001', 'B4 =SUMA(A1:BM1)', 'B5 =SUMA(AA1:AB1001)', 'B6 =ZZ1', 'B7 =SUMA(BL1000:BL1000)',
      'B8 =CONTAR.SI(AA1:BL1;">5")', 'B9 =$BL$1000', 'B10 =AAA1', 'B11 =A$1$', 'B12 =$$A1', 'B13 =$1'],
+    # una tabla para buscar: códigos (ordenados), nombres y precios
+    ['A1 10', 'B1 tornillo', 'C1 0,05', 'A2 20', 'B2 tuerca', 'C2 0,03', 'A3 30', 'B3 arandela', 'C3 0,01',
+     'A4 40', 'B4 clavo', 'C4 0,02', 'A6 60', 'B6 broca', 'C6 2,5', 'E1 uno', 'F1 dos', 'G1 tres', 'E2 1', 'F2 2', 'G2 3',
+     'D1 =BUSCARV(20;A1:C6;2)', 'D2 =BUSCARV(25;A1:C6;2)', 'D3 =BUSCARV(25;A1:C6;2;0)', 'D4 =BUSCARV(5;A1:C6;2)',
+     'D5 =BUSCARV(99;A1:C6;3)', 'D6 =BUSCARV(40;A1:C6;4)', 'D7 =BUSCARV(40;A1:C6;0)', 'D8 =BUSCARV("clavo";B1:C6;2;FALSO)',
+     'D9 =BUSCARV("CLAVO";B1:C6;2;0)', 'D10 =BUSCARV(50;A1:C6;2)', 'D11 =BUSCARV(60;A1:C6;3;0)*2',
+     'D12 =BUSCARH("dos";E1:G2;2;0)', 'D13 =BUSCARH("tres";E1:G2;1;0)', 'D14 =BUSCARH("cuatro";E1:G2;2;0)',
+     'D15 =COINCIDIR(30;A1:A6;0)', 'D16 =COINCIDIR(35;A1:A6)', 'D17 =COINCIDIR(35;A1:A6;0)', 'D18 =COINCIDIR("dos";E1:G1;0)',
+     'D19 =COINCIDIR(60;A1:A6;1)', 'D20 =COINCIDIR(1;A1:A6;2)', 'D21 =INDICE(A1:C6;2;2)', 'D22 =INDICE(A1:C6;6;3)',
+     'D23 =INDICE(A1:C6;7;1)', 'D24 =INDICE(E1:G1;3)', 'D25 =INDICE(A1:A6;3)', 'D26 =INDICE(A1:C6;0;1)',
+     'D27 =INDICE(B1:B6;COINCIDIR(40;A1:A6;0))', 'D28 =BUSCARV(D15;A1:C6;2)', 'D29 =INDICE(A1:C6;5;2)&"x"',
+     'D30 =SI.ERROR(BUSCARV(77;A1:C6;2;0);"no está")', 'D31 =BUSCARV(20;A1:C6)', 'D32 =BUSCARV(20;5;1)',
+     'D33 =MEDIANA(A1:A6)', 'D34 =DESVEST(A1:A6)', 'D35 =VAR(C1:C6)', 'D36 =PRODUCTO(A1:A3)', 'D37 =ESBLANCO(A5)',
+     'D38 =ESNUMERO(D1)', 'D39 =ESTEXTO(D1)', 'D40 =SI.ERROR(D40;1)', 'D41 =IZQUIERDA(B1;4)&DERECHA(B2;2)&EXTRAE(B3;2;3)',
+     'D42 =ENCONTRAR("la";B4)', 'D43 =BUSCARV("";B1:C6;2;0)', 'D44 =COINCIDIR(A5;A1:A6;0)'],
 ]
 
 # números con formato: (formato de la celda, lo tecleado). El formato: la
@@ -1205,6 +1649,18 @@ def main():
                 lambda: 'SI(%s&""=%s&"";%s;A1)' % (a, b, c),
                 lambda: 'MAX(%s;%s;%s)-MIN(%s;%s)' % (a, rango, b, c, rango),
                 lambda: 'CONTARA(%s;%s)' % (rango, a),
+                lambda: '%s(%s;%d)' % (random.choice(['TRUNCAR', 'REDONDEAR.MAS', 'REDONDEAR.MENOS']), a, random.randint(0, 8)),
+                lambda: 'SIGNO(%s)*PI()' % a,
+                lambda: '%s(%s;%s;%s)' % (random.choice(['MEDIANA', 'VAR', 'DESVEST', 'PRODUCTO']), a, rango, b),
+                lambda: 'SI.ERROR(%s;%s)' % (a, b),
+                lambda: 'PAGO((%s)%%;%d;%s)' % (a, random.randint(0, 40), b),
+                lambda: 'DIASEM(ABS(%s))+MES(ABS(%s))+DIA(ABS(%s))' % (a, a, b),
+                lambda: 'SI.ERROR(BUSCARV(%s;%s;%d;%d);-1)' % (a, rango, random.randint(1, 3), random.randint(0, 1)),
+                lambda: 'SI.ERROR(COINCIDIR(%s;%s;%d);INDICE(%s;%d;%d))' % (a, rango, random.randint(0, 1), rango,
+                                                                        random.randint(1, 4), random.randint(1, 3)),
+                lambda: 'LARGO(TEXTO(%s;"%s"))' % (a, random.choice(['0', '0,00', '#.##0,00', '0%', '0,0'])),
+                lambda: 'VALOR(IZQUIERDA(TEXTO(ABS(%s);"0,00");3))+ESNUMERO(%s)' % (a, b),
+                lambda: 'ENCONTRAR(",";TEXTO(%s;"0,000"))' % a,
             ])()
         a, b = e_azar(prof - 1), e_azar(prof - 1)
         s = a + random.choice('+-*/*') + b

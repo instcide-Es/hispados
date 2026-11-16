@@ -221,6 +221,8 @@ reabre 'A:\FUNC.HOJ'
   tecla down; escribe "1234567,5"; tecla ret up
   clic 327 71; sleep 0.8; clic 340 93; sleep 1.5                  # Formato > Celdas...
   clic 214 257; aparca; shot f2d; clic 343 430; sleep 1           # con millares; Aceptar
+  tecla ctrl-home right down down down down down down down down down down down down shift-right shift-down
+  clic 327 71; sleep 0.8; clic 340 305; sleep 1                   # B13:C14, con un borde alrededor
   tecla ctrl-end down down down; aparca; shot f3
   tecla ctrl-g; sleep 2.5
   clic 686 48; sleep 1.5; aparca; shot f4                         # la ventana, a toda la pantalla
@@ -258,6 +260,9 @@ hoj "HOJA 1"; hoj "M EUR"; hoj "A A1 128"; hoj "A F1 120"
 hoj "C B2 1 2"; hoj "C C2 2432 1,2"; hoj "C A3 16 vino"; hoj "C A2 8 pan"; hoj "C A5 2 leche"
 hoj "C E1 1536 0,21"; hoj "C E2 256 1234567,5"; hoj "C D8 640 16/11/2026"; hoj "C B10 2433 =SUMA(D2:D5)"
 hoj 'C B6 0 =SUMAR.SI(A2:A5;"pan";D2:D5)'; hoj "C F1 2 Columna ancha"
+hoj "C B12 16384 "; hoj "C A13 32768 "; hoj "C C13 32768 "; hoj "C B14 16384 "; hoj "C C14 49152 "   # las rayas del borde
+chk $T/f3.ppm rgb 240 431 181710 "la raya de abajo del borde, en tinta"
+chk $T/f3.ppm rgb 240 413 8F7F68 "y la raya de en medio, de las de la rejilla"
 
 echo "== Cuentas: abrir lo guardado; copiar y pegar, rellenar, insertar, eliminar, ordenar, buscar, imprimir =="
 rm -f $T/prn.txt
@@ -344,9 +349,11 @@ reabre ''
   clic 251 71; sleep 0.8; clic 265 161; sleep 1                   # Insertar > Fecha de hoy
   clic 327 71; sleep 0.8; clic 340 237; sleep 1; tecla backspace backspace; escribe "20"; tecla ret; sleep 1   # ancho: 20 letras
   aparca; shot a3
-  tecla ctrl-g; sleep 1.2; escribe "x.csv"; tecla ret; sleep 2.5
+  tecla ctrl-g; sleep 1.2; escribe "x.csv"; tecla ret; sleep 2; aparca; shot a4   # avisa: el .CSV pierde los formatos
+  tecla ret; sleep 2.5
   sal; } | run 240 -vga std
-muestra a1 cuentas_autosuma; muestra a3 cuentas_ira
+muestra a1 cuentas_autosuma; muestra a3 cuentas_ira; muestra a4 cuentas_aviso_csv
+chk $T/a4.ppm busca 100 200 700 400 0 8 "¿Guardar como .CSV de todos modos?"
 ANCHO_A=88
 chk $T/a1.ppm busca 130 140 700 162 0 9 "=SUMA(A1:A3)"            # en la barra de fórmulas, sin aceptar aún
 cel a2 0 0 "2105";  cel a2 0 3 "2135";  cel a2 0 5 "20"           # (A2, cortada, ya no suma)
@@ -358,6 +365,55 @@ if [ "$(sed -n '1p;2p;3p;4p;6p' $T/x.txt | tr '\n' '|')" = '2105;;=A1*2;=C1*2;=D
    sed -n '20p' $T/x.txt | grep -qE '^;;[0-9]{2}/[0-9]{2}/[0-9]{4};;$' && [ $(wc -l < $T/x.txt) -eq 20 ]
 then ok "X.CSV: lo tecleado, las fórmulas corregidas y la fecha de hoy"
 else ko "X.CSV no es lo esperado"; head -22 $T/x.txt; fi
+
+echo "== Cuentas: señalar celdas al escribir una fórmula, elegir letras, Ctrl+flechas, Mayús+Tab y deshacer varios pasos =="
+reabre ''
+{ arranca
+  escribe "5"; tecla ret; escribe "7"; tecla ret
+  escribe "="; tecla up up; escribe "+"; tecla up ret             # A3: =A1+A2, con las flechas
+  tecla ctrl-home right; escribe "=suma("; arrastra 142 189 142 225; aparca; shot p1   # B1: el rango, con el ratón
+  escribe ")"; tecla ret
+  escribe "=suma("; tecla left shift-up; escribe ")"; tecla ret   # B2: A2 y, con Mayús, hasta A1
+  tecla ctrl-home right right; escribe "abcdef"; tecla ret up
+  tecla f2 shift-left shift-left shift-left; aparca; shot p2; escribe "X"   # C1: «def», elegido, por una X
+  tecla home shift-right shift-right ctrl-c end ctrl-v ret        # y «ab», copiado al final
+  tecla ctrl-home ctrl-down; aparca; shot p3                      # Ctrl+abajo: al final de los datos
+  tecla ctrl-down; shot p4; tecla ctrl-up tab tab shift-tab; shot p5
+  tecla ctrl-home right right right; escribe "1"; tecla ret; escribe "2"; tecla ret; escribe "3"; tecla ret
+  tecla ctrl-z ctrl-z; aparca; shot p6; tecla ctrl-y; shot p7     # dos pasos deshechos; uno, rehecho
+  tecla ctrl-g; sleep 1.2; escribe "y.csv"; tecla ret; sleep 2.5
+  sal; } | run 240 -vga std
+muestra p1 cuentas_senalar; muestra p2 cuentas_letras
+chk $T/p1.ppm busca 130 140 700 162 0 9 "=suma(A1:A3"             # lo señalado, en la barra de fórmulas
+chk $T/p2.ppm busca 130 140 700 162 8 2 "ef"                      # las letras elegidas, en claro sobre petróleo
+chk $T/p3.ppm busca $PIE "A3: una fórmula"
+chk $T/p4.ppm busca $PIE "A1000: celda vacía"
+chk $T/p5.ppm busca $PIE "B3: celda vacía"
+cel p6 3 0 "1";  cel p7 3 1 "2"
+chk $T/p6.ppm rgb 400 207 FFFFFF "D2, vacía otra vez"
+mtype -i $T/f.img ::Y.CSV | tr -d '\r' > $T/y.txt
+if [ "$(tr '\n' '|' < $T/y.txt)" = '5;=suma(A1:A3);abcXab;1|7;=suma(A1:A2);;2|=A1+A2;;;|' ]
+then ok "Y.CSV: las fórmulas señaladas, el texto corregido y lo deshecho"
+else ko "Y.CSV no es lo esperado"; cat $T/y.txt; fi
+
+echo "== Cuentas: ordenar por dos columnas, con títulos, y las fórmulas corregidas =="
+printf 'HOJA 1\r\nC A1 0 Nombre\r\nC B1 0 Ciudad\r\nC C1 0 Edad\r\nC D1 0 Doble\r\nC A2 0 Ana\r\nC B2 0 Reus\r\nC C2 0 30\r\nC D2 0 =C2*2\r\nC A3 0 Luis\r\nC B3 0 Alba\r\nC C3 0 25\r\nC D3 0 =C3*2\r\nC A4 0 Eva\r\nC B4 0 Reus\r\nC C4 0 41\r\nC D4 0 =C4*2\r\nC A5 0 Pau\r\nC B5 0 Alba\r\nC C5 0 33\r\nC D5 0 =C5*2\r\n' > $T/ORD.HOJ
+mcopy -o -i $T/f.img $T/ORD.HOJ ::ORD.HOJ
+reabre 'A:\ORD.HOJ'
+{ arranca
+  tecla shift-down shift-down shift-down shift-down shift-right shift-right shift-right   # A1:D5
+  clic 418 71; sleep 0.8; clic 440 93; sleep 1.5                  # Herramientas > Ordenar...
+  tecla delete; escribe "b"; clic 414 266; escribe "c"; clic 454 266; clic 208 336   # por B; después por C, de mayor a menor; con títulos
+  aparca; shot o1; clic 340 379; sleep 1.5
+  tecla ctrl-end down; aparca; shot o2
+  tecla ctrl-g; sleep 2.5
+  sal; } | run 200 -vga std
+muestra o1 cuentas_ordenar_dlg; muestra o2 cuentas_ordenada2
+ANCHO_A=88
+cel o2 0 0 "Nombre" izq;  cel o2 0 1 "Pau" izq;  cel o2 0 2 "Luis" izq;  cel o2 0 3 "Eva" izq;  cel o2 0 4 "Ana" izq
+cel o2 2 1 "33";  cel o2 3 1 "66";  cel o2 3 4 "60"
+mtype -i $T/f.img ::ORD.HOJ | tr -d '\r' > $T/func.txt
+hoj "C A1 0 Nombre"; hoj "C A2 0 Pau"; hoj "C D2 0 =C2*2"; hoj "C A5 0 Ana"; hoj "C D5 0 =C5*2"
 
 rm -rf $T
 exit $fail

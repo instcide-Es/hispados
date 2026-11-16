@@ -268,7 +268,6 @@ gr_regla:
         ret
 
 gr_pintar:
-        call calc_olvida
         HV dc_pintar
         call gr_datos
         HV ven_cli

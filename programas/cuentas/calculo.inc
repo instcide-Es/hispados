@@ -45,12 +45,27 @@
 ;       HOY()       el día de hoy, en días desde el 30/12/1899 (como las
 ;                   demás hojas de cálculo: el formato de fecha lo enseña)
 ;       CONCATENAR(a; b; ...)  LARGO(x)  MAYUSC(x)  MINUSC(x)
+;       IZQUIERDA(t [; n])  DERECHA(t [; n])  EXTRAE(t; desde; n)
+;       ENCONTRAR(lo buscado; t [; desde])  ESPACIOS(t)  VALOR(t)
+;       TEXTO(x; "0,00")    con el formato: «0», «0,00», «#.##0,00», «0%»,
+;                   «dd/mm/aaaa»
+;       FECHA(año; mes; día)  AÑO(f) (o ANO)  MES(f)  DIA(f)  DIASEM(f [; 2])
+;       BUSCARV(valor; rango; columna [; 0])  BUSCARH  INDICE(rango; f [; c])
+;       COINCIDIR(valor; rango [; 0])
+;       ESNUMERO(x)  ESTEXTO(x)  ESBLANCO(x)  SI.ERROR(x; si falla)
+;       TRUNCAR(x [; d])  REDONDEAR.MAS(x; d)  REDONDEAR.MENOS(x; d)  SIGNO(x)
+;       PRODUCTO  MEDIANA  VAR  DESVEST (de una muestra; hasta 512 números)
+;       PAGO(tasa; plazos; capital)   la cuota de un préstamo
+;       PI()  ALEATORIO()
 ;
 ;  Lo que pide a quien lo incluye:
 ;       NCOL, NFIL                          constantes de la hoja
 ;       cel_puntero     ECX=columna EDX=fila -> ESI=el texto de la celda
 ;                       (conserva los demás registros)
+;       cel_cache       ECX=columna EDX=fila ESI=su texto (una fórmula) ->
+;                       EDI=su ficha (CV_TAM octetos); conserva los demás
 ;       hoy_serie       -> EAX=el día de hoy, en días desde el 30/12/1899
+;       azar_num        -> EAX=un número al azar, de 0 a CU_ESC - 1
 ;  y lo que da:
 ;       calc_celda      ECX=columna EDX=fila -> EDX:EAX; [cv_tipo]: 0 vacía,
 ;                       1 número, 2 texto (y entonces EAX=el texto, acabado
@@ -82,6 +97,13 @@ EV_ERROR    equ 1                   ; «#ERROR»
 EV_CIRC     equ 2                   ; «#CIRC»: la celda se pide a sí misma
 EV_REF      equ 3                   ; «#REF»: una celda que no existe
 EV_CADS     equ 8192                ; sitio para los textos a medio calcular
+; la ficha de una fórmula, donde se apunta lo que vale (la guarda quien
+; incluye esto, junto a la celda: cel_cache)
+CV_GEN      equ 0                   ; dd la tanda en que se apuntó
+CV_EST      equ 4                   ; db 0 nada, 1 calculándose, 2 apuntada
+CV_ERR      equ 5                   ; db su error
+CV_VAL      equ 6                   ; dq su valor
+CV_TAM      equ 14
 CAD_MAX     equ 255                 ; letras de un texto calculado, como mucho
 ; el formato de una celda (una palabra)
 F_NEG       equ 0x0001              ; negrita
@@ -94,6 +116,8 @@ F_NUM       equ 0x0380              ; formato del número (FN_*)
 F_NUM_D     equ 7
 F_DEC       equ 0x3C00              ; decimales (de 0 a 8)
 F_DEC_D     equ 10
+F_BABA      equ 0x4000              ; una raya (borde) debajo de la celda
+F_BDER      equ 0x8000              ; y otra a su derecha
 FN_GENERAL  equ 0
 FN_FIJO     equ 1                   ; con tantos decimales
 FN_MIL      equ 2                   ; y con puntos de millares
@@ -117,13 +141,6 @@ celda_valor:
         jae .ref
         cmp edx, NFIL
         jae .ref
-        imul edi, edx, NCOL
-        add edi, ecx                ; EDI=el número de la celda
-        mov al, [cv_est+edi]
-        cmp al, 1                   ; ¿se está calculando ya? Se pide a sí misma
-        je .circ
-        cmp al, 2                   ; ¿calculada ya? Lo apuntado
-        je .apuntada
         call cel_puntero
         mov al, [esi]
         test al, al
@@ -151,22 +168,34 @@ celda_valor:
 .apuntada:
         mov byte [cv_tipo], 1
         mov byte [ev_tx], 0
-        mov al, [cv_err+edi]
+        mov al, [edi+CV_ERR]
         test al, al
         jz .ap1
         call ev_pon_err
         jmp .cero
 .ap1:
-        mov eax, [cv_val+edi*8]
-        mov edx, [cv_val+edi*8+4]
+        mov eax, [edi+CV_VAL]
+        mov edx, [edi+CV_VAL+4]
         ret
 .formula:
+        call cel_cache              ; EDI=la ficha donde se apunta su valor
+        mov eax, [cv_gen]           ; (lo apuntado antes del último cambio no vale)
+        cmp [edi+CV_GEN], eax
+        jne .calc
+        mov al, [edi+CV_EST]
+        cmp al, 1                   ; ¿se está calculando ya? Se pide a sí misma
+        je .circ
+        cmp al, 2                   ; ¿calculada ya? Lo apuntado
+        je .apuntada
+.calc:
         cmp dword [ev_prof], EV_PROF        ; demasiadas, unas dentro de otras
         jae .honda
         cmp esp, [ev_pila_min]              ; (o la pila se acaba)
         jb .honda
         inc dword [ev_prof]
-        mov byte [cv_est+edi], 1
+        mov eax, [cv_gen]
+        mov [edi+CV_GEN], eax
+        mov byte [edi+CV_EST], 1
         push edi
         push dword [ev_ptr]
         movzx eax, byte [ev_err]
@@ -191,7 +220,7 @@ celda_valor:
         cmp byte [ev_tx], 1         ; ha salido un texto: no se apunta (vive en
         jne .f1                     ; el sitio de los textos a medio calcular)
         mov byte [cv_tipo], 2
-        mov byte [cv_est+edi], 0
+        mov byte [edi+CV_EST], 0
         ret
 .f0:
         xor eax, eax
@@ -199,15 +228,15 @@ celda_valor:
 .f1:
         mov byte [cv_tipo], 1       ; (una celda vacía, pedida con =A1, vale 0)
         mov byte [ev_tx], 0
-        mov byte [cv_est+edi], 0
+        mov byte [edi+CV_EST], 0
         test ebx, ebx               ; se apunta si lo que ha salido es todo
         jnz .f2                     ; suyo: sin un error de antes y sin haber
         cmp byte [ev_hondo], 0      ; tocado fondo
         jne .f2
-        mov [cv_val+edi*8], eax
-        mov [cv_val+edi*8+4], edx
-        mov [cv_err+edi], cl
-        mov byte [cv_est+edi], 2
+        mov [edi+CV_VAL], eax
+        mov [edi+CV_VAL+4], edx
+        mov [edi+CV_ERR], cl
+        mov byte [edi+CV_EST], 2
 .f2:
         ret
 .honda:
@@ -226,18 +255,14 @@ celda_valor:
         mov byte [ev_tx], 0
         jmp .cero
 
-; olvida lo apuntado: hay que llamarla cada vez que cambia una celda
+; olvida lo apuntado: hay que llamarla cada vez que cambia una celda. No
+; recorre nada: cada ficha lleva el número de la tanda en que se apuntó, y
+; con cambiar de tanda dejan de valer todas
 calc_olvida:
-        push eax
-        push ecx
-        push edi
-        mov edi, cv_est
-        mov ecx, NCOL * NFIL / 4
-        xor eax, eax
-        rep stosd
-        pop edi
-        pop ecx
-        pop eax
+        inc dword [cv_gen]
+        jnz .x
+        inc dword [cv_gen]          ; (el 0 es el de las fichas recién hechas)
+.x:
         ret
 
 ; apunta el error AL (ev_mal: EV_ERROR), si no hay ya otro: el primero manda
@@ -950,13 +975,20 @@ ev_nombre:
         mov al, [esi]
         cmp al, '.'                 ; (CONTAR.SI)
         je .pon
+        cmp al, 0xA5                ; (la Ñ de AÑO, en la página 437)
+        je .pon
+        cmp al, 0xA4                ; (y la ñ)
+        jne .l1
+        mov al, 0xA5
+        jmp .pon
+.l1:
         and al, 0xDF
         cmp al, 'A'
         jb .f
         cmp al, 'Z'
         ja .f
 .pon:
-        cmp ecx, 11
+        cmp ecx, 15
         jae .s
         mov [edi+ecx], al
         inc ecx
@@ -1027,6 +1059,38 @@ ev_funciones:
         FUNCION "LARGO", ev_largo, 0
         FUNCION "MAYUSC", ev_mayusc, 0
         FUNCION "MINUSC", ev_mayusc, 1
+        FUNCION "FECHA", ev_fecha, 0
+        FUNCION "AÑO", ev_parte_fecha, 0
+        FUNCION "ANO", ev_parte_fecha, 0
+        FUNCION "MES", ev_parte_fecha, 1
+        FUNCION "DIA", ev_parte_fecha, 2
+        FUNCION "DIASEM", ev_diasem, 0
+        FUNCION "BUSCARV", ev_buscar, 0
+        FUNCION "BUSCARH", ev_buscar, 1
+        FUNCION "COINCIDIR", ev_buscar, 2
+        FUNCION "INDICE", ev_indice, 0
+        FUNCION "IZQUIERDA", ev_izqder, 0
+        FUNCION "DERECHA", ev_izqder, 1
+        FUNCION "EXTRAE", ev_extrae, 0
+        FUNCION "ENCONTRAR", ev_encontrar, 0
+        FUNCION "ESPACIOS", ev_espacios, 0
+        FUNCION "TEXTO", ev_texto, 0
+        FUNCION "VALOR", ev_valor, 0
+        FUNCION "ESNUMERO", ev_es, 0
+        FUNCION "ESTEXTO", ev_es, 1
+        FUNCION "ESBLANCO", ev_es, 2
+        FUNCION "SI.ERROR", ev_sierror, 0
+        FUNCION "TRUNCAR", ev_trunca, 0
+        FUNCION "REDONDEAR.MENOS", ev_trunca, 1
+        FUNCION "REDONDEAR.MAS", ev_trunca, 2
+        FUNCION "PRODUCTO", ev_rangos, 6
+        FUNCION "MEDIANA", ev_rangos, 7
+        FUNCION "VAR", ev_rangos, 8
+        FUNCION "DESVEST", ev_rangos, 9
+        FUNCION "PAGO", ev_pago, 0
+        FUNCION "PI", ev_pi, 0
+        FUNCION "ALEATORIO", ev_aleatorio, 0
+        FUNCION "SIGNO", ev_signo_f, 0
         db 0
 
 ; ESI=texto -> ECX=columna EDX=fila (desde 0; pueden salirse de la hoja),
@@ -1188,11 +1252,18 @@ ev_rango_lee:
 %define R_EL    dword [ebp-44]      ; la mayor o la menor
 %define R_EH    dword [ebp-48]
 %define R_NA    dword [ebp-52]      ; cuántas cosas (números y textos)
+%define R_LP    dword [ebp-56]      ; la lista de los números (MEDIANA, VAR, DESVEST)
+EV_LISTA    equ 512                 ; números de una lista, como mucho
 ev_rangos:
         push ebp
         mov ebp, esp
-        sub esp, 52
+        sub esp, 56
         mov R_MODO, eax
+        cmp eax, 7                  ; la lista va en la pila: una fórmula puede
+        jb .sl                      ; pedir otra que también haga la suya
+        sub esp, EV_LISTA * 8
+        mov R_LP, esp
+.sl:
         xor eax, eax
         mov R_N, eax
         mov R_NA, eax
@@ -1271,8 +1342,12 @@ ev_rangos:
         jz .x                       ; SUMA
         cmp ecx, 1
         je .promedio
+        cmp ecx, 6
+        je .extremo                 ; PRODUCTO: lo que ha ido saliendo
+        ja .lista
         cmp ecx, 4
         jae .contar
+.extremo:
         mov eax, R_EL               ; MAX o MIN
         mov edx, R_EH
         jmp .x
@@ -1296,9 +1371,152 @@ ev_rangos:
         mov esp, ebp
         pop ebp
         ret
+; MEDIANA: la lista, ordenada, y el de en medio (o la media de los dos de en
+; medio). VAR y DESVEST (de una muestra): la media de los cuadrados de lo que
+; se aparta cada uno de la media, entre uno menos de los que son; y su raíz
+.lista:
+        cmp byte [ev_err], 0
+        jne .lcero
+        mov esi, R_LP
+        mov ecx, R_N
+        cmp R_MODO, 7
+        jne .var
+        test ecx, ecx
+        jz .lmal
+        mov ebx, 1                  ; por inserción
+.o1:
+        cmp ebx, ecx
+        jae .o5
+        mov eax, [esi+ebx*8]
+        mov edx, [esi+ebx*8+4]
+        mov edi, ebx
+.o2:
+        test edi, edi
+        jz .o4
+        cmp [esi+edi*8-4], edx
+        jg .o3
+        jl .o4
+        cmp [esi+edi*8-8], eax
+        jbe .o4
+.o3:
+        push eax
+        mov eax, [esi+edi*8-8]
+        mov [esi+edi*8], eax
+        mov eax, [esi+edi*8-4]
+        mov [esi+edi*8+4], eax
+        pop eax
+        dec edi
+        jmp .o2
+.o4:
+        mov [esi+edi*8], eax
+        mov [esi+edi*8+4], edx
+        inc ebx
+        jmp .o1
+.o5:
+        mov ebx, ecx
+        shr ebx, 1
+        mov eax, [esi+ebx*8]
+        mov edx, [esi+ebx*8+4]
+        test ecx, 1
+        jnz .x
+        add eax, [esi+ebx*8-8]
+        adc edx, [esi+ebx*8-4]
+        jo .lmal
+        mov ebx, eax
+        mov ecx, edx
+        mov eax, 2 * CU_ESC
+        xor edx, edx
+        call ev_div
+        jmp .x
+.var:
+        cmp ecx, 2
+        jb .lmal
+        xor eax, eax
+        xor edx, edx
+        xor ebx, ebx
+.v1:
+        add eax, [esi+ebx*8]
+        adc edx, [esi+ebx*8+4]
+        jo .lmal
+        inc ebx
+        cmp ebx, ecx
+        jb .v1
+        mov R_SL, eax
+        mov R_SH, edx
+        mov eax, R_N
+        mov ecx, CU_ESC
+        mul ecx
+        mov ebx, R_SL
+        mov ecx, R_SH
+        call ev_div                 ; la media
+        mov R_EL, eax
+        mov R_EH, edx
+        mov R_SL, 0
+        mov R_SH, 0
+        mov R_C, 0
+.v2:
+        mov esi, R_LP
+        mov ecx, R_C
+        mov eax, [esi+ecx*8]
+        mov edx, [esi+ecx*8+4]
+        sub eax, R_EL
+        sbb edx, R_EH
+        jo .lmal
+        mov ebx, eax
+        mov ecx, edx
+        call ev_mul
+        add R_SL, eax
+        adc R_SH, edx
+        jo .lmal
+        inc R_C
+        mov eax, R_C
+        cmp eax, R_N
+        jb .v2
+        mov eax, R_N
+        dec eax
+        mov ecx, CU_ESC
+        mul ecx
+        mov ebx, R_SL
+        mov ecx, R_SH
+        call ev_div
+        cmp R_MODO, 9
+        jne .x
+        cmp byte [ev_err], 0
+        jne .x
+        call raiz64
+        jmp .x
+.lmal:
+        call ev_mal
+.lcero:
+        xor eax, eax
+        xor edx, edx
+        jmp .x
 ; (interna) un número más, EDX:EAX; CF=1 si la suma no cabe
 .cuenta:
         inc R_N
+        cmp R_MODO, 6
+        jb .suma
+        je .prod
+        mov ecx, R_N                ; a la lista
+        cmp ecx, EV_LISTA
+        ja .cmal
+        mov ebx, R_LP
+        mov [ebx+ecx*8-8], eax
+        mov [ebx+ecx*8-4], edx
+        clc
+        ret
+.prod:
+        cmp R_N, 1                  ; PRODUCTO: el primero, tal cual
+        je .pon
+        mov ebx, R_EL
+        mov ecx, R_EH
+        call ev_mul
+        jmp .pon
+.cmal:
+        call ev_mal
+        stc
+        ret
+.suma:
         add R_SL, eax
         adc R_SH, edx
         jno .ext
@@ -2016,6 +2234,912 @@ mod64:
         pop edi
         pop esi
         ret
+
+; =============================================================================
+;  Más funciones: de fecha, de texto, de búsqueda y de cuentas
+; =============================================================================
+; gasta un «;», si viene: CF=0 si venía. Conserva los registros
+ev_puntoycoma:
+        push eax
+        call ev_car
+        cmp al, ';'
+        jne .no
+        inc dword [ev_ptr]
+        pop eax
+        clc
+        ret
+.no:
+        pop eax
+        stc
+        ret
+; una expresión, como número entero -> EAX (con signo; sin los decimales)
+ev_ent:
+        call ev_expr
+        call ev_num
+; EDX:EAX -> EAX=su parte entera; error si no cabe en 31 bits
+ent64:
+        push ebx
+        push ecx
+        push esi
+        mov esi, edx
+        call abs64
+        mov ebx, CU_ESC
+        call div64
+        test edx, edx
+        jnz .mal
+        test eax, eax
+        js .mal
+        test esi, esi
+        jns .x
+        neg eax
+.x:
+        pop esi
+        pop ecx
+        pop ebx
+        ret
+.mal:
+        call ev_mal
+        xor eax, eax
+        jmp .x
+; error, y cero
+ev_cero_mal:
+        call ev_mal
+        xor eax, eax
+        xor edx, edx
+        mov byte [ev_tx], 0
+        ret
+; EAX (sin signo) -> ese entero como número
+ev_de_ent:
+        mov ecx, CU_ESC
+        mul ecx
+        mov byte [ev_tx], 0
+        ret
+
+; ---- PI() ----
+ev_pi:
+        call ev_abre
+        call ev_cierra
+        mov eax, 314159265
+        xor edx, edx
+        mov byte [ev_tx], 0
+        ret
+; ---- ALEATORIO(): un número de 0 a 1 (sin llegar) ----
+ev_aleatorio:
+        call ev_abre
+        call ev_cierra
+        call azar_num
+        xor edx, edx
+        mov byte [ev_tx], 0
+        ret
+; ---- SIGNO(x): -1, 0 o 1 ----
+ev_signo_f:
+        call ev_arg1
+        mov ecx, eax
+        or ecx, edx
+        jz .x
+        test edx, edx
+        mov eax, CU_ESC
+        mov edx, 0
+        jns .x
+        mov eax, -CU_ESC
+        mov edx, -1
+.x:
+        ret
+
+; ---- TRUNCAR(x [; decimales]) (EAX=0), REDONDEAR.MENOS(x; d) (1: hacia el
+;      cero, como TRUNCAR) y REDONDEAR.MAS(x; d) (2: alejándose del cero) ----
+ev_trunca:
+        push eax
+        call ev_abre
+        call ev_expr
+        call ev_num
+        push edx
+        push eax
+        call ev_puntoycoma
+        jc .sin
+        call ev_ent
+        jmp .con
+.sin:
+        cmp dword [esp+8], 0        ; solo TRUNCAR puede ir sin los decimales
+        jne .mal
+        xor eax, eax
+.con:
+        call ev_cierra
+        cmp eax, CU_DEC
+        ja .mal
+        mov ebx, CU_DEC
+        sub ebx, eax
+        mov ebx, [pot10+ebx*4]
+        pop eax
+        pop edx
+        pop edi                     ; EDI=cuál
+        mov esi, edx                ; (el signo)
+        call abs64
+        call div64
+        cmp edi, 2
+        jne .r
+        test ecx, ecx               ; sobra algo: uno más
+        jz .r
+        add eax, 1
+        adc edx, 0
+.r:
+        mov ecx, edx
+        mul ebx
+        mov edi, eax
+        mov eax, ecx
+        mov ecx, edx
+        mul ebx
+        add eax, ecx
+        mov edx, eax
+        mov eax, edi
+        js ev_cero_mal
+        mov byte [ev_tx], 0
+        test esi, esi
+        jns .x
+        neg edx
+        neg eax
+        sbb edx, 0
+.x:
+        ret
+.mal:
+        add esp, 12
+        jmp ev_cero_mal
+
+; ---- PAGO(tasa; plazos; capital): la cuota de un préstamo (sale negativa,
+;      como en las demás hojas: es dinero que se paga) ----
+; capital x tasa / (1 - (1 + tasa)^-plazos); sin interés, capital / plazos
+ev_pago:
+        call ev_abre
+        call ev_expr
+        call ev_num
+        push edx
+        push eax
+        call ev_puntoycoma
+        jc .mal1
+        call ev_expr
+        call ev_num
+        push edx
+        push eax
+        call ev_puntoycoma
+        jc .mal2
+        call ev_expr
+        call ev_num
+        call ev_cierra
+        push edx
+        push eax
+        push ebp
+        mov ebp, esp                ; [ebp+4]=capital +12=plazos +20=tasa
+        mov eax, [ebp+20]
+        or eax, [ebp+24]
+        jz .cero
+        mov ebx, [ebp+4]
+        mov ecx, [ebp+8]
+        mov eax, [ebp+20]
+        mov edx, [ebp+24]
+        call ev_mul
+        push edx
+        push eax                    ; [ebp-8]=capital x tasa
+        mov ebx, [ebp+20]
+        mov ecx, [ebp+24]
+        add ebx, CU_ESC
+        adc ecx, 0
+        jno .p1
+        call ev_mal
+.p1:
+        mov eax, [ebp+12]
+        mov edx, [ebp+16]
+        neg edx
+        neg eax
+        sbb edx, 0
+        call ev_potencia
+        mov ebx, CU_ESC
+        xor ecx, ecx
+        sub ebx, eax
+        sbb ecx, edx
+        mov eax, ebx
+        mov edx, ecx
+        mov ebx, [ebp-8]
+        mov ecx, [ebp-4]
+        call ev_div
+        jmp .neg
+.cero:
+        mov ebx, [ebp+4]
+        mov ecx, [ebp+8]
+        mov eax, [ebp+12]
+        mov edx, [ebp+16]
+        call ev_div
+.neg:
+        neg edx
+        neg eax
+        sbb edx, 0
+        mov esp, ebp
+        pop ebp
+        add esp, 24
+        mov byte [ev_tx], 0
+        ret
+.mal2:
+        add esp, 8
+.mal1:
+        add esp, 8
+        jmp ev_cero_mal
+
+; ---- FECHA(año; mes; día) ----
+ev_fecha:
+        call ev_abre
+        call ev_ent
+        push eax
+        call ev_puntoycoma
+        jc .mal1
+        call ev_ent
+        push eax
+        call ev_puntoycoma
+        jc .mal2
+        call ev_ent
+        call ev_cierra
+        mov ebx, eax
+        pop ecx
+        pop eax
+        cmp eax, 1900
+        jb ev_cero_mal
+        cmp eax, 9999
+        ja ev_cero_mal
+        call fecha_serie
+        jc ev_cero_mal
+        jmp ev_de_ent
+.mal2:
+        add esp, 4
+.mal1:
+        add esp, 4
+        jmp ev_cero_mal
+; (interna) el argumento, como día -> EAX (error si no es una fecha)
+ev_dia_arg:
+        call ev_arg1
+ev_a_dia:
+        test edx, edx
+        js .mal
+        mov ebx, CU_ESC
+        call div64
+        test edx, edx
+        jnz .mal
+        cmp eax, FECHA_MAX
+        ja .mal
+        clc
+        ret
+.mal:
+        call ev_mal
+        xor eax, eax
+        stc
+        ret
+; ---- AÑO(fecha) (EAX=0), MES(fecha) (1) y DIA(fecha) (2) ----
+ev_parte_fecha:
+        push eax
+        call ev_dia_arg
+        pop edi
+        jc ev_cero_mal
+        call serie_fecha            ; EAX=año ECX=mes EBX=día
+        cmp edi, 1
+        jb ev_de_ent
+        mov eax, ecx
+        je ev_de_ent
+        mov eax, ebx
+        jmp ev_de_ent
+; ---- DIASEM(fecha [; tipo]): tipo 1 (o nada), del 1 domingo al 7 sábado;
+;      tipo 2, del 1 lunes al 7 domingo ----
+ev_diasem:
+        call ev_abre
+        call ev_expr
+        call ev_num
+        push edx
+        push eax
+        mov eax, 1
+        call ev_puntoycoma
+        jc .t
+        call ev_ent
+.t:
+        call ev_cierra
+        mov edi, eax
+        pop eax
+        pop edx
+        call ev_a_dia
+        jc ev_cero_mal
+        add eax, 6                  ; (el día 1, el 31/12/1899, fue domingo)
+        cmp edi, 1
+        je .c
+        dec eax
+        cmp edi, 2
+        jne ev_cero_mal
+.c:
+        xor edx, edx
+        mov ecx, 7
+        div ecx
+        lea eax, [edx+1]
+        jmp ev_de_ent
+
+; ---- ESNUMERO(x) (EAX=0), ESTEXTO(x) (1) y ESBLANCO(x) (2) ----
+ev_es:
+        push eax
+        call ev_abre
+        call ev_expr
+        call ev_cierra
+        pop ecx
+        movzx eax, byte [ev_tx]
+        cmp eax, ecx
+        sete al
+        movzx eax, al
+        jmp ev_bool
+; ---- SI.ERROR(x; si falla): x, o lo otro si x da error ----
+ev_sierror:
+        call ev_abre
+        cmp byte [ev_err], 0        ; (si ya había un error, ese manda)
+        jne .normal
+        push dword [ev_ptr]
+        push dword [ev_cad_p]
+        call ev_expr
+        cmp byte [ev_err], 0
+        jne .falla
+        add esp, 8
+        jmp .n1
+.normal:
+        call ev_expr
+.n1:
+        call ev_puntoycoma
+        jc .mal
+        call ev_salta
+        jmp ev_cierra
+.falla:
+        mov byte [ev_err], 0        ; como si no se hubiera calculado: se salta
+        pop dword [ev_cad_p]
+        pop dword [ev_ptr]
+        call ev_salta
+        call ev_puntoycoma
+        jc ev_cero_mal
+        call ev_expr
+        jmp ev_cierra
+.mal:
+        jmp ev_cero_mal
+
+; ---- los textos ----
+; (interna) un texto nuevo con EAX letras desde ESI -> EAX, como texto
+ev_subcad:
+        mov ecx, eax
+        call ev_cad_nueva
+        push edi
+        rep movsb
+        mov byte [edi], 0
+        inc edi
+        call ev_cad_fin
+        pop eax
+        xor edx, edx
+        mov byte [ev_tx], 1
+        ret
+; (interna) ESI=texto -> ECX=sus letras
+ev_cad_largo:
+        xor ecx, ecx
+.l:
+        cmp byte [esi+ecx], 0
+        je .x
+        inc ecx
+        jmp .l
+.x:
+        ret
+; ---- IZQUIERDA(texto [; letras]) (EAX=0) y DERECHA(texto [; letras]) (1) ----
+ev_izqder:
+        push eax
+        call ev_abre
+        call ev_expr
+        call ev_a_cad
+        push eax
+        mov eax, 1
+        call ev_puntoycoma
+        jc .n
+        call ev_ent
+.n:
+        call ev_cierra
+        pop esi
+        pop ebx
+        test eax, eax
+        js ev_cero_mal
+        call ev_cad_largo
+        cmp eax, ecx
+        jbe .a
+        mov eax, ecx
+.a:
+        test ebx, ebx
+        jz ev_subcad
+        add esi, ecx
+        sub esi, eax
+        jmp ev_subcad
+; ---- EXTRAE(texto; desde; letras): desde la letra «desde» (la primera es la 1) ----
+ev_extrae:
+        call ev_abre
+        call ev_expr
+        call ev_a_cad
+        push eax
+        call ev_puntoycoma
+        jc .mal1
+        call ev_ent
+        push eax
+        call ev_puntoycoma
+        jc .mal2
+        call ev_ent
+        call ev_cierra
+        pop ebx                     ; EBX=desde EAX=letras
+        pop esi
+        test eax, eax
+        js ev_cero_mal
+        dec ebx
+        js ev_cero_mal
+        call ev_cad_largo
+        sub ecx, ebx                ; lo que queda desde ahí
+        jns .a
+        xor ecx, ecx
+        xor ebx, ebx
+        xor eax, eax
+.a:
+        cmp eax, ecx
+        jbe .b
+        mov eax, ecx
+.b:
+        add esi, ebx
+        jmp ev_subcad
+.mal2:
+        add esp, 4
+.mal1:
+        add esp, 4
+        jmp ev_cero_mal
+; ---- ENCONTRAR(lo que se busca; texto [; desde]): en qué letra está (mirando
+;      las mayúsculas); si no está, error ----
+ev_encontrar:
+        call ev_abre
+        call ev_expr
+        call ev_a_cad
+        push eax
+        call ev_puntoycoma
+        jc .mal1
+        call ev_expr
+        call ev_a_cad
+        push eax
+        mov eax, 1
+        call ev_puntoycoma
+        jc .n
+        call ev_ent
+.n:
+        call ev_cierra
+        pop esi                     ; ESI=el texto
+        pop edi                     ; EDI=lo que se busca
+        mov ebx, eax
+        dec ebx
+        js ev_cero_mal
+        call ev_cad_largo
+        cmp ebx, ecx
+        ja ev_cero_mal
+.b:
+        xor ecx, ecx                ; ¿está en la letra EBX?
+.c:
+        mov al, [edi+ecx]
+        test al, al
+        jz .esta
+        cmp al, [esi+ebx]
+        jne .sig
+        inc ecx
+        inc ebx
+        jmp .c
+.sig:
+        sub ebx, ecx
+        cmp byte [esi+ebx], 0
+        je ev_cero_mal
+        inc ebx
+        jmp .b
+.esta:
+        sub ebx, ecx
+        lea eax, [ebx+1]
+        jmp ev_de_ent
+.mal1:
+        add esp, 4
+        jmp ev_cero_mal
+; ---- ESPACIOS(texto): sin espacios delante ni detrás, y uno solo entre palabras ----
+ev_espacios:
+        call ev_abre
+        call ev_expr
+        call ev_a_cad
+        mov esi, eax
+        call ev_cad_nueva
+        push edi
+        xor ecx, ecx                ; 1: hay un espacio pendiente
+.c:
+        lodsb
+        test al, al
+        jz .f
+        cmp al, ' '
+        jne .l
+        cmp edi, [esp]              ; (delante de todo, no)
+        je .c
+        mov ecx, 1
+        jmp .c
+.l:
+        jecxz .l1
+        mov byte [edi], ' '
+        inc edi
+        xor ecx, ecx
+.l1:
+        stosb
+        jmp .c
+.f:
+        mov byte [edi], 0
+        inc edi
+        call ev_cad_fin
+        pop eax
+        xor edx, edx
+        mov byte [ev_tx], 1
+        jmp ev_cierra
+; ---- VALOR(texto): el número que es ese texto; si no lo es, error ----
+ev_valor:
+        call ev_abre
+        call ev_expr
+        cmp byte [ev_tx], 1
+        jne .num
+        mov esi, eax
+        call cad_a_num
+        mov byte [ev_tx], 0
+        jnc ev_cierra
+        call ev_mal
+        xor eax, eax
+        xor edx, edx
+        jmp ev_cierra
+.num:
+        call ev_num
+        jmp ev_cierra
+; ---- TEXTO(valor; formato): el número, escrito con ese formato. El formato:
+;      «0», «0,00» (los decimales), «#.##0,00» (con puntos de millares),
+;      «0%» (por cien) o «dd/mm/aaaa» (una fecha) ----
+ev_texto:
+        call ev_abre
+        call ev_expr
+        call ev_num
+        push edx
+        push eax
+        call ev_puntoycoma
+        jc .mal1
+        call ev_expr
+        call ev_a_cad
+        call ev_cierra
+        mov esi, eax
+        mov al, [esi]
+        call may_car
+        cmp al, 'D'
+        je .fecha
+        xor ecx, ecx                ; ECX=decimales
+        xor ebx, ebx                ; BL=2: millares; BH=1: por cien; EDI=1: tras la coma
+        xor edi, edi
+.l:
+        lodsb
+        test al, al
+        jz .lf
+        cmp al, '%'
+        jne .l1
+        mov bh, 1
+        jmp .l
+.l1:
+        cmp al, ','
+        jne .l2
+        mov edi, 1
+        jmp .l
+.l2:
+        test edi, edi
+        jnz .l3
+        cmp al, '.'
+        jne .l
+        mov bl, 2
+        jmp .l
+.l3:
+        cmp ecx, CU_DEC
+        jae .l
+        inc ecx
+        jmp .l
+.lf:
+        pop eax
+        pop edx
+        test bh, bh
+        jz .n
+        mov esi, edx                ; por cien, si cabe
+        call abs64
+        cmp edx, 0x0147AE14
+        jae ev_cero_mal
+        push ecx
+        push ebx
+        mov ecx, edx
+        mov ebx, 100
+        mul ebx
+        imul ecx, 100
+        add edx, ecx
+        pop ebx
+        pop ecx
+        test esi, esi
+        jns .n
+        neg edx
+        neg eax
+        sbb edx, 0
+.n:
+        call ev_cad_nueva
+        push edi
+        push ebx
+        mov bh, 0
+        call num_fijo
+        pop ebx
+        test bh, bh
+        jz .cierra
+        mov byte [edi], '%'
+        inc edi
+.cierra:
+        mov byte [edi], 0
+        inc edi
+        call ev_cad_fin
+        pop eax
+        xor edx, edx
+        mov byte [ev_tx], 1
+        ret
+.fecha:
+        pop eax
+        pop edx
+        call ev_a_dia
+        jc ev_cero_mal
+        call ev_cad_nueva
+        push edi
+        call fecha_txt
+        jmp .cierra
+.mal1:
+        add esp, 8
+        jmp ev_cero_mal
+
+; ---- BUSCARV(valor; rango; columna [; ordenado]) (EAX=0): busca el valor en
+;      la primera columna del rango y da lo que hay en esa fila, en la
+;      columna que se dice (la 1 es la primera). BUSCARH (1): lo mismo, por
+;      filas. COINCIDIR(valor; rango [; tipo]) (2): en qué puesto del rango
+;      (una fila o una columna) está. Con «ordenado» 0 (o tipo 0) tiene que
+;      estar tal cual; si no, vale el último que no pase del valor (el rango
+;      tiene que estar ordenado de menor a mayor). Si no está, error ----
+%define L_MODO  dword [ebp-4]
+%define L_VT    dword [ebp-8]       ; lo que se busca: su clase
+%define L_VL    dword [ebp-12]
+%define L_VH    dword [ebp-16]
+%define L_C1    dword [ebp-20]
+%define L_F1    dword [ebp-24]
+%define L_C2    dword [ebp-28]
+%define L_F2    dword [ebp-32]
+%define L_IDX   dword [ebp-36]      ; la columna (o la fila) que se pide
+%define L_EX    dword [ebp-40]      ; 1: tiene que estar tal cual
+%define L_I     dword [ebp-44]
+%define L_ENC   dword [ebp-48]      ; dónde está (-1: no está)
+%define L_N     dword [ebp-52]      ; cuántas celdas se miran
+%define L_V     dword [ebp-56]      ; 1: se mira hacia abajo; 0: hacia la derecha
+ev_buscar:
+        push ebp
+        mov ebp, esp
+        sub esp, 56
+        mov L_MODO, eax
+        mov L_EX, 0
+        mov L_IDX, 1
+        mov L_ENC, -1
+        call ev_abre
+        call ev_expr
+        movzx ecx, byte [ev_tx]
+        mov L_VT, ecx
+        mov L_VL, eax
+        mov L_VH, edx
+        call ev_puntoycoma
+        jc .mal
+        call ev_rango_lee
+        jc .mal
+        mov L_C1, ecx
+        mov L_F1, edx
+        mov L_C2, esi
+        mov L_F2, edi
+        cmp L_MODO, 2
+        je .tipo
+        call ev_puntoycoma
+        jc .mal
+        call ev_ent
+        mov L_IDX, eax
+        call ev_puntoycoma
+        jc .cie
+        call ev_expr
+        call ev_num
+        or eax, edx
+        jnz .cie
+        mov L_EX, 1
+        jmp .cie
+.tipo:
+        call ev_puntoycoma
+        jc .cie
+        call ev_ent
+        cmp eax, 1
+        je .cie
+        test eax, eax
+        jnz .mal
+        mov L_EX, 1
+.cie:
+        call ev_cierra
+        cmp byte [ev_err], 0
+        jne .cero
+        mov eax, L_F2               ; hacia dónde se mira, y cuántas celdas
+        sub eax, L_F1
+        mov ebx, L_C2
+        sub ebx, L_C1               ; EAX=filas-1 EBX=columnas-1
+        mov ecx, 1
+        cmp L_MODO, 0
+        je .dir
+        xor ecx, ecx
+        cmp L_MODO, 1
+        je .dir
+        test ebx, ebx               ; COINCIDIR: según sea el rango
+        jnz .dir
+        inc ecx
+.dir:
+        mov L_V, ecx
+        test ecx, ecx
+        jnz .d1
+        xchg eax, ebx               ; (EAX=lo que se recorre EBX=lo otro)
+.d1:
+        inc eax
+        mov L_N, eax
+        mov eax, L_IDX              ; la columna pedida, dentro del rango
+        dec eax
+        js .mal
+        cmp eax, ebx
+        jbe .d2
+        cmp L_MODO, 2
+        je .d2
+        mov al, EV_REF
+        call ev_pon_err
+        jmp .cero
+.d2:
+        mov L_I, 0
+.b:
+        push dword [ev_cad_p]
+        call .celda                 ; ECX, EDX=la celda del puesto L_I
+        push ebp
+        call celda_valor
+        pop ebp
+        cmp byte [ev_err], 0
+        jne .ferr
+        cmp byte [cv_tipo], 0
+        je .sig
+        mov ecx, L_VL
+        mov [cmp_l], ecx
+        mov ecx, L_VH
+        mov [cmp_l+4], ecx
+        mov ecx, L_VT
+        call ev_compara             ; lo buscado con lo de la celda
+        test eax, eax
+        jz .esta
+        jns .menor
+        cmp L_EX, 0                 ; la celda ya pasa: en un rango ordenado
+        je .fpop                    ; no hay que seguir
+        jmp .sig
+.menor:
+        cmp L_EX, 0
+        jne .sig
+.esta:
+        mov ecx, L_I
+        mov L_ENC, ecx
+        cmp L_EX, 0
+        jne .fpop
+        jmp .sig
+.sig:
+        pop dword [ev_cad_p]
+        inc L_I
+        mov eax, L_I
+        cmp eax, L_N
+        jb .b
+        jmp .fin
+.ferr:
+        pop dword [ev_cad_p]
+        jmp .cero
+.fpop:
+        pop dword [ev_cad_p]
+.fin:
+        mov eax, L_ENC
+        cmp eax, -1
+        je .mal
+        cmp L_MODO, 2
+        jne .dato
+        inc eax
+        call ev_de_ent
+        jmp .x
+.dato:
+        mov L_I, eax                ; lo que hay en ese puesto, en la columna pedida
+        call .celda
+        mov eax, L_IDX
+        dec eax
+        cmp L_V, 0
+        je .h
+        add ecx, eax
+        jmp .v
+.h:
+        add edx, eax
+.v:
+        push ebp
+        call celda_valor
+        pop ebp
+        jmp .x
+.mal:
+        call ev_mal
+.cero:
+        xor eax, eax
+        xor edx, edx
+        mov byte [ev_tx], 0
+.x:
+        mov esp, ebp
+        pop ebp
+        ret
+; (interna) ECX=columna EDX=fila de la celda del puesto L_I de lo que se mira
+.celda:
+        mov ecx, L_C1
+        mov edx, L_F1
+        cmp L_V, 0
+        je .ch
+        add edx, L_I
+        ret
+.ch:
+        add ecx, L_I
+        ret
+
+; ---- INDICE(rango; fila [; columna]): lo que hay en ese sitio del rango (de
+;      un rango de una sola fila, con un número solo, la columna) ----
+ev_indice:
+        call ev_abre
+        call ev_rango_lee
+        jc ev_cero_mal
+        push ecx
+        push edx
+        push esi
+        push edi
+        call ev_puntoycoma
+        jc .mal4
+        call ev_ent
+        push eax
+        mov eax, -1
+        call ev_puntoycoma
+        jc .n
+        call ev_ent
+.n:
+        call ev_cierra
+        mov ebx, eax                ; EBX=columna (-1: no se ha dicho) EAX=fila
+        pop eax
+        pop edi
+        pop esi
+        pop edx
+        pop ecx
+        cmp byte [ev_err], 0
+        jne ev_primario.cero
+        cmp ebx, -1
+        jne .a
+        mov ebx, 1
+        cmp edx, edi                ; una sola fila: el número es la columna
+        jne .a
+        xchg eax, ebx
+.a:
+        dec eax
+        js ev_cero_mal
+        dec ebx
+        js ev_cero_mal
+        add edx, eax
+        add ecx, ebx
+        cmp edx, edi
+        ja .ref
+        cmp ecx, esi
+        ja .ref
+        push ebp
+        call celda_valor
+        pop ebp
+        ret
+.ref:
+        mov al, EV_REF
+        call ev_pon_err
+        jmp ev_primario.cero
+.mal4:
+        add esp, 16
+        jmp ev_cero_mal
 
 ; ---- ABS(expresión) ----
 ev_abs:
@@ -3005,12 +4129,10 @@ nj_dec      resd 1                  ; num_fijo: los decimales
 fs_d        resd 1                  ; fecha_serie: el día y el mes pedidos
 fs_m        resd 1
 nf_ent      resb 24                 ; la parte entera, en texto
-ev_nom      resb 12                 ; el nombre leído
+ev_nom      resb 16                 ; el nombre leído
 moneda_txt  resb 8                  ; lo que va detrás de la moneda («EUR»)
 ev_pila_min resd 1                  ; la pila no puede bajar de aquí (0: da igual)
-cv_val      resd 2 * NCOL * NFIL    ; lo apuntado de cada celda: su valor,
-cv_err      resb NCOL * NFIL        ; su error
-cv_est      resb NCOL * NFIL        ; y su estado: 0 nada, 1 calculándose, 2 apuntada
+cv_gen      resd 1                  ; la tanda de cálculo (cambia con cada cambio)
 ev_cads     resb EV_CADS + CAD_MAX + 1  ; los textos a medio calcular (y uno de sobra)
 ev_hondo    resb 1                  ; se ha tocado fondo en este cálculo
 ev_err      resb 1                  ; 0, o EV_ERROR, EV_CIRC, EV_REF

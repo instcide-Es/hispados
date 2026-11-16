@@ -20,8 +20,12 @@
 ;  derecho del rótulo de una columna se arrastra para cambiarle el ancho.
 ;
 ;  Escribir: al teclear se empieza una celda nueva; F2 (o doble clic, o
-;  pulsar la barra de fórmulas) corrige la que hay, con cursor. Intro acepta
-;  y baja, Tab acepta y va a la derecha, Esc deja la celda como estaba.
+;  pulsar la barra de fórmulas) corrige la que hay, con cursor (y con Mayús
+;  se eligen letras, que se copian, se cortan o se cambian). Intro acepta y
+;  baja, Tab acepta y va a la derecha, Esc deja la celda como estaba.
+;  Escribiendo una fórmula, detrás de un signo (=, +, (, ;...), las flechas o
+;  el ratón SEÑALAN una celda y se mete su referencia; con Mayús o
+;  arrastrando, el rango. Ctrl+flechas saltan al borde de los datos.
 ;    - texto:   lo que no es número ni empieza por «=»; a la izquierda; si no
 ;               cabe, sigue sobre las celdas vacías de su derecha
 ;    - número:  a la derecha (con coma o con punto decimal); una fecha
@@ -30,21 +34,27 @@
 ;               comparaciones, textos, referencias con «$» y las funciones
 ;               SUMA, PROMEDIO, MAX, MIN, CONTAR, CONTARA, SI, Y, O, NO,
 ;               ENTERO, REDONDEAR, RAIZ, POTENCIA, RESIDUO, ABS, CONTAR.SI,
-;               SUMAR.SI, HOY, CONCATENAR, LARGO, MAYUSC y MINUSC). Errores:
+;               SUMAR.SI, HOY, FECHA, BUSCARV, INDICE, TEXTO, PAGO... y las
+;               de texto: la lista entera, en calculo.inc). Errores:
 ;               «#ERROR», «#CIRC» (se pide a sí misma) y «#REF» (una celda
-;               que no existe). Se calcula todo cada vez que se pinta.
+;               que no existe).
 ;  Las cuentas son de coma fija, con ocho decimales exactos (0,1 + 0,2 es
 ;  0,3), y un número nunca se enseña cortado: si no cabe, almohadillas.
 ;
-;  Edición: deshacer y rehacer (un paso), cortar, copiar y pegar rangos
+;  Edición: deshacer y rehacer (varios pasos), cortar, copiar y pegar rangos
 ;  (corriendo las referencias de las fórmulas; lo copiado va también, como
 ;  texto, al portapapeles de los demás programas), rellenar hacia abajo y
 ;  hacia la derecha, borrar, insertar y eliminar filas y columnas (corrigiendo
 ;  las fórmulas), buscar e ir a una celda (cuentas/hoja.inc).
 ;  Formato de cada celda: negrita, cursiva, alineación, color de la letra y
 ;  formato del número (con decimales fijos, con millares, moneda, porcentaje
-;  o fecha); ancho de cada columna. Herramientas: ordenar las filas de un
-;  rango por una columna, autosuma y gráficos (cuentas/grafico.inc).
+;  o fecha) y bordes; ancho de cada columna. Herramientas: ordenar las filas
+;  de un rango (hasta por tres columnas, con su diálogo), autosuma y gráficos
+;  (cuentas/grafico.inc).
+;
+;  Memoria: el módulo pide algo más de 1,3 MB. El texto de las celdas va en
+;  un almacén disperso, el valor de cada fórmula se apunta junto a ella y
+;  solo se vuelve a calcular cuando cambia algo de la hoja (cuentas/hoja.inc).
 ;
 ;  Archivos: el formato propio, .HOJ, lo guarda todo; .CSV, para llevar y
 ;  traer datos (cuentas/archivo.inc). Imprime como texto por LPT1.
@@ -118,6 +128,8 @@ O_COLOR     equ 152                 ; 152-155: negro, rojo, azul, verde
 O_ORD_ASC   equ 160
 O_ORD_DESC  equ 161
 O_GRAFICO   equ 162                 ; 162-164: barras, líneas, sectores
+O_ORDENAR   equ 165
+O_BORDE     equ 180                 ; 180-183: ninguno, contorno, todos, abajo
 O_ACERCA    equ 170
 
 HVP_CABECERA "Cuentas", entrada, 4
@@ -269,8 +281,20 @@ cue_menu:
         db "&Ancho de columna...", 0
         dw O_SIMBOLO
         db "&Moneda...", 0
+        dw 0
+        db 0
+        dw O_BORDE
+        db "Bordes: nin&guno", 0
+        dw O_BORDE + 1
+        db "Bordes: c&ontorno", 0
+        dw O_BORDE + 2
+        db "Bordes: &todos", 0
+        dw O_BORDE + 3
+        db "Bordes: a&bajo", 0
         dw 0xFFFF
         db "&Herramientas", 0
+        dw O_ORDENAR
+        db "&Ordenar...", 0
         dw O_ORD_ASC
         db "Ordenar de &menor a mayor", 0
         dw O_ORD_DESC
@@ -348,8 +372,13 @@ ordenes:
         ORDEN O_COLOR + 1, fmt_color, 1
         ORDEN O_COLOR + 2, fmt_color, 2
         ORDEN O_COLOR + 3, fmt_color, 3
-        ORDEN O_ORD_ASC, ordenar, 0
-        ORDEN O_ORD_DESC, ordenar, 1
+        ORDEN O_BORDE, bordes, 0
+        ORDEN O_BORDE + 1, bordes, 1
+        ORDEN O_BORDE + 2, bordes, 2
+        ORDEN O_BORDE + 3, bordes, 3
+        ORDEN O_ORDENAR, ordenar_dlg
+        ORDEN O_ORD_ASC, ordenar_rapido, 0
+        ORDEN O_ORD_DESC, ordenar_rapido, 1
 %ifdef CON_GRAFICOS
         ORDEN O_GRAFICO, grafico, 0
         ORDEN O_GRAFICO + 1, grafico, 1
@@ -505,6 +534,29 @@ dlg_fmt:
         PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 220, 248, 90, 26, ID_CANCELAR
         dd 0
 
+; ---- diálogo: ordenar ----
+dlg_ord:
+        PLANTILLA HV_c_dialogo, t_d_ord, E_DIALOGO, 0, 0, 444, 232, 0
+        PLANTILLA HV_c_estatico, t_o_por, E_HIJA, 20, 18, 190, 18, 100
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 214, 14, 40, 24, 50
+        PLANTILLA HV_c_boton, t_o_desc, E_HIJA | E_TABULA | BS_CASILLA, 266, 16, 164, 20, 20
+        PLANTILLA HV_c_estatico, t_o_luego, E_HIJA, 20, 50, 190, 18, 101
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 214, 46, 40, 24, 51
+        PLANTILLA HV_c_boton, t_o_desc, E_HIJA | E_TABULA | BS_CASILLA, 266, 48, 164, 20, 21
+        PLANTILLA HV_c_estatico, t_o_luego, E_HIJA, 20, 82, 190, 18, 102
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 214, 78, 40, 24, 52
+        PLANTILLA HV_c_boton, t_o_desc, E_HIJA | E_TABULA | BS_CASILLA, 266, 80, 164, 20, 22
+        PLANTILLA HV_c_boton, t_o_tit, E_HIJA | E_TABULA | BS_CASILLA, 20, 118, 380, 20, 23
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 115, 158, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 215, 158, 90, 26, ID_CANCELAR
+        dd 0
+t_d_ord     db "Ordenar", 0
+t_o_por     db "Ordenar por la columna:", 0
+t_o_luego   db "Después, por la columna:", 0
+t_o_desc    db "de mayor a menor", 0
+t_o_tit     db "La primera fila son títulos (no se mueve)", 0
+t_ord_col   db "Escriba la letra de la columna que manda en el orden (A, B, C...).", 0
+
 ; ---- textos (todo en español) ----
 t_cuentas   db "Cuentas", 0
 t_guion     db " - ", 0
@@ -523,6 +575,10 @@ t_cambios   db "La hoja tiene cambios sin guardar.", 10, "¿Quiere guardarlos?",
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
 t_no_guardar db "No se ha podido guardar la hoja.", 10
             db "Compruebe que el disco no está lleno ni protegido.", 0
+t_csv_pierde db "Un archivo .CSV solo guarda lo escrito en las celdas: los formatos", 10
+            db "y los anchos de las columnas se pierden. Para guardarlo todo, use", 10
+            db "«Guardar como» con un nombre acabado en .HOJ.", 10, 10
+            db "¿Guardar como .CSV de todos modos?", 0
 t_llena     db "La hoja está llena: no cabe más texto.", 10
             db "Lo último que se ha escrito o pegado puede haber quedado sin poner.", 0
 t_clip_grande db "Lo elegido es demasiado grande para copiarlo de una vez.", 10
@@ -586,6 +642,8 @@ entrada:
         mov esi, hijos
         call hvl_clases
         mov esi, dlg_fmt
+        call hvl_clases
+        mov esi, dlg_ord
         call hvl_clases
         call hoja_vacia
         call pon_titulo
@@ -850,6 +908,7 @@ al_principio:
         mov [desp_col], eax
         mov [desp_fil], eax
         mov [editando], al
+        mov [csv_avisado], al
         pop eax
         cmp dword [barra_v], 0
         je .x
@@ -863,6 +922,17 @@ al_principio:
 ; =============================================================================
 tecla:
         mov [tec_may], edx
+        cmp byte [editando], 0      ; (escribiendo, copiar, cortar, pegar y todo
+        je .ats                     ; son de las letras, no de las celdas)
+        cmp ecx, TC_CTRL + 3
+        je tecla_edita
+        cmp ecx, TC_CTRL + 24
+        je tecla_edita
+        cmp ecx, TC_CTRL + 22
+        je tecla_edita
+        cmp ecx, TC_CTRL + 5
+        je tecla_edita
+.ats:
         mov esi, atajos             ; ¿un atajo de una orden?
 .at:
         movzx eax, word [esi]
@@ -904,6 +974,14 @@ tecla:
         je .cinicio
         cmp ecx, TC_CTRL_FIN
         je .cfin
+        cmp ecx, TC_CTRL_IZQ
+        je .cizq
+        cmp ecx, TC_CTRL_DER
+        je .cder
+        cmp ecx, 0x8D               ; Ctrl+arriba
+        je .carr
+        cmp ecx, 0x91               ; Ctrl+abajo
+        je .caba
         cmp ecx, TC_SUPR
         je .supr
         cmp ecx, TC_F1 + 1          ; F2
@@ -914,21 +992,45 @@ tecla:
         call borrar_rango
         jmp hecho
 .tab:
+        inc eax
+        test dword [tec_may], TM_MAYUS      ; Mayús+Tab: a la izquierda
         mov dword [tec_may], 0
+        jz .mueve
+        neg eax
+        jmp .mueve
 .der:
         inc eax
-        jmp .mueve
+        jmp .flecha
 .izq:
         dec eax
-        jmp .mueve
+        jmp .flecha
 .intro:
         mov dword [tec_may], 0
-.aba:
         inc ebx
         jmp .mueve
+.aba:
+        inc ebx
+        jmp .flecha
 .arr:
         dec ebx
-        jmp .mueve
+.flecha:
+        test dword [tec_may], TM_CTRL       ; con Ctrl: hasta el borde de los datos
+        jz .mueve
+.salto:
+        call salta
+        jmp hecho
+.cizq:
+        dec eax
+        jmp .salto
+.cder:
+        inc eax
+        jmp .salto
+.carr:
+        dec ebx
+        jmp .salto
+.caba:
+        inc ebx
+        jmp .salto
 .repag:
         sub ebx, [vis_fil]
         jmp .mueve
@@ -1015,9 +1117,14 @@ mueve_rel:
         mov [cur_fil], ebx
 .x:
         call a_la_vista
-        jmp invalida
+        jmp inval
 
 ; ---- mientras se escribe en una celda ----
+; Las flechas: si se está escribiendo una fórmula y el cursor está detrás de
+; un signo (=, +, (, ;...), SEÑALAN una celda: se mete su referencia, y con
+; Mayús, el rango. Si no, en una celda nueva aceptan lo escrito y mueven la
+; celda activa; y corrigiendo (F2), mueven el cursor por lo escrito (con
+; Mayús, eligen letras, que se pueden copiar, cortar o cambiar por otras).
 tecla_edita:
         cmp ecx, TC_INTRO
         je .intro
@@ -1035,6 +1142,14 @@ tecla_edita:
         je .fin
         cmp ecx, TC_F1 + 1          ; F2: las flechas mueven el cursor
         je .f2
+        cmp ecx, TC_CTRL + 3        ; Ctrl+C, X, V y E: con las letras elegidas
+        je .copia
+        cmp ecx, TC_CTRL + 24
+        je .corta
+        cmp ecx, TC_CTRL + 22
+        je .pega
+        cmp ecx, TC_CTRL + 5
+        je .todo
         xor eax, eax
         xor ebx, ebx
         cmp ecx, TC_ARRIBA
@@ -1045,41 +1160,74 @@ tecla_edita:
         je .izq
         cmp ecx, TC_DER
         jne hecho
-        cmp byte [edt_modo], 0
-        je .der
-        mov eax, [edt_pos]
-        cmp byte [edt_buf+eax], 0
-        je hecho
-        inc dword [edt_pos]
-        jmp .pinta
-.izq:
-        cmp byte [edt_modo], 0
-        je .izq1
-        cmp dword [edt_pos], 0
-        je hecho
-        dec dword [edt_pos]
-        jmp .pinta
-.izq1:
-        dec eax
-        jmp .acepta
-.tab:
-.der:
         inc eax
-        jmp .acepta
+        jmp .flecha
+.izq:
+        dec eax
+        jmp .flecha
 .arr:
         dec ebx
+        jmp .flecha
+.aba:
+        inc ebx
+.flecha:
+        cmp byte [pt_activo], 0
+        jne .senala
+        cmp byte [edt_modo], 0
+        jne .cursor
+        call puede_senalar
+        jc .acepta
+        mov ecx, [cur_col]          ; empieza a señalar, desde la celda activa
+        mov [pt_c2], ecx
+        mov ecx, [cur_fil]
+        mov [pt_f2], ecx
+        mov ecx, [edt_pos]
+        mov [pt_ini], ecx
+        mov dword [pt_len], 0
+        mov byte [pt_activo], 1
+        mov dword [edt_anc], -1
+        and dword [tec_may], ~TM_MAYUS
+.senala:
+        add eax, [pt_c2]
+        add ebx, [pt_f2]
+        call acota_celda
+        mov [pt_c2], eax
+        mov [pt_f2], ebx
+        test dword [tec_may], TM_MAYUS
+        jnz .s1
+        mov [pt_c1], eax
+        mov [pt_f1], ebx
+.s1:
+        call pt_escribe
+        mov ecx, [pt_c2]
+        mov edx, [pt_f2]
+        call a_la_vista_de
+        jmp .pinta
+.cursor:
+        test ebx, ebx               ; arriba y abajo: aceptan
+        jnz .acepta
+        call .ancla
+        mov ecx, [edt_pos]
+        add ecx, eax
+        js .pinta
+        push eax
+        call edt_largo
+        cmp ecx, eax
+        pop eax
+        ja .pinta
+        mov [edt_pos], ecx
+        jmp .pinta
+.tab:
+        mov eax, 1
+        xor ebx, ebx
+        test dword [tec_may], TM_MAYUS      ; Mayús+Tab: a la izquierda
+        jz .acepta
+        neg eax
         jmp .acepta
 .intro:
         xor eax, eax
-        xor ebx, ebx
-.aba:
-        inc ebx
+        mov ebx, 1
 .acepta:
-        cmp ecx, TC_TAB
-        jne .ac1
-        mov eax, 1
-        xor ebx, ebx
-.ac1:
         push eax
         push ebx
         call commit_edit
@@ -1090,35 +1238,386 @@ tecla_edita:
         jmp hecho
 .esc:
         mov byte [editando], 0
+        mov byte [pt_activo], 0
         jmp .pinta
 .f2:
         mov byte [edt_modo], 1
+        mov byte [pt_activo], 0
         jmp hecho
 .inicio:
+        call .ancla
         mov dword [edt_pos], 0
         jmp .pinta
 .fin:
+        call .ancla
         call edt_largo
         mov [edt_pos], eax
         jmp .pinta
+.todo:
+        mov dword [edt_anc], 0
+        call edt_largo
+        mov [edt_pos], eax
+        mov byte [pt_activo], 0
+        jmp .pinta
 .retro:
+        mov byte [pt_activo], 0
+        call edt_borra_sel
+        jc .pinta
         cmp dword [edt_pos], 0
         je hecho
         dec dword [edt_pos]
+        jmp .s2
 .supr:
-        mov esi, [edt_pos]          ; quita la letra del cursor
-        add esi, edt_buf
-        cmp byte [esi], 0
+        mov byte [pt_activo], 0
+        call edt_borra_sel
+        jc .pinta
+.s2:
+        mov eax, [edt_pos]          ; quita la letra del cursor
+        cmp byte [edt_buf+eax], 0
         je .pinta
-.s1:
-        mov al, [esi+1]
-        mov [esi], al
+        mov ecx, 1
+        call edt_quita
+        jmp .pinta
+.corta:
+        call edt_copia
+        call edt_borra_sel
+        jmp .pinta
+.copia:
+        call edt_copia
+        jmp hecho
+.pega:
+        mov byte [pt_activo], 0
+        call edt_borra_sel
+        mov ebp, [puente]           ; lo que haya en el portapapeles, hasta el
+        mov eax, WM_SETTEXT         ; primer salto de línea
+        mov edx, t_nada
+        HV msg_enviar
+        mov eax, WM_PASTE
+        HV msg_enviar
+        mov eax, WM_GETTEXT
+        mov ecx, PP_TAM + 1
+        mov edx, pega_txt
+        HV msg_enviar
+        mov esi, pega_txt
+.p1:
+        cmp byte [esi], 32
+        jb .p2
         inc esi
-        test al, al
-        jnz .s1
+        jmp .p1
+.p2:
+        mov byte [esi], 0
+        mov esi, pega_txt
+        mov eax, [edt_pos]
+        call edt_inserta
+        add [edt_pos], ecx
 .pinta:
         call inval
         jmp hecho
+; (interna) antes de mover el cursor: con Mayús, deja el ancla donde estaba
+; el cursor (si no la hay); sin Mayús, la quita. Conserva los registros
+.ancla:
+        mov byte [pt_activo], 0
+        test dword [tec_may], TM_MAYUS
+        jnz .a1
+        mov dword [edt_anc], -1
+        ret
+.a1:
+        cmp dword [edt_anc], -1
+        jne .a2
+        push eax
+        mov eax, [edt_pos]
+        mov [edt_anc], eax
+        pop eax
+.a2:
+        ret
+
+; EAX=columna EBX=fila (con signo) -> dentro de la hoja
+acota_celda:
+        test eax, eax
+        jns .a1
+        xor eax, eax
+.a1:
+        cmp eax, NCOL
+        jl .a2
+        mov eax, NCOL - 1
+.a2:
+        test ebx, ebx
+        jns .b1
+        xor ebx, ebx
+.b1:
+        cmp ebx, NFIL
+        jl .b2
+        mov ebx, NFIL - 1
+.b2:
+        ret
+
+; ¿se puede señalar una celda? Se está escribiendo una fórmula y delante del
+; cursor hay un signo que pide un valor. CF=0 si sí. Conserva los registros
+puede_senalar:
+        push eax
+        push esi
+        cmp byte [edt_buf], '='
+        jne .no
+        mov eax, [edt_pos]
+        test eax, eax
+        jz .no
+        mov al, [edt_buf+eax-1]
+        mov esi, t_signos
+.b:
+        cmp byte [esi], 0
+        je .no
+        cmp al, [esi]
+        je .si
+        inc esi
+        jmp .b
+.si:
+        pop esi
+        pop eax
+        clc
+        ret
+.no:
+        pop esi
+        pop eax
+        stc
+        ret
+t_signos    db "=+-*/^&(;:<>%", 0
+
+; pone en lo que se escribe la referencia de lo señalado ([pt_c1], [pt_f1] a
+; [pt_c2], [pt_f2]), en vez de la que hubiera puesto antes
+pt_escribe:
+        pushad
+        mov eax, [pt_ini]
+        mov ecx, [pt_len]
+        call edt_quita
+        mov ecx, [pt_c1]            ; de la esquina de arriba a la izquierda...
+        mov eax, [pt_c2]
+        cmp ecx, eax
+        jbe .a
+        xchg ecx, eax
+.a:
+        mov edx, [pt_f1]
+        mov ebx, [pt_f2]
+        cmp edx, ebx
+        jbe .b
+        xchg edx, ebx
+.b:
+        mov edi, pt_txt
+        call ref_nombre
+        cmp ecx, eax                ; ...a la otra, si son varias celdas
+        jne .r
+        cmp edx, ebx
+        je .f
+.r:
+        mov byte [edi], ':'
+        inc edi
+        mov ecx, eax
+        mov edx, ebx
+        call ref_nombre
+.f:
+        mov byte [edi], 0
+        mov esi, pt_txt
+        mov eax, [pt_ini]
+        call edt_inserta
+        mov [pt_len], ecx
+        add ecx, [pt_ini]
+        mov [edt_pos], ecx
+        popad
+        ret
+
+; quita de lo que se escribe ECX letras desde la EAX. Conserva los registros
+edt_quita:
+        push esi
+        push edi
+        push eax
+        lea edi, [edt_buf+eax]
+        lea esi, [edi+ecx]
+.b:
+        lodsb
+        stosb
+        test al, al
+        jnz .b
+        pop eax
+        pop edi
+        pop esi
+        ret
+; mete el texto ESI en lo que se escribe, delante de la letra EAX -> ECX=las
+; letras que han cabido. Conserva los demás registros
+edt_inserta:
+        push eax
+        push ebx
+        push edx
+        push esi
+        push edi
+        mov ebx, eax
+        xor ecx, ecx                ; cuántas son
+.l:
+        cmp byte [esi+ecx], 0
+        je .lf
+        inc ecx
+        jmp .l
+.lf:
+        call edt_largo              ; y cuántas caben
+        mov edx, CEL_MAX - 2
+        sub edx, eax
+        jns .l1
+        xor edx, edx
+.l1:
+        cmp ecx, edx
+        jbe .l2
+        mov ecx, edx
+.l2:
+        jecxz .x
+        lea edi, [edt_buf+eax]      ; el final (con su 0), ECX letras más allá
+        mov edx, eax
+        sub edx, ebx
+        inc edx
+.h:
+        mov al, [edi]
+        mov [edi+ecx], al
+        dec edi
+        dec edx
+        jnz .h
+        lea edi, [edt_buf+ebx]
+        push ecx
+        rep movsb
+        pop ecx
+.x:
+        pop edi
+        pop esi
+        pop edx
+        pop ebx
+        pop eax
+        ret
+; las letras elegidas de lo que se escribe -> EAX=la primera ECX=cuántas
+; (ZF=1 si no hay ninguna)
+edt_sel:
+        mov eax, [edt_anc]
+        mov ecx, [edt_pos]
+        cmp eax, -1
+        jne .a
+        mov eax, ecx
+.a:
+        cmp eax, ecx
+        jbe .b
+        xchg eax, ecx
+.b:
+        sub ecx, eax
+        ret
+; quita las letras elegidas; CF=1 si las había
+edt_borra_sel:
+        push eax
+        push ecx
+        call edt_sel
+        mov dword [edt_anc], -1
+        jz .no
+        call edt_quita
+        mov [edt_pos], eax
+        pop ecx
+        pop eax
+        stc
+        ret
+.no:
+        pop ecx
+        pop eax
+        clc
+        ret
+; copia las letras elegidas al portapapeles
+edt_copia:
+        pushad
+        call edt_sel
+        jz .x
+        lea esi, [edt_buf+eax]
+        mov edi, pega_txt
+        rep movsb
+        mov byte [edi], 0
+        mov ebp, [puente]
+        mov eax, WM_SETTEXT
+        mov edx, pega_txt
+        HV msg_enviar
+        mov eax, EM_SEL_TODO
+        HV msg_enviar
+        mov eax, WM_COPY
+        HV msg_enviar
+        mov byte [clip_hay], 0      ; (lo copiado de la hoja ya no es lo último)
+.x:
+        popad
+        ret
+
+; salta, desde la celda activa (o desde la otra esquina, con Mayús), en la
+; dirección EAX=columnas EBX=filas (de uno en uno), hasta el borde de los
+; datos: el final del bloque de celdas escritas, o la primera escrita que
+; haya más allá, o el borde de la hoja
+salta:
+        mov ecx, [cur_col]
+        mov edx, [cur_fil]
+        test dword [tec_may], TM_MAYUS
+        jz .a
+        mov ecx, [sel_c2]
+        mov edx, [sel_f2]
+.a:
+        push ecx
+        push edx
+        call .sig                   ; ¿se puede dar un paso? ESI, EDI=la de al lado
+        jc .fin
+        call .llena
+        jz .busca
+        xchg ecx, esi
+        xchg edx, edi
+        call .llena
+        xchg ecx, esi
+        xchg edx, edi
+        jz .busca
+.bloque:
+        mov ecx, esi                ; dentro de un bloque: hasta su última celda
+        mov edx, edi
+        call .sig
+        jc .fin
+        xchg ecx, esi
+        xchg edx, edi
+        call .llena
+        xchg ecx, esi
+        xchg edx, edi
+        jnz .bloque
+        jmp .fin
+.busca:
+        mov ecx, esi                ; por lo vacío: hasta la primera escrita
+        mov edx, edi
+        call .llena
+        jnz .fin
+        call .sig
+        jnc .busca
+.fin:
+        pop ebx
+        pop eax
+        sub ecx, eax
+        sub edx, ebx
+        mov eax, ecx
+        mov ebx, edx
+        jmp mueve_rel
+; (internas) ESI, EDI=la celda de al lado de ECX, EDX (CF=1 si se sale); y
+; ZF=1 si la celda ECX, EDX está vacía
+.sig:
+        mov esi, ecx
+        add esi, eax
+        mov edi, edx
+        add edi, ebx
+        cmp esi, NCOL
+        jae .no
+        cmp edi, NFIL
+        jae .no
+        clc
+        ret
+.no:
+        stc
+        ret
+.llena:
+        push eax
+        mov eax, edx
+        shl eax, 6
+        add eax, ecx
+        cmp dword [cel_off+eax*4], 0
+        pop eax
+        ret
 
 ; EAX=las letras de lo que se está escribiendo
 edt_largo:
@@ -1143,23 +1642,14 @@ letra:
         mov byte [edt_modo], 0
         call edita_empieza
 .mete:
-        mov bl, al
-        call edt_largo
-        cmp eax, CEL_MAX - 2
-        jae hecho
-        lea esi, [edt_buf+eax]      ; hace sitio en el cursor
-        mov ecx, eax
-        sub ecx, [edt_pos]
-        inc ecx
-.h:
-        mov al, [esi]
-        mov [esi+1], al
-        dec esi
-        dec ecx
-        jnz .h
+        mov byte [pt_activo], 0
+        call edt_borra_sel          ; (lo elegido se cambia por la letra)
+        mov [pt_txt], al
+        mov byte [pt_txt+1], 0
+        mov esi, pt_txt
         mov eax, [edt_pos]
-        mov [edt_buf+eax], bl
-        inc dword [edt_pos]
+        call edt_inserta
+        add [edt_pos], ecx
         call inval
         jmp hecho
 
@@ -1187,6 +1677,8 @@ edita_f2:
 edita_empieza:
         push eax
         mov byte [editando], 1
+        mov byte [pt_activo], 0
+        mov dword [edt_anc], -1
         mov eax, [cur_col]
         mov [sel_c2], eax
         mov eax, [cur_fil]
@@ -1206,6 +1698,7 @@ commit_edit:
         call cel_pon
         call fecha_auto
         mov byte [editando], 0
+        mov byte [pt_activo], 0
         popad
         jmp fin_cambio
 
@@ -1219,8 +1712,39 @@ raton:
         sar ebx, 16
         cmp ebx, TB_AL
         jl .barra
-        cmp byte [editando], 0      ; pulsar fuera de la barra acepta lo escrito
+        cmp byte [editando], 0      ; pulsar fuera de la barra acepta lo escrito...
         je .r1
+        cmp ebx, GY0                ; ...menos una celda, cuando la fórmula pide
+        jl .rc                      ; un valor: se señala (y arrastrando, el rango)
+        cmp ebx, [gy1]
+        jge .rc
+        cmp eax, ROT_AN
+        jl .rc
+        cmp eax, [gx1]
+        jge .rc
+        cmp byte [pt_activo], 0
+        jne .pt
+        call puede_senalar
+        jc .rc
+        mov ecx, [edt_pos]
+        mov [pt_ini], ecx
+        mov dword [pt_len], 0
+        mov byte [pt_activo], 1
+        mov dword [edt_anc], -1
+.pt:
+        call x_col
+        call y_fil
+        mov [pt_c2], ecx
+        mov [pt_f2], edx
+        test dword [tec_may], TM_MAYUS
+        jnz .pt1
+        mov [pt_c1], ecx
+        mov [pt_f1], edx
+.pt1:
+        call pt_escribe
+        mov byte [arrastra], 5
+        jmp .captura
+.rc:
         call commit_edit
 .r1:
         cmp ebx, HY0
@@ -1246,7 +1770,7 @@ raton:
 .captura:
         mov ebp, [ven]
         HV ven_capturar
-        call invalida
+        call inval
         jmp hecho
 .formula:
         call edita_f2
@@ -1260,6 +1784,7 @@ raton:
         call col_x
         mov [arr_x0], eax
         call instantanea
+        call des_ancho
         mov byte [arrastra], 2
         jmp .captura
 .rc1:
@@ -1303,7 +1828,7 @@ raton_mueve:
         movzx ecx, byte [arrastra]
         jmp [.que+ecx*4]
             align 4
-.que        dd .nada, .celdas, .ancho, .columnas, .filas
+.que        dd .nada, .celdas, .ancho, .columnas, .filas, .senala
 .nada:
         xor edi, edi                ; sobre un botón de la barra: su nombre, al pie
         cmp ebx, TB_AL
@@ -1409,6 +1934,20 @@ raton_mueve:
         je hecho
         mov [col_an+ecx*2], ax
         jmp .vista
+.senala:
+        call .acota                 ; la otra esquina de lo señalado
+        call x_col
+        call y_fil
+        cmp ecx, [pt_c2]
+        jne .se1
+        cmp edx, [pt_f2]
+        je hecho
+.se1:
+        mov [pt_c2], ecx
+        mov [pt_f2], edx
+        call pt_escribe
+        call inval
+        jmp hecho
 .columnas:
         call .acota
         call x_col
@@ -1618,7 +2157,7 @@ ir_a:
         mov [cur_fil], edx
         mov [sel_f2], edx
         call a_la_vista
-        jmp invalida
+        jmp inval
 .mal:
         mov esi, t_no_celda
         call aviso
@@ -1725,6 +2264,9 @@ fmt_aplica:
         mov esi, edx
         shl esi, 6
         add esi, ecx
+        xchg eax, esi
+        call des_celda
+        xchg eax, esi
         and [cel_fmt+esi*2], ax
         or [cel_fmt+esi*2], bx
         inc ecx
@@ -1835,6 +2377,94 @@ fmt_color:
         mov eax, F_COLOR
         jmp fmt_aplica
 
+; ---- los bordes de lo elegido (EAX: 0 ninguno, 1 el contorno, 2 todos, 3
+;      abajo). Cada celda guarda dos rayas, la de abajo y la de su derecha: la
+;      de arriba es la de abajo de la celda de encima, y la de la izquierda,
+;      la de la derecha de la celda de al lado ----
+bordes:
+        mov ebp, eax
+        call instantanea
+        call sel_rect
+        mov edx, [r_f1]
+.f:
+        mov ecx, [r_c1]
+.c:
+        xor eax, eax                ; EAX=lo que se pone EBX=lo que se quita
+        xor ebx, ebx
+        cmp ebp, 2
+        jne .n2
+        mov eax, F_BABA | F_BDER    ; todos
+.n2:
+        test ebp, ebp
+        jnz .n0
+        mov ebx, F_BABA | F_BDER    ; ninguno
+.n0:
+        cmp edx, [r_f2]             ; la última fila: la raya de abajo
+        jne .n1
+        test ebp, ebp
+        jz .n1
+        or eax, F_BABA
+.n1:
+        cmp ecx, [r_c2]             ; la última columna: la de la derecha
+        jne .n3
+        cmp ebp, 1
+        jb .n3
+        cmp ebp, 2
+        ja .n3
+        or eax, F_BDER
+.n3:
+        call .pon
+        cmp edx, [r_f1]             ; la primera fila: la raya de abajo de la de encima
+        jne .n4
+        cmp ebp, 3
+        je .n4
+        dec edx
+        mov eax, F_BABA
+        call .vecina
+        inc edx
+.n4:
+        cmp ecx, [r_c1]             ; la primera columna: la de la derecha de la de al lado
+        jne .n5
+        cmp ebp, 3
+        je .n5
+        dec ecx
+        mov eax, F_BDER
+        call .vecina
+        inc ecx
+.n5:
+        inc ecx
+        cmp ecx, [r_c2]
+        jbe .c
+        inc edx
+        cmp edx, [r_f2]
+        jbe .f
+        jmp invalida
+; (interna) a una vecina: pone la raya EAX (o, con «ninguno», la quita)
+.vecina:
+        xor ebx, ebx
+        test ebp, ebp
+        jnz .pon
+        xchg eax, ebx
+; (interna) a la celda ECX, EDX (si existe): pone los bits EAX y quita los EBX
+.pon:
+        cmp ecx, NCOL
+        jae .px
+        cmp edx, NFIL
+        jae .px
+        push esi
+        mov esi, edx
+        shl esi, 6
+        add esi, ecx
+        xchg eax, esi
+        call des_celda
+        xchg eax, esi
+        not ebx
+        and [cel_fmt+esi*2], bx
+        or [cel_fmt+esi*2], ax
+        pop esi
+.px:
+        ret
+
 ; ---- Formato > Celdas: el diálogo ----
 celdas:
         call fmt_activa
@@ -1914,6 +2544,9 @@ df_gancho:
         shl eax, F_COLOR_D
         or edi, eax
 .g6:
+        mov eax, [df_fmt]           ; (los bordes no son de este diálogo: como estaban)
+        and eax, F_BABA | F_BDER
+        or edi, eax
         mov [df_fmt], edi
         popad
         jmp .no
@@ -2035,6 +2668,114 @@ marca_pon:
         pop eax
         ret
 
+; ---- Ordenar: con los botones, por la columna de la celda activa (EAX=0 de
+;      menor a mayor, 1 de mayor a menor); con el menú, el diálogo ----
+ordenar_rapido:
+        mov [or_kdesc], al
+        mov byte [or_tit], 0
+        mov ecx, [cur_col]
+.pon:
+        mov [or_kcol], ecx
+        mov dword [or_kcol+4], -1
+        mov dword [or_kcol+8], -1
+        jmp ordena
+ordenar_dlg:
+        mov ecx, [cur_col]
+        mov [or_kcol], ecx
+        mov ebp, [ven]
+        mov esi, dlg_ord
+        mov edi, dlg_ord + P_TAM
+        mov ebx, ord_gancho
+        xor edx, edx
+        HV dlg_modal
+        cmp eax, ID_ACEPTAR
+        jne .x
+        cmp dword [or_kcol], NCOL
+        jb ordena
+        mov esi, t_ord_col
+        call aviso
+.x:
+        ret
+ord_gancho:
+        cmp eax, DM_INICIO
+        je .ini
+        cmp eax, WM_COMMAND
+        jne .no
+        cmp ecx, ID_ACEPTAR
+        jne .no
+        pushad
+        xor edi, edi                ; cada clave: su columna y su casilla
+.g:
+        lea ecx, [edi+50]
+        mov eax, WM_GETTEXT
+        mov ebx, 8
+        mov edx, num_txt
+        call hija_msg
+        mov esi, num_txt
+        call lee_col
+        mov [or_kcol+edi*4], eax
+        lea ecx, [edi+20]
+        call marca_lee
+        setnz [or_kdesc+edi]
+        inc edi
+        cmp edi, 3
+        jb .g
+        mov ecx, 23
+        call marca_lee
+        setnz [or_tit]
+        popad
+        jmp .no
+.ini:
+        pushad
+        mov ecx, [or_kcol]
+        mov edi, num_txt
+        call col_nombre
+        mov byte [edi], 0
+        mov ecx, 50
+        mov eax, WM_SETTEXT
+        mov edx, num_txt
+        call hija_msg
+        mov eax, EM_SEL_TODO        ; (lo que se teclee la cambia)
+        call hija_msg
+        popad
+.no:
+        xor eax, eax
+        ret
+; ESI=lo escrito (la letra de una columna) -> EAX=la columna (-1: nada, o no vale)
+lee_col:
+        push ecx
+        push edx
+        push esi
+        push edi
+.sp:
+        cmp byte [esi], ' '
+        jne .c
+        inc esi
+        jmp .sp
+.c:
+        mov edi, pt_txt
+        mov ecx, 3
+.c1:
+        lodsb
+        cmp al, ' '
+        jbe .c2
+        stosb
+        dec ecx
+        jnz .c1
+.c2:
+        mov word [edi], '1'
+        mov esi, pt_txt
+        call lee_ref
+        mov eax, ecx
+        jnc .x
+        mov eax, -1
+.x:
+        pop edi
+        pop esi
+        pop edx
+        pop ecx
+        ret
+
 ; ---- Formato > Ancho de columna: el de las columnas elegidas, en letras ----
 ancho_col:
         mov ecx, [cur_col]
@@ -2068,6 +2809,7 @@ ancho_col:
         call sel_rect
         mov ecx, [r_c1]
 .c:
+        call des_ancho
         mov [col_an+ecx*2], ax
         inc ecx
         cmp ecx, [r_c2]
@@ -2092,6 +2834,7 @@ simbolo:
         test eax, eax
         jz .x
         call instantanea
+        call des_moneda
         xor eax, eax
         mov [moneda_txt], eax
         mov [moneda_txt+4], eax
@@ -2143,6 +2886,13 @@ desp_col    resd 1                  ; la primera columna y la primera fila
 desp_fil    resd 1                  ; que se ven
 tec_may     resd 1                  ; las mayúsculas de la última tecla o clic
 edt_pos     resd 1                  ; el cursor de lo que se escribe
+edt_anc     resd 1                  ; y la otra punta de las letras elegidas (-1: ninguna)
+pt_ini      resd 1                  ; lo señalado: dónde está su referencia en lo
+pt_len      resd 1                  ; que se escribe, y cuánto ocupa
+pt_c1       resd 1                  ; de qué celda
+pt_f1       resd 1
+pt_c2       resd 1                  ; a cuál
+pt_f2       resd 1
 arr_col     resd 1                  ; la columna cuyo ancho se arrastra
 arr_x0      resd 1                  ; y dónde empieza
 forma       resd 1                  ; la forma del cursor del ratón
@@ -2151,9 +2901,12 @@ editando    resb 1                  ; se está escribiendo en la celda activa
 edt_modo    resb 1                  ; 1: las flechas mueven el cursor (F2)
 modif       resb 1                  ; hay cambios sin guardar
 arrastra    resb 1                  ; con el botón apretado: 1 celdas, 2 el
-                                    ; ancho de una columna, 3 columnas, 4 filas
+                                    ; ancho de una columna, 3 columnas, 4 filas,
+                                    ; 5 lo que se señala para una fórmula
+pt_activo   resb 1                  ; se está señalando una celda para la fórmula
             alignb 4
 num_txt     resb 16
+pt_txt      resb 20
 edt_buf     resb CEL_MAX + 4        ; lo que se escribe
 nombre      resb 80                 ; el nombre del archivo
 nom_tmp     resb 80

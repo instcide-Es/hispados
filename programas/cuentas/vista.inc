@@ -358,8 +358,8 @@ valor_celda:
 ;  Pintar
 ; =============================================================================
 pintar:
-        call calc_olvida            ; cada vez que se pinta se calcula de nuevo
-        mov ebp, [ven]
+        mov ebp, [ven]              ; (lo calculado sigue valiendo mientras no
+                                    ; cambie la hoja: ver «invalida»)
         HV dc_pintar
         call medidas
         call sel_rect
@@ -561,12 +561,56 @@ pinta_edt:
 .lf:
         COLOR C_TINTA
         HV dc_texto_n
+        call pinta_edt_sel
+        COLOR C_TINTA
         sub edx, edi                ; el cursor: una raya
         lea eax, [eax+edx*8]
         inc ebx
         mov ecx, 2
         mov edx, 14
         HV dc_rect
+        popad
+        ret
+
+; (interna) las letras elegidas de lo que se teclea, en petróleo con letra
+; clara: EAX=x EBX=y EDI=la primera letra que se ve ECX=cuántas se ven
+pinta_edt_sel:
+        pushad
+        mov esi, eax
+        mov ebp, ecx
+        call edt_sel                ; EAX=la primera ECX=cuántas
+        jz .x
+        lea edx, [eax+ecx]
+        cmp eax, edi                ; lo que de ellas se ve
+        jae .a1
+        mov eax, edi
+.a1:
+        add ebp, edi
+        cmp edx, ebp
+        jbe .a2
+        mov edx, ebp
+.a2:
+        sub edx, eax
+        jle .x
+        mov ecx, edx
+        mov edx, eax
+        sub edx, edi
+        lea esi, [esi+edx*8]        ; ESI=su x
+        COLOR C_PETROLEO
+        push eax
+        push ecx
+        mov eax, esi
+        shl ecx, 3
+        mov edx, 16
+        HV dc_rect
+        pop ecx
+        pop eax
+        COLOR C_CREMA
+        mov edx, esi
+        lea esi, [edt_buf+eax]
+        mov eax, edx
+        HV dc_texto_n
+.x:
         popad
         ret
 
@@ -947,6 +991,57 @@ pinta_celdas:
 .edita:
         cmp byte [editando], 0
         je .x
+        cmp byte [pt_activo], 0     ; lo señalado para la fórmula: un marco terracota
+        je .ed0
+        COLOR C_TERRACOTA
+        mov ecx, [pt_c1]
+        cmp ecx, [pt_c2]
+        jbe .p1
+        mov ecx, [pt_c2]
+.p1:
+        call col_x
+        call .recx
+        mov esi, eax
+        mov ecx, [pt_c1]
+        cmp ecx, [pt_c2]
+        jae .p2
+        mov ecx, [pt_c2]
+.p2:
+        inc ecx
+        call col_x
+        call .recx
+        mov edi, eax
+        mov edx, [pt_f1]
+        cmp edx, [pt_f2]
+        jbe .p3
+        mov edx, [pt_f2]
+.p3:
+        call fil_y
+        call .recy
+        mov ebp, ebx
+        mov edx, [pt_f1]
+        cmp edx, [pt_f2]
+        jae .p4
+        mov edx, [pt_f2]
+.p4:
+        inc edx
+        call fil_y
+        call .recy
+        mov edx, ebx
+        sub edx, ebp
+        jle .ed0
+        mov ecx, edi
+        sub ecx, esi
+        jle .ed0
+        mov eax, esi
+        mov ebx, ebp
+        HV dc_marco
+        inc eax
+        inc ebx
+        sub ecx, 2
+        sub edx, 2
+        HV dc_marco
+.ed0:
         mov ecx, [cur_col]          ; lo que se teclea, sobre la celda (y sobre
         call col_x                  ; las de su derecha, si no cabe)
         cmp eax, ROT_AN
@@ -1060,6 +1155,50 @@ pinta_fila:
         inc ecx
         jmp .c
 .x:
+        mov ecx, [desp_col]         ; y los bordes de las celdas que se ven (y el
+        test ecx, ecx               ; de la derecha de la que queda justo antes)
+        jz .b0
+        dec ecx
+.b0:
+        call col_x
+.b:
+        cmp ecx, NCOL
+        jae .bx
+        cmp eax, [gx1]
+        jge .bx
+        movzx edi, word [col_an+ecx*2]
+        lea edx, [esi+ecx]
+        mov dx, [cel_fmt+edx*2]
+        test dx, F_BABA | F_BDER
+        jz .bs
+        COLOR C_TINTA
+        push ecx
+        test dx, F_BABA
+        jz .b1
+        push ebx
+        push edx
+        add ebx, CEL_AL
+        lea ecx, [edi+1]
+        mov edx, 1
+        HV dc_rect
+        pop edx
+        pop ebx
+.b1:
+        test dx, F_BDER
+        jz .b2
+        push eax
+        add eax, edi
+        mov ecx, 1
+        mov edx, CEL_AL + 1
+        HV dc_rect
+        pop eax
+.b2:
+        pop ecx
+.bs:
+        add eax, edi
+        inc ecx
+        jmp .b
+.bx:
         popad
         ret
 

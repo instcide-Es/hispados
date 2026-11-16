@@ -181,6 +181,7 @@ guarda_como:
         call hvl_cad
 .f2:
         mov byte [edi], 0
+        mov byte [csv_avisado], 0
         popad
         jmp guarda_escribe
 .no:
@@ -191,6 +192,34 @@ guarda_como:
 ; escribe la hoja en [nombre]; CF=1 si no se guarda
 guarda_escribe:
         pushad
+        call es_csv                 ; un .CSV no guarda formatos ni anchos: si
+        jnz .abre                   ; los hay, se avisa (una vez por archivo)
+        cmp byte [csv_avisado], 0
+        jne .abre
+        mov edi, cel_fmt
+        mov ecx, NCEL
+        xor eax, eax
+        repe scasw
+        jne .avisa
+        mov edi, col_an
+        mov ecx, NCOL
+        mov ax, AN_NORMAL
+        repe scasw
+        je .abre
+.avisa:
+        mov ebp, [ven]
+        mov esi, t_csv_pierde
+        mov edi, t_cuentas
+        mov eax, DM_ACEPTAR_CANCELAR
+        HV dlg_mensaje
+        cmp eax, ID_ACEPTAR
+        je .av1
+        popad
+        stc
+        ret
+.av1:
+        mov byte [csv_avisado], 1
+.abre:
         mov esi, nombre
         call esc_abre
         jc .falla
@@ -610,6 +639,8 @@ fecha_auto:
         je .sp2
         test al, al
         jnz .x
+        mov eax, ebx
+        call des_celda
         or word [cel_fmt+ebx*2], FN_FECHA << F_NUM_D
 .x:
         popad
@@ -847,6 +878,12 @@ hoy_serie:
         pop ebx
         ret
 
+; un número al azar de 0 a 1 (sin llegar), en cienmillonésimas: para ALEATORIO()
+azar_num:
+        mov eax, CU_ESC
+        HV azar
+        ret
+
         section .bss
             alignb 4
 esc_h       resd 1                  ; el archivo que se escribe,
@@ -858,6 +895,7 @@ car_mango   resd 1
 car_h       resd 1
 rl          resb RL_TAM             ; los registros de una interrupción
 esc_mal     resb 1                  ; algo no se ha podido escribir
+csv_avisado resb 1                  ; ya se ha dicho que el .CSV pierde los formatos
 car_com     resb 1                  ; al abrir un CSV: dentro de unas comillas
 car_ini     resb 1                  ; (detrás de car_com) al principio de una celda
             alignb 4
