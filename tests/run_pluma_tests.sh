@@ -271,5 +271,32 @@ sys.exit(0 if ok else 1)
 PY
 then ok "TABLA.PLU: cada fila, un párrafo con sus celdas; detrás, un párrafo normal"; else ko "TABLA.PLU no es lo esperado"; xxd $T/tabla.plu | head -12; fi
 
+echo "== Pluma: la ortografía =="
+reabre ''
+# el diccionario ocupa medio disquete: se quitan los tamaños de letra que esta parte no usa
+mdel -i $T/f.img ::HISPADOS/PROGS/TIPOS24.DAT ::HISPADOS/PROGS/TIPOS32.DAT ::TABLA.PLU ::TIPOS.PLU ::LISTA.PLU 2>/dev/null
+mcopy -o -i $T/f.img programas/comun/DICCIO.DAT ::HISPADOS/PROGS/DICCIO.DAT || ko "no cabe el diccionario en el disquete de la prueba"
+mdel -i $T/f.img ::ORTO.PLU 2>/dev/null
+{ arranca
+  escribe "Esto es una prueva de ortografia y Rescoldito"; aparca; shot o1
+  tecla ctrl-home f7; sleep 2; shot o2; tecla ret; sleep 2      # «prueva»: la primera propuesta
+  shot o3; tecla ret; sleep 2                                   # «ortografia»: lo mismo
+  shot o4; clic 490 401; sleep 2                                # «Rescoldito»: Añadir
+  shot o5; tecla ret; sleep 1; aparca; shot o6                  # ha terminado
+  tecla ctrl-g; sleep 1.2; escribe "orto"; tecla ret; sleep 2
+  sal; } | run 200 -vga std
+chk $T/o6.ppm busca 80 151 90 166 0 9 "Esto es una prueba de ortografía y Rescoldito"
+chk $T/o5.ppm busca 150 250 650 310 0 8 "Ha terminado la revisión de la ortografía."
+muestra o1 pluma_faltas; muestra o2 pluma_orto; muestra o4 pluma_orto_propia; muestra o6 pluma_orto_fin
+mcopy -n -i $T/f.img ::ORTO.PLU $T/orto.plu 2>/dev/null
+if python3 - $T/orto.plu <<'PY'
+import sys,struct
+d=open(sys.argv[1],'rb').read()
+n=struct.unpack_from('<I',d,8)[0]
+sys.exit(0 if d[12:12+n].decode('cp437')=='Esto es una prueba de ortografía y Rescoldito\n' else 1)
+PY
+then ok "ORTO.PLU: las dos faltas, corregidas con la primera propuesta"; else ko "ORTO.PLU no es lo esperado"; xxd $T/orto.plu | head -5; fi
+if [ "$(mtype -i $T/f.img ::HISPADOS/PROGS/PROPIAS.TXT 2>/dev/null | tr -d '\r\n')" = "Rescoldito" ]; then ok "PROPIAS.TXT: la palabra añadida queda guardada"; else ko "PROPIAS.TXT no lleva la palabra añadida"; fi
+
 rm -rf $T
 exit $fail

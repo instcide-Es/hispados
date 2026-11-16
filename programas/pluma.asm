@@ -139,6 +139,8 @@ O_IMPRIMIRG equ 178                 ; imprimir como se ve
 O_PRELIM    equ 179                 ; vista preliminar: la página, entera
 O_TABLA     equ 180                 ; insertar una tabla
 O_SALTO     equ 181                 ; insertar un salto de página
+O_ORTO      equ 182                 ; revisar la ortografía
+O_ORTO_VER  equ 183                 ; marcar o no las faltas al escribir
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -314,6 +316,12 @@ plu_menu:
         db "Copiar &formato", 0
         dw 0xFFFF
         db "&Herramientas", 0
+        dw O_ORTO
+        db "&Ortografía...            F7", 0
+        dw O_ORTO_VER
+        db "&Marcar las faltas al escribir", 0
+        dw 0
+        db 0
         dw O_RESUMEN
         db "&Contar palabras...", 0
         dw 0xFFFF
@@ -343,6 +351,22 @@ dlg_tipo:
         PLANTILLA HV_c_lista, t_nada, E_HIJA | E_TABULA, 16, 12, 204, 244, 60
         PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 20, 268, 90, 26, ID_ACEPTAR
         PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 120, 268, 90, 26, ID_CANCELAR
+        dd 0
+; ---- diálogo: la ortografía (Cambiar, Omitir y Añadir acaban el diálogo con
+;      su número, que es menor que 16) ----
+ID_CAMBIAR  equ 3
+ID_OMITIR   equ 4
+ID_ANADIR   equ 5
+dlg_orto:
+        PLANTILLA HV_c_dialogo, t_d_orto, E_DIALOGO, 0, 0, 304, 312, 0
+        PLANTILLA HV_c_estatico, t_o_no, E_HIJA, 16, 12, 270, 18, 100
+        PLANTILLA HV_c_estatico, or_pal, E_HIJA, 16, 32, 270, 18, 101
+        PLANTILLA HV_c_estatico, t_o_prop, E_HIJA, 16, 58, 270, 18, 102
+        PLANTILLA HV_c_lista, t_nada, E_HIJA | E_TABULA, 16, 78, 270, 132, 60
+        PLANTILLA HV_c_boton, t_o_cambiar, E_HIJA | E_TABULA | BS_DEFECTO, 16, 220, 84, 26, ID_CAMBIAR
+        PLANTILLA HV_c_boton, t_o_omitir, E_HIJA | E_TABULA, 106, 220, 84, 26, ID_OMITIR
+        PLANTILLA HV_c_boton, t_o_anadir, E_HIJA | E_TABULA, 196, 220, 90, 26, ID_ANADIR
+        PLANTILLA HV_c_boton, t_o_cerrar, E_HIJA | E_TABULA, 106, 252, 84, 26, ID_CANCELAR
         dd 0
 ; ---- diálogo: el estilo del párrafo ----
 dlg_est:
@@ -387,6 +411,7 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
             dd 316, 24, ic_marcas, O_MARCAS, n_marcas, 1
             dd 348, 64, t_b_estilo, O_ESTILO, n_estilo, BT_TEXTO
             dd 416, 24, ic_hoja, O_TABLA, n_tabla, BT_ICONO
+            dd 442, 24, ic_orto, O_ORTO, n_orto, BT_ICONO
             dd 0, 0, 0, 0, 0, 0
 botones     dd 6, 96, t_nada, O_TIPO, n_tipo, 0
             dd 106, 36, t_nada, O_TAM, n_tam, 0
@@ -419,6 +444,7 @@ n_deshacer  db "Deshacer (Ctrl+Z)", 0
 n_rehacer   db "Rehacer lo deshecho (Ctrl+Y)", 0
 n_marcas    db "Mostrar u ocultar los espacios y las marcas de párrafo", 0
 t_b_estilo  db "Estilo", 0
+n_orto      db "Ortografía: repasa el documento y propone correcciones (F7)", 0
 n_tabla     db "Insertar una tabla", 0
 n_estilo    db "Estilo del párrafo: Normal, títulos, cita...", 0
 n_tipo      db "Tipo de letra: pulse para elegirlo de la lista", 0
@@ -485,6 +511,17 @@ t_f_cur     db "Cursiva", 0
 t_f_sub     db "Subrayado", 0
 t_f_color   db "Color:", 0
 t_d_tipo    db "Tipo de letra", 0
+t_d_orto    db "Ortografía", 0
+t_o_no      db "No está en el diccionario:", 0
+t_o_prop    db "Propuestas:", 0
+t_o_nada    db "(sin propuestas)", 0
+t_o_cambiar db "Cambiar", 0
+t_o_omitir  db "Omitir", 0
+t_o_anadir  db "Añadir", 0
+t_o_cerrar  db "Cerrar", 0
+t_orto_fin  db "Ha terminado la revisión de la ortografía.", 0
+t_e_dic     db "No está el diccionario (DICCIO.DAT, al lado de Pluma).", 0
+t_propias   db "PROPIAS.TXT", 0
 t_tabla     db "Insertar una tabla", 0
 t_q_cols    db "¿Cuántas columnas? (de 1 a 8)", 0
 t_q_filas   db "¿Cuántas filas? (de 1 a 40)", 0
@@ -550,6 +587,9 @@ firma       db "PLUMA1", 26, 0      ; el principio de un .PLU (8 octetos)
 entrada:
         cld
         call tl_cargar              ; los tipos de letra (ESI=ruta del módulo)
+        call ort_cargar             ; y el diccionario
+        mov byte [orto_ver], 1
+        call propias_lee
         mov [param], edi
         mov esi, hijos
         call hvl_clases
@@ -562,6 +602,8 @@ entrada:
         mov esi, dlg_tam
         call hvl_clases
         mov esi, dlg_est
+        call hvl_clases
+        mov esi, dlg_orto
         call hvl_clases
         call doc_vacio
         call pon_titulo
@@ -951,6 +993,10 @@ orden_haz:
         je tabla
         cmp ecx, O_SALTO
         je salto
+        cmp ecx, O_ORTO
+        je ortografia
+        cmp ecx, O_ORTO_VER
+        je orto_ver_cambia
         mov eax, ecx
         sub eax, O_IZQ
         cmp eax, 3
@@ -1558,6 +1604,11 @@ tecla:
         je .supr
         cmp ecx, TC_TAB
         je .tab
+        cmp ecx, TC_F1 + 6          ; F7
+        jne .f5
+        mov ecx, O_ORTO
+        jmp orden
+.f5:
         cmp ecx, TC_F1 + 4          ; F5
         jne .f3
         mov ecx, O_IRA
@@ -2150,6 +2201,292 @@ es_salto:
         mov eax, [lin_ini+edi*4]
         cmp byte [txt+eax], SALTO
         pop eax
+        ret
+; =============================================================================
+;  La ortografía (programas/comun/ortografia.inc y DICCIO.DAT)
+; =============================================================================
+; AL=carácter -> ZF=1 si es una letra (de la página 437)
+es_letra:
+        cmp al, 'A'
+        jb .no
+        cmp al, 'Z'
+        jbe .si
+        cmp al, 'a'
+        jb .no
+        cmp al, 'z'
+        jbe .si
+        cmp al, 128
+        jb .no
+        cmp al, 165
+        jbe .si
+        cmp al, 225
+        je .si
+.no:
+        push eax
+        or eax, 1                   ; (ZF=0)
+        pop eax
+        ret
+.si:
+        cmp al, al
+        ret
+; EAX=desde dónde, EDX=hasta dónde -> la primera palabra mal escrita: EAX=su
+; principio y EBX=su final; CF=1 si no hay ninguna
+ort_busca:
+        push ecx
+        push esi
+.w:
+        cmp eax, edx
+        jae .no
+        push eax
+        mov al, [txt+eax]
+        call es_letra
+        pop eax
+        je .pal
+        inc eax
+        jmp .w
+.pal:
+        mov ebx, eax                ; hasta donde llega la palabra
+.e:
+        inc ebx
+        cmp ebx, [n]
+        jae .e1
+        push eax
+        mov al, [txt+ebx]
+        call es_letra
+        pop eax
+        je .e
+.e1:
+        lea esi, [txt+eax]
+        mov ecx, ebx
+        sub ecx, eax
+        call ort_palabra
+        jc .mala
+        mov eax, ebx
+        jmp .w
+.mala:
+        pop esi
+        pop ecx
+        clc
+        ret
+.no:
+        pop esi
+        pop ecx
+        stc
+        ret
+; Herramientas > Marcar las faltas al escribir: sí o no
+orto_ver_cambia:
+        xor byte [orto_ver], 1
+        jmp inval
+; ---- Herramientas > Ortografía (F7): desde el cursor, palabra por palabra;
+;      de cada una que no conoce, enseña las propuestas y se puede cambiar,
+;      dejar como está o añadir a las palabras propias ----
+ortografia:
+        cmp dword [ort_hay], 0
+        jne .hay
+        mov esi, t_e_dic
+        jmp aviso
+.hay:
+        mov eax, [cur]
+        call fila_ini.palabra       ; (desde el principio de la palabra del cursor)
+.sig:
+        mov edx, [n]
+        call ort_busca
+        jc .fin
+        mov [anc], eax
+        mov [cur], ebx
+        mov [or_a], eax
+        mov [or_b], ebx
+        lea esi, [txt+eax]          ; la palabra, para el diálogo, y sus propuestas
+        mov ecx, ebx
+        sub ecx, eax
+        push ecx
+        push esi
+        mov edi, or_pal
+        cmp ecx, 40
+        jbe .cp
+        mov ecx, 40
+.cp:
+        rep movsb
+        mov byte [edi], 0
+        pop esi
+        pop ecx
+        mov edi, or_sug
+        mov edx, 8
+        call ort_sugerir
+        mov [or_nsug], eax
+        call tras_mover             ; que se vea, elegida
+        mov ebp, [ven]
+        mov esi, dlg_orto
+        mov edi, dlg_orto + P_TAM
+        mov ebx, orto_gancho
+        xor edx, edx
+        HV dlg_modal
+        cmp eax, ID_CAMBIAR
+        je .cambia
+        cmp eax, ID_OMITIR
+        je .omite
+        cmp eax, ID_ANADIR
+        je .anade
+        mov dword [anc], -1         ; Cerrar
+        jmp inval
+.anade:
+        mov esi, [or_a]
+        mov ecx, [or_b]
+        sub ecx, esi
+        add esi, txt
+        call ort_propia
+        call propias_guarda
+.omite:
+        mov eax, [or_b]
+        jmp .sig
+.cambia:
+        cmp dword [or_nsug], 0
+        je .omite
+        call instantanea
+        mov eax, [or_a]             ; con el formato de la que había
+        mov cl, [atr+eax]
+        mov ch, [tip+eax]
+        push ecx
+        mov ebx, [or_b]
+        call borra
+        pop ecx
+        mov [at_act], cl
+        mov [tip_act], ch
+        movzx esi, byte [dl_tipo]
+        shl esi, 6
+        add esi, or_sug
+.c:
+        lodsb
+        test al, al
+        jz .cf
+        call escribe1
+        jmp .c
+.cf:
+        call cambio
+        mov eax, [cur]
+        jmp .sig
+.fin:
+        mov dword [anc], -1
+        call inval
+        mov esi, t_orto_fin
+        jmp aviso
+; el gancho: la lista, con las propuestas
+orto_gancho:
+        cmp eax, DM_INICIO
+        je .ini
+        cmp eax, WM_COMMAND
+        jne .no
+        cmp cx, 60                  ; la lista: doble clic o Intro, cambiar
+        jne .boton
+        shr ecx, 16
+        cmp ecx, LN_DOBLE
+        jne .no
+        mov eax, WM_COMMAND
+        mov ecx, ID_CAMBIAR
+        xor edx, edx
+        HV msg_enviar
+        jmp .no
+.boton:
+        cmp ecx, ID_CAMBIAR
+        jne .no
+        pushad
+        mov byte [dl_tipo], 0
+        mov ecx, 60
+        HV ven_hija_id
+        mov ebp, eax
+        mov eax, LM_SELEC
+        HV msg_enviar
+        test eax, eax
+        js .b1
+        cmp eax, [or_nsug]
+        jae .b1
+        mov [dl_tipo], al
+.b1:
+        popad
+        jmp .no
+.ini:
+        pushad
+        mov ecx, 60
+        HV ven_hija_id
+        mov ebp, eax
+        mov dword [tg_i], 0
+        cmp dword [or_nsug], 0
+        jne .i1
+        mov edx, t_o_nada
+        mov eax, LM_ANADIR
+        HV msg_enviar
+        jmp short .i2
+.i1:
+        mov edx, [tg_i]
+        shl edx, 6
+        add edx, or_sug
+        mov eax, LM_ANADIR
+        HV msg_enviar
+        inc dword [tg_i]
+        mov eax, [tg_i]
+        cmp eax, [or_nsug]
+        jb .i1
+.i2:
+        xor ecx, ecx
+        mov eax, LM_PONER_SELEC
+        HV msg_enviar
+        popad
+.no:
+        xor eax, eax
+        ret
+; las palabras propias del usuario: PROPIAS.TXT, al lado del módulo
+propias_ruta:
+        push esi
+        push edi
+        push eax
+        mov edi, [tl_ruta_fin]
+        mov esi, t_propias
+.c:
+        lodsb
+        stosb
+        test al, al
+        jnz .c
+        pop eax
+        pop edi
+        pop esi
+        ret
+propias_lee:
+        pushad
+        cmp dword [ort_hay], 0
+        je .x
+        call propias_ruta
+        mov esi, tl_ruta
+        mov edi, fbuf
+        mov ecx, 4096
+        call hvl_leer
+        mov ecx, eax
+        mov esi, fbuf
+        call ort_propias_poner
+.x:
+        popad
+        ret
+propias_guarda:
+        pushad
+        call propias_ruta
+        call ort_propias_ptr        ; -> ESI=el texto ECX=octetos
+        mov edx, esi
+        mov esi, tl_ruta
+        call hvl_escribir
+        popad
+        ret
+
+; (interna) EAX=sitio -> EAX=el principio de su palabra
+fila_ini.palabra:
+        test eax, eax
+        jz .px
+        push eax
+        mov al, [txt+eax-1]
+        call es_letra
+        pop eax
+        jne .px
+        dec eax
+        jmp fila_ini.palabra
+.px:
         ret
 ; (interna) EAX=sitio -> EAX=el principio de su párrafo
 fila_ini:
@@ -4680,7 +5017,7 @@ pinta_linea:
         mov dword [g_mapa], m_vineta
         call pl_letra
         mov dword [g_mapa], 0
-        jmp short .texto
+        jmp .texto
 .numero:
         mov edi, num_txt            ; «12.», acabando cuatro puntos antes del texto
         call hvl_num
@@ -4701,6 +5038,38 @@ pinta_linea:
         dec ecx
         jnz .nd
 .texto:
+        ; las faltas de ortografía de la línea: se apunta dónde están
+        mov byte [pl_hay_faltas], 0
+        cmp byte [orto_ver], 0
+        je .sin_orto
+        cmp byte [pl_solo_buf], 0   ; (en el papel no se marcan)
+        jne .sin_orto
+        cmp dword [ort_hay], 0
+        je .sin_orto
+        mov edi, pl_falta
+        mov ecx, 640 / 4
+        xor eax, eax
+        rep stosd
+        mov eax, [m_s]
+.of:
+        mov edx, [m_e]
+        call ort_busca
+        jc .sin_orto
+        mov byte [pl_hay_faltas], 1
+        mov ecx, eax
+.om:
+        mov edx, ecx
+        sub edx, [m_s]
+        cmp edx, 640
+        jae .om1
+        mov byte [pl_falta+edx], 1
+.om1:
+        inc ecx
+        cmp ecx, ebx
+        jb .om
+        mov eax, ebx
+        jmp .of
+.sin_orto:
         mov esi, [m_s]
         mov ebx, [m_x0]             ; EBX=la x de la letra
         mov dword [m_jn], 0
@@ -4742,7 +5111,7 @@ pinta_linea:
         cmp al, ' '
         jne .sel
         mov dword [g_mapa], m_punto
-        jmp short .gris
+        jmp .gris
 .calderon:
         mov dword [g_mapa], m_calderon
         mov byte [g_atr], 0
@@ -4756,7 +5125,7 @@ pinta_linea:
 .cal1:
         call pl_letra
         mov dword [g_mapa], 0
-        jmp short .copia
+        jmp .copia
 .gris:
         mov byte [g_atr], 0
         mov byte [g_color], C_PIEDRA
@@ -4772,6 +5141,36 @@ pinta_linea:
         je .copia
         call pl_letra
         mov dword [g_mapa], 0
+        cmp byte [pl_hay_faltas], 0 ; una falta: puntos granates por debajo
+        je .sin_falta
+        mov eax, esi
+        sub eax, [m_s]
+        cmp eax, 640
+        jae .sin_falta
+        cmp byte [pl_falta+eax], 0
+        je .sin_falta
+        mov eax, [m_al]             ; (dos filas bajo la línea base)
+        lea eax, [eax+eax*2]
+        shr eax, 2
+        add eax, 2
+        cmp eax, [m_al]
+        jae .sin_falta
+        imul eax, PAG_AN
+        lea edi, [lbuf+eax+ebx]
+        mov ecx, [g_an]
+        mov eax, ebx
+.fp:
+        cmp eax, PAG_AN
+        jae .sin_falta
+        test al, 1
+        jz .fp1
+        mov byte [edi], C_GRANATE
+.fp1:
+        inc edi
+        inc eax
+        dec ecx
+        jnz .fp
+.sin_falta:
         add ebx, [g_an]
         inc esi
         jmp .c
@@ -5000,6 +5399,7 @@ pl_letra:
 
 %include "tipos.inc"
 %include "barra.inc"
+%include "ortografia.inc"
 %include "hvplib.inc"
 
 FBUF_TAM    equ 3 * MAX_TXT + 24
@@ -5035,6 +5435,9 @@ al_act      resd 1
 tg_modo     resb 1
 pl_solo_buf resb 1
 m_tabla     resb 1
+orto_ver    resb 1                  ; se marcan las faltas al escribir
+pl_hay_faltas resb 1
+or_pal      resb 44
 doc_viejo   resb 1
 vp_on       resb 1                  ; se ve la vista preliminar
 ig_marcas   resb 1
@@ -5064,6 +5467,9 @@ pl_fy       resd 1
 pl_y0       resd 1
 pl_gordo    resd 1
 vp_x        resd 1
+or_a        resd 1                  ; la palabra que se revisa: principio y final
+or_b        resd 1
+or_nsug     resd 1
 m_tx        resd 1                  ; una fila de tabla: la x por la que se va
 m_ncel      resd 1
 m_cols      resd 1
@@ -5114,6 +5520,9 @@ clip_tip    resb MAX_TXT + 4
 pega_txt    resb MAX_TXT + 4
 fbuf        resb FBUF_TAM + 4
 ig_banda    resb PAG_AN * 8
+pl_falta    resb 640                ; de cada letra de la línea: 1 si es de una falta
+or_sug      resb 8 * 64             ; las propuestas
+            ORTO_BSS
 vp_buf      resb (PAG_AN / 2) * 32
 lbuf        resb PAG_AN * 64
             alignb 4

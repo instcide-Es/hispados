@@ -7,7 +7,7 @@ y está escrito en ensamblador, como el resto del sistema.
 | Programa | Para qué | Estado |
 |---|---|---|
 | **Pluma** | procesador de textos | en uso |
-| **Cuentas** | hoja de cálculo | en uso; se amplía |
+| **Cuentas** | hoja de cálculo (rangos, formatos, funciones, gráficos) | en uso |
 | **Facturas** | facturas emitidas y recibidas | en uso |
 | **Publicaciones** | panfletos, carteles, folletos | en marcha |
 | **Presentaciones** | diapositivas | en proyecto |
@@ -28,6 +28,9 @@ todos lo incluyen.
     Los iconos son nuestros, de 16x16; los dibuja `tools/iconos.py`.
   - Las órdenes propias de un programa, sin icono evidente, van con texto.
   - Al pasar el ratón por un botón, el pie dice lo que hace.
+- **`ortografia.inc`** y `DICCIO.DAT`: el corrector de español (ver `ORTOGRAFIA.md`):
+  dice si una palabra está bien, propone correcciones y lleva las palabras propias
+  del usuario (`PROPIAS.TXT`).
 - **`tipos.inc`** y `TIPOS*.DAT`: los tipos de letra (veinte, en seis tamaños;
   ver `TIPOS-DE-LETRA.md`). Un documento hecho en un programa se ve con la
   misma letra en otro.
