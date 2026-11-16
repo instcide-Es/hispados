@@ -16,7 +16,7 @@ import os, subprocess, sys, tempfile
 
 RAIZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 INCS = [('programas/comun', 'desinfla.inc'), ('programas/lector', 'pdf.inc'), ('programas/lector', 'letras.inc'),
-        ('programas/lector', 'nombres.inc'), ('programas/lector', 'contenido.inc'), ('programas/lector', 'texto.inc')]
+        ('programas/lector', 'nombres.inc'), ('programas/lector', 'contenido.inc'), ('programas/lector', 'texto.inc'), ('programas/lector', 'imagen.inc')]
 
 ARNES = r'''
         bits 32
@@ -106,6 +106,21 @@ _start:
         test ecx, ecx
         jz .texto
         push ecx
+        movzx eax, word [ebx+IT_CLIP]   ; su recorte, delante: «K x0 y0 x1 y1»
+        test eax, eax
+        jz .sin_k
+        shl eax, 4
+        lea esi, [cl_tab+eax]
+        mov al, 'K'
+        call sal_car
+        mov ecx, 4
+.k:
+        lodsd
+        call sal_num
+        dec ecx
+        jnz .k
+        call sal_nl
+.sin_k:
         movzx eax, byte [ebx+IT_TIPO]
         mov al, [letras_it+eax]
         call sal_car
@@ -147,6 +162,20 @@ _start:
         dec ecx
         jnz .g
 .i2:
+        cmp byte [ebx+IT_TIPO], ITT_IMAGEN  ; su miniatura: «ancho alto» y los puntos, en otra línea
+        jne .i2b
+        mov esi, [ebx+IT_TXT]
+        test esi, esi
+        jz .i2b
+        lodsd
+        mov ecx, eax
+        call sal_num
+        lodsd
+        imul ecx, eax
+        call sal_num
+        call sal_nl
+        call sal_n
+.i2b:
         cmp byte [ebx+IT_TIPO], ITT_TEXTO
         jne .i3
         movzx eax, word [ebx+IT_FU]
@@ -322,6 +351,7 @@ alm_tam     dd ALM_TAM
 %include "nombres.inc"
 %include "contenido.inc"
 %include "texto.inc"
+%include "imagen.inc"
 
         section .bss
 buscar  resd 1
@@ -333,6 +363,7 @@ sal_buf resb 65536
         LETRAS_BSS
         CONTENIDO_BSS
         TEXTO_BSS
+        IMAGEN_BSS
 arch    resb ARCH_MAX
 almacen resb ALM_TAM
 '''
@@ -382,6 +413,7 @@ class Nucleo:
             return
         self.codigo = r.returncode
         d, p = r.stdout, 0
+        pend = None
 
         def linea():
             nonlocal p
@@ -409,9 +441,19 @@ class Nucleo:
                     p += n + 1
                 elif c[0] == b'HALLA':
                     self.pags[-1].halla.append((int(c[1]), int(c[2]), int(c[3])))
+                elif c[0] == b'K':
+                    pend = tuple(int(x) / 65536 for x in c[1:5])
                 elif c[0] in (b'T', b'R', b'L', b'I', b'X', b'G'):
                     v = [int(x) for x in c[1:]]
                     cosa = [c[0].decode()] + [x / 65536 for x in v[:4]] + v[4:7]
+                    if c[0] == b'I':
+                        if len(v) >= 9:     # la miniatura: (ancho, alto, puntos)
+                            n = v[7] * v[8]
+                            cosa.append((v[7], v[8], d[p:p + n]))
+                            p += n + 1
+                        else:
+                            cosa.append(None)
+                    recorte, pend = pend, None
                     if c[0] == b'L':
                         cosa.append(v[7] / 65536)
                     elif c[0] == b'G':
@@ -426,6 +468,7 @@ class Nucleo:
                         cosa.append(d[p:p + n].decode('cp437'))
                         cosa.append(v[7])
                         p += n + 1
+                    cosa.append(recorte)        # el último: su recorte (x0, y0, x1, y1) o None
                     self.pags[-1].cosas.append(tuple(cosa))
         except (ValueError, IndexError):
             self.codigo = -998          # la salida se corta: el programa ha caído

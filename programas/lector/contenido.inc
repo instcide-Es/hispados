@@ -25,9 +25,12 @@
 ;
 ;  Órdenes que entiende: q Q cm w; g G rg RG k K sc scn SC SCN; m l c v y h re;
 ;  S s f F f* B B* b b* n; BT ET Tf Td TD Tm T* Tj TJ ' " Tc Tw Tz TL Ts Tr; Do
-;  (imágenes y formularios, que son contenido dentro del contenido) y BI (una
-;  imagen metida en el contenido). Los recortes (W), los degradados (sh) y lo
-;  demás se pasa por alto. Las curvas se hacen con ocho rayas.
+;  (imágenes y formularios, que son contenido dentro del contenido), BI (una
+;  imagen metida en el contenido) y W, W* (el recorte, si es un rectángulo
+;  derecho: cada elemento lleva en IT_CLIP el suyo, de cl_tab). De cada imagen
+;  se hace una miniatura (imagen.inc) que va en IT_TXT (0: no se sabe pintar);
+;  en IT_BAND, cómo cae (II_*). Los degradados (sh) y lo demás se pasa por
+;  alto. Las curvas se hacen con ocho rayas.
 ;
 ;  Los trozos de texto seguidos de una misma línea se juntan en uno (así un
 ;  texto escrito letra a letra queda entero, para buscar en él y guardarlo).
@@ -45,6 +48,11 @@ IT_AL       equ 16                  ; alto; texto: tamaño (raya: la y del otro 
 IT_TXT      equ 20                  ; texto: sus letras (raya: grosor; figura: vértices)
 IT_N        equ 24                  ; (dw) cuántas letras (figura: cuántos trozos)
 IT_FU       equ 26                  ; (dw) la fuente del PDF de donde sale
+IT_CLIP     equ 28                  ; (dw) su recorte: un rectángulo de cl_tab (0: ninguno)
+II_ESPEJO   equ 1                   ; imagen (en IT_BAND): columnas al revés
+II_VUELTA   equ 2                   ; filas al revés
+II_GIRADA   equ 4                   ; las columnas van de arriba abajo
+MAX_CLIP    equ 255
 ITT_TEXTO   equ 1
 ITT_RECT    equ 2
 ITT_LINEA   equ 3
@@ -84,7 +92,8 @@ G_TL        equ 44
 G_TS        equ 48
 G_FU        equ 52                  ; la ficha de la fuente (0: ninguna)
 G_TF        equ 56                  ; el tamaño
-G_TAM       equ 60
+G_CLIP      equ 60                  ; el recorte en vigor (número en cl_tab)
+G_TAM       equ 64
 
 %macro CONTENIDO_BSS 0
             alignb 4
@@ -95,12 +104,16 @@ it_n        resd 1
 tx_tope     resd 1
 po_tope     resd 1
 ci_res      resd 2                  ; los recursos en vigor
+ci_recorta  resd 1                  ; se ha pedido «W»: el trazado, al acabar, recorta
+cl_n        resd 1
+cl_tab      resd (MAX_CLIP + 1) * 4 ; los recortes: x0, y0, x1, y1 (en la página)
 ci_ops      resd 1                  ; órdenes que aún se pueden ejecutar en esta página
 ci_formas   resd 1                  ; y formularios
 pg_filtro   resb 32                 ; el filtro desconocido de AV_FILTRO
 ci_prof     resd 1
 ci_lim      resd 1
 ci_salto    resd 1
+ci_bi       resd 1
 ci_mt       resd 6
 ci_m        resd 6
 ci_tm       resd 6                  ; la matriz del texto
@@ -142,6 +155,7 @@ k_matrix    db "Matrix", 0
 n_image     db "Image", 0
 n_form      db "Form", 0
 p_id        db "ID", 0
+f_f1        db "F", 0
 ; los pesos de una curva de Bézier en t = 1/8 ... 8/8 (suman 512)
 bz_pesos    dw 343, 147, 21, 1,   216, 216, 72, 8,   125, 225, 135, 27,   64, 192, 192, 64
             dw 27, 135, 225, 125,   8, 72, 216, 216,   1, 21, 147, 343,   0, 0, 0, 512
@@ -157,7 +171,7 @@ ci_ordenes:
         dd 'BT', o_BT,   'Tf', o_Tf,   'Td', o_Td,   'TD', o_TD,   'Tm', o_Tm,   'T*', o_Tast
         dd 'Tj', o_Tj,   'TJ', o_TJ,   0x27, o_comilla,   0x22, o_comillas
         dd 'Tc', o_Tc,   'Tw', o_Tw,   'Tz', o_Tz,   'TL', o_TL,   'Ts', o_Ts
-        dd 'Do', o_Do,   'BI', o_BI
+        dd 'Do', o_Do,   'BI', o_BI,   'W', o_W,   'W*', o_W
         dd 0
 
 ; EAX x EDX (16.16) -> EAX
@@ -360,6 +374,8 @@ it_nuevo:
         mov ecx, IT_TAM / 4
         rep stosd
         pop edi
+        mov eax, [eg+G_CLIP]
+        mov [edi+IT_CLIP], ax
         pop ecx
         pop eax
         clc
@@ -387,6 +403,11 @@ pdf_pagina:
         mov [px_prof], ebx
         mov [ci_salto], ebx
         mov [pg_filtro], bl
+        mov [ci_recorta], ebx
+        mov [cl_n], ebx
+        mov eax, [ar_fin0]          ; (las imágenes de la página anterior, fuera)
+        mov [ar_fin], eax
+        mov eax, [esp+28]
         mov dword [ci_ops], MAX_OPS
         mov dword [ci_formas], MAX_FORMAS
         mov dword [tx_tope], tx_pool
@@ -1046,7 +1067,78 @@ o_curva:
         ret
 
 o_n:
+        cmp dword [ci_recorta], 0
+        je .n
+        mov dword [ci_recorta], 0
+        call ci_recorte
+.n:
         mov dword [pt_n], 0
+        ret
+o_W:
+        mov dword [ci_recorta], 1
+        ret
+
+; (interna) el trazado pasa a ser el recorte, si es un rectángulo derecho (lo
+; que hacen casi todos los programas para recortar una imagen o una celda);
+; con otra forma no se recorta
+ci_recorte:
+        pushad
+        mov esi, pt_tab
+        mov ecx, [pt_n]
+        cmp ecx, 4
+        jb .x
+        call ci_rellena.trozo
+        cmp edx, ecx
+        jne .x
+        call ci_rellena.es_rect
+        jc .x
+        mov eax, [esi]              ; dos esquinas opuestas
+        mov ecx, [esi+2*PT_TAM]
+        cmp eax, ecx
+        jle .o1
+        xchg eax, ecx
+.o1:
+        mov ebx, [esi+4]
+        mov edx, [esi+2*PT_TAM+4]
+        cmp ebx, edx
+        jle .o2
+        xchg ebx, edx
+.o2:
+        mov esi, [eg+G_CLIP]        ; dentro del que ya hubiera
+        test esi, esi
+        jz .nuevo
+        shl esi, 4
+        add esi, cl_tab
+        cmp eax, [esi]
+        jge .i1
+        mov eax, [esi]
+.i1:
+        cmp ebx, [esi+4]
+        jge .i2
+        mov ebx, [esi+4]
+.i2:
+        cmp ecx, [esi+8]
+        jle .i3
+        mov ecx, [esi+8]
+.i3:
+        cmp edx, [esi+12]
+        jle .nuevo
+        mov edx, [esi+12]
+.nuevo:
+        mov esi, [cl_n]
+        cmp esi, MAX_CLIP
+        jae .x
+        inc esi
+        mov [cl_n], esi
+        mov [eg+G_CLIP], esi
+        shl esi, 4
+        add esi, cl_tab
+        mov [esi], eax
+        mov [esi+4], ebx
+        mov [esi+8], ecx
+        mov [esi+12], edx
+.x:
+        popad
         ret
 o_S:
         call ci_traza
@@ -1399,10 +1491,62 @@ ci_nombre_op:
 ; (interna) el sitio de una imagen: el cuadrado de lado 1, con la matriz en vigor
 ci_imagen:
         pushad
+        test eax, eax               ; EAX=su miniatura (0: no se sabe pintar)
+        jnz .hay
         or dword [pg_avisos], AV_IMAGEN
+.hay:
         call it_nuevo
         jc .x
+        mov [edi+IT_TXT], eax
         mov byte [edi+IT_TIPO], ITT_IMAGEN
+        ; cómo cae: la fila de arriba de la imagen va de (0,1) a (1,1)
+        xor eax, eax
+        mov ebx, 0x10000
+        call ci_punto
+        mov esi, eax                ; ESI, EBP=arriba a la izquierda
+        mov ebp, ebx
+        mov eax, 0x10000
+        mov ebx, 0x10000
+        call ci_punto
+        sub eax, esi                ; EAX, EBX=hacia dónde van las columnas
+        sub ebx, ebp
+        mov ecx, eax
+        mov edx, ebx
+        test ecx, ecx
+        jns .a1
+        neg ecx
+.a1:
+        test edx, edx
+        jns .a2
+        neg edx
+.a2:
+        cmp edx, ecx
+        ja .girada
+        shr eax, 31                 ; II_ESPEJO si van hacia la izquierda
+        push eax
+        xor eax, eax
+        xor ebx, ebx
+        call ci_punto
+        pop eax
+        cmp ebx, ebp                ; II_VUELTA si la fila de abajo queda arriba
+        jge .pon_b
+        or al, II_VUELTA
+        jmp .pon_b
+.girada:
+        mov eax, ebx
+        shr eax, 31
+        or al, II_GIRADA
+        push eax
+        xor eax, eax
+        xor ebx, ebx
+        call ci_punto
+        mov ebx, eax
+        pop eax
+        cmp ebx, esi
+        jge .pon_b
+        or al, II_VUELTA
+.pon_b:
+        mov [edi+IT_BAND], al
         mov dword [edi+IT_X], 0x7FFFFFFF
         mov dword [edi+IT_Y], 0x7FFFFFFF
         mov dword [edi+IT_AN], 0x80000000
@@ -1469,6 +1613,30 @@ o_Do:
 .imagen:
         pop ebp
         pop esi
+        call ar_marca
+        push eax
+        push esi
+        push ebp
+        call pdf_flujo
+        pop ebp
+        pop esi
+        jc .im_no
+        mov [im_dat], eax
+        mov [im_ndat], ecx
+        mov eax, [ci_res]
+        mov [im_res], eax
+        mov eax, [ci_res+4]
+        mov [im_res+4], eax
+        mov al, [eg+G_REL]
+        call im_hace
+        jnc .im_si
+.im_no:
+        xor eax, eax
+.im_si:
+        mov ebx, eax
+        pop eax
+        call ar_suelta
+        mov eax, ebx
         jmp ci_imagen
 .forma:
         ; un formulario: contenido con su matriz y, si los trae, sus recursos
@@ -1561,6 +1729,7 @@ o_Do:
 
 ; BI ... ID datos EI: una imagen dentro del contenido. Se salta entera
 o_BI:
+        mov dword [ci_bi], 0
         mov esi, [esp+8]            ; (el cursor que guardó ci_ejecuta)
         mov ebp, [esp+4]
 .b:
@@ -1573,7 +1742,63 @@ o_BI:
         call px_salta
         jmp .b
 .id:
+        ; lo de entre «BI» e «ID» es su diccionario, sin los «<<»: se copia con ellos
+        push esi
+        mov ecx, esi
+        mov esi, [esp+12]           ; (el cursor de ci_ejecuta: detrás de «BI»)
+        sub ecx, esi
+        cmp ecx, CAD_TAM - 8
+        ja .id_no
+        mov edi, ci_cad
+        mov ax, '<<'
+        stosw
+        rep movsb
+        mov ax, '>>'
+        stosw
+        pop esi
         add esi, 3                  ; «ID» y un blanco
+        mov [im_dat], esi
+        mov eax, ebp
+        sub eax, esi
+        jbe .e
+        mov [im_ndat], eax
+        push esi
+        push ebp
+        mov esi, ci_cad
+        mov ebp, edi
+        mov edi, k_filter           ; con filtros dentro del contenido, no
+        call px_dic
+        jnc .id_filtro
+        mov esi, ci_cad
+        mov edi, f_f1
+        call px_dic
+        jnc .id_filtro
+        mov eax, [ci_res]
+        mov [im_res], eax
+        mov eax, [ci_res+4]
+        mov [im_res+4], eax
+        mov esi, ci_cad
+        mov al, [eg+G_REL]
+        call im_hace
+        jc .id_filtro
+        mov [ci_bi], eax
+        pop ebp
+        pop esi
+        mov eax, [im_fila]          ; los datos miden lo que dicen: «EI», detrás
+        mul dword [im_h]
+        add eax, esi
+        jc .e
+        cmp eax, ebp
+        ja .e
+        mov esi, eax
+        jmp .e
+.id_filtro:
+        pop ebp
+        pop esi
+        jmp .e
+.id_no:
+        pop esi
+        add esi, 3
 .e:
         ; «EI» entre blancos (o al final)
         lea eax, [esi+2]
@@ -1600,6 +1825,7 @@ o_BI:
         mov esi, ebp
 .fin:
         mov [ci_salto], esi
+        mov eax, [ci_bi]
         jmp ci_imagen
 
 ; -----------------------------------------------------------------------------
@@ -1921,7 +2147,15 @@ ci_muestra:
         movzx ecx, word [ebp+F_DW]  ; el ancho y la letra de un código doble
         xor ebx, ebx
         cmp eax, T0_COD
-        jae .c_an
+        jb .c_tabla
+        test byte [ebp+F_BAND], FB_IDENT
+        jz .c_an
+        push eax
+        call uni_437
+        mov ebx, eax
+        pop eax
+        jmp .c_an
+.c_tabla:
         mov ebx, [ebp+F_T0AN]
         test ebx, ebx
         jz .c_dw
@@ -2125,6 +2359,9 @@ ci_muestra:
         jne .m_no
         test byte [edi+IT_BAND], IB_GIRO
         jnz .m_no
+        mov eax, [eg+G_CLIP]
+        cmp ax, [edi+IT_CLIP]
+        jne .m_no
         mov al, [eg+G_REL]
         cmp al, [edi+IT_COLOR]
         jne .m_no
@@ -2146,12 +2383,13 @@ ci_muestra:
 .m1:
         cmp eax, 0x4000             ; un cuarto de punto
         ja .m_no
-        mov eax, [ci_x]             ; el hueco: de -0,3 a +0,12 del tamaño
-        sub eax, [edi+IT_X]
+        mov eax, [ci_x]             ; el hueco: de -0,3 a +0,1 del tamaño (un
+        sub eax, [edi+IT_X]         ; espacio de TeX apretado mide 0,17)
         sub eax, [edi+IT_AN]
         mov ebx, [ci_tam]
         mov edx, ebx
-        shr edx, 3
+        imul edx, 26
+        sar edx, 8
         cmp eax, edx
         jg .m_no
         imul ebx, 5

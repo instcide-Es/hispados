@@ -27,7 +27,8 @@
 #  E. los PDF de verdad, en la pantalla;
 #  F. curvas, figuras rellenas, texto girado, páginas giradas, formularios,
 #     codificaciones, los otros filtros, PDF 1.5 y una actualización incremental.
-# Con LECTOR_SOLO=ABCDEF (las letras que se quieran) se pasan solo esas partes
+#  G. imágenes (RGB, grises, índices, máscaras, giradas), la que no se sabe y recortes.
+# Con LECTOR_SOLO=ABCDEFG (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con LECTOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat e ImageMagick (como las demás).
@@ -35,7 +36,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/LECTOR.HVP
-SOLO=${LECTOR_SOLO:-NABCDEF}
+SOLO=${LECTOR_SOLO:-NABCDEFG}
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/lector.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "LECTOR.HVP no se ensambla"; exit 1; }
 P=$T/pdf
 python3 tests/tools/hazpdf.py $P > /dev/null || { ko "hazpdf.py no hace los PDF"; exit 1; }
@@ -69,6 +70,7 @@ reabre 'A:\FACTURA.PDF'
   shot a1
   clic 211 69; sleep 0.8; clic 260 239; aparca; shot a2           # Ver > Tamaño real
   clic 750 528; aparca; shot a2v; clic 734 544; aparca; shot a2h; tecla home left   # las flechas de las barras: abajo y a la derecha
+  ir 400 300; mon "mouse_button 1" 0.3; ir 380 260; mon "mouse_button 0" 0.3; aparca; shot a2d; tecla home left   # se arrastra la hoja con el ratón
   tecla slash; shot a3; tecla bracket_right bracket_right; shot a4   # - y dos veces +
   clic 211 69; sleep 0.8; shot m2; clic 260 279; aparca; shot a5  # Ver > Página entera
   clic 211 69; sleep 0.8; clic 260 259; aparca                    # Ver > Ancho de página
@@ -88,7 +90,7 @@ reabre 'A:\FACTURA.PDF'
   sal; } | run 280 -vga std
 chk $T/a1.ppm titulo 40 34 activa "Lector - A:\\FACTURA.PDF"
 pie a1 "Página 1 de 2    86 %    A:\\FACTURA.PDF"
-avisa a1 "Las imágenes no se muestran: van como recuadros grises."
+avisa a1 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."
 # a lo ancho de la página (x = 51 + 1,1457 puntos; y = 136 + 1,1457 puntos desde arriba)
 chk $T/a1.ppm rgb 300 280 CCFFFF "la banda del título (0,8 0,95 1)"
 chk $T/a1.ppm rgb 60 280 FFFFFF "la hoja, blanca"
@@ -109,6 +111,7 @@ puntos $T/a2.ppm 300 345 20 15 000000 20 20 "al 100 %: la raya de arriba de la t
 puntos $T/a2.ppm 576 360 15 10 000000 10 10 "al 100 %: la raya vertical"
 chk $T/a2v.ppm igual 60 140 600 364 $T/a2.ppm 60 172 0     # la barra vertical: 32 puntos hacia abajo
 chk $T/a2h.ppm igual 60 140 600 364 $T/a2v.ppm 92 140 0    # la horizontal: 32 hacia la derecha
+chk $T/a2d.ppm igual 60 140 600 300 $T/a2.ppm 80 180 0      # arrastrada 20 a la izquierda y 40 arriba
 pie a3 "Página 1 de 2    75 %    A:\\FACTURA.PDF"
 pie a4 "Página 1 de 2    125 %    A:\\FACTURA.PDF"
 pie a5 "Página 1 de 2    35 %    A:\\FACTURA.PDF"
@@ -116,7 +119,7 @@ chk $T/a5.ppm px 60 300 8 "página entera: a la izquierda de la hoja, crema"
 chk $T/a5.ppm rgb 392 300 FFFFFF "página entera: la hoja, en el centro"
 chk $T/a5.ppm px 720 300 8 "página entera: a la derecha, crema"
 pie a6 "Página 2 de 2    170 %    A:\\FACTURA.PDF"
-chk $T/a6.ppm nobusca 46 106 56 114 13 8 "Las imágenes no se muestran: van como recuadros grises."
+chk $T/a6.ppm nobusca 46 106 56 114 13 8 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."
 puntos $T/a6.ppm 80 130 300 60 tinta 300 4000 "la segunda página: «Apaisada», grande"
 pie a7 "Página anterior (RePág)"
 pie a8 "Página 1 de 2    86 %    A:\\FACTURA.PDF"
@@ -202,6 +205,7 @@ reabre 'A:\CARTA.PDF'
 rm -f $T/prn.txt
 { arranca
   shot g0
+  tecla ctrl-c; sleep 0.8; tecla ctrl-b; sleep 1; tecla ctrl-v; sleep 0.8; shot g0c; tecla esc; sleep 0.8   # copiar la página y pegarla en el cuadro de buscar
   clic 83 69; sleep 0.8; clic 150 139; sleep 1.5; shot g1; tecla ret; sleep 2.5; shot g2; tecla ret; sleep 1   # Guardar el texto de la página
   tecla ctrl-p; sleep 5; shot g3; tecla ret; sleep 1                                   # imprimir la página
   tecla ctrl-a; sleep 1.2; escribe "fuentes.pdf"; tecla ret; sleep 2.5
@@ -211,6 +215,7 @@ rm -f $T/prn.txt
   clic 83 69; sleep 0.8; clic 150 235; sleep 8; shot g6; tecla ret; sleep 1            # Imprimir el texto del documento
   clic 83 69; sleep 0.8; clic 150 139; sleep 1.5; escribe "fuentes.pdf"; tecla ret; sleep 1.5; shot g7; tecla ret; sleep 1   # el nombre del PDF: no
   sal; } | PARALELO=file:$T/prn.txt run 280 -vga std
+puntos $T/g0c.ppm 250 292 290 18 0 400 700 "lo copiado, pegado en el cuadro de buscar (se ve el final: 35 letras)"
 chk $T/g1.ppm titulo 222 150 activa "Guardar el texto como"
 puntos $T/g1.ppm 243 211 80 16 12 600 1100 "el nombre propuesto (CARTA.TXT: se comprueba al guardar), elegido en añil"
 dice g2 "El texto se ha guardado."
@@ -255,7 +260,7 @@ except Exception as e:
 sys.exit(0 if ok else 1)
 PY
 then ok "CARTA.TXT, TODO.TXT y la impresora: el texto, letra a letra"; else ko "el texto guardado o impreso no es el esperado"; fi
-muestra g1 lector_guardar; muestra g0 lector_carta
+muestra g1 lector_guardar; muestra g0 lector_carta; muestra g0c lector_copiar
 fi
 
 if [[ $SOLO == *D* ]]; then
@@ -288,7 +293,7 @@ dice n4 "Este archivo no es un documento PDF."
 dice n5 "No se ha podido abrir el archivo."
 dice n6 "El documento está dañado y no se puede leer:"
 pie p1 "Página 1 de 5    86 %    nosabe.pdf"
-avisa p1 "Aviso: página con una compresión que Lector no conoce (LZWDecode); no se puede mostrar."
+avisa p1 "Aviso: página con una compresión que Lector no conoce (JBIG2Decode): no se muestra."
 puntos $T/p1.ppm 60 140 660 380 tinta 0 0 "la página que no se puede mostrar, en blanco (sin basura)"
 pie p2 "Página 2 de 5    86 %    nosabe.pdf"
 avisa p2 "Aviso: hay texto que no se puede leer (letra con codificación propia): va en gris."
@@ -303,7 +308,7 @@ avisa p4 "Aviso: la página está dañada; puede faltar una parte."
 puntos $T/p4.ppm 130 190 300 24 tinta 100 1500 "de la página dañada, lo que se salva: «Hasta aqui llega»"
 pie p5 "Página 5 de 5    86 %    nosabe.pdf"
 avisa p5 "Aviso: la página está dañada; puede faltar una parte."
-dice p6 "Esta página no tiene texto que se pueda guardar o imprimir."
+dice p6 "Esta página no tiene texto que se pueda guardar, copiar o imprimir."
 pie q1 "Página 1 de 3    86 %    cortado.pdf"
 chk $T/q1.ppm nobusca 46 106 56 114 13 8 "Aviso: la página está dañada; puede faltar una parte."
 puntos $T/q1.ppm 130 168 300 24 tinta 100 1500 "el PDF cortado: la primera página, entera"
@@ -404,6 +409,31 @@ pie h5 "Página 1 de 1    86 %    espacios.pdf"
 muestra f1 lector_graficos; muestra f2 lector_graficos_entera; muestra f3 lector_girada90; muestra f4 lector_girada180
 muestra f5 lector_girada270; muestra f6 lector_caja; muestra h1 lector_codif; muestra h2 lector_filtros; muestra h4 lector_incremental
 muestra h5 lector_espacios
+fi
+
+if [[ $SOLO == *G* ]]; then
+echo "== Lector G: imágenes, máscaras y recortes =="
+prepara $HVP
+mete $P/IMAGENES.PDF $P/RECORTES.PDF
+reabre 'A:\IMAGENES.PDF'
+{ arranca
+  shot j1
+  tecla ctrl-a; sleep 1.2; escribe "recortes.pdf"; tecla ret; sleep 2.5; shot j2
+  sal; } | run 150 -vga std
+# a lo ancho, con aviso: x = 51 + 1,1457 puntos; y = 136 + 1,1457 puntos desde arriba
+pie j1 "Página 1 de 1    86 %    A:\\IMAGENES.PDF"
+avisa j1 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."
+chk $T/j1.ppm rgb 140 250 FF0000 "la imagen RGB de 2 x 2: rojo arriba a la izquierda" rgb 210 250 00FF00 "verde a la derecha" \
+  rgb 140 290 0000FF "azul abajo" rgb 210 290 FFFFFF "y blanco"
+chk $T/j1.ppm rgb 280 270 000000 "grises de 2 bits: negro" rgb 310 270 585858 "gris oscuro" rgb 340 270 A5A5A5 "gris claro" rgb 370 270 FFFFFF "blanco"
+chk $T/j1.ppm rgb 130 490 FFFFFF "la máscara deja ver la hoja" rgb 155 490 0000FF "y pinta con el color de relleno" rgb 130 515 0000FF "(abajo, al revés)"
+chk $T/j1.ppm px 170 450 15 "la JPEG, en su recuadro gris"
+chk $T/j1.ppm rgb 310 480 0000FF "la imagen dada la vuelta: azul arriba" rgb 310 520 FF0000 "y rojo abajo"
+pie j2 "Página 1 de 1    86 %    recortes.pdf"
+chk $T/j2.ppm rgb 180 300 0000FF "dentro del recorte, azul" rgb 150 300 FFFFFF "fuera, a la izquierda, la hoja" \
+  rgb 180 270 FFFFFF "fuera, arriba" rgb 250 385 FF0000 "el recorte de dentro, rojo" rgb 420 385 FFFFFF "que no se sale del primero"
+puntos $T/j2.ppm 165 280 230 55 000000 100 3000 "el texto de dentro del recorte, en negro"
+muestra j1 lector_imagenes; muestra j2 lector_recortes
 fi
 
 rm -rf $T

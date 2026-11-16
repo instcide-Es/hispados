@@ -33,6 +33,9 @@ tests/tools/lector_pdf.py contra lo que dice el núcleo de Lector:
   ('ilegible', pag, x, y)      hay un trozo ilegible ahí
   ('figura', pag, nvertices)   hay una figura rellena con esos vértices
   ('ncosas', pag, clase, n)    cuántas cosas de esa clase hay
+  ('mini', pag, x, y, an, al, ancho, alto, puntos, giro)  hay una imagen ahí con esa
+                               miniatura (puntos: los colores de la paleta; None: no se sabe pintar)
+  ('recorte', pag, clase, texto o color[, x0, y0, x1, y1])  esa cosa lleva ese recorte (o ninguno)
   ('halla', buscar, pag, veces)
 Las páginas se cuentan desde 0; las medidas van en puntos, con la «y» desde
 arriba de la página (como las deja Lector).
@@ -82,7 +85,49 @@ def rl(d):
     return bytes(s) + b'\x80'
 
 
+def lzw(d, early=1):
+    """LZWDecode: códigos de 9 a 12 bits, el de más peso primero."""
+    bits, acc, nb, sal = 9, 0, 0, bytearray()
+
+    def pon(c):
+        nonlocal acc, nb
+        acc = (acc << bits) | c
+        nb += bits
+        while nb >= 8:
+            nb -= 8
+            sal.append((acc >> nb) & 255)
+    tabla = {bytes([i]): i for i in range(256)}
+    sig, w = 258, b''
+    pon(256)
+    for c in d:
+        wc = w + bytes([c])
+        if wc in tabla:
+            w = wc
+            continue
+        pon(tabla[w])
+        tabla[wc] = sig
+        sig += 1
+        if sig - 1 + early >= (1 << bits) and bits < 12:
+            bits += 1
+        if sig >= 4094:
+            pon(256)
+            tabla = {bytes([i]): i for i in range(256)}
+            sig, bits = 258, 9
+        w = bytes([c])
+    if w:
+        pon(tabla[w])
+        # (el que lee añade su entrada con un código de retraso: el tamaño cambia igual)
+        sig += 1
+        if sig - 1 + early >= (1 << bits) and bits < 12:
+            bits += 1
+    pon(257)
+    if nb:
+        sal.append((acc << (8 - nb)) & 255)
+    return bytes(sal)
+
+
 FILTROS = {
+    'LZWDecode': lzw,
     'FlateDecode': lambda d: zlib.compress(d, 9),
     'ASCIIHexDecode': lambda d: b'\n'.join(d.hex().upper().encode()[i:i + 72] for i in range(0, 2 * len(d), 72)) + b'>',
     'ASCII85Decode': lambda d: base64.a85encode(d, wrapcol=72) + b'~>',
@@ -473,9 +518,18 @@ def caso_filtros():
     tiff = b''.join(bytes((d[i + k] - (d[i + k - 1] if k else 0)) & 255 for k in range(16)) for i in range(0, 64, 16))
     z = zlib.compress(tiff)
     cs.append(p.pon(p.nuevo(), ('<< /Length %d /Filter /FlateDecode /DecodeParms << /Predictor 2 /Columns 16 >> >>\nstream\n' % len(z)).encode() + z + b'\nendstream'))
+    # LZW: largo, para que los códigos pasen de 9 a 12 bits y la tabla se vacíe; y con /EarlyChange 0
+    import random
+    rnd = random.Random(7)
+    relleno = ''.join('%% %s\n' % ' '.join(rnd.choice(['uno', 'dos', 'tres', 'catorce', 'x', 'yz', str(rnd.randint(0, 99999))]) for _ in range(12)) for _ in range(900))
+    cs.append(p.flujo(relleno + txt(10, 'con LZW'), filtros=('LZWDecode',)))
+    z = lzw((relleno + txt(11, 'con LZW sin adelanto')).encode(), 0)
+    cs.append(p.pon(p.nuevo(), ('<< /Length %d /Filter /LZWDecode /DecodeParms << /EarlyChange 0 >> >>\nstream\n' % len(z)).encode() + z + b'\nendstream'))
+    cs.append(p.flujo(txt(12, 'ASCII85 y LZW'), filtros=('ASCII85Decode', 'LZWDecode')))
     raiz = p.paginas([cs], {'F1': f1})
     nombres = ['en hexadecimal', 'en ASCII85', 'con RunLength: ' + 'a' * 48, 'ASCII85 y Flate', 'hexadecimal, RunLength y Flate',
-               'largo por referencia', 'largo equivocado', 'sin largo', 'con predictor de PNG', 'con predictor de TIFF']
+               'largo por referencia', 'largo equivocado', 'sin largo', 'con predictor de PNG', 'con predictor de TIFF',
+               'con LZW', 'con LZW sin adelanto', 'ASCII85 y LZW']
     e = [('error', 0), ('paginas', 1), ('sin_aviso', 0, 255), ('lineas', 0, [x for n in nombres for x in (n, '')][:-1])]
     e += [('texto', 0, t, 72, A4[1] - 780 + 20 * i, 10, MAQUINA) for i, t in enumerate(nombres)]
     return 'FILTROS', p.clasico(raiz), e
@@ -497,6 +551,7 @@ def caso_codif():
     pro = p.obj('<< /Type /Font /Subtype /TrueType /BaseFont /AAAAAA+Rara-Bold /FirstChar 1 /LastChar 34 /Widths [600 500 250 500 %s 700 700 700 %s 600 600 600] /FontDescriptor %d 0 R /ToUnicode %d 0 R >>' % ('0 ' * 11, '0 ' * 13, desc, tu))
     # compuesta: códigos de dos octetos = números de dibujo
     cmap0 = ('/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n1 begincodespacerange <0000> <FFFF> endcodespacerange\n'
+             '1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\n'        # (como mPDF: luego se pisa lo que haga falta)
              '3 beginbfchar\n<0003> <0020>\n<0100> <00D1>\n<0101> <20AC>\nendbfchar\n'
              '1 beginbfrange\n<0024> <003D> <0041>\nendbfrange\n1 beginbfrange\n<0044> <005D> <0061>\nendbfrange\nendcmap end end\n')
     tu0 = p.flujo(cmap0)
@@ -509,7 +564,7 @@ def caso_codif():
          'BT /Std 12 Tf 72 760 Td (`comillas\' \xa1ol\xe9! \xaeel \xd0 \xfb) Tj ET\n'                       # ‘comillas’ ¡ol(Ø)! fi-el — ß
          'BT /Dif 12 Tf 72 740 Td (c\001f\002 \003u AB\003C DE F G) Tj ET\n'                                # cáfé ñu ÑB... ¿ ú € fi ?
          'BT /Pro 12 Tf 72 720 Td <0102030400> Tj <101112> Tj < 20 21 22 > Tj ET\n'                         # Holá + ABC + ñ fi fl
-         'BT /T0 10 Tf 72 700 Td <002400250026000300440045004601000101> Tj <0FFF> Tj ET\n'                  # ABC abcÑ€ + uno sin letra
+         'BT /T0 10 Tf 72 700 Td <002400250026000300440045004601000101> Tj <0FFF> Tj <FB01> Tj ET\n'         # ABC abcÑ€ + uno sin letra + «fi» (U+FB01)
          'BT /Tex 10 Tf 72 680 Td (Texto de TeX: e\\014caz, \\013ores y o\\015cina \\\\as\\042) Tj ET\n')    # ligaduras fi, ff, fl y comillas“”
     c = p.flujo(s.encode('latin-1'))
     raiz = p.paginas([c], {'Mac': mac, 'Std': std, 'Dif': dif, 'Pro': pro, 'T0': t0, 'Tex': tex})
@@ -519,7 +574,7 @@ def caso_codif():
          ('texto', 0, "'comillas' ¡olO! fiel - ß", 72, H - 760, 12, IMPRENTA),
          ('texto', 0, 'cáfé ñu Ñ¿ñú EURfi ? G', 72, H - 740, 12, CLARO),
          ('texto', 0, 'HoláABCñfifl', 72, H - 720, 12, LLANO_N, (600 + 500 + 250 + 500 + 2100 + 1800) * 0.012),
-         ('texto', 0, 'ABC abcÑEUR?', 72, H - 700, 10, ROBLE, (700 * 3 + 300 + 600 + 610 + 620 + 800 * 2 + 500) / 100),
+         ('texto', 0, 'ABC abcÑEUR?fi', 72, H - 700, 10, ROBLE, (700 * 3 + 300 + 600 + 610 + 620 + 800 * 2 + 500 * 2) / 100),
          ('texto', 0, 'Texto de TeX: eficaz, ffores y oflcina "as"', 72, H - 680, 10, IMPRENTA)]
     return 'CODIF', p.clasico(raiz), e
 
@@ -551,7 +606,7 @@ def caso_no_sabe():
     en la 437 (página 3) y, en la 4, un contenido estropeado."""
     p = Pdf()
     f1 = p.fuente('Helvetica')
-    c1 = p.pon(p.nuevo(), b'<< /Length 20 /Filter /LZWDecode >>\nstream\n' + bytes(range(100, 120)) + b'\nendstream')
+    c1 = p.pon(p.nuevo(), b'<< /Length 20 /Filter /JBIG2Decode >>\nstream\n' + bytes(range(100, 120)) + b'\nendstream')
     desc = p.obj('<< /Type /FontDescriptor /FontName /AAAAAA+Propia /Flags 4 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 %d 0 R >>' % p.flujo(bytes(64), ' /Length1 64'))
     pro = p.obj('<< /Type /Font /Subtype /TrueType /BaseFont /AAAAAA+Propia /FirstChar 1 /LastChar 5 /Widths [500 500 500 500 500] /FontDescriptor %d 0 R >>' % desc)
     cid = p.obj('<< /Type /Font /Subtype /CIDFontType2 /BaseFont /BBBBBB+Otra /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor %d 0 R /DW 1000 >>' % desc)
@@ -589,7 +644,7 @@ def caso_graficos():
          '0 1 0 rg 100 500 m 200 500 l 200 560 l 100 560 l f\n'                  # un rectángulo hecho con rayas
          '0.5 0.5 0 rg 300 500 50 40 re 400 500 50 40 re f*\n'                   # dos rectángulos de una vez
          '0 g 100 400 m 180 400 l 140 460 l b\n'                                 # cerrar, rellenar y trazar
-         '50 300 m 60 310 l n 1 1 1 rg 0 0 10 10 re W n\n'                       # nada: se descarta
+         '50 300 m 60 310 l n q 1 1 1 rg 0 0 10 10 re W n Q\n'                   # nada: se descarta (y un recorte que se deshace)
          'q 1 0 0 1 50 100 cm /Fm1 Do Q q 0.5 0 0 0.5 300 100 cm /Fm1 Do Q\n'    # el mismo formulario, dos veces
          '0 g BT /F1 10 Tf 0 1 -1 0 500 300 Tm (Hacia arriba) Tj ET\n'           # texto girado
          'BT /F1 10 Tf -1 0 0 -1 500 200 Tm (Cabeza abajo) Tj ET\n')
@@ -716,6 +771,76 @@ def rotos():
     return casos
 
 
+def caso_imagenes():
+    """Imágenes: RGB, grises de 2 bits, 1 bit al revés, Indexed, CMYK, máscara,
+    una grande (se reduce), una dentro del contenido, una dada la vuelta y una
+    JPEG (que no se sabe: recuadro y aviso)."""
+    p = Pdf()
+    f1 = p.fuente('Helvetica')
+    im = lambda datos, dic, filtros=(): p.flujo(datos, ' /Type /XObject /Subtype /Image' + dic, filtros)
+    x = {'Rgb': im(bytes([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]), ' /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8', ('FlateDecode',)),
+         'G2': im(bytes([0b00011011]), ' /Width 4 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 2'),
+         'B1': im(bytes([0b10101010]), ' /Width 8 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 1 /Decode [1 0]', ('ASCIIHexDecode',)),
+         'Ind': im(bytes([0, 1, 2, 3]), ' /Width 2 /Height 2 /ColorSpace [/Indexed /DeviceRGB 3 <FF0000 00FF00 0000FF 808080>] /BitsPerComponent 8', ('RunLengthDecode',)),
+         'Cmyk': im(bytes([0, 255, 255, 0]), ' /Width 1 /Height 1 /ColorSpace /DeviceCMYK /BitsPerComponent 8', ('ASCII85Decode',)),
+         'Mas': im(bytes([0b10000000, 0b01000000]), ' /Width 2 /Height 2 /ImageMask true /BitsPerComponent 1'),
+         'Gra': im(bytes([128]) * (1300 * 4), ' /Width 1300 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8', ('LZWDecode',)),
+         'Icc': im(bytes([0, 0, 255, 255, 255, 0]), ' /Width 2 /Height 1 /ColorSpace /CsIcc /BitsPerComponent 8'),
+         'Jpg': im(b'\xff\xd8\xff\xe0' + bytes(40), ' /Width 8 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode')}
+    icc = p.flujo(bytes(64), ' /N 3')
+    s = ''.join('q 100 0 0 50 %d %d cm /%s Do Q\n' % (60 + 130 * (i % 4), 700 - 80 * (i // 4), n) for i, n in enumerate(x))
+    s += '0 0 1 rg q 40 0 0 40 60 500 cm /Mas Do Q\n'
+    s += 'q 100 0 0 -50 200 550 cm /Rgb Do Q q 0 50 -100 0 500 500 cm /Rgb Do Q\n'      # dada la vuelta; girada
+    s += 'q 60 0 0 60 60 400 cm BI /W 2 /H 2 /CS /G /BPC 8 ID \x00\xff\xff\x00 EI Q\n'
+    s += 'BT /F1 10 Tf 60 380 Td (Tras las im\xe1genes) Tj ET\n'
+    c = p.flujo(s.encode('latin-1'))
+    raiz = p.paginas([c], {'F1': f1}, mas_recursos=' /XObject << %s >> /ColorSpace << /CsIcc [/ICCBased %d 0 R] >>' % (
+        ' '.join('/%s %d 0 R' % kv for kv in x.items()), icc))
+    H = A4[1]
+    N = 255
+    sitio = lambda i: (60 + 130 * (i % 4), H - (700 - 80 * (i // 4)) - 50, 100, 50)
+    e = [('error', 0), ('paginas', 1), ('aviso', 0, AV_IMAGEN), ('ncosas', 0, 'I', 13),
+         ('mini', 0) + sitio(0) + (2, 2, bytes([196, 46, 21, 231]), 0),
+         ('mini', 0) + sitio(1) + (4, 1, bytes([16, 240, 247, 231]), 0),
+         ('mini', 0) + sitio(2) + (8, 1, bytes([16, 231] * 4), 0),
+         ('mini', 0) + sitio(3) + (2, 2, bytes([196, 46, 21, 244]), 0),
+         ('mini', 0) + sitio(4) + (1, 1, bytes([196]), 0),
+         ('mini', 0) + sitio(5) + (2, 2, bytes([N, 16, 16, N]), 0),                 # la máscara, con el relleno de entonces (negro)
+         ('mini', 0) + sitio(6) + (434, 2, bytes([244]) * 868, 0),                  # 1300 x 4, a un tercio
+         ('mini', 0) + sitio(7) + (2, 1, bytes([21, 226]), 0),                      # azul y amarillo (ICCBased de 3)
+         ('mini', 0) + sitio(8) + (0, 0, None, 0),                                  # la JPEG: sin miniatura
+         ('mini', 0, 60, H - 540, 40, 40, 2, 2, bytes([N, 21, 21, N]), 0),          # la máscara, en azul
+         ('mini', 0, 200, H - 550, 100, 50, 2, 2, bytes([196, 46, 21, 231]), 2),    # dada la vuelta
+         ('mini', 0, 400, H - 550, 100, 50, 2, 2, bytes([196, 46, 21, 231]), 5),    # girada un cuarto (las columnas, hacia arriba)
+         ('mini', 0, 60, H - 460, 60, 60, 2, 2, bytes([16, 231, 231, 16]), 0),      # la de dentro del contenido
+         ('texto', 0, 'Tras las imágenes', 60, H - 380, 10), ('no_texto', 0, 'EI')]
+    return 'IMAGENES', p.clasico(raiz), e
+
+
+def caso_recortes():
+    """Recortes: un rectángulo (W n), otro dentro de otro (W*), q/Q, y uno que
+    no es un rectángulo (no recorta)."""
+    p = Pdf()
+    f1 = p.fuente('Helvetica')
+    s = ('q 100 600 200 100 re W n 0 0 1 rg 0 0 600 800 re f BT /F1 10 Tf 110 650 Td 0 g (dentro del recorte) Tj ET\n'
+         'q 150 550 300 100 re W* n 1 0 0 rg 0 0 600 800 re f 0 0 m 600 800 l S Q\n'
+         'BT /F1 10 Tf 110 630 Td (otra vez el primero) Tj ET Q\n'
+         'BT /F1 10 Tf 110 500 Td (libre) Tj ET\n'
+         'q 100 300 m 200 300 l 150 400 l h W n BT /F1 10 Tf 110 350 Td (en un tri\xe1ngulo) Tj ET Q\n'
+         'q 300 300 100 50 re 0 1 0 rg W f BT /F1 10 Tf 310 320 Td (recorte y relleno) Tj ET Q\n')
+    c = p.flujo(s.encode('latin-1'))
+    raiz = p.paginas([c], {'F1': f1})
+    H = A4[1]
+    r1, r2, r3 = (100, H - 700, 300, H - 600), (150, H - 650, 300, H - 600), (300, H - 350, 400, H - 300)
+    e = [('error', 0), ('sin_aviso', 0, 255),
+         ('recorte', 0, 'R', 21) + r1, ('recorte', 0, 'T', 'dentro del recorte') + r1,
+         ('recorte', 0, 'R', 196) + r2, ('recorte', 0, 'L', 16) + r2,
+         ('recorte', 0, 'T', 'otra vez el primero') + r1,
+         ('recorte', 0, 'T', 'libre'), ('recorte', 0, 'T', 'en un triángulo'),
+         ('recorte', 0, 'R', 46), ('recorte', 0, 'T', 'recorte y relleno') + r3]
+    return 'RECORTES', p.clasico(raiz), e
+
+
 def caso_bomba():
     """Un formulario que se pinta a sí mismo diez veces (diez elevado a ocho
     con ocho niveles): Lector tiene que cortar a tiempo, y decirlo."""
@@ -742,7 +867,7 @@ def caso_muchas(n=4100):
 def casos():
     c = [caso_carta(), caso_fuentes(), caso_factura(), caso_moderno(), caso_moderno('MODERNO2', False), caso_incremental(),
          caso_filtros(), caso_codif(), caso_cifrado(), caso_cifrado15(), caso_no_sabe(), caso_graficos(), caso_largo(),
-         caso_espacios(), caso_bomba(), caso_muchas()]
+         caso_espacios(), caso_bomba(), caso_muchas(), caso_imagenes(), caso_recortes()]
     return c + rotos()
 
 

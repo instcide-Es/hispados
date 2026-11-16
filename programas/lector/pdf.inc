@@ -69,6 +69,12 @@ pdf_dat     resd 1                  ; el archivo, entero
 pdf_tam     resd 1
 ar_base     resd 1                  ; el almacén
 ar_fin      resd 1
+ar_fin0     resd 1                  ; el final de verdad (por arriba se piden las imágenes)
+lz_bits     resd 1
+lz_next     resd 1
+lz_prev     resd 1
+lz_early    resd 1
+lz_fin      resd 1
 ar_tope     resd 1                  ; lo que hay ocupado
 ar_fijo     resd 1                  ; hasta aquí, lo que dura mientras el documento
 pdf_npag    resd 1
@@ -113,6 +119,9 @@ fl_fila     resd 1
 fl_ant      resd 1
 fl_tmp      resd 4
 fl_filtro   resb 32                 ; el nombre del filtro que no se sabe
+lz_pref     resw 4096               ; LZW: de cada código, el anterior y su letra
+lz_suf      resb 4096
+lz_pila     resb 4100
 xr_t        resb MAX_OBJ            ; de cada objeto: 0 no se sabe, 1 en el archivo
             alignb 4                ; (a=dónde), 2 en un flujo de objetos (a=cuál,
 xr_a        resd MAX_OBJ            ; b=el cuánto), 3 ya en memoria (a=p, b=lím),
@@ -176,6 +185,9 @@ f_a85       db "ASCII85Decode", 0
 f_a852      db "A85", 0
 f_rl        db "RunLengthDecode", 0
 f_rl2       db "RL", 0
+f_lzw       db "LZWDecode", 0
+f_lzw2      db "LZW", 0
+k_early     db "EarlyChange", 0
 
 ; -----------------------------------------------------------------------------
 ;  El almacén
@@ -1249,6 +1261,12 @@ fl_aplica:
         mov edi, f_rl2
         call px_es_nombre
         je .rl
+        mov edi, f_lzw
+        call px_es_nombre
+        je .lzw
+        mov edi, f_lzw2
+        call px_es_nombre
+        je .lzw
         mov edi, fl_filtro          ; no se sabe: su nombre, para decirlo
         mov ecx, 32
         call px_copia_nombre
@@ -1382,6 +1400,149 @@ fl_aplica:
 .a4:
         sub edi, [fl_p]
         mov [fl_n], edi
+        jmp .bien
+.lzw:
+        ; LZW: códigos de 9 a 12 bits (el de más peso primero); 256 vacía la
+        ; tabla y 257 acaba. Con /EarlyChange 1 (lo normal) el código crece
+        ; una entrada antes
+        mov eax, 1
+        mov edi, k_early
+        cmp dword [fl_parm], 0
+        je .z0
+        call fl_parametro
+.z0:
+        mov [lz_early], eax
+        mov esi, [fl_p]
+        mov eax, esi
+        add eax, [fl_n]
+        mov [lz_fin], eax
+        mov edi, [ar_tope]
+        mov [fl_p], edi
+        xor ebx, ebx                ; EBX=bits leídos  EDX=cuántos
+        xor edx, edx
+.z_vacia:
+        mov dword [lz_bits], 9
+        mov dword [lz_next], 258
+        mov dword [lz_prev], -1
+.z:
+        mov ecx, [lz_bits]
+.z_mas:
+        cmp edx, ecx
+        jae .z_hay
+        cmp esi, [lz_fin]
+        jae .z_fin
+        shl ebx, 8
+        mov bl, [esi]
+        inc esi
+        add edx, 8
+        jmp .z_mas
+.z_hay:
+        sub edx, ecx
+        mov eax, ebx
+        xchg ecx, edx
+        shr eax, cl
+        xchg ecx, edx
+        mov ebp, 1
+        shl ebp, cl
+        dec ebp
+        and eax, ebp                ; EAX=el código
+        cmp eax, 256
+        je .z_vacia
+        cmp eax, 257
+        je .z_fin
+        mov ebp, [lz_prev]
+        cmp ebp, -1
+        jne .z_cadena
+        cmp eax, 255                ; el primero tras vaciar: una letra
+        ja .z_mal
+        cmp edi, [ar_fin]
+        jae .sin_sitio
+        stosb
+        mov [lz_prev], eax
+        jmp .z
+.z_cadena:
+        ; la cadena del código, al revés, a lz_pila
+        push eax
+        xor ecx, ecx                ; ECX=letras en la pila
+        cmp eax, [lz_next]
+        jb .z_anda
+        ja .z_mal1
+        mov eax, ebp                ; el que aún no existe: el anterior más su primera letra
+        inc ecx
+.z_anda:
+        cmp eax, 257
+        jbe .z_letra
+        cmp eax, [lz_next]
+        jae .z_mal1
+        cmp ecx, 4096
+        jae .z_mal1
+        mov ebp, eax
+        mov al, [lz_suf+ebp]
+        mov [lz_pila+ecx], al
+        inc ecx
+        movzx eax, word [lz_pref+ebp*2]
+        jmp .z_anda
+.z_letra:
+        cmp eax, 255
+        ja .z_mal1
+        mov [lz_pila+ecx], al       ; la primera letra de la cadena
+        inc ecx
+        mov ebp, [esp]
+        cmp ebp, [lz_next]
+        jne .z_saca
+        mov [lz_pila], al
+.z_saca:
+        push eax
+        mov eax, [ar_fin]
+        sub eax, edi
+        cmp ecx, eax
+        pop eax
+        ja .z_lleno
+.z_s1:
+        dec ecx
+        mov ah, [lz_pila+ecx]
+        mov [edi], ah
+        inc edi
+        test ecx, ecx
+        jnz .z_s1
+        ; una entrada nueva: el anterior más la primera letra de este
+        mov ecx, [lz_next]
+        cmp ecx, 4096
+        jae .z_sig
+        mov ebp, [lz_prev]
+        mov [lz_pref+ecx*2], bp
+        mov [lz_suf+ecx], al
+        inc ecx
+        mov [lz_next], ecx
+        add ecx, [lz_early]
+        mov eax, 1
+        push ecx
+        mov ecx, [lz_bits]
+        shl eax, cl
+        pop ecx
+        cmp ecx, eax
+        jb .z_sig
+        cmp dword [lz_bits], 12
+        jae .z_sig
+        inc dword [lz_bits]
+.z_sig:
+        pop eax
+        mov [lz_prev], eax
+        jmp .z
+.z_lleno:
+        pop eax
+        jmp .sin_sitio
+.z_mal1:
+        pop eax
+.z_mal:
+        mov dword [fl_parcial], 1   ; estropeado: lo que haya salido
+.z_fin:
+        sub edi, [fl_p]
+        mov [fl_n], edi
+        call fl_predictor
+        jc .roto
+        mov ecx, [fl_n]
+        call ar_pide
         jmp .bien
 .rl:
         mov esi, [fl_p]
@@ -1678,6 +1839,8 @@ pdf_abrir:
         mov eax, [ar_base]
         mov [ar_tope], eax
         mov [ar_fijo], eax
+        mov eax, [ar_fin]
+        mov [ar_fin0], eax
         xor eax, eax
         mov [pdf_npag], eax
         mov [pdf_reparado], eax

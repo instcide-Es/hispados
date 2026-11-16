@@ -98,6 +98,18 @@ def comprueba(nombre, n, esperado, hallados):
             bien = [k for k in pg.de(cl) if cerca(k[1], x) and cerca(k[2], y) and cerca(k[3], an) and cerca(k[4], al)
                     and (len(e) < 7 or k[5] == e[6])]
             res(bool(bien), d + ('' if bien else ' (hay: %s)' % '; '.join('%.1f,%.1f %.1fx%.1f c=%d' % k[1:6] for k in pg.de(cl))[:400]))
+        elif c == 'mini':
+            x, y, an, al, tw, th, pts, giro = e[2:10]
+            cand = [k for k in pg.de('I') if cerca(k[1], x) and cerca(k[2], y) and cerca(k[3], an) and cerca(k[4], al)]
+            bien = [k for k in cand if (k[8] is None and pts is None) or (k[8] is not None and pts is not None and k[8] == (tw, th, pts) and k[7] == giro)]
+            res(bool(bien), d[:70] + ('' if bien else ' (hay: %s)' % [(k[7], k[8] and (k[8][0], k[8][1], list(k[8][2][:12]))) for k in cand]))
+        elif c == 'recorte':
+            cl, que = e[2], e[3]
+            cand = [k for k in pg.de(cl) if (k[8] == que if cl == 'T' else k[5] == que)]
+            quiere = tuple(e[4:8]) if len(e) > 4 else None
+            bien = [k for k in cand if (k[-1] is None and quiere is None) or
+                    (k[-1] is not None and quiere is not None and all(cerca(a, b) for a, b in zip(k[-1], quiere)))]
+            res(bool(bien), d + ('' if bien else ' (hay: %s)' % [k[-1] for k in cand]))
         elif c == 'ilegible':
             res(any(cerca(k[1], e[2]) and cerca(k[2], e[3]) for k in pg.de('X')), d)
         elif c == 'figura':

@@ -45,6 +45,7 @@ FB_CURSIVA  equ 2
 FB_ILEGIBLE equ 4
 FB_DOS      equ 8                   ; códigos de dos octetos
 FB_FIJA     equ 16
+FB_IDENT    equ 32                  ; compuesta cuyo código es ya el Unicode de la letra
 
 TL_ROBLE    equ 1                   ; los tipos de programas/comun/tipos.inc
 TL_ROBLE_N  equ 2
@@ -1035,13 +1036,19 @@ fu_tounicode:
         call fu_pon
         jmp .b
 .t1:
-        mov edx, [fu_hi]
-        sub edx, ebx
-        cmp edx, T0_COD             ; (un tramo disparatado)
-        ja .b
+        test ebx, ebx               ; un solo tramo de 0000 a FFFF sobre 0000: el
+        jnz .t2                     ; código es el Unicode (lo hace mPDF); vale
+        test ecx, ecx               ; también para los que no caben en la tabla
+        jnz .t2
+        cmp dword [fu_hi], T0_COD
+        jb .t2
+        mov edx, [fu_slot]
+        or byte [edx+F_BAND], FB_IDENT
 .t2:
         cmp ebx, [fu_hi]
         ja .b
+        cmp ebx, T0_COD             ; (hay quien pone un solo tramo de 0000 a FFFF:
+        jae .b                      ; hasta donde se guarda)
         mov eax, ecx
         call uni_437
         mov dl, al

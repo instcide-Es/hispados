@@ -40,12 +40,20 @@
 ;  debajo de 8 puntos de pantalla las letras se encogen (se ve la mancha del
 ;  texto, no se lee); por debajo de 3, una raya gris.
 ;
-;  Lo que no hace (todavía): pintar las imágenes, los recortes y los
-;  degradados; el filtro LZW y los de imagen (DCT, CCITT, JBIG2, JPX); abrir
-;  documentos cifrados; rellenar formularios, enlaces y marcadores. Límites:
+;  Las imágenes sin comprimir o con Flate, LZW, RunLength, ASCII85 o
+;  ASCIIHex (grises, RGB, CMYK, con paleta, de 1 a 16 bits, y las máscaras)
+;  se pintan, reducidas a la paleta (programas/lector/imagen.inc); los
+;  recortes rectangulares (W, W*) se respetan; el texto de la página se copia
+;  al portapapeles (Ctrl+C) y la hoja se arrastra con el ratón.
+;
+;  Lo que no hace (todavía): las imágenes JPEG, JPEG 2000, fax y JBIG2 (van
+;  en un recuadro gris, con aviso), los recortes que no son un rectángulo y
+;  los degradados; abrir documentos cifrados; formularios, enlaces y
+;  marcadores; ordenar por columnas el texto que se guarda. Límites:
 ;  48 MB de archivo, 4.000 páginas y 32.768 objetos (si se pasa, lo dice y
 ;  enseña lo que cabe); de una página, 6.000 trozos y 128.000 letras. Necesita
-;  3,2 MB de memoria, más el archivo y de 0,75 a 6 MB de almacén.
+;  2,5 MB de memoria, más el mapa de puntos (lo que mida la pantalla), el
+;  archivo y de 1,25 a 7,25 MB de almacén, según el documento.
 ;
 ;  La prueba: tests/run_lector_tests.sh (el descompresor y el núcleo, fuera;
 ;  y el programa entero en QEMU).
@@ -57,8 +65,8 @@
 TB_AL       equ 30                  ; la barra de botones
 AVISO_AL    equ 20                  ; la franja del aviso de la página
 MARG        equ 8                   ; lo que se deja alrededor de la hoja
-VB_AN       equ 1024                ; lo más que mide la zona de lectura
-VB_AL       equ 768
+COPIA_MAX   equ 30000               ; letras que se copian al portapapeles
+ID_PUENTE   equ 900
 NUC_PILA    equ 48 * 1024           ; la pila del núcleo
 ARCH_MAX    equ 48 * 1024 * 1024    ; un PDF mayor no se intenta
 MAPA_N      equ 136
@@ -79,6 +87,7 @@ O_SALIR     equ 107
 O_CERRAR    equ 108
 O_BUSCAR    equ 111
 O_SIGUIENTE equ 112
+O_COPIAR    equ 113
 O_ANT       equ 121
 O_SIG       equ 122
 O_PRIMERA   equ 123
@@ -131,6 +140,7 @@ c_lector    dd lec_proc
 lec_plant:
         PLANTILLA c_lector, titulo, E_NORMAL, 40, 34, 720, 540, 0
 hijos:
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_OCULTA | ES_MULTI, 0, 0, 40, 40, ID_PUENTE
         PLANTILLA HV_c_barra, 0, E_HIJA, 0, 0, BD_AN, 50, ID_BARRA_V
         PLANTILLA HV_c_barra, 0, E_HIJA | BDS_HORIZ, 0, 0, 50, BD_AN, ID_BARRA_H
         dd 0
@@ -163,10 +173,14 @@ lec_menu:
         db "&Salir", 0
         dw 0xFFFF
         db "&Edición", 0
+        dw O_COPIAR
+        db "&Copiar el texto de la página  Ctrl+C", 0
+        dw 0
+        db 0
         dw O_BUSCAR
-        db "&Buscar...         Ctrl+B", 0
+        db "&Buscar...                     Ctrl+B", 0
         dw O_SIGUIENTE
-        db "Buscar si&guiente      F3", 0
+        db "Buscar si&guiente                  F3", 0
         dw 0xFFFF
         db "&Ver", 0
         dw O_ANT
@@ -253,10 +267,8 @@ ic_pag_sig:
 ; las ampliaciones fijas, en tantos por ciento (100 % = 96 puntos por pulgada)
 zooms       dd 25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400
 ZOOMS_N     equ 11
-; cuánto almacén se pide detrás del archivo: lo más que haya
-almacenes   dd 6 * 1024 * 1024, 3 * 1024 * 1024, 1536 * 1024, 768 * 1024, 0
 ; las órdenes de Ctrl+letra (de la A a la Z; 0: ninguna), como en Pluma
-ctrl_ord    db 0, O_ABRIR, O_BUSCAR, 0, 0, 0, 0, 0, 0, O_IRA, 0
+ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, 0, 0, 0, 0, 0, O_IRA, 0
             db 0, 0, 0, 0, 0, O_IMP_PAG, 0, 0, 0, 0
             db 0, 0, 0, 0, 0, 0
 
@@ -305,7 +317,8 @@ t_muchos    db "El documento es muy grande para Lector:", 10
             db "puede que falten páginas o partes de alguna", 10
             db "(caben 4.000 páginas y 32.768 objetos).", 0
 t_no_esta   db "No se encuentra ese texto en el documento.", 0
-t_sin_texto db "Esta página no tiene texto que se pueda guardar o imprimir.", 0
+t_sin_texto db "Esta página no tiene texto que se pueda guardar, copiar o imprimir.", 0
+t_copia_larga db "La página tiene mucho texto: se han copiado", 10, "solo las primeras 30.000 letras.", 0
 t_guardado  db "El texto se ha guardado.", 10
             db "Se puede abrir con Pluma.", 0
 t_no_guardar db "No se ha podido guardar el texto.", 10
@@ -320,13 +333,13 @@ t_cab_pag   db "--- Página ", 0
 t_cab_fin   db " ---", 13, 10, 0
 ; los avisos de la página, del más grave al menos
 t_av_filtro db "Aviso: página con una compresión que Lector no conoce", 0
-t_av_filtro2 db "; no se puede mostrar.", 0
+t_av_filtro2 db ": no se muestra.", 0
 t_av_memoria db "Aviso: falta memoria para mostrar esta página entera.", 0
 t_av_roto   db "Aviso: la página está dañada; puede faltar una parte.", 0
 t_av_ilegible db "Aviso: hay texto que no se puede leer (letra con codificación propia): va en gris.", 0
 t_av_llena  db "Aviso: la página es muy compleja; se muestra solo una parte.", 0
 t_av_descon db "Aviso: hay letras que Hispa-DOS no tiene; se ven como «?».", 0
-t_av_imagen db "Las imágenes no se muestran: van como recuadros grises.", 0
+t_av_imagen db "Hay imágenes que Lector no sabe mostrar: van como recuadros grises.", 0
 ; la información
 t_i_archivo db "Archivo: ", 0
 t_i_titulo  db "Título: ", 0
@@ -356,6 +369,15 @@ entrada:
         mov dword [zmodo], 1
         mov dword [zoom], 0x15555
         call pon_titulo
+        HV pantalla                 ; el mapa de puntos de la zona de lectura: nunca
+        mov [vb_an], eax            ; hará falta más que la pantalla
+        mov [vb_al], ebx
+        mov ecx, eax
+        imul ecx, ebx
+        HV mem_bloque
+        jc .x
+        mov [vbuf_p], eax
+        mov [vbuf_h], edx
         HV pantalla                 ; EAX=ancho EBX=alto: que quepa
         sub ebx, BARRA_H + 12
         cmp ebx, 540
@@ -381,6 +403,8 @@ entrada:
 .bucle:
         HV app_bucle
         call cierra_doc
+        mov edx, [vbuf_h]
+        HV mem_bloque_soltar
 .x:
         ret
 
@@ -458,6 +482,8 @@ lec_proc:
         je raton
         cmp eax, WM_MOUSEMOVE
         je raton_mueve
+        cmp eax, WM_LBUTTONUP
+        je raton_suelta
         cmp eax, WM_MOUSEWHEEL
         je .rueda
         cmp eax, WM_VSCROLL
@@ -486,6 +512,9 @@ lec_proc:
         mov dword [ebp+V_ICONO], hvp_icono
         mov esi, hijos
         HV ven_lista
+        mov ecx, ID_PUENTE
+        HV ven_hija_id
+        mov [puente], eax
         mov ecx, ID_BARRA_V
         HV ven_hija_id
         mov [barra_v], eax
@@ -630,9 +659,9 @@ dispone:
         jns .v2
         xor ebx, ebx
 .v2:
-        cmp ebx, VB_AL
+        cmp ebx, [vb_al]
         jbe .v3
-        mov ebx, VB_AL
+        mov ebx, [vb_al]
 .v3:
         mov [vh], ebx
         mov eax, [cli_an]
@@ -640,9 +669,9 @@ dispone:
         jns .v4
         xor eax, eax
 .v4:
-        cmp eax, VB_AN
+        cmp eax, [vb_an]
         jbe .v5
-        mov eax, VB_AN
+        mov eax, [vb_an]
 .v5:
         mov [vw], eax
         xor eax, eax
@@ -862,6 +891,8 @@ orden_haz:
         je imprime_pag
         cmp ecx, O_IMP_DOC
         je imprime_doc
+        cmp ecx, O_COPIAR
+        je copiar
         cmp ecx, O_BUSCAR
         je buscar
         cmp ecx, O_SIGUIENTE
@@ -1191,14 +1222,58 @@ raton:
         mov ebx, edx
         sar ebx, 16
         cmp ebx, TB_AL
-        jge hecho
+        jge .hoja
         movsx eax, dx
         mov esi, botones
         call br_boton_en
         jc hecho
         mov ecx, [esi+12]
         jmp orden
+.hoja:
+        ; en la zona de lectura: se coge la hoja y se arrastra
+        cmp byte [hay_doc], 0
+        je hecho
+        mov eax, [vy]
+        cmp ebx, eax
+        jl hecho
+        add eax, [vh]
+        cmp ebx, eax
+        jge hecho
+        movsx eax, dx
+        cmp eax, [vw]
+        jge hecho
+        mov [arr_x], eax
+        mov [arr_y], ebx
+        mov byte [arrastra], 1
+        mov ebp, [ven]
+        HV ven_capturar
+        jmp hecho
+raton_suelta:
+        cmp byte [arrastra], 0
+        je hecho
+        mov byte [arrastra], 0
+        HV ven_soltar
+        jmp hecho
 raton_mueve:
+        cmp byte [arrastra], 0
+        je .barra
+        movsx eax, dx               ; la hoja sigue al ratón
+        mov ebx, edx
+        sar ebx, 16
+        mov ecx, [arr_x]
+        sub ecx, eax
+        mov [arr_x], eax
+        mov edx, [arr_y]
+        sub edx, ebx
+        mov [arr_y], ebx
+        mov eax, [sx]
+        add eax, ecx
+        call desplaza_h
+        mov eax, [sy]
+        add eax, edx
+        call desplaza_v
+        jmp hecho
+.barra:
         ; sobre un botón de la barra: su nombre, abajo
         xor edi, edi
         mov ebx, edx
@@ -1294,18 +1369,26 @@ abre_archivo:
         call cierra_doc             ; (el de antes deja su memoria)
         call pon_titulo
         ; un bloque para el archivo y, detrás, el almacén más grande que haya
-        mov edi, almacenes
+        ; el almacén, según el documento: seis veces el archivo más un mega
+        ; (de 1 a 8 MB); si no hay tanta memoria, la mitad, hasta medio mega
+        mov edi, [arch_tam]
+        cmp edi, 1024 * 1024
+        jbe .a1
+        mov edi, 1024 * 1024
+.a1:
+        imul edi, 6
+        add edi, 1024 * 1024 + 256 * 1024
 .pide:
-        mov ecx, [edi]
+        mov ecx, edi
         mov esi, t_e_memoria
-        test ecx, ecx
-        jz .mal
+        cmp ecx, 512 * 1024
+        jb .mal
         mov [alm_tam], ecx
         add ecx, [arch_tam]
         add ecx, 64
         HV mem_bloque
         jnc .hay_mem
-        add edi, 4
+        shr edi, 1
         jmp .pide
 .hay_mem:
         mov [bloque], edx
@@ -1593,6 +1676,48 @@ marca:
 .sig:
         inc edi
         jmp .b
+.x:
+        popad
+        ret
+
+; Edición > Copiar: el texto de la página, al portapapeles de Hispa Ventanas
+; (por un cuadro de texto escondido, como Pluma); las líneas, acabadas en 10
+copiar:
+        pushad
+        call texto_pagina
+        mov esi, t_sin_texto
+        cmp dword [tx_n], 0
+        je .aviso
+        mov esi, tx_buf
+        mov ecx, [tx_n]
+        mov edi, copia_buf
+.c:
+        lodsb
+        cmp al, 13
+        je .c1
+        cmp edi, copia_buf + COPIA_MAX
+        jae .c2
+        stosb
+.c1:
+        dec ecx
+        jnz .c
+.c2:
+        mov byte [edi], 0
+        push ecx
+        mov ebp, [puente]
+        mov eax, WM_SETTEXT
+        mov edx, copia_buf
+        HV msg_enviar
+        mov eax, EM_SEL_TODO
+        HV msg_enviar
+        mov eax, WM_COPY
+        HV msg_enviar
+        pop ecx
+        mov esi, t_copia_larga
+        test ecx, ecx
+        jz .x
+.aviso:
+        call aviso
 .x:
         popad
         ret
@@ -2151,7 +2276,7 @@ pintar:
         mov ebx, [vy]
         mov ecx, [vw]
         mov edx, [vh]
-        mov esi, vbuf
+        mov esi, [vbuf_p]
         HV dc_copiar
 .esquina:
         COLOR C_ARENA               ; el rincón entre las dos barras
@@ -2219,11 +2344,12 @@ pinta_pie:
 ; =============================================================================
 dibuja:
         pushad
-        mov edi, vbuf               ; el fondo
+        mov edi, [vbuf_p]           ; el fondo
         mov ecx, [vw]
         imul ecx, [vh]
         mov al, C_CREMA
         rep stosb
+        call vc_todo
         cmp byte [hay_doc], 0
         jne .doc
         ; sin documento: una pista, en el centro
@@ -2279,6 +2405,7 @@ dibuja:
 .it:
         cmp ebx, [it_n]
         jae .x
+        call vc_pon                 ; su recorte
         mov al, [esi+IT_COLOR]
         mov [vb_color], al
         mov al, [esi+IT_TIPO]
@@ -2318,6 +2445,57 @@ dibuja:
         popad
         ret
 
+; el recorte: toda la zona de lectura
+vc_todo:
+        push eax
+        xor eax, eax
+        mov [vc_x0], eax
+        mov [vc_y0], eax
+        mov eax, [vw]
+        mov [vc_x1], eax
+        mov eax, [vh]
+        mov [vc_y1], eax
+        pop eax
+        ret
+; el recorte del elemento ESI: su rectángulo de la página (si lo tiene), a
+; puntos de la zona
+vc_pon:
+        push eax
+        push ebx
+        call vc_todo
+        movzx ebx, word [esi+IT_CLIP]
+        test ebx, ebx
+        jz .x
+        shl ebx, 4
+        add ebx, cl_tab
+        mov eax, [ebx]
+        call a_px_x
+        cmp eax, [vc_x0]
+        jle .a
+        mov [vc_x0], eax
+.a:
+        mov eax, [ebx+4]
+        call a_px_y
+        cmp eax, [vc_y0]
+        jle .b
+        mov [vc_y0], eax
+.b:
+        mov eax, [ebx+8]
+        call a_px_x
+        cmp eax, [vc_x1]
+        jge .c
+        mov [vc_x1], eax
+.c:
+        mov eax, [ebx+12]
+        call a_px_y
+        cmp eax, [vc_y1]
+        jge .x
+        mov [vc_y1], eax
+.x:
+        pop ebx
+        pop eax
+        ret
+
 ; un rectángulo del color [vb_color]: EAX=x EBX=y ECX=ancho EDX=alto, en
 ; puntos de la zona; lo que se sale no se pinta
 vb_rect:
@@ -2326,34 +2504,31 @@ vb_rect:
         jle .x
         test edx, edx
         jle .x
-        test eax, eax
-        jns .a
-        add ecx, eax
-        jle .x
-        xor eax, eax
-.a:
-        mov esi, [vw]
-        sub esi, eax
-        jle .x
-        cmp ecx, esi
-        jle .b
-        mov ecx, esi
-.b:
-        test ebx, ebx
-        jns .c
+        add ecx, eax                ; ECX, EDX=donde acaba; todo, dentro del recorte
         add edx, ebx
+        cmp eax, [vc_x0]
+        jge .a
+        mov eax, [vc_x0]
+.a:
+        cmp ecx, [vc_x1]
+        jle .b
+        mov ecx, [vc_x1]
+.b:
+        sub ecx, eax
         jle .x
-        xor ebx, ebx
+        cmp ebx, [vc_y0]
+        jge .c
+        mov ebx, [vc_y0]
 .c:
-        mov esi, [vh]
-        sub esi, ebx
-        jle .x
-        cmp edx, esi
+        cmp edx, [vc_y1]
         jle .d
-        mov edx, esi
+        mov edx, [vc_y1]
 .d:
+        sub edx, ebx
+        jle .x
         imul ebx, [vw]
-        lea edi, [vbuf+ebx]
+        mov edi, [vbuf_p]
+        add edi, ebx
         add edi, eax
         mov al, [vb_color]
         mov ebx, ecx
@@ -2569,6 +2744,8 @@ vb_imagen:
         mov edx, eax
         sub edx, ebx
         mov eax, edi
+        cmp dword [esi+IT_TXT], 0
+        jne .pinta
         cmp ecx, 2
         jl .x
         cmp edx, 2
@@ -2597,6 +2774,94 @@ vb_imagen:
 .x:
         popad
         ret
+.pinta:
+        ; la miniatura, estirada o encogida a su sitio (EAX, EBX, de ECX x EDX):
+        ; de cada punto de la pantalla, el suyo de la miniatura
+        test ecx, ecx
+        jg .p0
+        mov ecx, 1
+.p0:
+        test edx, edx
+        jg .p1
+        mov edx, 1
+.p1:
+        mov [im_px], eax
+        mov [im_py], ebx
+        mov [im_pw], ecx
+        mov [im_ph], edx
+        movzx eax, byte [esi+IT_BAND]
+        mov [im_pb], eax
+        mov esi, [esi+IT_TXT]       ; ESI=la miniatura: ancho, alto y puntos
+        mov ebp, [im_py]            ; EBP=la fila de la pantalla
+        cmp ebp, [vc_y0]
+        jge .fy
+        mov ebp, [vc_y0]
+.fy:
+        mov eax, [im_py]
+        add eax, [im_ph]
+        cmp ebp, eax
+        jge .x
+        cmp ebp, [vc_y1]
+        jge .x
+        mov edi, [im_px]            ; EDI=la columna
+        cmp edi, [vc_x0]
+        jge .fx
+        mov edi, [vc_x0]
+.fx:
+        mov eax, [im_px]
+        add eax, [im_pw]
+        cmp edi, eax
+        jge .f_sig
+        cmp edi, [vc_x1]
+        jge .f_sig
+        mov eax, edi                ; a lo ancho y a lo alto del sitio: de 0 a casi 1
+        sub eax, [im_px]
+        mov ebx, ebp
+        sub ebx, [im_py]
+        mov ecx, [im_pw]
+        mov edx, [im_ph]
+        test byte [im_pb], II_GIRADA
+        jz .o1
+        xchg eax, ebx               ; girada: las columnas van a lo alto
+        xchg ecx, edx
+.o1:
+        push edx
+        mul dword [esi]             ; columna = x * ancho de la miniatura / ancho del sitio
+        div ecx
+        pop ecx
+        test byte [im_pb], II_ESPEJO
+        jz .o2
+        neg eax
+        add eax, [esi]
+        dec eax
+.o2:
+        push eax
+        mov eax, ebx
+        mul dword [esi+4]
+        div ecx
+        test byte [im_pb], II_VUELTA
+        jz .o3
+        neg eax
+        add eax, [esi+4]
+        dec eax
+.o3:
+        mul dword [esi]
+        pop edx
+        add eax, edx
+        mov al, [esi+8+eax]
+        cmp al, IM_NADA
+        je .o4
+        mov ebx, ebp
+        imul ebx, [vw]
+        add ebx, edi
+        add ebx, [vbuf_p]
+        mov [ebx], al
+.o4:
+        inc edi
+        jmp .fx
+.f_sig:
+        inc ebp
+        jmp .fy
 
 ; ESI=un ITT_ILEGIBLE: una banda gris donde iría el texto
 vb_ilegible:
@@ -3290,6 +3555,7 @@ vb_uv:
 %include "nombres.inc"
 %include "contenido.inc"
 %include "texto.inc"
+%include "imagen.inc"
 %include "tipos.inc"
 %include "barra.inc"
 %include "hvplib.inc"
@@ -3330,6 +3596,24 @@ hl_it       resd HL_MAX
 hl_a        resd HL_MAX
 hl_b        resd HL_MAX
 vb_gros     resd 1
+vbuf_p      resd 1                  ; el mapa de puntos de la zona: del tamaño de la pantalla
+vbuf_h      resd 1
+vb_an       resd 1
+vb_al       resd 1
+puente      resd 1                  ; el cuadro de texto escondido del portapapeles
+arr_x       resd 1                  ; arrastrando la hoja: dónde estaba el ratón
+arr_y       resd 1
+arrastra    resb 1
+            alignb 4
+vc_x0       resd 1                  ; el recorte de lo que se pinta (en la zona)
+vc_y0       resd 1
+vc_x1       resd 1
+vc_y1       resd 1
+im_px       resd 1
+im_py       resd 1
+im_pw       resd 1
+im_ph       resd 1
+im_pb       resd 1
 ln_x        resd 1
 ln_y        resd 1
 ln_x1       resd 1
@@ -3397,9 +3681,10 @@ pv_tab      resd PV_MAX * 3 + 64
             LETRAS_BSS
             CONTENIDO_BSS
             TEXTO_BSS
+            IMAGEN_BSS
             TIPOS_BSS
             BARRA_BSS
             alignb 4
 nuc_pila    resb NUC_PILA
-vbuf        resb VB_AN * VB_AL
+copia_buf   resb COPIA_MAX + 4
 HVP_FIN

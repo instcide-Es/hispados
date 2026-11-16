@@ -197,7 +197,7 @@ tx_extrae:
         mov eax, [esi+IT_X]
         sub eax, [tx_fin_ant]
         mov edi, [tx_tam_ant]
-        sar edi, 2                  ; más de un cuarto del tamaño: un espacio
+        sar edi, 3                  ; más de un octavo del tamaño: un espacio
         cmp eax, edi
         jle .e2
         push eax
