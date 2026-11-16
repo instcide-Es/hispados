@@ -79,6 +79,7 @@ TAM_GRANDE  equ 3                   ; el de Ctrl+W: 24 puntos
 P_VIN       equ 0x04
 P_TABLA     equ 0x08
 TAB         equ 9                   ; lo que separa las celdas de una fila
+SALTO       equ 12                  ; un salto de página: va solo en su párrafo
 CEL_MARG    equ 4                   ; del borde de la celda a su texto
 P_NUM       equ 0x80
 P_SANGRIA   equ 0x70
@@ -137,6 +138,7 @@ O_ESTILO    equ 177                 ; el estilo del párrafo
 O_IMPRIMIRG equ 178                 ; imprimir como se ve
 O_PRELIM    equ 179                 ; vista preliminar: la página, entera
 O_TABLA     equ 180                 ; insertar una tabla
+O_SALTO     equ 181                 ; insertar un salto de página
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -258,6 +260,8 @@ plu_menu:
         db 0
         dw O_TABLA
         db "&Tabla...", 0
+        dw O_SALTO
+        db "&Salto de página       Ctrl+R", 0
         dw 0xFFFF
         db "&Formato", 0
         dw O_FUENTES
@@ -945,6 +949,8 @@ orden_haz:
         je estilo_elige
         cmp ecx, O_TABLA
         je tabla
+        cmp ecx, O_SALTO
+        je salto
         mov eax, ecx
         sub eax, O_IZQ
         cmp eax, 3
@@ -1725,7 +1731,7 @@ tecla:
 ; (Ctrl+H no vale de atajo: para el teclado es Retroceso. Ctrl+I y Ctrl+M se
 ; distinguen de Tab y de Intro desde Hispa-386 0.9.20; «Ir a» es también F5)
 ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, O_IRA, O_JUST
-            db O_CUR, O_REEMPLAZAR, 0, O_NEG, 0, O_IMPRIMIR, O_IZQ, 0, O_SUB, O_CEN
+            db O_CUR, O_REEMPLAZAR, 0, O_NEG, 0, O_IMPRIMIR, O_IZQ, O_SALTO, O_SUB, O_CEN
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 
 letra:
@@ -2119,6 +2125,31 @@ tip_pon:
         inc eax
         jmp .b
 .x:
+        ret
+; ---- Insertar > Salto de página: un párrafo que solo lleva la señal; lo que
+;      viene detrás empieza en hoja nueva (en la vista preliminar y al
+;      imprimir). En la hoja de escribir se ve como una raya de puntos ----
+salto:
+        call instantanea
+        mov dword [anc], -1
+        mov eax, [cur]
+        call fila_ini
+        cmp eax, [cur]              ; (si no está al principio de un párrafo,
+        je .p                       ; lo parte ahí)
+        mov al, 10
+        call escribe1
+.p:
+        mov al, SALTO
+        call escribe1
+        mov al, 10
+        call escribe1
+        jmp cambio
+; (interna) EDI=línea -> ZF=1 si es un salto de página
+es_salto:
+        push eax
+        mov eax, [lin_ini+edi*4]
+        cmp byte [txt+eax], SALTO
+        pop eax
         ret
 ; (interna) EAX=sitio -> EAX=el principio de su párrafo
 fila_ini:
@@ -3559,6 +3590,8 @@ cargar:
         jae .rl
         cmp al, TAB                 ; (el separador de las celdas de una tabla)
         je .rl
+        cmp al, SALTO               ; (y el salto de página)
+        je .rl
         mov byte [txt+esi], ' '
 .rl:
         and byte [atr+esi], 0x3F
@@ -3935,6 +3968,18 @@ imprimir_g:
         cmp edi, [nl]
         jae .fin
         call mide
+        call es_salto               ; un salto de página: hoja nueva, y él no
+        jne .nosalto                ; se imprime
+        cmp dword [ig_pag], 0
+        je .sig
+        call ig_tira
+        jc .mal2
+        mov al, 12
+        call imp_car
+        jc .mal2
+        mov dword [ig_pag], 0
+        jmp .sig
+.nosalto:
         mov eax, [ig_pag]           ; ¿cabe en esta página?
         add eax, [m_al]
         cmp eax, IG_PAG
@@ -4300,6 +4345,14 @@ vp_cuenta:
         cmp edi, [nl]
         jae .f
         call mide
+        call es_salto
+        jne .n
+        test edx, edx               ; un salto de página (si la hoja ya está
+        jz .s                       ; en blanco, no hace otra)
+        inc ebp
+        xor edx, edx
+        jmp short .s
+.n:
         mov eax, edx
         add eax, [m_al]
         cmp eax, IG_PAG
@@ -4308,6 +4361,7 @@ vp_cuenta:
         xor edx, edx
 .c:
         add edx, [m_al]
+.s:
         inc edi
         jmp .l
 .f:
@@ -4354,6 +4408,16 @@ pinta_prelim:
         cmp edi, [nl]
         jae .fin
         call mide
+        call es_salto
+        jne .nosalto
+        test edx, edx               ; un salto de página
+        jz .otra
+        inc ebp
+        xor edx, edx
+.otra:
+        inc edi
+        jmp .lin
+.nosalto:
         mov eax, edx
         add eax, [m_al]
         cmp eax, IG_PAG
@@ -4646,7 +4710,10 @@ pinta_linea:
         mov al, [txt+esi]
         mov ah, [atr+esi]
         cmp al, TAB                 ; (el separador de celdas: un hueco)
+        je .hueco
+        cmp al, SALTO               ; (y el salto de página, que es una raya)
         jne .nt
+.hueco:
         mov al, ' '
 .nt:
         mov [g_car], al
@@ -4709,6 +4776,23 @@ pinta_linea:
         inc esi
         jmp .c
 .copia:
+        mov eax, [m_s]              ; un salto de página: una raya de puntos a
+        cmp byte [txt+eax], SALTO   ; media altura
+        jne .sin_salto
+        mov edi, [m_al]
+        shr edi, 1
+        imul edi, PAG_AN
+        add edi, lbuf
+        xor ecx, ecx
+.sp:
+        test cl, 4
+        jnz .sp1
+        mov byte [edi+ecx], C_PIEDRA
+.sp1:
+        inc ecx
+        cmp ecx, PAG_AN
+        jb .sp
+.sin_salto:
         cmp byte [m_tabla], 0
         je .sin_tabla
         ; los bordes de la fila: una raya entre columnas, la de arriba y, si

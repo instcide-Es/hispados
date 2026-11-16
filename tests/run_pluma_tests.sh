@@ -244,6 +244,8 @@ mdel -i $T/f.img ::TABLA.PLU 2>/dev/null
   tecla ret; escribe "nueva"                         # Intro: una fila más, debajo
   aparca; shot b1
   tecla ctrl-end; escribe "Despues"; aparca; shot b2
+  tecla ctrl-r; escribe "Otra hoja"; aparca; shot b3                # un salto de página
+  clic 198 99; sleep 1; aparca; shot b4; tecla pgdn; sleep 0.6; shot b5; tecla esc; sleep 0.5   # la vista preliminar: dos páginas
   tecla ctrl-g; sleep 1.2; escribe "tabla"; tecla ret; sleep 2
   sal; } | run 150 -vga std
 chk $T/b1.ppm busca 80 151 90 166 0 9 "Antes"
@@ -254,6 +256,9 @@ chk $T/b1.ppm busca 84 194 92 206 0 9 "cuatro"
 chk $T/b1.ppm busca 84 218 92 230 0 9 "nueva"
 chk $T/b1.ppm rgb 275 180 1A1410 "la raya entre la primera columna y la segunda"
 muestra b2 pluma_tabla
+chk $T/b4.ppm busca 72 518 600 540 0 6 "Vista preliminar: página 1 de 2"
+chk $T/b5.ppm busca 72 518 600 540 0 6 "Vista preliminar: página 2 de 2"
+muestra b3 pluma_salto; muestra b5 pluma_preliminar2
 mcopy -n -i $T/f.img ::TABLA.PLU $T/tabla.plu 2>/dev/null
 if python3 - $T/tabla.plu <<'PY'
 import sys,struct
@@ -261,7 +266,7 @@ d=open(sys.argv[1],'rb').read()
 n=struct.unpack_from('<I',d,8)[0]
 t,a=d[12:12+n],d[12+n:12+2*n]
 m=[a[i] for i,c in enumerate(t) if c==10]
-ok = t==b'Antes\nuno\tdos\ttres\ncuatro\t\t\nnueva\t\t\n\t\t\nDespues\n' and m==[0,8,8,8,8,0] and d[-4:]==b'PL22'
+ok = t==b'Antes\nuno\tdos\ttres\ncuatro\t\t\nnueva\t\t\n\t\t\nDespues\n\x0c\nOtra hoja\n' and m==[0,8,8,8,8,0,0,0] and d[-4:]==b'PL22'
 sys.exit(0 if ok else 1)
 PY
 then ok "TABLA.PLU: cada fila, un párrafo con sus celdas; detrás, un párrafo normal"; else ko "TABLA.PLU no es lo esperado"; xxd $T/tabla.plu | head -12; fi
