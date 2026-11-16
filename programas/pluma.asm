@@ -131,6 +131,7 @@ O_TIPO      equ 175                 ; elegir el tipo de letra
 O_TAM       equ 176                 ; y el tamaño
 O_ESTILO    equ 177                 ; el estilo del párrafo
 O_IMPRIMIRG equ 178                 ; imprimir como se ve
+O_PRELIM    equ 179                 ; vista preliminar: la página, entera
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -236,6 +237,8 @@ plu_menu:
         db "&Ir a...           Ctrl+I", 0
         dw 0xFFFF
         db "&Ver", 0
+        dw O_PRELIM
+        db "&Vista preliminar", 0
         dw O_MARCAS
         db "&Mostrar las marcas (¶)", 0
         dw O_COMPLETA
@@ -361,14 +364,15 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
             dd 32, 24, ic_abrir, O_ABRIR, n_abrir, 1
             dd 58, 24, ic_guardar, O_GUARDAR, n_guardar, 1
             dd 90, 24, ic_imprimir, O_IMPRIMIR, n_imprimir, 1
-            dd 122, 24, ic_cortar, O_CORTAR, n_cortar, 1
-            dd 148, 24, ic_copiar, O_COPIAR, n_copiar, 1
-            dd 174, 24, ic_pegar, O_PEGAR, n_pegar, 1
-            dd 200, 24, ic_brocha, O_BROCHA, n_brocha, 1
-            dd 232, 24, ic_deshacer, O_DESHACER, n_deshacer, 1
-            dd 258, 24, ic_rehacer, O_REHACER, n_rehacer, 1
-            dd 290, 24, ic_marcas, O_MARCAS, n_marcas, 1
-            dd 322, 64, t_b_estilo, O_ESTILO, n_estilo, BT_TEXTO
+            dd 116, 24, ic_prelim, O_PRELIM, n_prelim, 1
+            dd 148, 24, ic_cortar, O_CORTAR, n_cortar, 1
+            dd 174, 24, ic_copiar, O_COPIAR, n_copiar, 1
+            dd 200, 24, ic_pegar, O_PEGAR, n_pegar, 1
+            dd 226, 24, ic_brocha, O_BROCHA, n_brocha, 1
+            dd 258, 24, ic_deshacer, O_DESHACER, n_deshacer, 1
+            dd 284, 24, ic_rehacer, O_REHACER, n_rehacer, 1
+            dd 316, 24, ic_marcas, O_MARCAS, n_marcas, 1
+            dd 348, 64, t_b_estilo, O_ESTILO, n_estilo, BT_TEXTO
             dd 0, 0, 0, 0, 0, 0
 botones     dd 6, 96, t_nada, O_TIPO, n_tipo, 0
             dd 106, 36, t_nada, O_TAM, n_tam, 0
@@ -392,6 +396,7 @@ n_nuevo     db "Nuevo: un documento en blanco (Ctrl+U)", 0
 n_abrir     db "Abrir un documento guardado (Ctrl+A)", 0
 n_guardar   db "Guardar el documento (Ctrl+G)", 0
 n_imprimir  db "Imprimir (Ctrl+P)", 0
+n_prelim    db "Vista preliminar: la página entera, como saldrá en el papel", 0
 n_cortar    db "Cortar lo elegido (Ctrl+X)", 0
 n_copiar    db "Copiar lo elegido (Ctrl+C)", 0
 n_pegar     db "Pegar (Ctrl+V)", 0
@@ -465,6 +470,8 @@ t_f_cur     db "Cursiva", 0
 t_f_sub     db "Subrayado", 0
 t_f_color   db "Color:", 0
 t_d_tipo    db "Tipo de letra", 0
+t_vp1       db "Vista preliminar: página ", 0
+t_vp2       db "   (Re Pág / Av Pág: otra; Esc: volver)", 0
 t_d_tam     db "Tamaño (puntos)", 0
 t_d_est     db "Estilo del párrafo", 0
 ; los estilos: de cada uno, el tamaño (0-5, los de tipos.inc), el formato de
@@ -824,6 +831,13 @@ orden:
         jmp hecho
 orden_haz:
         mov dword [br_sobre], 0
+        cmp ecx, O_PRELIM
+        je prelim
+        cmp byte [vp_on], 0         ; en la vista preliminar, cualquier otra
+        je .sigue                   ; orden vuelve antes a la hoja de escribir
+        mov byte [vp_on], 0
+        call inval
+.sigue:
         mov byte [tecleando], 0     ; (cualquier orden acaba la tanda de teclas)
         cmp ecx, O_NUEVO
         je nuevo
@@ -1398,6 +1412,34 @@ cur_a:
 
 ; ---- teclado: ECX=tecla EDX=mayúsculas ----
 tecla:
+        cmp byte [vp_on], 0
+        je .normal
+        cmp ecx, TC_CTRL            ; en la vista preliminar: otra página, o
+        jae .ctrl                   ; volver (las órdenes siguen valiendo)
+        mov eax, [vp_pag]
+        cmp ecx, TC_AVPAG
+        jne .vp1
+        inc eax
+        cmp eax, [vp_n]
+        jae hecho
+        jmp short .vp2
+.vp1:
+        cmp ecx, TC_REPAG
+        jne .vp3
+        test eax, eax
+        jz hecho
+        dec eax
+.vp2:
+        mov [vp_pag], eax
+        call inval
+        jmp hecho
+.vp3:
+        cmp ecx, TC_ESC
+        jne hecho
+        mov byte [vp_on], 0
+        call inval
+        jmp hecho
+.normal:
         cmp ecx, TC_CTRL
         jae .ctrl
         cmp ecx, TC_IZQ
@@ -1548,6 +1590,8 @@ ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, O
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 
 letra:
+        cmp byte [vp_on], 0         ; (en la vista preliminar no se escribe)
+        jne hecho
         cmp ecx, 32
         jb hecho
         cmp ecx, 255
@@ -1714,6 +1758,8 @@ raton:
         sub eax, STAT_AL
         cmp ebx, eax
         jge hecho
+        cmp byte [vp_on], 0         ; (en la vista preliminar no se elige)
+        jne hecho
         call raton_sitio
         mov edx, ecx                ; con Mayús, elige hasta ahí
         call cur_a
@@ -3908,6 +3954,12 @@ bios:
 pintar:
         HV dc_pintar
         call pinta_botones
+        cmp byte [vp_on], 0
+        je .hoja
+        call vp_cuenta
+        call pinta_estado
+        jmp pinta_prelim
+.hoja:
         call pinta_estado
         ; la zona del texto
         xor eax, eax
@@ -3989,6 +4041,145 @@ pintar:
         mov edx, [c_al]
         HV dc_rect
 .fin:
+        HV dc_cerrar
+        jmp hecho
+
+; ---- Vista preliminar: la página [vp_pag] entera, a la mitad de tamaño, con
+;      el mismo reparto en páginas que «Imprimir como se ve» ----
+VP_X        equ 12                  ; el margen del papel alrededor del texto
+; (interna) cuántas páginas hay: [vp_n]
+vp_cuenta:
+        pushad
+        xor edi, edi
+        xor ebp, ebp
+        xor edx, edx
+.l:
+        cmp edi, [nl]
+        jae .f
+        call mide
+        mov eax, edx
+        add eax, [m_al]
+        cmp eax, IG_PAG
+        jbe .c
+        inc ebp
+        xor edx, edx
+.c:
+        add edx, [m_al]
+        inc edi
+        jmp .l
+.f:
+        inc ebp
+        mov [vp_n], ebp
+        popad
+        ret
+prelim:
+        xor byte [vp_on], 1
+        mov dword [vp_pag], 0
+        jmp inval
+pinta_prelim:
+        xor eax, eax                ; la zona del texto, de fondo
+        mov ebx, TB_AL
+        mov ecx, [cli_an]
+        mov edx, [vh]
+        HV dc_cortar
+        COLOR C_ARENA_OSC
+        HV dc_rect
+        mov eax, [cli_an]           ; el papel, centrado, con su sombra
+        sub eax, PAG_AN / 2 + 2 * VP_X
+        sar eax, 1
+        mov [vp_x], eax
+        COLOR C_TINTA
+        add eax, 3
+        mov ebx, TB_AL + 11
+        mov ecx, PAG_AN / 2 + 2 * VP_X
+        mov edx, IG_PAG / 2 + 2 * VP_X
+        HV dc_rect
+        COLOR C_BLANCO
+        sub eax, 3
+        sub ebx, 3
+        HV dc_rect
+        mov al, [ver_marcas]        ; sin marcas ni nada elegido
+        mov [ig_marcas], al
+        mov byte [ver_marcas], 0
+        mov dword [sel_a], 0
+        mov dword [sel_b], 0
+        mov byte [pl_solo_buf], 1
+        xor edi, edi                ; la línea
+        xor ebp, ebp                ; la página por la que va
+        xor edx, edx                ; lo que lleva de alto la página
+.lin:
+        cmp edi, [nl]
+        jae .fin
+        call mide
+        mov eax, edx
+        add eax, [m_al]
+        cmp eax, IG_PAG
+        jbe .cabe
+        inc ebp                     ; no cabe: a la página siguiente
+        xor edx, edx
+.cabe:
+        cmp ebp, [vp_pag]
+        jne .sig
+        push edx
+        xor ebx, ebx
+        call pinta_linea            ; la línea, en lbuf; y a la mitad: de cada
+        mov esi, lbuf               ; cuatro puntos, uno (el que tenga tinta)
+        mov edi, vp_buf
+        mov edx, [m_al]
+        shr edx, 1
+.f:
+        mov ecx, PAG_AN / 2
+.p:
+        mov al, [esi]
+        cmp al, C_BLANCO
+        jne .t
+        mov al, [esi+1]
+        cmp al, C_BLANCO
+        jne .t
+        mov al, [esi+PAG_AN]
+        cmp al, C_BLANCO
+        jne .t
+        mov al, [esi+PAG_AN+1]
+.t:
+        stosb
+        add esi, 2
+        dec ecx
+        jnz .p
+        add esi, PAG_AN
+        dec edx
+        jnz .f
+        pop edx
+        push edx
+        mov eax, [vp_x]
+        add eax, VP_X
+        mov ebx, edx
+        shr ebx, 1
+        add ebx, TB_AL + 8 + VP_X
+        mov ecx, PAG_AN / 2
+        mov edx, [m_al]
+        shr edx, 1
+        mov esi, vp_buf
+        push ebp
+        HV dc_copiar
+        pop ebp
+        pop edx
+        mov edi, [pl_lin]           ; (la línea, que pinta_linea guarda)
+.sig:
+        add edx, [m_al]
+        inc edi
+        jmp .lin
+.fin:
+        inc ebp
+        mov [vp_n], ebp
+        mov al, [ig_marcas]
+        mov [ver_marcas], al
+        mov byte [pl_solo_buf], 0
+        cmp ebp, [vp_pag]           ; (si el documento ha encogido)
+        ja .x
+        dec ebp
+        mov [vp_pag], ebp
+        call inval
+.x:
         HV dc_cerrar
         jmp hecho
 
@@ -4089,7 +4280,30 @@ pinta_estado:
         mov ecx, [cli_an]
         mov edx, [cli_al]
         call br_pie                 ; (CF=1: ha puesto el nombre de un botón)
-        jnc .donde
+        jnc .vista
+        popad
+        ret
+.vista:
+        cmp byte [vp_on], 0
+        je .donde
+        mov edi, linea              ; «Vista preliminar: página 1 de 2...»
+        mov esi, t_vp1
+        call hvl_cad
+        mov eax, [vp_pag]
+        inc eax
+        call hvl_num
+        mov esi, t_de
+        call hvl_cad
+        mov eax, [vp_n]
+        call hvl_num
+        mov esi, t_vp2
+        call hvl_cad
+        mov byte [edi], 0
+        mov eax, 8
+        mov ebx, [cli_al]
+        sub ebx, STAT_AL - 3
+        mov esi, linea
+        HV dc_texto
         popad
         ret
 .donde:
@@ -4448,6 +4662,7 @@ g_an        resd 1
 al_act      resd 1
 tg_modo     resb 1
 pl_solo_buf resb 1
+vp_on       resb 1                  ; se ve la vista preliminar
 ig_marcas   resb 1
             alignb 4
 g_mapa      resd 1                  ; si no es 0, el dibujo que va en vez de la letra
@@ -4474,6 +4689,9 @@ pl_x        resd 1
 pl_fy       resd 1
 pl_y0       resd 1
 pl_gordo    resd 1
+vp_x        resd 1
+vp_pag      resd 1                  ; vista preliminar: la página que se ve
+vp_n        resd 1                  ; y cuántas hay
 ig_fila     resd 1                  ; imprimir como se ve: filas puestas en la tira
 ig_pag      resd 1                  ; y puntos de alto usados de la página
 at_act      resb 1                  ; el formato de lo que se escriba
@@ -4516,6 +4734,7 @@ clip_tip    resb MAX_TXT + 4
 pega_txt    resb MAX_TXT + 4
 fbuf        resb FBUF_TAM + 4
 ig_banda    resb PAG_AN * 8
+vp_buf      resb (PAG_AN / 2) * 32
 lbuf        resb PAG_AN * 64
             alignb 4
 lin_ini     resd MAX_TXT + 2

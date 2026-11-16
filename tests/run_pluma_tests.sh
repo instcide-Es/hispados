@@ -78,12 +78,17 @@ reabre 'A:\CARTA.PLU'
 rm -f $T/prn.txt
 { arranca
   shot a1
+  clic 198 99; sleep 1; aparca; shot v1; tecla esc; sleep 0.5; shot v2   # la vista preliminar, y volver
   tecla ctrl-p; sleep 4; shot a2; tecla ret; sleep 1
   clic 112 75; sleep 1; shot m1; clic 200 261; sleep 4; shot a3; tecla ret; sleep 1   # Archivo > Imprimir con formato
   clic 112 75; sleep 1; shot m2; clic 200 281; sleep 25; shot a4; tecla ret; sleep 1   # Archivo > Imprimir como se ve
   sal; } | PARALELO=file:$T/prn.txt run 200 -vga std
 chk $T/a1.ppm titulo 70 40 activa "Pluma - A:\\CARTA.PLU"
 chk $T/a1.ppm igual 76 146 592 120 $T/e1.ppm 76 146 80     # como antes de guardar (salvo el cursor)
+chk $T/v1.ppm busca 72 518 600 540 0 6 "Vista preliminar: página 1 de 1"
+chk $T/v1.ppm nobusca 80 183 90 198 0 9 "Esto es una prueba"          # la hoja de escribir no se ve
+chk $T/v2.ppm busca 80 183 90 198 0 9 "Esto es una prueba de texto normal que tiene que partirse sola al"
+muestra v1 pluma_preliminar
 chk $T/a2.ppm busca 150 250 650 310 0 8 "El documento se ha enviado a la impresora."
 chk $T/a3.ppm busca 150 250 650 310 0 8 "El documento se ha enviado a la impresora."
 if python3 - $T/prn.txt <<'PY'
@@ -160,10 +165,10 @@ mdel -i $T/f.img ::LISTA.PLU 2>/dev/null
   clic 422 127; escribe "tres"; tecla ret; escribe "cuatro"; tecla ret; clic 422 127  # numeración
   clic 500 127; clic 500 127; escribe "sangrado"; tecla ret; clic 474 127; clic 474 127   # sangría: dos pasos y fuera
   tecla ctrl-j; escribe "Esto es una prueba de texto normal que tiene que partirse sola al llegar al final de la linea de la hoja, por palabras."
-  clic 96 163; clic 282 99                                    # en «gordo»; la brocha
+  clic 96 163; clic 308 99                                    # en «gordo»; la brocha
   ir 133 163; mon "mouse_button 1" 0.25; ir 150 163; ir 165 163; mon "mouse_button 0" 0.5   # y se pasa por «fino»
   aparca; shot l1
-  ir 372 99; shot l3; clic 372 99; aparca; shot l2            # el nombre del botón ¶; las marcas a la vista
+  ir 398 99; shot l3; clic 398 99; aparca; shot l2            # el nombre del botón ¶; las marcas a la vista
   tecla ctrl-g; sleep 1.2; escribe "lista"; tecla ret; sleep 2
   tecla ctrl-p; sleep 4; tecla ret; sleep 1
   sal; } | PARALELO=file:$T/prn2.txt run 200 -vga std
@@ -197,7 +202,7 @@ echo "== Pluma: los tipos de letra =="
 reabre ''
 mdel -i $T/f.img ::TIPOS.PLU 2>/dev/null
 tam() { clic 194 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
-estilo() { clic 424 99; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; tecla ret; sleep 0.8; }
+estilo() { clic 450 99; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; tecla ret; sleep 0.8; }
 tipo() { clic 108 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
 { arranca
   tipo 1 f0; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # Roble

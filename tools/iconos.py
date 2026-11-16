@@ -73,6 +73,11 @@ g = lienzo(); caja(g, 1, 2, 14, 13, '0', '9'); lineas(g, [(5, 2, 13), (8, 2, 13)
 for y in range(3, 13): pon(g, 5, y, '7'); pon(g, 10, y, '7')
 I['hoja'] = g
 
+g = lienzo(); caja(g, 2, 1, 10, 13, '0', '9'); lineas(g, [(4, 4, 8), (6, 4, 8)], '7')
+for dx, dy in ((1,0),(2,0),(0,1),(3,1),(0,2),(3,2),(1,3),(2,3)): pon(g, 8 + dx, 7 + dy, 'c')
+pon(g, 9, 8, '9'); pon(g, 10, 8, '9'); pon(g, 9, 9, '9'); pon(g, 10, 9, '9'); raya(g, 12, 11, 14, 13, 'c'); raya(g, 12, 12, 13, 13, 'c')
+I['prelim'] = g
+
 if __name__ == '__main__':
     import sys
     for nom, g in I.items():
