@@ -14,11 +14,14 @@
 ;       BORRAR (DEL)        RENOMBRAR (REN)     CD
 ;       CREARDIR (MD)       BORRARDIR (RD)      LIMPIAR (CLS)
 ;       ACTUALIZAR          ECO (ECHO)          REM         PAUSA (PAUSE)
-;       IF                  GOTO                FOR (PARA)
-;       LLAMAR (CALL)       DESPLAZAR (SHIFT)
+;       SI (IF)             IR A (GOTO)         PARA (FOR)
+;       LLAMAR (CALL)       DESPLAZAR (SHIFT)   MOVER (MOVE)
+;       FECHA (DATE)        HORA (TIME)         VOL
+;       VERIFICAR (VERIFY)  MEMORIA (MEM)       PON (SET)
+;       RUTA (PATH)         INDICADOR (PROMPT)
 ;  «C:» a secas cambia de unidad. Cualquier otra palabra es un programa
 ;  (NOMBRE.COM o NOMBRE.EXE) o un archivo por lotes (NOMBRE.BAT), del
-;  directorio de trabajo o de la raíz.
+;  directorio de trabajo o de los que diga la variable PATH (la pone RUTA).
 ;
 ;  Un archivo por lotes es un texto con una orden por línea. Se carga entero
 ;  en un bloque de memoria y se va ejecutando; «@» delante de una línea hace
@@ -40,8 +43,14 @@
 ;  la unidad de trabajo, como hacía DOS) y se lo da a leer a la segunda.
 ;
 ;  Las órdenes que son programas del disco tienen también su nombre clásico:
-;  FORMAT es FORMATEA, SYS es SISTEMA, FDISK es PARTIR, MORE es MAS (y «más»)
-;  y SORT es ORDENAR: aquí se traduce el nombre, sin duplicar los archivos.
+;  FORMAT es FORMATEA, SYS es SISTEMA, FDISK es PARTIR, MORE es MAS (y «más»),
+;  SORT es ORDENAR, CHKDSK es REVISAR, LABEL es ETIQUETA, ATTRIB es ATRIBUTO,
+;  TREE es ARBOL, XCOPY es XCOPIAR, KEYB es TECLADO y EDIT es EDITAR: aquí se
+;  traduce el nombre, sin duplicar los archivos.
+;
+;  SI y IR A son IF y GOTO en español, con el criterio de PARA (FOR): valen
+;  las dos formas, y las palabras de dentro también (NO, EXISTE, NIVEL por
+;  NOT, EXIST, ERRORLEVEL): «SI NO EXISTE X.TXT IR A FIN».
 ; =============================================================================
         cpu 8086
         bits 16
@@ -51,6 +60,7 @@ LIN_MAX     equ 126                 ; letras de una línea de órdenes
 RUTA_MAX    equ 80
 LOTE_MAX    equ 16384               ; lo más que mide un archivo por lotes
 LOTE_NOM_TAM equ 24                 ; letras de %0
+ENT_TAM     equ 512                 ; lo que mide nuestro entorno
 E_ARCHIVO   equ 2
 E_RUTA      equ 3
 E_MUCHOS    equ 4
@@ -84,6 +94,7 @@ inicio:
         rep stosb
         mov dx, dta_int
         DOS 0x1A
+        call ent_ini                ; un entorno propio, con sitio para crecer
         int 0x11                    ; ¿pantalla monocroma?
         and al, 0x30
         cmp al, 0x30
@@ -154,18 +165,91 @@ bucle:
         call ejecuta_tubo
         jmp bucle
 
-; «A:\CARTAS>»
+; el indicador: lo que diga la variable PROMPT (la pone INDICADOR), o «$P$G»,
+; que es «A:\CARTAS>». $P la unidad y el directorio, $N la unidad, $G «>»,
+; $L «<», $B «|», $Q «=», $D la fecha, $T la hora, $_ línea nueva, $$ «$»
 pon_indicador:
         push si
-        call trae_dir
+        push di
         call pon_nl
+        mov si, t_prompt
+        call ent_busca
+        mov si, t_prompt_def
+        jc .v
+        mov si, arg2                ; (una copia, que el entorno está en otro
+        push si                     ; segmento)
+        mov cx, RUTA_MAX
+.cp:
+        mov al, [es:di]
+        mov [si], al
+        inc di
+        inc si
+        test al, al
+        loopnz .cp
+        mov byte [si], 0
+        pop si
+.v:
+        push cs
+        pop es
+.c:
+        lodsb
+        test al, al
+        jz .x
+        cmp al, '$'
+        je .d
+.pon:
+        call pon_car
+        jmp .c
+.d:
+        lodsb
+        test al, al
+        jz .x
+        call mayus
+        mov bx, t_prompt_car
+.b:
+        mov ah, [bx]
+        test ah, ah
+        jz .otros
+        cmp al, ah
+        je .este
+        add bx, 2
+        jmp .b
+.este:
+        mov al, [bx+1]
+        jmp .pon
+.otros:
+        cmp al, 'P'
+        jne .o1
+        call trae_dir
         call pon_unidad
+        push si
         mov si, dir_txt
         call pon_cad
-        mov al, '>'
-        call pon_car
+        pop si
+        jmp .c
+.o1:
+        cmp al, 'N'
+        jne .o2
+        DOS 0x19
+        add al, 'A'
+        jmp .pon
+.o2:
+        cmp al, 'D'
+        jne .o3
+        call pon_fecha
+        jmp .c
+.o3:
+        cmp al, 'T'
+        jne .c
+        call pon_hora
+        jmp .c
+.x:
+        pop di
         pop si
         ret
+t_prompt    db "PROMPT", 0
+t_prompt_def db "$P$G", 0
+t_prompt_car db "G>L<B|Q=$$_", 10, 0
 ; «C:\» (la unidad de trabajo)
 pon_unidad:
         push ax
@@ -327,7 +411,7 @@ ejecuta_red:
         mov dx, [tubo_sal]
         test dx, dx
         jz .t2
-        xor cx, cx
+        mov cx, 0x02                ; (oculto: que no salga en «DIR | ORDENAR»)
         DOS 0x3C
         jc .mal
         mov [r_sal], ax
@@ -506,6 +590,16 @@ ordenes     dw t_ayuda, o_ayuda, t_help, o_ayuda
             dw t_for, o_for, t_para, o_for
             dw t_llamar, o_call, t_call, o_call
             dw t_desplazar, o_shift, t_shift, o_shift
+            dw t_si, o_if, t_ir, o_goto
+            dw t_mover, o_mover, t_move, o_mover
+            dw t_fecha, o_fecha, t_date, o_fecha
+            dw t_hora, o_hora, t_time, o_hora
+            dw t_vol, o_vol
+            dw t_verificar, o_verificar, t_verify, o_verificar
+            dw t_memoria, o_memoria, t_mem, o_memoria
+            dw t_pon, o_pon, t_set, o_pon
+            dw t_ruta, o_ruta, t_path, o_ruta
+            dw t_indicador, o_indicador, t_prompt, o_indicador
             dw 0
 ; (las órdenes se miran a ocho letras: RENOMBRAR es RENOMBRA)
 t_ayuda     db "AYUDA", 0
@@ -544,6 +638,24 @@ t_llamar    db "LLAMAR", 0
 t_call      db "CALL", 0
 t_desplazar db "DESPLAZA", 0
 t_shift     db "SHIFT", 0
+t_si        db "SI", 0
+t_ir        db "IR", 0
+t_mover     db "MOVER", 0
+t_move      db "MOVE", 0
+t_fecha     db "FECHA", 0
+t_date      db "DATE", 0
+t_hora      db "HORA", 0
+t_time      db "TIME", 0
+t_vol       db "VOL", 0
+t_verificar db "VERIFICA", 0
+t_verify    db "VERIFY", 0
+t_memoria   db "MEMORIA", 0
+t_mem       db "MEM", 0
+t_pon       db "PON", 0
+t_set       db "SET", 0
+t_ruta      db "RUTA", 0
+t_path      db "PATH", 0
+t_indicador db "INDICADO", 0
 
 ; SI salta los espacios
 salta_esp:
@@ -645,6 +757,14 @@ es_directorio:
         mov si, dx
         call con_comodin
         je .no
+        call nombre_de              ; «.» y «..» lo son (la raíz no los tiene
+        cmp word [si], '.'          ; escritos, y no se encontrarían)
+        je .x
+        cmp word [si], '..'
+        jne .busca
+        cmp byte [si+2], 0
+        je .x
+.busca:
         mov cx, 0x10
         DOS 0x4E
         jc .no
@@ -898,43 +1018,222 @@ o_mostrar:
         DOS 0x3E
         jmp pon_nl
 
-; ---- COPIAR origen destino ----
+; ---- COPIAR origen [destino] y MOVER origen [destino] ----
+; El origen puede llevar comodines o ser un directorio (todo lo que tiene); el
+; destino, un directorio (cada archivo conserva su nombre), un nombre, o un
+; nombre con comodines («COPIAR *.TXT *.BAK»): lo que el destino no dice se
+; toma del origen. Sin destino, el directorio de trabajo. Cualquiera de los
+; dos puede ser un dispositivo: «COPIAR CON NOTA.TXT» (se acaba con Ctrl+Z e
+; Intro), «COPIAR NOTA.TXT PRN». MOVER cambia el archivo de directorio sin
+; copiarlo; si el destino está en otra unidad, lo copia y borra el original
+o_mover:
+        mov byte [cp_modo], 1
+        jmp short cp_comun
 o_copiar:
+        mov byte [cp_modo], 0
+cp_comun:
         mov di, arg1
         call toma_arg
-        jz .falta
-        mov di, arg2
-        call toma_arg
         jnz .hay
-.falta:
         mov si, m_e_copiar
         jmp pon_cad
 .hay:
-        mov di, arg2                ; si el destino es un directorio, dentro
-        call al_final               ; de él y con el mismo nombre
-        mov al, [di-1]
-        cmp al, '\'
-        je .dentro
-        cmp al, ':'
-        je .dentro
-        mov dx, arg2
+        mov di, arg2
+        call toma_arg
+        mov dx, arg1                ; un directorio: lo que tiene dentro
         call es_directorio
-        jne .abre
+        jne .o1
+        mov di, arg1
+        call al_final
         mov al, '\'
         stosb
-.dentro:
+        mov si, t_todos
+        call copia_txt
+.o1:
+        ; el destino, en dos: el directorio (cp_dir) y el nombre (cp_pat)
+        mov si, arg2
+        mov di, cp_dir
+        call copia_txt
+        cmp byte [arg2], 0
+        je .dir
+        mov al, [di-1]
+        cmp al, '\'
+        je .dir
+        cmp al, ':'
+        je .dir
+        mov dx, arg2
+        call es_directorio
+        jne .nombre
+        mov ax, '\'
+        stosw
+.dir:
+        mov si, t_todos
+        mov di, cp_pat
+        call copia_txt
+        jmp short .listo
+.nombre:
+        mov si, cp_dir
+        call nombre_de
+        push si
+        mov di, cp_pat
+        call copia_txt
+        pop si
+        mov byte [si], 0
+.listo:
+        cmp byte [cp_modo], 0
+        jne .va
+        call borr_pide
+        jc cp_fin.x
+.va:
+        mov word [cp_n], 0
+        mov si, arg1
+        call con_comodin
+        je cp_varios
+        mov si, arg1                ; uno solo: él mismo
+        mov di, cp_org
+        call copia_txt
         mov si, arg1
         call nombre_de
+        call cp_este
+; (común) dice cuántos han sido
+cp_fin:
+        mov ax, [cp_n]
+        cmp ax, 1
+        jne .n
+        mov si, m_copiado
+        cmp byte [cp_modo], 0
+        je .d
+        mov si, m_movido
+        jmp short .d
+.n:
+        cmp byte [cp_modo], 2       ; (RENOMBRAR no dice nada)
+        je .x
+        call pon_num
+        mov si, m_copiados
+        cmp byte [cp_modo], 0
+        je .d
+        mov si, m_movidos
+.d:
+        cmp byte [cp_modo], 2
+        je .x
+        call pon_cad
+.x:
+        ret
+; (común) con comodines: cada archivo que case con arg1
+cp_varios:
+        mov dx, cp_dta
+        DOS 0x1A
+        mov dx, arg1
+        xor cx, cx
+        DOS 0x4E
+        jnc .uno
+        call pon_error
+        jmp short .fin
+.uno:
+        mov si, arg1                ; su ruta: la del patrón, con su nombre
+        mov di, cp_org
         call copia_txt
-.abre:
+        mov si, cp_org
+        call nombre_de
+        mov di, si
+        mov si, cp_dta + 30
+        call copia_txt
+        cmp byte [cp_modo], 2
+        je .u1
+        mov si, cp_org
+        call pon_cad
+        call pon_nl
+.u1:
+        mov si, cp_dta + 30
+        call cp_este
+        DOS 0x4F
+        jnc .uno
+.fin:
+        mov dx, dta_int
+        DOS 0x1A
+        jmp cp_fin
+
+; (interna) el archivo de cp_org, que se llama como dice SI: se copia, se
+; mueve o cambia de nombre ([cp_modo]: 0, 1, 2) a cp_dir + su nombre nuevo
+cp_este:
+        mov di, fcb1                ; el nombre nuevo: el del destino, y donde
+        call a_fcb                  ; tiene comodines, lo del origen
+        mov si, cp_pat
+        mov di, fcb2
+        call a_fcb
+        xor bx, bx
+.m:
+        cmp byte [fcb2+bx], '?'
+        jne .m1
+        mov al, [fcb1+bx]
+        mov [fcb2+bx], al
+.m1:
+        inc bx
+        cmp bx, 11
+        jb .m
+        mov si, cp_dir
+        mov di, cp_dst
+        call copia_txt
+        mov si, fcb2
+        call de_fcb
+        mov si, cp_org              ; ¿sobre sí mismo?
+        mov di, cp_dst
+.i:
+        lodsb
+        call mayus
+        mov ah, al
+        mov al, [di]
+        call mayus
+        inc di
+        cmp al, ah
+        jne .dist
+        test al, al
+        jnz .i
+        mov si, m_e_mismo
+        jmp pon_cad
+.dist:
+        cmp byte [cp_modo], 0
+        je .copia
+        mov dx, cp_org              ; mover o renombrar: solo cambia la entrada
+        mov di, cp_dst
+        DOS 0x56
+        jnc .hecho
+        cmp byte [cp_modo], 1
+        jne .err
+        cmp ax, E_OTRO_DISP         ; a otra unidad: copiar y borrar
+        jne .err
+        cmp word [borr_seg], 0
+        jne .c1
         call borr_pide
         jc .x
-        mov dx, arg1
+.c1:
+        call copia_arch
+        jc .x
+        mov dx, cp_org
+        DOS 0x41
+        jnc .hecho
+.err:
+        jmp pon_error
+.copia:
+        call copia_arch
+        jc .x
+.hecho:
+        inc word [cp_n]
+.x:
+        ret
+
+; copia el archivo cp_org a cp_dst. CF=1 (y lo dice) si no ha podido
+copia_arch:
+        mov dx, cp_org
         mov al, 0
         DOS 0x3D
-        jc pon_error
+        jnc .abierto
+        call pon_error
+        stc
+        ret
+.abierto:
         mov [o_h1], ax
-        mov dx, arg2
+        mov dx, cp_dst
         xor cx, cx
         DOS 0x3C
         jnc .creado
@@ -942,9 +1241,12 @@ o_copiar:
         mov bx, [o_h1]
         DOS 0x3E
         pop ax
-        jmp pon_error
+        call pon_error
+        stc
+        ret
 .creado:
         mov [o_h2], ax
+        mov byte [cp_mal], 0
 .trozo:
         push ds
         mov bx, [o_h1]
@@ -955,7 +1257,7 @@ o_copiar:
         pop ds
         jc .mal
         test ax, ax
-        jz .hecho
+        jz .cierra
         mov cx, ax
         push ds
         mov bx, [o_h2]
@@ -968,21 +1270,106 @@ o_copiar:
         je .trozo
         mov si, m_e_lleno           ; no ha cabido todo
         call pon_cad
-        jmp short .cierra
+        jmp short .m1
 .mal:
         call pon_error
-        jmp short .cierra
-.hecho:
-        mov si, m_copiado
-        call pon_cad
+.m1:
+        mov byte [cp_mal], 1
 .cierra:
         mov bx, [o_h1]
         DOS 0x3E
         mov bx, [o_h2]
         DOS 0x3E
-        jnc .x
+        jnc .c1
         call pon_error
+        mov byte [cp_mal], 1
+.c1:
+        cmp byte [cp_mal], 1        ; CF=1 si [cp_mal] = 0... al revés:
+        cmc                         ; CF=1 si ha ido mal
+        ret
+
+; el nombre de SI («CARTA.TXT», «*.BAK») -> en DI, como en el disco: once
+; letras, con «?» donde vale cualquiera. Conserva los registros
+a_fcb:
+        push ax
+        push cx
+        push si
+        push di
+        push di
+        mov al, ' '
+        mov cx, 11
+        rep stosb
+        pop di
+        mov cx, 8
+.n:
+        lodsb
+        cmp al, ' '
+        jbe .x
+        cmp al, '.'
+        je .e
+        cmp al, '*'
+        je .na
+        jcxz .n
+        call mayus
+        stosb
+        dec cx
+        jmp .n
+.na:
+        mov al, '?'
+        rep stosb
+        jmp .n
+.e:
+        add di, cx
+        mov cx, 3
+.e1:
+        lodsb
+        cmp al, ' '
+        jbe .x
+        cmp al, '*'
+        je .ea
+        jcxz .e1
+        call mayus
+        stosb
+        dec cx
+        jmp .e1
+.ea:
+        mov al, '?'
+        rep stosb
+        jmp .e1
 .x:
+        pop di
+        pop si
+        pop cx
+        pop ax
+        ret
+; las once letras de SI -> «NOMBRE.EXT», acabado en 0, en DI
+de_fcb:
+        push ax
+        push cx
+        mov cx, 8
+.n:
+        lodsb
+        cmp al, ' '
+        je .n1
+        stosb
+.n1:
+        loop .n
+        cmp byte [si], ' '
+        je .f
+        mov al, '.'
+        stosb
+        mov cx, 3
+.e:
+        lodsb
+        cmp al, ' '
+        je .e1
+        stosb
+.e1:
+        loop .e
+.f:
+        mov byte [di], 0
+        pop cx
+        pop ax
         ret
 
 ; ---- BORRAR archivo (o varios, con comodines) ----
@@ -1001,6 +1388,21 @@ o_borrar:
         jc pon_error
         ret
 .varios:
+        mov si, arg1                ; «*.*»: todos; se pregunta antes
+        call nombre_de
+        cmp word [si], '*.'
+        jne .v1
+        cmp word [si+2], '*'
+        jne .v1
+        mov si, m_seguro
+        call pon_cad
+        DOS 0x01
+        call pon_nl
+        and al, 0xDF
+        cmp al, 'S'
+        je .v1
+        ret
+.v1:
         mov dx, arg1
         xor cx, cx
         DOS 0x4E
@@ -1035,11 +1437,31 @@ o_renombrar:
         mov si, m_e_renombrar
         jmp pon_cad
 .hay:
+        mov si, arg1                ; con comodines en alguno de los dos:
+        call con_comodin            ; cada archivo que case, con el nombre que
+        je .varios                  ; salga de mezclarlo con el nuevo
+        mov si, arg2
+        call con_comodin
+        je .varios
         mov dx, arg1
         mov di, arg2
         DOS 0x56
         jc pon_error
         ret
+.varios:
+        mov byte [cp_modo], 2
+        mov word [cp_n], 0
+        mov si, arg1                ; se quedan en su directorio
+        mov di, cp_dir
+        call copia_txt
+        mov si, cp_dir
+        call nombre_de
+        mov byte [si], 0
+        mov si, arg2
+        call nombre_de
+        mov di, cp_pat
+        call copia_txt
+        jmp cp_varios
 
 ; ---- CD [directorio]: sin nada, dice dónde se está ----
 o_cd:
@@ -1109,13 +1531,23 @@ o_if:
         xor bp, bp                  ; BP=1: al revés (NOT)
         mov di, t_not
         call palabra
+        je .no
+        mov di, t_no
+        call palabra
         jne .c
+.no:
         inc bp
 .c:
         mov di, t_exist
         call palabra
         je .existe
+        mov di, t_existe
+        call palabra
+        je .existe
         mov di, t_errorlevel
+        call palabra
+        je .nivel
+        mov di, t_nivel
         call palabra
         je .nivel
         ; a==b: se comparan letra a letra
@@ -1453,6 +1885,18 @@ o_shift:
 o_goto:
         cmp word [lote_seg], 0
         je .x
+        push si                     ; «IR A etiqueta»: la «A» sobra si detrás
+        mov di, t_a                 ; viene la etiqueta
+        call palabra
+        jne .sin_a
+        call salta_esp
+        cmp byte [si], ' '
+        jbe .sin_a
+        add sp, 2
+        jmp short .et
+.sin_a:
+        pop si
+.et:
         mov di, arg1
         call toma_arg
         jz .x
@@ -1515,6 +1959,539 @@ o_pausa:
         jmp pon_nl
 
 ; =============================================================================
+;  El entorno: PON (SET), RUTA (PATH), INDICADOR (PROMPT)
+; =============================================================================
+; El entorno son las variables («NOMBRE=valor», cada una acabada en 0, y otro
+; 0 al final) que hereda cada programa que se lanza. El que nos da el núcleo
+; viene justo de tamaño, así que al empezar se pasa a un bloque propio de
+; ENT_TAM octetos, donde pueden crecer
+ent_ini:
+        mov bx, ENT_TAM / 16
+        DOS 0x48
+        jc .x
+        mov [ent_seg], ax
+        push ds
+        mov es, ax
+        mov ds, [0x2C]
+        xor si, si
+        xor di, di
+.c:
+        lodsb
+        stosb
+        test al, al
+        jnz .c
+        cmp byte [si], 0            ; hasta los dos ceros seguidos
+        jne .c
+        stosb
+        push ds
+        pop es
+        pop ds
+        DOS 0x49                    ; el que traíamos ya no hace falta
+        mov ax, [ent_seg]
+        mov [0x2C], ax
+        push cs
+        pop es
+        ret
+.x:
+        mov ax, [0x2C]              ; (sin memoria: el que hay, sin crecer)
+        mov [ent_seg], ax
+        ret
+; busca la variable de nombre SI (en mayúsculas) -> ES:DI = su valor (ES es
+; el entorno: quien llama lo repone). CF=1 si no está. Conserva SI
+ent_busca:
+        mov es, [ent_seg]
+        xor di, di
+.v:
+        cmp byte [es:di], 0
+        je .no
+        push si
+.c:
+        lodsb
+        test al, al
+        jz .fin_nom
+        cmp al, [es:di]
+        jne .otra
+        inc di
+        jmp .c
+.fin_nom:
+        cmp byte [es:di], '='
+        jne .otra
+        pop si
+        inc di
+        clc
+        ret
+.otra:
+        pop si
+.s:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .s
+        jmp .v
+.no:
+        stc
+        ret
+; pone la variable de nombre SI con el valor de DX (vacío: la quita).
+; Conserva los registros; deja ES = el nuestro
+ent_pon:
+        push ax
+        push bx
+        push cx
+        push si
+        push di
+        call ent_busca
+        jc .nueva
+        mov bx, di                  ; la que había, fuera: lo de detrás se
+.i:
+        dec bx                      ; corre a su sitio
+        test bx, bx
+        jz .i1
+        cmp byte [es:bx-1], 0
+        jne .i
+.i1:
+.f:
+        inc di                      ; DI = detrás de su 0
+        cmp byte [es:di-1], 0
+        jne .f
+        mov cx, di
+.g:
+        cmp byte [es:di], 0         ; hasta el final (el 0 que sobra)
+        je .g2
+.g1:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .g1
+        jmp .g
+.g2:
+        sub di, cx
+        xchg cx, di                 ; CX = cuánto, DI = desde dónde
+        inc cx
+        push si
+        push ds
+        push es
+        pop ds
+        mov si, di
+        mov di, bx
+        rep movsb
+        pop ds
+        pop si
+.nueva:
+        mov bx, dx
+        cmp byte [bx], 0
+        je .x
+        xor di, di                  ; al final
+.e:
+        cmp byte [es:di], 0
+        je .e2
+.e1:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .e1
+        jmp .e
+.e2:
+        push si                     ; ¿cabe?
+        mov cx, di
+.l1:
+        lodsb
+        inc cx
+        test al, al
+        jnz .l1
+        mov si, dx
+.l2:
+        lodsb
+        inc cx
+        test al, al
+        jnz .l2
+        pop si
+        cmp cx, ENT_TAM - 2
+        jb .cabe
+        push cs
+        pop es
+        mov si, m_e_entorno
+        call pon_cad
+        jmp short .x
+.cabe:
+        lodsb
+        test al, al
+        jz .v0
+        stosb
+        jmp .cabe
+.v0:
+        mov al, '='
+        stosb
+        mov si, dx
+.v1:
+        lodsb
+        stosb
+        test al, al
+        jnz .v1
+        stosb                       ; y el 0 del final
+.x:
+        push cs
+        pop es
+        pop di
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; ---- PON (SET): sin nada, las enseña; PON NOMBRE=valor; PON NOMBRE= la quita ----
+o_pon:
+        call salta_esp
+        cmp byte [si], 0
+        jne .pon
+        mov es, [ent_seg]
+        xor di, di
+.v:
+        cmp byte [es:di], 0
+        je .fin
+.c:
+        mov al, [es:di]
+        inc di
+        test al, al
+        jz .nl
+        call pon_car
+        jmp .c
+.nl:
+        call pon_nl
+        jmp .v
+.fin:
+        push cs
+        pop es
+        ret
+.pon:
+        mov di, arg1                ; el nombre, en mayúsculas, hasta el «=»
+.n:
+        lodsb
+        test al, al
+        jz .mal
+        cmp al, '='
+        je .nf
+        call mayus
+        stosb
+        jmp .n
+.nf:
+        mov byte [di], 0
+        mov dx, si
+        mov si, arg1
+        jmp ent_pon
+.mal:
+        mov si, m_e_pon
+        jmp pon_cad
+; ---- RUTA (PATH): sin nada, la dice; RUTA dir;dir la pone; RUTA ; la quita ----
+o_ruta:
+        mov bx, t_path
+        jmp short var_orden
+; ---- INDICADOR (PROMPT) texto: sin nada, el de siempre ----
+o_indicador:
+        mov bx, t_prompt
+var_orden:
+        call salta_esp
+        cmp bx, t_prompt
+        je .pon
+        cmp byte [si], 0
+        jne .may
+        mov si, bx                  ; RUTA a secas: cuál es
+        call ent_busca
+        jc .no
+.c:
+        mov al, [es:di]
+        inc di
+        test al, al
+        jz .nl
+        call pon_car
+        jmp .c
+.no:
+        mov si, m_sin_ruta
+        push cs
+        pop es
+        jmp pon_cad
+.nl:
+        push cs
+        pop es
+        jmp pon_nl
+.may:
+        push si                     ; (las rutas, en mayúsculas)
+.m:
+        mov al, [si]
+        call mayus
+        mov [si], al
+        inc si
+        test al, al
+        jnz .m
+        pop si
+        cmp word [si], ';'          ; «;» a secas: ninguna
+        jne .pon
+        inc si
+.pon:
+        mov dx, si
+        mov si, bx
+        jmp ent_pon
+
+; =============================================================================
+;  FECHA, HORA, VOL, VERIFICAR, MEMORIA
+; =============================================================================
+; escribe AL con dos cifras
+pon_2:
+        push ax
+        aam
+        add ax, '00'
+        xchg al, ah
+        call pon_car
+        mov al, ah
+        call pon_car
+        pop ax
+        ret
+; escribe la fecha: 16-11-2026
+pon_fecha:
+        push ax
+        push cx
+        push dx
+        DOS 0x2A
+        mov al, dl
+        call pon_2
+        mov al, '-'
+        call pon_car
+        mov al, dh
+        call pon_2
+        mov al, '-'
+        call pon_car
+        mov ax, cx
+        call pon_num
+        pop dx
+        pop cx
+        pop ax
+        ret
+; escribe la hora: 19:45:10
+pon_hora:
+        push ax
+        push cx
+        push dx
+        DOS 0x2C
+        mov al, ch
+        call pon_2
+        mov al, ':'
+        call pon_car
+        mov al, cl
+        call pon_2
+        mov al, ':'
+        call pon_car
+        mov al, dh
+        call pon_2
+        pop dx
+        pop cx
+        pop ax
+        ret
+; el número de SI -> AX; SI queda detrás de él y del separador que le siga.
+; CF=1 si no hay número
+toma_num:
+        xor ax, ax
+        mov bl, [si]
+        sub bl, '0'
+        cmp bl, 9
+        ja .no
+.c:
+        mov bl, [si]
+        sub bl, '0'
+        cmp bl, 9
+        ja .f
+        mov cx, 10
+        mul cx
+        xor bh, bh
+        add ax, bx
+        inc si
+        jmp .c
+.f:
+        cmp byte [si], ' '
+        jbe .x
+        inc si                      ; el separador: - / : .
+.x:
+        clc
+        ret
+.no:
+        stc
+        ret
+; (común a FECHA y HORA) sin nada escrito, se pregunta: SI = lo tecleado
+pide_dato:
+        call salta_esp
+        cmp byte [si], 0
+        jne .x
+        mov si, dx
+        call pon_cad
+        mov byte [lin_buf], 20
+        mov dx, lin_buf
+        DOS 0x0A
+        mov bl, [lin_buf+1]
+        xor bh, bh
+        mov byte [lin_buf+2+bx], 0
+        call pon_nl
+        mov si, lin_buf + 2
+        call salta_esp
+.x:
+        ret
+; ---- FECHA [dd-mm-aaaa] (DATE) ----
+o_fecha:
+        call salta_esp
+        cmp byte [si], 0
+        jne .pon
+        push si
+        mov si, m_fecha
+        call pon_cad
+        call pon_fecha
+        call pon_nl
+        pop si
+        mov dx, m_fecha_nueva
+        call pide_dato
+        cmp byte [si], 0
+        je .x
+.pon:
+        call toma_num
+        jc .mal
+        mov [d_n], al               ; el día
+        call toma_num
+        jc .mal
+        mov [d_n+1], al             ; el mes
+        call toma_num
+        jc .mal
+        cmp ax, 100                 ; (con dos cifras: de 1980 a 2079)
+        jae .a
+        add ax, 1900
+        cmp ax, 1980
+        jae .a
+        add ax, 100
+.a:
+        mov cx, ax
+        mov dx, [d_n]
+        DOS 0x2B
+        test al, al
+        jz .x
+.mal:
+        mov si, m_e_fecha
+        jmp pon_cad
+.x:
+        ret
+; ---- HORA [hh:mm[:ss]] (TIME) ----
+o_hora:
+        call salta_esp
+        cmp byte [si], 0
+        jne .pon
+        push si
+        mov si, m_hora
+        call pon_cad
+        call pon_hora
+        call pon_nl
+        pop si
+        mov dx, m_hora_nueva
+        call pide_dato
+        cmp byte [si], 0
+        je .x
+.pon:
+        call toma_num
+        jc .mal
+        mov [d_n+1], al
+        call toma_num
+        jc .mal
+        mov [d_n], al
+        call toma_num               ; (los segundos pueden faltar)
+        mov dh, al
+        xor dl, dl
+        mov cx, [d_n]
+        DOS 0x2D
+        test al, al
+        jz .x
+.mal:
+        mov si, m_e_hora
+        jmp pon_cad
+.x:
+        ret
+; ---- VOL [unidad:]: cómo se llama el disco ----
+o_vol:
+        mov di, arg1
+        call toma_arg
+        mov si, t_todos             ; se busca la etiqueta en su raíz
+        mov di, arg2
+        cmp byte [arg1+1], ':'
+        jne .u
+        mov ax, [arg1]
+        stosw
+.u:
+        mov al, '\'
+        stosb
+        call copia_txt
+        mov dx, arg2
+        mov cx, 0x08
+        DOS 0x4E
+.b:
+        jc .sin
+        test byte [dta_int+21], 0x08
+        jnz .esta
+        DOS 0x4F
+        jmp .b
+.esta:
+        mov si, m_vol
+        call pon_cad
+        mov si, dta_int + 30        ; (sin el punto que separa la extensión)
+.c:
+        lodsb
+        test al, al
+        jz .nl
+        cmp al, '.'
+        je .c
+        call pon_car
+        jmp .c
+.sin:
+        cmp ax, E_NO_MAS
+        je .s1
+        jmp pon_error
+.s1:
+        mov si, m_sin_vol
+        jmp pon_cad
+.nl:
+        jmp pon_nl
+; ---- VERIFICAR [ON | OFF] (VERIFY) ----
+o_verificar:
+        call salta_esp
+        mov ax, [si]
+        and ax, 0xDFDF
+        cmp ax, 'ON'
+        mov dl, 1
+        je .pon
+        cmp ax, 'OF'
+        mov dl, 0
+        je .pon
+        DOS 0x54
+        mov si, m_verif_on
+        test al, al
+        jnz .d
+        mov si, m_verif_off
+.d:
+        jmp pon_cad
+.pon:
+        mov al, dl
+        DOS 0x2E
+        ret
+; ---- MEMORIA (MEM) ----
+o_memoria:
+        mov si, m_mem_total
+        call pon_cad
+        int 0x12
+        call pon_num
+        mov si, m_mem_libre
+        call pon_cad
+        mov bx, 0xFFFF
+        DOS 0x48
+        mov ax, bx                  ; párrafos, en octetos
+        xor dx, dx
+        mov cx, 4
+.m:
+        shl ax, 1
+        rcl dx, 1
+        loop .m
+        call pon_num32
+        mov si, m_octetos
+        jmp pon_cad
+
+; =============================================================================
 ;  Programas y archivos por lotes
 ; =============================================================================
 ; lo que no es una orden de dentro: ORDEN.COM, ORDEN.EXE u ORDEN.BAT, en el
@@ -1569,9 +2546,9 @@ ejecuta:
         jz .n4
         mov byte [bx], 0
 .n4:
-        mov bx, intentos_ruta
-        test dx, dx                 ; con ruta, solo ahí: no se busca en la raíz
-        jnz .i
+        mov [ej_ruta], dl
+        test dx, dx                 ; con ruta, solo ahí
+        jnz .cl3
         ; sin ruta: si es el nombre clásico de una orden del disco, su archivo
         ; lleva el español
         mov bx, clasicos
@@ -1596,18 +2573,29 @@ ejecuta:
         add bx, 4
         jmp .cl
 .cl3:
-        mov bx, intentos
+        ; se busca en el directorio de trabajo y luego en los de la variable
+        ; PATH (la pone RUTA), probando .COM, .EXE y .BAT en cada uno. Con
+        ; ruta escrita, solo ahí
+        mov word [ej_path], 0xFFFF  ; (aún no se ha mirado PATH)
+        cmp byte [ej_ruta], 0
+        je .c0
+        mov word [ej_path], 0       ; (ni se mirará)
+.c0:
+        mov byte [ej_pref], 0
+.pre:
+        mov bx, extensiones
 .i:
-        mov si, [bx]                ; delante («» o «\») y detrás (la extensión)
+        mov si, [bx]
         test si, si
-        jz .no
+        jz .prefijo
         mov di, arg1
+        mov si, ej_pref
         call copia_txt
         mov si, orden_l
         call copia_txt
-        mov si, [bx+2]
+        mov si, [bx]
         call copia_txt
-        cmp si, t_bat + 5           ; (copia_txt deja SI detrás del texto)
+        cmp word [bx], t_bat
         je .lote
         push bx
         mov dx, arg1
@@ -1620,8 +2608,14 @@ ejecuta:
         je .otro
         cmp ax, E_RUTA
         je .otro
+        cmp ax, E_UNIDAD            ; (un directorio de PATH que no está)
+        je .otro
+        cmp ax, E_DISCO
+        je .otro
         cmp ax, E_MEMORIA
-        jne pon_error
+        je .mem
+        jmp pon_error
+.mem:
         mov si, m_e_grande
         jmp pon_cad
 .lote:
@@ -1638,19 +2632,69 @@ ejecuta:
         call copia_txt
         ret
 .otro:
-        add bx, 4
+        add bx, 2
         jmp .i
+.prefijo:
+        ; el directorio siguiente de PATH -> ej_pref, acabado en barra
+        mov di, [ej_path]
+        test di, di
+        jz .no
+        cmp di, 0xFFFF
+        jne .p1
+        mov si, t_path
+        call ent_busca
+        jc .no_es
+.p1:
+        mov es, [ent_seg]
+        mov si, ej_pref
+        mov cx, RUTA_MAX - 2
+.p2:
+        mov al, [es:di]
+        test al, al
+        jz .p3
+        inc di
+        cmp al, ';'
+        je .p3
+        jcxz .p2
+        mov [si], al
+        inc si
+        dec cx
+        jmp .p2
+.p3:
+        test al, al                 ; (si era el último, ya no hay más)
+        jnz .p4
+        xor di, di
+.p4:
+        mov [ej_path], di
+        push cs
+        pop es
+        cmp si, ej_pref
+        je .prefijo                 ; (uno vacío: el siguiente)
+        mov al, [si-1]
+        cmp al, '\'
+        je .p5
+        cmp al, ':'
+        je .p5
+        mov byte [si], '\'
+        inc si
+.p5:
+        mov byte [si], 0
+        jmp .pre
+.no_es:
+        push cs
+        pop es
 .no:
         mov si, m_e_orden
         call pon_cad
 .x:
         ret
             align 2
-intentos    dw t_nada, t_com, t_nada, t_exe, t_nada, t_bat
-            dw t_barra, t_com, t_barra, t_exe, t_barra, t_bat, 0
-intentos_ruta dw t_nada, t_com, t_nada, t_exe, t_nada, t_bat, 0
+extensiones dw t_com, t_exe, t_bat, 0
 clasicos    dw tc_format, tc_formatea, tc_sys, tc_sistema, tc_fdisk, tc_partir
-            dw tc_more, tc_mas, tc_mas2, tc_mas, tc_sort, tc_ordenar, 0
+            dw tc_more, tc_mas, tc_mas2, tc_mas, tc_sort, tc_ordenar
+            dw tc_chkdsk, tc_revisar, tc_label, tc_etiqueta, tc_attrib, tc_atributo
+            dw tc_tree, tc_arbol, tc_xcopy, tc_xcopiar, tc_keyb, tc_teclado
+            dw tc_edit, tc_editar, 0
 tc_format   db "FORMAT", 0
 tc_formatea db "FORMATEA", 0
 tc_sys      db "SYS", 0
@@ -1662,8 +2706,20 @@ tc_mas2     db "M", 0xA0, "S", 0    ; «más», con su tilde
 tc_mas      db "MAS", 0
 tc_sort     db "SORT", 0
 tc_ordenar  db "ORDENAR", 0
-t_nada      db 0
-t_barra     db "\", 0
+tc_chkdsk   db "CHKDSK", 0
+tc_revisar  db "REVISAR", 0
+tc_label    db "LABEL", 0
+tc_etiqueta db "ETIQUETA", 0
+tc_attrib   db "ATTRIB", 0
+tc_atributo db "ATRIBUTO", 0
+tc_tree     db "TREE", 0
+tc_arbol    db "ARBOL", 0
+tc_xcopy    db "XCOPY", 0
+tc_xcopiar  db "XCOPIAR", 0
+tc_keyb     db "KEYB", 0
+tc_teclado  db "TECLADO", 0
+tc_edit     db "EDIT", 0
+tc_editar   db "EDITAR", 0
 t_exe       db ".EXE", 0
 t_bat       db ".BAT", 0
 t_autoexec  db "\AUTOEXEC.BAT", 0
@@ -2026,26 +3082,26 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.8", 10, 0
+m_ver       db "Hispa-8086 versión 0.9", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásico):", 10
-            db "  AYUDA   VER   EQUIPO   LIMPIAR (CLS)   ACTUALIZAR", 10
-            db "  DIR [ruta]              los archivos (LISTAR)", 10
-            db "  MOSTRAR archivo         enseña un archivo de texto (TYPE)", 10
-            db "  COPIAR origen destino   copia un archivo (COPY)", 10
-            db "  BORRAR archivo          lo borra; valen * y ? (DEL)", 10
-            db "  RENOMBRAR viejo nuevo   le cambia el nombre (REN)", 10
-            db "  CD [directorio]   CREARDIR (MD)   BORRARDIR (RD)", 10
-            db "En los lotes (.BAT): ECO, REM, PAUSA, IF, GOTO, DESPLAZAR (SHIFT),", 10
-            db "  LLAMAR lote (CALL) y FOR %%v IN (lista) DO orden (PARA.. EN.. HAZ)", 10
-            db "Detrás de una orden: > archivo, >> archivo, < archivo y | otra orden", 10
+            db "  AYUDA  VER  EQUIPO  MEMORIA (MEM)  LIMPIAR (CLS)  ACTUALIZAR", 10
+            db "  DIR [ruta]             los archivos (LISTAR)    VOL  cómo se llama el disco", 10
+            db "  MOSTRAR archivo        enseña un texto (TYPE)", 10
+            db "  COPIAR origen destino  copia; valen * y ?, directorios, CON y PRN (COPY)", 10
+            db "  MOVER origen destino   lo cambia de sitio (MOVE)", 10
+            db "  BORRAR archivo (DEL)   RENOMBRAR viejo nuevo (REN)", 10
+            db "  CD  CREARDIR (MD)  BORRARDIR (RD)            los directorios", 10
+            db "  FECHA (DATE)  HORA (TIME)  VERIFICAR (VERIFY)", 10
+            db "  PON (SET)  RUTA (PATH)  INDICADOR (PROMPT)   las variables", 10
+            db "En los lotes: ECO, REM, PAUSA, SI (IF), IR A (GOTO), PARA (FOR),", 10
+            db "  LLAMAR (CALL), DESPLAZAR (SHIFT). Detrás de una orden: > >> < |", 10
             db "Programas del disco:", 10
-            db "  FORMATEA unidad: [/S]   da formato a un disco (FORMAT)", 10
-            db "  SISTEMA unidad:         lo deja de arranque (SYS)", 10
-            db "  PARTIR                  las particiones del disco duro (FDISK)", 10
-            db "  MAS   ORDENAR           filtros: paginar y ordenar (MORE, SORT)", 10
-            db "  PASAR                   archivos por el puerto serie", 10
-            db "Cualquier otra palabra: el programa (.COM o .EXE) o el lote (.BAT)", 10
-            db "de ese nombre, del directorio de trabajo o de la raíz.", 10, 0
+            db "  EDITAR archivo         el editor de texto", 10
+            db "  FORMATEA (FORMAT)  SISTEMA (SYS)  PARTIR (FDISK)    preparar discos", 10
+            db "  REVISAR (CHKDSK)  ETIQUETA (LABEL)  ATRIBUTO (ATTRIB)", 10
+            db "  ARBOL (TREE)  XCOPIAR (XCOPY)  MAS (MORE)  ORDENAR (SORT)", 10
+            db "  TECLADO (KEYB)  el teclado español     PASAR  archivos por el puerto serie", 10
+            db "Cualquier otra palabra: el programa (.COM, .EXE) o el lote (.BAT) de ese nombre.", 10, 0
 m_actualizar db "Los sistemas de la familia Hispa-DOS se actualizan entre sí:", 10
             db "  Hispa-8086  PC, XT y AT: 8086, 8088, V20, 80186 y 286", 10
             db "  Hispa-386   386 o superior, con el escritorio Hispa Ventanas", 10
@@ -2055,6 +3111,26 @@ m_octetos   db " octetos", 10, 0
 m_libres    db " octetos libres", 10, 0
 m_dir       db "     <DIR>", 10, 0
 m_copiado   db "1 archivo copiado.", 10, 0
+m_copiados  db " archivos copiados.", 10, 0
+m_movido    db "1 archivo movido.", 10, 0
+m_movidos   db " archivos movidos.", 10, 0
+m_e_mismo   db "No se puede copiar un archivo sobre sí mismo.", 10, 0
+m_seguro    db "Se van a borrar TODOS los archivos. ¿Seguro? (S/N) ", 0
+m_e_entorno db "No queda sitio en el entorno.", 10, 0
+m_e_pon     db "Se escribe así: PON NOMBRE=valor", 10, 0
+m_sin_ruta  db "No hay ruta de búsqueda.", 10, 0
+m_fecha     db "Fecha: ", 0
+m_fecha_nueva db "Fecha nueva (dd-mm-aaaa), o Intro: ", 0
+m_e_fecha   db "Esa fecha no vale.", 10, 0
+m_hora      db "Hora: ", 0
+m_hora_nueva db "Hora nueva (hh:mm:ss), o Intro: ", 0
+m_e_hora    db "Esa hora no vale.", 10, 0
+m_vol       db "El disco se llama ", 0
+m_sin_vol   db "El disco no tiene etiqueta.", 10, 0
+m_verif_on  db "VERIFICAR está puesto (ON).", 10, 0
+m_verif_off db "VERIFICAR está quitado (OFF).", 10, 0
+m_mem_total db "Memoria: ", 0
+m_mem_libre db " K. Libre para los programas: ", 0
 m_e_error   db "Error ", 0
 m_e_disco   db "La unidad no está preparada.", 10, 0
 m_e_unidad  db "No existe esa unidad.", 10, 0
@@ -2070,11 +3146,11 @@ m_e_formato db "Ese programa no es válido.", 10, 0
 m_e_lleno   db "El disco está lleno: la copia ha quedado a medias.", 10, 0
 m_e_orden   db "Orden desconocida. Escriba AYUDA.", 10, 0
 m_e_falta_nombre db "Falta el nombre.", 10, 0
-m_e_copiar  db "Se escribe así: COPIAR origen destino", 10, 0
+m_e_copiar  db "Se escribe así: COPIAR origen [destino]", 10, 0
 m_e_renombrar db "Se escribe así: RENOMBRAR viejo nuevo", 10, 0
 m_pausa     db "Pulse una tecla para seguir...", 0
-m_e_if      db "Se escribe así: IF [NOT] EXIST archivo orden, IF [NOT] ERRORLEVEL n orden", 10
-            db "o IF [NOT] a==b orden", 10, 0
+m_e_if      db "Se escribe así: SI [NO] EXISTE archivo orden, SI [NO] NIVEL n orden", 10
+            db "o SI [NO] a==b orden (o IF [NOT] EXIST / ERRORLEVEL)", 10, 0
 m_e_goto    db "El lote no tiene esa etiqueta.", 10, 0
 m_e_for     db "Se escribe así: FOR %v IN (lista) DO orden", 10
             db "o PARA %v EN (lista) HAZ orden (en un lote, %%v)", 10, 0
@@ -2087,6 +3163,10 @@ t_haz       db "HAZ", 0
 t_not       db "NOT", 0
 t_exist     db "EXIST", 0
 t_errorlevel db "ERRORLEVEL", 0
+t_no        db "NO", 0
+t_existe    db "EXISTE", 0
+t_nivel     db "NIVEL", 0
+t_a         db "A", 0
 m_cpu       db "Procesador: ", 0
 m_mem       db 10, "Memoria:    ", 0
 m_mem2      db " K (", 0
@@ -2132,6 +3212,21 @@ lote_ant    resw 1                  ; el lote que ha llamado a este, guardado
 lote_nom    resb LOTE_NOM_TAM       ; %0
 lote_args   resb 130                ; %1 a %9
 LOTE_EST_TAM equ $ - lote_est
+ent_seg     resw 1                  ; nuestro entorno
+ej_path     resw 1                  ; ejecuta: por dónde va de PATH
+cp_n        resw 1                  ; COPIAR: cuántos van
+cp_modo     resb 1                  ; 0 copiar, 1 mover, 2 renombrar
+cp_mal      resb 1
+ej_ruta     resb 1
+fcb1        resb 11
+fcb2        resb 11
+cp_dta      resb 44
+ej_pref     resb RUTA_MAX
+cp_dir      resb RUTA_MAX + 16
+cp_pat      resb 16
+cp_org      resb RUTA_MAX + 16
+cp_dst      resb RUTA_MAX + 16
+            alignb 2
 tubo_ent    resw 1                  ; la tubería: el archivo del que se lee...
 tubo_sal    resw 1                  ; ...y en el que se escribe
 tubo_hay    resb 1

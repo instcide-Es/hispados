@@ -32,7 +32,12 @@
 ;  de 32 megas son 32 K, que en estas máquinas no sobran.
 ; =============================================================================
 N_ARCH      equ 8                   ; archivos abiertos a la vez (sin FILES=)
-N_UNI       equ 3                   ; unidades: A:, B: y C:
+N_UNI       equ 5                   ; unidades: A:, B:, C: y dos de controladores (D:, E:)
+C_TAM       equ 516                 ; una entrada de la reserva de sectores:
+C_UNI       equ 0                   ; db su unidad (FFh: libre), dw su sector
+C_LBA       equ 2                   ; (en 2) y los 512 octetos (en 4)
+BUF_DEF     equ 4                   ; sectores en la reserva, sin BUFFERS=
+BUF_MAX     equ 30
 PRIMERO     equ 5                   ; el primer número de archivo (0-4: la consola)
 ; la ficha de un archivo abierto
 H_USO       equ 0                   ; db: 0 libre
@@ -61,19 +66,181 @@ E_OTRO_DISP equ 17                  ; no es el mismo dispositivo
 E_NO_MAS    equ 18                  ; no hay más archivos
 E_PROTEGIDO equ 19                  ; disco protegido contra escritura
 E_DISCO     equ 21                  ; unidad no preparada
+E_DISP      equ 29                  ; el dispositivo no ha podido escribir
 E_LLENO     equ 39                  ; disco lleno (interno)
 
 ; =============================================================================
 ;  Sectores
 ; =============================================================================
-; lee (lee_sector) o escribe (escribe_sector) el sector AX en ES:BX. Tres
-; intentos. CF=1 y AX=error si no se puede. Conserva los demás registros
+; lee (lee_sector) o escribe (escribe_sector) el sector AX de la unidad
+; cargada en ES:BX (que es del núcleo). CF=1 y AX=error si no se puede.
+; Conserva los demás registros.
+;
+; LA RESERVA DE SECTORES. Entre estas dos rutinas y el disco hay una reserva
+; pequeña (lo que diga BUFFERS= en CONFIG.SYS) con los últimos sectores
+; leídos de la FAT y de los directorios, que son los que se piden una y otra
+; vez: lo que está en ella no se vuelve a leer del disquete. Los sectores de
+; datos de los archivos no entran (h_es quita [cache_mete] mientras los
+; pide): pasan una vez y echarían a los que sirven. Escribir va SIEMPRE al
+; disco en el momento (y pone al día la copia, si la hay): la reserva no
+; retrasa nada, así que sacar el disquete no pierde más que antes. Lo único
+; que se retrasa, como hasta ahora, es el sector en uso (`sector` y `fat`),
+; que se escribe al cambiar de sector y al cerrar el archivo.
 lee_sector:
+        push si
+        call cache_busca
+        jc .disco
+        push cx                     ; está: de la reserva
+        push di
+        add si, 4
+        mov di, bx
+        mov cx, 256
+        rep movsw
+        pop di
+        pop cx
+        pop si
+        clc
+        ret
+.disco:
+        pop si
         mov byte [op13], 2
-        jmp short disco_es
+        call disco_es
+        jc .x
+        cmp byte [cache_mete], 0
+        je .x                       ; (CF=0)
+        call cache_pon
+        clc
+.x:
+        ret
 escribe_sector:
         mov byte [op13], 3
+        call disco_es
+        jc .x
+        push si
+        call cache_busca
+        jc .n
+        push cx                     ; su copia, al día
+        push di
+        lea di, [si+4]
+        mov si, bx
+        mov cx, 256
+        rep movsw
+        pop di
+        pop cx
+.n:
+        pop si
+        clc
+.x:
+        ret
+; busca en la reserva el sector AX de la unidad cargada -> SI = su entrada.
+; CF=1 si no está. Conserva los demás registros
+cache_busca:
+        push cx
+        push dx
+        mov cl, [n_cache]
+        xor ch, ch
+        jcxz .no
+        mov si, [cache_p]
+        mov dl, [unidad_act]
+.b:
+        cmp [si+C_UNI], dl
+        jne .s
+        cmp [si+C_LBA], ax
+        je .si
+.s:
+        add si, C_TAM
+        loop .b
+.no:
+        stc
+.si:
+        pop dx
+        pop cx
+        ret
+; mete en la reserva el sector AX, que está en ES:BX, en el sitio del más
+; antiguo (se dan por turno). Conserva los registros
+cache_pon:
+        cmp byte [n_cache], 0
+        je .x
+        push ax
+        push cx
+        push dx
+        push si
+        push di
+        push ax
+        mov al, [cache_sig]
+        xor ah, ah
+        mov cx, C_TAM
+        mul cx
+        mov di, ax
+        add di, [cache_p]
+        pop ax
+        mov cl, [cache_sig]
+        inc cl
+        cmp cl, [n_cache]
+        jb .k
+        xor cl, cl
+.k:
+        mov [cache_sig], cl
+        mov cl, [unidad_act]
+        mov [di+C_UNI], cl
+        mov [di+C_LBA], ax
+        add di, 4
+        mov si, bx
+        mov cx, 256
+        rep movsw
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop ax
+.x:
+        ret
+; olvida lo que hay en la reserva de la unidad AL (FFh: de todas). Conserva
+; los registros
+cache_olvida:
+        push cx
+        push si
+        mov cl, [n_cache]
+        xor ch, ch
+        jcxz .x
+        mov si, [cache_p]
+.b:
+        cmp al, 0xFF
+        je .f
+        cmp [si+C_UNI], al
+        jne .s
+.f:
+        mov byte [si+C_UNI], 0xFF
+.s:
+        add si, C_TAM
+        loop .b
+.x:
+        pop si
+        pop cx
+        ret
+
+; el disco de verdad: lee ([op13]=2) o escribe (3) el sector AX de la unidad
+; cargada en ES:BX, con la BIOS (INT 13h) o, si la unidad es de un controlador
+; (DEVICE=), pidiéndoselo a él. Tres intentos. Conserva los demás registros
 disco_es:
+        cmp word [u_dev+2], 0
+        je .bios
+        jmp dev_bloque
+.bios:
+        ; con una sola disquetera, A: y B: son la misma: si el disquete que
+        ; hay puesto es el de la otra, se pide que lo cambien
+        cmp byte [una_disq], 0
+        je .va
+        cmp byte [u_bios], 0x80
+        jae .va
+        push ax
+        mov al, [unidad_act]
+        cmp al, [disq_puesto]
+        je .p0
+        call pide_disquete
+.p0:
+        pop ax
+.va:
         push bx
         push cx
         push dx
@@ -109,9 +276,22 @@ disco_es:
         mov ah, [op13]
         mov al, 1
         int 0x13
+        jc .falla
+        cmp byte [op13], 3          ; VERIFICAR ON: lo escrito se repasa
+        jne .bien
+        cmp byte [verificar], 0
+        je .bien
+        mov ax, 0x0401
+        int 0x13
         jnc .bien
+.falla:
         cmp ah, 3                   ; protegido contra escritura: no insistir
         je .prot
+        cmp ah, 6                   ; han cambiado el disquete (lo dicen los
+        jne .rep                    ; AT): lo guardado de él ya no vale
+        mov al, [unidad_act]
+        call cache_olvida
+.rep:
         xor ax, ax
         int 0x13
         dec si
@@ -132,6 +312,12 @@ disco_es:
         mov ax, [es:0x46C]
         mov [t_disco], ax
         pop es
+        mov si, n_lect              ; (la cuenta de lo leído y lo escrito,
+        cmp byte [op13], 2          ; para medir: INT 21h/E8h con AL=4)
+        je .cta
+        mov si, n_escr
+.cta:
+        inc word [si]
         pop ax
         clc
 .x:
@@ -140,6 +326,79 @@ disco_es:
         pop cx
         pop bx
         ret
+
+; «Ponga el disquete de la unidad B:»: se pide por la BIOS (no por la consola,
+; que puede estar redirigida) y se espera una tecla. AL = la unidad cuyo
+; disquete hace falta. Conserva los registros
+pide_disquete:
+        push ax
+        push bx
+        push si
+        push bp
+        mov [disq_puesto], al
+        add al, 'A'
+        mov [m_ponga.u], al
+        mov si, m_ponga
+        call .cad
+        xor ah, ah
+        int 0x16
+        mov si, m_ponga.nl
+        call .cad
+        pop bp
+        pop si
+        pop bx
+        pop ax
+        ret
+.cad:
+        lodsb
+        test al, al
+        jz .x
+        mov ah, 0x0E
+        mov bx, 7
+        int 0x10
+        jmp .cad
+.x:
+        ret
+m_ponga     db 13, 10, "Ponga el disquete de la unidad "
+.u          db "A: y pulse una tecla...", 0
+.nl         db 13, 10, 0
+; los disquetes sin medidas en su primer sector (los de DOS 1) se conocen por
+; el primer octeto de la FAT: FCh 180 K, FDh 360 K, FEh 160 K, FFh 320 K.
+; Cada fila: las medidas como van en el disco (13 octetos), sectores por
+; pista y caras
+medios:
+        dw 512
+        db 1
+        dw 1
+        db 2
+        dw 64, 360
+        db 0xFC
+        dw 2
+        db 9, 1
+        dw 512
+        db 2
+        dw 1
+        db 2
+        dw 112, 720
+        db 0xFD
+        dw 2
+        db 9, 2
+        dw 512
+        db 1
+        dw 1
+        db 2
+        dw 64, 320
+        db 0xFE
+        dw 1
+        db 8, 1
+        dw 512
+        db 2
+        dw 1
+        db 2
+        dw 112, 640
+        db 0xFF
+        dw 1
+        db 8, 2
 
 ; deja el sector AX en `sector` (si no es el que ya está). CF=1, AX=error
 sec_trae:
@@ -205,27 +464,92 @@ disco_ini:
         mov byte [fat_sucia], 0
         mov word [buf_lba], 0xFFFF
         mov word [fat_lba], 0xFFFF
+        cmp word [u_dev+2], 0
+        je .fis
+        call .limpia                ; de un controlador: las medidas que dio
+        push ds
+        lds si, [u_bpb]
+        mov di, sector + 11
+        mov cx, 13
+        rep movsb
+        pop ds
+        jmp .cmp
+.fis:
         cmp byte [u_bios], 0x80     ; (un disco duro ya tiene sus medidas: las
         jae .lee                    ; de la BIOS)
         mov word [spp], 18          ; (para leer el primer sector de un disquete
         mov word [caras], 2         ; vale cualquier medida: pista 0, cara 0)
 .lee:
+        xor ax, ax                  ; (del disco, no de la reserva: se trata
+        mov bx, sector              ; de saber qué disco hay)
+        mov byte [op13], 2
+        call disco_es
+        jc .mal0
+        cmp word [sector+0x0B], 512 ; ¿trae sus medidas? Sectores de 512
+        jne .sin_bpb                ; octetos, una o dos FAT y grupos de algo
+        mov al, [sector+0x10]
+        dec al
+        cmp al, 1
+        ja .sin_bpb
+        cmp byte [sector+0x0D], 0
+        jne .cmp
+.sin_bpb:
+        cmp byte [u_bios], 0x80     ; un disquete sin medidas: por el primer
+        jae .mal0                   ; octeto de su FAT
+        mov ax, 1
+        mov bx, sector
+        mov byte [op13], 2
+        call disco_es
+        jc .mal0
+        cmp word [sector+1], 0xFFFF
+        jne .mal0
+        mov al, [sector]
+        sub al, 0xFC
+        jb .mal0
+        mov ah, 15
+        mul ah
+        add ax, medios
+        push ax
+        call .limpia
+        pop si
+        mov di, sector + 11
+        mov cx, 13
+        rep movsb
+        lodsb
+        mov [sector+0x18], al
+        lodsb
+        mov [sector+0x1A], al
+        jmp short .cmp
+.mal0:
+        jmp .mal
+; (interna) `sector`, a cero
+.limpia:
+        mov di, sector
+        mov cx, 256
         xor ax, ax
-        call sec_trae
-        jc .mal
-        cmp word [sector+0x0B], 512 ; solo sectores de 512 octetos
-        jne .mal
-        mov si, sector + 11         ; ¿es otro disco? Entonces, a su raíz
-        mov di, bpb_ant
+        rep stosw
+        ret
+.cmp:
+        mov si, sector + 11         ; ¿es otro disco? Entonces, a su raíz, y
+        mov di, bpb_ant             ; lo guardado del anterior no vale
         mov cx, 51
         repe cmpsb
-        je .mismo
+        je .igual
         mov word [dir_act], 0
         mov byte [dir_txt], 0
         mov si, sector + 11
         mov di, bpb_ant
         mov cx, 51
         rep movsb
+        jmp short .olvida
+.igual:
+        cmp byte [u_bios], 0x80     ; las mismas medidas: si el disquete no
+        jae .mismo                  ; lleva número de serie, puede ser otro
+        cmp byte [sector+0x26], 0x29
+        je .mismo
+.olvida:
+        mov al, [unidad_act]
+        call cache_olvida
 .mismo:
         cmp byte [u_bios], 0x80
         jae .m1
@@ -354,14 +678,17 @@ unidad_pon:
 ; la primera partición FAT del primer disco duro (C:)
 unidades_ini:
         mov byte [u_hay], 1
+        mov byte [u_hay+1], 1
         int 0x11                    ; ¿dos disqueteras?
         test al, 1
-        jz .duro
+        jz .una
         and al, 0xC0
-        jz .duro
-        mov byte [u_hay+1], 1
+        jz .una
         mov byte [u_guardadas + U_TAM + (u_bios - u_ini)], 1
-.duro:
+        jmp short .duro
+.una:
+        mov byte [una_disq], 1      ; una sola: B: es la misma, con otro
+.duro:                              ; disquete (ver disco_es)
 ; (y también sola: cuando PARTIR o FORMATEA han cambiado el disco duro)
 ; busca la primera partición FAT del primer disco duro: si la hay y tiene
 ; formato, existe C:. Entra y sale con A: como unidad cargada
@@ -435,6 +762,8 @@ duro_ini:
 ; directorio de trabajo) y se vuelve a mirar el disco duro
 discos_nuevos:
         call disco_vuelca
+        mov al, 0xFF
+        call cache_olvida
         mov al, [unidad_act]
         push ax
         xor bx, bx
@@ -1342,7 +1671,7 @@ ahora:
 .cero:
         xor cx, cx
 .f80:
-        mov dx, 0x0021              ; 1 de enero de 1980
+        mov dx, [fecha_xt]          ; la que se haya dado con FECHA
 .x:
         pop bx
         pop ax
@@ -1496,6 +1825,12 @@ h_grupo:
 ; donde va, de o en [es_seg]:[es_off] -> AX=los que han sido (menos si se
 ; acaba el archivo o el disco). CF=1, AX=error si falla el disco
 h_es:
+        cmp byte [bx+H_USO], 2      ; un dispositivo: se le pide a él
+        jne .arch
+        mov ax, [bx+H_TAM]
+        mov dx, [bx+H_TAM+2]
+        jmp dev_es
+.arch:
         mov al, [bx+H_UNI]
         call unidad_pon
         mov [es_queda], cx
@@ -1544,6 +1879,7 @@ h_es:
         mov cl, 9
         shr dx, cl
         add ax, dx
+        mov byte [cache_mete], 0    ; (los datos no entran en la reserva)
         cmp byte [es_op], 0         ; un sector que se va a escribir entero no
         je .trae                    ; hace falta leerlo antes
         cmp word [es_n], 512
@@ -1553,6 +1889,7 @@ h_es:
 .trae:
         call sec_trae
 .t1:
+        mov byte [cache_mete], 1
         jc .mal
         push es
         push ds
@@ -1611,6 +1948,11 @@ h_es:
 ; deja el archivo de la ficha BX del tamaño de por donde va (escribir cero
 ; octetos): suelta lo que sobra de la cadena, o la alarga. CF=1, AX=error
 h_corta:
+        cmp byte [bx+H_USO], 2      ; (a un dispositivo no se le corta nada)
+        jne .arch
+        clc
+        ret
+.arch:
         mov al, [bx+H_UNI]
         call unidad_pon
         mov byte [bx+H_SUCIO], 1
@@ -1652,8 +1994,6 @@ h_corta:
 ; cierra el archivo de la ficha BX: pone al día su entrada del directorio y
 ; lo manda todo al disco. CF=1, AX=error
 h_cierra:
-        mov al, [bx+H_UNI]
-        call unidad_pon
         cmp bx, [red_sal]           ; (si era la salida o la entrada de la
         jne .r1                     ; consola, deja de serlo)
         mov word [red_sal], 0
@@ -1662,6 +2002,14 @@ h_cierra:
         jne .r2
         mov word [red_ent], 0
 .r2:
+        cmp byte [bx+H_USO], 2      ; un dispositivo: no hay nada que guardar
+        jne .arch
+        mov byte [bx+H_USO], 0
+        clc
+        ret
+.arch:
+        mov al, [bx+H_UNI]
+        call unidad_pon
         cmp byte [bx+H_SUCIO], 0
         je .libre
         mov ax, [bx+H_DSEC]

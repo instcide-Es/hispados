@@ -20,7 +20,7 @@ escribe() {
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
     case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; '/') tecla slash;; ':') tecla shift-semicolon;; '\') tecla backslash;;
-      '|') tecla shift-backslash;; '$') tecla shift-4;; '"') tecla shift-apostrophe;; '%') tecla shift-5;; '(') tecla shift-9;; ')') tecla shift-0;; ',') tecla comma;; '-') tecla minus;; '+') tecla shift-equal;; '_') tecla shift-minus;; [A-Z]) tecla "shift-${c,,}";; *) tecla "$c";; esac
+      '|') tecla shift-backslash;; ';') tecla semicolon;; '$') tecla shift-4;; '"') tecla shift-apostrophe;; '%') tecla shift-5;; '(') tecla shift-9;; ')') tecla shift-0;; ',') tecla comma;; '-') tecla minus;; '+') tecla shift-equal;; '_') tecla shift-minus;; [A-Z]) tecla "shift-${c,,}";; *) tecla "$c";; esac
   done
   tecla ret; sleep 0.8
 }
@@ -69,7 +69,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.8 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.9 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -80,12 +80,14 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.8" "VER: "
-escribe "limpiar"; escribe "dir"
+esta p2 "Hispa-8086 versión 0.9" "VER: "
+escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"; escribe "dir"
+pantalla p2
+esta p2 "22 archivos, " "DIR: "
+escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"
 pantalla p2
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
-esta p2 "14 archivos, " "DIR: "
 esta p2 "COMMAND.COM" "DIR: "
 esta p2 "octetos libres" "DIR: "
 noesta p2 "HISPA-8086 " "DIR: (la etiqueta) "
@@ -118,7 +120,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.8" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.9" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -282,7 +284,8 @@ if [ "${libre:-0}" -gt 100000 ]; then ok "en el disquete de 360 K quedan $libre 
 
 p_fuentes() {
 echo "== Hispa-8086: solo instrucciones del 8086 =="
-for f in arranque mbr nucleo command ordenes/pasar ordenes/formatea ordenes/sistema ordenes/partir ordenes/mas ordenes/ordenar; do
+for f in arranque mbr nucleo command ordenes/pasar ordenes/formatea ordenes/sistema ordenes/partir ordenes/mas ordenes/ordenar \
+         ordenes/revisar ordenes/etiqueta ordenes/atributo ordenes/arbol ordenes/xcopiar ordenes/editar ordenes/teclado ordenes/discoram; do
   if grep -q "^\s*cpu 8086" $f.asm; then ok "$f.asm se ensambla con «cpu 8086»"; else ko "$f.asm no lleva «cpu 8086»"; fi
 done
 # lo único de 386 es la prueba que distingue el 386 del 486, que solo corre
@@ -298,9 +301,9 @@ if [ $tam -lt 16384 ]; then ok "el intérprete ocupa $tam octetos"; else ko "el 
 p_formatea() {
 echo "== Hispa-8086: FORMATEA, disquetes =="
 cp build/hispa8086-360.img $T/a.img
-truncate -s 368640 $T/b.img            # un disquete de 360 K sin nada
+rm -f $T/b.img; truncate -s 368640 $T/b.img     # un disquete de 360 K sin nada
 QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
-escribe "limpiar"; escribe "formatea"; escribe "formatea z:"; escribe "dir b:"
+escribe "limpiar"; escribe "formatea"; escribe "formatea z:"; sleep 1; escribe "dir b:"; sleep 2
 pantalla f0
 esta f0 "FORMATEA unidad: [/S] [/V:etiqueta] [/F:medida] [/R] [/A]" "sin nada, dice cómo se usa: "
 esta f0 "No existe esa unidad." ""
@@ -453,7 +456,7 @@ if mdir -i $T/part.img :: 2> /dev/null | grep -q "DURO"; then ok "la etiqueta (/
 # y ahora, sin disquete: tiene que arrancar solo
 arranca_duro $T/hd.img 486
 pantalla k6
-esta k6 "Hispa-8086 0.8 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
+esta k6 "Hispa-8086 0.9 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
 esta k6 'C:\>' "y se queda en C:: "
 escribe "limpiar"; escribe "dir"; escribe "hola desde el duro"; escribe "mostrar leeme.txt"
 pantalla k7
@@ -480,6 +483,21 @@ esta k10 "Partición borrada." ""
 esta k10 "No hay ninguna partición." ""
 esta k10 "No existe esa unidad." "y C: deja de existir: "
 apaga
+
+# un disco como el de un XT: 306 cilindros, 4 caras y 17 sectores (10 megas).
+# PARTIR dice lo que diga la BIOS (INT 13h/08h: la última cara, el último
+# sector y el último cilindro, más uno cada uno)
+rm -f $T/hd.img; truncate -s $((306 * 4 * 17 * 512)) $T/hd.img
+QMAS="-drive if=none,id=xt,file=$T/hd.img,format=raw -device ide-hd,drive=xt,cyls=306,heads=4,secs=17" arranca $T/a.img 486
+escribe "limpiar"; escribe "partir crear /a"; sleep 2; escribe "partir"; escribe "formatea c: /s /a"
+if espera k13 "octetos libres" 60; then ok "disco de 306 cilindros, 4 caras y 17 sectores: PARTIR y FORMATEA C: /S acaban"; else ko "disco de 306:4:17: no acaban"; fi
+esta k13 " 4 caras, 17 sectores por pista: 10 megas" "la geometría que da la BIOS (4 caras, 17 sectores, 10 megas): "
+esta k13 "DOS, FAT12         01h" ""
+apaga
+QMAS=
+ini=$(fila_part $T/hd.img 1 | cut -d' ' -f3); tam=$(fila_part $T/hd.img 1 | cut -d' ' -f4)
+dd if=$T/hd.img of=$T/part.img bs=512 skip=$ini count=$tam 2> /dev/null
+if [ "$ini" = 17 ] && [ $((tam % 68)) = 51 ] && fsck.fat -n $T/part.img > $T/fsck.txt 2>&1 && [ "$(python3 -c "import sys,struct; d=open(sys.argv[1],'rb').read(64); print(struct.unpack('<HH', d[24:28]))" $T/part.img)" = "(17, 4)" ]; then ok "la partición empieza en la segunda pista (sector 17), acaba en cilindro entero y su BPB dice 17 sectores y 4 caras"; else ko "la partición del disco 306:4:17 no es la esperada (empieza en $ini, $tam sectores)"; cat $T/fsck.txt; fi
 
 echo "== Hispa-8086: discos duros de otras medidas (8 megas, FAT12; 64 megas, partición de 32) =="
 for megas in 8 64; do
@@ -599,6 +617,10 @@ tecla spc; sleep 2
 pantalla l7
 noesta l7 "-- Más --" "con una tecla sigue hasta el final: "
 esta l7 'A:\>' ""
+escribe "limpiar"; escribe "dir c*.* | ordenar"; sleep 4
+pantalla l8
+esta l8 "COMMAND.COM" "DIR | ORDENAR: "
+noesta l8 "TUBO" "los archivos temporales de la tubería no salen en la lista: "
 escribe "limpiar"; escribe "dir *.\$\$\$"; escribe "format"; escribe "sys"; escribe "fdisk"
 pantalla l8
 esta l8 "0 archivos, 0 octetos" "los archivos temporales de la tubería se borran: "
@@ -627,11 +649,12 @@ dib = bytes((0x5A + 7 * i) & 255 for i in range(1024))
 sys.exit(0 if d[-1024:] == dib else 1)
 PY2
 then ok "lo escrito con INT 26h está en los dos últimos sectores del disquete"; else ko "INT 26h no ha escrito lo esperado"; fi
-printf 'REM configuracion de prueba\r\nFILES=20\r\n\r\n  buffers = 10\r\nDEVICE=RATON.SYS\r\nshell=\\COMMAND.COM /P\r\n' > $T/CONFIG.SYS
+printf 'REM configuracion de prueba\r\nFILES=20\r\n\r\n  buffers = 10\r\nDEVICE=RATON.SYS\r\nLASTDRIVE=Z\r\nshell=\\COMMAND.COM /P\r\n' > $T/CONFIG.SYS
 mcopy -i $T/a.img $T/CONFIG.SYS ::
 arranca $T/a.img 486
 pantalla c2
-esta c2 "CONFIG.SYS: no se entiende esta línea: DEVICE=RATON.SYS" "lo que no entiende lo dice y sigue: "
+esta c2 "CONFIG.SYS: no se puede cargar el controlador: DEVICE=RATON.SYS" "un controlador que no está, lo dice y sigue: "
+esta c2 "CONFIG.SYS: no se entiende esta línea: LASTDRIVE=Z" "lo que no entiende lo dice y sigue: "
 noesta c2 "no se entiende esta línea: REM" "REM, FILES=, BUFFERS= y las líneas vacías, sin protestar: "
 noesta c2 "no se entiende esta línea: FILES" ""
 noesta c2 "no se entiende esta línea:   buffers" ""
@@ -640,7 +663,7 @@ escribe "limpiar"; escribe "n8"; sleep 3; escribe "equipo"
 pantalla c3
 esta c3 "N8: caben 20 archivos abiertos" "FILES=20: "
 libres=$(grep -o "([0-9]* K libres" $T/c3.txt | tr -dc 0-9)
-if [ -n "$libres" ] && [ "$libres" -ge 610 ]; then ok "con FILES=20 quedan $libres K libres"; else ko "memoria libre con FILES=20: $libres K"; fi
+if [ -n "$libres" ] && [ "$libres" -ge 595 ]; then ok "con FILES=20 y BUFFERS=10 quedan $libres K libres"; else ko "memoria libre con FILES=20: $libres K"; fi
 apaga
 printf 'FILES=999\r\nSHELL=\\NOHAY.COM /X\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/a.img $T/CONFIG.SYS ::
@@ -661,7 +684,8 @@ noesta c6 "Arranque terminado" "...y, como en DOS, sin /P no ejecuta AUTOEXEC.BA
 apaga
 }
 
-PARTES="basico lotes config pasar duro formatea sistema partir medidas fuentes"
+. prueba/partes_09.sh
+PARTES="basico lotes ordenes config dispositivos reserva discos fantasma editar teclado pasar duro formatea sistema partir medidas fuentes"
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

@@ -38,7 +38,7 @@ LIN_MAX     equ 126                 ; letras de una línea de órdenes
 RUTA_MAX    equ 80
 DIR_MAX     equ 64                  ; letras del directorio de trabajo
 PILA_TAM    equ 768
-VERSION10   equ 8                   ; la versión del núcleo por diez (0.8)
+VERSION10   equ 9                   ; la versión del núcleo por diez (0.9)
 FILES_MAX   equ 64                  ; lo más que admite FILES= de CONFIG.SYS
 
 ; el procesador
@@ -66,6 +66,9 @@ inicio:
         mov word [buf_lba], 0xFFFF
         mov word [fat_lba], 0xFFFF
         mov byte [n_arch], N_ARCH
+        mov byte [cache_mete], 1
+        mov word [fecha_xt], 0x0021 ; (sin reloj: 1 de enero de 1980)
+        call disp_ini
         call cpu_detecta
         int 0x12                    ; la memoria convencional, en K
         mov [mem_kb], ax
@@ -80,6 +83,8 @@ inicio:
         mov [es:0x25*4+2], cs
         mov word [es:0x26*4], int26
         mov [es:0x26*4+2], cs
+        mov word [es:0x27*4], int27
+        mov [es:0x27*4+2], cs
         push cs
         pop es
         mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
@@ -106,17 +111,11 @@ inicio:
 .unidades:
         mov si, m_titulo
         call pon_cad
-        call config_lee             ; CONFIG.SYS: FILES=, SHELL=...
+        call config_lee             ; CONFIG.SYS: FILES=, BUFFERS=, DEVICE=...
         ; dónde va el programa: detrás de todo lo del núcleo, que acaba en la
-        ; tabla de archivos abiertos (lo que haya dicho FILES=)
-        mov al, [n_arch]
-        mov ah, H_TAM_F
-        mul ah
-        add ax, fichas + 15
-        mov cl, 4
-        shr ax, cl
-        mov bx, cs
-        add ax, bx
+        ; tabla de archivos abiertos, la reserva de sectores y los
+        ; controladores cargados (config_lee deja dicho dónde)
+        mov ax, [cf_tope]
         mov [mem_seg], ax           ; ahí empieza la memoria que se reparte
         call mem_ini
         mov byte [primera], 1
@@ -259,9 +258,13 @@ f21:
         F21 0x1A, f1A
         F21 0x25, f25
         F21 0x2A, f2A
+        F21 0x2B, f2B
         F21 0x2C, f2C
+        F21 0x2D, f2D
+        F21 0x2E, f2E
         F21 0x2F, f2F
         F21 0x30, f30
+        F21 0x31, f31
         F21 0x35, f35
         F21 0x36, f36
         F21 0x39, f39
@@ -275,6 +278,7 @@ f21:
         F21 0x41, f41
         F21 0x42, f42
         F21 0x43, f43
+        F21 0x44, f44
         F21 0x46, f46
         F21 0x47, f47
         F21 0x48, f48
@@ -286,6 +290,7 @@ f21:
         F21 0x4F, f4F
         F21 0x50, f50
         F21 0x51, f51
+        F21 0x54, f54
         F21 0x56, f56
         F21 0x62, f51
         F21 0xE8, fE8
@@ -422,12 +427,71 @@ f35:
 ;      tocado las particiones con la BIOS): el núcleo olvida lo que sabía de
 ;      ellos y vuelve a mirar el disco duro
 ;   2  cuántos archivos hay abiertos en la unidad DL (0 = A:) -> AX
+;   3  con una sola disquetera: el disquete que hay puesto es el de la unidad
+;      DL (lo dicen FORMATEA y SISTEMA, que lo han pedido ellas)
+;   4  cuántos sectores se han leído (AX) y escrito (DX) de verdad desde el
+;      arranque: para medir lo que ahorra la reserva
+;   5  las medidas de la unidad DL, en ES:DI (nueve palabras: sectores por
+;      grupo, reservados, cuántas FAT, sectores de cada una, primer sector de
+;      la raíz, cuántos tiene, primer sector de los datos, último grupo, y 1
+;      si es FAT16). CF=1 si la unidad no está preparada
 fE8:
         mov al, [bp+R_AX]
         cmp al, 1
-        je discos_nuevos
+        jne .n1
+        jmp discos_nuevos
+.n1:
         cmp al, 2
         je .abiertos
+        cmp al, 3
+        jne .n3
+        mov al, [bp+R_DX]
+        cmp al, 1
+        ja .x
+        mov [disq_puesto], al
+.x:
+        ret
+.n3:
+        cmp al, 4
+        jne .n4
+        mov ax, [n_lect]
+        mov [bp+R_AX], ax
+        mov ax, [n_escr]
+        mov [bp+R_DX], ax
+        ret
+.n4:
+        cmp al, 5
+        jne .n5
+        mov al, [bp+R_DX]
+        call unidad_pon
+        jc .e5
+        call disco_fresco
+        jc .e5
+        mov es, [bp+R_ES]
+        mov di, [bp+R_DI]
+        mov ax, [spc]
+        stosw
+        mov ax, [res_sec]
+        stosw
+        mov ax, [nfat]
+        stosw
+        mov ax, [spf]
+        stosw
+        mov ax, [raiz_ini]
+        stosw
+        mov ax, [raiz_sec]
+        stosw
+        mov ax, [datos_ini]
+        stosw
+        mov ax, [max_clus]
+        stosw
+        mov al, [u_fat16]
+        xor ah, ah
+        stosw
+        ret
+.e5:
+        jmp f_error
+.n5:
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
         mov bh, VERSION10
@@ -471,6 +535,65 @@ f46:
 .mal:
         mov ax, E_NUMERO
         jmp f_error
+; 31h: terminar y quedarse en la memoria (los programas residentes): el
+; programa se queda con DX párrafos y sus archivos siguen abiertos. INT 27h
+; es lo mismo, a la antigua: DX = el primer octeto que ya no hace falta
+f31:
+        mov ax, [psp_act]
+        test ax, ax
+        jz .x
+        mov bx, [bp+R_DX]
+        cmp bx, 0x11                ; (por lo menos, su prefijo)
+        jae .t
+        mov bx, 0x11
+.t:
+        call mem_cambia
+        mov byte [queda], 1
+        mov al, [bp+R_AX]
+        jmp termina
+.x:
+        ret
+int27:
+        add dx, 15
+        mov cl, 4
+        shr dx, cl
+        mov ax, 0x3100
+        int 0x21
+; 2Eh: VERIFICAR (AL=1: lo que se escribe en el disco se repasa); 54h: cómo
+; está -> AL
+f2E:
+        mov al, [bp+R_AX]
+        and al, 1
+        mov [verificar], al
+        ret
+f54:
+        mov al, [verificar]
+        mov [bp+R_AX], al
+        ret
+; 44h, con AL=0: qué hay detrás del número de archivo BX -> DX (bit 7: es un
+; dispositivo; entonces, bits 0 y 1: es la consola). Lo demás de 44h no está
+f44:
+        cmp byte [bp+R_AX], 0
+        je .va
+        mov ax, E_FUNCION
+        jmp f_error
+.va:
+        mov ax, [bp+R_BX]
+        mov dx, 0x80D3
+        cmp ax, PRIMERO
+        jb .x
+        call h_ficha
+        jnc .f
+        jmp f_error
+.f:
+        mov dx, 0x80C0
+        cmp byte [bx+H_USO], 2
+        je .x
+        mov dl, [bx+H_UNI]
+        xor dh, dh
+.x:
+        mov [bp+R_DX], dx
+        ret
 ; 4Dh: el código con que terminó el último programa -> AL (AH = 0)
 f4D:
         mov al, [cod_salida]
@@ -484,6 +607,8 @@ f4D:
 ; escribe AL tal cual (lo que mandan los programas). Si la salida está
 ; redirigida a un archivo ([red_sal]), va a él. Conserva los registros
 pon_car_dos:
+        cmp byte [con_directo], 0   ; (el dispositivo CON: siempre la pantalla)
+        jne .pantalla
         cmp word [red_sal], 0
         je .pantalla
         push ax
@@ -615,6 +740,8 @@ pon_num32_ancho:
 ; entrada está redirigida ([red_ent]), es el octeto siguiente del archivo;
 ; cuando se acaba, vuelve el teclado
 tecla:
+        cmp byte [con_directo], 0   ; (el dispositivo CON: siempre el teclado)
+        jne .teclado
         cmp word [red_ent], 0
         je .teclado
         push bx
@@ -762,6 +889,7 @@ cpu_detecta:
         mov [cpu_tipo], bl
         ret
 
+%include "dispositivos.inc"
 %include "disco.inc"
 %include "archivos.inc"
 %include "proceso.inc"
@@ -770,7 +898,7 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.8 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.9 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 m_sin_shell db "No se puede lanzar el intérprete de SHELL=: se usa COMMAND.COM.", 10, 0
@@ -795,9 +923,30 @@ bus_atr     resb 1
 red_car     resb 1
 cf_files    resb 1                  ; CONFIG.SYS: lo que dice FILES=
 cf_fin      resb 1
+cf_bufs     resb 1                  ; lo que dice BUFFERS=
+cf_pasada   resb 1                  ; 1: todo menos DEVICE=; 2: DEVICE=
+cf_uni      resb 1                  ; la primera unidad libre para un controlador
+n_cache     resb 1                  ; sectores en la reserva
+cache_sig   resb 1                  ; el sitio que toca
+cache_mete  resb 1                  ; lo que se lea entra en la reserva
+una_disq    resb 1                  ; solo hay una disquetera (B: es la misma)
+disq_puesto resb 1                  ; de qué unidad es el disquete puesto
+verificar   resb 1                  ; VERIFICAR ON
+queda       resb 1                  ; el programa que termina se queda residente
+con_directo resb 1                  ; CON: sin redirección
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
 cf_ficha    resw 1
+cf_tope     resw 1                  ; el segmento donde acaba el núcleo
+cf_arg      resw 1
+cf_tope2    resw 1
+cache_p     resw 1                  ; la reserva de sectores
+n_lect      resw 1                  ; sectores leídos y escritos de verdad
+n_escr      resw 1
+fecha_xt    resw 1                  ; la fecha, en las máquinas sin reloj
+dv_pet      resw 2                  ; la petición que apunta la «estrategia»
+dv_far      resw 2
+pet         resb 26                 ; la petición a un dispositivo
 red_ent     resw 1                  ; la ficha del archivo que hace de entrada (0: el teclado)
 red_sal     resw 1                  ; (detrás de red_ent) y de salida (0: la pantalla)
 mem_seg     resw 1                  ; la primera cabecera de la memoria que se reparte
@@ -868,6 +1017,10 @@ max_clus    resw 1                  ; el último grupo del disco
 fat_pista   resw 1                  ; por dónde buscar un grupo libre
 dir_act     resw 1                  ; el directorio de trabajo (0: la raíz)
 t_disco     resw 1                  ; cuándo se usó por última vez
+u_dev       resw 2                  ; su controlador (DEVICE=), si es de uno
+u_bpb       resw 2                  ; y las medidas que dio
+u_sub       resb 1                  ; qué unidad es dentro del controlador
+            alignb 2
 bpb_ant     resb 52                 ; las medidas del último disco visto
 dir_txt     resb DIR_MAX            ; el directorio de trabajo, en texto
 u_fin:

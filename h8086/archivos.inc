@@ -109,8 +109,8 @@ f2C:
         mov ax, cx
         mov cl, 5
         shr ax, cl
-        and al, 0x3F
-        mov dl, al                  ; el minuto
+        mov dl, al
+        and dl, 0x3F                ; el minuto
         mov cl, 6
         shr ax, cl
         mov dh, al                  ; la hora
@@ -163,6 +163,10 @@ unidad_dl:
 
 ; ---- 3Ch: crear un archivo (si ya existe, lo vacía). CX=atributos -> AX ----
 f3C:
+        call dev_abre               ; ¿un dispositivo (PRN, NUL...)?
+        jc .arch
+        ret
+.arch:
         call f_ruta_nombre
         jc f_error
         mov ax, [r_dir]
@@ -208,6 +212,10 @@ f3C:
 
 ; ---- 3Dh: abrir un archivo. AL=modo (0 leer, 1 escribir, 2 las dos) -> AX ----
 f3D:
+        call dev_abre
+        jc .arch
+        ret
+.arch:
         call f_ruta_nombre
         jc f_error
         mov ax, [r_dir]
@@ -387,6 +395,27 @@ es_comun:
         ret
 f40_consola:
         mov cx, [bp+R_CX]
+        cmp ax, 3                   ; 3 es AUX y 4 es PRN
+        jb .con
+        mov ax, dev_prn
+        je .aux
+        jmp short .dev
+.aux:
+        mov ax, dev_aux
+.dev:
+        mov dx, cs
+        mov bx, [bp+R_DS]
+        mov [es_seg], bx
+        mov bx, [bp+R_DX]
+        mov [es_off], bx
+        mov byte [es_op], 1
+        call dev_es
+        jnc .d1
+        jmp f_error
+.d1:
+        mov [bp+R_AX], ax
+        ret
+.con:
         mov [bp+R_AX], cx
         jcxz .x
         mov si, [bp+R_DX]
@@ -505,6 +534,7 @@ f56:
         mov ax, [r_dir]
         cmp ax, [rn_dir]
         je .mismo
+        jmp .mueve
 .otro:
         mov ax, E_OTRO_DISP
         jmp f_error
@@ -523,6 +553,171 @@ f56:
         mov byte [buf_sucio], 1
         call disco_vuelca
         jc f_error
+        ret
+
+; (de 56h) a otro directorio de la misma unidad: la entrada se copia al
+; directorio nuevo, con el nombre nuevo, y la vieja se borra; los datos no se
+; mueven. Solo archivos: un directorio lleva dentro la dirección de su padre
+f56.mueve:
+        mov ax, [r_dir]
+        call dir_busca              ; no puede haber ya otro con ese nombre
+        jc .libre
+        jmp f_acceso
+.libre:
+        test ax, ax
+        jz .l1
+.err:
+        jmp f_error
+.l1:
+        mov ax, [rn_sec]
+        call sec_trae
+        jc .err
+        mov si, [rn_off]
+        test byte [si+11], 0x10
+        jz .l2
+        jmp f_acceso
+.l2:
+        mov di, linea               ; (la entrada, aparte mientras tanto)
+        mov cx, 32
+        rep movsb
+        mov ax, [r_dir]
+        call dir_hueco
+        jc .err
+        mov di, si
+        mov si, nom11
+        mov cx, 11
+        rep movsb
+        mov si, linea + 11
+        mov cx, 21
+        rep movsb
+        mov byte [buf_sucio], 1
+        mov ax, [rn_sec]
+        call sec_trae
+        jc .err
+        mov si, [rn_off]
+        mov byte [si], 0xE5
+        mov byte [buf_sucio], 1
+        call disco_vuelca
+        jc .err
+        ret
+
+; ---- 2Bh: poner la fecha (CX=año DH=mes DL=día) -> AL=0, o FFh si no vale.
+;      2Dh: poner la hora (CH=hora CL=minuto DH=segundo). Se ponen en el
+;      reloj de los AT y en lo que usa el núcleo cuando no lo hay (los tics
+;      de la BIOS y una fecha que guarda él: en un PC o un XT hay que dársela
+;      cada vez que se enciende) ----
+f2B:
+        mov cx, [bp+R_CX]
+        mov dx, [bp+R_DX]
+        mov byte [bp+R_AX], 0xFF
+        sub cx, 1980
+        jb .x
+        cmp cx, 119
+        ja .x
+        test dh, dh
+        jz .x
+        cmp dh, 12
+        ja .x
+        test dl, dl
+        jz .x
+        cmp dl, 31
+        ja .x
+        mov byte [bp+R_AX], 0
+        mov ax, cx                  ; como va en el disco: año, mes y día
+        mov cl, 9
+        shl ax, cl
+        mov bl, dh
+        xor bh, bh
+        mov cl, 5
+        shl bx, cl
+        or ax, bx
+        mov bl, dl
+        xor bh, bh
+        or ax, bx
+        mov [fecha_xt], ax
+        mov ax, [bp+R_CX]           ; y al reloj, en BCD
+        mov bl, 100
+        div bl                      ; AL = siglo, AH = año
+        push ax
+        call a_bcd
+        mov ch, al
+        pop ax
+        mov al, ah
+        call a_bcd
+        mov cl, al
+        mov al, dh
+        call a_bcd
+        mov dh, al
+        mov al, dl
+        call a_bcd
+        mov dl, al
+        mov ah, 5
+        int 0x1A
+.x:
+        ret
+f2D:
+        mov cx, [bp+R_CX]
+        mov dx, [bp+R_DX]
+        mov byte [bp+R_AX], 0xFF
+        cmp ch, 23
+        ja .x
+        cmp cl, 59
+        ja .x
+        cmp dh, 59
+        ja .x
+        mov byte [bp+R_AX], 0
+        push cx
+        push dx
+        mov al, ch                  ; al reloj, en BCD
+        call a_bcd
+        mov ch, al
+        mov al, cl
+        call a_bcd
+        mov cl, al
+        mov al, dh
+        call a_bcd
+        mov dh, al
+        xor dl, dl
+        mov ah, 3
+        int 0x1A
+        pop dx
+        pop cx
+        ; y a los tics de la BIOS: 65.543 por hora, 1.092 por minuto y 18
+        ; por segundo (lo mismo que deshace `ahora`)
+        mov al, cl
+        xor ah, ah
+        mov bx, 1092
+        push dx
+        mul bx
+        pop dx
+        mov bx, ax                  ; BX = los de los minutos
+        mov al, dh
+        mov ah, 18
+        mul ah
+        xor dx, dx
+        add bx, ax
+        adc dx, 0
+        mov al, ch
+        mov ah, 7
+        mul ah
+        add bx, ax
+        adc dx, 0
+        mov cl, ch
+        xor ch, ch
+        add cx, dx
+        mov dx, bx
+        mov ah, 1
+        int 0x1A
+.x:
+        ret
+; AL (0 a 99) -> en BCD
+a_bcd:
+        push cx
+        aam
+        mov cl, 4
+        shl ah, cl
+        or al, ah
+        pop cx
         ret
 
 ; ---- 39h: crear un directorio ----
