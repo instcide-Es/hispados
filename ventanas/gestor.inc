@@ -1741,18 +1741,31 @@ ges_tecla:
 .car:
         cmp al, 32
         jae .char
-        mov ecx, TC_INTRO           ; teclas de control
+        ; teclas de control. Ctrl+M y Ctrl+I dan el mismo carácter que Intro (13)
+        ; y Tab (9), pero la BIOS dice qué tecla fue (AH): si es la de la M o la
+        ; de la I, llegan como Ctrl+letra (TC_CTRL+13 / +9), para que los
+        ; programas puedan usarlas de atajo (p. ej. Ctrl+I «Ir a» en Pluma).
+        mov ecx, TC_INTRO
         cmp al, 13
-        je .abajo
+        jne .noin
+        cmp ah, 0x32                ; la tecla de la M: Ctrl+M
+        je .ctrl
+        jmp .abajo
+.noin:
         mov ecx, TC_TAB
         cmp al, 9
-        je .abajo
+        jne .notab
+        cmp ah, 0x17                ; la tecla de la I: Ctrl+I
+        je .ctrl
+        jmp .abajo
+.notab:
         mov ecx, TC_ESC
         cmp al, 27
         je .abajo
         mov ecx, TC_RETRO
         cmp al, 8
         je .abajo
+.ctrl:
         movzx ecx, al
         add ecx, TC_CTRL
 .abajo:

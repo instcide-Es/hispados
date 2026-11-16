@@ -104,7 +104,7 @@ reabre 'A:\NOTA.TXT'
 { arranca
   tecla ctrl-end; shot t1
   tecla ctrl-l; sleep 1; escribe "linea"; tecla ret; sleep 1; escribe "raya"; tecla ret; sleep 1.5; shot t3; tecla ret; sleep 1   # Reemplazar
-  tecla f5; sleep 1; escribe "2"; tecla ret; sleep 1; escribe "x"; tecla ctrl-end                                              # Ir a la línea 2
+  tecla ctrl-i; sleep 1; escribe "2"; tecla ret; sleep 1; escribe "x"; tecla ctrl-end                                              # Ir a la línea 2 (Ctrl+I: Ventanas lo distingue de Tab)
   escribe "fin"; tecla ctrl-g; sleep 2.5
   clic 677 53; sleep 1.2; shot t2       # cerrar: guardado, no pregunta
   sal; } | run 120 -vga std

@@ -15,8 +15,8 @@
 ;  Ojo: no es lo mismo que «Hispa Ventanas 0.3» (otro programa, otra versión).
 ; =============================================================================
 
-%define VER_STR "0.9.19"
-VER_NUM     equ 0*10000 + 9*100 + 19        ; 0.9.19 -> 919
+%define VER_STR "0.9.20"
+VER_NUM     equ 0*10000 + 9*100 + 20        ; 0.9.20 -> 920
 
 ;  VER_EDI  nivel de "riqueza" de la EDICION instalada (0 = la unica edicion de
 ;  hoy: Hispa-386, con Hispa Ventanas, 386+). ACTUALIZAR lo usa para recomendar
