@@ -7,8 +7,9 @@
 ;  8086 (el ensamblador lo vigila con «cpu 8086»), para que quepa y corra en
 ;  un PC o un XT de 256 K. docs/8086/HISPA-8086.md cuenta el plan entero.
 ;
-;  Lo que hay (etapas 0 a 3):
-;    - arranca desde un disquete FAT12 (lo carga arranque.asm);
+;  Lo que hay (etapas 0 a 5):
+;    - arranca desde un disquete o desde el disco duro (lo carga
+;      arranque.asm), y lee CONFIG.SYS (FILES=, BUFFERS=, SHELL=);
 ;    - reconoce el procesador y la memoria, y si la máquina puede con un
 ;      Hispa mayor, lo dice;
 ;    - INT 21h: la consola (01h, 02h, 06h-0Bh), los vectores (25h, 35h), la
@@ -17,10 +18,11 @@
 ;      sitio libre, fecha y hora (archivos.inc, sobre disco.inc);
 ;    - la memoria por bloques (48h-4Ah) y los programas: .COM y .EXE, que
 ;      pueden lanzar otros (4Bh) (proceso.inc);
+;    - INT 25h e INT 26h: leer y escribir sectores «en crudo», como en DOS;
 ;    - lanza el intérprete de órdenes, que es un programa aparte
 ;      (command.asm).
-;  Lo que falta: CONFIG.SYS y los controladores, el disco duro, el
-;  intérprete aparte... (ver «Etapas» en el documento).
+;  Lo que falta: los controladores de dispositivo (DEVICE=), el modo 286...
+;  (ver «Etapas» en el documento).
 ;
 ;  Mapa de memoria: el núcleo se carga en 0070:0000 y ahí se queda, con sus
 ;  variables, su pila y la copia de la FAT detrás; el programa que se ejecuta
@@ -36,6 +38,8 @@ LIN_MAX     equ 126                 ; letras de una línea de órdenes
 RUTA_MAX    equ 80
 DIR_MAX     equ 64                  ; letras del directorio de trabajo
 PILA_TAM    equ 768
+VERSION10   equ 8                   ; la versión del núcleo por diez (0.8)
+FILES_MAX   equ 64                  ; lo más que admite FILES= de CONFIG.SYS
 
 ; el procesador
 CPU_8086    equ 0
@@ -55,12 +59,13 @@ inicio:
         sti
         cld
         mov di, bss_ini             ; las variables, a cero
-        mov cx, bss_fin - bss_ini
+        mov cx, fichas + N_ARCH * H_TAM_F - bss_ini
         xor al, al
         rep stosb
-        mov [u_bios], dl
+        mov [arr_bios], dl          ; de dónde se ha arrancado
         mov word [buf_lba], 0xFFFF
         mov word [fat_lba], 0xFFFF
+        mov byte [n_arch], N_ARCH
         call cpu_detecta
         int 0x12                    ; la memoria convencional, en K
         mov [mem_kb], ax
@@ -71,22 +76,49 @@ inicio:
         mov [es:0x20*4+2], cs
         mov word [es:0x21*4], int21
         mov [es:0x21*4+2], cs
+        mov word [es:0x25*4], int25
+        mov [es:0x25*4+2], cs
+        mov word [es:0x26*4], int26
+        mov [es:0x26*4+2], cs
         push cs
         pop es
-        ; dónde va el programa: detrás de todo lo del núcleo
-        mov ax, bss_fin + 15
+        mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
+        mov word [dta_off], dta_int
+        ; las unidades. Arrancando de un disquete, ese es A: y la unidad de
+        ; trabajo; arrancando del disco duro, A: es la primera disquetera y
+        ; se trabaja en C:
+        mov al, [arr_bios]
+        test al, al
+        js .duro
+        mov [u_bios], al
+        call disco_ini
+        call unidades_ini
+        jmp short .unidades
+.duro:
+        call unidades_ini
+        cmp byte [u_hay+2], 0
+        je .unidades
+        mov al, 2
+        mov [unidad_def], al
+        call unidad_pon
+        mov byte [ent_nucleo.u1], 'C'   ; (PATH y COMSPEC, en C:)
+        mov byte [ent_nucleo.u2], 'C'
+.unidades:
+        mov si, m_titulo
+        call pon_cad
+        call config_lee             ; CONFIG.SYS: FILES=, SHELL=...
+        ; dónde va el programa: detrás de todo lo del núcleo, que acaba en la
+        ; tabla de archivos abiertos (lo que haya dicho FILES=)
+        mov al, [n_arch]
+        mov ah, H_TAM_F
+        mul ah
+        add ax, fichas + 15
         mov cl, 4
         shr ax, cl
         mov bx, cs
         add ax, bx
         mov [mem_seg], ax           ; ahí empieza la memoria que se reparte
         call mem_ini
-        mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
-        mov word [dta_off], dta_int
-        call disco_ini
-        call unidades_ini
-        mov si, m_titulo
-        call pon_cad
         mov byte [primera], 1
 
 ; lanza el intérprete de órdenes (\COMMAND.COM); al arrancar, con «/P». Si
@@ -104,13 +136,18 @@ interprete:
         mov [dta_seg], cs
         mov word [dta_off], dta_int
         mov si, t_command
+        mov word [lz_cola], cola_p
+        cmp byte [sh_ruta], 0       ; ¿otro intérprete (SHELL= de CONFIG.SYS)?
+        je .cual
+        mov si, sh_ruta
+        mov word [lz_cola], sh_cola
+.cual:
         mov di, ruta
 .c:
         lodsb
         stosb
         test al, al
         jnz .c
-        mov word [lz_cola], cola_p
         cmp byte [primera], 0
         jne .l
         mov word [lz_cola], cola_nada
@@ -119,6 +156,14 @@ interprete:
         mov [lz_cola+2], cs
         mov word [lz_ent], 0
         call lanza                  ; (si vuelve, no ha podido)
+        cmp byte [sh_ruta], 0       ; si era el de SHELL=, se dice y se prueba
+        je .sin                     ; con COMMAND.COM
+        mov byte [sh_ruta], 0
+        mov si, m_sin_shell
+        call pon_cad
+        mov byte [primera], 1
+        jmp interprete
+.sin:
         mov si, m_sin_command
         call pon_cad
 .para:
@@ -370,13 +415,40 @@ f35:
         mov ax, [es:bx+2]
         mov [bp+R_ES], ax
         ret
-; E8h (propia de Hispa-8086): AX = 4869h («Hi»), BL = el procesador
-; (CPU_*), BH = la versión del núcleo por diez
+; E8h (propia de Hispa-8086), según AL:
+;   0  AX = 4869h («Hi»), BL = el procesador (CPU_*), BH = la versión del
+;      núcleo por diez
+;   1  los discos han cambiado por debajo (un programa los ha formateado o ha
+;      tocado las particiones con la BIOS): el núcleo olvida lo que sabía de
+;      ellos y vuelve a mirar el disco duro
+;   2  cuántos archivos hay abiertos en la unidad DL (0 = A:) -> AX
 fE8:
+        mov al, [bp+R_AX]
+        cmp al, 1
+        je discos_nuevos
+        cmp al, 2
+        je .abiertos
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
-        mov bh, 7
+        mov bh, VERSION10
         mov [bp+R_BX], bx
+        ret
+.abiertos:
+        mov dl, [bp+R_DX]
+        xor ax, ax
+        mov bx, fichas
+        mov cl, [n_arch]
+        xor ch, ch
+.a:
+        cmp byte [bx+H_USO], 0
+        je .a1
+        cmp [bx+H_UNI], dl
+        jne .a1
+        inc ax
+.a1:
+        add bx, H_TAM_F
+        loop .a
+        mov [bp+R_AX], ax
         ret
 ; 46h: redirección. El archivo BX pasa a ser la entrada (CX=0) o la salida
 ; (CX=1) de la consola, para todos los programas; con BX menor que 5 (la
@@ -592,8 +664,11 @@ lee_linea:
         je .fin
         cmp al, 8
         je .borra
+        cmp al, 0x1A                ; (Ctrl+Z: el «fin de archivo» del teclado)
+        je .vale
         cmp al, ' '
         jb .t
+.vale:
         cmp bx, dx
         jae .t
         mov [es:di+bx], al
@@ -690,13 +765,15 @@ cpu_detecta:
 %include "disco.inc"
 %include "archivos.inc"
 %include "proceso.inc"
+%include "config.inc"
 
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.7.1 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.8 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
+m_sin_shell db "No se puede lanzar el intérprete de SHELL=: se usa COMMAND.COM.", 10, 0
 
 ; =============================================================================
 ;  Las variables (no van en el archivo: el núcleo las pone a cero al arrancar)
@@ -705,6 +782,8 @@ m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
             alignb 2
 bss_ini:
 cpu_tipo    resb 1
+arr_bios    resb 1                  ; la unidad de arranque, para la BIOS
+n_arch      resb 1                  ; cuántos archivos abiertos caben (FILES=)
 primera     resb 1                  ; aún no se ha lanzado el intérprete
 cod_salida  resb 1
 op13        resb 1                  ; disco_es: 2 leer, 3 escribir
@@ -714,8 +793,11 @@ abiertos    resb 1                  ; cuántos archivos hay abiertos
 es_op       resb 1                  ; h_es: 0 leer, 1 escribir
 bus_atr     resb 1
 red_car     resb 1
+cf_files    resb 1                  ; CONFIG.SYS: lo que dice FILES=
+cf_fin      resb 1
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
+cf_ficha    resw 1
 red_ent     resw 1                  ; la ficha del archivo que hace de entrada (0: el teclado)
 red_sal     resw 1                  ; (detrás de red_ent) y de salida (0: la pantalla)
 mem_seg     resw 1                  ; la primera cabecera de la memoria que se reparte
@@ -759,8 +841,9 @@ nom11       resb 12
 cd_txt      resb DIR_MAX + 2
 ruta        resb RUTA_MAX + 2
 dta_int     resb 44                 ; la zona de búsquedas del intérprete
-fichas      resb N_ARCH * H_TAM_F
 linea       resb LIN_MAX + 4
+sh_ruta     resb RUTA_MAX + 2       ; SHELL= de CONFIG.SYS: el intérprete...
+sh_cola     resb 64                 ; ...y lo que se le pasa
             alignb 2
 sector      resb 512
 fat         resb 512                ; un sector de la FAT
@@ -799,3 +882,7 @@ fat_lba     resw 1                  ; el sector que hay en `fat`
             resb PILA_TAM
 pila_fin:
 bss_fin:
+; la tabla de archivos abiertos va la última: con FILES= puede crecer hacia
+; la memoria que se reparte (hasta bss_fin se pone a cero al arrancar; lo que
+; crezca lo pone a cero config_lee)
+fichas      resb N_ARCH * H_TAM_F

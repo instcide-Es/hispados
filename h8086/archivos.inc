@@ -331,11 +331,17 @@ f3F:
         mov byte [es_op], 0
         jmp short es_comun
 .teclado:
-        ; de la consola se lee una línea, que acaba en retorno y salto
+        ; de la consola se lee una línea, que acaba en retorno y salto; si
+        ; empieza por Ctrl+Z, es el fin de lo que se teclea: cero octetos
         mov di, linea
         mov cx, LIN_MAX
         call lee_linea
         call pon_nl
+        cmp byte [linea], 0x1A
+        jne .t1
+        xor cx, cx
+        jmp short .c1
+.t1:
         mov bx, cx
         mov word [linea+bx], 0x0A0D
         add cx, 2

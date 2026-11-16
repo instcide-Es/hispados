@@ -14,7 +14,8 @@
 ;       BORRAR (DEL)        RENOMBRAR (REN)     CD
 ;       CREARDIR (MD)       BORRARDIR (RD)      LIMPIAR (CLS)
 ;       ACTUALIZAR          ECO (ECHO)          REM         PAUSA (PAUSE)
-;       IF                  GOTO
+;       IF                  GOTO                FOR (PARA)
+;       LLAMAR (CALL)       DESPLAZAR (SHIFT)
 ;  «C:» a secas cambia de unidad. Cualquier otra palabra es un programa
 ;  (NOMBRE.COM o NOMBRE.EXE) o un archivo por lotes (NOMBRE.BAT), del
 ;  directorio de trabajo o de la raíz.
@@ -25,12 +26,22 @@
 ;  sistema se ejecuta \AUTOEXEC.BAT, si existe. Dentro de un lote, %0 es su
 ;  nombre y %1 a %9 lo que se escribió detrás; IF [NOT] EXIST archivo,
 ;  IF [NOT] ERRORLEVEL n e IF [NOT] a==b ejecutan lo que sigue si se cumple;
-;  GOTO etiqueta salta a la línea «:etiqueta». (Un lote que llama a otro no
-;  vuelve.)
+;  GOTO etiqueta salta a la línea «:etiqueta». Un lote que nombra a otro le
+;  pasa el mando y no vuelve; con LLAMAR (CALL), vuelve y sigue. DESPLAZAR
+;  (SHIFT) corre los parámetros un sitio: %1 pasa a ser %0, %2 a ser %1...
+;  FOR %%v IN (lista) DO orden (o PARA %%v EN (lista) HAZ orden) repite la orden
+;  con cada elemento de la lista, y con cada archivo si lleva comodines; desde
+;  el teclado la variable se escribe con un solo «%».
 ;
 ;  Redirección, al final de cualquier orden: «> archivo» manda a él lo que
 ;  iría a la pantalla, «>> archivo» lo añade, y «< archivo» hace que se lea de
-;  él lo que se teclearía.
+;  él lo que se teclearía. Y tuberías: «orden1 | orden2» guarda lo que escribe
+;  la primera en un archivo temporal (\TUBO1.$$$ y \TUBO2.$$$, en la raíz de
+;  la unidad de trabajo, como hacía DOS) y se lo da a leer a la segunda.
+;
+;  Las órdenes que son programas del disco tienen también su nombre clásico:
+;  FORMAT es FORMATEA, SYS es SISTEMA, FDISK es PARTIR, MORE es MAS (y «más»)
+;  y SORT es ORDENAR: aquí se traduce el nombre, sin duplicar los archivos.
 ; =============================================================================
         cpu 8086
         bits 16
@@ -39,6 +50,7 @@
 LIN_MAX     equ 126                 ; letras de una línea de órdenes
 RUTA_MAX    equ 80
 LOTE_MAX    equ 16384               ; lo más que mide un archivo por lotes
+LOTE_NOM_TAM equ 24                 ; letras de %0
 E_ARCHIVO   equ 2
 E_RUTA      equ 3
 E_MUCHOS    equ 4
@@ -139,7 +151,7 @@ bucle:
         call pon_nl
         mov si, lin_buf + 2
 .ejec:
-        call ejecuta_red
+        call ejecuta_tubo
         jmp bucle
 
 ; «A:\CARTAS>»
@@ -179,9 +191,63 @@ trae_dir:
         pop ax
         ret
 
+; ---- ejecuta la línea de SI, con sus tuberías ----
+; «a | b | c»: cada tramo se ejecuta con su redirección; lo que escribe va a
+; un archivo temporal, que el tramo siguiente lee como si se tecleara. Se
+; alternan dos archivos, que al acabar se borran
+ejecuta_tubo:
+        mov word [tubo_ent], 0
+        mov byte [tubo_hay], 0
+.otro:
+        mov bx, si
+.b:
+        mov al, [bx]
+        test al, al
+        jz .ultimo
+        cmp al, '|'
+        je .hay
+        inc bx
+        jmp .b
+.hay:
+        mov byte [bx], 0            ; este tramo acaba aquí
+        inc bx
+        push bx
+        mov ax, t_tubo1
+        cmp word [tubo_ent], t_tubo1
+        jne .s
+        mov ax, t_tubo2
+.s:
+        mov [tubo_sal], ax
+        mov byte [tubo_hay], 1
+        call ejecuta_red
+        pop si
+        jc .borra                   ; (si no se ha podido, lo demás no se hace)
+        mov ax, [tubo_sal]
+        mov [tubo_ent], ax
+        jmp .otro
+.ultimo:
+        mov word [tubo_sal], 0
+        call ejecuta_red
+.borra:
+        cmp byte [tubo_hay], 0
+        je .x
+        mov dx, t_tubo1
+        DOS 0x41
+        mov dx, t_tubo2
+        DOS 0x41
+        mov word [tubo_ent], 0
+        mov word [tubo_sal], 0
+.x:
+        ret
+t_tubo1     db "\TUBO1.$$$", 0
+t_tubo2     db "\TUBO2.$$$", 0
+
 ; ---- ejecuta la línea de SI, con su redirección ----
 ; «> archivo», «>> archivo» y «< archivo», al final de la orden: se abren los
-; archivos, se le dice al núcleo (46h), se ejecuta lo de delante y se deshace
+; archivos, se le dice al núcleo (46h), se ejecuta lo de delante y se deshace.
+; Si es un tramo de una tubería, lo que no se haya redirigido va al archivo
+; temporal ([tubo_sal]) o viene de él ([tubo_ent]). CF=1 si no se ha podido
+; abrir alguno (y entonces no se ejecuta nada)
 ejecuta_red:
         push si
         mov word [r_sal], 0
@@ -242,8 +308,30 @@ ejecuta_red:
 .mal:
         call pon_error
         pop si
-        jmp short .deshace
+        call .deshace
+        stc
+        ret
 .va:
+        cmp word [r_ent], 0         ; la tubería: de dónde se lee...
+        jne .t1
+        mov dx, [tubo_ent]
+        test dx, dx
+        jz .t1
+        mov al, 0
+        DOS 0x3D
+        jc .mal
+        mov [r_ent], ax
+.t1:
+        cmp word [r_sal], 0         ; ...y adónde se escribe
+        jne .t2
+        mov dx, [tubo_sal]
+        test dx, dx
+        jz .t2
+        xor cx, cx
+        DOS 0x3C
+        jc .mal
+        mov [r_sal], ax
+.t2:
         mov bx, [r_ent]
         test bx, bx
         jz .v1
@@ -285,6 +373,7 @@ ejecuta_red:
         DOS 0x3E
         mov word [r_ent], 0
 .d2:
+        clc
         ret
 ; (interna) el nombre de archivo de SI -> DI; SI queda en lo que lo acaba
 toma_red:
@@ -389,6 +478,7 @@ ejecuta_linea:
         DOS 0x49
         push cs
         pop es
+        mov word [borr_seg], 0      ; (una orden puede ejecutar otra: IF, FOR)
 .x:
         ret
 .otra:
@@ -413,6 +503,9 @@ ordenes     dw t_ayuda, o_ayuda, t_help, o_ayuda
             dw t_rem, o_rem
             dw t_pausa, o_pausa, t_pause, o_pausa
             dw t_if, o_if, t_goto, o_goto
+            dw t_for, o_for, t_para, o_for
+            dw t_llamar, o_call, t_call, o_call
+            dw t_desplazar, o_shift, t_shift, o_shift
             dw 0
 ; (las órdenes se miran a ocho letras: RENOMBRAR es RENOMBRA)
 t_ayuda     db "AYUDA", 0
@@ -445,6 +538,12 @@ t_pausa     db "PAUSA", 0
 t_pause     db "PAUSE", 0
 t_if        db "IF", 0
 t_goto      db "GOTO", 0
+t_for       db "FOR", 0
+t_para      db "PARA", 0
+t_llamar    db "LLAMAR", 0
+t_call      db "CALL", 0
+t_desplazar db "DESPLAZA", 0
+t_shift     db "SHIFT", 0
 
 ; SI salta los espacios
 salta_esp:
@@ -1130,6 +1229,226 @@ palabra:
         pop ax
         ret
 
+; ---- FOR %v IN (lista) DO orden / PARA %v EN (lista) HAZ orden ----
+; La orden se ejecuta una vez por cada elemento de la lista (separados por
+; espacios o comas), con «%v» cambiado por él; un elemento con comodines vale
+; por todos los archivos que casen (con la ruta que lleve delante). Las
+; búsquedas van a una zona propia, para que la orden pueda hacer las suyas.
+; Como en DOS, un FOR no puede llevar otro dentro
+o_for:
+        cmp byte [for_dentro], 0
+        je .va
+        mov si, m_e_for2
+        jmp pon_cad
+.va:
+        call salta_esp
+        cmp byte [si], '%'
+        jne .mal
+        mov al, [si+1]
+        cmp al, ' '
+        jbe .mal
+        mov [for_var], al
+        add si, 2
+        mov di, t_in
+        call palabra
+        je .p1
+        mov di, t_en
+        call palabra
+        jne .mal
+.p1:
+        call salta_esp
+        cmp byte [si], '('
+        jne .mal
+        inc si
+        mov di, for_lista           ; la lista, hasta el paréntesis
+.l:
+        lodsb
+        test al, al
+        jz .mal
+        cmp al, ')'
+        je .lf
+        stosb
+        jmp .l
+.mal:
+        mov si, m_e_for
+        jmp pon_cad
+.lf:
+        mov byte [di], 0
+        mov di, t_do
+        call palabra
+        je .p2
+        mov di, t_haz
+        call palabra
+        jne .mal
+.p2:
+        call salta_esp
+        mov di, for_orden           ; la orden, aparte: la línea se va a pisar
+        call copia_txt
+        mov byte [for_dentro], 1
+        mov word [for_pos], for_lista
+.elem:
+        mov si, [for_pos]
+.sep:
+        mov al, [si]
+        cmp al, ' '
+        je .s1
+        cmp al, ','
+        je .s1
+        cmp al, ';'
+        jne .s2
+.s1:
+        inc si
+        jmp .sep
+.s2:
+        test al, al
+        jnz .e0
+        mov byte [for_dentro], 0    ; se acabó la lista
+        ret
+.e0:
+        mov di, for_elem
+        mov cx, RUTA_MAX - 1
+.e1:
+        mov al, [si]
+        cmp al, ' '
+        jbe .e2
+        cmp al, ','
+        je .e2
+        cmp al, ';'
+        je .e2
+        inc si
+        jcxz .e1
+        stosb
+        dec cx
+        jmp .e1
+.e2:
+        mov byte [di], 0
+        mov [for_pos], si
+        mov si, for_elem
+        call con_comodin
+        je .varios
+        mov si, for_elem            ; sin comodines: él mismo
+        mov di, for_valor
+        call copia_txt
+        call .corre
+        jmp .elem
+.varios:
+        mov dx, for_dta             ; con comodines: cada archivo que case
+        DOS 0x1A
+        mov dx, for_elem
+        xor cx, cx
+        DOS 0x4E
+.v1:
+        pushf
+        mov dx, dta_int
+        DOS 0x1A
+        popf
+        jc .elem
+        mov si, for_elem            ; su ruta: la del patrón, con su nombre
+        mov di, for_valor
+        call copia_txt
+        mov si, for_valor
+        call nombre_de
+        mov di, si
+        mov si, for_dta + 30
+        call copia_txt
+        call .corre
+        mov dx, for_dta
+        DOS 0x1A
+        DOS 0x4F
+        jmp .v1
+; (interna) ejecuta la orden con «%v» cambiado por for_valor
+.corre:
+        mov si, for_orden
+        mov di, for_lin
+        mov cx, LIN_MAX
+.c:
+        lodsb
+        test al, al
+        jz .cf
+        cmp al, '%'
+        jne .cp
+        mov ah, [si]
+        cmp ah, [for_var]
+        jne .cp
+        inc si
+        push si
+        mov si, for_valor
+.cv:
+        lodsb
+        test al, al
+        jz .cvf
+        jcxz .cv
+        stosb
+        dec cx
+        jmp .cv
+.cvf:
+        pop si
+        jmp .c
+.cp:
+        jcxz .c
+        stosb
+        dec cx
+        jmp .c
+.cf:
+        mov byte [di], 0
+        mov si, for_lin
+        jmp ejecuta_linea
+
+; ---- LLAMAR orden (CALL): si la orden es otro lote, al acabar se vuelve a
+;      este. El lote que llama (dónde está, por dónde va y sus parámetros) se
+;      guarda en un bloque de memoria; [lote_ant] dice cuál, y dentro va el
+;      que hubiera antes: los lotes llamados se apilan ----
+o_call:
+        cmp word [lote_seg], 0
+        jne .lote
+        jmp ejecuta_linea           ; desde el teclado: la orden, sin más
+.lote:
+        push si
+        mov bx, (LOTE_EST_TAM + 15) / 16
+        DOS 0x48
+        pop si
+        jnc .hay
+        mov si, m_e_grande_lote
+        jmp pon_cad
+.hay:
+        push si
+        push es
+        mov es, ax
+        xor di, di
+        mov si, lote_est
+        mov cx, LOTE_EST_TAM
+        rep movsb
+        pop es
+        pop si
+        mov [lote_ant], ax
+        mov word [lote_seg], 0
+        call ejecuta_linea
+        cmp word [lote_seg], 0      ; si no era un lote, ya ha acabado: se
+        jne .x                      ; sigue con el que llamaba
+        call lote_vuelve
+.x:
+        ret
+
+; ---- DESPLAZAR (SHIFT): %1 pasa a ser %0, %2 a ser %1... ----
+o_shift:
+        mov si, lote_args
+        call salta_esp
+        mov di, lote_nom
+        mov cx, LOTE_NOM_TAM - 1
+.n:
+        mov al, [si]
+        cmp al, ' '
+        jbe .nf
+        inc si
+        jcxz .n
+        stosb
+        dec cx
+        jmp .n
+.nf:
+        mov byte [di], 0
+        mov di, lote_args
+        jmp copia_txt
+
 ; ---- GOTO etiqueta: sigue por la línea «:etiqueta» del lote ----
 o_goto:
         cmp word [lote_seg], 0
@@ -1250,10 +1569,34 @@ ejecuta:
         jz .n4
         mov byte [bx], 0
 .n4:
-        mov bx, intentos
-        test dx, dx                 ; con ruta, solo ahí: no se busca en la raíz
-        jz .i
         mov bx, intentos_ruta
+        test dx, dx                 ; con ruta, solo ahí: no se busca en la raíz
+        jnz .i
+        ; sin ruta: si es el nombre clásico de una orden del disco, su archivo
+        ; lleva el español
+        mov bx, clasicos
+.cl:
+        mov si, [bx]
+        test si, si
+        jz .cl3
+        mov di, orden
+.cl1:
+        mov al, [si]
+        cmp al, [di]
+        jne .cl2
+        inc si
+        inc di
+        test al, al
+        jnz .cl1
+        mov si, [bx+2]
+        mov di, orden_l
+        call copia_txt
+        jmp short .cl3
+.cl2:
+        add bx, 4
+        jmp .cl
+.cl3:
+        mov bx, intentos
 .i:
         mov si, [bx]                ; delante («» o «\») y detrás (la extensión)
         test si, si
@@ -1306,6 +1649,19 @@ ejecuta:
 intentos    dw t_nada, t_com, t_nada, t_exe, t_nada, t_bat
             dw t_barra, t_com, t_barra, t_exe, t_barra, t_bat, 0
 intentos_ruta dw t_nada, t_com, t_nada, t_exe, t_nada, t_bat, 0
+clasicos    dw tc_format, tc_formatea, tc_sys, tc_sistema, tc_fdisk, tc_partir
+            dw tc_more, tc_mas, tc_mas2, tc_mas, tc_sort, tc_ordenar, 0
+tc_format   db "FORMAT", 0
+tc_formatea db "FORMATEA", 0
+tc_sys      db "SYS", 0
+tc_sistema  db "SISTEMA", 0
+tc_fdisk    db "FDISK", 0
+tc_partir   db "PARTIR", 0
+tc_more     db "MORE", 0
+tc_mas2     db "M", 0xA0, "S", 0    ; «más», con su tilde
+tc_mas      db "MAS", 0
+tc_sort     db "SORT", 0
+tc_ordenar  db "ORDENAR", 0
 t_nada      db 0
 t_barra     db "\", 0
 t_exe       db ".EXE", 0
@@ -1313,9 +1669,9 @@ t_bat       db ".BAT", 0
 t_autoexec  db "\AUTOEXEC.BAT", 0
 
 ; empieza a ejecutar el archivo por lotes de SI: lo carga entero en un bloque
-; de memoria. CF=1 si no existe (o no cabe)
+; de memoria. CF=1 si no existe (o no cabe); entonces, si había otro lote en
+; marcha, sigue como estaba
 lote_abre:
-        call lote_cierra            ; (si había otro, se deja)
         mov dx, si
         mov al, 0
         DOS 0x3D
@@ -1330,14 +1686,17 @@ lote_abre:
         jnz .mal
         cmp ax, LOTE_MAX
         ja .mal
-        mov [lote_fin], ax
+        push ax
         mov bx, ax
         add bx, 15 + 16
         mov cl, 4
         shr bx, cl
         DOS 0x48
+        pop bx
         jc .mal
+        call lote_suelta            ; (si había otro, este ocupa su sitio)
         mov [lote_seg], ax
+        mov [lote_fin], bx
         mov bx, [o_h1]
         xor cx, cx
         xor dx, dx
@@ -1350,7 +1709,6 @@ lote_abre:
         DOS 0x3F
         pop ds
         mov word [lote_pos], 0
-        mov byte [eco], 1
         mov bx, [o_h1]
         DOS 0x3E
         clc
@@ -1361,8 +1719,8 @@ lote_abre:
         stc
 .x:
         ret
-; deja el lote: suelta su memoria
-lote_cierra:
+; suelta la memoria del lote en marcha. Conserva los registros
+lote_suelta:
         cmp word [lote_seg], 0
         je .x
         push ax
@@ -1372,8 +1730,42 @@ lote_cierra:
         pop es
         pop ax
         mov word [lote_seg], 0
-        mov byte [eco], 1
 .x:
+        ret
+; el lote se acaba: si lo había llamado otro (LLAMAR), se sigue con ese; si
+; no, se vuelve al teclado
+lote_cierra:
+        call lote_suelta
+        cmp word [lote_ant], 0
+        jne lote_vuelve
+        mov byte [eco], 1
+        ret
+; vuelve el lote que estaba guardado en [lote_ant] (y con él, el que tuviera
+; guardado antes). Conserva los registros
+lote_vuelve:
+        push ax
+        push cx
+        push si
+        push di
+        mov ax, [lote_ant]
+        test ax, ax
+        jz .x
+        push ds
+        mov ds, ax
+        xor si, si
+        mov di, lote_est
+        mov cx, LOTE_EST_TAM
+        rep movsb
+        pop ds
+        push es
+        mov es, ax
+        DOS 0x49
+        pop es
+.x:
+        pop di
+        pop si
+        pop cx
+        pop ax
         ret
 ; la línea siguiente del lote -> lin_buf+2 (SI). CF=1 si se ha acabado
 lote_linea:
@@ -1634,23 +2026,24 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.7.1", 10, 0
-m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):", 10
-            db "  AYUDA                     esta lista", 10
-            db "  VER                       la versión del sistema", 10
-            db "  EQUIPO                    el procesador y la memoria", 10
-            db "  DIR [ruta]                los archivos (LISTAR)", 10
-            db "  MOSTRAR archivo           enseña un archivo de texto (TYPE)", 10
-            db "  COPIAR origen destino     copia un archivo (COPY)", 10
-            db "  BORRAR archivo            lo borra; valen * y ? (DEL)", 10
-            db "  RENOMBRAR viejo nuevo     le cambia el nombre (REN)", 10
-            db "  CD [directorio]           cambia de directorio, o dice cuál es", 10
-            db "  CREARDIR directorio       lo crea (MD)", 10
-            db "  BORRARDIR directorio      lo quita, si está vacío (RD)", 10
-            db "  LIMPIAR                   limpia la pantalla (CLS)", 10
-            db "  ACTUALIZAR                cómo pasar a otro sistema Hispa", 10
-            db "  ECO texto, REM, PAUSA     para los archivos por lotes (.BAT)", 10
-            db "  PASAR                     pasa archivos por el puerto serie (programa)", 10
+m_ver       db "Hispa-8086 versión 0.8", 10, 0
+m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásico):", 10
+            db "  AYUDA   VER   EQUIPO   LIMPIAR (CLS)   ACTUALIZAR", 10
+            db "  DIR [ruta]              los archivos (LISTAR)", 10
+            db "  MOSTRAR archivo         enseña un archivo de texto (TYPE)", 10
+            db "  COPIAR origen destino   copia un archivo (COPY)", 10
+            db "  BORRAR archivo          lo borra; valen * y ? (DEL)", 10
+            db "  RENOMBRAR viejo nuevo   le cambia el nombre (REN)", 10
+            db "  CD [directorio]   CREARDIR (MD)   BORRARDIR (RD)", 10
+            db "En los lotes (.BAT): ECO, REM, PAUSA, IF, GOTO, DESPLAZAR (SHIFT),", 10
+            db "  LLAMAR lote (CALL) y FOR %%v IN (lista) DO orden (PARA.. EN.. HAZ)", 10
+            db "Detrás de una orden: > archivo, >> archivo, < archivo y | otra orden", 10
+            db "Programas del disco:", 10
+            db "  FORMATEA unidad: [/S]   da formato a un disco (FORMAT)", 10
+            db "  SISTEMA unidad:         lo deja de arranque (SYS)", 10
+            db "  PARTIR                  las particiones del disco duro (FDISK)", 10
+            db "  MAS   ORDENAR           filtros: paginar y ordenar (MORE, SORT)", 10
+            db "  PASAR                   archivos por el puerto serie", 10
             db "Cualquier otra palabra: el programa (.COM o .EXE) o el lote (.BAT)", 10
             db "de ese nombre, del directorio de trabajo o de la raíz.", 10, 0
 m_actualizar db "Los sistemas de la familia Hispa-DOS se actualizan entre sí:", 10
@@ -1683,6 +2076,14 @@ m_pausa     db "Pulse una tecla para seguir...", 0
 m_e_if      db "Se escribe así: IF [NOT] EXIST archivo orden, IF [NOT] ERRORLEVEL n orden", 10
             db "o IF [NOT] a==b orden", 10, 0
 m_e_goto    db "El lote no tiene esa etiqueta.", 10, 0
+m_e_for     db "Se escribe así: FOR %v IN (lista) DO orden", 10
+            db "o PARA %v EN (lista) HAZ orden (en un lote, %%v)", 10, 0
+m_e_for2    db "Un FOR no puede llevar otro dentro.", 10, 0
+m_e_grande_lote db "No hay memoria para llamar a otro lote.", 10, 0
+t_in        db "IN", 0
+t_en        db "EN", 0
+t_do        db "DO", 0
+t_haz       db "HAZ", 0
 t_not       db "NOT", 0
 t_exist     db "EXIST", 0
 t_errorlevel db "ERRORLEVEL", 0
@@ -1714,9 +2115,6 @@ d_n         resw 1                  ; DIR: cuántos y cuánto ocupan
 d_total     resw 2
 borr_seg    resw 1                  ; el trozo de memoria de borrador
 borr_tam    resw 1
-lote_seg    resw 1                  ; el archivo por lotes (0: no hay)
-lote_pos    resw 1
-lote_fin    resw 1
 r_sal       resw 1                  ; los archivos de la redirección
 r_ent       resw 1
 bloque      resw 7                  ; para lanzar un programa (4Bh)
@@ -1725,13 +2123,33 @@ orden       resb 10
 pal_ini     resw 1
 orden_l     resb RUTA_MAX
 cola        resb 130
-lote_nom    resb 10                 ; %0
+; el lote en marcha: lo que LLAMAR guarda para poder volver a él
+lote_est:
+lote_seg    resw 1                  ; el archivo por lotes (0: no hay)
+lote_pos    resw 1
+lote_fin    resw 1
+lote_ant    resw 1                  ; el lote que ha llamado a este, guardado
+lote_nom    resb LOTE_NOM_TAM       ; %0
 lote_args   resb 130                ; %1 a %9
+LOTE_EST_TAM equ $ - lote_est
+tubo_ent    resw 1                  ; la tubería: el archivo del que se lee...
+tubo_sal    resw 1                  ; ...y en el que se escribe
+tubo_hay    resb 1
+for_dentro  resb 1                  ; FOR: se está ejecutando uno
+for_var     resb 1                  ; la letra de su variable
+            alignb 2
+for_pos     resw 1                  ; por dónde va de la lista
+for_dta     resb 44                 ; sus búsquedas
+for_elem    resb RUTA_MAX           ; el elemento de la lista
+for_valor   resb RUTA_MAX + 16      ; lo que vale la variable
+for_lista   resb LIN_MAX + 2
+for_orden   resb LIN_MAX + 2
+for_lin     resb LIN_MAX + 2        ; la orden, con la variable cambiada
 dta_int     resb 44                 ; lo que encuentran las búsquedas
 dir_txt     resb 68
 arg1        resb RUTA_MAX + 16
 arg2        resb RUTA_MAX + 16
 lin_buf     resb LIN_MAX + 6
 pila_ini:
-            resb 512
+            resb 768
 pila_fin:

@@ -729,6 +729,11 @@ termina:
         jmp interprete
 
 ; el entorno de partida
-ent_nucleo  db "PATH=A:\", 0
-            db "COMSPEC=A:\NUCLEO86.SYS", 0
+; el entorno de partida (las dos letras de unidad pasan a ser «C» si se
+; arranca del disco duro)
+ent_nucleo:
+            db "PATH="
+.u1         db "A:\", 0
+            db "COMSPEC="
+.u2         db "A:\COMMAND.COM", 0
             db 0, 0

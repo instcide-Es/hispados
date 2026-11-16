@@ -31,7 +31,7 @@ $(B):
 $(B)/arranque.bin: arranque.asm | $(B)
 	$(CP437) $< $(B)/gen/arranque.asm && $(NASM) -f bin -o $@ $(B)/gen/arranque.asm
 
-NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc
+NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc config.inc
 $(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
 	for f in $(NUCLEO); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
 	cd $(B)/gen && $(NASM) -f bin -l nucleo.lst -o ../NUCLEO86.SYS nucleo.asm
@@ -42,6 +42,32 @@ $(B)/COMMAND.COM: command.asm | $(B)
 $(B)/PASAR.COM: ordenes/pasar.asm | $(B)
 	$(CP437) $< $(B)/gen/pasar.asm && $(NASM) -f bin -o $@ $(B)/gen/pasar.asm
 
+$(B)/mbr.bin: mbr.asm | $(B)
+	$(CP437) $< $(B)/gen/mbr.asm && $(NASM) -f bin -o $@ $(B)/gen/mbr.asm
+
+# las órdenes de disco comparten ordenes/util.inc y llevan dentro el sector de
+# arranque y el de particiones (se ensamblan desde la carpeta de los ya
+# convertidos, como el núcleo)
+$(B)/gen/util.inc: ordenes/util.inc | $(B)
+	$(CP437) $< $@
+
+$(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM: $(B)/gen/util.inc $(B)/arranque.bin $(B)/mbr.bin
+
+$(B)/FORMATEA.COM: ordenes/formatea.asm | $(B)
+	$(CP437) $< $(B)/gen/formatea.asm && cd $(B)/gen && $(NASM) -f bin -o ../FORMATEA.COM formatea.asm
+
+$(B)/SISTEMA.COM: ordenes/sistema.asm | $(B)
+	$(CP437) $< $(B)/gen/sistema.asm && cd $(B)/gen && $(NASM) -f bin -o ../SISTEMA.COM sistema.asm
+
+$(B)/PARTIR.COM: ordenes/partir.asm | $(B)
+	$(CP437) $< $(B)/gen/partir.asm && cd $(B)/gen && $(NASM) -f bin -o ../PARTIR.COM partir.asm
+
+$(B)/MAS.COM: ordenes/mas.asm | $(B)
+	$(CP437) $< $(B)/gen/mas.asm && $(NASM) -f bin -o $@ $(B)/gen/mas.asm
+
+$(B)/ORDENAR.COM: ordenes/ordenar.asm | $(B)
+	$(CP437) $< $(B)/gen/ordenar.asm && $(NASM) -f bin -o $@ $(B)/gen/ordenar.asm
+
 $(B)/HOLA.COM: prueba/hola.asm | $(B)
 	$(CP437) $< $(B)/gen/hola.asm && $(NASM) -f bin -o $@ $(B)/gen/hola.asm
 
@@ -51,10 +77,13 @@ $(B)/ARCH.COM: prueba/arch.asm | $(B)
 $(B)/EXE.EXE: prueba/exe.asm | $(B)
 	$(CP437) $< $(B)/gen/exe.asm && $(NASM) -f bin -o $@ $(B)/gen/exe.asm
 
+$(B)/N8.COM: prueba/n8.asm | $(B)
+	$(CP437) $< $(B)/gen/n8.asm && $(NASM) -f bin -o $@ $(B)/gen/n8.asm
+
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos
@@ -68,7 +97,10 @@ endef
 $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 	$(call DISQUETE,$*)
 
-prueba: $(DISCOS)
+# lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
+PRUEBAS = $(B)/N8.COM
+
+prueba: $(DISCOS) $(PRUEBAS)
 	./prueba/prueba.sh
 
 clean:
