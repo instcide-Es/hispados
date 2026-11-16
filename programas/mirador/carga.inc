@@ -37,6 +37,9 @@ hay_n_orig  resb 1
 c_directo   resb 1                  ; de paleta a paleta, color a color y sin tramar
 c_cortada   resb 1
             alignb 4
+f_orienta   resd 1
+f_camara    resb 68
+f_tomada    resb 24
 pal_mapa    resb 256                ; cada color de la paleta de la imagen, en la nuestra
 err_buf     resb 256
 %endmacro
@@ -56,6 +59,10 @@ t_e_medidas db "La imagen dice tener unas medidas imposibles", 10
             db "(más de 32.767 puntos de lado o de 64 millones en total).", 0
 t_e_var1    db "Mirador no sabe ver esta imagen: es ", 10, 0
 t_e_var2    db ".", 0
+
+; la orientación de EXIF (de 1 a 8): cuartos de vuelta a la derecha y, después,
+; si se voltea en horizontal
+or_tabla    db 0, 0,  0, 1,  2, 0,  2, 1,  1, 1,  1, 0,  3, 1,  3, 0
 
 abrir:
         mov byte [nom_tmp], 0
@@ -119,10 +126,32 @@ pon_ruta:
 abre_archivo:
         pushad
         call pon_ruta
+        call mini_sal
+        mov dword [or_rot], 0       ; una imagen nueva: derecha
+        mov dword [or_volt], 0
         mov esi, t_abriendo
         call pie_dice
         call carga                  ; EAX=0, o el texto del error
+        cmp eax, t_e_memoria        ; sin memoria: las miniaturas se sueltan, y otra vez
+        jne .leida
+        cmp byte [mini_hay], 0
+        je .leida
+        call mini_suelta
+        call carga
+.leida:
         mov [err_txt], eax
+        test eax, eax               ; una foto que dice cómo hay que girarla: se gira sola
+        jnz .derecha
+        mov eax, [f_orienta]
+        dec eax
+        cmp eax, 7
+        ja .derecha
+        movzx ebx, byte [or_tabla+eax*2]
+        mov [or_rot], ebx
+        movzx ebx, byte [or_tabla+eax*2+1]
+        mov [or_volt], ebx
+        call tr_repite
+.derecha:
         mov esi, ruta
         mov edi, nombre
         mov ecx, 132
@@ -140,7 +169,8 @@ abre_archivo:
         popad
         ret
 
-; la misma imagen, leída otra vez (han cambiado los colores o el fondo)
+; la misma imagen, leída otra vez (han cambiado los colores o el fondo), y
+; puesta como estaba de girada
 recarga:
         pushad
         cmp byte [nombre], 0
@@ -153,6 +183,10 @@ recarga:
         call pie_dice
         call carga
         mov [err_txt], eax
+        test eax, eax
+        jnz .r1
+        call tr_repite              ; girada y volteada como estaba
+.r1:
         call dispone
         call inval
 .x:
@@ -530,6 +564,14 @@ carga:
         mov [f_ncol], eax
         mov eax, [im_extra]
         mov [f_extra], eax
+        mov eax, [im_orienta]
+        mov [f_orienta], eax
+        mov edi, f_camara           ; (los textos se copian: el núcleo se usa también
+        mov esi, [im_camara]        ; para las miniaturas)
+        call .copia
+        mov edi, f_tomada
+        mov esi, [im_tomada]
+        call .copia
         mov eax, [im_fmt]
         mov eax, [eax+F_NOMBRE]
         mov [f_fmt], eax
@@ -598,6 +640,19 @@ carga:
         mov eax, [c_err]
         mov [esp+28], eax
         popad
+        ret
+
+; (interna) el texto ESI (0: ninguno), a EDI
+.copia:
+        mov byte [edi], 0
+        test esi, esi
+        jz .cp9
+.cp1:
+        lodsb
+        stosb
+        test al, al
+        jnz .cp1
+.cp9:
         ret
 
 ; (interna, con la pila del núcleo) la fila EAX del mapa nuevo: se pide al

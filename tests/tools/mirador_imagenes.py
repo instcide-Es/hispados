@@ -13,6 +13,9 @@ uso: mirador_imagenes.py haz DIR
         punto, el trozo de la referencia que empieza en esa esquina
      mirador_imagenes.py bmp ARCHIVO.BMP REFERENCIA BITS [giro] [margen] [nombre]
         ¿es el BMP guardado la imagen de REFERENCIA, con esos bits por punto?
+     mirador_imagenes.py guardada ARCHIVO REFERENCIA MODO [giro] [margen] [nombre]
+        ¿es el PNG o el PCX guardado la imagen de REFERENCIA? MODO: RGB (color
+        verdadero) o P (con paleta), como lo abre Pillow
      mirador_imagenes.py impreso SALIDA.prn REFERENCIA [apaisada] [nombre]
         ¿son los gráficos ESC/P mandados a la impresora la imagen de REFERENCIA?
 Necesita Pillow. Escribe «  OK   ...» o «  FAIL ...».
@@ -125,6 +128,13 @@ def haz(d):
         blanco = Image.new('RGB', (lado, lado), (255, 255, 255))
         blanco.paste(ff, (0, 0), ff)
         blanco.save(g(nombre + '_b.png'))
+    # la foto de un móvil: guardada tumbada, con el EXIF que dice cómo girarla, la cámara y la fecha
+    ex = Image.Exif()
+    ex[0x0112] = 6
+    ex[0x010F] = 'Hispa'
+    ex[0x0110] = 'Camara 1'
+    ex[0x0132] = '2026:11:16 12:34:56'
+    p.transpose(Image.Transpose.ROTATE_90).save(g('MOVIL.JPG'), quality=90, exif=ex)
     # una alta y estrecha, y una ancha (para ajustar, desplazar y la impresión apaisada)
     paisaje(1280, 800).save(g('ANCHA.JPG'), quality=60)
     Image.open(g('ANCHA.JPG')).convert('RGB').save(g('ref_ancha.png'))
@@ -239,6 +249,25 @@ def bmp(a):
     return compara(im.convert('RGB'), ref, float(a[4]) if len(a) > 4 else 10, nombre + ' (%d bits, %dx%d)' % ((bits,) + im.size))
 
 
+def guardada(a):
+    nombre = a[5] if len(a) > 5 else '%s guardado es %s' % (os.path.basename(a[0]), os.path.basename(a[1]))
+    try:
+        im = Image.open(a[0])
+        im.load()
+    except Exception as e:
+        print('  FAIL %s: no se abre (%s)' % (nombre, e))
+        return 1
+    ref = gira(Image.open(a[1]).convert('RGB'), a[3] if len(a) > 3 else '')
+    if im.mode != a[2]:
+        print('  FAIL %s: Pillow lo abre como %s y se esperaba %s' % (nombre, im.mode, a[2]))
+        return 1
+    if im.size != ref.size:
+        print('  FAIL %s: mide %dx%d y se esperaba %dx%d' % ((nombre,) + im.size + ref.size))
+        return 1
+    return compara(im.convert('RGB'), ref, float(a[4]) if len(a) > 4 else 10,
+                   nombre + ' (%s, %dx%d, %d octetos)' % (im.mode, im.size[0], im.size[1], os.path.getsize(a[0])))
+
+
 def impreso(a):
     """rehace la hoja de los gráficos ESC/P (ESC * 5 n1 n2 y columnas de 8 agujas) y la compara"""
     d = open(a[0], 'rb').read()
@@ -305,6 +334,8 @@ if __name__ == '__main__':
         sys.exit(ve(sys.argv[2:]))
     if orden == 'bmp':
         sys.exit(bmp(sys.argv[2:]))
+    if orden == 'guardada':
+        sys.exit(guardada(sys.argv[2:]))
     if orden == 'impreso':
         sys.exit(impreso(sys.argv[2:]))
     print(__doc__)

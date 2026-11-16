@@ -167,6 +167,10 @@ dispone:
         HV ven_mover
         call pon_barras
 .x:
+        cmp byte [mini], 0          ; con las miniaturas, la barra es de la rejilla
+        je .x1
+        call mini_mide
+.x1:
         mov byte [sucio], 1
         popad
         ret
@@ -808,12 +812,70 @@ transforma:
         mov ebx, 3
         call voltea
 .hecho:
+        call tr_anota
         call suelta_vista
         mov dword [sx], 0
         mov dword [sy], 0
         call dispone
         call inval
 .x:
+        popad
+        ret
+
+; (interna) apunta el giro o el volteo que se acaba de hacer. Como esté la
+; imagen se guarda en dos datos: [or_rot] cuartos de vuelta a la derecha y,
+; después, [or_volt] volteada en horizontal. (Girar algo ya volteado es
+; girarlo al revés antes de voltearlo; voltear en vertical es voltear en
+; horizontal y dar media vuelta.)
+tr_anota:
+        cmp dword [tr_calla], 0
+        jne .x
+        push eax
+        push ebx
+        mov eax, [tr_orden]
+        mov ebx, 1
+        cmp eax, O_GIRA_DER
+        je .gira
+        mov ebx, -1
+        cmp eax, O_GIRA_IZQ
+        je .gira
+        xor dword [or_volt], 1
+        cmp eax, O_VOLT_V
+        jne .f
+        mov ebx, 2
+        jmp .suma
+.gira:
+        cmp dword [or_volt], 0
+        je .suma
+        neg ebx
+.suma:
+        add ebx, [or_rot]
+        and ebx, 3
+        mov [or_rot], ebx
+.f:
+        pop ebx
+        pop eax
+.x:
+        ret
+; deja la imagen recién leída girada y volteada como dicen or_rot y or_volt
+tr_repite:
+        pushad
+        mov dword [tr_calla], 1
+        mov ebx, [or_rot]
+.g:
+        test ebx, ebx
+        jz .v
+        mov ecx, O_GIRA_DER
+        call transforma
+        dec ebx
+        jmp .g
+.v:
+        cmp dword [or_volt], 0
+        je .x
+        mov ecx, O_VOLT_H
+        call transforma
+.x:
+        mov dword [tr_calla], 0
         popad
         ret
 

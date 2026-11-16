@@ -4,10 +4,12 @@
 ;
 ;  Abre una imagen y la enseña: BMP, PCX, GIF, PNG, TGA, ICO, PBM/PGM/PPM y
 ;  JPEG, reconocidos por lo que llevan dentro y no por la extensión. Se pasa
-;  a la imagen anterior y a la siguiente de la misma carpeta, se amplía y se
+;  a la imagen anterior y a la siguiente de la misma carpeta (o se elige en
+;  una rejilla con las miniaturas de todas), se amplía y se
 ;  reduce (de 25 a 800 %, ajustada a la ventana o a su tamaño), se desplaza
 ;  con las barras, las flechas o arrastrándola, se gira y se voltea, se ve a
-;  pantalla completa y en un pase de diapositivas, se guarda como BMP y se
+;  pantalla completa y en un pase de diapositivas, se guarda como BMP, PNG
+;  o PCX y se
 ;  imprime (impresoras de agujas, ESC/P, en gráficos).
 ;
 ;  La pantalla de Hispa Ventanas tiene 256 colores fijos (los 16 con nombre,
@@ -32,6 +34,8 @@
 ;     programas/mirador/carpeta.inc   las imágenes de la carpeta
 ;     programas/mirador/vista.inc     ampliación, vista reducida, girar
 ;     programas/mirador/salida.inc    guardar, imprimir, información
+;     programas/mirador/mini.inc      las miniaturas de la carpeta
+;     programas/mirador/guarda.inc    guardar como PNG y como PCX
 ;  El núcleo no sabe nada de Hispa Ventanas y se prueba aparte, en Linux,
 ;  contra Pillow (tests/tools/mirador_formatos.py y mirador_color.py); el
 ;  programa entero, en QEMU (tests/run_mirador_tests.sh).
@@ -51,10 +55,16 @@
 ;  El módulo pide unos 185 K fijos; al ampliar por encima del 100 % pide
 ;  además un mapa del tamaño de la pantalla (medio mega en 800x600).
 ;
-;  Lo que no hace: la animación de los GIF (enseña el primer cuadro); copiar
-;  la imagen al portapapeles (el de Hispa Ventanas es de texto: se copia el
-;  nombre del archivo) ni ponerla de fondo del escritorio (Hispa Ventanas
-;  solo admite de fondo un mosaico de 16x16); leer archivos de más de 64 MB.
+;  Una foto de móvil se gira sola (la orientación de su EXIF) y la
+;  información dice la cámara y la fecha de la toma. Cambiar el tramado o el
+;  fondo de lo transparente relee el archivo y lo deja girado como estaba.
+;
+;  Lo que no hace: la animación de los GIF (enseña el primer cuadro); retocar
+;  la imagen (recortar, brillo...); copiar la imagen al portapapeles (el de
+;  Hispa Ventanas es de texto: se copia el nombre del archivo) ni ponerla de
+;  fondo del escritorio (Hispa Ventanas solo admite de fondo un mosaico de
+;  16x16); leer archivos de más de 64 MB; girar las miniaturas según el EXIF.
+;  Un PNG necesita en memoria su imagen entera sin comprimir (png.inc).
 ;
 ;  Parámetros del acceso directo: el nombre de una imagen, que se abre.
 ; =============================================================================
@@ -87,6 +97,8 @@ O_GUARDAR8  equ 103
 O_INFO      equ 104
 O_IMPRIMIR  equ 105
 O_SALIR     equ 106
+O_GUARDA_PNG equ 107
+O_GUARDA_PCX equ 108
 O_COPIAR    equ 111
 O_ANT       equ 121
 O_SIG       equ 122
@@ -110,6 +122,7 @@ O_GIRA_DER  equ 142
 O_VOLT_H    equ 143
 O_VOLT_V    equ 144
 O_ACERCA    equ 151
+O_MINI      equ 152
 
 HVP_CABECERA "Mirador", entrada, 1
         db "................................"
@@ -166,6 +179,10 @@ mir_menu:
         db "&Guardar como BMP...            Ctrl+G", 0
         dw O_GUARDAR8
         db "Guardar como BMP de &256 colores...", 0
+        dw O_GUARDA_PNG
+        db "Guardar como &PNG...", 0
+        dw O_GUARDA_PCX
+        db "Guardar como PC&X...", 0
         dw 0
         db 0
         dw O_INFO
@@ -224,6 +241,10 @@ mm_ordenado db "  Colores: tramado &ordenado", 0
 mm_cercano  db "  Colores: el más cerca&no, sin tramar", 0
         dw O_AJEDREZ
 mm_ajedrez  db "  Lo transparente, a&jedrezado", 0
+        dw 0
+        db 0
+        dw O_MINI
+mm_mini     db "  M&iniaturas de la carpeta        M", 0
         dw 0xFFFF
         db "&Imagen", 0
         dw O_GIRA_IZQ
@@ -257,6 +278,7 @@ botones     dd 6, 26, ic_abrir, O_ABRIR, nb_abrir, BT_ICONO
             dd 282, 26, ic_gira_izq, O_GIRA_IZQ, nb_gira_izq, BT_ICONO
             dd 310, 26, ic_gira_der, O_GIRA_DER, nb_gira_der, BT_ICONO
             dd 346, 26, ic_completa, O_COMPLETA, nb_completa, BT_ICONO
+            dd 374, 26, ic_mini, O_MINI, nb_mini, BT_ICONO
             dd 0, 0, 0, 0, 0, 0
 nb_abrir    db "Abrir una imagen (Ctrl+A)", 0
 nb_guardar  db "Guardar la imagen como BMP (Ctrl+G)", 0
@@ -270,7 +292,25 @@ nb_real     db "Tamaño real: un punto de la imagen, uno de la pantalla (1)", 0
 nb_gira_izq db "Girar un cuarto de vuelta a la izquierda (L)", 0
 nb_gira_der db "Girar un cuarto de vuelta a la derecha (R)", 0
 nb_completa db "Pantalla completa (F11 o Intro; Esc para volver)", 0
+nb_mini     db "Miniaturas de las imágenes de la carpeta (M)", 0
 ; los iconos propios, con la forma de los de barra.inc
+ic_mini:
+        db "................"
+        db ".0000..0000..000"
+        db ".0ee0..0aa0..0bb"
+        db ".0ee0..0aa0..0bb"
+        db ".0000..0000..000"
+        db "................"
+        db ".0000..0000..000"
+        db ".0cc0..0dd0..0ee"
+        db ".0cc0..0dd0..0ee"
+        db ".0000..0000..000"
+        db "................"
+        db ".0000..0000..000"
+        db ".0bb0..0ee0..0aa"
+        db ".0bb0..0ee0..0aa"
+        db ".0000..0000..000"
+        db "................"
 ic_img_ant:
         db "................"
         db "................"
@@ -401,13 +441,13 @@ ctrl_ord    db 0, O_ABRIR, 0, O_COPIAR, 0, 0, 0, O_GUARDAR, 0, 0, 0
 ; y las de una letra sola (en mayúscula) o un signo
 letra_ord   db '+', O_AMPLIAR, '-', O_REDUCIR, '*', O_AJUSTAR, '1', O_REAL
             db 'I', O_INFO, 'L', O_GIRA_IZQ, 'R', O_GIRA_DER, 'H', O_VOLT_H
-            db 'V', O_VOLT_V, 0
+            db 'V', O_VOLT_V, 'M', O_MINI, 0
 
 ; ---- textos ----
 t_mirador   db "Mirador", 0
 t_guion     db " - ", 0
 t_abrir     db "Abrir una imagen", 0
-t_guardar   db "Guardar la imagen como BMP", 0
+t_guardar   db "Guardar la imagen", 0
 t_acerca_tit db "Acerca de Mirador", 0
 t_acerca    db "Mirador", 10
             db "El visor de imágenes de Hispa Ventanas:", 10
@@ -424,6 +464,7 @@ t_sep       db "    ", 0
 t_de        db " de ", 0
 t_reducida  db "reducida a 1/", 0
 t_pausa     db "En pausa (Espacio: seguir; Esc: salir)", 0
+t_en_pase   db "pase de diapositivas", 0
 t_abriendo  db "Abriendo la imagen...", 0
 t_imprimiendo db "Imprimiendo la imagen...", 0
 t_av_cortado db "Aviso: el archivo está cortado o dañado; se ve lo que se ha podido leer.", 0
@@ -563,6 +604,9 @@ pon_marcas:
         mov ah, 1
         mov ebx, mm_ajedrez
         call .una
+        mov al, [mini]
+        mov ebx, mm_mini
+        call .una
         pop ebx
         pop eax
         ret
@@ -661,6 +705,17 @@ mir_proc:
         call inval
         jmp hecho
 .rueda:
+        cmp byte [mini], 0          ; en las miniaturas, las pasa de fila en fila
+        je .rueda1
+        mov eax, [mini_fila0]
+        test ecx, ecx
+        js .r_m
+        add eax, 2
+.r_m:
+        dec eax
+        call mini_desplaza
+        jmp hecho
+.rueda1:
         ; la rueda amplía y reduce; con Ctrl, pasa de imagen
         push ecx
         HV tec_estado
@@ -682,6 +737,11 @@ mir_proc:
         jmp .r_o
 .barra_v:
         mov eax, ecx
+        cmp byte [mini], 0
+        je .bv1
+        call mini_desplaza
+        jmp hecho
+.bv1:
         call desplaza_v
         jmp hecho
 .barra_h:
@@ -689,6 +749,11 @@ mir_proc:
         call desplaza_h
         jmp hecho
 .reloj:
+        cmp ecx, ID_RELOJ_MINI      ; otra miniatura
+        jne .reloj1
+        call mini_paso
+        jmp hecho
+.reloj1:
         cmp byte [pase], 0          ; el pase de diapositivas: la siguiente
         je hecho
         cmp byte [pase_pausa], 0
@@ -786,6 +851,13 @@ orden_haz:
         je .acerca
         cmp ecx, O_SALIR
         je .salir
+        cmp ecx, O_MINI
+        jne .nmini
+        call mini_alterna
+        jmp pon_marcas
+.nmini:
+        cmp byte [mini], 0          ; con las miniaturas a la vista, lo demás no toca
+        jne .x
         cmp ecx, O_COMPLETA
         je completa
         cmp ecx, O_PASE3
@@ -816,6 +888,10 @@ orden_haz:
         cmp ecx, O_GUARDAR
         je guardar
         cmp ecx, O_GUARDAR8
+        je guardar
+        cmp ecx, O_GUARDA_PNG
+        je guardar
+        cmp ecx, O_GUARDA_PCX
         je guardar
         cmp ecx, O_INFO
         je informacion
@@ -906,11 +982,16 @@ aviso:
 tecla:
         cmp ecx, TC_CTRL
         jae .ctrl
+        cmp byte [mini], 0
+        jne mini_tecla
         cmp ecx, TC_ESC
         jne .t1
-        cmp byte [pantc], 0         ; Esc: fuera del pase y de la pantalla completa
-        je hecho
+        call pase_para              ; Esc: fuera del pase y de la pantalla completa
+        cmp byte [pantc], 0
+        je .esc1
         call completa_sal
+.esc1:
+        call inval
         jmp hecho
 .t1:
         cmp ecx, TC_INTRO
@@ -989,6 +1070,8 @@ tecla:
 letra:
         cmp ecx, ' '
         jne .l0
+        cmp byte [mini], 0
+        jne hecho
         mov ecx, O_SIG              ; el espacio: la siguiente; en el pase, pausa
         cmp byte [pase], 0
         je orden
@@ -1032,6 +1115,11 @@ raton:
         mov ecx, [esi+12]
         jmp orden
 .hoja:
+        cmp byte [mini], 0          ; en las miniaturas: se elige
+        je .hoja1
+        call mini_clic
+        jmp hecho
+.hoja1:
         ; en la imagen: se coge y se arrastra
         cmp byte [hay_img], 0
         je hecho
@@ -1062,6 +1150,12 @@ raton_doble:
         add eax, [vh]
         cmp ebx, eax
         jge hecho
+        cmp byte [mini], 0          ; en las miniaturas: se abre
+        je .completa
+        call mini_clic
+        jc hecho
+        jmp mini_abre
+.completa:
         mov ecx, O_COMPLETA
         jmp orden
 raton_suelta:
@@ -1180,7 +1274,6 @@ completa_sal:
         jz .x
         cmp byte [pantc], 0
         je .x
-        call pase_para
         mov byte [pantc], 0
         mov eax, [pc_estilo]
         mov [ebp+V_ESTILO], eax
@@ -1215,10 +1308,11 @@ completa_sal:
         popad
         ret
 
-; el pase: a pantalla completa, y cada [pase_seg] segundos, la siguiente
+; el pase: cada [pase_seg] segundos, la siguiente; en la ventana o a pantalla
+; completa, como se esté (y se puede cambiar con el pase en marcha)
 pase_alterna:
         cmp byte [pase], 0
-        jne completa_sal            ; (parar el pase es volver a la ventana)
+        jne pase_fuera
         cmp dword [lst_n], 0
         jne .hay
         mov esi, t_primero
@@ -1226,8 +1320,8 @@ pase_alterna:
 .hay:
         mov byte [pase], 1
         mov byte [pase_pausa], 0
-        call completa_entra
         call pon_marcas
+        call inval
 pase_reloj:
         pushad
         mov ebp, [ven]
@@ -1237,6 +1331,9 @@ pase_reloj:
         HV tmp_poner
         popad
         ret
+pase_fuera:
+        call pase_para
+        jmp inval
 pase_para:
         pushad
         cmp byte [pase], 0
@@ -1298,6 +1395,11 @@ pintar:
         jle .fin
         cmp dword [vh], 0
         jle .fin
+        cmp byte [mini], 0
+        je .zona1
+        call mini_pinta
+        jmp .fin
+.zona1:
         cmp byte [hay_img], 0
         jne .imagen
         ; sin imagen: el fondo y lo que haya que decir
@@ -1419,7 +1521,14 @@ pinta_mensaje:
 ; lo que pregunta la barra común de cada botón: «Ajustar» se queda puesto
 barra_estado:
         xor ebp, ebp
+        cmp dword [edi+12], O_MINI
+        jne .n
+        movzx ebp, byte [mini]
+        ret
+.n:
         cmp dword [edi+12], O_AJUSTAR
+        jne .x
+        cmp byte [mini], 0
         jne .x
         movzx ebp, byte [zajuste]
         cmp byte [hay_img], 0
@@ -1439,6 +1548,27 @@ pinta_pie:
         cmp byte [nombre], 0
         je .pon
         mov edi, linea
+        cmp byte [mini], 0
+        je .normal
+        mov esi, [mini_sel]         ; en las miniaturas: la elegida
+        imul esi, LST_TAM
+        add esi, lst
+        call hvl_cad
+        mov esi, t_sep
+        call hvl_cad
+        mov eax, [mini_sel]
+        inc eax
+        call hvl_num
+        mov esi, t_de
+        call hvl_cad
+        mov eax, [lst_n]
+        call hvl_num
+        mov esi, t_sep
+        call hvl_cad
+        mov esi, t_mini_pie
+        call hvl_cad
+        jmp .fin
+.normal:
         mov esi, [nom_corto]
         call hvl_cad
         cmp byte [hay_img], 0
@@ -1481,6 +1611,13 @@ pinta_pie:
         mov eax, [f_red]
         call hvl_num
 .fin:
+        cmp byte [pase], 0
+        je .fin1
+        mov esi, t_sep
+        call hvl_cad
+        mov esi, t_en_pase
+        call hvl_cad
+.fin1:
         mov byte [edi], 0
         mov esi, linea
 .pon:
@@ -1514,6 +1651,8 @@ pinta_pie:
 %include "carpeta.inc"
 %include "vista.inc"
 %include "salida.inc"
+%include "mini.inc"
+%include "guarda.inc"
 
         section .bss
         alignb 4
@@ -1569,6 +1708,9 @@ vis_al      resd 1
 arr_x       resd 1
 arr_y       resd 1
 trama       resd 1
+or_rot      resd 1                  ; cómo está girada: cuartos de vuelta a la derecha...
+or_volt     resd 1                  ; ...y después, volteada en horizontal o no
+tr_calla    resd 1                  ; 1: se está rehaciendo el giro (no se anota)
 pase_seg    resd 1
 pc_estilo   resd 1
 pc_menu     resd 1
@@ -1603,6 +1745,8 @@ rl          resb RL_TAM
             CARGA_BSS
             CARPETA_BSS
             SALIDA_BSS
+            MINI_BSS
+            GUARDA_BSS
             BARRA_BSS
             DESINFLA_BSS
 %ifdef MI_CON_JPEG

@@ -74,6 +74,9 @@ im_hay_alfa resd 1                  ; tiene partes transparentes
 im_aviso    resd 1                  ; cortado o dañado: se ve una parte
 im_var      resd 1
 im_extra    resd 1                  ; un texto más para la información (0: nada)
+im_orienta  resd 1                  ; cómo hay que ponerla para verla derecha (EXIF: de 1 a 8; 1: como viene)
+im_camara   resd 1                  ; con qué cámara se hizo y cuándo (textos; 0: no lo dice)
+im_tomada   resd 1
 im_alm      resd 1
 im_almp     resd 1
 im_pal      resb 1024               ; rojo, verde, azul, opacidad
@@ -201,6 +204,9 @@ mi_abre:
         mov [im_aviso], eax
         mov [im_var], eax
         mov [im_extra], eax
+        mov [im_camara], eax
+        mov [im_tomada], eax
+        mov dword [im_orienta], 1
         mov [im_alm], eax
         mov [im_clase], eax
         mov edi, im_pal             ; la paleta, negra y opaca

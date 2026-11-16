@@ -90,6 +90,7 @@ lista_carpeta:
         call .busca
         jnc .x
 .lista:
+        call mini_suelta            ; (las miniaturas eran de la lista de antes)
         mov byte [lst_fuerza], 0
         mov esi, nombre
         mov edi, dir_ruta

@@ -15,7 +15,7 @@
 ;  puntos que le tocan de cada una de las siete pasadas. Por eso un PNG
 ;  necesita en memoria la imagen entera como va en el archivo (de uno a ocho
 ;  octetos por punto), además de sus datos comprimidos.
-;  No se comprueban las sumas (CRC) de los trozos; la de zlib, sí: si no
+;  Se comprueban la suma (CRC-32) de cada trozo y la de zlib: si alguna no
 ;  cuadra o los datos se acaban antes, se enseña lo que haya y se avisa.
 ; =============================================================================
 %macro PNG_BSS 0
@@ -44,6 +44,7 @@ png_pd      resd 7
 png_pw      resd 7
 png_ph      resd 7
 png_po      resd 7
+png_crc_t   resd 256
 %endmacro
 
 ; las siete pasadas de Adam7: primera columna y fila, y cada cuántas
@@ -175,6 +176,7 @@ png_abre:
         jb .a1
         mov dword [im_hay_alfa], 1
 .a1:
+        call png_sumas
         ; los trozos: la paleta, la transparencia y cuánto ocupan los datos
         xor eax, eax
         mov [png_idat], eax
@@ -344,6 +346,111 @@ png_abre:
         jb .tt3
         mov dword [png_trns], 1
 .t_x:
+        ret
+
+; EAX=la suma (CRC-32) hasta ahora (se empieza con 0FFFFFFFFh y al final se
+; le da la vuelta a todos los bits) ESI=datos ECX=cuántos -> EAX. Conserva lo
+; demás. Antes, una vez, png_crc_tabla
+png_crc:
+        test ecx, ecx
+        jz .x
+        push ebx
+        push ecx
+        push esi
+        xor ebx, ebx
+.b:
+        mov bl, [esi]
+        inc esi
+        xor bl, al
+        shr eax, 8
+        xor eax, [png_crc_t+ebx*4]
+        dec ecx
+        jnz .b
+        pop esi
+        pop ecx
+        pop ebx
+.x:
+        ret
+png_crc_tabla:
+        pushad
+        xor ebx, ebx
+.t:
+        mov eax, ebx
+        mov ecx, 8
+.t1:
+        shr eax, 1
+        jnc .t2
+        xor eax, 0xEDB88320
+.t2:
+        dec ecx
+        jnz .t1
+        mov [png_crc_t+ebx*4], eax
+        inc ebx
+        cmp ebx, 256
+        jb .t
+        popad
+        ret
+
+; comprueba la suma (CRC-32) de cada trozo que esté entero: si alguna no
+; cuadra el archivo se ha estropeado por el camino; se ve igual, con aviso
+png_sumas:
+        pushad
+        xor ebx, ebx                ; la tabla del CRC-32 (polinomio EDB88320)
+.t:
+        mov eax, ebx
+        mov ecx, 8
+.t1:
+        shr eax, 1
+        jnc .t2
+        xor eax, 0xEDB88320
+.t2:
+        dec ecx
+        jnz .t1
+        mov [png_crc_t+ebx*4], eax
+        inc ebx
+        cmp ebx, 256
+        jb .t
+        mov esi, [png_dat]
+        add esi, 8
+.c:
+        mov eax, [png_fin]
+        sub eax, esi
+        cmp eax, 12
+        jb .x
+        sub eax, 12
+        push eax
+        mov eax, [esi]
+        call mi_be32
+        mov ecx, eax
+        pop eax
+        cmp ecx, eax                ; (cortado: de eso ya se avisa en otro sitio)
+        ja .x
+        mov edx, [esi+4]            ; EDX=su nombre
+        add ecx, 4                  ; la suma es del nombre y los datos
+        add esi, 4
+        mov eax, 0xFFFFFFFF
+        xor ebx, ebx
+.b:
+        mov bl, [esi]
+        inc esi
+        xor bl, al
+        shr eax, 8
+        xor eax, [png_crc_t+ebx*4]
+        dec ecx
+        jnz .b
+        not eax
+        mov ebx, eax
+        mov eax, [esi]
+        call mi_be32
+        add esi, 4
+        cmp eax, ebx
+        je .c1
+        mov dword [im_aviso], 1
+.c1:
+        cmp edx, 'IEND'
+        jne .c
+.x:
+        popad
         ret
 
 png_prepara:

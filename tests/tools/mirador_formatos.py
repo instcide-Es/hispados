@@ -250,6 +250,12 @@ _start:
         mov eax, [im_var]
         test eax, eax
         setnz byte [res+44]
+        mov eax, [im_orienta]
+        mov [res+45], al
+        cmp dword [im_camara], 0
+        setnz byte [res+46]
+        cmp dword [im_tomada], 0
+        setnz byte [res+47]
         mov ecx, res
         mov edx, 48
         call escribe
@@ -350,6 +356,7 @@ def corre(prog, casos, espera=600):
             continue
         r = Res()
         (r.err, r.an, r.al, r.clase, r.bits, r.ncol, r.alfa, r.aviso, r.filas, r.mal, r.fmt, r.var) = struct.unpack_from('<12I', sal, p)
+        r.orienta, r.camara, r.tomada = (r.var >> 8) & 255, (r.var >> 16) & 255, (r.var >> 24) & 255
         r.var &= 0xFF
         n = r.filas * r.an * 3
         r.rgb = sal[p + 48:p + 48 + n]
@@ -1227,6 +1234,52 @@ def prueba_jpeg(prog, rnd):
         print('  %s %s (%dx%d)%s' % ('OK  ' if not mal else 'FAIL', nombre, an, al, '' if not mal else ': ' + '; '.join(mal)))
 
 
+def con_exif(jpg, orienta, mm, camara=True):
+    """el JPEG con un bloque EXIF delante: orientación y, si se pide, cámara y fecha (en la lista de EXIF)"""
+    e = '>' if mm else '<'
+    datos = []          # (número, tipo, cuántos, valor o texto)
+    datos.append((0x0112, 3, 1, struct.pack(e + 'HH', orienta, 0)))
+    textos = b''
+    n = 4 if camara else 1
+    base = 8 + 2 + 12 * n + 4
+    if camara:
+        for num, t in ((0x010F, b'Hispa\0'), (0x0110, b'Camara 1\0')):
+            datos.append((num, 2, len(t), struct.pack(e + 'I', base + len(textos))))
+            textos += t
+        sub = base + len(textos)
+        datos.append((0x8769, 4, 1, struct.pack(e + 'I', sub)))
+        fecha = b'2026:11:16 12:34:56\0'
+        textos += struct.pack(e + 'H', 1) + struct.pack(e + 'HHI', 0x9003, 2, len(fecha)) + struct.pack(e + 'I', sub + 2 + 12 + 4)
+        textos += struct.pack(e + 'I', 0) + fecha
+    datos.sort()
+    t = (b'MM' if mm else b'II') + struct.pack(e + 'HI', 42, 8) + struct.pack(e + 'H', len(datos))
+    for num, tipo, cuantos, valor in datos:
+        t += struct.pack(e + 'HHI', num, tipo, cuantos) + valor
+    t += struct.pack(e + 'I', 0) + textos
+    ap = b'Exif\0\0' + t
+    return jpg[:2] + b'\xff\xe1' + struct.pack('>H', len(ap) + 2) + ap + jpg[2:]
+
+
+def jpeg_base():
+    im = Image.new('RGB', (40, 24), (200, 120, 40))
+    b = io.BytesIO()
+    im.save(b, 'JPEG', quality=80)
+    return b.getvalue()
+
+
+def prueba_exif(prog):
+    j = jpeg_base()
+    C = [(con_exif(j, o, mm, cam), o, cam) for o in range(1, 9) for mm in (False, True) for cam in (False, True)]
+    C.append((j, 1, False))                                 # sin EXIF: como viene
+    C.append((con_exif(j, 9, False), 1, True))              # una orientación que no existe: como viene
+    R = corre(prog, [(d, 0, 0) for d, _, _ in C])
+    bien = sum(1 for r, (d, o, cam) in zip(R, C)
+               if r is not None and r.err == 0 and r.orienta == o and r.camara == int(cam) and r.tomada == int(cam) and r.filas == 24)
+    res(bien == len(C), 'EXIF de los JPEG: %d de %d bien' % (bien, len(C)))
+    print('  %s EXIF de los JPEG (orientación de 1 a 8, en los dos órdenes de octetos; cámara y fecha): %d de %d' % (
+        'OK  ' if bien == len(C) else 'FAIL', bien, len(C)))
+
+
 def prueba_no_admitidos(prog, rnd):
     """lo que tiene que decir que no, y cómo: (nombre, datos, error, con texto de variante)"""
     C = []
@@ -1250,6 +1303,13 @@ def prueba_no_admitidos(prog, rnd):
     b[24] = 3                                   # color de 3 bits por muestra: no existe
     C.append(('PNG con una profundidad que no existe', bytes(b), 1, 0))
     C.append(('PNG sin datos', png[:33] + png_trozo(b'IEND', b''), 1, 0))
+    # un PNG con la suma (CRC) de un trozo cambiada: se ve entero, con aviso
+    b = bytearray(png)
+    b[png.index(b'IEND') - 5] ^= 0x40           # (la suma del tEXt de delante)
+    r = corre(prog, [(bytes(b), 0, 0), (png, 0, 0)])
+    ok = r[0] and r[1] and r[0].err == 0 and r[0].aviso == 1 and r[1].aviso == 0 and r[0].rgb == r[1].rgb and r[0].filas == 8
+    res(ok, 'PNG con una suma (CRC) que no cuadra: se ve entero y avisa')
+    print('  %s un PNG con la suma (CRC) de un trozo cambiada se ve entero y avisa' % ('OK  ' if ok else 'FAIL'))
     tga, _ = haz_tga(rnd, 8, 8, 3, 8)
     b = bytearray(tga)
     b[16] = 16                                  # grises con opacidad
@@ -1309,9 +1369,12 @@ def prueba_cortados(prog, rnd, L):
     print('  %s archivos cortados (avisan, y nada de basura dada por buena): %d de %d' % ('OK  ' if bien == n else 'FAIL', bien, n))
 
 
-def prueba_rotos(prog, rnd, L, cuantos):
+def prueba_rotos(prog, rnd, L, cuantos, con_jpeg=True):
     """archivos estropeados al azar: ni un cuelgue ni un acceso fuera de sitio"""
     base = [c for c in L if len(c[2]) < 60000]
+    if con_jpeg:        # y JPEG con su EXIF, que también se lee
+        j = jpeg_base()
+        base += [('JPEG con EXIF', 'JPEG', con_exif(j, o, mm), 40, 24, None, False) for o in (1, 6) for mm in (False, True)] * 12
     hechos = 0
     por_fmt = {}
     while hechos < cuantos:
@@ -1377,10 +1440,11 @@ def main():
         L = prueba_buenos(prog, rnd, guardar)
         if '--sin-jpeg' not in a:
             prueba_jpeg(prog, rnd)
+            prueba_exif(prog)
         prueba_no_admitidos(prog, rnd)
         prueba_cortados(prog, rnd, L)
         if rotos:
-            prueba_rotos(prog, rnd, L, rotos)
+            prueba_rotos(prog, rnd, L, rotos, '--sin-jpeg' not in a)
     print('  %s formatos de Mirador: %d comprobaciones, %d fallos' % ('OK  ' if not fallos else 'FAIL', total, fallos))
     return 1 if fallos else 0
 

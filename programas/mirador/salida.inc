@@ -66,6 +66,8 @@ t_i_alfa    db "; con partes transparentes", 0
 t_i_tam     db "Tamaño del archivo: ", 0
 t_i_octetos db " octetos", 0
 t_i_fecha   db "Fecha: ", 0
+t_i_camara  db "Cámara: ", 0
+t_i_tomada  db "Foto hecha el: ", 0
 t_i_mem     db "En memoria: ", 0
 t_i_256     db " puntos a 256 colores", 0
 t_i_orig    db ",", 10, "y además en color verdadero (se puede guardar en 24 bits)", 0
@@ -88,15 +90,27 @@ copiar:
         ret
 
 ; =============================================================================
-;  Guardar como BMP: ECX=O_GUARDAR (de 24 bits si se puede) u O_GUARDAR8
+;  Guardar: ECX=O_GUARDAR (BMP, de 24 bits si se puede), O_GUARDAR8 (BMP de
+;  256 colores), O_GUARDA_PNG u O_GUARDA_PCX (guarda.inc)
 ; =============================================================================
 guardar:
         pushad
         mov dword [sal_24], 0
-        cmp ecx, O_GUARDAR
-        jne .g0
-        movzx eax, byte [hay_orig]
+        mov dword [sal_fmt], 0
+        mov dword [sal_ext], t_ext_bmp
+        cmp ecx, O_GUARDAR8
+        je .g0
+        movzx eax, byte [hay_orig]  ; (lo demás: en color verdadero si se guarda)
         mov [sal_24], eax
+        cmp ecx, O_GUARDA_PNG
+        jne .g00
+        mov dword [sal_fmt], 1
+        mov dword [sal_ext], t_ext_png
+.g00:
+        cmp ecx, O_GUARDA_PCX
+        jne .g0
+        mov dword [sal_fmt], 2
+        mov dword [sal_ext], t_ext_pcx
 .g0:
         ; se propone el nombre de la imagen, con .BMP
         mov esi, [nom_corto]
@@ -110,7 +124,7 @@ guardar:
         stosb
         jmp .n
 .n1:
-        mov esi, t_ext_bmp
+        mov esi, [sal_ext]
         call hvl_cad
         mov byte [edi], 0
         mov ebp, [ven]
@@ -141,7 +155,7 @@ guardar:
         lea edi, [esi-1]
         cmp edi, nom_tmp + 120
         jae .e2
-        mov esi, t_ext_bmp
+        mov esi, [sal_ext]
         call hvl_cad
         mov byte [edi], 0
 .e2:
@@ -180,7 +194,17 @@ guardar:
         cmp eax, ID_ACEPTAR
         jne .x
 .dist:
+        cmp dword [sal_fmt], 1
+        jb .bmp
+        je .png
+        call escribe_pcx
+        jmp .escrita
+.png:
+        call escribe_png
+        jmp .escrita
+.bmp:
         call escribe_bmp
+.escrita:
         mov esi, t_no_guardar
         jc .dice
         mov byte [lst_fuerza], 1    ; la carpeta ha cambiado
@@ -555,6 +579,41 @@ informacion:
         mov al, 10
         stosb
 .sin_fecha:
+        ; lo que apuntó la cámara, si lo apuntó
+        cmp byte [f_camara], 0
+        je .sin_camara
+        mov esi, t_i_camara
+        call hvl_cad
+        mov esi, f_camara
+        call hvl_cad
+        mov al, 10
+        stosb
+.sin_camara:
+        cmp byte [f_tomada+15], 0   ; «AAAA:MM:DD HH:MM:SS»
+        je .sin_tomada
+        cmp byte [f_tomada+4], ':'
+        jne .sin_tomada
+        mov esi, t_i_tomada
+        call hvl_cad
+        mov ax, [f_tomada+8]
+        stosw
+        mov al, '/'
+        stosb
+        mov ax, [f_tomada+5]
+        stosw
+        mov al, '/'
+        stosb
+        mov eax, [f_tomada]
+        stosd
+        mov al, ' '
+        stosb
+        mov eax, [f_tomada+11]
+        stosd
+        mov al, [f_tomada+15]
+        stosb
+        mov al, 10
+        stosb
+.sin_tomada:
         mov esi, t_i_mem
         call hvl_cad
         mov eax, [ma_an]

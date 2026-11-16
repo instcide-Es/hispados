@@ -18,11 +18,16 @@
 #  C. abrir con el diálogo; lo que no sabe (lo que no es una imagen, una
 #     variante que no admite, un archivo que no existe, uno cortado, que se ve
 #     a medias con su aviso); las enormes, que se reducen al leerlas; la
-#     información; el menú Ver (tramado, más cercano, lo transparente);
-#  D. guardar como BMP (24 bits y 256 colores), copiar el nombre e imprimir
+#     información; el menú Ver (tramado, más cercano, lo transparente); la
+#     foto de un móvil, que se gira sola (EXIF), con su cámara y su fecha;
+#  D. guardar como BMP (24 bits y 256 colores), como PNG y como PCX, copiar
+#     el nombre e imprimir
 #     (LPT1 a un archivo), derecha y apaisada: lo guardado y lo impreso se
-#     comparan con la imagen.
-# Con MIRADOR_SOLO=ABCD (las letras que se quieran) se pasan solo esas partes
+#     comparan con la imagen;
+#  E. las miniaturas de la carpeta: la rejilla con una de cada imagen y su
+#     nombre, elegir con las flechas y con un clic, abrir con Intro y con
+#     doble clic, y volver con Esc.
+# Con MIRADOR_SOLO=ABCDE (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con MIRADOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat, ImageMagick y Pillow (de Python).
@@ -33,7 +38,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/MIRADOR.HVP
-SOLO=${MIRADOR_SOLO:-NABCD}
+SOLO=${MIRADOR_SOLO:-NABCDE}
 PY=${MIRADOR_PY:-python3}
 $PY -c 'import PIL' 2>/dev/null || { ko "falta Pillow: ponga en MIRADOR_PY un Python que lo tenga"; exit 1; }
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/mirador.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "MIRADOR.HVP no se ensambla"; exit 1; }
@@ -158,11 +163,14 @@ reabre 'A:\ANCHA.JPG'
   tecla esc; sleep 2; shot d3
   tecla ret; sleep 2; shot d4; tecla ret; sleep 2; shot d5        # Intro entra y sale
   tecla home; sleep 3
-  tecla f5; sleep 1.5; shot e1                                    # el pase (cada 5 segundos): ANCHA.JPG a pantalla completa
+  tecla f11; sleep 2.5; tecla f5; sleep 1.5; shot e1              # el pase (cada 5 segundos), a pantalla completa: ANCHA.JPG
   sleep 3.5; shot e2                                              # a los cinco segundos, la siguiente
   tecla spc; sleep 6.5; shot e3                                   # en pausa: no pasa
   tecla spc; sleep 6.5; shot e4                                   # sigue: a los cinco segundos, la tercera
   tecla esc; sleep 2; shot e5; sleep 6; shot e6                   # fuera: en la ventana, y ya no pasa sola
+  tecla f5; sleep 6.5; shot e7; tecla esc; sleep 1; shot e8       # el pase, en la ventana: a los cinco segundos, la cuarta
+  tecla r; sleep 1.5; clic 211 69; sleep 0.8; clic 260 395; sleep 2.5; aparca; shot e9   # girada, y se cambia el tramado: sigue girada
+  clic 211 69; sleep 0.8; clic 260 375; sleep 2.5; aparca         # (y otra vez con difusión)
   clic 211 69; sleep 0.8; clic 260 307; sleep 0.8                 # Ver > Pase: cada 3 segundos
   clic 211 69; sleep 0.8; shot m2; tecla esc; sleep 0.5           # el menú Ver, con sus marcas
   sal; } | run 280 -vga std
@@ -215,6 +223,12 @@ ve $T/e3.ppm 368 268 64 64 $I/ref_flecha.png "" 6 "en pausa no pasa: sigue la se
 ve $T/e4.ppm 240 200 320 200 $I/ref_paisaje.png "" 8 "el pase: tras la pausa, la tercera"
 chk $T/e5.ppm titulo 40 34 activa "Mirador - PAISAJE.PNG"
 chk $T/e6.ppm igual 60 120 600 380 $T/e5.ppm 60 120 0       # parado: ya no pasa
+chk $T/e7.ppm titulo 40 34 activa "Mirador - TORRE.PNG"
+pie e7 "TORRE.PNG    320 x 200    100 %    4 de 4    pase de diapositivas"
+pie e8 "TORRE.PNG    320 x 200    100 %    4 de 4"
+chk $T/e8.ppm nobusca 46 551 400 559 0 6 "pase de diapositivas"
+pie e9 "TORRE.PNG    200 x 320    100 %    4 de 4"
+ve $T/e9.ppm 292 162 200 320 $I/ref_torre.png der 8 "al cambiar el tramado sigue girada"
 chk $T/m2.ppm busca 200 294 216 304 0 8 "* Pase: cada "           # la marca, en «cada 3 segundos»...
 chk $T/m2.ppm nobusca 200 314 216 324 0 8 "* Pase: cada "         # ...y ya no en «cada 5»
 chk $T/m2.ppm busca 200 206 216 216 0 8 "* A"                    # Ajustar a la ventana
@@ -227,7 +241,7 @@ fi
 if [[ $SOLO == *C* ]]; then
 echo "== Mirador C: el diálogo de abrir; lo que no sabe; las enormes; información y colores =="
 disco
-mete LAGO.GIF NOTA.BMP RARO.BMP CORTADA.PNG ENORME.PNG FOTON.JPG FLECHA.PNG PAISAJE.PNG
+mete LAGO.GIF NOTA.BMP RARO.BMP CORTADA.PNG ENORME.PNG FOTON.JPG FLECHA.PNG PAISAJE.PNG MOVIL.JPG
 { arranca
   shot f1                                                         # sin imagen
   tecla i; sleep 1; shot f2; tecla ret; sleep 0.6                 # información sin imagen: lo dice
@@ -248,6 +262,8 @@ mete LAGO.GIF NOTA.BMP RARO.BMP CORTADA.PNG ENORME.PNG FOTON.JPG FLECHA.PNG PAIS
   clic 211 69; sleep 0.8; shot m3; clic 260 375; sleep 2.5; aparca; shot h3      # Ver > Colores: difusión de error
   tecla ctrl-a; sleep 1.2; escribe "flecha.png"; tecla ret; sleep 2.5
   clic 211 69; sleep 0.8; clic 260 435; sleep 2.5; aparca; shot h4               # Ver > Lo transparente, ajedrezado: fuera
+  tecla ctrl-a; sleep 1.2; escribe "movil.jpg"; tecla ret; sleep 2.5; shot j1    # la foto de un móvil: se gira sola
+  tecla i; sleep 1; shot j2; tecla ret; sleep 0.6
   sal; } | run 280 -vga std
 chk $T/f1.ppm titulo 40 34 activa "Mirador"
 pie f1 "No hay ninguna imagen abierta."
@@ -257,7 +273,7 @@ chk $T/f3.ppm titulo 40 34 activa "Mirador - LAGO.GIF"
 ve $T/f3.ppm 232 222 320 200 $I/ref_lago.png "" 8 "abierta con el diálogo"
 chk $T/f4.ppm titulo 40 34 activa "Mirador - NOTA.BMP"
 nove f4 "Este archivo no es una imagen de las que Mirador conoce:"
-pie f4 "NOTA.BMP    6 de 8"
+pie f4 "NOTA.BMP    7 de 9"
 nove f5 "Mirador no sabe ver esta imagen: es "
 nove f5 "un BMP con una compresión que Mirador no conoce (JPEG, PNG o Huffman)."
 nove f6 "No se ha podido abrir el archivo."
@@ -282,17 +298,17 @@ print('  %s la cortada: arriba es el paisaje (%.1f) y lo que falta va liso, de c
 sys.exit(0 if ok else 1)
 EOF
 dice f8 "El archivo está cortado o dañado: falta una parte."
-pie g1 "ENORME.PNG    3000 x 2000    21 %    2 de 8    reducida a 1/2"
+pie g1 "ENORME.PNG    3000 x 2000    21 %    2 de 9    reducida a 1/2"
 ve $T/g1.ppm 71 108 641 427 $I/ref_enorme.png "" 6 "un PNG de 3000x2000: reducido al leerlo, entero en la ventana"
 dice g2 "Medidas: 3.000 x 2.000 puntos"
 dice g2 "Colores: 5 colores, con paleta"
 dice g2 "En memoria: 1.500 x 1.000 puntos a 256 colores (reducida a 1/2)"
-pie g3 "ENORME.PNG    3000 x 2000    50 %    2 de 8    reducida a 1/2"
+pie g3 "ENORME.PNG    3000 x 2000    50 %    2 de 9    reducida a 1/2"
 chk $T/g3.ppm rgb 250 200 FF0000 "el mapa reducido, punto por punto: el centro, con el cuadrante rojo"
 chk $T/g3.ppm rgb 550 200 00FF00 "el verde"
 chk $T/g3.ppm rgb 250 450 0000FF "el azul"
 chk $T/g3.ppm rgb 550 450 FFFF00 "y el amarillo"
-pie g4 "FOTON.JPG    2560 x 1920    22 %    4 de 8    reducida a 1/2"
+pie g4 "FOTON.JPG    2560 x 1920    22 %    4 de 9    reducida a 1/2"
 ve $T/g4.ppm 107 108 570 427 $I/ref_foton.png "" 6 "un JPEG de 2560x1920: lo reduce su descodificador"
 dice g5 "Archivo: A:\\PAISAJE.PNG"
 dice g5 "Formato: PNG"
@@ -309,6 +325,11 @@ chk $T/m3.ppm busca 200 402 216 412 0 8 "* Colores: el más cerca"
 ve $T/h3.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "y otra vez con difusión de error"
 ve $T/h4.ppm 360 290 64 64 $I/ref_flecha_b.png "" 6 "lo transparente, sobre blanco liso"
 chk $T/h4.ppm rgb 364 350 FFFFFF "donde había un cuadro gris, blanco"
+chk $T/j1.ppm titulo 40 34 activa "Mirador - MOVIL.JPG"
+pie j1 "MOVIL.JPG    320 x 200    100 %    6 de 9"
+ve $T/j1.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "la foto del móvil (guardada tumbada, EXIF 6): se ve derecha"
+dice j2 "Cámara: Hispa Camara 1"
+dice j2 "Foto hecha el: 16/11/2026 12:34"
 muestra f5 mirador_no_sabe; muestra f7 mirador_cortada; muestra g1 mirador_enorme; muestra g5 mirador_info
 muestra h1 mirador_ordenado; muestra h2 mirador_cercano; muestra h3 mirador_difusion
 fi
@@ -316,13 +337,18 @@ fi
 if [[ $SOLO == *D* ]]; then
 echo "== Mirador D: guardar como BMP, copiar el nombre e imprimir =="
 disco
-mete PAISAJE.PNG TORRE.PNG
+mete CASA.PPM PAISAJE.PNG TORRE.PNG
 reabre 'A:\PAISAJE.PNG'
 { arranca
   tecla ctrl-g; sleep 1.2; tecla end; shot s1; tecla ret; sleep 3; shot s2; tecla ret; sleep 1     # el nombre que propone: PAISAJE.BMP (24 bits)
   clic 83 69; sleep 0.8; clic 150 139; sleep 1.2; escribe "ocho"; tecla ret; sleep 3; shot s3; tecla ret; sleep 1   # de 256 colores: OCHO.BMP
   tecla r; sleep 1.5; tecla ctrl-g; sleep 1.2; escribe "girada.bmp"; tecla ret; sleep 3; tecla ret; sleep 1          # girada: se guarda girada
-  tecla l; sleep 1.5; shot s4
+  tecla l; sleep 1.5
+  tecla home; sleep 2.5                                           # CASA.PPM (más pequeña: el disquete se llena)
+  clic 83 69; sleep 0.8; clic 150 159; sleep 1.2; escribe "copia"; tecla ret; sleep 3; shot s6; tecla ret; sleep 1  # como PNG: COPIA.PNG
+  clic 83 69; sleep 0.8; clic 150 179; sleep 1.2; escribe "copia"; tecla ret; sleep 3; tecla ret; sleep 1           # como PCX: COPIA.PCX
+  tecla pgdn; sleep 2.5; shot s7                                  # la siguiente de la carpeta: COPIA.PCX, la que se acaba de guardar
+  tecla end; sleep 2; tecla pgup; sleep 2; shot s4                # y otra vez PAISAJE.PNG
   tecla ctrl-c; sleep 0.6; tecla ctrl-a; sleep 1.2; tecla ctrl-v; sleep 0.8; shot s5; tecla esc; sleep 0.8          # el nombre, copiado: se pega en el diálogo
   tecla ctrl-p; sleep 5; shot p0; sleep 26; shot p1; tecla ret; sleep 1   # imprimir: apaisada (es más ancha que alta)
   sal; } | PARALELO=file:$T/prn1.bin run 240 -vga std
@@ -330,7 +356,10 @@ reabre 'A:\PAISAJE.PNG'
 chk $T/s1.ppm busca 150 150 600 450 0 9 "PAISAJE.BM"
 dice s2 "La imagen se ha guardado."
 dice s3 "La imagen se ha guardado con los 256 colores de Hispa Ventanas."
-pie s4 "PAISAJE.PNG    320 x 200    100 %    4 de 5"            # (con los tres BMP guardados)
+pie s4 "PAISAJE.PNG    320 x 200    100 %    7 de 8"            # (con los tres BMP, los dos PNG y el PCX guardados)
+dice s6 "La imagen se ha guardado."
+pie s7 "COPIA.PCX    160 x 100    100 %    2 de 8"
+ve $T/s7.ppm 312 272 160 100 $I/ref_casa.png "" 8 "el PCX guardado se abre con Mirador y es la misma imagen"
 chk $T/s5.ppm busca 150 150 600 450 0 9 "A:\\PAISAJE.PN"
 pie p0 "Imprimiendo la imagen..."
 dice p1 "La imagen se ha enviado a la impresora."
@@ -338,6 +367,9 @@ for f in PAISAJE.BMP OCHO.BMP GIRADA.BMP; do mcopy -n -i $T/f.img ::$f $T/$f 2>/
 $PY tests/tools/mirador_imagenes.py bmp $T/PAISAJE.BMP $I/ref_paisaje.png 24 "" 0.01 "guardada en 24 bits: idéntica al original" || fail=1
 $PY tests/tools/mirador_imagenes.py bmp $T/OCHO.BMP $I/ref_paisaje.png 8 "" 8 "guardada con 256 colores: lo que se ve" || fail=1
 $PY tests/tools/mirador_imagenes.py bmp $T/GIRADA.BMP $I/ref_paisaje.png 24 der 0.01 "guardada girada" || fail=1
+for f in COPIA.PNG COPIA.PCX; do mcopy -n -i $T/f.img ::$f $T/$f 2>/dev/null || ko "no se ha guardado $f"; done
+$PY tests/tools/mirador_imagenes.py guardada $T/COPIA.PNG $I/ref_casa.png RGB "" 0.01 "guardada como PNG: idéntica al original" || fail=1
+$PY tests/tools/mirador_imagenes.py guardada $T/COPIA.PCX $I/ref_casa.png RGB "" 0.01 "guardada como PCX: idéntica al original" || fail=1
 mcopy -n -i $T/f.img ::PAISAJE.PNG $T/sal.png 2>/dev/null
 cmp -s $T/sal.png $I/PAISAJE.PNG && ok "PAISAJE.PNG sigue como estaba" || ko "PAISAJE.PNG ha cambiado en el disco"
 $PY tests/tools/mirador_imagenes.py impreso $T/prn1.bin $I/ref_paisaje.png apaisada "impresa apaisada, ajustada a la hoja" || fail=1
@@ -364,7 +396,72 @@ reabre 'A:\PAISAJE.PNG'
   tecla ctrl-p; sleep 3; shot p3; tecla ret; sleep 1
   sal; } | run 100 -vga std
 dice p3 "No se ha podido imprimir."
+# con 4 MB no se guarda el original en color verdadero: lo que se guarda es lo que se ve, con paleta
+disco
+mete BARRAS.BMP PAISAJE.PNG
+reabre 'A:\BARRAS.BMP'
+{ arranca
+  clic 83 69; sleep 0.8; clic 150 159; sleep 1.2; escribe "b"; tecla ret; sleep 3; shot s8; tecla ret; sleep 1      # B.PNG
+  clic 83 69; sleep 0.8; clic 150 179; sleep 1.2; escribe "b"; tecla ret; sleep 3; tecla ret; sleep 1               # B.PCX
+  tecla end; sleep 2.5
+  clic 83 69; sleep 0.8; clic 150 159; sleep 1.2; escribe "p"; tecla ret; sleep 3; tecla ret; sleep 1               # P.PNG
+  clic 83 69; sleep 0.8; clic 150 179; sleep 1.2; escribe "p"; tecla ret; sleep 3; tecla ret; sleep 1               # P.PCX
+  tecla ctrl-g; sleep 1.2; escribe "p"; tecla ret; sleep 3; tecla ret; sleep 1                                      # P.BMP
+  sal; } | run 150 -vga std -m 4
+dice s8 "La imagen se ha guardado con los 256 colores de Hispa Ventanas."
+for f in B.PNG B.PCX P.PNG P.PCX P.BMP; do mcopy -n -i $T/f.img ::$f $T/$f 2>/dev/null || ko "no se ha guardado $f"; done
+$PY tests/tools/mirador_imagenes.py guardada $T/B.PNG $I/ref_barras.png P "" 0.01 "con paleta, como PNG: las barras, exactas" || fail=1
+$PY tests/tools/mirador_imagenes.py guardada $T/B.PCX $I/ref_barras.png P "" 0.01 "con paleta, como PCX: las barras, exactas" || fail=1
+$PY tests/tools/mirador_imagenes.py guardada $T/P.PNG $I/ref_paisaje.png P "" 8 "con paleta, como PNG: el paisaje, tramado" || fail=1
+$PY tests/tools/mirador_imagenes.py guardada $T/P.PCX $I/ref_paisaje.png P "" 8 "con paleta, como PCX: el paisaje, tramado" || fail=1
+$PY tests/tools/mirador_imagenes.py bmp $T/P.BMP $I/ref_paisaje.png 8 "" 8 "sin el original, Ctrl+G guarda el BMP de 256 colores" || fail=1
+[ $(stat -c %s $T/B.PNG) -lt 8000 ] && ok "el PNG de las barras ocupa $(stat -c %s $T/B.PNG) octetos (su BMP, 52.278)" || ko "el PNG de las barras ocupa $(stat -c %s $T/B.PNG) octetos: no comprime"
 muestra s1 mirador_guardar
+fi
+
+if [[ $SOLO == *E* ]]; then
+echo "== Mirador E: las miniaturas de la carpeta =="
+disco
+mete BARRAS.BMP BARRAS.PCX CASA.PPM FLECHA.ICO FLECHA.PNG FOTON.JPG LAGO.GIF MONTE.TGA NOTA.BMP PAISAJE.PNG PLAYA.JPG
+reabre 'A:\PAISAJE.PNG'
+{ arranca
+  tecla m; sleep 0.4; tecla right; sleep 0.8; shot k0             # mientras se llena, el teclado responde
+  sleep 9; shot k1                                                # la rejilla, llena
+  tecla left left; shot k2; tecla up; shot k3                     # las flechas
+  tecla end; shot k4; tecla home; shot k5
+  clic 112 260; aparca; shot k6                                   # un clic elige (LAGO.GIF)
+  tecla esc; sleep 1; shot k7                                     # Esc: a la imagen que se veía
+  clic 429 90; sleep 1.5; aparca; tecla home right right; sleep 0.5; tecla ret; sleep 2.5; shot k8   # el botón; Intro abre la elegida (CASA.PPM)
+  tecla m; sleep 1.5; ir 232 260; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.3
+  sleep 2.5; aparca; shot k9                                      # doble clic: abre MONTE.TGA
+  sal; } | run 200 -vga std
+pie k0 "PLAYA.JPG    11 de 11    Miniaturas: Intro abre la elegida; Esc vuelve"
+ve $T/k1.ppm 64 128 96 48 $I/ref_barras.png "" 8 "miniatura de BARRAS.BMP"
+ve $T/k1.ppm 288 122 96 60 $I/ref_casa.png "" 10 "miniatura de CASA.PPM"
+ve $T/k1.ppm 624 116 96 72 $I/ref_foton.png "" 8 "miniatura de FOTON.JPG (2560x1920)"
+ve $T/k1.ppm 64 226 96 60 $I/ref_lago.png "" 10 "miniatura de LAGO.GIF, en la segunda fila"
+ve $T/k1.ppm 176 226 96 60 $I/ref_paisaje.png "" 10 "miniatura de MONTE.TGA"
+ve $T/k1.ppm 400 226 96 60 $I/ref_paisaje.png "" 10 "miniatura de PAISAJE.PNG"
+ve $T/k1.ppm 512 226 96 60 $I/ref_playa.png "" 10 "miniatura de PLAYA.JPG"
+chk $T/k1.ppm busca 76 294 84 302 0 8 "LAGO.GIF"
+chk $T/k1.ppm busca 60 190 80 200 0 8 "BARRAS.BMP"
+chk $T/k1.ppm busca 320 240 340 256 13 8 "?"                     # NOTA.BMP no es una imagen
+chk $T/k1.ppm px 506 214 2 "la elegida (PLAYA.JPG), sobre petróleo"
+chk $T/k1.ppm busca 520 294 536 302 8 2 "PLAYA.JPG"
+pie k2 "NOTA.BMP    9 de 11    Miniaturas: Intro abre la elegida; Esc vuelve"
+pie k3 "CASA.PPM    3 de 11    Miniaturas: Intro abre la elegida; Esc vuelve"
+pie k4 "PLAYA.JPG    11 de 11    Miniaturas: Intro abre la elegida; Esc vuelve"
+pie k5 "BARRAS.BMP    1 de 11    Miniaturas: Intro abre la elegida; Esc vuelve"
+pie k6 "LAGO.GIF    7 de 11    Miniaturas: Intro abre la elegida; Esc vuelve"
+chk $T/k6.ppm px 58 214 2 "la del clic, sobre petróleo"
+chk $T/k7.ppm titulo 40 34 activa "Mirador - PAISAJE.PNG"
+pie k7 "PAISAJE.PNG    320 x 200    100 %    10 de 11"
+ve $T/k7.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "Esc: otra vez la imagen que se veía"
+chk $T/k8.ppm titulo 40 34 activa "Mirador - CASA.PPM"
+ve $T/k8.ppm 312 272 160 100 $I/ref_casa.png "" 8 "Intro: abre la elegida"
+chk $T/k9.ppm titulo 40 34 activa "Mirador - MONTE.TGA"
+ve $T/k9.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "doble clic: abre esa"
+muestra k1 mirador_miniaturas
 fi
 
 [ -n "${MIRADOR_DEJA:-}" ] && echo "(las capturas quedan en $T)" || rm -rf $T
