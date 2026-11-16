@@ -16,18 +16,24 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 
 ## Dónde estamos
 
-**Etapas 0 a 3 hechas y la 4 empezada** (`h8086/`, noviembre de 2026).
-Versión 0.7.1.
+**Etapas 0 a 3 hechas, y la 4 y la 5 muy avanzadas** (`h8086/`, noviembre de
+2026). Versión 0.8.
 
-- **Arranque**: sector de arranque FAT12 y núcleo (6,8 K en el disco). En
-  memoria, el núcleo con sus variables, la copia de la FAT y la pila son unos
-  14 K, y el intérprete de órdenes, otros 8 K: en una máquina de 640 K
-  quedan 618 K para los programas, ensamblados
-  con `cpu 8086`: el ensamblador rechaza cualquier instrucción posterior.
-  Disquetes de 360 K, 720 K, 1,2 M y 1,44 M.
+- **Arranque, de disquete o de disco duro**: un solo sector de arranque para
+  FAT12 y FAT16, disquetes y particiones (suma los sectores que hay delante
+  de la partición y le pregunta a la BIOS las medidas del disco), y un sector
+  de particiones (MBR) propio. El núcleo ocupa 8,6 K en el disco. En
+  memoria, el núcleo con sus variables, sus dos búferes y la pila son unos
+  12 K, y el intérprete de órdenes, otros 9 K: en una
+  máquina de 640 K quedan 616 K para los programas, y en una de
+  256 K, 233 K. Todo ensamblado con `cpu 8086`: el ensamblador
+  rechaza cualquier instrucción posterior. Disquetes de 360 K, 720 K, 1,2 M
+  y 1,44 M.
 - **El equipo**: reconoce el procesador (8086/8088, V20/V30, 80186, 286, 386,
   486 o más) y la memoria; si la máquina puede con un Hispa mayor, lo
   aconseja.
+- **CONFIG.SYS** al arrancar: `FILES=`, `BUFFERS=`, `SHELL=` y `REM` (ver
+  «CONFIG.SYS», más abajo).
 - **INT 21h**, lo que un programa de DOS espera encontrar:
   - consola (01h, 02h, 06h a 0Bh), vectores (25h, 35h), versión (30h),
     terminar (00h, 4Ch, 4Dh, INT 20h);
@@ -40,6 +46,8 @@ Versión 0.7.1.
     cambiar el tamaño (4Ah);
   - **programas**: lanzar otro y esperar (4Bh), su código de salida (4Dh),
     qué programa corre (50h, 51h, 62h).
+- **INT 25h e INT 26h**: leer y escribir sectores «en crudo», como en DOS
+  (para las herramientas de disco de la época).
 - **Disco**: tres unidades, A: y B: (disquetes) y **C:, el disco duro** (la
   primera partición FAT del primer disco); FAT12 y **FAT16** de hasta 32
   megas, de lectura y escritura, con subdirectorios que crecen. La FAT se lee
@@ -50,25 +58,33 @@ Versión 0.7.1.
   prefijo (PSP), sus parámetros y su entorno (las variables y, detrás, su
   propia ruta). Un programa puede lanzar otro; al terminar se cierran sus
   archivos y se suelta su memoria.
-- **El intérprete de órdenes es un programa aparte**, COMMAND.COM (4,7 K),
-  que el núcleo lanza al arrancar y que se queda solo con la memoria que
-  ocupa. Las órdenes llevan los mismos nombres que en el resto de la familia
-  (el español y el clásico): AYUDA, VER, EQUIPO, DIR, MOSTRAR, COPIAR, BORRAR
-  (con comodines), RENOMBRAR, CD, CREARDIR, BORRARDIR, LIMPIAR, ACTUALIZAR.
+- **El intérprete de órdenes es un programa aparte**, COMMAND.COM
+  (6,8 K), que el núcleo lanza al arrancar y que se queda solo con la
+  memoria que ocupa. Las órdenes llevan los mismos nombres que en el resto de
+  la familia (el español y el clásico): AYUDA, VER, EQUIPO, DIR, MOSTRAR,
+  COPIAR, BORRAR (con comodines), RENOMBRAR, CD, CREARDIR, BORRARDIR, LIMPIAR,
+  ACTUALIZAR.
 - **Archivos por lotes** (.BAT) con ECO, REM, PAUSA, los parámetros %0 a %9,
-  IF [NOT] EXIST / ERRORLEVEL / a==b y GOTO, y **AUTOEXEC.BAT** al arrancar.
-- **Redirección**: `orden > archivo`, `>> archivo` y `< archivo` (INT 21h/46h:
-  un archivo hace de pantalla o de teclado para todos los programas).
+  IF [NOT] EXIST / ERRORLEVEL / a==b, GOTO, **FOR** (o PARA), **LLAMAR**
+  (CALL) y **DESPLAZAR** (SHIFT), y **AUTOEXEC.BAT** al arrancar.
+- **Redirección y tuberías**: `orden > archivo`, `>> archivo`, `< archivo`
+  (INT 21h/46h: un archivo hace de pantalla o de teclado para todos los
+  programas) y `orden | orden`, con los filtros **MAS** (MORE) y **ORDENAR**
+  (SORT).
+- **Preparar discos**: **PARTIR** (FDISK), **FORMATEA** (FORMAT) y
+  **SISTEMA** (SYS). Con ellas el sistema se instala solo en un disco duro
+  vacío y hace sus propios disquetes de arranque (ver «Preparar discos»).
 - **PASAR**, la orden que lleva y trae archivos por el puerto serie con el
   protocolo XMODEM (ver más abajo «Pasar archivos»).
-- **Prueba automática** (`make -C h8086 prueba`): 102 comprobaciones en QEMU,
-  también sobre un disco duro de 20 megas con una partición FAT16 y con otro
-  programa haciendo de «el otro ordenador» por el puerto serie.
-  Un .EXE hecho a mano (`prueba/exe.asm`) comprueba la reubicación, la
-  memoria y el lanzamiento de otro programa; otro (`prueba/arch.asm`) ejerce
-  la interfaz de archivos en doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
-  contenido exacto y `fsck.fat` no encuentra ningún error, en las cuatro
-  medidas.
+- **Prueba automática** (`make -C h8086 prueba`): 271 comprobaciones en
+  QEMU: arrancando de disquete y de disco duro, con discos duros de 8, 20 y
+  64 megas partidos y formateados por el propio sistema, disquetes de las
+  cuatro medidas formateados por él, y con otro programa haciendo de «el otro
+  ordenador» por el puerto serie. Un .EXE hecho a mano (`prueba/exe.asm`)
+  comprueba la reubicación, la memoria y el lanzamiento de otro programa;
+  otro (`prueba/arch.asm`) ejerce la interfaz de archivos en doce pasos; y
+  todo lo que se escribe en los discos se mira después desde fuera: cada
+  archivo tiene su contenido exacto y `fsck.fat` no encuentra ningún error.
 
 **Probado también en un procesador de 16 bits** (16/11/2026): en el emulador
 8086tiny, que implementa un 8086/80186, arranca desde los disquetes de 360 K y
@@ -91,14 +107,37 @@ IBM con su BIOS de fábrica):
 De esa revisión salió un fallo, arreglado en la 0.7.1: `DIR C:` desde `A:`
 decía el espacio libre de A: en vez del de C:.
 
-**Lo que falta por comprobar:** PASAR por un puerto serie de verdad, un V20 y
-un 80186 (para la parte fina de la detección) y, sobre todo, un XT real con su
-disquetera.
+**Lo de la 0.8 solo está probado en QEMU** (un 486 con la BIOS SeaBIOS): el
+arranque del disco duro, PARTIR, FORMATEA, SISTEMA, CONFIG.SYS, los lotes
+nuevos y las tuberías. Falta pasarlo por las ROM de IBM (PCjs) y por un
+procesador de 16 bits (8086tiny), como se hizo con la 0.7. Y hay dos cosas
+que QEMU no deja probar de verdad:
 
-**Límites de hoy:** particiones de hasta 32 megas, una sola por disco y un
-solo disco duro; se arranca desde disquete (aún no hay FDISK, FORMAT ni SYS);
-ocho archivos abiertos entre todos los programas, sin programas residentes ni la vieja interfaz de
-archivos por FCB.
+- **El formato de bajo nivel de los disquetes.** La BIOS de QEMU contesta
+  «hecho» a la orden de grabar una pista (INT 13h/05h) sin grabar nada, y su
+  disquetera no sabe devolver un error de lectura. Así que la prueba recorre
+  el camino entero (preparar la unidad, grabar y releer las 40 u 80 pistas
+  por las dos caras), pero que la pista quede grabada y que una pista mala se
+  detecte solo se verá en una disquetera real. Lo que sí se prueba es qué se
+  hace con una pista mala: FORMATEA tiene un parámetro solo para eso
+  (`/M:n`, da por mala la pista n), y se comprueba que sus grupos quedan
+  marcados en las dos FAT y que el disquete sirve con lo demás.
+- **Las unidades de 1,2 M con disquetes de 360 K**, y en general el cambio de
+  densidad (INT 13h/17h y 18h): en QEMU la unidad es siempre de la medida de
+  la imagen.
+
+**Lo que falta por comprobar:** todo lo anterior en máquinas reales; PASAR
+por un puerto serie de verdad; un V20 y un 80186 (para la parte fina de la
+detección) y, sobre todo, un XT real con su disquetera y su disco duro.
+
+**Límites de hoy:** particiones de hasta 32 megas (65.535 sectores), una sola
+por disco, dentro de los primeros 2 gigas, y un solo disco duro; de 8 a 64
+archivos abiertos entre todos los programas (FILES=); sin controladores de
+dispositivo (DEVICE=), sin programas residentes ni la vieja interfaz de
+archivos por FCB. FORMATEA no hace las medidas de una cara ni de ocho
+sectores (160, 180 y 320 K). Con una sola disquetera no hay unidad B:
+«fantasma»: FORMATEA y SISTEMA piden cambiar de disquete cuando hace falta,
+pero COPIAR de un disquete a otro necesita dos unidades o el disco duro.
 
 ## Las decisiones
 
@@ -177,7 +216,7 @@ se pone en medio.
 | | MS-DOS 3.3 | Hispa-386 0.9 | Hispa-8086 (objetivo) |
 |---|---|---|---|
 | Residente (núcleo + intérprete) | ~54 K | ~59 K | **menos de 32 K** |
-| Hoy | | | unos 21 K: 12 del núcleo y 9 del intérprete |
+| Hoy (0.8) | | | unos 21 K: 12 del núcleo y 9 del intérprete |
 
 Reglas: el intérprete de órdenes tiene una parte que se puede pisar y volver
 a cargar (como COMMAND.COM); los búferes de disco se piden según la memoria
@@ -275,9 +314,9 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 0 | Cimientos: arranque, núcleo mínimo, detección del equipo, .COM | **hecha** |
 | 1 | Archivos por INT 21h (abrir, leer, escribir, crear, borrar, buscar), subdirectorios, FAT12 de escritura | **hecha** |
 | 2 | Memoria por bloques (48h-4Ah), programas .EXE, lanzar programas (4Bh), entorno | **hecha** |
-| 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha**, con %1, IF, GOTO y redirección (faltan las tuberías «\|», FOR y CALL) |
-| 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | **a medias**: C: con FAT16 hecho; faltan CONFIG.SYS y los controladores |
-| 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **empezada**: PASAR por el puerto serie |
+| 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha**, con %1, IF, GOTO, FOR, LLAMAR, DESPLAZAR, redirección y tuberías |
+| 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | **casi**: C: con FAT16, arranque del disco duro y CONFIG.SYS (FILES=, BUFFERS=, SHELL=); faltan los controladores (DEVICE=) |
+| 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **a medias**: FORMATEA, SISTEMA, PARTIR, MAS, ORDENAR y PASAR por el puerto serie; faltan REVISAR (CHKDSK), EDIT, COPIAR varios archivos y PASAR por el paralelo |
 | 6 | Modo 286: HMA y memoria extendida | |
 | 7 | Hispa-BASIC | |
 | 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | |
@@ -286,6 +325,157 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
 La compatibilidad se mide como en Hispa-386: con programas de la época que
 aporta cada usuario (nunca se distribuyen con el proyecto).
+
+## Preparar discos (PARTIR, FORMATEA, SISTEMA)
+
+Las tres son programas del disquete (no van dentro del intérprete), tienen su
+nombre clásico (FDISK, FORMAT, SYS: COMMAND.COM lo traduce, sin duplicar los
+archivos) y **preguntan antes de destruir nada**; con `/A` («automático») no
+preguntan, para los lotes y las pruebas. Trabajan con la BIOS, por debajo del
+núcleo (son discos que el núcleo todavía no conoce), y al acabar le avisan
+para que vuelva a mirar los discos (INT 21h/E8h con AL=1): no hace falta
+reiniciar.
+
+Instalar el sistema en un disco duro vacío, arrancando del disquete:
+
+```
+PARTIR CREAR        crea la partición de DOS y la marca activa
+FORMATEA C: /S      le da formato y copia el sistema
+```
+
+y el disco duro arranca solo.
+
+### PARTIR (FDISK)
+
+```
+PARTIR                 enseña el disco y su tabla de particiones
+PARTIR CREAR           crea la partición de DOS
+PARTIR ACTIVAR n       la partición n pasa a ser la que arranca
+PARTIR BORRAR n        borra la partición n
+```
+
+CREAR solo actúa en un disco sin particiones: hace una partición primaria
+desde la segunda pista hasta donde llega este sistema (32 megas: 65.535
+sectores), en cilindros enteros; de tipo 04h (FAT16) si tiene 16 megas o más
+y 01h (FAT12) si tiene menos, como MS-DOS 3.3; activa; con su primer sector a
+cero, para que nadie tome por bueno un formato viejo. Si el sector de
+particiones no tenía código (un disco nuevo), le pone el nuestro
+(`h8086/mbr.asm`, que busca la partición activa y la arranca). No hace
+particiones extendidas ni más de una: es un PARTIR sencillo.
+
+### FORMATEA (FORMAT)
+
+```
+FORMATEA unidad: [/S] [/V:etiqueta] [/F:medida] [/R] [/A]
+     /S            copia además el sistema: el disco queda de arranque
+     /V:etiqueta   el nombre del disco, hasta 11 letras
+     /F:medida     360, 720, 1200 o 1440 (un disquete)
+     /R            rápido: sin grabar ni repasar las pistas
+     /A            automático: no pregunta
+```
+
+- **Un disquete (A: o B:)** recibe formato de verdad: se prepara la unidad
+  para esa medida (INT 13h/18h, o 17h en los primeros AT, y la tabla de
+  parámetros de INT 1Eh con los sectores por pista y el hueco que tocan), se
+  graba cada pista (INT 13h/05h) y se repasa leyéndola entera. La pista que
+  falla se apunta en la FAT como defectuosa y el disquete sirve con lo demás
+  (salvo que falle el principio, donde van el arranque, la FAT y el
+  directorio). Si la BIOS no sabe grabar pistas, se dice y se hace el formato
+  rápido. Sin `/F:`, un disquete que ya tiene formato conserva su medida, y
+  uno nuevo recibe la mayor de la unidad (en un PC o un XT, que no saben
+  decir qué unidad tienen, 360 K).
+- **El disco duro (C:)** solo recibe formato lógico: FAT16 con grupos de 2 K
+  si la partición tiene 16 megas o más, y FAT12 con los grupos justos si
+  tiene menos; pone en la tabla de particiones el tipo que corresponde.
+- Después escribe el sector de arranque, las dos FAT y el directorio raíz, y
+  lo comprueba leyendo. Al acabar dice los octetos totales, los que hay en
+  sectores defectuosos y los libres (lo que dice el propio núcleo del disco
+  nuevo).
+- Se niega si hay archivos abiertos en esa unidad. Devuelve 0 si ha ido
+  bien, 4 si no y 5 si se contesta que no.
+
+### SISTEMA (SYS)
+
+```
+SISTEMA unidad: [/A]
+```
+
+Deja de arranque un disco **que ya tiene formato**, sin tocar sus archivos:
+escribe el sector de arranque de Hispa-8086 conservando las medidas del disco
+(su BPB) y copia a la raíz `NUCLEO86.SYS` y `COMMAND.COM`, que toma de la
+unidad en la que está la propia orden. En el disco duro, además, deja dichos
+en el sector de arranque los sectores que hay delante de la partición y las
+medidas del disco según la BIOS, marca la partición como activa y, si el
+sector de particiones no tiene código, le pone el nuestro.
+
+Los dos archivos se leen a la memoria antes de empezar (también en
+`FORMATEA /S`): con una sola disquetera se puede cambiar de disquete cuando
+lo pide.
+
+### El sector de arranque
+
+`h8086/arranque.asm` es el mismo para todo: disquetes y particiones, FAT12 y
+FAT16. Quien lo instala (FORMATEA, SISTEMA o `pon_arranque.py`) conserva la
+BPB del disco y deja dicho en el octeto 509 si la FAT es de 16 bits. Para
+saltar a un sector de la partición le suma los «sectores ocultos» de la BPB;
+en un disco duro, las medidas (sectores por pista y caras) se las pregunta a
+la BIOS, porque las de la BPB son las de la máquina en la que se dio formato.
+La FAT no la carga entera (una FAT16 son hasta 64 K): trae dos sectores cada
+vez. Al arrancar del disco duro, el núcleo trabaja en C: (`PATH` y `COMSPEC`
+apuntan allí) y A: sigue siendo la primera disquetera.
+
+## Lotes y tuberías
+
+Lo que entiende COMMAND.COM además de sus órdenes:
+
+| | |
+|---|---|
+| `%0` a `%9` | el nombre del lote y sus parámetros; `%%` es un `%` |
+| `IF [NOT] EXIST archivo orden` | también `IF [NOT] ERRORLEVEL n` e `IF [NOT] a==b` |
+| `GOTO etiqueta` | salta a la línea `:etiqueta` |
+| `FOR %%v IN (lista) DO orden` | la orden, una vez por cada elemento de la lista (separados por espacios o comas); un elemento con `*` o `?` vale por todos los archivos que casen. También `PARA %%v EN (lista) HAZ orden`. Desde el teclado, con un solo `%`. Un FOR no puede llevar otro dentro, como en DOS |
+| `LLAMAR lote [parámetros]` (`CALL`) | ejecuta otro lote y vuelve a la línea siguiente (sin LLAMAR, un lote que nombra a otro le pasa el mando y no vuelve). Se pueden encadenar: cada llamada guarda el lote que llama en un bloque de memoria de 160 octetos |
+| `DESPLAZAR` (`SHIFT`) | corre los parámetros un sitio: `%1` pasa a ser `%0`, `%2` a ser `%1`... |
+| `ECO`, `REM`, `PAUSA`, `@` | como en DOS (`ECHO`, `PAUSE`) |
+| `orden > archivo`, `>> archivo`, `< archivo` | redirección |
+| `orden \| orden` | tubería: lo que escribe la primera lo lee la segunda. Como en DOS, con archivos temporales (`\TUBO1.$$$` y `\TUBO2.$$$`, en la raíz de la unidad de trabajo, que se borran al acabar): hace falta poder escribir en ese disco |
+
+Los filtros: **MAS** (`MORE`, y también `más`) enseña el texto pantalla a
+pantalla (una tecla sigue, Esc lo deja) y **ORDENAR** (`SORT`) ordena las
+líneas sin distinguir mayúsculas (`/R`, al revés; `/+n`, desde la columna
+n); los dos admiten también un archivo: `MAS carta.txt`. ORDENAR ordena en
+memoria lo que quepa en su segmento (unos 60 K de texto).
+
+Criterio de nombres: las órdenes tienen nombre español y nombre clásico. `IF`
+y `GOTO` venían solo con el clásico y así siguen; `FOR` admite además
+`PARA... EN... HAZ`. Pendiente decidir si `IF` y `GOTO` reciben nombre
+español (`SI`, `IR`).
+
+## CONFIG.SYS
+
+Al arrancar, antes de lanzar el intérprete, el núcleo lee `\CONFIG.SYS` de
+la unidad de arranque, si existe (`h8086/config.inc`):
+
+| | |
+|---|---|
+| `FILES=n` | cuántos archivos pueden estar abiertos a la vez: de 8 (lo que hay sin decir nada) a 64. Cada uno son 24 octetos de memoria residente |
+| `BUFFERS=n` | se admite y no hace nada: el núcleo tiene un búfer de sector y otro de FAT, y no una reserva de búferes que se pueda agrandar. Cuando la haya (es lo que más aceleraría el disquete), esta línea dirá su tamaño |
+| `SHELL=ruta [parámetros]` | el intérprete que se lanza en vez de `\COMMAND.COM`, y lo que se le pasa; como en DOS, para que ejecute AUTOEXEC.BAT hay que ponerle `/P`. Si no se puede lanzar, se dice y se usa COMMAND.COM |
+| `REM ...` | un comentario; las líneas vacías no cuentan |
+
+Lo que no entiende lo dice (`CONFIG.SYS: no se entiende esta línea: ...`) y
+sigue con la siguiente.
+
+**`DEVICE=` (controladores de dispositivo) queda para otra etapa.** Cómo
+encaja: `config_lee` ya recorre el archivo antes de que se reparta la
+memoria; por cada `DEVICE=` cargaría el archivo en lo alto de la memoria del
+núcleo (donde hoy crece la tabla de archivos con `FILES=`, antes de calcular
+`[mem_seg]`), enlazaría su cabecera en una cadena de dispositivos que
+empezaría en NUL, y llamaría a sus rutinas de estrategia e interrupción con
+la petición de inicio, que devuelve hasta dónde se queda residente. Hace
+falta antes que el núcleo tenga esa cadena: que CON, AUX, PRN y los discos
+sean dispositivos con cabecera, y que abrir un archivo mire primero si el
+nombre es el de un dispositivo.
 
 ## Pasar archivos (PASAR)
 
@@ -331,21 +521,34 @@ make -C h8086            # los cuatro disquetes, en h8086/build/
 make -C h8086 prueba     # los arranca en QEMU y comprueba la pantalla
 ```
 
-Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto.
+Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto, y
+`fsck.fat` (dosfstools) para repasar los discos desde fuera. La prueba va por
+partes (básica, lotes, CONFIG.SYS, PASAR, disco duro, FORMATEA, SISTEMA,
+PARTIR, medidas y fuentes) y tarda unos trece minutos;
+`SOLO="formatea partir" ./prueba/prueba.sh` corre solo las que se digan.
 
 | Archivo | Qué es |
 |---|---|
-| `h8086/arranque.asm` | el sector de arranque (FAT12) |
+| `h8086/arranque.asm` | el sector de arranque (FAT12 y FAT16, disquete y disco duro) |
+| `h8086/mbr.asm` | el sector de particiones del disco duro |
 | `h8086/nucleo.asm` | el núcleo: arranque, INT 21h, consola, el equipo |
-| `h8086/disco.inc` | sectores, FAT12, directorios, rutas y archivos abiertos |
+| `h8086/config.inc` | CONFIG.SYS |
+| `h8086/disco.inc` | sectores (también INT 25h y 26h), FAT, unidades, directorios, rutas y archivos abiertos |
 | `h8086/archivos.inc` | las funciones de archivos y directorios de INT 21h |
 | `h8086/proceso.inc` | la memoria por bloques y los programas (.COM, .EXE, lanzar, terminar) |
 | `h8086/command.asm` | el intérprete de órdenes: COMMAND.COM |
 | `h8086/ordenes/pasar.asm` | PASAR: archivos por el puerto serie (XMODEM) |
+| `h8086/ordenes/formatea.asm` | FORMATEA: dar formato a disquetes y al disco duro |
+| `h8086/ordenes/sistema.asm` | SISTEMA: dejar un disco de arranque |
+| `h8086/ordenes/partir.asm` | PARTIR: las particiones del disco duro |
+| `h8086/ordenes/util.inc` | lo común de las tres: pantalla, preguntar, sectores por la BIOS, copiar el sistema |
+| `h8086/ordenes/mas.asm`, `ordenar.asm` | los filtros MAS y ORDENAR |
 | `h8086/prueba/hola.asm` | un programa .COM de prueba |
 | `h8086/prueba/arch.asm` | la prueba de la interfaz de archivos, en doce pasos |
 | `h8086/prueba/exe.asm` | un .EXE hecho a mano: reubicación, memoria y lanzar otro programa |
-| `h8086/prueba/prueba.sh` | la prueba automática |
+| `h8086/prueba/n8.asm` | prueba de INT 25h/26h y de FILES= |
+| `h8086/prueba/BUCLE.BAT`, `SUB.BAT`, `SUB2.BAT` | los lotes de la prueba de FOR, LLAMAR y DESPLAZAR |
+| `h8086/prueba/prueba.sh` | la prueba automática, por partes: `SOLO="partir sistema" ./prueba/prueba.sh` corre solo esas |
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
 | `h8086/prueba/haz_duro.py` | hace el disco duro de prueba (una partición FAT16) |
 | `h8086/prueba/xmodem.py` | «el otro ordenador» de la prueba de PASAR |

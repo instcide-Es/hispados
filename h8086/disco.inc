@@ -31,7 +31,7 @@
 ;  LA FAT se lee por sectores, a su propio búfer (`fat`), no entera: una FAT16
 ;  de 32 megas son 32 K, que en estas máquinas no sobran.
 ; =============================================================================
-N_ARCH      equ 8                   ; archivos abiertos a la vez
+N_ARCH      equ 8                   ; archivos abiertos a la vez (sin FILES=)
 N_UNI       equ 3                   ; unidades: A:, B: y C:
 PRIMERO     equ 5                   ; el primer número de archivo (0-4: la consola)
 ; la ficha de un archivo abierto
@@ -362,13 +362,26 @@ unidades_ini:
         mov byte [u_hay+1], 1
         mov byte [u_guardadas + U_TAM + (u_bios - u_ini)], 1
 .duro:
+; (y también sola: cuando PARTIR o FORMATEA han cambiado el disco duro)
+; busca la primera partición FAT del primer disco duro: si la hay y tiene
+; formato, existe C:. Entra y sale con A: como unidad cargada
+duro_ini:
+        mov byte [u_hay+2], 0
+        push es
         mov ah, 8                   ; ¿hay disco duro? Sus medidas
         mov dl, 0x80
         int 0x13
+        pop es
         jc .x
         test dl, dl
         jz .x
-        mov bx, u_guardadas + 2 * U_TAM
+        push cx
+        mov di, u_guardadas + 2 * U_TAM     ; todo lo de C:, de nuevo
+        mov bx, di
+        mov cx, U_TAM
+        xor al, al
+        rep stosb
+        pop cx
         mov byte [bx + (u_bios - u_ini)], 0x80
         and cx, 63
         mov [bx + (spp - u_ini)], cx
@@ -408,8 +421,7 @@ unidades_ini:
 .no:
         mov byte [u_hay+2], 0
 .vuelve:
-        mov al, 2                   ; (de u_hay depende poder volver a A:)
-        push word [u_hay+2]
+        push word [u_hay+2]         ; (de u_hay depende poder volver a A:)
         mov byte [u_hay+2], 1
         xor al, al
         call unidad_pon
@@ -417,6 +429,133 @@ unidades_ini:
         mov [u_hay+2], al
 .x:
         ret
+
+; los discos han cambiado por debajo (INT 21h/E8h con AL=1): se manda al disco
+; lo pendiente, se olvida lo que se sabía de cada unidad (sus medidas y su
+; directorio de trabajo) y se vuelve a mirar el disco duro
+discos_nuevos:
+        call disco_vuelca
+        mov al, [unidad_act]
+        push ax
+        xor bx, bx
+.u:
+        cmp byte [u_hay+bx], 0
+        je .s
+        mov al, bl
+        call unidad_pon
+        mov byte [disco_ok], 0
+        mov word [dir_act], 0
+        mov byte [dir_txt], 0
+.s:
+        inc bx
+        cmp bx, N_UNI
+        jb .u
+        xor al, al
+        call unidad_pon
+        call duro_ini
+        pop ax
+        call unidad_pon             ; (si ya no existe, se queda en A:)
+        mov bl, [unidad_def]
+        xor bh, bh
+        cmp byte [u_hay+bx], 0
+        jne .x
+        mov byte [unidad_def], 0
+.x:
+        ret
+
+; ---- INT 25h e INT 26h: leer y escribir sectores «en crudo», como en DOS ----
+; AL = unidad (0 = A:), CX = cuántos, DX = el primero (contado desde el
+; principio de la unidad), DS:BX = dónde. Vuelve con CF=0, o con CF=1 y el
+; error en AX; como en DOS, deja las banderas de quien llama en la pila (hay
+; que quitarlas) y no conserva más registros que los de segmento y la pila
+int25:
+        mov ah, 2
+        jmp short crudo
+int26:
+        mov ah, 3
+crudo:
+        sti
+        cld
+        push ds
+        push es
+        mov bp, ds
+        push cs
+        pop ds
+        push cs
+        pop es
+        mov [es_seg], bp            ; dónde (de quien llama)
+        mov [es_off], bx
+        mov [es_queda], cx          ; cuántos faltan
+        mov [es_dsec], dx           ; por cuál se va
+        mov [es_n], dx              ; el primero
+        mov [es_op], ah
+        call unidad_pon
+        jc .mal
+        call disco_vuelca
+        call disco_fresco           ; sus medidas (por si es otro disquete)
+        jc .mal
+        ; cada sector pasa por el búfer del núcleo: el de quien llama puede
+        ; cruzar una frontera de 64 K, y las disqueteras (DMA) no saben
+        mov word [buf_lba], 0xFFFF
+.b:
+        cmp word [es_queda], 0
+        je .hecho
+        cmp byte [es_op], 3
+        jne .lee
+        push ds
+        mov si, [es_off]
+        mov di, sector
+        mov cx, 256
+        mov ds, [es_seg]
+        rep movsw
+        pop ds
+        mov ax, [es_dsec]
+        mov bx, sector
+        call escribe_sector
+        jc .mal
+        jmp short .sig
+.lee:
+        mov ax, [es_dsec]
+        mov bx, sector
+        call lee_sector
+        jc .mal
+        push es
+        mov si, sector
+        mov di, [es_off]
+        mov es, [es_seg]
+        mov cx, 256
+        rep movsw
+        pop es
+.sig:
+        add word [es_off], 512
+        inc word [es_dsec]
+        dec word [es_queda]
+        jmp .b
+.hecho:
+        cmp byte [es_op], 3         ; si se ha escrito, la copia de la FAT no
+        jne .bien                   ; vale; y si ha sido el primer sector,
+        mov word [fat_lba], 0xFFFF  ; tampoco las medidas del disco
+        cmp word [es_n], 0
+        jne .bien
+        mov byte [disco_ok], 0
+.bien:
+        xor ax, ax
+        jmp short .fin
+.mal:
+        mov bx, 0x0300              ; protegido contra escritura
+        cmp ax, E_PROTEGIDO
+        je .m1
+        mov bx, 0x0201              ; esa unidad no existe
+        cmp ax, E_UNIDAD
+        je .m1
+        mov bx, 0x8002              ; no está preparada
+.m1:
+        mov ax, bx
+        stc
+.fin:
+        pop es
+        pop ds
+        retf
 
 ; antes de buscar nada en el disco: si no hay archivos abiertos y lleva más
 ; de dos segundos sin usarse, puede que hayan cambiado el disquete (un XT no
@@ -436,8 +575,9 @@ disco_fresco:
         jb .vale
         jmp disco_ini
 .vale:
-        cmp byte [disco_ok], 1      ; CF=1 si no hay disco
-        mov ax, E_DISCO
+        cmp byte [disco_ok], 0      ; si no se sabe nada del disco (no lo
+        je disco_ini                ; había, o lo acaban de formatear), se mira
+        clc
         ret
 
 ; ---- la FAT ----
@@ -1227,7 +1367,8 @@ ahora:
 h_libre:
         push cx
         mov bx, fichas
-        mov cx, N_ARCH
+        mov cl, [n_arch]
+        xor ch, ch
 .b:
         cmp byte [bx+H_USO], 0
         je .hay
@@ -1253,8 +1394,10 @@ h_libre:
 h_ficha:
         sub ax, PRIMERO
         jb .mal
-        cmp ax, N_ARCH
+        cmp al, [n_arch]
         jae .mal
+        test ah, ah
+        jnz .mal
         mov bx, H_TAM_F
         push dx
         mul bx
@@ -1550,7 +1693,8 @@ h_cierra:
 ; cierra los archivos que abrió el programa DX (cuando termina). Conserva DX
 h_cierra_de:
         mov bx, fichas
-        mov cx, N_ARCH
+        mov cl, [n_arch]
+        xor ch, ch
 .b:
         cmp byte [bx+H_USO], 0
         je .s
