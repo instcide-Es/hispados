@@ -69,6 +69,10 @@ for x, h, c in ((3, 4, 'c'), (6, 8, 'd'), (9, 6, 'b'), (12, 10, 'a')):
     for y in range(13 - h, 13): pon(g, x, y, c); pon(g, x + 1, y, c)
 I['grafico'] = g
 
+g = lienzo(); caja(g, 1, 2, 14, 13, '0', '9'); lineas(g, [(5, 2, 13), (8, 2, 13), (11, 2, 13)], '7'); lineas(g, [(3, 2, 13), (4, 2, 13)], 'b')
+for y in range(3, 13): pon(g, 5, y, '7'); pon(g, 10, y, '7')
+I['hoja'] = g
+
 if __name__ == '__main__':
     import sys
     for nom, g in I.items():

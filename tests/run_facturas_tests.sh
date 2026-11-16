@@ -22,7 +22,7 @@ echo "== Facturas: una emitida, una recibida, texto y resumen =="
 prepara $HVP
 { arranca
   shot v0
-  clic 454 96; sleep 1                  # «Mis datos»
+  clic 506 96; sleep 1                  # «Mis datos»
   escribe "Taller Rescoldo"; tecla tab; escribe "12345678Z"; tecla tab
   escribe "Calle Mayor 1"; tecla tab; escribe "43700 Albinyana"; tecla tab
   escribe "Pago por transferencia"; tecla ret; sleep 1.2
@@ -37,7 +37,7 @@ prepara $HVP
   aparca; shot f1
   clic 474 96; sleep 1.2; tecla ret; sleep 2; shot f2; tecla ret; sleep 1   # «Texto»
   tecla esc; sleep 1
-  clic 270 96; sleep 1                  # «Recibidas»
+  clic 322 96; sleep 1                  # «Recibidas»
   # la recibida, con su importe en el mismo diálogo y el IVA incluido (lo
   # normal en un recibo): 65,70 que se pagan = 54,30 + 11,40 de IVA
   tecla insert; sleep 1.2; escribe "A77"; tecla tab tab; escribe "Luz y Fuerza"
@@ -45,7 +45,7 @@ prepara $HVP
   tecla p; sleep 0.8
   aparca; shot r1
   tecla esc; sleep 1; shot r2
-  clic 366 96; sleep 1.2; shot s1; tecla ret; sleep 1   # «Resumen»
+  clic 418 96; sleep 1.2; shot s1; tecla ret; sleep 1   # «Resumen»
   sal; } | run 240 -vga std
 
 chk $T/v0.ppm titulo 50 36 activa "Facturas"
@@ -123,6 +123,31 @@ mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
   sal; } | run 120 -vga std
 chk $T/n1.ppm busca 150 250 650 300 0 8 "No se ha podido imprimir."
 muestra n1 facturas_sin_impresora
+
+echo "== Facturas: duplicar una factura; exportar la lista a Cuentas =="
+mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
+{ arranca
+  ir 166 96; shot u0                    # el ratón sobre un botón: abajo, lo que hace
+  clic 114 96; sleep 1.5; tecla ret; sleep 2; aparca; shot u1     # «Duplicar»: sus datos, y aceptar
+  tecla esc; sleep 1
+  clic 166 96; sleep 1.5; tecla ret; sleep 2.5; shot u2; tecla ret; sleep 1   # «Exportar»: el nombre que propone
+  sal; } | run 150 -vga std
+chk $T/u0.ppm busca 52 548 700 590 0 6 "Exportar esta lista a un archivo para Cuentas"
+chk $T/u1.ppm busca 400 135 740 160 0 9 "2026-002"        # la copia, con el número siguiente
+chk $T/u1.ppm busca 100 195 400 220 0 9 "Ana Soler"
+chk $T/u1.ppm busca 400 318 740 345 0 9 "89,90"           # y las mismas líneas
+chk $T/u1.ppm busca 400 170 740 195 13 9 "Pendiente de cobro"
+chk $T/u2.ppm busca 150 250 650 300 0 8 "La lista se ha guardado. Se abre con Cuentas."
+muestra u1 facturas_duplicada; muestra u0 facturas_pie
+mtype -i $T/f.img ::EMITIDAS.CSV 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/emi.csv
+if [ "$(head -1 $T/emi.csv)" = "Número;Fecha;Nombre;NIF;Base;IVA;Retención;Total;Pagada" ] \
+   && grep -qE '^2026-001;[0-9]{2}/[0-9]{2}/[0-9]{4};Ana Soler;11111111H;89,90;18,88;0,00;108,78;no$' $T/emi.csv \
+   && grep -qE '^2026-002;[0-9]{2}/[0-9]{2}/[0-9]{4};Ana Soler;11111111H;89,90;18,88;0,00;108,78;no$' $T/emi.csv \
+   && [ "$(wc -l < $T/emi.csv)" = 3 ]; then
+  ok "EMITIDAS.CSV: una fila por factura, con importes que Cuentas entiende"
+else
+  ko "EMITIDAS.CSV no es lo esperado"; cat $T/emi.csv
+fi
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/fac.txt; fi
 rm -rf $T

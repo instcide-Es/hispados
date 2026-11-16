@@ -76,6 +76,8 @@ O_BORRAR    equ 103
 O_TEXTO     equ 104
 O_IMPRIMIR  equ 105
 O_SALIR     equ 106
+O_DUPLICAR  equ 107
+O_CSV       equ 108
 O_DATOS     equ 111
 O_LIN_MAS   equ 112
 O_LIN_CAMB  equ 113
@@ -134,12 +136,16 @@ fac_menu:
         db "&Nueva factura...        Ins", 0
         dw O_ABRIR
         db "&Abrir                 Intro", 0
+        dw O_DUPLICAR
+        db "&Duplicar factura", 0
         dw O_BORRAR
         db "&Borrar factura", 0
         dw 0
         db 0
         dw O_TEXTO
         db "&Guardar como texto...", 0
+        dw O_CSV
+        db "&Exportar la lista a Cuentas...", 0
         dw O_IMPRIMIR
         db "&Imprimir", 0
         dw 0
@@ -190,11 +196,13 @@ fac_menu:
             align 4
 bot_lista   dd 8, 24, ic_nuevo, O_NUEVA, n_nueva, BT_ICONO
             dd 34, 24, ic_abrir, O_ABRIR, n_abrir, BT_ICONO
-            dd 60, 24, ic_borrar, O_BORRAR, n_borrar, BT_ICONO
-            dd 100, 80, t_b_emit, O_EMITIDAS, n_emit, BT_TEXTO
-            dd 184, 88, t_b_recib, O_RECIBIDAS, n_recib, BT_TEXTO
-            dd 284, 80, t_b_resumen, O_RESUMEN, n_resumen, BT_TEXTO
-            dd 368, 88, t_b_mis, O_MIS, n_mis, BT_TEXTO
+            dd 60, 24, ic_copiar, O_DUPLICAR, n_duplicar, BT_ICONO
+            dd 86, 24, ic_borrar, O_BORRAR, n_borrar, BT_ICONO
+            dd 112, 24, ic_hoja, O_CSV, n_csv, BT_ICONO
+            dd 152, 80, t_b_emit, O_EMITIDAS, n_emit, BT_TEXTO
+            dd 236, 88, t_b_recib, O_RECIBIDAS, n_recib, BT_TEXTO
+            dd 336, 80, t_b_resumen, O_RESUMEN, n_resumen, BT_TEXTO
+            dd 420, 88, t_b_mis, O_MIS, n_mis, BT_TEXTO
             dd 0, 0, 0, 0, 0, 0
 bot_fac     dd 8, 24, ic_volver, O_LISTA, n_lista, BT_ICONO
             dd 40, 64, t_b_datos, O_DATOS, n_datos, BT_TEXTO
@@ -208,6 +216,8 @@ bot_fac     dd 8, 24, ic_volver, O_LISTA, n_lista, BT_ICONO
 n_nueva     db "Nueva factura", 0
 n_abrir     db "Abrir la factura elegida", 0
 n_borrar    db "Borrar la factura elegida", 0
+n_csv       db "Exportar esta lista a un archivo para Cuentas", 0
+n_duplicar  db "Duplicar: una factura nueva con los mismos datos y líneas", 0
 n_emit      db "Las facturas que hago yo", 0
 n_recib     db "Las facturas que me hacen a mí", 0
 n_resumen   db "Resumen del trimestre", 0
@@ -409,6 +419,15 @@ t_r_ano     db "Año     ", 0
 t_r_nota    db 10, "Ingresos y gastos: las bases, sin IVA. Diferencia: IVA repercutido", 10
             db "menos IVA soportado (lo que sale a ingresar en cada trimestre).", 0
 t_ext_txt   db ".TXT", 0
+t_ext_csv   db ".CSV", 0
+t_csv_emi   db "EMITIDAS.CSV", 0
+t_csv_rec   db "RECIBIDA.CSV", 0
+t_csv_tit   db "Exportar la lista para Cuentas", 0
+t_csv_cab   db "Número;Fecha;Nombre;NIF;Base;IVA;Retención;Total;Pagada", 13, 10, 0
+t_csv_si    db "sí", 0
+t_csv_no    db "no", 0
+t_csv_hecho db "La lista se ha guardado. Se abre con Cuentas.", 0
+t_e_csv_nada db "No hay facturas en esta lista.", 0
 t_fac_nom   db "FACTURA", 0
 t_guardar_como db "Guardar la factura como texto", 0
 t_raya      db "------------------------------------------------------------------------", 0
@@ -494,6 +513,8 @@ fac_proc:
         je letra
         cmp eax, WM_LBUTTONDOWN
         je raton
+        cmp eax, WM_MOUSEMOVE
+        je raton_mueve
         cmp eax, WM_LBUTTONDBLCLK
         je doble
         cmp eax, WM_MOUSEWHEEL
@@ -549,6 +570,10 @@ orden_haz:
         je borrar
         cmp ecx, O_TEXTO
         je a_texto
+        cmp ecx, O_DUPLICAR
+        je duplicar
+        cmp ecx, O_CSV
+        je a_csv
         cmp ecx, O_IMPRIMIR
         je imprimir
         cmp ecx, O_DATOS
@@ -796,6 +821,30 @@ rueda:
         call fac_desplaza
         jmp hecho
 
+; ---- el ratón se mueve: si está sobre un botón de la barra, su nombre ----
+raton_mueve:
+        xor edi, edi
+        mov ebx, edx
+        sar ebx, 16
+        cmp ebx, TB_AL
+        jae .n
+        test ebx, ebx
+        js .n
+        movsx eax, dx
+        mov esi, bot_lista
+        cmp byte [modo], 0
+        je .f
+        mov esi, bot_fac
+.f:
+        call br_boton_en
+        jc .n
+        mov edi, [esi+16]
+.n:
+        call br_sobre_pon
+        je hecho
+        call inval
+        jmp hecho
+
 ; ---- ratón: EDX=x + y*65536 ----
 raton:
         movsx eax, dx
@@ -842,6 +891,7 @@ raton:
 .b:
         call br_boton_en
         jc hecho
+        mov dword [br_sobre], 0     ; (pulsado: su nombre ya no hace falta)
         mov ecx, [esi+12]
         jmp orden
 
@@ -1055,6 +1105,7 @@ nueva:
         jne .d
         call num_auto
 .d:
+nueva_pon:
         call edita_datos
         jc .x
         mov eax, [n_fac]
@@ -1076,6 +1127,28 @@ nueva:
         cmp byte [ebx+F_NLIN], 0    ; no se ha puesto, se pide la primera línea
         jne .x
         call lin_mas
+.x:
+        ret
+
+; ---- Duplicar: una factura nueva igual que la elegida (a quién, líneas, IVA),
+;      con la fecha de hoy, sin cobrar y, si es emitida, con su número nuevo.
+;      Se enseñan sus datos por si hay que retocarlos ----
+duplicar:
+        cmp dword [n_fac], MAX_FAC
+        jae nueva                   ; (no cabe: lo dice)
+        call fac_elegida
+        jc .x
+        mov esi, ebx
+        mov edi, tmp_fac
+        mov ecx, F_TAM / 4
+        rep movsd
+        mov byte [tmp_fac+F_PAGADA], 0
+        mov eax, [hoy]
+        mov [tmp_fac+F_FECHA], eax
+        cmp byte [tmp_fac+F_TIPO], 0
+        jne nueva_pon
+        call num_auto
+        jmp nueva_pon
 .x:
         ret
 
@@ -2426,6 +2499,12 @@ pintar:
 .barra:
         mov dword [desp], 0
         call pinta_barra
+        cmp dword [br_sobre], 0     ; con el ratón sobre un botón: abajo, lo
+        je .cierra                  ; que hace (como en toda la familia)
+        mov ecx, [cli_an]
+        mov edx, [cli_al]
+        call br_pie
+.cierra:
         HV dc_cerrar
         jmp hecho
 
@@ -3383,7 +3462,153 @@ a_texto:
         HV dlg_archivo
         test eax, eax
         jz .x
-        ; sin extensión, .TXT
+        mov esi, t_ext_txt          ; sin extensión, .TXT
+        call pon_ext
+        call texto_haz
+        mov esi, nom_tmp
+        mov edx, txt_buf
+        call hvl_escribir
+        mov esi, t_guardada
+        jnc .d
+        mov esi, t_e_texto
+.d:
+        call aviso
+.x:
+        ret
+
+; ---- Exportar la lista que se ve (emitidas o recibidas) a un .CSV, para
+;      abrirla con Cuentas: una fila por factura, con «;» entre celdas y los
+;      importes con coma y sin puntos de millares, para que sean números ----
+a_csv:
+        cmp dword [n_ord], 0
+        jne .hay
+        mov esi, t_e_csv_nada
+        jmp aviso
+.hay:
+        mov edi, nom_tmp
+        mov esi, t_csv_emi
+        cmp dword [ver_tipo], 0
+        je .n
+        mov esi, t_csv_rec
+.n:
+        call hvl_cad
+        mov byte [edi], 0
+        mov ebp, [ven]
+        mov ebx, nom_tmp
+        mov edi, t_csv_tit
+        HV dlg_archivo
+        test eax, eax
+        jz .x
+        mov esi, t_ext_csv
+        call pon_ext
+        mov edi, csv_buf
+        mov esi, t_csv_cab
+        call hvl_cad
+        xor ebp, ebp                ; EBP=la fila
+.f:
+        mov eax, [fac_ord+ebp*4]
+        call ptr_fac
+        call totales
+        lea esi, [ebx+F_NUM]
+        call csv_txt
+        mov eax, [ebx+F_FECHA]
+        call fmt_fecha
+        mov al, ';'
+        stosb
+        lea esi, [ebx+F_CLI]
+        call csv_txt
+        lea esi, [ebx+F_NIF]
+        call csv_txt
+        mov eax, [t_base]
+        call csv_dinero
+        mov eax, [t_iva]
+        call csv_dinero
+        mov eax, [t_ret]
+        call csv_dinero
+        mov eax, [t_total]
+        call csv_dinero
+        mov esi, t_csv_si
+        cmp byte [ebx+F_PAGADA], 0
+        jne .p
+        mov esi, t_csv_no
+.p:
+        call hvl_cad
+        mov ax, 0x0A0D
+        stosw
+        inc ebp
+        cmp ebp, [n_ord]
+        jb .f
+        mov ecx, edi
+        sub ecx, csv_buf
+        mov esi, nom_tmp
+        mov edx, csv_buf
+        call hvl_escribir
+        mov esi, t_csv_hecho
+        jnc .d
+        mov esi, t_e_texto
+.d:
+        call aviso
+.x:
+        ret
+; (internas) una celda de texto (ESI) y su «;»: los «;» y las comillas del
+; texto se cambian por una coma y un apóstrofo, y así no hacen falta comillas
+csv_txt:
+        lodsb
+        test al, al
+        jz .f
+        cmp al, ';'
+        jne .c1
+        mov al, ','
+.c1:
+        cmp al, '"'
+        jne .c2
+        mov al, "'"
+.c2:
+        stosb
+        jmp csv_txt
+.f:
+        mov al, ';'
+        stosb
+        ret
+; EAX=céntimos (con signo) -> «-1234,56;» en EDI
+csv_dinero:
+        push eax
+        push ebx
+        push edx
+        test eax, eax
+        jns .p
+        neg eax
+        mov byte [edi], '-'
+        inc edi
+.p:
+        xor edx, edx
+        mov ebx, 100
+        div ebx
+        push edx
+        call hvl_num
+        mov al, ','
+        stosb
+        pop eax
+        xor edx, edx
+        mov ebx, 10
+        div ebx
+        add al, '0'
+        stosb
+        mov al, dl
+        add al, '0'
+        stosb
+        mov al, ';'
+        stosb
+        pop edx
+        pop ebx
+        pop eax
+        ret
+; pone la extensión ESI a nom_tmp si no lleva ninguna
+pon_ext:
+        push eax
+        push edx
+        push edi
+        push esi
         mov esi, nom_tmp
         xor edx, edx
 .e:
@@ -3399,23 +3624,16 @@ a_texto:
         xor edx, edx
         jmp .e
 .e2:
-        test edx, edx
-        jnz .e3
         lea edi, [esi-1]
-        mov esi, t_ext_txt
+        pop esi
+        test edx, edx
+        jnz .x
         call hvl_cad
         mov byte [edi], 0
-.e3:
-        call texto_haz
-        mov esi, nom_tmp
-        mov edx, txt_buf
-        call hvl_escribir
-        mov esi, t_guardada
-        jnc .d
-        mov esi, t_e_texto
-.d:
-        call aviso
 .x:
+        pop edi
+        pop edx
+        pop eax
         ret
 
 ; ---- Imprimir: el texto y un salto de página, a la impresora del puerto
@@ -3588,6 +3806,7 @@ tmp_emi     resb CAB_TAM - E_NOM
 tmp_lin     resb L_TAM
 tmp_fac     resb F_TAM
 txt_buf     resb 4096
+csv_buf     resb MAX_FAC * 160 + 128
             alignb 4
 cab         resb CAB_TAM            ; el archivo: la cabecera y, detrás, las
 facs        resb MAX_FAC * F_TAM    ; facturas
