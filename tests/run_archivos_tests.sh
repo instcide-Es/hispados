@@ -285,7 +285,7 @@ LX=300                                      # (x de los nombres de la lista)
 } | run 420 -vga std
 
 # -- lo que se ve --
-chk $T/a0.ppm busca 200 150 650 420 0 8 "ministrador"
+chk $T/a0.ppm busca 200 150 650 420 0 8 "de archivos"
 chk $T/a1.ppm marco 60 40 620 420 activa titulo 60 40 activa "Administrador de archivos" \
   busca 140 88 400 104 0 9 "A:\\" busca 62 113 250 132 9 7 "Disquete (A:)" busca 62 113 250 240 0 9 "Disco (C:)" \
   busca 62 113 250 240 0 9 "HISPADOS" busca 250 113 680 300 0 9 "COMMAND.COM" busca 250 113 680 300 0 9 "README.TXT" \

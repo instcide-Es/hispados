@@ -45,7 +45,7 @@ if [ "${libre:-0}" -ge 200000 ]; then ok "caben en el disquete: quedan $libre oc
 } | run 150 -vga std
 # -- el grupo: ocho accesos en dos filas, con su nombre y su icono; la ventana se ha alargado --
 chk $T/g1.ppm tam 800 600 marco 248 188 452 207 activa titulo 248 188 activa "Juegos" \
-  texto 286 291 9 12 fina "Culebra" texto 362 291 0 8 fina "Campo de minas" \
+  texto 286 291 9 12 fina "Culebra" texto 386 291 0 8 fina "Campo de" texto 398 306 0 8 fina "minas" \
   texto 494 291 0 8 fina "Bloques" texto 590 291 0 8 fina "Solitario" \
   texto 274 367 0 8 fina "Tragabolas" texto 390 367 0 8 fina "Almacén" texto 486 367 0 8 fina "Hispa-Nes" texto 578 367 0 8 fina "Hispa-System" \
   px 521 257 0 "icono de Bloques" px 619 265 12 "icono de Solitario: el dorso añil" px 631 265 4 "icono de Solitario: el corazón" \
@@ -60,7 +60,7 @@ chk $T/g6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 
 ini "Modulos=17"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\BLOQUES.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\SOLITARI.HVP"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\TRAGABOL.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\ALMACEN.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador [Grupo] Nombre=Productividad Nombre=Pluma Nombre=Cuentas Nombre=Facturas " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador [Grupo] Nombre=Productividad Nombre=Pluma Nombre=Cuentas Nombre=Facturas " ]; then
   ok "CENTRO.INI: los seis juegos e Hispa-Nes e Hispa-System, en el grupo Juegos"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

@@ -99,8 +99,9 @@ def res(ok, texto):
         fallos += 1
 
 
-def texto_ok(cap, x, y, fg, bg, negrita, texto):
-    """Compara la zona con el texto dibujado con la fuente propia."""
+def texto_ok(cap, x, y, fg, bg, negrita, texto, paso=8):
+    """Compara la zona con el texto dibujado con la fuente propia (paso: puntos
+    por letra; 7 en los nombres largos de los iconos, «apretada»)."""
     F = fuente()
     mal = 0
     for i, ch in enumerate(texto.encode('cp437')):
@@ -108,12 +109,12 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto):
             bits = F[ch][fila] << 1
             if negrita:
                 bits |= F[ch][fila]
-            for col in range(8):
+            for col in range(paso):
                 # (la novena columna de la negrita cae en el carácter siguiente)
                 enc = bits & (0x100 >> col)
                 if negrita and col == 0 and i > 0:
                     enc = enc or (F[texto.encode('cp437')[i - 1]][fila] & 1)
-                c = cap.px(x + i * 8 + col, y + fila)
+                c = cap.px(x + i * paso + col, y + fila)
                 if not es(c, fg if enc else bg):
                     mal += 1
     return mal
@@ -236,7 +237,7 @@ def main():
         elif op == 'texto':
             x, y, fg, bg = (int(v) for v in a[i + 1:i + 5])
             t = a[i + 6]
-            mal = texto_ok(cap, x, y, fg, bg, a[i + 5] == 'negrita', t)
+            mal = texto_ok(cap, x, y, fg, bg, a[i + 5] == 'negrita', t, 7 if a[i + 5] == 'apretada' else 8)
             res(mal == 0, '%s: texto «%s»%s' % (nombre, t, '' if mal == 0 else ' (%d puntos distintos)' % mal))
             i += 7
         elif op in ('busca', 'nobusca'):

@@ -1,0 +1,110 @@
+; AYUDA.HLP de Hispa-DOS: los temas de la orden AYUDA (AYUDA ARCHIVOS...).
+; Cada tema empieza con su nombre entre corchetes; [INDICE] es lo que sale
+; con AYUDA sola y AYUDA TODO enseña los demás, seguidos. Líneas de 79
+; letras como mucho. Las líneas que empiezan por «;» no salen.
+
+[INDICE]
+AYUDA de Hispa-DOS. Escriba AYUDA y un tema:
+  AYUDA ARCHIVOS    copiar, borrar, mostrar, carpetas...
+  AYUDA DISCOS      formatear, particiones, revisar, instalar...
+  AYUDA ORDENADOR   memoria, fecha y hora, información, apagar...
+  AYUDA RED         red, ping, descargar, actualizar, consola remota
+  AYUDA SONIDOS     volumen, prueba de sonido, reproducir .WAV
+  AYUDA LOTES       archivos .BAT, redirecciones y tuberías (|)
+  AYUDA TECLAS      teclas para escribir órdenes (historial, Tab...)
+  AYUDA TODO        todo seguido, parando en cada pantalla
+O AYUDA y una orden, por ejemplo AYUDA COPIAR (lo mismo que COPIAR /?).
+Cada orden tiene su nombre español y el clásico: LISTAR o DIR.
+VENTANAS arranca el escritorio, Hispa Ventanas.
+
+[ARCHIVOS]
+ARCHIVOS Y CARPETAS (nombre español / nombre clásico)
+  LISTAR / DIR            lo que hay en una carpeta
+  MOSTRAR / TYPE          enseña un archivo de texto
+  COPIAR / COPY           copia archivos
+  XCOPIAR / XCOPY         copia carpetas con todo lo que tienen
+  MOVER / MOVE            lleva archivos a otro sitio
+  RENOMBRAR / REN         cambia el nombre
+  BORRAR / DEL, ERASE     borra archivos
+  ATRIBUTO / ATTRIB       solo lectura, oculto, de sistema...
+  BUSCAR / FIND           busca un texto dentro de archivos
+  EXPANDIR / EXPAND       descomprime archivos
+  EDITAR / EDIT           editor de textos
+  GESTOR                  administrador de archivos a pantalla completa
+  CD / CHDIR              entra en una carpeta (CD .. sube una)
+  CREARDIR / MD           crea una carpeta
+  BORRARDIR / RD          borra una carpeta vacía
+  BORRARARBOL / DELTREE   borra una carpeta con todo lo que tiene
+  ARBOL / TREE            dibuja las carpetas
+Comodines * y ?: COPIAR *.TXT A: copia todos los .TXT al disquete.
+
+[DISCOS]
+DISCOS (nombre español / nombre clásico)
+  A:, C:, D:...           cambia de unidad
+  PARTIR / FDISK          particiones del disco duro
+  FORMATEA / FORMAT       da formato a un disco (borra lo que tenga)
+  SISTEMA / SYS           deja un disco de arranque
+  INSTALAR                instala Hispa-DOS en el disco duro
+  REVISAR / CHKDSK        revisa un disco y arregla sus errores
+  ETIQUETA / LABEL        pone nombre a un disco
+  VOLUMEN / VOL           dice el nombre de un disco
+
+[ORDENADOR]
+EL ORDENADOR (nombre español / nombre clásico)
+  VERSION / VER           qué versión de Hispa-DOS es
+  MEMORIA / MEM           la memoria libre y la usada
+  FECHA / DATE, HORA / TIME   ver o cambiar la fecha y la hora
+  LIMPIAR / CLS           borra la pantalla
+  INFO / SYSINFO          información del sistema
+  EQUIPO (informe del hardware), DIAGNOSTICO (lo guarda para enviarlo).
+  TECLADO / KEYB          la distribución del teclado (español, Mac...)
+  TECLA (diagnóstico del teclado: enseña el código en crudo de cada tecla).
+  MANDO (mandos de juego).
+  VELOCIDAD               frena el procesador para juegos antiguos
+  LOADFIX, LH / LOADHIGH  cargar un programa más arriba en la memoria
+  PROTECTOR (protector de pantalla en modo texto: la «Lluvia verde»).
+  VENTANAS                el escritorio, Hispa Ventanas
+  APAGAR y REINICIAR (apagar o reiniciar el equipo).
+  SALIR / EXIT            cierra este intérprete de órdenes
+
+[RED]
+LA RED
+  HSPRED                  el controlador de la red (se carga al arrancar)
+  CONFRED / IPCONFIG      ver y cambiar la dirección de red
+  PING                    comprueba si se llega a otro equipo
+  DESCARGAR               baja un archivo por la red (HTTP)
+  ACTUALIZAR              busca, descarga e instala la versión nueva
+  CONSOLA: consola remota por red, abierta y con código de acceso.
+
+[SONIDOS]
+EL SONIDO
+  HSPSND                  el controlador (Sound Blaster para los juegos)
+  SONIDO                  ver o cambiar el volumen
+  SONAR / PLAYWAV         reproduce un archivo .WAV
+  AUDICION (prueba de sonido con preguntas de sí o no).
+
+[LOTES]
+ARCHIVOS POR LOTES (.BAT) Y REDIRECCIONES
+Un .BAT es una lista de órdenes; AUTOEXEC.BAT se ejecuta al arrancar.
+  ECO / ECHO              escribe un texto (ECO OFF: no enseña las órdenes)
+  PAUSA / PAUSE           espera a que se pulse una tecla
+  REM                     un comentario
+  LLAMAR / CALL           ejecuta otro .BAT y vuelve
+  IF, GOTO, FOR, SHIFT    condiciones, saltos, repeticiones; %1 a %9
+  ELEGIR / CHOICE         pregunta y elige una opción
+  SET, PROMPT, RUTA / PATH   variables, el aviso C:\> y dónde buscar
+Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.
+  DIR > LISTA.TXT         guarda lo que sale en un archivo (>> lo añade)
+  DIR | ORDENAR | PAGINAR los filtros ORDENAR / SORT y PAGINAR / MORE
+Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y
+después en PATH.
+
+[TECLAS]
+TECLAS (al escribir órdenes)
+Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.
+Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).
+  En la orden (la primera palabra, o tras «|») solo salen programas:
+  .COM, .EXE y .BAT (con una ruta, también las carpetas para llegar).
+Flechas izquierda/derecha, Inicio, Fin y Ctrl+flechas (por palabras): mover el
+cursor por la línea. Supr y Retroceso: borrar. Insertar: insertar/sobrescribir.
+En un Mac (TECLADO /MAC): Ctrl+Retroceso = Supr, Alt+flechas = Inicio/Fin.

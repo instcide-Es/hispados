@@ -57,7 +57,7 @@ texto() { tr -d '\r' < "$1" | iconv -f CP437 -t UTF-8 > "$1.u8"; }
 echo "== EQUIPO: -M pc, UHCI, Sound Blaster 16 y AdLib =="
 cp "$IMG" $T/f.img
 sesion "-M pc $FD -device piix3-usb-uhci -device sb16,audiodev=snd0 -device adlib,audiodev=snd0" \
-  "EQUIPO /?" "EQUIPO /PCI /ISA" "EQUIPO /CPU /BIOS /DISCOS /RES > E.TXT" "AYUDA" "AYUDA EQUIPO" \
+  "EQUIPO /?" "EQUIPO /PCI /ISA" "EQUIPO /CPU /BIOS /DISCOS /RES > E.TXT" "AYUDA ORDENADOR" "AYUDA EQUIPO" \
   "AYUDA DIAGNOSTICO" "EQUIPO /NADA"
 L=$T/log.txt
 check $L "EQUIPO: informe completo del hardware del equipo, en texto." "EQUIPO /? y AYUDA EQUIPO"

@@ -1441,9 +1441,12 @@ principal:
         call vid_cerrar
         mov esi, m_adios
         xor al, al
+        cmp byte [salir], 3         ; [0.9.22] el adiós, y luego el encargo (INFO)
+        je .encargo
         cmp byte [salir], 2         ; hay un encargo para el lanzador
         jne .fin
         mov esi, m_nada
+.encargo:
         mov al, 0xFE
         jmp .fin
 .sinmem:
@@ -1966,7 +1969,7 @@ op_color    resb 1
 op_fallo    resb 1
 hay_rat     resb 1
 en_grafico  resb 1
-salir       resb 1
+salir       resb 1                  ; 1 salir; 2 salir con un encargo al lanzador; 3 lo mismo, con el adiós
 op_demo     resb 1
 op_contorno resb 1                  ; [TAMAÑO] /CONTORNO
 op_bat      resb 1                  ; [BATERÍA] % forzado para pruebas (/BATnn)

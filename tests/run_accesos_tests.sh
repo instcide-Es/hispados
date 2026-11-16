@@ -224,7 +224,7 @@ vuelta() { espera 'cargando el servidor DPMI' 60 $1; sleep 6; centro; aparca; }
 } | run 700
 # -- el grupo ha salido solo, con un acceso por juego --
 chk $T/a1.ppm tam 800 600 marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
-  texto 286 155 0 8 fina "Juegos" texto 362 155 0 8 fina "Juegos de DOS"
+  texto 286 155 0 8 fina "Juegos" texto 369 155 0 8 apretada "Juegos de DOS"
 chk $T/a2.ppm titulo 272 212 activa "Juegos de DOS" titulo 36 52 no "Centro de programas" \
   texto 326 315 9 12 fina "Uno" texto 430 315 0 8 fina "Dos" texto 530 315 0 8 fina "Tres" texto 634 315 0 8 fina "Solo" \
   texto 314 391 0 8 fina "Suelto"
@@ -395,7 +395,7 @@ RX=400; RY=300
 } | run 300
 chk $T/c1.ppm tam 800 600 marco 100 300 460 200 activa titulo 100 300 activa "Mis cosas" \
   texto 146 403 9 12 fina "Viejo" texto 234 403 0 8 fina "Con freno" texto 350 403 0 8 fina "Arriba" \
-  texto 66 155 9 7 fina "Mis cosas" texto 154 155 0 8 fina "Juegos de DOS"
+  texto 66 155 9 7 fina "Mis cosas" texto 161 155 0 8 apretada "Juegos de DOS"
 es 1 PROG 'C:\JUEGOS\DOS\JUEGO.COM' "(1) el acceso de siempre funciona"
 if juego 1 | grep -qF 'ARGS=[ viejo]'; then ok "(1) con sus parámetros"; else ko "(1) parámetros: $(juego 1)"; fi
 es 1 RES NO "(1) sin VELOCIDAD"

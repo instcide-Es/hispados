@@ -316,7 +316,7 @@ check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
 ini "Modulos=17"; ini "Nombre=Pintura"; ini "Programa=A:\\HISPADOS\\PROGS\\PINTURA.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador [Grupo] Nombre=Productividad Nombre=Pluma Nombre=Cuentas Nombre=Facturas " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador [Grupo] Nombre=Productividad Nombre=Pluma Nombre=Cuentas Nombre=Facturas " ]; then
   ok "CENTRO.INI: Pintura, en el grupo Accesorios, y los juegos en el suyo"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

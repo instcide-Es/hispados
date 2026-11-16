@@ -109,7 +109,7 @@ lote; run ich9 "default=N;P01=S" -- -device ich9-intel-hda -device hda-duplex,au
 lote; run micro "default=S" -- -device intel-hda -device hda-micro,audiodev=snd0 &
 lote; run ac97 "default=S" -- -device AC97,audiodev=snd0 &
 lote; run sb16 "default=S" -- -device sb16,audiodev=snd0 &
-lote; run nada "default=S" --pre 'AUDICION /?' --pre 'AYUDA AUDICION' --pre 'AYUDA' --cmd 'AUDICION A:\DOCS' -- -machine pcspk-audiodev=snd0 &
+lote; run nada "default=S" --pre 'AUDICION /?' --pre 'AYUDA AUDICION' --pre 'AYUDA SONIDOS' --cmd 'AUDICION A:\DOCS' -- -machine pcspk-audiodev=snd0 &
 lote; run sim1 "default=N;P01=S;P07=S;$SI" --cmd 'AUDICION /SIM' -- $HDA &
 lote; run sim2 "default=N;P10=S" --cmd 'AUDICION /sim' -- $HDA &
 lote; run sim3 "default=N;P03=S" --cmd 'AUDICION /SIM' -- $HDA &

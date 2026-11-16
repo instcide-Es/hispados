@@ -486,7 +486,7 @@ c_imagen() {
   n=$(grep -c "^  HSPJOY " $T/log.txt)
   if [ "$n" = 1 ]; then echo "  OK   HSPJOY solo ocupa memoria con /R (MEM /C)"; else echo "  FAIL HSPJOY solo ocupa memoria con /R (MEM /C): $n"; cfail=1; fi
   check "HSPJOY descargado."
-  check "REVISAR (CHKDSK), MANDO (mandos de juego),"
+  check "  MANDO (mandos de juego)."
   if [ "$(grep -c 'HSPJOY  COM' $B/hispados-usb.img)" -ge 1 ] && [ "$(grep -c 'MANDO   INI' $B/hispados-usb.img)" -ge 1 ] \
      && [ "$(grep -c 'MANDO   COM' $B/hispados-usb.img)" -ge 1 ]; then
     echo "  OK   HSPJOY.COM, MANDO.COM y MANDO.INI en la imagen USB"
@@ -516,7 +516,7 @@ if quiere imagen; then
     orden 'HSPJOY /R'
     orden 'MEM /C'
     orden 'HSPJOY /D'
-    orden 'AYUDA'
+    orden 'AYUDA ORDENADOR'
     fin c_imagen
   fi
 fi

@@ -207,7 +207,7 @@ chk $T/t1.ppm tam 800 600 cursor 400 300 \
 # -- el grupo «Accesorios», en su ventana (alargada para que quepa la segunda
 # fila: Pintura, que es un módulo .HVP y entra sola) --
 chk $T/t1b.ppm marco 224 164 452 207 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
-  texto 238 267 9 12 fina "Bloc de notas" texto 350 267 0 8 fina "Calculadora" \
+  texto 262 267 9 12 fina "Bloc de" texto 270 282 9 12 fina "notas" texto 350 267 0 8 fina "Calculadora" \
   texto 478 267 0 8 fina "Reloj" texto 574 267 0 8 fina "Sistema" texto 166 155 9 7 fina "Acceso" \
   texto 262 343 0 8 fina "Pintura"
 # -- Bloc de notas: escribir --

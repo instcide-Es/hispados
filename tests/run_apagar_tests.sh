@@ -102,7 +102,7 @@ escrito() {
 echo "== APAGAR y REINICIAR: ayuda y /INFO (-M pc) =="
 imagen
 arranca "-M pc -no-reboot"
-orden 'APAGAR /?' 1; orden 'REINICIAR /?' 1; orden 'AYUDA APAGAR' 1; orden 'AYUDA' 1
+orden 'APAGAR /?' 1; orden 'REINICIAR /?' 1; orden 'AYUDA APAGAR' 1; orden 'AYUDA ORDENADOR' 1
 orden 'APAGAR /X' 1
 orden 'APAGAR /INFO' 3; orden 'REINICIAR /INFO' 3
 orden 'ECHO FIN-INFO'; espera '^FIN-INFO' 20

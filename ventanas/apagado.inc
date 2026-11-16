@@ -86,7 +86,7 @@ apa_dialogo:
         mov dword [apa_abierto], 0
         cmp eax, APA_VOLVER
         jne .r
-        mov byte [salir], 1
+        call apa_volver
         jmp .x
 .r:
         mov esi, apa_n_reini
@@ -97,6 +97,43 @@ apa_dialogo:
         jne .x
 .enc:
         call apa_encargo
+.x:
+        popad
+        ret
+
+; [0.9.22] «Volver a Hispa-DOS»: se sale y, al llegar, el lanzador enseña la
+; información del sistema (INFO.COM, de la carpeta de Hispa Ventanas). Sin
+; lanzador o sin INFO.COM, se sale sin más, como antes.
+apa_volver:
+        pushad
+        mov byte [salir], 1
+        cmp word [lz_seg], 0
+        je .x
+        call dir_propia_poner
+        mov edi, apa_ruta
+        mov esi, dir_propia
+        call pon_cad
+        mov esi, tn_info
+        call pon_cad
+        mov byte [edi], 0
+        mov esi, apa_ruta           ; ¿está?
+        xor al, al
+        call dos_abrir
+        jc .x
+        mov ebx, eax
+        call dos_cerrar
+        movzx edx, word [lz_seg]    ; el encargo, a la memoria del lanzador
+        shl edx, 4
+        add edx, [cero]
+        mov esi, apa_ruta
+        lea edi, [edx+lz_prog]
+        mov ecx, 79
+        call cad_copiar
+        mov byte [edx+lz_param], 0
+        mov byte [edx+lz_dir], 0
+        mov byte [edx+lz_band], 0   ; sin volver
+        mov byte [edx+lz_orden], 1
+        mov byte [salir], 3         ; («Hispa Ventanas ha terminado.» y luego INFO)
 .x:
         popad
         ret

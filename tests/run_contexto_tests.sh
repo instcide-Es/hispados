@@ -207,7 +207,7 @@ chk $T/a6.ppm px 374 377 8 "«Alfa», borrado"
 chk $T/a7.ppm texto 497 465 0 8 fina "Nuevo " texto 505 485 0 8 fina "uscar programas..." \
   texto 505 513 0 8 fina "rganizar iconos"
 # -- Organizar iconos: por el nombre --
-chk $T/a8.ppm texto 114 403 9 12 fina "Bloc de notas" texto 250 403 0 8 fina "Omega"
+chk $T/a8.ppm texto 138 403 9 12 fina "Bloc de" texto 146 418 9 12 fina "notas" texto 250 403 0 8 fina "Omega"
 # -- Ctrl+clic izquierdo: el mismo menú; Esc lo cierra --
 chk $T/b1.ppm texto 295 410 0 8 fina "ropiedades..." px 270 440 1 "el filete del menú (Ctrl+clic)"
 chk $T/b2.ppm px 270 440 8 "Esc: el menú, cerrado"

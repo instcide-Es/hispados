@@ -138,7 +138,7 @@ fi
   doble 102 129; sleep 1
   aparca
   shot s1
-  tecla right right right right ret; sleep 2
+  tecla home right ret; sleep 2             # (Principal: Hispa-DOS, Configuración y Administrador)
   aparca
   shot s2
   # ---- Pantalla: tema «Mar», dibujo «damero», fondo granate ----
@@ -216,8 +216,8 @@ check "Teclado español instalado."
 chk $T/s0.ppm tam 800 600 cursor 400 300 px 723 471 2 "el fondo de fábrica" \
   titulo 36 52 activa "Centro de programas"
 # -- el acceso directo, el último de «Principal» --
-chk $T/s1.ppm marco 200 140 452 260 activa titulo 200 140 activa "Principal" texto 542 243 0 8 fina "Hispa-DOS" \
-  texto 214 319 0 8 fina "Configuración" px 265 285 8 "icono de Configuración: el panel" px 270 291 12 "icono de Configuración: un rombo añil"
+chk $T/s1.ppm marco 200 140 452 260 activa titulo 200 140 activa "Principal" texto 230 243 9 12 fina "Hispa-DOS" \
+  texto 325 243 0 8 apretada "Configuración" px 369 209 8 "icono de Configuración: el panel" px 374 215 12 "icono de Configuración: un rombo añil"
 # -- la ventana --
 chk $T/s2.ppm marco 124 110 552 403 activa titulo 124 110 activa "Configuración" \
   texto 164 151 8 12 negrita "Pantalla" texto 164 185 0 8 fina "Ratón" texto 164 219 0 8 fina "Teclado" \
@@ -272,7 +272,7 @@ chk $T/s15.ppm texto 282 322 0 9 fina "ñ;" px 426 393 4 "«Estadounidense», ma
   texto 584 263 0 8 fina "30,0 por s"
 chk $T/s16.ppm texto 282 322 0 9 fina "ñ;ñ" px 286 393 4 "«Española», otra vez"
 # -- ocultar y enseñar --
-chk $T/s17.ppm titulo 200 140 activa "Principal" texto 214 319 9 12 fina "Configuración" px 660 300 13 "Configuración ya no está a la vista"
+chk $T/s17.ppm titulo 200 140 activa "Principal" texto 325 243 9 12 apretada "Configuración" px 660 300 13 "Configuración ya no está a la vista"
 chk $T/s18.ppm marco 124 110 552 403 activa titulo 124 110 activa "Configuración" texto 278 145 4 8 negrita "Teclado" \
   texto 134 483 0 8 fina "Se aplica al momento." texto 584 263 0 8 fina "30,0 por s"
 # -- salida --
@@ -309,7 +309,7 @@ RX=400; RY=300
   shot r0
   # ---- Sonido: el volumen de HSPSND (80 % al entrar) al 50 %, y silencio ----
   clic 540 152; sleep 0.5                  # el grupo Principal al frente (el Centro, con 5 grupos, es más alto y le tapa el icono)
-  doble 266 290; sleep 2                    # Configuración, en el grupo Principal
+  doble 370 214; sleep 2                    # Configuración, en el grupo Principal
   clic 196 264; aparca
   shot r2
   clic 428 207; clic 286 245; aparca
@@ -361,7 +361,7 @@ RX=400; RY=300; VEL=4
   derecho 206 129; aparca                   # el derecho, sí
   shot m2
   tecla left ret; sleep 1                   # «Principal» y, dentro, Configuración
-  tecla right right right right ret; sleep 2
+  tecla home right ret; sleep 2             # Configuración, la segunda
   derecho 196 230; aparca                   # Teclado
   shot m3
   derecho 430 491; sleep 1                  # «De fábrica»
@@ -412,7 +412,7 @@ RX=320; RY=240; VEL=2
   send 'A:\HISPADOS\HSPRATON' 2
   send 'VENTANAS /VGA' 7
   tecla ret; sleep 1.5
-  tecla right right right right ret; sleep 2.5
+  tecla home right ret; sleep 2.5
   ir 16 320
   shot v0
   clic 238 391; sleep 2.5                   # «Probar»: la lluvia en 16 colores

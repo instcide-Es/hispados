@@ -111,6 +111,8 @@ cfg_claves:
         dd hvp_vistos, k_modulos
         db 1, T_NUM, 0, 0
         dd jd_hecho, k_juegosdos
+        db 1, T_NUM, 0, 0
+        dd pr_hecho, k_sinrepe
         db 1, T_CAD, 119, 0         ; [ARCHIVOS] el módulo que se abre al volver
         dd cen_reabrir, k_reabrir
         db 2, T_GDIR, 0, 0
@@ -157,6 +159,7 @@ k_volumen   db "Volumen", 0
 k_silencio  db "Silencio", 0
 k_activo    db "Activo", 0
 k_modulos   db "Modulos", 0
+k_sinrepe   db "SinRepetidos", 0    ; [0.9.22] Principal ya sin Editar, Gestor ni Información
 k_nombre    db "Nombre", 0
 k_estado    db "Estado", 0
 k_marcado   db "Marcado", 0
@@ -178,11 +181,11 @@ s_ini_cab   db "; Hispa Ventanas - Centro de programas: grupos y accesos directo
 s_comspec   db "COMSPEC=", 0
 
 ; lo de omisión: nombre, icono, archivo de la carpeta propia, banderas
+; (Editar, Gestor e Información ya no están desde la 0.9.22: Hispa Ventanas
+; tiene el Bloc de notas, el Administrador de archivos y Sistema; los
+; programas siguen en Hispa-DOS, e INFO sale al volver a Hispa-DOS)
 def_principal:
-        dd td_editar, 3, tn_editar, AB_VOLVER
-        dd td_gestor, 2, tn_gestor, AB_VOLVER
-        dd td_info, 4, tn_info, AB_VOLVER | AB_PAUSA
-        dd 1                        ; [Configuración] (1: aquí, el intérprete de órdenes)
+        dd 1                       ; [Configuración] (1: aquí, el intérprete de órdenes)
         dd td_config, 4, tn_config, AB_VOLVER   ; [Configuración] CONFIG.HVP
         dd 0
 def_accesorios:
@@ -568,6 +571,11 @@ cfg_cargar:
         jz .h3
         mov dword [cfg_len], 0
 .h3:
+        call pr_limpiar             ; [0.9.22] una sola vez
+        test eax, eax
+        jz .h4
+        mov dword [cfg_len], 0
+.h4:
         cmp dword [cfg_len], 0
         jne .x
         call cfg_guardar
@@ -778,6 +786,85 @@ cfg_clave:
         mov [edi], al
 .x:
         popad
+        ret
+
+; [0.9.22] Una sola vez (la clave SinRepetidos de [Centro] lo recuerda): en
+; el grupo «Principal», fuera los accesos a EDITAR, GESTOR e INFO, que
+; repetían el Bloc de notas, el Administrador de archivos y Sistema. Los
+; programas siguen en Hispa-DOS; solo se quitan sus iconos. Si alguien los
+; vuelve a poner después, se quedan. EAX = 1 si hay que guardar CENTRO.INI.
+pr_limpiar:
+        pushad
+        xor eax, eax
+        cmp dword [pr_hecho], 0
+        jne .x
+        mov dword [pr_hecho], 1
+        mov ebx, [gr_tabla]
+        xor edx, edx                ; número de grupo
+.g:
+        cmp byte [ebx+GR_USO], 0
+        je .gs
+        lea esi, [ebx+GR_NOMBRE]
+        mov edi, tg_principal
+        call cad_igual_i
+        jne .gs
+        mov esi, [ac_tabla]
+        mov ecx, MAX_AC
+.a:
+        cmp byte [esi+AC_USO], 0
+        je .as
+        cmp [esi+AC_GRUPO], dl
+        jne .as
+        push esi
+        lea esi, [esi+AC_PROG]
+        call pr_repetido
+        pop esi
+        jne .as
+        mov byte [esi+AC_USO], 0
+.as:
+        add esi, AC_TAM
+        dec ecx
+        jnz .a
+.gs:
+        add ebx, GR_TAM
+        inc edx
+        cmp edx, MAX_GR
+        jb .g
+        mov eax, 1                  ; (aunque no hubiera nada: queda apuntado)
+.x:
+        mov [esp+28], eax           ; (EAX de vuelta)
+        popad
+        ret
+
+; ¿la ruta de ESI acaba en EDITAR.COM, GESTOR.COM o INFO.COM? ZF=1 si sí
+pr_repetido:
+        push eax
+        push esi
+        push edi
+        mov edi, esi                ; el nombre: tras la última «\»
+.b:
+        mov al, [esi]
+        inc esi
+        test al, al
+        jz .n
+        cmp al, '\'
+        jne .b
+        mov edi, esi
+        jmp .b
+.n:
+        mov esi, edi
+        mov edi, tn_editar
+        call cad_igual_i
+        je .r
+        mov edi, tn_gestor
+        call cad_igual_i
+        je .r
+        mov edi, tn_info
+        call cad_igual_i
+.r:
+        pop edi
+        pop esi
+        pop eax
         ret
 
 ; ---- lo de omisión ----
@@ -1029,6 +1116,12 @@ cfg_guardar:
         mov esi, k_juegosdos
         call pon_clave_num
 .sinjd:
+        mov eax, [pr_hecho]
+        test eax, eax
+        jz .sinpr
+        mov esi, k_sinrepe
+        call pon_clave_num
+.sinpr:
         cmp byte [cen_reabrir], 0   ; [ARCHIVOS] solo si hay algo que reabrir
         je .sinre
         mov esi, k_reabrir

@@ -65,6 +65,10 @@ vis_cols    resd 1
 vis_alto    resd 1
 vis_n       resd 1
 vis_nom     resd 1
+vis_t1      resd 1                  ; [0.9.22] el nombre en una o dos líneas (vis_partir)
+vis_n1      resd 1
+vis_t2      resd 1
+vis_n2      resd 1
 vis_x       resd 1
 vis_y       resd 1
 arr_acc     resd 1                  ; el acceso que se está arrastrando
@@ -114,6 +118,7 @@ bp_dirs     resb BP_MAXDIR * 13
 ; ---- grupos ligados a una carpeta y opciones de juego (accesos.inc) ----
             alignb 4
 jd_hecho    resd 1                  ; ya se creó (o se ligó) el grupo de juegos de DOS
+pr_hecho    resd 1                  ; [0.9.22] Principal ya sin Editar, Gestor ni Información (SinRepetidos)
 jd_tam      resd BP_MAXCAND         ; tamaño de cada candidato de bp_carpeta
 jd_nsuel    resd 1
 jd_quita    resd 1

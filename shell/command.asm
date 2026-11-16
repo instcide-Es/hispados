@@ -3499,11 +3499,20 @@ do_time:
         call put2
         jmp crlf
 
-; AYUDA            lista de órdenes
+; AYUDA            el índice de temas ([INDICE] de \HISPADOS\AYUDA.HLP)
+; AYUDA tema       un tema (AYUDA ARCHIVOS...); AYUDA TODO, todos, con pausa
 ; AYUDA orden      lo mismo que «orden /?» (internas y programas)
 do_help:
         cmp byte [si], 0
-        je .list
+        jne .pal
+        mov si, ay_n_indice
+        call ay_tema
+        jnc .r
+        mov si, msg_help            ; (sin AYUDA.HLP)
+        jmp puts
+.pal:
+        call ay_tema                ; AYUDA ARCHIVOS, AYUDA TODO...
+        jnc .r
         mov di, help_line
         mov cx, 100
 .c:
@@ -3518,9 +3527,244 @@ do_help:
         mov dword [di], ' /?' ; (con el cero final)
         mov si, help_line
         jmp execute_line
-.list:
-        mov si, msg_help
-        jmp puts
+.r:
+        ret
+
+; Los temas están en \HISPADOS\AYUDA.HLP (de la unidad de COMSPEC), no en
+; el intérprete: así no le quitan memoria a los programas. Cada tema empieza
+; con «[NOMBRE]». SI = la palabra (sin mirar mayúsculas). Si el tema está,
+; lo escribe (con pausa en cada pantalla) y vuelve con CF=0; si no (o falta
+; el archivo), CF=1 y SI como estaba.
+ay_tema:
+        mov [ay_pal], si
+        mov byte [ay_todo], 0
+        mov di, ay_n_todo
+        call ay_igual
+        jne .abre
+        mov byte [ay_todo], 1
+.abre:
+        mov si, s_comspec_n         ; la unidad, la de COMSPEC
+        mov di, t_buf2
+        call env_get
+        jc .ruta
+        mov al, [t_buf2]
+        cmp byte [t_buf2+1], ':'
+        jne .ruta
+        mov [ay_ruta], al
+.ruta:
+        mov dx, ay_ruta
+        mov ax, 0x3D00
+        int 0x21
+        jc .no
+        mov [ay_h], ax
+        call ay_empieza
+        xor ax, ax
+        mov [ay_imp], al
+        mov [ay_hal], al
+        mov [ay_fin], al
+        mov [ay_ll], ax
+.lee:
+        mov bx, [ay_h]
+        mov ah, 0x3F
+        mov cx, 512
+        mov dx, iobuf
+        int 0x21
+        jc .cierra
+        test ax, ax
+        jz .ultima
+        mov cx, ax
+        mov si, iobuf
+.c:
+        lodsb
+        cmp al, 13
+        je .sig
+        cmp al, 10
+        je .linea
+        mov di, [ay_ll]
+        cmp di, 128
+        jae .sig
+        mov [t_buf+di], al
+        inc word [ay_ll]
+.sig:
+        loop .c
+        jmp .lee
+.linea:
+        push si
+        push cx
+        call ay_linea
+        pop cx
+        pop si
+        cmp byte [ay_fin], 0
+        je .sig
+        jmp .cierra
+.ultima:
+        cmp word [ay_ll], 0
+        je .cierra
+        call ay_linea
+.cierra:
+        mov bx, [ay_h]
+        mov ah, 0x3E
+        int 0x21
+        cmp byte [ay_hal], 0
+        je .no
+        clc
+        ret
+.no:
+        mov si, [ay_pal]
+        stc
+        ret
+
+; (de ay_tema) la línea de t_buf ([ay_ll] letras): una cabecera «[TEMA]»
+; enciende o apaga la escritura; el texto se escribe si está encendida
+ay_linea:
+        mov di, [ay_ll]
+        mov byte [t_buf+di], 0
+        mov word [ay_ll], 0
+        cmp byte [t_buf], ';'       ; los comentarios no salen
+        je .r
+        cmp byte [t_buf], '['
+        jne .texto
+        mov si, t_buf+1             ; el nombre, hasta «]»
+        mov di, si
+.b:
+        mov al, [di]
+        test al, al
+        jz .bf
+        cmp al, ']'
+        je .bz
+        inc di
+        jmp .b
+.bz:
+        mov byte [di], 0
+.bf:
+        cmp byte [ay_todo], 0
+        je .uno
+        mov di, ay_n_indice         ; TODO: todos menos el índice
+        call ay_igual
+        je .apaga
+        cmp byte [ay_hal], 0        ; (una línea en blanco entre temas)
+        je .t1
+        mov si, s_crlf
+        call ay_puts
+        jc .corta
+.t1:
+        mov byte [ay_hal], 1
+        mov byte [ay_imp], 1
+        ret
+.apaga:
+        mov byte [ay_imp], 0
+        ret
+.uno:
+        cmp byte [ay_imp], 0        ; el tema pedido ya ha salido: se acabó
+        jne .corta
+        mov di, si
+        mov si, [ay_pal]
+        call ay_igual
+        jne .r
+        mov byte [ay_hal], 1
+        mov byte [ay_imp], 1
+.r:
+        ret
+.texto:
+        cmp byte [ay_imp], 0
+        je .r
+        mov si, t_buf
+        call ay_puts
+        jc .corta
+        mov si, s_crlf
+        call ay_puts
+        jnc .r
+.corta:
+        mov byte [ay_fin], 1
+        ret
+
+; ¿la palabra de SI (hasta un espacio, «/» o el final; sin mirar mayúsculas)
+; es la de DI? ZF=1 si lo es
+ay_igual:
+.l:
+        mov al, [si]
+        cmp al, 'a'
+        jb .m
+        cmp al, 'z'
+        ja .m
+        sub al, 32
+.m:
+        cmp al, ' '
+        jbe .fin
+        cmp al, '/'
+        je .fin
+        cmp al, [di]
+        jne .r
+        inc si
+        inc di
+        jmp .l
+.fin:
+        cmp byte [di], 0
+.r:
+        ret
+
+; antes de escribir un tema: cuenta de líneas a cero, y pausa solo si la
+; salida va a la pantalla (no a un archivo ni a una tubería)
+ay_empieza:
+        push ax
+        push bx
+        push dx
+        mov byte [ay_lin], 0
+        mov byte [ay_con], 0
+        mov ax, 0x4400
+        mov bx, 1
+        int 0x21
+        jc .r
+        test dl, 0x80               ; un dispositivo...
+        jz .r
+        test dl, 0x02               ; ...y es la pantalla
+        jz .r
+        mov byte [ay_con], 1
+.r:
+        pop dx
+        pop bx
+        pop ax
+        ret
+
+; como puts, pero para en cada pantalla («Pulse una tecla»); Esc corta y
+; vuelve con CF=1
+ay_puts:
+        push ax
+        push dx
+.l:
+        lodsb
+        test al, al
+        jz .d
+        mov dl, al
+        mov ah, 2
+        int 0x21
+        cmp dl, 10
+        jne .l
+        cmp byte [ay_con], 0
+        je .l
+        inc byte [ay_lin]
+        cmp byte [ay_lin], 23
+        jb .l
+        mov byte [ay_lin], 0
+        push si
+        mov si, msg_pause
+        call puts
+        mov ah, 0x08
+        int 0x21
+        mov si, ay_borra
+        call puts
+        pop si
+        cmp al, 27
+        jne .l
+        pop dx
+        pop ax
+        stc
+        ret
+.d:
+        pop dx
+        pop ax
+        clc
+        ret
 
 ; «orden /?» de una orden interna (BX = su rutina)
 int_help:
@@ -7335,37 +7579,22 @@ msg_baddate db "Fecha no válida (dd-mm-aaaa)", 13, 10, 0
 msg_badtime db "Hora no válida (hh:mm[:ss])", 13, 10, 0
 msg_date    db "La fecha actual es ", 0
 msg_time    db "La hora actual es ", 0
-msg_help    db "Lista de órdenes internas (nombre español / nombre clásico):", 13, 10
-            db "  AYUDA/HELP        COPIAR/COPY       BORRAR/DEL,ERASE  RENOMBRAR/REN", 13, 10
-            db "  LISTAR/DIR        MOSTRAR/TYPE      CREARDIR/MD       BORRARDIR/RD", 13, 10
-            db "  CD/CHDIR          LIMPIAR/CLS       FECHA/DATE        HORA/TIME", 13, 10
-            db "  VERSION/VER       MEMORIA/MEM       VOLUMEN/VOL       PAUSA/PAUSE", 13, 10
-            db "  ECO/ECHO          RUTA/PATH         LLAMAR/CALL       SALIR/EXIT", 13, 10
-            db "  BORRARARBOL/DELTREE (carpetas con todo su contenido)", 13, 10
-            db "  SET  PROMPT  REM  IF  FOR  GOTO  SHIFT", 13, 10
-            db "Redirecciones: > >> < y tuberías |. Archivos por lotes: .BAT, AUTOEXEC.BAT.", 13, 10
-            db "Los programas (.COM, .EXE, .BAT) se buscan en el directorio actual y", 13, 10
-            db "después en PATH. Programas en \HISPADOS (también con su nombre clásico):", 13, 10
-            db "  PARTIR (FDISK), FORMATEA, SISTEMA, INSTALAR, TECLADO, SONAR, SONIDO, EDITAR,", 13, 10
-            db "  GESTOR, INFO, MOVER, ATRIBUTO, ARBOL, BUSCAR, ORDENAR, PAGINAR, ELEGIR,", 13, 10
-            db "  EXPANDIR, ETIQUETA, XCOPIAR, REVISAR (CHKDSK), MANDO (mandos de juego),", 13, 10
-            db "  VELOCIDAD (frenar el procesador para juegos antiguos), LOADFIX,", 13, 10
-            db "  EQUIPO (informe del hardware), DIAGNOSTICO (lo guarda para enviarlo).", 13, 10
-            db "  AUDICION (prueba de sonido con preguntas de sí o no).", 13, 10
-            db "  APAGAR y REINICIAR (apagar o reiniciar el equipo).", 13, 10
-            db "  PROTECTOR (protector de pantalla en modo texto: la «Lluvia verde»).", 13, 10
-            db "  TECLA (diagnóstico del teclado: enseña el código en crudo de cada tecla).", 13, 10
-            db "  CONFRED (IPCONFIG), PING y DESCARGAR: la red (HSPRED es el controlador).", 13, 10
-            db "  CONSOLA: consola remota por red, abierta y con código de acceso.", 13, 10
-            db "  ACTUALIZAR: mira por la red si hay una versión más nueva del sistema.", 13, 10
-            db "AYUDA orden (u «orden /?») explica cada orden.", 13, 10
-            db "Flechas arriba/abajo: órdenes anteriores. F3: repetir la última. Esc: borrar.", 13, 10
-            db "Tab: completar nombres de archivos y carpetas (otra vez: el siguiente).", 13, 10
-            db "  En la orden (la primera palabra, o tras «|») solo salen programas:", 13, 10
-            db "  .COM, .EXE y .BAT (con una ruta, también las carpetas para llegar).", 13, 10
-            db "Flechas izquierda/derecha, Inicio, Fin y Ctrl+flechas (por palabras): mover el", 13, 10
-            db "cursor por la línea. Supr y Retroceso: borrar. Insertar: insertar/sobrescribir.", 13, 10
-            db "En un Mac (TECLADO /MAC): Ctrl+Retroceso = Supr, Alt+flechas = Inicio/Fin.", 13, 10, 0
+msg_help    db "AYUDA orden (u «orden /?») explica cada orden. Los temas (AYUDA ARCHIVOS,", 13, 10
+            db "AYUDA RED...) están en \HISPADOS\AYUDA.HLP, que no se encuentra.", 13, 10, 0
+ay_n_todo   db "TODO", 0
+ay_n_indice db "INDICE", 0
+ay_ruta     db "A:\HISPADOS\AYUDA.HLP", 0
+s_comspec_n db "COMSPEC", 0
+ay_borra    db 13, "                                    ", 13, 0
+ay_lin      db 0
+ay_con      db 0
+ay_pal      dw 0
+ay_h        dw 0
+ay_ll       dw 0
+ay_imp      db 0
+ay_hal      db 0
+ay_fin      db 0
+ay_todo     db 0
 help_tab:
         dw do_dir, h_dir
         dw do_type, h_type

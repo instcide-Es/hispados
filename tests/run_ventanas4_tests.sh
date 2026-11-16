@@ -272,9 +272,9 @@ ini "[Centro]"; ini "Ventana=36,52,452,190"; ini "Volumen=50"; ini "Silencio=0"
 ini "Nombre=Pruebas"; ini "Ventana=272,212,452,190"; ini "Estado=1"; ini "Marcado=1"
 ini "Programa=A:\\JUEGOS\\PRUEBA\\PRUEBA.COM"; ini "Carpeta=A:\\JUEGOS\\PRUEBA"; ini "Parametros=uno dos"
 ini "Icono=musica"; ini "Pausa=1"; ini "Programa=A:\\JUEGOS\\DOS\\JUEGO.EXE"; ini "Programa=A:\\JUEGOS\\TRES\\OTRO.EXE"
-ini "Programa=A:\\JUEGOS\\BAT\\JUGAR.BAT"; ini "Programa=:BLOC"; ini "Programa=A:\\HISPADOS\\EDITAR.COM"
+ini "Programa=A:\\JUEGOS\\BAT\\JUGAR.BAT"; ini "Programa=:BLOC"; ini "SinRepetidos=1"
 # «Dos» y «Tres» han pasado al grupo Juegos; «Prueba» y «Bat» siguen en Pruebas
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema [Grupo] Nombre=Juegos Nombre=Dos Nombre=Tres [Grupo] Nombre=Pruebas Nombre=Prueba Nombre=Bat " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema [Grupo] Nombre=Juegos Nombre=Dos Nombre=Tres [Grupo] Nombre=Pruebas Nombre=Prueba Nombre=Bat " ]; then
   ok "CENTRO.INI: cada acceso, en su grupo"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

@@ -826,45 +826,60 @@ vista_pintar:
         lea eax, [edx+(CEN_PASO-32)/2]
         call dc_icono
         call jd_marca_falta         ; (un aspa si su programa ya no está)
-        mov esi, [vis_nom]          ; el nombre, centrado (hasta 14 letras)
+        ; [0.9.22] el nombre, centrado: hasta 12 letras en una línea; si es
+        ; más largo, en un grupo se parte por un espacio en dos líneas («Bloc
+        ; de» / «notas»), como en Windows. Lo que no se puede partir (una sola
+        ; palabra, o en el Centro, donde la pista va justo debajo) va en una
+        ; línea de hasta 14 letras a 7 puntos por letra en vez de 8 (la fuente
+        ; deja libre la última columna: se ven igual), para no pegarse al de
+        ; al lado («ConfiguraciónAdministrador»).
+        mov esi, [vis_nom]
         call cad_largo
-        cmp eax, 14
-        jbe .i1
-        mov eax, 14
-.i1b:                               ; [ARCHIVOS] sin el espacio del final
-        cmp byte [esi+eax-1], ' '   ; («Administrador »: no pisa al de al lado)
-        jne .i1
-        dec eax
-        jnz .i1b
-.i1:
-        mov ecx, eax
-        shl eax, 2
-        neg eax
-        add eax, [vis_x]
-        add eax, CEN_PASO / 2
+        call vis_partir
         mov ebx, [vis_y]
         add ebx, 58
         COLOR C_TINTA
         cmp edi, [ebp+V_D0]
         jne .i3
-        push eax
-        push ecx
+        mov ecx, [vis_n1]           ; la marca: tan ancha como la línea más
+        call vis_ancho              ; larga, y alta como las que haya
+        mov edx, eax
+        mov ecx, [vis_n2]
+        call vis_ancho
+        cmp eax, edx
+        jae .m1
+        mov eax, edx
+.m1:
+        lea ecx, [eax+8]
+        shr eax, 1
+        neg eax
+        add eax, [vis_x]
+        add eax, CEN_PASO / 2 - 4
+        mov edx, 18
+        cmp dword [vis_n2], 0
+        je .m2
+        add edx, VIS_RENGLON
+.m2:
         COLOR C_ARENA_OSC
         cmp ebp, [foco]
         jne .i2
         COLOR C_ANIL
 .i2:
-        sub eax, 4
-        lea ecx, [ecx*8+8]
-        mov edx, 18
         dec ebx
         call dc_rect
         inc ebx
-        pop ecx
-        pop eax
         COLOR C_BLANCO
 .i3:
-        call dc_texto_n
+        mov esi, [vis_t1]
+        mov ecx, [vis_n1]
+        call vis_linea
+        mov ecx, [vis_n2]
+        test ecx, ecx
+        jz .i4
+        add ebx, VIS_RENGLON
+        mov esi, [vis_t2]
+        call vis_linea
+.i4:
         inc edi
         jmp .i
 .fin:
@@ -888,6 +903,114 @@ vista_pintar:
 .x:
         call dc_cerrar
         xor eax, eax
+        ret
+
+VIS_RENGLON equ 15                  ; [0.9.22] de la primera línea del nombre a la segunda
+
+; [0.9.22] (interna) parte el nombre de ESI (EAX letras) en una o dos líneas:
+; vis_t1/vis_n1 y vis_t2/vis_n2 (vis_n2 = 0: una sola). Solo en los grupos
+; (EBP con V_ID distinto de 0); en el Centro, una línea.
+vis_partir:
+        pushad
+        mov [vis_t1], esi
+        mov dword [vis_n2], 0
+        cmp eax, 12
+        jbe .uno
+        cmp dword [ebp+V_ID], 0
+        je .uno
+        mov ecx, 12                 ; el último espacio en las 13 primeras:
+.a:                                 ; la primera línea, de 12 letras o menos
+        cmp byte [esi+ecx], ' '
+        je .corta
+        dec ecx
+        jnz .a
+        mov ecx, 13                 ; si no, uno en la 14 o la 15 (13 o 14 letras)
+.b:
+        cmp ecx, eax
+        jae .uno
+        cmp byte [esi+ecx], ' '
+        je .corta
+        inc ecx
+        cmp ecx, 14
+        jbe .b
+        jmp .uno
+.corta:
+        mov [vis_n1], ecx
+        lea edx, [esi+ecx+1]
+        mov [vis_t2], edx
+        sub eax, ecx
+        dec eax
+        cmp eax, 14
+        jbe .c2
+        mov eax, 14
+.c2:
+        test eax, eax               ; (sin espacios al final)
+        jz .c3
+        cmp byte [edx+eax-1], ' '
+        jne .c3
+        dec eax
+        jmp .c2
+.c3:
+        mov [vis_n2], eax
+        jmp .x
+.uno:
+        cmp eax, 14
+        jbe .u1
+        mov eax, 14
+.u1:
+        test eax, eax               ; [ARCHIVOS] sin el espacio del final
+        jz .u2                      ; («Administrador »: no pisa al de al lado)
+        cmp byte [esi+eax-1], ' '
+        jne .u2
+        dec eax
+        jmp .u1
+.u2:
+        mov [vis_n1], eax
+.x:
+        popad
+        ret
+
+; (interna) ECX letras -> EAX puntos de ancho: 8 por letra, 7 si son más de 12
+vis_ancho:
+        mov eax, ecx
+        cmp ecx, 12
+        ja .siete
+        shl eax, 3
+        ret
+.siete:
+        imul eax, 7
+        ret
+
+; (interna) escribe ESI (ECX letras) centrado en la columna (vis_x), a la
+; altura EBX, con el color puesto
+vis_linea:
+        pushad
+        call vis_ancho
+        shr eax, 1
+        neg eax
+        add eax, [vis_x]
+        add eax, CEN_PASO / 2
+        cmp ecx, 12
+        ja .l7
+        call dc_texto_n
+        jmp .x
+.l7:                                ; letra a letra, a 7 puntos
+        push eax
+        push ebx
+        push ecx
+        push esi
+        mov ecx, 1
+        call dc_texto_n
+        pop esi
+        pop ecx
+        pop ebx
+        pop eax
+        inc esi
+        add eax, 7
+        dec ecx
+        jnz .l7
+.x:
+        popad
         ret
 
 ; (interna) abre lo marcado: un grupo (su ventana) o un acceso (el programa)
