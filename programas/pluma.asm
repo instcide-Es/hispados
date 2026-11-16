@@ -358,9 +358,9 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
             dd 0, 0, 0, 0, 0, 0
 botones     dd 6, 96, t_nada, O_TIPO, n_tipo, 0
             dd 106, 36, t_nada, O_TAM, n_tam, 0
-            dd 146, 24, t_b_n, O_NEG, n_neg, 0
+            dd 146, 24, t_b_n, O_NEG, n_neg, BT_NEGRITA
             dd 172, 24, t_b_k, O_CUR, n_cur, 0
-            dd 198, 24, t_b_s, O_SUB, n_sub, 0
+            dd 198, 24, t_b_s, O_SUB, n_sub, BT_SUBRAYA
             dd 230, 24, ic_izq, O_IZQ, n_izq, 1
             dd 256, 24, ic_cen, O_CEN, n_cen, 1
             dd 282, 24, ic_der, O_DER, n_der, 1
@@ -369,12 +369,11 @@ botones     dd 6, 96, t_nada, O_TIPO, n_tipo, 0
             dd 366, 24, ic_vinetas, O_VINETAS, n_vinetas, 1
             dd 392, 24, ic_sang_menos, O_SANG_MENOS, n_sang_menos, 1
             dd 418, 24, ic_sang_mas, O_SANG_MAS, n_sang_mas, 1
-            dd 452, 22, t_nada, O_COLOR, n_c0, 0
-            dd 476, 22, t_nada, O_COLOR + 1, n_c1, 0
-            dd 500, 22, t_nada, O_COLOR + 2, n_c2, 0
-            dd 524, 22, t_nada, O_COLOR + 3, n_c3, 0
+            dd 452, 22, C_TINTA, O_COLOR, n_c0, BT_COLOR
+            dd 476, 22, C_GRANATE, O_COLOR + 1, n_c1, BT_COLOR
+            dd 500, 22, C_ANIL, O_COLOR + 2, n_c2, BT_COLOR
+            dd 524, 22, C_OLIVA, O_COLOR + 3, n_c3, BT_COLOR
             dd 0, 0, 0, 0, 0, 0
-B_TAM       equ 24                  ; lo que ocupa cada botón en la tabla
 n_nuevo     db "Nuevo: un documento en blanco (Ctrl+U)", 0
 n_abrir     db "Abrir un documento guardado (Ctrl+A)", 0
 n_guardar   db "Guardar el documento (Ctrl+G)", 0
@@ -408,331 +407,6 @@ n_c3        db "Letra verde", 0
 m_vineta    db 0, 0, 0, 0, 0, 0, 0x3C, 0x7E, 0x7E, 0x7E, 0x7E, 0x3C, 0, 0, 0, 0
 m_punto     db 0, 0, 0, 0, 0, 0, 0, 0, 0x18, 0x18, 0, 0, 0, 0, 0, 0
 m_calderon  db 0, 0, 0x7E, 0xF4, 0xF4, 0xF4, 0x74, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14, 0, 0, 0
-ic_marcas:
-        db "................"
-        db "................"
-        db "....000000000..."
-        db "...0000.00......"
-        db "..00000.00......"
-        db "..00000.00......"
-        db "..00000.00......"
-        db "...0000.00......"
-        db "....000.00......"
-        db "......0.00......"
-        db "......0.00......"
-        db "......0.00......"
-        db "......0.00......"
-        db "......0.00......"
-        db "................"
-        db "................"
-; ---- los iconos: 16x16, un carácter por punto («.» deja ver el botón; las
-;      cifras y las letras, los colores de la paleta) ----
-ic_nuevo:
-        db "................"
-        db "...00000000....."
-        db "...099999900...."
-        db "...0999999000..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0999999990..."
-        db "...0000000000..."
-        db "................"
-ic_abrir:
-        db "................"
-        db "................"
-        db "................"
-        db "..000000........"
-        db "..0aaaa0........"
-        db ".00000000000000."
-        db ".0aaaaaaaaaaaa0."
-        db ".09999999999990."
-        db ".0aaaaaaaaaaaa0."
-        db ".0aaaaaaaaaaaa0."
-        db ".0aaaaaaaaaaaa0."
-        db ".0aaaaaaaaaaaa0."
-        db ".00000000000000."
-        db "................"
-        db "................"
-        db "................"
-ic_guardar:
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "..0c09999990c0.."
-        db "..0c09999990c0.."
-        db "..0c09999990c0.."
-        db "..0c00000000c0.."
-        db "..0cccccccccc0.."
-        db "..0cccccccccc0.."
-        db "..0cc000000cc0.."
-        db "..0cc0ff0f0cc0.."
-        db "..0cc0ff0f0cc0.."
-        db "..0cc0ffff0cc0.."
-        db "..000000000000.."
-        db "................"
-        db "................"
-ic_imprimir:
-        db "................"
-        db "....00000000...."
-        db "....09999990...."
-        db "....09999990...."
-        db "....09999990...."
-        db "....09999990...."
-        db ".00000000000000."
-        db ".0ffffffffffff0."
-        db ".0ffffffffffbf0."
-        db ".0ffffffffffff0."
-        db ".0ff00000000ff0."
-        db ".00009999990000."
-        db "....09777790...."
-        db "....09999990...."
-        db "....00000000...."
-        db "................"
-ic_cortar:
-        db "................"
-        db "....0......0...."
-        db ".....0....0....."
-        db "......0...0....."
-        db "......0..0......"
-        db ".......00......."
-        db ".......00......."
-        db "......0.0......."
-        db "......0..0......"
-        db ".....0....0....."
-        db "...dd......dd..."
-        db "..d..d....d..d.."
-        db "..d..d....d..d.."
-        db "...dd......dd..."
-        db "................"
-        db "................"
-ic_copiar:
-        db "................"
-        db "..00000000......"
-        db "..09999990......"
-        db "..09999990......"
-        db "..09999990......"
-        db "..099900000000.."
-        db "..099909999990.."
-        db "..099909999990.."
-        db "..099909777790.."
-        db "..099909999990.."
-        db "..000009777790.."
-        db "......09999990.."
-        db "......09777790.."
-        db "......09999990.."
-        db "......00000000.."
-        db "................"
-ic_pegar:
-        db "................"
-        db "......0000......"
-        db "..00000ff00000.."
-        db "..0aaa0000aaa0.."
-        db "..0aaaaaaaaaa0.."
-        db "..0aaaaaaaaaa0.."
-        db "..0aa000000000.."
-        db "..0aa099999900.."
-        db "..0aa097777900.."
-        db "..0aa099999900.."
-        db "..0aa097777900.."
-        db "..0aa099999900.."
-        db "..0aa099999900.."
-        db "..0aa000000000.."
-        db "..000000000000.."
-        db "................"
-ic_brocha:
-        db "................"
-        db ".............1.."
-        db "............111."
-        db "...........111.."
-        db "..........111..."
-        db ".........111...."
-        db "........111....."
-        db "....0000.1......"
-        db "...0aaaa0......."
-        db "..0aaaaa0......."
-        db ".0aaaaa0........"
-        db ".0aaaa0........."
-        db ".0aaa0.........."
-        db "..000..........."
-        db "................"
-        db "................"
-ic_deshacer:
-        db "................"
-        db "................"
-        db ".....00000......"
-        db "...00ccccc00...."
-        db "..0cc00000cc0..."
-        db "..0c0.....0c0..."
-        db ".0c0.......0c0.."
-        db "00c00......0c0.."
-        db "0ccc0......0c0.."
-        db ".0c0.......0c0.."
-        db "..0.......0c0..."
-        db ".........0c0...."
-        db ".......00c0....."
-        db ".......000......"
-        db "................"
-        db "................"
-ic_rehacer:
-        db "................"
-        db "................"
-        db "......00000....."
-        db "....00ccccc00..."
-        db "...0cc00000cc0.."
-        db "...0c0.....0c0.."
-        db "..0c0.......0c0."
-        db "..0c0......00c00"
-        db "..0c0......0ccc0"
-        db "..0c0.......0c0."
-        db "...0c0.......0.."
-        db "....0c0........."
-        db ".....0c00......."
-        db "......000......."
-        db "................"
-        db "................"
-ic_izq:
-        db "................"
-        db "................"
-        db "..00000000000..."
-        db "................"
-        db "..0000000......."
-        db "................"
-        db "..00000000000..."
-        db "................"
-        db "..00000........."
-        db "................"
-        db "..00000000000..."
-        db "................"
-        db "..00000000......"
-        db "................"
-        db "................"
-        db "................"
-ic_cen:
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "....00000000...."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db ".....000000....."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "....00000000...."
-        db "................"
-        db "................"
-        db "................"
-ic_der:
-        db "................"
-        db "................"
-        db "...00000000000.."
-        db "................"
-        db ".......0000000.."
-        db "................"
-        db "...00000000000.."
-        db "................"
-        db ".........00000.."
-        db "................"
-        db "...00000000000.."
-        db "................"
-        db "......00000000.."
-        db "................"
-        db "................"
-        db "................"
-ic_just:
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "................"
-        db "................"
-ic_numera:
-        db "................"
-        db "................"
-        db "..c............."
-        db ".cc...00000000.."
-        db "..c............."
-        db "................"
-        db ".cc............."
-        db "..cc..00000000.."
-        db ".cc............."
-        db "................"
-        db ".ccc............"
-        db "..cc..00000000.."
-        db ".ccc............"
-        db "................"
-        db "................"
-        db "................"
-ic_vinetas:
-        db "................"
-        db "................"
-        db "..cc............"
-        db "..cc..00000000.."
-        db "................"
-        db "................"
-        db "..cc............"
-        db "..cc..00000000.."
-        db "................"
-        db "................"
-        db "..cc............"
-        db "..cc..00000000.."
-        db "................"
-        db "................"
-        db "................"
-        db "................"
-ic_sang_mas:
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "................"
-        db ".......0000000.."
-        db ".c.............."
-        db ".cc............."
-        db ".cccc..0000000.."
-        db ".cc............."
-        db ".c.............."
-        db ".......0000000.."
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "................"
-ic_sang_menos:
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "................"
-        db "................"
-        db ".......0000000.."
-        db "....c..........."
-        db "...cc..........."
-        db ".cccc..0000000.."
-        db "...cc..........."
-        db "....c..........."
-        db ".......0000000.."
-        db "................"
-        db "................"
-        db "..000000000000.."
-        db "................"
 ; los colores de la letra (de la paleta de Hispa Ventanas)
 colores     db C_TINTA, C_GRANATE, C_ANIL, C_OLIVA, C_TERRACOTA, C_PETROLEO, C_MARRON, C_PIEDRA
 
@@ -1109,7 +783,7 @@ orden:
         call orden_haz
         jmp hecho
 orden_haz:
-        mov dword [bt_sobre], 0
+        mov dword [br_sobre], 0
         mov byte [tecleando], 0     ; (cualquier orden acaba la tanda de teclas)
         cmp ecx, O_NUEVO
         je nuevo
@@ -1836,7 +1510,7 @@ letra:
         ja hecho
         mov al, cl
 escribe:
-        mov dword [bt_sobre], 0     ; (al escribir, abajo vuelve la línea y la columna)
+        mov dword [br_sobre], 0     ; (al escribir, abajo vuelve la línea y la columna)
         call inst_tecleo
         call escribe1
         call cambio
@@ -2011,32 +1685,10 @@ raton:
         jl .b
         mov esi, botones
 .b:
-        call boton_en
+        call br_boton_en
         jc hecho
         mov ecx, [esi+12]
         jmp orden
-; (interna) EAX=x ESI=la tabla de una fila de botones -> ESI=el botón que hay
-; ahí; CF=1 si no hay ninguno
-boton_en:
-        push ecx
-.b:
-        cmp dword [esi+8], 0
-        je .no
-        mov ecx, eax
-        sub ecx, [esi]
-        cmp ecx, [esi+4]
-        jb .es
-        add esi, B_TAM
-        jmp .b
-.es:
-        pop ecx
-        clc
-        ret
-.no:
-        pop ecx
-        stc
-        ret
-
 raton_mueve:
         cmp byte [arrastra], 0
         jne .arrastra
@@ -2054,13 +1706,12 @@ raton_mueve:
         jl .f
         mov esi, botones
 .f:
-        call boton_en
+        call br_boton_en
         jc .nombre
         mov edi, [esi+16]
 .nombre:
-        cmp edi, [bt_sobre]
+        call br_sobre_pon
         je hecho
-        mov [bt_sobre], edi
         call inval
         jmp hecho
 .arrastra:
@@ -4034,65 +3685,26 @@ pintar:
 ; ---- la barra de botones ----
 pinta_botones:
         pushad
-        COLOR C_ARENA
-        xor eax, eax
-        xor ebx, ebx
         mov ecx, [cli_an]
         mov edx, TB_AL
-        HV dc_rect
-        COLOR C_ARENA_OSC
-        mov ebx, TB_AL - 1
-        mov edx, 1
-        HV dc_rect
+        call br_fondo
         mov eax, [cur]              ; la alineación del párrafo del cursor
         call alin_de
         mov [al_act], eax
         mov eax, [cur]
         call par_de
         mov [par_act], al
-        mov dword [bt_y], 4
         mov edi, botones1
-.b:
-        mov esi, [edi+8]
-        test esi, esi
-        jz .fila
-        call .activo                ; EBP=1 si está puesto
-        mov eax, [edi+12]
-        sub eax, O_COLOR
-        cmp eax, 3
-        ja .normal
-        ; un color: su muestra, con doble marco si es el de ahora
-        movzx eax, byte [colores+eax]
-        HV dc_color
-        mov eax, [edi]
-        mov ebx, [bt_y]
-        mov ecx, [edi+4]
-        mov edx, 22
-        HV dc_rect
-        COLOR C_TINTA
-        HV dc_marco
-        test ebp, ebp
-        jz .sig
-        COLOR C_BLANCO
-        add eax, 2
-        add ebx, 2
-        sub ecx, 4
-        sub edx, 4
-        HV dc_marco
-        jmp .sig
-.normal:
-        COLOR C_CREMA
-        test ebp, ebp
-        jz .c1
-        COLOR C_PETROLEO
-.c1:
-        mov eax, [edi]
-        mov ebx, [bt_y]
-        mov ecx, [edi+4]
-        mov edx, 22
-        HV dc_rect
-        COLOR C_TINTA
-        HV dc_marco
+        mov ebx, 4
+        call br_fila
+        mov edi, botones            ; y la fila de abajo
+        mov ebx, 32
+        call br_fila
+        popad
+        ret
+; lo que pregunta la barra común de cada botón (EDI): EBP=1 si está puesto
+; ahora; y el texto de los que lo cambian (ESI)
+barra_estado:
         cmp dword [edi+12], O_TIPO  ; el del tipo de letra: el nombre del de ahora
         jne .nt
         movzx eax, byte [tip_act]
@@ -4105,67 +3717,6 @@ pinta_botones:
         shr edx, 5
         call tl_puntos
 .nm:
-        cmp dword [edi+20], 0       ; ¿un icono?
-        je .txt
-        mov al, C_CREMA
-        test ebp, ebp
-        jz .i1
-        mov al, C_PETROLEO
-.i1:
-        mov [ic_fondo], al
-        mov eax, [edi+4]
-        sub eax, 16
-        sar eax, 1
-        add eax, [edi]
-        mov ebx, [bt_y]
-        add ebx, 3
-        call pinta_icono
-        jmp .sig
-.txt:
-        test ebp, ebp
-        jz .c2
-        COLOR C_CREMA
-.c2:
-        xor ecx, ecx                ; el texto, centrado
-.lg:
-        cmp byte [esi+ecx], 0
-        je .lg1
-        inc ecx
-        jmp .lg
-.lg1:
-        shl ecx, 3
-        mov eax, [edi+4]
-        sub eax, ecx
-        sar eax, 1
-        add eax, [edi]
-        mov ebx, [bt_y]
-        add ebx, 3
-        cmp dword [edi+12], O_NEG   ; la N, en negrita
-        jne .t
-        NEGRITA 1
-.t:
-        HV dc_texto
-        NEGRITA 0
-        cmp dword [edi+12], O_SUB   ; la S, subrayada
-        jne .sig
-        add ebx, 15
-        mov ecx, 8
-        mov edx, 1
-        HV dc_rect
-.sig:
-        add edi, B_TAM
-        jmp .b
-.fila:
-        cmp dword [bt_y], 4         ; y la fila de abajo
-        jne .x
-        mov dword [bt_y], 32
-        mov edi, botones
-        jmp .b
-.x:
-        popad
-        ret
-; (interna) EBP=1 si el botón EDI está puesto ahora
-.activo:
         xor ebp, ebp
         mov eax, [edi+12]
         mov dl, [ver_marcas]
@@ -4221,60 +3772,14 @@ pinta_botones:
         inc ebp
         ret
 
-; pinta el icono de ESI (16x16 caracteres) en EAX, EBX; los puntos «.» van del
-; color [ic_fondo], el del botón
-pinta_icono:
-        pushad
-        mov edi, ic_buf
-        mov ecx, 256
-.c:
-        lodsb
-        cmp al, '.'
-        jne .c1
-        mov al, [ic_fondo]
-        jmp short .c3
-.c1:
-        cmp al, '9'
-        ja .c2
-        sub al, '0'
-        jmp short .c3
-.c2:
-        sub al, 'a' - 10
-.c3:
-        stosb
-        dec ecx
-        jnz .c
-        mov eax, [esp+28]
-        mov ebx, [esp+16]
-        mov ecx, 16
-        mov edx, 16
-        mov esi, ic_buf
-        HV dc_copiar
-        popad
-        ret
-
 ; ---- la barra de estado: línea y columna, y cuánto hay escrito (o, con el
 ;      ratón sobre un botón, lo que hace) ----
 pinta_estado:
         pushad
-        COLOR C_ARENA
-        xor eax, eax
-        mov ebx, [cli_al]
-        sub ebx, STAT_AL
         mov ecx, [cli_an]
-        mov edx, STAT_AL
-        HV dc_rect
-        COLOR C_ARENA_OSC
-        mov edx, 1
-        HV dc_rect
-        mov esi, [bt_sobre]
-        test esi, esi
-        jz .donde
-        COLOR C_TINTA
-        mov eax, 8
-        mov ebx, [cli_al]
-        sub ebx, STAT_AL - 3
-        HV dc_texto
+        mov edx, [cli_al]
+        call br_pie                 ; (CF=1: ha puesto el nombre de un botón)
+        jnc .donde
         popad
         ret
 .donde:
@@ -4595,6 +4100,7 @@ pl_letra:
         ret
 
 %include "tipos.inc"
+%include "barra.inc"
 %include "hvplib.inc"
 
 FBUF_TAM    equ 3 * MAX_TXT + 16
@@ -4627,11 +4133,9 @@ sel_b       resd 1
 pl_y        resd 1
 g_an        resd 1
 al_act      resd 1
-bt_y        resd 1
 tg_modo     resb 1
             alignb 4
 g_mapa      resd 1                  ; si no es 0, el dibujo que va en vez de la letra
-bt_sobre    resd 1                  ; el nombre del botón que hay bajo el ratón
 pl_lin      resd 1
 m_izq       resd 1                  ; lo que deja a la izquierda el párrafo
 m_huecos    resd 1                  ; justificar: espacios entre los que se reparte
@@ -4675,7 +4179,6 @@ ver_marcas  resb 1                  ; se ven los espacios y las marcas de párra
 brocha      resb 1                  ; la brocha está cogida
 brocha_atr  resb 1
 par_act     resb 1
-ic_fondo    resb 1
 tecleando   resb 1                  ; en una tanda de teclas seguidas
             alignb 4
 rl          resb RL_TAM
@@ -4704,5 +4207,5 @@ lbuf        resb PAG_AN * 64
 lin_ini     resd MAX_TXT + 2
 lin_y       resd MAX_TXT + 2
 lin_marca   resw MAX_TXT + 2        ; delante de cada línea: 0 nada, FFFFh viñeta, n su número
-ic_buf      resb 256
+            BARRA_BSS
 HVP_FIN

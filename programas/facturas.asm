@@ -185,25 +185,41 @@ fac_menu:
         dw 0xFFFF
         db 0
 
-; ---- los botones de la barra: x, ancho, texto, orden ----
+; ---- los botones de la barra (programas/comun/barra.inc): x, ancho, dibujo,
+;      orden, nombre y clase ----
             align 4
-bot_lista   dd 8, 64, t_b_nueva, O_NUEVA
-            dd 76, 64, t_b_abrir, O_ABRIR
-            dd 144, 64, t_b_borrar, O_BORRAR
-            dd 228, 80, t_b_emit, O_EMITIDAS
-            dd 312, 88, t_b_recib, O_RECIBIDAS
-            dd 420, 80, t_b_resumen, O_RESUMEN
-            dd 504, 88, t_b_mis, O_MIS
-            dd 0, 0, 0, 0
-bot_fac     dd 8, 72, t_b_lista, O_LISTA
-            dd 84, 64, t_b_datos, O_DATOS
-            dd 152, 80, t_b_mas, O_LIN_MAS
-            dd 236, 72, t_b_cambiar, O_LIN_CAMB
-            dd 312, 64, t_b_quitar, O_LIN_QUITA
-            dd 380, 72, t_b_pagada, O_PAGADA
-            dd 472, 64, t_b_texto, O_TEXTO
-            dd 540, 80, t_b_imprimir, O_IMPRIMIR
-            dd 0, 0, 0, 0
+bot_lista   dd 8, 24, ic_nuevo, O_NUEVA, n_nueva, BT_ICONO
+            dd 34, 24, ic_abrir, O_ABRIR, n_abrir, BT_ICONO
+            dd 60, 24, ic_borrar, O_BORRAR, n_borrar, BT_ICONO
+            dd 100, 80, t_b_emit, O_EMITIDAS, n_emit, BT_TEXTO
+            dd 184, 88, t_b_recib, O_RECIBIDAS, n_recib, BT_TEXTO
+            dd 284, 80, t_b_resumen, O_RESUMEN, n_resumen, BT_TEXTO
+            dd 368, 88, t_b_mis, O_MIS, n_mis, BT_TEXTO
+            dd 0, 0, 0, 0, 0, 0
+bot_fac     dd 8, 24, ic_volver, O_LISTA, n_lista, BT_ICONO
+            dd 40, 64, t_b_datos, O_DATOS, n_datos, BT_TEXTO
+            dd 108, 80, t_b_mas, O_LIN_MAS, n_mas, BT_TEXTO
+            dd 192, 72, t_b_cambiar, O_LIN_CAMB, n_cambiar, BT_TEXTO
+            dd 268, 64, t_b_quitar, O_LIN_QUITA, n_quitar, BT_TEXTO
+            dd 336, 72, t_b_pagada, O_PAGADA, n_pagada, BT_TEXTO
+            dd 420, 24, ic_texto, O_TEXTO, n_texto, BT_ICONO
+            dd 446, 24, ic_imprimir, O_IMPRIMIR, n_imprimir, BT_ICONO
+            dd 0, 0, 0, 0, 0, 0
+n_nueva     db "Nueva factura", 0
+n_abrir     db "Abrir la factura elegida", 0
+n_borrar    db "Borrar la factura elegida", 0
+n_emit      db "Las facturas que hago yo", 0
+n_recib     db "Las facturas que me hacen a mí", 0
+n_resumen   db "Resumen del trimestre", 0
+n_mis       db "Mis datos: los que salen en las facturas", 0
+n_lista     db "Volver a la lista de facturas", 0
+n_datos     db "Los datos de la factura", 0
+n_mas       db "Añadir una línea", 0
+n_cambiar   db "Cambiar la línea elegida", 0
+n_quitar    db "Quitar la línea elegida", 0
+n_pagada    db "Marcar la factura como cobrada o pagada", 0
+n_texto     db "Guardar la factura en un archivo de texto", 0
+n_imprimir  db "Imprimir la factura", 0
 
 ; ---- diálogo: los datos de la factura ----
 dlg_fac:
@@ -305,21 +321,15 @@ cam_nada    dd 0
 
 ; ---- textos ----
 t_titulo    db "Facturas", 0
-t_b_nueva   db "Nueva", 0
-t_b_abrir   db "Abrir", 0
-t_b_borrar  db "Borrar", 0
 t_b_emit    db "Emitidas", 0
 t_b_recib   db "Recibidas", 0
 t_b_resumen db "Resumen", 0
 t_b_mis     db "Mis datos", 0
-t_b_lista   db "< Lista", 0
 t_b_datos   db "Datos", 0
 t_b_mas     db "+ Línea", 0
 t_b_cambiar db "Cambiar", 0
 t_b_quitar  db "Quitar", 0
 t_b_pagada  db "Pagada", 0
-t_b_texto   db "Texto", 0
-t_b_imprimir db "Imprimir", 0
 t_aceptar   db "Aceptar", 0
 t_cancelar  db "Cancelar", 0
 t_d_fac     db "Datos de la factura", 0
@@ -830,15 +840,8 @@ raton:
         je .b
         mov esi, bot_fac
 .b:
-        cmp dword [esi+8], 0
-        je hecho
-        mov ecx, eax
-        sub ecx, [esi]
-        cmp ecx, [esi+4]
-        jb .es
-        add esi, 16
-        jmp .b
-.es:
+        call br_boton_en
+        jc hecho
         mov ecx, [esi+12]
         jmp orden
 
@@ -2429,61 +2432,28 @@ pintar:
 ; ---- la barra de botones ----
 pinta_barra:
         pushad
-        COLOR C_ARENA
-        xor eax, eax
-        xor ebx, ebx
         mov ecx, [cli_an]
         mov edx, TB_AL
-        HV dc_rect
-        COLOR C_ARENA_OSC
-        mov ebx, TB_AL - 1
-        mov edx, 1
-        HV dc_rect
+        call br_fondo
         mov edi, bot_lista
         cmp byte [modo], 0
         je .b
         mov edi, bot_fac
 .b:
-        mov esi, [edi+8]
-        test esi, esi
-        jz .x
-        xor ebp, ebp                ; ¿la pestaña que se ve?
+        mov ebx, 4
+        call br_fila
+        popad
+        ret
+; lo que pregunta la barra común: EBP=1 en la pestaña que se ve
+barra_estado:
         mov eax, [edi+12]
         sub eax, O_EMITIDAS
         cmp eax, 1
-        ja .c
+        ja .x
         cmp eax, [ver_tipo]
-        jne .c
+        jne .x
         inc ebp
-.c:
-        COLOR C_CREMA
-        test ebp, ebp
-        jz .c1
-        COLOR C_PETROLEO
-.c1:
-        mov eax, [edi]
-        mov ebx, 4
-        mov ecx, [edi+4]
-        mov edx, 22
-        HV dc_rect
-        COLOR C_TINTA
-        HV dc_marco
-        test ebp, ebp
-        jz .c2
-        COLOR C_CREMA
-.c2:
-        call largo                  ; el texto, centrado
-        shl ecx, 3
-        mov eax, [edi+4]
-        sub eax, ecx
-        sar eax, 1
-        add eax, [edi]
-        mov ebx, 7
-        HV dc_texto
-        add edi, 16
-        jmp .b
 .x:
-        popad
         ret
 
 ; ---- la lista ----
@@ -3541,9 +3511,11 @@ imprimir:
         pop ecx
         ret
 
+%include "barra.inc"
 %include "hvplib.inc"
 
         section .bss
+            BARRA_BSS
 ven         resd 1
 modo        resb 1                  ; 0: la lista; 1: una factura
 lin_nueva   resb 1

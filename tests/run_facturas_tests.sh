@@ -22,7 +22,7 @@ echo "== Facturas: una emitida, una recibida, texto y resumen =="
 prepara $HVP
 { arranca
   shot v0
-  clic 590 96; sleep 1                  # «Mis datos»
+  clic 454 96; sleep 1                  # «Mis datos»
   escribe "Taller Rescoldo"; tecla tab; escribe "12345678Z"; tecla tab
   escribe "Calle Mayor 1"; tecla tab; escribe "43700 Albinyana"; tecla tab
   escribe "Pago por transferencia"; tecla ret; sleep 1.2
@@ -35,9 +35,9 @@ prepara $HVP
   tecla insert; sleep 1; escribe "Disco duro"; tecla tab tab; escribe "49,90"; tecla ret; sleep 1.2
   tecla insert; sleep 1; escribe "Descuento"; tecla tab tab; escribe "-10"; tecla ret; sleep 1.2
   aparca; shot f1
-  clic 554 96; sleep 1.2; tecla ret; sleep 2; shot f2; tecla ret; sleep 1   # «Texto»
+  clic 474 96; sleep 1.2; tecla ret; sleep 2; shot f2; tecla ret; sleep 1   # «Texto»
   tecla esc; sleep 1
-  clic 406 96; sleep 1                  # «Recibidas»
+  clic 270 96; sleep 1                  # «Recibidas»
   # la recibida, con su importe en el mismo diálogo y el IVA incluido (lo
   # normal en un recibo): 65,70 que se pagan = 54,30 + 11,40 de IVA
   tecla insert; sleep 1.2; escribe "A77"; tecla tab tab; escribe "Luz y Fuerza"
@@ -45,7 +45,7 @@ prepara $HVP
   tecla p; sleep 0.8
   aparca; shot r1
   tecla esc; sleep 1; shot r2
-  clic 510 96; sleep 1.2; shot s1; tecla ret; sleep 1   # «Resumen»
+  clic 366 96; sleep 1.2; shot s1; tecla ret; sleep 1   # «Resumen»
   sal; } | run 240 -vga std
 
 chk $T/v0.ppm titulo 50 36 activa "Facturas"
@@ -102,7 +102,7 @@ rm -f $T/prn.txt
 { arranca
   shot p0
   tecla ret; sleep 1.2
-  clic 630 96; sleep 3; shot p1; tecla ret; sleep 1     # «Imprimir»
+  clic 500 96; sleep 3; shot p1; tecla ret; sleep 1     # «Imprimir»
   sal; } | PARALELO=file:$T/prn.txt run 120 -vga std
 chk $T/p1.ppm busca 216 270 586 310 0 8 "La factura se ha enviado a la impresora."
 chk $T/p0.ppm busca 52 130 400 152 8 2 "2026-001"
@@ -119,7 +119,7 @@ echo "== Facturas: sin impresora, lo dice =="
 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
 { arranca
   tecla ret; sleep 1.2
-  clic 630 96; sleep 3; shot n1; tecla ret; sleep 1
+  clic 500 96; sleep 3; shot n1; tecla ret; sleep 1
   sal; } | run 120 -vga std
 chk $T/n1.ppm busca 150 250 650 300 0 8 "No se ha podido imprimir."
 muestra n1 facturas_sin_impresora
