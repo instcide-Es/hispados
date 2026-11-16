@@ -1826,6 +1826,11 @@ lis_proc:
         mov [ebp+V_D3], eax
         jmp .inv
 .tecla:
+        ; EDX trae el estado de mayúsculas, y ven_defecto lo necesita intacto (Tab
+        ; adelante o, con Mayús, atrás): se guarda, y EDX hace aquí de número de
+        ; elementos. Antes se pisaba, y Tab desde una lista iba hacia un lado u
+        ; otro según cuántos elementos tuviera.
+        push edx
         mov eax, [ebp+V_D2]
         mov edx, [ebp+V_D1]
         test edx, edx
@@ -1864,13 +1869,16 @@ lis_proc:
         jne .defecto
         test eax, eax
         js .defecto
+        add esp, 4                  ; (el estado de mayúsculas no hace falta)
         mov eax, LN_DOBLE
         call avisar
         jmp .nada
 .defecto:
+        pop edx                     ; el estado de mayúsculas, tal como llegó
         mov eax, WM_KEYDOWN
         jmp ven_defecto
 .tm:
+        add esp, 4                  ; (el estado de mayúsculas no hace falta)
         test eax, eax
         jns .tm1
         xor eax, eax
