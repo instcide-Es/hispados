@@ -27,6 +27,7 @@ ARNES = r'''
 NCOL        equ 64
 NFIL        equ 1000
 CEL_MAX     equ 128
+NHOJ        equ 3                   ; las hojas del libro: Hoja1, Hoja2 y Hoja3
         section .text
         global _start
 _start:
@@ -52,7 +53,16 @@ _start:
 .hecha:
         mov byte [edi], 0
         mov esi, lin
-        cmp byte [esi], '!'         ; «!»: la hoja, vacía
+        mov eax, [h_act]            ; (las celdas son de la hoja que toca)
+        mov [ev_hoja], eax
+        cmp byte [esi], '@'         ; «@2»: lo que sigue es de la hoja 2
+        jne .noh
+        movzx eax, byte [esi+1]
+        sub eax, '1'
+        mov [h_act], eax
+        jmp .linea
+.noh:
+        cmp byte [esi], '!'         ; «!»: el libro, vacío
         je .vaciar
         cmp byte [esi], '?'         ; «?B7»: lo que vale y cómo se ve
         je .pregunta
@@ -88,9 +98,10 @@ _start:
         jmp .linea
 .vaciar:
         mov edi, cel_txt
-        mov ecx, NCOL * NFIL * CEL_MAX
+        mov ecx, NHOJ * NCOL * NFIL * CEL_MAX
         xor al, al
         rep stosb
+        mov dword [h_act], 0
         call calc_olvida
         jmp .linea
 .pregunta:
@@ -182,12 +193,31 @@ hoy_serie:
         ret
 cel_puntero:
         push eax
-        mov eax, edx
+        mov eax, [ev_hoja]
+        imul eax, NFIL
+        add eax, edx
         imul eax, NCOL
         add eax, ecx
         imul eax, CEL_MAX
         lea esi, [cel_txt+eax]
         pop eax
+        ret
+; la hoja que se llama como ESI (ECX letras): aquí, Hoja1, Hoja2 y Hoja3
+hoja_busca:
+        cmp ecx, 5
+        jne .no
+        mov eax, [esi]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'HOJA'
+        jne .no
+        movzx eax, byte [esi+4]
+        sub eax, '1'
+        cmp eax, NHOJ
+        jae .no
+        clc
+        ret
+.no:
+        stc
         ret
 ; ALEATORIO(): aquí, siempre lo mismo
 azar_num:
@@ -195,19 +225,23 @@ azar_num:
         ret
 ; la ficha donde se apunta el valor de una fórmula: aquí, una por celda
 cel_cache:
-        imul edi, edx, NCOL
+        mov edi, [ev_hoja]
+        imul edi, NFIL
+        add edi, edx
+        imul edi, NCOL
         add edi, ecx
         imul edi, CV_TAM
         add edi, fichas
         ret
 %include "calculo.inc"
         section .bss
-fichas      resb NCOL * NFIL * CV_TAM
+fichas      resb NHOJ * NCOL * NFIL * CV_TAM
+h_act       resd 1
 lin         resb 512
 salida      resb 512
 fmt_w       resd 1
 v           resd 2
-cel_txt     resb NCOL * NFIL * CEL_MAX
+cel_txt     resb NHOJ * NCOL * NFIL * CEL_MAX
 '''
 
 
@@ -317,6 +351,7 @@ def lee_num(t, i):
 
 FECHA = re.compile(r'([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})(?![0-9])')
 REF = re.compile(r'(\$?)([A-Za-z]{1,2})(\$?)([0-9]+)')
+PREF = re.compile(r'([A-Za-z0-9_]{1,15})!')         # «Hoja2!»: una celda de otra hoja del libro
 
 
 def cad_a_num(t):
@@ -410,13 +445,21 @@ NADA = object()        # (lo que contesta mas_funciones si el nombre no es suyo)
 
 
 class Hoja:
-    def __init__(self):
+    """Una hoja de un libro (libro: la lista de sus hojas, compartida). Una
+    celda de otra hoja se pide con esa hoja, más uno, por encima de los 16
+    bits de la fila: así van los rangos de otra hoja, como en calculo.inc"""
+    def __init__(self, libro=None, n=0):
         self.c = {}
+        self.libro = [self] if libro is None else libro
+        self.n = n
+        self.nombre = 'Hoja%d' % (n + 1)
 
     def valor(self, col, fil, pila=(), prof=0):
+        if fil >> 16:
+            return self.libro[(fil >> 16) - 1].valor(col, fil & 0xFFFF, pila, prof)
         if not (0 <= col < NCOL and 0 <= fil < NFIL):
             raise Err(3)
-        if (col, fil) in pila:
+        if (self.n, col, fil) in pila:
             raise Err(2)
         t = self.c.get((col, fil), '')
         if t == '':
@@ -426,7 +469,7 @@ class Hoja:
             return t if n is None else n
         if prof >= PROF:
             raise Err()
-        p = Formula(self, t[1:], pila + ((col, fil),), prof + 1)
+        p = Formula(self, t[1:], pila + ((self.n, col, fil),), prof + 1)
         x = p.expr()
         if p.car() != '':
             raise Err()
@@ -606,14 +649,28 @@ class Formula:
         self.cierra()
         return x, y
 
+    def hoja_pref(self, i):
+        """-> (la hoja que nombra lo que hay en i, «Hoja2!», como la quiere
+        Hoja.valor, o 0 si no nombra ninguna; y dónde sigue)"""
+        m = PREF.match(self.t, i)
+        if not m:
+            return 0, i
+        for h in self.h.libro:
+            if h.nombre.upper() == m.group(1).upper():
+                return (h.n + 1) << 16, m.end()
+        raise Err(3)
+
     def nombre(self):
-        m = REF.match(self.t, self.i)
+        hoja, j = self.hoja_pref(self.i)
+        m = REF.match(self.t, j)
         if m:
             self.i = m.end()
             col, fil = colnum(m.group(2)), int(m.group(4)) - 1
             if not (0 <= col < NCOL and 0 <= fil < NFIL):
                 raise Err(3)
-            return self.h.valor(col, fil, self.pila, self.prof)
+            return self.h.valor(col, fil | hoja, self.pila, self.prof)
+        if hoja:
+            raise Err()
         m = re.compile(r'[A-Za-zñÑ.]*').match(self.t, self.i)
         self.i = m.end()
         nom = m.group().upper()[:15]
@@ -964,7 +1021,8 @@ class Formula:
         celda que sea el argumento entero (y entonces no gasta nada)"""
         self.car()
         t = self.t
-        m = REF.match(t, self.i)
+        hoja, j = self.hoja_pref(self.i)
+        m = REF.match(t, j)
         if not m:
             return None
         j = m.end()
@@ -988,7 +1046,7 @@ class Formula:
             return None
         if not (0 <= c1 < NCOL and 0 <= c2 < NCOL and 0 <= f1 < NFIL and 0 <= f2 < NFIL):
             raise Err(3)
-        return min(c1, c2), min(f1, f2), max(c1, c2), max(f1, f2)
+        return min(c1, c2), min(f1, f2) | hoja, max(c1, c2), max(f1, f2) | hoja
 
     def rangos(self, nom):
         e = {'n': 0, 'na': 0, 's': 0, 'ext': 0}
@@ -1101,7 +1159,7 @@ class Formula:
                 if not ok:
                     continue
                 n += 1
-                if sumar and 0 <= c - r[0] + sc < NCOL and 0 <= f - r[1] + sf < NFIL:
+                if sumar and 0 <= c - r[0] + sc < NCOL and (f - r[1] + sf) & 0xFFFF < NFIL:
                     w = self.h.valor(c - r[0] + sc, f - r[1] + sf, self.pila, self.prof)
                     if w is not None and not isinstance(w, str):
                         s = suma(s + w)
@@ -1600,6 +1658,19 @@ HOJAS = [
 # números con formato: (formato de la celda, lo tecleado). El formato: la
 # clase (1 fijo, 2 millares, 3 moneda, 4 por cien, 5 fecha) por 128 y los
 # decimales por 1024
+# un libro de tres hojas (Hoja1, Hoja2 y Hoja3): lo que tiene cada una
+LIBRO = [
+    ['A1 3', 'A2 =Hoja2!A3', 'A3 =SUMA(Hoja2!A1:A3)', 'A4 =hoja2!a1+HOJA2!$A$2', 'A5 =Hoja9!A1', 'A6 =Hoja2!B1&"x"',
+     'A7 =CONTAR.SI(Hoja2!A1:B3;">5")', 'A8 =SUMAR.SI(Hoja2!A1:A3;">5";Hoja3!A1:A3)', 'A9 =BUSCARV(7;Hoja2!A1:A3;1;0)',
+     'A10 =INDICE(Hoja2!A1:A3;2)', 'A11 =Hoja2!Z1001', 'A12 =Hoja2!', 'A13 =SUMA(Hoja3!A1:A2;Hoja2!A1)',
+     'A14 =Hoja2!C1', 'A15 =PROMEDIO(Hoja2!A1:A2;A1)', 'A16 =Hoja1!A1+1', 'A17 =SUMA(Hoja2!A1:Hoja2!A2)',
+     'A18 =Hoja2!A1:A2', 'A19 =MAX(Hoja3!A1:B3)-MIN(Hoja2!A1:A3)', 'A20 =COINCIDIR(12;Hoja2!A1:A3;0)',
+     'A21 =SUMAR.SI(A1:A3;">1";Hoja2!A1:A3)', 'A22 =SI(Hoja2!A1>4;Hoja3!A1;Hoja9!A1)', 'A23 =Hoja2 !A1',
+     'A24 =CONTARA(Hoja2!A1:C3)', 'A25 =Hoja3!B2', 'B1 =Hoja3!A3'],
+    ['A1 5', 'A2 7', 'A3 =A1+A2', 'B1 texto', 'C1 =Hoja1!A1*2', 'C2 =SUMA(A1:A3)+Hoja3!A1'],
+    ['A1 =Hoja2!A3*10', 'A2 =Hoja3!A1', 'A3 =Hoja1!B1', 'B2 =Hoja1!A25'],
+]
+
 FORMATOS = [(c * 128 + d * 1024, t) for c, d, t in [
     (1, 2, '3,14159'), (1, 0, '2,5'), (1, 0, '-2,5'), (1, 8, '1/3'), (1, 2, '-0,001'), (1, 2, '1234567,891'),
     (1, 3, '12345,6789'), (1, 4, '99999,99995'), (1, 9, '1'), (1, 2, '0'), (1, 1, '0,05'), (1, 1, '0,04'),
@@ -1630,23 +1701,27 @@ def main():
             return '0,%0*d' % (random.randint(1, 10), random.randint(1, 99))
         return str(random.randint(0, 99999999999))
 
+    def otra():
+        """delante de una celda o de un rango: a veces, otra hoja del libro"""
+        return random.choice(['Hoja2!', 'hoja3!', 'HOJA1!']) if random.random() < 0.2 else ''
+
     def e_azar(prof):
         if prof == 0 or random.random() < 0.3:
             k = random.random()
             if k < 0.12:
-                return random.choice('ABC') + str(random.randint(1, 6))
+                return otra() + random.choice('ABC') + str(random.randint(1, 6))
             return ('-' if k < 0.25 else '') + n_azar() + ('%' if k > 0.95 else '')
         k = random.random()
         if k < 0.06:
-            return '%s(%s%d:%s%d)' % (random.choice(['SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR']),
-                                      random.choice('ABC'), random.randint(1, 6), random.choice('ABC'), random.randint(1, 6))
+            return '%s(%s%s%d:%s%d)' % (random.choice(['SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR']), otra(),
+                                        random.choice('ABC'), random.randint(1, 6), random.choice('ABC'), random.randint(1, 6))
         if k < 0.10:
             return 'REDONDEAR(%s;%d)' % (e_azar(prof - 1), random.randint(0, 8))
         if k < 0.13:
             return 'ABS(%s)' % e_azar(prof - 1)
         if k < 0.30:
             a, b, c = e_azar(prof - 1), e_azar(prof - 1), e_azar(prof - 1)
-            rango = '%s%d:%s%d' % (random.choice('ABC'), random.randint(1, 6), random.choice('ABC'), random.randint(1, 6))
+            rango = '%s%s%d:%s%d' % (otra(), random.choice('ABC'), random.randint(1, 6), random.choice('ABC'), random.randint(1, 6))
             return random.choice([
                 lambda: 'SI(%s%s%s;%s;%s)' % (a, random.choice(['=', '<>', '<', '>', '<=', '>=']), b, c, e_azar(prof - 1)),
                 lambda: 'ENTERO(%s)' % a,
@@ -1720,6 +1795,19 @@ def main():
         for (col, fil) in sorted(h.c):
             pregunta(h, '%s%d «%s»' % (colnom(col), fil + 1, h.c[(col, fil)]), col, fil)
             esperado.append(resuelve(h, col, fil))
+    # un libro de tres hojas: celdas y rangos de otra hoja
+    libro = []
+    libro += [Hoja(libro, n) for n in range(3)]
+    entrada.append('!')
+    for n, lineas in enumerate(LIBRO):
+        entrada.append('@%d' % (n + 1))
+        for l in lineas:
+            pon(libro[n], l)
+    for n in range(3):
+        entrada.append('@%d' % (n + 1))
+        for (col, fil) in sorted(libro[n].c):
+            pregunta(libro[n], 'Hoja%d!%s%d «%s»' % (n + 1, colnom(col), fil + 1, libro[n].c[(col, fil)]), col, fil)
+            esperado.append(resuelve(libro[n], col, fil))
     # los formatos de número
     h = Hoja()
     entrada.append('!')
@@ -1750,14 +1838,21 @@ def main():
     entrada.append('??Z100')
     casos.append(('cadena: la última', None, 0, 0))
     esperado.append('%016X %s' % (2600 * ESC, celda(2600 * ESC)))
-    h = Hoja()
+    libro = []
+    libro += [Hoja(libro, n) for n in range(3)]
+    h = libro[0]
     entrada.append('!')
     for _ in range(cuantas):
         if random.random() < 0.15:      # de vez en cuando cambia una celda de datos
             col, fil = random.randint(0, 2), random.randint(0, 5)
             k = random.random()
             t = '' if k < 0.15 else 'texto' if k < 0.25 else ('-' if k < 0.4 else '') + n_azar()
-            pon(h, '%s%d %s' % (chr(65 + col), fil + 1, t))
+            n = random.choice([0, 0, 0, 1, 2])      # (a veces, de otra hoja del libro)
+            if n:
+                entrada.append('@%d' % (n + 1))
+            pon(libro[n], '%s%d %s' % (chr(65 + col), fil + 1, t))
+            if n:
+                entrada.append('@1')
         f = e_azar(random.randint(1, 3))
         pon(h, 'Z100 =' + f)
         pregunta(h, '=' + f, 25, 99)

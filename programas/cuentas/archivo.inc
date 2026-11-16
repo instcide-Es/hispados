@@ -6,12 +6,25 @@
 ;  y lo guarda todo. Una línea por cosa, acabada en CR+LF:
 ;       HOJA 1                  la primera: qué es el archivo y su versión
 ;       M EUR                   lo que va detrás de los números con moneda
+;       I 1                     al imprimir como se ve sale la rejilla (solo
+;                               si se ha pedido)
+;       G 0 A2:C5 0             el gráfico de la hoja: su tipo, el rango del
+;                               que sale y si las series van por filas (1)
+;       T Ventas del año        su título; X..., Y...: los rótulos de sus ejes
+;       H 7 30                  la fila 7 mide 30 puntos de alto (lo mismo)
+;       P 1 2                   están inmovilizadas la primera columna y las
+;                               dos primeras filas
 ;       A C1 120                la columna C mide 120 puntos de ancho (solo
 ;                               las que no tienen el ancho normal)
-;       C B7 2176 =A1*2         la celda B7: su formato (la palabra de bits
+;       C B7 2176 =A1*2         la celda B7: su formato (los bits
 ;                               F_*, en decimal) y, detrás de un espacio, su
 ;                               contenido tal como se tecleó (solo las celdas
 ;                               que tienen contenido o formato)
+;       L 2                     (libros de varias hojas) la hoja que se veía
+;       S Ventas                y aquí empieza la hoja «Ventas»: hasta la
+;                               «S» siguiente, todo es suyo (libro.inc)
+;       V 1 6 0 0               (solo en las hojas que no se veían) dónde
+;                               estaban su cursor y su vista
 ;  Lo que no se entiende se salta: una versión más nueva puede añadir líneas.
 ;
 ;  .CSV (para llevar y traer datos de otros programas): una fila por línea,
@@ -26,7 +39,6 @@
 ; =============================================================================
 ESC_TAM     equ 8192                ; el búfer de escribir
 TROZO       equ 16384               ; lo que se lee de una vez
-IMP_AN      equ 80                  ; letras de una línea de la impresora
 
 ; ---- escribir ----
 ; abre para escribir el archivo ESI; CF=1 si no se puede
@@ -93,6 +105,17 @@ esc_vuelca:
         pushad
         mov ecx, [esc_n]
         jecxz .x
+        cmp byte [esc_modo], 0      ; (a la memoria, o solo contando: libro.inc)
+        je .arch
+        add [esc_total], ecx
+        cmp byte [esc_modo], 1
+        je .x
+        mov esi, esc_buf
+        mov edi, [esc_mem_p]
+        rep movsb
+        mov [esc_mem_p], edi
+        jmp .x
+.arch:
         mov ebx, [esc_h]
         mov esi, esc_buf
         HV dos_escribir
@@ -140,6 +163,135 @@ es_csv:
         pop esi
         pop eax
         ret
+
+; escribe las líneas de la hoja activa (lo que es suyo: la rejilla al
+; imprimir, los anchos, los altos, los paneles, el gráfico y las celdas) con
+; las rutinas esc_*: al archivo o, al plegarla, a la memoria (libro.inc)
+hoja_escribe:
+        pushad
+        cmp byte [imp_rej], 0       ; la rejilla al imprimir, si se ha pedido
+        je .an0
+        mov esi, t_hoj_rej
+        call esc_cad
+        call esc_nl
+.an0:
+        xor ecx, ecx                ; los anchos que no son el normal
+.an:
+        movzx eax, word [col_an+ecx*2]
+        cmp eax, AN_NORMAL
+        je .an1
+        push eax
+        mov al, 'A'
+        call esc_car
+        mov al, ' '
+        call esc_car
+        xor edx, edx
+        mov edi, ref_txt
+        call ref_nombre
+        mov byte [edi], 0
+        mov esi, ref_txt
+        call esc_cad
+        mov al, ' '
+        call esc_car
+        pop eax
+        call esc_num
+        call esc_nl
+.an1:
+        inc ecx
+        cmp ecx, NCOL
+        jb .an
+        xor ecx, ecx                ; los altos que no son el normal
+.al:
+        movzx eax, byte [fil_al+ecx]
+        cmp eax, CEL_AL
+        je .al1
+        push eax
+        mov al, 'H'
+        call esc_car
+        mov al, ' '
+        call esc_car
+        lea eax, [ecx+1]
+        call esc_num
+        mov al, ' '
+        call esc_car
+        pop eax
+        call esc_num
+        call esc_nl
+.al1:
+        inc ecx
+        cmp ecx, NFIL
+        jb .al
+        mov eax, [inm_c]            ; lo inmovilizado: columnas y filas
+        or eax, [inm_f]
+        jz .inm1
+        mov al, 'P'
+        call esc_car
+        mov al, ' '
+        call esc_car
+        mov eax, [inm_c]
+        call esc_num
+        mov al, ' '
+        call esc_car
+        mov eax, [inm_f]
+        call esc_num
+        call esc_nl
+.inm1:
+%ifdef CON_GRAFICOS
+        call gr_guarda              ; el gráfico de la hoja, si lo tiene
+%endif
+        cmp byte [esc_modo], 0      ; al plegarla: dónde están el cursor y la vista
+        je .ce0
+        mov al, 'V'
+        call esc_car
+        mov ebx, cur_col
+        call .num
+        mov ebx, cur_fil
+        call .num
+        mov ebx, desp_col
+        call .num
+        mov ebx, desp_fil
+        call .num
+        call esc_nl
+.ce0:
+        xor ebx, ebx                ; las celdas con algo
+.ce:
+        mov eax, [cel_fmt+ebx*4]
+        or eax, [cel_off+ebx*4]
+        jz .ce1
+        mov al, 'C'
+        call esc_car
+        mov al, ' '
+        call esc_car
+        mov ecx, ebx
+        and ecx, NCOL - 1
+        mov edx, ebx
+        shr edx, 6
+        mov edi, ref_txt
+        call ref_nombre
+        mov byte [edi], 0
+        mov esi, ref_txt
+        call esc_cad
+        mov al, ' '
+        call esc_car
+        mov eax, [cel_fmt+ebx*4]
+        call esc_num
+        mov al, ' '
+        call esc_car
+        call cel_puntero
+        call esc_cad
+        call esc_nl
+.ce1:
+        inc ebx
+        cmp ebx, NCEL
+        jb .ce
+        popad
+        ret
+; (interna) un espacio y el número que hay en [EBX]
+.num:
+        mov al, ' '
+        call esc_car
+        mov eax, [ebx]
+        jmp esc_num
 
 guardar:
         cmp byte [nombre], 0
@@ -196,10 +348,12 @@ guarda_escribe:
         jnz .abre                   ; los hay, se avisa (una vez por archivo)
         cmp byte [csv_avisado], 0
         jne .abre
+        cmp dword [lib_n], 1        ; (ni las demás hojas del libro)
+        ja .avisa
         mov edi, cel_fmt
         mov ecx, NCEL
         xor eax, eax
-        repe scasw
+        repe scasd
         jne .avisa
         mov edi, col_an
         mov ecx, NCOL
@@ -235,62 +389,7 @@ guarda_escribe:
         mov esi, moneda_txt
         call esc_cad
         call esc_nl
-        xor ecx, ecx                ; los anchos que no son el normal
-.an:
-        movzx eax, word [col_an+ecx*2]
-        cmp eax, AN_NORMAL
-        je .an1
-        push eax
-        mov al, 'A'
-        call esc_car
-        mov al, ' '
-        call esc_car
-        xor edx, edx
-        mov edi, ref_txt
-        call ref_nombre
-        mov byte [edi], 0
-        mov esi, ref_txt
-        call esc_cad
-        mov al, ' '
-        call esc_car
-        pop eax
-        call esc_num
-        call esc_nl
-.an1:
-        inc ecx
-        cmp ecx, NCOL
-        jb .an
-        xor ebx, ebx                ; las celdas con algo
-.ce:
-        movzx eax, word [cel_fmt+ebx*2]
-        or eax, [cel_off+ebx*4]
-        jz .ce1
-        mov al, 'C'
-        call esc_car
-        mov al, ' '
-        call esc_car
-        mov ecx, ebx
-        and ecx, NCOL - 1
-        mov edx, ebx
-        shr edx, 6
-        mov edi, ref_txt
-        call ref_nombre
-        mov byte [edi], 0
-        mov esi, ref_txt
-        call esc_cad
-        mov al, ' '
-        call esc_car
-        movzx eax, word [cel_fmt+ebx*2]
-        call esc_num
-        mov al, ' '
-        call esc_car
-        call cel_puntero
-        call esc_cad
-        call esc_nl
-.ce1:
-        inc ebx
-        cmp ebx, NCEL
-        jb .ce
+        call libro_escribe          ; sus hojas (libro.inc)
         jmp .cierra
 .csv:
         call limites
@@ -413,11 +512,11 @@ cargar:
         mov byte [edi], 0
         mov ebx, [car_h]
         HV dos_cerrar
-        call hoja_vacia
+        call libro_vacio
         mov esi, [car_buf]
         cmp dword [esi], 'HOJA'
         jne .csv
-        call lee_hoj
+        call libro_lee
         jmp .leida
 .csv:
         call lee_csv
@@ -440,6 +539,10 @@ cargar:
 .nmx:
         mov byte [edi], 0
         call al_principio
+        cmp dword [barra_v], 0
+        je .sinv
+        call pon_hijas              ; (las pestañas del libro)
+.sinv:
         mov byte [modif], 0
         call pon_titulo
         popad
@@ -467,6 +570,19 @@ lee_hoj:
         je .a
         cmp al, 'M'
         je .m
+        cmp al, 'I'
+        je .i
+        cmp al, 'H'
+        je .h
+        cmp al, 'P'
+        je .p
+        cmp al, 'V'
+        je .v
+        cmp al, 'L'
+        je .l
+%ifdef CON_GRAFICOS
+        call gr_hoj_linea           ; (G, T, X, Y: el gráfico)
+%endif
 .salta:
         lodsb
         test al, al
@@ -490,6 +606,55 @@ lee_hoj:
         stosb
         inc esi
         jmp .m1
+.v:
+        add esi, 2                  ; el cursor y la vista de una hoja plegada
+        call hvl_lee_num
+        mov [hv_c], eax
+        call hvl_lee_num
+        mov [hv_f], eax
+        call hvl_lee_num
+        mov [hv_dc], eax
+        call hvl_lee_num
+        mov [hv_df], eax
+        mov byte [hv_hay], 1
+        jmp .salta
+.l:
+        add esi, 2                  ; la hoja del libro que estaba a la vista
+        call hvl_lee_num
+        mov [lib_quiere], eax
+        jmp .salta
+.h:
+        add esi, 2
+        call hvl_lee_num
+        lea ecx, [eax-1]
+        call hvl_lee_num
+        cmp ecx, NFIL
+        jae .salta
+        cmp eax, AL_MIN
+        jb .salta
+        cmp eax, AL_MAX
+        ja .salta
+        mov [fil_al+ecx], al
+        jmp .salta
+.p:
+        add esi, 2
+        call hvl_lee_num
+        mov ecx, eax
+        call hvl_lee_num
+        cmp ecx, INM_MAX
+        ja .salta
+        cmp eax, INM_MAX
+        ja .salta
+        mov [inm_c], ecx
+        mov [inm_f], eax
+        jmp .salta
+.i:
+        add esi, 2
+        call hvl_lee_num
+        and al, 1
+        mov [imp_rej], al
+        call rej_pon
+        jmp .salta
 .a:
         add esi, 2
         call lee_ref
@@ -515,7 +680,7 @@ lee_hoj:
         mov ebx, edx
         shl ebx, 6
         add ebx, ecx
-        mov [cel_fmt+ebx*2], ax
+        mov [cel_fmt+ebx*4], eax
         cmp byte [esi], ' '
         jne .ct
         inc esi
@@ -623,7 +788,7 @@ fecha_auto:
         mov ebx, edx
         shl ebx, 6
         add ebx, ecx
-        test word [cel_fmt+ebx*2], F_NUM
+        test dword [cel_fmt+ebx*4], F_NUM
         jnz .x
 .sp:
         cmp byte [esi], ' '
@@ -641,157 +806,14 @@ fecha_auto:
         jnz .x
         mov eax, ebx
         call des_celda
-        or word [cel_fmt+ebx*2], FN_FECHA << F_NUM_D
+        or dword [cel_fmt+ebx*4], FN_FECHA << F_NUM_D
 .x:
         popad
         ret
 
 ; =============================================================================
-;  Imprimir: por el puerto paralelo (LPT1) con la BIOS, INT 17h, como texto.
-;  Sale lo elegido (si es más de una celda) o toda la hoja escrita: una fila
-;  por línea, cada columna con el ancho que tiene en la pantalla (en letras)
-;  y un espacio entre columnas, cada celda alineada como se ve. El texto
-;  largo sigue sobre las celdas vacías de su derecha. Lo que pasa de IMP_AN
-;  letras no sale.
+;  La impresora (lo que se imprime y cómo, en imprime.inc)
 ; =============================================================================
-imprimir:
-        pushad
-        call sel_rect
-        mov eax, [r_c1]
-        xor eax, [r_c2]
-        mov ebx, [r_f1]
-        xor ebx, [r_f2]
-        or eax, ebx
-        jnz .rango
-        xor eax, eax                ; una celda sola: toda la hoja
-        mov [r_c1], eax
-        mov [r_f1], eax
-        mov dword [r_c2], NCOL - 1
-        mov dword [r_f2], NFIL - 1
-.rango:
-        call rect_recorta
-        cmp dword [lim_f], 0
-        jne .hay
-        mov esi, t_imp_vacia
-        call aviso
-        popad
-        ret
-.hay:
-        mov eax, 0                  ; ¿hay puerto paralelo? (INT 11h)
-        mov bl, 0x11
-        call bios
-        test ah, 0xC0
-        jz .mal
-        mov eax, 0x0200             ; ¿y la impresora está encendida?
-        mov bl, 0x17
-        call bios
-        test ah, 0x28
-        jnz .mal
-        test ah, 0x10
-        jz .mal
-        mov edx, [r_f1]
-.fila:
-        mov edi, imp_lin            ; la línea, en blanco
-        mov ecx, IMP_AN
-        mov al, ' '
-        rep stosb
-        xor ebx, ebx                ; EBX=la letra de la línea donde empieza la columna
-        mov ecx, [r_c1]
-.col:
-        movzx ebp, word [col_an+ecx*2]
-        shr ebp, 3                  ; EBP=el ancho de la columna, en letras
-        jnz .c1
-        inc ebp
-.c1:
-        call celda_ver
-        xor eax, eax
-.lg:
-        cmp byte [disp+eax], 0
-        je .lgf
-        inc eax
-        jmp .lg
-.lgf:
-        test eax, eax               ; (vacía: se queda lo que haya llegado de
-        jz .sig                     ; la izquierda)
-        push ecx
-        mov edi, ebx                ; limpia su sitio
-        mov ecx, ebp
-.lim:
-        cmp edi, IMP_AN
-        jae .limf
-        mov byte [imp_lin+edi], ' '
-        inc edi
-        dec ecx
-        jnz .lim
-.limf:
-        pop ecx
-        mov edi, ebx                ; dónde empieza, según la alineación
-        mov esi, ebp
-        sub esi, eax
-        jle .pon
-        cmp dword [disp_alin], 1
-        je .pon
-        cmp dword [disp_alin], 2
-        jne .der
-        shr esi, 1
-.der:
-        add edi, esi
-.pon:
-        mov esi, disp
-.p:
-        lodsb
-        test al, al
-        jz .sig
-        cmp edi, IMP_AN
-        jae .sig
-        mov [imp_lin+edi], al
-        inc edi
-        jmp .p
-.sig:
-        lea ebx, [ebx+ebp+1]
-        inc ecx
-        cmp ecx, [r_c2]
-        jbe .col
-        mov ecx, IMP_AN             ; la línea, sin los espacios del final
-.fin:
-        cmp byte [imp_lin+ecx-1], ' '
-        jne .manda
-        dec ecx
-        jnz .fin
-.manda:
-        mov esi, imp_lin
-        jecxz .nl
-.m:
-        lodsb
-        call imp_car
-        jc .mal
-        dec ecx
-        jnz .m
-.nl:
-        mov al, 13
-        call imp_car
-        jc .mal
-        mov al, 10
-        call imp_car
-        jc .mal
-        inc edx
-        cmp edx, [r_f2]
-        jbe .fila
-        mov al, 12                  ; y la hoja, fuera
-        call imp_car
-        jc .mal
-        call imp_lista
-        jc .mal
-        mov esi, t_impreso
-        call aviso
-        popad
-        ret
-.mal:
-        mov esi, t_e_imprimir
-        call aviso
-        popad
-        ret
-
 ; manda AL a la impresora; CF=1 si no lo admite
 imp_car:
         push eax
@@ -899,6 +921,5 @@ csv_avisado resb 1                  ; ya se ha dicho que el .CSV pierde los form
 car_com     resb 1                  ; al abrir un CSV: dentro de unas comillas
 car_ini     resb 1                  ; (detrás de car_com) al principio de una celda
             alignb 4
-imp_lin     resb IMP_AN + 4
 esc_buf     resb ESC_TAM + 4
         section .text

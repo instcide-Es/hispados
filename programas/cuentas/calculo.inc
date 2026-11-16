@@ -22,7 +22,8 @@
 ;       potencia  := factor { ^ factor }
 ;       factor    := (+|-) factor | primario { % }
 ;       primario  := número | "texto" | celda | ( expresión ) | función
-;       celda     := [$] letra [letra] [$] fila          (A1, $B$7, AB12)
+;       celda     := [hoja !] [$] letra [letra] [$] fila (A1, $B$7, AB12,
+;                    Hoja2!A1; en un rango, Hoja2!A1:B5)
 ;  «%» divide entre cien (=A1*21%). Las mayúsculas dan igual. Como en las
 ;  hojas de cálculo de siempre, -2^2 es 4 (el signo va antes que la potencia).
 ;
@@ -66,6 +67,11 @@
 ;                       EDI=su ficha (CV_TAM octetos); conserva los demás
 ;       hoy_serie       -> EAX=el día de hoy, en días desde el 30/12/1899
 ;       azar_num        -> EAX=un número al azar, de 0 a CU_ESC - 1
+;       hoja_busca      ESI=un nombre ECX=sus letras -> EAX=el número de la
+;                       hoja del libro que se llama así; CF=1 si no la hay
+;       [ev_hoja] (es de aquí) dice de qué hoja es la celda que se pide a
+;                       cel_puntero y a cel_cache; quien llama a calc_celda
+;                       lo pone antes
 ;  y lo que da:
 ;       calc_celda      ECX=columna EDX=fila -> EDX:EAX; [cv_tipo]: 0 vacía,
 ;                       1 número, 2 texto (y entonces EAX=el texto, acabado
@@ -105,7 +111,8 @@ CV_ERR      equ 5                   ; db su error
 CV_VAL      equ 6                   ; dq su valor
 CV_TAM      equ 14
 CAD_MAX     equ 255                 ; letras de un texto calculado, como mucho
-; el formato de una celda (una palabra)
+; el formato de una celda (una doble palabra: lo de la palabra de arriba
+; llegó después, y los archivos de antes, que solo traen la de abajo, valen)
 F_NEG       equ 0x0001              ; negrita
 F_CUR       equ 0x0002              ; cursiva
 F_ALIN      equ 0x000C              ; alineación: 0 la normal, 1 izquierda,
@@ -118,6 +125,10 @@ F_DEC       equ 0x3C00              ; decimales (de 0 a 8)
 F_DEC_D     equ 10
 F_BABA      equ 0x4000              ; una raya (borde) debajo de la celda
 F_BDER      equ 0x8000              ; y otra a su derecha
+F_FONDO     equ 0x000F0000          ; el color del fondo: uno de la paleta (0: sin fondo)
+F_FONDO_D   equ 16
+F_COMB      equ 0x03F00000          ; cuántas celdas de su derecha tapa (combinar y centrar)
+F_COMB_D    equ 20
 FN_GENERAL  equ 0
 FN_FIJO     equ 1                   ; con tantos decimales
 FN_MIL      equ 2                   ; y con puntos de millares
@@ -135,8 +146,23 @@ calc_celda:
         mov byte [ev_hondo], 0
         mov dword [ev_prof], 0
         mov dword [ev_cad_p], ev_cads
-; (y desde dentro de una fórmula)
+; (y desde dentro de una fórmula). Una celda de OTRA hoja (Hoja2!A1) llega
+; con la hoja, más uno, en la mitad de arriba de EDX: así los rangos de otra
+; hoja se recorren igual que los de esta, sin tocar las funciones. Mientras
+; se calcula, [ev_hoja] es esa hoja: sus fórmulas piden sus propias celdas
 celda_valor:
+        test edx, 0xFFFF0000
+        jz .aqui
+        push dword [ev_hoja]
+        mov eax, edx
+        shr eax, 16
+        dec eax
+        mov [ev_hoja], eax
+        and edx, 0xFFFF
+        call celda_valor
+        pop dword [ev_hoja]
+        ret
+.aqui:
         cmp ecx, NCOL
         jae .ref
         cmp edx, NFIL
@@ -950,16 +976,26 @@ ev_salta:
         pop eax
         ret
 
-; un nombre: una celda o una función
+; un nombre: una celda (de esta hoja, o de otra: Hoja2!A1) o una función
 ev_nombre:
         mov esi, [ev_ptr]
+        call ev_hoja_pref
+        push ebx
         call lee_ref
-        jc .fun
+        pop ebx
+        jnc .cel
+        test ebx, ebx               ; detrás de «Hoja2!» tiene que ir una celda
+        jz .fun
+        mov [ev_ptr], esi
+        call ev_mal
+        jmp .cero
+.cel:
         mov [ev_ptr], esi
         cmp ecx, NCOL
         jae .ref
         cmp edx, NFIL
         jae .ref
+        or edx, ebx
         push ebp
         call celda_valor
         pop ebp
@@ -1094,6 +1130,53 @@ ev_funciones:
         FUNCION "SIGNO", ev_signo_f, 0
         db 0
 
+; ESI=texto: si empieza por el nombre de una hoja y «!» (Hoja2!), EBX=esa
+; hoja más uno, en su mitad de arriba (como la quiere celda_valor), y ESI
+; detrás del «!»; si no, EBX=0. Si no hay ninguna hoja con ese nombre, el
+; error es «#REF» (y EBX=0). Conserva los demás registros
+ev_hoja_pref:
+        push eax
+        push ecx
+        push edx
+        xor ebx, ebx
+        xor ecx, ecx
+.l:
+        mov al, [esi+ecx]
+        cmp al, '_'
+        je .s
+        cmp al, '0'
+        jb .f
+        cmp al, '9'
+        jbe .s
+        and al, 0xDF
+        cmp al, 'A'
+        jb .f
+        cmp al, 'Z'
+        ja .f
+.s:
+        inc ecx
+        cmp ecx, 16
+        jb .l
+        jmp .x
+.f:
+        jecxz .x
+        cmp byte [esi+ecx], '!'
+        jne .x
+        call hoja_busca
+        lea esi, [esi+ecx+1]
+        jc .mal
+        lea ebx, [eax+1]
+        shl ebx, 16
+        jmp .x
+.mal:
+        mov al, EV_REF
+        call ev_pon_err
+.x:
+        pop edx
+        pop ecx
+        pop eax
+        ret
+
 ; ESI=texto -> ECX=columna EDX=fila (desde 0; pueden salirse de la hoja),
 ; AL=los «$» (1: el de la columna, 2: el de la fila) y ESI detrás; CF=1 si no
 ; es una celda (una o dos letras y la fila), y ESI como estaba
@@ -1168,6 +1251,10 @@ ev_rango_lee:
         call ev_car
         mov esi, [ev_ptr]
         push esi
+        push ebx
+        call ev_hoja_pref           ; (de otra hoja: Hoja2!A1:B5)
+        mov [rg_hoja], ebx
+        pop ebx
         call lee_ref
         jc .no
 .e1:
@@ -1226,6 +1313,8 @@ ev_rango_lee:
         jae .ref
         cmp edi, NFIL
         jae .ref
+        or edx, [rg_hoja]           ; (la hoja, en las dos filas: ver celda_valor)
+        or edi, [rg_hoja]
         clc
         ret
 .ref:
@@ -1757,7 +1846,10 @@ ev_si_rango:
         add edx, S_SF
         cmp ecx, NCOL
         jae .sig
+        push edx                    ; (la fila, sin la hoja que pueda llevar)
+        and edx, 0xFFFF
         cmp edx, NFIL
+        pop edx
         jae .sig
         push ebp
         call celda_valor
@@ -4163,6 +4255,8 @@ lee_fecha:
         section .bss
             alignb 4
 ev_ptr      resd 1                  ; por dónde va la fórmula
+ev_hoja     resd 1                  ; la hoja de la celda que se calcula
+rg_hoja     resd 1                  ; ev_rango_lee: la hoja del rango (como en celda_valor)
 ev_prof     resd 1                  ; fórmulas a medias (unas piden otras)
 ev_cad_p    resd 1                  ; hasta dónde hay textos a medio calcular
 cu_m        resd 4                  ; el producto o el dividendo, de 128 bits

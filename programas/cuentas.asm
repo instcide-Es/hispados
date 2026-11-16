@@ -2,16 +2,23 @@
 ;  CUENTAS.HVP - Cuentas, la hoja de cálculo de Hispa Ventanas
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Una hoja de 64 columnas (A, B... Z, AA... BL) por 1.000 filas, con el
-;  aspecto y el manejo de la familia de oficina (docs/OFICINA.md): barra de
-;  botones de dos filas y pie comunes (barra.inc), los mismos menús y los
-;  mismos atajos que Pluma.
+;  Un libro de hasta ocho hojas de 64 columnas (A, B... Z, AA... BL) por
+;  1.000 filas, con el aspecto y el manejo de la familia de oficina
+;  (docs/OFICINA.md): barra de botones de dos filas y pie comunes
+;  (barra.inc), los mismos menús y los mismos atajos que Pluma.
 ;
 ;  La ventana: la barra de botones; la barra de fórmulas (la celda activa y
 ;  su contenido tal como se tecleó); la rejilla, que ocupa todo lo demás y
 ;  crece con la ventana, con sus rótulos y sus dos barras de desplazamiento;
-;  y el pie, que dice lo que hace el botón que hay bajo el ratón o, si no, lo
-;  elegido (de un rango: su suma, su promedio y cuántos números tiene).
+;  las pestañas de las hojas, abajo a la izquierda; y el pie, que dice lo que
+;  hace el botón que hay bajo el ratón o, si no, lo elegido (de un rango: su
+;  suma, su promedio y cuántos números tiene).
+;
+;  Las hojas del libro (cuentas/libro.inc): se cambia de una a otra pulsando
+;  su pestaña (o con Ctrl+Av Pág y Ctrl+Re Pág); la pestaña «+» añade una;
+;  con doble clic se le cambia el nombre; por los menús se elimina (Edición)
+;  y se mueve (Formato). Una fórmula puede pedir celdas de otra hoja:
+;  =Hoja2!A1, =SUMA(Ventas!A1:B5).
 ;
 ;  Moverse y elegir: flechas, Tab, Intro, Inicio, Fin, Re Pág, Av Pág,
 ;  Ctrl+Inicio y Ctrl+Fin; con Mayús se elige un rango; con el ratón, pulsando
@@ -31,7 +38,8 @@
 ;    - número:  a la derecha (con coma o con punto decimal); una fecha
 ;               (16/11/2026) es el número de su día y toma formato de fecha
 ;    - fórmula: empieza por «=» (ver cuentas/calculo.inc: operadores,
-;               comparaciones, textos, referencias con «$» y las funciones
+;               comparaciones, textos, referencias con «$», celdas de otra
+;               hoja y las funciones
 ;               SUMA, PROMEDIO, MAX, MIN, CONTAR, CONTARA, SI, Y, O, NO,
 ;               ENTERO, REDONDEAR, RAIZ, POTENCIA, RESIDUO, ABS, CONTAR.SI,
 ;               SUMAR.SI, HOY, FECHA, BUSCARV, INDICE, TEXTO, PAGO... y las
@@ -46,18 +54,35 @@
 ;  texto, al portapapeles de los demás programas), rellenar hacia abajo y
 ;  hacia la derecha, borrar, insertar y eliminar filas y columnas (corrigiendo
 ;  las fórmulas), buscar e ir a una celda (cuentas/hoja.inc).
-;  Formato de cada celda: negrita, cursiva, alineación, color de la letra y
-;  formato del número (con decimales fijos, con millares, moneda, porcentaje
-;  o fecha) y bordes; ancho de cada columna. Herramientas: ordenar las filas
-;  de un rango (hasta por tres columnas, con su diálogo), autosuma y gráficos
-;  (cuentas/grafico.inc).
+;  Formato de cada celda (una doble palabra: los bits F_* de calculo.inc):
+;  negrita, cursiva, alineación, color de la letra, color del fondo (la fila
+;  de muestras «Fondo:» de la barra), formato del número (con decimales
+;  fijos, con millares, moneda, porcentaje o fecha) y bordes. «Combinar y
+;  centrar» hace de varias celdas de una fila una sola (para un título). El
+;  ancho de cada columna y el alto de cada fila se cambian arrastrando el
+;  borde de su rótulo o por el menú.
+;  Ver: la vista preliminar de lo que saldrá impreso; inmovilizar paneles
+;  (las filas de encima de la celda activa y las columnas de su izquierda se
+;  quedan quietas al mover la vista: los títulos, siempre a la vista).
+;  Herramientas: ordenar las filas de un rango (hasta por tres columnas, con
+;  su diálogo) y autosuma.
+;  Gráficos (cuentas/grafico.inc): de barras, barras apiladas, líneas,
+;  sectores y dispersión; varias series, con escala, rayas guía, título,
+;  leyenda y rótulos de los ejes. El gráfico es de la hoja: se guarda con
+;  ella, sigue a los datos cuando cambian, se imprime y se exporta a .BMP.
 ;
-;  Memoria: el módulo pide algo más de 1,3 MB. El texto de las celdas va en
-;  un almacén disperso, el valor de cada fórmula se apunta junto a ella y
-;  solo se vuelve a calcular cuando cambia algo de la hoja (cuentas/hoja.inc).
+;  Memoria: el módulo pide 1,8 MB. El texto de las celdas va en un almacén
+;  disperso, el valor de cada fórmula se apunta junto a ella y solo se vuelve
+;  a calcular cuando cambia algo de la hoja (cuentas/hoja.inc).
 ;
-;  Archivos: el formato propio, .HOJ, lo guarda todo; .CSV, para llevar y
-;  traer datos (cuentas/archivo.inc). Imprime como texto por LPT1.
+;  Archivos: el formato propio, .HOJ, lo guarda todo (el libro entero); .CSV,
+;  para llevar y traer los datos de una hoja (cuentas/archivo.inc).
+;  Imprimir (cuentas/imprime.inc), por LPT1: como texto, rápido, o «como se
+;  ve», en el modo gráfico de las impresoras de agujas (los anchos, los
+;  altos, las alineaciones, negritas, cursivas, bordes, fondos tramados y,
+;  si se pide, la rejilla). En varias páginas si no cabe en una, a lo alto y
+;  a lo ancho, cada una con su cabecera (el archivo, la fecha y «Página N de
+;  M»).
 ;
 ;  Es un módulo .HVP (ventanas/hvp.inc). Dibuja la rejilla él mismo.
 ;  Parámetros del acceso directo: el nombre de un archivo, que se abre al
@@ -94,6 +119,15 @@ O_GUARDAR   equ 103
 O_COMO      equ 104
 O_IMPRIMIR  equ 105
 O_SALIR     equ 106
+O_IMPRIMIRG equ 107
+O_PRELIM    equ 108
+O_REJILLA   equ 109
+O_INMOVIL   equ 124                 ; inmovilizar (o soltar) los paneles
+O_HOJA_NUEVA equ 125                ; las hojas del libro
+O_HOJA_ELIM equ 126
+O_HOJA_NOM  equ 127
+O_HOJA_IZQ  equ 128
+O_HOJA_DER  equ 129
 O_DESHACER  equ 110
 O_REHACER   equ 111
 O_CORTAR    equ 112
@@ -124,10 +158,16 @@ O_DEC_MAS   equ 148
 O_DEC_MENOS equ 149
 O_ANCHO     equ 150
 O_SIMBOLO   equ 151
+O_ALTO      equ 156                 ; el alto de las filas
+O_COMBINAR  equ 157                 ; combinar y centrar
+O_FONDO     equ 200                 ; 200-208: el color del fondo (el primero, ninguno)
+N_FONDOS    equ 9
 O_COLOR     equ 152                 ; 152-155: negro, rojo, azul, verde
 O_ORD_ASC   equ 160
 O_ORD_DESC  equ 161
-O_GRAFICO   equ 162                 ; 162-164: barras, líneas, sectores
+O_GRAFICO   equ 190                 ; 190-194: barras, líneas, sectores, apiladas, dispersión
+O_VER_GRAF  equ 195                 ; enseñar el gráfico de la hoja
+O_BOT_GRAF  equ 196                 ; el botón: el de la hoja o, con algo elegido, uno de barras
 O_ORDENAR   equ 165
 O_BORDE     equ 180                 ; 180-183: ninguno, contorno, todos, abajo
 O_ACERCA    equ 170
@@ -192,7 +232,9 @@ cue_menu:
         dw 0
         db 0
         dw O_IMPRIMIR
-        db "&Imprimir              Ctrl+P", 0
+        db "&Imprimir (como texto) Ctrl+P", 0
+        dw O_IMPRIMIRG
+        db "Imprimir como se &ve (gráficos)", 0
         dw 0
         db 0
         dw O_SALIR
@@ -225,6 +267,8 @@ cue_menu:
         db "Eliminar &filas", 0
         dw O_ELI_COL
         db "Eliminar co&lumnas", 0
+        dw O_HOJA_ELIM
+        db "Eliminar ho&ja", 0
         dw 0
         db 0
         dw O_TODO
@@ -235,6 +279,22 @@ cue_menu:
         db "Buscar siguie&nte           F3", 0
         dw O_IRA
         db "&Ir a...                    F5", 0
+        dw 0xFFFF
+        db "&Ver", 0
+        dw O_PRELIM
+        db "&Vista preliminar", 0
+        dw O_REJILLA
+        db "&Rejilla al imprimir: "
+m_rej   db "no", 0
+        dw O_INMOVIL
+        db "&Inmovilizar paneles: "
+m_inm   db "no", 0
+%ifdef CON_GRAFICOS
+        dw 0
+        db 0
+        dw O_VER_GRAF
+        db "&Gráfico de la hoja", 0
+%endif
         dw 0xFFFF
         db "&Insertar", 0
         dw O_INS_FILA
@@ -256,7 +316,15 @@ cue_menu:
         db "Gráfico de &líneas", 0
         dw O_GRAFICO + 2
         db "Gráfico de &sectores", 0
+        dw O_GRAFICO + 3
+        db "Gráfico de barras a&piladas", 0
+        dw O_GRAFICO + 4
+        db "Gráfico de &dispersión (X-Y)", 0
 %endif
+        dw 0
+        db 0
+        dw O_HOJA_NUEVA
+        db "&Hoja nueva", 0
         dw 0xFFFF
         db "&Formato", 0
         dw O_CELDAS
@@ -279,6 +347,10 @@ cue_menu:
         db 0
         dw O_ANCHO
         db "&Ancho de columna...", 0
+        dw O_ALTO
+        db "Alto de &fila...", 0
+        dw O_COMBINAR
+        db "Combinar &y centrar", 0
         dw O_SIMBOLO
         db "&Moneda...", 0
         dw 0
@@ -291,6 +363,14 @@ cue_menu:
         db "Bordes: &todos", 0
         dw O_BORDE + 3
         db "Bordes: a&bajo", 0
+        dw 0
+        db 0
+        dw O_HOJA_NOM
+        db "Nombre de la &hoja...", 0
+        dw O_HOJA_IZQ
+        db "Mover la hoja a la i&zquierda", 0
+        dw O_HOJA_DER
+        db "Mover la hoja a la de&recha", 0
         dw 0xFFFF
         db "&Herramientas", 0
         dw O_ORDENAR
@@ -337,6 +417,15 @@ ordenes:
         ORDEN O_GUARDAR, guardar
         ORDEN O_COMO, guarda_como
         ORDEN O_IMPRIMIR, imprimir
+        ORDEN O_IMPRIMIRG, imprimir_g
+        ORDEN O_PRELIM, prelim
+        ORDEN O_REJILLA, rejilla
+        ORDEN O_INMOVIL, inmovilizar
+        ORDEN O_HOJA_NUEVA, hoja_nueva
+        ORDEN O_HOJA_ELIM, hoja_elimina
+        ORDEN O_HOJA_NOM, hoja_renombra
+        ORDEN O_HOJA_IZQ, hoja_mueve, -1
+        ORDEN O_HOJA_DER, hoja_mueve, 1
         ORDEN O_SALIR, salir
         ORDEN O_DESHACER, deshacer
         ORDEN O_REHACER, rehacer
@@ -368,6 +457,13 @@ ordenes:
         ORDEN O_DEC_MENOS, fmt_dec, -1
         ORDEN O_ANCHO, ancho_col
         ORDEN O_SIMBOLO, simbolo
+        ORDEN O_ALTO, alto_fil
+        ORDEN O_COMBINAR, combinar
+%assign i 0
+%rep N_FONDOS
+        ORDEN O_FONDO + i, fmt_fondo, i
+%assign i i + 1
+%endrep
         ORDEN O_COLOR, fmt_color, 0
         ORDEN O_COLOR + 1, fmt_color, 1
         ORDEN O_COLOR + 2, fmt_color, 2
@@ -383,6 +479,10 @@ ordenes:
         ORDEN O_GRAFICO, grafico, 0
         ORDEN O_GRAFICO + 1, grafico, 1
         ORDEN O_GRAFICO + 2, grafico, 2
+        ORDEN O_GRAFICO + 3, grafico, 3
+        ORDEN O_GRAFICO + 4, grafico, 4
+        ORDEN O_VER_GRAF, gr_muestra
+        ORDEN O_BOT_GRAF, grafico_boton
 %endif
         ORDEN O_ACERCA, acerca
         dw 0
@@ -396,17 +496,18 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, BT_ICONO
             dd 32, 24, ic_abrir, O_ABRIR, n_abrir, BT_ICONO
             dd 58, 24, ic_guardar, O_GUARDAR, n_guardar, BT_ICONO
             dd 90, 24, ic_imprimir, O_IMPRIMIR, n_imprimir, BT_ICONO
-            dd 122, 24, ic_cortar, O_CORTAR, n_cortar, BT_ICONO
-            dd 148, 24, ic_copiar, O_COPIAR, n_copiar, BT_ICONO
-            dd 174, 24, ic_pegar, O_PEGAR, n_pegar, BT_ICONO
-            dd 206, 24, ic_deshacer, O_DESHACER, n_deshacer, BT_ICONO
-            dd 232, 24, ic_rehacer, O_REHACER, n_rehacer, BT_ICONO
-            dd 264, 24, ic_sigma, O_AUTOSUMA, n_autosuma, BT_ICONO
-            dd 296, 34, t_b_az, O_ORD_ASC, n_ord_asc, BT_TEXTO
-            dd 332, 34, t_b_za, O_ORD_DESC, n_ord_desc, BT_TEXTO
-            dd 374, 24, ic_buscar, O_BUSCAR, n_buscar, BT_ICONO
+            dd 116, 24, ic_prelim, O_PRELIM, n_prelim, BT_ICONO
+            dd 148, 24, ic_cortar, O_CORTAR, n_cortar, BT_ICONO
+            dd 174, 24, ic_copiar, O_COPIAR, n_copiar, BT_ICONO
+            dd 200, 24, ic_pegar, O_PEGAR, n_pegar, BT_ICONO
+            dd 232, 24, ic_deshacer, O_DESHACER, n_deshacer, BT_ICONO
+            dd 258, 24, ic_rehacer, O_REHACER, n_rehacer, BT_ICONO
+            dd 290, 24, ic_sigma, O_AUTOSUMA, n_autosuma, BT_ICONO
+            dd 322, 34, t_b_az, O_ORD_ASC, n_ord_asc, BT_TEXTO
+            dd 358, 34, t_b_za, O_ORD_DESC, n_ord_desc, BT_TEXTO
+            dd 400, 24, ic_buscar, O_BUSCAR, n_buscar, BT_ICONO
 %ifdef CON_GRAFICOS
-            dd 406, 24, ic_grafico, O_GRAFICO, n_grafico, BT_ICONO
+            dd 432, 24, ic_grafico, O_BOT_GRAF, n_grafico, BT_ICONO
 %endif
             dd 0, 0, 0, 0, 0, 0
 botones2    dd 6, 24, t_b_n, O_NEG, n_neg, BT_NEGRITA
@@ -422,11 +523,35 @@ botones2    dd 6, 24, t_b_n, O_NEG, n_neg, BT_NEGRITA
             dd 282, 22, C_GRANATE, O_COLOR + 1, n_c1, BT_COLOR
             dd 306, 22, C_ANIL, O_COLOR + 2, n_c2, BT_COLOR
             dd 330, 22, C_OLIVA, O_COLOR + 3, n_c3, BT_COLOR
+            ; el fondo de la celda (delante va escrito «Fondo:»): ninguno y ocho colores
+            dd FON_X + 52, 20, C_BLANCO, O_FONDO, n_f0, BT_COLOR
+            dd FON_X + 74, 20, C_CREMA, O_FONDO + 1, n_f1, BT_COLOR
+            dd FON_X + 96, 20, C_OCRE, O_FONDO + 2, n_f2, BT_COLOR
+            dd FON_X + 118, 20, C_TURQUESA, O_FONDO + 3, n_f3, BT_COLOR
+            dd FON_X + 140, 20, C_ARENA, O_FONDO + 4, n_f4, BT_COLOR
+            dd FON_X + 162, 20, C_PIEDRA, O_FONDO + 5, n_f5, BT_COLOR
+            dd FON_X + 184, 20, C_TERRACOTA_CL, O_FONDO + 6, n_f6, BT_COLOR
+            dd FON_X + 206, 20, C_OLIVA, O_FONDO + 7, n_f7, BT_COLOR
+            dd FON_X + 228, 20, C_PETROLEO, O_FONDO + 8, n_f8, BT_COLOR
             dd 0, 0, 0, 0, 0, 0
+FON_X       equ 364                 ; donde va «Fondo:» en la fila de abajo
+; los colores del fondo, en el orden de sus botones (el primero, ninguno)
+fondos      db 0, C_CREMA, C_OCRE, C_TURQUESA, C_ARENA, C_PIEDRA, C_TERRACOTA_CL, C_OLIVA, C_PETROLEO
+t_b_fondo   db "Fondo:", 0
+n_f0        db "Sin color de fondo", 0
+n_f1        db "Fondo crema", 0
+n_f2        db "Fondo ocre", 0
+n_f3        db "Fondo turquesa", 0
+n_f4        db "Fondo arena", 0
+n_f5        db "Fondo gris", 0
+n_f6        db "Fondo terracota", 0
+n_f7        db "Fondo verde", 0
+n_f8        db "Fondo azul petróleo", 0
 n_nuevo     db "Nuevo: una hoja en blanco (Ctrl+U)", 0
 n_abrir     db "Abrir una hoja guardada (Ctrl+A)", 0
 n_guardar   db "Guardar la hoja (Ctrl+G)", 0
-n_imprimir  db "Imprimir lo elegido o, si es una celda, toda la hoja (Ctrl+P)", 0
+n_imprimir  db "Imprimir como texto lo elegido o, si es una celda, toda la hoja (Ctrl+P)", 0
+n_prelim    db "Vista preliminar: la página, como saldrá en el papel", 0
 n_cortar    db "Cortar lo elegido (Ctrl+X)", 0
 n_copiar    db "Copiar lo elegido (Ctrl+C)", 0
 n_pegar     db "Pegar (Ctrl+V)", 0
@@ -436,7 +561,7 @@ n_autosuma  db "Autosuma: la suma de los números de encima (o de la izquierda)"
 n_ord_asc   db "Ordenar las filas elegidas de menor a mayor, por la columna de la celda activa", 0
 n_ord_desc  db "Ordenar las filas elegidas de mayor a menor, por la columna de la celda activa", 0
 n_buscar    db "Buscar un texto en la hoja (Ctrl+B)", 0
-n_grafico   db "Gráfico de barras de lo elegido", 0
+n_grafico   db "Gráfico de barras de lo elegido (o, con una sola celda, el que ya tiene la hoja)", 0
 n_neg       db "Negrita (Ctrl+N)", 0
 n_cur       db "Cursiva (Ctrl+K)", 0
 n_izq       db "Alinear a la izquierda", 0
@@ -564,6 +689,7 @@ t_sin_nombre db "(sin nombre)", 0
 t_nada      db 0
 t_ext_hoj   db ".HOJ", 0
 t_hoj_cab   db "HOJA 1", 0
+t_hoj_rej   db "I 1", 0
 t_abrir     db "Abrir", 0
 t_guardar_como db "Guardar como", 0
 t_aceptar   db "Aceptar", 0
@@ -575,9 +701,10 @@ t_cambios   db "La hoja tiene cambios sin guardar.", 10, "¿Quiere guardarlos?",
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
 t_no_guardar db "No se ha podido guardar la hoja.", 10
             db "Compruebe que el disco no está lleno ni protegido.", 0
-t_csv_pierde db "Un archivo .CSV solo guarda lo escrito en las celdas: los formatos", 10
-            db "y los anchos de las columnas se pierden. Para guardarlo todo, use", 10
-            db "«Guardar como» con un nombre acabado en .HOJ.", 10, 10
+t_csv_pierde db "Un archivo .CSV solo guarda lo escrito en las celdas de la hoja que", 10
+            db "se ve: los formatos, los anchos y las demás hojas se pierden. Para", 10
+            db "guardarlo todo, use"
+            db " «Guardar como» con un nombre acabado en .HOJ.", 10, 10
             db "¿Guardar como .CSV de todos modos?", 0
 t_des_roto  db "Este cambio toca tantas celdas que no se podrá deshacer,", 10
             db "y tampoco los cambios de antes.", 0
@@ -599,6 +726,14 @@ t_ancho     db "Ancho de columna", 0
 t_q_ancho   db "Ancho, en letras (de 1 a 59):", 0
 t_simbolo   db "Moneda", 0
 t_q_simbolo db "Lo que va detrás de la cantidad:", 0
+t_alto      db "Alto de fila", 0
+t_q_alto    db "Alto, en puntos (de 4 a 120; el normal, 18):", 0
+t_inm_a1    db "Ponga antes el cursor en la primera celda que se tiene que mover:", 10
+            db "las filas de encima y las columnas de su izquierda se quedarán", 10
+            db "quietas. (En A1 no hay nada que inmovilizar.)", 0
+t_inm_muchas db "No se puede inmovilizar tanto: lo que se queda quieto tiene que", 10
+            db "caber en la ventana y dejar sitio a lo demás (y no pasar de veinte", 10
+            db "filas ni de veinte columnas).", 0
 t_imp_vacia db "La hoja está vacía: no hay nada que imprimir.", 0
 t_impreso   db "La hoja se ha enviado a la impresora.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
@@ -647,7 +782,11 @@ entrada:
         call hvl_clases
         mov esi, dlg_ord
         call hvl_clases
-        call hoja_vacia
+%ifdef CON_GRAFICOS
+        mov esi, dlg_gr
+        call hvl_clases
+%endif
+        call libro_vacio
         call pon_titulo
         HV pantalla                 ; EAX=ancho EBX=alto: que quepa
         sub ebx, BARRA_H + 12
@@ -796,28 +935,22 @@ cue_proc:
         cmp dword [barra_v], 0
         je hecho
         call medidas
-        mov ebp, [barra_v]          ; la barra vertical, a la derecha de la rejilla
-        mov eax, [gx1]
-        mov ebx, HY0
-        mov ecx, BD_AN
-        mov edx, [gy1]
-        sub edx, ebx
-        HV ven_mover
-        mov ebp, [barra_h]          ; y la horizontal, debajo
-        xor eax, eax
-        mov ebx, [gy1]
-        mov ecx, [gx1]
-        mov edx, BD_AN
-        HV ven_mover
-        call pon_barras
+        call pon_hijas
         call inval
         jmp hecho
 .rueda:
+        cmp byte [vp_on], 0         ; en la vista preliminar: otra página
+        je .ru1
+        mov eax, ecx
+        call vp_pasa
+        jmp hecho
+.ru1:
         lea eax, [ecx+ecx*2]        ; tres filas por cada paso
         add eax, [desp_fil]
         jmp .bv
 .barra_v:
         mov eax, ecx
+        add eax, [inm_f]
 .bv:
         mov ebx, NFIL
         sub ebx, [vis_fil]
@@ -825,15 +958,16 @@ cue_proc:
         jle .bv1
         mov eax, ebx
 .bv1:
-        test eax, eax
-        jns .bv2
-        xor eax, eax
+        cmp eax, [inm_f]
+        jge .bv2
+        mov eax, [inm_f]
 .bv2:
         mov [desp_fil], eax
         call pon_barras
         call inval
         jmp hecho
 .barra_h:
+        add ecx, [inm_c]
         cmp ecx, NCOL - 1
         jbe .bh1
         mov ecx, NCOL - 1
@@ -853,11 +987,16 @@ cue_proc:
         HV ven_destruir
         jmp hecho
 .destruir:
+        call libro_suelta           ; (la memoria de las hojas plegadas)
         mov dword [ven], 0
         mov dword [barra_v], 0
         HV msg_salir
         jmp hecho
 .hvabrir:
+        cmp byte [vp_on], 0
+        je .hv1
+        call vp_sal
+.hv1:
         push edx
         call preguntar
         pop esi
@@ -867,6 +1006,29 @@ cue_proc:
         call cargar
 hecho:
         xor eax, eax
+        ret
+
+; las barras de desplazamiento, en su sitio: la vertical, a la derecha de la
+; rejilla; la horizontal, debajo, detrás de las pestañas de las hojas
+pon_hijas:
+        pushad
+        call tab_mide
+        mov ebp, [barra_v]
+        mov eax, [gx1]
+        mov ebx, HY0
+        mov ecx, BD_AN
+        mov edx, [gy1]
+        sub edx, ebx
+        HV ven_mover
+        mov ebp, [barra_h]
+        mov eax, [tab_x1]
+        mov ebx, [gy1]
+        mov ecx, [gx1]
+        sub ecx, eax
+        mov edx, BD_AN
+        HV ven_mover
+        call pon_barras
+        popad
         ret
 
 ; la ventana, a repintar
@@ -889,10 +1051,15 @@ invalida:
 %endif
         jmp inval
 
-; mensaje de aviso: ESI=texto. Conserva los registros
+; mensaje de aviso: ESI=texto. Conserva los registros. Sale sobre la ventana
+; de Cuentas o, si lo pide otra suya (la del gráfico), sobre esa
 aviso:
         pushad
+        mov ebp, [aviso_ven]
+        test ebp, ebp
+        jnz .v
         mov ebp, [ven]
+.v:
         mov edi, t_cuentas
         mov eax, DM_ACEPTAR
         HV dlg_mensaje
@@ -907,11 +1074,14 @@ al_principio:
         mov [cur_fil], eax
         mov [sel_c2], eax
         mov [sel_f2], eax
-        mov [desp_col], eax
-        mov [desp_fil], eax
         mov [editando], al
         mov [csv_avisado], al
+        mov eax, [inm_c]            ; (la vista, detrás de lo inmovilizado)
+        mov [desp_col], eax
+        mov eax, [inm_f]
+        mov [desp_fil], eax
         pop eax
+        call inm_pon
         cmp dword [barra_v], 0
         je .x
         call cuenta_cols
@@ -924,6 +1094,25 @@ al_principio:
 ; =============================================================================
 tecla:
         mov [tec_may], edx
+        cmp byte [vp_on], 0         ; en la vista preliminar: otra página, o
+        je .nvp                     ; volver (las órdenes siguen valiendo)
+        mov eax, 1
+        cmp ecx, TC_AVPAG
+        je .vpp
+        neg eax
+        cmp ecx, TC_REPAG
+        je .vpp
+        cmp ecx, TC_ESC
+        jne .vpo
+        call vp_sal
+        jmp hecho
+.vpp:
+        call vp_pasa
+        jmp hecho
+.vpo:
+        cmp ecx, TC_CTRL
+        jb hecho
+.nvp:
         cmp byte [editando], 0      ; (escribiendo, copiar, cortar, pegar y todo
         je .ats                     ; son de las letras, no de las celdas)
         cmp ecx, TC_CTRL + 3
@@ -984,6 +1173,10 @@ tecla:
         je .carr
         cmp ecx, 0x91               ; Ctrl+abajo
         je .caba
+        cmp ecx, 0x76               ; Ctrl+Av Pág: la hoja siguiente
+        je .hsig
+        cmp ecx, 0x84               ; Ctrl+Re Pág: la anterior
+        je .hant
         cmp ecx, TC_SUPR
         je .supr
         cmp ecx, TC_F1 + 1          ; F2
@@ -992,6 +1185,16 @@ tecla:
         jmp hecho
 .supr:
         call borrar_rango
+        jmp hecho
+.hsig:
+        mov eax, [lib_act]
+        inc eax
+        call cambia_hoja
+        jmp hecho
+.hant:
+        mov eax, [lib_act]
+        dec eax
+        call cambia_hoja            ; (de la primera no pasa: no hay hoja -1)
         jmp hecho
 .tab:
         inc eax
@@ -1111,13 +1314,33 @@ mueve_rel:
         jl .b2
         mov ebx, NFIL - 1
 .b2:
-        mov [sel_c2], eax
-        mov [sel_f2], ebx
         test dword [tec_may], TM_MAYUS
-        jnz .x
+        jnz .may2
+        ; una celda tapada por una combinación no se pisa: se va a su ancla
+        ; o, si se venía de ella hacia la derecha, a la siguiente
+        mov ecx, eax
+        mov edx, ebx
+        call comb_ancla
+        cmp ecx, eax
+        je .pon
+        cmp ecx, [cur_col]
+        jne .anc
+        cmp edx, [cur_fil]
+        jne .anc
+        cmp eax, ecx                ; (¿hacia la derecha?)
+        jbe .anc
+        call comb_n
+        lea eax, [ecx+eax+1]
+        cmp eax, NCOL
+        jb .pon
+.anc:
+        mov eax, ecx
+.pon:
         mov [cur_col], eax
         mov [cur_fil], ebx
-.x:
+.may2:
+        mov [sel_c2], eax
+        mov [sel_f2], ebx
         call a_la_vista
         jmp inval
 
@@ -1637,6 +1860,8 @@ letra:
         mov al, cl
         cmp al, 32
         jb hecho
+        cmp byte [vp_on], 0         ; (en la vista preliminar no se escribe)
+        jne hecho
         cmp byte [editando], 0
         jne .mete
         mov byte [edt_buf], 0       ; empieza una celda nueva
@@ -1714,6 +1939,8 @@ raton:
         sar ebx, 16
         cmp ebx, TB_AL
         jl .barra
+        cmp byte [vp_on], 0         ; (en la vista preliminar no se elige)
+        jne hecho
         cmp byte [editando], 0      ; pulsar fuera de la barra acepta lo escrito...
         je .r1
         cmp ebx, GY0                ; ...menos una celda, cuando la fórmula pide
@@ -1752,7 +1979,7 @@ raton:
         cmp ebx, HY0
         jl .formula
         cmp ebx, [gy1]
-        jge hecho
+        jge .pestana
         cmp eax, [gx1]
         jge hecho
         cmp ebx, GY0
@@ -1764,6 +1991,7 @@ raton:
         mov byte [arrastra], 1
         test dword [tec_may], TM_MAYUS
         jnz .ext
+        call comb_ancla
         mov [cur_col], ecx
         mov [cur_fil], edx
 .ext:
@@ -1800,6 +2028,16 @@ raton:
         mov [cur_col], ecx
         jmp .captura
 .rot_fil:
+        call borde_fil              ; ¿el borde de una fila? Su alto
+        jc .rf1
+        mov [arr_col], edx
+        call fil_y
+        mov [arr_x0], ebx
+        call instantanea
+        call des_alto
+        mov byte [arrastra], 6
+        jmp .captura
+.rf1:
         call y_fil                  ; la fila entera
         mov byte [arrastra], 4
         mov dword [cur_col], 0
@@ -1811,6 +2049,16 @@ raton:
         jmp .captura
 .todo:
         call todo
+        jmp hecho
+.pestana:
+        call tab_en                 ; una pestaña: esa hoja (o una nueva)
+        jc hecho
+        cmp eax, [lib_n]
+        jb .pe1
+        call hoja_nueva
+        jmp hecho
+.pe1:
+        call cambia_hoja
         jmp hecho
 .barra:
         mov esi, botones1           ; la fila de arriba o la de abajo
@@ -1830,7 +2078,7 @@ raton_mueve:
         movzx ecx, byte [arrastra]
         jmp [.que+ecx*4]
             align 4
-.que        dd .nada, .celdas, .ancho, .columnas, .filas, .senala
+.que        dd .nada, .celdas, .ancho, .columnas, .filas, .senala, .alto
 .nada:
         xor edi, edi                ; sobre un botón de la barra: su nombre, al pie
         cmp ebx, TB_AL
@@ -1849,7 +2097,9 @@ raton_mueve:
         mov edi, [esi+16]
 .forma:
         xor edx, edx                ; sobre el borde del rótulo de una columna,
-        cmp ebx, HY0                ; la flecha doble: se puede arrastrar
+        cmp byte [vp_on], 0         ; la flecha doble: se puede arrastrar
+        jne .f2
+        cmp ebx, HY0
         jl .f2
         cmp ebx, GY0
         jge .f2
@@ -1860,7 +2110,24 @@ raton_mueve:
         call borde_col
         jc .f2
         mov edx, CUR_HORIZ
+        jmp .f2b
 .f2:
+        cmp byte [vp_on], 0         ; y sobre el borde del de una fila, la de
+        jne .f2b                    ; arriba y abajo
+        cmp ebx, GY0
+        jl .f2b
+        cmp ebx, [gy1]
+        jge .f2b
+        test eax, eax
+        js .f2b
+        cmp eax, ROT_AN
+        jge .f2b
+        push edx
+        call borde_fil
+        pop edx
+        jc .f2b
+        mov edx, CUR_VERT
+.f2b:
         cmp edx, [forma]
         je .f3
         mov [forma], edx
@@ -1885,8 +2152,9 @@ raton_mueve:
 .c1:
         cmp ebx, GY0
         jge .c2
-        cmp dword [desp_fil], 0
-        je .c2
+        mov edx, [inm_f]
+        cmp [desp_fil], edx
+        jle .c2
         dec dword [desp_fil]
         inc esi
 .c2:
@@ -1899,8 +2167,9 @@ raton_mueve:
 .c3:
         cmp eax, ROT_AN
         jge .c4
-        cmp dword [desp_col], 0
-        je .c4
+        mov edx, [inm_c]
+        cmp [desp_col], edx
+        jle .c4
         dec dword [desp_col]
         inc esi
 .c4:
@@ -1935,6 +2204,21 @@ raton_mueve:
         cmp ax, [col_an+ecx*2]
         je hecho
         mov [col_an+ecx*2], ax
+        jmp .vista
+.alto:
+        sub ebx, [arr_x0]           ; el alto nuevo de la fila
+        cmp ebx, AL_MIN
+        jge .al1
+        mov ebx, AL_MIN
+.al1:
+        cmp ebx, AL_MAX
+        jle .al2
+        mov ebx, AL_MAX
+.al2:
+        mov ecx, [arr_col]
+        cmp bl, [fil_al+ecx]
+        je hecho
+        mov [fil_al+ecx], bl
         jmp .vista
 .senala:
         call .acota                 ; la otra esquina de lo señalado
@@ -1999,10 +2283,22 @@ raton_doble:
         movsx eax, dx
         mov ebx, edx
         sar ebx, 16
+        cmp byte [vp_on], 0
+        jne raton
         cmp ebx, GY0
         jl raton
         cmp ebx, [gy1]
-        jge raton
+        jl .rejilla
+        cmp byte [editando], 0      ; doble clic en una pestaña: su nombre
+        jne raton
+        call tab_en
+        jc hecho
+        cmp eax, [lib_n]
+        jae hecho
+        call cambia_hoja
+        call hoja_renombra
+        jmp hecho
+.rejilla:
         cmp eax, ROT_AN
         jl raton
         cmp eax, [gx1]
@@ -2011,6 +2307,7 @@ raton_doble:
         jne hecho
         call x_col
         call y_fil
+        call comb_ancla
         mov [cur_col], ecx
         mov [cur_fil], edx
         call edita_f2
@@ -2031,6 +2328,14 @@ orden:
         call commit_edit
         pop ecx
 .o:
+        cmp byte [vp_on], 0         ; en la vista preliminar, cualquier orden
+        je .o1                      ; que no sea de ella vuelve antes a la hoja
+        cmp ecx, O_PRELIM
+        je .o1
+        cmp ecx, O_REJILLA
+        je .o1
+        call vp_sal
+.o1:
         mov esi, ordenes
 .b:
         movzx eax, word [esi]
@@ -2048,7 +2353,7 @@ orden:
 nuevo:
         call preguntar
         jc .x
-        call hoja_vacia
+        call libro_vacio
         mov byte [nombre], 0
         call al_principio
         mov byte [modif], 0
@@ -2107,6 +2412,85 @@ preguntar:
         stc
         ret
 
+; ---- Ver > Inmovilizar paneles: las filas de encima de la celda activa y
+;      las columnas de su izquierda se quedan quietas al mover la vista (los
+;      títulos, siempre a la vista). Si ya hay algo inmovilizado, se suelta.
+;      Se guarda con la hoja ----
+inmovilizar:
+        mov eax, [inm_c]
+        or eax, [inm_f]
+        jz .pon
+        xor eax, eax
+        xor ebx, ebx
+        jmp .hecho
+.pon:
+        mov eax, [cur_col]
+        mov ebx, [cur_fil]
+        mov esi, t_inm_a1
+        mov ecx, eax
+        or ecx, ebx
+        jz aviso                    ; (en A1 no hay nada encima ni a la izquierda)
+        mov esi, t_inm_muchas
+        cmp eax, INM_MAX
+        ja aviso
+        cmp ebx, INM_MAX
+        ja aviso
+        mov ecx, eax                ; tienen que caber, y dejar sitio a lo demás
+        call .ancho
+        add edx, ROT_AN + AN_NORMAL
+        cmp edx, [gx1]
+        jg aviso
+        mov ecx, ebx
+        call .alto
+        add edx, GY0 + 2 * CEL_AL
+        cmp edx, [gy1]
+        jg aviso
+.hecho:
+        mov [inm_c], eax
+        mov [inm_f], ebx
+        mov [desp_col], eax
+        mov [desp_fil], ebx
+        mov byte [modif], 1
+        call inm_pon
+        call cuenta_cols
+        call pon_barras
+        call a_la_vista
+        jmp inval
+; (internas) EDX=lo que miden las ECX primeras columnas, o filas
+.ancho:
+        xor edx, edx
+        jecxz .ax
+.a1:
+        movzx edi, word [col_an+ecx*2-2]
+        add edx, edi
+        dec ecx
+        jnz .a1
+.ax:
+        ret
+.alto:
+        xor edx, edx
+        jecxz .ax
+.l1:
+        movzx edi, byte [fil_al+ecx-1]
+        add edx, edi
+        dec ecx
+        jnz .l1
+        ret
+; el menú dice si hay paneles inmovilizados
+inm_pon:
+        push eax
+        mov ax, [t_rej_no]
+        push ebx
+        mov ebx, [inm_c]
+        or ebx, [inm_f]
+        pop ebx
+        jz .p
+        mov ax, [t_rej_si]
+.p:
+        mov [m_inm], ax
+        pop eax
+        ret
+
 ; ---- Seleccionar todo ----
 todo:
         xor eax, eax
@@ -2154,6 +2538,7 @@ ir_a:
         jae .mal
         cmp edx, NFIL
         jae .mal
+        call comb_ancla
         mov [cur_col], ecx
         mov [sel_c2], ecx
         mov [cur_fil], edx
@@ -2269,8 +2654,8 @@ fmt_aplica:
         xchg eax, esi
         call des_celda
         xchg eax, esi
-        and [cel_fmt+esi*2], ax
-        or [cel_fmt+esi*2], bx
+        and [cel_fmt+esi*4], eax
+        or [cel_fmt+esi*4], ebx
         inc ecx
         cmp ecx, [r_c2]
         jbe .c
@@ -2379,6 +2764,102 @@ fmt_color:
         mov eax, F_COLOR
         jmp fmt_aplica
 
+; el color del fondo (EAX: el botón, de 0 a N_FONDOS - 1; el 0, ninguno)
+fmt_fondo:
+        movzx ebx, byte [fondos+eax]
+        shl ebx, F_FONDO_D
+        mov eax, F_FONDO
+        jmp fmt_aplica
+
+; ---- Formato > Combinar y centrar: de cada fila de lo elegido, la primera
+;      celda pasa a ocupar el sitio de todas (las demás se vacían) y queda
+;      centrada. Si la celda activa ya está combinada, se deshace ----
+combinar:
+        call instantanea
+        call sel_rect
+        mov ecx, [cur_col]
+        mov edx, [cur_fil]
+        call comb_n
+        mov ebp, eax                ; EBP distinto de 0: se deshace
+        mov edx, [r_f1]
+.f:
+        mov ecx, [r_c1]
+        mov esi, edx
+        shl esi, 6
+        add esi, ecx
+        mov eax, esi
+        call des_celda
+        and dword [cel_fmt+esi*4], ~F_COMB
+        test ebp, ebp
+        jnz .fs
+        mov eax, [r_c2]
+        sub eax, ecx
+        jz .fs                      ; (una sola columna: nada que combinar)
+        shl eax, F_COMB_D
+        or eax, 2 << F_ALIN_D
+        and dword [cel_fmt+esi*4], ~F_ALIN
+        or [cel_fmt+esi*4], eax
+.t:
+        inc ecx                     ; las que tapa: sin nada, y sin combinar
+        cmp ecx, [r_c2]
+        ja .fs
+        inc esi
+        mov eax, esi
+        call des_celda
+        mov dword [cel_off+esi*4], 0
+        and dword [cel_fmt+esi*4], ~F_COMB
+        jmp .t
+.fs:
+        inc edx
+        cmp edx, [r_f2]
+        jbe .f
+        mov eax, [r_c1]             ; lo elegido, la celda combinada
+        mov [cur_col], eax
+        mov [sel_c2], eax
+        mov eax, [cur_fil]
+        mov [sel_f2], eax
+        call limites
+        jmp fin_cambio
+
+; ---- Formato > Alto de fila: el de las filas elegidas, en puntos ----
+alto_fil:
+        mov edx, [cur_fil]
+        movzx eax, byte [fil_al+edx]
+        mov edi, num_txt
+        call hvl_num
+        mov byte [edi], 0
+        mov ebp, [ven]
+        mov esi, t_q_alto
+        mov edi, t_alto
+        mov ebx, num_txt
+        mov ecx, 4
+        HV dlg_pedir
+        test eax, eax
+        jz .x
+        mov esi, num_txt
+        call hvl_lee_num
+        cmp eax, AL_MIN
+        jae .a
+        mov eax, AL_MIN
+.a:
+        cmp eax, AL_MAX
+        jbe .b
+        mov eax, AL_MAX
+.b:
+        call instantanea
+        call sel_rect
+        mov edx, [r_f1]
+.c:
+        call des_alto
+        mov [fil_al+edx], al
+        inc edx
+        cmp edx, [r_f2]
+        jbe .c
+        call cuenta_cols
+        call invalida
+.x:
+        ret
+
 ; ---- los bordes de lo elegido (EAX: 0 ninguno, 1 el contorno, 2 todos, 3
 ;      abajo). Cada celda guarda dos rayas, la de abajo y la de su derecha: la
 ;      de arriba es la de abajo de la celda de encima, y la de la izquierda,
@@ -2461,8 +2942,8 @@ bordes:
         call des_celda
         xchg eax, esi
         not ebx
-        and [cel_fmt+esi*2], bx
-        or [cel_fmt+esi*2], ax
+        and [cel_fmt+esi*4], ebx
+        or [cel_fmt+esi*4], eax
         pop esi
 .px:
         ret
@@ -2861,6 +3342,8 @@ simbolo:
 %include "vista.inc"
 %include "hoja.inc"
 %include "archivo.inc"
+%include "libro.inc"
+%include "imprime.inc"
 %ifdef CON_GRAFICOS
 %include "grafico.inc"
 %endif
@@ -2880,6 +3363,7 @@ puente      resd 1                  ; el cuadro de texto escondido
 barra_v     resd 1                  ; las barras de desplazamiento
 barra_h     resd 1
 param       resd 1                  ; parámetros del acceso directo
+aviso_ven   resd 1                  ; la ventana que da los avisos (0: la de Cuentas)
 cur_col     resd 1                  ; la celda activa
 cur_fil     resd 1
 sel_c2      resd 1                  ; la otra esquina de lo elegido (si es

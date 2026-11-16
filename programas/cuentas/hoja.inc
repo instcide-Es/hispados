@@ -4,11 +4,12 @@
 ;  el ajuste de las referencias de las fórmulas y buscar
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
+;  (Aquí está la hoja ACTIVA del libro; las demás están plegadas: libro.inc.)
 ;  La hoja tiene NCOL x NFIL celdas (64 x 1.000), pero casi todas están
 ;  vacías, así que el texto de cada una no tiene un sitio fijo: va en un
 ;  ALMACÉN, una detrás de otra. De cada celda se guarda:
 ;       cel_off   dónde está su texto en el almacén (0: vacía)
-;       cel_fmt   su formato (una palabra: los bits F_* de calculo.inc)
+;       cel_fmt   su formato (una doble palabra: los bits F_* de calculo.inc)
 ;  y en el almacén, delante de cada texto: dw el número de su celda, db lo
 ;  que cabe en ese hueco (con el 0 final). Un texto que crece y no cabe en
 ;  su hueco se escribe al final, y el hueco viejo queda muerto; cuando el
@@ -39,11 +40,20 @@ PP_TAM      equ 32000               ; lo que cabe en el portapapeles de todos
 AN_NORMAL   equ 88                  ; ancho de una columna, si no se cambia
 AN_MIN      equ 8
 AN_MAX      equ 480
+AL_MIN      equ 4                   ; alto de una fila: el menor
+AL_MAX      equ 120                 ; y el mayor
+INM_MAX     equ 20                  ; filas o columnas inmovilizadas, como mucho
 
 ; ECX=columna EDX=fila -> ESI=el texto de la celda (acabado en 0; si está
 ; vacía, un texto vacío). Conserva los demás registros
 cel_puntero:
         push eax
+        mov eax, [ev_hoja]          ; (una celda de otra hoja del libro, que
+        cmp eax, [lib_act]          ; está plegada: libro.inc)
+        je .esta
+        pop eax
+        jmp idx_puntero
+.esta:
         mov eax, edx
         shl eax, 6
         add eax, ecx
@@ -62,7 +72,7 @@ cel_formato:
         mov eax, edx
         shl eax, 6
         add eax, ecx
-        movzx eax, word [cel_fmt+eax*2]
+        mov eax, [cel_fmt+eax*4]
         ret
 
 ; pone el texto ESI (acabado en 0; como mucho CEL_MAX-1 letras) en la celda
@@ -160,7 +170,14 @@ cel_pon:
 ; la ficha donde el cálculo apunta lo que vale la fórmula de ESI (su texto,
 ; en el almacén): va en su mismo hueco, delante
 cel_cache:
+        mov edi, [ev_hoja]
+        cmp edi, [lib_act]
+        jne .otra
         lea edi, [esi-CV_TAM-3]
+        ret
+.otra:
+        mov edi, [ix_ult]           ; (de una hoja plegada: en su índice)
+        add edi, 6
         ret
 
 ; arrima al principio del almacén los huecos vivos
@@ -221,18 +238,29 @@ hoja_vacia:
         xor eax, eax
         rep stosd
         mov edi, cel_fmt
-        mov ecx, NCEL / 2
+        mov ecx, NCEL
         rep stosd
         mov edi, col_an
         mov ecx, NCOL
         mov ax, AN_NORMAL
         rep stosw
+        mov edi, fil_al
+        mov ecx, NFIL
+        mov al, CEL_AL
+        rep stosb
         xor eax, eax
+        mov [inm_c], eax
+        mov [inm_f], eax
         mov [alm_fin], eax
         mov [lim_c], eax
         mov [lim_f], eax
         mov dword [moneda_txt], 'EUR'
         mov dword [moneda_txt+4], 0
+        mov byte [imp_rej], 0
+        call rej_pon
+%ifdef CON_GRAFICOS
+        call gr_olvida
+%endif
         call des_vacia
         mov byte [llena], 0
         call calc_olvida
@@ -285,9 +313,10 @@ limites:
 ; paso no cabe (ordenar o eliminar filas en una hoja muy grande), ese paso no
 ; se puede deshacer y se olvida todo lo anterior.
 ;   un paso:  dd tamaño, sus apuntes, dd tamaño
-;   apuntes:  db 0, dw celda, dw formato, db largo, el texto
+;   apuntes:  db 0, dw celda, dd formato, db largo, el texto
 ;             db 1, db columna, dw ancho
 ;             db 2, la moneda (8 octetos)
+;             db 3, dw fila, db alto
 DES_TAM     equ 131072
 
 ; empieza un paso: se llama antes de cada cambio
@@ -303,7 +332,7 @@ instantanea:
         add edi, 4
         mov [des_top], edi
         mov edi, des_mapa           ; nada apuntado todavía en este paso
-        mov ecx, (NCEL + NCOL) / 32 + 1
+        mov ecx, (NCEL + NCOL + NFIL) / 32 + 1
         xor eax, eax
         rep stosd
         mov byte [des_activo], 1
@@ -435,8 +464,8 @@ des_rec_celda:
         mov edi, des_rec
         mov byte [edi], 0
         mov [edi+1], ax
-        mov cx, [cel_fmt+eax*2]
-        mov [edi+3], cx
+        mov ecx, [cel_fmt+eax*4]
+        mov [edi+3], ecx
         mov esi, [cel_off+eax*4]
         xor ecx, ecx
         test esi, esi
@@ -446,12 +475,12 @@ des_rec_celda:
         mov al, [esi+ecx]
         test al, al
         jz .f
-        mov [edi+6+ecx], al
+        mov [edi+8+ecx], al
         inc ecx
         jmp .l
 .f:
-        mov [edi+5], cl
-        add ecx, 6
+        mov [edi+7], cl
+        add ecx, 8
         pop edi
         pop esi
         pop eax
@@ -462,6 +491,15 @@ des_rec_ancho:
         mov [des_rec+1], cl
         mov ax, [col_an+ecx*2]
         mov [des_rec+2], ax
+        mov ecx, 4
+        pop eax
+        ret
+des_rec_alto:
+        push eax
+        mov byte [des_rec], 3
+        mov [des_rec+1], dx
+        mov al, [fil_al+edx]
+        mov [des_rec+3], al
         mov ecx, 4
         pop eax
         ret
@@ -498,9 +536,9 @@ des_celda_vacia:
         push ecx
         mov byte [des_rec], 0
         mov [des_rec+1], ax
-        mov word [des_rec+3], 0
-        mov byte [des_rec+5], 0
-        mov ecx, 6
+        mov dword [des_rec+3], 0
+        mov byte [des_rec+7], 0
+        mov ecx, 8
         call des_mete
         pop ecx
 .x:
@@ -516,6 +554,21 @@ des_ancho:
         jc .x
         push ecx
         call des_rec_ancho
+        call des_mete
+        pop ecx
+.x:
+        ret
+; ...el alto de la fila EDX
+des_alto:
+        cmp byte [des_activo], 0
+        je .x
+        push eax
+        lea eax, [edx+NCEL+NCOL]
+        bts dword [des_mapa], eax
+        pop eax
+        jc .x
+        push ecx
+        call des_rec_alto
         call des_mete
         pop ecx
 .x:
@@ -540,7 +593,7 @@ des_zona:
         jae .x
         cmp dword [cel_off+eax*4], 0
         jne .s
-        cmp word [cel_fmt+eax*2], 0
+        cmp dword [cel_fmt+eax*4], 0
         je .n
 .s:
         call des_celda
@@ -557,7 +610,7 @@ des_zona_despues:
         jae .x
         cmp dword [cel_off+eax*4], 0
         jne .s
-        cmp word [cel_fmt+eax*2], 0
+        cmp dword [cel_fmt+eax*4], 0
         je .n
 .s:
         call des_celda_vacia
@@ -644,17 +697,19 @@ des_aplica:
         je .an
         cmp al, 2
         je .mon
+        cmp al, 3
+        je .alto
         movzx eax, word [esi+1]
         call des_rec_celda
         call des_mete
-        mov cx, [esi+3]
-        mov [cel_fmt+eax*2], cx
+        mov ecx, [esi+3]
+        mov [cel_fmt+eax*4], ecx
         mov ecx, eax
         and ecx, NCOL - 1
         mov edx, eax
         shr edx, 6
-        movzx eax, byte [esi+5]
-        add esi, 6
+        movzx eax, byte [esi+7]
+        add esi, 8
         mov edi, aj_buf
         push ecx
         mov ecx, eax
@@ -674,6 +729,14 @@ des_aplica:
         pop ecx
         mov ax, [esi+2]
         mov [col_an+ecx*2], ax
+        add esi, 4
+        jmp .b
+.alto:
+        movzx edx, word [esi+1]
+        call des_rec_alto
+        call des_mete
+        mov al, [esi+3]
+        mov [fil_al+edx], al
         add esi, 4
         jmp .b
 .mon:
@@ -712,6 +775,17 @@ sel_rect:
 .b:
         mov [r_f1], eax
         mov [r_f2], ebx
+        call sel_una                ; una celda sola que tapa a las de su
+        jne .x                      ; derecha (combinada): con ellas
+        push ecx
+        push edx
+        mov ecx, [cur_col]
+        mov edx, [cur_fil]
+        call comb_n
+        add [r_c2], eax
+        pop edx
+        pop ecx
+.x:
         pop ebx
         pop eax
         ret
@@ -786,7 +860,7 @@ borrar_rango:
         mov dword [cel_off+ebx*4], 0
         test eax, eax
         jz .s
-        mov word [cel_fmt+ebx*2], 0
+        mov dword [cel_fmt+ebx*4], 0
 .s:
         inc ecx
         cmp ecx, [r_c2]
@@ -827,10 +901,10 @@ copiar:
 .f:
         mov ecx, [r_c1]
 .c:
-        cmp edi, clip_buf + CLIP_TAM - CEL_MAX - 4
+        cmp edi, clip_buf + CLIP_TAM - CEL_MAX - 8
         jae .grande
         call cel_formato
-        stosw
+        stosd
         call cel_puntero
 .t:
         lodsb
@@ -1070,7 +1144,7 @@ pegar:
         mov [sel_f2], edx
         ret
 
-; pega en la celda ECX=columna EDX=fila lo copiado que hay en ESI (dw
+; pega en la celda ECX=columna EDX=fila lo copiado que hay en ESI (dd
 ; formato, texto), que venía de la celda [pg_i], [pg_j] de lo copiado; ESI
 ; queda detrás. Las fórmulas se corren lo que haya de un sitio al otro
 ; (menos si se cortó: lo cortado se lleva sus fórmulas como estaban)
@@ -1078,8 +1152,8 @@ pega_una:
         push eax
         push ebx
         push edi
-        movzx ebx, word [esi]
-        add esi, 2
+        mov ebx, [esi]
+        add esi, 4
         cmp ecx, NCOL
         jae .salta
         cmp edx, NFIL
@@ -1088,7 +1162,7 @@ pega_una:
         shl eax, 6
         add eax, ecx
         call des_celda
-        mov [cel_fmt+eax*2], bx
+        mov [cel_fmt+eax*4], ebx
         cmp byte [esi], '='
         jne .tal
         cmp byte [clip_corte], 0
@@ -1195,8 +1269,8 @@ copia_celda:
         xchg eax, edi
         call des_celda
         xchg eax, edi
-        mov bp, [cel_fmt+esi*2]
-        mov [cel_fmt+edi*2], bp
+        mov ebp, [cel_fmt+esi*4]
+        mov [cel_fmt+edi*4], ebp
         mov esi, [cel_off+esi*4]
         test esi, esi
         jnz .hay
@@ -1233,11 +1307,14 @@ copia_celda:
 ;   1  se han insertado [aj_n] filas en la fila [aj_pos]       3  columnas
 ;   2  se han eliminado [aj_n] filas desde la fila [aj_pos]    4  columnas
 ; Lo que cae fuera de la hoja o señalaba a algo eliminado queda «#REF».
-; Los textos entre comillas y los nombres de las funciones no se tocan
+; Los textos entre comillas y los nombres de las funciones no se tocan. Las
+; celdas de otra hoja (Hoja2!A1) se corren al copiar, como las demás, pero
+; al insertar o eliminar en esta hoja se dejan como están
 ajusta_formula:
         pushad
         lea eax, [edi+CEL_MAX-1]
         mov [aj_fin], eax
+        mov byte [aj_otra], 0
 .b:
         mov al, [esi]
         test al, al
@@ -1265,11 +1342,24 @@ ajusta_formula:
         cmp ah, 'Z'
         jbe .nombre
 .celda:
-        add esp, 4
+        pop ebx                     ; EBX=donde empezaba
+        cmp byte [aj_otra], 0       ; una celda de otra hoja (Hoja2!A1): al
+        je .mia                     ; insertar o eliminar aquí, no cambia
+        cmp dword [aj_modo], 0
+        je .mia
+.tal:
+        mov al, [ebx]
+        call aj_pon
+        inc ebx
+        cmp ebx, esi
+        jb .tal
+        jmp .b
+.mia:
         call aj_una
         jmp .b
 .nombre:
         pop esi                     ; un nombre: tal cual
+        mov byte [aj_otra], 0
 .id:
         mov al, [esi]
         cmp al, '.'
@@ -1291,6 +1381,7 @@ ajusta_formula:
         inc esi
         jmp .id
 .cad:
+        mov byte [aj_otra], 0
         call aj_pon
         inc esi
 .c1:
@@ -1303,6 +1394,11 @@ ajusta_formula:
         jne .c1
         jmp .b
 .otro:
+        cmp al, ':'                 ; (lo de otra hoja dura lo que su rango)
+        je .o1
+        cmp al, '!'
+        sete [aj_otra]
+.o1:
         call aj_pon
         inc esi
         jmp .b
@@ -1556,6 +1652,9 @@ ref_nombre:
 ; corrige todas las fórmulas de la hoja (con [aj_modo], [aj_pos] y [aj_n])
 aj_todas:
         pushad
+%ifdef CON_GRAFICOS
+        call gr_ajusta              ; (y el rango del gráfico)
+%endif
         xor ebx, ebx
 .b:
         mov eax, [cel_off+ebx*4]
@@ -1617,6 +1716,21 @@ filas_orden:
         jb .v
         call instantanea
         call .zona
+        mov ecx, NFIL - 1           ; los altos: los de debajo, hacia abajo, y
+.ia:                                ; las nuevas, del alto normal
+        mov eax, ecx
+        sub eax, ebx
+        cmp eax, [aj_pos]
+        jl .ia1
+        mov al, [fil_al+eax]
+        mov [fil_al+ecx], al
+        dec ecx
+        jmp .ia
+.ia1:
+        mov byte [fil_al+ecx], CEL_AL
+        dec ecx
+        cmp ecx, [aj_pos]
+        jge .ia1
         mov ecx, NFIL               ; las de debajo, hacia abajo (de atrás adelante)
         sub ecx, ebx
         sub ecx, [aj_pos]
@@ -1633,9 +1747,9 @@ filas_orden:
         mov esi, NFIL
         sub esi, ebx
         shl esi, 6
-        lea edi, [cel_fmt+NCEL*2-2]
-        lea esi, [cel_fmt+esi*2-2]
-        rep movsw
+        lea edi, [cel_fmt+NCEL*4-4]
+        lea esi, [cel_fmt+esi*4-4]
+        rep movsd
         cld
         mov edi, [aj_pos]           ; y las nuevas, vacías
         shl edi, 6
@@ -1648,13 +1762,25 @@ filas_orden:
         rep stosd
         pop edi
         pop ecx
-        lea edi, [cel_fmt+edi*2]
-        rep stosw
+        lea edi, [cel_fmt+edi*4]
+        rep stosd
         mov dword [aj_modo], 1
         jmp .fin
 .eli:
         call instantanea
         call .zona
+        mov ecx, [aj_pos]           ; los altos: los de debajo, hacia arriba
+.ea:
+        lea eax, [ecx+ebx]
+        mov dl, CEL_AL
+        cmp eax, NFIL
+        jae .ea1
+        mov dl, [fil_al+eax]
+.ea1:
+        mov [fil_al+ecx], dl
+        inc ecx
+        cmp ecx, NFIL
+        jb .ea
         mov ecx, NFIL               ; las de debajo, hacia arriba
         sub ecx, ebx
         sub ecx, [aj_pos]
@@ -1673,9 +1799,9 @@ filas_orden:
         pop edi
         pop esi
         pop ecx
-        lea esi, [cel_fmt+esi*2]
-        lea edi, [cel_fmt+edi*2]
-        rep movsw
+        lea esi, [cel_fmt+esi*4]
+        lea edi, [cel_fmt+edi*4]
+        rep movsd
         mov edi, NFIL               ; y las últimas, vacías
         sub edi, ebx
         shl edi, 6
@@ -1688,8 +1814,8 @@ filas_orden:
         rep stosd
         pop edi
         pop ecx
-        lea edi, [cel_fmt+edi*2]
-        rep stosw
+        lea edi, [cel_fmt+edi*4]
+        rep stosd
         mov dword [aj_modo], 2
 .fin:
         call alm_indices
@@ -1700,8 +1826,14 @@ filas_orden:
         call limites
         popad
         jmp fin_cambio
-; (interna) para deshacer: todo lo que hay de esa fila para abajo
+; (interna) para deshacer: todo lo que hay de esa fila para abajo, y los altos
 .zona:
+        mov edx, [aj_pos]
+.za:
+        call des_alto
+        inc edx
+        cmp edx, NFIL
+        jb .za
         mov eax, [aj_pos]
         shl eax, 6
         jmp des_zona
@@ -1764,9 +1896,9 @@ cols_orden:
         jl .i2
         lea edi, [esi+eax]
         push dword [cel_off+edi*4]
-        mov di, [cel_fmt+edi*2]
+        mov edi, [cel_fmt+edi*4]
         lea eax, [esi+ecx]
-        mov [cel_fmt+eax*2], di
+        mov [cel_fmt+eax*4], edi
         pop dword [cel_off+eax*4]
         dec ecx
         jmp .i1
@@ -1776,7 +1908,7 @@ cols_orden:
 .i3:
         lea eax, [esi+ecx]
         mov dword [cel_off+eax*4], 0
-        mov word [cel_fmt+eax*2], 0
+        mov dword [cel_fmt+eax*4], 0
         inc ecx
         dec edi
         jnz .i3
@@ -1789,9 +1921,9 @@ cols_orden:
         jae .e2
         lea edi, [esi+eax]
         push dword [cel_off+edi*4]
-        mov di, [cel_fmt+edi*2]
+        mov edi, [cel_fmt+edi*4]
         lea eax, [esi+ecx]
-        mov [cel_fmt+eax*2], di
+        mov [cel_fmt+eax*4], edi
         pop dword [cel_off+eax*4]
         inc ecx
         jmp .e1
@@ -1800,7 +1932,7 @@ cols_orden:
         jae .sig
         lea eax, [esi+ecx]
         mov dword [cel_off+eax*4], 0
-        mov word [cel_fmt+eax*2], 0
+        mov dword [cel_fmt+eax*4], 0
         inc ecx
         jmp .e2
 .sig:
@@ -2123,7 +2255,7 @@ mueve_filas:
         add eax, [r_f1]
         shl eax, 6
         lea esi, [cel_off+eax*4]
-        lea ebx, [cel_fmt+eax*2]
+        lea ebx, [cel_fmt+eax*4]
 .c1:
         mov edx, or_tmp_off
         mov ebp, or_tmp_fmt
@@ -2132,14 +2264,14 @@ mueve_filas:
         add edi, [r_f1]
         shl edi, 6
         lea edx, [cel_off+edi*4]
-        lea ebp, [cel_fmt+edi*2]
+        lea ebp, [cel_fmt+edi*4]
 .c2:
         mov ecx, [r_c1]
 .c3:
         mov eax, [esi+ecx*4]
         mov [edx+ecx*4], eax
-        mov ax, [ebx+ecx*2]
-        mov [ebp+ecx*2], ax
+        mov eax, [ebx+ecx*4]
+        mov [ebp+ecx*4], eax
         inc ecx
         cmp ecx, [r_c2]
         jbe .c3
@@ -2245,6 +2377,7 @@ des_sin     resb 1                  ; no ha cabido lo de rehacer
 des_roto    resb 1                  ; el paso no cabe en el diario
 des_aviso   resb 1                  ; y hay que decirlo
 clip_hay    resb 1
+aj_otra     resb 1                  ; ajusta_formula: lo que viene es de otra hoja
 clip_corte  resb 1                  ; lo copiado se cortó
 llena       resb 1                  ; no ha cabido algo en el almacén
             alignb 4
@@ -2260,13 +2393,16 @@ or_tit      resb 1                  ; la primera fila son títulos
             alignb 4
 or_val      resd 2 * 3 * NFIL       ; y su valor
 col_an      resw NCOL               ; el ancho de cada columna, en puntos
-or_tmp_fmt  resw NCOL               ; ordenar: la fila de reserva
-or_tmp_off  resd NCOL
-des_rec     resb CEL_MAX + 8        ; un apunte del diario, haciéndose
+fil_al      resb NFIL               ; y el alto de cada fila
             alignb 4
-des_mapa    resd (NCEL + NCOL) / 32 + 1     ; lo ya apuntado en este paso (un bit por celda)
+or_tmp_fmt  resd NCOL               ; ordenar: la fila de reserva
+or_tmp_off  resd NCOL
+des_rec     resb CEL_MAX + 12       ; un apunte del diario, haciéndose
+            alignb 4
+des_mapa    resd (NCEL + NCOL + NFIL) / 32 + 1      ; lo ya apuntado en este paso (un bit por
+                                    ; celda, por columna y por fila)
 cel_off     resd NCEL
-cel_fmt     resw NCEL
+cel_fmt     resd NCEL
 des_buf     resb DES_TAM            ; el diario de deshacer y rehacer
 clip_txt    resb PP_TAM + 4
 pega_txt    resb PP_TAM + 4

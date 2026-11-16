@@ -12,9 +12,17 @@
 ;  horizontal y el pie. La rejilla ocupa todo lo que deja lo demás: crece con
 ;  la ventana.
 ;
-;  Las columnas pueden tener anchos distintos, así que la x de una columna se
-;  saca sumando los anchos de las que hay desde la primera que se ve
-;  ([desp_col]); las filas son todas igual de altas.
+;  Las columnas pueden tener anchos distintos y las filas, altos distintos,
+;  así que la x de una columna (y la y de una fila) se saca sumando los
+;  anchos de las que hay desde la primera que se ve ([desp_col], [desp_fil]).
+;
+;  Con filas o columnas INMOVILIZADAS ([inm_f], [inm_c]: las primeras de la
+;  hoja), esas están siempre en su sitio y las demás se mueven detrás, desde
+;  ([gx0], [gy0]). La rejilla se pinta entonces en cuatro ZONAS, cada una
+;  recortada a su sitio: ver zona_pon.
+;
+;  Una celda COMBINADA con las de su derecha (F_COMB en su formato) se pinta
+;  a lo ancho de todas, y las que tapa no se pintan.
 ; =============================================================================
 
 ; las medidas de la ventana: [cli_an], [cli_al]; la rejilla va de (ROT_AN,
@@ -37,28 +45,39 @@ medidas:
         mov edx, GY0 + CEL_AL
 .b:
         mov [gy1], edx
-        mov eax, edx
-        sub eax, GY0
-        xor edx, edx
-        mov ecx, CEL_AL
-        div ecx
-        mov [vis_fil], eax
+        call cuenta_cols
         mov eax, [desp_fil]         ; (al crecer la ventana, que no quede un
         add eax, [vis_fil]          ; hueco debajo de la última fila)
         sub eax, NFIL
         jle .c
         sub [desp_fil], eax
-        jns .c
-        mov dword [desp_fil], 0
-.c:
+        mov eax, [inm_f]
+        cmp [desp_fil], eax
+        jge .c0
+        mov [desp_fil], eax
+.c0:
         call cuenta_cols
+.c:
         popad
         ret
-; [vis_col]: cuántas columnas enteras se ven desde [desp_col] (una al menos)
+; lo que se ve, al día: dónde empiezan las columnas y las filas que se mueven
+; ([gx0], [gy0]: detrás de las inmovilizadas) y cuántas enteras se ven desde
+; [desp_col] y [desp_fil] ([vis_col], [vis_fil]: una al menos). Hay que
+; llamarla cuando cambia un ancho, un alto, lo inmovilizado o la vista
 cuenta_cols:
         pushad
-        mov ecx, [desp_col]
         mov eax, ROT_AN
+        xor ecx, ecx
+.i:
+        cmp ecx, [inm_c]
+        jae .if
+        movzx edx, word [col_an+ecx*2]
+        add eax, edx
+        inc ecx
+        jmp .i
+.if:
+        mov [gx0], eax
+        mov ecx, [desp_col]
         xor ebx, ebx
 .b:
         cmp ecx, NCOL
@@ -76,15 +95,50 @@ cuenta_cols:
         inc ebx
 .g:
         mov [vis_col], ebx
+        mov eax, GY0
+        xor ecx, ecx
+.j:
+        cmp ecx, [inm_f]
+        jae .jf
+        movzx edx, byte [fil_al+ecx]
+        add eax, edx
+        inc ecx
+        jmp .j
+.jf:
+        mov [gy0], eax
+        mov ecx, [desp_fil]
+        xor ebx, ebx
+.r:
+        cmp ecx, NFIL
+        jae .rf
+        movzx edx, byte [fil_al+ecx]
+        add eax, edx
+        cmp eax, [gy1]
+        ja .rf
+        inc ebx
+        inc ecx
+        jmp .r
+.rf:
+        test ebx, ebx
+        jnz .rg
+        inc ebx
+.rg:
+        mov [vis_fil], ebx
         popad
         ret
 
-; ECX=columna -> EAX=su x en la ventana (negativa si queda a la izquierda)
+; ECX=columna -> EAX=su x en la ventana. Las inmovilizadas están siempre en
+; su sitio; las demás, detrás, contando desde la primera que se ve (y las
+; que quedan a su izquierda salen con una x menor: no se ven)
 col_x:
         push ebx
         push ecx
         push edx
         mov eax, ROT_AN
+        xor ebx, ebx
+        cmp ecx, [inm_c]
+        jb .b
+        mov eax, [gx0]
         mov ebx, [desp_col]
 .b:
         cmp ebx, ecx
@@ -104,20 +158,63 @@ col_x:
         pop ecx
         pop ebx
         ret
-; EDX=fila -> EBX=su y en la ventana
+; ...y la x donde acaba (su borde derecho)
+col_x1:
+        push edx
+        call col_x
+        movzx edx, word [col_an+ecx*2]
+        add eax, edx
+        pop edx
+        ret
+; EDX=fila -> EBX=su y en la ventana (lo mismo, con las filas)
 fil_y:
-        mov ebx, edx
-        sub ebx, [desp_fil]
-        imul ebx, CEL_AL
-        add ebx, GY0
+        push eax
+        push ecx
+        mov ebx, GY0
+        xor ecx, ecx
+        cmp edx, [inm_f]
+        jb .b
+        mov ebx, [gy0]
+        mov ecx, [desp_fil]
+.b:
+        cmp ecx, edx
+        je .x
+        ja .atras
+        movzx eax, byte [fil_al+ecx]
+        add ebx, eax
+        inc ecx
+        jmp .b
+.atras:
+        dec ecx
+        movzx eax, byte [fil_al+ecx]
+        sub ebx, eax
+        jmp .b
+.x:
+        pop ecx
+        pop eax
+        ret
+; ...y la y donde acaba
+fil_y1:
+        push eax
+        call fil_y
+        movzx eax, byte [fil_al+edx]
+        add ebx, eax
+        pop eax
+        ret
+; EDX=fila -> EAX=su alto, en puntos
+fil_alto:
+        movzx eax, byte [fil_al+edx]
         ret
 ; EAX=x de la ventana -> ECX=la columna que hay ahí (de las que se ven hacia
 ; la derecha; a la izquierda de la rejilla, la primera que se ve)
 x_col:
         push ebx
         push edx
+        cmp eax, [gx0]
+        jl .fijas
+.mueve:
         mov ecx, [desp_col]
-        mov ebx, ROT_AN
+        mov ebx, [gx0]
 .b:
         cmp ecx, NCOL - 1
         jae .x
@@ -127,6 +224,21 @@ x_col:
         jl .x
         inc ecx
         jmp .b
+.fijas:
+        cmp dword [inm_c], 0
+        je .mueve
+        xor ecx, ecx
+        mov ebx, ROT_AN
+.fb:
+        lea edx, [ecx+1]
+        cmp edx, [inm_c]
+        jae .x
+        movzx edx, word [col_an+ecx*2]
+        add ebx, edx
+        cmp eax, ebx
+        jl .x
+        inc ecx
+        jmp .fb
 .x:
         pop edx
         pop ebx
@@ -134,22 +246,38 @@ x_col:
 ; EBX=y de la ventana -> EDX=la fila que hay ahí
 y_fil:
         push eax
-        mov eax, ebx
-        sub eax, GY0
-        jns .a
-        xor eax, eax
-.a:
-        xor edx, edx
         push ecx
-        mov ecx, CEL_AL
-        div ecx
-        pop ecx
-        add eax, [desp_fil]
-        cmp eax, NFIL - 1
-        jbe .b
-        mov eax, NFIL - 1
+        cmp ebx, [gy0]
+        jl .fijas
+.mueve:
+        mov edx, [desp_fil]
+        mov eax, [gy0]
 .b:
-        mov edx, eax
+        cmp edx, NFIL - 1
+        jae .x
+        movzx ecx, byte [fil_al+edx]
+        add eax, ecx
+        cmp ebx, eax
+        jl .x
+        inc edx
+        jmp .b
+.fijas:
+        cmp dword [inm_f], 0
+        je .mueve
+        xor edx, edx
+        mov eax, GY0
+.fb:
+        lea ecx, [edx+1]
+        cmp ecx, [inm_f]
+        jae .x
+        movzx ecx, byte [fil_al+edx]
+        add eax, ecx
+        cmp ebx, eax
+        jl .x
+        inc edx
+        jmp .fb
+.x:
+        pop ecx
         pop eax
         ret
 ; EAX=x de la ventana -> ECX=la columna cuyo borde derecho está ahí (a tres
@@ -157,10 +285,24 @@ y_fil:
 borde_col:
         push ebx
         push edx
-        mov ecx, [desp_col]
+        push esi
+        xor ecx, ecx                ; primero las inmovilizadas, luego las demás
         mov ebx, ROT_AN
-.b:
-        cmp ecx, NCOL
+        mov esi, [inm_c]
+        call .busca
+        jnc .x
+        mov ecx, [desp_col]
+        mov ebx, [gx0]
+        mov esi, NCOL
+        call .busca
+.x:
+        pop esi
+        pop edx
+        pop ebx
+        ret
+; (interna) de la columna ECX (que está en la x EBX) a la ESI, sin llegar
+.busca:
+        cmp ecx, esi
         jae .no
         movzx edx, word [col_an+ecx*2]
         add ebx, edx
@@ -172,46 +314,188 @@ borde_col:
         cmp ebx, eax
         jg .no
         inc ecx
-        jmp .b
+        jmp .busca
 .si:
-        pop edx
-        pop ebx
         clc
         ret
 .no:
-        pop edx
-        pop ebx
+        stc
+        ret
+; EBX=y de la ventana -> EDX=la fila cuyo borde de abajo está ahí (a tres
+; puntos como mucho); CF=1 si no hay ninguno
+borde_fil:
+        push eax
+        push ecx
+        push esi
+        xor edx, edx
+        mov eax, GY0
+        mov esi, [inm_f]
+        call .busca
+        jnc .x
+        mov edx, [desp_fil]
+        mov eax, [gy0]
+        mov esi, NFIL
+        call .busca
+.x:
+        pop esi
+        pop ecx
+        pop eax
+        ret
+.busca:
+        cmp edx, esi
+        jae .no
+        movzx ecx, byte [fil_al+edx]
+        add eax, ecx
+        mov ecx, ebx
+        sub ecx, eax
+        add ecx, 3
+        cmp ecx, 6
+        jbe .si
+        cmp eax, ebx
+        jg .no
+        inc edx
+        jmp .busca
+.si:
+        clc
+        ret
+.no:
         stc
         ret
 
-; mueve la vista lo justo para que se vea la celda ECX=columna EDX=fila
+; ---- las celdas combinadas: la primera (el «ancla») lleva en su formato
+;      cuántas de su derecha tapa (F_COMB); las tapadas no se ven ----
+; ECX=columna EDX=fila -> EAX=cuántas tapa (sin salirse de la hoja)
+comb_n:
+        push ebx
+        mov eax, edx
+        shl eax, 6
+        add eax, ecx
+        mov eax, [cel_fmt+eax*4]
+        shr eax, F_COMB_D
+        and eax, 63
+        mov ebx, NCOL - 1
+        sub ebx, ecx
+        cmp eax, ebx
+        jbe .x
+        mov eax, ebx
+.x:
+        pop ebx
+        ret
+; ECX=columna EDX=fila -> EAX=cuántas celdas de su derecha son de su misma
+; combinación (0: ninguna, o no está combinada)
+comb_r:
+        push ebx
+        push esi
+        mov esi, ecx                ; hacia atrás, hasta dar con un ancla
+.b:
+        push ecx
+        mov ecx, esi
+        call comb_n
+        pop ecx
+        test eax, eax
+        jnz .hay
+        test esi, esi
+        jz .no
+        dec esi
+        jmp .b
+.hay:
+        add eax, esi                ; EAX=la última que tapa
+        sub eax, ecx
+        jns .x
+.no:
+        xor eax, eax
+.x:
+        pop esi
+        pop ebx
+        ret
+; ECX=columna EDX=fila: si está tapada por una combinación, ECX=su ancla
+comb_ancla:
+        push eax
+        push esi
+        mov esi, ecx
+.b:
+        test esi, esi
+        jz .x
+        dec esi
+        push ecx
+        mov ecx, esi
+        call comb_n
+        pop ecx
+        test eax, eax
+        jz .b
+        add eax, esi
+        cmp eax, ecx
+        jb .x
+        mov ecx, esi
+.x:
+        pop esi
+        pop eax
+        ret
+; ECX=columna EDX=fila -> EAX=su ancho, con las que tapa
+cel_ancho:
+        push ebx
+        push ecx
+        push edx
+        call comb_n
+        mov ebx, eax
+        movzx eax, word [col_an+ecx*2]
+.b:
+        test ebx, ebx
+        jz .x
+        inc ecx
+        movzx edx, word [col_an+ecx*2]
+        add eax, edx
+        dec ebx
+        jmp .b
+.x:
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
+; mueve la vista lo justo para que se vea la celda ECX=columna EDX=fila (las
+; inmovilizadas se ven siempre)
 a_la_vista_de:
         pushad
+        call cuenta_cols
+        cmp edx, [inm_f]
+        jb .c0
         cmp edx, [desp_fil]
         jae .f1
         mov [desp_fil], edx
+        jmp .c0
 .f1:
         mov eax, [desp_fil]
         add eax, [vis_fil]
         cmp edx, eax
         jb .c0
-        mov eax, edx
-        sub eax, [vis_fil]
-        inc eax
-        jns .f2
-        xor eax, eax
+        mov eax, [gy1]              ; no cabe por abajo: la primera que se ve
+        sub eax, [gy0]              ; será la más alta que la deje entera
+        mov esi, edx
 .f2:
-        mov [desp_fil], eax
+        movzx ebx, byte [fil_al+esi]
+        sub eax, ebx
+        js .f3
+        dec esi
+        cmp esi, [inm_f]
+        jge .f2
+.f3:
+        inc esi
+        cmp esi, edx
+        jbe .f4
+        mov esi, edx
+.f4:
+        mov [desp_fil], esi
 .c0:
+        cmp ecx, [inm_c]
+        jb .x
         cmp ecx, [desp_col]
         jae .c1
         mov [desp_col], ecx
 .c1:
         cmp ecx, [desp_col]         ; mientras su borde derecho no quepa, una
         jbe .x                      ; columna más allá
-        call col_x
-        movzx ebx, word [col_an+ecx*2]
-        add eax, ebx
+        call col_x1
         cmp eax, [gx1]
         jle .x
         inc dword [desp_col]
@@ -232,7 +516,8 @@ a_la_vista:
         pop ecx
         ret
 
-; las barras de desplazamiento, al día
+; las barras de desplazamiento, al día (cuentan desde la primera columna y
+; la primera fila que se mueven)
 pon_barras:
         pushad
         mov ebp, [barra_v]
@@ -240,6 +525,7 @@ pon_barras:
         jz .x
         mov ecx, NFIL
         sub ecx, [vis_fil]
+        sub ecx, [inm_f]
         jns .a
         xor ecx, ecx
 .a:
@@ -248,14 +534,17 @@ pon_barras:
         HV msg_enviar
         mov eax, BDM_POS
         mov ecx, [desp_fil]
+        sub ecx, [inm_f]
         HV msg_enviar
         mov ebp, [barra_h]
         mov ecx, NCOL - 1
+        sub ecx, [inm_c]
         mov edx, 1
         mov eax, BDM_PONER
         HV msg_enviar
         mov eax, BDM_POS
         mov ecx, [desp_col]
+        sub ecx, [inm_c]
         HV msg_enviar
 .x:
         popad
@@ -274,7 +563,8 @@ celda_ver:
         mov byte [disp_tipo], 0
         call cel_formato
         mov [disp_fmt], eax
-        movzx ebx, word [col_an+ecx*2]
+        call cel_ancho              ; (con las que tapa, si está combinada)
+        mov ebx, eax
         sub ebx, 6
         jns .a
         xor ebx, ebx
@@ -342,6 +632,8 @@ valor_celda:
         push esi
         push edi
         push ebp
+        mov eax, [lib_act]          ; (la celda es de la hoja activa)
+        mov [ev_hoja], eax
         mov [pila_ant], esp
         mov esp, pila_calc + PILA_CALC
         mov dword [ev_pila_min], pila_calc + 2048
@@ -362,12 +654,12 @@ pintar:
                                     ; cambie la hoja: ver «invalida»)
         HV dc_pintar
         call medidas
+        cmp byte [vp_on], 0
+        jne pinta_prelim
         call sel_rect
-        mov eax, [r_c1]
-        xor eax, [r_c2]
-        mov ebx, [r_f1]
-        xor ebx, [r_f2]
-        or eax, ebx
+        call sel_una
+        setne al
+        movzx eax, al
         mov [sel_varias], eax       ; distinto de 0: hay más de una celda elegida
         mov ecx, [cur_col]
         mov edx, [cur_fil]
@@ -382,23 +674,53 @@ pintar:
         mov ecx, BD_AN
         mov edx, BD_AN
         HV dc_rect
-        xor eax, eax                ; de aquí abajo, solo los rótulos y la rejilla
-        mov ebx, HY0
-        mov ecx, [gx1]
-        mov edx, [gy1]
-        sub edx, HY0
-        HV dc_cortar
+        call pinta_tabs
         call pinta_rotulos
-        mov eax, ROT_AN
-        mov ebx, GY0
+        xor esi, esi                ; las cuatro zonas de la rejilla (si no hay nada
+.z:                                 ; inmovilizado, solo la última tiene algo)
+        call zona_pon
+        jc .zs
+        call pinta_zona
+.zs:
+        inc esi
+        cmp esi, 4
+        jb .z
+        mov eax, ROT_AN             ; y, sobre toda ella, las rayas de lo
+        mov ebx, GY0                ; inmovilizado y lo que se está tecleando
         mov ecx, [gx1]
         sub ecx, eax
         mov edx, [gy1]
         sub edx, ebx
-        HV dc_cortar
-        call pinta_celdas
+        call recorta
+        call pinta_inm
+        call pinta_edita
         HV dc_cerrar
         jmp hecho
+
+; recorta el dibujo de la ventana al rectángulo EAX=x EBX=y ECX=ancho
+; EDX=alto. Los recortes de un contexto de dibujo se van sumando (cada uno
+; quita más), así que para recortar a otro sitio se cierra el contexto y se
+; abre otro, de toda la ventana. Conserva los registros
+recorta:
+        pushad
+        HV dc_cerrar
+        mov ebp, [ven]
+        HV dc_abrir
+        popad
+        HV dc_cortar
+        ret
+
+; ¿lo elegido es una sola celda? ZF=1 si sí. Conserva los registros
+sel_una:
+        push eax
+        mov eax, [cur_col]
+        cmp eax, [sel_c2]
+        jne .x
+        mov eax, [cur_fil]
+        cmp eax, [sel_f2]
+.x:
+        pop eax
+        ret
 
 ; ---- la barra de botones ----
 pinta_botones:
@@ -412,6 +734,11 @@ pinta_botones:
         mov edi, botones2
         mov ebx, 32
         call br_fila
+        COLOR C_TINTA               ; (delante de las muestras del fondo)
+        mov eax, FON_X
+        mov ebx, 35
+        mov esi, t_b_fondo
+        HV dc_texto
         popad
         ret
 ; lo que pregunta la barra común de cada botón (EDI): EBP=1 si está puesto
@@ -419,6 +746,11 @@ pinta_botones:
 barra_estado:
         xor ebp, ebp
         mov eax, [edi+12]
+        cmp eax, O_PRELIM
+        jne .np
+        movzx ebp, byte [vp_on]
+        ret
+.np:
         mov edx, [act_fmt]
         mov ecx, F_NEG
         cmp eax, O_NEG
@@ -461,8 +793,17 @@ barra_estado:
         cmp eax, O_COLOR
         jb .x
         cmp eax, O_COLOR + 3
-        ja .x
-        jmp .igual
+        jbe .igual
+        sub eax, O_FONDO            ; el fondo: el de su botón
+        cmp eax, N_FONDOS
+        jae .x
+        movzx eax, byte [fondos+eax]
+        shr edx, F_FONDO_D
+        and edx, 15
+        cmp eax, edx
+        jne .x
+        inc ebp
+        ret
 .z:
         jne .x
         inc ebp
@@ -623,6 +964,11 @@ pinta_pie:
         call br_pie
         jc .x
         mov edi, pie_txt
+        cmp byte [vp_on], 0
+        je .nv
+        call vp_pie
+        jmp .pon
+.nv:
         cmp byte [editando], 0
         je .n
         mov esi, t_pie_edita
@@ -762,19 +1108,80 @@ suma_rango:
         popad
         ret
 
-; ---- los rótulos de las columnas y de las filas ----
+; ---- los rótulos de las columnas y de las filas: primero los de las
+;      inmovilizadas (si las hay) y luego los de las que se mueven ----
 pinta_rotulos:
         pushad
-        COLOR C_PIEDRA              ; el fondo de los rótulos y la esquina
-        xor eax, eax                ; (pulsarla lo elige todo)
+        xor eax, eax
         mov ebx, HY0
         mov ecx, [gx1]
         mov edx, [gy1]
-        HV dc_rect
+        sub edx, ebx
+        call recorta
+        COLOR C_PIEDRA              ; el fondo de los rótulos y la esquina
+        HV dc_rect                  ; (pulsarla lo elige todo)
+        mov eax, [gx0]              ; las columnas que se mueven
+        mov ebx, HY0
+        mov ecx, [gx1]
+        sub ecx, eax
+        jle .cf
+        mov edx, [gy1]
+        sub edx, ebx
+        call recorta
         mov ecx, [desp_col]
+        mov esi, NCOL
+        call .cols
+        cmp eax, [gx1]              ; a la derecha de la última columna
+        jge .cf
+        COLOR C_CREMA
+        mov ebx, HY0
+        mov ecx, [gx1]
+        sub ecx, eax
+        mov edx, [gy1]
+        HV dc_rect
+.cf:
+        cmp dword [inm_c], 0        ; y las inmovilizadas
+        je .filas
         mov eax, ROT_AN
-.col:
-        cmp ecx, NCOL
+        mov ebx, HY0
+        mov ecx, [gx0]
+        sub ecx, eax
+        mov edx, ROT_AL
+        call recorta
+        xor ecx, ecx
+        mov esi, [inm_c]
+        call .cols
+.filas:
+        xor eax, eax                ; las filas que se mueven
+        mov ebx, [gy0]
+        mov ecx, ROT_AN
+        mov edx, [gy1]
+        sub edx, ebx
+        jle .ff
+        call recorta
+        mov edx, [desp_fil]
+        mov esi, NFIL
+        call .fils
+.ff:
+        cmp dword [inm_f], 0
+        je .x
+        xor eax, eax
+        mov ebx, GY0
+        mov ecx, ROT_AN
+        mov edx, [gy0]
+        sub edx, ebx
+        call recorta
+        xor edx, edx
+        mov ebx, GY0
+        mov esi, [inm_f]
+        call .fils
+.x:
+        popad
+        ret
+; (interna) los rótulos de las columnas, de la ECX (en la x EAX) a la ESI
+; (sin llegar) o hasta el borde -> EAX=la x donde acaban
+.cols:
+        cmp ecx, esi
         jae .colf
         cmp eax, [gx1]
         jge .colf
@@ -811,33 +1218,27 @@ pinta_rotulos:
         add eax, [esp+4]
         mov ebx, HY0 + 1
         COLOR C_TINTA
+        push esi
         mov esi, ref_txt
         HV dc_texto
+        pop esi
 .c2:
         pop edx
         pop eax
         pop ecx
         add eax, edx
         inc ecx
-        jmp .col
+        jmp .cols
 .colf:
-        cmp eax, [gx1]              ; a la derecha de la última columna
-        jge .filas
-        COLOR C_CREMA
-        mov ebx, HY0
-        mov ecx, [gx1]
-        sub ecx, eax
-        mov edx, [gy1]
-        HV dc_rect
-.filas:
-        mov edx, [desp_fil]
-        mov ebx, GY0
-.fil:
-        cmp edx, NFIL
+        ret
+; (interna) los rótulos de las filas, de la EDX (en la y EBX) a la ESI
+.fils:
+        cmp edx, esi
         jae .filf
         cmp ebx, [gy1]
         jge .filf
         push edx
+        movzx edi, byte [fil_al+edx]        ; EDI=su alto
         COLOR C_PIEDRA
         cmp edx, [r_f1]
         jb .f1
@@ -847,65 +1248,193 @@ pinta_rotulos:
 .f1:
         xor eax, eax
         mov ecx, ROT_AN
-        mov edx, CEL_AL
+        mov edx, edi
         HV dc_rect
         COLOR C_ARENA_OSC
         push ebx
-        add ebx, CEL_AL - 1
+        lea ebx, [ebx+edi-1]
         mov edx, 1
         HV dc_rect
         pop ebx
+        cmp edi, 14                 ; (en una fila muy baja no cabe el número)
+        jb .f2
         mov eax, [esp]
         inc eax
+        push edi
         mov edi, ref_txt
         call hvl_num
         mov byte [edi], 0
-        sub edi, ref_txt            ; el número, arrimado a la derecha
+        sub edi, ref_txt            ; el número, arrimado a la derecha y abajo
         shl edi, 3
         mov eax, ROT_AN - 4
         sub eax, edi
-        inc ebx
+        pop edi
+        push ebx
+        lea ebx, [ebx+edi-17]
         COLOR C_TINTA
+        push esi
         mov esi, ref_txt
         HV dc_texto
-        dec ebx
+        pop esi
+        pop ebx
+.f2:
         pop edx
-        add ebx, CEL_AL
+        add ebx, edi
         inc edx
-        jmp .fil
+        jmp .fils
 .filf:
+        ret
+
+; ---- las zonas de la rejilla. Con filas y columnas inmovilizadas son
+;      cuatro: la esquina (filas y columnas quietas), la de arriba (filas
+;      quietas), la de la izquierda (columnas quietas) y la que se mueve.
+;      Cada una se pinta igual, recortada a su sitio ----
+; prepara la zona ESI (bit 0: sus columnas se mueven; bit 1: sus filas) y
+; recorta el dibujo a ella. CF=1 si no tiene nada
+zona_pon:
+        pushad
+        test esi, 1
+        jnz .cm
+        mov eax, [inm_c]            ; columnas quietas: de la 0 a la última
+        test eax, eax               ; inmovilizada
+        jz .nada
+        mov [z_cn], eax
+        xor eax, eax
+        mov [z_c0], eax
+        mov [z_cb], eax
+        mov dword [z_xa], ROT_AN
+        mov eax, [gx0]
+        jmp .c1
+.cm:
+        mov eax, [desp_col]
+        mov [z_c0], eax
+        mov eax, [inm_c]
+        mov [z_cb], eax
+        mov dword [z_cn], NCOL
+        mov eax, [gx0]
+        mov [z_xa], eax
+        mov eax, [gx1]
+.c1:
+        cmp eax, [gx1]
+        jle .c2
+        mov eax, [gx1]
+.c2:
+        mov [z_xb], eax
+        cmp eax, [z_xa]
+        jle .nada
+        test esi, 2
+        jnz .fm
+        mov eax, [inm_f]
+        test eax, eax
+        jz .nada
+        mov [z_fn], eax
+        xor eax, eax
+        mov [z_f0], eax
+        mov [z_fb], eax
+        mov dword [z_ya], GY0
+        mov eax, [gy0]
+        jmp .f1
+.fm:
+        mov eax, [desp_fil]
+        mov [z_f0], eax
+        mov eax, [inm_f]
+        mov [z_fb], eax
+        mov dword [z_fn], NFIL
+        mov eax, [gy0]
+        mov [z_ya], eax
+        mov eax, [gy1]
+.f1:
+        cmp eax, [gy1]
+        jle .f2
+        mov eax, [gy1]
+.f2:
+        mov [z_yb], eax
+        cmp eax, [z_ya]
+        jle .nada
+        call zona_corta
+        popad
+        clc
+        ret
+.nada:
+        popad
+        stc
+        ret
+; recorta el dibujo a la zona
+zona_corta:
+        pushad
+        mov eax, [z_xa]
+        mov ebx, [z_ya]
+        mov ecx, [z_xb]
+        sub ecx, eax
+        mov edx, [z_yb]
+        sub edx, ebx
+        call recorta
         popad
         ret
 
-; ---- la rejilla: el fondo, lo elegido, las rayas, lo que hay en cada celda,
-;      el marco de lo elegido y lo que se está tecleando ----
-pinta_celdas:
+; ---- una zona: el fondo, lo elegido, las rayas, lo que hay en cada celda y
+;      el marco de lo elegido ----
+pinta_zona:
         pushad
         COLOR C_BLANCO
-        mov eax, ROT_AN
-        mov ebx, GY0
-        mov ecx, [gx1]
-        mov edx, [gy1]
+        mov eax, [z_xa]
+        mov ebx, [z_ya]
+        mov ecx, [z_xb]
+        sub ecx, eax
+        mov edx, [z_yb]
+        sub edx, ebx
         HV dc_rect
-        ; el rectángulo de lo elegido, en la ventana (recortado a lo que se ve)
+        ; lo elegido que cae en esta zona, en la ventana (recortado a ella)
+        mov byte [s_hay], 0
         mov ecx, [r_c1]
+        cmp ecx, [z_cb]
+        jae .s1
+        mov ecx, [z_cb]
+.s1:
+        mov eax, [r_c2]
+        cmp eax, [z_cn]
+        jb .s2
+        mov eax, [z_cn]
+        dec eax
+.s2:
+        cmp ecx, eax
+        jg .rayas
+        push eax
         call col_x
         call .recx
         mov [s_x0], eax
-        mov ecx, [r_c2]
-        inc ecx
-        call col_x
+        pop ecx
+        call col_x1
         call .recx
         mov [s_x1], eax
         mov edx, [r_f1]
+        cmp edx, [z_fb]
+        jae .s3
+        mov edx, [z_fb]
+.s3:
+        mov eax, [r_f2]
+        cmp eax, [z_fn]
+        jb .s4
+        mov eax, [z_fn]
+        dec eax
+.s4:
+        cmp edx, eax
+        jg .rayas
+        push eax
         call fil_y
         call .recy
         mov [s_y0], ebx
-        mov edx, [r_f2]
-        inc edx
-        call fil_y
+        pop edx
+        call fil_y1
         call .recy
         mov [s_y1], ebx
+        mov eax, [s_x1]
+        cmp eax, [s_x0]
+        jle .rayas
+        mov eax, [s_y1]
+        cmp eax, [s_y0]
+        jle .rayas
+        mov byte [s_hay], 1
         cmp dword [sel_varias], 0
         je .rayas
         COLOR C_PETROLEO            ; varias celdas: en petróleo, menos la activa
@@ -913,86 +1442,103 @@ pinta_celdas:
         mov ebx, [s_y0]
         mov ecx, [s_x1]
         sub ecx, eax
-        jle .rayas
         mov edx, [s_y1]
         sub edx, ebx
-        jle .rayas
         HV dc_rect
-        COLOR C_BLANCO
-        mov ecx, [cur_col]
-        call col_x
-        movzx ecx, word [col_an+ecx*2]
+        mov ecx, [cur_col]          ; (si la activa es de esta zona)
+        cmp ecx, [z_cb]
+        jb .rayas
+        cmp ecx, [z_cn]
+        jae .rayas
         mov edx, [cur_fil]
+        cmp edx, [z_fb]
+        jb .rayas
+        cmp edx, [z_fn]
+        jae .rayas
+        COLOR C_BLANCO
+        call col_x
+        mov esi, eax
+        call cel_ancho
+        mov ecx, eax
+        mov eax, esi
         call fil_y
-        mov edx, CEL_AL
-        cmp ebx, GY0 - CEL_AL
+        movzx edx, byte [fil_al+edx]
+        cmp ebx, GY0 - AL_MAX
         jl .rayas
         cmp ebx, [gy1]
         jg .rayas
         HV dc_rect
 .rayas:
         COLOR C_ARENA_OSC
-        mov ecx, [desp_col]         ; las verticales
-        mov eax, ROT_AN
+        mov ecx, [z_c0]             ; las verticales
+        mov eax, [z_xa]
 .v:
-        cmp eax, [gx1]
+        cmp eax, [z_xb]
         jg .vf
         push ecx
-        mov ebx, GY0
+        mov ebx, [z_ya]
         mov ecx, 1
         mov edx, [gy1]
         HV dc_rect
         pop ecx
-        cmp ecx, NCOL
+        cmp ecx, [z_cn]
         jae .vf
         movzx edx, word [col_an+ecx*2]
         add eax, edx
         inc ecx
         jmp .v
 .vf:
-        mov ebx, GY0                ; y las horizontales
+        mov edx, [z_f0]             ; y las horizontales
+        mov ebx, [z_ya]
 .h:
-        cmp ebx, [gy1]
+        cmp ebx, [z_yb]
         jg .hf
-        mov eax, ROT_AN
+        push edx
+        mov eax, [z_xa]
         mov ecx, [gx1]
         mov edx, 1
         HV dc_rect
-        add ebx, CEL_AL
+        pop edx
+        cmp edx, [z_fn]
+        jae .hf
+        movzx eax, byte [fil_al+edx]
+        add ebx, eax
+        inc edx
         jmp .h
 .hf:
-        mov edx, [desp_fil]         ; lo que hay escrito, fila a fila
-        mov ebx, GY0
+        mov edx, [z_f0]             ; lo que hay escrito, fila a fila
+        mov ebx, [z_ya]
 .fila:
-        cmp edx, NFIL
+        cmp edx, [z_fn]
         jae .marco
-        cmp ebx, [gy1]
+        cmp ebx, [z_yb]
         jge .marco
         call pinta_fila
-        add ebx, CEL_AL
+        movzx eax, byte [fil_al+edx]
+        add ebx, eax
         inc edx
         jmp .fila
 .marco:
+        cmp byte [s_hay], 0
+        je .senala
         COLOR C_TINTA               ; el marco de lo elegido: dos puntos de grueso
         mov eax, [s_x0]
         mov ebx, [s_y0]
         mov ecx, [s_x1]
         sub ecx, eax
-        jle .edita
         mov edx, [s_y1]
         sub edx, ebx
-        jle .edita
         HV dc_marco
         inc eax
         inc ebx
         sub ecx, 2
         sub edx, 2
         HV dc_marco
-.edita:
+.senala:
         cmp byte [editando], 0
         je .x
         cmp byte [pt_activo], 0     ; lo señalado para la fórmula: un marco terracota
-        je .ed0
+        je .x
         COLOR C_TERRACOTA
         mov ecx, [pt_c1]
         cmp ecx, [pt_c2]
@@ -1007,8 +1553,7 @@ pinta_celdas:
         jae .p2
         mov ecx, [pt_c2]
 .p2:
-        inc ecx
-        call col_x
+        call col_x1
         call .recx
         mov edi, eax
         mov edx, [pt_f1]
@@ -1024,15 +1569,14 @@ pinta_celdas:
         jae .p4
         mov edx, [pt_f2]
 .p4:
-        inc edx
-        call fil_y
+        call fil_y1
         call .recy
         mov edx, ebx
         sub edx, ebp
-        jle .ed0
+        jle .x
         mov ecx, edi
         sub ecx, esi
-        jle .ed0
+        jle .x
         mov eax, esi
         mov ebx, ebp
         HV dc_marco
@@ -1041,16 +1585,100 @@ pinta_celdas:
         sub ecx, 2
         sub edx, 2
         HV dc_marco
-.ed0:
-        mov ecx, [cur_col]          ; lo que se teclea, sobre la celda (y sobre
-        call col_x                  ; las de su derecha, si no cabe)
+.x:
+        popad
+        ret
+; (internas) recortan una x o una y a los bordes de la zona, con dos puntos
+; de sobra (para que el marco de lo que se sale no se vea)
+.recx:
+        push ebx
+        mov ebx, [z_xa]
+        sub ebx, 2
+        cmp eax, ebx
+        jge .rx1
+        mov eax, ebx
+.rx1:
+        mov ebx, [z_xb]
+        add ebx, 2
+        cmp eax, ebx
+        jle .rx2
+        mov eax, ebx
+.rx2:
+        pop ebx
+        ret
+.recy:
+        push eax
+        mov eax, [z_ya]
+        sub eax, 2
+        cmp ebx, eax
+        jge .ry1
+        mov ebx, eax
+.ry1:
+        mov eax, [z_yb]
+        add eax, 2
+        cmp ebx, eax
+        jle .ry2
+        mov ebx, eax
+.ry2:
+        pop eax
+        ret
+
+; ---- las rayas que separan lo inmovilizado de lo que se mueve ----
+pinta_inm:
+        pushad
+        COLOR C_TINTA
+        cmp dword [inm_c], 0
+        je .f
+        mov eax, [gx0]
+        mov ebx, GY0
+        mov ecx, 1
+        mov edx, [gy1]
+        HV dc_rect
+.f:
+        cmp dword [inm_f], 0
+        je .x
+        mov eax, ROT_AN
+        mov ebx, [gy0]
+        mov ecx, [gx1]
+        mov edx, 1
+        HV dc_rect
+.x:
+        popad
+        ret
+
+; ---- lo que se teclea, sobre la celda (y sobre las de su derecha, si no
+;      cabe) ----
+pinta_edita:
+        pushad
+        cmp byte [editando], 0
+        je .x
+        mov ecx, [cur_col]
+        mov edx, [cur_fil]
+        call col_x
         cmp eax, ROT_AN
         jl .x
-        mov edx, [cur_fil]
+        cmp ecx, [inm_c]            ; (una celda que se mueve y ha quedado
+        jb .e0                      ; debajo de las inmovilizadas no se ve)
+        cmp eax, [gx0]
+        jl .x
+.e0:
         call fil_y
         cmp ebx, GY0
         jl .x
-        movzx ecx, word [col_an+ecx*2]
+        cmp edx, [inm_f]
+        jb .e00
+        cmp ebx, [gy0]
+        jl .x
+.e00:
+        push eax
+        movzx eax, byte [fil_al+edx]        ; (en una fila alta, abajo: donde
+        sub eax, CEL_AL             ; está lo escrito)
+        jle .e01
+        add ebx, eax
+.e01:
+        call cel_ancho
+        mov ecx, eax
+        pop eax
         xor edx, edx
 .el:
         cmp byte [edt_buf+edx], 0
@@ -1089,107 +1717,155 @@ pinta_celdas:
 .x:
         popad
         ret
-; (internas) recortan una x o una y a los bordes de la rejilla, con dos
-; puntos de sobra (para que el marco de lo que se sale no se vea)
-.recx:
-        cmp eax, ROT_AN - 2
-        jge .rx1
-        mov eax, ROT_AN - 2
-.rx1:
-        push ebx
-        mov ebx, [gx1]
-        add ebx, 2
-        cmp eax, ebx
-        jle .rx2
-        mov eax, ebx
-.rx2:
-        pop ebx
-        ret
-.recy:
-        cmp ebx, GY0 - 2
-        jge .ry1
-        mov ebx, GY0 - 2
-.ry1:
-        push eax
-        mov eax, [gy1]
-        add eax, 2
-        cmp ebx, eax
-        jle .ry2
-        mov ebx, eax
-.ry2:
-        pop eax
-        ret
 
-; (interna) lo escrito en la fila EDX, que está en la y EBX. Empieza por la
-; última celda con algo que quede a la izquierda de lo que se ve: si es un
-; texto largo, se desborda hasta aquí
+; (interna) lo escrito en la fila EDX, que está en la y EBX, dentro de la
+; zona. Empieza por la última celda con algo (o combinada) que quede a la
+; izquierda de lo que se ve: si es un texto largo, se desborda hasta aquí
 pinta_fila:
         pushad
+        mov [pf_y], ebx
+        movzx eax, byte [fil_al+edx]
+        mov [pf_al], eax
+        cmp eax, CEL_AL             ; una fila baja: lo escrito no puede
+        jae .nr                     ; salirse de ella
+        push edx
+        mov ecx, [z_xb]
+        mov edx, eax
+        dec edx
+        mov eax, [z_xa]
+        sub ecx, eax
+        inc ebx
+        mov esi, [z_yb]             ; (ni de la zona)
+        sub esi, ebx
+        cmp edx, esi
+        jle .nr0
+        mov edx, esi
+.nr0:
+        mov esi, [z_ya]
+        sub esi, ebx
+        jle .nr1
+        add ebx, esi
+        sub edx, esi
+.nr1:
+        test edx, edx
+        jg .nr2
+        pop edx
+        jmp .bordes
+.nr2:
+        call recorta
+        pop edx
+        mov ebx, [pf_y]
+.nr:
         mov esi, edx
         shl esi, 6                  ; ESI=la primera celda de la fila
-        mov ecx, [desp_col]
+        mov ecx, [z_c0]
 .atras:
-        test ecx, ecx
-        jz .desde
+        cmp ecx, [z_cb]
+        jbe .desde
         dec ecx
         lea edi, [esi+ecx]
         cmp dword [cel_off+edi*4], 0
-        je .atras
+        jne .ya
+        test dword [cel_fmt+edi*4], F_COMB
+        jz .atras
         jmp .ya
 .desde:
-        mov ecx, [desp_col]
+        mov ecx, [z_c0]
 .ya:
         call col_x                  ; EAX=la x de la columna ECX
 .c:
-        cmp ecx, NCOL
-        jae .x
-        cmp eax, [gx1]
-        jge .x
+        cmp ecx, [z_cn]
+        jae .bordes
+        cmp eax, [z_xb]
+        jge .bordes
         lea edi, [esi+ecx]
+        mov ebp, [cel_fmt+edi*4]
+        test ebp, F_FONDO | F_COMB
+        jnz .p
         cmp dword [cel_off+edi*4], 0
         je .s
+.p:
         call pinta_celda
 .s:
+        shr ebp, F_COMB_D           ; detrás de ella y de las que tapa
+        and ebp, 63
+.s1:
         movzx edi, word [col_an+ecx*2]
         add eax, edi
         inc ecx
+        sub ebp, 1
+        jc .c
+        cmp ecx, [z_cn]
+        jb .s1
         jmp .c
-.x:
-        mov ecx, [desp_col]         ; y los bordes de las celdas que se ven (y el
-        test ecx, ecx               ; de la derecha de la que queda justo antes)
-        jz .b0
+.bordes:
+        cmp dword [pf_al], CEL_AL
+        jae .b00
+        call zona_corta
+.b00:
+        mov edx, [esp+20]           ; (la fila)
+        mov esi, edx
+        shl esi, 6
+        mov ebx, [pf_y]
+        mov ecx, [z_c0]             ; los bordes de las celdas que se ven (y el
+        cmp ecx, [z_cb]             ; de la derecha de la que queda justo antes)
+        jbe .b0
         dec ecx
 .b0:
+        mov dword [pf_resto], 0     ; (de una combinada solo cuenta la raya de
+        test ecx, ecx               ; la derecha de su última celda)
+        jz .b01
+        dec ecx
+        call comb_r
+        inc ecx
+        mov [pf_resto], eax
+.b01:
         call col_x
 .b:
-        cmp ecx, NCOL
+        cmp ecx, [z_cn]
         jae .bx
-        cmp eax, [gx1]
+        cmp eax, [z_xb]
         jge .bx
         movzx edi, word [col_an+ecx*2]
         lea edx, [esi+ecx]
-        mov dx, [cel_fmt+edx*2]
-        test dx, F_BABA | F_BDER
+        mov edx, [cel_fmt+edx*4]
+        mov ebp, edx
+        shr ebp, F_COMB_D
+        and ebp, 63
+        jz .br1
+        mov [pf_resto], ebp
+        jmp .br2
+.br1:
+        cmp dword [pf_resto], 0
+        je .br2
+        dec dword [pf_resto]
+.br2:
+        cmp dword [pf_resto], 0
+        je .br3
+        and edx, ~F_BDER
+.br3:
+        test edx, F_BABA | F_BDER
         jz .bs
         COLOR C_TINTA
         push ecx
-        test dx, F_BABA
+        test edx, F_BABA
         jz .b1
         push ebx
         push edx
-        add ebx, CEL_AL
+        add ebx, [pf_al]
         lea ecx, [edi+1]
         mov edx, 1
         HV dc_rect
         pop edx
         pop ebx
 .b1:
-        test dx, F_BDER
+        test edx, F_BDER
         jz .b2
         push eax
         add eax, edi
         mov ecx, 1
-        mov edx, CEL_AL + 1
+        mov edx, [pf_al]
+        inc edx
         HV dc_rect
         pop eax
 .b2:
@@ -1202,27 +1878,27 @@ pinta_fila:
         popad
         ret
 
-; (interna) la celda ECX=columna EDX=fila, que está en EAX=x EBX=y
+; (interna) la celda ECX=columna EDX=fila, que está en EAX=x EBX=y: su fondo
+; (si tiene color, o tapa a otras) y lo que hay escrito
 pinta_celda:
         pushad
         mov [pc_x], eax
         mov [pc_y], ebx
+        call cel_ancho
+        mov [pc_an], eax
         call celda_ver
-        xor edi, edi                ; EDI=las letras que tiene
-.l:
-        cmp byte [disp+edi], 0
-        je .lf
-        inc edi
-        jmp .l
-.lf:
-        test edi, edi
-        jz .x
         ; los colores: lo elegido (menos la celda activa), en claro sobre petróleo
         mov eax, [disp_fmt]
+        mov ebx, eax
         shr eax, F_COLOR_D
         and eax, 7
         mov al, [colores+eax]
-        mov ah, C_BLANCO
+        shr ebx, F_FONDO_D
+        and ebx, 15
+        jnz .f0
+        mov bl, C_BLANCO
+.f0:
+        mov ah, bl
         cmp dword [sel_varias], 0
         je .col
         cmp ecx, [r_c1]
@@ -1243,8 +1919,36 @@ pinta_celda:
 .col:
         mov [tc_fg], al
         mov [tc_bg], ah
-        movzx ebp, word [col_an+ecx*2]
-        mov [pc_an], ebp
+        test dword [disp_fmt], F_FONDO | F_COMB
+        jz .txt
+        push ecx                    ; el fondo: por dentro de las rayas
+        push edx
+        movzx eax, byte [tc_bg]
+        HV dc_color
+        mov eax, [pc_x]
+        inc eax
+        mov ebx, [pc_y]
+        inc ebx
+        mov ecx, [pc_an]
+        dec ecx
+        mov edx, [pf_al]
+        dec edx
+        jle .f1
+        HV dc_rect
+.f1:
+        pop edx
+        pop ecx
+.txt:
+        xor edi, edi                ; EDI=las letras que tiene
+.l:
+        cmp byte [disp+edi], 0
+        je .lf
+        inc edi
+        jmp .l
+.lf:
+        test edi, edi
+        jz .x
+        mov ebp, [pc_an]
         sub ebp, 6                  ; EBP=las letras que caben en la celda
         jns .c1
         xor ebp, ebp
@@ -1256,7 +1960,9 @@ pinta_celda:
         je .corta                   ; ya viene con almohadillas)
         cmp dword [disp_alin], 1
         jne .corta
-        ; un texto largo: sobre las celdas vacías de su derecha
+        test dword [disp_fmt], F_COMB       ; (ni una combinada)
+        jnz .corta
+        ; un texto largo: sobre las celdas vacías (y sin color) de su derecha
         mov esi, edx
         shl esi, 6
         mov eax, [pc_x]
@@ -1267,13 +1973,15 @@ pinta_celda:
         cmp eax, ebx
         jge .desf
         inc ecx
-        cmp ecx, NCOL
+        cmp ecx, [z_cn]
         jae .desf
-        cmp eax, [gx1]
+        cmp eax, [z_xb]
         jge .desf
         lea ebx, [esi+ecx]
         cmp dword [cel_off+ebx*4], 0
         jne .desf
+        test dword [cel_fmt+ebx*4], F_FONDO | F_COMB
+        jnz .desf
         movzx ebx, word [col_an+ecx*2]
         add eax, ebx
         jmp .des
@@ -1292,7 +2000,8 @@ pinta_celda:
         inc eax
         mov ebx, [pc_y]
         inc ebx
-        mov edx, CEL_AL - 1
+        mov edx, [pf_al]
+        dec edx
         HV dc_rect
 .corta:
         cmp edi, ebp
@@ -1319,8 +2028,9 @@ pinta_celda:
 .a3:
         lea eax, [eax+edx-3]
 .pinta:
-        mov ebx, [pc_y]
-        inc ebx
+        mov ebx, [pc_y]             ; abajo de la celda (en una fila de alto
+        add ebx, [pf_al]            ; normal, un punto por debajo de la raya)
+        sub ebx, 17
         mov ecx, edi
         mov esi, disp
         mov edx, [disp_fmt]
@@ -1415,6 +2125,23 @@ texto_cursiva:
 cli_an      resd 1                  ; la zona de la ventana
 cli_al      resd 1
 gx1         resd 1                  ; donde acaba la rejilla (y empiezan las barras)
+gx0         resd 1                  ; donde empiezan las columnas que se mueven
+gy0         resd 1                  ; y las filas (detrás de las inmovilizadas)
+inm_c       resd 1                  ; columnas inmovilizadas (las primeras)
+inm_f       resd 1                  ; y filas
+z_c0        resd 1                  ; la zona que se pinta: su primera columna,
+z_cb        resd 1                  ; la primera que le toca (aunque no se vea),
+z_cn        resd 1                  ; y la siguiente a la última;
+z_xa        resd 1                  ; de qué x a cuál;
+z_xb        resd 1
+z_f0        resd 1                  ; y lo mismo, de las filas
+z_fb        resd 1
+z_fn        resd 1
+z_ya        resd 1
+z_yb        resd 1
+pf_y        resd 1                  ; pinta_fila: su y,
+pf_al       resd 1                  ; su alto
+pf_resto    resd 1                  ; y lo que queda de una combinada
 gy1         resd 1
 vis_col     resd 1                  ; columnas y filas enteras que se ven
 vis_fil     resd 1
@@ -1435,6 +2162,7 @@ tc_n        resd 1                  ; texto_cursiva
 tc_an       resd 1
 pila_ant    resd 1
 disp_tipo   resb 1                  ; y la clase de lo que hay
+s_hay       resb 1                  ; lo elegido cae en la zona que se pinta
 sr_mal      resb 1
 tc_fg       resb 1
 tc_bg       resb 1
