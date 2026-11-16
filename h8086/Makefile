@@ -31,10 +31,13 @@ $(B):
 $(B)/arranque.bin: arranque.asm | $(B)
 	$(CP437) $< $(B)/gen/arranque.asm && $(NASM) -f bin -o $@ $(B)/gen/arranque.asm
 
-NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc ordenes.inc
+NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc
 $(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
 	for f in $(NUCLEO); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
 	cd $(B)/gen && $(NASM) -f bin -l nucleo.lst -o ../NUCLEO86.SYS nucleo.asm
+
+$(B)/COMMAND.COM: command.asm | $(B)
+	$(CP437) $< $(B)/gen/command.asm && $(NASM) -f bin -o $@ $(B)/gen/command.asm
 
 $(B)/HOLA.COM: prueba/hola.asm | $(B)
 	$(CP437) $< $(B)/gen/hola.asm && $(NASM) -f bin -o $@ $(B)/gen/hola.asm
@@ -48,7 +51,7 @@ $(B)/EXE.EXE: prueba/exe.asm | $(B)
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos

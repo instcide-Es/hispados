@@ -47,18 +47,22 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.3 - de la familia Rescoldo" ""
+esta p1 "Hispa-8086 0.4 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
-esta p1 "puede con HISPA-DOS" "el consejo: "
+esta p1 "puede con HISPA VENTANAS" "el consejo: "
 esta p1 'A:\>' ""
+esta p1 "Arranque terminado (AUTOEXEC.BAT)." "AUTOEXEC.BAT al arrancar: "
+noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
+noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.3" "VER: "
+esta p2 "Hispa-8086 versión 0.4" "VER: "
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
-esta p2 "5 archivos, " "DIR: "
+esta p2 "8 archivos, " "DIR: "
+esta p2 "COMMAND.COM" "DIR: "
 esta p2 "octetos libres" "DIR: "
 noesta p2 "HISPA-8086 " "DIR: (la etiqueta) "
 escribe "cls"; escribe "mostrar leeme.txt"
@@ -73,6 +77,15 @@ esta p4 "Vectores: bien" "HOLA.COM: "
 esta p4 "No existe ese archivo." ""
 esta p4 "Orden desconocida. Escriba AYUDA." ""
 esta p4 "Procesador: 80486 o superior" "EQUIPO: "
+
+echo "== Hispa-8086: archivos por lotes =="
+escribe "limpiar"; escribe "lote"; sleep 4; escribe "eco hola eco"; escribe "rem nada"
+pantalla pl
+esta pl "Lote: empiezo" "un .BAT: "
+esta pl "Parametros: desde el lote" "que lanza un programa: "
+esta pl "Hispa-8086 versión 0.4" "y una orden de dentro: "
+esta pl "Lote: acabo" "y sigue hasta el final: "
+esta pl "hola eco" "ECO desde el teclado: "
 
 echo "== Hispa-8086: memoria, programas .EXE y lanzar otro programa =="
 escribe "limpiar"; escribe "exe"; sleep 4; escribe "equipo"
@@ -152,7 +165,7 @@ libre=$(mdir -i build/hispa8086-360.img :: | awk '/bytes free/ { gsub(/ /, "", $
 if [ "${libre:-0}" -gt 100000 ]; then ok "en el disquete de 360 K quedan $libre octetos libres"; else ko "el disquete de 360 K se queda sin sitio ($libre)"; fi
 
 echo "== Hispa-8086: solo instrucciones del 8086 =="
-for f in arranque nucleo; do
+for f in arranque nucleo command; do
   if grep -q "^\s*cpu 8086" $f.asm; then ok "$f.asm se ensambla con «cpu 8086»"; else ko "$f.asm no lleva «cpu 8086»"; fi
 done
 # lo único de 386 es la prueba que distingue el 386 del 486, que solo corre
@@ -161,7 +174,9 @@ n=$(grep -c "^\s*cpu 386" nucleo.asm)
 if [ "$n" = 1 ]; then ok "un solo tramo de 386 (detrás de la prueba del 286)"; else ko "tramos de 386: $n"; fi
 tam=$(stat -c %s build/NUCLEO86.SYS)
 if [ $tam -lt 16384 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núcleo ha crecido a $tam octetos"; fi
+tam=$(stat -c %s build/COMMAND.COM)
+if [ $tam -lt 16384 ]; then ok "el intérprete ocupa $tam octetos"; else ko "el intérprete ha crecido a $tam octetos"; fi
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pe p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pe p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
 rm -rf $T
 exit $fail

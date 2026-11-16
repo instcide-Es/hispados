@@ -7,7 +7,7 @@
 ;  8086 (el ensamblador lo vigila con «cpu 8086»), para que quepa y corra en
 ;  un PC o un XT de 256 K. docs/8086/HISPA-8086.md cuenta el plan entero.
 ;
-;  Lo que hay (etapas 0, 1 y 2):
+;  Lo que hay (etapas 0 a 3):
 ;    - arranca desde un disquete FAT12 (lo carga arranque.asm);
 ;    - reconoce el procesador y la memoria, y si la máquina puede con un
 ;      Hispa mayor, lo dice;
@@ -17,7 +17,8 @@
 ;      sitio libre, fecha y hora (archivos.inc, sobre disco.inc);
 ;    - la memoria por bloques (48h-4Ah) y los programas: .COM y .EXE, que
 ;      pueden lanzar otros (4Bh) (proceso.inc);
-;    - un intérprete de órdenes (ordenes.inc), dentro del núcleo por ahora.
+;    - lanza el intérprete de órdenes, que es un programa aparte
+;      (command.asm).
 ;  Lo que falta: CONFIG.SYS y los controladores, el disco duro, el
 ;  intérprete aparte... (ver «Etapas» en el documento).
 ;
@@ -62,12 +63,6 @@ inicio:
         call cpu_detecta
         int 0x12                    ; la memoria convencional, en K
         mov [mem_kb], ax
-        int 0x11                    ; ¿pantalla monocroma (MDA, Hercules)?
-        and al, 0x30
-        cmp al, 0x30
-        jne .color
-        mov byte [es_mono], 1
-.color:
         ; los vectores del sistema: INT 20h (terminar) e INT 21h
         xor ax, ax
         mov es, ax
@@ -84,20 +79,52 @@ inicio:
         mov bx, cs
         add ax, bx
         mov [mem_seg], ax           ; ahí empieza la memoria que se reparte
-        inc ax
-        mov [prog_seg], ax          ; (y lo que usa el intérprete de borrador)
         call mem_ini
         mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
         mov word [dta_off], dta_int
         call disco_ini
-        ; la bienvenida
         mov si, m_titulo
         call pon_cad
-        call pon_equipo
-        call pon_consejo
-        mov si, m_ayuda0
+        mov byte [primera], 1
+
+; lanza el intérprete de órdenes (\COMMAND.COM); al arrancar, con «/P». Si
+; termina, se lanza otra vez; si no está, no hay nada que hacer
+interprete:
+        cli
+        mov ax, cs
+        mov ss, ax
+        mov sp, pila_fin
+        mov ds, ax
+        mov es, ax
+        sti
+        cld
+        mov word [psp_act], 0
+        mov [dta_seg], cs
+        mov word [dta_off], dta_int
+        mov si, t_command
+        mov di, ruta
+.c:
+        lodsb
+        stosb
+        test al, al
+        jnz .c
+        mov word [lz_cola], cola_p
+        cmp byte [primera], 0
+        jne .l
+        mov word [lz_cola], cola_nada
+.l:
+        mov byte [primera], 0
+        mov [lz_cola+2], cs
+        mov word [lz_ent], 0
+        call lanza                  ; (si vuelve, no ha podido)
+        mov si, m_sin_command
         call pon_cad
-        jmp interprete
+.para:
+        hlt
+        jmp .para
+t_command   db "\COMMAND.COM", 0
+cola_p      db 3, " /P", 13
+cola_nada   db 0, 13
 
 ; =============================================================================
 ;  INT 20h e INT 21h
@@ -213,6 +240,7 @@ f21:
         F21 0x51, f51
         F21 0x56, f56
         F21 0x62, f51
+        F21 0xE8, fE8
         db 0
 
 ; 01h: una tecla, con eco -> AL
@@ -325,6 +353,14 @@ f35:
         mov [bp+R_BX], ax
         mov ax, [es:bx+2]
         mov [bp+R_ES], ax
+        ret
+; E8h (propia de Hispa-8086): AX = 4869h («Hi»), BL = el procesador
+; (CPU_*), BH = la versión del núcleo por diez
+fE8:
+        mov word [bp+R_AX], 0x4869
+        mov bl, [cpu_tipo]
+        mov bh, 4
+        mov [bp+R_BX], bx
         ret
 ; 4Dh: el código con que terminó el último programa -> AL (AH = 0)
 f4D:
@@ -552,68 +588,16 @@ cpu_detecta:
         mov [cpu_tipo], bl
         ret
 
-; escribe el procesador y la memoria
-pon_equipo:
-        mov si, m_cpu
-        call pon_cad
-        mov bl, [cpu_tipo]
-        xor bh, bh
-        shl bx, 1
-        mov si, [cpu_nombres+bx]
-        call pon_cad
-        mov si, m_mem
-        call pon_cad
-        mov ax, [mem_kb]
-        call pon_num
-        mov si, m_mem2
-        call pon_cad
-        call mem_mayor              ; lo que queda libre para los programas
-        mov ax, bx
-        mov cl, 6
-        shr ax, cl
-        call pon_num
-        mov si, m_mem3
-        jmp pon_cad
-
-; si la máquina puede con un Hispa mayor, lo dice (toda la familia se
-; recomienda entre sí: ver «Una familia que se actualiza» en el documento)
-pon_consejo:
-        mov si, m_consejo_386
-        cmp byte [cpu_tipo], CPU_386
-        jae pon_cad
-        mov si, m_consejo_286
-        cmp byte [cpu_tipo], CPU_286
-        je pon_cad
-        ret
-
-            align 2
-cpu_nombres dw c_8086, c_v20, c_186, c_286, c_386, c_486
-c_8086      db "8086 u 8088", 0
-c_v20       db "NEC V20 o V30", 0
-c_186       db "80186 u 80188", 0
-c_286       db "80286", 0
-c_386       db "80386", 0
-c_486       db "80486 o superior", 0
-
 %include "disco.inc"
 %include "archivos.inc"
 %include "proceso.inc"
-%include "ordenes.inc"
 
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.3 - de la familia Rescoldo", 10
+m_titulo    db 10, "Hispa-8086 0.4 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
-m_cpu       db "Procesador: ", 0
-m_mem       db 10, "Memoria:    ", 0
-m_mem2      db " K (", 0
-m_mem3      db " K libres para los programas)", 10, 0
-m_consejo_386 db 10, "Este equipo tiene un procesador de 32 bits: puede con HISPA-DOS, el", 10
-            db "hermano mayor, que trae el entorno Hispa Ventanas. Hispa-8086 funciona", 10
-            db "aquí, pero está hecho para los PC, XT y AT. Escriba ACTUALIZAR.", 10, 0
-m_consejo_286 db 10, "Este equipo tiene un 286: Hispa-8086 lo aprovecha (modo 286).", 10, 0
-m_ayuda0    db 10, "Escriba AYUDA para ver las órdenes.", 10, 0
+m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 
 ; =============================================================================
 ;  Las variables (no van en el archivo: el núcleo las pone a cero al arrancar)
@@ -623,7 +607,7 @@ m_ayuda0    db 10, "Escriba AYUDA para ver las órdenes.", 10, 0
 bss_ini:
 unidad      resb 1                  ; la unidad de arranque (la de la BIOS)
 cpu_tipo    resb 1
-es_mono     resb 1
+primera     resb 1                  ; aún no se ha lanzado el intérprete
 disco_ok    resb 1
 cod_salida  resb 1
 op13        resb 1                  ; disco_es: 2 leer, 3 escribir
@@ -635,7 +619,6 @@ bus_atr     resb 1
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
 mem_seg     resw 1                  ; la primera cabecera de la memoria que se reparte
-prog_seg    resw 1                  ; memoria libre que el intérprete usa de borrador
 psp_act     resw 1                  ; el programa que corre (0: el intérprete)
 lz_ent      resw 1                  ; lanza: el entorno pedido
 lz_cola     resw 2                  ; lo que va detrás del nombre
@@ -693,7 +676,6 @@ ruta        resb RUTA_MAX + 2
 dta_int     resb 44                 ; la zona de búsquedas del intérprete
 fichas      resb N_ARCH * H_TAM_F
 linea       resb LIN_MAX + 4
-VARS_ORDENES
             alignb 2
 sector      resb 512
 fat         resb FAT_MAX

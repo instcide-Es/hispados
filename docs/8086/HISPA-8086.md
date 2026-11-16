@@ -3,8 +3,8 @@
 *El sistema de la familia Hispa para los PC, XT y AT · noviembre de 2026*
 *Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
-Hispa-8086 es el sistema operativo de la familia [Rescoldo](../VISION.md) para
-las máquinas más veteranas: las de **8086, 8088, V20, 80186 y 286**. Hecho
+Hispa-8086 es el miembro de la familia **Hispa-DOS** (proyecto
+[Rescoldo](../VISION.md)) para las máquinas más veteranas: las de **8086, 8088, V20, 80186 y 286**. Hecho
 desde cero, en español, libre y todo en ensamblador, para que un PC o un XT de
 256 K vuelva a servir: escribir, hacer cuentas, programar en BASIC y pasar los
 archivos a un ordenador de hoy.
@@ -15,11 +15,12 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 
 ## Dónde estamos
 
-**Etapas 0, 1 y 2 hechas** (`h8086/`, noviembre de 2026). Versión 0.3.
+**Etapas 0 a 3 hechas** (`h8086/`, noviembre de 2026). Versión 0.4.
 
-- **Arranque**: sector de arranque FAT12 y núcleo (10,4 K en el disco; con sus
-  variables, la copia de la FAT y la pila, unos 18 K en memoria: en una
-  máquina de 640 K quedan 620 K para los programas), ensamblados
+- **Arranque**: sector de arranque FAT12 y núcleo (6,8 K en el disco). En
+  memoria, el núcleo con sus variables, la copia de la FAT y la pila son unos
+  14 K, y el intérprete de órdenes, otros 8 K: en una máquina de 640 K
+  quedan 618 K para los programas, ensamblados
   con `cpu 8086`: el ensamblador rechaza cualquier instrucción posterior.
   Disquetes de 360 K, 720 K, 1,2 M y 1,44 M.
 - **El equipo**: reconoce el procesador (8086/8088, V20/V30, 80186, 286, 386,
@@ -44,10 +45,14 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
   prefijo (PSP), sus parámetros y su entorno (las variables y, detrás, su
   propia ruta). Un programa puede lanzar otro; al terminar se cierran sus
   archivos y se suelta su memoria.
-- **Órdenes**, con los mismos nombres que en Hispa-DOS (el español y el
-  clásico): AYUDA, VER, EQUIPO, DIR, MOSTRAR, COPIAR, BORRAR (con comodines),
-  RENOMBRAR, CD, CREARDIR, BORRARDIR, LIMPIAR, ACTUALIZAR.
-- **Prueba automática** (`make -C h8086 prueba`): 58 comprobaciones en QEMU.
+- **El intérprete de órdenes es un programa aparte**, COMMAND.COM (4,7 K),
+  que el núcleo lanza al arrancar y que se queda solo con la memoria que
+  ocupa. Las órdenes llevan los mismos nombres que en el resto de la familia
+  (el español y el clásico): AYUDA, VER, EQUIPO, DIR, MOSTRAR, COPIAR, BORRAR
+  (con comodines), RENOMBRAR, CD, CREARDIR, BORRARDIR, LIMPIAR, ACTUALIZAR.
+- **Archivos por lotes** (.BAT) con ECO, REM y PAUSA, y **AUTOEXEC.BAT** al
+  arrancar. Todavía sin parámetros (%1), IF, GOTO ni redirección.
+- **Prueba automática** (`make -C h8086 prueba`): 69 comprobaciones en QEMU.
   Un .EXE hecho a mano (`prueba/exe.asm`) comprueba la reubicación, la
   memoria y el lanzamiento de otro programa; otro (`prueba/arch.asm`) ejerce
   la interfaz de archivos en doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
@@ -78,7 +83,11 @@ La familia agrupa por **clase de máquina**:
 | Núcleo | Procesadores | Sistema |
 |---|---|---|
 | 16 bits, modo real | 8086, 8088, V20/V30, 80186/188, 286 | **Hispa-8086** |
-| 32 bits | 386, 486 y superiores | **Hispa-DOS** (con Hispa Ventanas) |
+| 32 bits | 386, 486 y posteriores | **Hispa Ventanas** (escritorio sobre el núcleo de 32 bits) |
+
+**Hispa-DOS es el nombre de la familia** de sistemas operativos (Carlos,
+16/11/2026: «la familia de sistemas operativos hasta llegar a un kernel que
+no dependa de DOS»); Hispa-8086 e Hispa Ventanas son sus miembros.
 
 Por qué no más:
 
@@ -131,7 +140,7 @@ se pone en medio.
 | | MS-DOS 3.3 | Hispa-DOS 0.9 | Hispa-8086 (objetivo) |
 |---|---|---|---|
 | Residente (núcleo + intérprete) | ~54 K | ~59 K | **menos de 32 K** |
-| Hoy | | | unos 18 K (etapas 0 a 2, con el intérprete provisional dentro) |
+| Hoy | | | unos 22 K: 14 del núcleo y 8 del intérprete (etapas 0 a 3) |
 
 Reglas: el intérprete de órdenes tiene una parte que se puede pisar y volver
 a cargar (como COMMAND.COM); los búferes de disco se piden según la memoria
@@ -209,9 +218,9 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
   requisitos: procesador mínimo, memoria, disco y edición.
 - **Cada sistema mira la máquina** al arrancar y con `EQUIPO`.
 - **Cada sistema recomienda el que le corresponde a esa máquina.** Hispa-8086
-  en un 386 o un 486 funciona, pero aconseja pasar a Hispa-DOS con Hispa
-  Ventanas (ya lo hace desde la etapa 0); Hispa-DOS en una máquina que no
-  llegue dirá que su sitio es Hispa-8086. Es un consejo, una vez, sin
+  en un 386 o un 486 funciona, pero aconseja pasar a Hispa Ventanas (ya lo
+  hace desde la etapa 0); Hispa Ventanas en una máquina que no llegue dirá
+  que su sitio es Hispa-8086. Es un consejo, una vez, sin
   insistir ni impedir nada: quien quiera un 486 con Hispa-8086 puede tenerlo.
 - **`ACTUALIZAR` cambia de versión y también de sistema**, conservando los
   datos del usuario (como hace hoy entre versiones de Hispa-DOS).
@@ -229,7 +238,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 0 | Cimientos: arranque, núcleo mínimo, detección del equipo, .COM | **hecha** |
 | 1 | Archivos por INT 21h (abrir, leer, escribir, crear, borrar, buscar), subdirectorios, FAT12 de escritura | **hecha** |
 | 2 | Memoria por bloques (48h-4Ah), programas .EXE, lanzar programas (4Bh), entorno | **hecha** |
-| 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, redirección | |
+| 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha** (faltan %1, IF, GOTO y la redirección) |
 | 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | |
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | |
 | 6 | Modo 286: HMA y memoria extendida | |
@@ -257,7 +266,7 @@ Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto.
 | `h8086/disco.inc` | sectores, FAT12, directorios, rutas y archivos abiertos |
 | `h8086/archivos.inc` | las funciones de archivos y directorios de INT 21h |
 | `h8086/proceso.inc` | la memoria por bloques y los programas (.COM, .EXE, lanzar, terminar) |
-| `h8086/ordenes.inc` | el intérprete de órdenes (provisional, dentro del núcleo) |
+| `h8086/command.asm` | el intérprete de órdenes: COMMAND.COM |
 | `h8086/prueba/hola.asm` | un programa .COM de prueba |
 | `h8086/prueba/arch.asm` | la prueba de la interfaz de archivos, en doce pasos |
 | `h8086/prueba/exe.asm` | un .EXE hecho a mano: reubicación, memoria y lanzar otro programa |
