@@ -18,7 +18,7 @@ escribe() {
   local t="$1" i c
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
-    case "$c" in ' ') tecla spc;; '.') tecla dot;; *) tecla "$c";; esac
+    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '\') tecla backslash;; *) tecla "$c";; esac
   done
   tecla ret; sleep 0.8
 }
@@ -47,26 +47,25 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.1 - de la familia Rescoldo" ""
+esta p1 "Hispa-8086 0.2 - de la familia Rescoldo" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
 esta p1 "puede con HISPA-DOS" "el consejo: "
-esta p1 "A>" ""
-tecla ctrl-l 2>/dev/null
-escribe "borrar"; escribe "ver"; escribe "dir"
+esta p1 'A:\>' ""
+escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.1 (cimientos)" "VER: "
-esta p2 "NUCLEO86 SYS" "DIR: "
-esta p2 "HOLA     COM       206" "DIR: "
-esta p2 "LEEME    TXT" "DIR: "
-esta p2 "3 archivos, " "DIR: "
+esta p2 "Hispa-8086 versión 0.2" "VER: "
+esta p2 "NUCLEO86.SYS" "DIR: "
+esta p2 "HOLA.COM             206" "DIR: "
+esta p2 "4 archivos, " "DIR: "
+esta p2 "octetos libres" "DIR: "
 noesta p2 "HISPA-8086 " "DIR: (la etiqueta) "
-escribe "borrar"; escribe "tipo leeme.txt"
+escribe "cls"; escribe "mostrar leeme.txt"
 pantalla p3
-esta p3 "El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20," "TIPO: "
-esta p3 "en español." "TIPO: "
-escribe "borrar"; escribe "hola uno dos"; escribe "tipo nada.txt"; escribe "xyz"; escribe "equipo"
+esta p3 "El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20," "MOSTRAR: "
+esta p3 "en español." "MOSTRAR: "
+escribe "limpiar"; escribe "hola uno dos"; escribe "type nada.txt"; escribe "xyz"; escribe "equipo"
 pantalla p4
 esta p4 "Hola desde un programa .COM. DOS 3.30" "HOLA.COM: "
 esta p4 "Parametros: uno dos" "HOLA.COM: "
@@ -74,18 +73,63 @@ esta p4 "Vectores: bien" "HOLA.COM: "
 esta p4 "No existe ese archivo." ""
 esta p4 "Orden desconocida. Escriba AYUDA." ""
 esta p4 "Procesador: 80486 o superior" "EQUIPO: "
+
+echo "== Hispa-8086: archivos y directorios =="
+escribe "limpiar"; escribe "arch"; sleep 6
+pantalla p6
+esta p6 "ARCHIVOS: BIEN" "la interfaz de INT 21h, paso a paso: "
+# y con las órdenes: crear un directorio, copiar dentro, entrar, renombrar,
+# copiar otra vez, borrar con comodín, salir
+escribe "limpiar"; escribe "creardir cartas"; escribe "copiar leeme.txt cartas"; sleep 2
+escribe "cd cartas"; escribe "renombrar leeme.txt juan.txt"; escribe "copy juan.txt ana.txt"; sleep 2
+escribe "copiar juan.txt pepe.doc"; sleep 2; escribe "dir"
+pantalla p7
+esta p7 'A:\CARTAS>' "CD: "
+esta p7 "1 archivo copiado." "COPIAR: "
+esta p7 "JUAN.TXT             340" "RENOMBRAR y DIR: "
+esta p7 "ANA.TXT              340" "COPIAR y DIR: "
+esta p7 "5 archivos, 1020 octetos" "DIR del directorio: "
+escribe "limpiar"; escribe "borrar *.txt"; sleep 2; escribe "dir"
+pantalla p8
+noesta p8 "JUAN.TXT" "BORRAR *.TXT: "
+esta p8 "PEPE.DOC             340" "BORRAR *.TXT deja lo demás: "
+escribe "limpiar"; escribe "cd .."; escribe "borrardir cartas"
+escribe "mostrar cartas\\pepe.doc"; escribe "cd nohay"; escribe "cd"
+pantalla p9
+esta p9 "No se puede: acceso denegado." "BORRARDIR con algo dentro: "
+esta p9 "en español." "MOSTRAR con ruta: "
+esta p9 "No existe esa ruta." "CD a donde no hay: "
 apaga
+# lo que ha quedado en el disquete, mirado desde fuera
+if python3 - $T/a.img <<'PY'
+import subprocess, sys
+img = sys.argv[1]
+def cat(n):
+    return subprocess.run(['mtype', '-i', img, '::' + n], capture_output=True).stdout
+dib = bytes((i * 7 + 3) & 255 for i in range(5000))
+leeme = cat('LEEME.TXT')
+ok = cat('GRANDE.DAT') == dib * 4 and cat('PRUEBA.DAT') == dib[:500] and cat('SUB/TRES.TXT') == b'hola'
+ok = ok and len(leeme) == 340 and cat('CARTAS/PEPE.DOC') == leeme
+dentro = subprocess.run(['mdir', '-b', '-i', img, '::CARTAS'], capture_output=True).stdout.decode()
+ok = ok and 'PEPE.DOC' in dentro and 'JUAN' not in dentro and 'ANA' not in dentro
+sys.exit(0 if ok else 1)
+PY
+then ok "el disquete, visto desde fuera: cada archivo con su contenido exacto"; else ko "el disquete no ha quedado como se esperaba"; mdir -/ -i $T/a.img :: | head -30; fi
+if command -v fsck.fat > /dev/null; then
+  if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi
+fi
 
 echo "== Hispa-8086: las demás medidas de disquete (720 K, 1,2 M y 1,44 M) =="
 for m in 720 1200 1440; do
   cp build/hispa8086-$m.img $T/b.img
   arranca $T/b.img pentium
-  escribe "hola"; escribe "dir"
+  escribe "hola"; escribe "arch"; sleep 7; escribe "dir"
   pantalla p5
-  esta p5 "Hispa-8086 0.1" "$m K: "
   esta p5 "Hola desde un programa .COM. DOS 3.30" "$m K: "
-  esta p5 "3 archivos, " "$m K: "
+  esta p5 "ARCHIVOS: BIEN" "$m K: "
+  esta p5 "GRANDE.DAT         20000" "$m K: "
   apaga
+  if fsck.fat -n $T/b.img > $T/fsck.txt 2>&1; then ok "$m K: fsck.fat no encuentra ningún error"; else ko "$m K: fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 done
 # el sistema base tiene que caber en el disquete de los XT
 libre=$(mdir -i build/hispa8086-360.img :: | awk '/bytes free/ { gsub(/ /, "", $0); sub(/bytesfree/, "", $0); print }')
@@ -100,8 +144,8 @@ done
 n=$(grep -c "^\s*cpu 386" nucleo.asm)
 if [ "$n" = 1 ]; then ok "un solo tramo de 386 (detrás de la prueba del 286)"; else ko "tramos de 386: $n"; fi
 tam=$(stat -c %s build/NUCLEO86.SYS)
-if [ $tam -lt 8192 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núcleo ha crecido a $tam octetos"; fi
+if [ $tam -lt 16384 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núcleo ha crecido a $tam octetos"; fi
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
 rm -rf $T
 exit $fail

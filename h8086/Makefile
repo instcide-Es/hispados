@@ -14,7 +14,8 @@
 #
 # Va aparte del Makefile de Hispa-DOS: son dos núcleos distintos (ver
 # docs/8086/HISPA-8086.md). Los fuentes están en UTF-8 y se pasan a la página
-# 437 antes de ensamblar, como en el resto del proyecto.
+# 437 antes de ensamblar, como en el resto del proyecto (y el núcleo se ensambla
+# desde la carpeta de los ya convertidos, para que sus %include sean esos).
 NASM ?= nasm
 B = build
 CP437 = python3 ../tools/cp437.py
@@ -30,16 +31,21 @@ $(B):
 $(B)/arranque.bin: arranque.asm | $(B)
 	$(CP437) $< $(B)/gen/arranque.asm && $(NASM) -f bin -o $@ $(B)/gen/arranque.asm
 
-$(B)/NUCLEO86.SYS: nucleo.asm | $(B)
-	$(CP437) $< $(B)/gen/nucleo.asm && $(NASM) -f bin -l $(B)/gen/nucleo.lst -o $@ $(B)/gen/nucleo.asm
+NUCLEO = nucleo.asm disco.inc archivos.inc ordenes.inc
+$(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
+	for f in $(NUCLEO); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
+	cd $(B)/gen && $(NASM) -f bin -l nucleo.lst -o ../NUCLEO86.SYS nucleo.asm
 
 $(B)/HOLA.COM: prueba/hola.asm | $(B)
 	$(CP437) $< $(B)/gen/hola.asm && $(NASM) -f bin -o $@ $(B)/gen/hola.asm
 
+$(B)/ARCH.COM: prueba/arch.asm | $(B)
+	$(CP437) $< $(B)/gen/arch.asm && $(NASM) -f bin -o $@ $(B)/gen/arch.asm
+
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/HOLA.COM $(B)/LEEME.TXT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/HOLA.COM $(B)/ARCH.COM $(B)/LEEME.TXT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos
