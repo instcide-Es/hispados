@@ -24,12 +24,17 @@
 ;  revés: tl_orden[tl_orden[i]] = i.
 ;
 ;  Se incluye en el código del programa y, en su «section .bss», se pone la
-;  macro TIPOS_BSS. Usa hvl_* (hvplib.inc) y la API de Hispa Ventanas.
+;  macro TIPOS_BSS. Usa la API de Hispa Ventanas. La memoria de cada archivo
+;  se pide al leerlo (mem_bloque), justo la que ocupa: un programa que solo
+;  usa la letra normal gasta unos 73 K, no los 640 K de todos los tamaños.
+;  Al cerrarse, el programa llama a tl_soltar para devolverla.
 ;
 ;    tl_cargar   ESI=ruta del módulo (la que recibe en su entrada): lee los
 ;                tipos de la letra normal; los otros tamaños se leen la primera
 ;                vez que hacen falta. Deja en [tl_n] cuántos tipos hay (con
 ;                «Hispa»)
+;    tl_soltar   devuelve la memoria de los tipos (al cerrar el programa);
+;                después hay que volver a llamar a tl_cargar para usarlos
 ;    tl_nombre   EAX=tipo -> ESI=su nombre
 ;    tl_puntos   EDX=tamaño -> ESI=sus puntos, en letra («12»)
 ;    tl_alto_de  EDX=tamaño -> EAX=el alto de su casilla (el de la línea)
@@ -44,13 +49,11 @@
 ; =============================================================================
 TL_TIPOS    equ 32                  ; tipos, a lo más (con «Hispa»)
 TL_TAMANOS  equ 6
-TL_B12      equ 64 * 1024           ; lo más que puede ocupar cada archivo
-TL_B16      equ 96 * 1024
-TL_B24      equ 192 * 1024
-TL_B32      equ 288 * 1024
+TL_TOPE     equ 512 * 1024          ; lo más que puede ocupar un archivo de tipos
 
 %macro TIPOS_BSS 0
 tl_n        resd 1
+tl_tam      resd 1
 tl_g_filas  resd 1
 tl_g_bpr    resd 1
 tl_g_esc    resd 1
@@ -59,10 +62,8 @@ tl_g_alto   resd 1
 tl_est      resb 4                  ; de cada archivo: 0 sin leer, 1 leído, 2 no está
 tl_ruta     resb 128
 tl_ruta_fin resd 1                  ; dónde va el nombre del archivo en tl_ruta
-tl_b12      resb TL_B12
-tl_b16      resb TL_B16
-tl_b24      resb TL_B24
-tl_b32      resb TL_B32
+tl_buf      resd 4                  ; de cada archivo: dónde está en memoria...
+tl_mango    resd 4                  ; ...y el mango de su bloque (para soltarlo)
 %endmacro
 
 ; los tamaños: el alto de la casilla, de qué archivo sale y a qué escala
@@ -85,12 +86,11 @@ tl_a3       db "TIPOS32.DAT", 0
 tl_pts      dd tl_pt0, tl_pt1, tl_pt2, tl_pt3, tl_pt4, tl_pt5
 ; los archivos: su nombre, dónde se guarda, lo que cabe y el alto de su casilla
 tl_arch     dd tl_a0, tl_a1, tl_a2, tl_a3
-tl_buf      dd tl_b12, tl_b16, tl_b24, tl_b32
-tl_cabe     dd TL_B12, TL_B16, TL_B24, TL_B32
 tl_altos    dd 12, 16, 24, 32
 
 tl_cargar:
         pushad
+        call tl_soltar              ; (por si se llama dos veces)
         mov dword [tl_n], 1
         mov dword [tl_est], 0
         mov edi, tl_ruta            ; la carpeta del módulo
@@ -113,9 +113,28 @@ tl_cargar:
         call tl_carga_f
         cmp byte [tl_est+1], 1
         jne .x
-        movzx eax, byte [tl_b16+8]
+        mov eax, [tl_buf+4]
+        movzx eax, byte [eax+8]
         mov [tl_n], eax
 .x:
+        popad
+        ret
+
+tl_soltar:
+        pushad
+        xor ebx, ebx
+.b:
+        cmp dword [tl_buf+ebx*4], 0
+        je .s
+        mov edx, [tl_mango+ebx*4]
+        HV mem_bloque_soltar
+        mov dword [tl_buf+ebx*4], 0
+.s:
+        mov byte [tl_est+ebx], 0
+        inc ebx
+        cmp ebx, 4
+        jb .b
+        mov dword [tl_n], 1
         popad
         ret
 
@@ -133,15 +152,35 @@ tl_carga_f:
         stosb
         test al, al
         jnz .n
-        mov esi, tl_ruta            ; se lee a trozos (de una vez, DOS no pasa
-        xor al, al                  ; de 64 K)
+        mov esi, tl_ruta
+        xor al, al
         HV dos_abrir
         jc .x
-        mov ebx, eax
-        mov edi, [tl_buf+ebp*4]
-.lee:
+        mov ebx, eax                ; EBX=el manejador
+        mov al, 2                   ; cuánto ocupa: el puntero, al final...
+        xor edx, edx
+        HV dos_puntero
+        jc .cierra
+        mov [tl_tam], eax
+        xor al, al                  ; ...y otra vez al principio
+        xor edx, edx
+        HV dos_puntero
+        jc .cierra
+        mov ecx, [tl_tam]
+        cmp ecx, 12 + 32
+        jb .cierra
+        cmp ecx, TL_TOPE
+        ja .cierra
+        push ebx                    ; la memoria justa para él
+        HV mem_bloque               ; -> EAX=dónde EDX=su mango
+        pop ebx
+        jc .cierra
+        mov [tl_buf+ebp*4], eax
+        mov [tl_mango+ebp*4], edx
+        mov edi, eax                ; se lee a trozos (de una vez, DOS no pasa
+.lee:                               ; de 64 K)
         mov ecx, [tl_buf+ebp*4]
-        add ecx, [tl_cabe+ebp*4]
+        add ecx, [tl_tam]
         sub ecx, edi
         jz .leido
         cmp ecx, 16384
@@ -159,25 +198,39 @@ tl_carga_f:
         mov ebx, [tl_buf+ebp*4]
         mov eax, edi
         sub eax, ebx                ; EAX=lo leído
+        call .mira
+        cmp byte [tl_est+ebp], 1    ; si no vale, su memoria se devuelve
+        je .x
+        mov edx, [tl_mango+ebp*4]
+        HV mem_bloque_soltar
+        mov dword [tl_buf+ebp*4], 0
+        jmp .x
+.cierra:
+        HV dos_cerrar
+        jmp .x
+; (interna) EBX=el archivo en memoria EAX=octetos: lo comprueba y, si vale,
+; pone su estado a 1
+.mira:
+        pushad
         cmp eax, 12 + 32
-        jb .x
+        jb .mx
         cmp dword [ebx], 'TIPO'
-        jne .x
+        jne .mx
         cmp dword [ebx+4], 'S2' | (26 << 16)
-        jne .x
+        jne .mx
         movzx ecx, byte [ebx+8]     ; cuántos tipos
         test ecx, ecx
-        jz .x
+        jz .mx
         cmp ecx, TL_TIPOS
-        ja .x
+        ja .mx
         movzx edx, byte [ebx+9]     ; el alto de la casilla: el de este archivo
         cmp edx, [tl_altos+ebp*4]
-        jne .x
+        jne .mx
         mov edx, ecx
         shl edx, 5
         add edx, 12
         cmp edx, eax
-        ja .x
+        ja .mx
         lea esi, [ebx+12]           ; que cada tipo esté entero en lo leído
 .v:
         mov byte [esi+23], 0
@@ -185,19 +238,22 @@ tl_carga_f:
         test edi, edi
         jz .v1                      ; (0: ese tipo no está en este archivo)
         cmp edi, 448
-        jb .x
+        jb .mx
         mov edx, [esi+24]
         cmp edx, eax
-        jae .x
+        jae .mx
         add edx, edi
-        jc .x
+        jc .mx
         cmp edx, eax
-        ja .x
+        ja .mx
 .v1:
         add esi, 32
         dec ecx
         jnz .v
         mov byte [tl_est+ebp], 1
+.mx:
+        popad
+        ret
 .x:
         popad
         ret
@@ -210,7 +266,8 @@ tl_nombre:
         jae .x
         mov esi, eax
         shl esi, 5
-        add esi, tl_b16 + 12
+        add esi, [tl_buf+4]
+        add esi, 12
 .x:
         ret
 

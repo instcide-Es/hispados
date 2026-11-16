@@ -580,6 +580,7 @@ lec_proc:
         jmp hecho
 .destruir:
         mov dword [ven], 0
+        call tl_soltar              ; la memoria de los tipos de letra, devuelta
         HV msg_salir
         jmp hecho
 .hvabrir:
