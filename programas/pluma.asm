@@ -700,6 +700,7 @@ doc_vacio:
         mov byte [modif], 0
         mov dword [des_p], 0
         mov dword [des_top], 0
+        mov dword [des_off], 0
         mov byte [tecleando], 0
         jmp compone
 
@@ -2779,16 +2780,22 @@ alinea:
         jmp .b
 
 ; ---- Deshacer y rehacer, varios pasos ----
-; Antes de cada cambio se guarda el documento entero en una casilla (son pocos
-; octetos): una tanda de teclas seguidas, sin mover el cursor, cuenta como un
-; solo cambio. Las casillas 0..[des_top]-1 son el documento de antes de cada
-; cambio; [des_p] dice por cuál va (igual a [des_top]: no se ha deshecho nada).
-; Al deshacer el primero, el documento de ahora se guarda en la casilla
+; Antes de cada cambio se guarda el documento entero en una casilla: una
+; tanda de teclas seguidas, sin mover el cursor, cuenta como un solo cambio.
+; Las casillas 0..[des_top]-1 son el documento de antes de cada cambio;
+; [des_p] dice por cuál va (igual a [des_top]: no se ha deshecho nada). Al
+; deshacer el primero, el documento de ahora se guarda en la casilla
 ; [des_top], para poder rehacer hasta él. Un cambio nuevo, después de
-; deshacer, tira lo que quedaba por rehacer. Si no caben más, se olvida el
-; cambio más antiguo.
-DES_PASOS   equ 8                   ; cambios que se pueden deshacer
-SL_TAM      equ 8 + 3 * (MAX_TXT + 4)   ; una casilla: n, cursor, txt, atr y tip
+; deshacer, tira lo que quedaba por rehacer.
+;
+; Las casillas van una detrás de otra en des_cas y cada una ocupa lo que su
+; documento (8 + 3 x letras): con documentos corrientes caben los ocho pasos
+; en poca memoria. Cuando no cabe otra (o ya hay ocho), se olvida el cambio
+; más antiguo. Siempre se deja sitio para la de «rehacer», que puede ser de
+; un documento lleno.
+DES_PASOS   equ 8                   ; cambios que se pueden deshacer, a lo más
+SL_MAX      equ 8 + 3 * MAX_TXT     ; lo más que ocupa una casilla
+DES_TAM     equ 3 * SL_MAX          ; (con el documento lleno caben dos pasos)
 inst_tecleo:
         cmp byte [tecleando], 0
         jne instantanea.x
@@ -2799,13 +2806,37 @@ instantanea:
         pushad
         mov byte [tecleando], 0
         mov eax, [des_p]
+.otra:
         cmp eax, DES_PASOS
-        jb .cabe
-        mov edi, des_cas            ; llenas: la más antigua, fuera
-        mov esi, des_cas + SL_TAM
-        mov ecx, (DES_PASOS - 1) * SL_TAM
+        jae .tira
+        mov ecx, [n]                ; ¿cabe esta y queda sitio para la de rehacer?
+        lea ecx, [ecx+ecx*2+8]
+        add ecx, [des_off+eax*4]
+        add ecx, SL_MAX
+        cmp ecx, DES_TAM
+        jbe .cabe
+        test eax, eax
+        jz .cabe                    ; (vacío siempre cabe: DES_TAM = 3 x SL_MAX)
+.tira:
+        mov ecx, [des_off+4]        ; la más antigua, fuera: las demás, abajo
+        mov edx, [des_off+eax*4]
+        sub edx, ecx
+        push ecx
+        mov edi, des_cas
+        lea esi, [des_cas+ecx]
+        mov ecx, edx
         rep movsb
+        pop ecx
+        xor edx, edx
+.t1:
+        mov ebx, [des_off+edx*4+4]
+        sub ebx, ecx
+        mov [des_off+edx*4], ebx
+        inc edx
+        cmp edx, eax
+        jb .t1
         dec eax
+        jmp .otra
 .cabe:
         call sl_guarda
         inc eax
@@ -2835,52 +2866,48 @@ des_va:
         mov dword [anc], -1
         mov byte [tecleando], 0
         jmp cambio
-; (internas) el documento, a la casilla EAX, y al revés
+; (internas) el documento, a la casilla EAX (que empieza donde acaba la de
+; antes; apunta dónde acaba ella), y al revés
 sl_guarda:
         pushad
-        imul edi, eax, SL_TAM
+        mov edi, [des_off+eax*4]
         add edi, des_cas
+        mov ebx, eax
         mov eax, [n]
         stosd
         mov eax, [cur]
         stosd
         mov esi, txt
-        call .trozo
-        mov esi, atr
-        call .trozo
-        mov esi, tip
-        call .trozo
-        popad
-        ret
-.trozo:
         mov ecx, [n]
-        push edi
         rep movsb
-        pop edi
-        add edi, MAX_TXT + 4
+        mov esi, atr
+        mov ecx, [n]
+        rep movsb
+        mov esi, tip
+        mov ecx, [n]
+        rep movsb
+        sub edi, des_cas
+        mov [des_off+ebx*4+4], edi
+        popad
         ret
 sl_carga:
         pushad
-        imul esi, eax, SL_TAM
+        mov esi, [des_off+eax*4]
         add esi, des_cas
         lodsd
         mov [n], eax
         lodsd
         mov [cur], eax
         mov edi, txt
-        call .trozo
-        mov edi, atr
-        call .trozo
-        mov edi, tip
-        call .trozo
-        popad
-        ret
-.trozo:
         mov ecx, [n]
-        push esi
         rep movsb
-        pop esi
-        add esi, MAX_TXT + 4
+        mov edi, atr
+        mov ecx, [n]
+        rep movsb
+        mov edi, tip
+        mov ecx, [n]
+        rep movsb
+        popad
         ret
 
 ; ---- Borrar: lo elegido, o la letra del cursor ----
@@ -5456,6 +5483,7 @@ clip_len    resd 1
 n_cambios   resd 1
 des_p       resd 1
 des_top     resd 1
+des_off     resd DES_PASOS + 2      ; dónde empieza cada casilla (la 0, en 0)
 tip_act     resb 1                  ; y su tipo de letra
 g_tip       resb 1
 brocha_tip  resb 1
@@ -5513,7 +5541,7 @@ txt         resb MAX_TXT + 4
 atr         resb MAX_TXT + 4
 tip         resb MAX_TXT + 4        ; el tipo de letra de cada una
             TIPOS_BSS
-des_cas     resb (DES_PASOS + 1) * SL_TAM   ; las casillas de deshacer
+des_cas     resb DES_TAM            ; las casillas de deshacer, una detrás de otra
 clip_txt    resb MAX_TXT + 4
 clip_atr    resb MAX_TXT + 4
 clip_tip    resb MAX_TXT + 4
