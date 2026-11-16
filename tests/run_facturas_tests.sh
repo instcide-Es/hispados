@@ -131,6 +131,7 @@ mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
   clic 114 96; sleep 1.5; tecla ret; sleep 2; aparca; shot u1     # «Duplicar»: sus datos, y aceptar
   tecla esc; sleep 1
   clic 166 96; sleep 1.5; tecla ret; sleep 2.5; shot u2; tecla ret; sleep 1   # «Exportar»: el nombre que propone
+  tecla insert; sleep 1.5; clic 584 190; sleep 1.5; shot c1; tecla ret; sleep 1.2; shot c2; tecla esc; sleep 1   # nueva: «...» elige el cliente de antes
   sal; } | run 150 -vga std
 chk $T/u0.ppm busca 52 548 700 590 0 6 "Exportar esta lista a un archivo para Cuentas"
 chk $T/u1.ppm busca 400 135 740 160 0 9 "2026-002"        # la copia, con el número siguiente
@@ -139,6 +140,10 @@ chk $T/u1.ppm busca 400 318 740 345 0 9 "89,90"           # y las mismas líneas
 chk $T/u1.ppm busca 400 170 740 195 13 9 "Pendiente de cobro"
 chk $T/u2.ppm busca 150 250 650 300 0 8 "La lista se ha guardado. Se abre con Cuentas."
 muestra u1 facturas_duplicada; muestra u0 facturas_pie
+chk $T/c2.ppm busca 300 180 340 205 0 9 "Ana Soler"          # el cliente elegido de la lista...
+chk $T/c2.ppm busca 300 210 340 236 0 9 "11111111H"          # ...con su NIF
+chk $T/c2.ppm busca 300 242 340 268 0 9 "Plaza 2"            # y su dirección
+muestra c1 facturas_clientes; muestra c2 facturas_cliente_puesto
 mtype -i $T/f.img ::EMITIDAS.CSV 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/emi.csv
 if [ "$(head -1 $T/emi.csv)" = "Número;Fecha;Nombre;NIF;Base;IVA;Retención;Total;Pagada" ] \
    && grep -qE '^2026-001;[0-9]{2}/[0-9]{2}/[0-9]{4};Ana Soler;11111111H;89,90;18,88;0,00;108,78;no$' $T/emi.csv \

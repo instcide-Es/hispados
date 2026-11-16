@@ -241,7 +241,8 @@ dlg_fac:
         PLANTILLA HV_c_estatico, t_l_ddmm, E_HIJA, 240, 50, 180, 18, 107
 df_lab_cli:
         PLANTILLA HV_c_estatico, t_l_cli, E_HIJA, 16, 82, 110, 18, 102
-        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 78, 290, 24, 112
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 78, 254, 24, 112
+        PLANTILLA HV_c_boton, t_b_elegir, E_HIJA, 388, 78, 32, 24, 130
         PLANTILLA HV_c_estatico, t_l_nif, E_HIJA, 16, 114, 110, 18, 103
         PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 110, 140, 24, 113
         PLANTILLA HV_c_estatico, t_l_dir, E_HIJA, 16, 146, 110, 18, 104
@@ -277,6 +278,13 @@ cam_fac     dd 110, c_num, 16
             dd 120, c_pre, 12
             dd 0
 
+; ---- diálogo: elegir un cliente (o proveedor) de las facturas ya hechas ----
+dlg_cli:
+        PLANTILLA HV_c_dialogo, t_d_cli, E_DIALOGO, 0, 0, 340, 300, 0
+        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 16, 12, 304, 204, 60
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 70, 228, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 170, 228, 90, 26, ID_CANCELAR
+        dd 0
 ; ---- diálogo: una línea ----
 dlg_lin:
         PLANTILLA HV_c_dialogo, t_d_lin, E_DIALOGO, 0, 0, 440, 190, 0
@@ -419,6 +427,9 @@ t_r_ano     db "Año     ", 0
 t_r_nota    db 10, "Ingresos y gastos: las bases, sin IVA. Diferencia: IVA repercutido", 10
             db "menos IVA soportado (lo que sale a ingresar en cada trimestre).", 0
 t_ext_txt   db ".TXT", 0
+t_b_elegir  db "...", 0
+t_d_cli     db "Elegir de las facturas anteriores", 0
+t_e_sin_cli db "Todavía no hay ninguno: salen de las facturas ya hechas.", 0
 t_ext_csv   db ".CSV", 0
 t_csv_emi   db "EMITIDAS.CSV", 0
 t_csv_rec   db "RECIBIDA.CSV", 0
@@ -469,6 +480,8 @@ entrada:
         mov esi, dlg_fac
         call hvl_clases
         mov esi, dlg_lin
+        call hvl_clases
+        mov esi, dlg_cli
         call hvl_clases
         mov esi, dlg_mis
         call hvl_clases
@@ -1665,6 +1678,8 @@ dlg_gancho:
         je .ini
         cmp eax, WM_COMMAND
         jne .no
+        cmp ecx, 130                ; «...»: elegir el cliente de los de antes
+        je elige_cliente
         cmp ecx, ID_ACEPTAR
         jne .no
         mov esi, [campos]
@@ -1716,6 +1731,141 @@ dlg_gancho:
         popad
         add esi, 12
         jmp .i
+.no:
+        xor eax, eax
+        ret
+
+; ---- «...» junto al nombre: una lista con los clientes (o los proveedores,
+;      en las recibidas) de las facturas ya hechas, sin repetir; el elegido
+;      rellena el nombre, el NIF y la dirección. EBP=el diálogo de la factura ----
+elige_cliente:
+        pushad
+        mov [ec_dlg], ebp
+        xor edi, edi                ; EDI=cuántos van
+        xor ecx, ecx                ; ECX=la factura
+.f:
+        cmp ecx, [n_fac]
+        jae .ff
+        mov eax, ecx
+        call ptr_fac
+        movzx eax, byte [ebx+F_TIPO]
+        cmp eax, [ver_tipo]
+        jne .fs
+        cmp byte [ebx+F_CLI], 0
+        je .fs
+        xor edx, edx                ; ¿está ya? (el mismo nombre)
+.r:
+        cmp edx, edi
+        jae .nuevo
+        push ecx
+        push edi
+        mov esi, [ec_tab+edx*4]
+        add esi, F_CLI
+        lea edi, [ebx+F_CLI]
+        mov ecx, 40
+        repe cmpsb
+        pop edi
+        pop ecx
+        je .fs
+        inc edx
+        jmp .r
+.nuevo:
+        mov [ec_tab+edi*4], ebx
+        inc edi
+.fs:
+        inc ecx
+        jmp .f
+.ff:
+        mov [ec_n], edi
+        test edi, edi
+        jnz .hay
+        mov esi, t_e_sin_cli
+        call aviso
+        jmp .x
+.hay:
+        mov dword [ec_sel], 0
+        mov esi, dlg_cli
+        lea edi, [esi+P_TAM]
+        mov ebx, cli_gancho
+        xor edx, edx
+        HV dlg_modal
+        cmp eax, ID_ACEPTAR
+        jne .x
+        mov ebx, [ec_sel]
+        mov ebx, [ec_tab+ebx*4]
+        lea edx, [ebx+F_CLI]
+        mov ecx, 112
+        call .pon
+        lea edx, [ebx+F_NIF]
+        mov ecx, 113
+        call .pon
+        lea edx, [ebx+F_DIR]
+        mov ecx, 114
+        call .pon
+.x:
+        popad
+        xor eax, eax
+        ret
+; (interna) el texto EDX, al cuadro ECX del diálogo de la factura
+.pon:
+        pushad
+        mov ebp, [ec_dlg]
+        HV ven_hija_id
+        mov ebp, eax
+        mov eax, WM_SETTEXT
+        HV msg_enviar
+        popad
+        ret
+cli_gancho:
+        cmp eax, DM_INICIO
+        je .ini
+        cmp eax, WM_COMMAND
+        jne .no
+        cmp cx, 60                  ; la lista: doble clic o Intro, aceptar
+        jne .boton
+        shr ecx, 16
+        cmp ecx, LN_DOBLE
+        jne .no
+        mov eax, WM_COMMAND
+        mov ecx, ID_ACEPTAR
+        xor edx, edx
+        HV msg_enviar
+        jmp .no
+.boton:
+        cmp ecx, ID_ACEPTAR
+        jne .no
+        pushad
+        mov ecx, 60
+        HV ven_hija_id
+        mov ebp, eax
+        mov eax, LM_SELEC
+        HV msg_enviar
+        cmp eax, [ec_n]
+        jae .b1
+        mov [ec_sel], eax
+.b1:
+        popad
+        jmp .no
+.ini:
+        pushad
+        mov ecx, 60
+        HV ven_hija_id
+        mov ebp, eax
+        mov dword [ec_i], 0
+.i1:
+        mov edx, [ec_i]
+        mov edx, [ec_tab+edx*4]
+        add edx, F_CLI
+        mov eax, LM_ANADIR
+        HV msg_enviar
+        inc dword [ec_i]
+        mov eax, [ec_i]
+        cmp eax, [ec_n]
+        jb .i1
+        xor ecx, ecx
+        mov eax, LM_PONER_SELEC
+        HV msg_enviar
+        popad
 .no:
         xor eax, eax
         ret
@@ -3806,6 +3956,11 @@ tmp_emi     resb CAB_TAM - E_NOM
 tmp_lin     resb L_TAM
 tmp_fac     resb F_TAM
 txt_buf     resb 4096
+ec_dlg      resd 1                  ; elegir cliente: el diálogo de la factura
+ec_n        resd 1
+ec_sel      resd 1
+ec_i        resd 1
+ec_tab      resd MAX_FAC
 csv_buf     resb MAX_FAC * 160 + 128
             alignb 4
 cab         resb CAB_TAM            ; el archivo: la cabecera y, detrás, las
