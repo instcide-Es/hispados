@@ -114,6 +114,9 @@ ci_prof     resd 1
 ci_lim      resd 1
 ci_salto    resd 1
 ci_bi       resd 1
+ci_bi_f     resd 1                  ; la imagen metida en el contenido lleva filtros
+ci_bi_dat   resd 1
+ci_bi_fin   resd 1
 ci_mt       resd 6
 ci_m        resd 6
 ci_tm       resd 6                  ; la matriz del texto
@@ -396,6 +399,7 @@ pdf_pagina:
         xor ebx, ebx
         mov [it_n], ebx
         mov [pg_avisos], ebx
+        mov [im_que], bl
         mov [ci_prof], ebx
         mov [gs_n], ebx
         mov [op_n], ebx
@@ -1613,26 +1617,15 @@ o_Do:
 .imagen:
         pop ebp
         pop esi
+        call ci_im_lado
         call ar_marca
         push eax
-        push esi
-        push ebp
-        call pdf_flujo
-        pop ebp
-        pop esi
-        jc .im_no
-        mov [im_dat], eax
-        mov [im_ndat], ecx
         mov eax, [ci_res]
         mov [im_res], eax
         mov eax, [ci_res+4]
         mov [im_res+4], eax
         mov al, [eg+G_REL]
-        call im_hace
-        jnc .im_si
-.im_no:
-        xor eax, eax
-.im_si:
+        call im_xobjeto             ; (con sus filtros, su JPEG y su transparencia)
         mov ebx, eax
         pop eax
         call ar_suelta
@@ -1727,9 +1720,90 @@ o_Do:
         pop dword [ci_res]
         ret
 
+; (interna) -> [im_lado]: lo que conviene que mida de lado la miniatura de la
+; imagen que se va a pintar con la matriz en vigor: dos puntos por cada punto
+; tipográfico de su lado más largo, entre 64 e IM_LADO_J
+ci_im_lado:
+        pushad
+        xor eax, eax
+        xor ebx, ebx
+        call ci_punto
+        mov esi, eax
+        mov edi, ebx
+        xor ebp, ebp                ; EBP=el lado más largo
+        mov ecx, 1                  ; las esquinas (1,0) y (0,1)
+.e:
+        mov eax, ecx
+        and eax, 1
+        shl eax, 16
+        mov ebx, ecx
+        shr ebx, 1
+        shl ebx, 16
+        call ci_punto
+        sub eax, esi
+        jns .e1
+        neg eax
+.e1:
+        sub ebx, edi
+        jns .e2
+        neg ebx
+.e2:
+        cmp eax, ebx
+        jae .e3
+        mov eax, ebx
+.e3:
+        cmp eax, ebp
+        jbe .e4
+        mov ebp, eax
+.e4:
+        inc ecx
+        cmp ecx, 2
+        jbe .e
+        shr ebp, 15
+        cmp ebp, 64
+        jae .l1
+        mov ebp, 64
+.l1:
+        cmp ebp, IM_LADO_J
+        jbe .l2
+        mov ebp, IM_LADO_J
+.l2:
+        mov [im_lado], ebp
+        popad
+        ret
+
+; (interna) ESI=el «EI» de una imagen metida en el contenido que lleva
+; filtros: sus datos van de [ci_bi_dat] hasta ahí -> [ci_bi]
+ci_bi_filtrada:
+        pushad
+        lea eax, [esi-1]            ; (sin el blanco de delante del «EI»)
+        sub eax, [ci_bi_dat]
+        jbe .x
+        mov [fl_n], eax
+        mov eax, [ci_bi_dat]
+        mov [fl_p], eax
+        call ci_im_lado
+        call ar_marca
+        push eax
+        mov eax, [ci_res]
+        mov [im_res], eax
+        mov eax, [ci_res+4]
+        mov [im_res+4], eax
+        mov esi, ci_cad
+        mov ebp, [ci_bi_fin]
+        mov al, [eg+G_REL]
+        call im_incrustada
+        mov [ci_bi], eax
+        pop eax
+        call ar_suelta
+.x:
+        popad
+        ret
+
 ; BI ... ID datos EI: una imagen dentro del contenido. Se salta entera
 o_BI:
         mov dword [ci_bi], 0
+        mov dword [ci_bi_f], 0
         mov esi, [esp+8]            ; (el cursor que guardó ci_ejecuta)
         mov ebp, [esp+4]
 .b:
@@ -1755,9 +1829,11 @@ o_BI:
         rep movsb
         mov ax, '>>'
         stosw
+        mov [ci_bi_fin], edi
         pop esi
         add esi, 3                  ; «ID» y un blanco
         mov [im_dat], esi
+        mov [ci_bi_dat], esi
         mov eax, ebp
         sub eax, esi
         jbe .e
@@ -1766,13 +1842,13 @@ o_BI:
         push ebp
         mov esi, ci_cad
         mov ebp, edi
-        mov edi, k_filter           ; con filtros dentro del contenido, no
-        call px_dic
-        jnc .id_filtro
+        mov edi, k_filter           ; con filtros: no se sabe lo que miden los
+        call px_dic                 ; datos; se busca su «EI» y entonces se hace
+        jnc .id_con_filtro
         mov esi, ci_cad
         mov edi, f_f1
         call px_dic
-        jnc .id_filtro
+        jnc .id_con_filtro
         mov eax, [ci_res]
         mov [im_res], eax
         mov eax, [ci_res+4]
@@ -1792,6 +1868,8 @@ o_BI:
         ja .e
         mov esi, eax
         jmp .e
+.id_con_filtro:
+        mov dword [ci_bi_f], 1
 .id_filtro:
         pop ebp
         pop esi
@@ -1816,6 +1894,10 @@ o_BI:
         cmp byte [px_clase+eax], 0
         je .e1
 .e_si:
+        cmp dword [ci_bi_f], 0
+        je .e_si1
+        call ci_bi_filtrada
+.e_si1:
         add esi, 2
         jmp .fin
 .e1:

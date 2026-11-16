@@ -35,6 +35,13 @@
 ;                  (MAX_OBJ) o páginas (MAX_PAG) de los que caben: se ve una parte
 ;    pdf_flujo     ESI, EBP=un objeto con flujo -> EAX=sus datos ECX=cuántos,
 ;                  ya sin filtros (en el almacén); CF=1: [fl_error]=FE_*
+;                  Con [fl_quiere_dct]=1 (las imágenes), al llegar a un
+;                  /DCTDecode se para ahí y lo dice en [fl_dct]: lo que da es
+;                  el JPEG, para programas/comun/jpeg.inc ([fl_dct_tr]: su
+;                  /ColorTransform, o -1 si no lo trae)
+;    pdf_filtros   lo mismo con los datos ya localizados ([fl_p], [fl_n]) y su
+;                  diccionario en ESI, EBP, que puede llevar las claves
+;                  abreviadas (/F, /DP): las imágenes metidas en el contenido
 ;    ar_marca / ar_suelta   EAX=la marca del almacén: lo pedido después de la
 ;                  marca se devuelve entero al soltarla
 ;
@@ -118,6 +125,10 @@ fl_bpp      resd 1
 fl_fila     resd 1
 fl_ant      resd 1
 fl_tmp      resd 4
+fl_dct      resd 1                  ; el flujo se ha quedado en un JPEG
+fl_quiere_dct resd 1
+fl_dct_tr   resd 1
+fl_abrev    resd 1                  ; valen las claves abreviadas
 fl_filtro   resb 32                 ; el nombre del filtro que no se sabe
 lz_pref     resw 4096               ; LZW: de cada código, el anterior y su letra
 lz_suf      resb 4096
@@ -188,6 +199,11 @@ f_rl2       db "RL", 0
 f_lzw       db "LZWDecode", 0
 f_lzw2      db "LZW", 0
 k_early     db "EarlyChange", 0
+f_dct       db "DCTDecode", 0
+f_dct2      db "DCT", 0
+k_ctransform db "ColorTransform", 0
+k_f1        db "F", 0
+k_dp        db "DP", 0
 
 ; -----------------------------------------------------------------------------
 ;  El almacén
@@ -1132,13 +1148,22 @@ pdf_flujo:
         mov dword [fl_parcial], 0
         mov dword [fl_error], FE_NOFLUJO
         mov byte [fl_filtro], 0
+        mov dword [fl_dct], 0
+        mov dword [fl_abrev], 0
         call fl_crudo
         jc .mal
+.filtros:
         mov esi, [fl_dic]
         mov ebp, [fl_dic+4]
         mov edi, k_filter
         call px_dic
-        jc .bien                    ; sin filtros: los datos, donde están
+        jnc .hay_filtro
+        cmp dword [fl_abrev], 0
+        je .bien                    ; sin filtros: los datos, donde están
+        mov edi, k_f1
+        call px_dic
+        jc .bien
+.hay_filtro:
         call px_ref
         ; los parámetros: un diccionario, o una lista pareja a la de filtros
         mov dword [fl_pa], 0
@@ -1149,7 +1174,13 @@ pdf_flujo:
         mov ebp, [fl_dic+4]
         mov edi, k_parms
         call px_dic
+        jnc .hay_parm
+        cmp dword [fl_abrev], 0
+        je .sin_parm
+        mov edi, k_dp
+        call px_dic
         jc .sin_parm
+.hay_parm:
         call px_ref
         cmp esi, ebp
         jae .sin_parm
@@ -1216,6 +1247,8 @@ pdf_flujo:
         call px_ref
         call fl_aplica
         jc .mal
+        cmp dword [fl_dct], 0       ; un JPEG: hasta aquí (es el último filtro)
+        jne .bien
         jmp .l
 .bien:
         mov eax, [fl_p]
@@ -1233,6 +1266,21 @@ pdf_flujo:
         pop edx
         pop ebx
         ret
+
+pdf_filtros:
+        push ebx
+        push edx
+        push esi
+        push edi
+        push ebp
+        mov [fl_dic], esi
+        mov [fl_dic+4], ebp
+        mov dword [fl_parcial], 0
+        mov dword [fl_error], FE_NOFLUJO
+        mov byte [fl_filtro], 0
+        mov dword [fl_dct], 0
+        mov dword [fl_abrev], 1
+        jmp pdf_flujo.filtros
 
 ; (interna) ESI=el nombre de un filtro: lo aplica a [fl_p], [fl_n]. CF=1: [fl_error]
 fl_aplica:
@@ -1267,11 +1315,30 @@ fl_aplica:
         mov edi, f_lzw2
         call px_es_nombre
         je .lzw
+        cmp dword [fl_quiere_dct], 0
+        je .no_se
+        mov edi, f_dct
+        call px_es_nombre
+        je .dct
+        mov edi, f_dct2
+        call px_es_nombre
+        je .dct
+.no_se:
         mov edi, fl_filtro          ; no se sabe: su nombre, para decirlo
         mov ecx, 32
         call px_copia_nombre
         mov dword [fl_error], FE_FILTRO
         jmp .mal
+.dct:
+        mov eax, -1                 ; un JPEG: no se deshace aquí
+        cmp dword [fl_parm], 0
+        je .dct1
+        mov edi, k_ctransform
+        call fl_parametro
+.dct1:
+        mov [fl_dct_tr], eax
+        mov dword [fl_dct], 1
+        jmp .bien
 .flate:
         mov esi, [fl_p]
         mov ecx, [fl_n]

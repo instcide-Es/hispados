@@ -5,7 +5,7 @@
 ;  Abre un PDF y lo enseña página a página: el texto, en su sitio y con el
 ;  tipo de letra de los nuestros que más se parece al suyo (Lector no usa las
 ;  fuentes que el PDF lleva dentro); las rayas, los recuadros y las figuras
-;  rellenas; y, donde hay una imagen, un recuadro gris que lo dice. Se pasa
+;  rellenas; y las imágenes, las fotos y los escaneos (JPEG) incluidos. Se pasa
 ;  de página, se amplía y se reduce (página entera, ancho de página, tamaño
 ;  real y de 25 a 400 %), se busca un texto por todo el documento y el texto
 ;  de una página o de todo el documento se guarda en un .TXT (para abrirlo
@@ -21,6 +21,7 @@
 ;  PDF es cosa del núcleo, que no sabe nada de Hispa Ventanas y se prueba
 ;  aparte (tests/tools/lector_pdf.py):
 ;     programas/comun/desinfla.inc    el descompresor (Deflate y zlib)
+;     programas/comun/jpeg.inc        el descodificador de JPEG
 ;     programas/lector/pdf.inc        objetos, índice, flujos y páginas
 ;     programas/lector/letras.inc     fuentes: codificación, anchos, parecido
 ;     programas/lector/nombres.inc    tablas (las hace haznombres.py)
@@ -42,13 +43,16 @@
 ;
 ;  Las imágenes sin comprimir o con Flate, LZW, RunLength, ASCII85 o
 ;  ASCIIHex (grises, RGB, CMYK, con paleta, de 1 a 16 bits, y las máscaras)
-;  se pintan, reducidas a la paleta (programas/lector/imagen.inc); los
-;  recortes rectangulares (W, W*) se respetan; el texto de la página se copia
-;  al portapapeles (Ctrl+C) y la hoja se arrastra con el ratón.
+;  y las JPEG (/DCTDecode: grises, color, CMYK, también progresivas) se
+;  pintan, reducidas a la paleta (programas/lector/imagen.inc), con su
+;  transparencia a todo o nada (/SMask y /Mask); una página escaneada es una
+;  imagen más. Los recortes rectangulares (W, W*) se respetan; el texto de la
+;  página se copia al portapapeles (Ctrl+C) y la hoja se arrastra con el ratón.
 ;
-;  Lo que no hace (todavía): las imágenes JPEG, JPEG 2000, fax y JBIG2 (van
-;  en un recuadro gris, con aviso), los recortes que no son un rectángulo y
-;  los degradados; abrir documentos cifrados; formularios, enlaces y
+;  Lo que no hace (todavía): las imágenes JPEG 2000, fax, JBIG2 y los JPEG
+;  aritméticos o de 12 bits (van en un recuadro gris, con un aviso que dice
+;  cuál es), los recortes que no son un rectángulo y los degradados; la
+;  transparencia a medias; abrir documentos cifrados; formularios, enlaces y
 ;  marcadores; ordenar por columnas el texto que se guarda. Límites:
 ;  48 MB de archivo, 4.000 páginas y 32.768 objetos (si se pasa, lo dice y
 ;  enseña lo que cabe); de una página, 6.000 trozos y 128.000 letras. Necesita
@@ -339,7 +343,8 @@ t_av_roto   db "Aviso: la página está dañada; puede faltar una parte.", 0
 t_av_ilegible db "Aviso: hay texto que no se puede leer (letra con codificación propia): va en gris.", 0
 t_av_llena  db "Aviso: la página es muy compleja; se muestra solo una parte.", 0
 t_av_descon db "Aviso: hay letras que Hispa-DOS no tiene; se ven como «?».", 0
-t_av_imagen db "Hay imágenes que Lector no sabe mostrar: van como recuadros grises.", 0
+t_av_imagen db "Hay imágenes que Lector no sabe mostrar", 0
+t_av_imagen2 db ": van como recuadros grises.", 0
 ; la información
 t_i_archivo db "Archivo: ", 0
 t_i_titulo  db "Título: ", 0
@@ -1061,9 +1066,26 @@ pon_aviso:
         mov esi, t_av_descon
         test eax, AV_DESCON
         jnz .pon
-        mov esi, t_av_imagen
         test eax, AV_IMAGEN
         jz .x
+        mov esi, t_av_imagen        ; con el nombre de lo que no se sabe, si lo hay
+        mov edi, aviso_buf
+        call hvl_cad
+        cmp byte [im_que], 0
+        je .i1
+        mov al, ' '
+        stosb
+        mov al, '('
+        stosb
+        mov esi, im_que
+        call hvl_cad
+        mov al, ')'
+        stosb
+.i1:
+        mov esi, t_av_imagen2
+        call hvl_cad
+        mov byte [edi], 0
+        mov esi, aviso_buf
 .pon:
         mov [av_txt], esi
 .x:
@@ -2805,8 +2827,110 @@ vb_imagen:
         jge .x
         mov edi, [im_px]            ; EDI=la columna
         cmp edi, [vc_x0]
-        jge .fx
+        jge .f0
         mov edi, [vc_x0]
+.f0:
+        mov eax, [im_px]
+        add eax, [im_pw]
+        cmp edi, eax
+        jge .f_sig
+        test byte [im_pb], II_GIRADA
+        jnz .fx
+        ; Lo corriente (sin girar), sin una sola división por punto: las filas
+        ; de la miniatura que caen en esta de la pantalla se calculan una vez,
+        ; y las columnas se van llevando con su resto, de punto en punto
+        mov eax, ebp
+        sub eax, [im_py]
+        mov ebx, eax
+        mul dword [esi+4]
+        div dword [im_ph]
+        mov [im_r0], eax
+        lea eax, [ebx+1]
+        mul dword [esi+4]
+        div dword [im_ph]
+        sub eax, [im_r0]
+        jg .rr1
+        mov eax, 1
+.rr1:
+        mov [im_rn], eax
+        test byte [im_pb], II_VUELTA
+        jz .rr2
+        mov eax, [esi+4]
+        sub eax, [im_r0]
+        sub eax, [im_rn]
+        jns .rr1b
+        xor eax, eax
+.rr1b:
+        mov [im_r0], eax
+.rr2:
+        mov eax, [im_r0]
+        mul dword [esi]
+        lea eax, [esi+eax+8]
+        mov [im_fila_p], eax        ; la primera de esas filas
+        mov eax, ebp
+        imul eax, [vw]
+        add eax, [vbuf_p]
+        mov [im_vfila], eax         ; y la de la pantalla
+        mov eax, edi
+        sub eax, [im_px]
+        mul dword [esi]
+        div dword [im_pw]
+        mov [im_cc], eax            ; la columna de la miniatura por la que se va
+        mov [im_ca], edx            ; y lo que sobra
+.rx:
+        mov eax, [im_px]
+        add eax, [im_pw]
+        cmp edi, eax
+        jge .f_sig
+        cmp edi, [vc_x1]
+        jge .f_sig
+        mov ebx, [im_cc]
+        mov eax, [im_ca]
+        add eax, [esi]
+        mov ecx, [im_pw]
+.rd:
+        cmp eax, ecx
+        jb .rd1
+        sub eax, ecx
+        inc dword [im_cc]
+        jmp .rd
+.rd1:
+        mov [im_ca], eax
+        mov eax, [im_cc]
+        sub eax, ebx                ; EBX=la primera columna EAX=cuántas (una, al menos)
+        jnz .rc1
+        inc eax
+.rc1:
+        test byte [im_pb], II_ESPEJO
+        jz .rc2
+        mov ecx, [esi]
+        sub ecx, ebx
+        sub ecx, eax
+        jns .rc1b
+        xor ecx, ecx
+.rc1b:
+        mov ebx, ecx
+.rc2:
+        cmp eax, 1
+        jne .rcaja
+        cmp dword [im_rn], 1
+        jne .rcaja
+        mov eax, [im_fila_p]        ; un punto solo (al ampliar o a su tamaño): tal cual
+        mov al, [eax+ebx]
+        jmp .rpon
+.rcaja:
+        mov [im_c0], ebx
+        mov [im_cn], eax
+        call vb_im_caja             ; varios (al encoger): su media
+.rpon:
+        cmp al, IM_NADA
+        je .r4
+        mov ebx, [im_vfila]
+        mov [ebx+edi], al
+.r4:
+        inc edi
+        jmp .rx
+        ; girada: punto a punto, con sus cuentas
 .fx:
         mov eax, [im_px]
         add eax, [im_pw]
@@ -2825,30 +2949,68 @@ vb_imagen:
         xchg eax, ebx               ; girada: las columnas van a lo alto
         xchg ecx, edx
 .o1:
+        ; las columnas de la miniatura que caen en este punto: de
+        ; x * ancho / sitio a (x + 1) * ancho / sitio (una, al menos)
         push edx
-        mul dword [esi]             ; columna = x * ancho de la miniatura / ancho del sitio
+        push ebx
+        mov ebx, eax
+        mul dword [esi]
         div ecx
-        pop ecx
+        mov [im_c0], eax
+        lea eax, [ebx+1]
+        mul dword [esi]
+        div ecx
+        sub eax, [im_c0]
+        jg .c1
+        mov eax, 1
+.c1:
+        mov [im_cn], eax
         test byte [im_pb], II_ESPEJO
-        jz .o2
-        neg eax
-        add eax, [esi]
-        dec eax
-.o2:
-        push eax
-        mov eax, ebx
+        jz .c2
+        mov eax, [esi]
+        sub eax, [im_c0]
+        sub eax, [im_cn]
+        jns .c1b
+        xor eax, eax
+.c1b:
+        mov [im_c0], eax
+.c2:
+        pop ebx
+        pop ecx
+        mov eax, ebx                ; y las filas, lo mismo
         mul dword [esi+4]
         div ecx
+        mov [im_r0], eax
+        lea eax, [ebx+1]
+        mul dword [esi+4]
+        div ecx
+        sub eax, [im_r0]
+        jg .r1
+        mov eax, 1
+.r1:
+        mov [im_rn], eax
         test byte [im_pb], II_VUELTA
-        jz .o3
-        neg eax
-        add eax, [esi+4]
-        dec eax
-.o3:
+        jz .r2
+        mov eax, [esi+4]
+        sub eax, [im_r0]
+        sub eax, [im_rn]
+        jns .r1b
+        xor eax, eax
+.r1b:
+        mov [im_r0], eax
+.r2:
+        mov eax, [im_cn]
+        or eax, [im_rn]
+        cmp eax, 1
+        jne .caja
+        mov eax, [im_r0]
         mul dword [esi]
-        pop edx
-        add eax, edx
+        add eax, [im_c0]
         mov al, [esi+8+eax]
+        jmp .o3
+.caja:
+        call vb_im_caja
+.o3:
         cmp al, IM_NADA
         je .o4
         mov ebx, ebp
@@ -2862,6 +3024,152 @@ vb_imagen:
 .f_sig:
         inc ebp
         jmp .fy
+
+; (interna) ESI=una miniatura; [im_c0], [im_cn], [im_r0], [im_rn]=un cuadro
+; suyo; EDI, EBP=el punto de la pantalla -> AL=el color de la media del cuadro
+; (IM_NADA si casi todo él deja ver lo de debajo). La miniatura va ya en la
+; paleta y tramada: al encogerla, quedarse con un punto de cada tantos haría
+; aguas con el tramado y se comería rayas de las letras; se deshace la paleta,
+; se promedia (hasta 4 x 4 puntos) y se vuelve a tramar, ya en la pantalla
+vb_im_caja:
+        push ebx
+        push ecx
+        push edx
+        cmp byte [im_tab_hecha], 0
+        jne .hay
+        call vb_im_tabla
+.hay:
+        xor eax, eax
+        mov [im_s], eax
+        mov [im_s+4], eax
+        mov [im_s+8], eax
+        mov [im_sn], eax
+        mov [im_st], eax
+        mov dword [im_s1], -1
+        mov eax, [im_cn]            ; los pasos: no más de cuatro por lado
+        add eax, 3
+        shr eax, 2
+        mov [im_sc], eax
+        mov eax, [im_rn]
+        add eax, 3
+        shr eax, 2
+        mov [im_sr], eax
+        mul dword [esi]
+        mov [im_spaso], eax         ; de una fila de las que se miran a la siguiente
+        mov eax, [im_r0]
+        mul dword [esi]
+        add eax, [im_c0]
+        lea ebx, [esi+eax+8]        ; EBX=el primer punto de la fila
+        xor ecx, ecx                ; ECX=la fila, dentro del cuadro
+.f:
+        xor edx, edx                ; EDX=la columna, dentro del cuadro
+.c:
+        movzx eax, byte [ebx+edx]
+        cmp al, IM_NADA
+        jne .c1
+        inc dword [im_st]
+        jmp .c3
+.c1:
+        cmp dword [im_s1], -1       ; ¿son todos iguales? (lo liso se queda como está)
+        jne .c2
+        mov [im_s1], eax
+.c2:
+        cmp eax, [im_s1]
+        je .c2b
+        mov dword [im_s1], -2
+.c2b:
+        mov eax, [im_tab_rgb+eax*4]
+        push ebx
+        movzx ebx, al
+        add [im_s], ebx
+        movzx ebx, ah
+        add [im_s+4], ebx
+        shr eax, 16
+        add [im_s+8], eax
+        pop ebx
+        inc dword [im_sn]
+.c3:
+        add edx, [im_sc]
+        cmp edx, [im_cn]
+        jb .c
+        add ebx, [im_spaso]
+        add ecx, [im_sr]
+        cmp ecx, [im_rn]
+        jb .f
+        mov al, IM_NADA
+        mov ecx, [im_sn]
+        cmp ecx, [im_st]            ; se ve si son más los que se pintan
+        jbe .x
+        mov eax, [im_s1]
+        test eax, eax
+        jns .x
+        mov edx, [im_rec+ecx*4]     ; entre cuántos son (16 a lo más), sin dividir
+        mov ecx, [im_s+8]
+        imul ecx, edx
+        shr ecx, 16
+        mov ebx, [im_s+4]
+        imul ebx, edx
+        shr ebx, 16
+        mov eax, [im_s]
+        imul eax, edx
+        shr eax, 16
+        push esi
+        push edi
+        mov esi, edi
+        mov edi, ebp
+        call im_color
+        pop edi
+        pop esi
+        cmp al, IM_NADA
+        jne .x
+        dec al
+.x:
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
+; 65.536 entre n, hacia arriba (de 1 a 16)
+im_rec      dd 0, 65536, 32768, 21846, 16384, 13108, 10923, 9363, 8192, 7282, 6554, 5958, 5462, 5042, 4682, 4370, 4096
+
+; (interna) de cada color de la paleta de las imágenes, su rojo, verde y azul:
+; el cubo de 6x6x6 (16-231, de 51 en 51) y los grises (232-255, de 11 en 11)
+vb_im_tabla:
+        pushad
+        mov edi, im_tab_rgb
+        xor eax, eax
+        mov ecx, 16
+        rep stosd
+        xor ecx, ecx
+.cubo:
+        mov eax, ecx                ; azul
+        xor edx, edx
+        mov ebx, 6
+        div ebx
+        imul esi, edx, 51
+        shl esi, 16
+        xor edx, edx                ; verde
+        div ebx
+        imul edx, edx, 51
+        shl edx, 8
+        or esi, edx
+        imul eax, eax, 51           ; rojo
+        or eax, esi
+        stosd
+        inc ecx
+        cmp ecx, 216
+        jb .cubo
+        xor ecx, ecx
+.gris:
+        imul eax, ecx, 11
+        imul eax, eax, 0x010101
+        stosd
+        inc ecx
+        cmp ecx, 24
+        jb .gris
+        mov byte [im_tab_hecha], 1
+        popad
+        ret
 
 ; ESI=un ITT_ILEGIBLE: una banda gris donde iría el texto
 vb_ilegible:
@@ -3550,6 +3858,7 @@ vb_uv:
         ret
 
 %include "desinfla.inc"
+%include "jpeg.inc"
 %include "pdf.inc"
 %include "letras.inc"
 %include "nombres.inc"
@@ -3676,7 +3985,31 @@ dato_buf    resb 64
 info_buf    resb 900
             alignb 4
 pv_tab      resd PV_MAX * 3 + 64
+; Lo que se escribe por cada punto al pintar una miniatura va aquí, lejos del
+; código: las primeras variables comparten página con el final del programa, y
+; escribir en una página que tiene código es lentísimo en QEMU (y en un
+; Pentium moderno): cada escritura le hace comprobar si se ha cambiado código.
+; Con estas arriba, repintar una página escaneada tardaba 2,5 s en vez de 0,1
+im_c0       resd 1                  ; el cuadro de la miniatura que cae en un punto
+im_cn       resd 1
+im_r0       resd 1
+im_rn       resd 1
+im_sc       resd 1
+im_sr       resd 1
+im_s        resd 3
+im_sn       resd 1
+im_st       resd 1
+im_s1       resd 1
+im_spaso    resd 1
+im_fila_p   resd 1
+im_vfila    resd 1
+im_cc       resd 1
+im_ca       resd 1
+im_tab_rgb  resd 256                ; la paleta de las imágenes, en rojo, verde y azul
+im_tab_hecha resb 1
+            alignb 4
             DESINFLA_BSS
+            JPEG_BSS
             PDF_BSS
             LETRAS_BSS
             CONTENIDO_BSS

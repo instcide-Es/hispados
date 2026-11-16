@@ -68,6 +68,8 @@ def comprueba(nombre, n, esperado, hallados):
             res(pg.avisos & e[2] == e[2], d + ' (lleva %d)' % pg.avisos)
         elif c == 'sin_aviso':
             res(pg.avisos & e[2] == 0, d + ' (lleva %d)' % pg.avisos)
+        elif c == 'que':
+            res(pg.que == e[2], d + ' (dice «%s»)' % pg.que)
         elif c == 'texto':
             t, x, y, tam = e[2:6]
             cand = [k for k in pg.textos() if k[8] == t]

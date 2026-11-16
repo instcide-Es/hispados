@@ -15,7 +15,7 @@ el texto en orden de lectura. tests/run_lector_tests.sh lo usa (módulo
 import os, subprocess, sys, tempfile
 
 RAIZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
-INCS = [('programas/comun', 'desinfla.inc'), ('programas/lector', 'pdf.inc'), ('programas/lector', 'letras.inc'),
+INCS = [('programas/comun', 'desinfla.inc'), ('programas/comun', 'jpeg.inc'), ('programas/lector', 'pdf.inc'), ('programas/lector', 'letras.inc'),
         ('programas/lector', 'nombres.inc'), ('programas/lector', 'contenido.inc'), ('programas/lector', 'texto.inc'), ('programas/lector', 'imagen.inc')]
 
 ARNES = r'''
@@ -100,6 +100,14 @@ _start:
         mov eax, [it_n]
         call sal_num
         call sal_nl
+        cmp byte [im_que], 0        ; el formato de imagen que no se ha sabido
+        je .sin_que
+        mov esi, t_que
+        call sal_cad
+        mov esi, im_que
+        call sal_cad
+        call sal_nl
+.sin_que:
         mov ebx, it_tab
         mov ecx, [it_n]
 .it:
@@ -338,6 +346,7 @@ sal_num:
 
 t_abre      db "ABRE", 0
 t_pag       db "PAG", 0
+t_que       db "QUE ", 0
 t_texto     db "TEXTO", 0
 t_halla     db "HALLA", 0
 t_titulo    db "TITULO ", 0
@@ -346,6 +355,7 @@ letras_it   db "?TRLIXG"
 alm_tam     dd ALM_TAM
 
 %include "desinfla.inc"
+%include "jpeg.inc"
 %include "pdf.inc"
 %include "letras.inc"
 %include "nombres.inc"
@@ -359,6 +369,7 @@ sal_p   resd 1
 cad     resb 256
 sal_buf resb 65536
         DESINFLA_BSS
+        JPEG_BSS
         PDF_BSS
         LETRAS_BSS
         CONTENIDO_BSS
@@ -387,6 +398,7 @@ class Pagina:
         self.n, self.an, self.al, self.avisos = n, an, al, avisos
         self.cosas = []         # (clase, x, y, an, al, color, letra, band, ...)
         self.texto = ''
+        self.que = ''           # el formato de imagen que no se ha sabido pintar
         self.halla = []
 
     def textos(self):
@@ -435,6 +447,8 @@ class Nucleo:
                     self.autor = l[6:].decode('cp437')
                 elif c[0] == b'PAG':
                     self.pags.append(Pagina(int(c[1]), int(c[2]) / 65536, int(c[3]) / 65536, int(c[4])))
+                elif c[0] == b'QUE':
+                    self.pags[-1].que = l[4:].decode('cp437')
                 elif c[0] == b'TEXTO':
                     n = int(c[1])
                     self.pags[-1].texto = d[p:p + n].decode('cp437')
@@ -485,7 +499,7 @@ def main():
         print('error %d, %d páginas, versión %d.%d, reparado %d, título «%s», autor «%s», salida %d' % (
             n.err, n.npag, n.ver >> 4, n.ver & 15, n.reparado, n.titulo, n.autor, n.codigo))
         for pg in n.pags:
-            print('--- página %d: %.1f x %.1f, avisos %d' % (pg.n + 1, pg.an, pg.al, pg.avisos))
+            print('--- página %d: %.1f x %.1f, avisos %d%s' % (pg.n + 1, pg.an, pg.al, pg.avisos, (' (no se sabe: %s)' % pg.que) if pg.que else ''))
             for c in pg.cosas:
                 print('   ', c)
             print(pg.texto)

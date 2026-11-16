@@ -28,7 +28,13 @@
 #  F. curvas, figuras rellenas, texto girado, páginas giradas, formularios,
 #     codificaciones, los otros filtros, PDF 1.5 y una actualización incremental.
 #  G. imágenes (RGB, grises, índices, máscaras, giradas), la que no se sabe y recortes.
-# Con LECTOR_SOLO=ABCDEFG (las letras que se quieran) se pasan solo esas partes
+#  H. las JPEG: las de bloques lisos de hazpdf.py (grises, color, CMYK de
+#     Adobe), la transparencia de una imagen y las que no se saben, cada una
+#     con su nombre en el aviso; fotos de verdad (tests/tools/lector_fotos.py,
+#     con ImageMagick: 4:2:0, 4:2:2, gris, CMYK, progresiva, grande), que se
+#     comparan en la pantalla con la foto; y una página A4 escaneada a 150
+#     puntos por pulgada, en gris y en color, con lo que tarda en componerse.
+# Con LECTOR_SOLO=ABCDEFGH (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con LECTOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat e ImageMagick (como las demás).
@@ -36,7 +42,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/LECTOR.HVP
-SOLO=${LECTOR_SOLO:-NABCDEFG}
+SOLO=${LECTOR_SOLO:-NABCDEFGH}
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/lector.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "LECTOR.HVP no se ensambla"; exit 1; }
 P=$T/pdf
 python3 tests/tools/hazpdf.py $P > /dev/null || { ko "hazpdf.py no hace los PDF"; exit 1; }
@@ -59,6 +65,12 @@ echo "== Lector: el descompresor, contra zlib =="
 python3 tests/tools/lector_desinfla.py ${LECTOR_AZAR:-1500} || fail=1
 echo "== Lector: el núcleo, contra los PDF de hazpdf.py, estropeados y de verdad =="
 python3 tests/tools/lector_pdf.py --azar ${LECTOR_ROTOS:-1500} --de-verdad $R || fail=1
+echo "== Lector: el núcleo, con fotos y escaneos JPEG de verdad (ImageMagick) =="
+if python3 tests/tools/lector_fotos.py haz $T/fotosn > $T/fotosn.txt 2>&1; then
+  python3 tests/tools/lector_fotos.py comprueba $T/fotosn || fail=1
+else
+  echo "  (ImageMagick no hace las fotos: esta parte no se pasa)"; cat $T/fotosn.txt
+fi
 fi
 
 if [[ $SOLO == *A* ]]; then
@@ -90,7 +102,7 @@ reabre 'A:\FACTURA.PDF'
   sal; } | run 280 -vga std
 chk $T/a1.ppm titulo 40 34 activa "Lector - A:\\FACTURA.PDF"
 pie a1 "Página 1 de 2    86 %    A:\\FACTURA.PDF"
-avisa a1 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."
+avisa a1 "Hay imágenes que Lector no sabe mostrar (JPEG 2000): van como recuadros grises."
 # a lo ancho de la página (x = 51 + 1,1457 puntos; y = 136 + 1,1457 puntos desde arriba)
 chk $T/a1.ppm rgb 300 280 CCFFFF "la banda del título (0,8 0,95 1)"
 chk $T/a1.ppm rgb 60 280 FFFFFF "la hoja, blanca"
@@ -119,7 +131,7 @@ chk $T/a5.ppm px 60 300 8 "página entera: a la izquierda de la hoja, crema"
 chk $T/a5.ppm rgb 392 300 FFFFFF "página entera: la hoja, en el centro"
 chk $T/a5.ppm px 720 300 8 "página entera: a la derecha, crema"
 pie a6 "Página 2 de 2    170 %    A:\\FACTURA.PDF"
-chk $T/a6.ppm nobusca 46 106 56 114 13 8 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."
+chk $T/a6.ppm nobusca 46 106 56 114 13 8 "Hay imágenes que Lector no sabe mostrar"
 puntos $T/a6.ppm 80 130 300 60 tinta 300 4000 "la segunda página: «Apaisada», grande"
 pie a7 "Página anterior (RePág)"
 pie a8 "Página 1 de 2    86 %    A:\\FACTURA.PDF"
@@ -422,18 +434,117 @@ reabre 'A:\IMAGENES.PDF'
   sal; } | run 150 -vga std
 # a lo ancho, con aviso: x = 51 + 1,1457 puntos; y = 136 + 1,1457 puntos desde arriba
 pie j1 "Página 1 de 1    86 %    A:\\IMAGENES.PDF"
-avisa j1 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."
+avisa j1 "Hay imágenes que Lector no sabe mostrar (JPEG dañado): van como recuadros grises."
 chk $T/j1.ppm rgb 140 250 FF0000 "la imagen RGB de 2 x 2: rojo arriba a la izquierda" rgb 210 250 00FF00 "verde a la derecha" \
   rgb 140 290 0000FF "azul abajo" rgb 210 290 FFFFFF "y blanco"
 chk $T/j1.ppm rgb 280 270 000000 "grises de 2 bits: negro" rgb 310 270 585858 "gris oscuro" rgb 340 270 A5A5A5 "gris claro" rgb 370 270 FFFFFF "blanco"
 chk $T/j1.ppm rgb 130 490 FFFFFF "la máscara deja ver la hoja" rgb 155 490 0000FF "y pinta con el color de relleno" rgb 130 515 0000FF "(abajo, al revés)"
-chk $T/j1.ppm px 170 450 15 "la JPEG, en su recuadro gris"
+chk $T/j1.ppm px 170 450 15 "la JPEG que no lo es, en su recuadro gris"
 chk $T/j1.ppm rgb 310 480 0000FF "la imagen dada la vuelta: azul arriba" rgb 310 520 FF0000 "y rojo abajo"
 pie j2 "Página 1 de 1    86 %    recortes.pdf"
 chk $T/j2.ppm rgb 180 300 0000FF "dentro del recorte, azul" rgb 150 300 FFFFFF "fuera, a la izquierda, la hoja" \
   rgb 180 270 FFFFFF "fuera, arriba" rgb 250 385 FF0000 "el recorte de dentro, rojo" rgb 420 385 FFFFFF "que no se sale del primero"
 puntos $T/j2.ppm 165 280 230 55 000000 100 3000 "el texto de dentro del recorte, en negro"
 muestra j1 lector_imagenes; muestra j2 lector_recortes
+fi
+
+if [[ $SOLO == *H* ]]; then
+echo "== Lector H: las JPEG: bloques lisos, transparencia y las que no se saben =="
+prepara $HVP
+mete $P/JPEG.PDF $P/JPEGNO.PDF $P/MASCARAS.PDF
+reabre 'A:\JPEG.PDF'
+abre() { tecla ctrl-a; sleep 1.2; escribe "$1"; tecla ret; sleep ${2:-2.5}; }
+{ arranca
+  shot k1
+  abre "mascaras.pdf"; shot k2
+  abre "jpegno.pdf"; shot n0
+  for i in 1 2 3 4 5 6 7 8 9 10 11; do clic 153 90; aparca; shot n$i; done      # página siguiente
+  sal; } | run 240 -vga std
+# JPEG.PDF, a lo ancho y con aviso: x = 51 + 1,1457 puntos; y = 136 + 1,1457 puntos desde arriba
+pie k1 "Página 1 de 1    86 %    A:\\JPEG.PDF"
+avisa k1 "Aviso: la página está dañada; puede faltar una parte."     # (por la JPEG cortada, que enseña lo que le ha llegado)
+chk $T/k1.ppm rgb 114 182 000000 "JPEG gris: el bloque negro" rgb 183 182 848484 "el gris medio" rgb 217 182 FFFFFF "y el blanco"
+chk $T/k1.ppm rgb 578 201 FF0000 "JPEG en RGB (APP14 de Adobe, sin girar): rojo" rgb 612 201 00FF00 "verde" rgb 647 201 0000FF "y azul"
+chk $T/k1.ppm rgb 423 281 FFFF00 "JPEG en CMYK de Adobe con su /Decode: amarillo" rgb 458 281 00FFFF "cian" rgb 492 281 FF00FF "y magenta"
+# MASCARAS.PDF, sin aviso: y = 116 + 1,1457 puntos desde arriba; debajo de las imágenes hay una banda amarilla
+pie k2 "Página 1 de 1    86 %    mascaras.pdf"
+chk $T/k2.ppm nobusca 46 106 56 114 13 8 "Aviso"
+chk $T/k2.ppm rgb 125 235 FF0000 "/SMask: donde es opaca, la imagen (rojo)" rgb 183 235 FFFF00 "donde no, lo de debajo (amarillo)" \
+  rgb 125 264 0000FF "opaca por los pelos (128): azul" rgb 183 264 FFFF00 "y transparente"
+chk $T/k2.ppm rgb 251 235 FF0000 "/Mask con una imagen de un bit: se ve" rgb 309 235 FFFF00 "no se ve" rgb 251 264 FFFF00 "no se ve" rgb 309 264 FFFFFF "se ve (blanco)"
+chk $T/k2.ppm rgb 377 235 FF0000 "/Mask por colores: el índice 0 se pinta" rgb 435 235 FFFF00 "el 1 no" rgb 435 264 848484 "el 3 sí"
+# JPEGNO.PDF: la primera se sabe; las demás, cada una con su nombre
+pie n0 "Página 1 de 12    86 %    jpegno.pdf"
+chk $T/n0.ppm nobusca 46 106 56 114 13 8 "Hay imágenes"
+k=1
+for que in "JPEG 2000" "fax CCITT" "JBIG2" "JPEG aritmético" "JPEG sin pérdidas" "JPEG jerárquico" "JPEG de 12 bits" "JPEG dañado" "JPEG dañado" "Raro"; do
+  avisa n$k "Hay imágenes que Lector no sabe mostrar ($que): van como recuadros grises."
+  k=$((k + 1))
+done
+avisa n11 "Hay imágenes que Lector no sabe mostrar: van como recuadros grises."     # (un espacio de color que no conoce: sin nombre)
+chk $T/n1.ppm px 130 250 15 "la JPEG 2000, en su recuadro gris"
+muestra k1 lector_jpeg; muestra k2 lector_mascaras; muestra n4 lector_jpeg_no
+
+echo "== Lector H: fotos JPEG de verdad y páginas escaneadas =="
+F=$T/fotos
+if python3 tests/tools/lector_fotos.py haz $F > $T/fotos.txt 2>&1; then
+prepara $HVP
+mete $F/FOTOS.PDF
+reabre 'A:\FOTOS.PDF'
+{ arranca
+  sleep 6; shot m1
+  clic 211 69; sleep 0.8; clic 260 279; aparca; sleep 3; shot m2          # Ver > Página entera
+  clic 211 69; sleep 0.8; clic 260 239; aparca; sleep 3; shot m3          # Ver > Tamaño real
+  sal; } | run 200 -vga std
+pie m1 "Página 1 de 1    86 %    A:\\FOTOS.PDF"
+avisa m1 "Hay imágenes que Lector no sabe mostrar (JPEG aritmético): van como recuadros grises."
+python3 tests/tools/lector_fotos.py pantalla $T/m1.ppm $F FOTOS.PDF 0 aviso || fail=1
+python3 tests/tools/lector_fotos.py pantalla $T/m2.ppm $F FOTOS.PDF 0 aviso || fail=1
+pie m3 "Página 1 de 1    100 %    A:\\FOTOS.PDF"
+muestra m1 lector_fotos; muestra m2 lector_fotos_entera; muestra m3 lector_fotos_100
+# una página A4 escaneada a 150 ppp: está en la segunda página (el archivo ya
+# está en memoria); se mide desde que se pide hasta que se ve su marca negra
+for cual in G C; do
+  prepara $HVP
+  mete $F/ESCAN$cual.PDF
+  reabre "A:\\ESCAN$cual.PDF"
+  { arranca
+    sleep 4; shot e${cual}0
+    t0=$(date +%s.%N); mon "sendkey ctrl-end" 0.05
+    for i in $(seq 1 400); do
+      mon "screendump $T/t.ppm" 0.12
+      python3 tests/tools/lector_fotos.py oscuro $T/t.ppm 106 171 2>/dev/null && break
+    done
+    echo "$t0 $(date +%s.%N) $i" > $T/tiempo$cual.txt
+    sleep 1; shot e${cual}1
+    # y lo que tarda en repintarla al bajar un paso (32 puntos): la marca se va de (106,185)
+    t0=$(date +%s.%N); mon "sendkey down" 0.05
+    for i in $(seq 1 200); do
+      mon "screendump $T/t.ppm" 0.12
+      python3 tests/tools/lector_fotos.py oscuro $T/t.ppm 106 185 2>/dev/null || break
+    done
+    echo "$t0 $(date +%s.%N) $i" > $T/repinta$cual.txt
+    sleep 0.5; tecla up; sleep 1
+    clic 211 69; sleep 0.8; clic 260 239; aparca; sleep 3; shot e${cual}2        # Ver > Tamaño real
+    sal; } | run 240 -vga std
+  nom=$([ $cual = G ] && echo gris || echo color)
+  pie e${cual}0 "Página 1 de 2    86 %    A:\\ESCAN$cual.PDF"
+  pie e${cual}1 "Página 2 de 2    86 %    A:\\ESCAN$cual.PDF"
+  chk $T/e${cual}1.ppm nobusca 46 106 56 114 13 8 "Aviso" nobusca 46 106 56 114 13 8 "Hay imágenes"
+  python3 tests/tools/lector_fotos.py pantalla $T/e${cual}1.ppm $F ESCAN$cual.PDF 1 || fail=1
+  puntos $T/e${cual}1.ppm 110 215 420 300 tinta 3000 60000 "el texto de la página escaneada ($nom), en la pantalla"
+  seg=$(awk '{ printf "%.1f", $2 - $1 }' $T/tiempo$cual.txt)
+  if awk '{ exit !($3 < 400 && $2 - $1 < 30) }' $T/tiempo$cual.txt; then ok "la página escaneada ($nom, 1240 x 1754) se compone y se pinta en $seg s"
+  else ko "la página escaneada ($nom) tarda $seg s (o no ha salido)"; fi
+  seg=$(awk '{ printf "%.1f", $2 - $1 }' $T/repinta$cual.txt)
+  if awk '{ exit !($3 < 200 && $2 - $1 < 10) }' $T/repinta$cual.txt; then ok "y al desplazarla se repinta en $seg s"
+  else ko "al desplazar la página escaneada ($nom) tarda $seg s en repintarse (o no se mueve)"; fi
+  pie e${cual}2 "Página 2 de 2    100 %    A:\\ESCAN$cual.PDF"
+  muestra e${cual}1 lector_escaneo_$nom; muestra e${cual}2 lector_escaneo_${nom}_100
+done
+else
+  echo "  (ImageMagick no hace las fotos: esta parte no se pasa)"; cat $T/fotos.txt
+fi
 fi
 
 rm -rf $T

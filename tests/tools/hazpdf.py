@@ -10,7 +10,10 @@ incrementales, índice en flujo y flujos de objetos (PDF 1.5, con predictor de
 PNG), las fuentes de siempre con WinAnsi, MacRoman, Standard, /Differences y
 /ToUnicode, fuentes compuestas (Type0), rayas, rectángulos, curvas, imágenes,
 formularios, páginas giradas... y los que no se pueden leer (cifrado, filtro
-desconocido, letra con codificación propia) y los rotos.
+desconocido, letra con codificación propia) y los rotos. Las JPEG también se
+hacen aquí (jpeg_liso): cada bloque de 8x8 de un color, para saber punto por
+punto lo que tiene que salir; las fotos y los escaneos de la parte que se
+mira en la pantalla los hace tests/tools/lector_fotos.py con ImageMagick.
 
 Cada caso es (nombre, octetos, lo que se espera); lo que se espera lo comprueba
 tests/tools/lector_pdf.py contra lo que dice el núcleo de Lector:
@@ -36,6 +39,7 @@ tests/tools/lector_pdf.py contra lo que dice el núcleo de Lector:
   ('mini', pag, x, y, an, al, ancho, alto, puntos, giro)  hay una imagen ahí con esa
                                miniatura (puntos: los colores de la paleta; None: no se sabe pintar)
   ('recorte', pag, clase, texto o color[, x0, y0, x1, y1])  esa cosa lleva ese recorte (o ninguno)
+  ('que', pag, nombre)         el formato de imagen que la página dice que no sabe pintar ('' ninguno)
   ('halla', buscar, pag, veces)
 Las páginas se cuentan desde 0; las medidas van en puntos, con la «y» desde
 arriba de la página (como las deja Lector).
@@ -377,7 +381,7 @@ def caso_factura():
     herencia, una imagen y una imagen metida en el contenido."""
     p = Pdf()
     he, heb = p.fuente('Helvetica'), p.fuente('Helvetica-Bold')
-    img = p.flujo(b'\xff\xd8\xff\xe0' + bytes(40), ' /Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode')
+    img = p.flujo(b'\0\0\0\x0cjP  \r\n\x87\n' + bytes(40), ' /Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /JPXDecode')
     filas = [('Cuota anual 2026', '1', '25,00'), ('Excursión a Tordera', '2', '61,90'), ('Lotería de Navidad', '10', '200,00')]
     s = 'q 0.8 0.95 1 rg 50 700 495 30 re f Q\n'                    # la banda del título
     s += '0.5 w 0 0 0 RG 50 580 495 100 re S\n'                    # el recuadro de la tabla
@@ -416,7 +420,7 @@ def caso_factura():
     H = A4[1]
     xt = 540 - ancho('Total: 286,90', 12, 1)
     e = [('error', 0), ('paginas', 2), ('tam', 0, A4[0], A4[1]), ('tam', 1, 300, 200),
-         ('aviso', 0, AV_IMAGEN), ('sin_aviso', 0, 255 - AV_IMAGEN), ('sin_aviso', 1, 255),
+         ('aviso', 0, AV_IMAGEN), ('sin_aviso', 0, 255 - AV_IMAGEN), ('sin_aviso', 1, 255), ('que', 0, 'JPEG 2000'), ('que', 1, ''),
          ('rect', 0, 50, H - 730, 495, 30, 16 + 36 * 4 + 6 * 5 + 5),     # 0,8 0,95 1 -> niveles 4, 5 y 5
          ('raya', 0, 50, H - 580, 545, H - 580, 0.5, NEGRO), ('raya', 0, 545, H - 580, 545, H - 680),
          ('raya', 0, 545, H - 680, 50, H - 680), ('raya', 0, 50, H - 680, 50, H - 580),
@@ -774,7 +778,7 @@ def rotos():
 def caso_imagenes():
     """Imágenes: RGB, grises de 2 bits, 1 bit al revés, Indexed, CMYK, máscara,
     una grande (se reduce), una dentro del contenido, una dada la vuelta y una
-    JPEG (que no se sabe: recuadro y aviso)."""
+    JPEG que no lo es (recuadro y aviso)."""
     p = Pdf()
     f1 = p.fuente('Helvetica')
     im = lambda datos, dic, filtros=(): p.flujo(datos, ' /Type /XObject /Subtype /Image' + dic, filtros)
@@ -799,7 +803,7 @@ def caso_imagenes():
     H = A4[1]
     N = 255
     sitio = lambda i: (60 + 130 * (i % 4), H - (700 - 80 * (i // 4)) - 50, 100, 50)
-    e = [('error', 0), ('paginas', 1), ('aviso', 0, AV_IMAGEN), ('ncosas', 0, 'I', 13),
+    e = [('error', 0), ('paginas', 1), ('aviso', 0, AV_IMAGEN), ('ncosas', 0, 'I', 13), ('que', 0, 'JPEG dañado'),
          ('mini', 0) + sitio(0) + (2, 2, bytes([196, 46, 21, 231]), 0),
          ('mini', 0) + sitio(1) + (4, 1, bytes([16, 240, 247, 231]), 0),
          ('mini', 0) + sitio(2) + (8, 1, bytes([16, 231] * 4), 0),
@@ -815,6 +819,286 @@ def caso_imagenes():
          ('mini', 0, 60, H - 460, 60, 60, 2, 2, bytes([16, 231, 231, 16]), 0),      # la de dentro del contenido
          ('texto', 0, 'Tras las imágenes', 60, H - 380, 10), ('no_texto', 0, 'EI')]
     return 'IMAGENES', p.clasico(raiz), e
+
+
+# ---------------------------------------------------------------------------
+#  JPEG «lisos»: cada bloque de 8x8, de un color. Solo llevan el primer
+#  coeficiente de cada bloque, así que se sabe exactamente lo que da cada punto
+# ---------------------------------------------------------------------------
+BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
+
+
+def a_paleta(r, g, b, x, y):
+    """El color de la paleta que da Lector a un punto (im_color, en imagen.inc)."""
+    if max(r, g, b) - min(r, g, b) <= 20:
+        v = (r + g + b) // 3
+        if v >= 248:
+            return BLANCO
+        if v <= 5:
+            return NEGRO
+        return 232 + min(23, (v + 5) // 11)
+    u = BAYER[(y & 3) * 4 + (x & 3)] * 255 // 16 + 8
+    return 16 + 36 * ((5 * r + u) // 255) + 6 * ((5 * g + u) // 255) + (5 * b + u) // 255
+
+
+def ycc_rgb(y, cb, cr):
+    """De YCbCr a rojo, verde y azul, con las cuentas de libjpeg (y de jpeg.inc)."""
+    cb, cr = cb - 128, cr - 128
+    t = lambda v: max(0, min(255, v))
+    return (t(y + ((91881 * cr + 32768) >> 16)), t(y + ((-22554 * cb - 46802 * cr + 32768) >> 16)), t(y + ((116130 * cb + 32768) >> 16)))
+
+
+def jpeg_liso(comp, an=None, al=None, marca='jfif', prog=False, ri=0, sof=None, ids=None, fines=None):
+    """comp: de cada componente, (h, v, filas de valores 0-255 de sus bloques).
+    marca: 'jfif', ('adobe', transformación) o None. Devuelve el JPEG. En «fines»
+    (una lista) deja en qué bit de los datos del barrido acaba cada bloque."""
+    hmax, vmax = max(c[0] for c in comp), max(c[1] for c in comp)
+    mcux, mcuy = len(comp[0][2][0]) // comp[0][0], len(comp[0][2]) // comp[0][1]
+    an, al = an or mcux * 8 * hmax, al or mcuy * 8 * vmax
+    seg = lambda m, c: bytes([0xFF, m]) + struct.pack('>H', len(c) + 2) + c
+    d = b'\xff\xd8'
+    if marca == 'jfif':
+        d += seg(0xE0, b'JFIF\0\1\1\0\0\1\0\1\0\0')
+    elif marca:
+        d += seg(0xEE, b'Adobe\0\x64\0\0\0\0' + bytes([marca[1]]))
+    d += seg(0xDB, b'\0' + bytes([1] * 64))                             # cuantización: todo unos
+    ids = ids or list(range(1, len(comp) + 1))
+    d += seg(sof or (0xC2 if prog else 0xC0), struct.pack('>BHHB', 8, al, an, len(comp)) + b''.join(bytes([ids[i], c[0] << 4 | c[1], 0]) for i, c in enumerate(comp)))
+    d += seg(0xC4, b'\0' + bytes([0, 0, 0, 12] + [0] * 12) + bytes(range(12)))  # DC: la clase, en 4 bits
+    d += seg(0xC4, b'\x10' + bytes([1] + [0] * 15) + b'\0')            # AC: solo «se acabó», un bit a 0
+    if ri:
+        d += seg(0xDD, struct.pack('>H', ri))
+    d += seg(0xDA, bytes([len(comp)]) + b''.join(bytes([ids[i], 0]) for i in range(len(comp))) + (b'\0\0\0' if prog else b'\0\x3f\0'))
+    sal, acc, nb = bytearray(), 0, 0
+
+    def pon(v, n):
+        nonlocal acc, nb
+        acc, nb = (acc << n) | (v & ((1 << n) - 1)), nb + n
+        while nb >= 8:
+            o = (acc >> (nb - 8)) & 255
+            sal.append(o)
+            if o == 255:
+                sal.append(0)
+            nb -= 8
+        acc &= (1 << nb) - 1
+
+    pred = [0] * len(comp)
+    for n in range(mcux * mcuy):
+        my, mx = divmod(n, mcux)
+        if ri and n and n % ri == 0:
+            if nb:
+                pon(0xFF, 8 - nb)
+            sal += bytes([0xFF, 0xD0 + (n // ri - 1) % 8])
+            pred = [0] * len(comp)
+        for i, (h, v, vals) in enumerate(comp):
+            for bv in range(v):
+                for bh in range(h):
+                    dc = 8 * (vals[my * v + bv][mx * h + bh] - 128)
+                    dif, pred[i] = dc - pred[i], dc
+                    cat = abs(dif).bit_length()
+                    pon(cat, 4)
+                    if cat:
+                        pon(dif if dif > 0 else dif + (1 << cat) - 1, cat)
+                    if not prog:
+                        pon(0, 1)
+                    if fines is not None:
+                        fines.append(len(sal) * 8 + nb)
+    if nb:
+        pon(0xFF, 8 - nb)
+    return d + bytes(sal) + b'\xff\xd9'
+
+
+def mini_lisa(comp, color, lado_pt, an=None, al=None):
+    """La miniatura que tiene que salir de un jpeg_liso pintado con lado_pt puntos
+    de lado largo: (ancho, alto, puntos). color: de los valores de los componentes
+    de un punto, su rojo, verde y azul."""
+    hmax, vmax = max(c[0] for c in comp), max(c[1] for c in comp)
+    an = an or len(comp[0][2][0]) // comp[0][0] * 8 * hmax
+    al = al or len(comp[0][2]) // comp[0][1] * 8 * vmax
+    lado = max(64, min(1280, int(lado_pt * 2)))
+    r, m = 0, max(an, al)
+    while r < 3 and (m >> 1) >= lado:
+        r, m = r + 1, m >> 1
+    tw, th = -(-an >> r), -(-al >> r)
+    assert max(tw, th) <= lado, 'esta se encogería: no se sabe punto por punto'
+    pts = bytearray()
+    for y in range(th):
+        for x in range(tw):
+            fx, fy = x << r, y << r
+            v = [c[2][fy * c[1] // (8 * vmax)][fx * c[0] // (8 * hmax)] for c in comp]
+            k = a_paleta(*color(v), x, y)
+            pts.append(254 if k == 255 else k)
+    return tw, th, bytes(pts)
+
+
+def cmyk_rgb(c, m, y, k):
+    return tuple((255 - v) * (255 - k) // 255 for v in (c, m, y))
+
+
+def caso_jpeg():
+    """Imágenes JPEG: gris, color (YCbCr 4:4:4 y 4:2:0), RGB de Adobe, sin girar
+    por /ColorTransform, CMYK de Adobe con su /Decode (y sin él), con índices,
+    gris al revés, progresiva, con reinicios, detrás de ASCII85, grandes (se
+    reducen al vuelo y se encogen), cortada (sale lo que hay, con aviso), con
+    /SMask y metidas en el contenido."""
+    p = Pdf()
+    f1 = p.fuente('Helvetica')
+    im = lambda datos, dic, filtros=(): p.flujo(datos, ' /Type /XObject /Subtype /Image' + dic, filtros + ('DCTDecode',))
+    FILTROS['DCTDecode'] = lambda d: d
+    gris = [(1, 1, [[0, 60, 128, 255], [200, 30, 90, 160], [255, 128, 5, 250]])]
+    ycc = [(1, 1, [[76, 150, 29], [255, 0, 128]]), (1, 1, [[85, 44, 255], [128, 128, 128]]), (1, 1, [[255, 21, 107], [128, 128, 128]])]
+    c420 = [(2, 2, [[40, 80, 120, 160], [60, 100, 140, 180], [200, 220, 240, 255], [0, 20, 40, 60]]), (1, 1, [[90, 200], [128, 60]]), (1, 1, [[240, 100], [128, 180]])]
+    rgb = [(1, 1, [[255, 0, 0, 40]]), (1, 1, [[0, 255, 0, 80]]), (1, 1, [[0, 0, 255, 200]])]
+    cmyk = [(1, 1, [[255, 0, 255, 128]]), (1, 1, [[255, 255, 0, 128]]), (1, 1, [[0, 255, 255, 128]]), (1, 1, [[255, 255, 255, 60]])]
+    ind = [(1, 1, [[0, 1], [2, 3]])]
+    dos = [(1, 1, [[0] * 50 + [255] * 50])]
+    liso = lambda n: [(1, 1, [[128] * n])]
+    cortada_c = [(1, 1, [[10 + 3 * (x + 7 * y) for x in range(4)] for y in range(6)])]
+    fines = []
+    cortada = jpeg_liso(cortada_c, fines=fines)
+    corte = (fines[13] + 7) // 8                                        # hasta el segundo bloque de la cuarta fila, y lo que quepa
+    cortada = cortada[:cortada.index(b'\xff\xda') + 10 + corte]
+    enteros = len([f for f in fines if f <= corte * 8])
+    x = {
+        'Gris': (im(jpeg_liso(gris), ' /Width 32 /Height 24 /ColorSpace /DeviceGray /BitsPerComponent 8'), gris, lambda v: (v[0],) * 3),
+        'Ycc': (im(jpeg_liso(ycc), ' /Width 24 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8'), ycc, lambda v: ycc_rgb(*v)),
+        'C420': (im(jpeg_liso(c420, ri=1), ' /Width 32 /Height 32 /ColorSpace /DeviceRGB /BitsPerComponent 8'), c420, lambda v: ycc_rgb(*v)),
+        'Rgb': (im(jpeg_liso(rgb, marca=('adobe', 0)), ' /Width 32 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8'), rgb, lambda v: tuple(v)),
+        'RgbCT': (im(jpeg_liso(rgb, marca=None), ' /Width 32 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /DecodeParms << /ColorTransform 0 >>'), rgb, lambda v: tuple(v)),
+        'YccCT': (im(jpeg_liso(ycc, marca=None, ids=[82, 71, 66]), ' /Width 24 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8 /DecodeParms << /ColorTransform 1 >>'), ycc, lambda v: ycc_rgb(*v)),
+        'Cmyk': (im(jpeg_liso(cmyk, marca=('adobe', 0)), ' /Width 32 /Height 8 /ColorSpace /DeviceCMYK /BitsPerComponent 8 /Decode [1 0 1 0 1 0 1 0]'), cmyk,
+                 lambda v: cmyk_rgb(*(255 - t for t in v))),
+        'CmykSin': (im(jpeg_liso(cmyk, marca=('adobe', 0)), ' /Width 32 /Height 8 /ColorSpace /DeviceCMYK /BitsPerComponent 8'), cmyk, lambda v: cmyk_rgb(*v)),
+        'Ycck': (im(jpeg_liso(ycc + [(1, 1, [[255, 255, 200], [255, 0, 128]])], marca=('adobe', 2)), ' /Width 24 /Height 16 /ColorSpace /DeviceCMYK /BitsPerComponent 8 /Decode [1 0 1 0 1 0 1 0]'),
+                 ycc + [(1, 1, [[255, 255, 200], [255, 0, 128]])], lambda v: cmyk_rgb(*(list(ycc_rgb(*v[:3])) + [255 - v[3]]))),
+        'Ind': (im(jpeg_liso(ind), ' /Width 16 /Height 16 /ColorSpace [/Indexed /DeviceRGB 3 <FF0000 00FF00 0000FF 808080>] /BitsPerComponent 8'), ind,
+                lambda v: [(255, 0, 0), (0, 255, 0), (0, 0, 255), (128, 128, 128)][v[0]]),
+        'GInv': (im(jpeg_liso(gris), ' /Width 32 /Height 24 /ColorSpace /DeviceGray /BitsPerComponent 8 /Decode [1 0]'), gris, lambda v: (255 - v[0],) * 3),
+        'Prog': (im(jpeg_liso(gris, prog=True), ' /Width 32 /Height 24 /ColorSpace /DeviceGray /BitsPerComponent 8'), gris, lambda v: (v[0],) * 3),
+        'A85': (im(jpeg_liso(ycc), ' /Width 24 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8', ('ASCII85Decode',)), ycc, lambda v: ycc_rgb(*v)),
+        'Dos': (im(jpeg_liso(dos), ' /Width 800 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 8'), dos, lambda v: (v[0],) * 3),
+        'Raro': (im(jpeg_liso(gris, an=27, al=19), ' /Width 27 /Height 19 /ColorSpace /DeviceGray /BitsPerComponent 8'), gris, lambda v: (v[0],) * 3),
+    }
+    otras = {'Larga': im(jpeg_liso(liso(200)), ' /Width 1600 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 8'),
+             'Enorme': im(jpeg_liso(liso(1600)), ' /Width 12800 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 8'),
+             'Cortada': im(cortada, ' /Width 32 /Height 48 /ColorSpace /DeviceGray /BitsPerComponent 8'),
+             'ConS': p.flujo(jpeg_liso(ycc), ' /Type /XObject /Subtype /Image /Width 24 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask %d 0 R /Filter /DCTDecode' % (p.n + 2))}
+    p.flujo(bytes([255, 0, 130, 127, 128, 200]), ' /Type /XObject /Subtype /Image /Width 3 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8')
+    H = A4[1]
+    s, e = '', [('error', 0), ('paginas', 1), ('que', 0, '')]
+    for i, (n, (num, comp, color)) in enumerate(x.items()):
+        px, py = 40 + 135 * (i % 4), 760 - 70 * (i // 4)
+        s += 'q 120 0 0 50 %d %d cm /%s Do Q\n' % (px, py, n)
+        if n == 'Dos':
+            e.append(('mini', 0, px, H - py - 50, 120, 50) + mini_lisa(comp, color, 100) + (0,))   # (a 1/4 al vuelo: 800 -> 200)
+            s = s.replace('q 120 0 0 50 %d %d cm /Dos' % (px, py), 'q 100 0 0 50 %d %d cm /Dos' % (px, py))
+            e[-1] = ('mini', 0, px, H - py - 50, 100, 50) + e[-1][6:]
+        elif n == 'Raro':
+            e.append(('mini', 0, px, H - py - 50, 120, 50) + mini_lisa(comp, color, 120, 27, 19) + (0,))
+        else:
+            e.append(('mini', 0, px, H - py - 50, 120, 50) + mini_lisa(comp, color, 120) + (0,))
+    # las grandes: 1600 x 8 pintada a 500 puntos (se encoge a 1000 x 5) y 12800 x 8 a 300 (a 1/8 al vuelo y a 600 x 1)
+    s += 'q 500 0 0 2.5 40 440 cm /Larga Do Q q 300 0 0 2 40 420 cm /Enorme Do Q\n'
+    e += [('mini', 0, 40, H - 442.5, 500, 2.5, 1000, 5, bytes([244]) * 5000, 0), ('mini', 0, 40, H - 422, 300, 2, 600, 1, bytes([244]) * 600, 0)]
+    # la cortada: salen las filas de bloques enteras y, de la que se queda a medias,
+    # lo que haya con el resto en gris; lo demás deja ver la hoja
+    s += 'q 40 0 0 60 40 340 cm /Cortada Do Q\n'
+    tw, th, pts = mini_lisa(cortada_c, lambda v: (v[0],) * 3, 60)
+    pts = bytearray(pts)
+    filas, resto = divmod(enteros, 4)
+    assert 0 < filas < 6 and resto
+    for y in range(filas * 8, 48):
+        for xx in range(32):
+            if y >= filas * 8 + 8:
+                pts[y * 32 + xx] = 255
+            elif xx >= resto * 8:
+                pts[y * 32 + xx] = a_paleta(128, 128, 128, xx, y)
+    e += [('mini', 0, 40, H - 400, 40, 60, tw, th, bytes(pts), 0), ('aviso', 0, AV_ROTO), ('sin_aviso', 0, AV_IMAGEN)]
+    # con /SMask: se ve donde la opacidad pasa de la mitad (3 x 2 sobre 24 x 16)
+    s += 'q 60 0 0 40 120 340 cm /ConS Do Q\n'
+    tw, th, pts = mini_lisa(ycc, lambda v: ycc_rgb(*v), 60)
+    alfa = [[255, 0, 130], [127, 128, 200]]
+    e.append(('mini', 0, 120, H - 380, 60, 40, tw, th, bytes(pts[y * tw + xx] if alfa[y * 2 // th][xx * 3 // tw] >= 128 else 255 for y in range(th) for xx in range(tw)), 0))
+    # metidas en el contenido: una JPEG en hexadecimal y una con Flate
+    j = jpeg_liso([(1, 1, [[90, 200]])])
+    s += 'q 32 0 0 16 220 340 cm BI /W 16 /H 8 /CS /G /BPC 8 /F [/AHx /DCT] ID %s> EI Q\n' % j.hex().upper()
+    e.append(('mini', 0, 220, H - 356, 32, 16) + mini_lisa([(1, 1, [[90, 200]])], lambda v: (v[0],) * 3, 32) + (0,))
+    s += 'q 20 0 0 20 280 340 cm BI /W 2 /H 2 /CS /RGB /BPC 8 /F /Fl ID '
+    c = s.encode('latin-1') + zlib.compress(bytes([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255])) + b' EI Q\nBT /F1 10 Tf 40 300 Td (Tras las JPEG) Tj ET\n'
+    e += [('mini', 0, 280, H - 360, 20, 20, 2, 2, bytes([196, 46, 21, 231]), 0), ('texto', 0, 'Tras las JPEG', 40, H - 300, 10), ('no_texto', 0, 'EI'),
+          ('ncosas', 0, 'I', len(x) + 6)]
+    todas = dict((n, v[0]) for n, v in x.items())
+    todas.update(otras)
+    raiz = p.paginas([p.flujo(c)], {'F1': f1}, mas_recursos=' /XObject << %s >>' % ' '.join('/%s %d 0 R' % kv for kv in todas.items()))
+    return 'JPEG', p.clasico(raiz), e
+
+
+def caso_jpeg_no():
+    """Las imágenes que no se saben, cada una en su página, con su nombre en
+    el aviso: JPEG 2000, fax, JBIG2, JPEG aritmético, sin pérdidas, jerárquico,
+    de 12 bits, uno que no es un JPEG, un filtro inventado, y un espacio de
+    color que no se conoce (esa, sin nombre)."""
+    p = Pdf()
+    f1 = p.fuente('Helvetica')
+    base = jpeg_liso([(1, 1, [[10, 200]])])
+    FILTROS.update({k: (lambda d: d) for k in ('DCTDecode', 'JPXDecode', 'CCITTFaxDecode', 'JBIG2Decode', 'Raro')})
+    lista = [(base, 'DCTDecode', '/DeviceGray', ''),
+             (bytes(60), 'JPXDecode', '/DeviceRGB', 'JPEG 2000'), (bytes(60), 'CCITTFaxDecode', '/DeviceGray', 'fax CCITT'),
+             (bytes(60), 'JBIG2Decode', '/DeviceGray', 'JBIG2'),
+             (jpeg_liso([(1, 1, [[10, 200]])], sof=0xC9), 'DCTDecode', '/DeviceGray', 'JPEG aritmético'),
+             (jpeg_liso([(1, 1, [[10, 200]])], sof=0xC3), 'DCTDecode', '/DeviceGray', 'JPEG sin pérdidas'),
+             (jpeg_liso([(1, 1, [[10, 200]])], sof=0xC5), 'DCTDecode', '/DeviceGray', 'JPEG jerárquico'),
+             (base.replace(b'\x00\x0b\x08', b'\x00\x0b\x0c', 1), 'DCTDecode', '/DeviceGray', 'JPEG de 12 bits'),
+             (b'esto no es un JPEG' + bytes(30), 'DCTDecode', '/DeviceGray', 'JPEG dañado'),
+             (base[:base.index(b'\xff\xda') + 10], 'DCTDecode', '/DeviceGray', 'JPEG dañado'),
+             (bytes(60), 'Raro', '/DeviceGray', 'Raro'),
+             (bytes(16), None, '[/Separation /Oro /DeviceCMYK 9 0 R]', '')]
+    cont, xo, e = [], {}, [('error', 0), ('paginas', len(lista))]
+    for i, (d, filtro, cs, que) in enumerate(lista):
+        xo['Im%d' % i] = p.flujo(d, ' /Type /XObject /Subtype /Image /Width 16 /Height 8 /ColorSpace %s /BitsPerComponent 8' % cs, (filtro,) if filtro else ())
+        cont.append(p.flujo('q 100 0 0 50 60 700 cm /Im%d Do Q BT /F1 10 Tf 60 680 Td (Imagen %d) Tj ET' % (i, i)))
+        e += [('que', i, que), ('texto', i, 'Imagen %d' % i, 60, A4[1] - 680, 10)]
+        if i:
+            e += [('aviso', i, AV_IMAGEN), ('mini', i, 60, A4[1] - 750, 100, 50, 0, 0, None, 0)]
+        else:
+            e += [('sin_aviso', i, 255), ('mini', i, 60, A4[1] - 750, 100, 50) + mini_lisa([(1, 1, [[10, 200]])], lambda v: (v[0],) * 3, 100) + (0,)]
+    raiz = p.paginas(cont, {'F1': f1}, mas_recursos=' /XObject << %s >>' % ' '.join('/%s %d 0 R' % kv for kv in xo.items()))
+    return 'JPEGNO', p.clasico(raiz), e
+
+
+def caso_mascaras():
+    """La transparencia de una imagen, a todo o nada: /SMask (opacidad, de 8
+    bits y de más resolución que la imagen), /Mask con otra imagen de un bit,
+    /Mask con colores (un índice de la paleta; un gris), y el /Decode al revés
+    en RGB y en CMYK."""
+    p = Pdf()
+    f1 = p.fuente('Helvetica')
+    N = 255
+    im = lambda datos, dic: p.flujo(datos, ' /Type /XObject /Subtype /Image' + dic)
+    alfa = im(bytes([255, 255, 0, 0, 255, 200, 100, 0, 128, 127, 0, 0, 0, 0, 0, 0]), ' /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8')
+    uno = im(bytes([0b01000000, 0b10000000]), ' /Width 2 /Height 2 /ImageMask true /BitsPerComponent 1')
+    cuatro = bytes([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255])
+    x = {'S': im(cuatro, ' /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask %d 0 R' % alfa),
+         'M': im(cuatro, ' /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Mask %d 0 R' % uno),
+         'K': im(bytes([0, 1, 2, 3]), ' /Width 2 /Height 2 /ColorSpace [/Indexed /DeviceRGB 3 <FF0000 00FF00 0000FF 808080>] /BitsPerComponent 8 /Mask [1 2]'),
+         'G': im(bytes([0, 100, 101, 255]), ' /Width 4 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Mask [100 100]'),
+         'R': im(cuatro, ' /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Decode [1 0 1 0 1 0]'),
+         'C': im(bytes([255, 0, 0, 255]), ' /Width 1 /Height 1 /ColorSpace /DeviceCMYK /BitsPerComponent 8 /Decode [1 0 1 0 1 0 1 0]')}
+    s = '1 1 0 rg 30 690 560 70 re f\n'                               # una banda amarilla debajo: se tiene que ver por los huecos
+    s += ''.join('q 100 0 0 50 %d 700 cm /%s Do Q\n' % (40 + 110 * i, n) for i, n in enumerate(x))
+    s += 'BT /F1 10 Tf 0 g 40 680 Td (Tras las transparencias) Tj ET\n'
+    raiz = p.paginas([p.flujo(s)], {'F1': f1}, mas_recursos=' /XObject << %s >>' % ' '.join('/%s %d 0 R' % kv for kv in x.items()))
+    H = A4[1]
+    sitio = lambda i: (40 + 110 * i, H - 750, 100, 50)
+    e = [('error', 0), ('paginas', 1), ('sin_aviso', 0, 255), ('ncosas', 0, 'I', 6),
+         ('mini', 0) + sitio(0) + (2, 2, bytes([196, N, 21, N]), 0),                    # la opacidad de cada punto: 255, 0 / 128, 0
+         ('mini', 0) + sitio(1) + (2, 2, bytes([196, N, N, 231]), 0),                   # se ve donde la máscara de un bit lleva un 0
+         ('mini', 0) + sitio(2) + (2, 2, bytes([196, N, N, 244]), 0),                   # los índices 1 y 2 no se pintan
+         ('mini', 0) + sitio(3) + (4, 1, bytes([16, N, 241, 231]), 0),                  # el gris 100, tampoco
+         ('mini', 0) + sitio(4) + (2, 2, bytes([51, 201, 226, 16]), 0),                 # RGB al revés: cian, magenta, amarillo y negro
+         ('mini', 0) + sitio(5) + (1, 1, bytes([196]), 0),                              # CMYK al revés (queda 0, 1, 1, 0: rojo)
+         ('texto', 0, 'Tras las transparencias', 40, H - 680, 10)]
+    return 'MASCARAS', p.clasico(raiz), e
 
 
 def caso_recortes():
@@ -867,7 +1151,7 @@ def caso_muchas(n=4100):
 def casos():
     c = [caso_carta(), caso_fuentes(), caso_factura(), caso_moderno(), caso_moderno('MODERNO2', False), caso_incremental(),
          caso_filtros(), caso_codif(), caso_cifrado(), caso_cifrado15(), caso_no_sabe(), caso_graficos(), caso_largo(),
-         caso_espacios(), caso_bomba(), caso_muchas(), caso_imagenes(), caso_recortes()]
+         caso_espacios(), caso_bomba(), caso_muchas(), caso_imagenes(), caso_recortes(), caso_jpeg(), caso_jpeg_no(), caso_mascaras()]
     return c + rotos()
 
 
