@@ -18,6 +18,10 @@
 ;       base  = suma de los importes
 ;       IVA   = base x tipo      retención = base x tipo
 ;       total = base + IVA - retención
+;  Si la factura dice que sus precios llevan el IVA incluido (lo normal en los
+;  recibos de casa: «la luz, 65,70»), es al revés: la suma de los importes es
+;  lo que se paga, y de ella se sacan la base y el IVA:
+;       base = suma / (1 + tipo)      IVA = suma - base
 ;
 ;  Los datos van en FACTURAS.DAT, al lado del módulo, y se escriben cada vez
 ;  que cambian. Es un módulo .HVP (ventanas/hvp.inc) del grupo «Productividad».
@@ -33,6 +37,7 @@ IMP_MAX     equ 99999999            ; el importe más alto de una línea: 999.99
 F_TIPO      equ 0                   ; db: 0 emitida, 1 recibida
 F_PAGADA    equ 1                   ; db: 1 cobrada o pagada
 F_NLIN      equ 2                   ; db: cuántas líneas tiene
+F_INCL      equ 3                   ; db: 1 si los precios llevan el IVA incluido
 F_IVA       equ 4                   ; dd: IVA, en centésimas de % (2100 = 21 %)
 F_RET       equ 8                   ; dd: retención, lo mismo
 F_FECHA     equ 12                  ; dd: aaaammdd
@@ -202,7 +207,7 @@ bot_fac     dd 8, 72, t_b_lista, O_LISTA
 
 ; ---- diálogo: los datos de la factura ----
 dlg_fac:
-        PLANTILLA HV_c_dialogo, t_d_fac, E_DIALOGO, 0, 0, 440, 322, 0
+        PLANTILLA HV_c_dialogo, t_d_fac, E_DIALOGO, 0, 0, 440, 446, 0
         PLANTILLA HV_c_estatico, t_l_num, E_HIJA, 16, 18, 110, 18, 100
         PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 14, 140, 24, 110
         PLANTILLA HV_c_estatico, t_l_fecha, E_HIJA, 16, 50, 110, 18, 101
@@ -220,10 +225,18 @@ df_lab_cli:
         PLANTILLA HV_c_estatico, t_l_ret, E_HIJA, 16, 210, 110, 18, 106
         PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 206, 60, 24, 116
         PLANTILLA HV_c_estatico, t_l_ret2, E_HIJA, 200, 210, 220, 18, 108
+        PLANTILLA HV_c_boton, t_c_incl, E_HIJA | E_TABULA | BS_CASILLA, 130, 238, 306, 20, 118
 df_pagada:
-        PLANTILLA HV_c_boton, t_c_cobrada, E_HIJA | E_TABULA | BS_CASILLA, 130, 240, 200, 20, 117
-        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 130, 272, 90, 26, ID_ACEPTAR
-        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 230, 272, 90, 26, ID_CANCELAR
+        PLANTILLA HV_c_boton, t_c_cobrada, E_HIJA | E_TABULA | BS_CASILLA, 130, 262, 200, 20, 117
+        ; y, de paso, el importe: una línea de la factura sin salir de aquí
+        PLANTILLA HV_c_estatico, t_l_otra, E_HIJA | SS_NEGRITA, 16, 296, 404, 18, 109
+        PLANTILLA HV_c_estatico, t_l_con, E_HIJA, 16, 326, 110, 18, 121
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 322, 290, 24, 119
+        PLANTILLA HV_c_estatico, t_l_imp, E_HIJA, 16, 358, 110, 18, 122
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 354, 100, 24, 120
+        PLANTILLA HV_c_estatico, t_l_imp2, E_HIJA, 240, 358, 190, 18, 123
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 130, 396, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 230, 396, 90, 26, ID_CANCELAR
         dd 0
 cam_fac     dd 110, c_num, 16
             dd 111, c_fecha, 12
@@ -233,6 +246,9 @@ cam_fac     dd 110, c_num, 16
             dd 115, c_iva, 8
             dd 116, c_ret, 8
             dd 117, c_pag, 0
+            dd 118, c_incl, 0
+            dd 119, c_con, 36
+            dd 120, c_pre, 12
             dd 0
 
 ; ---- diálogo: una línea ----
@@ -244,6 +260,7 @@ dlg_lin:
         PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 46, 100, 24, 111
         PLANTILLA HV_c_estatico, t_l_pre, E_HIJA, 16, 82, 110, 18, 102
         PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 130, 78, 100, 24, 112
+dl_pre2:
         PLANTILLA HV_c_estatico, t_l_pre2, E_HIJA, 240, 82, 190, 18, 103
         PLANTILLA HV_c_estatico, t_l_cant2, E_HIJA, 240, 50, 190, 18, 104
         PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 130, 122, 90, 26, ID_ACEPTAR
@@ -326,6 +343,13 @@ t_l_cant    db "Cantidad:", 0
 t_l_cant2   db "(vacío: una)", 0
 t_l_pre     db "Precio:", 0
 t_l_pre2    db "(de una unidad, sin IVA)", 0
+t_l_pre2i   db "(de una unidad, con IVA)", 0
+t_c_incl    db "Los precios llevan el IVA incluido", 0
+t_l_otra    db "El importe (una línea más de la factura):", 0
+t_l_imp     db "Importe:", 0
+t_l_imp2    db "(vacío: no añade nada)", 0
+t_con_def   db "Importe", 0
+t_incl      db "(precios con el IVA incluido)", 0
 t_l_nom     db "Nombre:", 0
 t_l_pob     db "C. P. y población:", 0
 t_l_nota    db "Pie de la factura:", 0
@@ -1020,6 +1044,7 @@ nueva:
         rep stosd
         mov eax, [ver_tipo]
         mov [tmp_fac+F_TIPO], al
+        mov [tmp_fac+F_INCL], al    ; (en las recibidas, el IVA va incluido)
         mov dword [tmp_fac+F_IVA], 2100
         mov eax, [hoy]
         mov [tmp_fac+F_FECHA], eax
@@ -1044,6 +1069,10 @@ nueva:
         mov dword [lsel], 0
         mov dword [fv_y], 0
         call inval
+        call fac_actual             ; una factura sin importe no es nada: si
+        cmp byte [ebx+F_NLIN], 0    ; no se ha puesto, se pide la primera línea
+        jne .x
+        call lin_mas
 .x:
         ret
 
@@ -1165,6 +1194,10 @@ edita_datos:
         mov byte [edi], 0
         mov al, [tmp_fac+F_PAGADA]
         mov [c_pag], al
+        mov al, [tmp_fac+F_INCL]
+        mov [c_incl], al
+        mov byte [c_con], 0         ; la línea que se añade de paso: en blanco
+        mov byte [c_pre], 0
 .otra:
         mov dword [campos], cam_fac
         mov esi, dlg_fac
@@ -1200,6 +1233,53 @@ edita_datos:
         ja .mal
 .r1:
         mov [tmp_fac+F_RET], eax
+        ; ¿se ha puesto un importe? Es una línea más: una unidad a ese precio
+        mov esi, c_pre
+        call vacio
+        jne .linea
+        mov esi, c_con
+        call vacio
+        je .sin_linea
+        mov esi, t_e_pre            ; (concepto sin importe)
+        jmp .mal
+.linea:
+        mov esi, c_pre
+        mov ecx, 2
+        call lee_dec
+        mov esi, t_e_pre
+        jc .mal
+        mov edx, eax
+        movzx eax, byte [tmp_fac+F_NLIN]
+        mov esi, t_e_lineas
+        cmp eax, MAX_LIN
+        jae .mal
+        imul edi, eax, L_TAM
+        add edi, tmp_fac + F_LIN    ; EDI = la línea nueva
+        push edi
+        mov ecx, L_TAM / 4
+        xor eax, eax
+        rep stosd
+        pop edi
+        mov dword [edi+L_CANT], 1000
+        mov [edi+L_PRE], edx
+        mov esi, c_con
+        call vacio
+        jne .lc
+        mov esi, t_con_def          ; sin concepto: «Importe»
+.lc:
+        push edi
+        call copia
+        pop edi
+        mov esi, edi
+        call importe_linea
+        mov esi, t_e_imp
+        jc .mal
+        inc byte [tmp_fac+F_NLIN]
+        mov byte [c_con], 0         ; (si hay que volver a preguntar, no se
+        mov byte [c_pre], 0         ; añade otra vez)
+.sin_linea:
+        mov al, [c_incl]
+        mov [tmp_fac+F_INCL], al
         mov esi, c_num
         mov edi, tmp_fac + F_NUM
         call copia
@@ -1391,6 +1471,13 @@ lin_quita:
 ; el diálogo de una línea, sobre tmp_lin; CF=1 si se cancela
 edita_linea:
         pushad
+        call fac_actual             ; el precio, ¿con el IVA o sin él?
+        mov eax, t_l_pre2
+        cmp byte [ebx+F_INCL], 0
+        je .rot
+        mov eax, t_l_pre2i
+.rot:
+        mov [dl_pre2+P_TEXTO], eax
         mov esi, tmp_lin + L_CON
         mov edi, c_con
         call copia
@@ -1627,6 +1714,37 @@ por_ciento:
         pop ebx
         ret
 
+; EAX=importe con el IVA dentro (céntimos) ECX=porcentaje (centésimas) ->
+; EAX=la base: importe x 10000 / (10000 + porcentaje), redondeada al céntimo
+quita_iva:
+        push ebx
+        push ecx
+        push edx
+        push esi
+        xor ebx, ebx
+        test eax, eax
+        jns .p
+        neg eax
+        inc ebx
+.p:
+        lea esi, [ecx+10000]        ; el divisor
+        mov ecx, 10000
+        mul ecx
+        mov ecx, esi
+        shr ecx, 1                  ; (la mitad, para redondear)
+        add eax, ecx
+        adc edx, 0
+        div esi
+        test ebx, ebx
+        jz .x
+        neg eax
+.x:
+        pop esi
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
 ; EBX=factura -> [t_base], [t_iva], [t_ret] y [t_total]
 totales:
         pushad
@@ -1640,11 +1758,26 @@ totales:
         add esi, L_TAM
         loop .l
 .f:
+        cmp byte [ebx+F_INCL], 0
+        je .sin
+        ; los precios llevan el IVA: la suma es lo que se paga; la base es la
+        ; suma entre (1 + tipo), y el IVA, lo que falta hasta la suma
+        mov eax, edi
+        mov ecx, [ebx+F_IVA]
+        call quita_iva
+        mov [t_base], eax
+        mov edx, edi
+        sub edx, eax
+        mov [t_iva], edx
+        mov edi, eax
+        jmp short .ret
+.sin:
         mov [t_base], edi
         mov eax, edi
         mov ecx, [ebx+F_IVA]
         call por_ciento
         mov [t_iva], eax
+.ret:
         mov eax, edi
         mov ecx, [ebx+F_RET]
         call por_ciento
@@ -2197,6 +2330,7 @@ cargar:
         jecxz .x
 .f:
         and byte [ebx+F_TIPO], 1
+        and byte [ebx+F_INCL], 1
         cmp byte [ebx+F_NLIN], MAX_LIN
         jbe .f1
         mov byte [ebx+F_NLIN], MAX_LIN
@@ -2822,6 +2956,12 @@ pinta_factura:
         inc edi
         jmp .l
 .tot:
+        cmp byte [ebp+F_INCL], 0    ; (a la izquierda de los totales)
+        je .tot1
+        COLOR C_MARRON
+        TX 24, [y_tot], t_incl
+        COLOR C_TINTA
+.tot1:
         ; los totales
         mov eax, 16
         mov ebx, [y_tot]
@@ -3165,6 +3305,10 @@ texto_haz:
 .tot:
         LN 0, t_raya
         call ln_fin
+        cmp byte [ebp+F_INCL], 0
+        je .tot1
+        LN 0, t_incl
+.tot1:
         mov esi, t_p_base
         mov eax, [t_base]
         call .total
@@ -3404,6 +3548,7 @@ ven         resd 1
 modo        resb 1                  ; 0: la lista; 1: una factura
 lin_nueva   resb 1
 c_pag       resb 1
+c_incl      resb 1
             alignb 4
 ver_tipo    resd 1                  ; la pestaña: 0 emitidas, 1 recibidas
 sel         resd 1                  ; la fila elegida de la lista
