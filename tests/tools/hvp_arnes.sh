@@ -60,6 +60,7 @@ prepara() {
   mdeltree -i $T/f.img ::BIN 2>/dev/null          # sitio para los datos
   mmd -i $T/f.img ::HISPADOS/PROGS 2>/dev/null
   mcopy -o -i $T/f.img $hvp ::HISPADOS/PROGS/$nom
+  [ -f programas/comun/TIPOS.DAT ] && mcopy -o -i $T/f.img programas/comun/TIPOS.DAT ::HISPADOS/PROGS/TIPOS.DAT   # los tipos de letra
   printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\%s\r\n' "$nom" > $T/CENTRO.INI
   mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
 }

@@ -28,7 +28,7 @@ prepara $HVP
   tecla ctrl-n; escribe "negrita "; tecla ctrl-n ctrl-k; escribe "cursiva "; tecla ctrl-k ctrl-s
   escribe "subrayado"; tecla ctrl-s; escribe " normal"; tecla ret
   tecla ctrl-d; escribe "A la derecha"; tecla ret ctrl-q
-  clic 549 127; escribe "En rojo"            # el botón del color rojo
+  clic 581 127; escribe "En rojo"            # el botón del color rojo
   aparca; shot e1
   tecla ctrl-g; sleep 1.2; escribe "carta"; tecla ret; sleep 2; shot e2
   escribe " y mas"; aparca; shot d1; tecla ctrl-z; shot d2; tecla ctrl-y; shot d3; tecla ctrl-z   # deshacer y rehacer
@@ -61,7 +61,7 @@ import sys,struct
 d=open(sys.argv[1],'rb').read()
 n=struct.unpack_from('<I',d,8)[0]
 t,a=d[12:12+n],d[12+n:12+2*n]
-ok = d[:8]==b'PLUMA1\x1a\x00' and n==186 and len(d)==12+2*n and t.endswith(b'En rojo\n')
+ok = d[:8]==b'PLUMA1\x1a\x00' and n==186 and len(d)==12+3*n and t.endswith(b'En rojo\n')
 ok = ok and t.startswith(b'Hispa Pluma\n') and a[0]==8 and a[11]&3==1          # grande; centrado
 ok = ok and a[t.index(b'negrita')]==1 and a[t.index(b'cursiva')]==2 and a[t.index(b'subrayado')]==4
 ok = ok and a[t.index(b'A la derecha')+12]&3==2 and a[t.index(b'En rojo')]==0x10
@@ -123,9 +123,9 @@ reabre ''
 mdel -i $T/f.img ::LISTA.PLU 2>/dev/null
 { arranca
   tecla ctrl-n; escribe "gordo"; tecla ctrl-n; escribe " fino"; tecla ret
-  clic 440 127; escribe "uno"; tecla ret; escribe "dos"; tecla ret; clic 440 127      # viñetas
-  clic 414 127; escribe "tres"; tecla ret; escribe "cuatro"; tecla ret; clic 414 127  # numeración
-  clic 492 127; clic 492 127; escribe "sangrado"; tecla ret; clic 466 127; clic 466 127   # sangría: dos pasos y fuera
+  clic 472 127; escribe "uno"; tecla ret; escribe "dos"; tecla ret; clic 472 127      # viñetas
+  clic 446 127; escribe "tres"; tecla ret; escribe "cuatro"; tecla ret; clic 446 127  # numeración
+  clic 524 127; clic 524 127; escribe "sangrado"; tecla ret; clic 498 127; clic 498 127   # sangría: dos pasos y fuera
   tecla ctrl-j; escribe "Esto es una prueba de texto normal que tiene que partirse sola al llegar al final de la linea de la hoja, por palabras."
   clic 96 163; clic 282 99                                    # en «gordo»; la brocha
   ir 133 163; mon "mouse_button 1" 0.25; ir 150 163; ir 165 163; mon "mouse_button 0" 0.5   # y se pasa por «fino»
@@ -163,29 +163,32 @@ else ko "LISTA.PLU o lo impreso no es lo esperado"; xxd $T/lista.plu | tail -12;
 echo "== Pluma: los tipos de letra =="
 reabre ''
 mdel -i $T/f.img ::TIPOS.PLU 2>/dev/null
+tipo() { clic 108 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
 { arranca
-  clic 108 127; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # Roble
-  clic 108 127; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # Llano
-  clic 108 127; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # y otra vez Hispa
-  tecla ctrl-w; clic 108 127; escribe "Grande"; tecla ctrl-n; escribe " negra "; tecla ctrl-n ctrl-k ctrl-s; escribe "cursiva"
+  tipo 1 f0; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # Roble
+  tipo 9; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret         # Llano
+  tipo 0; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret         # Hispa
+  tipo 18; escribe "Una fiesta "; tipo 19; escribe "y a mano"; tecla ret
+  tecla ctrl-w; tipo 2; escribe "Grande"; tecla ctrl-n; escribe " negra "; tecla ctrl-n ctrl-k ctrl-s; escribe "cursiva"
   aparca; shot f1
-  clic 367 75; sleep 1; shot f2; tecla esc esc      # el menú Formato
   tecla ctrl-g; sleep 1.2; escribe "tipos"; tecla ret; sleep 2
-  sal; } | run 200 -vga std
+  sal; } | run 240 -vga std
+chk $T/f0.ppm busca 295 200 310 216 0 9 "Roble negra"                                         # el diálogo con la lista
 chk $T/f1.ppm busca 80 183 90 198 0 9 "El veloz murcielago hindu comia feliz cardillo y kiwi."   # la tercera, en Hispa
 chk $T/f1.ppm nobusca 80 151 90 182 0 9 "El veloz"                                              # las otras, no
-chk $T/f1.ppm busca 72 518 400 540 0 6 "Línea 4 de 4, columna 21"   # (abajo ya no está el nombre del botón)
-muestra f1 pluma_tipos; muestra f2 pluma_menu_formato
+chk $T/f1.ppm busca 72 518 400 540 0 6 "Línea 5 de 5, columna 21"
+muestra f0 pluma_lista_tipos; muestra f1 pluma_tipos
 mcopy -n -i $T/f.img ::TIPOS.PLU $T/tipos.plu 2>/dev/null
 if python3 - $T/tipos.plu <<'PY'
 import sys,struct
 d=open(sys.argv[1],'rb').read()
 n=struct.unpack_from('<I',d,8)[0]
-t,a=d[12:12+n],d[12+n:12+2*n]
-ok = a[0]==0x40 and a[60]==0x80 and a[120]==0 and a[t.index(b'Grande')]==0x48 and a[t.index(b'negra')]==0x49 and a[t.index(b'cursiva')]==0x4E
+t,a,p=d[12:12+n],d[12+n:12+2*n],d[12+2*n:]
+ok = len(p)==n and p[0]==1 and p[60]==9 and p[120]==0 and p[t.index(b'fiesta')]==18 and p[t.index(b'a mano')]==19
+ok = ok and p[t.index(b'Grande')]==2 and a[t.index(b'Grande')]==8 and a[t.index(b'negra')]==9 and a[t.index(b'cursiva')]==0x0E
 sys.exit(0 if ok else 1)
 PY
-then ok "TIPOS.PLU: el tipo de cada letra"; else ko "TIPOS.PLU no es lo esperado"; xxd $T/tipos.plu | tail -14; fi
+then ok "TIPOS.PLU: el tipo de cada letra, detrás del formato"; else ko "TIPOS.PLU no es lo esperado"; xxd $T/tipos.plu | tail -14; fi
 
 rm -rf $T
 exit $fail

@@ -38,12 +38,13 @@ def main():
         subprocess.run([sys.executable, cp437, os.path.join(RAIZ, 'ventanas', inc),
                         os.path.join(gen, inc)], check=True)
     # los .inc propios del programa: en su carpeta (FUENTE sin «.asm»); si no
-    # está ahí, se busca en lib/ (así TERMINAL.HVP incluye lib/version.inc)
+    # está ahí, se busca en programas/comun/ (lo que comparten varios) y en lib/ (así TERMINAL.HVP incluye lib/version.inc)
     propios = os.path.splitext(fuente)[0]
     for inc in re.findall(r'^\s*%include\s+"([^"]+)"', open(fuente, encoding='utf-8').read(), re.M):
         if inc in INCS:
             continue
-        for cand in (os.path.join(propios, inc), os.path.join(RAIZ, 'lib', inc)):
+        for cand in (os.path.join(propios, inc), os.path.join(RAIZ, 'programas', 'comun', inc),
+                     os.path.join(RAIZ, 'lib', inc)):
             if os.path.isfile(cand):
                 subprocess.run([sys.executable, cp437, cand, os.path.join(gen, inc)], check=True)
                 break
