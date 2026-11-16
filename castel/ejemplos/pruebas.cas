@@ -1,0 +1,44 @@
+; pruebas.cas - ejercita mas del subconjunto de Fase 1:
+;   funcion con dos parametros, mientras, romper, seguir, si anidado.
+
+módulo Pruebas
+
+    función suma(a: ent16, b: ent16): ent16
+        devolver a + b
+    fin
+
+    función principal()
+        variable i: ent16
+        variable total: ent16
+
+        ; sumar 1..5 con un bucle «mientras»
+        i := 1
+        total := 0
+        mientras i <= 5 hacer
+            total := suma(total, i)
+            i := i + 1
+        fin
+        escribir("suma 1..5 = ")
+        escribir(total)
+        escribir("\n")
+
+        ; impares del 1 al 9, saltando el 5 (romper y seguir)
+        i := 0
+        mientras cierto hacer
+            i := i + 1
+            si i > 9 entonces
+                romper
+            fin
+            si (i mod 2) = 0 entonces
+                seguir
+            fin
+            si i = 5 entonces
+                seguir
+            fin
+            escribir(i)
+            escribir(" ")
+        fin
+        escribir("\n")
+    fin
+
+fin Pruebas.

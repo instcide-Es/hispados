@@ -1,0 +1,16 @@
+; saludo.cas - el ejemplo de la seccion 1 de CASTEL.md.
+; Cuenta del 1 al LIMITE.
+
+módulo Saludo
+
+    constante LIMITE = 10
+
+    función principal()
+        variable i: ent16
+        para i desde 1 hasta LIMITE hacer
+            escribir(i)
+            escribir("\n")
+        fin
+    fin
+
+fin Saludo.

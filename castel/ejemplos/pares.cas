@@ -1,0 +1,23 @@
+; pares.cas - el ejemplo diana de CASTEL.md (seccion 7).
+; Imprime los numeros del 1 al 20 y dice si cada uno es par o impar.
+
+módulo Pares
+
+    función es_par(n: ent16): bool
+        devolver (n mod 2) = 0
+    fin
+
+    función principal()
+        variable i: ent16
+        para i desde 1 hasta 20 hacer
+            escribir(i)
+            si es_par(i) entonces
+                escribir(" par")
+            sino
+                escribir(" impar")
+            fin
+            escribir("\n")
+        fin
+    fin
+
+fin Pares.
