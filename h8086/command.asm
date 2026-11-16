@@ -1190,8 +1190,8 @@ m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):"
             db "Cualquier otra palabra: el programa (.COM o .EXE) o el lote (.BAT)", 10
             db "de ese nombre, del directorio de trabajo o de la raíz.", 10, 0
 m_actualizar db "Los sistemas de la familia Hispa-DOS se actualizan entre sí:", 10
-            db "  Hispa-8086      PC, XT y AT: 8086, 8088, V20, 80186 y 286", 10
-            db "  Hispa Ventanas  386, 486 y posteriores, con escritorio", 10
+            db "  Hispa-8086  PC, XT y AT: 8086, 8088, V20, 80186 y 286", 10
+            db "  Hispa-386   386 o superior, con el escritorio Hispa Ventanas", 10
             db "Las versiones y los discos, en https://hispados.es", 10, 0
 m_archivos  db " archivos, ", 0
 m_octetos   db " octetos", 10, 0
@@ -1219,9 +1219,10 @@ m_cpu       db "Procesador: ", 0
 m_mem       db 10, "Memoria:    ", 0
 m_mem2      db " K (", 0
 m_mem3      db " K libres para los programas)", 10, 0
-m_consejo_386 db 10, "Este equipo tiene un procesador de 32 bits: puede con HISPA VENTANAS,", 10
-            db "el hermano mayor de la familia Hispa-DOS, con escritorio. Hispa-8086", 10
-            db "funciona aquí, pero está hecho para los PC, XT y AT. Escriba ACTUALIZAR.", 10, 0
+m_consejo_386 db 10, "Este equipo tiene un procesador de 32 bits: puede con HISPA-386, el", 10
+            db "hermano mayor de la familia Hispa-DOS, con su escritorio Hispa Ventanas.", 10
+            db "Hispa-8086 funciona aquí, pero está hecho para los PC, XT y AT.", 10
+            db "Escriba ACTUALIZAR.", 10, 0
 m_consejo_286 db 10, "Este equipo tiene un 286: Hispa-8086 lo aprovecha (modo 286).", 10, 0
 m_ayuda0    db 10, "Escriba AYUDA para ver las órdenes.", 10, 0
 

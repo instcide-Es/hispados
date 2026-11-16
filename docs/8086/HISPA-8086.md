@@ -4,7 +4,8 @@
 *Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 Hispa-8086 es el miembro de la familia **Hispa-DOS** (proyecto
-[Rescoldo](../VISION.md)) para las máquinas más veteranas: las de **8086, 8088, V20, 80186 y 286**. Hecho
+[Rescoldo](../VISION.md)) para las máquinas más veteranas, y hermano pequeño
+de Hispa-386: las de **8086, 8088, V20, 80186 y 286**. Hecho
 desde cero, en español, libre y todo en ensamblador, para que un PC o un XT de
 256 K vuelva a servir: escribir, hacer cuentas, programar en BASIC y pasar los
 archivos a un ordenador de hoy.
@@ -83,11 +84,21 @@ La familia agrupa por **clase de máquina**:
 | Núcleo | Procesadores | Sistema |
 |---|---|---|
 | 16 bits, modo real | 8086, 8088, V20/V30, 80186/188, 286 | **Hispa-8086** |
-| 32 bits | 386, 486 y posteriores | **Hispa Ventanas** (escritorio sobre el núcleo de 32 bits) |
+| 32 bits | 386 o superior | **Hispa-386** (con su escritorio, Hispa Ventanas) |
 
-**Hispa-DOS es el nombre de la familia** de sistemas operativos (Carlos,
-16/11/2026: «la familia de sistemas operativos hasta llegar a un kernel que
-no dependa de DOS»); Hispa-8086 e Hispa Ventanas son sus miembros.
+**Los nombres** (Carlos, 16/11/2026). **Hispa-DOS** es la familia: los
+sistemas operativos con DOS por debajo, «hasta llegar a un kernel que no
+dependa de DOS». Cada miembro se llama por el procesador MÍNIMO que pide:
+
+- **Hispa-8086**: del 8086 al 286 (este documento).
+- **Hispa-386**: 386 o superior. Es el sistema de 32 bits que ya existe;
+  **Hispa Ventanas** es el nombre de su escritorio, que va dentro.
+- **Hispa-486**: reservado para más adelante (lo de mediados y finales de los
+  90). El número definitivo será el del procesador mínimo en el que vaya bien.
+
+Después vendrá un núcleo nuevo, sin DOS. La orden VER y el repositorio del
+sistema de 32 bits siguen diciendo «Hispa-DOS 0.9.x»: es el nombre de la
+familia.
 
 Por qué no más:
 
@@ -100,20 +111,21 @@ Por qué no más:
 - Cada sistema de más son pruebas, discos, manuales y actualizaciones que
   mantener, sin nada a cambio para quien lo usa.
 
-«Hispa-286» no es, por tanto, otro producto: es Hispa-8086 en un 286.
+«Hispa-286» no es, por tanto, otro producto: es Hispa-8086 en un 286 (el
+nombre dice el procesador mínimo, no el único).
 (Decisión de Carlos, 16/11/2026, sobre la propuesta de tres ediciones del
 15/11.)
 
-### 2. Un núcleo nuevo, no una adaptación del de Hispa-DOS
+### 2. Un núcleo nuevo, no una adaptación del de Hispa-386
 
-Se midió antes de decidir: ensamblando Hispa-DOS con `cpu 8086`, el núcleo
+Se midió antes de decidir: ensamblando Hispa-386 con `cpu 8086`, el núcleo
 (15.000 líneas, 33 K) tiene **1.026** instrucciones que un 8086 no entiende, y
 el intérprete de órdenes (7.700 líneas, 25 K), **241**. Se podrían cambiar una
 a una, pero el resultado seguiría siendo un sistema pensado para un 386 con 4
 megas: 59 K residentes, más que MS-DOS 3.3 (54 K) en máquinas que a veces
 tienen 256 K.
 
-Hispa-8086 se escribe de nuevo, pequeño, reutilizando de Hispa-DOS lo que no
+Hispa-8086 se escribe de nuevo, pequeño, reutilizando de Hispa-386 lo que no
 depende del procesador: el diseño, las órdenes en español, los mensajes, los
 formatos y las pruebas.
 
@@ -137,7 +149,7 @@ se pone en medio.
 
 ### 5. Presupuesto de memoria
 
-| | MS-DOS 3.3 | Hispa-DOS 0.9 | Hispa-8086 (objetivo) |
+| | MS-DOS 3.3 | Hispa-386 0.9 | Hispa-8086 (objetivo) |
 |---|---|---|---|
 | Residente (núcleo + intérprete) | ~54 K | ~59 K | **menos de 32 K** |
 | Hoy | | | unos 22 K: 14 del núcleo y 8 del intérprete (etapas 0 a 3) |
@@ -171,7 +183,7 @@ De época, y solo de época: disquete; disco duro por la BIOS (MFM/RLL, IDE,
 XT-IDE con CompactFlash); teclado de XT y de AT; pantalla MDA, Hercules, CGA,
 EGA y VGA en texto (y los gráficos de CGA y Hercules para el entorno y los
 juegos); puerto serie y paralelo; ratón serie; altavoz del PC. Sin USB, sin
-sonido digital, sin CD: eso es de Hispa-DOS.
+sonido digital, sin CD: eso es de Hispa-386.
 
 ### 8. El entorno: Hispa Escritorio *(nombre provisional)*
 
@@ -189,7 +201,7 @@ Las aplicaciones del entorno comparten una biblioteca de ventanas en texto, así
 que todas se manejan igual (mismo menú, mismas teclas). Los gráficos se dejan
 para lo que los necesita: los juegos y, más adelante, un modo gráfico opcional.
 
-El nombre «Hispa Ventanas» se queda para el entorno gráfico de 32 bits.
+El nombre «Hispa Ventanas» es el del escritorio gráfico de Hispa-386.
 
 ### 9. Hispa-BASIC: compatible con GW-BASIC y en español
 
@@ -214,18 +226,18 @@ Un intérprete propio, escrito por nosotros en ensamblador:
 Todos los sistemas Hispa comparten el mismo mecanismo:
 
 - **Una lista de versiones común** (`versiones.txt`, la que ya lee
-  `ACTUALIZAR` en Hispa-DOS), con una sección por sistema y versión y sus
+  `ACTUALIZAR` en Hispa-386), con una sección por sistema y versión y sus
   requisitos: procesador mínimo, memoria, disco y edición.
 - **Cada sistema mira la máquina** al arrancar y con `EQUIPO`.
 - **Cada sistema recomienda el que le corresponde a esa máquina.** Hispa-8086
-  en un 386 o un 486 funciona, pero aconseja pasar a Hispa Ventanas (ya lo
-  hace desde la etapa 0); Hispa Ventanas en una máquina que no llegue dirá
-  que su sitio es Hispa-8086. Es un consejo, una vez, sin
+  en un 386 o un 486 funciona, pero aconseja pasar a Hispa-386 (ya lo hace
+  desde la etapa 0); Hispa-386 en una máquina que no llegue dirá que su sitio
+  es Hispa-8086. Es un consejo, una vez, sin
   insistir ni impedir nada: quien quiera un 486 con Hispa-8086 puede tenerlo.
 - **`ACTUALIZAR` cambia de versión y también de sistema**, conservando los
-  datos del usuario (como hace hoy entre versiones de Hispa-DOS).
+  datos del usuario (como hace hoy entre versiones de Hispa-386).
 - **Por dónde llega la actualización** depende de la máquina: por red donde
-  la hay (Hispa-DOS); en estas, por disquete o por el cable serie o paralelo
+  la hay (Hispa-386); en estas, por disquete o por el cable serie o paralelo
   desde otro ordenador con `PASAR`, que es además la respuesta a lo que más
   se echa de menos (ver el estudio).
 - **Los documentos son comunes**: .TXT y .CSV se abren en cualquier sistema
@@ -247,7 +259,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 9 | Juegos, manual, versión estable 1.0 | |
 
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
-La compatibilidad se mide como en Hispa-DOS: con programas de la época que
+La compatibilidad se mide como en Hispa-386: con programas de la época que
 aporta cada usuario (nunca se distribuyen con el proyecto).
 
 ## Cómo se construye y se prueba

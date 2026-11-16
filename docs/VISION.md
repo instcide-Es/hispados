@@ -24,10 +24,14 @@ persona que tenga un equipo antiguo.
 | Desde mediados de los 2000 | **Hispa x64** | 64 bits, para los PC actuales | x86-64 |
 | La era ARM | **Hispa ARM**: el último de la serie | Procesadores ARM | Raspberry Pi, portátiles y equipos ARM |
 
-La familia agrupa por clase de máquina, no por procesador: un núcleo de 16
-bits (Hispa-8086, del 8086 al 286) y otro de 32 (Hispa-DOS, del 386 en
-adelante). Todos se actualizan entre sí y cada uno recomienda el que le
-corresponde al equipo donde arranca (ver [docs/8086](8086/HISPA-8086.md)).
+**Los nombres** (Carlos, 16/11/2026). **Hispa-DOS** es la familia de los
+sistemas operativos con DOS por debajo, y cada miembro se llama por el
+procesador mínimo que pide: **Hispa-8086** (del 8086 al 286), **Hispa-386**
+(386 o superior: el sistema de 32 bits de la fila «1994», con su escritorio
+**Hispa Ventanas** dentro) e **Hispa-486** (reservado: lo de mediados y
+finales de los 90). Después, un núcleo nuevo que no dependa de DOS. Todos se
+actualizan entre sí y cada uno recomienda el que le corresponde al equipo
+donde arranca (ver [docs/8086](8086/HISPA-8086.md)).
 
 Todos los sistemas llevan el nombre de la familia **Hispa**. No se usan nombres
 de países ni de lugares concretos: todos los países de habla hispana tienen el
