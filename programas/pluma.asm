@@ -15,7 +15,10 @@
 ;  el formato, con iconos (y, al pasar el ratón por un botón, abajo sale lo
 ;  que hace). Los párrafos pueden ir justificados, con sangría, con viñetas o
 ;  numerados; «¶» enseña los espacios y los finales de párrafo; la brocha
-;  copia el formato de un texto a otro. Además de lo de abajo: Reemplazar, Ir a, Repetir, insertar la
+;  copia el formato de un texto a otro. Hay tres tipos de letra: «Hispa» (la
+;  de Hispa Ventanas, de ancho fijo), «Roble» (con remates) y «Llano» (de palo
+;  seco), las dos de ancho variable (programas/pluma/*.inc, hechos con
+;  tools/hazfuente.py). Además de lo de abajo: Reemplazar, Ir a, Repetir, insertar la
 ;  fecha o un archivo, los diálogos de Fuentes y Párrafo, cambiar mayúsculas
 ;  y minúsculas, contar palabras y pantalla completa.
 ;
@@ -55,7 +58,9 @@ A_NEG       equ 1
 A_CUR       equ 2
 A_SUB       equ 4
 A_GRA       equ 8                   ; grande: el doble de ancha y de alta
-A_COLOR     equ 0x70                ; el color: 0-7 en los bits 4-6
+A_COLOR     equ 0x30                ; el color: 0-3 en los bits 4-5
+A_FUENTE    equ 0xC0                ; el tipo de letra: 0-3 en los bits 6-7
+N_FUENTES   equ 3                   ; (0: la de Hispa Ventanas; 1 Roble; 2 Llano)
 ; En la marca de párrafo (el 10), el octeto dice cómo es el párrafo:
 ;   bits 0-1  la alineación: 0 izquierda, 1 centro, 2 derecha, 3 justificado
 ;   bit 2     con viñeta          bit 7     numerado
@@ -115,6 +120,8 @@ O_VINETAS   equ 171
 O_NUMERA    equ 172
 O_SANG_MAS  equ 173
 O_SANG_MENOS equ 174
+O_TIPO      equ 175                 ; el tipo de letra siguiente
+O_FUENTE    equ 176                 ; +0..2: ese tipo de letra
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -268,8 +275,16 @@ plu_menu:
         db "Dismin&uir sangría", 0
         dw 0
         db 0
+        dw O_FUENTE
+        db "Letra &Hispa", 0
+        dw O_FUENTE + 1
+        db "Letra R&oble", 0
+        dw O_FUENTE + 2
+        db "Letra &Llano", 0
+        dw 0
+        db 0
         dw O_BROCHA
-        db "Copiar f&ormato", 0
+        db "Copiar &formato", 0
         dw 0xFFFF
         db "&Herramientas", 0
         dw O_RESUMEN
@@ -283,7 +298,11 @@ plu_menu:
 
 ; ---- diálogo: las fuentes ----
 dlg_fue:
-        PLANTILLA HV_c_dialogo, t_d_fue, E_DIALOGO, 0, 0, 320, 268, 0
+        PLANTILLA HV_c_dialogo, t_d_fue, E_DIALOGO, 0, 0, 320, 324, 0
+        PLANTILLA HV_c_estatico, t_f_tipo, E_HIJA, 20, 196, 200, 18, 101
+        PLANTILLA HV_c_boton, t_fu0, E_HIJA | E_TABULA | BS_OPCION, 20, 218, 90, 20, 50
+        PLANTILLA HV_c_boton, t_fu1, E_HIJA | E_TABULA | BS_OPCION, 116, 218, 90, 20, 51
+        PLANTILLA HV_c_boton, t_fu2, E_HIJA | E_TABULA | BS_OPCION, 212, 218, 90, 20, 52
         PLANTILLA HV_c_boton, t_f_neg, E_HIJA | E_TABULA | BS_CASILLA, 20, 14, 200, 20, 20
         PLANTILLA HV_c_boton, t_f_cur, E_HIJA | E_TABULA | BS_CASILLA, 20, 38, 200, 20, 21
         PLANTILLA HV_c_boton, t_f_sub, E_HIJA | E_TABULA | BS_CASILLA, 20, 62, 200, 20, 22
@@ -293,8 +312,8 @@ dlg_fue:
         PLANTILLA HV_c_boton, t_f_c1, E_HIJA | E_TABULA | BS_OPCION, 160, 140, 120, 20, 31
         PLANTILLA HV_c_boton, t_f_c2, E_HIJA | E_TABULA | BS_OPCION, 20, 164, 120, 20, 32
         PLANTILLA HV_c_boton, t_f_c3, E_HIJA | E_TABULA | BS_OPCION, 160, 164, 120, 20, 33
-        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 60, 204, 90, 26, ID_ACEPTAR
-        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 160, 204, 90, 26, ID_CANCELAR
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 60, 260, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 160, 260, 90, 26, ID_CANCELAR
         dd 0
 ; ---- diálogo: el párrafo ----
 dlg_par:
@@ -323,22 +342,23 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
             dd 258, 24, ic_rehacer, O_REHACER, n_rehacer, 1
             dd 290, 24, ic_marcas, O_MARCAS, n_marcas, 1
             dd 0, 0, 0, 0, 0, 0
-botones     dd 6, 24, t_b_n, O_NEG, n_neg, 0
-            dd 32, 24, t_b_k, O_CUR, n_cur, 0
-            dd 58, 24, t_b_s, O_SUB, n_sub, 0
-            dd 86, 60, t_b_grande, O_GRANDE, n_grande, 0
-            dd 154, 24, ic_izq, O_IZQ, n_izq, 1
-            dd 180, 24, ic_cen, O_CEN, n_cen, 1
-            dd 206, 24, ic_der, O_DER, n_der, 1
-            dd 232, 24, ic_just, O_JUST, n_just, 1
-            dd 264, 24, ic_numera, O_NUMERA, n_numera, 1
-            dd 290, 24, ic_vinetas, O_VINETAS, n_vinetas, 1
-            dd 316, 24, ic_sang_menos, O_SANG_MENOS, n_sang_menos, 1
-            dd 342, 24, ic_sang_mas, O_SANG_MAS, n_sang_mas, 1
-            dd 376, 22, t_nada, O_COLOR, n_c0, 0
-            dd 400, 22, t_nada, O_COLOR + 1, n_c1, 0
-            dd 424, 22, t_nada, O_COLOR + 2, n_c2, 0
-            dd 448, 22, t_nada, O_COLOR + 3, n_c3, 0
+botones     dd 6, 64, t_fu0, O_TIPO, n_tipo, 0
+            dd 74, 24, t_b_n, O_NEG, n_neg, 0
+            dd 100, 24, t_b_k, O_CUR, n_cur, 0
+            dd 126, 24, t_b_s, O_SUB, n_sub, 0
+            dd 154, 60, t_b_grande, O_GRANDE, n_grande, 0
+            dd 222, 24, ic_izq, O_IZQ, n_izq, 1
+            dd 248, 24, ic_cen, O_CEN, n_cen, 1
+            dd 274, 24, ic_der, O_DER, n_der, 1
+            dd 300, 24, ic_just, O_JUST, n_just, 1
+            dd 332, 24, ic_numera, O_NUMERA, n_numera, 1
+            dd 358, 24, ic_vinetas, O_VINETAS, n_vinetas, 1
+            dd 384, 24, ic_sang_menos, O_SANG_MENOS, n_sang_menos, 1
+            dd 410, 24, ic_sang_mas, O_SANG_MAS, n_sang_mas, 1
+            dd 444, 22, t_nada, O_COLOR, n_c0, 0
+            dd 468, 22, t_nada, O_COLOR + 1, n_c1, 0
+            dd 492, 22, t_nada, O_COLOR + 2, n_c2, 0
+            dd 516, 22, t_nada, O_COLOR + 3, n_c3, 0
             dd 0, 0, 0, 0, 0, 0
 B_TAM       equ 24                  ; lo que ocupa cada botón en la tabla
 n_nuevo     db "Nuevo: un documento en blanco (Ctrl+U)", 0
@@ -352,6 +372,7 @@ n_brocha    db "Copiar formato: pulse y luego elija el texto que lo recibe", 0
 n_deshacer  db "Deshacer (Ctrl+Z)", 0
 n_rehacer   db "Rehacer lo deshecho (Ctrl+Y)", 0
 n_marcas    db "Mostrar u ocultar los espacios y las marcas de párrafo", 0
+n_tipo      db "Tipo de letra: pulse para pasar al siguiente (Hispa, Roble, Llano)", 0
 n_neg       db "Negrita (Ctrl+N)", 0
 n_cur       db "Cursiva (Ctrl+K)", 0
 n_sub       db "Subrayado (Ctrl+S)", 0
@@ -741,6 +762,14 @@ t_f_cur     db "Cursiva", 0
 t_f_sub     db "Subrayado", 0
 t_f_gra     db "Letra grande (el doble)", 0
 t_f_color   db "Color:", 0
+t_f_tipo    db "Tipo de letra:", 0
+; los tipos de letra: su nombre y su tabla (0: la de Hispa Ventanas)
+t_fu0       db "Hispa", 0
+t_fu1       db "Roble", 0
+t_fu2       db "Llano", 0
+            align 4
+fu_nombres  dd t_fu0, t_fu1, t_fu2, t_fu0
+fu_tablas   dd 0, fu_roble, fu_llano, 0
 t_f_c0      db "Negro", 0
 t_f_c1      db "Rojo", 0
 t_f_c2      db "Azul", 0
@@ -1068,6 +1097,7 @@ orden:
         call orden_haz
         jmp hecho
 orden_haz:
+        mov dword [bt_sobre], 0
         mov byte [tecleando], 0     ; (cualquier orden acaba la tanda de teclas)
         cmp ecx, O_NUEVO
         je nuevo
@@ -1151,6 +1181,12 @@ orden_haz:
         sub eax, O_COLOR
         cmp eax, 3
         jbe color
+        cmp ecx, O_TIPO
+        je tipo_sig
+        mov eax, ecx
+        sub eax, O_FUENTE
+        cmp eax, N_FUENTES
+        jb tipo
         mov eax, ecx
         sub eax, O_IZQ
         cmp eax, 3
@@ -1188,11 +1224,33 @@ aviso:
 ; =============================================================================
 ; EAX=sitio en el documento -> EAX=ancho de esa letra (8 o 16)
 ancho_de:
-        test byte [atr+eax], A_GRA
+        push ebx
+        push ecx
+        movzx ebx, byte [atr+eax]
+        movzx ecx, byte [txt+eax]
         mov eax, 8
+        cmp ecx, 32                 ; (la marca de párrafo: como una letra de
+        jb .g                       ; la fuente de Hispa Ventanas)
+        push ebx
+        shr ebx, 6
+        mov ebx, [fu_tablas+ebx*4]
+        test ebx, ebx
+        jz .g0
+        sub ecx, 32
+        imul ecx, 34
+        movzx ecx, word [ebx+ecx]
+        test ecx, ecx               ; (0: ese carácter no lo trae)
+        jz .g0
+        mov eax, ecx
+.g0:
+        pop ebx
+.g:
+        test bl, A_GRA
         jz .x
-        mov eax, 16
+        shl eax, 1
 .x:
+        pop ecx
+        pop ebx
         ret
 
 ; recompone la tabla de líneas: lin_ini (dónde empieza cada una) y lin_y (a
@@ -1774,6 +1832,7 @@ letra:
         ja hecho
         mov al, cl
 escribe:
+        mov dword [bt_sobre], 0     ; (al escribir, abajo vuelve la línea y la columna)
         call inst_tecleo
         call escribe1
         call cambio
@@ -2119,7 +2178,34 @@ color:
         inc eax
         jmp .b
 
-; EAX=alineación (0-2): a los párrafos de lo elegido, o al del cursor
+; ---- el tipo de letra: el siguiente al de ahora, o el EAX ----
+tipo_sig:
+        movzx eax, byte [at_act]
+        shr eax, 6
+        inc eax
+        cmp eax, N_FUENTES
+        jb tipo
+        xor eax, eax
+tipo:
+        shl eax, 6
+        mov dl, al
+        and byte [at_act], ~A_FUENTE
+        or [at_act], dl
+        call elegido
+        je inval
+        call instantanea
+.b:
+        cmp eax, ebx
+        jae cambio
+        cmp byte [txt+eax], 10
+        je .s
+        and byte [atr+eax], ~A_FUENTE
+        or [atr+eax], dl
+.s:
+        inc eax
+        jmp .b
+
+; EAX=alineación (0-3): a los párrafos de lo elegido, o al del cursor
 alinea:
         mov edx, eax
         call instantanea
@@ -2638,7 +2724,48 @@ fue_gancho:
         cmp eax, WM_COMMAND
         jne .no
         cmp ecx, ID_ACEPTAR
-        jne .no
+        je .acepta
+        ; el color y el tipo de letra son dos grupos de opciones en el mismo
+        ; diálogo (Ventanas solo lleva uno): se llevan aquí
+        mov eax, ecx
+        sub eax, 30
+        cmp eax, 3
+        ja .tipo
+        mov [dl_color], al
+        jmp short .opciones
+.tipo:
+        mov eax, ecx
+        sub eax, 50
+        cmp eax, N_FUENTES
+        jae .no
+        mov [dl_tipo], al
+.opciones:
+        mov ecx, 30
+.o1:
+        lea eax, [ecx-30]
+        xor edx, edx
+        cmp al, [dl_color]
+        jne .o2
+        inc edx
+.o2:
+        call marca_pon
+        inc ecx
+        cmp ecx, 34
+        jb .o1
+        mov ecx, 50
+.o3:
+        lea eax, [ecx-50]
+        xor edx, edx
+        cmp al, [dl_tipo]
+        jne .o4
+        inc edx
+.o4:
+        call marca_pon
+        inc ecx
+        cmp ecx, 50 + N_FUENTES
+        jb .o3
+        jmp short .no
+.acepta:
         xor bl, bl
         mov ecx, 20
         mov bh, A_NEG
@@ -2651,17 +2778,12 @@ fue_gancho:
         inc ecx
         cmp ecx, 24
         jb .g
-        mov ecx, 30                 ; el color: la opción marcada
-        xor bh, bh
-.gc:
-        call marca_lee
-        jz .gc1
-        or bl, bh
-.gc1:
-        add bh, 0x10
-        inc ecx
-        cmp ecx, 34
-        jb .gc
+        mov al, [dl_color]
+        shl al, 4
+        or bl, al
+        mov al, [dl_tipo]
+        shl al, 6
+        or bl, al
         mov [dl_atr], bl
         jmp short .no
 .ini:
@@ -2679,16 +2801,18 @@ fue_gancho:
         inc ecx
         cmp ecx, 24
         jb .i
-        movzx ecx, bl               ; el color (los que no están en el diálogo,
-        shr ecx, 4                  ; el negro)
-        and ecx, 7
-        cmp ecx, 3
-        jbe .i2
-        xor ecx, ecx
+        mov al, bl                  ; el color y el tipo de letra
+        shr al, 4
+        and al, 3
+        mov [dl_color], al
+        mov al, bl
+        shr al, 6
+        cmp al, N_FUENTES
+        jb .i2
+        xor al, al
 .i2:
-        add ecx, 30
-        mov edx, 1
-        call marca_pon
+        mov [dl_tipo], al
+        jmp .opciones
 .no:
         xor eax, eax
         ret
@@ -3804,6 +3928,12 @@ pinta_botones:
         HV dc_rect
         COLOR C_TINTA
         HV dc_marco
+        cmp dword [edi+12], O_TIPO  ; el del tipo de letra: el nombre del de ahora
+        jne .nt
+        movzx esi, byte [at_act]
+        shr esi, 6
+        mov esi, [fu_nombres+esi*4]
+.nt:
         cmp dword [edi+20], 0       ; ¿un icono?
         je .txt
         mov al, C_CREMA
@@ -4087,7 +4217,7 @@ pinta_linea:
         mov [g_an], ecx
         movzx eax, ah               ; su color
         shr eax, 4
-        and eax, 7
+        and eax, 3
         mov al, [colores+eax]
         mov [g_color], al
         cmp byte [ver_marcas], 0    ; con las marcas a la vista: un punto en
@@ -4173,8 +4303,24 @@ pl_letra:
         mov esi, [g_mapa]           ; un signo propio (viñeta, marcas)...
         test esi, esi
         jnz .mapa
-        movzx esi, byte [g_car]     ; ...o la letra, de la fuente
-        shl esi, 4
+        mov byte [g_16], 0
+        movzx esi, byte [g_car]     ; ...o la letra: de su tipo, si lo trae...
+        movzx eax, byte [g_atr]
+        shr eax, 6
+        mov eax, [fu_tablas+eax*4]
+        test eax, eax
+        jz .hispa
+        cmp esi, 32
+        jb .hispa
+        lea ecx, [esi-32]
+        imul ecx, 34
+        cmp word [eax+ecx], 0
+        je .hispa
+        lea esi, [eax+ecx+2]
+        mov byte [g_16], 1          ; (filas de 16 puntos)
+        jmp short .mapa
+.hispa:
+        shl esi, 4                  ; ...o de la fuente de Hispa Ventanas
         add esi, [hv_api + HV_fuente8x16 * 4]
 .mapa:
         mov ebp, 1                  ; la escala
@@ -4188,8 +4334,15 @@ pl_letra:
         sub edx, eax
         xor ecx, ecx                ; la fila de la fuente
 .fila:
+        cmp byte [g_16], 0
+        je .f8
+        movzx eax, word [esi+ecx*2]
+        shl eax, 16                 ; el punto de la izquierda, el bit 31
+        jmp short .f0
+.f8:
         movzx eax, byte [esi+ecx]
-        shl eax, 8                  ; el punto de la izquierda, el bit 15
+        shl eax, 24
+.f0:
         test byte [g_atr], A_NEG
         jz .f1
         mov edi, eax                ; negrita: cada punto, otra vez a su derecha
@@ -4200,7 +4353,21 @@ pl_letra:
         jz .f2
         cmp ecx, 14
         jne .f2
-        mov eax, 0xFF00             ; subrayado: la fila 14, entera
+        push ecx                    ; subrayado: la fila 14, todo su ancho
+        mov ecx, [g_an]
+        test byte [g_atr], A_GRA
+        jz .su1
+        shr ecx, 1
+.su1:
+        cmp ecx, 32
+        jb .su2
+        mov ecx, 32
+.su2:
+        neg ecx
+        add ecx, 32
+        mov eax, -1
+        shl eax, cl
+        pop ecx
 .f2:
         xor edi, edi                ; cursiva: las filas de arriba, a la derecha
         test byte [g_atr], A_CUR
@@ -4218,16 +4385,16 @@ pl_letra:
         add edi, ebx
 .f4:
         push ecx
-        mov ecx, 9                  ; nueve puntos (el noveno, de la negrita)
-.pt:
-        test eax, 0x8000
-        jz .ps
+.pt:                                ; los puntos que haya
+        test eax, eax
+        jz .pf
+        jns .ps
         call .punto
 .ps:
         shl eax, 1
         add edi, ebp
-        dec ecx
-        jnz .pt
+        jmp .pt
+.pf:
         pop ecx
         add edx, ebp
         inc ecx
@@ -4271,6 +4438,8 @@ pl_letra:
         pop eax
         ret
 
+%include "roble.inc"
+%include "llano.inc"
 %include "hvplib.inc"
 
 FBUF_TAM    equ 2 * MAX_TXT + 16
@@ -4304,6 +4473,8 @@ pl_y        resd 1
 g_an        resd 1
 al_act      resd 1
 bt_y        resd 1
+g_16        resb 1
+            alignb 4
 g_mapa      resd 1                  ; si no es 0, el dibujo que va en vez de la letra
 bt_sobre    resd 1                  ; el nombre del botón que hay bajo el ratón
 pl_lin      resd 1
@@ -4332,6 +4503,8 @@ des_hay     resb 1                  ; hay algo que deshacer
 des_hecho   resb 1                  ; 1: lo último fue deshacer (se puede repetir)
 completa_si resb 1
 dl_atr      resb 1
+dl_color    resb 1
+dl_tipo     resb 1
 m_just      resb 1
 cp_ini      resb 1
 ver_marcas  resb 1                  ; se ven los espacios y las marcas de párrafo
