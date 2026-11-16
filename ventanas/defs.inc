@@ -316,3 +316,14 @@ RL_TAM          equ 32
 ; directo o prog_abrir con parámetros): EDX=los parámetros. El Bloc de notas,
 ; Pintura y el Reproductor de sonido lo abren; los demás no hacen nada
 WM_HV_ABRIR     equ WM_USER + 200
+
+; [TECLADO] el CÓDIGO CRUDO de teclado, tal como llega del hardware (antes del
+; remapeo de KEYB), reenviado a la ventana SUSCRITA (tec_suscribir). Lo usa el
+; accesorio «Teclado» (programas/teclado.asm) para encender la tecla pulsada y
+; leer códigos raros. El gancho de INT 15h/4Fh lo encola y el bucle de eventos
+; lo entrega; solo hay tráfico mientras una ventana está suscrita.
+;   ECX = código de rastreo «make» (bits 0-6) | bit de soltar (0x80, «break»)
+;         | prefijo E0 de tecla extendida (0x100)
+; Es decir: ECX = octeto crudo del teclado (make con el bit 7 = soltar) y, si
+; venía con el prefijo E0, además el bit 8. El «make» puro es ECX & 0x7F.
+WM_TECLA_CRUDA  equ WM_USER + 210

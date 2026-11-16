@@ -60,7 +60,7 @@ chk $T/g6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 
 ini "Modulos=15"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\BLOQUES.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\SOLITARI.HVP"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\TRAGABOL.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\ALMACEN.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Pluma Nombre=Cuentas Nombre=Terminal [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Editar Nombre=Gestor Nombre=Información Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador [Grupo] Nombre=Productividad Nombre=Cuentas " ]; then
   ok "CENTRO.INI: los seis juegos e Hispa-Nes e Hispa-System, en el grupo Juegos"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

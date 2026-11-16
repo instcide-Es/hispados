@@ -78,6 +78,15 @@ sistema detrás (Carlos, 13/11/2026): **Pluma** (procesador de textos) y
 para lo que daban aquellos equipos, y cada uno abrirá los documentos de
 los anteriores.
 
+> Nota (Carlos, 16/11/2026): los programas de oficina **dejan de ser
+> accesorios** y pasan a su propio grupo, **«Productividad»** (número 4 en
+> `HVP_CABECERA`): **Cuentas**, **Pluma** y, más adelante, **Facturas** (la
+> economía de un hogar y de pequeños negocios). Así «Accesorios» se queda con
+> las herramientas pequeñas. **Pluma-Ventanas está retirada de momento**: la
+> primera versión no pasaba de un Bloc de notas (solo cambiaba el menú
+> Edición); vuelve, en «Productividad», cuando sea un procesador de textos de
+> verdad (letra con formato), que es lo que la distingue del Bloc.
+
 ## Consolas de cada época
 
 Idea de Carlos (13/11/2026): cada época trae emuladores de las consolas de

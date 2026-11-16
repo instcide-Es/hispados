@@ -197,10 +197,10 @@ check "Teclado español instalado."
 check "Instalado: clientes de 16 y de 32 bits, memoria de XMS."
 # -- el Centro de programas --
 chk $T/t1.ppm tam 800 600 cursor 400 300 \
-  marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
+  marco 36 52 452 247 activa titulo 36 52 activa "Centro de programas" \
   texto 60 79 0 15 fina "rchivo" texto 140 79 0 15 fina "uda" \
   texto 66 155 9 12 fina "Principal" texto 166 155 0 8 fina "Accesorios" \
-  texto 286 155 0 8 fina "Juegos" texto 54 197 7 8 fina "Doble clic o Intro para abrir un grupo." \
+  texto 286 155 0 8 fina "Juegos" texto 54 254 7 8 fina "Doble clic o Intro para abrir un grupo." \
   px 582 12 7 "altavoz gris: no hay HSPSND" \
   px 468 60 8 "botón de cerrar del Centro" px 475 65 13 "aspa del botón de cerrar" \
   px 300 10 1 "barra superior" texto 736 5 8 4 fina "Salir" px 491 150 0 "sombra del Centro"
@@ -251,7 +251,7 @@ chk $T/t16.ppm marco 150 90 520 340 activa titulo 36 52 no "Centro de programas"
   px 723 471 2 "fondo, otra vez a la vista" texto 164 138 0 9 fina "elcome to Hispa-DOS!"
 # -- mover y cambiar de tamaño --
 chk $T/t17.ppm marco 190 130 520 340 activa titulo 190 130 activa "Bloc de notas - README.TXT" \
-  px 163 263 2 "fondo donde estaba la ventana" texto 54 197 7 8 fina "Doble clic o Int" \
+  px 163 400 2 "fondo donde estaba la ventana" texto 54 254 7 8 fina "Doble clic o Int" \
   texto 204 178 0 9 fina "elcome to Hispa-DOS!"
 chk $T/t18.ppm marco 190 130 479 299 activa px 675 439 2 "fondo donde llegaba la ventana" \
   px 659 300 15 "la barra de desplazamiento sigue al borde"
@@ -288,7 +288,7 @@ chk $T/t33.ppm marco 212 171 376 257 activa titulo 212 171 activa "Salir de Hisp
 chk $T/t34.ppm tam 720 400
 check "TRAS-SALIR"
 # -- VGA de 16 colores --
-chk $T/v1.ppm tam 640 480 cursor 320 240 marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
+chk $T/v1.ppm tam 640 480 cursor 320 240 marco 36 52 452 247 activa titulo 36 52 activa "Centro de programas" \
   texto 166 155 0 8 fina "Accesorios" px 600 300 8 "el grupo «Accesorios» sigue abierto"
 n=$(grep -c "Hispa Ventanas ha terminado." $T/log.txt)
 if [ "$n" = 2 ]; then ok "dos sesiones terminadas con su mensaje"; else ko "sesiones terminadas: $n (esperadas 2)"; fi

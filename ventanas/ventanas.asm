@@ -70,6 +70,7 @@ mz_cab:
 %define CON_PROGRAMAS
 %include "defs.inc"
 RAT_COLA    equ 64                  ; sucesos de ratón que caben en la cola
+CRU_COLA    equ 16                  ; [TECLADO] códigos crudos de teclado en la cola
 
 inicio:
         jmp near arranque
@@ -1315,6 +1316,38 @@ rm_int15:
         and bx, 0x007F
         test al, 0x80
         setz [cs:tec_mapa+bx]
+        ; [TECLADO] si hay una ventana «Teclado» suscrita, se le reenvía el
+        ; código CRUDO (lo ve antes que el remapeo de KEYB, que corre en el
+        ; gancho de detrás). Aquí NO se procesa ni se pinta: solo se encola;
+        ; el bucle de eventos lo entrega como WM_TECLA_CRUDA. Sin suscriptor,
+        ; esto es un solo cmp y no cuesta nada.
+        cmp dword [cs:cru_susc], 0
+        je .crudo_fin
+        cmp al, 0xE0                ; el prefijo de las teclas extendidas no se
+        jne .crudo_cod              ; encola suelto: se recuerda para el código
+        mov byte [cs:cru_e0], 1     ; que viene detrás (llegará con el bit 8)
+        jmp .crudo_fin
+.crudo_cod:
+        push ax
+        mov bl, [cs:cru_cab]        ; BL=cabeza (dónde se escribe)
+        mov bh, bl
+        inc bh
+        and bh, CRU_COLA - 1        ; BH=la próxima cabeza
+        cmp bh, [cs:cru_cola]       ; ¿la cola está llena? se pierde el código
+        je .crudo_lleno
+        mov ah, [cs:cru_e0]         ; AH (bit 0) = 1 si llevaba E0 -> bit 8
+        and ah, 1
+        movzx bx, bl
+        shl bx, 1                   ; palabra por entrada
+        mov [cs:cru_buf+bx], ax     ; AL=octeto crudo (make + bit7 soltar), bit8=E0
+        mov bl, [cs:cru_cab]
+        inc bl
+        and bl, CRU_COLA - 1
+        mov [cs:cru_cab], bl
+.crudo_lleno:
+        mov byte [cs:cru_e0], 0     ; el prefijo, una sola vez
+        pop ax
+.crudo_fin:
         pop bx
         stc
 .c:
@@ -1559,6 +1592,55 @@ tec_quitar:
 .x:
         ret
 
+; ---- [TECLADO] la ventana EBP se suscribe al código CRUDO de teclado ----
+; (interfaz: tec_suscribir). EBP=la ventana que lo quiere, o 0 para nadie. El
+; accesorio «Teclado» la llama en WM_CREATE (con su ventana) y en WM_DESTROY
+; (con 0). Mientras cru_susc no sea 0, el gancho de INT 15h encola los códigos.
+tec_suscribir:
+        mov [cru_susc], ebp
+        test ebp, ebp
+        jnz .x
+        mov byte [cru_cab], 0       ; sin suscriptor: la cola se vacía
+        mov byte [cru_cola], 0
+        mov byte [cru_e0], 0
+.x:
+        ret
+
+; ---- [TECLADO] entrega los códigos crudos encolados a la ventana suscrita ----
+; (lo llama el bucle de eventos). Saca de cru_buf lo que haya puesto el gancho
+; y lo manda como WM_TECLA_CRUDA (ECX=código, ver defs.inc) a cru_susc. No hace
+; nada si no hay suscriptor o la cola está vacía.
+tec_reparte_crudo:
+        push eax
+        push ecx
+        push edx
+        push ebp
+        cmp dword [cru_susc], 0
+        je .x
+        movzx ecx, byte [cru_cola]
+.l:
+        mov al, [cru_cab]
+        cmp cl, al
+        je .x                       ; cola vacía
+        movzx edx, word [cru_buf+ecx*2]
+        inc cl
+        and cl, CRU_COLA - 1
+        mov [cru_cola], cl
+        push ecx
+        mov ebp, [cru_susc]
+        mov ecx, edx                ; ECX=el código crudo
+        mov eax, WM_TECLA_CRUDA
+        xor edx, edx
+        call msg_poner
+        pop ecx
+        jmp .l
+.x:
+        pop ebp
+        pop edx
+        pop ecx
+        pop eax
+        ret
+
 ; ---- una vuelta de sondeo, en modo real ----
 sondeo:
         pushad
@@ -1573,6 +1655,7 @@ eventos:
         mov eax, [cero]
         mov al, [eax+0x417]         ; mayúsculas, Ctrl y Alt (datos de la BIOS)
         mov [tec_mayus], al
+        call tec_reparte_crudo      ; [TECLADO] códigos crudos a la ventana suscrita
         cmp byte [hay_rat], 0
         je .teclas
 .r:
@@ -1895,6 +1978,18 @@ rc_cola     resb 1
             alignb 2
 son_teclas  resw 8
 rat_cola    resb RAT_COLA * 8
+            alignb 4
+; [TECLADO] cola de códigos CRUDOS de teclado (la escribe el gancho de modo
+; real rm_int15; la lee el bucle de eventos, en modo protegido, en
+; tec_reparte_crudo). cru_susc es la ventana suscrita (0: nadie), que ponen
+; tec_suscribir (modo protegido) y lee el gancho (modo real); los dos lados
+; llegan a la misma memoria, como con tec_mapa y son_teclas.
+cru_susc    resd 1                  ; ventana suscrita (0: ninguna)
+cru_cab     resb 1                  ; cabeza de la cola (la escribe el gancho)
+cru_cola    resb 1                  ; cola de la cola (la lee el bucle)
+cru_e0      resb 1                  ; el gancho vio el prefijo E0
+            alignb 2
+cru_buf     resw CRU_COLA
             alignb 4
 exc_ant_00  resb 8
 exc_ant_06  resb 8

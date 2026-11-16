@@ -298,8 +298,11 @@ smsprogs: $(B)/smsnativo $(B)/smsnativo_t $(B)/VDPTEST.SMS $(B)/TMSTEST.SMS
 HVPSIS = $(B)/CONFIG.HVP
 $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
-# los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS
-HVPA = $(B)/PINTURA.HVP $(B)/PLUMA.HVP $(B)/CUENTAS.HVP $(B)/TERMINAL.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP
+# los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS. El ORDEN
+# importa: los grupos que no existen se crean al encontrar su primer módulo, así
+# que los de «Productividad» (el 4: Cuentas; luego Pluma y Facturas) van al final
+# para que ese grupo nuevo salga detrás de «Sonido» y no le quite su sitio.
+HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP $(B)/CUENTAS.HVP
 # [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
 $(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
@@ -313,6 +316,9 @@ $(B)/CUENTAS.HVP: programas/cuentas.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Terminal, el símbolo del sistema (accesorio: el 1 de HVP_CABECERA)
 $(B)/TERMINAL.HVP: programas/terminal.asm $(wildcard programas/terminal/*.inc) lib/version.inc $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# Teclado, la herramienta de taller del teclado (accesorio: el 1 de HVP_CABECERA)
+$(B)/TECLADO.HVP: programas/teclado.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # el Reproductor de sonido y los sonidos propios (tools/mksample.py): HISPA.WAV,
 # su sonido de prueba, y CAMPANA.WAV, la campanita del volumen de Hispa
@@ -626,6 +632,8 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	DOSHIGH=1 tests/run_ventanas_tests.sh $(IMG)
 	tests/run_ventanas3_tests.sh $(IMG)
 	tests/run_ventanas4_tests.sh $(IMG)
+	tests/run_terminal_tests.sh $(IMG)
+	tests/run_teclado_tests.sh $(IMG)
 	tests/run_ventanas_bateria_tests.sh $(IMG)
 	tests/run_ventanas_red_tests.sh $(IMG)
 	tests/run_tamano_tests.sh $(IMG)

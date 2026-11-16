@@ -308,7 +308,8 @@ RX=400; RY=300
   aparca
   shot r0
   # ---- Sonido: el volumen de HSPSND (80 % al entrar) al 50 %, y silencio ----
-  doble 266 290; sleep 2                    # Configuración, en el grupo Principal (que está detrás)
+  clic 540 152; sleep 0.5                  # el grupo Principal al frente (el Centro, con 5 grupos, es más alto y le tapa el icono)
+  doble 266 290; sleep 2                    # Configuración, en el grupo Principal
   clic 196 264; aparca
   shot r2
   clic 428 207; clic 286 245; aparca

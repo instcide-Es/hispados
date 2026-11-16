@@ -2,7 +2,7 @@
 # Prueba de Terminal (TERMINAL.HVP), el símbolo del sistema de Hispa Ventanas.
 #
 # Abre Hispa Ventanas, entra en el grupo «Accesorios» y abre el Terminal (el
-# octavo icono: Bloc, Calculadora, Reloj, Sistema, Pintura, Pluma, Cuentas,
+# sexto icono: Bloc, Calculadora, Reloj, Sistema, Pintura,
 # Terminal). Comprueba que:
 #  - la ventana «Terminal» se abre (título en 100,60);
 #  - VER escribe la versión del sistema en el área de texto;
@@ -78,9 +78,9 @@ fi
   send 'VENTANAS' 5
   doble 206 129; sleep 1                # abrir el grupo «Accesorios»
   aparca
-  # el octavo icono (Terminal): Bloc, Calculadora, Reloj, Sistema, Pintura,
-  # Pluma, Cuentas, Terminal -> siete «right» desde el primero
-  tecla right right right right right right right ret; sleep 2.5
+  # el sexto icono (Terminal): Bloc, Calculadora, Reloj, Sistema, Pintura,
+  # Terminal (Cuentas esta en Productividad) -> cinco «right» desde el primero
+  tecla right right right right right ret; sleep 2.5
   aparca
   shot t1
   escribe "ver"; tecla ret; sleep 1    # la versión del sistema
@@ -98,7 +98,7 @@ fi
 # -- la ventana del Terminal, abierta en (100,60) --
 chk $T/t1.ppm titulo 100 60 activa "Terminal"
 # -- VER: la versión, escrita en el área de texto (claro sobre negro) --
-chk $T/t2.ppm busca 106 105 656 414 15 0 "Hispa-DOS 0.9.16"
+chk $T/t2.ppm busca 106 105 656 414 15 0 "Hispa-DOS 0.9.18"
 # -- ECHO: su argumento --
 chk $T/t3.ppm busca 106 105 656 414 15 0 "hola terminal"
 # -- Hispa-DOS sigue vivo tras salir --

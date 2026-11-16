@@ -698,15 +698,18 @@ hvp_buscar:
         jne .sig
         test edx, edx
         jns .g2
-        mov ebx, tg_juegos          ; su grupo: «Juegos» o, si la cabecera lo
-        cmp byte [edi+H_GRUPO], 1   ; dice, «Accesorios» o [MEZCLADOR] «Sonido»
-        jb .g0                      ; (si no está, se crea)
+        mov ebx, tg_juegos          ; su grupo segun H_GRUPO de la cabecera:
+        cmp byte [edi+H_GRUPO], 1   ; 0 Juegos, 1 Accesorios, 2 Sonido,
+        jb .g0                      ; 3 Principal, 4 Productividad (si no esta, se crea)
         mov ebx, tg_accesorios
         je .g0
-        mov ebx, tg_sonido
-        cmp byte [edi+H_GRUPO], 3   ; [ARCHIVOS] 3: «Principal»
-        jne .g0
-        mov ebx, tg_principal
+        mov ebx, tg_principal       ; [ARCHIVOS] 3: «Principal»
+        cmp byte [edi+H_GRUPO], 3
+        je .g0
+        mov ebx, tg_productividad   ; 4: «Productividad» (Cuentas; luego Pluma, Facturas)
+        cmp byte [edi+H_GRUPO], 4
+        je .g0
+        mov ebx, tg_sonido          ; [MEZCLADOR] 2 (y cualquier otro): «Sonido»
 .g0:
         mov eax, [gr_tabla]
         xor edx, edx

@@ -8,7 +8,7 @@
 #      pone un VENTANAS.COM "viejo" para ver que la actualización lo sustituye.
 #   3) Se arranca SOLO el disco, con tarjeta de red, y se ejecuta ACTUALIZAR (sin
 #      argumentos: usa la URL de RED.INI). El servidor sirve un versiones.txt con
-#      una versión nueva (0.9.17) y su paquete .PAQ (generado con
+#      una versión nueva (0.9.99) y su paquete .PAQ (generado con
 #      tools/paquete.py). Se contesta que SÍ. ACTUALIZAR baja el paquete, lo
 #      desempaqueta en C:\ACTUALIZA y lo aplica en el sitio.
 #   4) Se comprueba, con mtools, que:
@@ -98,13 +98,13 @@ cp build/VENTANAS.COM $T/paqsrc/HISPADOS/VENTANAS.COM
 printf 'VERSION-NUEVA-OK\r\n' > $T/paqsrc/HISPADOS/NUEVO.TXT
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDOS=HIGH\r\n' > $T/paqsrc/CONFIG.SYS
 printf '@ECHO Hispa-DOS actualizado por red\r\n' > $T/paqsrc/AUTOEXEC.BAT
-python3 -I tools/paquete.py $T/paqsrc $T/www/hispados-0.9.17.paq || { echo "paquete.py falló"; exit 1; }
-{ printf '[0.9.17]\n'
+python3 -I tools/paquete.py $T/paqsrc $T/www/hispados-0.9.99.paq || { echo "paquete.py falló"; exit 1; }
+{ printf '[0.9.99]\n'
   printf 'cpu=386\n'
   printf 'disco=1\n'
   printf 'nivel=0\n'
   printf 'edicion=Hispa-DOS con Hispa Ventanas\n'
-  printf 'paquete=http://10.0.2.2:%s/hispados-0.9.17.paq\n' "$PORT"
+  printf 'paquete=http://10.0.2.2:%s/hispados-0.9.99.paq\n' "$PORT"
   printf 'nota=Version de prueba por red\n'; } > $T/www/versiones.txt
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
 HTTP_PID=$!
@@ -129,7 +129,7 @@ check $T/s3 "Tu equipo admite la edición"
 check $T/s3 "Version de prueba por red"
 check $T/s3 "Descargando el paquete"
 check $T/s3 "Aplicando la actualización"
-check $T/s3 "Actualizado a 0.9.17"
+check $T/s3 "Actualizado a 0.9.99"
 
 # ------------------------------------------------------------------ 4
 echo "-- 4) comprobaciones en el disco --"

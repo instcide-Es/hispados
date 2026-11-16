@@ -63,7 +63,7 @@ O_COPIAR    equ 113
 O_PEGAR     equ 114
 O_ACERCA    equ 121
 
-HVP_CABECERA "Cuentas", entrada, 1
+HVP_CABECERA "Cuentas", entrada, 4
         db "................................"
         db "................................"
         db "................................"

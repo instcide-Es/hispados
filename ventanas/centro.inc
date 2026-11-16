@@ -165,6 +165,7 @@ centro_tarea:
         call ven_crear
         mov [cen_ven], eax
         add esp, P_TAM
+        call cen_alargar            ; [GRUPOS] si no caben los grupos, se alarga
         call aj_iniciar             ; [Configuración] CONFIG.HVP aplica VENTANAS.INI
         mov ebx, [gr_tabla]
         mov ecx, MAX_GR
@@ -261,6 +262,47 @@ rect_acotar:
         ret
 
 ; (interna) abre la ventana del grupo EAX (o la trae delante)
+; [GRUPOS] Si en el Centro no caben todos los grupos y la pista de abajo («Doble
+; clic o Intro...»), la ventana se alarga hasta que quepan, sin salirse de la
+; pantalla; como grupo_abrir con los grupos: solo crece, nunca encoge. Así,
+; al llegar un grupo nuevo (p. ej. «Productividad»), nada queda escondido,
+; tampoco en los equipos que ya tenían guardada la medida vieja. Solo si el
+; Centro sigue con su medida de fábrica (452x190, la de cfg_cargar): si el
+; usuario le ha dado otra, se respeta (y sale la barra), como con los grupos.
+cen_alargar:
+        pushad
+        cmp dword [cen_rect+8], 452
+        jne .x
+        cmp dword [cen_rect+12], 190
+        jne .x
+        mov ebp, [cen_ven]
+        test ebp, ebp
+        jz .x
+        call vista_cuenta           ; EAX=grupos (y vis_cols, vis_alto al día)
+        add eax, [vis_cols]
+        dec eax
+        xor edx, edx
+        div dword [vis_cols]        ; filas de iconos
+        imul eax, eax, CEN_FILA
+        add eax, 48                 ; y la pista, como en vt_pista_y
+        sub eax, [vis_alto]
+        jle .x                      ; ya cabe todo
+        mov edx, [ebp+V_AL]
+        add edx, eax
+        mov eax, [ebp+V_X]
+        mov ebx, [ebp+V_Y]
+        mov ecx, [vid_alto]         ; (sin salirse de la pantalla)
+        sub ecx, ebx
+        cmp edx, ecx
+        jle .cabe
+        mov edx, ecx
+.cabe:
+        mov ecx, [ebp+V_AN]
+        call ven_mover
+.x:
+        popad
+        ret
+
 grupo_abrir:
         pushad
         mov ebx, eax

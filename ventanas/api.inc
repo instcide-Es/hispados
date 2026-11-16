@@ -115,4 +115,7 @@
         HVF dos_buf                 ; 87  (datos) el búfer de paso de DOS (2.048 octetos)
         HVF dos_crit                ; 88  -> EAX=el último error crítico de disco (-1: ninguno)
         HVF prog_abrir              ; 89  ESI=programa EDI=parámetros EDX=carpeta ECX=banderas EBX=al volver
+        ; ---- [TECLADO] el accesorio «Teclado» (91 entradas) ----
+        HVF tec_suscribir           ; 90  EBP=ventana (0: ninguna): recibe el CÓDIGO
+                                    ;     CRUDO de teclado como WM_TECLA_CRUDA
 %endmacro
