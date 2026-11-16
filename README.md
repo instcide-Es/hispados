@@ -3,6 +3,8 @@
 **Hispa-386, de la familia Hispa-DOS: sistema operativo libre compatible con MS-DOS 6.22, escrito desde cero, con drivers para hardware actual.**
 *A free, from-scratch MS-DOS 6.22 compatible operating system with drivers for modern hardware.* — [English below](#english)
 
+**Pruébalo sin instalar nada, en el navegador (también en el móvil): [hispados.es](https://hispados.es).**
+
 ```
 Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22
 (C) 2026 Carlos Sanz y colaboradores de Hispa-DOS - GPL-2.0 o posterior
@@ -39,8 +41,8 @@ Hispa-DOS es la primera pieza de **Rescoldo**, la familia de programas libres en
 
 **Hispa-DOS es la familia de sistemas operativos** con DOS por debajo, uno para cada clase de ordenador, con el nombre del **procesador mínimo** que necesita:
 
-- **Hispa-8086** — 8086, 8088, V20, 80186 y 286: un núcleo de 16 bits propio, en marcha (rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)).
-- **Hispa-386** — 386 o superior: **este repositorio** (rama `hispados-0.9`). Trae su escritorio con ventanas, **Hispa Ventanas**.
+- **Hispa-8086** — 8086, 8088, V20, 80186 y 286: un núcleo de 16 bits propio, en marcha (versión 0.7.1, rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)). Ya arranca, maneja archivos y directorios en disquetes y disco duro, ejecuta .COM, .EXE y lotes, y pasa archivos por el puerto serie. Probado con las ROM originales del IBM PC, del XT y del AT.
+- **Hispa-386** — 386 o superior: **este repositorio** (rama `hispados-0.9`). Trae su escritorio con ventanas, **Hispa Ventanas**, con sus grupos de programas: Accesorios (Bloc de notas, Calculadora, Reloj, Sistema, Pintura, Terminal, Teclado), **Productividad** (Pluma, Cuentas y Facturas), Juegos (con los emuladores Hispa-Nes e Hispa-System) y Sonido.
 - **Hispa-486** — reservado, más adelante: lo de mediados a finales de los 90 (DirectX, navegador web, menú de inicio). El nombre definitivo será el del procesador mínimo con el que vaya bien de verdad.
 
 Después vendrá un núcleo nuevo, sin DOS, con la tecnología de los años 2000 (nombre por decidir). Y aparte:
@@ -58,11 +60,29 @@ Las imágenes listas para usar están en **[Releases](https://github.com/instcid
 | `hispados-disquete.img` | Disquete de arranque de 1,44 MB. En VirtualBox, VMware, 86Box o QEMU, como disquete; en un PC antiguo, grábalo en un disquete (Rufus o `dd`). |
 | `hispados-usb.zip` | Imagen de 512 MB para memoria USB (FAT16, con unos 510 MB libres para juegos y programas propios; la descarga sigue pesando alrededor de 1 MB): descomprímela y grábala con Rufus (modo DD), balenaEtcher o `dd`. Arranca en PCs con BIOS (o UEFI con CSM/Legacy) y permite instalar en el disco duro con `INSTALAR`. |
 
+**Sin instalar nada:** [hispados.es](https://hispados.es) lo arranca emulado en el navegador.
+
+**Instalar:** descarga `hispados-usb.zip` de la última versión, descomprime el `.img`, grábalo en un USB con Rufus («Imagen DD») o con `dd`, arranca desde el USB y ejecuta `INSTALAR` para dejarlo en el disco duro.
+
+**Actualizar por red:** con Hispa-386 en el disco duro y la red configurada, escribe `ACTUALIZAR`: comprueba si hay versión nueva, la descarga y la instala sola, conservando tus ajustes. Ya no hace falta el USB.
+
 Probar en QEMU: `qemu-system-i386 -fda hispados-disquete.img`.
 
-**Requisitos:** procesador **386 o superior** (386, 486, Pentium...) y 640 KB de memoria; para Hispa Ventanas, además memoria extendida (2 MB o más). En un 8086, 186 o 286 Hispa-DOS lo dice al arrancar en vez de colgarse. Una versión para 8086/286 está en la lista de ideas.
+**Requisitos:** procesador **386 o superior** (386, 486, Pentium...) y 640 KB de memoria; para Hispa Ventanas, además memoria extendida (2 MB o más). En un 8086, 186 o 286 Hispa-386 lo dice al arrancar en vez de colgarse: para esos equipos está **Hispa-8086** (rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)).
 
 La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáticas en emuladores, pero falta probarla en más PCs reales. Si encuentras un fallo, abre una *issue* contando el equipo (o el emulador) y qué pasó.
+
+## Novedades
+
+| Versión | Qué trae |
+|---|---|
+| 0.9.21 | Pluma con barra de iconos, párrafos (justificado, sangría, viñetas, numeración) y 20 tipos de letra |
+| 0.9.20 | Pluma, procesador de textos completo (Insertar, Formato, Herramientas, Reemplazar, Ir a con Ctrl+I); Ctrl+I y Ctrl+M sirven de atajo en las ventanas |
+| 0.9.19 | Facturas: el importe se pone al crear la factura; precios con el IVA incluido |
+| 0.9.18 | Grupo «Productividad» con Facturas, Pluma y Cuentas renovadas; ventana Teclado; el Centro de programas crece cuando hay más grupos |
+| 0.9.16–0.9.17 | Instalador por red (`ACTUALIZAR`), Terminal en una ventana, la red que se carga sola y el aviso de órdenes recortadas a 8 letras |
+
+Todas, con sus imágenes, en [Releases](https://github.com/instcide-Es/hispados/releases).
 
 ## Estado (versión 0.9 de pruebas)
 
@@ -122,12 +142,13 @@ La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáti
 | Cambiar de disco sin reiniciar: disquetes (360 KB a 2,88 MB), CD/DVD y memorias USB; «La unidad no está preparada» | ✅ |
 | Windows for Workgroups 3.11 en modo 386 mejorado (cada uno con su copia; ver [docs/WINDOWS.md](docs/WINDOWS.md)) | ✅ en pruebas |
 | **Hispa Ventanas**, etapas 2 y 3: `VENTANAS` abre el entorno gráfico propio (VESA 640×480 a 1024×768 de 256 colores o color verdadero, o VGA de 16 colores; fuente y aspecto propios) con ventanas que se mueven, cambian de tamaño, se maximizan y se minimizan, menús, cuadros de diálogo y los primeros programas: Centro de programas (con grupos y accesos directos, también a los juegos y programas de Hispa-DOS, que se ejecutan con toda la memoria y vuelven a Hispa Ventanas; el grupo «Juegos de DOS» se llena solo con los juegos de `C:\JUEGOS`, y cada acceso puede llevar su velocidad, LOADFIX y Sound Blaster emulada), Bloc de notas, Calculadora y Reloj, el volumen en la barra y, como programas aparte (módulos .HVP que se abren como ventanas), los primeros juegos propios, Culebra, Campo de minas, Bloques, Solitario (baraja francesa o española), Tragabolas y Almacén, Pintura, el programa de dibujo (lee y guarda BMP), y el Reproductor de sonido (para probar la tarjeta: sonido de prueba propio, izquierda y derecha, tono de 440 Hz y archivos WAV; al cambiar el volumen suena una campanita). **Botón derecho**: menús contextuales en los iconos y el fondo de los grupos, la barra de título, el escritorio y los cuadros de texto; también con Mayús+F10, la tecla de menú y, para los Mac y los touchpads de un botón, Ctrl+clic. Ver [docs/VENTANAS.md](docs/VENTANAS.md) | ✅ en pruebas |
+| **Productividad** (grupo de Hispa Ventanas, desde la 0.9.18): **Pluma**, procesador de textos con formato, menús completos, barra de iconos, párrafos justificados, sangría, viñetas, numeración, Reemplazar, Ir a, contar palabras y **20 tipos de letra** compartidos (`TIPOS.DAT`); **Cuentas**, hoja de cálculo (SUMA, PROMEDIO, MAX, MIN, CONTAR, REDONDEAR, ABS y %); y **Facturas**, la economía de una casa o de un pequeño negocio (emitidas y recibidas, IVA y retención, resumen por trimestres). En Accesorios, además, **Terminal** (Hispa-DOS en una ventana) y **Teclado** (enciende la tecla pulsada y deja cambiar teclas raras de un portátil) | ✅ en pruebas |
 | **Sound Blaster 16 emulada** (`HSPSND /SB`, con HSPEMM) para que los juegos de DOS suenen en equipos con solo HD Audio o AC'97: DSP, DMA, IRQ, mezclador y FM AdLib (OPL2). Ver [docs/HSPSB.md](docs/HSPSB.md) | ✅ en pruebas (QEMU; falta hardware real y los juegos en modo protegido) |
 | **Hispa-Nes**: la primera de las consolas de cada época. Emulador propio (código de sala limpia), compatible con los cartuchos de la NES en formato iNES: procesador 6502 completo, imagen por líneas, sonido por HSPSND, teclado y mandos de HSPJOY, cartuchos de los tipos 0, 1, 2, 3, 4, 7 y 66 y partidas con pila en archivos .SAV. Es un módulo de Hispa Ventanas (`HISPANES.HVP`) y trae un juego nuestro, Cometas (`HISPA1.NES`), escrito en ensamblador de 6502 y ensamblado aquí (`tools/asm6502.py`). Las ROM comerciales no van en el proyecto. Ver [docs/HISPANES.md](docs/HISPANES.md) | ✅ en pruebas (falta probarlo en equipos de verdad) |
 | **Hispa-System**: la segunda consola. Emulador propio (sala limpia), compatible con los cartuchos de la Master System (.SMS): Z80 completo, con las instrucciones y banderas no documentadas (pasa zexdoc y zexall), VDP en el modo 4 y en los del TMS9918, con desplazamiento, filas y columnas fijas, objetos de 8×8 y 8×16 e interrupciones de línea y de cuadro, sonido SN76489 por HSPSND (la interfaz nueva, sin esperar), teclado y mandos de HSPJOY, mapeadores de Sega y de Codemasters y partidas con pila en .SAV. Módulo `HISPASMS.HVP`, con un juego nuestro, Buzo (`BUZO.SMS`), escrito en ensamblador de Z80 y ensamblado aquí (`tools/asmz80.py`). Ver [docs/HISPASMS.md](docs/HISPASMS.md) | ✅ en pruebas (falta probarlo en equipos de verdad; la Game Gear, pendiente) |
 | **Red**, primer paso: `HSPRED` (controlador residente con la interfaz de *packet driver*, para mTCP y compañía: NE2000 PCI, Realtek RTL8139, Intel e1000; RTL8168 sin probar), pila TCP/IP propia (ARP, IP, ICMP, UDP, DHCP, DNS, TCP) y las órdenes `CONFRED` (`IPCONFIG`), `PING` y `DESCARGAR` (HTTP sin cifrar), con `\HISPADOS\RED.INI`. Ver [docs/RED.md](docs/RED.md) | ✅ en pruebas (QEMU; falta hardware real) |
 | **Consola remota** por red: `CONSOLA` escucha en un puerto TCP (apertura pasiva de la pila), avisa en pantalla de cada conexión y exige un código de acceso de 6 cifras (válido 60 s) que solo se ve en el equipo; dentro, ejecuta órdenes y manda su salida. Abierta, visible y controlada por el usuario (no arranca sola). Ver [docs/CONSOLA.md](docs/CONSOLA.md) | ✅ en pruebas (QEMU; falta hardware real) |
-| **Buscar actualizaciones** por red: `ACTUALIZAR` lee por HTTP un archivo con la última versión y avisa si hay una más nueva que la instalada (la versión está en un solo sitio, `lib/version.inc`). Solo avisa; no descarga ni instala. Ver [docs/RED.md](docs/RED.md) | ✅ en pruebas (QEMU; falta hardware real) |
+| **Actualizar por red**: `ACTUALIZAR` lee por HTTP la lista de versiones, mira el equipo (procesador, memoria, disco) y recomienda hasta dónde puede subir; descarga el paquete `.PAQ`, comprueba su suma y lo instala en el sitio, conservando los ajustes (`*.INI` y `*.REC`; el `CONFIG.SYS` y el `AUTOEXEC.BAT` anteriores quedan como `.ANT`). Ver [docs/RED.md](docs/RED.md) | ✅ (también en un equipo real) |
 | Vídeo VESA, Wi-Fi y WINSOCK.DLL para Windows 3.11 | 🔜 ver hoja de ruta |
 
 ## Arranque: «Normal» o «Juegos»
@@ -336,11 +357,13 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior (GPL-2.0-or
 
 ## English
 
-Hispa-DOS is a family of free operating systems named after the minimum CPU they need: Hispa-8086 (8086 to 286), Hispa-386 (this repository, 386 or better, with its desktop Hispa Ventanas) and, later, Hispa-486. Hispa-386 is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
+**Try it in your browser, no install needed: [hispados.es](https://hispados.es).**
+
+Hispa-DOS is a family of free operating systems in Spanish, part of the **Rescoldo** project, named after the minimum CPU they need: **Hispa-8086** (8086 to 286; version 0.7.1, branch [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086), tested with the original IBM PC, XT and AT ROMs), **Hispa-386** (this repository, 386 or better, with its desktop **Hispa Ventanas** and its own office suite in the «Productividad» group: Pluma word processor, Cuentas spreadsheet and Facturas invoicing) and, later, **Hispa-486** (reserved: DirectX, web browser, start menu). A new kernel without DOS will come after that, written in **Castel**, a Spanish systems programming language (in design). Hispa-386 is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
 
 It contains no Microsoft code: everything is implemented from public documentation.
 
-**Status (0.9, test release):** MS-DOS 6.22 compatible kernel and shell (FAT12/FAT16, hard disks, CD/DVD, native USB, SHARE, critical error handler, batch files, CONFIG.SYS and `.SYS` drivers), XMS, `DOS=HIGH` (kernel code in the HMA, about 33 KB more conventional memory), Sound Blaster/HD Audio/AC'97, PS/2 and USB mouse and keyboard, and the usual utilities with Spanish names (and the classic ones). Windows for Workgroups 3.11 runs in 386 enhanced mode. Ready-to-use images are in [Releases](https://github.com/instcide-Es/hispados/releases). See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/VENTANAS.md](docs/VENTANAS.md) for what comes next.
+**Status (0.9, test release):** MS-DOS 6.22 compatible kernel and shell (FAT12/FAT16, hard disks, CD/DVD, native USB, SHARE, critical error handler, batch files, CONFIG.SYS and `.SYS` drivers), XMS, `DOS=HIGH` (kernel code in the HMA, about 33 KB more conventional memory), Sound Blaster/HD Audio/AC'97, PS/2 and USB mouse and keyboard, and the usual utilities with Spanish names (and the classic ones). Windows for Workgroups 3.11 runs in 386 enhanced mode. Ready-to-use images are in [Releases](https://github.com/instcide-Es/hispados/releases); installed systems update themselves over the network with `ACTUALIZAR`. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/VENTANAS.md](docs/VENTANAS.md) for what comes next.
 
 ```sh
 make && make run     # build the floppy image and boot it in QEMU

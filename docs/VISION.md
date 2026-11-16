@@ -15,15 +15,20 @@ persona que tenga un equipo antiguo.
 
 | Época | Sistema | Base técnica | Equipos objetivo |
 |---|---|---|---|
-| 1981–1984 | *(nombre por decidir)* | Sistema para el 8086/8088 del PC original y el XT: modo real, disquetes, 64–640 KB | 8086/8088 |
-| 1984–1990 | *(nombre por decidir)* | Sistema para el 286 (PC AT): modo real y primeros pasos en modo protegido | 286, 1–4 MB |
-| 1994 | **Hispa-DOS** | Modo real, compatible con MS-DOS 6.22 y con Windows 3.11 | 386/486, 4–16 MB |
-| Principios de los 90 | **Hispa Ventanas**: entorno gráfico propio sobre Hispa-DOS | Ventanas, multitarea cooperativa, aplicaciones de Windows 3.x | 386/486 |
-| Mediados de los 90 | **Hispa 32**: sistema de 32 bits | Multitarea real, nombres largos, Plug and Play | Pentium, 8–32 MB |
-| Finales de los 90 | **Hispa Red**: sistema maduro | Red e Internet, USB, multimedia | Pentium II/III |
-| Principios de los 2000 | **Hispa XXI** | Sistema de 32 bits moderno | Pentium III/4 |
-| Desde mediados de los 2000 | **Hispa x64** | 64 bits, para los PC actuales | x86-64 |
-| La era ARM | **Hispa ARM**: el último de la serie | Procesadores ARM | Raspberry Pi, portátiles y equipos ARM |
+| 1981–1990 | **Hispa-8086** *(en marcha, versión 0.7.1: rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086))* | Sistema de 16 bits en modo real para el PC, el XT y el AT: disquetes de 360 K en adelante; en un 286 aprovecha además la memoria alta. Probado con las ROM originales del IBM PC, del XT y del AT | 8086, 8088, V20, 80186, 286 |
+| Principios de los 90 | **Hispa-386** *(este repositorio, versión 0.9)*, con su escritorio **Hispa Ventanas** | Compatible con MS-DOS 6.22 y con Windows 3.11; escritorio propio con ventanas, sus programas (Accesorios, Productividad, Juegos, Sonido) y emuladores de consolas | 386, 486 y posteriores |
+| Mediados a finales de los 90 | **Hispa-486** *(reservado)* | DirectX para los juegos, navegador web y menú de inicio; todavía con DOS por debajo. El nombre definitivo será el del procesador mínimo con el que vaya bien de verdad | 486 / Pentium |
+| Desde los 2000 | **Núcleo nuevo, sin DOS** *(nombre por decidir)* | Un sistema moderno con la tecnología de los 2000, escrito en Castel; después, 64 bits y ARM | Pentium III/4, x86-64, ARM |
+
+**Los nombres** (Carlos, 16/11/2026). **Hispa-DOS** es la familia de los
+sistemas operativos con DOS por debajo, y cada miembro se llama por el
+procesador **mínimo** que pide: **Hispa-8086** (del 8086 al 286), **Hispa-386**
+(386 o superior, con su escritorio **Hispa Ventanas** dentro) e **Hispa-486**
+(reservado). Después vendrá un núcleo nuevo que no dependa de DOS. Todos se
+actualizan entre sí, y cada uno recomienda el que le corresponde al equipo
+donde arranca. Aparte va **Castel**, el lenguaje de programación de sistemas,
+en español, con el que se escribirán los próximos. El conjunto se llama
+**Rescoldo**; su web es [hispados.es](https://hispados.es).
 
 Todos los sistemas llevan el nombre de la familia **Hispa**. No se usan nombres
 de países ni de lugares concretos: todos los países de habla hispana tienen el
@@ -45,16 +50,17 @@ documentación y sus imágenes listas para usar, antes de empezar la siguiente.
 - **Pruebas automáticas** en cada pieza y auditorías periódicas antes de cada
   versión estable.
 
-## Cómo prepararemos Hispa 32
+## Cómo prepararemos Hispa-486
 
-Acordado con Carlos (13/11/2026) para cuando empiece la época de 32 bits:
+Acordado con Carlos (13/11/2026) para cuando empiece la época siguiente (lo que
+entonces llamábamos «Hispa 32»; desde el 16/11/2026, Hispa-486):
 
 - **KolibriOS** (GPL v2), como estudio de arquitectura: un sistema de 32 bits
   escrito en ensamblador, con interfaz gráfica, USB, red y sonido, que cabe
   en un disquete. Sirve para ver cómo organizar núcleo, controladores y
   ventanas en poco espacio. Su interfaz (`int 40h`) no es la de Windows, así
   que no nos dice qué funciones dar. Se estudia, no se copia.
-- **Arranque UEFI nativo** (además de BIOS): Hispa 32 será la primera de la familia que arranque en PCs que solo tienen UEFI (ver docs/ROADMAP.md).
+- **Arranque UEFI nativo** (además de BIOS): Hispa-486 será el primero de la familia que arranque en PCs que solo tienen UEFI (ver docs/ROADMAP.md).
 - **Windows 95**, como objetivo de comportamiento, igual que MS-DOS 6.22 lo
   es de Hispa-DOS: se observa y se prueban programas, nunca su código.
 - **Documentación pública** del API Win32 (manuales y libros de la época) y
@@ -98,9 +104,9 @@ los juega desde su biblioteca personal; las ROM nunca van en el proyecto.
 
 | Época | Emuladores |
 |---|---|
-| Hispa-DOS / Hispa Ventanas (486) | **Hispa-Nes**, **Hispa-System**, **Hispa-Boy** |
-| Hispa 32 (Pentium) | **Hispa-Drive**, **Hispa-SNes**, **Hispa-BoyColor** |
-| Hispa XXI | **Hispa-PSX**, **Hispa-BoyAdvance**, **Hispa-Nin64** |
+| Hispa-386, con Hispa Ventanas | **Hispa-Nes**, **Hispa-System**, **Hispa-Boy** |
+| Hispa-486 | **Hispa-Drive**, **Hispa-SNes**, **Hispa-BoyColor** |
+| Núcleo nuevo (años 2000) | **Hispa-PSX**, **Hispa-BoyAdvance**, **Hispa-Nin64** |
 
 - Código propio, a partir de la documentación pública del hardware (sala
   limpia, como el resto del proyecto).
@@ -121,5 +127,11 @@ los juega desde su biblioteca personal; las ROM nunca van en el proyecto.
 
 ## Estado
 
-- Hispa-DOS (1994): casi completo. Ver el [README](../README.md), la
-  [hoja de ruta](ROADMAP.md) y el estado de [Windows 3.11](WINDOWS.md).
+- **Hispa-8086**: versión 0.7.1, en marcha (rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)).
+- **Hispa-386** con Hispa Ventanas: versión 0.9 de pruebas, casi completa (la
+  última, en [Releases](https://github.com/instcide-Es/hispados/releases)).
+  Ver el [README](../README.md), la [hoja de ruta](ROADMAP.md) y el estado de
+  [Windows 3.11](WINDOWS.md). Se puede probar en el navegador en
+  [hispados.es](https://hispados.es).
+- **Hispa-486**: reservado.
+- **Castel**: en diseño.
