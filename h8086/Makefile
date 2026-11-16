@@ -31,7 +31,7 @@ $(B):
 $(B)/arranque.bin: arranque.asm | $(B)
 	$(CP437) $< $(B)/gen/arranque.asm && $(NASM) -f bin -o $@ $(B)/gen/arranque.asm
 
-NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc config.inc
+NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc config.inc dispositivos.inc
 $(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
 	for f in $(NUCLEO); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
 	cd $(B)/gen && $(NASM) -f bin -l nucleo.lst -o ../NUCLEO86.SYS nucleo.asm
@@ -62,6 +62,23 @@ $(B)/SISTEMA.COM: ordenes/sistema.asm | $(B)
 $(B)/PARTIR.COM: ordenes/partir.asm | $(B)
 	$(CP437) $< $(B)/gen/partir.asm && cd $(B)/gen && $(NASM) -f bin -o ../PARTIR.COM partir.asm
 
+# las órdenes que solo usan de util.inc lo de la pantalla
+SUELTAS = ETIQUETA ATRIBUTO ARBOL XCOPIAR REVISAR
+define SUELTA
+$(B)/$(1).COM: ordenes/$(shell echo $(1) | tr A-Z a-z).asm $(B)/gen/util.inc | $(B)
+	$(CP437) $$< $(B)/gen/$(shell echo $(1) | tr A-Z a-z).asm && cd $(B)/gen && $(NASM) -f bin -o ../$(1).COM $(shell echo $(1) | tr A-Z a-z).asm
+endef
+$(foreach o,$(SUELTAS),$(eval $(call SUELTA,$(o))))
+
+$(B)/EDITAR.COM: ordenes/editar.asm | $(B)
+	$(CP437) $< $(B)/gen/editar.asm && $(NASM) -f bin -o $@ $(B)/gen/editar.asm
+
+$(B)/TECLADO.COM: ordenes/teclado.asm | $(B)
+	$(CP437) $< $(B)/gen/teclado.asm && $(NASM) -f bin -o $@ $(B)/gen/teclado.asm
+
+$(B)/DISCORAM.SYS: ordenes/discoram.asm | $(B)
+	$(CP437) $< $(B)/gen/discoram.asm && $(NASM) -f bin -o $@ $(B)/gen/discoram.asm
+
 $(B)/MAS.COM: ordenes/mas.asm | $(B)
 	$(CP437) $< $(B)/gen/mas.asm && $(NASM) -f bin -o $@ $(B)/gen/mas.asm
 
@@ -80,10 +97,16 @@ $(B)/EXE.EXE: prueba/exe.asm | $(B)
 $(B)/N8.COM: prueba/n8.asm | $(B)
 	$(CP437) $< $(B)/gen/n8.asm && $(NASM) -f bin -o $@ $(B)/gen/n8.asm
 
+$(B)/CUENTA.COM: prueba/cuenta.asm | $(B)
+	$(CP437) $< $(B)/gen/cuenta.asm && $(NASM) -f bin -o $@ $(B)/gen/cuenta.asm
+
+$(B)/SALUDO.SYS: prueba/saludo.asm | $(B)
+	$(CP437) $< $(B)/gen/saludo.asm && $(NASM) -f bin -o $@ $(B)/gen/saludo.asm
+
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/REVISAR.COM $(B)/ETIQUETA.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/XCOPIAR.COM $(B)/DISCORAM.SYS $(B)/EDITAR.COM $(B)/TECLADO.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos
@@ -98,7 +121,7 @@ $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 	$(call DISQUETE,$*)
 
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
-PRUEBAS = $(B)/N8.COM
+PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS
 
 prueba: $(DISCOS) $(PRUEBAS)
 	./prueba/prueba.sh

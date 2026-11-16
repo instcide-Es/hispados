@@ -140,7 +140,7 @@ confirma:
 .si:
         cmp al, al
         ret
-; ¿es Hispa-8086 0.8 o posterior? Estas órdenes necesitan que el núcleo sepa
+; ¿es Hispa-8086 0.9 o posterior? Estas órdenes necesitan que el núcleo sepa
 ; olvidar los discos (E8h). Si no lo es, lo dice y termina
 pide_nucleo:
         mov ax, 0xE800
@@ -148,7 +148,7 @@ pide_nucleo:
         int 0x21
         cmp ax, 0x4869
         jne .no
-        cmp bh, 8
+        cmp bh, 9
         jb .no
         ret
 .no:
@@ -164,6 +164,8 @@ avisa_nucleo:
         pop ax
         ret
 
+%ifndef SOLO_TEXTO                  ; (quien solo quiere la pantalla lo define,
+                                    ; y declara él [sin_preguntar])
 ; ---- los sectores, con la BIOS ----
 ; Todo lo que se le pide a la BIOS pasa por un búfer «de paso»: las
 ; disqueteras (y los discos duros de los XT) llevan los datos por DMA, que no
@@ -375,6 +377,7 @@ duro_activa:
         pop bx
         ret
 
+%endif
 %ifdef CON_SISTEMA
 ; ---- copiar el sistema ----
 ; la unidad de donde ha salido este programa (está detrás de su entorno, con
@@ -486,7 +489,7 @@ t_sis_nucleo  db "A:\NUCLEO86.SYS", 0
 t_sis_command db "A:\COMMAND.COM", 0
 %endif
 
-m_u_nucleo  db "Esta orden necesita Hispa-8086 0.8 o posterior.", 10, 0
+m_u_nucleo  db "Esta orden necesita Hispa-8086 0.9 o posterior.", 10, 0
 
 ; las variables de todo esto (van con las del programa, que no están en el
 ; archivo)

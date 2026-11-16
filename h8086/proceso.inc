@@ -693,7 +693,10 @@ termina:
         jz .nucleo
         push cs
         pop es
+        cmp byte [queda], 0         ; (si se queda residente, conserva sus
+        jne .q1                     ; archivos y su memoria)
         call h_cierra_de            ; sus archivos y su memoria
+.q1:
         mov es, dx
         mov ax, [es:PSP_PADRE]
         mov [psp_act], ax
@@ -701,7 +704,11 @@ termina:
         mov [dta_off], bx
         mov bx, [es:PSP_DTA+2]
         mov [dta_seg], bx
+        cmp byte [queda], 0
+        jne .q2
         call mem_suelta_de
+.q2:
+        mov byte [queda], 0
         test ax, ax
         jz .nucleo
         mov es, ax                  ; el padre sigue donde estaba: dentro de

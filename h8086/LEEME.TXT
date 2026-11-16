@@ -1,9 +1,9 @@
-Hispa-8086 0.8
+Hispa-8086 0.9
 
 El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20,
 80186 y 286. Software libre (GPL-2.0 o posterior), hecho desde cero y
 en español.
 
-Arranca de disquete o de disco duro; archivos, directorios, programas
-.COM y .EXE y lotes .BAT. Para instalarlo en el disco duro: PARTIR CREAR
-y FORMATEA C: /S (borra lo que haya). Escriba AYUDA para ver las órdenes.
+Arranca de disquete o de disco duro. AYUDA dice las órdenes; EDITAR es
+el editor; TECLADO pone el teclado español. Para instalarlo en el disco
+duro: PARTIR CREAR y FORMATEA C: /S (borra lo que haya en el disco).

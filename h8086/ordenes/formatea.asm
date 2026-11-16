@@ -8,7 +8,8 @@
 ;  crea PARTIR). Opciones:
 ;       /S           copia además el sistema: el disco queda de arranque
 ;       /V:etiqueta  le pone ese nombre al disco (hasta 11 letras)
-;       /F:medida    360, 720, 1200 o 1440 (K). Sin decirla, un disquete que
+;       /F:medida    360, 720, 1200 o 1440 (K), o las del PC original: 160,
+;                    180 o 320. Sin decirla, un disquete que
 ;                    ya tiene formato conserva su medida; uno nuevo recibe la
 ;                    mayor de la unidad
 ;       /R           formato rápido: no se graban ni se repasan las pistas
@@ -48,32 +49,24 @@ T_SPF       equ 7                   ; db: sectores de cada FAT
 T_MEDIO     equ 8                   ; db: el octeto que dice qué disco es
 T_TOT       equ 9                   ; dw: sectores
 T_HUECO     equ 11                  ; db: el hueco entre sectores, al grabar
-T_TAM       equ 12
+T_CARAS     equ 12                  ; db
+T_TAM       equ 13
+%macro MEDIDA 10                    ; K, pistas, spp, spc, raíz, spf, medio, sectores, hueco, caras
+        dw %1
+        db %2, %3, %4
+        dw %5
+        db %6, %7
+        dw %8
+        db %9, %10
+%endmacro
 medidas:
-        dw 360
-        db 40, 9, 2
-        dw 112
-        db 2, 0xFD
-        dw 720
-        db 0x50
-        dw 720
-        db 80, 9, 2
-        dw 112
-        db 3, 0xF9
-        dw 1440
-        db 0x50
-        dw 1200
-        db 80, 15, 1
-        dw 224
-        db 7, 0xF9
-        dw 2400
-        db 0x54
-        dw 1440
-        db 80, 18, 1
-        dw 224
-        db 9, 0xF0
-        dw 2880
-        db 0x6C
+        MEDIDA 360, 40, 9, 2, 112, 2, 0xFD, 720, 0x50, 2
+        MEDIDA 720, 80, 9, 2, 112, 3, 0xF9, 1440, 0x50, 2
+        MEDIDA 1200, 80, 15, 1, 224, 7, 0xF9, 2400, 0x54, 2
+        MEDIDA 1440, 80, 18, 1, 224, 9, 0xF0, 2880, 0x6C, 2
+        MEDIDA 160, 40, 8, 1, 64, 1, 0xFE, 320, 0x50, 1     ; las del PC original:
+        MEDIDA 180, 40, 9, 1, 64, 2, 0xFC, 360, 0x50, 1     ; una cara, u ocho
+        MEDIDA 320, 40, 8, 2, 112, 1, 0xFF, 640, 0x50, 2    ; sectores por pista
         dw 0
 
 inicio:
@@ -177,12 +170,8 @@ inicio:
         je .abiertos
         cmp byte [unidad], 0
         je .abiertos
-        int 0x11                    ; B: solo si hay dos disqueteras
-        test al, 1
-        jz .no_unidad
-        and al, 0xC0
-        jnz .abiertos
-.no_unidad:
+        jmp short .abiertos         ; (B: existe siempre: con una sola
+.no_unidad:                         ; disquetera es la misma, con otro disquete)
         mov si, m_e_unidad
         jmp error
 .abiertos:
@@ -232,6 +221,14 @@ lee_num:
 disquete:
         mov al, [unidad]
         mov [d_bios], al
+        int 0x11                    ; con una sola disquetera, A: y B: son la
+        test al, 1                  ; misma: la 0 de la BIOS
+        jz .una
+        and al, 0xC0
+        jnz .dos
+.una:
+        mov byte [d_bios], 0
+.dos:
         mov si, m_aviso_a
         call confirma
         je .va
@@ -312,7 +309,9 @@ disquete:
         mov al, [bx+T_SPP]
         mov [f_spp], ax
         mov [d_spp], ax
-        mov word [f_caras], 2
+        mov al, [bx+T_CARAS]
+        mov [f_caras], ax
+        mov [d_caras], ax
         mov al, [bx+T_PISTAS]
         mov [f_pistas], al
         call calc_datos
@@ -478,7 +477,8 @@ bajo_nivel:
         jc .inutil
 .sig:
         inc byte [f_cara]
-        cmp byte [f_cara], 2
+        mov al, [f_cara]
+        cmp al, [f_caras]
         jb .cara
         inc byte [f_cil]
         mov al, [f_cil]
@@ -541,8 +541,7 @@ es_pista:
 ; directorio): entonces no sirve el disquete
 marca_mala:
         mov al, [f_cil]
-        xor ah, ah
-        shl ax, 1
+        mul byte [f_caras]
         add al, [f_cara]
         mul word [f_spp]            ; AX = su primer sector
         mov cx, [f_spp]
@@ -952,6 +951,12 @@ fat_sector:
 ; ---- el final: se avisa al núcleo, se copia el sistema y se dice lo que hay ----
 final:
         call avisa_nucleo
+        cmp byte [unidad], 2        ; (con una sola disquetera: el disquete
+        jae .f0                     ; puesto es el de esta unidad)
+        mov ax, 0xE803
+        mov dl, [unidad]
+        int 0x21
+.f0:
         mov si, m_hecho
         call pon_cad
         cmp byte [con_sistema], 0
@@ -1032,7 +1037,7 @@ m_uso       db "FORMATEA - da formato a un disquete o al disco duro", 10
             db "  FORMATEA unidad: [/S] [/V:etiqueta] [/F:medida] [/R] [/A]", 10
             db "  /S           copia además el sistema: el disco queda de arranque", 10
             db "  /V:etiqueta  el nombre del disco, hasta 11 letras", 10
-            db "  /F:medida    360, 720, 1200 o 1440 (un disquete)", 10
+            db "  /F:medida    360, 720, 1200 o 1440 (y 160, 180 o 320), un disquete", 10
             db "  /R           rápido: sin grabar ni repasar las pistas", 10
             db "  /A           automático: no pregunta (para los lotes)", 10
             db "A: y B: son los disquetes; C:, la partición del disco duro (la crea PARTIR).", 10, 0
@@ -1057,7 +1062,7 @@ m_e_unidad  db "No existe esa unidad.", 10, 0
 m_abiertos  db "Hay archivos abiertos en "
 .u          db "A:: no se puede formatear.", 10, 0
 m_sin_sistema db "No se encuentran NUCLEO86.SYS y COMMAND.COM junto a esta orden (/S).", 10, 0
-m_e_medida  db "Esa medida no vale: 360, 720, 1200 o 1440.", 10, 0
+m_e_medida  db "Esa medida no vale: 160, 180, 320, 360, 720, 1200 o 1440.", 10, 0
 m_e_rapido  db "El formato rápido solo vale para un disquete que ya tiene formato.", 10, 0
 m_e_protegido db "El disco está protegido contra escritura.", 10, 0
 m_e_pista0  db 10, "No se puede dar formato al principio del disquete: no sirve, o no", 10

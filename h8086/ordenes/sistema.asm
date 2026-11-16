@@ -74,12 +74,8 @@ inicio:
         je .lee
         cmp byte [unidad], 0
         je .lee
-        int 0x11                    ; B: solo si hay dos disqueteras
-        test al, 1
-        jz .no_unidad
-        and al, 0xC0
-        jnz .lee
-.no_unidad:
+        jmp short .lee              ; (B: existe siempre: con una sola
+.no_unidad:                         ; disquetera es la misma, con otro disquete)
         mov si, m_e_unidad
         jmp error
 .lee:
@@ -97,12 +93,20 @@ inicio:
         int 0x21
 .va:
         ; de un disquete a otro en la misma unidad: hay que cambiarlo
+        cmp byte [unidad], 2
+        jae .destino
         mov al, [t_sis_nucleo]
         sub al, 'A'
         cmp al, [unidad]
-        jne .destino
-        cmp al, 2
-        je .destino
+        je .cambia                  ; del mismo disquete... o de A: a B: con
+        cmp al, 2                   ; una sola disquetera
+        jae .destino
+        int 0x11
+        test al, 1
+        jz .cambia
+        and al, 0xC0
+        jnz .destino
+.cambia:
         cmp byte [sin_preguntar], 0
         jne .destino
         mov si, m_cambia
@@ -114,6 +118,14 @@ inicio:
         je .duro
         mov al, [unidad]            ; un disquete: su primer sector se lee con
         mov [d_bios], al            ; cualquier medida
+        int 0x11                    ; (con una sola disquetera, A: y B: son
+        test al, 1                  ; la misma: la 0 de la BIOS)
+        jz .una
+        and al, 0xC0
+        jnz .dos
+.una:
+        mov byte [d_bios], 0
+.dos:
         mov word [d_spp], 9
         mov word [d_caras], 2
         jmp short .arranque
@@ -234,6 +246,12 @@ inicio:
         jmp error
 .copia:
         call avisa_nucleo
+        cmp byte [unidad], 2
+        jae .c0
+        mov ax, 0xE803              ; (el disquete puesto es el de esta unidad)
+        mov dl, [unidad]
+        int 0x21
+.c0:
         mov al, [unidad]
         add al, 'A'
         call sis_escribe
