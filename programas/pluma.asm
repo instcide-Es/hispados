@@ -9,6 +9,13 @@
 ;  a lo elegido (con Mayús y las flechas o arrastrando el ratón) o, si no hay
 ;  nada elegido, a lo que se escriba a continuación.
 ;
+;  Los menús siguen el orden de siempre en un procesador de textos (Archivo,
+;  Edición, Ver, Insertar, Formato, Herramientas y «?»), con lo que Pluma
+;  sabe hacer hoy; arriba, dos filas de botones: el archivo y la edición, y
+;  el formato. Además de lo de abajo: Reemplazar, Ir a, Repetir, insertar la
+;  fecha o un archivo, los diálogos de Fuentes y Párrafo, cambiar mayúsculas
+;  y minúsculas, contar palabras y pantalla completa.
+;
 ;  Archivo: Nuevo, Abrir, Guardar, Guardar como e Imprimir. Los documentos se
 ;  guardan en .PLU (el texto y, detrás, el formato de cada letra); con la
 ;  extensión .TXT se guarda solo el texto, y cualquier archivo de texto se
@@ -36,7 +43,7 @@ PX          equ 4                   ; dónde empieza la hoja
 MARG        equ 8                   ; su margen a cada lado
 PAPW        equ PAG_AN + 2 * MARG
 TOPM        equ 12                  ; el margen de arriba (y de abajo)
-TB_AL       equ 30                  ; la barra de botones
+TB_AL       equ 58                  ; la barra de botones: dos filas
 STAT_AL     equ 20                  ; la barra de estado
 TX0         equ PX + MARG           ; la x del texto en la ventana
 
@@ -60,6 +67,8 @@ O_COMO      equ 104
 O_IMPRIMIR  equ 105
 O_IMPRIMIRF equ 106
 O_SALIR     equ 107
+O_CERRAR    equ 108
+O_RESUMEN   equ 109
 O_CORTAR    equ 111
 O_COPIAR    equ 112
 O_PEGAR     equ 113
@@ -67,6 +76,8 @@ O_TODO      equ 114
 O_BUSCAR    equ 115
 O_SIGUIENTE equ 116
 O_DESHACER  equ 117
+O_REHACER   equ 118
+O_BORRAR    equ 119
 O_NEG       equ 121
 O_CUR       equ 122
 O_SUB       equ 123
@@ -76,6 +87,14 @@ O_IZQ       equ 141
 O_CEN       equ 142
 O_DER       equ 143
 O_ACERCA    equ 151
+O_REEMPLAZAR equ 161
+O_IRA       equ 162
+O_FECHA     equ 163
+O_INSARCH   equ 164
+O_FUENTES   equ 165
+O_PARRAFO   equ 166
+O_MAYMIN    equ 167
+O_COMPLETA  equ 168
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -124,13 +143,21 @@ hijos:
 plu_menu:
         db "&Archivo", 0
         dw O_NUEVO
-        db "&Nuevo", 0
+        db "&Nuevo                  Ctrl+U", 0
         dw O_ABRIR
-        db "&Abrir...", 0
+        db "&Abrir...               Ctrl+A", 0
+        dw O_CERRAR
+        db "&Cerrar", 0
+        dw 0
+        db 0
         dw O_GUARDAR
-        db "&Guardar               Ctrl+G", 0
+        db "&Guardar                Ctrl+G", 0
         dw O_COMO
-        db "Guardar &como...", 0
+        db "Guardar c&omo...", 0
+        dw 0
+        db 0
+        dw O_RESUMEN
+        db "&Resumen...", 0
         dw 0
         db 0
         dw O_IMPRIMIR
@@ -145,6 +172,8 @@ plu_menu:
         db "&Edición", 0
         dw O_DESHACER
         db "&Deshacer          Ctrl+Z", 0
+        dw O_REHACER
+        db "&Repetir           Ctrl+Y", 0
         dw 0
         db 0
         dw O_CORTAR
@@ -153,18 +182,40 @@ plu_menu:
         db "&Copiar            Ctrl+C", 0
         dw O_PEGAR
         db "&Pegar             Ctrl+V", 0
-        dw 0
-        db 0
+        dw O_BORRAR
+        db "B&orrar              Supr", 0
         dw O_TODO
-        db "&Seleccionar todo  Ctrl+A", 0
+        db "&Seleccionar todo  Ctrl+E", 0
         dw 0
         db 0
         dw O_BUSCAR
         db "&Buscar...         Ctrl+B", 0
         dw O_SIGUIENTE
         db "Buscar si&guiente      F3", 0
+        dw O_REEMPLAZAR
+        db "Reemp&lazar...     Ctrl+L", 0
+        dw O_IRA
+        db "&Ir a...               F5", 0
+        dw 0xFFFF
+        db "&Ver", 0
+        dw O_COMPLETA
+        db "&Pantalla completa", 0
+        dw 0xFFFF
+        db "&Insertar", 0
+        dw O_FECHA
+        db "&Fecha y hora", 0
+        dw O_INSARCH
+        db "&Archivo...", 0
         dw 0xFFFF
         db "&Formato", 0
+        dw O_FUENTES
+        db "&Fuentes...", 0
+        dw O_PARRAFO
+        db "&Párrafo...", 0
+        dw O_MAYMIN
+        db "Cambiar &mayús/minús", 0
+        dw 0
+        db 0
         dw O_NEG
         db "&Negrita           Ctrl+N", 0
         dw O_CUR
@@ -172,34 +223,64 @@ plu_menu:
         dw O_SUB
         db "&Subrayado         Ctrl+S", 0
         dw O_GRANDE
-        db "Letra &grande      Ctrl+L", 0
+        db "Letra &grande      Ctrl+W", 0
         dw 0
         db 0
-        dw O_COLOR
-        db "Color n&egro", 0
-        dw O_COLOR + 1
-        db "Color &rojo", 0
-        dw O_COLOR + 2
-        db "Color &azul", 0
-        dw O_COLOR + 3
-        db "Color &verde", 0
-        dw 0xFFFF
-        db "&Párrafo", 0
         dw O_IZQ
         db "A la &izquierda    Ctrl+Q", 0
         dw O_CEN
-        db "&Centrado          Ctrl+T", 0
+        db "C&entrado          Ctrl+T", 0
         dw O_DER
         db "A la &derecha      Ctrl+D", 0
         dw 0xFFFF
-        db "A&yuda", 0
+        db "&Herramientas", 0
+        dw O_RESUMEN
+        db "&Contar palabras...", 0
+        dw 0xFFFF
+        db "&?", 0
         dw O_ACERCA
         db "&Acerca de Pluma...", 0
         dw 0xFFFF
         db 0
 
-; ---- los botones de la barra: x, ancho, texto, orden ----
+; ---- diálogo: las fuentes ----
+dlg_fue:
+        PLANTILLA HV_c_dialogo, t_d_fue, E_DIALOGO, 0, 0, 320, 268, 0
+        PLANTILLA HV_c_boton, t_f_neg, E_HIJA | E_TABULA | BS_CASILLA, 20, 14, 200, 20, 20
+        PLANTILLA HV_c_boton, t_f_cur, E_HIJA | E_TABULA | BS_CASILLA, 20, 38, 200, 20, 21
+        PLANTILLA HV_c_boton, t_f_sub, E_HIJA | E_TABULA | BS_CASILLA, 20, 62, 200, 20, 22
+        PLANTILLA HV_c_boton, t_f_gra, E_HIJA | E_TABULA | BS_CASILLA, 20, 86, 280, 20, 23
+        PLANTILLA HV_c_estatico, t_f_color, E_HIJA, 20, 118, 100, 18, 100
+        PLANTILLA HV_c_boton, t_f_c0, E_HIJA | E_TABULA | BS_OPCION, 20, 140, 120, 20, 30
+        PLANTILLA HV_c_boton, t_f_c1, E_HIJA | E_TABULA | BS_OPCION, 160, 140, 120, 20, 31
+        PLANTILLA HV_c_boton, t_f_c2, E_HIJA | E_TABULA | BS_OPCION, 20, 164, 120, 20, 32
+        PLANTILLA HV_c_boton, t_f_c3, E_HIJA | E_TABULA | BS_OPCION, 160, 164, 120, 20, 33
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 60, 204, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 160, 204, 90, 26, ID_CANCELAR
+        dd 0
+; ---- diálogo: el párrafo ----
+dlg_par:
+        PLANTILLA HV_c_dialogo, t_d_par, E_DIALOGO, 0, 0, 280, 184, 0
+        PLANTILLA HV_c_boton, t_p_izq, E_HIJA | E_TABULA | BS_OPCION, 20, 14, 220, 20, 40
+        PLANTILLA HV_c_boton, t_p_cen, E_HIJA | E_TABULA | BS_OPCION, 20, 38, 220, 20, 41
+        PLANTILLA HV_c_boton, t_p_der, E_HIJA | E_TABULA | BS_OPCION, 20, 62, 220, 20, 42
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 40, 104, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 140, 104, 90, 26, ID_CANCELAR
+        dd 0
+
+; ---- los botones de la barra: x, ancho, texto, orden. Dos filas: arriba, el
+;      archivo y la edición; abajo, el formato ----
             align 4
+botones1    dd 6, 56, t_b_nuevo, O_NUEVO
+            dd 64, 56, t_b_abrir, O_ABRIR
+            dd 122, 68, t_b_guardar, O_GUARDAR
+            dd 198, 76, t_b_imprimir, O_IMPRIMIR
+            dd 282, 60, t_b_cortar, O_CORTAR
+            dd 344, 60, t_b_copiar, O_COPIAR
+            dd 406, 56, t_b_pegar, O_PEGAR
+            dd 470, 76, t_b_deshacer, O_DESHACER
+            dd 548, 68, t_b_rehacer, O_REHACER
+            dd 0, 0, 0, 0
 botones     dd 6, 24, t_b_n, O_NEG
             dd 32, 24, t_b_k, O_CUR
             dd 58, 24, t_b_s, O_SUB
@@ -247,6 +328,44 @@ t_impreso   db "El documento se ha enviado a la impresora.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
             db "Compruebe que la impresora (la del puerto paralelo, LPT1)", 10
             db "está encendida, en línea y con papel.", 0
+t_b_nuevo   db "Nuevo", 0
+t_b_abrir   db "Abrir", 0
+t_b_guardar db "Guardar", 0
+t_b_imprimir db "Imprimir", 0
+t_b_cortar  db "Cortar", 0
+t_b_copiar  db "Copiar", 0
+t_b_pegar   db "Pegar", 0
+t_b_deshacer db "Deshacer", 0
+t_b_rehacer db "Rehacer", 0
+t_aceptar   db "Aceptar", 0
+t_cancelar  db "Cancelar", 0
+t_d_fue     db "Fuentes", 0
+t_f_neg     db "Negrita", 0
+t_f_cur     db "Cursiva", 0
+t_f_sub     db "Subrayado", 0
+t_f_gra     db "Letra grande (el doble)", 0
+t_f_color   db "Color:", 0
+t_f_c0      db "Negro", 0
+t_f_c1      db "Rojo", 0
+t_f_c2      db "Azul", 0
+t_f_c3      db "Verde", 0
+t_d_par     db "Párrafo", 0
+t_p_izq     db "A la izquierda", 0
+t_p_cen     db "Centrado", 0
+t_p_der     db "A la derecha", 0
+t_reemplazar db "Reemplazar", 0
+t_q_por     db "Reemplazar por:", 0
+t_ira       db "Ir a", 0
+t_q_ira     db "Número de línea:", 0
+t_insertar  db "Insertar un archivo de texto", 0
+t_cambios_n db " cambios.", 0
+t_un_cambio db "1 cambio.", 0
+t_elija     db "Antes hay que elegir el texto (con Mayús y las flechas, o arrastrando el ratón).", 0
+t_r_letras  db "Letras:    ", 0
+t_r_palabras db 10, "Palabras:  ", 0
+t_r_lineas  db 10, "Líneas:    ", 0
+t_r_parrafos db 10, "Párrafos:  ", 0
+t_resumen   db "Resumen del documento", 0
 t_acerca_tit db "Acerca de Pluma", 0
 t_acerca    db "Pluma", 10
             db "El procesador de textos de Hispa Ventanas:", 10
@@ -261,6 +380,10 @@ entrada:
         cld
         mov [param], edi
         mov esi, hijos
+        call hvl_clases
+        mov esi, dlg_fue
+        call hvl_clases
+        mov esi, dlg_par
         call hvl_clases
         call doc_vacio
         call pon_titulo
@@ -573,6 +696,30 @@ orden_haz:
         je buscar_sig
         cmp ecx, O_DESHACER
         je deshacer
+        cmp ecx, O_REHACER
+        je rehacer
+        cmp ecx, O_CERRAR
+        je nuevo
+        cmp ecx, O_RESUMEN
+        je resumen
+        cmp ecx, O_BORRAR
+        je borrar_orden
+        cmp ecx, O_REEMPLAZAR
+        je reemplazar
+        cmp ecx, O_IRA
+        je ir_a
+        cmp ecx, O_FECHA
+        je ins_fecha
+        cmp ecx, O_INSARCH
+        je ins_archivo
+        cmp ecx, O_FUENTES
+        je fuentes
+        cmp ecx, O_PARRAFO
+        je parrafo
+        cmp ecx, O_MAYMIN
+        je may_min
+        cmp ecx, O_COMPLETA
+        je completa
         mov al, A_NEG
         cmp ecx, O_NEG
         je formato
@@ -975,6 +1122,11 @@ tecla:
         je .supr
         cmp ecx, TC_TAB
         je .tab
+        cmp ecx, TC_F1 + 4          ; F5
+        jne .f3
+        mov ecx, O_IRA
+        jmp orden
+.f3:
         cmp ecx, TC_F1 + 2          ; F3
         jne hecho
         mov ecx, O_SIGUIENTE
@@ -1083,9 +1235,11 @@ tecla:
         call cambio
         jmp hecho
 ; las órdenes de Ctrl+letra (de la A a la Z; 0: ninguna)
-ctrl_ord    db 0, O_TODO, O_BUSCAR, O_COPIAR, O_DER, 0, 0, O_GUARDAR, 0, 0, 0
-            db O_CUR, O_GRANDE, 0, O_NEG, 0, O_IMPRIMIR, O_IZQ, 0, O_SUB, O_CEN
-            db 0, O_PEGAR, 0, O_CORTAR, 0, O_DESHACER
+; (Ctrl+H, Ctrl+I y Ctrl+M no valen de atajo: para el teclado son Retroceso,
+; Tab e Intro)
+ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, 0, 0
+            db O_CUR, O_REEMPLAZAR, 0, O_NEG, 0, O_IMPRIMIR, O_IZQ, 0, O_SUB, O_CEN
+            db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 
 letra:
         cmp ecx, 32
@@ -1250,6 +1404,9 @@ raton:
         jmp hecho
 .barra:
         movsx eax, dx
+        mov esi, botones1           ; la fila de arriba o la de abajo
+        cmp ebx, 30
+        jl .b
         mov esi, botones
 .b:
         cmp dword [esi+8], 0
@@ -1417,6 +1574,7 @@ inst_tecleo:
         ret
 instantanea:
         pushad
+        mov byte [des_hecho], 0
         mov byte [tecleando], 0
         mov ecx, [n]
         mov [des_n], ecx
@@ -1434,6 +1592,14 @@ instantanea:
 .x:
         ret
 deshacer:
+        cmp byte [des_hecho], 0     ; (deshacer dos veces no rehace: para eso
+        jne des_cambia.x            ; está Repetir)
+        mov byte [des_hecho], 2
+rehacer:
+        dec byte [des_hecho]        ; (Repetir solo vale detrás de Deshacer)
+        cmp byte [des_hecho], 0
+        jl .no
+des_cambia:
         cmp byte [des_hay], 0
         je .x
         pushad
@@ -1464,6 +1630,573 @@ deshacer:
         popad
         call cambio
 .x:
+        ret
+rehacer.no:
+        mov byte [des_hecho], 0
+        ret
+
+; ---- Borrar: lo elegido, o la letra del cursor ----
+borrar_orden:
+        call elegido
+        jne .b
+        inc ebx
+.b:
+        call inst_tecleo
+        call borra
+        jmp cambio
+
+; inserta el texto de ESI (ECX letras; los saltos de línea, 10) donde el
+; cursor, en lugar de lo elegido y con el formato de ahora
+inserta_texto:
+        pushad
+        test ecx, ecx
+        jz .x
+        call instantanea
+        call elegido
+        je .h
+        call borra
+.h:
+        mov eax, [n]                ; lo que quepa
+        add eax, ecx
+        sub eax, MAX_TXT
+        jbe .cabe
+        sub ecx, eax
+        jbe .x
+.cabe:
+        call hueco
+        jc .x
+        mov eax, [cur]
+        call alin_de
+        mov dh, al                  ; (la marca de un párrafo nuevo: su
+        mov al, [at_act]            ; alineación y el tamaño de ahora)
+        and al, A_GRA
+        or dh, al
+        mov edi, [cur]
+.c:
+        lodsb
+        mov dl, [at_act]
+        cmp al, 10
+        jne .c1
+        mov dl, dh
+        jmp short .c2
+.c1:
+        cmp al, 32
+        jae .c2
+        mov al, ' '
+.c2:
+        mov [txt+edi], al
+        mov [atr+edi], dl
+        inc edi
+        dec ecx
+        jnz .c
+        mov [cur], edi
+        call cambio
+.x:
+        popad
+        ret
+
+; ---- Insertar > Fecha y hora: «16/11/2026 12:30» ----
+ins_fecha:
+        mov eax, 0x2A00
+        mov bl, 0x21
+        call bios
+        mov edi, linea
+        movzx eax, byte [rl+RL_EDX]
+        call .dos
+        mov al, '/'
+        stosb
+        movzx eax, byte [rl+RL_EDX+1]
+        call .dos
+        mov al, '/'
+        stosb
+        movzx eax, word [rl+RL_ECX]
+        call hvl_num
+        mov al, ' '
+        stosb
+        push edi
+        mov eax, 0x2C00
+        mov bl, 0x21
+        call bios
+        pop edi
+        movzx eax, byte [rl+RL_ECX+1]
+        call .dos
+        mov al, ':'
+        stosb
+        movzx eax, byte [rl+RL_ECX]
+        call .dos
+        mov ecx, edi
+        sub ecx, linea
+        mov esi, linea
+        jmp inserta_texto
+.dos:
+        cmp eax, 10
+        jae .d1
+        mov byte [edi], '0'
+        inc edi
+.d1:
+        jmp hvl_num
+
+; ---- Insertar > Archivo: un archivo de texto, donde el cursor ----
+ins_archivo:
+        mov byte [nom_tmp], 0
+        mov ebp, [ven]
+        mov ebx, nom_tmp
+        mov edi, t_insertar
+        HV dlg_archivo
+        test eax, eax
+        jz .x
+        mov esi, nom_tmp
+        mov edi, fbuf
+        mov ecx, FBUF_TAM
+        call hvl_leer
+        test eax, eax
+        jz .x
+        mov ecx, eax                ; sin los retornos, y hasta el fin de archivo
+        mov esi, fbuf
+        mov edi, fbuf
+.c:
+        lodsb
+        cmp al, 26
+        je .f
+        cmp al, 13
+        je .s
+        stosb
+.s:
+        dec ecx
+        jnz .c
+.f:
+        mov ecx, edi
+        sub ecx, fbuf
+        mov esi, fbuf
+        call inserta_texto
+.x:
+        ret
+
+; ---- Edición > Reemplazar: todas las veces que aparece ----
+reemplazar:
+        mov ebp, [ven]
+        mov esi, t_q_buscar
+        mov edi, t_reemplazar
+        mov ebx, busca_txt
+        mov ecx, 40
+        HV dlg_pedir
+        test eax, eax
+        jz .x
+        cmp byte [busca_txt], 0
+        je .x
+        mov ebp, [ven]
+        mov esi, t_q_por
+        mov edi, t_reemplazar
+        mov ebx, reemp_txt
+        mov ecx, 40
+        HV dlg_pedir
+        test eax, eax
+        jz .x
+        pushad
+        call instantanea
+        mov dword [anc], -1
+        xor edx, edx                ; el largo de lo que se busca
+.l1:
+        cmp byte [busca_txt+edx], 0
+        je .l2
+        inc edx
+        jmp .l1
+.l2:
+        xor ebp, ebp                ; y el de lo que se pone
+.l3:
+        cmp byte [reemp_txt+ebp], 0
+        je .l4
+        inc ebp
+        jmp .l3
+.l4:
+        mov dword [n_cambios], 0
+        xor edi, edi                ; por dónde se va
+.b:
+        mov eax, [n]
+        dec eax                     ; (la marca del final no cuenta)
+        sub eax, edi
+        cmp eax, edx
+        jl .fin
+        xor ebx, ebx                ; ¿está aquí?
+.c:
+        cmp ebx, edx
+        jae .esta
+        mov al, [txt+edi+ebx]
+        mov ah, [busca_txt+ebx]
+        call buscar_sig.may
+        xchg al, ah
+        call buscar_sig.may
+        cmp al, ah
+        jne .sig
+        inc ebx
+        jmp .c
+.sig:
+        inc edi
+        jmp .b
+.esta:
+        push edx
+        push ebp
+        push edi
+        mov cl, [atr+edi]           ; con el formato de lo que había
+        push ecx
+        mov eax, edi
+        lea ebx, [edi+edx]
+        call borra                  ; (deja el cursor en EAX)
+        pop ecx
+        mov [at_act], cl
+        mov ecx, [esp+4]            ; EBP: lo que se pone
+        test ecx, ecx
+        jz .puesto
+        call hueco
+        jc .puesto
+        mov edi, [cur]
+        xor ebx, ebx
+.p:
+        mov al, [reemp_txt+ebx]
+        mov [txt+edi+ebx], al
+        mov al, [at_act]
+        mov [atr+edi+ebx], al
+        inc ebx
+        cmp ebx, ecx
+        jb .p
+.puesto:
+        pop edi
+        pop ebp
+        pop edx
+        add edi, ebp
+        inc dword [n_cambios]
+        jmp .b
+.fin:
+        popad
+        call cambio
+        mov edi, linea              ; cuántos
+        mov eax, [n_cambios]
+        mov esi, t_un_cambio
+        cmp eax, 1
+        je .m
+        call hvl_num
+        mov esi, t_cambios_n
+        call hvl_cad
+        mov byte [edi], 0
+        mov esi, linea
+.m:
+        call aviso
+.x:
+        ret
+
+; ---- Edición > Ir a: el cursor, al principio de una línea ----
+ir_a:
+        mov byte [num_txt], 0
+        mov ebp, [ven]
+        mov esi, t_q_ira
+        mov edi, t_ira
+        mov ebx, num_txt
+        mov ecx, 8
+        HV dlg_pedir
+        test eax, eax
+        jz .x
+        mov esi, num_txt
+        call hvl_lee_num
+        test eax, eax
+        jz .x
+        cmp eax, [nl]
+        jbe .l
+        mov eax, [nl]
+.l:
+        mov eax, [lin_ini+eax*4-4]
+        mov [cur], eax
+        mov dword [anc], -1
+        call tras_mover
+        mov eax, [c_x]
+        mov [col_x], eax
+.x:
+        ret
+
+; ---- Formato > Cambiar mayús/minús: lo elegido, a mayúsculas; si ya lo
+;      está, a minúsculas ----
+may_min:
+        call elegido
+        jne .hay
+        mov esi, t_elija
+        jmp aviso
+.hay:
+        call instantanea
+        mov esi, eax                ; ¿hay alguna minúscula?
+        xor edx, edx
+.m:
+        cmp esi, ebx
+        jae .cambia
+        mov cl, [txt+esi]
+        inc esi
+        cmp cl, 0xA4                ; ñ
+        je .si
+        cmp cl, 'a'
+        jb .m
+        cmp cl, 'z'
+        ja .m
+.si:
+        inc edx
+.cambia:
+        mov esi, eax
+.c:
+        cmp esi, ebx
+        jae cambio
+        mov cl, [txt+esi]
+        test edx, edx
+        jz .min
+        cmp cl, 0xA4
+        je .inc
+        cmp cl, 'a'
+        jb .s
+        cmp cl, 'z'
+        ja .s
+        sub cl, 32
+        jmp short .pon
+.min:
+        cmp cl, 0xA5                ; Ñ
+        je .dec
+        cmp cl, 'A'
+        jb .s
+        cmp cl, 'Z'
+        ja .s
+        add cl, 32
+        jmp short .pon
+.inc:
+        inc cl
+        jmp short .pon
+.dec:
+        dec cl
+.pon:
+        mov [txt+esi], cl
+.s:
+        inc esi
+        jmp .c
+
+; ---- Archivo > Resumen y Herramientas > Contar palabras ----
+resumen:
+        pushad
+        xor ebx, ebx                ; letras
+        xor ecx, ecx                ; palabras
+        xor edx, edx                ; párrafos
+        xor esi, esi
+        xor ebp, ebp                ; 1: dentro de una palabra
+.b:
+        cmp esi, [n]
+        jae .f
+        mov al, [txt+esi]
+        inc esi
+        cmp al, 10
+        jne .l
+        inc edx
+        xor ebp, ebp
+        jmp .b
+.l:
+        inc ebx
+        cmp al, ' '
+        jne .p
+        xor ebp, ebp
+        jmp .b
+.p:
+        test ebp, ebp
+        jnz .b
+        inc ebp
+        inc ecx
+        jmp .b
+.f:
+        mov edi, fbuf
+        mov esi, t_r_letras
+        call hvl_cad
+        mov eax, ebx
+        call hvl_num
+        mov esi, t_r_palabras
+        call hvl_cad
+        mov eax, ecx
+        call hvl_num
+        mov esi, t_r_lineas
+        call hvl_cad
+        mov eax, [nl]
+        call hvl_num
+        mov esi, t_r_parrafos
+        call hvl_cad
+        mov eax, edx
+        call hvl_num
+        mov byte [edi], 0
+        mov ebp, [ven]
+        mov esi, fbuf
+        mov edi, t_resumen
+        mov eax, DM_ACEPTAR
+        HV dlg_mensaje
+        popad
+        ret
+
+; ---- Ver > Pantalla completa: la ventana, a toda la pantalla (y de vuelta) ----
+completa:
+        xor byte [completa_si], 1
+        mov eax, 3
+        cmp byte [completa_si], 0
+        jne .m
+        mov eax, 4
+.m:
+        mov ebp, [ven]
+        HV ven_mostrar
+        ret
+
+; ---- Formato > Fuentes: todo el formato de la letra, de una vez ----
+fuentes:
+        mov ebp, [ven]
+        mov esi, dlg_fue
+        mov edi, dlg_fue + P_TAM
+        mov ebx, fue_gancho
+        xor edx, edx
+        HV dlg_modal
+        cmp eax, ID_ACEPTAR
+        jne .x
+        mov dl, [dl_atr]            ; a lo elegido, o a lo que se escriba
+        mov [at_act], dl
+        call elegido
+        je inval
+        call instantanea
+.b:
+        cmp eax, ebx
+        jae cambio
+        cmp byte [txt+eax], 10
+        jne .l
+        and byte [atr+eax], ~A_GRA  ; (a una marca de párrafo, solo el tamaño)
+        mov cl, dl
+        and cl, A_GRA
+        or [atr+eax], cl
+        jmp short .s
+.l:
+        mov [atr+eax], dl
+.s:
+        inc eax
+        jmp .b
+.x:
+        ret
+; el gancho del diálogo: al empezar, las casillas como el formato de ahora;
+; al aceptar, el formato como las casillas
+fue_gancho:
+        cmp eax, DM_INICIO
+        je .ini
+        cmp eax, WM_COMMAND
+        jne .no
+        cmp ecx, ID_ACEPTAR
+        jne .no
+        xor bl, bl
+        mov ecx, 20
+        mov bh, A_NEG
+.g:
+        call marca_lee
+        jz .g1
+        or bl, bh
+.g1:
+        shl bh, 1
+        inc ecx
+        cmp ecx, 24
+        jb .g
+        mov ecx, 30                 ; el color: la opción marcada
+        xor bh, bh
+.gc:
+        call marca_lee
+        jz .gc1
+        or bl, bh
+.gc1:
+        add bh, 0x10
+        inc ecx
+        cmp ecx, 34
+        jb .gc
+        mov [dl_atr], bl
+        jmp short .no
+.ini:
+        mov bl, [at_act]
+        mov ecx, 20
+        mov bh, A_NEG
+.i:
+        xor edx, edx
+        test bl, bh
+        jz .i1
+        inc edx
+.i1:
+        call marca_pon
+        shl bh, 1
+        inc ecx
+        cmp ecx, 24
+        jb .i
+        movzx ecx, bl               ; el color (los que no están en el diálogo,
+        shr ecx, 4                  ; el negro)
+        and ecx, 7
+        cmp ecx, 3
+        jbe .i2
+        xor ecx, ecx
+.i2:
+        add ecx, 30
+        mov edx, 1
+        call marca_pon
+.no:
+        xor eax, eax
+        ret
+; (internas) la marca del control ECX del diálogo EBP: leerla (ZF=1 si no está
+; puesta) y ponerla (EDX). Conservan los registros
+marca_lee:
+        pushad
+        HV ven_hija_id
+        mov ebp, eax
+        mov eax, BM_MARCA
+        HV msg_enviar
+        test eax, eax
+        popad
+        ret
+marca_pon:
+        pushad
+        HV ven_hija_id
+        mov ebp, eax
+        mov eax, BM_PONER_MARCA
+        mov ecx, edx
+        HV msg_enviar
+        popad
+        ret
+
+; ---- Formato > Párrafo: la alineación ----
+parrafo:
+        mov ebp, [ven]
+        mov esi, dlg_par
+        mov edi, dlg_par + P_TAM
+        mov ebx, par_gancho
+        xor edx, edx
+        HV dlg_modal
+        cmp eax, ID_ACEPTAR
+        jne .x
+        movzx eax, byte [dl_atr]
+        jmp alinea
+.x:
+        ret
+par_gancho:
+        cmp eax, DM_INICIO
+        je .ini
+        cmp eax, WM_COMMAND
+        jne .no
+        cmp ecx, ID_ACEPTAR
+        jne .no
+        xor bl, bl
+        mov ecx, 40
+.g:
+        call marca_lee
+        jz .g1
+        mov [dl_atr], bl
+.g1:
+        inc bl
+        inc ecx
+        cmp ecx, 43
+        jb .g
+        jmp short .no
+.ini:
+        mov eax, [cur]
+        call alin_de
+        lea ecx, [eax+40]
+        mov edx, 1
+        call marca_pon
+.no:
+        xor eax, eax
         ret
 
 ; ---- Seleccionar todo ----
@@ -2313,11 +3046,12 @@ pinta_botones:
         mov eax, [cur]              ; la alineación del párrafo del cursor
         call alin_de
         mov [al_act], eax
-        mov edi, botones
+        mov dword [bt_y], 4
+        mov edi, botones1
 .b:
         mov esi, [edi+8]
         test esi, esi
-        jz .x
+        jz .fila
         call .activo                ; EBP=1 si está puesto
         mov eax, [edi+12]
         sub eax, O_COLOR
@@ -2327,7 +3061,7 @@ pinta_botones:
         movzx eax, byte [colores+eax]
         HV dc_color
         mov eax, [edi]
-        mov ebx, 4
+        mov ebx, [bt_y]
         mov ecx, [edi+4]
         mov edx, 22
         HV dc_rect
@@ -2349,7 +3083,7 @@ pinta_botones:
         COLOR C_PETROLEO
 .c1:
         mov eax, [edi]
-        mov ebx, 4
+        mov ebx, [bt_y]
         mov ecx, [edi+4]
         mov edx, 22
         HV dc_rect
@@ -2371,7 +3105,8 @@ pinta_botones:
         sub eax, ecx
         sar eax, 1
         add eax, [edi]
-        mov ebx, 7
+        mov ebx, [bt_y]
+        add ebx, 3
         cmp dword [edi+12], O_NEG   ; la N, en negrita
         jne .t
         NEGRITA 1
@@ -2386,6 +3121,12 @@ pinta_botones:
         HV dc_rect
 .sig:
         add edi, 16
+        jmp .b
+.fila:
+        cmp dword [bt_y], 4         ; y la fila de abajo
+        jne .x
+        mov dword [bt_y], 32
+        mov edi, botones
         jmp .b
 .x:
         popad
@@ -2696,7 +3437,9 @@ sel_b       resd 1
 pl_y        resd 1
 g_an        resd 1
 al_act      resd 1
+bt_y        resd 1
 clip_len    resd 1
+n_cambios   resd 1
 des_n       resd 1
 des_cur     resd 1
 at_act      resb 1                  ; el formato de lo que se escriba
@@ -2709,6 +3452,9 @@ g_color     resb 1
 imp_fmt     resb 1
 imp_atr     resb 1
 des_hay     resb 1                  ; hay algo que deshacer
+des_hecho   resb 1                  ; 1: lo último fue deshacer (se puede repetir)
+completa_si resb 1
+dl_atr      resb 1
 tecleando   resb 1                  ; en una tanda de teclas seguidas
             alignb 4
 rl          resb RL_TAM
@@ -2716,6 +3462,8 @@ titulo      resb 100
 nombre      resb 96
 nom_tmp     resb 96
 busca_txt   resb 44
+reemp_txt   resb 44
+num_txt     resb 12
 linea       resb 120
             alignb 4
 txt         resb MAX_TXT + 4

@@ -23,38 +23,38 @@ echo "== Pluma: escribir con formato, guardar, copiar y pegar, buscar =="
 prepara $HVP
 { arranca
   shot v0
-  tecla ctrl-l ctrl-t; escribe "Hispa Pluma"; tecla ret ctrl-l ctrl-q
+  tecla ctrl-w ctrl-t; escribe "Hispa Pluma"; tecla ret ctrl-w ctrl-q
   escribe "Esto es una prueba de texto normal que tiene que partirse sola al llegar al final de la linea de la hoja, por palabras."; tecla ret
   tecla ctrl-n; escribe "negrita "; tecla ctrl-n ctrl-k; escribe "cursiva "; tecla ctrl-k ctrl-s
   escribe "subrayado"; tecla ctrl-s; escribe " normal"; tecla ret
   tecla ctrl-d; escribe "A la derecha"; tecla ret ctrl-q
-  clic 437 86; escribe "En rojo"            # el botón del color rojo
+  clic 437 127; escribe "En rojo"            # el botón del color rojo
   aparca; shot e1
   tecla ctrl-g; sleep 1.2; escribe "carta"; tecla ret; sleep 2; shot e2
-  escribe " y mas"; aparca; shot d1; tecla ctrl-z; shot d2; tecla ctrl-z; shot d3; tecla ctrl-z   # deshacer y rehacer
-  tecla ctrl-a ctrl-c ctrl-end ret ctrl-v; sleep 0.5; tecla ctrl-v ctrl-v ctrl-v; sleep 1; aparca; shot e3
+  escribe " y mas"; aparca; shot d1; tecla ctrl-z; shot d2; tecla ctrl-y; shot d3; tecla ctrl-z   # deshacer y rehacer
+  tecla ctrl-e ctrl-c ctrl-end ret ctrl-v; sleep 0.5; tecla ctrl-v ctrl-v ctrl-v; sleep 1; aparca; shot e3
   tecla ctrl-b; sleep 1; escribe "hoja"; tecla ret; sleep 1; shot e4
   sal; } | run 240 -vga std
 
 chk $T/v0.ppm titulo 70 40 activa "Pluma - (sin nombre)"
 chk $T/v0.ppm busca 72 518 400 540 0 6 "Línea 1 de 1, columna 1    0 letras"
 # el párrafo largo, partido por las palabras (tinta sobre blanco)
-chk $T/e1.ppm busca 80 155 90 170 0 9 "Esto es una prueba de texto normal que tiene que partirse sola al"
-chk $T/e1.ppm busca 80 171 90 186 0 9 "llegar al final de la linea de la hoja, por palabras."
-chk $T/e1.ppm busca 280 187 300 202 0 9 "normal"          # detrás de las letras con formato
-chk $T/e1.ppm busca 555 203 570 218 0 9 "A la derecha"    # arrimado a la derecha
-chk $T/e1.ppm busca 80 219 90 234 13 9 "En rojo"
-chk $T/e1.ppm nobusca 80 123 660 150 0 9 "Hispa Pluma"    # (el título no es de letra normal)
-chk $T/e1.ppm rgb 290 150 FFFFFF "blanco a la izquierda del título centrado"
+chk $T/e1.ppm busca 80 183 90 198 0 9 "Esto es una prueba de texto normal que tiene que partirse sola al"
+chk $T/e1.ppm busca 80 199 90 214 0 9 "llegar al final de la linea de la hoja, por palabras."
+chk $T/e1.ppm busca 280 215 300 230 0 9 "normal"          # detrás de las letras con formato
+chk $T/e1.ppm busca 555 231 570 246 0 9 "A la derecha"    # arrimado a la derecha
+chk $T/e1.ppm busca 80 247 90 262 13 9 "En rojo"
+chk $T/e1.ppm nobusca 80 151 660 178 0 9 "Hispa Pluma"    # (el título no es de letra normal)
+chk $T/e1.ppm rgb 290 178 FFFFFF "blanco a la izquierda del título centrado"
 chk $T/e1.ppm busca 72 518 400 540 0 6 "Línea 6 de 6, columna 8    185 letras"
 chk $T/e2.ppm titulo 70 40 activa "Pluma - carta.PLU"
 chk $T/d1.ppm busca 72 518 500 540 0 6 "191 letras"
 chk $T/d2.ppm busca 72 518 500 540 0 6 "185 letras"       # deshecha la tanda entera
-chk $T/d2.ppm nobusca 80 219 400 234 13 9 "En rojo y mas"
-chk $T/d3.ppm busca 80 219 90 234 13 9 "En rojo y mas"    # y rehecha
+chk $T/d2.ppm nobusca 80 247 400 262 13 9 "En rojo y mas"
+chk $T/d3.ppm busca 80 247 90 262 13 9 "En rojo y mas"    # y rehecha
 chk $T/e3.ppm busca 72 518 500 540 0 6 "926 letras"       # 185 + 1 + 4 x 185
-chk $T/e4.ppm busca 72 110 660 140 9 2 "hoja"             # lo encontrado, elegido
-muestra v0 pluma_vacia; muestra e1 pluma_formato; muestra e3 pluma_pegado; muestra e4 pluma_buscar
+chk $T/e4.ppm busca 72 138 660 168 9 2 "hoja"             # lo encontrado, elegido
+muestra m1 pluma_menu; muestra v0 pluma_vacia; muestra e1 pluma_formato; muestra e3 pluma_pegado; muestra e4 pluma_buscar
 mcopy -n -i $T/f.img ::CARTA.PLU $T/carta.plu 2>/dev/null
 if python3 - $T/carta.plu <<'PY'
 import sys,struct
@@ -75,10 +75,10 @@ rm -f $T/prn.txt
 { arranca
   shot a1
   tecla ctrl-p; sleep 4; shot a2; tecla ret; sleep 1
-  clic 112 75; sleep 1; clic 200 205; sleep 4; shot a3; tecla ret; sleep 1   # Archivo > Imprimir con formato
+  clic 112 75; sleep 1; shot m1; clic 200 261; sleep 4; shot a3; tecla ret; sleep 1   # Archivo > Imprimir con formato
   sal; } | PARALELO=file:$T/prn.txt run 150 -vga std
 chk $T/a1.ppm titulo 70 40 activa "Pluma - A:\\CARTA.PLU"
-chk $T/a1.ppm igual 76 118 592 120 $T/e1.ppm 76 118 80     # como antes de guardar (salvo el cursor)
+chk $T/a1.ppm igual 76 146 592 120 $T/e1.ppm 76 146 80     # como antes de guardar (salvo el cursor)
 chk $T/a2.ppm busca 150 250 650 310 0 8 "El documento se ha enviado a la impresora."
 chk $T/a3.ppm busca 150 250 650 310 0 8 "El documento se ha enviado a la impresora."
 if python3 - $T/prn.txt <<'PY'
@@ -103,16 +103,19 @@ mcopy -o -i $T/f.img $T/NOTA.TXT ::NOTA.TXT
 reabre 'A:\NOTA.TXT'
 { arranca
   tecla ctrl-end; shot t1
+  tecla ctrl-l; sleep 1; escribe "linea"; tecla ret; sleep 1; escribe "raya"; tecla ret; sleep 1.5; shot t3; tecla ret; sleep 1   # Reemplazar
+  tecla f5; sleep 1; escribe "2"; tecla ret; sleep 1; escribe "x"; tecla ctrl-end                                              # Ir a la línea 2
   escribe "fin"; tecla ctrl-g; sleep 2.5
   clic 677 53; sleep 1.2; shot t2       # cerrar: guardado, no pregunta
   sal; } | run 120 -vga std
-chk $T/t1.ppm busca 80 123 90 138 0 9 "Primera linea"
-chk $T/t1.ppm busca 80 139 90 154 0 9 "Segunda"
-if [ "$(mtype -i $T/f.img ::NOTA.TXT | od -An -c | tr -s ' \n' ' ')" = "$(printf 'Primera linea\r\nSegunda\r\nfin' | od -An -c | tr -s ' \n' ' ')" ]; then
-  ok "NOTA.TXT: sigue siendo texto llano, con lo añadido"
+chk $T/t1.ppm busca 80 151 90 166 0 9 "Primera linea"
+chk $T/t1.ppm busca 80 167 90 182 0 9 "Segunda"
+if [ "$(mtype -i $T/f.img ::NOTA.TXT | od -An -c | tr -s ' \n' ' ')" = "$(printf 'Primera raya\r\nxSegunda\r\nfin' | od -An -c | tr -s ' \n' ' ')" ]; then
+  ok "NOTA.TXT: texto llano, con lo reemplazado, lo de «Ir a» y lo añadido"
 else
   ko "NOTA.TXT no es lo esperado"; mtype -i $T/f.img ::NOTA.TXT | od -c | head
 fi
+chk $T/t3.ppm busca 150 250 650 320 0 8 "1 cambio."
 chk $T/t2.ppm nobusca 70 40 690 60 9 4 "Pluma"            # la ventana se ha cerrado sin preguntar
 
 rm -rf $T
