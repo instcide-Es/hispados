@@ -28,10 +28,16 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 - Órdenes: AYUDA, VER, EQUIPO, DIR, TIPO, BORRAR, ACTUALIZAR.
 - Prueba automática (`make -C h8086 prueba`): 36 comprobaciones en QEMU.
 
-**Lo que falta por comprobar de esta etapa:** QEMU no emula nada anterior al
-486, así que el camino «es un 8086» de la detección y el comportamiento en un
-procesador de verdad de 16 bits están sin ejecutar. Hay que pasarlo por un
-emulador de XT (86Box, PCem, 8086tiny) y por un XT real.
+**Probado también en un procesador de 16 bits** (16/11/2026): en el emulador
+8086tiny, que implementa un 8086/80186, arranca desde los disquetes de 360 K y
+de 1,44 M, ejecuta el programa de prueba y lista el disco; se reconoce como
+«80186 u 80188» (lo que ese emulador es) y, como debe, no aconseja cambiar de
+sistema. QEMU, que es donde corre la prueba automática, no emula nada anterior
+al 486.
+
+**Lo que falta por comprobar de esta etapa:** un 8086 u 8088 estricto y un V20
+(para la parte fina de la detección) y, sobre todo, un XT real con su
+disquetera.
 
 ## Las decisiones
 
