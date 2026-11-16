@@ -18,7 +18,7 @@ escribe() {
   local t="$1" i c
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
-    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '\') tecla backslash;; *) tecla "$c";; esac
+    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; '\') tecla backslash;; *) tecla "$c";; esac
   done
   tecla ret; sleep 0.8
 }
@@ -47,7 +47,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.4 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.5 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -58,7 +58,7 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.4" "VER: "
+esta p2 "Hispa-8086 versión 0.5" "VER: "
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
 esta p2 "8 archivos, " "DIR: "
@@ -78,14 +78,29 @@ esta p4 "No existe ese archivo." ""
 esta p4 "Orden desconocida. Escriba AYUDA." ""
 esta p4 "Procesador: 80486 o superior" "EQUIPO: "
 
-echo "== Hispa-8086: archivos por lotes =="
-escribe "limpiar"; escribe "lote"; sleep 4; escribe "eco hola eco"; escribe "rem nada"
+echo "== Hispa-8086: archivos por lotes y redirección =="
+escribe "limpiar"; escribe "lote uno dos"; sleep 6
 pantalla pl
-esta pl "Lote: empiezo" "un .BAT: "
-esta pl "Parametros: desde el lote" "que lanza un programa: "
-esta pl "Hispa-8086 versión 0.4" "y una orden de dentro: "
-esta pl "Lote: acabo" "y sigue hasta el final: "
-esta pl "hola eco" "ECO desde el teclado: "
+esta pl "Lote: empiezo LOTE [uno] [dos] [] 100%" "%0, %1, %2 y %%: "
+esta pl "Parametros: desde el lote" "lanza un programa: "
+esta pl "Nivel: 7 o mas" "IF ERRORLEVEL: "
+esta pl "Nivel: menos de 8" "IF NOT ERRORLEVEL: "
+esta pl "Existe leeme" "IF EXIST: "
+esta pl "No existe nohay" "IF NOT EXIST: "
+esta pl "Lote: acabo" "GOTO y hasta el final: "
+noesta pl "NO DEBE SALIR" "lo que no se cumple no se ejecuta: "
+noesta pl "Primera linea" "con «>», a la pantalla no sale: "
+escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escribe "eco tras la pausa"
+escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
+pantalla pr
+esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
+esta pr "Hispa-8086 versión 0.5" "«>>»: y lo añadido detrás: "
+esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
+esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
+noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
+esta pr "tras la pausa" ""
+esta pr "if a==a mostrar t.txt" "(la orden, como se tecleó) "
+if [ "$(grep -c '^tecleado' $T/pr.txt)" = 1 ]; then ok "«>» desde el teclado e IF a==a: el texto solo sale al mostrar el archivo"; else ko "«>» desde el teclado"; fi
 
 echo "== Hispa-8086: memoria, programas .EXE y lanzar otro programa =="
 escribe "limpiar"; escribe "exe"; sleep 4; escribe "equipo"
@@ -177,6 +192,6 @@ if [ $tam -lt 16384 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núc
 tam=$(stat -c %s build/COMMAND.COM)
 if [ $tam -lt 16384 ]; then ok "el intérprete ocupa $tam octetos"; else ko "el intérprete ha crecido a $tam octetos"; fi
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pe p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pr pe p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
 rm -rf $T
 exit $fail

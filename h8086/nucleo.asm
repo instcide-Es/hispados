@@ -228,6 +228,7 @@ f21:
         F21 0x41, f41
         F21 0x42, f42
         F21 0x43, f43
+        F21 0x46, f46
         F21 0x47, f47
         F21 0x48, f48
         F21 0x49, f49
@@ -304,6 +305,9 @@ f0A:
         ret
 ; 0Bh: ¿hay una tecla? -> AL = FFh o 0
 f0B:
+        mov al, 0xFF
+        cmp word [red_ent], 0
+        jne .x
         mov ah, 1
         int 0x16
         mov al, 0
@@ -359,9 +363,30 @@ f35:
 fE8:
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
-        mov bh, 4
+        mov bh, 5
         mov [bp+R_BX], bx
         ret
+; 46h: redirección. El archivo BX pasa a ser la entrada (CX=0) o la salida
+; (CX=1) de la consola, para todos los programas; con BX menor que 5 (la
+; consola), la redirección se quita
+f46:
+        mov si, [bp+R_CX]
+        cmp si, 1
+        ja .mal
+        shl si, 1
+        mov ax, [bp+R_BX]
+        cmp ax, PRIMERO
+        jb .quita
+        call h_ficha
+        jc f_error
+        mov [red_ent+si], bx
+        ret
+.quita:
+        mov word [red_ent+si], 0
+        ret
+.mal:
+        mov ax, E_NUMERO
+        jmp f_error
 ; 4Dh: el código con que terminó el último programa -> AL (AH = 0)
 f4D:
         mov al, [cod_salida]
@@ -372,8 +397,36 @@ f4D:
 ; =============================================================================
 ;  La consola (con la BIOS: funciona con cualquier tarjeta de vídeo)
 ; =============================================================================
-; escribe AL tal cual (lo que mandan los programas). Conserva los registros
+; escribe AL tal cual (lo que mandan los programas). Si la salida está
+; redirigida a un archivo ([red_sal]), va a él. Conserva los registros
 pon_car_dos:
+        cmp word [red_sal], 0
+        je .pantalla
+        push ax
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push es
+        push cs
+        pop es
+        mov [red_car], al
+        mov [es_seg], cs
+        mov word [es_off], red_car
+        mov byte [es_op], 1
+        mov bx, [red_sal]
+        mov cx, 1
+        call h_es
+        pop es
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+.pantalla:
         push ax
         push bx
         push bp
@@ -474,8 +527,42 @@ pon_num32_ancho:
         pop bx
         pop ax
         ret
-; espera una tecla -> AL (las que no son letra, como las flechas: 0)
+; espera una tecla -> AL (las que no son letra, como las flechas: 0). Si la
+; entrada está redirigida ([red_ent]), es el octeto siguiente del archivo;
+; cuando se acaba, vuelve el teclado
 tecla:
+        cmp word [red_ent], 0
+        je .teclado
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push es
+        push cs
+        pop es
+        mov [es_seg], cs
+        mov word [es_off], red_car
+        mov byte [es_op], 0
+        mov bx, [red_ent]
+        mov cx, 1
+        call h_es
+        pop es
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        jc .fin
+        test ax, ax
+        jz .fin
+        mov al, [red_car]
+        cmp al, 10                  ; (de «retorno y salto», solo el retorno)
+        je tecla
+        ret
+.fin:
+        mov word [red_ent], 0
+.teclado:
         xor ah, ah
         int 0x16
         ret
@@ -595,7 +682,7 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.4 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.5 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 
@@ -616,8 +703,11 @@ fat_sucia   resb 1
 abiertos    resb 1                  ; cuántos archivos hay abiertos
 es_op       resb 1                  ; h_es: 0 leer, 1 escribir
 bus_atr     resb 1
+red_car     resb 1
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
+red_ent     resw 1                  ; la ficha del archivo que hace de entrada (0: el teclado)
+red_sal     resw 1                  ; (detrás de red_ent) y de salida (0: la pantalla)
 mem_seg     resw 1                  ; la primera cabecera de la memoria que se reparte
 psp_act     resw 1                  ; el programa que corre (0: el intérprete)
 lz_ent      resw 1                  ; lanza: el entorno pedido

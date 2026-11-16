@@ -1200,6 +1200,14 @@ h_corta:
 ; cierra el archivo de la ficha BX: pone al día su entrada del directorio y
 ; lo manda todo al disco. CF=1, AX=error
 h_cierra:
+        cmp bx, [red_sal]           ; (si era la salida o la entrada de la
+        jne .r1                     ; consola, deja de serlo)
+        mov word [red_sal], 0
+.r1:
+        cmp bx, [red_ent]
+        jne .r2
+        mov word [red_ent], 0
+.r2:
         cmp byte [bx+H_SUCIO], 0
         je .libre
         mov ax, [bx+H_DSEC]

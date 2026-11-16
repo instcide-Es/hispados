@@ -14,14 +14,22 @@
 ;       BORRAR (DEL)        RENOMBRAR (REN)     CD
 ;       CREARDIR (MD)       BORRARDIR (RD)      LIMPIAR (CLS)
 ;       ACTUALIZAR          ECO (ECHO)          REM         PAUSA (PAUSE)
+;       IF                  GOTO
 ;  Cualquier otra palabra es un programa (NOMBRE.COM o NOMBRE.EXE) o un
 ;  archivo por lotes (NOMBRE.BAT), del directorio de trabajo o de la raíz.
 ;
 ;  Un archivo por lotes es un texto con una orden por línea. Se carga entero
 ;  en un bloque de memoria y se va ejecutando; «@» delante de una línea hace
 ;  que no se enseñe, y ECO OFF, que no se enseñe ninguna. Al arrancar el
-;  sistema se ejecuta \AUTOEXEC.BAT, si existe. (Todavía sin parámetros %1,
-;  IF ni GOTO, y un lote que llama a otro no vuelve.)
+;  sistema se ejecuta \AUTOEXEC.BAT, si existe. Dentro de un lote, %0 es su
+;  nombre y %1 a %9 lo que se escribió detrás; IF [NOT] EXIST archivo,
+;  IF [NOT] ERRORLEVEL n e IF [NOT] a==b ejecutan lo que sigue si se cumple;
+;  GOTO etiqueta salta a la línea «:etiqueta». (Un lote que llama a otro no
+;  vuelve.)
+;
+;  Redirección, al final de cualquier orden: «> archivo» manda a él lo que
+;  iría a la pantalla, «>> archivo» lo añade, y «< archivo» hace que se lea de
+;  él lo que se teclearía.
 ; =============================================================================
         cpu 8086
         bits 16
@@ -129,7 +137,7 @@ bucle:
         call pon_nl
         mov si, lin_buf + 2
 .ejec:
-        call ejecuta_linea
+        call ejecuta_red
         jmp bucle
 
 ; «A:\CARTAS>»
@@ -157,11 +165,147 @@ trae_dir:
         pop ax
         ret
 
+; ---- ejecuta la línea de SI, con su redirección ----
+; «> archivo», «>> archivo» y «< archivo», al final de la orden: se abren los
+; archivos, se le dice al núcleo (46h), se ejecuta lo de delante y se deshace
+ejecuta_red:
+        push si
+        mov word [r_sal], 0
+        mov word [r_ent], 0
+.b:
+        mov al, [si]
+        test al, al
+        jz .va
+        cmp al, '>'
+        je .sal
+        cmp al, '<'
+        je .ent
+        inc si
+        jmp .b
+.sal:
+        mov byte [si], 0            ; la orden acaba aquí
+        inc si
+        xor bp, bp                  ; BP=1: añadir
+        cmp byte [si], '>'
+        jne .s1
+        inc bp
+        inc si
+.s1:
+        mov di, arg2
+        call toma_red
+        test bp, bp
+        jz .crea
+        mov dx, arg2                ; añadir: abrirlo e ir al final...
+        mov al, 2
+        DOS 0x3D
+        jc .crea                    ; ...o crearlo, si no existe
+        mov bx, ax
+        xor cx, cx
+        xor dx, dx
+        mov al, 2
+        DOS 0x42
+        mov ax, bx
+        jmp short .s2
+.crea:
+        mov dx, arg2
+        xor cx, cx
+        DOS 0x3C
+        jc .mal
+.s2:
+        mov [r_sal], ax
+        jmp .b
+.ent:
+        mov byte [si], 0
+        inc si
+        mov di, arg2
+        call toma_red
+        mov dx, arg2
+        mov al, 0
+        DOS 0x3D
+        jc .mal
+        mov [r_ent], ax
+        jmp .b
+.mal:
+        call pon_error
+        pop si
+        jmp short .deshace
+.va:
+        mov bx, [r_ent]
+        test bx, bx
+        jz .v1
+        xor cx, cx
+        DOS 0x46
+.v1:
+        mov bx, [r_sal]
+        test bx, bx
+        jz .v2
+        mov cx, 1
+        DOS 0x46
+.v2:
+        pop si
+        call ejecuta_linea
+.deshace:
+        push cs
+        pop ds
+        push cs
+        pop es
+        mov bx, [r_sal]
+        test bx, bx
+        jz .d1
+        push bx
+        mov bx, 2                   ; la salida, otra vez a la pantalla
+        mov cx, 1
+        DOS 0x46
+        pop bx
+        DOS 0x3E
+        mov word [r_sal], 0
+.d1:
+        mov bx, [r_ent]
+        test bx, bx
+        jz .d2
+        push bx
+        mov bx, 2
+        xor cx, cx
+        DOS 0x46
+        pop bx
+        DOS 0x3E
+        mov word [r_ent], 0
+.d2:
+        ret
+; (interna) el nombre de archivo de SI -> DI; SI queda en lo que lo acaba
+toma_red:
+        push ax
+        push bx
+        call salta_esp
+        xor bx, bx
+.c:
+        mov al, [si]
+        cmp al, ' '
+        jbe .f
+        cmp al, '>'
+        je .f
+        cmp al, '<'
+        je .f
+        cmp bx, RUTA_MAX - 1
+        jae .f
+        mov [di+bx], al
+        inc bx
+        inc si
+        jmp .c
+.f:
+        mov byte [di+bx], 0
+        pop bx
+        pop ax
+        ret
+
 ; ---- ejecuta la línea de SI ----
 ejecuta_linea:
         call salta_esp
         cmp byte [si], 0
+        je .nada
+        cmp byte [si], ':'          ; (una etiqueta de un lote)
         jne .hay
+.nada:
         ret
 .hay:
         mov di, orden               ; la primera palabra, en mayúsculas y hasta
@@ -238,6 +382,7 @@ ordenes     dw t_ayuda, o_ayuda, t_help, o_ayuda
             dw t_eco, o_eco, t_echo, o_eco
             dw t_rem, o_rem
             dw t_pausa, o_pausa, t_pause, o_pausa
+            dw t_if, o_if, t_goto, o_goto
             dw 0
 ; (las órdenes se miran a ocho letras: RENOMBRAR es RENOMBRA)
 t_ayuda     db "AYUDA", 0
@@ -268,6 +413,8 @@ t_echo      db "ECHO", 0
 t_rem       db "REM", 0
 t_pausa     db "PAUSA", 0
 t_pause     db "PAUSE", 0
+t_if        db "IF", 0
+t_goto      db "GOTO", 0
 
 ; SI salta los espacios
 salta_esp:
@@ -819,6 +966,192 @@ o_eco:
         jmp pon_nl
 o_rem:
         ret
+
+; ---- IF [NOT] EXIST archivo orden / IF [NOT] ERRORLEVEL n orden /
+;      IF [NOT] a==b orden ----
+o_if:
+        xor bp, bp                  ; BP=1: al revés (NOT)
+        mov di, t_not
+        call palabra
+        jne .c
+        inc bp
+.c:
+        mov di, t_exist
+        call palabra
+        je .existe
+        mov di, t_errorlevel
+        call palabra
+        je .nivel
+        ; a==b: se comparan letra a letra
+        call salta_esp
+        mov di, si
+.i1:
+        mov al, [si]
+        cmp al, ' '
+        jbe .mal
+        cmp al, '='
+        je .i2
+        inc si
+        jmp .i1
+.i2:
+        cmp byte [si+1], '='
+        jne .mal
+        mov cx, si
+        sub cx, di                  ; el largo de «a»
+        add si, 2
+        mov bx, 1                   ; BX=1: son iguales
+.i3:
+        jcxz .i4
+        mov al, [si]
+        cmp al, [di]
+        jne .i5
+        inc si
+        inc di
+        dec cx
+        jmp .i3
+.i4:
+        cmp byte [si], ' '          ; (y «b» no sigue)
+        jbe .hecho
+.i5:
+        xor bx, bx
+.i6:
+        cmp byte [si], ' '          ; hasta el final de «b»
+        jbe .hecho
+        inc si
+        jmp .i6
+.existe:
+        mov di, arg1
+        call toma_arg
+        jz .mal
+        push si
+        mov dx, arg1
+        mov cx, 0x10
+        DOS 0x4E
+        pop si
+        mov bx, 1
+        jnc .hecho
+        xor bx, bx
+        jmp short .hecho
+.nivel:
+        call salta_esp
+        xor dx, dx
+.n1:
+        mov al, [si]
+        sub al, '0'
+        cmp al, 9
+        ja .n2
+        mov ah, 10
+        xchg ax, dx
+        mul ah
+        xchg ax, dx
+        add dl, al
+        inc si
+        jmp .n1
+.n2:
+        DOS 0x4D                    ; el código del último programa: ¿es ese o más?
+        mov bx, 1
+        cmp al, dl
+        jae .hecho
+        xor bx, bx
+.hecho:
+        xor bx, bp
+        jz .x
+        jmp ejecuta_linea           ; se cumple: lo que queda de la línea
+.mal:
+        mov si, m_e_if
+        jmp pon_cad
+.x:
+        ret
+; (interna) ¿empieza SI (tras los espacios) por la palabra de DI, sin mirar
+; mayúsculas? ZF=1 y SI detrás, si es así
+palabra:
+        push ax
+        push bx
+        call salta_esp
+        mov bx, si
+.c:
+        mov ah, [di]
+        test ah, ah
+        jz .fin
+        mov al, [si]
+        call mayus
+        cmp al, ah
+        jne .no
+        inc si
+        inc di
+        jmp .c
+.fin:
+        cmp byte [si], ' '          ; (palabra entera)
+        ja .no
+        cmp al, al
+        jmp short .x
+.no:
+        mov si, bx
+        or bx, bx                   ; ZF=0 (BX nunca es 0 aquí)
+.x:
+        pop bx
+        pop ax
+        ret
+
+; ---- GOTO etiqueta: sigue por la línea «:etiqueta» del lote ----
+o_goto:
+        cmp word [lote_seg], 0
+        je .x
+        mov di, arg1
+        call toma_arg
+        jz .x
+        mov bx, arg1
+        cmp byte [bx], ':'
+        jne .b0
+        inc bx
+.b0:
+        push es
+        mov es, [lote_seg]
+        xor si, si
+.lin:
+        cmp si, [lote_fin]
+        jae .no
+        cmp byte [es:si], ':'
+        jne .sig
+        inc si
+        mov di, bx                  ; ¿es esta?
+.c:
+        mov ah, [di]
+        test ah, ah
+        jz .fin_et
+        mov al, [es:si]
+        call mayus
+        xchg al, ah
+        call mayus
+        cmp al, ah
+        jne .sig
+        inc si
+        inc di
+        jmp .c
+.fin_et:
+        cmp si, [lote_fin]
+        jae .esta
+        cmp byte [es:si], ' '
+        ja .sig
+.esta:
+        mov [lote_pos], si          ; (lo que queda de su línea no hace nada)
+        pop es
+        ret
+.sig:
+        cmp si, [lote_fin]          ; a la línea siguiente
+        jae .no
+        mov al, [es:si]
+        inc si
+        cmp al, 10
+        jne .sig
+        jmp .lin
+.no:
+        pop es
+        mov si, m_e_goto
+        call pon_cad
+        call lote_cierra
+.x:
+        ret
 o_pausa:
         mov si, m_pausa
         call pon_cad
@@ -881,7 +1214,14 @@ ejecuta:
         push bx
         call lote_abre
         pop bx
-        jnc .x
+        jc .otro
+        mov si, orden               ; %0 y lo de detrás, para %1 a %9
+        mov di, lote_nom
+        call copia_txt
+        mov si, [resto]
+        mov di, lote_args
+        call copia_txt
+        ret
 .otro:
         add bx, 4
         jmp .i
@@ -980,11 +1320,62 @@ lote_linea:
         je .c
         cmp al, 10
         je .hecha
+        cmp al, '%'
+        je .pct
+.pon:
         cmp cx, LIN_MAX
         jae .c
         mov [di], al
         inc di
         inc cx
+        jmp .c
+.pct:
+        cmp si, [lote_fin]          ; «%%» es un «%»; «%n», el parámetro n
+        jae .pon
+        mov ah, [es:si]
+        cmp ah, '%'
+        jne .p1
+        inc si
+        jmp .pon
+.p1:
+        sub ah, '0'
+        cmp ah, 9
+        ja .pon
+        inc si
+        push si
+        mov si, lote_nom
+        test ah, ah
+        jz .p4
+        mov si, lote_args           ; el parámetro: la palabra número AH
+.p2:
+        cmp byte [si], ' '
+        jne .p3
+        inc si
+        jmp .p2
+.p3:
+        dec ah
+        jz .p4
+.p3b:
+        cmp byte [si], ' '          ; saltar esta palabra
+        jbe .p2c
+        inc si
+        jmp .p3b
+.p2c:
+        cmp byte [si], 0
+        jne .p2
+.p4:
+        mov al, [si]                ; copiarla
+        cmp al, ' '
+        jbe .p5
+        cmp cx, LIN_MAX
+        jae .p5
+        mov [di], al
+        inc di
+        inc cx
+        inc si
+        jmp .p4
+.p5:
+        pop si
         jmp .c
 .eof:
         mov si, [lote_fin]
@@ -1171,7 +1562,7 @@ c_486       db "80486 o superior", 0
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
 m_indicador db 10, "A:\", 0
-m_ver       db "Hispa-8086 versión 0.4", 10, 0
+m_ver       db "Hispa-8086 versión 0.5", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):", 10
             db "  AYUDA                     esta lista", 10
             db "  VER                       la versión del sistema", 10
@@ -1215,6 +1606,12 @@ m_e_falta_nombre db "Falta el nombre.", 10, 0
 m_e_copiar  db "Se escribe así: COPIAR origen destino", 10, 0
 m_e_renombrar db "Se escribe así: RENOMBRAR viejo nuevo", 10, 0
 m_pausa     db "Pulse una tecla para seguir...", 0
+m_e_if      db "Se escribe así: IF [NOT] EXIST archivo orden, IF [NOT] ERRORLEVEL n orden", 10
+            db "o IF [NOT] a==b orden", 10, 0
+m_e_goto    db "El lote no tiene esa etiqueta.", 10, 0
+t_not       db "NOT", 0
+t_exist     db "EXIST", 0
+t_errorlevel db "ERRORLEVEL", 0
 m_cpu       db "Procesador: ", 0
 m_mem       db 10, "Memoria:    ", 0
 m_mem2      db " K (", 0
@@ -1246,9 +1643,13 @@ borr_tam    resw 1
 lote_seg    resw 1                  ; el archivo por lotes (0: no hay)
 lote_pos    resw 1
 lote_fin    resw 1
+r_sal       resw 1                  ; los archivos de la redirección
+r_ent       resw 1
 bloque      resw 7                  ; para lanzar un programa (4Bh)
 orden       resb 10
 cola        resb 130
+lote_nom    resb 10                 ; %0
+lote_args   resb 130                ; %1 a %9
 dta_int     resb 44                 ; lo que encuentran las búsquedas
 dir_txt     resb 68
 arg1        resb RUTA_MAX + 16

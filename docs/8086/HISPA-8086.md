@@ -16,7 +16,7 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 
 ## Dónde estamos
 
-**Etapas 0 a 3 hechas** (`h8086/`, noviembre de 2026). Versión 0.4.
+**Etapas 0 a 3 hechas** (`h8086/`, noviembre de 2026). Versión 0.5.
 
 - **Arranque**: sector de arranque FAT12 y núcleo (6,8 K en el disco). En
   memoria, el núcleo con sus variables, la copia de la FAT y la pila son unos
@@ -51,9 +51,11 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
   ocupa. Las órdenes llevan los mismos nombres que en el resto de la familia
   (el español y el clásico): AYUDA, VER, EQUIPO, DIR, MOSTRAR, COPIAR, BORRAR
   (con comodines), RENOMBRAR, CD, CREARDIR, BORRARDIR, LIMPIAR, ACTUALIZAR.
-- **Archivos por lotes** (.BAT) con ECO, REM y PAUSA, y **AUTOEXEC.BAT** al
-  arrancar. Todavía sin parámetros (%1), IF, GOTO ni redirección.
-- **Prueba automática** (`make -C h8086 prueba`): 69 comprobaciones en QEMU.
+- **Archivos por lotes** (.BAT) con ECO, REM, PAUSA, los parámetros %0 a %9,
+  IF [NOT] EXIST / ERRORLEVEL / a==b y GOTO, y **AUTOEXEC.BAT** al arrancar.
+- **Redirección**: `orden > archivo`, `>> archivo` y `< archivo` (INT 21h/46h:
+  un archivo hace de pantalla o de teclado para todos los programas).
+- **Prueba automática** (`make -C h8086 prueba`): 81 comprobaciones en QEMU.
   Un .EXE hecho a mano (`prueba/exe.asm`) comprueba la reubicación, la
   memoria y el lanzamiento de otro programa; otro (`prueba/arch.asm`) ejerce
   la interfaz de archivos en doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
@@ -250,7 +252,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 0 | Cimientos: arranque, núcleo mínimo, detección del equipo, .COM | **hecha** |
 | 1 | Archivos por INT 21h (abrir, leer, escribir, crear, borrar, buscar), subdirectorios, FAT12 de escritura | **hecha** |
 | 2 | Memoria por bloques (48h-4Ah), programas .EXE, lanzar programas (4Bh), entorno | **hecha** |
-| 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha** (faltan %1, IF, GOTO y la redirección) |
+| 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha**, con %1, IF, GOTO y redirección (faltan las tuberías «\|», FOR y CALL) |
 | 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | |
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | |
 | 6 | Modo 286: HMA y memoria extendida | |

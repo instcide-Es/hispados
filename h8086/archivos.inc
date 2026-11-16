@@ -308,6 +308,12 @@ f3F:
         mov byte [es_op], 0
         jmp short es_comun
 .consola:
+        cmp word [red_ent], 0       ; redirigida: del archivo
+        je .teclado
+        mov bx, [red_ent]
+        mov byte [es_op], 0
+        jmp short es_comun
+.teclado:
         ; de la consola se lee una línea, que acaba en retorno y salto
         mov di, linea
         mov cx, LIN_MAX
