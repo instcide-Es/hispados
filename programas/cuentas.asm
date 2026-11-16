@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  CUENTAS.HVP - Cuentas, la hoja de cálculo sencilla de Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Una hoja de cálculo sencilla: una rejilla de 26 columnas (A-Z) por 100 filas
 ;  (1-100), con encabezados de columna y de fila. La celda activa se resalta y
@@ -12,18 +12,30 @@
 ;
 ;  Tipos de celda:
 ;    - texto:   lo que no es número ni empieza por «=»; se ve a la izquierda.
-;    - número:  se ve a la derecha, tal y como se tecleó (coma o punto decimal).
+;    - número:  se ve a la derecha (se teclea con coma o con punto decimal).
 ;    - fórmula: empieza por «=»; evalúa una expresión con + - * / y paréntesis,
-;               referencias a celdas (A1, B7...) y la función de rango
-;               =SUMA(A1:A10). Los números son de coma fija (64 bits, cuatro
-;               decimales). Errores: «#ERROR» (sintaxis, división por cero,
-;               desbordamiento), «#CIRC» (referencia circular) y «#REF»
+;               referencias a celdas (A1, B7...), «%» (=A1*21%) y las
+;               funciones SUMA, PROMEDIO, MAX, MIN y CONTAR (de uno o
+;               varios rangos: =SUMA(A1:A10;C3)), REDONDEAR(x;decimales) y
+;               ABS(x). Errores: «#ERROR» (sintaxis, división por
+;               cero, desbordamiento), «#CIRC» (referencia circular) y «#REF»
 ;               (referencia fuera de la hoja). El recálculo es a la vista: cada
 ;               celda se evalúa al pintarse, resolviendo las que necesita.
 ;
+;  Las cuentas. Los números son de coma fija: enteros de 64 bits que cuentan
+;  cienmillonésimas (ocho decimales), sin coma flotante, así que 0,1 + 0,2 es
+;  0,3 exacto. Cada multiplicación y cada división se hace con 128 bits y se
+;  redondea a la cienmillonésima más cercana (la mitad, alejándose de cero);
+;  la suma y la resta son exactas. En la celda se ven hasta CUATRO decimales,
+;  redondeados y sin ceros de más (1/3 se ve 0,3333, y 1/3*3 se ve 1); si el
+;  número no cabe en la celda se le quitan decimales y, si ni así cabe, salen
+;  almohadillas (########): nunca se enseña un número cortado. Lo que no cabe
+;  en 64 bits (más de unos 92.000 millones) da «#ERROR».
+;
 ;  Archivo: formato CSV de texto (una fila por línea, celdas separadas por «;»,
 ;  fin de línea CR+LF como en DOS), guardando el contenido EN CRUDO (las
-;  fórmulas con su «=...»). Extensión .CSV. Archivo: Nuevo, Abrir, Guardar y
+;  fórmulas con su «=...»). La celda que lleva «;» o comillas va entre comillas
+;  (y las suyas, dobles), como en cualquier CSV. Extensión .CSV. Archivo: Nuevo, Abrir, Guardar y
 ;  Guardar como. Edición: Borrar celda, Cortar, Copiar y Pegar (una celda).
 ;  Pregunta antes de perder cambios.
 ;
@@ -39,17 +51,13 @@ NCOL        equ 26                  ; columnas A-Z
 NFIL        equ 100                 ; filas 1-100
 CEL_MAX     equ 32                  ; octetos por celda (texto crudo, con el 0)
 NCEL        equ NCOL * NFIL
-; ---- coma fija de las fórmulas ----
-CU_ESC      equ 10000               ; cuatro decimales
-CU_DEC      equ 4
-DEPTH_MAX   equ 48                  ; tope de anidamiento al evaluar
 ; ---- medidas en puntos ----
 BARRA       equ 22                  ; alto de la barra de referencia (arriba)
 ROT_AN      equ 36                  ; ancho de la columna de rótulos de fila
 ROT_AL      equ 18                  ; alto de la fila de rótulos de columna
-CEL_AN      equ 72                  ; ancho de una celda
+CEL_AN      equ 88                  ; ancho de una celda
 CEL_AL      equ 18                  ; alto de una celda
-CEL_CARS    equ 8                   ; caracteres que caben en una celda
+CEL_CARS    equ 10                  ; caracteres que caben en una celda
 GY0         equ BARRA + ROT_AL      ; y de la primera fila de celdas
 ; ---- órdenes del menú ----
 O_NUEVO     equ 101
@@ -102,7 +110,7 @@ HVP_CODIGO
 c_cuentas   dd cue_proc
             db C_CREMA, 0, 0, 0
 cue_plant:
-        PLANTILLA c_cuentas, titulo, E_NORMAL, 80, 50, 560, 400, 0
+        PLANTILLA c_cuentas, titulo, E_NORMAL, 80, 50, 572, 400, 0
 
 ; ---- la barra de menús ----
 cue_menu:
@@ -145,7 +153,6 @@ t_sin_nombre db "(sin nombre)", 0
 t_ext_csv   db ".CSV", 0
 t_abrir     db "Abrir", 0
 t_guardar_como db "Guardar como", 0
-t_suma      db "SUMA", 0
 t_err_err   db "#ERROR", 0
 t_err_circ  db "#CIRC", 0
 t_err_ref   db "#REF", 0
@@ -632,6 +639,7 @@ mueve_rel:
         ret
 
 invalida:
+        call calc_olvida            ; (algo ha cambiado: a calcular otra vez)
         push ebp
         mov ebp, [ven]
         test ebp, ebp
@@ -806,6 +814,7 @@ copia_cad:
 ;  Pintar
 ; =============================================================================
 pintar:
+        call calc_olvida            ; cada vez que se pinta se calcula de nuevo
         mov ebp, [ven]
         HV dc_pintar                ; borra el fondo con C_CREMA
         call calc_medidas
@@ -1286,19 +1295,6 @@ cel_puntero:
         pop eax
         ret
 
-; -> EDI = puntero al octeto de estado. Conserva los demás registros.
-cel_estado_ptr:
-        push eax
-        push edx
-        mov eax, edx
-        imul eax, NCOL
-        add eax, ecx
-        add eax, cel_estado
-        mov edi, eax
-        pop edx
-        pop eax
-        ret
-
 ; =============================================================================
 ;  Cómo se muestra una celda (col=ECX, fil=EDX) -> disp[], disp_der
 ; =============================================================================
@@ -1318,6 +1314,9 @@ celda_mostrar:
         call cad_a_num              ; ESI -> EDX:EAX, CF=1 si no es número
         jc .texto
         mov byte [disp_der], 1
+        mov edi, disp
+        call num_fmt
+        jmp .fin
 .texto:
         mov ecx, [cm_col]
         mov edx, [cm_fil]
@@ -1326,16 +1325,17 @@ celda_mostrar:
         call copia_disp
         jmp .fin
 .formula:
-        mov byte [ev_err], 0
-        mov dword [ev_depth], 0
         mov ecx, [cm_col]
         mov edx, [cm_fil]
-        call celda_valor            ; ECX=col EDX=fil
+        mov [pila_ant], esp         ; el cálculo, con su propia pila: una
+        mov esp, pila_calc + PILA_CALC      ; fórmula pide otras, y la de la
+        mov dword [ev_pila_min], pila_calc + 2048   ; tarea es pequeña
+        call calc_celda             ; ECX=col EDX=fil
+        mov esp, [pila_ant]
         cmp byte [ev_err], 0
         jne .ferr
         mov edi, disp
-        call num_a_cad
-        mov byte [edi], 0
+        call num_fmt
         mov byte [disp_der], 1
         jmp .fin
 .ferr:
@@ -1382,960 +1382,11 @@ err_texto:
         ret
 
 ; =============================================================================
-;  Valor de una celda (col=ECX, fil=EDX) -> EDX:EAX coma fija; ev_err
+;  El cálculo (valor de las celdas, fórmulas, números): programas/cuentas/
+;  calculo.inc. Se prueba aparte, contra un modelo exacto, con
+;  tests/tools/cuentas_calc.py.
 ; =============================================================================
-celda_valor:
-        test ecx, ecx
-        js .cero
-        cmp ecx, NCOL
-        jae .referr
-        test edx, edx
-        js .cero
-        cmp edx, NFIL
-        jae .referr
-        call cel_estado_ptr         ; EDI = estado
-        cmp byte [edi], 0
-        jne .circ
-        call cel_puntero            ; ESI = texto
-        mov al, [esi]
-        test al, al
-        jz .cero
-        cmp al, '='
-        je .formula
-        call cad_a_num              ; literal
-        jnc .ret
-        jmp .cero
-.formula:
-        inc dword [ev_depth]
-        cmp dword [ev_depth], DEPTH_MAX
-        ja .deep
-        mov byte [edi], 1           ; marca «visitando»
-        push edi
-        push dword [ev_ptr]
-        lea eax, [esi+1]
-        mov [ev_ptr], eax
-        call eval_expr
-        call salta_esp
-        mov esi, [ev_ptr]
-        cmp byte [esi], 0
-        je .ftrail
-        cmp byte [ev_err], 0
-        jne .ftrail
-        mov byte [ev_err], 1        ; sobra texto tras la fórmula
-.ftrail:
-        pop dword [ev_ptr]
-        pop edi
-        mov byte [edi], 0
-        dec dword [ev_depth]
-        ret
-.deep:
-        dec dword [ev_depth]
-        mov byte [ev_err], 1
-        jmp .cero
-.circ:
-        mov byte [ev_err], 2
-        jmp .cero
-.referr:
-        mov byte [ev_err], 3
-.cero:
-        xor eax, eax
-        xor edx, edx
-.ret:
-        ret
-
-; =============================================================================
-;  Evaluador de expresiones. Puntero en [ev_ptr], error en [ev_err],
-;  valor en EDX:EAX. Las rutinas pueden tocar todos los registros.
-; =============================================================================
-salta_esp:
-        push esi
-        mov esi, [ev_ptr]
-.l:
-        cmp byte [esi], ' '
-        jne .x
-        inc esi
-        jmp .l
-.x:
-        mov [ev_ptr], esi
-        pop esi
-        ret
-
-eval_expr:
-        call eval_term
-        cmp byte [ev_err], 0
-        jne .x
-.l:
-        call salta_esp
-        mov esi, [ev_ptr]
-        mov al, [esi]
-        cmp al, '+'
-        je .mas
-        cmp al, '-'
-        je .menos
-        ret
-.mas:
-        inc dword [ev_ptr]
-        push edx
-        push eax
-        call eval_term
-        cmp byte [ev_err], 0
-        jne .perr
-        pop ebx
-        pop ecx
-        add eax, ebx
-        adc edx, ecx
-        jmp .l
-.menos:
-        inc dword [ev_ptr]
-        push edx
-        push eax
-        call eval_term
-        cmp byte [ev_err], 0
-        jne .perr
-        pop ebx                     ; valor izquierdo (bajo)
-        pop ecx                     ; valor izquierdo (alto)
-        sub ebx, eax
-        sbb ecx, edx
-        mov eax, ebx
-        mov edx, ecx
-        jmp .l
-.perr:
-        add esp, 8
-.x:
-        ret
-
-eval_term:
-        call eval_factor
-        cmp byte [ev_err], 0
-        jne .x
-.l:
-        call salta_esp
-        mov esi, [ev_ptr]
-        mov al, [esi]
-        cmp al, '*'
-        je .por
-        cmp al, '/'
-        je .entre
-        ret
-.por:
-        inc dword [ev_ptr]
-        push edx
-        push eax
-        call eval_factor
-        cmp byte [ev_err], 0
-        jne .perr
-        pop ebx
-        pop ecx                     ; izquierdo en ECX:EBX, derecho en EDX:EAX
-        call mul_fijo               ; EDX:EAX * ECX:EBX / ESC
-        jc .over
-        jmp .l
-.entre:
-        inc dword [ev_ptr]
-        push edx
-        push eax
-        call eval_factor
-        cmp byte [ev_err], 0
-        jne .perr
-        pop ebx
-        pop ecx                     ; izquierdo (dividendo) en ECX:EBX
-        mov esi, eax                ; ¿divisor 0?
-        or esi, edx
-        jz .divz
-        xchg eax, ebx
-        xchg edx, ecx               ; EDX:EAX=dividendo, ECX:EBX=divisor
-        call div_fijo
-        jc .over
-        jmp .l
-.divz:
-        mov byte [ev_err], 1
-        ret
-.over:
-        mov byte [ev_err], 1
-        ret
-.perr:
-        add esp, 8
-.x:
-        ret
-
-eval_factor:
-        call salta_esp
-        mov esi, [ev_ptr]
-        mov al, [esi]
-        cmp al, '-'
-        je .neg
-        cmp al, '+'
-        je .pos
-        jmp eval_primary
-.pos:
-        inc dword [ev_ptr]
-        jmp eval_factor
-.neg:
-        inc dword [ev_ptr]
-        call eval_factor
-        cmp byte [ev_err], 0
-        jne .x
-        neg edx
-        neg eax
-        sbb edx, 0
-.x:
-        ret
-
-eval_primary:
-        call salta_esp
-        mov esi, [ev_ptr]
-        mov al, [esi]
-        cmp al, '('
-        je .paren
-        cmp al, '0'
-        jb .nd
-        cmp al, '9'
-        jbe .num
-.nd:
-        cmp al, '.'
-        je .num
-        cmp al, ','
-        je .num
-        cmp al, 'a'
-        jb .nl
-        cmp al, 'z'
-        jbe .letra
-.nl:
-        cmp al, 'A'
-        jb .bad
-        cmp al, 'Z'
-        ja .bad
-.letra:
-        jmp parse_ident
-.num:
-        jmp num_parse
-.paren:
-        inc dword [ev_ptr]
-        call eval_expr
-        cmp byte [ev_err], 0
-        jne .x
-        call salta_esp
-        mov esi, [ev_ptr]
-        cmp byte [esi], ')'
-        jne .bad
-        inc dword [ev_ptr]
-.x:
-        ret
-.bad:
-        mov byte [ev_err], 1
-        xor eax, eax
-        xor edx, edx
-        ret
-
-; lee un número (sin signo) de [ev_ptr] -> EDX:EAX coma fija
-num_parse:
-        mov esi, [ev_ptr]
-        xor eax, eax
-        xor edx, edx
-        mov [cu_acc], eax
-        mov [cu_acc+4], edx
-        xor ecx, ecx                ; decimales
-        mov byte [cu_dot], 0
-        mov byte [cu_any], 0
-.l:
-        mov bl, [esi]
-        cmp bl, '0'
-        jb .nd
-        cmp bl, '9'
-        ja .nd
-        mov byte [cu_any], 1
-        mov eax, [cu_acc]
-        mov edx, [cu_acc+4]
-        push ebx
-        push ecx
-        mov ebx, 10
-        call mul64_32
-        pop ecx
-        pop ebx
-        movzx edi, bl
-        sub edi, '0'
-        add eax, edi
-        adc edx, 0
-        mov [cu_acc], eax
-        mov [cu_acc+4], edx
-        cmp byte [cu_dot], 0
-        je .dn
-        inc ecx
-.dn:
-        inc esi
-        jmp .l
-.nd:
-        cmp bl, '.'
-        je .dot
-        cmp bl, ','
-        je .dot
-        jmp .fin
-.dot:
-        cmp byte [cu_dot], 0
-        jne .fin
-        mov byte [cu_dot], 1
-        inc esi
-        jmp .l
-.fin:
-        mov [ev_ptr], esi
-        cmp byte [cu_any], 0
-        je .bad
-        mov eax, [cu_acc]
-        mov edx, [cu_acc+4]
-        cmp ecx, CU_DEC
-        ja .trunc
-        mov ebx, CU_DEC
-        sub ebx, ecx
-        mov esi, 1
-.mf:
-        test ebx, ebx
-        jz .mfd
-        imul esi, 10
-        dec ebx
-        jmp .mf
-.mfd:
-        mov ebx, esi
-        call mul64_32
-        ret
-.trunc:
-        mov ebx, ecx
-        sub ebx, CU_DEC
-        mov esi, 1
-.df:
-        test ebx, ebx
-        jz .dfd
-        imul esi, 10
-        dec ebx
-        jmp .df
-.dfd:
-        mov ebx, esi
-        call div64_32
-        ret
-.bad:
-        mov byte [ev_err], 1
-        xor eax, eax
-        xor edx, edx
-        ret
-
-; un identificador: «SUMA» (función) o una referencia de una letra
-parse_ident:
-        mov esi, [ev_ptr]
-        mov edi, cu_ident
-        xor ecx, ecx
-.l:
-        mov al, [esi]
-        cmp al, 'a'
-        jb .u
-        cmp al, 'z'
-        ja .u
-        sub al, 0x20
-.u:
-        cmp al, 'A'
-        jb .done
-        cmp al, 'Z'
-        ja .done
-        cmp ecx, 7
-        jae .skip
-        mov [edi], al
-        inc edi
-        inc ecx
-.skip:
-        inc esi
-        jmp .l
-.done:
-        mov byte [edi], 0
-        mov [ev_ptr], esi
-        mov esi, cu_ident
-        mov edi, t_suma
-        call cad_igual
-        jnc parse_suma
-        cmp ecx, 1
-        jne .bad
-        movzx eax, byte [cu_ident]
-        sub eax, 'A'                ; columna
-        push eax
-        call lee_fila               ; EAX = fila (0-base), CF=1 si no vale
-        mov edx, eax
-        pop ecx
-        jc .bad
-        call celda_valor
-        ret
-.bad:
-        mov byte [ev_err], 3
-        xor eax, eax
-        xor edx, edx
-        ret
-
-; lee un número de fila de [ev_ptr] -> EAX = fila-1; CF=1 si no vale (1..NFIL)
-lee_fila:
-        mov esi, [ev_ptr]
-        xor eax, eax
-        xor ecx, ecx
-.l:
-        movzx ebx, byte [esi]
-        cmp bl, '0'
-        jb .f
-        cmp bl, '9'
-        ja .f
-        imul eax, 10
-        sub bl, '0'
-        movzx ebx, bl
-        add eax, ebx
-        inc esi
-        inc ecx
-        cmp eax, 100000
-        jb .l
-        mov [ev_ptr], esi
-        stc
-        ret
-.f:
-        mov [ev_ptr], esi
-        test ecx, ecx
-        jz .bad
-        test eax, eax
-        jz .bad
-        cmp eax, NFIL
-        ja .bad
-        dec eax
-        clc
-        ret
-.bad:
-        stc
-        ret
-
-; lee una referencia (letra + fila) de [ev_ptr] -> EAX=col EBX=fil; CF=1 si no
-lee_ref:
-        call salta_esp
-        mov esi, [ev_ptr]
-        mov al, [esi]
-        cmp al, 'a'
-        jb .u
-        cmp al, 'z'
-        ja .u
-        sub al, 0x20
-.u:
-        cmp al, 'A'
-        jb .bad
-        cmp al, 'Z'
-        ja .bad
-        sub al, 'A'
-        movzx eax, al
-        inc dword [ev_ptr]
-        push eax
-        call lee_fila
-        jc .bad2
-        mov ebx, eax
-        pop eax
-        clc
-        ret
-.bad2:
-        add esp, 4
-.bad:
-        stc
-        ret
-
-; =SUMA(ref:ref): suma del rango
-parse_suma:
-        call salta_esp
-        mov esi, [ev_ptr]
-        cmp byte [esi], '('
-        jne .bad
-        inc dword [ev_ptr]
-        call lee_ref
-        jc .bad
-        mov [sum_c1], eax
-        mov [sum_f1], ebx
-        call salta_esp
-        mov esi, [ev_ptr]
-        cmp byte [esi], ':'
-        jne .bad
-        inc dword [ev_ptr]
-        call lee_ref
-        jc .bad
-        mov [sum_c2], eax
-        mov [sum_f2], ebx
-        call salta_esp
-        mov esi, [ev_ptr]
-        cmp byte [esi], ')'
-        jne .bad
-        inc dword [ev_ptr]
-        ; normalizar el rango
-        mov eax, [sum_c1]
-        mov ebx, [sum_c2]
-        cmp eax, ebx
-        jle .nc
-        mov [sum_c1], ebx
-        mov [sum_c2], eax
-.nc:
-        mov eax, [sum_f1]
-        mov ebx, [sum_f2]
-        cmp eax, ebx
-        jle .nf
-        mov [sum_f1], ebx
-        mov [sum_f2], eax
-.nf:
-        xor eax, eax
-        mov [sum_lo], eax
-        mov [sum_hi], eax
-        mov eax, [sum_f1]
-        mov [sum_fi], eax
-.rf:
-        mov eax, [sum_c1]
-        mov [sum_ci], eax
-.rc:
-        push dword [sum_lo]
-        push dword [sum_hi]
-        push dword [sum_ci]
-        push dword [sum_fi]
-        push dword [sum_c1]
-        push dword [sum_c2]
-        push dword [sum_f1]
-        push dword [sum_f2]
-        mov ecx, [sum_ci]
-        mov edx, [sum_fi]
-        call celda_valor
-        pop dword [sum_f2]
-        pop dword [sum_f1]
-        pop dword [sum_c2]
-        pop dword [sum_c1]
-        pop dword [sum_fi]
-        pop dword [sum_ci]
-        pop dword [sum_hi]
-        pop dword [sum_lo]
-        cmp byte [ev_err], 0
-        jne .err
-        add [sum_lo], eax
-        adc [sum_hi], edx
-        mov eax, [sum_ci]
-        inc eax
-        mov [sum_ci], eax
-        cmp eax, [sum_c2]
-        jle .rc
-        mov eax, [sum_fi]
-        inc eax
-        mov [sum_fi], eax
-        cmp eax, [sum_f2]
-        jle .rf
-        mov eax, [sum_lo]
-        mov edx, [sum_hi]
-        ret
-.err:
-        xor eax, eax
-        xor edx, edx
-        ret
-.bad:
-        mov byte [ev_err], 1
-        xor eax, eax
-        xor edx, edx
-        ret
-
-; compara ESI y EDI (0): CF=0 si son iguales
-cad_igual:
-        push esi
-        push edi
-        push eax
-.l:
-        mov al, [esi]
-        cmp al, [edi]
-        jne .no
-        test al, al
-        jz .si
-        inc esi
-        inc edi
-        jmp .l
-.si:
-        pop eax
-        pop edi
-        pop esi
-        clc
-        ret
-.no:
-        pop eax
-        pop edi
-        pop esi
-        stc
-        ret
-
-; =============================================================================
-;  Aritmética de coma fija (64 bits)
-; =============================================================================
-; EDX:EAX *= EBX (sin signo, lo que desborde se pierde)
-mul64_32:
-        push ecx
-        push esi
-        mov ecx, edx
-        mul ebx
-        mov esi, eax
-        mov eax, ecx
-        push edx
-        mul ebx
-        pop ecx
-        add eax, ecx
-        mov edx, eax
-        mov eax, esi
-        pop esi
-        pop ecx
-        ret
-
-; EDX:EAX /= EBX (sin signo); el resto queda en cu_rem
-div64_32:
-        push ecx
-        push esi
-        push edi
-        mov esi, ebx
-        mov ecx, eax
-        mov eax, edx
-        xor edx, edx
-        div esi
-        mov edi, eax
-        mov eax, ecx
-        div esi
-        mov [cu_rem], edx
-        mov edx, edi
-        pop edi
-        pop esi
-        pop ecx
-        ret
-
-; EDX:EAX y ECX:EBX a valor absoluto; cu_neg = signo del resultado
-signos64:
-        mov byte [cu_neg], 0
-        test edx, edx
-        jns .a
-        not byte [cu_neg]
-        neg edx
-        neg eax
-        sbb edx, 0
-.a:
-        test ecx, ecx
-        jns .b
-        not byte [cu_neg]
-        neg ecx
-        neg ebx
-        sbb ecx, 0
-.b:
-        ret
-
-; aplica cu_neg a EDX:EAX; CF=1 si no cabe (más de 63 bits)
-pon_signo64:
-        test edx, edx
-        js .ov
-        cmp byte [cu_neg], 0
-        je .x
-        neg edx
-        neg eax
-        sbb edx, 0
-.x:
-        clc
-        ret
-.ov:
-        stc
-        ret
-
-; EDX:EAX (sin signo) * ECX:EBX -> cu_m (128 bits)
-mul128:
-        pushad
-        mov esi, eax
-        mov edi, edx
-        mul ebx
-        mov [cu_m], eax
-        mov [cu_m+4], edx
-        mov eax, edi
-        mul ecx
-        mov [cu_m+8], eax
-        mov [cu_m+12], edx
-        mov eax, esi
-        mul ecx
-        add [cu_m+4], eax
-        adc [cu_m+8], edx
-        adc dword [cu_m+12], 0
-        mov eax, edi
-        mul ebx
-        add [cu_m+4], eax
-        adc [cu_m+8], edx
-        adc dword [cu_m+12], 0
-        popad
-        ret
-
-; cu_m (128 bits) / ECX:EBX -> EDX:EAX; CF=1 si no cabe en 64 bits
-div128:
-        push esi
-        push edi
-        push ebp
-        xor esi, esi
-        xor edi, edi
-        mov ebp, 128
-.l:
-        shl dword [cu_m], 1
-        rcl dword [cu_m+4], 1
-        rcl dword [cu_m+8], 1
-        rcl dword [cu_m+12], 1
-        rcl esi, 1
-        rcl edi, 1
-        jc .resta
-        cmp edi, ecx
-        ja .resta
-        jb .sig
-        cmp esi, ebx
-        jb .sig
-.resta:
-        sub esi, ebx
-        sbb edi, ecx
-        or byte [cu_m], 1
-.sig:
-        dec ebp
-        jnz .l
-        mov eax, [cu_m]
-        mov edx, [cu_m+4]
-        mov esi, [cu_m+8]
-        or esi, [cu_m+12]
-        pop ebp
-        pop edi
-        pop esi
-        jnz .no
-        clc
-        ret
-.no:
-        stc
-        ret
-
-; EDX:EAX = (EDX:EAX * ECX:EBX) / CU_ESC (con signo); CF=1 si desborda
-mul_fijo:
-        call signos64
-        call mul128
-        mov ebx, CU_ESC
-        xor ecx, ecx
-        call div128
-        jc .ov
-        call pon_signo64
-        ret
-.ov:
-        stc
-        ret
-
-; EDX:EAX = (EDX:EAX * CU_ESC) / ECX:EBX (con signo); CF=1 si desborda
-div_fijo:
-        call signos64
-        push ebx
-        push ecx
-        mov ebx, CU_ESC
-        xor ecx, ecx
-        call mul128
-        pop ecx
-        pop ebx
-        call div128
-        jc .ov
-        call pon_signo64
-        ret
-.ov:
-        stc
-        ret
-
-; EDX:EAX coma fija (con signo) -> texto en EDI (EDI avanza; sin 0 final)
-num_a_cad:
-        test edx, edx
-        jns .pos
-        mov byte [edi], '-'
-        inc edi
-        neg edx
-        neg eax
-        sbb edx, 0
-.pos:
-        mov ebx, CU_ESC
-        call div64_32               ; EDX:EAX = entero, cu_rem = decimales
-        call print_u64
-        mov eax, [cu_rem]
-        test eax, eax
-        jz .x
-        mov byte [edi], ','
-        inc edi
-        call print_frac
-.x:
-        ret
-
-; EDX:EAX (sin signo) -> decimal en EDI
-print_u64:
-        push ecx
-        push esi
-        xor ecx, ecx
-.l:
-        mov ebx, 10
-        call div64_32
-        mov esi, [cu_rem]
-        push esi
-        inc ecx
-        mov esi, eax
-        or esi, edx
-        jnz .l
-.e:
-        pop eax
-        add al, '0'
-        mov [edi], al
-        inc edi
-        dec ecx
-        jnz .e
-        pop esi
-        pop ecx
-        ret
-
-; EAX = decimales (1..9999) -> hasta CU_DEC dígitos en EDI, sin ceros finales
-print_frac:
-        push ebx
-        push ecx
-        mov ecx, eax
-        mov eax, ecx
-        xor edx, edx
-        mov ebx, 1000
-        div ebx
-        mov [cu_fd+0], al
-        mov eax, edx
-        xor edx, edx
-        mov ebx, 100
-        div ebx
-        mov [cu_fd+1], al
-        mov eax, edx
-        xor edx, edx
-        mov ebx, 10
-        div ebx
-        mov [cu_fd+2], al
-        mov [cu_fd+3], dl
-        mov ecx, 4
-.tl:
-        mov al, [cu_fd+ecx-1]
-        test al, al
-        jnz .e
-        dec ecx
-        jnz .tl
-.e:
-        xor ebx, ebx
-.e2:
-        mov al, [cu_fd+ebx]
-        add al, '0'
-        mov [edi], al
-        inc edi
-        inc ebx
-        cmp ebx, ecx
-        jl .e2
-        pop ecx
-        pop ebx
-        ret
-
-; ESI (0) -> EDX:EAX coma fija; CF=1 si no es un número entero completo
-cad_a_num:
-        push esi
-        push ebx
-        push ecx
-        push edi
-        mov edi, esi
-        mov byte [cu_sign], 0
-        mov al, [edi]
-        cmp al, '-'
-        jne .s1
-        mov byte [cu_sign], 1
-        inc edi
-        jmp .s2
-.s1:
-        cmp al, '+'
-        jne .s2
-        inc edi
-.s2:
-        xor eax, eax
-        xor edx, edx
-        mov [cu_acc], eax
-        mov [cu_acc+4], edx
-        xor ecx, ecx
-        mov byte [cu_dot], 0
-        mov byte [cu_any], 0
-.dl:
-        mov bl, [edi]
-        cmp bl, '0'
-        jb .nd
-        cmp bl, '9'
-        ja .nd
-        mov byte [cu_any], 1
-        mov eax, [cu_acc]
-        mov edx, [cu_acc+4]
-        push ebx
-        push ecx
-        mov ebx, 10
-        call mul64_32
-        pop ecx
-        pop ebx
-        movzx ebx, bl
-        sub ebx, '0'
-        add eax, ebx
-        adc edx, 0
-        mov [cu_acc], eax
-        mov [cu_acc+4], edx
-        cmp byte [cu_dot], 0
-        je .dn
-        inc ecx
-.dn:
-        inc edi
-        jmp .dl
-.nd:
-        cmp bl, '.'
-        je .dot
-        cmp bl, ','
-        je .dot
-        jmp .end
-.dot:
-        cmp byte [cu_dot], 0
-        jne .end
-        mov byte [cu_dot], 1
-        inc edi
-        jmp .dl
-.end:
-        cmp byte [cu_any], 0
-        je .bad
-        cmp byte [edi], 0
-        jne .bad
-        mov eax, [cu_acc]
-        mov edx, [cu_acc+4]
-        cmp ecx, CU_DEC
-        ja .trunc
-        mov ebx, CU_DEC
-        sub ebx, ecx
-        mov esi, 1
-.mf:
-        test ebx, ebx
-        jz .mfd
-        imul esi, 10
-        dec ebx
-        jmp .mf
-.mfd:
-        mov ebx, esi
-        call mul64_32
-        jmp .sign
-.trunc:
-        mov ebx, ecx
-        sub ebx, CU_DEC
-        mov esi, 1
-.df:
-        test ebx, ebx
-        jz .dfd
-        imul esi, 10
-        dec ebx
-        jmp .df
-.dfd:
-        mov ebx, esi
-        call div64_32
-.sign:
-        cmp byte [cu_sign], 0
-        je .pos
-        neg edx
-        neg eax
-        sbb edx, 0
-.pos:
-        clc
-        jmp .out
-.bad:
-        stc
-.out:
-        pop edi
-        pop ecx
-        pop ebx
-        pop esi
-        ret
+%include "calculo.inc"
 
 ; =============================================================================
 ;  Archivos (.CSV)
@@ -2347,9 +1398,7 @@ limpia_todo:
         mov ecx, NCEL * CEL_MAX / 4
         xor eax, eax
         rep stosd
-        mov edi, cel_estado
-        mov ecx, NCEL / 4
-        rep stosd
+        call calc_olvida
         popad
         ret
 
@@ -2440,7 +1489,7 @@ guarda_escribe:
         pushad
         call bounds
         mov ecx, NCEL
-        imul ecx, CEL_MAX + 2
+        imul ecx, 2 * CEL_MAX + 4   ; (entre comillas puede ocupar el doble)
         add ecx, NFIL * 2 + 64
         HV mem_pedir
         jc .falla
@@ -2461,6 +1510,29 @@ guarda_escribe:
         mov ecx, [sv_c]
         mov edx, [sv_r]
         call cel_puntero
+        ; la celda que lleva «;» (los argumentos de una función) o comillas
+        ; va entre comillas, y las suyas, dobles: como en cualquier CSV
+        push esi
+        xor ah, ah
+.q:
+        mov al, [esi]
+        test al, al
+        jz .qf
+        inc esi
+        cmp al, ';'
+        je .qs
+        cmp al, '"'
+        jne .q
+.qs:
+        mov ah, 1
+        jmp .q
+.qf:
+        pop esi
+        mov [sv_com], ah
+        test ah, ah
+        jz .cpy
+        mov byte [edi], '"'
+        inc edi
 .cpy:
         mov al, [esi]
         test al, al
@@ -2471,10 +1543,21 @@ guarda_escribe:
         je .skipc
         mov [edi], al
         inc edi
+        cmp al, '"'
+        jne .skipc
+        cmp byte [sv_com], 0
+        je .skipc
+        mov [edi], al
+        inc edi
 .skipc:
         inc esi
         jmp .cpy
 .cpyend:
+        cmp byte [sv_com], 0
+        je .sincom
+        mov byte [edi], '"'
+        inc edi
+.sincom:
         mov eax, [sv_c]
         cmp eax, [maxc]
         jge .nosep
@@ -2541,17 +1624,42 @@ cargar:
         mov esi, [buf_ptr]
         xor edx, edx                ; fila
         xor ecx, ecx                ; columna
+        mov word [car_com], 0x0100  ; fuera de comillas, al principio de celda
 .pl:
         mov al, [esi]
         test al, al
         jz .pfin
         inc esi
+        cmp byte [car_com], 0       ; entre comillas todo es de la celda, menos
+        je .fuera                   ; las comillas: dos seguidas son una, y una
+        cmp al, '"'                 ; sola las cierra
+        jne .dentro
+        cmp byte [esi], '"'
+        jne .cierra
+        inc esi
+        jmp .pon
+.cierra:
+        mov byte [car_com], 0
+        jmp .pl
+.dentro:
+        cmp al, 32                  ; (un salto de línea dentro: fuera)
+        jb .pl
+        jmp .pon
+.fuera:
         cmp al, 13
         je .pl
         cmp al, 10
         je .nl
         cmp al, ';'
         je .sep
+        cmp al, '"'                 ; unas comillas al principio: las abren
+        jne .pon
+        cmp byte [car_ini], 0
+        je .pon
+        mov word [car_com], 0x0001
+        jmp .pl
+.pon:
+        mov byte [car_ini], 0
         cmp edx, NFIL
         jae .pl
         cmp ecx, NCOL
@@ -2582,10 +1690,12 @@ cargar:
         jmp .pl
 .sep:
         inc ecx
+        mov byte [car_ini], 1
         jmp .pl
 .nl:
         inc edx
         xor ecx, ecx
+        mov byte [car_ini], 1
         jmp .pl
 .pfin:
         mov eax, [buf_ptr]
@@ -2681,30 +1791,6 @@ a_y         resd 1
 fil_i       resd 1
 esi2tmp     resd 1
 
-; evaluador
-ev_ptr      resd 1                  ; puntero de análisis
-ev_depth    resd 1                  ; profundidad de anidamiento
-ev_err      resb 1                  ; 0 ok, 1 #ERROR, 2 #CIRC, 3 #REF
-            alignb 4
-cu_acc      resd 2                  ; acumulador de dígitos (64 bits)
-cu_m        resd 4                  ; producto de 128 bits
-cu_rem      resd 1                  ; resto de div64_32
-cu_neg      resb 1                  ; signo del producto/cociente
-cu_dot      resb 1
-cu_any      resb 1
-cu_sign     resb 1
-cu_fd       resb 4                  ; dígitos decimales
-cu_ident    resb 16                 ; identificador leído
-            alignb 4
-sum_lo      resd 1                  ; SUMA: acumulador y rango
-sum_hi      resd 1
-sum_c1      resd 1
-sum_f1      resd 1
-sum_c2      resd 1
-sum_f2      resd 1
-sum_ci      resd 1
-sum_fi      resd 1
-
 ; archivos
 buf_ptr     resd 1
 car_ruta    resd 1
@@ -2712,6 +1798,10 @@ maxc        resd 1
 maxr        resd 1
 sv_r        resd 1
 sv_c        resd 1
+car_com     resb 1                  ; al abrir: dentro de unas comillas
+car_ini     resb 1                  ; (detrás de car_com) al principio de una celda
+sv_com      resb 1                  ; al guardar: la celda va entre comillas
+            alignb 4
 
 disp_der    resb 1                  ; 1: alinear a la derecha
             alignb 4
@@ -2728,7 +1818,9 @@ nom_tmp     resb 80
 titulo      resb 120
 
             alignb 4
-cel_estado  resb NCEL               ; estado de evaluación (0/1)
+pila_ant    resd 1
+PILA_CALC   equ 65536
+pila_calc   resb PILA_CALC          ; la pila del cálculo
             alignb 4
 cel_txt     resb NCEL * CEL_MAX      ; texto crudo de cada celda
 
