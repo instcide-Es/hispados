@@ -120,8 +120,12 @@ f2C:
 ; ---- 36h: el sitio libre -> AX=sectores por grupo BX=grupos libres
 ;      CX=octetos por sector DX=grupos del disco ----
 f36:
+        mov al, [bp+R_DX]           ; DL: 0 la de trabajo, 1 A:, 2 B:...
+        call unidad_dl
+        jc .no
         call disco_fresco
         jnc .hay
+.no:
         mov word [bp+R_AX], 0xFFFF
         ret
 .hay:
@@ -147,6 +151,15 @@ f36:
         dec ax
         mov [bp+R_DX], ax
         ret
+
+; (interna) AL = unidad como la dan 36h y 47h (0: la de trabajo, 1: A:...): pasa
+; a ser la cargada. CF=1, AX=E_UNIDAD si no existe
+unidad_dl:
+        dec al
+        jns .u
+        mov al, [unidad_def]
+.u:
+        jmp unidad_pon
 
 ; ---- 3Ch: crear un archivo (si ya existe, lo vacía). CX=atributos -> AX ----
 f3C:
@@ -223,6 +236,8 @@ f3D:
 ; (común con crear) la ficha BX queda abierta sobre la entrada SI
 abre_fin:
         mov byte [bx+H_USO], 1
+        mov al, [unidad_act]
+        mov [bx+H_UNI], al
         mov ax, [psp_act]
         mov [bx+H_PSP], ax
         mov ax, [di_sec]
@@ -271,6 +286,8 @@ abre_ruta:
         mov [bx+H_DOFF], ax
         mov ax, [psp_act]
         mov [bx+H_PSP], ax
+        mov al, [unidad_act]
+        mov [bx+H_UNI], al
         inc byte [abiertos]
         clc
         ret
@@ -460,6 +477,8 @@ f56:
         mov [rn_off], si
         mov ax, [r_dir]
         mov [rn_dir], ax
+        mov al, [unidad_act]
+        mov [rn_uni], al
         mov es, [bp+R_ES]           ; el nombre nuevo
         mov si, [bp+R_DI]
         call ruta_copia
@@ -474,9 +493,13 @@ f56:
         mov al, '?'
         repne scasb
         je f_acceso
+        mov al, [unidad_act]
+        cmp al, [rn_uni]
+        jne .otro
         mov ax, [r_dir]
         cmp ax, [rn_dir]
         je .mismo
+.otro:
         mov ax, E_OTRO_DISP
         jmp f_error
 .mismo:
@@ -634,9 +657,9 @@ f3B:
 ; la ruta de `ruta` pasa a ser el directorio de trabajo. CF=1, AX=error
 cd_ruta:
         mov si, ruta
-        cmp byte [si+1], ':'
-        jne .u
-        add si, 2
+        call ruta_unidad
+        jnc .u
+        ret
 .u:
         mov di, cd_txt              ; el texto nuevo, sin la barra del principio
         mov byte [di], 0
@@ -714,6 +737,10 @@ cd_ruta:
         ; ¿existe? Se resuelve «\texto\»: el directorio queda en [r_dir]
         mov si, cd_txt
         mov di, ruta
+        mov al, [unidad_act]
+        add al, 'A'
+        mov ah, ':'
+        stosw
         mov al, '\'
         stosb
 .c2:
@@ -723,7 +750,7 @@ cd_ruta:
         stosb
         jmp .c2
 .c3:
-        cmp di, ruta + 1
+        cmp di, ruta + 3
         je .c4
         mov al, '\'
         stosb
@@ -762,6 +789,9 @@ cd_ruta:
 
 ; ---- 47h: el directorio de trabajo, en DS:SI (sin la barra del principio) ----
 f47:
+        mov al, [bp+R_DX]
+        call unidad_dl
+        jc f_error
         mov es, [bp+R_DS]
         mov di, [bp+R_SI]
         mov si, dir_txt
@@ -776,7 +806,7 @@ f47:
 ;      4Fh: el siguiente. Lo que se encuentra queda en la zona de búsquedas:
 ;      21 atributos, 22 hora, 24 fecha, 26 tamaño, 30 el nombre ----
 ; (los 21 primeros octetos son nuestros: 0 los atributos pedidos, 1 el patrón,
-; 12 el directorio, 14 por qué entrada vamos)
+; 12 el directorio, 14 por qué entrada vamos, 16 la unidad)
 f4E:
         call f_ruta
         jc f_error
@@ -796,6 +826,8 @@ f4E:
         stosw
         xor ax, ax
         stosw
+        mov al, [cs:unidad_act]
+        stosb
         push cs
         pop es
 f4F:
@@ -811,7 +843,10 @@ f4F:
         mov bx, ax                  ; el directorio
         lodsw
         mov dx, ax                  ; las entradas ya vistas
+        lodsb                       ; y la unidad
         pop ds
+        call unidad_pon
+        jc f_error
         mov ax, bx
         call dir_abre
         xor cx, cx                  ; las que se llevan vistas ahora

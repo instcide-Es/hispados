@@ -374,7 +374,9 @@ lanza:
         mov si, ruta
         cmp byte [si+1], ':'
         je .er
-        mov ax, 'A:'
+        mov al, [unidad_act]
+        add al, 'A'
+        mov ah, ':'
         stosw
         cmp byte [si], '\'
         je .er

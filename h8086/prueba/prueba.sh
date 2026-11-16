@@ -18,7 +18,7 @@ escribe() {
   local t="$1" i c
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
-    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; '\') tecla backslash;; *) tecla "$c";; esac
+    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; ':') tecla shift-semicolon;; '\') tecla backslash;; *) tecla "$c";; esac
   done
   tecla ret; sleep 0.8
 }
@@ -34,10 +34,11 @@ PY
 }
 esta() { if grep -qF -- "$2" $T/$1.txt; then ok "$3«$2»"; else ko "$3falta «$2»"; fi; }
 noesta() { if grep -qF -- "$2" $T/$1.txt; then ko "$3sobra «$2»"; else ok "$3no sale «$2»"; fi; }
-arranca() {   # imagen, cpu, memoria en K
+arranca() {   # imagen del disquete, cpu y, si se quiere, imagen del disco duro
   rm -f $T/mon
   qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu $2 -m 4 \
-    -drive file=$1,format=raw,if=floppy,index=0 -boot a -no-reboot > /dev/null 2>&1 &
+    -drive file=$1,format=raw,if=floppy,index=0 ${3:+-drive file=$3,format=raw,if=ide,index=0} \
+    -boot a -no-reboot > /dev/null 2>&1 &
   QPID=$!
   sleep 5
 }
@@ -47,7 +48,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.5 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.6 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -58,7 +59,7 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.5" "VER: "
+esta p2 "Hispa-8086 versión 0.6" "VER: "
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
 esta p2 "8 archivos, " "DIR: "
@@ -94,7 +95,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.5" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.6" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -163,6 +164,42 @@ if command -v fsck.fat > /dev/null; then
   if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 fi
 
+echo "== Hispa-8086: el disco duro (C:, una partición FAT16 de 20 megas) =="
+cp build/hispa8086-360.img $T/a.img
+python3 prueba/haz_duro.py $T/hd.img > /dev/null
+arranca $T/a.img 486 $T/hd.img
+escribe "limpiar"; escribe "c:"; escribe "dir"
+pantalla ph0
+esta ph0 "0 archivos, 0 octetos" "DIR del disco vacío: "
+esta ph0 "20434944 octetos libres" "y su sitio libre: "
+escribe "limpiar"; escribe "copiar a:leeme.txt c:"; sleep 3
+escribe "creardir datos"; escribe "copy a:\\hola.com datos"; sleep 3; escribe "a:arch"; sleep 8
+escribe "datos\\hola desde c"; escribe "dir"; escribe "z:"
+pantalla ph
+esta ph 'C:\>' "«C:» cambia de unidad: "
+esta ph "ARCHIVOS: BIEN" "la interfaz de archivos, sobre FAT16: "
+esta ph "Parametros: desde c" "un programa cargado del disco duro: "
+esta ph "GRANDE.DAT         20000" ""
+esta ph "No existe esa unidad." "una unidad que no hay: "
+escribe "a:"; escribe "dir c:\\datos"
+pantalla ph2
+esta ph2 "HOLA.COM             206" "DIR de otra unidad, con ruta: "
+esta ph2 'A:\>' "y de vuelta en A: "
+apaga
+dd if=$T/hd.img of=$T/part.img bs=512 skip=63 2> /dev/null
+if python3 - $T/part.img build/LEEME.TXT build/HOLA.COM <<'PY'
+import subprocess, sys
+img = sys.argv[1]
+def cat(n):
+    return subprocess.run(['mtype', '-i', img, '::' + n], capture_output=True).stdout
+dib = bytes((i * 7 + 3) & 255 for i in range(5000))
+ok = cat('GRANDE.DAT') == dib * 4 and cat('PRUEBA.DAT') == dib[:500] and cat('SUB/TRES.TXT') == b'hola'
+ok = ok and cat('LEEME.TXT') == open(sys.argv[2], 'rb').read() and cat('DATOS/HOLA.COM') == open(sys.argv[3], 'rb').read()
+sys.exit(0 if ok else 1)
+PY
+then ok "la partición, vista desde fuera: cada archivo con su contenido exacto"; else ko "la partición no ha quedado como se esperaba"; mdir -/ -i $T/part.img :: | head -30; fi
+if fsck.fat -n $T/part.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en la partición"; else ko "fsck.fat encuentra errores en la partición"; cat $T/fsck.txt; fi
+
 echo "== Hispa-8086: las demás medidas de disquete (720 K, 1,2 M y 1,44 M) =="
 for m in 720 1200 1440; do
   cp build/hispa8086-$m.img $T/b.img
@@ -192,6 +229,6 @@ if [ $tam -lt 16384 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núc
 tam=$(stat -c %s build/COMMAND.COM)
 if [ $tam -lt 16384 ]; then ok "el intérprete ocupa $tam octetos"; else ko "el intérprete ha crecido a $tam octetos"; fi
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pr pe p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pr pe p6 p7 p8 p9 ph ph2 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
 rm -rf $T
 exit $fail

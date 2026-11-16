@@ -16,7 +16,8 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 
 ## Dónde estamos
 
-**Etapas 0 a 3 hechas** (`h8086/`, noviembre de 2026). Versión 0.5.
+**Etapas 0 a 3 hechas y la 4 empezada** (`h8086/`, noviembre de 2026).
+Versión 0.6.
 
 - **Arranque**: sector de arranque FAT12 y núcleo (6,8 K en el disco). En
   memoria, el núcleo con sus variables, la copia de la FAT y la pila son unos
@@ -39,8 +40,11 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
     cambiar el tamaño (4Ah);
   - **programas**: lanzar otro y esperar (4Bh), su código de salida (4Dh),
     qué programa corre (50h, 51h, 62h).
-- **Disco**: FAT12 de lectura y escritura, con subdirectorios que crecen;
-  detecta el cambio de disquete (un XT no avisa: si no hay archivos abiertos y
+- **Disco**: tres unidades, A: y B: (disquetes) y **C:, el disco duro** (la
+  primera partición FAT del primer disco); FAT12 y **FAT16** de hasta 32
+  megas, de lectura y escritura, con subdirectorios que crecen. La FAT se lee
+  por sectores, no entera, así que el núcleo ocupa 4 K menos de memoria.
+  Detecta el cambio de disquete (un XT no avisa: si no hay archivos abiertos y
   pasan dos segundos, vuelve a leer sus medidas y su FAT).
 - **Programas .COM y .EXE** (con su tabla de reubicación), cada uno con su
   prefijo (PSP), sus parámetros y su entorno (las variables y, detrás, su
@@ -55,7 +59,8 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
   IF [NOT] EXIST / ERRORLEVEL / a==b y GOTO, y **AUTOEXEC.BAT** al arrancar.
 - **Redirección**: `orden > archivo`, `>> archivo` y `< archivo` (INT 21h/46h:
   un archivo hace de pantalla o de teclado para todos los programas).
-- **Prueba automática** (`make -C h8086 prueba`): 81 comprobaciones en QEMU.
+- **Prueba automática** (`make -C h8086 prueba`): 92 comprobaciones en QEMU, también
+  sobre un disco duro de 20 megas con una partición FAT16.
   Un .EXE hecho a mano (`prueba/exe.asm`) comprueba la reubicación, la
   memoria y el lanzamiento de otro programa; otro (`prueba/arch.asm`) ejerce
   la interfaz de archivos en doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
@@ -73,8 +78,9 @@ corre la prueba automática, no emula nada anterior al 486.
 parte fina de la detección), la escritura en disco en un emulador de 16 bits
 y, sobre todo, un XT real con su disquetera.
 
-**Límites de hoy:** una sola unidad (A:), solo FAT12, ocho archivos abiertos
-entre todos los programas, sin programas residentes ni la vieja interfaz de
+**Límites de hoy:** particiones de hasta 32 megas, una sola por disco y un
+solo disco duro; se arranca desde disquete (aún no hay FDISK, FORMAT ni SYS);
+ocho archivos abiertos entre todos los programas, sin programas residentes ni la vieja interfaz de
 archivos por FCB.
 
 ## Las decisiones
@@ -154,7 +160,7 @@ se pone en medio.
 | | MS-DOS 3.3 | Hispa-386 0.9 | Hispa-8086 (objetivo) |
 |---|---|---|---|
 | Residente (núcleo + intérprete) | ~54 K | ~59 K | **menos de 32 K** |
-| Hoy | | | unos 22 K: 14 del núcleo y 8 del intérprete (etapas 0 a 3) |
+| Hoy | | | unos 21 K: 12 del núcleo y 9 del intérprete |
 
 Reglas: el intérprete de órdenes tiene una parte que se puede pisar y volver
 a cargar (como COMMAND.COM); los búferes de disco se piden según la memoria
@@ -253,7 +259,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 1 | Archivos por INT 21h (abrir, leer, escribir, crear, borrar, buscar), subdirectorios, FAT12 de escritura | **hecha** |
 | 2 | Memoria por bloques (48h-4Ah), programas .EXE, lanzar programas (4Bh), entorno | **hecha** |
 | 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha**, con %1, IF, GOTO y redirección (faltan las tuberías «\|», FOR y CALL) |
-| 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | |
+| 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | **a medias**: C: con FAT16 hecho; faltan CONFIG.SYS y los controladores |
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | |
 | 6 | Modo 286: HMA y memoria extendida | |
 | 7 | Hispa-BASIC | |

@@ -15,8 +15,9 @@
 ;       CREARDIR (MD)       BORRARDIR (RD)      LIMPIAR (CLS)
 ;       ACTUALIZAR          ECO (ECHO)          REM         PAUSA (PAUSE)
 ;       IF                  GOTO
-;  Cualquier otra palabra es un programa (NOMBRE.COM o NOMBRE.EXE) o un
-;  archivo por lotes (NOMBRE.BAT), del directorio de trabajo o de la raíz.
+;  «C:» a secas cambia de unidad. Cualquier otra palabra es un programa
+;  (NOMBRE.COM o NOMBRE.EXE) o un archivo por lotes (NOMBRE.BAT), del
+;  directorio de trabajo o de la raíz.
 ;
 ;  Un archivo por lotes es un texto con una orden por línea. Se carga entero
 ;  en un bloque de memoria y se va ejecutando; «@» delante de una línea hace
@@ -44,6 +45,7 @@ E_MUCHOS    equ 4
 E_ACCESO    equ 5
 E_MEMORIA   equ 8
 E_FORMATO   equ 11
+E_UNIDAD    equ 15
 E_DIR_ACT   equ 16
 E_OTRO_DISP equ 17
 E_NO_MAS    equ 18
@@ -144,13 +146,25 @@ bucle:
 pon_indicador:
         push si
         call trae_dir
-        mov si, m_indicador
-        call pon_cad
+        call pon_nl
+        call pon_unidad
         mov si, dir_txt
         call pon_cad
         mov al, '>'
         call pon_car
         pop si
+        ret
+; «C:\» (la unidad de trabajo)
+pon_unidad:
+        push ax
+        DOS 0x19
+        add al, 'A'
+        call pon_car
+        mov al, ':'
+        call pon_car
+        mov al, '\'
+        call pon_car
+        pop ax
         ret
 ; el directorio de trabajo -> dir_txt
 trae_dir:
@@ -308,6 +322,22 @@ ejecuta_linea:
 .nada:
         ret
 .hay:
+        cmp byte [si+1], ':'        ; «C:» a secas: cambiar de unidad
+        jne .orden
+        cmp byte [si+2], ' '
+        ja .orden
+        mov al, [si]
+        call mayus
+        sub al, 'A'
+        mov dl, al
+        DOS 0x0E
+        DOS 0x19
+        cmp al, dl
+        je .nada
+        mov si, m_e_unidad
+        jmp pon_cad
+.orden:
+        mov [pal_ini], si           ; (la palabra entera, por si es una ruta)
         mov di, orden               ; la primera palabra, en mayúsculas y hasta
         mov cx, 8                   ; ocho letras
 .p:
@@ -560,6 +590,7 @@ pon_error:
 errores     dw E_FORMATO, m_e_formato, E_ARCHIVO, m_e_no_esta, E_RUTA, m_e_ruta, E_MUCHOS, m_e_muchos
             dw E_ACCESO, m_e_acceso, E_DIR_ACT, m_e_dir_act, E_OTRO_DISP, m_e_otro_dir
             dw E_NO_MAS, m_e_no_esta, E_PROTEGIDO, m_e_protegido, E_DISCO, m_e_disco
+            dw E_UNIDAD, m_e_unidad
             dw 0
 
 ; pide un trozo de memoria de borrador (8 K, o lo que haya) para la orden que
@@ -910,8 +941,7 @@ o_cd:
         call toma_arg
         jnz .va
         call trae_dir
-        mov si, m_indicador + 1
-        call pon_cad
+        call pon_unidad
         mov si, dir_txt
         call pon_cad
         jmp pon_nl
@@ -1181,14 +1211,49 @@ ejecuta:
         mov word [bloque], 0        ; el entorno: una copia del nuestro
         mov word [bloque+2], cola
         mov [bloque+4], cs
+        ; el nombre, entero (puede traer unidad y ruta: «C:\JUEGOS\AJEDREZ»),
+        ; sin la extensión
+        mov si, [pal_ini]
+        mov di, orden_l
+        xor bx, bx                  ; BX = donde está su último punto
+        xor dx, dx                  ; DX = 1 si trae ruta
+        mov cx, RUTA_MAX - 8
+.n:
+        mov al, [si]
+        cmp al, ' '
+        jbe .nf
+        cmp al, '.'
+        jne .n1
+        mov bx, di
+.n1:
+        cmp al, '\'
+        je .n2
+        cmp al, ':'
+        jne .n3
+.n2:
+        xor bx, bx                  ; (un punto de antes no era la extensión)
+        mov dx, 1
+.n3:
+        stosb
+        inc si
+        loop .n
+.nf:
+        mov byte [di], 0
+        test bx, bx
+        jz .n4
+        mov byte [bx], 0
+.n4:
         mov bx, intentos
+        test dx, dx                 ; con ruta, solo ahí: no se busca en la raíz
+        jz .i
+        mov bx, intentos_ruta
 .i:
         mov si, [bx]                ; delante («» o «\») y detrás (la extensión)
         test si, si
         jz .no
         mov di, arg1
         call copia_txt
-        mov si, orden
+        mov si, orden_l
         call copia_txt
         mov si, [bx+2]
         call copia_txt
@@ -1233,6 +1298,7 @@ ejecuta:
             align 2
 intentos    dw t_nada, t_com, t_nada, t_exe, t_nada, t_bat
             dw t_barra, t_com, t_barra, t_exe, t_barra, t_bat, 0
+intentos_ruta dw t_nada, t_com, t_nada, t_exe, t_nada, t_bat, 0
 t_nada      db 0
 t_barra     db "\", 0
 t_exe       db ".EXE", 0
@@ -1561,8 +1627,7 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_indicador db 10, "A:\", 0
-m_ver       db "Hispa-8086 versión 0.5", 10, 0
+m_ver       db "Hispa-8086 versión 0.6", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):", 10
             db "  AYUDA                     esta lista", 10
             db "  VER                       la versión del sistema", 10
@@ -1591,6 +1656,7 @@ m_dir       db "     <DIR>", 10, 0
 m_copiado   db "1 archivo copiado.", 10, 0
 m_e_error   db "Error ", 0
 m_e_disco   db "La unidad no está preparada.", 10, 0
+m_e_unidad  db "No existe esa unidad.", 10, 0
 m_e_protegido db "El disco está protegido contra escritura.", 10, 0
 m_e_no_esta db "No existe ese archivo.", 10, 0
 m_e_ruta    db "No existe esa ruta.", 10, 0
@@ -1647,6 +1713,9 @@ r_sal       resw 1                  ; los archivos de la redirección
 r_ent       resw 1
 bloque      resw 7                  ; para lanzar un programa (4Bh)
 orden       resb 10
+            alignb 2
+pal_ini     resw 1
+orden_l     resb RUTA_MAX
 cola        resb 130
 lote_nom    resb 10                 ; %0
 lote_args   resb 130                ; %1 a %9

@@ -36,7 +36,6 @@ LIN_MAX     equ 126                 ; letras de una línea de órdenes
 RUTA_MAX    equ 80
 DIR_MAX     equ 64                  ; letras del directorio de trabajo
 PILA_TAM    equ 768
-FAT_MAX     equ 9 * 512             ; la FAT12 más grande: la de 1,44 M
 
 ; el procesador
 CPU_8086    equ 0
@@ -59,7 +58,9 @@ inicio:
         mov cx, bss_fin - bss_ini
         xor al, al
         rep stosb
-        mov [unidad], dl
+        mov [u_bios], dl
+        mov word [buf_lba], 0xFFFF
+        mov word [fat_lba], 0xFFFF
         call cpu_detecta
         int 0x12                    ; la memoria convencional, en K
         mov [mem_kb], ax
@@ -83,6 +84,7 @@ inicio:
         mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
         mov word [dta_off], dta_int
         call disco_ini
+        call unidades_ini
         mov si, m_titulo
         call pon_cad
         mov byte [primera], 1
@@ -316,13 +318,23 @@ f0B:
 .x:
         mov [bp+R_AX], al
         ret
-; 0Eh: elegir unidad -> AL = cuántas hay
+; 0Eh: la unidad de trabajo pasa a ser DL (0 = A:), si existe -> AL = cuántas
+; letras de unidad hay
 f0E:
-        mov byte [bp+R_AX], 1
+        mov bl, [bp+R_DX]
+        cmp bl, N_UNI
+        jae .x
+        xor bh, bh
+        cmp byte [u_hay+bx], 0
+        je .x
+        mov [unidad_def], bl
+.x:
+        mov byte [bp+R_AX], N_UNI
         ret
 ; 19h: la unidad de trabajo -> AL (0 = A:)
 f19:
-        mov byte [bp+R_AX], 0
+        mov al, [unidad_def]
+        mov [bp+R_AX], al
         ret
 ; 25h: pone el vector AL en DS:DX
 f25:
@@ -363,7 +375,7 @@ f35:
 fE8:
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
-        mov bh, 5
+        mov bh, 6
         mov [bp+R_BX], bx
         ret
 ; 46h: redirección. El archivo BX pasa a ser la entrada (CX=0) o la salida
@@ -682,7 +694,7 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.5 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.6 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 
@@ -692,10 +704,8 @@ m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
         absolute $
             alignb 2
 bss_ini:
-unidad      resb 1                  ; la unidad de arranque (la de la BIOS)
 cpu_tipo    resb 1
 primera     resb 1                  ; aún no se ha lanzado el intérprete
-disco_ok    resb 1
 cod_salida  resb 1
 op13        resb 1                  ; disco_es: 2 leer, 3 escribir
 buf_sucio   resb 1
@@ -727,20 +737,7 @@ lz_reub     resw 2
 lz_cab      resb 28                 ; la cabecera del .EXE
 lz_exe      resb 1
             alignb 2
-t_disco     resw 1                  ; cuándo se usó el disco por última vez
 buf_lba     resw 1                  ; el sector que hay en `sector`
-spp         resw 1                  ; sectores por pista
-caras       resw 1
-spc         resw 1                  ; sectores por grupo
-bpc         resw 1                  ; octetos por grupo
-res_sec     resw 1                  ; sectores reservados (delante de la FAT)
-nfat        resw 1                  ; cuántas FAT
-spf         resw 1                  ; sectores de cada una
-raiz_ini    resw 1                  ; primer sector del directorio raíz
-raiz_sec    resw 1                  ; y cuántos tiene
-datos_ini   resw 1                  ; primer sector de los datos
-max_clus    resw 1                  ; el último grupo del disco
-dir_act     resw 1                  ; el directorio de trabajo (0: la raíz)
 di_clus     resw 1                  ; dir_sig: por dónde va
 di_sec      resw 1
 di_resto    resw 1
@@ -759,8 +756,6 @@ es_dsec     resw 1
 dta_seg     resw 1                  ; la zona de las búsquedas (DTA)
 dta_off     resw 1
 nom11       resb 12
-bpb_ant     resb 52                 ; las medidas del último disco visto
-dir_txt     resb DIR_MAX            ; el directorio de trabajo, en texto
 cd_txt      resb DIR_MAX + 2
 ruta        resb RUTA_MAX + 2
 dta_int     resb 44                 ; la zona de búsquedas del intérprete
@@ -768,7 +763,39 @@ fichas      resb N_ARCH * H_TAM_F
 linea       resb LIN_MAX + 4
             alignb 2
 sector      resb 512
-fat         resb FAT_MAX
+fat         resb 512                ; un sector de la FAT
+; ---- la unidad cargada: todo lo que cambia de una unidad a otra ----
+u_ini:
+u_bios      resb 1                  ; su número para la BIOS (0, 1, 80h)
+u_fat16     resb 1                  ; 1: FAT16 (0: FAT12)
+disco_ok    resb 1                  ; sus medidas están leídas
+            alignb 2
+u_base      resw 2                  ; el sector donde empieza (la partición)
+spp         resw 1                  ; sectores por pista
+caras       resw 1
+spc         resw 1                  ; sectores por grupo
+bpc         resw 1                  ; octetos por grupo
+res_sec     resw 1                  ; sectores reservados (delante de la FAT)
+nfat        resw 1                  ; cuántas FAT
+spf         resw 1                  ; sectores de cada una
+raiz_ini    resw 1                  ; primer sector del directorio raíz
+raiz_sec    resw 1                  ; y cuántos tiene
+datos_ini   resw 1                  ; primer sector de los datos
+max_clus    resw 1                  ; el último grupo del disco
+fat_pista   resw 1                  ; por dónde buscar un grupo libre
+dir_act     resw 1                  ; el directorio de trabajo (0: la raíz)
+t_disco     resw 1                  ; cuándo se usó por última vez
+bpb_ant     resb 52                 ; las medidas del último disco visto
+dir_txt     resb DIR_MAX            ; el directorio de trabajo, en texto
+u_fin:
+U_TAM       equ u_fin - u_ini
+u_guardadas resb N_UNI * U_TAM      ; las variables de las unidades no cargadas
+u_hay       resb N_UNI + 1          ; qué unidades existen
+unidad_act  resb 1                  ; la cargada
+unidad_def  resb 1                  ; la de trabajo
+rn_uni      resb 1
+            alignb 2
+fat_lba     resw 1                  ; el sector que hay en `fat`
             resb PILA_TAM
 pila_fin:
 bss_fin:

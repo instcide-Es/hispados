@@ -19,10 +19,20 @@
 ;  Todas las rutinas suponen DS = ES = el núcleo y devuelven CF=1 con el
 ;  código de error de DOS en AX cuando fallan.
 ;
-;  Por ahora: una sola unidad (A:, la de arranque) y FAT12. El disco duro y la
-;  FAT16 son de la etapa 4 (docs/8086/HISPA-8086.md).
+;  UNIDADES. Hay hasta tres: A: y B:, los disquetes, y C:, la primera partición
+;  FAT del primer disco duro (FAT12 o FAT16 de hasta 32 megas, como en MS-DOS
+;  3.3: así los números de sector caben en 16 bits). Todas las rutinas de
+;  este archivo trabajan con «la unidad cargada»: sus medidas, su directorio
+;  de trabajo y los dos búferes están en un bloque de variables (de u_ini a
+;  u_fin), y unidad_pon cambia de unidad guardando ese bloque y trayendo el de
+;  la otra. Cada ruta («C:\DATOS\X») y cada archivo abierto dicen de qué
+;  unidad son.
+;
+;  LA FAT se lee por sectores, a su propio búfer (`fat`), no entera: una FAT16
+;  de 32 megas son 32 K, que en estas máquinas no sobran.
 ; =============================================================================
 N_ARCH      equ 8                   ; archivos abiertos a la vez
+N_UNI       equ 3                   ; unidades: A:, B: y C:
 PRIMERO     equ 5                   ; el primer número de archivo (0-4: la consola)
 ; la ficha de un archivo abierto
 H_USO       equ 0                   ; db: 0 libre
@@ -35,6 +45,7 @@ H_DOFF      equ 14                  ; dw: y dónde está dentro de él
 H_CCLU      equ 16                  ; dw: el último grupo visitado...
 H_CIDX      equ 18                  ; dw: ...y qué número hace en la cadena
 H_SUCIO     equ 20                  ; db: hay que poner al día su entrada
+H_UNI       equ 21                  ; db: su unidad (0 = A:)
 H_PSP       equ 22                  ; dw: el programa que lo abrió
 H_TAM_F     equ 24
 ; errores de DOS
@@ -44,6 +55,7 @@ E_RUTA      equ 3                   ; no existe la ruta
 E_MUCHOS    equ 4                   ; demasiados archivos abiertos
 E_ACCESO    equ 5                   ; acceso denegado
 E_NUMERO    equ 6                   ; número de archivo no válido
+E_UNIDAD    equ 15                  ; esa unidad no existe
 E_DIR_ACT   equ 16                  ; no se puede quitar el directorio de trabajo
 E_OTRO_DISP equ 17                  ; no es el mismo dispositivo
 E_NO_MAS    equ 18                  ; no hay más archivos
@@ -71,15 +83,29 @@ disco_es:
 .otra:
         pop ax
         push ax
+        push bx
+        xor dx, dx                  ; el sector, contado desde el principio del
+        add ax, [u_base]            ; disco (32 bits): más donde empieza la
+        adc dx, [u_base+2]          ; partición
+        mov bx, ax
+        mov ax, dx                  ; entre los sectores de una pista, en dos pasos
         xor dx, dx
         div word [spp]
-        mov cl, dl
+        mov ax, bx
+        div word [spp]              ; AX = pista x caras + cara, DX = sector - 1
+        mov cx, dx
         inc cl
         xor dx, dx
-        div word [caras]
-        mov ch, al
+        div word [caras]            ; AX = cilindro, DX = cara
         mov dh, dl
-        mov dl, [unidad]
+        mov ch, al
+        mov al, ah                  ; (los dos bits altos del cilindro, con el sector)
+        ror al, 1
+        ror al, 1
+        and al, 0xC0
+        or cl, al
+        pop bx
+        mov dl, [u_bios]
         mov ah, [op13]
         mov al, 1
         int 0x13
@@ -172,17 +198,23 @@ sec_vuelca:
 ; =============================================================================
 ;  El disquete: sus medidas y su FAT
 ; =============================================================================
-; lee las medidas (la BPB) y la FAT. CF=1 si no hay disco que valga
+; lee las medidas (la BPB) de la unidad cargada. CF=1 si no hay disco que valga
 disco_ini:
         mov byte [disco_ok], 0
         mov byte [buf_sucio], 0
         mov byte [fat_sucia], 0
         mov word [buf_lba], 0xFFFF
-        mov word [spp], 18          ; (para leer el primer sector vale
-        mov word [caras], 2         ; cualquier medida: pista 0, cara 0)
+        mov word [fat_lba], 0xFFFF
+        cmp byte [u_bios], 0x80     ; (un disco duro ya tiene sus medidas: las
+        jae .lee                    ; de la BIOS)
+        mov word [spp], 18          ; (para leer el primer sector de un disquete
+        mov word [caras], 2         ; vale cualquier medida: pista 0, cara 0)
+.lee:
         xor ax, ax
         call sec_trae
         jc .mal
+        cmp word [sector+0x0B], 512 ; solo sectores de 512 octetos
+        jne .mal
         mov si, sector + 11         ; ¿es otro disco? Entonces, a su raíz
         mov di, bpb_ant
         mov cx, 51
@@ -195,12 +227,17 @@ disco_ini:
         mov cx, 51
         rep movsb
 .mismo:
+        cmp byte [u_bios], 0x80
+        jae .m1
         mov ax, [sector+0x18]
         mov [spp], ax
         mov ax, [sector+0x1A]
         mov [caras], ax
+.m1:
         mov al, [sector+0x0D]
         xor ah, ah
+        test ax, ax
+        jz .mal
         mov [spc], ax
         mov cl, 9
         shl ax, cl
@@ -212,35 +249,38 @@ disco_ini:
         mov [nfat], ax
         mov ax, [sector+0x16]
         mov [spf], ax
-        cmp ax, FAT_MAX / 512
-        ja .mal
         mul word [nfat]
         add ax, [res_sec]
         mov [raiz_ini], ax
         mov bx, [sector+0x11]
+        add bx, 15
         mov cl, 4
         shr bx, cl
         mov [raiz_sec], bx
         add ax, bx
         mov [datos_ini], ax
-        mov bx, [sector+0x13]       ; el último grupo: los sectores de datos
-        sub bx, ax                  ; entre los que tiene cada grupo, más 1
+        mov bx, [sector+0x13]       ; los sectores del disco: 16 bits (o, si es
+        test bx, bx                 ; 0, los 32 de más allá, que tienen que
+        jnz .tot                    ; caber en 16)
+        cmp word [sector+0x22], 0
+        jne .mal
+        mov bx, [sector+0x20]
+.tot:
+        sub bx, ax                  ; el último grupo: los sectores de datos
+        jbe .mal                    ; entre los que tiene cada grupo, más 1
         mov ax, bx
         xor dx, dx
         div word [spc]
         inc ax
         mov [max_clus], ax
-        cmp ax, 0x0FF0              ; (solo FAT12)
+        mov byte [u_fat16], 0       ; menos de 4.085 grupos: FAT12
+        cmp ax, 0x0FF6
+        jb .tipo
+        mov byte [u_fat16], 1
+        cmp ax, 0xFFF0
         jae .mal
-        mov cx, [spf]               ; la FAT, a la memoria
-        mov ax, [res_sec]
-        mov bx, fat
-.f:
-        call lee_sector
-        jc .mal
-        inc ax
-        add bx, 512
-        loop .f
+.tipo:
+        mov word [fat_pista], 2
         mov byte [disco_ok], 1
         clc
         ret
@@ -249,10 +289,141 @@ disco_ini:
         stc
         ret
 
+; AL = unidad (0 = A:) -> esa pasa a ser la cargada: se manda al disco lo
+; pendiente, se guardan las variables de la que había y se traen las suyas.
+; CF=1 y AX=E_UNIDAD si no existe. Conserva los demás registros
+unidad_pon:
+        cmp al, [unidad_act]
+        je .ya
+        cmp al, N_UNI
+        jae .mal
+        push bx
+        mov bl, al
+        xor bh, bh
+        cmp byte [u_hay+bx], 0
+        pop bx
+        je .mal
+        push ax
+        push bx
+        push cx
+        push si
+        push di
+        push es
+        push cs
+        pop es
+        push ax
+        call disco_vuelca
+        mov al, [unidad_act]
+        call .sitio
+        mov si, u_ini
+        mov cx, U_TAM
+        rep movsb
+        pop ax
+        mov [unidad_act], al
+        call .sitio
+        mov si, di
+        mov di, u_ini
+        mov cx, U_TAM
+        rep movsb
+        mov word [buf_lba], 0xFFFF
+        mov word [fat_lba], 0xFFFF
+        mov byte [buf_sucio], 0
+        mov byte [fat_sucia], 0
+        pop es
+        pop di
+        pop si
+        pop cx
+        pop bx
+        pop ax
+.ya:
+        clc
+        ret
+.mal:
+        mov ax, E_UNIDAD
+        stc
+        ret
+; (interna) AL = unidad -> DI = donde se guardan sus variables
+.sitio:
+        mov ah, U_TAM
+        mul ah
+        add ax, u_guardadas
+        mov di, ax
+        ret
+
+; mira qué unidades hay además de la de arranque: un segundo disquete (B:) y
+; la primera partición FAT del primer disco duro (C:)
+unidades_ini:
+        mov byte [u_hay], 1
+        int 0x11                    ; ¿dos disqueteras?
+        test al, 1
+        jz .duro
+        and al, 0xC0
+        jz .duro
+        mov byte [u_hay+1], 1
+        mov byte [u_guardadas + U_TAM + (u_bios - u_ini)], 1
+.duro:
+        mov ah, 8                   ; ¿hay disco duro? Sus medidas
+        mov dl, 0x80
+        int 0x13
+        jc .x
+        test dl, dl
+        jz .x
+        mov bx, u_guardadas + 2 * U_TAM
+        mov byte [bx + (u_bios - u_ini)], 0x80
+        and cx, 63
+        mov [bx + (spp - u_ini)], cx
+        mov cl, dh
+        xor ch, ch
+        inc cx
+        mov [bx + (caras - u_ini)], cx
+        mov byte [u_hay+2], 1
+        mov al, 2                   ; su tabla de particiones: el primer sector
+        call unidad_pon
+        xor ax, ax
+        mov bx, sector
+        call lee_sector
+        jc .no
+        cmp word [sector+510], 0xAA55
+        jne .no
+        mov si, sector + 0x1BE
+        mov cx, 4
+.p:
+        mov al, [si+4]              ; FAT12, FAT16, o FAT16 «grande» (que solo
+        cmp al, 1                   ; vale si no pasa de 32 megas)
+        je .esta
+        cmp al, 4
+        je .esta
+        cmp al, 6
+        je .esta
+        add si, 16
+        loop .p
+        jmp short .no
+.esta:
+        mov ax, [si+8]
+        mov [u_base], ax
+        mov ax, [si+10]
+        mov [u_base+2], ax
+        call disco_ini
+        jnc .vuelve
+.no:
+        mov byte [u_hay+2], 0
+.vuelve:
+        mov al, 2                   ; (de u_hay depende poder volver a A:)
+        push word [u_hay+2]
+        mov byte [u_hay+2], 1
+        xor al, al
+        call unidad_pon
+        pop ax
+        mov [u_hay+2], al
+.x:
+        ret
+
 ; antes de buscar nada en el disco: si no hay archivos abiertos y lleva más
 ; de dos segundos sin usarse, puede que hayan cambiado el disquete (un XT no
 ; avisa): se leen otra vez sus medidas y su FAT. CF=1 si no hay disco
 disco_fresco:
+        cmp byte [u_bios], 0x80     ; (un disco duro no se cambia)
+        jae .vale
         cmp byte [abiertos], 0
         jne .vale
         push es
@@ -270,21 +441,121 @@ disco_fresco:
         ret
 
 ; ---- la FAT ----
-; AX=grupo -> AX=el que le sigue (0FF8h o más: es el último). Conserva lo demás
+; trae el sector AX de la FAT a su búfer. CF=1 si falla el disco. Conserva
+; los registros
+fat_trae:
+        cmp ax, [fat_lba]
+        je .x
+        call fat_vuelca
+        jc .x1
+        push bx
+        mov bx, fat
+        call lee_sector
+        pop bx
+        jc .mal
+        mov [fat_lba], ax
+.x:
+        clc
+.x1:
+        ret
+.mal:
+        mov word [fat_lba], 0xFFFF
+        stc
+        ret
+; escribe el sector de la FAT que hay en el búfer (si ha cambiado) en todas
+; las copias de la FAT. CF=1, AX=error
+fat_vuelca:
+        cmp byte [fat_sucia], 0
+        je .x
+        push bx
+        push cx
+        mov byte [fat_sucia], 0
+        mov ax, [fat_lba]
+        mov bx, fat
+        mov cx, [nfat]
+.c:
+        call escribe_sector
+        jc .mal
+        add ax, [spf]
+        loop .c
+        clc
+.mal:
+        pop cx
+        pop bx
+        ret
+.x:
+        clc
+        ret
+; (interna) BX = un octeto de la FAT, contado desde su principio -> SI = su
+; sitio en el búfer. CF=1 si falla el disco. Conserva lo demás
+fat_octeto:
+        push ax
+        push cx
+        mov ax, bx
+        mov cl, 9
+        shr ax, cl
+        add ax, [res_sec]
+        call fat_trae
+        mov si, bx
+        and si, 511
+        lea si, [fat+si]
+        pop cx
+        pop ax
+        ret
+; AX=grupo -> AX=el que le sigue (menos de 2 o más que [max_clus]: es el
+; último). Conserva lo demás
 fat_lee:
         push bx
         push cx
-        mov bx, ax
+        push si
+        cmp byte [u_fat16], 0
+        je .doce
+        mov bx, ax                  ; FAT16: una palabra por grupo
+        shl bx, 1
+        jc .alta
+        call fat_octeto
+        jc .mal
+        jmp short .p16
+.alta:
+        push ax                     ; (más allá de los primeros 64 K de la FAT)
+        mov ax, bx
+        mov cl, 9
+        shr ax, cl
+        add ax, 128
+        add ax, [res_sec]
+        call fat_trae
+        pop ax
+        jc .mal
+        mov si, bx
+        and si, 511
+        lea si, [fat+si]
+.p16:
+        mov ax, [si]
+        jmp short .x
+.doce:
+        mov bx, ax                  ; FAT12: doce bits, en el octeto n*3/2
         shr bx, 1
         add bx, ax
-        mov bx, [fat+bx]
-        test al, 1
+        mov ch, al                  ; (¿par o impar?)
+        call fat_octeto
+        jc .mal
+        mov al, [si]
+        inc bx
+        call fat_octeto             ; (el segundo puede caer en otro sector)
+        jc .mal
+        mov ah, [si]
+        test ch, 1
         jz .par
         mov cl, 4
-        shr bx, cl
+        shr ax, cl
 .par:
-        and bx, 0x0FFF
-        mov ax, bx
+        and ax, 0x0FFF
+        cmp ax, 0x0FF8              ; el fin de cadena, igual en las dos FAT
+        jb .x
+.mal:
+        mov ax, 0xFFFF
+.x:
+        pop si
         pop cx
         pop bx
         ret
@@ -294,52 +565,102 @@ fat_pon:
         push bx
         push cx
         push dx
+        push si
+        cmp byte [u_fat16], 0
+        je .doce
+        mov bx, ax
+        shl bx, 1
+        jc .alta
+        call fat_octeto
+        jc .x
+        jmp short .p16
+.alta:
+        mov ax, bx
+        mov cl, 9
+        shr ax, cl
+        add ax, 128
+        add ax, [res_sec]
+        call fat_trae
+        jc .x
+        mov si, bx
+        and si, 511
+        lea si, [fat+si]
+.p16:
+        mov [si], dx
+        mov byte [fat_sucia], 1
+        jmp short .x
+.doce:
         mov bx, ax
         shr bx, 1
         add bx, ax
         and dx, 0x0FFF
         test al, 1
-        jz .par
-        mov cl, 4
-        shl dx, cl
-        and word [fat+bx], 0x000F
-        jmp short .p
-.par:
-        and word [fat+bx], 0xF000
-.p:
-        or [fat+bx], dx
+        jnz .impar
+        call fat_octeto             ; par: el octeto entero y la mitad baja del
+        jc .x                       ; siguiente
+        mov [si], dl
         mov byte [fat_sucia], 1
+        inc bx
+        call fat_octeto
+        jc .x
+        and byte [si], 0xF0
+        or [si], dh
+        mov byte [fat_sucia], 1
+        jmp short .x
+.impar:
+        mov cl, 4                   ; impar: la mitad alta de uno y el siguiente
+        shl dx, cl                  ; entero
+        call fat_octeto
+        jc .x
+        and byte [si], 0x0F
+        or [si], dl
+        mov byte [fat_sucia], 1
+        inc bx
+        call fat_octeto
+        jc .x
+        mov [si], dh
+        mov byte [fat_sucia], 1
+.x:
+        pop si
         pop dx
         pop cx
         pop bx
         pop ax
         ret
-; busca un grupo libre y lo marca como último de una cadena -> AX. CF=1 si
-; el disco está lleno
+; busca un grupo libre (desde el último que se dio, para no repasar la FAT
+; entera cada vez) y lo marca como último de una cadena -> AX. CF=1 si el
+; disco está lleno
 fat_nuevo:
         push bx
+        push cx
         push dx
-        mov bx, 2
+        mov cx, [max_clus]
+        dec cx                      ; cuántos se miran: todos
+        mov bx, [fat_pista]
 .b:
         cmp bx, [max_clus]
-        ja .lleno
+        jbe .mira
+        mov bx, 2
+.mira:
         mov ax, bx
         call fat_lee
         test ax, ax
         jz .libre
         inc bx
-        jmp .b
-.libre:
-        mov ax, bx
-        mov dx, 0x0FFF
-        call fat_pon
-        clc
-        jmp short .x
-.lleno:
+        loop .b
         mov ax, E_LLENO
         stc
+        jmp short .x
+.libre:
+        mov ax, bx
+        mov dx, 0xFFFF
+        call fat_pon
+        inc bx
+        mov [fat_pista], bx
+        clc
 .x:
         pop dx
+        pop cx
         pop bx
         ret
 ; suelta la cadena que empieza en el grupo AX
@@ -352,6 +673,10 @@ fat_suelta:
         jb .x
         cmp ax, [max_clus]
         ja .x
+        cmp ax, [fat_pista]         ; (y por ahí se vuelve a buscar)
+        jae .s
+        mov [fat_pista], ax
+.s:
         mov bx, ax
         call fat_lee
         xchg ax, bx                 ; AX=este, BX=el siguiente
@@ -363,36 +688,6 @@ fat_suelta:
         pop dx
         pop bx
         pop ax
-        ret
-; escribe la FAT (si ha cambiado) en todas sus copias. CF=1, AX=error
-fat_vuelca:
-        cmp byte [fat_sucia], 0
-        je .x
-        push bx
-        push cx
-        push dx
-        mov ax, [res_sec]
-        mov dx, [nfat]
-.copia:
-        mov bx, fat
-        mov cx, [spf]
-.s:
-        call escribe_sector
-        jc .mal
-        inc ax
-        add bx, 512
-        loop .s
-        dec dx
-        jnz .copia
-        mov byte [fat_sucia], 0
-        clc
-.mal:
-        pop dx
-        pop cx
-        pop bx
-        ret
-.x:
-        clc
         ret
 ; AX=grupo -> AX=su primer sector
 clus_lba:
@@ -689,13 +984,13 @@ nombre_fat:
 ; contiene lo último, y nom11 = lo último (vacío si la ruta acaba en «\»).
 ; CF=1 y AX=E_RUTA si algún directorio del camino no existe
 ruta_resuelve:
-        call disco_fresco
-        jc .x
         mov si, ruta
-        cmp byte [si+1], ':'        ; la unidad: solo hay una
-        jne .u
-        add si, 2
-.u:
+        call ruta_unidad
+        jc .x
+        push si                     ; (si relee el disco, no conserva nada)
+        call disco_fresco
+        pop si
+        jc .x
         mov ax, [dir_act]
         cmp byte [si], '\'
         je .raiz
@@ -743,6 +1038,19 @@ ruta_resuelve:
         stc
 .x:
         ret
+
+; la unidad de la ruta de SI («C:», o la de trabajo si no la dice) pasa a ser
+; la cargada, y SI queda detrás de ella. CF=1, AX=E_UNIDAD si no existe
+ruta_unidad:
+        mov al, [unidad_def]
+        cmp byte [si+1], ':'
+        jne .u
+        mov al, [si]
+        call mayus
+        sub al, 'A'
+        add si, 2
+.u:
+        jmp unidad_pon
 
 ; copia la ruta de ES:SI (de quien llama) a `ruta`. Conserva los registros
 ruta_copia:
@@ -1045,6 +1353,8 @@ h_grupo:
 ; donde va, de o en [es_seg]:[es_off] -> AX=los que han sido (menos si se
 ; acaba el archivo o el disco). CF=1, AX=error si falla el disco
 h_es:
+        mov al, [bx+H_UNI]
+        call unidad_pon
         mov [es_queda], cx
         mov word [es_hecho], 0
 .otro:
@@ -1158,6 +1468,8 @@ h_es:
 ; deja el archivo de la ficha BX del tamaño de por donde va (escribir cero
 ; octetos): suelta lo que sobra de la cadena, o la alarga. CF=1, AX=error
 h_corta:
+        mov al, [bx+H_UNI]
+        call unidad_pon
         mov byte [bx+H_SUCIO], 1
         mov word [bx+H_CCLU], 0
         mov ax, [bx+H_POS]
@@ -1183,12 +1495,9 @@ h_corta:
         jc .mal
         push ax
         call fat_lee                ; lo de detrás, fuera
-        cmp ax, 0x0FF8
-        jae .ult
         call fat_suelta
-.ult:
         pop ax
-        mov dx, 0x0FFF
+        mov dx, 0xFFFF
         call fat_pon
         clc
         ret
@@ -1200,6 +1509,8 @@ h_corta:
 ; cierra el archivo de la ficha BX: pone al día su entrada del directorio y
 ; lo manda todo al disco. CF=1, AX=error
 h_cierra:
+        mov al, [bx+H_UNI]
+        call unidad_pon
         cmp bx, [red_sal]           ; (si era la salida o la entrada de la
         jne .r1                     ; consola, deja de serlo)
         mov word [red_sal], 0
