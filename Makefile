@@ -303,6 +303,12 @@ $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 # que los de «Productividad» (el 4: Pluma, Cuentas y Facturas) van al final
 # para que ese grupo nuevo salga detrás de «Sonido» y no le quite su sitio.
 # (tools/mkusb.py recibe esta lista y copia en este mismo orden)
+# datos comunes de los programas de Productividad, que van en \HISPADOS\PROGS al
+# lado de los .HVP (TIPOS.DAT: los tipos de letra; ver docs/TIPOS-DE-LETRA.md).
+# Solo en la instalación (imagen USB y .PAQ, por tools/mkusb.py), NO en el
+# disquete de arranque: no cabe con sitio para guardar (Pluma, sin él, usa la letra
+# «Hispa»). Irá en el disquete de Oficina cuando se divida la distribución.
+PROGSDAT = programas/comun/TIPOS.DAT
 HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP \
        $(B)/PLUMA.HVP $(B)/CUENTAS.HVP $(B)/FACTURAS.HVP
 # [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
@@ -311,7 +317,7 @@ $(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Pluma, el procesador de textos (Productividad: el 4 de HVP_CABECERA)
-$(B)/PLUMA.HVP: programas/pluma.asm $(HVPDEP) | $(B)
+$(B)/PLUMA.HVP: programas/pluma.asm $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Cuentas, la hoja de cálculo (Productividad: el 4 de HVP_CABECERA)
 $(B)/CUENTAS.HVP: programas/cuentas.asm $(wildcard programas/cuentas/*.inc) $(HVPDEP) | $(B)
@@ -472,8 +478,8 @@ $(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUE
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(wildcard usb/* floppy/*)
-	HVPA="$(notdir $(HVPA))" python3 tools/mkusb.py
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(PROGSDAT) $(wildcard usb/* floppy/*)
+	HVPA="$(notdir $(HVPA))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 run: $(IMG)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy -boot a

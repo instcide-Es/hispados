@@ -103,6 +103,10 @@ def main():
     hvpa = os.environ.get('HVPA', '').split()
     for f in hvpa:
         cp(os.path.join(B, f), 'HISPADOS/PROGS/' + f)
+    # los datos comunes de esos programas (PROGSDAT del Makefile: TIPOS.DAT, los
+    # tipos de letra de Productividad), al lado de los .HVP
+    for f in os.environ.get('PROGSDAT', '').split():
+        cp(f, 'HISPADOS/PROGS/' + os.path.basename(f))
     for f in sorted(os.listdir(B)):
         if f.endswith('.HVP') and f not in hvpa:
             if f in HVPSIS:
