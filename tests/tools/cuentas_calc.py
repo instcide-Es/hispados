@@ -7,27 +7,32 @@ Toma programas/cuentas/calculo.inc TAL CUAL (el valor de las celdas, las
 fórmulas, la coma fija de 64 bits y leer y escribir números), lo ensambla con
 NASM dentro de un programa de Linux de 32 bits que hace de hoja (se le dan
 celdas y se le preguntan valores por la entrada) y compara cada respuesta, el
-valor en cienmillonésimas y el texto que se vería en la celda, con un modelo
+valor en cienmillonésimas y el texto que se vería en la celda (con su formato
+de número, si lo tiene), o el texto si la fórmula da un texto, con un modelo
 exacto hecho aquí con enteros de Python: casos elegidos y miles de fórmulas
-al azar.
+al azar, con todas las funciones.
 """
-import os, random, re, subprocess, sys, tempfile
+import datetime, math, os, random, re, subprocess, sys, tempfile
 
 RAIZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
-ESC, VER, CARS, NCOL, NFIL, PROF = 10**8, 4, 10, 26, 100, 400
+ESC, VER, CARS, NCOL, NFIL, PROF = 10**8, 4, 10, 64, 1000, 400
+DIA0 = datetime.date(1899, 12, 30)
+HOY = (datetime.date(2026, 11, 16) - DIA0).days     # lo que contesta HOY() en la prueba
+CAD_MAX = 255
 LIM = 2**63
 
 ARNES = r'''
         bits 32
         cpu 386
-NCOL        equ 26
-NFIL        equ 100
-CEL_CARS    equ 10
+NCOL        equ 64
+NFIL        equ 1000
 CEL_MAX     equ 128
         section .text
         global _start
 _start:
         cld
+        mov dword [nf_cars], 10     ; lo que cabe en una celda de las de siempre
+        mov dword [moneda_txt], 'EUR'
 .linea:
         mov edi, lin                ; una línea de la entrada, acabada en 0
 .c:
@@ -51,7 +56,9 @@ _start:
         je .vaciar
         cmp byte [esi], '?'         ; «?B7»: lo que vale y cómo se ve
         je .pregunta
-        call ref                    ; «B7 texto»: el texto de la celda
+        cmp byte [esi], '%'         ; «%640»: el formato con el que se ve
+        je .formato
+        call lee_ref                ; «B7 texto»: el texto de la celda
         inc esi
         push esi
         call cel_puntero
@@ -63,6 +70,21 @@ _start:
         test al, al
         jnz .cp
         call calc_olvida            ; (ha cambiado una celda)
+        jmp .linea
+.formato:
+        inc esi
+        xor eax, eax
+.fo:
+        movzx ebx, byte [esi]
+        sub ebx, '0'
+        cmp ebx, 9
+        ja .fof
+        imul eax, 10
+        add eax, ebx
+        inc esi
+        jmp .fo
+.fof:
+        mov [fmt_w], eax
         jmp .linea
 .vaciar:
         mov edi, cel_txt
@@ -81,7 +103,7 @@ _start:
 .p1:
         mov byte [lin], 0
 .p2:
-        call ref
+        call lee_ref
         cmp byte [lin], '?'         ; («??B7»: sin olvidar lo ya calculado)
         je .calc
         call calc_olvida
@@ -100,9 +122,17 @@ _start:
         mov bl, 'V'
         cmp byte [cv_tipo], 0
         je .letra
-        mov bl, 'T'
         cmp byte [cv_tipo], 2
         jne .val
+        mov esi, eax                ; un texto: «T» y el texto
+        mov al, 'T'
+        stosb
+.tx:
+        lodsb
+        test al, al
+        jz .nl
+        stosb
+        jmp .tx
 .letra:
         mov [edi], bl
         inc edi
@@ -124,7 +154,8 @@ _start:
         mov al, ' '
         stosb
         mov eax, [v]
-        call num_fmt                ; y como se ve en la celda
+        mov ebx, [fmt_w]
+        call fmt_celda              ; y como se ve en la celda
 .z:
         cmp byte [edi], 0
         je .nl
@@ -145,23 +176,9 @@ _start:
         xor ebx, ebx
         int 0x80
 hex         db "0123456789ABCDEF"
-; ESI=«B7» -> ECX=columna EDX=fila, y ESI detrás
-ref:
-        movzx ecx, byte [esi]
-        sub ecx, 'A'
-        inc esi
-        xor edx, edx
-.l:
-        movzx eax, byte [esi]
-        sub eax, '0'
-        cmp eax, 9
-        ja .f
-        imul edx, 10
-        add edx, eax
-        inc esi
-        jmp .l
-.f:
-        dec edx
+; el día de hoy, para HOY(): siempre el mismo (el 16/11/2026)
+hoy_serie:
+        mov eax, HOY
         ret
 cel_puntero:
         push eax
@@ -175,7 +192,8 @@ cel_puntero:
 %include "calculo.inc"
         section .bss
 lin         resb 512
-salida         resb 128
+salida      resb 512
+fmt_w       resd 1
 v           resd 2
 cel_txt     resb NCOL * NFIL * CEL_MAX
 '''
@@ -187,8 +205,9 @@ def hacer(tmp):
     asm = os.path.join(tmp, 'calc.asm')
     # (en .val, EAX se gasta al escribir el hexadecimal: num_fmt lo toma de v)
     open(asm, 'w', encoding='cp437').write(
-        ARNES.replace('        mov eax, [v]\n        call num_fmt',
-                      '        mov eax, [v]\n        mov edx, [vv]\n        call num_fmt')
+        ARNES.replace('HOY', str(HOY))
+             .replace('        mov eax, [v]\n        mov ebx, [fmt_w]',
+                      '        mov eax, [v]\n        mov edx, [vv]\n        mov ebx, [fmt_w]')
              .replace('        mov [v+4], edx\n        mov ecx, 16',
                       '        mov [v+4], edx\n        mov [vv], edx\n        mov ecx, 16')
              .replace('v           resd 2', 'v           resd 2\nvv          resd 1'))
@@ -198,6 +217,8 @@ def hacer(tmp):
 
 
 # ---- el modelo: lo mismo, con enteros de Python ----
+# Un valor es None (vacío), un entero (un número, en cienmillonésimas) o un
+# str (un texto).
 class Err(Exception):
     def __init__(self, n=1):
         self.n = n
@@ -221,6 +242,22 @@ def suma(x):
     if not -LIM <= x < LIM:
         raise Err()
     return x
+
+
+def mul(x, y):
+    return mag(rdiv(x * y, ESC))
+
+
+def div(x, y):
+    if y == 0:
+        raise Err()
+    return mag(rdiv(x * ESC, y))
+
+
+def raiz(x):
+    n = x * ESC
+    r = math.isqrt(n)
+    return r + 1 if n - r * r > r else r
 
 
 def lee_num(t, i):
@@ -266,36 +303,119 @@ def lee_num(t, i):
     return acc, i
 
 
+FECHA = re.compile(r'([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})(?![0-9])')
+REF = re.compile(r'(\$?)([A-Za-z]{1,2})(\$?)([0-9]+)')
+
+
+def cad_a_num(t):
+    """como cad_a_num: el número (o la fecha) que es ese texto, o None"""
+    s = t.lstrip(' ')
+    m = FECHA.match(s)
+    if m:
+        d, me, a = (int(g) for g in m.groups())
+        try:
+            dia = datetime.date(a, me, d) if a >= 1900 else None
+        except ValueError:
+            dia = None
+        if dia is not None:
+            return (dia - DIA0).days * ESC if s[m.end():].strip(' ') == '' else None
+    s = s.rstrip(' ')
+    neg = s[:1] == '-'
+    if s[:1] in ('-', '+'):
+        s = s[1:]
+    r = lee_num(s, 0)
+    if r is None or r[1] != len(s):
+        return None
+    # (espacios delante y detrás valen; entre el signo y el número, no)
+    return -r[0] if neg else r[0]
+
+
+MAY = str.maketrans('abcdefghijklmnopqrstuvwxyzñéüç', 'ABCDEFGHIJKLMNOPQRSTUVWXYZÑÉÜÇ')
+MIN = str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZÑÉÜÇ', 'abcdefghijklmnopqrstuvwxyzñéüç')
+
+
+def cad_cmp(a, b):
+    a, b = a.translate(MAY).encode('cp437'), b.translate(MAY).encode('cp437')
+    return (a > b) - (a < b)
+
+
+def num(v):
+    """en una cuenta: el vacío y el texto que no es un número valen 0"""
+    if v is None:
+        return 0
+    if isinstance(v, str):
+        n = cad_a_num(v)
+        return 0 if n is None else n
+    return v
+
+
+def num_fijo(x, dec, sin_ceros=False, millares=False):
+    neg, x = x < 0, abs(x)
+    q = rdiv(x, 10 ** (8 - dec))
+    ent, d = divmod(q, 10 ** dec)
+    s = str(ent)
+    if millares:
+        s = '.'.join(reversed([s[::-1][i:i + 3][::-1] for i in range(0, len(s), 3)]))
+    if dec:
+        s += ',' + '%0*d' % (dec, d)
+        if sin_ceros:
+            s = s.rstrip('0').rstrip(',')
+    return ('-' if neg and q else '') + s
+
+
+def a_cad(v):
+    if v is None:
+        return ''
+    return v if isinstance(v, str) else num_fijo(v, 8, True)
+
+
+def compara(a, b):
+    if a is None:
+        if b is None:
+            return 0
+        a = '' if isinstance(b, str) else 0
+    if b is None:
+        b = '' if isinstance(a, str) else 0
+    if isinstance(a, str) != isinstance(b, str):
+        return 1 if isinstance(a, str) else -1        # un número es menor que un texto
+    return cad_cmp(a, b) if isinstance(a, str) else (a > b) - (a < b)
+
+
+def cumple(r, op):
+    return (r == 0, r != 0, r < 0, r > 0, r <= 0, r >= 0)[op]
+
+
+def colnum(letras):
+    letras = letras.upper()
+    return ord(letras) - 65 if len(letras) == 1 else (ord(letras[0]) - 64) * 26 + ord(letras[1]) - 65
+
+
+def colnom(c):
+    return chr(65 + c) if c < 26 else chr(64 + c // 26) + chr(65 + c % 26)
+
+
 class Hoja:
     def __init__(self):
         self.c = {}
 
     def valor(self, col, fil, pila=(), prof=0):
-        """-> (valor, tipo): 0 vacía, 1 número, 2 texto"""
         if not (0 <= col < NCOL and 0 <= fil < NFIL):
             raise Err(3)
         if (col, fil) in pila:
             raise Err(2)
         t = self.c.get((col, fil), '')
         if t == '':
-            return 0, 0
+            return None
         if t[0] != '=':
-            s = t.strip(' ')
-            neg = s[:1] == '-'
-            if s[:1] in ('-', '+'):
-                s = s[1:]
-            r = lee_num(s, 0)
-            if r is None or r[1] != len(s):
-                return 0, 2
-            # (espacios delante y detrás valen; entre el signo y el número, no)
-            return (-r[0] if neg else r[0]), 1
+            n = cad_a_num(t)
+            return t if n is None else n
         if prof >= PROF:
             raise Err()
         p = Formula(self, t[1:], pila + ((col, fil),), prof + 1)
         x = p.expr()
         if p.car() != '':
             raise Err()
-        return x, 1
+        return 0 if x is None else x
 
 
 class Formula:
@@ -308,43 +428,86 @@ class Formula:
         return self.t[self.i] if self.i < len(self.t) else ''
 
     def expr(self):
+        x = self.union()
+        while True:
+            c, sig = self.car(), self.t[self.i + 1:self.i + 2]
+            if c == '=':
+                op, n = 0, 1
+            elif c == '<':
+                op, n = (1, 2) if sig == '>' else (4, 2) if sig == '=' else (2, 1)
+            elif c == '>':
+                op, n = (5, 2) if sig == '=' else (3, 1)
+            else:
+                return x
+            self.i += n
+            y = self.union()
+            x = ESC if cumple(compara(x, y), op) else 0
+
+    def union(self):
+        x = self.suma()
+        while self.car() == '&':
+            self.i += 1
+            a = a_cad(x)
+            x = (a + a_cad(self.suma()))[:CAD_MAX]
+        return x
+
+    def suma(self):
         x = self.term()
         while self.car() in ('+', '-') and self.car():
             op = self.car(); self.i += 1
-            y = self.term()
+            x = num(x)
+            y = num(self.term())
             x = suma(x + y if op == '+' else x - y)
         return x
 
     def term(self):
-        x = self.factor()
+        x = self.pot()
         while self.car() in ('*', '/') and self.car():
             op = self.car(); self.i += 1
-            y = self.factor()
-            x = self.mul(x, y) if op == '*' else self.div(x, y)
+            x = num(x)
+            y = num(self.pot())
+            x = mul(x, y) if op == '*' else div(x, y)
+        return x
+
+    def pot(self):
+        x = self.factor()
+        while self.car() == '^':
+            self.i += 1
+            x = num(x)
+            x = self.potencia(x, num(self.factor()))
         return x
 
     @staticmethod
-    def mul(x, y):
-        return mag(rdiv(x * y, ESC))
-
-    @staticmethod
-    def div(x, y):
-        if y == 0:
+    def potencia(b, e):
+        neg, e = e < 0, abs(e)
+        n, r = divmod(e, ESC)
+        if n >= 2 ** 32 or r not in (0, ESC // 2):
             raise Err()
-        return mag(rdiv(x * ESC, y))
+        res, base = ESC, b
+        while n:
+            if n & 1:
+                res = mul(res, base)
+            n >>= 1
+            if n:
+                base = mul(base, base)
+        if r:
+            if b < 0:
+                raise Err()
+            res = mul(res, raiz(b))
+        return div(ESC, res) if neg else res
 
     def factor(self):
         c = self.car()
         if c == '-':
             self.i += 1
-            return -self.factor()
+            return -num(self.factor())
         if c == '+':
             self.i += 1
-            return self.factor()
+            return num(self.factor())
         x = self.primario()
         while self.car() == '%':
             self.i += 1
-            x = self.div(x, 100 * ESC)
+            x = div(num(x), 100 * ESC)
         return x
 
     def cierra(self):
@@ -357,6 +520,27 @@ class Formula:
             raise Err()
         self.i += 1
 
+    def salta(self):
+        """un argumento que no se calcula: hasta su «;» o su «)»"""
+        t, i, hondo = self.t, self.i, 0
+        while i < len(t):
+            c = t[i]
+            if c == '"':
+                i = t.find('"', i + 1)
+                if i < 0:
+                    i = len(t)
+                    break
+            elif c == '(':
+                hondo += 1
+            elif c == ')':
+                if hondo == 0:
+                    break
+                hondo -= 1
+            elif c == ';' and hondo == 0:
+                break
+            i += 1
+        self.i = i
+
     def primario(self):
         c = self.car()
         if c == '(':
@@ -364,40 +548,66 @@ class Formula:
             x = self.expr()
             self.cierra()
             return x
+        if c == '"':
+            i, s = self.i + 1, ''
+            while True:
+                if i >= len(self.t):
+                    raise Err()
+                if self.t[i] == '"':
+                    if self.t[i + 1:i + 2] != '"':
+                        break
+                    i += 1
+                s += self.t[i]
+                i += 1
+            self.i = i + 1
+            return s[:CAD_MAX]
+        if c == '#':
+            if self.t[self.i:self.i + 4] == '#REF':
+                raise Err(3)
+            raise Err()
         if c and (c in ',.' or c in '0123456789'):
             r = lee_num(self.t, self.i)
             if r is None:
                 raise Err()
             self.i = r[1]
             return r[0]
-        if c and c.isascii() and c.isalpha():
+        if c == '$' or (c and c.isascii() and c.isalpha()):
             return self.nombre()
         raise Err()
 
+    def args1(self):
+        self.abre()
+        x = num(self.expr())
+        self.cierra()
+        return x
+
+    def args2(self):
+        self.abre()
+        x = num(self.expr())
+        if self.car() != ';':
+            raise Err()
+        self.i += 1
+        y = num(self.expr())
+        self.cierra()
+        return x, y
+
     def nombre(self):
-        j = self.i
-        while j < len(self.t) and self.t[j].isascii() and self.t[j].isalpha():
-            j += 1
-        nom = self.t[self.i:j].upper()
-        if len(nom) == 1 and j < len(self.t) and self.t[j] in '0123456789':
-            col, fil = self.ref()
-            return self.h.valor(col, fil, self.pila, self.prof)[0]
-        self.i = j
-        if nom in ('SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR'):
+        m = REF.match(self.t, self.i)
+        if m:
+            self.i = m.end()
+            col, fil = colnum(m.group(2)), int(m.group(4)) - 1
+            if not (0 <= col < NCOL and 0 <= fil < NFIL):
+                raise Err(3)
+            return self.h.valor(col, fil, self.pila, self.prof)
+        m = re.compile(r'[A-Za-z.]*').match(self.t, self.i)
+        self.i = m.end()
+        nom = m.group().upper()[:11]
+        if nom in ('SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR', 'CONTARA'):
             return self.rangos(nom)
         if nom == 'ABS':
-            self.abre()
-            x = self.expr()
-            self.cierra()
-            return abs(x)
+            return abs(self.args1())
         if nom == 'REDONDEAR':
-            self.abre()
-            x = self.expr()
-            if self.car() != ';':
-                raise Err()
-            self.i += 1
-            d = self.expr()
-            self.cierra()
+            x, d = self.args2()
             if d < 0 or d % ESC or d // ESC > 8:
                 raise Err()
             p = 10 ** (8 - d // ESC)
@@ -405,56 +615,188 @@ class Formula:
             if r >= LIM:
                 raise Err()
             return -r if x < 0 else r
+        if nom == 'SI':
+            self.abre()
+            c = num(self.expr())
+            if self.car() != ';':
+                raise Err()
+            self.i += 1
+            if c:
+                x = self.expr()
+                if self.car() == ';':
+                    self.i += 1
+                    self.salta()
+            else:
+                self.salta()
+                x = 0
+                if self.car() == ';':
+                    self.i += 1
+                    x = self.expr()
+            self.cierra()
+            return x
+        if nom in ('Y', 'O'):
+            self.abre()
+            r = nom == 'Y'
+            while True:
+                v = num(self.expr()) != 0
+                r = (r and v) if nom == 'Y' else (r or v)
+                if self.car() != ';':
+                    break
+                self.i += 1
+            self.cierra()
+            return ESC if r else 0
+        if nom == 'NO':
+            return 0 if self.args1() else ESC
+        if nom == 'VERDADERO':
+            return ESC
+        if nom == 'FALSO':
+            return 0
+        if nom == 'ENTERO':
+            return mag(self.args1() // ESC * ESC)
+        if nom == 'RAIZ':
+            x = self.args1()
+            if x < 0:
+                raise Err()
+            return raiz(x)
+        if nom == 'POTENCIA':
+            return self.potencia(*self.args2())
+        if nom == 'RESIDUO':
+            a, b = self.args2()
+            if b == 0:
+                raise Err()
+            return a % b
+        if nom in ('CONTAR.SI', 'SUMAR.SI'):
+            return self.si_rango(nom == 'SUMAR.SI')
+        if nom == 'HOY':
+            self.abre()
+            self.cierra()
+            return HOY * ESC
+        if nom == 'CONCATENAR':
+            self.abre()
+            s = a_cad(self.expr())
+            while self.car() == ';':
+                self.i += 1
+                s = (s + a_cad(self.expr()))[:CAD_MAX]
+            self.cierra()
+            return s
+        if nom in ('LARGO', 'MAYUSC', 'MINUSC'):
+            self.abre()
+            s = a_cad(self.expr())
+            self.cierra()
+            return len(s) * ESC if nom == 'LARGO' else s.translate(MAY if nom == 'MAYUSC' else MIN)
         raise Err()
 
-    def ref(self):
-        c = self.car()
-        if not (c and c.isascii() and c.isalpha()):
-            raise Err()
-        col = ord(c.upper()) - 65
-        self.i += 1
-        j = self.i
-        while j < len(self.t) and self.t[j] in '0123456789':
+    def rango_lee(self):
+        """-> (c1, f1, c2, f2), o None si lo que viene no es un rango ni una
+        celda que sea el argumento entero (y entonces no gasta nada)"""
+        self.car()
+        t = self.t
+        m = REF.match(t, self.i)
+        if not m:
+            return None
+        j = m.end()
+        while t[j:j + 1] == ' ':
             j += 1
-        if j == self.i:
-            raise Err()
-        fil = int(self.t[self.i:j]) - 1
-        self.i = j
-        if not 0 <= fil < NFIL:
+        c1, f1 = colnum(m.group(2)), int(m.group(4)) - 1
+        if t[j:j + 1] == ':':
+            j += 1
+            while t[j:j + 1] == ' ':
+                j += 1
+            m2 = REF.match(t, j)
+            if not m2:
+                self.i = j
+                raise Err()
+            self.i = m2.end()
+            c2, f2 = colnum(m2.group(2)), int(m2.group(4)) - 1
+        elif t[j:j + 1] in (';', ')') and j < len(t):
+            self.i = j
+            c2, f2 = c1, f1
+        else:
+            return None
+        if not (0 <= c1 < NCOL and 0 <= c2 < NCOL and 0 <= f1 < NFIL and 0 <= f2 < NFIL):
             raise Err(3)
-        return col, fil
+        return min(c1, c2), min(f1, f2), max(c1, c2), max(f1, f2)
 
     def rangos(self, nom):
-        n, s, ext = 0, 0, 0
+        e = {'n': 0, 'na': 0, 's': 0, 'ext': 0}
+
+        def cuenta(v):
+            if v is None:
+                return
+            e['na'] += 1
+            if isinstance(v, str):
+                return
+            e['n'] += 1
+            e['s'] = suma(e['s'] + v)
+            if e['n'] == 1 or (nom == 'MAX' and v > e['ext']) or (nom == 'MIN' and v < e['ext']):
+                e['ext'] = v
+
         self.abre()
         while True:
-            c1, f1 = self.ref()
-            c2, f2 = c1, f1
-            if self.car() == ':':
-                self.i += 1
-                c2, f2 = self.ref()
-            c1, c2 = min(c1, c2), max(c1, c2)
-            f1, f2 = min(f1, f2), max(f1, f2)
-            for f in range(f1, f2 + 1):
-                for c in range(c1, c2 + 1):
-                    v, tipo = self.h.valor(c, f, self.pila, self.prof)
-                    if tipo != 1:
-                        continue
-                    n += 1
-                    s = suma(s + v)
-                    if n == 1 or (nom == 'MAX' and v > ext) or (nom == 'MIN' and v < ext):
-                        ext = v
+            r = self.rango_lee()
+            if r:
+                for f in range(r[1], r[3] + 1):
+                    for c in range(r[0], r[2] + 1):
+                        cuenta(self.h.valor(c, f, self.pila, self.prof))
+            else:
+                cuenta(self.expr())
             if self.car() != ';':
                 break
             self.i += 1
         self.cierra()
         if nom == 'SUMA':
-            return s
+            return e['s']
         if nom == 'PROMEDIO':
-            return self.div(s, n * ESC)
+            return div(e['s'], e['n'] * ESC)
         if nom == 'CONTAR':
-            return n * ESC
-        return ext
+            return e['n'] * ESC
+        if nom == 'CONTARA':
+            return e['na'] * ESC
+        return e['ext']
+
+    def si_rango(self, sumar):
+        self.abre()
+        r = self.rango_lee()
+        if r is None or self.car() != ';':
+            raise Err()
+        self.i += 1
+        crit, op = self.expr(), 0
+        if isinstance(crit, str):
+            s = crit
+            if s[:1] == '=':
+                s = s[1:]
+            elif s[:1] == '<':
+                op, s = (1, s[2:]) if s[1:2] == '>' else (4, s[2:]) if s[1:2] == '=' else (2, s[1:])
+            elif s[:1] == '>':
+                op, s = (5, s[2:]) if s[1:2] == '=' else (3, s[1:])
+            n = cad_a_num(s)
+            crit = s if n is None else n
+        else:
+            crit = num(crit)
+        sc, sf = r[0], r[1]
+        if sumar and self.car() == ';':
+            self.i += 1
+            r2 = self.rango_lee()
+            if r2 is None:
+                raise Err()
+            sc, sf = r2[0], r2[1]
+        self.cierra()
+        n, s = 0, 0
+        for f in range(r[1], r[3] + 1):
+            for c in range(r[0], r[2] + 1):
+                v = self.h.valor(c, f, self.pila, self.prof)
+                if v is not None and isinstance(v, str) == isinstance(crit, str):
+                    ok = cumple(cad_cmp(v, crit) if isinstance(v, str) else (v > crit) - (v < crit), op)
+                else:
+                    ok = op == 1            # de otra clase: solo cumple «distinto de»
+                if not ok:
+                    continue
+                n += 1
+                if sumar and 0 <= c - r[0] + sc < NCOL and 0 <= f - r[1] + sf < NFIL:
+                    w = self.h.valor(c - r[0] + sc, f - r[1] + sf, self.pila, self.prof)
+                    if w is not None and not isinstance(w, str):
+                        s = suma(s + w)
+        return s if sumar else n * ESC
 
 
 def celda(x):
@@ -467,6 +809,24 @@ def celda(x):
         if len(s) <= CARS:
             return s
     return '#' * CARS
+
+
+def celda_fmt(x, fmt):
+    """como fmt_celda: el número con el formato de la celda (bits 7-9: la
+    clase; 10-13: los decimales)"""
+    clase, dec = fmt >> 7 & 7, min(fmt >> 10 & 15, 8)
+    if clase == 0:
+        return celda(x)
+    s = None
+    if clase in (1, 2, 3):
+        s = num_fijo(x, dec, False, clase != 1) + (' EUR' if clase == 3 else '')
+    elif clase == 4:
+        if abs(x) >> 32 < 0x0147AE14:
+            s = num_fijo(x * 100, dec) + '%'
+    elif clase == 5:
+        if 0 <= x // ESC <= 2958465 and x >= 0:
+            s = (DIA0 + datetime.timedelta(x // ESC)).strftime('%d/%m/%Y')
+    return s if s is not None and len(s) <= CARS else '#' * CARS
 
 
 # ---- los casos ----
@@ -587,7 +947,145 @@ A1B
 1,2,3
 1..2
 3%*200
--3%'''.split('\n')
+-3%
+2^10
+2^0,5
+2^-1
+-2^2
+2^3^2
+0^0
+0^-1
+4^1,5
+(-4)^0,5
+2^0,3
+1,0000001^1000000
+10^11
+9^0,5*9^0,5
+POTENCIA(2;10)
+potencia(1,5;3)
+POTENCIA(2)
+RAIZ(2)
+RAIZ(16)
+RAIZ(-1)
+RAIZ(0,00000001)
+RAIZ(92233720368)
+RAIZ(2)*RAIZ(2)
+ENTERO(2,5)
+ENTERO(-2,5)
+ENTERO(-3)
+ENTERO(0,99999999)
+ENTERO(-0,00000001)
+ENTERO(-92233720368,5)
+RESIDUO(10;3)
+RESIDUO(-10;3)
+RESIDUO(10;-3)
+RESIDUO(-10;-3)
+RESIDUO(7,5;2)
+RESIDUO(5;0)
+RESIDUO(9;3)
+1=1
+1=2
+1<>2
+2<1
+2>1
+2<=2
+2>=3
+1+1=2
+"a"="A"
+"a"<"b"
+"b"<"a"
+"pan"<>"vino"
+1<"a"
+"a">99999
+"10"=10
+1=1=1
+SI(1;2;3)
+SI(0;2;3)
+SI(0;2)
+SI(1;2)
+SI(2>1;"sí";"no")
+SI(2<1;"sí";"no")
+SI(1;5;1/0)
+SI(0;1/0;5)
+SI(0;(1;2);7)
+SI(1;8;"a;b")
+SI(0;"a;b)";9)
+SI(1/0;1;2)
+SI(1)
+SI()
+SI(1;2;3;4)
+Y(1;1;1)
+Y(1;0;1)
+Y(2>1;3>2)
+O(0;0)
+O(0;5)
+O(1=2;2=2)
+NO(0)
+NO(7)
+NO(1=1)
+VERDADERO
+FALSO
+VERDADERO+VERDADERO
+SI(Y(1;O(0;1));10;20)
+"hola"
+"a"&"b"
+"a"&1
+1&2
+1,50&""
+"x"&1/3
+"dice ""hola"""
+"sin cerrar
+CONCATENAR("a";"b";"c")
+CONCATENAR("total: ";12,5*2)
+CONCATENAR(1)
+LARGO("hola")
+LARGO("")
+LARGO(12345)
+LARGO(1/3)
+MAYUSC("hola Ñandú")
+MINUSC("HOLA ÑANDU É")
+mayusc("año")
+"a"+1
+"12"+1
+"12,5"*2
+-"3"
++"abc"
+"5"%
+HOY()
+HOY()+1
+HOY(1)
+SUMA(1;2;3)
+SUMA(1;"a";2)
+SUMA(A1;5)
+SUMA(1+1;2*3)
+MAX(3;7;5)
+MIN(3;7;5)
+PROMEDIO(1;2;3;4)
+CONTAR(1;"a";3)
+CONTARA(1;"a";3)
+CONTARA()
+SUMA(A1:B2;3)
+$A$1
+A$1+$A1
+$Z$1001
+BL1000
+BM1
+AA1+AB2
+#REF
+#REF+1
+#RE
+1+#REF
+CONTAR.SI(A1:A3;1)
+SUMAR.SI(A1:A3;">0")
+CONTAR.SI(1;1)
+CONTAR.SI(A1:A3)
+CONTAR.SIX(A1:A3;1)
+16/11/2026
+1&&2
+A1&A2
+A1=""
+A1=0
+A1<>""'''.split('\n')
 
 # hojas enteras: celdas y lo que se pregunta
 HOJAS = [
@@ -609,7 +1107,52 @@ HOJAS = [
     # dinero: sumas largas de céntimos, exactas
     ['A%d 0,1' % i for i in range(1, 101)] + ['B1 =SUMA(A1:A100)', 'B2 =B1=10', 'B3 =PROMEDIO(A1:A100)',
                                                'B4 =SUMA(A1:A100)*3-30'],
+    # una lista de la compra: criterios, textos y comparaciones
+    ['A1 pan', 'B1 2', 'C1 1,2', 'A2 Vino', 'B2 1', 'C2 7,5', 'A3 PAN', 'B3 3', 'C3 1,25', 'A4 leche', 'B4 6', 'C4 0,89',
+     'A5 queso', 'B5 -1', 'C5 12', 'A7 total', 'B6 texto',
+     'D1 =B1*C1', 'D2 =B2*C2', 'D3 =B3*C3', 'D4 =B4*C4', 'D5 =B5*C5',
+     'E1 =CONTAR.SI(A1:A5;"pan")', 'E2 =SUMAR.SI(A1:A5;"pan";D1:D5)', 'E3 =CONTAR.SI(B1:B6;">1")',
+     'E4 =SUMAR.SI(B1:B6;">=2")', 'E5 =SUMAR.SI(B1:B6;"<0";C1:C6)', 'E6 =CONTAR.SI(B1:B6;"<>1")',
+     'E7 =CONTAR.SI(A1:A7;"<>pan")', 'E8 =CONTAR.SI(B1:B5;B2)', 'E9 =SUMAR.SI(B1:B5;3;D1)', 'E10 =CONTAR.SI(A1:B7;"")',
+     'E11 =CONTAR.SI(A1:A7;">=q")', 'E12 =SUMAR.SI(A1:A5;"=vino";B1:B5)', 'E13 =CONTAR.SI(B1:B6;"<=1")',
+     'E14 =SUMAR.SI(D1:D5;"<"&5)', 'E15 =CONTAR.SI(A1:A5;A3)', 'E16 =SUMAR.SI(A1:A5;"pan";BK1:BL5)',
+     'F1 =SI(D1>D2;"caro";"barato")', 'F2 =SI(A1=A3;1;0)', 'F3 =A1&" y "&A2', 'F4 =LARGO(A5)&" letras"',
+     'F5 =MAYUSC(A4)', 'F6 =F5&F5', 'F7 =SI(B6="texto";F3;0)', 'F8 =CONTARA(A1:B7)', 'F9 =CONTAR(A1:B7)',
+     'F10 =SI(B7="";"vacía";"llena")', 'F11 =B7=0', 'F12 =B7', 'F13 =B7&"x"', 'F14 =F3=F3', 'F15 =F1&F2',
+     'F16 =SUMA(F1:F15)', 'F17 =CONTARA(F1:F15)', 'F18 =MAX(B1:B6;10)', 'F19 =F5+1', 'F20 =SI(F1="CARO";F5;F4)',
+     'G1 =SI(G1;1;2)', 'G2 =SI(1;5;G2)', 'G3 =F3&F4&F5&F6', 'G4 =Y(A1="pan";B1=2;C1<2)', 'G5 =O(A1="x";F12)',
+     'G6 =$B$1+B$2+$B3', 'G7 =SUMA($B$1:B$5)', 'G8 =ENTERO(C2)+RESIDUO(B4;4)', 'G9 =RAIZ(B4*B4)^2',
+     'G10 =CONCATENAR(A1;B1;C1)', 'G11 =MINUSC(G10)&MAYUSC(G10)', 'G12 =NO(F11)', 'G13 =LARGO(G3)'],
+    # fechas: lo tecleado como día/mes/año es un número de día
+    ['A1 16/11/2026', 'A2 1/1/1900', 'A3 29/2/2024', 'A4 29/2/2023', 'A5 31/12/9999', 'A6 1/3/1900', 'A7 31/4/2026',
+     'A8 1/13/2026', 'A9 16/11/26', 'A10 16/11/2026 ', 'A11  1/1/2000', 'A12 16/11/2026x', 'A13 0/1/2026',
+     'A14 31/12/1899', 'A15 28/2/1900', 'A16 29/2/1900', 'A17 1/1/10000', 'A18 123/1/2026', 'A19 -1/1/2026',
+     'B1 =A1+1', 'B2 =A1-A3', 'B3 =HOY()-A1', 'B4 =A4', 'B5 =A2', 'B6 =A3-A6', 'B7 =SI(A1>A3;"después";"antes")',
+     'B8 =A7&""', 'B9 =A1&""', 'B10 =ENTERO(A1/7)', 'B11 =RESIDUO(A1;7)', 'B12 =CONTAR(A1:A19)', 'B13 =MAX(A1:A19)'],
+    # una cadena de textos y un texto que crece hasta el tope
+    ['A1 ab'] + ['A%d =A%d&A%d' % (i, i - 1, i - 1) for i in range(2, 11)] + ['B1 =LARGO(A10)', 'B2 =LARGO(A7)',
+     'B3 =A3', 'B4 =A8=A8', 'B5 =MAYUSC(A9)=A9'],
+    # columnas de dos letras y el borde de la hoja
+    ['AA1 5', 'AB1 7', 'BL1000 9', 'AZ50 =AA1*AB1', 'BA1 =SUMA(AA1:AB1)', 'BL1 =BL1000+aa1', 'A1 =SUMA(A2:BL1000)',
+     'B2 =BM1', 'B3 =A1001', 'B4 =SUMA(A1:BM1)', 'B5 =SUMA(AA1:AB1001)', 'B6 =ZZ1', 'B7 =SUMA(BL1000:BL1000)',
+     'B8 =CONTAR.SI(AA1:BL1;">5")', 'B9 =$BL$1000', 'B10 =AAA1', 'B11 =A$1$', 'B12 =$$A1', 'B13 =$1'],
 ]
+
+# números con formato: (formato de la celda, lo tecleado). El formato: la
+# clase (1 fijo, 2 millares, 3 moneda, 4 por cien, 5 fecha) por 128 y los
+# decimales por 1024
+FORMATOS = [(c * 128 + d * 1024, t) for c, d, t in [
+    (1, 2, '3,14159'), (1, 0, '2,5'), (1, 0, '-2,5'), (1, 8, '1/3'), (1, 2, '-0,001'), (1, 2, '1234567,891'),
+    (1, 3, '12345,6789'), (1, 4, '99999,99995'), (1, 9, '1'), (1, 2, '0'), (1, 1, '0,05'), (1, 1, '0,04'),
+    (2, 2, '1234,5'), (2, 0, '1234567'), (2, 2, '-1234,5'), (2, 0, '999'), (2, 0, '1000'), (2, 0, '-1000'),
+    (2, 1, '12345,67'), (2, 2, '123456,7'), (2, 0, '12345678'), (2, 0, '123456789'), (2, 3, '0,5'),
+    (3, 2, '12,5'), (3, 2, '1234,5'), (3, 0, '1234'), (3, 2, '-3'), (3, 0, '123456'), (3, 2, '0'),
+    (4, 0, '0,21'), (4, 2, '0,21'), (4, 1, '1/3'), (4, 0, '1'), (4, 0, '-0,5'), (4, 0, '92233720368'),
+    (4, 2, '12,3456'), (4, 0, '922337203'), (4, 0, '922337204'), (4, 0, '0,005'), (4, 0, '0,004'),
+    (5, 0, '16/11/2026'), (5, 0, '1'), (5, 0, '0'), (5, 0, '-1'), (5, 0, '61'), (5, 0, '2958465'), (5, 0, '2958466'),
+    (5, 0, '36526,75'), (5, 2, '29/2/2024'), (5, 0, 'HOY()'), (5, 0, '1/3/1900'), (5, 0, '31/12/1999'),
+    (6, 0, '5'), (7, 2, '5'), (0, 2, '2,50'), (0, 0, '1/3'), (1, 2, '"texto"'), (3, 2, '1/0'),
+]]
 
 
 def main():
@@ -642,6 +1185,27 @@ def main():
             return 'REDONDEAR(%s;%d)' % (e_azar(prof - 1), random.randint(0, 8))
         if k < 0.13:
             return 'ABS(%s)' % e_azar(prof - 1)
+        if k < 0.30:
+            a, b, c = e_azar(prof - 1), e_azar(prof - 1), e_azar(prof - 1)
+            rango = '%s%d:%s%d' % (random.choice('ABC'), random.randint(1, 6), random.choice('ABC'), random.randint(1, 6))
+            return random.choice([
+                lambda: 'SI(%s%s%s;%s;%s)' % (a, random.choice(['=', '<>', '<', '>', '<=', '>=']), b, c, e_azar(prof - 1)),
+                lambda: 'ENTERO(%s)' % a,
+                lambda: 'RAIZ(ABS(%s))' % a,
+                lambda: 'RESIDUO(%s;%s)' % (a, b),
+                lambda: 'POTENCIA(%s;%d)' % (a, random.randint(-3, 6)),
+                lambda: '(%s)^%s' % (a, random.choice(['2', '3', '0,5', '-1', '1,5', '0', '10'])),
+                lambda: 'Y(%s;%s)+O(%s;%s)+NO(%s)' % (a, b, b, c, a),
+                lambda: '(%s%s%s)' % (a, random.choice(['=', '<>', '<', '>', '<=', '>=']), b),
+                lambda: 'CONTAR.SI(%s;"%s%s")' % (rango, random.choice(['', '=', '<>', '<', '>', '<=', '>=']),
+                                                  random.choice(['texto', n_azar(), '0', '-5'])),
+                lambda: 'SUMAR.SI(%s;"%s%s";%s)' % (rango, random.choice(['<>', '<', '>', '<=', '>=']), n_azar(), rango),
+                lambda: 'LARGO(%s&"x")' % a,
+                lambda: 'LARGO(CONCATENAR(%s;MAYUSC("añ");%s))' % (a, b),
+                lambda: 'SI(%s&""=%s&"";%s;A1)' % (a, b, c),
+                lambda: 'MAX(%s;%s;%s)-MIN(%s;%s)' % (a, rango, b, c, rango),
+                lambda: 'CONTARA(%s;%s)' % (rango, a),
+            ])()
         a, b = e_azar(prof - 1), e_azar(prof - 1)
         s = a + random.choice('+-*/*') + b
         return '(' + s + ')' if random.random() < 0.4 else s
@@ -649,22 +1213,23 @@ def main():
     entrada, casos = [], []           # casos: (rótulo, hoja, col, fil)
 
     def pregunta(h, rot, col, fil):
-        entrada.append('?%s%d' % (chr(65 + col), fil + 1))
+        entrada.append('?%s%d' % (colnom(col), fil + 1))
         casos.append((rot, h, col, fil))
 
     def pon(h, linea):
         entrada.append(linea)
         ref, _, t = linea.partition(' ')
-        h.c[(ord(ref[0]) - 65, int(ref[1:]) - 1)] = t
+        m = REF.fullmatch(ref)
+        h.c[(colnum(m.group(2)), int(m.group(4)) - 1)] = t
 
     # (cada pregunta se contesta con la hoja como está en ese momento: el
     # modelo se evalúa a la vez que se prepara la entrada)
     esperado = []
 
-    def resuelve(h, col, fil):
+    def resuelve(h, col, fil, fmt=0):
         try:
-            v, tipo = h.valor(col, fil)
-            return 'V' if tipo == 0 else 'T' if tipo == 2 else '%016X %s' % (v & (2**64 - 1), celda(v))
+            v = h.valor(col, fil)
+            return 'V' if v is None else 'T' + v if isinstance(v, str) else '%016X %s' % (v & (2**64 - 1), celda_fmt(v, fmt))
         except Err as e:
             return 'E%d' % e.n
         except RecursionError:
@@ -682,8 +1247,17 @@ def main():
         for l in hoja:
             pon(h, l)
         for (col, fil) in sorted(h.c):
-            pregunta(h, '%s%d «%s»' % (chr(65 + col), fil + 1, h.c[(col, fil)]), col, fil)
+            pregunta(h, '%s%d «%s»' % (colnom(col), fil + 1, h.c[(col, fil)]), col, fil)
             esperado.append(resuelve(h, col, fil))
+    # los formatos de número
+    h = Hoja()
+    entrada.append('!')
+    for fmt, t in FORMATOS:
+        entrada.append('%%%d' % fmt)
+        pon(h, 'C3 ' + (t if re.fullmatch(r'-?[0-9,]+|[0-9]+/[0-9]+/[0-9]+', t) else '=' + t))
+        pregunta(h, 'formato %d: «%s»' % (fmt, h.c[(2, 2)]), 2, 2)
+        esperado.append(resuelve(h, 2, 2, fmt))
+    entrada.append('%0')
     # cada celda suma las dos de antes: sin apuntar lo calculado no acabaría
     # nunca (y el modelo, que no apunta, tampoco: aquí el resultado va a mano)
     entrada.append('!')
@@ -693,7 +1267,7 @@ def main():
     # y una cadena de 2.600 celdas preguntada de abajo arriba: como cada una
     # queda apuntada, la última sale aunque esté a 2.599 fórmulas de la primera
     entrada.append('!')
-    orden = [(c, f) for c in range(NCOL) for f in range(NFIL)]
+    orden = [(c, f) for c in range(26) for f in range(100)]
     entrada.append('A1 1')
     for k in range(1, len(orden)):
         (c, f), (c0, f0) = orden[k], orden[k - 1]
@@ -721,7 +1295,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         prog = hacer(tmp)
         sal = subprocess.run([prog], input=('\n'.join(entrada) + '\n').encode('cp437'),
-                             capture_output=True).stdout.decode().split('\n')
+                             capture_output=True).stdout.decode('cp437').split('\n')
     mal = 0
     for (rot, _, _, _), r, esp in zip(casos, sal, esperado):
         if os.environ.get('VER') and re.search(os.environ['VER'], rot):
@@ -735,8 +1309,8 @@ def main():
         mal += 1
     if mal == 0:
         print('  OK   %d celdas: valor y texto iguales que el modelo exacto' % len(casos))
-        err = sum(1 for e in esperado if len(e) == 2)
-        otras = sum(1 for e in esperado if len(e) == 1)
+        err = sum(1 for e in esperado if len(e) == 2 and e[0] == 'E')
+        otras = sum(1 for e in esperado if e[0] in 'VT')
         print('       (%d con número, %d con error, %d de texto o vacías)' % (len(esperado) - err - otras, err, otras))
     return 1 if mal else 0
 
