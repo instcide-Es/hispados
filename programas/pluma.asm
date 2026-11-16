@@ -129,6 +129,8 @@ O_SANG_MAS  equ 173
 O_SANG_MENOS equ 174
 O_TIPO      equ 175                 ; elegir el tipo de letra
 O_TAM       equ 176                 ; y el tamaño
+O_ESTILO    equ 177                 ; el estilo del párrafo
+O_IMPRIMIRG equ 178                 ; imprimir como se ve
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -198,6 +200,8 @@ plu_menu:
         db "&Imprimir (texto llano) Ctrl+P", 0
         dw O_IMPRIMIRF
         db "Imprimir con &formato (ESC/P)", 0
+        dw O_IMPRIMIRG
+        db "Imprimir como se &ve (gráficos)", 0
         dw 0
         db 0
         dw O_SALIR
@@ -286,6 +290,8 @@ plu_menu:
         db "&Tipo de letra...", 0
         dw O_TAM
         db "Ta&maño de letra...", 0
+        dw O_ESTILO
+        db "&Estilo del párrafo...", 0
         dw 0
         db 0
         dw O_BROCHA
@@ -322,6 +328,13 @@ dlg_tipo:
         PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 20, 268, 90, 26, ID_ACEPTAR
         PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 120, 268, 90, 26, ID_CANCELAR
         dd 0
+; ---- diálogo: el estilo del párrafo ----
+dlg_est:
+        PLANTILLA HV_c_dialogo, t_d_est, E_DIALOGO, 0, 0, 240, 232, 0
+        PLANTILLA HV_c_lista, t_nada, E_HIJA | E_TABULA, 16, 12, 204, 136, 60
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 20, 160, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 120, 160, 90, 26, ID_CANCELAR
+        dd 0
 ; ---- diálogo: el tamaño de la letra ----
 dlg_tam:
         PLANTILLA HV_c_dialogo, t_d_tam, E_DIALOGO, 0, 0, 240, 212, 0
@@ -355,6 +368,7 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
             dd 232, 24, ic_deshacer, O_DESHACER, n_deshacer, 1
             dd 258, 24, ic_rehacer, O_REHACER, n_rehacer, 1
             dd 290, 24, ic_marcas, O_MARCAS, n_marcas, 1
+            dd 322, 64, t_b_estilo, O_ESTILO, n_estilo, BT_TEXTO
             dd 0, 0, 0, 0, 0, 0
 botones     dd 6, 96, t_nada, O_TIPO, n_tipo, 0
             dd 106, 36, t_nada, O_TAM, n_tam, 0
@@ -385,6 +399,8 @@ n_brocha    db "Copiar formato: pulse y luego elija el texto que lo recibe", 0
 n_deshacer  db "Deshacer (Ctrl+Z)", 0
 n_rehacer   db "Rehacer lo deshecho (Ctrl+Y)", 0
 n_marcas    db "Mostrar u ocultar los espacios y las marcas de párrafo", 0
+t_b_estilo  db "Estilo", 0
+n_estilo    db "Estilo del párrafo: Normal, títulos, cita...", 0
 n_tipo      db "Tipo de letra: pulse para elegirlo de la lista", 0
 n_neg       db "Negrita (Ctrl+N)", 0
 n_cur       db "Cursiva (Ctrl+K)", 0
@@ -450,6 +466,27 @@ t_f_sub     db "Subrayado", 0
 t_f_color   db "Color:", 0
 t_d_tipo    db "Tipo de letra", 0
 t_d_tam     db "Tamaño (puntos)", 0
+t_d_est     db "Estilo del párrafo", 0
+; los estilos: de cada uno, el tamaño (0-5, los de tipos.inc), el formato de
+; la letra (A_*), la alineación (0-3) y la sangría (0-7). El tipo de letra y
+; el color no se tocan
+N_ESTILOS   equ 7
+est_tab     db 0, 0, 0, 0                   ; Normal
+            db 4, A_NEG, 1, 0               ; Título de portada: 36 puntos, centrado
+            db 3, A_NEG, 0, 0               ; Título 1: 24 puntos
+            db 2, A_NEG, 0, 0               ; Título 2: 18 puntos
+            db 0, A_NEG, 0, 0               ; Título 3
+            db 0, A_CUR, 3, 1               ; Cita: cursiva, justificada y con sangría
+            db 1, 0, 0, 0                   ; Nota: 9 puntos
+t_e0        db "Normal", 0
+t_e1        db "Título de portada", 0
+t_e2        db "Título 1", 0
+t_e3        db "Título 2", 0
+t_e4        db "Título 3", 0
+t_e5        db "Cita", 0
+t_e6        db "Nota", 0
+            align 4
+est_nom     dd t_e0, t_e1, t_e2, t_e3, t_e4, t_e5, t_e6
 t_f_c0      db "Negro", 0
 t_f_c1      db "Rojo", 0
 t_f_c2      db "Azul", 0
@@ -497,6 +534,8 @@ entrada:
         mov esi, dlg_tipo
         call hvl_clases
         mov esi, dlg_tam
+        call hvl_clases
+        mov esi, dlg_est
         call hvl_clases
         call doc_vacio
         call pon_titulo
@@ -591,7 +630,8 @@ doc_vacio:
         mov byte [at_act], 0
         mov byte [tip_act], 0
         mov byte [modif], 0
-        mov byte [des_hay], 0
+        mov dword [des_p], 0
+        mov dword [des_top], 0
         mov byte [tecleando], 0
         jmp compone
 
@@ -797,6 +837,8 @@ orden_haz:
         je imprimir
         cmp ecx, O_IMPRIMIRF
         je imprimir_f
+        cmp ecx, O_IMPRIMIRG
+        je imprimir_g
         cmp ecx, O_CORTAR
         je cortar
         cmp ecx, O_COPIAR
@@ -870,6 +912,8 @@ orden_haz:
         je tipo_elige
         cmp ecx, O_TAM
         je tam_elige
+        cmp ecx, O_ESTILO
+        je estilo_elige
         mov eax, ecx
         sub eax, O_IZQ
         cmp eax, 3
@@ -1892,6 +1936,64 @@ tip_pon:
         jmp .b
 .x:
         ret
+; ---- el estilo: a los párrafos de lo elegido, o al del cursor, enteros ----
+estilo_elige:
+        mov byte [tg_modo], 2
+        mov esi, dlg_est
+        mov edi, dlg_est + P_TAM
+        call lista_elige
+        jne tip_pon.x
+        movzx edx, byte [dl_tipo]
+        cmp edx, N_ESTILOS
+        jae tip_pon.x
+        lea edx, [est_tab+edx*4]    ; EDX=el estilo
+        call instantanea
+        call elegido
+.ini:
+        test eax, eax               ; desde el principio del primer párrafo...
+        jz .b
+        cmp byte [txt+eax-1], 10
+        je .b
+        dec eax
+        jmp .ini
+.b:
+        mov cl, [tip+eax]           ; su tamaño (a las letras y a la marca)
+        and cl, T_TIPO
+        mov ch, [edx]
+        shl ch, 5
+        or cl, ch
+        mov [tip+eax], cl
+        cmp byte [txt+eax], 10
+        je .marca
+        mov cl, [atr+eax]           ; la letra: su formato, con el color que tenía
+        and cl, A_COLOR
+        or cl, [edx+1]
+        mov [atr+eax], cl
+        inc eax
+        jmp .b
+.marca:
+        mov cl, [atr+eax]           ; la marca: alineación y sangría; si era de
+        and cl, P_VIN | P_NUM       ; una lista, lo sigue siendo
+        or cl, [edx+2]
+        mov ch, [edx+3]
+        shl ch, 4
+        or cl, ch
+        mov [atr+eax], cl
+        inc eax
+        cmp eax, ebx                ; ...hasta la marca del último
+        jb .b
+        mov eax, [cur]              ; y lo que se escriba ahora, igual
+        mov cl, [tip_act]
+        and cl, T_TIPO
+        mov ch, [edx]
+        shl ch, 5
+        or cl, ch
+        mov [tip_act], cl
+        mov cl, [at_act]
+        and cl, A_COLOR
+        or cl, [edx+1]
+        mov [at_act], cl
+        jmp cambio
 ; (interna) el diálogo de la lista: ZF=1 si se acepta
 lista_elige:
         mov ebp, [ven]
@@ -1910,7 +2012,7 @@ grande:
         xor al, al
         jmp tamano
 ; el gancho: la lista, con lo que hay y lo de ahora elegido ([tg_modo]: 0 los
-; tipos, 1 los tamaños, de menor a mayor)
+; tipos, 1 los tamaños, de menor a mayor, 2 los estilos)
 tipo_gancho:
         cmp eax, DM_INICIO
         je .ini
@@ -1937,8 +2039,8 @@ tipo_gancho:
         HV msg_enviar
         test eax, eax
         js .b1
-        cmp byte [tg_modo], 0
-        je .b0
+        cmp byte [tg_modo], 1
+        jne .b0
         cmp eax, TL_TAMANOS
         jae .b1
         mov al, [tl_orden+eax]
@@ -1964,6 +2066,13 @@ tipo_gancho:
         mov dword [tg_i], 0
 .i1:
         mov eax, [tg_i]
+        cmp byte [tg_modo], 2
+        jne .i1b
+        cmp eax, N_ESTILOS
+        jae .i2
+        mov esi, [est_nom+eax*4]
+        jmp short .ia
+.i1b:
         cmp byte [tg_modo], 0
         jne .it
         cmp eax, [tl_n]
@@ -1982,6 +2091,9 @@ tipo_gancho:
         inc dword [tg_i]
         jmp .i1
 .i2:
+        xor ecx, ecx
+        cmp byte [tg_modo], 2       ; (de los estilos, el primero)
+        je .i4
         movzx ecx, byte [dl_tipo]   ; lo de ahora, elegido
         cmp byte [tg_modo], 0
         je .i3
@@ -2025,11 +2137,17 @@ alinea:
         inc eax
         jmp .b
 
-; ---- Deshacer ----
-; Antes de cada cambio se guarda el documento entero (son pocos octetos): una
-; tanda de teclas seguidas, sin mover el cursor, cuenta como un solo cambio.
-; Deshacer cambia el documento por lo guardado, así que deshacer otra vez
-; rehace.
+; ---- Deshacer y rehacer, varios pasos ----
+; Antes de cada cambio se guarda el documento entero en una casilla (son pocos
+; octetos): una tanda de teclas seguidas, sin mover el cursor, cuenta como un
+; solo cambio. Las casillas 0..[des_top]-1 son el documento de antes de cada
+; cambio; [des_p] dice por cuál va (igual a [des_top]: no se ha deshecho nada).
+; Al deshacer el primero, el documento de ahora se guarda en la casilla
+; [des_top], para poder rehacer hasta él. Un cambio nuevo, después de
+; deshacer, tira lo que quedaba por rehacer. Si no caben más, se olvida el
+; cambio más antiguo.
+DES_PASOS   equ 8                   ; cambios que se pueden deshacer
+SL_TAM      equ 8 + 3 * (MAX_TXT + 4)   ; una casilla: n, cursor, txt, atr y tip
 inst_tecleo:
         cmp byte [tecleando], 0
         jne instantanea.x
@@ -2038,72 +2156,90 @@ inst_tecleo:
         ret
 instantanea:
         pushad
-        mov byte [des_hecho], 0
         mov byte [tecleando], 0
-        mov ecx, [n]
-        mov [des_n], ecx
-        mov esi, txt
-        mov edi, des_txt
+        mov eax, [des_p]
+        cmp eax, DES_PASOS
+        jb .cabe
+        mov edi, des_cas            ; llenas: la más antigua, fuera
+        mov esi, des_cas + SL_TAM
+        mov ecx, (DES_PASOS - 1) * SL_TAM
         rep movsb
-        mov ecx, [n]
-        mov esi, atr
-        mov edi, des_atr
-        rep movsb
-        mov ecx, [n]
-        mov esi, tip
-        mov edi, des_tip
-        rep movsb
-        mov eax, [cur]
-        mov [des_cur], eax
-        mov byte [des_hay], 1
+        dec eax
+.cabe:
+        call sl_guarda
+        inc eax
+        mov [des_p], eax
+        mov [des_top], eax
         popad
 .x:
         ret
 deshacer:
-        cmp byte [des_hecho], 0     ; (deshacer dos veces no rehace: para eso
-        jne des_cambia.x            ; está Repetir)
-        mov byte [des_hecho], 2
+        mov eax, [des_p]
+        test eax, eax
+        jz instantanea.x
+        cmp eax, [des_top]          ; el primero: se guarda lo de ahora, para
+        jne .d                      ; poder volver
+        call sl_guarda
+.d:
+        dec eax
+        jmp short des_va
 rehacer:
-        dec byte [des_hecho]        ; (Repetir solo vale detrás de Deshacer)
-        cmp byte [des_hecho], 0
-        jl .no
-des_cambia:
-        cmp byte [des_hay], 0
-        je .x
-        pushad
-        mov ecx, [n]                ; se cambian uno por otro, hasta el más largo
-        cmp ecx, [des_n]
-        jae .l
-        mov ecx, [des_n]
-.l:
-        xor esi, esi
-.b:
-        mov al, [txt+esi]
-        xchg al, [des_txt+esi]
-        mov [txt+esi], al
-        mov al, [atr+esi]
-        xchg al, [des_atr+esi]
-        mov [atr+esi], al
-        mov al, [tip+esi]
-        xchg al, [des_tip+esi]
-        mov [tip+esi], al
-        inc esi
-        dec ecx
-        jnz .b
-        mov eax, [n]
-        xchg eax, [des_n]
-        mov [n], eax
-        mov eax, [cur]
-        xchg eax, [des_cur]
-        mov [cur], eax
+        mov eax, [des_p]
+        cmp eax, [des_top]
+        jae instantanea.x
+        inc eax
+des_va:
+        mov [des_p], eax
+        call sl_carga
         mov dword [anc], -1
         mov byte [tecleando], 0
+        jmp cambio
+; (internas) el documento, a la casilla EAX, y al revés
+sl_guarda:
+        pushad
+        imul edi, eax, SL_TAM
+        add edi, des_cas
+        mov eax, [n]
+        stosd
+        mov eax, [cur]
+        stosd
+        mov esi, txt
+        call .trozo
+        mov esi, atr
+        call .trozo
+        mov esi, tip
+        call .trozo
         popad
-        call cambio
-.x:
         ret
-rehacer.no:
-        mov byte [des_hecho], 0
+.trozo:
+        mov ecx, [n]
+        push edi
+        rep movsb
+        pop edi
+        add edi, MAX_TXT + 4
+        ret
+sl_carga:
+        pushad
+        imul esi, eax, SL_TAM
+        add esi, des_cas
+        lodsd
+        mov [n], eax
+        lodsd
+        mov [cur], eax
+        mov edi, txt
+        call .trozo
+        mov edi, atr
+        call .trozo
+        mov edi, tip
+        call .trozo
+        popad
+        ret
+.trozo:
+        mov ecx, [n]
+        push esi
+        rep movsb
+        pop esi
+        add esi, MAX_TXT + 4
         ret
 
 ; ---- Borrar: lo elegido, o la letra del cursor ----
@@ -3471,6 +3607,180 @@ imprime:
         popad
         ret
 
+; ---- Imprimir como se ve: la hoja, punto por punto, con sus tipos y tamaños
+;      de letra, en el modo gráfico de las impresoras de agujas (ESC/P): 72
+;      puntos por pulgada a lo ancho («ESC * 5», 576 puntos: los de la hoja)
+;      y tiras de 8 puntos de alto con el avance de línea a 8/72 de pulgada,
+;      así que cada punto de la pantalla es uno del papel. Cuando una línea
+;      no cabe en lo que queda de página, se pasa a la siguiente ----
+IG_PAG      equ 760                 ; puntos de alto que se usan de cada página
+imprimir_g:
+        pushad
+        mov eax, 0                  ; ¿hay puerto paralelo? (INT 11h)
+        mov bl, 0x11
+        call bios
+        test ah, 0xC0
+        jz .mal
+        mov eax, 0x0200             ; ¿y la impresora está encendida?
+        mov bl, 0x17
+        call bios
+        test ah, 0x28
+        jnz .mal
+        test ah, 0x10
+        jz .mal
+        mov esi, ig_ini             ; ESC @ y el avance de línea
+        mov ecx, 5
+        call ig_manda
+        jc .mal
+        mov al, [ver_marcas]        ; sin marcas ni nada elegido
+        mov [ig_marcas], al
+        mov byte [ver_marcas], 0
+        mov dword [sel_a], 0
+        mov dword [sel_b], 0
+        mov byte [pl_solo_buf], 1
+        mov dword [ig_fila], 0
+        mov dword [ig_pag], 0
+        call ig_limpia
+        xor edi, edi                ; la línea del documento
+.lin:
+        cmp edi, [nl]
+        jae .fin
+        call mide
+        mov eax, [ig_pag]           ; ¿cabe en esta página?
+        add eax, [m_al]
+        cmp eax, IG_PAG
+        jbe .cabe
+        call ig_tira                ; no: lo que haya, y la hoja fuera
+        jc .mal2
+        mov al, 12
+        call imp_car
+        jc .mal2
+        mov dword [ig_pag], 0
+.cabe:
+        xor ebx, ebx
+        call pinta_linea            ; la línea, en lbuf
+        xor edx, edx                ; EDX=su fila
+.fila:
+        cmp edx, [m_al]
+        jae .sig
+        push edi
+        mov esi, edx
+        imul esi, PAG_AN
+        add esi, lbuf
+        mov edi, [ig_fila]
+        imul edi, PAG_AN
+        add edi, ig_banda
+        mov ecx, PAG_AN
+        rep movsb
+        pop edi
+        inc dword [ig_pag]
+        inc dword [ig_fila]
+        cmp dword [ig_fila], 8
+        jb .f1
+        call ig_tira
+        jc .mal2
+.f1:
+        inc edx
+        jmp .fila
+.sig:
+        inc edi
+        jmp .lin
+.fin:
+        call ig_tira
+        jc .mal2
+        mov al, 12                  ; y la hoja, fuera
+        call imp_car
+        jc .mal2
+        call imp_lista
+        jc .mal2
+        call .deja
+        mov esi, t_impreso
+        call aviso
+        popad
+        ret
+.mal2:
+        call .deja
+.mal:
+        mov esi, t_e_imprimir
+        call aviso
+        popad
+        ret
+.deja:
+        mov al, [ig_marcas]
+        mov [ver_marcas], al
+        mov byte [pl_solo_buf], 0
+        jmp inval
+; (internas) manda ECX octetos de ESI; CF=1 si falla
+ig_manda:
+        lodsb
+        call imp_car
+        jc .x
+        dec ecx
+        jnz ig_manda
+.x:
+        ret
+; la tira, en blanco
+ig_limpia:
+        pushad
+        mov edi, ig_banda
+        mov ecx, 8 * PAG_AN
+        mov al, C_BLANCO
+        rep stosb
+        popad
+        ret
+; manda la tira (si tiene algo) y avanza el papel; la deja en blanco. CF=1 si
+; falla
+ig_tira:
+        pushad
+        cmp dword [ig_fila], 0
+        je .bien
+        mov edi, ig_banda           ; ¿tiene algo?
+        mov ecx, 8 * PAG_AN
+        mov al, C_BLANCO
+        repe scasb
+        je .avanza
+        mov esi, ig_graf            ; ESC * 5 y cuántas columnas
+        mov ecx, 5
+        call ig_manda
+        jc .mal
+        xor ebx, ebx                ; EBX=la columna
+.col:
+        xor al, al                  ; sus ocho puntos: el de arriba, el bit 7
+        mov ah, 0x80
+        lea esi, [ig_banda+ebx]
+.pt:
+        cmp byte [esi], C_BLANCO
+        je .p1
+        or al, ah
+.p1:
+        add esi, PAG_AN
+        shr ah, 1
+        jnz .pt
+        call imp_car
+        jc .mal
+        inc ebx
+        cmp ebx, PAG_AN
+        jb .col
+.avanza:
+        mov al, 13
+        call imp_car
+        jc .mal
+        mov al, 10
+        call imp_car
+        jc .mal
+        mov dword [ig_fila], 0
+        call ig_limpia
+.bien:
+        popad
+        clc
+        ret
+.mal:
+        popad
+        stc
+        ret
+ig_ini      db 27, '@', 27, 'A', 8
+ig_graf     db 27, '*', 5, PAG_AN & 0xFF, PAG_AN >> 8
+
 ; pone en la impresora el formato AH (códigos ESC/P): solo lo que cambia
 ; respecto a lo que tiene puesto. Conserva AL. CF=1 si falla
 imp_formato:
@@ -3938,12 +4248,15 @@ pinta_linea:
         inc esi
         jmp .c
 .copia:
+        cmp byte [pl_solo_buf], 0   ; (para la impresora: se queda en lbuf)
+        jne .hecha
         mov eax, TX0
         mov ebx, [pl_y]
         mov ecx, PAG_AN
         mov edx, [m_al]
         mov esi, lbuf
         HV dc_copiar
+.hecha:
         popad
         ret
 
@@ -4134,6 +4447,8 @@ pl_y        resd 1
 g_an        resd 1
 al_act      resd 1
 tg_modo     resb 1
+pl_solo_buf resb 1
+ig_marcas   resb 1
             alignb 4
 g_mapa      resd 1                  ; si no es 0, el dibujo que va en vez de la letra
 pl_lin      resd 1
@@ -4147,8 +4462,8 @@ cp_num      resd 1
 cp_ancho    resd 1
 clip_len    resd 1
 n_cambios   resd 1
-des_n       resd 1
-des_cur     resd 1
+des_p       resd 1
+des_top     resd 1
 tip_act     resb 1                  ; y su tipo de letra
 g_tip       resb 1
 brocha_tip  resb 1
@@ -4159,6 +4474,8 @@ pl_x        resd 1
 pl_fy       resd 1
 pl_y0       resd 1
 pl_gordo    resd 1
+ig_fila     resd 1                  ; imprimir como se ve: filas puestas en la tira
+ig_pag      resd 1                  ; y puntos de alto usados de la página
 at_act      resb 1                  ; el formato de lo que se escriba
 modif       resb 1
 foco        resb 1
@@ -4168,8 +4485,6 @@ g_atr       resb 1
 g_color     resb 1
 imp_fmt     resb 1
 imp_atr     resb 1
-des_hay     resb 1                  ; hay algo que deshacer
-des_hecho   resb 1                  ; 1: lo último fue deshacer (se puede repetir)
 completa_si resb 1
 dl_atr      resb 1
 dl_tipo     resb 1
@@ -4194,14 +4509,13 @@ txt         resb MAX_TXT + 4
 atr         resb MAX_TXT + 4
 tip         resb MAX_TXT + 4        ; el tipo de letra de cada una
             TIPOS_BSS
-des_txt     resb MAX_TXT + 4        ; el documento de antes del último cambio
-des_atr     resb MAX_TXT + 4
-des_tip     resb MAX_TXT + 4
+des_cas     resb (DES_PASOS + 1) * SL_TAM   ; las casillas de deshacer
 clip_txt    resb MAX_TXT + 4
 clip_atr    resb MAX_TXT + 4
 clip_tip    resb MAX_TXT + 4
 pega_txt    resb MAX_TXT + 4
 fbuf        resb FBUF_TAM + 4
+ig_banda    resb PAG_AN * 8
 lbuf        resb PAG_AN * 64
             alignb 4
 lin_ini     resd MAX_TXT + 2

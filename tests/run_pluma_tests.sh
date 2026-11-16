@@ -32,6 +32,8 @@ prepara $HVP
   aparca; shot e1
   tecla ctrl-g; sleep 1.2; escribe "carta"; tecla ret; sleep 2; shot e2
   escribe " y mas"; aparca; shot d1; tecla ctrl-z; shot d2; tecla ctrl-y; shot d3; tecla ctrl-z   # deshacer y rehacer
+  tecla ret; escribe "uno"; tecla left right; escribe "dos"; tecla ctrl-z ctrl-z; shot d4   # dos cambios, deshechos los dos
+  tecla ctrl-y ctrl-y; shot d5; tecla ctrl-z ctrl-z                                        # rehechos, y otra vez fuera
   tecla ctrl-e ctrl-c ctrl-end ret ctrl-v; sleep 0.5; tecla ctrl-v ctrl-v ctrl-v; sleep 1; aparca; shot e3
   tecla ctrl-b; sleep 1; escribe "hoja"; tecla ret; sleep 1; shot e4
   sal; } | run 240 -vga std
@@ -52,6 +54,8 @@ chk $T/d1.ppm busca 72 518 500 540 0 6 "191 letras"
 chk $T/d2.ppm busca 72 518 500 540 0 6 "185 letras"       # deshecha la tanda entera
 chk $T/d2.ppm nobusca 80 247 400 262 13 9 "En rojo y mas"
 chk $T/d3.ppm busca 80 247 90 262 13 9 "En rojo y mas"    # y rehecha
+chk $T/d4.ppm busca 72 518 500 540 0 6 "185 letras"       # deshacer, dos pasos
+chk $T/d5.ppm busca 72 518 500 540 0 6 "192 letras"       # y rehacer, los dos
 chk $T/e3.ppm busca 72 518 500 540 0 6 "926 letras"       # 185 + 1 + 4 x 185
 chk $T/e4.ppm busca 72 138 660 168 9 2 "hoja"             # lo encontrado, elegido
 muestra m1 pluma_menu; muestra v0 pluma_vacia; muestra e1 pluma_formato; muestra e3 pluma_pegado; muestra e4 pluma_buscar
@@ -76,7 +80,8 @@ rm -f $T/prn.txt
   shot a1
   tecla ctrl-p; sleep 4; shot a2; tecla ret; sleep 1
   clic 112 75; sleep 1; shot m1; clic 200 261; sleep 4; shot a3; tecla ret; sleep 1   # Archivo > Imprimir con formato
-  sal; } | PARALELO=file:$T/prn.txt run 150 -vga std
+  clic 112 75; sleep 1; shot m2; clic 200 281; sleep 25; shot a4; tecla ret; sleep 1   # Archivo > Imprimir como se ve
+  sal; } | PARALELO=file:$T/prn.txt run 200 -vga std
 chk $T/a1.ppm titulo 70 40 activa "Pluma - A:\\CARTA.PLU"
 chk $T/a1.ppm igual 76 146 592 120 $T/e1.ppm 76 146 80     # como antes de guardar (salvo el cursor)
 chk $T/a2.ppm busca 150 250 650 310 0 8 "El documento se ha enviado a la impresora."
@@ -96,6 +101,34 @@ ok = ok and b'\x1bEnegrita \x1bF\x1b4cursiva \x1b5\x1b-\x01subrayado\x1b-\x00 no
 sys.exit(0 if ok else 1)
 PY
 then ok "impresora: texto llano y con formato (ESC/P)"; else ko "impresora: no ha salido lo esperado"; xxd $T/prn.txt | head -40; fi
+chk $T/a4.ppm busca 150 250 650 310 0 8 "El documento se ha enviado a la impresora."
+muestra m2 pluma_menu_archivo
+# lo impreso «como se ve»: se rehace la hoja a partir de las tiras de puntos
+if python3 - $T/prn.txt $B/pluma_impresa.pgm <<'PY'
+import sys
+d=open(sys.argv[1],'rb').read()
+i=d.rfind(b'\x1b@\x1bA\x08')
+if i<0: sys.exit(1)
+i+=5; filas=[]
+while i<len(d) and d[i]!=12:
+    if d[i:i+5]==b'\x1b*\x05\x40\x02':            # una tira con puntos, y su avance
+        col=d[i+5:i+5+576]; i+=5+576
+        for r in range(8): filas.append([1 if c&(0x80>>r) else 0 for c in col])
+        if d[i:i+2]!=b'\r\n': sys.exit(2)
+        i+=2
+    elif d[i:i+2]==b'\r\n':                         # una tira en blanco: solo el avance
+        filas+=[[0]*576 for _ in range(8)]; i+=2
+    else: sys.exit(2)
+tinta=sum(map(sum,filas))
+open(sys.argv[2],'wb').write(b'P5 576 %d 255\n'%len(filas)+bytes(0 if v else 255 for f in filas for v in f))
+# el título, de 24 puntos y centrado: tinta en el centro de las primeras filas y nada en los lados
+arriba=filas[:32]
+centro=sum(sum(f[200:376]) for f in arriba); lados=sum(sum(f[:150])+sum(f[426:]) for f in arriba)
+ok = d[-1]==12 and tinta>3000 and centro>150 and lados==0 and len(filas)>=96
+sys.exit(0 if ok else 3)
+PY
+then ok "impresora: la hoja como se ve, punto por punto (título centrado de 24 puntos)"; convert $B/pluma_impresa.pgm $B/pluma_impresa.png
+else ko "impresora: la hoja «como se ve» no ha salido bien"; fi
 
 echo "== Pluma: un archivo de texto llano =="
 printf 'Primera linea\r\nSegunda\r\n' > $T/NOTA.TXT
@@ -164,6 +197,7 @@ echo "== Pluma: los tipos de letra =="
 reabre ''
 mdel -i $T/f.img ::TIPOS.PLU 2>/dev/null
 tam() { clic 194 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
+estilo() { clic 424 99; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; tecla ret; sleep 0.8; }
 tipo() { clic 108 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
 { arranca
   tipo 1 f0; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # Roble
@@ -173,6 +207,7 @@ tipo() { clic 108 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do 
   tecla ctrl-w; tipo 2; escribe "Grande"; tecla ctrl-n; escribe " negra "; tecla ctrl-n ctrl-k ctrl-s; escribe "cursiva"
   aparca; shot f1
   tecla ctrl-n ctrl-k ctrl-s ret; tam 5 f3; escribe "Enorme"; tecla ret; tam 0; escribe "menuda"; tam 1      # 48 puntos, 9 y el normal
+  tecla ret; estilo 2; escribe "Titular"                                                      # el estilo «Título 1»
   aparca; shot f4
   tecla ctrl-g; sleep 1.2; escribe "tipos"; tecla ret; sleep 2
   sal; } | run 240 -vga std
@@ -188,6 +223,7 @@ d=open(sys.argv[1],'rb').read()
 n=struct.unpack_from('<I',d,8)[0]
 t,a,p=d[12:12+n],d[12+n:12+2*n],d[12+2*n:]
 ok = len(p)==n and p[0]==1 and p[60]==9 and p[120]==0 and p[t.index(b'fiesta')]==18 and p[t.index(b'a mano')]==19
+ok = ok and p[t.index(b'Titular')]==0x62 and a[t.index(b'Titular')]==1
 ok = ok and p[t.index(b'Enorme')]==0xA2 and p[t.index(b'menuda')]==0x22
 ok = ok and p[t.index(b'Grande')]==0x62 and a[t.index(b'Grande')]==0 and a[t.index(b'negra')]==1 and a[t.index(b'cursiva')]==6
 sys.exit(0 if ok else 1)
