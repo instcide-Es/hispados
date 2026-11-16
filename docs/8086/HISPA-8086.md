@@ -17,7 +17,7 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 ## Dónde estamos
 
 **Etapas 0 a 3 hechas y la 4 empezada** (`h8086/`, noviembre de 2026).
-Versión 0.6.
+Versión 0.7.
 
 - **Arranque**: sector de arranque FAT12 y núcleo (6,8 K en el disco). En
   memoria, el núcleo con sus variables, la copia de la FAT y la pila son unos
@@ -59,8 +59,11 @@ Versión 0.6.
   IF [NOT] EXIST / ERRORLEVEL / a==b y GOTO, y **AUTOEXEC.BAT** al arrancar.
 - **Redirección**: `orden > archivo`, `>> archivo` y `< archivo` (INT 21h/46h:
   un archivo hace de pantalla o de teclado para todos los programas).
-- **Prueba automática** (`make -C h8086 prueba`): 92 comprobaciones en QEMU, también
-  sobre un disco duro de 20 megas con una partición FAT16.
+- **PASAR**, la orden que lleva y trae archivos por el puerto serie con el
+  protocolo XMODEM (ver más abajo «Pasar archivos»).
+- **Prueba automática** (`make -C h8086 prueba`): 102 comprobaciones en QEMU,
+  también sobre un disco duro de 20 megas con una partición FAT16 y con otro
+  programa haciendo de «el otro ordenador» por el puerto serie.
   Un .EXE hecho a mano (`prueba/exe.asm`) comprueba la reubicación, la
   memoria y el lanzamiento de otro programa; otro (`prueba/arch.asm`) ejerce
   la interfaz de archivos en doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
@@ -260,7 +263,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 2 | Memoria por bloques (48h-4Ah), programas .EXE, lanzar programas (4Bh), entorno | **hecha** |
 | 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha**, con %1, IF, GOTO y redirección (faltan las tuberías «\|», FOR y CALL) |
 | 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | **a medias**: C: con FAT16 hecho; faltan CONFIG.SYS y los controladores |
-| 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | |
+| 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **empezada**: PASAR por el puerto serie |
 | 6 | Modo 286: HMA y memoria extendida | |
 | 7 | Hispa-BASIC | |
 | 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | |
@@ -269,6 +272,43 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
 La compatibilidad se mide como en Hispa-386: con programas de la época que
 aporta cada usuario (nunca se distribuyen con el proyecto).
+
+## Pasar archivos (PASAR)
+
+Lo que más se echa de menos al restaurar una de estas máquinas es meter y
+sacar archivos (ver el [estudio](ESTUDIO.md)). `PASAR` lo hace por el puerto
+serie con **XMODEM**, un protocolo que tiene cualquier programa de terminal:
+en el otro ordenador no hace falta nada nuestro.
+
+```
+PASAR ENVIAR archivo      lo manda
+PASAR RECIBIR archivo     lo recibe
+     /2                   por COM2 (si no, COM1)
+     /V:19200             la velocidad, de 300 a 115200 (si no, 9600)
+```
+
+Qué hace falta: un cable serie cruzado («null modem») y, en un ordenador de
+hoy, un adaptador de USB a serie. Siempre 8 bits, sin paridad, 1 bit de
+parada.
+
+En el otro ordenador:
+
+- **Linux**: `sx archivo < /dev/ttyUSB0 > /dev/ttyUSB0` para enviar y
+  `rx archivo < /dev/ttyUSB0 > /dev/ttyUSB0` para recibir (paquete `lrzsz`),
+  tras `stty -F /dev/ttyUSB0 9600 raw -echo`; o `minicom`, con Ctrl+A S.
+- **Windows**: Tera Term (Archivo › Transferir › XMODEM) o cualquier otro
+  terminal con XMODEM.
+- **Otro PC antiguo**: el propio `PASAR`, uno enviando y otro recibiendo.
+
+Cómo va: XMODEM manda bloques de 128 octetos, cada uno con su número y su
+comprobación (un CRC de 16 bits, o la suma de 8 bits de los XMODEM más
+antiguos: PASAR entiende los dos); el que recibe contesta «bien» o «otra
+vez», así que una línea con ruido no estropea el archivo. El último bloque
+se rellena con el octeto 1Ah, que al recibir se quita: un archivo que acabe
+de verdad en 1Ah los pierde (los de texto y los programas, no).
+
+Pendiente: el puerto paralelo (más rápido, y lo tienen todas estas máquinas)
+y un XMODEM de bloques de 1 K.
 
 ## Cómo se construye y se prueba
 
@@ -287,11 +327,14 @@ Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto.
 | `h8086/archivos.inc` | las funciones de archivos y directorios de INT 21h |
 | `h8086/proceso.inc` | la memoria por bloques y los programas (.COM, .EXE, lanzar, terminar) |
 | `h8086/command.asm` | el intérprete de órdenes: COMMAND.COM |
+| `h8086/ordenes/pasar.asm` | PASAR: archivos por el puerto serie (XMODEM) |
 | `h8086/prueba/hola.asm` | un programa .COM de prueba |
 | `h8086/prueba/arch.asm` | la prueba de la interfaz de archivos, en doce pasos |
 | `h8086/prueba/exe.asm` | un .EXE hecho a mano: reubicación, memoria y lanzar otro programa |
 | `h8086/prueba/prueba.sh` | la prueba automática |
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
+| `h8086/prueba/haz_duro.py` | hace el disco duro de prueba (una partición FAT16) |
+| `h8086/prueba/xmodem.py` | «el otro ordenador» de la prueba de PASAR |
 
 ### Cómo reconoce el procesador
 

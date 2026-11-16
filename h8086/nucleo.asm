@@ -375,7 +375,7 @@ f35:
 fE8:
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
-        mov bh, 6
+        mov bh, 7
         mov [bp+R_BX], bx
         ret
 ; 46h: redirección. El archivo BX pasa a ser la entrada (CX=0) o la salida
@@ -694,7 +694,7 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.6 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.7 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 

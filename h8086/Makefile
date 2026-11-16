@@ -39,6 +39,9 @@ $(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
 $(B)/COMMAND.COM: command.asm | $(B)
 	$(CP437) $< $(B)/gen/command.asm && $(NASM) -f bin -o $@ $(B)/gen/command.asm
 
+$(B)/PASAR.COM: ordenes/pasar.asm | $(B)
+	$(CP437) $< $(B)/gen/pasar.asm && $(NASM) -f bin -o $@ $(B)/gen/pasar.asm
+
 $(B)/HOLA.COM: prueba/hola.asm | $(B)
 	$(CP437) $< $(B)/gen/hola.asm && $(NASM) -f bin -o $@ $(B)/gen/hola.asm
 
@@ -51,7 +54,7 @@ $(B)/EXE.EXE: prueba/exe.asm | $(B)
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos

@@ -1627,7 +1627,7 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.6", 10, 0
+m_ver       db "Hispa-8086 versión 0.7", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):", 10
             db "  AYUDA                     esta lista", 10
             db "  VER                       la versión del sistema", 10
@@ -1643,6 +1643,7 @@ m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):"
             db "  LIMPIAR                   limpia la pantalla (CLS)", 10
             db "  ACTUALIZAR                cómo pasar a otro sistema Hispa", 10
             db "  ECO texto, REM, PAUSA     para los archivos por lotes (.BAT)", 10
+            db "  PASAR                     pasa archivos por el puerto serie (programa)", 10
             db "Cualquier otra palabra: el programa (.COM o .EXE) o el lote (.BAT)", 10
             db "de ese nombre, del directorio de trabajo o de la raíz.", 10, 0
 m_actualizar db "Los sistemas de la familia Hispa-DOS se actualizan entre sí:", 10

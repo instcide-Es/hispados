@@ -18,7 +18,7 @@ escribe() {
   local t="$1" i c
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
-    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; ':') tecla shift-semicolon;; '\') tecla backslash;; *) tecla "$c";; esac
+    case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; '/') tecla slash;; ':') tecla shift-semicolon;; '\') tecla backslash;; *) tecla "$c";; esac
   done
   tecla ret; sleep 0.8
 }
@@ -38,6 +38,7 @@ arranca() {   # imagen del disquete, cpu y, si se quiere, imagen del disco duro
   rm -f $T/mon
   qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu $2 -m 4 \
     -drive file=$1,format=raw,if=floppy,index=0 ${3:+-drive file=$3,format=raw,if=ide,index=0} \
+    -serial unix:$T/serie,server,nowait \
     -boot a -no-reboot > /dev/null 2>&1 &
   QPID=$!
   sleep 5
@@ -48,7 +49,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.6 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.7 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -59,10 +60,10 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.6" "VER: "
+esta p2 "Hispa-8086 versión 0.7" "VER: "
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
-esta p2 "8 archivos, " "DIR: "
+esta p2 "9 archivos, " "DIR: "
 esta p2 "COMMAND.COM" "DIR: "
 esta p2 "octetos libres" "DIR: "
 noesta p2 "HISPA-8086 " "DIR: (la etiqueta) "
@@ -95,7 +96,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.6" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.7" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -164,6 +165,33 @@ if command -v fsck.fat > /dev/null; then
   if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 fi
 
+echo "== Hispa-8086: PASAR, archivos por el puerto serie (XMODEM) =="
+cp build/hispa8086-360.img $T/a.img
+arranca $T/a.img 486
+# de fuera adentro: 3.000 octetos de todos los valores, con el CRC
+python3 -c "import sys; sys.stdout.buffer.write(bytes((i * 13 + 5) & 255 for i in range(3000)))" > $T/ida.bin
+escribe "limpiar"; escribe "pasar recibir ida.bin"
+if python3 prueba/xmodem.py $T/serie enviar $T/ida.bin; then ok "el otro lado envía y PASAR RECIBIR lo da todo por bueno"; else ko "PASAR RECIBIR"; fi
+sleep 2
+# de dentro afuera, con el CRC y con la suma de 8 bits de los XMODEM antiguos
+escribe "pasar enviar leeme.txt"
+if python3 prueba/xmodem.py $T/serie recibir $T/vuelta.txt; then ok "PASAR ENVIAR y el otro lado lo recibe (con CRC)"; else ko "PASAR ENVIAR"; fi
+sleep 2
+escribe "pasar enviar ida.bin /v:19200"
+sleep 1
+if python3 prueba/xmodem.py $T/serie recibir $T/vuelta.bin suma; then ok "PASAR ENVIAR con la suma de 8 bits (y a 19.200)"; else ko "PASAR ENVIAR con suma"; fi
+sleep 2
+escribe "pasar"; escribe "pasar recibir x.txt /v:7"
+pantalla px
+esta px "Recibido: 3000 octetos." "lo recibido, con su tamaño exacto: "
+esta px "Enviado: " ""
+esta px "PASAR - pasa archivos por el puerto serie (XMODEM)" "sin nada, dice cómo se usa: "
+esta px "Esa velocidad no vale" ""
+apaga
+if cmp -s <(mtype -i $T/a.img ::IDA.BIN) $T/ida.bin; then ok "lo recibido está en el disquete, octeto a octeto"; else ko "IDA.BIN no es lo enviado"; fi
+if cmp -s $T/vuelta.txt build/LEEME.TXT; then ok "lo enviado llega igual (LEEME.TXT)"; else ko "LEEME.TXT no llega igual"; fi
+if cmp -s $T/vuelta.bin $T/ida.bin; then ok "ida y vuelta: el archivo vuelve idéntico"; else ko "el archivo no vuelve idéntico"; fi
+
 echo "== Hispa-8086: el disco duro (C:, una partición FAT16 de 20 megas) =="
 cp build/hispa8086-360.img $T/a.img
 python3 prueba/haz_duro.py $T/hd.img > /dev/null
@@ -229,6 +257,6 @@ if [ $tam -lt 16384 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núc
 tam=$(stat -c %s build/COMMAND.COM)
 if [ $tam -lt 16384 ]; then ok "el intérprete ocupa $tam octetos"; else ko "el intérprete ha crecido a $tam octetos"; fi
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pr pe p6 p7 p8 p9 ph ph2 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pl pr pe p6 p7 p8 p9 px ph ph2 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
 rm -rf $T
 exit $fail
