@@ -12,7 +12,10 @@
 ;  Los menús siguen el orden de siempre en un procesador de textos (Archivo,
 ;  Edición, Ver, Insertar, Formato, Herramientas y «?»), con lo que Pluma
 ;  sabe hacer hoy; arriba, dos filas de botones: el archivo y la edición, y
-;  el formato. Además de lo de abajo: Reemplazar, Ir a, Repetir, insertar la
+;  el formato, con iconos (y, al pasar el ratón por un botón, abajo sale lo
+;  que hace). Los párrafos pueden ir justificados, con sangría, con viñetas o
+;  numerados; «¶» enseña los espacios y los finales de párrafo; la brocha
+;  copia el formato de un texto a otro. Además de lo de abajo: Reemplazar, Ir a, Repetir, insertar la
 ;  fecha o un archivo, los diálogos de Fuentes y Párrafo, cambiar mayúsculas
 ;  y minúsculas, contar palabras y pantalla completa.
 ;
@@ -53,8 +56,18 @@ A_CUR       equ 2
 A_SUB       equ 4
 A_GRA       equ 8                   ; grande: el doble de ancha y de alta
 A_COLOR     equ 0x70                ; el color: 0-7 en los bits 4-6
-; (en la marca de párrafo, los bits 0-1 son la alineación: 0 izquierda,
-; 1 centro, 2 derecha; A_GRA vale también, para la línea vacía)
+; En la marca de párrafo (el 10), el octeto dice cómo es el párrafo:
+;   bits 0-1  la alineación: 0 izquierda, 1 centro, 2 derecha, 3 justificado
+;   bit 2     con viñeta          bit 7     numerado
+;   bit 3     A_GRA, para la línea vacía
+;   bits 4-6  la sangría: de 0 a 7 pasos de cuatro letras
+; (Un Pluma anterior que abra el documento se queda con la alineación y pierde
+; lo demás, sin estropear nada.)
+P_VIN       equ 0x04
+P_NUM       equ 0x80
+P_SANGRIA   equ 0x70
+SANGRIA_PX  equ 32                  ; un paso de sangría
+MARCA_PX    equ 24                  ; el sitio de la viñeta o del número
 
 ID_PUENTE   equ 900
 ID_BARRA    equ 901
@@ -86,6 +99,7 @@ O_COLOR     equ 130                 ; 130-133: negro, rojo, azul, verde
 O_IZQ       equ 141
 O_CEN       equ 142
 O_DER       equ 143
+O_JUST      equ 144
 O_ACERCA    equ 151
 O_REEMPLAZAR equ 161
 O_IRA       equ 162
@@ -95,6 +109,12 @@ O_FUENTES   equ 165
 O_PARRAFO   equ 166
 O_MAYMIN    equ 167
 O_COMPLETA  equ 168
+O_BROCHA    equ 169
+O_MARCAS    equ 170
+O_VINETAS   equ 171
+O_NUMERA    equ 172
+O_SANG_MAS  equ 173
+O_SANG_MENOS equ 174
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -198,6 +218,8 @@ plu_menu:
         db "&Ir a...           Ctrl+I", 0
         dw 0xFFFF
         db "&Ver", 0
+        dw O_MARCAS
+        db "&Mostrar las marcas (¶)", 0
         dw O_COMPLETA
         db "&Pantalla completa", 0
         dw 0xFFFF
@@ -232,6 +254,22 @@ plu_menu:
         db "C&entrado          Ctrl+T", 0
         dw O_DER
         db "A la &derecha      Ctrl+D", 0
+        dw O_JUST
+        db "&Justificado       Ctrl+J", 0
+        dw 0
+        db 0
+        dw O_VINETAS
+        db "&Viñetas", 0
+        dw O_NUMERA
+        db "Nume&ración", 0
+        dw O_SANG_MAS
+        db "A&umentar sangría", 0
+        dw O_SANG_MENOS
+        db "Dismin&uir sangría", 0
+        dw 0
+        db 0
+        dw O_BROCHA
+        db "Copiar f&ormato", 0
         dw 0xFFFF
         db "&Herramientas", 0
         dw O_RESUMEN
@@ -260,39 +298,406 @@ dlg_fue:
         dd 0
 ; ---- diálogo: el párrafo ----
 dlg_par:
-        PLANTILLA HV_c_dialogo, t_d_par, E_DIALOGO, 0, 0, 280, 184, 0
+        PLANTILLA HV_c_dialogo, t_d_par, E_DIALOGO, 0, 0, 280, 208, 0
         PLANTILLA HV_c_boton, t_p_izq, E_HIJA | E_TABULA | BS_OPCION, 20, 14, 220, 20, 40
         PLANTILLA HV_c_boton, t_p_cen, E_HIJA | E_TABULA | BS_OPCION, 20, 38, 220, 20, 41
         PLANTILLA HV_c_boton, t_p_der, E_HIJA | E_TABULA | BS_OPCION, 20, 62, 220, 20, 42
-        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 40, 104, 90, 26, ID_ACEPTAR
-        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 140, 104, 90, 26, ID_CANCELAR
+        PLANTILLA HV_c_boton, t_p_just, E_HIJA | E_TABULA | BS_OPCION, 20, 86, 220, 20, 43
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 40, 128, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 140, 128, 90, 26, ID_CANCELAR
         dd 0
 
-; ---- los botones de la barra: x, ancho, texto, orden. Dos filas: arriba, el
-;      archivo y la edición; abajo, el formato ----
+; ---- los botones de la barra, en dos filas: arriba, el archivo y la edición;
+;      abajo, el formato. De cada uno: x, ancho, su icono (o su texto), la
+;      orden, su nombre (sale abajo al pasar el ratón) y si es icono (1) ----
             align 4
-botones1    dd 6, 56, t_b_nuevo, O_NUEVO
-            dd 64, 56, t_b_abrir, O_ABRIR
-            dd 122, 68, t_b_guardar, O_GUARDAR
-            dd 198, 76, t_b_imprimir, O_IMPRIMIR
-            dd 282, 60, t_b_cortar, O_CORTAR
-            dd 344, 60, t_b_copiar, O_COPIAR
-            dd 406, 56, t_b_pegar, O_PEGAR
-            dd 470, 76, t_b_deshacer, O_DESHACER
-            dd 548, 68, t_b_rehacer, O_REHACER
-            dd 0, 0, 0, 0
-botones     dd 6, 24, t_b_n, O_NEG
-            dd 32, 24, t_b_k, O_CUR
-            dd 58, 24, t_b_s, O_SUB
-            dd 90, 64, t_b_grande, O_GRANDE
-            dd 164, 48, t_b_izq, O_IZQ
-            dd 214, 56, t_b_cen, O_CEN
-            dd 272, 48, t_b_der, O_DER
-            dd 332, 22, t_nada, O_COLOR
-            dd 356, 22, t_nada, O_COLOR + 1
-            dd 380, 22, t_nada, O_COLOR + 2
-            dd 404, 22, t_nada, O_COLOR + 3
-            dd 0, 0, 0, 0
+botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
+            dd 32, 24, ic_abrir, O_ABRIR, n_abrir, 1
+            dd 58, 24, ic_guardar, O_GUARDAR, n_guardar, 1
+            dd 90, 24, ic_imprimir, O_IMPRIMIR, n_imprimir, 1
+            dd 122, 24, ic_cortar, O_CORTAR, n_cortar, 1
+            dd 148, 24, ic_copiar, O_COPIAR, n_copiar, 1
+            dd 174, 24, ic_pegar, O_PEGAR, n_pegar, 1
+            dd 200, 24, ic_brocha, O_BROCHA, n_brocha, 1
+            dd 232, 24, ic_deshacer, O_DESHACER, n_deshacer, 1
+            dd 258, 24, ic_rehacer, O_REHACER, n_rehacer, 1
+            dd 290, 24, ic_marcas, O_MARCAS, n_marcas, 1
+            dd 0, 0, 0, 0, 0, 0
+botones     dd 6, 24, t_b_n, O_NEG, n_neg, 0
+            dd 32, 24, t_b_k, O_CUR, n_cur, 0
+            dd 58, 24, t_b_s, O_SUB, n_sub, 0
+            dd 86, 60, t_b_grande, O_GRANDE, n_grande, 0
+            dd 154, 24, ic_izq, O_IZQ, n_izq, 1
+            dd 180, 24, ic_cen, O_CEN, n_cen, 1
+            dd 206, 24, ic_der, O_DER, n_der, 1
+            dd 232, 24, ic_just, O_JUST, n_just, 1
+            dd 264, 24, ic_numera, O_NUMERA, n_numera, 1
+            dd 290, 24, ic_vinetas, O_VINETAS, n_vinetas, 1
+            dd 316, 24, ic_sang_menos, O_SANG_MENOS, n_sang_menos, 1
+            dd 342, 24, ic_sang_mas, O_SANG_MAS, n_sang_mas, 1
+            dd 376, 22, t_nada, O_COLOR, n_c0, 0
+            dd 400, 22, t_nada, O_COLOR + 1, n_c1, 0
+            dd 424, 22, t_nada, O_COLOR + 2, n_c2, 0
+            dd 448, 22, t_nada, O_COLOR + 3, n_c3, 0
+            dd 0, 0, 0, 0, 0, 0
+B_TAM       equ 24                  ; lo que ocupa cada botón en la tabla
+n_nuevo     db "Nuevo: un documento en blanco (Ctrl+U)", 0
+n_abrir     db "Abrir un documento guardado (Ctrl+A)", 0
+n_guardar   db "Guardar el documento (Ctrl+G)", 0
+n_imprimir  db "Imprimir (Ctrl+P)", 0
+n_cortar    db "Cortar lo elegido (Ctrl+X)", 0
+n_copiar    db "Copiar lo elegido (Ctrl+C)", 0
+n_pegar     db "Pegar (Ctrl+V)", 0
+n_brocha    db "Copiar formato: pulse y luego elija el texto que lo recibe", 0
+n_deshacer  db "Deshacer (Ctrl+Z)", 0
+n_rehacer   db "Rehacer lo deshecho (Ctrl+Y)", 0
+n_marcas    db "Mostrar u ocultar los espacios y las marcas de párrafo", 0
+n_neg       db "Negrita (Ctrl+N)", 0
+n_cur       db "Cursiva (Ctrl+K)", 0
+n_sub       db "Subrayado (Ctrl+S)", 0
+n_grande    db "Letra grande, el doble (Ctrl+W)", 0
+n_izq       db "Alinear a la izquierda (Ctrl+Q)", 0
+n_cen       db "Centrar (Ctrl+T)", 0
+n_der       db "Alinear a la derecha (Ctrl+D)", 0
+n_just      db "Justificar: los dos márgenes rectos (Ctrl+J)", 0
+n_numera    db "Numeración: una lista con números", 0
+n_vinetas   db "Viñetas: una lista con puntos", 0
+n_sang_menos db "Disminuir la sangría", 0
+n_sang_mas  db "Aumentar la sangría", 0
+n_c0        db "Letra negra", 0
+n_c1        db "Letra roja", 0
+n_c2        db "Letra azul", 0
+n_c3        db "Letra verde", 0
+; los signos que la fuente no trae, de 8x16: la viñeta, el punto de un espacio
+; y el calderón del final de párrafo
+m_vineta    db 0, 0, 0, 0, 0, 0, 0x3C, 0x7E, 0x7E, 0x7E, 0x7E, 0x3C, 0, 0, 0, 0
+m_punto     db 0, 0, 0, 0, 0, 0, 0, 0, 0x18, 0x18, 0, 0, 0, 0, 0, 0
+m_calderon  db 0, 0, 0x7E, 0xF4, 0xF4, 0xF4, 0x74, 0x14, 0x14, 0x14, 0x14, 0x14, 0x14, 0, 0, 0
+ic_marcas:
+        db "................"
+        db "................"
+        db "....000000000..."
+        db "...0000.00......"
+        db "..00000.00......"
+        db "..00000.00......"
+        db "..00000.00......"
+        db "...0000.00......"
+        db "....000.00......"
+        db "......0.00......"
+        db "......0.00......"
+        db "......0.00......"
+        db "......0.00......"
+        db "......0.00......"
+        db "................"
+        db "................"
+; ---- los iconos: 16x16, un carácter por punto («.» deja ver el botón; las
+;      cifras y las letras, los colores de la paleta) ----
+ic_nuevo:
+        db "................"
+        db "...00000000....."
+        db "...099999900...."
+        db "...0999999000..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0999999990..."
+        db "...0000000000..."
+        db "................"
+ic_abrir:
+        db "................"
+        db "................"
+        db "................"
+        db "..000000........"
+        db "..0aaaa0........"
+        db ".00000000000000."
+        db ".0aaaaaaaaaaaa0."
+        db ".09999999999990."
+        db ".0aaaaaaaaaaaa0."
+        db ".0aaaaaaaaaaaa0."
+        db ".0aaaaaaaaaaaa0."
+        db ".0aaaaaaaaaaaa0."
+        db ".00000000000000."
+        db "................"
+        db "................"
+        db "................"
+ic_guardar:
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "..0c09999990c0.."
+        db "..0c09999990c0.."
+        db "..0c09999990c0.."
+        db "..0c00000000c0.."
+        db "..0cccccccccc0.."
+        db "..0cccccccccc0.."
+        db "..0cc000000cc0.."
+        db "..0cc0ff0f0cc0.."
+        db "..0cc0ff0f0cc0.."
+        db "..0cc0ffff0cc0.."
+        db "..000000000000.."
+        db "................"
+        db "................"
+ic_imprimir:
+        db "................"
+        db "....00000000...."
+        db "....09999990...."
+        db "....09999990...."
+        db "....09999990...."
+        db "....09999990...."
+        db ".00000000000000."
+        db ".0ffffffffffff0."
+        db ".0ffffffffffbf0."
+        db ".0ffffffffffff0."
+        db ".0ff00000000ff0."
+        db ".00009999990000."
+        db "....09777790...."
+        db "....09999990...."
+        db "....00000000...."
+        db "................"
+ic_cortar:
+        db "................"
+        db "....0......0...."
+        db ".....0....0....."
+        db "......0...0....."
+        db "......0..0......"
+        db ".......00......."
+        db ".......00......."
+        db "......0.0......."
+        db "......0..0......"
+        db ".....0....0....."
+        db "...dd......dd..."
+        db "..d..d....d..d.."
+        db "..d..d....d..d.."
+        db "...dd......dd..."
+        db "................"
+        db "................"
+ic_copiar:
+        db "................"
+        db "..00000000......"
+        db "..09999990......"
+        db "..09999990......"
+        db "..09999990......"
+        db "..099900000000.."
+        db "..099909999990.."
+        db "..099909999990.."
+        db "..099909777790.."
+        db "..099909999990.."
+        db "..000009777790.."
+        db "......09999990.."
+        db "......09777790.."
+        db "......09999990.."
+        db "......00000000.."
+        db "................"
+ic_pegar:
+        db "................"
+        db "......0000......"
+        db "..00000ff00000.."
+        db "..0aaa0000aaa0.."
+        db "..0aaaaaaaaaa0.."
+        db "..0aaaaaaaaaa0.."
+        db "..0aa000000000.."
+        db "..0aa099999900.."
+        db "..0aa097777900.."
+        db "..0aa099999900.."
+        db "..0aa097777900.."
+        db "..0aa099999900.."
+        db "..0aa099999900.."
+        db "..0aa000000000.."
+        db "..000000000000.."
+        db "................"
+ic_brocha:
+        db "................"
+        db ".............1.."
+        db "............111."
+        db "...........111.."
+        db "..........111..."
+        db ".........111...."
+        db "........111....."
+        db "....0000.1......"
+        db "...0aaaa0......."
+        db "..0aaaaa0......."
+        db ".0aaaaa0........"
+        db ".0aaaa0........."
+        db ".0aaa0.........."
+        db "..000..........."
+        db "................"
+        db "................"
+ic_deshacer:
+        db "................"
+        db "................"
+        db ".....00000......"
+        db "...00ccccc00...."
+        db "..0cc00000cc0..."
+        db "..0c0.....0c0..."
+        db ".0c0.......0c0.."
+        db "00c00......0c0.."
+        db "0ccc0......0c0.."
+        db ".0c0.......0c0.."
+        db "..0.......0c0..."
+        db ".........0c0...."
+        db ".......00c0....."
+        db ".......000......"
+        db "................"
+        db "................"
+ic_rehacer:
+        db "................"
+        db "................"
+        db "......00000....."
+        db "....00ccccc00..."
+        db "...0cc00000cc0.."
+        db "...0c0.....0c0.."
+        db "..0c0.......0c0."
+        db "..0c0......00c00"
+        db "..0c0......0ccc0"
+        db "..0c0.......0c0."
+        db "...0c0.......0.."
+        db "....0c0........."
+        db ".....0c00......."
+        db "......000......."
+        db "................"
+        db "................"
+ic_izq:
+        db "................"
+        db "................"
+        db "..00000000000..."
+        db "................"
+        db "..0000000......."
+        db "................"
+        db "..00000000000..."
+        db "................"
+        db "..00000........."
+        db "................"
+        db "..00000000000..."
+        db "................"
+        db "..00000000......"
+        db "................"
+        db "................"
+        db "................"
+ic_cen:
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "....00000000...."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db ".....000000....."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "....00000000...."
+        db "................"
+        db "................"
+        db "................"
+ic_der:
+        db "................"
+        db "................"
+        db "...00000000000.."
+        db "................"
+        db ".......0000000.."
+        db "................"
+        db "...00000000000.."
+        db "................"
+        db ".........00000.."
+        db "................"
+        db "...00000000000.."
+        db "................"
+        db "......00000000.."
+        db "................"
+        db "................"
+        db "................"
+ic_just:
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "................"
+        db "................"
+ic_numera:
+        db "................"
+        db "................"
+        db "..c............."
+        db ".cc...00000000.."
+        db "..c............."
+        db "................"
+        db ".cc............."
+        db "..cc..00000000.."
+        db ".cc............."
+        db "................"
+        db ".ccc............"
+        db "..cc..00000000.."
+        db ".ccc............"
+        db "................"
+        db "................"
+        db "................"
+ic_vinetas:
+        db "................"
+        db "................"
+        db "..cc............"
+        db "..cc..00000000.."
+        db "................"
+        db "................"
+        db "..cc............"
+        db "..cc..00000000.."
+        db "................"
+        db "................"
+        db "..cc............"
+        db "..cc..00000000.."
+        db "................"
+        db "................"
+        db "................"
+        db "................"
+ic_sang_mas:
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "................"
+        db ".......0000000.."
+        db ".c.............."
+        db ".cc............."
+        db ".cccc..0000000.."
+        db ".cc............."
+        db ".c.............."
+        db ".......0000000.."
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "................"
+ic_sang_menos:
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "................"
+        db "................"
+        db ".......0000000.."
+        db "....c..........."
+        db "...cc..........."
+        db ".cccc..0000000.."
+        db "...cc..........."
+        db "....c..........."
+        db ".......0000000.."
+        db "................"
+        db "................"
+        db "..000000000000.."
+        db "................"
 ; los colores de la letra (de la paleta de Hispa Ventanas)
 colores     db C_TINTA, C_GRANATE, C_ANIL, C_OLIVA, C_TERRACOTA, C_PETROLEO, C_MARRON, C_PIEDRA
 
@@ -328,15 +733,6 @@ t_impreso   db "El documento se ha enviado a la impresora.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
             db "Compruebe que la impresora (la del puerto paralelo, LPT1)", 10
             db "está encendida, en línea y con papel.", 0
-t_b_nuevo   db "Nuevo", 0
-t_b_abrir   db "Abrir", 0
-t_b_guardar db "Guardar", 0
-t_b_imprimir db "Imprimir", 0
-t_b_cortar  db "Cortar", 0
-t_b_copiar  db "Copiar", 0
-t_b_pegar   db "Pegar", 0
-t_b_deshacer db "Deshacer", 0
-t_b_rehacer db "Rehacer", 0
 t_aceptar   db "Aceptar", 0
 t_cancelar  db "Cancelar", 0
 t_d_fue     db "Fuentes", 0
@@ -353,6 +749,7 @@ t_d_par     db "Párrafo", 0
 t_p_izq     db "A la izquierda", 0
 t_p_cen     db "Centrado", 0
 t_p_der     db "A la derecha", 0
+t_p_just    db "Justificado (los dos márgenes rectos)", 0
 t_reemplazar db "Reemplazar", 0
 t_q_por     db "Reemplazar por:", 0
 t_ira       db "Ir a", 0
@@ -370,7 +767,9 @@ t_acerca_tit db "Acerca de Pluma", 0
 t_acerca    db "Pluma", 10
             db "El procesador de textos de Hispa Ventanas:", 10
             db "negrita, cursiva, subrayado, letra grande, colores", 10
-            db "y párrafos a la izquierda, centrados o a la derecha.", 0
+            db "y párrafos alineados, justificados, con sangría o en lista.", 10, 10
+            db "Copyright (C) 2026 Carlos Sanz y contribuidores.", 10
+            db "GPL-2.0 o posterior.", 0
 firma       db "PLUMA1", 26, 0      ; el principio de un .PLU (8 octetos)
 
 ; =============================================================================
@@ -720,6 +1119,22 @@ orden_haz:
         je may_min
         cmp ecx, O_COMPLETA
         je completa
+        cmp ecx, O_BROCHA
+        je brocha_orden
+        cmp ecx, O_MARCAS
+        je marcas
+        mov al, P_VIN
+        cmp ecx, O_VINETAS
+        je lista
+        mov al, P_NUM
+        cmp ecx, O_NUMERA
+        je lista
+        mov eax, 1
+        cmp ecx, O_SANG_MAS
+        je sangria
+        mov eax, -1
+        cmp ecx, O_SANG_MENOS
+        je sangria
         mov al, A_NEG
         cmp ecx, O_NEG
         je formato
@@ -738,7 +1153,7 @@ orden_haz:
         jbe color
         mov eax, ecx
         sub eax, O_IZQ
-        cmp eax, 2
+        cmp eax, 3
         jbe alinea
         cmp ecx, O_ACERCA
         je .acerca
@@ -787,11 +1202,38 @@ compone:
         xor esi, esi                ; por dónde va
         xor edi, edi                ; la línea
         xor ebp, ebp                ; la altura
+        mov dword [cp_num], 0
+        mov byte [cp_ini], 1        ; la línea que viene empieza un párrafo
 .lin:
         cmp esi, [n]
         jae .fin
         mov [lin_ini+edi*4], esi
         mov [lin_y+edi*4], ebp
+        mov word [lin_marca+edi*2], 0
+        cmp byte [cp_ini], 0
+        je .sigue
+        ; un párrafo nuevo: cuánto sitio tiene (su sangría y su marca) y, si
+        ; es de una lista, qué lleva delante su primera línea
+        mov eax, esi
+        call par_de
+        mov ebx, eax
+        call par_izq
+        mov ecx, PAG_AN
+        sub ecx, eax
+        mov [cp_ancho], ecx
+        test bl, P_NUM
+        jz .nn
+        inc dword [cp_num]          ; (los numerados seguidos cuentan 1, 2, 3...)
+        mov eax, [cp_num]
+        mov [lin_marca+edi*2], ax
+        jmp short .sigue
+.nn:
+        mov dword [cp_num], 0
+        test bl, P_VIN
+        jz .sigue
+        mov word [lin_marca+edi*2], 0xFFFF
+.sigue:
+        mov byte [cp_ini], 0
         mov ebx, esi                ; donde empieza
         xor ecx, ecx                ; lo que ocupa
         mov edx, -1                 ; el último espacio
@@ -800,6 +1242,7 @@ compone:
         cmp al, 10
         jne .c1
         inc esi
+        mov byte [cp_ini], 1
         jmp .hecha
 .c1:
         push eax
@@ -807,7 +1250,7 @@ compone:
         call ancho_de
         add ecx, eax
         pop eax
-        cmp ecx, PAG_AN
+        cmp ecx, [cp_ancho]
         ja .corta
         cmp al, ' '
         jne .c2
@@ -834,6 +1277,30 @@ compone:
         mov [lin_ini+edi*4], esi
         mov [lin_y+edi*4], ebp
         popad
+        ret
+
+; EAX=sitio -> EAX=el octeto de la marca de su párrafo (cómo es el párrafo)
+par_de:
+        cmp byte [txt+eax], 10
+        je .x
+        inc eax
+        jmp par_de
+.x:
+        movzx eax, byte [atr+eax]
+        ret
+; AL=octeto de un párrafo -> EAX=lo que deja a la izquierda, en puntos: la
+; sangría y, si es de una lista, el sitio de la viñeta o del número
+par_izq:
+        push ecx
+        movzx ecx, al
+        mov eax, ecx
+        and eax, P_SANGRIA
+        shl eax, 1                  ; (pasos x 16 x 2 = pasos x SANGRIA_PX)
+        test cl, P_VIN | P_NUM
+        jz .x
+        add eax, MARCA_PX
+.x:
+        pop ecx
         ret
 
 ; EBX=principio ESI=final de una línea -> EAX=su alto (16, o 32 si tiene
@@ -904,6 +1371,9 @@ mide:
         mov [m_al], eax
         xor ecx, ecx                ; el ancho
         xor edx, edx                ; el ancho sin los espacios del final
+        xor ebp, ebp                ; los espacios vistos
+        mov dword [m_huecos], 0
+        mov [m_fin_txt], ebx
 .b:
         cmp ebx, esi
         jae .f
@@ -913,28 +1383,84 @@ mide:
         call ancho_de
         add ecx, eax
         cmp byte [txt+ebx], ' '
-        je .s
+        jne .l
+        inc ebp
+        jmp short .s
+.l:
         mov edx, ecx
+        mov [m_huecos], ebp         ; los espacios de antes de la última letra
+        lea eax, [ebx+1]
+        mov [m_fin_txt], eax
 .s:
         inc ebx
         jmp .b
 .f:
-        mov eax, [m_s]
-        call alin_de
-        xor ecx, ecx
-        cmp eax, 1
-        jb .p
-        mov ecx, PAG_AN
+        mov eax, [m_s]              ; cómo es su párrafo
+        call par_de
+        mov ebx, eax
+        call par_izq
+        mov [m_izq], eax
+        mov ecx, PAG_AN             ; lo que sobra a la derecha
+        sub ecx, eax
         sub ecx, edx
         jns .f1
         xor ecx, ecx
 .f1:
-        cmp eax, 1
-        jne .p
-        shr ecx, 1
+        mov byte [m_just], 0
+        and ebx, 3
+        jz .p                       ; a la izquierda
+        cmp ebx, 3
+        je .just
+        cmp ebx, 1
+        jne .der
+        shr ecx, 1                  ; centrada: la mitad de lo que sobra
+.der:
+        add eax, ecx
+        jmp short .p
+.just:
+        ; justificada: lo que sobra se reparte entre sus espacios; la última
+        ; línea del párrafo (y la que no tiene espacios) se queda como está
+        mov esi, [m_e]
+        cmp byte [txt+esi-1], 10
+        je .p
+        cmp dword [m_huecos], 0
+        je .p
+        push eax
+        mov eax, ecx
+        xor edx, edx
+        div dword [m_huecos]
+        mov [m_jq], eax
+        mov [m_jr], edx
+        pop eax
+        mov byte [m_just], 1
 .p:
-        mov [m_x0], ecx
+        mov [m_x0], eax
+        mov dword [m_jn], 0
         popad
+        ret
+
+; EAX=un sitio de la línea medida (hay que ir en orden desde su principio) ->
+; EAX=lo que ocupa, con lo que le toca del reparto si la línea va justificada
+ancho_j:
+        push ebx
+        mov ebx, eax
+        call ancho_de
+        cmp byte [m_just], 0
+        je .x
+        cmp byte [txt+ebx], ' '
+        jne .x
+        cmp ebx, [m_fin_txt]
+        jae .x
+        add eax, [m_jq]
+        push ecx
+        mov ecx, [m_jn]
+        inc dword [m_jn]
+        cmp ecx, [m_jr]
+        pop ecx
+        jae .x
+        inc eax
+.x:
+        pop ebx
         ret
 
 ; EAX=sitio -> [c_lin], [c_x], [c_y] y [c_al]: la línea, la x en el texto, la
@@ -952,7 +1478,7 @@ sitio_xy:
         cmp esi, ebx
         jae .f
         mov eax, esi
-        call ancho_de
+        call ancho_j
         add ecx, eax
         inc esi
         jmp .b
@@ -981,7 +1507,7 @@ xy_sitio:
         cmp byte [txt+esi], 10
         je .x
         mov eax, esi
-        call ancho_de
+        call ancho_j
         mov ebx, eax
         shr ebx, 1
         add ebx, ecx
@@ -1237,7 +1763,7 @@ tecla:
 ; las órdenes de Ctrl+letra (de la A a la Z; 0: ninguna)
 ; (Ctrl+H no vale de atajo: para el teclado es Retroceso. Ctrl+I y Ctrl+M se
 ; distinguen de Tab y de Intro desde Hispa-386 0.9.20; «Ir a» es también F5)
-ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, O_IRA, 0
+ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, O_IRA, O_JUST
             db O_CUR, O_REEMPLAZAR, 0, O_NEG, 0, O_IMPRIMIR, O_IZQ, 0, O_SUB, O_CEN
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 
@@ -1269,9 +1795,10 @@ escribe1:
         mov bl, [at_act]
         cmp dl, 10
         jne .p
-        push eax                    ; la marca del párrafo que se parte: su
-        inc eax                     ; alineación, y el tamaño de ahora
-        call alin_de
+        push eax                    ; la marca del párrafo que se parte: como
+        inc eax                     ; la del suyo (alineación, sangría, lista),
+        call par_de                 ; y el tamaño de ahora
+        and al, ~A_GRA
         and bl, A_GRA
         or bl, al
         pop eax
@@ -1409,21 +1936,59 @@ raton:
         jl .b
         mov esi, botones
 .b:
+        call boton_en
+        jc hecho
+        mov ecx, [esi+12]
+        jmp orden
+; (interna) EAX=x ESI=la tabla de una fila de botones -> ESI=el botón que hay
+; ahí; CF=1 si no hay ninguno
+boton_en:
+        push ecx
+.b:
         cmp dword [esi+8], 0
-        je hecho
+        je .no
         mov ecx, eax
         sub ecx, [esi]
         cmp ecx, [esi+4]
         jb .es
-        add esi, 16
+        add esi, B_TAM
         jmp .b
 .es:
-        mov ecx, [esi+12]
-        jmp orden
+        pop ecx
+        clc
+        ret
+.no:
+        pop ecx
+        stc
+        ret
 
 raton_mueve:
         cmp byte [arrastra], 0
+        jne .arrastra
+        ; sobre un botón de la barra: su nombre, abajo
+        xor edi, edi
+        mov ebx, edx
+        sar ebx, 16
+        cmp ebx, TB_AL
+        jae .nombre
+        test ebx, ebx
+        js .nombre
+        movsx eax, dx
+        mov esi, botones1
+        cmp ebx, 30
+        jl .f
+        mov esi, botones
+.f:
+        call boton_en
+        jc .nombre
+        mov edi, [esi+16]
+.nombre:
+        cmp edi, [bt_sobre]
         je hecho
+        mov [bt_sobre], edi
+        call inval
+        jmp hecho
+.arrastra:
         call raton_sitio
         cmp eax, [cur]
         je hecho
@@ -1432,11 +1997,20 @@ raton_mueve:
         call tras_mover
         jmp hecho
 raton_suelta:
+        cmp byte [arrastra], 0
+        je hecho
         mov byte [arrastra], 0
         mov eax, [anc]              ; (un clic sin arrastrar no elige nada)
         cmp eax, [cur]
-        jne hecho
+        jne .elegido
         mov dword [anc], -1
+        jmp hecho
+.elegido:
+        cmp byte [brocha], 0        ; con la brocha: lo elegido recibe el formato
+        je hecho                    ; copiado, y la brocha se suelta
+        mov byte [brocha], 0
+        mov dl, [brocha_atr]
+        call pon_formato
         jmp hecho
 
 ; doble clic: elige la palabra
@@ -1666,7 +2240,8 @@ inserta_texto:
         call hueco
         jc .x
         mov eax, [cur]
-        call alin_de
+        call par_de
+        and al, ~A_GRA
         mov dh, al                  ; (la marca de un párrafo nuevo: su
         mov al, [at_act]            ; alineación y el tamaño de ahora)
         and al, A_GRA
@@ -2052,25 +2627,7 @@ fuentes:
         cmp eax, ID_ACEPTAR
         jne .x
         mov dl, [dl_atr]            ; a lo elegido, o a lo que se escriba
-        mov [at_act], dl
-        call elegido
-        je inval
-        call instantanea
-.b:
-        cmp eax, ebx
-        jae cambio
-        cmp byte [txt+eax], 10
-        jne .l
-        and byte [atr+eax], ~A_GRA  ; (a una marca de párrafo, solo el tamaño)
-        mov cl, dl
-        and cl, A_GRA
-        or [atr+eax], cl
-        jmp short .s
-.l:
-        mov [atr+eax], dl
-.s:
-        inc eax
-        jmp .b
+        jmp pon_formato
 .x:
         ret
 ; el gancho del diálogo: al empezar, las casillas como el formato de ahora;
@@ -2156,6 +2713,114 @@ marca_pon:
         popad
         ret
 
+; pone el formato DL a lo elegido (y a lo que se escriba): lo usan Fuentes y
+; la brocha
+pon_formato:
+        mov [at_act], dl
+        call elegido
+        je inval
+        call instantanea
+.b:
+        cmp eax, ebx
+        jae cambio
+        cmp byte [txt+eax], 10
+        jne .l
+        and byte [atr+eax], ~A_GRA  ; (a una marca de párrafo, solo el tamaño)
+        mov cl, dl
+        and cl, A_GRA
+        or [atr+eax], cl
+        jmp short .s
+.l:
+        mov [atr+eax], dl
+.s:
+        inc eax
+        jmp .b
+
+; ---- Copiar formato (la brocha): se queda con el formato de donde está el
+;      cursor (o del principio de lo elegido); lo siguiente que se elija con
+;      el ratón lo recibe. Pulsarla otra vez la suelta ----
+brocha_orden:
+        xor byte [brocha], 1
+        jz inval
+        call elegido
+        mov dl, [at_act]
+        je .p
+        mov dl, [atr+eax]
+.p:
+        mov [brocha_atr], dl
+        mov dword [anc], -1
+        jmp inval
+
+; ---- Ver > Mostrar las marcas: los espacios y los finales de párrafo ----
+marcas:
+        xor byte [ver_marcas], 1
+        jmp inval
+
+; ---- Viñetas y Numeración (AL = P_VIN o P_NUM): a los párrafos de lo
+;      elegido, o al del cursor. Si todos lo tienen ya, se les quita ----
+lista:
+        mov dl, al
+        call instantanea
+        call elegido
+        push eax
+        xor ecx, ecx                ; ¿hay alguno que no lo tenga?
+.m:
+        cmp byte [txt+eax], 10
+        jne .ms
+        test [atr+eax], dl
+        jnz .m1
+        inc ecx
+.m1:
+        cmp eax, ebx
+        jae .mf
+.ms:
+        inc eax
+        jmp .m
+.mf:
+        pop eax
+.b:
+        cmp byte [txt+eax], 10
+        jne .s
+        and byte [atr+eax], ~(P_VIN | P_NUM)
+        test ecx, ecx
+        jz .q
+        or [atr+eax], dl
+.q:
+        cmp eax, ebx
+        jae cambio
+.s:
+        inc eax
+        jmp .b
+
+; ---- Aumentar o disminuir la sangría (EAX = 1 o -1) de los párrafos de lo
+;      elegido, o del cursor: de 0 a 7 pasos ----
+sangria:
+        mov edx, eax
+        call instantanea
+        call elegido
+.b:
+        cmp byte [txt+eax], 10
+        jne .s
+        movzx ecx, byte [atr+eax]
+        shr ecx, 4
+        and ecx, 7
+        add ecx, edx
+        jns .p
+        xor ecx, ecx
+.p:
+        cmp ecx, 7
+        jbe .p1
+        mov ecx, 7
+.p1:
+        shl ecx, 4
+        and byte [atr+eax], ~P_SANGRIA
+        or [atr+eax], cl
+        cmp eax, ebx
+        jae cambio
+.s:
+        inc eax
+        jmp .b
+
 ; ---- Formato > Párrafo: la alineación ----
 parrafo:
         mov ebp, [ven]
@@ -2186,7 +2851,7 @@ par_gancho:
 .g1:
         inc bl
         inc ecx
-        cmp ecx, 43
+        cmp ecx, 44
         jb .g
         jmp short .no
 .ini:
@@ -2296,7 +2961,8 @@ pegar:
         call hueco
         jc .x
         mov eax, [cur]
-        call alin_de
+        call par_de
+        and al, ~A_GRA
         mov dh, al                  ; la alineación del párrafo donde se pega
         mov bl, [at_act]
         and bl, A_GRA
@@ -2553,16 +3219,7 @@ cargar:
 .rl:
         and byte [atr+esi], 0x7F
         jmp .rs
-.rm:
-        mov al, [atr+esi]
-        and al, A_GRA | 3
-        mov ah, al
-        and ah, 3
-        cmp ah, 3
-        jne .rm1
-        and al, A_GRA
-.rm1:
-        mov [atr+esi], al
+.rm:                                ; (la marca de párrafo: tal cual)
 .rs:
         inc esi
         dec ecx
@@ -2759,12 +3416,67 @@ imprime:
         mov ecx, [m_x0]             ; el margen y la alineación, en espacios
         shr ecx, 3
         add ecx, 4
+        movzx ebx, word [lin_marca+edi*2]
+        test ebx, ebx               ; una lista: los cuatro últimos huecos son
+        jz .esp                     ; para la viñeta o el número y un espacio
+        sub ecx, 4
 .esp:
         mov al, ' '
         call imp_car
         jc .mal
         dec ecx
         jnz .esp
+        test ebx, ebx
+        jz .sin_marca
+        cmp ebx, 0xFFFF
+        jne .inum
+        mov al, ' '
+        call imp_car
+        jc .mal
+        mov al, ' '
+        call imp_car
+        jc .mal
+        mov al, '-'                 ; (la viñeta: un guion, que lo imprime todo)
+        call imp_car
+        jc .mal
+        mov al, ' '
+        call imp_car
+        jc .mal
+        jmp short .sin_marca
+.inum:
+        push edi
+        mov eax, ebx
+        mov edi, num_txt
+        call hvl_num
+        mov al, '.'
+        stosb
+        mov byte [edi], 0
+        mov ecx, edi
+        sub ecx, num_txt
+        pop edi
+        mov ebx, 3                  ; el número y su punto, a la derecha de tres
+        sub ebx, ecx
+        jle .in2
+.in1:
+        mov al, ' '
+        call imp_car
+        jc .mal
+        dec ebx
+        jnz .in1
+.in2:
+        mov esi, num_txt
+.in3:
+        lodsb
+        test al, al
+        jz .in4
+        call imp_car
+        jc .mal
+        jmp .in3
+.in4:
+        mov al, ' '
+        call imp_car
+        jc .mal
+.sin_marca:
         mov esi, [m_s]
         mov edx, [m_e]              ; sin la marca ni los espacios del final
 .q:
@@ -3046,6 +3758,9 @@ pinta_botones:
         mov eax, [cur]              ; la alineación del párrafo del cursor
         call alin_de
         mov [al_act], eax
+        mov eax, [cur]
+        call par_de
+        mov [par_act], al
         mov dword [bt_y], 4
         mov edi, botones1
 .b:
@@ -3089,6 +3804,23 @@ pinta_botones:
         HV dc_rect
         COLOR C_TINTA
         HV dc_marco
+        cmp dword [edi+20], 0       ; ¿un icono?
+        je .txt
+        mov al, C_CREMA
+        test ebp, ebp
+        jz .i1
+        mov al, C_PETROLEO
+.i1:
+        mov [ic_fondo], al
+        mov eax, [edi+4]
+        sub eax, 16
+        sar eax, 1
+        add eax, [edi]
+        mov ebx, [bt_y]
+        add ebx, 3
+        call pinta_icono
+        jmp .sig
+.txt:
         test ebp, ebp
         jz .c2
         COLOR C_CREMA
@@ -3120,7 +3852,7 @@ pinta_botones:
         mov edx, 1
         HV dc_rect
 .sig:
-        add edi, 16
+        add edi, B_TAM
         jmp .b
 .fila:
         cmp dword [bt_y], 4         ; y la fila de abajo
@@ -3135,6 +3867,20 @@ pinta_botones:
 .activo:
         xor ebp, ebp
         mov eax, [edi+12]
+        mov dl, [ver_marcas]
+        cmp eax, O_MARCAS
+        je .si_dl
+        mov dl, [brocha]
+        cmp eax, O_BROCHA
+        je .si_dl
+        mov dl, [par_act]
+        and dl, P_VIN
+        cmp eax, O_VINETAS
+        je .si_dl
+        mov dl, [par_act]
+        and dl, P_NUM
+        cmp eax, O_NUMERA
+        je .si_dl
         movzx edx, byte [at_act]
         mov cl, A_NEG
         cmp eax, O_NEG
@@ -3150,12 +3896,17 @@ pinta_botones:
         je .bit
         mov ecx, eax
         sub ecx, O_IZQ
-        cmp ecx, 2
+        cmp ecx, 3
         ja .col
         cmp ecx, [al_act]
         jne .a0
         inc ebp
 .a0:
+        ret
+.si_dl:
+        test dl, dl
+        jz .a0
+        inc ebp
         ret
 .col:
         mov ecx, eax
@@ -3172,7 +3923,40 @@ pinta_botones:
         inc ebp
         ret
 
-; ---- la barra de estado: línea y columna, y cuánto hay escrito ----
+; pinta el icono de ESI (16x16 caracteres) en EAX, EBX; los puntos «.» van del
+; color [ic_fondo], el del botón
+pinta_icono:
+        pushad
+        mov edi, ic_buf
+        mov ecx, 256
+.c:
+        lodsb
+        cmp al, '.'
+        jne .c1
+        mov al, [ic_fondo]
+        jmp short .c3
+.c1:
+        cmp al, '9'
+        ja .c2
+        sub al, '0'
+        jmp short .c3
+.c2:
+        sub al, 'a' - 10
+.c3:
+        stosb
+        dec ecx
+        jnz .c
+        mov eax, [esp+28]
+        mov ebx, [esp+16]
+        mov ecx, 16
+        mov edx, 16
+        mov esi, ic_buf
+        HV dc_copiar
+        popad
+        ret
+
+; ---- la barra de estado: línea y columna, y cuánto hay escrito (o, con el
+;      ratón sobre un botón, lo que hace) ----
 pinta_estado:
         pushad
         COLOR C_ARENA
@@ -3185,6 +3969,17 @@ pinta_estado:
         COLOR C_ARENA_OSC
         mov edx, 1
         HV dc_rect
+        mov esi, [bt_sobre]
+        test esi, esi
+        jz .donde
+        COLOR C_TINTA
+        mov eax, 8
+        mov ebx, [cli_al]
+        sub ebx, STAT_AL - 3
+        HV dc_texto
+        popad
+        ret
+.donde:
         mov eax, [cur]
         call linea_de
         mov edx, eax
@@ -3228,14 +4023,52 @@ pinta_estado:
 pinta_linea:
         pushad
         mov [pl_y], ebx
+        mov [pl_lin], edi
         call mide
         mov ecx, [m_al]             ; en blanco
         imul ecx, PAG_AN
         mov edi, lbuf
         mov al, C_BLANCO
         rep stosb
+        ; delante de la primera línea de un párrafo de lista: su viñeta o su
+        ; número, en el sitio que le deja la sangría
+        mov edi, [pl_lin]
+        movzx eax, word [lin_marca+edi*2]
+        test eax, eax
+        jz .texto
+        mov byte [g_atr], 0
+        mov byte [g_color], C_TINTA
+        mov ebx, [m_izq]
+        cmp eax, 0xFFFF
+        jne .numero
+        sub ebx, 16
+        mov dword [g_mapa], m_vineta
+        call pl_letra
+        mov dword [g_mapa], 0
+        jmp short .texto
+.numero:
+        mov edi, num_txt            ; «12.», acabando cuatro puntos antes del texto
+        call hvl_num
+        mov al, '.'
+        stosb
+        mov ecx, edi
+        sub ecx, num_txt
+        mov eax, ecx
+        shl eax, 3
+        sub ebx, 4
+        sub ebx, eax
+        mov esi, num_txt
+.nd:
+        lodsb
+        mov [g_car], al
+        call pl_letra
+        add ebx, 8
+        dec ecx
+        jnz .nd
+.texto:
         mov esi, [m_s]
         mov ebx, [m_x0]             ; EBX=la x de la letra
+        mov dword [m_jn], 0
 .c:
         cmp esi, [m_e]
         jae .copia
@@ -3246,9 +4079,10 @@ pinta_linea:
         mov ecx, 8
         cmp al, 10
         je .ancho                   ; (la marca: un hueco de una letra normal)
-        test ah, A_GRA
-        jz .ancho
-        mov ecx, 16
+        mov eax, esi
+        call ancho_j
+        mov ecx, eax
+        mov ah, [g_atr]
 .ancho:
         mov [g_an], ecx
         movzx eax, ah               ; su color
@@ -3256,6 +4090,33 @@ pinta_linea:
         and eax, 7
         mov al, [colores+eax]
         mov [g_color], al
+        cmp byte [ver_marcas], 0    ; con las marcas a la vista: un punto en
+        je .sel                     ; cada espacio y un calderón en cada marca
+        mov al, [g_car]
+        cmp al, 10
+        je .calderon
+        cmp al, ' '
+        jne .sel
+        mov dword [g_mapa], m_punto
+        jmp short .gris
+.calderon:
+        mov dword [g_mapa], m_calderon
+        mov byte [g_atr], 0
+        mov byte [g_color], C_PIEDRA
+        cmp esi, [sel_a]
+        jb .cal1
+        cmp esi, [sel_b]
+        jae .cal1
+        mov byte [g_color], C_BLANCO
+        call pl_fondo
+.cal1:
+        call pl_letra
+        mov dword [g_mapa], 0
+        jmp short .copia
+.gris:
+        and byte [g_atr], A_GRA
+        mov byte [g_color], C_PIEDRA
+.sel:
         cmp esi, [sel_a]            ; lo elegido: claro sobre petróleo
         jb .let
         cmp esi, [sel_b]
@@ -3266,6 +4127,7 @@ pinta_linea:
         cmp byte [g_car], 10
         je .copia
         call pl_letra
+        mov dword [g_mapa], 0
         add ebx, [g_an]
         inc esi
         jmp .c
@@ -3308,9 +4170,13 @@ pl_fondo:
 ; la x EBX de lbuf, apoyada en el pie de la línea
 pl_letra:
         pushad
-        movzx esi, byte [g_car]
+        mov esi, [g_mapa]           ; un signo propio (viñeta, marcas)...
+        test esi, esi
+        jnz .mapa
+        movzx esi, byte [g_car]     ; ...o la letra, de la fuente
         shl esi, 4
         add esi, [hv_api + HV_fuente8x16 * 4]
+.mapa:
         mov ebp, 1                  ; la escala
         test byte [g_atr], A_GRA
         jz .e
@@ -3438,6 +4304,17 @@ pl_y        resd 1
 g_an        resd 1
 al_act      resd 1
 bt_y        resd 1
+g_mapa      resd 1                  ; si no es 0, el dibujo que va en vez de la letra
+bt_sobre    resd 1                  ; el nombre del botón que hay bajo el ratón
+pl_lin      resd 1
+m_izq       resd 1                  ; lo que deja a la izquierda el párrafo
+m_huecos    resd 1                  ; justificar: espacios entre los que se reparte
+m_fin_txt   resd 1
+m_jq        resd 1                  ; lo que le toca a cada uno...
+m_jr        resd 1                  ; ...y a cuántos, uno más
+m_jn        resd 1
+cp_num      resd 1
+cp_ancho    resd 1
 clip_len    resd 1
 n_cambios   resd 1
 des_n       resd 1
@@ -3455,6 +4332,13 @@ des_hay     resb 1                  ; hay algo que deshacer
 des_hecho   resb 1                  ; 1: lo último fue deshacer (se puede repetir)
 completa_si resb 1
 dl_atr      resb 1
+m_just      resb 1
+cp_ini      resb 1
+ver_marcas  resb 1                  ; se ven los espacios y las marcas de párrafo
+brocha      resb 1                  ; la brocha está cogida
+brocha_atr  resb 1
+par_act     resb 1
+ic_fondo    resb 1
 tecleando   resb 1                  ; en una tanda de teclas seguidas
             alignb 4
 rl          resb RL_TAM
@@ -3478,4 +4362,6 @@ lbuf        resb PAG_AN * 32
             alignb 4
 lin_ini     resd MAX_TXT + 2
 lin_y       resd MAX_TXT + 2
+lin_marca   resw MAX_TXT + 2        ; delante de cada línea: 0 nada, FFFFh viñeta, n su número
+ic_buf      resb 256
 HVP_FIN

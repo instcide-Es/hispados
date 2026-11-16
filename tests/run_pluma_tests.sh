@@ -28,7 +28,7 @@ prepara $HVP
   tecla ctrl-n; escribe "negrita "; tecla ctrl-n ctrl-k; escribe "cursiva "; tecla ctrl-k ctrl-s
   escribe "subrayado"; tecla ctrl-s; escribe " normal"; tecla ret
   tecla ctrl-d; escribe "A la derecha"; tecla ret ctrl-q
-  clic 437 127; escribe "En rojo"            # el botón del color rojo
+  clic 481 127; escribe "En rojo"            # el botón del color rojo
   aparca; shot e1
   tecla ctrl-g; sleep 1.2; escribe "carta"; tecla ret; sleep 2; shot e2
   escribe " y mas"; aparca; shot d1; tecla ctrl-z; shot d2; tecla ctrl-y; shot d3; tecla ctrl-z   # deshacer y rehacer
@@ -117,6 +117,48 @@ else
 fi
 chk $T/t3.ppm busca 150 250 650 320 0 8 "1 cambio."
 chk $T/t2.ppm nobusca 70 40 690 60 9 4 "Pluma"            # la ventana se ha cerrado sin preguntar
+
+echo "== Pluma: listas, sangría, justificado, la brocha y las marcas =="
+reabre ''
+mdel -i $T/f.img ::LISTA.PLU 2>/dev/null
+{ arranca
+  tecla ctrl-n; escribe "gordo"; tecla ctrl-n; escribe " fino"; tecla ret
+  clic 372 127; escribe "uno"; tecla ret; escribe "dos"; tecla ret; clic 372 127      # viñetas
+  clic 346 127; escribe "tres"; tecla ret; escribe "cuatro"; tecla ret; clic 346 127  # numeración
+  clic 424 127; clic 424 127; escribe "sangrado"; tecla ret; clic 398 127; clic 398 127   # sangría: dos pasos y fuera
+  tecla ctrl-j; escribe "Esto es una prueba de texto normal que tiene que partirse sola al llegar al final de la linea de la hoja, por palabras."
+  clic 96 163; clic 282 99                                    # en «gordo»; la brocha
+  ir 133 163; mon "mouse_button 1" 0.25; ir 150 163; ir 165 163; mon "mouse_button 0" 0.5   # y se pasa por «fino»
+  aparca; shot l1
+  ir 372 99; shot l3; clic 372 99; aparca; shot l2            # el nombre del botón ¶; las marcas a la vista
+  tecla ctrl-g; sleep 1.2; escribe "lista"; tecla ret; sleep 2
+  tecla ctrl-p; sleep 4; tecla ret; sleep 1
+  sal; } | PARALELO=file:$T/prn2.txt run 200 -vga std
+chk $T/l1.ppm busca 104 167 112 182 0 9 "uno"             # detrás de su viñeta
+chk $T/l1.ppm busca 104 199 112 214 0 9 "tres"
+chk $T/l1.ppm busca 84 199 100 214 0 9 "1."
+chk $T/l1.ppm busca 84 215 100 230 0 9 "2."
+chk $T/l1.ppm busca 144 231 152 246 0 9 "sangrado"        # dos pasos de sangría
+chk $T/l1.ppm busca 640 247 648 262 0 9 "al"              # justificado: la línea acaba en el margen derecho
+chk $T/l1.ppm busca 80 263 90 278 0 9 "llegar al final de la linea de la hoja, por palabras."   # la última, no
+chk $T/l3.ppm busca 72 518 600 540 0 6 "Mostrar u ocultar los espacios y las marcas de párrafo"
+chk $T/l2.ppm nobusca 80 263 90 278 0 9 "llegar al final"  # con las marcas, los espacios llevan su punto
+muestra l1 pluma_listas; muestra l2 pluma_marcas
+mcopy -n -i $T/f.img ::LISTA.PLU $T/lista.plu 2>/dev/null
+if python3 - $T/lista.plu $T/prn2.txt <<'PY'
+import sys,struct
+d=open(sys.argv[1],'rb').read()
+n=struct.unpack_from('<I',d,8)[0]
+t,a=d[12:12+n],d[12+n:12+2*n]
+m=[a[i] for i,c in enumerate(t) if c==10]                 # las marcas de los párrafos
+ok = m==[0,4,4,0x80,0x80,0x20,3] 
+ok = ok and a[0]==1 and a[5]==0 and all(x==1 for x in a[6:10])   # «fino», en negrita por la brocha
+l=open(sys.argv[2],'rb').read().split(b'\r\n')
+ok = ok and l[1]==b'     - uno' and l[3]==b'    1. tres' and l[4]==b'    2. cuatro' and l[5]==b'            sangrado'
+sys.exit(0 if ok else 1)
+PY
+then ok "LISTA.PLU: los párrafos (viñetas, números, sangría, justificado), la brocha y la impresión"
+else ko "LISTA.PLU o lo impreso no es lo esperado"; xxd $T/lista.plu | tail -12; xxd $T/prn2.txt | head -12; fi
 
 rm -rf $T
 exit $fail
