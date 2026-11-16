@@ -336,13 +336,18 @@ mira_pub CARTA.PUB "el rectángulo, el texto y la elipse" \
   "[r.tipo for r in o] == [RECT, TEXTO, ELIPSE] and o[0].fondo == 2 and o[1].txt == 'Guardado ya' and o[1].tinta == 9 and o[2].caja == (320, 40, 100, 80)"
 mcopy -n -i $T/f.img ::CARTA.PUB $T/carta.pub; mcopy -n -i $T/f.img ::COPIA.PUB $T/copia.pub
 if cmp -s $T/carta.pub $T/copia.pub; then ok "COPIA.PUB (Guardar como) es igual que CARTA.PUB"; else ko "COPIA.PUB no es igual que CARTA.PUB"; fi
+# se guarda en un temporal que luego toma el nombre: no queda ninguno por el disco
+if mdir -i $T/f.img :: | grep -qi '\.TMP\| TMP '; then ko "ha quedado un temporal (.TMP) en el disco"; else ok "guardado seguro: no queda ningún temporal en el disco"; fi
+# SOLOLEE.PUB: una copia que no se puede cambiar; guardar encima tiene que fallar sin estropearla
+cp $T/carta.pub $T/SOLOLEE.PUB; mcopy -o -i $T/f.img $T/SOLOLEE.PUB ::; mattrib -i $T/f.img +r ::SOLOLEE.PUB
 # se arranca otra vez abriendo el documento: se ve igual que antes de guardar
 reabre 'A:\CARTA.PUB'
 { arranca
   shot a0
   al100; aparca; shot a1
   tecla ctrl-a; sleep 1.2; escribe "futuro.pub"; tecla ret; sleep 2; aparca; shot a4; tecla ctrl-g; sleep 2.5   # el de mañana
-  boton1 $B_LINEA; pc 300 300                               # un cambio...
+  tecla ctrl-a; sleep 1.2; escribe "sololee.pub"; tecla ret; sleep 2          # el que no se puede cambiar
+  boton1 $B_LINEA; pc 300 300; tecla ctrl-g; sleep 2.5; shot a5; tecla ret; sleep 0.8   # un cambio y guardar: no se puede
   clic 779 41; sleep 1.2; shot a2; tecla tab ret; sleep 1.2; shot a3   # ...y al cerrar pregunta: No
   sal; } | run 120 -vga std
 chk $T/a0.ppm titulo 8 30 activa "Publicaciones - A:\\CARTA.PUB"
@@ -355,6 +360,10 @@ mira_pub FUTURO.PUB "guardado otra vez, con las fichas de hoy y sin el objeto qu
   "(an, al, n, tam) == (559, 794, 2, 40) and [r.tipo for r in o] == [RECT, TEXTO] and o[1].txt == 'del futuro'"
 chk $T/a2.ppm busca 150 200 650 400 0 8 "La publicación tiene cambios sin guardar."
 chk $T/a3.ppm nobusca 8 30 400 50 8 4 "Publicaciones"       # cerrada
+chk $T/a5.ppm busca 100 200 700 400 0 8 "No se ha podido guardar la publicación."
+mattrib -i $T/f.img -r ::SOLOLEE.PUB; rm -f $T/sololee2.pub; mcopy -n -i $T/f.img ::SOLOLEE.PUB $T/sololee2.pub 2>/dev/null
+if cmp -s $T/carta.pub $T/sololee2.pub && ! mdir -i $T/f.img :: | grep -qi 'SOLOLEE *TMP'; then ok "si no se puede guardar, el archivo de antes sigue entero y no queda el temporal"
+else ko "el archivo de antes ha cambiado, o ha quedado el temporal"; mdir -i $T/f.img :: | grep -i sololee; fi
 mcopy -n -i $T/f.img ::CARTA.PUB $T/carta2.pub
 if cmp -s $T/carta.pub $T/carta2.pub; then ok "CARTA.PUB no ha cambiado (se contestó que no)"; else ko "CARTA.PUB ha cambiado"; fi
 muestra g1 publica_guardar; muestra a1 publica_abierta

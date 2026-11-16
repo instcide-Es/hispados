@@ -432,6 +432,9 @@ t_objetos   dd t_nada, t_o_caja, t_o_rect, t_o_elipse, t_o_linea, t_o_imagen
 t_escriba   db ": escriba; Esc o un clic fuera para acabar", 0
 t_ajustado  db "    Ajuste a la rejilla", 0
 t_no_cabe   db "; el texto no cabe", 0
+t_sin_mem   db "No hay memoria bastante para hacer eso.", 10
+            db "Cierre otros programas y pruebe otra vez.", 0
+t_sin_mem_v db "No hay memoria bastante para dibujar esto. Cierre otros programas.", 0
 t_ext_bmp   db ".BMP", 0
 t_abrir     db "Abrir", 0
 t_guardar_como db "Guardar como", 0
@@ -681,6 +684,7 @@ ed_proc:
         HV ven_destruir
         jmp hecho
 .destruir:
+        call ed_suelta              ; la memoria pedida, de vuelta
         mov dword [ven], 0
         HV msg_salir
         jmp hecho
@@ -694,6 +698,19 @@ ed_proc:
         call cargar
 hecho:
         xor eax, eax
+        ret
+
+; devuelve la memoria que se ha ido pidiendo (al cerrar la ventana)
+ed_suelta:
+        push ebx
+        mov ebx, des_dat
+        call lam_bloque_suelta
+        mov ebx, clip_dat
+        call lam_bloque_suelta
+        mov ebx, esc_buf
+        call lam_bloque_suelta
+        call lam_suelta
+        pop ebx
         ret
 
 ; (interna) las barras de desplazamiento, pegadas a la vista
@@ -2682,12 +2699,22 @@ instantanea:
         mov byte [des_hecho], 0
         mov byte [tecleando], 0
         mov byte [moviendo], 0
+        mov ecx, [lam_dat_n]        ; sitio para los datos (se pide al usarlo);
+        mov ebx, des_dat            ; si no hay memoria, no hay qué deshacer
+        xor al, al
+        call lam_bloque
+        jnc .hay
+        mov byte [des_hay], 0
+        popad
+        stc
+        ret
+.hay:
         mov esi, lam_doc
         mov edi, des_doc
         mov ecx, LAM_DOC_TAM / 4
         rep movsd
-        mov esi, lam_dat
-        mov edi, des_dat
+        mov esi, [lam_dat]
+        mov edi, [des_dat]
         mov ecx, [lam_dat_n]
         add ecx, 3
         shr ecx, 2
@@ -2698,6 +2725,7 @@ instantanea:
         mov [des_pag], eax
         mov byte [des_hay], 1
         popad
+        clc
 .x:
         ret
 deshacer:
@@ -2728,10 +2756,23 @@ des_cambia:
         jae .l
         mov ecx, [des_doc+20]
 .l:
+        mov al, 1                   ; (y que quepa en los dos sitios)
+        mov ebx, lam_dat
+        call lam_bloque
+        jc .sin
+        mov ebx, des_dat
+        call lam_bloque
+        jnc .cabe
+.sin:
+        mov esi, t_sin_mem
+        call aviso
+        popad
+        ret
+.cabe:
         add ecx, 3
         shr ecx, 2
-        mov esi, lam_dat
-        mov edi, des_dat
+        mov esi, [lam_dat]
+        mov edi, [des_dat]
         call .trueca
         mov esi, lam_doc
         mov edi, des_doc
@@ -2850,19 +2891,31 @@ copiar:
         js .x
         call lam_ptr
         mov ebx, esi
+        push ebx                    ; sitio para sus datos (se pide al usarlo)
+        mov ecx, [ebx+LO_LARGO]
+        mov ebx, clip_dat
+        xor al, al
+        call lam_bloque
+        pop ebx
+        jnc .sitio
+        mov byte [clip_hay], 0
+        mov esi, t_sin_mem
+        call aviso
+        jmp .x
+.sitio:
         mov edi, clip_ficha
         mov ecx, LO_TAM
         rep movsb
         mov esi, [ebx+LO_DAT]
-        add esi, lam_dat
-        mov edi, clip_dat
+        add esi, [lam_dat]
+        mov edi, [clip_dat]
         mov ecx, [ebx+LO_LARGO]
         rep movsb
         mov byte [clip_hay], 1
         cmp byte [ebx+LO_TIPO], LT_TEXTO
         jne .x
         mov esi, [ebx+LO_DAT]
-        add esi, lam_dat
+        add esi, [lam_dat]
         mov edi, pega_txt
         mov ecx, [ebx+LO_LARGO]
         cmp ecx, TXT_MAX
@@ -2917,7 +2970,7 @@ pegar:
         mov [esi+LO_PAG], al
         mov eax, ebx
         mov edx, [clip_ficha+LO_LARGO]
-        mov esi, clip_dat
+        mov esi, [clip_dat]
         xor ebx, ebx
         xor ecx, ecx
         call lam_dat_cambia
@@ -3183,6 +3236,13 @@ cargar:
         mov ah, [des_hecho]
         push eax
         call instantanea
+        jnc .sigue
+        pop eax                     ; sin memoria para guardar lo que hay: no se abre
+        mov esi, t_sin_mem
+        call aviso
+        popad
+        ret
+.sigue:
         mov esi, nom_tmp
         mov edi, firma
         call lam_carga
@@ -3260,24 +3320,82 @@ con_extension:
         mov byte [edi], 0
         ret
 
-; escribe el documento en [nombre]
+; escribe el documento en [nombre]. Primero entero en un temporal (el mismo
+; nombre, con .TMP); solo cuando está bien escrito se quita el de antes y el
+; temporal toma su nombre: si el disco se llena o se va la luz a mitad, en el
+; disco sigue habiendo un documento entero (el de antes o, como mucho, el
+; nuevo en el .TMP)
 guarda_escribe:
         pushad
         mov byte [tecleando], 0
         mov esi, nombre
+        mov edi, nom_seg
+        mov eax, 'TMP'
+        call hvl_ruta
+        mov esi, nombre             ; (un nombre sin extensión, o que ya es
+        mov edi, nom_seg            ; .TMP: se escribe directamente)
+.c:
+        mov al, [esi]
+        cmp al, [edi]
+        jne .seguro
+        inc esi
+        inc edi
+        test al, al
+        jnz .c
+        mov esi, nombre
         mov edi, firma
         call lam_guarda
         jc .mal
+        jmp .bien
+.seguro:
+        mov esi, nom_seg
+        mov edi, firma
+        call lam_guarda
+        jc .mal_tmp
+        mov esi, nombre
+        HV dos_borrar               ; (si es la primera vez, no hay de antes)
+        mov esi, nom_seg
+        mov edi, nombre
+        call renombra
+        jc .mal_tmp
+.bien:
         mov byte [modif], 0
         call pon_titulo
         popad
         clc
         ret
+.mal_tmp:
+        mov esi, nom_seg            ; (el temporal a medias, fuera)
+        HV dos_borrar
 .mal:
         mov esi, t_no_guardar
         call aviso
         popad
         stc
+        ret
+; ESI=nombre de antes EDI=el nuevo: cambia de nombre un archivo (INT 21h,
+; 56h, con los dos nombres en el búfer de paso de DOS). CF=1 si no se puede
+renombra:
+        pushad
+        mov ebx, [hv_api + HV_dos_buf * 4]
+        push edi
+        mov edi, ebx
+        call copia
+        pop esi
+        lea edi, [ebx+128]
+        call copia
+        mov edi, rl
+        mov ecx, RL_TAM / 4
+        xor eax, eax
+        rep stosd
+        mov dword [rl+RL_EAX], 0x5600
+        mov [rl+RL_EDX], ebx
+        add ebx, 128
+        mov [rl+RL_EDI], ebx
+        mov byte [rl+RL_INT], 0x21
+        mov esi, rl
+        HV rm_interrup
+        popad
         ret
 
 ; ---- Exportar la página como BMP: de 256 colores, con la paleta de Hispa
@@ -3301,6 +3419,13 @@ exportar:
         mov dword [lam_guia_fn], 0
         call lam_pinta
         pop dword [lam_guia_fn]
+        cmp byte [lam_sin_mem], 0
+        je .dibujada
+        mov esi, t_sin_mem
+        call aviso
+        popad
+        ret
+.dibujada:
         mov byte [lam_sucio], 1
         mov esi, nom_exp
         HV dos_crear
@@ -3360,7 +3485,7 @@ exportar:
         js .fin
         mov esi, edx
         imul esi, [lam_an]
-        add esi, lam_buf
+        add esi, [lam_buf]
         mov edi, fila
         mov ecx, [lam_an]
         rep movsb
@@ -3416,10 +3541,18 @@ imprime:
         cmp ecx, [lam_pags]
         jae .fin
         call lam_pinta
+        cmp byte [lam_sin_mem], 0
+        jne .sin
         call imp_pagina
         jc .mal
         inc ecx
         jmp .pag
+.sin:
+        call imp_cierra
+        mov esi, t_sin_mem
+        call aviso
+        popad
+        ret
 .fin:
         call imp_lista
         jc .mal
@@ -3513,7 +3646,7 @@ imp_prepara:
         mov edx, [esp+20]
         test edi, edi               ; lo que se imprime: lam_buf, si no se dice
         jnz .otro
-        mov edi, lam_buf
+        mov edi, [lam_buf]
         mov ecx, [lam_an]
         mov edx, [lam_al]
 .otro:
@@ -3833,7 +3966,17 @@ al_dia:
         je .x
         cmp byte [esc_sucio], 0
         je .x
-        mov edi, esc_buf
+        mov ecx, [pw]               ; sitio para la lámina reducida (se pide al usarlo)
+        imul ecx, [ph]
+        mov ebx, esc_buf
+        xor al, al
+        call lam_bloque
+        jnc .red
+        mov byte [esc_falta], 1
+        jmp .x
+.red:
+        mov byte [esc_falta], 0
+        mov edi, [esc_buf]
         mov ecx, [pw]
         mov edx, [ph]
         mov ebx, [suave]
@@ -3903,15 +4046,35 @@ pinta_vista:
         mov edx, [ph]
         add edx, 2
         HV dc_marco
-        mov esi, lam_buf            ; la lámina
-        cmp dword [zoom], 256
-        je .p
-        mov esi, esc_buf
-.p:
         mov eax, [wx0]
         mov ebx, [wy0]
         mov ecx, [pw]
         mov edx, [ph]
+        cmp dword [zoom], 256       ; sin memoria para dibujarla (o para
+        je .m1                      ; reducirla): se dice ahí mismo
+        cmp byte [esc_falta], 0
+        jne .m2
+.m1:
+        cmp byte [lam_sin_mem], 0
+        je .hay
+.m2:
+        COLOR C_BLANCO
+        HV dc_rect
+        COLOR C_GRANATE
+        mov eax, [vx0]
+        add eax, 12
+        mov ebx, [vy0]
+        add ebx, 12
+        mov esi, t_sin_mem_v
+        HV dc_texto
+        popad
+        ret
+.hay:
+        mov esi, [lam_buf]          ; la lámina
+        cmp dword [zoom], 256
+        je .p
+        mov esi, [esc_buf]
+.p:
         HV dc_copiar
         call pinta_guias
         call pinta_sel
@@ -4595,6 +4758,7 @@ ed_car      resb 1
 pl_peq      resb 1
 imp_borr    resb 1
 imp_gira    resb 1
+esc_falta   resb 1                  ; no ha habido memoria para la lámina reducida
 imp_abierta resb 1
 ed_todo     resb 1                  ; ha cambiado más de una lámina
 pl_pag      resb 1
@@ -4605,6 +4769,7 @@ titulo      resb 112
 nombre      resb 96
 nom_tmp     resb 96
 nom_exp     resb 100
+nom_seg     resb 100                ; el temporal en el que se guarda
 num_txt     resb 12
 t_vista_b   resb 12
 t_grosor_b  resb 8
@@ -4617,7 +4782,9 @@ imp_buf     resb 1024
 fila        resb LAM_MAX_LADO + 1024 + 8
 pega_txt    resb TXT_MAX + 4
 des_doc     resb LAM_DOC_TAM        ; el documento de antes del último cambio
-des_dat     resb LAM_DAT_TAM + 4
-clip_dat    resb LAM_DAT_TAM + 4    ; los datos del objeto copiado
-esc_buf     resb ESC_TAM            ; la página, reducida
+; lo grande no está aquí: son bloques que se piden al usarlos (lam_bloque:
+; puntero, lo que cabe y mango) y se devuelven al cerrar (ed_suelta)
+des_dat     resd 3                  ; los datos del documento de antes del último cambio
+clip_dat    resd 3                  ; los datos del objeto copiado
+esc_buf     resd 3                  ; la lámina, reducida
 %endmacro

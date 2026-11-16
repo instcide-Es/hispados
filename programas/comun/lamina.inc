@@ -16,7 +16,7 @@
 ;  3,78), que es lo que mide un punto de la pantalla al 100 %. Así las letras
 ;  de tipos.inc (12 puntos de imprenta = casilla de 16) salen punto por punto
 ;  a tamaño real, y un A4 mide 794 x 1123. La lámina se dibuja siempre al
-;  100 % en lam_buf (un octeto por punto, colores de la paleta de Hispa
+;  100 % en [lam_buf] (un octeto por punto, colores de la paleta de Hispa
 ;  Ventanas) y lam_reduce la lleva al tamaño que se quiera enseñar.
 ;
 ;  UN OBJETO es una ficha de LO_TAM (40) octetos; el orden de la tabla es el
@@ -126,6 +126,14 @@
 ;                   está escribiendo)
 ;    [lam_parr_max] 0: todo; n: de las listas solo se pintan los n-1 primeros
 ;                   puntos (la aparición por pasos de una presentación)
+;    lam_bloque     EBX=bloque (tres dd: puntero, lo que cabe, mango) ECX=octetos
+;                   AL=1 para conservar lo que tiene: que quepan esos; CF=1 si
+;                   no hay memoria. lam_bloque_suelta (EBX) lo devuelve. Así se
+;                   piden los búferes grandes solo cuando hacen falta y de su
+;                   medida: [lam_buf] (la lámina) y [lam_dat] (los datos) son
+;                   punteros; si no hay memoria para la lámina, lam_pinta deja
+;                   [lam_sin_mem] a 1 y no dibuja
+;    lam_suelta     al acabar el programa: devuelve la memoria del motor
 ;    lam_guarda     ESI=nombre EDI=firma (8 octetos) -> CF=1 si no se puede
 ;    lam_carga      ESI=nombre EDI=firma -> CF=1 si no se puede: EAX=0 no se
 ;                   abre, 1 no es un archivo de estos. OJO: si falla a medias
@@ -264,6 +272,7 @@ lam_parr_max resd 1                 ; de las listas, solo los n-1 primeros punto
 lam_t_txt   resd 1                  ; el texto que se compone
 lam_t_n     resd 1
 lam_c_y     resd 1
+lam_d_antes resd 1
 lam_c_izq   resd 1
 lam_c_cabe  resd 1
 lam_p_parr  resd 1
@@ -289,8 +298,13 @@ lam_l_niv   resb LAM_MAX_LIN + 2    ; y su nivel (+40h si empieza párrafo, +80h
 lam_r_x     resd LAM_MAX_LADO + 2
 lam_i_mapa  resb 256
 lam_fila    resb 4096 + 1024        ; para leer y escribir archivos
-lam_dat     resb LAM_DAT_TAM + 4
-lam_buf     resb LAM_BUF_TAM
+; los dos búferes grandes no están aquí: se piden (lam_bloque) cuando hacen
+; falta y de la medida que hace falta. De cada uno: el puntero, lo que cabe y
+; su mango
+lam_dat     resd 3                  ; los datos (crece de 16 en 16 K, hasta LAM_DAT_TAM)
+lam_buf     resd 3                  ; la lámina dibujada (ancho x alto del documento)
+lam_sin_mem resb 1                  ; 1: no ha habido memoria para dibujar la lámina
+            alignb 4
 %endmacro
 
 ; =============================================================================
@@ -366,6 +380,28 @@ lam_dat_cambia:
         add eax, edi
         cmp eax, LAM_DAT_TAM
         jg .no
+        cmp eax, [lam_dat+4]        ; ¿cabe en lo que hay pedido? Si no, se pide más
+        jle .cabe
+        push eax
+        push ebx
+        mov ebx, [lam_dat]          ; (lo que se pone puede estar en los propios
+        mov eax, ebp                ; datos: se mueve con ellos)
+        sub eax, ebx
+        cmp eax, [lam_dat+4]
+        pop ebx
+        pop eax
+        pushf
+        call lam_dat_pide
+        jc .no_f
+        popf
+        jae .cabe
+        sub ebp, [lam_d_antes]
+        add ebp, [lam_dat]
+        jmp .cabe
+.no_f:
+        popf
+        jmp .no
+.cabe:
         push esi
         push ecx
         push edx
@@ -379,7 +415,9 @@ lam_dat_cambia:
         test edi, edi
         jz .corrido
         js .abajo
-        lea esi, [lam_dat+eax+ecx-1]    ; hacia arriba: de atrás adelante
+        mov esi, [lam_dat]              ; hacia arriba: de atrás adelante
+        add esi, eax
+        lea esi, [esi+ecx-1]
         lea edx, [esi+edi]
         xchg edi, edx
         std
@@ -388,7 +426,8 @@ lam_dat_cambia:
         mov edi, edx
         jmp .corrido
 .abajo:
-        lea esi, [lam_dat+eax]
+        mov esi, [lam_dat]
+        add esi, eax
         lea edx, [esi+edi]
         xchg edi, edx
         rep movsb
@@ -423,7 +462,8 @@ lam_dat_cambia:
         add [lam_dat_n], edi
         mov ecx, edx                ; y lo nuevo, a su sitio
         mov edi, [esi+LO_DAT]
-        lea edi, [lam_dat+edi+ebx]
+        add edi, [lam_dat]
+        add edi, ebx
         mov esi, ebp
         rep movsb
         popad
@@ -432,6 +472,91 @@ lam_dat_cambia:
 .no:
         popad
         stc
+        ret
+
+; (interna) que en lam_dat quepan EAX octetos (y algo más); CF=1 si no hay
+; memoria. Deja en [lam_d_antes] dónde estaban los datos
+lam_dat_pide:
+        push eax
+        push ebx
+        push ecx
+        mov ecx, [lam_dat]
+        mov [lam_d_antes], ecx
+        lea ecx, [eax+16384]
+        cmp ecx, LAM_DAT_TAM
+        jbe .a
+        mov ecx, LAM_DAT_TAM
+        cmp ecx, eax
+        jae .a
+        mov ecx, eax
+.a:
+        mov ebx, lam_dat
+        mov al, 1
+        call lam_bloque
+        pop ecx
+        pop ebx
+        pop eax
+        ret
+
+; EBX=un bloque (tres dd: puntero, lo que cabe y mango) ECX=octetos AL=1 para
+; conservar lo que tiene: que quepan al menos esos (si hay que pedir otro más
+; grande, el de antes se suelta); CF=1 si no hay memoria (se queda como estaba)
+lam_bloque:
+        pushad
+        cmp ecx, [ebx+4]
+        jbe .ok
+        add ecx, 16383
+        and ecx, ~16383
+        mov ebp, ecx
+        HV mem_bloque               ; EAX=puntero EDX=mango
+        jc .no
+        mov esi, [ebx]
+        test esi, esi
+        jz .pon
+        cmp byte [esp+28], 0
+        je .suelta
+        mov edi, eax
+        mov ecx, [ebx+4]
+        rep movsb
+.suelta:
+        push edx
+        mov edx, [ebx+8]
+        HV mem_bloque_soltar
+        pop edx
+.pon:
+        mov [ebx], eax
+        mov [ebx+4], ebp
+        mov [ebx+8], edx
+.ok:
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
+        ret
+; EBX=un bloque: lo suelta
+lam_bloque_suelta:
+        pushad
+        cmp dword [ebx], 0
+        je .x
+        mov edx, [ebx+8]
+        HV mem_bloque_soltar
+        xor eax, eax
+        mov [ebx], eax
+        mov [ebx+4], eax
+        mov [ebx+8], eax
+.x:
+        popad
+        ret
+; suelta la memoria del motor (al acabar el programa)
+lam_suelta:
+        push ebx
+        mov ebx, lam_dat
+        call lam_bloque_suelta
+        mov ebx, lam_buf
+        call lam_bloque_suelta
+        pop ebx
         ret
 
 lam_obj_quita:
@@ -478,7 +603,7 @@ lam_obj_dup:
         mov dword [esi+LO_LARGO], 0
         pop eax
         mov esi, [ebx+LO_DAT]       ; sus datos: al final de lam_dat (no se
-        add esi, lam_dat            ; corre nada, así que pueden salir de ahí)
+        add esi, [lam_dat]            ; corre nada, así que pueden salir de ahí)
         mov edx, [ebx+LO_LARGO]
         xor ebx, ebx
         xor ecx, ecx
@@ -669,11 +794,19 @@ lam_pag_dup:
 lam_pinta:
         pushad
         mov [lam_p_pag], ecx
+        mov byte [lam_sin_mem], 1   ; el búfer, de la medida de la lámina
+        mov ecx, [lam_an]
+        imul ecx, [lam_al]
+        mov ebx, lam_buf
+        xor al, al
+        call lam_bloque
+        jc .x
+        mov byte [lam_sin_mem], 0
         xor edi, edi
         call lam_destino
         mov ecx, [lam_an]           ; el papel, en blanco
         imul ecx, [lam_al]
-        mov edi, lam_buf
+        mov edi, [lam_buf]
         mov al, C_BLANCO
         rep stosb
         cmp dword [lam_fondo_fn], 0 ; o como lo quiera el programa
@@ -704,7 +837,8 @@ lam_destino:
         push eax
         test edi, edi
         jnz .otro
-        mov dword [lam_dst], lam_buf
+        mov eax, [lam_buf]
+        mov [lam_dst], eax
         mov eax, [lam_an]
         mov [lam_dst_an], eax
         mov eax, [lam_al]
@@ -1158,7 +1292,7 @@ lam_p_imagen:
         movzx eax, word [esi+LO_IMG_AN]
         imul edx, eax
         add edx, [esi+LO_DAT]
-        add edx, lam_dat            ; EDX=la fila de la imagen
+        add edx, [lam_dat]            ; EDX=la fila de la imagen
         xor ecx, ecx                ; la columna
         xor ebp, ebp
         mov edi, [esi+LO_X]
@@ -1215,7 +1349,7 @@ lam_ancho_car:
 lam_compone:
         push eax
         mov eax, [esi+LO_DAT]
-        add eax, lam_dat
+        add eax, [lam_dat]
         mov [lam_t_txt], eax
         mov eax, [esi+LO_LARGO]
         mov [lam_t_n], eax
@@ -1794,6 +1928,8 @@ lam_letra:
 ; =============================================================================
 lam_reduce:
         pushad
+        cmp byte [lam_sin_mem], 0   ; (sin lámina dibujada no hay nada que reducir)
+        jne .x
         mov [lam_r_dw], ecx
         mov [lam_r_dh], edx
         mov [lam_r_suave], ebx
@@ -1872,7 +2008,7 @@ lam_reduce:
         push ebp
         mov esi, [lam_r_y0]
         imul esi, [lam_an]
-        add esi, lam_buf            ; ESI=la primera fila del bloque
+        add esi, [lam_buf]            ; ESI=la primera fila del bloque
         mov edx, [lam_r_x0]
         mov al, [esi+edx]
         cmp dword [lam_r_suave], 0
@@ -2233,7 +2369,7 @@ lam_guarda:
         imul ecx, dword [lam_n], LO_TAM
         call lam_f_escribe
         jc .mal
-        mov esi, lam_dat            ; y los datos
+        mov esi, [lam_dat]            ; y los datos
         mov ecx, [lam_dat_n]
         call lam_f_escribe
         jc .mal
@@ -2330,7 +2466,10 @@ lam_carga:
         inc ebp
         jmp .f
 .datos:
-        mov edi, lam_dat
+        mov eax, [lam_dat_n]
+        call lam_dat_pide
+        jc .roto
+        mov edi, [lam_dat]
         mov ecx, [lam_dat_n]
         call lam_f_lee
         jc .roto
@@ -2589,6 +2728,8 @@ lam_imagen_bmp:
         add eax, ecx
         cmp eax, LAM_DAT_TAM
         ja .nocabe
+        call lam_dat_pide
+        jc .nocabe
         mov [esi+LO_LARGO], ecx
         mov [lam_dat_n], eax
         mov ebp, esi                ; EBP=la ficha
@@ -2609,7 +2750,8 @@ lam_imagen_bmp:
 .y:
         imul eax, [lam_i_an]
         add eax, [ebp+LO_DAT]
-        lea edi, [lam_dat+eax]
+        mov edi, [lam_dat]
+        add edi, eax
         mov esi, lam_fila
         mov ecx, [lam_i_an]
         push edx
@@ -2694,7 +2836,8 @@ lam_imagen_bmp:
 .c2:
         imul eax, [lam_i_an]
         add eax, [ebp+LO_DAT]
-        lea edi, [lam_dat+eax]
+        mov edi, [lam_dat]
+        add edi, eax
         mov ecx, [lam_i_an]
         mov al, C_BLANCO
         rep stosb

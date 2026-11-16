@@ -35,9 +35,19 @@ folleto:
         pushad
         mov [fo_modo], esi
         call fin_edicion
+        mov ecx, HOJA_AN * HOJA_AL + 8  ; la hoja y la diapositiva reducida: la
+        mov ebx, hoja_buf               ; memoria se pide ahora y se devuelve al acabar
+        xor al, al
+        call lam_bloque
+        jc .sin
+        mov ecx, [esi+4]
+        imul ecx, [esi+8]
+        mov ebx, esc_buf
+        call lam_bloque
+        jc .sin
         call imp_abre
         jc .mal
-        mov edi, hoja_buf
+        mov edi, [hoja_buf]
         mov ecx, HOJA_AN
         mov edx, HOJA_AL
         call imp_prepara
@@ -45,7 +55,7 @@ folleto:
 .hoja:
         cmp ebp, [lam_pags]
         jae .fin
-        mov edi, hoja_buf           ; una hoja en blanco
+        mov edi, [hoja_buf]           ; una hoja en blanco
         mov ecx, HOJA_AN * HOJA_AL
         mov al, C_BLANCO
         rep stosb
@@ -59,7 +69,9 @@ folleto:
         jae .imprime
         mov ecx, ebp
         call lam_pinta
-        mov edi, esc_buf            ; reducida...
+        cmp byte [lam_sin_mem], 0
+        jne .sin_c
+        mov edi, [esc_buf]            ; reducida...
         mov ecx, [esi+4]
         mov edx, [esi+8]
         mov ebx, [suave]
@@ -87,27 +99,33 @@ folleto:
         call imp_lista
         jc .mal
         call imp_cierra
-        mov byte [esc_sucio], 1     ; (esc_buf se ha usado para reducir)
         mov esi, t_impreso
+.dice:
+        mov byte [esc_sucio], 1     ; (esc_buf se ha usado para reducir)
+        call pre_suelta
         call aviso
         popad
         ret
 .mal:
         call imp_cierra
-        mov byte [esc_sucio], 1
         mov esi, t_e_imprimir
-        call aviso
-        popad
-        ret
+        jmp .dice
+.sin_c:
+        call imp_cierra
+.sin:
+        mov esi, t_sin_mem
+        jmp .dice
 
 ; (interna) pega en la hoja, en (EAX, EBX), lo que hay en esc_buf (ECX x EDX),
 ; con un filete negro alrededor
 hoja_pega:
         pushad
-        mov esi, esc_buf
+        mov esi, [esc_buf]
         mov ebp, edx                ; las filas
         imul ebx, HOJA_AN
-        lea edi, [hoja_buf+ebx+eax]
+        mov edi, [hoja_buf]
+        add edi, ebx
+        add edi, eax
         mov edx, edi                ; (EDX=su esquina en la hoja)
 .f:
         push ecx
@@ -148,7 +166,8 @@ hoja_renglones:
         pushad
         add ebx, 30
         imul ebx, HOJA_AN
-        lea edi, [hoja_buf+ebx+400]
+        mov edi, [hoja_buf]
+        lea edi, [edi+ebx+400]
         mov edx, 7
 .r:
         push edi
@@ -186,7 +205,7 @@ hoja_notas:
         mov byte [esi+LO_ESTILO], 0
         mov byte [esi+LO_ALIN], 0
         mov byte [esi+LO_BAND], 0
-        mov edi, hoja_buf
+        mov edi, [hoja_buf]
         mov ecx, HOJA_AN
         mov edx, HOJA_AL
         call lam_destino

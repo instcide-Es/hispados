@@ -522,6 +522,11 @@ pre_proc:
         je pr_doble
         cmp eax, WM_KEYDOWN
         je pr_tecla
+        cmp eax, WM_DESTROY
+        jne ed_proc
+        call pre_suelta             ; la memoria pedida, de vuelta
+        mov ebx, mini
+        call lam_bloque_suelta
         jmp ed_proc
 .pres:
         cmp eax, WM_KEYDOWN
@@ -968,7 +973,7 @@ notas:
         mov ecx, NOTAS_MAX
 .c:
         mov esi, [esi+LO_DAT]
-        add esi, lam_dat
+        add esi, [lam_dat]
         mov edi, notas_buf
         rep movsb
         mov byte [edi], 0
@@ -1082,6 +1087,32 @@ pintar:
 ;      cambia más de una: otro tema, otro orden, deshacer, otro documento) ----
 minis_al_dia:
         pushad
+        mov ecx, [lam_an]           ; (antes que nada, la memoria de la lámina:
+        imul ecx, [lam_al]          ; si falta, que no sea por las miniaturas)
+        mov ebx, lam_buf
+        xor al, al
+        call lam_bloque
+        mov ecx, [lam_pags]         ; sitio para las miniaturas (se pide al
+        add ecx, 3                  ; usarlo, con holgura para tres más)
+        cmp ecx, LAM_MAX_PAG
+        jbe .m1
+        mov ecx, LAM_MAX_PAG
+.m1:
+        imul ecx, MINI_AN * MINI_AL
+        mov eax, [lam_pags]
+        imul eax, MINI_AN * MINI_AL
+        cmp eax, [mini+4]
+        jbe .m2
+        mov ebx, mini
+        xor al, al
+        call lam_bloque
+        jnc .m3
+        call al_dia                 ; sin memoria: no hay miniaturas
+        popad
+        ret
+.m3:
+        mov byte [ed_todo], 1
+.m2:
         cmp byte [ed_todo], 0
         je .a
         mov byte [ed_todo], 0
@@ -1106,7 +1137,7 @@ minis_al_dia:
         mov ecx, ebx
         call lam_pinta
         call .reduce
-        mov byte [lam_sucio], 1     ; (lam_buf ya no tiene la que se ve)
+        mov byte [lam_sucio], 1     ; (en lam_buf ya no está la que se ve)
 .os:
         inc ebx
         jmp .o
@@ -1124,11 +1155,17 @@ minis_al_dia:
         pushad
         mov byte [mini_ok+ebx], 1
         imul edi, ebx, MINI_AN * MINI_AL
-        add edi, mini
+        add edi, [mini]
         mov ecx, MINI_AN
         mov edx, MINI_AL
         mov ebx, [suave]
         call lam_reduce
+        cmp byte [lam_sin_mem], 0   ; (sin lámina dibujada: en blanco)
+        je .rx
+        mov ecx, MINI_AN * MINI_AL
+        mov al, C_BLANCO
+        rep stosb
+.rx:
         popad
         ret
 
@@ -1198,9 +1235,14 @@ pinta_tira:
         mov eax, MINI_X
         mov ecx, MINI_AN
         mov edx, MINI_AL
-        imul esi, edi, MINI_AN * MINI_AL
-        add esi, mini
+        lea esi, [edi+1]            ; (si no ha habido memoria para ella, solo su marco)
+        imul esi, MINI_AN * MINI_AL
+        cmp esi, [mini+4]
+        ja .m3
+        sub esi, MINI_AN * MINI_AL
+        add esi, [mini]
         HV dc_copiar
+.m3:
         push edi                    ; su número
         lea eax, [edi+1]
         mov edi, num_txt
@@ -1283,7 +1325,7 @@ pinta_notas:
         COLOR C_TINTA
         mov ebp, [esi+LO_LARGO]     ; EBP=lo que queda
         mov esi, [esi+LO_DAT]
-        add esi, lam_dat            ; ESI=por dónde va
+        add esi, [lam_dat]            ; ESI=por dónde va
         mov dword [n_lin], 0
 .l:
         test ebp, ebp
@@ -1379,8 +1421,10 @@ mini_ok     resb LAM_MAX_PAG        ; qué miniaturas están al día
             alignb 4
 ficha_tmp   resb LO_TAM
 notas_buf   resb NOTAS_MAX + 8
-mini        resb LAM_MAX_PAG * MINI_AN * MINI_AL
-pres_buf    resb PRES_AN * PRES_AL  ; la diapositiva, al tamaño de la pantalla
-hoja_buf    resb HOJA_AN * HOJA_AL + 8  ; la hoja de un folleto (y, al presentar,
-                                    ; lo que se va poniendo en una transición)
+; lo grande son bloques que se piden al usarlos (lam_bloque) y se devuelven
+; al acabar de presentar o de imprimir (pre_suelta) y al cerrar
+mini        resd 3                  ; las miniaturas (MINI_AN x MINI_AL cada una)
+pres_buf    resd 3                  ; la diapositiva, al tamaño de la pantalla
+hoja_buf    resd 3                  ; la hoja de un folleto (y, al presentar, lo
+                                    ; que se va poniendo en una transición)
 HVP_FIN

@@ -31,6 +31,14 @@ pres_empieza:
         cmp byte [pres], 0
         jne .x
         call fin_edicion
+        mov ecx, eax                ; ¿hay memoria para dibujar una diapositiva?
+        call lam_pinta
+        mov byte [lam_sucio], 1
+        cmp byte [lam_sin_mem], 0
+        je .hay
+        mov esi, t_sin_mem
+        jmp aviso
+.hay:
         mov dword [sel], -1
         mov dword [herr], 0
         mov byte [drag], 0
@@ -82,6 +90,7 @@ pres_acaba:
         cmp byte [pres], 0
         je .x
         pushad
+        call pre_suelta             ; los búferes del pase, de vuelta
         mov byte [pres], 0
         mov byte [pres_fin], 0
         mov ebp, [ven]
@@ -112,6 +121,16 @@ pres_acaba:
         HV ven_invalidar
         popad
 .x:
+        ret
+
+; devuelve la memoria de presentar y de imprimir folletos
+pre_suelta:
+        push ebx
+        mov ebx, pres_buf
+        call lam_bloque_suelta
+        mov ebx, hoja_buf
+        call lam_bloque_suelta
+        pop ebx
         ret
 
 ; (interna) cuánto mide la diapositiva en la pantalla y dónde cae
@@ -172,7 +191,8 @@ pres_dibuja:
         mov dword [lam_parr_max], 0
         pop dword [lam_guia_fn]
         mov byte [lam_sucio], 1     ; (lam_buf ya no es la lámina del editor)
-        mov dword [pres_src], lam_buf
+        mov eax, [lam_buf]
+        mov [pres_src], eax
         mov ecx, [pres_an]
         mov edx, [pres_al]
         cmp ecx, [lam_an]
@@ -180,7 +200,28 @@ pres_dibuja:
         cmp edx, [lam_al]
         je .x
 .escala:
-        mov edi, pres_buf
+        push ecx                    ; sitio para ella a ese tamaño (se pide al usarlo)
+        imul ecx, edx
+        mov ebx, pres_buf
+        xor al, al
+        call lam_bloque
+        pop ecx
+        jnc .cabe
+        mov eax, [lam_an]           ; sin memoria: a su tamaño, sin escalar
+        mov [pres_an], eax
+        mov ebx, [pan_an]
+        sub ebx, eax
+        sar ebx, 1
+        mov [pres_x], ebx
+        mov eax, [lam_al]
+        mov [pres_al], eax
+        mov ebx, [pan_al]
+        sub ebx, eax
+        sar ebx, 1
+        mov [pres_y], ebx
+        jmp .x
+.cabe:
+        mov edi, [pres_buf]
         mov [pres_src], edi
         mov ebx, [suave]
         call lam_reduce
@@ -213,7 +254,7 @@ pres_puntos:
         test ecx, ecx
         jz .s
         mov ebx, [esi+LO_DAT]
-        add ebx, lam_dat
+        add ebx, [lam_dat]
         mov edx, 1                  ; los párrafos: uno, y otro por cada salto
 .c:                                 ; de línea que no sea el último
         dec ecx
@@ -442,12 +483,15 @@ pres_pinta:
 ; (interna, con el contexto abierto) la diapositiva, a su sitio en la pantalla
 pres_copia:
         pushad
+        cmp byte [lam_sin_mem], 0   ; (sin memoria para dibujarla, se queda en negro)
+        jne .x
         mov eax, [pres_x]
         mov ebx, [pres_y]
         mov ecx, [pres_an]
         mov edx, [pres_al]
         mov esi, [pres_src]
         HV dc_copiar
+.x:
         popad
         ret
 
@@ -462,6 +506,7 @@ transicion:
         je .barrido
         cmp eax, 3
         je .disolver
+.nada:
         popad
         ret
 .cortina:
@@ -511,10 +556,16 @@ transicion:
 .disolver:
         ; en dieciséis pasos: en cada uno, los puntos a los que les toca según
         ; la trama de 4x4; los demás se dejan como están (CLAVE no se copia)
+        mov ecx, [pres_an]          ; (el búfer de la trama se pide al usarlo; sin
+        imul ecx, [pres_al]         ; memoria, no hay transición)
+        mov ebx, hoja_buf
+        xor al, al
+        call lam_bloque
+        jc .nada
         mov dword [tr_k], 0
 .d1:
         mov esi, [pres_src]
-        mov edi, hoja_buf
+        mov edi, [hoja_buf]
         xor ebx, ebx                ; la fila
 .df:
         cmp ebx, [pres_al]
@@ -550,7 +601,7 @@ transicion:
         mov ebx, [pres_y]
         mov ecx, [pres_an]
         mov edx, [pres_al]
-        mov esi, hoja_buf
+        mov esi, [hoja_buf]
         HV dc_copiar_clave
         HV dc_cerrar
         call tr_espera
