@@ -1,9 +1,26 @@
 # Hispa-DOS
 
-**Hispa-386, de la familia Hispa-DOS: sistema operativo libre compatible con MS-DOS 6.22, escrito desde cero, con drivers para hardware actual.**
-*A free, from-scratch MS-DOS 6.22 compatible operating system with drivers for modern hardware.* — [English below](#english)
+**La familia de sistemas operativos libres en español, compatibles con MS-DOS, para devolver a la vida los ordenadores viejos.** Es parte de **Rescoldo**: [hispados.es](https://hispados.es).
+*A family of free Spanish operating systems, MS-DOS compatible, to bring old PCs back to life.* — [English below](#english)
 
 **Pruébalo sin instalar nada, en el navegador (también en el móvil): [hispados.es](https://hispados.es).**
+
+Cada sistema de la familia se llama por el **procesador mínimo** que necesita. Van del ordenador más antiguo al más moderno: busca el procesador de tu equipo y mira cuál le toca.
+
+| | Para qué ordenadores | Estado | En este repositorio |
+|---|---|---|---|
+| **Hispa-8086** | 8086, 8088, V20, 80186 y 286 (PC, XT y AT) | 0.7.1, en marcha. Probado con las ROM originales del IBM PC, del XT y del AT | [`h8086/`](h8086/) · [plan](docs/8086/HISPA-8086.md) |
+| **Hispa-386** | 386, 486 y posteriores, con su escritorio **Hispa Ventanas** | 0.9 de pruebas, casi completo ([última versión](https://github.com/instcide-Es/hispados/releases)) | la raíz (lo que sigue en esta página) |
+| **Hispa-486** | Lo de mediados a finales de los 90: DirectX, navegador web, menú de inicio | Reservado, más adelante | [visión](docs/VISION.md) |
+| **Castel** | El lenguaje de programación de sistemas, en español, para escribir los próximos Hispa sin ensamblador | En diseño; ya tiene su primer compilador | [`castel/`](castel/) |
+
+Todos los Hispa se actualizan entre sí: cada uno aconseja el que le corresponde al equipo. Después vendrá un núcleo nuevo, sin DOS, con la tecnología de los años 2000, escrito en Castel. Más en [docs/VISION.md](docs/VISION.md).
+
+---
+
+## Hispa-386
+
+**Sistema operativo libre compatible con MS-DOS 6.22, escrito desde cero, con drivers para hardware actual y su escritorio, Hispa Ventanas.**
 
 ```
 Hispa-DOS 0.9 - núcleo compatible con MS-DOS 6.22
@@ -41,13 +58,13 @@ Hispa-DOS es la primera pieza de **Rescoldo**, la familia de programas libres en
 
 **Hispa-DOS es la familia de sistemas operativos** con DOS por debajo, uno para cada clase de ordenador, con el nombre del **procesador mínimo** que necesita:
 
-- **Hispa-8086** — 8086, 8088, V20, 80186 y 286: un núcleo de 16 bits propio, en marcha (versión 0.7.1, rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)). Ya arranca, maneja archivos y directorios en disquetes y disco duro, ejecuta .COM, .EXE y lotes, y pasa archivos por el puerto serie. Probado con las ROM originales del IBM PC, del XT y del AT.
+- **Hispa-8086** — 8086, 8088, V20, 80186 y 286: un núcleo de 16 bits propio, en marcha (versión 0.7.1, en [`h8086/`](h8086/); se desarrolla en la rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)). Ya arranca, maneja archivos y directorios en disquetes y disco duro, ejecuta .COM, .EXE y lotes, y pasa archivos por el puerto serie. Probado con las ROM originales del IBM PC, del XT y del AT.
 - **Hispa-386** — 386 o superior: **este repositorio** (rama `hispados-0.9`). Trae su escritorio con ventanas, **Hispa Ventanas**, con sus grupos de programas: Accesorios (Bloc de notas, Calculadora, Reloj, Sistema, Pintura, Terminal, Teclado), **Productividad** (Pluma, Cuentas y Facturas), Juegos (con los emuladores Hispa-Nes e Hispa-System) y Sonido.
 - **Hispa-486** — reservado, más adelante: lo de mediados a finales de los 90 (DirectX, navegador web, menú de inicio). El nombre definitivo será el del procesador mínimo con el que vaya bien de verdad.
 
 Después vendrá un núcleo nuevo, sin DOS, con la tecnología de los años 2000 (nombre por decidir). Y aparte:
 
-- **Castel** — el lenguaje de programación de sistemas, en español, de la familia Pascal/Oberon, con el que se escribirán los próximos sistemas (en diseño). El nombre **Castel** es un recorte de «**castel**lano».
+- **Castel** — el lenguaje de programación de sistemas, en español, de la familia Pascal/Oberon, con el que se escribirán los próximos sistemas (en diseño; su primer compilador, en [`castel/`](castel/)). El nombre **Castel** es un recorte de «**castel**lano».
 
 Web del proyecto, con una demostración que arranca Hispa-386 en el propio navegador: **[hispados.es](https://hispados.es)**.
 
@@ -68,7 +85,7 @@ Las imágenes listas para usar están en **[Releases](https://github.com/instcid
 
 Probar en QEMU: `qemu-system-i386 -fda hispados-disquete.img`.
 
-**Requisitos:** procesador **386 o superior** (386, 486, Pentium...) y 640 KB de memoria; para Hispa Ventanas, además memoria extendida (2 MB o más). En un 8086, 186 o 286 Hispa-386 lo dice al arrancar en vez de colgarse: para esos equipos está **Hispa-8086** (rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)).
+**Requisitos:** procesador **386 o superior** (386, 486, Pentium...) y 640 KB de memoria; para Hispa Ventanas, además memoria extendida (2 MB o más). En un 8086, 186 o 286 Hispa-386 lo dice al arrancar en vez de colgarse: para esos equipos está **Hispa-8086** ([`h8086/`](h8086/)).
 
 La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáticas en emuladores, pero falta probarla en más PCs reales. Si encuentras un fallo, abre una *issue* contando el equipo (o el emulador) y qué pasó.
 
@@ -359,7 +376,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior (GPL-2.0-or
 
 **Try it in your browser, no install needed: [hispados.es](https://hispados.es).**
 
-Hispa-DOS is a family of free operating systems in Spanish, part of the **Rescoldo** project, named after the minimum CPU they need: **Hispa-8086** (8086 to 286; version 0.7.1, branch [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086), tested with the original IBM PC, XT and AT ROMs), **Hispa-386** (this repository, 386 or better, with its desktop **Hispa Ventanas** and its own office suite in the «Productividad» group: Pluma word processor, Cuentas spreadsheet and Facturas invoicing) and, later, **Hispa-486** (reserved: DirectX, web browser, start menu). A new kernel without DOS will come after that, written in **Castel**, a Spanish systems programming language (in design). Hispa-386 is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
+Hispa-DOS is a family of free operating systems in Spanish, part of the **Rescoldo** project, named after the minimum CPU they need: **Hispa-8086** (8086 to 286; version 0.7.1, in [`h8086/`](h8086/), tested with the original IBM PC, XT and AT ROMs), **Hispa-386** (this repository, 386 or better, with its desktop **Hispa Ventanas** and its own office suite in the «Productividad» group: Pluma word processor, Cuentas spreadsheet and Facturas invoicing) and, later, **Hispa-486** (reserved: DirectX, web browser, start menu). A new kernel without DOS will come after that, written in **Castel**, a Spanish systems programming language (in design; its first compiler is in [`castel/`](castel/)). Hispa-386 is a free operating system written from scratch that aims to be **compatible with MS-DOS 6.22** and **Windows 3.1**, with **drivers for current hardware**: video (VESA/VBE), mouse (PS/2, USB), audio (HDA/AC'97 with Sound Blaster compatibility) and TCP/IP networking, both for DOS and Windows 3.1.
 
 It contains no Microsoft code: everything is implemented from public documentation.
 
