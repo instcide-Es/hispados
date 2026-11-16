@@ -195,7 +195,7 @@ plu_menu:
         dw O_REEMPLAZAR
         db "Reemp&lazar...     Ctrl+L", 0
         dw O_IRA
-        db "&Ir a...               F5", 0
+        db "&Ir a...           Ctrl+I", 0
         dw 0xFFFF
         db "&Ver", 0
         dw O_COMPLETA
@@ -1235,9 +1235,9 @@ tecla:
         call cambio
         jmp hecho
 ; las órdenes de Ctrl+letra (de la A a la Z; 0: ninguna)
-; (Ctrl+H, Ctrl+I y Ctrl+M no valen de atajo: para el teclado son Retroceso,
-; Tab e Intro)
-ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, 0, 0
+; (Ctrl+H no vale de atajo: para el teclado es Retroceso. Ctrl+I y Ctrl+M se
+; distinguen de Tab y de Intro desde Hispa-386 0.9.20; «Ir a» es también F5)
+ctrl_ord    db 0, O_ABRIR, O_BUSCAR, O_COPIAR, O_DER, O_TODO, 0, O_GUARDAR, 0, O_IRA, 0
             db O_CUR, O_REEMPLAZAR, 0, O_NEG, 0, O_IMPRIMIR, O_IZQ, 0, O_SUB, O_CEN
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 
