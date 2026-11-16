@@ -19,7 +19,7 @@
 VER_NUM     equ 0*10000 + 9*100 + 18        ; 0.9.18 -> 918
 
 ;  VER_EDI  nivel de "riqueza" de la EDICION instalada (0 = la unica edicion de
-;  hoy: Hispa-DOS con Hispa Ventanas, 386+). ACTUALIZAR lo usa para recomendar
+;  hoy: Hispa-386, con Hispa Ventanas, 386+). ACTUALIZAR lo usa para recomendar
 ;  una edicion mas rica cuando el equipo da para mas (p.ej. pasar de una edicion
 ;  basica de solo texto, nivel 0, a una con entorno grafico, nivel mayor). Al
 ;  crear ediciones nuevas, suba este numero en la edicion que las traiga.

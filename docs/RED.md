@@ -117,7 +117,7 @@ cpu=386            ; nivel mínimo: 386 / 486 / 586 (Pentium)
 ram=0              ; KiB mínimos de memoria extendida (0 = no exige)
 disco=4            ; MiB libres mínimos en el disco de destino
 nivel=0            ; "riqueza" de la edición (mayor = más completa)
-edicion=Hispa-DOS con Hispa Ventanas
+edicion=Hispa-386 (con Hispa Ventanas)
 paquete=http://actualiza.clicgest.es/hispados-0.9.16.paq
 nota=Novedades de esta versión
 ```
