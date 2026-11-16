@@ -1,30 +1,35 @@
 #!/usr/bin/env python3
-"""Hace TIPOS.DAT, los tipos de letra que comparten los programas de Hispa
-Ventanas (Pluma y los demás de «Productividad»), a partir de fuentes libres.
+"""Hace los tipos de letra que comparten los programas de Hispa Ventanas
+(Pluma y los demás de «Productividad»), a partir de fuentes libres.
 
   Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
-Dibuja cada letra de la página 437 en una casilla de 16 filas (la línea base,
-en la fila 12), en blanco y negro. El archivo (lo lee programas/comun/tipos.inc):
+Dibuja cada letra de la página 437, en blanco y negro, en casillas de cuatro
+altos: 12, 16, 24 y 32 puntos de pantalla (la línea base, a tres cuartos). De
+cada alto sale un archivo: TIPOS12.DAT, TIPOS.DAT (el de 16), TIPOS24.DAT y
+TIPOS32.DAT. Los lee programas/comun/tipos.inc. El archivo:
 
-  0   «TIPOS1», 26, 0
-  8   dd  cuántos tipos
+  0   «TIPOS2», 26, 0
+  8   db cuántos tipos (con el 0), db alto de la casilla, db línea base, db 0
   12  de cada tipo, 32 octetos: su nombre (24, acabado en 0), dd dónde
-      empieza en el archivo y dd cuánto ocupa
+      empieza en el archivo y dd cuánto ocupa (0: ese tipo no está aquí)
   y de cada tipo: 224 palabras (dónde está cada carácter, del 32 al 255,
   contando desde el principio del tipo; 0: no lo trae y se pone el de la letra
   de Hispa Ventanas) y, de cada carácter: su ancho, cuántos octetos lleva cada
-  fila (1 o 2) y sus 16 filas (el punto de la izquierda, el bit más alto).
+  fila, y sus filas (tantas como el alto; el punto de la izquierda es el bit
+  más alto del primer octeto).
 
-Los documentos guardan el NÚMERO del tipo (1, el primero de la tabla): los
-tipos nuevos se añaden AL FINAL y los que hay no se cambian de sitio.
+El tipo 0 es «Hispa», la letra de ancho fijo de Hispa Ventanas (8x16): en el
+archivo de 16 no está (se usa la del sistema); en los otros altos lo hace una
+de ancho fijo de aquí. Los documentos guardan el NÚMERO del tipo: los tipos
+nuevos se añaden AL FINAL y los que hay no se cambian de sitio.
 
-Solo hace falta para REHACER TIPOS.DAT. Pide Pillow (pip install pillow) y
+Solo hace falta para REHACER los archivos. Pide Pillow (pip install pillow) y
 las fuentes: las de DejaVu y Bitstream, en /usr/share/fonts de Debian/Ubuntu
 (paquetes fonts-dejavu-core y xfonts-scalable); las demás, de los paquetes
 fonts-* que dice la tabla, desempaquetados (dpkg -x) en la carpeta que se da.
 
-uso: hazfuentes.py carpeta-de-los-paquetes TIPOS.DAT TIPOS-DE-LETRA.md
+uso: hazfuentes.py carpeta-de-los-paquetes carpeta-de-salida TIPOS-DE-LETRA.md
 """
 import os, struct, sys
 from PIL import Image, ImageDraw, ImageFont
@@ -57,38 +62,35 @@ TIPOS = [
     ('fiesta',     'Fiesta',      X + '/opentype/lobster/lobster.otf', 'Lobster (fonts-lobster)', 'OFL-1.1', 15),
     ('manuscrita', 'Manuscrita',  X + '/truetype/breip/Breip.ttf', 'Breip (fonts-breip)', 'OFL-1.0', 18),
 ]
-BASE = 12
+HISPA = S + '/truetype/dejavu/DejaVuSansMono.ttf'      # «Hispa» en los altos que no son 16
+ALTOS = (12, 16, 24, 32)
 LETRAS = list(range(32, 176)) + [225, 230, 241, 246, 248, 250, 253]
+MARGEN = 16
 
 
-def dibuja(f, ch, alto=24):
-    im = Image.new('1', (40, alto), 0)
+def dibuja(f, ch, alto, base):
+    im = Image.new('1', (MARGEN + 4 * alto, alto), 0)
     d = ImageDraw.Draw(im)
     d.fontmode = '1'
-    d.text((4, BASE), ch, font=f, fill=1, anchor='ls')
+    d.text((MARGEN, base), ch, font=f, fill=1, anchor='ls')
     return im
 
 
-def tamano(ruta):
+def tamano(ruta, alto, base):
     """el mayor en el que caben en la casilla las letras altas y las de rabo"""
-    mejor = 8
-    for t in range(8, 25):
-        bb = dibuja(ImageFont.truetype(ruta, t), 'ÉÑdfhklgjpqy', 40).crop((0, 0, 40, 40)).getbbox()
-        im = Image.new('1', (400, 48), 0)
+    mejor = 6
+    for t in range(6, 3 * alto):
+        im = Image.new('1', (40 * alto, 4 * alto), 0)
         d = ImageDraw.Draw(im)
         d.fontmode = '1'
-        d.text((4, 24), 'ÉÑdfhklgjpqy', font=ImageFont.truetype(ruta, t), fill=1, anchor='ls')
+        d.text((4, 2 * alto), 'ÉÑdfhklgjpqy', font=ImageFont.truetype(ruta, t), fill=1, anchor='ls')
         bb = im.getbbox()
-        if bb and bb[1] >= 24 - BASE and bb[3] <= 24 + 16 - BASE:
+        if bb and bb[1] >= 2 * alto - base and bb[3] <= 2 * alto + alto - base:
             mejor = t
     return mejor
 
 
-blobs = []
-doc = []
-total = 0
-for etq, nombre, ruta, origen, lic, *resto in TIPOS:
-    t = resto[0] if resto else tamano(ruta)
+def tipo(ruta, t, alto, base):
     f = ImageFont.truetype(ruta, t)
     falta = bytes(f.getmask('￿', mode='1')), f.getmask('￿', mode='1').size
     tabla, datos, pos = [], [], 448
@@ -98,44 +100,58 @@ for etq, nombre, ruta, origen, lic, *resto in TIPOS:
         if c not in LETRAS or (c != 32 and (bytes(m), m.size) == falta):
             tabla.append(0)
             continue
-        im = dibuja(f, ch)
-        ancho = max(1, min(16, round(f.getlength(ch))))
-        filas = []
-        for y in range(16):
-            v = 0
-            for x in range(16):
-                if im.getpixel((4 + x, y)):
-                    v |= 0x8000 >> x
-            filas.append(v)
-        if any(v & 0xFF for v in filas):
-            o = [ancho, 2] + [b for v in filas for b in (v & 0xFF, v >> 8)]
-        else:
-            o = [ancho, 1] + [v >> 8 for v in filas]
+        im = dibuja(f, ch, alto, base)
+        ancho = max(1, min(255, round(f.getlength(ch))))
+        bb = im.crop((MARGEN, 0, im.width, alto)).getbbox()
+        puntos = max(ancho, bb[2] if bb else 0)
+        bpr = min(8, (puntos + 7) // 8)
+        o = [ancho, bpr]
+        for y in range(alto):
+            for b in range(bpr):
+                v = 0
+                for x in range(8):
+                    if im.getpixel((MARGEN + b * 8 + x, y)):
+                        v |= 0x80 >> x
+                o.append(v)
         tabla.append(pos)
         datos.append(o)
         pos += len(o)
-    blobs.append(struct.pack('<224H', *tabla) + bytes(b for o in datos for b in o))
+    return struct.pack('<224H', *tabla) + bytes(b for o in datos for b in o)
+
+
+doc = [[t[1], t[3], t[4], 0] for t in TIPOS]
+total = 0
+for alto in ALTOS:
+    base = alto * 3 // 4
+    blobs = [b'' if alto == 16 else tipo(HISPA, tamano(HISPA, alto, base), alto, base)]
+    for k, (etq, nombre, ruta, origen, lic, *resto) in enumerate(TIPOS):
+        t = round(resto[0] * alto / 16) if resto else tamano(ruta, alto, base)
+        blobs.append(tipo(ruta, t, alto, base))
+        doc[k][3] += len(blobs[-1])
+    cab = b'TIPOS2\x1a\x00' + bytes([len(blobs), alto, base, 0])
+    pos = len(cab) + 32 * len(blobs)
+    for nombre, b in zip(['Hispa'] + [t[1] for t in TIPOS], blobs):
+        cab += nombre.encode('cp437').ljust(24, b'\0') + struct.pack('<II', pos if b else 0, len(b))
+        pos += len(b)
+    nom = 'TIPOS.DAT' if alto == 16 else 'TIPOS%d.DAT' % alto
+    open(os.path.join(sys.argv[2], nom), 'wb').write(cab + b''.join(blobs))
+    print('%s: %d octetos' % (nom, pos))
     total += pos
-    doc.append((nombre, origen, t, lic, pos))
-cab = b'TIPOS1\x1a\x00' + struct.pack('<I', len(TIPOS))
-pos = len(cab) + 32 * len(TIPOS)
-for (etq, nombre, *_r), b in zip(TIPOS, blobs):
-    cab += nombre.encode('cp437').ljust(24, b'\0') + struct.pack('<II', pos, len(b))
-    pos += len(b)
-open(sys.argv[2], 'wb').write(cab + b''.join(blobs))
 md = ['# Los tipos de letra de Hispa Ventanas', '',
       'Los programas de «Productividad» (Pluma, y los que vengan) comparten los tipos de',
-      'letra del archivo `\\HISPADOS\\PROGS\\TIPOS.DAT` (en el repositorio,',
-      '`programas/comun/TIPOS.DAT`; lo hace `tools/hazfuentes.py` y lo lee',
-      '`programas/comun/tipos.inc`). El tipo 0 es «Hispa», la letra de ancho fijo de Hispa',
-      'Ventanas, que no está en el archivo.', '',
-      'Cada tipo sale de una fuente libre, dibujada en una casilla de 16 puntos de alto. Lleva',
-      'un nombre nuestro porque las licencias piden que lo cambiado no use el nombre original.',
-      'Cada uno conserva la licencia de su fuente de origen:', '',
-      '| N.º | Tipo | Sale de | Puntos | Licencia | Octetos |', '|---|---|---|---|---|---|']
+      'letra de `\\HISPADOS\\PROGS`: `TIPOS.DAT` (letra normal, en casilla de 16 puntos de',
+      'pantalla) y `TIPOS12.DAT`, `TIPOS24.DAT` y `TIPOS32.DAT` (los otros tamaños). En el',
+      'repositorio están en `programas/comun/`; los hace `tools/hazfuentes.py` y los lee',
+      '`programas/comun/tipos.inc`. El tipo 0 es «Hispa», la letra de ancho fijo de Hispa',
+      'Ventanas; en los tamaños que no son el normal la hace DejaVu Sans Mono.', '',
+      'Cada tipo sale de una fuente libre. Lleva un nombre nuestro porque las licencias piden',
+      'que lo cambiado no use el nombre original, y conserva la licencia de su fuente de origen:', '',
+      '| N.º | Tipo | Sale de | Licencia | Octetos (los cuatro tamaños) |', '|---|---|---|---|---|']
 for i, d in enumerate(doc):
-    md.append('| %d | %s | %s | %d | %s | %d |' % ((i + 1,) + d))
-md += ['', 'Los documentos guardan el número del tipo: los nuevos se añaden al final de la tabla de',
+    md.append('| %d | %s | %s | %s | %d |' % ((i + 1,) + tuple(d)))
+md += ['', 'Tamaños: 9, 12, 18 y 24 puntos son los dibujados (casillas de 12, 16, 24 y 32 puntos de',
+       'pantalla); 36 y 48 son el doble de 18 y de 24.', '',
+       'Los documentos guardan el número del tipo: los nuevos se añaden al final de la tabla de',
        '`tools/hazfuentes.py` y los que hay no se cambian de sitio.', '']
 open(sys.argv[3], 'w', encoding='utf-8').write('\n'.join(md))
-print('%d tipos, %d octetos' % (len(TIPOS), pos))
+print('%d tipos, %d octetos en total' % (len(TIPOS) + 1, total))

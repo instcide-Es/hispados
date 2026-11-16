@@ -60,7 +60,9 @@ prepara() {
   mdeltree -i $T/f.img ::BIN 2>/dev/null          # sitio para los datos
   mmd -i $T/f.img ::HISPADOS/PROGS 2>/dev/null
   mcopy -o -i $T/f.img $hvp ::HISPADOS/PROGS/$nom
-  [ -f programas/comun/TIPOS.DAT ] && mcopy -o -i $T/f.img programas/comun/TIPOS.DAT ::HISPADOS/PROGS/TIPOS.DAT   # los tipos de letra
+  # los tipos de letra (medio mega): se hace sitio quitando lo que la prueba no usa
+  mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null; mdeltree -i $T/f.img ::HISPADOS/JUEGOS 2>/dev/null
+  mcopy -o -i $T/f.img programas/comun/TIPOS*.DAT ::HISPADOS/PROGS/ || echo "  FAIL no caben los tipos de letra en el disquete de la prueba"
   printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\%s\r\n' "$nom" > $T/CENTRO.INI
   mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
 }
