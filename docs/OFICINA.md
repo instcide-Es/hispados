@@ -9,11 +9,11 @@ y está escrito en ensamblador, como el resto del sistema.
 | **Pluma** | procesador de textos | en uso |
 | **Cuentas** | hoja de cálculo (rangos, formatos, funciones, gráficos) | en uso |
 | **Facturas** | facturas emitidas y recibidas | en uso |
-| **Publicaciones** | panfletos, carteles, folletos | en marcha |
-| **Presentaciones** | diapositivas | en proyecto |
-| **Lector de PDF** | leer documentos PDF | en proyecto |
-| **Datos** | fichas y tablas | en proyecto |
-| **Correo** | correo sencillo | en proyecto |
+| **Publicaciones** | panfletos, carteles, tarjetas, folletos | en uso |
+| **Presentaciones** | diapositivas | en marcha |
+| **Lector** | leer documentos PDF (texto, rayas y recuadros) | en uso |
+| **Datos** | base de datos sencilla: tablas, fichas, filtros, listados | en uso |
+| **Correo** | correo sencillo | en proyecto (le falta red cifrada en el sistema) |
 
 ## Una sola familia: el aspecto
 
@@ -31,6 +31,9 @@ todos lo incluyen.
 - **`ortografia.inc`** y `DICCIO.DAT`: el corrector de español (ver `ORTOGRAFIA.md`):
   dice si una palabra está bien, propone correcciones y lleva las palabras propias
   del usuario (`PROPIAS.TXT`).
+- **`lamina.inc`**: la lámina con objetos (cajas de texto, formas, imágenes) de
+  Publicaciones y Presentaciones.
+- **`desinfla.inc`**: el descompresor Deflate/zlib (lo usa el Lector).
 - **`tipos.inc`** y `TIPOS*.DAT`: los tipos de letra (veinte, en seis tamaños;
   ver `TIPOS-DE-LETRA.md`). Un documento hecho en un programa se ve con la
   misma letra en otro.
