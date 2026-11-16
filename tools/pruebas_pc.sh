@@ -38,10 +38,15 @@ tar --exclude=./build --exclude=./.git -cf - . | $SSH "rm -rf /dev/shm/$NOMBRE &
 # QEMU_MAS: opciones que se añaden a TODAS las máquinas de las pruebas (p. ej.
 # '-cpu 486' o '-m 16'), con un envoltorio de qemu-system-i386 por delante
 # en el PATH: así la misma batería se pasa en otras máquinas.
+# Primero se compila; si falla, se enseña el error y NO se lanzan las pruebas
+# (antes seguía adelante y pasaba la batería sin imagen: miles de fallos falsos).
 $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS='${QEMU_MAS:-}' && mkdir -p \$TMPDIR build/pc qbin && \
   printf '#!/bin/sh\\nexec /usr/bin/qemu-system-i386 \"\$@\" %s\\n' '${QEMU_MAS:-}' > qbin/qemu-system-i386 && chmod +x qbin/qemu-system-i386 && \
   export PATH=/dev/shm/$NOMBRE/qbin:\$PATH && \
-  make -s 2>&1 | tail -3 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM 2>&1 | tail -3 && \
+  { { make -s > build/pc/make.log 2>&1 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM >> build/pc/make.log 2>&1; } \
+    || { tail -25 build/pc/make.log; exit 1; }; } && tail -3 build/pc/make.log" \
+  || { echo "pruebas_pc: la COMPILACIÓN ha fallado en el PC (el error, arriba): no se lanzan las pruebas."; exit 4; }
+$SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS='${QEMU_MAS:-}' PATH=/dev/shm/$NOMBRE/qbin:\$PATH && \
   sed -n '/^test:/,/^\$/p' Makefile | grep 'tests/' | sed 's/^\t//; s/\$(IMG)/build\/hispados.img/g' | grep -E -- '${SOLO:-.}' > build/pc/lista.txt && \
   echo \"\$(wc -l < build/pc/lista.txt) pruebas, $J a la vez\" && \
   date +%s > build/pc/inicio && \

@@ -880,7 +880,7 @@ fac_elegida:
         mov eax, [sel]
         cmp eax, [n_ord]
         jae .no
-        mov eax, [ord+eax*4]
+        mov eax, [fac_ord+eax*4]
         mov [act], eax
         pop eax
 .ya:
@@ -934,7 +934,7 @@ ordena:
 .b:                                 ; sea posterior
         cmp esi, edi
         jae .pon
-        mov eax, [ord+esi*4]
+        mov eax, [fac_ord+esi*4]
         call ptr_fac
         cmp [ebx+F_FECHA], edx
         jbe .pon
@@ -945,12 +945,12 @@ ordena:
 .c:
         cmp eax, esi
         jbe .d
-        mov ebx, [ord+eax*4-4]
-        mov [ord+eax*4], ebx
+        mov ebx, [fac_ord+eax*4-4]
+        mov [fac_ord+eax*4], ebx
         dec eax
         jmp .c
 .d:
-        mov [ord+esi*4], ecx
+        mov [fac_ord+esi*4], ecx
         inc edi
 .sig:
         inc ecx
@@ -978,7 +978,7 @@ sel_en_act:
 .b:
         cmp ecx, [n_ord]
         jae .x
-        cmp [ord+ecx*4], eax
+        cmp [fac_ord+ecx*4], eax
         je .es
         inc ecx
         jmp .b
@@ -2429,7 +2429,7 @@ pinta_lista:
         cmp eax, [n_ord]
         jae .pie
         mov ebp, eax
-        mov eax, [ord+eax*4]
+        mov eax, [fac_ord+eax*4]
         call ptr_fac
         imul edx, edi, FIL_AL
         add edx, LY0                ; EDX=y de la fila
@@ -3448,7 +3448,7 @@ s_ing       resd 2
 s_gas       resd 2
 q_sumas     resd 5 * 4 * 2          ; 4 trimestres y el año x 4 columnas de 64 bits
 rl          resb RL_TAM
-ord         resd MAX_FAC
+fac_ord     resd MAX_FAC
 c_num       resb 16
 c_fecha     resb 16
 c_cli       resb 40

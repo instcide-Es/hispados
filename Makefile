@@ -300,19 +300,24 @@ $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS. El ORDEN
 # importa: los grupos que no existen se crean al encontrar su primer módulo, así
-# que los de «Productividad» (el 4: Cuentas; luego Pluma y Facturas) van al final
+# que los de «Productividad» (el 4: Pluma, Cuentas y Facturas) van al final
 # para que ese grupo nuevo salga detrás de «Sonido» y no le quite su sitio.
-HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP $(B)/CUENTAS.HVP
+# (tools/mkusb.py recibe esta lista y copia en este mismo orden)
+HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP \
+       $(B)/PLUMA.HVP $(B)/CUENTAS.HVP $(B)/FACTURAS.HVP
 # [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
 $(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
-# Pluma, el procesador de textos (accesorio: el 1 de HVP_CABECERA)
+# Pluma, el procesador de textos (Productividad: el 4 de HVP_CABECERA)
 $(B)/PLUMA.HVP: programas/pluma.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
-# Cuentas, la hoja de cálculo (accesorio: el 1 de HVP_CABECERA)
-$(B)/CUENTAS.HVP: programas/cuentas.asm $(HVPDEP) | $(B)
+# Cuentas, la hoja de cálculo (Productividad: el 4 de HVP_CABECERA)
+$(B)/CUENTAS.HVP: programas/cuentas.asm $(wildcard programas/cuentas/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# Facturas, la economía de casa y de un pequeño negocio (Productividad: el 4)
+$(B)/FACTURAS.HVP: programas/facturas.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Terminal, el símbolo del sistema (accesorio: el 1 de HVP_CABECERA)
 $(B)/TERMINAL.HVP: programas/terminal.asm $(wildcard programas/terminal/*.inc) lib/version.inc $(HVPDEP) | $(B)
@@ -468,7 +473,7 @@ $(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUE
 hispabios: $(HBEFI)
 
 usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(wildcard usb/* floppy/*)
-	python3 tools/mkusb.py
+	HVPA="$(notdir $(HVPA))" python3 tools/mkusb.py
 
 run: $(IMG)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy -boot a
@@ -634,6 +639,9 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_terminal_tests.sh $(IMG)
 	tests/run_teclado_tests.sh $(IMG)
+	tests/run_pluma_tests.sh $(IMG)
+	tests/run_cuentas_tests.sh $(IMG)
+	tests/run_facturas_tests.sh $(IMG)
 	tests/run_ventanas_bateria_tests.sh $(IMG)
 	tests/run_ventanas_red_tests.sh $(IMG)
 	tests/run_tamano_tests.sh $(IMG)

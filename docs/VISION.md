@@ -82,10 +82,11 @@ los anteriores.
 > accesorios** y pasan a su propio grupo, **«Productividad»** (número 4 en
 > `HVP_CABECERA`): **Cuentas**, **Pluma** y, más adelante, **Facturas** (la
 > economía de un hogar y de pequeños negocios). Así «Accesorios» se queda con
-> las herramientas pequeñas. **Pluma-Ventanas está retirada de momento**: la
-> primera versión no pasaba de un Bloc de notas (solo cambiaba el menú
-> Edición); vuelve, en «Productividad», cuando sea un procesador de textos de
-> verdad (letra con formato), que es lo que la distingue del Bloc.
+> las herramientas pequeñas. Desde la 0.9.18 están las tres: **Pluma**,
+> reescrita como procesador de textos de verdad (letra con formato, que es lo
+> que la distingue del Bloc de notas: la primera versión no pasaba de un Bloc
+> con otro menú Edición); **Cuentas**, con un núcleo de cálculo nuevo (la
+> primera daba resultados erróneos); y **Facturas**.
 
 ## Consolas de cada época
 

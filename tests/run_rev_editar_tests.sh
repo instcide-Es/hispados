@@ -24,6 +24,10 @@ fill() { local free; free=$(mdir -i "$1" :: | sed -n 's/ //g;s/^\([0-9]*\)bytesf
 
 # ---------------------------------------------------------------- 1) EDIT y GESTOR
 cp "$IMG" $T/f.img
+# sitio para los textos grandes de abajo (~330 KB al guardar): fuera los juegos y los
+# módulos de Ventanas, que EDIT y GESTOR no usan (si no, al crecer el sistema se
+# llena el disquete y TOPE.TXT no cabe; EDIT, bien, deja el original intacto)
+mdeltree -i $T/f.img ::HISPADOS/JUEGOS ::HISPADOS/PROGS > /dev/null 2>&1
 python3 - $T <<'PYEOF'
 import sys
 d = sys.argv[1]

@@ -90,20 +90,33 @@ def main():
                      ('CONSOLA.COM', 'CONSOLA.COM'), ('ACTUALIZAR.COM', 'ACTUALIZ.COM'),
                      ('RED.INI', 'RED.INI')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
-    # los programas de Hispa Ventanas (.HVP): los juegos, en \HISPADOS\JUEGOS;
-    # los accesorios (los que dicen grupo 1 o 2, «Sonido», en la cabecera), en
-    # \HISPADOS\PROGS
+    # los programas de Hispa Ventanas (.HVP): los juegos (grupo 0 en la
+    # cabecera), en \HISPADOS\JUEGOS; los demás (1 Accesorios, 2 Sonido,
+    # 3 Principal, 4 Productividad...), en \HISPADOS\PROGS.
+    # Los de PROGS van EXACTAMENTE los de HVPA del Makefile y EN SU ORDEN (lo
+    # pasa el Makefile en la variable HVPA): los grupos que no existen se crean
+    # al encontrar su primer módulo, así que el orden decide dónde sale cada
+    # grupo. Un accesorio viejo que siga en build/ pero ya no esté en HVPA no se
+    # copia (antes se colaba cualquier .HVP que hubiera en build/).
     md('HISPADOS/JUEGOS')
     md('HISPADOS/PROGS')
+    hvpa = os.environ.get('HVPA', '').split()
+    for f in hvpa:
+        cp(os.path.join(B, f), 'HISPADOS/PROGS/' + f)
     for f in sorted(os.listdir(B)):
-        if f.endswith('.HVP'):
+        if f.endswith('.HVP') and f not in hvpa:
             if f in HVPSIS:
                 # [Configuración] los que no son juegos ni accesorios (HVPSIS del Makefile), en \HISPADOS
                 cp(os.path.join(B, f), 'HISPADOS/' + f)
             else:
                 cab = open(os.path.join(B, f), 'rb').read(32)
-                carpeta = 'PROGS' if cab[:4] == b'HVP1' and cab[28] in (1, 2, 3) else 'JUEGOS'  # [MEZCLADOR] 2: «Sonido»
-                cp(os.path.join(B, f), 'HISPADOS/%s/%s' % (carpeta, f))
+                if cab[:4] == b'HVP1' and cab[28] == 0:
+                    cp(os.path.join(B, f), 'HISPADOS/JUEGOS/' + f)
+                elif not hvpa:
+                    # (sin HVPA, como antes: por la cabecera)
+                    cp(os.path.join(B, f), 'HISPADOS/PROGS/' + f)
+                else:
+                    print('mkusb: %s no está en HVPA: no se copia' % f)
     # los cartuchos de los emuladores, cada uno en su carpeta
     md('HISPADOS/JUEGOS/NES')
     md('HISPADOS/JUEGOS/SMS')

@@ -106,7 +106,7 @@ check "Hispa Ventanas ha terminado."
 check "TRAS-SALIR"
 check "SIGUE-VIVO"
 # -- al salir, el CENTRO.INI cuenta 15 módulos y el Terminal en Accesorios --
-if grep -qxF -- "Modulos=15" $T/ini.txt; then ok "CENTRO.INI: Modulos=15"; else ko "CENTRO.INI sin Modulos=15"; fi
+if grep -qxF -- "Modulos=17" $T/ini.txt; then ok "CENTRO.INI: Modulos=17"; else ko "CENTRO.INI sin Modulos=17"; fi
 if grep -qF -- "Nombre=Terminal" $T/ini.txt; then ok "CENTRO.INI: Nombre=Terminal"; else ko "CENTRO.INI sin Nombre=Terminal"; fi
 
 muestra t1 abierto; muestra t2 ver; muestra t3 echo

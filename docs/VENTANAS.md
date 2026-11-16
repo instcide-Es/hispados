@@ -76,10 +76,15 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    programas nuevos van aparte, en módulos .HVP: los primeros, los juegos
    Culebra y Campo de minas (ver «Programas aparte: los módulos .HVP»;
    `tests/run_juegos_tests.sh`), y después Pintura, el programa de dibujo
-   (`tests/run_pintura_tests.sh`). Próximos programas propios (nombres de
-   Carlos): **Pluma-Ventanas**, el procesador de textos (letra con formato,
-   párrafos, imprimir), y **Cuentas-Ventanas**, la hoja de cálculo (fórmulas, formatos de
-   número, gráficos sencillos); el Administrador de archivos ya está
+   (`tests/run_pintura_tests.sh`). Los programas de oficina (nombres de
+   Carlos) van en su propio grupo, **«Productividad»** (el 4 de
+   `HVP_CABECERA`, desde la 0.9.18): **Pluma-Ventanas**, el procesador de
+   textos (letra con formato; `tests/run_pluma_tests.sh`), **Cuentas-Ventanas**,
+   la hoja de cálculo (fórmulas con SUMA, PROMEDIO, MAX, MIN, CONTAR, REDONDEAR,
+   ABS y %; el CSV entrecomilla las celdas que llevan «;»;
+   `tests/run_cuentas_tests.sh`), y **Facturas**, la economía de una casa y de
+   un pequeño negocio (emitidas y recibidas, líneas, IVA y retención, resumen
+   por trimestres; `tests/run_facturas_tests.sh`). El Administrador de archivos ya está
    ([ARCHIVOS], `programas/archivos.asm`, ver «Administrador de archivos»). La
    segunda tanda de juegos (Bloques, Solitario, Tragabolas y Almacén) ya
    está (`tests/run_juegos2_tests.sh`). Pendiente (se
