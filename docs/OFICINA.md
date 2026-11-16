@@ -10,7 +10,7 @@ y está escrito en ensamblador, como el resto del sistema.
 | **Cuentas** | hoja de cálculo (rangos, formatos, funciones, gráficos) | en uso |
 | **Facturas** | facturas emitidas y recibidas | en uso |
 | **Publicaciones** | panfletos, carteles, tarjetas, folletos | en uso |
-| **Presentaciones** | diapositivas | en marcha |
+| **Presentaciones** | diapositivas, temas, pase a pantalla completa | en uso |
 | **Lector** | leer documentos PDF (texto, rayas y recuadros) | en uso |
 | **Datos** | base de datos sencilla: tablas, fichas, filtros, listados | en uso |
 | **Correo** | correo sencillo | en proyecto (le falta red cifrada en el sistema) |
@@ -31,8 +31,8 @@ todos lo incluyen.
 - **`ortografia.inc`** y `DICCIO.DAT`: el corrector de español (ver `ORTOGRAFIA.md`):
   dice si una palabra está bien, propone correcciones y lleva las palabras propias
   del usuario (`PROPIAS.TXT`).
-- **`lamina.inc`**: la lámina con objetos (cajas de texto, formas, imágenes) de
-  Publicaciones y Presentaciones.
+- **`lamina.inc`** y **`lamina_ed.inc`**: la lámina con objetos (cajas de texto,
+  formas, imágenes) y su editor; los comparten Publicaciones y Presentaciones.
 - **`desinfla.inc`**: el descompresor Deflate/zlib (lo usa el Lector).
 - **`tipos.inc`** y `TIPOS*.DAT`: los tipos de letra (veinte, en seis tamaños;
   ver `TIPOS-DE-LETRA.md`). Un documento hecho en un programa se ve con la
