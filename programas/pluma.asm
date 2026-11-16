@@ -2,42 +2,47 @@
 ;  PLUMA.HVP - Pluma, el procesador de textos de Hispa Ventanas
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Un procesador de textos: se escribe sobre una hoja de 72 letras de ancho y
-;  las líneas se parten solas por las palabras. Cada letra lleva su formato:
-;  negrita, cursiva, subrayado, tamaño (normal o grande, el doble) y color; y
-;  cada párrafo, su alineación (izquierda, centro o derecha). El formato se da
-;  a lo elegido (con Mayús y las flechas o arrastrando el ratón) o, si no hay
-;  nada elegido, a lo que se escriba a continuación.
+;  Un procesador de textos: se escribe sobre una hoja de 576 puntos de ancho
+;  (72 letras de las de ancho fijo) y las líneas se parten solas por las
+;  palabras. El formato se da a lo elegido (con Mayús y las flechas o
+;  arrastrando el ratón) o, si no hay nada elegido, a lo que se escriba.
 ;
-;  Los menús siguen el orden de siempre en un procesador de textos (Archivo,
-;  Edición, Ver, Insertar, Formato, Herramientas y «?»), con lo que Pluma
-;  sabe hacer hoy; arriba, dos filas de botones: el archivo y la edición, y
-;  el formato, con iconos (y, al pasar el ratón por un botón, abajo sale lo
-;  que hace). Los párrafos pueden ir justificados, con sangría, con viñetas o
-;  numerados; «¶» enseña los espacios y los finales de párrafo; la brocha
-;  copia el formato de un texto a otro. Los tipos de letra son los que
-;  comparten los programas de Hispa Ventanas (TIPOS.DAT: veinte con «Hispa»,
-;  la de ancho fijo; programas/comun/tipos.inc y docs/TIPOS-DE-LETRA.md).
-;  Además de lo de abajo: Reemplazar, Ir a, Repetir, insertar la
-;  fecha o un archivo, los diálogos de Fuentes y Párrafo, cambiar mayúsculas
-;  y minúsculas, contar palabras y pantalla completa.
+;  - La letra: tipo (los veinte que comparten los programas de la familia,
+;    programas/comun/tipos.inc), tamaño (9, 12, 18, 24, 36 y 48 puntos),
+;    negrita, cursiva, subrayado y color. La brocha copia el formato.
+;  - El párrafo: a la izquierda, centrado, a la derecha o justificado; con
+;    sangría, con viñetas o numerado; y los estilos (Normal, títulos, cita,
+;    nota), que lo ponen todo de una vez.
+;  - Tablas (cada fila es un párrafo con sus celdas), saltos de página, la
+;    fecha, otro archivo.
+;  - Ortografía: las faltas se subrayan al escribir y F7 las repasa con
+;    propuestas (programas/comun/ortografia.inc).
+;  - Buscar, reemplazar, ir a, contar palabras, mayúsculas y minúsculas,
+;    «¶» (ver espacios y finales de párrafo), pantalla completa.
+;  - Deshacer y rehacer, hasta ocho cambios. Cortar, copiar y pegar con el
+;    portapapeles de Hispa Ventanas (dentro de Pluma conserva el formato).
+;  - Vista preliminar de la página entera. Se imprime por el puerto paralelo
+;    (INT 17h) de tres maneras: en texto llano, con formato (códigos ESC/P)
+;    o «como se ve», punto por punto en el modo gráfico de la impresora.
 ;
-;  Archivo: Nuevo, Abrir, Guardar, Guardar como e Imprimir. Los documentos se
-;  guardan en .PLU (el texto y, detrás, el formato de cada letra); con la
-;  extensión .TXT se guarda solo el texto, y cualquier archivo de texto se
-;  puede abrir. Edición: cortar, copiar y pegar (con el portapapeles de Hispa
-;  Ventanas: el texto va y viene del Bloc de notas; dentro de Pluma conserva
-;  el formato), deshacer el último cambio, seleccionar todo y buscar. Se imprime por el puerto paralelo
-;  (INT 17h), en texto llano o con formato (códigos ESC/P de Epson).
+;  La barra, el pie y los iconos son los de toda la familia
+;  (programas/comun/barra.inc; las reglas, en docs/OFICINA.md).
 ;
-;  Cómo está hecho. El documento son dos tablas parejas, txt (una letra por
-;  octeto, página 437; el 10 acaba el párrafo) y atr (su formato). El último
-;  octeto es siempre un 10 que no se puede borrar: así todo párrafo tiene su
-;  marca, y en el atr de la marca va la alineación. Tras cada cambio se
-;  recompone la tabla de líneas (dónde empieza cada una y a qué altura). Cada
-;  línea se dibuja entera en un mapa de puntos propio (con la fuente de Hispa
-;  Ventanas, que el módulo recibe como datos) y se copia a la ventana de una
-;  vez, así que no parpadea.
+;  Archivo. Los documentos se guardan en .PLU: «PLUMA1», 26, 0; dd cuántas
+;  letras; el texto; el formato de cada letra; su tipo y tamaño; y «PL22».
+;  (Un Pluma anterior abre los de ahora sin lo que no conoce, y este abre
+;  los de antes.) Con la extensión .TXT se guarda solo el texto, y cualquier
+;  archivo de texto se puede abrir.
+;
+;  Cómo está hecho. El documento son tres tablas parejas: txt (una letra por
+;  octeto, página 437; el 10 acaba el párrafo, el 9 separa las celdas de una
+;  fila de tabla y el 12 es un salto de página), atr (el formato de la letra
+;  o, en la marca de párrafo, cómo es el párrafo) y tip (tipo y tamaño). El
+;  último octeto es siempre un 10 que no se puede borrar: así todo párrafo
+;  tiene su marca. Tras cada cambio se recompone la tabla de líneas (dónde
+;  empieza cada una y a qué altura). Cada línea se dibuja entera en un mapa
+;  de puntos propio y se copia a la ventana de una vez, así que no parpadea;
+;  ese mismo mapa es el que va a la vista preliminar y a la impresora.
 ;
 ;  Parámetros del acceso directo: el nombre de un documento, que se abre.
 ; =============================================================================
