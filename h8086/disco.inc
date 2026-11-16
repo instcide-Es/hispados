@@ -35,7 +35,8 @@ H_DOFF      equ 14                  ; dw: y dónde está dentro de él
 H_CCLU      equ 16                  ; dw: el último grupo visitado...
 H_CIDX      equ 18                  ; dw: ...y qué número hace en la cadena
 H_SUCIO     equ 20                  ; db: hay que poner al día su entrada
-H_TAM_F     equ 22
+H_PSP       equ 22                  ; dw: el programa que lo abrió
+H_TAM_F     equ 24
 ; errores de DOS
 E_FUNCION   equ 1
 E_ARCHIVO   equ 2                   ; no existe el archivo
@@ -1227,20 +1228,23 @@ h_cierra:
         stc
         ret
 
-; cierra todos los archivos (cuando un programa termina)
-h_cierra_todos:
+; cierra los archivos que abrió el programa DX (cuando termina). Conserva DX
+h_cierra_de:
         mov bx, fichas
         mov cx, N_ARCH
 .b:
         cmp byte [bx+H_USO], 0
         je .s
+        cmp [bx+H_PSP], dx
+        jne .s
+        push dx
         push bx
         push cx
         call h_cierra
         pop cx
         pop bx
+        pop dx
 .s:
         add bx, H_TAM_F
         loop .b
-        mov byte [abiertos], 0
         ret

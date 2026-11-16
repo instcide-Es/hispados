@@ -47,7 +47,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.2 - de la familia Rescoldo" ""
+esta p1 "Hispa-8086 0.3 - de la familia Rescoldo" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -55,10 +55,10 @@ esta p1 "puede con HISPA-DOS" "el consejo: "
 esta p1 'A:\>' ""
 escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.2" "VER: "
+esta p2 "Hispa-8086 versión 0.3" "VER: "
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
-esta p2 "4 archivos, " "DIR: "
+esta p2 "5 archivos, " "DIR: "
 esta p2 "octetos libres" "DIR: "
 noesta p2 "HISPA-8086 " "DIR: (la etiqueta) "
 escribe "cls"; escribe "mostrar leeme.txt"
@@ -74,7 +74,23 @@ esta p4 "No existe ese archivo." ""
 esta p4 "Orden desconocida. Escriba AYUDA." ""
 esta p4 "Procesador: 80486 o superior" "EQUIPO: "
 
+echo "== Hispa-8086: memoria, programas .EXE y lanzar otro programa =="
+escribe "limpiar"; escribe "exe"; sleep 4; escribe "equipo"
+pantalla pe
+esta pe "EXE: datos bien" "un .EXE con sus direcciones reubicadas: "
+esta pe "EXE: llamada lejana bien" ""
+esta pe "EXE: memoria bien" "pedir, soltar y encoger memoria: "
+esta pe 'EXE: soy A:\EXE.EXE' "su ruta, detrás del entorno: "
+esta pe "Parametros: hijo" "lanza HOLA.COM con parámetros: "
+esta pe "EXE: el hijo acaba con 7" "y recoge su código de salida: "
+noesta pe "EXE: MAL" ""
+libres=$(grep -o "([0-9]* K libres" $T/pe.txt | tr -dc 0-9)
+antes=$(grep -o "([0-9]* K libres" $T/p1.txt | tr -dc 0-9)
+if [ -n "$libres" ] && [ "$libres" = "$antes" ]; then ok "al acabar, la memoria vuelve a estar libre entera ($libres K)"; else ko "memoria libre: $antes K antes, $libres K después"; fi
+
 echo "== Hispa-8086: archivos y directorios =="
+TL=$(stat -c %s build/LEEME.TXT)      # lo que ocupa el archivo con el que se juega
+fila() { printf '%-14s%10d' "$1" "$2"; }
 escribe "limpiar"; escribe "arch"; sleep 6
 pantalla p6
 esta p6 "ARCHIVOS: BIEN" "la interfaz de INT 21h, paso a paso: "
@@ -86,13 +102,13 @@ escribe "copiar juan.txt pepe.doc"; sleep 2; escribe "dir"
 pantalla p7
 esta p7 'A:\CARTAS>' "CD: "
 esta p7 "1 archivo copiado." "COPIAR: "
-esta p7 "JUAN.TXT             340" "RENOMBRAR y DIR: "
-esta p7 "ANA.TXT              340" "COPIAR y DIR: "
-esta p7 "5 archivos, 1020 octetos" "DIR del directorio: "
+esta p7 "$(fila JUAN.TXT $TL)" "RENOMBRAR y DIR: "
+esta p7 "$(fila ANA.TXT $TL)" "COPIAR y DIR: "
+esta p7 "5 archivos, $((3 * TL)) octetos" "DIR del directorio: "
 escribe "limpiar"; escribe "borrar *.txt"; sleep 2; escribe "dir"
 pantalla p8
 noesta p8 "JUAN.TXT" "BORRAR *.TXT: "
-esta p8 "PEPE.DOC             340" "BORRAR *.TXT deja lo demás: "
+esta p8 "$(fila PEPE.DOC $TL)" "BORRAR *.TXT deja lo demás: "
 escribe "limpiar"; escribe "cd .."; escribe "borrardir cartas"
 escribe "mostrar cartas\\pepe.doc"; escribe "cd nohay"; escribe "cd"
 pantalla p9
@@ -109,7 +125,7 @@ def cat(n):
 dib = bytes((i * 7 + 3) & 255 for i in range(5000))
 leeme = cat('LEEME.TXT')
 ok = cat('GRANDE.DAT') == dib * 4 and cat('PRUEBA.DAT') == dib[:500] and cat('SUB/TRES.TXT') == b'hola'
-ok = ok and len(leeme) == 340 and cat('CARTAS/PEPE.DOC') == leeme
+ok = ok and len(leeme) > 100 and cat('CARTAS/PEPE.DOC') == leeme
 dentro = subprocess.run(['mdir', '-b', '-i', img, '::CARTAS'], capture_output=True).stdout.decode()
 ok = ok and 'PEPE.DOC' in dentro and 'JUAN' not in dentro and 'ANA' not in dentro
 sys.exit(0 if ok else 1)
@@ -146,6 +162,6 @@ if [ "$n" = 1 ]; then ok "un solo tramo de 386 (detrás de la prueba del 286)"; 
 tam=$(stat -c %s build/NUCLEO86.SYS)
 if [ $tam -lt 16384 ]; then ok "el núcleo ocupa $tam octetos"; else ko "el núcleo ha crecido a $tam octetos"; fi
 
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then for p in p1 p2 p3 p4 pe p6 p7 p8 p9 p5; do echo "--- $p"; cat $T/$p.txt 2>/dev/null; done; fi
 rm -rf $T
 exit $fail

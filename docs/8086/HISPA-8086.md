@@ -15,10 +15,11 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 
 ## Dónde estamos
 
-**Etapas 0 y 1 hechas** (`h8086/`, noviembre de 2026). Versión 0.2.
+**Etapas 0, 1 y 2 hechas** (`h8086/`, noviembre de 2026). Versión 0.3.
 
-- **Arranque**: sector de arranque FAT12 y núcleo (8,9 K en el disco; con sus
-  variables, la copia de la FAT y la pila, unos 16 K en memoria), ensamblados
+- **Arranque**: sector de arranque FAT12 y núcleo (10,4 K en el disco; con sus
+  variables, la copia de la FAT y la pila, unos 18 K en memoria: en una
+  máquina de 640 K quedan 620 K para los programas), ensamblados
   con `cpu 8086`: el ensamblador rechaza cualquier instrucción posterior.
   Disquetes de 360 K, 720 K, 1,2 M y 1,44 M.
 - **El equipo**: reconoce el procesador (8086/8088, V20/V30, 80186, 286, 386,
@@ -31,17 +32,25 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
     escribir y cortar (40h), borrar (41h), moverse (42h), atributos (43h),
     renombrar (56h), buscar con comodines (4Eh, 4Fh, 1Ah, 2Fh);
   - **directorios**: crear (39h), quitar (3Ah), cambiar (3Bh), cuál es (47h);
-  - sitio libre (36h), fecha y hora (2Ah, 2Ch), volcar al disco (0Dh).
+  - sitio libre (36h), fecha y hora (2Ah, 2Ch), volcar al disco (0Dh);
+  - **memoria por bloques**, como en MS-DOS: pedir (48h), soltar (49h),
+    cambiar el tamaño (4Ah);
+  - **programas**: lanzar otro y esperar (4Bh), su código de salida (4Dh),
+    qué programa corre (50h, 51h, 62h).
 - **Disco**: FAT12 de lectura y escritura, con subdirectorios que crecen;
   detecta el cambio de disquete (un XT no avisa: si no hay archivos abiertos y
   pasan dos segundos, vuelve a leer sus medidas y su FAT).
-- **Programas .COM**, con sus parámetros y su prefijo (PSP).
+- **Programas .COM y .EXE** (con su tabla de reubicación), cada uno con su
+  prefijo (PSP), sus parámetros y su entorno (las variables y, detrás, su
+  propia ruta). Un programa puede lanzar otro; al terminar se cierran sus
+  archivos y se suelta su memoria.
 - **Órdenes**, con los mismos nombres que en Hispa-DOS (el español y el
   clásico): AYUDA, VER, EQUIPO, DIR, MOSTRAR, COPIAR, BORRAR (con comodines),
   RENOMBRAR, CD, CREARDIR, BORRARDIR, LIMPIAR, ACTUALIZAR.
-- **Prueba automática** (`make -C h8086 prueba`): 50 comprobaciones en QEMU.
-  Un programa de prueba (`prueba/arch.asm`) ejerce la interfaz de archivos en
-  doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
+- **Prueba automática** (`make -C h8086 prueba`): 58 comprobaciones en QEMU.
+  Un .EXE hecho a mano (`prueba/exe.asm`) comprueba la reubicación, la
+  memoria y el lanzamiento de otro programa; otro (`prueba/arch.asm`) ejerce
+  la interfaz de archivos en doce pasos; después se mira el disquete desde fuera: cada archivo tiene su
   contenido exacto y `fsck.fat` no encuentra ningún error, en las cuatro
   medidas.
 
@@ -56,8 +65,9 @@ corre la prueba automática, no emula nada anterior al 486.
 parte fina de la detección), la escritura en disco en un emulador de 16 bits
 y, sobre todo, un XT real con su disquetera.
 
-**Límites de hoy:** una sola unidad (A:), solo FAT12, ocho archivos abiertos,
-programas .COM de hasta 64 K, sin memoria por bloques ni .EXE.
+**Límites de hoy:** una sola unidad (A:), solo FAT12, ocho archivos abiertos
+entre todos los programas, sin programas residentes ni la vieja interfaz de
+archivos por FCB.
 
 ## Las decisiones
 
@@ -121,7 +131,7 @@ se pone en medio.
 | | MS-DOS 3.3 | Hispa-DOS 0.9 | Hispa-8086 (objetivo) |
 |---|---|---|---|
 | Residente (núcleo + intérprete) | ~54 K | ~59 K | **menos de 32 K** |
-| Hoy | | | unos 16 K (etapas 0 y 1, con el intérprete provisional dentro) |
+| Hoy | | | unos 18 K (etapas 0 a 2, con el intérprete provisional dentro) |
 
 Reglas: el intérprete de órdenes tiene una parte que se puede pisar y volver
 a cargar (como COMMAND.COM); los búferes de disco se piden según la memoria
@@ -218,7 +228,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 |---|---|---|
 | 0 | Cimientos: arranque, núcleo mínimo, detección del equipo, .COM | **hecha** |
 | 1 | Archivos por INT 21h (abrir, leer, escribir, crear, borrar, buscar), subdirectorios, FAT12 de escritura | **hecha** |
-| 2 | Memoria (bloques, 48h-4Ah), programas .EXE, EXEC completo, variables de entorno | |
+| 2 | Memoria por bloques (48h-4Ah), programas .EXE, lanzar programas (4Bh), entorno | **hecha** |
 | 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, redirección | |
 | 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | |
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | |
@@ -246,9 +256,11 @@ Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto.
 | `h8086/nucleo.asm` | el núcleo: arranque, INT 21h, consola, el equipo |
 | `h8086/disco.inc` | sectores, FAT12, directorios, rutas y archivos abiertos |
 | `h8086/archivos.inc` | las funciones de archivos y directorios de INT 21h |
+| `h8086/proceso.inc` | la memoria por bloques y los programas (.COM, .EXE, lanzar, terminar) |
 | `h8086/ordenes.inc` | el intérprete de órdenes (provisional, dentro del núcleo) |
 | `h8086/prueba/hola.asm` | un programa .COM de prueba |
 | `h8086/prueba/arch.asm` | la prueba de la interfaz de archivos, en doce pasos |
+| `h8086/prueba/exe.asm` | un .EXE hecho a mano: reubicación, memoria y lanzar otro programa |
 | `h8086/prueba/prueba.sh` | la prueba automática |
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
 

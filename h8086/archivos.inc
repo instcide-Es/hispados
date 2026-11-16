@@ -223,6 +223,8 @@ f3D:
 ; (común con crear) la ficha BX queda abierta sobre la entrada SI
 abre_fin:
         mov byte [bx+H_USO], 1
+        mov ax, [psp_act]
+        mov [bx+H_PSP], ax
         mov ax, [di_sec]
         mov [bx+H_DSEC], ax
         mov ax, si
@@ -240,6 +242,47 @@ abre_fin:
         dec byte [abiertos]
         pop ax
         jmp f_error
+
+; abre para leer el archivo de `ruta` (para el propio núcleo) -> BX=su ficha.
+; CF=1, AX=error
+abre_ruta:
+        call ruta_resuelve
+        jc .x
+        cmp byte [nom11], ' '
+        je .no
+        mov ax, [r_dir]
+        call dir_busca
+        jc .no0
+        test byte [si+11], 0x10
+        jnz .no
+        call h_libre
+        jc .x
+        mov byte [bx+H_USO], 1
+        mov ax, [si+26]
+        mov [bx+H_PRIM], ax
+        mov ax, [si+28]
+        mov [bx+H_TAM], ax
+        mov ax, [si+30]
+        mov [bx+H_TAM+2], ax
+        mov ax, [di_sec]
+        mov [bx+H_DSEC], ax
+        mov ax, si
+        sub ax, sector
+        mov [bx+H_DOFF], ax
+        mov ax, [psp_act]
+        mov [bx+H_PSP], ax
+        inc byte [abiertos]
+        clc
+        ret
+.no0:
+        test ax, ax
+        jnz .mal
+.no:
+        mov ax, E_ARCHIVO
+.mal:
+        stc
+.x:
+        ret
 
 ; ---- 3Eh: cerrar el archivo BX ----
 f3E:

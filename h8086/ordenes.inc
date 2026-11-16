@@ -11,8 +11,8 @@
 ;       BORRAR (DEL)        RENOMBRAR (REN)     CD
 ;       CREARDIR (MD)       BORRARDIR (RD)      LIMPIAR (CLS)
 ;       ACTUALIZAR
-;  Cualquier otra palabra es un programa: NOMBRE.COM, en el directorio de
-;  trabajo o en la raíz.
+;  Cualquier otra palabra es un programa: NOMBRE.COM o NOMBRE.EXE, en el
+;  directorio de trabajo o en la raíz.
 ; =============================================================================
 %macro DOS 1
         mov ah, %1
@@ -286,7 +286,7 @@ pon_error:
         pop bx
         ret
             align 2
-errores     dw E_ARCHIVO, m_e_no_esta, E_RUTA, m_e_ruta, E_MUCHOS, m_e_muchos
+errores     dw E_FORMATO, m_e_formato, E_ARCHIVO, m_e_no_esta, E_RUTA, m_e_ruta, E_MUCHOS, m_e_muchos
             dw E_ACCESO, m_e_acceso, E_DIR_ACT, m_e_dir_act, E_OTRO_DISP, m_e_otro_dir
             dw E_NO_MAS, m_e_no_esta, E_PROTEGIDO, m_e_protegido, E_DISCO, m_e_disco
             dw 0
@@ -628,85 +628,11 @@ dir_orden:
         jc pon_error
         ret
 
-; ---- un programa: ORDEN.COM, con lo que venga detrás como parámetros ----
+; ---- un programa: ORDEN.COM u ORDEN.EXE, en el directorio de trabajo o en la
+;      raíz, con lo que venga detrás como parámetros ----
 ejecuta:
-        mov di, arg1                ; en el directorio de trabajo...
-        mov si, orden
-        call copia_txt
-        mov si, t_com
-        call copia_txt
-        mov dx, arg1
-        mov al, 0
-        DOS 0x3D
-        jnc .abierto
-        mov di, arg2                ; ...o en la raíz
-        mov al, '\'
-        stosb
-        mov si, arg1
-        call copia_txt
-        mov dx, arg2
-        mov al, 0
-        DOS 0x3D
-        jnc .abierto
-        mov si, m_e_orden
-        jmp pon_cad
-.abierto:
-        mov [o_h1], ax
-        mov bx, ax
-        xor cx, cx                  ; cuánto ocupa: hasta el final
-        xor dx, dx
-        mov al, 2
-        DOS 0x42
-        test dx, dx                 ; ¿cabe? (un .COM: menos de 64 K, y la
-        jnz .grande                 ; memoria que haya)
-        cmp ax, 0xFE00
-        ja .grande
-        mov si, ax                  ; SI = su tamaño
-        mov bx, [mem_kb]
-        mov cl, 6
-        shl bx, cl
-        sub bx, [prog_seg]          ; los párrafos libres
-        add ax, 0x100 + 256 + 15    ; (con el prefijo y un poco de pila)
-        mov cl, 4
-        shr ax, cl
-        cmp ax, bx
-        jae .grande
-        mov bx, [o_h1]
-        xor cx, cx
-        xor dx, dx
-        mov al, 0
-        DOS 0x42
-        push ds
-        mov cx, si
-        mov ds, [prog_seg]
-        mov dx, 0x100
-        DOS 0x3F
-        pop ds
-        pushf
-        mov bx, [o_h1]
-        DOS 0x3E
-        popf
-        jnc .cargado
-        jmp pon_error
-.grande:
-        mov bx, [o_h1]
-        DOS 0x3E
-        mov si, m_e_grande
-        jmp pon_cad
-.cargado:
-        ; el prefijo del programa (PSP), delante de él
-        mov es, [prog_seg]
-        xor di, di
-        mov cx, 0x80
-        xor ax, ax
-        rep stosw
-        mov word [es:0], 0x20CD     ; INT 20h: «ret» al principio también termina
-        mov ax, [mem_kb]            ; el final de la memoria, en segmento
-        mov cl, 6
-        shl ax, cl
-        mov [es:2], ax
-        mov si, [resto]             ; los parámetros
-        mov di, 0x81
+        mov si, [resto]             ; lo de detrás, como lo quiere un programa:
+        mov di, arg2 + 1            ; cuántas letras, las letras y un retorno
         xor cx, cx
 .t:
         lodsb
@@ -714,43 +640,53 @@ ejecuta:
         jz .tf
         stosb
         inc cx
-        cmp cx, 126
+        cmp cx, 100
         jb .t
 .tf:
-        mov byte [es:di], 0x0D
-        mov [es:0x80], cl
-        mov [dta_seg], es           ; sus búsquedas, a su prefijo (80h)
-        mov word [dta_off], 0x80
-        ; y a él: todos los segmentos en el suyo, la pila arriba del todo
-        mov ax, [prog_seg]
-        mov bx, [es:2]
-        sub bx, ax                  ; los párrafos que tiene
-        mov dx, 0xFFFE
-        cmp bx, 0x1000              ; (con menos de 64 K, hasta donde llegue)
-        jae .pila
-        mov dx, bx
-        mov cl, 4
-        shl dx, cl
-        sub dx, 2
-.pila:
-        cli
-        mov ds, ax
-        mov es, ax
-        mov ss, ax
-        mov sp, dx
-        sti
-        xor bx, bx
-        push bx                     ; un cero: «ret» salta a PSP:0000
-        push ax
-        mov bx, 0x100
+        mov byte [di], 0x0D
+        mov [arg2], cl
+        mov word [lz_cola], arg2
+        mov [lz_cola+2], cs
+        mov word [lz_ent], 0
+        mov bx, intentos
+.i:
+        mov si, [bx]                ; delante («» o «\») y detrás (.COM, .EXE)
+        test si, si
+        jz .no
+        mov di, ruta
+        call copia_txt
+        mov si, orden
+        call copia_txt
+        mov si, [bx+2]
+        call copia_txt
         push bx
-        retf
+        call lanza                  ; (si vuelve, no ha podido)
+        pop bx
+        cmp ax, E_ARCHIVO
+        je .otro
+        cmp ax, E_RUTA
+        je .otro
+        cmp ax, E_MEMORIA
+        jne pon_error
+        mov si, m_e_grande
+        jmp pon_cad
+.otro:
+        add bx, 4
+        jmp .i
+.no:
+        mov si, m_e_orden
+        jmp pon_cad
+            align 2
+intentos    dw t_nada, t_com, t_nada, t_exe, t_barra, t_com, t_barra, t_exe, 0
+t_nada      db 0
+t_barra     db "\", 0
+t_exe       db ".EXE", 0
 
 ; ---- los textos de las órdenes ----
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
 m_indicador db 10, "A:\", 0
-m_ver       db "Hispa-8086 versión 0.2", 10, 0
+m_ver       db "Hispa-8086 versión 0.3", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):", 10
             db "  AYUDA                     esta lista", 10
             db "  VER                       la versión del sistema", 10
@@ -765,7 +701,7 @@ m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):"
             db "  BORRARDIR directorio      lo quita, si está vacío (RD)", 10
             db "  LIMPIAR                   limpia la pantalla (CLS)", 10
             db "  ACTUALIZAR                cómo pasar a otro sistema Hispa", 10
-            db "Cualquier otra palabra: el programa .COM de ese nombre.", 10, 0
+            db "Cualquier otra palabra: el programa (.COM o .EXE) de ese nombre.", 10, 0
 m_actualizar db "Todos los sistemas Hispa se actualizan entre sí:", 10
             db "  Hispa-8086  PC, XT y AT: 8086, 8088, V20, 80186 y 286", 10
             db "  Hispa-DOS   386, 486 y superiores, con Hispa Ventanas", 10
@@ -785,6 +721,7 @@ m_e_acceso  db "No se puede: acceso denegado.", 10, 0
 m_e_dir_act db "No se puede quitar el directorio en el que se está.", 10, 0
 m_e_otro_dir db "Para cambiar el nombre, los dos tienen que estar en el mismo directorio.", 10, 0
 m_e_grande  db "El programa no cabe en la memoria.", 10, 0
+m_e_formato db "Ese programa no es válido.", 10, 0
 m_e_lleno   db "El disco está lleno: la copia ha quedado a medias.", 10, 0
 m_e_orden   db "Orden desconocida. Escriba AYUDA.", 10, 0
 m_e_falta_nombre db "Falta el nombre.", 10, 0

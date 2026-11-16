@@ -7,7 +7,7 @@
 ;  8086 (el ensamblador lo vigila con «cpu 8086»), para que quepa y corra en
 ;  un PC o un XT de 256 K. docs/8086/HISPA-8086.md cuenta el plan entero.
 ;
-;  Lo que hay (etapas 0 y 1):
+;  Lo que hay (etapas 0, 1 y 2):
 ;    - arranca desde un disquete FAT12 (lo carga arranque.asm);
 ;    - reconoce el procesador y la memoria, y si la máquina puede con un
 ;      Hispa mayor, lo dice;
@@ -15,10 +15,11 @@
 ;      versión (30h), terminar (00h, 4Ch, 4Dh, INT 20h) y los ARCHIVOS: crear,
 ;      abrir, leer, escribir, cerrar, borrar, renombrar, buscar, directorios,
 ;      sitio libre, fecha y hora (archivos.inc, sobre disco.inc);
-;    - ejecuta programas .COM;
+;    - la memoria por bloques (48h-4Ah) y los programas: .COM y .EXE, que
+;      pueden lanzar otros (4Bh) (proceso.inc);
 ;    - un intérprete de órdenes (ordenes.inc), dentro del núcleo por ahora.
-;  Lo que falta: la memoria por bloques, los .EXE, CONFIG.SYS, el disco
-;  duro... (ver «Etapas» en el documento).
+;  Lo que falta: CONFIG.SYS y los controladores, el disco duro, el
+;  intérprete aparte... (ver «Etapas» en el documento).
 ;
 ;  Mapa de memoria: el núcleo se carga en 0070:0000 y ahí se queda, con sus
 ;  variables, su pila y la copia de la FAT detrás; el programa que se ejecuta
@@ -82,7 +83,10 @@ inicio:
         shr ax, cl
         mov bx, cs
         add ax, bx
-        mov [prog_seg], ax
+        mov [mem_seg], ax           ; ahí empieza la memoria que se reparte
+        inc ax
+        mov [prog_seg], ax          ; (y lo que usa el intérprete de borrador)
+        call mem_ini
         mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
         mov word [dta_off], dta_int
         call disco_ini
@@ -100,22 +104,7 @@ inicio:
 ; =============================================================================
 int20:
         xor al, al
-; el programa termina con el código AL: se cierran sus archivos y se vuelve
-; al intérprete
-termina:
-        cli
-        mov bx, cs
-        mov ds, bx
-        mov es, bx
-        mov ss, bx
-        mov sp, pila_fin
-        sti
-        cld
-        mov [cod_salida], al
-        call h_cierra_todos
-        mov [dta_seg], cs
-        mov word [dta_off], dta_int
-        jmp interprete
+        jmp termina
 
 ; la pila, dentro de INT 21h, con todos los registros de quien llama
 R_ES        equ 0
@@ -213,10 +202,17 @@ f21:
         F21 0x42, f42
         F21 0x43, f43
         F21 0x47, f47
+        F21 0x48, f48
+        F21 0x49, f49
+        F21 0x4A, f4A
+        F21 0x4B, f4B
         F21 0x4D, f4D
         F21 0x4E, f4E
         F21 0x4F, f4F
+        F21 0x50, f50
+        F21 0x51, f51
         F21 0x56, f56
+        F21 0x62, f51
         db 0
 
 ; 01h: una tecla, con eco -> AL
@@ -571,10 +567,8 @@ pon_equipo:
         call pon_num
         mov si, m_mem2
         call pon_cad
-        mov ax, [mem_kb]            ; lo que queda libre para los programas
-        mov cl, 6
-        shl ax, cl
-        sub ax, [prog_seg]
+        call mem_mayor              ; lo que queda libre para los programas
+        mov ax, bx
         mov cl, 6
         shr ax, cl
         call pon_num
@@ -603,12 +597,13 @@ c_486       db "80486 o superior", 0
 
 %include "disco.inc"
 %include "archivos.inc"
+%include "proceso.inc"
 %include "ordenes.inc"
 
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.2 - de la familia Rescoldo", 10
+m_titulo    db 10, "Hispa-8086 0.3 - de la familia Rescoldo", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_cpu       db "Procesador: ", 0
 m_mem       db 10, "Memoria:    ", 0
@@ -639,7 +634,26 @@ es_op       resb 1                  ; h_es: 0 leer, 1 escribir
 bus_atr     resb 1
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
-prog_seg    resw 1                  ; donde se carga el programa
+mem_seg     resw 1                  ; la primera cabecera de la memoria que se reparte
+prog_seg    resw 1                  ; memoria libre que el intérprete usa de borrador
+psp_act     resw 1                  ; el programa que corre (0: el intérprete)
+lz_ent      resw 1                  ; lanza: el entorno pedido
+lz_cola     resw 2                  ; lo que va detrás del nombre
+lz_ficha    resw 1
+lz_ent_seg  resw 1
+lz_ent_org  resw 1
+lz_ent_off  resw 1
+lz_ent_tam  resw 1
+lz_psp      resw 1
+lz_tam      resw 1
+lz_min      resw 1
+lz_max      resw 1
+lz_img      resw 1
+lz_base     resw 1
+lz_reub     resw 2
+lz_cab      resb 28                 ; la cabecera del .EXE
+lz_exe      resb 1
+            alignb 2
 t_disco     resw 1                  ; cuándo se usó el disco por última vez
 buf_lba     resw 1                  ; el sector que hay en `sector`
 spp         resw 1                  ; sectores por pista
