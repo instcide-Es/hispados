@@ -579,6 +579,8 @@ t_csv_pierde db "Un archivo .CSV solo guarda lo escrito en las celdas: los forma
             db "y los anchos de las columnas se pierden. Para guardarlo todo, use", 10
             db "«Guardar como» con un nombre acabado en .HOJ.", 10, 10
             db "¿Guardar como .CSV de todos modos?", 0
+t_des_roto  db "Este cambio toca tantas celdas que no se podrá deshacer,", 10
+            db "y tampoco los cambios de antes.", 0
 t_llena     db "La hoja está llena: no cabe más texto.", 10
             db "Lo último que se ha escrito o pegado puede haber quedado sin poner.", 0
 t_clip_grande db "Lo elegido es demasiado grande para copiarlo de una vez.", 10
@@ -2276,7 +2278,7 @@ fmt_aplica:
         cmp edx, [r_f2]
         jbe .f
         popad
-        jmp invalida
+        jmp fin_cambio
 ; EAX=el formato de la celda activa
 fmt_activa:
         push ecx
@@ -2438,7 +2440,7 @@ bordes:
         inc edx
         cmp edx, [r_f2]
         jbe .f
-        jmp invalida
+        jmp fin_cambio
 ; (interna) a una vecina: pone la raya EAX (o, con «ninguno», la quita)
 .vecina:
         xor ebx, ebx

@@ -415,5 +415,37 @@ cel o2 2 1 "33";  cel o2 3 1 "66";  cel o2 3 4 "60"
 mtype -i $T/f.img ::ORD.HOJ | tr -d '\r' > $T/func.txt
 hoj "C A1 0 Nombre"; hoj "C A2 0 Pau"; hoj "C D2 0 =C2*2"; hoj "C A5 0 Ana"; hoj "C D5 0 =C5*2"
 
+echo "== Cuentas: ordenar por tres columnas, los demás bordes, ocho deshacer seguidos y el aviso del diario =="
+printf 'HOJA 1\r\nC A1 0 x\r\nC B1 0 1\r\nC C1 0 3\r\nC A2 0 x\r\nC B2 0 1\r\nC C2 0 1\r\nC A3 0 x\r\nC B3 0 2\r\nC C3 0 5\r\nC A4 0 x\r\nC B4 0 1\r\nC C4 0 2\r\n' > $T/G.HOJ
+mcopy -o -i $T/f.img $T/G.HOJ ::G.HOJ
+reabre 'A:\G.HOJ'
+{ arranca
+  tecla shift-down shift-down shift-down shift-right shift-right   # A1:C4
+  clic 418 71; sleep 0.8; clic 440 93; sleep 1.5                  # Ordenar...: por A, después por B y por C (esta, de mayor a menor)
+  clic 414 266; escribe "b"; clic 414 298; escribe "c"; clic 454 298; clic 340 379; sleep 1.5
+  tecla ctrl-home down down down down down right shift-right shift-down   # B6:C7, con todos los bordes
+  clic 327 71; sleep 0.8; clic 340 325; sleep 1
+  tecla ctrl-home right right right right right down shift-right shift-down   # F2:G3, con borde abajo
+  clic 327 71; sleep 0.8; clic 340 345; sleep 1
+  tecla ctrl-home down down down down down down down down down right shift-right shift-down   # B10:C11: todos, y luego ninguno
+  clic 327 71; sleep 0.8; clic 340 325; sleep 1; clic 327 71; sleep 0.8; clic 340 285; sleep 1
+  tecla ctrl-home right right right right
+  for n in 1 2 3 4 5 6 7 8 9; do escribe $n; tecla ret; done    # E1...E9: nueve cambios
+  tecla ctrl-z ctrl-z ctrl-z ctrl-z ctrl-z ctrl-z ctrl-z ctrl-z; aparca; shot u1   # ocho, deshechos
+  tecla ctrl-y ctrl-y ctrl-y ctrl-y ctrl-y ctrl-y ctrl-y ctrl-y; shot u2          # y rehechos
+  tecla ctrl-g; sleep 2.5
+  tecla ctrl-e ctrl-n; sleep 3; aparca; shot u3; tecla ret        # toda la hoja en negrita: no cabe en el diario, y lo dice
+  sal; } | run 300 -vga std
+muestra u1 cuentas_ocho; muestra u3 cuentas_aviso_diario
+ANCHO_A=88
+cel u1 4 0 "1";  chk $T/u1.ppm nobusca 450 196 540 216 0 9 "2"   # solo queda el primero
+cel u2 4 1 "2";  cel u2 4 8 "9"
+chk $T/u3.ppm busca 100 200 700 400 0 8 "Este cambio toca tantas celdas que no se podrá deshacer,"
+mtype -i $T/f.img ::G.HOJ | tr -d '\r' > $T/func.txt
+hoj "C C1 0 3"; hoj "C C2 0 2"; hoj "C C3 0 1"; hoj "C C4 0 5"   # B, de menor a mayor; a igual B, C de mayor a menor
+hoj "C B6 49152 "; hoj "C C7 49152 "; hoj "C B5 16384 "; hoj "C A6 32768 "   # todos los bordes de B6:C7
+hoj "C F3 16384 "; hoj "C G3 16384 "; hoj "C E9 0 9"
+if grep -qE '^C (B|C)1[01] |^C (B|C)9 |^C A1[01] |^C F2 |^C G2 ' $T/func.txt; then ko "G.HOJ: quedan bordes donde se quitaron (o sobran)"; else ok "G.HOJ: «ninguno» quita los bordes, y «abajo» solo pone el de abajo"; fi
+
 rm -rf $T
 exit $fail

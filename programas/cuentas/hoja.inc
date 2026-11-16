@@ -378,6 +378,7 @@ des_sitio:
         pop ecx
         jmp .b
 .roto:
+        mov byte [des_aviso], 1     ; (se dirá al acabar el cambio)
         mov byte [des_roto], 1      ; (lo que quede de este paso ya no se apunta)
         mov dword [des_top], des_buf
         mov dword [des_ini], 0
@@ -743,6 +744,14 @@ rect_recorta:
 
 ; después de un cambio: si la hoja se ha llenado, lo dice; y a repintar
 fin_cambio:
+        cmp byte [des_aviso], 0     ; el cambio no ha cabido en el diario: no se
+        je .l                       ; podrá deshacer, ni lo de antes; se dice
+        mov byte [des_aviso], 0
+        push esi
+        mov esi, t_des_roto
+        call aviso
+        pop esi
+.l:
         cmp byte [llena], 0
         je invalida
         mov byte [llena], 0
@@ -2234,6 +2243,7 @@ des_activo  resb 1                  ; hay un paso abierto: se apunta lo que camb
 des_dir     resb 1                  ; a qué pila van los apuntes: 0 deshacer, 1 rehacer
 des_sin     resb 1                  ; no ha cabido lo de rehacer
 des_roto    resb 1                  ; el paso no cabe en el diario
+des_aviso   resb 1                  ; y hay que decirlo
 clip_hay    resb 1
 clip_corte  resb 1                  ; lo copiado se cortó
 llena       resb 1                  ; no ha cabido algo en el almacén

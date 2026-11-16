@@ -617,7 +617,7 @@ class Formula:
         m = re.compile(r'[A-Za-zñÑ.]*').match(self.t, self.i)
         self.i = m.end()
         nom = m.group().upper()[:15]
-        if nom in ('SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR', 'CONTARA', 'PRODUCTO', 'MEDIANA', 'VAR', 'DESVEST'):
+        if nom in ('SUMA', 'PROMEDIO', 'MAX', 'MIN', 'CONTAR', 'CONTARA', 'PRODUCTO', 'MEDIANA', 'VAR', 'DESVEST', 'MODA'):
             return self.rangos(nom)
         r = self.mas_funciones(nom)
         if r is not NADA:
@@ -1004,7 +1004,7 @@ class Formula:
             if nom == 'PRODUCTO':
                 e['ext'] = v if e['n'] == 1 else mul(e['ext'], v)
                 return
-            if nom in ('MEDIANA', 'VAR', 'DESVEST'):
+            if nom in ('MEDIANA', 'VAR', 'DESVEST', 'MODA'):
                 if e['n'] > 512:
                     raise Err()
                 lista.append(v)
@@ -1034,6 +1034,14 @@ class Formula:
             return e['n'] * ESC
         if nom == 'CONTARA':
             return e['na'] * ESC
+        if nom == 'MODA':
+            veces, cual = 1, None
+            for v in lista:
+                if lista.count(v) > veces:
+                    veces, cual = lista.count(v), v
+            if cual is None:
+                raise Err()
+            return cual
         if nom == 'MEDIANA':
             lista.sort()
             n = len(lista)
@@ -1514,7 +1522,14 @@ DESVEST(10;12;23;23;16;23;21;16)
 DESVEST(1)
 VAR(0,1;0,2;0,35)
 MEDIANA(A1:C6)
-PRODUCTO(A1:C6)'''.split('\n')
+PRODUCTO(A1:C6)
+MODA(1;2;2;3;3)
+MODA(3;3;2;2;1)
+MODA(1;2;3)
+MODA(5;5)
+MODA(0,1;0,10;7)
+MODA()
+MODA(A1:C6)'''.split('\n')
 
 # hojas enteras: celdas y lo que se pregunta
 HOJAS = [
@@ -1651,7 +1666,7 @@ def main():
                 lambda: 'CONTARA(%s;%s)' % (rango, a),
                 lambda: '%s(%s;%d)' % (random.choice(['TRUNCAR', 'REDONDEAR.MAS', 'REDONDEAR.MENOS']), a, random.randint(0, 8)),
                 lambda: 'SIGNO(%s)*PI()' % a,
-                lambda: '%s(%s;%s;%s)' % (random.choice(['MEDIANA', 'VAR', 'DESVEST', 'PRODUCTO']), a, rango, b),
+                lambda: '%s(%s;%s;%s)' % (random.choice(['MEDIANA', 'VAR', 'DESVEST', 'PRODUCTO', 'MODA']), a, rango, b),
                 lambda: 'SI.ERROR(%s;%s)' % (a, b),
                 lambda: 'PAGO((%s)%%;%d;%s)' % (a, random.randint(0, 40), b),
                 lambda: 'DIASEM(ABS(%s))+MES(ABS(%s))+DIA(ABS(%s))' % (a, a, b),

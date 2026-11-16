@@ -54,7 +54,7 @@
 ;       COINCIDIR(valor; rango [; 0])
 ;       ESNUMERO(x)  ESTEXTO(x)  ESBLANCO(x)  SI.ERROR(x; si falla)
 ;       TRUNCAR(x [; d])  REDONDEAR.MAS(x; d)  REDONDEAR.MENOS(x; d)  SIGNO(x)
-;       PRODUCTO  MEDIANA  VAR  DESVEST (de una muestra; hasta 512 números)
+;       PRODUCTO  MEDIANA  MODA  VAR  DESVEST (de una muestra; hasta 512 números)
 ;       PAGO(tasa; plazos; capital)   la cuota de un préstamo
 ;       PI()  ALEATORIO()
 ;
@@ -1087,6 +1087,7 @@ ev_funciones:
         FUNCION "MEDIANA", ev_rangos, 7
         FUNCION "VAR", ev_rangos, 8
         FUNCION "DESVEST", ev_rangos, 9
+        FUNCION "MODA", ev_rangos, 10
         FUNCION "PAGO", ev_pago, 0
         FUNCION "PI", ev_pi, 0
         FUNCION "ALEATORIO", ev_aleatorio, 0
@@ -1379,6 +1380,8 @@ ev_rangos:
         jne .lcero
         mov esi, R_LP
         mov ecx, R_N
+        cmp R_MODO, 10
+        je .moda
         cmp R_MODO, 7
         jne .var
         test ecx, ecx
@@ -1484,6 +1487,47 @@ ev_rangos:
         cmp byte [ev_err], 0
         jne .x
         call raiz64
+        jmp .x
+; MODA: el número que más se repite (si empatan, el que sale antes); si
+; ninguno se repite, error
+.moda:
+        xor ebx, ebx
+        mov R_C, 1                  ; las veces del que más
+        mov R_F, -1                 ; y cuál es
+.md1:
+        cmp ebx, ecx
+        jae .md5
+        mov eax, [esi+ebx*8]
+        mov edx, [esi+ebx*8+4]
+        xor edi, edi
+        push ebx
+        xor ebx, ebx
+.md2:
+        cmp ebx, ecx
+        jae .md4
+        cmp eax, [esi+ebx*8]
+        jne .md3
+        cmp edx, [esi+ebx*8+4]
+        jne .md3
+        inc edi
+.md3:
+        inc ebx
+        jmp .md2
+.md4:
+        pop ebx
+        cmp edi, R_C
+        jbe .md4b
+        mov R_C, edi
+        mov R_F, ebx
+.md4b:
+        inc ebx
+        jmp .md1
+.md5:
+        mov ebx, R_F
+        cmp ebx, -1
+        je .lmal
+        mov eax, [esi+ebx*8]
+        mov edx, [esi+ebx*8+4]
         jmp .x
 .lmal:
         call ev_mal
