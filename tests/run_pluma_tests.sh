@@ -65,7 +65,7 @@ import sys,struct
 d=open(sys.argv[1],'rb').read()
 n=struct.unpack_from('<I',d,8)[0]
 t,a=d[12:12+n],d[12+n:12+2*n]
-ok = d[:8]==b'PLUMA1\x1a\x00' and n==186 and len(d)==12+3*n and t.endswith(b'En rojo\n')
+ok = d[:8]==b'PLUMA1\x1a\x00' and n==186 and len(d)==12+3*n+4 and t.endswith(b'En rojo\n')
 ok = ok and t.startswith(b'Hispa Pluma\n') and a[0]==0 and d[12+2*n]==0x60 and a[11]&3==1     # 24 puntos; centrado
 ok = ok and a[t.index(b'negrita')]==1 and a[t.index(b'cursiva')]==2 and a[t.index(b'subrayado')]==4
 ok = ok and a[t.index(b'A la derecha')+12]&3==2 and a[t.index(b'En rojo')]==0x10
@@ -226,7 +226,7 @@ if python3 - $T/tipos.plu <<'PY'
 import sys,struct
 d=open(sys.argv[1],'rb').read()
 n=struct.unpack_from('<I',d,8)[0]
-t,a,p=d[12:12+n],d[12+n:12+2*n],d[12+2*n:]
+t,a,p=d[12:12+n],d[12+n:12+2*n],d[12+2*n:12+3*n]
 ok = len(p)==n and p[0]==1 and p[60]==9 and p[120]==0 and p[t.index(b'fiesta')]==18 and p[t.index(b'a mano')]==19
 ok = ok and p[t.index(b'Titular')]==0x62 and a[t.index(b'Titular')]==1
 ok = ok and p[t.index(b'Enorme')]==0xA2 and p[t.index(b'menuda')]==0x22
@@ -234,6 +234,37 @@ ok = ok and p[t.index(b'Grande')]==0x62 and a[t.index(b'Grande')]==0 and a[t.ind
 sys.exit(0 if ok else 1)
 PY
 then ok "TIPOS.PLU: el tipo y el tamaño de cada letra, detrás del formato"; else ko "TIPOS.PLU no es lo esperado"; xxd $T/tipos.plu | tail -14; fi
+
+echo "== Pluma: una tabla =="
+reabre ''
+mdel -i $T/f.img ::TABLA.PLU 2>/dev/null
+{ arranca
+  escribe "Antes"; clic 498 99; sleep 1.2; tecla ret; sleep 1.2; tecla ret; sleep 1.2     # Insertar tabla: 3 columnas y 3 filas
+  escribe "uno"; tecla tab; escribe "dos"; tecla tab; escribe "tres"; tecla tab; escribe "cuatro"
+  tecla ret; escribe "nueva"                         # Intro: una fila más, debajo
+  aparca; shot b1
+  tecla ctrl-end; escribe "Despues"; aparca; shot b2
+  tecla ctrl-g; sleep 1.2; escribe "tabla"; tecla ret; sleep 2
+  sal; } | run 150 -vga std
+chk $T/b1.ppm busca 80 151 90 166 0 9 "Antes"
+chk $T/b1.ppm busca 84 170 92 182 0 9 "uno"               # la primera celda
+chk $T/b1.ppm busca 274 170 284 182 0 9 "dos"             # la segunda, en su columna
+chk $T/b1.ppm busca 464 170 476 182 0 9 "tres"
+chk $T/b1.ppm busca 84 194 92 206 0 9 "cuatro"
+chk $T/b1.ppm busca 84 218 92 230 0 9 "nueva"
+chk $T/b1.ppm rgb 275 180 1A1410 "la raya entre la primera columna y la segunda"
+muestra b2 pluma_tabla
+mcopy -n -i $T/f.img ::TABLA.PLU $T/tabla.plu 2>/dev/null
+if python3 - $T/tabla.plu <<'PY'
+import sys,struct
+d=open(sys.argv[1],'rb').read()
+n=struct.unpack_from('<I',d,8)[0]
+t,a=d[12:12+n],d[12+n:12+2*n]
+m=[a[i] for i,c in enumerate(t) if c==10]
+ok = t==b'Antes\nuno\tdos\ttres\ncuatro\t\t\nnueva\t\t\n\t\t\nDespues\n' and m==[0,8,8,8,8,0] and d[-4:]==b'PL22'
+sys.exit(0 if ok else 1)
+PY
+then ok "TABLA.PLU: cada fila, un párrafo con sus celdas; detrás, un párrafo normal"; else ko "TABLA.PLU no es lo esperado"; xxd $T/tabla.plu | head -12; fi
 
 rm -rf $T
 exit $fail

@@ -71,11 +71,15 @@ TAM_GRANDE  equ 3                   ; el de Ctrl+W: 24 puntos
 ; En la marca de párrafo (el 10), el octeto dice cómo es el párrafo:
 ;   bits 0-1  la alineación: 0 izquierda, 1 centro, 2 derecha, 3 justificado
 ;   bit 2     con viñeta          bit 7     numerado
-;   bit 3     (no se usa)
+;   bit 3     P_TABLA: el párrafo es una fila de tabla; sus celdas van
+;             separadas por el carácter 9 y todas las columnas miden igual
 ;   bits 4-6  la sangría: de 0 a 7 pasos de cuatro letras
 ; (Un Pluma anterior que abra el documento se queda con la alineación y pierde
 ; lo demás, sin estropear nada.)
 P_VIN       equ 0x04
+P_TABLA     equ 0x08
+TAB         equ 9                   ; lo que separa las celdas de una fila
+CEL_MARG    equ 4                   ; del borde de la celda a su texto
 P_NUM       equ 0x80
 P_SANGRIA   equ 0x70
 SANGRIA_PX  equ 32                  ; un paso de sangría
@@ -132,6 +136,7 @@ O_TAM       equ 176                 ; y el tamaño
 O_ESTILO    equ 177                 ; el estilo del párrafo
 O_IMPRIMIRG equ 178                 ; imprimir como se ve
 O_PRELIM    equ 179                 ; vista preliminar: la página, entera
+O_TABLA     equ 180                 ; insertar una tabla
 
 HVP_CABECERA "Pluma", entrada, 4
         db "................................"
@@ -249,6 +254,10 @@ plu_menu:
         db "&Fecha y hora", 0
         dw O_INSARCH
         db "&Archivo...", 0
+        dw 0
+        db 0
+        dw O_TABLA
+        db "&Tabla...", 0
         dw 0xFFFF
         db "&Formato", 0
         dw O_FUENTES
@@ -373,6 +382,7 @@ botones1    dd 6, 24, ic_nuevo, O_NUEVO, n_nuevo, 1
             dd 284, 24, ic_rehacer, O_REHACER, n_rehacer, 1
             dd 316, 24, ic_marcas, O_MARCAS, n_marcas, 1
             dd 348, 64, t_b_estilo, O_ESTILO, n_estilo, BT_TEXTO
+            dd 416, 24, ic_hoja, O_TABLA, n_tabla, BT_ICONO
             dd 0, 0, 0, 0, 0, 0
 botones     dd 6, 96, t_nada, O_TIPO, n_tipo, 0
             dd 106, 36, t_nada, O_TAM, n_tam, 0
@@ -405,6 +415,7 @@ n_deshacer  db "Deshacer (Ctrl+Z)", 0
 n_rehacer   db "Rehacer lo deshecho (Ctrl+Y)", 0
 n_marcas    db "Mostrar u ocultar los espacios y las marcas de párrafo", 0
 t_b_estilo  db "Estilo", 0
+n_tabla     db "Insertar una tabla", 0
 n_estilo    db "Estilo del párrafo: Normal, títulos, cita...", 0
 n_tipo      db "Tipo de letra: pulse para elegirlo de la lista", 0
 n_neg       db "Negrita (Ctrl+N)", 0
@@ -470,6 +481,10 @@ t_f_cur     db "Cursiva", 0
 t_f_sub     db "Subrayado", 0
 t_f_color   db "Color:", 0
 t_d_tipo    db "Tipo de letra", 0
+t_tabla     db "Insertar una tabla", 0
+t_q_cols    db "¿Cuántas columnas? (de 1 a 8)", 0
+t_q_filas   db "¿Cuántas filas? (de 1 a 40)", 0
+t_e_tabla   db "Ese número no vale para la tabla.", 0
 t_vp1       db "Vista preliminar: página ", 0
 t_vp2       db "   (Re Pág / Av Pág: otra; Esc: volver)", 0
 t_d_tam     db "Tamaño (puntos)", 0
@@ -928,6 +943,8 @@ orden_haz:
         je tam_elige
         cmp ecx, O_ESTILO
         je estilo_elige
+        cmp ecx, O_TABLA
+        je tabla
         mov eax, ecx
         sub eax, O_IZQ
         cmp eax, 3
@@ -1009,6 +1026,10 @@ compone:
         mov ecx, PAG_AN
         sub ecx, eax
         mov [cp_ancho], ecx
+        test bl, P_TABLA            ; (una fila de tabla es una sola línea)
+        jz .nt
+        mov dword [cp_ancho], 0x7FFFFFFF
+.nt:
         test bl, P_NUM
         jz .nn
         inc dword [cp_num]          ; (los numerados seguidos cuentan 1, 2, 3...)
@@ -1081,6 +1102,9 @@ par_de:
 par_izq:
         push ecx
         movzx ecx, al
+        xor eax, eax
+        test cl, P_TABLA
+        jnz .x
         mov eax, ecx
         and eax, P_SANGRIA
         shl eax, 1                  ; (pasos x 16 x 2 = pasos x SANGRIA_PX)
@@ -1114,7 +1138,13 @@ alto_linea:
         inc ebx
         cmp ebx, esi
         jb .b
+        mov eax, [esp+8]            ; (el principio de la línea)
+        call par_de
+        test al, P_TABLA            ; una fila de tabla: sitio para sus bordes
         mov eax, ecx
+        jz .x
+        add eax, 8
+.x:
         pop edx
         pop ecx
         pop ebx
@@ -1198,6 +1228,34 @@ mide:
         xor ecx, ecx
 .f1:
         mov byte [m_just], 0
+        mov byte [m_tabla], 0
+        test bl, P_TABLA
+        jz .nt
+        ; una fila de tabla: tantas columnas como celdas, todas iguales; el
+        ; texto de cada una empieza a CEL_MARG de su borde
+        mov byte [m_tabla], 1
+        push esi
+        mov esi, [m_s]
+        mov ecx, 1
+.tc:
+        cmp byte [txt+esi], 10
+        je .tf
+        cmp byte [txt+esi], TAB
+        jne .ts
+        inc ecx
+.ts:
+        inc esi
+        jmp .tc
+.tf:
+        pop esi
+        mov [m_cols], ecx
+        mov eax, PAG_AN - 1
+        xor edx, edx
+        div ecx
+        mov [m_colw], eax
+        mov eax, CEL_MARG
+        jmp .p
+.nt:
         and ebx, 3
         jz .p                       ; a la izquierda
         cmp ebx, 3
@@ -1226,6 +1284,8 @@ mide:
         mov byte [m_just], 1
 .p:
         mov [m_x0], eax
+        mov [m_tx], eax
+        mov dword [m_ncel], 0
         mov dword [m_jn], 0
         popad
         ret
@@ -1233,6 +1293,28 @@ mide:
 ; EAX=un sitio de la línea medida (hay que ir en orden desde su principio) ->
 ; EAX=lo que ocupa, con lo que le toca del reparto si la línea va justificada
 ancho_j:
+        cmp byte [m_tabla], 0
+        je .normal
+        cmp byte [txt+eax], TAB     ; el separador: lo que falta hasta el texto
+        jne .normal                 ; de la celda siguiente (4 puntos al menos,
+        push edx                    ; si la celda se ha llenado)
+        inc dword [m_ncel]
+        mov eax, [m_ncel]
+        imul eax, [m_colw]
+        add eax, CEL_MARG
+        sub eax, [m_tx]
+        cmp eax, 4
+        jge .t1
+        mov eax, 4
+.t1:
+        pop edx
+        add [m_tx], eax
+        ret
+.normal:
+        call ancho_j0
+        add [m_tx], eax
+        ret
+ancho_j0:
         push ebx
         mov ebx, eax
         call ancho_de
@@ -1557,9 +1639,66 @@ tecla:
         call tras_mover
         jmp hecho
 .intro:
+        mov eax, [cur]
+        call par_de
+        test al, P_TABLA
+        jz .intro_n
+        ; en una tabla, Intro añade una fila debajo, con las mismas celdas
+        call inst_tecleo
+        mov eax, [cur]
+        call fila_ini               ; EAX=principio de la fila
+        xor ecx, ecx
+.in1:
+        cmp byte [txt+eax], 10
+        je .in2
+        cmp byte [txt+eax], TAB
+        jne .in0
+        inc ecx
+.in0:
+        inc eax
+        jmp .in1
+.in2:
+        mov [cur], eax              ; desde el final de la fila
+        mov dword [anc], -1
+        mov al, 10
+        call escribe1
+        mov edx, [cur]
+        jecxz .in4
+.in3:
+        mov al, TAB
+        call escribe1
+        dec ecx
+        jnz .in3
+.in4:
+        mov [cur], edx
+        call cambio
+        jmp hecho
+.intro_n:
         mov al, 10
         jmp escribe
 .tab:
+        mov eax, [cur]
+        call par_de
+        test al, P_TABLA
+        jz .tab_n
+        mov eax, [cur]              ; en una tabla, Tab va a la celda siguiente
+.tb1:
+        mov cl, [txt+eax]
+        inc eax
+        cmp cl, TAB
+        je .tb2
+        cmp cl, 10
+        jne .tb1
+.tb2:
+        mov ecx, [n]
+        dec ecx
+        cmp eax, ecx
+        jbe .tb3
+        mov eax, ecx
+.tb3:
+        xor edx, edx
+        jmp .mov
+.tab_n:
         call inst_tecleo
         mov al, ' '
         call escribe1
@@ -1623,7 +1762,6 @@ escribe1:
         push eax                    ; la marca del párrafo que se parte: como
         inc eax                     ; la del suyo (alineación, sangría, lista),
         call par_de                 ; y el tamaño de ahora
-        and al, ~A_GRA
         mov bl, al
         pop eax
 .p:
@@ -1982,6 +2120,95 @@ tip_pon:
         jmp .b
 .x:
         ret
+; (interna) EAX=sitio -> EAX=el principio de su párrafo
+fila_ini:
+        test eax, eax
+        jz .x
+        cmp byte [txt+eax-1], 10
+        je .x
+        dec eax
+        jmp fila_ini
+.x:
+        ret
+; ---- Insertar > Tabla: pregunta columnas y filas y la pone debajo del
+;      párrafo del cursor. Cada fila es un párrafo con la marca P_TABLA y sus
+;      celdas separadas por TAB; detrás de la tabla queda un párrafo normal ----
+tabla:
+        mov dword [num_txt], '3'
+        mov ebp, [ven]
+        mov esi, t_q_cols
+        mov edi, t_tabla
+        mov ebx, num_txt
+        mov ecx, 3
+        HV dlg_pedir
+        test eax, eax
+        jz .x
+        mov esi, num_txt
+        call hvl_lee_num
+        cmp eax, 1
+        jb .mal
+        cmp eax, 8
+        ja .mal
+        mov [tb_cols], eax
+        mov dword [num_txt], '3'
+        mov ebp, [ven]
+        mov esi, t_q_filas
+        mov edi, t_tabla
+        mov ebx, num_txt
+        mov ecx, 3
+        HV dlg_pedir
+        test eax, eax
+        jz .x
+        mov esi, num_txt
+        call hvl_lee_num
+        cmp eax, 1
+        jb .mal
+        cmp eax, 40
+        ja .mal
+        mov [tb_filas], eax
+        call instantanea
+        mov dword [anc], -1
+        mov eax, [cur]              ; al final del párrafo del cursor
+.f:
+        cmp byte [txt+eax], 10
+        je .f1
+        inc eax
+        jmp .f
+.f1:
+        mov [cur], eax
+        call fila_ini
+        cmp eax, [cur]              ; (si no está vacío, se acaba: la tabla
+        je .vacio                   ; va en párrafo aparte)
+        mov al, 10
+        call escribe1
+.vacio:
+        mov byte [at_act], 0
+        mov edx, [cur]              ; EDX=la primera celda
+        mov ebx, [tb_filas]
+.fila:
+        mov ecx, [tb_cols]
+        dec ecx
+        jz .marca
+.cel:
+        mov al, TAB
+        call escribe1
+        dec ecx
+        jnz .cel
+.marca:
+        mov al, 10
+        call escribe1
+        mov eax, [cur]
+        mov byte [atr+eax-1], P_TABLA
+        dec ebx
+        jnz .fila
+        mov [cur], edx
+        jmp cambio
+.mal:
+        mov esi, t_e_tabla
+        jmp aviso
+.x:
+        ret
+
 ; ---- el estilo: a los párrafos de lo elegido, o al del cursor, enteros ----
 estilo_elige:
         mov byte [tg_modo], 2
@@ -3071,6 +3298,8 @@ pegar:
 .c1:
         cmp al, 32                  ; (lo que no sea letra, un espacio)
         jae .c2
+        cmp al, TAB
+        je .c2
         mov al, ' '
 .c2:
         mov bh, [tip_act]
@@ -3270,6 +3499,7 @@ cargar:
         rep movsb
         pop ecx
         call tip_vacia              ; y, si lo trae, el tipo de cada letra
+        mov byte [doc_viejo], 1
         lea eax, [ecx*2+ecx+12]
         cmp eax, edx
         ja .sin_tipos
@@ -3277,11 +3507,18 @@ cargar:
         mov edi, tip
         rep movsb
         pop ecx
+        add eax, 4                  ; ¿lleva la marca de los de ahora? Los de
+        cmp eax, edx                ; antes usaban el bit 3 para «grande»
+        ja .sin_tipos
+        cmp dword [esi], 'PL22'
+        jne .sin_tipos
+        mov byte [doc_viejo], 0
 .sin_tipos:
         mov [n], ecx
         jmp .repasa
 .texto:
         call tip_vacia
+        mov byte [doc_viejo], 0
         ; texto llano: sin los CR; cada LF, una marca
         mov esi, fbuf
         xor edi, edi
@@ -3320,10 +3557,14 @@ cargar:
         je .rm
         cmp al, 32
         jae .rl
+        cmp al, TAB                 ; (el separador de las celdas de una tabla)
+        je .rl
         mov byte [txt+esi], ' '
 .rl:
         and byte [atr+esi], 0x3F
 .rm:                                ; (la marca de párrafo: tal cual)
+        cmp byte [doc_viejo], 0
+        je .rt
         test byte [atr+esi], A_GRA  ; el «grande» de antes: 24 puntos
         jz .rt
         and byte [atr+esi], ~A_GRA
@@ -3456,6 +3697,8 @@ guarda_escribe:
         mov ecx, eax                ; y el tipo de cada letra (un Pluma de
         mov esi, tip                ; antes no lo lee, y no le estorba)
         rep movsb
+        mov eax, 'PL22'             ; y la marca de los documentos de ahora
+        stosd
         jmp .escribe
 .txt:
         mov esi, txt                ; el texto, con CR+LF, sin la marca final
@@ -4402,6 +4645,10 @@ pinta_linea:
         jae .copia
         mov al, [txt+esi]
         mov ah, [atr+esi]
+        cmp al, TAB                 ; (el separador de celdas: un hueco)
+        jne .nt
+        mov al, ' '
+.nt:
         mov [g_car], al
         mov [g_atr], ah
         mov cl, [tip+esi]
@@ -4462,6 +4709,47 @@ pinta_linea:
         inc esi
         jmp .c
 .copia:
+        cmp byte [m_tabla], 0
+        je .sin_tabla
+        ; los bordes de la fila: una raya entre columnas, la de arriba y, si
+        ; es la última fila de la tabla, la de abajo
+        xor ecx, ecx                ; las verticales
+.tv:
+        mov eax, ecx
+        imul eax, [m_colw]
+        cmp ecx, [m_cols]
+        jb .tv1
+        mov eax, PAG_AN - 1
+.tv1:
+        mov edx, [m_al]
+        lea edi, [lbuf+eax]
+.tv2:
+        mov byte [edi], C_TINTA
+        add edi, PAG_AN
+        dec edx
+        jnz .tv2
+        inc ecx
+        cmp ecx, [m_cols]
+        jbe .tv
+        mov edi, lbuf               ; la de arriba
+        mov ecx, PAG_AN
+        mov al, C_TINTA
+        rep stosb
+        mov eax, [m_e]              ; ¿sigue otra fila?
+        cmp eax, [n]
+        jae .tb
+        call par_de
+        test al, P_TABLA
+        jnz .sin_tabla
+.tb:
+        mov edi, [m_al]             ; no: la de abajo
+        dec edi
+        imul edi, PAG_AN
+        add edi, lbuf
+        mov ecx, PAG_AN
+        mov al, C_TINTA
+        rep stosb
+.sin_tabla:
         cmp byte [pl_solo_buf], 0   ; (para la impresora: se queda en lbuf)
         jne .hecha
         mov eax, TX0
@@ -4630,7 +4918,7 @@ pl_letra:
 %include "barra.inc"
 %include "hvplib.inc"
 
-FBUF_TAM    equ 3 * MAX_TXT + 16
+FBUF_TAM    equ 3 * MAX_TXT + 24
 
         section .bss
 ven         resd 1
@@ -4662,6 +4950,8 @@ g_an        resd 1
 al_act      resd 1
 tg_modo     resb 1
 pl_solo_buf resb 1
+m_tabla     resb 1
+doc_viejo   resb 1
 vp_on       resb 1                  ; se ve la vista preliminar
 ig_marcas   resb 1
             alignb 4
@@ -4690,6 +4980,12 @@ pl_fy       resd 1
 pl_y0       resd 1
 pl_gordo    resd 1
 vp_x        resd 1
+m_tx        resd 1                  ; una fila de tabla: la x por la que se va
+m_ncel      resd 1
+m_cols      resd 1
+m_colw      resd 1
+tb_cols     resd 1
+tb_filas    resd 1
 vp_pag      resd 1                  ; vista preliminar: la página que se ve
 vp_n        resd 1                  ; y cuántas hay
 ig_fila     resd 1                  ; imprimir como se ve: filas puestas en la tira
