@@ -36,10 +36,22 @@
 ;     de descriptores. Registros por los puertos (IOADDR/IODATA) si la
 ;     tarjeta los tiene (las de verdad) o, si no, en memoria con el modo
 ;     «irreal» (como HD Audio en HSPSND; no en modo V86: ver docs/RED.md).
-;   - Realtek RTL8111/8168/8101/8169 («r8169»): preparada a partir de la
-;     documentación pública de la familia, SIN PROBAR (QEMU no la tiene);
-;     es la del Lenovo A275 de las pruebas. Ver docs/RED.md.
-;  Las tres con «bus master» necesitan búferes en memoria física continua:
+;     También la Intel 82574L («e1000e», -device e1000e): misma rutina.
+;   - Realtek RTL8111/8168/8101/8169 («r8169»): hecha a partir de la
+;     documentación pública de la familia; QEMU no la tiene, pero funciona en
+;     un equipo de verdad (Toshiba NB250-10N, 10EC:8136, desde el 15/11/2026).
+;     /INFO dice la revisión PCI y la familia del chip. Ver docs/RED.md.
+;   - AMD PCnet-PCI II / PCnet-FAST III (1022:2000; -device pcnet): la de
+;     VirtualBox por omisión y la «vlance» de VMware. Registros por puertos
+;     en modo de 32 bits (DWIO), estilo de software 2.
+;   - DEC 21140/21143 «Tulip» (1011:0009/0019; -device tulip): el «Adaptador
+;     de red heredado» de Hyper-V. Registros por puertos, MAC de la SROM,
+;     filtro perfecto con la trama de configuración.
+;    Estas dos últimas solo se han probado en QEMU (no en VirtualBox, VMware
+;    ni Hyper-V): ver docs/RED.md, «En una máquina virtual».
+;    Su parte residente va en secciones «de quita y pon» (ver más abajo): la
+;    de la tarjeta que no está no se queda en la memoria.
+;  Las que tienen «bus master» necesitan búferes en memoria física continua:
 ;  van detrás de lo residente o, si HSPRED está en la memoria superior (LH),
 ;  en un bloque aparte de la memoria convencional (en modo V86 la superior
 ;  no es memoria física continua). En modo V86 la dirección física se pide
@@ -61,8 +73,19 @@
         bits 16
         org 0x100
 
+; Secciones. «.text» es lo residente común a todas las tarjetas (y, por ahora,
+; las cuatro primeras); «.init», la instalación, que se descarta. Entre las
+; dos van las tarjetas «de quita y pon» (PCnet, Tulip), cada una en su
+; sección: todas se ensamblan para la MISMA dirección (ov_base, justo detrás
+; de la pila: vfollows=.text) y la instalación deja en ese sitio solo la de
+; la tarjeta encontrada (la primera ya está en su sitio; la segunda la copia
+; allí su instalación, tu_init). Así una tarjeta nueva no le cuesta ni un
+; octeto residente a las demás. Ojo: lo residente de estas secciones no puede
+; nombrar nada de «.init» (tools/initcheck.py solo vigila «.text»).
         section .text
-        section .init follows=.text
+        section .pcnet follows=.text align=1
+        section .tulip follows=.pcnet vfollows=.text align=1 valign=1
+        section .init follows=.tulip
         section .text
 
 NH          equ 8                   ; manejadores (tipos de paquete)
@@ -74,6 +97,8 @@ C_NE        equ 1
 C_8139      equ 2
 C_E1000     equ 3
 C_8168      equ 4
+C_PCNET     equ 5
+C_TULIP     equ 6
 
 ; configuración IP compartida (cfg, 30 octetos)
 CFG_FLAGS   equ 0                   ; bit 0 válida, bit 1 por DHCP
@@ -106,6 +131,36 @@ R68_RXB     equ 512
 R68_TXB     equ R68_RXB + 4 * 1536
 R68_SIZE    equ R68_TXB + 1536
 R68_BUF     equ 1536
+; PCnet: 4 descriptores de recepción y 4 de envío (16 octetos cada uno, estilo
+; de software 2), el bloque de inicialización (28 octetos), 4 búferes de
+; recepción y uno de envío (el mismo para los 4 descriptores)
+PN_RXD      equ 0
+PN_TXD      equ 64
+PN_INIT     equ 128
+PN_RXB      equ 160
+PN_BUF      equ 1536
+PN_TXB      equ PN_RXB + 4 * PN_BUF
+PN_SIZE     equ PN_TXB + 1536
+PN_RMD1     equ 0x8000FA00          ; OWN y BCNT = -1536 (los bits 12-15, a uno)
+; Tulip: 4 descriptores de recepción y 2 de envío (16 octetos cada uno), 4
+; búferes de recepción y uno de envío (que sirve también para la trama de
+; configuración, de 192 octetos)
+TU_RXD      equ 0
+TU_TXD      equ 64
+TU_RXB      equ 96
+TU_BUF      equ 1536
+TU_TXB      equ TU_RXB + 4 * TU_BUF
+TU_SIZE     equ TU_TXB + 1536
+; CSR6 (modo): PS (bit 18: puerto MII/SYM, el de la 21140), HBD (19), SF (21:
+; guardar la trama entera antes de enviarla) y el bit 25, que la 21140 quiere
+; a uno. Sin modo promiscuo: el filtro es el perfecto de la trama de
+; configuración. Los bits ST (13) y SR (1) arrancan el envío y la recepción.
+TU_CSR6     equ 0x022C0000
+TU_ST       equ 0x00002000
+TU_SR       equ 0x00000002
+; CSR7 (interrupciones): NIS (16) y AIS (15), los dos resúmenes, con RI (6:
+; trama recibida) y RU (7: la tarjeta se ha quedado sin descriptores)
+TU_CSR7     equ 0x000180C0
 
 start:
         jmp init
@@ -152,6 +207,10 @@ st_drop     dd 0
 handles     times NH * 16 db 0      ; +0 en uso, +1 long. del tipo, +2 tipo
                                     ; (8), +10 receptor (seg:desp)
 cfg         times CFG_LEN db 0
+; (lo nuevo, siempre al final: Configuración de Hispa Ventanas lee la MAC de
+; aquí por su desplazamiento)
+chip_id     dw 0                    ; PCnet: número de pieza (CSR88/89)
+card_name   times 36 db 0           ; el nombre (lo copia la instalación)
 info_end:
 INFO_LEN    equ info_end - info
 
@@ -179,10 +238,6 @@ gdtr        dw 15
 gdt_tbl     dq 0
             dq 0x008F92000000FFFF   ; datos, base 0, límite 4 GB
 
-name_ne     db "NE2000 PCI", 0
-name_8139   db "Realtek RTL8139", 0
-name_e1000  db "Intel PRO/1000 (e1000)", 0
-name_8168   db "Realtek RTL8168/8111 (sin probar)", 0
 
 ; =============================================================================
 ;  Funciones del packet driver
@@ -1617,7 +1672,10 @@ e1_link:
         ret
 
 ; =============================================================================
-;  Realtek RTL8168 / 8111 / 8101 / 8169 (sin probar: ver docs/RED.md)
+;  Realtek RTL8168 / 8111 / 8101 / 8169. Probada en un equipo de verdad (el
+;  Toshiba NB250-10N, 10EC:8136 rev. 05h); QEMU no la emula, así que aquí no
+;  se toca nada sin probarlo en ese equipo. Lo que le falta frente a r8169 de
+;  Linux para las revisiones modernas está en docs/RED.md.
 ; =============================================================================
 r68_send:
         mov es, [cs:dma_seg]
@@ -1890,6 +1948,542 @@ pila_top:
 resident_end:
 
 ; =============================================================================
+;  AMD PCnet-PCI II (Am79C970A) y PCnet-FAST III (Am79C973), 1022:2000: la
+;  tarjeta por omisión de VirtualBox, la «vlance» de VMware y -device pcnet
+;  de QEMU. Sección de quita y pon (ver arriba): solo queda residente si la
+;  tarjeta es ésta.
+;
+;  Fuentes: las hojas de datos públicas de AMD (Am79C970A, Am79C973) y, para
+;  el comportamiento, el controlador pcnet32 de Linux (GPL-2.0) y las
+;  emulaciones de QEMU (hw/net/pcnet.c) y VirtualBox (DevPCNet).
+;
+;  Registros por los puertos de E/S (BAR0), en modo de 32 bits (DWIO): RDP en
+;  +10h, RAP en +14h, RESET en +18h y BDP en +1Ch; todos los accesos, de 32
+;  bits. Se elige un registro escribiendo su número en RAP y se lee o escribe
+;  por RDP (los CSR) o por BDP (los BCR). Estilo de software 2 (BCR20):
+;  descriptores de 16 octetos con direcciones de 32 bits.
+;  Todas las rutinas dejan RAP como quieran: cada una lo pone antes de usarlo
+;  (la interrupción también), y la única que no usa el CSR0 con la tarjeta en
+;  marcha (pn_link) lo hace con las interrupciones cerradas.
+; =============================================================================
+        section .pcnet
+ov_base:
+
+; RAP = BL -> DX = RDP. Destroza EAX.
+pn_rap:
+        mov dx, [cs:iob]
+        add dx, 0x14
+        movzx eax, bl
+        out dx, eax
+        sub dx, 4
+        ret
+
+; CSR número BL -> AX (y EAX). Destroza DX.
+pn_rcsr:
+        call pn_rap
+        in eax, dx
+        ret
+
+; CSR número BL = AX. Lo conserva todo.
+pn_wcsr:
+        push eax
+        push dx
+        push eax
+        call pn_rap
+        pop eax
+        movzx eax, ax
+        out dx, eax
+        pop dx
+        pop eax
+        ret
+
+; DS:SI = paquete, CX = longitud
+pn_send:
+        mov es, [cs:dma_seg]
+        mov di, PN_TXB
+        mov bx, cx
+        rep movsb
+        mov cx, bx
+        cmp cx, 60
+        jae .l
+        mov cx, 60
+        sub cx, bx
+        xor al, al
+        rep stosb
+        mov cx, 60
+.l:
+        movzx di, byte [cs:tx_i]
+        shl di, 4
+        add di, PN_TXD
+        neg cx                      ; BCNT: la longitud en complemento a dos
+        mov dword [es:di+8], 0      ; (12 bits; los bits 12-15 quedan a uno)
+        mov [es:di+4], cx
+        mov word [es:di+6], 0x8300  ; OWN, STP y ENP: lo último que se escribe
+        xor bl, bl
+        mov ax, 0x0048              ; CSR0: IENA y TDMD (envía ya, sin esperar
+        call pn_wcsr                ; al sondeo de la tarjeta)
+        mov cx, 60000
+.w:
+        mov al, [es:di+7]
+        test al, 0x80               ; OWN: todavía es de la tarjeta
+        jz .d
+        call io_wait
+        loop .w
+        stc
+        ret
+.d:
+        inc byte [cs:tx_i]
+        and byte [cs:tx_i], 3
+        test al, 0x40               ; ERR (sin portadora, colisiones...)
+        jz .ok
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+pn_isr:
+        xor bl, bl
+        call pn_rcsr
+        test al, 0x80               ; INTR: la tarjeta pide interrupción
+        jz .no
+        and ax, 0x7F00              ; quitar las marcas que se han visto (se
+        or al, 0x40                 ; borran escribiendo un uno) y seguir con
+        call pn_wcsr                ; IENA
+        call pn_drain
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; Se mira el anillo ENTERO, no solo el descriptor que toca: una PCnet de
+; verdad los llena por orden, pero la emulación de QEMU (hw/net/pcnet.c,
+; pcnet_receive; puede que también las que salen de ella), si el que le toca
+; aún no es suyo, busca cualquier otro libre y salta a él. Si eso pasara justo
+; mientras aquí se devuelven (anillo lleno, en plena descarga), quedaría uno
+; sin usar en medio y, esperándolo a él, las tramas siguientes se quedarían
+; paradas hasta que el anillo diera la vuelta. Es una precaución sacada de
+; leer ese código (no se ha visto fallar). Tras 4 pasos sin encontrar nada,
+; rx_i queda donde estaba.
+pn_drain:
+.l:
+        mov es, [dma_seg]
+        mov cx, 4
+.s:
+        movzx bx, byte [rx_i]
+        shl bx, 4                   ; (PN_RXD = 0)
+        mov eax, [es:bx+4]
+        test eax, 0x80000000        ; OWN: todavía es de la tarjeta
+        jz .got
+        inc byte [rx_i]
+        and byte [rx_i], 3
+        loop .s
+        ret
+.got:
+        and eax, 0x43000000         ; ERR, STP y ENP: entera en un búfer y sin
+        cmp eax, 0x03000000         ; errores
+        jne .bad
+        mov cx, [es:bx+8]           ; MCNT: longitud con el CRC
+        and cx, 0x0FFF
+        sub cx, 4
+        cmp cx, 14
+        jb .bad
+        cmp cx, 1518
+        ja .bad
+        push bx
+        movzx si, byte [rx_i]
+        imul si, si, PN_BUF
+        add si, PN_RXB
+        push si
+        push ds
+        mov di, rx_tmp
+        push ds
+        pop es
+        mov ds, [dma_seg]
+        push cx
+        mov cx, 7
+        rep movsw
+        pop cx
+        pop ds
+        call rx_find
+        pop si
+        jc .sk
+        mov cx, [rx_len]
+        push ds
+        mov ds, [dma_seg]
+        rep movsb
+        pop ds
+        call rx_done
+.sk:
+        pop bx
+        jmp .next
+.bad:
+        inc dword [st_ein]
+.next:
+        mov es, [dma_seg]
+        mov dword [es:bx+8], 0
+        mov dword [es:bx+4], PN_RMD1    ; otra vez de la tarjeta
+        inc byte [rx_i]
+        and byte [rx_i], 3
+        jmp .l
+
+; Bloque de inicialización en EAX (dirección física): parar, darle a la
+; tarjeta el bloque y las máscaras, INIT y esperar a IDON.
+; -> CF = 1 si la tarjeta no lo acaba. Deja BL = 0.
+pn_doinit:
+        xor bl, bl
+        push ax
+        mov ax, 0x0004              ; CSR0: STOP (siempre antes de reprogramar)
+        call pn_wcsr
+        pop ax
+        inc bl
+        call pn_wcsr                ; CSR1: bloque, parte baja
+        shr eax, 16
+        inc bl
+        call pn_wcsr                ; CSR2: parte alta
+        inc bl
+        mov ax, 0x4B00              ; CSR3: sin interrupción por BABL, MERR,
+        call pn_wcsr                ; TINT ni IDON (quedan RINT y MISS)
+        inc bl
+        mov ax, 0x0915              ; CSR4: relleno automático de las tramas
+        call pn_wcsr                ; cortas (APAD_XMT) y lo demás, tapado
+        xor bl, bl
+        mov ax, 0x0001              ; CSR0: INIT (lee el bloque por DMA)
+        call pn_wcsr
+        mov cx, 50000
+.w:
+        call pn_rcsr
+        test ah, 0x01               ; IDON
+        jnz .ok
+        call io_wait
+        loop .w
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+pn_start:
+        mov es, [dma_seg]
+        mov edx, [dma_phys]
+        xor di, di
+        lea eax, [edx+PN_RXB]
+.d:
+        mov [es:di+PN_RXD], eax
+        mov dword [es:di+PN_RXD+4], PN_RMD1
+        lea ecx, [edx+PN_TXB]
+        mov [es:di+PN_TXD], ecx     ; (lo demás ya está a cero)
+        add eax, PN_BUF
+        add di, 16
+        cmp di, 4 * 16
+        jb .d
+        ; bloque de inicialización (el de 32 bits): modo 0 (normal: lo dirigido
+        ; a esta tarjeta y la difusión), 4 y 4 descriptores (RLEN = TLEN = 2),
+        ; la MAC, el filtro de multidifusión a cero y los dos anillos
+        mov di, PN_INIT
+        mov word [es:di+2], 0x2020
+        mov eax, [mac]
+        mov [es:di+4], eax
+        mov ax, [mac+4]
+        mov [es:di+8], ax
+        mov [es:di+20], edx         ; (PN_RXD = 0)
+        lea eax, [edx+PN_TXD]
+        mov [es:di+24], eax
+        lea eax, [edx+PN_INIT]
+        call pn_doinit              ; (si no acabara, STRT no haría daño)
+        mov ax, 0x0142              ; CSR0: quitar IDON, STRT e IENA
+        call pn_wcsr
+        ret
+
+pn_stop:
+        push bx
+        xor bl, bl
+        mov ax, 0x0004              ; STOP: para el DMA y las interrupciones
+        call pn_wcsr
+        pop bx
+        ret
+
+; El enlace: BCR4 (el LED 0, que de fábrica es el de enlace), bit 15 = estado
+; del LED. La velocidad no se mira.
+pn_link:
+        push bx
+        push dx
+        push eax
+        pushf
+        cli
+        mov bl, 4
+        call pn_rap
+        add dx, 0x0C                ; BDP
+        in eax, dx
+        mov bx, ax
+        sub dx, 8                   ; RAP = 0, como lo espera el resto
+        xor eax, eax
+        out dx, eax
+        popf
+        shr bx, 15                  ; 1 = hay enlace
+        pop eax
+        mov ax, bx                  ; AH = 0: la velocidad no se sabe
+        pop dx
+        pop bx
+        ret
+pn_end:
+PN_LEN      equ pn_end - ov_base
+
+; =============================================================================
+;  DEC 21140/21140A/21143 «Tulip» (1011:0009 y 1011:0019). La 21140A es lo que
+;  Hyper-V (y antes Virtual PC) le da a un sistema antiguo como «Adaptador de
+;  red heredado»; QEMU la emula con -device tulip (como 21143). Sección de
+;  quita y pon: se ensambla para la misma dirección que la PCnet (ov_base) y
+;  tu_init la copia allí si la tarjeta es ésta.
+;
+;  Fuentes: las hojas de datos públicas de DEC/Intel (21140A, 21143: «Hardware
+;  Reference Manual») y, para el comportamiento, el controlador tulip de Linux
+;  (drivers/net/ethernet/dec/tulip, GPL-2.0) y la emulación de QEMU
+;  (hw/net/tulip.c). Nada copiado: lo que se hace igual que Linux se dice,
+;  porque Linux es lo que se sabe que funciona en Hyper-V.
+;
+;  Registros CSR0-CSR15 por los puertos de E/S (BAR0), de 32 bits, cada 8
+;  puertos (CSRn en +n*8). Dos anillos de descriptores de 4 palabras dobles:
+;  +0 estado (bit 31 OWN: es de la tarjeta), +4 control (tamaño del búfer 1 en
+;  los bits 0-10; bit 25 = último del anillo), +8 búfer 1, +12 búfer 2.
+;  Lo que se hace pensando en cada emulación:
+;   - Anillo cerrado por el bit «fin de anillo» (RER/TER) Y ADEMÁS el búfer 2
+;     de cada descriptor apuntando al siguiente, con tamaño 0 (así lo deja
+;     Linux): vale tanto si la emulación sigue el anillo como si sigue la
+;     cadena, y QEMU no escribe en el búfer 2 si su tamaño es 0.
+;   - Cada trama, en un solo descriptor con «primero» y «último» (FS y LS) a
+;     la vez: la emulación de Microsoft no admite tramas partidas.
+;   - La trama de configuración (filtro perfecto: 16 direcciones) se envía y
+;     se espera ANTES de arrancar la recepción: la de Microsoft no recibe
+;     nada hasta tenerla; QEMU deja pasar la difusión sin ella, pero no lo
+;     dirigido a la tarjeta. Sin FS ni LS, como manda la hoja de datos.
+;   - No se toca el CSR8 (en QEMU 8.2 escribirlo pisa el CSR9) ni se lee el
+;     CSR12 (en la 21140 son las patillas de uso general, no el enlace): el
+;     estado del enlace no se sabe.
+; =============================================================================
+        section .tulip
+tu_base:
+
+; CSR número BL = EAX. Destroza DX.
+tu_wr:
+        movzx dx, bl
+        shl dx, 3
+        add dx, [cs:iob]
+        out dx, eax
+        ret
+
+; DS:SI = paquete, CX = longitud
+tu_send:
+        mov es, [cs:dma_seg]
+        mov di, TU_TXB
+        mov bx, cx
+        rep movsb
+        mov cx, bx
+        cmp cx, 60
+        jae .l
+        mov cx, 60
+        sub cx, bx
+        xor al, al
+        rep stosb
+        mov cx, 60
+.l:
+        movzx eax, cx
+        or eax, 0x60000000          ; LS y FS: la trama entera en este búfer
+; EAX = control del descriptor (tamaño y marcas) -> enviar lo que hay en el
+; búfer de envío y esperar a que la tarjeta lo suelte. CF = 1 si no lo hace.
+tu_xmit:
+        mov es, [cs:dma_seg]
+        movzx di, byte [cs:tx_i]
+        shl di, 4
+        jz .n0
+        or eax, 0x02000000          ; TER: el segundo es el último del anillo
+.n0:
+        add di, TU_TXD
+        mov [es:di+4], eax
+        mov dword [es:di], 0x80000000   ; OWN: de la tarjeta
+        mov bl, 1
+        call tu_wr                  ; CSR1: «mira el anillo de envío»
+        mov cx, 60000
+.w:
+        test byte [es:di+3], 0x80
+        jz .d
+        call io_wait
+        loop .w
+        stc
+        ret
+.d:
+        ; (los bits de error del estado no se miran: en una red emulada no
+        ; dicen nada, y la portadora o las colisiones de una de verdad no las
+        ; arregla reenviar desde aquí)
+        xor byte [cs:tx_i], 1
+        clc
+        ret
+
+tu_isr:
+        mov dx, [iob]
+        add dx, 5 * 8               ; CSR5: estado
+        in eax, dx
+        cmp eax, 0xFFFFFFFF
+        je .no
+        test eax, 0x00018000        ; NIS o AIS: alguna de las que se han
+        jz .no                      ; pedido en el CSR7
+        out dx, eax                 ; quitar las marcas vistas (con un uno)
+        call tu_drain
+        xor eax, eax
+        mov bl, 2
+        call tu_wr                  ; CSR2: «mira el anillo de recepción» (si
+        clc                         ; se quedó sin descriptores, se había
+        ret                         ; parado)
+.no:
+        stc
+        ret
+
+tu_drain:
+.l:
+        mov es, [dma_seg]
+        movzx bx, byte [rx_i]
+        shl bx, 4                   ; (TU_RXD = 0)
+        mov eax, [es:bx]
+        test eax, 0x80000000        ; OWN: todavía es de la tarjeta
+        jnz .r
+        mov ecx, eax
+        and ax, 0x8300              ; ES (error), FS y LS: entera y sin
+        cmp ax, 0x0300              ; errores
+        jne .bad
+        shr ecx, 16
+        and cx, 0x3FFF              ; longitud con el CRC
+        sub cx, 4
+        cmp cx, 14
+        jb .bad
+        cmp cx, 1518
+        ja .bad
+        push bx
+        movzx si, byte [rx_i]
+        imul si, si, TU_BUF
+        add si, TU_RXB
+        push si
+        push ds
+        mov di, rx_tmp
+        push ds
+        pop es
+        mov ds, [dma_seg]
+        push cx
+        mov cx, 7
+        rep movsw
+        pop cx
+        pop ds
+        call rx_find
+        pop si
+        jc .sk
+        mov cx, [rx_len]
+        push ds
+        mov ds, [dma_seg]
+        rep movsb
+        pop ds
+        call rx_done
+.sk:
+        pop bx
+        jmp .next
+.bad:
+        inc dword [st_ein]
+.next:
+        mov es, [dma_seg]
+        mov dword [es:bx], 0x80000000   ; otra vez de la tarjeta
+        inc byte [rx_i]
+        and byte [rx_i], 3
+        jmp .l
+.r:
+        ret
+
+tu_start:
+        mov es, [dma_seg]
+        mov edx, [dma_phys]
+        ; anillo de recepción
+        xor di, di
+        lea eax, [edx+TU_RXB]
+        lea ecx, [edx+TU_RXD+16]    ; el descriptor siguiente
+.d:
+        mov dword [es:di], 0x80000000
+        mov dword [es:di+4], TU_BUF
+        mov [es:di+8], eax
+        mov [es:di+12], ecx
+        add eax, TU_BUF
+        add ecx, 16
+        add di, 16
+        cmp di, 4 * 16
+        jb .d
+        or byte [es:di-16+7], 0x02  ; RER en el último...
+        mov [es:di-16+12], edx      ; ...que apunta al primero
+        ; anillo de envío: dos descriptores con el mismo búfer
+        lea eax, [edx+TU_TXB]
+        mov [es:TU_TXD+8], eax
+        mov [es:TU_TXD+16+8], eax
+        lea eax, [edx+TU_TXD+16]
+        mov [es:TU_TXD+12], eax
+        sub eax, 16
+        mov [es:TU_TXD+16+12], eax
+        mov bl, 4
+        call tu_wr                  ; CSR4: anillo de envío
+        mov eax, [dma_phys]
+        mov bl, 3
+        call tu_wr                  ; CSR3: anillo de recepción (TU_RXD = 0)
+        ; trama de configuración, en el búfer de envío: 16 direcciones de 12
+        ; octetos (cada palabra de la dirección, dos veces); como Linux, 15
+        ; veces la de difusión y, la última, la de esta tarjeta
+        mov di, TU_TXB
+        mov cx, 15 * 6
+        mov ax, 0xFFFF
+        rep stosw
+        mov si, mac
+        mov cx, 3
+.sf:
+        lodsw
+        stosw
+        stosw
+        loop .sf
+        mov eax, TU_CSR6 | TU_ST
+        mov bl, 6
+        call tu_wr                  ; arranca solo el envío
+        mov eax, 0x08000000 | 192   ; SET: trama de configuración, 192 octetos
+        call tu_xmit                ; (y se espera a que la tarjeta la lea)
+        setc cl                     ; Si no la ha querido (una emulación sin
+        shl cl, 6                   ; filtro), modo promiscuo (PR, bit 6): el
+                                    ; conmutador de una red emulada ya solo
+                                    ; entrega lo de esta tarjeta y la difusión
+        mov eax, 0xFFFFFFFF
+        mov bl, 5
+        call tu_wr                  ; quitar las marcas pendientes
+        mov eax, TU_CSR7
+        mov bl, 7
+        call tu_wr
+        mov eax, TU_CSR6 | TU_ST | TU_SR
+        or al, cl
+        dec bl
+        call tu_wr                  ; y ahora, la recepción
+        ret
+
+tu_stop:
+        push bx
+        push dx
+        push eax
+        xor eax, eax
+        mov bl, 7
+        call tu_wr                  ; sin interrupciones
+        mov eax, TU_CSR6
+        dec bl
+        call tu_wr                  ; envío y recepción parados
+        mov eax, 1
+        xor bl, bl
+        call tu_wr                  ; y reinicio: el DMA ya no toca la memoria
+        pop eax
+        pop dx
+        pop bx
+        ret
+tu_end:
+TU_LEN      equ tu_end - tu_base
+
+; =============================================================================
 ;  Instalación (se descarta)
 ; =============================================================================
         section .init
@@ -1946,6 +2540,7 @@ init:
         mov ax, 0xDA01
         int 0x2F
         mov [i_link], ax
+        mov word [name_ptr], card_name  ; (el del residente, copiado)
         call show_info
         mov ax, 0x4C00
         int 0x21
@@ -2284,6 +2879,9 @@ card_tab:
         db C_E1000
         dw 0x8086, 0x107C           ; 82541PI
         db C_E1000
+        dw 0x8086, 0x10D3           ; 82574L («e1000e» de QEMU y de VMware):
+        db C_E1000                  ; con descriptores clásicos, igual que las
+                                    ; 8254x (ver e1_init)
         dw 0x10EC, 0x8168           ; RTL8111/8168 (Lenovo A275)
         db C_8168
         dw 0x10EC, 0x8169
@@ -2296,8 +2894,54 @@ card_tab:
         db C_8168
         dw 0x1186, 0x4300           ; D-Link DGE-528T
         db C_8168
+        dw 0x1022, 0x2000           ; AMD PCnet-PCI II / FAST III (VirtualBox,
+        db C_PCNET                  ; VMware «vlance», QEMU -device pcnet)
+        dw 0x1022, 0x2001           ; AMD PCnet-Home (Am79C978)
+        db C_PCNET
+        dw 0x1011, 0x0009           ; DEC 21140/21140A (Hyper-V: «Adaptador
+        db C_TULIP                  ; de red heredado»)
+        dw 0x1011, 0x0019           ; DEC 21142/21143 (QEMU -device tulip)
+        db C_TULIP
         dw 0
-card_names  dw 0, name_ne, name_8139, name_e1000, name_8168
+card_names  dw 0, name_ne, name_8139, name_e1000, name_8168, name_pcnet
+            dw name_tulip
+; los nombres: el de la tarjeta encontrada se copia a card_name (residente)
+name_ne     db "NE2000 PCI", 0
+name_8139   db "Realtek RTL8139", 0
+name_e1000  db "Intel PRO/1000 (e1000)", 0
+name_e1000e db "Intel PRO/1000 (e1000e, 82574L)", 0
+name_8168   db "Realtek RTL8168/8111", 0
+name_pcnet  db "AMD PCnet", 0
+name_pn70a  db "AMD PCnet-PCI II (Am79C970A)", 0
+name_pn73   db "AMD PCnet-FAST III (Am79C973)", 0
+name_pn75   db "AMD PCnet-FAST III (Am79C975)", 0
+name_pn78   db "AMD PCnet-Home (Am79C978)", 0
+name_tulip  db "DEC 2114x (Tulip)", 0
+name_tu40   db "DEC 21140 (Tulip)", 0
+name_tu43   db "DEC 21143 (Tulip)", 0
+
+; DS:SI = nombre -> card_name (como mucho 35 letras) y name_ptr
+set_name:
+        push ax
+        push cx
+        push di
+        push es
+        push ds
+        pop es
+        mov di, card_name
+        mov cx, 35
+.l:
+        lodsb
+        stosb
+        test al, al
+        loopnz .l
+        mov byte [di], 0            ; (si era más largo; el 36.º es siempre 0)
+        mov word [name_ptr], card_name
+        pop es
+        pop di
+        pop cx
+        pop ax
+        ret
 
 ; -> CF = 0 y card, pci_bdf, pci_ven, pci_dev
 find_card:
@@ -2332,8 +2976,8 @@ find_card:
         mov [card], al
         movzx bx, al
         add bx, bx
-        mov ax, [card_names+bx]
-        mov [name_ptr], ax
+        mov si, [card_names+bx]
+        call set_name
         clc
         ret
 .n:
@@ -2444,7 +3088,11 @@ card_init:
         je r39_init
         cmp al, C_E1000
         je e1_init
-        jmp r68_init
+        cmp al, C_8168
+        je r68_init
+        cmp al, C_PCNET
+        je pn_init
+        jmp tu_init
 .fail:
         stc
         ret
@@ -2785,6 +3433,14 @@ e1_init:
         cmp dx, 0x5400
         jb .mta
         pop fs
+        ; la 82574L, con su nombre (lo demás, igual: reinicio, RAL0/RAH0,
+        ; anillos de descriptores clásicos e interrupción INTx, que es lo que
+        ; hay mientras nadie active MSI ni los descriptores ampliados)
+        cmp word [pci_dev], 0x10D3
+        jne .n74
+        mov si, name_e1000e
+        call set_name
+.n74:
         mov word [c_send], e1_send
         mov word [c_isr], e1_isr
         mov word [c_stop], e1_stop
@@ -2842,8 +3498,372 @@ r68_init:
         clc
         ret
 
+; ---- AMD PCnet ----
+pn_init:
+        mov si, msg_noio
+        cmp word [iob], 0
+        je .f
+        mov word [res_end], pn_end  ; lo residente llega hasta aquí
+        ; Reinicio por programa (leer el registro RESET), en los dos anchos:
+        ; la tarjeta puede estar en modo de 16 bits (WIO: como sale del
+        ; encendido, y como la deja el reinicio en QEMU y VirtualBox) o en el
+        ; de 32 (DWIO: en las de verdad el reinicio por programa no lo quita).
+        ; El acceso del ancho que no toca no hace nada.
+        mov dx, [iob]
+        add dx, 0x14                ; RESET en WIO
+        in ax, dx
+        add dx, 4                   ; RESET en DWIO
+        in eax, dx
+        mov cx, 2
+        call ticks_wait
+        ; a DWIO: una escritura de 32 bits en RDP (si ya lo estaba, escribe
+        ; un cero en el CSR0, que no hace nada)
+        mov dx, [iob]
+        add dx, 0x10
+        xor eax, eax
+        out dx, eax
+        ; ¿contesta? Tras el reinicio el CSR0 vale 0004h (STOP)
+        xor bl, bl
+        call pn_rcsr
+        mov si, msg_pn_no
+        cmp ax, 0x0004
+        jne .f
+        call pn_wcsr                ; STOP, por si acaso
+        ; estilo de software 2 (BCR20): PCnet-PCI, todo de 32 bits
+        mov bl, 20
+        call pn_rap
+        add dx, 0x0C                ; BDP
+        mov eax, 2
+        out dx, eax
+        ; BCR2: ASEL (elige sola el medio: par trenzado o AUI)
+        mov bl, 2
+        call pn_rap
+        add dx, 0x0C
+        in eax, dx
+        or al, 0x02
+        movzx eax, ax
+        out dx, eax
+        ; número de pieza: CSR88 (bits 12-15) y CSR89 (bits 0-11)
+        mov bl, 89
+        call pn_rcsr
+        shl eax, 16
+        push eax
+        mov bl, 88
+        call pn_rcsr
+        pop ecx
+        mov cx, ax
+        shr ecx, 12
+        mov [chip_id], cx
+        call pn_setname
+        ; la MAC: los 6 primeros octetos del APROM (los puertos +0 a +5; en
+        ; DWIO se leen de 4 en 4)
+        mov dx, [iob]
+        in eax, dx
+        mov [mac], eax
+        add dx, 4
+        in eax, dx
+        mov [mac+4], ax
+        call .macok
+        jnc .mac
+        ; si el APROM no la da, la que la tarjeta cargó en los CSR12-14
+        mov bl, 12
+        mov di, mac
+.m:
+        call pn_rcsr
+        mov [di], ax
+        add di, 2
+        inc bl
+        cmp bl, 15
+        jb .m
+        call .macok
+        mov si, msg_pn_mac
+        jc .f
+.mac:
+        ; Ensayo de la inicialización con un bloque de prueba (sin anillos:
+        ; INIT solo carga los registros), para saber AHORA si la tarjeta la
+        ; acaba (IDON) y poder decirlo; la de verdad se hace al quedarse
+        ; residente (pn_start), con los búferes ya en su sitio.
+        mov di, pn_tmp + 3
+        and di, 0xFFFC              ; alineado a 4
+        mov word [di+2], 0x2020
+        mov eax, [mac]
+        mov [di+4], eax
+        mov ax, [mac+4]
+        mov [di+8], ax
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        movzx edx, di
+        add eax, edx
+        call phys
+        call pn_doinit
+        pushf
+        xor bl, bl
+        mov ax, 0x0004              ; STOP otra vez, hasta pn_start
+        call pn_wcsr
+        popf
+        mov si, msg_pn_idon
+        jc .f
+        mov word [c_send], pn_send
+        mov word [c_isr], pn_isr
+        mov word [c_stop], pn_stop
+        mov word [c_link], pn_link
+        mov word [c_start], pn_start
+        mov word [need_dma], PN_SIZE
+        mov word [dma_align], 16
+        clc
+        ret
+.f:
+        stc
+        ret
+; ¿la MAC vale? (ni todo ceros ni todo unos) -> CF = 1 si no
+.macok:
+        mov eax, [mac]
+        movzx edx, word [mac+4]
+        test eax, eax
+        jnz .mk1
+        test dx, dx
+        jz .mkno
+.mk1:
+        cmp eax, 0xFFFFFFFF
+        jne .mkok
+        cmp dx, 0xFFFF
+        je .mkno
+.mkok:
+        clc
+        ret
+.mkno:
+        stc
+        ret
+
+; el nombre de la PCnet según su número de pieza (chip_id)
+pn_setname:
+        mov ax, [chip_id]
+        mov si, name_pn70a
+        cmp ax, 0x2621
+        je .s
+        mov si, name_pn73
+        cmp ax, 0x2625
+        je .s
+        mov si, name_pn75
+        cmp ax, 0x2627
+        je .s
+        mov si, name_pn78
+        cmp ax, 0x2626
+        je .s
+        mov si, name_pcnet
+.s:
+        call set_name
+        ret
+pn_tmp      times 32 db 0
+
+; ---- DEC Tulip ----
+tu_init:
+        mov si, msg_noio
+        cmp word [iob], 0
+        je .f
+        ; su parte residente, a su sitio (tu_base, pegado a la pila): en el
+        ; archivo va detrás de la de la PCnet, que aquí no hace falta
+        push ds
+        pop es
+        mov si, pn_end              ; donde está en el archivo
+        mov di, tu_base             ; para donde está ensamblada
+        mov cx, TU_LEN
+        rep movsb
+        mov word [res_end], tu_end
+        ; 21142/21143: despertarla (CFDD, registro 40h de la configuración
+        ; PCI: bits 31 «dormida» y 30 «adormilada»). La 21140 no lo necesita
+        ; (Linux tampoco se lo hace).
+        cmp word [pci_dev], 0x0019
+        jne .nw
+        mov bx, [pci_bdf]
+        mov di, 0x40
+        xor ecx, ecx
+        mov ax, 0xB10D
+        int 0x1A
+        mov cx, 1
+        call ticks_wait
+.nw:
+        ; reinicio por programa (CSR0, bit 0) y modo del bus: ráfagas de 8
+        ; palabras dobles alineadas a 8 y descriptores seguidos (DSL = 0)
+        mov eax, 1
+        xor bl, bl
+        call tu_wr
+        mov cx, 2
+        call ticks_wait
+        mov eax, 0x00004800
+        xor bl, bl
+        call tu_wr
+        xor eax, eax
+        mov bl, 7
+        call tu_wr                  ; sin interrupciones
+        mov eax, TU_CSR6
+        dec bl
+        call tu_wr                  ; parada, con el puerto ya elegido
+        ; la SROM (93C46 o 93C66, por el CSR9), entera: 64 palabras
+        call tu_ee_bits
+        xor bx, bx
+        mov di, tu_srom
+.rd:
+        call tu_ee_read
+        mov [di], ax
+        add di, 2
+        inc bx
+        cmp bx, 64
+        jb .rd
+        ; ¿dónde está la MAC? En el formato de DEC, en el octeto 20; las
+        ; tarjetas antiguas la ponían al principio y repetida en el 16 (lo
+        ; mismo que mira Linux: si los 8 primeros octetos son iguales que los
+        ; 8 del 16, está en el 0)
+        mov si, tu_srom
+        mov di, tu_srom + 16
+        mov cx, 8
+        repe cmpsb
+        mov si, tu_srom
+        je .at
+        mov si, tu_srom + 20
+.at:
+        call .take
+        jnc .mac
+        ; si ahí no hay una dirección que valga, en el otro sitio
+        sub si, tu_srom
+        xor si, 20                  ; 0 <-> 20
+        add si, tu_srom
+        call .take
+        mov si, msg_tu_mac
+        jc .f
+.mac:
+        mov si, name_tu40
+        cmp word [pci_dev], 0x0009
+        je .nm
+        mov si, name_tu43
+.nm:
+        call set_name
+        mov word [c_send], tu_send
+        mov word [c_isr], tu_isr
+        mov word [c_stop], tu_stop
+        mov word [c_link], ne_link  ; no se sabe (ver arriba)
+        mov word [c_start], tu_start
+        mov word [need_dma], TU_SIZE
+        mov word [dma_align], 32
+        clc
+        ret
+.f:
+        stc
+        ret
+; SI = 6 octetos de la SROM -> mac; CF = 1 si no vale (todo ceros, todo unos
+; o de multidifusión). Conserva SI.
+.take:
+        push si
+        mov di, mac
+        mov cx, 6
+        rep movsb
+        pop si
+        mov eax, [mac]
+        movzx edx, word [mac+4]
+        test al, 1
+        jnz .tno
+        or edx, eax
+        jz .tno
+        clc
+        ret
+.tno:
+        stc
+        ret
+
+; La SROM serie por el CSR9: bit 11 (SR) la elige y bit 14 (RD) es «leer»;
+; bit 0 CS, bit 1 reloj, bit 2 dato hacia la SROM, bit 3 dato de la SROM.
+TU_EE       equ 0x4800
+; CSR9 = EAX y una espera corta
+tu_ee_out:
+        push bx
+        mov bl, 9
+        call tu_wr
+        call io_wait
+        call io_wait
+        pop bx
+        ret
+; enviar los CL bits altos de BX (el primero, el bit 15), con CS puesto
+tu_ee_cmd:
+.l:
+        mov eax, TU_EE | 1
+        shl bx, 1
+        jnc .z
+        or al, 4
+.z:
+        call tu_ee_out
+        or al, 2                    ; flanco de subida: la SROM lee el bit
+        call tu_ee_out
+        dec cl
+        jnz .l
+        ret
+; ¿cuántos bits de dirección tiene la SROM? Se le manda «leer» con una
+; dirección de todo unos: la SROM contesta con un cero en cuanto ha recibido
+; el último bit de la dirección. Si el cero sale tras el 6.º, es de 6 bits
+; (93C46); si no, de 8 (93C66). Es la misma prueba que hace Linux.
+tu_ee_bits:
+        mov eax, TU_EE
+        call tu_ee_out
+        mov bx, 0xDF80              ; 1 (inicio), 10 (leer) y 6 unos
+        mov cl, 9
+        call tu_ee_cmd
+        mov dx, [iob]
+        add dx, 9 * 8
+        in eax, dx
+        mov byte [tu_abits], 6
+        test al, 8
+        jz .r
+        mov byte [tu_abits], 8
+.r:
+        mov eax, TU_EE              ; soltar CS: se acaba la orden
+        call tu_ee_out
+        ret
+; BX = número de palabra -> AX. Conserva BX.
+tu_ee_read:
+        push bx
+        push cx
+        push dx
+        push bx
+        mov eax, TU_EE
+        call tu_ee_out
+        mov bx, 0xC000              ; 1 (inicio) y 10 (leer)
+        mov cl, 3
+        call tu_ee_cmd
+        pop bx
+        mov cl, 16
+        sub cl, [tu_abits]
+        shl bx, cl                  ; la dirección, arriba
+        mov cl, [tu_abits]
+        call tu_ee_cmd
+        mov eax, TU_EE | 1
+        call tu_ee_out
+        xor bx, bx
+        mov cx, 16
+.b:
+        mov eax, TU_EE | 1 | 2      ; flanco de subida: la SROM pone el bit
+        call tu_ee_out
+        mov dx, [iob]
+        add dx, 9 * 8
+        in eax, dx
+        shr al, 4                   ; el bit 3, al acarreo
+        rcl bx, 1
+        mov eax, TU_EE | 1
+        call tu_ee_out
+        loop .b
+        mov eax, TU_EE
+        call tu_ee_out
+        mov ax, bx
+        pop dx
+        pop cx
+        pop bx
+        ret
+tu_abits    db 6
+tu_srom     times 128 db 0
+
 need_dma    dw 0
 dma_align   dw 16
+res_end     dw resident_end         ; fin de lo residente (con la sección de
+                                    ; quita y pon de la tarjeta, si la tiene)
 
 ; -----------------------------------------------------------------------------
 ;  Vector del packet driver: /INT:xx o el primero libre desde el 60h
@@ -2905,7 +3925,8 @@ vec_free:
 ;  física y continua. -> res_paras, dma_seg, dma_phys; CF y SI si no.
 ; -----------------------------------------------------------------------------
 dma_setup:
-        mov ax, resident_end + 15
+        mov ax, [res_end]
+        add ax, 15
         shr ax, 4
         mov [res_paras], ax
         mov cx, [need_dma]
@@ -3082,6 +4103,18 @@ show_info:
         call putc
         mov ax, [pci_dev]
         call hex4
+        ; la revisión (registro 08h de la configuración PCI): con el modelo,
+        ; dice qué chip es exactamente
+        mov si, msg_i_rev
+        call puts
+        mov bx, [pci_bdf]
+        mov ax, 0xB108
+        mov di, 0x08
+        int 0x1A
+        mov al, cl
+        call hex2
+        mov al, 'h'
+        call putc
         call crlf
         cmp word [iob], 0
         je .nio
@@ -3119,13 +4152,42 @@ show_info:
         add dx, 0x40
         in eax, dx
         push eax
+        push eax
         shr eax, 16
         call hex4
         pop eax
         call hex4
+        ; y el «XID» que mira el controlador r8169 de Linux para saber la
+        ; familia: los bits 20-31 de TxConfig, sin los 4 y 5
+        mov si, msg_i_xid2
+        call puts
+        pop eax
+        shr eax, 20
+        and ax, 0x0FCF
+        call hex4
+        mov bx, r68_fam
+.xf:
+        mov dx, ax
+        and dx, [bx]
+        cmp dx, [bx+2]
+        je .xh
+        add bx, 6
+        jmp .xf
+.xh:
+        mov si, [bx+4]
+        call puts
+        call crlf
+.nv:
+        ; PCnet: el número de pieza (2621h = Am79C970A, 2625h = Am79C973)
+        cmp byte [card], C_PCNET
+        jne .npn
+        mov si, msg_i_pnid
+        call puts
+        mov ax, [chip_id]
+        call hex4
         mov si, msg_i_mmh2
         call puts
-.nv:
+.npn:
         mov si, msg_i_irq
         call puts
         movzx eax, byte [irq]
@@ -3368,8 +4430,9 @@ msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/U]", 13, 10
             db "  /INFO    tarjeta, MAC, enlace, IRQ, vector y la configuración IP", 13, 10
             db "  /AUTO    sin tarjeta, sale en silencio (para el AUTOEXEC.BAT)", 13, 10
             db "  /U       descargarlo de la memoria", 13, 10
-            db "Tarjetas: NE2000 PCI (RTL8029), Realtek RTL8139, Intel PRO/1000 (e1000)", 13, 10
-            db "y Realtek RTL8111/8168/8101 (sin probar). La IP: CONFRED (IPCONFIG).", 13, 10
+            db "Tarjetas: NE2000 PCI (RTL8029), Realtek RTL8139 y RTL8111/8168/8101, Intel", 13, 10
+            db "PRO/1000 (e1000, 82574L), AMD PCnet (VirtualBox, VMware) y DEC 21140/21143", 13, 10
+            db "(Hyper-V: adaptador heredado). La IP: CONFRED (IPCONFIG).", 13, 10
             db "Sirve también para los programas de DOS que usan packet drivers (mTCP...).", 13, 10, 0
 msg_already db "HSPRED ya está cargado (HSPRED /INFO lo enseña; /U lo descarga).", 13, 10, 0
 msg_notres  db "HSPRED no está cargado.", 13, 10, 0
@@ -3383,6 +4446,10 @@ msg_pci_at  db " en ", 0
 msg_noirq   db "La tarjeta no tiene IRQ asignado por la BIOS.", 13, 10, 0
 msg_noio    db "La tarjeta no tiene puertos de E/S asignados.", 13, 10, 0
 msg_noreset db "La tarjeta no termina de reiniciarse.", 13, 10, 0
+msg_pn_no   db "La tarjeta PCnet no contesta por sus puertos (modo de 32 bits, DWIO).", 13, 10, 0
+msg_pn_mac  db "La tarjeta PCnet no da su dirección MAC.", 13, 10, 0
+msg_pn_idon db "La tarjeta PCnet no termina su inicialización (INIT sin IDON).", 13, 10, 0
+msg_tu_mac  db "La tarjeta Tulip no da su dirección MAC (SROM).", 13, 10, 0
 msg_nommio  db "La tarjeta no tiene sus registros en memoria asignados.", 13, 10, 0
 msg_e1v86   db "Esta tarjeta e1000 solo da sus registros en memoria, y en modo V86 (con", 13, 10
             db "HSPEMM u otro EMM386) no se llega a ellos: arranque en «Normal».", 13, 10, 0
@@ -3401,8 +4468,61 @@ msg_i_mm    db "Registros:       ", 0
 msg_i_mmh   db "h (registros por memoria)", 13, 10, 0
 msg_i_mmp   db "h (registros por los puertos)", 13, 10, 0
 msg_i_irq   db "IRQ:             ", 0
+msg_i_rev   db ", revisión ", 0
+msg_i_pnid  db "Chip (CSR88/89): ", 0
 msg_i_xid   db "Chip (TxConfig): ", 0
 msg_i_mmh2  db "h", 13, 10, 0
+msg_i_xid2  db "h, XID ", 0
+; familias de la RTL8168/8101/8169 por el XID (máscara, valor, nombre), en el
+; orden en que las mira r8169 (Linux, rtl8169_get_mac_version)
+r68_fam:
+        dw 0x7CF, 0x541, r68_n_h
+        dw 0x7C8, 0x548, r68_n_17
+        dw 0x7CF, 0x502, r68_n_ep
+        dw 0x7CF, 0x5C8, r68_n_g
+        dw 0x7CF, 0x509, r68_n_g
+        dw 0x7CF, 0x4C0, r68_n_g
+        dw 0x7C8, 0x488, r68_n_f
+        dw 0x7C8, 0x480, r68_n_f
+        dw 0x7C8, 0x2C8, r68_n_evl
+        dw 0x7C8, 0x2C0, r68_n_e
+        dw 0x7C8, 0x288, r68_n_dp
+        dw 0x7C8, 0x280, r68_n_d
+        dw 0x7C0, 0x3C0, r68_n_c
+        dw 0x7C8, 0x380, r68_n_b
+        dw 0x7C8, 0x300, r68_n_b
+        dw 0x7C8, 0x448, r68_n_06
+        dw 0x7C8, 0x440, r68_n_02
+        dw 0x7C8, 0x408, r68_n_05
+        dw 0x7C8, 0x348, r68_n_2e
+        dw 0x7C8, 0x248, r68_n_2e
+        dw 0x7CF, 0x240, r68_n_01
+        dw 0x7C8, 0x340, r68_n_1e
+        dw 0xFC8, 0x980, r68_n_69
+        dw 0xFC8, 0x180, r68_n_69
+        dw 0xFC8, 0x100, r68_n_69
+        dw 0xFC8, 0x040, r68_n_69
+        dw 0xFC8, 0x008, r68_n_69
+        dw 0, 0, r68_n_unk
+r68_n_h     db "h (RTL8168H/8111H)", 0
+r68_n_17    db "h (RTL8117)", 0
+r68_n_ep    db "h (RTL8168EP/8111EP)", 0
+r68_n_g     db "h (RTL8168G/8111G)", 0
+r68_n_f     db "h (RTL8168F/8111F)", 0
+r68_n_evl   db "h (RTL8168E-VL/8111E-VL)", 0
+r68_n_e     db "h (RTL8168E/8111E)", 0
+r68_n_dp    db "h (RTL8168DP/8111DP)", 0
+r68_n_d     db "h (RTL8168D/8111D)", 0
+r68_n_c     db "h (RTL8168C/8111C)", 0
+r68_n_b     db "h (RTL8168B/8111B)", 0
+r68_n_06    db "h (RTL8106E)", 0
+r68_n_02    db "h (RTL8402)", 0
+r68_n_05    db "h (RTL8105E)", 0
+r68_n_2e    db "h (RTL8102E/8103E)", 0
+r68_n_01    db "h (RTL8401)", 0
+r68_n_1e    db "h (RTL8101E)", 0
+r68_n_69    db "h (RTL8169/8110)", 0
+r68_n_unk   db "h (familia sin identificar)", 0
 msg_i_mac   db "Dirección MAC:   ", 0
 msg_i_link  db "Enlace:          ", 0
 msg_l_unk   db "no se sabe (esta tarjeta no lo dice)", 0

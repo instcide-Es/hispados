@@ -50,7 +50,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 
 | Orden | Para qué |
 |---|---|
-| `HSPRED [/INT:xx] [/INFO] [/U]` | El controlador. `/INFO`: tarjeta, PCI, puertos, IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). |
+| `HSPRED [/INT:xx] [/INFO] [/U]` | El controlador. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). |
 | `CONFRED [/RENOVAR] [/LIBERAR]` | La configuración IP. `/RENOVAR` (`/RENEW`) la pide otra vez; `/LIBERAR` (`/RELEASE`) la olvida. `/ALL` se acepta (como en Windows) y hace lo mismo que sin nada. |
 | `PING destino [/N:n] [/T]` | Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
@@ -184,8 +184,146 @@ disco al volver al intérprete). Por eso el mensaje final pide reiniciar.
 |---|---|---|
 | NE2000 PCI (Realtek RTL8029 y compatibles: Winbond 89C940, Compex, VIA 86C926...) | `10EC:8029`... | ✅ probada en QEMU (`-device ne2k_pci`). Datos por el «DMA remoto» de la tarjeta: sin búferes en el PC, la que menos ocupa. Sin estado del enlace. |
 | Realtek RTL8139 (y D-Link DFE-538TX, Accton) | `10EC:8139` | ✅ probada en QEMU (`-device rtl8139`). Anillo de recepción de 8 KB. |
-| Intel PRO/1000 de la familia 8254x («e1000»: 82540EM, 82545EM, 82541...) | `8086:100E`... | ✅ probada en QEMU (`-device e1000`). Registros por los puertos (IOADDR/IODATA) en las tarjetas de verdad; en QEMU, que solo los da en memoria, por el modo «irreal» (no funciona en modo V86: con HSPEMM lo dice y no se carga). |
-| Realtek RTL8111/8168, 8101E/8102E (8136), 8169 («r8169») | `10EC:8168`... | ⚠️ escrita a partir de la documentación pública de la familia, **sin probar** (QEMU no la tiene). Es la del Lenovo A275. |
+| Intel PRO/1000 de la familia 8254x («e1000»: 82540EM, 82545EM, 82541...) | `8086:100E`... | ✅ probada en QEMU (`-device e1000`) **y en VirtualBox** («Intel PRO/1000 MT Desktop (82540EM)»: confirmada por el responsable del proyecto el 16/11/2026). Registros por los puertos (IOADDR/IODATA) si la tarjeta los tiene (las de verdad y la de VirtualBox); en QEMU, que solo los da en memoria, por el modo «irreal» (no funciona en modo V86: con HSPEMM lo dice y no se carga). |
+| Intel 82574L («e1000e») | `8086:10D3` | ✅ probada en QEMU (`-device e1000e`). Misma rutina que la e1000 (descriptores clásicos, interrupción INTx); en QEMU tiene los registros por puertos, así que va también con HSPEMM. Sin probar en VMware ni en una de verdad. |
+| Realtek RTL8111/8168, 8101E/8102E/8105E (8136), 8169 («r8169») | `10EC:8168`, `10EC:8136`... | ✅ **funciona en un equipo de verdad**: Toshiba NB250-10N (`10EC:8136`, revisión PCI 05h), desde el 15/11/2026 (red y consola remota). QEMU no la tiene. En otras revisiones (8111E/F/G/H, la 8111EP del Lenovo A275), sin probar: ver «RTL8168: lo que falta para las revisiones modernas». |
+| AMD PCnet-PCI II (Am79C970A) y PCnet-FAST III (Am79C973) | `1022:2000` | ✅ probada en QEMU (`-device pcnet`). ⚠️ Es la tarjeta por omisión de **VirtualBox** y la «vlance» de **VMware**, pero en ellos **no se ha probado** (aquí solo hay QEMU). |
+| DEC 21140/21140A y 21143 «Tulip» | `1011:0009`, `1011:0019` | ✅ probada en QEMU (`-device tulip`, que se presenta como 21143). ⚠️ La 21140A es el «Adaptador de red heredado» de **Hyper-V**, pero en Hyper-V **no se ha probado**. En tarjetas de verdad, sin probar y sin elección del medio (ver «Límites de las tarjetas nuevas»). |
+
+No se hacen (paravirtualizadas, sin nada que ver con las anteriores y muy
+largas): **vmxnet3** de VMware, la tarjeta sintética de Hyper-V (**netvsc**
+sobre VMBus, la de las máquinas de generación 2) y **virtio-net**. Tampoco
+las DEC 21040/21041 (`1011:0002`, `1011:0014`): no tienen SROM con el mismo
+formato ni puerto MII, y ningún programa de máquinas virtuales las ofrece.
+
+### En una máquina virtual
+
+Qué tarjeta elegir en cada programa para que Hispa-386 tenga red:
+
+| Programa | Qué elegir | Estado |
+|---|---|---|
+| **VirtualBox** | Configuración › Red › Adaptador 1 › Avanzadas › Tipo de adaptador: **PCnet-FAST III (Am79C973)** (la de por omisión con el tipo de invitado «DOS» u «Otro») o **Intel PRO/1000 MT Desktop (82540EM)**. «Conectado a»: **NAT** (el invitado recibe 10.0.2.15 por DHCP, puerta 10.0.2.2, DNS 10.0.2.3) o **Adaptador puente** (la dirección la da el router de casa). | Intel PRO/1000 MT Desktop: confirmada (16/11/2026). PCnet: solo en QEMU. |
+| **Hyper-V** | Máquina de **generación 1** y, en su configuración, Agregar hardware › **Adaptador de red heredado** (Legacy Network Adapter), conectado a un conmutador virtual (el «Default Switch» da DHCP). El «Adaptador de red» normal (sintético) no sirve; conviene quitarlo. | Solo en QEMU (`-device tulip`). |
+| **VMware** (Workstation, Player, ESXi) | En el `.vmx`: `ethernet0.virtualDev = "vlance"` (PCnet) o `"e1000"` (82545EM); `"e1000e"` (82574L) también debería ir. `"vmxnet3"` no. | Sin probar. |
+| **QEMU** | Cualquiera: `-device ne2k_pci`, `rtl8139`, `e1000`, `e1000e`, `pcnet` o `tulip`, con `-netdev user,id=n0` (y `,netdev=n0` en la tarjeta). | Todas probadas (`tests/run_red_tests.sh`). |
+
+#### Probar en VirtualBox, paso a paso
+
+1. Máquina nueva: tipo «Other», versión «DOS» (u «Other/Unknown»), 32 MB de
+   memoria bastan. En Almacenamiento, un controlador de disquete con
+   `hispados.img` (o el disco duro/USB de la versión instalable).
+2. Configuración › Red › Adaptador 1: habilitado, «Conectado a: NAT»;
+   Avanzadas › Tipo de adaptador: **PCnet-FAST III (Am79C973)**.
+3. Arrancar y, en el símbolo del sistema: `HSPRED /INFO`. Tiene que decir
+   `Tarjeta: AMD PCnet-FAST III (Am79C973)`, `PCI: ... 1022:2000`,
+   `Chip (CSR88/89): 2625h`, la MAC que enseña VirtualBox en esa misma
+   pantalla (08:00:27:...) y `Enlace: sí`.
+4. `CONFRED`: con NAT, `Dirección IP: 10.0.2.15`, puerta `10.0.2.2`.
+5. `PING 10.0.2.2` (con NAT contesta la puerta; con adaptador puente, la
+   dirección del router) y, si hay un servidor HTTP a mano,
+   `DESCARGAR http://.../archivo`.
+6. Repetir con «PCnet-PCI II (Am79C970A)» (`Chip: 2621h`) si se quiere.
+
+Si falla, lo que hay que apuntar:
+
+| Qué sale | Qué significa |
+|---|---|
+| «No se ha encontrado ninguna tarjeta...» y una línea con `fabricante:modelo` | La tarjeta elegida no es de las admitidas (apuntar ese par). |
+| «La tarjeta PCnet no contesta por sus puertos (modo de 32 bits, DWIO)» | Tras el reinicio y el paso a 32 bits, el CSR0 no vale 0004h: esa emulación no admite DWIO. Habría que añadir el modo de 16 bits (WIO), que es el que usa Linux. |
+| «La tarjeta PCnet no termina su inicialización (INIT sin IDON)» | La tarjeta no lee el bloque de inicialización (DMA) o no pone IDON. |
+| Se carga, pero `CONFRED` dice que no hay respuesta del DHCP | Mirar `HSPRED /INFO` después: si «enviados» sube y «recibidos» se queda en 0, no llegan tramas (interrupción o anillo de recepción); si «errores» sube, el envío falla. Apuntar la línea «Paquetes» entera y el IRQ. |
+| `Enlace: no` | El cable virtual está desconectado (casilla «Cable conectado»). |
+
+#### Probar en Hyper-V, paso a paso
+
+1. Administrador de Hyper-V › Nuevo › Máquina virtual: **Generación 1**,
+   32 MB o más de memoria (sin memoria dinámica), sin disco o con el disco
+   de la versión instalable.
+2. Configuración de la máquina › Agregar hardware › **Adaptador de red
+   heredado** › Agregar; en «Conmutador virtual», elegir **Default Switch**
+   (da DHCP y salida a Internet por NAT) o un conmutador externo. Quitar el
+   «Adaptador de red» normal que pone el asistente.
+3. Unidad de disquete: Hyper-V quiere un archivo `.vfd`; sirve una copia de
+   `hispados.img` con el nombre cambiado a `hispados.vfd` (es la misma
+   imagen de 1,44 MB).
+4. Arrancar y escribir `HSPRED /INFO`. Tiene que decir
+   `Tarjeta: DEC 21140 (Tulip)`, `PCI: ... 1011:0009` (la 21140A suele dar
+   la revisión 20h), la MAC que enseña Hyper-V en Adaptador de red heredado ›
+   Características avanzadas (las de Hyper-V empiezan por `00:15:5D`) y
+   `Enlace: no se sabe` (es lo normal con esta tarjeta).
+5. `CONFRED`: con el Default Switch da una dirección privada (normalmente
+   `172.x.x.x`) y su puerta de enlace.
+6. `PING` a la puerta de enlace que haya dicho `CONFRED`.
+
+Si falla:
+
+| Qué sale | Qué significa |
+|---|---|
+| «No se ha encontrado ninguna tarjeta...» sin ninguna línea de tarjeta | La máquina es de generación 2 o no tiene el adaptador heredado. |
+| «La tarjeta Tulip no da su dirección MAC (SROM)» | La lectura de la SROM por el CSR9 no da una dirección válida ni en el octeto 20 ni en el 0. Es lo primero que puede ser distinto en Hyper-V. |
+| La MAC no es la que enseña Hyper-V | La SROM tiene otro formato: apuntar la MAC que sale. |
+| Se carga, pero el DHCP no contesta | `HSPRED /INFO`: si «enviados» sube y «recibidos» es 0, o no se envía de verdad o el filtro no deja pasar nada (la trama de configuración); si «errores» sube, los descriptores de recepción llegan sin «primero/último». Apuntar la línea «Paquetes» y el IRQ. |
+
+Lo que HSPRED hace con la Tulip pensando en la emulación de Microsoft (en
+los comentarios de `drivers/hspred.asm`, con el porqué): cada trama en un
+solo descriptor con «primero» y «último»; anillos cerrados con el bit de fin
+de anillo y, además, encadenados por el búfer 2 (como Linux, que es lo que se
+sabe que funciona allí); la trama de configuración (filtro perfecto: 15 veces
+la dirección de difusión y la de la tarjeta) enviada y esperada **antes** de
+arrancar la recepción, y si la tarjeta no la acepta, modo promiscuo; la MAC,
+de la SROM serie (con el número de bits de dirección detectado, 6 u 8, y
+buscándola en el octeto 20 o en el 0, igual que Linux); puerto MII elegido en
+el CSR6 (la 21140 no tiene otro).
+
+#### Límites de las tarjetas nuevas
+
+- **PCnet y Tulip solo se han probado contra la emulación de QEMU** (8.2).
+  VirtualBox, VMware y Hyper-V emulan las mismas tarjetas con su propio
+  código: lo que se ha hecho pensando en ellos sale de la documentación de
+  las tarjetas y de lo que hace Linux, no de haberlo visto funcionar.
+- **PCnet**: la emulación de QEMU, cuando el descriptor de recepción que le
+  toca no está libre, salta a cualquier otro que lo esté (una tarjeta de
+  verdad no lo hace); por si eso pasa con el anillo lleno, HSPRED mira el
+  anillo entero cada vez (precaución sacada de leer el código de QEMU; no se
+  ha visto fallar). Solo el modo de 32 bits (DWIO); sin multidifusión (filtro a
+  cero); la velocidad no se dice (el enlace sí, por el LED 0, BCR4); el
+  medio lo elige la tarjeta (ASEL). En una PCnet de verdad, sin probar.
+- **Tulip**: el estado del enlace no se sabe (`Enlace: no se sabe`); sin
+  multidifusión. En una tarjeta de verdad faltaría elegir el medio según la
+  SROM (10BASE-T por el SIA de la 21143, o el PHY por MII) y el dúplex: tal
+  como está, deja puesto el puerto MII/SYM, que es lo que quieren las
+  emuladas. Las 21040/21041 no están.
+- **82574L**: probada solo en QEMU; las Intel integradas en la placa (ICH8
+  en adelante, I217/I218/I219) son otra cosa y no están.
+
+### RTL8168: lo que falta para las revisiones modernas
+
+La puesta en marcha de HSPRED (`r68_init`, `r68_start`) está comprobada en
+la RTL810xE del Toshiba NB250 y **no se ha cambiado**. Repasada contra el
+controlador `r8169` de Linux (6.6), esto es lo que hace distinto y puede
+hacer falta en las 8111E-VL/F/G/H/EP; `HSPRED /INFO` enseña la revisión PCI,
+el `TxConfig` entero, el XID (bits 20-31 sin el 4 y el 5: lo que mira Linux)
+y la familia, y el estado del enlace, para saber cuál es antes de tocar nada:
+
+| Qué | HSPRED | r8169 | Para quién importa |
+|---|---|---|---|
+| `Cfg9346` (50h) | desbloquea (C0h) y vuelve a bloquear | igual | — |
+| `MaxTxPacketSize` (ECh) | 3Fh siempre | 3Fh hasta la 8168E; **27h** («EarlySize») de la 8168E-VL en adelante | 8111E-VL/F/G/H |
+| `TxConfig` (40h) | 03000700h | lo mismo, más el bit 7 (`TXCFG_AUTO_FIFO`) de la 8168E-VL en adelante | 8111E-VL/F/G/H: sin él el envío puede no salir |
+| `RxConfig` (44h) | 0000E70Eh (umbral de FIFO «sin umbral», bits 13-15: lo de la 8169/8101 antigua) | 8168C a F: bits 15 y 14 (`RX128_INT_EN`, `RX_MULTI_EN`) sin el 13; 8168G en adelante, además el bit 11 (`RX_EARLY_OFF`) | 8111G/H/EP |
+| `Config2` (53h) bit 7 y `Config5` (56h) bit 0 (CLKREQ y ASPM) | no los toca (quedan como los dejó la BIOS) | los quita antes de configurar (8168E en adelante) | portátiles con ASPM activado: cortes o latencia |
+| `CPlusCmd` (E0h) | no lo escribe | lo escribe (suma de comprobación, VLAN; en la 8169 antigua, más bits) | 8169/8110 PCI |
+| `IntrMitigate` (E2h) | no lo escribe | a cero | si la BIOS lo dejó puesto, interrupciones con retraso |
+| `MISC` (F0h) bit 19 (`RXDV_GATED_EN`) y `MCU` (D3h) bit 7 (`NOW_IS_OOB`) | no los toca | 8168G en adelante: cierra la puerta de recepción al iniciar y la **abre** al arrancar; quita `NOW_IS_OOB` | 8111G/H/EP: si quedó cerrada, no se recibe nada |
+| Arranque del PHY y del PLL (`PMCH`, 6Fh; BMCR del PHY) | nada (se fía del encendido) | lo enciende y relanza la negociación | si otro sistema lo dejó apagado: `Enlace: no` |
+| 8111EP (DASH) | nada | avisa al firmware (`rtl8168ep_driver_start`, registros OCP) | Lenovo A275 |
+| `RxMaxSize` (DAh) | 1536 | 16383 (sin filtro) | — (las tramas normales caben) |
+
+Ninguno se ha añadido: no se pueden probar aquí y el código de ahora es el
+que funciona en el Toshiba. El orden razonable, cuando haya un equipo con
+una 8111 moderna: (1) `TXCFG_AUTO_FIFO` y `MaxTxPacketSize` según el XID,
+(2) `RxConfig` según la familia, (3) quitar ASPM/CLKREQ, (4) `RXDV_GATED_EN`
+en la 8168G en adelante.
 
 ### Las tarjetas de los portátiles de las pruebas
 
@@ -198,13 +336,13 @@ volcados `PCI\*.BIN`, clase 02h):
 | HP Mini 5103 (los dos) | **Marvell Yukon 88E8059 «Yukon Optima»** (`11AB:4381`, rev. 11h, subsistema `103C:1608`) | Broadcom BCM43224 (`14E4:4353`) |
 | MacBook Air 2012 | — (no tiene; el adaptador de Apple por Thunderbolt es una Broadcom BCM57762, `tg3`) | Broadcom BCM43224 (`14E4:4353`) |
 
-- **A275**: la RTL8168 está en `HSPRED`, sin probar. Lo que falta: probarla
-  en el equipo (`HSPRED /INFO`, `CONFRED`, `PING` a la puerta de casa); si no
-  recibe, el primer sospechoso es el firmware DASH de las 8111EP, que en
-  Linux necesita un aviso de «arranque del controlador» por los registros OCP
-  (`rtl8168ep_driver_start`) y una puesta a punto del PHY que cambia en cada
-  revisión del chip. Habría que leer el `TxConfig` (la versión del chip) en
-  `/INFO` y añadir lo de esa versión.
+- **A275**: la RTL8168 de `HSPRED` funciona en el Toshiba NB250 (otra
+  revisión), pero en este equipo está sin probar. Lo que falta: probarla
+  (`HSPRED /INFO`, que ya dice el `TxConfig`, el XID y la familia; `CONFRED`;
+  `PING` a la puerta de casa); si no recibe, el primer sospechoso es el
+  firmware DASH de las 8111EP, que en Linux necesita un aviso de «arranque
+  del controlador» por los registros OCP (`rtl8168ep_driver_start`), y luego
+  lo de la tabla de «RTL8168: lo que falta para las revisiones modernas».
 - **HP Mini 5103**: la Marvell Yukon 88E8059 no tiene documentación pública
   (Marvell solo la daba con acuerdo de confidencialidad); la única fuente es
   el controlador `sky2` de Linux (GPL-2.0, compatible, unas 5.000 líneas, con
@@ -316,32 +454,41 @@ igual que las del cliente: la pila no es residente.
 
 ## Memoria
 
-| | Residente en total | de ello, búferes de DMA |
-|---|---|---|
-| HSPRED con la NE2000 | 5.040 octetos (código, datos, la pila de 512 y el PSP) | ninguno |
-| HSPRED con la RTL8139 | 14.784 | 9.744 (anillo de 8 KB y uno de envío) |
-| HSPRED con la e1000 | unos 15.100 | 9.984 (descriptores y 4 búferes de 2 KB) |
-| HSPRED con la RTL8168 | unos 13.500 | 8.192 (descriptores y búferes) |
+| | Residente en total | de ello, búferes de DMA | Antes del 16/11/2026 |
+|---|---|---|---|
+| HSPRED con la NE2000 | 4.992 octetos (código, datos, la pila de 512 y el PSP) | ninguno | 5.040 |
+| HSPRED con la RTL8139 | 14.736 | 9.744 (anillo de 8 KB y uno de envío) | 14.784 |
+| HSPRED con la e1000 o la 82574L | 15.056 | 9.984 (descriptores y 4 búferes de 2 KB) | unos 15.100 |
+| HSPRED con la RTL8168 | unos 13.400 | 8.192 (descriptores y búferes) | unos 13.500 |
+| HSPRED con la PCnet | 13.424 | 7.840 (descriptores, bloque de inicialización, 4 búferes de recepción y uno de envío) | — |
+| HSPRED con la Tulip | 13.328 | 7.776 (descriptores, 4 búferes de recepción y uno de envío) | — |
 
-El archivo `HSPRED.COM` ocupa 10 KB (la mitad es la instalación, que se
-descarta). Cada orden de red, de 6 a 8 KB (la pila TCP/IP va dentro).
+La PCnet y la Tulip no les cuestan nada a las demás: su parte residente (582
+y 556 octetos) va en dos secciones «de quita y pon» del archivo, ensambladas
+las dos para la misma dirección (justo detrás de la pila), y la instalación
+deja en la memoria solo la de la tarjeta encontrada, si es una de ellas. Las
+otras cuatro siguen juntas en la parte común (se podrían pasar al mismo
+sistema: la NE2000 bajaría a unos 3 KB). Los nombres de las tarjetas ya no
+son residentes (se copia el de la encontrada): de ahí los 48 octetos menos.
 
-Con `LH`, el código va en la memoria superior y los búferes de DMA (las tres
-tarjetas con *bus master*), en un bloque aparte de la convencional: en modo
+El archivo `HSPRED.COM` ocupa 13,7 KB (antes 10,3; lo que no es residente
+se descarta al instalarse). Cada orden de red, de 6 a 8 KB (la pila TCP/IP
+va dentro).
+
+Con `LH`, el código va en la memoria superior y los búferes de DMA (las
+tarjetas con *bus master*: todas menos la NE2000), en un bloque aparte de la convencional: en modo
 V86 la memoria superior no es memoria física continua, y la tarjeta escribe
 en la memoria física. La dirección física se pide por VCPI (DE06h) y se
 comprueba que el bloque es continuo. Medido en QEMU con HSPEMM: `LH HSPRED`
-deja 5.056 octetos en la memoria superior y, con la RTL8139, 9.776 en la
-convencional (los búferes). Para cargarse arriba, `LH` necesita un hueco del
-tamaño del archivo (10 KB): en QEMU con la ROM de arranque por red de la
-tarjeta solo quedan 8 KB de memoria superior y se queda abajo (con
-`romfile=` vacío, como en un portátil con el arranque por red apagado,
-quedan 12 KB y cabe).
+deja 5.008 octetos en la memoria superior (5.600 con la PCnet, 5.568 con la
+Tulip) y, con la RTL8139, 9.776 en la convencional (los búferes; 7.872 con
+la PCnet y 7.824 con la Tulip). Para cargarse arriba, `LH` necesita un hueco
+del tamaño del archivo (13,7 KB); si no lo hay, se queda abajo.
 
 ## Pruebas
 
 `tests/run_red_tests.sh` (en `make test`), con la red de usuario de QEMU
-(`-netdev user -device ne2k_pci|rtl8139|e1000`), dentro de un espacio de
+(`-netdev user -device ne2k_pci|rtl8139|e1000|pcnet|tulip|e1000e`), dentro de un espacio de
 nombres de red propio (`unshare -rn`): no hace falta Internet ni se toca la
 red del equipo. Arranca un servidor HTTP (`python3 -m http.server` en
 127.0.0.1, que el invitado ve como 10.0.2.2:8080) y un DNS falso
@@ -351,20 +498,41 @@ red del equipo. Arranca un servidor HTTP (`python3 -m http.server` en
 con el original con mtools), un 404, una dirección `https://` y una
 redirección; DNS (PING y DESCARGAR por nombre, y un nombre que no existe);
 `RED.INI` con `DHCP=NO`; `HSPRED /U`. Y con HSPEMM (modo V86): `LH HSPRED`
-con la NE2000 y la RTL8139 (en la memoria superior, con los búferes en la
-convencional) y la e1000, que lo dice y no se carga. Tres QEMU a la vez;
-unos 4 minutos. `SOLO=v86` hace solo la parte de HSPEMM y `GUARDAR=carpeta`
-deja allí lo que salió en la pantalla de cada QEMU. Si no se puede crear el
+con la NE2000, la RTL8139, la PCnet, la Tulip y la 82574L (en la memoria
+superior, con los búferes en la convencional) y la e1000, que lo dice y no
+se carga. Tres QEMU a la vez; unos 8 minutos. `TARJETAS="pcnet tulip"` prueba
+solo esas, `SOLO=tarjetas` deja fuera la parte de HSPEMM, `SOLO=v86` hace
+solo ésa, `GUARDAR=carpeta` deja allí lo que salió en la pantalla de cada
+QEMU y `VOLCAR=carpeta`, las tramas de cada uno (pcap, para `tcpdump -r`). Si no se puede crear el
 espacio de nombres ni usar el puerto 53, se saltan las pruebas de DNS (lo
 dice).
 
+### Un fallo de la pila que sacó la PCnet (arreglado)
+
+Con la PCnet la prueba de la redirección fallaba más de la mitad de las veces
+(«El servidor no contesta»). No era la tarjeta: `tcp_abrir` (`lib/red.inc`)
+sacaba el puerto local y el número de secuencia inicial solo del reloj de la
+BIOS (tics de 55 ms), y dos conexiones abiertas en el mismo tic (la segunda
+de una redirección, con una tarjeta que envía rápido) salían del mismo puerto
+con el mismo número: el servidor tomaba el SYN por uno repetido de la
+conexión recién cerrada y no contestaba (se ve en la captura:
+`VOLCAR=carpeta tests/run_red_tests.sh` deja un `.pcap` por QEMU). Ahora se
+suma un contador de conexiones. Con las otras tarjetas no salía porque
+tardan más de un tic entre una conexión y la siguiente.
+
 ## Pendiente
 
-- **Probar en equipos de verdad**, sobre todo la RTL8168 del A275.
+- **Probar en VirtualBox (PCnet), Hyper-V (Tulip) y VMware**: lo de esas
+  tarjetas solo se ha probado contra QEMU (ver «En una máquina virtual»).
+- **Probar en más equipos de verdad**, sobre todo la RTL8168 del A275, y
+  añadir lo de las 8111 modernas (ver la tabla de la RTL8168).
+- **PCnet en modo de 16 bits (WIO)**, de reserva, por si alguna emulación
+  (VMware) no admite el de 32; y Tulip de verdad: elección del medio por la
+  SROM (10BASE-T, MII) y estado del enlace.
 - **Marvell Yukon** (HP Mini 5103) y **Broadcom tg3** (el adaptador
   Thunderbolt de los Mac), a partir de los controladores de Linux.
-- **Más tarjetas**: Intel e1000e (82574, ICH8 en adelante), virtio-net (para
-  las máquinas virtuales), 3Com 3c59x/3c90x, AMD PCnet (VirtualBox y VMware).
+- **Más tarjetas**: Intel e1000e integradas (ICH8 en adelante: I217/I218/I219,
+  con otro PHY), virtio-net (para las máquinas virtuales), 3Com 3c59x/3c90x.
   Tarjetas ISA (NE2000 ISA, 3c509) con su dirección en la línea de órdenes.
 - **Wi-Fi**: las tarjetas de los portátiles (Broadcom BCM43224, Realtek
   RTL8822BE) necesitan su firmware, la gestión 802.11 y WPA2 (cifrado AES y

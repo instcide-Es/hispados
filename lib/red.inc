@@ -1694,6 +1694,12 @@ tcp_abrir:
         mov [t_ip], eax
         mov [t_rpuerto], bx
         call tic
+        ; dos conexiones abiertas en el mismo tic del reloj (55 ms: p. ej. al
+        ; seguir una redirección con una tarjeta rápida) no pueden salir del
+        ; mismo puerto con el mismo número de secuencia: el servidor toma el
+        ; SYN por uno repetido de la conexión que acaba de cerrar y no contesta
+        add ax, [t_nabre]
+        inc word [t_nabre]
         mov dx, ax
         and ax, 0x3FFF
         or ax, 0xC000
@@ -2087,6 +2093,7 @@ dns_res     resd 1
 t_ip        resd 1
 t_rpuerto   resw 1
 t_lpuerto   resw 1
+t_nabre     resw 1                  ; conexiones abiertas (para el puerto)
 t_snd       resd 1
 t_una       resd 1
 t_rcv       resd 1

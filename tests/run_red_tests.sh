@@ -1,7 +1,7 @@
 #!/bin/bash
-# Prueba de la red (docs/RED.md): HSPRED con las tres tarjetas de QEMU
-# (NE2000 PCI, RTL8139 y e1000) en la red de usuario de QEMU, y CONFRED,
-# PING y DESCARGAR:
+# Prueba de la red (docs/RED.md): HSPRED con las tarjetas que emula QEMU
+# (NE2000 PCI, RTL8139, e1000, AMD PCnet, DEC Tulip y e1000e/82574L) en la
+# red de usuario de QEMU, y CONFRED, PING y DESCARGAR, con cada una:
 #  1. HSPRED encuentra la tarjeta y da la MAC de QEMU (52:54:00:12:34:56).
 #  2. CONFRED: DHCP da 10.0.2.15, puerta 10.0.2.2 y DNS 10.0.2.3.
 #  3. PING 10.0.2.2 contesta (la red de usuario contesta al eco de su puerta).
@@ -15,11 +15,16 @@
 #     PING y DESCARGAR por nombre, y un nombre que no existe.
 #  6. RED.INI con DHCP=NO: la dirección a mano (10.0.2.20).
 #  7. HSPRED /U lo descarga.
-#  8. Con HSPEMM (modo V86, memoria superior): LH HSPRED con la NE2000 y con
-#     la RTL8139 (búferes de DMA en la memoria convencional, dirección física
-#     por VCPI), y la e1000 sin registros por puertos lo dice y no se carga.
+#  8. Con HSPEMM (modo V86, memoria superior): LH HSPRED con la NE2000, la
+#     RTL8139, la PCnet, la Tulip y la e1000e (búferes de DMA en la memoria
+#     convencional, dirección física por VCPI), y la e1000 sin registros por
+#     puertos lo dice y no se carga.
 # Todo va en un espacio de nombres de red propio (unshare -rn): no hace falta
 # Internet ni se toca la red del equipo. Como mucho 3 QEMU a la vez.
+# Variables: TARJETAS="pcnet tulip" (solo esas en la primera parte),
+# SOLO=tarjetas (sin la parte de HSPEMM), SOLO=v86 (solo ésa),
+# GUARDAR=carpeta (deja allí lo que salió por la pantalla de cada QEMU),
+# VOLCAR=carpeta (deja allí las tramas de cada QEMU, en formato pcap).
 # Network test (QEMU user networking, own HTTP and DNS servers).
 set -u
 cd "$(dirname "$0")/.."
@@ -66,7 +71,8 @@ corre() {
     for c in "$@"; do printf '%s\r' "${c#*|}"; sleep "${c%%|*}"; done
   } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
         -m 32 -drive file=$T/$n.img,format=raw,if=floppy -boot a -no-reboot \
-        -netdev user,id=n0 -device $nic,netdev=n0${NICOPT:-} > $T/$n.raw 2>&1
+        -netdev user,id=n0 -device $nic,netdev=n0${NICOPT:-} \
+        ${VOLCAR:+-object filter-dump,id=f0,netdev=n0,file=$VOLCAR/$n.pcap} > $T/$n.raw 2>&1
   tr -d '\r' < $T/$n.raw | iconv -f CP437 -t UTF-8 -c > $T/$n.txt
 }
 fail=0
@@ -87,19 +93,29 @@ CMDS=('3|HSPRED' '2|HSPRED /INFO' '4|CONFRED' '7|PING 10.0.2.2 /N:3'
       '2|HSPRED /INFO' '2|HSPRED /U' '2|ECHO fin-de-la-prueba')
 PIDS=()
 # (SOLO=v86: solo la segunda parte, la de HSPEMM)
-RONDA1="ne2k_pci rtl8139 e1000"
+# (TARJETAS="pcnet tulip": solo esas; SOLO=tarjetas: sin la parte de HSPEMM)
+RONDA1=${TARJETAS:-ne2k_pci rtl8139 e1000 pcnet tulip e1000e}
 [ "${SOLO:-}" = v86 ] && RONDA1=""
-for nic in $RONDA1; do
-  mkimg $T/$nic.img
-  corre $nic $nic 150 "${CMDS[@]}" &
-  PIDS+=($!)
+# de tres en tres, para no tener más de 3 QEMU a la vez
+set -- $RONDA1
+while [ $# -gt 0 ]; do
+  PIDS=()
+  for nic in ${1:-} ${2:-} ${3:-}; do
+    mkimg $T/$nic.img
+    corre $nic $nic 150 "${CMDS[@]}" &
+    PIDS+=($!)
+  done
+  wait "${PIDS[@]}"
+  shift; [ $# -gt 0 ] && shift; [ $# -gt 0 ] && shift
 done
-[ -n "$RONDA1" ] && wait "${PIDS[@]}"
 for nic in $RONDA1; do
   case $nic in
     ne2k_pci) nombre="NE2000 PCI";;
     rtl8139) nombre="Realtek RTL8139";;
     e1000) nombre="Intel PRO/1000 (e1000)";;
+    pcnet) nombre="AMD PCnet-PCI II (Am79C970A)";;
+    tulip) nombre="DEC 21143 (Tulip)";;
+    e1000e) nombre="Intel PRO/1000 (e1000e, 82574L)";;
   esac
   echo "== Hispa-DOS red: $nic =="
   check $nic "Tarjeta $nombre, MAC 52:54:00:12:34:56, IRQ"
@@ -140,6 +156,7 @@ for nic in $RONDA1; do
   if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>HSPRED$/,$p' $T/$nic.txt | head -150; fi
 done
 
+[ "${SOLO:-}" = tarjetas ] && exit $fail
 PIDS=()
 # ---- con HSPEMM: LH y búferes de DMA en la memoria convencional ----
 # (sin la ROM de arranque por red de la tarjeta, que ocupa la memoria
@@ -148,14 +165,17 @@ NICOPT=",romfile="
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\nDOS=HIGH,UMB\r\nFILES=30\r\n' > $T/CONFIG.SYS
 CMDS2=('3|LH HSPRED' '3|MEM /C' '2|HSPRED /INFO' '4|CONFRED' '4|PING 10.0.2.2 /N:2'
        "12|DESCARGAR $U/PRUEBA.BIN" '2|HSPRED /U' '2|ECHO fin-de-la-prueba')
-for nic in ne2k_pci rtl8139 e1000; do
-  mkimg $T/v$nic.img
-  mcopy -o -i $T/v$nic.img $T/CONFIG.SYS ::CONFIG.SYS
-  corre v$nic $nic 90 "${CMDS2[@]}" &
-  PIDS+=($!)
+for tanda in "ne2k_pci rtl8139 e1000" "pcnet tulip e1000e"; do
+  PIDS=()
+  for nic in $tanda; do
+    mkimg $T/v$nic.img
+    mcopy -o -i $T/v$nic.img $T/CONFIG.SYS ::CONFIG.SYS
+    corre v$nic $nic 90 "${CMDS2[@]}" &
+    PIDS+=($!)
+  done
+  wait "${PIDS[@]}"
 done
-wait "${PIDS[@]}"
-for nic in ne2k_pci rtl8139; do
+for nic in ne2k_pci rtl8139 pcnet tulip e1000e; do
   echo "== Hispa-DOS red con HSPEMM (LH): $nic =="
   check v$nic "HSPEMM 0.1"
   check v$nic "Dirección MAC:   52:54:00:12:34:56"
