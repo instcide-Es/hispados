@@ -49,7 +49,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp build/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.7 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.7.1 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -60,7 +60,7 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"; escribe "dir"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.7" "VER: "
+esta p2 "Hispa-8086 versión 0.7.1" "VER: "
 esta p2 "NUCLEO86.SYS" "DIR: "
 esta p2 "HOLA.COM             206" "DIR: "
 esta p2 "9 archivos, " "DIR: "
@@ -96,7 +96,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.7" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.7.1" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -196,7 +196,14 @@ echo "== Hispa-8086: el disco duro (C:, una partición FAT16 de 20 megas) =="
 cp build/hispa8086-360.img $T/a.img
 python3 prueba/haz_duro.py $T/hd.img > /dev/null
 arranca $T/a.img 486 $T/hd.img
-escribe "limpiar"; escribe "c:"; escribe "dir"
+escribe "limpiar"; escribe "dir c:"
+pantalla phc
+esta phc "20434944 octetos libres" "DIR C: desde A: dice lo libre de C:, no lo de A:: "
+escribe "limpiar"; escribe "c:"; escribe "dir a:hola.com"
+pantalla pha
+noesta pha "20434944 octetos libres" "y DIR A: desde C:, lo de A:: "
+esta pha "octetos libres" ""
+escribe "limpiar"; escribe "dir"
 pantalla ph0
 esta ph0 "0 archivos, 0 octetos" "DIR del disco vacío: "
 esta ph0 "20434944 octetos libres" "y su sitio libre: "

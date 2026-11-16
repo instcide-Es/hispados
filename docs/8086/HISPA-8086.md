@@ -17,7 +17,7 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 ## Dónde estamos
 
 **Etapas 0 a 3 hechas y la 4 empezada** (`h8086/`, noviembre de 2026).
-Versión 0.7.
+Versión 0.7.1.
 
 - **Arranque**: sector de arranque FAT12 y núcleo (6,8 K en el disco). En
   memoria, el núcleo con sus variables, la copia de la FAT y la pila son unos
@@ -77,9 +77,23 @@ de archivos de la etapa 1); se reconoce como «80186 u 80188» (lo que ese
 emulador es) y, como debe, no aconseja cambiar de sistema. QEMU, que es donde
 corre la prueba automática, no emula nada anterior al 486.
 
-**Lo que falta por comprobar:** un 8086 u 8088 estricto y un V20 (para la
-parte fina de la detección), la escritura en disco en un emulador de 16 bits
-y, sobre todo, un XT real con su disquetera.
+**Probado con las ROM originales de IBM** (16/11/2026, revisión independiente
+de la versión 0.7 en el emulador PCjs, que reproduce el 8088 y las máquinas de
+IBM con su BIOS de fábrica):
+
+| Máquina | Lo probado |
+|---|---|
+| IBM PC 5150 (BIOS de 24/04/1981, 8088, MDA, 64 K) | arranca del disquete de 360 K; EQUIPO y DIR. Con solo 64 K quedan 44 K libres |
+| IBM XT 5160 (BIOS de 08/11/1982, 8088, MDA y CGA, 256 K y 640 K) | EQUIPO («8086 u 8088»), MOSTRAR, programas .COM y .EXE, lotes con IF, GOTO y parámetros, `>` y `>>`, COPIAR, BORRAR, directorios, LIMPIAR, VER, ACTUALIZAR |
+| XT con disco duro de 10 megas (controladora Xebec original) | `DIR C:`, `C:` y MOSTRAR desde C: |
+| IBM AT 5170 (80286), disquetes de 1,2 M y 1,44 M | «Procesador: 80286», DIR, ACTUALIZAR |
+
+De esa revisión salió un fallo, arreglado en la 0.7.1: `DIR C:` desde `A:`
+decía el espacio libre de A: en vez del de C:.
+
+**Lo que falta por comprobar:** PASAR por un puerto serie de verdad, un V20 y
+un 80186 (para la parte fina de la detección) y, sobre todo, un XT real con su
+disquetera.
 
 **Límites de hoy:** particiones de hasta 32 megas, una sola por disco y un
 solo disco duro; se arranca desde disquete (aún no hay FDISK, FORMAT ni SYS);

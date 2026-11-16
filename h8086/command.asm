@@ -721,7 +721,14 @@ o_dir:
         call pon_num32
         mov si, m_octetos
         call pon_cad
-        DOS 0x36                    ; lo libre: grupos x sectores x 512
+        xor dl, dl                  ; lo libre, de la unidad que se ha
+        cmp byte [arg1+1], ':'      ; listado: la de la ruta, o la actual
+        jne .libre
+        mov dl, [arg1]
+        and dl, 0xDF
+        sub dl, 'A' - 1
+.libre:
+        DOS 0x36                    ; grupos x sectores x 512
         cmp ax, 0xFFFF
         je .x
         mul bx
@@ -1627,7 +1634,7 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.7", 10, 0
+m_ver       db "Hispa-8086 versión 0.7.1", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (nombre español y nombre clásico):", 10
             db "  AYUDA                     esta lista", 10
             db "  VER                       la versión del sistema", 10
