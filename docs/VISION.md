@@ -15,8 +15,7 @@ persona que tenga un equipo antiguo.
 
 | Época | Sistema | Base técnica | Equipos objetivo |
 |---|---|---|---|
-| 1981–1984 | *(nombre por decidir)* | Sistema para el 8086/8088 del PC original y el XT: modo real, disquetes, 64–640 KB | 8086/8088 |
-| 1984–1990 | *(nombre por decidir)* | Sistema para el 286 (PC AT): modo real y primeros pasos en modo protegido | 286, 1–4 MB |
+| 1981–1990 | **Hispa-8086** *(en marcha: [docs/8086](8086/HISPA-8086.md))* | Sistema de 16 bits en modo real para el PC, el XT y el AT: disquetes de 360 K en adelante, desde 256 KB; en un 286 aprovecha además la memoria alta | 8086, 8088, V20, 80186, 286 |
 | 1994 | **Hispa-DOS** | Modo real, compatible con MS-DOS 6.22 y con Windows 3.11 | 386/486, 4–16 MB |
 | Principios de los 90 | **Hispa Ventanas**: entorno gráfico propio sobre Hispa-DOS | Ventanas, multitarea cooperativa, aplicaciones de Windows 3.x | 386/486 |
 | Mediados de los 90 | **Hispa 32**: sistema de 32 bits | Multitarea real, nombres largos, Plug and Play | Pentium, 8–32 MB |
@@ -24,6 +23,11 @@ persona que tenga un equipo antiguo.
 | Principios de los 2000 | **Hispa XXI** | Sistema de 32 bits moderno | Pentium III/4 |
 | Desde mediados de los 2000 | **Hispa x64** | 64 bits, para los PC actuales | x86-64 |
 | La era ARM | **Hispa ARM**: el último de la serie | Procesadores ARM | Raspberry Pi, portátiles y equipos ARM |
+
+La familia agrupa por clase de máquina, no por procesador: un núcleo de 16
+bits (Hispa-8086, del 8086 al 286) y otro de 32 (Hispa-DOS, del 386 en
+adelante). Todos se actualizan entre sí y cada uno recomienda el que le
+corresponde al equipo donde arranca (ver [docs/8086](8086/HISPA-8086.md)).
 
 Todos los sistemas llevan el nombre de la familia **Hispa**. No se usan nombres
 de países ni de lugares concretos: todos los países de habla hispana tienen el
