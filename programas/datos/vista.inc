@@ -198,6 +198,21 @@ pinta_pie:
         mov esi, t_p_reg1
 .c2:
         call hvl_cad
+        push ebx
+        call rango
+        jc .sinr
+        mov al, ','
+        stosb
+        mov al, ' '
+        stosb
+        mov eax, edx
+        sub eax, ebx
+        inc eax
+        call hvl_num
+        mov esi, t_p_eleg
+        call hvl_cad
+.sinr:
+        pop ebx
         cmp byte [f_on], 0
         je .o
         mov esi, t_p_filtro
@@ -263,26 +278,46 @@ pinta_pie:
         popad
         ret
 
-; (interna) el filtro, con palabras, a EDI: «Población contiene «alb»»
+; (interna) el filtro, con palabras, a EDI: «Población contiene «alb» y
+; Cuota es mayor que «10»»
 filtro_txt:
+        push esi
+        mov esi, fc1
+        call cond_txt
+        cmp byte [f_dos], 0
+        je .x
+        mov esi, t_p_y
+        cmp byte [f_dos], 1
+        je .y
+        mov esi, t_p_o
+.y:
+        call hvl_cad
+        mov esi, fc2
+        call cond_txt
+.x:
+        pop esi
+        ret
+; (interna) la condición ESI, con palabras, a EDI
+cond_txt:
         push eax
         push ebx
+        push ecx
         push esi
-        mov eax, [f_campo]
+        mov ecx, esi
+        mov eax, [ecx+FC_CAMPO]
         call cam_ptr
         mov esi, ebx
         call hvl_cad
         mov al, ' '
         stosb
-        mov eax, [f_op]
+        mov eax, [ecx+FC_OP]
         mov esi, [op_nom+eax*4]
         call hvl_cad
         cmp eax, 4
         je .x
         mov ax, ' «'
         stosw
-        mov esi, f_txt
-        push ecx
+        lea esi, [ecx+FC_TXT]
         mov ecx, 40
 .c:
         lodsb
@@ -292,11 +327,11 @@ filtro_txt:
         dec ecx
         jnz .c
 .c1:
-        pop ecx
         mov al, '»'
         stosb
 .x:
         pop esi
+        pop ecx
         pop ebx
         pop eax
         ret
@@ -503,18 +538,24 @@ pinta_tabla:
         mov ebx, GY0
         mov ecx, [g_an]
         HV dc_rect
-        mov eax, [sel]              ; la fila elegida
-        sub eax, [top]
-        js .rayas
-        cmp eax, [g_filas]
+        COLOR C_PETROLEO            ; las filas elegidas
+        xor esi, esi
+.el:
+        cmp esi, [g_filas]
         jae .rayas
-        COLOR C_PETROLEO
-        imul ebx, eax, FIL_AL
+        mov edx, [top]
+        add edx, esi
+        call fila_elegida
+        jne .el1
+        imul ebx, esi, FIL_AL
         add ebx, GY0
         xor eax, eax
         mov ecx, [g_an]
         mov edx, FIL_AL - 1
         HV dc_rect
+.el1:
+        inc esi
+        jmp .el
 .rayas:
         COLOR C_ARENA               ; las rayas entre filas
         xor esi, esi
@@ -643,11 +684,14 @@ pinta_columna:
         mov edx, [top]
         add edx, ebp                ; EDX=su sitio en la vista
         COLOR C_TINTA
-        cmp edx, [sel]
+        call fila_elegida
         jne .txt
+        cmp edx, [sel]
+        jne .clara
         mov eax, [c_i]
         cmp eax, [col]
         je .ocre
+.clara:
         COLOR C_CREMA               ; fila elegida: letra clara
         jmp .txt
 .ocre:

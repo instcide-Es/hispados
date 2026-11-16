@@ -24,10 +24,23 @@ rh_fin      resd 1
 rh_delta    resd 1
 rh_tam      resd 1
 va_fin      resd 1
+dj_tam      resd 1                  ; el diario: el tamaño y la suma del .BDD
+dj_suma     resd 1                  ;   que hay en el disco,
+dj_bytes    resd 1                  ;   lo que mide el diario (0: no hay)
+dj_fin      resd 1
+dj_cab      resb 16
+dj_no       resb 1
+            alignb 4
+techo       resd 1                  ; hasta dónde puede crecer la base: por
+                                    ;   encima están las fotos de deshacer
+des_n       resd 1                  ; cuántas fotos hay
+des_tam     resd DES_MAX            ;   y lo que mide cada una
 %endmacro
 
 ; ---- la memoria: un bloque con los búferes de trabajo y, detrás, la arena;
 ;      se pide lo más que haya de 2 MB a 448 K. CF=1 si no hay ----
+DJ_MAX      equ 24 * 1024           ; lo más que crece el diario
+DES_MAX     equ 8                   ; pasos que se pueden deshacer
 M_FIJO      equ MAX_CAM * EB_TAM + RB_TAM + 2 * MAX_REG * 4
             align 4
 mem_tam     dd 2048 * 1024, 1024 * 1024, 448 * 1024, 0
@@ -60,6 +73,7 @@ memoria:
         mov [arena], eax
         add eax, [esi]
         mov [arena_fin], eax
+        mov [techo], eax
         popad
         clc
         ret
@@ -71,6 +85,7 @@ memoria:
 ; ---- la base vacía ----
 base_vacia:
         pushad
+        call des_vacia
         mov edi, [arena]
         mov ecx, H_CAB / 4
         xor eax, eax
@@ -221,6 +236,7 @@ indexa:
 ; la vista: los registros que pasan el filtro, y en su orden
 filtra:
         pushad
+        mov dword [anc], -1
         mov edi, [vis]
         xor ecx, ecx
         xor edx, edx
@@ -1042,20 +1058,46 @@ contiene:
 ; =============================================================================
 ;  El filtro y el orden
 ; =============================================================================
-; EAX=registro: ¿pasa el filtro? -> CF=0 si pasa
+; EAX=registro: ¿pasa el filtro? -> CF=0 si pasa. El filtro son una o dos
+; condiciones (fc1 y fc2); con dos, tienen que cumplirse las dos ([f_dos]=1)
+; o basta con una (2)
 pasa:
         cmp byte [f_on], 0
         jne .hay
         clc
         ret
 .hay:
+        push ebx
+        push esi
+        mov esi, fc1
+        call pasa_una
+        setnc bl                    ; BL=1 si pasa la primera
+        cmp byte [f_dos], 0
+        je .fin
+        mov esi, fc2
+        call pasa_una
+        setnc bh
+        cmp byte [f_dos], 1
+        jne .o
+        and bl, bh
+        jmp .fin
+.o:
+        or bl, bh
+.fin:
+        cmp bl, 1                   ; CF=1 si no pasa
+        pop esi
+        pop ebx
+        ret
+; (interna) EAX=registro ESI=una condición (FC_*): CF=0 si la cumple
+pasa_una:
         pushad
+        mov ebp, esi
         mov esi, [idx]
         mov esi, [esi+eax*4]
-        mov eax, [f_campo]
+        mov eax, [ebp+FC_CAMPO]
         call val_ptr                ; ESI=el valor
         movzx ebx, byte [tipos+eax]
-        mov ecx, [f_op]
+        mov ecx, [ebp+FC_OP]
         cmp ecx, 4
         je .vacio
         test ecx, ecx
@@ -1068,39 +1110,39 @@ pasa:
         je .sn
         movzx ecx, word [esi]       ; texto
         add esi, 2
-        mov edi, f_txt
-        mov edx, [f_len]
+        lea edi, [ebp+FC_TXT]
+        mov edx, [ebp+FC_LEN]
         call cmp_txt
         jmp .mira
 .num:
         mov eax, [esi]
         cmp eax, VACIO              ; lo que está vacío no es mayor ni menor
         jne .n1
-        cmp dword [f_val], VACIO
+        cmp dword [ebp+FC_VAL], VACIO
         jne .no
-        cmp dword [f_op], 1
+        cmp dword [ebp+FC_OP], 1
         je .si
         jmp .no
 .fec:
         mov eax, [esi]
         test eax, eax
         jnz .n1
-        cmp dword [f_val], 0
+        cmp dword [ebp+FC_VAL], 0
         jne .no
-        cmp dword [f_op], 1
+        cmp dword [ebp+FC_OP], 1
         je .si
         jmp .no
 .sn:
         movzx eax, byte [esi]
 .n1:
-        cmp eax, [f_val]
+        cmp eax, [ebp+FC_VAL]
         mov eax, 0
         je .mira
         mov eax, 1
         jg .mira
         mov eax, -1
 .mira:                              ; EAX: el valor frente al del filtro
-        mov ecx, [f_op]
+        mov ecx, [ebp+FC_OP]
         cmp ecx, 1
         jne .m2
         test eax, eax
@@ -1118,7 +1160,7 @@ pasa:
         jmp .no
 .contiene:
         mov al, bl                  ; en su texto, como se ve
-        mov ecx, [f_campo]
+        mov ecx, [ebp+FC_CAMPO]
         mov dl, [decs+ecx]
         mov edi, vbuf
         mov byte [fmt_mil], 0
@@ -1126,8 +1168,8 @@ pasa:
         mov ecx, edi
         sub ecx, vbuf
         mov esi, vbuf
-        mov edi, f_txt
-        mov edx, [f_len]
+        lea edi, [ebp+FC_TXT]
+        mov edx, [ebp+FC_LEN]
         call contiene
         jc .no
         jmp .si
@@ -1303,8 +1345,14 @@ hueco:
         mov ebx, [fin]
         mov edx, ebx
         add edx, eax
-        cmp edx, [arena_fin]
+        cmp edx, [techo]
+        jbe .cabe
+        cmp dword [des_n], 0        ; no cabe: antes que decir que no, se
+        je .no                      ; renuncia a deshacer lo anterior
+        call des_vacia
+        cmp edx, [techo]
         ja .no
+.cabe:
         mov ecx, ebx
         sub ecx, edi                ; lo que se corre
         test eax, eax
@@ -1332,6 +1380,149 @@ hueco:
 .no:
         popad
         stc
+        ret
+
+; ---- deshacer: antes de cada cambio se guarda una foto de la base entera
+;      en lo alto del bloque (las bases son pequeñas: una foto son unas
+;      decenas de K). Las fotos se apilan hacia abajo desde [arena_fin];
+;      [techo] es donde empieza la más nueva, y la base no crece más allá ----
+des_vacia:
+        push eax
+        mov dword [des_n], 0
+        mov eax, [arena_fin]
+        mov [techo], eax
+        pop eax
+        ret
+; guarda la foto. Si no cabe (hay que dejar sitio para que la base crezca y
+; para rehacer una tabla), se olvidan las más viejas; si ni así, no hay foto
+des_guarda:
+        pushad
+        mov ebx, [fin]
+        sub ebx, [arena]            ; EBX=lo que mide la base
+        cmp dword [des_n], DES_MAX
+        jb .mira
+        call des_olvida
+.mira:
+        mov eax, [techo]
+        sub eax, [fin]              ; lo que hay libre
+        lea edx, [ebx+ebx+REG_MAX+65536]
+        cmp eax, edx
+        jae .pon
+        cmp dword [des_n], 0
+        je .x
+        call des_olvida
+        jmp .mira
+.pon:
+        mov eax, [techo]
+        sub eax, ebx
+        mov [techo], eax
+        mov edi, eax
+        mov esi, [arena]
+        mov ecx, ebx
+        rep movsb
+        mov eax, [des_n]
+        mov [des_tam+eax*4], ebx
+        inc dword [des_n]
+.x:
+        popad
+        ret
+; (interna) olvida la foto más vieja (la de más arriba): las demás suben
+des_olvida:
+        pushad
+        mov edx, [des_tam]
+        mov ecx, [arena_fin]
+        sub ecx, edx
+        sub ecx, [techo]            ; lo que ocupan las demás
+        mov esi, [arena_fin]
+        sub esi, edx
+        dec esi
+        mov edi, [arena_fin]
+        dec edi
+        std
+        rep movsb
+        cld
+        add [techo], edx
+        dec dword [des_n]
+        mov ecx, [des_n]
+        mov esi, des_tam + 4
+        mov edi, des_tam
+        rep movsd
+        popad
+        ret
+; pone la base como en la última foto -> CF=1 si no hay ninguna
+des_vuelve:
+        pushad
+        mov eax, [des_n]
+        test eax, eax
+        jz .no
+        dec eax
+        mov [des_n], eax
+        mov ecx, [des_tam+eax*4]
+        mov esi, [techo]
+        mov edi, [arena]
+        add [techo], ecx
+        rep movsb
+        mov [fin], edi
+        mov eax, [arena]
+        mov eax, [eax+H_ACT]
+        call tab_pon
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
+        ret
+
+; quita de una vez los registros que están en la vista del sitio EBX al EDX
+borra_varios:
+        pushad
+        mov edi, [ebufs]            ; un octeto por registro: 1 = se quita
+        mov ecx, [n_reg]
+        xor al, al
+        rep stosb
+        mov edi, [ebufs]
+        mov esi, [vis]
+.m:
+        cmp ebx, edx
+        ja .m9
+        mov eax, [esi+ebx*4]
+        mov byte [edi+eax], 1
+        inc ebx
+        jmp .m
+.m9:
+        mov ebx, [ebufs]
+        mov esi, [idx]
+        mov esi, [esi]              ; el primer registro
+        mov edi, esi
+        xor edx, edx                ; EDX=el registro
+        xor ebp, ebp                ; EBP=cuántos se quitan
+.r:
+        cmp edx, [n_reg]
+        jae .r9
+        movzx ecx, word [esi]
+        cmp byte [ebx+edx], 0
+        jne .q
+        rep movsb
+        jmp .s
+.q:
+        add esi, ecx
+        inc ebp
+.s:
+        inc edx
+        jmp .r
+.r9:
+        mov eax, esi
+        sub eax, edi                ; lo que encoge la tabla
+        mov ecx, [fin]
+        sub ecx, esi
+        rep movsb                   ; lo de detrás (las otras tablas), a su sitio
+        sub [fin], eax
+        mov ebx, [tab]
+        sub [ebx+T_TAM], eax
+        sub [ebx+T_NREG], ebp
+        call indexa
+        popad
         ret
 
 ; pone el registro montado en [rbuf] en la tabla: EAX=el registro que cambia
@@ -1402,7 +1593,7 @@ tabla_nueva:
         shl eax, 5
         add eax, T_CAB
         lea edx, [edi+eax]
-        cmp edx, [arena_fin]
+        cmp edx, [techo]
         ja .no
         push edi
         push eax
@@ -1512,7 +1703,7 @@ rehaz:
         shl eax, 5
         add eax, T_CAB + 16
         add eax, edi
-        cmp eax, [arena_fin]
+        cmp eax, [techo]
         ja .no
         mov esi, ebx
         mov ecx, T_CAB
@@ -1544,7 +1735,7 @@ rehaz:
         cmp ebp, [n_reg]
         jae .hechos
         lea eax, [edi+REG_MAX]
-        cmp eax, [arena_fin]
+        cmp eax, [techo]
         ja .no
         mov [rh_reg], edi
         add edi, 2
@@ -1704,6 +1895,9 @@ pon_ruta:
         mov edi, ruta_ant
         mov eax, 'ANT'
         call hvl_ruta
+        mov edi, ruta_bdj
+        mov eax, 'BDJ'
+        call hvl_ruta
         popad
         ret
 
@@ -1757,6 +1951,14 @@ guarda:
         call renombra
         jc .mal
         mov byte [sucio], 0
+        mov ebx, [arena]            ; el diario era del archivo de antes
+        mov eax, [ebx+H_TAM]
+        mov [dj_tam], eax
+        mov eax, [ebx+H_SUMA]
+        mov [dj_suma], eax
+        mov dword [dj_bytes], 0
+        mov esi, ruta_bdj
+        HV dos_borrar
         popad
         ret
 .mal:
@@ -1809,6 +2011,306 @@ escribe_base:
         popad
         stc
         ret
+; ---- el diario (ver la cabecera de datos.asm) ----
+; (interna) ESI=datos ECX=octetos EDX=suma que se lleva -> EDX
+suma_mas:
+        push eax
+        push ecx
+        push esi
+        xor eax, eax
+.s:
+        test ecx, ecx
+        jz .x
+        lodsb
+        add edx, eax
+        rol edx, 1
+        dec ecx
+        jmp .s
+.x:
+        pop esi
+        pop ecx
+        pop eax
+        ret
+; apunta en el diario un cambio de la tabla que se ve: BL='P' (se ha puesto
+; el registro EAX, o uno nuevo si es -1: está en [rbuf]) o 'Q' (se va a
+; quitar el registro EAX). Si el diario ya es grande, o no se puede escribir,
+; se guarda la base entera (para 'Q', después de quitar: lo hace quien llama
+; con [sucio])
+dj_apunta:
+        pushad
+        mov ecx, [dj_bytes]
+        cmp ecx, DJ_MAX
+        ja .entera
+        mov edx, [fin]
+        sub edx, [arena]
+        cmp ecx, edx
+        ja .entera
+        cmp byte [sucio], 0         ; (hay más cosas pendientes: todo de una vez)
+        jne .entera
+        mov edi, dj_cab
+        mov [edi], bl
+        mov ecx, [tab_i]
+        mov [edi+1], cl
+        mov word [edi+2], 0
+        mov [edi+4], eax
+        cmp bl, 'P'
+        jne .a
+        mov esi, [rbuf]
+        mov cx, [esi]
+        mov [edi+2], cx
+.a:
+        xor edx, edx                ; la suma del apunte
+        mov esi, dj_cab
+        mov ecx, 8
+        call suma_mas
+        mov esi, [rbuf]
+        movzx ecx, word [dj_cab+2]
+        call suma_mas
+        mov [dj_fin], edx
+        ; el archivo: nuevo, con su cabecera, o por el final
+        cmp dword [dj_bytes], 0
+        jne .abre
+        mov esi, ruta_bdj
+        HV dos_crear
+        jc .entera
+        mov ebx, eax
+        mov dword [dj_cab+8], 'HBDJ'
+        mov dword [dj_cab+12], 1
+        lea esi, [dj_cab+8]
+        mov ecx, 8
+        HV dos_escribir
+        jc .mal
+        mov esi, dj_tam             ; (y detrás, dj_suma)
+        mov ecx, 8
+        HV dos_escribir
+        jc .mal
+        mov dword [dj_bytes], 16
+        jmp .escribe
+.abre:
+        mov esi, ruta_bdj
+        mov al, 1
+        HV dos_abrir
+        jc .entera
+        mov ebx, eax
+        mov al, 0
+        mov edx, [dj_bytes]
+        HV dos_puntero
+        jc .mal
+.escribe:
+        mov esi, dj_cab
+        mov ecx, 8
+        HV dos_escribir
+        jc .mal
+        movzx ecx, word [dj_cab+2]
+        jecxz .sind
+        mov esi, [rbuf]
+        HV dos_escribir
+        jc .mal
+.sind:
+        mov esi, dj_fin
+        mov ecx, 4
+        HV dos_escribir
+        jc .mal
+        HV dos_cerrar
+        jc .entera
+        movzx ecx, word [dj_cab+2]
+        add ecx, 12
+        add [dj_bytes], ecx
+        popad
+        ret
+.mal:
+        HV dos_cerrar
+.entera:
+        mov byte [sucio], 1
+        popad
+        cmp bl, 'Q'                 ; (al quitar, la base se guarda después)
+        je .x
+        call guarda
+.x:
+        ret
+
+; (interna) ESI=un registro: ¿cuadra con los campos de la tabla que se ve?
+; -> CF=1 si no
+reg_vale:
+        pushad
+        movzx edx, word [esi]
+        add edx, esi                ; donde acaba
+        add esi, 2
+        xor ecx, ecx
+.c:
+        cmp ecx, [n_cam]
+        jae .f
+        mov al, [tipos+ecx]
+        cmp al, T_NUM
+        je .c4
+        cmp al, T_FECHA
+        je .c4
+        cmp al, T_SINO
+        je .c1
+        lea eax, [esi+2]
+        cmp eax, edx
+        ja .no
+        movzx eax, word [esi]
+        cmp eax, MEMO_MAX
+        ja .no
+        lea esi, [esi+eax+2]
+        jmp .s
+.c4:
+        add esi, 4
+        jmp .s
+.c1:
+        inc esi
+.s:
+        cmp esi, edx
+        ja .no
+        inc ecx
+        jmp .c
+.f:
+        cmp esi, edx
+        jne .no
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
+        ret
+
+; (interna) al abrir: aplica a la base recién leída los apuntes del diario,
+; si es el suyo. Se lee entero en lo alto del bloque. Si acaba en un apunte a
+; medias (o hay algo que no cuadra), se aplica hasta ahí y se deja dicho en
+; [sucio] que hay que guardar la base entera
+dj_aplica:
+        pushad
+        mov esi, ruta_bdj
+        xor al, al
+        HV dos_abrir
+        jc .x
+        mov ebx, eax
+        mov al, 2
+        xor edx, edx
+        HV dos_puntero
+        mov ecx, eax                ; ECX=lo que mide
+        push ecx
+        xor al, al
+        xor edx, edx
+        HV dos_puntero
+        pop ecx
+        mov eax, [arena_fin]
+        sub eax, [fin]
+        sub eax, 2 * REG_MAX
+        jl .cierra
+        cmp ecx, eax
+        ja .cierra
+        cmp ecx, 16
+        jb .cierra
+        mov edi, [arena_fin]
+        sub edi, ecx
+        mov [techo], edi            ; (la base no puede crecer sobre él)
+        push edi
+.l:
+        mov ecx, [arena_fin]
+        sub ecx, edi
+        jz .l9
+        cmp ecx, 16384
+        jbe .l1
+        mov ecx, 16384
+.l1:
+        HV dos_leer
+        jc .l9
+        test eax, eax
+        jz .l9
+        add edi, eax
+        jmp .l
+.l9:
+        HV dos_cerrar
+        mov ebp, edi                ; EBP=donde acaba lo leído
+        pop esi                     ; ESI=el diario
+        cmp dword [esi], 'HBDJ'
+        jne .fin
+        cmp dword [esi+4], 1
+        jne .fin
+        mov eax, [dj_tam]
+        cmp [esi+8], eax
+        jne .fin
+        mov eax, [dj_suma]
+        cmp [esi+12], eax
+        jne .fin
+        mov dword [dj_bytes], 16
+        add esi, 16
+.e:
+        cmp esi, ebp
+        je .fin                     ; todos enteros
+        lea eax, [esi+12]
+        cmp eax, ebp
+        ja .roto
+        movzx ecx, word [esi+2]
+        lea eax, [esi+ecx+12]
+        cmp eax, ebp
+        ja .roto
+        xor edx, edx
+        add ecx, 8
+        call suma_mas
+        cmp [esi+ecx], edx
+        jne .roto
+        movzx eax, byte [esi+1]     ; su tabla, a la vista (para leerla)
+        mov ebx, [arena]
+        cmp eax, [ebx+H_NTAB]
+        jae .roto
+        mov [tab_i], eax
+        call tab_ptr
+        mov [tab], ebx
+        mov byte [f_on], 0
+        call indexa
+        mov eax, [esi+4]            ; el registro
+        cmp byte [esi], 'Q'
+        je .q
+        cmp byte [esi], 'P'
+        jne .roto
+        cmp eax, -1
+        je .p1
+        cmp eax, [n_reg]
+        jae .roto
+.p1:
+        movzx ecx, word [esi+2]
+        cmp ecx, 2
+        jb .roto
+        cmp cx, [esi+8]             ; (el registro mide lo que dice el apunte)
+        jne .roto
+        push esi
+        add esi, 8
+        call reg_vale
+        jc .roto1
+        mov edi, [rbuf]
+        rep movsb
+        pop esi
+        call reg_pon
+        jc .roto
+        jmp .sig
+.q:
+        cmp eax, [n_reg]
+        jae .roto
+        call reg_quita
+.sig:
+        movzx ecx, word [esi+2]
+        lea esi, [esi+ecx+12]
+        add ecx, 12
+        add [dj_bytes], ecx
+        jmp .e
+.roto1:
+        pop esi
+.roto:
+        mov byte [dj_no], 2         ; (hay que rehacer el archivo)
+.fin:
+        call des_vacia
+        popad
+        ret
+.cierra:
+        HV dos_cerrar
+.x:
+        popad
+        ret
+
 ; guarda si hay algo pendiente (el ancho de una columna, el orden, la vista)
 guarda_si:
         cmp byte [sucio], 0
@@ -2040,6 +2542,8 @@ valida:
 abre:
         push ebx
         push esi
+        call des_vacia
+        mov byte [dj_no], 0
         xor ebx, ebx                ; EBX=1 si hay algún archivo
         mov esi, ruta_bdd
         call .prueba
@@ -2054,15 +2558,29 @@ abre:
         lea eax, [ebx+1]
         jmp .x
 .rec:
+        mov byte [dj_no], 1         ; (el diario no era de esta copia)
         mov byte [aviso_ini], 1     ; se ha recuperado una copia: se dice y
         mov byte [sucio], 1         ; se guarda con su nombre
 .ok:
         mov esi, [arena]
         mov eax, [esi+H_TAM]
+        mov [dj_tam], eax
         add eax, esi
         mov [fin], eax
+        mov eax, [esi+H_SUMA]
+        mov [dj_suma], eax
+        mov dword [dj_bytes], 0
+        cmp byte [dj_no], 0
+        jne .sind
+        call dj_aplica
+.sind:
+        mov esi, [arena]
         mov eax, [esi+H_ACT]
         call tab_pon
+        cmp byte [dj_no], 2         ; el diario acababa a medias: la base,
+        jne .bien                   ; entera, al disco
+        call guarda
+.bien:
         xor eax, eax
 .x:
         pop esi

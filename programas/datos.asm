@@ -15,7 +15,13 @@
 ;      por una condición y el resumen de un campo (suma, media, mayor, menor);
 ;    - exportar a .CSV (para Cuentas), importar un .CSV como tabla nueva,
 ;      imprimir el listado y etiquetas de dos columnas (puerto paralelo);
-;    - un campo puede «venir de otra tabla»: su valor se elige de una lista.
+;    - un campo puede «venir de otra tabla»: su valor se elige de una lista;
+;    - deshacer los últimos cambios (hasta ocho), copiar y pegar por el
+;      portapapeles del sistema, elegir varios registros (Mayús+flechas,
+;      Mayús+clic) para borrarlos, exportarlos o imprimirlos, buscar al
+;      teclear y filtros de dos condiciones;
+;    - informes a medida (columnas, grupos con subtotales, 132 columnas, a
+;      la impresora o a un .TXT) y cartas o recibos en serie con un modelo.
 ;
 ;  LOS LÍMITES (se dicen cuando se alcanzan): 16 tablas por base, 32 campos
 ;  por tabla, 8.000 registros por tabla, 100 letras en un texto y 2.000 en un
@@ -26,7 +32,8 @@
 ;  LAS TECLAS: flechas, RePág, AvPág, Inicio y Fin para moverse; Ins añade,
 ;  Intro cambia y Supr borra el registro; F4 pasa de la rejilla a la ficha;
 ;  F3 busca el siguiente; F5, el resumen; F6, las tablas; Ctrl+U base nueva,
-;  Ctrl+A abrir, Ctrl+P imprimir, Ctrl+B buscar y Ctrl+F filtrar.
+;  Ctrl+A abrir, Ctrl+P imprimir, Ctrl+B buscar, Ctrl+F filtrar, Ctrl+Z
+;  deshacer, Ctrl+C copiar, Ctrl+V pegar y Ctrl+E elegir todos.
 ;
 ;  LA MEMORIA. Toda la base está en memoria, en un bloque de memoria extendida
 ;  (mem_bloque), con la misma forma que en el archivo: así guardar es escribir
@@ -65,6 +72,27 @@
 ;                                     10^decimales; 80000000h = vacío
 ;               fecha                 dd aaaammdd; 0 = vacía
 ;               sí o no               db 0 o 1
+;
+;  EL DIARIO (.BDJ). Para no reescribir la base entera cada vez que se toca
+;  un registro (en un disquete, con miles de fichas, se nota), los cambios de
+;  un solo registro se apuntan al final de un archivo aparte, el diario, con
+;  el mismo nombre y la extensión .BDJ; el .BDD no se toca. Al abrir se lee el
+;  .BDD y se le aplican los apuntes del diario. El .BDD no cambia de formato:
+;  uno sin diario (los de antes) se abre igual. El diario:
+;       0  "HBDJ"     4  dd versión (1)
+;       8  dd tamaño y 12 dd suma del .BDD al que pertenece (los de su
+;          cabecera): si no coinciden con el .BDD que hay, el diario es de
+;          otra versión de la base y no se usa
+;      y detrás los apuntes, cada uno:
+;       0  db 'P' (poner el registro) o 'Q' (quitarlo)
+;       1  db la tabla       2  dw cuántos octetos de datos
+;       4  dd el registro (su número en la tabla; -1 en 'P': uno nuevo)
+;       8  los datos ('P': el registro, como en el .BDD; 'Q': nada)
+;          dd suma de comprobación del apunte (cabecera y datos)
+;  Un apunte a medio escribir (un corte de luz) no pasa su suma: se aplica
+;  hasta el último entero y se rehace el .BDD. Todo lo demás (diseño, borrar
+;  varios, importar, deshacer) guarda la base entera, y también cuando el
+;  diario pasa de 24 K o de lo que ocupa la base: entonces el diario se borra.
 ;
 ;  GUARDAR SIN SUSTOS. La base se guarda sola cada vez que cambia. Se escribe
 ;  entera en un archivo temporal (.$$$); solo cuando está completo, el archivo
@@ -131,6 +159,14 @@ AN_MIN      equ 24                  ; lo más estrecha y lo más ancha que
 AN_MAX      equ 600                 ; puede ser una columna
 ID_BV       equ 901                 ; las barras de desplazamiento
 ID_BH       equ 902
+ID_PUENTE   equ 900                 ; el cuadro escondido del portapapeles
+; una condición del filtro
+FC_CAMPO    equ 0                   ; dd: el campo
+FC_OP       equ 4                   ; dd: 0 contiene, 1 igual, 2 mayor, 3 menor, 4 vacío
+FC_VAL      equ 8                   ; dd: el valor, si es número, fecha o sí/no
+FC_LEN      equ 12                  ; dd: lo que mide el texto
+FC_TXT      equ 16                  ; el texto
+FC_TAM      equ 16 + TXT_MAX + 4
 
 ; ---- órdenes ----
 O_NUEVA     equ 101
@@ -141,12 +177,18 @@ O_EXPORTAR  equ 105
 O_IMPRIMIR  equ 106
 O_SALIR     equ 107
 O_ETIQ      equ 108
+O_INFORME   equ 109
+O_CARTAS    equ 110
 O_R_MAS     equ 111
 O_R_CAMB    equ 112
 O_R_BORRA   equ 113
 O_BUSCAR    equ 114
 O_SIGUE     equ 115
 O_R_DUP     equ 116
+O_DESHACER  equ 117
+O_COPIAR    equ 118
+O_PEGAR     equ 119
+O_TODO      equ 120
 O_V_TABLA   equ 121
 O_V_FICHA   equ 122
 O_FILTRAR   equ 123
@@ -212,6 +254,7 @@ dat_plant:
 hijos:
         PLANTILLA HV_c_barra, 0, E_HIJA, 0, 0, BD_AN, 50, ID_BV
         PLANTILLA HV_c_barra, 0, E_HIJA | BDS_HORIZ, 0, 0, 50, BD_AN, ID_BH
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_OCULTA | ES_MULTI, 0, 0, 40, 40, ID_PUENTE
         dd 0
 
 dat_menu:
@@ -234,6 +277,10 @@ dat_menu:
         db "&Imprimir el listado    Ctrl+P", 0
         dw O_ETIQ
         db "Imprimir e&tiquetas...", 0
+        dw O_INFORME
+        db "In&forme a medida...", 0
+        dw O_CARTAS
+        db "Ca&rtas y recibos en serie...", 0
         dw 0
         db 0
         dw O_SALIR
@@ -254,6 +301,16 @@ dat_menu:
         db "B&uscar...              Ctrl+B", 0
         dw O_SIGUE
         db "Buscar el &siguiente        F3", 0
+        dw 0
+        db 0
+        dw O_DESHACER
+        db "D&eshacer               Ctrl+Z", 0
+        dw O_COPIAR
+        db "C&opiar                 Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar en el campo      Ctrl+V", 0
+        dw O_TODO
+        db "Elegir &todos           Ctrl+E", 0
         dw 0xFFFF
         db "&Ver", 0
         dw O_V_TABLA
@@ -560,6 +617,12 @@ t_e_abrir   db "No se ha podido abrir esa base: el archivo no está,", 10
 t_recupera  db "El archivo de la base estaba a medias (¿un corte de luz?).", 10
             db "Se ha recuperado la última copia entera.", 0
 t_e_sintab  db "Antes hay que hacer una tabla: pulse «Tablas...».", 0
+t_e_nodes   db "No hay nada que deshacer.", 0
+t_e_pegar   db "Lo que hay en el portapapeles no vale para este campo.", 0
+t_q_borrarn db "¿Borrar los registros elegidos? Son ", 0
+t_p_eleg    db " elegidos", 0
+t_p_y       db " y ", 0
+t_p_o       db " o ", 0
 t_e_sinreg  db "No hay ningún registro elegido.", 0
 t_e_lleno   db "No cabe más: la base ha llenado la memoria que tiene Datos.", 10
             db "Borre lo que no haga falta o reparta los datos en dos bases.", 0
@@ -599,6 +662,7 @@ entrada:
         cld
         mov [param], edi
         mov dword [arr_col], -1
+        mov dword [anc], -1
         mov edi, ruta_def           ; la base de siempre: DATOS.BDD, al lado
         mov eax, 'BDD'
         call hvl_ruta
@@ -662,6 +726,8 @@ dat_proc:
         je orden
         cmp eax, WM_KEYDOWN
         je tecla
+        cmp eax, WM_CHAR
+        je letra
         cmp eax, WM_LBUTTONDOWN
         je raton
         cmp eax, WM_MOUSEMOVE
@@ -678,6 +744,8 @@ dat_proc:
         je .bh
         cmp eax, WM_SIZE
         je .tam
+        cmp eax, WM_HV_ABRIR        ; con Datos ya abierto, le llega una base
+        je .hvabrir                 ; que abrir: EDX=su nombre
         cmp eax, WM_ENTERMENULOOP   ; se abre un menú: el ratón ya no está
         je .menu                    ; sobre ningún botón
         cmp eax, WM_GETMINMAXINFO
@@ -700,6 +768,9 @@ dat_proc:
         mov ecx, ID_BV
         HV ven_hija_id
         mov [barra_v], eax
+        mov ecx, ID_PUENTE
+        HV ven_hija_id
+        mov [puente], eax
         mov ecx, ID_BH
         HV ven_hija_id
         mov [barra_h], eax
@@ -732,6 +803,23 @@ dat_proc:
 .bh:
         mov [xdesp], ecx
         call inval
+        jmp hecho
+.hvabrir:
+        mov esi, edx
+        mov edi, nom_tmp
+        mov ecx, 100
+.hc:
+        lodsb
+        cmp al, ' '
+        jb .hc1
+        stosb
+        dec ecx
+        jnz .hc
+.hc1:
+        mov byte [edi], 0
+        cmp byte [nom_tmp], 0
+        je hecho
+        call abre_nom
         jmp hecho
 .menu:
         cmp dword [br_sobre], 0
@@ -872,11 +960,15 @@ orden_haz:
         cmp ecx, O_IMPORTAR
         je importar
         cmp ecx, O_EXPORTAR
-        je exportar
+        je .exportar
         cmp ecx, O_IMPRIMIR
-        je imprimir
+        je .imprimir
         cmp ecx, O_ETIQ
-        je etiquetas
+        je .etiq
+        cmp ecx, O_INFORME
+        je .informe
+        cmp ecx, O_CARTAS
+        je .cartas
         cmp ecx, O_R_MAS
         je reg_mas
         cmp ecx, O_R_CAMB
@@ -887,6 +979,14 @@ orden_haz:
         je reg_borra
         cmp ecx, O_BUSCAR
         je buscar
+        cmp ecx, O_DESHACER
+        je deshacer
+        cmp ecx, O_COPIAR
+        je copiar
+        cmp ecx, O_PEGAR
+        je pegar
+        cmp ecx, O_TODO
+        je elegir_todo
         cmp ecx, O_SIGUE
         je buscar_sig
         cmp ecx, O_V_TABLA
@@ -939,6 +1039,33 @@ orden_haz:
         HV ven_destruir
 .x:
         ret
+.exportar:
+        call vis_estrecha
+        call exportar
+        jmp vis_repone
+.imprimir:
+        call vis_estrecha
+        call imprimir
+        jmp vis_repone
+.etiq:
+        call vis_estrecha
+        call etiquetas
+        jmp vis_repone
+.cartas:
+        call vis_estrecha
+        call cartas
+        jmp vis_repone
+.informe:
+        mov byte [inf_reord], 0
+        call vis_estrecha
+        call informe
+        call vis_repone
+        cmp byte [inf_reord], 0     ; agrupado: la vista se ordenó por el
+        je .x                       ; campo del grupo; ahora, como estaba
+        call sel_guarda
+        call filtra
+        call sel_repon
+        jmp inval
 .vt:
         xor eax, eax
         jmp vista_pon
@@ -947,9 +1074,11 @@ orden_haz:
         jmp vista_pon
 .ant:
         mov eax, -1
+        mov dword [anc], -1
         jmp sel_mueve
 .sig:
         mov eax, 1
+        mov dword [anc], -1
         jmp sel_mueve
 .oaz:
         xor edx, edx
@@ -1032,6 +1161,18 @@ tecla:
         je .ord
         mov eax, O_FILTRAR
         cmp ecx, TC_CTRL + 6        ; Ctrl+F
+        je .ord
+        mov eax, O_DESHACER
+        cmp ecx, TC_CTRL + 26       ; Ctrl+Z
+        je .ord
+        mov eax, O_COPIAR
+        cmp ecx, TC_CTRL + 3        ; Ctrl+C
+        je .ord
+        mov eax, O_PEGAR
+        cmp ecx, TC_CTRL + 22       ; Ctrl+V
+        je .ord
+        mov eax, O_TODO
+        cmp ecx, TC_CTRL + 5        ; Ctrl+E
         je .ord
         mov eax, O_SIGUE
         cmp ecx, TC_F1 + 2          ; F3
@@ -1124,11 +1265,188 @@ tecla:
 .fin:
         mov eax, MAX_REG
 .sel:
+        mov dword [tc_n], 0         ; (lo tecleado para buscar, olvidado)
+        test dl, TM_MAYUS           ; con Mayús: se eligen todos desde donde
+        jz .sinm                    ; se estaba
+        cmp dword [anc], -1
+        jne .mv
+        mov ebx, [sel]
+        mov [anc], ebx
+        jmp .mv
+.sinm:
+        mov dword [anc], -1
+.mv:
         call sel_mueve
         jmp hecho
 .col:
         call col_mueve
         jmp hecho
+
+; ---- buscar al teclear: en la rejilla, las letras que se escriben van
+;      llevando al primer registro que empieza por ellas en la columna del
+;      orden (o, si no hay orden, en la elegida). Tras un segundo y medio sin
+;      teclear se empieza otra vez ----
+letra:
+        cmp byte [vista], 0
+        jne hecho
+        cmp dword [tab], 0
+        je hecho
+        cmp ecx, 32
+        jb hecho
+        push ecx
+        HV tics
+        pop ecx
+        mov edx, eax
+        sub eax, [tc_tics]
+        mov [tc_tics], edx
+        cmp eax, 27
+        jbe .sigue
+        mov dword [tc_n], 0
+.sigue:
+        mov eax, [tc_n]
+        cmp eax, 30
+        jae hecho
+        mov [tc_txt+eax], cl
+        inc dword [tc_n]
+        mov ebx, [tab]
+        movzx ebx, byte [ebx+T_ORDC]
+        cmp ebx, [n_cam]
+        jb .c
+        mov ebx, [col]
+.c:
+        xor ebp, ebp
+.b:
+        cmp ebp, [n_vis]
+        jae .no
+        mov esi, [vis]
+        mov eax, [esi+ebp*4]
+        mov ecx, ebx
+        call celda
+        mov edx, [tc_n]
+        cmp ecx, edx
+        jb .s
+        mov ecx, edx
+        mov edi, tc_txt
+        call cmp_txt
+        test eax, eax
+        jz .si
+.s:
+        inc ebp
+        jmp .b
+.si:
+        mov [sel], ebp
+        mov dword [anc], -1
+        call sel_ver
+        call inval
+        jmp hecho
+.no:
+        dec dword [tc_n]            ; ninguno empieza así: esa letra no cuenta
+        jmp hecho
+
+; -> EBX=el primero y EDX=el último de los registros elegidos (sitios de la
+; vista); CF=1 si no hay más que uno
+rango:
+        mov ebx, [anc]
+        cmp ebx, -1
+        je .no
+        mov edx, [sel]
+        cmp ebx, edx
+        je .no
+        jb .ok
+        xchg ebx, edx
+.ok:
+        cmp edx, [n_vis]
+        jae .no
+        clc
+        ret
+.no:
+        stc
+        ret
+; EDX=un sitio de la vista -> ZF=1 si ese registro está elegido
+fila_elegida:
+        cmp edx, [sel]
+        je .x
+        push eax
+        push ebx
+        push edx
+        mov eax, edx
+        call rango
+        jc .no
+        cmp eax, ebx
+        jb .no
+        cmp eax, edx
+        ja .no
+        pop edx
+        pop ebx
+        pop eax
+        cmp eax, eax
+.x:
+        ret
+.no:
+        pop edx
+        pop ebx
+        pop eax
+        test esp, esp
+        ret
+; Elegir todos los registros que se ven
+elegir_todo:
+        cmp dword [n_vis], 2
+        jb .x
+        mov dword [anc], 0
+        mov eax, [n_vis]
+        dec eax
+        mov [sel], eax
+        call inval
+.x:
+        ret
+; las órdenes que sacan datos (exportar, imprimir...) trabajan sobre lo que se
+; ve; si hay varios registros elegidos, solo sobre esos: mientras dura la
+; orden, la vista se estrecha a ellos
+vis_estrecha:
+        pushad
+        call rango
+        jc .x
+        mov eax, [vis]
+        mov [ve_vis], eax
+        mov ecx, [n_vis]
+        mov [ve_n], ecx
+        mov ecx, [sel]
+        mov [ve_sel], ecx
+        mov ecx, [top]
+        mov [ve_top], ecx
+        mov ecx, [anc]
+        mov [ve_anc], ecx
+        mov byte [ve_on], 1
+        lea eax, [eax+ebx*4]
+        mov [vis], eax
+        sub edx, ebx
+        inc edx
+        mov [n_vis], edx
+        mov dword [sel], 0
+        mov dword [top], 0
+        mov dword [anc], -1
+.x:
+        popad
+        ret
+vis_repone:
+        pushad
+        cmp byte [ve_on], 0
+        je .x
+        mov byte [ve_on], 0
+        mov eax, [ve_vis]
+        mov [vis], eax
+        mov eax, [ve_n]
+        mov [n_vis], eax
+        mov eax, [ve_sel]
+        mov [sel], eax
+        mov eax, [ve_top]
+        mov [top], eax
+        mov eax, [ve_anc]
+        mov [anc], eax
+        call inval
+.x:
+        popad
+        ret
 
 ; mueve la elección EAX registros
 sel_mueve:
@@ -1429,6 +1747,16 @@ raton:
 .fila:
         call fila_en
         jc hecho
+        test cl, TM_MAYUS           ; Mayús+clic: desde el elegido hasta aquí
+        jz .sinm
+        cmp dword [anc], -1
+        jne .con
+        mov ebx, [sel]
+        mov [anc], ebx
+        jmp .con
+.sinm:
+        mov dword [anc], -1
+.con:
         mov [sel], edx
         call col_en
         jc .f1
@@ -1540,6 +1868,11 @@ doble:
         mov ecx, O_R_CAMB
         jmp orden
 
+f_campo     equ fc1 + FC_CAMPO
+f_op        equ fc1 + FC_OP
+f_val       equ fc1 + FC_VAL
+f_len       equ fc1 + FC_LEN
+f_txt       equ fc1 + FC_TXT
 %include "base.inc"
 %include "vista.inc"
 %include "dialogo.inc"
@@ -1583,16 +1916,25 @@ arr_an0     resd 1
 cur_ahora   resd 1
 hoy         resd 1                  ; aaaammdd
 ord_c       resd 1
-f_campo     resd 1                  ; el filtro: campo,
-f_op        resd 1                  ;   comparación (0 contiene ... 4 vacío),
-f_val       resd 1                  ;   el valor (número o fecha)
-f_len       resd 1                  ;   y lo que mide el texto
+fc1         resb FC_TAM             ; el filtro: la primera condición
+fc2         resb FC_TAM             ;   y la segunda
+puente      resd 1
+anc         resd 1                  ; desde dónde se eligen varios (-1: uno solo)
+tc_n        resd 1                  ; lo tecleado para buscar: cuántas letras
+tc_tics     resd 1                  ;   y cuándo fue la última
+ve_vis      resd 1                  ; la vista de verdad, mientras está estrecha
+ve_n        resd 1
+ve_sel      resd 1
+ve_top      resd 1
+ve_anc      resd 1
 suma_lo     resd 1                  ; la suma del campo elegido (64 bits)
 suma_hi     resd 1
 vista       resb 1                  ; 0: la rejilla; 1: la ficha
 sucio       resb 1                  ; hay algo sin guardar (anchos, orden)
 ord_d       resb 1
 f_on        resb 1
+f_dos       resb 1                  ; 0: una condición; 1: las dos; 2: una u otra
+ve_on       resb 1
 fmt_mil     resb 1                  ; los números, con puntos de millares
 suma_ok     resb 1
 aviso_ini   resb 1
@@ -1601,15 +1943,16 @@ rl          resb RL_TAM
 tipos       resb MAX_CAM            ; el tipo y los decimales de cada campo
 decs        resb MAX_CAM
 pliega      resb 256                ; sin mayúsculas ni acentos, para comparar
-f_txt       resb TXT_MAX + 4
+tc_txt      resb 32
 busca_txt   resb 64
 num_tmp     resb 32
 bt_buf      resb 40
-pie_buf     resb 200
+pie_buf     resb 360
 nom_tmp     resb 128
 ruta_bdd    resb 128
 ruta_tmp    resb 128
 ruta_ant    resb 128
+ruta_bdj    resb 128
 ruta_def    resb 128
 ruta_ini    resb 128
 vbuf        resb MEMO_MAX + 104

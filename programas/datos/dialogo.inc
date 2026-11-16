@@ -26,8 +26,6 @@ dc_reft     resd 1                  ;   -2: el primero de una tabla nueva)
 dc_refc     resd 1
 tn_sel      resd 1
 tl_sel      resd 1
-fl_campo    resd 1
-fl_op       resd 1
 el_sel      resd 1
 el_modo     resd 1
 el_tab      resd 1
@@ -46,7 +44,8 @@ dc_nom      resb 24
 dc_dectxt   resb 8
 dc_ref_txt  resb 64
 tn_nom      resb 28
-fl_txt      resb TXT_MAX + 4
+fl1         resb FC_TAM
+fl2         resb FC_TAM
 tit_buf     resb 40
 ruta_old    resb 128
 lin_buf     resb 96
@@ -97,19 +96,27 @@ dlg_tablas:
         PLANTILLA HV_c_boton, t_b_tnueva, E_HIJA | E_TABULA, 270, 50, 130, 26, 3
         PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 270, 84, 130, 26, ID_CANCELAR
         dd 0
-; ---- diálogo: el filtro (el valor va primero: es lo que se escribe casi
-;      siempre, con el campo elegido y «contiene» ya puestos) ----
+; ---- diálogo: el filtro, con una condición o con dos (el valor va primero:
+;      es lo que se escribe casi siempre, con el campo elegido y «contiene»
+;      ya puestos) ----
 dlg_filtro:
-        PLANTILLA HV_c_dialogo, t_d_filtro, E_DIALOGO, 0, 0, 470, 300, 0
-        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 232, 166, 216, 24, 110
-        PLANTILLA HV_c_estatico, t_l_fcampo, E_HIJA, 16, 14, 200, 18, 100
-        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 16, 36, 200, 196, 60
-        PLANTILLA HV_c_estatico, t_l_fcond, E_HIJA, 232, 14, 200, 18, 101
-        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 232, 36, 216, 84, 61
-        PLANTILLA HV_c_estatico, t_l_fvalor, E_HIJA, 232, 144, 200, 18, 102
-        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 232, 206, 90, 26, ID_ACEPTAR
-        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 330, 206, 90, 26, ID_CANCELAR
-        PLANTILLA HV_c_boton, t_b_sinfiltro, E_HIJA | E_TABULA, 232, 238, 188, 26, 3
+        PLANTILLA HV_c_dialogo, t_d_filtro, E_DIALOGO, 0, 0, 470, 420, 0
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 80, 124, 368, 24, 110
+        PLANTILLA HV_c_estatico, t_l_fcampo, E_HIJA, 16, 10, 200, 18, 100
+        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 16, 30, 200, 84, 60
+        PLANTILLA HV_c_estatico, t_l_fcond, E_HIJA, 232, 10, 200, 18, 101
+        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 232, 30, 216, 84, 61
+        PLANTILLA HV_c_estatico, t_l_fvalor, E_HIJA, 16, 128, 60, 18, 102
+        PLANTILLA HV_c_boton, t_f_una, E_HIJA | E_TABULA | BS_OPCION, 16, 160, 110, 20, 120
+        PLANTILLA HV_c_boton, t_f_y, E_HIJA | E_TABULA | BS_OPCION, 130, 160, 150, 20, 121
+        PLANTILLA HV_c_boton, t_f_o, E_HIJA | E_TABULA | BS_OPCION, 290, 160, 160, 20, 122
+        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 16, 190, 200, 84, 62
+        PLANTILLA HV_c_lista, 0, E_HIJA | E_TABULA, 232, 190, 216, 84, 63
+        PLANTILLA HV_c_estatico, t_l_fvalor, E_HIJA, 16, 288, 60, 18, 103
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 80, 284, 368, 24, 111
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 80, 326, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 178, 326, 90, 26, ID_CANCELAR
+        PLANTILLA HV_c_boton, t_b_sinfiltro, E_HIJA | E_TABULA, 276, 326, 172, 26, 3
         dd 0
 ; ---- diálogo: un texto largo ----
 dlg_memo:
@@ -142,6 +149,42 @@ dlg_etiq:
         PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 190, 256, 90, 26, ID_CANCELAR
         dd 0
 
+; ---- diálogo: el informe a medida ----
+dlg_inf:
+        PLANTILLA HV_c_dialogo, t_d_inf, E_DIALOGO, 0, 0, 470, 270, 0
+        PLANTILLA HV_c_estatico, t_l_inf1, E_HIJA, 16, 16, 120, 18, 100
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 140, 12, 180, 24, 110
+        PLANTILLA HV_c_estatico, t_l_inf1b, E_HIJA, 328, 16, 130, 18, 101
+        PLANTILLA HV_c_estatico, t_l_inf2, E_HIJA, 16, 46, 120, 18, 102
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA, 140, 42, 40, 24, 111
+        PLANTILLA HV_c_estatico, t_l_inf2b, E_HIJA, 188, 46, 270, 18, 103
+        PLANTILLA HV_c_boton, t_c_comp, E_HIJA | E_TABULA | BS_CASILLA, 16, 76, 440, 20, 120
+        PLANTILLA HV_c_boton, t_c_arch, E_HIJA | E_TABULA | BS_CASILLA, 16, 100, 440, 20, 121
+        PLANTILLA HV_c_estatico, t_l_infn, E_HIJA, 16, 126, 300, 18, 104
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 140, 198, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 240, 198, 90, 26, ID_CANCELAR
+        dd 0
+; ---- diálogo: cartas y recibos en serie ----
+dlg_carta:
+        PLANTILLA HV_c_dialogo, t_d_carta, E_DIALOGO, 0, 0, 520, 370, 0
+        PLANTILLA HV_c_edit, 0, E_HIJA | E_TABULA | ES_MULTI, 12, 12, 492, 180, 110
+        PLANTILLA HV_c_estatico, t_l_car1, E_HIJA, 12, 198, 492, 18, 100
+        PLANTILLA HV_c_boton, t_c_arch, E_HIJA | E_TABULA | BS_CASILLA, 12, 222, 492, 20, 121
+        PLANTILLA HV_c_boton, t_aceptar, E_HIJA | E_TABULA | BS_DEFECTO, 12, 298, 90, 26, ID_ACEPTAR
+        PLANTILLA HV_c_boton, t_cancelar, E_HIJA | E_TABULA, 110, 298, 90, 26, ID_CANCELAR
+        PLANTILLA HV_c_boton, t_b_leer, E_HIJA | E_TABULA, 330, 298, 174, 26, 130
+        dd 0
+t_d_inf     db "Informe a medida", 0
+t_l_inf1    db "Columnas:", 0
+t_l_inf1b   db "(vacío: todas)", 0
+t_l_inf2    db "Agrupar por:", 0
+t_l_inf2b   db "(un campo: da subtotales)", 0
+t_c_comp    db "Letra comprimida: 132 columnas (impresoras ESC/P)", 0
+t_c_arch    db "Guardar en un .TXT (para Pluma) en vez de imprimir", 0
+t_l_infn    db "Los números de los campos:", 0
+t_d_carta   db "Cartas y recibos en serie", 0
+t_l_car1    db "Una por registro. Los campos, así: <Nombre> o «Nombre».", 0
+t_b_leer    db "Leer de un .TXT...", 0
 t_d_campo   db "Campo", 0
 t_d_tnueva  db "Nueva tabla", 0
 t_d_tablas  db "Tablas de la base", 0
@@ -173,6 +216,9 @@ t_tabla_def db "Tabla", 0
 t_b_ver     db "Ver", 0
 t_b_tnueva  db "Nueva tabla...", 0
 t_b_sinfiltro db "Quitar el filtro", 0
+t_f_una     db "Nada más", 0
+t_f_y       db "Y además...", 0
+t_f_o       db "O bien...", 0
 t_b_escribir db "Escribir...", 0
 t_b_puntos  db "...", 0
 t_b_imprimir db "Imprimir", 0
@@ -191,6 +237,7 @@ t_e_cdup    db "Ya hay un campo con ese nombre en la tabla.", 0
 t_e_cdec    db "Los decimales tienen que ser un número de 0 a 3.", 0
 t_e_num     db "tiene que ser un número, como 12 o 3,50", 10, "(como mucho, nueve cifras).", 0
 t_e_fecha   db "tiene que ser una fecha que exista, así: 16/11/2026.", 0
+t_e_memo    db "Un texto largo no puede pasar de 2.000 letras:", 10, "acórtelo un poco.", 0
 t_e_largo   db "no puede tener más de 100 letras.", 0
 t_e_fnum    db "Para comparar con este campo escriba un número, como 12 o 3,50.", 0
 t_e_ffecha  db "Para comparar con este campo escriba una fecha, así: 16/11/2026.", 0
@@ -236,6 +283,10 @@ dlg_clases:
         mov esi, dlg_elige
         call hvl_clases
         mov esi, dlg_etiq
+        call hvl_clases
+        mov esi, dlg_inf
+        call hvl_clases
+        mov esi, dlg_carta
         call hvl_clases
         ret
 
@@ -377,10 +428,9 @@ g_doble:
         cmp eax, WM_COMMAND
         jne .x
         cmp cx, 60
-        je .l
-        cmp cx, 61
-        jne .x
-.l:
+        jb .x
+        cmp cx, 63
+        ja .x
         mov eax, ecx
         shr eax, 16
         cmp eax, LN_DOBLE
@@ -429,13 +479,246 @@ reg_dup:
 reg_borra:
         call reg_elegido
         jc .x
+        call rango
+        jnc .varios
         mov esi, t_q_borrar
         call pregunta
         jne .x
+        call des_guarda
+        mov bl, 'Q'
+        call dj_apunta              ; (antes de quitarlo: va con su número)
         call reg_quita
-        call guarda
+        call guarda_si              ; (si no ha podido ir al diario)
         call inval
 .x:
+        ret
+.varios:                            ; los elegidos, de una vez
+        mov edi, res_buf
+        mov esi, t_q_borrarn
+        call hvl_cad
+        mov eax, edx
+        sub eax, ebx
+        inc eax
+        call hvl_num
+        mov ax, '.'
+        stosw
+        mov esi, res_buf
+        call pregunta
+        jne .x
+        call des_guarda
+        call borra_varios
+        call guarda
+        call inval
+        ret
+
+; Deshacer el último cambio (hasta ocho, uno tras otro)
+deshacer:
+        mov ebx, [sel]              ; (el cursor se queda donde estaba, si
+        mov edx, [col]              ; sigue habiendo algo ahí)
+        mov ecx, [tab_i]
+        call des_vuelve
+        jnc .ok
+        mov esi, t_e_nodes
+        jmp aviso
+.ok:
+        cmp ecx, [tab_i]
+        jne .g
+        cmp ebx, [n_vis]
+        jae .g
+        cmp edx, [n_cam]
+        jae .g
+        mov [sel], ebx
+        mov [col], edx
+        call sel_ver
+.g:
+        call guarda
+        call inval
+        ret
+
+; ---- el portapapeles. Hispa Ventanas no lo da a los módulos, pero sí un
+;      cuadro de texto que sabe copiar y pegar: Datos tiene uno escondido (el
+;      «puente», como Pluma) y pasa el texto por él ----
+; Copiar: el valor del campo elegido o, si hay varios registros elegidos,
+; todos ellos, un renglón por registro y los campos separados por tabuladores
+copiar:
+        call reg_elegido
+        jc .x0
+        pushad
+        mov edi, [rbuf]
+        call rango
+        jc .una
+.f:
+        cmp ebx, edx
+        ja .pon
+        mov esi, [vis]
+        mov eax, [esi+ebx*4]
+        xor ecx, ecx
+.c:
+        cmp ecx, [n_cam]
+        jae .c9
+        test ecx, ecx
+        jz .c0
+        mov byte [edi], 9
+        inc edi
+.c0:
+        call .valor
+        inc ecx
+        jmp .c
+.c9:
+        mov byte [edi], 10
+        inc edi
+        mov eax, edi                ; (hasta lo que cabe en el cuadro)
+        sub eax, [rbuf]
+        cmp eax, 56000
+        ja .pon
+        inc ebx
+        jmp .f
+.una:
+        mov ecx, [col]
+        call .valor
+.pon:
+        mov byte [edi], 0
+        mov ebp, [puente]
+        mov eax, WM_SETTEXT
+        mov edx, [rbuf]
+        HV msg_enviar
+        mov eax, EM_SEL_TODO
+        HV msg_enviar
+        mov eax, WM_COPY
+        HV msg_enviar
+        popad
+.x0:
+        ret
+; (interna) el valor del campo ECX del registro EAX, a EDI (en un renglón)
+.valor:
+        push eax
+        push esi
+        mov byte [fmt_mil], 0
+        call reg_txt
+.v:
+        lodsb
+        test al, al
+        jz .v9
+        cmp al, ' '
+        jae .v1
+        mov al, ' '
+.v1:
+        stosb
+        jmp .v
+.v9:
+        pop esi
+        pop eax
+        ret
+
+; Pegar: el texto del portapapeles (su primer renglón; entero si el campo es
+; un texto largo), en el campo elegido del registro elegido
+pegar:
+        call reg_elegido
+        jc .x0
+        pushad
+        mov ebx, eax                ; EBX=el registro
+        mov ebp, [puente]
+        mov eax, WM_SETTEXT
+        mov edx, t_nada
+        HV msg_enviar
+        mov eax, WM_PASTE
+        HV msg_enviar
+        mov eax, WM_GETTEXT
+        mov ecx, MEMO_MAX + 1
+        mov edx, [ebufs]
+        HV msg_enviar
+        mov esi, [ebufs]
+        mov ecx, [col]
+        cmp byte [tipos+ecx], T_MEMO
+        je .t9
+.t:                                 ; hasta el fin del renglón o el tabulador
+        cmp byte [esi], ' '
+        jb .t1
+        inc esi
+        jmp .t
+.t1:
+        mov byte [esi], 0
+.t9:
+        mov esi, [ebufs]
+        cmp byte [esi], 0
+        je .x
+        mov eax, ebx
+        call reg_con_valor
+        jc .mal
+        call des_guarda
+        mov eax, ebx
+        call reg_pon
+        jc .lleno
+        mov eax, ebx
+        mov bl, 'P'
+        call dj_apunta
+        mov [sel_reg], ebx
+        call sel_repon
+        call inval
+.x:
+        popad
+.x0:
+        ret
+.mal:
+        mov esi, t_e_pegar
+        call aviso
+        jmp .x
+.lleno:
+        mov esi, t_e_lleno
+        call aviso
+        jmp .x
+; (interna) monta en [rbuf] el registro EAX con el texto ESI en el campo ECX
+; -> CF=1 si el texto no vale para ese campo
+reg_con_valor:
+        pushad
+        mov ebp, esi
+        mov edi, [rbuf]
+        add edi, 2
+        xor ebx, ebx
+.c:
+        cmp ebx, [n_cam]
+        jae .c9
+        mov dl, [tipos+ebx]
+        mov dh, [decs+ebx]
+        cmp ebx, ecx
+        jne .igual
+        mov esi, ebp
+        cmp dl, T_TEXTO
+        jne .v
+        push ecx
+        call largo
+        cmp ecx, TXT_MAX
+        pop ecx
+        ja .no
+.v:
+        call txt_val
+        jc .no
+        jmp .s
+.igual:
+        mov esi, [idx]
+        mov esi, [esi+eax*4]
+        push eax
+        mov eax, ebx
+        call val_ptr
+        pop eax
+        push ebx
+        mov bl, dl
+        call val_copia
+        pop ebx
+.s:
+        inc ebx
+        jmp .c
+.c9:
+        mov eax, edi
+        mov esi, [rbuf]
+        sub eax, esi
+        mov [esi], ax
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
         ret
 
 ; el diálogo de un registro: empieza con lo que tiene el registro EAX (-1: en
@@ -481,10 +764,12 @@ reg_edita:
         call dialogo
         cmp eax, ID_ACEPTAR
         jne .x
+        call des_guarda
         mov eax, [re_dest]
         call reg_pon
         jc .lleno
-        call guarda
+        mov bl, 'P'
+        call dj_apunta
         mov eax, [re_dest]          ; y queda elegido
         cmp eax, -1
         jne .s
@@ -874,6 +1159,19 @@ memo_gancho:
         jne .no
         cmp ecx, ID_ACEPTAR
         jne .no
+        pushad                      ; ¿pasa de lo que cabe? Se dice, y no se
+        mov ecx, 110                ; cierra: que se acorte a la vista
+        call g_hija
+        mov eax, EM_LARGO
+        HV msg_enviar
+        cmp eax, MEMO_MAX
+        popad
+        jbe .cabe
+        mov esi, t_e_memo
+        call g_aviso
+        mov eax, 1
+        ret
+.cabe:
         mov eax, [memo_i]
         call ebuf_ptr
         mov edx, edi
@@ -1356,6 +1654,7 @@ nv_copia:
 ; venir de él si se ha quitado). CF=1 (y lo dice) si no cabe
 nv_aplica:
         pushad
+        call des_guarda
         call rehaz
         jnc .ok
         mov esi, t_e_lleno
@@ -1696,6 +1995,7 @@ tabla_dlg_nueva:
         shl ecx, 3
         rep movsd
 .haz:
+        call des_guarda
         mov esi, tn_nom
         call tabla_nueva
         jnc .ok
@@ -1763,6 +2063,7 @@ tabla_nombre:
         mov esi, tn_nom
         call vacio
         je .x
+        call des_guarda
         mov edi, [tab]
         add edi, T_NOM
         call copia
@@ -1777,6 +2078,7 @@ tabla_quita:
         mov esi, t_q_tborra
         call pregunta
         jne .x
+        call des_guarda
         call tabla_borra
         call guarda
         call inval
@@ -1807,6 +2109,7 @@ sin_filtro:
         cmp byte [f_on], 0
         je .x
         mov byte [f_on], 0
+        mov byte [f_dos], 0
         call sel_guarda
         call filtra
         call sel_repon
@@ -1826,10 +2129,12 @@ filtro_gancho:
         ret
 .ini:
         mov ecx, 60
+.it:
         call g_lista_tab
-        mov ecx, 61
-        call g_lista_tab
-        xor ebx, ebx                ; los campos
+        inc ecx
+        cmp ecx, 63
+        jbe .it
+        xor ebx, ebx                ; los campos, en las dos listas
 .c:
         cmp ebx, [n_cam]
         jae .c9
@@ -1840,107 +2145,178 @@ filtro_gancho:
         pop ebx
         mov ecx, 60
         call g_lista_mas
+        mov ecx, 62
+        call g_lista_mas
         inc ebx
         jmp .c
 .c9:
-        xor ebx, ebx                ; las condiciones
+        xor ebx, ebx                ; y las condiciones
 .o:
         mov edx, [op_nom+ebx*4]
         mov ecx, 61
         call g_lista_mas
+        mov ecx, 63
+        call g_lista_mas
         inc ebx
         cmp ebx, 5
         jb .o
-        mov edx, [col]              ; lo de ahora, o el campo elegido
-        xor ebx, ebx
+        ; lo de ahora o, si no hay filtro, el campo elegido y «contiene»
         cmp byte [f_on], 0
-        je .p
-        mov edx, [f_campo]
-        mov ebx, [f_op]
-        push edx
-        mov ecx, 110
-        mov edx, f_txt
-        call g_pon_txt
-        pop edx
-.p:
+        jne .hay
+        mov edx, [col]
         mov ecx, 60
         call g_lista_pon
-        mov ecx, 61
-        mov edx, ebx
+        mov ecx, 62
         call g_lista_pon
+        xor edx, edx
+        mov ecx, 61
+        call g_lista_pon
+        mov ecx, 63
+        call g_lista_pon
+        mov ecx, 120
+        mov edx, 1
+        call g_pon_marca
         jmp .no
-.acepta:
+.hay:
+        mov esi, fc1
         mov ecx, 60
-        call g_lista_sel
+        mov ebx, 110
+        call .pon
+        mov esi, fc2
+        mov ecx, 62
+        mov ebx, 111
+        cmp byte [f_dos], 0
+        jne .h2
+        mov esi, fc1                ; (sin segunda: como la primera, sin valor)
+        mov ebx, 0
+.h2:
+        call .pon
+        movzx ecx, byte [f_dos]
+        add ecx, 120
+        mov edx, 1
+        call g_pon_marca
+        jmp .no
+; (interna) la condición ESI, a las listas ECX y ECX+1 y al cuadro EBX (0: no)
+.pon:
+        mov edx, [esi+FC_CAMPO]
+        call g_lista_pon
+        inc ecx
+        mov edx, [esi+FC_OP]
+        call g_lista_pon
+        test ebx, ebx
+        jz .p9
+        mov ecx, ebx
+        lea edx, [esi+FC_TXT]
+        call g_pon_txt
+.p9:
+        ret
+.acepta:
+        mov edi, fl1                ; la primera condición
+        mov ecx, 60
+        mov ebx, 110
+        call .lee
+        jc .mal
+        xor edx, edx                ; ¿y la segunda?
+        mov ecx, 121
+        call g_marca
         test eax, eax
-        jns .a1
-        xor eax, eax
+        jz .a1
+        mov edx, 1
 .a1:
-        mov [fl_campo], eax
-        mov ecx, 61
+        mov ecx, 122
+        call g_marca
+        test eax, eax
+        jz .a2
+        mov edx, 2
+.a2:
+        test edx, edx
+        jz .vale
+        push edx
+        mov edi, fl2
+        mov ecx, 62
+        mov ebx, 111
+        call .lee
+        pop edx
+        jc .mal
+        mov esi, fl2
+        mov edi, fc2
+        mov ecx, FC_TAM
+        rep movsb
+.vale:
+        mov [f_dos], dl
+        mov esi, fl1
+        mov edi, fc1
+        mov ecx, FC_TAM
+        rep movsb
+        jmp .no
+.mal:                               ; ESI=lo que pasa EBX=el cuadro
+        call g_aviso
+        mov ecx, ebx
+        call g_foco
+        mov eax, 1
+        ret
+; (interna) lee de las listas ECX y ECX+1 y del cuadro EBX una condición, a
+; EDI, y la comprueba -> CF=1 y ESI=lo que pasa si el valor no vale
+.lee:
         call g_lista_sel
         test eax, eax
-        jns .a2
+        jns .l1
         xor eax, eax
-.a2:
-        mov [fl_op], eax
-        mov ecx, 110
-        mov edx, fl_txt
+.l1:
+        mov [edi+FC_CAMPO], eax
+        inc ecx
+        call g_lista_sel
+        test eax, eax
+        jns .l2
+        xor eax, eax
+.l2:
+        mov [edi+FC_OP], eax
+        mov ecx, ebx
+        lea edx, [edi+FC_TXT]
+        push ebx
         mov ebx, TXT_MAX + 1
         call g_lee_txt
-        xor edi, edi                ; EDI=el valor, si es número o fecha
-        cmp dword [fl_op], 4
-        je .vale
-        mov esi, fl_txt
-        cmp dword [fl_op], 0
+        pop ebx
+        lea esi, [edi+FC_TXT]
+        call largo
+        mov [edi+FC_LEN], ecx
+        mov dword [edi+FC_VAL], 0
+        cmp dword [edi+FC_OP], 4
+        je .lv
+        cmp dword [edi+FC_OP], 0
         jne .comp
         call vacio
+        jne .lv
         mov esi, t_e_fvacio
-        je .mal
-        jmp .vale
+        stc
+        ret
 .comp:
-        mov ebx, [fl_campo]
-        mov al, [tipos+ebx]
+        mov ecx, [edi+FC_CAMPO]
+        mov al, [tipos+ecx]
         cmp al, T_NUM
         jne .f
-        mov dl, [decs+ebx]
+        mov dl, [decs+ecx]
         call lee_num
-        mov edi, eax
+        mov [edi+FC_VAL], eax
         mov esi, t_e_fnum
-        jc .mal
-        jmp .vale
+        ret                         ; (con el acarreo de lee_num)
 .f:
         cmp al, T_FECHA
         jne .s
         call lee_fecha
-        mov edi, eax
+        mov [edi+FC_VAL], eax
         mov esi, t_e_ffecha
-        jc .mal
-        jmp .vale
+        ret
 .s:
         cmp al, T_SINO
-        jne .vale
+        jne .lv
         call lee_sino
-        movzx edi, al
+        movzx eax, al
+        mov [edi+FC_VAL], eax
         mov esi, t_e_fsino
-        jc .mal
-.vale:
-        mov [f_val], edi
-        mov eax, [fl_campo]
-        mov [f_campo], eax
-        mov eax, [fl_op]
-        mov [f_op], eax
-        mov esi, fl_txt
-        mov edi, f_txt
-        call copia
-        call largo
-        mov [f_len], ecx
-        jmp .no
-.mal:
-        call g_aviso
-        mov ecx, 110
-        call g_foco
-        mov eax, 1
+        ret
+.lv:
+        clc
         ret
 
 buscar:
@@ -2447,7 +2823,9 @@ base_abrir:
         mov byte [nom_tmp], 0
         mov edi, t_abrir_tit
         call pide_archivo
-        jz .x
+        jz abre_nom.x
+; abre la base de nombre nom_tmp (la de ahora queda guardada)
+abre_nom:
         call guarda_si
         mov esi, ruta_bdd
         mov edi, ruta_old
