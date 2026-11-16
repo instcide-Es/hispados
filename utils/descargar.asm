@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS DESCARGAR (en el disco DESCARGA.COM) - bajar un archivo por HTTP
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  DESCARGAR [http://]servidor[:puerto]/ruta [archivo]
 ;  HTTP/1.0 sin cifrar, con barra de progreso; sigue hasta 4 redirecciones a

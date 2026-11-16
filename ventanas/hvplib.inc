@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - rutinas de ayuda para los módulos .HVP
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Se ensamblan dentro del módulo (%include "hvplib.inc", después del
 ;  código). Conservan los registros salvo los que devuelven algo.

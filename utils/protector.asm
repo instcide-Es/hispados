@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa-DOS PROTECTOR.COM (en el disco PROTECTO.COM: 8 letras) - protector
 ;  de pantalla en modo texto, residente: la «Lluvia verde»
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  PROTECTOR minutos   se queda en la memoria y salta tras esos minutos (1 a
 ;                      60) sin teclado ni ratón; si ya está, cambia los minutos

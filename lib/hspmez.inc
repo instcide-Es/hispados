@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  hspmez.inc - el mezclador por fuentes de HSPSND (parte residente)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Siete fuentes con una escala unica de 0 a 100 % (docs/MEZCLADOR.md):
 ;  General, Sonidos (la onda), Musica (FM), CD, Linea, Microfono y Altavoz

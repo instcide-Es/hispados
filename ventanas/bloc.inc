@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - Bloc de notas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un cuadro de texto de varias líneas que ocupa toda la ventana, con menús
 ;  para abrir y guardar archivos de texto (dos.inc) y para cortar, copiar y

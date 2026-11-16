@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - deteccion minima de hardware para recomendar version
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Rutinas sacadas (lo justo) de utils/equipo.asm para que ACTUALIZAR pueda
 ;  recomendar la edicion mas rica que el equipo aguanta:

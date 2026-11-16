@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - HSPUSB: las controladoras, parte de inicialización
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Va al final de HSPUSB.SYS, con los mensajes: nada de esto se usa después
 ;  del arranque, y sus últimos 4 KB se aprovechan entonces para el búfer de

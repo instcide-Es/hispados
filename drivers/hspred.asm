@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  HSPRED.COM - controlador de red de Hispa-DOS (residente, «packet driver»)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Uso:  HSPRED [/INT:xx] [/INFO] [/AUTO] [/U] [/?]  (en AUTOEXEC.BAT; vale LH)
 ;        /INT:xx  vector del packet driver, en hexadecimal (60 a 80); si no

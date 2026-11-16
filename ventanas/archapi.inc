@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa Ventanas - [ARCHIVOS] lo que pide el Administrador de archivos
 ;  (programas/archivos.asm, ARCHIVOS.HVP)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Va en la parte alta del archivo (solo modo protegido). Para los módulos:
 ;    rm_interrup  ESI=bloque de registros (RL_*, defs.inc): una interrupción

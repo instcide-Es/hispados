@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - [APAGAR] salir: volver a Hispa-DOS, reiniciar o apagar el equipo
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Este archivo va en la «parte alta» de VENTANAS.COM (ventanas.asm): solo
 ;  código y datos de 32 bits.

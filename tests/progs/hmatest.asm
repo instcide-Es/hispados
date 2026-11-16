@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  HMATEST.COM - prueba de DOS=HIGH (tests/run_hma_tests.sh)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  HMATEST       informe: memoria convencional libre (LIBRE=, MAYOR=), si el
 ;                DOS dice estar en la HMA (INT 21h AX=3306h), la HMA libre

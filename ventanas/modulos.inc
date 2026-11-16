@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - programas aparte: los módulos .HVP
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un .HVP («programa de Hispa Ventanas») es un binario plano de 32 bits con
 ;  una cabecera (ventanas/hvp.inc, docs/VENTANAS.md), hecho con NASM y

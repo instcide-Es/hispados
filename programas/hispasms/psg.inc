@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-System - el sonido: el SN76489 de la consola (tres tonos y un ruido)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del SN76489 y de la versión que
 ;  lleva la consola: ocho registros (para cada canal, el periodo de 10 bits o

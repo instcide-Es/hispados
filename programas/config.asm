@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  CONFIG.HVP - Configuración de Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Los ajustes del entorno, en una ventana con los apartados a la izquierda y
 ;  el apartado elegido a la derecha:

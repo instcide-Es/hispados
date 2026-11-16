@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - gestor de ventanas (el USER propio)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Lleva las fichas de las ventanas (defs.inc), el orden de las de primer
 ;  nivel (cuál tapa a cuál), la activa, el foco del teclado, la captura del

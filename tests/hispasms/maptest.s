@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  MAPTEST - prueba propia de los mapeadores de Hispa-System
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  128 KB: ocho bancos de 16 KB con su número en el primer octeto. Pide cada
 ;  banco en 4000h y en 8000h y mira que es el que se ve. Se ensambla dos

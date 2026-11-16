@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - pila TCP/IP propia, mínima (para CONFRED, PING y DESCARGAR)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Habla con cualquier «packet driver» (HSPRED u otro: especificación de FTP
 ;  Software 1.09, INT 60h-80h). Con HSPRED, la configuración IP se guarda en

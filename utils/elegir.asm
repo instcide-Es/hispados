@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS ELEGIR.COM (CHOICE) - preguntar en los archivos por lotes
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  ELEGIR [/C[:]teclas] [/N] [/S] [/T[:]c,nn] [texto]
 ;     /C  teclas válidas (por omisión SN)

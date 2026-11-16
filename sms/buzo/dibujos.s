@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Buzo - los dibujos (diseño propio). GPL-2.0-or-later.
-;  Copyright (C) 2026 Hispa-DOS contributors.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores.
 ;  Colores del fondo: 0 agua, 1 blanco, 2 y 3 celestes, 4 arena, 5 y 6 roca,
 ;  7 y 8 verdes, 9 coral, a naranja, b y c grises, d negro, f agua clara.
 ;  Colores de los objetos: 1 blanco, 2 amarillo, 3 naranja, 4 rojo, 5 y 6

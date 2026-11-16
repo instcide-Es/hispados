@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Simulador de los puertos de los mandos, para las pruebas de HSPJOY
 ;  (HSPJOYT.COM = drivers/hspjoy.asm con -DPRUEBA; tests/run_joy_tests.sh).
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  QEMU no tiene puerto de juegos (201h) y no deja mover las entradas del
 ;  puerto de impresora, así que en HSPJOYT las entradas y salidas de esos

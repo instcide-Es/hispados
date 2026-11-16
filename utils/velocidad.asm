@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa-DOS VELOCIDAD.COM - frenar el procesador para programas antiguos
 ;  (en el disco, VELOCIDA.COM: el intérprete corta el nombre a 8 letras)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  VELOCIDAD [nivel [/C] [/S] [/1] [programa [argumentos]]]
 ;     nivel: n% | PENTIUM | 486 | 386 | 286 | XT | NORMAL

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  cirrus.inc - [CIRRUS] los Cirrus Logic CS4206/CS4207/CS4208 de los Mac
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Lo usan HSPSND y AUDICION. Escrito desde cero con lo que se sabe
 ;  públicamente de estos códecs (hojas de Cirrus Logic de la familia

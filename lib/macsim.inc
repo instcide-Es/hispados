@@ -5,7 +5,7 @@
 ;  al códec 0 las contesta esta tabla (y guarda lo que se escribe); el
 ;  formato y el número de flujo de sus DAC se pasan también al DAC 02h del
 ;  códec de QEMU, para que el flujo suene y la posición avance de verdad.
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Lo usan AUDICION /SIM:MAC y HSPSND /SIMMAC (solo para las pruebas). Quien
 ;  lo incluye pone mac_fwd_cmd (EAX = orden para el DAC 02h del códec real;

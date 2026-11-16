@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  MANDO.COM - los mandos de juego de Hispa-DOS (HSPJOY): verlos, probarlos
 ;  y calibrar el del puerto de juegos
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  MANDO             lista de los mandos que hay y quién es cada jugador
 ;  MANDO /VER        ejes, cruceta y botones de cada mando, en vivo

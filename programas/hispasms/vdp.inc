@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa-System - la imagen (el VDP de la consola), los puertos, los mandos y
 ;  el cuadro entero
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del VDP de la consola (315-5124 y
 ;  315-5246, que es el TMS9918 con un modo más, el «modo 4») y de sus

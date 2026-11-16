@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  hspopl.inc - sintesis FM de la Sound Blaster emulada: OPL2 (YM3812, AdLib)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Nueve canales de dos operadores (en serie -FM- o sumados), cuatro formas
 ;  de onda, envolvente (ataque, caida, sostenido, suelta) con escala por

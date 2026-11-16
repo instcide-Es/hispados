@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  smsnativo - el núcleo de Hispa-System como programa de Linux, para las pruebas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Los mismos archivos del emulador (programas/hispasms/*.inc), sin ventana:
 ;  carga una ROM, corre unos cuadros con los botones de un guion y deja la

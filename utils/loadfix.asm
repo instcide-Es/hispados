@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS LOADFIX.COM - cargar un programa por encima de los primeros 64 KB
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  LOADFIX [unidad:][ruta]programa [argumentos]
 ;

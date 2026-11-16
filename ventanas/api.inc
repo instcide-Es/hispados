@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - la interfaz para los programas aparte (módulos .HVP)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  La lista de lo que Hispa Ventanas ofrece a un módulo, en orden: cada línea
 ;  es una entrada de la tabla que el cargador (modulos.inc) copia dentro del

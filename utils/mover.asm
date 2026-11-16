@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS MOVER.COM (MOVE) - mover archivos y renombrar carpetas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  MOVER [/Y | /-Y] origen destino
 ;     origen   archivo(s) (admite comodines) o una carpeta (se renombra)

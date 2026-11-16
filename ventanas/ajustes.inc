@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa Ventanas - ajustes del entorno (lo que cambia el programa
 ;  Configuración, CONFIG.HVP)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Aquí solo está lo mínimo (VENTANAS.COM tiene que caber en 64 KB): los
 ;  valores y cómo se aplican. Quien lee y escribe VENTANAS.INI, y quien hace

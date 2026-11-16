@@ -3,7 +3,7 @@
 ;  del Toshiba NB250-10N de Carlos (subsistema 1179:FF6C), simulado a partir
 ;  de su volcado real (informe SONIDO.TXT de AUDICION, nodo a nodo: capacidades,
 ;  amplificadores, conexiones, pines y cómo los dejó la BIOS).
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Solo para las pruebas en QEMU (que no tiene ese códec): AUDICION /SIM:ALC269
 ;  y HSPSND /SIMALC. Se ensambla aparte (build/gen/lib/alcsim.bin, ORG 0) y se

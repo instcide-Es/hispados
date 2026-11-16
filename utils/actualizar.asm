@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS ACTUALIZAR (en el disco ACTUALIZ.COM) - instalador por red
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  ACTUALIZAR [http://servidor[:puerto]/ruta]
 ;  Mira por la red (HTTP, sin cifrar) si hay una versión más nueva o una edición

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - Centro de programas (grupos y accesos directos) y «Sistema»
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  La ventana del Centro tiene un icono por grupo; cada grupo se abre en su
 ;  propia ventana, con un icono por acceso directo. Un clic marca, doble clic

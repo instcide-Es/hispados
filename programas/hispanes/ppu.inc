@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa-Nes - la imagen (el procesador de imagen de la consola), los
 ;  registros de 2000h a 401Fh, los mandos y el cuadro entero
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del hardware: registros 2000h a
 ;  2007h, los registros internos v, t, x y w del desplazamiento, las tablas

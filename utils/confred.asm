@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS CONFRED.COM (IPCONFIG) - la configuración de la red
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  CONFRED              la enseña (si todavía no hay, la pide: DHCP o la de
 ;                       \HISPADOS\RED.INI)

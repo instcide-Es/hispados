@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - HSPUSB: la capa común de «controladora» (parte residente)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  HSPUSB lleva las cuatro clases de controladora USB que hay en un PC:
 ;    UHCI (USB 1.x de Intel y VIA; puertos de E/S)        lib/usb_uhci.inc

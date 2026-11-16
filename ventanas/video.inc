@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - driver de pantalla (modo protegido)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Interfaz del driver (lo único que usan las demás capas):
 ;    vid_detectar   (modo real, video16.inc) elige el modo

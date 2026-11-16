@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Cometas (HISPA1.NES) - el primer juego propio de Hispa-Nes
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un juego de naves pequeño, de diseño propio, escrito para el hardware de
 ;  la consola (funciona en Hispa-Nes, en otros emuladores y en una consola

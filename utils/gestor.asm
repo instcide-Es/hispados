@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS GESTOR.COM - gestor de archivos a pantalla completa (estilo DOSSHELL)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Flechas, RePág, AvPág, Inicio, Fin: moverse.  Una letra: saltar a ella.
 ;  Intro: entrar en la carpeta / ejecutar el programa / editar el texto.

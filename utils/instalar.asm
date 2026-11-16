@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS INSTALAR.COM - instalar Hispa-DOS en un disco duro (o disquete)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  INSTALAR           sin unidad, guiado: PARTIR /INSTALAR propone el disco
 ;                     duro (nunca la memoria USB ni el disco de arranque) y,

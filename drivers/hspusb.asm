@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  HSPUSB.SYS - USB nativo de Hispa-DOS: controladoras UHCI, OHCI, EHCI y
 ;  xHCI; memorias USB, teclado, ratón, mandos de juego y concentradores
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  CONFIG.SYS:  DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/?]
 ;     (sin opciones) seguro: si la BIOS está usando el USB no se toca nada. Se

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  BLOQUES.HVP - Bloques, un juego de Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Por un pozo de 11 x 18 casillas caen piezas de azulejos, de una en una; se
 ;  mueven y se giran para encajarlas abajo. Cada fila que queda completa

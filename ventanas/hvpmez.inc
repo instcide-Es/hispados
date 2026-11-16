@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - el mezclador de HSPSND para los módulos .HVP
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Lo usan el Mezclador (MEZCLAD.HVP) y Configuración (CONFIG.HVP). Se
 ;  ensambla dentro del módulo, detrás de hvplib.inc (%include "hvpmez.inc").

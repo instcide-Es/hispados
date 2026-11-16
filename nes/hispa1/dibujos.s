@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Cometas (HISPA1.NES) - los dibujos: 8 KB, 256 de fondo y 256 de objetos
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Todos hechos aquí, en texto: 8 filas de 8 puntos por dibujo; «.» es
 ;  transparente (el color 0) y 1, 2 y 3 los otros tres de su paleta. Los

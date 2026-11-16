@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - cuadros de diálogo modales
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un diálogo modal es una ventana de la clase c_dialogo con sus controles;
 ;  mientras está abierto, su dueña no recibe ratón ni teclado y la tarea se

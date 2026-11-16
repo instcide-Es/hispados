@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - menús desplegables
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  La barra de menús de una ventana es una tabla (V_MENU apunta a ella):
 ;      db "&Archivo", 0             título («&» marca la letra de Alt+letra)

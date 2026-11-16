@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa Ventanas - controles: botón, casilla, opción, texto, cuadro de
 ;  texto de una y de varias líneas, lista y barra de desplazamiento
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Cada control es una clase de ventana hija; se crean con ven_crear y una
 ;  plantilla (clase, texto, estilo, x, y, ancho, alto, id). Avisan a su madre

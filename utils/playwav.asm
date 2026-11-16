@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  PLAYWAV.COM - reproductor de sonido de Hispa-DOS (usa HSPSND)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  PLAYWAV fichero.wav           reproduce un WAV PCM (8/16 bits, mono/estéreo)
 ;  PLAYWAV /TONE hz [ms]         tono de prueba (onda cuadrada, 22050 Hz)

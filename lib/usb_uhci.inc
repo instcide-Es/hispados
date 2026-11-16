@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - HSPUSB: controladora UHCI (USB 1.x de Intel y VIA), residente
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Según «Universal Host Controller Interface (UHCI) Design Guide» 1.1 (Intel).
 ;  Registros en puertos de E/S (hc_base): USBCMD 00h, USBSTS 02h, USBINTR 04h,

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-Nes - el sonido: dos canales de pulsos, triángulo, ruido y muestras
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del hardware: registros 4000h a
 ;  4017h, el secuenciador de cuadros (envolventes, barridos y contadores de

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  TMSTEST.SMS - prueba propia de los modos heredados del TMS9918
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Pone el modo gráfico II (el que usan casi todos los juegos de la consola
 ;  anterior): las letras propias en los tres tercios de la pantalla, con un

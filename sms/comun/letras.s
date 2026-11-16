@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Las letras propias de Hispa-System (8x8, de una tinta: el color 1), para
-;  los cartuchos propios. Copyright (C) 2026 Hispa-DOS contributors.
+;  los cartuchos propios. Copyright (C) 2026 Carlos Sanz y contribuidores.
 ;  GPL-2.0-or-later. Diseño propio. Van en el orden de sus códigos, de
 ;  20h (espacio) a 5Ah (Z): 59 dibujos; los que no tienen letra, en blanco.
 ;  Un cartucho las pone a partir de un dibujo N y escribe el texto con N +

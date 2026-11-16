@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  HISPASMS.HVP - Hispa-System, la segunda consola de 8 bits de Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un emulador compatible con los cartuchos de la Master System (volcados en
 ;  archivos .SMS). Todo el código es propio, escrito a partir de la

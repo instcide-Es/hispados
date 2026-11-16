@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS FDISK.COM (en el disco PARTIR.COM) - particiones de los discos
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  PARTIR                 menú interactivo (como FDISK de MS-DOS 6.22)
 ;  PARTIR [n] /STATUS     tabla de particiones del disco n (1 = primero)

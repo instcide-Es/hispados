@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  VENTANAS.COM - Hispa Ventanas, etapa 3: ventanas, mensajes y programas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Uso:  VENTANAS [/1024] [/640] [/8] [/15] [/16] [/24] [/32] [/COLOR] [/VGA]
 ;                 [/DEMO] [/CONTORNO]

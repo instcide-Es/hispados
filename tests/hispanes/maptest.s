@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  MAPTEST - prueba propia de los cartuchos de Hispa-Nes (cambio de bancos)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un mismo programa para los tipos de cartucho 1, 2, 3, 4, 7 y 66. Se
 ;  ensambla con  tools/asm6502.py -D MAPA=n  y sale solo el trozo de 16 KB de

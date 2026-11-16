@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa Ventanas - CENTRO.INI: los grupos y los accesos directos del Centro
 ;  de programas, dónde está cada ventana y el volumen
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  CENTRO.INI está en la carpeta de VENTANAS.COM. Es un archivo de texto
 ;  (página 437, líneas con CR+LF) con un formato propio, parecido a un .INI

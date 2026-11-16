@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - [MEZCLADOR] el mezclador de HSPSND desde Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Va en la parte alta de VENTANAS.COM (solo la usa el código de 32 bits).
 ;    snd_mezcla   (interfaz 82) EAX EBX ECX EDX -> HSPSND (AH = función:

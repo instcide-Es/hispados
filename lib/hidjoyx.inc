@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - mandos USB: del informe al estado del mando (parte residente)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Lo incluyen HSPUSB.SYS (residente) y las pruebas (tests/progs/hidtest.asm).
 ;  El «mapa» (HJM_*) lo prepara una vez lib/hidjoyp.inc a partir del

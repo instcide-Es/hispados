@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - sector de arranque FAT16 (disco duro) / FAT16 boot sector
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  FORMAT rellena el BPB. Se copia a 8000:0000, busca KERNEL.SYS en el
 ;  directorio raíz, lo carga en 0070:0000 y salta a él con DL = unidad y

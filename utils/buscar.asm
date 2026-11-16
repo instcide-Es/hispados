@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS BUSCAR.COM (FIND) - buscar un texto en archivos o en la entrada
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  BUSCAR [/V] [/C] [/N] [/I] "texto" [archivo ...]
 ;     /V  las líneas que NO contienen el texto

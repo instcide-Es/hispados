@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  HSPDPMI.COM - servidor DPMI 0.9 de Hispa-DOS (residente)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Uso:  HSPDPMI        instalar (en AUTOEXEC.BAT; necesita HSPXMS.SYS u otro
 ;                       gestor XMS y un 386 o superior)

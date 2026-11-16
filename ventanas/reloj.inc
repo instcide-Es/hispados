@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - Reloj
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Esfera con agujas que se adapta al tamaño de la ventana y, debajo, la hora
 ;  en cifras. En «Opciones» (un diálogo con una casilla y dos opciones) se

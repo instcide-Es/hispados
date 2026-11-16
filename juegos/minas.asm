@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  MINAS.HVP - Campo de minas, un juego de Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un campo de losas con minas escondidas. Al levantar una losa sale cuántas
 ;  minas tiene alrededor (si no tiene ninguna, se levantan solas las de al

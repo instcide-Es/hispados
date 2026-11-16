@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - motor de copia de arbol de ficheros (compartido)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Copia conjuntos de ficheros (patron "\CARPETA\*.*") de una unidad (y, si se
 ;  quiere, de una CARPETA base dentro de ella) a otra unidad, respetando los

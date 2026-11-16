@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-Nes - el procesador: 6502 sin modo decimal (el de la consola)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del 6502 (juego de instrucciones,
 ;  modos de direccionamiento, banderas y ciclos de cada instrucción) y de la

@@ -2,7 +2,7 @@
 ;  Hispa Ventanas - juegos de DOS en el Centro de programas: grupos ligados a
 ;  una carpeta de juegos y opciones de juego de un acceso directo (velocidad,
 ;  LOADFIX y Sound Blaster emulada)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Este archivo va en la «parte alta» de VENTANAS.COM (ventanas.asm): solo
 ;  código y datos de 32 bits.

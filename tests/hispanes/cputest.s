@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  CPUTEST.NES - prueba propia de Hispa-Nes: procesador, imagen, sonido y mando
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Una ROM de prueba hecha aquí (se ensambla con tools/asm6502.py), para que
 ;  las pruebas del emulador no dependan de nada descargado. Hace 24 pruebas

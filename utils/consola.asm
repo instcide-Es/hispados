@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS CONSOLA.COM - consola remota por red (abierta, visible, con código)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  CONSOLA [/PUERTO:n]
 ;  Escucha en un puerto TCP (2323 si no se dice) y espera a que alguien se

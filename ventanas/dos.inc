@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - archivos: las llamadas a DOS desde modo protegido
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  INT 21h quiere los punteros en memoria de modo real. En vez de hacer que el
 ;  servidor DPMI los traduzca, Hispa Ventanas usa la función 0300h con un

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  MEZCLAD.HVP - el Mezclador de Hispa Ventanas (grupo «Sonido»)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  El volumen de cada fuente de sonido, con el mezclador por fuentes de
 ;  HSPSND (sus funciones 09h-0Fh, versión 4; docs/MEZCLADOR.md):

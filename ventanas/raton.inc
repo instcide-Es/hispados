@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - ratón y cursor
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  El ratón llega por INT 33h (HSPRATON u otro driver) y por interrupciones:
 ;  el driver llama a rm_raton (ventanas.asm, en modo real) en cada movimiento

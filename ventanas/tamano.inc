@@ -2,7 +2,7 @@
 ;  Hispa Ventanas - [TAMAÑO] cambiar el tamaño de las ventanas con el ratón,
 ;  formas del cursor, arrastrar solo el contorno, la rueda del ratón y la
 ;  barra de desplazamiento (c_barra), con su uso en el Centro de programas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Va en la parte alta (32 bits, sin el límite de 64 KB). Lo llama el gestor
 ;  (gestor.inc), el ratón (raton.inc, ventanas.asm) y el Centro (centro.inc).

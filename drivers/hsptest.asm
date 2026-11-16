@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  HSPTEST.SYS - driver de carácter de prueba (dispositivo HSPTEST$)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Al leerlo devuelve lo último que se le escribió (o un mensaje de prueba)
 ;  y después fin de fichero. Sirve para probar DEVICE= y la cadena de

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
 #  Hispa-DOS - tools/paquete.py: construir un paquete .PAQ para ACTUALIZAR
-#  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+#  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 #
 #  Empaqueta una carpeta (con la MISMA estructura que tendra el sistema en el
 #  disco: KERNEL.SYS, COMMAND.COM, CONFIG.SYS, AUTOEXEC.BAT en la raiz y

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS - registro maestro de arranque (MBR) / Master Boot Record
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Se copia a 0000:0600, busca la partición activa, carga su sector de
 ;  arranque en 0000:7C00 (LBA si la BIOS lo admite, si no CHS) y salta a él

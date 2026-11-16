@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS REVISAR.COM (CHKDSK) - comprobar el estado de un disco FAT
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  REVISAR [unidad:][[ruta]archivo] [/F] [/V]
 ;     /F       corrige los errores (sin /F solo informa y no escribe nada)

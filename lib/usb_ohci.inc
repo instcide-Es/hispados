@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  Hispa-DOS - HSPUSB: controladora OHCI (USB 1.x de SiS, ALi, NEC, Apple,
 ;  AMD, NVIDIA...), parte residente
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Según «OpenHCI: Open Host Controller Interface Specification for USB» 1.0a.
 ;  Registros en memoria (hc_base): HcControl 04h, HcCommandStatus 08h,

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS EQUIPO.COM - informe completo del hardware del equipo, en texto
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  EQUIPO [/CPU] [/BIOS] [/VESA] [/PCI] [/DISCOS] [/RES] [/ISA] [/NOxxx]
 ;  EQUIPO /INFORME [/NOxxx]     (lo que hace DIAGNOSTICO: DIAGNOST.BAT)

@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  hspmezi.inc - el mezclador por fuentes de HSPSND: lo de la instalacion
 ;  (se descarta al quedar residente)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;    mz_iniciar   (al instalar, con la tarjeta ya elegida) mira que tiene la
 ;                 tarjeta, lee la seccion [Mezclador] de SONIDO.INI y, si se

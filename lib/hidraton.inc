@@ -3,7 +3,7 @@
 ;  (HID 1.11, apartado 6.2.2; tablas de usos «HID Usage Tables»). Saca dónde
 ;  van los botones y el movimiento en los informes de un ratón que no da (o
 ;  no se sabe si da) los informes de arranque de 3 bytes.
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Para qué: un ratón de arranque (interfaz 03/01/02) da, tras SET_PROTOCOL
 ;  (arranque), botones, X e Y en los bytes 0, 1 y 2. Pero hay paneles y

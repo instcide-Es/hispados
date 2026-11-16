@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS FORMAT.COM - dar formato FAT12/FAT16 a una unidad
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/Q] [/U] [/AUTOTEST]
 ;     /S         copiar el sistema (KERNEL.SYS y COMMAND.COM): disco de arranque

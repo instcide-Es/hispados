@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS ARBOL.COM (TREE) - árbol de carpetas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  ARBOL [unidad:][ruta] [/F] [/A]
 ;     /F  también los archivos de cada carpeta

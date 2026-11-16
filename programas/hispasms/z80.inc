@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-System - el procesador: Z80 (el de la consola, a 3,58 MHz)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del Z80 (el manual del fabricante
 ;  del procesador: instrucciones, banderas y ciclos) y los documentos públicos

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - el escritorio y las ventanas de muestra
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  El escritorio es una ventana más (la del fondo, de la tarea del sistema):
 ;  mosaico de rombos en azul petróleo, barra superior marrón con filete ocre y

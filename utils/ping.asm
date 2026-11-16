@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS PING.COM - ¿contesta otro equipo? (eco de ICMP)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  PING nombre|a.b.c.d [/N:n]   (n ecos; 4 si no se dice; Esc para)
 ;  Necesita HSPRED (u otro packet driver). Ver docs/RED.md.

@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - driver de pantalla, parte de modo real: elegir el modo
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Se hace antes de entrar en modo protegido porque las funciones de VBE
 ;  4F00h y 4F01h escriben en un búfer de memoria convencional.

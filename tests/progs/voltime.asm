@@ -1,5 +1,5 @@
 ; VOLTIME.COM - cuanto tarda un cambio de volumen en HSPSND (pruebas:
-; tests/run_volumen_tests.sh). Copyright (C) 2026 Hispa-DOS contributors.
+; tests/run_volumen_tests.sh). Copyright (C) 2026 Carlos Sanz y contribuidores.
 ; GPL-2.0-or-later.
 ;   VOLTIME [n] [T]   n llamadas a la función 05h (volumen en %), cada una
 ;                     con un volumen distinto (20..79 %); por defecto 50.

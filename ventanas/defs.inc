@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - constantes de la interfaz (mensajes, estilos, fichas)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Los mensajes llevan los nombres y los números documentados de la API de
 ;  Windows (es interfaz); los propios de cada control van desde WM_USER.

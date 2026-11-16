@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa Ventanas - núcleo: memoria, tareas, mensajes y temporizadores
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Memoria: un «montón» en memoria extendida (función 0501h del DPMI).
 ;    mem_iniciar                 CF=1 si no hay memoria

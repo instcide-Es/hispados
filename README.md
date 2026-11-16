@@ -324,7 +324,7 @@ Se aceptan *pull requests*. Normas importantes:
 
 ## Licencia
 
-GPL-2.0-or-later. Ver [LICENSE](LICENSE).
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior (GPL-2.0-or-later). Ver [LICENSE](LICENSE).
 
 ---
 
@@ -341,4 +341,4 @@ make && make run     # build the floppy image and boot it in QEMU
 make test            # automated end-to-end test over the serial port
 ```
 
-Contributions are welcome. Please never submit Microsoft code or disassembly. Licensed under GPL-2.0-or-later.
+Contributions are welcome. Please never submit Microsoft code or disassembly. Copyright (C) 2026 Carlos Sanz y contribuidores. Licensed under GPL-2.0-or-later.

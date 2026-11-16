@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS SYS.COM - hacer arrancable una unidad ya formateada
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  SYS unidad:     copia KERNEL.SYS y COMMAND.COM desde la unidad de arranque
 ;                  y escribe el código de arranque de Hispa-DOS (FAT12/FAT16),

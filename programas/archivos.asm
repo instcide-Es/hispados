@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  ARCHIVOS.HVP - el Administrador de archivos de Hispa Ventanas
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Pedido de Carlos: «En ventanas, ¿tenemos explorador de archivos?». Una
 ;  ventana (redimensionable, maximizable; recuerda su sitio y su tamaño) con

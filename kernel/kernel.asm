@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS kernel (KERNEL.SYS)
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Núcleo compatible con la API de MS-DOS 6.22 escrito desde cero a partir de
 ;  documentación pública (Ralf Brown's Interrupt List, especificación FAT,

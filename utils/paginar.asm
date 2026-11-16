@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  Hispa-DOS PAGINAR.COM (MORE) - mostrar texto pantalla a pantalla
-;  Copyright (C) 2026 Hispa-DOS contributors. GPL-2.0-or-later.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  PAGINAR [archivo]       orden | PAGINAR       PAGINAR < archivo
 ;  En cada pantalla espera una tecla («-- Más --»); Esc o Q terminan.
