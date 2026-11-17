@@ -555,19 +555,78 @@ init:
         int 0x21
         ; ---- sin instalar ----
 .nores:
-        call load_teclas            ; leer \HISPADOS\TECLAS.INI (remapeos)
-        mov al, [macopt]
-        cmp al, 2
-        je .nomac
-        cmp al, 1
-        je .simac
-        cmp byte [lay], 0           ; «KEYB» a secas solo informa
-        je .nomac
-        call detect_mac
-        mov [mac], al
+        ; TECLAS.INI y la tabla de SMBIOS se leen en una zona de trabajo de
+        ; detrás del programa (smbuf y teclas_buf: 3 KB que no están en el
+        ; fichero). Con LH en un hueco pequeño de la memoria superior (el HP
+        ; Mini: 4 KB al final de B000-B7FF, con HSPDPMI y HSPRATON delante)
+        ; esa zona pasa del final del bloque: se pisaba la pila (que DOS pone
+        ; al final del bloque) y lo de detrás del bloque, y el arranque de
+        ; «Juegos» se colgaba aquí según lo que hubiera en SMBIOS. Si no
+        ; cabe, la preparación se hace en una copia del programa en un bloque
+        ; de paso de la memoria convencional y se trae el resultado.
+        mov ax, [2]                 ; fin del bloque (PSP)
+        mov dx, cs
+        sub ax, dx                  ; párrafos del bloque
+        cmp ax, TRABAJO_PARR
+        jae .cabe
+        mov ax, 0x5800              ; (LH deja «solo arriba»: se pide abajo)
+        int 0x21
+        push ax
+        mov ax, 0x5801
+        xor bx, bx
+        int 0x21
+        mov ah, 0x48
+        mov bx, TRABAJO_PARR
+        int 0x21
+        pop bx
+        pushf
+        push ax
+        xor bh, bh
+        mov ax, 0x5801              ; la estrategia, como estaba
+        int 0x21
+        pop ax
+        popf
+        jc .sinmem
+        mov [seg_orig], cs
+        mov es, ax
+        xor si, si
+        xor di, di
+        mov cx, smbuf               ; PSP y programa
+        cld
+        rep movsb
+        push es
+        push word .encopia
+        retf
+.encopia:                           ; (CS = la copia; la pila, la de antes)
+        push cs
+        pop ds
+        call prepara
+        mov es, [seg_orig]          ; el resultado (variables), a su sitio
+        mov si, 0x100
+        mov di, si
+        mov cx, smbuf - 0x100
+        cld
+        rep movsb
+        push es
+        push word .vuelta
+        retf
+.vuelta:
+        push ds
+        pop es                      ; el bloque de paso ya no hace falta
+        push cs
+        pop ds
+        mov ah, 0x49
+        int 0x21
+        push cs
+        pop es
         jmp .nomac
-.simac:
-        mov byte [mac], 1
+.sinmem:
+        mov si, msg_sinmem
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.cabe:
+        call prepara
 .nomac:
         mov al, [lay]
         and al, 1
@@ -622,6 +681,26 @@ init:
         shr dx, 4
         mov ax, 0x3100
         int 0x21
+
+; Lo que se lee antes de instalarse: los remapeos de TECLAS.INI y si el
+; equipo es de Apple. Usa la zona de trabajo de detrás del programa (smbuf y
+; teclas_buf); todo con CS = DS (también vale en una copia del programa).
+prepara:
+        call load_teclas            ; leer \HISPADOS\TECLAS.INI (remapeos)
+        mov al, [macopt]
+        cmp al, 2
+        je .r
+        cmp al, 1
+        je .simac
+        cmp byte [lay], 0           ; «KEYB» a secas solo informa
+        je .r
+        call detect_mac
+        mov [mac], al
+        ret
+.simac:
+        mov byte [mac], 1
+.r:
+        ret
 
 puts:
         lodsb
@@ -1073,6 +1152,8 @@ msg_mac     db "Teclado de Mac: Ctrl+Retroceso = Supr, Alt+flechas = Inicio/Fin/
             db "Alt+Retroceso = Insertar", 13, 10, 0
 msg_nomac   db "Teclado de Mac: desactivado.", 13, 10, 0
 msg_remap   db "Remapeo de teclas de TECLAS.INI activo.", 13, 10, 0
+msg_sinmem  db "TECLADO: no hay memoria suficiente.", 13, 10, 0
+seg_orig    dw 0                    ; segmento del programa (desde su copia)
 
 teclas_path db "\HISPADOS\TECLAS.INI", 0
 teclas_name db "TECLAS.INI", 0
@@ -1080,3 +1161,5 @@ teclas_name db "TECLAS.INI", 0
 smbuf:                              ; SM_BUF + 2 octetos, detrás del programa
 teclas_buf  equ smbuf + SM_BUF + 2  ; TECLAS_BUF octetos para TECLAS.INI (solo
                                     ; al arrancar; detrás de smbuf, no residente)
+; párrafos que hacen falta para la zona de trabajo y 512 octetos de pila
+TRABAJO_PARR equ (teclas_buf - $$ + 0x100 + TECLAS_BUF + 1 + 512 + 15) / 16

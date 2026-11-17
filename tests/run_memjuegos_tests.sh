@@ -17,7 +17,9 @@
 #   hpmini  como el HP Mini 5103: la ROM de vídeo en C000-CFFF, la BIOS en
 #           E000-FFFF (X=C000-CFFF X=E000-EFFF) y sin lector de CD (sin
 #           HSPCD): solo queda B000-B7FF, y HSPDPMI cabe en ella con sus
-#           tablas de páginas
+#           tablas de páginas. A TECLADO le quedan 4 KB: lee TECLAS.INI y
+#           SMBIOS en un bloque de paso (antes pisaba su pila y se colgaba
+#           con QEMU 10)
 #   sinumb  sin ninguna memoria superior: el lanzador de Ventanas se queda
 #           abajo (como antes) y todo sigue funcionando
 # Sin segundo argumento se hacen todas. MIN_QEMU y MIN_HP: los mínimos de
@@ -78,11 +80,17 @@ caso() {
   echo "== Hispa-DOS memoria para juegos ($1) =="
   cp $DISQ $T/f.img
   if [ -n "$2" ]; then
-    mtype -i $T/f.img ::CONFIG.SYS | sed "s/^DEVICE=A:\\\\HISPADOS\\\\HSPEMM.SYS/& $2/" | grep -v "${3:-NADA_QUE_QUITAR}" > $T/CONFIG.SYS
+    mtype -i $T/f.img ::CONFIG.SYS | sed "s/^DEVICE=A:\\\\HISPADOS\\\\HSPEMM.SYS/& $2/" | grep -a -v "${3:-NADA_QUE_QUITAR}" > $T/CONFIG.SYS
     grep -q "^DEVICE=A:.HISPADOS.HSPEMM.SYS $2" $T/CONFIG.SYS || ko "no está la línea de HSPEMM en CONFIG.SYS"
     mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   fi
   mcopy -o -i $T/f.img $B/MEMJUEGO.COM $B/SBTEST.COM $B/SBPM.COM $B/DPMI16.COM ::BIN/
+  if [ "$1" = hpmini ]; then
+    # un remapeo en TECLAS.INI: TECLADO lo tiene que leer aunque LH lo deje
+    # en un hueco de 4 KB (su zona de trabajo no cabe detrás del programa)
+    { mtype -i $T/f.img ::HISPADOS/TECLAS.INI; printf '5B=1D\r\n'; } > $T/TECLAS.INI
+    mcopy -o -i $T/f.img $T/TECLAS.INI ::HISPADOS/TECLAS.INI
+  fi
   # (sin los juegos propios: no hacen falta y el grupo sale vacío)
   mdel -i $T/f.img '::HISPADOS/JUEGOS/*.HVP' 2>/dev/null
   # un grupo con dos accesos al «juego»: el primero vuelve a Hispa Ventanas,
@@ -222,6 +230,9 @@ c_hp() {
   comunes $MIN_HP
   check "memoria superior: 32 KB ( B000-B7FF)"
   arriba HSPDPMI
+  arriba TECLADO
+  check "Teclado español instalado."
+  check "Remapeo de teclas de TECLAS.INI activo."
   check "SBPM terminado, fallos: 0"
 }
 if quiere hpmini; then
