@@ -18,9 +18,13 @@
 #     etiquetas;
 #   - etiquetas «nombre:» y locales «.nombre:» (de la última no local);
 #   - db dw dd resb resw resd times, cpu, bits, org, absolute, section, align.
-#  Los saltos: empiezan todos cortos y se alargan los que no llegan, hasta que
-#  nada cambia (lo mismo que hace NASM): un «jmp» largo son 3 octetos; un
-#  salto condicional largo, el contrario por encima de un «jmp» (5 octetos).
+#  Los saltos, como NASM: se pasa por el archivo las veces que haga falta. En
+#  cada pasada un salto va corto si llega (a 127 octetos) contando con dónde
+#  están ahora las etiquetas: las de atrás, donde han quedado en esta pasada;
+#  las de delante, donde quedaron en la anterior (en la primera aún no se
+#  saben: se supone que llega). Cuando ninguna etiqueta cambia de sitio, se ha
+#  acabado. Un «jmp» largo son 3 octetos; un salto condicional largo, el
+#  contrario por encima de un «jmp» (5 octetos).
 #  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # =============================================================================
 import sys
@@ -68,7 +72,6 @@ class Ensamblador:
     def __init__(self, lineas):
         self.lineas = lineas
         self.sim = {}               # etiqueta -> valor (de la pasada anterior, y de esta)
-        self.largos = set()         # los saltos (por su número de línea) que van largos
         self.final = False
 
     def error(self, msg):
@@ -524,11 +527,9 @@ class Ensamblador:
                 self.error(f"«{nem}» no llega tan lejos (127 octetos)")
             self.b(BUCLES[nem], d)
         else:
-            if forma == b'near' or (forma is None and not llega):
-                self.largos.add(self.nl)
             if forma == b'short' and not llega and self.final:
                 self.error("el salto corto no llega")
-            if self.nl in self.largos:
+            if forma == b'near' or (forma is None and not llega):
                 if nem == 'jmp':
                     self.b(0xE9)
                     self.w(destino - (self.pc + 2))
@@ -664,11 +665,10 @@ class Ensamblador:
         self.primera = True
         n = 0
         while True:
-            antes = set(self.largos)
             self.pasada()
             self.primera = False
             n += 1
-            if not self.cambio and antes == self.largos:
+            if not self.cambio:
                 break
             if n > 200:
                 raise ErrorEns("los saltos no se asientan")

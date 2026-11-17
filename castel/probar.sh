@@ -15,6 +15,7 @@ COM=${1:-}
 [ -f "$COM" ] || { echo "uso: probar.sh PROGRAMA.COM [argumentos...]"; exit 2; }
 shift
 NOM=$(basename "${COM%.*}" | tr 'a-z' 'A-Z')
+EXT=$(echo "${COM##*.}" | tr 'a-z' 'A-Z')     # COM o EXE
 AQUI=$(dirname "$(readlink -f "$0")")
 T=$(mktemp -d)
 QPID=
@@ -23,7 +24,7 @@ trap '[ -n "$QPID" ] && kill $QPID 2>/dev/null; rm -rf $T' EXIT
 if [ -n "${HISPADOS_IMG:-}" ]; then
   [ -f "$HISPADOS_IMG" ] || { echo "No encuentro la imagen de Hispa-386: $HISPADOS_IMG"; exit 2; }
   cp "$HISPADOS_IMG" "$T/f.img"
-  mcopy -o -i "$T/f.img" "$COM" "::$NOM.COM"
+  mcopy -o -i "$T/f.img" "$COM" "::$NOM.$EXT"
   { sleep 7
     printf '%s\r' "$NOM $*"; sleep 3
     printf '%s\r' "ECHO [fin]"; sleep 1.5
@@ -39,7 +40,7 @@ H=$AQUI/../h8086
 [ -f $H/build/hispa8086-1440.img ] || { echo "No hay disquete de Hispa-8086 (make en h8086)"; exit 2; }
 cp $H/build/hispa8086-1440.img $T/a.img
 printf '@ECO OFF\r\n%s %s > SALIDA.TXT\r\nECO [castel-fin]\r\n' "$NOM" "$*" > $T/AUTOEXEC.BAT
-mcopy -o -i $T/a.img "$COM" "::$NOM.COM"
+mcopy -o -i $T/a.img "$COM" "::$NOM.$EXT"
 mcopy -o -i $T/a.img $T/AUTOEXEC.BAT ::
 qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
   -drive file=$T/a.img,format=raw,if=floppy,index=0 -boot a -no-reboot > /dev/null 2>&1 &

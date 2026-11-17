@@ -1,0 +1,13 @@
+modelo grande
+datos con valor inicial: 23 letras
+natural_a_texto: 4000000000
+número_a_texto + hex: -123456789 y CAFE
+texto_a_natural: 70000
+texto_a_número: -16
+comparar: -1 cierto
+factorial(12) = 479001600
+cambia: 2 1
+figuras: 144 15 2540
+área y perímetro: 12 14, hechas: 2
+500000 400000 300000 200000 100000 (5 nodos)
+argumentos: 0

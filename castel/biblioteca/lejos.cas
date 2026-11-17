@@ -1,0 +1,74 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; lejos.cas - memoria LEJANA: bloques fuera del segmento del programa, para
+; las tablas que no caben en sus 64 K (las del compilador y el ensamblador).
+; Se piden al DOS por párrafos (16 octetos) y lo que se recibe es un
+; segmento: se lee y se escribe con leer_byte, poner_byte, leer_palabra y
+; poner_palabra, dando el segmento y el desplazamiento.
+;
+;   importar Lejos
+;   ...
+;   tabla := pedir(0x1000)              ; 64 K; 0 si no hay
+;   poner_palabra(tabla, 10, 1981)
+;   ...
+;   devolver_bloque(tabla)
+;
+; Un .COM recibe del DOS toda la memoria libre: la primera vez que se pide
+; un bloque, el programa se queda con sus 64 K y devuelve el resto. (Un
+; programa de «modelo grande» ya solo tiene lo suyo.)
+módulo Lejos
+
+    variable encogido: bool
+
+    función seg_datos(): nat16
+        ensamblador
+            mov ax, ds
+        fin
+    fin
+
+    función seg_código(): nat16
+        ensamblador
+            mov ax, cs
+        fin
+    fin
+
+    ; pide un bloque de tantos párrafos (0x1000 son 64 K). Devuelve su
+    ; segmento, o 0 si no hay tanta memoria seguida
+    público función pedir(párrafos: nat16): nat16
+        variable seg: nat16
+        seg := interrupción(0x21, ah: 0x48, bx: párrafos)
+        si no acarreo() entonces devolver seg fin
+        si encogido o seg_datos() <> seg_código() entonces devolver 0 fin
+        ; un .COM: el bloque del programa (el de su prefijo) se queda en 64 K
+        encogido := cierto
+        interrupción(0x21, ah: 0x4A, es: seg_datos(), bx: 0x1000)
+        si acarreo() entonces devolver 0 fin
+        seg := interrupción(0x21, ah: 0x48, bx: párrafos)
+        si acarreo() entonces devolver 0 fin
+        devolver seg
+    fin
+
+    ; cuántos párrafos tiene el mayor bloque que se puede pedir ahora
+    público función mayor_bloque(): nat16
+        variable seg: nat16
+        seg := interrupción(0x21, ah: 0x48, bx: 0xFFFF)
+        si acarreo() entonces devolver reg_bx() fin
+        interrupción(0x21, ah: 0x49, es: seg)   ; (nadie da tanto: por si acaso)
+        devolver 0xFFFF
+    fin
+
+    público función devolver_bloque(seg: nat16)
+        interrupción(0x21, ah: 0x49, es: seg)
+    fin
+
+    ; pone a cero las primeras «palabras» palabras de un bloque
+    público función borrar_bloque(seg: nat16, palabras: nat16)
+        variable i: nat16
+        i := 0
+        mientras palabras > 0 hacer
+            poner_palabra(seg, i, 0)
+            i := i + 2
+            palabras := palabras - 1
+        fin
+    fin
+
+fin Lejos.

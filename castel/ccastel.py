@@ -419,6 +419,10 @@ class Sintactico:
             return self.decl_tipo()
         if self.es('PAL', 'ensamblador'):
             return self.ensamblador()
+        if self.es('ID', 'modelo') and self.es('ID', 'grande', 1):
+            pos = self.pos()                    # «modelo grande»: un .EXE de varios segmentos
+            self.p += 2
+            return N('modelo', pos)
         if self.es('ID', self.nombre_modulo) or self.es('EOF'):
             self.falta_fin()
         self.error("esperaba constante, variable, tipo, función o ensamblador")
@@ -934,6 +938,7 @@ class Modulo:
         self.funcs = {}             # nombre -> N func (con .ptipos, .tret, .etq...)
         self.publicos = {}          # nombre -> (tabla, objeto): lo que ven los que lo importan
         self.ambiguos = {}          # nombre -> los módulos importados que lo traen (dos o más)
+        self.seg = 1                # modelo grande: su segmento de código (1, el programa)
 
     def etiqueta(self, letra, nombre):
         """El nombre en NASM: F_nombre en el programa, F_Módulo__nombre en los demás."""
@@ -944,10 +949,11 @@ class Trozo:
     """Un pedazo de lo que se genera (una función, un dato, una rutina de apoyo)
     con su etiqueta. Los que no son «fijos» solo van al programa si alguien los
     nombra: así un programa no carga con lo que no usa de los módulos."""
-    def __init__(self, etq, lineas, fijo):
+    def __init__(self, etq, lineas, fijo, seg=1):
         self.etq = etq
         self.lineas = lineas
         self.vivo = fijo
+        self.seg = seg              # modelo grande: en qué segmento de código va
 
 
 class Var:
@@ -997,8 +1003,15 @@ def texto_lugar(r):
 #     los nombra (ver genera).
 # =============================================================================
 class Generador:
-    def __init__(self, modulos):
+    def __init__(self, modulos, todo=False):
         self.modulos = modulos      # en orden: cada uno, detrás de los que importa; el último, el programa
+        self.todo = todo            # no dejar fuera lo que no se usa (para probar la biblioteca entera)
+        # «modelo grande» en el programa: un .EXE con un segmento de código por
+        # módulo y otro para los datos y la pila (ver genera)
+        self.grande = any(d.k == 'modelo' for d in modulos[-1].arbol.decls)
+        for i, m in enumerate(modulos[:-1]):
+            m.seg = i + 2
+        self.puentes = {}           # etiqueta del puente -> (segmento que lo usa, la función lejana)
         self.lineas = []
         self.datos = []             # Trozos con valor inicial: van en el archivo
         self.bss = []               # Trozos sin él: detrás, a cero al arrancar
@@ -1048,6 +1061,24 @@ class Generador:
     def nueva(self):
         self.nlbl += 1
         return f"L_{self.nlbl}"
+
+    def puente(self, f):
+        """A dónde se llama (con «call» cercano) para llegar a la función lejana f:
+        a ella misma si está en el segmento del módulo que se genera; si no, a un
+        puente de este segmento (un «jmp» lejano, que es lo que se reubica)."""
+        if f.mod is self.mod:
+            return f.etq
+        nombre = f'J{self.mod.seg}_{f.etq[2:]}'
+        if nombre not in self.puentes:
+            self.puentes[nombre] = (self.mod.seg, f)
+        return nombre
+
+    def apoyo(self, nombre):
+        """El nombre de una rutina de apoyo: en el modelo grande cada segmento
+        lleva las suyas (son cercanas), con su número detrás."""
+        if self.grande and self.mod.seg > 1:
+            return f'{nombre}_{self.mod.seg}'
+        return nombre
 
     def em(self, ln):
         self.lineas.append('    ' + ln)
@@ -1166,13 +1197,17 @@ class Generador:
                     self.error("una función no devuelve arreglos ni estructuras (use un parámetro «ref»)", d.t.pos)
                 d.ptipos = [self.resuelve(p.t) for p in d.params]
                 d.poff = []                     # dónde cae cada parámetro: [bp+4], [bp+6]...
-                off = 4
+                # modelo grande: las funciones públicas son lejanas (se las llama desde
+                # otro segmento): vuelven con «retf» y sus parámetros caen dos más allá
+                d.lejos = self.grande and getattr(d, 'publico', False) \
+                    and not (m.principal and d.nombre == 'principal')
+                off = 6 if d.lejos else 4
                 for p, t in zip(d.params, d.ptipos):
                     if t.k in ('arr', 'est') and not p.ref:
                         self.error("los arreglos y las estructuras se pasan con «ref»", p.pos)
                     d.poff.append(off)
                     off += 4 if es32(t) and not p.ref else 2
-                d.nbytes = off - 4
+                d.nbytes = off - (6 if d.lejos else 4)
 
     # ---- el programa entero ----
     def genera(self):
@@ -1194,13 +1229,13 @@ class Generador:
                 if d.k == 'func':
                     self.lineas = []
                     self.gen_funcion(d)
-                    codigo.append(Trozo(d.etq, self.lineas, m.principal))
+                    codigo.append(Trozo(d.etq, self.lineas, m.principal, m.seg))
                 elif d.k == 'asm':
                     self.func = None
                     self.locales = {}
                     self.lineas = ['']
                     self.gen_asm(d)
-                    codigo.append(Trozo(None, self.lineas, True))
+                    codigo.append(Trozo(None, self.lineas, True, m.seg))
         self.usa(prog)
         if not self.ban_memoria:
             # todos los acarreo() han salido con «jc»: la copia de las banderas sobra
@@ -1212,38 +1247,87 @@ class Generador:
         for r in sorted(set(SALIDAS_INT.values())):
             self.bss.append(Trozo(f'R_{r}', [f"R_{r}: resw 1"], False))
         apoyo = [Trozo(nombre, txt.strip('\n').split('\n'), False) for nombre, txt in APOYO.items()]
+        nsegs = len(self.modulos) if self.grande else 1
+        for k in range(2, nsegs + 1):
+            # las rutinas de apoyo de cada segmento: las mismas, con su número detrás
+            for nombre, txt in APOYO.items():
+                txt = re.sub(r'\w+', lambda m: f'{m.group(0)}_{k}' if m.group(0) in APOYO else m.group(0), txt)
+                apoyo.append(Trozo(f'{nombre}_{k}', txt.strip('\n').split('\n'), False, k))
+        # los puentes: desde un segmento, el salto lejano a una función de otro
+        puentes = [Trozo(nombre, [f'{nombre}:', f'    jmp ((C_{f.mod.seg}-C_1)>>4):({f.etq}-C_{f.mod.seg})'], False, k)
+                   for nombre, (k, f) in self.puentes.items()]
         # qué va al programa: lo fijo y, de lo demás, lo que alguien nombre
-        todos = codigo + apoyo + self.datos + self.bss
+        todos = codigo + apoyo + puentes + self.datos + self.bss
         palabras = set()
         pendientes = [t for t in todos if t.vivo]
         while pendientes:
             for t in pendientes:
                 palabras.update(re.findall(r'\w+', '\n'.join(t.lineas)))
-            pendientes = [t for t in todos if not t.vivo and t.etq in palabras]
+            pendientes = [t for t in todos if not t.vivo and (t.etq in palabras or self.todo)]
             for t in pendientes:
                 t.vivo = True
 
-        def vivos(lista):
-            return [ln for t in lista if t.vivo for ln in t.lineas]
+        def vivos(lista, seg=None):
+            return [ln for t in lista if t.vivo and (seg is None or t.seg == seg) for ln in t.lineas]
         bss = vivos(self.bss)
         cab = [
             '; -----------------------------------------------------------------',
             f'; Generado por ccastel desde el módulo {prog.nombre}. NO editar a mano.',
-            '; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.COM',
+            '; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.' + ('EXE' if self.grande else 'COM'),
             '; -----------------------------------------------------------------',
             'cpu 8086',
             'bits 16',
-            'org 0x100',
-            '    cld',
         ]
+        if self.grande:
+            # Un .EXE: la cabecera «MZ» con la tabla de lo que se reubica (el segmento
+            # de cada puente); un segmento de código por módulo (C_1, el programa) y,
+            # detrás, el de los datos y la pila (D_ini), que empieza con una copia del
+            # prefijo (PSP): así puntero(0x81) sigue siendo la línea de órdenes.
+            vivos_p = [t for t in puentes if t.vivo]
+            cab += ['C_cab:',
+                    '    db 77, 90',
+                    '    dw (C_fin-C_cab+D_fin-D_ini) % 512',
+                    '    dw (C_fin-C_cab+D_fin-D_ini+511) / 512',
+                    f'    dw {len(vivos_p)}',
+                    '    dw (C_1-C_cab)>>4',
+                    '    dw 0x1000',
+                    '    dw 0x1000',
+                    '    dw (C_fin-C_1)>>4',
+                    '    dw 0xFFFE',
+                    '    dw 0, 0, 0, 28, 0']
+            cab += [f'    dw {t.etq}+3-C_{t.seg}, (C_{t.seg}-C_1)>>4' for t in vivos_p]
+            cab += ['    align 16, db 0',
+                    'C_1:',
+                    '    cld',
+                    '    mov ax, ss',
+                    '    mov es, ax',
+                    '    xor si, si',
+                    '    xor di, di',
+                    '    mov cx, 128',
+                    '    rep movsw',
+                    '    mov ds, ax']
+        else:
+            cab += ['org 0x100', '    cld']
         if bss:
             cab += ['    mov di, _vacio', '    mov cx, _vacio_fin-_vacio', '    xor al, al', '    rep stosb']
         cab.append('    call F_principal')
         cab.append('    mov ah, 0x4C' if pr.tret is not T_NADA else '    mov ax, 0x4C00')
         cab.append('    int 0x21')
-        sal = cab + vivos(codigo) + vivos(apoyo)
+        if self.grande:
+            sal = cab
+            for k in range(1, nsegs + 1):
+                if k > 1:
+                    sal += ['', f'; ---- segmento {k}: el módulo {self.modulos[k - 2].nombre} ----',
+                            '    align 16, db 0', f'C_{k}:']
+                sal += vivos(codigo, k) + vivos(apoyo, k) + vivos(puentes, k)
+            sal += ['    align 16, db 0', 'C_fin:']
+        else:
+            sal = cab + vivos(codigo) + vivos(apoyo)
         datos = vivos(self.datos)
-        if datos:
+        if self.grande:
+            sal += ['', '; ---- datos ----', 'section .data vstart=0 align=16', 'D_ini:',
+                    '    times 256 db 0'] + datos + ['D_fin:']
+        elif datos:
             sal += ['', '; ---- datos ----'] + datos
         if bss:
             sal += ['', '; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----',
@@ -1367,7 +1451,8 @@ class Generador:
             if marco:
                 self.em('mov sp, bp')
             self.em('pop bp')
-        self.em(f'ret {d.nbytes}' if nparams else 'ret')
+        ret = 'retf' if d.lejos else 'ret'
+        self.em(f'{ret} {d.nbytes}' if nparams else ret)
         self.func = None
 
     def gen_bloque(self, sents, ultimo=False):
@@ -2658,7 +2743,7 @@ class Generador:
                 self.em('mov cx, ax')
                 self.em('pop ax')
                 self.em('pop dx')
-            self.em(f'call castel_{rut}')
+            self.em(f"call {self.apoyo('castel_' + rut)}")
             return
         if op in self.INS32:
             i1, i2 = self.INS32[op]
@@ -2674,13 +2759,13 @@ class Generador:
             return
         if op == '*':
             self.dos32(a, b)
-            self.em('call castel_mul32')
+            self.em(f"call {self.apoyo('castel_mul32')}")
             return
         if op in ('div', 'mod'):
             if cb == 0:
                 self.error("división por cero", b.pos)
             self.dos32(a, b)
-            self.em(f"call castel_{'div32s' if self.con_signo(ta, tb) else 'div32u'}")
+            self.em(f"call {self.apoyo('castel_div32s' if self.con_signo(ta, tb) else 'castel_div32u')}")
             if op == 'mod':
                 self.em('mov ax, bx')
                 self.em('mov dx, cx')
@@ -2890,7 +2975,11 @@ class Generador:
                     else:
                         self.gen_expr(a)
                         self.em('push ax')
-            self.em(f'call {f.etq}')
+            if f.lejos:                         # lejana: «push cs» y una llamada cercana
+                self.em('push cs')              # (a ella, o a su puente si está en otro segmento)
+                self.em(f'call {self.puente(f)}')
+            else:
+                self.em(f'call {f.etq}')
             return
         if nm == 'escribir':
             for a in args:
@@ -2902,7 +2991,7 @@ class Generador:
                     else:
                         self.gen_expr(a)
                         self.em('mov si, ax')
-                    self.em('call escribir_cad')
+                    self.em(f"call {self.apoyo('escribir_cad')}")
                 elif t.k == 'bool':
                     l_no = self.nueva()
                     l_fin = self.nueva()
@@ -2912,18 +3001,18 @@ class Generador:
                     self.et(l_no)
                     self.em(f"mov si, {self.etiqueta_cadena(b'falso')}")
                     self.et(l_fin)
-                    self.em('call escribir_cad')
+                    self.em(f"call {self.apoyo('escribir_cad')}")
                 elif es32(t):
                     self.gen_expr32(a)
                     c = self.const(a)
                     con_signo = t.k == 'ent32' or (c is not None and c < 0)
-                    self.em(f"call {'escribir_num32' if con_signo else 'escribir_nat32'}")
+                    self.em(f"call {self.apoyo('escribir_num32' if con_signo else 'escribir_nat32')}")
                 else:
                     self.gen_expr(a)
                     c = self.const(a)
                     con_signo = t.k == 'ent16' or (t.k == 'lit' and c is not None and c < 0)
                     rut = 'escribir_num' if con_signo else 'escribir_nat'
-                    self.em(f'call {rut}')
+                    self.em(f'call {self.apoyo(rut)}')
             return
         if nm == 'escribir_car':
             self.carga8('dl', args[0])
@@ -3530,12 +3619,12 @@ class Cargador:
         return m
 
 
-def compila(ruta, rutas=()):
+def compila(ruta, rutas=(), todo=False):
     """Compila el programa de ese archivo (con sus módulos): da el ensamblador."""
     c = Cargador(list(rutas))
     try:
         c.carga(ruta).principal = True
-        return Generador(c.orden).genera()
+        return Generador(c.orden, todo).genera()
     except ErrorCastel as e:
         e.textos = c.textos
         raise
@@ -3546,6 +3635,7 @@ def main():
     entrada = None
     salida = None
     rutas = []
+    todo = False                    # --todo: no quita lo que no se usa (para las pruebas)
     i = 0
     while i < len(args):
         if args[i] in ('-o', '-I') and i + 1 < len(args):
@@ -3556,6 +3646,9 @@ def main():
             i += 2
         elif args[i].startswith('-I') and len(args[i]) > 2:
             rutas.append(args[i][2:])
+            i += 1
+        elif args[i] == '--todo':
+            todo = True
             i += 1
         elif entrada is None and not args[i].startswith('-'):
             entrada = args[i]
@@ -3569,7 +3662,7 @@ def main():
     if salida is None:
         salida = entrada.rsplit('.', 1)[0] + '.asm'
     try:
-        asm = compila(entrada, rutas)
+        asm = compila(entrada, rutas, todo)
     except ErrorCastel as e:
         archivo = e.archivo or entrada
         if e.pos:

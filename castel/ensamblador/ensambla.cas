@@ -1,0 +1,1286 @@
+; =============================================================================
+;  ensambla.cas - ENSAMBLA, el ensamblador propio de Castel, escrito en Castel.
+;  Corre dentro de Hispa-8086 (o de cualquier DOS): lee el ensamblador que saca
+;  el compilador de Castel (la parte de NASM que este usa) y deja el programa,
+;  .COM o .EXE, igual octeto a octeto que el que haría NASM.
+;
+;      ENSAMBLA ENTRADA.ASM [SALIDA]
+;
+;  Sin SALIDA, deja ENTRADA.COM (ENTRADA.EXE si el programa es de «modelo
+;  grande»: lleva la etiqueta C_cab). Acaba con el nivel de error 1 si algo
+;  falla.
+;
+;  Es ensambla.py (la referencia, en Python) pasado a Castel, función por
+;  función: lo que entiende y cómo decide cada cosa está contado allí y en
+;  docs/ENSAMBLADOR.md. Lo propio de aquí:
+;   - el archivo se lee entero en cada pasada (no se guarda en memoria);
+;   - las etiquetas van a memoria lejana (módulo Lejos): L_n y T_n, que son
+;     casi todas, en dos tablas por su número; las demás, en una tabla de
+;     dispersión con los nombres.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ensambla
+
+    importar Textos, Archivos, Argumentos, Lejos
+
+    constante MAX_LINEA = 12000
+    constante MAX_L = 32768             ; etiquetas L_n con tabla propia
+    constante MAX_T = 16384             ; y T_n
+    constante CUBOS = 4096              ; de la tabla de dispersión
+    constante PARRAFOS_SIM = 0x2000     ; 128 K para las etiquetas con nombre
+
+    ; las clases de operando
+    constante K_R16 = 1
+    constante K_R8 = 2
+    constante K_RS = 3
+    constante K_MEM = 4
+    constante K_INM = 5
+    constante K_LEJOS = 6
+    constante SIN_REG = 255
+
+    ; las clases de instrucción (TABLA_n)
+    constante C_SUELTA = 1
+    constante C_CUENTA = 2
+    constante C_GIRO = 3
+    constante C_UNARIA = 4
+    constante C_JCC = 5
+    constante C_BUCLE = 6
+    constante C_PREFIJO = 7
+    constante C_MOV = 8
+    constante C_TEST = 9
+    constante C_INCDEC = 10
+    constante C_PUSH = 11
+    constante C_POP = 12
+    constante C_XCHG = 13
+    constante C_LEA = 14
+    constante C_INT = 15
+    constante C_RET = 16
+    constante C_IN = 17
+    constante C_OUT = 18
+    constante C_JMP = 19
+    constante C_CALL = 20
+    constante C_DATO = 21
+    constante C_RESERVA = 22
+    constante C_NADA = 23
+    constante C_ORG = 24
+    constante C_ABSOLUTE = 25
+    constante C_SECTION = 26
+    constante C_ALIGN = 27
+    constante C_TIMES = 28
+
+    ; las instrucciones y órdenes: nombre, clase y código + 1 (hecha con un guion a partir
+    ; de las tablas de ensambla.py; por delante, las más frecuentes)
+    constante TABLA_1 = "mov\x08\x01call\x14\x01push\x0B\x01cmp\x02\x08pop\x0C\x01xor\x02\x07jmp\x13\x01add\x02\x01ret\x10\xC3inc\x0A\x01or\x02\x02je\x05\x05int\x0F\x01sub\x02\x06jne\x05\x06db\x15\x02retf\x10\xCBlea\x0E\x01dec\x0A\x02test\x09\x01xchg\x0D\x01in\x11\x01out\x12\x01retn\x10\xC3dw\x15\x03dd\x15\x05resb\x16\x02resw\x16\x03resd\x16\x05cpu\x17\x01bits\x17\x01org\x18\x01absolute\x19\x01section\x1A\x01align\x1B\x01times\x1C\x01"
+    constante TABLA_2 = "adc\x02\x03sbb\x02\x04and\x02\x05rol\x03\x01ror\x03\x02rcl\x03\x03rcr\x03\x04shl\x03\x05sal\x03\x05shr\x03\x06sar\x03\x08not\x04\x03neg\x04\x04mul\x04\x05imul\x04\x06div\x04\x07idiv\x04\x08jo\x05\x01jno\x05\x02jb\x05\x03jc\x05\x03jnae\x05\x03jnb\x05\x04jnc\x05\x04jae\x05\x04jz\x05\x05jnz\x05\x06jbe\x05\x07jna\x05\x07ja\x05\x08jnbe\x05\x08js\x05\x09jns\x05\x0Ajp\x05\x0Bjpe\x05\x0Bjnp\x05\x0Cjpo\x05\x0Cjl\x05\x0D"
+    constante TABLA_3 = "jnge\x05\x0Djge\x05\x0Ejnl\x05\x0Ejle\x05\x0Fjng\x05\x0Fjg\x05\x10jnle\x05\x10loopne\x06\xE1loopnz\x06\xE1loope\x06\xE2loopz\x06\xE2loop\x06\xE3jcxz\x06\xE4rep\x07\xF4repe\x07\xF4repz\x07\xF4repne\x07\xF3repnz\x07\xF3cld\x01\xFDstd\x01\xFEcli\x01\xFBsti\x01\xFCclc\x01\xF9stc\x01\xFAcmc\x01\xF6cwd\x01\x9Acbw\x01\x99pushf\x01\x9Dpopf\x01\x9Elodsb\x01\xADlodsw\x01\xAEstosb\x01\xABstosw\x01\xACmovsb\x01\xA5movsw\x01\xA6"
+    constante TABLA_4 = "cmpsb\x01\xA7cmpsw\x01\xA8scasb\x01\xAFscasw\x01\xB0nop\x01\x91hlt\x01\xF5lahf\x01\xA0sahf\x01\x9Fxlatb\x01\xD8iret\x01\xD0into\x01\xCF"
+    constante TABLAS = 4
+
+    variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4)
+
+    tipo Op = estructura
+        k: byte
+        reg: byte
+        tam: byte                       ; 1, 2 o 0 (no se sabe)
+        seg: byte                       ; el prefijo de segmento, o 0
+        rm: byte                        ; memoria: 0 a 7, o SIN_REG (dirección sin registros)
+        sim: bool                       ; ¿lleva alguna etiqueta la cuenta?
+        v: nat32                        ; el número (inmediato o desplazamiento)
+        v2: nat32                       ; K_LEJOS: el segmento
+    fin
+
+    variable nombre_ent: arreglo [80] de byte
+    variable nombre_sal: arreglo [80] de byte
+    variable ent: Lector
+    variable sal: Escritor
+    variable linea: arreglo [MAX_LINEA] de byte
+    variable nl: nat32                  ; la línea por la que se va
+    variable pc: nat32                  ; la dirección
+    variable pos: nat32                 ; la posición en el archivo
+    variable absoluto: bool
+    variable final: bool                ; la última pasada: la que escribe
+    variable primera: bool
+    variable cambio: bool               ; alguna etiqueta ha cambiado de sitio
+    variable ambito: arreglo [100] de byte
+    variable nom: arreglo [200] de byte ; un nombre de etiqueta entero
+    variable visto_L: arreglo [4096] de byte
+    variable visto_T: arreglo [2048] de byte
+    variable seg_L, seg_T, seg_cubos, seg_sim, libre_sim: nat16
+    variable e_sim, e_falta: bool       ; de la última cuenta
+    variable ei, efin: puntero a byte   ; por dónde va la cuenta y dónde acaba
+    variable op_a, op_c: Op
+
+    ; ---- errores ----
+    función error2(msg: puntero a byte, más: puntero a byte)
+        escribir(nombre_ent, ": error: línea ", nl, ": ", msg, más, "\r\n")
+        salir(1)
+    fin
+
+    función error(msg: puntero a byte)
+        error2(msg, "")
+    fin
+
+    ; ---- letras ----
+    función minus(c: byte): byte
+        si c >= 'A' y c <= 'Z' entonces devolver c + 32 fin
+        devolver c
+    fin
+
+    función es_blanco(c: byte): bool
+        devolver c = ' ' o c = '\t'
+    fin
+
+    función es_de_nombre(c: byte): bool
+        si c >= 128 entonces devolver cierto fin
+        si c >= '0' y c <= '9' entonces devolver cierto fin
+        si c >= 'A' y c <= 'Z' entonces devolver cierto fin
+        si c >= 'a' y c <= 'z' entonces devolver cierto fin
+        devolver c = '_' o c = '.' o c = '$' o c = '@' o c = '?'
+    fin
+
+    ; quita los blancos de los dos lados de [ini, fin)
+    función recorta(ref ini: puntero a byte, ref fin_: puntero a byte)
+        mientras ini < fin_ y es_blanco(valor(ini)) hacer
+            ini := ini + 1
+        fin
+        mientras fin_ > ini y es_blanco(valor(fin_ - 1)) hacer
+            fin_ := fin_ - 1
+        fin
+    fin
+
+    ; ¿empieza [p, fin) por esa palabra (en minúsculas), sin mirar la caja?
+    función empieza(p: puntero a byte, fin_: puntero a byte, pal: puntero a byte): bool
+        mientras valor(pal) <> 0 hacer
+            si p >= fin_ o minus(valor(p)) <> valor(pal) entonces devolver falso fin
+            p := p + 1
+            pal := pal + 1
+        fin
+        devolver cierto
+    fin
+
+    ; dónde está el primer separador de [p, fin) que no cae dentro de comillas,
+    ; corchetes ni paréntesis (o fin, si no hay)
+    función corta(p: puntero a byte, fin_: puntero a byte, sep: byte): puntero a byte
+        variable comilla, c: byte
+        variable prof: ent16
+        comilla := 0
+        prof := 0
+        mientras p < fin_ hacer
+            c := valor(p)
+            si comilla <> 0 entonces
+                si c = comilla entonces comilla := 0 fin
+            sino si c = '"' o c = '\'' entonces
+                comilla := c
+            sino si c = '[' o c = '(' entonces
+                prof := prof + 1
+            sino si c = ']' o c = ')' entonces
+                prof := prof - 1
+            sino si c = sep y prof = 0 entonces
+                devolver p
+            fin
+            p := p + 1
+        fin
+        devolver fin_
+    fin
+
+    ; ---- las etiquetas ----
+    función dispersa(n: puntero a byte, largo_: nat16): nat16
+        variable h: nat16
+        h := 0
+        mientras largo_ > 0 hacer
+            h := h * 31 + valor(n)
+            n := n + 1
+            largo_ := largo_ - 1
+        fin
+        devolver h yb (CUBOS - 1)
+    fin
+
+    ; si el nombre es «L_123» o «T_123» (con esa letra), su número; si no, -1
+    función número_de(n: puntero a byte, largo_: nat16, letra: byte, tope: nat32): ent32
+        variable v: nat32
+        variable i: nat16
+        si largo_ < 3 o largo_ > 7 o n[0] <> letra o n[1] <> '_' entonces devolver -1 fin
+        v := 0
+        para i desde 2 hasta largo_ - 1 hacer
+            si n[i] < '0' o n[i] > '9' entonces devolver -1 fin
+            v := v * 10 + (n[i] - '0')
+        fin
+        si n[2] = '0' o v >= tope entonces devolver -1 fin
+        devolver ent32(v)
+    fin
+
+    ; la entrada de la tabla de dispersión con ese nombre, o 0
+    función entrada(n: puntero a byte, largo_: nat16): nat16
+        variable r, s, i: nat16
+        r := leer_palabra(seg_cubos, dispersa(n, largo_) * 2)
+        mientras r <> 0 hacer
+            s := seg_sim + r
+            si leer_byte(s, 6) = largo_ entonces
+                i := 0
+                mientras i < largo_ y leer_byte(s, 7 + i) = n[i] hacer
+                    i := i + 1
+                fin
+                si i = largo_ entonces devolver r fin
+            fin
+            r := leer_palabra(s, 0)
+        fin
+        devolver 0
+    fin
+
+    ; el valor de una etiqueta; falso si (aún) no está
+    función busca(n: puntero a byte, largo_: nat16, ref v: nat32): bool
+        variable num: ent32
+        variable i, r: nat16
+        num := número_de(n, largo_, 'L', MAX_L)
+        si num >= 0 entonces
+            i := nat16(num)
+            si visto_L[i >> 3] yb (1 << (i yb 7)) = 0 entonces devolver falso fin
+            v := leer_palabra(seg_L, i * 2)
+            devolver cierto
+        fin
+        num := número_de(n, largo_, 'T', MAX_T)
+        si num >= 0 entonces
+            i := nat16(num)
+            si visto_T[i >> 3] yb (1 << (i yb 7)) = 0 entonces devolver falso fin
+            v := leer_palabra(seg_T, i * 2)
+            devolver cierto
+        fin
+        r := entrada(n, largo_)
+        si r = 0 entonces devolver falso fin
+        v := nat32(leer_palabra(seg_sim + r, 4)) << 16 ob leer_palabra(seg_sim + r, 2)
+        devolver cierto
+    fin
+
+    ; una etiqueta, aquí (en pc)
+    función define(n: puntero a byte, largo_: nat16)
+        variable num: ent32
+        variable i, r, s, h, bit: nat16
+        num := número_de(n, largo_, 'L', MAX_L)
+        si num >= 0 entonces
+            i := nat16(num)
+            bit := 1 << (i yb 7)
+            si visto_L[i >> 3] yb bit = 0 entonces
+                visto_L[i >> 3] := visto_L[i >> 3] ob bit
+                cambio := cierto
+            sino
+                si primera entonces error2("etiqueta repetida: ", n) fin
+                si leer_palabra(seg_L, i * 2) <> nat16(pc) entonces cambio := cierto fin
+            fin
+            poner_palabra(seg_L, i * 2, nat16(pc))
+            devolver
+        fin
+        num := número_de(n, largo_, 'T', MAX_T)
+        si num >= 0 entonces
+            i := nat16(num)
+            bit := 1 << (i yb 7)
+            si visto_T[i >> 3] yb bit = 0 entonces
+                visto_T[i >> 3] := visto_T[i >> 3] ob bit
+                cambio := cierto
+            sino
+                si primera entonces error2("etiqueta repetida: ", n) fin
+                si leer_palabra(seg_T, i * 2) <> nat16(pc) entonces cambio := cierto fin
+            fin
+            poner_palabra(seg_T, i * 2, nat16(pc))
+            devolver
+        fin
+        r := entrada(n, largo_)
+        si r <> 0 entonces
+            si primera entonces error2("etiqueta repetida: ", n) fin
+            s := seg_sim + r
+            si leer_palabra(s, 2) <> nat16(pc) o leer_palabra(s, 4) <> nat16(pc >> 16) entonces
+                cambio := cierto
+            fin
+        sino
+            ; una entrada nueva: enlace (2), valor (4), largo (1) y el nombre
+            r := libre_sim
+            libre_sim := libre_sim + (7 + largo_ + 15) div 16
+            si libre_sim >= PARRAFOS_SIM entonces error("demasiadas etiquetas") fin
+            s := seg_sim + r
+            h := dispersa(n, largo_) * 2
+            poner_palabra(s, 0, leer_palabra(seg_cubos, h))
+            poner_palabra(seg_cubos, h, r)
+            poner_byte(s, 6, largo_)
+            para i desde 1 hasta largo_ hacer
+                poner_byte(s, 6 + i, n[i - 1])
+            fin
+            cambio := cierto
+        fin
+        poner_palabra(s, 2, nat16(pc))
+        poner_palabra(s, 4, nat16(pc >> 16))
+    fin
+
+    ; ---- las cuentas: | ^ & << >> + - * / % y paréntesis, en 32 bits ----
+    función c_blancos()
+        mientras ei < efin y es_blanco(valor(ei)) hacer
+            ei := ei + 1
+        fin
+    fin
+
+    función c_número(p: puntero a byte, n: nat16): nat32
+        variable v: nat32
+        variable i, base: nat16
+        variable c: byte
+        base := 10
+        i := 0
+        si n > 2 y p[0] = '0' y minus(p[1]) = 'x' entonces
+            base := 16
+            i := 2
+        sino si minus(p[n - 1]) = 'h' entonces
+            base := 16
+            n := n - 1
+        fin
+        v := 0
+        mientras i < n hacer
+            c := minus(p[i])
+            si c >= '0' y c <= '9' entonces
+                c := c - '0'
+            sino si base = 16 y c >= 'a' y c <= 'f' entonces
+                c := c - 'a' + 10
+            sino
+                error("número mal escrito")
+            fin
+            v := v * base + c
+            i := i + 1
+        fin
+        devolver v
+    fin
+
+    función c_unario(): nat32
+        variable c: byte
+        variable v: nat32
+        variable j: puntero a byte
+        variable n, m: nat16
+        c_blancos()
+        si ei >= efin entonces error("falta un número o una etiqueta") fin
+        c := valor(ei)
+        si c = '-' entonces
+            ei := ei + 1
+            devolver 0 - c_unario()
+        fin
+        si c = '+' entonces
+            ei := ei + 1
+            devolver c_unario()
+        fin
+        si c = '~' entonces
+            ei := ei + 1
+            devolver nob c_unario()
+        fin
+        si c = '(' entonces
+            ei := ei + 1
+            v := c_nivel(0)
+            c_blancos()
+            si ei >= efin o valor(ei) <> ')' entonces error("falta un «)»") fin
+            ei := ei + 1
+            devolver v
+        fin
+        si c = '\'' entonces
+            si ei + 2 >= efin o ei[2] <> '\'' entonces error("carácter mal cerrado") fin
+            ei := ei + 3
+            devolver ei[-2]
+        fin
+        j := ei
+        mientras ei < efin y es_de_nombre(valor(ei)) hacer
+            ei := ei + 1
+        fin
+        n := ei - j
+        si n = 0 entonces error("cuenta que no entiendo") fin
+        si j[0] >= '0' y j[0] <= '9' entonces devolver c_número(j, n) fin
+        e_sim := cierto
+        m := 0
+        si j[0] = '.' entonces              ; una etiqueta local: con la de fuera delante
+            copiar(nom, ambito)
+            m := longitud(nom)
+        fin
+        si m + n >= 199 entonces error("etiqueta demasiado larga") fin
+        para n desde n hasta 1 paso -1 hacer
+            nom[m] := valor(j)
+            m := m + 1
+            j := j + 1
+        fin
+        nom[m] := 0
+        si no busca(nom, m, v) entonces
+            si final entonces error2("etiqueta sin definir: ", nom) fin
+            e_falta := cierto
+            devolver 0
+        fin
+        devolver v
+    fin
+
+    ; los operadores de cada nivel, de menos a más fuerza: uno o dos
+    ; caracteres (el segundo, 0 o el mismo: << y >>)
+    función c_operador(nivel: nat16): byte
+        variable c: byte
+        c_blancos()
+        si ei >= efin entonces devolver 0 fin
+        c := valor(ei)
+        según nivel
+            caso 0: si c = '|' entonces devolver c fin
+            caso 1: si c = '^' entonces devolver c fin
+            caso 2: si c = '&' entonces devolver c fin
+            caso 3: si (c = '<' o c = '>') y ei + 1 < efin y ei[1] = c entonces devolver c fin
+            caso 4: si c = '+' o c = '-' entonces devolver c fin
+            caso 5: si c = '*' o c = '/' o c = '%' entonces devolver c fin
+        fin
+        devolver 0
+    fin
+
+    función c_nivel(nivel: nat16): nat32
+        variable v, w: nat32
+        variable op: byte
+        si nivel = 6 entonces devolver c_unario() fin
+        v := c_nivel(nivel + 1)
+        mientras cierto hacer
+            op := c_operador(nivel)
+            si op = 0 entonces devolver v fin
+            ei := ei + 1
+            si nivel = 3 entonces ei := ei + 1 fin
+            w := c_nivel(nivel + 1)
+            según op
+                caso '|': v := v ob w
+                caso '^': v := v xob w
+                caso '&': v := v yb w
+                caso '<':
+                    si w > 31 entonces v := 0 sino v := v << nat16(w) fin
+                caso '>':
+                    si w > 31 entonces v := 0 sino v := v >> nat16(w) fin
+                caso '+': v := v + w
+                caso '-': v := v - w
+                caso '*': v := v * w
+                si no:
+                    si w = 0 entonces
+                        si final entonces error("división por cero") fin
+                        w := 1
+                    fin
+                    si op = '/' entonces v := v div w sino v := v mod w fin
+            fin
+        fin
+        devolver v
+    fin
+
+    ; el valor de la cuenta escrita en [p, fin); deja e_sim y e_falta
+    función cuenta(p: puntero a byte, fin_: puntero a byte): nat32
+        variable v: nat32
+        ei := p
+        efin := fin_
+        e_sim := falso
+        e_falta := falso
+        v := c_nivel(0)
+        c_blancos()
+        si ei < efin entonces error("cuenta que no entiendo") fin
+        devolver v
+    fin
+
+    ; ---- los operandos ----
+    ; el registro de dos letras de [p, p+2) en la lista (de dos en dos), o SIN_REG
+    función registro(p: puntero a byte, lista: puntero a byte): byte
+        variable i: byte
+        i := 0
+        mientras valor(lista) <> 0 hacer
+            si minus(p[0]) = lista[0] y minus(p[1]) = lista[1] entonces devolver i fin
+            lista := lista + 2
+            i := i + 1
+        fin
+        devolver SIN_REG
+    fin
+
+    función memoria(p: puntero a byte, fin_: puntero a byte, ref op: Op)
+        variable resto: arreglo [256] de byte
+        variable dos, j, t, tf: puntero a byte
+        variable regs, r: byte
+        variable prof: ent16
+        variable n: nat16
+        variable signo: byte
+        op.k := K_MEM
+        dos := corta(p, fin_, ':')
+        si dos < fin_ entonces
+            t := p
+            tf := dos
+            recorta(t, tf)
+            r := SIN_REG
+            si tf - t = 2 entonces r := registro(t, "escsssds") fin
+            si r = SIN_REG entonces error("delante de «:» va un registro de segmento") fin
+            op.seg := 0x26 + 8 * r
+            p := dos + 1
+        fin
+        ; los registros (sumados) y lo demás, que es una cuenta
+        regs := 0
+        n := 0
+        signo := '+'
+        mientras cierto hacer
+            j := p
+            prof := 0
+            mientras j < fin_ y no ((valor(j) = '+' o valor(j) = '-') y prof = 0 y j > p) hacer
+                si valor(j) = '(' entonces prof := prof + 1 fin
+                si valor(j) = ')' entonces prof := prof - 1 fin
+                j := j + 1
+            fin
+            t := p
+            tf := j
+            recorta(t, tf)
+            r := SIN_REG
+            si tf - t = 2 y signo = '+' entonces r := registro(t, "bxbpsidi") fin
+            si r <> SIN_REG entonces
+                si regs yb (1 << r) <> 0 entonces error("dirección mal escrita") fin
+                regs := regs ob (1 << r)
+            sino si tf > t entonces
+                si n + (tf - t) + 2 >= 256 entonces error("dirección demasiado larga") fin
+                resto[n] := signo
+                n := n + 1
+                mientras t < tf hacer
+                    resto[n] := valor(t)
+                    n := n + 1
+                    t := t + 1
+                fin
+            sino
+                error("dirección mal escrita")
+            fin
+            si j >= fin_ entonces romper fin
+            signo := valor(j)
+            p := j + 1
+        fin
+        ; bx = 1, bp = 2, si = 4, di = 8
+        según regs
+            caso 0: op.rm := SIN_REG
+            caso 5: op.rm := 0
+            caso 9: op.rm := 1
+            caso 6: op.rm := 2
+            caso 10: op.rm := 3
+            caso 4: op.rm := 4
+            caso 8: op.rm := 5
+            caso 2: op.rm := 6
+            caso 1: op.rm := 7
+            si no: error("esos registros no valen juntos en una dirección")
+        fin
+        si n > 0 entonces
+            op.v := cuenta(resto, dirección(resto[n]))
+            op.sim := e_sim
+        fin
+    fin
+
+    función operando(p: puntero a byte, fin_: puntero a byte, ref op: Op)
+        variable dos: puntero a byte
+        variable r: byte
+        op.k := 0
+        op.reg := 0
+        op.tam := 0
+        op.seg := 0
+        op.rm := SIN_REG
+        op.sim := falso
+        op.v := 0
+        op.v2 := 0
+        recorta(p, fin_)
+        si fin_ - p > 4 y (es_blanco(p[4]) o p[4] = '[') entonces
+            si empieza(p, fin_, "byte") entonces op.tam := 1 fin
+            si empieza(p, fin_, "word") entonces op.tam := 2 fin
+            si op.tam <> 0 entonces
+                p := p + 4
+                recorta(p, fin_)
+            fin
+        fin
+        si fin_ - p = 2 entonces
+            r := registro(p, "axcxdxbxspbpsidi")
+            si r <> SIN_REG entonces
+                op.k := K_R16
+                op.reg := r
+                op.tam := 2
+                devolver
+            fin
+            r := registro(p, "alcldlblahchdhbh")
+            si r <> SIN_REG entonces
+                op.k := K_R8
+                op.reg := r
+                op.tam := 1
+                devolver
+            fin
+            r := registro(p, "escsssds")
+            si r <> SIN_REG entonces
+                op.k := K_RS
+                op.reg := r
+                op.tam := 2
+                devolver
+            fin
+        fin
+        si p < fin_ y valor(p) = '[' entonces
+            si fin_[-1] <> ']' entonces error("falta un «]»") fin
+            memoria(p + 1, fin_ - 1, op)
+            devolver
+        fin
+        dos := corta(p, fin_, ':')
+        si dos < fin_ entonces
+            op.k := K_LEJOS
+            op.v2 := cuenta(p, dos)
+            op.v := cuenta(dos + 1, fin_)
+            devolver
+        fin
+        op.k := K_INM
+        op.v := cuenta(p, fin_)
+        op.sim := e_sim
+    fin
+
+    ; ---- sacar octetos ----
+    función b(x: byte)
+        si no absoluto entonces
+            pos := pos + 1
+            si final entonces poner_car(sal, x) fin
+        fin
+        pc := pc + 1
+    fin
+
+    función w(v: nat16)
+        b(byte(v))
+        b(byte(v >> 8))
+    fin
+
+    ; el prefijo de segmento, el código y el octeto ModRM (con su desplazamiento)
+    función modrm(reg: byte, ref op: Op, código: byte)
+        variable d: ent32
+        si op.k <> K_MEM entonces
+            b(código)
+            b(0xC0 ob (reg << 3) ob op.reg)
+            devolver
+        fin
+        si op.seg <> 0 entonces b(op.seg) fin
+        b(código)
+        d := ent32(op.v)
+        si op.rm = SIN_REG entonces
+            b(0x06 ob (reg << 3))
+            w(nat16(op.v))
+        sino si op.sim o d < -128 o d > 127 entonces
+            b(0x80 ob (reg << 3) ob op.rm)
+            w(nat16(op.v))
+        sino si d = 0 y op.rm <> 6 entonces
+            b((reg << 3) ob op.rm)
+        sino
+            b(0x40 ob (reg << 3) ob op.rm)
+            b(byte(op.v))
+        fin
+    fin
+
+    ; ¿vale el inmediato como un octeto con signo (para la forma 83h)?
+    función corto(ref op: Op): bool
+        variable v: nat16
+        si op.sim entonces devolver falso fin
+        v := nat16(op.v)
+        devolver v <= 0x7F o v >= 0xFF80
+    fin
+
+    ; el tamaño de la operación: 1 o 2, lo que digan los operandos
+    función tam_de(ref a: Op, ref c: Op): byte
+        variable t: byte
+        t := a.tam
+        si t = 0 entonces t := c.tam fin
+        si a.tam <> 0 y c.tam <> 0 y a.tam <> c.tam y c.k <> K_INM entonces
+            error("los dos operandos no son del mismo tamaño")
+        fin
+        si t = 0 entonces error("no se sabe el tamaño: falta «byte» o «word»") fin
+        devolver t
+    fin
+
+    función tam_uno(ref a: Op): byte
+        si a.tam = 0 entonces error("no se sabe el tamaño: falta «byte» o «word»") fin
+        devolver a.tam
+    fin
+
+    función es_rm(ref op: Op): bool
+        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_MEM
+    fin
+
+    función es_reg(ref op: Op): bool
+        devolver op.k = K_R16 o op.k = K_R8
+    fin
+
+    ; 1 si la operación es de 16 bits; 0 si es de 8
+    función ancho(t: byte): byte
+        si t = 2 entonces devolver 1 fin
+        devolver 0
+    fin
+
+    función inm(v: nat32, t: byte)
+        si t = 1 entonces b(byte(v)) sino w(nat16(v)) fin
+    fin
+
+    función mal(qué: puntero a byte)
+        error2("operandos que no valen para ", qué)
+    fin
+
+    ; ---- las instrucciones ----
+    función i_mov(ref a: Op, ref c: Op)
+        variable t: byte
+        si es_reg(a) y a.reg = 0 y c.k = K_MEM y c.rm = SIN_REG entonces
+            si c.seg <> 0 entonces b(c.seg) fin
+            b(0xA0 + ancho(a.tam))
+            w(nat16(c.v))
+        sino si es_reg(c) y c.reg = 0 y a.k = K_MEM y a.rm = SIN_REG entonces
+            si a.seg <> 0 entonces b(a.seg) fin
+            b(0xA2 + ancho(c.tam))
+            w(nat16(a.v))
+        sino si es_rm(a) y es_reg(c) entonces
+            modrm(c.reg, a, 0x88 + ancho(tam_de(a, c)))
+        sino si es_reg(a) y c.k = K_MEM entonces
+            modrm(a.reg, c, 0x8A + ancho(tam_de(a, c)))
+        sino si (a.k = K_R16 o a.k = K_MEM) y c.k = K_RS entonces
+            modrm(c.reg, a, 0x8C)
+        sino si a.k = K_RS y (c.k = K_R16 o c.k = K_MEM) entonces
+            modrm(a.reg, c, 0x8E)
+        sino si a.k = K_R8 y c.k = K_INM entonces
+            b(0xB0 + a.reg)
+            b(byte(c.v))
+        sino si a.k = K_R16 y c.k = K_INM entonces
+            b(0xB8 + a.reg)
+            w(nat16(c.v))
+        sino si a.k = K_MEM y c.k = K_INM entonces
+            t := tam_de(a, c)
+            modrm(0, a, 0xC6 + ancho(t))
+            inm(c.v, t)
+        sino
+            mal("mov")
+        fin
+    fin
+
+    función i_cuenta(i: byte, ref a: Op, ref c: Op)
+        variable t: byte
+        si es_rm(a) y es_reg(c) entonces
+            modrm(c.reg, a, 8 * i + ancho(tam_de(a, c)))
+        sino si es_reg(a) y c.k = K_MEM entonces
+            modrm(a.reg, c, 8 * i + 2 + ancho(tam_de(a, c)))
+        sino si es_rm(a) y c.k = K_INM entonces
+            t := tam_de(a, c)
+            si t = 2 y corto(c) entonces
+                modrm(i, a, 0x83)
+                b(byte(c.v))
+            sino si a.k <> K_MEM y a.reg = 0 entonces
+                b(8 * i + 4 + ancho(t))
+                inm(c.v, t)
+            sino
+                modrm(i, a, 0x80 + ancho(t))
+                inm(c.v, t)
+            fin
+        sino
+            mal("esa cuenta")
+        fin
+    fin
+
+    función i_test(ref a: Op, ref c: Op)
+        variable t: byte
+        si es_reg(a) y c.k = K_MEM entonces
+            modrm(a.reg, c, 0x84 + ancho(tam_de(c, a)))
+        sino si es_rm(a) y es_reg(c) entonces
+            modrm(c.reg, a, 0x84 + ancho(tam_de(a, c)))
+        sino si es_rm(a) y c.k = K_INM entonces
+            t := tam_de(a, c)
+            si a.k <> K_MEM y a.reg = 0 entonces
+                b(0xA8 + ancho(t))
+            sino
+                modrm(0, a, 0xF6 + ancho(t))
+            fin
+            inm(c.v, t)
+        sino
+            mal("test")
+        fin
+    fin
+
+    función i_xchg(ref a: Op, ref c: Op)
+        si a.k = K_R16 y c.k = K_R16 y (a.reg = 0 o c.reg = 0) entonces
+            b(0x90 + a.reg + c.reg)
+        sino si es_reg(a) y es_rm(c) entonces
+            modrm(a.reg, c, 0x86 + ancho(tam_de(a, c)))
+        sino si a.k = K_MEM y es_reg(c) entonces
+            modrm(c.reg, a, 0x86 + ancho(tam_de(a, c)))
+        sino
+            mal("xchg")
+        fin
+    fin
+
+    ; jmp, call, los saltos condicionales y loop/jcxz
+    función i_salto(clase: byte, cod: byte, p: puntero a byte, fin_: puntero a byte)
+        variable destino: nat32
+        variable d: nat16
+        variable llega, corto_, cerca: bool
+        recorta(p, fin_)
+        corto_ := falso
+        cerca := falso
+        si fin_ - p > 6 y empieza(p, fin_, "short") y es_blanco(p[5]) entonces
+            corto_ := cierto
+            p := p + 6
+        sino si fin_ - p > 5 y empieza(p, fin_, "near") y es_blanco(p[4]) entonces
+            cerca := cierto
+            p := p + 5
+        fin
+        si clase = C_JMP o clase = C_CALL entonces
+            operando(p, fin_, op_a)
+            si op_a.k = K_R16 o op_a.k = K_MEM entonces
+                si clase = C_JMP entonces modrm(4, op_a, 0xFF) sino modrm(2, op_a, 0xFF) fin
+                devolver
+            fin
+            si op_a.k = K_LEJOS entonces
+                si clase = C_JMP entonces b(0xEA) sino b(0x9A) fin
+                w(nat16(op_a.v))
+                w(nat16(op_a.v2))
+                devolver
+            fin
+            si op_a.k <> K_INM entonces mal("ese salto") fin
+            destino := op_a.v
+        sino
+            destino := cuenta(p, fin_)
+        fin
+        d := nat16(destino) - (nat16(pc) + 2)
+        llega := d <= 0x7F o d >= 0xFF80 o e_falta      ; (lo que aún no se sabe, se supone cerca)
+        si clase = C_CALL entonces
+            b(0xE8)
+            w(nat16(destino) - (nat16(pc) + 2))
+            devolver
+        fin
+        si clase = C_BUCLE entonces
+            si no llega y final entonces error("ese salto no llega tan lejos (127 octetos)") fin
+            b(cod)
+            b(byte(d))
+            devolver
+        fin
+        si corto_ y no llega y final entonces error("el salto corto no llega") fin
+        si cerca o (no corto_ y no llega) entonces
+            si clase = C_JCC entonces
+                b(0x70 + (cod xob 1))
+                b(3)
+            fin
+            b(0xE9)
+            w(nat16(destino) - (nat16(pc) + 2))
+        sino
+            si clase = C_JMP entonces b(0xEB) sino b(0x70 + cod) fin
+            b(byte(d))
+        fin
+    fin
+
+    función i_datos(tam: byte, p: puntero a byte, fin_: puntero a byte)
+        variable c, t, tf: puntero a byte
+        variable v: nat32
+        variable k, n: nat16
+        mientras cierto hacer
+            c := corta(p, fin_, ',')
+            t := p
+            tf := c
+            recorta(t, tf)
+            si tf - t >= 2 y (valor(t) = '"' o valor(t) = '\'') y tf[-1] = valor(t) entonces
+                n := tf - t - 2
+                t := t + 1
+                para k desde 1 hasta n hacer
+                    b(valor(t))
+                    t := t + 1
+                fin
+                mientras n mod tam <> 0 hacer
+                    b(0)
+                    n := n + 1
+                fin
+            sino
+                v := cuenta(t, tf)
+                para k desde 1 hasta tam hacer
+                    b(byte(v))
+                    v := v >> 8
+                fin
+            fin
+            si c >= fin_ entonces romper fin
+            p := c + 1
+        fin
+    fin
+
+    función alinea(n: nat32)
+        si n = 0 o n yb (n - 1) <> 0 entonces error("se alinea a una potencia de 2") fin
+        mientras pos yb (n - 1) <> 0 hacer
+            b(0)
+        fin
+    fin
+
+    función i_section(p: puntero a byte, fin_: puntero a byte)
+        variable j: puntero a byte
+        variable n: nat16
+        ; otra sección: sigue en el archivo donde iba (alineada), pero sus
+        ; direcciones vuelven a contar desde «vstart»
+        absoluto := falso
+        n := 0
+        mientras cierto hacer
+            mientras p < fin_ y es_blanco(valor(p)) hacer
+                p := p + 1
+            fin
+            si p >= fin_ entonces romper fin
+            j := p
+            mientras j < fin_ y no es_blanco(valor(j)) hacer
+                j := j + 1
+            fin
+            si n > 0 entonces
+                si empieza(p, j, "align=") entonces
+                    alinea(cuenta(p + 6, j))
+                sino si empieza(p, j, "vstart=") entonces
+                    pc := cuenta(p + 7, j)
+                sino
+                    error("de «section» solo entiendo «vstart=» y «align=»")
+                fin
+            fin
+            n := n + 1
+            p := j
+        fin
+    fin
+
+    ; busca la palabra [p, p+n) en las tablas: deja su clase y su código
+    función instrucción(p: puntero a byte, n: nat16, ref clase: byte, ref cod: byte): bool
+        variable t: puntero a byte
+        variable i, k: nat16
+        para k desde 0 hasta TABLAS - 1 hacer
+            t := tablas[k]
+            mientras valor(t) <> 0 hacer
+                i := 0
+                mientras i < n y minus(p[i]) = t[i] hacer
+                    i := i + 1
+                fin
+                si i = n y t[i] < 32 entonces
+                    clase := t[i]
+                    cod := t[i + 1] - 1
+                    devolver cierto
+                fin
+                mientras valor(t) >= 32 hacer
+                    t := t + 1
+                fin
+                t := t + 2
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; una orden o una instrucción con sus operandos: [p, fin)
+    función orden(p: puntero a byte, fin_: puntero a byte)
+        variable j, c: puntero a byte
+        variable clase, cod, t: byte
+        variable n: nat16
+        variable veces: nat32
+        recorta(p, fin_)
+        si p >= fin_ entonces devolver fin
+        j := p
+        mientras j < fin_ y no es_blanco(valor(j)) hacer
+            j := j + 1
+        fin
+        si no instrucción(p, j - p, clase, cod) entonces
+            valor(j) := 0
+            error2("instrucción que no entiendo: ", p)
+        fin
+        p := j
+        recorta(p, fin_)
+        ; cuántos operandos hay, y los dos primeros
+        n := 0
+        si p < fin_ entonces n := 1 fin
+        c := corta(p, fin_, ',')
+        si c < fin_ entonces n := 2 fin
+        según clase
+            caso C_PREFIJO:
+                b(cod)
+                orden(p, fin_)
+                devolver
+            caso C_TIMES:
+                j := p
+                mientras j < fin_ y no es_blanco(valor(j)) hacer
+                    j := j + 1
+                fin
+                veces := cuenta(p, j)
+                mientras veces > 0 hacer
+                    orden(j, fin_)
+                    veces := veces - 1
+                fin
+                devolver
+            caso C_SUELTA:
+                si n <> 0 entonces mal("eso") fin
+                b(cod)
+                devolver
+            caso C_JCC, C_BUCLE, C_JMP, C_CALL:
+                si n <> 1 entonces error("ese salto lleva un operando") fin
+                i_salto(clase, cod, p, fin_)
+                devolver
+            caso C_DATO:
+                i_datos(cod, p, fin_)
+                devolver
+            caso C_RESERVA:
+                veces := cuenta(p, fin_) * cod
+                si absoluto entonces
+                    pc := pc + veces
+                sino
+                    mientras veces > 0 hacer
+                        b(0)
+                        veces := veces - 1
+                    fin
+                fin
+                devolver
+            caso C_NADA:
+                devolver
+            caso C_ORG:
+                pc := cuenta(p, fin_)
+                devolver
+            caso C_ABSOLUTE:
+                absoluto := cierto
+                pc := cuenta(p, fin_)
+                devolver
+            caso C_SECTION:
+                i_section(p, fin_)
+                devolver
+            caso C_ALIGN:
+                alinea(cuenta(p, c))                ; «align N, db 0»: ceros hasta el múltiplo de N
+                devolver
+        fin
+        ; las que llevan operandos de verdad
+        si n >= 1 entonces operando(p, c, op_a) fin
+        si n = 2 entonces
+            si corta(c + 1, fin_, ',') < fin_ entonces error("sobran operandos") fin
+            operando(c + 1, fin_, op_c)
+        fin
+        según clase
+            caso C_MOV:
+                si n <> 2 entonces mal("mov") fin
+                i_mov(op_a, op_c)
+            caso C_CUENTA:
+                si n <> 2 entonces mal("esa cuenta") fin
+                i_cuenta(cod, op_a, op_c)
+            caso C_TEST:
+                si n <> 2 entonces mal("test") fin
+                i_test(op_a, op_c)
+            caso C_INCDEC:
+                si n <> 1 entonces mal("inc y dec") fin
+                si op_a.k = K_R16 entonces
+                    b(0x40 + 8 * cod + op_a.reg)
+                sino si es_rm(op_a) entonces
+                    modrm(cod, op_a, 0xFE + ancho(tam_uno(op_a)))
+                sino
+                    mal("inc y dec")
+                fin
+            caso C_UNARIA:
+                si n <> 1 o no es_rm(op_a) entonces mal("esa instrucción") fin
+                modrm(cod, op_a, 0xF6 + ancho(tam_uno(op_a)))
+            caso C_GIRO:
+                si n <> 2 o no es_rm(op_a) entonces mal("desplazar") fin
+                t := tam_uno(op_a)
+                si op_c.k = K_R8 y op_c.reg = 1 entonces
+                    modrm(cod, op_a, 0xD2 + ancho(t))
+                sino si op_c.k = K_INM y op_c.v = 1 y no op_c.sim entonces
+                    modrm(cod, op_a, 0xD0 + ancho(t))
+                sino
+                    error("en el 8086 se desplaza 1 o «cl»")
+                fin
+            caso C_PUSH:
+                si n <> 1 entonces mal("push") fin
+                si op_a.k = K_R16 entonces
+                    b(0x50 + op_a.reg)
+                sino si op_a.k = K_RS entonces
+                    b(0x06 + 8 * op_a.reg)
+                sino si op_a.k = K_MEM entonces
+                    modrm(6, op_a, 0xFF)
+                sino
+                    mal("push")
+                fin
+            caso C_POP:
+                si n <> 1 entonces mal("pop") fin
+                si op_a.k = K_R16 entonces
+                    b(0x58 + op_a.reg)
+                sino si op_a.k = K_RS y op_a.reg <> 1 entonces
+                    b(0x07 + 8 * op_a.reg)
+                sino si op_a.k = K_MEM entonces
+                    modrm(0, op_a, 0x8F)
+                sino
+                    mal("pop")
+                fin
+            caso C_XCHG:
+                si n <> 2 entonces mal("xchg") fin
+                i_xchg(op_a, op_c)
+            caso C_LEA:
+                si n <> 2 o op_a.k <> K_R16 o op_c.k <> K_MEM entonces mal("lea") fin
+                modrm(op_a.reg, op_c, 0x8D)
+            caso C_INT:
+                si n <> 1 o op_a.k <> K_INM entonces mal("int") fin
+                b(0xCD)
+                b(byte(op_a.v))
+            caso C_RET:
+                si n = 0 entonces
+                    b(cod + 1)
+                sino si n = 1 y op_a.k = K_INM entonces
+                    b(cod)
+                    w(nat16(op_a.v))
+                sino
+                    mal("ret")
+                fin
+            caso C_IN:
+                si n <> 2 o no es_reg(op_a) o op_a.reg <> 0 entonces mal("in") fin
+                si op_c.k = K_R16 y op_c.reg = 2 entonces
+                    b(0xEC + ancho(op_a.tam))
+                sino si op_c.k = K_INM entonces
+                    b(0xE4 + ancho(op_a.tam))
+                    b(byte(op_c.v))
+                sino
+                    error("el puerto es «dx» o un número")
+                fin
+            caso C_OUT:
+                si n <> 2 o no es_reg(op_c) o op_c.reg <> 0 entonces mal("out") fin
+                si op_a.k = K_R16 y op_a.reg = 2 entonces
+                    b(0xEE + ancho(op_c.tam))
+                sino si op_a.k = K_INM entonces
+                    b(0xE6 + ancho(op_c.tam))
+                    b(byte(op_a.v))
+                sino
+                    error("el puerto es «dx» o un número")
+                fin
+            si no:
+                error("instrucción que no entiendo")
+        fin
+    fin
+
+    ; ---- una línea, que ya está en «linea» (con n letras) ----
+    función una_línea(n: nat16)
+        variable p, fin_, j: puntero a byte
+        variable comilla, c: byte
+        variable m, k: nat16
+        ; hasta el comentario
+        p := linea
+        fin_ := p
+        comilla := 0
+        mientras n > 0 hacer
+            c := valor(fin_)
+            si comilla <> 0 entonces
+                si c = comilla entonces comilla := 0 fin
+            sino si c = '"' o c = '\'' entonces
+                comilla := c
+            sino si c = ';' entonces
+                romper
+            fin
+            fin_ := fin_ + 1
+            n := n - 1
+        fin
+        recorta(p, fin_)
+        ; la etiqueta
+        j := p
+        mientras j < fin_ y es_de_nombre(valor(j)) hacer
+            j := j + 1
+        fin
+        si j < fin_ y valor(j) = ':' y j > p y no (p[0] >= '0' y p[0] <= '9') y no (j - p = 2 y registro(p, "escsssds") <> SIN_REG) entonces
+            m := 0
+            si p[0] = '.' entonces
+                copiar(nom, ambito)
+                m := longitud(nom)
+            fin
+            k := j - p
+            si m + k >= 99 entonces error("etiqueta demasiado larga") fin
+            mientras p < j hacer
+                nom[m] := valor(p)
+                m := m + 1
+                p := p + 1
+            fin
+            nom[m] := 0
+            si nom[0] <> '.' y k = m entonces copiar(ambito, nom) fin
+            define(nom, m)
+            p := j + 1
+        fin
+        orden(p, fin_)
+    fin
+
+    ; ---- una pasada por todo el archivo ----
+    función pasada(m: ent16)
+        variable c: ent16
+        variable n: nat16
+        situar(m, 0, DESDE_EL_PRINCIPIO)
+        empezar_lector(ent, m)
+        pc := 0
+        pos := 0
+        absoluto := falso
+        ambito[0] := 0
+        cambio := falso
+        nl := 0
+        n := 0
+        mientras cierto hacer
+            c := leer_car(ent)
+            si c = '\n' o c = FIN_DE_ARCHIVO o c = 0x1A entonces
+                nl := nl + 1
+                linea[n] := 0
+                una_línea(n)
+                n := 0
+                si c <> '\n' entonces romper fin
+            sino si c <> '\r' entonces
+                si n >= MAX_LINEA - 1 entonces
+                    nl := nl + 1
+                    error("línea demasiado larga")
+                fin
+                linea[n] := c
+                n := n + 1
+            fin
+        fin
+    fin
+
+    función pide(párrafos: nat16): nat16
+        variable s: nat16
+        s := pedir(párrafos)
+        si s = 0 entonces
+            escribir("ENSAMBLA: no hay memoria bastante\r\n")
+            salir(1)
+        fin
+        devolver s
+    fin
+
+    función principal(): byte
+        variable m, ms: ent16
+        variable pasadas, i: nat16
+        variable p: puntero a byte
+        variable v: nat32
+        si no argumento(1, nombre_ent, 80) entonces
+            escribir("uso: ENSAMBLA ENTRADA.ASM [SALIDA]\r\n")
+            devolver 2
+        fin
+        m := abrir(nombre_ent, LEER)
+        si m = MAL entonces
+            escribir("ENSAMBLA: no puedo abrir ", nombre_ent, "\r\n")
+            devolver 1
+        fin
+        seg_L := pide(0x1000)
+        seg_T := pide(0x800)
+        seg_cubos := pide(CUBOS div 8)
+        seg_sim := pide(PARRAFOS_SIM)
+        borrar_bloque(seg_cubos, CUBOS)
+        libre_sim := 1
+        ; se pasa por el archivo hasta que ninguna etiqueta cambia de sitio: en
+        ; cada pasada un salto va corto si llega, contando con dónde están ahora
+        ; las etiquetas (igual que NASM: ver ensambla.py)
+        primera := cierto
+        pasadas := 0
+        mientras cierto hacer
+            pasada(m)
+            primera := falso
+            pasadas := pasadas + 1
+            si no cambio entonces romper fin
+            si pasadas > 200 entonces
+                escribir("ENSAMBLA: los saltos no se asientan\r\n")
+                devolver 1
+            fin
+        fin
+        ; el nombre de la salida: el dado, o el de la entrada con .COM o .EXE
+        si no argumento(2, nombre_sal, 80) entonces
+            copiar(nombre_sal, nombre_ent)
+            p := nulo
+            para i desde 0 hasta longitud(nombre_sal) hacer
+                si nombre_sal[i] = '.' entonces p := dirección(nombre_sal[i]) fin
+                si nombre_sal[i] = '\\' o nombre_sal[i] = ':' entonces p := nulo fin
+            fin
+            si p <> nulo entonces valor(p) := 0 fin
+            si busca("C_cab", 5, v) entonces
+                concatenar(nombre_sal, ".EXE")
+            sino
+                concatenar(nombre_sal, ".COM")
+            fin
+        fin
+        ms := crear(nombre_sal)
+        si ms = MAL entonces
+            escribir("ENSAMBLA: no puedo crear ", nombre_sal, "\r\n")
+            devolver 1
+        fin
+        empezar_escritor(sal, ms)
+        final := cierto
+        pasada(m)
+        si no vaciar(sal) entonces
+            escribir("ENSAMBLA: no puedo escribir en ", nombre_sal, " (¿disco lleno?)\r\n")
+            devolver 1
+        fin
+        cerrar(ms)
+        cerrar(m)
+        escribir("ensambla: ", nombre_ent, " -> ", nombre_sal, "  (", pos, " octetos, ", pasadas + 1, " pasadas)\r\n")
+        devolver 0
+    fin
+
+fin Ensambla.

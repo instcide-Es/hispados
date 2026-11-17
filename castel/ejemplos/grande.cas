@@ -1,0 +1,89 @@
+; grande.cas - Fase 4: el «modelo grande». Con «modelo grande» el programa
+; no es un .COM sino un .EXE: cada módulo va en su propio segmento de código
+; (hasta 64 K cada uno) y los datos y la pila en otro. Las funciones públicas
+; se llaman de un segmento a otro (son «lejanas»); las demás siguen igual.
+; Lo que se escribe en Castel no cambia: este programa es como cualquier otro.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Grande
+
+    modelo grande
+
+    importar Textos, Memoria, Argumentos, Figuras, Medidas
+
+    tipo Nodo = estructura
+        n: nat32
+        sig: puntero a Nodo
+    fin
+
+    variable cuenta: nat16
+    variable renglón: arreglo [40] de byte = "datos con valor inicial"
+
+    ; pública en el programa: también es lejana, y se llama a sí misma
+    público función factorial(n: nat32): nat32
+        si n < 2 entonces devolver 1 fin
+        devolver n * factorial(n - 1)
+    fin
+
+    función cambia(ref a: nat16, ref b: nat16)
+        variable t: nat16
+        t := a
+        a := b
+        b := t
+    fin
+
+    función principal(): byte
+        variable t: arreglo [24] de byte
+        variable lista, nodo: puntero a Nodo
+        variable i, uno, dos: nat16
+        variable n: nat32
+        variable e: ent32
+        variable r: Rectángulo
+
+        escribir("modelo grande\n")
+        escribir(renglón, ": ", longitud(renglón), " letras\n")
+
+        ; de un segmento a otro, con textos, números de 32 bits y «ref»
+        natural_a_texto(4000000000, t)
+        escribir("natural_a_texto: ", t, "\n")
+        número_a_texto(-123456789, t)
+        concatenar(t, " y ")
+        hex_a_texto(0xCAFE, 4, dirección(t[longitud(t)]))
+        escribir("número_a_texto + hex: ", t, "\n")
+        si texto_a_natural("70000", n) entonces escribir("texto_a_natural: ", n, "\n") fin
+        si texto_a_número("-0x10", e) entonces escribir("texto_a_número: ", e, "\n") fin
+        escribir("comparar: ", comparar("abc", "abd"), " ", iguales_sin_caja("Ñu", "ñU"), "\n")
+        escribir("factorial(12) = ", factorial(12), "\n")
+        uno := 1
+        dos := 2
+        cambia(uno, dos)
+        escribir("cambia: ", uno, " ", dos, "\n")
+
+        ; un módulo que escribe él, con sus rutinas de apoyo en su segmento
+        escribir(aviso(), cuadrado(12), " ", Figuras.escala(5), " ", a_décimas(10), "\n")
+        r.ancho := 3
+        r.alto := 4
+        escribir("área y perímetro: ", área(r), " ", perímetro(r), ", hechas: ", hechas, "\n")
+
+        ; el montón, en el segmento de los datos
+        lista := nulo
+        para i desde 1 hasta 5 hacer
+            nodo := puntero(reservar(tamaño(Nodo)))
+            nodo.n := nat32(i) * 100000
+            nodo.sig := lista
+            lista := nodo
+        fin
+        nodo := lista
+        mientras nodo <> nulo hacer
+            escribir(nodo.n, " ")
+            cuenta := cuenta + 1
+            nodo := nodo.sig
+        fin
+        escribir("(", cuenta, " nodos)\n")
+
+        ; la línea de órdenes: el prefijo del programa se copia al segmento de datos
+        escribir("argumentos: ", cuántos_argumentos(), "\n")
+        devolver 0
+    fin
+
+fin Grande.
