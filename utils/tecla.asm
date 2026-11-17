@@ -23,9 +23,17 @@
 ;     Codigo: E0 4B  (make)   Estado: 00            (flecha izquierda: E0 + 4B)
 ;  y, si la BIOS lo convierte en carácter, el ASCII.
 ;
+;  El «Estado» de cada línea es el de la BIOS (0040:0017h) JUSTO DESPUÉS de
+;  que la BIOS haya tratado ese código, no el del momento de escribir la línea:
+;  el aviso 4Fh llega ANTES de que la BIOS cambie el estado, así que también
+;  nos enganchamos a INT 09h (encadenando primero a la BIOS) y, a la vuelta,
+;  apuntamos el estado junto a los códigos que han entrado en esa interrupción.
+;  Antes se leía al escribir la línea y, si el equipo iba lento (o la tecla
+;  se soltaba deprisa), un Ctrl salía con «Estado: 00» porque ya estaba suelto.
+;
 ;  Salida robusta (no depende de Esc ni de Ctrl, que pueden ser justo las
 ;  teclas que fallan): pulse F10 (código 44h) o escriba la palabra FIN.
-;  Al salir, DESENGANCHA INT 15h 4Fh (restaura el vector anterior).
+;  Al salir, DESENGANCHA INT 15h e INT 09h (restaura los vectores anteriores).
 ; =============================================================================
         cpu 386
         bits 16
@@ -61,6 +69,16 @@ start:
         mov dx, int15
         mov ax, 0x2515
         int 0x21
+        ; y el de INT 09h (solo para apuntar el estado a la vuelta de la BIOS)
+        mov ax, 0x3509
+        int 0x21
+        mov [old09], bx
+        mov [old09+2], es
+        push cs
+        pop es
+        mov dx, int09
+        mov ax, 0x2509
+        int 0x21
 
 ; -----------------------------------------------------------------------------
 ; bucle principal: vacía el búfer circular de códigos y el búfer de la BIOS
@@ -72,10 +90,28 @@ main:
         cmp bx, [ring_head]
         je .noscan
         mov al, [ring+bx]
+        mov ah, [ring_st+bx]        ; el estado apuntado a la vuelta de INT 09h
+        cmp bx, [ring_samp]         ; ¿sin apuntar? (el aviso no vino de INT 09h)
+        jne .conestado
+        push ds                     ; entonces, el estado de ahora mismo
+        push bx
+        mov bx, 0x40
+        mov ds, bx
+        mov ah, [0x17]
+        pop bx
+        pop ds
+        inc bx
+        and bx, RINGMASK
+        mov [ring_samp], bx
+        mov [ring_tail], bx
+        jmp .sacado
+.conestado:
         inc bx
         and bx, RINGMASK
         mov [ring_tail], bx
+.sacado:
         sti
+        mov [cur_st], ah
         call show_scan
         cmp byte [done], 0
         jne .fin
@@ -107,8 +143,13 @@ main:
         int 0x16
         jmp .flush
 .restore:
-        ; DESENGANCHAR: restaurar el vector de INT 15h anterior
+        ; DESENGANCHAR: restaurar los vectores de INT 09h e INT 15h anteriores
         cli
+        push ds
+        lds dx, [old09]
+        mov ax, 0x2509
+        int 0x21
+        pop ds
         push ds
         lds dx, [old15]
         mov ax, 0x2515
@@ -140,6 +181,38 @@ int15:
         pop bx
 .chain:
         jmp far [cs:old15]          ; el iret del anterior restaura el acarreo original
+
+; =============================================================================
+;  Nuestro INT 09h: primero la BIOS (que llama al aviso 4Fh de arriba y luego
+;  cambia el estado de las modificadoras) y, a la vuelta, se apunta el estado
+;  (0040:0017h) junto a cada código que haya entrado y aún no lo tenga. Así
+;  «Estado» es el que dejó la BIOS al tratar ESA tecla, tarde lo que tarde el
+;  bucle principal en escribir la línea.
+; =============================================================================
+int09:
+        pushf
+        call far [cs:old09]
+        push ax
+        push bx
+        push ds
+        cli                         ; (la BIOS puede haber vuelto a permitirlas)
+        mov ax, 0x40
+        mov ds, ax
+        mov al, [0x17]
+        mov bx, [cs:ring_samp]
+.apunta:
+        cmp bx, [cs:ring_head]
+        je .hecho
+        mov [cs:ring_st+bx], al
+        inc bx
+        and bx, RINGMASK
+        jmp .apunta
+.hecho:
+        mov [cs:ring_samp], bx
+        pop ds
+        pop bx
+        pop ax
+        iret                        ; restaura los indicadores del interrumpido
 
 ; =============================================================================
 ;  show_scan: AL = un código en crudo del búfer circular -> una línea
@@ -221,17 +294,14 @@ show_scan:
         jmp .clrpfx
 
 ; -----------------------------------------------------------------------------
-; show_state: imprime «   Estado: XX [Ctrl][Alt][May]» leyendo 0040:0017h
+; show_state: imprime «   Estado: XX [Ctrl][Alt][May]» con el estado de la BIOS
+; (0040:0017h) apuntado para este código (cur_st)
 ; -----------------------------------------------------------------------------
 show_state:
         push ax
-        push ds
         mov si, msg_est
         call puts
-        mov ax, 0x40
-        mov ds, ax
-        mov al, [0x17]
-        pop ds
+        mov al, [cur_st]
         push ax
         call puthex2
         pop ax
@@ -372,9 +442,13 @@ fin_seq     db 0x21, 0x17, 0x31     ; F, I, N
             alignb 4
 bss_start:
 old15       resd 1
+old09       resd 1
 ring        resb RINGSZ
+ring_st     resb RINGSZ             ; el estado de la BIOS tras cada código
 ring_head   resw 1
 ring_tail   resw 1
+ring_samp   resw 1                  ; primer código aún sin su estado apuntado
+cur_st      resb 1                  ; el estado del código que se está escribiendo
 e0          resb 1
 e1          resb 1
 done        resb 1
