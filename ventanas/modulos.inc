@@ -18,7 +18,9 @@
 ;                 que dice su cabecera, «Juegos» o «Accesorios»)
 ;                 -> EAX=cuántos .HVP hay / cuántos accesos ha creado
 ;    mem_bloque, mem_bloque_soltar   memoria extendida para un módulo
-;    es_hvp       ESI=ruta: ZF=1 si acaba en .HVP
+;    es_hvp       ESI=ruta: ZF=1 si se abre como una ventana: acaba en .HVP
+;                 o es un .EXE de Windows de ventanas ([HISPA-486], win32.inc)
+;    es_hvp_ext   ESI=ruta: ZF=1 si acaba en .HVP
 ;  Al entrar en el módulo: EBX=su base (la cabecera), ESI=su ruta completa,
 ;  EDI=los parámetros del acceso directo, ECX=entradas de la interfaz que hay.
 ; =============================================================================
@@ -397,6 +399,10 @@ hvp_las_dos:
         jmp hvp_buscar
 
 es_hvp:
+        call es_hvp_ext
+        je es_hvp_ext.r
+        jmp es_pe_gui               ; [HISPA-486] un .EXE de Windows de ventanas
+es_hvp_ext:
         push eax
         push esi
         push edi
@@ -410,11 +416,17 @@ es_hvp:
         pop edi
         pop esi
         pop eax
+.r:
         ret
 
 hvp_abrir:
         pushad
         lea esi, [ebx+AC_PROG]
+        call es_hvp_ext
+        je .hvp
+        popad                       ; [HISPA-486] un programa de Windows
+        jmp pe_abrir
+.hvp:
         mov edx, hvp_tabla
         xor ebp, ebp
         mov ecx, HVP_MAX
@@ -600,12 +612,12 @@ hvp_limpiar:
         dec ebp
         jnz .b
         popad
-        ret
+        jmp pe_limpiar              ; [HISPA-486] y los programas de Windows
 
 hvp_icono:
         pushad
         lea esi, [ebx+AC_PROG]
-        call es_hvp
+        call es_hvp_ext
         jne .x
         xor ecx, ecx
 .b:

@@ -238,7 +238,7 @@ dlg_mensaje:
 dm_botones:
         dd ID_ACEPTAR, t_aceptar, 0, 0, 0, 0, 0
         dd ID_ACEPTAR, t_aceptar, ID_CANCELAR, t_cancelar, 0, 0, 0
-        dd 0, 0, 0, 0, 0, 0, 0
+        dd ID_SI, t_si, ID_NO, t_no, 0, 0, 0
         dd ID_SI, t_si, ID_NO, t_no, ID_CANCELAR, t_cancelar, 0
 
 dm_gancho:

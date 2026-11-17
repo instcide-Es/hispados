@@ -125,6 +125,14 @@ $(B)/LANZA.EXE: tests/progs/lanza.c tools/elf2pe.py | $(B)
 $(B)/K32CON.EXE: tests/progs/k32con.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/k32con.o
 	python3 tools/elf2pe.py -o $@ $(B)/k32con.o
+# [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
+# Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
+$(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/wingui.o
+	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:MessageBoxA $(B)/wingui.o
+$(B)/WINFALTA.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
+	$(CC32) -DFALTA -c $< -o $(B)/winfalta.o
+	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:MessageBoxA,CreateWindowExA $(B)/winfalta.o
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
@@ -613,6 +621,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_dpmi_tests.sh $(IMG)
 	DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	tests/run_hw32_tests.sh $(IMG)
+	tests/run_win32gui_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)

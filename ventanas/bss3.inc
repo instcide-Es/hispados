@@ -141,6 +141,13 @@ hvi_sig     resd 1
 hvi_de      resd HVI_N              ; de qué acceso es cada icono guardado
 hvp_tabla   resb HVP_MAX * HS_TAM
 hvi_buf     resb HVI_N * 512
+; ---- [HISPA-486] programas de Windows de ventanas (win32.inc) ----
+            alignb 4
+pe_lfanew   resd 1                  ; dónde está la cabecera PE en el archivo
+pe_misc     resd 1                  ; lo suyo (TIB, línea de órdenes), dirección del programa
+pe_dll      resd 1                  ; el nombre de la DLL que se está importando
+pe_cab      resb 160                ; la cabecera PE del que se está abriendo
+pe_tabla    resb PE_MAX * PE_TAM
 ; ---- [Configuración] ajustes (ajustes.inc) ----
             alignb 4
 aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados

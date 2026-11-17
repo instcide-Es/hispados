@@ -92,6 +92,7 @@ ID_NO           equ 7
 DM_ACEPTAR      equ 0
 DM_ACEPTAR_CANCELAR equ 1
 DM_SI_NO_CANCELAR equ 3
+DM_SI_NO        equ 2               ; [HISPA-486] sí o no (cerrarlo da ID_CANCELAR)
 
 ; ---- teclas de WM_KEYDOWN (ECX): las que no escriben un carácter ----
 TC_ESC          equ 0x01

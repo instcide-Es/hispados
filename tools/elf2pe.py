@@ -5,13 +5,14 @@
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 #
 #   tools/elf2pe.py -o PROG.EXE [-e entrada] [--reloc] [--base 0x400000]
-#                   [-i DLL:func,func...] obj.o ...
+#                   [--gui] [-i DLL:func,func...] obj.o ...
 #   tools/elf2pe.py --dll -o MSVCRT.DLL [-e DllMain] obj.o ...
 #
 # Con --dll sale una DLL: se exportan todos los símbolos globales definidos
 # (las funciones y los datos; lo que no deba verse, «static»), con su nombre
 # tal cual, y lleva siempre .reloc. La entrada (DllMain, si la hay) es
-# opcional.
+# opcional. Con --gui el programa es de ventanas (subsistema 2) en vez de
+# consola (3): Hispa Ventanas lo abre dentro, como una tarea.
 #
 # Los símbolos que quedan sin definir se importan: de la DLL que diga -i, o de
 # KERNEL32.dll si no lo dice. Con --reloc se añade la sección .reloc (para
@@ -53,6 +54,7 @@ def main():
     ap.add_argument('--dll', action='store_true')
     ap.add_argument('--base', default=None)
     ap.add_argument('--reloc', action='store_true')
+    ap.add_argument('--gui', action='store_true')
     ap.add_argument('-i', action='append', default=[])
     ap.add_argument('objs', nargs='+')
     a = ap.parse_args()
@@ -297,7 +299,7 @@ def main():
     struct.pack_into('<HBBIIIIIIIII', sal, o, 0x10B, 2, 0, len(t), len(d), bss_tam,
                      entrada, rva_t, rva_d, base, SEC_AL, ARCH_AL)
     struct.pack_into('<HHHHHHIIIIHHIIIIII', sal, o + 40, 4, 0, 0, 0, 4, 0, 0, tam_img,
-                     cab_tam, 0, 3, 0, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16)
+                     cab_tam, 0, 2 if a.gui else 3, 0, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16)
     dirs = [(0, 0)] * 16
     dirs[1] = imp_dir
     dirs[12] = iat_dir
