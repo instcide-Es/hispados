@@ -43,7 +43,7 @@ tabla_ff:
         dw fn_sin, fn_log, fn_exp, fn_cos, fn_tan, fn_atn, fn_fre, fn_inp
         dw fn_pos, fn_len, fn_str, fn_val, fn_asc, fn_chr, fn_peek, fn_space
         dw fn_oct, fn_hex, fn_pos, fn_cint, fn_csng, fn_cdbl, fn_fix, fn_mal
-        dw fn_mal, fn_mal, fn_mal, fn_mal, fn_mal
+        dw fn_mal, fn_mal, fn_eof, fn_loc, fn_lof
 fn_mal:
         jmp err_funcion
 
@@ -702,6 +702,8 @@ desborda_aviso:
         call pon_cad_cs
         call pon_nl
         pop si
+; el acumulador, al mayor número de simple (con el signo que tenga)
+desborda_max:
         mov di, ac
         mov al, [ac + AC_SIG]
         call f_cero

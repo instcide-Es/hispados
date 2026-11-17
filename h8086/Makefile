@@ -109,7 +109,7 @@ $(B)/SALUDO.SYS: prueba/saludo.asm | $(B)
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/REVISAR.COM $(B)/ETIQUETA.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/XCOPIAR.COM $(B)/DISCORAM.SYS $(B)/EDITAR.COM $(B)/TECLADO.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/REVISAR.COM $(B)/ETIQUETA.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/XCOPIAR.COM $(B)/DISCORAM.SYS $(B)/EDITAR.COM $(B)/TECLADO.COM $(B)/BASIC.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos
@@ -126,8 +126,16 @@ $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
 PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM
 
+# Hispa-BASIC (docs/8086/BASIC.md): varios fuentes; se ensambla desde la
+# carpeta de los ya pasados a la página 437, como el núcleo
+$(B)/BASIC.COM: basic/basic.asm $(wildcard basic/*.inc) | $(B)
+	mkdir -p $(B)/gen/basic
+	for f in basic/*.asm basic/*.inc; do $(CP437) $$f $(B)/gen/basic/$$(basename $$f) || exit 1; done
+	cd $(B)/gen/basic && $(NASM) -f bin -l basic.lst -o ../../BASIC.COM basic.asm
+
 prueba: $(DISCOS) $(PRUEBAS)
 	./prueba/prueba.sh
+	./prueba/basic_compara.sh prueba/basic/b0*.bas
 
 clean:
 	rm -rf $(B)

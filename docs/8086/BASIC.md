@@ -12,17 +12,16 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 - Decir los mensajes y los errores en español.
 - Aceptar las órdenes también en español. Cada palabra española se guarda
   con el **mismo código interno** que la inglesa: el programa, por dentro, es
-  de GW-BASIC. `LIST` lo enseña en inglés y `LISTAR` en español (el idioma
-  de `LIST` se cambia con `IDIOMA ES` / `IDIOMA EN`).
+  de GW-BASIC. `LIST` lo enseña en inglés y `LISTAR` en español.
 - Funcionar en un IBM PC con 64 K y un disquete.
 
 ## Entregas
 
-| Versión | Qué |
-|---|---|
-| 0.11 | Lo esencial: edición de líneas, LIST/RUN/NEW/SAVE/LOAD en texto, PRINT, LET, INPUT, IF…THEN…ELSE, FOR…NEXT, WHILE…WEND, GOTO, GOSUB, ON…GOTO/GOSUB, DIM, DATA/READ/RESTORE, END/STOP/CONT, enteros (`%`), simple precisión (`!`) y cadenas (`$`), funciones de números y de cadenas, DEF FN, errores en español, palabras en español |
-| 0.12 | Formato binario de GW-BASIC, doble precisión (`#`), PRINT USING, archivos (OPEN, PRINT#, INPUT#, LINE INPUT#, CLOSE, EOF), ON ERROR / RESUME, RENUM, AUTO, DELETE, EDIT |
-| 0.13 | Pantalla y sonido: CLS, LOCATE, COLOR, WIDTH, SCREEN 1 y 2, PSET, LINE, CIRCLE, DRAW, PAINT, SOUND, PLAY, BEEP, INKEY$ |
+| Versión | Qué | Estado |
+|---|---|---|
+| 0.11 | Lo esencial: edición de líneas, LIST/RUN/NEW/SAVE/LOAD en texto, PRINT, LET, INPUT, IF…THEN…ELSE, FOR…NEXT, WHILE…WEND, GOTO, GOSUB, ON…GOTO/GOSUB, DIM, DATA/READ/RESTORE, END/STOP/CONT, enteros (`%`), simple precisión (`!`) y cadenas (`$`), funciones de números y de cadenas, DEF FN, errores en español, palabras en español | hecha (Hispa-8086 0.11) |
+| 0.12 | Formato binario de GW-BASIC, doble precisión (`#`), PRINT USING, archivos (OPEN, PRINT#, INPUT#, LINE INPUT#, CLOSE, EOF), ON ERROR / RESUME, RENUM, AUTO, DELETE, EDIT | hecha: también WRITE, LOF, LOC, NAME, FILES; EDIT solo enseña la línea (se escribe otra vez); OPEN … FOR RANDOM, FIELD, GET y PUT, aún no |
+| 0.13 | Pantalla y sonido: CLS, LOCATE, COLOR, WIDTH, SCREEN 1 y 2, PSET, LINE, CIRCLE, DRAW, PAINT, SOUND, PLAY, BEEP, INKEY$ | hecha: también PRESET y POINT; CIRCLE sin arcos ni aspecto propio; DRAW sin A, TA ni «=variable;» |
 
 ## Memoria
 
@@ -117,6 +116,12 @@ Una lista cerrada; cada una es otra forma de escribir la inglesa:
 | AND / OR / NOT | Y / O / NO | DEF FN | DEF FN (igual) |
 | SYSTEM | SALIR | RANDOMIZE | ALEATORIO |
 | CLEAR | VACIAR | SWAP | CAMBIAR |
+| OPEN / CLOSE | ABRIR / CERRAR | WRITE | ESCRIBIR |
+| RESUME | REANUDAR | PRINT USING | IMPRIMIR USANDO |
+| DELETE / RENUM / EDIT | QUITAR / RENUMERAR / EDITAR | KILL / NAME / FILES | BORRAR / RENOMBRAR / ARCHIVOS (como en COMMAND) |
+
+`LIST` lista en inglés y `LISTAR` en español (cada vez, según con cuál se
+pida).
 
 Las funciones van con el nombre de siempre (`LEFT$`, `LEN`, `INT`…): se
 leen igual en cualquier listado y no chocan con nombres de variables. Las

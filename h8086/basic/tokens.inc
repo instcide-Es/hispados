@@ -247,6 +247,17 @@ pal_esp:
         E 'ALEATORIO', 0xB9, C_SENT
         E 'VACIAR', 0x92, C_SENT
         E 'CAMBIAR', 0xA4, C_SENT
+        E 'ABRIR', 0xBA, C_SENT
+        E 'CERRAR', 0xBB, C_SENT
+        E 'ESCRIBIR', 0xB7, C_SENT
+        E 'REANUDAR', 0xA8, C_SENT
+        E 'USANDO', 0xD7, C_SIEMPRE
+        E 'QUITAR', 0xA9, C_SENT
+        E 'RENUMERAR', 0xAB, C_SENT
+        E 'EDITAR', 0xA6, C_SENT
+        E 'BORRAR', 0xFE, C_SENT, 0x87
+        E 'RENOMBRAR', 0xFE, C_SENT, 0x84
+        E 'ARCHIVOS', 0xFE, C_SENT, 0x81
         db 0
 
 ; los operadores de un signo
@@ -859,12 +870,14 @@ tok_espanola:
         mov si, bx
         add si, cx
         push si
-.esp:
-        lodsb
-        cmp al, ' '
-        je .esp
+.esp:                               ; (sin LODSB: AX lleva el código)
+        cmp byte [si], ' '
+        jne .esp_f
+        inc si
+        jmp .esp
+.esp_f:
+        mov dh, [si]                ; DH = lo siguiente
         pop si
-        mov dh, al                  ; DH = lo siguiente
         test dl, C_SIEMPRE
         jnz pon_esp
         test dl, C_SENT
@@ -1003,6 +1016,28 @@ lista_linea:
 ; ---- escribe el código AX como palabra. En español, con espacios si
 ; hace falta para que se pueda volver a leer ----
 lista_palabra:
+        ; los operadores de un signo (+ - * / ^ \ = < >): el signo
+        test ah, ah
+        jnz .no_signo
+        push bx
+        mov bx, ops_sig
+.s:
+        cmp byte [cs:bx], 0
+        je .s_no
+        cmp [cs:bx + 1], al
+        je .s_si
+        add bx, 2
+        jmp .s
+.s_si:
+        push ax
+        mov al, [cs:bx]
+        call pon_car
+        pop ax
+        pop bx
+        ret
+.s_no:
+        pop bx
+.no_signo:
         push bx
         push cx
         push si

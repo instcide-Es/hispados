@@ -17,7 +17,7 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 ## Dónde estamos
 
 **Etapas 0 a 4 y 6 hechas, y la 5 casi** (`h8086/`, noviembre de 2026).
-Versión 0.10.
+Versión 0.11.
 
 - **Arranque, de disquete o de disco duro**: un solo sector de arranque para
   FAT12 y FAT16, disquetes y particiones, y un sector de particiones (MBR)
@@ -386,7 +386,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | **hecha**: C: con FAT16, arranque del disco duro, CONFIG.SYS con FILES=, BUFFERS=, SHELL= y DEVICE= (controladores de carácter y de bloque), la cadena de dispositivos |
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **casi**: todas las de MS-DOS 3.3 que hacen falta, EDITAR y TECLADO; falta PASAR por el puerto paralelo (y las menores: IMPRIMIR, COMPARAR, COPIADISCO) |
 | 6 | Modo 286: HMA y memoria extendida | **hecha** (0.10): gestor XMS 2.0 dentro del núcleo, A20, `DOS=ALTO`, DISCORAM `/E`; sin UMB |
-| 7 | Hispa-BASIC | |
+| 7 | Hispa-BASIC | **primera entrega** (0.11): `BASIC.COM`, compatible con GW-BASIC (lee sus programas en texto y en binario) y con las órdenes también en español; ver docs/8086/BASIC.md. Faltan la 0.12 (doble precisión completa, PRINT USING, archivos, ON ERROR) y la 0.13 (pantalla y sonido) |
 | 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | |
 | 9 | Juegos, manual, versión estable 1.0 | |
 

@@ -17,6 +17,9 @@ MARCO       equ 24
 ejecuta:
 .sent:
         mov word [v_temp_n], 0
+        mov [v_sent_ptr], si        ; (para ON ERROR / RESUME)
+        mov ax, [v_linea]
+        mov [v_sent_lin], ax
         cmp byte [v_corte], 0
         jne interrumpido
         lodsb
@@ -65,7 +68,32 @@ ejecuta:
         je .kill
         cmp al, 0x81
         je .files
+        cmp al, 0x84
+        je .name
+        cmp al, 0x8F
+        je .paint
+        cmp al, 0x91
+        je .circle
+        cmp al, 0x92
+        je .draw
+        cmp al, 0x93
+        je .play
         jmp err_sintaxis
+.paint:
+        call sent_paint
+        jmp .tras
+.circle:
+        call sent_circle
+        jmp .tras
+.draw:
+        call sent_draw
+        jmp .tras
+.play:
+        call sent_play
+        jmp .tras
+.name:
+        call sent_name
+        jmp .tras
 .kill:
         call sent_kill
         jmp .tras
@@ -163,13 +191,13 @@ tabla_sent:
         dw sent_clear, sent_list, sent_new, sent_on, sent_mal, sent_def
         dw sent_poke, sent_cont, sent_mal, sent_mal, sent_out, sent_lprint
         dw sent_list, sent_mal, sent_width, sent_rem, sent_tron, sent_troff
-        dw sent_swap, sent_erase, sent_mal, sent_error, sent_mal, sent_mal
-        dw sent_mal, sent_mal, sent_defstr, sent_defint, sent_defsng
+        dw sent_swap, sent_erase, sent_edit, sent_error, sent_resume, sent_delete
+        dw sent_auto, sent_renum, sent_defstr, sent_defint, sent_defsng
         dw sent_defdbl, sent_line, sent_while, sent_wend, sent_mal, sent_mal
-        dw sent_mal, sent_mal, sent_mal, sent_mal, sent_randomize, sent_mal
-        dw sent_mal, sent_load, sent_mal, sent_save, sent_color, sent_cls
-        dw sent_rem, sent_mal, sent_mal, sent_rem_sent, sent_beep, sent_mal
-        dw sent_mal, sent_screen, sent_key, sent_locate
+        dw sent_mal, sent_mal, sent_write, sent_mal, sent_randomize, sent_open
+        dw sent_close, sent_load, sent_mal, sent_save, sent_color, sent_cls
+        dw sent_rem, sent_mal, sent_mal, sent_sound, sent_beep, sent_pset
+        dw sent_preset, sent_screen, sent_key, sent_locate
 %if ($ - tabla_sent) != 74 * 2
 %error "tabla_sent no tiene 74 entradas"
 %endif
@@ -225,6 +253,13 @@ sent_let:
 sent_lprint:
 sent_print:
         call salta_esp
+        cmp al, '#'                 ; PRINT #n, ...: al archivo
+        jne sent_print_cuerpo
+        call empieza_print_arch
+        call sent_print_cuerpo
+        jmp fin_print_arch
+sent_print_cuerpo:
+        call salta_esp
         test al, al
         jz .nl
         cmp al, ':'
@@ -241,6 +276,8 @@ sent_print:
         je .pyc
         cmp al, ','
         je .coma
+        cmp al, 0xD7                ; USING
+        je .using
         cmp al, 0xCE                ; TAB(
         je .tab
         cmp al, 0xD2                ; SPC(
@@ -368,6 +405,9 @@ sent_print:
         ret
 .nl:
         jmp pon_nl
+.using:
+        inc si
+        jmp print_using
 
 ; ¿AL es el final de una sentencia (0, «:», ELSE)? ZF=1
 fin_de_sent:
@@ -611,8 +651,11 @@ salta_cte:
 ; ---- ON n GOTO / GOSUB ----
 sent_on:
         call salta_esp
-        cmp al, 0xA7                ; ON ERROR (en la 0.12)
-        je err_sintaxis
+        cmp al, 0xA7                ; ON ERROR GOTO
+        jne .no_err
+        inc si
+        jmp sent_on_error
+.no_err:
         call eval_ent
         test ax, ax
         js .mal
@@ -1368,6 +1411,9 @@ asigna_dato:
 
 ; ---- INPUT ----
 sent_input:
+        call salta_esp
+        cmp al, '#'                 ; INPUT #n, ...: del archivo
+        je sent_input_arch
         ; ¿un «;» delante? (no salta de línea al acabar: no se usa aquí)
         call salta_esp
         cmp al, ';'
@@ -1541,9 +1587,11 @@ dato_de_linea:
 sent_line:
         call salta_esp
         cmp al, 0x85                ; INPUT
-        jne err_sintaxis
+        jne sent_line_graf          ; si no, LINE de dibujar
         inc si
         call salta_esp
+        cmp al, '#'                 ; LINE INPUT #n, a$
+        je sent_line_input_arch
         cmp al, ';'
         jne .t
         inc si
@@ -2032,19 +2080,7 @@ sent_locate:
         int 0x10
         jmp sent_rem_sent
 
-; ---- COLOR, SCREEN, KEY: se aceptan (la pantalla llega en la 0.13) ----
-sent_color:
-        jmp sent_rem_sent
-sent_screen:
-        call salta_esp
-        call fin_de_sent
-        je .x
-        call eval_ent
-        test ax, ax
-        jnz err_funcion
-        jmp sent_rem_sent
-.x:
-        ret
+; ---- KEY: se acepta (las teclas de función no se enseñan abajo) ----
 sent_key:
         jmp sent_rem_sent
 sent_beep:
@@ -2146,9 +2182,6 @@ sent_kill:
         mov al, 53
         jmp error
 
-; ---- FILES: lo deja para la 0.12 ----
-sent_files:
-        jmp sent_rem_sent
 
 m_repita    db "?Repita desde el principio", 10, 0
 m_semilla   db "Semilla del azar (-32768 a 32767)? ", 0

@@ -599,8 +599,19 @@ op_div:
         call prepara_flot
         cmp word [ac + AC_M3], 0
         jne .bien
-        mov al, 11
-        jmp error
+        ; entre cero: GW-BASIC avisa «División por cero» y sigue con el mayor
+        ; número (con el signo del dividendo)
+        pop si
+        push si
+        call col_cero
+        mov si, m_div_cero
+        call pon_cad_cs
+        call pon_nl
+        mov al, [arg + AC_SIG]
+        mov [ac + AC_SIG], al
+        call desborda_max
+        pop si
+        ret
 .bien:
         mov si, ac
         mov di, arg
@@ -631,7 +642,22 @@ resultado_arg:
         mov di, ac
         call f_copia
         pop si                      ; el texto, guardado en prepara_flot
-        ret                         ; (encima de él estaba ya la vuelta)
+; ¿se ha salido del margen (más de 1,7E+38)? Como GW-BASIC: avisa y sigue
+; con el mayor número, con su signo
+mira_desborde:
+        cmp word [ac + AC_M3], 0
+        je .x
+        cmp word [ac + AC_EXP], 127
+        jle .x
+        push ax
+        mov al, [ac + AC_TIPO]
+        push ax
+        call desborda_aviso
+        pop ax
+        mov [ac + AC_TIPO], al
+        pop ax
+.x:
+        ret
 
 ; ---- ^ ----
 op_pot:
@@ -707,7 +733,7 @@ op_pot:
         mov di, ac
         call f_redondea
         pop si
-        ret
+        jmp mira_desborde
 .div0:
         mov al, 11
         jmp error
@@ -781,6 +807,10 @@ ev_atomo:
         je .instr
         cmp al, 0xDA
         je .varptr
+        cmp al, 0xDC                ; POINT(x, y)
+        jne .no
+        inc si
+        jmp fn_point
 .no:
         test al, al
         jz .falta
@@ -1067,6 +1097,7 @@ busca_var:
         push dx
         push di
         mov dl, al                  ; crear
+        call salta_esp              ; (tras la palabra clave puede haber espacios)
         call lee_nombre             ; AL = el tipo
         mov dh, al
         mov [v_tipo_var], al
@@ -1433,3 +1464,5 @@ crea_matriz:
 .grande2:
         mov al, 7
         jmp error
+
+m_div_cero  db "División por cero", 0

@@ -89,6 +89,11 @@ inicio:
         mov [v_cima], ax
         mov word [v_ancho], 80
         mov word [v_col], 0
+        mov byte [v_attr], 7
+        mov byte [v_gcolor], 3
+        call es_pantalla
+        sbb al, al
+        mov [v_es_pant], al
         mov byte [PROG_INI - 1], 0  ; (lo que hay antes de la primera línea)
         call nuevo
         ; RND: la semilla de GW-BASIC
@@ -173,6 +178,41 @@ ordenes:
         mov sp, [v_pila0]
         mov word [v_linea], 0xFFFF
         mov word [v_temp_n], 0
+        cmp byte [v_auto], 0
+        je .normal
+        ; ---- AUTO: el número, y lo que se escriba es esa línea ----
+        mov ax, [v_auto_n]
+        call pon_natural
+        call busca_linea
+        mov al, ' '
+        jnc .a1
+        mov al, '*'                 ; (ya existe: se cambiaría)
+.a1:
+        call pon_car
+        call lee_linea_ent
+        jc salir
+        cmp byte [v_corte], 0
+        jne .a_fin
+        mov si, b_lin
+.a2:
+        lodsb
+        cmp al, ' '
+        je .a2
+        dec si
+        test al, al
+        jz .a_fin                   ; una línea vacía: se acaba
+        call tokeniza
+        mov ax, [v_auto_n]
+        call mete_linea
+        mov ax, [v_auto_paso]
+        add [v_auto_n], ax
+        jc .a_fin
+        jmp ordenes
+.a_fin:
+        mov byte [v_auto], 0
+        mov byte [v_corte], 0
+        jmp ordenes_ok
+.normal:
         call lee_linea_ent          ; b_lin; CF=1 si se acabó la entrada
         jc salir
         mov si, b_lin
@@ -261,6 +301,8 @@ vacia:
         mov word [v_dat_lin], 0
         mov word [v_dat_ptr], 0
         mov word [v_fn_fin], 0
+        mov word [v_onerr], 0
+        mov byte [v_en_trampa], 0
         ; todas las letras, simple precisión
         push di
         push cx
@@ -475,6 +517,8 @@ lee_car_ent:
 ; =============================================================================
 ; AL a la salida, llevando la columna
 pon_car:
+        cmp word [v_sal_f], 0       ; PRINT #: al archivo
+        jne pon_car_f
         cmp word [v_sal_h], 0
         je .pantalla
         cmp al, 10
@@ -496,7 +540,16 @@ pon_car:
         cmp al, 7
         je .tal
         inc word [v_col]
-        jmp .tal
+        cmp byte [v_attr], 7        ; COLOR en texto, a la pantalla: por la
+        je .tal                     ; BIOS, con su atributo
+        cmp byte [v_modo], 0
+        jne .tal
+        cmp byte [v_es_pant], 0
+        je .tal
+        call pon_car_color
+        pop dx
+        pop ax
+        ret
 .atras:
         cmp word [v_col], 0
         je .tal
@@ -615,8 +668,12 @@ pon_libres:
 ;  Los errores: AL = el número. Escribe el mensaje y vuelve a las órdenes.
 ; =============================================================================
 error:
-        mov sp, [v_pila0]
         cld
+        push ax
+        call error_trampa           ; ON ERROR: si lo atiende, no vuelve
+        pop ax
+        call fin_print_arch
+        mov sp, [v_pila0]
         xor ah, ah
         mov [v_err], ax
         mov bx, [v_linea]
@@ -736,6 +793,11 @@ errores:
 %include "sent.inc"
 %include "funciones.inc"
 %include "archivo.inc"
+%include "ficheros.inc"
+%include "using.inc"
+%include "edicion.inc"
+%include "grafico.inc"
+%include "sonido.inc"
 
 fin_codigo:
 

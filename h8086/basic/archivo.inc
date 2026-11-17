@@ -294,14 +294,17 @@ cierra_carga:
 ; ---- SAVE "archivo"[,A] (siempre en texto, por ahora) ----
 sent_save:
         call nombre_archivo
+        mov byte [v_aux2], 0        ; 1: en texto (,A)
         call salta_esp
         cmp al, ','
         jne .ya
         inc si
         call salta_esp
+        call mayus
         cmp al, 'A'
         jne err_sintaxis
         inc si
+        mov byte [v_aux2], 1
 .ya:
         push si
         mov dx, b_arch
@@ -309,6 +312,40 @@ sent_save:
         mov ah, 0x3C
         int 0x21
         jc .no
+        cmp byte [v_aux2], 0
+        jne .texto
+        ; ---- en binario, como GW-BASIC: FFh, las líneas tal cual (los
+        ; enlaces los rehace quien carga) y 1Ah ----
+        mov bx, ax
+        mov byte [b_disco], 0xFF
+        mov dx, b_disco
+        mov cx, 1
+        mov ah, 0x40
+        int 0x21
+        jc .b_mal
+        mov dx, PROG_INI
+        mov cx, [v_vars]
+        sub cx, dx
+        mov ah, 0x40
+        int 0x21
+        jc .b_mal
+        cmp ax, cx
+        jne .b_mal
+        mov byte [b_disco], 0x1A
+        mov dx, b_disco
+        mov cx, 1
+        mov ah, 0x40
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+        pop si
+        ret
+.b_mal:
+        mov ah, 0x3E
+        int 0x21
+        mov al, 61
+        jmp error
+.texto:
         mov [v_sal_h], ax
         mov word [v_sal_n], 0
         push word [v_col]
@@ -377,6 +414,3 @@ pon_car_archivo:
         pop bx
         ret
 
-; ---- cerrar los archivos abiertos (los de OPEN llegan en la 0.12) ----
-cierra_todo:
-        ret

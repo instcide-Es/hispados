@@ -109,6 +109,83 @@ v_sal_n     resw 1                  ;  lo que hay en su búfer
 v_dpos      resw 1                  ; LOAD: el búfer del archivo
 v_dfin      resw 1
 v_cero_val  resb 8                  ; el valor de una variable que no existe
+v_sent_ptr  resw 1                  ; dónde empieza la sentencia que se ejecuta
+v_sent_lin  resw 1                  ;  y en qué línea (para ON ERROR)
+v_onerr     resw 1                  ; ON ERROR GOTO: la línea (0: no)
+v_err_ptr   resw 1                  ; RESUME: dónde se vuelve
+v_en_trampa resb 1                  ; dentro de la rutina de ON ERROR
+            alignb 2
+v_sal_f     resw 1                  ; PRINT #: el archivo al que va (0: pantalla)
+v_col_guard resw 1                  ;  la columna y el ancho de la pantalla, guardados
+v_ancho_g   resw 1
+v_lp_x      resw 1                  ; gráficos (grafico.inc): el último punto
+v_lp_y      resw 1
+v_gmax_x    resw 1                  ;  el ancho en puntos
+v_g_x1      resw 1
+v_g_y1      resw 1
+v_g_x2      resw 1
+v_g_y2      resw 1
+v_g_ya      resw 1
+v_g_yb      resw 1
+v_g_ax      resw 1
+v_g_ay      resw 1
+v_g_bx      resw 1
+v_g_by      resw 1
+v_g_dx      resw 1
+v_g_dy      resw 1
+v_g_sx      resw 1
+v_g_sy      resw 1
+v_g_r       resw 1
+v_g_ry      resw 1
+v_g_px      resw 1
+v_g_py      resw 1
+v_d_fin     resw 1                  ;  DRAW
+v_d_escala  resw 1
+v_modo      resb 1                  ; SCREEN: 0 texto, 1 o 2
+v_attr      resb 1                  ; COLOR en texto (7: el normal)
+v_gcolor    resb 1                  ; el color de dibujo
+v_gmask     resb 1
+v_g_col     resb 1
+v_g_caja    resb 1
+v_g_borde   resb 1
+v_g_arr     resb 1
+v_g_aba     resb 1
+v_d_b       resb 1
+v_d_n       resb 1
+v_es_pant   resb 1                  ; la salida va a la pantalla (se mira al empezar)
+v_p_listo   resb 1                  ; PLAY (sonido.inc)
+v_p_oct     resb 1
+v_p_estilo  resb 1
+            alignb 2
+v_p_largo   resw 1
+v_p_tempo   resw 1
+v_p_fin     resw 1
+            alignb 2
+RELLENO_TAM equ 1024
+b_relleno   resb RELLENO_TAM        ; PAINT: las semillas
+v_auto_n    resw 1                  ; AUTO: la línea siguiente y el paso
+v_auto_paso resw 1
+v_auto      resb 1
+            alignb 2
+v_us_largo  resw 1                  ; PRINT USING (using.inc)
+v_us_pos    resw 1
+v_us_campo  resw 1
+v_us_fin    resw 1
+v_us_ent    resw 1
+v_us_dec    resw 1
+v_us_ndec   resw 1
+v_us_nent   resw 1
+v_us_sig    resw 1
+v_us_e10    resw 1
+v_us_hubo   resb 1
+v_us_mas    resb 1
+v_us_ast    resb 1
+v_us_dolar  resb 1
+v_us_coma   resb 1
+v_us_exp    resb 1
+v_us_neg    resb 1
+v_us_cero   resb 1
+b_us        resb 256                ; el formato de PRINT USING
 v_cero_tmp  resb 8                  ; INPUT: para probar un número
             alignb 2
 v_def       resb 26                 ; DEFINT/DEFSTR...: el tipo por letra
@@ -138,6 +215,18 @@ v_nom_pila  resb 42 * N_NOMS        ; nombres guardados (matrices anidadas)
 FN_TAM      equ 12
 N_FNP       equ 16
 v_fn_pila   resb FN_TAM * N_FNP     ; FN: los valores de antes de los parámetros
+; los archivos de OPEN (#1 a #3): una ficha de F_TAM octetos cada uno
+N_ARCH      equ 3
+F_HAN       equ 0                   ; el handle de DOS
+F_MODO      equ 2                   ; 0 cerrado; 'I', 'O' o 'A'
+F_FIN       equ 3                   ; 1: ya no hay más que leer
+F_POS       equ 4                   ; el búfer: por dónde va
+F_LEN       equ 6                   ;  y cuánto hay (al leer) / lleno (al escribir)
+F_COL       equ 8                   ; la columna (para PRINT #)
+F_BUF       equ 16
+F_BUF_TAM   equ 256
+F_TAM       equ F_BUF + F_BUF_TAM
+v_arch      resb F_TAM * N_ARCH
             alignb 2
 b_disco     resb 512                ; LOAD: lo leído del disco
             alignb 2
@@ -145,5 +234,6 @@ b_ctrl      resb CTRL_TAM           ; la pila de control (crece hacia arriba)
             alignb 2
 b_pila      resb PILA_TAM
 pila_cima:
-            alignb 16
+            resw 2                  ; (un hueco: la pila no puede tocar el 0 de
+            alignb 16               ;  PROG_INI-1, delante de la primera línea)
 PROG_INI:

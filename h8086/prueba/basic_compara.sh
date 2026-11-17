@@ -56,14 +56,25 @@ while t and t[-1] in ('', 'Ok'): t.pop()
 print('\n'.join(l.rstrip() for l in t))
 PY
   gw="${f%.bas}.gw"
+  # lo que no tiene GW-BASIC (las palabras en español...): lo esperado, a mano
+  [ -f "${f%.bas}.esperado" ] && gw="${f%.bas}.esperado"
   if [ ! -f "$gw" ] && [ -x "$PCB" ]; then
     abs=$(realpath "$f"); (cd $T && timeout 30 $PCB -n "$abs" < /dev/null 2>&1) | \
       python3 -c "
 import sys
 t=sys.stdin.buffer.read().decode('latin-1').replace('\r','').split('\n')
-while t and t[-1].strip(' \x00\x1a\xff') in ('', 'Ok'): t.pop()
-print('\n'.join(l.rstrip() for l in t))" > "$gw"
+o=[]
+for l in t:                         # (hasta el primer «Ok»: detrás, PC-BASIC lee basura)
+    if l.strip(' \x00\x1a\xff').startswith('Ok'): break
+    o.append(l.rstrip())
+while o and not o[-1]: o.pop()
+print('\n'.join(o))" > "$gw"
   fi
+  # los mensajes de GW-BASIC, en el español de Hispa-BASIC (docs/8086/BASIC.md)
+  [ -f "$gw" ] && [ "${gw%.esperado}" = "$gw" ] && sed -e 's/^Overflow$/Desbordamiento/' -e 's/^Division by zero$/División por cero/' \
+    -e 's/^Syntax error in \([0-9]*\)$/Error de sintaxis en \1/' -e 's/^Out of DATA in \([0-9]*\)$/No quedan DATOS en \1/' \
+    -e 's/^Type mismatch in \([0-9]*\)$/Tipos que no casan en \1/' "$gw" > "$gw.es"
+  [ -f "$gw.es" ] && [ "${gw%.esperado}" = "$gw" ] && gw="$gw.es"
   if [ -f "$gw" ]; then
     if diff -q "$gw" $T/$n.mio > /dev/null; then echo "  OK   $n"; else echo "  FAIL $n"; diff "$gw" $T/$n.mio | head -${DIFF:-15}; fallos=1; fi
   else
