@@ -38,7 +38,7 @@
 #     completa, ampliados y en el pase; el que se ve una sola vez se queda en
 #     el último cuadro; la información; girar lo deja en un cuadro; y el que
 #     no cabe en la memoria (4 MB) se queda en el primero y lo dice.
-# Con MIRADOR_SOLO=ABCDEFG (las letras que se quieran) se pasan solo esas partes
+# Con MIRADOR_SOLO=ABCDEFGK (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con MIRADOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat, ImageMagick y Pillow (de Python).
@@ -49,7 +49,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/MIRADOR.HVP
-SOLO=${MIRADOR_SOLO:-NABCDEFG}
+SOLO=${MIRADOR_SOLO:-NABCDEFGK}
 PY=${MIRADOR_PY:-python3}
 $PY -c 'import PIL' 2>/dev/null || { ko "falta Pillow: ponga en MIRADOR_PY un Python que lo tenga"; exit 1; }
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/mirador.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "MIRADOR.HVP no se ensambla"; exit 1; }
@@ -675,6 +675,33 @@ chk $T/y1.ppm rgb 392 330 FF0000 "la animación que no cabe en 4 MB: su primer c
 chk $T/y2.ppm rgb 392 330 FF0000 "y ahí se queda"
 dice y3 "No cabe en la memoria: se ve el primer cuadro."
 muestra y1 mirador_anima_no_cabe
+fi
+
+if [[ $SOLO == *K* ]]; then
+echo "== Mirador K: el botón secundario (el menú contextual) =="
+disco
+mete BARRAS.BMP CASA.PPM PAISAJE.PNG
+reabre 'A:\PAISAJE.PNG'
+{ arranca
+  derecho 300 150; shot q1                       # sobre la imagen: sin retoques ni zona elegida
+  tecla d; sleep 2; aparca; shot q2              # Girar a la derecha
+  tecla ctrl-e; sleep 0.5                        # elegir toda la imagen
+  derecho 300 150; shot q3; tecla esc            # ya hay una zona que recortar
+  tecla shift-f10; sleep 0.6; shot q5            # con el teclado
+  tecla u; sleep 7                               # Miniaturas de la carpeta
+  derecho 112 150; shot q6                       # sobre la primera miniatura: la elige; su menú
+  tecla a; sleep 2.5; aparca; shot q7            # Abrir
+  derecho 500 90; sleep 0.5; shot q8             # en la barra de botones no hay menú
+  sal; } | run 200 -vga std
+chk $T/q1.ppm busca 300 150 420 560 0 8 "nterior" busca 300 150 420 560 0 8 "pliar" busca 300 150 420 560 0 8 "Girar a la " \
+  busca 300 150 420 560 7 8 "rtar a lo elegido" busca 300 150 420 560 7 8 "acer el " busca 300 150 420 560 0 8 "ormaci"
+pie q2 "PAISAJE.PNG    200 x 320"
+chk $T/q3.ppm busca 300 150 420 560 0 8 "rtar a lo elegido" busca 300 150 420 560 7 8 "acer el "
+chk $T/q5.ppm busca 40 90 200 500 0 8 "Girar a la "
+chk $T/q6.ppm busca 112 150 220 260 0 8 "brir" busca 112 150 220 260 0 8 "olver a la imagen"
+pie q7 "BARRAS.BMP"
+chk $T/q8.ppm nobusca 480 85 640 500 0 8 "Girar a la "
+muestra q1 mirador_contexto; muestra q6 mirador_contexto_mini
 fi
 
 [ -n "${MIRADOR_DEJA:-}" ] && echo "(las capturas quedan en $T)" || rm -rf $T

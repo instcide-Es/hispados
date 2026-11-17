@@ -144,6 +144,7 @@ O_INVERTIR  equ 149
 O_BRILLO    equ 150
 O_ACERCA    equ 151
 O_MINI      equ 152
+O_MINI_ABRE equ 153                 ; (del menú del botón secundario) abrir la miniatura elegida
 
 HVP_CABECERA "Mirador", entrada, 1
         db "................................"
@@ -306,6 +307,88 @@ mm_mini     db "  M&iniaturas de la carpeta        M", 0
         db "&Acerca de Mirador...", 0
         dw 0xFFFF
         db 0
+; ---- los menús del botón secundario (comun/contexto.inc) ----
+ctx_imagen:                         ; sobre la imagen
+        dw O_ANT
+        db "Imagen &anterior             RePág", 0
+        dw O_SIG
+        db "Imagen &siguiente            AvPág", 0
+        dw 0
+        db 0
+        dw O_AMPLIAR
+        db "A&mpliar                         +", 0
+        dw O_REDUCIR
+        db "&Reducir                         -", 0
+        dw O_AJUSTAR
+        db "A&justar a la ventana            *", 0
+        dw O_REAL
+        db "&Tamaño real (100 %)             1", 0
+        dw O_COMPLETA
+        db "Pantalla &completa      F11, Intro", 0
+        dw 0
+        db 0
+        dw O_GIRA_IZQ
+        db "Girar a la &izquierda            L", 0
+        dw O_GIRA_DER
+        db "Girar a la &derecha              R", 0
+        dw O_ELEGIR
+        db "&Elegir una zona                 E", 0
+        dw O_RECORTAR
+        db "Rec&ortar a lo elegido", 0
+        dw O_DESHACER
+        db "Des&hacer el último retoque Ctrl+Z", 0
+        dw 0
+        db 0
+        dw O_COPIAR
+        db "Copiar el nom&bre del archivo Ctrl+C", 0
+        dw O_GUARDAR
+        db "&Guardar como BMP...        Ctrl+G", 0
+        dw O_INFO
+        db "I&nformación de la imagen...     I", 0
+        dw 0
+        db 0
+        dw O_MINI
+        db "Miniat&uras de la carpeta        M", 0
+        dw 0xFFFF
+ctx_mini:                           ; sobre las miniaturas
+        dw O_MINI_ABRE
+        db "&Abrir                     Intro", 0
+        dw O_MINI
+        db "&Volver a la imagen          Esc", 0
+        dw 0xFFFF
+ctx_gris:                           ; las que pueden ir en gris, y cuándo
+        dw O_ANT
+        dd cg_una
+        dw O_SIG
+        dd cg_una
+        dw O_AMPLIAR
+        dd cg_sin_img
+        dw O_REDUCIR
+        dd cg_sin_img
+        dw O_AJUSTAR
+        dd cg_sin_img
+        dw O_REAL
+        dd cg_sin_img
+        dw O_GIRA_IZQ
+        dd cg_sin_img
+        dw O_GIRA_DER
+        dd cg_sin_img
+        dw O_ELEGIR
+        dd cg_sin_img
+        dw O_RECORTAR
+        dd cg_sin_zona
+        dw O_DESHACER
+        dd cg_deshacer
+        dw O_COPIAR
+        dd cg_sin_img
+        dw O_GUARDAR
+        dd cg_sin_img
+        dw O_INFO
+        dd cg_sin_img
+        dw O_MINI_ABRE
+        dd cg_sin_mini
+        dw 0
+
 MARCA       equ '*'                 ; la marca de «puesto» de una orden del menú (como en los emuladores)
 
 ; ---- la barra de botones (programas/comun/barra.inc) ----
@@ -716,6 +799,10 @@ mir_proc:
         je raton_mueve
         cmp eax, WM_LBUTTONUP
         je raton_suelta
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: al soltarlo, el
+        je raton_der                ; menú de la imagen (o de la miniatura)
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je .rueda
         cmp eax, WM_VSCROLL
@@ -932,6 +1019,12 @@ orden_haz:
         call mini_alterna
         jmp pon_marcas
 .nmini:
+        cmp ecx, O_MINI_ABRE        ; la miniatura elegida (como Intro)
+        jne .nabre
+        cmp byte [mini], 0
+        je .x
+        jmp mini_abre
+.nabre:
         cmp byte [mini], 0          ; con las miniaturas a la vista, lo demás no toca
         jne .x
         cmp ecx, O_COMPLETA
@@ -1288,6 +1381,75 @@ raton_suelta:
         mov byte [arrastra], 0
         HV ven_soltar
         jmp hecho
+
+; ---- el botón secundario ----
+; Se aprieta: en las miniaturas, elige la que hay debajo. [ctx_donde] apunta
+; dónde ha sido, para el menú: 1 la imagen, 2 una miniatura (0: nada, la
+; barra de botones o un hueco entre las miniaturas)
+raton_der:
+        mov byte [ctx_donde], 0
+        cmp byte [pantc], 0
+        jne .hoja
+        mov ebx, edx
+        sar ebx, 16
+        cmp ebx, TB_AL
+        jl hecho
+.hoja:
+        mov byte [ctx_donde], 1
+        cmp byte [mini], 0
+        je hecho
+        mov byte [ctx_donde], 0
+        call mini_clic
+        jc hecho
+        mov byte [ctx_donde], 2
+        jmp hecho
+; El menú: EDX=el punto de la pantalla, o -1 si se pide con el teclado
+; (Mayús+F10 o la tecla de menú)
+menu_ctx:
+        cmp edx, -1
+        jne .abre
+        mov byte [ctx_donde], 1
+        cmp byte [mini], 0
+        je .abre
+        mov byte [ctx_donde], 2
+.abre:
+        mov esi, ctx_imagen
+        cmp byte [ctx_donde], 1
+        je .m
+        mov esi, ctx_mini
+        cmp byte [ctx_donde], 2
+        jne hecho
+.m:
+        mov edi, ctx_gris
+        mov eax, -1
+        call ctx_abre
+        jmp hecho
+
+; (ctx_gris) lo que ahora no se puede hacer: CF=1
+cg_sin_zona:                        ; no hay ninguna zona elegida
+        cmp byte [el_hay], 0
+        je cg_no
+        jmp short cg_sin_img
+cg_deshacer:                        ; no hay ningún retoque que deshacer
+        cmp byte [des_hay], 0
+        je cg_no
+cg_sin_img:                         ; no hay ninguna imagen a la vista
+        cmp byte [hay_img], 0
+        je cg_no
+cg_si:
+        clc
+        ret
+cg_no:
+        stc
+        ret
+cg_una:                             ; en la carpeta no hay otra imagen
+        cmp dword [lst_n], 1
+        jbe cg_no
+        jmp cg_si
+cg_sin_mini:                        ; la carpeta no tiene imágenes
+        cmp dword [lst_n], 0
+        je cg_no
+        jmp cg_si
 raton_mueve:
         cmp byte [arrastra], 0
         je .barra
@@ -1803,6 +1965,7 @@ pinta_pie:
         ret
 
 %include "barra.inc"
+%include "contexto.inc"
 %include "hvplib.inc"
 %include "desinfla_t.inc"
 %ifdef MI_CON_JPEG
@@ -1832,6 +1995,8 @@ pinta_pie:
         alignb 4
 param       resd 1
 ven         resd 1
+ctx_donde   resb 1                  ; dónde se apretó el botón secundario (raton_der)
+            alignb 4
 puente      resd 1
 barra_v     resd 1
 barra_h     resd 1
