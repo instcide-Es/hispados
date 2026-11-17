@@ -204,7 +204,7 @@ EOF
     clic 658 14; sleep 1
     # ---- Configuración > Sonido ----
     doble 102 129; sleep 1.5
-    tecla right right right right ret; sleep 2.5
+    tecla right ret; sleep 2.5
     clic 196 264; sleep 0.5
     clic 344 207; sleep 2
     clic 568 207; sleep 2

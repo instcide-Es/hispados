@@ -211,7 +211,7 @@ RX=400; RY=300
   tecla esc; sleep 1.5
   # Configuración > Sonido
   doble 102 129; sleep 1.5
-  tecla right right right right ret; sleep 2.5
+  tecla right ret; sleep 2.5
   clic 196 264; sleep 1.5
   aparca
   shot c1

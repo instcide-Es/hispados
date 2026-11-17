@@ -81,7 +81,7 @@ abrir_red() {
   send 'VENTANAS' 6
   doble 102 129; sleep 1          # abre el grupo Principal
   aparca
-  tecla right right right right ret; sleep 2   # Configuración (el último)
+  tecla right ret; sleep 2   # Configuración (la segunda de «Principal»)
   aparca
   clic 196 366; sleep 1           # el apartado «Red»
   aparca
