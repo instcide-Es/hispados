@@ -139,6 +139,9 @@ ico_abre:
         jbe .p1
         mov ecx, [ico_mejor_n]
 .p1:
+        mov [im_dat], esi           ; (png.inc pide sus trozos con mi_trozo: el
+        mov [im_tam], ecx           ; «archivo» pasa a ser el PNG de dentro)
+        mov [im_cab], ecx
         call png_detecta
         jc .roto
         jmp png_abre

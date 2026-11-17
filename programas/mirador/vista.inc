@@ -578,6 +578,8 @@ pinta_imagen:
         mov ecx, [ma_an]
         mov edx, [ma_al]
         je .copia
+        cmp dword [an_n], 2         ; (una animación reducida: sin suavizar, que hay que
+        jae .amplia                 ; hacerla en cada cuadro)
         cmp byte [hay_vista], 0     ; reducida: la vista, hecha a esta ampliación
         je .hazla
         cmp eax, [vista_zoom]
@@ -751,6 +753,7 @@ t_e_ampliar db "No hay memoria para ampliar.", 0
 
 transforma:
         pushad
+        call an_para                ; (una animación se queda en el cuadro que se ve)
         mov [tr_orden], ecx
         cmp ecx, O_VOLT_H
         jae .voltea

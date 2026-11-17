@@ -1,18 +1,50 @@
 ; =============================================================================
-;  MIRADOR.HVP - el formato GIF (87a y 89a)
+;  MIRADOR.HVP - el formato GIF (87a y 89a), con sus animaciones
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  La paleta global o la propia de la imagen, el color transparente (de la
 ;  extensión de control gráfico), las imágenes entrelazadas y las que no
 ;  ocupan toda la «pantalla lógica» (lo de alrededor queda transparente, o
-;  del color de fondo si no hay transparente). De un GIF animado se enseña
-;  el primer cuadro.
+;  del color de fondo si no hay transparente).
 ;
 ;  Los puntos van comprimidos con LZW en trozos de hasta 255 octetos: se
 ;  descomprime todo de una vez a la memoria de trabajo (un octeto por punto:
 ;  entrelazada, las filas no vienen en orden). El diccionario (4.096 códigos:
 ;  de cada uno, el código del que viene y su último color) está en GIF_BSS.
+;
+;  Como imagen (abre, prepara, fila) un GIF es su primer cuadro. Si tiene más
+;  ([im_cuadros] > 1; [im_dura] dice cuántos milisegundos dura una vuelta e
+;  [im_bucle] cuántas veces se repite: -1 no lo dice (una vez), 0 sin fin),
+;  los cuadros de la animación se piden después, uno detrás de otro:
+;    gif_an_mem      -> EAX=octetos de memoria de trabajo que hacen falta
+;    gif_an_empieza  EDI=esa memoria: se pone delante del primer cuadro
+;    gif_an_cuadro   compone el cuadro siguiente -> EAX=los milisegundos que
+;                    se queda a la vista; CF=1 si no hay más (o el que viene
+;                    está cortado o dañado: la animación acaba en el anterior)
+;    gif_an_fila     EAX=fila EDI=destino: una fila del cuadro compuesto, en
+;                    rojo, verde y azul, con lo transparente mezclado con el
+;                    fondo (como mi_fila)
+;  Pueden cambiar todos los registros. Hace falta que el archivo siga en
+;  memoria y que entre tanto no se abra otro GIF.
+;
+;  Cómo se compone. Hay un «lienzo» del tamaño de la pantalla lógica, con
+;  cuatro octetos por punto (rojo, verde, azul y opacidad). Empieza
+;  transparente si el primer cuadro tiene color transparente y, si no, del
+;  color de fondo (como se ve la imagen sola). Cada cuadro se pinta encima,
+;  en su rectángulo, saltando sus puntos transparentes. Antes de pintar uno
+;  se hace con el rectángulo del anterior lo que este pidió («disposal»):
+;    0 y 1  nada: se queda como está
+;    2      se borra: transparente si aquel cuadro tenía color transparente;
+;           si no, del color de fondo (con la paleta de aquel cuadro)
+;    3      vuelve a estar como antes de pintarlo (se guarda una copia del
+;           lienzo; solo se pide su memoria si algún cuadro lo usa)
+;  Un cuadro que se sale de la pantalla lógica se recorta. El tiempo de cada
+;  cuadro va en centésimas; menos de dos centésimas (o ninguna) son diez,
+;  como hacen los navegadores. Las repeticiones, de la extensión
+;  «NETSCAPE2.0».
 ; =============================================================================
+GIF_AN_MAX  equ 4096                ; cuadros de una animación, como mucho
+
 %macro GIF_BSS 0
             alignb 4
 gif_p       resd 1                  ; por dónde se va leyendo
@@ -40,6 +72,33 @@ gif_nbits   resd 1
 gif_pref    resw 4096
 gif_suf     resb 4096
 gif_pila    resb 4100
+            alignb 4
+gif_dest    resd 1                  ; dónde se dejan los puntos (un octeto cada uno)
+gif_bg      resd 1                  ; el índice del color de fondo
+gif_gpal    resd 1                  ; la paleta global (0: no hay) y sus colores
+gif_gncol   resd 1
+gif_lpal    resd 1                  ; la paleta del cuadro (0: no tiene) y sus colores
+gif_lncol   resd 1
+gif_lbits   resd 1
+gif_transp  resd 1                  ; del cuadro: su índice transparente (-1: no tiene),
+gif_cdisp   resd 1                  ; qué hacer con él después («disposal»)
+gif_cret    resd 1                  ; y sus centésimas (-1: no lo dice)
+gif_datos   resd 1                  ; dónde empiezan sus datos
+gif_bloq0   resd 1                  ; dónde empiezan los bloques (tras la cabecera y la paleta global)
+gif_bucle   resd 1
+gif_hay_d3  resd 1                  ; algún cuadro pide «como antes» (disposal 3)
+gif_an_p    resd 1                  ; la animación: dónde empieza el cuadro siguiente
+gif_an_k    resd 1                  ; cuántos van
+gif_an_idx  resd 1                  ; los índices del cuadro
+gif_an_lienzo resd 1                ; el lienzo
+gif_an_antes resd 1                 ; su copia (0: no hace falta)
+gif_an_disp resd 1                  ; lo que pidió el cuadro anterior, y su rectángulo
+gif_an_dx   resd 1
+gif_an_dy   resd 1
+gif_an_dw   resd 1
+gif_an_dh   resd 1
+gif_an_dfondo resd 1                ; con qué se borra
+gif_cpal    resd 256                ; la paleta del cuadro: rojo, verde, azul, opacidad
 %endmacro
 
 gif_paso    dd 8, 8, 4, 2
@@ -99,6 +158,134 @@ gif_paleta:
         jnz .c
         ret
 
+; (interna) EAX=centésimas de un cuadro (-1: no lo dice) -> EAX=milisegundos
+gif_ms:
+        cmp eax, 2
+        jge .m
+        mov eax, 10
+.m:
+        imul eax, 10
+        ret
+
+; (interna) lee los bloques desde EDX hasta la imagen siguiente: las
+; extensiones (el control gráfico: transparente, «disposal» y tiempo; y las
+; repeticiones de NETSCAPE2.0) y la cabecera de la imagen. Deja el cuadro en
+; gif_fx, gif_fy, gif_fw, gif_fh, gif_entre, gif_lpal, gif_lncol, gif_min,
+; gif_transp, gif_cdisp, gif_cret y gif_datos (y gif_p). CF=1 si no hay más
+; imágenes o el archivo se acaba o está mal
+gif_bloques:
+        mov dword [gif_transp], -1
+        mov dword [gif_cdisp], 0
+        mov dword [gif_cret], -1
+        mov dword [gif_lpal], 0
+.b:
+        cmp edx, [gif_fin]
+        jae .no
+        mov al, [edx]
+        inc edx
+        cmp al, 0x21
+        je .ext
+        cmp al, 0x2C
+        je .imagen
+        jmp .no                     ; (el final, o algo que no es de un GIF)
+.ext:
+        lea eax, [edx+7]
+        cmp eax, [gif_fin]
+        ja .no
+        cmp byte [edx], 0xF9        ; el control gráfico
+        jne .e1
+        cmp byte [edx+1], 4
+        jne .e2
+        mov dword [gif_transp], -1
+        movzx eax, byte [edx+2]
+        test al, 1
+        jz .e0
+        movzx ecx, byte [edx+5]
+        mov [gif_transp], ecx
+.e0:
+        shr eax, 2
+        and eax, 7
+        mov [gif_cdisp], eax
+        movzx eax, word [edx+3]
+        mov [gif_cret], eax
+        jmp .e2
+.e1:
+        cmp byte [edx], 0xFF        ; de aplicación: «NETSCAPE2.0», 3, 1 y las repeticiones
+        jne .e2
+        cmp byte [edx+1], 11
+        jne .e2
+        lea eax, [edx+17]
+        cmp eax, [gif_fin]
+        ja .e2
+        cmp dword [edx+2], 'NETS'
+        jne .e2
+        cmp dword [edx+6], 'CAPE'
+        jne .e2
+        cmp dword [edx+9], 'E2.0'
+        jne .e2
+        cmp byte [edx+13], 3
+        jb .e2
+        cmp byte [edx+14], 1
+        jne .e2
+        movzx eax, word [edx+15]
+        mov [gif_bucle], eax
+.e2:
+        inc edx
+        call gif_salta
+        jc .no
+        jmp .b
+.imagen:
+        lea eax, [edx+10]
+        cmp eax, [gif_fin]
+        ja .no
+        movzx eax, word [edx]
+        mov [gif_fx], eax
+        movzx eax, word [edx+2]
+        mov [gif_fy], eax
+        movzx eax, word [edx+4]
+        mov [gif_fw], eax
+        test eax, eax
+        jz .no
+        movzx eax, word [edx+6]
+        mov [gif_fh], eax
+        test eax, eax
+        jz .no
+        movzx ecx, byte [edx+8]
+        add edx, 9
+        mov eax, ecx
+        shr eax, 6
+        and eax, 1
+        mov [gif_entre], eax
+        test cl, 0x80
+        jz .i1
+        and ecx, 7                  ; con su propia paleta
+        inc ecx
+        mov [gif_lbits], ecx
+        mov eax, 1
+        shl eax, cl
+        mov [gif_lncol], eax
+        mov [gif_lpal], edx
+        lea eax, [eax+eax*2]
+        add edx, eax
+        cmp edx, [gif_fin]
+        jae .no
+.i1:
+        cmp edx, [gif_fin]
+        jae .no
+        movzx eax, byte [edx]
+        inc edx
+        mov [gif_min], eax
+        dec eax
+        cmp eax, 10                 ; de 1 a 11 bits
+        ja .no
+        mov [gif_p], edx
+        mov [gif_datos], edx
+        clc
+        ret
+.no:
+        stc
+        ret
+
 gif_abre:
         lea eax, [esi+ecx]
         mov [gif_fin], eax
@@ -108,10 +295,15 @@ gif_abre:
         mov [im_al], eax
         movzx eax, byte [esi+11]
         mov [gif_relleno], eax
+        mov [gif_bg], eax
         mov dword [im_bits], 8
         mov dword [im_clase], IC_PALETA
-        ; sin paleta ninguna (los hay): 256 grises
         xor eax, eax
+        mov [gif_gpal], eax
+        mov [gif_gncol], eax
+        mov [gif_hay_d3], eax
+        mov dword [gif_bucle], -1
+        ; sin paleta ninguna (los hay): 256 grises
 .g:
         mov [im_pal+eax*4], al
         mov [im_pal+eax*4+1], al
@@ -134,86 +326,23 @@ gif_abre:
         add edx, eax
         cmp edx, [gif_fin]
         ja .roto
+        mov [gif_gpal], ebx
+        mov [gif_gncol], ecx
         push edx
         call gif_paleta
         pop edx
 .bloques:
-        mov ebp, -1                 ; EBP=el índice transparente
-.b:
-        cmp edx, [gif_fin]
-        jae .roto
-        mov al, [edx]
-        inc edx
-        cmp al, 0x21
-        je .ext
-        cmp al, 0x2C
-        je .imagen
-        jmp .roto                   ; (ni una imagen antes del final)
-.ext:
-        lea eax, [edx+7]
-        cmp eax, [gif_fin]
-        ja .roto
-        cmp byte [edx], 0xF9        ; el control gráfico: el color transparente
-        jne .e1
-        cmp byte [edx+1], 4
-        jne .e1
-        mov ebp, -1
-        test byte [edx+2], 1
-        jz .e1
-        movzx ebp, byte [edx+5]
-.e1:
-        inc edx
-        call gif_salta
+        mov [gif_bloq0], edx
+        call gif_bloques            ; el primer cuadro
         jc .roto
-        jmp .b
-.imagen:
-        lea eax, [edx+10]
-        cmp eax, [gif_fin]
-        ja .roto
-        movzx eax, word [edx]
-        mov [gif_fx], eax
-        movzx eax, word [edx+2]
-        mov [gif_fy], eax
-        movzx eax, word [edx+4]
-        mov [gif_fw], eax
-        test eax, eax
-        jz .roto
-        movzx eax, word [edx+6]
-        mov [gif_fh], eax
-        test eax, eax
-        jz .roto
-        movzx ecx, byte [edx+8]
-        add edx, 9
-        mov eax, ecx
-        shr eax, 6
-        and eax, 1
-        mov [gif_entre], eax
-        test cl, 0x80
-        jz .i1
-        and ecx, 7                  ; con su propia paleta
-        inc ecx
-        mov [im_bits], ecx
-        mov eax, 1
-        shl eax, cl
-        mov ecx, eax
-        lea eax, [eax+eax*2]
-        mov ebx, edx
-        add edx, eax
-        cmp edx, [gif_fin]
-        jae .roto
-        push edx
+        cmp dword [gif_lpal], 0
+        je .i1
+        mov eax, [gif_lbits]
+        mov [im_bits], eax
+        mov ebx, [gif_lpal]
+        mov ecx, [gif_lncol]
         call gif_paleta
-        pop edx
 .i1:
-        cmp edx, [gif_fin]
-        jae .roto
-        movzx eax, byte [edx]
-        inc edx
-        mov [gif_min], eax
-        dec eax
-        cmp eax, 10                 ; de 1 a 11 bits
-        ja .roto
-        mov [gif_p], edx
         ; una pantalla lógica sin medidas: las del cuadro
         cmp dword [im_an], 0
         je .sin
@@ -229,6 +358,7 @@ gif_abre:
 .con:
         call mi_medidas_ok
         jc .grande
+        mov ebp, [gif_transp]
         test ebp, ebp
         js .i2
         mov byte [im_pal+ebp*4+3], 0
@@ -238,6 +368,33 @@ gif_abre:
         mov eax, [im_an]
         imul eax, [im_al]
         mov [im_alm], eax
+        ; ---- ¿hay más cuadros? Se cuentan, con sus tiempos ----
+        mov dword [im_cuadros], 1
+        mov eax, [gif_cret]
+        call gif_ms
+        mov [im_dura], eax
+.cuenta:
+        cmp dword [gif_cdisp], 3
+        jne .c1
+        mov dword [gif_hay_d3], 1
+.c1:
+        cmp dword [im_cuadros], GIF_AN_MAX
+        jae .contado
+        mov edx, [gif_datos]
+        call gif_salta
+        jc .contado
+        call gif_bloques
+        jc .contado
+        inc dword [im_cuadros]
+        mov eax, [gif_cret]
+        call gif_ms
+        add [im_dura], eax
+        jmp .cuenta
+.contado:
+        mov eax, [gif_bucle]
+        mov [im_bucle], eax
+        mov edx, [gif_bloq0]        ; y otra vez en el primero (que ya se sabe que está)
+        call gif_bloques
         xor eax, eax
         ret
 .roto:
@@ -296,7 +453,7 @@ gif_pon:
         jae .p1
         imul ecx, [im_an]
         add ecx, ebx
-        add ecx, [im_almp]
+        add ecx, [gif_dest]
         mov [ecx], al
 .p1:
         mov ebx, [gif_x]
@@ -341,9 +498,21 @@ gif_pon:
 
 gif_prepara:
         mov edi, [im_almp]          ; lo que no tape el cuadro
+        mov [gif_dest], edi
         mov ecx, [im_alm]
         mov al, [gif_relleno]
         rep stosb
+        call gif_descomprime
+        cmp dword [gif_hecha], 0    ; ¿se ha quedado a medias?
+        jne .bien
+        mov dword [im_aviso], 1
+.bien:
+        xor eax, eax
+        ret
+
+; (interna) descomprime los puntos del cuadro (desde [gif_p]) a [gif_dest];
+; [gif_hecha] queda a 1 si han salido todos
+gif_descomprime:
         xor eax, eax
         mov [gif_blq], eax
         mov [gif_se_acabo], eax
@@ -452,11 +621,6 @@ gif_prepara:
 .roto:
 .corto:
 .fin:
-        cmp dword [gif_hecha], 0    ; ¿se ha quedado a medias?
-        jne .bien
-        mov dword [im_aviso], 1
-.bien:
-        xor eax, eax
         ret
 ; (interna) el diccionario, vacío
 .borra:
@@ -475,5 +639,280 @@ gif_fila:
         add esi, eax
         mov ecx, [im_an]
         rep movsb
+        clc
+        ret
+
+; =============================================================================
+;  La animación
+; =============================================================================
+gif_an_mem:
+        mov eax, [im_an]
+        imul eax, [im_al]
+        mov edx, eax
+        lea eax, [eax+eax*4]        ; los índices y el lienzo
+        cmp dword [gif_hay_d3], 0
+        je .x
+        lea eax, [eax+edx*4]        ; y su copia
+.x:
+        add eax, 64
+        ret
+
+gif_an_empieza:
+        mov [gif_an_idx], edi
+        mov eax, [im_an]
+        imul eax, [im_al]
+        lea edi, [edi+eax+3]
+        and edi, ~3
+        mov [gif_an_lienzo], edi
+        lea edi, [edi+eax*4]
+        mov dword [gif_an_antes], 0
+        cmp dword [gif_hay_d3], 0
+        je .e1
+        mov [gif_an_antes], edi
+.e1:
+        mov eax, [gif_bloq0]
+        mov [gif_an_p], eax
+        xor eax, eax
+        mov [gif_an_k], eax
+        mov [gif_an_disp], eax
+        ret
+
+gif_an_cuadro:
+        mov edx, [gif_an_p]
+        call gif_bloques
+        jc .no
+        mov eax, [gif_an_idx]       ; sus puntos; si no salen todos, no vale
+        mov [gif_dest], eax
+        call gif_descomprime
+        cmp dword [gif_hecha], 0
+        je .no
+        ; ---- su paleta: la suya, la global o grises ----
+        mov edi, gif_cpal
+        mov eax, 0xFF000000
+        mov ecx, 256
+        rep stosd
+        mov esi, [gif_lpal]
+        mov ecx, [gif_lncol]
+        test esi, esi
+        jnz .pal
+        mov esi, [gif_gpal]
+        mov ecx, [gif_gncol]
+        test esi, esi
+        jnz .pal
+        xor eax, eax
+.gris:
+        mov [gif_cpal+eax*4], al
+        mov [gif_cpal+eax*4+1], al
+        mov [gif_cpal+eax*4+2], al
+        inc eax
+        cmp eax, 256
+        jb .gris
+        jmp .pal9
+.pal:
+        xor eax, eax
+.pal1:
+        mov dl, [esi]
+        mov [gif_cpal+eax*4], dl
+        mov dl, [esi+1]
+        mov [gif_cpal+eax*4+1], dl
+        mov dl, [esi+2]
+        mov [gif_cpal+eax*4+2], dl
+        add esi, 3
+        inc eax
+        dec ecx
+        jnz .pal1
+.pal9:
+        ; con qué se borra, si hay que borrar: transparente si este cuadro
+        ; tiene color transparente; si no, el color de fondo
+        xor ebx, ebx
+        cmp dword [gif_transp], 0
+        jge .f1
+        mov eax, [gif_bg]
+        mov ebx, [gif_cpal+eax*4]
+.f1:
+        cmp dword [gif_an_k], 0
+        jne .antes
+        mov edi, [gif_an_lienzo]    ; el primero: el lienzo, de ese color
+        mov ecx, [im_an]
+        imul ecx, [im_al]
+        mov eax, ebx
+        rep stosd
+        jmp .rect
+.antes:
+        ; ---- lo que pidió el cuadro anterior, en su rectángulo ----
+        cmp dword [gif_an_disp], 2
+        jne .a3
+        mov eax, [gif_an_dfondo]
+        call gif_an_llena
+        jmp .rect
+.a3:
+        cmp dword [gif_an_disp], 3
+        jne .rect
+        mov esi, [gif_an_antes]
+        mov edi, [gif_an_lienzo]
+        call gif_an_copia
+.rect:
+        ; ---- el rectángulo de este, recortado a la pantalla lógica ----
+        mov eax, [gif_fx]
+        cmp eax, [im_an]
+        jbe .r1
+        mov eax, [im_an]
+.r1:
+        mov [gif_an_dx], eax
+        mov ecx, [im_an]
+        sub ecx, eax
+        cmp ecx, [gif_fw]
+        jbe .r2
+        mov ecx, [gif_fw]
+.r2:
+        mov [gif_an_dw], ecx
+        mov eax, [gif_fy]
+        cmp eax, [im_al]
+        jbe .r3
+        mov eax, [im_al]
+.r3:
+        mov [gif_an_dy], eax
+        mov ecx, [im_al]
+        sub ecx, eax
+        cmp ecx, [gif_fh]
+        jbe .r4
+        mov ecx, [gif_fh]
+.r4:
+        mov [gif_an_dh], ecx
+        mov [gif_an_dfondo], ebx
+        mov eax, [gif_cdisp]
+        mov [gif_an_disp], eax
+        cmp eax, 3                  ; «como antes»: se guarda cómo está
+        jne .pinta
+        mov esi, [gif_an_lienzo]
+        mov edi, [gif_an_antes]
+        test edi, edi
+        jnz .r5
+        mov dword [gif_an_disp], 1  ; (no puede pasar: se pidió su memoria si alguno lo usa)
+        jmp .pinta
+.r5:
+        call gif_an_copia
+.pinta:
+        ; ---- sus puntos, encima (menos los transparentes) ----
+        mov ebp, [gif_an_dh]
+        test ebp, ebp
+        jz .p9
+        cmp dword [gif_an_dw], 0
+        je .p9
+        mov eax, [gif_an_dy]
+        imul eax, [im_an]
+        add eax, [gif_an_dx]
+        mov esi, [gif_an_idx]
+        add esi, eax
+        mov edi, [gif_an_lienzo]
+        lea edi, [edi+eax*4]
+        mov ebx, [gif_transp]
+.p1:
+        push esi
+        push edi
+        mov ecx, [gif_an_dw]
+.p2:
+        movzx eax, byte [esi]
+        inc esi
+        cmp eax, ebx
+        je .p3
+        mov eax, [gif_cpal+eax*4]
+        mov [edi], eax
+.p3:
+        add edi, 4
+        dec ecx
+        jnz .p2
+        pop edi
+        pop esi
+        add esi, [im_an]
+        mov eax, [im_an]
+        lea edi, [edi+eax*4]
+        dec ebp
+        jnz .p1
+.p9:
+        ; ---- y a por el siguiente ----
+        mov edx, [gif_datos]
+        call gif_salta
+        jnc .s1
+        mov edx, [gif_fin]
+.s1:
+        mov [gif_an_p], edx
+        inc dword [gif_an_k]
+        mov eax, [gif_cret]
+        call gif_ms
+        clc
+        ret
+.no:
+        mov eax, [gif_fin]          ; (y ya no hay más)
+        mov [gif_an_p], eax
+        stc
+        ret
+
+; (internas) el rectángulo del cuadro anterior: lleno del color EAX, o
+; copiado del lienzo ESI al lienzo EDI
+gif_an_llena:
+        mov edx, [gif_an_dh]
+        test edx, edx
+        jz .x
+        cmp dword [gif_an_dw], 0
+        je .x
+        push eax
+        mov eax, [gif_an_dy]
+        imul eax, [im_an]
+        add eax, [gif_an_dx]
+        mov edi, [gif_an_lienzo]
+        lea edi, [edi+eax*4]
+        pop eax
+.f:
+        push edi
+        mov ecx, [gif_an_dw]
+        rep stosd
+        pop edi
+        mov ecx, [im_an]
+        lea edi, [edi+ecx*4]
+        dec edx
+        jnz .f
+.x:
+        ret
+gif_an_copia:
+        mov edx, [gif_an_dh]
+        test edx, edx
+        jz .x
+        cmp dword [gif_an_dw], 0
+        je .x
+        mov eax, [gif_an_dy]
+        imul eax, [im_an]
+        add eax, [gif_an_dx]
+        lea esi, [esi+eax*4]
+        lea edi, [edi+eax*4]
+        mov eax, [im_an]
+        shl eax, 2
+.f:
+        push esi
+        push edi
+        mov ecx, [gif_an_dw]
+        rep movsd
+        pop edi
+        pop esi
+        add esi, eax
+        add edi, eax
+        dec edx
+        jnz .f
+.x:
+        ret
+
+gif_an_fila:
+        mov [mi_y], eax
+        imul eax, [im_an]
+        mov esi, [gif_an_lienzo]
+        lea esi, [esi+eax*4]
+        xor ebx, ebx
+        mov ecx, [im_an]
+.p:
+        mov eax, [esi+ebx*4]
+        call mi_pon
+        inc ebx
+        cmp ebx, ecx
+        jb .p
         clc
         ret

@@ -10,12 +10,19 @@
 ;  Las miniaturas se hacen de una en una, con un temporizador: entre una y
 ;  otra se atienden el teclado y el ratón, así que la rejilla se va llenando
 ;  sin dejar la ventana parada (primero las que se ven). Cada una se lee como
-;  cualquier imagen (el núcleo de formatos), pero reducida al vuelo a su
-;  casilla de 96x80 (reduce.inc; un JPEG, antes, por su propio descodificador)
-;  y pasada a la paleta. Se guardan en un bloque (7.680 octetos cada una)
-;  mientras no se cambie de carpeta: volver a la rejilla es inmediato. Si no
-;  hay memoria para todas, las que no caben se quedan con su recuadro vacío;
-;  y si al abrir una imagen falta memoria, las miniaturas se sueltan.
+;  cualquier imagen (el núcleo de formatos; un PNG, un BMP o un TGA grande,
+;  del disco y sin cargarlo entero), pero reducida al vuelo a su casilla de
+;  96x80 (reduce.inc; un JPEG, antes, por su propio descodificador) y pasada
+;  a la paleta. La foto de un móvil se pone derecha (la orientación de su
+;  EXIF), como al abrirla: se hace tumbada y se gira al guardarla.
+;
+;  Se guardan en memoria mientras no se cambie de carpeta (volver a la
+;  rejilla es inmediato), cada una con lo que ocupa de verdad (ancho x alto:
+;  una apaisada de 96x54, 5 K; un icono de 16x16, 256 octetos), seguidas, en
+;  bloques de 64 K que se piden según hacen falta: no se aparta de entrada
+;  sitio para todas las de la carpeta. Si la memoria se acaba, las que no
+;  caben se quedan con su recuadro vacío; y si al abrir una imagen falta
+;  memoria, las miniaturas se sueltan.
 ; =============================================================================
 MINI_AN     equ 96                  ; la miniatura, como mucho
 MINI_AL     equ 80
@@ -25,13 +32,20 @@ CEL_AL      equ 104
 ME_PENDIENTE equ 0                  ; estado de cada miniatura
 ME_HECHA    equ 1
 ME_NO       equ 2                   ; no se puede ver
+ME_SIN_SITIO equ 3                  ; no hay memoria para guardarla
 ID_RELOJ_MINI equ 2
+MINI_TROZO  equ 65536               ; los bloques en los que se guardan
+MINI_TROZOS equ 128                 ; (para mil miniaturas de las mayores)
 
 %macro MINI_BSS 0
             alignb 4
-mini_p      resd 1                  ; el bloque de las miniaturas
-mini_h      resd 1
-mini_cap    resd 1                  ; cuántas caben en él
+mini_tz_n   resd 1                  ; bloques pedidos
+mini_tz_libre resd 1                ; por dónde va el último
+mini_tmp    resd 1                  ; la miniatura como sale del archivo (sin girar)
+mini_pan    resd 1                  ; sus medidas
+mini_pal    resd 1
+mini_rot    resd 1                  ; cómo hay que ponerla: cuartos de vuelta a la derecha
+mini_volt   resd 1                  ; y, después, volteada o no
 mini_sel    resd 1                  ; la elegida
 mini_fila0  resd 1                  ; la primera fila de casillas que se ve
 mini_cols   resd 1
@@ -42,10 +56,7 @@ mini_tan    resd 1
 mini_tal    resd 1
 mini_fila   resd 1
 mini_y      resd 1
-mini_tam    resd 1
-mini_ah     resd 1                  ; el archivo y la memoria de trabajo
-mini_ap     resd 1
-mini_th     resd 1
+mini_th     resd 1                  ; la memoria de trabajo
 mini        resb 1                  ; 1: se ven las miniaturas
 mini_hay    resb 1                  ; hay bloque
             alignb 4
@@ -53,6 +64,10 @@ mini_ruta   resb 132
 mini_est    resb LST_MAX
 mini_ta     resb LST_MAX            ; ancho y alto de cada una
 mini_tb     resb LST_MAX
+            alignb 4
+mini_ptr    resd LST_MAX            ; dónde está cada una
+mini_tz_p   resd MINI_TROZOS        ; los bloques y sus mangos
+mini_tz_h   resd MINI_TROZOS
 %endmacro
 
 t_mini_pie  db "Miniaturas: Intro abre la elegida; Esc vuelve", 0
@@ -77,26 +92,10 @@ mini_alterna:
         mov [mini_sel], eax
         cmp byte [mini_hay], 0
         jne .listo
-        ; el bloque: para todas; si no cabe, para las que quepan
-        mov edi, mini_est
+        mov edi, mini_est           ; otra carpeta: todas por hacer
         mov ecx, LST_MAX
         xor al, al
         rep stosb
-        mov ebx, [lst_n]
-.pide:
-        mov ecx, ebx
-        imul ecx, MINI_HUECO
-        add ecx, 64
-        HV mem_bloque
-        jnc .cabe
-        shr ebx, 1
-        jnz .pide
-        mov dword [mini_cap], 0
-        jmp .listo
-.cabe:
-        mov [mini_p], eax
-        mov [mini_h], edx
-        mov [mini_cap], ebx
         mov byte [mini_hay], 1
 .listo:
         mov ebp, [barra_v]          ; la barra, de fila en fila
@@ -134,15 +133,58 @@ mini_sal:
 
 ; suelta las miniaturas (otra carpeta, o hace falta la memoria)
 mini_suelta:
-        cmp byte [mini_hay], 0
-        je .x
         pushad
-        mov edx, [mini_h]
+        mov ebx, [mini_tz_n]
+.s:
+        test ebx, ebx
+        jz .s9
+        dec ebx
+        mov edx, [mini_tz_h+ebx*4]
         HV mem_bloque_soltar
-        popad
+        jmp .s
+.s9:
+        mov dword [mini_tz_n], 0
         mov byte [mini_hay], 0
-.x:
-        mov dword [mini_cap], 0
+        popad
+        ret
+
+; (interna) ECX=octetos (hasta MINI_TROZO) -> EAX=dónde guardarlos, a
+; continuación de lo que ya hay; CF=1 si no hay memoria
+mini_pide:
+        push ebx
+        push edx
+        mov ebx, [mini_tz_n]
+        test ebx, ebx
+        jz .nuevo
+        mov eax, [mini_tz_libre]
+        add eax, ecx
+        cmp eax, MINI_TROZO
+        jbe .cabe
+.nuevo:
+        cmp ebx, MINI_TROZOS
+        jae .no
+        push ecx
+        mov ecx, MINI_TROZO + 16
+        HV mem_bloque
+        pop ecx
+        jc .no
+        mov [mini_tz_p+ebx*4], eax
+        mov [mini_tz_h+ebx*4], edx
+        inc ebx
+        mov [mini_tz_n], ebx
+        mov dword [mini_tz_libre], 0
+.cabe:
+        mov eax, [mini_tz_p+ebx*4-4]
+        add eax, [mini_tz_libre]
+        add [mini_tz_libre], ecx
+        pop edx
+        pop ebx
+        clc
+        ret
+.no:
+        pop edx
+        pop ebx
+        stc
         ret
 
 ; la rejilla: columnas, filas que se ven y la barra (la llama «dispone»)
@@ -424,9 +466,7 @@ mini_celda:
         sub esi, edx
         shr esi, 1
         lea ebx, [ebx+esi+4]
-        mov esi, ebp
-        imul esi, MINI_HUECO
-        add esi, [mini_p]
+        mov esi, [mini_ptr+ebp*4]
         HV dc_copiar
         pop ebx
         pop eax
@@ -531,8 +571,6 @@ mini_paso:
 .b1:
         cmp ebx, ecx
         jae .b_no
-        cmp ebx, [mini_cap]
-        jae .b_no
         cmp byte [mini_est+ebx], ME_PENDIENTE
         je .b_si
         inc ebx
@@ -557,63 +595,11 @@ mini_haz:
         add esi, lst
         call hvl_cad
         mov byte [edi], 0
-        ; ---- el archivo, entero ----
+        ; ---- el archivo: abierto y reconocido como el de una imagen cualquiera ----
         mov esi, mini_ruta
-        xor al, al
-        HV dos_abrir
-        jc .x
-        mov ebx, eax
-        mov al, 2
-        xor edx, edx
-        HV dos_puntero
-        jc .cierra
-        mov [mini_tam], eax
-        xor al, al
-        xor edx, edx
-        HV dos_puntero
-        jc .cierra
-        mov ecx, [mini_tam]
-        test ecx, ecx
-        jz .cierra
-        cmp ecx, ARCH_MAX
-        ja .cierra
-        add ecx, 64
-        HV mem_bloque
-        jc .cierra
-        mov [mini_ap], eax
-        mov [mini_ah], edx
-        mov edi, eax
-.lee:
-        mov ecx, [mini_ap]
-        add ecx, [mini_tam]
-        sub ecx, edi
-        jz .leido
-        cmp ecx, 16384
-        jbe .l1
-        mov ecx, 16384
-.l1:
-        HV dos_leer
-        jc .mal_lee
+        call c_abre_arch
         test eax, eax
-        jz .mal_lee
-        add edi, eax
-        jmp .lee
-.mal_lee:
-        HV dos_cerrar
-        jmp .suelta_a
-.leido:
-        HV dos_cerrar
-        ; ---- qué es, y a qué tamaño ----
-        movzx eax, byte [ajedrez]
-        xor eax, 1
-        mov [mi_fondo], eax
-        mov dword [mi_fondo_rgb], 0x00FFFFFF
-        mov esi, [mini_ap]
-        mov ecx, [mini_tam]
-        mov edx, mi_abre
-        call nuc
-        test eax, eax
-        jnz .suelta_a
+        jnz .x
         mov ebx, 1                  ; un JPEG grande: que lo reduzca él primero
 .jr:
         cmp dword [im_an], MINI_AN * 4
@@ -627,31 +613,48 @@ mini_haz:
         inc ebx
         jmp .jr
 .jr9:
+        ; cómo hay que ponerla (EXIF): cuartos de vuelta a la derecha y volteo
+        mov eax, [im_orienta]
+        dec eax
+        cmp eax, 7
+        jbe .o1
+        xor eax, eax
+.o1:
+        movzx ebx, byte [or_tabla+eax*2]
+        mov [mini_rot], ebx
+        movzx eax, byte [or_tabla+eax*2+1]
+        mov [mini_volt], eax
+        mov esi, [im_an]            ; ESI, EDI=medidas de la imagen ya derecha
+        mov edi, [im_al]
+        test bl, 1
+        jz .o2
+        xchg esi, edi
+.o2:
         ; la miniatura: que quepa en 96x80 sin deformarse (y sin agrandarse)
-        mov eax, [im_an]
+        mov eax, esi
         imul eax, MINI_AL
-        mov ecx, [im_al]
+        mov ecx, edi
         imul ecx, MINI_AN
         cmp eax, ecx
         jb .alta
-        mov eax, [im_an]            ; manda el ancho
+        mov eax, esi                ; manda el ancho
         cmp eax, MINI_AN
         jbe .a1
         mov eax, MINI_AN
 .a1:
         mov [mini_tan], eax
-        mul dword [im_al]
-        div dword [im_an]
+        mul edi
+        div esi
         jmp .a3
 .alta:
-        mov eax, [im_al]            ; manda el alto
+        mov eax, edi                ; manda el alto
         cmp eax, MINI_AL
         jbe .a2
         mov eax, MINI_AL
 .a2:
         mov [mini_tal], eax
-        mul dword [im_an]
-        div dword [im_al]
+        mul esi
+        div edi
         test eax, eax
         jnz .a2b
         inc eax
@@ -665,16 +668,28 @@ mini_haz:
 .a3b:
         mov [mini_tal], eax
 .a4:
-        ; ---- la memoria de trabajo: la del formato, los errores, el reductor y una fila ----
-        mov ecx, [mini_tan]
+        mov eax, [mini_tan]         ; como sale del archivo: tumbada, si hay que girarla
+        mov ecx, [mini_tal]
+        test byte [mini_rot], 1
+        jz .a5
+        xchg eax, ecx
+.a5:
+        mov [mini_pan], eax
+        mov [mini_pal], ecx
+        ; ---- la memoria de trabajo: la del formato, los errores, el reductor,
+        ;      una fila y la miniatura sin girar ----
+        mov ecx, [mini_pan]
         add ecx, 2
         imul ecx, 12
         mov eax, [im_an]
         lea eax, [eax+eax*2]
         lea ecx, [ecx+eax*2]
-        mov eax, [mini_tan]
+        mov eax, [mini_pan]
         shl eax, 4
         lea ecx, [ecx+eax+256]
+        mov eax, [mini_pan]
+        imul eax, [mini_pal]
+        lea ecx, [ecx+eax+16]
         add ecx, [mi_mem]
         jc .suelta_a
         HV mem_bloque
@@ -688,7 +703,7 @@ mini_haz:
         add edi, [mi_mem]
         add edi, 3
         and edi, ~3
-        mov ecx, [mini_tan]
+        mov ecx, [mini_pan]
         call ap_empieza
         mov eax, [trama]
         mov [ap_modo], eax
@@ -697,21 +712,25 @@ mini_haz:
         add edi, eax
         mov eax, [im_an]
         mov ebx, [im_al]
-        mov edx, [mini_tal]
+        mov edx, [mini_pal]
         mov esi, mi_fila
         call red_prepara
         lea eax, [eax+eax*2]
         add edi, eax
-        mov eax, [mini_tan]
+        mov eax, [mini_pan]
         shl eax, 4
         lea edi, [edi+eax+36]
         and edi, ~3
         mov [mini_fila], edi
+        mov eax, [mini_pan]
+        lea eax, [eax+eax*2]
+        lea edi, [edi+eax+8]
+        mov [mini_tmp], edi
         ; ---- las filas ----
         mov dword [mini_y], 0
 .fila:
         mov eax, [mini_y]
-        cmp eax, [mini_tal]
+        cmp eax, [mini_pal]
         jae .hecha
         mov edx, mini_una_fila
         call nuc
@@ -721,19 +740,28 @@ mini_haz:
 .corta:
         cmp dword [mini_y], 0       ; ni una fila: no se puede ver
         je .suelta_t
-        mov eax, [mini_tal]         ; cortada: lo que falta, liso
+        mov eax, [mini_pal]         ; cortada: lo que falta, liso
         sub eax, [mini_y]
-        mul dword [mini_tan]
+        mul dword [mini_pan]
         mov ecx, eax
         mov eax, [mini_y]
-        mul dword [mini_tan]
-        mov edi, ebp
-        imul edi, MINI_HUECO
-        add edi, [mini_p]
+        mul dword [mini_pan]
+        mov edi, [mini_tmp]
         add edi, eax
         mov al, C_PIEDRA
         rep stosb
 .hecha:
+        ; ---- a su sitio, ya derecha ----
+        mov byte [mini_est+ebp], ME_SIN_SITIO
+        mov ecx, [mini_tan]
+        imul ecx, [mini_tal]
+        add ecx, 3
+        and ecx, ~3
+        call mini_pide
+        jc .suelta_t
+        mov [mini_ptr+ebp*4], eax
+        mov edi, eax
+        call mini_endereza
         mov al, [mini_tan]
         mov [mini_ta+ebp], al
         mov al, [mini_tal]
@@ -743,11 +771,71 @@ mini_haz:
         mov edx, [mini_th]
         HV mem_bloque_soltar
 .suelta_a:
-        mov edx, [mini_ah]
-        HV mem_bloque_soltar
-        jmp .x
-.cierra:
-        HV dos_cerrar
+        call c_suelta_arch
+.x:
+        popad
+        ret
+
+; (interna) la miniatura sin girar ([mini_tmp], de [mini_pan] x [mini_pal]),
+; a EDI ([mini_tan] x [mini_tal]), girada [mini_rot] cuartos de vuelta a la
+; derecha y, después, volteada en horizontal si [mini_volt]: de cada punto
+; del destino, el que le toca del origen
+mini_endereza:
+        pushad
+        xor ebp, ebp                ; EBP=y
+.fy:
+        cmp ebp, [mini_tal]
+        jae .x
+        xor ebx, ebx                ; EBX=x
+.fx:
+        cmp ebx, [mini_tan]
+        jae .f9
+        mov eax, ebx                ; EAX=x antes de voltear
+        cmp dword [mini_volt], 0
+        je .v
+        mov eax, [mini_tan]
+        dec eax
+        sub eax, ebx
+.v:
+        mov edx, [mini_rot]         ; ECX, ESI=columna y fila del origen
+        cmp edx, 1
+        jb .r0
+        je .r1
+        cmp edx, 2
+        je .r2
+        mov ecx, [mini_pan]         ; a la izquierda: la columna «ancho-1-y», de arriba abajo
+        dec ecx
+        sub ecx, ebp
+        mov esi, eax
+        jmp .pon
+.r0:
+        mov ecx, eax
+        mov esi, ebp
+        jmp .pon
+.r1:
+        mov ecx, ebp                ; a la derecha: la columna «y», de abajo arriba
+        mov esi, [mini_pal]
+        dec esi
+        sub esi, eax
+        jmp .pon
+.r2:
+        mov ecx, [mini_pan]         ; media vuelta
+        dec ecx
+        sub ecx, eax
+        mov esi, [mini_pal]
+        dec esi
+        sub esi, ebp
+.pon:
+        imul esi, [mini_pan]
+        add esi, ecx
+        add esi, [mini_tmp]
+        mov al, [esi]
+        stosb
+        inc ebx
+        jmp .fx
+.f9:
+        inc ebp
+        jmp .fy
 .x:
         popad
         ret
@@ -758,11 +846,9 @@ mini_una_fila:
         mov edi, [mini_fila]
         call red_fila
         jc .falta
-        mov ecx, [mini_tan]
+        mov ecx, [mini_pan]
         mul ecx
-        mov edi, [mini_i]
-        imul edi, MINI_HUECO
-        add edi, [mini_p]
+        mov edi, [mini_tmp]
         add edi, eax
         mov esi, [mini_fila]
         mov eax, [mini_y]

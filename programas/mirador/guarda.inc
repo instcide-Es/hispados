@@ -17,7 +17,7 @@
 ;  PCX: versión 5, de 8 bits con la paleta al final o de 24 bits en tres
 ;  planos, con las tiradas de siempre (RLE).
 ;
-;  Usa las tablas de largos de desinfla.inc (dsf_lbase, dsf_lext) y la del
+;  Usa las tablas de largos de desinfla_t.inc (dst_lbase, dst_lext) y la del
 ;  CRC-32 de png.inc.
 ; =============================================================================
 SAL_OB      equ 16384               ; lo que se junta antes de escribir en el disco
@@ -620,7 +620,7 @@ df_tirada:
         ; el código del largo: el último de la tabla que no pasa de EDX
         mov ebx, 28
 .b:
-        movzx eax, word [dsf_lbase+ebx*2]
+        movzx eax, word [dst_lbase+ebx*2]
         cmp eax, edx
         jbe .es
         dec ebx
@@ -635,7 +635,7 @@ df_tirada:
         inc ecx
 .c1:
         call df_codigo
-        movzx ecx, byte [dsf_lext+ebx]
+        movzx ecx, byte [dst_lext+ebx]
         test ecx, ecx
         jz .c2
         mov eax, edx

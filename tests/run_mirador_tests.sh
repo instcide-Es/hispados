@@ -27,7 +27,18 @@
 #  E. las miniaturas de la carpeta: la rejilla con una de cada imagen y su
 #     nombre, elegir con las flechas y con un clic, abrir con Intro y con
 #     doble clic, y volver con Esc.
-# Con MIRADOR_SOLO=ABCDE (las letras que se quieran) se pasan solo esas partes
+#  F. los retoques: a grises, invertir, brillo y contraste, cambiar de tamaño
+#     (a un tanto por ciento y a unas medidas) y recortar a lo elegido con el
+#     ratón (el marco, sus bordes, moverlo, Esc e Intro); deshacer y rehacer;
+#     «(retocada)» en el pie; la pregunta al pasar a otra imagen o cerrar; lo
+#     guardado, punto por punto contra las mismas cuentas hechas aquí; y lo
+#     mismo sin el original en color verdadero (con 4 MB).
+#  G. los GIF animados: se pasan solos, con sus tiempos y en orden (cuadros
+#     parciales que se acumulan); Espacio los para y los sigue; a pantalla
+#     completa, ampliados y en el pase; el que se ve una sola vez se queda en
+#     el último cuadro; la información; girar lo deja en un cuadro; y el que
+#     no cabe en la memoria (4 MB) se queda en el primero y lo dice.
+# Con MIRADOR_SOLO=ABCDEFG (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con MIRADOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat, ImageMagick y Pillow (de Python).
@@ -38,7 +49,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/MIRADOR.HVP
-SOLO=${MIRADOR_SOLO:-NABCDE}
+SOLO=${MIRADOR_SOLO:-NABCDEFG}
 PY=${MIRADOR_PY:-python3}
 $PY -c 'import PIL' 2>/dev/null || { ko "falta Pillow: ponga en MIRADOR_PY un Python que lo tenga"; exit 1; }
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/mirador.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "MIRADOR.HVP no se ensambla"; exit 1; }
@@ -462,6 +473,208 @@ ve $T/k8.ppm 312 272 160 100 $I/ref_casa.png "" 8 "Intro: abre la elegida"
 chk $T/k9.ppm titulo 40 34 activa "Mirador - MONTE.TGA"
 ve $T/k9.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "doble clic: abre esa"
 muestra k1 mirador_miniaturas
+fi
+
+if [[ $SOLO == *F* ]]; then
+echo "== Mirador F: los retoques, deshacer y guardar lo retocado =="
+retoque() { $PY tests/tools/mirador_imagenes.py retoque "$@" || fail=1; }
+exacta() { $PY tests/tools/mirador_imagenes.py exacta "$@" || fail=1; }
+disco
+mete PAISAJE.PNG TORRE.PNG
+reabre 'A:\PAISAJE.PNG'
+{ arranca
+  clic 266 69; sleep 0.8; shot n1; clic 300 255; sleep 2; aparca; shot r1          # Imagen > A grises
+  tecla ctrl-z; sleep 1.2; shot r2                                # deshacer: en color
+  tecla ctrl-z; sleep 1.2; shot r3                                # y otra vez: rehace (gris)
+  clic 140 69; sleep 0.8; shot n2; clic 200 91; sleep 1.2; aparca; shot r4         # Edición > Deshacer
+  clic 266 69; sleep 0.8; clic 300 275; sleep 2; aparca; shot r5  # Imagen > Invertir los colores
+  tecla i; sleep 1; shot r6; tecla ret; sleep 0.6                 # la información lo dice
+  clic 211 69; sleep 0.8; clic 260 395; sleep 2; aparca; shot r7  # Ver > tramado ordenado: sigue invertida (no se lee del disco)
+  clic 211 69; sleep 0.8; clic 260 375; sleep 2; aparca; shot r8  # y con difusión otra vez
+  tecla f11; sleep 2; tecla pgdn; sleep 2; shot q1                # pasar a otra, a pantalla completa: vuelve a la ventana y pregunta
+  tecla esc; sleep 1; shot q2                                     # Cancelar: se queda
+  clic 747 47; sleep 1.2; shot q3; tecla esc; sleep 1             # cerrar la ventana: pregunta también
+  tecla pgdn; sleep 1.2; clic 400 336; sleep 2.5; aparca; shot q4 # No: pasa a TORRE.PNG sin guardar
+  tecla pgup; sleep 2.5; shot q5                                  # PAISAJE.PNG, como está en el disco
+  clic 266 69; sleep 0.8; clic 300 295; sleep 1.2; aparca; shot d1        # Imagen > Brillo y contraste
+  escribe "300"; tecla ret; sleep 1; shot d0; tecla ret; sleep 1  # (un valor que no vale: lo dice y vuelve a preguntar)
+  escribe "30"; tecla tab; escribe "-40"; tecla ret; sleep 2; shot d2
+  clic 266 69; sleep 0.8; clic 300 227; sleep 1.2; aparca; shot d3        # Imagen > Cambiar de tamaño
+  tecla tab; escribe "50"; tecla ret; sleep 2; shot d4            # al 50 %
+  clic 83 69; sleep 0.8; clic 150 159; sleep 1.2; escribe "bc"; tecla ret; sleep 3; shot d5; tecla ret; sleep 3; shot d6   # Guardar como PNG: BC.PNG pasa a ser la que se ve
+  clic 266 69; sleep 0.8; clic 300 227; sleep 1.2; clic 265 289; tecla tab; escribe "100"; tecla tab; escribe "100"; aparca; shot d7
+  tecla ret; sleep 2; shot d8                                     # a 100 x 100 conservando la proporción: 100 x 63
+  clic 266 69; sleep 0.8; clic 300 227; sleep 1.2; clic 265 289; tecla tab; escribe "40"; tecla tab; escribe "90"
+  clic 285 349; tecla ret; sleep 2; shot d9                       # a 40 x 90, sin conservarla
+  tecla ctrl-g; sleep 1.2; escribe "medidas"; tecla ret; sleep 3; tecla ret; sleep 3; shot d10   # MEDIDAS.BMP
+  tecla ctrl-a; sleep 1.2; escribe "paisaje.png"; tecla ret; sleep 2.5
+  tecla e; sleep 0.6; shot e1                                     # el modo «elegir»
+  ir 300 280; mon "mouse_button 1" 0.3; ir 420 360; mon "mouse_button 0" 0.4; aparca; shot e2   # una zona de 120 x 80
+  ir 418 320; mon "mouse_button 1" 0.3; ir 460 320; mon "mouse_button 0" 0.4                    # el borde derecho, 40 más allá
+  ir 350 320; mon "mouse_button 1" 0.3; ir 330 310; mon "mouse_button 0" 0.4; aparca; shot e3   # y el marco entero, 20 a la izquierda y 10 arriba
+  tecla ret; sleep 1.5; shot e4                                   # Intro: recortada
+  clic 83 69; sleep 0.8; clic 150 179; sleep 1.2; escribe "trozo"; tecla ret; sleep 3; tecla ret; sleep 3; shot e5  # TROZO.PCX
+  tecla e; sleep 0.6; ir 380 300; mon "mouse_button 1" 0.3; ir 420 330; mon "mouse_button 0" 0.4; aparca
+  tecla esc; sleep 0.8; shot e6                                   # Esc quita lo elegido
+  tecla ctrl-e; sleep 0.8; shot e7; tecla ret; sleep 1            # Ctrl+E: toda la imagen (recortar a toda: no cambia nada)
+  clic 266 69; sleep 0.8; clic 300 207; sleep 1.2; shot e8; tecla ret; sleep 0.8   # Recortar sin elegir: dice cómo
+  clic 266 69; sleep 0.8; clic 300 255; sleep 2                   # a grises...
+  tecla pgdn; sleep 1.2; clic 310 336; sleep 1.5; shot g1         # ...y a otra: Sí, se guarda (propone TROZO.PCX)
+  escribe "gris"; tecla ret; sleep 3; shot g2; tecla ret; sleep 3; aparca; shot g3    # GRIS.PCX, y pasa a la siguiente
+  sal; } | run 330 -vga std
+chk $T/n1.ppm busca 264 196 284 212 0 8 "ortar a lo elegido"
+pie r1 "PAISAJE.PNG (retocada)    320 x 200    100 %    1 de 2"
+retoque $I/ref_paisaje.png $T/ref_gris.png gris
+ve $T/r1.ppm 232 222 320 200 $T/ref_gris.png "" 8 "a grises: se ve el paisaje en grises"
+pie r2 "PAISAJE.PNG    320 x 200    100 %    1 de 2"
+ve $T/r2.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "Ctrl+Z: otra vez en color, y ya no está retocada"
+pie r3 "PAISAJE.PNG (retocada)    320 x 200    100 %    1 de 2"
+ve $T/r3.ppm 232 222 320 200 $T/ref_gris.png "" 8 "Ctrl+Z otra vez: rehace el retoque"
+chk $T/n2.ppm busca 160 78 176 98 0 8 "acer el "
+ve $T/r4.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "Edición > Deshacer: en color"
+retoque $I/ref_paisaje.png $T/ref_inv.png inv
+ve $T/r5.ppm 232 222 320 200 $T/ref_inv.png "" 8 "invertir los colores: el negativo"
+dice r6 "Retocada: los cambios a"
+ve $T/r7.ppm 232 222 320 200 $T/ref_inv.png "" 8 "retocada, al cambiar el tramado sigue invertida"
+chk $T/r7.ppm cambia 232 222 320 200 $T/r5.ppm 8000
+chk $T/r8.ppm igual 232 222 320 200 $T/r5.ppm 232 222 0     # y con difusión, como antes
+chk $T/q1.ppm titulo 40 34 no "Mirador - PAISAJE.PNG"       # (en la ventana, detrás de la pregunta)
+dice q1 "La imagen está retocada y no se ha guardado."
+pie q2 "PAISAJE.PNG (retocada)    320 x 200    100 %    1 de 2"
+dice q3 "¿Quiere guardarla?"
+chk $T/q4.ppm titulo 40 34 activa "Mirador - TORRE.PNG"
+pie q4 "TORRE.PNG    320 x 200    100 %    2 de 2"
+ve $T/q5.ppm 232 222 320 200 $I/ref_paisaje.png "" 8 "no se guardó: PAISAJE.PNG sigue como estaba"
+dice d1 "Brillo (de -100 a 100):"
+dice d0 "El brillo y el contraste tienen que ser n"
+retoque $I/ref_paisaje.png $T/ref_bc.png bc:30:-40
+ve $T/d2.ppm 232 222 320 200 $T/ref_bc.png "" 8 "brillo 30 y contraste -40"
+dice d3 "Ahora mide 320 x 200 puntos."
+pie d4 "PAISAJE.PNG (retocada)    160 x 100    100 %    1 de 2"
+dice d5 "La imagen se ha guardado."
+chk $T/d6.ppm titulo 40 34 activa "Mirador - BC.PNG"
+pie d6 "BC.PNG    160 x 100    100 %    1 de 3"
+mcopy -n -i $T/f.img ::BC.PNG $T/BC.PNG 2>/dev/null || ko "no se ha guardado BC.PNG"
+retoque $T/ref_bc.png $T/ref_bc2.png tam:160:100
+exacta $T/BC.PNG $T/ref_bc2.png "brillo, contraste y la mitad de tamaño, guardado como PNG: punto por punto"
+chk $T/d7.ppm busca 250 298 330 324 0 8 "Ancho:"
+pie d8 "BC.PNG (retocada)    100 x 63    100 %    1 de 3"
+pie d9 "BC.PNG (retocada)    40 x 90    100 %    1 de 3"
+chk $T/d10.ppm titulo 40 34 activa "Mirador - MEDIDAS.BMP"
+mcopy -n -i $T/f.img ::MEDIDAS.BMP $T/MEDIDAS.BMP 2>/dev/null || ko "no se ha guardado MEDIDAS.BMP"
+retoque $T/ref_bc2.png $T/ref_med.png tam:100:63 tam:40:90
+exacta $T/MEDIDAS.BMP $T/ref_med.png "a 100 x 63 (con proporción) y a 40 x 90 (sin ella), guardado como BMP: punto por punto"
+pie e1 "PAISAJE.PNG    Elija la zona arrastrando el ratón sobre la imagen (Esc: dejarlo)"
+pie e2 "PAISAJE.PNG    Elegido: 120 x 80    Intro recorta; Esc lo quita"
+chk $T/e2.ppm px 350 280 0 "el marco de lo elegido: la raya negra de arriba"
+chk $T/e2.ppm px 350 279 9 "y la blanca de fuera"
+chk $T/e2.ppm px 419 320 9 "un tirador, en mitad del lado derecho"
+chk $T/e2.ppm igual 232 364 320 56 $T/q5.ppm 232 364 0      # fuera del marco, la imagen como estaba
+pie e3 "PAISAJE.PNG    Elegido: 160 x 80    Intro recorta; Esc lo quita"
+chk $T/e3.ppm px 320 270 0 "el marco, movido y agrandado: su raya de arriba"
+pie e4 "PAISAJE.PNG (retocada)    160 x 80    100 %    3 de 4"
+chk $T/e5.ppm titulo 40 34 activa "Mirador - TROZO.PCX"
+mcopy -n -i $T/f.img ::TROZO.PCX $T/TROZO.PCX 2>/dev/null || ko "no se ha guardado TROZO.PCX"
+retoque $I/ref_paisaje.png $T/ref_trozo.png recorte:48:48:208:128
+exacta $T/TROZO.PCX $T/ref_trozo.png "recortada a lo elegido y guardada como PCX: punto por punto"
+pie e6 "TROZO.PCX    160 x 80    100 %    5 de 5"
+pie e7 "TROZO.PCX    Elegido: 160 x 80    Intro recorta; Esc lo quita"
+dice e8 "Primero elija la zona que quiere conservar:"
+dice g1 "Nombre del archivo:"
+dice g2 "La imagen se ha guardado."
+chk $T/g3.ppm titulo 40 34 activa "Mirador - BC.PNG"
+mcopy -n -i $T/f.img ::GRIS.PCX $T/GRIS.PCX 2>/dev/null || ko "no se ha guardado GRIS.PCX"
+retoque $T/ref_trozo.png $T/ref_tgris.png gris
+exacta $T/GRIS.PCX $T/ref_tgris.png "retocada, al pasar a otra se dice que sí: guardada (a grises), punto por punto"
+mcopy -n -i $T/f.img ::PAISAJE.PNG $T/sal.png 2>/dev/null
+cmp -s $T/sal.png $I/PAISAJE.PNG && ok "PAISAJE.PNG sigue como estaba en el disco" || ko "PAISAJE.PNG ha cambiado en el disco"
+muestra r1 mirador_grises; muestra d1 mirador_brillo; muestra d3 mirador_tamano; muestra e3 mirador_elegir; muestra q1 mirador_pregunta
+# sin el original en color verdadero (4 MB): se retoca lo que se ve, con paleta
+disco
+mete BARRAS.BMP PAISAJE.PNG
+reabre 'A:\BARRAS.BMP'
+{ arranca
+  clic 266 69; sleep 0.8; clic 300 275; sleep 2; aparca; shot u1  # invertir
+  tecla e; sleep 0.6; ir 272 262; mon "mouse_button 1" 0.3; ir 512 382; mon "mouse_button 0" 0.4; aparca
+  tecla ret; sleep 1.5; shot u2                                   # recortar: 240 x 120
+  clic 83 69; sleep 0.8; clic 150 159; sleep 1.2; escribe "b"; tecla ret; sleep 3; tecla ret; sleep 3    # B.PNG
+  tecla end; sleep 2.5
+  clic 266 69; sleep 0.8; clic 300 227; sleep 1.2; tecla tab; escribe "50"; tecla ret; sleep 2; shot u3  # PAISAJE al 50 %
+  clic 266 69; sleep 0.8; clic 300 255; sleep 2; shot u4          # y a grises
+  tecla ctrl-z; sleep 1.2; shot u5
+  clic 83 69; sleep 0.8; clic 150 159; sleep 1.2; escribe "p"; tecla ret; sleep 3; tecla ret; sleep 3    # P.PNG
+  sal; } | run 150 -vga std -m 4
+chk $T/u1.ppm rgb 250 260 000000 "sin original: la barra blanca, invertida, negra exacta"
+chk $T/u1.ppm rgb 290 260 0000FF "la amarilla, azul"
+chk $T/u1.ppm rgb 450 260 00FFFF "la roja, turquesa"
+pie u2 "BARRAS.BMP (retocada)    240 x 120    100 %    1 de 2"
+mcopy -n -i $T/f.img ::B.PNG $T/B.PNG 2>/dev/null || ko "no se ha guardado B.PNG"
+retoque $I/ref_barras.png $T/ref_b.png inv recorte:40:20:280:140
+$PY tests/tools/mirador_imagenes.py guardada $T/B.PNG $T/ref_b.png P "" 0.5 "sin original: invertida y recortada, guardada con paleta" || fail=1
+pie u3 "PAISAJE.PNG (retocada)    160 x 100    100 %    3 de 3"
+retoque $I/ref_paisaje.png $T/ref_p.png tam:160:100
+retoque $T/ref_p.png $T/ref_pg.png gris
+ve $T/u4.ppm 312 272 160 100 $T/ref_pg.png "" 8 "sin original: reducida y a grises"
+ve $T/u5.ppm 312 272 160 100 $T/ref_p.png "" 8 "sin original: deshacer devuelve el color"
+mcopy -n -i $T/f.img ::P.PNG $T/P.PNG 2>/dev/null || ko "no se ha guardado P.PNG"
+$PY tests/tools/mirador_imagenes.py guardada $T/P.PNG $T/ref_p.png P "" 8 "sin original: el paisaje a la mitad, guardado con paleta" || fail=1
+fi
+
+if [[ $SOLO == *G* ]]; then
+echo "== Mirador G: los GIF animados =="
+anima() { $PY tests/tools/mirador_imagenes.py anima "$@" || fail=1; }
+disco
+mete ANIMA.GIF PAISAJE.PNG UNAVEZ.GIF
+reabre 'A:\\ANIMA.GIF'
+{ arranca
+  shot v0; shot v1; shot v2; shot v3; shot v4; shot v5; shot v6; shot v7; shot v8; shot v9    # (una captura cada 1,1 segundos)
+  tecla spc; sleep 0.6; shot w1; sleep 3; shot w2                 # Espacio: en pausa
+  tecla spc; shot w3; shot w5; shot w6                            # y sigue
+  tecla i; sleep 1; shot w4; tecla ret; sleep 0.6                 # la información
+  tecla f11; sleep 2; shot x1; sleep 1.5; shot x2; sleep 1.5; shot x3; tecla esc; sleep 2    # a pantalla completa
+  tecla bracket_right; sleep 1.2; shot z1; sleep 1.5; shot z2; sleep 1.5; shot z3            # ampliada al 150 %
+  tecla 1; sleep 1
+  tecla f5; shot p1; shot p2; shot p3                             # en el pase (cada 5 segundos) también se mueve
+  tecla esc; sleep 1
+  tecla home; sleep 2.5; tecla r; sleep 1.5; shot g1; sleep 2.6; shot g2                     # girada: se queda en ese cuadro
+  tecla end; sleep 5.5; shot u1                                   # UNAVEZ.GIF: tres cuadros de un segundo, una sola vez
+  tecla spc; sleep 0.3; shot u2                                   # Espacio: otra vez desde el principio
+  sal; } | run 200 -vga std
+chk $T/v0.ppm titulo 40 34 activa "Mirador - ANIMA.GIF"
+pie v0 "ANIMA.GIF    160 x 120    100 %    1 de 3    animación (Espacio: pausa)"
+anima 312 262 4 6 "la animación pasa sola, en orden y a su paso (un cuadro cada dos segundos; diez capturas en once)" $T/v0.ppm $T/v1.ppm $T/v2.ppm $T/v3.ppm $T/v4.ppm $T/v5.ppm $T/v6.ppm $T/v7.ppm $T/v8.ppm $T/v9.ppm
+chk $T/w1.ppm busca 46 551 600 559 0 6 "en pausa: cuadro "
+chk $T/w2.ppm igual 312 262 160 120 $T/w1.ppm 312 262 0       # en pausa no se mueve
+anima 312 262 1 2 "tras la pausa, sigue por donde iba" $T/w2.ppm $T/w3.ppm $T/w5.ppm $T/w6.ppm
+dice w4 "Animación: 4 cuadros; una vuelta dura 8,00 segundos;"
+dice w4 "se repite sin fin."
+chk $T/x1.ppm px 10 10 0 "la animación, a pantalla completa"
+anima 320 240 1 2 "a pantalla completa sigue pasando" $T/x1.ppm $T/x2.ppm $T/x3.ppm
+chk $T/z1.ppm busca 46 551 300 559 0 6 "150 %"
+chk $T/z3.ppm cambia 272 232 240 180 $T/z1.ppm 800
+chk $T/z1.ppm rgb 280 240 333333 "ampliada: el fondo gris del primer cuadro, liso"
+pie p1 "ANIMA.GIF    160 x 120    100 %    1 de 3    pase de diapositivas"
+anima 312 262 1 2 "en el pase de diapositivas sigue pasando" $T/p1.ppm $T/p2.ppm $T/p3.ppm
+pie g1 "ANIMA.GIF    120 x 160    100 %    1 de 3"
+chk $T/g1.ppm nobusca 46 551 600 559 0 6 "animaci"
+chk $T/g2.ppm igual 332 242 120 160 $T/g1.ppm 332 242 0       # girada, ya no se mueve
+pie u1 "UNAVEZ.GIF    96 x 64    100 %    3 de 3    animación acabada (Espacio: otra vez)"
+chk $T/u1.ppm rgb 392 322 0000FF "la que se ve una vez se queda en el último cuadro (azul)"
+chk $T/u2.ppm rgb 392 322 FF0000 "Espacio: otra vez desde el primero (rojo)"
+muestra v2 mirador_anima; muestra w1 mirador_anima_pausa; muestra w4 mirador_anima_info
+# la que no cabe en la memoria: el primer cuadro, y se dice
+disco
+mete GORDA.GIF
+reabre 'A:\\GORDA.GIF'
+{ arranca
+  sleep 4; shot y1; sleep 1.5; shot y2
+  tecla i; sleep 1; shot y3; tecla ret; sleep 0.6
+  sal; } | run 100 -vga std -m 4
+avisa y1 "Aviso: animación de 40 cuadros; no hay memoria para todos y se ve solo el primero."
+chk $T/y1.ppm rgb 392 330 FF0000 "la animación que no cabe en 4 MB: su primer cuadro (rojo)"
+chk $T/y2.ppm rgb 392 330 FF0000 "y ahí se queda"
+dice y3 "No cabe en la memoria: se ve el primer cuadro."
+muestra y1 mirador_anima_no_cabe
 fi
 
 [ -n "${MIRADOR_DEJA:-}" ] && echo "(las capturas quedan en $T)" || rm -rf $T

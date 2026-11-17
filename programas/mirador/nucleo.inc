@@ -12,7 +12,9 @@
 ;      abre      ESI=datos ECX=cuántos: lee la cabecera -> EAX=ME_* (0: bien)
 ;                y deja puestos im_an, im_al, im_clase, im_bits, im_ncol,
 ;                im_pal (si es de paleta), im_hay_alfa e im_alm (los octetos
-;                de memoria de trabajo que necesita)
+;                de memoria de trabajo que necesita); un GIF animado, además,
+;                im_cuadros, im_dura e im_bucle (gif.inc dice cómo se piden
+;                los cuadros)
 ;      prepara   con la memoria de trabajo en [im_almp]: lo que haya que
 ;                descomprimir de una vez -> EAX=ME_*
 ;      fila      EAX=fila (se piden en orden, de la 0 en adelante, una vez
@@ -21,6 +23,11 @@
 ;                esa fila ya no está (archivo cortado)
 ;      reduce    (0 si no sabe) EAX=1, 2 o 3: abre otra vez para entregar la
 ;                imagen a la mitad, un cuarto o un octavo (JPEG)
+;      tramos    (0 si no sabe) ESI=la cabecera del archivo ECX=cuántos
+;                octetos hay de ella -> CF=0 si ese archivo se puede ver sin
+;                tenerlo entero en memoria: «abre» se apaña con esa cabecera
+;                y todo lo demás lo pide con mi_trozo (PNG; BMP y TGA sin
+;                comprimir)
 ;  Pueden cambiar todos los registros. Si el archivo está cortado o dañado
 ;  pero algo se ve, ponen [im_aviso] a 1. Si la variante no se admite,
 ;  devuelven ME_VARIANTE con el texto que lo explica en [im_var].
@@ -29,10 +36,30 @@
 ;    mi_abre     ESI=datos ECX=cuántos -> EAX=ME_*; con 0, las medidas y lo
 ;                demás en im_*, el formato en [im_fmt] y en [mi_mem] la
 ;                memoria de trabajo que hay que darle
+;    mi_abre_d   lo mismo, sin el archivo entero en memoria: ESI=su cabecera
+;                (sus primeros MI_CAB octetos, o todos si son menos) ECX=
+;                cuántos son EDX=lo que ocupa el archivo; y en [mi_lector] una
+;                rutina que lee de él: EAX=posición EDI=destino ECX=cuántos
+;                -> EAX=los leídos (puede cambiar los demás registros).
+;                Además de lo de mi_abre puede devolver ME_ENTERO: ese
+;                archivo hay que leerlo entero y abrirlo con mi_abre. Con 0,
+;                mi_prepara y mi_fila irán leyendo del archivo: tiene que
+;                seguir abierto hasta la última fila
 ;    mi_reduce   EAX=1, 2 o 3 -> CF=0 si el formato sabe entregar la imagen
 ;                ya reducida a 1/2, 1/4 o 1/8 (cambian im_an, im_al y mi_mem)
 ;    mi_prepara  EDI=la memoria de trabajo ([mi_mem] octetos) -> EAX=ME_*
 ;    mi_fila     EAX=fila EDI=destino (3 octetos por punto) -> CF=1 si no está
+;  Y lo que usan los formatos para leer del archivo esté donde esté:
+;    mi_trozo    EAX=posición ECX=octetos -> ESI=dónde están (hasta la llamada
+;                siguiente); CF=1 si no están todos (se sale del archivo o el
+;                disco falla). Conserva los demás registros. Con el archivo
+;                en memoria es un puntero a él. Leyendo del disco, lo que cae
+;                en la cabecera sale de ella; lo demás, de un búfer que va
+;                con la memoria de trabajo (el formato dice en [im_buf_n] el
+;                trozo mayor que pedirá; se leen 32 K de cada vez, hacia
+;                delante o hacia atrás, según se vaya pidiendo); antes de
+;                «prepara», en «abre», solo valen trozos de hasta MI_MINI
+;                octetos
 ;  Lo transparente se mezcla con un ajedrezado de cuadros de 8 puntos, blanco
 ;  y gris claro ([mi_fondo]=0), o con el color liso [mi_fondo_rgb] (=1).
 ; =============================================================================
@@ -42,6 +69,7 @@ ME_VARIANTE     equ 2               ; una variante que no se admite ([im_var] di
 ME_MEMORIA      equ 3               ; (del programa) no hay memoria
 ME_DESCONOCIDO  equ 4               ; no es de ningún formato que se conozca
 ME_GRANDE       equ 5               ; medidas imposibles (más de 32.767 de lado o de 64 megapuntos)
+ME_ENTERO       equ 6               ; (de mi_abre_d) hay que leer el archivo entero y usar mi_abre
 
 IC_PALETA       equ 0               ; un índice de im_pal por punto
 IC_GRIS         equ 1               ; un gris por punto
@@ -55,7 +83,12 @@ F_PREPARA       equ 8
 F_FILA          equ 12
 F_REDUCE        equ 16
 F_NOMBRE        equ 20
-F_TAM           equ 24
+F_TRAMOS        equ 24
+F_TAM           equ 28
+
+MI_CAB          equ 4096            ; la cabecera que se le da a mi_abre_d
+MI_MINI         equ 1024            ; el trozo mayor que se puede pedir en «abre» leyendo del disco
+MI_BLOQUE       equ 32768           ; lo que se lee del disco de cada vez
 
 MI_LADO_MAX     equ 32767
 MI_PUNTOS_MAX   equ 64 * 1024 * 1024
@@ -77,6 +110,9 @@ im_extra    resd 1                  ; un texto más para la información (0: nad
 im_orienta  resd 1                  ; cómo hay que ponerla para verla derecha (EXIF: de 1 a 8; 1: como viene)
 im_camara   resd 1                  ; con qué cámara se hizo y cuándo (textos; 0: no lo dice)
 im_tomada   resd 1
+im_cuadros  resd 1                  ; cuadros de una animación (GIF; 0 o 1: no es animada)
+im_dura     resd 1                  ; lo que dura una vuelta, en milisegundos
+im_bucle    resd 1                  ; cuántas veces se repite (-1: no lo dice; 0: sin fin)
 im_alm      resd 1
 im_almp     resd 1
 im_pal      resb 1024               ; rojo, verde, azul, opacidad
@@ -87,17 +123,27 @@ mi_fondo_rgb resd 1
 mi_y        resd 1
 mi_px       resd 1
 mi_bg       resd 1
+im_cab      resd 1                  ; octetos del archivo que hay en memoria, en im_dat
+im_buf_n    resd 1                  ; el trozo mayor que el formato pedirá con mi_trozo
+mi_disco    resd 1                  ; 1: el archivo no está entero en memoria: se lee con mi_lector
+mi_lector   resd 1
+mi_buf      resd 1                  ; el búfer de lo leído del disco (0: aún no lo hay)
+mi_buf_tam  resd 1
+mi_buf_pos  resd 1                  ; qué trozo del archivo tiene: desde dónde y cuánto
+mi_buf_hay  resd 1
+mi_ult      resd 1                  ; la última posición que se pidió (para saber si se va hacia atrás)
+mi_mini     resb MI_MINI
 %endmacro
 
 mi_formatos:
-        dd png_detecta, png_abre, png_prepara, png_fila, 0, mi_n_png
-        dd gif_detecta, gif_abre, gif_prepara, gif_fila, 0, mi_n_gif
-        dd bmp_detecta, bmp_abre, bmp_prepara, bmp_fila, 0, mi_n_bmp
-        dd jpg_detecta, jpg_abre, jpg_prepara, jpg_fila, jpg_reduce, mi_n_jpg
-        dd pnm_detecta, pnm_abre, mi_nada, pnm_fila, 0, mi_n_pnm
-        dd ico_detecta, ico_abre, ico_prepara, ico_fila, 0, mi_n_ico
-        dd pcx_detecta, pcx_abre, mi_nada, pcx_fila, 0, mi_n_pcx
-        dd tga_detecta, tga_abre, tga_prepara, tga_fila, 0, mi_n_tga
+        dd png_detecta, png_abre, png_prepara, png_fila, 0, mi_n_png, png_tramos
+        dd gif_detecta, gif_abre, gif_prepara, gif_fila, 0, mi_n_gif, 0
+        dd bmp_detecta, bmp_abre, bmp_prepara, bmp_fila, 0, mi_n_bmp, bmp_tramos
+        dd jpg_detecta, jpg_abre, jpg_prepara, jpg_fila, jpg_reduce, mi_n_jpg, 0
+        dd pnm_detecta, pnm_abre, mi_nada, pnm_fila, 0, mi_n_pnm, 0
+        dd ico_detecta, ico_abre, ico_prepara, ico_fila, 0, mi_n_ico, 0
+        dd pcx_detecta, pcx_abre, mi_nada, pcx_fila, 0, mi_n_pcx, 0
+        dd tga_detecta, tga_abre, tga_prepara, tga_fila, 0, mi_n_tga, tga_tramos
         dd 0
 mi_n_png    db "PNG", 0
 mi_n_gif    db "GIF", 0
@@ -186,6 +232,28 @@ mi_desempaqueta:
         ret
 
 mi_abre:
+        push edx
+        mov edx, ecx                ; (entero en memoria: su «cabecera» es todo él)
+        mov dword [mi_disco], 0
+        call mi_abre_comun
+        pop edx
+        ret
+
+mi_abre_d:
+        mov dword [mi_disco], 1
+        cmp ecx, edx                ; la cabecera: MI_CAB octetos, o el archivo entero si es menor
+        je mi_abre_comun
+        cmp ecx, MI_CAB
+        jne .entero
+        cmp edx, ecx
+        ja mi_abre_comun
+.entero:
+        mov eax, ME_ENTERO
+        ret
+
+; (interna) ESI=lo que hay del archivo en memoria ECX=cuántos octetos EDX=lo
+; que ocupa el archivo; [mi_disco] dice si es todo
+mi_abre_comun:
         push ebx
         push ecx
         push edx
@@ -193,7 +261,8 @@ mi_abre:
         push edi
         push ebp
         mov [im_dat], esi
-        mov [im_tam], ecx
+        mov [im_cab], ecx
+        mov [im_tam], edx
         xor eax, eax
         mov [im_fmt], eax
         mov [im_an], eax
@@ -206,9 +275,16 @@ mi_abre:
         mov [im_extra], eax
         mov [im_camara], eax
         mov [im_tomada], eax
+        mov [im_cuadros], eax
+        mov [im_dura], eax
+        mov dword [im_bucle], -1
         mov dword [im_orienta], 1
         mov [im_alm], eax
         mov [im_clase], eax
+        mov [im_buf_n], eax
+        mov [mi_buf], eax
+        mov [mi_buf_hay], eax
+        mov [mi_ult], eax
         mov edi, im_pal             ; la paleta, negra y opaca
         mov ecx, 256
         mov eax, 0xFF000000
@@ -218,7 +294,7 @@ mi_abre:
         cmp dword [ebx], 0
         je .ninguno
         mov esi, [im_dat]
-        mov ecx, [im_tam]
+        mov ecx, [im_cab]
         push ebx
         call [ebx+F_DETECTA]
         pop ebx
@@ -227,9 +303,24 @@ mi_abre:
         jmp .b
 .ninguno:
         mov eax, ME_DESCONOCIDO
+        cmp dword [mi_disco], 0
+        je .x
+.entero:
+        mov eax, ME_ENTERO          ; (con solo la cabecera no se sabe: que se lea entero)
         jmp .x
 .es:
         mov [im_fmt], ebx
+        cmp dword [mi_disco], 0
+        je .abre
+        cmp dword [ebx+F_TRAMOS], 0 ; leyendo del disco: ¿sabe el formato, con este archivo?
+        je .entero
+        mov esi, [im_dat]
+        mov ecx, [im_cab]
+        push ebx
+        call [ebx+F_TRAMOS]
+        pop ebx
+        jc .entero
+.abre:
         mov esi, [im_dat]
         mov ecx, [im_tam]
         call [ebx+F_ABRE]
@@ -249,6 +340,105 @@ mi_abre:
         pop ebx
         ret
 
+; EAX=posición ECX=octetos -> ESI=dónde están; CF=1 si no están todos
+mi_trozo:
+        push edx
+        cmp eax, [im_tam]           ; ¿dentro del archivo?
+        ja .no
+        mov edx, [im_tam]
+        sub edx, eax
+        cmp ecx, edx
+        ja .no
+        lea edx, [eax+ecx]          ; ¿en lo que hay en memoria? (todo, si no se lee del disco)
+        cmp edx, [im_cab]
+        ja .disco
+        mov esi, [im_dat]
+        add esi, eax
+        pop edx
+        clc
+        ret
+.no:
+        pop edx
+        stc
+        ret
+.disco:
+        cmp dword [mi_disco], 0
+        je .no
+        pushad
+        mov ebx, [mi_buf]
+        test ebx, ebx
+        jz .mini
+        ; ¿lo tiene el búfer?
+        mov edx, eax
+        sub edx, [mi_buf_pos]
+        jb .lee
+        add edx, ecx
+        cmp edx, [mi_buf_hay]
+        ja .lee
+        sub edx, ecx
+        add ebx, edx
+        jmp .esta
+.lee:
+        cmp ecx, [mi_buf_tam]
+        ja .mal
+        ; un bloque entero que tenga el trozo: desde él hacia delante o, si se
+        ; viene leyendo hacia atrás (un BMP, de abajo arriba), hasta él
+        mov edx, eax                ; EDX=desde dónde
+        cmp eax, [mi_ult]
+        jae .l1
+        lea edx, [eax+ecx]
+        sub edx, [mi_buf_tam]
+        jae .l1
+        xor edx, edx
+.l1:
+        mov [mi_ult], eax
+        mov esi, [im_tam]
+        sub esi, edx
+        cmp esi, [mi_buf_tam]
+        jbe .l2
+        mov esi, [mi_buf_tam]
+.l2:
+        mov dword [mi_buf_hay], 0
+        mov [mi_buf_pos], edx
+        push eax
+        push ecx
+        mov eax, edx
+        mov edi, ebx
+        mov ecx, esi
+        call [mi_lector]
+        mov [mi_buf_hay], eax
+        pop ecx
+        pop eax
+        mov ebx, [mi_buf]
+        mov edx, eax                ; ¿ha llegado para lo que se pedía?
+        sub edx, [mi_buf_pos]
+        add ebx, edx
+        add edx, ecx
+        cmp edx, [mi_buf_hay]
+        ja .mal
+        jmp .esta
+.mini:
+        cmp ecx, MI_MINI            ; aún no hay búfer: un trozo pequeño, tal cual
+        ja .mal
+        mov edi, mi_mini
+        push ecx
+        call [mi_lector]
+        pop ecx
+        cmp eax, ecx
+        jne .mal
+        mov ebx, mi_mini
+.esta:
+        mov [esp+4], ebx            ; (el ESI de quien llama)
+        popad
+        pop edx
+        clc
+        ret
+.mal:
+        popad
+        pop edx
+        stc
+        ret
+
 ; (interna) la memoria de trabajo: la del formato y una fila cruda
 mi_pon_mem:
         mov eax, [im_alm]
@@ -258,6 +448,19 @@ mi_pon_mem:
         mov edx, [im_an]
         lea eax, [eax+edx*4+64]
         mov [mi_mem], eax
+        cmp dword [mi_disco], 0     ; leyendo del disco: además, el búfer de lo leído
+        je .x
+        mov edx, [im_buf_n]
+        cmp edx, MI_BLOQUE
+        jae .b
+        mov edx, MI_BLOQUE
+.b:
+        add edx, 3
+        and edx, ~3
+        mov [mi_buf_tam], edx
+        add eax, edx
+        mov [mi_mem], eax
+.x:
         ret
 
 mi_reduce:
@@ -288,6 +491,13 @@ mi_prepara:
         mov [im_almp], edi
         add edi, [im_alm]
         mov [mi_cruda], edi
+        cmp dword [mi_disco], 0     ; el búfer del disco, detrás de la fila cruda
+        je .p1
+        mov eax, [im_an]
+        lea eax, [edi+eax*4+64]
+        mov [mi_buf], eax
+        mov dword [mi_buf_hay], 0
+.p1:
         mov ebx, [im_fmt]
         call [ebx+F_PREPARA]
         pop ebp

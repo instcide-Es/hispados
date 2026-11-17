@@ -10,7 +10,9 @@
 ;
 ;  El TGA no tiene firma: se reconoce porque su cabecera tiene sentido (por
 ;  eso es el último formato que se prueba). Sin comprimir, cada fila se toma
-;  de su sitio; con RLE se descomprime entero a la memoria de trabajo.
+;  de su sitio en el archivo con mi_trozo (no hace falta tenerlo entero en
+;  memoria: uno grande se lee del disco fila a fila); con RLE se descomprime
+;  entero a la memoria de trabajo, y ese sí tiene que estar en memoria.
 ; =============================================================================
 %macro TGA_BSS 0
             alignb 4
@@ -20,8 +22,9 @@ tga_tipo    resd 1                  ; 1 paleta, 2 color, 3 grises
 tga_rle     resd 1
 tga_o       resd 1                  ; octetos por punto
 tga_desc    resd 1
-tga_px      resd 1                  ; los puntos, sin comprimir
+tga_px      resd 1                  ; los puntos, sin comprimir (con RLE: en la memoria de trabajo)
 tga_px_fin  resd 1
+tga_px_o    resd 1                  ; (sin RLE) dónde empiezan en el archivo
 %endmacro
 
 tga_t_var   db "un TGA con índices de 16 bits o con grises y opacidad", 0
@@ -81,6 +84,32 @@ tga_detecta:
         cmp al, 32
         jne .no
 .si:
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; ¿se puede ver sin tenerlo entero en memoria? Sí, si va sin comprimir y su
+; paleta (si la tiene) cabe en la cabecera que se da
+tga_tramos:
+        cmp ecx, 19
+        jb .no
+        test byte [esi+2], 8
+        jnz .no
+        movzx eax, byte [esi]
+        add eax, 18
+        cmp byte [esi+1], 1
+        jne .t1
+        movzx edx, word [esi+5]
+        movzx ebx, byte [esi+7]
+        add ebx, 7
+        shr ebx, 3
+        imul edx, ebx
+        add eax, edx
+.t1:
+        cmp eax, ecx
+        ja .no
         clc
         ret
 .no:
@@ -193,6 +222,12 @@ tga_abre:
         mov [tga_px_fin], eax
         cmp edi, eax
         ja .roto
+        mov eax, edi
+        sub eax, [tga_dat]
+        mov [tga_px_o], eax
+        mov eax, [im_an]            ; (lo más que se pide de una vez: una fila)
+        imul eax, [tga_o]
+        mov [im_buf_n], eax
         ; la clase
         mov eax, [tga_tipo]
         mov ebx, [tga_o]
@@ -322,12 +357,24 @@ tga_fila:
         mov ebx, [tga_o]
         mov ecx, [im_an]
         imul ecx, ebx               ; ECX=octetos de una fila
+        cmp dword [tga_rle], 0
+        jne .mem
+        mul ecx                     ; sin comprimir: de su sitio en el archivo
+        test edx, edx
+        jnz .falta
+        add eax, [tga_px_o]
+        jc .falta
+        call mi_trozo
+        jc .falta
+        jmp .esta
+.mem:
         imul eax, ecx
         mov esi, [tga_px]
         add esi, eax
         lea eax, [esi+ecx]
         cmp eax, [tga_px_fin]
         ja .falta
+.esta:
         push edi
         cmp ebx, 1
         jne .color

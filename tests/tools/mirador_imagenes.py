@@ -18,6 +18,15 @@ uso: mirador_imagenes.py haz DIR
         verdadero) o P (con paleta), como lo abre Pillow
      mirador_imagenes.py impreso SALIDA.prn REFERENCIA [apaisada] [nombre]
         ¿son los gráficos ESC/P mandados a la impresora la imagen de REFERENCIA?
+     mirador_imagenes.py retoque REFERENCIA SALIDA.png RETOQUE [RETOQUE...]
+        hace la referencia de una imagen retocada, con las cuentas de Mirador
+        (programas/mirador/retoca.inc). Los retoques, en orden: gris, inv,
+        bc:BRILLO:CONTRASTE, recorte:X0:Y0:X1:Y1, tam:ANCHO:ALTO
+     mirador_imagenes.py exacta ARCHIVO REFERENCIA [nombre]
+        ¿es la imagen guardada, punto por punto, la de REFERENCIA?
+     mirador_imagenes.py anima X Y MINIMO MAXIMO NOMBRE CAPTURA...
+        ¿se ve en esas capturas seguidas la animación de la prueba (ANIMA.GIF,
+        con su esquina en X, Y), pasando sus cuadros en orden?
 Necesita Pillow. Escribe «  OK   ...» o «  FAIL ...».
 """
 import os, re, struct, sys, zlib
@@ -89,6 +98,79 @@ def png_grande(an, al):
     out += z.flush()
     return (b'\x89PNG\r\n\x1a\n' + png_trozo(b'IHDR', struct.pack('>IIBBBBB', an, al, 8, 3, 0, 0, 0)) +
             png_trozo(b'PLTE', pal) + png_trozo(b'IDAT', out) + png_trozo(b'IEND', b''))
+
+
+def gif_lzw(idx, minimo):
+    """los índices, comprimidos con LZW y partidos en trozos de 255 octetos"""
+    borra, fin = 1 << minimo, (1 << minimo) + 1
+    out = bytearray()
+    acc = n = 0
+    tabla, sig, tam = {}, fin + 1, minimo + 1
+    w = None
+    codigos = [(borra, tam)]
+    for c in idx:
+        if w is None:
+            w = (c,)
+            continue
+        wc = w + (c,)
+        if wc in tabla:
+            w = wc
+            continue
+        codigos.append((tabla[w] if len(w) > 1 else w[0], tam))
+        if sig < 4096:
+            tabla[wc] = sig
+            sig += 1
+            if sig > (1 << tam) and tam < 12:
+                tam += 1
+        else:
+            codigos.append((borra, tam))
+            tabla, sig, tam = {}, fin + 1, minimo + 1
+        w = (c,)
+    if w is not None:
+        codigos.append((tabla[w] if len(w) > 1 else w[0], tam))
+        if sig < 4096:
+            sig += 1
+            if sig > (1 << tam) and tam < 12:
+                tam += 1
+    codigos.append((fin, tam))
+    for cod, t in codigos:
+        acc |= cod << n
+        n += t
+        while n >= 8:
+            out.append(acc & 255)
+            acc >>= 8
+            n -= 8
+    if n:
+        out.append(acc & 255)
+    r = bytearray()
+    for i in range(0, len(out), 255):
+        r.append(len(out[i:i + 255]))
+        r += out[i:i + 255]
+    r.append(0)
+    return bytes(r)
+
+
+def gif_animado(an, al, paleta, cuadros, bucle=None):
+    """cuadros: [(x, y, ancho, alto, centésimas, «disposal», índices)]; bucle: None (no lo dice), 0 (sin fin) o las veces"""
+    bits = max(1, (len(paleta) - 1).bit_length())
+    pal = list(paleta) + [(0, 0, 0)] * ((1 << bits) - len(paleta))
+    d = b'GIF89a' + struct.pack('<HHBBB', an, al, 0xF0 | (bits - 1), 0, 0) + b''.join(bytes(c) for c in pal)
+    if bucle is not None:
+        d += b'\x21\xff\x0bNETSCAPE2.0\x03\x01' + struct.pack('<H', bucle) + b'\0'
+    for x, y, w, h, cs, disp, idx in cuadros:
+        d += b'\x21\xf9\x04' + bytes((disp << 2,)) + struct.pack('<H', cs) + b'\0\0'
+        d += b'\x2c' + struct.pack('<HHHHB', x, y, w, h, 0) + bytes((max(2, bits),)) + gif_lzw(idx, max(2, bits))
+    return d + b'\x3b'
+
+
+# la animación de la prueba: sobre gris, cuatro cuadrados que van apareciendo
+# (cada cuadro pinta solo el suyo y deja lo anterior); dos segundos cada uno
+ANIMA_COLORES = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
+ANIMA_GRIS = (51, 51, 51)
+
+
+def anima_cuadrado(k):
+    return 10 + 38 * k, 45, 30, 30
 
 
 def haz(d):
@@ -167,6 +249,18 @@ def haz(d):
     rd.rectangle((150, 100, 299, 199), fill=(255, 255, 0))
     rd.line((0, 0, 299, 199), fill=(0, 0, 0), width=2)
     r.save(g('ref_enorme.png'))
+    # animaciones: una que no acaba (cuadros parciales que se acumulan), una que se ve
+    # una vez y una que no cabe en 4 MB
+    pal = [ANIMA_GRIS] + ANIMA_COLORES
+    x, y, w, h = anima_cuadrado(0)
+    primero = [1 if x <= i % 160 < x + w and y <= i // 160 < y + h else 0 for i in range(160 * 120)]
+    cs = [(0, 0, 160, 120, 200, 1, primero)]
+    for k in (1, 2, 3):
+        x, y, w, h = anima_cuadrado(k)
+        cs.append((x, y, w, h, 200, 1, [k + 1] * (w * h)))
+    open(g('ANIMA.GIF'), 'wb').write(gif_animado(160, 120, pal, cs, 0))
+    open(g('UNAVEZ.GIF'), 'wb').write(gif_animado(96, 64, pal, [(0, 0, 96, 64, 100, 1, [k + 1] * (96 * 64)) for k in range(3)]))
+    open(g('GORDA.GIF'), 'wb').write(gif_animado(400, 300, pal, [(0, 0, 400, 300, 50, 1, [1 + k % 4] * 120000) for k in range(40)], 0))
     return 0
 
 
@@ -326,6 +420,107 @@ def impreso(a):
                    nombre + ' (%dx%d puntos%s)' % (an, al, ', apaisada' if apaisada else ''))
 
 
+def hacia_cero(a, b):
+    """a / b quitando los decimales hacia el cero (como IDIV)"""
+    q = abs(a) // b
+    return q if a >= 0 else -q
+
+
+def retoque(a):
+    """los retoques de Mirador, con sus mismas cuentas"""
+    im = Image.open(a[0]).convert('RGB')
+    for r in a[2:]:
+        p = r.split(':')
+        an, al = im.size
+        d = im.tobytes()
+        px = list(zip(d[0::3], d[1::3], d[2::3]))
+        if p[0] == 'gris':
+            px = [((77 * r_ + 150 * g + 29 * b) >> 8,) * 3 for r_, g, b in px]
+        elif p[0] == 'inv':
+            px = [(255 - r_, 255 - g, 255 - b) for r_, g, b in px]
+        elif p[0] == 'bc':
+            bri, con = int(p[1]), int(p[2])
+            lut = [max(0, min(255, hacia_cero((v - 128) * (100 + con), 100) + hacia_cero(bri * 255, 100) + 128)) for v in range(256)]
+            px = [(lut[r_], lut[g], lut[b]) for r_, g, b in px]
+        elif p[0] == 'recorte':
+            x0, y0, x1, y1 = (int(v) for v in p[1:5])
+            px = [px[y * an + x] for y in range(y0, y1) for x in range(x0, x1)]
+            an, al = x1 - x0, y1 - y0
+        elif p[0] == 'tam':
+            dan, dal = int(p[1]), int(p[2])
+            xb = [i * an // dan for i in range(dan + 1)]        # (como reduce.inc: la media de los que tapa)
+            out = []
+            for dy in range(dal):
+                y0 = dy * al // dal
+                y1 = max(y0 + 1, (dy + 1) * al // dal)
+                for dx in range(dan):
+                    x0 = xb[dx]
+                    x1 = max(x0 + 1, xb[dx + 1])
+                    n = (x1 - x0) * (y1 - y0)
+                    out.append(tuple((sum(px[y * an + x][k] for y in range(y0, y1) for x in range(x0, x1)) + n // 2) // n
+                                     for k in range(3)))
+            px, an, al = out, dan, dal
+        else:
+            print('  FAIL retoque desconocido: ' + r)
+            return 1
+        im = Image.new('RGB', (an, al))
+        im.putdata(px)
+    im.save(a[1])
+    return 0
+
+
+def exacta(a):
+    nombre = a[2] if len(a) > 2 else '%s guardado es %s' % (os.path.basename(a[0]), os.path.basename(a[1]))
+    try:
+        im = Image.open(a[0])
+        im.load()
+    except Exception as e:
+        print('  FAIL %s: no se abre (%s)' % (nombre, e))
+        return 1
+    ref = Image.open(a[1]).convert('RGB')
+    if im.size != ref.size:
+        print('  FAIL %s: mide %dx%d y se esperaba %dx%d' % ((nombre,) + im.size + ref.size))
+        return 1
+    da, db = im.convert('RGB').tobytes(), ref.tobytes()
+    dif = sum(1 for i in range(0, len(da), 3) if da[i:i + 3] != db[i:i + 3])
+    print('  %s %s (%dx%d, %d puntos distintos)' % ('OK  ' if not dif else 'FAIL', nombre, im.size[0], im.size[1], dif))
+    return 1 if dif else 0
+
+
+def anima_cuadro(cap, x, y):
+    """qué cuadro de ANIMA.GIF (a su tamaño, con la esquina en x, y) se ve en la captura; None si ninguno"""
+    es = lambda c, d: all(abs(p - q) <= 8 for p, q in zip(c, d))    # (la pantalla da 6 bits por color)
+    n = 0
+    for k in range(4):
+        cx, cy, w, h = anima_cuadrado(k)
+        c = cap.getpixel((x + cx + w // 2, y + cy + h // 2))
+        if es(c, ANIMA_COLORES[k]):
+            if n != k:
+                return None
+            n += 1
+        elif not es(c, ANIMA_GRIS):
+            return None
+    return n - 1 if n and es(cap.getpixel((x + 3, y + 3)), ANIMA_GRIS) else None
+
+
+def anima(a):
+    """anima X Y MINIMO MAXIMO NOMBRE CAPTURA... : en las capturas (hechas una detrás
+    de otra, a un segundo más o menos) se ve ANIMA.GIF pasando: los cuadros en su
+    orden, sin saltarse ninguno, y entre MINIMO y MAXIMO cambios en total"""
+    x, y, minimo, maximo = (int(v) for v in a[:4])
+    ks = [anima_cuadro(captura(c), x, y) for c in a[5:]]
+    ok = None not in ks
+    cambios = 0
+    if ok:
+        for p, q in zip(ks, ks[1:]):
+            paso = (q - p) % 4
+            ok = ok and paso <= 1
+            cambios += paso
+        ok = ok and minimo <= cambios <= maximo
+    print('  %s %s (se ven los cuadros %s)' % ('OK  ' if ok else 'FAIL', a[4], ' '.join('?' if k is None else str(k + 1) for k in ks)))
+    return 0 if ok else 1
+
+
 if __name__ == '__main__':
     orden = sys.argv[1] if len(sys.argv) > 1 else ''
     if orden == 'haz':
@@ -338,5 +533,11 @@ if __name__ == '__main__':
         sys.exit(guardada(sys.argv[2:]))
     if orden == 'impreso':
         sys.exit(impreso(sys.argv[2:]))
+    if orden == 'retoque':
+        sys.exit(retoque(sys.argv[2:]))
+    if orden == 'exacta':
+        sys.exit(exacta(sys.argv[2:]))
+    if orden == 'anima':
+        sys.exit(anima(sys.argv[2:]))
     print(__doc__)
     sys.exit(2)

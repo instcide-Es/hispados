@@ -2,11 +2,15 @@
 ;  MIRADOR.HVP - abrir un archivo y hacer su mapa de puntos
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  El archivo se lee entero a un bloque; el núcleo (nucleo.inc) dice qué es y
-;  cuánta memoria de trabajo quiere; las filas salen de una en una, en rojo,
-;  verde y azul, y cada una se pasa a la paleta (apaleta.inc) en el «mapa»,
-;  que es lo que se queda. Si la imagen es mayor que el tope (o no hay
-;  memoria para su mapa), se reduce al vuelo (reduce.inc, o el propio
+;  Del archivo se lee primero la cabecera (4 K) y se le enseña al núcleo
+;  (nucleo.inc). Si es un PNG, o un BMP o un TGA sin comprimir, el archivo se
+;  queda abierto y el formato va leyendo de él lo que necesita para cada fila
+;  («c_lector»): no llega a estar entero en memoria, así que puede ser mucho
+;  mayor que la memoria que hay. Los demás se leen enteros a un bloque. El
+;  núcleo dice cuánta memoria de trabajo quiere; las filas salen de una en
+;  una, en rojo, verde y azul, y cada una se pasa a la paleta (apaleta.inc)
+;  en el «mapa», que es lo que se queda. Si la imagen es mayor que el tope (o
+;  no hay memoria para su mapa), se reduce al vuelo (reduce.inc, o el propio
 ;  descodificador si es un JPEG). Si sobra memoria se guarda también el
 ;  original en color verdadero.
 ; =============================================================================
@@ -31,6 +35,7 @@ c_y         resd 1
 c_f_an      resd 1                  ; medidas de la imagen del archivo
 c_f_al      resd 1
 hay_arch    resb 1
+hay_man     resb 1                  ; el archivo sigue abierto (se lee según hace falta)
 hay_trab    resb 1
 hay_n_mapa  resb 1
 hay_n_orig  resb 1
@@ -42,13 +47,18 @@ f_camara    resb 68
 f_tomada    resb 24
 pal_mapa    resb 256                ; cada color de la paleta de la imagen, en la nuestra
 err_buf     resb 256
+c_man       resd 1                  ; el manejador del archivo abierto
+c_pos       resd 1                  ; por dónde va su puntero (-1: no se sabe)
+c_cab_n     resd 1                  ; octetos de cabecera leídos
+c_cab       resb MI_CAB             ; la cabecera
 %endmacro
 
 t_no_abrir  db "No se ha podido abrir el archivo.", 10
             db "Compruebe que el nombre está bien escrito y que el disco se lee.", 0
 t_no_leer   db "No se ha podido leer el archivo entero: el disco da error.", 0
 t_e_vacio   db "El archivo está vacío.", 0
-t_e_grande  db "El archivo es demasiado grande para Mirador (más de 64 MB).", 0
+t_e_grande  db "El archivo es demasiado grande para Mirador:", 10
+            db "pasa de 1 GB, o de 64 MB y no es un PNG, un BMP o un TGA sin comprimir.", 0
 t_e_memoria db "No hay memoria bastante para ver esta imagen.", 10
             db "Cierre otros programas y pruebe otra vez.", 0
 t_e_descon  db "Este archivo no es una imagen de las que Mirador conoce:", 10
@@ -125,6 +135,8 @@ pon_ruta:
 ; porqué a la vista (nada de un diálogo: pasando imágenes estorbaría)
 abre_archivo:
         pushad
+        call confirma_retoque       ; la de ahora, retocada y sin guardar: se pregunta
+        jc .x
         call pon_ruta
         call mini_sal
         mov dword [or_rot], 0       ; una imagen nueva: derecha
@@ -166,6 +178,7 @@ abre_archivo:
         call pon_titulo
         call dispone
         call inval
+.x:
         popad
         ret
 
@@ -208,6 +221,10 @@ suelta_imagen:
         HV mem_bloque_soltar
         mov byte [hay_orig], 0
 .w:
+        call an_olvida              ; (los cuadros de una animación son el bloque del mapa)
+        call des_suelta             ; y lo que hubiera para deshacer
+        mov byte [retocada], 0
+        call el_sal
         call suelta_vista
         call suelta_vbuf
         mov dword [av_txt], 0
@@ -279,64 +296,12 @@ carga:
         mov [c_cortada], al
         mov [c_k], eax
         mov dword [c_r], 1
+        mov [hay_man], al
         mov dword [c_err], t_no_abrir
         mov esi, ruta
-        xor al, al
-        HV dos_abrir
-        jc .mal
-        mov ebx, eax                ; EBX=el manejador
-        mov dword [c_err], t_no_leer
-        mov al, 2                   ; cuánto ocupa: el puntero, al final...
-        xor edx, edx
-        HV dos_puntero
-        jc .mal_cierra
-        mov [arch_tam], eax
-        xor al, al                  ; ...y otra vez al principio
-        xor edx, edx
-        HV dos_puntero
-        jc .mal_cierra
-        mov dword [c_err], t_e_vacio
-        mov ecx, [arch_tam]
-        test ecx, ecx
-        jz .mal_cierra
-        mov dword [c_err], t_e_grande
-        cmp ecx, ARCH_MAX
-        ja .mal_cierra
-        mov dword [c_err], t_e_memoria
-        add ecx, 64
-        HV mem_bloque
-        jc .mal_cierra
-        mov [arch_p], eax
-        mov [arch_h], edx
-        mov byte [hay_arch], 1
-        mov dword [c_err], t_no_leer
-        mov edi, eax                ; el archivo, a trozos (DOS no pasa de 64 K de una vez)
-.lee:
-        mov ecx, [arch_p]
-        add ecx, [arch_tam]
-        sub ecx, edi
-        jz .leido
-        cmp ecx, 16384
-        jbe .l1
-        mov ecx, 16384
-.l1:
-        HV dos_leer
-        jc .mal_cierra
-        test eax, eax
-        jz .mal_cierra              ; (se acaba antes de lo que dijo)
-        add edi, eax
-        jmp .lee
-.leido:
-        HV dos_cerrar
-        ; ---- qué es ----
-        movzx eax, byte [ajedrez]
-        xor eax, 1
-        mov [mi_fondo], eax
-        mov dword [mi_fondo_rgb], 0x00FFFFFF
-        mov esi, [arch_p]
-        mov ecx, [arch_tam]
-        mov edx, mi_abre
-        call nuc
+        call c_abre_arch            ; EAX=lo que dice el núcleo (-1: no se puede leer)
+        cmp eax, -1
+        je .mal
         test eax, eax
         jnz .mal_formato
         mov eax, [im_an]
@@ -587,6 +552,13 @@ carga:
         jz .v2
         mov dword [av_txt], t_av_cortado
 .v2:
+        cmp byte [hay_trab], 0      ; (la memoria de trabajo ya no hace falta)
+        je .v3
+        mov edx, [trab_h]
+        HV mem_bloque_soltar
+        mov byte [hay_trab], 0
+.v3:
+        call an_carga               ; una animación: sus cuadros, ahora que el archivo está aquí
         mov dword [c_err], 0
         jmp .limpia
 .mal_formato:
@@ -612,8 +584,6 @@ carga:
         mov byte [edi], 0
         mov dword [c_err], err_buf
         jmp .mal
-.mal_cierra:
-        HV dos_cerrar
 .mal:
         call suelta_imagen
 .limpia:
@@ -632,11 +602,7 @@ carga:
         mov edx, [trab_h]
         HV mem_bloque_soltar
 .l4:
-        cmp byte [hay_arch], 0
-        je .l5
-        mov edx, [arch_h]
-        HV mem_bloque_soltar
-.l5:
+        call c_suelta_arch
         mov eax, [c_err]
         mov [esp+28], eax
         popad
@@ -653,6 +619,185 @@ carga:
         test al, al
         jnz .cp1
 .cp9:
+        ret
+
+; -----------------------------------------------------------------------------
+;  El archivo: abrirlo, reconocerlo y leer de él
+; -----------------------------------------------------------------------------
+DISCO_MAX   equ 0x40000000          ; un archivo mayor no se intenta ni leyéndolo a trozos
+
+; ESI=la ruta: abre el archivo y se lo enseña al núcleo -> EAX=lo que dice
+; (ME_*; 0: se puede seguir con mi_prepara y las filas), o -1 si el archivo
+; no se puede leer ([c_err] dice por qué). Con 0, o el archivo se queda
+; abierto ([hay_man]) o está entero en un bloque ([hay_arch]): al acabar,
+; c_suelta_arch. Lo usan la imagen y las miniaturas
+c_abre_arch:
+        pushad
+        mov byte [hay_arch], 0
+        mov byte [hay_man], 0
+        xor al, al
+        HV dos_abrir
+        jc .mal
+        mov [c_man], eax
+        mov byte [hay_man], 1
+        mov ebx, eax                ; EBX=el manejador
+        mov dword [c_err], t_no_leer
+        mov al, 2                   ; cuánto ocupa: el puntero, al final...
+        xor edx, edx
+        HV dos_puntero
+        jc .mal
+        mov [arch_tam], eax
+        xor al, al                  ; ...y otra vez al principio
+        xor edx, edx
+        HV dos_puntero
+        jc .mal
+        mov dword [c_err], t_e_vacio
+        mov ecx, [arch_tam]
+        test ecx, ecx
+        jz .mal
+        mov dword [c_err], t_e_grande
+        cmp ecx, DISCO_MAX
+        ja .mal
+        ; ---- la cabecera, y qué dice el núcleo de ella ----
+        mov dword [c_err], t_no_leer
+        cmp ecx, MI_CAB
+        jbe .c1
+        mov ecx, MI_CAB
+.c1:
+        mov edi, c_cab
+        HV dos_leer
+        jc .mal
+        cmp eax, ecx
+        jne .mal                    ; (se acaba antes de lo que dijo)
+        mov [c_cab_n], eax
+        mov [c_pos], eax
+        movzx eax, byte [ajedrez]
+        xor eax, 1
+        mov [mi_fondo], eax
+        mov dword [mi_fondo_rgb], 0x00FFFFFF
+        mov dword [mi_lector], c_lector
+        mov esi, c_cab
+        mov ecx, [c_cab_n]
+        mov edx, c_abre_d
+        call nuc
+        cmp eax, ME_ENTERO
+        je .entero
+        test eax, eax               ; (lo ve leyendo del disco: se queda abierto; o no vale)
+        jz .dev
+        call c_suelta_arch
+        jmp .dev
+.entero:
+        ; ---- hay que tenerlo entero en memoria ----
+        mov dword [c_err], t_e_grande
+        mov ecx, [arch_tam]
+        cmp ecx, ARCH_MAX
+        ja .mal
+        mov dword [c_err], t_e_memoria
+        add ecx, 64
+        HV mem_bloque
+        jc .mal
+        mov [arch_p], eax
+        mov [arch_h], edx
+        mov byte [hay_arch], 1
+        mov dword [c_err], t_no_leer
+        mov edi, eax                ; lo que ya se ha leído, y el resto
+        mov esi, c_cab
+        mov ecx, [c_cab_n]
+        rep movsb
+        mov ebx, [c_man]
+        xor al, al
+        mov edx, [c_cab_n]
+        HV dos_puntero
+        jc .mal
+.lee:
+        mov ecx, [arch_p]
+        add ecx, [arch_tam]
+        sub ecx, edi
+        jz .leido
+        cmp ecx, 16384
+        jbe .l1
+        mov ecx, 16384
+.l1:
+        HV dos_leer
+        jc .mal
+        test eax, eax
+        jz .mal                     ; (se acaba antes de lo que dijo)
+        add edi, eax
+        jmp .lee
+.leido:
+        call c_cierra
+        mov esi, [arch_p]
+        mov ecx, [arch_tam]
+        mov edx, mi_abre
+        call nuc
+        test eax, eax
+        jz .dev
+        call c_suelta_arch
+.dev:
+        mov [esp+28], eax
+        popad
+        ret
+.mal:
+        call c_suelta_arch
+        mov dword [esp+28], -1
+        popad
+        ret
+
+; (interna, la llama «nuc») mi_abre_d, con el tamaño del archivo en EDX
+c_abre_d:
+        mov edx, [arch_tam]
+        jmp mi_abre_d
+
+; (interna) cierra el archivo, si sigue abierto. Conserva los registros
+c_cierra:
+        cmp byte [hay_man], 0
+        je .x
+        mov byte [hay_man], 0
+        push ebx
+        mov ebx, [c_man]
+        HV dos_cerrar
+        pop ebx
+.x:
+        ret
+
+; cierra el archivo y suelta su bloque, lo que haya. Conserva los registros
+c_suelta_arch:
+        call c_cierra
+        cmp byte [hay_arch], 0
+        je .x
+        mov byte [hay_arch], 0
+        pushad
+        mov edx, [arch_h]
+        HV mem_bloque_soltar
+        popad
+.x:
+        ret
+
+; lo que el núcleo llama para leer del archivo abierto: EAX=posición
+; EDI=destino ECX=cuántos -> EAX=los leídos
+c_lector:
+        push ebx
+        push edx
+        mov ebx, [c_man]
+        cmp eax, [c_pos]            ; (si ya está ahí, no se mueve el puntero)
+        je .l
+        mov edx, eax
+        xor al, al
+        HV dos_puntero
+        jc .mal
+        mov [c_pos], eax
+.l:
+        HV dos_leer
+        jc .mal
+        add [c_pos], eax
+        pop edx
+        pop ebx
+        ret
+.mal:
+        mov dword [c_pos], -1       ; (a saber dónde ha quedado)
+        xor eax, eax
+        pop edx
+        pop ebx
         ret
 
 ; (interna, con la pila del núcleo) la fila EAX del mapa nuevo: se pide al

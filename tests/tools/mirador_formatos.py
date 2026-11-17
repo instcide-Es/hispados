@@ -4,7 +4,7 @@
 uso: mirador_formatos.py [--rotos N] [--semilla S] [--guardar DIR] [--sin-jpeg]
 
 Toma el núcleo de Mirador TAL CUAL (nucleo.inc y un .inc por formato, con
-programas/comun/desinfla.inc y jpeg.inc), lo ensambla con NASM dentro de un
+programas/comun/desinfla_t.inc y jpeg.inc), lo ensambla con NASM dentro de un
 programa de Linux de 32 bits que lee archivos de imagen por la entrada y
 devuelve la imagen descodificada (rojo, verde y azul de cada punto, con lo
 transparente ya mezclado con el fondo), y lo compara punto a punto con lo que
@@ -139,10 +139,48 @@ _start:
         mov ecx, 12
         xor eax, eax
         rep stosd
-        mov eax, [cab]
+        mov eax, [cab]              ; (el bit 8: además, los cuadros de la animación)
+        and eax, 0xFF
         mov [mi_fondo], eax
         mov eax, [cab+4]
         mov [mi_fondo_rgb], eax
+        mov dword [tramos], 0
+        mov dword [cab_z], 0
+        test dword [cab], 0x200     ; el bit 9: sin el archivo entero en memoria. Se le da
+        jz .entero                  ; solo la cabecera (pegada a una página prohibida) y
+        mov eax, [cab+8]            ; una rutina que «lee del disco»
+        cmp eax, MI_CAB
+        jbe .cz1
+        mov eax, MI_CAB
+.cz1:
+        mov [cab_n], eax
+        call bloque
+        mov [cab_z], eax
+        mov [cab_b], edx
+        mov [cab_t], ecx
+        mov edi, eax
+        mov esi, [arch]
+        mov ecx, [cab_n]
+        rep movsb
+        mov dword [mi_lector], lector
+        mov dword [lecturas], 0
+        mov esi, [cab_z]
+        mov ecx, [cab_n]
+        mov edx, [cab+8]
+        mov ebx, 0x11223344
+        mov ebp, 0x55667788
+        call mi_abre_d
+        cmp ebx, 0x11223344
+        jne .reg
+        cmp ebp, 0x55667788
+        jne .reg
+        cmp esi, [cab_z]
+        jne .reg
+        cmp eax, ME_ENTERO          ; no puede ser: como haría el programa, entero en memoria
+        je .entero
+        mov dword [tramos], 1
+        jmp .reg_ok
+.entero:
         mov esi, [arch]
         mov ecx, [cab+8]
         mov ebx, 0x11223344
@@ -247,6 +285,14 @@ _start:
         inc eax
 .sin_fmt:
         mov [res+40], eax
+        mov eax, [tramos]           ; (y si se ha visto leyendo «del disco», y cuántas lecturas)
+        mov [res+41], al
+        mov eax, [lecturas]
+        cmp eax, 0xFFFF
+        jbe .lec
+        mov eax, 0xFFFF
+.lec:
+        mov [res+42], ax
         mov eax, [im_var]
         test eax, eax
         setnz byte [res+44]
@@ -264,12 +310,109 @@ _start:
         lea edx, [eax+eax*2]
         mov ecx, salida
         call escribe
+        ; ---- la animación: cuántos cuadros dice tener, lo que dura y las
+        ;      repeticiones; y cada cuadro compuesto (su tiempo y sus puntos) ----
+        test dword [cab], 0x100
+        jz .sin_anima
+        mov eax, [im_cuadros]
+        mov [res2], eax
+        mov eax, [im_dura]
+        mov [res2+4], eax
+        mov eax, [im_bucle]
+        mov [res2+8], eax
+        mov ecx, res2
+        mov edx, 12
+        call escribe
+        cmp dword [res], 0
+        jne .an_fin
+        cmp dword [im_cuadros], 2
+        jb .an_fin
+        call gif_an_mem
+        cmp eax, MAXMEM
+        ja .an_fin
+        mov [an_mem], eax
+        call bloque
+        mov [mem_b], edx
+        mov [mem_t], ecx
+        push eax
+        mov edi, eax
+        mov ecx, [an_mem]
+        mov al, 0xA5
+        rep stosb
+        pop edi
+        call gif_an_empieza
+.an_c:
+        call gif_an_cuadro
+        jc .an_s
+        mov [res2], eax
+        mov ecx, res2
+        mov edx, 4
+        call escribe
+        xor ebx, ebx
+        mov edi, salida
+.an_f:
+        cmp ebx, [im_al]
+        jae .an_e
+        mov eax, ebx
+        push ebx
+        push edi
+        call gif_an_fila
+        pop edi
+        pop ebx
+        mov eax, [im_an]
+        lea eax, [eax+eax*2]
+        add edi, eax
+        inc ebx
+        jmp .an_f
+.an_e:
+        mov eax, [im_an]
+        mul dword [im_al]
+        lea edx, [eax+eax*2]
+        mov ecx, salida
+        call escribe
+        jmp .an_c
+.an_s:
+        mov edx, [mem_b]
+        mov ecx, [mem_t]
+        call suelta
+.an_fin:
+        mov dword [res2], -1
+        mov ecx, res2
+        mov edx, 4
+        call escribe
+.sin_anima:
         mov edx, [arch_b]
         mov ecx, [arch_t]
         call suelta
+        cmp dword [cab_z], 0
+        je .caso
+        mov edx, [cab_b]
+        mov ecx, [cab_t]
+        call suelta
         jmp .caso
 
-%%include "desinfla.inc"
+; «lee del disco»: EAX=posición EDI=destino ECX=cuántos -> EAX=los leídos (del
+; archivo que hay en [arch]: nunca más allá de su final)
+lector:
+        inc dword [lecturas]
+        cmp eax, [cab+8]
+        jae .nada
+        mov edx, [cab+8]
+        sub edx, eax
+        cmp ecx, edx
+        jbe .l1
+        mov ecx, edx
+.l1:
+        mov esi, [arch]
+        add esi, eax
+        mov eax, ecx
+        rep movsb
+        ret
+.nada:
+        xor eax, eax
+        ret
+
+%%include "desinfla_t.inc"
 %%include "jpeg.inc"
 %%include "nucleo.inc"
 %%include "bmp.inc"
@@ -284,6 +427,14 @@ _start:
         section .bss
 cab     resd 3
 res     resd 12
+res2    resd 3
+an_mem  resd 1
+tramos  resd 1
+lecturas resd 1
+cab_n   resd 1
+cab_z   resd 1
+cab_b   resd 1
+cab_t   resd 1
 arch    resd 1
 arch_b  resd 1
 arch_t  resd 1
@@ -293,7 +444,7 @@ bl_n    resd 1
 bl_util resd 1
 bl_tam  resd 1
 bl_base resd 1
-        DESINFLA_BSS
+        DESINFLA_T_BSS
         JPEG_BSS
         NUCLEO_BSS
         BMP_BSS
@@ -323,7 +474,7 @@ def res(ok, texto):
 
 def monta(tmp, con_jpeg=True):
     for d, fs in (('mirador', ['nucleo', 'bmp', 'ico', 'pcx', 'gif', 'png', 'tga', 'pnm', 'jpg']),
-                  ('comun', ['desinfla', 'jpeg'])):
+                  ('comun', ['desinfla_t', 'jpeg'])):
         for f in fs:
             s = open(os.path.join(RAIZ, 'programas', d, f + '.inc'), encoding='utf-8').read()
             open(os.path.join(tmp, f + '.inc'), 'w', encoding='cp437', errors='replace').write(s)
@@ -350,20 +501,48 @@ def corre(prog, casos, espera=600):
     except subprocess.TimeoutExpired as e:
         sal = e.stdout or b''
     out, p = [], 0
+    roto = False
     for d, f, l in casos:
-        if p + 48 > len(sal):
+        if roto or p + 48 > len(sal):
             out.append(None)
             continue
         r = Res()
         (r.err, r.an, r.al, r.clase, r.bits, r.ncol, r.alfa, r.aviso, r.filas, r.mal, r.fmt, r.var) = struct.unpack_from('<12I', sal, p)
         r.orienta, r.camara, r.tomada = (r.var >> 8) & 255, (r.var >> 16) & 255, (r.var >> 24) & 255
         r.var &= 0xFF
+        r.tramos, r.lecturas = (r.fmt >> 8) & 255, r.fmt >> 16      # visto sin tenerlo entero en memoria
+        r.fmt &= 0xFF
         n = r.filas * r.an * 3
         r.rgb = sal[p + 48:p + 48 + n]
         p += 48 + n
         if len(r.rgb) != n:
             out.append(None)
             continue
+        if f & 0x100:           # con los cuadros de la animación: [(milisegundos, puntos)]
+            if p + 16 > len(sal):
+                out.append(None)
+                roto = True
+                continue
+            r.cuadros, r.dura, r.bucle = struct.unpack_from('<IIi', sal, p)
+            p += 12
+            r.anima = []
+            n = r.an * r.al * 3
+            while True:
+                if p + 4 > len(sal):
+                    roto = True
+                    break
+                ms = struct.unpack_from('<I', sal, p)[0]
+                p += 4
+                if ms == 0xFFFFFFFF:
+                    break
+                if p + n > len(sal):
+                    roto = True
+                    break
+                r.anima.append((ms, sal[p:p + n]))
+                p += n
+            if roto:
+                out.append(None)
+                continue
         out.append(r)
     return out
 
@@ -753,6 +932,251 @@ def haz_gif(rnd, an, al, bits=8, entre=False, transp=False, local=False, v87=Fal
     return d, esperado
 
 
+def haz_gif_animado(rnd, clase=None, limpio=False):
+    """un GIF animado al azar -> (datos, ancho, alto, cuadros, bucle, con_pillow)
+    cuadros: [(milisegundos, [(r, g, b, a)])], cada uno ya compuesto como dice
+    programas/mirador/gif.inc; bucle: -1 si no lo dice. «con_pillow»: Pillow
+    compone igual (fuera quedan sus rarezas: ver prueba_anima).
+    clase: 'T' todos los cuadros con color transparente; 'O' ninguno; 'M' mezcla
+    limpio: sin nada de lo que Pillow hace a su manera"""
+    clase = clase or rnd.choice('TO' if limpio else 'TTOOM')
+    an, al = rnd.choice((1, 2, 5, 8, 13, 16, 24, 33, 40)), rnd.choice((1, 3, 6, 8, 11, 16, 20, 31))
+    bits = rnd.choice((1, 2, 3, 4, 6, 8))
+    ncol = 1 << bits
+    hay_global = limpio or rnd.random() < 0.85
+    gpal = [(rnd.getrandbits(8), rnd.getrandbits(8), rnd.getrandbits(8)) for _ in range(ncol)]
+    fondo = rnd.randrange(ncol) if hay_global else 0
+    pil = True
+    d = b'GIF89a' + struct.pack('<HHBBB', an, al, ((0x80 | (bits - 1)) if hay_global else 0) | 0x70, fondo, 0)
+    if hay_global:
+        d += b''.join(bytes(c) for c in gpal)
+    bucle = rnd.choice((-1, -1, 0, 0, 1, 3, 65535))
+    if bucle >= 0:
+        d += b'\x21\xff\x0bNETSCAPE2.0\x03\x01' + struct.pack('<H', bucle) + b'\0'
+    n = rnd.choice((2, 2, 3, 3, 4, 5, 7, 12))
+    lienzo = None
+    antes_disp = 0          # lo que pidió el cuadro anterior, su rectángulo y con qué se borra
+    antes_rect = None
+    antes_fondo = None
+    copia = None
+    efectivo = 0            # (Pillow: un «disposal» 0 deja puesto el del cuadro anterior)
+    cuadros = []
+    for k in range(n):
+        # ---- cómo es este cuadro ----
+        if k == 0 and (clase == 'O' or rnd.random() < 0.5) or rnd.random() < 0.3:
+            fx, fy, fw, fh = 0, 0, an, al
+        else:
+            fx, fy = rnd.randrange(an), rnd.randrange(al)
+            fw, fh = rnd.randint(1, an - fx), rnd.randint(1, al - fy)
+            if not limpio and rnd.random() < 0.08:             # se sale de la pantalla lógica: se recorta (Pillow agranda la imagen)
+                fw += rnd.randint(1, 5)
+                fh += rnd.randint(0, 5)
+                pil = False
+        local = (not hay_global) or rnd.random() < 0.3
+        if not hay_global and rnd.random() < 0.1:
+            local = False                        # sin paleta ninguna: grises
+            pil = False
+        lbits = rnd.choice((1, 2, 4, 5, 8)) if local else bits
+        lncol = 1 << lbits
+        pal = [(rnd.getrandbits(8), rnd.getrandbits(8), rnd.getrandbits(8)) for _ in range(lncol)] if local else (
+            gpal if hay_global else [(i, i, i) for i in range(256)])
+        con_ctl = limpio or rnd.random() < 0.92
+        transp = clase == 'T' or (clase == 'M' and rnd.random() < 0.5 and (k > 0 or True))
+        if clase == 'M' and k == 0:
+            transp = True
+        if not con_ctl and clase != 'T':
+            transp = False
+        if clase == 'T':
+            con_ctl = True
+        t = rnd.randrange(lncol) if transp else None
+        disp = rnd.choice((0, 1, 1, 2, 2, 3, 3)) if con_ctl else 0
+        if limpio and (disp == 0 and efectivo >= 2 or disp == 3 and k == 0 and clase == 'O'):
+            disp = 1
+        if limpio and disp == 2 and not transp and fondo >= lncol:
+            disp = 1
+        if con_ctl and not limpio and rnd.random() < 0.03:
+            disp = rnd.choice((4, 5, 6, 7))      # sin definir: como «dejarlo»
+            pil = False
+        cs = rnd.choice((0, 1, 2, 3, 5, 10, 20, 100, 500)) if con_ctl else -1
+        entre = rnd.random() < 0.3
+        if rnd.random() < 0.5:
+            idx = [rnd.randrange(lncol) for _ in range(fw * fh)]
+        else:
+            idx = [((x // 3) + (y // 2) * 2 + k) % lncol for y in range(fh) for x in range(fw)]
+        if transp and rnd.random() < 0.8:        # con huecos por los que se ve lo de debajo
+            idx = [t if ((x + k) // 3 + y // 2) % 3 == 0 else v for (v, (y, x)) in zip(idx, ((y, x) for y in range(fh) for x in range(fw)))]
+        # ---- lo que dice Pillow que no hace igual (y aquí se sabe por qué) ----
+        if disp == 0 and efectivo >= 2:
+            pil = False                          # el «disposal» 0 hereda el anterior
+        if disp:
+            efectivo = disp
+        if clase == 'M' and not transp:
+            pil = False                          # mezcla lienzos con y sin opacidad
+        if clase == 'O' and k == 0 and disp == 3:
+            pil = False                          # el primer cuadro, «como antes» y sin transparente: lo deja
+        if (fondo if hay_global else 0) >= lncol and disp == 2 and not transp:
+            pil = False                          # el color de fondo no está en la paleta del cuadro
+        # ---- al archivo ----
+        if con_ctl:
+            d += b'\x21\xf9\x04' + bytes(((disp << 2) | (1 if transp else 0),)) + struct.pack('<H', cs) + bytes((t if transp else 0, 0))
+        if rnd.random() < 0.2:
+            d += b'\x21\xfe' + trozos(b'un comentario entre cuadros', rnd)
+        d += b'\x2c' + struct.pack('<HHHHB', fx, fy, fw, fh, (0x40 if entre else 0) | ((0x80 | (lbits - 1)) if local else 0))
+        if local:
+            d += b''.join(bytes(c) for c in pal)
+        orden = list(range(fh))
+        if entre:
+            orden = [y for a, b in ((0, 8), (4, 8), (2, 4), (1, 2)) for y in range(a, fh, b)]
+        flujo = [idx[y * fw + x] for y in orden for x in range(fw)]
+        minimo = max(2, lbits)
+        d += bytes((minimo,)) + trozos(gif_lzw(flujo, minimo, rnd), rnd)
+        # ---- el modelo: como lo compone gif.inc ----
+        color = lambda i: (pal[i] + (255,)) if i < len(pal) else (0, 0, 0, 255)
+        borra = (0, 0, 0, 0) if transp else color(fondo)
+        if k == 0:
+            lienzo = [borra] * (an * al)
+        elif antes_disp == 2:
+            x0, y0, w, h = antes_rect
+            for y in range(y0, y0 + h):
+                for x in range(x0, x0 + w):
+                    lienzo[y * an + x] = antes_fondo
+        elif antes_disp == 3:
+            lienzo = list(copia)
+        rx, ry = min(fx, an), min(fy, al)
+        rw, rh = min(fw, an - rx), min(fh, al - ry)
+        antes_disp, antes_rect, antes_fondo = disp, (rx, ry, rw, rh), borra
+        if disp == 3:
+            copia = list(lienzo)
+        for y in range(rh):
+            for x in range(rw):
+                i = idx[y * fw + x]
+                if i != t:
+                    lienzo[(ry + y) * an + rx + x] = color(i)
+        cuadros.append(((cs if cs >= 2 else 10) * 10, list(lienzo)))
+    d += b'\x3b'
+    return d, an, al, cuadros, bucle, pil
+
+
+def pillow_cuadros(d):
+    """los cuadros de un GIF como los compone Pillow: [(duración o None, [(r, g, b, a)])]"""
+    im = Image.open(io.BytesIO(d))
+    out = []
+    try:
+        k = 0
+        while True:
+            im.seek(k)
+            im.load()
+            c = im.convert('RGBA')
+            out.append((im.info.get('duration'), list(c.get_flattened_data() if hasattr(c, 'get_flattened_data') else c.getdata()),
+                        im.info.get('loop')))
+            k += 1
+    except EOFError:
+        pass
+    return out
+
+
+def prueba_anima(prog, rnd, cuantos=260):
+    """GIF animados: cada cuadro compuesto, punto a punto contra el modelo de la
+    prueba (que es lo que dice gif.inc) y, donde Pillow compone igual, contra
+    Pillow. Pillow tiene rarezas que no se siguen: un «disposal» 0 hereda el
+    del cuadro anterior; mezcla mal cuadros con y sin color transparente;
+    agranda la imagen si un cuadro se sale; y al primer cuadro sin
+    transparente no le hace el «como antes»."""
+    casos, metas = [], []
+    n_pil = 0
+    for i in range(cuantos):
+        d, an, al, cuadros, bucle, pil = haz_gif_animado(rnd, 'TOM'[i % 3] if i < 60 else None, limpio=(i >= 60 and i % 2 == 0))
+        if pil:
+            n_pil += 1
+            try:
+                pc = pillow_cuadros(d)
+            except Exception as e:
+                pc = None
+                res(False, 'GIF animado %d: Pillow no lo abre (%s)' % (i, e))
+            if pc is not None:
+                mal = None
+                if len(pc) != len(cuadros):
+                    mal = 'Pillow ve %d cuadros y son %d' % (len(pc), len(cuadros))
+                else:
+                    for k, ((dur, px, bu), (ms, e)) in enumerate(zip(pc, cuadros)):
+                        if any(a != b and not (a[3] == 0 and b[3] == 0) for a, b in zip(px, e)):
+                            mal = 'cuadro %d: Pillow no compone lo mismo que el modelo de la prueba' % k
+                            break
+                        if dur is not None and dur >= 20 and dur != ms:
+                            mal = 'cuadro %d: Pillow dice %d ms y el modelo %d' % (k, dur, ms)
+                            break
+                    if not mal and pc[0][2] is not None and pc[0][2] != bucle:
+                        mal = 'Pillow dice %s repeticiones y son %d' % (pc[0][2], bucle)
+                res(not mal, 'GIF animado %d: %s' % (i, mal))
+        for fondo, liso in ((0x100, 0), (0x101, rnd.getrandbits(24))):
+            casos.append((d, fondo, liso))
+            metas.append((i, an, al, cuadros, bucle, fondo & 1, liso))
+    R = corre(prog, casos)
+    bien = 0
+    for r, (i, an, al, cuadros, bucle, fondo, liso) in zip(R, metas):
+        nombre = 'GIF animado %d (%dx%d, %d cuadros)' % (i, an, al, len(cuadros))
+        if r is None:
+            res(False, nombre + ': el programa se ha parado')
+            break
+        mal = []
+        if r.err or r.mal:
+            mal.append('error %d, registros o centinela %d' % (r.err, r.mal))
+        elif (r.an, r.al) != (an, al):
+            mal.append('mide %dx%d' % (r.an, r.al))
+        else:
+            if r.cuadros != len(cuadros):
+                mal.append('dice %d cuadros' % r.cuadros)
+            if r.dura != sum(ms for ms, _ in cuadros):
+                mal.append('dice que dura %d ms y son %d' % (r.dura, sum(ms for ms, _ in cuadros)))
+            if r.bucle != bucle:
+                mal.append('dice %d repeticiones y son %d' % (r.bucle, bucle))
+            if len(r.anima) != len(cuadros):
+                mal.append('da %d cuadros' % len(r.anima))
+            else:
+                for k, ((ms, rgb), (ems, e)) in enumerate(zip(r.anima, cuadros)):
+                    if ms != ems:
+                        mal.append('cuadro %d: %d ms y son %d' % (k, ms, ems))
+                        break
+                    if rgb != mezcla(e, an, al, fondo, liso):
+                        mal.append('cuadro %d: no es el que tiene que ser' % k)
+                        break
+            if r.rgb != mezcla(cuadros[0][1], an, al, fondo, liso):
+                mal.append('la imagen sola no es el primer cuadro')
+            if r.aviso:
+                mal.append('avisa de que está cortado')
+        bien += not mal
+        res(not mal, '%s: %s' % (nombre, '; '.join(mal)))
+    print('  %s GIF animados: %d de %d, cada cuadro compuesto punto a punto (todos los «disposal», transparencia, cuadros parciales, '
+          'paletas propias, entrelazados; %d animaciones, también contra Pillow)' % ('OK  ' if bien == len(metas) else 'FAIL', bien, len(metas), n_pil))
+    # ---- cortados: los cuadros que da son los primeros, enteros; ni uno a medias ----
+    casos, metas = [], []
+    for i in range(60):
+        d, an, al, cuadros, bucle, pil = haz_gif_animado(rnd)
+        for _ in range(4):
+            corte = rnd.randrange(14, len(d))
+            casos.append((d[:corte], 0x101, 0x445566))
+            metas.append((i, an, al, cuadros, corte, len(d)))
+    R = corre(prog, casos)
+    bien = 0
+    for r, (i, an, al, cuadros, corte, largo) in zip(R, metas):
+        if r is None:
+            res(False, 'GIF animado %d cortado en %d de %d: el programa se ha parado' % (i, corte, largo))
+            break
+        mal = []
+        if r.mal or r.err not in (0, 1):
+            mal.append('error %d, registros o centinela %d' % (r.err, r.mal))
+        elif r.err == 0:
+            if len(r.anima) > len(cuadros):
+                mal.append('da más cuadros de los que hay')
+            for k, (ms, rgb) in enumerate(r.anima):
+                if k < len(cuadros) and rgb != mezcla(cuadros[k][1], an, al, 1, 0x445566):
+                    mal.append('el cuadro %d no es el que tiene que ser' % k)
+                    break
+        bien += not mal
+        res(not mal, 'GIF animado %d cortado en %d de %d: %s' % (i, corte, largo, '; '.join(mal)))
+    print('  %s GIF animados cortados: %d de %d dan solo cuadros enteros y buenos' % ('OK  ' if bien == len(metas) else 'FAIL', bien, len(metas)))
+
+
 # ----------------------------------------------------------------------------
 #  PNG
 # ----------------------------------------------------------------------------
@@ -1059,6 +1483,12 @@ def casos_buenos(rnd):
         an, al = tam()
         pon('BMP 32 bits con opacidad', 'BMP', an, al, haz_bmp(rnd, an, al, 32, alfa=True, cab=124))
     pon('BMP grande de 24 bits', 'BMP', 400, 300, haz_bmp(rnd, 400, 300, 24))
+    pon('BMP grande de 8 bits, de arriba abajo', 'BMP', 500, 300, haz_bmp(rnd, 500, 300, 8, 0, True, clase='azar'))
+    pon('BMP grande de 1 bit', 'BMP', 2000, 60, haz_bmp(rnd, 2000, 60, 1, clase='azar'))
+    pon('BMP grande de 4 bits, cabecera 12', 'BMP', 640, 100, haz_bmp(rnd, 640, 100, 4, cab=12))
+    pon('BMP grande de 32 bits con opacidad', 'BMP', 200, 150, haz_bmp(rnd, 200, 150, 32, alfa=True, cab=124))
+    pon('BMP grande de 16 bits 5-6-5', 'BMP', 400, 100, haz_bmp(rnd, 400, 100, 16, m565=True))
+    pon('BMP muy alto y estrecho (más filas que caben en un bloque)', 'BMP', 3, 3000, haz_bmp(rnd, 3, 3000, 24))
     pon('BMP grande RLE8', 'BMP', 500, 333, haz_bmp(rnd, 500, 333, 8, 1))
     # ---- PCX ----
     for rep in range(4):
@@ -1106,6 +1536,11 @@ def casos_buenos(rnd):
     for nivel in (0, 1, 9):
         pon('PNG grande, compresión %d' % nivel, 'PNG', 300, 200, haz_png(rnd, 300, 200, 2, 8, nivel=nivel, clase='liso'))
     pon('PNG grande con Adam7 y opacidad', 'PNG', 257, 199, haz_png(rnd, 257, 199, 6, 8, entre=True, clase='liso'))
+    pon('PNG grande que no se comprime', 'PNG', 300, 200, haz_png(rnd, 300, 200, 2, 8, nidat=7, clase='azar'))
+    pon('PNG grande de 16 bits con opacidad', 'PNG', 150, 120, haz_png(rnd, 150, 120, 6, 16, nidat=3, clase='azar'), pillow=False)
+    pon('PNG grande con paleta y tRNS', 'PNG', 500, 300, haz_png(rnd, 500, 300, 3, 8, trns=True, clase='azar'))
+    pon('PNG grande de 1 bit', 'PNG', 2000, 100, haz_png(rnd, 2000, 100, 0, 1, clase='azar'))
+    pon('PNG grande con Adam7 que no se comprime', 'PNG', 300, 200, haz_png(rnd, 300, 200, 2, 8, entre=True, nidat=5, clase='azar'))
     for an, al in ((1, 1), (2, 1), (1, 2), (3, 3), (4, 5), (5, 4), (8, 8), (9, 9)):
         pon('PNG Adam7 de %dx%d' % (an, al), 'PNG', an, al, haz_png(rnd, an, al, 2, 8, entre=True))
         pon('PNG Adam7 de %dx%d, 1 bit' % (an, al), 'PNG', an, al, haz_png(rnd, an, al, 0, 1, entre=True))
@@ -1124,6 +1559,11 @@ def casos_buenos(rnd):
                         'TGA', an, al, haz_tga(rnd, an, al, tipo, bits, rle, arriba, der, pb, alfa, nombre=nom),
                         pillow=(not nom and not der and not rle and not (bits == 32 and not alfa) and bits not in (15, 16) and not (tipo == 1 and pb != 24)))
     pon('TGA grande RLE de 24 bits', 'TGA', 320, 240, haz_tga(rnd, 320, 240, 2, 24, rle=True))
+    pon('TGA grande de 24 bits', 'TGA', 300, 200, haz_tga(rnd, 300, 200, 2, 24))
+    pon('TGA grande de 16 bits, de derecha a izquierda', 'TGA', 300, 100, haz_tga(rnd, 300, 100, 2, 16, derecha=True), pillow=False)
+    pon('TGA grande de 32 bits con opacidad, de arriba abajo', 'TGA', 200, 200, haz_tga(rnd, 200, 200, 2, 32, arriba=True, alfa=True))
+    pon('TGA grande con paleta', 'TGA', 400, 150, haz_tga(rnd, 400, 150, 1, 8))
+    pon('TGA grande de grises', 'TGA', 500, 100, haz_tga(rnd, 500, 100, 3, 8))
     # ---- PNM ----
     for rep in range(3):
         for tipo in (1, 2, 3, 4, 5, 6):
@@ -1160,13 +1600,25 @@ def prueba_buenos(prog, rnd, guardar):
             elif pr[0] != (an, al) or pr[1] != [tuple(p) for p in e]:
                 dif = sum(1 for a, b in zip(pr[1], e) if tuple(a) != tuple(b)) if pr[0] == (an, al) else -1
                 res(False, '%s: Pillow no ve lo mismo que dice el escritor de la prueba (%d puntos distintos)' % (nombre, dif))
-        for fondo, liso in ((0, 0), (1, rnd.getrandbits(24))):
+        # (0x200: sin el archivo entero en memoria; se le da la cabecera y lee «del disco»)
+        for fondo, liso in ((0, 0), (1, rnd.getrandbits(24)), (0x200, 0), (0x201, rnd.getrandbits(24))):
             entradas.append((d, fondo, liso))
-            metas.append((nombre, fmt, an, al, mezcla(e, an, al, fondo, liso), any(p[3] != 255 for p in e)))
+            metas.append((nombre + (' (leído del disco)' if fondo & 0x200 else ''), fmt, an, al,
+                          mezcla(e, an, al, fondo & 1, liso), any(p[3] != 255 for p in e), fondo & 0x200, len(d)))
     R = corre(prog, entradas)
-    for r, (nombre, fmt, an, al, rgb, alfa) in zip(R, metas):
-        c = por_fmt.setdefault(fmt, [0, 0])
+    for r, (nombre, fmt, an, al, rgb, alfa, disco, largo) in zip(R, metas):
+        c = por_fmt.setdefault(fmt, [0, 0, 0, 0])
         c[0] += 1
+        if r is not None and disco:
+            c[2] += r.tramos
+            c[3] += 1 if r.tramos and r.lecturas else 0
+            # lo que tiene que poder verse sin tenerlo entero en memoria: todos los
+            # PNG; y los BMP y los TGA que no van comprimidos
+            debe = fmt == 'PNG' or (fmt in ('BMP', 'TGA') and 'RLE' not in nombre)
+            if bool(r.tramos) != debe:
+                res(False, '%s: %s' % (nombre, 'no se ha podido ver sin leerlo entero' if debe else 'dice que se puede ver sin leerlo entero'))
+            if r.tramos and largo > 4096 and fmt != 'PNG' and r.lecturas * 16384 > largo + 4 * 32768:
+                res(False, '%s: %d lecturas del disco para %d octetos (se esperaban bloques de 32 K)' % (nombre, r.lecturas, largo))
         if r is None:
             res(False, '%s: el programa se ha parado (¿un cuelgue o un acceso fuera de sitio?)' % nombre)
             break
@@ -1195,8 +1647,9 @@ def prueba_buenos(prog, rnd, guardar):
         if mal:
             c[1] += 1
     for fmt in ('BMP', 'PCX', 'GIF', 'PNG', 'TGA', 'ICO', 'PNM'):
-        n, m = por_fmt.get(fmt, (0, 0))
-        print('  %s %s: %d imágenes punto a punto%s' % ('OK  ' if not m and n else 'FAIL', fmt, n, '' if not m else ', %d mal' % m))
+        n, m, t, tl = por_fmt.get(fmt, (0, 0, 0, 0))
+        print('  %s %s: %d imágenes punto a punto%s%s' % ('OK  ' if not m and n else 'FAIL', fmt, n, '' if not m else ', %d mal' % m,
+              '' if not t else ' (%d de ellas, sin el archivo entero en memoria; %d, leyendo más allá de la cabecera)' % (t, tl)))
     return L
 
 
@@ -1342,8 +1795,9 @@ def prueba_cortados(prog, rnd, L):
     for fmt, cs in elegidos.items():
         for nombre, fmt, d, an, al, e, pil in cs:
             for corte in (len(d) * 9 // 10, len(d) * 2 // 3, len(d) // 2, len(d) - 1):
-                entradas.append((d[:corte], 1, 0x112233))
-                metas.append((nombre, fmt, an, al, mezcla(e, an, al, 1, 0x112233), corte, len(d)))
+                for disco in (0, 0x200):
+                    entradas.append((d[:corte], 1 | disco, 0x112233))
+                    metas.append((nombre + (' (leído del disco)' if disco else ''), fmt, an, al, mezcla(e, an, al, 1, 0x112233), corte, len(d)))
     R = corre(prog, entradas)
     bien = n = 0
     for r, (nombre, fmt, an, al, rgb, corte, largo) in zip(R, metas):
@@ -1372,6 +1826,11 @@ def prueba_cortados(prog, rnd, L):
 def prueba_rotos(prog, rnd, L, cuantos, con_jpeg=True):
     """archivos estropeados al azar: ni un cuelgue ni un acceso fuera de sitio"""
     base = [c for c in L if len(c[2]) < 60000]
+    base += [c for c in L if 'grande' in c[0] and c[1] in ('PNG', 'BMP', 'TGA') and len(c[2]) < 400000] * 3    # (y de los que pasan de la cabecera)
+    ra = random.Random(7)       # y GIF animados (con sus cuadros: se piden todos)
+    for _ in range(40):
+        g = haz_gif_animado(ra)
+        base.append(('GIF animado', 'GIF', g[0], g[1], g[2], None, False))
     if con_jpeg:        # y JPEG con su EXIF, que también se lee
         j = jpeg_base()
         base += [('JPEG con EXIF', 'JPEG', con_exif(j, o, mm), 40, 24, None, False) for o in (1, 6) for mm in (False, True)] * 12
@@ -1405,7 +1864,8 @@ def prueba_rotos(prog, rnd, L, cuantos, con_jpeg=True):
             else:                                           # un bit
                 p = rnd.randrange(len(b))
                 b[p] ^= 1 << rnd.randrange(8)
-            lote.append((bytes(b), rnd.getrandbits(1), rnd.getrandbits(24)))
+            lote.append((bytes(b), rnd.getrandbits(1) | (0x100 if nombre == 'GIF animado' else 0) | (0x200 if rnd.getrandbits(1) else 0),
+                         rnd.getrandbits(24)))
             metas.append((nombre, fmt))
         R = corre(prog, lote, espera=300)
         for i, (r, (nombre, fmt)) in enumerate(zip(R, metas)):
@@ -1441,6 +1901,7 @@ def main():
         if '--sin-jpeg' not in a:
             prueba_jpeg(prog, rnd)
             prueba_exif(prog)
+        prueba_anima(prog, random.Random(semilla + 2))
         prueba_no_admitidos(prog, rnd)
         prueba_cortados(prog, rnd, L)
         if rotos:

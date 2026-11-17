@@ -93,7 +93,25 @@ copiar:
 ;  Guardar: ECX=O_GUARDAR (BMP, de 24 bits si se puede), O_GUARDAR8 (BMP de
 ;  256 colores), O_GUARDA_PNG u O_GUARDA_PCX (guarda.inc)
 ; =============================================================================
+;  Una imagen retocada, una vez guardada, pasa a ser la que se ve: se abre el
+;  archivo que se acaba de escribir (así lo que se ve es lo que hay en el disco)
 guardar:
+        call guarda_haz
+        jc .x
+        cmp byte [retocada], 0
+        je .x
+        pushad
+        mov byte [retocada], 0
+        mov esi, ruta2
+        mov edi, nom_tmp
+        mov ecx, 132
+        rep movsb
+        call abre_archivo
+        popad
+.x:
+        ret
+; lo mismo, sin más: CF=1 si no se ha guardado (se ha cancelado o no se ha podido)
+guarda_haz:
         pushad
         mov dword [sal_24], 0
         mov dword [sal_fmt], 0
@@ -205,8 +223,14 @@ guardar:
 .bmp:
         call escribe_bmp
 .escrita:
+        jnc .bien
         mov esi, t_no_guardar
-        jc .dice
+        call aviso
+.x:
+        popad
+        stc
+        ret
+.bien:
         mov byte [lst_fuerza], 1    ; la carpeta ha cambiado
         call lista_carpeta
         call inval
@@ -216,8 +240,8 @@ guardar:
         mov esi, t_guardado8
 .dice:
         call aviso
-.x:
         popad
+        clc
         ret
 
 ; escribe la imagen en ruta2: de 24 bits si [sal_24]; si no, de 8. CF=1 si
@@ -614,6 +638,7 @@ informacion:
         mov al, 10
         stosb
 .sin_tomada:
+        call an_info
         mov esi, t_i_mem
         call hvl_cad
         mov eax, [ma_an]
@@ -645,6 +670,13 @@ informacion:
         mov esi, t_i_cortada
         call hvl_cad
 .m3:
+        cmp byte [retocada], 0
+        je .m4
+        mov al, 10
+        stosb
+        mov esi, t_i_retoc
+        call hvl_cad
+.m4:
         mov byte [edi], 0
         mov ebp, [ven]
         mov esi, linea

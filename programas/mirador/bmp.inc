@@ -10,14 +10,17 @@
 ;  negativo). No: los que llevan dentro un JPEG o un PNG, ni el Huffman de
 ;  OS/2 (se dice).
 ;
-;  Sin comprimir, cada fila se toma de su sitio en el archivo. Uno con RLE se
-;  descomprime entero a la memoria de trabajo (un octeto por punto).
+;  Sin comprimir, cada fila se toma de su sitio en el archivo con mi_trozo:
+;  no hace falta tenerlo entero en memoria (un BMP grande se lee del disco
+;  fila a fila). Uno con RLE se descomprime entero a la memoria de trabajo (un
+;  octeto por punto), y ese sí tiene que estar entero en memoria.
 ; =============================================================================
 %macro BMP_BSS 0
             alignb 4
 bmp_dat     resd 1
 bmp_fin     resd 1
-bmp_px      resd 1                  ; dónde empiezan los puntos
+bmp_px      resd 1                  ; dónde empiezan los puntos (con RLE: en memoria)
+bmp_px_o    resd 1                  ; y en qué posición del archivo
 bmp_bits    resd 1
 bmp_comp    resd 1
 bmp_paso    resd 1                  ; octetos de una fila en el archivo
@@ -36,6 +39,28 @@ bmp_detecta:
         jb .no
         cmp word [esi], 'BM'
         jne .no
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; ¿se puede ver sin tenerlo entero en memoria? Sí, si no va comprimido con
+; RLE (y la cabecera no es un disparate: la paleta cae siempre en los
+; primeros 2.078 octetos)
+bmp_tramos:
+        cmp ecx, 34
+        jb .no
+        mov eax, [esi+14]
+        cmp eax, 1024
+        ja .no
+        cmp eax, 20
+        jb .si
+        mov eax, [esi+30]
+        dec eax
+        cmp eax, 1
+        jbe .no
+.si:
         clc
         ret
 .no:
@@ -295,6 +320,7 @@ bmp_abre:
         sub ecx, [bmp_dat]
         cmp eax, ecx
         ja .roto
+        mov [bmp_px_o], eax
         add eax, [bmp_dat]
         mov [bmp_px], eax
         mov eax, [im_an]
@@ -303,6 +329,7 @@ bmp_abre:
         shr eax, 5
         shl eax, 2
         mov [bmp_paso], eax
+        mov [im_buf_n], eax         ; (lo más que se pide de una vez: una fila)
         mov eax, [bmp_comp]
         dec eax
         cmp eax, 1
@@ -479,18 +506,17 @@ bmp_fila:
         clc
         ret
 .sin:
-        imul eax, [bmp_paso]
-        mov esi, [bmp_px]
-        add esi, eax
-        mov eax, [im_an]            ; ¿está entera en el archivo?
-        imul eax, [bmp_bits]
-        add eax, 7
-        shr eax, 3
-        add eax, esi
-        cmp eax, [bmp_fin]
-        ja .falta
-        cmp esi, [bmp_px]
-        jb .falta
+        mul dword [bmp_paso]        ; su sitio en el archivo (si la cuenta no cabe, no está)
+        test edx, edx
+        jnz .falta
+        add eax, [bmp_px_o]
+        jc .falta
+        mov ecx, [im_an]            ; los octetos que tienen sus puntos
+        imul ecx, [bmp_bits]
+        add ecx, 7
+        shr ecx, 3
+        call mi_trozo               ; ESI=la fila; si no está entera, falta
+        jc .falta
         mov eax, [bmp_bits]
         cmp eax, 8
         jb .bits
