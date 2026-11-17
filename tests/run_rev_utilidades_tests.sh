@@ -12,6 +12,7 @@
 # Review test of the disk-writing utilities.
 set -u
 cd "$(dirname "$0")/.."
+. tests/tools/serie.sh
 IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 fail=0
@@ -21,15 +22,26 @@ check() { if grep -qF -- "$2" "$1"; then ok "$2"; else ko "$2"; fi; }
 checkn() { if grep -qF -- "$2" "$1"; then ko "no debía salir: $2"; else ok "no sale: $2"; fi; }
 checkx() { if grep -qxF -- "$2" "$1"; then ok "$2"; else ko "$2"; fi; }
 part() { awk -v m="=$2=" '$0==m{p=1;next} /^=M[0-9]+=$/{p=0} p' "$1"; }
-# run LOG B.IMG C.IMG ESPERA órdenes...
+# run LOG B.IMG C.IMG QUIETO órdenes...
+# Sin esperas fijas: cada orden se escribe cuando la anterior ha vuelto al
+# indicador de órdenes (o, si es una pregunta, cuando lleva QUIETO segundos
+# parada), y QEMU se cierra cuando acaba la última (tests/tools/serie.sh).
+# Antes eran «sleep» fijos y un tiempo límite justo: con el equipo cargado se
+# mataba a QEMU en mitad de INSTALAR.
 run() {
   local log=$1 b=$2 c=$3 w=$4; shift 4
   local drv=(-drive file=$T/f.img,format=raw,if=floppy,index=0)
   [ -n "$b" ] && drv+=(-drive file=$b,format=raw,if=floppy,index=1)
   [ -n "$c" ] && drv+=(-drive file=$c,format=raw,if=ide,index=0)
-  { sleep 6; for x in "$@"; do printf '%s\r' "$x"; sleep "$w"; done; } | \
-    timeout $(( 8 + $# * ${w%.*} )) qemu-system-i386 -display none -serial stdio -monitor none \
-      -parallel none "${drv[@]}" -boot a -no-reboot > $log.raw 2>&1
+  rm -f $T/entrada; mkfifo $T/entrada
+  : > $log.raw
+  timeout 900 qemu-system-i386 -display none -serial stdio -monitor none \
+      -parallel none "${drv[@]}" -boot a -no-reboot < $T/entrada > $log.raw 2>&1 &
+  local qp=$!
+  exec 9> $T/entrada
+  serie_ordenes $log.raw 240 "$w" "$@"
+  exec 9>&-
+  kill $qp 2>/dev/null; wait $qp 2>/dev/null
   tr -d '\r' < $log.raw | iconv -f CP437 -t UTF-8 > $log
 }
 # tabla de particiones: «n tipo inicio tamaño total_del_BPB» de cada una

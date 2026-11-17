@@ -9,6 +9,7 @@
 # CHKDSK test.
 set -u
 cd "$(dirname "$0")/.."
+. tests/tools/serie.sh
 IMG=${1:-build/hispados.img}
 FI="python3 tests/tools/fatimg.py"
 T=$(mktemp -d)
@@ -28,9 +29,18 @@ run() {
   local drv=(-drive file=$T/f.img,format=raw,if=floppy,index=0)
   [ -n "$b" ] && drv+=(-drive file=$b,format=raw,if=floppy,index=1)
   [ -n "$c" ] && drv+=(-drive file=$c,format=raw,if=ide,index=0)
-  { sleep 6; for x in "$@"; do printf '%s\r' "$x"; sleep "$w"; done; } | \
-    timeout $(( 10 + $# * ${w%.*} + 10 )) qemu-system-i386 -display none -serial stdio -monitor none \
-      -parallel none "${drv[@]}" -boot a -no-reboot > $log.raw 2>&1
+  # sin esperas fijas (tests/tools/serie.sh): cada orden se escribe cuando la
+  # anterior ha vuelto al indicador de órdenes (o, si pregunta, cuando lleva
+  # $w segundos parada), y QEMU se cierra al acabar la última
+  rm -f $T/entrada; mkfifo $T/entrada
+  : > $log.raw
+  timeout 900 qemu-system-i386 -display none -serial stdio -monitor none \
+      -parallel none "${drv[@]}" -boot a -no-reboot < $T/entrada > $log.raw 2>&1 &
+  local qp=$!
+  exec 9> $T/entrada
+  serie_ordenes $log.raw 240 "$w" "$@"
+  exec 9>&-
+  kill $qp 2>/dev/null; wait $qp 2>/dev/null
   tr -d '\r' < $log.raw | iconv -f CP437 -t UTF-8 > $log
 }
 # el informe de un trozo cuadra con fatimg.py info
