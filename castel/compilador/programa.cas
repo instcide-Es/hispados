@@ -15,7 +15,7 @@
 ; =============================================================================
 módulo Programa
 
-    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Sintactico, Apoyo, Textos, Archivos
+    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos
 
     constante MAX_LN = 320
     constante N_R = 7
@@ -1092,6 +1092,7 @@ módulo Programa
         fin
         usa(prog)
         loc_vacía()
+        lex_cierra()                            ; (el último archivo del que se han leído cuerpos)
         si no cierra_temporal() entonces
             m("no puedo escribir el archivo temporal (¿disco lleno?)")
             falla_sin_más()

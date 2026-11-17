@@ -40,8 +40,8 @@ resultado, compilado otra vez, sale idéntico. Lo siguiente es la Fase 5 (32 bit
   lo que escribe.
 - `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA,
   el ensamblador propio contra NASM, el compilador en Castel contra `ccastel.py` y el
-  arranque en tres pasos). Tarda unos minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el
-  arranque, que es lo más largo). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
+  arranque en tres pasos). Tarda unos dos minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta
+  el arranque). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
   cuentas al azar de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits
   (`azar32.py`, unas 200), comparadas con lo que tienen que dar.
 - `ejemplos/` — los programas de ejemplo; `ejemplos/esperado/` — lo que tiene que escribir
@@ -229,9 +229,19 @@ paso 3   C2.EXE       compila  CASTEL.CAS              ->  C3.ASM -> C3.EXE (en 
 ```
 
 Los pasos 2 y 3 dan **exactamente el mismo archivo** (el ensamblador y el `.EXE`), que es
-además el del paso 1: el compilador se sostiene solo. `pruebas.sh` lo hace en un disco duro
-de Hispa-8086 (C:, 20 megas), porque el ensamblador del compilador (700 K) y su temporal
-no caben en un disquete. Cada compilación tarda cerca de un minuto en QEMU.
+además el del paso 1: el compilador se sostiene solo. `pruebas.sh` hace cada paso en un
+Hispa-8086 con dos disquetes: en A: el sistema, el compilador que toca, ENSAMBLA y los
+fuentes (y ahí deja CASTEL su temporal); en B:, lo que sale (el ensamblador del compilador
+son 700 K: con su temporal no cabe en un solo disquete). También funciona en un disco duro
+(C:). En QEMU, compilarse a sí mismo le lleva a CASTEL unos seis segundos, y a ENSAMBLA
+ensamblar el resultado (37.000 líneas, 35 pasadas), tres.
+
+Una cosa pendiente, que no es de Castel sino de Hispa-8086: después de que CASTEL compile
+un programa, **en ese mismo arranque** leer archivos grandes va decenas de veces más despacio
+(ensamblar el compilador pasa de tres segundos a cuatro minutos); reiniciando vuelve a ir
+bien. Por eso `pruebas.sh` compila y ensambla en dos arranques. No se ha encontrado la causa
+(no pasa con programas pequeños que crean, leen, se sitúan y borran archivos, ni por pedir
+memoria): queda por mirar en el núcleo.
 
 ## Lo que NO entra todavía
 

@@ -1526,7 +1526,7 @@ módulo Ensambla
 
     función principal(): byte
         variable m, ms: ent16
-        variable pasadas, i: nat16
+        variable pasadas, leídas, i: nat16
         variable p: puntero a byte
         variable v: nat32
         si no argumento(1, nombre_ent, 80) entonces
@@ -1558,8 +1558,14 @@ módulo Ensambla
         ; las etiquetas (igual que NASM: ver ensambla.py)
         primera := cierto
         pasadas := 0
+        leídas := 0
         mientras cierto hacer
-            si primera o no res_ok entonces pasada(m) sino pasada_rápida() fin
+            si primera o no res_ok entonces
+                pasada(m)
+                leídas := leídas + 1
+            sino
+                pasada_rápida()
+            fin
             primera := falso
             pasadas := pasadas + 1
             si no cambio entonces romper fin
@@ -1597,7 +1603,9 @@ módulo Ensambla
         fin
         cerrar(ms)
         cerrar(m)
-        escribir("ensambla: ", nombre_ent, " -> ", nombre_sal, "  (", pos, " octetos, ", pasadas + 1, " pasadas)\r\n")
+        escribir("ensambla: ", nombre_ent, " -> ", nombre_sal, "  (", pos, " octetos, ", pasadas + 1, " pasadas")
+        si leídas + 1 < pasadas + 1 entonces escribir(", ", leídas + 1, " de ellas leyendo el archivo") fin
+        escribir(")\r\n")
         devolver 0
     fin
 

@@ -26,15 +26,15 @@
 #   6. El compilador escrito en Castel (compilador/castel.cas -> CASTEL.EXE),
 #      dentro de Hispa-8086: saca el mismo ensamblador que ccastel.py para
 #      todos los ejemplos, la biblioteca entera y ENSAMBLA, y dice los mismos
-#      errores. Y EL ARRANQUE EN TRES PASOS, en un disco duro: (1) ccastel.py
-#      compila el compilador; (2) ese CASTEL.EXE, dentro de Hispa-8086, se
-#      compila a sí mismo y ENSAMBLA lo ensambla; (3) el resultado se compila
-#      otra vez. Los pasos 2 y 3 tienen que dar el mismo ensamblador y el
-#      mismo .EXE (que son, además, los del paso 1 con NASM).
+#      errores. Y EL ARRANQUE EN TRES PASOS: (1) ccastel.py compila el
+#      compilador; (2) ese CASTEL.EXE, dentro de Hispa-8086, se compila a sí
+#      mismo y ENSAMBLA lo ensambla; (3) el resultado se compila otra vez.
+#      Los pasos 2 y 3 tienen que dar el mismo ensamblador y el mismo .EXE
+#      (que son, además, los del paso 1 con NASM).
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
-#   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos (lo más largo)
+#   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
 #                                 (azar32.py): lo que calculan frente a lo
@@ -429,7 +429,9 @@ for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .ca
 for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 mcopy -i $T/c.img $A/CASTEL.EXE ::
 { printf '@ECO OFF\r\n'
-  for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas; do
+  python3 -I $AQUI/azar.py 7 45 $A/azar16.cas $A/azar16.esp
+  python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
+  for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
     mcopy -i $T/c.img $f ::$N.CAS
@@ -466,7 +468,7 @@ for f in $A/ref/*.ASM; do
   N=$(basename $f .ASM)
   if cmp -s $f $A/sal/$N.ASM; then iguales=$((iguales + 1)); else distintos="$distintos $N"; fi
 done
-if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos, biblioteca entera y ENSAMBLA)"
+if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos, biblioteca entera, ENSAMBLA y dos de cuentas al azar)"
 else ko "CASTEL no saca el mismo ensamblador que ccastel.py en:$distintos"; fi
 iguales=0
 distintos=
@@ -478,36 +480,49 @@ done < $A/errores.txt
 if [ -z "$distintos" ]; then ok "CASTEL: los $iguales errores, dichos igual que ccastel.py (con su línea y su columna)"
 else ko "CASTEL no dice igual que ccastel.py los errores de:$distintos"; fi
 
-# el arranque en tres pasos, en un disco duro (los archivos no caben en un disquete)
-if [ -z "${SIN_ARRANQUE:-}" ]; then
-  echo "== El arranque en tres pasos: el compilador se compila a sí mismo =="
-  python3 $H/prueba/haz_duro.py $A/hd.img > /dev/null
-  P=$A/hd.img@@32256
-  mmd -i $P ::BIB
-  mcopy -i $P $A/CASTEL.EXE ::
-  mcopy -i $P $T/ens/nasm/ensambla.bin ::ENSAMBLA.COM
-  for f in $AQUI/compilador/*.cas; do mcopy -i $P $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-  for f in $AQUI/biblioteca/*.cas; do mcopy -i $P $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-  cp $H/build/hispa8086-1440.img $T/d.img
-  printf '@ECO OFF\r\nC:\r\nCASTEL CASTEL.CAS -o C2.ASM -I BIB > P2.SAL\r\nENSAMBLA C2.ASM C2.EXE > E2.SAL\r\nC2 CASTEL.CAS -o C3.ASM -I BIB > P3.SAL\r\nENSAMBLA C3.ASM C3.EXE > E3.SAL\r\nECO [castel-fin]\r\n' > $T/AUTOEXEC.BAT
+# El arranque en tres pasos. Cada paso, en un Hispa-8086 con dos disquetes: en
+# A: el sistema, el compilador que toca, ENSAMBLA y los fuentes (y ahí deja
+# CASTEL su archivo temporal); en B:, lo que sale (el ensamblador del
+# compilador son 700 K: no cabe todo en uno). Compilar y ensamblar van en dos
+# arranques seguidos con el mismo B: (en Hispa-8086, después de que CASTEL
+# compile, leer archivos grandes en ese mismo arranque va decenas de veces
+# más despacio: el ensamblado tardaría cuatro minutos en vez de tres segundos).
+arranca_ab() {     # las órdenes del AUTOEXEC (con A: en $T/d.img y B: en $T/b.img)
+  printf '@ECO OFF\r\n%s\r\nECO [castel-fin]\r\n' "$1" > $T/AUTOEXEC.BAT
   mcopy -o -i $T/d.img $T/AUTOEXEC.BAT ::
   qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
-    -drive file=$T/d.img,format=raw,if=floppy,index=0 -drive file=$A/hd.img,format=raw,if=ide,index=0 \
+    -drive file=$T/d.img,format=raw,if=floppy,index=0 -drive file=$T/b.img,format=raw,if=floppy,index=1 \
     -boot a -no-reboot > /dev/null 2>&1 &
   QPID=$!
   sleep 4
   hecho=0
-  for ((i = 0; i < 900; i++)); do
+  for ((i = 0; i < 600; i++)); do
     pantalla p
     if grep -qF '[castel-fin]' $T/p.txt; then hecho=1; break; fi
-    sleep 2
+    sleep 1
   done
   mon quit 0.5
   wait $QPID 2>/dev/null
   QPID=
-  [ $hecho = 1 ] || ko "el arranque no ha llegado al final"
+  [ $hecho = 1 ]
+}
+paso() {       # número del paso, el compilador (un .EXE) y cómo se llama en el disquete
+  cp $H/build/hispa8086-1440.img $T/d.img
+  mmd -i $T/d.img ::BIB
+  mcopy -i $T/d.img $2 ::$3.EXE
+  mcopy -i $T/d.img $T/ens/nasm/ensambla.bin ::ENSAMBLA.COM
+  for f in $AQUI/compilador/*.cas; do mcopy -i $T/d.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/d.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  rm -f $T/b.img; mformat -C -f 1440 -i $T/b.img ::
+  arranca_ab "$3 CASTEL.CAS -o B:C$1.ASM -I BIB > B:P$1.SAL" || ko "el paso $1 del arranque (compilar) no ha llegado al final"
+  arranca_ab "ENSAMBLA B:C$1.ASM B:C$1.EXE > B:E$1.SAL" || ko "el paso $1 del arranque (ensamblar) no ha llegado al final"
+  mcopy -n -i $T/b.img "::C$1.*" '::*.SAL' $A/arr/ > /dev/null 2>&1
+}
+if [ -z "${SIN_ARRANQUE:-}" ]; then
+  echo "== El arranque en tres pasos: el compilador se compila a sí mismo =="
   mkdir $A/arr
-  mcopy -n -i $P '::C2.*' '::C3.*' '::*.SAL' $A/arr/ > /dev/null 2>&1
+  paso 2 $A/CASTEL.EXE CASTEL
+  if [ -s $A/arr/C2.EXE ]; then paso 3 $A/arr/C2.EXE C2; else ko "el paso 2 no ha dejado C2.EXE: $(tr -d '\r' < $A/arr/P2.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1)"; fi
   if [ -s $A/arr/C2.ASM ] && cmp -s $A/c1.asm $A/arr/C2.ASM; then ok "paso 2: CASTEL se compila a sí mismo dentro de Hispa-8086: el mismo ensamblador que el paso 1 ($(wc -l < $A/arr/C2.ASM) líneas)"
   else ko "paso 2: el ensamblador no es el del paso 1: $(tr -d '\r' < $A/arr/P2.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1)"; fi
   if [ -s $A/arr/C2.EXE ] && cmp -s $A/CASTEL.EXE $A/arr/C2.EXE; then ok "paso 2: ENSAMBLA lo ensambla: el mismo CASTEL.EXE que el paso 1 con NASM ($(stat -c %s $A/arr/C2.EXE) octetos)"
