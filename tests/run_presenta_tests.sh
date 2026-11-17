@@ -25,7 +25,7 @@ IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/PRESENTA.HVP
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/presenta.asm $HVP > /dev/null || { echo "  FAIL no se ensambla"; exit 1; }
-FASES=${FASES:-1 2 3 4 5 6}
+FASES=${FASES:-1 2 3 4 5 6 7}
 fase() { case " $FASES " in *" $1 "*) return 0;; esac; return 1; }
 reabre() { printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\PRESENTA.HVP %s\r\n' "$1" > $T/CENTRO.INI
            mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI; }
@@ -438,6 +438,33 @@ mira_pre CLASIF.PRE "el orden nuevo, los diseños cambiados (cada caja en su sit
    and [r.caja for r in o if r.pag == 2 and r.papel == CUERPO] == [(40, 132, 352, 420)] and de(2, CUERPO).startswith('Una asociación') \
    and sorted(r.papel for r in o if r.pag == 3) == [TITULO, CUERPO, CUERPO2] and 'Pintura' in de(3, CUERPO) and 'Biblioteca' in de(3, CUERPO2) \
    and [r.band for r in o if r.pag == 4 and r.papel == CUERPO] == [8] and de(4, NOTAS) == 'NXota uno\nlinea dos'"
+fi
+
+if fase 7; then
+echo "== Presentaciones: el botón secundario (el menú contextual) =="
+prepara $HVP
+{ arranca
+  ec 400 230; escribe "Hola"; tecla esc
+  nueva_dia 1; ec 200 60; escribe "Dos"; tecla esc          # dos diapositivas; se ve la segunda
+  derecho 88 183; shot c1                                   # la primera miniatura: se pasa a ella; su menú
+  tecla i; sleep 1; aparca; shot c2                         # Duplicar la diapositiva
+  derecho $(e 400 230); shot c3; tecla esc                  # sobre la caja del título: la elige; el menú del objeto
+  derecho $(e 15 15); shot c4; tecla esc                    # en un sitio vacío: el menú de la diapositiva
+  tecla shift-f10; sleep 0.6; shot c5; tecla esc            # con el teclado, sin nada elegido: el mismo
+  menu $M_VER 291; aparca                                   # Ver > Clasificador de diapositivas
+  derecho 80 220; shot c6; tecla esc                        # en el clasificador, sobre la primera
+  derecho 300 89; sleep 0.5; shot c7                        # en la barra de botones no hay menú
+  sal; } | run 200 -vga std
+chk $T/c1.ppm busca 88 100 220 599 0 8 "iapositiva nueva..." busca 88 100 220 599 0 8 "uitar esta diapositiva" \
+  busca 88 100 220 599 7 8 "ubirla un puesto" busca 88 100 220 599 0 8 "arla un puesto" busca 88 100 220 599 0 8 "Empezar desde esta "
+chk $T/c2.ppm busca $PIE "Diapositiva 2 de 3"
+chk $T/c3.ppm busca 300 60 600 599 0 8 "opiar" busca 300 60 600 599 0 8 "scribir en la caja" busca 300 60 600 599 0 8 "Tipo de letr" \
+  busca 300 60 600 599 7 8 "grupar"
+chk $T/c4.ppm busca 200 100 400 599 0 8 "Caja de " busca 200 100 400 599 0 8 "ma de la presentaci" nobusca 200 100 400 599 0 8 "orrar el objeto"
+chk $T/c5.ppm busca 10 75 200 599 0 8 "Caja de "
+chk $T/c6.ppm busca 80 100 220 599 0 8 "uitar esta diapositiva" busca 80 100 220 599 7 8 "ubirla un puesto"
+chk $T/c7.ppm nobusca 280 85 440 500 0 8 "Caja de " nobusca 280 85 440 500 0 8 "uitar esta diapositiva"
+muestra c1 presenta_contexto_tira; muestra c3 presenta_contexto; muestra c4 presenta_contexto_fondo; muestra c6 presenta_contexto_clasif
 fi
 
 rm -rf $T

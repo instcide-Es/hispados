@@ -33,7 +33,7 @@ IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/PUBLICA.HVP
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/publica.asm $HVP > /dev/null || { echo "  FAIL no se ensambla"; exit 1; }
-FASES=${FASES:-1 2 3 4 5 6 7 8 9 10 11 12 13}
+FASES=${FASES:-1 2 3 4 5 6 7 8 9 10 11 12 13 14}
 fase() { case " $FASES " in *" $1 "*) return 0;; esac; return 1; }
 reabre() { printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\PUBLICA.HVP %s\r\n' "$1" > $T/CENTRO.INI
            mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI; }
@@ -778,6 +778,39 @@ rm -f $T/lleno2.pub; mcopy -n -i $T/f.img ::LLENO.PUB $T/lleno2.pub 2>/dev/null
 if cmp -s $T/LLENO.PUB $T/lleno2.pub; then ok "disco lleno: el archivo que había sigue entero"; else ko "disco lleno: el archivo que había ha cambiado"; fi
 if mdir -i $T/f.img :: | grep -qi 'TMP\|OTRO'; then ko "disco lleno: ha quedado un archivo a medias"; mdir -i $T/f.img :: | grep -i 'TMP\|OTRO'
 else ok "disco lleno: no queda ningún archivo a medias (ni el temporal ni el del otro nombre)"; fi
+fi
+
+if fase 14; then
+echo "== Publicaciones: el botón secundario (el menú contextual) =="
+prepara $HVP
+{ arranca
+  al100
+  boton1 $B_RECT; arr 60 60 200 160                         # un rectángulo
+  boton1 $B_ELIPSE; arr 250 60 400 160                      # y una elipse, que queda elegida
+  derecho $((PX+60)) $((PY+100)); shot z1                   # sobre el rectángulo: lo elige; su menú
+  tecla c; sleep 0.5                                        # Copiar
+  derecho $((PX+450)) $((PY+300)); shot z2                  # en un sitio vacío: el menú de la página
+  tecla p; sleep 0.8; aparca; shot z3                       # Pegar: otro rectángulo, un poco más allá
+  derecho $((PX+251)) $((PY+110)); sleep 0.3; tecla b; sleep 0.8; aparca; shot z4   # sobre la elipse: Borrar el objeto
+  tecla shift-f10; sleep 0.6; shot z5; tecla esc            # con el teclado, sin nada elegido: el de la página
+  boton1 $B_TEXTO; arr 60 250 300 330; escribe "hola"
+  derecho $((PX+100)) $((PY+290)); shot z6; tecla esc       # escribiendo en una caja: el menú del texto
+  derecho 300 89; sleep 0.5; shot z7                        # en la barra de botones no hay menú
+  sal; } | run 200 -vga std
+chk $T/z1.ppm px $((PX+57)) $((PY+57)) 0 "el rectángulo, elegido: un tirador en su esquina" \
+  busca 78 60 200 599 0 8 "opiar" busca 78 60 200 599 7 8 "egar" busca 78 60 200 599 0 8 "orrar el objeto" \
+  busca 78 60 200 599 7 8 "scribir en la caja" busca 78 60 200 599 0 8 "Traer al " busca 78 60 200 599 0 8 "Enviar al fond" \
+  busca 78 60 200 599 7 8 "grupar" busca 78 60 200 599 7 8 "Tipo de letr" busca 78 60 200 599 0 8 "Color del "
+chk $T/z2.ppm busca 468 100 600 599 0 8 "egar" busca 468 100 600 599 0 8 "Caja de " busca 468 100 600 599 7 8 "uitar esta p" \
+  busca 468 100 600 599 0 8 "gina " busca 468 100 600 599 0 8 "eshacer" nobusca 468 100 600 599 0 8 "orrar el objeto"
+chk $T/z3.ppm busca $PIE "Página 1 de 1    Rectángulo: x 1" nobusca $PIE "Página 1 de 1    Rectángulo: x 16,"
+chk $T/z2.ppm px $((PX+251)) $((PY+110)) 0 "el borde de la elipse"
+chk $T/z4.ppm px $((PX+251)) $((PY+110)) 9 "la elipse, borrada"
+chk $T/z5.ppm busca 10 75 200 500 0 8 "Caja de "
+chk $T/z6.ppm busca 118 100 260 599 0 8 "egrita" busca 118 100 260 599 0 8 "ursiva" busca 118 100 260 599 0 8 "Tipo de letr" \
+  nobusca 118 100 260 599 0 8 "orrar el objeto"
+chk $T/z7.ppm nobusca 280 85 440 500 0 8 "Caja de " nobusca 280 85 440 500 0 8 "opiar"
+muestra z1 publica_contexto; muestra z2 publica_contexto_pagina; muestra z6 publica_contexto_texto
 fi
 
 rm -rf $T

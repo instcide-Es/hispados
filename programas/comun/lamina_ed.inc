@@ -28,7 +28,8 @@
 ;  «call elige» con el que deba quedar, o «call sel_nada»).
 ;
 ;  CÓMO SE USA. El programa incluye, por este orden, tipos.inc, lamina.inc,
-;  lamina_ed.inc, barra.inc y hvplib.inc, y pone en su «section .bss»
+;  lamina_ed.inc, barra.inc, contexto.inc (con «%define CTX_PUENTE» delante: el
+;  botón secundario) y hvplib.inc, y pone en su «section .bss»
 ;  TIPOS_BSS, LAMINA_BSS, LAMINA_ED_BSS y BARRA_BSS. Su ventana puede usar
 ;  directamente ed_proc como procedimiento, o uno suyo que atienda lo que le
 ;  interese y salte a ed_proc con lo demás. Al empezar llama a ed_inicia
@@ -56,6 +57,15 @@
 ;                   hay nada elegido (el papel, el tema...)
 ;    nuevo          la orden Nuevo (cada programa, con sus plantillas)
 ;    firma          los 8 octetos con los que empiezan sus archivos
+;    ctx_fondo      el menú del botón secundario sobre la lámina, donde no hay
+;                   ningún objeto; ctx_prog, otro suyo (el de una miniatura de
+;                   la tira, p. ej.: lo abre poniendo [ctx_donde] a 4 y
+;                   saltando a menu_ctx_abre; si no tiene, el mismo ctx_fondo)
+;                   y ctx_gris_prog, lo que va en gris en ellos y en los de
+;                   aquí: la macro CTX_GRIS_ED, sus órdenes (dw número, dd
+;                   rutina que da CF=1 si ahora no se puede) y un «dw 0»
+;                   (comun/contexto.inc; detrás de incluir lamina_ed.inc, que
+;                   es donde está la macro)
 ;    y los textos t_programa (su nombre), t_ext (".PUB"), t_pagina ("Página "),
 ;    t_arrastre, t_cambios, t_no_valido, t_no_guardar, t_exportar,
 ;    t_exportado, t_lleno, t_sin_sitio, t_max_pag, t_unica, t_q_quitar,
@@ -67,6 +77,13 @@
 ;    orden, tecla, letra, raton, raton_mueve, raton_suelta, raton_doble
 ;                   lo que hace ed_proc con cada mensaje (para el programa
 ;                   que tenga su procedimiento y quiera pasarles algunos)
+;    raton_der, menu_ctx, menu_ctx_abre
+;                   el botón secundario (el derecho): al apretarlo se elige lo
+;                   que hay debajo y [ctx_donde] apunta qué es (1 un objeto, 2
+;                   la lámina vacía, 3 el texto de la caja en la que se
+;                   escribe, 4 lo del programa; 0: nada); al soltarlo (o con
+;                   Mayús+F10) sale su menú (ctx_objeto, ctx_fondo, ctx_texto
+;                   o ctx_prog)
 ;    hecho          el final de todo mensaje atendido (xor eax, eax / ret)
 ;    inval          la ventana, a repintar          aviso  ESI=texto: lo dice
 ;    cambio         el documento ha cambiado (hay cambios; se redibuja)
@@ -629,6 +646,299 @@ doc_estrena:
         jmp inval
 
 ; =============================================================================
+;  El botón secundario (comun/contexto.inc)
+; =============================================================================
+; ---- los menús: las mismas órdenes que las de la barra de menús ----
+ctx_objeto:                         ; sobre un objeto (o varios elegidos)
+        dw O_CORTAR
+        db "Cor&tar                Ctrl+X", 0
+        dw O_COPIAR
+        db "&Copiar                Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar                 Ctrl+V", 0
+        dw O_BORRAR
+        db "&Borrar el objeto        Supr", 0
+        dw O_DUPLICAR
+        db "D&uplicar              Ctrl+R", 0
+        dw 0
+        db 0
+        dw O_ESCRIBIR
+        db "&Escribir en la caja    Intro", 0
+        dw 0
+        db 0
+        dw O_FRENTE
+        db "Traer al &frente       Ctrl+F", 0
+        dw O_ALFONDO
+        db "Enviar al fond&o       Ctrl+O", 0
+        dw O_AGRUPAR
+        db "A&grupar", 0
+        dw O_DESAGRUPAR
+        db "De&sagrupar", 0
+        dw O_GIRAR
+        db "Girar un cuarto de &vuelta Ctrl+L", 0
+        dw 0
+        db 0
+        dw O_TIPO
+        db "Tipo de letr&a...", 0
+        dw O_TAM
+        db "Ta&maño de letra...", 0
+        dw O_C_LETRA
+        db "Color de la &letra...", 0
+        dw O_C_FONDO
+        db "Color del &relleno...", 0
+        dw O_C_BORDE
+        db "Color del borde o de la lí&nea...", 0
+        dw O_GROSOR
+        db "Grosor del borde o de la línea...", 0
+        dw 0xFFFF
+ctx_texto:                          ; escribiendo en una caja, sobre su texto
+        dw O_PEGAR
+        db "&Pegar                 Ctrl+V", 0
+        dw 0
+        db 0
+        dw O_NEG
+        db "&Negrita               Ctrl+N", 0
+        dw O_CUR
+        db "&Cursiva               Ctrl+K", 0
+        dw O_SUB
+        db "&Subrayado             Ctrl+S", 0
+        dw 0
+        db 0
+        dw O_IZQ
+        db "A la &izquierda        Ctrl+Q", 0
+        dw O_CEN
+        db "C&entrado              Ctrl+T", 0
+        dw O_DER
+        db "A la &derecha          Ctrl+D", 0
+        dw 0
+        db 0
+        dw O_TIPO
+        db "Tipo de letr&a...", 0
+        dw O_TAM
+        db "Ta&maño de letra...", 0
+        dw O_C_LETRA
+        db "Color de la &letra...", 0
+        dw O_VINETAS
+        db "&Viñetas (una lista en la caja)", 0
+        dw O_NUMEROS
+        db "N&umeración (una lista con números)", 0
+        dw 0xFFFF
+            align 4
+ctx_menus   dd ctx_objeto, ctx_fondo, ctx_texto, ctx_prog
+
+; lo que va en gris de las órdenes comunes, y cuándo (el programa la pone
+; delante de las suyas, en ctx_gris_prog)
+%macro CTX_GRIS_ED 0
+        dw O_DESHACER
+        dd cg_deshacer
+        dw O_REHACER
+        dd cg_rehacer
+        dw O_PEGAR
+        dd cg_pegar
+        dw O_TODO
+        dd cg_vacia
+        dw O_ESCRIBIR
+        dd cg_escribir
+        dw O_AGRUPAR
+        dd cg_agrupar
+        dw O_DESAGRUPAR
+        dd cg_desagrupar
+        dw O_TIPO
+        dd cg_letra
+        dw O_TAM
+        dd cg_letra
+        dw O_C_LETRA
+        dd cg_letra
+        dw O_PAG_QUITA
+        dd cg_pag_unica
+        dw O_PAG_ANT
+        dd cg_pag_primera
+        dw O_PAG_SIG
+        dd cg_pag_ultima
+%endmacro
+
+; ---- se aprieta el botón secundario: EDX=x + y*65536 ----
+; Escribiendo en una caja, dentro de ella: el cursor va ahí. Sobre un objeto:
+; si no estaba elegido queda elegido él solo (como un clic); si era uno de los
+; elegidos, siguen todos, para cortarlos, copiarlos o darles formato. En un
+; sitio vacío de la lámina: nada elegido. [ctx_donde] apunta qué había
+raton_der:
+        mov byte [ctx_donde], 0
+        call ctx_punto              ; EAX=x EBX=y
+        cmp ebx, TB_AL              ; (en la barra de botones no hay menú)
+        jl hecho
+        call en_vista
+        jc hecho
+        cmp byte [drag], 0          ; (a medio arrastrar con el otro botón)
+        jne hecho
+        cmp byte [encadenando], 0   ; (se espera un clic en otra caja)
+        jne hecho
+        mov dword [br_sobre], 0
+        call a_pagina
+        mov [m_ux], eax
+        mov [m_uy], ebx
+        cmp byte [editando], 0
+        je .sin_ed
+        mov byte [ctx_donde], 3
+        call cursor_en_caja
+        jnc hecho
+        call fin_edicion            ; fuera de la caja: se acaba de escribir
+.sin_ed:
+        mov eax, [m_ux]             ; el objeto que hay ahí
+        mov ebx, [m_uy]
+        mov ecx, [pag]
+        call holgura
+        call lam_en_punto
+        test eax, eax
+        js .vacio
+        call lam_ptr
+        mov byte [ctx_donde], 1
+        test byte [sel_m+eax], 1
+        jz .solo
+        mov [sel], eax              ; uno de los elegidos: pasa a ser el principal
+        call sel_formato
+        jmp .pinta
+.solo:
+        call elige
+        jmp .pinta
+.vacio:
+        mov byte [ctx_donde], 2
+        call sel_nada
+.pinta:
+        call inval
+        jmp hecho
+
+; (interna) escribiendo en la caja elegida: si el punto de la página [m_ux],
+; [m_uy] cae dentro, el cursor va ahí; si no, CF=1. -> ESI=la ficha de la caja
+cursor_en_caja:
+        mov eax, [sel]
+        call lam_ptr
+        mov eax, [m_ux]
+        sub eax, [esi+LO_X]
+        js .no
+        cmp eax, [esi+LO_AN]
+        jge .no
+        mov ebx, [m_uy]
+        sub ebx, [esi+LO_Y]
+        js .no
+        cmp ebx, [esi+LO_AL]
+        jge .no
+        call lam_compone
+        call lam_xy_sitio
+        add eax, [lam_t_ini]
+        mov [cur], eax
+        mov byte [tecleando], 0
+        call inval
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; ---- el menú: EDX=el punto de la pantalla, o -1 si se pide con el teclado
+; (Mayús+F10 o la tecla de menú): entonces es el del texto, si se escribe; el
+; del objeto elegido, junto a él; o el de la lámina ----
+menu_ctx:
+        mov eax, -1
+        cmp edx, -1
+        jne menu_ctx_abre
+        mov byte [ctx_donde], 3
+        cmp byte [editando], 0
+        jne menu_ctx_abre
+        mov byte [ctx_donde], 2
+        mov ecx, [sel]
+        test ecx, ecx
+        js menu_ctx_abre
+        mov byte [ctx_donde], 1
+        mov eax, ecx
+        call lam_ptr
+        mov eax, [esi+LO_X]
+        mov ebx, [esi+LO_Y]
+        call a_ventana
+        add eax, 8
+        add ebx, 8
+        call en_vista
+        jnc menu_ctx_abre
+        mov eax, -1
+; EAX, EBX=dónde, en la ventana (EAX=-1: donde se pidió); [ctx_donde]=cuál
+menu_ctx_abre:
+        movzx ecx, byte [ctx_donde]
+        test ecx, ecx
+        jz hecho
+        mov esi, [ctx_menus+ecx*4-4]
+        mov edi, ctx_gris_prog
+        call ctx_abre
+        jmp hecho
+
+; ---- (CTX_GRIS_ED) lo que ahora no se puede hacer: CF=1 ----
+cg_deshacer:
+        cmp dword [des_c], 0
+        je cg_no
+        jmp short cg_si
+cg_rehacer:
+        mov eax, [des_c]
+        inc eax
+        cmp eax, [des_n]
+        jae cg_no
+        jmp short cg_si
+cg_pegar:                           ; escribiendo, texto; si no, objetos copiados
+        cmp byte [editando], 0
+        jne ctx_porta
+        cmp dword [clip_n], 0
+        je cg_no
+        jmp short cg_si
+cg_vacia:                           ; no hay ningún objeto que elegir
+        cmp dword [lam_n], 0
+        je cg_no
+        jmp short cg_si
+cg_agrupar:                         ; hacen falta dos o más
+        call sel_varios
+        jnc cg_no
+cg_si:
+        clc
+        ret
+cg_no:
+        stc
+        ret
+cg_desagrupar:                      ; el elegido no es de ningún grupo
+        mov eax, [sel]
+        test eax, eax
+        js cg_no
+        call lam_ptr
+        cmp byte [esi+LO_GRUPO], 0
+        je cg_no
+        jmp cg_si
+cg_escribir:                        ; solo en una caja de texto, ella sola
+        call sel_varios
+        jc cg_no
+cg_letra:                           ; con uno solo que no es de texto, la letra no
+        mov eax, [sel]
+        test eax, eax
+        js cg_no
+        call sel_varios
+        jc cg_si
+        call lam_ptr
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne cg_no
+        test byte [esi+LO_BAND], LB_HUECO
+        jnz cg_no
+        jmp cg_si
+cg_pag_unica:
+        cmp dword [lam_pags], 1
+        jbe cg_no
+        jmp cg_si
+cg_pag_primera:
+        cmp dword [pag], 0
+        je cg_no
+        jmp cg_si
+cg_pag_ultima:
+        mov eax, [pag]
+        inc eax
+        cmp eax, [lam_pags]
+        jae cg_no
+        jmp cg_si
+
+; =============================================================================
 ;  El procedimiento de la ventana
 ; =============================================================================
 ed_proc:
@@ -648,6 +958,10 @@ ed_proc:
         je raton_suelta
         cmp eax, WM_LBUTTONDBLCLK
         je raton_doble
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: elige lo que hay
+        je raton_der                ; debajo y, al soltarlo, su menú
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je .rueda
         cmp eax, WM_VSCROLL
@@ -2299,25 +2613,8 @@ raton:
         je .sin_ed
         ; escribiendo: un clic dentro de la caja lleva el cursor ahí; fuera,
         ; se acaba de escribir
-        mov eax, [sel]
-        call lam_ptr
-        mov eax, [m_ux]
-        sub eax, [esi+LO_X]
-        js .fuera
-        cmp eax, [esi+LO_AN]
-        jge .fuera
-        mov ebx, [m_uy]
-        sub ebx, [esi+LO_Y]
-        js .fuera
-        cmp ebx, [esi+LO_AL]
-        jge .fuera
-        call lam_compone
-        call lam_xy_sitio
-        add eax, [lam_t_ini]
-        mov [cur], eax
-        mov byte [tecleando], 0
-        call inval
-        jmp hecho
+        call cursor_en_caja
+        jnc hecho
 .fuera:
         ; ¿en otra caja de su misma cadena? El cursor pasa a ella
         movzx eax, byte [esi+LO_CADENA]
@@ -6232,6 +6529,8 @@ marcas:
 
 %macro LAMINA_ED_BSS 0
 ven         resd 1
+ctx_donde   resb 1                  ; dónde se apretó el botón secundario (raton_der)
+            alignb 4
 puente      resd 1                  ; el cuadro de texto escondido del portapapeles
 barra_v     resd 1                  ; las barras de desplazamiento
 barra_h     resd 1

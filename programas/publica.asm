@@ -277,6 +277,43 @@ mk_ajus db "  &Ajustar a la rejilla (5 mm)", 0
         dw 0xFFFF
         db 0
 
+; ---- el menú del botón secundario sobre la página, donde no hay ningún
+;      objeto (los de los objetos y el del texto son los comunes: lamina_ed.inc) ----
+ctx_fondo:
+ctx_prog:
+        dw O_DESHACER
+        db "&Deshacer              Ctrl+Z", 0
+        dw O_PEGAR
+        db "&Pegar                 Ctrl+V", 0
+        dw O_TODO
+        db "Ele&gir todo           Ctrl+E", 0
+        dw 0
+        db 0
+        dw O_HERR + 1
+        db "Caja de &texto", 0
+        dw O_HERR + 2
+        db "&Rectángulo", 0
+        dw O_HERR + 3
+        db "&Elipse", 0
+        dw O_HERR + 4
+        db "&Línea", 0
+        dw O_IMAGEN
+        db "&Imagen (BMP)...", 0
+        dw 0
+        db 0
+        dw O_PAG_NUEVA
+        db "Página &nueva", 0
+        dw O_PAG_QUITA
+        db "&Quitar esta página", 0
+        dw O_PAG_ANT
+        db "Página &anterior        RePág", 0
+        dw O_PAG_SIG
+        db "Página &siguiente       AvPág", 0
+        dw 0
+        db 0
+        dw O_PAPEL
+        db "Tamaño de la página...", 0
+        dw 0xFFFF
 ; ---- diálogo: una publicación nueva (la plantilla y el papel) ----
 dlg_nuevo:
         PLANTILLA HV_c_dialogo, t_d_nuevo, E_DIALOGO, 0, 0, 440, 236, 0
@@ -661,6 +698,11 @@ nuevo_gancho:
         ret
 
 %include "barra.inc"
+%define CTX_PUENTE
+%include "contexto.inc"             ; el botón secundario
+ctx_gris_prog:                      ; lo que puede ir en gris en sus menús, y cuándo
+        CTX_GRIS_ED
+        dw 0
 %include "hvplib.inc"
 
         section .bss

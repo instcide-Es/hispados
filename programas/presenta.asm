@@ -416,6 +416,67 @@ ctrl_ord    db 0, O_ABRIR, 0, O_COPIAR, O_DER, O_TODO, O_FRENTE, O_GUARDAR, 0, 0
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 ; las órdenes propias, y las del editor que aquí se hacen de otra manera
             align 4
+; ---- los menús del botón secundario propios (los de los objetos y el del
+;      texto son los comunes: lamina_ed.inc) ----
+ctx_fondo:                          ; sobre la diapositiva, donde no hay ningún objeto
+        dw O_DESHACER
+        db "&Deshacer              Ctrl+Z", 0
+        dw O_PEGAR
+        db "&Pegar                 Ctrl+V", 0
+        dw O_TODO
+        db "Ele&gir todo           Ctrl+E", 0
+        dw 0
+        db 0
+        dw O_HERR + 1
+        db "Caja de &texto", 0
+        dw O_HERR + 2
+        db "&Rectángulo", 0
+        dw O_HERR + 3
+        db "E&lipse", 0
+        dw O_HERR + 4
+        db "Lí&nea", 0
+        dw O_IMAGEN
+        db "&Imagen (BMP)...", 0
+        dw 0
+        db 0
+        dw O_DISENO
+        db "Di&seño de esta diapositiva...", 0
+        dw O_TEMA
+        db "T&ema de la presentación...", 0
+        dw O_NOTAS
+        db "Notas del &orador...", 0
+        dw 0
+        db 0
+        dw O_PAG_NUEVA
+        db "Di&apositiva nueva...", 0
+        dw O_PRES_AQUI
+        db "Empezar desde esta diapositi&va  Mayús+F5", 0
+        dw 0xFFFF
+ctx_prog:                           ; sobre una diapositiva de la tira o del clasificador
+        dw O_PAG_NUEVA
+        db "&Diapositiva nueva...", 0
+        dw O_DIA_DUP
+        db "Duplicar la d&iapositiva", 0
+        dw O_PAG_QUITA
+        db "&Quitar esta diapositiva", 0
+        dw 0
+        db 0
+        dw O_DIA_SUBE
+        db "&Subirla un puesto   Ctrl+Izda.", 0
+        dw O_DIA_BAJA
+        db "Ba&jarla un puesto   Ctrl+Dcha.", 0
+        dw 0
+        db 0
+        dw O_DISENO
+        db "Dis&eño de esta diapositiva...", 0
+        dw O_TRANS
+        db "&Transición entre diapositivas...", 0
+        dw 0
+        db 0
+        dw O_PRES_AQUI
+        db "Empezar desde esta diapositi&va  Mayús+F5", 0
+        dw 0xFFFF
+            align 4
 ordenes_prog dd O_PAG_NUEVA, dia_nueva, O_IMAGEN, imagen_dia, O_DIA_DUP, dia_dup
             dd O_DIA_SUBE, dia_sube, O_DIA_BAJA, dia_baja, O_NOTAS, notas
             dd O_TEMA, tema_elige, O_PRES, pres_inicio, O_PRES_AQUI, pres_aqui
@@ -588,6 +649,10 @@ pre_proc:
         je pr_suelta
         cmp eax, WM_LBUTTONDBLCLK
         je pr_doble
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: en la tira, lo suyo
+        je pr_raton_der
+        cmp eax, WM_CONTEXTMENU
+        je pr_menu_ctx
         cmp eax, WM_KEYDOWN
         je pr_tecla
 pre_proc2:
@@ -600,6 +665,10 @@ pre_proc2:
         call lam_bloque_suelta
         jmp ed_proc
 pre_pres:
+        cmp eax, WM_RBUTTONDOWN     ; (en el pase no hay menús)
+        je hecho
+        cmp eax, WM_CONTEXTMENU
+        je hecho
         cmp eax, WM_KEYDOWN
         je pres_tecla
         cmp eax, WM_CHAR
@@ -795,6 +864,59 @@ pr_raton:
         pop ecx
         pop edx
         jmp raton
+; ---- el botón secundario (lo común, en lamina_ed.inc: raton_der y menu_ctx) ----
+; Se aprieta: en la tira de miniaturas, se pasa a esa diapositiva y el menú
+; será el de la diapositiva ([ctx_donde] = 4: ctx_prog); en las notas, nada;
+; en lo demás, lo del editor
+pr_raton_der:
+        push edx
+        call pr_zona
+        pop edx
+        jc pr_der_editor
+        mov byte [ctx_donde], 0
+        cmp ecx, 2
+        je hecho
+        cmp byte [tira_coge], 0     ; (a medio arrastrar una miniatura)
+        jne hecho
+        mov dword [br_sobre], 0
+        call tira_cual
+pr_der_dia:
+        mov byte [ctx_donde], 4
+        cmp eax, [pag]
+        je .p
+        call pag_ir
+.p:
+        call inval
+        jmp hecho
+pr_der_editor:
+        call notas_en               ; (si se estaban escribiendo las notas, se acaba)
+        jnc raton_der
+        call fin_edicion
+        jmp raton_der
+; en el clasificador: sobre una diapositiva, se pasa a ella; su menú
+cl_raton_der:
+        mov byte [ctx_donde], 0
+        cmp byte [cl_coge], 0
+        jne hecho
+        call cl_cual
+        jc hecho                    ; (la barra de botones)
+        mov dword [br_sobre], 0
+        jmp pr_der_dia
+; El menú: con el ratón, el que se apuntó al apretar; con el teclado, en el
+; clasificador, el de la diapositiva; escribiendo las notas, ninguno
+pr_menu_ctx:
+        cmp edx, -1
+        jne menu_ctx
+        cmp byte [clasif], 0
+        je .ed
+        mov byte [ctx_donde], 4
+        mov eax, -1
+        jmp menu_ctx_abre
+.ed:
+        call notas_en
+        jc hecho
+        jmp menu_ctx
+
 pr_mueve:
         cmp byte [tira_coge], 0
         je raton_mueve
@@ -1875,6 +1997,10 @@ cl_proc:
         je cl_mueve
         cmp eax, WM_LBUTTONUP
         je cl_suelta
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: sobre una diapositiva
+        je cl_raton_der
+        cmp eax, WM_CONTEXTMENU
+        je pr_menu_ctx
         cmp eax, WM_KEYDOWN
         je pr_tecla
         cmp eax, WM_CHAR
@@ -2171,6 +2297,15 @@ pinta_clasif:
         ret
 
 %include "barra.inc"
+%define CTX_PUENTE
+%include "contexto.inc"             ; el botón secundario
+ctx_gris_prog:                      ; lo que puede ir en gris en sus menús, y cuándo
+        CTX_GRIS_ED
+        dw O_DIA_SUBE
+        dd cg_pag_primera
+        dw O_DIA_BAJA
+        dd cg_pag_ultima
+        dw 0
 %include "hvplib.inc"
 
         section .bss
