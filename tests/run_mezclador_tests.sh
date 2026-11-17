@@ -24,9 +24,14 @@
 #  Y Configuración > Sonido: la tarjeta, «Sound Blaster para juegos» y el
 #  botón «Mezclador...». Capturas en build/mezclador_*.png (con CAPTURAS=dir,
 #  también ahí).
+#  Sin esperas a ciegas (tests/tools/serie.sh): cada orden se escribe cuando
+#  la anterior ha vuelto al indicador de órdenes y cada captura se repite hasta
+#  que la pantalla enseña lo que se va a comprobar (con tope), para que la
+#  prueba valga igual con el equipo cargado (20 pruebas a la vez).
 # Per-source mixer test (HSPSND API 09h-0Fh, MEZCLAD.HVP, SONIDO.INI).
 set -u
 cd "$(dirname "$0")/.."
+. tests/tools/serie.sh
 IMG=${1:-build/hispados.img}
 B=$(dirname "$IMG")
 for f in MEZTEST.COM SBTEST.COM; do
@@ -42,7 +47,24 @@ chk() { $CHK "$@" || fail=1; }
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.3}"; }
 tecla() { local k; for k in "$@"; do mon "sendkey $k" 0.3; done; }
 shot() { sleep 0.4; mon "screendump $T/$1.ppm" 0.6; }
-send() { printf '%s\r' "$1"; sleep "${2:-1.5}"; }
+# send ORDEN: la escribe cuando la anterior ha terminado (indicador de órdenes
+# en el registro serie); listo: espera a que termine la última. inicio: al
+# empezar cada máquina. (Lo que escriben va a la entrada serie: avisos, a 2)
+inicio() { DESDE=0; }
+listo() { serie_indicador $T/raw $DESDE 300 120 >&2; }
+send() { listo; DESDE=$(( $(serie_tam $T/raw) + ${#1} )); printf '%s\r' "$1"; }
+# hasta NOMBRE comprobaciones...: repite la captura NOMBRE hasta que se cumplan
+# (las de ventanas_check.py), con un tope de unos 60 s
+hasta() {
+  local n=$1 i; shift
+  for i in $(seq 1 60); do
+    mon "screendump $T/$n.ppm" 0.6
+    $CHK $T/$n.ppm "$@" > /dev/null 2>&1 && return 0
+  done
+  echo "  (no llegó a verse en pantalla lo esperado en la captura $n)" >&2
+  return 1
+}
+escritorio() { hasta e0 titulo 36 52 activa "Centro de programas"; sleep 1; }
 muestra() { [ -f $T/$1.ppm ] && { convert $T/$1.ppm $B/mezclador_$2.png; [ -n "${CAPTURAS:-}" ] && mkdir -p "$CAPTURAS" && cp $B/mezclador_$2.png "$CAPTURAS/"; }; }
 RX=400; RY=300
 ir() {
@@ -65,6 +87,7 @@ run() {
     -parallel none -m 32 -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot \
     -audiodev wav,id=snd0,path=$T/out.wav "$@" > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 | grep -v '^audio:' > $T/log.txt
+  : > $T/raw                      # la máquina siguiente no debe ver este registro
   mtype -i $T/f.img ::HISPADOS/SONIDO.INI 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/ini.txt
 }
 nueva() {
@@ -160,22 +183,23 @@ EOF
 echo "== (a) Sound Blaster 16: el Mezclador mueve los registros del CT1745 =="
 nueva
 RX=400; RY=300
-{ sleep 6
+{ inicio
   send 'KEYB SP' 2
   send 'A:\HISPADOS\HSPRATON' 2
   send 'A:\HISPADOS\HSPSND' 3
   send 'ECHO uno' 0.5
   send 'MEZTEST C' 2
-  send 'VENTANAS' 7
+  send 'VENTANAS'; escritorio
   # el volumen de la barra: el botón «Mezclador...»
   clic 658 14; sleep 1
   aparca
-  shot v1
+  hasta v1 titulo 550 34 activa "Volumen" texto 621 147 0 6 fina "Mezclador..."
   clic 658 14; sleep 1
   # doble clic en el altavoz: el Mezclador, en la vista Completa
-  doble 658 14; sleep 3.5
+  doble 658 14; sleep 1
   aparca
-  shot m1
+  hasta m1 titulo 86 81 activa "Mezclador" texto 394 136 0 8 negrita "CD" \
+    texto 96 446 0 8 fina "Esta tarjeta lo tiene todo: volumen, balance y casillas por fuente."
   # con el teclado: General -15; Sonidos -20 y el balance a la derecha;
   # Música en silencio (M); CD a grabar; Línea a sonar
   tecla down down down; sleep 0.3
@@ -186,26 +210,27 @@ RX=400; RY=300
   # con el ratón: el Altavoz del PC, un clic a un cuarto de la guía (75 %)
   clic 666 208; sleep 1
   aparca
-  shot m2
+  hasta m2 texto 122 156 0 8 fina "65 %" texto 210 156 0 8 fina "70 %" texto 650 156 0 8 fina "75 %" \
+    px 276 346 4 "Silencio de Música"
   # Avanzado: la ganancia de entrada a x2 y sin el ajuste automático
   tecla alt-v; sleep 0.5; tecla down down ret; sleep 2
   aparca
-  shot m3
+  hasta m3 titulo 126 141 activa "Avanzado" texto 198 181 0 6 fina "Ganancia de entrada: x1"
   tecla spc; sleep 0.5
   tecla tab tab spc; sleep 0.5
-  shot m4
+  hasta m4 texto 198 181 0 6 fina "Ganancia de entrada: x2"
   tecla esc; sleep 1
   # Cómo se usa: el primer paso y el del balance
   tecla alt-y; sleep 0.5; tecla ret; sleep 2
   aparca
-  shot t1
+  hasta t1 texto 402 146 0 8 negrita "Paso 1 de 8: Qué es"
   tecla ret ret ret; sleep 1.5
-  shot t4
+  hasta t4 texto 402 146 0 8 negrita "Paso 4 de 8: El balance"
   tecla esc; sleep 1
   # la vista sencilla y otra vez la completa
   tecla alt-v; sleep 0.5; tecla ret; sleep 2
   aparca
-  shot s1
+  hasta s1 texto 192 138 0 8 fina "Vista sencilla: solo el"
   tecla alt-v; sleep 0.5; tecla down ret; sleep 2
   sleep 2
   tecla esc; sleep 1.5
@@ -214,7 +239,8 @@ RX=400; RY=300
   tecla right ret; sleep 2.5
   clic 196 264; sleep 1.5
   aparca
-  shot c1
+  hasta c1 titulo 124 110 activa "Configuración" texto 278 313 0 8 negrita "Tarjeta: Sound Blaster 16" \
+    texto 534 237 0 6 fina "Mezclador..."
   tecla esc; sleep 1
   clic 756 13; sleep 1; tecla ret; sleep 3
   send 'ECHO dos' 0.5
@@ -225,8 +251,8 @@ RX=400; RY=300
   send 'MEZTEST V0:33 B0:90 V3:0 G4:1 S5:1 V6:10 A0:0 A1:100 A3:3 A4:1 C' 2
   send 'ECHO cinco' 0.5
   send 'A:\HISPADOS\HSPSND /INFO' 2
-  mon quit
-} | run 200 -vga std -device sb16,audiodev=snd0
+  listo; mon quit
+} | run 900 -vga std -device sb16,audiodev=snd0
 cp $T/ini.txt $T/ini_a.txt
 ct uno " (de fábrica)"
 estado uno "MEZ versión 4 tarjeta 2 fuentes=7F tarjeta=7F ajustes=00BF grabar=3C sonar=38" \
@@ -261,14 +287,14 @@ echo "== (c) SONIDO.INI: se guarda solo y HSPSND lo pone al arrancar otra vez ==
 cp $T/ini_a.txt $T/ini.txt
 for l in "[Mezclador]" "General=65,50" "Sonidos=70,60" "Musica=85,50" "Altavoz=75,50" "Silencio=Musica" \
          "Sonar=CD,Linea" "Grabar=CD,Microfono" "GananciaEntrada=1" "AjusteMicrofono=0" "Vista=completa"; do ini "$l"; done
-{ sleep 6
+{ inicio
   send 'A:\HISPADOS\HSPSND' 3
   send 'ECHO seis' 0.5
   send 'MEZTEST C' 2
   send 'ECHO siete' 0.5
   send 'A:\HISPADOS\HSPSND /INFO' 2
-  mon quit
-} | run 30 -device sb16,audiodev=snd0
+  listo; mon quit
+} | run 300 -device sb16,audiodev=snd0
 ct seis " (al arrancar, de SONIDO.INI)"
 estado seis "F0 vol=65 cas=0 bal=50" "F1 vol=70 cas=0 bal=60" "F2 vol=85 cas=1 bal=50" "F3 vol=85 cas=6 bal=50" \
   "F6 vol=75 cas=0 bal=50" "AJ 0=50 1=50 2=1 3=0 4=0 5=0" "cambios=0"
@@ -278,17 +304,16 @@ python3 - $T/f.img <<'EOF'
 import subprocess, sys
 ini = subprocess.run(['mtype', '-i', sys.argv[1], '::HISPADOS/SONIDO.INI'], capture_output=True).stdout
 nuevo = b'; prueba\r\n[HDA 8086:2668 1AF4:1100 1AF4:0022 1AF4:0022]\r\nEstado=SUENA\r\nRuta=03h(0) 02h\r\n\r\n' + ini
-open('/dev/stdout', 'wb')
 p = sys.argv[1] + '.ini'
 open(p, 'wb').write(nuevo)
 subprocess.run(['mcopy', '-o', '-i', sys.argv[1], p, '::HISPADOS/SONIDO.INI'])
 EOF
-{ sleep 6
+{ inicio
   send 'A:\HISPADOS\HSPSND /VOL:40' 3
   send 'ECHO ocho' 0.5
   send 'MEZTEST' 2
-  mon quit
-} | run 25 -device sb16,audiodev=snd0
+  listo; mon quit
+} | run 300 -device sb16,audiodev=snd0
 estado ocho "F0 vol=40 cas=0 bal=50" "F1 vol=70 cas=0 bal=60" "F3 vol=85 cas=6 bal=50"
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/log.txt; cat $T/ini_a.txt; fi
 
@@ -299,7 +324,7 @@ for CARD in hda ac97; do
   esac
   echo "== (b) $NAME: el volumen de cada fuente, medido en la grabación =="
   nueva
-  { sleep 6
+  { inicio
     send 'A:\HISPADOS\HSPSND /VOL:100' 3
     send 'ECHO uno' 0.5
     send 'MEZTEST' 2
@@ -316,8 +341,8 @@ for CARD in hda ac97; do
     send 'SONAR /TONE 1400 500' 3
     send 'MEZTEST M0:0' 2
     send 'SONAR /TONE 1575 500' 3
-    mon quit
-  } | run 70 $DEV
+    listo; mon quit
+  } | run 600 $DEV
   estado uno "MEZ versión 4 tarjeta" "$FU"
   # (QEMU solo graba mientras suena: con HD Audio los tonos salen pegados.
   # Se miden por tramos de la misma frecuencia, con el pico de cada canal)
@@ -379,7 +404,7 @@ EOF
 
   echo "== (b) y (d) $NAME con la Sound Blaster emulada: la Música (FM) y lo que escribe el juego =="
   nueva 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\nDOS=UMB\r\n'
-  { sleep 6
+  { inicio
     send 'A:\HISPADOS\HSPSND /SB' 4
     send 'ECHO uno' 0.5
     send 'MEZTEST M2:1 W30:F8 W31:F8 W34:F8 W35:F8 W22:FF' 2.5
@@ -389,8 +414,8 @@ EOF
     send 'ECHO tres' 0.5
     send 'MEZTEST M2:0 W30:F8 W31:F8' 2.5
     send 'A:\SBTEST' 12
-    mon quit
-  } | run 70 $DEV
+    listo; mon quit
+  } | run 600 $DEV
   estado uno "fuentes=07" "F0 vol=80 cas=0 bal=50" "F2 vol=85 cas=1 bal=50"
   estado dos "SBP 22=00" "30=00 31=00" "34=F8 35=F8" "F0 vol=80 cas=0 bal=50" "F1 vol=90 cas=0 bal=50" "F2 vol=85 cas=1 bal=50"
   estado tres "F2 vol=85 cas=0 bal=50"
@@ -417,21 +442,21 @@ done
 echo "== El Mezclador con Intel HD Audio: lo que no tiene, dicho =="
 nueva
 RX=400; RY=300
-{ sleep 6
+{ inicio
   send 'KEYB SP' 2
   send 'A:\HISPADOS\HSPRATON' 2
   send 'A:\HISPADOS\HSPSND' 3
-  send 'VENTANAS' 7
+  send 'VENTANAS'; escritorio
   doble 414 129; sleep 1.5
   aparca
-  shot g1
+  hasta g1 marco 272 212 452 190 activa titulo 272 212 activa "Sonido"
   tecla right ret; sleep 3
   aparca
-  shot h1
+  hasta h1 texto 130 174 0 8 negrita "General" texto 116 444 0 8 fina "Graves y agudos no salen:"
   tecla esc; sleep 1
   clic 756 13; sleep 1; tecla ret; sleep 3
-  mon quit
-} | run 80 -vga std -device intel-hda -device hda-duplex,audiodev=snd0
+  listo; mon quit
+} | run 600 -vga std -device intel-hda -device hda-duplex,audiodev=snd0
 chk $T/g1.ppm marco 272 212 452 190 activa titulo 272 212 activa "Sonido"
 chk $T/h1.ppm texto 130 174 0 8 negrita "General" texto 218 174 0 8 negrita "Sonidos" \
   texto 116 408 0 8 fina "CD, Línea y Micrófono no salen: la tarjeta no tiene esas entradas." \
