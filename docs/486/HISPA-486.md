@@ -128,6 +128,47 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
   mano, y un compilador de C cruzado si está en el equipo de pruebas), en QEMU
   con Hispa-DOS: que escriban lo esperado y acaben con su código de salida.
 
+## Fase 3: programas de Windows con ventanas (diseño)
+
+Un programa Win32 de ventanas tiene que correr **dentro de Hispa Ventanas**,
+como una tarea más (multitarea cooperativa), no saliendo a Hispa-DOS como los
+de consola. Lo que hay que resolver:
+
+- **Cargarlo.** Los módulos .HVP se cargan reubicados y comparten los
+  segmentos de Hispa Ventanas (base del programa, 4 GB). Los .EXE de Windows de
+  la época casi nunca traen reubicados (`/FIXED`), así que cada programa de
+  Windows lleva **sus propios selectores** (código, datos y FS para su TIB), con
+  base «bloque − ImageBase», como en HW32. El cargador de PE de HW32 (cabeceras,
+  secciones, reubicados, importaciones, DLL) se saca a un archivo común que
+  usen los dos.
+- **Las llamadas.** Igual que en HW32: cada importación, un trampolín que salta
+  lejos al despacho de Hispa Ventanas; el despacho pasa a los segmentos del
+  entorno, llama a la función (USER32/GDI32/KERNEL32 hechas sobre la interfaz
+  de `ventanas/api.inc`) y vuelve con RETF quitando los argumentos.
+- **Las tareas.** El cambio de tarea de Hispa Ventanas tiene que guardar y
+  devolver también DS, ES, FS y SS de las tareas de Windows. `GetMessage` es el
+  punto donde la tarea cede el turno.
+- **USER32 sobre Hispa Ventanas.** Ventanas (`CreateWindowExA`, clases con
+  `RegisterClassA`, `DefWindowProcA`), mensajes (`GetMessageA`,
+  `DispatchMessageA`, `PostQuitMessage`, traducción de los mensajes de Hispa
+  Ventanas a WM_* de Windows), cuadros (`MessageBoxA`), menús y controles
+  (BUTTON, EDIT, STATIC, LISTBOX) con los de `controles.inc`.
+- **GDI32.** `BeginPaint`/`EndPaint`, `TextOutA`, `SetTextColor`, pinceles y
+  plumas, `Rectangle`, `LineTo`, mapas de bits (`BitBlt`, `StretchDIBits`) sobre
+  la superficie de dibujo de Hispa Ventanas.
+
+Pasos, cada uno con su prueba:
+
+1. **3a** — un PE que solo llama a `MessageBoxA` sale como cuadro de Hispa
+   Ventanas (cargador común, selectores propios, despacho, tarea).
+2. **3b** — «Hola, mundo» de ventana: `RegisterClassA`, `CreateWindowExA`,
+   bucle de mensajes, `WM_PAINT` con `TextOutA`, cerrar.
+3. **3c** — controles y menús (un programa con botones, una caja de texto y un
+   menú).
+4. **3d** — GDI completa para los programas sencillos de la época (dibujo,
+   mapas de bits, tipos de letra) y diálogos desde recursos (`.rsrc`:
+   `DialogBoxParamA`, `LoadIconA`, `LoadStringA`).
+
 ## Relación con los demás
 
 - La familia: **Hispa-8086** (8086 a 286, gama MS-DOS de los 80), **Hispa-386**
