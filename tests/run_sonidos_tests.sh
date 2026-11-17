@@ -6,6 +6,16 @@
 # que empieza y el pico de cada canal. El entorno se maneja con el ratón y el
 # teclado del monitor de QEMU y las capturas se miran punto a punto
 # (tests/tools/ventanas_check.py).
+#  El guion no va a ciegas con esperas fijas: después de cada cosa espera a
+#  ver su efecto en la pantalla («hasta»: «Sonando...», «Terminado.», el
+#  título de la ventana que se abre...). Con el equipo cargado (la batería,
+#  con veinte pruebas a la vez) el emulador va más despacio y con esperas
+#  fijas el guion se adelantaba: pulsaba donde aún no había nada.
+#  De cada sonido se mira además que no tenga ni un corte (audio.py los
+#  cuenta: silencios dentro del sonido). Un corte es que a la tarjeta no le
+#  han llegado los datos a tiempo: así se vio que HSPSND tardaba en preparar
+#  cada trozo para AC'97 y HD Audio lo mismo que dura el trozo (escribía en
+#  sus variables y en la pila con cada trama; ver fill_buffer).
 #  Con Intel AC'97, con Intel HD Audio y con una Sound Blaster 16:
 #  - SONIDOS.HVP está en \HISPADOS\PROGS, y HISPA.WAV y CAMPANA.WAV en
 #    \HISPADOS (disquete e imagen USB); su acceso sale en el grupo «Sonido»
@@ -48,6 +58,19 @@ mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep
 tecla() { local k; for k in "$@"; do mon "sendkey $k" 0.3; done; }
 shot() { sleep 0.4; mon "screendump $T/$1.ppm" 0.6; }
 send() { printf '%s\r' "$1"; sleep "${2:-1.5}"; }
+# hasta NOMBRE SEGUNDOS COMPROBACIÓN...: captura la pantalla en $T/NOMBRE.ppm
+# hasta que cumple la comprobación (las de ventanas_check.py) o pasan los
+# segundos. No escribe nada (la salida del guion va al puerto serie); si no
+# llega a cumplirse, la última captura queda ahí y el «chk» de después lo dice
+hasta() {
+  local nom=$1 fin=$(( SECONDS + $2 )); shift 2
+  while :; do
+    printf 'screendump %s\n' "$T/$nom.ppm" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1
+    sleep 0.3
+    $CHK $T/$nom.ppm "$@" > /dev/null 2>&1 && return 0
+    [ $SECONDS -ge $fin ] && return 1
+  done
+}
 muestra() { [ -f $T/$1.ppm ] && convert $T/$1.ppm $B/sonidos_$2.png; }
 RX=400; RY=300
 ir() {
@@ -120,13 +143,14 @@ EOF
 if [ "$(stat -c %s $B/CAMPANA.WAV)" -le 4096 ]; then ok "CAMPANA.WAV cabe en lo que lee Hispa Ventanas ($(stat -c %s $B/CAMPANA.WAV) octetos)"; else ko "CAMPANA.WAV pasa de 4096 octetos"; fi
 
 for CARD in ${CARDS:-ac97 hda sb16}; do
-  PRE="REM"; LADO="solo por la izquierda"; UMB=120
+  PRE="REM"; LADO="solo por la izquierda"; LADOD="solo por la derecha"; UMB=120
   case $CARD in
     ac97) DEV="-device AC97,audiodev=snd0"; NAME="Intel AC'97" ;;
     hda)  DEV="-device intel-hda -device hda-micro,audiodev=snd0"; NAME="Intel HD Audio" ;;
     sb16) DEV="-device sb16,audiodev=snd0"; NAME="Sound Blaster 16" ;;
     # (la vía de 8 bits y un canal: no va en la lista; CARDS=sb8 para probarla)
-    sb8)  DEV="-device sb16,audiodev=snd0"; NAME="Sound Blaster"; PRE="SET BLASTER=A220 I5 D1 H0 T4"; UMB=400 ;;
+    sb8)  DEV="-device sb16,audiodev=snd0"; NAME="Sound Blaster"; PRE="SET BLASTER=A220 I5 D1 H0 T4"; UMB=400
+          LADO="la tarjeta es mono: igual por los dos lados"; LADOD=$LADO ;;
   esac
   echo "== Reproductor de sonido con $NAME: tono, sonido de prueba, izquierda, derecha, parar, WAV y campanita =="
   cp "$IMG" $T/f.img
@@ -148,73 +172,85 @@ EOF
     send "$PRE" 1
     send 'A:\HISPADOS\HSPSND /VOL:100' 3
     send 'VENTANAS' 6
+    hasta w 40 titulo 36 52 activa "Centro de programas"
     # ---- [MEZCLADOR] el grupo Sonido: el Reproductor es el primero ----
     doble 414 129; sleep 1
     aparca
-    shot a0
-    tecla ret; sleep 3
+    hasta a0 20 titulo 272 212 activa "Sonido"
+    tecla ret; sleep 1
     aparca
-    shot a1
+    hasta a1 30 titulo 158 135 activa "Reproductor de sonido" $EST "Listo."
     # ---- tono, sonido de prueba, izquierda y derecha ----
-    clic $TONO; sleep 0.8
-    shot a2
-    sleep 3.5
-    clic $PRUEBA; sleep 1.2
+    clic $TONO
+    hasta a2 15 $EST "Sonando... tono de 440 Hz (2 segundos)"
+    hasta w 20 $EST "Terminado."; sleep 0.5
+    clic $PRUEBA
     aparca
-    shot a3
-    sleep 6
-    shot a4
-    clic $IZQ; sleep 1
-    shot a5
-    sleep 6
-    clic $DER; sleep 7
+    hasta a3 15 $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)" px 180 446 12 "empezada"
+    hasta a4 30 $EST "Terminado."; sleep 0.5
+    clic $IZQ
+    hasta a5 15 $EST "Sonando... $LADO"
+    hasta w 30 $EST "Terminado."; sleep 0.5
+    clic $DER
+    hasta w 15 $EST "Sonando... $LADOD"
+    hasta w 30 $EST "Terminado."; sleep 0.5
     # ---- parar a medias ----
-    clic $PRUEBA; sleep 1.2
-    clic $PARAR; sleep 1.5
+    clic $PRUEBA
+    hasta w 15 $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)"
+    sleep 0.5
+    clic $PARAR
     aparca
-    shot a6
+    hasta a6 15 $EST "Parado."; sleep 1
     # ---- Abrir WAV: uno de 8.000 Hz y uno que no se admite ----
-    clic $ABRIR; sleep 1.5
-    shot a7d
-    escribe "OCHO.WAV"; tecla ret; sleep 0.6
-    shot a7
-    sleep 3
-    clic $ABRIR; sleep 1.5
-    escribe "RARO.WAV"; tecla ret; sleep 2
+    clic $ABRIR
+    hasta a7d 20 titulo 222 150 activa "Abrir un sonido WAV"
+    escribe "OCHO.WAV"; tecla ret
+    hasta a7 15 $EST "Sonando... OCHO.WAV (8000 Hz, 8 bits, mono)"
+    hasta w 20 $EST "Terminado."; sleep 0.5
+    clic $ABRIR
+    hasta w 20 titulo 222 150 activa "Abrir un sonido WAV"
+    escribe "RARO.WAV"; tecla ret
     aparca
-    shot a8
+    hasta a8 20 $EST "No se admite: solo WAV PCM de 8 o 16 bits, 8000-48000 Hz"
     # ---- el volumen del Reproductor: al 20 % y al 100 %, y silencio ----
-    clic $(VOLX 20) $VOLY; sleep 2
+    # (después de cada cambio, a ver el número nuevo y dos segundos para que
+    # suene entera la campanita: si llega otra antes, la corta)
+    clic $(VOLX 20) $VOLY
     aparca
-    shot a9
-    clic $(VOLX 100) $VOLY; sleep 2
-    clic $MUDO; sleep 1.5
-    clic $(VOLX 60) $VOLY; sleep 2
+    hasta a9 15 texto 474 412 0 8 fina "20 %"; sleep 2
+    clic $(VOLX 100) $VOLY
+    hasta w 15 texto 474 412 0 8 fina "100 %"; sleep 2
+    clic $MUDO
+    hasta w 15 px 544 421 4 "marcada"; sleep 1.5
+    clic $(VOLX 60) $VOLY
     aparca
-    shot a10
-    clic $MUDO; sleep 2                     # (al quitar el silencio también suena: al 60 %)
-    clic $(VOLX 100) $VOLY; sleep 2
+    hasta a10 15 texto 474 412 0 8 fina "60 %" px 544 421 4 "marcada"; sleep 2
+    clic $MUDO; sleep 2.5                   # (al quitar el silencio también suena: al 60 %)
+    clic $(VOLX 100) $VOLY
+    hasta w 15 texto 474 412 0 8 fina "100 %"; sleep 2
     tecla esc; sleep 1.5
     # ---- la barra del altavoz de Hispa Ventanas ----
-    clic 658 14; sleep 1
-    clic 610 92; sleep 2
-    clic 770 92; sleep 2
+    clic 658 14
+    hasta w 15 titulo 550 34 activa "Volumen"
+    clic 610 92; sleep 2.5
+    clic 770 92
     aparca
-    shot a11
+    hasta a11 15 titulo 550 34 activa "Volumen" texto 568 63 0 8 fina "Volumen: 100 %"; sleep 2
     clic 658 14; sleep 1
     # ---- Configuración > Sonido ----
     doble 102 129; sleep 1.5
-    tecla right ret; sleep 2.5
-    clic 196 264; sleep 0.5
-    clic 344 207; sleep 2
-    clic 568 207; sleep 2
+    tecla right ret
+    hasta w 30 titulo 124 110 activa "Configuración"; sleep 0.5
+    clic 196 264; sleep 1
+    clic 344 207; sleep 2.5
+    clic 568 207
     aparca
-    shot a12
+    hasta a12 15 titulo 124 110 activa "Configuración" texto 586 199 0 8 fina "100 %"; sleep 2
     tecla esc; sleep 1
     clic 756 13; sleep 1; tecla ret; sleep 2.5
-    send 'ECHO SIGUE-VIVO'
+    send 'ECHO SIGUE-VIVO' 3
     mon quit
-  } | run 170 -vga std -audiodev wav,id=snd0,path=$T/out.wav $DEV
+  } | run 420 -vga std -audiodev wav,id=snd0,path=$T/out.wav $DEV
   python3 tests/tools/audio.py rafagas $T/out.wav $UMB 20 > $T/audio.txt 2>&1
   chk $T/a0.ppm titulo 272 212 activa "Sonido"
   chk $T/a1.ppm tam 800 600 marco 158 135 484 353 activa titulo 158 135 activa "Reproductor de sonido" \
@@ -223,7 +259,6 @@ EOF
   chk $T/a2.ppm $EST "Sonando... tono de 440 Hz (2 segundos)"
   chk $T/a3.ppm $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)" px 180 446 12 "la barra de por dónde va, empezada" px 600 446 9 "y sin acabar"
   chk $T/a4.ppm $EST "Terminado." px 180 446 9 "la barra de por dónde va, vacía"
-  [ $CARD = sb8 ] && LADO="la tarjeta es mono: igual por los dos lados"
   chk $T/a5.ppm $EST "Sonando... $LADO"
   chk $T/a6.ppm $EST "Parado."
   chk $T/a7.ppm $EST "Sonando... OCHO.WAV (8000 Hz, 8 bits, mono)"
@@ -238,7 +273,7 @@ import re, sys
 txt = open(sys.argv[1], encoding='utf-8').read()
 card = sys.argv[2]
 r = [tuple(float(x) for x in m) for m in
-     re.findall(r'ráfaga ([\d.]+)-([\d.]+) s: dura ([\d.]+), empieza a (\d+) Hz, pico I (\d+) D (\d+)', txt)]
+     re.findall(r'ráfaga ([\d.]+)-([\d.]+) s: dura ([\d.]+), empieza a (\d+) Hz, pico I (\d+) D (\d+), cortes (\d+) \(el mayor, (\d+) ms\)', txt)]
 tr = [tuple(float(x) for x in m) for m in
       re.findall(r'tramo ([\d.]+)-([\d.]+) s: (\d+) Hz', open(sys.argv[3], encoding='utf-8').read())]
 bien = True
@@ -247,28 +282,37 @@ def mira(cond, que):
     print("  %s %s" % ("OK  " if cond else "FAIL", que))
     bien = bien and bool(cond)
 def n(i):
-    return r[i] if i < len(r) else (0, 0, 0, 0, 0, 0)
+    return r[i] if i < len(r) else (0, 0, 0, 0, 0, 0, 0, 0)
+# Los cortes (t[6] cuántos, t[7] lo que dura el mayor): el tono no puede tener
+# ninguno; la melodía de HISPA.WAV calla una vez de 5 a 8 ms entre dos notas,
+# y un corte de verdad (la tarjeta sin datos) dura 10 ms o más y nunca viene
+# solo (con el fallo de fill_buffer salían de 5 a 22 en cada sonido)
+def seguido(t):
+    return t[6] <= 1 and t[7] < 10
+def cortes(t):
+    return "sin cortes" if seguido(t) else "CON %d CORTES, el mayor de %d ms" % (t[6], t[7])
 mono = card == 'sb8'                    # (un canal: sale igual por los dos lados)
 t = n(0)
 mira(abs(t[2] - 2.0) < 0.25 and abs(t[3] - 440) < 15 and t[4] > 8000 and t[5] > 8000,
      "Tono 440 Hz: %.2f s a %d Hz por los dos canales (picos %d y %d)" % (t[2], t[3], t[4], t[5]))
+mira(t[2] > 0 and t[6] == 0, "el tono suena seguido: %d cortes" % t[6])
 t = n(1)
-mira(abs(t[2] - 4.65) < 0.35 and abs(t[3] - 523) < 25 and t[4] > 8000 and abs(t[4] - t[5]) < t[4] * 0.05,
-     "Sonido de prueba: %.2f s, empieza a %d Hz, igual por los dos canales (picos %d y %d)" % (t[2], t[3], t[4], t[5]))
+mira(abs(t[2] - 4.65) < 0.35 and abs(t[3] - 523) < 25 and t[4] > 8000 and abs(t[4] - t[5]) < t[4] * 0.05 and seguido(t),
+     "Sonido de prueba: %.2f s, empieza a %d Hz, igual por los dos canales (picos %d y %d), %s" % (t[2], t[3], t[4], t[5], cortes(t)))
 t = n(2)
 if mono:
-    mira(abs(t[2] - 4.65) < 0.35 and t[4] > 4000 and abs(t[4] - t[5]) < t[4] * 0.05,
-         "Izquierda con una tarjeta mono: %.2f s, por los dos canales (picos %d y %d)" % (t[2], t[4], t[5]))
+    mira(abs(t[2] - 4.65) < 0.35 and t[4] > 4000 and abs(t[4] - t[5]) < t[4] * 0.05 and seguido(t),
+         "Izquierda con una tarjeta mono: %.2f s, por los dos canales (picos %d y %d), %s" % (t[2], t[4], t[5], cortes(t)))
 else:
-    mira(abs(t[2] - 4.65) < 0.35 and abs(t[3] - 523) < 25 and t[4] > 8000 and t[5] < t[4] * 0.02,
-         "Izquierda: %.2f s, casi todo por el canal izquierdo (picos %d y %d)" % (t[2], t[4], t[5]))
+    mira(abs(t[2] - 4.65) < 0.35 and abs(t[3] - 523) < 25 and t[4] > 8000 and t[5] < t[4] * 0.02 and seguido(t),
+         "Izquierda: %.2f s, casi todo por el canal izquierdo (picos %d y %d), %s" % (t[2], t[4], t[5], cortes(t)))
 t = n(3)
 if mono:
-    mira(abs(t[2] - 4.65) < 0.35 and t[4] > 4000 and abs(t[4] - t[5]) < t[4] * 0.05,
-         "Derecha con una tarjeta mono: %.2f s, por los dos canales (picos %d y %d)" % (t[2], t[4], t[5]))
+    mira(abs(t[2] - 4.65) < 0.35 and t[4] > 4000 and abs(t[4] - t[5]) < t[4] * 0.05 and seguido(t),
+         "Derecha con una tarjeta mono: %.2f s, por los dos canales (picos %d y %d), %s" % (t[2], t[4], t[5], cortes(t)))
 else:
-    mira(abs(t[2] - 4.65) < 0.35 and abs(t[3] - 523) < 25 and t[5] > 8000 and t[4] < t[5] * 0.02,
-         "Derecha: %.2f s, casi todo por el canal derecho (picos %d y %d)" % (t[2], t[4], t[5]))
+    mira(abs(t[2] - 4.65) < 0.35 and abs(t[3] - 523) < 25 and t[5] > 8000 and t[4] < t[5] * 0.02 and seguido(t),
+         "Derecha: %.2f s, casi todo por el canal derecho (picos %d y %d), %s" % (t[2], t[4], t[5], cortes(t)))
 # «Parar» y el WAV de 8.000 Hz (300 Hz durante 1,5 s). Con algunas tarjetas,
 # al parar, QEMU deja de grabar hasta el sonido siguiente y los dos salen
 # pegados: se separan por el tramo de 300 Hz
@@ -280,7 +324,7 @@ if ocho and t[0] <= ocho[0][0] < t[1]:
 else:
     parar = t[2]
     sig = 6
-mira(0.6 < parar < 3.6 and abs(t[3] - 523) < 25, "Parar corta el sonido de prueba (a los %.2f s)" % parar)
+mira(0.3 < parar < 4.2 and abs(t[3] - 523) < 25, "Parar corta el sonido de prueba, que dura 4,65 s (a los %.2f s)" % parar)
 mira(ocho and abs(ocho[0][1] - ocho[0][0] - 1.5) < 0.25,
      "un WAV de 8000 Hz, 8 bits y mono suena a 300 Hz durante 1,5 s (%s)" % ", ".join("%.2f s a %d Hz" % (x[1] - x[0], x[2]) for x in ocho))
 # las campanitas: Reproductor 20 y 100, (silencio: nada), al quitarlo 60 y
@@ -316,20 +360,22 @@ RX=400; RY=300
   send 'KEYB SP' 2
   send 'A:\HISPADOS\HSPRATON' 2
   send 'VENTANAS' 6
+  hasta w 40 titulo 36 52 activa "Centro de programas"
   doble 414 129; sleep 1
-  tecla ret; sleep 3
+  hasta w 20 titulo 272 212 activa "Sonido"
+  tecla ret; sleep 1
   aparca
-  shot n1
-  clic $PRUEBA; sleep 1
+  hasta n1 30 titulo 158 135 activa "Reproductor de sonido"
+  clic $PRUEBA
   aparca
-  shot n2
+  hasta n2 15 $EST "No hay sonido: HSPSND no está cargado."
   clic $TONO; sleep 1
   clic $(VOLX 50) $VOLY; sleep 1
   tecla esc; sleep 1
   clic 756 13; sleep 1; tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
-} | run 60 -vga std -audiodev wav,id=snd0,path=$T/out.wav -device AC97,audiodev=snd0
+} | run 200 -vga std -audiodev wav,id=snd0,path=$T/out.wav -device AC97,audiodev=snd0
 chk $T/n1.ppm titulo 158 135 activa "Reproductor de sonido" texto 174 168 0 8 negrita "HSPSND no está cargado: no hay sonido." \
   texto 174 188 0 8 fina "Cargue HSPSND antes de abrir Hispa Ventanas: salga,"
 chk $T/n2.ppm $EST "No hay sonido: HSPSND no está cargado."

@@ -9,8 +9,12 @@
                                                           segundo de silencio, o las
                                                           centésimas que se digan): lo
                                                           que dura, la frecuencia
-                                                          con la que empieza y el
-                                                          pico de cada canal
+                                                          con la que empieza, el
+                                                          pico de cada canal y los
+                                                          cortes (silencios de 3 ms
+                                                          o más dentro del sonido:
+                                                          la tarjeta se ha quedado
+                                                          sin datos)
 """
 import sys, wave, struct, math
 
@@ -96,8 +100,20 @@ def rafagas(path, umbral=150, calla=50):
         pi, pd = max(abs(x) for x in i), max(abs(x) for x in d)
         s = (i if pi >= pd else d)[:rate // 4]          # el primer cuarto de segundo
         zc = sum(1 for q in range(1, len(s)) if (s[q - 1] < 0) != (s[q] < 0))
-        print("ráfaga %.2f-%.2f s: dura %.2f, empieza a %.0f Hz, pico I %d D %d" %
-              (a * win / rate, b * win / rate, (b - a) * win / rate, zc / 2 / (len(s) / rate), pi, pd))
+        # los cortes: si a la tarjeta no le llegan los datos a tiempo, calla
+        # hasta que llegan (y QEMU graba ese silencio). Un sonido seguido no
+        # tiene ninguno: una onda pasa por cero, pero no se queda 3 ms en él
+        cortes, mayor, sigue = 0, 0, 0
+        for q in range(len(i)):
+            if -8 <= i[q] <= 8 and -8 <= d[q] <= 8:
+                sigue += 1
+            else:
+                if sigue >= rate * 3 // 1000:
+                    cortes += 1; mayor = max(mayor, sigue)
+                sigue = 0
+        print("ráfaga %.2f-%.2f s: dura %.2f, empieza a %.0f Hz, pico I %d D %d, cortes %d (el mayor, %.0f ms)" %
+              (a * win / rate, b * win / rate, (b - a) * win / rate, zc / 2 / (len(s) / rate), pi, pd,
+               cortes, mayor * 1000 / rate))
 
 if __name__ == '__main__':
     if sys.argv[1] == 'rafagas':

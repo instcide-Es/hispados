@@ -2217,7 +2217,12 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   campanitas al cambiar el volumen desde el Reproductor, desde la barra del
   altavoz y desde Configuración › Sonido (más fuertes al 100 % que al 20 %;
   ninguna en silencio). Y sin HSPSND: el aviso. Capturas de muestra en
-  `build/sonidos_*.png`.
+  `build/sonidos_*.png`. De cada sonido se cuentan además los cortes
+  (silencios dentro del sonido: la tarjeta se ha quedado sin datos): el
+  tono y los sonidos de prueba no pueden tener ninguno. Y el guion no lleva
+  esperas fijas: después de cada pulsación espera a ver su efecto en la
+  pantalla («Sonando...», «Terminado.», el título de la ventana), para que
+  valga igual con el equipo cargado (la batería entera).
 - Programas de prueba de Windows 16 bits propios (NASM + nuestra
   herramienta de cabeceras NE) para cada función de la API, con su
   resultado escrito en un archivo (etapa 4).
