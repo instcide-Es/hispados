@@ -373,6 +373,11 @@ msg_mirar:
         ; lo tenía cuando se pulsó. Si el equipo va lento, llegan varias teclas
         ; juntas: con «Tab, Espacio» seguidos, el espacio se apuntaba al control
         ; que tenía el foco antes de atender el Tab, y actuaba sobre él.
+        cmp dword [edi-M_TAM+M_MSG], WM_KEYDOWN
+        je .tecla
+        cmp dword [edi-M_TAM+M_MSG], WM_CHAR
+        jne .si                     ; (otros mensajes llevan en M_L lo que quieran)
+.tecla:
         test byte [edi-M_TAM+M_L+3], ML_TECLADO >> 24
         jz .si
         mov ebp, [foco]
