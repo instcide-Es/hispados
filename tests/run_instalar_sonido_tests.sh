@@ -110,6 +110,9 @@ EOF
 lote() { while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 0.5; done; }
 nuevo() {  # nombre imagen: carpeta, copia de la imagen y disco vacío de 32 MB
   mkdir -p $T/$1; cp "$2" $T/$1/f.img
+  # [0.9.22] un disquete «con la oficina» (un PLUMA.HVP de muestra): así INSTALAR no
+  # pregunta por el disquete Oficina (eso lo mira run_instalar_tests.sh)
+  printf x > $T/pluma.hvp; MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/$1/f.img $T/pluma.hvp ::HISPADOS/PROGS/PLUMA.HVP 2>/dev/null || true
   dd if=/dev/zero of=$T/$1/hdd.img bs=1M count=32 status=none
 }
 PREC="PARTIR /PRI|FORMATEA C: /V:DESTINO /AUTOTEST"
