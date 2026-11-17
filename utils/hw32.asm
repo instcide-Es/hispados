@@ -40,6 +40,22 @@ PILA_MAX    equ 0x100000            ; la pila: lo que pida, hasta 1 MB
 MONTON_TAM  equ 0x100000            ; cada trozo de montón que se pide
 
 inicio:
+        jmp near inicio16
+; ---- [fase 3c] HW32 como MÓDULO de Hispa Ventanas. Hispa Ventanas carga este
+; mismo archivo en memoria extendida, le hace dos selectores de 32 bits (código
+; y datos, con la base en «copia − 100h»), rellena mod_d y llama (lejos) a
+; mod_cargar: el programa de ventanas tiene así el mismo KERNEL32 y el mismo
+; cargador de DLL que uno de consola. Lo que es del entorno (USER32, GDI32...)
+; se lo pide a Hispa Ventanas por md_resolver. Aquí, en 103h, la firma y la
+; tabla que busca Hispa Ventanas (ventanas/win32.inc) ----
+        db 'HW32MOD', 1
+        dd mod_cargar               ; +0  (lejos) carga el programa -> EAX=0 si bien
+        dd mod_fin                  ; +4  (lejos) suelta todo lo del programa
+        dd mod_d                    ; +8  los datos que se cruzan
+        dd nombre                   ; +12 el programa (hasta 129 letras)
+        dd mod_param                ; +16 sus parámetros (con el espacio delante)
+        dd hw32_dir                 ; +20 la carpeta de HW32 (acabada en barra)
+inicio16:
         mov sp, pila16_cima
         mov ax, [0x2C]              ; el entorno de DOS
         mov [env_seg], ax
@@ -247,9 +263,39 @@ escribe_tb_h:                       ; (rm_bx = el handle)
         jmp dos
 ; ---- falla con el mensaje DS:ESI ----
 falla:
+        cmp byte [md_modulo], 0
+        jne falla_mod
         call pon_cad
         mov ax, 0x4CFF
         int 0x21
+; (módulo) al cargar: se vuelve a Hispa Ventanas con el texto; ya en marcha:
+; se le pide que lo diga y que acabe el programa
+falla_mod:
+        cmp byte [en_marcha], 0
+        jne .ya
+        mov [md_error], esi
+        mov eax, 1
+        jmp mod_cargar.vuelve
+.ya:
+        mov eax, esi
+        mov ecx, 1
+        jmp aviso_y_fin
+; ---- (módulo) Hispa Ventanas dice el aviso y acaba el programa: ECX=0, falta
+; la función EAX (su nombre, en el programa; 0: por número); 1, el texto EAX
+; (nuestro); 2, el texto EAX (del programa) ----
+aviso_y_fin:
+        mov edx, [md_ficha]
+        jmp dword far [md_falta]
+; ---- el programa acaba con el código AL ----
+acaba:
+        cmp byte [md_modulo], 0
+        jne .mod
+        mov ah, 0x4C
+        int 0x21
+.mod:
+        movzx eax, al
+        mov edx, [md_ficha]
+        jmp dword far [md_salir]
 
 ; ---- la carpeta de HW32 (de lo que hay tras el entorno) a hw32_dir ----
 carpeta_hw32:
@@ -313,14 +359,20 @@ dos:
         pop ebx
         ret
 int_rm:
+        cmp byte [md_modulo], 0
+        jne int_rm_mod
+int_rm_real:
+        push eax
+        mov ax, [tb_seg]
+        mov [rm_ds], ax
+        mov [rm_es], ax
+        pop eax
+int_rm_cru:                         ; (con rm_ds y rm_es ya puestos)
         push eax
         push ebx
         push ecx
         push edi
         push es
-        mov ax, [tb_seg]
-        mov [rm_ds], ax
-        mov [rm_es], ax
         mov dword [rm_ss_sp], 0
         mov word [rm_flags], 0x0202
         push ds
@@ -336,6 +388,131 @@ int_rm:
         pop ebx
         pop eax
         bt word [rm_flags], 0
+        ret
+; ---- (módulo) dentro de Hispa Ventanas no hay consola: lo que va a la
+; pantalla de texto o viene del teclado por la BIOS o por los handles 0 a 2
+; no se hace (lo escrito se da por escrito; de leer, nada); no se ejecutan
+; otros programas; se lleva la cuenta de los archivos abiertos (mod_fin los
+; cierra) y, tras una búsqueda, la DTA vuelve a ser la de Hispa Ventanas ----
+int_rm_mod:
+        cmp bl, 0x21
+        je .dos
+        cmp bl, 0x16
+        je .tecla
+        cmp bl, 0x10
+        jne int_rm_real
+.nada:
+        mov word [rm_flags], 0x0202
+        clc
+        ret
+.tecla:
+        mov word [rm_flags], 0x0242 ; (ZF: no hay tecla)
+        mov word [rm_ax], 0
+        clc
+        ret
+.dos:
+        push eax
+        mov ah, [rm_ax + 1]
+        mov [mod_ah], ah
+        cmp ah, 0x0C
+        jbe .dos_nada               ; consola de DOS
+        cmp ah, 0x4B                ; EXEC: no
+        je .dos_no
+        cmp ah, 0x40
+        je .dos_esc
+        cmp ah, 0x3F
+        je .dos_lee
+        cmp ah, 0x3E
+        jne .dos_si
+        cmp word [rm_bx], 4         ; los de serie no se cierran
+        ja .dos_si
+.dos_nada:
+        pop eax
+        jmp .nada
+.dos_no:
+        pop eax
+        mov word [rm_ax], 8
+        mov word [rm_flags], 0x0203
+        stc
+        ret
+.dos_esc:
+        cmp word [rm_bx], 2
+        ja .dos_si
+        mov ax, [rm_cx]
+        mov [rm_ax], ax
+        pop eax
+        jmp .nada
+.dos_lee:
+        cmp word [rm_bx], 2
+        ja .dos_si
+        mov word [rm_ax], 0
+        pop eax
+        jmp .nada
+.dos_si:
+        pop eax
+        call int_rm_real
+        pushfd
+        push eax
+        push ebx
+        mov al, [mod_ah]
+        cmp al, 0x4E
+        je .dta
+        cmp al, 0x4F
+        je .dta
+        test byte [esp + 8], 1      ; (el acarreo de DOS)
+        jnz .dos_x
+        movzx ebx, word [rm_ax]
+        cmp al, 0x3C
+        je .abre
+        cmp al, 0x3D
+        je .abre
+        cmp al, 0x5B
+        je .abre
+        cmp al, 0x5A
+        je .abre
+        cmp al, 0x45
+        je .abre
+        cmp al, 0x6C
+        je .abre
+        movzx ebx, word [rm_bx]
+        cmp al, 0x3E
+        je .cierra
+        jmp .dos_x
+.dta:
+        call dta_anfitrion
+        jmp .dos_x
+.abre:
+        cmp ebx, 255
+        ja .dos_x
+        bts [mod_abiertos], ebx
+        jmp .dos_x
+.cierra:
+        cmp ebx, 255
+        ja .dos_x
+        btr [mod_abiertos], ebx
+.dos_x:
+        pop ebx
+        pop eax
+        popfd
+        ret
+; (módulo) la DTA de DOS, otra vez la de Hispa Ventanas (PSP:80h). Conserva
+; los rm_*
+dta_anfitrion:
+        push dword [rm_eax]
+        push dword [rm_edx]
+        push dword [rm_flags]
+        mov ax, [md_psp]
+        mov [rm_ds], ax
+        mov [rm_es], ax
+        mov word [rm_dx], 0x80
+        mov word [rm_ax], 0x1A00
+        push ebx
+        mov bl, 0x21
+        call int_rm_cru
+        pop ebx
+        pop dword [rm_flags]
+        pop dword [rm_edx]
+        pop dword [rm_eax]
         ret
 
 ; =============================================================================
@@ -391,6 +568,7 @@ carga_pe:
         ; la base del programa: bloque - ImageBase
         sub ebx, [img_base]
         mov [prog_base], ebx
+        mov [md_base], ebx          ; (módulo: Hispa Ventanas ya la necesita al importar)
         call hace_selectores
         ; a cero
         push es
@@ -605,6 +783,12 @@ carga_dll:
         mov esi, b_vacio
         call prueba_dll
         jnc .abierta
+        cmp byte [md_modulo], 0
+        je .dos
+        mov dword [md_error2], b_dll
+        mov esi, m_falta_dll
+        jmp falla
+.dos:
         mov esi, m_falta_dll
         call pon_cad
         mov esi, b_dll
@@ -799,8 +983,50 @@ pide_bloque:
         shl esi, 16                 ; el handle del bloque (para soltarlo)
         mov si, di
         mov [ult_handle], esi
+        ; se apunta (mod_fin los suelta todos); sin sitio y de módulo: no
+        mov eax, [n_blq]
+        cmp eax, N_BLQ
+        jae .lleno
+        mov [blq_tab + eax * 4], esi
+        inc dword [n_blq]
         clc
+        jmp .x
+.lleno:
+        cmp byte [md_modulo], 0
+        je .x                       ; (CF=0)
+        mov edi, esi
+        shr esi, 16
+        mov ax, 0x0502
+        int 0x31
+        stc
 .x:
+        pop edi
+        pop esi
+        pop ecx
+        pop eax
+        ret
+
+; suelta el bloque de DPMI de handle ESI (y lo borra de los apuntados)
+suelta_dpmi:
+        push eax
+        push ecx
+        push esi
+        push edi
+        mov ecx, [n_blq]
+.b:
+        jecxz .s
+        dec ecx
+        cmp [blq_tab + ecx * 4], esi
+        jne .b
+        dec dword [n_blq]
+        mov eax, [n_blq]
+        mov eax, [blq_tab + eax * 4]
+        mov [blq_tab + ecx * 4], eax
+.s:
+        mov edi, esi
+        shr esi, 16
+        mov ax, 0x0502
+        int 0x31
         pop edi
         pop esi
         pop ecx
@@ -889,6 +1115,7 @@ importaciones:
         test eax, eax
         jz .fin
         add eax, [ebp + M_DIR]
+        mov [imp_dll], eax
         mov ebx, [es:esi]           ; la tabla de nombres (o la IAT)
         test ebx, ebx
         jnz .ilt
@@ -899,6 +1126,43 @@ importaciones:
         add edi, [ebp + M_DIR]
         call es_kernel32_nom        ; ES:EAX: ¿KERNEL32? (ZF=1)
         je .f
+        ; (módulo) ¿una del entorno (USER32, GDI32)? Sus funciones las pone
+        ; Hispa Ventanas (la que no tenga, con su «falta»)
+        cmp byte [md_modulo], 0
+        je .otra
+        push esi
+        push eax
+        mov esi, eax
+        mov al, 1
+        call anfitrion
+        test eax, eax
+        pop eax
+        pop esi
+        jz .otra
+.h:
+        mov eax, [es:ebx]
+        test eax, eax
+        jz .d_sig
+        push esi
+        push edi
+        xor edi, edi
+        test eax, 0x80000000
+        jnz .h1
+        lea edi, [eax + 2]
+        add edi, [ebp + M_DIR]
+.h1:
+        mov esi, [imp_dll]
+        xor al, al
+        call anfitrion
+        pop edi
+        pop esi
+        test eax, eax
+        jz .muchas
+        mov [es:edi], eax
+        add ebx, 4
+        add edi, 4
+        jmp .h
+.otra:
         ; otra DLL: la suya (cargándola si hace falta) -> EDX
         push esi
         push ebx
@@ -947,6 +1211,24 @@ importaciones:
         jnz .ordinal
         add eax, [ebp + M_DIR]
         add eax, 2
+        cmp byte [md_modulo], 0     ; (módulo) las que hace el entorno en vez
+        je .f_n                     ; de nosotros (Sleep: allí cede el turno)
+        push esi
+        push edi
+        push eax
+        mov edi, eax
+        mov esi, [imp_dll]
+        xor al, al
+        call anfitrion
+        mov ecx, eax
+        pop eax
+        pop edi
+        pop esi
+        test ecx, ecx
+        jz .f_n
+        mov eax, ecx
+        jmp .pon2
+.f_n:
         call busca_funcion          ; ES:EAX nombre -> ECX manejador, DX args
         jmp .pon
 .ordinal:
@@ -956,6 +1238,7 @@ importaciones:
 .pon:
         call nuevo_tramp            ; -> EAX el trampolín
         jc .muchas
+.pon2:
         mov [es:edi], eax
         add ebx, 4
         add edi, 4
@@ -1003,6 +1286,16 @@ es_kernel32_nom:
         pop esi
         ret
 s_k32   db 'KERNEL32', 0
+; ---- (módulo) pregunta a Hispa Ventanas. AL=0: la función EDI (su nombre;
+; 0: por número) de la DLL de nombre ESI -> EAX=su trampolín (0: no es cosa
+; suya). AL=1: la DLL de nombre ESI -> EAX=su mango (0: no la lleva). AL=2:
+; la función EDI del mango EBX -> EAX (0: no). Todo, direcciones del programa
+anfitrion:
+        push edx
+        mov edx, [md_ficha]
+        call dword far [md_resolver]
+        pop edx
+        ret
 
 ; ---- la ficha de la DLL de nombre ES:EAX, cargándola si no está -> EDX ----
 dll_de_nombre:
@@ -1250,6 +1543,33 @@ busca_funcion:
 ;  Ejecutar
 ; =============================================================================
 ejecuta:
+        call prepara
+        ; al programa
+        mov ax, [sel_pc]
+        mov [salto + 4], ax
+        mov ebx, [img_base]
+        add ebx, [pila_off]
+        add ebx, [pila_tam]
+        sub ebx, 16
+        mov fs, [sel_fs]
+        mov ax, [sel_pd]
+        mov es, ax
+        mov ss, ax
+        mov esp, ebx
+        xor eax, eax
+        xor ebx, ebx
+        xor ecx, ecx
+        xor edx, edx
+        xor esi, esi
+        xor edi, edi
+        xor ebp, ebp
+        push dword [salto + 4]       ; (con DS aún nuestro)
+        push dword [salto]
+        mov ds, [cs:sel_pd_cs]
+        retf
+; ---- lo del programa antes de empezar: su línea de órdenes, el entorno, la
+; TIB y el trampolín de inicio ([salto]) ----
+prepara:
         ; la línea de órdenes del programa, en lo nuestro (+0x1000)
         push es
         mov es, [sel_pd]
@@ -1339,28 +1659,159 @@ ejecuta:
         mov [es:edi + 1], eax
         mov word [es:edi + 5], 0xE0FF       ; jmp eax
         pop es
-        ; al programa
-        mov ax, [sel_pc]
-        mov [salto + 4], ax
-        mov ebx, [img_base]
-        add ebx, [pila_off]
-        add ebx, [pila_tam]
-        sub ebx, 16
-        mov fs, [sel_fs]
+        ret
+
+; =============================================================================
+;  [fase 3c] El módulo: HW32 dentro de Hispa Ventanas
+; =============================================================================
+; ---- (lejos, desde Hispa Ventanas) carga el programa «nombre»
+; con sus DLL y lo deja listo para empezar -> EAX=0 y md_selc, md_seld,
+; md_self, md_base, md_img, md_entrada y md_esp; si no, EAX=1 y md_error (y
+; md_error2) con el porqué. En los dos casos hay que llamar luego a mod_fin ----
+mod_cargar:
+        pushad
+        push ds
+        push es
+        push gs
+        mov ds, [cs:md_ds]
+        cld
+        ; a nuestra pila (tras el archivo: Hispa Ventanas deja 4 KB): el
+        ; cargador cuenta con que la pila y los datos son el mismo segmento
+        mov [mod_ss], ss
+        mov [mod_esp0], esp
+        mov ss, [md_ds]
+        mov esp, fin_prog + 0x1000
+        mov [mod_esp], esp
+        push ds                     ; (y ES, el nuestro: como al arrancar HW32)
+        pop es
+        mov ax, [md_cs]
+        mov [sel_cs32], ax
+        mov ax, [md_ds]
+        mov [sel_ds], ax
+        mov [sel_ss32], ax
+        mov ax, [md_env]
+        mov [env_seg], ax
+        ; el búfer de DOS: memoria convencional, con su selector
+        mov ax, 0x0100
+        mov bx, TB_PARR
+        int 0x31
+        mov esi, m_sin_conv
+        jc falla
+        mov [tb_seg], ax
+        mov [sel_tb], dx
+        mov [segrm], ax             ; (el número de proceso)
+        mov gs, dx
+        mov bx, 0x40
+        call sel_de_seg
+        mov [sel_bios], ax
+        mov bx, 0xB800
+        call sel_de_seg
+        mov [sel_vid], ax
+        mov bx, 0xB000
+        call sel_de_seg
+        mov [sel_mda], ax
+        mov bx, [env_seg]
+        test bx, bx
+        jz .sin_env
+        call sel_de_seg
+        mov [sel_env], ax
+.sin_env:
+        mov dword [resto], mod_param
+        call carga_pe
+        call prepara
+        mov byte [en_marcha], 1
+        movzx eax, word [sel_pc]
+        mov [md_selc], eax
         mov ax, [sel_pd]
-        mov es, ax
-        mov ss, ax
-        mov esp, ebx
+        mov [md_seld], eax
+        mov ax, [sel_fs]
+        mov [md_self], eax
+        mov eax, [prog_base]
+        mov [md_base], eax
+        mov eax, [img_base]
+        mov [md_img], eax
+        add eax, [pila_off]
+        add eax, [pila_tam]
+        sub eax, 16
+        mov [md_esp], eax
+        mov eax, [salto]
+        mov [md_entrada], eax
         xor eax, eax
+.vuelve:
+        mov ds, [cs:md_ds]
+        mov ss, [mod_ss]
+        mov esp, [mod_esp0]
+        pop gs
+        pop es
+        pop ds
+        mov [esp + 28], eax
+        popad
+        retf
+; ---- (lejos, desde Hispa Ventanas) suelta todo lo del programa: cierra los
+; archivos que dejó abiertos, la memoria (el programa, sus DLL, el montón),
+; el búfer de DOS y los selectores ----
+mod_fin:
+        pushad
+        push ds
+        push es
+        mov ds, [cs:md_ds]
+        cld
+        mov [mod_ss], ss
+        mov [mod_esp0], esp
+        mov ss, [md_ds]
+        mov esp, fin_prog + 0x1000
+        push ds
+        pop es
+        cmp word [tb_seg], 0
+        je .mem
         xor ebx, ebx
-        xor ecx, ecx
-        xor edx, edx
-        xor esi, esi
-        xor edi, edi
-        xor ebp, ebp
-        push dword [salto + 4]       ; (con DS aún nuestro)
-        push dword [salto]
-        mov ds, [cs:sel_pd_cs]
+.arch:
+        bt [mod_abiertos], ebx
+        jnc .arch_s
+        mov [rm_bx], bx
+        mov word [rm_ax], 0x3E00
+        push ebx
+        mov bl, 0x21
+        call int_rm_real
+        pop ebx
+.arch_s:
+        inc ebx
+        cmp ebx, 256
+        jb .arch
+.mem:
+        mov ecx, [n_blq]
+.blq:
+        jecxz .blq_f
+        dec ecx
+        mov esi, [blq_tab + ecx * 4]
+        mov edi, esi
+        shr esi, 16
+        mov ax, 0x0502
+        int 0x31
+        jmp .blq
+.blq_f:
+        mov [n_blq], ecx
+        mov dx, [sel_tb]
+        test dx, dx
+        jz .sel
+        mov ax, 0x0101
+        int 0x31
+.sel:
+        mov bx, [sel_pc]
+        test bx, bx
+        jz .x
+        mov ecx, 3
+.s:
+        mov ax, 0x0001
+        int 0x31
+        add bx, 8
+        loop .s
+.x:
+        mov ss, [mod_ss]
+        mov esp, [mod_esp0]
+        pop es
+        pop ds
+        popad
         retf
 
 ; =============================================================================
@@ -1525,6 +1976,13 @@ traza_sale:
 
 ; ---- una función que no está: lo dice y acaba ----
 f_falta:
+        cmp byte [md_modulo], 0
+        je .dos
+        mov ebx, [ficha_act]        ; (módulo) lo dice Hispa Ventanas
+        mov eax, [ebx + 6]
+        xor ecx, ecx
+        jmp aviso_y_fin
+.dos:
         mov esi, m_falta
         call pon_cad
         mov ebx, [ficha_act]
@@ -1571,6 +2029,7 @@ m_falta_dll db "Hispa-486: falta la DLL ", 0
 m_nl        db 13, 10, 0
 m_falta     db "Hispa-486: falta la funcion ", 0
 m_ordinal   db "(por numero)", 13, 10, 0
+m_sin_conv  db "No hay memoria convencional para el programa de Windows.", 0
 m_no_dpmi   db "HW32: hace falta HSPDPMI (cliente DPMI de 32 bits).", 13, 10, "$"
 m_no_mem    db "HW32: no hay memoria convencional bastante.", 13, 10, "$"
 m_no_sel    db "HW32: DPMI no da los selectores.", 13, 10, "$"
@@ -1648,6 +2107,38 @@ monton_ptr  dd 0
 monton_libre dd 0
 salto       dd 0, 0
 desc        times 8 db 0
+; [fase 3c] el módulo (HW32 dentro de Hispa Ventanas)
+N_BLQ       equ 256
+n_blq       dd 0                    ; los bloques de DPMI pedidos
+blq_tab     times N_BLQ dd 0
+imp_dll     dd 0                    ; el nombre de la DLL que se está importando
+mod_esp     dd 0
+mod_esp0    dd 0                    ; la pila de Hispa Ventanas mientras se carga
+mod_ss      dd 0
+mod_abiertos times 32 db 0          ; los archivos de DOS abiertos (un bit cada uno)
+mod_ah      db 0
+en_marcha   db 0                    ; el programa ya corre
+        align 4
+mod_d:
+md_modulo   dd 0                    ; +0  1: somos el módulo de Hispa Ventanas
+md_cs       dd 0                    ; +4  nuestros selectores (código y datos)
+md_ds       dd 0                    ; +8
+md_env      dd 0                    ; +12 el segmento (de modo real) del entorno
+md_psp      dd 0                    ; +16 el del PSP de Hispa Ventanas (su DTA)
+md_ficha    dd 0                    ; +20 la ficha del programa en Hispa Ventanas
+md_resolver dd 0, 0                 ; +24 (lejos) sus funciones: ver «anfitrion»
+md_salir    dd 0, 0                 ; +32 (lejos) el programa acaba: EAX=código
+md_falta    dd 0, 0                 ; +40 (lejos) un aviso y acaba: ver «aviso_y_fin»
+md_selc     dd 0                    ; +48 lo que devuelve mod_cargar: los
+md_seld     dd 0                    ; +52   selectores del programa,
+md_self     dd 0                    ; +56
+md_base     dd 0                    ; +60   su base (lineal),
+md_img      dd 0                    ; +64   su ImageBase,
+md_entrada  dd 0                    ; +68   donde empieza (sus DllMain y él)
+md_esp      dd 0                    ; +72   y su pila
+md_error    dd 0                    ; +76 el porqué (texto nuestro) si no carga
+md_error2   dd 0                    ; +80   y su segunda parte (0: no hay)
+mod_param   times 130 db 0
 ; la estructura de registros de 0300h
 rmr:
 rm_edi      dd 0

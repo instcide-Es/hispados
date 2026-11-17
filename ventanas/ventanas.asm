@@ -2068,6 +2068,8 @@ alto_ini:
 %include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
 %include "win32.inc"                ; [HISPA-486] programas de Windows de ventanas
 %include "win32u.inc"               ; [HISPA-486] su USER32 y su GDI32
+%include "win32c.inc"               ; [HISPA-486] sus controles de serie
+%include "win32m.inc"               ; [HISPA-486] sus menús, recursos y diálogos
 %endif
         align 16
 fin_archivo:

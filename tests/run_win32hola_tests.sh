@@ -27,7 +27,7 @@ set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 B=build
-make -s $B/WINHOLA.EXE > /dev/null 2>&1 || {
+make -s $B/WINHOLA.EXE $B/HW32.COM > /dev/null 2>&1 || {
   echo "== Hispa-486: el «Hola» de ventana de Win32: sin gcc de 32 bits, se salta =="; exit 0; }
 T=$(mktemp -d)
 fail=0
@@ -65,6 +65,8 @@ cp "$IMG" $T/f.img
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $B/WINHOLA.EXE ::BIN/WINHOLA.EXE || ko "no cabe WINHOLA.EXE en el disco"
+# (fase 3c) HW32.COM es el módulo de los programas de Windows: su KERNEL32
+MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $B/HW32.COM ::HISPADOS/HW32.COM || ko "no cabe HW32.COM en el disco"
 # un grupo «Win32», abierto, con los accesos de la prueba (tres iconos en
 # fila: sus nombres, en x = 125, 229 y 333 de la pantalla, y = 371)
 printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'SinRepetidos=1' 'TareasPrincipal=1' \

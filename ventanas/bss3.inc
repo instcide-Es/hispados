@@ -148,6 +148,14 @@ pe_misc     resd 1                  ; lo suyo (TIB, línea de órdenes), direcci
 pe_dll      resd 1                  ; el nombre de la DLL que se está importando
 pe_cab      resb 160                ; la cabecera PE del que se está abriendo
 pe_tabla    resb PE_MAX * PE_TAM
+pe_ruta     resb 200                ; la ruta de HW32.COM (y sus avisos)
+pe_dirfin   resd 1                  ;   donde acaba su carpeta
+w32c_p      resb P_TAM              ; (fase 3c) la plantilla del control que se hace
+w32_rec_ent resd 1                  ; la ficha del último recurso buscado
+w32d_tpl    resd 1                  ; el diálogo que se hace: su plantilla,
+w32d_sig    resd 1                  ;   por dónde se va leyendo,
+w32d_arg    resd 1                  ;   los argumentos
+w32d_tipo   resd 1                  ;   y la clase del control (0 a 4; -1: ninguna)
 w32_crea    resd 8                  ; lo de la ventana que se está creando (V_D0...V_D7)
 w32_cascada resd 1                  ; cuántas ventanas se han puesto con CW_USEDEFAULT
 w32_dt_dc   resd 1                  ; DrawTextA: el contexto,

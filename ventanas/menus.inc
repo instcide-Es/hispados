@@ -219,6 +219,9 @@ menu_abrir:
         mov dword [menu_duena], 0
         jmp .ok2
 .ok:
+%ifdef CON_PROGRAMAS
+        call w32_menu_abierto       ; [HISPA-486] las órdenes en gris de un programa de Windows
+%endif
         mov eax, WM_ENTERMENULOOP   ; a la dueña: tiene un menú abierto
         call menu_avisar
 .ok2:

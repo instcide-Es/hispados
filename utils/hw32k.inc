@@ -2266,10 +2266,7 @@ suelta:
 .grande:
         mov dword [es:eax], 0
         mov esi, [es:eax + 8]
-        mov edi, esi
-        shr esi, 16
-        mov ax, 0x0502
-        int 0x31
+        call suelta_dpmi
 .y:
         pop edi
         pop esi
@@ -2493,10 +2490,7 @@ k_VirtualFree:                      ; (dirección, tamaño, tipo)
 .es:
         mov dword [virt_dir + ecx * 4], 0
         mov esi, [virt_h + ecx * 4]
-        mov edi, esi
-        shr esi, 16
-        mov ax, 0x0502
-        int 0x31
+        call suelta_dpmi
 .si:
         mov eax, 1
         ret
@@ -2594,28 +2588,56 @@ k_IsBadStringPtrA:
 k_ExitProcess:                      ; (código)
 k_ExitThread:
         mov al, [ebp]
-        mov ah, 0x4C
-        int 0x21
+        jmp acaba
 k_TerminateProcess:                 ; (proceso, código)
         mov al, [ebp + 4]
-        mov ah, 0x4C
-        int 0x21
+        jmp acaba
 k_FatalAppExitA:                    ; (0, texto)
+        cmp byte [md_modulo], 0
+        je .dos
+        mov eax, [ebp + 4]          ; (módulo) lo dice Hispa Ventanas
+        mov ecx, 2
+        jmp aviso_y_fin
+.dos:
         mov esi, [ebp + 4]
         call pon_cad_prog
         mov esi, m_nl2
         call pon_cad
-        mov ax, 0x4CFF
-        int 0x21
+        mov al, 0xFF
+        jmp acaba
 k_RaiseException:                   ; (código, opciones, n, args)
+        cmp byte [md_modulo], 0
+        je .dos
+        mov eax, [ebp]              ; (módulo) el texto, entero, a Hispa Ventanas
+        mov edi, m_exc_cod
+        mov ecx, 8
+.c:
+        rol eax, 4
+        mov bl, al
+        and bl, 15
+        add bl, '0'
+        cmp bl, '9'
+        jbe .c1
+        add bl, 7
+.c1:
+        mov [edi], bl
+        inc edi
+        loop .c
+        mov byte [m_exc_cod - 1], ' '
+        mov eax, m_excepcion
+        mov ecx, 1
+        jmp aviso_y_fin
+.dos:
         mov esi, m_excepcion
+        call pon_cad
+        mov esi, m_esp
         call pon_cad
         mov eax, [ebp]
         call pon_hex8
         mov esi, m_nl2
         call pon_cad
-        mov ax, 0x4CFF
-        int 0x21
+        mov al, 0xFF
+        jmp acaba
 ; escribe el texto del programa ES:ESI
 pon_cad_prog:
         xor edi, edi
@@ -2867,8 +2889,16 @@ es_kernel32:
         cmp al, '.'
         je .si
 .no:
+        cmp byte [md_modulo], 0     ; (módulo) ¿una del entorno (USER32, GDI32)?
+        je .no2
+        mov al, 1
+        call anfitrion
+        test eax, eax
+        jnz .x
+.no2:
         mov dword [ult_error], 126  ; ERROR_MOD_NOT_FOUND
         xor eax, eax
+.x:
         ret
 .si:
         mov eax, H_KERNEL32
@@ -2903,6 +2933,18 @@ k_GetModuleFileNameA:               ; (módulo, buf, n): el nombre completo
 .x:
         ret
 k_GetProcAddress:                   ; (módulo, nombre)
+        cmp byte [md_modulo], 0     ; (módulo) lo del entorno, y lo que el
+        je .nuestro                 ; entorno hace en vez de nosotros (Sleep)
+        mov edi, [ebp + 4]
+        cmp edi, 0x10000
+        jb .nuestro
+        mov ebx, [ebp]
+        mov al, 2
+        call anfitrion
+        test eax, eax
+        jz .nuestro
+        ret
+.nuestro:
         mov eax, [ebp]
         cmp eax, H_KERNEL32
         je .k32
@@ -3050,6 +3092,12 @@ s_equipo    db 'HISPA-486', 0
 N_PROC      equ 16
 H_PROC      equ 0x50000
 k_CreateProcessA:                   ; (app, línea, sa, sa, heredar, opciones, entorno, carpeta, *si, *pi)
+        cmp byte [md_modulo], 0     ; (módulo) dentro de Hispa Ventanas, no
+        je .dos
+        mov dword [ult_error], 120  ; ERROR_CALL_NOT_IMPLEMENTED
+        xor eax, eax
+        ret
+.dos:
         ; el intérprete: COMSPEC
         mov edi, s_comspec
         call busca_env
@@ -3681,8 +3729,10 @@ vk_ext:
         db 0x68, 0x70, 0x69, 0x71, 0x6A, 0x72, 0x6B, 0x73, 0x6C, 0x74, 0x6D, 0x75, 0x6E, 0x76, 0x6F, 0x77, 0x70, 0x78, 0x71, 0x79
         db 0
 
-m_excepcion db 'Hispa-486: excepcion ', 0
+m_excepcion db 'Hispa-486: excepcion', 0
+m_exc_cod   db '00000000', 0         ; (justo detras: de modulo se dice todo junto)
 m_nl2       db 13, 10, 0
+m_esp       db ' ', 0
 
 ; ---- los datos de KERNEL32 ----
         align 4

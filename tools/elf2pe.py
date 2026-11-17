@@ -6,6 +6,7 @@
 #
 #   tools/elf2pe.py -o PROG.EXE [-e entrada] [--reloc] [--base 0x400000]
 #                   [--gui] [-i DLL:func,func...] obj.o ...
+#                   [-l UNA.DLL] [-t ventanas/win32.inc] [--res recursos.rc]
 #   tools/elf2pe.py --dll -o MSVCRT.DLL [-e DllMain] obj.o ...
 #
 # Con --dll sale una DLL: se exportan todos los símbolos globales definidos
@@ -15,7 +16,12 @@
 # consola (3): Hispa Ventanas lo abre dentro, como una tarea.
 #
 # Los símbolos que quedan sin definir se importan: de la DLL que diga -i, o de
-# KERNEL32.dll si no lo dice. Con --reloc se añade la sección .reloc (para
+# KERNEL32.dll si no lo dice. Para no escribir las listas a mano: -l UNA.DLL
+# importa de esa DLL (un PE ya hecho, como build/MSVCRT.DLL) lo que exporte, y
+# -t ventanas/win32.inc importa de USER32.dll y GDI32.dll lo que haya en la
+# tabla de funciones de Hispa Ventanas. Con --res recursos.rc se añade la
+# sección .rsrc (textos, menús, diálogos e iconos: el formato, sencillo, está
+# en tools/rcmini.py). Con --reloc se añade la sección .reloc (para
 # probar que el cargador reubica). Hecho a partir de la especificación pública
 # de los formatos ELF y PE/COFF.
 import struct, sys, argparse
@@ -24,6 +30,38 @@ SEC_AL, ARCH_AL = 0x1000, 0x200
 
 def al(x, a):
     return (x + a - 1) // a * a
+
+def exporta(nombre):
+    """los nombres que exporta una DLL (un PE)"""
+    d = open(nombre, 'rb').read()
+    pe = struct.unpack_from('<I', d, 0x3C)[0]
+    nsec, topc = struct.unpack_from('<H', d, pe + 6)[0], struct.unpack_from('<H', d, pe + 20)[0]
+    erva = struct.unpack_from('<I', d, pe + 24 + 96)[0]
+    secs = [struct.unpack_from('<IIII', d, pe + 24 + topc + 40 * k + 8) for k in range(nsec)]
+    def pos(rva):
+        for vt, va, ta, pa in secs:
+            if va <= rva < va + max(vt, ta):
+                return rva - va + pa
+        sys.exit(f'{nombre}: RVA fuera de las secciones')
+    if not erva:
+        return []
+    e = pos(erva)
+    n, pnom = struct.unpack_from('<I', d, e + 24)[0], pos(struct.unpack_from('<I', d, e + 32)[0])
+    sal = []
+    for k in range(n):
+        q = pos(struct.unpack_from('<I', d, pnom + 4 * k)[0])
+        sal.append(d[q: d.index(b'\0', q)].decode())
+    return sal
+
+def tabla_hv(nombre):
+    """las funciones de USER32 y GDI32 de Hispa Ventanas: nombre -> DLL"""
+    import re
+    sal = {}
+    for l in open(nombre, encoding='utf-8'):
+        m = re.match(r"\s+W32F\s+\w+,\s*\d+,\s*(\d+),\s*'(\w+)'", l)
+        if m and m.group(1) in '12':
+            sal[m.group(2)] = ('USER32.dll', 'GDI32.dll')[int(m.group(1)) - 1]
+    return sal
 
 class Obj:
     def __init__(self, nombre):
@@ -56,6 +94,9 @@ def main():
     ap.add_argument('--reloc', action='store_true')
     ap.add_argument('--gui', action='store_true')
     ap.add_argument('-i', action='append', default=[])
+    ap.add_argument('-l', action='append', default=[])
+    ap.add_argument('-t', action='append', default=[])
+    ap.add_argument('--res', default=None)
     ap.add_argument('objs', nargs='+')
     a = ap.parse_args()
     if a.dll:
@@ -70,6 +111,13 @@ def main():
         orden_dll.append(dll)
         for f in fs.split(','):
             dll_de[f] = dll
+    for x in a.l:
+        dll = x.replace('\\', '/').split('/')[-1]
+        for f in exporta(x):
+            dll_de.setdefault(f, dll)
+    for x in a.t:
+        for f, dll in tabla_hv(x).items():
+            dll_de.setdefault(f, dll)
     objs = [Obj(n) for n in a.objs]
     # las secciones de cada clase, una tras otra: texto (código y solo
     # lectura), datos y bss
@@ -270,11 +318,22 @@ def main():
             struct.pack_into('<I', edata, o_nom + 4 * k, rva_e + pos_nom[k])
             struct.pack_into('<H', edata, o_ord + 2 * k, k)
     rva_r = al(rva_e + max(len(edata), 1), SEC_AL) if edata else al(rva_b + max(bss_tam, 1), SEC_AL)
+    # los recursos (.rsrc), delante de .reloc
+    rva_rs, rsrc = rva_r, b''
+    if a.res:
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import rcmini
+        rsrc = rcmini.compila(open(a.res, encoding='utf-8').read(), os.path.dirname(a.res), rva_rs)
+        if rsrc:
+            rva_r = al(rva_rs + len(rsrc), SEC_AL)
     secciones = [('.text', t, rva_t, len(t), 0x60000020),
                  ('.data', d, rva_d, len(d), 0xC0000040),
                  ('.bss', None, rva_b, bss_tam, 0xC0000080)]
     if edata:
         secciones.append(('.edata', edata, rva_e, len(edata), 0x40000040))
+    if rsrc:
+        secciones.append(('.rsrc', bytearray(rsrc), rva_rs, len(rsrc), 0x40000040))
     if reloc:
         secciones.append(('.reloc', reloc, rva_r, len(reloc), 0x42000040))
     tam_img = al(secciones[-1][2] + max(secciones[-1][3], 1), SEC_AL)
@@ -307,6 +366,8 @@ def main():
         dirs[5] = (rva_r, len(reloc))
     if edata:
         dirs[0] = (rva_e, len(edata))
+    if rsrc:
+        dirs[2] = (rva_rs, len(rsrc))
     for k, (r, n) in enumerate(dirs):
         struct.pack_into('<II', sal, o + 96 + 8 * k, r, n)
     st = o + 224

@@ -52,7 +52,7 @@
 
 PE_MAX      equ 4                   ; programas de Windows a la vez
 PE_USO      equ 0                   ; 0 libre, 1 en marcha, 2 terminado
-PE_MANGO    equ 4                   ; el bloque (mango de DPMI)
+PE_MANGO    equ 4                   ; el bloque de HW32 (mango de DPMI)
 PE_TAREA    equ 8
 PE_SEL      equ 12                  ; su selector de código; +8 datos y pila, +16 FS
 PE_DELTA    equ 16                  ; puntero de Hispa Ventanas = el suyo + esto
@@ -82,7 +82,12 @@ PE_BOT      equ 248                 ; botones del ratón apretados (MK_LBUTTON, 
 PE_NPEND    equ 252                 ; mensajes inventados que esperan
 PE_PEND     equ 256                 ;   (HWND, mensaje, wParam, lParam cada uno)
 PE_PEND_MAX equ 4
-PE_TAM      equ PE_PEND + PE_PEND_MAX * 16
+; (fase 3c: HW32 es su módulo, con KERNEL32 y el cargador de DLL)
+PE_MOD      equ PE_PEND + PE_PEND_MAX * 16  ; HW32.COM en memoria (su 100h)
+PE_MD       equ PE_MOD + 4          ; su mod_d (MD_*)
+PE_MODSEL   equ PE_MOD + 8          ; su selector de código (+8: datos)
+PE_TRAMPS   equ PE_MOD + 12         ; los trampolines de lo de aquí (del montón)
+PE_TAM      equ PE_MOD + 16
 
 PT_TAM      equ 28                  ; un trampolín: push (5), jmp lejos (7) y
 PT_PE       equ 12                  ;   la ficha del programa,
@@ -113,6 +118,8 @@ PC_LEER     equ PC_OPC + 96 + 16
 
 t_ext_exe   db ".EXE", 0
 t_pe_mal    db "No se ha podido cargar el programa de Windows.", 0
+t_pe_sinhw  db "Falta HW32.COM: hace falta para los programas de Windows.", 0
+t_pe_hw32   db "HW32.COM", 0
 t_pe_mem    db "No hay memoria para el programa de Windows.", 0
 t_pe_muchas db "El programa de Windows usa demasiadas funciones.", 0
 t_pe_falta  db "Hispa-486: falta la función ", 0
@@ -246,162 +253,14 @@ pe_abrir:
         lea edi, [edx+PE_PARAM]
         mov ecx, 71
         call cad_copiar
-        lea esi, [edx+PE_RUTA]
-        xor al, al
-        call dos_abrir
-        jc .mal
-        mov ebx, eax                ; EBX = el archivo, EDX = la ficha
-        call pe_leer_cab
-        jc .malc
-        test word [pe_cab+PC_CARACT], 0x2000    ; una DLL no se ejecuta
-        jnz .malc
-        ; el bloque: imagen + trampolines + lo suyo + pila
-        mov eax, [pe_cab+PC_IMGTAM]
-        cmp eax, PE_IMG_MAX
-        ja .malc
-        add eax, 0xFFF
-        and eax, ~0xFFF
-        jz .malc
-        mov [edx+PE_IMGTAM], eax
-        mov ecx, [pe_cab+PC_PILA]
-        cmp ecx, PE_PILA_MAX
-        jbe .p1
-        mov ecx, PE_PILA_MAX
-.p1:
-        cmp ecx, PE_PILA_MIN
-        jae .p2
-        mov ecx, PE_PILA_MIN
-.p2:
-        add ecx, 0xFFF
-        and ecx, ~0xFFF
-        lea ebp, [eax+ecx+PE_TRAMP_TAM+PE_MISC_TAM]  ; EBP = todo el bloque
-        push ebx
-        push edx
-        mov ecx, ebp
-        mov ebx, ebp
-        shr ebx, 16
-        mov ax, 0x0501
-        int 0x31
-        pop edx                     ; (no cambia las banderas)
-        jc .malm
-        mov [edx+PE_MANGO], di
-        mov [edx+PE_MANGO+2], si
         mov dword [edx+PE_USO], 2   ; (si algo falla, pe_limpiar lo suelta)
-        shl ebx, 16
-        mov bx, cx                  ; EBX = dirección lineal del bloque
-        mov edi, ebx
-        sub edi, [base]
-        mov [edx+PE_IMG], edi
-        mov eax, [pe_cab+PC_BASE]
-        mov [edx+PE_BASE], eax
-        mov esi, edi
-        sub esi, eax
-        mov [edx+PE_DELTA], esi
-        add eax, [pe_cab+PC_ENTRADA]
-        mov [edx+PE_ENTRADA], eax
-        mov ecx, ebp                ; todo, a cero
-        shr ecx, 2
-        xor eax, eax
-        rep stosd
-        ; lo suyo y la cima de la pila, en direcciones suyas
-        mov eax, [edx+PE_BASE]
-        add eax, [edx+PE_IMGTAM]
-        add eax, PE_TRAMP_TAM
-        mov [pe_misc], eax
-        add eax, 0x100
-        mov [edx+PE_CMD], eax
-        mov eax, [edx+PE_BASE]
-        add eax, ebp
-        mov [edx+PE_CIMA], eax
-        ; los selectores: código, datos y pila, y FS (la TIB)
-        mov esi, ebx                ; ESI = dirección lineal del bloque
-        xor eax, eax
-        mov ecx, 3
-        int 0x31
-        jc .malm
-        movzx eax, ax
-        mov [edx+PE_SEL], eax
-        mov edi, esi
-        sub edi, [edx+PE_BASE]      ; EDI = la base: bloque − ImageBase
-        mov ebx, eax
-        mov ecx, 0xC0FA             ; G, D, presente, código legible
-        call pe_selector
-        add ebx, 8
-        mov ecx, 0xC0F2             ; G, B, presente, datos escribibles
-        call pe_selector
-        add ebx, 8
-        mov edi, [pe_misc]
-        sub edi, [edx+PE_BASE]
-        add edi, esi                ; la TIB, en lineal
-        call pe_selector
-        pop ebx
-        ; las cabeceras, a la imagen
-        mov ecx, [pe_cab+PC_CABTAM]
-        cmp ecx, [edx+PE_IMGTAM]
-        ja .malc
-        mov eax, [pe_lfanew]        ; (y la tabla de secciones tiene que caber)
-        movzx esi, word [pe_cab+PC_OPC_TAM]
-        lea eax, [eax+esi+PC_OPC]
-        mov ebp, eax                ; EBP = la tabla de secciones (en la imagen)
-        movzx esi, word [pe_cab+PC_SECC]
-        imul esi, 40
-        add eax, esi
-        cmp eax, ecx
-        ja .malc
-        push edx
-        xor edx, edx
-        xor al, al
-        call dos_puntero
-        pop edx
-        jc .malc
-        mov edi, [edx+PE_IMG]
-        call dos_leer
-        jc .malc
-        cmp eax, ecx
-        jne .malc
-        ; las secciones
-        add ebp, [edx+PE_IMG]
-        movzx esi, word [pe_cab+PC_SECC]
-.s:
-        test esi, esi
-        jz .sf
-        mov ecx, [ebp+16]           ; lo que hay en el archivo
-        mov eax, [ebp+8]            ; lo que ocupa en memoria
-        test eax, eax
-        jz .s1
-        cmp ecx, eax
-        jbe .s1
-        mov ecx, eax
-.s1:
-        mov edi, [ebp+12]           ; dónde va (RVA)
-        mov eax, [edx+PE_IMGTAM]
-        cmp edi, eax
-        ja .malc
-        sub eax, edi
-        cmp ecx, eax
-        ja .malc
-        test ecx, ecx
-        jz .ss
-        cmp dword [ebp+20], 0
-        je .ss
-        add edi, [edx+PE_IMG]
-        push edx
-        mov edx, [ebp+20]
-        xor al, al
-        call dos_puntero
-        pop edx
-        jc .malc
-        call dos_leer               ; (si el archivo es más corto, lo demás a cero)
-        jc .malc
-.ss:
-        add ebp, 40
-        dec esi
-        jmp .s
-.sf:
-        call dos_cerrar
-        ; las importaciones
-        call pe_importar            ; (si falla, ESI = el aviso)
+        mov ecx, PE_TRAMP_TAM       ; el sitio de sus trampolines
+        call mem_pedir
+        mov esi, t_pe_mem
         jc .aviso
+        mov [edx+PE_TRAMPS], eax
+        call pe_modulo              ; HW32 y, con él, el programa y sus DLL
+        jc .aviso                   ; (ESI = el aviso)
         mov esi, t_pe_muchas
         mov eax, w32_e_salida       ; adonde vuelve la entrada si hace «ret»
         xor ecx, ecx
@@ -420,28 +279,6 @@ pe_abrir:
         mov esi, t_pe_mem           ; su bloque de USER32 y GDI32
         call w32_iniciar
         jc .aviso
-        ; la TIB: sin manejadores de excepción, la pila y ella misma
-        mov edi, [pe_misc]
-        mov eax, edi
-        add edi, [edx+PE_DELTA]
-        mov dword [edi], -1
-        mov ecx, [edx+PE_CIMA]
-        mov [edi+4], ecx
-        lea ecx, [eax+PE_MISC_TAM]
-        mov [edi+8], ecx
-        mov [edi+0x18], eax
-        ; la línea de órdenes: el programa y sus parámetros
-        add edi, 0x100
-        lea esi, [edx+PE_RUTA]
-        call pon_cad
-        cmp byte [edx+PE_PARAM], 0
-        je .l1
-        mov al, ' '
-        stosb
-        lea esi, [edx+PE_PARAM]
-        call pon_cad
-.l1:
-        mov byte [edi], 0
         ; y la tarea
         mov dword [edx+PE_USO], 1
         mov eax, pe_tarea
@@ -457,16 +294,6 @@ pe_abrir:
         call mem_soltar
         mov dword [edx+PE_USO], 2
         mov esi, t_hvp_muchos
-        jmp .aviso
-.malm:
-        pop ebx
-        mov esi, t_pe_mem
-        call dos_cerrar
-        jmp .aviso
-.malc:
-        call dos_cerrar
-.mal:
-        mov esi, t_pe_mal
 .aviso:
         mov ebp, [esp+8]            ; (la ventana desde la que se abre)
         call cen_aviso
@@ -492,6 +319,237 @@ pe_selector:
         popad
         ret
 
+; ---- (interna) carga HW32.COM como módulo del programa EDX y, con él, el
+; programa y sus DLL (fase 3c). HW32.COM se busca al lado de VENTANAS.COM, al
+; lado del programa y en la carpeta de ahora. CF=1 si no se puede: ESI = el
+; aviso. Lo que deja a medias lo suelta pe_limpiar ----
+HM_FIRMA    equ 3                   ; «HW32MOD», 1 (en el archivo)
+HM_CARGAR   equ 0x0B                ; mod_cargar (lejos)
+HM_FIN      equ 0x0F                ; mod_fin (lejos)
+HM_DATOS    equ 0x13                ; mod_d
+HM_NOMBRE   equ 0x17                ; el programa
+HM_PARAM    equ 0x1B                ; sus parámetros
+HM_DIR      equ 0x1F                ; la carpeta de HW32
+MD_MODULO   equ 0
+MD_CS       equ 4
+MD_DS       equ 8
+MD_ENV      equ 12
+MD_PSP      equ 16
+MD_FICHA    equ 20
+MD_RESOLVER equ 24
+MD_SALIR    equ 32
+MD_FALTA    equ 40
+MD_SELC     equ 48
+MD_BASE     equ 60
+MD_IMG      equ 64
+MD_ENTRADA  equ 68
+MD_ESP      equ 72
+MD_ERROR    equ 76
+MD_ERROR2   equ 80
+pe_modulo:
+        pushad
+        mov edi, pe_ruta            ; 1.º al lado de VENTANAS.COM
+        mov esi, dir_propia
+        call pon_cad
+        call .abre
+        jnc .abierto
+        mov edi, pe_ruta            ; 2.º al lado del programa
+        lea esi, [edx+PE_RUTA]
+        mov ebx, edi
+.c:
+        lodsb
+        test al, al
+        jz .cf
+        stosb
+        cmp al, '\'
+        je .cs
+        cmp al, ':'
+        jne .c
+.cs:
+        mov ebx, edi
+        jmp .c
+.cf:
+        mov edi, ebx
+        call .abre
+        jnc .abierto
+        mov edi, pe_ruta            ; 3.º en la carpeta de ahora
+        call .abre
+        jnc .abierto
+        mov dword [esp+4], t_pe_sinhw
+        jmp .mal
+.abierto:
+        mov ebx, eax                ; EBX = el archivo
+        mov [pe_dirfin], edi        ; (dónde acaba la carpeta en pe_ruta)
+        push edx
+        mov al, 2
+        xor edx, edx
+        call dos_puntero
+        mov ecx, eax                ; ECX = lo que ocupa
+        xor al, al
+        xor edx, edx
+        call dos_puntero
+        pop edx
+        cmp ecx, 0x200
+        jb .malc
+        cmp ecx, 0xFFF0
+        ja .malc
+        push edx
+        push ecx
+        add ecx, 0x1000
+        call mem_bloque             ; EAX = dónde, EDX = su mango
+        mov esi, edx
+        pop ecx
+        pop edx
+        jc .malm
+        mov [edx+PE_MANGO], esi
+        mov [edx+PE_MOD], eax
+        mov edi, eax
+        call dos_leer
+        jc .malc
+        cmp eax, ecx
+        jne .malc
+        call dos_cerrar
+        mov ebp, [edx+PE_MOD]       ; EBP = HW32 (su 100h)
+        cmp dword [ebp+HM_FIRMA], 'HW32'
+        jne .malv
+        cmp dword [ebp+HM_FIRMA+4], 'MOD' | (1 << 24)
+        jne .malv
+        ; sus dos selectores: código y datos, con la base en «copia − 100h»
+        push edx
+        xor eax, eax
+        mov ecx, 2
+        int 0x31
+        pop edx
+        jc .malm2
+        movzx eax, ax
+        mov [edx+PE_MODSEL], eax
+        mov ebx, eax
+        mov edi, ebp
+        add edi, [base]
+        sub edi, 0x100
+        mov ecx, 0xC0FA
+        call pe_selector
+        add ebx, 8
+        mov ecx, 0xC0F2
+        call pe_selector
+        ; lo que se le da
+        mov eax, [ebp+HM_DATOS]
+        lea ebx, [ebp+eax-0x100]    ; EBX = mod_d
+        mov [edx+PE_MD], ebx
+        mov dword [ebx+MD_MODULO], 1
+        mov eax, [edx+PE_MODSEL]
+        mov [ebx+MD_CS], eax
+        add eax, 8
+        mov [ebx+MD_DS], eax
+        movzx eax, word [env_seg]
+        mov [ebx+MD_ENV], eax
+        movzx eax, word [rmseg]
+        mov [ebx+MD_PSP], eax
+        mov [ebx+MD_FICHA], edx
+        movzx eax, word [sel_cod]
+        mov dword [ebx+MD_RESOLVER], pe_resolver
+        mov [ebx+MD_RESOLVER+4], eax
+        mov dword [ebx+MD_SALIR], pe_salir_mod
+        mov [ebx+MD_SALIR+4], eax
+        mov dword [ebx+MD_FALTA], pe_falta_mod
+        mov [ebx+MD_FALTA+4], eax
+        mov eax, [ebp+HM_NOMBRE]    ; el programa
+        lea edi, [ebp+eax-0x100]
+        lea esi, [edx+PE_RUTA]
+        mov ecx, 120
+        call cad_copiar
+        mov eax, [ebp+HM_PARAM]     ; sus parámetros, con el espacio delante
+        lea edi, [ebp+eax-0x100]
+        cmp byte [edx+PE_PARAM], 0
+        je .sinp
+        mov byte [edi], ' '
+        inc edi
+        lea esi, [edx+PE_PARAM]
+        mov ecx, 120
+        call cad_copiar
+.sinp:
+        mov eax, [ebp+HM_DIR]       ; y la carpeta de HW32 (donde busca las DLL)
+        lea edi, [ebp+eax-0x100]
+        mov esi, pe_ruta
+        mov ecx, [pe_dirfin]
+        sub ecx, esi
+        cmp ecx, 120
+        jbe .d1
+        xor ecx, ecx
+.d1:
+        rep movsb
+        mov byte [edi], 0
+        ; a cargar
+        push dword [edx+PE_MODSEL]
+        push dword [ebp+HM_CARGAR]
+        call dword far [esp]
+        add esp, 8
+        test eax, eax
+        jnz .malp
+        mov eax, [ebx+MD_SELC]
+        mov [edx+PE_SEL], eax
+        mov eax, [ebx+MD_BASE]
+        sub eax, [base]
+        mov [edx+PE_DELTA], eax
+        mov ecx, [ebx+MD_IMG]
+        mov [edx+PE_BASE], ecx
+        add eax, ecx
+        mov [edx+PE_IMG], eax
+        mov ecx, [eax+0x3C]         ; (lo que ocupa: de su cabecera)
+        mov ecx, [eax+ecx+PC_IMGTAM]
+        mov [edx+PE_IMGTAM], ecx
+        mov eax, [ebx+MD_ENTRADA]
+        mov [edx+PE_ENTRADA], eax
+        mov eax, [ebx+MD_ESP]
+        mov [edx+PE_CIMA], eax
+        popad
+        clc
+        ret
+; no carga: lo que dice HW32 (y su segunda parte: la DLL que falta)
+.malp:
+        mov edi, pe_ruta
+        mov esi, [ebx+MD_ERROR]
+        test esi, esi
+        jz .malv
+        lea esi, [ebp+esi-0x100]
+        mov ecx, 100
+        call w32_pon
+        mov esi, [ebx+MD_ERROR2]
+        test esi, esi
+        jz .mp2
+        lea esi, [ebp+esi-0x100]
+        mov ecx, 40
+        call w32_pon
+.mp2:
+        mov byte [edi], 0
+        mov dword [esp+4], pe_ruta
+        jmp .mal
+.malm2:
+.malm:
+        mov dword [esp+4], t_pe_mem
+        call dos_cerrar
+        jmp .mal
+.malc:
+        call dos_cerrar
+.malv:
+        mov dword [esp+4], t_pe_mal
+.mal:
+        popad
+        stc
+        ret
+; (de pe_modulo) añade «HW32.COM» a la ruta que acaba en EDI y lo abre ->
+; EAX=el archivo; CF=1 si no está. EDI no cambia
+.abre:
+        push edi
+        mov esi, t_pe_hw32
+        call pon_cad
+        mov byte [edi], 0
+        mov esi, pe_ruta
+        xor al, al
+        call dos_abrir
+        pop edi
+        ret
+
 ; (interna) EAX=RVA EDX=ficha -> EAX=puntero de Hispa Ventanas; CF=1 si cae
 ; fuera de la imagen
 pe_rva:
@@ -514,8 +572,7 @@ pe_tramp:
         jae .no
         inc dword [edx+PE_NTRAMP]
         imul ebx, PT_TAM
-        add ebx, [edx+PE_IMG]
-        add ebx, [edx+PE_IMGTAM]
+        add ebx, [edx+PE_TRAMPS]
         mov byte [ebx], 0x68        ; push trampolín
         mov [ebx+1], ebx
         mov byte [ebx+5], 0xEA      ; jmp lejos pe_despacho
@@ -536,110 +593,187 @@ pe_tramp:
         stc
         ret
 
-; (interna) las importaciones del programa EDX: cada una, su trampolín.
-; CF=1 si la tabla está mal (ESI = el aviso) o no caben los trampolines
-pe_importar:
-        pushad
-        cmp dword [pe_cab+PC_NDIR], 2
-        jb .bien
-        mov eax, [pe_cab+PC_IMPORT]
-        test eax, eax
-        jz .bien
-        call pe_rva
-        jc .mal
-        mov esi, eax                ; ESI = el descriptor de una DLL
-.d:
-        mov eax, [edx+PE_IMGTAM]    ; (entero dentro de la imagen)
-        add eax, [edx+PE_IMG]
-        sub eax, esi
-        cmp eax, 20
-        jb .mal
-        mov eax, [esi+12]           ; su nombre
-        test eax, eax
-        jz .bien
-        mov ebx, eax
-        add ebx, [edx+PE_BASE]
-        mov [pe_dll], ebx           ; (dirección del programa)
-        call pe_rva
-        jc .mal
+; ---- (lejos, desde HW32) lo que el cargador y KERNEL32 le piden al entorno.
+; EDX=la ficha del programa; todo lo demás, direcciones del programa.
+;   AL=0: la función de nombre EDI (0: por número) de la DLL de nombre ESI
+;         -> EAX=su trampolín. De USER32 y GDI32, siempre (la que no hay, con
+;         su «falta»); de KERNEL32, solo las que se hacen aquí (0: las demás);
+;         de otra DLL, 0 (la carga HW32)
+;   AL=1: la DLL de nombre ESI -> EAX=su mango (0: no es de aquí)
+;   AL=2: la función de nombre EDI del mango EBX -> EAX (0: no la hay)
+; Conserva lo demás. Llega con la pila de HW32 (al cargar) o con la del
+; programa: la pila solo se usa para guardar, y nada de [EBP] ni [ESP] ----
+H_KERNEL32  equ 0xBFF70000
+H_USER32    equ 0xBFF50000
+H_GDI32     equ 0xBFF20000
+pe_resolver:
+        push ds
+        push es
+        push ebx
+        push ecx
         push esi
-        mov esi, eax
+        push edi
+        push ebp
+        mov cx, [cs:sel_dat]
+        mov ds, cx
+        mov es, cx
+        cld
+        mov ebp, [edx+PE_MD]        ; (al cargar aún no está apuntado)
+        mov ebp, [ds:ebp+MD_BASE]   ; (con DS: la pila no es la nuestra)
+        sub ebp, [base]
+        mov [edx+PE_DELTA], ebp
+        cmp al, 2
+        je .mango
+        add esi, ebp
+        call pe_que_dll             ; -> BL
+        cmp al, 1
+        je .dll
+        cmp bl, 0xFF
+        je .cero
+        mov ecx, edi                ; ECX = el nombre (del programa)
+        mov eax, w32_e_falta
+        test edi, edi
+        jz .f1
+        lea eax, [edi+ebp]
+        call w32_busca
+.f1:
+        cmp eax, w32_e_falta
+        jne .pon
+        test bl, bl                 ; de KERNEL32: la tiene HW32
+        jz .cero
+.pon:
+        mov edi, esi
+        sub edi, ebp                ; EDI = el nombre de la DLL (del programa)
+        call pe_tramp
+        jnc .x
+.cero:
+        xor eax, eax
+.x:
+        pop ebp
+        pop edi
+        pop esi
+        pop ecx
+        pop ebx
+        pop es
+        pop ds
+        retf
+.dll:
+        mov eax, H_USER32
+        cmp bl, 1
+        je .x
+        mov eax, H_GDI32
+        cmp bl, 2
+        je .x
+        jmp .cero
+.mango:
+        mov ecx, ebx
+        xor bl, bl
+        cmp ecx, H_KERNEL32
+        je .m1
+        inc bl
+        cmp ecx, H_USER32
+        je .m1
+        inc bl
+        cmp ecx, H_GDI32
+        jne .cero
+.m1:
+        lea eax, [edi+ebp]
+        call w32_busca
+        cmp eax, w32_e_falta
+        je .cero
+        mov esi, [edx+PE_TRAMPS]    ; ¿ya tiene trampolín?
+        mov ecx, [edx+PE_NTRAMP]
+.m2:
+        jecxz .m3
+        cmp [esi+PT_FUN], eax
+        je .m4
+        add esi, PT_TAM
+        dec ecx
+        jmp .m2
+.m3:
+        mov ecx, edi
+        xor edi, edi
+        call pe_tramp
+        jnc .x
+        jmp .cero
+.m4:
+        mov eax, esi
+        sub eax, ebp
+        jmp .x
+; (interna) ESI=nombre de una DLL -> BL=0 KERNEL32, 1 USER32, 2 GDI32,
+; FFh otra
+pe_que_dll:
+        push edi
         mov bl, 0
         mov edi, t_k32
         call pe_es_dll
-        je .dll
+        je .x
         mov bl, 1
         mov edi, t_u32
         call pe_es_dll
-        je .dll
+        je .x
         mov bl, 2
         mov edi, t_g32
         call pe_es_dll
-        je .dll
-        mov bl, 0xFF                ; una DLL que no hay: todo lo suyo «falta»
-.dll:
-        pop esi
-        mov eax, [esi]              ; la tabla de nombres (o la de direcciones)
-        test eax, eax
-        jnz .t
-        mov eax, [esi+16]
-.t:
-        call pe_rva
-        jc .mal
-        mov ebp, eax
-        mov eax, [esi+16]           ; la tabla de direcciones
-        call pe_rva
-        jc .mal
-        mov edi, eax
-.f:
-        mov eax, [ebp]
-        test eax, eax
-        jz .ds
-        xor ecx, ecx                ; por número: no se resuelve
-        test eax, 0x80000000
-        jnz .falta
-        add eax, 2                  ; (la pista) -> el nombre
-        mov ecx, eax
-        add ecx, [edx+PE_BASE]
-        call pe_rva
-        jc .mal
-        call w32_busca              ; EAX=nombre BL=DLL -> EAX=la función
-        jmp .pon
-.falta:
-        mov eax, w32_e_falta
-.pon:
-        push edi
-        mov edi, [pe_dll]
-        call pe_tramp
+        je .x
+        mov bl, 0xFF
+.x:
         pop edi
-        jc .muchas
-        mov [edi], eax
-        add ebp, 4
-        add edi, 4
-        mov eax, [edx+PE_IMGTAM]    ; (las dos tablas, dentro de la imagen)
-        add eax, [edx+PE_IMG]
-        sub eax, 4
-        cmp ebp, eax
-        ja .mal
-        cmp edi, eax
-        ja .mal
-        jmp .f
-.ds:
-        add esi, 20
-        jmp .d
-.bien:
-        popad
-        clc
         ret
-.muchas:
-        mov dword [esp+4], t_pe_muchas
-        jmp .malx
-.mal:
-        mov dword [esp+4], t_pe_mal
-.malx:
-        popad
-        stc
-        ret
+
+; ---- (lejos, desde HW32: ExitProcess y demás) el programa EDX acaba ----
+pe_salir_mod:
+        mov cx, [cs:sel_dat]
+        mov ds, cx
+        mov es, cx
+        mov fs, cx
+        mov gs, cx
+        mov ss, cx
+        mov esp, [edx+PE_ESPV0]
+        cld
+        jmp pe_salir
+; ---- (lejos, desde HW32) un aviso y el programa EDX acaba. ECX=0: falta la
+; función de nombre EAX (del programa; 0: por número); 1: el texto EAX (de
+; HW32); 2: el texto EAX (del programa) ----
+pe_falta_mod:
+        mov bx, [cs:sel_dat]
+        mov ds, bx
+        mov es, bx
+        mov fs, bx
+        mov gs, bx
+        mov ss, bx
+        mov esp, [edx+PE_ESPV0]
+        cld
+        mov dword [edx+PE_ESPP], 0  ; (a sus funciones ya no se las llama)
+        sub esp, 192
+        mov edi, esp
+        mov esi, eax
+        cmp ecx, 1
+        je .hw
+        ja .prog
+        mov esi, t_pe_falta
+        call pon_cad
+        mov esi, t_pe_num
+        test eax, eax
+        jz .hw2
+        mov esi, eax
+.prog:
+        add esi, [edx+PE_DELTA]
+        jmp .hw2
+.hw:
+        add esi, [edx+PE_MOD]
+        sub esi, 0x100
+.hw2:
+        mov ecx, 150
+        call w32_pon
+        mov byte [edi], 0
+        mov esi, esp
+        mov edi, t_pe_titulo
+        xor ebp, ebp
+        mov eax, DM_ACEPTAR
+        call dlg_mensaje
+        add esp, 192
+        jmp pe_salir
 
 ; (interna) ¿el nombre de DLL ESI es EDI (en mayúsculas), con «.DLL» o sin
 ; él? ZF=1 si lo es
@@ -673,7 +807,7 @@ pe_es_dll:
         pop eax
         ret
 
-; (interna) EAX=nombre de la función BL=DLL (0 KERNEL32, 1 USER32)
+; (interna) EAX=nombre de la función BL=DLL (0 KERNEL32, 1 USER32, 2 GDI32)
 ; -> EAX=su ficha en w32_tabla (w32_e_falta si no está)
 w32_busca:
         push ecx
@@ -917,21 +1051,29 @@ pe_limpiar:
 .b2:
         cmp dword [edx+PE_USO], 2
         jne .s
-        mov ebx, [edx+PE_SEL]
-        test ebx, ebx
+        mov esi, [edx+PE_MOD]
+        test esi, esi
         jz .m
-        mov ecx, 3
-.sel:
-        mov ax, 0x0001
+        mov ebx, [edx+PE_MODSEL]
+        test ebx, ebx
+        jz .m0
+        push ebx                    ; HW32 suelta lo del programa (su memoria,
+        push dword [esi+HM_FIN]     ; sus DLL, su montón, sus archivos y sus
+        call dword far [esp]        ; selectores)
+        add esp, 8
+        mov ax, 0x0001              ; y aquí, HW32: sus selectores y su bloque
         int 0x31
         add ebx, 8
-        dec ecx
-        jnz .sel
-.m:
-        mov di, [edx+PE_MANGO]
-        mov si, [edx+PE_MANGO+2]
-        mov ax, 0x0502
+        mov ax, 0x0001
         int 0x31
+.m0:
+        push edx
+        mov edx, [edx+PE_MANGO]
+        call mem_bloque_soltar
+        pop edx
+.m:
+        mov eax, [edx+PE_TRAMPS]
+        call mem_soltar
         mov dword [edx+PE_USO], 0
 .s:
         add edx, PE_TAM
@@ -959,23 +1101,11 @@ w32_e_salida:
         dw 0
         db 0xFE, 0
 w32_tabla:
-        W32F k_ExitProcess, 4, 0, 'ExitProcess'
-        W32F k_GetModuleHandle, 4, 0, 'GetModuleHandleA'
-        W32F k_GetModuleHandle, 4, 0, 'GetModuleHandleW'
-        W32F k_GetCommandLineA, 0, 0, 'GetCommandLineA'
-        W32F k_GetStartupInfoA, 4, 0, 'GetStartupInfoA'
-        W32F k_GetVersion, 0, 0, 'GetVersion'
-        W32F k_GetLastError, 0, 0, 'GetLastError'
-        W32F k_SetLastError, 4, 0, 'SetLastError'
-        W32F k_GetTickCount, 0, 0, 'GetTickCount'
         W32F k_Sleep, 4, 0, 'Sleep'
-        W32F k_GetModuleFileNameA, 12, 0, 'GetModuleFileNameA'
-        W32F k_lstrlenA, 4, 0, 'lstrlenA'
-        W32F k_lstrlenA, 4, 0, 'lstrlen'
-        W32F k_lstrcpyA, 8, 0, 'lstrcpyA'
-        W32F k_lstrcpyA, 8, 0, 'lstrcpy'
-        W32F k_lstrcatA, 8, 0, 'lstrcatA'
-        W32F k_lstrcatA, 8, 0, 'lstrcat'
+        W32F k_FindResourceA, 12, 0, 'FindResourceA'
+        W32F k_LoadResource, 8, 0, 'LoadResource'
+        W32F k_LockResource, 4, 0, 'LockResource'
+        W32F k_SizeofResource, 8, 0, 'SizeofResource'
         W32F u_MessageBoxA, 16, 1, 'MessageBoxA'
         ; fase 3b: USER32 (win32u.inc)
         W32F u_RegisterClassA, 4, 1, 'RegisterClassA'
@@ -1026,6 +1156,39 @@ w32_tabla:
         W32F u_SetFocus, 4, 1, 'SetFocus'
         W32F u_GetFocus, 0, 1, 'GetFocus'
         W32F u_wsprintfA, 0, 1, 'wsprintfA'
+        ; fase 3c: los controles (win32c.inc)
+        W32F u_GetDlgItem, 8, 1, 'GetDlgItem'
+        W32F u_GetDlgCtrlID, 4, 1, 'GetDlgCtrlID'
+        W32F u_SendDlgItemMessageA, 20, 1, 'SendDlgItemMessageA'
+        W32F u_SetDlgItemTextA, 12, 1, 'SetDlgItemTextA'
+        W32F u_GetDlgItemTextA, 16, 1, 'GetDlgItemTextA'
+        W32F u_SetDlgItemInt, 16, 1, 'SetDlgItemInt'
+        W32F u_GetDlgItemInt, 16, 1, 'GetDlgItemInt'
+        W32F u_CheckDlgButton, 12, 1, 'CheckDlgButton'
+        W32F u_IsDlgButtonChecked, 8, 1, 'IsDlgButtonChecked'
+        W32F u_CheckRadioButton, 16, 1, 'CheckRadioButton'
+        W32F u_EnableWindow, 8, 1, 'EnableWindow'
+        W32F u_IsWindowEnabled, 4, 1, 'IsWindowEnabled'
+        W32F u_SetWindowPos, 28, 1, 'SetWindowPos'
+        W32F u_cero, 8, 1, 'IsDialogMessageA'
+        ; fase 3c: los menús, los recursos y los diálogos (win32m.inc)
+        W32F u_CreateMenu, 0, 1, 'CreateMenu'
+        W32F u_CreateMenu, 0, 1, 'CreatePopupMenu'
+        W32F u_AppendMenuA, 16, 1, 'AppendMenuA'
+        W32F u_DestroyMenu, 4, 1, 'DestroyMenu'
+        W32F u_SetMenu, 8, 1, 'SetMenu'
+        W32F u_GetMenu, 4, 1, 'GetMenu'
+        W32F u_GetSubMenu, 8, 1, 'GetSubMenu'
+        W32F u_DrawMenuBar, 4, 1, 'DrawMenuBar'
+        W32F u_CheckMenuItem, 12, 1, 'CheckMenuItem'
+        W32F u_EnableMenuItem, 12, 1, 'EnableMenuItem'
+        W32F u_GetMenuState, 12, 1, 'GetMenuState'
+        W32F u_GetMenuItemCount, 4, 1, 'GetMenuItemCount'
+        W32F u_LoadStringA, 16, 1, 'LoadStringA'
+        W32F u_LoadMenuA, 8, 1, 'LoadMenuA'
+        W32F u_DialogBoxParamA, 20, 1, 'DialogBoxParamA'
+        W32F u_CreateDialogParamA, 20, 1, 'CreateDialogParamA'
+        W32F u_EndDialog, 8, 1, 'EndDialog'
         ; fase 3b: GDI32
         W32F g_TextOutA, 20, 2, 'TextOutA'
         W32F g_SetTextColor, 8, 2, 'SetTextColor'
@@ -1096,46 +1259,11 @@ w32_pon:
 .x:
         ret
 
-; ---- KERNEL32 ----
-; void ExitProcess(código)
+; ---- KERNEL32: está en HW32 (utils/hw32k.inc), que es el módulo del
+; programa. Aquí, solo lo que es cosa del entorno ----
+; (adonde vuelve la entrada del programa si hace «ret»)
 k_ExitProcess:
         jmp pe_salir
-; HMODULE GetModuleHandleA/W(nombre): solo el del programa (NULL)
-k_GetModuleHandle:
-        xor eax, eax
-        cmp [ebp], eax
-        jne .x
-        mov eax, [edx+PE_BASE]
-.x:
-        ret
-k_GetCommandLineA:
-        mov eax, [edx+PE_CMD]
-        ret
-; void GetStartupInfoA(STARTUPINFOA*): 68 octetos, todo a cero menos el tamaño
-k_GetStartupInfoA:
-        mov edi, [ebp]
-        add edi, [edx+PE_DELTA]
-        mov ebx, edi
-        mov ecx, 17
-        xor eax, eax
-        rep stosd
-        mov dword [ebx], 68
-        ret
-k_GetVersion:                       ; Windows 98: 4.10 (como HW32)
-        mov eax, 0xC0000A04
-        ret
-k_GetLastError:
-        mov eax, [edx+PE_ERROR]
-        ret
-k_SetLastError:
-        mov eax, [ebp]
-        mov [edx+PE_ERROR], eax
-        ret
-; DWORD GetTickCount(): milisegundos (del reloj de la BIOS: 55 ms por tic)
-k_GetTickCount:
-        call tics
-        imul eax, eax, 55
-        ret
 ; void Sleep(ms): deja el turno a los demás hasta que pase ese tiempo
 k_Sleep:
         call tics
@@ -1148,75 +1276,6 @@ k_Sleep:
         cmp eax, [ebp]
         jb .b
         ret
-; DWORD GetModuleFileNameA(módulo, búfer, tamaño): la ruta del programa
-k_GetModuleFileNameA:
-        mov edi, [ebp+4]
-        add edi, [edx+PE_DELTA]
-        mov ecx, [ebp+8]
-        xor eax, eax
-        test ecx, ecx
-        jz .x
-        lea esi, [edx+PE_RUTA]
-.c:
-        dec ecx
-        jz .f
-        mov bl, [esi]
-        test bl, bl
-        jz .f
-        mov [edi+eax], bl
-        inc esi
-        inc eax
-        jmp .c
-.f:
-        mov byte [edi+eax], 0
-.x:
-        ret
-; int lstrlenA(texto)
-k_lstrlenA:
-        xor eax, eax
-        mov esi, [ebp]
-        test esi, esi
-        jz .x
-        add esi, [edx+PE_DELTA]
-.c:
-        cmp byte [esi+eax], 0
-        je .x
-        inc eax
-        jmp .c
-.x:
-        ret
-; LPSTR lstrcpyA(destino, origen) y lstrcatA(destino, origen)
-k_lstrcatA:
-        mov edi, [ebp]
-        test edi, edi
-        jz k_lstrcpyA.no
-        add edi, [edx+PE_DELTA]
-.f:
-        cmp byte [edi], 0
-        je k_lstrcpyA.o
-        inc edi
-        jmp .f
-k_lstrcpyA:
-        mov edi, [ebp]
-        test edi, edi
-        jz .no
-        add edi, [edx+PE_DELTA]
-.o:
-        mov esi, [ebp+4]
-        test esi, esi
-        jz .no
-        add esi, [edx+PE_DELTA]
-.c:
-        lodsb
-        stosb
-        test al, al
-        jnz .c
-        mov eax, [ebp]
-        ret
-.no:
-        xor eax, eax
-        ret
-
 ; ---- USER32 ----
 MB_TEXTO    equ 1024                ; letras del texto de un MessageBox
 MB_TITULO   equ 128                 ; y de su título

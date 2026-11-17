@@ -1,0 +1,28 @@
+# Los recursos de WINCALC.EXE (tests/progs/wincalc.c), en el formato de
+# tools/rcmini.py. Copyright (C) 2026 Carlos Sanz y contribuidores.
+# GPL-2.0 o posterior.
+STRING 1 "Calculadora de Hispa-486.\nCuentas hechas: %d (y %.1f)"
+STRING 2 "No se puede dividir por cero."
+STRING 3 "Calculadora"
+ICON 1
+
+MENU "CALC"
+  POPUP "&Archivo"
+    ITEM "&Salir" 302
+  END
+  POPUP "&Edición"
+    ITEM "&Borrar\tEsc" 201
+    ITEM "&Raíz cuadrada" 202
+  END
+  POPUP "&Ver"
+    ITEM "&Dos decimales" 300
+  END
+  POPUP "A&yuda"
+    ITEM "&Acerca de..." 301
+  END
+END
+
+DIALOG "ACERCA" 0 0 150 62 "Acerca de la calculadora"
+  LTEXT "" 10 10 8 130 20
+  DEFPUSHBUTTON "Aceptar" 1 50 40 50 14
+END

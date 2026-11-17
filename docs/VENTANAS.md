@@ -892,8 +892,13 @@ devuelven algo.
   (módulos .HVP: juegos/*.asm y programas/*.asm, con hvp.inc y hvplib.inc)
   api.inc modulos.inc    la interfaz y el cargador de los módulos
   win32.inc      [Hispa-486] programas de Windows de ventanas (parte alta):
-                 el cargador, el despacho, la llamada de vuelta y KERNEL32
+                 HW32.COM como módulo (su KERNEL32 y sus DLL), el despacho
+                 y la llamada de vuelta
   win32u.inc     [Hispa-486] su USER32 y su GDI32 (parte alta)
+  win32c.inc     [Hispa-486] sus controles de serie: BUTTON, EDIT, STATIC,
+                 LISTBOX y COMBOBOX sobre los de controles.inc (parte alta)
+  win32m.inc     [Hispa-486] sus menús (sobre menus.inc), sus recursos
+                 (.rsrc) y sus diálogos de plantilla (parte alta)
   ajustes.inc    los ajustes que cambia Configuración (CONFIG.HVP)
   centro.inc bloc.inc calc.inc reloj.inc    los programas
   accesos.inc    grupos ligados a una carpeta de juegos y opciones de
@@ -1455,8 +1460,8 @@ como una ventana, no saliendo a Hispa-DOS: `es_hvp` dice que sí tanto para un
 .HVP como para un PE de ventanas (`es_pe_gui` mira la cabecera del archivo),
 y `hvp_abrir` pasa los segundos a `pe_abrir` (`ventanas/win32.inc`, en la
 parte alta). Es la fase 3 de Hispa-486; el detalle está en
-`docs/486/HISPA-486.md` («Cómo está hecho (fase 3a)» y «(fase 3b)»). Lo que
-importa aquí:
+`docs/486/HISPA-486.md` («Cómo está hecho (fase 3a)», «(fase 3b)» y «(fase
+3c)»). Lo que importa aquí:
 
 - El programa corre como **una tarea más**, pero con **sus propios
   selectores** (código, datos y pila, FS) y **su propia pila**, dentro de un
@@ -1499,6 +1504,33 @@ importa aquí:
 - La memoria que pide del montón (el bloque del programa y el de cada
   ventana) queda **apuntada a su tarea**, como la de los módulos
   (`tar_w_pedir`): si se termina a la fuerza, `tar_soltar_de` la suelta.
+
+- (Fase 3c.) **KERNEL32 y las DLL son cosa de HW32**: `pe_abrir` carga
+  `HW32.COM` como módulo del programa (`pe_modulo`: una copia en memoria
+  extendida, con sus dos selectores) y le pide que cargue el programa con sus
+  DLL. Las llamadas a KERNEL32 van a esa copia sin pasar por Hispa Ventanas;
+  HW32 pide lo del entorno (USER32, GDI32, `Sleep`, salir, los avisos) por
+  tres entradas lejanas: `pe_resolver`, `pe_salir_mod` y `pe_falta_mod`. Ojo
+  en ellas: llegan con la pila de HW32 o la del programa (nada de `[EBP]` ni
+  `[ESP]` hasta cambiar de pila). `pe_limpiar` llama a `mod_fin` de HW32, que
+  suelta todo lo del programa. Sin `HW32.COM` en el disco, los programas de
+  Windows de ventanas no se abren (y lo dicen).
+- (Fase 3c, `ventanas/win32c.inc`.) **Sus controles son los de
+  `controles.inc`**: un BUTTON es un `c_boton`, etc., con `V_PROC` =
+  `w32_ctl_proc` (que llama al procedimiento de la clase y añade `EN_CHANGE`)
+  y su texto en un bloque del montón. Como `V_D0` a `V_D7` son de la clase,
+  el control es del programa de su tarea. El aviso a la madre (`avisar`:
+  `WM_COMMAND` con el control en EDX) llega al programa con el HWND del
+  control en `lParam`. El COMBOBOX es una clase nueva, `c_w32combo`, que abre
+  un `ctx_menu`.
+- (Fase 3c, `ventanas/win32m.inc`.) **Su barra de menús es la de
+  `menus.inc`**: de las fichas de sus HMENU se hace la tabla de `V_MENU` (en
+  un bloque del montón; en `V_D7`, el HMENU). Lo único que se ha tocado fuera
+  es `menu_abrir`, que llama a `w32_menu_abierto` para saber qué órdenes van
+  en gris (`menu_gris` y `ctx_gris`, que mira `ctx_es_gris`). **Sus diálogos
+  de plantilla** son ventanas de Windows con la marca `W32V_DIALOGO` y los
+  controles que diga la plantilla de sus recursos; el modal tiene su propio
+  bucle (`msg_tomar` y `msg_despachar`), como `dlg_modal`.
 
 Un `.EXE` de Win32 **de consola** sale a Hispa-DOS como los demás programas,
 pero `acc_lanzar` lo marca (`pe_marca_consola`: bit 4 de `lz_band`) y el
@@ -2098,6 +2130,15 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 
 ## Pruebas
 
+- `tests/run_win32crt_tests.sh`, `run_win32ctl_tests.sh`,
+  `run_win32menu_tests.sh` y `run_win32calc_tests.sh` ([Hispa-486], fase 3c):
+  un Win32 de ventanas en C con MSVCRT.DLL y una DLL propia (KERNEL32 es el
+  de HW32, cargado como módulo; al cerrar no queda memoria; la DLL que falta;
+  sin `HW32.COM`); los controles de serie con el ratón y el teclado; los
+  menús, los recursos y los diálogos de plantilla; y la calculadora
+  (WINCALC.EXE), que lo junta todo. Lo común (la imagen con `HW32.COM` y
+  `MSVCRT.DLL` en `\HISPADOS`, el grupo «Win32», el ratón y el teclado de
+  QEMU) está en `tests/tools/win32_ventanas.sh`.
 - `tests/run_win32hola_tests.sh` ([Hispa-486], fase 3b): el «Hola, mundo»
   de ventana de Win32 (`tests/progs/winhola.c`): la ventana con su título, su
   texto y sus dibujos; los clics y las teclas; `MessageBoxA` con dueña;

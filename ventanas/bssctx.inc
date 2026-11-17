@@ -1,6 +1,8 @@
 ; Hispa Ventanas - [CONTEXTO] variables sin valor inicial de contexto.inc (en
 ; la parte de 32 bits; se ponen a cero al entrar en modo protegido)
             alignb 4
+menu_gris   resb 1                  ; [HISPA-486] 1: ctx_gris vale para el desplegable de la barra (programas de Windows)
+            alignb 4
 ctx_gris    resd 1                  ; las órdenes en gris del emergente abierto (un bit cada una)
 ctx_gris_q  resd 1                  ; (ctx_menu) las que se piden
 ctx_qx      resd 1                  ; (ctx_menu) dónde se pide

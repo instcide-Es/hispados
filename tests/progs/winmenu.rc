@@ -1,0 +1,37 @@
+# Los recursos de WINMENU.EXE (tests/progs/winmenu.c), en el formato de
+# tools/rcmini.py. Copyright (C) 2026 Carlos Sanz y contribuidores.
+# GPL-2.0 o posterior.
+STRING 1 "Hispa-486 lee sus textos"
+STRING 2 "Menús y recursos de Win32,\ndentro de Hispa Ventanas."
+STRING 17 "El diecisiete: ñandú, camión"
+ICON 1
+
+MENU "DEMAS"
+  POPUP "&Recursos"
+    ITEM "Diálogo &modal" 201
+    ITEM "Diálogo &aparte" 202
+    ITEM "&Texto" 203
+    SEPARATOR
+    ITEM "Menú de a&ntes" 204 CHECKED
+  END
+END
+MENU 1
+  ITEM "Uno" 1
+END
+
+DIALOG 1 0 0 150 60 "Acerca de"
+  LTEXT "..." 300 10 8 130 20
+  DEFPUSHBUTTON "Aceptar" 1 50 38 50 14
+END
+DIALOG 2 0 0 170 76 "Datos"
+  LTEXT "Nombre:" -1 8 10 36 10
+  EDITTEXT 301 48 8 110 13
+  CHECKBOX "Con saludo" 302 8 28 80 10
+  DEFPUSHBUTTON "Aceptar" 1 26 52 50 14
+  PUSHBUTTON "Cancelar" 2 94 52 50 14
+END
+DIALOG "APARTE" 0 0 110 44 "Aparte"
+  PUSHBUTTON "Sumar" 310 8 8 44 14
+  PUSHBUTTON "Cerrar" 2 58 8 44 14
+  RTEXT "no modal" -1 8 28 94 10
+END

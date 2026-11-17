@@ -266,6 +266,7 @@ ctx_acotar:
 
 ; (menu_cerrar) se ha cerrado el desplegable o el emergente
 ctx_cerrado:
+        mov byte [menu_gris], 0     ; [HISPA-486]
         mov byte [ctx_activo], 0
         mov byte [ctx_sis], 0
         mov dword [ctx_gris], 0
@@ -274,7 +275,10 @@ ctx_cerrado:
 ; (interna) ECX=número de orden -> CF=1 si va en gris
 ctx_es_gris:
         cmp byte [ctx_activo], 0
-        je .no
+        jne .mira
+        cmp byte [menu_gris], 0     ; [HISPA-486] o el de la barra de un programa
+        je .no                      ; de Windows (EnableMenuItem)
+.mira:
         cmp ecx, 32
         jae .no
         bt [ctx_gris], ecx

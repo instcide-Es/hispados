@@ -43,7 +43,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 0 | Este documento; la lista de funciones por orden de uso (`tools/importaciones.py`, con los programas que aporte cada uno) | documento hecho (17/11/2026) |
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
-| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos) |
+| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador |
@@ -99,11 +99,13 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    encuentran por su recorte 8+3, como en MS-DOS).
 2. ~~Que COMMAND.COM ejecute los PE solo~~: hecho (17/11/2026): un .EXE con cabecera PE se lanza con HW32 (de la carpeta de COMSPEC, del PATH o de la actual); si no hay HW32, lo dice y no se lanza.
 3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
-4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a y la 3b (el «Hola,
-   mundo» de ventana) están hechas; sigue la 3c (controles y menús: las
-   clases BUTTON, EDIT, STATIC y LISTBOX sobre los controles de Hispa
-   Ventanas, `WM_COMMAND`, `CreateMenu`) y que los programas de C con
-   biblioteca carguen MSVCRT.DLL dentro de Hispa Ventanas.
+4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a, la 3b (el «Hola,
+   mundo» de ventana) y la 3c (KERNEL32 y las DLL dentro de Hispa Ventanas,
+   los controles, los menús, los recursos y los diálogos) están hechas; sigue
+   la 3d: GDI completa para los programas sencillos de la época (mapas de
+   bits, tipos de letra, regiones), los iconos y los cursores del programa,
+   los aceleradores y los diálogos comunes (abrir y guardar), probando con
+   programas reales pequeños.
 
 ## Fase 1: el cargador PE
 
@@ -167,11 +169,12 @@ Pasos, cada uno con su prueba:
    Ventanas (cargador común, selectores propios, despacho, tarea).
 2. **3b** — «Hola, mundo» de ventana: `RegisterClassA`, `CreateWindowExA`,
    bucle de mensajes, `WM_PAINT` con `TextOutA`, cerrar.
-3. **3c** — controles y menús (un programa con botones, una caja de texto y un
-   menú).
+3. **3c** — KERNEL32 y las DLL dentro de Hispa Ventanas, controles, menús,
+   recursos (`.rsrc`: `LoadStringA`, `LoadMenuA`) y diálogos de plantilla
+   (`DialogBoxParamA`): una calculadora en C con MSVCRT.
 4. **3d** — GDI completa para los programas sencillos de la época (dibujo,
-   mapas de bits, tipos de letra) y diálogos desde recursos (`.rsrc`:
-   `DialogBoxParamA`, `LoadIconA`, `LoadStringA`).
+   mapas de bits, tipos de letra), iconos y cursores del programa,
+   aceleradores y diálogos comunes.
 
 ### Cómo está hecho (fase 3a)
 
@@ -401,6 +404,191 @@ Decisiones y límites de la 3b (para las fases siguientes):
 - KERNEL32 dentro de Hispa Ventanas sigue siendo el mínimo de la 3a: sin
   montón (`HeapAlloc`, `GlobalAlloc`) ni archivos, y sin cargar DLL
   (MSVCRT.DLL): los programas de C con biblioteca aún no van.
+
+### Cómo está hecho (fase 3c)
+
+Un programa de ventanas hecho en C con MSVCRT.DLL, con sus controles, su
+menú, sus recursos y sus diálogos: la calculadora de la prueba. Son cuatro
+partes, cada una con su prueba.
+
+**1. KERNEL32 y las DLL: HW32 es el módulo del programa.** En vez de escribir
+otro KERNEL32 para Hispa Ventanas, se usa el de los programas de consola
+entero: `HW32.COM` lleva en 103h la firma «HW32MOD» y una tabla
+(`mod_cargar`, `mod_fin`, `mod_d`), y Hispa Ventanas lo carga **como módulo
+de cada programa de Windows** (`pe_modulo`, en `ventanas/win32.inc`):
+
+- Lee `HW32.COM` (de al lado de `VENTANAS.COM`, de al lado del programa o de
+  la carpeta de ahora) a un bloque de memoria extendida, con 4 KB detrás para
+  su pila; le hace dos selectores de 32 bits (código y datos, con la base en
+  «copia − 100h»: HW32 corre tal cual, con su `ORG 100h`); rellena `mod_d`
+  (sus selectores, el entorno, el PSP, la ficha del programa y tres entradas
+  lejanas de Hispa Ventanas) y llama lejos a `mod_cargar`. Sin `HW32.COM` el
+  programa no se abre y se dice por qué.
+- `mod_cargar` hace lo que hace HW32 al arrancar (el búfer de DOS —16 KB de
+  memoria convencional, con DPMI 0100h—, los selectores de la BIOS y del
+  entorno) y carga el programa **con el cargador de siempre**: el bloque, los
+  selectores del programa, las secciones, los reubicados, las importaciones,
+  las DLL (de la carpeta del programa, de la de HW32 o de la de ahora) y el
+  trampolín de inicio con sus `DllMain`. Mientras carga usa una pila suya (el
+  cargador cuenta con que la pila y los datos son el mismo segmento). Vuelve
+  con los selectores del programa, su base, su ImageBase, su entrada y su
+  pila; si no puede, con el porqué («falta la DLL...»), que sale en un aviso.
+- Las llamadas del programa a KERNEL32 (y las de MSVCRT.DLL) van, como en
+  HW32, a un trampolín que salta lejos al `despacho` **de su copia de HW32**:
+  se atienden en la pila del programa, con DS = HW32, ES = el programa y
+  GS = el búfer de DOS, sin pasar por Hispa Ventanas (y sin ceder el turno).
+  Cada programa tiene su copia: su montón, sus handles, su TLS, sus búsquedas
+  y su último error son suyos.
+- Lo del entorno se lo pide HW32 a Hispa Ventanas por `md_resolver`
+  (`pe_resolver`): al importar, las funciones de USER32 y GDI32 (cada una, su
+  trampolín a `pe_despacho`; la que no hay, con su «falta») y las pocas de
+  KERNEL32 que se hacen aquí en vez de allí (`Sleep`, que cede el turno, y
+  `FindResourceA`, `LoadResource`, `LockResource` y `SizeofResource`);
+  `GetModuleHandleA("USER32")` y `GetProcAddress` también preguntan. Los
+  trampolines de Hispa Ventanas están ahora en un bloque del montón.
+- Dentro de Hispa Ventanas no hay consola: en modo módulo, `int_rm` no
+  escribe en la pantalla de texto ni lee del teclado por la BIOS ni por los
+  handles 0 a 2 (lo escrito se da por escrito; `printf` no rompe nada), no
+  ejecuta otros programas (`CreateProcessA` falla), apunta los archivos que se
+  abren y, tras una búsqueda, devuelve la DTA a la de Hispa Ventanas.
+  `ExitProcess` (y `exit` de MSVCRT) salta lejos a `pe_salir_mod`; una
+  función que falta, `FatalAppExitA` o una excepción sin atender, a
+  `pe_falta_mod`, que lo dice en un cuadro y termina el programa.
+- Al acabar (o si lo termina el Administrador de tareas), `pe_limpiar` llama
+  a `mod_fin`: HW32 cierra los archivos que quedaron abiertos y suelta todos
+  los bloques de DPMI que pidió (el programa, sus DLL, el montón,
+  `VirtualAlloc`: los lleva apuntados en `blq_tab`), el búfer de DOS y los
+  selectores; Hispa Ventanas suelta luego su copia de HW32.
+- Prueba: `tests/run_win32crt_tests.sh` (WINCRT.EXE: el montón,
+  `VirtualAlloc`, archivos y búsquedas, la hora, el entorno, TLS,
+  `GetProcAddress`, MSVCRT con coma flotante y archivos con búfer, una DLL de
+  al lado del programa y otra de la carpeta de HW32; no queda memoria ni al
+  salir con `exit`; la DLL que falta; sin `HW32.COM`). `tests/run_hw32_tests.sh`
+  sigue pasando: HW32 de consola es el mismo archivo.
+
+**2. Los controles de serie** (`ventanas/win32c.inc`). Un control de Windows
+**es** un control de Hispa Ventanas (`c_boton`, `c_edit`, `c_estatico`,
+`c_lista`), hijo de la ventana de Windows; el COMBOBOX sencillo es una clase
+de aquí (`c_w32combo`) que abre un menú emergente (`ctx_menu`).
+
+- `CreateWindowExA` con BUTTON, EDIT, STATIC, LISTBOX o COMBOBOX (si el
+  programa no ha registrado una clase con ese nombre) hace el control con
+  `ven_crear` y le cambia el procedimiento por `w32_ctl_proc`, que llama al
+  de su clase. `V_D0` a `V_D7` son de su clase de Hispa Ventanas, así que un
+  control no lleva dentro a su programa: es el de su tarea (`w32_ven` lo
+  admite como HWND por eso; `w32_ctl_prog`). Su texto (página 437) está en un
+  bloque del montón (`V_TEXTO`).
+- El ratón y el teclado los atiende el control (el foco, Tab entre los que
+  tienen `WS_TABSTOP`, el espacio y el Intro en los botones): el programa no
+  ve esos mensajes, ve el aviso. El control avisa a su madre con `WM_COMMAND`
+  y `w32_traducir` pone en `lParam` su HWND: `BN_CLICKED`, `LBN_SELCHANGE`,
+  `LBN_DBLCLK`, `CBN_SELCHANGE` y `EN_CHANGE` (`w32_ctl_proc` mira si el
+  cuadro de texto ha cambiado con cada mensaje).
+- Lo que el control no quiere (una tecla, un carácter) **sube a su madre**,
+  como en Hispa Ventanas: la ventana recibe `WM_KEYDOWN` y `WM_CHAR` aunque el
+  foco esté en un botón (la calculadora se maneja así con el teclado).
+- Los mensajes de Windows a un control (`SendMessageA`, `SetWindowTextA`,
+  `GetWindowTextA`...) pasan por `w32_ctl_enviar`: `WM_SETTEXT`, `WM_GETTEXT`,
+  `WM_GETTEXTLENGTH`; `BM_GETCHECK`, `BM_SETCHECK`, `BM_CLICK`; `EM_SETSEL`,
+  `EM_GETMODIFY`, `EM_SETMODIFY`, `EM_GETLINECOUNT`, `EM_REPLACESEL`, cortar,
+  copiar y pegar; `LB_ADDSTRING`, `LB_RESETCONTENT`, `LB_SETCURSEL`,
+  `LB_GETCURSEL`, `LB_GETTEXT`, `LB_GETTEXTLEN`, `LB_GETCOUNT`; y los `CB_*`
+  equivalentes. Los textos van de la página 1252 a la 437 y vuelven; en los
+  cuadros de varias líneas, CR LF <-> LF.
+- USER32: `GetDlgItem`, `GetDlgCtrlID`, `SendDlgItemMessageA`,
+  `SetDlgItemTextA`, `GetDlgItemTextA`, `SetDlgItemInt`, `GetDlgItemInt`,
+  `CheckDlgButton`, `IsDlgButtonChecked`, `CheckRadioButton`, `EnableWindow`,
+  `IsWindowEnabled`, `SetWindowPos`, `IsDialogMessageA` (devuelve 0: el Tab ya
+  lo lleva Hispa Ventanas); `SetFocus` y `GetFocus` valen con controles.
+- Prueba: `tests/run_win32ctl_tests.sh` (WINCTL.EXE, con el ratón y el
+  teclado).
+
+**3. Los menús** (`ventanas/win32m.inc`). Un HMENU es una ficha del programa
+(8 menús de 16 órdenes, con el texto ya en la página 437). `SetMenu` (o el
+menú que se da a `CreateWindowExA`, o el de la clase: `lpszMenuName`) hace con
+ellas la tabla de la barra de menús de Hispa Ventanas (`V_MENU`), y se rehace
+cada vez que el programa cambia algo. La barra, los desplegables, Alt+letra y
+las flechas son los de Hispa Ventanas; al elegir llega `WM_COMMAND`. La marca
+de `CheckMenuItem` es un «*» delante del texto; las órdenes en gris se le
+dicen al desplegable al abrirse (`w32_menu_abierto`, desde `menu_abrir`, y
+`ctx_es_gris`). Al ganar o perder la barra, las hijas se quedan donde estaban
+dentro de su zona y la ventana recibe `WM_SIZE`. USER32: `CreateMenu`,
+`CreatePopupMenu`, `AppendMenuA`, `DestroyMenu`, `SetMenu`, `GetMenu`,
+`GetSubMenu`, `DrawMenuBar`, `CheckMenuItem`, `EnableMenuItem`,
+`GetMenuState`, `GetMenuItemCount`.
+
+**4. Los recursos y los diálogos** (`ventanas/win32m.inc`). `w32_recurso`
+busca en la sección `.rsrc` del programa (tipo, nombre o número, el primer
+idioma). `LoadStringA`, `LoadMenuA`, `LoadIconA` y `LoadCursorA` (del
+programa: se sabe si están; el icono y el cursor que se ven siguen siendo los
+de Hispa Ventanas) y `FindResourceA` salen de ahí; los textos, de UTF-16 a la
+página 1252.
+
+- Un diálogo de plantilla es una ventana de Windows de la clase «#32770» (la
+  0 de cada programa) con la marca `W32V_DIALOGO`: su «WndProc» es el DLGPROC
+  y, si este devuelve 0, `w32_proc` hace lo que haría `DefDlgProc`
+  (`w32_dlg_defecto`: el fondo, `WM_CLOSE` y Esc = IDCANCEL, Intro = el botón
+  por defecto o IDOK). Sus controles salen de la plantilla, con las medidas
+  en unidades de diálogo (con la letra de 8×16, dos puntos cada una); sale
+  centrado. `WM_INITDIALOG` lleva en `wParam` el primer control donde para el
+  tabulador y, si el DLGPROC devuelve distinto de 0, ese control toma el foco.
+- `DialogBoxParamA` se queda en un bucle de mensajes propio, con la dueña
+  desactivada, hasta `EndDialog`; `CreateDialogParamA` vuelve enseguida y el
+  diálogo convive con las demás ventanas del programa.
+- `tools/elf2pe.py --res recursos.rc` mete la sección `.rsrc`: la hace
+  `tools/rcmini.py` de un texto sencillo parecido a un `.rc` (STRING, ICON,
+  MENU con POPUP e ITEM, DIALOG con LTEXT, EDITTEXT, PUSHBUTTON...). Además,
+  `-l UNA.DLL` importa lo que esa DLL exporte y `-t ventanas/win32.inc`, lo
+  que haya en la tabla de USER32 y GDI32: ya no hace falta escribir las
+  listas de importaciones a mano.
+- Pruebas: `tests/run_win32menu_tests.sh` (WINMENU.EXE: los menús por
+  programa y de los recursos, los textos, el diálogo modal y el que no lo es)
+  y la final, `tests/run_win32calc_tests.sh` (WINCALC.EXE: la calculadora, con
+  el ratón y con el teclado).
+
+Con todo, `VENTANAS.COM` queda en unos 113 KB: lo nuevo (unos 8 KB de código
+de 32 bits; el cargador y el KERNEL32 mínimo de la 3a se han ido) va en la
+parte alta, y de la baja solo se ha tocado una llamada en `menu_abrir`.
+
+Decisiones y límites de la 3c (para las fases siguientes):
+
+- Hace falta `HW32.COM` (y `MSVCRT.DLL` para los programas de C) en el disco:
+  al lado de `VENTANAS.COM`, del programa o en la carpeta de trabajo. Cada
+  programa de Windows abierto gasta, además de lo suyo, unos 36 KB de memoria
+  extendida (su copia de HW32), 16 KB de memoria convencional (su búfer de
+  DOS), 1 MB de montón en cuanto pide memoria y la pila que diga su cabecera
+  (hasta 1 MB).
+- Los límites de KERNEL32 son los de HW32: `LoadLibraryA` solo da las DLL que
+  el programa ya importa; no hay hilos ni `CreateProcessA` (dentro de Hispa
+  Ventanas, ni por COMMAND.COM); los nombres largos, por su recorte 8+3.
+  `Sleep` importado cede el turno; el de `GetProcAddress` también (lo da
+  Hispa Ventanas). Las demás funciones de KERNEL32 no ceden el turno: un
+  programa que lea un archivo grande para a los demás mientras tanto.
+- El programa comparte con Hispa Ventanas la tabla de archivos de DOS
+  (FILES) y la carpeta de trabajo: si la cambia, la cambia para todos.
+- Los controles son los de Hispa Ventanas, con su aspecto: los estilos de
+  Windows que no tienen equivalente se pasan por alto (`ES_READONLY`,
+  `ES_PASSWORD`, `SS_CENTER`, las listas con varias columnas o varias
+  elegidas, `LB_DELETESTRING`, el COMBOBOX con caja de texto). Un control
+  desactivado no atiende, pero se pinta igual. No se puede cambiar el
+  procedimiento de un control (`GWL_WNDPROC`: 0), ni hay `WM_CTLCOLOR*` ni
+  `WM_SETFONT`. Una lista lleva hasta 200 líneas de 39 letras; un COMBOBOX,
+  24; un cuadro de texto de una línea, 255 letras.
+- El programa no ve los mensajes de ratón y de teclado de sus controles
+  (`GetMessageA` no los da; los reparte Hispa Ventanas), así que tampoco hay
+  aceleradores (`TranslateAcceleratorA` falta). En cambio recibe en la
+  ventana madre las teclas que el control no quiere, cosa que Windows no hace.
+- Menús: un nivel de desplegables (uno dentro de otro sale como una orden que
+  no hace nada); 8 menús de 16 órdenes de 31 letras por programa; 32 órdenes
+  por desplegable para el gris. Faltan `InsertMenuA`, `ModifyMenuA`,
+  `TrackPopupMenu` y los mensajes `WM_INITMENU*`.
+- Recursos: solo los del `.EXE` (no los de una DLL); las plantillas de
+  diálogo extendidas (DLGTEMPLATEEX) no se cargan; los iconos, los cursores y
+  los mapas de bits de los recursos no se dibujan (`LoadBitmapA` falta); no
+  hay tablas de aceleradores.
+- Diálogos: la letra es la de Hispa Ventanas (DS_SETFONT se salta); el fondo,
+  el de los cuadros de Hispa Ventanas; `DialogBoxIndirectParamA` y
+  `DWL_MSGRESULT` faltan; `DS_CENTER` o no, salen centrados en la pantalla.
 
 ## Red inalámbrica (Wi-Fi)
 

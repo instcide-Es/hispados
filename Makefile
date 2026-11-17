@@ -140,6 +140,30 @@ W32HOLA_G = TextOutA,SetTextColor,SetBkColor,SetBkMode,GetStockObject,CreateSoli
 $(B)/WINHOLA.EXE: tests/progs/winhola.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/winhola.o
 	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:$(W32HOLA_U) -i GDI32.dll:$(W32HOLA_G) $(B)/winhola.o
+# [HISPA-486] fase 3c: KERNEL32 completo (HW32 de módulo), DLL y MSVCRT dentro
+# de Hispa Ventanas (tests/run_win32crt_tests.sh). -l y -t: las importaciones
+# salen de lo que exporta la DLL y de la tabla de USER32 y GDI32 de Hispa Ventanas
+W32L = -l $(B)/MSVCRT.DLL -t ventanas/win32.inc
+W32DEP = tests/progs/win32min.h tools/elf2pe.py $(B)/MSVCRT.DLL ventanas/win32.inc
+$(B)/WINCRT.EXE: tests/progs/wincrt.c $(W32DEP) $(B)/DLLPRUE.DLL | $(B)
+	$(CC32) -c $< -o $(B)/wincrt.o
+	python3 tools/elf2pe.py --gui -o $@ -l $(B)/DLLPRUE.DLL $(W32L) $(B)/wincrt.o
+$(B)/WINSINDL.EXE: tests/progs/wincrt.c $(W32DEP) $(B)/DLLPRUE.DLL | $(B)
+	$(CC32) -DSINDLL -c $< -o $(B)/winsindl.o
+	python3 tools/elf2pe.py --gui -o $@ -i NOESTA.DLL:NoEsta -l $(B)/DLLPRUE.DLL $(W32L) $(B)/winsindl.o
+# los controles de serie (tests/run_win32ctl_tests.sh)
+$(B)/WINCTL.EXE: tests/progs/winctl.c $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/winctl.o
+	python3 tools/elf2pe.py --gui -o $@ $(W32L) $(B)/winctl.o
+# los menús, los recursos (--res: tools/rcmini.py) y los diálogos de plantilla
+# (tests/run_win32menu_tests.sh)
+$(B)/WINMENU.EXE: tests/progs/winmenu.c tests/progs/winmenu.rc tools/rcmini.py $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/winmenu.o
+	python3 tools/elf2pe.py --gui -o $@ --res tests/progs/winmenu.rc $(W32L) $(B)/winmenu.o
+# la calculadora: la prueba final de la fase 3c (tests/run_win32calc_tests.sh)
+$(B)/WINCALC.EXE: tests/progs/wincalc.c tests/progs/wincalc.rc tools/rcmini.py $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/wincalc.o
+	python3 tools/elf2pe.py --gui -o $@ --res tests/progs/wincalc.rc $(W32L) $(B)/wincalc.o
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
@@ -630,6 +654,10 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_hw32_tests.sh $(IMG)
 	tests/run_win32gui_tests.sh $(IMG)
 	tests/run_win32hola_tests.sh $(IMG)
+	tests/run_win32crt_tests.sh $(IMG)
+	tests/run_win32ctl_tests.sh $(IMG)
+	tests/run_win32menu_tests.sh $(IMG)
+	tests/run_win32calc_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)

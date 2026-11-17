@@ -62,7 +62,8 @@ WC_FONDO    equ 20                  ; hbrBackground
 WC_CURSOR   equ 24
 WC_ICONO    equ 28
 WC_EXTRA    equ 32                  ; cbWndExtra
-WC_NOMBRE   equ 36                  ; 43 letras y el 0
+WC_MENU     equ 36                  ; lpszMenuName (del programa; 0: sin menú)
+WC_NOMBRE   equ 40                  ; 39 letras y el 0
 WC_TAM      equ 80
 WC_EXTRA_MAX equ 64
 ; un objeto de GDI
@@ -102,7 +103,19 @@ WB_CLASES   equ 0
 WB_OBJ      equ WB_CLASES + WC_MAX * WC_TAM
 WB_DC       equ WB_OBJ + GO_MAX * GO_TAM
 WB_TMP      equ WB_DC + DC_MAX * DC_TAM
-WB_TAM      equ WB_TMP + TP_MAX * TP_TAM
+; (fase 3c) un menú: sus órdenes (win32m.inc)
+MN_MAX      equ 8
+MI_MAX      equ 16
+MI_FLAGS    equ 0                   ; MF_*
+MI_ID       equ 4                   ; el número de la orden (o el HMENU del desplegable)
+MI_TEXTO    equ 8                   ; 31 letras y el 0 (página 437)
+MI_TAM      equ 40
+MN_USO      equ 0
+MN_N        equ 4
+MN_ITEMS    equ 8
+MN_TAM      equ MN_ITEMS + MI_MAX * MI_TAM
+WB_MENUS    equ WB_TMP + TP_MAX * TP_TAM
+WB_TAM      equ WB_MENUS + MN_MAX * MN_TAM
 
 %if V_TAM != 128
 %error "w32_ven y w32_hwnd cuentan con fichas de 128 octetos"
@@ -178,7 +191,10 @@ w32_sw      db 0, 4, 2, 3, 1, 1, 2, 2, 1, 4, 1
 ; =============================================================================
 ;  Lo de dentro
 ; =============================================================================
-; ---- EAX=HWND EDX=programa -> EAX=la ventana (0 y ZF=1 si no es suya) ----
+; ---- EAX=HWND EDX=programa -> EAX=la ventana (0 y ZF=1 si no es suya). Vale
+; también para sus controles (los de serie: V_PROC = w32_ctl_proc y de su
+; tarea), que no llevan en V_D0...V_D7 lo de una ventana de Windows (ahí está
+; lo de su clase de Hispa Ventanas): quien toque eso, que mire antes cuál es ----
 w32_ven:
         sub eax, W32_HWND
         jb .no
@@ -192,8 +208,18 @@ w32_ven:
         cmp dword [eax+V_USO], 1
         jne .no
         cmp dword [eax+V_PROC], w32_ven_proc
-        jne .no
+        jne .ctl
         cmp [eax+V_D0], edx
+        jne .no
+        test eax, eax
+        ret
+.ctl:
+        cmp dword [eax+V_PROC], w32_ctl_proc    ; (fase 3c) un control suyo:
+        jne .no                                 ; de su tarea
+        push ebx
+        mov ebx, [edx+PE_TAREA]
+        cmp [eax+V_TAREA], ebx
+        pop ebx
         jne .no
         test eax, eax
         ret
@@ -273,6 +299,7 @@ w32_iniciar:
         add edi, GO_TAM
         dec ecx
         jnz .b
+        call w32_dlg_clase          ; (fase 3c) la clase de los diálogos
         clc
 .x:
         popad
@@ -840,8 +867,18 @@ w32_traducir:
         ret
 .sin:
         xor ecx, ecx
-.ord:
         xor edx, edx
+        clc
+        ret
+.ord:
+        test edx, edx               ; de un control: lParam = su HWND
+        jz .o1
+        push eax
+        mov eax, edx
+        call w32_hwnd
+        mov edx, eax
+        pop eax
+.o1:
         clc
         ret
 .tmp:
@@ -885,6 +922,8 @@ w32_traducir:
 ; ---- llama al WndProc de la ventana EBP con el mensaje EAX, ECX, EDX (ya
 ; de Windows) -> EAX. Conserva lo demás ----
 w32_proc:
+        cmp dword [ebp+V_PROC], w32_ctl_proc    ; a un control: se traduce
+        je w32_ctl_enviar
         push ebx
         push ecx
         push edx
@@ -899,6 +938,21 @@ w32_proc:
         mov edx, [ebp+V_D0]
         mov eax, [ebp+V_D1]
         call pe_llamar
+        test eax, eax               ; (fase 3c) un diálogo cuyo DLGPROC dice que
+        jnz .x                      ; no lo atiende: lo que haría Windows
+        cmp dword [ebp+V_USO], 1
+        jne .x
+        cmp dword [ebp+V_PROC], w32_ven_proc
+        jne .x
+        cmp [ebp+V_D0], edx
+        jne .x
+        test byte [ebp+V_D5], W32V_DIALOGO
+        jz .x
+        mov eax, ecx
+        mov ecx, esi
+        mov edx, edi
+        call w32_dlg_defecto
+.x:
         pop edi
         pop esi
         pop edx
@@ -1065,6 +1119,21 @@ w32_ven_proc:
         dec ecx
         jnz .l2
 .l3:
+        cmp dword [ebp+V_D7], 0     ; (fase 3c) su barra de menús y su menú
+        je .l4
+        cmp ebp, [menu_duena]
+        jne .l3b
+        call menu_cerrar
+.l3b:
+        mov eax, [ebp+V_MENU]
+        mov dword [ebp+V_MENU], 0
+        call mem_soltar
+        test edi, edi
+        jz .l4
+        mov edx, esi
+        mov eax, [ebp+V_D7]
+        call w32_menu_soltar
+.l4:
         mov eax, [ebp+V_D4]         ; y su bloque
         call mem_soltar
         xor eax, eax
@@ -1136,6 +1205,8 @@ u_RegisterClassA:
         mov [edi+WC_CURSOR], eax
         mov eax, [esi+28]
         mov [edi+WC_FONDO], eax
+        mov eax, [esi+32]
+        mov [edi+WC_MENU], eax
         mov eax, [esi+12]
         cmp eax, WC_EXTRA_MAX
         jbe .e
@@ -1190,6 +1261,8 @@ u_CreateWindowExA:
         mov eax, [ebp+4]
         call w32_clase
         jnc .clase
+        call w32c_clase             ; (fase 3c) ¿una de serie: BUTTON, EDIT...?
+        jnc w32c_crear
         mov dword [edx+PE_ERROR], 1407  ; ERROR_CANNOT_FIND_WND_CLASS
         jmp u_cero
 .clase:
@@ -1302,6 +1375,29 @@ u_CreateWindowExA:
         test eax, eax
         jz .falla
         mov esi, eax                ; ESI = la ventana
+        test dword [esi+V_ESTILO], E_HIJA   ; (fase 3c) su menú: el que se da
+        jnz .sinmenu                        ; o el de su clase (de los recursos)
+        mov eax, [ebp+36]
+        test eax, eax
+        jnz .hm
+        mov ebx, [esi+V_D2]
+        mov ebx, [ebx+WC_MENU]
+        test ebx, ebx
+        jz .sinmenu
+        push esi
+        call w32_menu_recurso
+        pop esi
+.hm:
+        push esi
+        call w32_menu
+        pop esi
+        jc .sinmenu
+        mov [esi+V_D7], eax
+        push ebp
+        mov ebp, esi
+        call w32_menu_hacer
+        pop ebp
+.sinmenu:
         mov eax, [esp+P_X]
         mov ecx, [esp+P_Y]
         add esp, P_TAM
@@ -1459,13 +1555,26 @@ u_ShowWindow:
         mov ecx, [ebp+4]
         mov esi, edx
         mov ebp, eax
+        cmp dword [ebp+V_PROC], w32_ctl_proc
+        je .ctl
         mov eax, ecx
         jmp w32_mostrar
+.ctl:
+        mov ebx, [ebp+V_ESTADO]     ; un control: se ve o no se ve
+        and ebx, S_VISIBLE
+        xor eax, eax
+        test ecx, ecx
+        setnz al
+        call ven_mostrar
+        mov eax, ebx
+        ret
 ; BOOL UpdateWindow(ventana): si tiene algo que pintar, WM_PAINT ya
 u_UpdateWindow:
         mov eax, [ebp]
         call w32_ven
         jz u_cero
+        cmp dword [eax+V_PROC], w32_ctl_proc    ; (un control se pinta solo)
+        je u_uno
         mov ebp, eax
         mov esi, edx
         test dword [ebp+V_ESTADO], S_NCSUCIO
@@ -1490,9 +1599,12 @@ u_DestroyWindow:
         mov eax, [ebp]
         call w32_ven
         jz u_cero
-        test byte [eax+V_D5], W32V_DESTRUYE
-        jnz u_cero
         mov ebp, eax
+        cmp dword [ebp+V_PROC], w32_ctl_proc
+        je .d
+        test byte [ebp+V_D5], W32V_DESTRUYE
+        jnz u_cero
+.d:
         call ven_destruir
         jmp u_uno
 ; BOOL IsWindow(ventana), IsWindowVisible, IsIconic, IsZoomed
@@ -1539,11 +1651,11 @@ u_GetFocus:
         mov eax, [foco]
         test eax, eax
         jz .x
-        cmp dword [eax+V_PROC], w32_ven_proc
-        jne u_cero
-        cmp [eax+V_D0], edx
-        jne u_cero
-        jmp w32_hwnd
+        call w32_hwnd               ; (suya, o un control suyo)
+        push eax
+        call w32_ven
+        pop eax
+        jz u_cero
 .x:
         ret
 
@@ -1553,6 +1665,8 @@ u_DefWindowProcA:
         mov eax, [ebp]
         call w32_ven
         jz u_cero
+        cmp dword [eax+V_PROC], w32_ctl_proc
+        je u_cero
         mov esi, eax                ; ESI = la ventana
         mov eax, [ebp+4]
         cmp eax, WM_CLOSE
@@ -1950,6 +2064,8 @@ u_DispatchMessageA:
         mov eax, [edi+4]
         mov ecx, [edi+8]
         mov edx, [edi+12]
+        cmp dword [ebp+V_PROC], w32_ctl_proc    ; (a un control)
+        je w32_proc
         cmp eax, WM_TIMER
         jne .n
         test edx, edx
@@ -2137,8 +2253,16 @@ u_SetWindowTextA:
         jz u_cero
         mov ecx, [ebp+4]
         mov ebp, eax
+        cmp dword [ebp+V_PROC], w32_ctl_proc
+        je .ctl
         mov eax, ecx
         call w32_poner_titulo
+        jmp u_uno
+.ctl:
+        mov edx, ecx
+        mov eax, WM_SETTEXT
+        xor ecx, ecx
+        call w32_proc
         jmp u_uno
 ; int GetWindowTextA(ventana, búfer, tamaño) y GetWindowTextLengthA(ventana)
 u_GetWindowTextA:
@@ -2148,13 +2272,25 @@ u_GetWindowTextA:
         mov edi, [ebp+4]
         mov ecx, [ebp+8]
         mov ebp, eax
-        jmp w32_leer_titulo
+        cmp dword [ebp+V_PROC], w32_ctl_proc
+        jne w32_leer_titulo
+        mov edx, edi
+        mov eax, WM_GETTEXT
+        jmp w32_proc
 u_GetWindowTextLengthA:
         mov eax, [ebp]
         call w32_ven
         jz u_cero
+        cmp dword [eax+V_PROC], w32_ctl_proc
+        je .ctl
         mov esi, [eax+V_D4]
         jmp cad_largo
+.ctl:
+        mov ebp, eax
+        mov eax, 0x000E             ; WM_GETTEXTLENGTH
+        xor ecx, ecx
+        xor edx, edx
+        jmp w32_proc
 ; LONG GetWindowLongA(ventana, cuál) y SetWindowLongA(ventana, cuál, valor)
 u_GetWindowLongA:
         xor ebx, ebx
@@ -2167,6 +2303,8 @@ u_long:
         jz u_cero
         mov esi, eax                ; ESI = la ventana
         mov ecx, [ebp+4]
+        cmp dword [esi+V_PROC], w32_ctl_proc
+        je .ctl
         mov edi, [esi+V_D4]
         add edi, VB_USER
         cmp ecx, -21                ; GWL_USERDATA
@@ -2221,6 +2359,53 @@ u_long:
 .madre:
         mov eax, [esi+V_PADRE]
         jmp w32_hwnd
+; de un control: su número, su madre, el módulo y un estilo aproximado
+.ctl:
+        lea edi, [esi+V_ID]
+        cmp ecx, -12
+        je .dir
+        cmp ecx, -6
+        je .modulo
+        cmp ecx, -8
+        je .madre
+        cmp ecx, -16
+        jne u_cero
+        mov eax, WS_CHILD
+        test dword [esi+V_ESTADO], S_VISIBLE
+        jz .c1
+        or eax, WS_VISIBLE
+.c1:
+        test dword [esi+V_ESTADO], S_INACTIVA
+        jz .c2
+        or eax, WS_DISABLED
+.c2:
+        mov ecx, [esi+V_ESTILO]
+        test ecx, E_TABULA
+        jz .c3
+        or eax, WS_TABSTOP
+.c3:
+        mov edi, [esi+V_CLASE]
+        cmp edi, c_boton
+        jne .c6
+        test ecx, BS_DEFECTO
+        jz .c4
+        or eax, 1
+.c4:
+        test ecx, BS_CASILLA
+        jz .c5
+        or eax, 3
+.c5:
+        test ecx, BS_OPCION
+        jz .x
+        or eax, 9
+        ret
+.c6:
+        cmp edi, c_edit
+        jne .x
+        test ecx, ES_MULTI
+        jz .x
+        or eax, 4
+        ret
 
 ; UINT SetTimer(ventana, número, milisegundos, función) y KillTimer(ventana,
 ; número). Sin ventana no hay temporizador
@@ -2289,16 +2474,6 @@ u_tmp_quitar:
         pop edi
         ret
 
-; HCURSOR LoadCursorA(módulo, cuál) y HICON LoadIconA(módulo, cuál): los de
-; serie; algo que vale (el cursor y el icono son los de Hispa Ventanas)
-u_LoadCursorA:
-        movzx eax, word [ebp+4]
-        or eax, 0x30000
-        ret
-u_LoadIconA:
-        movzx eax, word [ebp+4]
-        or eax, 0x40000
-        ret
 ; int GetSystemMetrics(cuál)
 u_GetSystemMetrics:
         mov ecx, [ebp]
