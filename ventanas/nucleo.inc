@@ -36,6 +36,9 @@ MONTON_TAM  equ 640 * 1024
 PILA_TAM    equ 8192
 TAR_MAX     equ 12
 COLA_MAX    equ 48
+; marca (en M_L) de las teclas que vienen del teclado: se quita al sacarlas de
+; la cola (msg_mirar), donde se dirigen a quien tenga el foco en ese momento
+ML_TECLADO  equ 0x80000000
 T_USO       equ 0                   ; 0 libre, 1 en marcha, 2 terminada
 T_ESP       equ 4
 T_PILA      equ 8
@@ -348,6 +351,7 @@ msg_mirar:
         call tar_latido             ; [TAREAS] la tarea que corre mira su cola: responde
         pushad
         mov ebx, [tar_act]
+.de_nuevo:
         cmp dword [ebx+T_N], 0
         je .pintar
         mov esi, [ebx+T_CAB]
@@ -364,6 +368,35 @@ msg_mirar:
         movsd
         movsd
         movsd
+        ; [TECLADO] Una tecla del teclado (ML_TECLADO: la apuntó ges_tecla) es
+        ; para quien tenga el foco AHORA, al sacarla de la cola, no para quien
+        ; lo tenía cuando se pulsó. Si el equipo va lento, llegan varias teclas
+        ; juntas: con «Tab, Espacio» seguidos, el espacio se apuntaba al control
+        ; que tenía el foco antes de atender el Tab, y actuaba sobre él.
+        test byte [edi-M_TAM+M_L+3], ML_TECLADO >> 24
+        jz .si
+        mov ebp, [foco]
+        test ebp, ebp
+        jz .quita
+        cmp dword [ebp+V_USO], 1
+        jne .quita
+        mov eax, [ebp+V_TAREA]
+        cmp eax, ebx
+        je .mia
+        ; el foco ha pasado a una ventana de otra tarea: la tecla, a su cola
+        push ebx
+        mov ebx, eax
+        mov eax, [edi-M_TAM+M_MSG]
+        mov ecx, [edi-M_TAM+M_W]
+        mov edx, [edi-M_TAM+M_L]
+        call msg_poner_en
+        pop ebx
+        sub edi, M_TAM
+        jmp .de_nuevo
+.mia:
+        mov [edi-M_TAM+M_VEN], ebp
+.quita:
+        and dword [edi-M_TAM+M_L], ~ML_TECLADO
         jmp .si
 .pintar:
         mov ebp, [ven_tabla]        ; ventanas de la tarea con algo que pintar

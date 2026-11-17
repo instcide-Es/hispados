@@ -954,7 +954,12 @@ grafico:
         je .ocont
         cmp al, 9                   ; [BATERÍA] (depuración: fija el nivel)
         je .obat
+        cmp al, 10                  ; [TECLADO] (pruebas: equipo lento)
+        je .olento
         jmp .ayuda
+.olento:
+        mov byte [op_lento], 1
+        jmp .arg
 .ocont:
         mov byte [op_contorno], 1
         jmp .arg
@@ -1421,6 +1426,24 @@ principal:
         xor al, 1
         mov [son_esperar], al
         mov byte [actividad], 0
+        ; [TECLADO] /LENTO (oculta, para las pruebas): cada vuelta espera 6 tics
+        ; (1/3 s), como en un equipo lento o muy cargado: las teclas que se
+        ; pulsan seguidas llegan juntas en la misma vuelta (así se prueba que
+        ; cada una va a quien tiene el foco cuando le toca, no cuando se pulsó)
+        cmp byte [op_lento], 0
+        je .nolento
+        push eax
+        push edx
+        call tics
+        mov edx, eax
+.lento:
+        call tics
+        sub eax, edx
+        cmp eax, 6
+        jb .lento
+        pop edx
+        pop eax
+.nolento:
         call sondeo
         call eventos
         mov ecx, 4
@@ -1917,6 +1940,8 @@ opciones:
         dw 0
         db 3, "BAT", 9              ; [BATERÍA] (oculta, pruebas): /BATnn[C] fija el nivel
         dw 0
+        db 5, "LENTO", 10           ; [TECLADO] (oculta, pruebas): como en un equipo lento
+        dw 0
         db 1, "@", 7                ; (interna: la pone el lanzador)
         dw 0
         db 1, "?", 4
@@ -1991,6 +2016,7 @@ op_contorno resb 1                  ; [TAMAÑO] /CONTORNO
 op_bat      resb 1                  ; [BATERÍA] % forzado para pruebas (/BATnn)
 op_batac    resb 1                  ; enchufada/cargando forzado (/BATnnC)
 op_bathay   resb 1                  ; 1: usar la batería forzada (no la BIOS)
+op_lento    resb 1                  ; [TECLADO] /LENTO (pruebas): cada vuelta tarda 1/3 s
 son_nteclas resb 1
 rc_cab      resb 1                  ; cola de sucesos del ratón
 rc_cola     resb 1

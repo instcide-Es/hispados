@@ -715,6 +715,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_ventanas4_tests.sh $(IMG)
 	tests/run_terminal_tests.sh $(IMG)
 	tests/run_teclado_tests.sh $(IMG)
+	tests/run_teclas_seguidas_tests.sh $(IMG)
 	tests/run_pluma_tests.sh $(IMG)
 	tests/run_cuentas_tests.sh $(IMG)
 	tests/run_facturas_tests.sh $(IMG)

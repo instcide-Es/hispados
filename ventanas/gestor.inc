@@ -1770,11 +1770,13 @@ ges_tecla:
         add ecx, TC_CTRL
 .abajo:
         mov eax, WM_KEYDOWN
+        or edx, ML_TECLADO          ; [TECLADO] al sacarla de la cola, a quien tenga el foco
         call msg_poner
         jmp .x
 .char:
         movzx ecx, al
         mov eax, WM_CHAR
+        or edx, ML_TECLADO
         call msg_poner
 .x:
         popad
