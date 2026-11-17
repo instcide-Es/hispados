@@ -25,6 +25,8 @@ ir() {
   RX=$1; RY=$2; sleep 0.3
 }
 clic() { ir $1 $2; mon "mouse_button 1" 0.25; mon "mouse_button 0" 0.5; }
+# el botón secundario (el derecho): su menú sale al soltarlo
+derecho() { ir $1 $2; mon "mouse_button 2" 0.25; mon "mouse_button 0" 0.6; }
 aparca() { ir 16 590; }
 # teclea un texto con el teclado español (KEYB SP) ya cargado
 escribe() {

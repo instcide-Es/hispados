@@ -336,5 +336,27 @@ chk $T/c5.ppm titulo 70 40 activa "Pluma - (sin nombre)"
 centro c5 72 676 300 99 127 "restaurada con el botón del título"
 muestra c1 pluma_maximizada; muestra c2 pluma_maximizada_clic; muestra c4 pluma_pantalla_completa; muestra c5 pluma_restaurada
 
+echo "== Pluma: el botón secundario (el menú contextual) =="
+reabre ''
+mdel -i $T/f.img ::HISPADOS/PROGS/DICCIO.DAT 2>/dev/null
+{ arranca
+  escribe "Hola mundo"; tecla ret; escribe "segunda"
+  derecho 120 160; shot x1                  # en la primera línea, sin nada elegido: el cursor va allí
+  tecla esc; tecla ctrl-e
+  derecho 150 160; shot x2                  # dentro de lo elegido: sigue elegido
+  tecla c; sleep 0.5                        # Copiar
+  tecla ctrl-end shift-f10; sleep 0.6; shot x3   # con el teclado; ya hay algo que pegar
+  tecla p; sleep 0.8; aparca; shot x4       # Pegar
+  derecho 300 110; sleep 0.5; shot x5       # en la barra de botones no hay menú
+  sal; } | run 120 -vga std
+chk $T/x1.ppm busca 72 518 400 540 0 6 "Línea 1 de 2, columna" \
+  busca 120 160 220 460 0 8 "eshacer" busca 120 160 220 460 7 8 "opiar" busca 120 160 220 460 7 8 "egar" \
+  busca 120 160 220 460 0 8 "eleccionar todo" busca 120 160 220 460 0 8 "uentes..." busca 120 160 220 460 0 8 "stilo del p"
+chk $T/x2.ppm busca 80 151 90 166 9 2 "Hola" busca 150 160 250 460 0 8 "opiar" busca 150 160 250 460 7 8 "egar"
+chk $T/x3.ppm busca 72 86 200 400 0 8 "egar" busca 72 86 200 400 7 8 "opiar"
+chk $T/x4.ppm busca 72 518 500 540 0 6 "36 letras"
+chk $T/x5.ppm nobusca 280 100 420 420 0 8 "eleccionar todo"
+muestra x1 pluma_contexto; muestra x2 pluma_contexto_elegido
+
 rm -rf $T
 exit $fail

@@ -336,6 +336,58 @@ plu_menu:
         dw 0xFFFF
         db 0
 
+; ---- el menú del botón secundario, sobre el texto (comun/contexto.inc) ----
+ctx_texto:
+        dw O_DESHACER
+        db "&Deshacer          Ctrl+Z", 0
+        dw O_REHACER
+        db "&Repetir           Ctrl+Y", 0
+        dw 0
+        db 0
+        dw O_CORTAR
+        db "Cor&tar            Ctrl+X", 0
+        dw O_COPIAR
+        db "&Copiar            Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar             Ctrl+V", 0
+        dw O_BORRAR
+        db "B&orrar              Supr", 0
+        dw O_TODO
+        db "&Seleccionar todo  Ctrl+E", 0
+        dw 0
+        db 0
+        dw O_FUENTES
+        db "&Fuentes...", 0
+        dw O_PARRAFO
+        db "Párr&afo...", 0
+        dw O_ESTILO
+        db "&Estilo del párrafo...", 0
+        dw O_VINETAS
+        db "&Viñetas", 0
+        dw O_NUMERA
+        db "&Numeración", 0
+        dw 0
+        db 0
+        dw O_ORTO
+        db "Orto&grafía...            F7", 0
+        dw 0xFFFF
+ctx_gris:                           ; las que pueden ir en gris, y cuándo
+        dw O_DESHACER
+        dd cg_deshacer
+        dw O_REHACER
+        dd cg_rehacer
+        dw O_CORTAR
+        dd cg_elegido
+        dw O_COPIAR
+        dd cg_elegido
+        dw O_BORRAR
+        dd cg_elegido
+        dw O_PEGAR
+        dd ctx_porta
+        dw O_TODO
+        dd cg_todo
+        dw 0
+
 ; ---- diálogo: las fuentes ----
 dlg_fue:
         PLANTILLA HV_c_dialogo, t_d_fue, E_DIALOGO, 0, 0, 320, 268, 0
@@ -729,6 +781,10 @@ plu_proc:
         je raton_suelta
         cmp eax, WM_LBUTTONDBLCLK
         je raton_doble
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: se coloca y, al
+        je raton_der                ; soltarlo, su menú
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je .rueda
         cmp eax, WM_VSCROLL
@@ -2046,6 +2102,83 @@ raton_suelta:
         mov [pf_tip], al
         call pon_formato
         jmp hecho
+
+; ---- el botón secundario ----
+; Se aprieta: en el texto, fuera de lo elegido, pone ahí el cursor (como un
+; clic); dentro de lo elegido lo deja como está, para cortarlo o copiarlo
+raton_der:
+        mov byte [ctx_donde], 0     ; (en la barra y en el pie no hay menú)
+        mov ebx, edx
+        sar ebx, 16
+        cmp ebx, TB_AL
+        jl hecho
+        mov eax, [cli_al]
+        sub eax, STAT_AL
+        cmp ebx, eax
+        jge hecho
+        cmp byte [vp_on], 0
+        jne hecho
+        cmp byte [arrastra], 0      ; (a medio elegir con el otro botón)
+        jne hecho
+        mov byte [ctx_donde], 1
+        call raton_sitio
+        mov ecx, eax
+        call elegido
+        je .pon
+        cmp ecx, eax
+        jb .pon
+        cmp ecx, ebx
+        jb hecho
+.pon:
+        mov eax, ecx
+        xor edx, edx
+        call cur_a
+        call tras_mover
+        mov eax, [c_x]
+        mov [col_x], eax
+        jmp hecho
+
+; El menú: EDX=el punto de la pantalla, o -1 si se pide con el teclado
+; (Mayús+F10 o la tecla de menú)
+menu_ctx:
+        cmp byte [vp_on], 0
+        jne .no
+        cmp edx, -1
+        je .abre
+        cmp byte [ctx_donde], 0
+        je hecho
+.abre:
+        mov esi, ctx_texto
+        mov edi, ctx_gris
+        mov eax, -1
+        call ctx_abre
+        jmp hecho
+.no:
+        HVJ ven_defecto
+
+; (ctx_gris) lo que ahora no se puede hacer: CF=1
+cg_elegido:                         ; sin nada elegido
+        call elegido
+        jne cg_si
+cg_no:
+        stc
+        ret
+cg_si:
+        clc
+        ret
+cg_deshacer:
+        cmp dword [des_p], 0
+        je cg_no
+        jmp cg_si
+cg_rehacer:
+        mov eax, [des_p]
+        cmp eax, [des_top]
+        jae cg_no
+        jmp cg_si
+cg_todo:                            ; el documento vacío
+        cmp dword [n], 1
+        jbe cg_no
+        jmp cg_si
 
 ; doble clic: elige la palabra
 raton_doble:
@@ -5449,6 +5582,8 @@ pl_letra:
 
 %include "tipos.inc"
 %include "barra.inc"
+%define CTX_PUENTE
+%include "contexto.inc"
 %include "ortografia.inc"
 %include "hvplib.inc"
 
@@ -5456,6 +5591,8 @@ FBUF_TAM    equ 3 * MAX_TXT + 24
 
         section .bss
 ven         resd 1
+ctx_donde   resb 1                  ; dónde se apretó el botón secundario: 1 el texto
+            alignb 4
 puente      resd 1                  ; el cuadro de texto escondido del portapapeles
 barra       resd 1                  ; la barra de desplazamiento
 param       resd 1
