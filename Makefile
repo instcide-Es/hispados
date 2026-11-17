@@ -308,9 +308,17 @@ $(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
 # Solo en la instalación (imagen USB y .PAQ, por tools/mkusb.py), NO en el
 # disquete de arranque: no cabe con sitio para guardar (Pluma, sin él, usa la letra
 # «Hispa»). Irá en el disquete de Oficina cuando se divida la distribución.
-PROGSDAT = programas/comun/TIPOS.DAT
-HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP \
-       $(B)/PLUMA.HVP $(B)/CUENTAS.HVP $(B)/FACTURAS.HVP
+# [0.9.22] Con la familia de oficina ya no cabe todo en el disquete de arranque:
+#  HVPA: los accesorios, en el disquete de arranque (y en el USB y el .PAQ);
+#  HVPO: la oficina (Productividad), en el disquete «Oficina» (build/
+#        hispados-oficina.img) y en el USB y el .PAQ, con sus datos (PROGSDAT).
+# En el USB van todos, HVPA y luego HVPO (el orden de los grupos, arriba).
+PROGSDAT = programas/comun/TIPOS.DAT programas/comun/TIPOS12.DAT programas/comun/TIPOS24.DAT \
+           programas/comun/TIPOS32.DAT programas/comun/DICCIO.DAT
+HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/MIRADOR.HVP $(B)/TAREAS.HVP \
+       $(B)/SONIDOS.HVP $(B)/MEZCLAD.HVP $(B)/ARCHIVOS.HVP
+HVPO = $(B)/PLUMA.HVP $(B)/CUENTAS.HVP $(B)/FACTURAS.HVP $(B)/DATOS.HVP $(B)/LECTOR.HVP \
+       $(B)/PUBLICA.HVP $(B)/PRESENTA.HVP
 # [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
 $(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
@@ -498,8 +506,8 @@ $(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUE
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(PROGSDAT) $(wildcard usb/* floppy/*)
-	HVPA="$(notdir $(HVPA))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(wildcard usb/* floppy/*)
+	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 run: $(IMG)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy -boot a
