@@ -6,7 +6,8 @@
 #             INCLUDE, la variable CONFIG, elegir por el puerto serie y con el
 #             teclado (flechas), F5 y F8 dentro del menú
 #   normal    el disquete de uso sin tocar nada: a los 5 s arranca «Normal»
-#             (lo de siempre: modo real, sin HSPEMM)
+#             (lo de siempre: modo real, sin HSPEMM), sin tarjeta de red y
+#             con ella (HSPRED /AUTO se queda: 15 KB menos)
 #   memoria   el disquete de uso eligiendo «Juegos», tal cual: HMA, memoria
 #             superior, EMS, BLASTER y la memoria convencional libre
 #   juegos    «Juegos» con HSPUSB llevando el USB (/F) en modo V86 (HSPEMM):
@@ -264,19 +265,43 @@ c_normal() {
   nocheck "Error en CONFIG.SYS"
   nocheck "Comando o nombre de archivo incorrecto"
   check "EMS: no hay gestor (EMMXXXX0)"
+  # Sin tarjeta de red HSPRED /AUTO no se queda: 592976 (17/11/2026). Con
+  # tarjeta (la e1000 que pone QEMU si no se le dice nada) se queda, en la
+  # memoria convencional porque en «Normal» no hay memoria superior, y ocupa
+  # 15088: 577872. (Desde la 0.9.17 «Normal» carga la red sola; esta prueba
+  # medía con la tarjeta de QEMU sin saberlo y por eso fallaba.)
   n=$(libres)
-  if [ -n "$n" ] && [ "$n" -ge 590000 ]; then ok "memoria convencional libre con «Normal»: $n bytes"; else ko "memoria convencional libre con «Normal»: $n bytes (se esperaban 590000 o más)"; fi
+  if [ -n "$n" ] && [ "$n" -ge $1 ]; then ok "memoria convencional libre con «Normal»$2: $n bytes"; else ko "memoria convencional libre con «Normal»$2: $n bytes (se esperaban $1 o más)"; fi
+}
+c_normal_sinred() {
+  c_normal 590000 " (sin tarjeta de red)"
+  nocheck "packet driver en INT"
+}
+c_normal_red() {
+  c_normal 575000 " y la red cargada (HSPRED)"
+  check "Tarjeta Intel PRO/1000 (e1000)"
+  check "packet driver en INT 60h"
+  check "  HSPRED  "
 }
 if quiere normal; then
   if [ ! -f $DISQ ]; then falta normal "$DISQ (make usb)"; else
-    caso normal $DISQ
+    caso "normal, sin tarjeta de red" $DISQ
     mcopy -o -i $T/f.img $B/EMSTEST.COM ::BIN/
-    arranca -audiodev none,id=a0 -device sb16,audiodev=a0
+    arranca -audiodev none,id=a0 -device sb16,audiodev=a0 -nic none
     espera "$P"
     orden 'MEM'
     orden 'SET'
     orden 'BIN\EMSTEST'
-    fin c_normal
+    fin c_normal_sinred
+    caso "normal, con tarjeta de red" $DISQ
+    mcopy -o -i $T/f.img $B/EMSTEST.COM ::BIN/
+    arranca -audiodev none,id=a0 -device sb16,audiodev=a0 -nic user,model=e1000
+    espera "$P"
+    orden 'MEM'
+    orden 'MEM /C'
+    orden 'SET'
+    orden 'BIN\EMSTEST'
+    fin c_normal_red
   fi
 fi
 
