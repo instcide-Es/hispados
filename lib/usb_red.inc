@@ -62,7 +62,8 @@ N_RXFS      equ 1536                ; lo que se pide en cada recepción: un múl
 N_RXHS      equ 2048                ; del paquete (64; 512 o 1024), mayor que la trama
 N_TICK      equ 8                   ; tramas por tic, como mucho
 N_WAIT      equ 16                  ; espera de la trama siguiente (microtramas: 2 ms)
-N_SBUF      equ 2048 + 1536         ; el búfer de los avisos (64), tras los de recepción y envío
+N_SBUF      equ 2048                ; el búfer de los avisos (64 octetos), tras el de recepción
+N_BUFS      equ N_SBUF + 64         ; los dos
 
 section .init
 ; ---- reconocer el adaptador ----
@@ -492,14 +493,12 @@ net_setup:
         jc .fail
         mov [ds:bp+n_utd], bx
 .buf:
-        ; búferes: 2048 de recepción y, detrás, 1536 de envío y 64 de los
-        ; avisos. Alineados a 2048, ninguno cruza de página.
-        mov cx, N_SBUF + 64
-        mov dx, 2048
-        call zalloc
-        jc .fail
-        mov [n_rxbuf], bx
-        add bx, 2048
+        ; Búferes. El de envío es el de datos del disco (4 KB, al principio
+        ; de la zona): los dos se usan solo con «busy» tomado, nunca a la
+        ; vez. El de recepción se reserva al final de la inicialización
+        ; (net_fin), fuera de lo que cabe por debajo de la inicialización.
+        mov bx, [data_rel]
+        call zone
         mov [ds:bp+n_txbuf], bx
         ; SET_CONFIGURATION de la configuración que trae CDC-ECM
         movzx eax, byte [np_cfg]
@@ -742,12 +741,53 @@ net_status:
 .r:
         ret
 
-; Al acabar la inicialización, si hay adaptador: decirlo y atender INT 2Fh
-; (AX=DB00h), por donde lo encuentra HSPRED, e INT 16h (ver n_int16)
+; El búfer de recepción (y el de los avisos, detrás): N_BUFS octetos que no
+; crucen de página, a continuación de todo lo reservado. Se hace al final
+; (después de init_fin) porque no hace falta que quepa por debajo de la
+; inicialización, que es donde acaba la zona mientras se arranca: nadie lo
+; usa hasta que HSPRED se carga, así que puede caer encima del código de
+; inicialización (por eso NO se pone a cero). Solo tiene que acabar dentro
+; de la memoria que init_go comprobó que había. -> CF si no cabe
+net_fin:
+        mov eax, [ztop]
+        movzx ebx, word [mem_off]   ; (la zona empieza en una página física)
+        sub eax, ebx
+        mov edx, eax
+        and edx, 0x0FFF
+        add edx, N_BUFS
+        cmp edx, 0x1000
+        jbe .fit
+        add eax, 0x0FFF
+        and eax, 0xFFFFF000
+.fit:
+        add eax, ebx
+        mov edx, eax
+        add edx, N_BUFS
+        cmp edx, red_hold + RED_LEN
+        ja .no
+        mov [n_rxbuf], ax
+        mov [ztop], edx
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; Al acabar la inicialización (después de init_fin), si hay adaptador: su
+; búfer de recepción, decirlo, y atender INT 2Fh (AX=DB00h), por donde lo
+; encuentra HSPRED, e INT 16h (ver n_int16)
 net_ready:
         mov bp, [n_blk]
         test bp, bp
         jz .r
+        call net_fin
+        jnc .ok
+        mov word [n_blk], 0         ; sin búfer no hay red (lo demás, igual)
+        mov si, msg_netmem
+        call puts
+        ret
+.ok:
+        mov bp, [n_blk]
         mov si, msg_netok
         call puts
         lea si, [bp+n_mac]
@@ -811,6 +851,7 @@ msg_netok2  db ": cargue HSPRED.", 13, 10, 0
 msg_netno   db "Adaptador de red USB ", 0
 msg_netno2  db ": aún no se admite (no ofrece la clase estándar CDC-ECM).", 13, 10, 0
 msg_netmac  db "el adaptador de red no da su dirección MAC.", 13, 10, 0
+msg_netmem  db "Adaptador de red USB: no queda memoria para su búfer; no se usa.", 13, 10, 0
 
 ; las posiciones de las llamadas de .red a .text (las apunta MCALL)
 red_fix:
@@ -858,7 +899,10 @@ n_pump:
         mov [di+n_t0], ax
         mov cx, 20000               ; (por si el reloj no avanzara)
 .w:
+        push cx
         MCALL usb_poll
+        pop cx
+        mov di, [n_blk]
         call n_check
         cmp byte [di+n_st], 1
         jne .l
@@ -1444,6 +1488,8 @@ n_leave:
 ; cada vuelta de sus esperas, por si se pulsa Esc: se aprovecha para mirar
 ; ahí también si ha llegado algo, y la respuesta se entrega enseguida. Solo
 ; mientras HSPRED esté escuchando; si HSPUSB está ocupado, nada.
+; (Entra con las interrupciones cerradas, como toda INT, y así las deja al
+; pasar la llamada a quien estuviera antes.)
 n_int16:
         cmp ah, 0x01
         je .p
@@ -1476,6 +1522,33 @@ n_int16:
         pushad
         push es
         push fs
+        ; ¿Hay algo que hacer? Con la trama pedida y sin llegar, nada: se
+        ; mira solo en la memoria (el anillo de eventos del xHCI, los TD de
+        ; las clásicas), sin tocar las controladoras ni cambiar de pila, que
+        ; aquí se entra miles de veces por segundo.
+        cmp byte [di+n_st], 1
+        jne .go                     ; hay que pedir, entregar o reanudar
+        mov al, [ip_pool+PIPE_NET]
+        MCALL dev_hc
+        cmp byte [cur_type], HCT_XHCI
+        jne .cl
+        mov bx, EVT_RING            ; (como get_event, sin recogerlo)
+        MCALL zone
+        movzx si, byte [evt_idx]
+        shl si, 4
+        mov al, [bx+si+12]
+        and al, 1
+        cmp al, [evt_cyc]
+        je .go
+        jmp .idle
+.cl:
+        call n_check
+        cmp byte [di+n_st], 1
+        jne .go
+.idle:
+        mov byte [busy], 0
+        jmp .y
+.go:
         call n_enter
         jc .y
         MCALL usb_poll
@@ -1532,7 +1605,7 @@ n_txerr     dw 0                    ; +24
 n_got       dw 0                    ; octetos de la trama que ha llegado
 n_txlen     dw 0
 n_omps      dw 0                    ; extremo de salida: paquete máximo
-n_txbuf     dw 0                    ; búfer de envío (en CS)
+n_txbuf     dw 0                    ; búfer de envío (en CS): el de datos del disco
 n_rxring    dw 0                    ; xHCI: anillos (en la zona)
 n_txring    dw 0
 n_utd       dw 0                    ; UHCI: los TD de la recepción (en CS)

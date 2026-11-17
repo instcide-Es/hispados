@@ -1184,7 +1184,7 @@ info_ports:
         popad
         ret
 
-msg_usage   db "DEVICE=HSPUSB.SYS [/F] [/U] [/INFO] [/V]", 13, 10
+msg_usage   db "DEVICE=HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/2]", 13, 10
             db "  Lleva el USB sin la BIOS, con las cuatro clases de controladora (UHCI y", 13, 10
             db "  OHCI de USB 1.x, EHCI de USB 2.0 y xHCI de USB 3): memorias USB como", 13, 10
             db "  unidades de DOS, teclado, ratón, mandos de juego y concentradores.", 13, 10
@@ -1193,6 +1193,7 @@ msg_usage   db "DEVICE=HSPUSB.SYS [/F] [/U] [/INFO] [/V]", 13, 10
             db "  /U     como /F, también si el sistema ha arrancado de una memoria USB", 13, 10
             db "  /INFO  enseñar las controladoras y el árbol de aparatos", 13, 10
             db "  /V     mensajes detallados", 13, 10
+            db "  /2     Intel series 7 a 9: sin USB 3 (los aparatos, a alta velocidad)", 13, 10
             db "  /?     esta ayuda (el driver no se carga)", 13, 10, 0
 msg_nohc    db "No se ha encontrado ninguna controladora USB.", 13, 10, 0
 msg_notake  db "No se ha podido tomar ninguna controladora USB.", 13, 10, 0
