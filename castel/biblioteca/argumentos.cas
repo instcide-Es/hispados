@@ -1,0 +1,79 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; argumentos.cas - lo que se escribió detrás del nombre del programa.
+; El DOS deja la línea de órdenes en el prefijo del programa (PSP): en 80h,
+; cuántas letras tiene; desde 81h, las letras, acabadas en un retorno de
+; carro. Aquí se parte en argumentos: palabras separadas por espacios o
+; tabuladores.
+;
+;   importar Argumentos
+;   ...
+;   para i desde 1 hasta cuántos_argumentos() hacer
+;       si argumento(i, nombre, 80) entonces ... fin
+;   fin
+módulo Argumentos
+
+    constante LINEA = 0x81
+
+    función es_blanco(c: byte): bool
+        devolver c = ' ' o c = '\t'
+    fin
+
+    función acaba(c: byte): bool
+        devolver c = '\r' o c = 0
+    fin
+
+    ; la línea de órdenes entera, tal cual (acaba en un retorno de carro, no en 0)
+    público función línea_de_órdenes(): puntero a byte
+        devolver puntero(LINEA)
+    fin
+
+    público función cuántos_argumentos(): nat16
+        variable p: puntero a byte
+        variable n: nat16
+        p := puntero(LINEA)
+        n := 0
+        mientras cierto hacer
+            mientras es_blanco(valor(p)) hacer
+                p := p + 1
+            fin
+            si acaba(valor(p)) entonces devolver n fin
+            n := n + 1
+            mientras no es_blanco(valor(p)) y no acaba(valor(p)) hacer
+                p := p + 1
+            fin
+        fin
+        devolver n
+    fin
+
+    ; copia en destino el argumento número n (el primero es el 1), acabado en
+    ; 0; «cabe» es el sitio que hay, con el 0. Da falso si no hay tantos.
+    público función argumento(n: nat16, destino: puntero a byte, cabe: nat16): bool
+        variable p: puntero a byte
+        variable i: nat16
+        p := puntero(LINEA)
+        valor(destino) := 0
+        si n = 0 o cabe = 0 entonces devolver falso fin
+        mientras cierto hacer
+            mientras es_blanco(valor(p)) hacer
+                p := p + 1
+            fin
+            si acaba(valor(p)) entonces devolver falso fin
+            n := n - 1
+            si n = 0 entonces romper fin
+            mientras no es_blanco(valor(p)) y no acaba(valor(p)) hacer
+                p := p + 1
+            fin
+        fin
+        i := 0
+        mientras no es_blanco(valor(p)) y no acaba(valor(p)) hacer
+            si i + 1 < cabe entonces
+                destino[i] := valor(p)
+                i := i + 1
+            fin
+            p := p + 1
+        fin
+        destino[i] := 0
+        devolver cierto
+    fin
+
+fin Argumentos.

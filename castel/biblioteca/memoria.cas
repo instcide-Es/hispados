@@ -1,0 +1,133 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; memoria.cas - un montón sencillo, escrito en Castel: memoria que se pide
+; y se devuelve mientras el programa corre (las listas y las tablas que no
+; se sabe cuánto van a crecer).
+; El montón vive DENTRO del segmento del programa: va desde donde acaban sus
+; variables (fin_programa()) hasta cerca de la pila, que baja desde arriba.
+; En un .COM eso es lo que quede de los 64 K.
+;
+;   importar Memoria
+;   ...
+;   n := puntero(reservar(tamaño(Nodo)))        ; nulo si no queda sitio
+;   ...
+;   soltar(puntero(n))
+;
+; Por dentro: los bloques van seguidos, uno detrás de otro. Cada uno lleva
+; delante una palabra con su tamaño entero (cabecera incluida, siempre par)
+; y, en el bit 0, si está ocupado. Para reservar se recorre la fila y se
+; toma el primer hueco que valga (juntando por el camino los huecos
+; vecinos); si no hay, el montón crece por arriba.
+módulo Memoria
+
+    constante CABECERA = 2
+    público constante PARA_LA_PILA = 2048       ; lo que se deja libre a la pila
+
+    variable inicio: nat16                      ; donde empieza el montón
+    variable cima: nat16                        ; donde acaba el último bloque
+    variable tope: nat16                        ; hasta dónde puede crecer
+    variable listo: bool
+
+    función prepara()
+        variable aquí: nat16                    ; una local: su dirección dice por dónde va la pila
+        inicio := (nat16(fin_programa()) + 1) yb 0xFFFE
+        tope := (nat16(dirección(aquí)) - PARA_LA_PILA) yb 0xFFFE
+        si tope < inicio entonces tope := inicio fin
+        cima := inicio
+        listo := cierto
+    fin
+
+    ; pide n octetos. Devuelve dónde están, o nulo si no queda sitio.
+    ; (Lo que hay dentro no está a cero.)
+    público función reservar(n: nat16): puntero a byte
+        variable p, q: puntero a nat16
+        variable b, tam: nat16
+        si no listo entonces prepara() fin
+        si n = 0 o n > 0xFFF0 entonces devolver nulo fin
+        n := (n + CABECERA + 1) yb 0xFFFE       ; con su cabecera, y par
+        b := inicio
+        mientras b < cima hacer
+            p := puntero(b)
+            tam := valor(p)
+            si tam yb 1 = 0 entonces
+                ; un hueco: se junta con los que le sigan
+                mientras b + tam < cima hacer
+                    q := puntero(b + tam)
+                    si valor(q) yb 1 <> 0 entonces romper fin
+                    tam := tam + valor(q)
+                fin
+                valor(p) := tam
+                si tam >= n entonces
+                    si tam - n >= CABECERA + 2 entonces
+                        q := puntero(b + n)     ; sobra para otro bloque: se parte
+                        valor(q) := tam - n
+                        tam := n
+                    fin
+                    valor(p) := tam ob 1
+                    devolver puntero(b + CABECERA)
+                fin
+                si b + tam = cima entonces      ; el último es un hueco corto: crece desde él
+                    cima := b
+                    romper
+                fin
+            fin
+            b := b + (tam yb 0xFFFE)
+        fin
+        si n > tope - cima entonces devolver nulo fin
+        p := puntero(cima)
+        valor(p) := n ob 1
+        cima := cima + n
+        devolver puntero(cima - n + CABECERA)
+    fin
+
+    ; devuelve un bloque que se pidió con reservar (soltar(nulo) no hace nada)
+    público función soltar(p: puntero a byte)
+        variable c: puntero a nat16
+        variable b, tam, ocupado: nat16
+        si p = nulo entonces devolver fin
+        c := puntero(nat16(p) - CABECERA)
+        valor(c) := valor(c) yb 0xFFFE
+        si nat16(c) + valor(c) <> cima entonces devolver fin
+        ; era el último: el montón encoge hasta el final del último bloque ocupado
+        ocupado := inicio
+        b := inicio
+        mientras b < cima hacer
+            c := puntero(b)
+            tam := valor(c) yb 0xFFFE
+            b := b + tam
+            si valor(c) yb 1 <> 0 entonces ocupado := b fin
+        fin
+        cima := ocupado
+    fin
+
+    ; cuánto puede crecer todavía el montón (sin contar los huecos de dentro)
+    público función memoria_libre(): nat16
+        si no listo entonces prepara() fin
+        devolver tope - cima
+    fin
+
+    ; cuánto ocupa ahora el montón, con huecos y cabeceras
+    público función memoria_usada(): nat16
+        si no listo entonces prepara() fin
+        devolver cima - inicio
+    fin
+
+    ; pone n octetos al mismo valor
+    público función llenar(p: puntero a byte, n: nat16, con: byte)
+        mientras n > 0 hacer
+            valor(p) := con
+            p := p + 1
+            n := n - 1
+        fin
+    fin
+
+    ; copia n octetos (que no se pisen el origen y el destino)
+    público función copiar_memoria(destino: puntero a byte, origen: puntero a byte, n: nat16)
+        mientras n > 0 hacer
+            valor(destino) := valor(origen)
+            destino := destino + 1
+            origen := origen + 1
+            n := n - 1
+        fin
+    fin
+
+fin Memoria.

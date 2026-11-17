@@ -1,0 +1,265 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; textos.cas - la biblioteca de textos de Castel, escrita en Castel.
+; Un texto es una ristra de bytes acabada en 0 (página 437). Las funciones
+; reciben «puntero a byte»: vale un texto escrito ("hola") y vale un arreglo
+; de byte. Quien llama pone el sitio: ninguna función reserva memoria.
+;
+;   importar Textos
+;   ...
+;   si iguales(orden, "SALIR") entonces ...
+;   número_a_texto(-1234, cifras)
+módulo Textos
+
+    ; ---- letras ----
+
+    público función es_cifra(c: byte): bool
+        devolver c >= '0' y c <= '9'
+    fin
+
+    ; las letras del inglés y, de la página 437, las de casa: ñ Ñ á é í ó ú ü Ü É ç Ç
+    público función es_letra(c: byte): bool
+        según c
+            caso 'a'..'z', 'A'..'Z', 'ñ', 'Ñ', 'á', 'é', 'í', 'ó', 'ú', 'ü', 'Ü', 'É', 'ç', 'Ç': devolver cierto
+        fin
+        devolver falso
+    fin
+
+    público función es_espacio(c: byte): bool
+        devolver c = ' ' o c = '\t' o c = '\r' o c = '\n'
+    fin
+
+    público función mayúscula(c: byte): byte
+        según c
+            caso 'a'..'z': devolver c - 32
+            caso 'ñ': devolver 'Ñ'
+            caso 'é': devolver 'É'
+            caso 'ü': devolver 'Ü'
+            caso 'ç': devolver 'Ç'
+        fin
+        devolver c
+    fin
+
+    público función minúscula(c: byte): byte
+        según c
+            caso 'A'..'Z': devolver c + 32
+            caso 'Ñ': devolver 'ñ'
+            caso 'É': devolver 'é'
+            caso 'Ü': devolver 'ü'
+            caso 'Ç': devolver 'ç'
+        fin
+        devolver c
+    fin
+
+    ; ---- textos ----
+
+    ; cuántas letras tiene (sin contar el 0 final)
+    público función longitud(t: puntero a byte): nat16
+        variable n: nat16
+        n := 0
+        mientras t[n] <> 0 hacer
+            n := n + 1
+        fin
+        devolver n
+    fin
+
+    ; copia origen en destino, con su 0 (el sitio lo pone quien llama)
+    público función copiar(destino: puntero a byte, origen: puntero a byte)
+        mientras valor(origen) <> 0 hacer
+            valor(destino) := valor(origen)
+            destino := destino + 1
+            origen := origen + 1
+        fin
+        valor(destino) := 0
+    fin
+
+    ; como copiar, pero sin pasarse: «cabe» es el sitio que hay en destino,
+    ; contando el 0. Devuelve falso si ha habido que cortar.
+    público función copiar_hasta(destino: puntero a byte, origen: puntero a byte, cabe: nat16): bool
+        si cabe = 0 entonces devolver falso fin
+        mientras valor(origen) <> 0 y cabe > 1 hacer
+            valor(destino) := valor(origen)
+            destino := destino + 1
+            origen := origen + 1
+            cabe := cabe - 1
+        fin
+        valor(destino) := 0
+        devolver valor(origen) = 0
+    fin
+
+    ; añade un texto al final de otro
+    público función concatenar(destino: puntero a byte, añadido: puntero a byte)
+        copiar(destino + longitud(destino), añadido)
+    fin
+
+    ; añade una letra al final
+    público función añadir_car(destino: puntero a byte, c: byte)
+        destino := destino + longitud(destino)
+        destino[0] := c
+        destino[1] := 0
+    fin
+
+    ; compara dos textos letra a letra: 0 si son iguales, menos de 0 si el
+    ; primero va antes (por el código de sus letras) y más de 0 si va después
+    público función comparar(a: puntero a byte, b: puntero a byte): ent16
+        mientras valor(a) <> 0 y valor(a) = valor(b) hacer
+            a := a + 1
+            b := b + 1
+        fin
+        devolver ent16(valor(a)) - ent16(valor(b))
+    fin
+
+    público función iguales(a: puntero a byte, b: puntero a byte): bool
+        devolver comparar(a, b) = 0
+    fin
+
+    ; iguales sin mirar mayúsculas y minúsculas
+    público función iguales_sin_caja(a: puntero a byte, b: puntero a byte): bool
+        mientras valor(a) <> 0 y mayúscula(valor(a)) = mayúscula(valor(b)) hacer
+            a := a + 1
+            b := b + 1
+        fin
+        devolver valor(a) = 0 y valor(b) = 0
+    fin
+
+    ; ¿empieza t por ese principio?
+    público función empieza_por(t: puntero a byte, principio: puntero a byte): bool
+        mientras valor(principio) <> 0 hacer
+            si valor(t) <> valor(principio) entonces devolver falso fin
+            t := t + 1
+            principio := principio + 1
+        fin
+        devolver cierto
+    fin
+
+    ; dónde está la primera letra c (un puntero a ella), o nulo si no está
+    público función buscar_car(t: puntero a byte, c: byte): puntero a byte
+        mientras valor(t) <> 0 hacer
+            si valor(t) = c entonces devolver t fin
+            t := t + 1
+        fin
+        devolver nulo
+    fin
+
+    ; dónde empieza un trozo dentro de un texto, o nulo si no está
+    público función buscar(t: puntero a byte, trozo: puntero a byte): puntero a byte
+        mientras cierto hacer
+            si empieza_por(t, trozo) entonces devolver t fin
+            si valor(t) = 0 entonces devolver nulo fin
+            t := t + 1
+        fin
+        devolver nulo
+    fin
+
+    público función a_mayúsculas(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            valor(t) := mayúscula(valor(t))
+            t := t + 1
+        fin
+    fin
+
+    ; ---- números ----
+
+    ; un natural, a texto en decimal (hasta 10 cifras y el 0: 11 octetos)
+    público función natural_a_texto(n: nat32, destino: puntero a byte)
+        variable cifras: arreglo [10] de byte
+        variable i: nat16
+        i := 0
+        mientras n <> 0 o i = 0 hacer
+            cifras[i] := '0' + nat8(n mod 10)
+            n := n div 10
+            i := i + 1
+        fin
+        mientras i > 0 hacer
+            i := i - 1
+            valor(destino) := cifras[i]
+            destino := destino + 1
+        fin
+        valor(destino) := 0
+    fin
+
+    ; un entero, a texto en decimal, con su «-» si es negativo (12 octetos)
+    público función número_a_texto(n: ent32, destino: puntero a byte)
+        si n < 0 entonces
+            valor(destino) := '-'
+            natural_a_texto(nat32(-n), destino + 1)
+        sino
+            natural_a_texto(nat32(n), destino)
+        fin
+    fin
+
+    ; un natural, a texto en hexadecimal con las cifras que se digan (de 1 a 8)
+    público función hex_a_texto(n: nat32, cifras: nat16, destino: puntero a byte)
+        variable c: byte
+        mientras cifras > 0 hacer
+            cifras := cifras - 1
+            c := nat8(n >> (cifras * 4)) yb 15
+            si c < 10 entonces valor(destino) := '0' + c sino valor(destino) := 'A' + c - 10 fin
+            destino := destino + 1
+        fin
+        valor(destino) := 0
+    fin
+
+    ; lee un natural escrito en decimal (123) o en hexadecimal (0x7B). Da
+    ; cierto si todo el texto es un número que cabe en 32 bits, y lo deja en n.
+    público función texto_a_natural(t: puntero a byte, ref n: nat32): bool
+        variable v: nat32
+        variable c: byte
+        variable cifras: nat16
+        v := 0
+        cifras := 0
+        si valor(t) = '0' y (t[1] = 'x' o t[1] = 'X') entonces
+            t := t + 2
+            mientras cierto hacer
+                c := valor(t)
+                si c >= '0' y c <= '9' entonces
+                    c := c - '0'
+                sino si c >= 'a' y c <= 'f' entonces
+                    c := c - 'a' + 10
+                sino si c >= 'A' y c <= 'F' entonces
+                    c := c - 'A' + 10
+                sino
+                    romper
+                fin
+                si cifras = 8 entonces devolver falso fin
+                v := v << 4 ob c
+                cifras := cifras + 1
+                t := t + 1
+            fin
+        sino
+            mientras es_cifra(valor(t)) hacer
+                c := valor(t) - '0'
+                ; ¿cabe v * 10 + c? El mayor es 4294967295
+                si v > 429496729 o (v = 429496729 y c > 5) entonces devolver falso fin
+                v := v * 10 + c
+                cifras := cifras + 1
+                t := t + 1
+            fin
+        fin
+        si cifras = 0 o valor(t) <> 0 entonces devolver falso fin
+        n := v
+        devolver cierto
+    fin
+
+    ; lo mismo, con un «-» o un «+» delante si se quiere
+    público función texto_a_número(t: puntero a byte, ref n: ent32): bool
+        variable v: nat32
+        variable negativo: bool
+        negativo := falso
+        si valor(t) = '-' entonces
+            negativo := cierto
+            t := t + 1
+        sino si valor(t) = '+' entonces
+            t := t + 1
+        fin
+        si no texto_a_natural(t, v) entonces devolver falso fin
+        si negativo entonces
+            si v > 2147483648 entonces devolver falso fin
+            n := -ent32(v)
+        sino
+            si v > 2147483647 entonces devolver falso fin
+            n := ent32(v)
+        fin
+        devolver cierto
+    fin
+
+fin Textos.

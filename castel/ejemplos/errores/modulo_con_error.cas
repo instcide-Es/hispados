@@ -1,0 +1,10 @@
+; El error está dentro del módulo importado: se dice con su archivo y su línea.
+; ERROR: 6:14: error: «n» es un número (nat16) y se le da un texto
+módulo Error
+
+    importar Roto
+
+    función principal()
+        escribir(tres())
+    fin
+fin Error.

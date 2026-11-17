@@ -1,0 +1,22 @@
+; medidas.cas - otro módulo de prueba (lo importan ../modulos.cas y figuras.cas).
+módulo Medidas
+
+    público constante PULGADA = 254             ; en décimas de milímetro
+
+    público variable usos: nat16
+
+    público función doble(n: nat16): nat16
+        usos := usos + 1
+        devolver n * 2
+    fin
+
+    ; también hay una «escala» en Figuras: el que importe los dos elige
+    público función escala(n: nat16): nat16
+        devolver n * 10
+    fin
+
+    público función a_décimas(pulgadas: nat16): nat32
+        devolver nat32(pulgadas) * PULGADA
+    fin
+
+fin Medidas.

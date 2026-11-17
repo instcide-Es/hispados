@@ -1,0 +1,10 @@
+; Ni siquiera con el nombre del módulo delante.
+; ERROR: 8:18: error: el módulo Figuras no tiene nada público que se llame «secreto»
+módulo Error
+
+    importar Figuras
+
+    función principal()
+        escribir(Figuras.secreto)
+    fin
+fin Error.

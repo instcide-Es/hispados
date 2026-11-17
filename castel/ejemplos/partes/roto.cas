@@ -1,0 +1,10 @@
+; roto.cas - un módulo con un error dentro (para errores/modulo_con_error.cas).
+módulo Roto
+
+    público función tres(): nat16
+        variable n: nat16
+        n := "tres"
+        devolver n
+    fin
+
+fin Roto.

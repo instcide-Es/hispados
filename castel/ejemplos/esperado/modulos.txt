@@ -1,0 +1,8 @@
+figuras: área 120000, perímetro 1400
+el doble: 600 x 800, área 480000
+constantes: 16 254 medir dos veces medir dos veces
+lo propio manda: 1005 y el del módulo: 250000
+con el módulo delante: 42 15 50
+variables de los módulos: 4 áreas, 4 dobles; y cambiadas: 0 104
+lo privado, por una función: 11
+32 bits entre módulos: 254000

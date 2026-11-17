@@ -1,0 +1,9 @@
+; Se importa un módulo que no está en ningún sitio.
+; ERROR: 5:14: error: no encuentro el módulo «Nada»: falta el archivo nada.cas
+módulo Error
+
+    importar Nada
+
+    función principal()
+    fin
+fin Error.

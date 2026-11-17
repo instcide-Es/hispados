@@ -1,0 +1,10 @@
+; Lo que un módulo no declara «público» no se ve desde fuera.
+; ERROR: 8:9: error: función no declarada: «anota»
+módulo Error
+
+    importar Figuras
+
+    función principal()
+        anota()
+    fin
+fin Error.

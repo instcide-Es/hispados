@@ -1,0 +1,25 @@
+creado: cierto
+escrito: 10 octetos más; largo 205
+cerrado: cierto; otra vez: falso (error 6)
+abierto: cierto, largo 205
+leídos 15: «línea número 1»
+va por 15; a 10 del final: 195: «y el final» (10); y ya no queda: 0
+en la posición 48: «línea número 4»
+  1: línea número 9 (14)
+  2: línea número 10 (15)
+  3: línea número 11 (15)
+  4: línea número 12 (15)
+  5: y el final (10)
+líneas desde la novena: 5; fin de archivo: cierto
+tras añadir: «y el final (añadido)», largo 215
+uno que no existe: cierto (error 2)
+borrado: cierto; otra vez: falso (error 2)
+y ya no se abre: cierto
+por la salida, con grabar_texto
+con un Escritor: cierto, largo 5556
+  1: el cuadrado de 1 es 1
+  150: el cuadrado de 150 es 22500
+  200: el cuadrado de 200 es 40000
+  201: -70000
+leídas 201 líneas; borrado: cierto
+y por la salida, con un Escritor: 1981

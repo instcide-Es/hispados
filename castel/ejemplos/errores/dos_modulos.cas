@@ -1,0 +1,10 @@
+; Un nombre que traen dos módulos: hay que decir de cuál.
+; ERROR: 8:18: error: «escala» está en los módulos Figuras y Medidas: escriba «Figuras.escala» o «Medidas.escala»
+módulo Error
+
+    importar Figuras, Medidas
+
+    función principal()
+        escribir(escala(5))
+    fin
+fin Error.

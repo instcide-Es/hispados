@@ -1,0 +1,11 @@
+; «público» va delante de una declaración del módulo.
+; ERROR: 5:13: error: tras «público» va constante, variable, tipo o función (está «ensamblador»)
+módulo Error
+
+    público ensamblador
+        nop
+    fin
+
+    función principal()
+    fin
+fin Error.

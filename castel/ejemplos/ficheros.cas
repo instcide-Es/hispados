@@ -1,0 +1,109 @@
+; ficheros.cas - los archivos del DOS con el módulo Archivos de la biblioteca:
+; crear, escribir, cerrar, abrir, leer, moverse (con posiciones de 32 bits),
+; leer por líneas con un Lector y borrar. Deja el disco como estaba.
+módulo Ficheros
+
+    importar Archivos, Textos
+
+    constante NOMBRE = "PRUEBA.TMP"
+
+    variable trozo: arreglo [64] de byte
+    variable línea: arreglo [40] de byte
+    variable cifras: arreglo [12] de byte
+    variable lector: Lector
+    variable escritor: Escritor
+
+    función principal(): byte
+        variable m: ent16
+        variable n, i: nat16
+        variable pos: nat32
+
+        m := crear(NOMBRE)
+        si m = MAL entonces
+            escribir("no puedo crear ", NOMBRE, " (error ", error_dos, ")\n")
+            devolver 1
+        fin
+        escribir("creado: ", m <> MAL, "\n")
+        para i desde 1 hasta 12 hacer
+            copiar(línea, "línea número ")
+            natural_a_texto(i, cifras)
+            concatenar(línea, cifras)
+            concatenar(línea, "\r\n")
+            si no grabar_texto(m, línea) entonces escribir("no se ha escrito\n") fin
+        fin
+        escribir("escrito: ", grabar(m, "y el final", 10), " octetos más; largo ", largo(m), "\n")
+        escribir("cerrado: ", cerrar(m), "; otra vez: ", cerrar(m), " (error ", error_dos, ")\n")
+
+        m := abrir(NOMBRE, LEER)
+        escribir("abierto: ", m <> MAL, ", largo ", largo(m), "\n")
+        n := leer(m, trozo, 15)
+        trozo[n] := 0
+        escribir("leídos ", n, ": «", trozo, "»\n")
+        pos := situar(m, 0, DESDE_DONDE_VA)
+        escribir("va por ", pos)
+        pos := situar(m, -10, DESDE_EL_FINAL)
+        escribir("; a 10 del final: ", pos)
+        n := leer(m, trozo, 63)
+        trozo[n] := 0
+        escribir(": «", trozo, "» (", n, "); y ya no queda: ", leer(m, trozo, 63), "\n")
+        pos := situar(m, 16 * 3, DESDE_EL_PRINCIPIO)
+        n := leer(m, trozo, 14)
+        trozo[n] := 0
+        escribir("en la posición ", pos, ": «", trozo, "»\n")
+
+        situar(m, 16 * 8, DESDE_EL_PRINCIPIO)
+        empezar_lector(lector, m)
+        n := 0
+        mientras leer_línea(lector, línea, 40) hacer
+            n := n + 1
+            escribir("  ", n, ": ", línea, " (", longitud(línea), ")\n")
+        fin
+        escribir("líneas desde la novena: ", n, "; fin de archivo: ", leer_car(lector) = FIN_DE_ARCHIVO, "\n")
+        cerrar(m)
+
+        ; añadir al final, abriendo para leer y escribir
+        m := abrir(NOMBRE, LEER_Y_ESCRIBIR)
+        situar(m, 0, DESDE_EL_FINAL)
+        grabar_texto(m, " (añadido)")
+        situar(m, -20, DESDE_EL_FINAL)
+        n := leer(m, trozo, 63)
+        trozo[n] := 0
+        escribir("tras añadir: «", trozo, "», largo ", largo(m), "\n")
+        cerrar(m)
+
+        escribir("uno que no existe: ", abrir("NOHAY.TMP", LEER) = MAL, " (error ", error_dos, ")\n")
+        escribir("borrado: ", borrar(NOMBRE), "; otra vez: ", borrar(NOMBRE), " (error ", error_dos, ")\n")
+        escribir("y ya no se abre: ", abrir(NOMBRE, LEER) = MAL, "\n")
+        grabar_texto(SALIDA, "por la salida, con grabar_texto\r\n")
+
+        ; con un Escritor: doscientas líneas (más de 512 octetos: va por trozos)
+        m := crear(NOMBRE)
+        empezar_escritor(escritor, m)
+        para i desde 1 hasta 200 hacer
+            poner_texto(escritor, "el cuadrado de ")
+            poner_número(escritor, i)
+            poner_texto(escritor, " es ")
+            poner_número(escritor, nat32(i) * i)
+            poner_línea(escritor)
+        fin
+        poner_número(escritor, -70000)
+        escribir("con un Escritor: ", vaciar(escritor), ", largo ", largo(m), "\n")
+        cerrar(m)
+        m := abrir(NOMBRE, LEER)
+        empezar_lector(lector, m)
+        n := 0
+        mientras leer_línea(lector, línea, 40) hacer
+            n := n + 1
+            si n = 1 o n = 150 o n > 199 entonces escribir("  ", n, ": ", línea, "\n") fin
+        fin
+        cerrar(m)
+        escribir("leídas ", n, " líneas; borrado: ", borrar(NOMBRE), "\n")
+        empezar_escritor(escritor, SALIDA)
+        poner_texto(escritor, "y por la salida, con un Escritor: ")
+        poner_número(escritor, 1981)
+        poner_línea(escritor)
+        vaciar(escritor)
+        devolver 0
+    fin
+
+fin Ficheros.

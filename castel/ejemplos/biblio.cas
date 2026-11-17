@@ -1,0 +1,171 @@
+; biblio.cas - la biblioteca escrita en Castel: los textos (módulo Textos) y
+; el montón (módulo Memoria). Se traen con «importar» y se usan sin más.
+módulo Biblio
+
+    importar Textos, Memoria
+
+    tipo Nodo = estructura
+        número: ent32
+        nombre: arreglo [12] de byte
+        sig: puntero a Nodo
+    fin
+
+    variable sitio: arreglo [40] de byte
+    variable corto: arreglo [6] de byte
+    variable lista: puntero a Nodo
+
+    función prueba_número(t: puntero a byte)
+        variable n: ent32
+        si texto_a_número(t, n) entonces
+            escribir("  «", t, "» es ", n, "\n")
+        sino
+            escribir("  «", t, "» no es un número\n")
+        fin
+    fin
+
+    función textos()
+        variable p: puntero a byte
+        variable u: nat32
+        escribir("longitud: ", longitud(""), " ", longitud("hola"), " ", longitud("Hispa-8086, de 1981"), "\n")
+        copiar(sitio, "Castel")
+        concatenar(sitio, " en ")
+        concatenar(sitio, "castellano")
+        añadir_car(sitio, '.')
+        escribir("copiar y concatenar: ", sitio, " (", longitud(sitio), ")\n")
+        escribir("copiar_hasta: ", copiar_hasta(corto, "cabe", 6), " ", corto)
+        escribir(" / ", copiar_hasta(corto, "no cabe entero", 6), " ", corto, "\n")
+        escribir("comparar: ", comparar("abc", "abc"), " ", comparar("abc", "abd") < 0, " ",
+                 comparar("b", "abc") > 0, " ", comparar("ab", "abc") < 0, " ", comparar("ñu", "nu") > 0, "\n")
+        escribir("iguales: ", iguales(sitio, "Castel en castellano."), " ", iguales("uno", "una"), " ",
+                 iguales_sin_caja("Ñandú", "ñANDú"), " ", iguales_sin_caja("uno", "unos"), "\n")
+        escribir("empieza_por: ", empieza_por(sitio, "Cast"), " ", empieza_por(sitio, "cast"), " ",
+                 empieza_por("a", "abc"), "\n")
+        p := buscar_car(sitio, 'e')
+        escribir("buscar_car: ", p, " / ", buscar_car(sitio, 'z') = nulo, "\n")
+        p := buscar(sitio, "castellano")
+        escribir("buscar: en la posición ", p - sitio, ": ", p, " / ", buscar(sitio, "inglés") = nulo, "\n")
+        a_mayúsculas(sitio)
+        escribir("mayúsculas: ", sitio, " ")
+        escribir_car(mayúscula('ñ'))
+        escribir_car(minúscula('Q'))
+        escribir_car(minúscula('!'))
+        escribir(" ", es_letra('x'), " ", es_letra('Ñ'), " ", es_letra('7'), " ", es_cifra('7'), " ",
+                 es_espacio('\t'), " ", es_espacio('_'), "\n")
+        escribir("números a texto:")
+        natural_a_texto(0, sitio)
+        escribir(" ", sitio)
+        natural_a_texto(4294967295, sitio)
+        escribir(" ", sitio)
+        número_a_texto(-2147483648, sitio)
+        escribir(" ", sitio)
+        número_a_texto(-7, sitio)
+        escribir(" ", sitio)
+        número_a_texto(1981, sitio)
+        escribir(" ", sitio, " (", longitud(sitio), " cifras)")
+        hex_a_texto(0xB800, 4, sitio)
+        escribir(" ", sitio)
+        hex_a_texto(3735928559, 8, sitio)
+        escribir(" ", sitio)
+        hex_a_texto(10, 1, sitio)
+        escribir(" ", sitio, "\n")
+        escribir("textos a número:\n")
+        prueba_número("0")
+        prueba_número("1981")
+        prueba_número("-32768")
+        prueba_número("+2147483647")
+        prueba_número("-2147483648")
+        prueba_número("2147483648")
+        prueba_número("0x7B")
+        prueba_número("-0xff")
+        prueba_número("12a")
+        prueba_número("")
+        prueba_número("-")
+        prueba_número("0x")
+        si texto_a_natural("4294967295", u) entonces escribir("  el mayor natural: ", u, "\n") fin
+        si no texto_a_natural("4294967296", u) entonces escribir("  4294967296 ya no cabe\n") fin
+        si texto_a_natural("0xDEADBEEF", u) entonces escribir("  0xDEADBEEF es ", u, "\n") fin
+    fin
+
+    ; una lista enlazada con los nodos pedidos al montón
+    función apunta(número: ent32, nombre: puntero a byte)
+        variable n: puntero a Nodo
+        n := puntero(reservar(tamaño(Nodo)))
+        si n = nulo entonces
+            escribir("no queda memoria\n")
+            salir(1)
+        fin
+        n.número := número
+        copiar(n.nombre, nombre)
+        n.sig := lista
+        lista := n
+    fin
+
+    función memoria()
+        variable a, b, c, d: puntero a byte
+        variable n: puntero a Nodo
+        variable usada: nat16
+        variable i: nat16
+        escribir("montón: al empezar, ", memoria_usada(), " octetos; libres, más de 30000: ",
+                 memoria_libre() > 30000, "\n")
+        a := reservar(10)
+        b := reservar(100)
+        c := reservar(7)
+        ; cada bloque, con su cabecera de 2 octetos y a tamaño par
+        escribir("tres bloques: ", b - a, " ", c - b, " ", memoria_usada(), "\n")
+        llenar(a, 10, 'a')
+        llenar(b, 100, 'b')
+        llenar(c, 7, 'c')
+        a[9] := 0
+        c[6] := 0
+        escribir("no se pisan: ", a, " ", b[0] = 'b' y b[99] = 'b', " ", c, "\n")
+        soltar(b)
+        d := reservar(40)                       ; cabe en el hueco de b
+        escribir("el hueco se aprovecha: ", d = b, " ", memoria_usada(), "\n")
+        soltar(a)
+        soltar(d)
+        d := reservar(150)                      ; ni el de a ni lo que queda de b: va detrás de c
+        escribir("si no cabe, detrás: ", d > c, " ", memoria_usada(), "\n")
+        soltar(d)
+        d := reservar(110)                      ; a y b, juntos, hacen un hueco de 114
+        escribir("los huecos vecinos se juntan: ", d = a, " ", memoria_usada(), "\n")
+        soltar(c)
+        soltar(d)
+        soltar(nulo)
+        escribir("todo devuelto: ", reservar(1) = a, " ", memoria_usada(), "\n")
+        soltar(a)
+        escribir("pedir demasiado: ", reservar(60000) = nulo, " ", reservar(0) = nulo, " ", memoria_usada(), "\n")
+        ; mil bloques pedidos y devueltos: el montón no crece
+        usada := memoria_usada()
+        para i desde 1 hasta 1000 hacer
+            a := reservar(i mod 50 + 1)
+            b := reservar(20)
+            soltar(a)
+            soltar(b)
+        fin
+        escribir("mil vueltas: ", memoria_usada() = usada, "\n")
+        copiar_memoria(sitio, "copiado\0resto", 8)
+        escribir("copiar_memoria: ", sitio, "\n")
+        apunta(1981, "IBM PC")
+        apunta(-1, "nada")
+        apunta(70000, "Hispa-8086")
+        escribir("la lista:")
+        n := lista
+        mientras n <> nulo hacer
+            escribir(" ", n.nombre, "=", n.número)
+            n := n.sig
+        fin
+        escribir(" (", memoria_usada(), " octetos)\n")
+        mientras lista <> nulo hacer
+            n := lista
+            lista := n.sig
+            soltar(puntero(n))
+        fin
+        escribir("vacía: ", memoria_usada(), "\n")
+    fin
+
+    función principal()
+        textos()
+        memoria()
+    fin
+
+fin Biblio.

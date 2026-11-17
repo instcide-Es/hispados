@@ -1,0 +1,38 @@
+longitud: 0 4 19
+copiar y concatenar: Castel en castellano. (21)
+copiar_hasta: cierto cabe / falso no ca
+comparar: 0 cierto cierto cierto cierto
+iguales: cierto falso cierto falso
+empieza_por: cierto falso falso
+buscar_car: el en castellano. / cierto
+buscar: en la posición 10: castellano. / cierto
+mayúsculas: CASTEL EN CASTELLANO. Ñq! cierto cierto falso cierto cierto falso
+números a texto: 0 4294967295 -2147483648 -7 1981 (4 cifras) B800 DEADBEEF A
+textos a número:
+  «0» es 0
+  «1981» es 1981
+  «-32768» es -32768
+  «+2147483647» es 2147483647
+  «-2147483648» es -2147483648
+  «2147483648» no es un número
+  «0x7B» es 123
+  «-0xff» es -255
+  «12a» no es un número
+  «» no es un número
+  «-» no es un número
+  «0x» no es un número
+  el mayor natural: 4294967295
+  4294967296 ya no cabe
+  0xDEADBEEF es 3735928559
+montón: al empezar, 0 octetos; libres, más de 30000: cierto
+tres bloques: 12 102 124
+no se pisan: aaaaaaaaa cierto cccccc
+el hueco se aprovecha: cierto 124
+si no cabe, detrás: cierto 276
+los huecos vecinos se juntan: cierto 124
+todo devuelto: cierto 4
+pedir demasiado: cierto cierto 0
+mil vueltas: cierto
+copiar_memoria: copiado
+la lista: Hispa-8086=70000 nada=-1 IBM PC=1981 (60 octetos)
+vacía: 0

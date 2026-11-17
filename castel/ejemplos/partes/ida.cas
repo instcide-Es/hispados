@@ -1,0 +1,6 @@
+; ida.cas - para probar el error de los módulos en círculo (con vuelta.cas).
+módulo Ida
+
+    importar Vuelta
+
+fin Ida.

@@ -1,0 +1,37 @@
+; modulos.cas - un programa en varios archivos. «importar» trae lo público
+; de otros módulos (partes/figuras.cas y partes/medidas.cas): sus funciones,
+; variables, constantes y tipos se usan por su nombre o, si hay que
+; distinguir, como Módulo.nombre.
+módulo Modulos
+
+    importar Figuras, Medidas
+
+    variable r: Rectángulo                      ; un tipo de Figuras
+    variable otro: Figuras.Rectángulo           ; lo mismo, con el módulo delante
+
+    ; el programa también tiene su «cuadrado»: lo propio manda, y el de
+    ; Figuras sigue estando como Figuras.cuadrado
+    función cuadrado(n: nat16): nat16
+        devolver n + 1000
+    fin
+
+    función principal()
+        r.ancho := 300
+        r.alto := 400
+        escribir(aviso(), "área ", área(r), ", perímetro ", perímetro(r), "\n")
+        doble_rectángulo(r)
+        escribir("el doble: ", r.ancho, " x ", r.alto, ", área ", área(r), "\n")
+        otro.ancho := LADOS_DEL_CUADRADO
+        otro.alto := Figuras.LADOS_DEL_CUADRADO
+        escribir("constantes: ", área(otro), " ", PULGADA, " ", LEMA, " ", Figuras.LEMA, "\n")
+        escribir("lo propio manda: ", cuadrado(5), " y el del módulo: ", Figuras.cuadrado(500), "\n")
+        escribir("con el módulo delante: ", Medidas.doble(21), " ", Figuras.escala(5), " ", Medidas.escala(5), "\n")
+        escribir("variables de los módulos: ", hechas, " áreas, ", usos, " dobles")
+        hechas := 0
+        Medidas.usos := Medidas.usos + 100
+        escribir("; y cambiadas: ", Figuras.hechas, " ", usos, "\n")
+        escribir("lo privado, por una función: ", el_secreto(), "\n")
+        escribir("32 bits entre módulos: ", a_décimas(1000), "\n")
+    fin
+
+fin Modulos.

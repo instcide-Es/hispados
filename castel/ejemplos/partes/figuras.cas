@@ -1,0 +1,64 @@
+; figuras.cas - un módulo de prueba (lo importa ../modulos.cas).
+; Lo que lleva «público» delante lo ven los que lo importan; lo demás es
+; solo de aquí dentro.
+módulo Figuras
+
+    importar Medidas                            ; un módulo puede importar otros
+
+    público constante LADOS_DEL_CUADRADO = 4
+    público constante LEMA = "medir dos veces"
+
+    público tipo Rectángulo = estructura
+        ancho, alto: nat16
+    fin
+
+    público variable hechas: nat16              ; cuántas áreas se han calculado
+    variable secreto: nat16 = 7                 ; esta no se ve desde fuera
+
+    función anota()                             ; ni esta
+        hechas := hechas + 1
+    fin
+
+    público función área(ref r: Rectángulo): nat32
+        anota()
+        devolver nat32(r.ancho) * r.alto
+    fin
+
+    público función perímetro(ref r: Rectángulo): nat16
+        devolver doble(r.ancho + r.alto)        ; doble() es de Medidas
+    fin
+
+    público función cuadrado(lado: nat16): nat32
+        anota()
+        devolver nat32(lado) * lado
+    fin
+
+    ; las dos, «doble», aquí y en Medidas: quien importe los dos módulos
+    ; tiene que decir cuál quiere (Figuras.doble o Medidas.doble)
+    público función doble_rectángulo(ref r: Rectángulo)
+        r.ancho := doble(r.ancho)
+        r.alto := doble(r.alto)
+    fin
+
+    público función el_secreto(): nat16
+        ; en el ensamblador de un módulo, los nombres van entre llaves
+        ensamblador
+            mov ax, {secreto}
+            add ax, {LADOS_DEL_CUADRADO}
+        fin
+    fin
+
+    público función aviso(): puntero a byte
+        devolver "figuras: "
+    fin
+
+    público función escala(n: nat16): nat16
+        devolver n * 3
+    fin
+
+    ; esta no la llama nadie: no va al programa
+    público función sin_usar(): puntero a byte
+        devolver "ESTE TEXTO NO TIENE QUE ESTAR EN EL PROGRAMA"
+    fin
+
+fin Figuras.

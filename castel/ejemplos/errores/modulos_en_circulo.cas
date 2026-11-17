@@ -1,0 +1,9 @@
+; Dos módulos que se importan el uno al otro.
+; ERROR: 4:14: error: los módulos se importan en círculo: Ida -> Vuelta -> Ida
+módulo Error
+
+    importar Ida
+
+    función principal()
+    fin
+fin Error.
