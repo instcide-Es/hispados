@@ -7,7 +7,9 @@
 # Fase 2 (también en C): K32PRUE repasa KERNEL32 de consola (archivos,
 # búsquedas, directorios, hora, montón, VirtualAlloc, entorno, TLS,
 # GetProcAddress y textos) con los resultados de Windows 98; K32CON pinta en
-# la pantalla (colores, cursor, rellenar) y se mira su memoria.
+# la pantalla (colores, cursor, rellenar) y se mira su memoria. DLLPRUE/USADLL:
+# una DLL propia (reubicada, DllMain, una función y un dato). Y un programa
+# real: NASM 2.16 para Win32 con nuestra MSVCRT.DLL (si está bajado).
 # Win32 PE loader test.
 set -u
 cd "$(dirname "$0")/.."
@@ -191,6 +193,49 @@ PY
     ko "no se ha podido leer la pantalla"
   fi
   cp $T/log1.txt $T/log.txt
+fi
+
+# ---- un programa real: NASM 2.16 para Win32 (MinGW: KERNEL32 + msvcrt.dll),
+# con nuestra MSVCRT.DLL, desde un disco duro (no cabe en el disquete) ----
+NASMW=tests/thirdparty/dl/win32-nasm/nasm-2.16.03/nasm.exe
+if [ $HAYC = 1 ] && [ -f $NASMW ] && make -s $B/MSVCRT.DLL >/dev/null 2>&1; then
+  echo "-- NASM para Win32 --"
+  truncate -s 32M $T/c.img
+  printf 'label: dos\n2048,,6,*\n' | /sbin/sfdisk -q $T/c.img >/dev/null 2>&1
+  mkfs.fat -F 16 -h 2048 --offset 2048 $T/c.img >/dev/null 2>&1
+  echo "drive c: file=\"$T/c.img\" offset=1048576" > $T/mtoolsrc
+  printf 'mov ax, 1234h\r\nint 21h\r\nret\r\n' > $T/P.ASM
+  MTOOLSRC=$T/mtoolsrc mcopy -o $NASMW c:NASM.EXE
+  MTOOLSRC=$T/mtoolsrc mcopy -o $B/MSVCRT.DLL c:MSVCRT.DLL
+  MTOOLSRC=$T/mtoolsrc mcopy -o $B/HW32.COM c:HW32.COM
+  MTOOLSRC=$T/mtoolsrc mcopy -o $T/P.ASM c:P.ASM
+  printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
+  mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
+  printf '@ECHO OFF\r\n' > $T/AUTOEXEC.BAT
+  mcopy -o -i $T/f.img $T/AUTOEXEC.BAT ::AUTOEXEC.BAT
+  { sleep 7
+    printf 'A:\\HISPADOS\\HSPDPMI\r'; sleep 2
+    printf 'C:\r'; sleep 1
+    printf 'HW32 NASM.EXE -v\r'; sleep 10
+    printf 'HW32 NASM.EXE -f bin -o P.BIN P.ASM\r'; sleep 12
+    printf 'IF ERRORLEVEL 1 ECHO NASM-FALLA\r'; sleep 1
+    printf 'HW32 NASM.EXE -f bin -o Q.BIN NOHAY.ASM\r'; sleep 9
+    printf 'IF ERRORLEVEL 1 ECHO NASM-NIVEL-1\r'; sleep 1
+  } | timeout 70 qemu-system-i386 -display none -serial stdio -monitor none -parallel none -m 32 \
+      -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
+      -boot a -no-reboot > $T/raw 2>&1
+  tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
+  check "NASM version 2.16.03 compiled on"
+  checkn "NASM-FALLA"
+  MTOOLSRC=$T/mtoolsrc mcopy -o c:P.BIN $T/P.BIN 2>/dev/null
+  if [ "$(xxd -p $T/P.BIN 2>/dev/null)" = "b83412cd21c3" ]; then ok "NASM ensambla bien (B8 34 12 CD 21 C3)"; else ko "lo que ha ensamblado NASM: $(xxd -p $T/P.BIN 2>/dev/null)"; fi
+  check "nasm: fatal: unable to open input file \`NOHAY.ASM' No existe el archivo o el directorio"
+  check "NASM-NIVEL-1"
+  checkn "Hispa-486: falta"
+  checkn "HSPDPMI: excepción"
+  cp $T/log1.txt $T/log.txt
+else
+  echo "  (sin NASM para Win32: tests/thirdparty/fetch_win32.sh; o sin gcc de 32 bits)"
 fi
 if [ $fail = 0 ]; then echo "Resultado: todo OK"; else echo "Resultado: FALLOS"; cat $T/log.txt | tail -40; fi
 rm -rf $T

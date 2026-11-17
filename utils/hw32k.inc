@@ -2588,15 +2588,86 @@ k_GetStartupInfoA:                  ; (*STARTUPINFO): a cero, con su tamaño
         call a_cero
         mov dword [es:edi], 68
         ret
+k_GetModuleHandleW:                 ; (nombre ancho o NULL): a 8 bits y como A
+        mov esi, [ebp]
+        test esi, esi
+        jz k_GetModuleHandleA.prog
+        mov edi, [cmd_dir]
+        add edi, 0xF00              ; (un sitio del programa para el nombre)
+        xor ecx, ecx
+.c:
+        mov ax, [es:esi + ecx * 2]
+        mov [es:edi + ecx], al
+        inc ecx
+        test ax, ax
+        jz .f
+        cmp ecx, 60
+        jb .c
+        mov byte [es:edi + ecx], 0
+.f:
+        mov [ebp], edi
 k_GetModuleHandleA:                 ; (nombre o NULL)
         mov esi, [ebp]
         test esi, esi
-        jnz es_kernel32
+        jnz .nom
+.prog:
         mov eax, [img_base]
+        ret
+.nom:
+        call dll_cargada            ; ¿una de las nuestras? -> EAX
+        jnc .x
+        jmp es_kernel32
+.x:
+        ret
+; ¿la DLL de nombre ES:ESI ya está cargada? CF=0 y EAX = su dirección
+dll_cargada:
+        push esi
+        mov edi, b_dll
+        mov ecx, 26
+        xor edx, edx                ; ¿lleva extensión?
+.c:
+        mov al, [es:esi]
+        cmp al, 'a'
+        jb .c1
+        cmp al, 'z'
+        ja .c1
+        sub al, 32
+.c1:
+        cmp al, '.'
+        jne .c2
+        inc edx
+.c2:
+        mov [edi], al
+        test al, al
+        jz .c_f
+        inc esi
+        inc edi
+        loop .c
+        mov byte [edi], 0
+.c_f:
+        test edx, edx
+        jnz .b
+        mov dword [edi], '.DLL'
+        mov byte [edi + 4], 0
+.b:
+        pop esi
+        call ficha_de_b_dll         ; -> EDX
+        jc .x
+        mov eax, [edx + M_DIR]
+.x:
+        ret
+k_IsDBCSLeadByteEx:                 ; (página, c): sin páginas de dos octetos
+k_IsDBCSLeadByte:
+        xor eax, eax
         ret
 k_LoadLibraryA:                     ; (nombre)
 k_LoadLibraryExA:                   ; (nombre, 0, opciones)
         mov esi, [ebp]
+        call dll_cargada            ; (las que ya trae el programa)
+        jnc .x
+        jmp es_kernel32
+.x:
+        ret
 es_kernel32:
         ; ¿KERNEL32 (con .DLL o sin él)?
         mov edi, s_kernel32
@@ -2653,6 +2724,34 @@ k_GetModuleFileNameA:               ; (módulo, buf, n): el nombre completo
 .x:
         ret
 k_GetProcAddress:                   ; (módulo, nombre)
+        mov eax, [ebp]
+        cmp eax, H_KERNEL32
+        je .k32
+        ; ¿una de las DLL cargadas (o el programa)?
+        xor ecx, ecx
+.m:
+        cmp ecx, [n_mods]
+        jae .no
+        mov edx, ecx
+        imul edx, MOD_TAM
+        add edx, mods
+        cmp [edx + M_DIR], eax
+        je .m_si
+        inc ecx
+        jmp .m
+.m_si:
+        mov eax, [ebp + 4]
+        cmp eax, 0x10000
+        jb .m_num
+        call busca_export
+        jmp .m_x
+.m_num:
+        call export_numero
+.m_x:
+        test eax, eax
+        jz .no
+        ret
+.k32:
         mov eax, [ebp + 4]
         cmp eax, 0x10000
         jb .no                      ; (por número: no)
@@ -3186,6 +3285,9 @@ funciones:
         FUNC k_SetEnvironmentVariableA, 8, 'SetEnvironmentVariableA'
         FUNC k_GetStartupInfoA, 4, 'GetStartupInfoA'
         FUNC k_GetModuleHandleA, 4, 'GetModuleHandleA'
+        FUNC k_GetModuleHandleW, 4, 'GetModuleHandleW'
+        FUNC k_IsDBCSLeadByteEx, 8, 'IsDBCSLeadByteEx'
+        FUNC k_IsDBCSLeadByte, 4, 'IsDBCSLeadByte'
         FUNC k_LoadLibraryA, 4, 'LoadLibraryA'
         FUNC k_LoadLibraryExA, 12, 'LoadLibraryExA'
         FUNC k_FreeLibrary, 4, 'FreeLibrary'

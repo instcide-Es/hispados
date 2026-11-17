@@ -94,7 +94,7 @@ $(B)/DPMI16.COM: tests/progs/dpmi16.asm | $(B)
 $(B)/DPMI32.COM: tests/progs/dpmi32.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # [HISPA-486] HW32: programas Win32 de consola sobre HSPDPMI (docs/486/HISPA-486.md)
-$(B)/HW32.COM: utils/hw32.asm | $(B)
+$(B)/HW32.COM: utils/hw32.asm utils/hw32k.inc lib/version.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PEHOLA.EXE: tests/progs/pehola.asm | $(B)
 	$(NASM) -f bin -o $@ $<
@@ -109,6 +109,10 @@ $(B)/HOLAC.EXE: tests/progs/holac.c tools/elf2pe.py | $(B)
 $(B)/K32PRUE.EXE: tests/progs/k32prue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/k32prue.o
 	python3 tools/elf2pe.py -o $@ $(B)/k32prue.o
+# MSVCRT.DLL de Hispa-486 (la biblioteca de C de Win32, en C)
+$(B)/MSVCRT.DLL: w32/msvcrt.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/msvcrt.o
+	python3 tools/elf2pe.py --dll -o $@ $(B)/msvcrt.o
 $(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/dllprue.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/dllprue.o

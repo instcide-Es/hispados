@@ -42,7 +42,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 |---|---|---|
 | 0 | Este documento; la lista de funciones por orden de uso (`tools/importaciones.py`, con los programas que aporte cada uno) | documento hecho (17/11/2026) |
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
-| 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecho lo de KERNEL32 (17/11/2026)**: unas 180 funciones, K32PRUE da lo de Windows 98; falta MSVCRT.DLL (la biblioteca de C que traen los programas de MinGW y de Visual C++) y probar con programas reales de la época |
+| 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana) |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
@@ -68,11 +68,32 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
   de potencias de dos con listas de sueltos; lo de más de 1 MB, en su bloque de
   DPMI), VirtualAlloc, entorno de DOS, TLS, secciones críticas (un hilo),
   GetProcAddress (crea trampolines nuevos) y textos.
+- Las DLL: HW32 carga las que pida el programa (de su carpeta, de la de HW32
+  o de la de ahora), las reubica, resuelve sus importaciones (que pueden traer
+  otras) y llama a sus DllMain antes del programa (primero aquellas de las que
+  dependen las demás). `GetModuleHandle`, `LoadLibrary` (de las ya cargadas) y
+  `GetProcAddress` las conocen.
+- `w32/msvcrt.c`: **MSVCRT.DLL** propia, en C (se compila con `gcc -m32` y
+  `elf2pe --dll`): arranque (`__getmainargs`, `_initterm`, `exit`...),
+  archivos con búfer en modo texto y binario, `printf` y `scanf`, textos,
+  ctype, `qsort`, números (también de 64 bits y con coma), hora, `stat`,
+  `setlocale` («C») y matemáticas por el x87; los mensajes, en español. Las
+  DLL de Win32 de Hispa-486 se escriben en C para empezar (gcc es solo la
+  herramienta, como NASM); cuando Castel tenga 32 bits se podrán pasar a él.
 - `tools/elf2pe.py`: un enlazador pequeño de objetos ELF de `gcc -m32` a PE,
   para hacer los programas de prueba en C sin compilador de Windows.
 - Prueba: `tests/run_hw32_tests.sh` (PEHOLA, PEFALTA, HOLAC, K32PRUE con los
-  resultados de Windows 98, K32CON mirando la pantalla, y que no se pierde
-  memoria).
+  resultados de Windows 98, K32CON mirando la pantalla, DLLPRUE/USADLL, que no
+  se pierde memoria y, si se ha bajado con `tests/thirdparty/fetch_win32.sh`,
+  NASM 2.16 para Win32 ensamblando desde un disco duro).
+
+## Lo siguiente
+
+1. Más programas reales de consola (de MinGW y de Visual C++), para ver qué
+   funciones piden («falta la función...») y completarlas.
+2. Que COMMAND.COM ejecute los PE solo (sin escribir `HW32` delante).
+3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
+4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas.
 
 ## Fase 1: el cargador PE
 
