@@ -334,6 +334,7 @@ start:
         jne .end
         call sound_check
 .end:
+        call instal2                ; [0.9.24] el disquete «Instalación 2», si hace falta
         call oficina                ; [0.9.22] el disquete «Oficina», si hace falta
         cmp byte [updmode], 0
         jne .end_upd
@@ -441,6 +442,68 @@ run:
         clc
 .r:
         ret
+
+; [0.9.24] Lo que ya no cabe en el disquete de arranque (los programas de
+; Windows de consola: HW32 y MSVCRT.DLL, de Hispa-486) va en el disquete
+; «Instalación 2», en su \HISPADOS. Igual que «Oficina»: si se instala desde
+; A: o B: y el origen no lo trae, se ofrece ese disquete y se copia.
+instal2:
+        mov al, [src]
+        and al, 0xDF
+        cmp al, 'B'
+        ja .r
+        mov [i2_ruta], al
+        mov dx, i2_ruta             ; ¿el origen ya trae HW32?
+        mov ax, 0x3D00
+        int 0x21
+        jc .pregunta
+        mov bx, ax
+        mov ah, 0x3E
+        int 0x21
+.r:
+        ret
+.pregunta:
+        mov si, msg_i2_preg
+        call puts
+        call ask_yes
+        jc .r
+        mov dx, i2_ruta             ; ¿es el de Instalación 2?
+        mov ax, 0x3D00
+        int 0x21
+        jnc .es
+        mov si, msg_i2_no
+        call puts
+        jmp .pregunta
+.es:
+        mov bx, ax
+        mov ah, 0x3E
+        int 0x21
+        mov word [ncopied], 0
+        mov word [nfailed], 0
+        mov byte [keep], 0
+        mov byte [keepdata], 0
+        mov byte [fix], 0
+        mov si, s_hsp
+        mov di, s_hdir
+        call make_dir
+        call copy_set
+        mov si, msg_i2_hecho
+        call puts
+        movzx eax, word [ncopied]
+        call putnum
+        mov si, msg_of_hecho2
+        call puts
+        cmp word [nfailed], 0
+        je .vuelta
+        mov si, msg_of_fallo
+        call puts
+.vuelta:
+        mov si, msg_of_vuelve       ; (el intérprete vuelve a leerse del disquete)
+        call puts
+        mov ah, 0x08
+        int 0x21
+        mov si, msg_crlf
+        jmp puts
 
 ; [0.9.22] La familia de oficina (Pluma, Cuentas...) no cabe en el disquete de
 ; arranque: va en el disquete «Oficina». Si se instala desde A: o B: y el
@@ -762,6 +825,7 @@ msg_askins2 equ msg_askfmt2
 msg_fmterr  db "No se ha podido dar formato a la unidad: no se ha instalado nada.", 13, 10, 0
 msg_nothing db "No se ha instalado nada.", 13, 10, 0
 of_ruta     db "A:\HISPADOS\PROGS\PLUMA.HVP", 0
+i2_ruta     db "A:\HISPADOS\HW32.COM", 0
 msg_of_preg db 13, 10, "La oficina (Pluma, Cuentas, Facturas, Datos, el Lector de PDF,", 13, 10
             db "Publicaciones y Presentaciones) va en el disquete ", 0xAE, "Oficina", 0xAF, ".", 13, 10
             db "Si lo tiene, p", 0xA2, "ngalo en la unidad de arranque y escriba S", 13, 10
@@ -769,6 +833,12 @@ msg_of_preg db 13, 10, "La oficina (Pluma, Cuentas, Facturas, Datos, el Lector d
 msg_of_no   db "Ese no es el disquete ", 0xAE, "Oficina", 0xAF, ".", 13, 10, 0
 msg_of_hecho db "Oficina: ", 0
 msg_of_hecho2 db " archivos copiados.", 13, 10, 0
+msg_i2_preg db 13, 10, "Los programas de Windows de consola (HW32, de Hispa-486) van en el", 13, 10
+            db "disquete ", 0xAE, "Instalaci", 0xA2, "n 2", 0xAF, ".", 13, 10
+            db "Si lo tiene, p", 0xA2, "ngalo en la unidad de arranque y escriba S", 13, 10
+            db "(N para seguir sin ", 0x82, "l; se puede copiar despu", 0x82, "s): ", 0
+msg_i2_no   db "Ese no es el disquete ", 0xAE, "Instalaci", 0xA2, "n 2", 0xAF, ".", 13, 10, 0
+msg_i2_hecho db "Instalaci", 0xA2, "n 2: ", 0
 msg_of_fallo db "Alguno no se ha podido copiar (", 0xA8, "disco lleno?).", 13, 10, 0
 msg_of_vuelve db "Vuelva a poner el disquete de arranque y pulse una tecla.", 0
 msg_nopart  db "No se encuentra \HISPADOS\PARTIR.COM en la unidad de arranque.", 13, 10, 0

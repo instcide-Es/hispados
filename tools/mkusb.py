@@ -152,6 +152,22 @@ def mkfloppy():
         run('mcopy', '-o', '-i', out, dst, '::' + f)
     print(out)
     mkoficina()
+    mkinstal2()
+
+def mkinstal2():
+    """[0.9.24] El disquete «Instalación 2»: lo que ya no cabe en el de
+    arranque (los programas de Windows de consola de Hispa-486: HW32 y
+    MSVCRT.DLL), en \\HISPADOS, como queda en el disco duro. INSTALAR lo pide
+    antes que el de Oficina; también se puede copiar a mano con
+    XCOPIAR A:\\HISPADOS C:\\HISPADOS."""
+    out = os.path.join(B, 'hispados-instal2.img')
+    if os.path.exists(out):
+        os.remove(out)
+    run('mformat', '-C', '-f', '1440', '-v', 'INSTAL2', '-i', out, '::')
+    run('mmd', '-i', out, '::HISPADOS')
+    for f in ('HW32.COM', 'MSVCRT.DLL'):
+        run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
+    print(out)
 
 def mkoficina():
     """[0.9.22] El disquete «Oficina»: la familia de oficina (HVPO del Makefile)

@@ -16,6 +16,9 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 # [0.9.22] el disquete «Oficina»: INSTALAR lo pide al acabar (desde disquete)
 OFI=${OFICINA:-build/hispados-oficina.img}
 cp "$OFI" $T/o.img 2>/dev/null || echo "  (falta $OFI: make usb)"
+# [0.9.24] y antes el disquete «Instalación 2» (HW32 y MSVCRT.DLL, de Hispa-486)
+IN2=${INSTAL2:-build/hispados-instal2.img}
+cp "$IN2" $T/i2.img 2>/dev/null || echo "  (falta $IN2: make usb)"
 mon1() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon1 > /dev/null 2>&1; }
 # 1) FDISK + FORMAT sin sistema + INSTALAR C: y, al final, el disquete Oficina
 {
@@ -25,12 +28,16 @@ mon1() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon1 > /dev/null 2>&1; }
   send "INSTALAR /?" 2
   send "INSTALAR A:" 2
   send "INSTALAR C:" 2
-  sleep 10; mon1 "change floppy0 $T/o.img"; sleep 2
+  sleep 10; mon1 "change floppy0 $T/i2.img"; sleep 2
+  send "S" 1
+  sleep 8; mon1 "change floppy0 $T/f.img"; sleep 2
+  printf ' '; sleep 3
+  mon1 "change floppy0 $T/o.img"; sleep 2
   send "S" 1
   sleep 20; mon1 "change floppy0 $T/f.img"; sleep 2
   printf ' '; sleep 3
   send "DIR C:\HISPADOS\PROGS\PLUMA.HVP" 2
-} | timeout 70 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
+} | timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
       -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/hdd.img,format=raw,if=ide -boot a -no-reboot > $T/l1 2>&1
 # 2) arrancar desde C: y usar el historial con teclas reales
@@ -58,6 +65,13 @@ check $T/l1.txt "Uso: INSTALAR unidad:"
 check $T/l1.txt "No se puede instalar sobre la unidad de arranque."
 check $T/l1.txt "Sistema transferido a la unidad C:"
 check $T/l1.txt "Hispa-DOS instalado en la unidad C:"
+check $T/l1.txt "disquete «Instalación 2»."
+check $T/l1.txt "Instalación 2: 2 archivos copiados."
+in2=0
+for off in 32256 1048576; do
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/HW32.COM ::HISPADOS/MSVCRT.DLL > /dev/null 2>&1 && in2=1
+done
+if [ $in2 = 1 ]; then echo "  OK   Instalación 2: HW32 y MSVCRT.DLL en C:\\HISPADOS"; else echo "  FAIL Instalación 2: faltan HW32 o MSVCRT.DLL en el disco instalado"; fail=1; fi
 check $T/l1.txt "va en el disquete «Oficina»."
 check $T/l1.txt " archivos copiados."
 check $T/l1.txt "Vuelva a poner el disquete de arranque y pulse una tecla."
@@ -92,5 +106,5 @@ if [ $car = 1 ]; then echo "  OK   HISPA1.NES en \\HISPADOS\\JUEGOS\\NES y BUZO.
 n=$(grep -c "^uno$" $T/l2.txt)
 if [ "$n" -ge 3 ]; then echo "  OK   historial: ECO uno repetido ($n veces)"; else echo "  FAIL historial: ECO uno salió $n veces"; fail=1; fi
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/l1.txt; echo ---; cat $T/l2.txt; fi
-rm -rf $T
+[ -n "${GUARDA:-}" ] && cp $T/l1.txt $T/l2.txt "$GUARDA"/; rm -rf $T
 exit $fail

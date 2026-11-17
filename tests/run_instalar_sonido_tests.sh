@@ -113,6 +113,8 @@ nuevo() {  # nombre imagen: carpeta, copia de la imagen y disco vacío de 32 MB
   # [0.9.22] un disquete «con la oficina» (un PLUMA.HVP de muestra): así INSTALAR no
   # pregunta por el disquete Oficina (eso lo mira run_instalar_tests.sh)
   printf x > $T/pluma.hvp; MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/$1/f.img $T/pluma.hvp ::HISPADOS/PROGS/PLUMA.HVP 2>/dev/null || true
+  # [0.9.24] y con HW32 (así tampoco pregunta por «Instalación 2»)
+  MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/$1/f.img $T/pluma.hvp ::HISPADOS/HW32.COM 2>/dev/null || true
   dd if=/dev/zero of=$T/$1/hdd.img bs=1M count=32 status=none
 }
 PREC="PARTIR /PRI|FORMATEA C: /V:DESTINO /AUTOTEST"
