@@ -59,7 +59,7 @@ módulo Tablas
     público constante T_PUNT_U = 10             ; puntero «universal»: nulo y puntero(n)
     público constante T_TEXTO = 11              ; puntero a byte: un texto escrito
 
-    constante PARRAFOS_TIP = 0x800              ; 32 K
+    constante PARRAFOS_TIP = 0x600              ; 24 K
     público variable seg_tip: nat16
     variable tip_abajo, tip_arriba: nat16
     público variable tip_temporal: bool         ; los tipos nuevos, ¿son de la función en curso?
@@ -82,7 +82,7 @@ módulo Tablas
     público constante FM_PUBLICO = 4
     público constante FM_VISTO = 8
 
-    constante PARRAFOS_SIM = 0x1000             ; 64 K
+    constante PARRAFOS_SIM = 0x0E00             ; 56 K
     constante CUBOS_SIM = 1024
     público variable seg_sim: nat16
     variable libre_sim: nat16
@@ -122,8 +122,8 @@ módulo Tablas
 
     ; ---- los textos con etiqueta (T_n), en el orden en que la reciben, y las
     ;      globales con valor inicial: los «datos» del programa, por orden ----
-    constante PARRAFOS_ORD = 0x800              ; 32 K: 8192 datos y 8192 etiquetas
-    constante MAX_DATOS = 8190
+    constante PARRAFOS_ORD = 0x400              ; 16 K: 4096 datos y 4096 etiquetas
+    constante MAX_DATOS = 4090
     variable seg_ord: nat16
     público variable n_datos: nat16
     público variable n_cadenas: nat16
@@ -753,7 +753,7 @@ módulo Tablas
             falla_sin_más()
         fin
         tx_pon_etiqueta(tx, n)
-        poner_palabra(seg_ord + 0x400, n * 2, tx)
+        poner_palabra(seg_ord + 0x200, n * 2, tx)
         dato_nuevo(tx)
         devolver n
     fin
@@ -761,7 +761,7 @@ módulo Tablas
     ; el texto que lleva la etiqueta T_n, o 0
     público función texto_de_etiqueta(n: nat16): nat16
         si n = 0 o n > n_cadenas entonces devolver 0 fin
-        devolver leer_palabra(seg_ord + 0x400, n * 2)
+        devolver leer_palabra(seg_ord + 0x200, n * 2)
     fin
 
     ; el puente desde ese segmento a esa función lejana (lo crea si no está): su número

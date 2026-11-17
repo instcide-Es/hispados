@@ -223,9 +223,9 @@ módulo Base
     público constante M_CONST = 16              ; expresiones: ya se sabe que es constante
 
     ; ---- los bloques de memoria lejana ----
-    constante PARRAFOS_AT = 0x1000              ; 64 K de nombres
-    constante PARRAFOS_CAD = 0x0C00             ; 48 K de textos
-    constante PARRAFOS_AR = 0x1000              ; 64 K de árbol
+    constante PARRAFOS_AT = 0x0A00              ; 40 K de nombres
+    constante PARRAFOS_CAD = 0x0A00             ; 40 K de textos
+    constante PARRAFOS_AR = 0x2000              ; 128 K de árbol
     constante CUBOS_AT = 1024
     constante CUBOS_CAD = 512
     público variable seg_at, seg_cad, seg_ar: nat16

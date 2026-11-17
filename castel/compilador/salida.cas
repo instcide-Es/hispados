@@ -13,9 +13,9 @@ módulo Salida
 
     importar Base, Tablas, Textos, Archivos
 
-    constante PARRAFOS_LIN = 0x1000             ; 64 K de texto por función
-    constante MAX_TEXTO = 0xFE00
-    constante MAX_LINEAS = 6000
+    constante PARRAFOS_LIN = 0x0C00             ; 48 K de texto por función
+    constante MAX_TEXTO = 0xBE00
+    constante MAX_LINEAS = 4000
     constante MAX_LN = 300
     público constante NOMBRE_TEMPORAL = "CASTEL.$$$"
 
@@ -500,6 +500,8 @@ módulo Salida
             i := i + 1
         fin
         cuánto := escrito - sitio
+        si n_lineas > más_líneas entonces más_líneas := n_lineas fin
+        si libre_lin > más_texto entonces más_texto := libre_lin fin
         vacía_líneas()
     fin
 
@@ -517,9 +519,7 @@ módulo Salida
         vacía_líneas()
     fin
 
-    ; el máximo que ha llegado a ocupar el texto de una función
-    público función líneas(): nat16
-        devolver n_lineas
-    fin
+    ; lo más que ha ocupado el ensamblador de una función: líneas y octetos
+    público variable más_líneas, más_texto: nat16
 
 fin Salida.

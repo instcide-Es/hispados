@@ -4,11 +4,12 @@
 ;  (y los módulos que importa) y saca el mismo ensamblador que ccastel.py,
 ;  letra a letra. Con ENSAMBLA (ensamblador/ensambla.cas) da el programa.
 ;
-;      CASTEL ENTRADA.CAS [-o SALIDA.ASM] [-I CARPETA]... [--todo]
+;      CASTEL ENTRADA.CAS [-o SALIDA.ASM] [-I CARPETA]... [--todo] [--gasto]
 ;
 ;  Sin -o, deja ENTRADA.ASM. -I: una carpeta más donde buscar módulos (los
 ;  busca también en la del programa y en la del propio CASTEL). --todo: no
-;  deja fuera lo que no se usa (para las pruebas). Acaba con el nivel de
+;  deja fuera lo que no se usa (para las pruebas). --gasto: dice al acabar
+;  cuánta memoria ha gastado. Acaba con el nivel de
 ;  error 1 si el programa tiene un error (lo dice con su archivo, su línea y
 ;  su columna, igual que ccastel.py) y con 2 si se le llama mal.
 ;
@@ -45,12 +46,13 @@ módulo Castel
 
     función principal(): byte
         variable i, n: nat16
-        variable todo: bool
+        variable todo, gasto: bool
         variable p: puntero a byte
         prepara_base()
         prepara_tablas()
         prepara_salida()
         todo := falso
+        gasto := falso
         n := cuántos_argumentos()
         i := 1
         mientras i <= n hacer
@@ -67,6 +69,9 @@ módulo Castel
                 i := i + 1
             sino si iguales_sin_caja(arg_, "--todo") entonces
                 todo := cierto
+                i := i + 1
+            sino si iguales_sin_caja(arg_, "--gasto") entonces
+                gasto := cierto
                 i := i + 1
             sino si entrada[0] = 0 y arg_[0] <> '-' entonces
                 copiar(entrada, arg_)
@@ -88,7 +93,7 @@ módulo Castel
             concatenar(salida, ".ASM")
         fin
         carga_programa(entrada)
-        compila(entrada, salida, todo)
+        compila(entrada, salida, todo, gasto)
         devolver 0
     fin
 

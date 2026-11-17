@@ -26,6 +26,7 @@ módulo Programa
     variable temporal: ent16
     variable todo: bool                         ; no dejar fuera lo que no se usa
     variable prog: nat16                        ; el módulo del programa
+    variable más_árbol: nat16                   ; lo más que ha ocupado el árbol
 
     ; a dónde van los trozos de una línea de datos
     constante A_NADA = 0                        ; a ningún sitio (solo se comprueba)
@@ -1023,7 +1024,7 @@ módulo Programa
     ; -------------------------------------------------------------------------
     ;  El programa entero. Los módulos ya están cargados (Sintactico)
     ; -------------------------------------------------------------------------
-    público función compila(entrada: puntero a byte, salida: puntero a byte, con_todo: bool)
+    público función compila(entrada: puntero a byte, salida: puntero a byte, con_todo: bool, con_gasto: bool)
         variable m_, d, f, r, cuerpo, marca, aux, ms, orden: nat16
         variable sitio, cuánto: nat32
         todo := con_todo
@@ -1065,6 +1066,7 @@ módulo Programa
                     tip_temporal := cierto
                     cuerpo := cuerpo_de(d, m_)
                     gen_función(ficha(d), cuerpo)
+                    si gasto_árbol() > más_árbol entonces más_árbol := gasto_árbol() fin
                     limpia()
                     vuelca(sitio, cuánto)
                     f_pon_sitio(ficha(d), sitio, cuánto)
@@ -1118,7 +1120,13 @@ módulo Programa
         cerrar(ms)
         cerrar(temporal)
         borrar(NOMBRE_TEMPORAL)
-        escribir("ccastel: ", entrada, " -> ", salida, "  (", líneas_sal, " l\xA1neas de ensamblador)\r\n")
+        escribir("ccastel: ", entrada, " -> ", salida, "  (", líneas_sal, " líneas de ensamblador)\r\n")
+        si con_gasto entonces
+            escribir("  gasto, en párrafos de 16 octetos: nombres ", gasto_nombres(), ", textos ", gasto_textos())
+            escribir(", árbol ", gasto_árbol(), " (lo más, ", más_árbol, "), tipos ", gasto_tipos(), ", declarados ", gasto_declarados(), "\r\n")
+            escribir("  la función mayor: ", más_líneas, " líneas y ", más_texto, " octetos de ensamblador; ")
+            escribir(n_cadenas, " textos con etiqueta, ", n_datos, " datos y ", n_puentes, " puentes\r\n")
+        fin
     fin
 
 fin Programa.

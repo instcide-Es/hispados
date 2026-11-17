@@ -13,7 +13,10 @@
 ;  Es ensambla.py (la referencia, en Python) pasado a Castel, función por
 ;  función: lo que entiende y cómo decide cada cosa está contado allí y en
 ;  docs/ENSAMBLADOR.md. Lo propio de aquí:
-;   - el archivo se lee entero en cada pasada (no se guarda en memoria);
+;   - el archivo se lee entero en la primera pasada y en la última (no se
+;     guarda en memoria); las de en medio, que solo mueven etiquetas y
+;     alargan saltos, se hacen sobre un resumen de la primera (tramos de
+;     tamaño fijo, etiquetas y saltos), que es mucho más rápido;
 ;   - las etiquetas van a memoria lejana (módulo Lejos): L_n y T_n, que son
 ;     casi todas, en dos tablas por su número; las demás, en una tabla de
 ;     dispersión con los nombres.
@@ -107,6 +110,24 @@ módulo Ensambla
     variable visto_T: arreglo [2048] de byte
     variable seg_L, seg_T, seg_cubos, seg_sim, libre_sim: nat16
     variable e_sim, e_falta: bool       ; de la última cuenta
+    ; el resumen de la primera pasada (ver más abajo)
+    constante R_FIN = 0                 ; las marcas del resumen: el final,
+    constante R_FIJO = 1                ; un tramo fijo largo: n (2),
+    constante R_PC = 4                  ; la dirección pasa a ser otra: valor (4),
+    constante R_ALINEA = 5              ; ceros hasta un múltiplo de n (2),
+    constante R_ABSOLUTO = 6            ; lo que sigue va o no al archivo: sí (1),
+    constante R_ETIQUETA = 0x10         ; + clase (1 L_n, 2 T_n, 3 con nombre): una etiqueta: cuál (2),
+    constante R_SALTO = 0x40            ; + forma * 4 + clase: un salto a esa etiqueta: cuál (2),
+    constante R_FIJO_CORTO = 0x80       ; + n: un tramo fijo de menos de 128 octetos
+    constante F_JCC = 1                 ; la forma de un salto: condicional,
+    constante F_CORTO = 2               ; con «short» delante
+    constante F_CERCA = 4               ; o con «near»
+    variable seg_res: nat16
+    variable res_cabe, res_n: nat32
+    variable res_seg, res_off: nat16    ; por dónde se va leyendo
+    variable res_ok: bool               ; hay resumen (cabe, y todos los saltos van a una etiqueta)
+    variable apuntando: bool            ; se está apuntando (en la primera pasada)
+    variable fijo_n: nat16              ; octetos de tamaño fijo aún sin apuntar
     variable ei, efin: puntero a byte   ; por dónde va la cuenta y dónde acaba
     variable op_a, op_c: Op
 
@@ -217,7 +238,7 @@ módulo Ensambla
             s := seg_sim + r
             si leer_byte(s, 6) = largo_ entonces
                 i := 0
-                mientras i < largo_ y leer_byte(s, 7 + i) = n[i] hacer
+                mientras i < largo_ y leer_byte(s, 8 + i) = n[i] hacer
                     i := i + 1
                 fin
                 si i = largo_ entonces devolver r fin
@@ -247,8 +268,215 @@ módulo Ensambla
         fin
         r := entrada(n, largo_)
         si r = 0 entonces devolver falso fin
+        si leer_byte(seg_sim + r, 7) = 0 entonces devolver falso fin
         v := nat32(leer_palabra(seg_sim + r, 4)) << 16 ob leer_palabra(seg_sim + r, 2)
         devolver cierto
+    fin
+
+    ; la entrada de ese nombre en la tabla de dispersión; si no está, la crea (sin definir)
+    función entrada_o_nueva(n: puntero a byte, largo_: nat16): nat16
+        variable r, s, h, i: nat16
+        r := entrada(n, largo_)
+        si r <> 0 entonces devolver r fin
+        ; una entrada nueva: enlace (2), valor (4), largo (1), definida (1) y el nombre
+        r := libre_sim
+        libre_sim := libre_sim + (8 + largo_ + 15) div 16
+        si libre_sim >= PARRAFOS_SIM entonces error("demasiadas etiquetas") fin
+        s := seg_sim + r
+        h := dispersa(n, largo_) * 2
+        poner_palabra(s, 0, leer_palabra(seg_cubos, h))
+        poner_palabra(seg_cubos, h, r)
+        poner_palabra(s, 2, 0)
+        poner_palabra(s, 4, 0)
+        poner_palabra(s, 6, largo_)             ; (largo, y definida: 0)
+        para i desde 1 hasta largo_ hacer
+            poner_byte(s, 7 + i, n[i - 1])
+        fin
+        devolver r
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El resumen. En la primera pasada se apunta, en memoria lejana, lo que
+    ;  hace falta para repetir las cuentas sin volver a leer el archivo: tramos
+    ;  de tamaño fijo, etiquetas y saltos (lo único que cambia de tamaño de una
+    ;  pasada a otra). Las pasadas de en medio se hacen sobre ese resumen, que
+    ;  es mucho más rápido; la primera y la última, sobre el archivo.
+    ;  (Las marcas, con las constantes R_...: casi todo ocupa de uno a tres octetos.)
+    ; -------------------------------------------------------------------------
+    función r_byte(c: byte)
+        si res_n >= res_cabe entonces
+            res_ok := falso                     ; no cabe: se hará todo sobre el archivo
+            devolver
+        fin
+        poner_byte(seg_res + nat16(res_n >> 4), nat16(res_n) yb 15, c)
+        res_n := res_n + 1
+    fin
+
+    función r_palabra(v: nat16)
+        r_byte(byte(v))
+        r_byte(byte(v >> 8))
+    fin
+
+    función vuelca_fijo()
+        si fijo_n = 0 entonces devolver fin
+        si fijo_n < 128 entonces
+            r_byte(R_FIJO_CORTO ob fijo_n)
+        sino
+            r_byte(R_FIJO)
+            r_palabra(fijo_n)
+        fin
+        fijo_n := 0
+    fin
+
+    ; un tramo de n octetos que no cambia de tamaño
+    función apunta_fijo(n: nat32)
+        si no apuntando entonces devolver fin
+        mientras n > 0 hacer
+            si fijo_n >= 60000 entonces vuelca_fijo() fin
+            si n > 5000 entonces
+                fijo_n := fijo_n + 5000
+                n := n - 5000
+            sino
+                fijo_n := fijo_n + nat16(n)
+                n := 0
+            fin
+        fin
+    fin
+
+    ; una etiqueta (o el destino de un salto): su clase y cuál es
+    función apunta_etiqueta(marca: byte, forma: byte, clase: byte, cuál: nat16)
+        si no apuntando entonces devolver fin
+        vuelca_fijo()
+        si marca = R_SALTO entonces
+            r_byte(R_SALTO ob (forma << 2) ob clase)
+        sino
+            r_byte(R_ETIQUETA + clase)
+        fin
+        r_palabra(cuál)
+    fin
+
+    ; la dirección pasa a ser v (org, absolute, vstart=)
+    función pon_pc(v: nat32)
+        si apuntando entonces
+            si e_sim entonces
+                ; una dirección con etiquetas («absolute _vacio»): solo vale el
+                ; resumen si no mueve nada (la etiqueta está justo aquí)
+                si v <> pc entonces
+                    res_ok := falso
+                    apuntando := falso
+                fin
+            sino
+                vuelca_fijo()
+                r_byte(R_PC)
+                r_palabra(nat16(v))
+                r_palabra(nat16(v >> 16))
+            fin
+        fin
+        pc := v
+    fin
+
+    función r_lee(): byte
+        variable c: byte
+        c := leer_byte(res_seg, res_off)
+        res_off := res_off + 1
+        si res_off = 16 entonces
+            res_off := 0
+            res_seg := res_seg + 1
+        fin
+        devolver c
+    fin
+
+    función r_lee_palabra(): nat16
+        variable v: nat16
+        v := r_lee()
+        devolver v ob (nat16(r_lee()) << 8)
+    fin
+
+    ; una pasada sobre el resumen: lo mismo que una sobre el archivo
+    función pasada_rápida()
+        variable marca, forma, clase, bit: byte
+        variable cuál, d, n: nat16
+        variable v: nat32
+        variable está, largo_: bool
+        pc := 0
+        pos := 0
+        absoluto := falso
+        cambio := falso
+        res_seg := seg_res
+        res_off := 0
+        mientras cierto hacer
+            marca := r_lee()
+            si marca >= R_FIJO_CORTO entonces
+                n := marca yb 0x7F
+                pc := pc + n
+                si no absoluto entonces pos := pos + n fin
+            sino si marca >= R_SALTO entonces
+                forma := (marca >> 2) yb 7
+                clase := marca yb 3
+                cuál := r_lee_palabra()
+                está := cierto
+                si clase = 1 entonces
+                    bit := 1 << (cuál yb 7)
+                    está := visto_L[cuál >> 3] yb bit <> 0
+                    d := leer_palabra(seg_L, cuál * 2)
+                sino si clase = 2 entonces
+                    bit := 1 << (cuál yb 7)
+                    está := visto_T[cuál >> 3] yb bit <> 0
+                    d := leer_palabra(seg_T, cuál * 2)
+                sino
+                    está := leer_byte(seg_sim + cuál, 7) <> 0
+                    d := leer_palabra(seg_sim + cuál, 2)
+                fin
+                d := d - (nat16(pc) + 2)
+                ; (lo que no está definido se supone cerca: el error lo dirá la última pasada)
+                largo_ := forma yb F_CERCA <> 0 o (forma yb F_CORTO = 0 y no (d <= 0x7F o d >= 0xFF80 o no está))
+                n := 2
+                si largo_ entonces
+                    n := 3
+                    si forma yb F_JCC <> 0 entonces n := 5 fin
+                fin
+                pc := pc + n
+                si no absoluto entonces pos := pos + n fin
+            sino si marca > R_ETIQUETA entonces
+                clase := marca - R_ETIQUETA
+                cuál := r_lee_palabra()
+                si clase = 1 entonces
+                    si leer_palabra(seg_L, cuál * 2) <> nat16(pc) entonces
+                        cambio := cierto
+                        poner_palabra(seg_L, cuál * 2, nat16(pc))
+                    fin
+                sino si clase = 2 entonces
+                    si leer_palabra(seg_T, cuál * 2) <> nat16(pc) entonces
+                        cambio := cierto
+                        poner_palabra(seg_T, cuál * 2, nat16(pc))
+                    fin
+                sino
+                    d := seg_sim + cuál
+                    si leer_palabra(d, 2) <> nat16(pc) o leer_palabra(d, 4) <> nat16(pc >> 16) entonces
+                        cambio := cierto
+                        poner_palabra(d, 2, nat16(pc))
+                        poner_palabra(d, 4, nat16(pc >> 16))
+                    fin
+                fin
+            sino si marca = R_FIJO entonces
+                n := r_lee_palabra()
+                pc := pc + n
+                si no absoluto entonces pos := pos + n fin
+            sino si marca = R_PC entonces
+                v := r_lee_palabra()
+                pc := v ob (nat32(r_lee_palabra()) << 16)
+            sino si marca = R_ALINEA entonces
+                n := r_lee_palabra()
+                mientras nat16(pos) yb (n - 1) <> 0 hacer
+                    pc := pc + 1
+                    pos := pos + 1
+                fin
+            sino si marca = R_ABSOLUTO entonces
+                absoluto := r_lee() <> 0
+            sino
+                romper                          ; R_FIN
+            fin
+        fin
     fin
 
     ; una etiqueta, aquí (en pc)
@@ -267,6 +495,7 @@ módulo Ensambla
                 si leer_palabra(seg_L, i * 2) <> nat16(pc) entonces cambio := cierto fin
             fin
             poner_palabra(seg_L, i * 2, nat16(pc))
+            apunta_etiqueta(R_ETIQUETA, 0, 1, i)
             devolver
         fin
         num := número_de(n, largo_, 'T', MAX_T)
@@ -281,32 +510,23 @@ módulo Ensambla
                 si leer_palabra(seg_T, i * 2) <> nat16(pc) entonces cambio := cierto fin
             fin
             poner_palabra(seg_T, i * 2, nat16(pc))
+            apunta_etiqueta(R_ETIQUETA, 0, 2, i)
             devolver
         fin
-        r := entrada(n, largo_)
-        si r <> 0 entonces
+        r := entrada_o_nueva(n, largo_)
+        s := seg_sim + r
+        si leer_byte(s, 7) <> 0 entonces
             si primera entonces error2("etiqueta repetida: ", n) fin
-            s := seg_sim + r
             si leer_palabra(s, 2) <> nat16(pc) o leer_palabra(s, 4) <> nat16(pc >> 16) entonces
                 cambio := cierto
             fin
         sino
-            ; una entrada nueva: enlace (2), valor (4), largo (1) y el nombre
-            r := libre_sim
-            libre_sim := libre_sim + (7 + largo_ + 15) div 16
-            si libre_sim >= PARRAFOS_SIM entonces error("demasiadas etiquetas") fin
-            s := seg_sim + r
-            h := dispersa(n, largo_) * 2
-            poner_palabra(s, 0, leer_palabra(seg_cubos, h))
-            poner_palabra(seg_cubos, h, r)
-            poner_byte(s, 6, largo_)
-            para i desde 1 hasta largo_ hacer
-                poner_byte(s, 6 + i, n[i - 1])
-            fin
+            poner_byte(s, 7, 1)
             cambio := cierto
         fin
         poner_palabra(s, 2, nat16(pc))
         poner_palabra(s, 4, nat16(pc >> 16))
+        apunta_etiqueta(R_ETIQUETA, 0, 3, r)
     fin
 
     ; ---- las cuentas: | ^ & << >> + - * / % y paréntesis, en 32 bits ----
@@ -624,6 +844,10 @@ módulo Ensambla
             si final entonces poner_car(sal, x) fin
         fin
         pc := pc + 1
+        si apuntando entonces
+            fijo_n := fijo_n + 1
+            si fijo_n >= 60000 entonces vuelca_fijo() fin
+        fin
     fin
 
     función w(v: nat16)
@@ -791,11 +1015,53 @@ módulo Ensambla
         fin
     fin
 
+    ; apunta en el resumen un salto a la etiqueta escrita en [p, fin)
+    función apunta_salto(p: puntero a byte, fin_: puntero a byte, forma: byte)
+        variable j: puntero a byte
+        variable num: ent32
+        variable m, n: nat16
+        recorta(p, fin_)
+        j := p
+        mientras j < fin_ y es_de_nombre(valor(j)) hacer
+            j := j + 1
+        fin
+        n := fin_ - p
+        si j < fin_ o n = 0 o (p[0] >= '0' y p[0] <= '9') entonces
+            res_ok := falso                     ; una cuenta: sin resumen
+            apuntando := falso
+            devolver
+        fin
+        m := 0
+        si p[0] = '.' entonces
+            copiar(nom, ambito)
+            m := longitud(nom)
+        fin
+        si m + n >= 199 entonces error("etiqueta demasiado larga") fin
+        mientras p < fin_ hacer
+            nom[m] := valor(p)
+            m := m + 1
+            p := p + 1
+        fin
+        nom[m] := 0
+        num := número_de(nom, m, 'L', MAX_L)
+        si num >= 0 entonces
+            apunta_etiqueta(R_SALTO, forma, 1, nat16(num))
+            devolver
+        fin
+        num := número_de(nom, m, 'T', MAX_T)
+        si num >= 0 entonces
+            apunta_etiqueta(R_SALTO, forma, 2, nat16(num))
+            devolver
+        fin
+        apunta_etiqueta(R_SALTO, forma, 3, entrada_o_nueva(nom, m))
+    fin
+
     ; jmp, call, los saltos condicionales y loop/jcxz
     función i_salto(clase: byte, cod: byte, p: puntero a byte, fin_: puntero a byte)
         variable destino: nat32
         variable d: nat16
-        variable llega, corto_, cerca: bool
+        variable llega, corto_, cerca, era: bool
+        variable forma: byte
         recorta(p, fin_)
         corto_ := falso
         cerca := falso
@@ -837,6 +1103,16 @@ módulo Ensambla
             devolver
         fin
         si corto_ y no llega y final entonces error("el salto corto no llega") fin
+        si apuntando entonces
+            ; al resumen: a qué etiqueta va (si el destino no es una etiqueta sola, no hay resumen)
+            forma := 0
+            si clase = C_JCC entonces forma := F_JCC fin
+            si corto_ entonces forma := forma ob F_CORTO fin
+            si cerca entonces forma := forma ob F_CERCA fin
+            apunta_salto(p, fin_, forma)
+        fin
+        era := apuntando
+        apuntando := falso
         si cerca o (no corto_ y no llega) entonces
             si clase = C_JCC entonces
                 b(0x70 + (cod xob 1))
@@ -848,6 +1124,7 @@ módulo Ensambla
             si clase = C_JMP entonces b(0xEB) sino b(0x70 + cod) fin
             b(byte(d))
         fin
+        apuntando := era
     fin
 
     función i_datos(tam: byte, p: puntero a byte, fin_: puntero a byte)
@@ -883,10 +1160,24 @@ módulo Ensambla
     fin
 
     función alinea(n: nat32)
+        variable era: bool
         si n = 0 o n yb (n - 1) <> 0 entonces error("se alinea a una potencia de 2") fin
+        si apuntando entonces
+            si n > 0x8000 entonces
+                res_ok := falso
+                apuntando := falso
+            sino
+                vuelca_fijo()
+                r_byte(R_ALINEA)
+                r_palabra(nat16(n))
+            fin
+        fin
+        era := apuntando
+        apuntando := falso
         mientras pos yb (n - 1) <> 0 hacer
             b(0)
         fin
+        apuntando := era
     fin
 
     función i_section(p: puntero a byte, fin_: puntero a byte)
@@ -895,6 +1186,11 @@ módulo Ensambla
         ; otra sección: sigue en el archivo donde iba (alineada), pero sus
         ; direcciones vuelven a contar desde «vstart»
         absoluto := falso
+        si apuntando entonces
+            vuelca_fijo()
+            r_byte(R_ABSOLUTO)
+            r_byte(0)
+        fin
         n := 0
         mientras cierto hacer
             mientras p < fin_ y es_blanco(valor(p)) hacer
@@ -909,7 +1205,7 @@ módulo Ensambla
                 si empieza(p, j, "align=") entonces
                     alinea(cuenta(p + 6, j))
                 sino si empieza(p, j, "vstart=") entonces
-                    pc := cuenta(p + 7, j)
+                    pon_pc(cuenta(p + 7, j))
                 sino
                     error("de «section» solo entiendo «vstart=» y «align=»")
                 fin
@@ -998,6 +1294,7 @@ módulo Ensambla
                 veces := cuenta(p, fin_) * cod
                 si absoluto entonces
                     pc := pc + veces
+                    apunta_fijo(veces)
                 sino
                     mientras veces > 0 hacer
                         b(0)
@@ -1008,11 +1305,16 @@ módulo Ensambla
             caso C_NADA:
                 devolver
             caso C_ORG:
-                pc := cuenta(p, fin_)
+                pon_pc(cuenta(p, fin_))
                 devolver
             caso C_ABSOLUTE:
                 absoluto := cierto
-                pc := cuenta(p, fin_)
+                pon_pc(cuenta(p, fin_))
+                si apuntando entonces
+                    vuelca_fijo()
+                    r_byte(R_ABSOLUTO)
+                    r_byte(1)
+                fin
                 devolver
             caso C_SECTION:
                 i_section(p, fin_)
@@ -1184,6 +1486,8 @@ módulo Ensambla
         absoluto := falso
         ambito[0] := 0
         cambio := falso
+        apuntando := primera y res_ok
+        fijo_n := 0
         nl := 0
         n := 0
         mientras cierto hacer
@@ -1203,6 +1507,11 @@ módulo Ensambla
                 n := n + 1
             fin
         fin
+        si apuntando entonces
+            vuelca_fijo()
+            r_byte(R_FIN)
+        fin
+        apuntando := falso
     fin
 
     función pide(párrafos: nat16): nat16
@@ -1235,13 +1544,22 @@ módulo Ensambla
         seg_sim := pide(PARRAFOS_SIM)
         borrar_bloque(seg_cubos, CUBOS)
         libre_sim := 1
+        ; el resumen: lo que quede de memoria, hasta 192 K (si no hay ni 32 K, sin él)
+        res_ok := falso
+        res_cabe := 0x3000
+        mientras res_cabe >= 0x800 y no res_ok hacer
+            seg_res := pedir(nat16(res_cabe))
+            si seg_res <> 0 entonces res_ok := cierto sino res_cabe := res_cabe - 0x400 fin
+        fin
+        res_cabe := res_cabe * 16 - 16
+        res_n := 0
         ; se pasa por el archivo hasta que ninguna etiqueta cambia de sitio: en
         ; cada pasada un salto va corto si llega, contando con dónde están ahora
         ; las etiquetas (igual que NASM: ver ensambla.py)
         primera := cierto
         pasadas := 0
         mientras cierto hacer
-            pasada(m)
+            si primera o no res_ok entonces pasada(m) sino pasada_rápida() fin
             primera := falso
             pasadas := pasadas + 1
             si no cambio entonces romper fin
