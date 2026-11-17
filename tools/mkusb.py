@@ -88,7 +88,11 @@ def main():
                      ('HSPRED.COM', 'HSPRED.COM'), ('CONFRED.COM', 'CONFRED.COM'),
                      ('PING.COM', 'PING.COM'), ('DESCARGAR.COM', 'DESCARGA.COM'),
                      ('CONSOLA.COM', 'CONSOLA.COM'), ('ACTUALIZAR.COM', 'ACTUALIZ.COM'),
-                     ('RED.INI', 'RED.INI')):
+                     ('RED.INI', 'RED.INI'),
+                     # [HISPA-486] los programas de Windows de consola
+                     # (docs/486/HISPA-486.md): HW32 y su MSVCRT.DLL, juntos
+                     # (HW32 busca las DLL en su carpeta)
+                     ('HW32.COM', 'HW32.COM'), ('MSVCRT.DLL', 'MSVCRT.DLL')):
         cp(os.path.join(B, src), 'HISPADOS/' + dst)
     # los programas de Hispa Ventanas (.HVP): los juegos (grupo 0 en la
     # cabecera), en \HISPADOS\JUEGOS; los demás (1 Accesorios, 2 Sonido,
