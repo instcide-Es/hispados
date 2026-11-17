@@ -341,7 +341,7 @@ alineada a una página, con todo lo que ven las controladoras. La
 ponerlas en marcha, el teclado, el ratón y los mandos, el análisis del
 descriptor de informe HID, el reconocimiento del adaptador de red, `/INFO` y
 los mensajes; unos 17 KB) va en el fichero detrás de `.text`, pero se
-ejecuta en `CS:INIT_ORG` (A800h; B000h y AC00h hasta el 17/11/2026), por encima de
+ejecuta en `CS:INIT_ORG` (A700h; B000h hasta el 17/11/2026), por encima de
 donde irá la zona, y **se descarta**: la zona se monta justo encima de lo
 residente, donde estaba `.init` en el fichero. Detrás de `.init` va en el
 fichero el bloque residente de la red (`.red`), que durante la
@@ -378,7 +378,7 @@ y ella queda un hueco de 0 a 4 KB (todo dentro de una página) que antes se
 perdía: la zona útil bailaba entre 22,4 y 26,4 KB según dónde cargara DOS
 el driver. Ahora `zalloc` mira primero en ese hueco (`gtop`, `gend`), y lo
 que cabe ahí (colas, TD, contextos de aparato, el bloque de la red) no
-gasta zona: entre los dos hay siempre unos 25,5 KB. Con el xHCI son 11,75 KB
+gasta zona: entre los dos hay siempre unos 25 KB. Con el xHCI son 11,75 KB
 fijos, 1 KB por aparato si sus contextos son de 32 octetos (2 KB si son de
 64) y 2,5 KB del adaptador de red; con controladoras clásicas, 1,5 KB más,
 y 4 KB de la lista de tramas de cada UHCI con algo conectado. Lo que no

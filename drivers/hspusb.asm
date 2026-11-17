@@ -197,7 +197,7 @@ PIPE_NST    equ PIPE_N + 1            ; de recepción (bulk) y la de avisos (int
 POOL_N      equ 12                    ; dispositivos a la vez (concentradores incluidos)
 XPOOL_N     equ 8                     ; ...de ellos, en el xHCI (los primeros de la reserva:
                                       ; anillo de EP0, contexto de salida y slot cada uno)
-INIT_ORG    equ 0xA800                ; dónde se ejecuta la inicialización (.init)
+INIT_ORG    equ 0xA700                ; dónde se ejecuta la inicialización (.init)
 MAX_SLOTS   equ XPOOL_N
 HUB_N       equ 8                     ; concentradores a la vez
 HUB_DEPTH   equ 3                     ; niveles de concentradores encadenados
