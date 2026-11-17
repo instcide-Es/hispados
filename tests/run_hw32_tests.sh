@@ -277,8 +277,44 @@ if [ $HAYC = 1 ] && [ -f $NASMW ] && make -s $B/MSVCRT.DLL >/dev/null 2>&1; then
   checkn "Hispa-486: falta"
   checkn "HSPDPMI: excepción"
   cp $T/log1.txt $T/log.txt
+fi
+
+# ---- un compilador de C de Windows (TCC 0.9.27) dentro de Hispa-DOS: compila
+# un programa y el programa corre. DOS recorta los nombres largos a 8+3, así
+# que libtcc1-32.a va como LIBTCC1-.A ----
+TCCW=tests/thirdparty/dl/win32-tcc/tcc
+if [ $HAYC = 1 ] && [ -f $TCCW/tcc.exe ] && [ -f $T/c.img ]; then
+  echo "-- TCC para Win32 --"
+  export MTOOLSRC=$T/mtoolsrc
+  mmd c:TCC 2>/dev/null
+  mcopy -o -s $TCCW/tcc.exe $TCCW/libtcc.dll $TCCW/include $TCCW/lib c:TCC/ >/dev/null 2>&1
+  mcopy -o $TCCW/lib/libtcc1-32.a "c:TCC/LIB/LIBTCC1-.A"
+  mcopy -o $B/HW32.COM c:HW32.COM
+  mcopy -o $B/MSVCRT.DLL c:MSVCRT.DLL
+  printf '#include <stdio.h>\r\nint main(int argc, char **argv) {\r\n  int i, s = 0;\r\n  for (i = 1; i <= 100; i++) s += i;\r\n  printf("Hola desde TCC: %%d (%%s)\\n", s, argv[1]);\r\n  return 3;\r\n}\r\n' > $T/HOLA.C
+  mcopy -o $T/HOLA.C c:HOLA.C
+  unset MTOOLSRC
+  { sleep 7
+    printf 'A:\\HISPADOS\\HSPDPMI\r'; sleep 2
+    printf 'C:\r'; sleep 1
+    printf 'PATH C:\;C:\\TCC;A:\\HISPADOS\r'; sleep 1
+    printf 'TCC -v\r'; sleep 8
+    printf 'TCC HOLA.C -o HOLA.EXE\r'; sleep 25
+    printf 'HOLA uno\r'; sleep 5
+    printf 'IF ERRORLEVEL 3 ECHO TCC-NIVEL-3\r'; sleep 1
+  } | timeout 80 qemu-system-i386 -display none -serial stdio -monitor none -parallel none -m 32 \
+      -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
+      -boot a -no-reboot > $T/raw 2>&1
+  tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
+  check "tcc version 0.9.27 (i386 Windows)"
+  checkn "tcc: error"
+  check "Hola desde TCC: 5050 (uno)"
+  check "TCC-NIVEL-3"
+  checkn "Hispa-486: falta"
+  checkn "HSPDPMI: excepción"
+  cp $T/log1.txt $T/log.txt
 else
-  echo "  (sin NASM para Win32: tests/thirdparty/fetch_win32.sh; o sin gcc de 32 bits)"
+  echo "  (sin TCC para Win32: tests/thirdparty/fetch_win32.sh)"
 fi
 if [ $fail = 0 ]; then echo "Resultado: todo OK"; else echo "Resultado: FALLOS"; cat $T/log.txt | tail -40; fi
 rm -rf $T

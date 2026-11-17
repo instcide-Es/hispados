@@ -1372,6 +1372,185 @@ pon_cifras_temp:
         mov dword [gs:edi], '.TMP'
         mov byte [gs:edi + 4], 0
         ret
+; ---- SearchPathA (ruta, nombre, extensión, n, buf, *parte): busca el archivo
+; en la lista de carpetas «ruta» (con ;) o, si es NULL, en la del programa, en
+; la de ahora y en las del PATH ----
+k_SearchPathA:
+        ; el nombre (y la extensión si no la lleva) a b_sp_nom
+        mov esi, [ebp + 4]
+        mov edi, b_sp_nom
+        xor ebx, ebx                ; BL: ¿punto en la última parte? BH: ¿con carpeta?
+        mov ecx, 200
+.n:
+        mov al, [es:esi]
+        test al, al
+        jz .n_f
+        mov [edi], al
+        cmp al, '.'
+        jne .n1
+        mov bl, 1
+.n1:
+        cmp al, '\'
+        je .n_sep
+        cmp al, ':'
+        jne .n2
+.n_sep:
+        mov bh, 1
+        xor bl, bl
+.n2:
+        inc esi
+        inc edi
+        loop .n
+.n_f:
+        mov byte [edi], 0
+        test bl, bl
+        jnz .con_ext
+        mov esi, [ebp + 8]
+        test esi, esi
+        jz .con_ext
+.e:
+        mov al, [es:esi]
+        mov [edi], al
+        inc esi
+        inc edi
+        test al, al
+        jnz .e
+.con_ext:
+        ; con carpeta en el nombre: solo ese
+        test bh, bh
+        jz .lista
+        mov byte [b_sp_dir], 0
+        call sp_prueba
+        jnc .hallado
+        jmp .no
+.lista:
+        mov esi, [ebp]
+        test esi, esi
+        jz .por_defecto
+        call sp_lista               ; ES:ESI la lista
+        jnc .hallado
+        jmp .no
+.por_defecto:
+        mov esi, exe_dir
+        mov edi, b_sp_dir
+.d:
+        lodsb
+        mov [edi], al
+        inc edi
+        test al, al
+        jnz .d
+        call sp_prueba
+        jnc .hallado
+        mov byte [b_sp_dir], 0
+        call sp_prueba
+        jnc .hallado
+        mov edi, s_path_env
+        call busca_env
+        jc .no
+        call sp_lista
+        jnc .hallado
+.no:
+        mov dword [ult_error], 2
+        xor eax, eax
+        ret
+.hallado:
+        mov esi, TB_SAL
+        mov edi, [ebp + 16]
+        mov ecx, [ebp + 12]
+        call tb_a_prog
+        cmp eax, [ebp + 12]
+        jae .x
+        mov ecx, [ebp + 20]
+        test ecx, ecx
+        jz .x
+        mov edx, edi
+.p:
+        mov bl, [es:edx]
+        test bl, bl
+        jz .x
+        inc edx
+        cmp bl, '\'
+        jne .p
+        mov [es:ecx], edx
+        jmp .p
+.x:
+        ret
+s_path_env  db 'PATH', 0
+; prueba cada carpeta de la lista ES:ESI (con ;): CF=0 si está (TB_SAL)
+sp_lista:
+.t:
+        cmp byte [es:esi], 0
+        je .no
+        mov edi, b_sp_dir
+.c:
+        mov al, [es:esi]
+        test al, al
+        jz .c_f
+        inc esi
+        cmp al, ';'
+        je .c_f
+        mov [edi], al
+        inc edi
+        cmp edi, b_sp_dir + 120
+        jb .c
+.c_f:
+        mov byte [edi], 0
+        cmp edi, b_sp_dir
+        je .t
+        push esi
+        call sp_prueba
+        pop esi
+        jnc .x
+        jmp .t
+.no:
+        stc
+.x:
+        ret
+; b_sp_dir + \ + b_sp_nom: ¿existe (y no es carpeta)? CF=0 y su nombre
+; completo en TB_SAL
+sp_prueba:
+        mov esi, b_sp_dir
+        mov edi, TB_NOM1
+.d:
+        lodsb
+        test al, al
+        jz .d_f
+        mov [gs:edi], al
+        inc edi
+        jmp .d
+.d_f:
+        cmp edi, TB_NOM1
+        je .nom
+        mov al, [gs:edi - 1]
+        cmp al, '\'
+        je .nom
+        cmp al, ':'
+        je .nom
+        mov byte [gs:edi], '\'
+        inc edi
+.nom:
+        mov esi, b_sp_nom
+.n:
+        lodsb
+        mov [gs:edi], al
+        inc edi
+        test al, al
+        jnz .n
+        mov word [rm_dx], TB_NOM1
+        mov word [rm_ax], 0x4300
+        call dos
+        jc .no
+        test byte [rm_cx], 0x10
+        jnz .no
+        mov dword [rm_esi], TB_NOM1
+        mov dword [rm_edi], TB_SAL
+        mov word [rm_ax], 0x6000
+        call dos
+        ret
+.no:
+        stc
+        ret
+
 k_GetWindowsDirectoryA:             ; (buf, n)
 k_GetSystemDirectoryA:
         mov esi, s_dir_win
@@ -3211,6 +3390,7 @@ funciones:
         FUNC k_GetDiskFreeSpaceA, 20, 'GetDiskFreeSpaceA'
         FUNC k_GetTempPathA, 8, 'GetTempPathA'
         FUNC k_GetTempFileNameA, 16, 'GetTempFileNameA'
+        FUNC k_SearchPathA, 24, 'SearchPathA'
         FUNC k_GetWindowsDirectoryA, 8, 'GetWindowsDirectoryA'
         FUNC k_GetSystemDirectoryA, 8, 'GetSystemDirectoryA'
         FUNC k_FindFirstFileA, 8, 'FindFirstFileA'
@@ -3405,3 +3585,5 @@ filtro_exc  dd 0
 b_mem       times 48 db 0
 b_hex8      times 12 db 0
 b_nombre    times 64 db 0
+b_sp_nom    times 210 db 0
+b_sp_dir    times 130 db 0

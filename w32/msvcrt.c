@@ -75,6 +75,7 @@ u32 WINAPI GetModuleFileNameA(HANDLE, char *, u32);
 #define EMFILE 24
 #define ENOSPC 28
 #define ERANGE 34
+#define ECHILD_ 10
 
 static int errno_v;
 int *_errno(void) { return &errno_v; }
@@ -1467,6 +1468,74 @@ void *bsearch(const void *k, const void *base, size_t n, size_t t, int (*cmp)(co
   return NULL;
 }
 
+/* ---- setjmp y longjmp (el jmp_buf de Microsoft: Ebp, Ebx, Edi, Esi, Esp,
+ * Eip, Registration, TryLevel...). Sin SEH: se vuelve a la vuelta de setjmp
+ * con los registros que guardan las llamadas ---- */
+__attribute__((naked)) int _setjmp3(void *jb, int n, ...) {
+  __asm__("movl 4(%esp), %edx\n"
+          "movl %ebp, 0(%edx)\n movl %ebx, 4(%edx)\n movl %edi, 8(%edx)\n movl %esi, 12(%edx)\n"
+          "leal 4(%esp), %ecx\n movl %ecx, 16(%edx)\n"   /* la pila tras volver */
+          "movl (%esp), %ecx\n movl %ecx, 20(%edx)\n"    /* la vuelta */
+          "movl %fs:0, %ecx\n movl %ecx, 24(%edx)\n movl $-1, 28(%edx)\n"
+          "xorl %eax, %eax\n ret\n");
+}
+__attribute__((naked)) int _setjmp(void *jb) { __asm__("jmp _setjmp3"); }
+__attribute__((naked)) void longjmp(void *jb, int v) {
+  __asm__("movl 4(%esp), %edx\n movl 8(%esp), %eax\n"
+          "testl %eax, %eax\n jnz 1f\n incl %eax\n1:\n"
+          "movl 0(%edx), %ebp\n movl 4(%edx), %ebx\n movl 8(%edx), %edi\n movl 12(%edx), %esi\n"
+          "movl 16(%edx), %esp\n jmp *20(%edx)\n");
+}
+
+/* ---- el coprocesador (x87): la palabra de control. Las máscaras de
+ * Microsoft (_MCW_EM 0x8001F, _MCW_RC 0x300, _MCW_PC 0x30000) no son los bits
+ * del x87: se traducen ---- */
+static u32 cw_a_ms(u16 cw) {
+  u32 r = 0;
+  if (cw & 0x01) r |= 0x10;      /* inválida */
+  if (cw & 0x02) r |= 0x80000;   /* denormal */
+  if (cw & 0x04) r |= 0x08;      /* división por cero */
+  if (cw & 0x08) r |= 0x04;      /* desbordamiento */
+  if (cw & 0x10) r |= 0x02;      /* subdesbordamiento */
+  if (cw & 0x20) r |= 0x01;      /* inexacta */
+  switch ((cw >> 10) & 3) { case 1: r |= 0x100; break; case 2: r |= 0x200; break; case 3: r |= 0x300; break; }
+  switch ((cw >> 8) & 3) { case 0: r |= 0x20000; break; case 2: r |= 0x10000; break; }
+  return r;
+}
+static u16 ms_a_cw(u32 m, u16 cw) {
+  cw &= ~0x0F3F;
+  if (m & 0x10) cw |= 0x01; if (m & 0x80000) cw |= 0x02; if (m & 0x08) cw |= 0x04;
+  if (m & 0x04) cw |= 0x08; if (m & 0x02) cw |= 0x10; if (m & 0x01) cw |= 0x20;
+  cw |= ((m & 0x100) ? 1 : 0) << 10 | ((m & 0x200) ? 2 : 0) << 10;
+  cw |= (m & 0x20000) ? 0 : (m & 0x10000) ? 2 << 8 : 3 << 8;
+  return cw;
+}
+unsigned _controlfp(unsigned nuevo, unsigned mascara) {
+  u16 cw; __asm__ volatile("fnstcw %0" : "=m"(cw));
+  u32 v = cw_a_ms(cw);
+  if (mascara) {
+    v = (v & ~mascara) | (nuevo & mascara);
+    u16 c2 = ms_a_cw(v, cw);
+    __asm__ volatile("fldcw %0" : : "m"(c2));
+  }
+  return v;
+}
+unsigned _control87(unsigned n, unsigned m) { return _controlfp(n, m); }
+unsigned _clearfp(void) { u16 sw; __asm__ volatile("fnstsw %0; fnclex" : "=m"(sw)); return sw & 0x3F; }
+unsigned _statusfp(void) { u16 sw; __asm__ volatile("fnstsw %0" : "=m"(sw)); return sw & 0x3F; }
+void _fpreset(void) { __asm__ volatile("fninit"); }
+/* el manejador de excepciones de Visual C++ (sin SEH: no se llega a usar) */
+int _except_handler3(void *a, void *b, void *c, void *d) { return 1; }
+int _except_handler4_common(void *a, void *b, void *c, void *d, void *e, void *f) { return 1; }
+
+/* ---- otros programas: aún no (Hispa-486 todavía no lanza procesos) ---- */
+int _spawnvp(int modo, const char *n, const char *const *argv) { errno_v = ENOENT; return -1; }
+int _spawnv(int modo, const char *n, const char *const *argv) { errno_v = ENOENT; return -1; }
+int _spawnl(int modo, const char *n, ...) { errno_v = ENOENT; return -1; }
+int _cwait(int *r, int h, int a) { errno_v = ECHILD_; return -1; }
+int system(const char *c) { if (!c) return 0; errno_v = ENOENT; return -1; }
+int __lconv_init(void) { return 0; }
+
 /* ---- consola (conio) ---- */
 int _getch(void) {
   u8 c; u32 r;
@@ -1491,5 +1560,6 @@ int WINAPI DllMain(HANDLE h, u32 razon, void *x) {
   _iob[2].flag |= F_SINBUF;
   for (int c = 0; c < 256; c++) tabla_ctype[c + 1] = _isctype(c, 0x1FF);
   _pctype = tabla_ctype + 1;
+  prepara_args();             /* (_acmdln, __argv y _environ, listos desde el principio) */
   return 1;
 }
