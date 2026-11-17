@@ -118,7 +118,7 @@ cp "$IMG" $T/f.img
 # sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
 # los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
 # comprueba)
-for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM; do
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM ::HISPADOS/EQUIPO.COM; do
   mdel -i $T/f.img $f > /dev/null 2>&1
 done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
@@ -238,7 +238,7 @@ fi
 
 check "Teclado español instalado."
 # -- el grupo: Pintura, con su nombre y su icono --
-chk $T/a1.ppm tam 800 600 marco 224 164 452 207 activa titulo 224 164 activa "Accesorios" \
+chk $T/a1.ppm tam 800 600 marco 224 164 452 293 activa titulo 224 164 activa "Accesorios" \
   texto 262 343 0 8 fina "Pintura" px 284 304 1 "icono de Pintura: el marco de la hoja" \
   px 281 317 12 "icono de Pintura: el recuadro añil"
 # -- la ventana recién abierta --
@@ -332,7 +332,7 @@ cp "$IMG" $T/f.img
 # sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
 # los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
 # comprueba)
-for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM; do
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM ::HISPADOS/EQUIPO.COM; do
   mdel -i $T/f.img $f > /dev/null 2>&1
 done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS

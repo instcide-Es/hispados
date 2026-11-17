@@ -138,7 +138,7 @@ fi
 
 check "Teclado español instalado."
 # -- el grupo: un acceso por módulo, con su nombre y su icono --
-chk $T/j1.ppm tam 800 600 marco 248 188 452 207 activa titulo 248 188 activa "Juegos" \
+chk $T/j1.ppm tam 800 600 marco 248 188 452 217 activa titulo 248 188 activa "Juegos" \
   texto 286 291 9 12 fina "Culebra" texto 386 291 0 8 fina "Campo de" texto 398 306 0 8 fina "minas" \
   px 303 255 11 "icono de Culebra: el cuerpo, verde oliva" px 317 255 2 "icono de Culebra: la cabeza" \
   px 405 253 11 "icono de Campo de minas: una losa" px 426 251 10 "icono de Campo de minas: el banderín"
@@ -157,7 +157,7 @@ chk $T/j4.ppm texto 183 119 9 12 fina "ueva partida" texto 183 187 0 8 fina "elo
 chk $T/j5.ppm marco 120 60 204 283 activa titulo 120 60 activa "Campo de minas" \
   texto 156 118 0 9 negrita "10" px 222 126 10 "el rombo de arriba: centro ocre" px 222 118 12 "el rombo: añil (jugando)" \
   px 142 161 11 "una losa tapada" px 222 241 11 "otra losa tapada" px 131 150 1 "el marco del tablero"
-chk $T/j6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 386 291 9 12 fina "Campo de" texto 398 306 9 12 fina "minas" \
+chk $T/j6.ppm marco 248 188 452 217 activa titulo 248 188 activa "Juegos" texto 386 291 9 12 fina "Campo de" texto 398 306 9 12 fina "minas" \
   px 300 70 6 "donde estaba Campo de minas se ve otra vez el Centro"
 chk $T/j7.ppm marco 150 70 468 377 activa titulo 150 70 activa "Culebra" texto 160 123 0 8 fina "Puntos: 0"
 # -- salida --

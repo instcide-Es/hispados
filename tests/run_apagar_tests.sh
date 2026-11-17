@@ -285,7 +285,7 @@ orden 'MEM' 2
 orden 'ECHO FIN-V'; espera '^FIN-V' 20
 cierra
 cuadro v1
-chk $T/v2.ppm igual 400 332 32 32 $T/v2.ppm 560 460 0 marco 36 52 452 247 activa titulo 36 52 activa "Centro de programas"
+chk $T/v2.ppm igual 400 332 32 32 $T/v2.ppm 560 460 0 marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas"
 cuadro v3
 cuadro v4
 chk $T/v4.ppm igual 40 64 32 32 $T/v4.ppm 520 64 0

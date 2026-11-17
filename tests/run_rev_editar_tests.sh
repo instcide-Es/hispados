@@ -136,7 +136,7 @@ if [ -n "${VERBOSE:-}" ]; then for s in lleno w sp; do echo "--- $s"; scr $T/s_$
 cp "$IMG" $T/h.img
 dd if=/dev/zero of=$T/b.img bs=1k count=1440 status=none
 mformat -i $T/b.img -f 1440 ::
-head -c 30000 /dev/urandom | base64 > $T/DATOS.TXT
+head -c 12000 /dev/urandom | base64 > $T/DATOS.TXT
 python3 - $T <<'PYEOF'
 import struct, sys
 d = sys.argv[1]

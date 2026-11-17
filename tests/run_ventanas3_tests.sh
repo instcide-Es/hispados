@@ -126,7 +126,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   shot t12
   clic 551 382                              # flecha de abajo de la lista
   shot t13
-  doble 300 285; sleep 1.5                  # doble clic en README.TXT
+  doble 300 301; sleep 1.5                  # doble clic en README.TXT (tras «[A:\]»)
   shot t14
   # ---- maximizar, restaurar, mover, tamaño, minimizar ----
   clic 637 103
@@ -197,19 +197,19 @@ check "Teclado español instalado."
 check "Instalado: clientes de 16 y de 32 bits, memoria de XMS."
 # -- el Centro de programas --
 chk $T/t1.ppm tam 800 600 cursor 400 300 \
-  marco 36 52 452 247 activa titulo 36 52 activa "Centro de programas" \
+  marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
   texto 60 79 0 15 fina "rchivo" texto 140 79 0 15 fina "uda" \
   texto 66 155 9 12 fina "Principal" texto 166 155 0 8 fina "Accesorios" \
-  texto 286 155 0 8 fina "Juegos" texto 54 254 7 8 fina "Doble clic o Intro para abrir un grupo." \
-  px 582 12 7 "altavoz gris: no hay HSPSND" \
+  texto 286 155 0 8 fina "Juegos" texto 54 197 7 8 fina "Doble clic o Intro para abrir un grupo." \
+  px 655 12 7 "altavoz gris: no hay HSPSND" \
   px 468 60 8 "botón de cerrar del Centro" px 475 65 13 "aspa del botón de cerrar" \
   px 300 10 1 "barra superior" texto 736 5 8 4 fina "Salir" px 491 150 0 "sombra del Centro"
 # -- el grupo «Accesorios», en su ventana (alargada para que quepa la segunda
 # fila: Pintura, que es un módulo .HVP y entra sola) --
-chk $T/t1b.ppm marco 224 164 452 207 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
+chk $T/t1b.ppm marco 224 164 452 293 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
   texto 262 267 9 12 fina "Bloc de" texto 270 282 9 12 fina "notas" texto 350 267 0 8 fina "Calculadora" \
   texto 478 267 0 8 fina "Reloj" texto 574 267 0 8 fina "Sistema" texto 166 155 9 7 fina "Acceso" \
-  texto 262 343 0 8 fina "Pintura"
+  texto 262 343 0 8 fina "Pintura" texto 254 434 0 8 fina "de tareas"
 # -- Bloc de notas: escribir --
 chk $T/t2.ppm marco 150 90 520 340 activa titulo 150 90 activa "Bloc de notas - (sin nombre)" \
   titulo 36 52 no "Centro de programas" texto 174 117 0 15 fina "rchivo" \
@@ -223,7 +223,7 @@ chk $T/t5.ppm px 165 199 12 "«Guardar como...» marcado" texto 175 199 9 12 fin
 # -- diálogo de archivo --
 chk $T/t6.ppm marco 222 150 356 300 activa titulo 222 150 activa "Guardar como" \
   titulo 150 90 no "Bloc de notas - (sin nombre)" texto 240 187 0 8 fina "Nombre del archivo:" \
-  texto 240 237 0 8 fina "Carpeta: A:\\" texto 246 261 0 9 fina "KERNEL.SYS" \
+  texto 240 237 0 8 fina "Carpeta: A:\\" texto 246 277 0 9 fina "KERNEL.SYS" \
   texto 328 408 0 6 fina "Aceptar" texto 416 408 0 6 fina "Cancelar"
 chk $T/t7.ppm marco 150 90 520 340 activa titulo 150 90 activa "Bloc de notas - prueba.TXT"
 # -- portapapeles --
@@ -241,8 +241,8 @@ chk $T/t10b.ppm px 454 326 4 "foco en «Cancelar» tras dos Tab" px 274 326 6 "�
 chk $T/t11.ppm marco 150 90 520 340 activa titulo 150 90 activa "Bloc de notas - prueba.TXT" \
   texto 156 138 0 9 fina "Hola " px 204 144 4 "cursor de texto tras la X"
 # -- abrir: lista con barra de desplazamiento y doble clic --
-chk $T/t12.ppm titulo 222 150 activa "Abrir" texto 246 261 0 9 fina "KERNEL.SYS" texto 246 277 0 9 fina "COMMAND.COM"
-chk $T/t13.ppm texto 246 261 0 9 fina "COMMAND.COM" texto 246 277 0 9 fina "README.TXT"
+chk $T/t12.ppm titulo 222 150 activa "Abrir" texto 246 277 0 9 fina "KERNEL.SYS" texto 246 293 0 9 fina "COMMAND.COM"
+chk $T/t13.ppm texto 246 277 0 9 fina "COMMAND.COM" texto 246 293 0 9 fina "README.TXT"
 chk $T/t14.ppm titulo 150 90 activa "Bloc de notas - README.TXT" texto 164 138 0 9 fina "elcome to Hispa-DOS!"
 # -- maximizar y restaurar --
 chk $T/t15.ppm marco 0 28 800 572 activa titulo 0 28 activa "Bloc de notas - README.TXT" \
@@ -251,12 +251,12 @@ chk $T/t16.ppm marco 150 90 520 340 activa titulo 36 52 no "Centro de programas"
   px 723 471 2 "fondo, otra vez a la vista" texto 164 138 0 9 fina "elcome to Hispa-DOS!"
 # -- mover y cambiar de tamaño --
 chk $T/t17.ppm marco 190 130 520 340 activa titulo 190 130 activa "Bloc de notas - README.TXT" \
-  px 163 400 2 "fondo donde estaba la ventana" texto 54 254 7 8 fina "Doble clic o Int" \
+  px 163 400 2 "fondo donde estaba la ventana" texto 54 197 7 8 fina "Doble clic o Int" \
   texto 204 178 0 9 fina "elcome to Hispa-DOS!"
-chk $T/t18.ppm marco 190 130 479 299 activa px 675 439 2 "fondo donde llegaba la ventana" \
+chk $T/t18.ppm marco 190 130 479 299 activa px 695 450 2 "fondo donde llegaba la ventana" \
   px 659 300 15 "la barra de desplazamiento sigue al borde"
 # -- minimizar y recuperar --
-chk $T/t19.ppm titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" px 403 400 2 "fondo donde estaba el Bloc" \
+chk $T/t19.ppm titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" px 205 420 2 "fondo donde estaba el Bloc" \
   texto 20 578 8 2 fina "Bloc de not" px 58 554 9 "icono del Bloc minimizado"
 chk $T/t20.ppm marco 190 130 479 299 activa titulo 190 130 activa "Bloc de notas - README.TXT" \
   px 67 583 2 "el icono ya no está"
@@ -288,7 +288,7 @@ chk $T/t33.ppm marco 212 171 376 257 activa titulo 212 171 activa "Salir de Hisp
 chk $T/t34.ppm tam 720 400
 check "TRAS-SALIR"
 # -- VGA de 16 colores --
-chk $T/v1.ppm tam 640 480 cursor 320 240 marco 36 52 452 247 activa titulo 36 52 activa "Centro de programas" \
+chk $T/v1.ppm tam 640 480 cursor 320 240 marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
   texto 166 155 0 8 fina "Accesorios" px 600 300 8 "el grupo «Accesorios» sigue abierto"
 n=$(grep -c "Hispa Ventanas ha terminado." $T/log.txt)
 if [ "$n" = 2 ]; then ok "dos sesiones terminadas con su mensaje"; else ko "sesiones terminadas: $n (esperadas 2)"; fi

@@ -12,7 +12,7 @@ cp "$IMG" $T/f.img
 fail=0
 ok() { echo "  OK   $1"; }
 ko() { echo "  FAIL $1"; fail=1; }
-head -c 30000 /dev/urandom | base64 > $T/DATOS.TXT
+head -c 12000 /dev/urandom | base64 > $T/DATOS.TXT   # (cabe todo en los 183 K del disquete)
 # KWAJ 0 (sin comprimir) y 1 (XOR FFh), con nombre y extensión guardados
 python3 - $T <<'EOF'
 import struct, sys

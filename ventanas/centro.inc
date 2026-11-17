@@ -355,8 +355,8 @@ grupo_abrir:
         xor edx, edx
         div dword [vis_cols]
         imul eax, eax, CEN_FILA
-        add eax, 8
-        sub eax, [vis_alto]
+        add eax, 18                 ; [0.9.22] (la última fila puede llevar un
+        sub eax, [vis_alto]         ;  nombre en dos líneas: «Administrador…»)
         jle .x
         mov edx, [ebp+V_AL]
         add edx, eax

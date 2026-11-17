@@ -125,7 +125,7 @@ echo "  (disquete: $(mdir -i $T/f.img :: | tail -1 | sed 's/ *//'))"
 python3 tests/tools/mkhdd.py $T/c.img 16 > /dev/null
 mmd -i $HD ::DATOS ::DATOS/SUB ::PROG ::VIEJA ::VIEJA/DENTRO
 printf 'uno\r\n' > $T/UNO.TXT; printf 'dos dos\r\n' > $T/DOS.TXT; printf 'tres tres tres\r\n' > $T/TRES.TXT
-head -c 200000 /dev/urandom > $T/GRANDE.BIN
+head -c 120000 /dev/urandom > $T/GRANDE.BIN   # (tiene que caber en los 183 K libres del disquete)
 mcopy -i $HD $T/UNO.TXT $T/DOS.TXT $T/GRANDE.BIN ::DATOS/
 mcopy -i $HD $T/TRES.TXT ::DATOS/SUB/
 mcopy -i $HD $T/UNO.TXT ::VIEJA/A.TXT
@@ -294,7 +294,7 @@ chk $T/a2.ppm busca 140 88 400 104 0 9 "C:\\" busca 250 113 680 200 0 9 "DATOS" 
   busca 300 430 680 450 0 6 "MB"
 chk $T/a3.ppm busca 140 88 400 104 0 9 "C:\\DATOS" busca 250 113 680 132 0 6 "Tipo" \
   busca 260 $(( 134 + 18 )) 400 $(( 134 + 18 )) 0 9 "DOS.TXT" busca 260 $(( 134 + 54 )) 400 $(( 134 + 54 )) 0 9 "UNO.TXT" \
-  busca 400 $(( 134 + 36 )) 680 $(( 134 + 36 )) 0 9 "200.000"
+  busca 400 $(( 134 + 36 )) 680 $(( 134 + 36 )) 0 9 "120.000"
 chk $T/a4.ppm busca 260 $(( 134 + 18 )) 400 $(( 134 + 18 )) 0 9 "UNO.TXT" busca 260 $(( 134 + 36 )) 400 $(( 134 + 36 )) 0 9 "DOS.TXT" \
   busca 260 $(( 134 + 54 )) 400 $(( 134 + 54 )) 0 9 "GRANDE.BIN"
 chk $T/a5.ppm busca 260 $(( 134 + 18 )) 400 $(( 134 + 18 )) 0 9 "GRANDE.BIN" busca 260 $(( 134 + 54 )) 400 $(( 134 + 54 )) 0 9 "UNO.TXT"
@@ -315,7 +315,7 @@ chk $T/a17.ppm busca 100 150 700 400 0 8 "El disco está lleno." busca 100 150 7
 chk $T/a18.ppm busca 140 88 400 104 0 9 "A:\\DOCS" nobusca 250 113 680 400 0 9 "ENORME.BIN" nobusca 250 113 680 400 9 12 "ENORME.BIN"
 chk $T/a19.ppm busca 100 150 700 400 0 8 "¿Quiere eliminar «VIEJA»?" busca 100 150 700 400 0 8 "Se borra también todo lo que hay dentro"
 chk $T/a20.ppm nobusca 250 113 680 400 0 9 "VIEJA" nobusca 250 113 680 400 9 12 "VIEJA"
-chk $T/a21.ppm busca 100 100 700 450 0 8 "ENORME.BIN" busca 100 100 700 450 0 8 "200.000 octetos" \
+chk $T/a21.ppm busca 100 100 700 450 0 8 "ENORME.BIN" busca 100 100 700 450 0 8 "120.000 octetos" \
   busca 100 100 700 450 0 8 "Solo lectura" busca 100 100 700 450 0 8 "C:\\DATOS"
 chk $T/a22.ppm busca 100 150 700 400 0 8 "Nombre (vale * y ?), aquí y dentro:"
 chk $T/a23.ppm busca 140 88 600 104 0 9 "Búsqueda de *.TXT en C:\\" busca 250 113 680 400 0 9 "TRES.TXT" \
