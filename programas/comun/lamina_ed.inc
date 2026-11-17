@@ -703,6 +703,11 @@ ed_proc:
         HV ven_cli                  ; ECX=ancho EDX=alto de la zona
         mov [cli_an], ecx
         mov [cli_al], edx
+        mov eax, ecx                ; los botones, centrados en la ventana
+        sar eax, 1
+        mov esi, botones1
+        mov edi, botones
+        call br_centra
         call medidas                ; (del programa) dónde va la vista
         call ed_barras
         call calc_vista
@@ -5353,22 +5358,27 @@ pinta_botones:
         COLOR C_TINTA               ; los rótulos de las muestras de color
         mov ebx, 35
         mov eax, BX_LETRA - 44
+        add eax, [br_x0]
         mov esi, t_r_letra
         HV dc_texto
         mov eax, BX_FONDO - 44
+        add eax, [br_x0]
         mov esi, t_r_fondo
         HV dc_texto
         mov eax, BX_BORDE - 44
+        add eax, [br_x0]
         mov esi, t_r_borde
         HV dc_texto
         ; «sin color»: la muestra, en blanco y cruzada
         mov ecx, [act_clase]
         mov eax, BX_FONDO
+        add eax, [br_x0]
         cmp byte [act_fondo+ecx], LAM_NADA
         jne .n1
         call .cruz
 .n1:
         mov eax, BX_BORDE
+        add eax, [br_x0]
         cmp byte [act_borde+ecx], LAM_NADA
         jne .n2
         call .cruz

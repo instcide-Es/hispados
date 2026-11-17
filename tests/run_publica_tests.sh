@@ -47,8 +47,9 @@ pdc() { ir $((PX + $1)) $((PY + $2)); mon "mouse_button 1" 0.12; mon "mouse_butt
         mon "mouse_button 1" 0.12; mon "mouse_button 0" 0.5; }   # y un doble clic
 arr() { ir $((PX + $1)) $((PY + $2)); mon "mouse_button 1" 0.3  # arrastrar de un punto a otro
         ir $((PX + ($1 + $3) / 2)) $((PY + ($2 + $4) / 2)); ir $((PX + $3)) $((PY + $4)); mon "mouse_button 0" 0.5; }
-boton1() { clic $((10 + $1 + 12)) 89; }                     # un botón de la fila de arriba (su x)
-boton2() { clic $((10 + $1 + 11)) 117; }                    # y de la de abajo
+# (las dos filas de botones van centradas en la ventana: 38 puntos más allá)
+boton1() { clic $((48 + $1 + 12)) 89; }                     # un botón de la fila de arriba (su x)
+boton2() { clic $((48 + $1 + 11)) 117; }                    # y de la de abajo
 B_VISTA=522; B_ELEGIR=258; B_TEXTO=284; B_RECT=310; B_ELIPSE=336; B_LINEA=362
 al100() { boton1 $B_VISTA; sleep 0.8; }
 # un menú (la x de su nombre) y una orden suya (su y)
@@ -150,7 +151,7 @@ echo "== Publicaciones: la ventana, la página y las vistas =="
 prepara $HVP
 { arranca
   shot v0
-  ir 332 89; shot v1                                        # el ratón sobre un botón: su nombre, abajo
+  ir 370 89; shot v1                                        # el ratón sobre un botón: su nombre, abajo
   al100; aparca; shot v2
   clic 778 549; clic 778 549; aparca; shot v3               # la flecha de abajo de la barra, dos veces
   menu $M_VER 107; aparca; shot v4                          # Ver > Al 50 %
@@ -161,11 +162,18 @@ prepara $HVP
   clic 554 65; sleep 0.9; clic 584 87; sleep 1.2; shot v8; tecla ret   # ? > Acerca de
   sleep 0.8; tecla ctrl-p; sleep 2; shot v9; tecla ret; sleep 0.8      # imprimir, sin impresora
   menu $M_EDIC 291; shot v10; tecla ret                     # Edición > Quitar esta página: es la única
+  sleep 0.8; clic 763 43; sleep 1; aparca; shot v11         # el botón de maximizar
   sal; } | run 150 -vga std
 chk $T/v0.ppm titulo 8 30 activa "Publicaciones - (sin nombre)"
+# la página y las dos filas de botones, en el centro: en la ventana corriente y maximizada
+chk $T/v0.ppm centrado 10 774 340 8 1 "la página" centrado 10 790 117 6 1 "los botones" \
+              alineado 10 790 89 117 6 "las dos filas de botones empiezan en el mismo sitio"
+chk $T/v11.ppm titulo 0 28 activa "Publicaciones - (sin nombre)"
+chk $T/v11.ppm centrado 2 782 340 8 1 "maximizada: la página" centrado 2 798 115 6 1 "maximizada: los botones" \
+               alineado 2 798 87 115 6 "maximizada: las dos filas de botones empiezan en el mismo sitio"
 chk $T/v0.ppm busca $PIE "Página 1 de 1    A4 vertical, 210 x 297 mm    Vista: 36 %"
 chk $T/v0.ppm px 400 340 9 "la página, blanca" px 100 300 8 "crema alrededor" px 262 340 14 "la guía del margen" \
-              px 12 103 6 "la barra, en arena" px 270 80 2 "la herramienta Elegir, puesta"
+              px 12 103 6 "la barra, en arena" px 308 80 2 "la herramienta Elegir, puesta"
 chk $T/v1.ppm busca $PIE "Rectángulo: arrastre sobre la página"
 chk $T/v2.ppm busca $PIE "Página 1 de 1    A4 vertical, 210 x 297 mm    Vista: 100 %"
 chk $T/v2.ppm px 30 150 9 "al 100 %: la página desde la esquina" px 56 300 14 "el margen izquierdo, a 10 mm" \
@@ -281,9 +289,9 @@ chk $T/t4.ppm px $((PX+60)) $((PY+280)) 0 "el borde de la caja" px $((PX+66)) $(
               px $((PX+100)) $((PY+265)) 10 "a la izquierda del título centrado, fondo"
 chk $T/t4.ppm cambia $((PX+200)) $((PY+244)) 160 40 $T/t3.ppm 300        # ahí está el título
 chk $T/t4.ppm nobusca $((PX+62)) $((PY+240)) $((PX+400)) $((PY+280)) 13 10 "Titulo"   # (y no es la letra normal)
-chk $T/t4.ppm busca 20 108 60 124 0 8 "Llano negra"                                 # la barra dice el tipo...
-chk $T/t4.ppm busca 120 108 140 124 0 8 "24"                                        # ...y el tamaño
-chk $T/t4.ppm px 170 110 2 "el botón N, puesto" px 280 110 2 "y el de centrar"
+chk $T/t4.ppm busca 58 108 98 124 0 8 "Llano negra"                                 # la barra dice el tipo...
+chk $T/t4.ppm busca 158 108 178 124 0 8 "24"                                        # ...y el tamaño
+chk $T/t4.ppm px 208 110 2 "el botón N, puesto" px 318 110 2 "y el de centrar"
 chk $T/t5.ppm busca $((PX+62)) $((PY+62)) $((PX+66)) $((PY+66)) 0 9 "Hola gran mundo, esto es una caja de"
 chk $T/t6.ppm busca $((PX+290)) $((PY+110)) $((PX+294)) $((PY+114)) 0 9 "segundas"       # arrimado a la derecha
 chk $T/t6.ppm busca $((PX+106)) $((PY+78)) $((PX+110)) $((PY+82)) 0 9 "texto que se parte sola por las"
@@ -710,7 +718,7 @@ chk $T/l1.ppm busca $((PX+74)) $((PY+78)) $((PX+78)) $((PY+82)) 0 9 "2."
 chk $T/l1.ppm cambia $((PX+90)) $((PY+96)) 60 12 $T/l0.ppm 20       # el segundo nivel (con letra más pequeña): «a)» y su texto
 chk $T/l1.ppm busca $((PX+74)) $((PY+106)) $((PX+78)) $((PY+110)) 0 9 "3."
 chk $T/l1.ppm busca $((PX+94)) $((PY+106)) $((PX+98)) $((PY+110)) 0 9 "tres"
-chk $T/l1.ppm px 686 108 2 "el botón de la numeración, puesto" px 660 108 8 "y el de las viñetas, no"
+chk $T/l1.ppm px 724 108 2 "el botón de la numeración, puesto" px 698 108 8 "y el de las viñetas, no"
 chk $T/c1.ppm busca $PIE "Página 1 de 1    Caja de texto: x 16, y 64 mm; 53 x 13 mm; el texto no cabe"
 chk $T/c2.ppm busca $PIE "Página 1 de 1    Haga clic en la caja de texto en la que debe seguir (Esc: dejarlo)"
 chk $T/c3.ppm busca $PIE "Página 1 de 1    Caja de texto: x 79, y 64 mm; 53 x 13 mm; encadenada (2 de 2)"

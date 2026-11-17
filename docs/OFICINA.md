@@ -28,6 +28,12 @@ todos lo incluyen.
     Los iconos son nuestros, de 16x16; los dibuja `tools/iconos.py`.
   - Las órdenes propias de un programa, sin icono evidente, van con texto.
   - Al pasar el ratón por un botón, el pie dice lo que hace.
+  - En los programas de hoja (Pluma, Publicaciones, Presentaciones) las filas
+    de botones van centradas, como la hoja, sea cual sea el tamaño de la
+    ventana (maximizada también): al cambiar de tamaño (`WM_SIZE`) el programa
+    llama a `br_centra` con la x del centro y sus filas, y `br_fila` y
+    `br_boton_en` cuentan con lo que se han corrido (`[br_x0]`). El programa
+    que no la llama deja sus botones a la izquierda, como dice su tabla.
 - **`ortografia.inc`** y `DICCIO.DAT`: el corrector de español (ver `ORTOGRAFIA.md`):
   dice si una palabra está bien, propone correcciones y lleva las palabras propias
   del usuario (`PROPIAS.TXT`).

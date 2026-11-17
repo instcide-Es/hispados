@@ -39,8 +39,9 @@ e() { echo $(( EX + $1 * 148 / 256 )) $(( EY + $2 * 148 / 256 )); }     # un pun
 ec() { clic $(e $1 $2); }
 PX=158; PY=141
 pc() { clic $((PX + $1)) $((PY + $2)); }
-boton1() { clic $((10 + $1 + 12)) 89; }                     # un botón de la fila de arriba (su x)
-boton2() { clic $((10 + $1 + 11)) 117; }
+# (las dos filas de botones van centradas en la ventana: 38 puntos más allá)
+boton1() { clic $((48 + $1 + 12)) 89; }                     # un botón de la fila de arriba (su x)
+boton2() { clic $((48 + $1 + 11)) 117; }
 B_VISTA=522; B_NUEVA=472; B_PRES=572; B_VIN=648
 mini() { clic 88 $((183 + 100 * ($1 - 1))); }               # un clic en la miniatura de la diapositiva N
 menu() { clic $1 65; sleep 0.9; clic $(( $1 + 30 )) $2; sleep 0.9; }
@@ -101,7 +102,7 @@ echo "== Presentaciones: la ventana y la tira de miniaturas =="
 prepara $HVP
 { arranca
   shot v0
-  ir 592 89; shot v1                                        # el ratón sobre el botón de presentar
+  ir 630 89; shot v1                                        # el ratón sobre el botón de presentar
   ec 400 230; escribe "Hola"; aparca; shot v2; tecla esc    # un clic en la caja del título: se escribe
   nueva_dia 1; aparca; shot v3                              # otra diapositiva (título y texto)
   ec 200 60; escribe "Dos"; tecla esc
@@ -116,8 +117,16 @@ prepara $HVP
   tecla pgdn pgdn ctrl-left; aparca; shot v12               # a la cuarta (Hola); Ctrl+izquierda la sube
   guarda tira
   clic 554 65; sleep 0.9; clic 584 87; sleep 1.2; shot v13; tecla ret     # ? > Acerca de
+  sleep 0.8; clic 763 43; sleep 1; aparca; shot v14         # el botón de maximizar
   sal; } | run 240 -vga std
 chk $T/v0.ppm titulo 8 30 activa "Presentaciones - (sin nombre)"
+# la diapositiva (en lo que deja la tira) y las dos filas de botones, en el
+# centro: en la ventana corriente y maximizada
+chk $T/v0.ppm centrado 150 774 400 8 1 "la diapositiva" centrado 10 790 117 6 1 "los botones" \
+              alineado 10 790 89 117 6 "las dos filas de botones empiezan en el mismo sitio"
+chk $T/v14.ppm titulo 0 28 activa "Presentaciones - tira.PRE"
+chk $T/v14.ppm centrado 142 782 400 8 1 "maximizada: la diapositiva" centrado 2 798 115 6 1 "maximizada: los botones" \
+               alineado 2 798 87 115 6 "maximizada: las dos filas de botones empiezan en el mismo sitio"
 chk $T/v0.ppm busca $PIE "Diapositiva 1 de 1    Tema: Claro    Vista: 58 %"
 chk $T/v0.ppm px 400 200 9 "la diapositiva, blanca" px 400 480 2 "la franja del tema" px 250 480 10 "y su tramo ocre" \
               px 700 540 9 "el recuadro de las notas" px 30 150 2 "la miniatura de la que se ve, con su marco"
@@ -170,9 +179,9 @@ chk $T/d0.ppm busca 200 100 600 500 9 12 "Título y texto"
 chk $T/d0.ppm busca 200 100 600 500 0 9 "Título e imagen"
 chk $T/d1.ppm busca $PIE "Diapositiva 2 de 2    Tema: Claro    Vista: 100 %"
 chk $T/d2.ppm px $((PX+59)) $((PY+153)) 0 "la viñeta del primer punto" px $((PX+91)) $((PY+181)) 0 "la raya del segundo nivel" \
-              px $((PX+59)) $((PY+181)) 9 "(con su sangría)" px $((PX+59)) $((PY+225)) 0 "la viñeta del cuarto, otra vez al principio" px 660 108 2 "y el botón de las viñetas, puesto"
+              px $((PX+59)) $((PY+181)) 9 "(con su sangría)" px $((PX+59)) $((PY+225)) 0 "la viñeta del cuarto, otra vez al principio" px 698 108 2 "y el botón de las viñetas, puesto"
 chk $T/d3.ppm cambia $((PX+40)) $((PY+132)) 100 110 $T/d2.ppm 50      # sin viñetas, todo va al margen
-chk $T/d3.ppm px 660 108 8 "y el botón, sin poner"
+chk $T/d3.ppm px 698 108 8 "y el botón, sin poner"
 chk $T/d4.ppm busca $PIE "Diapositiva 3 de 3"
 chk $T/d5.ppm busca $PIE "Diapositiva 4 de 4"
 chk $T/d6.ppm px $(e 420 300) 4 "la imagen, en el hueco: la banda terracota" px $(e 420 268) 11 "y arriba, verde oliva" \
@@ -402,7 +411,7 @@ chk $T/f0l.ppm busca 200 100 600 500 9 12 "Título y texto"
 chk $T/f1.ppm cambia $(e 100 180) 350 60 $T/f0.ppm 200          # el título ya no está en medio
 chk $T/f1.ppm busca $PIE "Diapositiva 1 de 5    Tema: Claro    Vista: 58 %"
 chk $T/f2.ppm busca $PIE "Diapositiva 2 de 5    Tema: Claro    Vista: 58 %"
-chk $T/f4.ppm px 686 108 2 "la lista de la cuarta, con números: su botón, puesto"
+chk $T/f4.ppm px 724 108 2 "la lista de la cuarta, con números: su botón, puesto"
 chk $T/f5.ppm busca 215 514 225 524 0 9 "Nota uno"
 chk $T/f5.ppm busca 215 530 225 540 0 9 "linea dos"
 chk $T/f5.ppm busca $PIE "Diapositiva 4 de 5    Caja de texto: escriba; Esc o un clic fuera para acabar"
