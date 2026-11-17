@@ -1,0 +1,10 @@
+; Una constante que no cabe en un byte.
+; ERROR: 8:14: error: 256 no cabe en un byte (0 a 255)
+módulo Error
+
+    función principal()
+        variable b: byte
+        b := 255
+        b := 256
+    fin
+fin Error.

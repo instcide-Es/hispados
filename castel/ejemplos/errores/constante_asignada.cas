@@ -1,0 +1,9 @@
+; A una constante no se le asigna.
+; ERROR: 7:9: error: «TOPE» es una constante: no se le asigna
+módulo Error
+
+    constante TOPE = 10
+    función principal()
+        TOPE := 11
+    fin
+fin Error.

@@ -1,0 +1,9 @@
+x = -8, y2 = 3
+g1 = 10, g2 = 20, x = -8
+suma = 33, cuenta = 10
+menor = -7, mayor = 12
+al revés: 12 -7 8 5
+ordenada: -7 -3 0 1 4 4 5 8 9 12
+octeto = 1
+fgh
+7! = 5040, fib(20) = 6765

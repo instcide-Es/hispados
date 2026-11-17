@@ -1,0 +1,12 @@
+; En el ensamblador, {nombre} tiene que estar declarado en Castel.
+; ERROR: 9:22: error: en el ensamblador, «{cuanta}» no es nada declarado en Castel
+módulo Error
+
+    variable cuenta: nat16
+    función principal()
+        ensamblador
+            inc word {cuenta}
+            inc word {cuanta}
+        fin
+    fin
+fin Error.

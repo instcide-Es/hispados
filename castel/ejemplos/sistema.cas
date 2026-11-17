@@ -1,0 +1,112 @@
+; sistema.cas - Fase 3: llamar al sistema sin ensamblador (interrupción,
+; acarreo, reg_bx...), la memoria lejana, y ensamblador que nombra variables
+; de Castel.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Sistema
+
+    constante DOS   = 0x21
+    constante VIDEO = 0x10
+    constante AVISO = "texto con la función 9 del DOS\r\n$"
+
+    variable cuenta: nat16
+    variable letra: byte
+    variable nombre: arreglo [12] de byte = "NOHAY.XYZ"
+    variable tabla: arreglo [4] de nat16
+
+    ; una rutina entera en ensamblador, fuera de las funciones: las globales
+    ; de Castel se llaman G_nombre
+    ensamblador
+    suma_tabla:                     ; devuelve en AX la suma de la tabla
+        xor ax, ax
+        mov bx, G_tabla
+        mov cx, 4
+    .otra:
+        add ax, [bx]
+        add bx, 2
+        loop .otra
+        ret
+    fin
+
+    función letra_dos(c: byte)
+        interrupción(DOS, ah: 2, dl: c)
+    fin
+
+    ; dentro de una función, {nombre} es la variable (global, local o
+    ; parámetro), la constante o la función de Castel con ese nombre
+    función doble_más(n: nat16, extra: nat16): nat16
+        variable r: nat16
+        ensamblador
+            mov ax, {n}             ; un parámetro: [bp+4]
+            shl ax, 1
+            add ax, {extra}
+            mov {r}, ax             ; una local: [bp-2]
+            inc word {cuenta}       ; una global: [G_cuenta]
+            inc word [G_cuenta]     ; lo mismo, por su nombre en NASM
+        fin
+        devolver r
+    fin
+
+    función principal()
+        variable modo, manejador, i: nat16
+        variable c: byte
+
+        ; registros de 8 bits, constantes y variables
+        letra_dos('C')
+        letra := 'a'
+        interrupción(DOS, ah: 2, dl: letra)
+        c := 's'
+        interrupción(DOS, ah: 2, dl: c)
+        interrupción(DOS, ax: 0x0200, dx: 't')
+        i := 'e'
+        interrupción(DOS, ah: 2, dl: i)
+        interrupción(DOS, ah: 2, dl: nombre[0] + 30)
+        ; una cuenta en cada registro
+        interrupción(DOS, ah: i - 99, dl: c - 82)
+        interrupción(DOS, ah: 2, dl: '\n')
+        interrupción(DOS, ah: 9, dx: AVISO)
+
+        ; lo que devuelve: AX, y los demás registros con reg_bx()...
+        modo := interrupción(VIDEO, ah: 0x0F)
+        escribir("modo de vídeo ", modo yb 0xFF, ", ", modo >> 8, " columnas, página ", reg_bx() >> 8, "\n")
+
+        ; el acarreo: abrir un archivo que no está
+        manejador := interrupción(DOS, ax: 0x3D00, dx: nombre)
+        si acarreo() entonces
+            escribir("no se abre (error ", manejador, ")\n")
+        sino
+            escribir("NO DEBE SALIR\n")
+        fin
+        ; ...y uno que sí: el dispositivo NUL
+        manejador := interrupción(DOS, ax: 0x3D00, dx: "NUL")
+        escribir("NUL: ", acarreo(), " ", banderas() yb 1, "\n")
+        si no acarreo() entonces
+            interrupción(DOS, ah: 0x3E, bx: manejador)
+            escribir("cerrado: ", no acarreo(), "\n")
+        fin
+
+        ; la memoria de fuera del programa: las variables de la BIOS
+        escribir("columnas según la BIOS: ", leer_palabra(0x40, 0x4A), "\n")
+        ; y la pantalla (segmento 0xB800): se escribe y se lee
+        poner_byte(0xB800, 3998, '#')
+        poner_palabra(0xB800, 3996, 0x0700 + '@')
+        i := 3996
+        escribir("pantalla: ", leer_byte(0xB800, i), " ", leer_byte(0xB800, i + 2), " ", leer_palabra(0xB800, i) >> 8, "\n")
+
+        ; ensamblador y Castel se pasan datos por las variables
+        cuenta := 10
+        escribir("doble_más: ", doble_más(20, 2), " ", doble_más(cuenta, 1), ", cuenta = ", cuenta, "\n")
+        para i desde 0 hasta 3 hacer
+            tabla[i] := (i + 1) * 100
+        fin
+        ensamblador
+            call suma_tabla
+            mov {modo}, ax
+        fin
+        escribir("suma de la tabla = ", modo, "\n")
+
+        salir(0)
+        escribir("NO DEBE SALIR\n")
+    fin
+
+fin Sistema.

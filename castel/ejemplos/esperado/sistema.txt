@@ -1,0 +1,10 @@
+Castel!
+texto con la función 9 del DOS
+modo de vídeo 3, 80 columnas, página 0
+no se abre (error 2)
+NUL: falso 0
+cerrado: cierto
+columnas según la BIOS: 80
+pantalla: 64 35 7
+doble_más: 42 25, cuenta = 14
+suma de la tabla = 1000

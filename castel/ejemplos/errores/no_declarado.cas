@@ -1,0 +1,9 @@
+; Un nombre sin declarar.
+; ERROR: 7:18: error: nombre no declarado: «totl»
+módulo Error
+
+    función principal()
+        variable total: nat16
+        total := totl + 1
+    fin
+fin Error.

@@ -1,0 +1,9 @@
+; Índice constante negativo.
+; ERROR: 7:20: error: índice -1 fuera del arreglo (va de 0 a 9)
+módulo Error
+
+    variable a: arreglo [10] de byte
+    función principal()
+        escribir(a[-1])
+    fin
+fin Error.

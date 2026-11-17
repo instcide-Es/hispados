@@ -1,0 +1,7 @@
+; Un programa necesita principal().
+; ERROR: 3:1: error: falta la función principal()
+módulo Error
+
+    función otra()
+    fin
+fin Error.

@@ -1,0 +1,114 @@
+; textos.cas - Fase 3: los textos son arreglos de byte acabados en 0.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Textos
+
+    constante SALUDO = "Hola, Castel"
+
+    variable nombre: arreglo [16] de byte = "mundo"
+    variable copia: arreglo [32] de byte
+    variable meses: arreglo [3] de puntero a byte = ("enero", "febrero", "marzo")
+
+    ; cuántas letras tiene un texto
+    función longitud(t: puntero a byte): nat16
+        variable n: nat16
+        n := 0
+        mientras t[n] <> 0 hacer
+            n := n + 1
+        fin
+        devolver n
+    fin
+
+    ; copia un texto detrás de lo que ya haya en destino
+    función añade(destino: puntero a byte, origen: puntero a byte)
+        destino := destino + longitud(destino)
+        mientras valor(origen) <> 0 hacer
+            valor(destino) := valor(origen)
+            destino := destino + 1
+            origen := origen + 1
+        fin
+        valor(destino) := 0
+    fin
+
+    función mayúsculas(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            si valor(t) >= 'a' y valor(t) <= 'z' entonces
+                valor(t) := valor(t) - 32
+            fin
+            t := t + 1
+        fin
+    fin
+
+    función iguales(a: puntero a byte, b: puntero a byte): bool
+        mientras valor(a) = valor(b) hacer
+            si valor(a) = 0 entonces
+                devolver cierto
+            fin
+            a := a + 1
+            b := b + 1
+        fin
+        devolver falso
+    fin
+
+    ; un número, a texto (en decimal), dentro de un arreglo local
+    función en_texto(n: nat16, destino: puntero a byte)
+        variable cifras: arreglo [6] de byte
+        variable i: nat16
+        i := 0
+        mientras cierto hacer
+            cifras[i] := '0' + n mod 10
+            n := n div 10
+            i := i + 1
+            si n = 0 entonces
+                romper
+            fin
+        fin
+        mientras i > 0 hacer
+            i := i - 1
+            valor(destino) := cifras[i]
+            destino := destino + 1
+        fin
+        valor(destino) := 0
+    fin
+
+    función principal()
+        variable num: arreglo [8] de byte
+        variable i: nat16
+        variable p: puntero a byte
+
+        escribir(SALUDO, "\n")
+        escribir("longitud = ", longitud(SALUDO), "\n")
+        escribir("nombre = ", nombre, " (", longitud(nombre), " letras, ", tamaño(nombre), " de sitio)\n")
+
+        añade(copia, "Hola, ")
+        añade(copia, nombre)
+        añade(copia, "!")
+        escribir(copia, "\n")
+        mayúsculas(copia)
+        escribir(copia, "\n")
+
+        nombre[0] := 'M'
+        escribir(nombre, " / ", dirección(nombre[2]), "\n")
+
+        escribir(iguales(nombre, "Mundo"), " ", iguales(nombre, "mundo"), " ", iguales("a", "ab"), "\n")
+
+        en_texto(40321, num)
+        escribir("[", num, "] ", longitud(num), "\n")
+        en_texto(0, num)
+        escribir("[", num, "]\n")
+
+        para i desde 0 hasta 2 hacer
+            escribir(" ", meses[i])
+        fin
+        escribir("\n")
+
+        ; letras sueltas, acentos (página 437) y escapes
+        p := "aeiou\tñ\x41\\"
+        escribir(p, " ", p[1], " ", longitud(p), "\n")
+        escribir_car('<')
+        escribir_car(p[0] - 32)
+        escribir_car('>')
+        escribir("\n")
+    fin
+
+fin Textos.

@@ -1,0 +1,10 @@
+; Un bloque sin cerrar.
+; ERROR: 10:5: error: falta un «fin»: algún bloque de antes (si, mientras, para, según, función...) se ha quedado sin cerrar
+módulo Error
+
+    función principal()
+        variable n: nat16
+        mientras n < 5 hacer
+            n := n + 1
+    fin
+fin Error.

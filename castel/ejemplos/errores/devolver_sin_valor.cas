@@ -1,0 +1,11 @@
+; Una función con tipo tiene que devolver un valor.
+; ERROR: 6:9: error: doble() devuelve un nat16: falta el valor
+módulo Error
+
+    función doble(n: nat16): nat16
+        devolver
+    fin
+    función principal()
+        escribir(doble(2))
+    fin
+fin Error.

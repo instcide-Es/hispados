@@ -1,0 +1,9 @@
+; «=» en vez de «:=».
+; ERROR: 7:11: error: para asignar se escribe «:=» («=» solo compara)
+módulo Error
+
+    función principal()
+        variable n: nat16
+        n = 5
+    fin
+fin Error.

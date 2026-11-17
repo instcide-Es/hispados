@@ -1,0 +1,11 @@
+; A un parámetro «ref» hay que pasarle una variable.
+; ERROR: 9:13: error: el parámetro «n» es «ref»: hay que pasarle una variable
+módulo Error
+
+    función pon(ref n: nat16)
+        n := 1
+    fin
+    función principal()
+        pon(5)
+    fin
+fin Error.

@@ -1,0 +1,9 @@
+hoy: 17/11/2026
+tamaños: 4 21 63
+7 Sole 1/2/1999 cierto -25
+100 Juan 1/12/2000 cierto -60
+101 Carlos 2/11/2010 falso -10
+102 Luiggi 3/10/2020 cierto 40
+101 Karlos 2/10/2010 falso 990
+lleva 16 y 27 años
+total = 202

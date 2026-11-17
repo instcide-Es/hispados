@@ -1,0 +1,11 @@
+0034 12FF 12CB EDCB 1200
+2340 0123 91A0 0247 8000 1234
+-4 16380 -32 -2
+00F0 FFFF 04F7
+0 16 2 7
+0EE0 152
+bit 11 puesto, bit 0 quitado, el alto del byte sí
+cierto falso falso
+5714 2 -14 -2 12
+14464 -300 4464 25543
+156 64 28928 -8545

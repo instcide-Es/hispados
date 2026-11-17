@@ -1,0 +1,7 @@
+; El módulo se cierra con su nombre.
+; ERROR: 7:5: error: el módulo abre como «Error» y cierra como «Otro»
+módulo Error
+
+    función principal()
+    fin
+fin Otro.

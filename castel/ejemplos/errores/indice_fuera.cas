@@ -1,0 +1,10 @@
+; Índice constante fuera del arreglo.
+; ERROR: 8:11: error: índice 10 fuera del arreglo (va de 0 a 9)
+módulo Error
+
+    variable a: arreglo [10] de nat16
+    función principal()
+        a[9] := 1
+        a[10] := 2
+    fin
+fin Error.

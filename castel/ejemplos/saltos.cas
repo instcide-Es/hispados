@@ -1,0 +1,161 @@
+; saltos.cas - bloques largos: los saltos condicionales del 8086 solo llegan a
+; 127 octetos, y el compilador tiene que arreglárselas cuando el bloque que
+; se salta es mayor (si, mientras, para, según, «y»/«o»).
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Saltos
+
+    variable v: arreglo [8] de nat16
+    variable total: nat16
+
+    ; relleno: bastante código como para pasar de 127 octetos
+    función relleno(n: nat16)
+        v[0] := v[0] + n
+        v[1] := v[1] + v[0] * 2
+        v[2] := v[2] + v[1] - n
+        v[3] := v[3] xob v[2]
+        v[4] := v[4] + v[3] mod 7
+        v[5] := v[5] + v[4] div 3
+        v[6] := v[6] ob v[5]
+        v[7] := v[7] + v[6] yb 0xFF
+        total := total + 1
+    fin
+
+    función principal()
+        variable i, j: nat16
+        variable e: ent16
+
+        ; «si» con el bloque largo, y con «sino»
+        i := 3
+        si i = 3 entonces
+            v[0] := v[0] + i
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            escribir("si largo\n")
+        sino
+            v[0] := 1000
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            escribir("NO DEBE SALIR\n")
+        fin
+        si i <> 3 entonces
+            v[0] := 1000
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            escribir("NO DEBE SALIR\n")
+        sino
+            escribir("sino largo\n")
+        fin
+
+        ; «mientras» y «para» con el cuerpo largo, con romper y seguir
+        i := 0
+        mientras i < 10 hacer
+            i := i + 1
+            si i = 2 entonces
+                seguir
+            fin
+            v[0] := v[0] + i
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            total := total + 1
+            si i = 5 entonces
+                romper
+            fin
+        fin
+        escribir("mientras: ", i, " ", total, "\n")
+        para e desde 10 hasta 1 paso -3 hacer
+            si e = 7 entonces
+                seguir
+            fin
+            v[0] := v[0] + i
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            total := total + 1
+        fin
+        para j desde 1 hasta 4 hacer
+            v[0] := v[0] + i
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            total := total + 1
+        fin
+        escribir("para: ", e, " ", j, " ", total, "\n")
+
+        ; «y» y «o» con el bloque largo
+        si i = 5 y (j = 99 o total = 11) y no (e > 0) entonces
+            v[0] := v[0] + i
+            v[1] := v[1] + v[0] * 2
+            v[2] := v[2] + v[1] - i
+            v[3] := v[3] xob v[2]
+            v[4] := v[4] + v[3] mod 7
+            v[5] := v[5] + v[4] div 3
+            v[6] := v[6] ob v[5]
+            v[7] := v[7] + v[6] yb 0xFF
+            escribir("condición larga\n")
+        fin
+
+        ; «según» con los casos lejos
+        para i desde 1 hasta 4 hacer
+            según i
+                caso 1:
+                    relleno(1)
+                    v[1] := v[1] + v[0] * 2
+                    v[2] := v[2] + v[1] - i
+                    v[3] := v[3] xob v[2]
+                    v[4] := v[4] + v[3] mod 7
+                    v[5] := v[5] + v[4] div 3
+                    v[6] := v[6] ob v[5]
+                    escribir("uno ")
+                caso 2, 3:
+                    relleno(2)
+                    v[1] := v[1] + v[0] * 2
+                    v[2] := v[2] + v[1] - i
+                    v[3] := v[3] xob v[2]
+                    v[4] := v[4] + v[3] mod 7
+                    v[5] := v[5] + v[4] div 3
+                    v[6] := v[6] ob v[5]
+                    escribir("dos-tres ")
+                si no:
+                    relleno(3)
+                    v[1] := v[1] + v[0] * 2
+                    v[2] := v[2] + v[1] - i
+                    v[3] := v[3] xob v[2]
+                    v[4] := v[4] + v[3] mod 7
+                    v[5] := v[5] + v[4] div 3
+                    v[6] := v[6] ob v[5]
+                    escribir("otro")
+            fin
+        fin
+        escribir("\n", total, " ", v[0], " ", v[7], "\n")
+    fin
+
+fin Saltos.

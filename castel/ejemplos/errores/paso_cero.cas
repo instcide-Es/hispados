@@ -1,0 +1,10 @@
+; El paso de un «para» no puede ser 0.
+; ERROR: 7:38: error: el «paso» no puede ser 0
+módulo Error
+
+    función principal()
+        variable i: nat16
+        para i desde 1 hasta 10 paso 0 hacer
+        fin
+    fin
+fin Error.

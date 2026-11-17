@@ -1,0 +1,11 @@
+; Lo que no devuelve nada no vale como valor.
+; ERROR: 9:14: error: esa función no devuelve nada
+módulo Error
+
+    función nada()
+    fin
+    función principal()
+        variable n: nat16
+        n := nada() + 1
+    fin
+fin Error.

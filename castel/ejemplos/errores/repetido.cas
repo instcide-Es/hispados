@@ -1,0 +1,10 @@
+; Dos cosas con el mismo nombre.
+; ERROR: 6:5: error: «total» ya está declarado
+módulo Error
+
+    variable total: nat16
+    función total()
+    fin
+    función principal()
+    fin
+fin Error.

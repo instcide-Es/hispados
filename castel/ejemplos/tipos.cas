@@ -1,0 +1,84 @@
+; tipos.cas - Fase 3: los tipos sencillos y sus cambios; constantes con cuentas;
+; bool; variables con valor inicial.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Tipos
+
+    constante FILAS    = 25
+    constante COLUMNAS = 80
+    constante CELDAS   = FILAS * COLUMNAS           ; cuentas con constantes
+    constante ULTIMA   = CELDAS * 2 - 2
+    constante NEGATIVA = -(FILAS + 5) div 4
+    constante GRANDE   = CELDAS > 1000 y no (FILAS = 24)
+    constante LETRA    = 'A' + 2
+
+    variable inicial: nat16 = CELDAS + 1            ; globales con valor inicial
+    variable menos: ent16 = -2
+    variable sí: bool = cierto
+    variable inicial8: byte = LETRA
+    variable sin_valor: nat16                       ; las demás empiezan a cero
+    variable no_puesto: bool
+
+    función es_mayúscula(c: byte): bool
+        devolver c >= 'A' y c <= 'Z'
+    fin
+
+    función recorta(n: nat16): byte
+        devolver n                                  ; se queda el byte bajo
+    fin
+
+    función signo(n: ent16): ent16
+        si n < 0 entonces
+            devolver -1
+        sino si n = 0 entonces
+            devolver 0
+        fin
+        devolver 1
+    fin
+
+    función principal(): byte
+        variable b: byte
+        variable n: nat16
+        variable e: ent16
+        variable listo, otro: bool
+        variable local: nat16 = 5 * 5               ; y las locales, también
+
+        escribir(CELDAS, " ", ULTIMA, " ", NEGATIVA, " ", GRANDE, " ", LETRA, "\n")
+        escribir(inicial, " ", menos, " ", sí, " ", inicial8, " ", sin_valor, " ", no_puesto, " ", local, "\n")
+
+        ; un byte guarda de 0 a 255: lo que pase, da la vuelta
+        b := 250
+        b := b + 10
+        n := 250
+        n := n + 10
+        escribir(b, " ", n, " ", recorta(1000), " ", nat8(n) + 1, " ", nat8(n + 252), "\n")
+
+        ; nat16 y ent16: los mismos 16 bits, vistos sin signo o con él
+        n := 65535
+        e := n
+        escribir(n, " ", e, " ", nat16(e) div 2, " ", ent16(n) div 2, " ", ent16(40000), "\n")
+        e := -32768
+        n := 32767
+        escribir(e, " ", n + 1, " ", e - 1, " ", signo(e), signo(0), signo(n), "\n")
+
+        ; bool: condiciones que se guardan
+        listo := 3 > 2
+        otro := no listo o n = 0
+        escribir(listo, " ", otro, " ", listo y no otro, " ", listo = otro, " ", listo <> otro, "\n")
+        escribir(es_mayúscula('M'), " ", es_mayúscula('m'), " ", es_mayúscula(LETRA), "\n")
+        si listo y (otro o es_mayúscula('Q')) y no no_puesto entonces
+            escribir("condición compuesta\n")
+        fin
+        no_puesto := sí
+        sí := falso
+        escribir(no_puesto, " ", sí, "\n")
+
+        ; la cuenta: precedencias y paréntesis
+        e := 7
+        escribir(2 + 3 * 4, " ", (2 + 3) * 4, " ", -e + 10, " ", -(e + 10), " ", e mod 4 * 3, " ", 100 - e - 3, "\n")
+        escribir(e * e - 4 * e, " ", (e + 1) div (e - 5), " ", e - -e, " ", 2 * (e + (3 - e) * 2), "\n")
+
+        devolver 0
+    fin
+
+fin Tipos.

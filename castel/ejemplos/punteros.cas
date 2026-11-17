@@ -1,0 +1,101 @@
+; punteros.cas - Fase 3: «puntero a», dirección(), valor(), nulo y la cuenta
+; con punteros (avanzan de elemento en elemento).
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Punteros
+
+    tipo Nodo = estructura
+        dato: ent16
+        sig: puntero a Nodo             ; un tipo puede apuntarse a sí mismo
+    fin
+
+    variable g: nat16
+    variable números: arreglo [5] de nat16 = (10, 20, 30, 40, 50)
+    variable nodos: arreglo [4] de Nodo
+    variable primero: puntero a Nodo
+    variable pp: puntero a puntero a nat16
+    variable q: puntero a nat16
+
+    ; pone un nodo delante de la lista
+    función delante(n: puntero a Nodo, dato: ent16)
+        n.dato := dato
+        n.sig := primero
+        primero := n
+    fin
+
+    función suma_lista(): ent16
+        variable n: puntero a Nodo
+        variable s: ent16
+        s := 0
+        n := primero
+        mientras n <> nulo hacer
+            s := s + n.dato
+            n := n.sig
+        fin
+        devolver s
+    fin
+
+    función dobla(p: puntero a nat16)
+        valor(p) := valor(p) * 2
+    fin
+
+    función principal()
+        variable loc: nat16
+        variable p: puntero a nat16
+        variable b: puntero a byte
+        variable i: nat16
+
+        ; dirección de una global y de una local
+        g := 5
+        loc := 7
+        p := dirección(g)
+        valor(p) := valor(p) + 1
+        dobla(p)
+        dobla(dirección(loc))
+        escribir("g = ", g, ", loc = ", loc, "\n")
+
+        ; recorrer un arreglo con un puntero: p + 1 es el elemento siguiente
+        p := números
+        escribir("recorrido:")
+        para i desde 1 hasta 5 hacer
+            escribir(" ", valor(p))
+            p := p + 1
+        fin
+        escribir("\n")
+        p := dirección(números[4])
+        escribir("atrás: ", valor(p - 1), " ", valor(p - 4), " ", p[-2], "\n")
+        p := p - 3
+        i := 2
+        escribir("p[0] = ", p[0], ", p[i] = ", p[i], ", valor(p + i) = ", valor(p + i), "\n")
+        p[1] := 33
+        valor(p + i) := 44
+        escribir("números: ", números[1], " ", números[2], " ", números[3], "\n")
+        escribir("separación = ", nat16(dirección(números[3])) - nat16(dirección(números[0])), "\n")
+
+        ; el mismo sitio visto como bytes (el 8086 guarda primero el byte bajo)
+        números[0] := 0x1234
+        b := puntero(dirección(números))
+        escribir("bytes: ", b[0], " ", b[1], "\n")
+
+        ; puntero a puntero
+        q := dirección(g)
+        pp := dirección(q)
+        valor(valor(pp)) := 99
+        escribir("g = ", g, "\n")
+
+        ; una lista enlazada, y «nulo»
+        primero := nulo
+        escribir("vacía: ", suma_lista(), " ", primero = nulo, "\n")
+        para i desde 0 hasta 3 hacer
+            delante(dirección(nodos[i]), 100 * i - 50)
+        fin
+        escribir("suma = ", suma_lista(), ", primero = ", primero.dato, ", segundo = ", primero.sig.dato, "\n")
+        escribir("último: ", primero.sig.sig.sig.sig = nulo, " ", primero.sig.sig.sig.dato, "\n")
+
+        ; una dirección fija de la memoria: el PSP del programa empieza por
+        ; la orden «int 20h» (0xCD, 0x20)
+        b := puntero(0)
+        escribir("PSP: ", b[0], " ", b[1], "\n")
+    fin
+
+fin Punteros.

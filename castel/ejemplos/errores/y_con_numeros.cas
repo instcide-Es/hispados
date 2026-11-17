@@ -1,0 +1,12 @@
+; «y» une condiciones; para los bits es «yb».
+; ERROR: 8:12: error: «y» une condiciones (bool), no un nat16 (para los bits, «yb»)
+módulo Error
+
+    función principal()
+        variable n: nat16
+        n := 12
+        si n y 4 <> 0 entonces
+            escribir(n)
+        fin
+    fin
+fin Error.

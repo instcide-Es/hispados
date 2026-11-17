@@ -1,0 +1,8 @@
+; Un texto inicial que no cabe en su arreglo (con su 0 final).
+; ERROR: 5:39: error: el texto (4 letras y el 0 final) no cabe en el arreglo de 4
+módulo Error
+
+    variable t: arreglo [4] de byte = "hola"
+    función principal()
+    fin
+fin Error.

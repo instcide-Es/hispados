@@ -1,0 +1,12 @@
+Hola, Castel
+longitud = 12
+nombre = mundo (5 letras, 16 de sitio)
+Hola, mundo!
+HOLA, MUNDO!
+Mundo / ndo
+cierto falso falso
+[40321] 5
+[0]
+ enero febrero marzo
+aeiou	ñA\ 101 9
+<A>

@@ -1,0 +1,9 @@
+; Un bool no es un número.
+; ERROR: 7:14: error: «n» es un número (nat16) y se le da un bool
+módulo Error
+
+    función principal()
+        variable n: nat16
+        n := 3 > 2
+    fin
+fin Error.

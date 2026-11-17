@@ -1,0 +1,8 @@
+; Un tipo que no existe.
+; ERROR: 6:21: error: tipo desconocido: «entero»
+módulo Error
+
+    función principal()
+        variable n: entero
+    fin
+fin Error.

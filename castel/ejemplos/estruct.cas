@@ -1,0 +1,101 @@
+; estruct.cas - Fase 3: estructuras, tipos con nombre y acceso con «.campo».
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Estruct
+
+    tipo Fecha = estructura
+        día, mes: byte
+        año: nat16
+    fin
+
+    tipo Socio = estructura
+        número: nat16
+        nombre: arreglo [12] de byte
+        alta: Fecha
+        al_día: bool
+        saldo: ent16
+    fin
+
+    tipo Palabra = nat16
+    tipo Lista = arreglo [3] de Socio
+
+    constante HOY_AÑO = 2026
+
+    variable hoy: Fecha
+    variable socios: Lista
+    variable total: Palabra
+
+    función pon_nombre(ref s: Socio, t: puntero a byte)
+        variable i: nat16
+        i := 0
+        mientras t[i] <> 0 hacer
+            s.nombre[i] := t[i]
+            i := i + 1
+        fin
+        s.nombre[i] := 0
+    fin
+
+    función enseña(ref s: Socio)
+        escribir(s.número, " ", s.nombre, " ", s.alta.día, "/", s.alta.mes, "/", s.alta.año)
+        escribir(" ", s.al_día, " ", s.saldo, "\n")
+    fin
+
+    función años(p: puntero a Socio): nat16
+        devolver HOY_AÑO - p.alta.año
+    fin
+
+    función principal()
+        variable i: nat16
+        variable uno: Socio
+        variable p: puntero a Socio
+
+        hoy.día := 17
+        hoy.mes := 11
+        hoy.año := HOY_AÑO
+        escribir("hoy: ", hoy.día, "/", hoy.mes, "/", hoy.año, "\n")
+        escribir("tamaños: ", tamaño(Fecha), " ", tamaño(Socio), " ", tamaño(socios), "\n")
+
+        ; una estructura local
+        uno.número := 7
+        pon_nombre(uno, "Sole")
+        uno.alta.día := 1
+        uno.alta.mes := 2
+        uno.alta.año := 1999
+        uno.al_día := cierto
+        uno.saldo := -25
+        enseña(uno)
+
+        ; un arreglo de estructuras, con índice variable
+        para i desde 0 hasta 2 hacer
+            socios[i].número := 100 + i
+            socios[i].alta.día := i + 1
+            socios[i].alta.mes := 12 - i
+            socios[i].alta.año := 2000 + 10 * i
+            socios[i].al_día := i <> 1
+            socios[i].saldo := 50 * i - 60
+        fin
+        pon_nombre(socios[0], "Juan")
+        pon_nombre(socios[1], "Carlos")
+        pon_nombre(socios[2], "Luiggi")
+        para i desde 0 hasta 2 hacer
+            enseña(socios[i])
+        fin
+
+        ; con un puntero: el punto pasa a través de él
+        p := dirección(socios[1])
+        p.saldo := p.saldo + 1000
+        p.alta.mes := p.alta.mes - 1
+        p.nombre[0] := 'K'
+        enseña(socios[1])
+        escribir("lleva ", años(p), " y ", años(dirección(uno)), " años\n")
+
+        total := 0
+        para i desde 0 hasta 2 hacer
+            si socios[i].al_día entonces
+                total := total + socios[i].número
+            fin
+        fin
+        escribir("total = ", total, "\n")
+    fin
+
+fin Estruct.

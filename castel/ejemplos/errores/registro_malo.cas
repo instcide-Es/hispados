@@ -1,0 +1,9 @@
+; En interrupción(), los registros van por su nombre.
+; ERROR: 7:35: error: «dj» no es un registro (ax bx cx dx si di, sus mitades, es, ds)
+módulo Error
+
+    función principal()
+        interrupción(0x21, ah: 2, dl: 'A')
+        interrupción(0x21, ah: 2, dj: 'A')
+    fin
+fin Error.

@@ -1,0 +1,10 @@
+; Punteros a tipos distintos no se mezclan.
+; ERROR: 8:14: error: «p» es un puntero a byte y se le da un puntero a nat16
+módulo Error
+
+    función principal()
+        variable n: nat16
+        variable p: puntero a byte
+        p := dirección(n)
+    fin
+fin Error.

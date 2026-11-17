@@ -1,0 +1,11 @@
+2000 3998 -7 cierto 67
+2001 -2 cierto 67 0 falso 25
+4 260 232 5 0
+65535 -1 32767 0 -25536
+-32768 32768 32767 -101
+cierto falso cierto falso cierto
+cierto falso cierto
+condición compuesta
+cierto falso
+14 20 3 -17 9 90
+21 4 14 -2

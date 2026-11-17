@@ -1,0 +1,9 @@
+; Los arreglos no se copian enteros.
+; ERROR: 7:14: error: «a»: los arreglos y las estructuras no se copian enteros (elemento a elemento o campo a campo)
+módulo Error
+
+    variable a, b: arreglo [4] de byte
+    función principal()
+        a := b
+    fin
+fin Error.

@@ -1,0 +1,8 @@
+; «romper» fuera de un bucle.
+; ERROR: 6:9: error: «romper» fuera de un bucle
+módulo Error
+
+    función principal()
+        romper
+    fin
+fin Error.

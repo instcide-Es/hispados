@@ -1,0 +1,11 @@
+suma de primos = 77
+antes: 0
+cuadrados: 1000 1 4 9 16 25 36 49
+letras: abcdefg
+letras[2] = 43
+acaban en 1, 3, 7, 9: 1 2 2 1
+pares[4] = -10, pares[1] + pares[3] = 0
+tabla[2][3] = 23, tabla[1][0] = 10
+cuadrados[3] = 20
+signos: -5 300 -32768 0
+tamaños: 16 8 12

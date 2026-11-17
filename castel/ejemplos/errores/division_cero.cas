@@ -1,0 +1,10 @@
+; División por una constante que es 0.
+; ERROR: 8:14: error: división por cero
+módulo Error
+
+    constante N = 4
+    función principal()
+        variable n: nat16
+        n := 100 div (N - 4)
+    fin
+fin Error.

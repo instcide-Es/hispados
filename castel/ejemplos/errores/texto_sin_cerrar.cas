@@ -1,0 +1,8 @@
+; Un texto sin la comilla final.
+; ERROR: 6:18: error: texto sin cerrar (falta la comilla ")
+módulo Error
+
+    función principal()
+        escribir("hola)
+    fin
+fin Error.

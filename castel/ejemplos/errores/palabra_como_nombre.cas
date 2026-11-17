@@ -1,0 +1,8 @@
+; Una palabra del lenguaje no vale como nombre («y», «o», «no»...).
+; ERROR: 6:21: error: «y» es una palabra del lenguaje: no vale como nombre
+módulo Error
+
+    función principal()
+        variable x, y: ent16
+    fin
+fin Error.

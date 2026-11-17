@@ -1,0 +1,11 @@
+; Una llamada con argumentos de menos.
+; ERROR: 9:18: error: suma() lleva 2 argumentos y hay 1
+módulo Error
+
+    función suma(a: ent16, b: ent16): ent16
+        devolver a + b
+    fin
+    función principal()
+        escribir(suma(1))
+    fin
+fin Error.

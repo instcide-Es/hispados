@@ -1,0 +1,12 @@
+; A un «ref» se le pasa una variable de su mismo tipo.
+; ERROR: 10:13: error: el parámetro «n» es ref nat16 y se le pasa un byte
+módulo Error
+
+    función pon(ref n: nat16)
+        n := 1
+    fin
+    función principal()
+        variable b: byte
+        pon(b)
+    fin
+fin Error.

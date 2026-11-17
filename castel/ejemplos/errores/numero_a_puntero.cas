@@ -1,0 +1,9 @@
+; Un número no se guarda en un puntero sin decirlo.
+; ERROR: 7:14: error: «p» es un puntero a byte y se le da un número (para convertir, puntero(...); el puntero vacío es «nulo»)
+módulo Error
+
+    función principal()
+        variable p: puntero a byte
+        p := 0x81
+    fin
+fin Error.

@@ -1,0 +1,9 @@
+; Un carácter que no es del lenguaje.
+; ERROR: 7:16: error: carácter inesperado: «%»
+módulo Error
+
+    función principal()
+        variable n: nat16
+        n := 5 % 2
+    fin
+fin Error.

@@ -1,0 +1,119 @@
+; bucles.cas - Fase 3: «paso» en el «para» (también hacia atrás) y
+; «según ... caso ... si no ... fin».
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Bucles
+
+    constante SALTO = 3
+
+    variable veces: nat16
+
+    función clase(c: byte): nat16
+        según c
+            caso '0'..'9': devolver 1
+            caso 'a'..'z', 'A'..'Z', 'ñ', 'Ñ':
+                devolver 2
+            caso ' ', '\t':
+                devolver 3
+            si no:
+                devolver 0
+        fin
+    fin
+
+    función nombre_día(d: ent16)
+        según d
+            caso 1: escribir("lunes")
+            caso 2: escribir("martes")
+            caso 6, 7:
+                escribir("fin ")
+                escribir("de semana")
+            caso -1:
+                escribir("ayer")
+            si no: escribir("otro")
+        fin
+    fin
+
+    función principal()
+        variable i: ent16
+        variable n: nat16
+        variable b: byte
+        variable t: puntero a byte
+
+        escribir("de 2 en 2:")
+        para i desde 1 hasta 10 paso 2 hacer
+            escribir(" ", i)
+        fin
+        escribir("\n")
+
+        escribir("hacia atrás:")
+        para i desde 5 hasta -5 paso -1 hacer
+            escribir(" ", i)
+        fin
+        escribir("\n")
+
+        escribir("de -3 en -3:")
+        para i desde 10 hasta 0 paso -SALTO hacer
+            si i = 4 entonces
+                seguir
+            fin
+            escribir(" ", i)
+        fin
+        escribir("\n")
+
+        ; no se entra si ya se ha pasado
+        para i desde 5 hasta 1 hacer
+            escribir("NO DEBE SALIR\n")
+        fin
+        para i desde 1 hasta 5 paso -1 hacer
+            escribir("NO DEBE SALIR\n")
+        fin
+
+        ; hasta el borde del tipo, sin desbordarse
+        veces := 0
+        para b desde 250 hasta 255 hacer
+            veces := veces + 1
+        fin
+        para n desde 65000 hasta 65535 paso 100 hacer
+            veces := veces + 1
+        fin
+        para n desde 3 hasta 0 paso -1 hacer
+            veces := veces + 1
+        fin
+        para i desde 32000 hasta 32767 paso 500 hacer
+            veces := veces + 1
+        fin
+        escribir("veces = ", veces, ", b = ", b, ", n = ", n, "\n")
+
+        ; el final se calcula una sola vez
+        n := 3
+        para i desde 1 hasta n * 2 hacer
+            n := 0
+            escribir(i)
+        fin
+        escribir("\n")
+
+        ; romper dentro de un «según» sale del bucle
+        para i desde 1 hasta 9 hacer
+            según i
+                caso 3: seguir
+                caso 6: romper
+            fin
+            escribir(i)
+        fin
+        escribir("\n")
+
+        t := "Año 2026, ñu\t!"
+        mientras valor(t) <> 0 hacer
+            escribir(clase(valor(t)))
+            t := t + 1
+        fin
+        escribir("\n")
+
+        para i desde -1 hasta 8 hacer
+            escribir(" ")
+            nombre_día(i)
+        fin
+        escribir("\n")
+    fin
+
+fin Bucles.

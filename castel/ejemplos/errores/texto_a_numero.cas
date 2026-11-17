@@ -1,0 +1,9 @@
+; Un texto no se guarda en un número.
+; ERROR: 7:14: error: «n» es un número (nat16) y se le da un texto
+módulo Error
+
+    función principal()
+        variable n: nat16
+        n := "hola"
+    fin
+fin Error.

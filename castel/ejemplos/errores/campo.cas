@@ -1,0 +1,13 @@
+; Un campo que la estructura no tiene.
+; ERROR: 11:10: error: la estructura Punto no tiene el campo «colunma»
+módulo Error
+
+    tipo Punto = estructura
+        fila, columna: ent16
+    fin
+    variable p: Punto
+    función principal()
+        p.fila := 1
+        p.colunma := 2
+    fin
+fin Error.

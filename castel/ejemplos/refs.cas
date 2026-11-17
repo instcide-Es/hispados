@@ -1,0 +1,131 @@
+; refs.cas - Fase 3: parámetros por referencia («ref») y funciones que se
+; llaman a sí mismas.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Refs
+
+    tipo Par = estructura
+        menor, mayor: ent16
+    fin
+    tipo Diez = arreglo [10] de ent16
+
+    variable g1, g2: ent16
+    variable lista: Diez = (5, -3, 9, 0, 12, -7, 4, 4, 1, 8)
+    variable octeto: byte
+
+    función cambia(ref a: ent16, ref b: ent16)
+        variable t: ent16
+        t := a
+        a := b
+        b := t
+    fin
+
+    ; un «ref» que se pasa tal cual a otra función
+    función ordena2(ref a: ent16, ref b: ent16)
+        si a > b entonces
+            cambia(a, b)
+        fin
+    fin
+
+    función suma_y_cuenta(v: ent16, ref suma: ent16, ref cuenta: nat16)
+        suma := suma + v
+        cuenta := cuenta + 1
+    fin
+
+    ; los arreglos y las estructuras se pasan con «ref» (no se copian)
+    función ordena(ref v: Diez)
+        variable i, j: nat16
+        para i desde 0 hasta 8 hacer
+            para j desde 0 hasta 8 - i hacer
+                ordena2(v[j], v[j + 1])
+            fin
+        fin
+    fin
+
+    función extremos(ref v: Diez, ref p: Par)
+        variable i: nat16
+        p.menor := v[0]
+        p.mayor := v[0]
+        para i desde 1 hasta 9 hacer
+            si v[i] < p.menor entonces
+                p.menor := v[i]
+            fin
+            si v[i] > p.mayor entonces
+                p.mayor := v[i]
+            fin
+        fin
+    fin
+
+    función incrementa(ref b: byte)
+        b := b + 1
+    fin
+
+    función avanza(ref p: puntero a byte, n: nat16)
+        p := p + n
+    fin
+
+    función factorial(n: nat16): nat16
+        si n <= 1 entonces
+            devolver 1
+        fin
+        devolver n * factorial(n - 1)
+    fin
+
+    función fib(n: nat16): nat16
+        si n < 2 entonces
+            devolver n
+        fin
+        devolver fib(n - 1) + fib(n - 2)
+    fin
+
+    función principal()
+        variable x, y2, suma: ent16
+        variable n, i: nat16
+        variable par: Par
+        variable t: puntero a byte
+
+        x := 3
+        y2 := -8
+        cambia(x, y2)
+        escribir("x = ", x, ", y2 = ", y2, "\n")
+        g1 := 20
+        g2 := 10
+        ordena2(g1, g2)
+        ordena2(x, g1)
+        escribir("g1 = ", g1, ", g2 = ", g2, ", x = ", x, "\n")
+
+        suma := 0
+        n := 0
+        para i desde 0 hasta 9 hacer
+            suma_y_cuenta(lista[i], suma, n)
+        fin
+        escribir("suma = ", suma, ", cuenta = ", n, "\n")
+
+        extremos(lista, par)
+        escribir("menor = ", par.menor, ", mayor = ", par.mayor, "\n")
+        cambia(par.menor, par.mayor)
+        cambia(lista[0], lista[9])
+        escribir("al revés: ", par.menor, " ", par.mayor, " ", lista[0], " ", lista[9], "\n")
+
+        ordena(lista)
+        escribir("ordenada:")
+        para i desde 0 hasta 9 hacer
+            escribir(" ", lista[i])
+        fin
+        escribir("\n")
+
+        octeto := 254
+        incrementa(octeto)
+        incrementa(octeto)
+        incrementa(octeto)
+        escribir("octeto = ", octeto, "\n")
+
+        t := "abcdefgh"
+        avanza(t, 2)
+        avanza(t, 3)
+        escribir(t, "\n")
+
+        escribir("7! = ", factorial(7), ", fib(20) = ", fib(20), "\n")
+    fin
+
+fin Refs.

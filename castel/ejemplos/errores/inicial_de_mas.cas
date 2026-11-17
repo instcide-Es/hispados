@@ -1,0 +1,8 @@
+; Más valores iniciales que elementos.
+; ERROR: 5:50: error: sobran valores: el arreglo es de 3
+módulo Error
+
+    variable a: arreglo [3] de nat16 = (1, 2, 3, 4)
+    función principal()
+    fin
+fin Error.

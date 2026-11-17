@@ -1,0 +1,135 @@
+; =============================================================================
+;  MAS.COM (MÁS, MORE) - enseña un texto pantalla a pantalla
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;
+;       orden | MAS          lo que escribe la orden, por páginas
+;       MAS < archivo        el archivo, por páginas
+;       MAS archivo          lo mismo
+;
+;  Es la orden MAS de Hispa-8086 (h8086/ordenes/mas.asm) escrita en Castel:
+;  hace lo mismo, octeto a octeto de salida. Es un filtro: lee de la entrada
+;  (que una tubería o «<» cambian por un archivo) y escribe en la salida. Cada
+;  vez que se llena la pantalla espera una tecla; Esc lo deja. El aviso
+;  «-- Más --» y la tecla van directamente por la BIOS: la entrada está
+;  ocupada con el texto, y si la salida se ha mandado a un archivo el aviso no
+;  tiene que acabar en él.
+; =============================================================================
+módulo Mas
+
+    constante M_MAS     = "-- Más --"
+    constante M_BORRA   = "\r         \r"
+    constante M_NO_ESTA = "No existe ese archivo.\r\n$"
+    constante TAM_BUF   = 512
+
+    variable ent: nat16                     ; de dónde se lee (0: la entrada)
+    variable col, lin, filas: byte
+    variable buf: arreglo [TAM_BUF] de byte
+
+    ; escribe una letra en la salida
+    función sale(c: byte)
+        interrupción(0x21, ah: 2, dl: c)
+    fin
+
+    ; escribe un texto (acabado en 0) con la BIOS
+    función bios_cad(p: puntero a byte)
+        mientras valor(p) <> 0 hacer
+            interrupción(0x10, ah: 0x0E, al: valor(p), bx: 7)
+            p := p + 1
+        fin
+    fin
+
+    ; «-- Más --»: espera una tecla y borra el aviso. Con Esc, se acaba
+    función pausa()
+        variable tecla: byte
+        lin := 0
+        bios_cad(M_MAS)
+        tecla := interrupción(0x16, ah: 0)
+        bios_cad(M_BORRA)
+        si tecla = 27 entonces
+            salir(0)
+        fin
+    fin
+
+    ; una línea más de pantalla: si con ella se llena, la pausa
+    función línea()
+        lin := lin + 1
+        si lin >= filas entonces
+            pausa()
+        fin
+    fin
+
+    función principal()
+        variable p, nombre: puntero a byte
+        variable n, i: nat16
+        variable c: byte
+
+        ; cuántas líneas caben: las de la pantalla menos una (25 si la BIOS
+        ; no lo dice: las tarjetas anteriores a la EGA)
+        filas := 24
+        c := leer_byte(0x40, 0x84)
+        si c >= 24 y c <= 60 entonces
+            filas := c
+        fin
+
+        ; ¿un archivo? Si no, la entrada
+        p := puntero(0x81)
+        mientras valor(p) = ' ' hacer
+            p := p + 1
+        fin
+        si valor(p) > ' ' entonces
+            nombre := p
+            mientras valor(p) > ' ' hacer
+                p := p + 1
+            fin
+            valor(p) := 0
+            ent := interrupción(0x21, ax: 0x3D00, dx: nombre)
+            si acarreo() entonces
+                interrupción(0x21, ah: 9, dx: M_NO_ESTA)
+                salir(1)
+            fin
+        fin
+
+        mientras cierto hacer
+            n := interrupción(0x21, ah: 0x3F, bx: ent, cx: TAM_BUF, dx: buf)
+            si acarreo() o n = 0 entonces
+                romper
+            fin
+            para i desde 0 hasta n - 1 hacer
+                c := buf[i]
+                si c = 0x1A entonces        ; el fin de archivo de los textos
+                    salir(0)
+                fin
+                si c = '\t' entonces
+                    ; el tabulador: espacios hasta la columna siguiente
+                    ; que sea múltiplo de ocho
+                    mientras cierto hacer
+                        sale(' ')
+                        col := col + 1
+                        si col >= 80 entonces
+                            col := 0
+                            línea()
+                            romper
+                        fin
+                        si col yb 7 = 0 entonces
+                            romper
+                        fin
+                    fin
+                    seguir
+                fin
+                sale(c)
+                si c = '\n' entonces
+                    línea()
+                sino si c = '\r' entonces
+                    col := 0
+                sino si c >= ' ' entonces
+                    col := col + 1
+                    si col >= 80 entonces   ; una línea más larga que la
+                        col := 0            ; pantalla ocupa otra
+                        línea()
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+fin Mas.

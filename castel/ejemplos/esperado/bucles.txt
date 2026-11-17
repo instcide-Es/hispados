@@ -1,0 +1,8 @@
+de 2 en 2: 1 3 5 7 9
+hacia atrás: 5 4 3 2 1 0 -1 -2 -3 -4 -5
+de -3 en -3: 10 7 1
+veces = 18, b = 255, n = 0
+123456
+1245
+22231111032230
+ ayer otro lunes martes otro otro otro fin de semana fin de semana otro

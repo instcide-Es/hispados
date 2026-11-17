@@ -1,0 +1,12 @@
+; Un valor en dos casos de un «según».
+; ERROR: 9:18: error: ese valor ya está en otro «caso»
+módulo Error
+
+    función principal()
+        variable n: nat16
+        según n
+            caso 1..5: escribir("a")
+            caso 5: escribir("b")
+        fin
+    fin
+fin Error.

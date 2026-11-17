@@ -1,0 +1,7 @@
+si largo
+sino largo
+mientras: 5 4
+para: -2 4 11
+condición larga
+uno dos-tres dos-tres otro
+15 64 1805

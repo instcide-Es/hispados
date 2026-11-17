@@ -1,0 +1,12 @@
+g = 12, loc = 14
+recorrido: 10 20 30 40 50
+atrás: 40 10 30
+p[0] = 20, p[i] = 40, valor(p + i) = 40
+números: 20 33 44
+separación = 6
+bytes: 52 18
+g = 99
+vacía: 0 cierto
+suma = 400, primero = 250, segundo = 150
+último: cierto -50
+PSP: 205 32
