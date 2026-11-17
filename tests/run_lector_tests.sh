@@ -34,7 +34,7 @@
 #     con ImageMagick: 4:2:0, 4:2:2, gris, CMYK, progresiva, grande), que se
 #     comparan en la pantalla con la foto; y una página A4 escaneada a 150
 #     puntos por pulgada, en gris y en color, con lo que tarda en componerse.
-# Con LECTOR_SOLO=ABCDEFGH (las letras que se quieran) se pasan solo esas partes
+# Con LECTOR_SOLO=ABCDEFGHK (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con LECTOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat e ImageMagick (como las demás).
@@ -42,7 +42,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/LECTOR.HVP
-SOLO=${LECTOR_SOLO:-NABCDEFGH}
+SOLO=${LECTOR_SOLO:-NABCDEFGHK}
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/lector.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "LECTOR.HVP no se ensambla"; exit 1; }
 P=$T/pdf
 python3 tests/tools/hazpdf.py $P > /dev/null || { ko "hazpdf.py no hace los PDF"; exit 1; }
@@ -545,6 +545,33 @@ done
 else
   echo "  (ImageMagick no hace las fotos: esta parte no se pasa)"; cat $T/fotos.txt
 fi
+fi
+
+if [[ $SOLO == *K* ]]; then
+echo "== Lector K: el botón secundario (el menú contextual) =="
+prepara $HVP
+mete $P/FACTURA.PDF
+reabre 'A:\FACTURA.PDF'
+{ arranca
+  derecho 300 250; shot k1                      # sobre la página (la primera): Anterior, en gris
+  tecla s; sleep 1.2; aparca; shot k2           # Página siguiente
+  derecho 300 250; shot k3                      # en la última: Siguiente, en gris
+  tecla t; sleep 1.2; aparca; shot k4           # Tamaño real
+  tecla shift-f10; sleep 0.6; shot k5; tecla esc   # con el teclado
+  derecho 300 90; sleep 0.5; shot k6            # en la barra de botones no hay menú
+  clic 83 69; sleep 0.8; clic 150 111; sleep 1  # Archivo > Cerrar
+  derecho 300 250; shot k7                      # sin documento: solo vale Abrir
+  sal; } | run 200 -vga std
+chk $T/k1.ppm busca 300 250 420 560 0 8 "opiar el texto de la p" busca 300 250 420 560 7 8 "Buscar si" \
+  busca 300 250 420 560 7 8 "nterior" busca 300 250 420 560 0 8 "iguiente" busca 300 250 420 560 0 8 "pliar" \
+  busca 300 250 420 560 0 8 "Guardar el te"
+pie k2 "Página 2 de 2"
+chk $T/k3.ppm busca 300 250 420 560 0 8 "nterior" busca 300 250 420 560 7 8 "iguiente"
+pie k4 "Página 2 de 2    100 %"
+chk $T/k5.ppm busca 40 90 200 420 0 8 "opiar el texto de la p"
+chk $T/k6.ppm nobusca 280 85 440 420 0 8 "opiar el texto de la p"
+chk $T/k7.ppm busca 300 250 420 560 7 8 "opiar el texto de la p" busca 300 250 420 560 7 8 "pliar" busca 300 250 420 580 0 8 "Abrir un d"
+muestra k1 lector_contexto; muestra k7 lector_contexto_sin
 fi
 
 rm -rf $T

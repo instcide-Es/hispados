@@ -216,6 +216,78 @@ lec_menu:
         dw 0xFFFF
         db 0
 
+; ---- el menú del botón secundario, sobre la página (comun/contexto.inc) ----
+ctx_pagina:
+        dw O_COPIAR
+        db "&Copiar el texto de la página  Ctrl+C", 0
+        dw O_BUSCAR
+        db "&Buscar...                     Ctrl+B", 0
+        dw O_SIGUIENTE
+        db "Buscar si&guiente                  F3", 0
+        dw 0
+        db 0
+        dw O_ANT
+        db "Página &anterior               RePág", 0
+        dw O_SIG
+        db "Página &siguiente              AvPág", 0
+        dw O_IRA
+        db "&Ir a la página...            Ctrl+I", 0
+        dw 0
+        db 0
+        dw O_AMPLIAR
+        db "A&mpliar                           +", 0
+        dw O_REDUCIR
+        db "&Reducir                           -", 0
+        dw O_REAL
+        db "&Tamaño real (100 %)", 0
+        dw O_ANCHO
+        db "Anc&ho de página", 0
+        dw O_ENTERA
+        db "Página &entera", 0
+        dw 0
+        db 0
+        dw O_TXT_PAG
+        db "Guardar el te&xto de la página...", 0
+        dw O_IMP_PAG
+        db "Im&primir el texto de la página Ctrl+P", 0
+        dw O_INFO
+        db "I&nformación del documento...", 0
+        dw 0
+        db 0
+        dw O_ABRIR
+        db "Abrir un d&ocumento...      Ctrl+A", 0
+        dw 0xFFFF
+ctx_gris:                           ; las que pueden ir en gris, y cuándo
+        dw O_COPIAR
+        dd cg_sin_doc
+        dw O_BUSCAR
+        dd cg_sin_doc
+        dw O_SIGUIENTE
+        dd cg_sin_buscar
+        dw O_ANT
+        dd cg_primera
+        dw O_SIG
+        dd cg_ultima
+        dw O_IRA
+        dd cg_una
+        dw O_AMPLIAR
+        dd cg_tope
+        dw O_REDUCIR
+        dd cg_minimo
+        dw O_REAL
+        dd cg_sin_doc
+        dw O_ANCHO
+        dd cg_sin_doc
+        dw O_ENTERA
+        dd cg_sin_doc
+        dw O_TXT_PAG
+        dd cg_sin_doc
+        dw O_IMP_PAG
+        dd cg_sin_doc
+        dw O_INFO
+        dd cg_sin_doc
+        dw 0
+
 ; ---- la barra de botones (programas/comun/barra.inc) ----
 botones     dd 6, 26, ic_abrir, O_ABRIR, nb_abrir, BT_ICONO
             dd 34, 26, ic_imprimir, O_IMP_PAG, nb_imprimir, BT_ICONO
@@ -489,6 +561,10 @@ lec_proc:
         je raton_mueve
         cmp eax, WM_LBUTTONUP
         je raton_suelta
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: al soltarlo, el
+        je raton_der                ; menú de la página
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je .rueda
         cmp eax, WM_VSCROLL
@@ -1277,6 +1353,70 @@ raton_suelta:
         mov byte [arrastra], 0
         HV ven_soltar
         jmp hecho
+
+; ---- el botón secundario ----
+; Se aprieta: apunta si ha sido en la zona de lectura (en la barra de botones
+; no hay menú)
+raton_der:
+        call ctx_punto              ; EAX=x EBX=y
+        cmp ebx, TB_AL
+        setge byte [ctx_donde]
+        jmp hecho
+; El menú de la página: EDX=el punto de la pantalla, o -1 si se pide con el
+; teclado (Mayús+F10 o la tecla de menú)
+menu_ctx:
+        cmp edx, -1
+        je .abre
+        cmp byte [ctx_donde], 0
+        je hecho
+.abre:
+        mov esi, ctx_pagina
+        mov edi, ctx_gris
+        mov eax, -1
+        call ctx_abre
+        jmp hecho
+
+; (ctx_gris) lo que ahora no se puede hacer: CF=1
+cg_sin_buscar:                      ; no se ha buscado nada todavía
+        cmp byte [busca_txt], 0
+        je cg_no
+cg_sin_doc:                         ; no hay ningún documento abierto
+        cmp byte [hay_doc], 0
+        je cg_no
+cg_si:
+        clc
+        ret
+cg_no:
+        stc
+        ret
+cg_primera:                         ; ya es la primera página
+        cmp dword [pag], 0
+        je cg_no
+        jmp cg_sin_doc
+cg_ultima:                          ; ya es la última
+        mov eax, [pag]
+        inc eax
+        cmp eax, [pdf_npag]
+        jae cg_no
+        jmp cg_sin_doc
+cg_tope:                            ; ya está en el aumento mayor
+        cmp byte [hay_doc], 0
+        je cg_no
+        call zoom_pct
+        cmp eax, [zooms+(ZOOMS_N-1)*4]
+        jae cg_no
+        jmp cg_si
+cg_minimo:                          ; ya está en el menor
+        cmp byte [hay_doc], 0
+        je cg_no
+        call zoom_pct
+        cmp eax, [zooms]
+        jbe cg_no
+        jmp cg_si
+cg_una:                             ; el documento tiene una sola página
+        cmp dword [pdf_npag], 1
+        jbe cg_no
+        jmp cg_sin_doc
 raton_mueve:
         cmp byte [arrastra], 0
         je .barra
@@ -3868,10 +4008,13 @@ vb_uv:
 %include "imagen.inc"
 %include "tipos.inc"
 %include "barra.inc"
+%include "contexto.inc"
 %include "hvplib.inc"
 
         section .bss
 ven         resd 1
+ctx_donde   resb 1                  ; 1: el botón secundario se apretó en la zona de lectura
+            alignb 4
 barra_v     resd 1
 barra_h     resd 1
 param       resd 1
