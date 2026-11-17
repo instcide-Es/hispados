@@ -977,8 +977,10 @@ disco_fresco:
 fat_trae:
         cmp ax, [fat_lba]
         je .x
-        call fat_vuelca
-        jc .x1
+        push ax                     ; (fat_vuelca gasta AX: sin guardarlo, tras
+        call fat_vuelca             ; escribir una FAT cambiada se traía otro
+        jc .x2                      ; sector, y con el número de este)
+        pop ax
         push bx
         mov bx, fat
         call lee_sector
@@ -987,7 +989,10 @@ fat_trae:
         mov [fat_lba], ax
 .x:
         clc
-.x1:
+        ret
+.x2:
+        add sp, 2                   ; no se ha podido escribir: AX=el error
+        stc
         ret
 .mal:
         mov word [fat_lba], 0xFFFF
