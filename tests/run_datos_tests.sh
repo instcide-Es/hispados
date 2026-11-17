@@ -665,6 +665,38 @@ chk $T/a4.ppm busca 100 126 260 146 0 9 "S 2"
 acaba 8
 fi
 
+if parte 9; then
+echo "== Datos 9: el botón secundario (el menú contextual) =="
+prepara $HVP        # (un disquete nuevo: esta parte no sigue a las anteriores)
+mdel -i $T/f.img ::$D/TIPOS.DAT ::$D/TIPOS12.DAT ::$D/TIPOS24.DAT ::$D/TIPOS32.DAT 2>/dev/null
+{ arranca
+  derecho 300 300; shot x0; tecla esc              # sin tablas: Nueva base y Abrir base
+  clic 578 91; sleep 1.5; tecla ret; sleep 2       # la plantilla «Socios»
+  socio "Marta" "Vidal" "Albinyana" "1/2/2020"
+  socio "Berta" "Soler" "Valls" "15/6/2019"
+  derecho 60 135; shot x1                          # el primer registro (estaba elegido el segundo): lo elige
+  tecla o; sleep 0.6                               # Copiar (su nombre)
+  derecho 200 153; shot x2                         # el segundo, en «Apellidos»: ya hay algo que pegar
+  tecla p; sleep 1.5; aparca; shot x3              # Pegar en el campo
+  derecho 200 116; shot x4                         # el encabezado «Apellidos»: el menú del campo
+  tecla m; sleep 1.2; aparca; shot x5              # Ordenar de menor a mayor
+  derecho 300 400; shot x6; tecla esc              # donde no hay registros
+  tecla shift-f10; sleep 0.6; shot x7; tecla esc   # con el teclado: debajo del registro elegido
+  derecho 300 91; sleep 0.5; shot x8               # en la barra de botones no hay menú
+  sal; } | run 200 -vga std
+chk $T/x0.ppm busca 300 300 400 380 0 8 "ueva base..." busca 300 300 400 380 0 8 "brir base..."
+chk $T/x1.ppm busca 12 126 148 146 0 10 "Marta" busca 60 135 160 340 0 8 "ambiar el registro..." \
+  busca 60 135 160 340 0 8 "orrar el registro" busca 60 135 160 340 7 8 "egar en el campo" busca 60 135 160 340 7 8 "uitar el filtro"
+chk $T/x2.ppm busca 200 153 300 360 0 8 "egar en el campo"
+chk $T/x3.ppm busca 148 144 324 164 0 10 "Marta"
+chk $T/x4.ppm busca 200 116 300 380 0 8 "Ordenar de " busca 200 116 300 380 0 8 "ambiar el campo..." busca 200 116 300 380 7 8 "uitar el filtro"
+chk $T/x5.ppm busca 12 566 600 590 0 6 "2 registros   Orden: Apellidos"
+chk $T/x6.ppm busca 300 150 420 420 0 8 "legir tabla..." busca 300 150 420 420 7 8 "En ta" busca 300 150 420 420 0 8 "En "
+chk $T/x7.ppm busca 40 130 160 380 0 8 "orrar el registro"
+chk $T/x8.ppm nobusca 280 85 420 300 0 8 "orrar el registro"
+muestra x1 datos_contexto; muestra x4 datos_contexto_campo
+fi
+
 if [ -n "${VERBOSE:-}" ]; then cat $T/bdd.txt 2>/dev/null; fi
 if [ -n "${CAPTURAS:-}" ]; then for f in $T/*.ppm; do convert $f $B/dx_$(basename $f .ppm).png; done; fi   # todas, a build/dx_*.png
 rm -rf $T

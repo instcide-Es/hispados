@@ -370,6 +370,120 @@ dat_menu:
         dw 0xFFFF
         db 0
 
+; ---- los menús del botón secundario (comun/contexto.inc) ----
+ctx_registro:                       ; sobre un registro (en la rejilla o en la ficha)
+        dw O_R_CAMB
+        db "&Cambiar el registro...  Intro", 0
+        dw O_R_DUP
+        db "&Duplicar el registro...", 0
+        dw O_R_BORRA
+        db "&Borrar el registro       Supr", 0
+        dw 0
+        db 0
+        dw O_COPIAR
+        db "C&opiar                 Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar en el campo      Ctrl+V", 0
+        dw 0
+        db 0
+        dw O_R_MAS
+        db "&Añadir un registro...     Ins", 0
+        dw 0
+        db 0
+        dw O_BUSCAR
+        db "B&uscar...              Ctrl+B", 0
+        dw O_FILTRAR
+        db "Fi&ltrar...             Ctrl+F", 0
+        dw O_SINFILTRO
+        db "&Quitar el filtro", 0
+        dw O_RESUMEN
+        db "&Resumen del campo...       F5", 0
+        dw 0xFFFF
+ctx_campo:                          ; sobre el encabezado de una columna
+        dw O_ORD_AZ
+        db "Ordenar de &menor a mayor", 0
+        dw O_ORD_ZA
+        db "Ordenar de ma&yor a menor", 0
+        dw O_ORD_NO
+        db "Sin &ordenar (como se escribieron)", 0
+        dw 0
+        db 0
+        dw O_FILTRAR
+        db "Fi&ltrar...             Ctrl+F", 0
+        dw O_SINFILTRO
+        db "&Quitar el filtro", 0
+        dw O_RESUMEN
+        db "&Resumen del campo...       F5", 0
+        dw 0
+        db 0
+        dw O_C_MAS
+        db "&Añadir un campo...", 0
+        dw O_C_CAMB
+        db "&Cambiar el campo...", 0
+        dw O_C_QUITA
+        db "Qu&itar el campo", 0
+        dw O_C_IZQ
+        db "Mover el campo hacia &delante", 0
+        dw O_C_DER
+        db "Mover el campo hacia de&trás", 0
+        dw 0xFFFF
+ctx_fondo:                          ; en la tabla, donde no hay registros
+        dw O_R_MAS
+        db "&Añadir un registro...     Ins", 0
+        dw O_TODO
+        db "Elegir &todos           Ctrl+E", 0
+        dw 0
+        db 0
+        dw O_BUSCAR
+        db "B&uscar...              Ctrl+B", 0
+        dw O_FILTRAR
+        db "Fi&ltrar...             Ctrl+F", 0
+        dw O_SINFILTRO
+        db "&Quitar el filtro", 0
+        dw 0
+        db 0
+        dw O_V_TABLA
+        db "En ta&bla                   F4", 0
+        dw O_V_FICHA
+        db "En &ficha                   F4", 0
+        dw 0
+        db 0
+        dw O_TABLAS
+        db "&Elegir tabla...            F6", 0
+        dw O_C_MAS
+        db "Añadir un &campo...", 0
+        dw 0xFFFF
+ctx_sin_base:                       ; sin ninguna tabla a la vista
+        dw O_NUEVA
+        db "&Nueva base...          Ctrl+U", 0
+        dw O_ABRIR
+        db "&Abrir base...          Ctrl+A", 0
+        dw 0xFFFF
+            align 4
+ctx_menus   dd ctx_registro, ctx_campo, ctx_fondo, ctx_sin_base
+ctx_gris:                           ; las que pueden ir en gris, y cuándo
+        dw O_R_CAMB
+        dd cg_sin_reg
+        dw O_R_DUP
+        dd cg_sin_reg
+        dw O_R_BORRA
+        dd cg_sin_reg
+        dw O_COPIAR
+        dd cg_sin_reg
+        dw O_PEGAR
+        dd cg_pegar
+        dw O_TODO
+        dd cg_sin_reg
+        dw O_BUSCAR
+        dd cg_sin_reg
+        dw O_SINFILTRO
+        dd cg_sin_filtro
+        dw O_V_TABLA
+        dd cg_en_tabla
+        dw O_V_FICHA
+        dd cg_en_ficha
+        dw 0
+
 ; ---- los botones de la barra (programas/comun/barra.inc): x, ancho, dibujo,
 ;      orden, nombre y clase ----
             align 4
@@ -736,6 +850,10 @@ dat_proc:
         je raton_suelta
         cmp eax, WM_LBUTTONDBLCLK
         je doble
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: elige lo que hay
+        je raton_der                ; debajo y, al soltarlo, su menú
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je rueda
         cmp eax, WM_VSCROLL
@@ -1780,6 +1898,132 @@ raton:
         mov ecx, [esi+12]
         jmp orden
 
+; ---- el botón secundario ----
+; Se aprieta: sobre un registro que no está entre los elegidos, lo elige (y el
+; campo, como un clic); sobre el encabezado de una columna, elige ese campo.
+; [ctx_donde] apunta dónde ha sido, para el menú: 1 un registro, 2 el
+; encabezado de un campo, 3 la tabla donde no hay registros, 4 sin ninguna
+; tabla (0: nada, la barra de botones)
+raton_der:
+        mov byte [ctx_donde], 0
+        call ctx_punto              ; EAX=x EBX=y
+        cmp ebx, TB_AL
+        jl hecho
+        cmp dword [arr_col], -1     ; (a medio ensanchar una columna)
+        jne hecho
+        mov byte [ctx_donde], 4
+        cmp dword [tab], 0
+        je hecho
+        cmp byte [vista], 0
+        jne .ficha
+        cmp ebx, GY0
+        jge .fila
+        mov byte [ctx_donde], 3     ; el encabezado
+        call col_en
+        jc hecho
+        mov byte [ctx_donde], 2
+        jmp .campo
+.fila:
+        mov byte [ctx_donde], 3
+        call fila_en
+        jc hecho
+        mov byte [ctx_donde], 1
+        mov esi, [anc]              ; ¿está entre los elegidos?
+        mov edi, [sel]
+        cmp esi, -1
+        jne .var
+        mov esi, edi
+.var:
+        cmp esi, edi
+        jbe .v1
+        xchg esi, edi
+.v1:
+        cmp edx, esi
+        jb .uno
+        cmp edx, edi
+        jbe .col
+.uno:
+        mov dword [anc], -1
+        mov [sel], edx
+.col:
+        call col_en
+        jc .pinta
+        jmp .campo
+.ficha:
+        mov byte [ctx_donde], 3
+        cmp dword [n_vis], 0
+        je hecho
+        mov byte [ctx_donde], 1
+        call campo_en
+        jc hecho
+.campo:
+        mov [col], ecx
+        mov byte [suma_ok], 0
+.pinta:
+        call inval
+        jmp hecho
+
+; El menú: EDX=el punto de la pantalla, o -1 si se pide con el teclado
+; (Mayús+F10 o la tecla de menú): entonces es el del registro elegido (en la
+; rejilla, debajo de él)
+menu_ctx:
+        mov eax, -1
+        cmp edx, -1
+        jne .abre
+        mov byte [ctx_donde], 4
+        cmp dword [tab], 0
+        je .abre
+        mov byte [ctx_donde], 3
+        cmp dword [n_vis], 0
+        je .abre
+        mov byte [ctx_donde], 1
+        cmp byte [vista], 0
+        jne .abre
+        mov ecx, [sel]
+        sub ecx, [top]
+        jb .abre
+        cmp ecx, [vis_fil]
+        jae .abre
+        inc ecx
+        imul ebx, ecx, FIL_AL
+        add ebx, GY0
+        mov eax, 40
+.abre:
+        movzx ecx, byte [ctx_donde]
+        test ecx, ecx
+        jz hecho
+        mov esi, [ctx_menus+ecx*4-4]
+        mov edi, ctx_gris
+        call ctx_abre
+        jmp hecho
+
+; (ctx_gris) lo que ahora no se puede hacer: CF=1
+cg_pegar:                           ; sin registro o sin nada que pegar
+        cmp dword [n_vis], 0
+        je cg_no
+        jmp ctx_porta
+cg_sin_reg:                         ; no hay ningún registro a la vista
+        cmp dword [n_vis], 0
+        je cg_no
+        jmp short cg_si
+cg_sin_filtro:
+        cmp byte [f_on], 0
+        je cg_no
+        jmp short cg_si
+cg_en_tabla:                        ; la vista que ya se ve
+        cmp byte [vista], 0
+        je cg_no
+        jmp short cg_si
+cg_en_ficha:
+        cmp byte [vista], 0
+        jne cg_no
+cg_si:
+        clc
+        ret
+cg_no:
+        stc
+        ret
+
 ; (interna) EBX=y: la fila de la rejilla -> EDX=su sitio en la vista; CF=1
 fila_en:
         push eax
@@ -1878,11 +2122,15 @@ f_txt       equ fc1 + FC_TXT
 %include "dialogo.inc"
 %include "salida.inc"
 %include "barra.inc"
+%define CTX_PUENTE
+%include "contexto.inc"
 %include "hvplib.inc"
 
         section .bss
             BARRA_BSS
 ven         resd 1
+ctx_donde   resb 1                  ; dónde se apretó el botón secundario (raton_der)
+            alignb 4
 barra_v     resd 1
 barra_h     resd 1
 param       resd 1                  ; los parámetros con los que se abrió
