@@ -20,6 +20,12 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
                                     la esquina dentro del rectángulo
   nobusca X0 Y0 X1 Y1 COLOR FONDO TEXTO  y que no está
   cambia X Y ANCHO ALTO OTRA.ppm MINDIF        la zona ha cambiado respecto a OTRA
+  centrado X0 X1 Y FONDO HOLGURA NOMBRE        en la fila Y, entre X0 y X1 (sin
+                                    contar X1), lo que no es del color FONDO
+                                    (una hoja, una fila de botones) deja a los
+                                    dos lados el mismo hueco, con esa holgura
+  alineado X0 X1 Y1 Y2 FONDO NOMBRE            lo que no es del color FONDO empieza
+                                    en la misma x en las filas Y1 e Y2
 Los colores se dan por su número (0-15) en la paleta de ventanas/datos.inc (o
 16-255: el cubo de 6x6x6 y los grises de ventanas/video.inc) y se comparan con un margen (las pantallas de 15/16 bits y el DAC de 6 bits
 redondean). La fuente esperada se lee de build/gen/ventanas/fuente.inc.
@@ -280,6 +286,22 @@ def main():
                       if cap.px(x + xx, y + yy) != otra.px(x + xx, y + yy))
             res(dif >= mindif, '%s: zona (%d,%d) %dx%d distinta de la de %s: %d puntos' % (
                 nombre, x, y, w, h, os.path.basename(a[i + 5]).replace('.ppm', ''), dif))
+            i += 7
+        elif op == 'centrado':
+            x0, x1, y, n, holgura = (int(v) for v in a[i + 1:i + 6])
+            xs = [x for x in range(x0, x1) if not es(cap.px(x, y), n)]
+            if xs:
+                izq, der = xs[0] - x0, x1 - 1 - xs[-1]
+                res(abs(izq - der) <= holgura, '%s: %s, en el centro (fila %d: de %d a %d; huecos de %d y %d)' % (
+                    nombre, a[i + 6], y, xs[0], xs[-1], izq, der))
+            else:
+                res(False, '%s: %s: no hay nada en la fila %d entre %d y %d' % (nombre, a[i + 6], y, x0, x1))
+            i += 7
+        elif op == 'alineado':
+            x0, x1, y1, y2, n = (int(v) for v in a[i + 1:i + 6])
+            ini = [next((x for x in range(x0, x1) if not es(cap.px(x, y), n)), -1) for y in (y1, y2)]
+            res(ini[0] == ini[1] and ini[0] >= 0, '%s: %s (empiezan en %d y en %d)' % (
+                nombre, a[i + 6], ini[0], ini[1]))
             i += 7
         else:
             raise SystemExit('comprobación desconocida: ' + op)

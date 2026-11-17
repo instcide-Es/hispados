@@ -50,13 +50,13 @@
 
 MAX_TXT     equ 30000               ; letras de un documento
 PAG_AN      equ 576                 ; ancho del texto: 72 letras normales
-PX          equ 4                   ; dónde empieza la hoja
+PX          equ 4                   ; dónde empieza la hoja, a lo menos: va centrada
+                                    ; en la ventana ([hoja_x], y su texto en [tx0])
 MARG        equ 8                   ; su margen a cada lado
 PAPW        equ PAG_AN + 2 * MARG
 TOPM        equ 12                  ; el margen de arriba (y de abajo)
 TB_AL       equ 58                  ; la barra de botones: dos filas
 STAT_AL     equ 20                  ; la barra de estado
-TX0         equ PX + MARG           ; la x del texto en la ventana
 
 ; ---- el formato de una letra ----
 A_NEG       equ 1
@@ -781,6 +781,20 @@ plu_proc:
         xor edx, edx
 .t1:
         mov [vh], edx
+        mov eax, ecx                ; la hoja, centrada en lo que deja la barra de
+        sub eax, BD_AN + PAPW       ; desplazamiento; y los botones, sobre ella
+        sar eax, 1
+        cmp eax, PX
+        jge .t2
+        mov eax, PX
+.t2:
+        mov [hoja_x], eax
+        add eax, MARG
+        mov [tx0], eax
+        add eax, PAG_AN / 2
+        mov esi, botones1
+        mov edi, botones
+        call br_centra
         mov eax, ecx
         sub eax, BD_AN
         mov ebx, TB_AL
@@ -1930,7 +1944,7 @@ raton_sitio:
         push ecx
         push edi
         movsx eax, dx
-        sub eax, TX0
+        sub eax, [tx0]
         mov ebx, edx
         sar ebx, 16
         sub ebx, TB_AL + TOPM
@@ -3315,14 +3329,15 @@ resumen:
         ret
 
 ; ---- Ver > Pantalla completa: la ventana, a toda la pantalla (y de vuelta) ----
+; (se mira cómo está la ventana de verdad: también se maximiza y se restaura
+; con los botones del título)
 completa:
-        xor byte [completa_si], 1
+        mov ebp, [ven]
         mov eax, 3
-        cmp byte [completa_si], 0
-        jne .m
+        test dword [ebp+V_ESTADO], S_MAXIM
+        jz .m
         mov eax, 4
 .m:
-        mov ebp, [ven]
         HV ven_mostrar
         ret
 
@@ -4628,21 +4643,23 @@ pintar:
         HV dc_cortar
         COLOR C_CREMA               ; lo que no es hoja
         xor eax, eax
-        mov ecx, PX
+        mov ecx, [hoja_x]
         HV dc_rect
-        mov eax, PX + PAPW
+        mov eax, [hoja_x]
+        add eax, PAPW
         mov ecx, [cli_an]
-        sub ecx, PX + PAPW
+        sub ecx, eax
         jle .h
         HV dc_rect
 .h:
         COLOR C_BLANCO              ; los márgenes de la hoja
-        mov eax, PX
+        mov eax, [hoja_x]
         mov ecx, MARG
         HV dc_rect
-        mov eax, TX0 + PAG_AN
+        mov eax, [tx0]
+        add eax, PAG_AN
         HV dc_rect
-        mov eax, TX0                ; el de arriba
+        mov eax, [tx0]              ; el de arriba
         mov ebx, TB_AL
         sub ebx, [sy]
         mov ecx, PAG_AN
@@ -4678,7 +4695,7 @@ pintar:
         mov ebx, [lin_y+eax*4]
         add ebx, TB_AL + TOPM
         sub ebx, [sy]
-        mov eax, TX0
+        mov eax, [tx0]
         mov ecx, PAG_AN
         mov edx, [cli_al]
         sub edx, ebx
@@ -4691,7 +4708,7 @@ pintar:
         call sitio_xy
         COLOR C_TINTA
         mov eax, [c_x]
-        add eax, TX0
+        add eax, [tx0]
         mov ebx, [c_y]
         add ebx, TB_AL + TOPM
         sub ebx, [sy]
@@ -5268,7 +5285,7 @@ pinta_linea:
 .sin_tabla:
         cmp byte [pl_solo_buf], 0   ; (para la impresora: se queda en lbuf)
         jne .hecha
-        mov eax, TX0
+        mov eax, [tx0]
         mov ebx, [pl_y]
         mov ecx, PAG_AN
         mov edx, [m_al]
@@ -5451,6 +5468,8 @@ sy          resd 1                  ; lo que está desplazado el documento
 sy_max      resd 1
 vh          resd 1                  ; el alto de la zona del texto
 cli_an      resd 1
+hoja_x      resd 1                  ; la x de la hoja en la ventana
+tx0         resd 1                  ; y la de su texto
 cli_al      resd 1
 m_s         resd 1
 m_e         resd 1
@@ -5523,7 +5542,6 @@ g_atr       resb 1
 g_color     resb 1
 imp_fmt     resb 1
 imp_atr     resb 1
-completa_si resb 1
 dl_atr      resb 1
 dl_tipo     resb 1
 m_just      resb 1

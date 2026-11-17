@@ -28,7 +28,7 @@ prepara $HVP
   tecla ctrl-n; escribe "negrita "; tecla ctrl-n ctrl-k; escribe "cursiva "; tecla ctrl-k ctrl-s
   escribe "subrayado"; tecla ctrl-s; escribe " normal"; tecla ret
   tecla ctrl-d; escribe "A la derecha"; tecla ret ctrl-q
-  clic 557 127; escribe "En rojo"            # el botón del color rojo
+  clic 583 127; escribe "En rojo"            # el botón del color rojo
   aparca; shot e1
   tecla ctrl-g; sleep 1.2; escribe "carta"; tecla ret; sleep 2; shot e2
   escribe " y mas"; aparca; shot d1; tecla ctrl-z; shot d2; tecla ctrl-y; shot d3; tecla ctrl-z   # deshacer y rehacer
@@ -78,7 +78,7 @@ reabre 'A:\CARTA.PLU'
 rm -f $T/prn.txt
 { arranca
   shot a1
-  clic 198 99; sleep 1; aparca; shot v1; tecla esc; sleep 0.5; shot v2   # la vista preliminar, y volver
+  clic 224 99; sleep 1; aparca; shot v1; tecla esc; sleep 0.5; shot v2   # la vista preliminar, y volver
   tecla ctrl-p; sleep 4; shot a2; tecla ret; sleep 1
   clic 112 75; sleep 1; shot m1; clic 200 261; sleep 4; shot a3; tecla ret; sleep 1   # Archivo > Imprimir con formato
   clic 112 75; sleep 1; shot m2; clic 200 281; sleep 25; shot a4; tecla ret; sleep 1   # Archivo > Imprimir como se ve
@@ -161,14 +161,14 @@ reabre ''
 mdel -i $T/f.img ::LISTA.PLU 2>/dev/null
 { arranca
   tecla ctrl-n; escribe "gordo"; tecla ctrl-n; escribe " fino"; tecla ret
-  clic 448 127; escribe "uno"; tecla ret; escribe "dos"; tecla ret; clic 448 127      # viñetas
-  clic 422 127; escribe "tres"; tecla ret; escribe "cuatro"; tecla ret; clic 422 127  # numeración
-  clic 500 127; clic 500 127; escribe "sangrado"; tecla ret; clic 474 127; clic 474 127   # sangría: dos pasos y fuera
+  clic 474 127; escribe "uno"; tecla ret; escribe "dos"; tecla ret; clic 474 127      # viñetas
+  clic 448 127; escribe "tres"; tecla ret; escribe "cuatro"; tecla ret; clic 448 127  # numeración
+  clic 526 127; clic 526 127; escribe "sangrado"; tecla ret; clic 500 127; clic 500 127   # sangría: dos pasos y fuera
   tecla ctrl-j; escribe "Esto es una prueba de texto normal que tiene que partirse sola al llegar al final de la linea de la hoja, por palabras."
-  clic 96 163; clic 308 99                                    # en «gordo»; la brocha
+  clic 96 163; clic 334 99                                    # en «gordo»; la brocha
   ir 133 163; mon "mouse_button 1" 0.25; ir 150 163; ir 165 163; mon "mouse_button 0" 0.5   # y se pasa por «fino»
   aparca; shot l1
-  ir 398 99; shot l3; clic 398 99; aparca; shot l2            # el nombre del botón ¶; las marcas a la vista
+  ir 424 99; shot l3; clic 424 99; aparca; shot l2            # el nombre del botón ¶; las marcas a la vista
   tecla ctrl-g; sleep 1.2; escribe "lista"; tecla ret; sleep 2
   tecla ctrl-p; sleep 4; tecla ret; sleep 1
   sal; } | PARALELO=file:$T/prn2.txt run 200 -vga std
@@ -201,9 +201,9 @@ else ko "LISTA.PLU o lo impreso no es lo esperado"; xxd $T/lista.plu | tail -12;
 echo "== Pluma: los tipos de letra =="
 reabre ''
 mdel -i $T/f.img ::TIPOS.PLU 2>/dev/null
-tam() { clic 194 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
-estilo() { clic 450 99; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; tecla ret; sleep 0.8; }
-tipo() { clic 108 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
+tam() { clic 220 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
+estilo() { clic 476 99; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; tecla ret; sleep 0.8; }
+tipo() { clic 134 127; sleep 1.2; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
 { arranca
   tipo 1 f0; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret      # Roble
   tipo 9; escribe "El veloz murcielago hindu comia feliz cardillo y kiwi."; tecla ret         # Llano
@@ -239,13 +239,13 @@ echo "== Pluma: una tabla =="
 reabre ''
 mdel -i $T/f.img ::TABLA.PLU 2>/dev/null
 { arranca
-  escribe "Antes"; clic 498 99; sleep 1.2; tecla ret; sleep 1.2; tecla ret; sleep 1.2     # Insertar tabla: 3 columnas y 3 filas
+  escribe "Antes"; clic 524 99; sleep 1.2; tecla ret; sleep 1.2; tecla ret; sleep 1.2     # Insertar tabla: 3 columnas y 3 filas
   escribe "uno"; tecla tab; escribe "dos"; tecla tab; escribe "tres"; tecla tab; escribe "cuatro"
   tecla ret; escribe "nueva"                         # Intro: una fila más, debajo
   aparca; shot b1
   tecla ctrl-end; escribe "Despues"; aparca; shot b2
   tecla ctrl-r; escribe "Otra hoja"; aparca; shot b3                # un salto de página
-  clic 198 99; sleep 1; aparca; shot b4; tecla pgdn; sleep 0.6; shot b5; tecla esc; sleep 0.5   # la vista preliminar: dos páginas
+  clic 224 99; sleep 1; aparca; shot b4; tecla pgdn; sleep 0.6; shot b5; tecla esc; sleep 0.5   # la vista preliminar: dos páginas
   tecla ctrl-g; sleep 1.2; escribe "tabla"; tecla ret; sleep 2
   sal; } | run 150 -vga std
 chk $T/b1.ppm busca 80 151 90 166 0 9 "Antes"
@@ -254,7 +254,7 @@ chk $T/b1.ppm busca 274 170 284 182 0 9 "dos"             # la segunda, en su co
 chk $T/b1.ppm busca 464 170 476 182 0 9 "tres"
 chk $T/b1.ppm busca 84 194 92 206 0 9 "cuatro"
 chk $T/b1.ppm busca 84 218 92 230 0 9 "nueva"
-chk $T/b1.ppm rgb 275 180 1A1410 "la raya entre la primera columna y la segunda"
+chk $T/b1.ppm rgb 277 180 1A1410 "la raya entre la primera columna y la segunda"
 muestra b2 pluma_tabla
 chk $T/b4.ppm busca 72 518 600 540 0 6 "Vista preliminar: página 1 de 2"
 chk $T/b5.ppm busca 72 518 600 540 0 6 "Vista preliminar: página 2 de 2"
@@ -297,6 +297,44 @@ sys.exit(0 if d[12:12+n].decode('cp437')=='Esto es una prueba de ortografía y R
 PY
 then ok "ORTO.PLU: las dos faltas, corregidas con la primera propuesta"; else ko "ORTO.PLU no es lo esperado"; xxd $T/orto.plu | head -5; fi
 if [ "$(mtype -i $T/f.img ::HISPADOS/PROGS/PROPIAS.TXT 2>/dev/null | tr -d '\r\n')" = "Rescoldito" ]; then ok "PROPIAS.TXT: la palabra añadida queda guardada"; else ko "PROPIAS.TXT no lleva la palabra añadida"; fi
+
+echo "== Pluma: maximizada y a pantalla completa, la hoja y los botones en el centro =="
+# La hoja va centrada en lo que deja la barra de desplazamiento, y las dos
+# filas de botones, centradas sobre ella: con la ventana corriente, maximizada
+# (el botón del título), restaurada y a pantalla completa (Ver > Pantalla
+# completa, que es lo mismo). Maximizada, el ratón sigue cayendo donde se ve:
+# en la letra de la hoja y en los botones.
+reabre ''
+{ arranca
+  escribe "casa"; aparca; shot c0
+  clic 661 53; sleep 1; aparca; shot c1                         # el botón de maximizar
+  clic 603 115; escribe " rojo"                                 # el botón del color rojo, donde está ahora
+  clic 121 147; escribe "mi"; tecla end; aparca; shot c2        # un clic en medio de «casa»: «camisa»
+  clic 171 63; sleep 1; clic 201 125; sleep 1; aparca; shot c3  # Ver > Pantalla completa: estaba maximizada, se restaura
+  clic 241 75; sleep 1; clic 271 137; sleep 1; aparca; shot c4  # y otra vez: a toda la pantalla
+  clic 767 41; sleep 1; aparca; shot c5                         # el botón de restaurar
+  sal; } | run 120 -vga std
+# captura; la zona a lo ancho (sin la barra de desplazamiento); una fila de la
+# hoja y las de las dos filas de botones; cómo está la ventana
+centro() {
+  chk $T/$1.ppm centrado $2 $3 $4 8 1 "la hoja, $7" centrado $2 $3 $6 6 1 "los botones, $7" \
+                alineado $2 $3 $5 $6 6 "las dos filas de botones empiezan en el mismo sitio, $7"
+}
+chk $T/c0.ppm titulo 70 40 activa "Pluma - (sin nombre)"
+centro c0 72 676 300 99 127 "en la ventana corriente"
+chk $T/c1.ppm titulo 0 28 activa "Pluma - (sin nombre)"
+centro c1 2 782 300 87 115 "maximizada"
+chk $T/c1.ppm busca 100 135 108 143 0 9 "casa"            # el texto, en la hoja centrada
+chk $T/c2.ppm busca 100 135 108 143 0 9 "camisa"          # el clic en la hoja cae en su letra
+chk $T/c2.ppm busca 156 135 164 143 13 9 "rojo"           # y el del botón, en su botón
+chk $T/c3.ppm titulo 70 40 activa "Pluma - (sin nombre)"
+centro c3 72 676 300 99 127 "restaurada con Ver > Pantalla completa"
+chk $T/c3.ppm busca 80 151 90 166 0 9 "camisa"
+chk $T/c4.ppm titulo 0 28 activa "Pluma - (sin nombre)"
+centro c4 2 782 300 87 115 "a pantalla completa"
+chk $T/c5.ppm titulo 70 40 activa "Pluma - (sin nombre)"
+centro c5 72 676 300 99 127 "restaurada con el botón del título"
+muestra c1 pluma_maximizada; muestra c2 pluma_maximizada_clic; muestra c4 pluma_pantalla_completa; muestra c5 pluma_restaurada
 
 rm -rf $T
 exit $fail

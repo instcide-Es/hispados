@@ -23,6 +23,11 @@
 ;
 ;    br_fondo     ECX=ancho EDX=alto: el fondo de la barra, arriba de la ventana
 ;    br_fila      EDI=tabla EBX=y: pinta una fila de botones
+;    br_centra    EAX=x del centro, ESI=una fila, EDI=otra (o 0): corre las
+;                 filas a la derecha lo que haga falta ([br_x0], nunca menos
+;                 de 0) para que queden centradas en esa x. Se llama al
+;                 cambiar de tamaño la ventana; sin llamarla, [br_x0] es 0 y
+;                 las filas se quedan donde dice su tabla
 ;    br_boton_en  EAX=x ESI=tabla -> ESI=el botón que hay ahí; CF=1 si ninguno
 ;    br_sobre_pon EDI=nombre del botón bajo el ratón (0: ninguno) -> ZF=1 si
 ;                 es el mismo de antes (no hay que repintar)
@@ -45,6 +50,7 @@ BT_COLOR    equ 4
 
 %macro BARRA_BSS 0
 br_y        resd 1
+br_x0       resd 1                  ; lo que se corren las filas a la derecha
 br_sobre    resd 1                  ; el nombre del botón que hay bajo el ratón
 br_fondo_c  resb 1
             alignb 4
@@ -79,6 +85,7 @@ br_fila:
         mov eax, esi
         HV dc_color
         mov eax, [edi]
+        add eax, [br_x0]
         mov ebx, [br_y]
         mov ecx, [edi+4]
         mov edx, BR_AL
@@ -103,6 +110,7 @@ br_fila:
         movzx eax, byte [br_fondo_c]
         HV dc_color
         mov eax, [edi]
+        add eax, [br_x0]
         mov ebx, [br_y]
         mov ecx, [edi+4]
         mov edx, BR_AL
@@ -115,6 +123,7 @@ br_fila:
         sub eax, 16
         sar eax, 1
         add eax, [edi]
+        add eax, [br_x0]
         add ebx, 3
         call br_icono
         jmp .sig
@@ -135,6 +144,7 @@ br_fila:
         sub eax, ecx
         sar eax, 1
         add eax, [edi]
+        add eax, [br_x0]
         mov ebx, [br_y]
         add ebx, 3
         cmp dword [edi+20], BT_NEGRITA
@@ -155,12 +165,55 @@ br_fila:
         popad
         ret
 
+br_centra:
+        pushad
+        mov ebp, eax                ; el centro que se quiere
+        mov ebx, 0x7FFFFFFF         ; de dónde a dónde llegan los botones
+        xor edx, edx
+        call .mide
+        mov esi, edi
+        test esi, esi
+        jz .una
+        call .mide
+.una:
+        xor eax, eax
+        cmp ebx, edx                ; (sin botones: en su sitio)
+        jge .pon
+        add ebx, edx
+        sar ebx, 1
+        mov eax, ebp
+        sub eax, ebx
+        jns .pon
+        xor eax, eax
+.pon:
+        mov [br_x0], eax
+        popad
+        ret
+.mide:
+        cmp dword [esi+4], 0
+        je .m9
+        mov eax, [esi]
+        cmp eax, ebx
+        jge .m1
+        mov ebx, eax
+.m1:
+        add eax, [esi+4]
+        cmp eax, edx
+        jle .m2
+        mov edx, eax
+.m2:
+        add esi, B_TAM
+        jmp .mide
+.m9:
+        ret
+
 br_boton_en:
         push ecx
 .b:
         cmp dword [esi+4], 0
         je .no
         mov ecx, eax
+        sub ecx, [br_x0]
         sub ecx, [esi]
         cmp ecx, [esi+4]
         jb .es
