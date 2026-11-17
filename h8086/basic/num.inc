@@ -173,12 +173,13 @@ f_suma:
         mov [di + AC_TIPO], al
         jmp .x
 .los_dos:
-        ; el otro, a la derecha, en ac4 (no se toca el de SI)
+        ; el otro, a la derecha, en ac_suma (no se toca el de SI; una zona
+        ; propia: quien llama puede usar cualquier acumulador, ac4 también)
         push di
-        mov di, ac4
+        mov di, ac_suma
         call f_copia
         pop di
-        mov si, ac4
+        mov si, ac_suma
         mov ax, [di + AC_EXP]
         sub ax, [si + AC_EXP]
         jge .ya
@@ -637,6 +638,7 @@ f_carga_cte_aux:
         ret
 ; pone en DI la constante de CS:SI (8 octetos MBF), de tipo doble
 f_carga_cte:
+        push ax                     ; (todo se conserva: f_pot10 lleva AX)
         push si
         push cx
         push di
@@ -653,6 +655,7 @@ f_carga_cte:
         call mbf8_a
         pop cx
         pop si
+        pop ax
         ret
 f_uno_cte   db 0, 0, 0, 0, 0, 0, 0x00, 0x81       ; 1
 f_diez_cte  db 0, 0, 0, 0, 0, 0, 0x20, 0x84       ; 10

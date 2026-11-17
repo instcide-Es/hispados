@@ -630,9 +630,8 @@ resultado_arg:
         mov si, arg
         mov di, ac
         call f_copia
-        pop bp                      ; (la vuelta)
         pop si                      ; el texto, guardado en prepara_flot
-        jmp bp
+        ret                         ; (encima de él estaba ya la vuelta)
 
 ; ---- ^ ----
 op_pot:
@@ -1366,7 +1365,8 @@ busca_matriz:
 crea_matriz:
         push si
         push dx
-        ; los elementos: el producto
+        ; los elementos: el producto (MUL pisa DX: el tipo, antes a BL)
+        mov bl, dh
         mov ax, 1
         mov si, v_aux2
         push cx
@@ -1378,7 +1378,6 @@ crea_matriz:
         add si, 2
         loop .p
         pop cx
-        mov bl, dh
         xor bh, bh
         mul bx                      ; en octetos
         jc .grande2

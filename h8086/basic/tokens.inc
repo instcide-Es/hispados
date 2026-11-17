@@ -617,17 +617,21 @@ tok_palabra:
 .no_fn:
         ; con el «$» o «(» de detrás
         push cx
+        push bx                     ; (busca_pal deja la clase en BL)
         inc cx
         mov dx, pal_ing
         call busca_pal              ; CF=1 si la encuentra: AX = el código
+        pop bx
         pop cx
         jnc .sin
         inc cx                      ; se come también el «$» o el «(»
         jmp .encontrada
 .sin:
         push cx
+        push bx
         mov dx, pal_ing
         call busca_pal
+        pop bx
         pop cx
         jc .encontrada
         ; ¿una española?
@@ -910,6 +914,7 @@ pon_esp:                            ; AX = el código; SI detrás de la palabra
 ; =============================================================================
 lista_linea:
         push bx
+        push dx
         push si
         mov ax, [bx + 2]
         call pon_entero_sin
@@ -991,6 +996,7 @@ lista_linea:
 .fin:
         call pon_nl
         pop si
+        pop dx
         pop bx
         ret
 

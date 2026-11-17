@@ -53,6 +53,7 @@ inicio:
         rep stosw
         pop ax
         ; la línea de órdenes (PSP:80h), al segmento nuevo, antes de cambiar
+        push ax                     ; (AX = el segmento: el 0 de abajo lo pisaría)
         mov si, 0x80
         mov di, b_lin
         xor ch, ch
@@ -65,6 +66,7 @@ inicio:
         rep movsb
         xor al, al
         stosb
+        pop ax
         ; DS = ES = SS = los datos
         mov ds, ax
         cli
@@ -343,21 +345,20 @@ mete_linea:
         cld
         pop cx
         add [v_vars], cx
-        ; escribirla
+        ; escribirla. En la pila: [DI de quien llama] [SI] [el número]
         mov di, bx
         mov ax, bx
         add ax, cx
         stosw                       ; el enlace
-        pop si
-        pop ax                      ; (DI del que llama, se tira)
-        pop ax                      ; el número
-        push si
+        mov bp, sp
+        mov ax, [bp + 4]            ; el número
         stosw
         mov si, b_tok
         sub cx, 4
         rep movsb
         pop di
         pop si
+        pop ax
 .x:
         ; las variables se pierden al cambiar el programa (como en GW-BASIC)
         mov word [v_cont_lin], 0
