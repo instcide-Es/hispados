@@ -148,6 +148,15 @@ pe_misc     resd 1                  ; lo suyo (TIB, línea de órdenes), direcci
 pe_dll      resd 1                  ; el nombre de la DLL que se está importando
 pe_cab      resb 160                ; la cabecera PE del que se está abriendo
 pe_tabla    resb PE_MAX * PE_TAM
+w32_crea    resd 8                  ; lo de la ventana que se está creando (V_D0...V_D7)
+w32_cascada resd 1                  ; cuántas ventanas se han puesto con CW_USEDEFAULT
+w32_dt_dc   resd 1                  ; DrawTextA: el contexto,
+w32_dt_ini  resd 1                  ;   dónde empieza la línea,
+w32_dt_y    resd 1                  ;   su y
+w32_dt_alto resd 1                  ;   y el alto de todo
+w32_wsp_delta resd 1                ; wsprintfA: PE_DELTA del programa,
+w32_wsp     resw 1                  ;   el relleno y la letra de las cifras
+            alignb 4
 ; ---- [Configuración] ajustes (ajustes.inc) ----
             alignb 4
 aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados

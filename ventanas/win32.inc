@@ -2,10 +2,11 @@
 ;  Hispa Ventanas - [HISPA-486] programas de Windows de 32 bits con ventanas
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Fase 3a de Hispa-486 (docs/486/HISPA-486.md): un .EXE de Win32 (formato PE)
+;  Fase 3 de Hispa-486 (docs/486/HISPA-486.md): un .EXE de Win32 (formato PE)
 ;  cuyo subsistema es el de ventanas (2) se abre DENTRO de Hispa Ventanas, como
 ;  una tarea más, en vez de salir a Hispa-DOS. Los de consola siguen saliendo
-;  (allí los ejecuta HW32).
+;  (allí los ejecuta HW32). Aquí están el cargador, el despacho, la llamada de
+;  vuelta y KERNEL32 (fase 3a); USER32 y GDI32 (fase 3b), en win32u.inc.
 ;
 ;  Cómo funciona:
 ;  - El programa se carga en un bloque de memoria extendida (DPMI 0501h):
@@ -29,6 +30,14 @@
 ;    nada de los selectores del programa.
 ;  - Lo que no hay: un trampolín que, si se llama, dice «falta la función
 ;    NOMBRE» y termina el programa.
+;  - La llamada de vuelta (pe_llamar): de Hispa Ventanas a una función del
+;    programa (su WndProc). Pasa a la pila del programa, debajo de donde
+;    estaba en la llamada que se está atendiendo, deja allí los cuatro
+;    argumentos y la vuelta a un trampolín suyo, y salta. El trampolín salta
+;    lejos a pe_volver, que vuelve a los segmentos y a la pila de Hispa
+;    Ventanas. Mientras tanto, PE_ESPV apunta a la pila de Hispa Ventanas por
+;    debajo de la llamada: lo que el WndProc llame (pe_despacho) sigue ahí, y
+;    se puede anidar las veces que haga falta.
 ;  Sala limpia: hecho a partir de la documentación pública del formato PE y
 ;  del API Win32.
 ;
@@ -37,6 +46,8 @@
 ;    pe_marca_consola  (acc_lanzar) los de consola, por el intérprete de órdenes
 ;    pe_limpiar   (sistema) suelta los selectores y la memoria de los que han
 ;                 acabado
+;    pe_llamar    EDX=programa EAX=su función (EBX, ECX, ESI, EDI: los cuatro
+;                 argumentos) -> EAX
 ; =============================================================================
 
 PE_MAX      equ 4                   ; programas de Windows a la vez
@@ -59,7 +70,19 @@ PE_ERROR    equ 60                  ; GetLastError
 PE_SALIDA   equ 64                  ; el trampolín adonde vuelve su entrada (suyo)
 PE_RUTA     equ 68                  ; 79 letras
 PE_PARAM    equ 148                 ; 71
-PE_TAM      equ 220
+; (fase 3b: USER32 y GDI32, win32u.inc)
+PE_W32      equ 220                 ; su bloque: clases, objetos de GDI, contextos...
+PE_QUIT     equ 224                 ; ha llamado a PostQuitMessage
+PE_QCOD     equ 228                 ;   con este código
+PE_VUELTA   equ 232                 ; el trampolín adonde vuelven sus funciones (suyo)
+PE_TEC_CAR  equ 236                 ; el carácter de la tecla que se acaba de tomar,
+PE_TEC_VEN  equ 240                 ;   su HWND
+PE_TEC_L    equ 244                 ;   y su lParam (para TranslateMessage)
+PE_BOT      equ 248                 ; botones del ratón apretados (MK_LBUTTON, MK_RBUTTON)
+PE_NPEND    equ 252                 ; mensajes inventados que esperan
+PE_PEND     equ 256                 ;   (HWND, mensaje, wParam, lParam cada uno)
+PE_PEND_MAX equ 4
+PE_TAM      equ PE_PEND + PE_PEND_MAX * 16
 
 PT_TAM      equ 28                  ; un trampolín: push (5), jmp lejos (7) y
 PT_PE       equ 12                  ;   la ficha del programa,
@@ -98,6 +121,7 @@ t_pe_titulo db "Hispa-486", 0
 t_pe_error  db "Error", 0
 t_k32       db "KERNEL32", 0
 t_u32       db "USER32", 0
+t_g32       db "GDI32", 0
 
 ; ---- ¿es un programa de Windows de ventanas? ESI=ruta -> ZF=1 si lo es
 ; (acaba en .EXE, es un PE de 386 y su subsistema es el 2). Conserva todo ----
@@ -385,6 +409,17 @@ pe_abrir:
         call pe_tramp
         jc .aviso
         mov [edx+PE_SALIDA], eax
+        mov eax, w32_e_salida       ; y adonde vuelven sus funciones (pe_llamar):
+        xor ecx, ecx                ; como los demás, pero salta a pe_volver
+        xor edi, edi
+        call pe_tramp
+        jc .aviso
+        mov [edx+PE_VUELTA], eax
+        add eax, [edx+PE_DELTA]
+        mov dword [eax+6], pe_volver
+        mov esi, t_pe_mem           ; su bloque de USER32 y GDI32
+        call w32_iniciar
+        jc .aviso
         ; la TIB: sin manejadores de excepción, la pila y ella misma
         mov edi, [pe_misc]
         mov eax, edi
@@ -413,7 +448,13 @@ pe_abrir:
         call tar_crear
         mov [edx+PE_TAREA], eax
         test eax, eax
-        jnz .x
+        jz .sintarea
+        mov ebx, [edx+PE_W32]       ; (su bloque queda apuntado a su tarea: si
+        mov [ebx-4], eax            ; la terminan a la fuerza, se suelta con ella)
+        jmp .x
+.sintarea:
+        mov eax, [edx+PE_W32]
+        call mem_soltar
         mov dword [edx+PE_USO], 2
         mov esi, t_hvp_muchos
         jmp .aviso
@@ -529,6 +570,10 @@ pe_importar:
         je .dll
         mov bl, 1
         mov edi, t_u32
+        call pe_es_dll
+        je .dll
+        mov bl, 2
+        mov edi, t_g32
         call pe_es_dll
         je .dll
         mov bl, 0xFF                ; una DLL que no hay: todo lo suyo «falta»
@@ -777,7 +822,78 @@ pe_despacho:
 ; sus ventanas); los selectores y la memoria los suelta pe_limpiar ----
 pe_salir:
         mov esp, [edx+PE_ESPV0]
-        mov dword [edx+PE_USO], 2
+        mov dword [edx+PE_USO], 2   ; (a sus ventanas ya no se las avisa)
+        mov ebx, [tar_act]
+        call ges_destruir_de_tarea
+        mov eax, [edx+PE_W32]       ; su bloque de USER32 y GDI32
+        mov dword [edx+PE_W32], 0
+        call mem_soltar
+        ret
+
+; ---- la llamada de vuelta: llama a la función EAX del programa EDX (un
+; WndProc: stdcall, cuatro argumentos, EBX, ECX, ESI y EDI) -> EAX. Solo desde
+; la tarea del programa y mientras atiende una llamada suya; si no (o si el
+; programa ya ha acabado), no llama y devuelve 0. Conserva los registros ----
+pe_llamar:
+        pushad
+        mov dword [esp+28], 0
+        test eax, eax
+        jz .no
+        cmp dword [edx+PE_USO], 1
+        jne .no
+        call w32_en_tarea
+        jne .no
+        mov ebp, [edx+PE_ESPP]      ; su pila, donde la dejó al llamar
+        test ebp, ebp
+        jz .no
+        push dword [edx+PE_ESPV]
+        push ebp
+        push edx
+        mov [edx+PE_ESPV], esp      ; lo que llame desde dentro, de aquí para abajo
+        sub ebp, 24
+        and ebp, ~3
+        add ebp, [edx+PE_DELTA]     ; los argumentos y la vuelta, en su pila
+        mov [ebp+4], ebx
+        mov [ebp+8], ecx
+        mov [ebp+12], esi
+        mov [ebp+16], edi
+        mov ecx, [edx+PE_VUELTA]
+        mov [ebp], ecx
+        sub ebp, [edx+PE_DELTA]
+        mov ecx, [edx+PE_SEL]
+        lea esi, [ecx+8]
+        lea edi, [ecx+16]
+        mov fs, di
+        mov es, si
+        mov gs, si
+        mov ss, si
+        mov esp, ebp
+        push ecx
+        push eax
+        mov ds, si
+        xor ebp, ebp
+        retf
+.no:
+        popad
+        ret
+; aquí vuelve (por el trampolín PE_VUELTA, que ha empujado su dirección) la
+; función del programa, con sus segmentos y su pila; EAX = lo que devuelve
+pe_volver:
+        mov cx, [cs:sel_dat]
+        mov ds, cx
+        mov es, cx
+        mov fs, cx
+        mov gs, cx
+        cld
+        pop ebx                     ; el trampolín
+        mov edx, [ebx+PT_PE]
+        mov ss, cx
+        mov esp, [edx+PE_ESPV]
+        pop edx
+        pop dword [edx+PE_ESPP]
+        pop dword [edx+PE_ESPV]
+        mov [esp+28], eax
+        popad
         ret
 
 ; ---- (sistema) suelta los selectores y la memoria de los programas de
@@ -826,7 +942,7 @@ pe_limpiar:
 
 ; =============================================================================
 ;  Las funciones. Cada ficha: la rutina (4), los octetos de argumentos (2),
-;  la DLL (1: 0 KERNEL32, 1 USER32) y el nombre.
+;  la DLL (1: 0 KERNEL32, 1 USER32, 2 GDI32) y el nombre.
 ; =============================================================================
 %macro W32F 4
         dd %1
@@ -861,6 +977,75 @@ w32_tabla:
         W32F k_lstrcatA, 8, 0, 'lstrcatA'
         W32F k_lstrcatA, 8, 0, 'lstrcat'
         W32F u_MessageBoxA, 16, 1, 'MessageBoxA'
+        ; fase 3b: USER32 (win32u.inc)
+        W32F u_RegisterClassA, 4, 1, 'RegisterClassA'
+        W32F u_RegisterClassExA, 4, 1, 'RegisterClassExA'
+        W32F u_UnregisterClassA, 8, 1, 'UnregisterClassA'
+        W32F u_CreateWindowExA, 48, 1, 'CreateWindowExA'
+        W32F u_ShowWindow, 8, 1, 'ShowWindow'
+        W32F u_UpdateWindow, 4, 1, 'UpdateWindow'
+        W32F u_DestroyWindow, 4, 1, 'DestroyWindow'
+        W32F u_DefWindowProcA, 16, 1, 'DefWindowProcA'
+        W32F u_GetMessageA, 16, 1, 'GetMessageA'
+        W32F u_PeekMessageA, 20, 1, 'PeekMessageA'
+        W32F u_TranslateMessage, 4, 1, 'TranslateMessage'
+        W32F u_DispatchMessageA, 4, 1, 'DispatchMessageA'
+        W32F u_PostQuitMessage, 4, 1, 'PostQuitMessage'
+        W32F u_PostMessageA, 16, 1, 'PostMessageA'
+        W32F u_SendMessageA, 16, 1, 'SendMessageA'
+        W32F u_GetClientRect, 8, 1, 'GetClientRect'
+        W32F u_GetWindowRect, 8, 1, 'GetWindowRect'
+        W32F u_InvalidateRect, 12, 1, 'InvalidateRect'
+        W32F u_ValidateRect, 8, 1, 'ValidateRect'
+        W32F u_MoveWindow, 24, 1, 'MoveWindow'
+        W32F u_SetWindowTextA, 8, 1, 'SetWindowTextA'
+        W32F u_GetWindowTextA, 12, 1, 'GetWindowTextA'
+        W32F u_GetWindowTextLengthA, 4, 1, 'GetWindowTextLengthA'
+        W32F u_GetWindowLongA, 8, 1, 'GetWindowLongA'
+        W32F u_SetWindowLongA, 12, 1, 'SetWindowLongA'
+        W32F u_SetTimer, 16, 1, 'SetTimer'
+        W32F u_KillTimer, 8, 1, 'KillTimer'
+        W32F u_LoadCursorA, 8, 1, 'LoadCursorA'
+        W32F u_LoadIconA, 8, 1, 'LoadIconA'
+        W32F u_cero, 4, 1, 'SetCursor'
+        W32F u_uno, 4, 1, 'MessageBeep'
+        W32F u_GetSystemMetrics, 4, 1, 'GetSystemMetrics'
+        W32F u_GetSysColor, 4, 1, 'GetSysColor'
+        W32F u_GetSysColorBrush, 4, 1, 'GetSysColorBrush'
+        W32F u_GetDC, 4, 1, 'GetDC'
+        W32F u_ReleaseDC, 8, 1, 'ReleaseDC'
+        W32F u_BeginPaint, 8, 1, 'BeginPaint'
+        W32F u_EndPaint, 8, 1, 'EndPaint'
+        W32F u_FillRect, 12, 1, 'FillRect'
+        W32F u_DrawTextA, 20, 1, 'DrawTextA'
+        W32F u_IsWindow, 4, 1, 'IsWindow'
+        W32F u_IsWindowVisible, 4, 1, 'IsWindowVisible'
+        W32F u_IsIconic, 4, 1, 'IsIconic'
+        W32F u_IsZoomed, 4, 1, 'IsZoomed'
+        W32F u_GetParent, 4, 1, 'GetParent'
+        W32F u_SetFocus, 4, 1, 'SetFocus'
+        W32F u_GetFocus, 0, 1, 'GetFocus'
+        W32F u_wsprintfA, 0, 1, 'wsprintfA'
+        ; fase 3b: GDI32
+        W32F g_TextOutA, 20, 2, 'TextOutA'
+        W32F g_SetTextColor, 8, 2, 'SetTextColor'
+        W32F g_SetBkColor, 8, 2, 'SetBkColor'
+        W32F g_SetBkMode, 8, 2, 'SetBkMode'
+        W32F g_SetTextAlign, 8, 2, 'SetTextAlign'
+        W32F g_GetTextColor, 4, 2, 'GetTextColor'
+        W32F g_GetBkColor, 4, 2, 'GetBkColor'
+        W32F g_GetStockObject, 4, 2, 'GetStockObject'
+        W32F g_CreateSolidBrush, 4, 2, 'CreateSolidBrush'
+        W32F g_CreatePen, 12, 2, 'CreatePen'
+        W32F g_SelectObject, 8, 2, 'SelectObject'
+        W32F g_DeleteObject, 4, 2, 'DeleteObject'
+        W32F g_Rectangle, 20, 2, 'Rectangle'
+        W32F g_MoveToEx, 16, 2, 'MoveToEx'
+        W32F g_LineTo, 12, 2, 'LineTo'
+        W32F g_SetPixel, 16, 2, 'SetPixel'
+        W32F g_GetTextExtentPoint32A, 16, 2, 'GetTextExtentPoint32A'
+        W32F g_GetTextExtentPoint32A, 16, 2, 'GetTextExtentPointA'
+        W32F g_GetTextMetricsA, 8, 2, 'GetTextMetricsA'
         dd 0
 %unmacro W32F 4
 
@@ -1039,7 +1224,7 @@ MB_TITULO   equ 128                 ; y de su título
 mb_tipos    db DM_ACEPTAR, DM_ACEPTAR_CANCELAR, DM_ACEPTAR, DM_SI_NO_CANCELAR
             db DM_SI_NO, DM_ACEPTAR_CANCELAR
 ; int MessageBoxA(ventana, texto, título, tipo): un cuadro de Hispa Ventanas
-; (dlg_mensaje). MB_OK, MB_OKCANCEL, MB_YESNOCANCEL y MB_YESNO, con las
+; (dlg_mensaje) cuya dueña es esa ventana, si es del programa. MB_OK, MB_OKCANCEL, MB_YESNOCANCEL y MB_YESNO, con las
 ; respuestas de Windows (1 aceptar, 2 cancelar, 6 sí, 7 no);
 ; MB_RETRYCANCEL sale como aceptar y cancelar (4 reintentar, 2 cancelar) y lo
 ; demás, con «Aceptar». Los textos vienen en la página 1252 de Windows.
@@ -1070,11 +1255,13 @@ u_MessageBoxA:
         jbe .otra
         xor ecx, ecx
 .otra:
-        movzx eax, byte [mb_tipos+ecx]
         mov esi, ebx
         lea edi, [ebx+MB_TEXTO]
         push ebp
-        xor ebp, ebp
+        mov eax, [ebp]              ; la dueña (si sigue ahí)
+        call w32_ven
+        mov ebp, eax
+        movzx eax, byte [mb_tipos+ecx]
         call dlg_mensaje
         pop ebp
         cmp ecx, 4                  ; sí o no: no vale cerrarlo sin contestar

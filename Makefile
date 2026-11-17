@@ -132,7 +132,14 @@ $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
 	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:MessageBoxA $(B)/wingui.o
 $(B)/WINFALTA.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
 	$(CC32) -DFALTA -c $< -o $(B)/winfalta.o
-	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:MessageBoxA,CreateWindowExA $(B)/winfalta.o
+	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:MessageBoxA,SetWindowsHookA $(B)/winfalta.o
+# [HISPA-486] fase 3b: el «Hola, mundo» de ventana (ventanas/win32u.inc;
+# tests/run_win32hola_tests.sh)
+W32HOLA_U = RegisterClassA,CreateWindowExA,ShowWindow,UpdateWindow,DestroyWindow,DefWindowProcA,GetMessageA,TranslateMessage,DispatchMessageA,PostQuitMessage,PostMessageA,SendMessageA,GetClientRect,GetWindowRect,InvalidateRect,SetWindowTextA,GetWindowTextA,SetTimer,KillTimer,MessageBoxA,LoadCursorA,LoadIconA,GetSystemMetrics,GetDC,ReleaseDC,BeginPaint,EndPaint,FillRect,DrawTextA,wsprintfA
+W32HOLA_G = TextOutA,SetTextColor,SetBkColor,SetBkMode,GetStockObject,CreateSolidBrush,CreatePen,SelectObject,DeleteObject,Rectangle,MoveToEx,LineTo,GetTextExtentPoint32A
+$(B)/WINHOLA.EXE: tests/progs/winhola.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/winhola.o
+	python3 tools/elf2pe.py --gui -o $@ -i USER32.dll:$(W32HOLA_U) -i GDI32.dll:$(W32HOLA_G) $(B)/winhola.o
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
@@ -622,6 +629,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
 	tests/run_hw32_tests.sh $(IMG)
 	tests/run_win32gui_tests.sh $(IMG)
+	tests/run_win32hola_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)

@@ -891,7 +891,9 @@ devuelven algo.
 ```
   (módulos .HVP: juegos/*.asm y programas/*.asm, con hvp.inc y hvplib.inc)
   api.inc modulos.inc    la interfaz y el cargador de los módulos
-  win32.inc      [Hispa-486] programas de Windows de ventanas (parte alta)
+  win32.inc      [Hispa-486] programas de Windows de ventanas (parte alta):
+                 el cargador, el despacho, la llamada de vuelta y KERNEL32
+  win32u.inc     [Hispa-486] su USER32 y su GDI32 (parte alta)
   ajustes.inc    los ajustes que cambia Configuración (CONFIG.HVP)
   centro.inc bloc.inc calc.inc reloj.inc    los programas
   accesos.inc    grupos ligados a una carpeta de juegos y opciones de
@@ -1452,8 +1454,9 @@ Un `.EXE` de Win32 **de ventanas** (formato PE, subsistema 2) también se abre
 como una ventana, no saliendo a Hispa-DOS: `es_hvp` dice que sí tanto para un
 .HVP como para un PE de ventanas (`es_pe_gui` mira la cabecera del archivo),
 y `hvp_abrir` pasa los segundos a `pe_abrir` (`ventanas/win32.inc`, en la
-parte alta). Es la fase 3a de Hispa-486; el detalle está en
-`docs/486/HISPA-486.md` («Cómo está hecho (fase 3a)»). Lo que importa aquí:
+parte alta). Es la fase 3 de Hispa-486; el detalle está en
+`docs/486/HISPA-486.md` («Cómo está hecho (fase 3a)» y «(fase 3b)»). Lo que
+importa aquí:
 
 - El programa corre como **una tarea más**, pero con **sus propios
   selectores** (código, datos y pila, FS) y **su propia pila**, dentro de un
@@ -1473,6 +1476,29 @@ parte alta). Es la fase 3a de Hispa-486; el detalle está en
 - `hvp_limpiar` llama a `pe_limpiar`, que suelta los selectores y el bloque
   de los programas que han acabado (o que ha terminado el Administrador de
   tareas).
+- (Fase 3b, `ventanas/win32u.inc`.) **Sus ventanas son ventanas de Hispa
+  Ventanas** con el procedimiento `w32_ven_proc` y lo de Windows en `V_D0` a
+  `V_D6` (el programa, su `WndProc`, su clase, su estilo, su bloque con el
+  título...). El marco y el reparto del ratón y del teclado son los de
+  siempre; `GetMessageA` es `msg_mirar` más la traducción de los mensajes a
+  los de Windows, y cede el turno con `tar_ceder`.
+- **`pe_llamar`** es el camino contrario a `pe_despacho`: de Hispa Ventanas
+  al `WndProc` del programa, en la pila del programa, y de vuelta por un
+  trampolín (`pe_volver`). Solo se usa **en la tarea del programa**. Como
+  `msg_enviar` llama al procedimiento de una ventana desde la tarea que sea
+  (el sistema, al arrastrarla o al cambiar la activa), `w32_ven_proc` deja lo
+  que le llega desde otra tarea en la cola de la suya, con la marca
+  `W32_DIFERIDO` en `M_MSG`, y se entrega cuando el programa mira su cola.
+  (`M_MSG` puede llevar también `W32_CRUDO`: un mensaje de `PostMessageA`,
+  que ya es de Windows. Las dos marcas son bits altos que ningún mensaje
+  usa; `msg_purgar` y `msg_despachar` no las miran.)
+- **El dibujo** va por las `dc_*`: cada función de GDI abre el contexto de la
+  ventana, dibuja y lo cierra, porque el contexto de Hispa Ventanas es uno
+  solo y no vale de un turno a otro. Los colores RGB pasan al cubo de 6×6×6
+  y a los grises de la paleta.
+- La memoria que pide del montón (el bloque del programa y el de cada
+  ventana) queda **apuntada a su tarea**, como la de los módulos
+  (`tar_w_pedir`): si se termina a la fuerza, `tar_soltar_de` la suelta.
 
 Un `.EXE` de Win32 **de consola** sale a Hispa-DOS como los demás programas,
 pero `acc_lanzar` lo marca (`pe_marca_consola`: bit 4 de `lz_band`) y el
@@ -2072,6 +2098,11 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 
 ## Pruebas
 
+- `tests/run_win32hola_tests.sh` ([Hispa-486], fase 3b): el «Hola, mundo»
+  de ventana de Win32 (`tests/progs/winhola.c`): la ventana con su título, su
+  texto y sus dibujos; los clics y las teclas; `MessageBoxA` con dueña;
+  moverla y cambiarle el tamaño; cerrarla con la X sin dejar memoria; dos
+  copias a la vez y el Administrador de tareas.
 - `tests/run_win32gui_tests.sh` ([Hispa-486], fase 3a): programas Win32 de
   ventanas dentro de Hispa Ventanas, desde un grupo del Centro hecho por la
   prueba. WINGUI.EXE: su `MessageBoxA` sale como cuadro con «Sí» y «No», Esc

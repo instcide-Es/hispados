@@ -2067,6 +2067,7 @@ alto_ini:
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
 %include "win32.inc"                ; [HISPA-486] programas de Windows de ventanas
+%include "win32u.inc"               ; [HISPA-486] su USER32 y su GDI32
 %endif
         align 16
 fin_archivo:

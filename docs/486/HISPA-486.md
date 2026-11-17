@@ -43,7 +43,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 0 | Este documento; la lista de funciones por orden de uso (`tools/importaciones.py`, con los programas que aporte cada uno) | documento hecho (17/11/2026) |
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
-| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas |
+| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos) |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador |
@@ -99,9 +99,11 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    encuentran por su recorte 8+3, como en MS-DOS).
 2. ~~Que COMMAND.COM ejecute los PE solo~~: hecho (17/11/2026): un .EXE con cabecera PE se lanza con HW32 (de la carpeta de COMSPEC, del PATH o de la actual); si no hay HW32, lo dice y no se lanza.
 3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
-4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a está hecha; sigue la
-   3b (el «Hola, mundo» de ventana: clases, `CreateWindowExA`, bucle de
-   mensajes, `WndProc` llamado desde Hispa Ventanas, `TextOutA`).
+4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a y la 3b (el «Hola,
+   mundo» de ventana) están hechas; sigue la 3c (controles y menús: las
+   clases BUTTON, EDIT, STATIC y LISTBOX sobre los controles de Hispa
+   Ventanas, `WM_COMMAND`, `CreateMenu`) y que los programas de C con
+   biblioteca carguen MSVCRT.DLL dentro de Hispa Ventanas.
 
 ## Fase 1: el cargador PE
 
@@ -259,8 +261,141 @@ Decisiones y límites de la 3a (para las fases siguientes):
   es una copia nueva.
 - `ExitProcess` desde una llamada de vuelta que corra en otra tarea (3b)
   habrá que resolverlo entonces: hoy vuelve al principio de la tarea propia.
+  (Resuelto en la 3b: las llamadas de vuelta solo corren en la tarea propia.)
 - El cuadro de `MessageBoxA` no tiene dueña (la 3a no tiene ventanas): si se
-  activa otra ventana, queda detrás.
+  activa otra ventana, queda detrás. (En la 3b ya la tiene.)
+
+### Cómo está hecho (fase 3b)
+
+El «Hola, mundo» de ventana: un programa de Windows registra su clase, crea
+su ventana, atiende sus mensajes y pinta. Está en `ventanas/win32u.inc`
+(USER32 y GDI32; va detrás de `win32.inc`, en la parte alta: unos 6 KB más)
+y en `win32.inc` la llamada de vuelta. Prueba:
+`tests/run_win32hola_tests.sh` con `tests/progs/winhola.c`.
+
+- **Una ventana de Windows es una ventana de Hispa Ventanas** cuyo
+  procedimiento es `w32_ven_proc`. En las ocho palabras de la clase de su
+  ficha lleva lo de Windows: el programa (`V_D0`), su `WndProc` (`V_D1`), su
+  clase (`V_D2`), su estilo (`V_D3`), un bloque del montón con el título (en
+  la página 437, para el marco), `GWL_USERDATA` y los octetos de más de la
+  clase (`V_D4`), unas banderas (`V_D5`) y el estilo extendido (`V_D6`). El
+  `HWND` es el número de la ficha (100h + 4 × número). El marco, el título,
+  los botones, moverla, cambiarle el tamaño, minimizarla y maximizarla son
+  los de Hispa Ventanas.
+- **Lo de cada programa** (`PE_W32`, un bloque del montón): sus clases (12:
+  nombre, `WndProc`, estilo, pincel de fondo, cursor, icono y octetos de
+  más; delante, la «clase» de Hispa Ventanas que usa `ven_crear`), sus
+  objetos de GDI (96: los 20 primeros son los de `GetStockObject`), sus
+  contextos de dispositivo (8) y las funciones de sus temporizadores (8).
+  La memoria queda apuntada a su tarea: si el Administrador de tareas lo
+  termina a la fuerza, se suelta con ella.
+- **La llamada de vuelta** (`pe_llamar`, de Hispa Ventanas al `WndProc`).
+  Se está en la pila de Hispa Ventanas de la tarea, dentro de una llamada
+  del programa (`pe_despacho` dejó apuntado en `PE_ESPP` dónde estaba la pila
+  del programa). `pe_llamar` guarda `PE_ESPV` y `PE_ESPP` en la pila de
+  Hispa Ventanas y pone `PE_ESPV` = la pila de ahora: lo que el `WndProc`
+  llame entrará por `pe_despacho` de ahí para abajo. En la pila del programa,
+  por debajo de `PE_ESPP`, deja los cuatro argumentos y la vuelta (cercana) a
+  un trampolín del programa (`PE_VUELTA`); carga FS, ES, GS, SS:ESP y DS del
+  programa y salta lejos al `WndProc` con RETF. El `WndProc` vuelve con su
+  `ret 16` al trampolín, que empuja su dirección y salta lejos a `pe_volver`:
+  segmentos de Hispa Ventanas, ESP = `PE_ESPV`, se reponen `PE_ESPP` y
+  `PE_ESPV` y se vuelve con el resultado en EAX. Se anida sin más: el
+  `WndProc` llama a `SendMessageA`, que vuelve a llamar al `WndProc`
+  (`winhola` lo hace en `WM_CREATE`), o a `MessageBoxA`, cuyo bucle entrega
+  `WM_PAINT` a la ventana de debajo.
+- **Solo en su tarea.** El `WndProc` solo se llama desde la tarea del
+  programa (`w32_en_tarea`: la tarea que corre es la suya y la pila es la de
+  esa tarea; el Administrador de tareas, al terminar un programa, se hace
+  pasar por él). Hispa Ventanas envía mensajes desde la tarea del sistema
+  (`WM_SIZE` y `WM_MOVE` al arrastrar, `WM_SETFOCUS` y `WM_KILLFOCUS` al
+  cambiar la activa): esos, `w32_ven_proc` los apunta en la cola de la tarea
+  del programa con la marca `W32_DIFERIDO` y se entregan dentro de
+  `GetMessageA` (o del bucle de un cuadro). De `WM_SIZE` y `WM_MOVE` basta
+  uno en la cola: al entregarlo se mira cómo está la ventana. Así
+  `ExitProcess` dentro de un `WndProc` siempre está en su tarea (vuelve al
+  principio de la tarea, que acaba) y un `MessageBoxA` dentro de un
+  `WndProc` nunca deja parado el bucle del sistema.
+- **Los mensajes.** La cola de la tarea lleva los mensajes de Hispa
+  Ventanas; `GetMessageA` (`w32_tomar`: donde la tarea cede el turno, con
+  `msg_mirar` y `tar_ceder`) los traduce: el ratón (wParam = `MK_*`: los
+  botones que lleva apretados y Mayús y Ctrl; el doble clic solo con
+  `CS_DBLCLKS`, si no, otro `WM_LBUTTONDOWN`), `WM_SIZE` (wParam = normal,
+  minimizada o maximizada), `WM_MOVE`, `WM_TIMER` (lParam = la función),
+  `WM_PAINT`, `WM_CLOSE`. Las teclas: un `WM_KEYDOWN` de Hispa Ventanas (las
+  que no escriben) o un `WM_CHAR` pasan a ser `WM_KEYDOWN` con su tecla
+  virtual, y detrás un `WM_KEYUP` inventado; `TranslateMessage` pone delante
+  el `WM_CHAR` (página 1252). Lo inventado, y lo que se mira con
+  `PM_NOREMOVE`, espera en una cola de cuatro del programa (`PE_PEND`). Los
+  mensajes de `PostMessageA` van a la cola de la tarea con la marca
+  `W32_CRUDO` (ya son de Windows). `PostQuitMessage` es una bandera: cuando
+  la cola se vacía, `GetMessageA` da `WM_QUIT` y devuelve 0. Lo que llega a
+  una ventana de Windows por dentro (un cuadro que reparte, lo diferido) pasa
+  por `w32_ven_proc`, que traduce igual y llama al `WndProc` (una tecla: los
+  tres mensajes seguidos).
+- **Crear y destruir.** `CreateWindowExA` busca la clase, pide el bloque,
+  hace la plantilla (con título: `E_TITULO` y `E_CERRAR`, y `E_MAXIM`,
+  `E_MINIM` y `E_TAMANO` según `WS_MAXIMIZEBOX`, `WS_MINIMIZEBOX` y
+  `WS_THICKFRAME`; `WS_CHILD`: `E_HIJA`, dentro de la zona de su madre;
+  `WS_POPUP` sin título: sin marco; `CW_USEDEFAULT`: en escalera y 5/8 de la
+  pantalla) y llama a `ven_crear` (oculta); luego `WM_NCCREATE` y `WM_CREATE`
+  con su `CREATESTRUCTA` (en la pila de Hispa Ventanas: el programa la ve
+  restando `PE_DELTA`) y, con `WS_VISIBLE`, la muestra. `ShowWindow`:
+  `WM_SHOWWINDOW`, `ven_mostrar` (que la activa: `WM_ACTIVATE` y
+  `WM_SETFOCUS`) y, la primera vez, `WM_SIZE` y `WM_MOVE`. Cerrar: la X pone
+  `WM_CLOSE` en la cola; `DefWindowProcA` llama a `ven_destruir`, que envía
+  `WM_DESTROY` (al programa: `WM_DESTROY` y `WM_NCDESTROY`; después se sueltan
+  su bloque, sus contextos y sus temporizadores).
+- **Pintar.** Hispa Ventanas tiene un solo contexto de dibujo, que no vale
+  de un turno a otro, así que un `HDC` es una ficha (ventana, lo que había
+  que pintar, colores, modo del fondo, pluma, pincel, dónde está la pluma) y
+  cada función de GDI abre el contexto de Hispa Ventanas (`reg_ventana`,
+  recortado en `BeginPaint` a lo que había que pintar), dibuja con las `dc_*`
+  y lo cierra. `BeginPaint` da la zona por pintada, marca las hijas y envía
+  `WM_ERASEBKGND` (`DefWindowProcA` la borra con el pincel de la clase).
+  Los colores RGB van al cubo de 6×6×6 o a los grises de la paleta de Hispa
+  Ventanas (`w32_color`). La letra es la de Hispa Ventanas (8×16, fija).
+- **Las funciones de la 3b.** USER32: `RegisterClassA/ExA`,
+  `UnregisterClassA`, `CreateWindowExA`, `ShowWindow`, `UpdateWindow`,
+  `DestroyWindow`, `DefWindowProcA`, `GetMessageA`, `PeekMessageA` (si no hay
+  nada, deja pasar una vez a los demás), `TranslateMessage`,
+  `DispatchMessageA`, `PostQuitMessage`, `PostMessageA`, `SendMessageA`,
+  `GetClientRect`, `GetWindowRect`, `InvalidateRect`, `ValidateRect`,
+  `MoveWindow`, `SetWindowTextA`, `GetWindowTextA`, `GetWindowTextLengthA`,
+  `GetWindowLongA`, `SetWindowLongA`, `SetTimer`, `KillTimer`, `MessageBoxA`
+  con dueña, `LoadCursorA`, `LoadIconA`, `SetCursor`, `GetSystemMetrics`,
+  `GetSysColor`, `GetSysColorBrush`, `GetDC`, `ReleaseDC`, `BeginPaint`,
+  `EndPaint`, `FillRect`, `DrawTextA`, `IsWindow`, `IsWindowVisible`,
+  `IsIconic`, `IsZoomed`, `GetParent`, `SetFocus`, `GetFocus`, `MessageBeep` y
+  `wsprintfA`. GDI32: `TextOutA`, `SetTextColor`, `SetBkColor`, `SetBkMode`,
+  `SetTextAlign`, `GetTextColor`, `GetBkColor`, `GetStockObject`,
+  `CreateSolidBrush`, `CreatePen`, `SelectObject`, `DeleteObject`,
+  `Rectangle`, `MoveToEx`, `LineTo`, `SetPixel`, `GetTextExtentPoint32A`,
+  `GetTextExtentPointA` y `GetTextMetricsA`.
+
+Decisiones y límites de la 3b (para las fases siguientes):
+
+- Las clases de serie (BUTTON, EDIT, STATIC, LISTBOX), los menús y los
+  recursos son la 3c y la 3d: `CreateWindowExA` solo conoce las clases que
+  registra el programa.
+- Un `HWND` solo vale para las ventanas del propio programa; no hay
+  `FindWindowA` ni mensajes entre programas.
+- Sin ventana no hay temporizador (`SetTimer` con NULL devuelve 0), y son los
+  16 de Hispa Ventanas para todos.
+- `GetMessageA` y `PeekMessageA` no filtran por ventana ni por mensaje.
+- De una tecla que escribe solo se sabe el carácter: la tecla virtual sale
+  bien para las letras, las cifras y el espacio (los signos, 0); no hay
+  `WM_SYSKEYDOWN` (Alt+letra es de los menús de Hispa Ventanas) ni
+  `GetKeyState`.
+- Plumas de un punto y lisas; pinceles lisos; una sola letra (`CreateFontA`
+  falta). Las coordenadas son las de la zona, sin transformaciones.
+- El cursor y el icono de la clase no se usan (flecha e icono de Hispa
+  Ventanas).
+- Al destruir una ventana, Hispa Ventanas destruye primero las hijas
+  (Windows avisa primero a la madre).
+- KERNEL32 dentro de Hispa Ventanas sigue siendo el mínimo de la 3a: sin
+  montón (`HeapAlloc`, `GlobalAlloc`) ni archivos, y sin cargar DLL
+  (MSVCRT.DLL): los programas de C con biblioteca aún no van.
 
 ## Relación con los demás
 

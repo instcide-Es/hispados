@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # mk1252.py - escribe la tabla de ventanas/win32.inc que pasa las letras de
-# Windows (página 1252, de 80h a FFh) a las de Hispa Ventanas (página 437).
+# Windows (página 1252, de 80h a FFh) a las de Hispa Ventanas (página 437), y
+# la contraria (ventanas/win32u.inc).
 # Lo que no existe en la 437 sale como la letra sin acento o como «?».
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 #
@@ -17,6 +18,17 @@ for b in range(0x80, 0x100):
         o = bytes([b]).decode('cp1252').encode('cp437')[0]
     except (UnicodeDecodeError, UnicodeEncodeError):
         o = ord(BASE.get(b, '?'))
+    t.append(o)
+for i in range(0, 128, 16):
+    print('        db ' + ', '.join('0x%02X' % x for x in t[i:i + 16]))
+# y la contraria (ventanas/win32u.inc, w32_437): de la 437 a la 1252
+print('w32_437:')
+t = []
+for b in range(0x80, 0x100):
+    try:
+        o = bytes([b]).decode('cp437').encode('cp1252')[0]
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        o = ord('?')
     t.append(o)
 for i in range(0, 128, 16):
     print('        db ' + ', '.join('0x%02X' % x for x in t[i:i + 16]))

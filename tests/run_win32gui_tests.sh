@@ -7,8 +7,8 @@
 #    segundo cuadro con lo contestado, la línea de órdenes (el programa y sus
 #    parámetros) y «Todo bien.»; Aceptar y la tarea termina. Otra vez,
 #    contestando «No». Abierto varias veces, no se pierde memoria.
-#  - WINFALTA.EXE: llama a una función que no hay (CreateWindowExA): sale
-#    «Hispa-486: falta la función CreateWindowExA (USER32.dll)», el programa
+#  - WINFALTA.EXE: llama a una función que no hay (SetWindowsHookA): sale
+#    «Hispa-486: falta la función SetWindowsHookA (USER32.dll)», el programa
 #    termina y Hispa Ventanas sigue.
 #  - Con uno preguntando se abren el Bloc de notas y otro WINGUI (dos a la
 #    vez); el Administrador de tareas lo lista, lo termina a la fuerza y la
@@ -119,9 +119,9 @@ chk $T/g5.ppm titulo 274 225 activa "Prueba de Win32" busca 270 250 530 330 0 8 
 echo "-- WINFALTA.EXE: una función que falta --"
 chk $T/f1.ppm titulo 288 243 activa "Error" busca 280 260 520 320 0 8 "Ahora, una que falta."
 chk $T/f2.ppm titulo 150 243 activa "Hispa-486" \
-  busca 100 270 700 310 0 8 "Hispa-486: falta la función CreateWindowExA (USER32.dll)"
+  busca 100 270 700 310 0 8 "Hispa-486: falta la función SetWindowsHookA (USER32.dll)"
 chk $T/f3.ppm titulo 60 260 activa "Win32" nobusca 100 200 700 400 0 8 "ESTO NO DEBE SALIR" \
-  nobusca 100 200 700 400 0 8 "Hispa-486: falta la función CreateWindowExA (USER32.dll)"
+  nobusca 100 200 700 400 0 8 "Hispa-486: falta la función SetWindowsHookA (USER32.dll)"
 echo "-- con un programa de Windows abierto, lo demás sigue --"
 chk $T/b1.ppm titulo 150 90 activa "Bloc de notas - (sin nombre)"
 chk $T/b2.ppm titulo 60 260 activa "Win32" titulo 288 234 no "Prueba de Win32"
