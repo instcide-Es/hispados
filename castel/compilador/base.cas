@@ -1,0 +1,817 @@
+; =============================================================================
+;  base.cas - lo que comparten todas las partes del compilador de Castel
+;  escrito en Castel (castel/compilador/): las clases de las piezas (tokens),
+;  las palabras del lenguaje, los nombres («átomos»), los textos, el árbol y
+;  los errores. Es la traducción de las estructuras de ccastel.py a memoria
+;  LEJANA: aquí no hay listas ni diccionarios, hay bloques pedidos al DOS
+;  (módulo Lejos) y referencias de 16 bits a párrafos de esos bloques.
+;
+;  LOS NOMBRES (átomos). Cada nombre distinto que aparece en el programa se
+;  guarda una sola vez; un átomo es su referencia (distinta de 0). Comparar
+;  dos nombres es comparar dos números. Se guardan como vienen en el archivo
+;  (UTF-8). Un nombre «Módulo.nombre» es un átomo con su punto dentro.
+;      entrada (en seg_at + átomo): 0 enlace, 2 largo, 3 palabra (P_...,
+;      o 0), 4 interna (I_..., o 0), 6... las letras
+;
+;  LOS TEXTOS. Los textos entre comillas (ya en la página 437) y los bloques
+;  «ensamblador» (tal cual, líneas separadas por \n), también una vez cada
+;  uno, por su contenido.
+;      entrada (en seg_cad + texto): 0 enlace, 2 largo, 4 etiqueta (el n de
+;      T_n, o 0), 6 vivo, 8... los octetos
+;
+;  EL ÁRBOL. Cada nudo ocupa un párrafo (16 octetos) de seg_ar:
+;      0 k (clase, K_...)   1 op (O_...)    2 línea (2)   4 columna (1)
+;      5 marcas (1)         6 a   8 b   10 c   12 sig   14 t
+;  «sig» encadena los nudos de una lista (las sentencias de un bloque, los
+;  argumentos, las declaraciones...). Qué lleva cada clase en a, b, c y t,
+;  más abajo, junto a las constantes K_.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Base
+
+    importar Textos, Archivos, Lejos
+
+    ; ---- las clases de pieza (token) ----
+    público constante T_NL = 1
+    público constante T_EOF = 2
+    público constante T_NUM = 3                 ; val: el número
+    público constante T_CAD = 4                 ; val: el texto (referencia)
+    público constante T_ID = 5                  ; val: el átomo
+    público constante T_PAL = 6                 ; val: P_...
+    público constante T_OP = 7                  ; val: O_...
+    público constante T_ASM = 8                 ; val: el texto del bloque; val2: la línea de su primera línea
+
+    público tipo Pieza = estructura
+        clase: byte
+        val: nat32
+        val2: nat16
+        lin: nat16
+        col: nat16
+    fin
+
+    ; ---- las palabras del lenguaje (en el orden de PALABRAS_TXT) ----
+    público constante P_MODULO = 1
+    público constante P_FIN = 2
+    público constante P_CONSTANTE = 3
+    público constante P_VARIABLE = 4
+    público constante P_FUNCION = 5
+    público constante P_DEVOLVER = 6
+    público constante P_TIPO = 7
+    público constante P_SI = 8
+    público constante P_ENTONCES = 9
+    público constante P_SINO = 10
+    público constante P_MIENTRAS = 11
+    público constante P_HACER = 12
+    público constante P_PARA = 13
+    público constante P_DESDE = 14
+    público constante P_HASTA = 15
+    público constante P_PASO = 16
+    público constante P_ROMPER = 17
+    público constante P_SEGUIR = 18
+    público constante P_ENSAMBLADOR = 19
+    público constante P_Y = 20
+    público constante P_O = 21
+    público constante P_NO = 22
+    público constante P_DIV = 23
+    público constante P_MOD = 24
+    público constante P_CIERTO = 25
+    público constante P_FALSO = 26
+    público constante P_NULO = 27
+    público constante P_YB = 28
+    público constante P_OB = 29
+    público constante P_XOB = 30
+    público constante P_NOB = 31
+    público constante P_SEGUN = 32
+    público constante P_CASO = 33
+    público constante P_ARREGLO = 34
+    público constante P_ESTRUCTURA = 35
+    público constante P_PUNTERO = 36
+    público constante P_PUBLICO = 37
+    público constante P_IMPORTAR = 38
+    público constante N_PALABRAS = 38
+    ; (separadas por un espacio; los acentos, en UTF-8, como en los archivos)
+    constante PALABRAS_TXT = "m\xC3\xB3dulo fin constante variable funci\xC3\xB3n devolver tipo si entonces sino mientras hacer para desde hasta paso romper seguir ensamblador y o no div mod cierto falso nulo yb ob xob nob seg\xC3\xBAn caso arreglo estructura puntero p\xC3\xBAblico importar"
+
+    ; ---- los símbolos (val de T_OP) y las operaciones (op de los nudos) ----
+    público constante O_ASIG = 1                ; :=
+    público constante O_DIST = 2                ; <>
+    público constante O_MENIG = 3               ; <=
+    público constante O_MAYIG = 4               ; >=
+    público constante O_IZQ = 5                 ; <<
+    público constante O_DER = 6                 ; >>
+    público constante O_PP = 7                  ; ..
+    público constante O_MAS = 8                 ; +
+    público constante O_MENOS = 9               ; -
+    público constante O_POR = 10                ; *
+    público constante O_PAR_A = 11              ; (
+    público constante O_PAR_C = 12              ; )
+    público constante O_IGUAL = 13              ; =
+    público constante O_MENOR = 14              ; <
+    público constante O_MAYOR = 15              ; >
+    público constante O_COMA = 16               ; ,
+    público constante O_DOSP = 17               ; :
+    público constante O_PUNTO = 18              ; .
+    público constante O_COR_A = 19              ; [
+    público constante O_COR_C = 20              ; ]
+    público constante N_SIMBOLOS = 20
+    constante SIMBOLOS_TXT = ":= <> <= >= << >> .. + - * ( ) = < > , : . [ ]"
+    ; las operaciones que se escriben con una palabra: O_PALABRA + P_...
+    ; (O_PALABRA + P_Y es «y», O_PALABRA + P_DIV es «div»...)
+    público constante O_PALABRA = 40
+    público constante O_Y = 60
+    público constante O_O = 61
+    público constante O_NO = 62
+    público constante O_DIV = 63
+    público constante O_MOD = 64
+    público constante O_YB = 68
+    público constante O_OB = 69
+    público constante O_XOB = 70
+    público constante O_NOB = 71
+
+    ; ---- las funciones propias del lenguaje y los tipos básicos (campo «interna» del átomo) ----
+    público constante I_ESCRIBIR = 1
+    público constante I_ESCRIBIR_CAR = 2
+    público constante I_METER_PUERTO = 3
+    público constante I_SACAR_PUERTO = 4
+    público constante I_LEER_BYTE = 5
+    público constante I_PONER_BYTE = 6
+    público constante I_LEER_PALABRA = 7
+    público constante I_PONER_PALABRA = 8
+    público constante I_DIRECCION = 9
+    público constante I_VALOR = 10
+    público constante I_PUNTERO = 11
+    público constante I_TAMANO = 12
+    público constante I_INTERRUPCION = 13
+    público constante I_SALIR = 14
+    público constante I_FIN_PROGRAMA = 15
+    público constante I_ACARREO = 16
+    público constante I_BANDERAS = 17
+    público constante I_REG_BX = 18
+    público constante I_REG_CX = 19
+    público constante I_REG_DX = 20
+    público constante I_REG_SI = 21
+    público constante I_REG_DI = 22
+    público constante I_REG_ES = 23
+    público constante N_INTERNAS = 23           ; hasta aquí, las INTERNAS de ccastel.py
+    público constante I_NAT8 = 24               ; y los tipos básicos (y conversiones)
+    público constante I_BYTE = 25
+    público constante I_NAT16 = 26
+    público constante I_ENT16 = 27
+    público constante I_BOOL = 28
+    público constante I_NAT32 = 29
+    público constante I_ENT32 = 30
+    constante INTERNAS_TXT = "escribir escribir_car meter_puerto sacar_puerto leer_byte poner_byte leer_palabra poner_palabra direcci\xC3\xB3n valor puntero tama\xC3\xB1o interrupci\xC3\xB3n salir fin_programa acarreo banderas reg_bx reg_cx reg_dx reg_si reg_di reg_es nat8 byte nat16 ent16 bool nat32 ent32"
+
+    ; ---- las clases de nudo del árbol (campo k) ----
+    ; expresiones (todas: t = su tipo, cuando se ha mirado; marcas, ver M_...)
+    público constante K_NUM = 1                 ; a, b: el número (a la palabra baja)
+    público constante K_BOOL = 2                ; a: 0 o 1
+    público constante K_NULO = 3
+    público constante K_CAD = 4                 ; a: el texto
+    público constante K_REF = 5                 ; a: el átomo del nombre
+    público constante K_UN = 6                  ; op (O_MENOS, O_NOB, O_NO); a: el operando
+    público constante K_BIN = 7                 ; op; a, b: los operandos. Su posición es la de a
+    público constante K_INDICE = 8              ; a: el objeto; b: el índice. Posición: la del «[»
+    público constante K_CAMPO = 9               ; a: el objeto; b: el átomo del campo. Posición: la del «.»
+    público constante K_LLAMADA = 10            ; a: el átomo de la función; b: el primer K_ARG
+    público constante K_ARG = 11                ; a: el átomo del nombre («ah: 2»), o 0; b: la expresión.
+                                                ;   Posición: la del nombre (si lo lleva)
+    público constante K_LISTA = 12              ; a: la primera expresión (encadenadas por sig)
+    ; sentencias (encadenadas por sig dentro de su bloque)
+    público constante K_VAR = 20                ; a: el primer K_NOMBRE; b: el tipo escrito; c: el valor
+                                                ;   inicial (o 0); marca M_GLOBAL; t: el tipo, ya resuelto
+    público constante K_CONST = 21              ; a: el átomo; b: la expresión
+    público constante K_ASIG = 22               ; a: el destino; b: la expresión
+    público constante K_LLAMADA_SENT = 23       ; a: el K_LLAMADA
+    público constante K_DEVOLVER = 24           ; a: la expresión (o 0)
+    público constante K_SI = 25                 ; a: la condición; b: «entonces»; c: «sino» (0 si no hay)
+    público constante K_MIENTRAS = 26           ; a: la condición; b: el cuerpo
+    público constante K_PARA = 27               ; a: la variable (un K_REF); b: desde; c: un K_PARA2
+    público constante K_PARA2 = 28              ; a: hasta; b: el paso (o 0); c: el cuerpo; t: sitio del tope
+    público constante K_SEGUN = 29              ; a: la expresión; b: el primer K_CASO; c: el bloque de «si no»
+    público constante K_CASO = 30               ; a: el primer K_VAL; b: el cuerpo
+    público constante K_VAL = 31                ; a: el valor; b: el final del intervalo (o 0)
+    público constante K_ROMPER = 32
+    público constante K_SEGUIR = 33
+    público constante K_ASM = 34                ; a: el texto del bloque; b: la línea de su primera línea
+    ; declaraciones del módulo (además de K_VAR, K_CONST y K_ASM); marca M_PUBLICO
+    público constante K_MODULO = 40             ; a: el átomo del nombre; b: la primera declaración;
+                                                ;   c: K_NOMBRE de las constantes declaradas dentro de funciones
+    público constante K_FUNC = 41               ; a: el átomo; b: el primer K_PARAM; c: el tipo que
+                                                ;   devuelve (o 0); t: un K_FUNC2
+    público constante K_FUNC2 = 42              ; dónde empieza el cuerpo en el archivo (justo detrás de la
+                                                ;   cabecera): a, b: la posición (a la baja); c: la línea; t: la columna
+    público constante K_PARAM = 43              ; a: el átomo; b: el tipo escrito; marca M_REF;
+                                                ;   t: el tipo resuelto; c: dónde cae ([bp+c])
+    público constante K_TIPO = 44               ; a: el átomo; b: el tipo escrito
+    público constante K_IMPORTAR = 45           ; a: el primer K_NOMBRE
+    público constante K_MODELO = 46             ; «modelo grande»
+    público constante K_NOMBRE = 47             ; a: el átomo (y su posición)
+    ; tipos escritos
+    público constante K_TARR = 50               ; a: el tamaño (expresión); b: el tipo de los elementos
+    público constante K_TPUNT = 51              ; a: el tipo apuntado
+    público constante K_TEST = 52               ; a: el primer K_CAMPOS
+    público constante K_CAMPOS = 53             ; a: el primer K_NOMBRE; b: su tipo
+    público constante K_TNOM = 54               ; a: el átomo del nombre del tipo
+
+    ; las marcas de un nudo
+    público constante M_GLOBAL = 1              ; K_VAR: es del módulo
+    público constante M_REF = 1                 ; K_PARAM: por referencia
+    público constante M_PUBLICO = 2             ; declaraciones: con «público»
+    público constante M_NO_CONST = 4            ; expresiones: ya se sabe que no es constante
+    público constante M_TIPANDO = 8             ; expresiones: se está mirando su tipo
+    público constante M_CONST = 16              ; expresiones: ya se sabe que es constante
+
+    ; ---- los bloques de memoria lejana ----
+    constante PARRAFOS_AT = 0x1000              ; 64 K de nombres
+    constante PARRAFOS_CAD = 0x0C00             ; 48 K de textos
+    constante PARRAFOS_AR = 0x1000              ; 64 K de árbol
+    constante CUBOS_AT = 1024
+    constante CUBOS_CAD = 512
+    público variable seg_at, seg_cad, seg_ar: nat16
+    variable libre_at, libre_cad, libre_ar: nat16
+    variable cubos_at: arreglo [CUBOS_AT] de nat16
+    variable cubos_cad: arreglo [CUBOS_CAD] de nat16
+
+    ; los átomos de las palabras, de las internas y de otros nombres con significado
+    público variable at_palabra: arreglo [N_PALABRAS + 1] de nat16
+    variable at_simbolo: arreglo [N_SIMBOLOS + 1] de nat16
+    público variable a_de, a_a, a_ref, a_modelo, a_grande, a_principal: nat16
+
+    ; ---- los módulos: el programa (el último) y los que importa, cada uno detrás de los suyos ----
+    público constante MAX_MODULOS = 24
+    público constante MAX_RUTA = 64
+    público variable n_modulos: nat16
+    público variable mod_nombre: arreglo [MAX_MODULOS] de nat16         ; el átomo
+    público variable mod_arbol: arreglo [MAX_MODULOS] de nat16          ; su K_MODULO
+    público variable mod_ruta: arreglo [MAX_MODULOS] de arreglo [MAX_RUTA] de byte
+    público variable mod_n_importa: arreglo [MAX_MODULOS] de byte       ; cuántos importa
+    público variable mod_importa: arreglo [MAX_MODULOS] de arreglo [MAX_MODULOS] de byte
+
+    ; ---- el mensaje de error que se está montando (en la página 437) ----
+    constante MAX_MENSAJE = 400
+    variable mens: arreglo [MAX_MENSAJE] de byte
+    variable n_mens: nat16
+    variable nota: arreglo [MAX_MENSAJE] de byte
+    público variable archivo_error: arreglo [MAX_RUTA] de byte          ; el archivo del que se habla
+    variable lec_error: Lector
+
+    ; la página 437, de 128 a 255, en Unicode
+    variable tabla_437: arreglo [128] de nat16 = (199, 252, 233, 226, 228, 224, 229, 231, 234, 235, 232, 239, 238, 236, 196, 197, 201, 230, 198, 244, 246, 242, 251, 249, 255, 214, 220, 162, 163, 165, 8359, 402, 225, 237, 243, 250, 241, 209, 170, 186, 191, 8976, 172, 189, 188, 161, 171, 187, 9617, 9618, 9619, 9474, 9508, 9569, 9570, 9558, 9557, 9571, 9553, 9559, 9565, 9564, 9563, 9488, 9492, 9524, 9516, 9500, 9472, 9532, 9566, 9567, 9562, 9556, 9577, 9574, 9568, 9552, 9580, 9575, 9576, 9572, 9573, 9561, 9560, 9554, 9555, 9579, 9578, 9496, 9484, 9608, 9604, 9612, 9616, 9600, 945, 223, 915, 960, 931, 963, 181, 964, 934, 920, 937, 948, 8734, 966, 949, 8745, 8801, 177, 8805, 8804, 8992, 8993, 247, 8776, 176, 8729, 183, 8730, 8319, 178, 9632, 160)
+
+    ; -------------------------------------------------------------------------
+    ;  Letras: UTF-8 y la página 437
+    ; -------------------------------------------------------------------------
+    ; el octeto de la página 437 de una letra de Unicode, o -1 si no está
+    público función a_437(letra: nat32): ent16
+        variable i: nat16
+        si letra < 128 entonces devolver ent16(letra) fin
+        si letra > 0xFFFF entonces devolver -1 fin
+        para i desde 0 hasta 127 hacer
+            si tabla_437[i] = nat16(letra) entonces devolver 128 + i fin
+        fin
+        devolver -1
+    fin
+
+    ; la letra de Unicode que empieza en p (UTF-8); devuelve cuántos octetos ocupa
+    público función letra_utf8(p: puntero a byte, ref letra: nat32): nat16
+        variable c: byte
+        c := p[0]
+        si c < 0x80 entonces
+            letra := c
+            devolver 1
+        fin
+        si c >= 0xF0 y p[1] >= 0x80 y p[2] >= 0x80 y p[3] >= 0x80 entonces
+            letra := nat32(c yb 7) << 18 ob nat32(p[1] yb 63) << 12 ob nat32(p[2] yb 63) << 6 ob (p[3] yb 63)
+            devolver 4
+        fin
+        si c >= 0xE0 y p[1] >= 0x80 y p[2] >= 0x80 entonces
+            letra := nat32(c yb 15) << 12 ob nat32(p[1] yb 63) << 6 ob (p[2] yb 63)
+            devolver 3
+        fin
+        si c >= 0xC0 y p[1] >= 0x80 entonces
+            letra := nat32(c yb 31) << 6 ob (p[1] yb 63)
+            devolver 2
+        fin
+        letra := c
+        devolver 1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los nombres (átomos)
+    ; -------------------------------------------------------------------------
+    función dispersa(p: puntero a byte, n: nat16): nat16
+        variable h: nat16
+        h := 0
+        mientras n > 0 hacer
+            h := h * 31 + valor(p)
+            p := p + 1
+            n := n - 1
+        fin
+        devolver h
+    fin
+
+    ; el átomo de ese nombre si ya está; si no, 0
+    público función busca_átomo(p: puntero a byte, n: nat16): nat16
+        variable r, s, i: nat16
+        r := cubos_at[dispersa(p, n) yb (CUBOS_AT - 1)]
+        mientras r <> 0 hacer
+            s := seg_at + r
+            si leer_byte(s, 2) = n entonces
+                i := 0
+                mientras i < n y leer_byte(s, 6 + i) = p[i] hacer
+                    i := i + 1
+                fin
+                si i = n entonces devolver r fin
+            fin
+            r := leer_palabra(s, 0)
+        fin
+        devolver 0
+    fin
+
+    ; el átomo de ese nombre (de n letras, n < 250); lo crea si no estaba
+    público función átomo(p: puntero a byte, n: nat16): nat16
+        variable r, s, h, i: nat16
+        r := busca_átomo(p, n)
+        si r <> 0 entonces devolver r fin
+        r := libre_at
+        libre_at := libre_at + (6 + n + 15) div 16
+        si libre_at >= PARRAFOS_AT o n >= 250 entonces sin_memoria("demasiados nombres") fin
+        s := seg_at + r
+        h := dispersa(p, n) yb (CUBOS_AT - 1)
+        poner_palabra(s, 0, cubos_at[h])
+        cubos_at[h] := r
+        poner_palabra(s, 2, n)                  ; (largo y palabra: 0)
+        poner_palabra(s, 4, 0)                  ; (interna: 0)
+        para i desde 1 hasta n hacer
+            poner_byte(s, 5 + i, p[i - 1])
+        fin
+        devolver r
+    fin
+
+    ; el átomo de un texto acabado en 0
+    público función átomo_de(t: puntero a byte): nat16
+        devolver átomo(t, longitud(t))
+    fin
+
+    público función at_largo(a: nat16): nat16
+        devolver leer_byte(seg_at + a, 2)
+    fin
+
+    ; P_... si el nombre es una palabra del lenguaje; si no, 0
+    público función at_pal(a: nat16): byte
+        devolver leer_byte(seg_at + a, 3)
+    fin
+
+    ; I_... si es una función propia del lenguaje o un tipo básico; si no, 0
+    público función at_interna(a: nat16): byte
+        devolver leer_byte(seg_at + a, 4)
+    fin
+
+    ; copia el nombre (acabado en 0) en destino; devuelve su largo
+    público función at_texto(a: nat16, destino: puntero a byte): nat16
+        variable s, n, i: nat16
+        s := seg_at + a
+        n := leer_byte(s, 2)
+        i := 0
+        mientras i < n hacer
+            destino[i] := leer_byte(s, 6 + i)
+            i := i + 1
+        fin
+        destino[n] := 0
+        devolver n
+    fin
+
+    ; la letra número i (desde 0) del nombre
+    público función at_letra(a: nat16, i: nat16): byte
+        devolver leer_byte(seg_at + a, 6 + i)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los textos
+    ; -------------------------------------------------------------------------
+    ; guarda (si no estaba) un texto de n octetos; devuelve su referencia
+    público función texto(p: puntero a byte, n: nat16): nat16
+        variable r, s, h, i: nat16
+        h := dispersa(p, n) yb (CUBOS_CAD - 1)
+        r := cubos_cad[h]
+        mientras r <> 0 hacer
+            s := seg_cad + r
+            si leer_palabra(s, 2) = n entonces
+                i := 0
+                mientras i < n y leer_byte(s, 8 + i) = p[i] hacer
+                    i := i + 1
+                fin
+                si i = n entonces devolver r fin
+            fin
+            r := leer_palabra(s, 0)
+        fin
+        r := libre_cad
+        si n > 0xFF00 o (8 + n + 15) div 16 >= PARRAFOS_CAD - libre_cad entonces sin_memoria("demasiados textos") fin
+        libre_cad := libre_cad + (8 + n + 15) div 16
+        s := seg_cad + r
+        poner_palabra(s, 0, cubos_cad[h])
+        cubos_cad[h] := r
+        poner_palabra(s, 2, n)
+        poner_palabra(s, 4, 0)
+        poner_palabra(s, 6, 0)
+        i := 0
+        mientras i < n hacer
+            poner_byte(s, 8 + i, p[i])
+            i := i + 1
+        fin
+        devolver r
+    fin
+
+    público función tx_largo(t: nat16): nat16
+        devolver leer_palabra(seg_cad + t, 2)
+    fin
+
+    público función tx_byte(t: nat16, i: nat16): byte
+        devolver leer_byte(seg_cad + t, 8 + i)
+    fin
+
+    ; el número de su etiqueta T_n (0: aún no tiene)
+    público función tx_etiqueta(t: nat16): nat16
+        devolver leer_palabra(seg_cad + t, 4)
+    fin
+
+    público función tx_pon_etiqueta(t: nat16, n: nat16)
+        poner_palabra(seg_cad + t, 4, n)
+    fin
+
+    público función tx_vivo(t: nat16): bool
+        devolver leer_byte(seg_cad + t, 6) <> 0
+    fin
+
+    público función tx_pon_vivo(t: nat16)
+        poner_byte(seg_cad + t, 6, 1)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El árbol
+    ; -------------------------------------------------------------------------
+    ; un nudo nuevo de esa clase, con su posición y todo lo demás a cero
+    público función nudo(k: byte, lin: nat16, col: nat16): nat16
+        variable r, s: nat16
+        r := libre_ar
+        si r >= PARRAFOS_AR - 1 entonces sin_memoria("la función es demasiado grande (el árbol no cabe)") fin
+        libre_ar := r + 1
+        s := seg_ar + r
+        si col > 255 entonces col := 255 fin
+        poner_palabra(s, 0, k)
+        poner_palabra(s, 2, lin)
+        poner_palabra(s, 4, col)
+        poner_palabra(s, 6, 0)
+        poner_palabra(s, 8, 0)
+        poner_palabra(s, 10, 0)
+        poner_palabra(s, 12, 0)
+        poner_palabra(s, 14, 0)
+        devolver r
+    fin
+
+    ; por dónde va el árbol, para soltar luego lo que se añada (el cuerpo de una función)
+    público función marca_árbol(): nat16
+        devolver libre_ar
+    fin
+
+    público función suelta_árbol(marca: nat16)
+        libre_ar := marca
+    fin
+
+    público función nk(n: nat16): byte
+        devolver leer_byte(seg_ar + n, 0)
+    fin
+
+    público función nop(n: nat16): byte
+        devolver leer_byte(seg_ar + n, 1)
+    fin
+
+    público función nlin(n: nat16): nat16
+        devolver leer_palabra(seg_ar + n, 2)
+    fin
+
+    público función ncol(n: nat16): nat16
+        devolver leer_byte(seg_ar + n, 4)
+    fin
+
+    público función nmarcas(n: nat16): byte
+        devolver leer_byte(seg_ar + n, 5)
+    fin
+
+    público función na(n: nat16): nat16
+        devolver leer_palabra(seg_ar + n, 6)
+    fin
+
+    público función nb(n: nat16): nat16
+        devolver leer_palabra(seg_ar + n, 8)
+    fin
+
+    público función nc(n: nat16): nat16
+        devolver leer_palabra(seg_ar + n, 10)
+    fin
+
+    público función nsig(n: nat16): nat16
+        devolver leer_palabra(seg_ar + n, 12)
+    fin
+
+    público función nt(n: nat16): nat16
+        devolver leer_palabra(seg_ar + n, 14)
+    fin
+
+    ; el número de un K_NUM
+    público función nv(n: nat16): nat32
+        devolver nat32(leer_palabra(seg_ar + n, 8)) << 16 ob leer_palabra(seg_ar + n, 6)
+    fin
+
+    público función pon_op(n: nat16, op: byte)
+        poner_byte(seg_ar + n, 1, op)
+    fin
+
+    público función pon_marca(n: nat16, marca: byte)
+        poner_byte(seg_ar + n, 5, leer_byte(seg_ar + n, 5) ob marca)
+    fin
+
+    público función quita_marca(n: nat16, marca: byte)
+        poner_byte(seg_ar + n, 5, leer_byte(seg_ar + n, 5) yb nob marca)
+    fin
+
+    público función pon_a(n: nat16, v: nat16)
+        poner_palabra(seg_ar + n, 6, v)
+    fin
+
+    público función pon_b(n: nat16, v: nat16)
+        poner_palabra(seg_ar + n, 8, v)
+    fin
+
+    público función pon_c(n: nat16, v: nat16)
+        poner_palabra(seg_ar + n, 10, v)
+    fin
+
+    público función pon_sig(n: nat16, v: nat16)
+        poner_palabra(seg_ar + n, 12, v)
+    fin
+
+    público función pon_t(n: nat16, v: nat16)
+        poner_palabra(seg_ar + n, 14, v)
+    fin
+
+    público función pon_v(n: nat16, v: nat32)
+        poner_palabra(seg_ar + n, 6, nat16(v))
+        poner_palabra(seg_ar + n, 8, nat16(v >> 16))
+    fin
+
+    ; un K_NUM nuevo con ese valor
+    público función nudo_num(v: nat32, lin: nat16, col: nat16): nat16
+        variable n: nat16
+        n := nudo(K_NUM, lin, col)
+        pon_v(n, v)
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los errores. El mensaje se monta a trozos (m, m_at, m_num...) y se
+    ;  dice con falla(línea, columna): el archivo, la línea y la columna, el
+    ;  mensaje, la línea del archivo y una flecha debajo. Y se acaba (nivel 1).
+    ; -------------------------------------------------------------------------
+    función m_octeto(c: byte)
+        si n_mens < MAX_MENSAJE - 1 entonces
+            mens[n_mens] := c
+            n_mens := n_mens + 1
+        fin
+    fin
+
+    ; añade un texto (de los escritos en el compilador: ya en la página 437)
+    público función m(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            m_octeto(valor(t))
+            t := t + 1
+        fin
+    fin
+
+    ; añade un texto que está en UTF-8 (un nombre del programa, una ruta)
+    público función m_utf8(t: puntero a byte)
+        variable letra: nat32
+        variable c: ent16
+        mientras valor(t) <> 0 hacer
+            t := t + letra_utf8(t, letra)
+            c := a_437(letra)
+            si c < 0 entonces c := '?' fin
+            m_octeto(byte(c))
+        fin
+    fin
+
+    ; añade un nombre (átomo)
+    público función m_at(a: nat16)
+        variable t: arreglo [256] de byte
+        at_texto(a, t)
+        m_utf8(t)
+    fin
+
+    ; añade un número, en decimal
+    público función m_num(n: ent32)
+        variable t: arreglo [12] de byte
+        número_a_texto(n, t)
+        m(t)
+    fin
+
+    ; añade un número sin signo
+    público función m_nat(n: nat32)
+        variable t: arreglo [12] de byte
+        natural_a_texto(n, t)
+        m(t)
+    fin
+
+    ; añade un texto de los guardados (ya en la página 437)
+    público función m_tx(t: nat16)
+        variable i: nat16
+        i := 0
+        mientras i < tx_largo(t) hacer
+            m_octeto(tx_byte(t, i))
+            i := i + 1
+        fin
+    fin
+
+    ; añade el símbolo O_...
+    público función m_simbolo(op: byte)
+        m_at(at_simbolo[op])
+    fin
+
+    ; lo montado hasta ahora pasa a ser la nota (una línea más de explicación)
+    público función m_a_nota()
+        mens[n_mens] := 0
+        copiar(nota, mens)
+        n_mens := 0
+    fin
+
+    función escribe_mensaje()
+        mens[n_mens] := 0
+        escribir(mens, "\r\n")
+    fin
+
+    función escribe_nota()
+        si nota[0] <> 0 entonces escribir("    (", nota, ")\r\n") fin
+    fin
+
+    función escribe_ruta()
+        variable t: arreglo [MAX_MENSAJE] de byte
+        variable n: nat16
+        ; (la ruta puede llevar letras de fuera del ASCII: pasa por el mensaje)
+        mens[n_mens] := 0
+        copiar(t, mens)
+        n := n_mens
+        n_mens := 0
+        m_utf8(archivo_error)
+        mens[n_mens] := 0
+        escribir(mens)
+        copiar(mens, t)
+        n_mens := n
+    fin
+
+    ; el error, en la línea y la columna dadas de archivo_error
+    público función falla(lin: nat16, col: nat16)
+        variable m_: ent16
+        variable c: ent16
+        variable i, n: nat16
+        variable letra: nat32
+        variable u: arreglo [5] de byte
+        escribe_ruta()
+        escribir(":", lin, ":", col, ": error: ")
+        escribe_mensaje()
+        ; la línea del archivo (los tabuladores, como espacios) y la flecha
+        m_ := abrir(archivo_error, LEER)
+        si m_ <> MAL entonces
+            empezar_lector(lec_error, m_)
+            i := 1
+            c := 0
+            mientras i < lin y c <> FIN_DE_ARCHIVO hacer
+                c := leer_car(lec_error)
+                si c = '\n' entonces i := i + 1 fin
+            fin
+            si c <> FIN_DE_ARCHIVO entonces
+                escribir("    ")
+                mientras cierto hacer
+                    c := leer_car(lec_error)
+                    si c = FIN_DE_ARCHIVO o c = '\n' entonces romper fin
+                    si c = '\r' entonces seguir fin
+                    si c = '\t' entonces c := ' ' fin
+                    si c >= 0xC0 entonces
+                        ; una letra de varios octetos
+                        u[0] := c
+                        n := 1
+                        si c >= 0xE0 entonces n := 2 fin
+                        si c >= 0xF0 entonces n := 3 fin
+                        para i desde 1 hasta n hacer
+                            u[i] := leer_car(lec_error)
+                        fin
+                        u[n + 1] := 0
+                        letra_utf8(u, letra)
+                        c := a_437(letra)
+                        si c < 0 entonces c := '?' fin
+                    fin
+                    escribir_car(c)
+                fin
+                escribir("\r\n    ")
+                para i desde 2 hasta col hacer
+                    escribir_car(' ')
+                fin
+                escribir("^\r\n")
+            fin
+            cerrar(m_)
+        fin
+        escribe_nota()
+        salir(1)
+    fin
+
+    ; un error del archivo entero, sin línea
+    público función falla_archivo()
+        escribe_ruta()
+        escribir(": error: ")
+        escribe_mensaje()
+        escribe_nota()
+        salir(1)
+    fin
+
+    ; un error que no es de ningún archivo
+    público función falla_sin_más()
+        escribir("ccastel: ")
+        escribe_mensaje()
+        escribe_nota()
+        salir(1)
+    fin
+
+    función sin_memoria(qué: puntero a byte)
+        n_mens := 0
+        m("no hay memoria: ")
+        m(qué)
+        falla_sin_más()
+    fin
+
+    ; pide un bloque de memoria lejana; si no hay, lo dice y acaba
+    público función bloque(párrafos: nat16): nat16
+        variable s: nat16
+        s := pedir(párrafos)
+        si s = 0 entonces sin_memoria("no queda memoria libre para las tablas del compilador") fin
+        devolver s
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Al empezar: los bloques y los nombres del lenguaje
+    ; -------------------------------------------------------------------------
+    ; da de alta los nombres de una lista (separados por un espacio): al nombre
+    ; número i (desde 1) le pone i en el campo dado (3: palabra; 4: interna), o
+    ; lo apunta en at_simbolo (campo 0)
+    función alta_lista(lista: puntero a byte, campo: nat16)
+        variable p: puntero a byte
+        variable i, a: nat16
+        i := 1
+        mientras valor(lista) <> 0 hacer
+            p := lista
+            mientras valor(p) <> 0 y valor(p) <> ' ' hacer
+                p := p + 1
+            fin
+            a := átomo(lista, p - lista)
+            si campo = 0 entonces
+                at_simbolo[i] := a
+            sino
+                poner_byte(seg_at + a, campo, i)
+                si campo = 3 entonces at_palabra[i] := a fin
+            fin
+            i := i + 1
+            lista := p
+            si valor(lista) = ' ' entonces lista := lista + 1 fin
+        fin
+    fin
+
+    público función prepara_base()
+        seg_at := bloque(PARRAFOS_AT)
+        seg_cad := bloque(PARRAFOS_CAD)
+        seg_ar := bloque(PARRAFOS_AR)
+        libre_at := 1
+        libre_cad := 1
+        libre_ar := 1
+        alta_lista(PALABRAS_TXT, 3)
+        alta_lista(INTERNAS_TXT, 4)
+        alta_lista(SIMBOLOS_TXT, 0)
+        a_de := átomo_de("de")
+        a_a := átomo_de("a")
+        a_ref := átomo_de("ref")
+        a_modelo := átomo_de("modelo")
+        a_grande := átomo_de("grande")
+        a_principal := átomo_de("principal")
+    fin
+
+    ; cuánto se ha gastado de cada bloque (para el resumen del final)
+    público función gasto_nombres(): nat16
+        devolver libre_at
+    fin
+
+    público función gasto_textos(): nat16
+        devolver libre_cad
+    fin
+
+    público función gasto_árbol(): nat16
+        devolver libre_ar
+    fin
+
+fin Base.

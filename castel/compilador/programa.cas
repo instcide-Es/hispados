@@ -1,0 +1,1124 @@
+; =============================================================================
+;  programa.cas - el programa entero: lo que declara cada módulo (declara de
+;  ccastel.py), generar todas las funciones, ver qué va al programa (lo fijo
+;  y, de lo demás, lo que alguien nombra) y escribir el ensamblador con la
+;  misma forma que ccastel.py: cabecera, código, rutinas de apoyo, datos y lo
+;  que no lleva valor inicial; y, en el modelo grande, la cabecera del .EXE,
+;  los segmentos y los puentes.
+;
+;  Lo que cambia respecto a ccastel.py es por la memoria: el código generado
+;  está en un archivo temporal (ver salida.cas) y de ahí se lee dos veces: una
+;  para ver a quién nombra cada trozo vivo y otra para copiarlo. Las líneas de
+;  datos (textos y variables con valor inicial) se vuelven a escribir cada vez
+;  que hacen falta, en vez de guardarlas.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Programa
+
+    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Sintactico, Apoyo, Textos, Archivos
+
+    constante MAX_LN = 320
+    constante N_R = 7
+
+    variable sal: Escritor                      ; el ensamblador que se escribe
+    variable líneas_sal: nat32                  ; cuántas líneas lleva
+    variable lec: Lector                        ; para leer el temporal
+    variable temporal: ent16
+    variable todo: bool                         ; no dejar fuera lo que no se usa
+    variable prog: nat16                        ; el módulo del programa
+
+    ; a dónde van los trozos de una línea de datos
+    constante A_NADA = 0                        ; a ningún sitio (solo se comprueba)
+    constante A_SALIDA = 1                      ; al ensamblador
+    constante A_MIRAR = 2                       ; a ver a quién nombra
+    variable destino: byte
+
+    ; lo vivo que no tiene tabla propia
+    variable r_vivo: arreglo [N_R] de bool      ; R_ban, R_bx... (en el orden de R_NOMBRES)
+    variable r_nombres: arreglo [N_R] de puntero a byte = ("ban", "bx", "cx", "di", "dx", "es", "si")
+    variable ap_vivo: arreglo [MAX_MODULOS + 1] de arreglo [N_APOYO] de bool
+    variable ap_visto: arreglo [MAX_MODULOS + 1] de arreglo [N_APOYO] de bool
+    variable pu_visto: arreglo [MAX_PUENTES] de bool
+    variable fin_programa_usado: bool
+    variable cambio: bool
+    variable seg_mirado: nat16                  ; el segmento del trozo que se está mirando
+
+    ; la palabra que se está leyendo al mirar un texto
+    variable pal: arreglo [132] de byte
+    variable n_pal: nat16
+    variable tras_c2: bool
+
+    ; -------------------------------------------------------------------------
+    ;  Escribir en el ensamblador
+    ; -------------------------------------------------------------------------
+    función s(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            si valor(t) = '\n' entonces líneas_sal := líneas_sal + 1 fin
+            poner_car(sal, valor(t))
+            t := t + 1
+        fin
+    fin
+
+    función s_nat(n: nat32)
+        variable t: arreglo [12] de byte
+        natural_a_texto(n, t)
+        s(t)
+    fin
+
+    ; una línea entera
+    función sl(t: puntero a byte)
+        s(t)
+        s("\n")
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Mirar un texto: cada palabra que sea la etiqueta de algo, lo da por vivo
+    ; -------------------------------------------------------------------------
+    función cifras(p: puntero a byte, n: nat16, ref v: nat16): bool
+        variable x: nat32
+        si n = 0 o n > 5 entonces devolver falso fin
+        x := 0
+        mientras n > 0 hacer
+            si valor(p) < '0' o valor(p) > '9' entonces devolver falso fin
+            x := x * 10 + (valor(p) - '0')
+            p := p + 1
+            n := n - 1
+        fin
+        si x > 0xFFFF entonces devolver falso fin
+        v := nat16(x)
+        devolver cierto
+    fin
+
+    ; lo declarado (de esa clase) que lleva la etiqueta «X_resto»: «nombre» en
+    ; el programa, «Módulo__nombre» en los demás
+    función por_etiqueta(p: puntero a byte, n: nat16, clase: byte): nat16
+        variable a, r, i, am, an, m_: nat16
+        a := busca_átomo(p, n)
+        si a <> 0 entonces
+            r := sim_propio(prog, a)
+            si r <> 0 y s_clase(r) = clase entonces devolver r fin
+        fin
+        i := 1
+        mientras i + 2 < n hacer
+            si p[i] = '_' y p[i + 1] = '_' entonces
+                am := busca_átomo(p, i)
+                an := busca_átomo(p + i + 2, n - i - 2)
+                si am <> 0 y an <> 0 entonces
+                    m_ := 0
+                    mientras m_ + 1 < n_modulos hacer
+                        si mod_nombre[m_] = am entonces
+                            r := sim_propio(m_, an)
+                            si r <> 0 y s_clase(r) = clase entonces devolver r fin
+                        fin
+                        m_ := m_ + 1
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; el número de la rutina de apoyo de ese nombre, o -1
+    función cuál_apoyo(p: puntero a byte, n: nat16): ent16
+        variable i: nat16
+        variable q: puntero a byte
+        para i desde 0 hasta N_APOYO - 1 hacer
+            q := apoyo_nombre(i)
+            si longitud(q) = n entonces
+                si empieza_por(p, q) entonces devolver i fin
+            fin
+        fin
+        devolver -1
+    fin
+
+    función fin_palabra()
+        variable n, v, r, f, i, k: nat16
+        variable j: ent16
+        n := n_pal
+        n_pal := 0
+        si n < 3 o n > 128 entonces devolver fin
+        pal[n] := 0
+        si pal[1] = '_' entonces
+            si pal[0] = 'T' entonces
+                si cifras(dirección(pal[2]), n - 2, v) entonces
+                    r := texto_de_etiqueta(v)
+                    si r <> 0 entonces tx_pon_vivo(r) fin
+                fin
+                devolver
+            fin
+            si pal[0] = 'F' entonces
+                r := por_etiqueta(dirección(pal[2]), n - 2, S_FUNC)
+                si r <> 0 entonces f_marca(s_a(r), FM_VIVO) fin
+                devolver
+            fin
+            si pal[0] = 'G' entonces
+                r := por_etiqueta(dirección(pal[2]), n - 2, S_GLOBAL)
+                si r <> 0 entonces s_marca(r, SM_VIVO) fin
+                devolver
+            fin
+            si pal[0] = 'R' entonces
+                para i desde 0 hasta N_R - 1 hacer
+                    si iguales(dirección(pal[2]), r_nombres[i]) entonces r_vivo[i] := cierto fin
+                fin
+                devolver
+            fin
+        fin
+        si pal[0] = 'J' entonces
+            ; un puente: J<segmento>_<etiqueta de la función, sin su F_>
+            i := 1
+            mientras pal[i] >= '0' y pal[i] <= '9' hacer
+                i := i + 1
+            fin
+            si i > 1 y pal[i] = '_' entonces
+                si cifras(dirección(pal[1]), i - 1, k) entonces
+                    r := por_etiqueta(dirección(pal[i + 1]), n - i - 1, S_FUNC)
+                    si r <> 0 entonces
+                        f := s_a(r)
+                        i := 0
+                        mientras i < n_puentes hacer
+                            si puente_func(i) = f y puente_seg(i) = k entonces puente_pon_vivo(i) fin
+                            i := i + 1
+                        fin
+                    fin
+                fin
+            fin
+            devolver
+        fin
+        si iguales(pal, "_fin_programa") entonces
+            fin_programa_usado := cierto
+            devolver
+        fin
+        ; una rutina de apoyo: la del segmento 1, o «nombre_<segmento>»
+        j := cuál_apoyo(pal, n)
+        si j >= 0 entonces
+            ap_vivo[1][j] := cierto
+            devolver
+        fin
+        i := n
+        mientras i > 0 y pal[i - 1] >= '0' y pal[i - 1] <= '9' hacer
+            i := i - 1
+        fin
+        si i < n y i > 1 y pal[i - 1] = '_' entonces
+            si cifras(dirección(pal[i]), n - i, k) entonces
+                j := cuál_apoyo(pal, i - 1)
+                si j >= 0 y k >= 2 y k <= MAX_MODULOS entonces ap_vivo[k][j] := cierto fin
+            fin
+        fin
+    fin
+
+    función mira_octeto(c: byte)
+        variable palabra: bool
+        si tras_c2 entonces
+            ; U+0080 a U+00BF: signos, salvo ª µ º
+            tras_c2 := falso
+            si c = 0xAA o c = 0xB5 o c = 0xBA entonces
+                mira_octeto(0xFF)
+                mira_octeto(0xFF)
+            sino
+                fin_palabra()
+            fin
+            devolver
+        fin
+        si c = 0xC2 entonces
+            tras_c2 := cierto
+            devolver
+        fin
+        palabra := c >= 128 o c = '_' o (c >= '0' y c <= '9') o (c >= 'A' y c <= 'Z') o (c >= 'a' y c <= 'z')
+        si palabra entonces
+            si n_pal < 130 entonces
+                pal[n_pal] := c
+                n_pal := n_pal + 1
+            fin
+        sino si n_pal > 0 entonces
+            fin_palabra()
+        fin
+    fin
+
+    función mira_texto(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            mira_octeto(valor(t))
+            t := t + 1
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las líneas de datos: van a donde diga «destino»
+    ; -------------------------------------------------------------------------
+    función dp(t: puntero a byte)
+        si destino = A_SALIDA entonces s(t) fin
+        si destino = A_MIRAR entonces mira_texto(t) fin
+    fin
+
+    función dp_nat(n: nat32)
+        variable t: arreglo [12] de byte
+        natural_a_texto(n, t)
+        dp(t)
+    fin
+
+    función valor_inicial(t: nat16, e: nat16)
+        variable c: N64
+        variable im: arreglo [TXT] de byte
+        si nk(e) = K_LISTA entonces
+            m("la lista de valores es para los arreglos")
+            falla(nlin(e), ncol(e))
+        fin
+        compatible(t, e, "el valor inicial", 0)
+        si es32(t) entonces
+            si no const(e, c) entonces
+                m("el valor inicial de una variable global tiene que ser constante")
+                falla(nlin(e), ncol(e))
+            fin
+            dp_nat(c.bajo)
+            devolver
+        fin
+        si no inmediato(e, im) entonces
+            m("el valor inicial de una variable global tiene que ser constante")
+            falla(nlin(e), ncol(e))
+        fin
+        dp(im)
+    fin
+
+    función directiva(tam: nat16)
+        si tam = 1 entonces
+            dp("db ")
+        sino si tam = 2 entonces
+            dp("dw ")
+        sino
+            dp("dd ")
+        fin
+    fin
+
+    función dato_inicial(t: nat16, ini: nat16)
+        variable tx, r, n, i, e, base: nat16
+        si tk(t) = TK_ARR entonces
+            tx := 0
+            si nk(ini) = K_CAD entonces
+                tx := na(ini)
+            sino si nk(ini) = K_REF entonces
+                r := busca(na(ini))
+                si r <> 0 y s_clase(r) = S_CAD entonces tx := s_a(r) fin
+            fin
+            base := tbase(t)
+            si nk(ini) = K_CAD o tx <> 0 entonces
+                si ttam(base) <> 1 entonces
+                    m("un texto solo inicia un arreglo de byte")
+                    falla(nlin(ini), ncol(ini))
+                fin
+                n := tx_largo(tx)
+                si n + 1 > tn(t) entonces
+                    m("el texto (")
+                    m_nat(n)
+                    m(" letras y el 0 final) no cabe en el arreglo de ")
+                    m_nat(tn(t))
+                    falla(nlin(ini), ncol(ini))
+                fin
+                dp("db ")
+                para i desde 0 hasta tn(t) - 1 hacer
+                    si i > 0 entonces dp(",") fin
+                    si i < n entonces dp_nat(tx_byte(tx, i)) sino dp("0") fin
+                fin
+                devolver
+            fin
+            si nk(ini) <> K_LISTA entonces
+                m("un arreglo se inicia con una lista (a, b, c) o con un texto")
+                falla(nlin(ini), ncol(ini))
+            fin
+            si tk(base) = TK_ARR o tk(base) = TK_EST entonces
+                m("solo se inician arreglos de números, bool o punteros")
+                falla(nlin(ini), ncol(ini))
+            fin
+            n := 0
+            e := na(ini)
+            mientras e <> 0 hacer
+                si n = tn(t) entonces
+                    m("sobran valores: el arreglo es de ")
+                    m_nat(tn(t))
+                    falla(nlin(e), ncol(e))
+                fin
+                n := n + 1
+                e := nsig(e)
+            fin
+            directiva(ttam(base))
+            n := 0
+            e := na(ini)
+            mientras e <> 0 hacer
+                si n > 0 entonces dp(",") fin
+                valor_inicial(base, e)
+                n := n + 1
+                e := nsig(e)
+            fin
+            mientras n < tn(t) hacer
+                si n > 0 entonces dp(",") fin
+                dp("0")
+                n := n + 1
+            fin
+            devolver
+        fin
+        si tk(t) = TK_EST entonces
+            m("las estructuras no llevan valor inicial (se rellenan campo a campo)")
+            falla(nlin(ini), ncol(ini))
+        fin
+        directiva(ttam(t))
+        valor_inicial(t, ini)
+    fin
+
+    ; la línea de una variable global con valor inicial: «G_x: dw 5»
+    función línea_global(r: nat16)
+        variable t: arreglo [TXT] de byte
+        variable antes: nat16
+        antes := el_mod
+        usa(s_mod(r))
+        etq_nombre('G', s_mod(r), s_nombre(r), t)
+        dp(t)
+        dp(": ")
+        dato_inicial(s_a(r), nc(s_b(r)))
+        dp("\n")
+        usa(antes)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que declara un módulo (antes de generar nada)
+    ; -------------------------------------------------------------------------
+    función decl_global(d: nat16)
+        variable t, nm, r: nat16
+        t := resuelve(nb(d))
+        nm := na(d)
+        mientras nm <> 0 hacer
+            declarado(na(nm), nlin(d), ncol(d), falso)
+            r := sim_alta(el_mod, na(nm))
+            s_pon_a(r, t)
+            s_pon_b(r, d)
+            s_pon_clase(r, S_GLOBAL)
+            si es_programa(el_mod) entonces s_marca(r, SM_VIVO) fin
+            si nc(d) <> 0 entonces
+                s_marca(r, SM_INICIAL)
+                destino := A_NADA
+                dato_inicial(t, nc(d))
+                dato_global(r)
+            fin
+            nm := nsig(nm)
+        fin
+    fin
+
+    función publica(d: nat16, a: nat16)
+        si nmarcas(d) yb M_PUBLICO <> 0 entonces s_marca(sim_propio(el_mod, a), SM_PUBLICO) fin
+    fin
+
+    ; la ficha de una función por su nudo K_FUNC
+    función ficha(d: nat16): nat16
+        devolver nsig(nt(d))
+    fin
+
+    función declara(m_: nat16)
+        variable d, nm, t, r, f, p, off, n: nat16
+        variable lejos: bool
+        ; lo que el módulo declara (aunque no se haya llegado aún a ello): manda
+        ; sobre lo que traigan los módulos importados
+        d := nb(mod_arbol[m_])
+        mientras d <> 0 hacer
+            si nk(d) = K_CONST o nk(d) = K_TIPO o nk(d) = K_FUNC entonces sim_alta(m_, na(d)) fin
+            si nk(d) = K_VAR entonces
+                nm := na(d)
+                mientras nm <> 0 hacer
+                    sim_alta(m_, na(nm))
+                    nm := nsig(nm)
+                fin
+            fin
+            d := nsig(d)
+        fin
+        nm := nc(mod_arbol[m_])
+        mientras nm <> 0 hacer
+            sim_alta(m_, na(nm))
+            nm := nsig(nm)
+        fin
+        d := nb(mod_arbol[m_])
+        mientras d <> 0 hacer
+            según nk(d)
+                caso K_CONST:
+                    decl_const(d)
+                    publica(d, na(d))
+                caso K_TIPO:
+                    declarado(na(d), nlin(d), ncol(d), falso)
+                    t := resuelve(nb(d))
+                    si tk(t) = TK_EST y t_nombre(t) = 0 entonces t_pon_nombre(t, na(d)) fin
+                    r := sim_alta(m_, na(d))
+                    s_pon_a(r, t)
+                    s_pon_clase(r, S_TIPO)
+                    publica(d, na(d))
+                caso K_VAR:
+                    decl_global(d)
+                    nm := na(d)
+                    mientras nm <> 0 hacer
+                        publica(d, na(nm))
+                        nm := nsig(nm)
+                    fin
+                caso K_FUNC:
+                    declarado(na(d), nlin(d), ncol(d), falso)
+                    f := func_nueva(d, m_)
+                    pon_sig(nt(d), f)
+                    n := 0
+                    p := nb(d)
+                    mientras p <> 0 hacer
+                        n := n + 1
+                        p := nsig(p)
+                    fin
+                    f_pon_nparams(f, n)
+                    f_pon_tret(f, T_NADA)
+                    r := sim_alta(m_, na(d))
+                    s_pon_a(r, f)
+                    s_pon_clase(r, S_FUNC)
+                    publica(d, na(d))
+            fin
+            d := nsig(d)
+        fin
+        d := nb(mod_arbol[m_])
+        mientras d <> 0 hacer
+            si nk(d) = K_FUNC entonces
+                f := ficha(d)
+                si nc(d) <> 0 entonces
+                    t := resuelve(nc(d))
+                    f_pon_tret(f, t)
+                    si tk(t) = TK_ARR o tk(t) = TK_EST entonces
+                        m("una función no devuelve arreglos ni estructuras (use un parámetro «ref»)")
+                        falla(nlin(nc(d)), ncol(nc(d)))
+                    fin
+                fin
+                p := nb(d)
+                mientras p <> 0 hacer
+                    pon_t(p, resuelve(nb(p)))
+                    p := nsig(p)
+                fin
+                ; modelo grande: las funciones públicas son lejanas (se las llama desde
+                ; otro segmento): vuelven con «retf» y sus parámetros caen dos más allá
+                lejos := grande y nmarcas(d) yb M_PUBLICO <> 0 y no (es_programa(m_) y na(d) = a_principal)
+                off := 4
+                si lejos entonces
+                    off := 6
+                    f_marca(f, FM_LEJOS)
+                fin
+                si es_programa(m_) entonces f_marca(f, FM_VIVO) fin
+                p := nb(d)
+                mientras p <> 0 hacer
+                    t := nt(p)
+                    si (tk(t) = TK_ARR o tk(t) = TK_EST) y nmarcas(p) yb M_REF = 0 entonces
+                        m("los arreglos y las estructuras se pasan con «ref»")
+                        falla(nlin(p), ncol(p))
+                    fin
+                    pon_c(p, off)
+                    si es32(t) y nmarcas(p) yb M_REF = 0 entonces off := off + 4 sino off := off + 2 fin
+                    p := nsig(p)
+                fin
+                si lejos entonces f_pon_nbytes(f, off - 6) sino f_pon_nbytes(f, off - 4) fin
+            fin
+            d := nsig(d)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Leer el temporal: mirar un trozo y copiarlo
+    ; -------------------------------------------------------------------------
+    ; lee la línea siguiente del temporal (sin su salto) en t; quedan «queda» octetos del trozo
+    función trae_línea(t: puntero a byte, ref queda: nat32)
+        variable n: nat16
+        variable c: ent16
+        n := 0
+        mientras queda > 0 hacer
+            c := leer_car(lec)
+            queda := queda - 1
+            si c = '\n' o c = FIN_DE_ARCHIVO entonces romper fin
+            si n < MAX_LN - 1 entonces
+                t[n] := c
+                n := n + 1
+            fin
+        fin
+        t[n] := 0
+    fin
+
+    función va_a(dónde: nat32)
+        situar(temporal, ent32(dónde), DESDE_EL_PRINCIPIO)
+        empezar_lector(lec, temporal)
+    fin
+
+    ; mira a quién nombra un trozo de código. (Si nadie lee la copia de las
+    ; banderas, el «pop word [R_ban]» que sigue a un «pushf» no cuenta: se quita.)
+    función mira_trozo(dónde: nat32, cuánto: nat32)
+        variable t: arreglo [MAX_LN] de byte
+        variable era_pushf: bool
+        va_a(dónde)
+        era_pushf := falso
+        mientras cuánto > 0 hacer
+            trae_línea(t, cuánto)
+            si no (era_pushf y no ban_memoria y iguales(t, "    pop word [R_ban]")) entonces
+                mira_texto(t)
+                mira_octeto('\n')
+            fin
+            era_pushf := iguales(t, "    pushf")
+        fin
+    fin
+
+    ; copia un trozo de código al ensamblador
+    función copia_trozo(dónde: nat32, cuánto: nat32)
+        variable t: arreglo [MAX_LN] de byte
+        variable pendiente: bool                ; un «pushf» que aún no se ha escrito
+        va_a(dónde)
+        pendiente := falso
+        mientras cuánto > 0 hacer
+            trae_línea(t, cuánto)
+            si pendiente entonces
+                pendiente := falso
+                si iguales(t, "    pop word [R_ban]") entonces seguir fin
+                sl("    pushf")
+            fin
+            si no ban_memoria y iguales(t, "    pushf") entonces
+                pendiente := cierto
+            sino
+                sl(t)
+            fin
+        fin
+        si pendiente entonces sl("    pushf") fin
+    fin
+
+    ; el texto de una rutina de apoyo, para el segmento k: a mirar o a escribir.
+    ; En los segmentos de los módulos (k > 1), los nombres de las rutinas llevan «_k»
+    función apoyo_va(i: nat16, k: nat16, escribir_: bool)
+        variable p: puntero a byte
+        variable w: arreglo [64] de byte
+        variable n: nat16
+        variable c: byte
+        variable palabra: bool
+        p := apoyo_texto(i)
+        n := 0
+        mientras cierto hacer
+            c := valor(p)
+            palabra := c >= 128 o c = '_' o (c >= '0' y c <= '9') o (c >= 'A' y c <= 'Z') o (c >= 'a' y c <= 'z')
+            si palabra y n < 62 entonces
+                w[n] := c
+                n := n + 1
+            sino
+                si n > 0 entonces
+                    w[n] := 0
+                    si cuál_apoyo(w, n) >= 0 entonces
+                        si escribir_ entonces
+                            s(w)
+                            si k > 1 entonces
+                                s("_")
+                                s_nat(k)
+                            fin
+                        sino
+                            ap_vivo[k][cuál_apoyo(w, n)] := cierto
+                        fin
+                    sino si escribir_ entonces
+                        s(w)
+                    fin
+                    n := 0
+                fin
+                si c = 0 entonces romper fin
+                si escribir_ entonces
+                    w[0] := c
+                    w[1] := 0
+                    s(w)
+                fin
+            fin
+            p := p + 1
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Qué va al programa: lo fijo y, de lo demás, lo que alguien nombre
+    ; -------------------------------------------------------------------------
+    función aux_dónde(x: nat16): nat32
+        devolver nat32(nb(x)) << 16 ob na(x)
+    fin
+
+    función aux_cuánto(x: nat16): nat32
+        devolver nat32(nt(x)) << 16 ob nc(x)
+    fin
+
+    función vive()
+        variable m_, d, f, r, i, k, nm, v: nat16
+        ; con --todo, todo va al programa
+        si todo entonces
+            para i desde 0 hasta N_R - 1 hacer
+                r_vivo[i] := cierto
+            fin
+            para k desde 1 hasta MAX_MODULOS hacer
+                si k = 1 o (grande y k <= n_modulos) entonces
+                    para i desde 0 hasta N_APOYO - 1 hacer
+                        ap_vivo[k][i] := cierto
+                    fin
+                fin
+            fin
+            i := 0
+            mientras i < n_puentes hacer
+                puente_pon_vivo(i)
+                i := i + 1
+            fin
+            para i desde 1 hasta n_cadenas hacer
+                tx_pon_vivo(texto_de_etiqueta(i))
+            fin
+            m_ := 0
+            mientras m_ < n_modulos hacer
+                d := nb(mod_arbol[m_])
+                mientras d <> 0 hacer
+                    si nk(d) = K_FUNC entonces f_marca(ficha(d), FM_VIVO) fin
+                    si nk(d) = K_VAR entonces
+                        nm := na(d)
+                        mientras nm <> 0 hacer
+                            s_marca(sim_propio(m_, na(nm)), SM_VIVO)
+                            nm := nsig(nm)
+                        fin
+                    fin
+                    d := nsig(d)
+                fin
+                m_ := m_ + 1
+            fin
+        fin
+        ; los bloques «ensamblador» sueltos van siempre
+        m_ := 0
+        mientras m_ < n_modulos hacer
+            d := nb(mod_arbol[m_])
+            mientras d <> 0 hacer
+                si nk(d) = K_ASM entonces
+                    seg_mirado := seg_de(m_)
+                    mira_trozo(aux_dónde(nc(d)), aux_cuánto(nc(d)))
+                fin
+                d := nsig(d)
+            fin
+            m_ := m_ + 1
+        fin
+        ; y, vuelta a vuelta, lo que nombra lo que ya está vivo
+        cambio := cierto
+        mientras cambio hacer
+            cambio := falso
+            m_ := 0
+            mientras m_ < n_modulos hacer
+                d := nb(mod_arbol[m_])
+                mientras d <> 0 hacer
+                    si nk(d) = K_FUNC entonces
+                        f := ficha(d)
+                        si f_marcas(f) yb FM_VIVO <> 0 y f_marcas(f) yb FM_VISTO = 0 entonces
+                            f_marca(f, FM_VISTO)
+                            seg_mirado := seg_de(m_)
+                            mira_trozo(f_dónde(f), f_cuánto(f))
+                            cambio := cierto
+                        fin
+                    fin
+                    d := nsig(d)
+                fin
+                m_ := m_ + 1
+            fin
+            para k desde 1 hasta MAX_MODULOS hacer
+                para i desde 0 hasta N_APOYO - 1 hacer
+                    si ap_vivo[k][i] y no ap_visto[k][i] entonces
+                        ap_visto[k][i] := cierto
+                        apoyo_va(i, k, falso)
+                        cambio := cierto
+                    fin
+                fin
+            fin
+            i := 0
+            mientras i < n_puentes hacer
+                si puente_vivo(i) y no pu_visto[i] entonces
+                    pu_visto[i] := cierto
+                    f_marca(puente_func(i), FM_VIVO)
+                    cambio := cierto
+                fin
+                i := i + 1
+            fin
+            i := 0
+            mientras i < n_datos hacer
+                v := dato(i)
+                si v yb DATO_GLOBAL <> 0 entonces
+                    r := v yb 0x7FFF
+                    si s_marcas(r) yb SM_VIVO <> 0 y s_marcas(r) yb SM_VISTO = 0 entonces
+                        s_marca(r, SM_VISTO)
+                        destino := A_MIRAR
+                        línea_global(r)
+                        cambio := cierto
+                    fin
+                fin
+                i := i + 1
+            fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Escribir el programa
+    ; -------------------------------------------------------------------------
+    ; el código vivo de un módulo (sus funciones y bloques de ensamblador, por orden)
+    función código_de(m_: nat16)
+        variable d, f: nat16
+        d := nb(mod_arbol[m_])
+        mientras d <> 0 hacer
+            si nk(d) = K_FUNC entonces
+                f := ficha(d)
+                si f_marcas(f) yb FM_VIVO <> 0 entonces copia_trozo(f_dónde(f), f_cuánto(f)) fin
+            fin
+            si nk(d) = K_ASM entonces copia_trozo(aux_dónde(nc(d)), aux_cuánto(nc(d))) fin
+            d := nsig(d)
+        fin
+    fin
+
+    función apoyo_de(k: nat16)
+        variable i: nat16
+        para i desde 0 hasta N_APOYO - 1 hacer
+            si ap_vivo[k][i] entonces apoyo_va(i, k, cierto) fin
+        fin
+    fin
+
+    ; «C_k»
+    función s_seg(k: nat16)
+        s("C_")
+        s_nat(k)
+    fin
+
+    función puentes_de(k: nat16)
+        variable i, f, kf: nat16
+        variable t: arreglo [TXT] de byte
+        i := 0
+        mientras i < n_puentes hacer
+            si puente_vivo(i) y puente_seg(i) = k entonces
+                f := puente_func(i)
+                kf := seg_de(f_mod(f))
+                f_etq('F', f, t)
+                s("J")
+                s_nat(k)
+                s("_")
+                s(dirección(t[2]))
+                s(":\n    jmp ((")
+                s_seg(kf)
+                s("-C_1)>>4):(")
+                s(t)
+                s("-")
+                s_seg(kf)
+                s(")\n")
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; ¿hay alguna variable sin valor inicial (o R_xx) viva?
+    función hay_vacío(): bool
+        variable m_, d, nm, r, i: nat16
+        para i desde 0 hasta N_R - 1 hacer
+            si r_vivo[i] entonces devolver cierto fin
+        fin
+        m_ := 0
+        mientras m_ < n_modulos hacer
+            d := nb(mod_arbol[m_])
+            mientras d <> 0 hacer
+                si nk(d) = K_VAR y nc(d) = 0 entonces
+                    nm := na(d)
+                    mientras nm <> 0 hacer
+                        r := sim_propio(m_, na(nm))
+                        si s_marcas(r) yb SM_VIVO <> 0 entonces devolver cierto fin
+                        nm := nsig(nm)
+                    fin
+                fin
+                d := nsig(d)
+            fin
+            m_ := m_ + 1
+        fin
+        devolver falso
+    fin
+
+    función escribe(pr: nat16)
+        variable k, i, n, v, r, m_, d, nm: nat16
+        variable t: arreglo [TXT] de byte
+        variable vacío, hay_datos: bool
+        vacío := hay_vacío()
+        sl("; -----------------------------------------------------------------")
+        s("; Generado por ccastel desde el m\xC3\xB3dulo ")
+        at_texto(mod_nombre[prog], t)
+        s(t)
+        sl(". NO editar a mano.")
+        si grande entonces
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.EXE")
+        sino
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.COM")
+        fin
+        sl("; -----------------------------------------------------------------")
+        sl("cpu 8086")
+        sl("bits 16")
+        si grande entonces
+            ; Un .EXE: la cabecera «MZ» con la tabla de lo que se reubica (el segmento
+            ; de cada puente); un segmento de código por módulo (C_1, el programa) y,
+            ; detrás, el de los datos y la pila (D_ini), que empieza con una copia del
+            ; prefijo (PSP): así puntero(0x81) sigue siendo la línea de órdenes
+            n := 0
+            i := 0
+            mientras i < n_puentes hacer
+                si puente_vivo(i) entonces n := n + 1 fin
+                i := i + 1
+            fin
+            sl("C_cab:")
+            sl("    db 77, 90")
+            sl("    dw (C_fin-C_cab+D_fin-D_ini) % 512")
+            sl("    dw (C_fin-C_cab+D_fin-D_ini+511) / 512")
+            s("    dw ")
+            s_nat(n)
+            s("\n")
+            sl("    dw (C_1-C_cab)>>4")
+            sl("    dw 0x1000-((D_fin-D_ini)>>4)")
+            sl("    dw 0x1000-((D_fin-D_ini)>>4)")
+            sl("    dw (C_fin-C_1)>>4")
+            sl("    dw 0xFFFE")
+            sl("    dw 0, 0, 0, 28, 0")
+            i := 0
+            mientras i < n_puentes hacer
+                si puente_vivo(i) entonces
+                    k := puente_seg(i)
+                    f_etq('F', puente_func(i), t)
+                    s("    dw J")
+                    s_nat(k)
+                    s("_")
+                    s(dirección(t[2]))
+                    s("+3-")
+                    s_seg(k)
+                    s(", (")
+                    s_seg(k)
+                    sl("-C_1)>>4")
+                fin
+                i := i + 1
+            fin
+            sl("    align 16, db 0")
+            sl("C_1:")
+            sl("    cld")
+            sl("    mov ax, ss")
+            sl("    mov es, ax")
+            sl("    xor si, si")
+            sl("    xor di, di")
+            sl("    mov cx, 128")
+            sl("    rep movsw")
+            sl("    mov ds, ax")
+        sino
+            sl("org 0x100")
+            sl("    cld")
+        fin
+        si vacío entonces
+            sl("    mov di, _vacio")
+            sl("    mov cx, _vacio_fin-_vacio")
+            sl("    xor al, al")
+            sl("    rep stosb")
+        fin
+        sl("    call F_principal")
+        si f_tret(pr) <> T_NADA entonces sl("    mov ah, 0x4C") sino sl("    mov ax, 0x4C00") fin
+        sl("    int 0x21")
+        ; el código: primero el programa; detrás, los módulos
+        si grande entonces
+            para k desde 1 hasta n_modulos hacer
+                si k = 1 entonces
+                    código_de(prog)
+                sino
+                    s("\n; ---- segmento ")
+                    s_nat(k)
+                    s(": el m\xC3\xB3dulo ")
+                    at_texto(mod_nombre[k - 2], t)
+                    s(t)
+                    sl(" ----")
+                    sl("    align 16, db 0")
+                    s_seg(k)
+                    sl(":")
+                    código_de(k - 2)
+                fin
+                apoyo_de(k)
+                puentes_de(k)
+            fin
+            sl("    align 16, db 0")
+            sl("C_fin:")
+        sino
+            código_de(prog)
+            m_ := 0
+            mientras m_ + 1 < n_modulos hacer
+                código_de(m_)
+                m_ := m_ + 1
+            fin
+            apoyo_de(1)
+        fin
+        ; los datos: los textos y las variables con valor inicial, por orden
+        hay_datos := falso
+        i := 0
+        mientras i < n_datos y no hay_datos hacer
+            v := dato(i)
+            si v yb DATO_GLOBAL <> 0 entonces
+                hay_datos := s_marcas(v yb 0x7FFF) yb SM_VIVO <> 0
+            sino
+                hay_datos := tx_vivo(v)
+            fin
+            i := i + 1
+        fin
+        si grande entonces
+            sl("")
+            sl("; ---- datos ----")
+            sl("section .data vstart=0 align=16")
+            sl("D_ini:")
+            sl("    times 256 db 0")
+        sino si hay_datos entonces
+            sl("")
+            sl("; ---- datos ----")
+        fin
+        destino := A_SALIDA
+        i := 0
+        mientras i < n_datos hacer
+            v := dato(i)
+            si v yb DATO_GLOBAL <> 0 entonces
+                r := v yb 0x7FFF
+                si s_marcas(r) yb SM_VIVO <> 0 entonces línea_global(r) fin
+            sino si tx_vivo(v) entonces
+                s("T_")
+                s_nat(tx_etiqueta(v))
+                s(": db ")
+                n := tx_largo(v)
+                k := 0
+                mientras k < n hacer
+                    s_nat(tx_byte(v, k))
+                    s(",")
+                    k := k + 1
+                fin
+                sl("0")
+            fin
+            i := i + 1
+        fin
+        si grande entonces sl("D_fin:") fin
+        si vacío entonces
+            sl("")
+            sl("; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----")
+            sl("_vacio:")
+            sl("    absolute _vacio")
+            m_ := 0
+            mientras m_ < n_modulos hacer
+                d := nb(mod_arbol[m_])
+                mientras d <> 0 hacer
+                    si nk(d) = K_VAR y nc(d) = 0 entonces
+                        nm := na(d)
+                        mientras nm <> 0 hacer
+                            r := sim_propio(m_, na(nm))
+                            si s_marcas(r) yb SM_VIVO <> 0 entonces
+                                etq_nombre('G', m_, na(nm), t)
+                                s(t)
+                                s(": resb ")
+                                s_nat(ttam(s_a(r)))
+                                s("\n")
+                            fin
+                            nm := nsig(nm)
+                        fin
+                    fin
+                    d := nsig(d)
+                fin
+                m_ := m_ + 1
+            fin
+            para i desde 0 hasta N_R - 1 hacer
+                si r_vivo[i] entonces
+                    s("R_")
+                    s(r_nombres[i])
+                    sl(": resw 1")
+                fin
+            fin
+            sl("_vacio_fin:")
+        fin
+        si fin_programa_usado entonces sl("_fin_programa:") fin    ; el primer octeto libre detrás del programa
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El programa entero. Los módulos ya están cargados (Sintactico)
+    ; -------------------------------------------------------------------------
+    público función compila(entrada: puntero a byte, salida: puntero a byte, con_todo: bool)
+        variable m_, d, f, r, cuerpo, marca, aux, ms, orden: nat16
+        variable sitio, cuánto: nat32
+        todo := con_todo
+        prog := n_modulos - 1
+        grande := falso
+        d := nb(mod_arbol[prog])
+        mientras d <> 0 hacer
+            si nk(d) = K_MODELO entonces grande := cierto fin
+            d := nsig(d)
+        fin
+        m_ := 0
+        mientras m_ < n_modulos hacer
+            usa(m_)
+            declara(m_)
+            m_ := m_ + 1
+        fin
+        usa(prog)
+        r := sim_propio(prog, a_principal)
+        si r = 0 o s_clase(r) <> S_FUNC entonces
+            m("falta la función principal()")
+            falla(nlin(mod_arbol[prog]), ncol(mod_arbol[prog]))
+        fin
+        f := s_a(r)
+        si f_nparams(f) <> 0 entonces
+            m("principal() no lleva parámetros")
+            falla(nlin(f_nudo(f)), ncol(f_nudo(f)))
+        fin
+        la_principal := f
+        ; el código: primero el programa; detrás, los módulos
+        abre_temporal()
+        para orden desde 0 hasta n_modulos - 1 hacer
+            m_ := orden - 1
+            si orden = 0 entonces m_ := prog fin
+            usa(m_)
+            d := nb(mod_arbol[m_])
+            mientras d <> 0 hacer
+                si nk(d) = K_FUNC entonces
+                    marca := marca_árbol()
+                    tip_temporal := cierto
+                    cuerpo := cuerpo_de(d, m_)
+                    gen_función(ficha(d), cuerpo)
+                    limpia()
+                    vuelca(sitio, cuánto)
+                    f_pon_sitio(ficha(d), sitio, cuánto)
+                    tip_temporal := falso
+                    tip_suelta()
+                    suelta_árbol(marca)
+                sino si nk(d) = K_ASM entonces
+                    func_actual := 0
+                    loc_vacía()
+                    blanca()
+                    gen_asm(d)
+                    limpia()
+                    vuelca(sitio, cuánto)
+                    aux := nudo(K_NOMBRE, 0, 0)
+                    pon_a(aux, nat16(sitio))
+                    pon_b(aux, nat16(sitio >> 16))
+                    pon_c(aux, nat16(cuánto))
+                    pon_t(aux, nat16(cuánto >> 16))
+                    pon_c(d, aux)
+                fin
+                d := nsig(d)
+            fin
+        fin
+        usa(prog)
+        loc_vacía()
+        si no cierra_temporal() entonces
+            m("no puedo escribir el archivo temporal (¿disco lleno?)")
+            falla_sin_más()
+        fin
+        temporal := abrir(NOMBRE_TEMPORAL, LEER)
+        si temporal = MAL entonces
+            m("no puedo volver a abrir el archivo temporal")
+            falla_sin_más()
+        fin
+        vive()
+        ms := crear(salida)
+        si ms = MAL entonces
+            m("no puedo crear ")
+            m_utf8(salida)
+            falla_sin_más()
+        fin
+        empezar_escritor(sal, ms)
+        líneas_sal := 0
+        escribe(f)
+        si no vaciar(sal) entonces
+            m("no puedo escribir en ")
+            m_utf8(salida)
+            m(" (¿disco lleno?)")
+            falla_sin_más()
+        fin
+        cerrar(ms)
+        cerrar(temporal)
+        borrar(NOMBRE_TEMPORAL)
+        escribir("ccastel: ", entrada, " -> ", salida, "  (", líneas_sal, " l\xA1neas de ensamblador)\r\n")
+    fin
+
+fin Programa.

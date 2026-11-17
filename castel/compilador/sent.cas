@@ -1,0 +1,978 @@
+; =============================================================================
+;  sent.cas - el generador del compilador de Castel, segunda mitad: las
+;  sentencias (asignar, si, mientras, para, según, devolver, ensamblador) y
+;  cada función entera, con su marco. Es gen_funcion, gen_sent y compañía de
+;  ccastel.py, función por función.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sent
+
+    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Textos
+
+    constante MAX_BUCLES = 32
+    constante MAX_CASOS = 200
+
+    variable bucle_seguir: arreglo [MAX_BUCLES] de nat16
+    variable bucle_romper: arreglo [MAX_BUCLES] de nat16
+    variable n_bucles: nat16
+    variable fin_usado: bool
+    ; el tipo de cada local por su nombre (se usan antes de declararse)
+    variable td_nombre: arreglo [MAX_LOCALES] de nat16
+    variable td_tipo: arreglo [MAX_LOCALES] de nat16
+    variable n_td: nat16
+    variable marco: nat16
+    ; lo que se ve al recorrer el cuerpo de una función
+    variable visto_int: byte                    ; lo que pregunta de interrupción (R_...)
+    variable visto_devolver, visto_asm: bool
+    ; los valores de los casos de un «según» (para ver los repetidos)
+    variable caso_desde: arreglo [MAX_CASOS] de ent32
+    variable caso_hasta: arreglo [MAX_CASOS] de ent32
+
+    ; -------------------------------------------------------------------------
+    ;  Asignar
+    ; -------------------------------------------------------------------------
+    función mismo_lugar(ref a: Lugar, ref b: Lugar): bool
+        devolver a.base = b.base y a.sim = b.sim y a.off = b.off
+    fin
+
+    ; dest := e, con dest de 32 bits (dos palabras: la baja, primero)
+    función gen_asig32(dest: nat16, e: nat16)
+        variable r, q: Lugar
+        variable hay_r: bool
+        variable c: N64
+        variable baja, alta, t: arreglo [TXT] de byte
+        variable i1, i2: puntero a byte
+        hay_r := lugar_de(dest, falso, r)
+        si const(e, c) entonces
+            si no hay_r entonces lugar_de(dest, cierto, r) fin
+            mitades(c, baja, alta)
+            texto_lugar(r, t)
+            em4("mov word [", t, "], ", baja)
+            r.off := r.off + 2
+            texto_lugar(r, t)
+            em4("mov word [", t, "], ", alta)
+            devolver
+        fin
+        ; x := x + n, x := x yb n...: sobre la propia memoria
+        si hay_r y nk(e) = K_BIN entonces
+            si ins32(nop(e), i1, i2) y es_lugar(na(e)) entonces
+                si es32(tipo_de(na(e))) entonces
+                    si lugar_de(na(e), falso, q) entonces
+                        si mismo_lugar(q, r) y const(nb(e), c) entonces
+                            tipo_de(e)
+                            mitades(c, baja, alta)
+                            texto_lugar(r, t)
+                            em5(i1, " word [", t, "], ", baja)
+                            r.off := r.off + 2
+                            texto_lugar(r, t)
+                            em5(i2, " word [", t, "], ", alta)
+                            devolver
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        gen_expr32(e)
+        si no hay_r entonces
+            em("push dx")
+            em("push ax")
+            lugar_de(dest, cierto, r)
+            em("pop ax")
+            em("pop dx")
+        fin
+        texto_lugar(r, t)
+        em3("mov [", t, "], ax")
+        r.off := r.off + 2
+        texto_lugar(r, t)
+        em3("mov [", t, "], dx")
+    fin
+
+    función gen_asig(dest: nat16, e: nat16)
+        variable td, r: nat16
+        variable tt, reg, ins: puntero a byte
+        variable im, fijo, lug, otro: arreglo [TXT] de byte
+        variable hay_im, hay_fijo: bool
+        variable n: N64
+        variable v: nat32
+        variable op: byte
+        si no es_lugar(dest) entonces
+            si nk(dest) = K_REF entonces
+                r := busca(na(dest))
+                si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL o s_clase(r) = S_CAD) entonces
+                    m("«")
+                    m_at(na(dest))
+                    m("» es una constante: no se le asigna")
+                    falla(nlin(dest), ncol(dest))
+                fin
+            fin
+            m("a la izquierda de «:=» va una variable, un elemento o un campo")
+            falla(nlin(dest), ncol(dest))
+        fin
+        td := tipo_de(dest)
+        si nk(dest) = K_REF entonces compatible(td, e, "", na(dest)) sino compatible(td, e, "el destino", 0) fin
+        si es32(td) entonces
+            gen_asig32(dest, e)
+            devolver
+        fin
+        tt := tam_txt(td)
+        reg := "ax"
+        si ttam(td) = 1 entonces reg := "al" fin
+        hay_im := inmediato(e, im)
+        hay_fijo := lugar_fijo(dest, fijo)
+        si hay_im entonces
+            si ttam(td) = 1 entonces
+                texto_a_natural(im, v)
+                natural_a_texto(v yb 0xFF, im)
+            fin
+            si no hay_fijo entonces lugar(dest, fijo) fin
+            ini()
+            l("mov ")
+            l(tt)
+            l(" [")
+            l(fijo)
+            l("], ")
+            l(im)
+            cruda()
+            devolver
+        fin
+        ; x := x + n, x := x yb n...: sobre la propia memoria
+        op := 0
+        si nk(e) = K_BIN entonces op := nop(e) fin
+        si hay_fijo y (op = O_MAS o op = O_MENOS o op = O_YB o op = O_OB o op = O_XOB) entonces
+            si es_lugar(na(e)) entonces
+                si lugar_fijo(na(e), otro) entonces
+                    si iguales(otro, fijo) y const(nb(e), n) entonces
+                        tipo_de(e)
+                        v := n.bajo
+                        si tk(td) = TK_PUNT entonces v := v * ttam(tbase(td)) fin
+                        si ttam(td) = 1 entonces v := v yb 0xFF sino v := v yb 0xFFFF fin
+                        ini()
+                        si (op = O_MAS o op = O_MENOS) y v = 1 entonces
+                            si op = O_MAS entonces l("inc ") sino l("dec ") fin
+                            l(tt)
+                            l(" [")
+                            l(fijo)
+                            l("]")
+                        sino
+                            según op
+                                caso O_MAS: ins := "add "
+                                caso O_MENOS: ins := "sub "
+                                caso O_YB: ins := "and "
+                                caso O_OB: ins := "or "
+                                si no: ins := "xor "
+                            fin
+                            l(ins)
+                            l(tt)
+                            l(" [")
+                            l(fijo)
+                            l("], ")
+                            l_nat(v)
+                        fin
+                        cruda()
+                        devolver
+                    fin
+                fin
+            fin
+        fin
+        si ttam(td) = 1 entonces gen_al(e) sino gen_expr(e) fin
+        si hay_fijo entonces
+            em4("mov [", fijo, "], ", reg)
+        sino si limpio(dest) entonces
+            lugar(dest, lug)
+            em4("mov [", lug, "], ", reg)
+        sino
+            em("push ax")
+            lugar(dest, lug)
+            em("pop ax")
+            em4("mov [", lug, "], ", reg)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  si, mientras, para, según
+    ; -------------------------------------------------------------------------
+    ; ¿el bloque termina saltando a otro sitio (no sigue por debajo)?
+    función acaba(s: nat16): bool
+        variable k: byte
+        si s = 0 entonces devolver falso fin
+        mientras nsig(s) <> 0 hacer
+            s := nsig(s)
+        fin
+        k := nk(s)
+        si k = K_DEVOLVER o k = K_ROMPER o k = K_SEGUIR entonces devolver cierto fin
+        devolver k = K_LLAMADA_SENT y at_interna(na(na(s))) = I_SALIR
+    fin
+
+    función gen_bloque(s: nat16, ultimo: bool)
+        mientras s <> 0 hacer
+            gen_sent(s, ultimo y nsig(s) = 0)
+            s := nsig(s)
+        fin
+    fin
+
+    función gen_si(s: nat16, ultimo: bool)
+        variable l_sino, l_fin, e: nat16
+        ; «si c entonces romper fin»: un salto y ya
+        e := nb(s)
+        si nc(s) = 0 y e <> 0 y n_bucles > 0 entonces
+            si nsig(e) = 0 y (nk(e) = K_ROMPER o nk(e) = K_SEGUIR) entonces
+                si nk(e) = K_ROMPER entonces
+                    salta(na(s), bucle_romper[n_bucles - 1], cierto)
+                sino
+                    salta(na(s), bucle_seguir[n_bucles - 1], cierto)
+                fin
+                devolver
+            fin
+        fin
+        l_sino := nueva()
+        salta(na(s), l_sino, falso)
+        gen_bloque(nb(s), ultimo y nc(s) = 0)
+        si nc(s) <> 0 entonces
+            l_fin := nueva()
+            si no acaba(nb(s)) entonces
+                si ultimo entonces
+                    fin_usado := cierto
+                    jmp(0)
+                sino
+                    jmp(l_fin)
+                fin
+            fin
+            et(l_sino)
+            gen_bloque(nc(s), ultimo)
+            et(l_fin)
+        sino
+            et(l_sino)
+        fin
+    fin
+
+    función mete_bucle(seguir_: nat16, romper_: nat16, s: nat16)
+        si n_bucles >= MAX_BUCLES entonces
+            m("demasiados bucles unos dentro de otros")
+            falla(nlin(s), ncol(s))
+        fin
+        bucle_seguir[n_bucles] := seguir_
+        bucle_romper[n_bucles] := romper_
+        n_bucles := n_bucles + 1
+    fin
+
+    función gen_mientras(s: nat16)
+        variable l_ini, l_fin: nat16
+        l_ini := nueva()
+        l_fin := nueva()
+        et(l_ini)
+        salta(na(s), l_fin, falso)
+        mete_bucle(l_ini, l_fin, s)
+        gen_bloque(nb(s), falso)
+        n_bucles := n_bucles - 1
+        jmp(l_ini)
+        et(l_fin)
+    fin
+
+    ; el «para» con una variable de 32 bits: lo mismo, a dos palabras
+    función para32_pasado(sube: bool, baja: puntero a byte, alta: puntero a byte, tb: puntero a byte, ta: puntero a byte)
+        ; deja «menor» si la variable ya se ha pasado del final
+        si sube entonces                        ; final < variable
+            em2("mov ax, ", tb)
+            em2("mov dx, ", ta)
+            em3("cmp ax, [", baja, "]")
+            em3("sbb dx, [", alta, "]")
+        sino                                    ; variable < final
+            em3("mov ax, [", baja, "]")
+            em3("mov dx, [", alta, "]")
+            em2("cmp ax, ", tb)
+            em2("sbb dx, ", ta)
+        fin
+    fin
+
+    función gen_para32(s: nat16, tv: nat16, ref el_paso: N64)
+        variable r, tope: Lugar
+        variable baja, alta, tb, ta, pb, pa: arreglo [TXT] de byte
+        variable cc: byte
+        variable ch: N64
+        variable s2, l_cuerpo, l_seguir, l_fin, l_no: nat16
+        variable sube: bool
+        s2 := nc(s)
+        lugar_de(na(s), falso, r)
+        texto_lugar(r, baja)
+        r.off := r.off + 2
+        texto_lugar(r, alta)
+        cc := CC_B
+        si tk(tv) = TK_ENT32 entonces cc := CC_L fin
+        gen_asig(na(s), nb(s))
+        si const(na(s2), ch) entonces
+            rango(ch, tv, nlin(na(s2)), ncol(na(s2)))
+            mitades(ch, tb, ta)
+        sino
+            tope.base := B_BP
+            tope.sim := 0
+            tope.off := 0 - ent32(nt(s2))
+            tb[0] := '['
+            texto_lugar(tope, dirección(tb[1]))
+            concatenar(tb, "]")
+            tope.off := tope.off + 2
+            ta[0] := '['
+            texto_lugar(tope, dirección(ta[1]))
+            concatenar(ta, "]")
+            gen_expr32(na(s2))
+            em3("mov ", tb, ", ax")
+            em3("mov ", ta, ", dx")
+        fin
+        sube := no n_negativo(el_paso)
+        l_cuerpo := nueva()
+        l_seguir := nueva()
+        l_fin := nueva()
+        para32_pasado(sube, baja, alta, tb, ta)
+        salto_cc(cc, l_fin)
+        et(l_cuerpo)
+        mete_bucle(l_seguir, l_fin, s)
+        gen_bloque(nc(s2), falso)
+        n_bucles := n_bucles - 1
+        et(l_seguir)
+        si n_abs(el_paso) = 1 entonces
+            l_no := nueva()
+            em3("mov ax, [", baja, "]")
+            em2("cmp ax, ", tb)
+            salto_cc(CC_NE, l_no)
+            em3("mov ax, [", alta, "]")
+            em2("cmp ax, ", ta)
+            salto_cc(CC_E, l_fin)
+            et(l_no)
+            si sube entonces
+                em3("add word [", baja, "], 1")
+                em3("adc word [", alta, "], 0")
+            sino
+                em3("sub word [", baja, "], 1")
+                em3("sbb word [", alta, "], 0")
+            fin
+            jmp(l_cuerpo)
+        sino
+            n_nat(ch, n_abs(el_paso))
+            mitades(ch, pb, pa)
+            si sube entonces
+                em4("add word [", baja, "], ", pb)
+                em4("adc word [", alta, "], ", pa)
+            sino
+                em4("sub word [", baja, "], ", pb)
+                em4("sbb word [", alta, "], ", pa)
+            fin
+            si tk(tv) = TK_ENT32 entonces salto_cc(CC_O, l_fin) sino salto_cc(CC_C, l_fin) fin
+            para32_pasado(sube, baja, alta, tb, ta)
+            salto_no(cc, l_cuerpo)
+        fin
+        et(l_fin)
+    fin
+
+    ; la comparación de la variable del «para» con su final
+    función para_compara(hay_ch: bool, tt: puntero a byte, lug: puntero a byte, ch: nat32, reg: puntero a byte, tope: puntero a byte)
+        si hay_ch entonces
+            ini()
+            l("cmp ")
+            l(tt)
+            l(" [")
+            l(lug)
+            l("], ")
+            l_nat(ch)
+            cruda()
+        sino
+            em5("mov ", reg, ", [", tope, "]")
+            em4("cmp [", lug, "], ", reg)
+        fin
+    fin
+
+    función gen_para(s: nat16)
+        variable tv, s2, l_cuerpo, l_seguir, l_fin: nat16
+        variable lug, tope: arreglo [TXT] de byte
+        variable el_paso, ch, abs_: N64
+        variable hay_ch, signo, sube: bool
+        variable tt, reg: puntero a byte
+        variable pasado: byte
+        variable r: Lugar
+        variable chv: nat32
+        s2 := nc(s)
+        tv := tipo_de(na(s))
+        si no es_num(tv) o no lugar_fijo(na(s), lug) entonces
+            m("la variable del «para» es una variable numérica sencilla")
+            falla(nlin(na(s)), ncol(na(s)))
+        fin
+        número(na(s2), "el final del «para»", 0)
+        n_nat(el_paso, 1)
+        si nb(s2) <> 0 entonces
+            si no const(nb(s2), el_paso) o no es_lit(tipo_de(nb(s2))) entonces
+                m("el «paso» es un número constante")
+                falla(nlin(nb(s2)), ncol(nb(s2)))
+            fin
+            si n_cero(el_paso) entonces
+                m("el «paso» no puede ser 0")
+                falla(nlin(nb(s2)), ncol(nb(s2)))
+            fin
+            n_nat(abs_, n_abs(el_paso))
+            rango(abs_, tv, nlin(nb(s2)), ncol(nb(s2)))
+        fin
+        si es32(tv) entonces
+            gen_para32(s, tv, el_paso)
+            devolver
+        fin
+        tt := tam_txt(tv)
+        signo := tk(tv) = TK_ENT16
+        gen_asig(na(s), nb(s))
+        hay_ch := const(na(s2), ch)
+        chv := 0
+        reg := "ax"
+        si hay_ch entonces
+            rango(ch, tv, nlin(na(s2)), ncol(na(s2)))
+            si ttam(tv) = 1 entonces chv := ch.bajo yb 0xFF sino chv := ch.bajo yb 0xFFFF fin
+        sino
+            r.base := B_BP
+            r.sim := 0
+            r.off := 0 - ent32(nt(s2))
+            texto_lugar(r, tope)
+            gen_expr(na(s2))
+            em3("mov [", tope, "], ax")
+            si ttam(tv) = 1 entonces reg := "al" fin
+        fin
+        l_cuerpo := nueva()
+        l_seguir := nueva()
+        l_fin := nueva()
+        sube := no n_negativo(el_paso)
+        si sube entonces
+            pasado := CC_A
+            si signo entonces pasado := CC_G fin
+        sino
+            pasado := CC_B
+            si signo entonces pasado := CC_L fin
+        fin
+        para_compara(hay_ch, tt, lug, chv, reg, tope)
+        salto_cc(pasado, l_fin)
+        et(l_cuerpo)
+        mete_bucle(l_seguir, l_fin, s)
+        gen_bloque(nc(s2), falso)
+        n_bucles := n_bucles - 1
+        et(l_seguir)
+        si n_abs(el_paso) = 1 entonces
+            ; se acaba al llegar justo al final: así no se desborda nunca
+            para_compara(hay_ch, tt, lug, chv, reg, tope)
+            salto_cc(CC_E, l_fin)
+            si sube entonces em5("inc ", tt, " [", lug, "]") sino em5("dec ", tt, " [", lug, "]") fin
+            jmp(l_cuerpo)
+        sino
+            ini()
+            si sube entonces l("add ") sino l("sub ") fin
+            l(tt)
+            l(" [")
+            l(lug)
+            l("], ")
+            l_nat(n_abs(el_paso))
+            cruda()
+            ; si al dar el paso se sale del tipo, se acabó
+            si signo entonces salto_cc(CC_O, l_fin) sino salto_cc(CC_C, l_fin) fin
+            para_compara(hay_ch, tt, lug, chv, reg, tope)
+            salto_no(pasado, l_cuerpo)
+        fin
+        et(l_fin)
+    fin
+
+    función gen_según(s: nat16, ultimo: bool)
+        variable t, l_fin, l_c, l_no, c, v, n_vistos, i: nat16
+        variable signo: bool
+        variable va, vb: N64
+        variable hay_a, hay_b: bool
+        variable x, y_: ent32
+        t := valor_tipo(na(s))
+        si no es_num(t) entonces
+            m("«según» elige por un número, no por un ")
+            m_tipo(t)
+            falla(nlin(na(s)), ncol(na(s)))
+        fin
+        si es32(t) entonces
+            m("«según» elige por un número de 16 bits: convierta antes con nat16(...)")
+            falla(nlin(na(s)), ncol(na(s)))
+        fin
+        signo := tk(t) = TK_ENT16
+        gen_expr(na(s))
+        l_fin := nueva()
+        n_vistos := 0
+        c := nb(s)
+        mientras c <> 0 hacer
+            l_c := nueva()
+            pon_t(c, l_c)
+            v := na(c)
+            mientras v <> 0 hacer
+                hay_a := const(na(v), va)
+                si nb(v) = 0 entonces
+                    hay_b := hay_a
+                    n_copia(vb, va)
+                sino
+                    hay_b := const(nb(v), vb)
+                fin
+                si no hay_a o no hay_b entonces
+                    m("los valores de un «caso» son constantes")
+                    si no hay_a entonces falla(nlin(na(v)), ncol(na(v))) fin
+                    falla(nlin(nb(v)), ncol(nb(v)))
+                fin
+                si no (n_cabe16(va) y n_cabe16(vb)) entonces
+                    m("el valor de un «caso» cabe en 16 bits")
+                    falla(nlin(na(v)), ncol(na(v)))
+                fin
+                si n_compara(vb, va) < 0 entonces
+                    m("el intervalo del «caso» va de menor a mayor")
+                    falla(nlin(na(v)), ncol(na(v)))
+                fin
+                x := ent32(va.bajo)
+                y_ := ent32(vb.bajo)
+                i := 0
+                mientras i < n_vistos hacer
+                    si x <= caso_hasta[i] y caso_desde[i] <= y_ entonces
+                        m("ese valor ya está en otro «caso»")
+                        falla(nlin(na(v)), ncol(na(v)))
+                    fin
+                    i := i + 1
+                fin
+                si n_vistos >= MAX_CASOS entonces
+                    m("demasiados valores en un «según»")
+                    falla(nlin(na(v)), ncol(na(v)))
+                fin
+                caso_desde[n_vistos] := x
+                caso_hasta[n_vistos] := y_
+                n_vistos := n_vistos + 1
+                si n_igual(va, vb) entonces
+                    em_n("cmp ax, ", va.bajo yb 0xFFFF, "")
+                    salto_cc(CC_E, l_c)
+                sino
+                    l_no := nueva()
+                    em_n("cmp ax, ", va.bajo yb 0xFFFF, "")
+                    si signo entonces salto_cc(CC_L, l_no) sino salto_cc(CC_B, l_no) fin
+                    em_n("cmp ax, ", vb.bajo yb 0xFFFF, "")
+                    si signo entonces salto_cc(CC_LE, l_c) sino salto_cc(CC_BE, l_c) fin
+                    et(l_no)
+                fin
+                v := nsig(v)
+            fin
+            c := nsig(c)
+        fin
+        si nc(s) <> 0 entonces gen_bloque(nc(s), falso) fin
+        jmp(l_fin)
+        c := nb(s)
+        mientras c <> 0 hacer
+            et(nt(c))
+            gen_bloque(nb(c), falso)
+            si no acaba(nb(c)) entonces jmp(l_fin) fin
+            c := nsig(c)
+        fin
+        et(l_fin)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  ensamblador ... fin: las líneas tal cual, con los {nombres} de Castel
+    ;  cambiados por lo que son
+    ; -------------------------------------------------------------------------
+    función de_nombre(c: byte): bool
+        si c >= 128 o c = '_' o c = '.' entonces devolver cierto fin
+        si c >= '0' y c <= '9' entonces devolver cierto fin
+        si c >= 'A' y c <= 'Z' entonces devolver cierto fin
+        devolver c >= 'a' y c <= 'z'
+    fin
+
+    ; lo que vale {nombre+más} en el ensamblador: lo añade a la línea
+    función cambia(nm: puntero a byte, n: nat16, más: nat32, s: nat16, lin: nat16, col: nat16)
+        variable a, r: nat16
+        variable v: Var
+        variable t: arreglo [TXT] de byte
+        variable c: N64
+        variable q: Lugar
+        a := átomo(nm, n)
+        si es_var(a) entonces
+            var(a, nlin(s), ncol(s), v)
+            si v.por_ref entonces
+                l("[bp+")
+                l_nat(v.off)
+                l("]")
+                devolver
+            fin
+            q.base := v.lugar.base
+            q.sim := v.lugar.sim
+            q.off := v.lugar.off + ent32(más)
+            texto_lugar(q, t)
+            l("[")
+            l(t)
+            l("]")
+            devolver
+        fin
+        r := busca(a)
+        si r <> 0 y s_clase(r) = S_CAD entonces
+            l("T_")
+            l_nat(etiqueta_cadena(s_a(r)))
+            devolver
+        fin
+        si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL) entonces
+            s_valor(r, c)
+            si n_cabe16(c) entonces l_nat((c.bajo + más) yb 0xFFFF) sino l_nat(c.bajo + más) fin
+            devolver
+        fin
+        si r <> 0 y s_clase(r) = S_FUNC entonces
+            f_etq('F', s_a(r), t)
+            l(t)
+            devolver
+        fin
+        m("en el ensamblador, «{")
+        m_at(a)
+        m("}» no es nada declarado en Castel")
+        falla(lin, col)
+    fin
+
+    público función gen_asm(s: nat16)
+        variable tx, largo_, i, j, k, lin, col, ini_linea, n: nat16
+        variable c: byte
+        variable nm: arreglo [200] de byte
+        variable más: nat32
+        variable comentario, hecho: bool
+        tx := na(s)
+        largo_ := tx_largo(tx)
+        lin := nb(s)
+        i := 0
+        mientras i < largo_ hacer
+            ; una línea: de i hasta su \n (todas acaban en uno)
+            ini_linea := i
+            comentario := falso
+            mientras i < largo_ hacer
+                c := tx_byte(tx, i)
+                si c = '\n' entonces romper fin
+                si c = ';' entonces comentario := cierto fin
+                hecho := falso
+                si c = '{' y no comentario entonces
+                    ; ¿{nombre} o {nombre+número}?
+                    j := i + 1
+                    n := 0
+                    mientras j < largo_ y n < 199 y de_nombre(tx_byte(tx, j)) hacer
+                        nm[n] := tx_byte(tx, j)
+                        n := n + 1
+                        j := j + 1
+                    fin
+                    más := 0
+                    k := j
+                    si n > 0 y j < largo_ y tx_byte(tx, j) = '+' entonces
+                        k := j + 1
+                        mientras k < largo_ y tx_byte(tx, k) >= '0' y tx_byte(tx, k) <= '9' hacer
+                            más := más * 10 + (tx_byte(tx, k) - '0')
+                            k := k + 1
+                        fin
+                        si k = j + 1 entonces k := largo_ fin   ; (un «+» sin número: no es de los nuestros)
+                    fin
+                    si n > 0 y k < largo_ y tx_byte(tx, k) = '}' entonces
+                        ; la columna: las letras que hay antes, más una
+                        col := 1
+                        j := ini_linea
+                        mientras j < i hacer
+                            si tx_byte(tx, j) < 0x80 o tx_byte(tx, j) >= 0xC0 entonces col := col + 1 fin
+                            j := j + 1
+                        fin
+                        cambia(nm, n, más, s, lin, col)
+                        i := k + 1
+                        hecho := cierto
+                    fin
+                fin
+                si no hecho entonces
+                    l_car(c)
+                    i := i + 1
+                fin
+            fin
+            cruda()
+            lin := lin + 1
+            i := i + 1
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Sentencias
+    ; -------------------------------------------------------------------------
+    función hace_algo(i: byte): bool
+        devolver i = I_ESCRIBIR o i = I_ESCRIBIR_CAR o i = I_SALIR o i = I_SACAR_PUERTO o i = I_PONER_BYTE o i = I_PONER_PALABRA o i = I_INTERRUPCION
+    fin
+
+    función m_función()
+        m_at(f_nombre(func_actual))
+        m("() ")
+    fin
+
+    función gen_sent(s: nat16, ultimo: bool)
+        variable k: byte
+        variable e, r, tret: nat16
+        k := nk(s)
+        según k
+            caso K_VAR:
+                si nc(s) <> 0 entonces
+                    si nsig(na(s)) <> 0 o tk(nt(s)) = TK_ARR o tk(nt(s)) = TK_EST entonces
+                        m("dentro de una función, el valor inicial es para una sola variable sencilla")
+                        falla(nlin(nc(s)), ncol(nc(s)))
+                    fin
+                    r := nudo(K_REF, nlin(s), ncol(s))
+                    pon_a(r, na(na(s)))
+                    gen_asig(r, nc(s))
+                fin
+            caso K_CONST: decl_const(s)
+            caso K_ASIG: gen_asig(na(s), nb(s))
+            caso K_LLAMADA_SENT:
+                e := na(s)
+                tipo_de(e)
+                r := busca(na(e))
+                si no (r <> 0 y s_clase(r) = S_FUNC) y no hace_algo(at_interna(na(e))) entonces
+                    m_at(na(e))
+                    m("() da un valor, y aquí se pierde: falta guardarlo o usarlo")
+                    falla(nlin(e), ncol(e))
+                fin
+                gen_llamada(e, falso)
+            caso K_DEVOLVER:
+                tret := f_tret(func_actual)
+                e := na(s)
+                si e = 0 entonces
+                    si tret <> T_NADA entonces
+                        m_función()
+                        m("devuelve un ")
+                        m_tipo(tret)
+                        m(": falta el valor")
+                        falla(nlin(s), ncol(s))
+                    fin
+                sino
+                    si tret = T_NADA entonces
+                        m_función()
+                        m("no devuelve nada (no lleva tipo)")
+                        falla(nlin(e), ncol(e))
+                    fin
+                    compatible(tret, e, "lo que se devuelve", 0)
+                    si es32(tret) entonces
+                        gen_expr32(e)
+                    sino
+                        gen_expr(e)
+                        si ttam(tret) = 1 y ttam(tipo_de(e)) <> 1 entonces
+                            si no es_const(e) entonces em("xor ah, ah") fin
+                        fin
+                    fin
+                fin
+                si no ultimo entonces
+                    fin_usado := cierto
+                    jmp(0)
+                fin
+            caso K_SI: gen_si(s, ultimo)
+            caso K_MIENTRAS: gen_mientras(s)
+            caso K_PARA: gen_para(s)
+            caso K_SEGUN: gen_según(s, ultimo)
+            caso K_ROMPER:
+                si n_bucles = 0 entonces
+                    m("«romper» fuera de un bucle")
+                    falla(nlin(s), ncol(s))
+                fin
+                jmp(bucle_romper[n_bucles - 1])
+            caso K_SEGUIR:
+                si n_bucles = 0 entonces
+                    m("«seguir» fuera de un bucle")
+                    falla(nlin(s), ncol(s))
+                fin
+                jmp(bucle_seguir[n_bucles - 1])
+            caso K_ASM: gen_asm(s)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Una función entera
+    ; -------------------------------------------------------------------------
+    ; mira lo que hay en el cuerpo: qué pregunta de interrupción, si hay
+    ; algún «devolver» y algún «ensamblador»
+    función mira(n: nat16)
+        variable k: byte
+        variable x: nat16
+        mientras n <> 0 hacer
+            k := nk(n)
+            según k
+                caso K_UN, K_CAMPO, K_LLAMADA_SENT: mira_uno(na(n))
+                caso K_BIN, K_INDICE, K_ASIG:
+                    mira_uno(na(n))
+                    mira_uno(nb(n))
+                caso K_LLAMADA:
+                    visto_int := visto_int ob bit_de_int(at_interna(na(n)))
+                    x := nb(n)
+                    mientras x <> 0 hacer
+                        mira_uno(nb(x))
+                        x := nsig(x)
+                    fin
+                caso K_LISTA: mira(na(n))
+                caso K_VAR: mira_uno(nc(n))
+                caso K_CONST: mira_uno(nb(n))
+                caso K_DEVOLVER:
+                    visto_devolver := cierto
+                    mira_uno(na(n))
+                caso K_SI:
+                    mira_uno(na(n))
+                    mira(nb(n))
+                    mira(nc(n))
+                caso K_MIENTRAS:
+                    mira_uno(na(n))
+                    mira(nb(n))
+                caso K_PARA:
+                    mira_uno(nb(n))
+                    x := nc(n)
+                    mira_uno(na(x))
+                    mira_uno(nb(x))
+                    mira(nc(x))
+                caso K_SEGUN:
+                    mira_uno(na(n))
+                    x := nb(n)
+                    mientras x <> 0 hacer
+                        mira(na(x))
+                        mira(nb(x))
+                        x := nsig(x)
+                    fin
+                    mira(nc(n))
+                caso K_VAL:
+                    mira_uno(na(n))
+                    mira_uno(nb(n))
+                caso K_ASM: visto_asm := cierto
+            fin
+            n := nsig(n)
+        fin
+    fin
+
+    ; lo mismo, de un solo nudo (sin seguir por su «sig»)
+    función mira_uno(n: nat16)
+        variable sig: nat16
+        si n = 0 entonces devolver fin
+        sig := nsig(n)
+        pon_sig(n, 0)
+        mira(n)
+        pon_sig(n, sig)
+    fin
+
+    ; las variables del cuerpo. Fase 1: el tipo de cada una; fase 2: su sitio
+    ; en el marco (y el del tope de cada «para»)
+    función locales(s: nat16, fase: byte)
+        variable k: byte
+        variable nm, t, i, x, tv, r: nat16
+        variable j: ent16
+        mientras s <> 0 hacer
+            k := nk(s)
+            si k = K_VAR entonces
+                si fase = 1 entonces
+                    t := resuelve(nb(s))
+                    pon_t(s, t)
+                    nm := na(s)
+                    mientras nm <> 0 hacer
+                        i := 0
+                        mientras i < n_td y td_nombre[i] <> na(nm) hacer
+                            i := i + 1
+                        fin
+                        si i = n_td y n_td < MAX_LOCALES entonces
+                            td_nombre[n_td] := na(nm)
+                            td_tipo[n_td] := t
+                            n_td := n_td + 1
+                        fin
+                        nm := nsig(nm)
+                    fin
+                sino
+                    t := nt(s)
+                    nm := na(s)
+                    mientras nm <> 0 hacer
+                        declarado(na(nm), nlin(s), ncol(s), cierto)
+                        marco := marco + ((ttam(t) + 1) yb 0xFFFE)
+                        loc_alta(na(nm), t, falso, 0 - ent16(marco))
+                        nm := nsig(nm)
+                    fin
+                fin
+            sino si k = K_PARA entonces
+                si fase = 2 entonces
+                    ; sitio para el tope, si no es constante (dos palabras si la variable es de 32 bits)
+                    nm := na(na(s))
+                    tv := 0
+                    i := 0
+                    mientras i < n_td y td_nombre[i] <> nm hacer
+                        i := i + 1
+                    fin
+                    si i < n_td entonces
+                        tv := td_tipo[i]
+                    sino
+                        j := loc_busca(nm)
+                        si j >= 0 entonces
+                            tv := loc_tipo_de(j)
+                        sino
+                            r := busca(nm)
+                            si r <> 0 y s_clase(r) = S_GLOBAL entonces tv := s_a(r) fin
+                        fin
+                    fin
+                    si tv <> 0 y es32(tv) entonces marco := marco + 4 sino marco := marco + 2 fin
+                    pon_t(nc(s), marco)
+                fin
+                locales(nc(nc(s)), fase)
+            sino si k = K_SI entonces
+                locales(nb(s), fase)
+                locales(nc(s), fase)
+            sino si k = K_MIENTRAS entonces
+                locales(nb(s), fase)
+            sino si k = K_SEGUN entonces
+                x := nb(s)
+                mientras x <> 0 hacer
+                    locales(nb(x), fase)
+                    x := nsig(x)
+                fin
+                locales(nc(s), fase)
+            fin
+            s := nsig(s)
+        fin
+    fin
+
+    ; genera la función de esa ficha, con ese cuerpo (su primera sentencia)
+    público función gen_función(f: nat16, cuerpo: nat16)
+        variable d, p, nparams: nat16
+        variable con_marco: bool
+        variable t: arreglo [TXT] de byte
+        d := f_nudo(f)
+        func_actual := f
+        loc_vacía()
+        fin_usado := falso
+        n_bucles := 0
+        nparams := f_nparams(f)
+        p := nb(d)
+        mientras p <> 0 hacer
+            declarado(na(p), nlin(p), ncol(p), cierto)
+            loc_alta(na(p), nt(p), nmarcas(p) yb M_REF <> 0, nc(p))
+            p := nsig(p)
+        fin
+        marco := 0
+        n_td := 0
+        locales(cuerpo, 1)
+        locales(cuerpo, 2)
+        visto_int := 0
+        visto_devolver := falso
+        visto_asm := falso
+        mira(cuerpo)
+        f_pon_usa_int(f, visto_int)
+        si f_tret(f) <> T_NADA y no visto_devolver y no visto_asm entonces
+            m_función()
+            m("devuelve un ")
+            m_tipo(f_tret(f))
+            m(", pero no tiene ningún «devolver»")
+            falla(nlin(d), ncol(d))
+        fin
+        con_marco := marco <> 0 o nparams <> 0 o visto_asm
+        f_etq('X', f, fin_func)
+        blanca()
+        f_etq('F', f, t)
+        et_nombre(t)
+        si con_marco entonces
+            em("push bp")
+            em("mov bp, sp")
+            si marco <> 0 entonces em_n("sub sp, ", marco, "") fin
+        fin
+        gen_bloque(cuerpo, cierto)
+        si fin_usado entonces et(0) fin
+        si con_marco entonces
+            si marco <> 0 entonces em("mov sp, bp") fin
+            em("pop bp")
+        fin
+        ini()
+        si f_lejos(f) entonces l("retf") sino l("ret") fin
+        si nparams <> 0 entonces
+            l(" ")
+            l_nat(f_nbytes(f))
+        fin
+        cruda()
+        func_actual := 0
+    fin
+
+fin Sent.

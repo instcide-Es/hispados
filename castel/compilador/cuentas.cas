@@ -1,0 +1,195 @@
+; =============================================================================
+;  cuentas.cas - números de 64 bits con signo, para las cuentas que el
+;  compilador hace con constantes. Una constante de Castel va de -2147483648
+;  a 4294967295 (33 bits con signo) y por el camino puede salirse (sumar,
+;  multiplicar, desplazar) antes de recortarla o de decir que no cabe: en
+;  ccastel.py son los enteros sin límite de Python; aquí, 64 bits en
+;  complemento a dos (dos palabras de 32), que dan lo mismo en todo lo que se
+;  comprueba.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cuentas
+
+    importar Textos
+
+    público tipo N64 = estructura
+        bajo: nat32
+        alto: nat32
+    fin
+
+    público función n_nat(ref n: N64, v: nat32)
+        n.bajo := v
+        n.alto := 0
+    fin
+
+    público función n_ent(ref n: N64, v: ent32)
+        n.bajo := nat32(v)
+        n.alto := 0
+        si v < 0 entonces n.alto := 0xFFFFFFFF fin
+    fin
+
+    público función n_copia(ref d: N64, ref de_: N64)
+        d.bajo := de_.bajo
+        d.alto := de_.alto
+    fin
+
+    público función n_negativo(ref n: N64): bool
+        devolver n.alto >= 0x80000000
+    fin
+
+    público función n_cero(ref n: N64): bool
+        devolver n.bajo = 0 y n.alto = 0
+    fin
+
+    ; a := a + b
+    público función n_suma(ref a: N64, ref b: N64)
+        variable antes: nat32
+        antes := a.bajo
+        a.bajo := a.bajo + b.bajo
+        a.alto := a.alto + b.alto
+        si a.bajo < antes entonces a.alto := a.alto + 1 fin
+    fin
+
+    público función n_niega(ref a: N64)
+        a.bajo := nob a.bajo
+        a.alto := nob a.alto
+        a.bajo := a.bajo + 1
+        si a.bajo = 0 entonces a.alto := a.alto + 1 fin
+    fin
+
+    ; a := a - b
+    público función n_resta(ref a: N64, ref b: N64)
+        variable c: N64
+        n_copia(c, b)
+        n_niega(c)
+        n_suma(a, c)
+    fin
+
+    ; el producto entero (64 bits) de dos números de 32 sin signo
+    función por32(p: nat32, q: nat32, ref r: N64)
+        variable x0, x1, y0, y1, medio, antes: nat32
+        x0 := p yb 0xFFFF
+        x1 := p >> 16
+        y0 := q yb 0xFFFF
+        y1 := q >> 16
+        r.bajo := x0 * y0
+        r.alto := x1 * y1
+        medio := x0 * y1
+        antes := r.bajo
+        r.bajo := r.bajo + (medio << 16)
+        si r.bajo < antes entonces r.alto := r.alto + 1 fin
+        r.alto := r.alto + (medio >> 16)
+        medio := x1 * y0
+        antes := r.bajo
+        r.bajo := r.bajo + (medio << 16)
+        si r.bajo < antes entonces r.alto := r.alto + 1 fin
+        r.alto := r.alto + (medio >> 16)
+    fin
+
+    ; a := a * b (los 64 bits bajos)
+    público función n_por(ref a: N64, ref b: N64)
+        variable r: N64
+        por32(a.bajo, b.bajo, r)
+        r.alto := r.alto + a.bajo * b.alto + a.alto * b.bajo
+        n_copia(a, r)
+    fin
+
+    público función n_y(ref a: N64, ref b: N64)
+        a.bajo := a.bajo yb b.bajo
+        a.alto := a.alto yb b.alto
+    fin
+
+    público función n_o(ref a: N64, ref b: N64)
+        a.bajo := a.bajo ob b.bajo
+        a.alto := a.alto ob b.alto
+    fin
+
+    público función n_xo(ref a: N64, ref b: N64)
+        a.bajo := a.bajo xob b.bajo
+        a.alto := a.alto xob b.alto
+    fin
+
+    público función n_nob(ref a: N64)
+        a.bajo := nob a.bajo
+        a.alto := nob a.alto
+    fin
+
+    ; a := a << bits (de 0 a 63)
+    público función n_izq(ref a: N64, bits: nat16)
+        mientras bits > 0 hacer
+            a.alto := a.alto << 1
+            si a.bajo >= 0x80000000 entonces a.alto := a.alto ob 1 fin
+            a.bajo := a.bajo << 1
+            bits := bits - 1
+        fin
+    fin
+
+    ; a := a >> bits, conservando el signo
+    público función n_der(ref a: N64, bits: nat16)
+        variable signo: nat32
+        signo := a.alto yb 0x80000000
+        mientras bits > 0 hacer
+            a.bajo := a.bajo >> 1
+            si a.alto yb 1 <> 0 entonces a.bajo := a.bajo ob 0x80000000 fin
+            a.alto := a.alto >> 1 ob signo
+            bits := bits - 1
+        fin
+    fin
+
+    ; -1, 0 o 1 según a sea menor, igual o mayor que b
+    público función n_compara(ref a: N64, ref b: N64): ent16
+        variable na, nb_: bool
+        na := n_negativo(a)
+        nb_ := n_negativo(b)
+        si na y no nb_ entonces devolver -1 fin
+        si nb_ y no na entonces devolver 1 fin
+        si a.alto < b.alto entonces devolver -1 fin
+        si a.alto > b.alto entonces devolver 1 fin
+        si a.bajo < b.bajo entonces devolver -1 fin
+        si a.bajo > b.bajo entonces devolver 1 fin
+        devolver 0
+    fin
+
+    público función n_igual(ref a: N64, ref b: N64): bool
+        devolver a.bajo = b.bajo y a.alto = b.alto
+    fin
+
+    ; ¿está entre mín (negativo o cero) y máx (positivo o cero), los dos incluidos?
+    público función n_entre(ref a: N64, mín: ent32, máx: nat32): bool
+        si n_negativo(a) entonces
+            devolver a.alto = 0xFFFFFFFF y a.bajo >= 0x80000000 y ent32(a.bajo) >= mín
+        fin
+        devolver a.alto = 0 y a.bajo <= máx
+    fin
+
+    ; ¿cabe en 32 bits (de -2147483648 a 4294967295)?
+    público función n_cabe32(ref a: N64): bool
+        devolver n_entre(a, -2147483647 - 1, 0xFFFFFFFF)
+    fin
+
+    ; ¿cabe en 16 bits (de -32768 a 65535)?
+    público función n_cabe16(ref a: N64): bool
+        devolver n_entre(a, -32768, 0xFFFF)
+    fin
+
+    ; ¿es igual a ese número pequeño (positivo)?
+    público función n_es(ref a: N64, v: nat32): bool
+        devolver a.alto = 0 y a.bajo = v
+    fin
+
+    ; el valor absoluto (de uno que cabe en 32 bits)
+    público función n_abs(ref a: N64): nat32
+        si n_negativo(a) entonces devolver 0 - a.bajo fin
+        devolver a.bajo
+    fin
+
+    ; lo escribe en decimal en destino (de uno que cabe en 32 bits)
+    público función n_texto(ref a: N64, destino: puntero a byte)
+        si n_negativo(a) entonces
+            valor(destino) := '-'
+            destino := destino + 1
+        fin
+        Textos.natural_a_texto(n_abs(a), destino)
+    fin
+
+fin Cuentas.

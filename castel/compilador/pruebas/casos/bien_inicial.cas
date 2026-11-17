@@ -1,0 +1,14 @@
+; caso de prueba del frente del compilador (compilador/pruebas/prueba_frente.sh)
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Caso
+    variable a: nat16 = (1 + 2) * 3
+    variable b: arreglo [4] de nat16 = (1, 2,
+        3,
+        4)
+    variable c: nat16 = (5)
+    variable d: arreglo [3] de byte = "ab"
+    variable e: puntero a byte = "texto"
+    función principal()
+        a := (a)
+    fin
+fin Caso.

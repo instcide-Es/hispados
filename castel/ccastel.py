@@ -1290,8 +1290,8 @@ class Generador:
                     '    dw (C_fin-C_cab+D_fin-D_ini+511) / 512',
                     f'    dw {len(vivos_p)}',
                     '    dw (C_1-C_cab)>>4',
-                    '    dw 0x1000',
-                    '    dw 0x1000',
+                    '    dw 0x1000-((D_fin-D_ini)>>4)',
+                    '    dw 0x1000-((D_fin-D_ini)>>4)',
                     '    dw (C_fin-C_1)>>4',
                     '    dw 0xFFFE',
                     '    dw 0, 0, 0, 28, 0']

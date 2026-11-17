@@ -1,0 +1,837 @@
+; =============================================================================
+;  tablas.cas - las tablas del compilador de Castel: los tipos, los nombres
+;  declarados (constantes, tipos, variables globales y funciones de cada
+;  módulo), las variables locales de la función que se genera, los textos
+;  con etiqueta y los puentes del modelo grande. Es lo que en ccastel.py son
+;  las clases Tipo, Modulo y Var y los diccionarios del Generador, puesto en
+;  memoria lejana.
+;
+;  LOS TIPOS. Cada tipo, un párrafo de seg_tip:
+;      0 k (TK_...)   1 estado de la base (0: no tiene; 1: sin mirar; 2: ya)
+;      2 tamaño       4 base (un tipo, o el nudo del tipo escrito si aún no
+;      se ha mirado)  6 n (elementos de un arreglo)   8 el primer campo
+;      10 nombre (átomo, de una estructura)   12 módulo donde se escribió
+;  y cada campo de una estructura, otro: 0 siguiente, 2 átomo, 4 dónde, 6 tipo.
+;  Los tipos que nacen mientras se genera una función (los de sus locales)
+;  se sueltan al acabarla: van por arriba del bloque; los demás, por abajo.
+;
+;  LOS NOMBRES DECLARADOS. Uno por (módulo, nombre), en un párrafo de seg_sim:
+;      0 enlace   2 átomo   4 módulo   5 clase (S_...)   6 marcas (SM_...)
+;      8 a   10 b   12 c   14 d
+;  S_PROPIO: el módulo lo declara, pero aún no se ha llegado a él (así lo de
+;  otro módulo que se llame igual no se ve: lo propio manda). S_NUM y S_BOOL:
+;  a, b el valor (y SM_NEG si es negativo). S_CAD: a el texto. S_TIPO: a el
+;  tipo. S_GLOBAL: a el tipo; b el nudo K_VAR. S_FUNC: a su ficha.
+;  La ficha de una función, dos párrafos de seg_sim:
+;      0 nudo K_FUNC   2 átomo   4 módulo   5 marcas (FM_...)   6 tipo que
+;      devuelve   8 octetos de parámetros   10 parámetros   11 lo que usa de
+;      interrupción   12 dónde está su código en el archivo temporal (4)
+;      16 cuánto ocupa (4)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tablas
+
+    importar Base, Textos, Lejos
+
+    ; ---- los tipos ----
+    público constante TK_NAT8 = 1
+    público constante TK_NAT16 = 2
+    público constante TK_ENT16 = 3
+    público constante TK_BOOL = 4
+    público constante TK_NAT32 = 5
+    público constante TK_ENT32 = 6
+    público constante TK_LIT = 7                ; un número escrito tal cual: vale para todos
+    público constante TK_LIT32 = 8              ; uno que no cabe en 16 bits
+    público constante TK_NADA = 9
+    público constante TK_PUNT = 10
+    público constante TK_ARR = 11
+    público constante TK_EST = 12
+    ; los tipos de siempre (con estos números: se dan de alta en este orden)
+    público constante T_NAT8 = 1
+    público constante T_NAT16 = 2
+    público constante T_ENT16 = 3
+    público constante T_BOOL = 4
+    público constante T_NAT32 = 5
+    público constante T_ENT32 = 6
+    público constante T_LIT = 7
+    público constante T_LIT32 = 8
+    público constante T_NADA = 9
+    público constante T_PUNT_U = 10             ; puntero «universal»: nulo y puntero(n)
+    público constante T_TEXTO = 11              ; puntero a byte: un texto escrito
+
+    constante PARRAFOS_TIP = 0x800              ; 32 K
+    público variable seg_tip: nat16
+    variable tip_abajo, tip_arriba: nat16
+    público variable tip_temporal: bool         ; los tipos nuevos, ¿son de la función en curso?
+
+    ; ---- los nombres declarados ----
+    público constante S_PROPIO = 0
+    público constante S_NUM = 1
+    público constante S_BOOL = 2
+    público constante S_CAD = 3
+    público constante S_TIPO = 4
+    público constante S_GLOBAL = 5
+    público constante S_FUNC = 6
+    público constante SM_PUBLICO = 1
+    público constante SM_VIVO = 2               ; va al programa
+    público constante SM_INICIAL = 4            ; variable global con valor inicial
+    público constante SM_NEG = 8                ; constante negativa
+    público constante SM_VISTO = 16             ; ya se ha mirado a quién nombra
+    público constante FM_LEJOS = 1
+    público constante FM_VIVO = 2
+    público constante FM_PUBLICO = 4
+    público constante FM_VISTO = 8
+
+    constante PARRAFOS_SIM = 0x1000             ; 64 K
+    constante CUBOS_SIM = 1024
+    público variable seg_sim: nat16
+    variable libre_sim: nat16
+    variable cubos_sim: arreglo [CUBOS_SIM] de nat16
+
+    ; ---- el módulo del que se habla (self.el_mod de ccastel.py) ----
+    público variable el_mod: nat16
+    público variable grande: bool               ; el programa es de «modelo grande»
+    ; de la última búsqueda: los módulos importados que traen ese nombre (si son dos o más)
+    público variable amb_n: nat16
+    público variable amb_mod: arreglo [MAX_MODULOS] de byte
+
+    ; ---- las variables de la función que se genera ----
+    público constante MAX_LOCALES = 160
+    variable loc_n: nat16
+    variable loc_nombre: arreglo [MAX_LOCALES] de nat16
+    variable loc_tipo: arreglo [MAX_LOCALES] de nat16
+    variable loc_off: arreglo [MAX_LOCALES] de ent16
+    variable loc_ref: arreglo [MAX_LOCALES] de bool
+
+    ; un lugar: dónde vive una variable, un elemento o un campo
+    público constante B_FIJA = 0                ; dirección fija (una global)
+    público constante B_BP = 1                  ; en el marco: [bp+n]
+    público constante B_BX = 2                  ; calculada: [bx+n]
+    público constante B_BPSI = 3                ; [bp+si+n]
+    público tipo Lugar = estructura
+        base: byte
+        sim: nat16                              ; la variable global (su nombre declarado), o 0
+        off: ent32
+    fin
+    público tipo Var = estructura
+        tipo_: nat16
+        por_ref: bool                           ; parámetro por referencia: en [bp+off] va la dirección
+        off: nat16
+        lugar: Lugar
+    fin
+
+    ; ---- los textos con etiqueta (T_n), en el orden en que la reciben, y las
+    ;      globales con valor inicial: los «datos» del programa, por orden ----
+    constante PARRAFOS_ORD = 0x800              ; 32 K: 8192 datos y 8192 etiquetas
+    constante MAX_DATOS = 8190
+    variable seg_ord: nat16
+    público variable n_datos: nat16
+    público variable n_cadenas: nat16
+    público constante DATO_GLOBAL = 0x8000      ; en la lista de datos: es una global (y no un texto)
+
+    ; ---- los puentes del modelo grande ----
+    público constante MAX_PUENTES = 700
+    público variable n_puentes: nat16
+    variable pu_seg: arreglo [MAX_PUENTES] de byte
+    variable pu_func: arreglo [MAX_PUENTES] de nat16
+    variable pu_vivo: arreglo [MAX_PUENTES] de bool
+
+    variable n_etq: nat16                       ; la última etiqueta L_n dada
+
+    ; -------------------------------------------------------------------------
+    ;  Tipos
+    ; -------------------------------------------------------------------------
+    público función tip_nuevo(k: byte, tam: nat16): nat16
+        variable r, s, i: nat16
+        si tip_arriba - tip_abajo < 2 entonces
+            m("no hay memoria: demasiados tipos")
+            falla_sin_más()
+        fin
+        si tip_temporal entonces
+            tip_arriba := tip_arriba - 1
+            r := tip_arriba
+        sino
+            r := tip_abajo
+            tip_abajo := tip_abajo + 1
+        fin
+        s := seg_tip + r
+        para i desde 0 hasta 14 paso 2 hacer
+            poner_palabra(s, i, 0)
+        fin
+        poner_byte(s, 0, k)
+        poner_palabra(s, 2, tam)
+        devolver r
+    fin
+
+    ; suelta los tipos de la función que se acaba de generar
+    público función tip_suelta()
+        tip_arriba := PARRAFOS_TIP
+    fin
+
+    ; ¿es de los que no se sueltan?
+    público función tip_fijo(t: nat16): bool
+        devolver t < tip_abajo
+    fin
+
+    público función tk(t: nat16): byte
+        devolver leer_byte(seg_tip + t, 0)
+    fin
+
+    público función ttam(t: nat16): nat16
+        devolver leer_palabra(seg_tip + t, 2)
+    fin
+
+    ; 0: no tiene base (puntero sin tipo); 1: escrita pero sin mirar; 2: mirada
+    público función t_estado(t: nat16): byte
+        devolver leer_byte(seg_tip + t, 1)
+    fin
+
+    público función t_base_cruda(t: nat16): nat16
+        devolver leer_palabra(seg_tip + t, 4)
+    fin
+
+    público función t_pon_base(t: nat16, estado: byte, base: nat16)
+        poner_byte(seg_tip + t, 1, estado)
+        poner_palabra(seg_tip + t, 4, base)
+    fin
+
+    público función tn(t: nat16): nat16
+        devolver leer_palabra(seg_tip + t, 6)
+    fin
+
+    público función t_pon_n(t: nat16, n: nat16)
+        poner_palabra(seg_tip + t, 6, n)
+    fin
+
+    público función t_nombre(t: nat16): nat16
+        devolver leer_palabra(seg_tip + t, 10)
+    fin
+
+    público función t_pon_nombre(t: nat16, a: nat16)
+        poner_palabra(seg_tip + t, 10, a)
+    fin
+
+    público función t_mod(t: nat16): nat16
+        devolver leer_byte(seg_tip + t, 12)
+    fin
+
+    público función t_pon_mod(t: nat16, m_: nat16)
+        poner_byte(seg_tip + t, 12, m_)
+    fin
+
+    ; añade un campo a una estructura (al final de los que tiene)
+    público función t_campo_nuevo(t: nat16, a: nat16, off: nat16, tipo_: nat16)
+        variable c, s, u: nat16
+        c := tip_nuevo(0, 0)
+        s := seg_tip + c
+        poner_palabra(s, 2, a)
+        poner_palabra(s, 4, off)
+        poner_palabra(s, 6, tipo_)
+        u := leer_palabra(seg_tip + t, 8)
+        si u = 0 entonces
+            poner_palabra(seg_tip + t, 8, c)
+            devolver
+        fin
+        mientras leer_palabra(seg_tip + u, 0) <> 0 hacer
+            u := leer_palabra(seg_tip + u, 0)
+        fin
+        poner_palabra(seg_tip + u, 0, c)
+    fin
+
+    ; el campo de ese nombre: falso si la estructura no lo tiene
+    público función t_campo(t: nat16, a: nat16, ref off: nat16, ref tipo_: nat16): bool
+        variable c: nat16
+        c := leer_palabra(seg_tip + t, 8)
+        mientras c <> 0 hacer
+            si leer_palabra(seg_tip + c, 2) = a entonces
+                off := leer_palabra(seg_tip + c, 4)
+                tipo_ := leer_palabra(seg_tip + c, 6)
+                devolver cierto
+            fin
+            c := leer_palabra(seg_tip + c, 0)
+        fin
+        devolver falso
+    fin
+
+    público función t_tiene_campos(t: nat16): bool
+        devolver leer_palabra(seg_tip + t, 8) <> 0
+    fin
+
+    público función es_num(t: nat16): bool
+        variable k: byte
+        k := tk(t)
+        devolver k = TK_NAT8 o k = TK_NAT16 o k = TK_ENT16 o k = TK_LIT o k = TK_NAT32 o k = TK_ENT32 o k = TK_LIT32
+    fin
+
+    ; ¿es un número de 32 bits (va en DX:AX)?
+    público función es32(t: nat16): bool
+        variable k: byte
+        k := tk(t)
+        devolver k = TK_NAT32 o k = TK_ENT32 o k = TK_LIT32
+    fin
+
+    público función es_lit(t: nat16): bool
+        devolver tk(t) = TK_LIT o tk(t) = TK_LIT32
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Módulos
+    ; -------------------------------------------------------------------------
+    ; desde ahora, los nombres son los del módulo m
+    público función usa(m_: nat16)
+        el_mod := m_
+        copiar(archivo_error, mod_ruta[m_])
+    fin
+
+    ; ¿es el programa (el archivo que se compila)?
+    público función es_programa(m_: nat16): bool
+        devolver m_ + 1 = n_modulos
+    fin
+
+    ; el segmento de código de un módulo en el modelo grande (1, el programa)
+    público función seg_de(m_: nat16): nat16
+        si es_programa(m_) entonces devolver 1 fin
+        devolver m_ + 2
+    fin
+
+    ; el nombre en NASM: F_nombre en el programa, F_Módulo__nombre en los demás.
+    ; Lo escribe en t (acabado en 0) y devuelve su largo
+    público función etq_nombre(letra: byte, m_: nat16, a: nat16, t: puntero a byte): nat16
+        variable n: nat16
+        t[0] := letra
+        t[1] := '_'
+        n := 2
+        si no es_programa(m_) entonces
+            n := n + at_texto(mod_nombre[m_], dirección(t[n]))
+            t[n] := '_'
+            t[n + 1] := '_'
+            n := n + 2
+        fin
+        n := n + at_texto(a, dirección(t[n]))
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Nombres declarados
+    ; -------------------------------------------------------------------------
+    función cubo_de(m_: nat16, a: nat16): nat16
+        devolver (a + m_ * 67) yb (CUBOS_SIM - 1)
+    fin
+
+    ; lo que el módulo m declara con ese nombre (aunque aún no se haya llegado a ello), o 0
+    público función sim_propio(m_: nat16, a: nat16): nat16
+        variable r, s: nat16
+        r := cubos_sim[cubo_de(m_, a)]
+        mientras r <> 0 hacer
+            s := seg_sim + r
+            si leer_palabra(s, 2) = a y leer_byte(s, 4) = m_ entonces devolver r fin
+            r := leer_palabra(s, 0)
+        fin
+        devolver 0
+    fin
+
+    función sim_párrafos(n: nat16): nat16
+        variable r, s, i: nat16
+        r := libre_sim
+        si PARRAFOS_SIM - libre_sim <= n entonces
+            m("no hay memoria: demasiados nombres declarados")
+            falla_sin_más()
+        fin
+        libre_sim := libre_sim + n
+        s := seg_sim + r
+        para i desde 0 hasta n * 16 - 2 paso 2 hacer
+            poner_palabra(s, i, 0)
+        fin
+        devolver r
+    fin
+
+    ; apunta que el módulo m declara ese nombre (si no estaba ya); devuelve su entrada
+    público función sim_alta(m_: nat16, a: nat16): nat16
+        variable r, s, h: nat16
+        r := sim_propio(m_, a)
+        si r <> 0 entonces devolver r fin
+        r := sim_párrafos(1)
+        s := seg_sim + r
+        h := cubo_de(m_, a)
+        poner_palabra(s, 0, cubos_sim[h])
+        cubos_sim[h] := r
+        poner_palabra(s, 2, a)
+        poner_byte(s, 4, m_)
+        devolver r
+    fin
+
+    público función s_nombre(r: nat16): nat16
+        devolver leer_palabra(seg_sim + r, 2)
+    fin
+
+    público función s_mod(r: nat16): nat16
+        devolver leer_byte(seg_sim + r, 4)
+    fin
+
+    público función s_clase(r: nat16): byte
+        devolver leer_byte(seg_sim + r, 5)
+    fin
+
+    público función s_pon_clase(r: nat16, clase: byte)
+        poner_byte(seg_sim + r, 5, clase)
+    fin
+
+    público función s_marcas(r: nat16): byte
+        devolver leer_byte(seg_sim + r, 6)
+    fin
+
+    público función s_marca(r: nat16, marca: byte)
+        poner_byte(seg_sim + r, 6, leer_byte(seg_sim + r, 6) ob marca)
+    fin
+
+    público función s_a(r: nat16): nat16
+        devolver leer_palabra(seg_sim + r, 8)
+    fin
+
+    público función s_b(r: nat16): nat16
+        devolver leer_palabra(seg_sim + r, 10)
+    fin
+
+    público función s_pon_a(r: nat16, v: nat16)
+        poner_palabra(seg_sim + r, 8, v)
+    fin
+
+    público función s_pon_b(r: nat16, v: nat16)
+        poner_palabra(seg_sim + r, 10, v)
+    fin
+
+    ; si el nombre es «Módulo.nombre», parte sus dos átomos (si existen)
+    función calificado(a: nat16, ref am: nat16, ref an: nat16): bool
+        variable t: arreglo [256] de byte
+        variable n, i: nat16
+        n := at_texto(a, t)
+        i := 0
+        mientras i < n y t[i] <> '.' hacer
+            i := i + 1
+        fin
+        si i >= n entonces devolver falso fin
+        am := busca_átomo(t, i)
+        an := busca_átomo(dirección(t[i + 1]), n - i - 1)
+        devolver cierto
+    fin
+
+    público función es_calificado(a: nat16): bool
+        variable am, an: nat16
+        devolver calificado(a, am, an)
+    fin
+
+    ; Lo que ve el módulo en curso con ese nombre: lo suyo (si ya está
+    ; declarado) y lo público de los módulos que importa, a secas o como
+    ; «Módulo.nombre». 0 si no hay nada (o si lo traen dos módulos: quedan en
+    ; amb_mod). Es la consulta a los diccionarios consts, tipos, globales y
+    ; funcs de ccastel.py, todos a la vez: la clase dice de cuál es.
+    público función busca(a: nat16): nat16
+        variable r, hallado, am, an, i, imp: nat16
+        amb_n := 0
+        r := sim_propio(el_mod, a)
+        si r <> 0 entonces
+            si s_clase(r) = S_PROPIO entonces devolver 0 fin
+            devolver r
+        fin
+        si calificado(a, am, an) entonces
+            si am = 0 o an = 0 entonces devolver 0 fin
+            i := 0
+            mientras i < mod_n_importa[el_mod] hacer
+                imp := mod_importa[el_mod][i]
+                si mod_nombre[imp] = am entonces
+                    r := sim_propio(imp, an)
+                    si r <> 0 y s_clase(r) <> S_PROPIO y s_marcas(r) yb SM_PUBLICO <> 0 entonces devolver r fin
+                    devolver 0
+                fin
+                i := i + 1
+            fin
+            devolver 0
+        fin
+        hallado := 0
+        i := 0
+        mientras i < mod_n_importa[el_mod] hacer
+            imp := mod_importa[el_mod][i]
+            r := sim_propio(imp, a)
+            si r <> 0 y s_clase(r) <> S_PROPIO y s_marcas(r) yb SM_PUBLICO <> 0 entonces
+                si hallado = 0 entonces hallado := r fin
+                amb_mod[amb_n] := imp
+                amb_n := amb_n + 1
+            fin
+            i := i + 1
+        fin
+        si amb_n > 1 entonces devolver 0 fin
+        amb_n := 0
+        devolver hallado
+    fin
+
+    ; la clase de lo que se ve con ese nombre (S_PROPIO si no se ve nada)
+    público función clase_de(a: nat16): byte
+        variable r: nat16
+        r := busca(a)
+        si r = 0 entonces devolver S_PROPIO fin
+        devolver s_clase(r)
+    fin
+
+    ; el tipo que tiene ese nombre (los básicos también), o 0
+    público función tipo_de_nombre(a: nat16): nat16
+        variable r: nat16
+        según at_interna(a)
+            caso I_NAT8, I_BYTE: devolver T_NAT8
+            caso I_NAT16: devolver T_NAT16
+            caso I_ENT16: devolver T_ENT16
+            caso I_BOOL: devolver T_BOOL
+            caso I_NAT32: devolver T_NAT32
+            caso I_ENT32: devolver T_ENT32
+        fin
+        r := busca(a)
+        si r <> 0 y s_clase(r) = S_TIPO entonces devolver s_a(r) fin
+        devolver 0
+    fin
+
+    ; el error de un nombre que no se encuentra (con la pista, si es cosa de módulos)
+    público función no_está(qué: puntero a byte, a: nat16, lin: nat16, col: nat16)
+        variable am, an, i: nat16
+        busca(a)
+        si amb_n > 1 entonces
+            m("«")
+            m_at(a)
+            m("» está en los módulos ")
+            para i desde 0 hasta amb_n - 1 hacer
+                si i > 0 entonces m(" y ") fin
+                m_at(mod_nombre[amb_mod[i]])
+            fin
+            m(": escriba «")
+            m_at(mod_nombre[amb_mod[0]])
+            m(".")
+            m_at(a)
+            m("» o «")
+            m_at(mod_nombre[amb_mod[1]])
+            m(".")
+            m_at(a)
+            m("»")
+            falla(lin, col)
+        fin
+        si calificado(a, am, an) entonces falla_calificado(a, lin, col) fin
+        m(qué)
+        m(": «")
+        m_at(a)
+        m("»")
+        falla(lin, col)
+    fin
+
+    ; «el módulo M no tiene nada público que se llame «n»»
+    función falla_calificado(a: nat16, lin: nat16, col: nat16)
+        variable t: arreglo [256] de byte
+        variable i: nat16
+        at_texto(a, t)
+        i := 0
+        mientras t[i] <> '.' hacer
+            i := i + 1
+        fin
+        t[i] := 0
+        m("el módulo ")
+        m_utf8(t)
+        m(" no tiene nada público que se llame «")
+        m_utf8(dirección(t[i + 1]))
+        m("»")
+        falla(lin, col)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Fichas de las funciones
+    ; -------------------------------------------------------------------------
+    público función func_nueva(nudo_: nat16, m_: nat16): nat16
+        variable f: nat16
+        f := sim_párrafos(2)
+        poner_palabra(seg_sim + f, 0, nudo_)
+        poner_palabra(seg_sim + f, 2, na(nudo_))
+        poner_byte(seg_sim + f, 4, m_)
+        devolver f
+    fin
+
+    público función f_nudo(f: nat16): nat16
+        devolver leer_palabra(seg_sim + f, 0)
+    fin
+
+    público función f_nombre(f: nat16): nat16
+        devolver leer_palabra(seg_sim + f, 2)
+    fin
+
+    público función f_mod(f: nat16): nat16
+        devolver leer_byte(seg_sim + f, 4)
+    fin
+
+    público función f_marcas(f: nat16): byte
+        devolver leer_byte(seg_sim + f, 5)
+    fin
+
+    público función f_marca(f: nat16, marca: byte)
+        poner_byte(seg_sim + f, 5, leer_byte(seg_sim + f, 5) ob marca)
+    fin
+
+    público función f_lejos(f: nat16): bool
+        devolver leer_byte(seg_sim + f, 5) yb FM_LEJOS <> 0
+    fin
+
+    público función f_tret(f: nat16): nat16
+        devolver leer_palabra(seg_sim + f, 6)
+    fin
+
+    público función f_pon_tret(f: nat16, t: nat16)
+        poner_palabra(seg_sim + f, 6, t)
+    fin
+
+    público función f_nbytes(f: nat16): nat16
+        devolver leer_palabra(seg_sim + f, 8)
+    fin
+
+    público función f_pon_nbytes(f: nat16, n: nat16)
+        poner_palabra(seg_sim + f, 8, n)
+    fin
+
+    público función f_nparams(f: nat16): nat16
+        devolver leer_byte(seg_sim + f, 10)
+    fin
+
+    público función f_pon_nparams(f: nat16, n: nat16)
+        poner_byte(seg_sim + f, 10, n)
+    fin
+
+    ; lo que la función pregunta de la última interrupción: un bit por cada R_xx
+    público función f_usa_int(f: nat16): byte
+        devolver leer_byte(seg_sim + f, 11)
+    fin
+
+    público función f_pon_usa_int(f: nat16, bits: byte)
+        poner_byte(seg_sim + f, 11, bits)
+    fin
+
+    ; dónde está su código en el archivo temporal, y cuánto ocupa
+    público función f_dónde(f: nat16): nat32
+        devolver nat32(leer_palabra(seg_sim + f, 14)) << 16 ob leer_palabra(seg_sim + f, 12)
+    fin
+
+    público función f_cuánto(f: nat16): nat32
+        devolver nat32(leer_palabra(seg_sim + f, 18)) << 16 ob leer_palabra(seg_sim + f, 16)
+    fin
+
+    público función f_pon_sitio(f: nat16, dónde: nat32, cuánto: nat32)
+        poner_palabra(seg_sim + f, 12, nat16(dónde))
+        poner_palabra(seg_sim + f, 14, nat16(dónde >> 16))
+        poner_palabra(seg_sim + f, 16, nat16(cuánto))
+        poner_palabra(seg_sim + f, 18, nat16(cuánto >> 16))
+    fin
+
+    ; la etiqueta de la función (F_...) o la de su final (X_...), en t
+    público función f_etq(letra: byte, f: nat16, t: puntero a byte): nat16
+        devolver etq_nombre(letra, f_mod(f), f_nombre(f), t)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Variables de la función en curso
+    ; -------------------------------------------------------------------------
+    público función loc_vacía()
+        loc_n := 0
+    fin
+
+    ; el número de la local de ese nombre, o -1
+    público función loc_busca(a: nat16): ent16
+        variable i: nat16
+        i := 0
+        mientras i < loc_n hacer
+            si loc_nombre[i] = a entonces devolver i fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    público función loc_alta(a: nat16, tipo_: nat16, por_ref: bool, off: ent16)
+        si loc_n >= MAX_LOCALES entonces
+            m("demasiadas variables en una función (caben ")
+            m_num(MAX_LOCALES)
+            m(")")
+            falla_archivo()
+        fin
+        loc_nombre[loc_n] := a
+        loc_tipo[loc_n] := tipo_
+        loc_ref[loc_n] := por_ref
+        loc_off[loc_n] := off
+        loc_n := loc_n + 1
+    fin
+
+    público función loc_tipo_de(i: nat16): nat16
+        devolver loc_tipo[i]
+    fin
+
+    ; ¿es una variable (local o global) lo que se ve con ese nombre?
+    público función es_var(a: nat16): bool
+        si loc_busca(a) >= 0 entonces devolver cierto fin
+        devolver clase_de(a) = S_GLOBAL
+    fin
+
+    ; la variable de ese nombre; si no lo es, el error que toca
+    público función var(a: nat16, lin: nat16, col: nat16, ref v: Var)
+        variable i: ent16
+        variable r: nat16
+        i := loc_busca(a)
+        si i >= 0 entonces
+            v.tipo_ := loc_tipo[i]
+            v.por_ref := loc_ref[i]
+            v.off := 0
+            v.lugar.base := B_BP
+            v.lugar.sim := 0
+            v.lugar.off := loc_off[i]
+            si v.por_ref entonces v.off := loc_off[i] fin
+            devolver
+        fin
+        r := busca(a)
+        si r <> 0 y s_clase(r) = S_GLOBAL entonces
+            v.tipo_ := s_a(r)
+            v.por_ref := falso
+            v.off := 0
+            v.lugar.base := B_FIJA
+            v.lugar.sim := r
+            v.lugar.off := 0
+            devolver
+        fin
+        si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL o s_clase(r) = S_CAD) entonces
+            m("«")
+            m_at(a)
+            m("» es una constante, no una variable")
+            falla(lin, col)
+        fin
+        si (r <> 0 y s_clase(r) = S_FUNC) o (at_interna(a) >= 1 y at_interna(a) <= N_INTERNAS) entonces
+            m("«")
+            m_at(a)
+            m("» es una función: se llama con paréntesis")
+            falla(lin, col)
+        fin
+        no_está("nombre no declarado", a, lin, col)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Etiquetas, textos con etiqueta y puentes
+    ; -------------------------------------------------------------------------
+    ; una etiqueta L_n nueva: su número
+    público función nueva(): nat16
+        n_etq := n_etq + 1
+        si n_etq = 0 entonces
+            m("demasiadas etiquetas (más de 65535)")
+            falla_sin_más()
+        fin
+        devolver n_etq
+    fin
+
+    función dato_nuevo(v: nat16)
+        si n_datos >= MAX_DATOS entonces
+            m("no hay memoria: demasiados datos (textos y variables con valor inicial)")
+            falla_sin_más()
+        fin
+        poner_palabra(seg_ord, n_datos * 2, v)
+        n_datos := n_datos + 1
+    fin
+
+    ; el dato número i (desde 0): un texto, o una global (con DATO_GLOBAL)
+    público función dato(i: nat16): nat16
+        devolver leer_palabra(seg_ord, i * 2)
+    fin
+
+    ; una global con valor inicial pasa a la lista de los datos
+    público función dato_global(r: nat16)
+        dato_nuevo(r ob DATO_GLOBAL)
+    fin
+
+    ; el número de la etiqueta T_n de un texto (se la da si no tenía)
+    público función etiqueta_cadena(tx: nat16): nat16
+        variable n: nat16
+        n := tx_etiqueta(tx)
+        si n <> 0 entonces devolver n fin
+        n_cadenas := n_cadenas + 1
+        n := n_cadenas
+        si n >= MAX_DATOS entonces
+            m("no hay memoria: demasiados textos")
+            falla_sin_más()
+        fin
+        tx_pon_etiqueta(tx, n)
+        poner_palabra(seg_ord + 0x400, n * 2, tx)
+        dato_nuevo(tx)
+        devolver n
+    fin
+
+    ; el texto que lleva la etiqueta T_n, o 0
+    público función texto_de_etiqueta(n: nat16): nat16
+        si n = 0 o n > n_cadenas entonces devolver 0 fin
+        devolver leer_palabra(seg_ord + 0x400, n * 2)
+    fin
+
+    ; el puente desde ese segmento a esa función lejana (lo crea si no está): su número
+    público función puente_de(seg: nat16, f: nat16): nat16
+        variable i: nat16
+        i := 0
+        mientras i < n_puentes hacer
+            si pu_func[i] = f y pu_seg[i] = seg entonces devolver i fin
+            i := i + 1
+        fin
+        si n_puentes >= MAX_PUENTES entonces
+            m("demasiadas llamadas de un módulo a otro (puentes)")
+            falla_sin_más()
+        fin
+        pu_seg[n_puentes] := seg
+        pu_func[n_puentes] := f
+        pu_vivo[n_puentes] := falso
+        n_puentes := n_puentes + 1
+        devolver n_puentes - 1
+    fin
+
+    público función puente_seg(i: nat16): nat16
+        devolver pu_seg[i]
+    fin
+
+    público función puente_func(i: nat16): nat16
+        devolver pu_func[i]
+    fin
+
+    público función puente_vivo(i: nat16): bool
+        devolver pu_vivo[i]
+    fin
+
+    público función puente_pon_vivo(i: nat16)
+        pu_vivo[i] := cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Al empezar
+    ; -------------------------------------------------------------------------
+    público función prepara_tablas()
+        variable t: nat16
+        seg_tip := bloque(PARRAFOS_TIP)
+        seg_sim := bloque(PARRAFOS_SIM)
+        seg_ord := bloque(PARRAFOS_ORD)
+        libre_sim := 1
+        tip_abajo := 1
+        tip_arriba := PARRAFOS_TIP
+        tip_temporal := falso
+        ; (en el orden de T_NAT8... T_TEXTO)
+        tip_nuevo(TK_NAT8, 1)
+        tip_nuevo(TK_NAT16, 2)
+        tip_nuevo(TK_ENT16, 2)
+        tip_nuevo(TK_BOOL, 1)
+        tip_nuevo(TK_NAT32, 4)
+        tip_nuevo(TK_ENT32, 4)
+        tip_nuevo(TK_LIT, 2)
+        tip_nuevo(TK_LIT32, 4)
+        tip_nuevo(TK_NADA, 0)
+        tip_nuevo(TK_PUNT, 2)
+        t := tip_nuevo(TK_PUNT, 2)
+        t_pon_base(t, 2, T_NAT8)
+    fin
+
+    público función gasto_tipos(): nat16
+        devolver tip_abajo
+    fin
+
+    público función gasto_declarados(): nat16
+        devolver libre_sim
+    fin
+
+fin Tablas.

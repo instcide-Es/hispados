@@ -1,0 +1,7 @@
+; caso de prueba del frente del compilador (compilador/pruebas/prueba_frente.sh)
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Caso
+    función principal()
+        escribir("a\x4")
+    fin
+fin Caso.

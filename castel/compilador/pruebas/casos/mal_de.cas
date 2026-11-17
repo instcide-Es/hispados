@@ -1,0 +1,8 @@
+; caso de prueba del frente del compilador (compilador/pruebas/prueba_frente.sh)
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Caso
+    variable x: arreglo [5] nat16
+    función principal()
+
+    fin
+fin Caso.

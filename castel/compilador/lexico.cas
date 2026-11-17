@@ -1,0 +1,632 @@
+; =============================================================================
+;  lexico.cas - el lector (análisis léxico) del compilador de Castel escrito
+;  en Castel: la clase Lexico de ccastel.py, pieza a pieza.
+;
+;  El archivo no se guarda en memoria: se lee por trozos (un Lector) y las
+;  piezas se dan de una en una, con sig_pieza. Lo que cambia respecto a
+;  Python, sin que cambie lo que sale:
+;   - Los fines de línea: «\r\n» (y un «\r» suelto) cuentan como «\n», igual
+;     que al abrir un archivo de texto en Python.
+;   - Las columnas se cuentan en letras, no en octetos (el archivo está en
+;     UTF-8 y una «ñ» son dos octetos).
+;   - Cada pieza lleva dónde empieza en el archivo (pieza_pos), para poder
+;     volver a leer desde ella: así se vuelve al cuerpo de una función
+;     (lex_situar) cuando toca generarla.
+;   - ¿Qué es una letra? Las de la «a» a la «z», el «_» y, fuera del ASCII
+;     (donde Python pregunta isalpha()): ª, µ, º, de À a la letra U+024F
+;     menos × y ÷, y todo lo que hay de U+0250 en adelante salvo los signos
+;     de U+2000 a U+2BFF y de U+3000 a U+303F. O sea: las letras con acento
+;     y la ñ son letras; « » ¿ ¡ · ° y compañía, no.
+;  Límites: un nombre, 240 octetos; un texto entre comillas, 2000; una línea
+;  de un bloque «ensamblador», 500; un bloque entero, 6000.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Lexico
+
+    importar Base, Archivos
+
+    constante FIN = -1                          ; no quedan letras
+    constante NADA = -2
+    constante MAX_NOMBRE = 240
+    constante MAX_TEXTO = 2000
+    constante MAX_LIN_ASM = 500
+    constante MAX_ASM = 6000
+
+    constante TOCA_ASM = 1                      ; lo siguiente es el bloque de ensamblador
+    constante TOCA_FIN = 2                      ; y luego, su «fin»
+    constante TOCA_EOF = 3
+
+    variable arch: ent16 = -1
+    variable lec: Lector
+    variable pos_bruta: nat32                   ; cuántos octetos del archivo se han leído
+    variable pend: ent16                        ; un octeto leído de más (o NADA)
+    variable cola: arreglo [4] de ent16         ; las letras (octetos) que vienen, ya miradas
+    variable cola_pos: arreglo [4] de nat32     ; y dónde está cada una en el archivo
+    variable n_cola: nat16
+    variable lin, col: nat16                    ; la línea y la columna de la letra que viene
+    variable ultima_nl: bool                    ; la última pieza dada fue un fin de línea
+    variable toca: byte
+    variable fin_lin, fin_col: nat16            ; dónde está el «fin» de un bloque de ensamblador
+    público variable pieza_pos: nat32           ; dónde empieza en el archivo la última pieza dada
+    variable ini_pos: nat32
+    variable nom: arreglo [MAX_NOMBRE + 8] de byte
+    variable txt: arreglo [MAX_TEXTO + 8] de byte
+    variable lin_asm: arreglo [MAX_LIN_ASM + 8] de byte
+    variable blq: arreglo [MAX_ASM + 8] de byte
+
+    ; ---- el archivo ----
+    función bruto(): ent16
+        variable c: ent16
+        si pend <> NADA entonces
+            c := pend
+            pend := NADA
+        sino
+            c := leer_car(lec)
+        fin
+        si c <> FIN entonces pos_bruta := pos_bruta + 1 fin
+        devolver c
+    fin
+
+    ; el octeto siguiente, con los fines de línea ya hechos «\n»
+    función normal(ref dónde: nat32): ent16
+        variable c, c2: ent16
+        dónde := pos_bruta
+        c := bruto()
+        si c = '\r' entonces
+            c2 := bruto()
+            si c2 <> '\n' y c2 <> FIN entonces
+                pend := c2
+                pos_bruta := pos_bruta - 1
+            fin
+            c := '\n'
+        fin
+        devolver c
+    fin
+
+    ; el octeto que hay k más allá (k de 0 a 3), sin gastarlo
+    función mira(k: nat16): ent16
+        mientras n_cola <= k hacer
+            cola[n_cola] := normal(cola_pos[n_cola])
+            n_cola := n_cola + 1
+        fin
+        devolver cola[k]
+    fin
+
+    función avanza()
+        variable c: ent16
+        variable i: nat16
+        c := mira(0)
+        para i desde 1 hasta n_cola - 1 hacer
+            cola[i - 1] := cola[i]
+            cola_pos[i - 1] := cola_pos[i]
+        fin
+        n_cola := n_cola - 1
+        si c = '\n' entonces
+            lin := lin + 1
+            col := 1
+        sino si c <> FIN y (c < 0x80 o c >= 0xC0) entonces
+            col := col + 1
+        fin
+    fin
+
+    función empieza(m_: ent16, pos: nat32, línea: nat16, columna: nat16)
+        situar(m_, ent32(pos), DESDE_EL_PRINCIPIO)
+        empezar_lector(lec, m_)
+        pos_bruta := pos
+        pend := NADA
+        n_cola := 0
+        lin := línea
+        col := columna
+        ultima_nl := falso
+        toca := 0
+    fin
+
+    ; abre un archivo para leer sus piezas desde el principio. Falso si no se puede
+    público función lex_abre(ruta: puntero a byte): bool
+        lex_cierra()
+        arch := abrir(ruta, LEER)
+        si arch = MAL entonces devolver falso fin
+        empieza(arch, 0, 1, 1)
+        devolver cierto
+    fin
+
+    público función lex_cierra()
+        si arch <> MAL entonces cerrar(arch) fin
+        arch := MAL
+    fin
+
+    ; las piezas siguientes, desde esa posición del archivo abierto (el
+    ; principio de una pieza, con su línea y su columna)
+    público función lex_situar(pos: nat32, línea: nat16, columna: nat16)
+        empieza(arch, pos, línea, columna)
+    fin
+
+    ; ---- letras ----
+    ; la letra (de Unicode) que viene; devuelve cuántos octetos ocupa y la deja
+    ; también, en UTF-8 y acabada en 0, en u
+    función letra_aquí(ref letra: nat32, u: puntero a byte): nat16
+        variable c: ent16
+        variable n, i: nat16
+        c := mira(0)
+        n := 1
+        si c >= 0xF0 entonces
+            n := 4
+        sino si c >= 0xE0 entonces
+            n := 3
+        sino si c >= 0xC0 entonces
+            n := 2
+        fin
+        u[0] := c
+        para i desde 1 hasta n - 1 hacer
+            c := mira(i)
+            si c < 0x80 o c >= 0xC0 entonces    ; (mal UTF-8: se queda en lo que haya)
+                n := i
+                romper
+            fin
+            u[i] := c
+        fin
+        u[n] := 0
+        u[n + 1] := 0
+        u[n + 2] := 0
+        letra_utf8(u, letra)
+        devolver n
+    fin
+
+    función es_letra_u(letra: nat32): bool
+        si letra < 0x80 entonces
+            devolver (letra >= 'a' y letra <= 'z') o (letra >= 'A' y letra <= 'Z') o letra = '_'
+        fin
+        si letra < 0xC0 entonces devolver letra = 0xAA o letra = 0xB5 o letra = 0xBA fin
+        si letra < 0x250 entonces devolver letra <> 0xD7 y letra <> 0xF7 fin
+        si letra >= 0x2000 y letra <= 0x2BFF entonces devolver falso fin
+        si letra >= 0x3000 y letra <= 0x303F entonces devolver falso fin
+        devolver cierto
+    fin
+
+    ; ¿viene una letra (o «_»)?
+    función viene_letra(): bool
+        variable letra: nat32
+        variable u: arreglo [8] de byte
+        variable c: ent16
+        c := mira(0)
+        si c = FIN entonces devolver falso fin
+        si c < 0x80 entonces devolver es_letra_u(c) fin
+        letra_aquí(letra, u)
+        devolver es_letra_u(letra)
+    fin
+
+    función viene_cifra(): bool
+        devolver mira(0) >= '0' y mira(0) <= '9'
+    fin
+
+    ; añade al mensaje la letra que viene
+    función m_letra()
+        variable letra: nat32
+        variable u: arreglo [8] de byte
+        letra_aquí(letra, u)
+        m_utf8(u)
+    fin
+
+    ; gasta la letra que viene (todos sus octetos)
+    función avanza_letra()
+        variable letra: nat32
+        variable u: arreglo [8] de byte
+        variable n: nat16
+        n := letra_aquí(letra, u)
+        mientras n > 0 hacer
+            avanza()
+            n := n - 1
+        fin
+    fin
+
+    ; ---- dar una pieza ----
+    función pon(ref p: Pieza, clase: byte, val: nat32, línea: nat16, columna: nat16)
+        p.clase := clase
+        p.val := val
+        p.val2 := 0
+        p.lin := línea
+        p.col := columna
+        ultima_nl := clase = T_NL
+        pieza_pos := ini_pos
+    fin
+
+    función comentario_bloque()
+        variable prof, l0, c0: nat16
+        prof := 0
+        l0 := lin
+        c0 := col
+        mientras mira(0) <> FIN hacer
+            si mira(0) = '(' y mira(1) = '*' entonces
+                prof := prof + 1
+                avanza()
+                avanza()
+            sino si mira(0) = '*' y mira(1) = ')' entonces
+                prof := prof - 1
+                avanza()
+                avanza()
+                si prof = 0 entonces devolver fin
+            sino
+                avanza()
+            fin
+        fin
+        m("comentario de bloque «(*» sin cerrar")
+        falla(l0, c0)
+    fin
+
+    función hex(c: ent16): ent16
+        si c >= '0' y c <= '9' entonces devolver c - '0' fin
+        si c >= 'a' y c <= 'f' entonces devolver c - 'a' + 10 fin
+        si c >= 'A' y c <= 'F' entonces devolver c - 'A' + 10 fin
+        devolver -1
+    fin
+
+    ; lo que sigue a una barra «\» (la barra ya está gastada)
+    función escape(): byte
+        variable e: ent16
+        variable v: byte
+        e := mira(0)
+        si e = FIN entonces
+            m("texto sin cerrar")
+            falla(lin, col)
+        fin
+        si e = 'x' entonces
+            si hex(mira(1)) < 0 o hex(mira(2)) < 0 entonces
+                m("«\\x» lleva dos cifras hexadecimales")
+                falla(lin, col)
+            fin
+            v := hex(mira(1)) * 16 + hex(mira(2))
+            avanza()
+            avanza()
+            avanza()
+            devolver v
+        fin
+        según e
+            caso 'n': v := 10
+            caso 'r': v := 13
+            caso 't': v := 9
+            caso '"': v := 34
+            caso '\\': v := 92
+            caso '0': v := 0
+            caso '\'': v := 39
+            caso 'e': v := 27
+            si no:
+                m("escape desconocido: «\\")
+                m_letra()
+                m("»")
+                falla(lin, col)
+        fin
+        avanza()
+        devolver v
+    fin
+
+    ; la letra que viene, en la página 437 (y la gasta)
+    función letra_437(): byte
+        variable letra: nat32
+        variable u: arreglo [8] de byte
+        variable c: ent16
+        letra_aquí(letra, u)
+        c := a_437(letra)
+        si c < 0 entonces
+            m("la letra «")
+            m_utf8(u)
+            m("» no está en la página 437")
+            falla(lin, col)
+        fin
+        avanza_letra()
+        devolver byte(c)
+    fin
+
+    función cadena(ref p: Pieza)
+        variable l0, c0, n: nat16
+        variable c: ent16
+        l0 := lin
+        c0 := col
+        avanza()
+        n := 0
+        mientras cierto hacer
+            c := mira(0)
+            si c = FIN o c = '\n' entonces
+                m("texto sin cerrar (falta la comilla \")")
+                falla(l0, c0)
+            fin
+            si c = '"' entonces romper fin
+            si n >= MAX_TEXTO entonces
+                m("texto demasiado largo para el compilador")
+                falla(l0, c0)
+            fin
+            si c = '\\' entonces
+                avanza()
+                txt[n] := escape()
+            sino
+                txt[n] := letra_437()
+            fin
+            n := n + 1
+        fin
+        avanza()
+        pon(p, T_CAD, texto(txt, n), l0, c0)
+    fin
+
+    función carácter(ref p: Pieza)
+        variable l0, c0: nat16
+        variable v: byte
+        l0 := lin
+        c0 := col
+        avanza()
+        si mira(0) = FIN o mira(0) = '\n' entonces
+            m("carácter sin cerrar (falta la comilla ')")
+            falla(l0, c0)
+        fin
+        si mira(0) = '\\' entonces
+            avanza()
+            v := escape()
+        sino
+            v := letra_437()
+        fin
+        si mira(0) <> '\'' entonces
+            m("carácter mal cerrado (falta la comilla ')")
+            falla(l0, c0)
+        fin
+        avanza()
+        pon(p, T_NUM, v, l0, c0)
+    fin
+
+    función número(ref p: Pieza)
+        variable l0, c0, n: nat16
+        variable v: nat32
+        variable no_cabe: bool
+        variable d: ent16
+        l0 := lin
+        c0 := col
+        v := 0
+        no_cabe := falso
+        si mira(0) = '0' y (mira(1) = 'x' o mira(1) = 'X') entonces
+            avanza()
+            avanza()
+            n := 0
+            mientras hex(mira(0)) >= 0 hacer
+                si v >> 28 <> 0 entonces no_cabe := cierto fin
+                v := v << 4 ob nat32(hex(mira(0)))
+                n := n + 1
+                avanza()
+            fin
+            si n = 0 entonces
+                m("número hexadecimal sin cifras")
+                falla(l0, c0)
+            fin
+        sino
+            mientras viene_cifra() hacer
+                d := mira(0) - '0'
+                si v > 429496729 o (v = 429496729 y d > 5) entonces no_cabe := cierto fin
+                v := v * 10 + nat32(d)
+                avanza()
+            fin
+        fin
+        si viene_letra() o viene_cifra() entonces
+            m("número mal escrito")
+            falla(l0, c0)
+        fin
+        si no_cabe entonces
+            m("el número no cabe en 32 bits")
+            falla(l0, c0)
+        fin
+        pon(p, T_NUM, v, l0, c0)
+    fin
+
+    función identificador(ref p: Pieza)
+        variable l0, c0, n, k, a: nat16
+        variable letra: nat32
+        variable u: arreglo [8] de byte
+        variable pal: byte
+        l0 := lin
+        c0 := col
+        n := 0
+        mientras viene_letra() o viene_cifra() hacer
+            k := letra_aquí(letra, u)
+            si n + k > MAX_NOMBRE entonces
+                m("nombre demasiado largo para el compilador")
+                falla(l0, c0)
+            fin
+            mientras k > 0 hacer
+                nom[n] := mira(0)
+                n := n + 1
+                avanza()
+                k := k - 1
+            fin
+        fin
+        a := átomo(nom, n)
+        pal := at_pal(a)
+        si pal = 0 entonces
+            pon(p, T_ID, a, l0, c0)
+        sino
+            pon(p, T_PAL, pal, l0, c0)
+            si pal = P_ENSAMBLADOR entonces toca := TOCA_ASM fin
+        fin
+    fin
+
+    función es_blanco_py(c: byte): bool
+        devolver c = ' ' o c = '\t' o c = '\r' o c = 11 o c = 12
+    fin
+
+    ; tras «ensamblador»: lo que sigue, tal cual, hasta una línea que sea solo «fin»
+    función bloque_asm(ref p: Pieza)
+        variable c: ent16
+        variable l0, c0, n, nb, i, j, k, primera: nat16
+        mientras mira(0) <> FIN y mira(0) <> '\n' hacer
+            c := mira(0)
+            si c = ';' entonces
+                mientras mira(0) <> FIN y mira(0) <> '\n' hacer
+                    avanza()
+                fin
+                romper
+            fin
+            si c <> ' ' y c <> '\t' y c <> '\r' entonces
+                m("tras «ensamblador» se cambia de línea")
+                falla(lin, col)
+            fin
+            avanza()
+        fin
+        l0 := lin
+        c0 := col
+        nb := 0
+        primera := 0
+        mientras cierto hacer
+            si mira(0) = FIN entonces
+                m("bloque «ensamblador» sin «fin»")
+                falla(l0, c0)
+            fin
+            avanza()                            ; el fin de línea
+            n := 0
+            mientras mira(0) <> FIN y mira(0) <> '\n' hacer
+                si n >= MAX_LIN_ASM entonces
+                    m("línea de ensamblador demasiado larga para el compilador")
+                    falla(lin, 1)
+                fin
+                lin_asm[n] := mira(0)
+                n := n + 1
+                avanza()
+            fin
+            ; ¿es la línea «fin» (con blancos y, si acaso, un comentario)?
+            i := 0
+            mientras i < n y es_blanco_py(lin_asm[i]) hacer
+                i := i + 1
+            fin
+            j := 0
+            mientras j < n y lin_asm[j] <> ';' hacer
+                j := j + 1
+            fin
+            mientras j > i y es_blanco_py(lin_asm[j - 1]) hacer
+                j := j - 1
+            fin
+            si j = i + 3 y lin_asm[i] = 'f' y lin_asm[i + 1] = 'i' y lin_asm[i + 2] = 'n' entonces
+                si primera = 0 entonces primera := lin fin
+                pon(p, T_ASM, texto(blq, nb), lin, i + 1)
+                p.val2 := primera
+                fin_lin := lin
+                fin_col := i + 1
+                toca := TOCA_FIN
+                devolver
+            fin
+            si primera = 0 entonces primera := lin fin
+            si nb + n + 1 > MAX_ASM entonces
+                m("bloque «ensamblador» demasiado largo para el compilador")
+                falla(l0, c0)
+            fin
+            para k desde 1 hasta n hacer
+                blq[nb] := lin_asm[k - 1]
+                nb := nb + 1
+            fin
+            blq[nb] := '\n'
+            nb := nb + 1
+        fin
+    fin
+
+    función símbolo(ref p: Pieza)
+        variable c, c2: ent16
+        variable op: byte
+        variable l0, c0: nat16
+        l0 := lin
+        c0 := col
+        c := mira(0)
+        c2 := mira(1)
+        op := 0
+        si c = ':' y c2 = '=' entonces op := O_ASIG fin
+        si c = '<' y c2 = '>' entonces op := O_DIST fin
+        si c = '<' y c2 = '=' entonces op := O_MENIG fin
+        si c = '>' y c2 = '=' entonces op := O_MAYIG fin
+        si c = '<' y c2 = '<' entonces op := O_IZQ fin
+        si c = '>' y c2 = '>' entonces op := O_DER fin
+        si c = '.' y c2 = '.' entonces op := O_PP fin
+        si op <> 0 entonces
+            avanza()
+            avanza()
+            pon(p, T_OP, op, l0, c0)
+            devolver
+        fin
+        según c
+            caso '+': op := O_MAS
+            caso '-': op := O_MENOS
+            caso '*': op := O_POR
+            caso '(': op := O_PAR_A
+            caso ')': op := O_PAR_C
+            caso '=': op := O_IGUAL
+            caso '<': op := O_MENOR
+            caso '>': op := O_MAYOR
+            caso ',': op := O_COMA
+            caso ':': op := O_DOSP
+            caso '.': op := O_PUNTO
+            caso '[': op := O_COR_A
+            caso ']': op := O_COR_C
+            si no:
+                m("carácter inesperado: «")
+                m_letra()
+                m("»")
+                falla(l0, c0)
+        fin
+        avanza()
+        pon(p, T_OP, op, l0, c0)
+    fin
+
+    ; la pieza siguiente del archivo. Tras la última (T_EOF) sigue dando T_EOF
+    público función sig_pieza(ref p: Pieza)
+        variable c: ent16
+        variable l0, c0: nat16
+        si toca = TOCA_ASM entonces
+            toca := 0
+            ini_pos := pos_bruta
+            bloque_asm(p)
+            devolver
+        fin
+        si toca = TOCA_FIN entonces
+            toca := 0
+            pon(p, T_PAL, P_FIN, fin_lin, fin_col)
+            devolver
+        fin
+        mientras cierto hacer
+            c := mira(0)
+            ini_pos := cola_pos[0]
+            si c = FIN entonces
+                si toca <> TOCA_EOF y no ultima_nl entonces
+                    pon(p, T_NL, 0, lin, col)
+                sino
+                    toca := TOCA_EOF
+                    pon(p, T_EOF, 0, lin, col)
+                    ultima_nl := cierto
+                fin
+                devolver
+            fin
+            si c = '\n' entonces
+                l0 := lin
+                c0 := col
+                avanza()
+                si no ultima_nl entonces
+                    pon(p, T_NL, 0, l0, c0)
+                    devolver
+                fin
+            sino si c = ' ' o c = '\t' o c = '\r' entonces
+                avanza()
+            sino si c = ';' entonces
+                mientras mira(0) <> FIN y mira(0) <> '\n' hacer
+                    avanza()
+                fin
+            sino si c = '(' y mira(1) = '*' entonces
+                comentario_bloque()
+            sino si c = '"' entonces
+                cadena(p)
+                devolver
+            sino si c = '\'' entonces
+                carácter(p)
+                devolver
+            sino si c >= '0' y c <= '9' entonces
+                número(p)
+                devolver
+            sino si viene_letra() entonces
+                identificador(p)
+                devolver
+            sino
+                símbolo(p)
+                devolver
+            fin
+        fin
+    fin
+
+fin Lexico.

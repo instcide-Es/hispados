@@ -1,0 +1,346 @@
+; =============================================================================
+;  volcar.cas - prueba del frente del compilador de Castel escrito en Castel
+;  (lexico.cas y sintactico.cas): carga un programa con sus módulos y vuelca
+;  el árbol entero (el cuerpo de cada función, pedido con cuerpo_de) en un
+;  texto. volcar.py saca el mismo texto con las clases de ccastel.py: los dos
+;  tienen que coincidir (prueba_frente.sh).
+;
+;      VOLCAR PROGRAMA.CAS SALIDA.TXT [CARPETA]
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Volcar
+
+    modelo grande
+
+    importar Base, Sintactico, Archivos, Argumentos, Textos
+
+    variable sal: Escritor
+    variable módulo_actual: nat16
+
+    función pt(t: puntero a byte)
+        poner_texto(sal, t)
+    fin
+
+    función pn(n: nat32)
+        variable t: arreglo [12] de byte
+        natural_a_texto(n, t)
+        poner_texto(sal, t)
+    fin
+
+    función pat(a: nat16)
+        variable t: arreglo [256] de byte
+        at_texto(a, t)
+        poner_texto(sal, t)
+    fin
+
+    función hex2(c: byte)
+        variable t: arreglo [4] de byte
+        hex_a_texto(c, 2, t)
+        poner_car(sal, minúscula(t[0]))
+        poner_car(sal, minúscula(t[1]))
+    fin
+
+    función ptx(t: nat16)
+        variable i: nat16
+        i := 0
+        mientras i < tx_largo(t) hacer
+            hex2(tx_byte(t, i))
+            i := i + 1
+        fin
+    fin
+
+    ; « L:C»
+    función pos(n: nat16)
+        pt(" ")
+        pn(nlin(n))
+        pt(":")
+        pn(ncol(n))
+    fin
+
+    función abre(qué: puntero a byte, n: nat16)
+        pt("(")
+        pt(qué)
+        pos(n)
+    fin
+
+    función lista(n: nat16)
+        mientras n <> 0 hacer
+            pt(" ")
+            v(n)
+            n := nsig(n)
+        fin
+    fin
+
+    función bloque_(n: nat16)
+        pt(" [")
+        lista(n)
+        pt("]")
+    fin
+
+    función nombres(n: nat16)
+        mientras n <> 0 hacer
+            pt(" (n ")
+            pat(na(n))
+            pos(n)
+            pt(")")
+            n := nsig(n)
+        fin
+    fin
+
+    función público_(n: nat16)
+        si nmarcas(n) yb M_PUBLICO <> 0 entonces pt(" p") sino pt(" -") fin
+    fin
+
+    función uno(n: nat16)
+        pt(" ")
+        v(n)
+    fin
+
+    función v(n: nat16)
+        variable x, marca: nat16
+        si n = 0 entonces
+            pt("-")
+            devolver
+        fin
+        según nk(n)
+            caso K_NUM:
+                abre("num", n)
+                pt(" ")
+                pn(nv(n))
+            caso K_BOOL:
+                abre("bool", n)
+                pt(" ")
+                pn(na(n))
+            caso K_NULO: abre("nulo", n)
+            caso K_CAD:
+                abre("cad", n)
+                pt(" ")
+                ptx(na(n))
+            caso K_REF:
+                abre("ref", n)
+                pt(" ")
+                pat(na(n))
+            caso K_UN:
+                abre("un", n)
+                pt(" ")
+                pn(nop(n))
+                uno(na(n))
+            caso K_BIN:
+                abre("bin", n)
+                pt(" ")
+                pn(nop(n))
+                uno(na(n))
+                uno(nb(n))
+            caso K_INDICE:
+                abre("indice", n)
+                uno(na(n))
+                uno(nb(n))
+            caso K_CAMPO:
+                abre("campo", n)
+                uno(na(n))
+                pt(" ")
+                pat(nb(n))
+            caso K_LLAMADA:
+                abre("llamada", n)
+                pt(" ")
+                pat(na(n))
+                x := nb(n)
+                mientras x <> 0 hacer
+                    pt(" (arg ")
+                    si na(x) <> 0 entonces
+                        pat(na(x))
+                        pos(x)
+                    sino
+                        pt("-")
+                    fin
+                    uno(nb(x))
+                    pt(")")
+                    x := nsig(x)
+                fin
+            caso K_LISTA:
+                abre("lista", n)
+                lista(na(n))
+            caso K_VAR:
+                abre("var", n)
+                si nmarcas(n) yb M_GLOBAL <> 0 entonces pt(" g") sino pt(" l") fin
+                público_(n)
+                x := na(n)
+                mientras x <> 0 hacer
+                    pt(" ")
+                    pat(na(x))
+                    x := nsig(x)
+                fin
+                pt(" :")
+                uno(nb(n))
+                uno(nc(n))
+            caso K_CONST:
+                abre("const", n)
+                público_(n)
+                pt(" ")
+                pat(na(n))
+                uno(nb(n))
+            caso K_ASIG:
+                abre("asig", n)
+                uno(na(n))
+                uno(nb(n))
+            caso K_LLAMADA_SENT:
+                abre("llamada_sent", n)
+                uno(na(n))
+            caso K_DEVOLVER:
+                abre("devolver", n)
+                uno(na(n))
+            caso K_SI:
+                abre("si", n)
+                uno(na(n))
+                bloque_(nb(n))
+                bloque_(nc(n))
+            caso K_MIENTRAS:
+                abre("mientras", n)
+                uno(na(n))
+                bloque_(nb(n))
+            caso K_PARA:
+                abre("para", n)
+                uno(na(n))
+                uno(nb(n))
+                x := nc(n)
+                uno(na(x))
+                uno(nb(x))
+                bloque_(nc(x))
+            caso K_SEGUN:
+                abre("segun", n)
+                uno(na(n))
+                lista(nb(n))
+                pt(" otro")
+                bloque_(nc(n))
+            caso K_CASO:
+                abre("caso", n)
+                x := na(n)
+                mientras x <> 0 hacer
+                    pt(" (val")
+                    uno(na(x))
+                    uno(nb(x))
+                    pt(")")
+                    x := nsig(x)
+                fin
+                bloque_(nb(n))
+            caso K_ROMPER: abre("romper", n)
+            caso K_SEGUIR: abre("seguir", n)
+            caso K_ASM:
+                abre("asm", n)
+                pt(" ")
+                si tx_largo(na(n)) = 0 entonces pt("-") sino pn(nb(n)) fin
+                pt(" ")
+                ptx(na(n))
+            caso K_FUNC:
+                abre("func", n)
+                público_(n)
+                pt(" ")
+                pat(na(n))
+                x := nb(n)
+                mientras x <> 0 hacer
+                    pt(" ")
+                    abre("param", x)
+                    si nmarcas(x) yb M_REF <> 0 entonces pt(" r ") sino pt(" v ") fin
+                    pat(na(x))
+                    uno(nb(x))
+                    pt(")")
+                    x := nsig(x)
+                fin
+                pt(" :")
+                uno(nc(n))
+                marca := marca_árbol()
+                bloque_(cuerpo_de(n, módulo_actual))
+                suelta_árbol(marca)
+            caso K_TIPO:
+                abre("tipo", n)
+                público_(n)
+                pt(" ")
+                pat(na(n))
+                uno(nb(n))
+            caso K_IMPORTAR:
+                abre("importar", n)
+                nombres(na(n))
+            caso K_MODELO: abre("modelo", n)
+            caso K_TARR:
+                abre("tarr", n)
+                uno(na(n))
+                uno(nb(n))
+            caso K_TPUNT:
+                abre("tpunt", n)
+                uno(na(n))
+            caso K_TEST:
+                abre("test", n)
+                x := na(n)
+                mientras x <> 0 hacer
+                    pt(" (campos")
+                    nombres(na(x))
+                    uno(nb(x))
+                    pt(")")
+                    x := nsig(x)
+                fin
+            caso K_TNOM:
+                abre("tnom", n)
+                pt(" ")
+                pat(na(n))
+            si no:
+                pt("(???")
+        fin
+        pt(")")
+    fin
+
+    función principal(): byte
+        variable nombre: arreglo [80] de byte
+        variable salida: arreglo [80] de byte
+        variable carpeta: arreglo [80] de byte
+        variable ms: ent16
+        variable i, j, d, árbol: nat16
+        si no argumento(1, nombre, 80) o no argumento(2, salida, 80) entonces
+            escribir("uso: VOLCAR PROGRAMA.CAS SALIDA.TXT [CARPETA]\r\n")
+            devolver 2
+        fin
+        prepara_base()
+        si argumento(3, carpeta, 80) entonces añade_carpeta(carpeta) fin
+        carga_programa(nombre)
+        ms := crear(salida)
+        si ms = MAL entonces
+            escribir("VOLCAR: no puedo crear ", salida, "\r\n")
+            devolver 1
+        fin
+        empezar_escritor(sal, ms)
+        para i desde 0 hasta n_modulos - 1 hacer
+            módulo_actual := i
+            pt("== ")
+            pat(mod_nombre[i])
+            pt(" importa:")
+            para j desde 1 hasta mod_n_importa[i] hacer
+                pt(" ")
+                pat(mod_nombre[mod_importa[i][j - 1]])
+            fin
+            pt("\n")
+            árbol := mod_arbol[i]
+            abre("modulo", árbol)
+            pt(" ")
+            pat(na(árbol))
+            pt("\n")
+            d := nb(árbol)
+            mientras d <> 0 hacer
+                v(d)
+                pt("\n")
+                d := nsig(d)
+            fin
+            pt("(consts")
+            d := nc(árbol)
+            mientras d <> 0 hacer
+                pt(" ")
+                pat(na(d))
+                d := nsig(d)
+            fin
+            pt("))\n")
+        fin
+        vaciar(sal)
+        cerrar(ms)
+        escribir("volcar: ", n_modulos, " módulos; nombres ", gasto_nombres(), ", textos ", gasto_textos(), ", árbol ", gasto_árbol(), "\r\n")
+        devolver 0
+    fin
+
+fin Volcar.

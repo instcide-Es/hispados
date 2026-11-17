@@ -1,0 +1,525 @@
+; =============================================================================
+;  salida.cas - las líneas de ensamblador que va generando el compilador.
+;  En ccastel.py cada función junta sus líneas en una lista (self.lineas) y
+;  al final se repasa todo el programa. Aquí el programa entero no cabe en
+;  memoria: las líneas de la función (o del bloque «ensamblador» suelto) que
+;  se está generando se guardan en memoria lejana; al acabarla se le pasa la
+;  limpieza (limpia() de ccastel.py, que solo junta líneas vecinas de un mismo
+;  trozo) y se manda a un archivo temporal, del que al final se copia al
+;  programa lo que se usa.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Salida
+
+    importar Base, Tablas, Textos, Archivos
+
+    constante PARRAFOS_LIN = 0x1000             ; 64 K de texto por función
+    constante MAX_TEXTO = 0xFE00
+    constante MAX_LINEAS = 6000
+    constante MAX_LN = 300
+    público constante NOMBRE_TEMPORAL = "CASTEL.$$$"
+
+    variable seg_lin, seg_idx: nat16
+    variable n_lineas: nat16
+    variable libre_lin: nat16                   ; por dónde va el texto en seg_lin
+    variable ln: arreglo [MAX_LN] de byte       ; la línea que se está montando
+    variable n_ln: nat16
+    variable temporal: ent16                    ; el archivo temporal
+    variable esc_temporal: Escritor
+    variable escrito: nat32                     ; lo que se lleva escrito en él
+    ; la etiqueta del final de la función que se genera (X_nombre): el destino 0
+    público variable fin_func: arreglo [120] de byte
+
+    ; -------------------------------------------------------------------------
+    ;  Montar una línea, a trozos
+    ; -------------------------------------------------------------------------
+    público función l_car(c: byte)
+        si n_ln >= MAX_LN - 1 entonces
+            m("una línea de ensamblador demasiado larga")
+            falla_archivo()
+        fin
+        ln[n_ln] := c
+        n_ln := n_ln + 1
+    fin
+
+    público función l(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            l_car(valor(t))
+            t := t + 1
+        fin
+    fin
+
+    público función l_nat(v: nat32)
+        variable t: arreglo [12] de byte
+        natural_a_texto(v, t)
+        l(t)
+    fin
+
+    público función l_num(v: ent32)
+        variable t: arreglo [12] de byte
+        número_a_texto(v, t)
+        l(t)
+    fin
+
+    ; un destino de salto: L_n, o el final de la función si es 0
+    público función l_destino(d: nat16)
+        si d = 0 entonces
+            l(fin_func)
+        sino
+            l("L_")
+            l_nat(d)
+        fin
+    fin
+
+    ; guarda la línea montada, tal cual
+    público función cruda()
+        variable i, n: nat16
+        si n_lineas >= MAX_LINEAS o libre_lin >= MAX_TEXTO - n_ln entonces
+            m("la función es demasiado grande (su ensamblador no cabe en memoria): pártala en dos")
+            falla_archivo()
+        fin
+        poner_palabra(seg_idx, n_lineas * 2, libre_lin)
+        n_lineas := n_lineas + 1
+        n := n_ln
+        i := 0
+        mientras i < n hacer
+            poner_byte(seg_lin, libre_lin, ln[i])
+            libre_lin := libre_lin + 1
+            i := i + 1
+        fin
+        poner_byte(seg_lin, libre_lin, 0)
+        libre_lin := libre_lin + 1
+        n_ln := 0
+    fin
+
+    ; empieza una instrucción (cuatro espacios delante)
+    público función ini()
+        n_ln := 0
+        l("    ")
+    fin
+
+    ; una instrucción entera, de uno a cinco trozos
+    público función em(t: puntero a byte)
+        ini()
+        l(t)
+        cruda()
+    fin
+
+    público función em2(a: puntero a byte, b: puntero a byte)
+        ini()
+        l(a)
+        l(b)
+        cruda()
+    fin
+
+    público función em3(a: puntero a byte, b: puntero a byte, c: puntero a byte)
+        ini()
+        l(a)
+        l(b)
+        l(c)
+        cruda()
+    fin
+
+    público función em4(a: puntero a byte, b: puntero a byte, c: puntero a byte, d: puntero a byte)
+        ini()
+        l(a)
+        l(b)
+        l(c)
+        l(d)
+        cruda()
+    fin
+
+    público función em5(a: puntero a byte, b: puntero a byte, c: puntero a byte, d: puntero a byte, e: puntero a byte)
+        ini()
+        l(a)
+        l(b)
+        l(c)
+        l(d)
+        l(e)
+        cruda()
+    fin
+
+    ; una instrucción con un número en medio: «a» n «b»
+    público función em_n(a: puntero a byte, n: nat32, b: puntero a byte)
+        ini()
+        l(a)
+        l_nat(n)
+        l(b)
+        cruda()
+    fin
+
+    ; una etiqueta L_n (o la del final de la función)
+    público función et(d: nat16)
+        n_ln := 0
+        l_destino(d)
+        l(":")
+        cruda()
+    fin
+
+    ; una etiqueta con nombre
+    público función et_nombre(t: puntero a byte)
+        n_ln := 0
+        l(t)
+        l(":")
+        cruda()
+    fin
+
+    ; «jmp destino»
+    público función jmp(d: nat16)
+        ini()
+        l("jmp ")
+        l_destino(d)
+        cruda()
+    fin
+
+    ; «jCC destino»
+    público función salto(cc: puntero a byte, d: nat16)
+        ini()
+        l("j")
+        l(cc)
+        l(" ")
+        l_destino(d)
+        cruda()
+    fin
+
+    ; una línea en blanco
+    público función blanca()
+        n_ln := 0
+        cruda()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las líneas ya guardadas
+    ; -------------------------------------------------------------------------
+    público función vacía_líneas()
+        n_lineas := 0
+        libre_lin := 0
+        n_ln := 0
+    fin
+
+    función dónde(i: nat16): nat16
+        devolver leer_palabra(seg_idx, i * 2)
+    fin
+
+    ; copia la línea i en t (acabada en 0); devuelve su largo
+    función trae(i: nat16, t: puntero a byte): nat16
+        variable p, n: nat16
+        variable c: byte
+        p := dónde(i)
+        n := 0
+        mientras cierto hacer
+            c := leer_byte(seg_lin, p + n)
+            t[n] := c
+            si c = 0 entonces romper fin
+            n := n + 1
+        fin
+        devolver n
+    fin
+
+    ; ¿es la línea i igual a ese texto?
+    función línea_es(i: nat16, t: puntero a byte): bool
+        variable p: nat16
+        variable c: byte
+        p := dónde(i)
+        mientras cierto hacer
+            c := leer_byte(seg_lin, p)
+            si c <> valor(t) entonces devolver falso fin
+            si c = 0 entonces devolver cierto fin
+            p := p + 1
+            t := t + 1
+        fin
+        devolver falso
+    fin
+
+    ; ¿empieza la línea i por ese texto?
+    función línea_empieza(i: nat16, t: puntero a byte): bool
+        variable p: nat16
+        p := dónde(i)
+        mientras valor(t) <> 0 hacer
+            si leer_byte(seg_lin, p) <> valor(t) entonces devolver falso fin
+            p := p + 1
+            t := t + 1
+        fin
+        devolver cierto
+    fin
+
+    ; ¿Siguen en el procesador las banderas de la última interrupción? Sí, si
+    ; desde que se guardaron solo ha habido «mov» (que no las tocan) y ninguna
+    ; etiqueta: entonces acarreo() es un «jc» y no hace falta mirar la copia.
+    público función banderas_vivas(): bool
+        variable i: nat16
+        i := n_lineas
+        mientras i > 0 hacer
+            i := i - 1
+            si línea_es(i, "    pop word [R_ban]") entonces devolver cierto fin
+            si no línea_empieza(i, "    mov ") entonces devolver falso fin
+        fin
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La limpieza (limpia() de ccastel.py): quita los «jmp X» que caen justo
+    ;  delante de «X:» y el código tras un salto que nadie puede alcanzar; da la
+    ;  vuelta a «jCC A / jmp B / A:»; y quita el «mov ax, [X]» que sigue a
+    ;  «mov [X], ax».
+    ; -------------------------------------------------------------------------
+    función de_palabra(c: byte): bool
+        si c >= 128 o c = '_' entonces devolver cierto fin
+        si c >= '0' y c <= '9' entonces devolver cierto fin
+        si c >= 'A' y c <= 'Z' entonces devolver cierto fin
+        devolver c >= 'a' y c <= 'z'
+    fin
+
+    ; ¿es t «L_» y cifras hasta ese final (0 o ':')? Devuelve dónde acaban las cifras, o nulo
+    función tras_L(t: puntero a byte): puntero a byte
+        si t[0] <> 'L' o t[1] <> '_' o t[2] < '0' o t[2] > '9' entonces devolver nulo fin
+        t := t + 2
+        mientras valor(t) >= '0' y valor(t) <= '9' hacer
+            t := t + 1
+        fin
+        devolver t
+    fin
+
+    ; «    jmp PALABRA»: deja en destino la palabra
+    función es_jmp(t: puntero a byte, destino: puntero a byte): bool
+        variable n: nat16
+        si no empieza_por(t, "    jmp ") entonces devolver falso fin
+        t := t + 8
+        n := 0
+        mientras de_palabra(valor(t)) hacer
+            destino[n] := valor(t)
+            n := n + 1
+            t := t + 1
+        fin
+        destino[n] := 0
+        devolver n > 0 y valor(t) = 0
+    fin
+
+    ; «L_123:»
+    función es_etq_L(t: puntero a byte): bool
+        variable p: puntero a byte
+        p := tras_L(t)
+        devolver p <> nulo y p[0] = ':' y p[1] = 0
+    fin
+
+    ; «    jXX L_123» (también jmp): deja la condición (lo que sigue a la j) y la etiqueta
+    función es_salto_L(t: puntero a byte, cc: puntero a byte, etq: puntero a byte): bool
+        variable n: nat16
+        variable p: puntero a byte
+        si no empieza_por(t, "    j") entonces devolver falso fin
+        t := t + 5
+        n := 0
+        mientras de_palabra(valor(t)) y n < 10 hacer
+            cc[n] := valor(t)
+            n := n + 1
+            t := t + 1
+        fin
+        cc[n] := 0
+        si n = 0 o valor(t) <> ' ' entonces devolver falso fin
+        t := t + 1
+        p := tras_L(t)
+        si p = nulo o valor(p) <> 0 entonces devolver falso fin
+        copiar(etq, t)
+        devolver cierto
+    fin
+
+    ; la condición contraria, o falso si no es de las que se dan la vuelta
+    función inversa(cc: puntero a byte, otra: puntero a byte): bool
+        variable pares: puntero a byte
+        variable p, q: puntero a byte
+        variable n: nat16
+        ; (cada una con su contraria detrás, separadas por espacios)
+        pares := "e ne ne e l ge ge l g le le g b ae ae b a be be a z nz nz z c nc nc c "
+        mientras valor(pares) <> 0 hacer
+            p := pares
+            q := cc
+            mientras valor(q) <> 0 y valor(p) = valor(q) hacer
+                p := p + 1
+                q := q + 1
+            fin
+            si valor(q) = 0 y valor(p) = ' ' entonces
+                p := p + 1
+                n := 0
+                mientras valor(p) <> ' ' hacer
+                    otra[n] := valor(p)
+                    n := n + 1
+                    p := p + 1
+                fin
+                otra[n] := 0
+                devolver cierto
+            fin
+            ; al par siguiente: dos palabras más allá
+            n := 0
+            mientras n < 2 hacer
+                si valor(pares) = ' ' entonces n := n + 1 fin
+                pares := pares + 1
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; «    mov [X], ax» (o al): deja «[X]» y el registro
+    función es_guardar(t: puntero a byte, mem: puntero a byte, reg: puntero a byte): bool
+        variable n: nat16
+        si no empieza_por(t, "    mov [") entonces devolver falso fin
+        t := t + 8
+        n := 0
+        mientras valor(t) <> 0 y valor(t) <> ']' hacer
+            mem[n] := valor(t)
+            n := n + 1
+            t := t + 1
+        fin
+        si valor(t) <> ']' o n < 2 entonces devolver falso fin
+        mem[n] := ']'
+        mem[n + 1] := 0
+        t := t + 1
+        si no (iguales(t, ", ax") o iguales(t, ", al")) entonces devolver falso fin
+        copiar(reg, t + 2)
+        devolver cierto
+    fin
+
+    público función limpia()
+        variable a, b: arreglo [MAX_LN] de byte
+        variable x, z: arreglo [MAX_LN] de byte
+        variable cc, otra: arreglo [12] de byte
+        variable i, j, k, n: nat16
+        variable cambio, hecho: bool
+        cambio := cierto
+        mientras cambio hacer
+            cambio := falso
+            n := n_lineas
+            i := 0
+            j := 0
+            mientras i < n hacer
+                trae(i, a)
+                si es_jmp(a, x) entonces
+                    concatenar(x, ":")
+                    k := i + 1
+                    mientras k < n hacer
+                        trae(k, b)
+                        si no es_etq_L(b) o iguales(b, x) entonces romper fin
+                        k := k + 1
+                    fin
+                    si k < n y línea_es(k, x) entonces
+                        cambio := cierto
+                        i := i + 1
+                        seguir
+                    fin
+                    ; tras un jmp, lo que haya hasta la etiqueta siguiente no se alcanza
+                    poner_palabra(seg_idx, j * 2, dónde(i))
+                    j := j + 1
+                    i := i + 1
+                    mientras i < n hacer
+                        trae(i, b)
+                        si no es_salto_L(b, cc, z) entonces romper fin
+                        cambio := cierto
+                        i := i + 1
+                    fin
+                    seguir
+                fin
+                hecho := falso
+                ; «jCC A / jmp B / A:»  ->  «jNCC B / A:»
+                si es_salto_L(a, cc, x) y inversa(cc, otra) y i + 2 < n entonces
+                    concatenar(x, ":")
+                    si línea_es(i + 2, x) entonces
+                        trae(i + 1, b)
+                        si es_jmp(b, z) entonces
+                            n_ln := 0
+                            l("    j")
+                            l(otra)
+                            l(" ")
+                            l(z)
+                            ; (la línea nueva va al final del texto; su sitio en la lista, aquí)
+                            k := n_lineas
+                            cruda()
+                            n_lineas := k
+                            poner_palabra(seg_idx, j * 2, leer_palabra(seg_idx, k * 2))
+                            j := j + 1
+                            i := i + 2
+                            cambio := cierto
+                            hecho := cierto
+                        fin
+                    fin
+                fin
+                ; «mov [X], ax / mov ax, [X]»: lo segundo sobra
+                si no hecho y i + 1 < n y es_guardar(a, x, z) entonces
+                    copiar(b, "    mov ")
+                    concatenar(b, z)
+                    concatenar(b, ", ")
+                    concatenar(b, x)
+                    si línea_es(i + 1, b) entonces
+                        poner_palabra(seg_idx, j * 2, dónde(i))
+                        j := j + 1
+                        i := i + 2
+                        cambio := cierto
+                        hecho := cierto
+                    fin
+                fin
+                si no hecho entonces
+                    poner_palabra(seg_idx, j * 2, dónde(i))
+                    j := j + 1
+                    i := i + 1
+                fin
+            fin
+            n_lineas := j
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El archivo temporal
+    ; -------------------------------------------------------------------------
+    público función abre_temporal()
+        temporal := crear(NOMBRE_TEMPORAL)
+        si temporal = MAL entonces
+            m("no puedo crear el archivo temporal ")
+            m(NOMBRE_TEMPORAL)
+            falla_sin_más()
+        fin
+        empezar_escritor(esc_temporal, temporal)
+        escrito := 0
+    fin
+
+    ; manda al temporal las líneas guardadas (cada una con su salto de línea)
+    ; y las suelta. Deja dónde han quedado y cuánto ocupan
+    público función vuelca(ref sitio: nat32, ref cuánto: nat32)
+        variable i, p: nat16
+        variable c: byte
+        sitio := escrito
+        i := 0
+        mientras i < n_lineas hacer
+            p := dónde(i)
+            mientras cierto hacer
+                c := leer_byte(seg_lin, p)
+                si c = 0 entonces romper fin
+                poner_car(esc_temporal, c)
+                escrito := escrito + 1
+                p := p + 1
+            fin
+            poner_car(esc_temporal, '\n')
+            escrito := escrito + 1
+            i := i + 1
+        fin
+        cuánto := escrito - sitio
+        vacía_líneas()
+    fin
+
+    ; cierra el temporal (para leerlo después); falso si no se ha podido escribir todo
+    público función cierra_temporal(): bool
+        variable bien: bool
+        bien := vaciar(esc_temporal)
+        cerrar(temporal)
+        devolver bien
+    fin
+
+    público función prepara_salida()
+        seg_lin := bloque(PARRAFOS_LIN)
+        seg_idx := bloque((MAX_LINEAS + 8) div 8)
+        vacía_líneas()
+    fin
+
+    ; el máximo que ha llegado a ocupar el texto de una función
+    público función líneas(): nat16
+        devolver n_lineas
+    fin
+
+fin Salida.

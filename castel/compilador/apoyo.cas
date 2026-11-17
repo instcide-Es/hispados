@@ -1,0 +1,49 @@
+; =============================================================================
+;  apoyo.cas - las rutinas de apoyo en ensamblador que el compilador añade a
+;  los programas (solo las que se usan): escribir números y textos, y
+;  multiplicar, dividir y desplazar en 32 bits. NO editar a mano: lo escribe
+;  compilador/haz_apoyo.py con el texto de APOYO de ccastel.py, para que los
+;  dos compiladores pongan lo mismo, letra a letra.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Apoyo
+
+    público constante N_APOYO = 11
+
+    constante N_0 = "escribir_num"
+    constante T_0 = "; escribir_num: ense\xC3\xB1a AX como entero con signo, en decimal\nescribir_num:\n    or ax, ax\n    jns escribir_nat\n    push ax\n    mov dl, \'-\'\n    mov ah, 2\n    int 0x21\n    pop ax\n    neg ax\n"
+    constante N_1 = "escribir_nat"
+    constante T_1 = "; escribir_nat: ense\xC3\xB1a AX como natural, en decimal\nescribir_nat:\n    xor cx, cx\n    mov bx, 10\n.cifra:\n    xor dx, dx\n    div bx\n    push dx\n    inc cx\n    or ax, ax\n    jnz .cifra\n.sale:\n    pop dx\n    add dl, \'0\'\n    mov ah, 2\n    int 0x21\n    loop .sale\n    ret\n"
+    constante N_2 = "escribir_num32"
+    constante T_2 = "; escribir_num32: ense\xC3\xB1a DX:AX como entero con signo de 32 bits, en decimal\nescribir_num32:\n    or dx, dx\n    jns escribir_nat32\n    push ax\n    push dx\n    mov dl, \'-\'\n    mov ah, 2\n    int 0x21\n    pop dx\n    pop ax\n    neg dx\n    neg ax\n    sbb dx, 0\n"
+    constante N_3 = "escribir_nat32"
+    constante T_3 = "; escribir_nat32: ense\xC3\xB1a DX:AX como natural de 32 bits, en decimal\nescribir_nat32:\n    xor cx, cx\n    mov bx, 10\n.cifra:\n    mov si, ax\n    mov ax, dx\n    xor dx, dx\n    div bx\n    xchg ax, si\n    div bx\n    push dx\n    inc cx\n    mov dx, si\n    mov si, ax\n    or si, dx\n    jnz .cifra\n.sale:\n    pop dx\n    add dl, \'0\'\n    mov ah, 2\n    int 0x21\n    loop .sale\n    ret\n"
+    constante N_4 = "escribir_cad"
+    constante T_4 = "; escribir_cad: ense\xC3\xB1a el texto acabado en 0 que hay en SI\nescribir_cad:\n    lodsb\n    or al, al\n    jz .fin\n    mov dl, al\n    mov ah, 2\n    int 0x21\n    jmp escribir_cad\n.fin:\n    ret\n"
+    constante N_5 = "castel_mul32"
+    constante T_5 = "; castel_mul32: DX:AX = DX:AX * CX:BX (los 32 bits bajos: vale con signo y sin \xC3\xA9l)\ncastel_mul32:\n    mov si, ax\n    mov di, dx\n    mul bx\n    push ax\n    push dx\n    mov ax, si\n    mul cx\n    mov cx, ax\n    mov ax, di\n    mul bx\n    add ax, cx\n    pop dx\n    add dx, ax\n    pop ax\n    ret\n"
+    constante N_6 = "castel_div32s"
+    constante T_6 = "; castel_div32s: divisi\xC3\xB3n con signo de DX:AX entre CX:BX. Cociente en DX:AX\n; (hacia cero) y resto en CX:BX (con el signo del dividendo)\ncastel_div32s:\n    mov si, dx\n    xor si, cx\n    push si\n    push dx\n    or dx, dx\n    jns .a\n    neg dx\n    neg ax\n    sbb dx, 0\n.a:\n    or cx, cx\n    jns .b\n    neg cx\n    neg bx\n    sbb cx, 0\n.b:\n    call castel_div32u\n    pop si\n    or si, si\n    jns .c\n    neg cx\n    neg bx\n    sbb cx, 0\n.c:\n    pop si\n    or si, si\n    jns .d\n    neg dx\n    neg ax\n    sbb dx, 0\n.d:\n    ret\n"
+    constante N_7 = "castel_div32u"
+    constante T_7 = "; castel_div32u: divisi\xC3\xB3n sin signo de DX:AX entre CX:BX. Cociente en DX:AX y\n; resto en CX:BX. (Entre cero salta la interrupci\xC3\xB3n 0, como con \xC2\xABdiv\xC2\xBB.)\ncastel_div32u:\n    or cx, cx\n    jnz .largo\n    mov cx, ax\n    mov ax, dx\n    xor dx, dx\n    div bx\n    xchg ax, cx\n    div bx\n    mov bx, dx\n    mov dx, cx\n    xor cx, cx\n    ret\n.largo:\n    push bp\n    mov bp, 32\n    xor si, si\n    xor di, di\n.bit:\n    shl ax, 1\n    rcl dx, 1\n    rcl si, 1\n    rcl di, 1\n    jc .resta\n    cmp di, cx\n    jb .no\n    ja .resta\n    cmp si, bx\n    jb .no\n.resta:\n    sub si, bx\n    sbb di, cx\n    inc ax\n.no:\n    dec bp\n    jnz .bit\n    mov bx, si\n    mov cx, di\n    pop bp\n    ret\n"
+    constante N_8 = "castel_shl32"
+    constante T_8 = "; castel_shl32: DX:AX desplazado CX bits a la izquierda\ncastel_shl32:\n    cmp cx, 32\n    jbe .cabe\n    mov cx, 32\n.cabe:\n    jcxz .fin\n.otro:\n    shl ax, 1\n    rcl dx, 1\n    loop .otro\n.fin:\n    ret\n"
+    constante N_9 = "castel_shr32"
+    constante T_9 = "; castel_shr32: DX:AX desplazado CX bits a la derecha, metiendo ceros\ncastel_shr32:\n    cmp cx, 32\n    jbe .cabe\n    mov cx, 32\n.cabe:\n    jcxz .fin\n.otro:\n    shr dx, 1\n    rcr ax, 1\n    loop .otro\n.fin:\n    ret\n"
+    constante N_10 = "castel_sar32"
+    constante T_10 = "; castel_sar32: DX:AX desplazado CX bits a la derecha, conservando el signo\ncastel_sar32:\n    cmp cx, 32\n    jbe .cabe\n    mov cx, 32\n.cabe:\n    jcxz .fin\n.otro:\n    sar dx, 1\n    rcr ax, 1\n    loop .otro\n.fin:\n    ret\n"
+
+    variable nombres: arreglo [N_APOYO] de puntero a byte = (N_0, N_1, N_2, N_3, N_4, N_5, N_6, N_7, N_8, N_9, N_10)
+    variable textos: arreglo [N_APOYO] de puntero a byte = (T_0, T_1, T_2, T_3, T_4, T_5, T_6, T_7, T_8, T_9, T_10)
+
+    ; el nombre de la rutina número i (desde 0)
+    público función apoyo_nombre(i: nat16): puntero a byte
+        devolver nombres[i]
+    fin
+
+    ; su texto: sus líneas, cada una acabada en un salto de línea
+    público función apoyo_texto(i: nat16): puntero a byte
+        devolver textos[i]
+    fin
+
+fin Apoyo.

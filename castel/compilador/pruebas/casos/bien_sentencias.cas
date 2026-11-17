@@ -1,0 +1,44 @@
+; caso de prueba del frente del compilador (compilador/pruebas/prueba_frente.sh)
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Caso
+    importar Textos, Figuras
+    importar Medidas
+    tipo R = estructura
+        a, b: nat16
+        c: puntero a R
+        d: arreglo [2] de arreglo [3] de Figuras.Rectángulo
+    fin
+    público variable r: R
+    público función f(ref x: R, ref: nat16, y: ent32): puntero a byte
+        variable i: nat16
+        constante DENTRO = 3
+        para i desde 10 hasta 0 paso -2 hacer seguir fin
+        según i
+            caso 1, 2..5, DENTRO: romper
+            caso 'a'..'z':
+                i := 1
+            si no:
+                i := 2
+        fin
+        según i
+            caso 7: devolver nulo
+            sino: i := 3
+        fin
+        si i = 1 entonces
+            devolver "uno"
+        sino si i >= 2 y no (i <> 3 o i < 4) entonces
+            devolver "dos"
+        sino
+            i := -i + nob i * 2 div 3 mod 4 yb 5 ob 6 xob 7 << 1 >> 2
+        fin
+        mientras x.c.d[1][i].ancho <= valor(puntero(i))[2] hacer
+            interrupción(0x21, ah: 2,
+                dl: 'A')
+            Figuras.escala(Medidas.PULGADA)
+        fin
+        devolver
+    fin
+    función principal()
+        salir()
+    fin
+fin Caso.

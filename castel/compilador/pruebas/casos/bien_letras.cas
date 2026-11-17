@@ -1,0 +1,13 @@
+; caso de prueba del frente del compilador (compilador/pruebas/prueba_frente.sh)
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Caso
+    constante AÑO = 0x7EA
+    constante ÑANDÚ = 'ñ'
+    constante TXT = "áéíóú É ñÑ üÜ ¿? ¡! «» \n\r\t\0\e\"\'\\ \x41\xff"
+    variable año_nuevo, über, çedilla_2: nat16
+    (* un comentario (* con otro dentro *) y sigue
+       en otra línea *)
+    función principal()
+        año_nuevo := AÑO + ÑANDÚ + '\'' + '\x7F' + 'A'    ; comentario
+    fin
+fin Caso.

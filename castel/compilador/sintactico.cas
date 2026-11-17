@@ -1,0 +1,1370 @@
+; =============================================================================
+;  sintactico.cas - la gramática (análisis sintáctico) y el cargador de
+;  módulos del compilador de Castel escrito en Castel: las clases Sintactico
+;  y Cargador de ccastel.py, función por función, sobre el árbol de Base.
+;
+;  Lo que cambia respecto a Python, sin que cambie lo que sale:
+;   - Las piezas no se guardan todas: hay una ventana de las últimas 1024 (en
+;     memoria lejana). Se mira hasta dos piezas por delante, y solo se vuelve
+;     atrás en el valor inicial entre paréntesis de una variable (inicial):
+;     esa lista no puede pasar de unas 1000 piezas.
+;   - Cada archivo se lee dos veces: una primera pasada solo del léxico (así
+;     sus errores salen antes que los de la gramática, y se recogen los
+;     nombres de «importar», que hacen falta para entender «Módulo.nombre»),
+;     y la del análisis.
+;   - El cuerpo de cada función se analiza al cargar (para decir sus errores
+;     en su sitio) pero su árbol se suelta: queda apuntado dónde empieza en
+;     el archivo (K_FUNC2) y se vuelve a analizar, con cuerpo_de, cuando el
+;     generador lo pide. Las constantes declaradas dentro de las funciones
+;     quedan apuntadas en el campo c del K_MODULO.
+;   - Un bloque «ensamblador» es un texto de Base: sus líneas, tal cual,
+;     CADA UNA acabada en «\n» (así se distingue un bloque vacío de uno con
+;     una línea en blanco).
+;   - Los archivos de los módulos, en DOS: «importar Argumentos» busca
+;     ARGUMENT.CAS: las ocho primeras letras, cifras o «_» del nombre (las
+;     letras de fuera del ASCII se saltan), en mayúsculas. Se busca en la
+;     carpeta del archivo que importa, en las dadas con añade_carpeta (-I) y
+;     en la carpeta del propio compilador (la que el DOS deja detrás del
+;     entorno del programa).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sintactico
+
+    importar Base, Lexico, Textos, Archivos
+
+    constante VENTANA = 1024                    ; piezas a la vista (una potencia de 2)
+    constante MAX_CONSTS = 64                   ; constantes declaradas dentro de una función
+    constante MAX_CARPETAS = 6
+    constante NINGUNO = 0xFFFF
+
+    ; una pieza de la ventana (16 octetos, en seg_pz + número): 0 clase,
+    ; 2 val (4), 6 val2, 8 línea, 10 columna, 12 dónde empieza en el archivo (4)
+    variable seg_pz: nat16
+    variable pp: nat16                          ; la pieza por la que va el análisis
+    variable prod: nat16                        ; cuántas ha dado ya el léxico
+    variable hay_marca: bool                    ; hay que poder volver a marca_pp
+    variable marca_pp: nat16
+    variable pz: Pieza
+
+    variable importados: arreglo [MAX_MODULOS + 8] de nat16     ; los módulos de «importar» del archivo
+    variable n_importados: nat16
+    variable nombre_modulo: nat16
+    variable raíz: nat16                        ; el K_MODULO que se está haciendo
+    variable cola_consts: nat16                 ; el último K_NOMBRE de su lista de constantes
+    variable en_función: bool
+    variable consts_fn: arreglo [MAX_CONSTS] de nat16
+    variable n_consts_fn: nat16
+
+    variable carpetas: arreglo [MAX_CARPETAS] de arreglo [MAX_RUTA] de byte
+    variable n_carpetas: nat16 = 1              ; (la 0 es la del archivo que importa)
+    variable en_curso: arreglo [MAX_MODULOS] de nat16           ; los módulos que se están leyendo
+    variable n_en_curso: nat16
+    variable abierto: nat16 = NINGUNO           ; el módulo cuyo archivo está abierto para cuerpo_de
+
+    ; -------------------------------------------------------------------------
+    ;  Las piezas
+    ; -------------------------------------------------------------------------
+    función trae()
+        variable s: nat16
+        sig_pieza(pz)
+        si hay_marca y prod - marca_pp >= VENTANA - 4 entonces
+            m("la lista de valores es demasiado larga para el compilador")
+            falla(pz.lin, pz.col)
+        fin
+        s := seg_pz + (prod yb (VENTANA - 1))
+        poner_palabra(s, 0, pz.clase)
+        poner_palabra(s, 2, nat16(pz.val))
+        poner_palabra(s, 4, nat16(pz.val >> 16))
+        poner_palabra(s, 6, pz.val2)
+        poner_palabra(s, 8, pz.lin)
+        poner_palabra(s, 10, pz.col)
+        poner_palabra(s, 12, nat16(pieza_pos))
+        poner_palabra(s, 14, nat16(pieza_pos >> 16))
+        prod := prod + 1
+    fin
+
+    ; dónde está (su segmento) la pieza que hay d más allá de la que toca
+    función ranura(d: nat16): nat16
+        mientras prod - pp <= d hacer
+            trae()
+        fin
+        devolver seg_pz + ((pp + d) yb (VENTANA - 1))
+    fin
+
+    función vacía_ventana()
+        pp := 0
+        prod := 0
+        hay_marca := falso
+    fin
+
+    función clase(d: nat16): byte
+        devolver leer_byte(ranura(d), 0)
+    fin
+
+    función val(d: nat16): nat16
+        devolver leer_palabra(ranura(d), 2)
+    fin
+
+    función plin(): nat16
+        devolver leer_palabra(ranura(0), 8)
+    fin
+
+    función pcol(): nat16
+        devolver leer_palabra(ranura(0), 10)
+    fin
+
+    función es_cl(cl: byte, d: nat16): bool
+        devolver clase(d) = cl
+    fin
+
+    función es_pal(pal: byte, d: nat16): bool
+        devolver clase(d) = T_PAL y val(d) = pal
+    fin
+
+    función es_op(op: byte, d: nat16): bool
+        devolver clase(d) = T_OP y val(d) = op
+    fin
+
+    función es_id(a: nat16, d: nat16): bool
+        devolver clase(d) = T_ID y val(d) = a
+    fin
+
+    ; un nudo nuevo en la posición de la pieza que toca
+    función nudo_aquí(k: byte): nat16
+        devolver nudo(k, plin(), pcol())
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los errores
+    ; -------------------------------------------------------------------------
+    ; el error ya montado, en la pieza que toca
+    función aquí()
+        falla(plin(), pcol())
+    fin
+
+    ; lo mismo, diciendo además qué pieza está
+    función está()
+        variable s: nat16
+        s := ranura(0)
+        m(" (está ")
+        según leer_byte(s, 0)
+            caso T_NL: m("el fin de la línea")
+            caso T_EOF: m("el final del archivo")
+            caso T_ASM: m("un bloque de ensamblador")
+            caso T_CAD:
+                m("«")
+                m_tx(leer_palabra(s, 2))
+                m("»")
+            caso T_NUM:
+                m("«")
+                m_nat(nat32(leer_palabra(s, 4)) << 16 ob leer_palabra(s, 2))
+                m("»")
+            caso T_ID:
+                m("«")
+                m_at(leer_palabra(s, 2))
+                m("»")
+            caso T_PAL:
+                m("«")
+                m_at(at_palabra[leer_palabra(s, 2)])
+                m("»")
+            si no:
+                m("«")
+                m_simbolo(leer_palabra(s, 2))
+                m("»")
+        fin
+        m(")")
+        aquí()
+    fin
+
+    función falta_fin()
+        m("falta un «fin»: algún bloque de antes (si, mientras, para, según, función...) se ha quedado sin cerrar")
+        aquí()
+    fin
+
+    función salta_nl()
+        mientras clase(0) = T_NL hacer
+            pp := pp + 1
+        fin
+    fin
+
+    función come_pal(pal: byte)
+        si no es_pal(pal, 0) entonces
+            m("esperaba «")
+            m_at(at_palabra[pal])
+            m("»")
+            está()
+        fin
+        pp := pp + 1
+    fin
+
+    función come_op(op: byte)
+        si no es_op(op, 0) entonces
+            m("esperaba «")
+            m_simbolo(op)
+            m("»")
+            está()
+        fin
+        pp := pp + 1
+    fin
+
+    ; un nombre cualquiera: devuelve su átomo. «qué» dice qué nombre se espera
+    función come_id(qué: puntero a byte): nat16
+        variable a: nat16
+        si clase(0) <> T_ID entonces
+            si clase(0) = T_PAL entonces
+                m("«")
+                m_at(at_palabra[val(0)])
+                m("» es una palabra del lenguaje: no vale como nombre")
+                aquí()
+            fin
+            m("esperaba ")
+            m(qué)
+            está()
+        fin
+        a := val(0)
+        pp := pp + 1
+        devolver a
+    fin
+
+    ; un nombre concreto («de», «a»)
+    función come_este(a: nat16)
+        si no es_id(a, 0) entonces
+            m("esperaba «")
+            m_at(a)
+            m("»")
+            está()
+        fin
+        pp := pp + 1
+    fin
+
+    ; ¿viene «Módulo.nombre», con Módulo importado?
+    función calificado(): bool
+        variable i, a: nat16
+        si clase(0) <> T_ID entonces devolver falso fin
+        a := val(0)
+        para i desde 1 hasta n_importados hacer
+            si importados[i - 1] = a entonces
+                devolver es_op(O_PUNTO, 1) y clase(2) = T_ID
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; el átomo «Módulo.nombre» de las piezas que tocan (la 0 y la 2)
+    función átomo_calificado(): nat16
+        variable t: arreglo [520] de byte
+        variable n: nat16
+        n := at_texto(val(0), t)
+        t[n] := '.'
+        n := n + 1 + at_texto(val(2), dirección(t[n + 1]))
+        si n >= 250 entonces
+            m("nombre demasiado largo para el compilador")
+            aquí()
+        fin
+        devolver átomo(t, n)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El módulo y sus declaraciones
+    ; -------------------------------------------------------------------------
+    función módulo_(): nat16
+        variable l, c, nombre, d, último, fin_nombre: nat16
+        salta_nl()
+        l := plin()
+        c := pcol()
+        come_pal(P_MODULO)
+        nombre := come_id("el nombre del módulo")
+        nombre_modulo := nombre
+        raíz := nudo(K_MODULO, l, c)
+        pon_a(raíz, nombre)
+        cola_consts := 0
+        último := 0
+        salta_nl()
+        mientras no es_pal(P_FIN, 0) hacer
+            d := declaración_módulo()
+            si último = 0 entonces pon_b(raíz, d) sino pon_sig(último, d) fin
+            último := d
+            si es_id(nombre, 0) entonces falta_fin() fin
+            si no es_cl(T_NL, 0) entonces
+                m("sobra esto al final de la declaración")
+                está()
+            fin
+            salta_nl()
+        fin
+        come_pal(P_FIN)
+        l := plin()
+        c := pcol()
+        fin_nombre := come_id("el nombre del módulo tras «fin»")
+        si fin_nombre <> nombre entonces
+            m("el módulo abre como «")
+            m_at(nombre)
+            m("» y cierra como «")
+            m_at(fin_nombre)
+            m("»")
+            falla(l, c)
+        fin
+        si es_op(O_PUNTO, 0) entonces pp := pp + 1 fin
+        salta_nl()
+        si no es_cl(T_EOF, 0) entonces
+            m("sobra texto después del final del módulo")
+            está()
+        fin
+        devolver raíz
+    fin
+
+    función declaración_módulo(): nat16
+        variable d: nat16
+        si es_pal(P_IMPORTAR, 0) entonces devolver importar_() fin
+        si es_pal(P_PUBLICO, 0) entonces
+            pp := pp + 1
+            si no (es_pal(P_CONSTANTE, 0) o es_pal(P_VARIABLE, 0) o es_pal(P_FUNCION, 0) o es_pal(P_TIPO, 0)) entonces
+                m("tras «público» va constante, variable, tipo o función")
+                está()
+            fin
+            d := declaración_módulo()
+            pon_marca(d, M_PUBLICO)
+            devolver d
+        fin
+        si es_pal(P_CONSTANTE, 0) entonces devolver constante_() fin
+        si es_pal(P_VARIABLE, 0) entonces devolver variable_(cierto) fin
+        si es_pal(P_FUNCION, 0) entonces devolver función_() fin
+        si es_pal(P_TIPO, 0) entonces devolver decl_tipo() fin
+        si es_pal(P_ENSAMBLADOR, 0) entonces devolver ensamblador_() fin
+        si es_id(a_modelo, 0) y es_id(a_grande, 1) entonces
+            d := nudo_aquí(K_MODELO)            ; «modelo grande»: un .EXE de varios segmentos
+            pp := pp + 2
+            devolver d
+        fin
+        si es_id(nombre_modulo, 0) o es_cl(T_EOF, 0) entonces falta_fin() fin
+        m("esperaba constante, variable, tipo, función o ensamblador")
+        está()
+        devolver 0
+    fin
+
+    función importar_(): nat16
+        variable d, n, último: nat16
+        d := nudo_aquí(K_IMPORTAR)
+        come_pal(P_IMPORTAR)
+        último := 0
+        mientras cierto hacer
+            n := nudo_aquí(K_NOMBRE)
+            pon_a(n, come_id("el nombre de un módulo"))
+            si último = 0 entonces pon_a(d, n) sino pon_sig(último, n) fin
+            último := n
+            si no es_op(O_COMA, 0) entonces romper fin
+            pp := pp + 1
+        fin
+        devolver d
+    fin
+
+    función constante_(): nat16
+        variable d, nombre: nat16
+        d := nudo_aquí(K_CONST)
+        come_pal(P_CONSTANTE)
+        nombre := come_id("el nombre de la constante")
+        pon_a(d, nombre)
+        come_op(O_IGUAL)
+        pon_b(d, expr())
+        si en_función entonces
+            si n_consts_fn >= MAX_CONSTS entonces
+                m("demasiadas constantes en una función para el compilador")
+                falla(nlin(d), ncol(d))
+            fin
+            consts_fn[n_consts_fn] := nombre
+            n_consts_fn := n_consts_fn + 1
+        fin
+        devolver d
+    fin
+
+    función decl_tipo(): nat16
+        variable d: nat16
+        d := nudo_aquí(K_TIPO)
+        come_pal(P_TIPO)
+        pon_a(d, come_id("el nombre del tipo"))
+        come_op(O_IGUAL)
+        pon_b(d, tipo_())
+        devolver d
+    fin
+
+    ; un K_NOMBRE con el nombre que viene, en la posición de la pieza que le sigue
+    ; (así lo hace ccastel.py con los campos)
+    función campo_nombre(): nat16
+        variable a, n: nat16
+        a := come_id("el nombre de un campo")
+        n := nudo_aquí(K_NOMBRE)
+        pon_a(n, a)
+        devolver n
+    fin
+
+    función tipo_(): nat16
+        variable t, grupo, n, último, últ_grupo: nat16
+        t := nudo_aquí(K_TARR)
+        si es_pal(P_ARREGLO, 0) entonces
+            pp := pp + 1
+            come_op(O_COR_A)
+            pon_a(t, expr())
+            come_op(O_COR_C)
+            come_este(a_de)
+            pon_b(t, tipo_())
+            devolver t
+        fin
+        si es_pal(P_PUNTERO, 0) entonces
+            pon_k(t, K_TPUNT)
+            pp := pp + 1
+            come_este(a_a)
+            pon_a(t, tipo_())
+            devolver t
+        fin
+        si es_pal(P_ESTRUCTURA, 0) entonces
+            pon_k(t, K_TEST)
+            pp := pp + 1
+            últ_grupo := 0
+            salta_nl()
+            mientras no es_pal(P_FIN, 0) hacer
+                grupo := nudo_aquí(K_CAMPOS)
+                si últ_grupo = 0 entonces pon_a(t, grupo) sino pon_sig(últ_grupo, grupo) fin
+                últ_grupo := grupo
+                n := campo_nombre()
+                pon_a(grupo, n)
+                último := n
+                mientras es_op(O_COMA, 0) hacer
+                    pp := pp + 1
+                    n := campo_nombre()
+                    pon_sig(último, n)
+                    último := n
+                fin
+                come_op(O_DOSP)
+                pon_b(grupo, tipo_())
+                salta_nl()
+            fin
+            come_pal(P_FIN)
+            devolver t
+        fin
+        pon_k(t, K_TNOM)
+        si calificado() entonces
+            pon_a(t, átomo_calificado())
+            pp := pp + 3
+            devolver t
+        fin
+        si es_cl(T_ID, 0) entonces
+            pon_a(t, val(0))
+            pp := pp + 1
+            devolver t
+        fin
+        m("esperaba un tipo")
+        está()
+        devolver 0
+    fin
+
+    ; cambia la clase de un nudo recién hecho
+    función pon_k(n: nat16, k: byte)
+        poner_byte(seg_ar + n, 0, k)
+    fin
+
+    función variable_(global_: bool): nat16
+        variable d, n, último: nat16
+        d := nudo_aquí(K_VAR)
+        si global_ entonces pon_marca(d, M_GLOBAL) fin
+        come_pal(P_VARIABLE)
+        último := 0
+        mientras cierto hacer
+            n := nudo_aquí(K_NOMBRE)
+            pon_a(n, come_id("el nombre de la variable"))
+            si último = 0 entonces pon_a(d, n) sino pon_sig(último, n) fin
+            último := n
+            si no es_op(O_COMA, 0) entonces romper fin
+            pp := pp + 1
+        fin
+        come_op(O_DOSP)
+        pon_b(d, tipo_())
+        si es_op(O_IGUAL, 0) entonces
+            pp := pp + 1
+            pon_c(d, inicial())
+        fin
+        devolver d
+    fin
+
+    ; una expresión, o una lista entre paréntesis para un arreglo
+    función inicial(): nat16
+        variable marca, marca_ar, l, c, primero, último, e, n: nat16
+        si es_op(O_PAR_A, 0) entonces
+            marca := pp
+            marca_ar := marca_árbol()
+            hay_marca := cierto
+            marca_pp := pp
+            l := plin()
+            c := pcol()
+            pp := pp + 1
+            salta_nl()
+            primero := expr()
+            último := primero
+            n := 1
+            salta_nl()
+            mientras es_op(O_COMA, 0) hacer
+                pp := pp + 1
+                salta_nl()
+                e := expr()
+                pon_sig(último, e)
+                último := e
+                n := n + 1
+                salta_nl()
+            fin
+            si es_op(O_PAR_C, 0) y (es_cl(T_NL, 1) o es_cl(T_EOF, 1)) y n > 1 entonces
+                pp := pp + 1
+                hay_marca := falso
+                e := nudo(K_LISTA, l, c)
+                pon_a(e, primero)
+                devolver e
+            fin
+            pp := marca
+            hay_marca := falso
+            suelta_árbol(marca_ar)
+        fin
+        devolver expr()
+    fin
+
+    función función_(): nat16
+        variable f, f2, p, último, marca, s, i, n: nat16
+        f := nudo_aquí(K_FUNC)
+        come_pal(P_FUNCION)
+        pon_a(f, come_id("el nombre de la función"))
+        come_op(O_PAR_A)
+        si no es_op(O_PAR_C, 0) entonces
+            p := parámetro()
+            pon_b(f, p)
+            último := p
+            mientras es_op(O_COMA, 0) hacer
+                pp := pp + 1
+                p := parámetro()
+                pon_sig(último, p)
+                último := p
+            fin
+        fin
+        come_op(O_PAR_C)
+        si es_op(O_DOSP, 0) entonces
+            pp := pp + 1
+            pon_c(f, tipo_())
+        fin
+        ; dónde empieza el cuerpo: la pieza que toca
+        s := ranura(0)
+        f2 := nudo(K_FUNC2, leer_palabra(s, 8), leer_palabra(s, 10))
+        pon_a(f2, leer_palabra(s, 12))
+        pon_b(f2, leer_palabra(s, 14))
+        pon_c(f2, leer_palabra(s, 8))
+        pon_t(f2, leer_palabra(s, 10))
+        pon_t(f, f2)
+        ; el cuerpo se analiza (por sus errores) y se suelta
+        marca := marca_árbol()
+        n_consts_fn := 0
+        en_función := cierto
+        bloque()
+        en_función := falso
+        come_pal(P_FIN)
+        suelta_árbol(marca)
+        para i desde 1 hasta n_consts_fn hacer
+            n := nudo(K_NOMBRE, nlin(f), ncol(f))
+            pon_a(n, consts_fn[i - 1])
+            si cola_consts = 0 entonces pon_c(raíz, n) sino pon_sig(cola_consts, n) fin
+            cola_consts := n
+        fin
+        devolver f
+    fin
+
+    función parámetro(): nat16
+        variable p: nat16
+        p := nudo_aquí(K_PARAM)
+        si es_id(a_ref, 0) y es_cl(T_ID, 1) entonces
+            pp := pp + 1
+            pon_marca(p, M_REF)
+        fin
+        pon_a(p, come_id("el nombre del parámetro"))
+        come_op(O_DOSP)
+        pon_b(p, tipo_())
+        devolver p
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las sentencias
+    ; -------------------------------------------------------------------------
+    función es_si_no(): bool
+        si es_pal(P_SI, 0) entonces devolver es_pal(P_NO, 1) y es_op(O_DOSP, 2) fin
+        devolver es_pal(P_SINO, 0) y es_op(O_DOSP, 1)
+    fin
+
+    función acaba_bloque(): bool
+        devolver es_pal(P_FIN, 0) o es_pal(P_SINO, 0) o es_pal(P_CASO, 0) o es_si_no()
+    fin
+
+    ; un bloque de sentencias: hasta fin, sino, caso o «si no:». Devuelve la primera (o 0)
+    función bloque(): nat16
+        variable primera, última, s: nat16
+        primera := 0
+        última := 0
+        salta_nl()
+        mientras no acaba_bloque() hacer
+            si es_cl(T_EOF, 0) entonces falta_fin() fin
+            s := sentencia()
+            si última = 0 entonces primera := s sino pon_sig(última, s) fin
+            última := s
+            ; una sentencia por línea (o seguida de lo que cierra el bloque)
+            si no (es_cl(T_NL, 0) o es_cl(T_EOF, 0) o acaba_bloque()) entonces
+                m("sobra esto al final de la sentencia (va una por línea)")
+                está()
+            fin
+            salta_nl()
+        fin
+        devolver primera
+    fin
+
+    función sentencia(): nat16
+        variable s, e, l, c: nat16
+        si es_pal(P_VARIABLE, 0) entonces devolver variable_(falso) fin
+        si es_pal(P_CONSTANTE, 0) entonces devolver constante_() fin
+        si es_pal(P_SI, 0) entonces devolver si_() fin
+        si es_pal(P_MIENTRAS, 0) entonces devolver mientras_() fin
+        si es_pal(P_PARA, 0) entonces devolver para_() fin
+        si es_pal(P_SEGUN, 0) entonces devolver según_() fin
+        si es_pal(P_ENSAMBLADOR, 0) entonces devolver ensamblador_() fin
+        l := plin()
+        c := pcol()
+        si es_pal(P_DEVOLVER, 0) entonces
+            s := nudo(K_DEVOLVER, l, c)
+            pp := pp + 1
+            si no (es_cl(T_NL, 0) o es_pal(P_FIN, 0) o es_pal(P_SINO, 0)) entonces pon_a(s, expr()) fin
+            devolver s
+        fin
+        si es_pal(P_ROMPER, 0) entonces
+            pp := pp + 1
+            devolver nudo(K_ROMPER, l, c)
+        fin
+        si es_pal(P_SEGUIR, 0) entonces
+            pp := pp + 1
+            devolver nudo(K_SEGUIR, l, c)
+        fin
+        si es_cl(T_ID, 0) o es_op(O_PAR_A, 0) entonces
+            e := postfijo()
+            si es_op(O_ASIG, 0) entonces
+                pp := pp + 1
+                s := nudo(K_ASIG, l, c)
+                pon_a(s, e)
+                pon_b(s, expr())
+                devolver s
+            fin
+            si nk(e) = K_LLAMADA entonces
+                s := nudo(K_LLAMADA_SENT, l, c)
+                pon_a(s, e)
+                devolver s
+            fin
+            si es_op(O_IGUAL, 0) entonces
+                m("para asignar se escribe «:=» («=» solo compara)")
+                aquí()
+            fin
+            m("esperaba «:=» o una llamada")
+            está()
+        fin
+        m("sentencia no reconocida")
+        está()
+        devolver 0
+    fin
+
+    función si_(): nat16
+        variable s: nat16
+        s := nudo_aquí(K_SI)
+        come_pal(P_SI)
+        pon_a(s, expr())
+        come_pal(P_ENTONCES)
+        pon_b(s, bloque())
+        si es_pal(P_SINO, 0) y no es_op(O_DOSP, 1) entonces
+            pp := pp + 1
+            si es_pal(P_SI, 0) entonces
+                pon_c(s, si_())
+                devolver s
+            fin
+            pon_c(s, bloque())
+        fin
+        come_pal(P_FIN)
+        devolver s
+    fin
+
+    función mientras_(): nat16
+        variable s: nat16
+        s := nudo_aquí(K_MIENTRAS)
+        come_pal(P_MIENTRAS)
+        pon_a(s, expr())
+        come_pal(P_HACER)
+        pon_b(s, bloque())
+        come_pal(P_FIN)
+        devolver s
+    fin
+
+    función para_(): nat16
+        variable s, s2, v: nat16
+        s := nudo_aquí(K_PARA)
+        come_pal(P_PARA)
+        v := nudo_aquí(K_REF)
+        pon_a(v, come_id("la variable del «para»"))
+        pon_a(s, v)
+        come_pal(P_DESDE)
+        pon_b(s, expr())
+        come_pal(P_HASTA)
+        s2 := nudo(K_PARA2, nlin(s), ncol(s))
+        pon_c(s, s2)
+        pon_a(s2, expr())
+        si es_pal(P_PASO, 0) entonces
+            pp := pp + 1
+            pon_b(s2, expr())
+        fin
+        come_pal(P_HACER)
+        pon_c(s2, bloque())
+        come_pal(P_FIN)
+        devolver s
+    fin
+
+    función según_(): nat16
+        variable s, k, último, v, últ_val: nat16
+        variable hay_otro: bool
+        s := nudo_aquí(K_SEGUN)
+        come_pal(P_SEGUN)
+        pon_a(s, expr())
+        si no es_cl(T_NL, 0) entonces
+            m("esperaba el fin de la línea")
+            está()
+        fin
+        pp := pp + 1
+        salta_nl()
+        último := 0
+        hay_otro := falso
+        mientras no es_pal(P_FIN, 0) hacer
+            si es_si_no() entonces
+                si hay_otro entonces
+                    m("«si no:» repetido")
+                    está()
+                fin
+                si es_pal(P_SI, 0) entonces pp := pp + 2 sino pp := pp + 1 fin
+                come_op(O_DOSP)
+                pon_c(s, bloque())
+                hay_otro := cierto
+            sino
+                k := nudo_aquí(K_CASO)
+                si no es_pal(P_CASO, 0) entonces
+                    m("esperaba «caso», «si no:» o «fin»")
+                    está()
+                fin
+                pp := pp + 1
+                si hay_otro entonces
+                    m("«si no:» va el último")
+                    falla(nlin(k), ncol(k))
+                fin
+                si último = 0 entonces pon_b(s, k) sino pon_sig(último, k) fin
+                último := k
+                últ_val := 0
+                mientras cierto hacer
+                    v := nudo_aquí(K_VAL)
+                    pon_a(v, expr())
+                    si es_op(O_PP, 0) entonces
+                        pp := pp + 1
+                        pon_b(v, expr())
+                    fin
+                    si últ_val = 0 entonces pon_a(k, v) sino pon_sig(últ_val, v) fin
+                    últ_val := v
+                    si no es_op(O_COMA, 0) entonces romper fin
+                    pp := pp + 1
+                fin
+                come_op(O_DOSP)
+                pon_b(k, bloque())
+            fin
+        fin
+        come_pal(P_FIN)
+        devolver s
+    fin
+
+    función ensamblador_(): nat16
+        variable s, r: nat16
+        s := nudo_aquí(K_ASM)
+        come_pal(P_ENSAMBLADOR)
+        si no es_cl(T_ASM, 0) entonces
+            m("esperaba ASM")
+            está()
+        fin
+        r := ranura(0)
+        pon_a(s, leer_palabra(r, 2))
+        pon_b(s, leer_palabra(r, 6))
+        pp := pp + 1
+        come_pal(P_FIN)
+        devolver s
+    fin
+
+    ; los argumentos de una llamada, con sus paréntesis: el primer K_ARG (o 0)
+    función argumentos(): nat16
+        variable primero, último, g: nat16
+        come_op(O_PAR_A)
+        primero := 0
+        último := 0
+        salta_nl()
+        si no es_op(O_PAR_C, 0) entonces
+            mientras cierto hacer
+                g := nudo_aquí(K_ARG)
+                si es_cl(T_ID, 0) y es_op(O_DOSP, 1) entonces
+                    pon_a(g, val(0))
+                    pp := pp + 2
+                fin
+                pon_b(g, expr())
+                si último = 0 entonces primero := g sino pon_sig(último, g) fin
+                último := g
+                salta_nl()
+                si no es_op(O_COMA, 0) entonces romper fin
+                pp := pp + 1
+                salta_nl()
+            fin
+        fin
+        come_op(O_PAR_C)
+        devolver primero
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las expresiones. De más floja a más fuerte:
+    ;  o | y | no | comparaciones | + - ob xob | * div mod yb << >> | unarios
+    ; -------------------------------------------------------------------------
+    ; un K_BIN con la posición de su operando izquierdo
+    función binario(op: byte, izq: nat16): nat16
+        variable n: nat16
+        n := nudo(K_BIN, nlin(izq), ncol(izq))
+        pon_op(n, op)
+        pon_a(n, izq)
+        devolver n
+    fin
+
+    función expr(): nat16
+        variable izq, n: nat16
+        izq := e_y()
+        mientras es_pal(P_O, 0) hacer
+            pp := pp + 1
+            n := binario(O_O, izq)
+            pon_b(n, e_y())
+            izq := n
+        fin
+        devolver izq
+    fin
+
+    función e_y(): nat16
+        variable izq, n: nat16
+        izq := e_no()
+        mientras es_pal(P_Y, 0) hacer
+            pp := pp + 1
+            n := binario(O_Y, izq)
+            pon_b(n, e_no())
+            izq := n
+        fin
+        devolver izq
+    fin
+
+    función e_no(): nat16
+        variable n: nat16
+        si es_pal(P_NO, 0) entonces
+            n := nudo_aquí(K_UN)
+            pon_op(n, O_NO)
+            pp := pp + 1
+            pon_a(n, e_no())
+            devolver n
+        fin
+        devolver e_cmp()
+    fin
+
+    ; O_... si la pieza que toca es una comparación; si no, 0
+    función comparación(): byte
+        variable op: nat16
+        si clase(0) <> T_OP entonces devolver 0 fin
+        op := val(0)
+        si op = O_IGUAL o op = O_DIST o op = O_MENOR o op = O_MENIG o op = O_MAYOR o op = O_MAYIG entonces devolver op fin
+        devolver 0
+    fin
+
+    función e_cmp(): nat16
+        variable izq, n: nat16
+        variable op: byte
+        izq := e_suma()
+        op := comparación()
+        si op <> 0 entonces
+            pp := pp + 1
+            n := binario(op, izq)
+            pon_b(n, e_suma())
+            izq := n
+            si comparación() <> 0 entonces
+                m("las comparaciones no se encadenan: use «y»")
+                está()
+            fin
+        fin
+        devolver izq
+    fin
+
+    función e_suma(): nat16
+        variable izq, n: nat16
+        variable op: byte
+        izq := e_mul()
+        mientras cierto hacer
+            op := 0
+            si es_op(O_MAS, 0) o es_op(O_MENOS, 0) entonces op := val(0) fin
+            si es_pal(P_OB, 0) o es_pal(P_XOB, 0) entonces op := O_PALABRA + val(0) fin
+            si op = 0 entonces romper fin
+            pp := pp + 1
+            n := binario(op, izq)
+            pon_b(n, e_mul())
+            izq := n
+        fin
+        devolver izq
+    fin
+
+    función e_mul(): nat16
+        variable izq, n: nat16
+        variable op: byte
+        izq := e_unario()
+        mientras cierto hacer
+            op := 0
+            si es_op(O_POR, 0) o es_op(O_IZQ, 0) o es_op(O_DER, 0) entonces op := val(0) fin
+            si es_pal(P_DIV, 0) o es_pal(P_MOD, 0) o es_pal(P_YB, 0) entonces op := O_PALABRA + val(0) fin
+            si op = 0 entonces romper fin
+            pp := pp + 1
+            n := binario(op, izq)
+            pon_b(n, e_unario())
+            izq := n
+        fin
+        devolver izq
+    fin
+
+    función e_unario(): nat16
+        variable n: nat16
+        si es_op(O_MENOS, 0) entonces
+            n := nudo_aquí(K_UN)
+            pon_op(n, O_MENOS)
+            pp := pp + 1
+            pon_a(n, e_unario())
+            devolver n
+        fin
+        si es_pal(P_NOB, 0) entonces
+            n := nudo_aquí(K_UN)
+            pon_op(n, O_NOB)
+            pp := pp + 1
+            pon_a(n, e_unario())
+            devolver n
+        fin
+        devolver postfijo()
+    fin
+
+    función postfijo(): nat16
+        variable e, n: nat16
+        e := primario()
+        mientras cierto hacer
+            si es_op(O_COR_A, 0) entonces
+                n := nudo_aquí(K_INDICE)
+                pp := pp + 1
+                pon_a(n, e)
+                pon_b(n, expr())
+                come_op(O_COR_C)
+                e := n
+            sino si es_op(O_PUNTO, 0) y es_cl(T_ID, 1) entonces
+                n := nudo_aquí(K_CAMPO)
+                pp := pp + 1
+                pon_a(n, e)
+                pon_b(n, val(0))
+                pp := pp + 1
+                e := n
+            sino
+                romper
+            fin
+        fin
+        devolver e
+    fin
+
+    función primario(): nat16
+        variable n, s, nombre: nat16
+        variable cl: byte
+        s := ranura(0)
+        cl := leer_byte(s, 0)
+        si cl = T_NUM entonces
+            n := nudo_aquí(K_NUM)
+            pon_a(n, leer_palabra(s, 2))
+            pon_b(n, leer_palabra(s, 4))
+            pp := pp + 1
+            devolver n
+        fin
+        si cl = T_CAD entonces
+            n := nudo_aquí(K_CAD)
+            pon_a(n, leer_palabra(s, 2))
+            pp := pp + 1
+            devolver n
+        fin
+        si es_pal(P_CIERTO, 0) o es_pal(P_FALSO, 0) entonces
+            n := nudo_aquí(K_BOOL)
+            si es_pal(P_CIERTO, 0) entonces pon_a(n, 1) fin
+            pp := pp + 1
+            devolver n
+        fin
+        si es_pal(P_NULO, 0) entonces
+            n := nudo_aquí(K_NULO)
+            pp := pp + 1
+            devolver n
+        fin
+        si es_op(O_PAR_A, 0) entonces
+            pp := pp + 1
+            n := expr()
+            come_op(O_PAR_C)
+            devolver n
+        fin
+        si cl = T_ID o (es_pal(P_PUNTERO, 0) y es_op(O_PAR_A, 1)) entonces
+            n := nudo_aquí(K_REF)
+            si cl = T_ID entonces nombre := val(0) sino nombre := at_palabra[P_PUNTERO] fin
+            si calificado() entonces            ; Módulo.nombre
+                nombre := átomo_calificado()
+                pp := pp + 2
+            fin
+            pp := pp + 1
+            pon_a(n, nombre)
+            si es_op(O_PAR_A, 0) entonces
+                pon_k(n, K_LLAMADA)
+                pon_b(n, argumentos())
+            fin
+            devolver n
+        fin
+        m("esperaba una expresión")
+        está()
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los archivos: el programa y los módulos que importa (el Cargador)
+    ; -------------------------------------------------------------------------
+    ; lee un archivo entero: devuelve su K_MODULO
+    función lee(ruta: puntero a byte): nat16
+        variable estado: byte
+        variable r: nat16
+        copiar_hasta(archivo_error, ruta, MAX_RUTA)
+        si no lex_abre(ruta) entonces
+            m("no puedo leer ")
+            m_utf8(ruta)
+            falla_sin_más()
+        fin
+        abierto := NINGUNO
+        ; la primera pasada: solo el léxico; de paso, los módulos de «importar»
+        ; (estén donde estén): valen como Módulo.nombre
+        n_importados := 0
+        estado := 0
+        mientras cierto hacer
+            sig_pieza(pz)
+            si pz.clase = T_EOF entonces romper fin
+            si estado = 1 entonces
+                si pz.clase = T_ID entonces
+                    si n_importados < MAX_MODULOS + 8 entonces
+                        importados[n_importados] := nat16(pz.val)
+                        n_importados := n_importados + 1
+                    fin
+                    estado := 2
+                    seguir
+                fin
+                estado := 0
+            sino si estado = 2 entonces
+                si pz.clase = T_OP y pz.val = O_COMA entonces
+                    estado := 1
+                    seguir
+                fin
+                estado := 0
+            fin
+            si pz.clase = T_PAL y pz.val = P_IMPORTAR entonces estado := 1 fin
+        fin
+        ; y la del análisis
+        lex_situar(0, 1, 1)
+        vacía_ventana()
+        en_función := falso
+        r := módulo_()
+        lex_cierra()
+        devolver r
+    fin
+
+    función existe(ruta: puntero a byte): bool
+        variable m_: ent16
+        m_ := abrir(ruta, LEER)
+        si m_ = MAL entonces devolver falso fin
+        cerrar(m_)
+        devolver cierto
+    fin
+
+    ; una carpeta más donde buscar los módulos (-I)
+    público función añade_carpeta(ruta: puntero a byte)
+        si n_carpetas < MAX_CARPETAS - 1 entonces
+            copiar_hasta(carpetas[n_carpetas], ruta, MAX_RUTA - 14)
+            n_carpetas := n_carpetas + 1
+        fin
+    fin
+
+    ; la carpeta de una ruta (con su barra o sus dos puntos; vacía si no lleva)
+    función carpeta_de(ruta: puntero a byte, destino: puntero a byte)
+        variable i, n: nat16
+        n := 0
+        i := 0
+        mientras ruta[i] <> 0 hacer
+            si ruta[i] = '\\' o ruta[i] = '/' o ruta[i] = ':' entonces n := i + 1 fin
+            i := i + 1
+        fin
+        si n > MAX_RUTA - 14 entonces n := 0 fin
+        para i desde 1 hasta n hacer
+            destino[i - 1] := ruta[i - 1]
+        fin
+        destino[n] := 0
+    fin
+
+    ; la carpeta del propio compilador: el DOS deja la ruta del programa detrás
+    ; de su entorno (el segmento del entorno está en 2Ch del prefijo)
+    función carpeta_propia(destino: puntero a byte)
+        variable p: puntero a nat16
+        variable seg, i, n: nat16
+        variable ruta: arreglo [MAX_RUTA] de byte
+        destino[0] := 0
+        p := puntero(0x2C)
+        seg := valor(p)
+        si seg = 0 entonces devolver fin
+        i := 0
+        mientras leer_byte(seg, i) <> 0 hacer
+            mientras leer_byte(seg, i) <> 0 hacer
+                i := i + 1
+                si i > 30000 entonces devolver fin
+            fin
+            i := i + 1
+        fin
+        si leer_palabra(seg, i + 1) <> 1 entonces devolver fin
+        i := i + 3
+        n := 0
+        mientras leer_byte(seg, i) <> 0 y n < MAX_RUTA - 1 hacer
+            ruta[n] := leer_byte(seg, i)
+            n := n + 1
+            i := i + 1
+        fin
+        ruta[n] := 0
+        carpeta_de(ruta, destino)
+    fin
+
+    ; el nombre del archivo de un módulo, en DOS: ARGUMENT.CAS
+    función archivo_de(nombre: nat16, destino: puntero a byte)
+        variable i, n: nat16
+        variable c: byte
+        n := 0
+        para i desde 1 hasta at_largo(nombre) hacer
+            c := at_letra(nombre, i - 1)
+            si c >= 'a' y c <= 'z' entonces c := c - 32 fin
+            si n < 8 y ((c >= 'A' y c <= 'Z') o (c >= '0' y c <= '9') o c = '_') entonces
+                destino[n] := c
+                n := n + 1
+            fin
+        fin
+        destino[n] := 0
+        concatenar(destino, ".CAS")
+    fin
+
+    ; añade al mensaje el nombre en minúsculas y «.cas» (como lo dice ccastel.py)
+    función m_archivo(nombre: nat16)
+        variable t: arreglo [256] de byte
+        variable i: nat16
+        at_texto(nombre, t)
+        i := 0
+        mientras t[i] <> 0 hacer
+            si t[i] >= 'A' y t[i] <= 'Z' entonces t[i] := t[i] + 32 fin
+            i := i + 1
+        fin
+        m_utf8(t)
+        m(".cas")
+    fin
+
+    función tiene_principal(árbol: nat16): bool
+        variable d: nat16
+        d := nb(árbol)
+        mientras d <> 0 hacer
+            si nk(d) = K_FUNC y na(d) = a_principal entonces devolver cierto fin
+            d := nsig(d)
+        fin
+        devolver falso
+    fin
+
+    ; el archivo del módulo que se importa (desde el archivo ruta_m, en esa
+    ; línea y columna): deja su ruta y devuelve su árbol. Un archivo que se
+    ; llame así pero sea un programa (con principal()) no vale: se sigue buscando
+    función busca(nombre: nat16, ruta_m: puntero a byte, lin: nat16, col: nat16, ruta: puntero a byte): nat16
+        variable programas: arreglo [200] de byte
+        variable archivo: arreglo [14] de byte
+        variable i, n, árbol: nat16
+        carpeta_de(ruta_m, carpetas[0])
+        carpeta_propia(carpetas[n_carpetas])
+        n := n_carpetas
+        si carpetas[n_carpetas][0] <> 0 entonces n := n + 1 fin
+        archivo_de(nombre, archivo)
+        programas[0] := 0
+        para i desde 0 hasta n - 1 hacer
+            copiar(ruta, carpetas[i])
+            árbol := longitud(ruta)
+            si árbol > 0 y ruta[árbol - 1] <> '\\' y ruta[árbol - 1] <> '/' y ruta[árbol - 1] <> ':' entonces concatenar(ruta, "\\") fin
+            concatenar(ruta, archivo)
+            si existe(ruta) entonces
+                árbol := lee(ruta)
+                si tiene_principal(árbol) entonces
+                    si longitud(programas) + longitud(ruta) + 3 < 200 entonces
+                        si programas[0] <> 0 entonces concatenar(programas, ", ") fin
+                        concatenar(programas, ruta)
+                    fin
+                sino
+                    si na(árbol) <> nombre entonces
+                        copiar_hasta(archivo_error, ruta_m, MAX_RUTA)
+                        m("el archivo ")
+                        m_archivo(nombre)
+                        m(" es el módulo «")
+                        m_at(na(árbol))
+                        m("», no «")
+                        m_at(nombre)
+                        m("»")
+                        falla(lin, col)
+                    fin
+                    devolver árbol
+                fin
+            fin
+        fin
+        copiar_hasta(archivo_error, ruta_m, MAX_RUTA)
+        m("se busca en: ")
+        para i desde 0 hasta n - 1 hacer
+            si i > 0 entonces m(", ") fin
+            si carpetas[i][0] = 0 entonces m(".") sino m_utf8(carpetas[i]) fin
+        fin
+        si programas[0] <> 0 entonces
+            m("; ")
+            m_utf8(programas)
+            m(" es un programa (tiene principal()), no un módulo")
+        fin
+        m_a_nota()
+        m("no encuentro el módulo «")
+        m_at(nombre)
+        m("»: falta el archivo ")
+        m_archivo(nombre)
+        falla(lin, col)
+        devolver 0
+    fin
+
+    ; el módulo ya cargado con ese nombre, o NINGUNO
+    función cargado(nombre: nat16): nat16
+        variable i: nat16
+        para i desde 1 hasta n_modulos hacer
+            si mod_nombre[i - 1] = nombre entonces devolver i - 1 fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; carga un módulo (si no se da su árbol, lo lee) y, antes, los que
+    ; importa. Devuelve su número en la tabla de módulos de Base
+    función carga(ruta: puntero a byte, árbol: nat16): nat16
+        variable importa: arreglo [MAX_MODULOS] de byte
+        variable ruta2: arreglo [MAX_RUTA] de byte
+        variable n_importa, nombre, d, n, nm, i, j, otro: nat16
+        variable repetido: bool
+        si árbol = 0 entonces árbol := lee(ruta) fin
+        nombre := na(árbol)
+        si n_en_curso >= MAX_MODULOS entonces
+            m("demasiados módulos, unos dentro de otros, para el compilador")
+            falla_sin_más()
+        fin
+        en_curso[n_en_curso] := nombre
+        n_en_curso := n_en_curso + 1
+        n_importa := 0
+        d := nb(árbol)
+        mientras d <> 0 hacer
+            si nk(d) = K_IMPORTAR entonces
+                n := na(d)
+                mientras n <> 0 hacer
+                    nm := na(n)
+                    para i desde 1 hasta n_en_curso hacer
+                        si en_curso[i - 1] = nm entonces
+                            copiar_hasta(archivo_error, ruta, MAX_RUTA)
+                            m("los módulos se importan en círculo: ")
+                            para j desde i hasta n_en_curso hacer
+                                m_at(en_curso[j - 1])
+                                m(" -> ")
+                            fin
+                            m_at(nm)
+                            falla(nlin(n), ncol(n))
+                        fin
+                    fin
+                    repetido := falso
+                    para i desde 1 hasta n_importa hacer
+                        si mod_nombre[importa[i - 1]] = nm entonces repetido := cierto fin
+                    fin
+                    si no repetido entonces
+                        otro := cargado(nm)
+                        si otro = NINGUNO entonces
+                            j := busca(nm, ruta, nlin(n), ncol(n), ruta2)
+                            otro := carga(ruta2, j)
+                        fin
+                        importa[n_importa] := otro
+                        n_importa := n_importa + 1
+                    fin
+                    n := nsig(n)
+                fin
+            fin
+            d := nsig(d)
+        fin
+        n_en_curso := n_en_curso - 1
+        si n_modulos >= MAX_MODULOS entonces
+            m("demasiados módulos para el compilador")
+            falla_sin_más()
+        fin
+        i := n_modulos
+        mod_nombre[i] := nombre
+        mod_arbol[i] := árbol
+        copiar_hasta(mod_ruta[i], ruta, MAX_RUTA)
+        mod_n_importa[i] := n_importa
+        para j desde 1 hasta n_importa hacer
+            mod_importa[i][j - 1] := importa[j - 1]
+        fin
+        n_modulos := n_modulos + 1
+        devolver i
+    fin
+
+    ; lee el programa de ese archivo y, antes, los módulos que importa (y los
+    ; que importan estos): rellena la tabla de módulos de Base, cada uno
+    ; detrás de los que importa; el programa, el último
+    público función carga_programa(ruta: puntero a byte)
+        si seg_pz = 0 entonces seg_pz := Base.bloque(VENTANA) fin
+        n_modulos := 0
+        n_en_curso := 0
+        carga(ruta, 0)
+    fin
+
+    ; vuelve a analizar el cuerpo de una función (su K_FUNC, del módulo de ese
+    ; número) y devuelve su primera sentencia (0 si está vacío). Los nudos se
+    ; crean donde vaya el árbol: quien llama pone la marca y lo suelta
+    público función cuerpo_de(func: nat16, mód: nat16): nat16
+        variable f2, d, n: nat16
+        si abierto <> mód entonces
+            si no lex_abre(mod_ruta[mód]) entonces
+                m("no puedo leer ")
+                m_utf8(mod_ruta[mód])
+                falla_sin_más()
+            fin
+            abierto := mód
+            ; los módulos que importa este (para Módulo.nombre)
+            n_importados := 0
+            d := nb(mod_arbol[mód])
+            mientras d <> 0 hacer
+                si nk(d) = K_IMPORTAR entonces
+                    n := na(d)
+                    mientras n <> 0 hacer
+                        si n_importados < MAX_MODULOS + 8 entonces
+                            importados[n_importados] := na(n)
+                            n_importados := n_importados + 1
+                        fin
+                        n := nsig(n)
+                    fin
+                fin
+                d := nsig(d)
+            fin
+        fin
+        f2 := nt(func)
+        lex_situar(nat32(nb(f2)) << 16 ob na(f2), nc(f2), nt(f2))
+        vacía_ventana()
+        en_función := falso
+        devolver bloque()
+    fin
+
+fin Sintactico.

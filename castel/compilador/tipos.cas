@@ -1,0 +1,1125 @@
+; =============================================================================
+;  tipos.cas - los tipos y las comprobaciones del compilador de Castel: de un
+;  tipo escrito a un tipo (resuelve), el valor de una cuenta con constantes
+;  (const), el tipo de una expresión con sus comprobaciones (tipo) y si una
+;  cosa se puede guardar en otra (compatible). Es la parte 3 de ccastel.py y
+;  la mitad de la 4 (la que no genera nada), función por función y con los
+;  mismos mensajes.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tipos
+
+    importar Base, Tablas, Cuentas, Textos
+
+    ; -------------------------------------------------------------------------
+    ;  Tipos: su base, si son iguales y cómo se dicen
+    ; -------------------------------------------------------------------------
+    ; el tipo apuntado (o el de los elementos). Lo apuntado por un puntero se
+    ; mira la primera vez que hace falta, con los nombres del módulo donde se escribió
+    público función tbase(t: nat16): nat16
+        variable antes, b: nat16
+        variable temp: bool
+        si t_estado(t) = 1 entonces
+            antes := el_mod
+            temp := tip_temporal
+            tip_temporal := no tip_fijo(t)
+            usa(t_mod(t))
+            b := resuelve(t_base_cruda(t))
+            usa(antes)
+            tip_temporal := temp
+            t_pon_base(t, 2, b)
+        fin
+        devolver t_base_cruda(t)
+    fin
+
+    ; ¿un puntero sin tipo (nulo, puntero(n))?
+    público función sin_base(t: nat16): bool
+        devolver t_estado(t) = 0
+    fin
+
+    público función igual(a: nat16, b: nat16): bool
+        si a = b entonces devolver cierto fin
+        si tk(a) <> tk(b) entonces devolver falso fin
+        si tk(a) = TK_PUNT entonces
+            devolver sin_base(a) o sin_base(b) o igual(tbase(a), tbase(b))
+        fin
+        si tk(a) = TK_ARR entonces
+            devolver tn(a) = tn(b) y igual(tbase(a), tbase(b))
+        fin
+        devolver tk(a) <> TK_EST
+    fin
+
+    ; añade al mensaje cómo se llama un tipo
+    público función m_tipo(t: nat16)
+        según tk(t)
+            caso TK_PUNT:
+                si sin_base(t) entonces
+                    m("puntero")
+                sino
+                    m("puntero a ")
+                    m_tipo(tbase(t))
+                fin
+            caso TK_ARR:
+                m("arreglo [")
+                m_nat(tn(t))
+                m("] de ")
+                m_tipo(tbase(t))
+            caso TK_EST:
+                si t_nombre(t) <> 0 entonces m_at(t_nombre(t)) sino m("estructura") fin
+            caso TK_LIT, TK_LIT32: m("número")
+            caso TK_NAT8: m("byte")
+            caso TK_NADA: m("nada")
+            caso TK_NAT16: m("nat16")
+            caso TK_ENT16: m("ent16")
+            caso TK_BOOL: m("bool")
+            caso TK_NAT32: m("nat32")
+            caso TK_ENT32: m("ent32")
+        fin
+    fin
+
+    ; añade al mensaje una operación como se escribe («+», «yb»...)
+    público función m_op(op: byte)
+        si op >= O_PALABRA entonces m_at(at_palabra[op - O_PALABRA]) sino m_simbolo(op) fin
+    fin
+
+    ; «texto» y, si hay átomo, «nombre» entre comillas
+    función m_qué(t: puntero a byte, a: nat16)
+        m(t)
+        si a <> 0 entonces
+            m("«")
+            m_at(a)
+            m("»")
+        fin
+    fin
+
+    función m_n64(ref v: N64)
+        variable t: arreglo [14] de byte
+        n_texto(v, t)
+        m(t)
+    fin
+
+    público función es_texto(t: nat16): bool
+        si tk(t) <> TK_PUNT y tk(t) <> TK_ARR entonces devolver falso fin
+        si tk(t) = TK_PUNT y sin_base(t) entonces devolver falso fin
+        devolver tk(tbase(t)) = TK_NAT8
+    fin
+
+    público función con_signo(ta: nat16, tb: nat16): bool
+        si tk(ta) = TK_ENT16 o tk(tb) = TK_ENT16 o tk(ta) = TK_ENT32 o tk(tb) = TK_ENT32 entonces devolver cierto fin
+        devolver es_lit(ta) y es_lit(tb)
+    fin
+
+    ; el tipo de un número escrito: de 16 bits si cabe; si no, de 32
+    público función tipo_lit(ref v: N64): nat16
+        si n_cabe16(v) entonces devolver T_LIT fin
+        devolver T_LIT32
+    fin
+
+    ; el valor de una constante declarada
+    público función s_valor(r: nat16, ref v: N64)
+        v.bajo := nat32(s_b(r)) << 16 ob s_a(r)
+        v.alto := 0
+        si s_marcas(r) yb SM_NEG <> 0 entonces v.alto := 0xFFFFFFFF fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Nombres: ¿se puede declarar este?
+    ; -------------------------------------------------------------------------
+    público función declarado(a: nat16, lin: nat16, col: nat16, local: bool)
+        si at_pal(a) <> 0 o at_interna(a) <> 0 entonces
+            m_qué("", a)
+            m(" es un nombre del lenguaje")
+            falla(lin, col)
+        fin
+        si local entonces
+            si loc_busca(a) >= 0 entonces
+                m_qué("", a)
+                m(" ya está declarado en esta función")
+                falla(lin, col)
+            fin
+            devolver
+        fin
+        si busca(a) <> 0 entonces
+            m_qué("", a)
+            m(" ya está declarado")
+            falla(lin, col)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Tipos escritos -> tipo
+    ; -------------------------------------------------------------------------
+    público función resuelve(t: nat16): nat16
+        variable r, base, c, nm, tt, off, off2, tipo2: nat16
+        variable n: N64
+        según nk(t)
+            caso K_TNOM:
+                r := tipo_de_nombre(na(t))
+                si r = 0 entonces no_está("tipo desconocido", na(t), nlin(t), ncol(t)) fin
+                devolver r
+            caso K_TPUNT:
+                r := tip_nuevo(TK_PUNT, 2)      ; lo apuntado se mira más tarde, pero en este módulo
+                t_pon_base(r, 1, na(t))
+                t_pon_mod(r, el_mod)
+                devolver r
+            caso K_TARR:
+                si no const(na(t), n) entonces
+                    m("el tamaño de un arreglo es una constante")
+                    falla(nlin(na(t)), ncol(na(t)))
+                fin
+                si n_negativo(n) o n_cero(n) entonces
+                    m("un arreglo tiene al menos un elemento")
+                    falla(nlin(na(t)), ncol(na(t)))
+                fin
+                base := resuelve(nb(t))
+                si n.bajo > 0xFFFF o n.bajo * ttam(base) > 0xFFFF entonces
+                    m("el arreglo no cabe en un segmento")
+                    falla(nlin(t), ncol(t))
+                fin
+                r := tip_nuevo(TK_ARR, nat16(n.bajo) * ttam(base))
+                t_pon_base(r, 2, base)
+                t_pon_n(r, nat16(n.bajo))
+                devolver r
+            caso K_TEST:
+                r := tip_nuevo(TK_EST, 0)
+                off := 0
+                c := na(t)
+                mientras c <> 0 hacer
+                    tt := resuelve(nb(c))
+                    nm := na(c)
+                    mientras nm <> 0 hacer
+                        si t_campo(r, na(nm), off2, tipo2) entonces
+                            m_qué("campo repetido: ", na(nm))
+                            falla(nlin(nm), ncol(nm))
+                        fin
+                        t_campo_nuevo(r, na(nm), off, tt)
+                        off := off + ttam(tt)
+                        nm := nsig(nm)
+                    fin
+                    c := nsig(c)
+                fin
+                si no t_tiene_campos(r) entonces
+                    m("una estructura sin campos")
+                    falla(nlin(t), ncol(t))
+                fin
+                poner_palabra(seg_tip + r, 2, off)
+                devolver r
+        fin
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lugares y variables
+    ; -------------------------------------------------------------------------
+    público función es_lugar(e: nat16): bool
+        variable k: byte
+        k := nk(e)
+        si k = K_REF entonces devolver es_var(na(e)) fin
+        si k = K_CAMPO o k = K_INDICE entonces devolver cierto fin
+        devolver k = K_LLAMADA y at_interna(na(e)) = I_VALOR
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Constantes: el valor de e si se sabe al compilar
+    ; -------------------------------------------------------------------------
+    función no_cabe(e: nat16)
+        m("la cuenta con constantes no cabe en 32 bits")
+        falla(nlin(e), ncol(e))
+    fin
+
+    función es_conversión(i: byte): bool
+        devolver i = I_NAT8 o i = I_BYTE o i = I_NAT16 o i = I_ENT16 o i = I_NAT32 o i = I_ENT32
+    fin
+
+    ; recorta v a 16 o 32 bits y, si es con signo y tiene el bit alto, lo hace negativo
+    función da_la_vuelta(ref v: N64, largo_: bool, signo: bool)
+        si largo_ entonces
+            v.alto := 0
+            si signo y v.bajo >= 0x80000000 entonces v.alto := 0xFFFFFFFF fin
+        sino
+            v.alto := 0
+            v.bajo := v.bajo yb 0xFFFF
+            si signo y v.bajo >= 0x8000 entonces
+                v.bajo := v.bajo ob 0xFFFF0000
+                v.alto := 0xFFFFFFFF
+            fin
+        fin
+    fin
+
+    función const_bin(e: nat16, ref v: N64): bool
+        variable a, b: N64
+        variable ca, cb, largo_, signo: bool
+        variable op: byte
+        variable ta, tb, bits, cmp: nat16
+        variable c: ent16
+        variable q: nat32
+        ca := const(na(e), a)
+        cb := const(nb(e), b)
+        si no ca o no cb entonces devolver falso fin
+        comprueba(e)
+        op := nop(e)
+        si (op = O_DIV o op = O_MOD) y n_cero(b) entonces
+            m("división por cero")
+            falla(nlin(e), ncol(e))
+        fin
+        ; uno de 32 bits (o un número que no cabe en 16) se desplaza como uno de 32
+        ta := tipo_de(na(e))
+        tb := tipo_de(nb(e))
+        largo_ := es32(ta) o no n_cabe16(a)
+        si op = O_IZQ o op = O_DER entonces
+            bits := 15
+            si largo_ entonces bits := 31 fin
+            si no n_entre(b, 0, bits) entonces
+                m("se desplaza de 0 a ")
+                m_nat(bits)
+                m(" bits")
+                falla(nlin(nb(e)), ncol(nb(e)))
+            fin
+        fin
+        si op = O_DIV entonces
+            q := n_abs(a) div n_abs(b)
+            n_nat(v, q)
+            si n_negativo(a) <> n_negativo(b) entonces n_niega(v) fin
+            devolver cierto
+        fin
+        si op = O_MOD entonces
+            q := n_abs(a) mod n_abs(b)
+            n_nat(v, q)
+            si n_negativo(a) entonces n_niega(v) fin
+            devolver cierto
+        fin
+        n_copia(v, a)
+        cmp := 0
+        según op
+            caso O_MAS: n_suma(v, b)
+            caso O_MENOS: n_resta(v, b)
+            caso O_POR: n_por(v, b)
+            caso O_YB, O_Y: n_y(v, b)
+            caso O_OB, O_O: n_o(v, b)
+            caso O_XOB: n_xo(v, b)
+            caso O_IZQ:
+                n_izq(v, nat16(b.bajo))
+                si largo_ entonces
+                    v.alto := 0
+                sino
+                    v.alto := 0
+                    v.bajo := v.bajo yb 0xFFFF
+                fin
+            caso O_DER:
+                si no n_negativo(a) entonces
+                    v.alto := 0
+                    si no largo_ entonces v.bajo := v.bajo yb 0xFFFF fin
+                fin
+                n_der(v, nat16(b.bajo))
+            si no:
+                ; las comparaciones
+                cmp := 1
+                c := n_compara(a, b)
+                según op
+                    caso O_IGUAL: n_nat(v, nat32(c = 0))
+                    caso O_DIST: n_nat(v, nat32(c <> 0))
+                    caso O_MENOR: n_nat(v, nat32(c < 0))
+                    caso O_MENIG: n_nat(v, nat32(c <= 0))
+                    caso O_MAYOR: n_nat(v, nat32(c > 0))
+                    caso O_MAYIG: n_nat(v, nat32(c >= 0))
+                fin
+        fin
+        si es_num(ta) y es_num(tb) y no (es_lit(ta) y es_lit(tb)) y cmp = 0 entonces
+            ; con un tipo por medio, la cuenta da la vuelta como al ejecutar
+            si op <> O_IZQ y op <> O_DER entonces
+                largo_ := es32(ta) o es32(tb)
+                signo := con_signo(ta, tb)
+            sino
+                signo := tk(ta) = TK_ENT16 o tk(ta) = TK_ENT32
+            fin
+            da_la_vuelta(v, largo_, signo)
+        fin
+        si no n_cabe32(v) entonces no_cabe(e) fin
+        devolver cierto
+    fin
+
+    función const_cruda(e: nat16, ref v: N64): bool
+        variable k, i: byte
+        variable r, x: nat16
+        variable ancho32: bool
+        variable uno: N64
+        k := nk(e)
+        si k = K_NUM entonces
+            n_nat(v, nv(e))
+            devolver cierto
+        fin
+        si k = K_BOOL entonces
+            n_nat(v, na(e))
+            devolver cierto
+        fin
+        si k = K_REF entonces
+            r := busca(na(e))
+            si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL) y no es_var(na(e)) entonces
+                s_valor(r, v)
+                devolver cierto
+            fin
+            devolver falso
+        fin
+        si k = K_UN entonces
+            si no const(na(e), v) entonces devolver falso fin
+            comprueba(e)
+            ancho32 := es32(tipo_de(na(e))) o no n_cabe16(v)
+            según nop(e)
+                caso O_MENOS: n_niega(v)
+                caso O_NOB:
+                    n_nob(v)
+                    v.alto := 0
+                    si no ancho32 entonces v.bajo := v.bajo yb 0xFFFF fin
+                si no:
+                    n_nat(uno, 1)
+                    n_resta(uno, v)
+                    n_copia(v, uno)
+            fin
+            si no n_cabe32(v) entonces no_cabe(e) fin
+            devolver cierto
+        fin
+        si k = K_BIN entonces devolver const_bin(e, v) fin
+        si k = K_LLAMADA entonces
+            i := at_interna(na(e))
+            si i = I_TAMANO entonces
+                n_nat(v, ttam(tipo_de_tamaño(e)))
+                devolver cierto
+            fin
+            x := nb(e)
+            si es_conversión(i) y x <> 0 y nsig(x) = 0 entonces
+                si no const(nb(x), v) entonces devolver falso fin
+                comprueba(e)
+                si i = I_NAT8 o i = I_BYTE entonces
+                    n_nat(v, v.bajo yb 0xFF)
+                sino si i = I_NAT32 entonces
+                    v.alto := 0
+                sino si i = I_ENT32 entonces
+                    n_ent(v, ent32(v.bajo))
+                sino si i = I_ENT16 entonces
+                    n_ent(v, ent16(v.bajo))
+                sino
+                    n_nat(v, v.bajo yb 0xFFFF)
+                fin
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; el valor de e si es una constante. (De un nudo que no lo es, se recuerda.)
+    público función const(e: nat16, ref v: N64): bool
+        si nmarcas(e) yb M_NO_CONST <> 0 entonces devolver falso fin
+        si const_cruda(e, v) entonces devolver cierto fin
+        pon_marca(e, M_NO_CONST)
+        devolver falso
+    fin
+
+    ; ¿es e una constante? (sin querer su valor)
+    público función es_const(e: nat16): bool
+        variable v: N64
+        devolver const(e, v)
+    fin
+
+    función falla_rango(ref v: N64, qué: puntero a byte, lin: nat16, col: nat16)
+        m_n64(v)
+        m(qué)
+        falla(lin, col)
+    fin
+
+    público función rango(ref v: N64, t: nat16, lin: nat16, col: nat16)
+        variable k: byte
+        k := tk(t)
+        si k = TK_NAT8 y no n_entre(v, -128, 255) entonces falla_rango(v, " no cabe en un byte (0 a 255)", lin, col) fin
+        si k = TK_NAT16 y no n_cabe16(v) entonces falla_rango(v, " no cabe en nat16 (0 a 65535)", lin, col) fin
+        si k = TK_ENT16 y no n_cabe16(v) entonces falla_rango(v, " no cabe en ent16 (-32768 a 32767)", lin, col) fin
+        si k = TK_NAT32 y no n_cabe32(v) entonces falla_rango(v, " no cabe en nat32 (0 a 4294967295)", lin, col) fin
+        si k = TK_ENT32 y no n_cabe32(v) entonces falla_rango(v, " no cabe en ent32 (-2147483648 a 2147483647)", lin, col) fin
+        si es_lit(t) y no n_cabe32(v) entonces falla_rango(v, " no cabe en 32 bits", lin, col) fin
+    fin
+
+    público función tipo_de_tamaño(e: nat16): nat16
+        variable x, a, t: nat16
+        x := nb(e)
+        si x = 0 o nsig(x) <> 0 o na(x) <> 0 entonces
+            m("tamaño() lleva un tipo o una variable")
+            falla(nlin(e), ncol(e))
+        fin
+        a := nb(x)
+        si nk(a) = K_REF y no es_var(na(a)) entonces
+            t := tipo_de_nombre(na(a))
+            si t <> 0 entonces devolver t fin
+        fin
+        si no es_lugar(a) entonces
+            m("tamaño() lleva un tipo o una variable")
+            falla(nlin(a), ncol(a))
+        fin
+        devolver tipo_de(a)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El tipo de una expresión (con sus comprobaciones)
+    ; -------------------------------------------------------------------------
+    público función tipo_de(e: nat16): nat16
+        variable t: nat16
+        t := nt(e)
+        si t = 0 entonces
+            pon_marca(e, M_TIPANDO)
+            t := tipo_crudo(e)
+            pon_t(e, t)
+        fin
+        devolver t
+    fin
+
+    ; las comprobaciones de tipos de e, si no se están haciendo ya
+    público función comprueba(e: nat16)
+        si nt(e) = 0 y nmarcas(e) yb M_TIPANDO = 0 entonces tipo_de(e) fin
+    fin
+
+    público función valor_tipo(e: nat16): nat16
+        variable t: nat16
+        t := tipo_de(e)
+        si tk(t) = TK_NADA entonces
+            m("esa función no devuelve nada")
+            falla(nlin(e), ncol(e))
+        fin
+        si tk(t) = TK_EST entonces
+            m("una estructura entera no vale aquí: use sus campos")
+            falla(nlin(e), ncol(e))
+        fin
+        devolver t
+    fin
+
+    función tipo_crudo(e: nat16): nat16
+        variable k: byte
+        variable t, to, ti, r, off, tc: nat16
+        variable v: N64
+        variable vr: Var
+        k := nk(e)
+        según k
+            caso K_NUM:
+                n_nat(v, nv(e))
+                devolver tipo_lit(v)
+            caso K_BOOL: devolver T_BOOL
+            caso K_NULO: devolver T_PUNT_U
+            caso K_CAD: devolver T_TEXTO
+            caso K_REF:
+                si es_var(na(e)) entonces
+                    var(na(e), nlin(e), ncol(e), vr)
+                    devolver vr.tipo_
+                fin
+                r := busca(na(e))
+                si r <> 0 entonces
+                    si s_clase(r) = S_NUM entonces
+                        s_valor(r, v)
+                        devolver tipo_lit(v)
+                    fin
+                    si s_clase(r) = S_BOOL entonces devolver T_BOOL fin
+                    si s_clase(r) = S_CAD entonces devolver T_TEXTO fin
+                fin
+                si tipo_de_nombre(na(e)) <> 0 entonces
+                    m_qué("", na(e))
+                    m(" es un tipo, no un valor")
+                    falla(nlin(e), ncol(e))
+                fin
+                var(na(e), nlin(e), ncol(e), vr)
+            caso K_UN:
+                t := valor_tipo(na(e))
+                si nop(e) = O_NO entonces
+                    si tk(t) <> TK_BOOL entonces
+                        m("«no» niega un bool, no un ")
+                        m_tipo(t)
+                        m(" (para los bits, «nob»)")
+                        falla(nlin(e), ncol(e))
+                    fin
+                    devolver T_BOOL
+                fin
+                si no es_num(t) entonces
+                    m("«")
+                    m_op(nop(e))
+                    m("» es para números, no para ")
+                    m_tipo(t)
+                    falla(nlin(e), ncol(e))
+                fin
+                si es_lit(t) entonces
+                    const(e, v)
+                    devolver tipo_lit(v)
+                fin
+                si nop(e) = O_MENOS entonces
+                    si es32(t) entonces devolver T_ENT32 fin
+                    devolver T_ENT16
+                fin
+                si es32(t) entonces devolver t fin
+                si tk(t) = TK_ENT16 entonces devolver T_ENT16 fin
+                devolver T_NAT16
+            caso K_BIN: devolver tipo_bin(e)
+            caso K_INDICE:
+                to := valor_tipo(na(e))
+                ti := valor_tipo(nb(e))
+                si tk(to) <> TK_ARR y tk(to) <> TK_PUNT entonces
+                    m("solo se indexan los arreglos y los punteros, no un ")
+                    m_tipo(to)
+                    falla(nlin(e), ncol(e))
+                fin
+                si tk(to) = TK_PUNT y sin_base(to) entonces
+                    m("un puntero sin tipo no se puede indexar")
+                    falla(nlin(e), ncol(e))
+                fin
+                si no es_num(ti) entonces
+                    m("el índice es un número, no un ")
+                    m_tipo(ti)
+                    falla(nlin(nb(e)), ncol(nb(e)))
+                fin
+                si const(nb(e), v) y tk(to) = TK_ARR entonces
+                    si no n_entre(v, 0, tn(to) - 1) entonces
+                        m("índice ")
+                        m_n64(v)
+                        m(" fuera del arreglo (va de 0 a ")
+                        m_nat(tn(to) - 1)
+                        m(")")
+                        falla(nlin(nb(e)), ncol(nb(e)))
+                    fin
+                fin
+                devolver tbase(to)
+            caso K_CAMPO:
+                to := tipo_de(na(e))
+                si tk(to) = TK_PUNT y no sin_base(to) entonces
+                    si tk(tbase(to)) = TK_EST entonces to := tbase(to) fin
+                fin
+                si tk(to) <> TK_EST entonces
+                    m("«.")
+                    m_at(nb(e))
+                    m("»: lo de la izquierda no es una estructura, es un ")
+                    m_tipo(to)
+                    falla(nlin(e), ncol(e))
+                fin
+                si no t_campo(to, nb(e), off, tc) entonces
+                    m("la estructura ")
+                    m_tipo(to)
+                    m_qué(" no tiene el campo ", nb(e))
+                    falla(nlin(e), ncol(e))
+                fin
+                devolver tc
+            caso K_LLAMADA: devolver tipo_llamada(e)
+        fin
+        devolver 0
+    fin
+
+    función falla_bool_op(op: byte, t: nat16, x: nat16)
+        m("«")
+        m_op(op)
+        m("» une condiciones (bool), no un ")
+        m_tipo(t)
+        m(" (para los bits, «")
+        m_op(op)
+        m("b»)")
+        falla(nlin(x), ncol(x))
+    fin
+
+    ; el operando x (de tipo t) de una cuenta: tiene que ser un número
+    función cuenta_con(op: byte, t: nat16, x: nat16)
+        variable txt: arreglo [8] de byte
+        variable n: nat16
+        si es_num(t) entonces devolver fin
+        si tk(t) = TK_BOOL y (op = O_YB o op = O_OB o op = O_XOB) entonces
+            m("«")
+            m_op(op)
+            m("» es para los bits de un número; con bool se usa «")
+            ; (la misma palabra sin su última letra: yb -> y, ob -> o)
+            n := at_texto(at_palabra[op - O_PALABRA], txt)
+            txt[n - 1] := 0
+            m(txt)
+            m("»")
+            falla(nlin(x), ncol(x))
+        fin
+        m("«")
+        m_op(op)
+        m("» es para números, no para ")
+        m_tipo(t)
+        falla(nlin(x), ncol(x))
+    fin
+
+    función tipo_bin(e: nat16): nat16
+        variable op: byte
+        variable ta, tb: nat16
+        variable pa, pb, signo: bool
+        variable v: N64
+        op := nop(e)
+        ta := valor_tipo(na(e))
+        tb := valor_tipo(nb(e))
+        si op = O_Y o op = O_O entonces
+            si tk(ta) <> TK_BOOL entonces falla_bool_op(op, ta, na(e)) fin
+            si tk(tb) <> TK_BOOL entonces falla_bool_op(op, tb, nb(e)) fin
+            devolver T_BOOL
+        fin
+        si op = O_IGUAL o op = O_DIST o op = O_MENOR o op = O_MENIG o op = O_MAYOR o op = O_MAYIG entonces
+            si es_num(ta) y es_num(tb) entonces devolver T_BOOL fin
+            si tk(ta) = TK_BOOL y tk(tb) = TK_BOOL y (op = O_IGUAL o op = O_DIST) entonces devolver T_BOOL fin
+            pa := tk(ta) = TK_PUNT o tk(ta) = TK_ARR
+            pb := tk(tb) = TK_PUNT o tk(tb) = TK_ARR
+            si pa y pb entonces devolver T_BOOL fin
+            m("no se puede comparar un ")
+            m_tipo(ta)
+            m(" con un ")
+            m_tipo(tb)
+            falla(nlin(e), ncol(e))
+        fin
+        si (op = O_MAS o op = O_MENOS) y tk(ta) = TK_PUNT y es_num(tb) entonces
+            si sin_base(ta) entonces
+                m("a un puntero sin tipo no se le suma")
+                falla(nlin(e), ncol(e))
+            fin
+            devolver ta
+        fin
+        si op = O_MAS y tk(tb) = TK_PUNT y es_num(ta) entonces
+            si sin_base(tb) entonces
+                m("a un puntero sin tipo no se le suma")
+                falla(nlin(e), ncol(e))
+            fin
+            devolver tb
+        fin
+        si op = O_MENOS y tk(ta) = TK_PUNT y (tk(tb) = TK_PUNT o tk(tb) = TK_ARR) entonces
+            ; (el nombre de un arreglo de byte vale como puntero a su primer elemento)
+            pa := sin_base(ta) o (tk(tb) = TK_PUNT y sin_base(tb))
+            si no pa entonces pa := ttam(tbase(ta)) <> 1 o no igual(tbase(ta), tbase(tb)) fin
+            si pa entonces
+                m("solo se restan dos punteros a byte")
+                falla(nlin(e), ncol(e))
+            fin
+            devolver T_NAT16
+        fin
+        cuenta_con(op, ta, na(e))
+        cuenta_con(op, tb, nb(e))
+        si es_lit(ta) y es_lit(tb) entonces
+            const(e, v)
+            devolver tipo_lit(v)
+        fin
+        si op = O_IZQ o op = O_DER entonces     ; manda el que se desplaza
+            si es32(ta) entonces
+                si tk(ta) = TK_ENT32 entonces devolver T_ENT32 fin
+                devolver T_NAT32
+            fin
+            si tk(ta) = TK_ENT16 entonces devolver T_ENT16 fin
+            devolver T_NAT16
+        fin
+        signo := tk(ta) = TK_ENT16 o tk(tb) = TK_ENT16 o tk(ta) = TK_ENT32 o tk(tb) = TK_ENT32
+        si es32(ta) o es32(tb) entonces
+            si signo entonces devolver T_ENT32 fin
+            devolver T_NAT32
+        fin
+        si signo entonces devolver T_ENT16 fin
+        devolver T_NAT16
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Llamadas
+    ; -------------------------------------------------------------------------
+    ; cuántos argumentos lleva la llamada
+    público función n_args(e: nat16): nat16
+        variable x, n: nat16
+        n := 0
+        x := nb(e)
+        mientras x <> 0 hacer
+            n := n + 1
+            x := nsig(x)
+        fin
+        devolver n
+    fin
+
+    ; el argumento número i (desde 0): su expresión
+    público función arg(e: nat16, i: nat16): nat16
+        variable x: nat16
+        x := nb(e)
+        mientras i > 0 hacer
+            x := nsig(x)
+            i := i - 1
+        fin
+        devolver nb(x)
+    fin
+
+    ; comprueba que la llamada lleva de n a nmax argumentos, y ninguno con nombre
+    función args_simples(e: nat16, n: nat16, nmax: nat16)
+        variable x, hay: nat16
+        x := nb(e)
+        mientras x <> 0 hacer
+            si na(x) <> 0 entonces
+                m_at(na(e))
+                m("() no lleva argumentos con nombre")
+                falla(nlin(nb(nb(e))), ncol(nb(nb(e))))
+            fin
+            x := nsig(x)
+        fin
+        hay := n_args(e)
+        si nmax = 0 entonces nmax := n fin
+        si hay < n o hay > nmax entonces
+            m_at(na(e))
+            m("() lleva ")
+            si nmax = n entonces
+                m_nat(n)
+            sino
+                m("de ")
+                m_nat(n)
+                m(" a ")
+                m_nat(nmax)
+            fin
+            m(" argumento")
+            si nmax <> 1 entonces m("s") fin
+            m(" y hay ")
+            m_nat(hay)
+            falla(nlin(e), ncol(e))
+        fin
+    fin
+
+    ; «qué» (y, si hay átomo, «nombre()») es un número
+    público función número(a: nat16, qué: puntero a byte, at: nat16)
+        variable t: nat16
+        t := valor_tipo(a)
+        si no es_num(t) entonces
+            m(qué)
+            si at <> 0 entonces
+                m_at(at)
+                m("()")
+            fin
+            m(" es un número, no un ")
+            m_tipo(t)
+            falla(nlin(a), ncol(a))
+        fin
+    fin
+
+    ; la clase de un registro por su nombre: 1 (ax bx cx dx si di), 2 (sus
+    ; mitades), 3 (es ds) o 0; deja sus dos letras en r
+    público función registro(a: nat16, r: puntero a byte): byte
+        r[0] := 0
+        r[1] := 0
+        r[2] := 0
+        si at_largo(a) <> 2 entonces devolver 0 fin
+        r[0] := at_letra(a, 0)
+        r[1] := at_letra(a, 1)
+        si r[1] = 'x' y (r[0] = 'a' o r[0] = 'b' o r[0] = 'c' o r[0] = 'd') entonces devolver 1 fin
+        si r[1] = 'i' y (r[0] = 's' o r[0] = 'd') entonces devolver 1 fin
+        si (r[1] = 'l' o r[1] = 'h') y (r[0] = 'a' o r[0] = 'b' o r[0] = 'c' o r[0] = 'd') entonces devolver 2 fin
+        si r[1] = 's' y (r[0] = 'e' o r[0] = 'd') entonces devolver 3 fin
+        devolver 0
+    fin
+
+    ; interrupción(n, reg: valor, ...): las comprobaciones
+    función prepara_int(e: nat16)
+        variable x, otro, a, t: nat16
+        variable v: N64
+        variable r, s: arreglo [3] de byte
+        variable cr, cs: byte
+        variable choca: bool
+        x := nb(e)
+        si x = 0 o na(x) <> 0 entonces
+            m("interrupción(n, registro: valor, ...): falta el número")
+            falla(nlin(e), ncol(e))
+        fin
+        si no const(nb(x), v) entonces n_ent(v, -1) fin
+        si no n_entre(v, 0, 255) entonces
+            m("el número de la interrupción es una constante de 0 a 255")
+            falla(nlin(nb(x)), ncol(nb(x)))
+        fin
+        x := nsig(x)
+        mientras x <> 0 hacer
+            a := nb(x)
+            si na(x) = 0 entonces
+                m("los registros se dan por su nombre: interrupción(0x21, ah: 2, dl: 'A')")
+                falla(nlin(a), ncol(a))
+            fin
+            cr := registro(na(x), r)
+            si cr = 0 entonces
+                m_qué("", na(x))
+                m(" no es un registro (ax bx cx dx si di, sus mitades, es, ds)")
+                falla(nlin(x), ncol(x))
+            fin
+            ; ¿ya está dado (él, o el registro entero del que es mitad)?
+            otro := nsig(nb(e))
+            mientras otro <> x hacer
+                cs := registro(na(otro), s)
+                choca := r[0] = s[0] y r[1] = s[1]
+                si no choca y r[0] = s[0] y (cr = 1 o cs = 1) y cr <> 3 y cs <> 3 entonces
+                    ; el mismo registro entero: uno de los dos lo es, y el otro es él o su mitad
+                    choca := (cr = 2 o r[1] = 'x') y (cs = 2 o s[1] = 'x')
+                fin
+                si choca entonces
+                    m("el registro ")
+                    m_qué("", na(x))
+                    m(" ya está dado")
+                    falla(nlin(x), ncol(x))
+                fin
+                otro := nsig(otro)
+            fin
+            t := valor_tipo(a)
+            si tk(t) = TK_BOOL o tk(t) = TK_EST entonces
+                m("a un registro se le da un número o una dirección, no un ")
+                m_tipo(t)
+                falla(nlin(a), ncol(a))
+            fin
+            si cr = 2 entonces
+                si const(a, v) entonces
+                    si no n_entre(v, -128, 255) entonces
+                        m_n64(v)
+                        m_qué(" no cabe en ", na(x))
+                        m(" (8 bits)")
+                        falla(nlin(a), ncol(a))
+                    fin
+                fin
+            sino
+                es_const(a)
+            fin
+            x := nsig(x)
+        fin
+    fin
+
+    función tipo_llamada(e: nat16): nat16
+        variable nm, r, f, x, p, a, t, ta, n: nat16
+        variable i: byte
+        nm := na(e)
+        si es_var(nm) entonces
+            m_qué("", nm)
+            m(" es una variable, no una función")
+            falla(nlin(e), ncol(e))
+        fin
+        r := busca(nm)
+        si r <> 0 y s_clase(r) = S_FUNC entonces
+            f := s_a(r)
+            args_simples(e, f_nparams(f), 0)
+            x := nb(e)
+            p := nb(f_nudo(f))
+            mientras x <> 0 hacer
+                a := nb(x)
+                t := nt(p)
+                si nmarcas(p) yb M_REF <> 0 entonces
+                    si no es_lugar(a) entonces
+                        m_qué("el parámetro ", na(p))
+                        m(" es «ref»: hay que pasarle una variable")
+                        falla(nlin(a), ncol(a))
+                    fin
+                    ta := tipo_de(a)
+                    si no igual(ta, t) o (tk(ta) = TK_PUNT y sin_base(ta) <> sin_base(t)) entonces
+                        m_qué("el parámetro ", na(p))
+                        m(" es ref ")
+                        m_tipo(t)
+                        m(" y se le pasa un ")
+                        m_tipo(ta)
+                        falla(nlin(a), ncol(a))
+                    fin
+                sino
+                    compatible(t, a, "el parámetro ", na(p))
+                fin
+                x := nsig(x)
+                p := nsig(p)
+            fin
+            devolver f_tret(f)
+        fin
+        i := at_interna(nm)
+        según i
+            caso I_ESCRIBIR:
+                si nb(e) = 0 entonces
+                    m("escribir() lleva al menos un argumento")
+                    falla(nlin(e), ncol(e))
+                fin
+                args_simples(e, 1, 99)
+                x := nb(e)
+                mientras x <> 0 hacer
+                    a := nb(x)
+                    t := valor_tipo(a)
+                    si no (es_num(t) o tk(t) = TK_BOOL o es_texto(t)) entonces
+                        m("escribir() no sabe enseñar un ")
+                        m_tipo(t)
+                        falla(nlin(a), ncol(a))
+                    fin
+                    x := nsig(x)
+                fin
+                devolver T_NADA
+            caso I_ESCRIBIR_CAR:
+                args_simples(e, 1, 0)
+                número(arg(e, 0), "la letra", 0)
+                devolver T_NADA
+            caso I_METER_PUERTO, I_LEER_BYTE, I_LEER_PALABRA, I_SACAR_PUERTO, I_PONER_BYTE, I_PONER_PALABRA:
+                n := 2
+                si i = I_METER_PUERTO entonces n := 1 fin
+                si i = I_PONER_BYTE o i = I_PONER_PALABRA entonces n := 3 fin
+                args_simples(e, n, 0)
+                x := nb(e)
+                mientras x <> 0 hacer
+                    número(nb(x), "cada argumento de ", nm)
+                    x := nsig(x)
+                fin
+                si i = I_METER_PUERTO o i = I_LEER_BYTE entonces devolver T_NAT8 fin
+                si i = I_LEER_PALABRA entonces devolver T_NAT16 fin
+                devolver T_NADA
+            caso I_DIRECCION:
+                args_simples(e, 1, 0)
+                a := arg(e, 0)
+                si no es_lugar(a) entonces
+                    si nk(a) = K_CAD entonces devolver T_TEXTO fin
+                    si tipo_de(a) = T_TEXTO entonces devolver T_TEXTO fin
+                    m("dirección() lleva una variable (o un elemento o un campo)")
+                    falla(nlin(a), ncol(a))
+                fin
+                t := tipo_de(a)
+                si tk(t) = TK_ARR entonces t := tbase(t) fin
+                r := tip_nuevo(TK_PUNT, 2)
+                t_pon_base(r, 2, t)
+                devolver r
+            caso I_VALOR:
+                args_simples(e, 1, 0)
+                a := arg(e, 0)
+                t := valor_tipo(a)
+                si tk(t) <> TK_PUNT entonces
+                    m("valor() lleva un puntero, no un ")
+                    m_tipo(t)
+                    falla(nlin(a), ncol(a))
+                fin
+                si sin_base(t) entonces
+                    m("valor() de un puntero sin tipo: asígnelo antes a un «puntero a ...»")
+                    falla(nlin(a), ncol(a))
+                fin
+                devolver tbase(t)
+            caso I_PUNTERO:
+                args_simples(e, 1, 0)
+                a := arg(e, 0)
+                t := valor_tipo(a)
+                si no (es_num(t) o tk(t) = TK_PUNT o tk(t) = TK_ARR) entonces
+                    m("puntero() lleva un número o un puntero, no un ")
+                    m_tipo(t)
+                    falla(nlin(a), ncol(a))
+                fin
+                devolver T_PUNT_U
+            caso I_NAT8, I_BYTE, I_NAT16, I_ENT16, I_NAT32, I_ENT32:
+                args_simples(e, 1, 0)
+                a := arg(e, 0)
+                t := valor_tipo(a)
+                si tk(t) = TK_ARR entonces
+                    m_at(nm)
+                    m("() no convierte un arreglo")
+                    falla(nlin(a), ncol(a))
+                fin
+                devolver tipo_de_nombre(nm)
+            caso I_FIN_PROGRAMA:
+                args_simples(e, 0, 0)
+                devolver T_PUNT_U
+            caso I_TAMANO:
+                tipo_de_tamaño(e)
+                devolver T_LIT
+            caso I_INTERRUPCION:
+                prepara_int(e)
+                devolver T_NAT16
+            caso I_ACARREO:
+                args_simples(e, 0, 0)
+                devolver T_BOOL
+            caso I_BANDERAS, I_REG_BX, I_REG_CX, I_REG_DX, I_REG_SI, I_REG_DI, I_REG_ES:
+                args_simples(e, 0, 0)
+                devolver T_NAT16
+            caso I_SALIR:
+                args_simples(e, 0, 1)
+                si nb(e) <> 0 entonces número(arg(e, 0), "el código de salida", 0) fin
+                devolver T_NADA
+        fin
+        si tipo_de_nombre(nm) <> 0 entonces
+            m_qué("", nm)
+            m(" es un tipo; solo convierten nat8(), nat16(), ent16(), nat32(), ent32() y puntero()")
+            falla(nlin(e), ncol(e))
+        fin
+        no_está("función no declarada", nm, nlin(e), ncol(e))
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  ¿Se puede guardar e en algo de tipo dest? Si no, error. «qué» y, si
+    ;  hay átomo, «nombre» dicen de qué se habla
+    ; -------------------------------------------------------------------------
+    público función compatible(dest: nat16, e: nat16, qué: puntero a byte, at: nat16)
+        variable t: nat16
+        variable v: N64
+        variable c: bool
+        variable k: byte
+        t := valor_tipo(e)
+        c := const(e, v)
+        k := tk(dest)
+        si k = TK_ARR o k = TK_EST entonces
+            m_qué(qué, at)
+            m(": los arreglos y las estructuras no se copian enteros (elemento a elemento o campo a campo)")
+            falla(nlin(e), ncol(e))
+        fin
+        si es_num(dest) entonces
+            si es_texto(t) y (nk(e) = K_CAD o t = T_TEXTO) entonces
+                m_qué(qué, at)
+                m(" es un número (")
+                m_tipo(dest)
+                m(") y se le da un texto")
+                falla(nlin(e), ncol(e))
+            fin
+            si tk(t) = TK_PUNT o tk(t) = TK_ARR entonces
+                m_qué(qué, at)
+                m(" es un número (")
+                m_tipo(dest)
+                m(") y se le da un ")
+                m_tipo(t)
+                m(" (para convertir, nat16(...))")
+                falla(nlin(e), ncol(e))
+            fin
+            si tk(t) = TK_BOOL entonces
+                m_qué(qué, at)
+                m(" es un número (")
+                m_tipo(dest)
+                m(") y se le da un bool")
+                falla(nlin(e), ncol(e))
+            fin
+            si c entonces rango(v, dest, nlin(e), ncol(e)) fin
+            devolver
+        fin
+        si k = TK_BOOL entonces
+            si tk(t) <> TK_BOOL entonces
+                m_qué(qué, at)
+                m(" es un bool y se le da un ")
+                m_tipo(t)
+                falla(nlin(e), ncol(e))
+            fin
+            devolver
+        fin
+        si k = TK_PUNT entonces
+            si tk(t) = TK_PUNT y igual(dest, t) entonces devolver fin
+            si tk(t) = TK_ARR y no sin_base(dest) entonces
+                si igual(tbase(dest), tbase(t)) entonces devolver fin
+            fin
+            m_qué(qué, at)
+            m(" es un ")
+            m_tipo(dest)
+            si es_num(t) o tk(t) = TK_BOOL entonces
+                m(" y se le da un número (para convertir, puntero(...); el puntero vacío es «nulo»)")
+                falla(nlin(e), ncol(e))
+            fin
+            m(" y se le da un ")
+            m_tipo(t)
+            falla(nlin(e), ncol(e))
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  constante NOMBRE = cuenta o texto
+    ; -------------------------------------------------------------------------
+    público función decl_const(d: nat16)
+        variable r, e: nat16
+        variable v: N64
+        declarado(na(d), nlin(d), ncol(d), falso)
+        e := nb(d)
+        r := sim_alta(el_mod, na(d))
+        si nk(e) = K_CAD entonces
+            etiqueta_cadena(na(e))
+            s_pon_a(r, na(e))
+            s_pon_clase(r, S_CAD)
+            devolver
+        fin
+        si no const(e, v) entonces
+            m("una constante es un número, un texto o una cuenta con constantes")
+            falla(nlin(e), ncol(e))
+        fin
+        rango(v, T_LIT, nlin(e), ncol(e))
+        s_pon_a(r, nat16(v.bajo))
+        s_pon_b(r, nat16(v.bajo >> 16))
+        si n_negativo(v) entonces s_marca(r, SM_NEG) fin
+        si tk(tipo_de(e)) = TK_BOOL entonces s_pon_clase(r, S_BOOL) sino s_pon_clase(r, S_NUM) fin
+    fin
+
+fin Tipos.
