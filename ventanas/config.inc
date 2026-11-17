@@ -113,6 +113,8 @@ cfg_claves:
         dd jd_hecho, k_juegosdos
         db 1, T_NUM, 0, 0
         dd pr_hecho, k_sinrepe
+        db 1, T_NUM, 0, 0
+        dd tp_hecho, k_tareaspr
         db 1, T_CAD, 119, 0         ; [ARCHIVOS] el módulo que se abre al volver
         dd cen_reabrir, k_reabrir
         db 2, T_GDIR, 0, 0
@@ -160,6 +162,7 @@ k_silencio  db "Silencio", 0
 k_activo    db "Activo", 0
 k_modulos   db "Modulos", 0
 k_sinrepe   db "SinRepetidos", 0    ; [0.9.22] Principal ya sin Editar, Gestor ni Información
+k_tareaspr  db "TareasPrincipal", 0 ; [TAREAS] el Administrador de tareas ya pasó a Principal
 k_nombre    db "Nombre", 0
 k_estado    db "Estado", 0
 k_marcado   db "Marcado", 0
@@ -205,6 +208,7 @@ td_info     db "Información", 0
 td_ordenes  db "Hispa-DOS", 0
 td_config   db "Configuración", 0   ; [Configuración]
 tn_editar   db "EDITAR.COM", 0
+tn_tareas   db "TAREAS.HVP", 0      ; [TAREAS] (pr_tareas)
 tn_gestor   db "GESTOR.COM", 0
 tn_info     db "INFO.COM", 0
 ti_bloc     db ":BLOC", 0
@@ -573,6 +577,11 @@ cfg_cargar:
 .h3:
         call pr_limpiar             ; [0.9.22] una sola vez
         test eax, eax
+        jz .h3b
+        mov dword [cfg_len], 0
+.h3b:
+        call pr_tareas              ; [TAREAS] una sola vez
+        test eax, eax
         jz .h4
         mov dword [cfg_len], 0
 .h4:
@@ -836,12 +845,83 @@ pr_limpiar:
         popad
         ret
 
-; ¿la ruta de ESI acaba en EDITAR.COM, GESTOR.COM o INFO.COM? ZF=1 si sí
-pr_repetido:
+; [TAREAS] Una sola vez (la clave TareasPrincipal de [Centro] lo recuerda):
+; el acceso al Administrador de tareas (TAREAS.HVP) que esté en «Accesorios»
+; pasa a «Principal», donde lo pone ya su cabecera en una instalación nueva
+; (con el Administrador de archivos y Configuración). No se repite: sale de
+; Accesorios. Si está en otro grupo, o no hay «Principal», se queda como
+; está; y si después alguien lo cambia de grupo, también. EAX = 1 si hay que
+; guardar CENTRO.INI.
+pr_tareas:
+        pushad
+        xor eax, eax
+        cmp dword [tp_hecho], 0
+        jne .x
+        mov dword [tp_hecho], 1
+        mov edi, tg_principal
+        call pr_grupo
+        jc .hecho
+        mov ebx, edx                ; BL = «Principal»
+        mov edi, tg_accesorios
+        call pr_grupo
+        jc .hecho                   ; DL = «Accesorios»
+        mov esi, [ac_tabla]
+        mov ecx, MAX_AC
+.a:
+        cmp byte [esi+AC_USO], 0
+        je .as
+        cmp [esi+AC_GRUPO], dl
+        jne .as
+        push esi
+        lea esi, [esi+AC_PROG]
+        call pr_nombre
+        mov edi, tn_tareas
+        call cad_igual_i
+        pop esi
+        jne .as
+        mov [esi+AC_GRUPO], bl
+.as:
+        add esi, AC_TAM
+        dec ecx
+        jnz .a
+.hecho:
+        mov eax, 1                  ; (aunque no hubiera nada: queda apuntado)
+.x:
+        mov [esp+28], eax           ; (EAX de vuelta)
+        popad
+        ret
+
+; (interna) EDI=nombre de un grupo -> EDX=su número; CF=1 si no lo hay
+pr_grupo:
         push eax
         push esi
+        mov eax, [gr_tabla]
+        xor edx, edx
+.g:
+        cmp byte [eax+GR_USO], 0
+        je .gs
+        lea esi, [eax+GR_NOMBRE]
+        call cad_igual_i
+        je .si
+.gs:
+        add eax, GR_TAM
+        inc edx
+        cmp edx, MAX_GR
+        jb .g
+        stc
+        jmp .x
+.si:
+        clc
+.x:
+        pop esi
+        pop eax
+        ret
+
+; (interna) ESI=ruta -> ESI=el nombre del archivo: tras la última «\»
+pr_nombre:
+        push eax
         push edi
-        mov edi, esi                ; el nombre: tras la última «\»
+        mov edi, esi
 .b:
         mov al, [esi]
         inc esi
@@ -853,6 +933,16 @@ pr_repetido:
         jmp .b
 .n:
         mov esi, edi
+        pop edi
+        pop eax
+        ret
+
+; ¿la ruta de ESI acaba en EDITAR.COM, GESTOR.COM o INFO.COM? ZF=1 si sí
+pr_repetido:
+        push eax
+        push esi
+        push edi
+        call pr_nombre
         mov edi, tn_editar
         call cad_igual_i
         je .r
@@ -1122,6 +1212,12 @@ cfg_guardar:
         mov esi, k_sinrepe
         call pon_clave_num
 .sinpr:
+        mov eax, [tp_hecho]         ; [TAREAS]
+        test eax, eax
+        jz .sintp
+        mov esi, k_tareaspr
+        call pon_clave_num
+.sintp:
         cmp byte [cen_reabrir], 0   ; [ARCHIVOS] solo si hay algo que reabrir
         je .sinre
         mov esi, k_reabrir

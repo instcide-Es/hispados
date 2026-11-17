@@ -205,11 +205,12 @@ chk $T/t1.ppm tam 800 600 cursor 400 300 \
   px 468 60 8 "botón de cerrar del Centro" px 475 65 13 "aspa del botón de cerrar" \
   px 300 10 1 "barra superior" texto 736 5 8 4 fina "Salir" px 491 150 0 "sombra del Centro"
 # -- el grupo «Accesorios», en su ventana (alargada para que quepa la segunda
-# fila: Pintura, que es un módulo .HVP y entra sola) --
-chk $T/t1b.ppm marco 224 164 452 293 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
+# fila: Pintura, que es un módulo .HVP y entra sola; el Administrador de
+# tareas ya no está aquí: sale en «Principal») --
+chk $T/t1b.ppm marco 224 164 452 217 activa titulo 224 164 activa "Accesorios" titulo 36 52 no "Centro de programas" \
   texto 262 267 9 12 fina "Bloc de" texto 270 282 9 12 fina "notas" texto 350 267 0 8 fina "Calculadora" \
   texto 478 267 0 8 fina "Reloj" texto 574 267 0 8 fina "Sistema" texto 166 155 9 7 fina "Acceso" \
-  texto 262 343 0 8 fina "Pintura" texto 254 434 0 8 fina "de tareas"
+  texto 262 343 0 8 fina "Pintura" texto 574 343 0 8 fina "Mirador" nobusca 224 164 676 600 0 8 "de tareas"
 # -- Bloc de notas: escribir --
 chk $T/t2.ppm marco 150 90 520 340 activa titulo 150 90 activa "Bloc de notas - (sin nombre)" \
   titulo 36 52 no "Centro de programas" texto 174 117 0 15 fina "rchivo" \

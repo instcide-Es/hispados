@@ -375,7 +375,7 @@ $(B)/PRESENTA.HVP: programas/presenta.asm $(wildcard programas/presenta/*) $(wil
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/MIRADOR.HVP: programas/mirador.asm $(wildcard programas/mirador/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
-# [TAREAS] el Administrador de tareas (Accesorios, el 1; ventanas/tareas_api.inc).
+# [TAREAS] el Administrador de tareas (Principal, el 3; ventanas/tareas_api.inc).
 # CUELGA.HVP (programas/tareas/cuelga.asm) es solo para tests/run_tareas_tests.sh
 $(B)/TAREAS.HVP: programas/tareas.asm $(wildcard programas/tareas/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@

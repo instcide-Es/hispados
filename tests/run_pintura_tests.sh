@@ -238,7 +238,7 @@ fi
 
 check "Teclado español instalado."
 # -- el grupo: Pintura, con su nombre y su icono --
-chk $T/a1.ppm tam 800 600 marco 224 164 452 293 activa titulo 224 164 activa "Accesorios" \
+chk $T/a1.ppm tam 800 600 marco 224 164 452 217 activa titulo 224 164 activa "Accesorios" \
   texto 262 343 0 8 fina "Pintura" px 284 304 1 "icono de Pintura: el marco de la hoja" \
   px 281 317 12 "icono de Pintura: el recuadro añil"
 # -- la ventana recién abierta --
@@ -316,7 +316,7 @@ check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 xms_igual
 ini "Modulos=16"; ini "Nombre=Pintura"; ini "Programa=A:\\HISPADOS\\PROGS\\PINTURA.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado Nombre=Mirador Nombre=Administrador de tareas [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de tareas Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado Nombre=Mirador [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
   ok "CENTRO.INI: Pintura, en el grupo Accesorios, y los juegos en el suyo"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

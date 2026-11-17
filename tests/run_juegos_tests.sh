@@ -169,7 +169,7 @@ checkn "HSPDPMI: excepción"
 xms_igual
 ini "Modulos=16"; ini "Nombre=Juegos"; ini "Nombre=Culebra"; ini "Programa=A:\\HISPADOS\\JUEGOS\\CULEBRA.HVP"
 ini "Nombre=Campo de minas"; ini "Programa=A:\\HISPADOS\\JUEGOS\\MINAS.HVP"
-if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado Nombre=Mirador Nombre=Administrador de tareas [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
+if [ "$(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')" = "[Grupo] Nombre=Principal Nombre=Hispa-DOS Nombre=Configuración Nombre=Administrador de tareas Nombre=Administrador de archivos [Grupo] Nombre=Accesorios Nombre=Bloc de notas Nombre=Calculadora Nombre=Reloj Nombre=Sistema Nombre=Pintura Nombre=Terminal Nombre=Teclado Nombre=Mirador [Grupo] Nombre=Juegos Nombre=Culebra Nombre=Campo de minas Nombre=Bloques Nombre=Solitario Nombre=Tragabolas Nombre=Almacén Nombre=Hispa-Nes Nombre=Hispa-System [Grupo] Nombre=Sonido Nombre=Reproductor de sonido Nombre=Mezclador " ]; then
   ok "CENTRO.INI: los juegos, en el grupo Juegos (y Pintura, en Accesorios)"
 else
   ko "CENTRO.INI, grupos: $(grep -E '^(Nombre|\[Grupo\])' $T/ini.txt | tr '\n' ' ')"

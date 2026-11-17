@@ -19,7 +19,9 @@
 #  - en un icono del Centro (un grupo);
 #  - en el Bloc de notas: Seleccionar todo, Copiar y Pegar (con lo que no se
 #    puede hacer en gris);
-#  - en el escritorio, cerca de la esquina (el menú se ajusta al borde):
+#  - en el escritorio, cerca de la esquina (el menú se ajusta al borde; con
+#    «Centro de programas», «Administrador de tareas...» y «Salir de Hispa
+#    Ventanas...», que se prueban en run_principal_tests.sh):
 #    «Fondo del escritorio...» abre Configuración en Pantalla; «Ventanas en
 #    cascada»; y el menú de una ventana minimizada (su icono de abajo).
 # Deja capturas en build/contexto_*.png (y en capturas/ si existe).
@@ -230,10 +232,12 @@ chk $T/e2.ppm texto 156 138 9 12 fina "hola mund" texto 417 255 0 8 fina "Cor" t
   texto 425 295 7 8 fina "egar"
 chk $T/e3.ppm texto 156 138 0 9 fina "hola mundohola mund"
 # -- el escritorio, en la esquina: el menú, arriba y a la izquierda del punto --
-chk $T/f1.ppm texto 467 431 0 8 fina "onfiguración..." texto 467 451 0 8 fina "ondo del escritorio..." \
-  texto 467 471 0 8 fina "ezclador..." texto 459 491 0 8 fina "Administrador de a" \
-  texto 459 519 0 8 fina "Ventanas en c" texto 459 539 0 8 fina "Ventanas en m" \
-  px 442 500 1 "el filete del menú, a la izquierda"
+# (con «Centro de programas», «Administrador de tareas...» y «Salir de Hispa Ventanas...»)
+chk $T/f1.ppm texto 467 355 0 8 fina "onfiguración..." texto 467 375 0 8 fina "ondo del escritorio..." \
+  texto 467 395 0 8 fina "ezclador..." texto 459 423 0 8 fina "Centro de " \
+  texto 459 443 0 8 fina "Administrador de a" texto 459 463 0 8 fina "Administrador de " texto 603 463 0 8 fina "areas..." \
+  texto 459 491 0 8 fina "Ventanas en c" texto 459 511 0 8 fina "Ventanas en m" \
+  texto 467 539 0 8 fina "alir de Hispa Ventanas..." px 442 500 1 "el filete del menú, a la izquierda"
 chk $T/f2.ppm titulo 124 110 activa "Configuración" texto 278 145 4 8 negrita "Pantalla"
 # -- cascada --
 chk $T/f3.ppm titulo 8 36 no "Centro de programas" titulo 34 62 no "Pruebas" titulo 60 88 activa "Bloc de notas - (sin nombre)"

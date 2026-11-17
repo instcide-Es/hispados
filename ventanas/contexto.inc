@@ -51,6 +51,9 @@ CE_MEZ      equ 0xE103
 CE_CASCADA  equ 0xE104
 CE_MOSAICO  equ 0xE105
 CE_ARCH     equ 0xE106              ; [ARCHIVOS] el Administrador de archivos
+CE_TAREAS   equ 0xE107              ; [TAREAS] el Administrador de tareas
+CE_CENTRO   equ 0xE108              ; el Centro de programas, delante
+CE_SALIR    equ 0xE109              ; [APAGAR] el cuadro «Salir»
 CT_CORTAR   equ 0xE201              ; los cuadros de texto
 CT_COPIAR   equ 0xE202
 CT_PEGAR    equ 0xE203
@@ -115,14 +118,24 @@ ctx_l_esc:                          ; el escritorio
         db "&Fondo del escritorio...", 0
         dw CE_MEZ
         db "&Mezclador...", 0
+        dw 0
+        db 0
+        dw CE_CENTRO
+        db "Centro de &programas", 0
         dw CE_ARCH
         db "Administrador de a&rchivos...", 0
+        dw CE_TAREAS                ; [TAREAS] (también con Ctrl+Alt+Supr)
+        db "Administrador de &tareas...", 0
         dw 0
         db 0
         dw CE_CASCADA
         db "Ventanas en c&ascada", 0
         dw CE_MOSAICO
         db "Ventanas en m&osaico", 0
+        dw 0
+        db 0
+        dw CE_SALIR
+        db "&Salir de Hispa Ventanas...", 0
         dw 0xFFFF
 ctx_l_edit:                         ; un cuadro de texto (no tiene deshacer)
         dw CT_CORTAR
@@ -817,10 +830,43 @@ ctx_esc_orden:
         jmp .x
 .e5:
         cmp ecx, CE_ARCH
-        jne .x
+        jne .e6
         call arch_abrir
+        jmp .x
+.e6:
+        cmp ecx, CE_TAREAS          ; [TAREAS] el Administrador de tareas
+        jne .e7
+        call tar_abrir
+        jmp .x
+.e7:
+        cmp ecx, CE_CENTRO
+        jne .e8
+        call ctx_centro
+        jmp .x
+.e8:
+        cmp ecx, CE_SALIR           ; [APAGAR] lo mismo que el botón «Salir»
+        jne .x
+        call apa_pedir
 .x:
         xor eax, eax
+        ret
+
+; (interna) el Centro de programas, delante (si está minimizado, se restaura)
+ctx_centro:
+        pushad
+        mov ebp, [cen_ven]
+        test ebp, ebp
+        jz .x
+        test dword [ebp+V_ESTADO], S_INACTIVA   ; (tiene un cuadro abierto)
+        jnz .x
+        test dword [ebp+V_ESTADO], S_MINIM
+        jz .a
+        mov eax, 4
+        call ven_mostrar
+.a:
+        call ven_activar
+.x:
+        popad
         ret
 
 ; (interna) abre Configuración (CONFIG.HVP, que ya está en marcha con la

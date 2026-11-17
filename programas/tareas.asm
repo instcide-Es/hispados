@@ -1,5 +1,5 @@
 ; =============================================================================
-;  TAREAS.HVP - el Administrador de tareas de Hispa Ventanas (Accesorios)
+;  TAREAS.HVP - el Administrador de tareas de Hispa Ventanas (grupo «Principal»)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Enseña los programas que hay en marcha, con la memoria que gasta cada uno y
@@ -41,7 +41,7 @@ MAXF        equ 32                  ; programas que se enseñan, a lo más
 T_REFRESCO  equ 1000                ; milisegundos entre una puesta al día y otra
 ESPERA_CIERRE equ 55                ; tics (tres segundos) que se espera a un cierre
 
-HVP_CABECERA "Administrador de tareas", entrada, 1
+HVP_CABECERA "Administrador de tareas", entrada, 3   ; grupo «Principal»
         db "................................"
         db "................................"
         db "................................"

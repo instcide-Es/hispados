@@ -300,6 +300,22 @@ se toca nada más de un CENTRO.INI que ya exista (al que se hizo antes de que
 existiera Pintura se le añade su acceso en «Accesorios»), y un acceso que
 se borre a mano no vuelve mientras no cambie el número de módulos.
 
+[TAREAS] El **Administrador de tareas** (`TAREAS.HVP`) sale en
+**«Principal»** (el 3 de su cabecera), con Configuración y el Administrador
+de archivos: es una herramienta del sistema, no un accesorio. Pedido de
+Carlos: «Administrador de tareas en Principal y en botón secundario en el
+escritorio». Un módulo tiene un solo acceso (al buscar módulos, el que ya
+tiene acceso en cualquier grupo no recibe otro), y desde la 0.9.22
+«Principal» no repite iconos (`SinRepetidos`), así que no está en los dos
+grupos: en la 0.9.22 salía en «Accesorios», y ahora, **una sola vez** (la
+clave `TareasPrincipal=1` de `[Centro]` lo recuerda; `pr_tareas` en
+`config.inc`), el acceso que esté en «Accesorios» pasa a «Principal» al
+arrancar. Si estaba en otro grupo, se queda donde está; y si después
+alguien lo lleva a otro grupo («Mover a otro grupo...»), también. La regla
+de `SinRepetidos` no lo toca: solo quita de «Principal» EDITAR.COM,
+GESTOR.COM e INFO.COM. Además se abre con **Ctrl+Alt+Supr** y con el botón
+derecho en el fondo del escritorio (ver «Botón derecho»).
+
 El menú **Archivo** es el mismo en el Centro y en los grupos y actúa sobre el
 icono marcado de la ventana que lo tiene:
 
@@ -431,6 +447,8 @@ Volumen=80
 Silencio=0
 Activo=0
 Modulos=7
+SinRepetidos=1
+TareasPrincipal=1
 
 [Grupo]
 Nombre=Juegos
@@ -483,7 +501,11 @@ Cambiado=1
   `Volumen` = 0-100 y `Silencio` = 0/1 (no están hasta que se toca el
   volumen); `Activo` = el grupo cuya ventana estaba delante (0 el primero;
   -1, la del Centro); `Modulos` = cuántos .HVP había en las carpetas `JUEGOS`
-  y `PROGS` la última vez que se miró (no está si no hay ninguno).
+  y `PROGS` la última vez que se miró (no está si no hay ninguno);
+  `SinRepetidos` = 1 cuando ya se quitaron de «Principal» Editar, Gestor e
+  Información (0.9.22) y `TareasPrincipal` = 1 cuando el Administrador de
+  tareas ya pasó de «Accesorios» a «Principal»: las dos cosas se hacen una
+  sola vez (si falta la clave, se hace al arrancar).
 - `[Grupo]`: empieza un grupo. `Nombre` (27 letras); `Ventana`, la de su
   ventana; `Estado` = 0 cerrado, 1 abierto, 2 minimizado, 3 maximizado;
   `Marcado` = el icono que tiene marcado (0 el primero).
@@ -1044,7 +1066,7 @@ a mediados de los 90; aquí tienen el aspecto de los menús de siempre.
 | El fondo del Centro | Nuevo grupo..., Buscar programas... |
 | La barra de título (o sus botones) de cualquier ventana | Restaurar, Minimizar, Maximizar y Cerrar: las que tiene la ventana; en gris la que no toca (Restaurar si no está maximizada ni minimizada...) |
 | El icono de una ventana minimizada (abajo) | el mismo de la barra de título |
-| El escritorio | Configuración..., Fondo del escritorio... (Configuración en el apartado Pantalla), Mezclador..., [ARCHIVOS] Administrador de archivos..., Ventanas en cascada, Ventanas en mosaico |
+| El escritorio (el fondo) | Configuración..., Fondo del escritorio... (Configuración en el apartado Pantalla), Mezclador...; Centro de programas (lo trae delante; si está minimizado, lo restaura), [ARCHIVOS] Administrador de archivos..., [TAREAS] **Administrador de tareas...** (lo abre o, si ya está abierto, lo trae delante; a diferencia de Ctrl+Alt+Supr, no para a nadie ni ofrece reiniciar); Ventanas en cascada, Ventanas en mosaico; Salir de Hispa Ventanas... (el mismo cuadro del botón «Salir»: volver a Hispa-DOS, reiniciar o apagar) |
 | Un cuadro de texto (Bloc de notas, campos de los diálogos) | Cortar, Copiar, Pegar, Borrar, Seleccionar todo (con sus teclas al lado; en gris lo que no se puede: sin selección, con el portapapeles vacío o sin texto). Deshacer no está: los cuadros de texto no lo tienen |
 | Pintura | el botón derecho sigue siendo el color secundario: no hay menú con el ratón; con Mayús+F10, Deshacer, Rehacer, Cortar, Copiar, Pegar, Borrar, Seleccionar todo e Intercambiar los colores |
 | Mezclador | Vista sencilla / completa (en gris la que se ve), Avanzado..., Valores de fábrica... |
@@ -2065,6 +2087,18 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   Bloc de notas, una línea larga mueve la barra horizontal, Inicio la
   devuelve y sus flechas desplazan el texto. Capturas en
   `build/tamano_*.png`.
+- `tests/run_principal_tests.sh`: el grupo «Principal». Con un CENTRO.INI
+  de antes de la 0.9.22 se quitan Editar, Gestor e Información (y solo de
+  «Principal»; `SinRepetidos=1`), y al volver a Hispa-DOS sale INFO; de
+  fábrica, «Principal» trae Hispa-DOS, Configuración, el Administrador de
+  tareas y el de archivos, y el de tareas no está en «Accesorios»; con un
+  CENTRO.INI de la 0.9.22 (el Administrador de tareas en «Accesorios»)
+  pasa a «Principal» (`TareasPrincipal=1`) y, llevado otra vez a
+  «Accesorios» a mano, se queda; y, con capturas, el icono en la ventana
+  de «Principal», el menú del botón derecho en el fondo del escritorio,
+  «Administrador de tareas...» (que lo abre), «Centro de programas» (que
+  lo trae delante) y «Salir de Hispa Ventanas...» (el cuadro de salir).
+  `GUARDAR=carpeta` deja las capturas.
 - `tests/run_contexto_tests.sh` ([CONTEXTO]): el botón derecho. En un
   icono de un grupo, su menú; «Propiedades» abre el diálogo del acceso;
   «Cambiar nombre» (con la letra subrayada) y «Eliminar» (con las flechas e

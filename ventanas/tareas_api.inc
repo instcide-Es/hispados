@@ -56,6 +56,7 @@
 ;    tar_en_rm      (rm_ir) distinto de 0 dentro de una llamada a modo real
 ;    tar_sistema    (eventos) una vez por vuelta del bucle del sistema
 ;    tar_latido     (msg_mirar) la tarea que corre mira su cola
+;    tar_abrir      (el menú del escritorio, contexto.inc) abre el Administrador
 ;    msg_enviar.tar_vuelta      adonde vuelve un procedimiento de ventana
 ;
 ;  QUÉ SE LLEVA DE CADA TAREA. La tabla de la interfaz se retoca al arrancar
@@ -751,6 +752,24 @@ tar_adm_tarea:
         call cen_aviso
 .x:
         mov byte [tar_adm_curso], 0
+        ret
+
+; (el menú del escritorio) abre el Administrador de tareas o, si ya está
+; abierto, lo trae delante. No es Ctrl+Alt+Supr: aquí no se para a nadie ni
+; se ofrece reiniciar
+tar_abrir:
+        pushad
+        mov edi, tar_acc + AC_PROG
+        mov esi, dir_propia
+        call pon_cad
+        mov esi, tar_t_admin
+        call pon_cad
+        mov byte [edi], 0
+        mov dword [tar_acc+AC_PARAM], 0
+        mov ebx, tar_acc
+        mov ebp, [cen_ven]          ; (si no se puede cargar, el aviso sale aquí)
+        call hvp_abrir
+        popad
         ret
 
 ; (interna) termina a la fuerza todas las tareas paradas
