@@ -269,7 +269,8 @@ Decisiones y límites de la 3a (para las fases siguientes):
 
 El «Hola, mundo» de ventana: un programa de Windows registra su clase, crea
 su ventana, atiende sus mensajes y pinta. Está en `ventanas/win32u.inc`
-(USER32 y GDI32; va detrás de `win32.inc`, en la parte alta: unos 6 KB más)
+(USER32 y GDI32; va detrás de `win32.inc`, en la parte alta, sin tocar la
+baja: `VENTANAS.COM` queda en unos 106 KB)
 y en `win32.inc` la llamada de vuelta. Prueba:
 `tests/run_win32hola_tests.sh` con `tests/progs/winhola.c`.
 
@@ -393,6 +394,10 @@ Decisiones y límites de la 3b (para las fases siguientes):
   Ventanas).
 - Al destruir una ventana, Hispa Ventanas destruye primero las hijas
   (Windows avisa primero a la madre).
+- Si a una ventana que tiene abierto un `MessageBoxA` le llega `WM_CLOSE`
+  (se lo pide el Administrador de tareas), el `WndProc` la puede destruir con
+  el cuadro aún abierto: el cuadro sigue hasta que se contesta (en Windows se
+  iría con su dueña).
 - KERNEL32 dentro de Hispa Ventanas sigue siendo el mínimo de la 3a: sin
   montón (`HeapAlloc`, `GlobalAlloc`) ni archivos, y sin cargar DLL
   (MSVCRT.DLL): los programas de C con biblioteca aún no van.

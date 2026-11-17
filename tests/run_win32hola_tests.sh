@@ -18,8 +18,8 @@
 #  - la X la cierra (WM_CLOSE -> DefWindowProcA -> WM_DESTROY ->
 #    PostQuitMessage) y la tarea termina sin dejar memoria;
 #  - dos copias a la vez, cada una con su cuenta; el Administrador de tareas
-#    las ve, le pide a una que cierre y termina a la fuerza la otra (con un
-#    cuadro abierto); la memoria queda como al principio.
+#    las ve, le pide a una que cierre (y cierra) y termina a la fuerza la otra
+#    (que tiene un cuadro abierto); la memoria queda como al principio.
 # La fase 3a (tests/run_win32gui_tests.sh) se pasa aparte.
 #  (GUARDAR=carpeta deja las capturas.)
 # Win32 «Hello, world» window inside Hispa Ventanas (phase 3b) test.
@@ -49,7 +49,7 @@ ir() {
   RX=$1; RY=$2; sleep 0.3
 }
 clic() { ir $1 $2; mon "mouse_button 1" 0.25; mon "mouse_button 0" 0.5; }
-clicder() { ir $1 $2; mon "mouse_button 4" 0.25; mon "mouse_button 0" 0.5; }
+clicder() { ir $1 $2; mon "mouse_button 2" 0.25; mon "mouse_button 0" 0.5; }
 doble() { ir $1 $2; mon "mouse_button 1" 0.12; mon "mouse_button 0" 0.12; mon "mouse_button 1" 0.12; mon "mouse_button 0" 0.6; }
 arrastra() { ir $1 $2; mon "mouse_button 1" 0.4; ir $3 $4; mon "mouse_button 0" 0.8; }
 chk() { python3 -I tests/tools/ventanas_check.py "$@" || fail=1; }
@@ -95,7 +95,7 @@ N=16; B_=231               # negro y blanco del cubo de colores (el texto y el f
   clic 100 250; aparca; shot c2                                              # (la dueña no atiende)
   tecla ret; sleep 1.5; shot c3
   arrastra 150 62 462 300; aparca; shot v1                                   # moverla: a 360,290
-  arrastra 758 528 778 558; aparca; shot v2                                  # más grande: 420x270
+  arrastra 758 528 778 558; aparca; shot v2                                  # más grande: 419x269
   clic 500 500; aparca; shot v3                                              # y sigue contando
   clic 769 299; sleep 1.5; aparca; shot x1                                   # la X
   tecla right right ret; sleep 5; aparca; shot m1                            # la memoria, después
@@ -126,7 +126,7 @@ chk $T/c3.ppm titulo 48 52 activa "Hola desde Win32 (título)" nobusca 200 200 6
 echo "-- moverla y cambiarle el tamaño la repinta --"
 chk $T/v1.ppm titulo 360 290 activa "Hola desde Win32 (título)" texto 372 325 $N $B_ fina "¡Hola, mundo de Win32!" \
   texto 372 345 $N $B_ fina "Clics: 3" texto 372 365 $N $B_ fina "Zona: 396x213" rgb 632 333 FF0000 "rectángulo rojo"
-chk $T/v2.ppm titulo 360 290 activa "Hola desde Win32 (título)" texto 372 365 $N $B_ fina "Zona: 416x243" \
+chk $T/v2.ppm titulo 360 290 activa "Hola desde Win32 (título)" texto 372 365 $N $B_ fina "Zona: 415x242" \
   texto 372 345 $N $B_ fina "Clics: 3" rgb 632 333 FF0000 "rectángulo rojo" rgb 770 550 FFFFFF "fondo de lo nuevo"
 chk $T/v3.ppm texto 372 345 $N $B_ fina "Clics: 4"
 echo "-- la X la cierra y no queda memoria --"
@@ -150,15 +150,30 @@ RX=400; RY=300
   doble 125 375; sleep 4; aparca; shot d1                                    # la segunda
   clic 200 280; aparca; shot d2                                              # un clic en la segunda
   clic 600 500; aparca; shot d3                                              # y otro en la primera (pasa delante)
-  doble 333 375; sleep 5; aparca; shot k1                                    # el Administrador de tareas
-  mon quit; } | run
+  clicder 600 500; sleep 1.5                                                 # la primera, con su cuadro abierto
+  tecla ctrl-alt-delete; sleep 5; aparca; shot k1                            # el Administrador de tareas
+  tecla down down down down; sleep 1; tecla delete; sleep 1.5; shot k2       # a la segunda se le pide que cierre
+  tecla ret; sleep 4; shot k3
+  tecla up; sleep 0.5; tecla delete; sleep 1.5; tecla ret; sleep 6; shot k4  # la primera no puede (tiene el cuadro):
+  tecla ret; sleep 4; shot k5                                                # a la fuerza
+  tecla alt-f4; sleep 1.5; shot k6
+  mon quit; } | TMAX=200 run
 chk $T/d1.ppm titulo 72 76 activa "Hola desde Win32" texto 84 131 $N $B_ fina "Clics: 0" \
-  texto 372 345 $N $B_ fina "Clics: 2"
-chk $T/d2.ppm texto 84 131 $N $B_ fina "Clics: 1" texto 372 345 $N $B_ fina "Clics: 2"
+  rgb 700 340 FF0000 "la primera, detrás"
+chk $T/d2.ppm texto 84 131 $N $B_ fina "Clics: 1" rgb 700 340 FF0000 "la primera, detrás"
 chk $T/d3.ppm titulo 360 290 activa "Hola desde Win32" texto 372 345 $N $B_ fina "Clics: 3" \
   texto 84 131 $N $B_ fina "Clics: 1"
 chk $T/k1.ppm titulo 170 80 activa "Administrador de tareas" busca 176 180 640 330 0 8 "Hola desde Win32" \
   busca 176 480 640 498 0 6 "6 programas en marcha" cambia $MEMZ $T/m0.ppm 20
+echo "-- el Administrador de tareas: pedirle que cierre y terminarlo a la fuerza --"
+chk $T/k2.ppm busca 150 250 650 330 0 8 "¿Terminar «Hola desde Win32»?"
+chk $T/k3.ppm titulo 170 80 activa "Administrador de tareas" busca 176 480 640 498 0 6 "5 programas en marcha" \
+  busca 176 180 640 330 0 8 "Hola desde Win32"
+chk $T/k4.ppm busca 130 250 680 330 0 8 "«Hola desde Win32» no se cierra."
+chk $T/k5.ppm titulo 170 80 activa "Administrador de tareas" nobusca 176 180 640 330 0 8 "Hola desde Win32" \
+  busca 176 480 640 498 0 6 "4 programas en marcha" igual $MEMZ $T/m0.ppm ${MEMZ% * *} 0
+chk $T/k6.ppm titulo 60 260 activa "Win32" nobusca 100 200 790 590 0 8 "Lleva 3 clics." \
+  nobusca 300 280 790 590 $N $B_ "Clics: 3"
 
 [ -n "${GUARDAR:-}" ] && { for f in $T/*.ppm; do cp $f "$GUARDAR"/s2_$(basename $f); done; } 2>/dev/null
 if [ $fail -ne $f1 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/VENTANAS/,$p' $T/log.txt | tail -20; fi
