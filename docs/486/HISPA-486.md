@@ -6,8 +6,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ## Qué es
 
 - **Para quién:** los 486 y Pentium (y lo que vino después) con 8 MB o más.
-  El nombre definitivo será el del procesador mínimo con el que vaya bien de
-  verdad (si pide Pentium, se cambia).
+  Es la gama de Windows 95/98.
 - **Qué hace:** lo que hacía un PC de 1995-1999. Programas de Windows de 32
   bits (Win32: los de Windows 95), juegos con DirectX, navegador web, escritorio
   con **menú de inicio** y **barra de tareas**. Todavía con DOS por debajo
@@ -19,7 +18,8 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
   la reimplementaron, Wine y ReactOS, para saber qué hace cada función); nunca
   se copia código de nadie.
 - **Lo que no es:** un núcleo nuevo. El núcleo sin DOS, con la tecnología de los
-  2000, es el sistema siguiente (y se escribirá en [Castel](../../castel/)).
+  2000, es el sistema siguiente: **Hispa-Pentium**, la gama de Windows XP (y se
+  escribirá en [Castel](../../castel/)).
 
 ## Cómo se construye: por encima de Hispa-386
 
@@ -80,8 +80,12 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 
 ## Relación con los demás
 
-- **Hispa-8086** (8086 a 286) e **Hispa-386** (386+, con Hispa Ventanas) siguen
-  su camino; Hispa-486 lleva todo lo de Hispa-386.
+- La familia: **Hispa-8086** (8086 a 286, gama MS-DOS de los 80), **Hispa-386**
+  (386+, Hispa Ventanas, gama MS-DOS 6.22 + Windows 3.1), **Hispa-486** (gama
+  Windows 95/98) e **Hispa-Pentium** (gama Windows XP: núcleo propio sin DOS,
+  de 32 bits con memoria virtual). Hispa-486 lleva todo lo de Hispa-386, y lo
+  que se haga en Win32 para Hispa-486 (KERNEL32, USER32, GDI32, DirectX) es la
+  base de los programas de Hispa-Pentium.
 - **Castel**: cuando esté maduro, las piezas nuevas de Hispa-486 se podrán
   escribir en él (el cargador y las DLL empiezan en ensamblador, como todo
   Hispa-DOS).
