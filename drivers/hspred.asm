@@ -4714,7 +4714,7 @@ msg_noun1   db "No se puede descargar: hay otro programa residente cargado despu
 msg_noun2   db "No se puede descargar: hay un programa usando la red.", 13, 10, 0
 msg_nocard  db "No se ha encontrado ninguna tarjeta de red que HSPRED sepa usar.", 13, 10
             db "(Un adaptador USB-Ethernet lo lleva HSPUSB.SYS, en CONFIG.SYS: tiene que", 13, 10
-            db "estar cargado y con el adaptador conectado al arrancar.)", 13, 10, 0
+            db "estar cargado con /RED y con el adaptador conectado al arrancar.)", 13, 10, 0
 msg_unk_eth db "  Hay una tarjeta Ethernet que todavía no se sabe usar: ", 0
 msg_unk_wifi db "  Hay una tarjeta inalámbrica (Wi-Fi), que todavía no se sabe usar: ", 0
 msg_pci_at  db " en ", 0

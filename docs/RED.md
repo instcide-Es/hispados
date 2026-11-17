@@ -349,7 +349,7 @@ para:
   trae RNDIS en la 1 y CDC-ECM en la 2).
 
 ```
-CONFIG.SYS:   DEVICE=A:\HISPADOS\HSPUSB.SYS /F /INFO
+CONFIG.SYS:   DEVICE=A:\HISPADOS\HSPUSB.SYS /F /RED /INFO
   ...
   5 SS 2109:0817 09/00/00 -> concentrador de 4 puertos
     5.1 SS 0BDA:8153 02/06/00 0A/00/00 -> red (CDC-ECM)
@@ -369,10 +369,14 @@ Enlace:          sí
 uno de verdad; ver «Límites».) Después, `CONFRED`, `PING`, `DESCARGAR`,
 `ACTUALIZAR` y `CONSOLA` como con cualquier tarjeta. Hace falta:
 
-1. `HSPUSB.SYS` cargado en `CONFIG.SYS` **llevando él el USB** (con `/F` si
-   la BIOS lo está usando; en un MacBook lo toma él solo) y el adaptador
-   **conectado al arrancar** (no se busca después). HSPUSB dice
-   «Adaptador de red USB preparado (CDC-ECM), MAC ...».
+1. `HSPUSB.SYS` cargado en `CONFIG.SYS` **con la opción `/RED`** y
+   **llevando él el USB** (con `/F` si la BIOS lo está usando; en un MacBook
+   lo toma él solo), y el adaptador **conectado al arrancar** (no se busca
+   después). HSPUSB dice «Adaptador de red USB preparado (CDC-ECM), MAC
+   ...». **Sin `/RED` la red por USB está apagada**: HSPUSB no toca el
+   adaptador (hace lo mismo que antes de tener la red) y solo dice
+   «Adaptador de red USB 0BDA:8153: sin usar. Para usarlo, añada /RED a la
+   línea de HSPUSB.SYS en CONFIG.SYS.»
 2. `HSPRED` (a mano o en `AUTOEXEC.BAT`). Primero busca una tarjeta PCI de
    las suyas y, si no hay, el adaptador USB; con `HSPRED /USB`, solo el
    adaptador USB.

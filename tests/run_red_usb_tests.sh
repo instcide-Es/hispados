@@ -42,6 +42,9 @@
 #                           dos sentidos; se mueve un ratón y luego el otro)
 #   muchos                  más de 8 aparatos en uso a la vez (10: la reserva
 #                           era de 8 y en el MacBook se llenaba)
+#   sinred                  sin /RED en la línea de HSPUSB: la red por USB está
+#                           apagada, el adaptador no se toca (se dice cómo
+#                           encenderla) y HSPUSB ocupa lo mismo que sin él
 #   sinsitio                HSPUSB con -DRED_SIN_SITIO (como si al acabar la
 #                           enumeración no quedara memoria para el
 #                           adaptador): se dice, la red no se usa y el
@@ -104,8 +107,12 @@ ko() { echo "  FAIL $1"; cfail=1; }
 check() { if grep -qF -- "$1" $T/log.txt; then ok "$1"; else ko "$1"; fi; }
 checkn() { if grep -qF -- "$1" $T/log.txt; then ko "(no debía salir) $1"; else ok "sin «$1»"; fi; }
 veces() { grep -aoF -- "$1" $T/log 2>/dev/null | wc -l; }
+# Se espera a lo que se busca (no un tiempo fijo), con un tope generoso: el
+# de cada espera por TOPE (3 de serie), para que con la máquina cargada (la
+# batería entera a la vez) no se quede corto. Si llega antes, no se espera.
+TOPE=${TOPE:-3}
 espera() {  # texto [veces] [décimas de segundo]
-  local n=${2:-1} i=0 max=${3:-600}
+  local n=${2:-1} i=0 max=$(( ${3:-600} * TOPE ))
   while [ "$(veces "$1")" -lt "$n" ] && [ $i -lt $max ]; do sleep 0.1; i=$((i + 1)); done
   [ $i -lt $max ] || echo "  (no llega: $1)"
 }
@@ -157,7 +164,7 @@ fin() {
 NET="-netdev user,id=n0"
 USBNET() { echo "-device usb-net,netdev=n0,id=red,bus=$1"; }
 STICK() { echo "-drive if=none,id=u,format=raw,file=@T@/usb.img -device usb-storage,bus=$1,drive=u,id=mem"; }
-SOLOUSB='DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO\r\n'
+SOLOUSB='DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED /INFO\r\n'
 
 # las órdenes de red de todos los casos
 ordenes_red() {
@@ -289,7 +296,7 @@ c_todo() {
 }
 
 # con HSPEMM (modo V86): HSPUSB arriba (DEVICEHIGH) y LH HSPRED
-V86CFG='DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS NOEMS\r\nDOS=HIGH,UMB\r\nFILES=30\r\nDEVICEHIGH=A:\\HISPADOS\\HSPUSB.SYS /F /INFO\r\n'
+V86CFG='DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS NOEMS\r\nDOS=HIGH,UMB\r\nFILES=30\r\nDEVICEHIGH=A:\\HISPADOS\\HSPUSB.SYS /F /RED /INFO\r\n'
 v86() {  # nombre, título, clase, opciones de QEMU
   local n=$1 t=$2 hc=$3; shift 3
   caso $n "$t" "$V86CFG"
@@ -341,14 +348,15 @@ c_sinecm() {
   checkn "red (CDC-ECM)"
   check "Teclado USB preparado."
   check "No se ha encontrado ninguna tarjeta de red que HSPRED sepa usar."
-  check "(Un adaptador USB-Ethernet lo lleva HSPUSB.SYS, en CONFIG.SYS"
+  check "(Un adaptador USB-Ethernet lo lleva HSPUSB.SYS, en CONFIG.SYS: tiene que"
+  check "estar cargado con /RED y con el adaptador conectado al arrancar.)"
   check "fin-de-la-prueba"
 }
 
 # CONSOLA (la consola remota: un servidor TCP) por el adaptador USB, con el
 # cliente de tests/run_consola_tests.sh
 t_consola() {
-  caso consola "CONSOLA (servidor TCP) por el adaptador USB, xHCI" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n'
+  caso consola "CONSOLA (servidor TCP) por el adaptador USB, xHCI" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED\r\n'
   CONSOLA_QEMU="-device qemu-xhci,id=hc" python3 tests/consola_cliente.py $T/f.img "usb-net,bus=hc.0" 12399 > $T/consola.out 2>&1
   local rc=$?
   cat $T/consola.out
@@ -385,7 +393,7 @@ c_pciusb() {
 # /2: en un xHCI de Intel de las series 7 a 9 (simulado con -DINTEL_FAKE: QEMU
 # no tiene esos registros) no se enciende el USB 3, y la red sigue yendo
 t_sinusb3() {
-  caso sinusb3 "/2 (sin USB 3) en un xHCI de Intel simulado (-DINTEL_FAKE)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO /2\r\n' "-DINTEL_FAKE"
+  caso sinusb3 "/2 (sin USB 3) en un xHCI de Intel simulado (-DINTEL_FAKE)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED /INFO /2\r\n' "-DINTEL_FAKE"
   arranca -device usb-ehci,id=he -device qemu-xhci,id=hc $NET $(USBNET hc.0)
   orden "HSPRED"
   orden "CONFRED"
@@ -406,13 +414,13 @@ c_sinusb3() {
 # queda su bloque (código, búferes y anillos); sin él, nada de eso
 t_memoria() {
   local con sin mal=0
-  caso memoria "memoria de HSPUSB con el adaptador (xHCI, teclado)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n'
+  caso memoria "memoria de HSPUSB con el adaptador (xHCI, teclado)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED\r\n'
   arranca -device qemu-xhci,id=hc -device usb-kbd,bus=hc.0 $NET $(USBNET hc.0)
   orden "MEM /C"
   orden "ECHO fin-de-la-prueba"
   fin check "Adaptador de red USB preparado (CDC-ECM)" || mal=1
   con=$(grep -m1 -E "^ *Libre " $T/log.txt | awk '{print $2}' | tr -d .)
-  caso memoria2 "memoria de HSPUSB sin el adaptador (xHCI, teclado)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n'
+  caso memoria2 "memoria de HSPUSB sin el adaptador (xHCI, teclado)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED\r\n'
   arranca -device qemu-xhci,id=hc -device usb-kbd,bus=hc.0
   orden "MEM /C"
   orden "ECHO fin-de-la-prueba"
@@ -521,7 +529,7 @@ t_dosteclados() {
 # los dos movimientos
 t_dosratones() {
   local m1 m2
-  caso dosratones "dos ratones (xHCI y UHCI) con el adaptador: van los dos" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO\r\n'
+  caso dosratones "dos ratones (xHCI y UHCI) con el adaptador: van los dos" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED /INFO\r\n'
   arranca $MON -device qemu-xhci,id=hc -device piix3-usb-uhci,id=hu \
       -device usb-hub,bus=hc.0,port=1,id=hub1 $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1 \
       -device usb-mouse,bus=hc.0,port=1.2,id=m1 -device usb-kbd,bus=hc.0,port=1.3 \
@@ -599,6 +607,42 @@ c_muchos() {
   check "fin-de-la-prueba"
 }
 
+# Sin /RED la red por USB está apagada: HSPUSB no toca el adaptador (ni lee
+# sus demás configuraciones ni se queda con nada suyo), dice en una línea
+# cómo encenderla, y ocupa lo mismo que sin adaptador
+t_sinred() {
+  local con sin mal=0
+  caso sinred "sin /RED: el adaptador no se toca (y se dice cómo usarlo)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO\r\n'
+  arranca $MON $MACXHCI $NET -device usb-kbd,bus=he.0,id=k1
+  teclea "echo sinlared"
+  orden "HSPRED"
+  orden "MEM /C"
+  orden "ECHO fin-de-la-prueba"
+  fin c_sinred || mal=1
+  con=$(grep -m1 -E "^ *Libre " $T/log.txt | awk '{print $2}' | tr -d .)
+  caso sinred2 "sin /RED y sin adaptador: la misma memoria" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO\r\n'
+  arranca -device usb-ehci,id=he -device qemu-xhci,id=hc \
+      -device usb-hub,bus=hc.0,port=1,id=hub1 -device usb-hub,bus=hc.0,port=1.1,id=hub2 \
+      -device usb-kbd,bus=he.0,id=k1
+  orden "MEM /C"
+  orden "ECHO fin-de-la-prueba"
+  fin check "Teclado USB preparado." || mal=1
+  sin=$(grep -m1 -E "^ *Libre " $T/log.txt | awk '{print $2}' | tr -d .)
+  echo "  memoria convencional libre sin /RED: con el adaptador puesto, ${con:-?} octetos; sin él, ${sin:-?}"
+  if [ -n "$con" ] && [ "$con" = "$sin" ]; then ok "sin /RED, el adaptador no le cuesta memoria a HSPUSB"; else ko "sin /RED, el adaptador cambia la memoria de HSPUSB"; mal=1; fi
+  return $mal
+}
+c_sinred() {
+  check "      5.1.1 FS 0525:A4A2 02/02/FF 0A/00/00 -> sin uso"
+  check "Adaptador de red USB 0525:A4A2: sin usar. Para usarlo, añada /RED a la línea de"
+  checkn "red (CDC-ECM)"
+  checkn "Adaptador de red USB preparado"
+  check "Teclado USB preparado."
+  llega sinlared "sin /RED"
+  check "No se ha encontrado ninguna tarjeta de red que HSPRED sepa usar."
+  check "fin-de-la-prueba"
+}
+
 # sin sitio para el adaptador: no se usa, y el teclado no lo nota
 t_sinsitio() {
   caso sinsitio "sin memoria para el adaptador (HSPUSB con -DRED_SIN_SITIO): la red cede" "$SOLOUSB" "-DRED_SIN_SITIO"
@@ -635,7 +679,7 @@ c_sinlista() {
 }
 
 # ---- todos, de dos en dos ----
-TODOS="xhci xhcihub uhci uhcihub ohci ohcihub ehci todo v86 v86uhci sinecm sinusb3 pciusb consola memoria tecladoehci dosteclados dosratones muchos sinsitio sinlista"
+TODOS="xhci xhcihub uhci uhcihub ohci ohcihub ehci todo v86 v86uhci sinecm sinusb3 pciusb consola memoria tecladoehci dosteclados dosratones muchos sinred sinsitio sinlista"
 CASOS=${CASOS:-$TODOS}
 JOBS=${JOBS:-2}
 fail=0

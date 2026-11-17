@@ -1299,13 +1299,14 @@ info_ports:
         popad
         ret
 
-msg_usage   db "DEVICE=HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/2]", 13, 10
+msg_usage   db "DEVICE=HSPUSB.SYS [/F] [/U] [/RED] [/INFO] [/V] [/2]", 13, 10
             db "  Lleva el USB sin la BIOS, con las cuatro clases de controladora (UHCI y", 13, 10
             db "  OHCI de USB 1.x, EHCI de USB 2.0 y xHCI de USB 3): memorias USB como", 13, 10
             db "  unidades de DOS, teclado, ratón, mandos de juego y concentradores.", 13, 10
             db "  (sin opciones) si la BIOS está usando el USB no se toca nada", 13, 10
             db "  /F     tomar el USB aunque lo use la BIOS (teclado y ratón pasan a HSPUSB)", 13, 10
             db "  /U     como /F, también si el sistema ha arrancado de una memoria USB", 13, 10
+            db "  /RED   usar también el adaptador de red USB (CDC-ECM), para HSPRED", 13, 10
             db "  /INFO  enseñar las controladoras y el árbol de aparatos", 13, 10
             db "  /V     mensajes detallados", 13, 10
             db "  /2     Intel series 7 a 9: sin USB 3 (los aparatos, a alta velocidad)", 13, 10

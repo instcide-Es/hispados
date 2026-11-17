@@ -76,6 +76,37 @@ section .init
 role_net:
         mov byte [np_seen], 0
         mov byte [np_idx], 0
+        cmp byte [opt_red], 0
+        jne .on
+        ; [USB-RED] Sin /RED la red por USB está apagada: HSPUSB hace lo
+        ; mismo que antes de tenerla. No se leen las demás configuraciones
+        ; ni se le manda nada al adaptador: solo se mira lo que ya se ha
+        ; leído (su primera configuración y su VID:PID), para decir en una
+        ; línea que está ahí y cómo se enciende.
+        call net_parse
+        jnc .off
+        cmp byte [np_seen], 0
+        jne .off
+        mov al, [p_kbd]
+        or al, [p_mou]
+        or al, [p_joy]
+        or al, [p_msc]
+        jnz .no
+        call net_known
+        jnc .no
+.off:
+        mov si, msg_netno
+        call puts
+        mov ax, [d_vid]
+        call puthex4
+        mov dl, ':'
+        call putc
+        mov ax, [d_pid]
+        call puthex4
+        mov si, msg_netoff
+        call puts
+        jmp .no
+.on:
         call net_parse
         jnc .found
         ; lo que ya tiene otro uso (teclado, ratón, mando, memoria) no se
@@ -955,6 +986,8 @@ msg_netok   db "Adaptador de red USB preparado (CDC-ECM), MAC ", 0
 msg_netok2  db ": cargue HSPRED.", 13, 10, 0
 msg_netno   db "Adaptador de red USB ", 0
 msg_netno2  db ": aún no se admite (no ofrece la clase estándar CDC-ECM).", 13, 10, 0
+msg_netoff  db ": sin usar. Para usarlo, añada /RED a la línea de", 13, 10
+            db "HSPUSB.SYS en CONFIG.SYS.", 13, 10, 0
 msg_netmac  db "el adaptador de red no da su dirección MAC.", 13, 10, 0
 msg_netmem  db "Adaptador de red USB: no queda memoria para su búfer; no se usa.", 13, 10, 0
 

@@ -3118,6 +3118,10 @@ init:
         mov byte [cs:opt_force], 1
         mov byte [cs:opt_boot], 1
 .nu:
+        cmp al, 'R'
+        jne .nr
+        mov byte [cs:opt_red], 1    ; /RED: usar el adaptador de red USB
+.nr:
         cmp al, 'I'
         jne .ni
         mov byte [cs:opt_info], 1
@@ -4324,6 +4328,7 @@ ir_fake     dd 0x1E318086, 0, 0x0F, 0, 0x0F
 intel_xids  dw 0x1E31, 0x8C31, 0x9C31, 0x8CB1, 0x9CB1, 0x8D31, 0x0F35, 0
 ir_done     db 0
 opt_usb2    db 0                    ; /2: no encender el USB 3 (Intel series 7 a 9)
+opt_red     db 0                    ; /RED: usar el adaptador de red USB (sin ella, ni se mira)
 ir_u2m      dd 0
 ir_u3m      dd 0
 ir_u2o      dd 0

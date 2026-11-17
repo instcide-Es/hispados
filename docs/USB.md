@@ -22,14 +22,14 @@ Encima de cualquiera de ellas funciona lo mismo:
   ([MANDOS.md](MANDOS.md));
 - **adaptadores de red** USB-Ethernet con la clase estándar CDC-ECM (los
   Realtek RTL8152/RTL8153), como una tarjeta más de HSPRED
-  ([RED.md](RED.md));
+  ([RED.md](RED.md)); solo con la opción `/RED`;
 - **concentradores** (hubs), también encadenados;
 - el disco de arranque de la BIOS con `/U`.
 
 ## Uso
 
 ```
-DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/2] [/?]
+DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/RED] [/INFO] [/V] [/2] [/?]
 ```
 
 | Opción | Qué hace |
@@ -37,6 +37,7 @@ DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/2] [/?]
 | (ninguna) | Seguro: si la BIOS está usando **alguna** controladora USB (es suya o la tiene en marcha), o el sistema ha arrancado de un disco USB de la BIOS, no se toca nada. **Salvo** en los equipos sin ratón PS/2 (ver «Equipos sin ratón PS/2»): ahí lo toma él solo. |
 | `/F` | Tomar el USB aunque lo use la BIOS (teclado y ratón pasan a HSPUSB). |
 | `/U` | Como `/F`, también cuando se ha arrancado de una memoria USB de la BIOS: HSPUSB la reconoce y atiende él la unidad 80h (INT 13h). |
+| `/RED` | Usar también el adaptador de red USB-Ethernet (CDC-ECM), para HSPRED. **Sin `/RED` la red por USB está apagada**: HSPUSB hace exactamente lo que hacía antes de tenerla (no lee las demás configuraciones del adaptador, no le manda nada ni se queda con memoria para él) y solo dice, en una línea, que el adaptador está ahí y cómo se enciende. |
 | `/INFO` | Enseña las controladoras (clase, fabricante:modelo, uso que les da la BIOS), los puertos con algo conectado de cada una y el árbol de aparatos. Espera 15 s. |
 | `/V` | Mensajes detallados. |
 | `/2` | Solo en los Intel de las series 7, 8 y 9 (ver más abajo): no encender el USB 3 de los puertos (`USB3_PSSEN` = 0), para que lo que se conecte vaya a alta velocidad (USB 2.0). Para probar un aparato de USB 3 que a supervelocidad no aparezca (un adaptador de red con su concentrador). Sin probar en un equipo de verdad. |
@@ -142,7 +143,8 @@ enumera). Con `/INFO`: «Bluetooth (HID proxy): para después».
 
 ## Adaptadores de red (CDC-ECM)
 
-`[USB-RED]` Un adaptador USB-Ethernet con la clase estándar CDC-ECM
+`[USB-RED]` **Solo con `/RED`** (sin ella, `role_net` no pasa de mirar lo ya
+leído para decir que el adaptador está ahí). Un adaptador USB-Ethernet con la clase estándar CDC-ECM
 (interfaz de comunicaciones 02h/06h e interfaz de datos 0Ah) se pone en
 marcha y queda a disposición de HSPRED, que lo usa como una tarjeta más: lo
 que ve el usuario, los adaptadores que valen y la interfaz entre los dos
