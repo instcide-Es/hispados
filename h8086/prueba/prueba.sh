@@ -10,6 +10,24 @@ set -u
 cd "$(dirname "$0")/.."
 T=$(mktemp -d)
 fail=0
+# MODO=alto ./prueba/prueba.sh pasa TODA la prueba con el núcleo en la memoria
+# alta (como con DOS=ALTO en CONFIG.SYS), y MODO=8086, tratando el procesador
+# como un 8086 (sin A20, HMA ni memoria extendida): se hace con copias de los
+# disquetes en las que se cambia el octeto que el núcleo lleva para eso
+# detrás de la marca «HCFG:»
+IMG=build
+if [ -n "${MODO:-}" ]; then
+  IMG=$T/img; mkdir -p $IMG
+  python3 - $IMG "$MODO" build/hispa8086-*.img <<'PY'
+import os, sys
+dst, modo = sys.argv[1], sys.argv[2]
+for f in sys.argv[3:]:
+    d = bytearray(open(f, 'rb').read())
+    i = d.index(b'HCFG:')
+    d[i + 5] = {'alto': 1, '8086': 2}[modo]
+    open(os.path.join(dst, os.path.basename(f)), 'wb').write(d)
+PY
+fi
 ok() { echo "  OK   $1" | tee -a $T/salida.txt; }
 ko() { echo "  FAIL $1" | tee -a $T/salida.txt; fail=1; }
 : > $T/salida.txt
@@ -38,7 +56,7 @@ esta() { if grep -qF -- "$2" $T/$1.txt; then ok "$3«$2»"; else ko "$3falta «$
 noesta() { if grep -qF -- "$2" $T/$1.txt; then ko "$3sobra «$2»"; else ok "$3no sale «$2»"; fi; }
 arranca() {   # imagen del disquete, cpu y, si se quiere, imagen del disco duro
   rm -f $T/mon  # (en QMAS, lo que se le quiera añadir a QEMU: otra disquetera...)
-  qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu $2 -m 4 \
+  qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu $2 -m ${QMEM:-4} \
     -drive file=$1,format=raw,if=floppy,index=0 ${3:+-drive file=$3,format=raw,if=ide,index=0} \
     -serial unix:$T/serie,server,nowait ${QMAS:-} \
     -boot a -no-reboot > /dev/null 2>&1 &
@@ -47,7 +65,7 @@ arranca() {   # imagen del disquete, cpu y, si se quiere, imagen del disco duro
 }
 arranca_duro() {   # solo con el disco duro, sin disquete: imagen y cpu
   rm -f $T/mon
-  qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu $2 -m 4 \
+  qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu $2 -m ${QMEM:-4} \
     -drive file=$1,format=raw,if=ide,index=0 \
     -serial unix:$T/serie,server,nowait \
     -boot c -no-reboot > /dev/null 2>&1 &
@@ -66,10 +84,10 @@ apaga() { mon quit 0.5; wait $QPID 2>/dev/null; }
 # SOLO="duro medidas" ./prueba/prueba.sh se corren solo las que se digan ----
 p_basico() {
 echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.9 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.10 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -80,7 +98,7 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.9" "VER: "
+esta p2 "Hispa-8086 versión 0.10" "VER: "
 escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"; escribe "dir"
 pantalla p2
 esta p2 "22 archivos, " "DIR: "
@@ -120,7 +138,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.9" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.10" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -192,7 +210,7 @@ fi
 
 p_pasar() {
 echo "== Hispa-8086: PASAR, archivos por el puerto serie (XMODEM) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 # de fuera adentro: 3.000 octetos de todos los valores, con el CRC
 python3 -c "import sys; sys.stdout.buffer.write(bytes((i * 13 + 5) & 255 for i in range(3000)))" > $T/ida.bin
@@ -221,7 +239,7 @@ if cmp -s $T/vuelta.bin $T/ida.bin; then ok "ida y vuelta: el archivo vuelve id�
 
 p_duro() {
 echo "== Hispa-8086: el disco duro (C:, una partición FAT16 de 20 megas) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 python3 prueba/haz_duro.py $T/hd.img > /dev/null
 arranca $T/a.img 486 $T/hd.img
 escribe "limpiar"; escribe "dir c:"
@@ -267,7 +285,7 @@ if fsck.fat -n $T/part.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ni
 p_medidas() {
 echo "== Hispa-8086: las demás medidas de disquete (720 K, 1,2 M y 1,44 M) =="
 for m in 720 1200 1440; do
-  cp build/hispa8086-$m.img $T/b.img
+  cp $IMG/hispa8086-$m.img $T/b.img
   arranca $T/b.img pentium
   escribe "hola"; escribe "arch"; sleep 7; escribe "dir grande.dat"
   pantalla p5
@@ -278,12 +296,16 @@ for m in 720 1200 1440; do
   if fsck.fat -n $T/b.img > $T/fsck.txt 2>&1; then ok "$m K: fsck.fat no encuentra ningún error"; else ko "$m K: fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 done
 # el sistema base tiene que caber en el disquete de los XT
-libre=$(mdir -i build/hispa8086-360.img :: | awk '/bytes free/ { gsub(/ /, "", $0); sub(/bytesfree/, "", $0); print }')
+libre=$(mdir -i $IMG/hispa8086-360.img :: | awk '/bytes free/ { gsub(/ /, "", $0); sub(/bytesfree/, "", $0); print }')
 if [ "${libre:-0}" -gt 100000 ]; then ok "en el disquete de 360 K quedan $libre octetos libres"; else ko "el disquete de 360 K se queda sin sitio ($libre)"; fi
 }
 
 p_fuentes() {
 echo "== Hispa-8086: solo instrucciones del 8086 =="
+for f in ordenes/xcopiar; do
+  if grep -q "cpu 286\|cpu 386" $f.asm; then ko "$f.asm lleva instrucciones de 286"; fi
+done
+if grep -q "^\s*cpu 286" *.asm *.inc ordenes/*.asm ordenes/*.inc; then ko "hay tramos de 286 (no debería: todo va por la BIOS)"; else ok "ni una instrucción de 286: la memoria extendida se maneja con la BIOS (INT 15h)"; fi
 for f in arranque mbr nucleo command ordenes/pasar ordenes/formatea ordenes/sistema ordenes/partir ordenes/mas ordenes/ordenar \
          ordenes/revisar ordenes/etiqueta ordenes/atributo ordenes/arbol ordenes/xcopiar ordenes/editar ordenes/teclado ordenes/discoram; do
   if grep -q "^\s*cpu 8086" $f.asm; then ok "$f.asm se ensambla con «cpu 8086»"; else ko "$f.asm no lleva «cpu 8086»"; fi
@@ -300,7 +322,7 @@ if [ $tam -lt 16384 ]; then ok "el intérprete ocupa $tam octetos"; else ko "el 
 
 p_formatea() {
 echo "== Hispa-8086: FORMATEA, disquetes =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 rm -f $T/b.img; truncate -s 368640 $T/b.img     # un disquete de 360 K sin nada
 QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
 escribe "limpiar"; escribe "formatea"; escribe "formatea z:"; sleep 1; escribe "dir b:"; sleep 2
@@ -415,7 +437,7 @@ PY2
 
 p_partir() {
 echo "== Hispa-8086: PARTIR, FORMATEA C: /S y arrancar del disco duro (20 megas, FAT16) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 rm -f $T/hd.img; truncate -s $((40 * 16 * 63 * 512)) $T/hd.img     # un disco nuevo, a cero (la BIOS se guarda un cilindro)
 arranca $T/a.img 486 $T/hd.img
 escribe "limpiar"; escribe "partir"; escribe "dir c:"
@@ -451,12 +473,12 @@ if [ "$(fila_part $T/hd.img 1)" = "80 04 63 39249 55aa" ]; then ok "la tabla, de
 dd if=$T/hd.img of=$T/part.img bs=512 skip=63 2> /dev/null
 if fsck.fat -n $T/part.img > $T/fsck.txt 2>&1; then ok "fsck.fat da por buena la partición formateada"; else ko "fsck.fat encuentra errores en la partición"; cat $T/fsck.txt; fi
 if grep -q "FAT16" <(file $T/part.img) || minfo -i $T/part.img :: 2> /dev/null | grep -q 'disk type="FAT16'; then ok "es FAT16"; else ko "no es FAT16"; fi
-if cmp -s <(mtype -i $T/part.img ::NUCLEO86.SYS) build/NUCLEO86.SYS && cmp -s <(mtype -i $T/part.img ::COMMAND.COM) build/COMMAND.COM && cmp -s <(mtype -i $T/part.img ::LEEME.TXT) build/LEEME.TXT; then ok "mtools lee el sistema y lo copiado, idénticos"; else ko "los archivos de C: no son los esperados"; fi
+if cmp -s <(mtype -i $T/part.img ::NUCLEO86.SYS) <(mtype -i $IMG/hispa8086-360.img ::NUCLEO86.SYS) && cmp -s <(mtype -i $T/part.img ::COMMAND.COM) build/COMMAND.COM && cmp -s <(mtype -i $T/part.img ::LEEME.TXT) build/LEEME.TXT; then ok "mtools lee el sistema y lo copiado, idénticos"; else ko "los archivos de C: no son los esperados"; fi
 if mdir -i $T/part.img :: 2> /dev/null | grep -q "DURO"; then ok "la etiqueta (/V:) está puesta"; else ko "falta la etiqueta de C:"; fi
 # y ahora, sin disquete: tiene que arrancar solo
 arranca_duro $T/hd.img 486
 pantalla k6
-esta k6 "Hispa-8086 0.9 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
+esta k6 "Hispa-8086 0.10 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
 esta k6 'C:\>' "y se queda en C:: "
 escribe "limpiar"; escribe "dir"; escribe "hola desde el duro"; escribe "mostrar leeme.txt"
 pantalla k7
@@ -528,7 +550,7 @@ done
 
 p_sistema() {
 echo "== Hispa-8086: SISTEMA (un disquete y un disco duro que ya tenían formato y archivos) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 rm -f $T/b.img; mformat -C -f 720 -v DATOS -i $T/b.img ::; mcopy -i $T/b.img build/LEEME.TXT ::CARTA.TXT
 python3 prueba/haz_duro.py $T/hd.img > /dev/null
 mcopy -i $T/hd.img@@$((63 * 512)) build/LEEME.TXT ::CARTA.TXT
@@ -569,7 +591,7 @@ apaga
 
 p_lotes() {
 echo "== Hispa-8086: lotes (FOR, LLAMAR, DESPLAZAR), tuberías y filtros =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 mcopy -i $T/a.img prueba/BUCLE.BAT prueba/SUB.BAT prueba/SUB2.BAT ::
 arranca $T/a.img 486
 escribe "limpiar"; escribe "bucle p1 p2"; sleep 8
@@ -633,7 +655,7 @@ if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ning�
 
 p_config() {
 echo "== Hispa-8086: CONFIG.SYS, INT 25h/26h y lo nuevo del núcleo =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 mcopy -i $T/a.img build/N8.COM ::
 arranca $T/a.img 486
 escribe "limpiar"; escribe "n8"; sleep 3; escribe "dir n8.com"
@@ -685,7 +707,8 @@ apaga
 }
 
 . prueba/partes_09.sh
-PARTES="basico lotes ordenes config dispositivos reserva discos fantasma editar teclado pasar duro formatea sistema partir medidas fuentes"
+. prueba/partes_10.sh
+PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 v86 pasar duro formatea sistema partir medidas fuentes"
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

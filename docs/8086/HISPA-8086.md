@@ -16,12 +16,12 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 
 ## Dónde estamos
 
-**Etapas 0 a 4 hechas y la 5 casi** (`h8086/`, noviembre de 2026).
-Versión 0.9.
+**Etapas 0 a 4 y 6 hechas, y la 5 casi** (`h8086/`, noviembre de 2026).
+Versión 0.10.
 
 - **Arranque, de disquete o de disco duro**: un solo sector de arranque para
   FAT12 y FAT16, disquetes y particiones, y un sector de particiones (MBR)
-  propio. El núcleo ocupa 11,2 K en el disco. En memoria, el núcleo con
+  propio. El núcleo ocupa 13,4 K en el disco. En memoria, el núcleo con
   sus variables, su pila, la tabla de archivos y la reserva de sectores son
   unos 17 K, y el intérprete de órdenes con su entorno, otros
   13 K: en una máquina de 640 K quedan 607 K para los
@@ -32,8 +32,15 @@ Versión 0.9.
 - **El equipo**: reconoce el procesador (8086/8088, V20/V30, 80186, 286, 386,
   486 o más) y la memoria; si la máquina puede con un Hispa mayor, lo
   aconseja.
-- **CONFIG.SYS** al arrancar: `FILES=`, `BUFFERS=`, `DEVICE=`, `SHELL=` y
-  `REM` (ver «CONFIG.SYS», más abajo).
+- **CONFIG.SYS** al arrancar: `FILES=`, `BUFFERS=`, `DEVICE=`, `SHELL=`,
+  `DOS=ALTO`/`DOS=BAJO`, `PROCESADOR=8086` y `REM` (ver «CONFIG.SYS», más
+  abajo).
+- **En un 286 (o más) con memoria por encima del mega** (desde la 0.10): un
+  gestor de memoria extendida **XMS 2.0** dentro del núcleo, la puerta A20
+  abierta y comprobada de verdad, y **`DOS=ALTO`**, que sube el núcleo entero
+  a la memoria alta (HMA) y deja unos 19 K más de memoria convencional;
+  DISCORAM puede ir en la extendida (`/E`). Ver «El 286: memoria extendida,
+  A20 y HMA».
 - **INT 21h**, lo que un programa de DOS espera encontrar:
   - consola (01h, 02h, 06h a 0Bh), vectores (25h, 35h), versión (30h),
     terminar (00h, 4Ch, 4Dh, INT 20h) y **terminar quedándose residente**
@@ -41,7 +48,8 @@ Versión 0.9.
   - **archivos**: crear (3Ch), abrir (3Dh), cerrar (3Eh), leer (3Fh),
     escribir y cortar (40h), borrar (41h), moverse (42h), atributos (43h),
     qué hay detrás de un número de archivo (44h con AL=0), renombrar y mover
-    a otro directorio (56h), buscar con comodines (4Eh, 4Fh, 1Ah, 2Fh);
+    a otro directorio (56h), la fecha y la hora de un archivo (57h), buscar
+    con comodines (4Eh, 4Fh, 1Ah, 2Fh);
   - **directorios**: crear (39h), quitar (3Ah), cambiar (3Bh), cuál es (47h);
   - sitio libre (36h), fecha y hora, **y ponerlas** (2Ah a 2Dh), verificar
     lo que se escribe (2Eh, 54h), volcar al disco (0Dh);
@@ -78,8 +86,9 @@ Versión 0.9.
   FORMATEA, SISTEMA, PARTIR, REVISAR, ETIQUETA, ATRIBUTO, ARBOL, XCOPIAR,
   MAS, ORDENAR, TECLADO (el teclado español, residente) y PASAR (archivos
   por el puerto serie).
-- **Prueba automática** (`make -C h8086 prueba`): 409 comprobaciones en
-  QEMU, en diecisiete partes: arrancando de disquete y de disco duro, con
+- **Prueba automática** (`make -C h8086 prueba`): 470 comprobaciones en
+  QEMU, en veintiuna partes (y la batería entera se pasa también con el
+  núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
   discos partidos y formateados por el propio sistema, disquetes de siete
   medidas, una sola disquetera cambiando de disquete, discos estropeados a
   propósito que REVISAR arregla, un controlador de bloque y otro de carácter
@@ -183,11 +192,16 @@ con su disquetera y su disco duro.
 - Las mayúsculas con tilde no existen en la página 437 (salvo É): TECLADO
   las escribe sin ella. No hay más páginas de códigos.
 - REVISAR no arregla los archivos cruzados (lo dice, como CHKDSK) ni repasa
-  la superficie del disco. XCOPIAR y COPIAR no conservan la fecha del
-  archivo (no hay INT 21h/57h).
+  la superficie del disco.
 - EDITAR: un archivo de hasta unos 55 K, líneas de hasta 250 letras (las más
   largas se parten al leer), los tabuladores se ven como un carácter.
-- DIR no tiene `/P` ni `/W` ni enseña fechas (para eso, `DIR | MAS`).
+- DIR no ordena ni tiene `/S` ni `/A`.
+- La memoria extendida: sin bloques de memoria superior (UMB, las funciones
+  10h a 12h de XMS dicen «no la hay»), 16 bloques a la vez, y hasta unos
+  63 megas (lo que da INT 15h/88h, que en un 286 son 15). Un programa que
+  cuente con que la memoria «da la vuelta» al mega (algunos .EXE
+  comprimidos con EXEPACK) puede fallar con `DOS=ALTO`, como en MS-DOS 5;
+  con `DOS=BAJO` A20 está cerrada mientras nadie la pida.
 - VOL enseña la etiqueta sin los espacios que lleve dentro (ETIQUETA la
   enseña bien).
 
@@ -268,7 +282,9 @@ se pone en medio.
 | | MS-DOS 3.3 | Hispa-386 0.9 | Hispa-8086 (objetivo) |
 |---|---|---|---|
 | Residente (núcleo + intérprete) | ~54 K | ~59 K | **menos de 32 K** |
-| Hoy (0.9) | | | unos 30 K: 17 del núcleo (con 4 sectores de reserva) y 13 del intérprete |
+| 0.9 | | | unos 30 K: 17 del núcleo (con 4 sectores de reserva) y 13 del intérprete |
+| Hoy (0.10), sin 286 o con `DOS=BAJO` | | | quedan 618.768 octetos libres de 640 K (unos 35 K ocupados: núcleo con el gestor de memoria extendida, la reserva de sectores e intérprete) |
+| Hoy (0.10), `DOS=ALTO` en un 286 con más de un mega | | | quedan 638.000 octetos libres (el núcleo sube a la HMA: 19.232 octetos más que abajo) |
 
 Reglas: el intérprete de órdenes tiene una parte que se puede pisar y volver
 a cargar (como COMMAND.COM); los búferes de disco se piden según la memoria
@@ -369,7 +385,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 3 | Intérprete de órdenes aparte (COMMAND.COM): órdenes en español, archivos .BAT, AUTOEXEC.BAT | **hecha**: SI, IR A, PARA, LLAMAR, DESPLAZAR, redirección, tuberías, entorno, PATH e indicador |
 | 4 | Disco duro: particiones, FAT16; CONFIG.SYS y controladores de dispositivo | **hecha**: C: con FAT16, arranque del disco duro, CONFIG.SYS con FILES=, BUFFERS=, SHELL= y DEVICE= (controladores de carácter y de bloque), la cadena de dispositivos |
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **casi**: todas las de MS-DOS 3.3 que hacen falta, EDITAR y TECLADO; falta PASAR por el puerto paralelo (y las menores: IMPRIMIR, COMPARAR, COPIADISCO) |
-| 6 | Modo 286: HMA y memoria extendida | |
+| 6 | Modo 286: HMA y memoria extendida | **hecha** (0.10): gestor XMS 2.0 dentro del núcleo, A20, `DOS=ALTO`, DISCORAM `/E`; sin UMB |
 | 7 | Hispa-BASIC | |
 | 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | |
 | 9 | Juegos, manual, versión estable 1.0 | |
@@ -386,10 +402,10 @@ del intérprete:
 | Orden | Clásico | |
 |---|---|---|
 | `AYUDA`, `VER`, `EQUIPO`, `ACTUALIZAR` | `HELP`, `VERSION` | la lista de órdenes, la versión, el procesador y la memoria |
-| `MEMORIA` | `MEM` | la memoria total y la libre |
-| `DIR [ruta]` | `LISTAR` | los archivos |
+| `MEMORIA` | `MEM` | la memoria total y la libre; en un 286 con más de un mega, también la memoria alta (HMA: libre, de un programa o del sistema) y la extendida, con la que queda libre |
+| `DIR [ruta] [/P] [/W]` | `LISTAR` | los archivos, con su tamaño, su fecha y su hora; `/P` se para a cada pantalla, `/W` solo los nombres, cinco por línea (los directorios, entre corchetes) |
 | `MOSTRAR archivo` | `TYPE` | enseña un texto |
-| `COPIAR origen [destino]` | `COPY` | con comodines, directorios enteros, nombre nuevo con comodines (`COPIAR *.TXT *.BAK`) y dispositivos: `COPIAR CON nota.txt` (se acaba con Ctrl+Z e Intro), `COPIAR nota.txt PRN` |
+| `COPIAR origen [destino]` | `COPY` | conserva la fecha y la hora del original; con comodines, directorios enteros, nombre nuevo con comodines (`COPIAR *.TXT *.BAK`) y dispositivos: `COPIAR CON nota.txt` (se acaba con Ctrl+Z e Intro), `COPIAR nota.txt PRN` |
 | `MOVER origen [destino]` | `MOVE` | cambia el archivo de directorio sin copiarlo; a otra unidad, lo copia y borra el original |
 | `BORRAR archivo` | `DEL` | con comodines; `*.*` pregunta antes |
 | `RENOMBRAR viejo nuevo` | `REN` | con comodines: `REN *.TXT *.BAK` |
@@ -414,7 +430,7 @@ duplicar archivos):
 | `ETIQUETA [unidad:] [nombre]` | `LABEL` | dice, pone o quita (`/B`) el nombre del disco |
 | `ATRIBUTO [+R -R +A -A +S -S +H -H] archivos` | `ATTRIB` | solo leer, cambiado, del sistema, oculto; sin signos, los enseña |
 | `ARBOL [directorio] [/A]` | `TREE` | los directorios en árbol; con `/A`, también los archivos |
-| `XCOPIAR origen [destino] [/S]` | `XCOPY` | copia un directorio entero; con `/S`, con sus subdirectorios, que crea en el destino |
+| `XCOPIAR origen [destino] [/S]` | `XCOPY` | copia un directorio entero, con la fecha y la hora de cada archivo; con `/S`, con sus subdirectorios, que crea en el destino |
 | `MAS`, `ORDENAR` | `MORE`, `SORT` | los filtros |
 | `TECLADO [/N]` | `KEYB` | el teclado español (ver «TECLADO») |
 | `PASAR` | | archivos por el puerto serie |
@@ -450,7 +466,7 @@ línea y la columna, el modo y un asterisco si hay cambios sin guardar.
 | Ins | insertar o sobrescribir |
 | Supr, Retroceso | borrar (al final o al principio de la línea, la juntan con la de al lado) |
 | F2 | guardar |
-| F3 | buscar, sin distinguir mayúsculas; F3 e Intro, el siguiente |
+| F3 | buscar, desde detrás del cursor hasta el final, sin distinguir mayúsculas; F3 e Intro, el siguiente |
 | F4, F5, F6 | copiar la línea, cortarla, pegarla encima |
 | F10 o Esc | salir (si hay cambios, pregunta) |
 
@@ -496,7 +512,12 @@ pasa a su rutina de estrategia y luego a la de interrupción
     piden de uno en uno (órdenes 4 y 8).
 - **DISCORAM.SYS** es el ejemplo, y sirve: `DEVICE=\DISCORAM.SYS 64` deja un
   disco en memoria de 64 K (de 16 a 512) en D:, con formato y vacío. Lo que
-  ocupa se le quita a los programas. Son 0,7 K de controlador
+  ocupa se le quita a los programas. Con **`/E`**
+  (`DEVICE=\DISCORAM.SYS 1000 /E`), en un 286 con memoria extendida, el disco
+  va en la extendida (hasta 4.000 K): se lo pide al gestor XMS del núcleo y
+  mueve cada sector con su función de mover, y en la memoria convencional
+  solo deja el controlador (unos 400 octetos). Sin memoria extendida, `/E`
+  lo dice y no se instala. Es 1,1 K de controlador
   (`h8086/ordenes/discoram.asm`, comentado para que sirva de modelo).
 
 ## La reserva de sectores (BUFFERS=)
@@ -506,7 +527,9 @@ leídos **de la FAT y de los directorios**, que son los que se piden una y
 otra vez: lo que está en ella no se vuelve a leer del disquete. Los sectores
 de datos de los archivos no entran (pasan una vez y echarían a los que
 sirven). `BUFFERS=n` dice cuántos sectores guarda: de 0 (sin reserva) a 30;
-sin decir nada, 4. Cada uno son 516 octetos de memoria residente.
+sin decir nada, 4. Cada uno son 516 octetos de memoria residente. Con
+`DOS=ALTO` la reserva sube a la HMA con el resto del núcleo y no gasta
+memoria convencional: sin decir nada, entonces, son 20.
 
 **Escribir no se retrasa**: cada sector que el núcleo da por escrito va al
 disco en el momento y, si tiene copia en la reserva, se pone al día. Lo
@@ -667,6 +690,80 @@ dos. `IF` es `SI` y `GOTO` es `IR A` (también `IR` a secas), como `FOR` es
 `PARA... EN... HAZ`; dentro de `SI`, `NO`, `EXISTE` y `NIVEL` valen por
 `NOT`, `EXIST` y `ERRORLEVEL`.
 
+## El 286: memoria extendida, A20 y HMA
+
+Desde la 0.10, Hispa-8086 saca partido de un 286 (o más) que tenga memoria
+por encima del mega. En un 8088, un 8086, un V20 o un 80186 todo sigue igual:
+la detección del procesador es lo primero, y si no encuentra un 286 no se
+llega a nada de esto (`h8086/alta.inc`).
+
+**Lo que hay:**
+
+- **Un gestor de memoria extendida XMS 2.0**, como HIMEM.SYS: INT 2Fh/4300h
+  dice que lo hay y 4310h da su punto de entrada; por él, la versión (00h),
+  la HMA (pedirla y soltarla, 01h y 02h), A20 para todos y para uno (03h a
+  06h, la local se cuenta) y cómo está (07h), cuánta queda (08h) y los
+  bloques: pedir (09h), soltar (0Ah), mover (0Bh, también entre la memoria
+  convencional y la extendida), bloquear y desbloquear (0Ch, 0Dh, que dan
+  su dirección), qué hay de uno (0Eh) y cambiarle el tamaño (0Fh, que lo
+  muda y copia si no puede crecer donde está). El tamaño de la extendida lo
+  da INT 15h/88h; los 64 K primeros son la HMA y el resto se reparte en K.
+- **La puerta A20** se abre por el controlador del teclado (8042, como en el
+  AT) y por el puerto 92h (PS/2 y posteriores), y **se comprueba de
+  verdad**: con ella cerrada, FFFF:0010 es el mismo octeto que 0000:0000; se
+  cambia uno y se mira el otro.
+- **`DOS=ALTO`** en CONFIG.SYS sube a la HMA el núcleo entero: el código, sus
+  variables, su pila, la tabla de archivos y la reserva de sectores (con 20
+  sectores, sin decir nada). Abajo solo se queda **el puente**, unos 350
+  octetos: las entradas de INT 20h, 21h, 25h, 26h, 27h y 2Fh y la del gestor,
+  que se aseguran de que A20 esté abierta y saltan arriba. Para eso el
+  núcleo se ensambla desde la dirección 10h y corre con su segmento un
+  párrafo por debajo de donde se carga: la misma imagen vale en 006F:0010 y
+  en FFFF:0010, y subir es copiarla y saltar.
+- **MEMORIA** enseña la convencional, la HMA y la extendida (total y libre);
+  **DISCORAM `/E`** pone el disco en la extendida.
+- **`PROCESADOR=8086`** hace como si no hubiera 286: ni gestor, ni A20, ni
+  HMA, ni se toca INT 2Fh. Es el interruptor para probar que todo va sin lo
+  nuevo (la batería lo hace).
+
+Medido en la batería (QEMU, 640 K de memoria convencional y 4 megas en
+total), la memoria libre para los programas que dice MEMORIA:
+
+| | octetos libres |
+|---|---|
+| núcleo abajo (`DOS=BAJO`, o un 8086, o `PROCESADOR=8086`) | 618.768 |
+| núcleo en la HMA (`DOS=ALTO`) | 638.000 (19.232 más) |
+| con `FILES=20` y `BUFFERS=10`, núcleo abajo | unos 600 K |
+| un DISCORAM `/E` de 1.000 K | cuesta 400 octetos de memoria convencional; el resto sale de la extendida |
+
+**Dos decisiones:**
+
+1. **Dentro del núcleo, no un MEMEXT.SYS con `DEVICE=`.** El gestor cuesta
+   unos 1,4 K y, con `DOS=ALTO`, va arriba con el núcleo, así que no gasta
+   memoria convencional; un controlador aparte se quedaría abajo y no podría
+   subir el núcleo (que necesita A20 antes de que se carguen los
+   controladores). Y lo útil es que la memoria esté ahí sin saber poner
+   un `DEVICE=`: en un 286 con memoria extendida el gestor está siempre;
+   `DOS=ALTO` es lo único que se pide. Lo que se paga: en un 8086 esos 1,4 K
+   de código están en el núcleo sin servir para nada.
+2. **Ni una instrucción de 286.** Mover memoria por encima del mega pide
+   entrar en modo protegido, y en un 286 no hay manera limpia de volver: hay
+   que reiniciar el procesador por el 8042 y recogerlo, y cada BIOS lo hace
+   a su modo. Lo hace mejor la propia BIOS (INT 15h/87h), que existe en
+   todos los AT y conoce su máquina. Así todo Hispa-8086 se sigue
+   ensamblando con `cpu 8086`, y no hay ningún tramo que un 8088 pudiera
+   ejecutar por error. La BIOS del AT cierra A20 al volver de copiar: por
+   eso se la llama desde el puente, que está abajo, y es él quien la vuelve
+   a abrir.
+
+Probado en QEMU con 1, 2, 4 y 16 megas y en su máquina sin PCI (`isapc`):
+A20 de verdad, 256 K movidos a la extendida y de vuelta y comparados, un
+bloque que crece de 256 a 384 K sin perder nada, llenar la extendida y
+soltarla, la HMA para un programa, y la batería entera con el núcleo arriba
+(`MODO=alto`) y como un 8086 (`MODO=8086`). **Falta probarlo en un 286
+real** y en PCjs con la BIOS del IBM AT: la puerta A20 de los AT de verdad
+y la vuelta del modo protegido de su BIOS son justo lo que QEMU no reproduce.
+
 ## CONFIG.SYS
 
 Al arrancar, antes de lanzar el intérprete, el núcleo lee `\CONFIG.SYS` de
@@ -674,9 +771,11 @@ la unidad de arranque, si existe (`h8086/config.inc`):
 
 | | |
 |---|---|
-| `FILES=n` | cuántos archivos pueden estar abiertos a la vez: de 8 (lo que hay sin decir nada) a 64. Cada uno son 24 octetos de memoria residente |
+| `FILES=n` | cuántos archivos pueden estar abiertos a la vez: de 8 (lo que hay sin decir nada) a 64. Cada uno son 28 octetos de memoria residente |
 | `BUFFERS=n` | cuántos sectores guarda la reserva de sectores: de 0 a 30; sin decir nada, 4 (ver «La reserva de sectores») |
 | `DEVICE=archivo [parámetros]` | carga un controlador de dispositivo (ver «Dispositivos») |
+| `DOS=ALTO` (o `HIGH`), `DOS=BAJO` (o `LOW`) | con `ALTO`, en un 286 con más de un mega, el núcleo se sube a la memoria alta (ver «El 286»); sin decir nada, se queda abajo |
+| `PROCESADOR=8086` | hace como si el procesador fuera un 8086 aunque sea un 286 o más: ni A20, ni HMA, ni memoria extendida, ni INT 2Fh. Sirve para probar que todo va sin lo del 286 |
 | `SHELL=ruta [parámetros]` | el intérprete que se lanza en vez de `\COMMAND.COM`, y lo que se le pasa; como en DOS, para que ejecute AUTOEXEC.BAT hay que ponerle `/P`. Si no se puede lanzar, se dice y se usa COMMAND.COM |
 | `REM ...` | un comentario; las líneas vacías no cuentan |
 
@@ -733,14 +832,15 @@ make -C h8086 prueba     # los arranca en QEMU y comprueba la pantalla
 
 Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto, y
 `fsck.fat` (dosfstools) para repasar los discos desde fuera. La prueba va por
-partes (diecisiete) y tarda unos veinticinco minutos;
+partes (veintiuna) y tarda unos TIEMPO minutos;
 `SOLO="formatea partir" ./prueba/prueba.sh` corre solo las que se digan.
 
 | Archivo | Qué es |
 |---|---|
 | `h8086/arranque.asm` | el sector de arranque (FAT12 y FAT16, disquete y disco duro) |
 | `h8086/mbr.asm` | el sector de particiones del disco duro |
-| `h8086/nucleo.asm` | el núcleo: arranque, INT 21h, consola, el equipo |
+| `h8086/nucleo.asm` | el núcleo: arranque, el puente, INT 21h, consola, el equipo |
+| `h8086/alta.inc` | en un 286: el gestor de memoria extendida (XMS 2.0) y la subida a la HMA |
 | `h8086/config.inc` | CONFIG.SYS, y cargar los controladores (DEVICE=) |
 | `h8086/dispositivos.inc` | la cadena de dispositivos: NUL, CON, AUX, PRN; las peticiones |
 | `h8086/disco.inc` | sectores (también INT 25h y 26h), FAT, unidades, directorios, rutas y archivos abiertos |
@@ -763,7 +863,9 @@ partes (diecisiete) y tarda unos veinticinco minutos;
 | `h8086/prueba/n8.asm` | prueba de INT 25h/26h y de FILES= |
 | `h8086/prueba/BUCLE.BAT`, `SUB.BAT`, `SUB2.BAT` | los lotes de la prueba de FOR, LLAMAR y DESPLAZAR |
 | `h8086/prueba/cuenta.asm`, `saludo.asm` | la cuenta de sectores leídos y un controlador de carácter, para la prueba |
-| `h8086/prueba/partes_09.sh` | las partes de la prueba que llegaron con la 0.9 |
+| `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
+| `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
+| `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
 | `h8086/prueba/prueba.sh` | la prueba automática, por partes: `SOLO="partir sistema" ./prueba/prueba.sh` corre solo esas |
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
 | `h8086/prueba/haz_duro.py` | hace el disco duro de prueba (una partición FAT16) |

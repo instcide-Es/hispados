@@ -9,8 +9,7 @@
 ;  trabajo). Con /S copia también los directorios que cuelgan del origen, con
 ;  todo lo suyo, creándolos en el destino.
 ;
-;  Es un XCOPIAR sencillo: no conserva la fecha de los archivos ni pregunta, y
-;  si el destino está dentro del origen se para cuando la ruta no da más.
+;  Es un XCOPIAR sencillo: no pregunta, y si el destino está dentro del origen se para cuando la ruta no da más.
 ;  Baja por los directorios con una rutina que se llama a sí misma (cada nivel
 ;  guarda en la pila su zona de búsquedas). Solo instrucciones del 8086.
 ; =============================================================================
@@ -271,6 +270,13 @@ copia_arch:
         ret
 .hecho:
         inc word [n]
+        mov bx, [h1]                ; la copia, con la fecha del original
+        mov ax, 0x5700
+        int 0x21
+        jc .cierra
+        mov bx, [h2]
+        mov ax, 0x5701
+        int 0x21
 .cierra:
         mov bx, [h1]
         DOS 0x3E

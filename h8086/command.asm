@@ -795,7 +795,33 @@ pon_error:
 .esta:
         mov si, [bx+2]
         call pon_cad
+        cmp ax, E_DISCO             ; un fallo del disco: lo que dijo la BIOS
+        jne .x
+        push ax
+        mov ax, 0xE807
+        int 0x21
+        push ax
+        mov si, m_e_bios
+        call pon_cad
+        pop ax
+        push ax
+        mov cl, 4
+        shr al, cl
+        call .hex
+        pop ax
+        call .hex
+        mov si, m_e_bios2
+        call pon_cad
+        pop ax
         jmp short .x
+.hex:
+        and al, 0x0F
+        add al, '0'
+        cmp al, '9'
+        jbe .h1
+        add al, 7
+.h1:
+        jmp pon_car
 .otro:
         mov si, m_e_error
         call pon_cad
@@ -867,11 +893,38 @@ o_actualizar:
         call pon_cad
         jmp pon_consejo
 
-; ---- DIR [ruta o patrón] ----
+; ---- DIR [ruta o patrón] [/P] [/W]: /P se para cada pantalla; /W, solo los
+;      nombres, cinco por línea ----
 o_dir:
-        mov di, arg1
+        mov word [dir_p], 0         ; (dir_p y dir_w)
+        mov byte [dir_lin], 0
+        mov byte [arg1], 0
+.a:
+        mov di, arg2
         call toma_arg
-        jnz .hay
+        jz .af
+        cmp byte [arg2], '/'
+        jne .ruta
+        mov al, [arg2+1]
+        and al, 0xDF
+        cmp al, 'P'
+        jne .a1
+        mov byte [dir_p], 1
+.a1:
+        cmp al, 'W'
+        jne .a
+        mov byte [dir_w], 1
+        jmp .a
+.ruta:
+        push si
+        mov si, arg2
+        mov di, arg1
+        call copia_txt
+        pop si
+        jmp .a
+.af:
+        cmp byte [arg1], 0
+        jne .hay
         mov si, t_todos
         mov di, arg1
         call copia_txt
@@ -901,6 +954,59 @@ o_dir:
         DOS 0x4E
         jc .nada
 .uno:
+        cmp byte [dir_w], 0
+        je .largo
+        ; a lo ancho: el nombre en 16 columnas (los directorios, entre
+        ; corchetes), cinco por línea
+        mov cx, 16
+        test byte [dta_int+21], 0x10
+        jz .w1
+        mov al, '['
+        call pon_car
+        dec cx
+.w1:
+        mov si, dta_int + 30
+.w2:
+        lodsb
+        test al, al
+        jz .w3
+        call pon_car
+        dec cx
+        jmp .w2
+.w3:
+        test byte [dta_int+21], 0x10
+        jz .w4
+        mov al, ']'
+        call pon_car
+        dec cx
+.w4:
+        test byte [dta_int+21], 0x10
+        jnz .w6
+        mov ax, [dta_int+26]
+        mov dx, [dta_int+28]
+        add [d_total], ax
+        adc [d_total+2], dx
+.w6:
+        call .quinto                ; el quinto de la línea: sin relleno (con
+        jz .w7                      ; él se llegaría a la columna 80 y la
+        mov al, ' '                 ; pantalla saltaría sola de línea)
+.w5:
+        call pon_car
+        loop .w5
+        jmp .sig
+.w7:
+        call .nl
+        jmp .sig
+; (interna) ZF=1 si el archivo que se lleva es el último de su línea (/W)
+.quinto:
+        mov ax, [d_n]
+        inc ax
+        xor dx, dx
+        mov bx, 5
+        div bx
+        test dx, dx
+        ret
+.largo:
         mov si, dta_int + 30        ; el nombre, en 14 columnas
         mov cx, 14
 .n:
@@ -917,7 +1023,7 @@ o_dir:
         jz .arch
         mov si, m_dir
         call pon_cad
-        jmp short .sig
+        jmp short .fecha
 .arch:
         mov ax, [dta_int+26]
         mov dx, [dta_int+28]
@@ -925,11 +1031,72 @@ o_dir:
         adc [d_total+2], dx
         mov cx, 10
         call pon_num32_ancho
-        call pon_nl
+.fecha:
+        mov al, ' '                 ; su fecha y su hora
+        call pon_car
+        call pon_car
+        mov ax, [dta_int+24]
+        and al, 0x1F
+        call pon_2
+        mov al, '-'
+        call pon_car
+        mov ax, [dta_int+24]
+        mov cl, 5
+        shr ax, cl
+        and al, 0x0F
+        call pon_2
+        mov al, '-'
+        call pon_car
+        mov ax, [dta_int+24]
+        mov cl, 9
+        shr ax, cl
+        add ax, 1980
+        call pon_num
+        mov al, ' '
+        call pon_car
+        mov ax, [dta_int+22]
+        mov cl, 11
+        shr ax, cl
+        call pon_2
+        mov al, ':'
+        call pon_car
+        mov ax, [dta_int+22]
+        mov cl, 5
+        shr ax, cl
+        and al, 0x3F
+        call pon_2
+        call .nl
 .sig:
         inc word [d_n]
         DOS 0x4F
         jnc .uno
+        cmp byte [dir_w], 0         ; (a lo ancho: la última línea, a medias)
+        je .fin
+        mov ax, [d_n]
+        xor dx, dx
+        mov bx, 5
+        div bx
+        test dx, dx
+        jz .fin
+        call pon_nl
+        jmp short .fin
+; (interna) línea nueva; con /P, cada 23 se espera una tecla
+.nl:
+        call pon_nl
+        cmp byte [dir_p], 0
+        je .nl1
+        inc byte [dir_lin]
+        cmp byte [dir_lin], 23
+        jb .nl1
+        mov byte [dir_lin], 0
+        push si
+        mov si, m_pausa
+        call pon_cad
+        DOS 0x08
+        call pon_nl
+        pop si
+.nl1:
+        ret
 .fin:
         mov ax, [d_n]
         call pon_num
@@ -1276,6 +1443,14 @@ copia_arch:
 .m1:
         mov byte [cp_mal], 1
 .cierra:
+        mov bx, [o_h1]              ; la copia, con la fecha del original
+        mov ax, 0x5700
+        int 0x21
+        jc .c0
+        mov bx, [o_h2]
+        mov ax, 0x5701
+        int 0x21
+.c0:
         mov bx, [o_h1]
         DOS 0x3E
         mov bx, [o_h2]
@@ -2470,7 +2645,8 @@ o_verificar:
         mov al, dl
         DOS 0x2E
         ret
-; ---- MEMORIA (MEM) ----
+; ---- MEMORIA (MEM): la convencional y, en un 286 con más de un mega, la
+;      memoria alta (HMA) y la extendida, y quién las tiene ----
 o_memoria:
         mov si, m_mem_total
         call pon_cad
@@ -2489,7 +2665,49 @@ o_memoria:
         loop .m
         call pon_num32
         mov si, m_octetos
+        call pon_cad
+        mov ax, 0xE806              ; lo de más allá del mega, según el núcleo
+        xor bx, bx
+        int 0x21
+        test al, 1
+        jnz .hay
+        mov si, m_mem_sin
         jmp pon_cad
+.hay:
+        push ax
+        push bx
+        mov si, m_mem_hma
+        call pon_cad
+        mov si, m_hma_sis
+        test al, 2
+        jnz .h
+        mov si, m_hma_prog
+        test al, 4
+        jnz .h
+        mov si, m_hma_libre
+.h:
+        call pon_cad
+        mov si, m_mem_ext
+        call pon_cad
+        pop ax                      ; (sin los 64 K de la HMA)
+        sub ax, 64
+        call pon_num
+        mov si, m_mem_ext2
+        call pon_cad
+        mov ax, 0x4310              ; y la libre, que la dice el gestor
+        int 0x2F
+        mov [bloque], bx
+        mov [bloque+2], es
+        mov ah, 0x08
+        call far [bloque]
+        push cs
+        pop es
+        mov ax, dx
+        call pon_num
+        mov si, m_mem_ext3
+        call pon_cad
+        pop ax
+        ret
 
 ; =============================================================================
 ;  Programas y archivos por lotes
@@ -3082,10 +3300,10 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.9", 10, 0
+m_ver       db "Hispa-8086 versión 0.10", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásico):", 10
             db "  AYUDA  VER  EQUIPO  MEMORIA (MEM)  LIMPIAR (CLS)  ACTUALIZAR", 10
-            db "  DIR [ruta]             los archivos (LISTAR)    VOL  cómo se llama el disco", 10
+            db "  DIR [ruta] [/P] [/W]   los archivos (LISTAR)    VOL  cómo se llama el disco", 10
             db "  MOSTRAR archivo        enseña un texto (TYPE)", 10
             db "  COPIAR origen destino  copia; valen * y ?, directorios, CON y PRN (COPY)", 10
             db "  MOVER origen destino   lo cambia de sitio (MOVE)", 10
@@ -3109,7 +3327,7 @@ m_actualizar db "Los sistemas de la familia Hispa-DOS se actualizan entre sí:",
 m_archivos  db " archivos, ", 0
 m_octetos   db " octetos", 10, 0
 m_libres    db " octetos libres", 10, 0
-m_dir       db "     <DIR>", 10, 0
+m_dir       db "     <DIR>", 0
 m_copiado   db "1 archivo copiado.", 10, 0
 m_copiados  db " archivos copiados.", 10, 0
 m_movido    db "1 archivo movido.", 10, 0
@@ -3131,8 +3349,18 @@ m_verif_on  db "VERIFICAR está puesto (ON).", 10, 0
 m_verif_off db "VERIFICAR está quitado (OFF).", 10, 0
 m_mem_total db "Memoria: ", 0
 m_mem_libre db " K. Libre para los programas: ", 0
+m_mem_sin   db "Sin memoria extendida (o sin un 286 que la aproveche).", 10, 0
+m_mem_hma   db "Memoria alta (HMA), 64 K: ", 0
+m_hma_sis   db "la usa el sistema (DOS=ALTO)", 10, 0
+m_hma_prog  db "la tiene un programa", 10, 0
+m_hma_libre db "libre", 10, 0
+m_mem_ext   db "Memoria extendida: ", 0
+m_mem_ext2  db " K. Libre: ", 0
+m_mem_ext3  db " K", 10, 0
 m_e_error   db "Error ", 0
-m_e_disco   db "La unidad no está preparada.", 10, 0
+m_e_disco   db "La unidad no está preparada.", 0
+m_e_bios    db " (la BIOS dice: error ", 0
+m_e_bios2   db "h)", 10, 0
 m_e_unidad  db "No existe esa unidad.", 10, 0
 m_e_protegido db "El disco está protegido contra escritura.", 10, 0
 m_e_no_esta db "No existe ese archivo.", 10, 0
@@ -3217,6 +3445,9 @@ ej_path     resw 1                  ; ejecuta: por dónde va de PATH
 cp_n        resw 1                  ; COPIAR: cuántos van
 cp_modo     resb 1                  ; 0 copiar, 1 mover, 2 renombrar
 cp_mal      resb 1
+dir_p       resb 1                  ; DIR /P
+dir_w       resb 1                  ; DIR /W (detrás de dir_p)
+dir_lin     resb 1
 ej_ruta     resb 1
 fcb1        resb 11
 fcb2        resb 11

@@ -4,12 +4,18 @@
 ;
 ;       TECLADO         pone el teclado español (se queda en la memoria)
 ;       TECLADO /N      vuelve al normal (el de la BIOS, el americano)
+;       TECLADO /9      lo pone por la interrupción del teclado (INT 9), como
+;                       en un PC o un XT, aunque la BIOS sea de AT (para
+;                       probar ese camino, o por si la BIOS no cumple)
 ;
 ;  La BIOS cree que el teclado es americano. TECLADO se queda residente
-;  (unos 0,7 K) y atiende antes que ella la interrupción del teclado (INT 9):
-;  si la tecla es de las que cambian en el teclado español, mete él en la
-;  cola del teclado la letra que toca y la BIOS ni se entera; las demás (las
-;  letras, las flechas, las de función) pasan a la BIOS como siempre.
+;  (unos 0,8 K) y ve cada tecla antes de que la BIOS haga nada con ella: si
+;  es de las que cambian en el teclado español, mete él en la cola del
+;  teclado la letra que toca y la BIOS ni se entera; las demás (las letras,
+;  las flechas, las de función) pasan a la BIOS como siempre. En los AT y
+;  posteriores se engancha a la «intercepción del teclado» de la BIOS (INT
+;  15h/4Fh), y en los PC y XT, a la interrupción del teclado (INT 9): ver
+;  más abajo por qué.
 ;
 ;  Lo que pone: ñ y Ñ, ç y Ç, º ª ¡ ¿, los signos en su sitio ( " · / ( ) = ?
 ;  ; : _ ' < > ), con AltGr (o Ctrl+Alt) | @ # ~ [ ] { } \ y ¬, y los acentos:
@@ -31,7 +37,7 @@ inicio:
 firma       db "HTEC"
 activo      db 1
 muerta      db 0                    ; el acento que espera su vocal (1 a 4)
-anterior    dd 0                    ; la INT 9 de la BIOS
+anterior    dd 0                    ; la rutina a la que nos hemos enganchado
 con_e0      db 0                    ; el código anterior fue E0h
 altgr       db 0                    ; está pulsado el Alt de la derecha
 
@@ -70,6 +76,45 @@ acentos:
         db 0x84, 0x89, 0x8B, 0x94, 0x81, '"', 0x8E, "EI", 0x99, 0x9A, '"'  ; ¨
         db 0x83, 0x88, 0x8C, 0x93, 0x96, "^", "AEIOU", "^"             ; ^
 
+; ---- por dónde llegan las teclas ----
+; En un AT (y en todo lo posterior), la BIOS lee la tecla del puerto 60h UNA
+; vez y, antes de hacer nada con ella, llama a INT 15h con AH=4Fh y el código
+; en AL: «¿la quieres tú?». Ahí nos enganchamos: si es de las nuestras,
+; metemos la letra en la cola y contestamos que la tecla no cuenta (CF=0); si
+; no, se deja pasar. Así el puerto se lee una sola vez, que es lo único
+; fiable: en un 8042, leerlo otra vez puede dar ya la tecla siguiente (pasa
+; en algunos emuladores, y con la cola llena), y la BIOS se descuadra.
+int15:
+        cmp ah, 0x4F
+        jne .otro
+        cmp byte [cs:activo], 0
+        je .otro
+        push ax
+        push bx
+        push cx
+        push si
+        push ds
+        push cs
+        pop ds
+        call traduce
+        pop ds
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        jnc .otro
+        push bp                     ; nuestra: «no hagas nada con ella» (CF=0
+        mov bp, sp                  ; en las banderas de quien llama)
+        and byte [bp+6], 0xFE
+        pop bp
+        iret
+.otro:
+        jmp far [cs:anterior]
+; En un PC o un XT, la BIOS no pregunta: hay que ponerse delante de ella en
+; la interrupción del teclado (INT 9) y leer el puerto. Allí sí se puede leer
+; dos veces (nosotros y, si la tecla no es nuestra, la BIOS): el puerto 60h
+; de un XT es un registro que guarda el código hasta que se le da el pulso
+; por el puerto 61h, cosa que solo hace quien se queda la tecla
 int9:
         push ax
         push bx
@@ -79,15 +124,43 @@ int9:
         push cs
         pop ds
         cmp byte [activo], 0
-        je .bios
+        je .pasa
         in al, 0x60
+        call traduce
+        jnc .pasa
+        in al, 0x61                 ; la tecla, atendida
+        mov ah, al
+        or al, 0x80
+        out 0x61, al
+        mov al, ah
+        out 0x61, al
+        mov al, 0x20
+        out 0x20, al
+        pop ds
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        iret
+.pasa:
+        pop ds
+        pop si
+        pop cx
+        pop bx
+        pop ax
+        jmp far [cs:anterior]
+
+; la tecla de código AL: si es de las que cambian, mete su letra en la cola
+; del teclado (o apunta el acento) y vuelve con CF=1: la BIOS no tiene que
+; verla. Si no, CF=0. DS = el nuestro. No conserva AX, BX, CX ni SI
+traduce:
         ; las teclas «extendidas» llegan en dos veces: E0h y su código. No
         ; se cambian, pero hay que saber si el Alt que está pulsado es el de
         ; la derecha (AltGr), y de eso no todas las BIOS llevan la cuenta
         cmp al, 0xE0
         jne .n1
         mov byte [con_e0], 1
-        jmp .bios
+        jmp .no
 .n1:
         xor bl, bl
         xchg bl, [con_e0]
@@ -101,7 +174,7 @@ int9:
         jne .n1c
         mov byte [altgr], 0
 .n1c:
-        jmp .bios
+        jmp .no
 .n2:
         test al, 0x80               ; soltar una tecla: cosa de la BIOS
         jnz .n1c
@@ -171,7 +244,7 @@ int9:
         mov si, teclas
 .t:
         cmp byte [si], 0
-        je .bios
+        je .no
         cmp cl, [si]
         je .esta
         add si, 4
@@ -192,11 +265,11 @@ int9:
 .e1:
         mov al, [si+bx+1]
         test al, al
-        jz .bios
+        jz .no
         cmp al, 4
         ja .mete
         mov [muerta], al            ; un acento: espera a la vocal
-        jmp short .hecho
+        jmp .si
 .mete:
         ; AL, a la cola del teclado de la BIOS (si cabe)
         push ds
@@ -216,28 +289,12 @@ int9:
         mov [0x1C], si
 .m2:
         pop ds
-.hecho:
-        in al, 0x61                 ; la tecla, atendida (así lo quieren los
-        mov ah, al                  ; PC y XT; a los AT les da igual)
-        or al, 0x80
-        out 0x61, al
-        mov al, ah
-        out 0x61, al
-        mov al, 0x20
-        out 0x20, al
-        pop ds
-        pop si
-        pop cx
-        pop bx
-        pop ax
-        iret
-.bios:
-        pop ds
-        pop si
-        pop cx
-        pop bx
-        pop ax
-        jmp far [cs:anterior]
+.si:
+        stc
+        ret
+.no:
+        clc
+        ret
 residente_fin:
 
 ; ---- lo que solo hace falta al instalar ----
@@ -251,14 +308,22 @@ instala:
         mov byte [quitar], 0
         cmp al, '/'
         jne .ya
+        cmp byte [si], '9'          ; /9: por INT 9 aunque la BIOS pregunte
+        jne .q
+        mov byte [por9], 1
+        jmp short .ya
+.q:
         mov byte [quitar], 1
 .ya:
-        mov ax, 0x3509              ; ¿está ya en la memoria?
+        mov ax, 0x3515              ; ¿está ya en la memoria? (enganchado a
+        int 0x21                    ; INT 15h o a INT 9, según la máquina)
+        call .es_el
+        je .esta
+        mov ax, 0x3509
         int 0x21
-        cmp word [es:firma], 'HT'
+        call .es_el
         jne .no_esta
-        cmp word [es:firma+2], 'EC'
-        jne .no_esta
+.esta:
         mov al, [quitar]
         xor al, 1
         mov [es:activo], al
@@ -272,17 +337,49 @@ instala:
         int 0x21
         mov ax, 0x4C00
         int 0x21
+; (interna) ¿es nuestra la rutina de ES:BX? ZF=1 si lo es
+.es_el:
+        cmp word [es:firma], 'HT'
+        jne .e
+        cmp word [es:firma+2], 'EC'
+.e:
+        ret
 .no_esta:
         cmp byte [quitar], 0
         je .pon
         mov dx, m_no_esta
         jmp .dice
 .pon:
+        ; ¿pregunta la BIOS por cada tecla (INT 15h/4Fh)? Lo dice ella: INT
+        ; 15h/C0h da su tabla de características, y el bit 4 del octeto 5 es
+        ; ese. Las de los PC y XT no saben de C0h (vuelven con acarreo)
+        cmp byte [por9], 0
+        jne .por_int9
+        mov ah, 0xC0
+        stc
+        int 0x15
+        jc .por_int9
+        test ah, ah
+        jnz .por_int9
+        test byte [es:bx+5], 0x10
+        jz .por_int9
+        mov ax, 0x3515
+        int 0x21
+        mov [anterior], bx
+        mov [anterior+2], es
+        mov dx, int15
+        mov ax, 0x2515
+        int 0x21
+        jmp short .puesto
+.por_int9:
+        mov ax, 0x3509
+        int 0x21
         mov [anterior], bx
         mov [anterior+2], es
         mov dx, int9
         mov ax, 0x2509
         int 0x21
+.puesto:
         mov es, [0x2C]              ; el entorno no hace falta
         mov ah, 0x49
         int 0x21
@@ -296,6 +393,7 @@ instala:
         int 0x21
 
 quitar      db 0
+por9        db 0
 m_espanol   db "Teclado español.", 13, 10, "$"
 m_normal    db "Teclado normal (el de la BIOS).", 13, 10, "$"
 m_no_esta   db "TECLADO no está en la memoria.", 13, 10, "$"

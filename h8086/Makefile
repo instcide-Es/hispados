@@ -31,7 +31,7 @@ $(B):
 $(B)/arranque.bin: arranque.asm | $(B)
 	$(CP437) $< $(B)/gen/arranque.asm && $(NASM) -f bin -o $@ $(B)/gen/arranque.asm
 
-NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc config.inc dispositivos.inc
+NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc config.inc dispositivos.inc alta.inc
 $(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
 	for f in $(NUCLEO); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
 	cd $(B)/gen && $(NASM) -f bin -l nucleo.lst -o ../NUCLEO86.SYS nucleo.asm
@@ -97,6 +97,9 @@ $(B)/EXE.EXE: prueba/exe.asm | $(B)
 $(B)/N8.COM: prueba/n8.asm | $(B)
 	$(CP437) $< $(B)/gen/n8.asm && $(NASM) -f bin -o $@ $(B)/gen/n8.asm
 
+$(B)/XMS.COM: prueba/xms.asm | $(B)
+	$(CP437) $< $(B)/gen/xms.asm && $(NASM) -f bin -o $@ $(B)/gen/xms.asm
+
 $(B)/CUENTA.COM: prueba/cuenta.asm | $(B)
 	$(CP437) $< $(B)/gen/cuenta.asm && $(NASM) -f bin -o $@ $(B)/gen/cuenta.asm
 
@@ -121,7 +124,7 @@ $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 	$(call DISQUETE,$*)
 
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
-PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS
+PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM
 
 prueba: $(DISCOS) $(PRUEBAS)
 	./prueba/prueba.sh
