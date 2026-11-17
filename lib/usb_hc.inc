@@ -112,7 +112,7 @@ xr_p0       dd 0
 bk_pool     db 0                    ; el aparato de la memoria USB
 tog_in      db 0                    ; sus testigos de alternancia (clásicas)
 tog_out     db 0
-ip_cur      times PIPE_N db 0       ; OHCI: cuál de los dos TD de la tubería es el de cola
+ip_cur      times PIPE_N + 1 db 0   ; OHCI: cuál de los dos TD de la tubería es el de cola
 
 ; elegir la controladora AL (conserva todos los registros)
 hc_sel:
@@ -347,16 +347,26 @@ c_blk_tab   dw u_bulk, o_bulk, e_bulk
 ; ---- tuberías de interrupción (informes del teclado, el ratón y los mandos) ----
 ; bloque de la tubería BX -> DI (desplazamiento en CS)
 c_pipe_blk:
+        mov di, [n_pblk]            ; [USB-RED] la de la red tiene el suyo
+        cmp bx, PIPE_N
+        jae .r
         mov di, bx
         imul di, PIPE_BLK
         add di, [cl_pipe]
+.r:
         ret
 ; búfer del informe de la tubería BX -> EAX = dirección física
 c_pipe_buf:
         push bx
+        cmp bx, PIPE_N
+        jb .p
+        mov bx, [cs:n_rxbuf]        ; [USB-RED] el de la trama que llega
+        jmp .f
+.p:
         shl bx, 6
         add bx, PIPE_BUF
         call zone
+.f:
         call phys
         pop bx
         ret

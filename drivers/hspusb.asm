@@ -117,7 +117,30 @@
         section .text
         section .init follows=.text vstart=INIT_ORG
 init_start:
+; [USB-RED] .red: lo residente de la red por USB (CDC-ECM). Va en el fichero
+; detrás de .init y solo se queda en la memoria si hay un adaptador: entonces
+; net_setup lo copia a la zona de trabajo y lo ajusta al sitio donde cae (ver
+; MCALL). Se ensambla para la dirección 0: sus etiquetas son desplazamientos
+; dentro del bloque.
+        section .red follows=.init vstart=0 align=1
+red_start:
         section .text
+
+; [USB-RED] Llamada desde .red a una rutina de .text. El bloque de .red se
+; ejecuta en otro sitio (donde lo deje net_setup), así que el desplazamiento
+; relativo de la llamada hay que corregirlo: cada MCALL apunta su posición
+; en la tabla red_fix (en .init) y net_setup le resta la dirección de carga.
+; Dentro de .red: las llamadas y saltos entre sus rutinas, tal cual (son
+; relativos); sus datos, siempre con el registro que lleva la base del
+; bloque ([di+n_st]); y las rutinas de .text, SIEMPRE con MCALL (o por una
+; tabla de direcciones, que son absolutas). Lo vigila tools/redcheck.py.
+%macro MCALL 1
+        call %1
+%%f:
+        [section .init]
+        dw %%f - 2
+        __SECT__
+%endmacro
 
 ; Zona de memoria tras lo residente (res_end), en una página física (mem_off),
 ; donde estaba la inicialización en el fichero (se ejecuta en CS:INIT_ORG,
@@ -150,8 +173,10 @@ DCBAA       equ 0x2C40                ; MAX_SLOTS + 1 entradas de 8 bytes
 X_END       equ 0x2D00                ; fin de lo del xHCI
 JOY_N       equ 2                     ; mandos de juego a la vez
 PIPE_N      equ 2 + JOY_N             ; tuberías de interrupción: teclado, ratón y mandos
+PIPE_NET    equ PIPE_N                ; [USB-RED] y una más: la de recepción (bulk) del
+                                      ; adaptador de red, que usa las mismas rutinas
 POOL_N      equ 8                     ; dispositivos a la vez (concentradores incluidos)
-INIT_ORG    equ 0xB000                ; dónde se ejecuta la inicialización (.init)
+INIT_ORG    equ 0xAC00                ; dónde se ejecuta la inicialización (.init)
 MAX_SLOTS   equ POOL_N
 HUB_N       equ 6                     ; concentradores a la vez
 HUB_DEPTH   equ 3                     ; niveles de concentradores encadenados
@@ -205,13 +230,13 @@ busy        db 1
 ; tuberías de interrupción: 0 teclado, 1 ratón, 2... mandos de juego
 ip_on       times PIPE_N db 0
 ip_slot     times PIPE_N db 0       ; xHCI: slot
-ip_dci      times PIPE_N db 0       ; endpoint: 2 * número + 1 (entrada)
-ip_pool     times PIPE_N db 0       ; su aparato en la reserva
-ip_tog      times PIPE_N db 0       ; UHCI: testigo de alternancia
+ip_dci      times PIPE_N + 1 db 0   ; endpoint: 2 * número + 1 (entrada)
+ip_pool     times PIPE_N + 1 db 0   ; su aparato en la reserva
+ip_tog      times PIPE_N + 1 db 0   ; UHCI: testigo de alternancia
             align 2
 ip_len      dw 8, 4
-            times JOY_N dw 0        ; bytes que se piden
-ip_mps      times PIPE_N dw 0
+            times JOY_N + 1 dw 0    ; bytes que se piden
+ip_mps      times PIPE_N + 1 dw 0
 ip_ring     times PIPE_N db 0, 1    ; xHCI: índice y ciclo de su anillo
 ip_got      dw 0                    ; bytes del informe que acaba de llegar
 k_on        equ ip_on
@@ -232,6 +257,10 @@ j_tick      db 0
 j_ack       db 0                    ; HSPJOY recogió el último estado entregado
 j_wait      dw 16                   ; espera del informe reciente (microtramas)
 ctl_buf     dw DESC                 ; adónde van los datos de una petición de control
+; [USB-RED] adaptador de red (CDC-ECM): lo demás está en su bloque (.red)
+n_blk       dw 0                    ; el bloque (código y datos), en CS; 0 = no hay adaptador
+n_pblk      dw 0                    ; clásicas: cola y TD de su tubería de recepción
+n_rxbuf     dw 0                    ; búfer de la trama que llega
 oldrep      times 8 db 0
 newrep      times 8 db 0
 rep_key     db 0
@@ -2144,9 +2173,18 @@ hid_event:
         inc bx
         cmp bx, PIPE_N
         jb .l
+        ; [USB-RED] ¿de la recepción del adaptador de red? (n_event, +3)
+        mov bx, [cs:n_blk]
+        test bx, bx
+        jz .no
+        add bx, 3
+        call bx                     ; CF = 0 si era suyo
+        jmp .x
+.no:
+        stc
+.x:
         pop bx
         pop ax
-        stc
         ret
 
 ; ---- mandos de juego ----
@@ -2909,6 +2947,12 @@ int08:
 .v86:
         call a20_open
         call usb_poll
+        ; [USB-RED] las tramas que hayan llegado, a HSPRED (n_pump)
+        mov bx, [cs:n_blk]
+        test bx, bx
+        jz .nn
+        call bx
+.nn:
         ; mandos: el informe reciente y, cada 4 tics, su estado a HSPJOY
         ; (para que sepa que están aunque no se muevan)
         cmp byte [cs:j_ev], 0
@@ -3170,6 +3214,8 @@ init:
         or al, [j_on]
         or al, [j_on+1]
         jnz .hok
+        cmp word [n_blk], 0         ; [USB-RED] solo el adaptador de red:
+        jne .tick                   ; también hace falta el reloj
         mov al, [units]
         or al, [boot_match]
         jz .fail
@@ -3231,6 +3277,9 @@ init:
         inc bx
         cmp bx, JOY_N
         jb .hj
+.tick:
+        ; [USB-RED] el adaptador de red: decirlo y atender INT 2Fh
+        call net_ready
         ; reloj: recoger los informes
         mov ax, 0x3508
         int 0x21
@@ -4418,6 +4467,8 @@ enum_one:
         mov [d_vid], ax
         mov ax, [cs:bx+10]
         mov [d_pid], ax
+        mov al, [cs:bx+17]
+        mov [d_ncfg], al            ; [USB-RED] configuraciones que tiene
         mov byte [n_if], 0
         mov byte [d_have], 1
         ; descriptor de configuración: primero 9 bytes, después entero
@@ -4462,6 +4513,12 @@ enum_one:
 .hid:
         cmp byte [only_disk], 0
         jne .dis
+        ; [USB-RED] ¿un adaptador de red? (solo al arrancar: role_net es de
+        ; la inicialización). Mira todas sus configuraciones.
+        call role_net
+        cmp al, 1
+        je .used                    ; con CDC-ECM: tomado
+        ja .dis                     ; de red, pero no se puede usar
         ; [USB-BT] un receptor de Bluetooth que se hace pasar por teclado o
         ; ratón (HID proxy: el de los Mac va por el mismo concentrador
         ; interno que el teclado y el panel): se deja para el final, por si
@@ -4952,11 +5009,13 @@ d_np        db 0
 n_if        db 0
 d_vid       dw 0
 d_pid       dw 0
+d_ncfg      db 0
 IF_MAX      equ 8
 if_tab      times IF_MAX * 3 db 0
 section .init
 spd_tab     db "??", "FS", "LS", "HS", "SS"
 role_tab    dw msg_r0, msg_r1, msg_r2, msg_r3, msg_r4, msg_r5, msg_r6, msg_r7, msg_r8
+            dw msg_r9, msg_r10, msg_r11
 msg_arrow   db " -> ", 0
 msg_r0      db "sin uso", 0
 msg_r1      db "disco", 0
@@ -4967,6 +5026,9 @@ msg_r5      db "concentrador de ", 0
 msg_r6      db "ERROR", 0
 msg_r7      db "mando de juego", 0
 msg_r8      db "Bluetooth (HID proxy): para después", 0
+msg_r9      db "red (CDC-ECM)", 0
+msg_r10     db "adaptador de red que aún no se admite (sin CDC-ECM)", 0
+msg_r11     db "red (CDC-ECM): ya hay otro adaptador, sin uso", 0
 msg_nports  db " puertos", 0
 msg_iports  db "puertos con algo conectado:", 0
 msg_iports2 db " (de ", 0
@@ -6138,6 +6200,7 @@ msg_scsi    db "El disco USB no responde.", 13, 10, 0
 msg_bsize   db "El disco USB no tiene sectores de 512 bytes.", 13, 10, 0
 msg_nofat   db "El disco USB no tiene un sistema de archivos FAT12/FAT16.", 13, 10, 0
 %include "usb_hcini.inc"
+%include "usb_red.inc"
 section .text
 boot_saved  db 0
 boot_match  db 0
@@ -6164,7 +6227,7 @@ init_go:
         xor ecx, ecx
         mov cx, cs
         shl ecx, 4
-        add ecx, init_end
+        add ecx, red_hold + RED_LEN
         cmp ecx, eax
         jbe .ok
         mov byte [bx+0x0D], 0
@@ -6191,6 +6254,13 @@ init_go:
         pop ds
         push cs
         pop es
+        ; [USB-RED] primero el bloque de la red (va en el fichero detrás de
+        ; .init): arriba del todo (red_hold), de donde lo tomará net_setup
+        mov si, section..red.start + RED_LEN - 1
+        mov di, red_hold + RED_LEN - 1
+        mov cx, RED_LEN
+        std
+        rep movsb
         mov si, init_end - 1
         add si, section..init.start - INIT_ORG
         mov di, init_end - 1
@@ -6204,6 +6274,8 @@ init_go:
 res_end:
 section .init
 init_end:
+; [USB-RED] mientras dura la inicialización, el bloque de .red está aquí
+red_hold    equ init_end
 ; La inicialización tiene que acabar por debajo de F000h (si no, bajar
 ; INIT_ORG). Las llamadas y saltos entre .init y .text son relativos de 16
 ; bits y dan la vuelta a los 64 KB (IP se queda en 16 bits, como manda la

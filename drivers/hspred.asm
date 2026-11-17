@@ -51,6 +51,11 @@
 ;    ni Hyper-V): ver docs/RED.md, «En una máquina virtual».
 ;    Su parte residente va en secciones «de quita y pon» (ver más abajo): la
 ;    de la tarjeta que no está no se queda en la memoria.
+;  Y, si no hay ninguna de ésas, un adaptador USB-Ethernet con la clase
+;  estándar CDC-ECM, que lleva HSPUSB.SYS (lib/usb_red.inc): HSPRED lo
+;  encuentra por INT 2Fh AX=DB00h y es una tarjeta más, también de quita y
+;  pon (sección .usb). No tiene interrupción: HSPUSB mira si han llegado
+;  tramas en cada tic del reloj y las entrega a us_rx.
 ;  Las que tienen «bus master» necesitan búferes en memoria física continua:
 ;  van detrás de lo residente o, si HSPRED está en la memoria superior (LH),
 ;  en un bloque aparte de la memoria convencional (en modo V86 la superior
@@ -85,7 +90,8 @@
         section .text
         section .pcnet follows=.text align=1
         section .tulip follows=.pcnet vfollows=.text align=1 valign=1
-        section .init follows=.tulip
+        section .usb follows=.tulip vfollows=.text align=1 valign=1
+        section .init follows=.usb
         section .text
 
 NH          equ 8                   ; manejadores (tipos de paquete)
@@ -99,6 +105,7 @@ C_E1000     equ 3
 C_8168      equ 4
 C_PCNET     equ 5
 C_TULIP     equ 6
+C_USB       equ 7                   ; adaptador USB con CDC-ECM, por HSPUSB
 
 ; configuración IP compartida (cfg, 30 octetos)
 CFG_FLAGS   equ 0                   ; bit 0 válida, bit 1 por DHCP
@@ -2484,6 +2491,118 @@ tu_end:
 TU_LEN      equ tu_end - tu_base
 
 ; =============================================================================
+;  Adaptador USB-Ethernet con la clase estándar CDC-ECM. El aparato lo lleva
+;  HSPUSB.SYS (enumeración, transferencias y sondeo: lib/usb_red.inc); aquí
+;  solo está el puente con el packet driver. Sección de quita y pon: se
+;  ensambla para la misma dirección que la PCnet (ov_base) y us_init la copia
+;  allí si la «tarjeta» es ésta.
+;
+;  HSPUSB da (INT 2Fh AX=DB00h -> ES:DI) un bloque con la MAC (+0), el VID y
+;  el PID (+6), la velocidad USB (+10), la clase de controladora (+11), el
+;  enlace (+12), su rutina de envío (+14, lejana: DS:SI = trama, CX = octetos
+;  -> CF) y el sitio donde se le deja el receptor (+18): us_rx, al que llama
+;  (lejana) desde el tic del reloj con ES:DI = trama y CX = octetos, con las
+;  interrupciones cerradas.
+;  No hay interrupción de la tarjeta: el «IRQ» de lo común (irq_handler) se
+;  queda en un vector libre al que no llama nadie, para que la descarga y lo
+;  demás sigan igual que con las tarjetas PCI sin gastar un octeto residente.
+; =============================================================================
+        section .usb
+us_base:
+us_info     dd 0                    ; el bloque de HSPUSB
+us_src      dd 0                    ; la trama que se está entregando
+
+; DS:SI = paquete, CX = longitud -> CF si no sale (HSPUSB lo rellena a 60)
+us_send:
+        les bx, [cs:us_info]
+        call far [es:bx+14]
+        ret
+
+; (no hay interrupción: no es nuestra)
+us_isr:
+        stc
+        ret
+
+; a recibir: se le deja a HSPUSB el receptor
+us_start:
+        push es
+        push bx
+        les bx, [cs:us_info]
+        pushf
+        cli
+        mov word [es:bx+18], us_rx
+        mov [es:bx+20], cs
+        popf
+        pop bx
+        pop es
+        ret
+
+us_stop:
+        push es
+        push bx
+        les bx, [cs:us_info]
+        pushf
+        cli
+        mov dword [es:bx+18], 0
+        popf
+        pop bx
+        pop es
+        ret
+
+; AL = enlace (FFh: HSPUSB no lo sabe), AH = 0 (la velocidad no se sabe)
+us_link:
+        push es
+        push bx
+        les bx, [cs:us_info]
+        mov al, [es:bx+12]
+        xor ah, ah
+        pop bx
+        pop es
+        ret
+
+; El receptor: llamada lejana de HSPUSB (desde su INT 08h), ES:DI = trama,
+; CX = octetos, interrupciones cerradas. Con la pila propia, como en la
+; interrupción de una tarjeta.
+us_rx:
+        push ds
+        push cs
+        pop ds
+        mov [sv_ss], ss
+        mov [sv_sp], sp
+        mov ax, cs
+        mov ss, ax
+        mov sp, pila_top
+        cld
+        mov [us_src], di
+        mov [us_src+2], es
+        push cx
+        push ds
+        push es
+        pop ds
+        mov si, di
+        push cs
+        pop es
+        mov di, rx_tmp
+        mov cx, 7
+        rep movsw
+        pop ds
+        pop cx
+        call rx_find
+        jc .r
+        mov cx, [rx_len]
+        push ds
+        lds si, [us_src]
+        rep movsb
+        pop ds
+        call rx_done
+.r:
+        lss sp, [sv_sp]
+        pop ds
+        retf
+us_end:
+US_LEN      equ us_end - us_base
+
+; =============================================================================
 ;  Instalación (se descarta)
 ; =============================================================================
         section .init
@@ -2581,6 +2700,8 @@ init:
         mov [v86], al
         call find_card
         jnc .found
+        call find_usb               ; ¿un adaptador USB que lleve HSPUSB?
+        jnc .found
         ; no hay tarjeta de red. Con /AUTO (p. ej. en el AUTOEXEC.BAT), salir
         ; en silencio con errorlevel 1; sin /AUTO, avisar como siempre.
         cmp byte [o_auto], 0
@@ -2631,6 +2752,10 @@ init:
         jb .iv
         add al, 0x70 - 16
 .iv:
+        cmp byte [card], C_USB
+        jne .iv2
+        mov al, [us_vec]            ; USB: sin IRQ (un vector libre: us_init)
+.iv2:
         mov [irq_vec], al
         mov ah, 0x35
         int 0x21
@@ -2904,7 +3029,7 @@ card_tab:
         db C_TULIP
         dw 0
 card_names  dw 0, name_ne, name_8139, name_e1000, name_8168, name_pcnet
-            dw name_tulip
+            dw name_tulip, name_usb
 ; los nombres: el de la tarjeta encontrada se copia a card_name (residente)
 name_ne     db "NE2000 PCI", 0
 name_8139   db "Realtek RTL8139", 0
@@ -2919,6 +3044,7 @@ name_pn78   db "AMD PCnet-Home (Am79C978)", 0
 name_tulip  db "DEC 2114x (Tulip)", 0
 name_tu40   db "DEC 21140 (Tulip)", 0
 name_tu43   db "DEC 21143 (Tulip)", 0
+name_usb    db "Adaptador USB (CDC-ECM)", 0
 
 ; DS:SI = nombre -> card_name (como mucho 35 letras) y name_ptr
 set_name:
@@ -3057,6 +3183,8 @@ show_dev:
 ;  -> CF = 1 y SI = mensaje si no se puede
 ; -----------------------------------------------------------------------------
 card_init:
+        cmp byte [card], C_USB
+        je us_init
         call pci_d0
         ; IRQ
         mov bx, [pci_bdf]
@@ -3667,6 +3795,88 @@ pn_setname:
         ret
 pn_tmp      times 32 db 0
 
+; ---- adaptador USB (CDC-ECM), por HSPUSB ----
+; -> CF = 0 si HSPUSB tiene uno (us_blk = su bloque)
+find_usb:
+        push es
+        mov ax, 0xDB00
+        xor bx, bx
+        xor di, di
+        int 0x2F
+        cmp al, 0xFF
+        jne .no
+        cmp bx, 0x5552              ; «UR»
+        jne .no
+        mov [us_blk], di
+        mov [us_blk+2], es
+        mov byte [card], C_USB
+        mov ax, [es:di+6]
+        mov [pci_ven], ax           ; (VID y PID del aparato USB)
+        mov ax, [es:di+8]
+        mov [pci_dev], ax
+        mov ax, [es:di+10]
+        mov [mmio], ax              ; (velocidad USB y clase de controladora)
+        pop es
+        mov si, name_usb
+        call set_name
+        clc
+        ret
+.no:
+        pop es
+        stc
+        ret
+
+us_init:
+        ; su parte residente, a su sitio: en el archivo va detrás de las de
+        ; la PCnet y la Tulip
+        push ds
+        pop es
+        mov si, pn_end + TU_LEN     ; donde está en el archivo
+        mov di, us_base             ; para donde está ensamblada
+        mov cx, US_LEN
+        rep movsb
+        mov word [res_end], us_end
+        mov eax, [us_blk]
+        mov [us_info], eax
+        ; la MAC
+        push ds
+        lds si, [us_blk]
+        mov di, mac
+        mov cx, 6
+        rep movsb
+        pop ds
+        ; sin IRQ: irq_handler se queda en un vector libre (distinto del
+        ; que vaya a ser el del packet driver) al que no llama nadie, y el
+        ; «IRQ» es el 0 (quitarle la máscara al reloj no cambia nada)
+        mov byte [irq], 0
+        mov al, 0x80
+.v:
+        cmp al, 0x67
+        je .vn
+        cmp al, [o_int]
+        je .vn
+        call vec_free
+        jnc .vok
+.vn:
+        dec al
+        cmp al, 0x60
+        jae .v
+        mov si, msg_novec
+        stc
+        ret
+.vok:
+        mov [us_vec], al
+        mov word [c_send], us_send
+        mov word [c_isr], us_isr
+        mov word [c_stop], us_stop
+        mov word [c_link], us_link
+        mov word [c_start], us_start
+        mov word [need_dma], 0
+        clc
+        ret
+us_blk      dd 0
+us_vec      db 0
+
 ; ---- DEC Tulip ----
 tu_init:
         mov si, msg_noio
@@ -4082,11 +4292,15 @@ show_short:
         mov si, msg_s2
         call puts
         call put_mac
+        mov si, msg_s3u
+        cmp byte [card], C_USB
+        je .u
         mov si, msg_s3
         call puts
         movzx eax, byte [irq]
         call putdec
         mov si, msg_s4
+.u:
         call puts
         mov al, [pkt_vec]
         call hex2
@@ -4100,6 +4314,34 @@ show_info:
         mov si, [name_ptr]
         call puts
         call crlf
+        cmp byte [card], C_USB
+        jne .pci
+        ; adaptador USB: VID:PID, velocidad y controladora; sin IRQ
+        mov si, msg_i_usb
+        call puts
+        mov ax, [pci_ven]
+        call hex4
+        mov al, ':'
+        call putc
+        mov ax, [pci_dev]
+        call hex4
+        mov si, msg_u_fs
+        cmp byte [mmio], 3
+        jb .us
+        mov si, msg_u_hs
+        je .us
+        mov si, msg_u_ss
+.us:
+        call puts
+        movzx bx, byte [mmio+1]
+        and bx, 3
+        shl bx, 1
+        mov si, [u_hc_tab+bx]
+        call puts
+        mov si, msg_i_usb2
+        call puts
+        jmp .npn2
+.pci:
         mov si, msg_i_pci
         call puts
         mov bx, [pci_bdf]
@@ -4203,6 +4445,7 @@ show_info:
         movzx eax, byte [irq]
         call putdec
         call crlf
+.npn2:
         mov si, msg_i_mac
         call puts
         call put_mac
@@ -4449,7 +4692,9 @@ msg_notres  db "HSPRED no está cargado.", 13, 10, 0
 msg_unloaded db "HSPRED descargado.", 13, 10, 0
 msg_noun1   db "No se puede descargar: hay otro programa residente cargado después.", 13, 10, 0
 msg_noun2   db "No se puede descargar: hay un programa usando la red.", 13, 10, 0
-msg_nocard  db "No se ha encontrado ninguna tarjeta de red que HSPRED sepa usar.", 13, 10, 0
+msg_nocard  db "No se ha encontrado ninguna tarjeta de red que HSPRED sepa usar.", 13, 10
+            db "(Un adaptador USB-Ethernet lo lleva HSPUSB.SYS, en CONFIG.SYS: tiene que", 13, 10
+            db "estar cargado y con el adaptador conectado al arrancar.)", 13, 10, 0
 msg_unk_eth db "  Hay una tarjeta Ethernet que todavía no se sabe usar: ", 0
 msg_unk_wifi db "  Hay una tarjeta inalámbrica (Wi-Fi), que todavía no se sabe usar: ", 0
 msg_pci_at  db " en ", 0
@@ -4469,6 +4714,7 @@ msg_nocont  db "Los búferes de la tarjeta no quedan en memoria física continua
 msg_s1      db "Tarjeta ", 0
 msg_s2      db ", MAC ", 0
 msg_s3      db ", IRQ ", 0
+msg_s3u     db ", por HSPUSB, packet driver en INT ", 0
 msg_s4      db ", packet driver en INT ", 0
 msg_s5      db "h", 13, 10, 0
 msg_i_card  db "Tarjeta:         ", 0
@@ -4534,6 +4780,17 @@ r68_n_1e    db "h (RTL8101E)", 0
 r68_n_69    db "h (RTL8169/8110)", 0
 r68_n_unk   db "h (familia sin identificar)", 0
 msg_i_mac   db "Dirección MAC:   ", 0
+msg_i_usb   db "USB:             ", 0
+msg_u_fs    db ", velocidad plena (12 Mbit/s), por ", 0
+msg_u_hs    db ", alta velocidad (480 Mbit/s), por ", 0
+msg_u_ss    db ", supervelocidad (USB 3), por ", 0
+u_hc_tab    dw msg_u_uhci, msg_u_ohci, msg_u_ehci, msg_u_xhci
+msg_u_uhci  db "UHCI", 0
+msg_u_ohci  db "OHCI", 0
+msg_u_ehci  db "EHCI", 0
+msg_u_xhci  db "xHCI", 0
+msg_i_usb2  db " (lo lleva HSPUSB)", 13, 10
+            db "IRQ:             no usa (HSPUSB mira si hay tramas en cada tic del reloj)", 13, 10, 0
 msg_i_link  db "Enlace:          ", 0
 msg_l_unk   db "no se sabe (esta tarjeta no lo dice)", 0
 msg_l_no    db "no (¿está el cable puesto?)", 0

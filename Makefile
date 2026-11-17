@@ -229,12 +229,15 @@ $(B)/REVISAR.COM: utils/revisar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc lib/hidraton.inc lib/hidratx.inc lib/usb_hc.inc lib/usb_uhci.inc lib/usb_ohci.inc lib/usb_ehci.inc lib/usb_hcini.inc | $(B)
+$(B)/HSPUSB.SYS: drivers/hspusb.asm lib/hidjoyx.inc lib/hidjoyp.inc lib/hidraton.inc lib/hidratx.inc lib/usb_hc.inc lib/usb_uhci.inc lib/usb_ohci.inc lib/usb_ehci.inc lib/usb_hcini.inc lib/usb_red.inc tools/redcheck.py | $(B)
 	for f in lib/usb_*.inc; do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
 	$(ASM) -l $(B)/gen/HSPUSB.lst -o $@ $(B)/gen/$<
 	@# lo residente no puede usar nada de la inicialización, que se descarta
 	@# (las permitidas: solo al arrancar, o con /V o /INFO; ver hspusb.asm)
-	python3 tools/initcheck.py $(B)/gen/HSPUSB.lst init,init_end,info_line_go,role_hid,role_joy 'msg_*' || { rm -f $@; exit 1; }
+	python3 tools/initcheck.py $(B)/gen/HSPUSB.lst init,init_end,info_line_go,role_hid,role_joy,role_net 'msg_*' || { rm -f $@; exit 1; }
+	@# [USB-RED] el bloque de la red (.red) se ejecuta en otro sitio: sus
+	@# llamadas a .text, con MCALL, y sus datos, con el registro de la base
+	python3 tools/redcheck.py $(B)/gen/HSPUSB.lst || { rm -f $@; exit 1; }
 # VELOCIDAD (en el disco VELOCIDA.COM: 8 letras) y LOADFIX: para los juegos
 # antiguos que fallan en equipos rápidos o cargados en los primeros 64 KB
 $(B)/VELOCIDAD.COM: utils/velocidad.asm lib/util.inc lib/ejecutar.inc | $(B)
@@ -746,6 +749,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)
+	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)
 	tests/run_actualizar_tests.sh $(IMG)
 	tests/run_actualizar_hspred_tests.sh $(IMG)
