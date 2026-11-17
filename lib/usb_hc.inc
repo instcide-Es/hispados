@@ -56,6 +56,7 @@ HCF_PARK    equ 0x02                ; UHCI parada y sin lista de tramas (nada co
 HCF_OWNED   equ 0x04                ; es de la BIOS (USB Legacy Support, SMM)
 HCF_RUN     equ 0x08                ; la BIOS la tiene en marcha
 HCF_BAD     equ 0x10                ; no se puede usar
+HCF_LATE    equ 0x20                ; EHCI: tiene tuberías y su lista periódica aún no está en marcha
 XTD_N       equ 32                  ; UHCI: paquetes por tanda (un TD cada uno)
 XTD_BYTES   equ XTD_N * 16          ; reserva de TD de control y bulk (qTD de EHCI: 3 de 64)
 PIPE_BLK    equ 0xA0                ; cola + TD de una tubería (el TD, en +60h)
@@ -75,6 +76,8 @@ hc_base     times HC_N dd 0         ; UHCI: puerto de E/S; OHCI y xHCI: registro
                                     ; EHCI: registros operativos (base + CAPLENGTH)
 hc_fl       times HC_N dd 0         ; UHCI y EHCI: lista de tramas (dirección lineal; 0 = sin ella)
 hc_per      times HC_N dd 0         ; primer eslabón de la cadena periódica
+fl_pend     db 0                    ; [USB-TARDE] hay listas periódicas por poner en marcha (fl_late)
+            align 2
 fl_free     dd 0                    ; lista de tramas de reserva (para una UHCI aparcada)
 ztop        dd 0                    ; fin de la memoria reservada (desde CS)
 zlimit      dd 0xFFF0               ; hasta dónde hay memoria (desde CS)

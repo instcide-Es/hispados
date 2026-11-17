@@ -275,24 +275,22 @@ section .init                   ; (solo al arrancar)
 e_pipe_open:
         call c_pipe_blk
         movzx si, byte [cur_hc]
+        test byte [hc_flags+si], HCF_LATE
+        pushf
+        or byte [hc_flags+si], HCF_LATE
         shl si, 2
-        cmp dword [hc_fl+si], 0
-        jne .have
-        ; la primera de esta controladora: lista periódica, y en marcha
-        call fl_alloc
-        jc .r
-        mov [hc_fl+si], eax
+        popf
+        jnz .have
+        ; [USB-TARDE] la primera de esta controladora. La lista periódica
+        ; (4 KB en una página) NO se reserva ahora: mientras dura la
+        ; inicialización la zona acaba en INIT_ORG, y con unos cuantos
+        ; aparatos en el xHCI (un adaptador de red con sus dos
+        ; concentradores) ya no cabía: el teclado del EHCI se quedaba sin
+        ; lista, «preparado» y mudo (MacBook Air, 17/11/2026). Se reserva
+        ; al final (fl_fin), donde estaba la inicialización, y la pone en
+        ; marcha lo residente en el primer tic (fl_late). Hasta entonces
+        ; las colas de las tuberías se van encadenando en hc_per.
         mov dword [hc_per+si], 1
-        call fl_fill
-        call lphys
-        push si
-        mov esi, 0x14
-        call hc_wr
-        xor esi, esi
-        call hc_rd
-        or eax, 0x10
-        call mwr
-        pop si
 .have:
         push si
         mov si, di
@@ -320,6 +318,48 @@ e_pipe_open:
         ret
 
 section .text
+; [USB-TARDE] Poner en marcha las listas periódicas que fl_fin reservó al
+; acabar la inicialización (una por cada EHCI con tuberías): rellenarla con
+; la cadena de colas, dársela a la controladora y arrancar la planificación
+; periódica. Lo hace lo residente, en el primer tic del reloj (INT 08h, con
+; «busy» tomado), porque la lista cae donde estaba el código de
+; inicialización, que entonces ya ha terminado.
+fl_late:
+        pushad
+        push ds
+        push cs
+        pop ds
+        mov byte [fl_pend], 0
+        xor bx, bx
+.l:
+        cmp bl, [hc_n]
+        jae .r
+        test byte [hc_flags+bx], HCF_LATE
+        jz .n
+        and byte [hc_flags+bx], ~HCF_LATE
+        mov al, bl
+        call hc_sel
+        push bx
+        call fl_fill
+        mov si, bx
+        shl si, 2
+        mov eax, [hc_fl+si]
+        call lphys
+        mov esi, 0x14
+        call hc_wr                      ; PERIODICLISTBASE
+        xor esi, esi
+        call hc_rd
+        or eax, 0x10                    ; planificación periódica, en marcha
+        call mwr
+        pop bx
+.n:
+        inc bx
+        jmp .l
+.r:
+        pop ds
+        popad
+        ret
+
 e_pipe_queue:
         call c_pipe_blk
         push di

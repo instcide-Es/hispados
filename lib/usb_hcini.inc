@@ -506,6 +506,75 @@ init_fin:
 .parked     db 0
 .spare      db 0
 
+; ---- [USB-TARDE] las listas periódicas de los EHCI, al final ----
+; Cada EHCI con alguna tubería (teclado, ratón, mando, adaptador de red)
+; necesita una lista periódica: 4 KB en una página física. Se reservan aquí,
+; después de init_fin, a continuación de todo lo demás: ya no tienen que
+; caber por debajo de la inicialización (INIT_ORG), solo dentro de la
+; memoria que init_go comprobó que había (hasta red_hold + RED_LEN). Caen,
+; por tanto, encima del código de inicialización, que sigue ejecutándose:
+; aquí NO se escriben. Las rellena y las pone en marcha lo residente, en el
+; primer tic del reloj (fl_late, lib/usb_ehci.inc).
+; Si alguna no cupiera (no debería: quedan más de 16 KB), las tuberías de
+; esa controladora se dan de baja y se dice.
+fl_fin:
+        pushad
+        xor bx, bx
+.l:
+        cmp bl, [hc_n]
+        jae .r
+        test byte [hc_flags+bx], HCF_LATE
+        jz .n
+        xor edx, edx
+        mov dx, cs
+        shl edx, 4
+        mov eax, [ztop]
+        add eax, edx
+        add eax, 0xFFF
+        and eax, 0xFFFFF000         ; la página (dirección lineal)
+        mov ecx, eax
+        sub ecx, edx
+        add ecx, 0x1000             ; dónde acaba, desde CS
+%ifdef FL_FIN_FALLA
+        jmp .no                     ; (prueba: como si no cupiera)
+%endif
+        cmp ecx, red_hold + RED_LEN
+        ja .no
+        mov [ztop], ecx
+        mov si, bx
+        shl si, 2
+        mov [hc_fl+si], eax
+        mov byte [fl_pend], 1
+        jmp .n
+.no:
+        ; sin lista: lo de esta controladora no puede funcionar
+        and byte [hc_flags+bx], ~HCF_LATE
+        xor si, si
+.p:
+        movzx di, byte [ip_pool+si]
+        cmp bl, [dv_hc+di]
+        jne .pn
+        cmp si, PIPE_N
+        jae .pnet
+        mov byte [ip_on+si], 0
+        jmp .pn
+.pnet:
+        mov word [n_blk], 0         ; el adaptador de red (aún sin anunciar)
+.pn:
+        inc si
+        cmp si, PIPE_N + 1          ; (hasta la de recepción de la red)
+        jb .p
+        mov si, msg_nolist
+        call puts
+.n:
+        inc bx
+        jmp .l
+.r:
+        popad
+        ret
+msg_nolist  db "USB: no queda memoria para la lista periódica de un EHCI: su teclado, ratón,", 13, 10
+            db "mando o adaptador de red no se usa.", 13, 10, 0
+
 ; ---- la zona de memoria (tras lo residente, en una página física) ----
 ; -> CF si no hay memoria
 mem_setup:

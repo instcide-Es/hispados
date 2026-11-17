@@ -630,12 +630,7 @@ net_setup:
         cmp byte [cur_type], HCT_EHCI
         jne .on
         ; EHCI: la cola va en la lista periódica (las mismas rutinas que el
-        ; teclado). Sin lista no hay tubería...
-        movzx si, byte [cur_hc]
-        shl si, 2
-        mov word [fail_msg], msg_nomem
-        cmp dword [hc_fl+si], 0
-        je .fail
+        ; teclado; la lista se reserva al final: fl_fin)...
         ; ...y, de alta velocidad, que se atienda en las 8 microtramas (un
         ; paquete de 512 en cada una), no solo en la primera
         cmp byte [speed], 3

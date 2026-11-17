@@ -186,7 +186,7 @@ PIPE_NET    equ PIPE_N                ; [USB-RED] y dos más, las del adaptador 
 PIPE_NST    equ PIPE_N + 1            ; de recepción (bulk) y la de avisos (interrupción),
                                       ; que usan las mismas rutinas
 POOL_N      equ 8                     ; dispositivos a la vez (concentradores incluidos)
-INIT_ORG    equ 0xAC00                ; dónde se ejecuta la inicialización (.init)
+INIT_ORG    equ 0xA800                ; dónde se ejecuta la inicialización (.init)
 MAX_SLOTS   equ POOL_N
 HUB_N       equ 6                     ; concentradores a la vez
 HUB_DEPTH   equ 3                     ; niveles de concentradores encadenados
@@ -2956,6 +2956,11 @@ int08:
         call unreal
 .v86:
         call a20_open
+        ; [USB-TARDE] las listas periódicas de los EHCI, en el primer tic
+        cmp byte [cs:fl_pend], 0
+        je .nl
+        call fl_late
+.nl:
         call usb_poll
         ; [USB-RED] las tramas que hayan llegado, a HSPRED (n_pump)
         mov bx, [cs:n_blk]
@@ -3295,6 +3300,7 @@ init:
         ; el reparto final de la memoria y, después, [USB-RED] el adaptador
         ; de red: su búfer, decirlo y atender INT 2Fh e INT 16h
         call init_fin
+        call fl_fin                 ; [USB-TARDE] las listas periódicas de los EHCI
         call net_ready
         ; reloj: recoger los informes
         mov ax, 0x3508
