@@ -34,6 +34,16 @@ MONTON_TAM  equ 0x100000            ; cada trozo de montón que se pide
 
 inicio:
         mov sp, pila16_cima
+        ; las mitades altas de los registros, a cero: DOS no las toca y pueden
+        ; traer lo del programa anterior (y DPMI las usa con los clientes de
+        ; 32 bits)
+        xor eax, eax
+        xor ebx, ebx
+        xor ecx, ecx
+        xor edx, edx
+        xor esi, esi
+        xor edi, edi
+        xor ebp, ebp
         mov [segrm], cs
         ; la línea de órdenes, a orden (ASCIZ)
         mov si, 0x81
@@ -87,8 +97,8 @@ inicio:
         mov [sel_ss32], ax
         mov bx, cs
         mov ax, 0x000B
-        mov di, desc
-        int 0x31
+        mov edi, desc               ; (EDI entero: somos cliente de 32 bits y
+        int 0x31                    ; la mitad alta puede traer basura)
         or byte [desc + 6], 0x40
         mov bx, [sel_cs32]
         mov ax, 0x000C

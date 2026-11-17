@@ -1,6 +1,8 @@
 ; PEHOLA.EXE - un programa Win32 de consola, con la cabecera PE escrita a mano
 ; (para probar HW32, el cargador de Hispa-486, sin compiladores de fuera).
 ; Escribe «Hola desde Win32» y la línea de órdenes, y acaba con el código 42.
+; Con -DFALTA (PEFALTA.EXE) llama además a una función que HW32 no tiene: debe
+; decir «falta la funcion ExisteSoloEnPruebas» y acabar con 255.
 ; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;   nasm -f bin -o PEHOLA.EXE pehola.asm
         bits 32
@@ -91,6 +93,9 @@ inicio:
         push A(nl)
         push ebx
         call [A(iat_write)]
+%ifdef FALTA
+        call [A(iat_falta)]
+%endif
         push 42
         call [A(iat_exit)]
         hlt
@@ -106,12 +111,14 @@ imports:
         dd A(ilt) - BASE, 0, 0, A(dllname) - BASE, A(iat) - BASE
         dd 0, 0, 0, 0, 0
 imp_fin:
-ilt:    dd A(h_getstd) - BASE, A(h_write) - BASE, A(h_cmdline) - BASE, A(h_exit) - BASE, 0
+ilt:    dd A(h_getstd) - BASE, A(h_write) - BASE, A(h_cmdline) - BASE, A(h_exit) - BASE
+        dd A(h_falta) - BASE, 0
 iat:
 iat_getstd  dd A(h_getstd) - BASE
 iat_write   dd A(h_write) - BASE
 iat_cmdline dd A(h_cmdline) - BASE
 iat_exit    dd A(h_exit) - BASE
+iat_falta   dd A(h_falta) - BASE
         dd 0
 dllname db 'KERNEL32.dll', 0
         align 2
@@ -126,6 +133,9 @@ h_cmdline dw 0
         align 2
 h_exit    dw 0
         db 'ExitProcess', 0
+        align 2
+h_falta   dw 0
+        db 'ExisteSoloEnPruebas', 0
 TEXTO_TAM equ $ - texto
         times (ARCHALIN - (($ - texto) % ARCHALIN)) % ARCHALIN db 0
 ARCH_TAM equ $ - texto

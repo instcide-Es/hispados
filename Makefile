@@ -93,6 +93,18 @@ $(B)/DPMI16.COM: tests/progs/dpmi16.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/DPMI32.COM: tests/progs/dpmi32.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# [HISPA-486] HW32: programas Win32 de consola sobre HSPDPMI (docs/486/HISPA-486.md)
+$(B)/HW32.COM: utils/hw32.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/PEHOLA.EXE: tests/progs/pehola.asm | $(B)
+	$(NASM) -f bin -o $@ $<
+$(B)/PEFALTA.EXE: tests/progs/pehola.asm | $(B)
+	$(NASM) -f bin -DFALTA -o $@ $<
+# un Win32 hecho en C (gcc -m32 y tools/elf2pe.py); si no hay gcc de 32 bits,
+# la prueba lo salta
+$(B)/HOLAC.EXE: tests/progs/holac.c tools/elf2pe.py | $(B)
+	gcc -m32 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -c $< -o $(B)/holac.o
+	python3 tools/elf2pe.py -o $@ $(B)/holac.o
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
@@ -521,7 +533,7 @@ run-hdd: $(IMG) $(HDD)
 # programas de las pruebas de HSPEMM (tests/run_emm_tests.sh)
 EMMPROGS = $(B)/EMSTEST.COM $(B)/VCPITEST.COM $(B)/UMBTEST.COM $(B)/EMMMISC.COM $(B)/SBTEST.COM $(B)/MEZTEST.COM $(B)/SBPM.COM $(B)/KBSB.COM $(B)/SINIRQ.COM $(B)/SBVGA.COM $(B)/MEMJUEGO.COM $(B)/VOLTIME.COM
 emmprogs: $(EMMPROGS)
-NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
+NUCPROGS = $(EMMPROGS) $(B)/DPMI16.COM $(B)/DPMI32.COM $(B)/HW32.COM $(B)/PEHOLA.EXE $(B)/PEFALTA.EXE $(B)/NUCTEST.COM $(B)/NUCHIJO.COM $(B)/NUCEXE.EXE $(B)/NUCBRK.COM $(B)/NUCCON.SYS $(B)/NUCDRV.SYS $(B)/PILTEST.COM $(B)/HMATEST.COM $(B)/HMAUSO.SYS $(B)/MEMTEST.COM $(B)/EXEPILA.EXE $(B)/LEETEST.COM $(B)/VELTEST.COM $(B)/PSPTEST.COM $(B)/PSPSH.COM
 $(B)/MEMTEST.COM: tests/progs/memtest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXEPILA.EXE: tests/progs/exepila.asm | $(B)
@@ -580,6 +592,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_hma_tests.sh $(IMG)
 	tests/run_dpmi_tests.sh $(IMG)
 	DOSHIGH=1 tests/run_dpmi_tests.sh $(IMG)
+	tests/run_hw32_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)
