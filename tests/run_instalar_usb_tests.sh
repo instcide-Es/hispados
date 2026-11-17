@@ -153,7 +153,7 @@ grep -q "^PATH C:\\\\HISPADOS" $T/AUTOEXEC.BAT && ok "AUTOEXEC.BAT: PATH C:\\HIS
       -drive file=$T/hdd.img,format=raw,if=ide -boot c > $T/l2 2>&1
 txt $T/l2
 echo "-- arranque solo desde el disco duro --"
-check $T/l2.txt "Hispa-DOS 0.9.22 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "Hispa-DOS 0.9.23 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l2.txt "Bienvenido a Hispa-DOS"
 checkn $T/l2.txt "Para instalarlo en el disco duro"

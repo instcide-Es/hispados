@@ -66,7 +66,7 @@ for off in 32256 1048576; do
   MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/PROGS/PLUMA.HVP ::HISPADOS/PROGS/DICCIO.DAT ::HISPADOS/PROGS/PINTURA.HVP > /dev/null 2>&1 && ofi=1
 done
 if [ $ofi = 1 ]; then echo "  OK   Oficina: Pluma y el diccionario en C:\\HISPADOS\\PROGS, junto a Pintura"; else echo "  FAIL Oficina: faltan Pluma o el diccionario en el disco instalado"; fail=1; fi
-check $T/l2.txt "Hispa-DOS 0.9.22 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "Hispa-DOS 0.9.23 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l2.txt "HISPADOS"
 check $T/l2.txt "TECLADO  COM"
