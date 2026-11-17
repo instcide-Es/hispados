@@ -653,10 +653,11 @@ manejador); `ENTRADA`, `SALIDA` y `ERRORES` ya están abiertos:
 **`Argumentos`** (`argumentos.cas`) — lo escrito detrás del nombre del programa:
 `cuántos_argumentos()`, `argumento(n, destino, cabe)` y `línea_de_órdenes()`.
 
-Tres programas de `ejemplos/` los usan: `biblio.cas` (textos y montón), `ficheros.cas`
-(archivos) y **`contar.cas`**, la orden CONTAR: cuenta líneas, palabras y octetos de uno o
-más archivos (como el `wc` de Unix), con totales de 32 bits. Con todo dentro ocupa menos de
-1,5 K.
+Los usan cuatro programas de `ejemplos/`: `biblio.cas` (textos y montón), `ficheros.cas`
+(archivos) y dos órdenes de verdad: **`contar.cas`**, CONTAR, que cuenta líneas, palabras y
+octetos de uno o más archivos (como el `wc` de Unix), con totales de 32 bits; y
+**`numera.cas`**, NUMERA, que enseña un texto con el número de cada línea delante. Con todo
+dentro, cada una ocupa menos de 1,5 K.
 
 ---
 

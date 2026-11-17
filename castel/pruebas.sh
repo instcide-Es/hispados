@@ -14,9 +14,10 @@
 #      mismas teclas: archivo, «<», tubería, archivo que no está, pausas,
 #      Esc. Tienen que escribir lo mismo, octeto a octeto, en la salida y en
 #      la pantalla.
-#   4. CONTAR (ejemplos/contar.cas): el programa de verdad de la Fase 4, con
-#      archivos, «<», tubería, uno que no está y uno de más de 65535 octetos;
-#      lo que cuenta se compara con lo que cuenta Python.
+#   4. CONTAR y NUMERA (ejemplos/contar.cas y numera.cas): los programas de
+#      verdad de la Fase 4, con archivos, «<», tubería, uno que no está y uno
+#      de más de 65535 octetos; lo que escriben se compara con lo que sale de
+#      hacer la misma cuenta en Python.
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
@@ -63,8 +64,8 @@ for f in $AQUI/ejemplos/*.cas; do
   [ $n = mas ] && N=MASC               # MAS.COM es la de ensamblador
   if $AQUI/compilar.sh $f $T/$N.COM -I $AQUI/ejemplos/partes > $T/comp.txt 2>&1; then
     ok "$n.cas -> $N.COM ($(stat -c %s $T/$N.COM) octetos)"
-    # MAS y CONTAR llevan argumentos y sus pruebas aparte
-    [ $n = mas ] || [ $n = contar ] || EJEMPLOS="$EJEMPLOS $n"
+    # MAS, CONTAR y NUMERA llevan argumentos y sus pruebas aparte
+    [ $n = mas ] || [ $n = contar ] || [ $n = numera ] || EJEMPLOS="$EJEMPLOS $n"
   else
     ko "$n.cas no compila: $(head -1 $T/comp.txt)"
   fi
@@ -126,6 +127,17 @@ open(t + '/contar1.esp', 'w').write(
     + renglon(cg, 'GRANDE.TXT') + renglon(tuple(a + b + c for a, b, c in zip(cl, cc, cg)), 'total'))
 open(t + '/contar2.esp', 'w').write(renglon(cc, 'CORTO.TXT'))
 open(t + '/contar3.esp', 'w').write(renglon(cc, ''))
+# y lo que tiene que escribir NUMERA: cada línea con su número delante, hasta
+# el fin de archivo de los textos (1Ah)
+def numera(d):
+    d = d.split(b'\x1a')[0]
+    sal = b''
+    for i, ln in enumerate(d.splitlines(keepends=True)):
+        sal += b"%5d: " % (i + 1) + ln
+    return sal
+assert b'\r' not in corto.replace(b'\r\n', b'') and b'\r' not in largo.replace(b'\r\n', b'')
+open(t + '/numera1.esp', 'wb').write(numera(largo))
+open(t + '/numera2.esp', 'wb').write(numera(corto))
 # cuántas pausas tiene que haber (la misma cuenta que hace MAS)
 col = lin = pausas = 0
 for c in largo:
@@ -169,6 +181,10 @@ lote += [
     "IF ERRORLEVEL 1 ECO nivel 1 > CONTAR2N.SAL",
     "CONTAR < CORTO.TXT > CONTAR3.SAL",
     "TYPE CORTO.TXT | CONTAR > CONTAR4.SAL",
+    "NUMERA LARGO.TXT > NUMERA1.SAL",
+    "NUMERA < CORTO.TXT > NUMERA2.SAL",
+    "NUMERA NOHAY.TXT > NUMERA3.SAL",
+    "IF ERRORLEVEL 1 ECO nivel 1 > NUMERA3N.SAL",
 ]
 for prog, l in (("MAS", "M"), ("MASC", "C")):
     lote += [
@@ -300,7 +316,7 @@ if [ -f $T/pausa_4.txt ] && grep -q "Línea 1[0-9] de la prueba" $T/pausa_4.txt 
 else ko "en la pantalla no está el texto con el aviso"; fi
 
 # ---------------------------------------------------------------- 4. CONTAR
-echo "== CONTAR: un programa con módulos, biblioteca y 32 bits =="
+echo "== CONTAR y NUMERA: programas con módulos, biblioteca y 32 bits =="
 contar() {     # número de la salida, la esperada y lo que se prueba
   if [ ! -f $T/sal/CONTAR$1.SAL ]; then ko "$3: no ha dejado salida"; return; fi
   tr -d '\r' < $T/sal/CONTAR$1.SAL | iconv -f CP437 -t UTF-8 > $T/sal/contar$1.txt
@@ -313,6 +329,15 @@ contar 2 2 "CONTAR de un archivo"
 if [ -s $T/sal/CONTAR2N.SAL ]; then ko "CONTAR de un archivo que está acaba con nivel de error"; else ok "y acaba con el nivel de error 0"; fi
 contar 3 3 "CONTAR < archivo"
 contar 4 3 "orden | CONTAR"
+numera() {     # número de la salida y lo que se prueba
+  if [ ! -f $T/sal/NUMERA$1.SAL ]; then ko "$2: no ha dejado salida"
+  elif cmp -s $T/sal/NUMERA$1.SAL $T/numera$1.esp; then ok "$2 ($(stat -c %s $T/sal/NUMERA$1.SAL) octetos, los mismos)"
+  else ko "$2: no sale lo esperado"; cmp $T/numera$1.esp $T/sal/NUMERA$1.SAL 2>&1 | sed 's/^/        /'; fi
+}
+numera 1 "NUMERA de un archivo de 76 líneas (para en el 1Ah)"
+numera 2 "NUMERA < archivo"
+if [ -s $T/sal/NUMERA3N.SAL ] && grep -q "no puedo abrir NOHAY.TXT" $T/sal/NUMERA3.SAL; then ok "NUMERA de uno que no está: lo dice y acaba con el nivel de error 1"
+else ko "NUMERA de uno que no está: no lo dice o no acaba con el nivel de error 1"; fi
 
 # ------------------------------------------------- 5. cuentas al azar (AZAR=n)
 if [ -n "${AZAR:-}" ]; then

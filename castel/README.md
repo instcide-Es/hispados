@@ -27,7 +27,7 @@ ensamblador propio y el compilador en Castel.
   `NOMBRE.COM` (`-I`: una carpeta más donde buscar módulos).
 - `probar.sh PROGRAMA.COM [argumentos]` — lo ejecuta dentro de Hispa-8086 (QEMU) y enseña
   lo que escribe.
-- `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS y CONTAR). Tarda
+- `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA). Tarda
   cerca de un minuto. Con `AZAR=3 ./pruebas.sh`, además, tres programas de cuentas al azar
   de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits (`azar32.py`, unas
   200), comparadas con lo que tienen que dar.
@@ -134,10 +134,12 @@ Para escribir el compilador en Castel hacían falta tres cosas, y están hechas:
    `Memoria` (un montón dentro del segmento: reservar y soltar) y `Argumentos` (la línea de
    órdenes).
 
-Y un programa de verdad hecho con todo eso: **`ejemplos/contar.cas`, la orden CONTAR**
+Y dos programas de verdad hechos con todo eso: **`ejemplos/contar.cas`, la orden CONTAR**
 (cuenta líneas, palabras y octetos de uno o más archivos, como el `wc` de Unix; lee de los
-archivos, de `<` o de una tubería, y lleva los totales en 32 bits). Ocupa menos de 1,5 K y
-`pruebas.sh` la ejecuta en Hispa-8086 y compara lo que cuenta con lo que cuenta Python.
+archivos, de `<` o de una tubería, y lleva los totales en 32 bits) y **`ejemplos/numera.cas`,
+NUMERA** (un TYPE con el número de cada línea delante). Cada una ocupa menos de 1,5 K, y
+`pruebas.sh` las ejecuta en Hispa-8086 y compara lo que escriben con la misma cuenta hecha
+en Python.
 
 ## Lo que NO entra todavía
 

@@ -1972,6 +1972,9 @@ class Generador:
         c = self.const(e)
         if c is not None:
             return mitades(c)
+        self.tipo(e)
+        while e.k == 'llamada' and e.nombre in ('nat32', 'ent32') and es32(self.tipo(e.args[0][1])):
+            e = e.args[0][1]                    # nat32(x) con x ya de 32 bits: los mismos bits
         if self.es_lugar(e):
             t = self.tipo(e)
             if es32(t) or t.k == 'nat16':

@@ -1,0 +1,70 @@
+; numera.cas - NUMERA: enseña un texto con el número de cada línea delante
+; (un TYPE con números de línea). Otro programa hecho con la biblioteca:
+; lee con un Lector, escribe con un Escritor y cuenta las líneas en 32 bits.
+;
+;   NUMERA CARTA.TXT            de un archivo
+;   NUMERA < CARTA.TXT          de la entrada (también ORDEN | NUMERA)
+;
+; Para en el fin de archivo de los textos del DOS (1Ah). Acaba con el nivel
+; de error 1 si el archivo no se ha podido abrir.
+módulo Numera
+
+    importar Archivos, Textos, Argumentos
+
+    constante FIN_DE_TEXTO = 0x1A
+
+    variable lector: Lector
+    variable escritor: Escritor
+    variable nombre: arreglo [80] de byte
+    variable cifras: arreglo [12] de byte
+
+    ; el número de la línea, arrimado a la derecha en 5 sitios, y «: »
+    función margen(n: nat32)
+        variable i: nat16
+        natural_a_texto(n, cifras)
+        para i desde longitud(cifras) hasta 4 hacer
+            poner_car(escritor, ' ')
+        fin
+        poner_texto(escritor, cifras)
+        poner_texto(escritor, ": ")
+    fin
+
+    función numera(m: ent16)
+        variable línea: nat32
+        variable c: ent16
+        variable al_principio: bool
+        línea := 0
+        al_principio := cierto
+        empezar_lector(lector, m)
+        empezar_escritor(escritor, SALIDA)
+        mientras cierto hacer
+            c := leer_car(lector)
+            si c = FIN_DE_ARCHIVO o c = FIN_DE_TEXTO entonces romper fin
+            si al_principio entonces
+                línea := línea + 1
+                margen(línea)
+                al_principio := falso
+            fin
+            poner_car(escritor, c)
+            si c = '\n' entonces al_principio := cierto fin
+        fin
+        vaciar(escritor)
+    fin
+
+    función principal(): byte
+        variable m: ent16
+        si no argumento(1, nombre, 80) entonces
+            numera(ENTRADA)
+            devolver 0
+        fin
+        m := abrir(nombre, LEER)
+        si m = MAL entonces
+            escribir("NUMERA: no puedo abrir ", nombre, "\r\n")
+            devolver 1
+        fin
+        numera(m)
+        cerrar(m)
+        devolver 0
+    fin
+
+fin Numera.
