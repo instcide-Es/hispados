@@ -1316,6 +1316,7 @@ rm_int15:
         and bx, 0x007F
         test al, 0x80
         setz [cs:tec_mapa+bx]
+        call tar_rm_tecla           ; [TAREAS] Ctrl+Alt+Supr: se apunta y a la BIOS le llega otra cosa
         ; [TECLADO] si hay una ventana «Teclado» suscrita, se le reenvía el
         ; código CRUDO (lo ve antes que el remapeo de KEYB, que corre en el
         ; gancho de detrás). Aquí NO se procesa ni se pinta: solo se encola;
@@ -1356,6 +1357,8 @@ tec_ant15   dd 0
 tec_mapa    times 128 db 0
 
 %include "video16.inc"
+%define TAREAS_RM                   ; [TAREAS] el Administrador de tareas: su parte de modo real
+%include "tareas_api.inc"
 
 ; =============================================================================
 ;  Modo protegido, 32 bits
@@ -1562,7 +1565,9 @@ rm_ir:
         xor ecx, ecx
         mov bh, 0
         mov edi, rmcs
+        inc byte [tar_en_rm]        ; [TAREAS] en modo real no hay programa colgado
         int 0x31
+        dec byte [tar_en_rm]        ; [TAREAS] (dec no toca el acarreo)
         pop edi
         pop ecx
         ret
@@ -1579,6 +1584,7 @@ tec_instalar:
         mov dx, rm_int15
         mov [eax+0x15*4], edx
         mov byte [tec_puesto], 1
+        call tar_rm_poner           ; [TAREAS] el tic del reloj, INT 3 y las envolturas
         popad
         ret
 tec_quitar:
@@ -1590,6 +1596,7 @@ tec_quitar:
         mov edx, [tec_ant15]
         mov [eax+0x15*4], edx
         mov byte [tec_puesto], 0
+        call tar_rm_quitar          ; [TAREAS]
         pop edx
         pop eax
 .x:
@@ -1658,6 +1665,7 @@ eventos:
         mov eax, [cero]
         mov al, [eax+0x417]         ; mayúsculas, Ctrl y Alt (datos de la BIOS)
         mov [tec_mayus], al
+        call tar_sistema            ; [TAREAS] Ctrl+Alt+Supr, tareas paradas y lo que dejan las que acaban
         call tec_reparte_crudo      ; [TECLADO] códigos crudos a la ventana suscrita
         cmp byte [hay_rat], 0
         je .teclas
@@ -2023,6 +2031,7 @@ alto_ini:
 %include "archapi.inc"              ; [ARCHIVOS] lo que pide el Administrador de archivos
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
+%include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
 %endif
         align 16
 fin_archivo:
@@ -2036,5 +2045,9 @@ pila_fin:
 %include "bsstam.inc"               ; [TAMAÑO]
 %include "bssctx.inc"               ; [CONTEXTO]
 %include "bssarch.inc"              ; [ARCHIVOS]
+%ifdef CON_PROGRAMAS
+%define TAREAS_BSS                  ; [TAREAS] las variables del Administrador de tareas
+%include "tareas_api.inc"
+%endif
             alignb 16
 bss_fin:

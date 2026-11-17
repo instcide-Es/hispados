@@ -118,4 +118,10 @@
         ; ---- [TECLADO] el accesorio «Teclado» (91 entradas) ----
         HVF tec_suscribir           ; 90  EBP=ventana (0: ninguna): recibe el CÓDIGO
                                     ;     CRUDO de teclado como WM_TECLA_CRUDA
+        ; ---- [TAREAS] el Administrador de tareas (96 entradas; ventanas/tareas_api.inc) ----
+        HVF tar_lista               ; 91  EDI=búfer ECX=cuántas fichas caben -> EAX=cuántas tareas hay
+        HVF tar_activar             ; 92  EAX=tarea: delante (y en marcha si estaba parada); CF=1 si no
+        HVF tar_cerrar              ; 93  EAX=tarea EDX=0 pedírselo / 1 a la fuerza; CF=1 si no se puede
+        HVF mem_estado              ; 94  -> EAX=total EBX=libre ECX=mayor bloque EDX=módulos ESI=DOS EDI=montón
+        HVF tar_reiniciar           ; 95  EBP=dueña: reinicia el equipo (como el cuadro «Salir»)
 %endmacro

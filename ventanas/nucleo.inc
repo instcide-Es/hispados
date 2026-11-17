@@ -324,6 +324,7 @@ msg_enviar:
         jne .no
         pushad
         call [ebp+V_PROC]
+.tar_vuelta:                        ; [TAREAS] (aquí vuelve un procedimiento de ventana)
         mov [esp+28], eax
         popad
         ret
@@ -344,6 +345,7 @@ msg_tomar:
         ret
 
 msg_mirar:
+        call tar_latido             ; [TAREAS] la tarea que corre mira su cola: responde
         pushad
         mov ebx, [tar_act]
         cmp dword [ebx+T_N], 0
