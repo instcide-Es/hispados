@@ -124,4 +124,6 @@
         HVF tar_cerrar              ; 93  EAX=tarea EDX=0 pedírselo / 1 a la fuerza; CF=1 si no se puede
         HVF mem_estado              ; 94  -> EAX=total EBX=libre ECX=mayor bloque EDX=módulos ESI=DOS EDI=montón
         HVF tar_reiniciar           ; 95  EBP=dueña: reinicia el equipo (como el cuadro «Salir»)
+        ; ---- 0.9.22: elegir de una lista (Archivos: «Abrir con…»; Configuración) ----
+        HVF dlg_lista               ; 96  EBP=dueña EDI=título ESI=pregunta EBX=textos (uno cada EDX octetos) ECX=cuántos -> EAX=el elegido (-1: ninguno)
 %endmacro

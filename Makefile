@@ -296,7 +296,7 @@ smsprogs: $(B)/smsnativo $(B)/smsnativo_t $(B)/VDPTEST.SMS $(B)/TMSTEST.SMS
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP
-$(B)/CONFIG.HVP: programas/config.asm $(HVPDEP) | $(B)
+$(B)/CONFIG.HVP: programas/config.asm programas/comun/asocia_ini.inc $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # los accesorios (con el 1 en HVP_CABECERA) van en \HISPADOS\PROGS. El ORDEN
 # importa: los grupos que no existen se crean al encontrar su primer módulo, así
@@ -320,7 +320,7 @@ HVPA = $(B)/PINTURA.HVP $(B)/TERMINAL.HVP $(B)/TECLADO.HVP $(B)/MIRADOR.HVP $(B)
 HVPO = $(B)/PLUMA.HVP $(B)/CUENTAS.HVP $(B)/FACTURAS.HVP $(B)/DATOS.HVP $(B)/LECTOR.HVP \
        $(B)/PUBLICA.HVP $(B)/PRESENTA.HVP
 # [ARCHIVOS] el Administrador de archivos (el 3 de HVP_CABECERA: grupo «Principal»)
-$(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $(HVPDEP) | $(B)
+$(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) programas/comun/asocia_ini.inc $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@

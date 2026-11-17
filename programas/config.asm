@@ -268,7 +268,8 @@ pl_fecha:
         dd 0
 
 pl_sistema:
-        PLANTILLA EST, sis_txt, H, PX, 40, PAN_AN, 290, 150
+        PLANTILLA EST, sis_txt, H, PX, 40, PAN_AN, 250, 150
+        PLANTILLA BOT, t_tipos, HT, PX, 300, 190, 26, 149   ; [ASOCIA] 0.9.22
         dd 0
 
 ; ---- Red ----
@@ -1126,6 +1127,11 @@ ordenes:
         jmp .hecho
         ; ---- Fecha y hora ----
 .f1:
+        cmp ecx, 149                ; [ASOCIA] «Tipos de archivo...»
+        jne .f2
+        call tipos_archivo
+        jmp .hecho
+.f2:
         cmp ecx, 148
         jne .hecho
         call fecha_poner
@@ -4148,8 +4154,315 @@ ll_pintar:
         popad
         ret
 
+; =============================================================================
+;  [ASOCIA] Tipos de archivo: qué programa abre cada extensión (ASOCIA.INI,
+;  en la misma carpeta que CONFIG.HVP; lo común, en comun/asocia_ini.inc).
+;  Una lista con los tipos que hay, más «Añadir un tipo...» y «Volver a los de
+;  serie»; al elegir un tipo, la lista de programas (o «Ninguno»).
+; =============================================================================
+asoc_pon_ruta:
+        pushad
+        mov esi, ini_ruta
+        mov edi, asoc_ruta
+        xor ebx, ebx
+.c:
+        lodsb
+        stosb
+        cmp al, '\'
+        jne .n
+        mov ebx, edi
+.n:
+        test al, al
+        jnz .c
+        test ebx, ebx
+        jnz .b
+        mov ebx, asoc_ruta
+.b:
+        mov edi, ebx
+        mov esi, n_asocia
+        call hvl_cad
+        mov byte [edi], 0
+        popad
+        ret
+%macro ASOC_OLVIDA 0
+        push eax
+        HV dos_crit
+        pop eax
+%endmacro
+
+tipos_archivo:
+        pushad
+.otra:
+        call asoc_carga
+        call ta_hacer_lista         ; ta_lista: los dos de arriba y los tipos
+        mov ebp, [ven]
+        mov edi, t_ta_titulo
+        mov esi, t_ta_preg
+        mov ebx, ta_lista
+        mov edx, TA_TAM
+        mov ecx, [ta_n]
+        add ecx, 2
+        HV dlg_lista
+        test eax, eax
+        js .x
+        jz .anadir
+        cmp eax, 1
+        je .serie
+        ; un tipo: su extensión
+        dec eax
+        dec eax
+        lea esi, [ta_exts+eax*8]
+        mov edi, asoc_ext
+        call hvl_cad
+        mov byte [edi], 0
+        jmp .programa
+.anadir:
+        mov byte [asoc_ext], 0
+        mov ebp, [ven]
+        mov esi, t_ta_ext
+        mov edi, t_ta_titulo
+        mov ebx, asoc_ext
+        mov ecx, 5
+        HV dlg_pedir
+        test eax, eax
+        jz .otra
+        ; solo letras y cifras, en mayúsculas (y sin el punto, si lo ponen)
+        mov esi, asoc_ext
+        mov edi, asoc_ext
+        cmp byte [esi], '.'
+        jne .l
+        inc esi
+.l:
+        lodsb
+        test al, al
+        jz .l_f
+        call asoc_mayus
+        cmp al, '0'
+        jb .otra
+        cmp al, 'Z'
+        ja .otra
+        cmp al, '9'
+        jbe .l_ok
+        cmp al, 'A'
+        jb .otra
+.l_ok:
+        stosb
+        jmp .l
+.l_f:
+        mov byte [edi], 0
+        cmp byte [asoc_ext], 0
+        je .otra
+.programa:
+        ; la lista de programas, con «Ninguno» al final
+        mov esi, asoc_progs
+        mov edi, ta_progs
+        mov ecx, ASOC_PROG_TAM * ASOC_N_PROGS / 4
+        rep movsd
+        mov esi, t_ta_ninguno
+        call hvl_cad
+        mov byte [edi], 0
+        mov ebp, [ven]
+        mov edi, msg_ta
+        mov esi, t_ta_con1
+        call hvl_cad
+        mov esi, asoc_ext
+        call hvl_cad
+        mov esi, t_ta_con2
+        call hvl_cad
+        mov byte [edi], 0
+        mov edi, t_ta_titulo
+        mov esi, msg_ta
+        mov ebx, ta_progs
+        mov edx, ASOC_PROG_TAM
+        mov ecx, ASOC_N_PROGS + 1
+        HV dlg_lista
+        test eax, eax
+        js .otra
+        mov byte [asoc_val], 0      ; «Ninguno»: se quita la línea
+        cmp eax, ASOC_N_PROGS
+        jae .guarda
+        imul eax, eax, ASOC_PROG_TAM
+        lea esi, [asoc_progs+eax+ASOC_NOM_TAM]
+        mov edi, asoc_val
+        call hvl_cad
+        mov byte [edi], 0
+.guarda:
+        call asoc_guarda
+        jmp .otra
+.serie:
+        mov ebp, [ven]
+        mov esi, t_ta_serie_p
+        mov edi, t_ta_titulo
+        mov eax, DM_ACEPTAR_CANCELAR
+        HV dlg_mensaje
+        cmp eax, ID_ACEPTAR
+        jne .otra
+        mov edx, asoc_ruta          ; se borra: la próxima vez salen los de serie
+        mov ah, 0x41
+        int 0x21
+        ASOC_OLVIDA
+        jmp .otra
+.x:
+        popad
+        ret
+
+; ta_lista: «Añadir...», «De serie» y una línea por tipo: «EXT   Programa»
+ta_hacer_lista:
+        pushad
+        mov edi, ta_lista
+        mov esi, t_ta_anadir
+        call ta_pon
+        mov esi, t_ta_deserie
+        call ta_pon
+        xor edx, edx                ; cuántos
+        mov esi, asoc_buf
+.linea:
+        cmp byte [esi], 0
+        je .fin
+        cmp edx, TA_MAX
+        jae .fin
+        mov al, [esi]
+        cmp al, ';'
+        je .salta
+        cmp al, '['
+        je .salta
+        cmp al, ' '
+        jbe .salta
+        ; la extensión, hasta el «=»
+        push edi
+        lea edi, [ta_exts+edx*8]
+        mov ecx, 6
+.e:
+        lodsb
+        cmp al, '='
+        je .e_f
+        cmp al, ' '
+        jb .e_mal
+        call asoc_mayus
+        stosb
+        loop .e
+.e_mal:
+        pop edi
+        dec esi
+        jmp .salta
+.e_f:
+        mov byte [edi], 0
+        pop edi
+        ; el texto: la extensión y, en la columna 7, el programa
+        push edi
+        push esi
+        lea esi, [ta_exts+edx*8]
+        call hvl_cad
+        pop esi
+        pop ecx                     ; (el principio del texto)
+        push ecx
+        add ecx, 7
+.esp:
+        cmp edi, ecx
+        jae .prog
+        mov al, ' '
+        stosb
+        jmp .esp
+.prog:
+        ; ¿uno de los que se conocen? su nombre; si no, tal cual
+        call ta_nombre_prog         ; ESI en el valor -> lo escribe en EDI
+        pop edi
+        add edi, TA_TAM
+        inc edx
+.salta:
+        lodsb
+        test al, al
+        jz .fin0
+        cmp al, 10
+        jne .salta
+        jmp .linea
+.fin0:
+        dec esi
+        jmp .linea
+.fin:
+        mov [ta_n], edx
+        popad
+        ret
+ta_pon:                             ; ESI -> el texto de EDI (y EDI al siguiente)
+        push edi
+        call hvl_cad
+        mov byte [edi], 0
+        pop edi
+        add edi, TA_TAM
+        ret
+; ESI = el valor de la línea: escribe en EDI el nombre del programa (o el
+; valor, si no es de los conocidos), sin pasar de TA_TAM; ESI se queda
+ta_nombre_prog:
+        pushad
+        mov ebp, edi
+        ; el valor, a asoc_val
+        mov edi, asoc_val
+        mov ecx, ASOC_RUTA - 1
+.v:
+        lodsb
+        cmp al, ' '
+        jb .v_f
+        stosb
+        loop .v
+.v_f:
+        mov byte [edi], 0
+        mov ebx, asoc_progs
+        mov ecx, ASOC_N_PROGS
+.p:
+        lea esi, [ebx+ASOC_NOM_TAM]
+        mov edi, asoc_val
+.cmp:
+        mov al, [esi]
+        mov ah, [edi]
+        call asoc_mayus
+        xchg al, ah
+        call asoc_mayus
+        cmp al, ah
+        jne .sig
+        test al, al
+        jz .es
+        inc esi
+        inc edi
+        jmp .cmp
+.sig:
+        add ebx, ASOC_PROG_TAM
+        loop .p
+        mov esi, asoc_val           ; no se conoce: la ruta tal cual
+        cmp byte [esi], '-'
+        jne .pon
+        mov esi, t_ta_ninguno
+        jmp .pon
+.es:
+        mov esi, ebx
+.pon:
+        mov edi, ebp
+        mov ecx, TA_TAM - 8
+.c:
+        lodsb
+        test al, al
+        jz .c_f
+        stosb
+        loop .c
+.c_f:
+        mov byte [edi], 0
+        popad
+        ret
+
+t_tipos     db "Tipos de archivo...", 0
+t_ta_titulo db "Tipos de archivo", 0
+t_ta_preg   db "Elija un tipo de archivo:", 0
+t_ta_anadir db "(Añadir un tipo...)", 0
+t_ta_deserie db "(Volver a los de serie)", 0
+t_ta_ext    db "Extensión del tipo nuevo (sin el punto, p. ej. DOC):", 0
+t_ta_con1   db "¿Qué programa abre los .", 0
+t_ta_con2   db "?", 0
+t_ta_ninguno db "Ninguno", 0
+t_ta_serie_p db "Se quitan los cambios y vuelven los programas de", 10
+            db "serie para cada tipo de archivo.", 0
+
 %include "hvplib.inc"
 %include "hvpmez.inc"               ; [MEZCLADOR]
+%include "asocia_ini.inc"           ; [ASOCIA]
 
 ; =============================================================================
 ;  Variables (a cero al cargar)
@@ -4191,6 +4504,14 @@ ll_nc       resd 1                  ; la lluvia: columnas y filas,
 ll_nf       resd 1
 ll_x0       resd 1                  ; dónde empieza la primera columna
 ll_colores  resd 1                  ; y sus colores (ll_col_vesa o ll_col_vga)
+ASOC_BSS                            ; [ASOCIA]
+TA_MAX      equ 48                  ; tipos que se enseñan en la lista
+TA_TAM      equ 40                  ; (cada texto)
+ta_lista    resb TA_TAM * (TA_MAX + 2)
+ta_exts     resb 8 * TA_MAX
+ta_n        resd 1
+msg_ta      resb 128
+ta_progs    resb ASOC_PROG_TAM * (ASOC_N_PROGS + 1)
 montado     resb 1                  ; los controles del apartado están puestos
 pedido      resb 1                  ; (va detrás de «montado»: se miran juntos)
 residente   resb 1                  ; cargado al arrancar («/A»): no se cierra

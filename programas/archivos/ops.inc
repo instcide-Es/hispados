@@ -1699,6 +1699,14 @@ o_abrir:
         je lanzar_dos
         cmp eax, TI_ORD
         je lanzar_dos
+        cmp eax, TI_MOD
+        je .mod
+        ; [0.9.22] ¿tiene programa en ASOCIA.INI?
+        push eax
+        call asoc_intenta
+        pop eax
+        jnc .x
+        mov edi, ab_ruta
         mov esi, n_bloc
         cmp eax, TI_TEXTO
         je abrir_con_int
@@ -1712,17 +1720,8 @@ o_abrir:
         je .progs
         cmp eax, TI_CART
         je .cart
-        ; no se sabe: ¿en el Bloc de notas?
-        mov ebp, [ven]
-        mov esi, t_e_noabre
-        mov edi, t_titulo
-        mov eax, DM_ACEPTAR_CANCELAR
-        HV dlg_mensaje
-        cmp eax, ID_ACEPTAR
-        jne .x
-        mov esi, n_bloc
-        mov edi, ab_ruta
-        jmp abrir_con_int
+        ; no se sabe: ¿con qué programa? [0.9.22]
+        jmp abrir_con_lista
 .mod:
         mov esi, ab_ruta
         xor edi, edi
@@ -1764,6 +1763,20 @@ o_editar:
         jnz .x
         mov edi, ab_ruta
         call ent_ruta
+        ; [0.9.22] un BMP se edita en Pintura (abrirlo va a Mirador)
+        mov esi, ab_ruta
+        call asoc_extension
+        jc .bloc
+        cmp dword [asoc_ext], 'BMP'
+        jne .bloc
+        mov esi, d_progs
+        mov ebx, n_pintura
+        mov edi, ab_prog
+        call ruta_unir
+        mov esi, ab_prog
+        mov edi, ab_ruta
+        jmp abrir_con
+.bloc:
         mov esi, n_bloc
         jmp abrir_con_int
 .x:

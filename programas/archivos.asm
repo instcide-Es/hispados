@@ -135,6 +135,7 @@ O_BUSCAR    equ 104
 O_SALIR     equ 105
 O_SUBIR     equ 106
 O_IR        equ 107                 ; (la ruta escrita)
+O_ABRIRCON  equ 108                 ; [0.9.22] Abrir con… (ASOCIA.INI)
 O_CORTAR    equ 111
 O_COPIAR    equ 112
 O_PEGAR     equ 113
@@ -192,8 +193,10 @@ arc_menu:
         db "Archivo", 0
         dw O_ABRIR
         db "&Abrir                 Intro", 0
+        dw O_ABRIRCON
+        db "Abrir c&on...", 0
         dw O_EDITAR
-        db "&Editar (Bloc de notas)", 0
+        db "&Editar", 0
         dw O_NUEVA
         db "&Nueva carpeta...      F7", 0
         dw 0
@@ -262,6 +265,8 @@ mv_marcas   dd mv_iconos, mv_detalles, mv_o0, mv_o1, mv_o2, mv_o3, mv_inv
 ctx_ent:                            ; un archivo o una carpeta (en la lista)
         dw O_ABRIR
         db "&Abrir", 0
+        dw O_ABRIRCON
+        db "Abrir c&on...", 0
         dw O_EDITAR
         db "&Editar", 0
         dw 0
@@ -336,7 +341,7 @@ ctx_nodo:                           ; una carpeta o una unidad del árbol
 
             align 4
 ; las órdenes y quién las hace
-tab_orden   dd O_ABRIR, o_abrir, O_EDITAR, o_editar, O_NUEVA, o_nueva, O_BUSCAR, o_buscar
+tab_orden   dd O_ABRIR, o_abrir, O_ABRIRCON, o_abrir_con, O_EDITAR, o_editar, O_NUEVA, o_nueva, O_BUSCAR, o_buscar
             dd O_SALIR, o_salir, O_SUBIR, o_subir, O_IR, o_ir, O_CORTAR, o_cortar
             dd O_COPIAR, o_copiar, O_PEGAR, o_pegar, O_ELIMINAR, o_eliminar
             dd O_NOMBRE, o_nombre, O_PROPIED, o_propiedades, O_TODO, o_todo
@@ -1086,16 +1091,16 @@ arc_ctx:
         xor ecx, ecx
         cmp dword [pp_n], 0         ; sin nada copiado, «Pegar» en gris
         jne .l1
-        or ecx, 1 << 5
+        or ecx, 1 << 6              ; (se cuentan también las rayas)
 .l1:
-        cmp eax, 1                  ; con varios, «Cambiar nombre» y «Abrir» no
-        je .l2
-        or ecx, (1 << 9) | 1 | 2
+        cmp eax, 1                  ; con varios, «Cambiar nombre», «Abrir»,
+        je .l2                      ; «Abrir con» y «Editar» no
+        or ecx, (1 << 9) | 1 | 2 | 4
 .l2:
-        shl edx, 5                  ; una carpeta no se edita
+        shl edx, 5                  ; una carpeta no se edita ni se «abre con»
         test byte [ents+edx+E_ATR], 0x10
         jz .menu
-        or ecx, 2
+        or ecx, 2 | 4
         jmp .menu
 .fondo:
         mov esi, ctx_fondo
@@ -1876,6 +1881,8 @@ o_invertir:
 %include "lista.inc"
 %include "arbol.inc"
 %include "ops.inc"
+%include "asocia.inc"
+%include "asocia_ini.inc"
 %include "iconos.inc"
 %include "hvplib.inc"
 
@@ -1929,6 +1936,7 @@ dir_txt     resb 128
 st_izq      resb 128                ; la barra de estado
 st_der      resb 64
 msg_txt     resb 512
+ASOC_BSS
 ini_buf     resb 1024
 ini_nuevo   resb 1024
 ini_hecho   resb 1024
