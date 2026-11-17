@@ -12413,7 +12413,8 @@ fn_4b:
         push ds
         pop es
         mov bx, ex_hdr
-        mov cx, 28
+        mov dword [ex_hdr+28], 0    ; (la marca del compresor: ver .gotexe)
+        mov cx, 32
         call file_read
         mov word [ex_isexe], 0
         cmp ax, 28
@@ -12530,6 +12531,18 @@ fn_4b:
         ; cabecera, como VENTANAS.COM: se carga donde iría un .COM)
         cmp word [ex_hdr+0x16], 0xFFF0
         je .segok
+        ; Los comprimidos con LZEXE (marca «LZ09» o «LZ91» en la cabecera:
+        ; Commander Keen 4, 5 y 6 y muchos juegos más) no tienen ese fallo, y
+        ; el relleno les quita memoria: con los controladores en la memoria
+        ; superior son hasta 36 KB, y Keen cuenta lo que le queda tras
+        ; cargarse («Memory Available to Game»).
+        cmp word [ex_hdr+0x1C], 'LZ'
+        jne .rell
+        cmp word [ex_hdr+0x1E], '09'
+        je .segok
+        cmp word [ex_hdr+0x1E], '91'
+        je .segok
+.rell:
         mov es, ax
         mov dx, ax
         call mcb_free
@@ -14915,7 +14928,7 @@ npath       resb NPATH_MAX+4
 ex_pb       resd 1
 ex_path     resb NPATH_MAX+8
 ex_plen     resw 1
-ex_hdr      resb 28
+ex_hdr      resb 32
 ex_isexe    resw 1
 ex_env      resw 1
 ex_esrc     resw 1

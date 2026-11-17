@@ -7,7 +7,8 @@
 #             teclado (flechas), F5 y F8 dentro del menú
 #   normal    el disquete de uso sin tocar nada: a los 5 s arranca «Normal»
 #             (lo de siempre: modo real, sin HSPEMM), sin tarjeta de red y
-#             con ella (HSPRED /AUTO se queda: 15 KB menos)
+#             con ella (desde la 0.9.24 HSPRED ya no se carga al arrancar:
+#             la misma memoria libre; a mano se queda y son 15 KB menos)
 #   memoria   el disquete de uso eligiendo «Juegos», tal cual: HMA, memoria
 #             superior, EMS, BLASTER y la memoria convencional libre
 #   juegos    «Juegos» con HSPUSB llevando el USB (/F) en modo V86 (HSPEMM):
@@ -265,11 +266,11 @@ c_normal() {
   nocheck "Error en CONFIG.SYS"
   nocheck "Comando o nombre de archivo incorrecto"
   check "EMS: no hay gestor (EMMXXXX0)"
-  # Sin tarjeta de red HSPRED /AUTO no se queda: 592976 (17/11/2026). Con
-  # tarjeta (la e1000 que pone QEMU si no se le dice nada) se queda, en la
-  # memoria convencional porque en «Normal» no hay memoria superior, y ocupa
-  # 15088: 577872. (Desde la 0.9.17 «Normal» carga la red sola; esta prueba
-  # medía con la tarjeta de QEMU sin saberlo y por eso fallaba.)
+  # 592976 libres (17/11/2026), con tarjeta de red o sin ella: desde la
+  # 0.9.24 «Normal» ya no carga HSPRED al arrancar (en un equipo con tarjeta
+  # se quedaba en la memoria convencional, porque en «Normal» no hay memoria
+  # superior, y les quitaba 13-15 KB a los juegos: Commander Keen 4 en el
+  # Toshiba NB250). Cargado a mano ocupa 15088: 577872.
   n=$(libres)
   if [ -n "$n" ] && [ "$n" -ge $1 ]; then ok "memoria convencional libre con «Normal»$2: $n bytes"; else ko "memoria convencional libre con «Normal»$2: $n bytes (se esperaban $1 o más)"; fi
 }
@@ -278,7 +279,9 @@ c_normal_sinred() {
   nocheck "packet driver en INT"
 }
 c_normal_red() {
-  c_normal 575000 " y la red cargada (HSPRED)"
+  c_normal 590000 " (con tarjeta de red: HSPRED no se carga al arrancar)"
+  n=$(grep -a 'bytes libres' $T/log.txt | sed -n 2p | tr -cd '0-9')
+  if [ -n "$n" ] && [ "$n" -ge 575000 ] && [ "$n" -lt 590000 ]; then ok "con HSPRED cargado a mano: $n bytes libres"; else ko "con HSPRED cargado a mano: $n bytes libres (se esperaban de 575000 a 590000)"; fi
   check "Tarjeta Intel PRO/1000 (e1000)"
   check "packet driver en INT 60h"
   check "  HSPRED  "
@@ -298,9 +301,11 @@ if quiere normal; then
     arranca -audiodev none,id=a0 -device sb16,audiodev=a0 -nic user,model=e1000
     espera "$P"
     orden 'MEM'
-    orden 'MEM /C'
     orden 'SET'
     orden 'BIN\EMSTEST'
+    orden 'A:\HISPADOS\HSPRED'
+    orden 'MEM'
+    orden 'MEM /C'
     fin c_normal_red
   fi
 fi

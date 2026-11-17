@@ -3,7 +3,8 @@
 # tiene UEFI (QEMU con OVMF sin CSM, de 64 y de 32 bits) por \EFI\BOOT, llega
 # a C:\>, el teclado y el disco funcionan, y la opción «Juegos» no reinicia
 # el equipo (HSPEMM no se instala con HispaBIOS). El equipo lleva una tarjeta
-# de red e1000 (la que QEMU pone por omisión): HSPRED /AUTO la tiene que cargar.
+# de red e1000 (la que QEMU pone por omisión): HSPRED (a mano: ya no va en
+# AUTOEXEC.BAT) la tiene que cargar.
 # uso: run_hispabios_tests.sh [imagen_usb]     (necesita los paquetes ovmf y ovmf-ia32)
 cd "$(dirname "$0")/.."
 B=build
@@ -64,7 +65,7 @@ for arq in 64 32; do
   else
     ko "falta \\EFI\\BOOT en la imagen USB"; continue
   fi
-  arranca $arq $T/u$arq.img n$arq "d i r ret" "bytes libres" || continue
+  arranca $arq $T/u$arq.img n$arq "h s p r e d ret d i r ret" "bytes libres" || continue
   S=$T/serie_n$arq.txt
   grep -aq 'Hispa-DOS 0.9' $S && ok "arranca el núcleo de Hispa-DOS" || ko "no arranca el núcleo"
   grep -aq 'C:\\>' $S && ok "llega a C:\\>" || ko "no llega a C:\\>"
@@ -74,7 +75,7 @@ for arq in 64 32; do
   [ "$n" -le 1 ] && ok "no se ha reiniciado" || ko "se ha reiniciado ($n arranques)"
   grep -aq 'los lleva el firmware' $S && ok "HSPCD deja la controladora SATA al firmware" || ko "HSPCD no avisa de la SATA"
   grep -aq 'HSPUSB no se carga' $S && ok "HSPUSB deja el USB al firmware" || echo "  (HSPUSB no se carga en esta configuración)"
-  # (HSPRED /AUTO del AUTOEXEC.BAT con la e1000 de QEMU, que solo da sus registros
+  # (HSPRED, tecleado antes de DIR, con la e1000 de QEMU, que solo da sus registros
   # en memoria: usa el modo «irreal». Sin la base de su GDT, con HispaBIOS el
   # equipo se reiniciaba aquí una y otra vez: era el fallo de esta prueba.)
   grep -aq 'Tarjeta Intel PRO/1000 (e1000), MAC 52:54:00:12:34:56' $S && ok "HSPRED carga la tarjeta de red (e1000, modo «irreal»)" || ko "HSPRED no carga la tarjeta de red"

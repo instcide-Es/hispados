@@ -12,10 +12,13 @@ REM Mandos de juego (USB, puerto de juegos...): solo se queda si hay alguno.
 REM Se configuran en C:\HISPADOS\MANDO.INI; MANDO los enseña.
 C:\HISPADOS\HSPJOY
 C:\HISPADOS\HSPSND /VOL:80
-REM Red por cable: si hay tarjeta, carga sola el controlador (para ACTUALIZAR
-REM desde Hispa Ventanas, CONFRED, PING...). Con /AUTO, si no hay tarjeta sale
-REM en silencio y no gasta memoria.
-C:\HISPADOS\HSPRED /AUTO
+REM Red por cable: el controlador (HSPRED) ya no se carga al arrancar: ocupa
+REM 13 KB de memoria convencional, que les faltan a los juegos y programas
+REM grandes. ACTUALIZAR lo carga solo cuando lo necesita; para CONFRED, PING,
+REM DESCARGAR o CONSOLA, antes y a mano: HSPRED. Para tener la red siempre,
+REM quite el REM de la línea siguiente (con /AUTO, si no hay tarjeta sale en
+REM silencio y no gasta memoria):
+REM C:\HISPADOS\HSPRED /AUTO
 GOTO COMUN
 
 :JUEGOS
@@ -45,10 +48,9 @@ C:\HISPADOS\DIAGNOST
 GOTO FIN
 
 :COMUN
-REM Red por cable (docs/RED.md): en «Normal» el controlador (HSPRED) ya se
-REM carga solo arriba, si hay tarjeta; después, CONFRED (IPCONFIG), PING y
-REM DESCARGAR. En «Juegos» no se carga (los juegos quieren toda la memoria);
-REM para la red en «Juegos», a mano: C:\HISPADOS\HSPRED
+REM Red por cable (docs/RED.md): primero el controlador, a mano:
+REM C:\HISPADOS\HSPRED; después, CONFRED (IPCONFIG), PING y DESCARGAR.
+REM (ACTUALIZAR lo carga solo.)
 SYSINFO
 ECHO.
 ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.

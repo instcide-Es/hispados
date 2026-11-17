@@ -38,8 +38,12 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 
 ## Uso
 
-1. Cargar el controlador, en `AUTOEXEC.BAT` o a mano: `HSPRED` (o
-   `LH HSPRED` con memoria superior). Si no encuentra una tarjeta que sepa
+1. Cargar el controlador, a mano o en `AUTOEXEC.BAT`: `HSPRED` (o
+   `LH HSPRED` con memoria superior). Desde la 0.9.24 el `AUTOEXEC.BAT` que
+   se instala ya no lo carga al arrancar (trae la línea `HSPRED /AUTO` con un
+   `REM` delante): ocupa 13 KB de memoria convencional, que les faltan a los
+   juegos y a los programas grandes. `ACTUALIZAR` lo carga solo; para tener
+   la red siempre, quite ese `REM`. Si no encuentra una tarjeta que sepa
    usar, lo dice, enseña las tarjetas de red que hay (fabricante:modelo) y no
    se queda en la memoria.
 2. `CONFRED` (también `IPCONFIG`): pide la dirección por DHCP (o la pone de
