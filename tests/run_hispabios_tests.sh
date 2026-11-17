@@ -94,4 +94,26 @@ if arranca 64 $T/j.img juegos "d i r ret" "bytes libres"; then
   [ "$n" -le 1 ] && ok "no se ha reiniciado" || ko "se ha reiniciado ($n arranques)"
 fi
 
+# El modo «irreal» (FS con límite de 4 GB en modo real: HSPRED lo usa para los
+# registros de las tarjetas Intel, y muchos juegos) tiene que sobrevivir a los
+# viajes al firmware (el tic del reloj que dibuja la pantalla, el disco, el
+# teclado): HispaBIOS vuelve al modo real con los segmentos de datos a 4 GB.
+# IRREAL.COM (tests/progs/irreal.asm) pone FS, escribe puntos, deja pasar tics
+# y lee por encima de 1 MB. OJO: QEMU sin KVM no comprueba los límites de los
+# segmentos, así que aquí solo se ve que el programa acaba y no hay reinicio;
+# la comprobación de verdad es con KVM o en un PC real.
+echo "== HispaBIOS: el modo «irreal» sobrevive a los viajes al firmware =="
+if nasm -f bin -o $T/IRREAL.COM tests/progs/irreal.asm; then
+  cp --sparse=always $USB $T/i.img
+  mcopy -o -i $T/i.img@@1048576 $T/IRREAL.COM ::IRREAL.COM
+  if arranca 64 $T/i.img irreal "i r r e a l ret" "IRREAL-BIEN"; then
+    S=$T/serie_irreal.txt
+    grep -aq 'IRREAL-BIEN' $S && ok "IRREAL acaba: leer con FS por encima de 1 MB tras los tics" || ko "IRREAL no acaba (¿FS perdió el límite?)"
+    n=$(grep -ac 'BdsDxe: loading' $S)
+    [ "$n" -le 1 ] && ok "no se ha reiniciado" || ko "se ha reiniciado ($n arranques)"
+  fi
+else
+  ko "no se ha podido ensamblar tests/progs/irreal.asm"
+fi
+
 exit $fail

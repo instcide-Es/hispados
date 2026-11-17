@@ -27,6 +27,7 @@ SEL_C32         equ 10h
 SEL_D32         equ 18h
 SEL_C16         equ 20h             ; código de 16 bits con base BASE
 SEL_D16         equ 28h
+SEL_DGR         equ 30h             ; datos de 16 bits con límite de 4 GB (modo «irreal»)
 EFER            equ 0C0000080h
 
 ; zonas dentro de la BIOS (desplazamientos)
@@ -193,9 +194,18 @@ baja_32:
         bits 16
 baja_16:
         mov ax, SEL_D16
+        mov ss, ax
+        ; Los segmentos de datos vuelven al modo real con límite de 4 GB, no de
+        ; 64 KB: así el modo «irreal» que tuviera puesto el programa (FS o GS
+        ; para llegar por encima de 1 MB: HSPRED con las tarjetas Intel, los
+        ; juegos) sobrevive al viaje al firmware. Antes, cada vuelta (el tic
+        ; del reloj que dibuja la pantalla, el disco, el teclado) lo dejaba en
+        ; 64 KB y la lectura siguiente con FS era un fallo de protección: el
+        ; equipo se reiniciaba (al cargar HSPRED, si el tic caía en mal sitio).
+        ; Un límite de más no molesta a quien no lo usa.
+        mov ax, SEL_DGR
         mov ds, ax
         mov es, ax
-        mov ss, ax
         mov fs, ax
         mov gs, ax
         mov eax, cr0
@@ -1066,6 +1076,7 @@ gdt:
         dq 00CF92000000FFFFh            ; 18h datos de 32 bits
         dq 00009A090000FFFFh            ; 20h código de 16 bits, base 90000h
         dq 000092090000FFFFh            ; 28h datos de 16 bits, base 90000h
+        dq 008F92000000FFFFh            ; 30h datos de 16 bits, límite de 4 GB
 gdt_fin:
 gdtr:   dw gdt_fin - gdt - 1            ; (para lgdt en modo largo: base de 64 bits)
         dq L(gdt)
