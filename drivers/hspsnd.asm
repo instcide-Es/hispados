@@ -222,7 +222,7 @@ hda_rates   dw 0x0040               ; frecuencias que admiten los DAC (bits
                                     ; 22,05, 32, 44,1, 48 kHz...)
 hw_rate     dw 48000                ; frecuencia a la que toca la tarjeta
 rs_acc      dd 0                    ; fase del cambio de frecuencia
-fb_bpf      dw 0
+fb_bpf      dw 0                    ; fill_buffer: octetos de cada trama de los datos
 ; volumen y mezclador por fuentes (lib/hspmez.inc). Cada fuente tiene su
 ; volumen (0..100 %), sus casillas (MZF_*) y su balance (0..100, 50 en
 ; medio). La fuente 0, «General», es el volumen de siempre: vol_pct y
@@ -720,6 +720,17 @@ int15:
 ; Si la tarjeta no toca a la frecuencia de los datos (cur_rate != hw_rate:
 ; códecs HD Audio que solo admiten 44,1 y 48 kHz, AC'97 de 48 kHz fijos) se
 ; repiten o se saltan muestras con un acumulador de fase.
+; Dentro del bucle no se escribe más que en el búfer: ni en las variables del
+; driver (lo que queda, BP, y la fase, ECX, van en registros y se guardan al
+; salir) ni en la pila (sin PUSH ni CALL: el volumen se aplica aquí mismo).
+; Las variables están en la misma página de memoria que el código, y la pila
+; con la que llama Hispa Ventanas (la de modo real de HSPDPMI) también está
+; en una página con código. Escribir en una página así es lento en un
+; emulador sin virtualización (QEMU mira cada vez si se le ha cambiado el
+; código que tiene traducido) y en algunos procesadores. Con unas diez
+; escrituras de esas por trama, un trozo de 2.048 tramas tardaba en QEMU lo
+; mismo que dura (40 ms) y el sonido salía a saltos; así tarda menos de 1 ms
+; (tests/run_sonidos_tests.sh mira que no haya ni un corte).
 fill_buffer:
         push bp
         ; bytes por trama de entrada
@@ -732,73 +743,82 @@ fill_buffer:
         jz .c
         shl cx, 1
 .c:
+        mov [cs:fb_bpf], cx
         ; destino
         movzx di, byte [cs:wr_idx]
         and di, NBUF - 1
         shl di, 13                  ; * BUFSZ
         add di, [cs:buf_off]
+        lea ax, [di+BUFSZ]
+        mov [cs:fb_end], ax         ; donde acaba el búfer
         push cs
         pop es
+        mov bp, [cs:p_left]         ; lo que queda por convertir
+        mov ecx, [cs:rs_acc]        ; la fase
         lds si, [cs:p_src]
         mov dl, [cs:p_fmt]
-        xor bp, bp                  ; tramas escritas
         cld
 .l:
-        cmp [cs:p_left], cx
+        cmp bp, [cs:fb_bpf]
         jb .eof
-        cmp bp, FRAMES
+        cmp di, [cs:fb_end]
         jae .end
-        push si
+        ; una trama -> AX izquierdo, BX derecho (16 bits con signo)
         test dl, 1
         jnz .s16
-        lodsb
-        sub al, 0x80
-        mov ah, al
+        mov ah, [si]
+        sub ah, 0x80
         xor al, al
         mov bx, ax
         test dl, 2
-        jz .mono
-        lodsb
-        sub al, 0x80
-        mov ah, al
-        xor al, al
+        jz .st
+        mov bh, [si+1]
+        sub bh, 0x80
         jmp .st
 .s16:
-        lodsw
+        mov ax, [si]
         mov bx, ax
         test dl, 2
-        jz .mono
-        lodsw
-        jmp .st
-.mono:
-        mov ax, bx
+        jz .st
+        mov bx, [si+2]
 .st:
-        pop si
-        xchg ax, bx
-        call vol_scale
+        ; el volumen por programa (muestra * factor / 256), sin tocar la pila
+        cmp word [cs:soft_l], 256
+        je .vi
+        imul word [cs:soft_l]
+        mov al, ah
+        mov ah, dl
+.vi:
         stosw                       ; izquierdo
         mov ax, bx
-        call vol_scale_r
+        cmp word [cs:soft_r], 256
+        je .vd
+        imul word [cs:soft_r]
+        mov al, ah
+        mov ah, dl
+.vd:
         stosw                       ; derecho
-        inc bp
+        mov dl, [cs:p_fmt]          ; (IMUL estropea DX)
         ; avanzar en los datos: cur_rate tramas por cada hw_rate de salida
         movzx eax, word [cs:cur_rate]
-        add eax, [cs:rs_acc]
+        add eax, ecx
         movzx ebx, word [cs:hw_rate]
 .adv:
         cmp eax, ebx
         jb .na
         sub eax, ebx
-        add si, cx
-        sub [cs:p_left], cx
-        cmp [cs:p_left], cx
+        add si, [cs:fb_bpf]
+        sub bp, [cs:fb_bpf]
+        cmp bp, [cs:fb_bpf]
         jae .adv
 .na:
-        mov [cs:rs_acc], eax
+        mov ecx, eax
         jmp .l
 .eof:
-        mov word [cs:p_left], 0
+        xor bp, bp
 .end:
+        mov [cs:p_left], bp
+        mov [cs:rs_acc], ecx
         ; normalizar el puntero de origen
         mov ax, ds
         mov bx, si
@@ -807,9 +827,13 @@ fill_buffer:
         and si, 15
         mov [cs:p_src], si
         mov [cs:p_src+2], ax
-        mov bx, bp
+        mov bx, di                  ; tramas escritas: lo andado en el búfer
+        sub bx, [cs:fb_end]
+        add bx, BUFSZ
+        shr bx, 2
         pop bp
         ret
+fb_end      dw 0                   ; donde acaba el búfer que se llena
 
 ; ---- AC'97 ----
 ; EAX <- dirección física de CS:BX
@@ -2394,6 +2418,7 @@ sb_fill:
         mov cx, bx
         mov dl, [cs:p_fmt]
         mov dh, [cs:dev_type]
+        mov bp, dx                  ; (IMUL estropea DX)
         cld
 .l:
         ; una trama -> AX izquierdo, BX derecho (16 bits con signo)
@@ -2423,10 +2448,23 @@ sb_fill:
 .mono:
         mov ax, bx
 .put:
-        call vol_scale
+        ; el volumen por programa (muestra * factor / 256); en el bucle no
+        ; se toca la pila, como en fill_buffer
+        cmp word [cs:soft_l], 256
+        je .vi
+        imul word [cs:soft_l]
+        mov al, ah
+        mov ah, dl
+.vi:
         xchg ax, bx
-        call vol_scale_r
+        cmp word [cs:soft_r], 256
+        je .vd
+        imul word [cs:soft_r]
+        mov al, ah
+        mov ah, dl
+.vd:
         xchg ax, bx
+        mov dx, bp
         cmp dh, 2
         jne .p8
         stosw

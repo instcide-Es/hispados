@@ -391,26 +391,9 @@ vol_apply:
         popad
         ret
 
-; AX = muestra de 16 bits -> por el factor por programa de los Sonidos
-; (vol_scale: izquierdo; vol_scale_r: derecho)
-vol_scale:
-        push si
-        mov si, soft_l
-        jmp vol_sc
-vol_scale_r:
-        push si
-        mov si, soft_r
-vol_sc:
-        cmp word [cs:si], 256
-        je .r
-        push dx
-        imul word [cs:si]
-        mov al, ah
-        mov ah, dl
-        pop dx
-.r:
-        pop si
-        ret
+; (El factor por programa de los Sonidos, soft_l y soft_r, se aplica a cada
+; muestra en fill_buffer y sb_fill de hspsnd.asm, dentro del bucle y sin
+; llamar a nada: muestra * factor / 256.)
 
 ; -> AL = las casillas de la fuente BL, solo si no esta en silencio
 ; (para «Sonar» y «Grabar»)
