@@ -891,6 +891,7 @@ devuelven algo.
 ```
   (módulos .HVP: juegos/*.asm y programas/*.asm, con hvp.inc y hvplib.inc)
   api.inc modulos.inc    la interfaz y el cargador de los módulos
+  win32.inc      [Hispa-486] programas de Windows de ventanas (parte alta)
   ajustes.inc    los ajustes que cambia Configuración (CONFIG.HVP)
   centro.inc bloc.inc calc.inc reloj.inc    los programas
   accesos.inc    grupos ligados a una carpeta de juegos y opciones de
@@ -1275,7 +1276,7 @@ estropeaba la x del clic).
 
 | Función | Registros |
 |---|---|
-| `dlg_mensaje` | EBP=dueña ESI=texto EDI=título EAX=`DM_ACEPTAR`, `DM_ACEPTAR_CANCELAR` o `DM_SI_NO_CANCELAR` → EAX=`ID_ACEPTAR`, `ID_CANCELAR`, `ID_SI`, `ID_NO` |
+| `dlg_mensaje` | EBP=dueña ESI=texto EDI=título EAX=`DM_ACEPTAR`, `DM_ACEPTAR_CANCELAR`, `DM_SI_NO_CANCELAR` o `DM_SI_NO` (solo «Sí» y «No»: Esc y el botón de cerrar dan `ID_CANCELAR`) → EAX=`ID_ACEPTAR`, `ID_CANCELAR`, `ID_SI`, `ID_NO` |
 | `dlg_pedir` | EBP=dueña ESI=pregunta EDI=título EBX=búfer ECX=tamaño → EAX=1 si se acepta |
 | `dlg_archivo` | EBP=dueña EDI=título EBX=búfer del nombre → EAX=1; lista la carpeta actual y deja entrar en las carpetas |
 | `dlg_lista` | (en `centro.inc`; para los módulos, la entrada 96 de la interfaz, desde la 0.9.22) EBP=dueña EDI=título ESI=pregunta EBX=textos, uno cada EDX octetos, ECX=cuántos → EAX=el elegido (-1: ninguno) |
@@ -1444,6 +1445,39 @@ El cargador (`hvp_abrir`, en `ventanas/modulos.inc`):
 
 Un módulo corre dentro de Hispa Ventanas, sin protección: como cualquier
 programa interno, un error suyo es un error del entorno.
+
+### Programas de Windows de 32 bits (Hispa-486)
+
+Un `.EXE` de Win32 **de ventanas** (formato PE, subsistema 2) también se abre
+como una ventana, no saliendo a Hispa-DOS: `es_hvp` dice que sí tanto para un
+.HVP como para un PE de ventanas (`es_pe_gui` mira la cabecera del archivo),
+y `hvp_abrir` pasa los segundos a `pe_abrir` (`ventanas/win32.inc`, en la
+parte alta). Es la fase 3a de Hispa-486; el detalle está en
+`docs/486/HISPA-486.md` («Cómo está hecho (fase 3a)»). Lo que importa aquí:
+
+- El programa corre como **una tarea más**, pero con **sus propios
+  selectores** (código, datos y pila, FS) y **su propia pila**, dentro de un
+  bloque de DPMI. Las fichas están en `pe_tabla` (`PE_MAX` = 4), aparte de
+  `hvp_tabla`: para el Administrador de tareas es una tarea sin módulo (sale
+  con el título de su ventana; se puede terminar, pero no arrebatarle el
+  control con INT 3).
+- Sus llamadas a Windows entran por `pe_despacho` (un salto lejano desde un
+  trampolín), que pone los segmentos de Hispa Ventanas y pasa a la pila de
+  Hispa Ventanas de la tarea antes de llamar a la función. **`tar_ceder` no
+  ha cambiado**: solo se cede el turno dentro de esas funciones, ya con los
+  segmentos y la pila de siempre, y mientras tanto no queda cargado ningún
+  selector del programa (FS y GS incluidos).
+- Las funciones (`w32_tabla`) reciben EBP = los argumentos y usan la memoria
+  del programa sumando `PE_DELTA` a sus punteros. `MessageBoxA` es
+  `dlg_mensaje`.
+- `hvp_limpiar` llama a `pe_limpiar`, que suelta los selectores y el bloque
+  de los programas que han acabado (o que ha terminado el Administrador de
+  tareas).
+
+Un `.EXE` de Win32 **de consola** sale a Hispa-DOS como los demás programas,
+pero `acc_lanzar` lo marca (`pe_marca_consola`: bit 4 de `lz_band`) y el
+lanzador lo ejecuta con `COMSPEC /C` y sin quitar HSPDPMI de la memoria:
+COMMAND.COM lo pasa a HW32, que necesita el servidor DPMI.
 
 ### La interfaz y sus versiones
 
@@ -2037,6 +2071,18 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 «Mezclador...» de su ventanita y con el de Configuración > Sonido.
 
 ## Pruebas
+
+- `tests/run_win32gui_tests.sh` ([Hispa-486], fase 3a): programas Win32 de
+  ventanas dentro de Hispa Ventanas, desde un grupo del Centro hecho por la
+  prueba. WINGUI.EXE: su `MessageBoxA` sale como cuadro con «Sí» y «No», Esc
+  no lo cierra, y el segundo cuadro dice lo contestado, la línea de órdenes
+  y «Todo bien.»; WINFALTA.EXE: «Hispa-486: falta la función
+  CreateWindowExA (USER32.dll)» y sigue todo; con uno preguntando se abren
+  el Bloc de notas y otro WINGUI; el Administrador de tareas lo lista, lo
+  termina a la fuerza y la memoria libre queda como al principio (se compara
+  la zona de la memoria de su ventana). Segunda sesión: HOLAC.EXE (de
+  consola) sale a Hispa-DOS, lo ejecuta HW32 y se vuelve a Hispa Ventanas.
+  `GUARDAR=carpeta` deja las capturas.
 
 - `tests/run_archivos_tests.sh` ([ARCHIVOS]): el Administrador de archivos
   con un disquete y un disco duro hecho por la prueba: abrir, navegar por

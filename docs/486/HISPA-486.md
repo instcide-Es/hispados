@@ -43,7 +43,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 0 | Este documento; la lista de funciones por orden de uso (`tools/importaciones.py`, con los programas que aporte cada uno) | documento hecho (17/11/2026) |
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
-| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana) |
+| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador |
@@ -99,7 +99,9 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    encuentran por su recorte 8+3, como en MS-DOS).
 2. ~~Que COMMAND.COM ejecute los PE solo~~: hecho (17/11/2026): un .EXE con cabecera PE se lanza con HW32 (de la carpeta de COMSPEC, del PATH o de la actual); si no hay HW32, lo dice y no se lanza.
 3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
-4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas.
+4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a está hecha; sigue la
+   3b (el «Hola, mundo» de ventana: clases, `CreateWindowExA`, bucle de
+   mensajes, `WndProc` llamado desde Hispa Ventanas, `TextOutA`).
 
 ## Fase 1: el cargador PE
 
@@ -168,6 +170,97 @@ Pasos, cada uno con su prueba:
 4. **3d** — GDI completa para los programas sencillos de la época (dibujo,
    mapas de bits, tipos de letra) y diálogos desde recursos (`.rsrc`:
    `DialogBoxParamA`, `LoadIconA`, `LoadStringA`).
+
+### Cómo está hecho (fase 3a)
+
+Está en `ventanas/win32.inc` (va en la parte alta de `VENTANAS.COM`: unos
+2 KB de código de 32 bits). Prueba: `tests/run_win32gui_tests.sh`.
+
+- **Quién lo abre.** Hispa Ventanas mira la cabecera del `.EXE` que se va a
+  abrir (desde un acceso directo del Centro, el Administrador de archivos o
+  «Reabrir»): si es un PE de 386 con **subsistema 2** (ventanas), lo abre
+  dentro, como un módulo .HVP (`es_hvp` → `es_pe_gui`; `hvp_abrir` →
+  `pe_abrir`). Si es un PE de **consola**, sale a Hispa-DOS como cualquier
+  programa, pero el lanzador lo ejecuta con `COMSPEC /C` (que es quien lo pasa
+  a HW32) y **sin quitar HSPDPMI** (bit 4 de `lz_band`): antes, un Win32 de
+  consola abierto desde Hispa Ventanas se ejecutaba como si fuera de DOS y
+  colgaba el equipo.
+- **La carga.** Un bloque de DPMI (0501h) con la imagen, 8 KB de trampolines,
+  4 KB de lo suyo (la TIB y la línea de órdenes) y su pila (lo que pida la
+  cabecera, entre 64 y 256 KB). Tres selectores propios (código, datos y pila,
+  FS) con base «bloque − ImageBase» y 4 GB; FS, con la base en la TIB. No se
+  reubica nada. En esta fase no se cargan DLL: lo que no sea de KERNEL32 o
+  USER32 «falta».
+- **Los punteros.** Hispa Ventanas tiene un único segmento de datos de 4 GB
+  con la base de `VENTANAS.COM`; el programa, otro con la base «bloque −
+  ImageBase». Un puntero del programa se convierte en puntero de Hispa
+  Ventanas sumándole `PE_DELTA` = (bloque − ImageBase) − base de Hispa
+  Ventanas (la suma da la vuelta por 2^32 y cae en la misma dirección
+  lineal). Así USER32 y KERNEL32 leen y escriben la memoria del programa con
+  el segmento de Hispa Ventanas, sin cambiar de segmento.
+- **Los trampolines.** Cada importación apunta a un trampolín de 28 octetos
+  dentro del espacio del programa: `push trampolín; jmp lejos pe_despacho` y,
+  detrás, su ficha: el programa, la función (su ficha en `w32_tabla`), el
+  nombre y la DLL. El número que se empuja es el propio trampolín (como
+  puntero de Hispa Ventanas): el despacho sabe de qué programa es la llamada
+  sin mirar qué tarea corre (hará falta en la 3b, cuando un `WndProc` se
+  llame desde otra tarea).
+- **Dos pilas.** La tarea empieza en la pila de Hispa Ventanas (`pe_tarea`),
+  apunta su ESP en la ficha (`PE_ESPV0`, `PE_ESPV`), pasa a la pila y a los
+  segmentos del programa y salta a su entrada con RETF. En la pila del
+  programa deja la vuelta a un trampolín de salida, por si la entrada hace
+  `ret`.
+- **El despacho** (`pe_despacho`). Llega con la pila y los segmentos del
+  programa: guarda DS, ES, FS, GS, EBP, EBX, ESI y EDI en la pila del
+  programa; pone los segmentos de Hispa Ventanas (también en FS y GS: mientras
+  corre lo demás no queda puesto ningún selector del programa); pasa a la pila
+  de Hispa Ventanas (`PE_ESPV`), donde guarda el ESP del programa (y el de la
+  llamada anterior, `PE_ESPP`: se puede anidar); llama a la función con
+  EBP = los argumentos ya convertidos, EDX = la ficha del programa y EBX = el
+  trampolín; vuelve a la pila del programa, recoloca la vuelta lejos encima de
+  los argumentos y hace RETF (stdcall). Como solo se cambia de tarea dentro
+  de las funciones (en la pila y con los segmentos de Hispa Ventanas), el
+  cambio de tarea de Hispa Ventanas no se ha tocado.
+- **Acabar.** `ExitProcess` (o el `ret` de la entrada) vuelve al ESP del
+  principio de la tarea y esta termina como cualquier otra (`tar_fin`
+  destruye sus ventanas). Los selectores (DPMI 0001h) y el bloque (0502h) los
+  suelta `pe_limpiar` en el bucle del sistema, también si el programa lo ha
+  terminado el Administrador de tareas (que lo lista con el título de su
+  cuadro y lo puede terminar a la fuerza).
+- **Lo que falta.** Una función que no está tiene un trampolín que, si se
+  llama, saca el cuadro «Hispa-486: falta la función NOMBRE (DLL)» y termina
+  el programa.
+- **Las funciones de la 3a.** USER32: `MessageBoxA` (`dlg_mensaje`: MB_OK,
+  MB_OKCANCEL, MB_YESNOCANCEL, MB_YESNO —con un tipo nuevo de cuadro,
+  `DM_SI_NO`, que no se puede cerrar sin contestar— y MB_RETRYCANCEL como
+  aceptar y cancelar; devuelve los números de Windows; los textos pasan de la
+  página 1252 a la 437, tabla de `tools/mk1252.py`; sin título, «Error»).
+  KERNEL32: `ExitProcess`, `GetModuleHandleA/W` (NULL), `GetCommandLineA`,
+  `GetStartupInfoA`, `GetVersion` (Windows 98), `GetLastError`,
+  `SetLastError`, `GetTickCount`, `Sleep` (cede el turno),
+  `GetModuleFileNameA`, `lstrlenA`, `lstrcpyA` y `lstrcatA`.
+- **Los programas de prueba.** `tests/progs/wingui.c` (WINGUI.EXE y, con
+  `-DFALTA`, WINFALTA.EXE), con `gcc -m32` y `tools/elf2pe.py --gui` (la
+  opción nueva pone el subsistema 2).
+
+Decisiones y límites de la 3a (para las fases siguientes):
+
+- El cargador de PE de Hispa Ventanas es propio y pequeño, no el de HW32
+  sacado a un archivo común como decía el diseño: HW32 lee por un búfer de
+  memoria convencional con selectores aparte y aquí todo es un puntero de
+  Hispa Ventanas, así que compartirlo era más código que escribirlo. Cuando
+  haga falta cargar DLL dentro de Hispa Ventanas (MSVCRT.DLL para los
+  programas de C), se verá si se unifican.
+- No hay protección: un fallo del programa es un fallo de Hispa Ventanas,
+  como con los módulos .HVP. El Administrador de tareas no puede arrebatar el
+  control a un programa de Windows que no llame a ninguna función (sí a los
+  .HVP).
+- Hasta 4 programas de Windows a la vez (`PE_MAX`); cada vez que se abre uno
+  es una copia nueva.
+- `ExitProcess` desde una llamada de vuelta que corra en otra tarea (3b)
+  habrá que resolverlo entonces: hoy vuelve al principio de la tarea propia.
+- El cuadro de `MessageBoxA` no tiene dueña (la 3a no tiene ventanas): si se
+  activa otra ventana, queda detrás.
 
 ## Relación con los demás
 
