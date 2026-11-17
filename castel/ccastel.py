@@ -2392,7 +2392,6 @@ class Generador:
             self.salto(cc if si else self.INVERSA[cc], destino)
             return
         if e.k == 'llamada' and e.nombre == 'acarreo':
-            self.usa_reg_int('ban')
             if self.banderas_vivas():
                 self.salto('c' if si else 'nc', destino)
                 return
@@ -2854,12 +2853,6 @@ class Generador:
             self.em(f'{ins} ax, cl')
 
     # ---- llamadas ----
-    def usa_apoyo(self, nombre):
-        pass                                    # van al programa las que se nombran (ver genera)
-
-    def usa_reg_int(self, r):
-        pass
-
     def gen_llamada(self, e, sentencia=False, solo_al=False):
         nm = e.nombre
         args = [a for _, a in e.args]
@@ -2909,7 +2902,6 @@ class Generador:
                     else:
                         self.gen_expr(a)
                         self.em('mov si, ax')
-                    self.usa_apoyo('escribir_cad')
                     self.em('call escribir_cad')
                 elif t.k == 'bool':
                     l_no = self.nueva()
@@ -2920,7 +2912,6 @@ class Generador:
                     self.et(l_no)
                     self.em(f"mov si, {self.etiqueta_cadena(b'falso')}")
                     self.et(l_fin)
-                    self.usa_apoyo('escribir_cad')
                     self.em('call escribir_cad')
                 elif es32(t):
                     self.gen_expr32(a)
@@ -2932,7 +2923,6 @@ class Generador:
                     c = self.const(a)
                     con_signo = t.k == 'ent16' or (t.k == 'lit' and c is not None and c < 0)
                     rut = 'escribir_num' if con_signo else 'escribir_nat'
-                    self.usa_apoyo(rut)
                     self.em(f'call {rut}')
             return
         if nm == 'escribir_car':
@@ -3027,7 +3017,6 @@ class Generador:
             return
         if nm in SALIDAS_INT:
             r = SALIDAS_INT[nm]
-            self.usa_reg_int(r)
             if r == 'ban':
                 self.ban_memoria = True
             self.em(f'mov ax, [R_{r}]')
@@ -3152,12 +3141,10 @@ class Generador:
             self.em('pop ds')
         guardar = {SALIDAS_INT[x] for x in self.func.usa_int}
         if 'ban' in guardar:
-            self.usa_reg_int('ban')
             self.em('pushf')
             self.em('pop word [R_ban]')
         for r in ('bx', 'cx', 'dx', 'si', 'di', 'es'):
             if r in guardar:
-                self.usa_reg_int(r)
                 self.em(f'mov [R_{r}], {r}')
 
 
