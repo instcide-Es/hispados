@@ -62,7 +62,6 @@ N_RXFS      equ 1536                ; lo que se pide en cada recepción: un múl
 N_RXHS      equ 2048                ; del paquete (64; 512 o 1024), mayor que la trama
 N_TICK      equ 8                   ; tramas por tic, como mucho
 N_WAIT      equ 16                  ; espera de la trama siguiente (microtramas: 2 ms)
-N_SBUF      equ 2048 + 1536         ; el búfer de los avisos (64), tras los de recepción y envío
 
 section .init
 ; ---- reconocer el adaptador ----
@@ -166,7 +165,6 @@ net_parse:
         mov [np_comm_ok], al
         mov [np_done], al
         mov [np_imac], al
-        mov [np_int], al
         mov byte [np_union], 0xFF
 .l:
         cmp si, cx
@@ -267,32 +265,18 @@ net_parse:
 .ep:
         cmp ah, 5
         jne .n
+        cmp byte [np_mode], 2
+        jne .n
+        mov al, [cs:si+3]
+        and al, 3
+        cmp al, 2                   ; bulk
+        jne .n
         mov dl, [cs:si+2]
         mov dh, dl
         and dh, 0x0F
         shl dh, 1                   ; DCI = 2 * número (+1 si es de entrada)
         mov di, [cs:si+4]
         and di, 0x7FF
-        mov al, [cs:si+3]
-        and al, 3
-        cmp byte [np_mode], 1
-        jne .ed
-        ; en la de comunicaciones: el de interrupción de entrada (avisos)
-        cmp al, 3
-        jne .n
-        test dl, 0x80
-        jz .n
-        inc dh
-        mov [np_int], dh
-        mov [np_int_mps], di
-        mov al, [cs:si+6]
-        mov [np_int_ival], al
-        jmp .n
-.ed:
-        cmp byte [np_mode], 2
-        jne .n
-        cmp al, 2                   ; bulk
-        jne .n
         test dl, 0x80
         jz .eo
         inc dh
@@ -462,8 +446,8 @@ net_setup:
         mov bp, bx                  ; BP = el bloque, hasta el final
         cmp byte [cur_type], HCT_XHCI
         jne .cl
-        ; xHCI: tres anillos (cada uno en su página: alineados a 100h)
-        mov cx, 0x300
+        ; xHCI: dos anillos (cada uno en su página: alineados a 100h)
+        mov cx, 0x200
         mov dx, 0x100
         call zalloc
         jc .fail
@@ -471,18 +455,13 @@ net_setup:
         mov [ds:bp+n_rxring], bx
         add bx, 0x100
         mov [ds:bp+n_txring], bx
-        add bx, 0x100
-        mov [ds:bp+n_sring], bx
         jmp .buf
 .cl:
-        ; clásicas: la cola y el TD de sus dos tuberías, seguidas (y los TD
-        ; de la recepción en la UHCI). n_pblk: como si fueran las tuberías
-        ; PIPE_NET y PIPE_NST de una tabla que empezara en la 0 (c_pipe_blk).
-        mov cx, 2 * PIPE_BLK
+        ; clásicas: la cola y el TD de la tubería (y los TD de la UHCI)
+        mov cx, PIPE_BLK
         mov dx, 32
         call zalloc_np
         jc .fail
-        sub bx, PIPE_NET * PIPE_BLK
         mov [n_pblk], bx
         cmp byte [cur_type], HCT_UHCI
         jne .buf
@@ -492,9 +471,9 @@ net_setup:
         jc .fail
         mov [ds:bp+n_utd], bx
 .buf:
-        ; búferes: 2048 de recepción y, detrás, 1536 de envío y 64 de los
-        ; avisos. Alineados a 2048, ninguno cruza de página.
-        mov cx, N_SBUF + 64
+        ; búferes: 2048 de recepción y, detrás, 1536 de envío. Alineados a
+        ; 2048, ninguno cruza de página.
+        mov cx, 2048 + 1536
         mov dx, 2048
         call zalloc
         jc .fail
@@ -641,12 +620,9 @@ net_setup:
         ; paquete de 512 en cada una), no solo en la primera
         cmp byte [speed], 3
         jb .on
-        mov bx, PIPE_NET
-        call c_pipe_blk
+        mov di, [n_pblk]
         or byte [di+8], 0xFF
 .on:
-        call net_status             ; la tubería de avisos, si se puede
-        mov bp, [ns_blk]
         mov [n_blk], bp             ; desde ahora, en marcha
         clc
         ret
@@ -677,73 +653,8 @@ net_setup:
         stc
         ret
 
-; La tubería de avisos del adaptador (el extremo de interrupción de su
-; interfaz de comunicaciones): por ella dice si hay enlace. No es
-; imprescindible: si no la tiene o algo falla, se queda sin ella (enlace:
-; no se sabe) y lo demás sigue igual.
-net_status:
-        cmp byte [np_int], 0
-        je .r
-        mov cx, [np_int_mps]
-        test cx, cx
-        jz .r
-        cmp cx, 64
-        ja .r
-        cmp byte [cur_type], HCT_XHCI
-        jne .cl
-        ; xHCI: otro Configure Endpoint, que añade el extremo (si la
-        ; controladora lo rechaza, los dos bulk se quedan como estaban)
-        call clear_in
-        mov bx, IN_CTX
-        call zone
-        mov eax, 1
-        movzx ecx, byte [np_int]
-        bts eax, ecx
-        mov [cs:bx+4], eax
-        add bx, [ctx_sz]
-        movzx eax, byte [np_in]     ; entradas de contexto: el mayor de los tres
-        cmp al, [np_out]
-        jae .m1
-        mov al, [np_out]
-.m1:
-        cmp al, [np_int]
-        jae .m2
-        mov al, [np_int]
-.m2:
-        call slot_fill
-        mov al, [np_int_ival]
-        call calc_ival
-        mov [ep_ival], al
-        movzx eax, word [np_int_mps]
-        mov edx, eax
-        shl edx, 16
-        or eax, edx
-        mov [ep_d4], eax
-        mov bp, [ns_blk]
-        mov al, [np_int]
-        mov dx, [ds:bp+n_sring]
-        mov cx, [np_int_mps]
-        mov ah, 7                               ; interrupción IN
-        call set_ep
-        call cfg_ep_cmd
-        jc .r
-.cl:
-        mov al, [cur_pool]
-        mov [ip_pool+PIPE_NST], al
-        mov al, [np_int]
-        mov [ip_dci+PIPE_NST], al
-        mov ax, [np_int_mps]
-        mov [ip_mps+PIPE_NST*2], ax
-        mov [ip_len+PIPE_NST*2], ax ; se pide un paquete: nunca llega de más
-        mov bx, PIPE_NST
-        call pipe_ready
-        mov bp, [ns_blk]
-        mov byte [ds:bp+n_son], 1
-.r:
-        ret
-
 ; Al acabar la inicialización, si hay adaptador: decirlo y atender INT 2Fh
-; (AX=DB00h), por donde lo encuentra HSPRED, e INT 16h (ver n_int16)
+; (AX=DB00h), por donde lo encuentra HSPRED
 net_ready:
         mov bp, [n_blk]
         test bp, bp
@@ -773,15 +684,6 @@ net_ready:
         lea dx, [bp+n_int2f]
         mov ax, 0x252F
         int 0x21
-        push es
-        mov ax, 0x3516
-        int 0x21
-        mov [ds:bp+n_old16], bx
-        mov [ds:bp+n_old16+2], es
-        pop es
-        lea dx, [bp+n_int16]
-        mov ax, 0x2516
-        int 0x21
 .r:
         ret
 
@@ -798,12 +700,9 @@ np_alt      db 0
 np_imac     db 0
 np_in       db 0
 np_out      db 0
-np_int      db 0                    ; extremo de los avisos (0 = no tiene)
-np_int_ival db 0
             align 2
 np_mps_in   dw 0
 np_mps_out  dw 0
-np_int_mps  dw 0
 ns_blk      dw 0
 ns_ztop     dd 0
 msg_netok   db "Adaptador de red USB preparado (CDC-ECM), MAC ", 0
@@ -831,7 +730,6 @@ n_pump:
         push cs
         pop ds
         mov di, [n_blk]
-        call n_stat                 ; los avisos (enlace)
         mov byte [di+n_cnt], N_TICK
 .l:
         mov al, [di+n_st]
@@ -959,34 +857,26 @@ n_check:
         ret
 
 ; ---- xHCI ----
-; pedir la trama siguiente: un TRB normal en su anillo de entrada
+; pedir: un TRB normal en su anillo de entrada
 n_xq:
-        mov bx, [n_rxbuf]
-        mov cx, [ip_len+PIPE_NET*2]
-        mov dx, [di+n_rxring]
-        lea si, [di+n_rxidx]
-        mov al, [ip_dci+PIPE_NET]
-; un TRB normal: BX = búfer (en CS), CX = octetos, DX = anillo (en la zona),
-; SI = su índice y ciclo, AL = extremo (DCI); y el timbre. Conserva todo.
-n_xput:
         pushad
-        push ax
+        mov bx, [n_rxbuf]
         MCALL phys
-        movzx ecx, cx
-        mov bx, dx
         xor edx, edx
+        movzx ecx, word [ip_len+PIPE_NET*2]
         mov ebp, (1 << 10) | (1 << 5) | (1 << 2)    ; Normal, IOC, ISP
+        mov bx, [di+n_rxring]
+        lea si, [di+n_rxidx]
         MCALL put_trb
-        pop ax
+        mov al, [ip_dci+PIPE_NET]
         mov ah, [di+n_slot]
         MCALL doorbell
         popad
         ret
 
 ; evento de transferencia en evt (desde hid_event): si es de la recepción
-; o de los avisos del adaptador, se apunta (lo atenderá n_pump) y CF = 0; si
-; no, CF = 1. Los del extremo de salida no son de aquí: los espera el envío
-; (wait_xfer).
+; del adaptador, se apunta (lo entregará n_pump) y CF = 0; si no, CF = 1.
+; Los del extremo de salida no son de aquí: los espera el envío (wait_xfer).
 n_event:
         push di
         push ax
@@ -997,31 +887,23 @@ n_event:
         mov al, [cs:evt+14]
         and al, 0x1F
         cmp al, [cs:ip_dci+PIPE_NET]
-        je .rx
-        cmp byte [cs:di+n_son], 0
-        je .no
-        cmp al, [cs:ip_dci+PIPE_NST]
         jne .no
-        ; avisos
-        cmp byte [cs:di+n_sst], 1
-        jne .eat
-        mov byte [cs:di+n_sst], 3
-        call .good
-        jc .eat
-        mov ax, [cs:ip_len+PIPE_NST*2]
-        sub ax, [cs:evt+8]          ; menos lo que ha faltado por llegar
-        mov [cs:di+n_sgot], ax
-        mov byte [cs:di+n_sst], 2
-        jmp .eat
-.rx:
         cmp byte [cs:di+n_st], 1
         jne .eat
         mov byte [cs:di+n_st], 3
-        call .good
-        jc .eat
-        mov ax, [cs:ip_len+PIPE_NET*2]
-        sub ax, [cs:evt+8]
+        mov al, [cs:evt+11]
+        cmp al, 1                   ; éxito
+        je .ok
+        cmp al, 13                  ; paquete corto: lo normal
+        jne .eat
+.ok:
+        push eax
+        mov eax, [cs:evt+8]
+        and eax, 0x00FFFFFF         ; lo que ha faltado por llegar
+        neg ax
+        add ax, [cs:ip_len+PIPE_NET*2]
         mov [cs:di+n_got], ax
+        pop eax
         mov byte [cs:di+n_st], 2
 .eat:
         pop ax
@@ -1033,89 +915,6 @@ n_event:
         pop di
         stc
         ret
-; ¿transferencia correcta? (éxito, o paquete corto: lo normal) CF si no
-.good:
-        mov al, [cs:evt+11]
-        cmp al, 1
-        je .y
-        cmp al, 13
-        je .y
-        stc
-        ret
-.y:
-        clc
-        ret
-
-; ---- la tubería de avisos (interrupción): el enlace ----
-; El adaptador avisa por ella de NETWORK_CONNECTION (A1h 00h, wValue = 1 si
-; hay enlace, 0 si no) y de SPEED_CHANGE (A1h 2Ah, que no se usa). Se mira
-; con cada sondeo. DS = CS, DI = bloque.
-n_stat:
-        cmp byte [di+n_son], 0
-        je .r
-        mov al, [ip_pool+PIPE_NST]
-        MCALL dev_hc
-        mov al, [di+n_sst]
-        cmp al, 2
-        je .got
-        cmp al, 3
-        je .err
-        cmp al, 1
-        jne .q
-        cmp byte [cur_type], HCT_XHCI
-        je .r                       ; (lo dirá n_event)
-        mov bx, PIPE_NST
-        movzx si, byte [cur_type]
-        shl si, 1
-        push di
-        call [c_pc_tab+si]          ; (dirección absoluta: vale desde aquí)
-        pop di
-        jc .r                       ; sigue pendiente
-        mov [di+n_sgot], ax
-        cmp ax, 0xFFFF
-        je .err
-.got:
-        mov byte [di+n_serr], 0
-        cmp word [di+n_sgot], 8
-        jb .q
-        mov bx, [n_rxbuf]
-        add bx, N_SBUF
-        cmp word [bx], 0x00A1       ; aviso de clase a la interfaz, NETWORK_CONNECTION
-        jne .q
-        mov al, [bx+2]
-        and al, 1
-        mov [di+n_link], al
-.q:
-        mov byte [di+n_sst], 1
-        cmp byte [cur_type], HCT_XHCI
-        je .xq
-        mov bx, PIPE_NST
-        MCALL pipe_queue
-.r:
-        ret
-.xq:
-        mov bx, [n_rxbuf]
-        add bx, N_SBUF
-        mov cx, [ip_len+PIPE_NST*2]
-        mov dx, [di+n_sring]
-        lea si, [di+n_sidx]
-        mov al, [ip_dci+PIPE_NST]
-        jmp n_xput
-.err:
-        inc byte [di+n_serr]
-        cmp byte [di+n_serr], 3
-        jb .e1
-        mov byte [di+n_son], 0      ; no hay manera: sin avisos
-        mov byte [di+n_link], 0xFF  ; (enlace: no se sabe)
-        ret
-.e1:
-        cmp byte [cur_type], HCT_XHCI
-        jne .q
-        mov al, [ip_dci+PIPE_NST]
-        mov bx, [di+n_sring]
-        lea si, [di+n_sidx]
-        call n_xrec
-        jmp .q
 
 ; reanudar un extremo parado: Reset Endpoint y Set TR Dequeue Pointer a
 ; donde va su anillo. AL = DCI, BX = anillo (en la zona), SI = su índice y
@@ -1162,8 +961,8 @@ n_uq:
         pushad
         MCALL c_xf_pipe             ; (xf_addr, xf_ep, xf_mps: los de la tubería BX)
         mov bp, di
-        MCALL c_pipe_blk            ; DI = la cola de la tubería BX
-        mov dword [di+4], 1         ; vacía mientras se preparan los TD
+        mov di, [n_pblk]
+        mov dword [di+4], 1         ; la cola, vacía mientras se preparan
         mov bx, [n_rxbuf]
         MCALL phys
         mov edx, eax                ; EDX = búfer del paquete que toca
@@ -1312,10 +1111,35 @@ n_send:
         mov di, bx
         cmp byte [di+n_deliv], 0
         jne .nest
-        call n_enter
-        jc .out
+        ; pila propia (la de INT 08h, que no entra mientras busy esté tomado)
+        mov [di+n_ss], ss
+        mov [di+n_sp], sp
+        mov ax, cs
+        mov ss, ax
+        mov sp, istack_top
+        sti
+        MCALL io_mode
+        cmp byte [iomode], 1
+        je .v86                     ; modo V86 con VCPI: sin modo irreal
+        ja .leave                   ; modo V86 sin VCPI: no se puede
+        sgdt [di+n_gdtr]
+        MCALL unreal
+.v86:
+        MCALL a20_open
+        mov di, [n_blk]
         call n_tx
-        call n_leave
+        MCALL a20_restore
+        mov di, [n_blk]
+        cmp byte [iomode], 0
+        jne .leave
+        cli
+        lgdt [di+n_gdtr]
+.leave:
+        cli
+        mov di, [n_blk]
+        mov ss, [di+n_ss]
+        mov sp, [di+n_sp]
+        mov byte [busy], 0
         jmp .out
 .nest:
         sti
@@ -1375,11 +1199,16 @@ n_tx:
         ret
 .x:
         mov bx, [di+n_txbuf]
-        mov cx, [di+n_txlen]
-        mov dx, [di+n_txring]
+        MCALL phys
+        xor edx, edx
+        movzx ecx, word [di+n_txlen]
+        mov ebp, (1 << 10) | (1 << 5) | (1 << 2)    ; Normal, IOC, ISP
+        mov bx, [di+n_txring]
         lea si, [di+n_txidx]
+        MCALL put_trb
         mov al, [di+n_odci]
-        call n_xput
+        mov ah, [di+n_slot]
+        MCALL doorbell
         MCALL wait_xfer
         jnc .ok
         cmp byte [xf_code], 0xFF    ; sin respuesta: nada que reanudar
@@ -1389,107 +1218,6 @@ n_tx:
         lea si, [di+n_txidx]
         call n_xrec
         jmp .bad
-
-; Entrar a trabajar con las controladoras como lo hace INT 08h: pila propia
-; (la suya: no entra mientras «busy» esté tomado), modo irreal y A20.
-; «busy» ya lo ha tomado quien llama, con las interrupciones cerradas.
-; DS = CS, DI = bloque -> CF = 1 si no se puede (modo V86 sin VCPI), con
-; «busy» suelto otra vez. Las dos vuelven con DI = bloque.
-n_enter:
-        pop word [di+n_ret]
-        mov [di+n_ss], ss
-        mov [di+n_sp], sp
-        mov ax, cs
-        mov ss, ax
-        mov sp, istack_top
-        sti
-        MCALL io_mode
-        mov di, [n_blk]
-        cmp byte [iomode], 1
-        je .v86                     ; modo V86 con VCPI: sin modo irreal
-        ja .no
-        sgdt [di+n_gdtr]
-        MCALL unreal
-.v86:
-        MCALL a20_open
-        mov di, [n_blk]
-        clc
-        jmp [di+n_ret]
-.no:
-        cli
-        mov ss, [di+n_ss]
-        mov sp, [di+n_sp]
-        mov byte [busy], 0
-        stc
-        jmp [di+n_ret]
-; ...y salir (deja las interrupciones cerradas)
-n_leave:
-        pop word [di+n_ret]
-        MCALL a20_restore
-        mov di, [n_blk]
-        cmp byte [iomode], 0
-        jne .s
-        cli
-        lgdt [di+n_gdtr]
-.s:
-        cli
-        mov ss, [di+n_ss]
-        mov sp, [di+n_sp]
-        mov byte [busy], 0
-        jmp [di+n_ret]
-
-; ---- INT 16h: sondear también cuando el programa mira el teclado ----
-; Con el tic del reloj solo, una trama puede esperar 55 ms. Los programas de
-; red de Hispa-DOS (lib/red.inc) miran el teclado (INT 16h, AH = 01h) en
-; cada vuelta de sus esperas, por si se pulsa Esc: se aprovecha para mirar
-; ahí también si ha llegado algo, y la respuesta se entrega enseguida. Solo
-; mientras HSPRED esté escuchando; si HSPUSB está ocupado, nada.
-n_int16:
-        cmp ah, 0x01
-        je .p
-        cmp ah, 0x11
-        je .p
-.ch:
-        ; a quien estuviera antes (sin gastar ningún registro)
-        push dword 0
-        push bp
-        mov bp, sp
-        push bx
-        mov bx, [cs:n_blk]
-        push dword [cs:bx+n_old16]
-        pop dword [bp+2]
-        pop bx
-        pop bp
-        retf
-.p:
-        push ds
-        push di
-        push cs
-        pop ds
-        cli
-        mov di, [n_blk]
-        cmp dword [di+n_rcv], 0
-        je .x
-        cmp byte [busy], 0
-        jne .x
-        mov byte [busy], 1
-        pushad
-        push es
-        push fs
-        call n_enter
-        jc .y
-        MCALL usb_poll
-        mov di, [n_blk]
-        call n_pump
-        call n_leave
-.y:
-        pop fs
-        pop es
-        popad
-.x:
-        pop di
-        pop ds
-        jmp .ch
 
 ; ---- INT 2Fh AX=DB00h: ¿hay adaptador de red USB? ----
 n_int2f:
@@ -1536,21 +1264,13 @@ n_txbuf     dw 0                    ; búfer de envío (en CS)
 n_rxring    dw 0                    ; xHCI: anillos (en la zona)
 n_txring    dw 0
 n_utd       dw 0                    ; UHCI: los TD de la recepción (en CS)
-n_sring     dw 0                    ; xHCI: anillo de los avisos
-n_sgot      dw 0                    ; octetos del aviso que ha llegado
 n_t0        dw 0
 n_ss        dw 0
 n_sp        dw 0
-n_ret       dw 0
 n_old2f     dd 0
-n_old16     dd 0
 n_gdtr      times 6 db 0
 n_rxidx     db 0, 1                 ; xHCI: índice y ciclo de cada anillo
 n_txidx     db 0, 1
-n_sidx      db 0, 1
-n_son       db 0                    ; hay tubería de avisos
-n_sst       db 0                    ; avisos: 0 sin pedir, 1 pedido, 2 ha llegado, 3 error
-n_serr      db 0                    ; errores seguidos
 n_st        db 0                    ; recepción: 0 libre, 1 pedida, 2 ha llegado, 3 error
 n_deliv     db 0                    ; dentro del receptor de HSPRED
 n_cnt       db 0

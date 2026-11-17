@@ -173,9 +173,8 @@ DCBAA       equ 0x2C40                ; MAX_SLOTS + 1 entradas de 8 bytes
 X_END       equ 0x2D00                ; fin de lo del xHCI
 JOY_N       equ 2                     ; mandos de juego a la vez
 PIPE_N      equ 2 + JOY_N             ; tuberías de interrupción: teclado, ratón y mandos
-PIPE_NET    equ PIPE_N                ; [USB-RED] y dos más, las del adaptador de red: la
-PIPE_NST    equ PIPE_N + 1            ; de recepción (bulk) y la de avisos (interrupción),
-                                      ; que usan las mismas rutinas
+PIPE_NET    equ PIPE_N                ; [USB-RED] y una más: la de recepción (bulk) del
+                                      ; adaptador de red, que usa las mismas rutinas
 POOL_N      equ 8                     ; dispositivos a la vez (concentradores incluidos)
 INIT_ORG    equ 0xAC00                ; dónde se ejecuta la inicialización (.init)
 MAX_SLOTS   equ POOL_N
@@ -231,13 +230,13 @@ busy        db 1
 ; tuberías de interrupción: 0 teclado, 1 ratón, 2... mandos de juego
 ip_on       times PIPE_N db 0
 ip_slot     times PIPE_N db 0       ; xHCI: slot
-ip_dci      times PIPE_N + 2 db 0   ; endpoint: 2 * número + 1 (entrada)
-ip_pool     times PIPE_N + 2 db 0   ; su aparato en la reserva
-ip_tog      times PIPE_N + 2 db 0   ; UHCI: testigo de alternancia
+ip_dci      times PIPE_N + 1 db 0   ; endpoint: 2 * número + 1 (entrada)
+ip_pool     times PIPE_N + 1 db 0   ; su aparato en la reserva
+ip_tog      times PIPE_N + 1 db 0   ; UHCI: testigo de alternancia
             align 2
 ip_len      dw 8, 4
-            times JOY_N + 2 dw 0    ; bytes que se piden
-ip_mps      times PIPE_N + 2 dw 0
+            times JOY_N + 1 dw 0    ; bytes que se piden
+ip_mps      times PIPE_N + 1 dw 0
 ip_ring     times PIPE_N db 0, 1    ; xHCI: índice y ciclo de su anillo
 ip_got      dw 0                    ; bytes del informe que acaba de llegar
 k_on        equ ip_on
@@ -260,8 +259,8 @@ j_wait      dw 16                   ; espera del informe reciente (microtramas)
 ctl_buf     dw DESC                 ; adónde van los datos de una petición de control
 ; [USB-RED] adaptador de red (CDC-ECM): lo demás está en su bloque (.red)
 n_blk       dw 0                    ; el bloque (código y datos), en CS; 0 = no hay adaptador
-n_pblk      dw 0                    ; clásicas: cola y TD de sus dos tuberías (c_pipe_blk)
-n_rxbuf     dw 0                    ; búfer de la trama que llega (y, detrás, los demás)
+n_pblk      dw 0                    ; clásicas: cola y TD de su tubería de recepción
+n_rxbuf     dw 0                    ; búfer de la trama que llega
 oldrep      times 8 db 0
 newrep      times 8 db 0
 rep_key     db 0
