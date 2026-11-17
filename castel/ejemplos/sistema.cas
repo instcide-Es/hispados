@@ -8,8 +8,9 @@ módulo Sistema
     constante DOS   = 0x21
     constante VIDEO = 0x10
     constante AVISO = "texto con la función 9 del DOS\r\n$"
+    constante BITS  = 16
 
-    variable cuenta: nat16
+    variable cuenta, veces_todos: nat16
     variable letra: byte
     variable nombre: arreglo [12] de byte = "NOHAY.XYZ"
     variable tabla: arreglo [4] de nat16
@@ -47,8 +48,30 @@ módulo Sistema
         devolver r
     fin
 
+    ; cuántos bits a 1 tiene n: un bucle en ensamblador, con sus etiquetas
+    función unos(n: nat16): nat16
+        ensamblador
+            mov bx, {n}
+            xor ax, ax
+            mov cx, {BITS}          ; una constante: el número
+        .bit:
+            shl bx, 1
+            adc ax, 0
+            loop .bit
+            cmp ax, 16
+            jne .no_todos
+            call {todos}            ; una función: F_todos
+        .no_todos:
+        fin
+    fin
+
+    función todos()
+        veces_todos := veces_todos + 1
+    fin
+
     función principal()
         variable modo, manejador, i: nat16
+        variable viejo_seg, viejo_desp: nat16
         variable c: byte
 
         ; registros de 8 bits, constantes y variables
@@ -93,6 +116,18 @@ módulo Sistema
         i := 3996
         escribir("pantalla: ", leer_byte(0xB800, i), " ", leer_byte(0xB800, i + 2), " ", leer_palabra(0xB800, i) >> 8, "\n")
 
+        ; registros de segmento (ds, es): se cambia un vector de interrupción
+        ; (el 60h, que es para los programas) y se vuelve a dejar como estaba
+        interrupción(DOS, ax: 0x3560)
+        viejo_seg := reg_es()
+        viejo_desp := reg_bx()
+        interrupción(DOS, ax: 0x2560, ds: 0x1234, dx: 0x5678)
+        interrupción(DOS, ax: 0x3560)
+        escribir("vector 60h: ", reg_es(), ":", reg_bx(), " ", leer_palabra(0, 0x182), ":", leer_palabra(0, 0x180), "\n")
+        interrupción(DOS, ax: 0x2560, ds: viejo_seg, dx: viejo_desp)
+        interrupción(DOS, ax: 0x3560)
+        escribir("repuesto: ", reg_es() = viejo_seg y reg_bx() = viejo_desp, "\n")
+
         ; ensamblador y Castel se pasan datos por las variables
         cuenta := 10
         escribir("doble_más: ", doble_más(20, 2), " ", doble_más(cuenta, 1), ", cuenta = ", cuenta, "\n")
@@ -104,6 +139,7 @@ módulo Sistema
             mov {modo}, ax
         fin
         escribir("suma de la tabla = ", modo, "\n")
+        escribir("unos: ", unos(0), " ", unos(0x8001), " ", unos(0xFFFF), " ", unos(1990), ", todos = ", veces_todos, "\n")
 
         salir(0)
         escribir("NO DEBE SALIR\n")

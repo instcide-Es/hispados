@@ -14,6 +14,9 @@
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
+#   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
+#                                 (azar.py): lo que calculan frente a lo que
+#                                 tiene que dar. Unos 10 s más cada uno.
 #   VER=1 ./pruebas.sh            deja lo que sale en /tmp/castel-pruebas
 set -u
 AQUI=$(dirname "$(readlink -f "$0")")
@@ -128,6 +131,8 @@ lote = ["@ECO OFF"]
 for n in sys.argv[2:]:
     N = n.upper()
     lote.append(f"{N} > {N}.SAL")
+    if N == "NIVEL":
+        lote += ["IF ERRORLEVEL 7 ECO siete > NIV7.SAL", "IF ERRORLEVEL 8 ECO ocho > NIV8.SAL"]
 for prog, l in (("MAS", "M"), ("MASC", "C")):
     lote += [
         "LIMPIAR",
@@ -215,6 +220,9 @@ for n in $EJEMPLOS; do
   fi
 done
 
+if [ -s $T/sal/NIV7.SAL ] && [ ! -s $T/sal/NIV8.SAL ]; then ok "nivel: lo que devuelve principal() es el nivel de error (7)"
+else ko "nivel: el programa no ha acabado con el nivel de error 7"; fi
+
 # ---------------------------------------------------------------- 3. MAS
 echo "== MAS en Castel frente a MAS en ensamblador =="
 echo "  (MAS.COM en ensamblador: $(stat -c %s $H/build/MAS.COM) octetos; en Castel: $(stat -c %s $T/MASC.COM))"
@@ -253,6 +261,21 @@ done
 if [ -f $T/pausa_4.txt ] && grep -q "Línea 1[0-9] de la prueba" $T/pausa_4.txt && grep -qF -- "-- Más --" $T/pausa_4.txt; then
   ok "en la pantalla: el texto y, debajo, «-- Más --»"
 else ko "en la pantalla no está el texto con el aviso"; fi
+
+# ------------------------------------------------- 4. cuentas al azar (AZAR=n)
+if [ -n "${AZAR:-}" ]; then
+  echo "== Castel: cuentas al azar =="
+  for ((s = 1; s <= AZAR; s++)); do
+    python3 -I $AQUI/azar.py $s 250 $T/azar$s.cas $T/azar$s.esp
+    if ! $AQUI/compilar.sh $T/azar$s.cas $T/AZAR$s.COM > $T/comp.txt 2>&1; then
+      ko "azar $s: no compila: $(head -1 $T/comp.txt)"
+      continue
+    fi
+    $AQUI/probar.sh $T/AZAR$s.COM > $T/azar$s.sal 2>&1
+    if cmp -s $T/azar$s.esp $T/azar$s.sal; then ok "azar $s: $(wc -l < $T/azar$s.esp) resultados, todos bien"
+    else ko "azar $s: hay cuentas que no salen (< esperado, > lo que sale):"; diff $T/azar$s.esp $T/azar$s.sal | head -6 | sed 's/^/        /'; fi
+  done
+fi
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))

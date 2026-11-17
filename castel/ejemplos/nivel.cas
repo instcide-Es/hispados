@@ -1,0 +1,19 @@
+; nivel.cas - el código de salida del programa (el «nivel de error» del DOS):
+; lo que devuelve principal(). pruebas.sh comprueba que sale con 7.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Nivel
+
+    función cuatro(): nat16
+        devolver 4
+    fin
+
+    función principal(): byte
+        escribir("salgo con el nivel 7\n")
+        si cuatro() <> 4 entonces
+            salir(1)
+        fin
+        devolver 3 + cuatro()
+    fin
+
+fin Nivel.

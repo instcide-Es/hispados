@@ -1,0 +1,133 @@
+; mezcla.cas - combinaciones retorcidas, para apretar al generador de código:
+; índices que son cuentas o llamadas, arreglos dentro de estructuras a través
+; de punteros, estructuras locales, «ref» de elementos, destinos complicados.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Mezcla
+
+    tipo Caja = estructura
+        marca: byte
+        pesos: arreglo [3] de nat16
+        dentro: puntero a Caja
+    fin                                     ; 9 octetos: no es potencia de dos
+
+    variable cajas: arreglo [4] de Caja
+    variable letras: arreglo [8] de byte = "abcdefg"
+    variable índices: arreglo [4] de byte = (3, 0, 2, 1)
+    variable g, tope: byte
+    variable veces: nat16
+
+    función tres(): nat16
+        veces := veces + 1
+        devolver 3
+    fin
+
+    función suma3(a: nat16, b: nat16, c: nat16): nat16
+        devolver a + b * 10 + c * 100
+    fin
+
+    función dobla(ref n: nat16)
+        n := n * 2
+    fin
+
+    función pesa(ref c: Caja): nat16
+        devolver c.pesos[0] + c.pesos[1] + c.pesos[2]
+    fin
+
+    ; recursiva, con un arreglo local en cada llamada
+    función escalera(n: nat16): nat16
+        variable peldaños: arreglo [4] de nat16
+        variable i: nat16
+        para i desde 0 hasta 3 hacer
+            peldaños[i] := n + i
+        fin
+        si n = 0 entonces
+            devolver peldaños[3]
+        fin
+        devolver escalera(n - 1) + peldaños[n mod 4]
+    fin
+
+    función principal()
+        variable loc: arreglo [3] de Caja
+        variable nums: arreglo [5] de nat16
+        variable p: puntero a Caja
+        variable i, k: nat16
+        variable b: byte
+
+        ; arreglo de estructuras (elemento de 9 octetos), global y local
+        para i desde 0 hasta 3 hacer
+            cajas[i].marca := 'A' + i
+            para k desde 0 hasta 2 hacer
+                cajas[i].pesos[k] := (i + 1) * 100 + k
+            fin
+            cajas[i].dentro := dirección(cajas[(i + 1) mod 4])
+        fin
+        para i desde 0 hasta 2 hacer
+            loc[i].marca := cajas[i + 1].marca + 32
+            loc[i].pesos[2 - i] := pesa(cajas[i])
+            loc[i].dentro := dirección(loc[(i + 2) mod 3])
+        fin
+        escribir(pesa(cajas[3]), " ", loc[0].pesos[2], " ", loc[1].pesos[1], " ", loc[2].pesos[0], "\n")
+
+        ; a través de punteros, con índices que son cuentas y llamadas
+        p := dirección(cajas[1])
+        k := 1
+        escribir(p.pesos[k + 1], " ", p.dentro.pesos[tres() - 2], " ", p.dentro.dentro.dentro.marca, "\n")
+        p.dentro.pesos[k * 2] := p.pesos[tres() - 3] + cajas[tres()].pesos[tres() - k - 1]
+        escribir(cajas[2].pesos[2], " ", veces, "\n")
+        p := dirección(loc[0])
+        escribir_car(p.marca)
+        escribir_car(p.dentro.marca)
+        escribir_car(p.dentro.dentro.marca)
+        escribir_car(loc[tres() - 1].dentro.marca)
+        escribir("\n")
+
+        ; un byte como índice, y un arreglo indexado por otro arreglo
+        para b desde 0 hasta 3 hacer
+            escribir_car(letras[índices[b]])
+            escribir_car(letras[índices[b] + 3])
+        fin
+        g := 2
+        letras[g] := letras[g + 1] - 32
+        letras[índices[g] * 2 + 1] := 'Z'
+        escribir(" ", letras, "\n")
+
+        ; el final de un «para» en un byte que no es constante; la variable, global
+        tope := 5
+        k := 0
+        para g desde 2 hasta tope hacer
+            k := k * 10 + g
+        fin
+        escribir(k, " ", g, "\n")
+
+        ; «ref» de elementos y de campos; argumentos que son llamadas
+        para i desde 0 hasta 4 hacer
+            nums[i] := i + 1
+        fin
+        dobla(nums[2])
+        dobla(nums[tres() + 1])
+        dobla(cajas[0].pesos[1])
+        dobla(loc[1].pesos[1])
+        k := 4
+        dobla(k)
+        escribir(nums[2], " ", nums[4], " ", cajas[0].pesos[1], " ", loc[1].pesos[1], " ", k, "\n")
+        escribir(suma3(tres(), suma3(1, 2, 3) mod 10, nums[tres() - 3]), " ", suma3(k, nums[1], g), "\n")
+
+        ; comparaciones entre cuentas, con y sin memoria por medio
+        si nums[0] + nums[1] < nums[2] - 2 y tres() * 2 >= nums[2] entonces
+            escribir("a")
+        fin
+        si pesa(cajas[0]) > pesa(cajas[1]) o cajas[1].pesos[0] <= nums[0] entonces
+            escribir("NO DEBE SALIR")
+        sino
+            escribir("b")
+        fin
+        si letras[0] = 'a' y letras[2] <> letras[1] y índices[3] < índices[2] y no (g = tope + 1) entonces
+            escribir("c")
+        fin
+        escribir(" ", veces, "\n")
+
+        escribir(escalera(5), " ", escalera(0), "\n")
+    fin
+
+fin Mezcla.

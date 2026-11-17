@@ -189,10 +189,16 @@ la elijo: hace el primer compilador abordable.
   clave en español y el alcance del primer subconjunto. Un documento de «cómo se escribe».
 - **Fase 1 — Compilador mínimo (etapa 0) en el PC:** lee el subconjunto pequeño, saca
   ensamblador, NASM remata. Objetivo: compilar un «hola» y una función con `si`/`para`.
+  *(Hecha el 16/11/2026: `castel/ccastel.py`, en Python.)*
 - **Fase 2 — Primer hito real:** reescribir **una orden pequeña de Hispa-DOS** en el
   lenguaje nuevo y que funcione igual. Prueba de fuego de que sirve para el sistema real.
+  *(Hecha el 17/11/2026: la orden MAS de Hispa-8086, `castel/ejemplos/mas.cas`, comprobada
+  contra la de ensamblador por `castel/pruebas.sh`.)*
 - **Fase 3 — Crecer el lenguaje:** estructuras, punteros con todas las de la ley, bloques
   `ensamblador`, módulos. Reescribir más piezas de Hispa-DOS.
+  *(Hecha el 17/11/2026, antes que la 2 porque MAS la necesitaba: arreglos, estructuras,
+  punteros, `ref`, `paso`, `según`, bits, `interrupción`. Quedan los módulos, `nat32` y los
+  punteros lejanos: CASTEL.md §11.)*
 - **Fase 4 — Autohospedaje:** reescribir el compilador en el propio lenguaje.
 - **Fase 5 — Saltar a 32 bits:** con el lenguaje ya sólido, empezar el SO de los 90.
 

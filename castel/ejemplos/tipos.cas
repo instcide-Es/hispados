@@ -36,6 +36,25 @@ módulo Tipos
         devolver 1
     fin
 
+    ; un «si ... sino» que es lo último de la función, con «devolver» dentro
+    función mayor(a: ent16, b: ent16): ent16
+        si a > b entonces
+            devolver a
+        sino
+            devolver b
+        fin
+    fin
+
+    función nombre_signo(n: ent16)
+        si n < 0 entonces
+            escribir("menos")
+        sino si n = 0 entonces
+            escribir("cero")
+        sino
+            escribir("más")
+        fin
+    fin
+
     función principal(): byte
         variable b: byte
         variable n: nat16
@@ -77,6 +96,12 @@ módulo Tipos
         e := 7
         escribir(2 + 3 * 4, " ", (2 + 3) * 4, " ", -e + 10, " ", -(e + 10), " ", e mod 4 * 3, " ", 100 - e - 3, "\n")
         escribir(e * e - 4 * e, " ", (e + 1) div (e - 5), " ", e - -e, " ", 2 * (e + (3 - e) * 2), "\n")
+
+        escribir(mayor(3, -5), " ", mayor(-5, 3), " ", mayor(-2, -9), " ")
+        nombre_signo(-4)
+        nombre_signo(0)
+        nombre_signo(9)
+        escribir("\n")
 
         devolver 0
     fin

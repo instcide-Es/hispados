@@ -1,0 +1,33 @@
+; cuenta.cas - el ejemplo de la sección 9 de CASTEL.md: una estructura, un
+; «ref», un «según» y un texto recorrido con un puntero.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+módulo Cuenta
+
+    tipo Recuento = estructura
+        letras, cifras, otros: nat16
+    fin
+
+    función mira(c: byte, ref r: Recuento)
+        según c
+            caso 'a'..'z', 'A'..'Z': r.letras := r.letras + 1
+            caso '0'..'9':           r.cifras := r.cifras + 1
+            si no:                   r.otros := r.otros + 1
+        fin
+    fin
+
+    función principal()
+        variable r: Recuento
+        variable t: puntero a byte
+        r.letras := 0
+        r.cifras := 0
+        r.otros := 0
+        t := "Hispa-8086, de 1981"
+        mientras valor(t) <> 0 hacer
+            mira(valor(t), r)
+            t := t + 1
+        fin
+        escribir(r.letras, " letras, ", r.cifras, " cifras y ", r.otros, " más\n")
+    fin
+
+fin Cuenta.

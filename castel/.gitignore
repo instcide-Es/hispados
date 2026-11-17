@@ -1,0 +1,4 @@
+# lo que dejan compilar.sh y ccastel.py al lado de los fuentes
+ejemplos/*.asm
+ejemplos/*.COM
+__pycache__/

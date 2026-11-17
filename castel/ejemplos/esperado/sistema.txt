@@ -6,5 +6,8 @@ NUL: falso 0
 cerrado: cierto
 columnas según la BIOS: 80
 pantalla: 64 35 7
+vector 60h: 4660:22136 4660:22136
+repuesto: cierto
 doble_más: 42 25, cuenta = 14
 suma de la tabla = 1000
+unos: 0 2 16 7, todos = 1

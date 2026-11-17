@@ -9,3 +9,4 @@ condición compuesta
 cierto falso
 14 20 3 -17 9 90
 21 4 14 -2
+3 3 -2 menosceromás

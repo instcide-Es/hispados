@@ -7,7 +7,7 @@
 #  (docs/CASTEL.md) y SACA ENSAMBLADOR (NASM) para un .COM de DOS de 16 bits,
 #  solo con instrucciones del 8086. Luego NASM remata.
 #
-#  uso:   python3 -I ccastel.py ENTRADA.cas [-o SALIDA.asm] [--sin-nasm]
+#  uso:   python3 -I ccastel.py ENTRADA.cas [-o SALIDA.asm]
 #         (sin -o, escribe ENTRADA.asm al lado)
 #
 #  Entiende: módulo con principal; constante (con expresiones), variable
@@ -20,15 +20,12 @@
 #  funciones de bajo nivel (puertos y memoria lejana).
 #
 #  Las partes: 1) léxico, 2) sintáctico (árbol), 3) tipos y comprobaciones,
-#  4) generación de NASM, 5) ajuste de los saltos condicionales largos.
+#  4) generación de NASM. (Los saltos condicionales del 8086 solo llegan a 127
+#  octetos: cuando no llegan, NASM pone él solo el salto contrario y un jmp.)
 #  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # =============================================================================
-import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 
 PALABRAS = {
     'módulo', 'fin', 'constante', 'variable', 'función', 'devolver', 'tipo',
@@ -348,8 +345,10 @@ class Sintactico:
         return t
 
     def fin_sentencia(self):
-        if not (self.es('NL') or self.es('EOF') or self.es('PAL', 'fin') or self.es('PAL', 'sino')):
-            self.error("sobra algo al final de la sentencia")
+        # una sentencia por línea (o seguida de lo que cierra el bloque)
+        if not (self.es('NL') or self.es('EOF') or self.es('PAL', 'fin') or self.es('PAL', 'sino')
+                or self.es('PAL', 'caso') or self.es_si_no()):
+            self.error("sobra esto al final de la sentencia (va una por línea)")
 
     # ---- módulo ----
     def modulo(self):
@@ -362,6 +361,10 @@ class Sintactico:
         self.salta_nl()
         while not self.es('PAL', 'fin'):
             decls.append(self.declaracion_modulo())
+            if self.es('ID', nombre):
+                self.falta_fin()
+            if not self.es('NL'):
+                self.error("sobra esto al final de la declaración")
             self.salta_nl()
         self.come('PAL', 'fin')
         pf = self.pos()
@@ -387,9 +390,12 @@ class Sintactico:
         if self.es('PAL', 'ensamblador'):
             return self.ensamblador()
         if self.es('ID', self.nombre_modulo) or self.es('EOF'):
-            self.error("falta un «fin»: algún bloque de antes (si, mientras, para, según,"
-                       " función...) se ha quedado sin cerrar", self.pos())
+            self.falta_fin()
         self.error("esperaba constante, variable, tipo, función o ensamblador")
+
+    def falta_fin(self):
+        self.error("falta un «fin»: algún bloque de antes (si, mientras, para, según,"
+                   " función...) se ha quedado sin cerrar", self.pos())
 
     def constante(self):
         pos = self.pos()
@@ -513,8 +519,9 @@ class Sintactico:
         while not (self.es('PAL', 'fin') or self.es('PAL', 'sino') or self.es('PAL', 'caso')
                    or self.es_si_no()):
             if self.es('EOF'):
-                self.error("falta un «fin»")
+                self.falta_fin()
             sent.append(self.sentencia())
+            self.fin_sentencia()
             self.salta_nl()
         return sent
 
@@ -878,6 +885,7 @@ class Generador:
         self.bucles = []            # (etiqueta de seguir, etiqueta de romper)
         self.apoyo = set()
         self.reg_int = set()        # R_xx que hacen falta
+        self.ban_memoria = False    # ¿alguien lee la copia de las banderas (R_ban)?
         self.func = None
 
     # ---- utilidades ----
@@ -985,6 +993,12 @@ class Generador:
                 self.lineas.append('')
                 self.gen_asm(d)
         cuerpo = self.lineas
+        if 'ban' in self.reg_int and not self.ban_memoria:
+            # todos los acarreo() han salido con «jc»: la copia de las banderas sobra
+            self.reg_int.discard('ban')
+            cuerpo = [ln for i, ln in enumerate(cuerpo)
+                      if not (ln == '    pop word [R_ban]' and cuerpo[i - 1] == '    pushf')
+                      and not (ln == '    pushf' and cuerpo[i + 1:i + 2] == ['    pop word [R_ban]'])]
         for r in sorted(self.reg_int):
             self.bss.append(f"R_{r}: resw 1")
         cab = [
@@ -995,11 +1009,6 @@ class Generador:
             'cpu 8086',
             'bits 16',
             'org 0x100',
-            '%macro salto_largo 2',
-            '    j%-1 %%cerca',
-            '    jmp %2',
-            '%%cerca:',
-            '%endmacro',
             '    cld',
         ]
         if self.bss:
@@ -1099,6 +1108,8 @@ class Generador:
                 marco += 2                      # sitio para el tope, si no es constante
                 s.tope = ('bp', '', -marco)
         d.usa_int = {x.nombre for x in recorre(d.cuerpo) if x.k == 'llamada' and x.nombre in SALIDAS_INT}
+        if d.tret is not T_NADA and not any(s.k in ('devolver', 'asm') for s in recorre(d.cuerpo)):
+            self.error(f"{d.nombre}() devuelve un {d.tret}, pero no tiene ningún «devolver»", d.pos)
         con_marco = bool(marco or nparams or any(s.k == 'asm' for s in recorre(d.cuerpo)))
         self.con_marco = con_marco
         self.fin_func = f"X_{d.nombre}"
@@ -1686,6 +1697,8 @@ class Generador:
             self.gen_asig(s.dest, s.e)
         elif k == 'llamada_sent':
             self.tipo(s.e)
+            if s.e.nombre not in self.funcs and s.e.nombre not in HACEN_ALGO:
+                self.error(f"{s.e.nombre}() da un valor, y aquí se pierde: falta guardarlo o usarlo", s.e.pos)
             self.gen_llamada(s.e, sentencia=True)
         elif k == 'devolver':
             f = self.func
@@ -1803,7 +1816,7 @@ class Generador:
             return
         l_sino = self.nueva()
         self.salta(s.cond, l_sino, False)
-        self.gen_bloque(s.entonces, ultimo)
+        self.gen_bloque(s.entonces, ultimo and not s.sino)
         if s.sino:
             l_fin = self.nueva()
             if not self.acaba(s.entonces):
@@ -1935,7 +1948,8 @@ class Generador:
         self.em(f'j{cc} {destino}')
 
     INVERSA = {'e': 'ne', 'ne': 'e', 'l': 'ge', 'ge': 'l', 'g': 'le', 'le': 'g',
-               'b': 'ae', 'ae': 'b', 'a': 'be', 'be': 'a', 'z': 'nz', 'nz': 'z'}
+               'b': 'ae', 'ae': 'b', 'a': 'be', 'be': 'a', 'z': 'nz', 'nz': 'z',
+               'c': 'nc', 'nc': 'c'}
 
     def salta(self, e, destino, si):
         """Salta a destino si la condición e vale «si»; si no, sigue."""
@@ -1966,6 +1980,10 @@ class Generador:
             return
         if e.k == 'llamada' and e.nombre == 'acarreo':
             self.usa_reg_int('ban')
+            if self.banderas_vivas():
+                self.salto('c' if si else 'nc', destino)
+                return
+            self.ban_memoria = True
             self.em('test byte [R_ban], 1')
             self.salto('nz' if si else 'z', destino)
             return
@@ -1976,6 +1994,17 @@ class Generador:
             self.gen_expr(e)
             self.em('or al, al')
         self.salto('nz' if si else 'z', destino)
+
+    def banderas_vivas(self):
+        """¿Siguen en el procesador las banderas de la última interrupción? Sí, si
+        desde que se guardaron solo ha habido «mov» (que no las tocan) y ninguna
+        etiqueta: entonces acarreo() es un «jc» y no hace falta mirar la copia."""
+        for ln in reversed(self.lineas):
+            if ln == '    pop word [R_ban]':
+                return True
+            if not ln.startswith('    mov '):
+                return False
+        return False
 
     def compara(self, e):
         """Deja las banderas de comparar e.a con e.b; da la condición del salto."""
@@ -2377,6 +2406,8 @@ class Generador:
         if nm in SALIDAS_INT:
             r = SALIDAS_INT[nm]
             self.usa_reg_int(r)
+            if r == 'ban':
+                self.ban_memoria = True
             self.em(f'mov ax, [R_{r}]')
             if nm == 'acarreo':
                 self.em('and ax, 1')
@@ -2489,7 +2520,7 @@ class Generador:
                 self.em(f'mov {r}, {o[0]}')
         if 'ds' in regs:
             self.em('pop ds')
-        protege_bp = n == 0x10 and self.con_marco      # hay BIOS que estropean BP en la int 10h
+        protege_bp = n == 0x10                  # hay BIOS que estropean BP en la int 10h
         if protege_bp:
             self.em('push bp')
         self.em(f'int 0x{n:02X}')
@@ -2508,6 +2539,8 @@ class Generador:
                 self.em(f'mov [R_{r}], {r}')
 
 
+HACEN_ALGO = {'escribir', 'escribir_car', 'salir', 'sacar_puerto', 'poner_byte', 'poner_palabra',
+              'interrupción'}
 INTERNAS = {'escribir', 'escribir_car', 'meter_puerto', 'sacar_puerto', 'leer_byte', 'poner_byte',
             'leer_palabra', 'poner_palabra', 'dirección', 'valor', 'puntero', 'tamaño',
             'interrupción', 'salir'} | set(SALIDAS_INT)
@@ -2617,40 +2650,6 @@ escribir_cad:
 }
 
 
-# =============================================================================
-#  5. Los saltos condicionales del 8086 solo llegan a 127 octetos. Se escriben
-#  cortos y, donde NASM diga que no llegan, se cambian por la pareja «salto
-#  contrario corto + jmp» (la macro salto_largo), hasta que ensambla.
-# =============================================================================
-def ajusta_saltos(asm):
-    nasm = shutil.which('nasm')
-    if not nasm:
-        return asm
-    lineas = asm.split('\n')
-    with tempfile.TemporaryDirectory() as d:
-        f_asm = os.path.join(d, 'p.asm')
-        for _ in range(100):
-            with open(f_asm, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(lineas))
-            r = subprocess.run([nasm, '-f', 'bin', '-o', os.path.join(d, 'p.bin'), f_asm],
-                               capture_output=True, text=True)
-            if r.returncode == 0:
-                break
-            cambio = False
-            for ln in r.stderr.splitlines():
-                m = re.match(r'^.*?:(\d+): error: short jump is out of range', ln)
-                if not m:
-                    continue
-                i = int(m.group(1)) - 1
-                m2 = re.match(r'^    j(\w+) (\w+)$', lineas[i])
-                if m2 and m2.group(1) != 'mp':
-                    lineas[i] = f'    salto_largo {m2.group(1)}, {m2.group(2)}'
-                    cambio = True
-            if not cambio:
-                break
-    return '\n'.join(lineas)
-
-
 def compila(texto):
     toks = Lexico(texto).lee()
     arbol = Sintactico(toks).modulo()
@@ -2659,10 +2658,8 @@ def compila(texto):
 
 def main():
     args = sys.argv[1:]
-    sin_nasm = '--sin-nasm' in args
-    args = [a for a in args if a != '--sin-nasm']
     if not args:
-        print("uso: ccastel.py ENTRADA.cas [-o SALIDA.asm] [--sin-nasm]", file=sys.stderr)
+        print("uso: ccastel.py ENTRADA.cas [-o SALIDA.asm]", file=sys.stderr)
         return 2
     entrada = args[0]
     salida = None
@@ -2689,8 +2686,6 @@ def main():
         else:
             print(f"{entrada}: error: {e.msg}", file=sys.stderr)
         return 1
-    if not sin_nasm:
-        asm = ajusta_saltos(asm)
     with open(salida, 'w', encoding='utf-8') as f:
         f.write(asm)
     print(f"ccastel: {entrada} -> {salida}  ({len(asm.splitlines())} líneas de ensamblador)")
