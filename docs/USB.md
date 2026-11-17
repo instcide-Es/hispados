@@ -18,16 +18,13 @@ Encima de cualquiera de ellas funciona lo mismo:
   fueran PS/2 (o a HSPRATON, o al búfer de la BIOS si no hay 8042);
 - **mandos de juego** (HID genéricos y tipo Xbox 360) para HSPJOY
   ([MANDOS.md](MANDOS.md));
-- **adaptadores de red** USB-Ethernet con la clase estándar CDC-ECM (los
-  Realtek RTL8152/RTL8153), como una tarjeta más de HSPRED
-  ([RED.md](RED.md));
 - **concentradores** (hubs), también encadenados;
 - el disco de arranque de la BIOS con `/U`.
 
 ## Uso
 
 ```
-DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/2] [/?]
+DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/?]
 ```
 
 | Opción | Qué hace |
@@ -37,7 +34,6 @@ DEVICE=C:\HISPADOS\HSPUSB.SYS [/F] [/U] [/INFO] [/V] [/2] [/?]
 | `/U` | Como `/F`, también cuando se ha arrancado de una memoria USB de la BIOS: HSPUSB la reconoce y atiende él la unidad 80h (INT 13h). |
 | `/INFO` | Enseña las controladoras (clase, fabricante:modelo, uso que les da la BIOS), los puertos con algo conectado de cada una y el árbol de aparatos. Espera 15 s. |
 | `/V` | Mensajes detallados. |
-| `/2` | Solo en los Intel de las series 7, 8 y 9 (ver más abajo): no encender el USB 3 de los puertos (`USB3_PSSEN` = 0), para que lo que se conecte vaya a alta velocidad (USB 2.0). Para probar un aparato de USB 3 que a supervelocidad no aparezca (un adaptador de red con su concentrador). Sin probar en un equipo de verdad. |
 | `/?` | Ayuda (el driver no se carga). |
 
 Se toman **todas** las controladoras o ninguna: no tendría sentido quitarle a
@@ -82,11 +78,7 @@ registros del espacio PCI del xHCI):
 | `D0h` XUSB2PR (máscara `D4h` USB2PRM) | puerto de USB 2 por el xHCI (1) o por el EHCI (0) |
 
 Después se espera (hasta 0,7 s) a que lo que había en esos puertos aparezca
-en el xHCI. Con `/2` no se encienden las terminaciones de USB 3
-(`USB3_PSSEN` = 0): los aparatos de USB 3 se conectan entonces por sus hilos
-de USB 2, a alta velocidad (si la BIOS las había encendido, se esperan dos
-segundos a que vuelvan a conectarse). `/2` vale también en los equipos de
-esas series que ya no tienen EHCI. Con `/INFO` sale «Intel: puertos pasados del EHCI al xHCI: USB 2
+en el xHCI. Con `/INFO` sale «Intel: puertos pasados del EHCI al xHCI: USB 2
 XUSB2PR=… (de …), USB 3 USB3_PSSEN=… (de …)». Si HSPUSB no se queda, los
 registros vuelven a como estaban (`intel_unroute`). `EQUIPO` enseña los
 valores y las máscaras.
@@ -137,54 +129,6 @@ Mac cuelga del mismo concentrador interno que el teclado y el panel. Como
 HSPUSB lleva un teclado y un ratón, se dejan para el final: solo se usan si
 no ha aparecido otro (`proxy_retry` vuelve a reiniciar su puerto y los
 enumera). Con `/INFO`: «Bluetooth (HID proxy): para después».
-
-## Adaptadores de red (CDC-ECM)
-
-`[USB-RED]` Un adaptador USB-Ethernet con la clase estándar CDC-ECM
-(interfaz de comunicaciones 02h/06h e interfaz de datos 0Ah) se pone en
-marcha y queda a disposición de HSPRED, que lo usa como una tarjeta más: lo
-que ve el usuario, los adaptadores que valen y la interfaz entre los dos
-(INT 2Fh AX=DB00h) están en [RED.md](RED.md), «Adaptadores USB-Ethernet
-(CDC-ECM)». Aquí, lo que toca a HSPUSB (`lib/usb_red.inc`):
-
-- **Elegir la configuración.** HSPUSB solo leía la primera configuración de
-  cada aparato. Para lo que no es concentrador, memoria, teclado, ratón ni
-  mando, `role_net` lee las demás (`bNumConfigurations`) y se queda con la
-  primera que traiga CDC-ECM completo (`net_parse`): los RTL8152/8153 lo
-  traen en la 2. Con `/INFO`, la línea del aparato enseña las interfaces de
-  la configuración elegida y «red (CDC-ECM)». Si es de red pero no trae
-  CDC-ECM (alguna interfaz NCM o RNDIS, o está en la lista de adaptadores
-  conocidos `nk_tab`): «adaptador de red que aún no se admite (sin
-  CDC-ECM)», y una línea con su VID:PID aunque no se haya pedido `/INFO`.
-- **Dos tuberías más**, que usan las mismas rutinas que las de interrupción
-  (`pipe_queue`, y las de cada controladora) pero no entran en `usb_poll`:
-  `PIPE_NET`, la de recepción (el extremo bulk de entrada, con un búfer de
-  2 KB y transferencias de 1536 octetos a velocidad plena o 2048 a alta y
-  súper: un múltiplo del paquete mayor que la trama), y `PIPE_NST`, la de
-  avisos (el extremo de interrupción: el enlace). En la UHCI, que lleva un
-  TD por paquete, la recepción son 24 TD seguidos (`n_uq`, `n_ucheck`); en
-  el EHCI, la cola de recepción va en la lista periódica, atendida en las 8
-  microtramas.
-- **El bloque residente** (sección `.red`: sondeo, envío, eventos del xHCI,
-  INT 2Fh e INT 16h; 1,7 KB) **solo se queda si hay adaptador**. Va en el
-  fichero detrás de `.init`, ensamblado para la dirección 0; `net_setup` lo
-  copia a la zona de trabajo y corrige sus llamadas a `.text`
-  (macro `MCALL`, que apunta cada una en la tabla `red_fix`). Dentro del
-  bloque los datos se nombran siempre con el registro que lleva su base
-  (`[di+n_st]`). `tools/redcheck.py` lo comprueba al compilar: falla si el
-  bloque llama a algo de fuera sin `MCALL` o nombra una etiqueta suya sin
-  la base.
-- **Sondeo** (`n_pump`): desde INT 08h, después de `usb_poll`, y desde
-  INT 16h (AH=01h u 11h, mientras HSPRED esté escuchando), siempre con
-  `busy` tomado y la pila de HSPUSB. En el xHCI la llegada de una trama es
-  un evento más del anillo (`hid_event` se lo pasa a `n_event`, también en
-  mitad de una transferencia de la memoria USB; la entrega espera al
-  sondeo).
-- **Envío** (`n_send`): síncrono, con el búfer de datos del disco (los dos
-  se usan solo con `busy` tomado). Si la trama acaba justo en un paquete
-  lleno, se manda un octeto más de relleno en vez del paquete vacío.
-- Tras un error en el xHCI el extremo se reanuda (Reset Endpoint y Set TR
-  Dequeue Pointer, `n_xrec`); en las clásicas se vuelve a pedir.
 
 ## Diseño: una capa común y cuatro controladoras
 
@@ -301,14 +245,10 @@ memoria USB conectada después: unos 16 KB) y, detrás, **la zona de trabajo**,
 alineada a una página, con todo lo que ven las controladoras. La
 **inicialización** (sección `.init`: buscar y tomar las controladoras,
 ponerlas en marcha, el teclado, el ratón y los mandos, el análisis del
-descriptor de informe HID, el reconocimiento del adaptador de red, `/INFO` y
-los mensajes; unos 17 KB) va en el fichero detrás de `.text`, pero se
-ejecuta en `CS:INIT_ORG` (AC00h; B000h hasta el 17/11/2026), por encima de
-donde irá la zona, y **se descarta**: la zona se monta justo encima de lo
-residente, donde estaba `.init` en el fichero. Detrás de `.init` va en el
-fichero el bloque residente de la red (`.red`), que durante la
-inicialización se guarda encima de ella (`red_hold`) y solo pasa a la zona
-si hay adaptador.
+descriptor de informe HID, `/INFO` y los mensajes; unos 14 KB) va en el
+fichero detrás de `.text`, pero se ejecuta en `CS:INIT_ORG` (B000h), por
+encima de donde irá la zona, y **se descarta**: la zona se monta justo
+encima de lo residente, donde estaba `.init` en el fichero.
 
 | Qué | Cuánto |
 |---|---|
@@ -318,29 +258,14 @@ si hay adaptador.
 | Clásicas (si las hay): reserva de TD y colas de las tuberías | 1,2 KB |
 | Cada UHCI | 16 bytes, y 4 KB (lista de tramas) si tiene algo conectado |
 | Cada OHCI | 288 bytes |
-| Cada EHCI | 192 bytes, y 4 KB si lleva teclado, ratón, mando o adaptador de red |
-| Adaptador de red (si lo hay) | 1,7 KB del bloque residente, 2,1 KB de búfer de recepción y avisos, y 768 bytes (tres anillos del xHCI) o 320 (colas de las clásicas; 384 más de TD en una UHCI). El búfer de envío es el del disco. |
-
-Medido en QEMU (xHCI y teclado, `DEVICE=HSPUSB.SYS /F`, 17/11/2026): sin
-adaptador de red HSPUSB ocupa exactamente lo mismo que antes de tener la red
-(los 115 octetos que ha crecido `.text` caben en el hueco hasta la página de
-la zona; también con UHCI, y con `DEVICEHIGH` con xHCI y con EHCI); con el
-adaptador, 7.232 octetos más (el bloque, tres anillos, el búfer de recepción
-y otra entrada de reserva del xHCI).
+| Cada EHCI | 192 bytes, y 4 KB si lleva teclado, ratón o mando |
 
 Cuando hace falta memoria «de reserva» para lo que se conecte después (una
 lista de tramas para una UHCI aparcada, o dos aparatos más en el xHCI), se
 reserva al final de la inicialización, detrás de lo demás.
 
-Mientras se inicializa hace falta memoria hasta `CS:red_hold + RED_LEN`
-(unos 61,5 KB desde el principio del driver; 58 hasta el 17/11/2026).
-Mientras tanto la zona no puede pasar de `CS:INIT_ORG`: le quedan entre
-22,4 y 26,4 KB, según dónde caiga la página (antes, entre 23,5 y 27,5). Con
-el xHCI son 11,25 KB fijos, 1 KB por aparato si sus contextos son de 32
-octetos (2 KB si son de 64) y 2,5 KB del adaptador de red; con controladoras
-clásicas, 1,2 KB más. El búfer de recepción del adaptador de red se reserva
-al final (`net_fin`) y puede caer por encima de `INIT_ORG`: no se usa hasta
-que la inicialización ha terminado. Con `DEVICEHIGH` en un bloque de memoria
+Mientras se inicializa hace falta memoria hasta `CS:init_end` (unos 58 KB
+desde el principio del driver; `.init` se ejecuta en `CS:B000h`). Con `DEVICEHIGH` en un bloque de memoria
 superior más pequeño, HSPUSB dice «no me quedo, me falta memoria» sin tocar
 nada (estado de INIT con el bit 9 puesto) y el núcleo lo carga abajo.
 
@@ -363,9 +288,7 @@ Dos reglas para quien toque el código:
   comprueba `tools/initcheck.py` al compilar (falla si `.text` nombra una
   etiqueta de `.init` que no esté en su lista: las que solo se usan durante
   el arranque o tras comprobar `/V` o `/INFO`, que `rescan` apaga).
-- `.init` tiene que acabar por debajo de F000h (lo comprueba el ensamblador;
-  quedan unos 200 octetos: lo siguiente que crezca tendrá que bajar
-  `INIT_ORG`, que es quitarle sitio a la zona).
+- `.init` tiene que acabar por debajo de F000h (lo comprueba el ensamblador).
   Las llamadas entre `.init` y `.text` son relativas de 16 bits y dan la
   vuelta a los 64 KB; con ese margen, origen y destino «sin la vuelta» nunca
   caen en la misma página de 4 KB, que es cuando QEMU 10 se salta la vuelta
@@ -387,9 +310,8 @@ Dos reglas para quien toque el código:
 
 - Un solo xHCI (el primero), 8 controladoras en total, 8 aparatos a la vez
   (concentradores incluidos), 6 concentradores, una memoria USB, un teclado,
-  un ratón, dos mandos y un adaptador de red.
-- Teclado, ratón, mandos y adaptador de red tienen que estar conectados al
-  cargar el driver;
+  un ratón y dos mandos.
+- Teclado, ratón y mandos tienen que estar conectados al cargar el driver;
   la memoria USB se puede cambiar después (si no había ninguna al cargar, no
   hay unidad de DOS que ofrecer).
 - En un EHCI sin controladoras compañeras ni traductor en el concentrador
@@ -408,11 +330,6 @@ Dos reglas para quien toque el código:
 - Las cuatro controladoras se sondean; no se usan sus interrupciones.
 
 ## Cómo probar
-
-La red por USB: `tests/run_red_usb_tests.sh` (ver [RED.md](RED.md),
-«Pruebas»): `-device usb-net` de QEMU en un puerto raíz y detrás de un
-concentrador, con cada clase de controladora, en modo V86 y con los demás
-aparatos a la vez.
 
 `tests/run_usbauto_tests.sh build/hispados.img [modo]`: RATONTST (el
 descriptor de informe de los ratones), PC sin 8042 con xHCI y con EHCI

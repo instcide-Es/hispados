@@ -19,12 +19,6 @@
 #   sinecm                  HSPUSB ensamblado con -DRED_SIN_ECM (como un
 #                           adaptador que solo trae RNDIS o su modo propio):
 #                           lo dice con su VID:PID, y HSPRED no lo encuentra
-#   consola                 CONSOLA (servidor TCP, tests/consola_cliente.py)
-#                           por el adaptador, con xHCI
-#   pciusb                  una tarjeta PCI (RTL8139) y el adaptador: HSPRED
-#                           usa la PCI; HSPRED /USB, el adaptador
-#   sinusb3                 HSPUSB /2 con el xHCI de Intel simulado
-#                           (-DINTEL_FAKE): no enciende el USB 3
 #   memoria                 la memoria convencional libre (MEM /C) con el
 #                           adaptador y sin él: sin él, HSPUSB no se queda
 #                           con nada de la red
@@ -324,63 +318,6 @@ c_sinecm() {
   check "fin-de-la-prueba"
 }
 
-# CONSOLA (la consola remota: un servidor TCP) por el adaptador USB, con el
-# cliente de tests/run_consola_tests.sh
-t_consola() {
-  caso consola "CONSOLA (servidor TCP) por el adaptador USB, xHCI" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n'
-  CONSOLA_QEMU="-device qemu-xhci,id=hc" python3 tests/consola_cliente.py $T/f.img "usb-net,bus=hc.0" 12399 > $T/consola.out 2>&1
-  local rc=$?
-  cat $T/consola.out
-  cp $T/consola.out $W/consola.txt
-  if [ $rc -eq 0 ] && ! grep -q "FAIL" $T/consola.out && grep -q "  OK   " $T/consola.out; then return 0; fi
-  return 1
-}
-
-# con una tarjeta PCI además: HSPRED elige la PCI; HSPRED /USB, el adaptador
-t_pciusb() {
-  caso pciusb "tarjeta PCI y adaptador USB a la vez (HSPRED /USB)" "$SOLOUSB"
-  arranca -device qemu-xhci,id=hc $NET $(USBNET hc.0) -netdev user,id=n1 -device rtl8139,netdev=n1,mac=52:54:00:AA:BB:CC
-  orden "HSPRED"
-  orden "HSPRED /U"
-  orden "HSPRED /USB"
-  orden "CONFRED"
-  orden "PING 10.0.2.2 /N:2"
-  orden "HSPRED /?"
-  orden "ECHO fin-de-la-prueba"
-  fin c_pciusb
-}
-c_pciusb() {
-  check "$ECM"
-  check "Tarjeta Realtek RTL8139, MAC 52:54:00:AA:BB:CC, IRQ"
-  check "HSPRED descargado."
-  check "Tarjeta Adaptador USB (CDC-ECM), MAC $MAC, por HSPUSB, packet driver en INT 60h"
-  check "Dirección MAC . . . . : $MAC"
-  check "Dirección IP  . . . . : 10.0.2.15"
-  check "Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
-  check "  /USB     el adaptador USB aunque haya una tarjeta PCI que valga"
-  check "fin-de-la-prueba"
-}
-
-# /2: en un xHCI de Intel de las series 7 a 9 (simulado con -DINTEL_FAKE: QEMU
-# no tiene esos registros) no se enciende el USB 3, y la red sigue yendo
-t_sinusb3() {
-  caso sinusb3 "/2 (sin USB 3) en un xHCI de Intel simulado (-DINTEL_FAKE)" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO /2\r\n' "-DINTEL_FAKE"
-  arranca -device usb-ehci,id=he -device qemu-xhci,id=hc $NET $(USBNET hc.0)
-  orden "HSPRED"
-  orden "CONFRED"
-  orden "PING 10.0.2.2 /N:2"
-  orden "ECHO fin-de-la-prueba"
-  fin c_sinusb3
-}
-c_sinusb3() {
-  check "Intel: puertos pasados del EHCI al xHCI: USB 2 XUSB2PR=0000000F (de 0000000F),"
-  check "  USB 3 USB3_PSSEN=00000000 (de 0000000F)"
-  check "$ECM"
-  check "Dirección IP  . . . . : 10.0.2.15"
-  check "Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
-  check "fin-de-la-prueba"
-}
-
 # lo que ocupa HSPUSB (MEM /C) con el adaptador y sin él: con adaptador se
 # queda su bloque (código, búferes y anillos); sin él, nada de eso
 t_memoria() {
@@ -407,7 +344,7 @@ t_memoria() {
 }
 
 # ---- todos, de dos en dos ----
-TODOS="xhci xhcihub uhci uhcihub ohci ohcihub ehci todo v86 v86uhci sinecm sinusb3 pciusb consola memoria"
+TODOS="xhci xhcihub uhci uhcihub ohci ohcihub ehci todo v86 v86uhci sinecm memoria"
 CASOS=${CASOS:-$TODOS}
 JOBS=${JOBS:-2}
 fail=0

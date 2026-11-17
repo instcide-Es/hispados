@@ -2,7 +2,7 @@
 ;  HSPRED.COM - controlador de red de Hispa-DOS (residente, «packet driver»)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Uso:  HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/U] [/?]  (en AUTOEXEC.BAT; vale LH)
+;  Uso:  HSPRED [/INT:xx] [/INFO] [/AUTO] [/U] [/?]  (en AUTOEXEC.BAT; vale LH)
 ;        /INT:xx  vector del packet driver, en hexadecimal (60 a 80); si no
 ;                 se dice, el primero libre desde el 60h (el 67h, el de la
 ;                 memoria expandida, nunca)
@@ -11,8 +11,6 @@
 ;        /AUTO    silencioso si no hay tarjeta: sale sin avisar (errorlevel 1)
 ;                 en vez de imprimir el aviso. Pensada para el AUTOEXEC.BAT,
 ;                 para que no moleste en un equipo sin red. (/Q es lo mismo.)
-;        /USB     usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque
-;                 haya una tarjeta PCI de las que se saben usar
 ;        /U       descargarlo de la memoria (si ningún programa lo usa)
 ;
 ;  Interfaz: la especificación pública de «packet drivers» de FTP Software
@@ -2700,11 +2698,8 @@ init:
         smsw ax
         and al, 1
         mov [v86], al
-        cmp byte [o_usb], 0         ; /USB: sin mirar las tarjetas PCI
-        jne .usb
         call find_card
         jnc .found
-.usb:
         call find_usb               ; ¿un adaptador USB que lleve HSPUSB?
         jnc .found
         ; no hay tarjeta de red. Con /AUTO (p. ej. en el AUTOEXEC.BAT), salir
@@ -2875,18 +2870,6 @@ parse:
         mov byte [o_info], 1
         jmp .end
 .u:
-        mov al, [si]                ; ¿/USB?
-        call upcase
-        cmp al, 'S'
-        jne .u1
-        inc si
-        lodsb
-        call upcase
-        cmp al, 'B'
-        jne .bad
-        mov byte [o_usb], 1
-        jmp .end
-.u1:
         mov byte [o_unload], 1
         jmp .end
 .auto:
@@ -2967,7 +2950,6 @@ o_help      db 0
 o_info      db 0
 o_unload    db 0
 o_auto      db 0
-o_usb       db 0
 o_int       db 0
 v86         db 0
 i_link      dw 0
@@ -4695,17 +4677,15 @@ putdec:
         ret
 
 msg_title   db "HSPRED 0.1: controlador de red de Hispa-DOS (packet driver)", 13, 10, 0
-msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/U]", 13, 10
+msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/U]", 13, 10
             db "  /INT:xx  vector del packet driver (60 a 80, hexadecimal; si no, el", 13, 10
             db "           primero libre desde el 60)", 13, 10
             db "  /INFO    tarjeta, MAC, enlace, IRQ, vector y la configuración IP", 13, 10
             db "  /AUTO    sin tarjeta, sale en silencio (para el AUTOEXEC.BAT)", 13, 10
-            db "  /USB     el adaptador USB aunque haya una tarjeta PCI que valga", 13, 10
             db "  /U       descargarlo de la memoria", 13, 10
             db "Tarjetas: NE2000 PCI (RTL8029), Realtek RTL8139 y RTL8111/8168/8101, Intel", 13, 10
             db "PRO/1000 (e1000, 82574L), AMD PCnet (VirtualBox, VMware) y DEC 21140/21143", 13, 10
-            db "(Hyper-V: adaptador heredado). Y, con HSPUSB.SYS cargado, un adaptador", 13, 10
-            db "USB-Ethernet con CDC-ECM (Realtek RTL8153). La IP: CONFRED (IPCONFIG).", 13, 10
+            db "(Hyper-V: adaptador heredado). La IP: CONFRED (IPCONFIG).", 13, 10
             db "Sirve también para los programas de DOS que usan packet drivers (mTCP...).", 13, 10, 0
 msg_already db "HSPRED ya está cargado (HSPRED /INFO lo enseña; /U lo descarga).", 13, 10, 0
 msg_notres  db "HSPRED no está cargado.", 13, 10, 0

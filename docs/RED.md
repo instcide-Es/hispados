@@ -39,8 +39,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 ## Uso
 
 1. Cargar el controlador, a mano o en `AUTOEXEC.BAT`: `HSPRED` (o
-   `LH HSPRED` con memoria superior). Con un adaptador USB-Ethernet, además,
-   `HSPUSB.SYS` en `CONFIG.SYS` (ver «Adaptadores USB-Ethernet»). Desde la 0.9.24 el `AUTOEXEC.BAT` que
+   `LH HSPRED` con memoria superior). Desde la 0.9.24 el `AUTOEXEC.BAT` que
    se instala ya no lo carga al arrancar (trae la línea `HSPRED /AUTO` con un
    `REM` delante): ocupa 13 KB de memoria convencional, que les faltan a los
    juegos y a los programas grandes. `ACTUALIZAR` lo carga solo; para tener
@@ -55,7 +54,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 
 | Orden | Para qué |
 |---|---|
-| `HSPRED [/INT:xx] [/INFO] [/USB] [/U]` | El controlador. `/USB`: usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque haya una tarjeta PCI que valga. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). |
+| `HSPRED [/INT:xx] [/INFO] [/U]` | El controlador. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). |
 | `CONFRED [/RENOVAR] [/LIBERAR]` | La configuración IP. `/RENOVAR` (`/RENEW`) la pide otra vez; `/LIBERAR` (`/RELEASE`) la olvida. `/ALL` se acepta (como en Windows) y hace lo mismo que sin nada. |
 | `PING destino [/N:n] [/T]` | Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
@@ -193,7 +192,6 @@ disco al volver al intérprete). Por eso el mensaje final pide reiniciar.
 | Intel 82574L («e1000e») | `8086:10D3` | ✅ probada en QEMU (`-device e1000e`). Misma rutina que la e1000 (descriptores clásicos, interrupción INTx); en QEMU tiene los registros por puertos, así que va también con HSPEMM. Sin probar en VMware ni en una de verdad. |
 | Realtek RTL8111/8168, 8101E/8102E/8105E (8136), 8169 («r8169») | `10EC:8168`, `10EC:8136`... | ✅ **funciona en un equipo de verdad**: Toshiba NB250-10N (`10EC:8136`, revisión PCI 05h), desde el 15/11/2026 (red y consola remota). QEMU no la tiene. En otras revisiones (8111E/F/G/H, la 8111EP del Lenovo A275), sin probar: ver «RTL8168: lo que falta para las revisiones modernas». |
 | AMD PCnet-PCI II (Am79C970A) y PCnet-FAST III (Am79C973) | `1022:2000` | ✅ probada en QEMU (`-device pcnet`). ⚠️ Es la tarjeta por omisión de **VirtualBox** y la «vlance» de **VMware**, pero en ellos **no se ha probado** (aquí solo hay QEMU). |
-| Adaptador **USB**-Ethernet con la clase estándar CDC-ECM (Realtek RTL8152/RTL8153 y otros) | USB `0BDA:8153`... | ✅ probada en QEMU (`-device usb-net`), con las cuatro clases de controladora USB y detrás de un concentrador. ⚠️ En un adaptador de verdad, **sin probar**. La lleva `HSPUSB.SYS`: ver «Adaptadores USB-Ethernet (CDC-ECM)». |
 | DEC 21140/21140A y 21143 «Tulip» | `1011:0009`, `1011:0019` | ✅ probada en QEMU (`-device tulip`, que se presenta como 21143). ⚠️ La 21140A es el «Adaptador de red heredado» de **Hyper-V**, pero en Hyper-V **no se ha probado**. En tarjetas de verdad, sin probar y sin elección del medio (ver «Límites de las tarjetas nuevas»). |
 
 No se hacen (paravirtualizadas, sin nada que ver con las anteriores y muy
@@ -331,124 +329,6 @@ una 8111 moderna: (1) `TXCFG_AUTO_FIFO` y `MaxTxPacketSize` según el XID,
 (2) `RxConfig` según la familia, (3) quitar ASPM/CLKREQ, (4) `RXDV_GATED_EN`
 en la 8168G en adelante.
 
-### Adaptadores USB-Ethernet (CDC-ECM)
-
-Desde el 17/11/2026, un adaptador USB-Ethernet que ofrezca la **clase
-estándar CDC-ECM** es una tarjeta más de HSPRED. El aparato lo lleva
-`HSPUSB.SYS` (enumeración, transferencias y sondeo: `lib/usb_red.inc`, ver
-[USB.md](USB.md)) y HSPRED solo pone el puente con el packet driver. Vale
-para:
-
-- los **Realtek RTL8152 y RTL8153** (los adaptadores «USB a Ethernet
-  Gigabit» corrientes, muchos con un concentrador de 3 puertos; `0BDA:8152`,
-  `0BDA:8153`, y los de Lenovo, Microsoft, Samsung o TP-Link que los llevan
-  dentro). Su configuración 1 es el modo propio de Realtek y la **2**, la
-  estándar: HSPUSB mira todas y elige la que trae CDC-ECM;
-- cualquier otro que traiga CDC-ECM en alguna configuración (algunos ASIX
-  AX88179A/AX88772D, los «gadgets» de Linux, `-device usb-net` de QEMU, que
-  trae RNDIS en la 1 y CDC-ECM en la 2).
-
-```
-CONFIG.SYS:   DEVICE=A:\HISPADOS\HSPUSB.SYS /F /INFO
-  ...
-  5 SS 2109:0817 09/00/00 -> concentrador de 4 puertos
-    5.1 SS 0BDA:8153 02/06/00 0A/00/00 -> red (CDC-ECM)
-Adaptador de red USB preparado (CDC-ECM), MAC 00:E0:4C:68:xx:xx: cargue HSPRED.
-
-A:\>HSPRED
-Tarjeta Adaptador USB (CDC-ECM), MAC 00:E0:4C:68:xx:xx, por HSPUSB, packet driver en INT 60h
-A:\>HSPRED /INFO
-Tarjeta:         Adaptador USB (CDC-ECM)
-USB:             0BDA:8153, supervelocidad (USB 3), por xHCI (lo lleva HSPUSB)
-IRQ:             no usa (HSPUSB mira si hay tramas en cada tic del reloj)
-Dirección MAC:   00:E0:4C:68:xx:xx
-Enlace:          sí
-```
-
-(Las líneas del RTL8153 son como **deberían** salir: no se ha probado con
-uno de verdad; ver «Límites».) Después, `CONFRED`, `PING`, `DESCARGAR`,
-`ACTUALIZAR` y `CONSOLA` como con cualquier tarjeta. Hace falta:
-
-1. `HSPUSB.SYS` cargado en `CONFIG.SYS` **llevando él el USB** (con `/F` si
-   la BIOS lo está usando; en un MacBook lo toma él solo) y el adaptador
-   **conectado al arrancar** (no se busca después). HSPUSB dice
-   «Adaptador de red USB preparado (CDC-ECM), MAC ...».
-2. `HSPRED` (a mano o en `AUTOEXEC.BAT`). Primero busca una tarjeta PCI de
-   las suyas y, si no hay, el adaptador USB; con `HSPRED /USB`, solo el
-   adaptador USB.
-
-Si el adaptador no trae CDC-ECM en ninguna configuración (solo el modo
-propio del fabricante, NCM o RNDIS), HSPUSB lo dice con su VID:PID, con
-`/INFO` o sin él: «Adaptador de red USB 0B95:1790: aún no se admite (no
-ofrece la clase estándar CDC-ECM)» y, en el árbol, «adaptador de red que aún
-no se admite (sin CDC-ECM)».
-
-#### Cómo va por dentro
-
-- **Reconocer** (`role_net`, `net_parse`): se leen los descriptores de todas
-  las configuraciones (`bNumConfigurations`) buscando una interfaz de
-  comunicaciones 02h/06h con su descriptor funcional Ethernet (la MAC es la
-  cadena `iMACAddress`, 12 cifras hexadecimales) y la interfaz de datos 0Ah
-  que tenga los dos extremos bulk. Después: `SET_CONFIGURATION` de esa
-  configuración, `SET_INTERFACE` de la de datos a la alternativa con los
-  extremos (la 1) y `SET_ETHERNET_PACKET_FILTER` (lo dirigido a la tarjeta y
-  la difusión; hay adaptadores que no dan enlace ni tramas hasta recibirlo).
-- **Recibir**: no hay interrupción. La tubería bulk de entrada se lleva como
-  una tubería más de HSPUSB, con las mismas rutinas que las del teclado y el
-  ratón (en el xHCI, su anillo; en el EHCI, una cola de la lista periódica
-  atendida en las 8 microtramas; en la OHCI, un ED; en la UHCI, 24 TD
-  seguidos), con un búfer de una trama. Se deja pedida y se mira **en cada
-  tic del reloj** (INT 08h, 18 veces por segundo) y **cada vez que el
-  programa consulta el teclado** (INT 16h, AH=01h u 11h): las esperas de
-  `lib/red.inc` lo hacen en cada vuelta (por si se pulsa Esc), así que la
-  respuesta no espera al tic. Cuando llega una trama se entrega a HSPRED
-  (que llama al receptor del programa, como en la interrupción de una
-  tarjeta PCI), se pide la siguiente y se la espera hasta 2 ms (vienen a
-  ráfagas), 8 por pasada como mucho.
-- **Enviar**: síncrono, como las transferencias de la memoria USB (HSPUSB
-  hace una cada vez). Si HSPUSB está ocupado en ese momento (en mitad de una
-  lectura del disco USB, por ejemplo, desde una interrupción), el envío
-  falla (`CANT_SEND`) y el programa lo repite; desde el receptor sí se puede
-  enviar.
-- **Enlace**: el adaptador avisa por su tubería de interrupción
-  (`NETWORK_CONNECTION`); HSPUSB la lee y `HSPRED /INFO` dice «sí» o «no».
-  Mientras no llegue ningún aviso, «no se sabe» (usb-net de QEMU no manda
-  ninguno).
-- **HSPUSB ↔ HSPRED**: `INT 2Fh AX=DB00h` (ver «API»).
-
-#### Límites
-
-- **Sin probar en un adaptador de verdad** (17/11/2026): todo se ha probado
-  con `-device usb-net` de QEMU, que es de USB 1.1 (velocidad plena) y cuyo
-  concentrador también lo es. No se ha podido probar: el adaptador a **alta
-  velocidad** (USB 2.0, paquetes de 512) ni a **supervelocidad** (USB 3,
-  paquetes de 1024), un **concentrador de USB 2.0 o 3.0** por medio (el de
-  los adaptadores con puertos; ver USB.md), ni que lleguen los avisos del
-  enlace. En el EHCI el camino del adaptador usa las rutinas ya probadas con
-  el teclado (recepción) y con la memoria USB (envío), pero juntas y con
-  tramas, no.
-- En un PC con xHCI de Intel de las series 7 a 9 (el MacBook Air de 2012),
-  si el adaptador no aparece a supervelocidad se puede probar `HSPUSB /2`:
-  no enciende el USB 3 de los puertos y el adaptador (y su concentrador) va
-  a alta velocidad.
-- El adaptador tiene que estar conectado al cargar HSPUSB, y no se puede
-  quitar con HSPRED cargado (los envíos fallarían tras 2 s cada uno).
-- Un adaptador a la vez (el primero). Sin multidifusión.
-- La velocidad del enlace (10/100/1000) no se dice.
-- Un programa que no consulte el teclado mientras espera recibe solo con el
-  tic del reloj: hasta 8 tramas cada 55 ms.
-
-#### Lo que falta (no entra ahora)
-
-| Qué | Para quién | Qué habría que hacer |
-|---|---|---|
-| **CDC-NCM** (02h/0Dh) | RTL8156 (2,5 Gb), los AX88179A y los móviles que comparten red | Lo mismo que ECM (mismas tuberías y sondeo), pero cada transferencia lleva varias tramas con una cabecera NTH16/NDP16: `GET_NTB_PARAMETERS`, desempaquetar al recibir y poner la cabecera al enviar. |
-| **RTL8152/8153 en su modo propio** (configuración 1) | No hace falta mientras traigan ECM; daría el enlace y la velocidad seguros | Registros por peticiones de control de fabricante (PLA/USB OCP), arranque del PHY y del MAC, y una cabecera de 8 octetos por trama al recibir y al enviar. A partir de `r8152.c` de Linux (GPL-2.0): largo. |
-| **ASIX AX88179/AX88178A** (`0B95:1790`, `0B95:178A`) | El otro chip de los adaptadores Gigabit baratos; los AX88179 antiguos **no** traen ECM | Como el anterior: registros por control de fabricante, PHY por MII, cabeceras propias en cada transferencia (`ax88179_178a.c` de Linux). |
-| **AX88772** (`0B95:772x`, el adaptador USB de Apple `05AC:1402`) | Adaptadores de 100 Mbit | Igual, más sencillo (`asix_devices.c`). |
-| **RNDIS** | Móviles Android con «anclaje USB» | Mensajes RNDIS por el extremo de control y cabecera de 44 octetos por trama. |
-| Conectar y quitar con el driver cargado | — | Buscar el adaptador en `rescan` (hoy solo busca memorias) y soltar su bloque al quitarlo. |
-
 ### Las tarjetas de los portátiles de las pruebas
 
 Sacado de los informes de `DIAGNOSTICO` (`INFORMES\...\INFORME.TXT` y los
@@ -458,7 +338,7 @@ volcados `PCI\*.BIN`, clase 02h):
 |---|---|---|
 | Lenovo A275 | **Realtek RTL8111EP/8168EP** (`10EC:8168`, rev. 0Eh, subsistema `17AA:511F`; en 01:00.0, puertos 2400h, IRQ 5; con las funciones DASH 01:00.1-4: dos puertos serie, IPMI y un EHCI) | Realtek RTL8822BE (`10EC:B822`, en 03:00.0, clase FFh) |
 | HP Mini 5103 (los dos) | **Marvell Yukon 88E8059 «Yukon Optima»** (`11AB:4381`, rev. 11h, subsistema `103C:1608`) | Broadcom BCM43224 (`14E4:4353`) |
-| MacBook Air 2012 | — (no tiene; el adaptador de Apple por Thunderbolt es una Broadcom BCM57762, `tg3`). Con un adaptador USB Realtek RTL8153 (`0BDA:8153`, «USB-C a Ethernet Gigabit con concentrador de 3 puertos»): por CDC-ECM, **pendiente de probar** | Broadcom BCM43224 (`14E4:4353`) |
+| MacBook Air 2012 | — (no tiene; el adaptador de Apple por Thunderbolt es una Broadcom BCM57762, `tg3`) | Broadcom BCM43224 (`14E4:4353`) |
 
 - **A275**: la RTL8168 de `HSPRED` funciona en el Toshiba NB250 (otra
   revisión), pero en este equipo está sin probar. Lo que falta: probarla
@@ -471,9 +351,8 @@ volcados `PCI\*.BIN`, clase 02h):
   (Marvell solo la daba con acuerdo de confidencialidad); la única fuente es
   el controlador `sky2` de Linux (GPL-2.0, compatible, unas 5.000 líneas, con
   muchas diferencias entre modelos). Es posible pero largo: se deja para más
-  adelante. Mientras, sirve un adaptador USB-Ethernet con CDC-ECM (los
-  Realtek RTL8152/8153: ver «Adaptadores USB-Ethernet»); una tarjeta
-  PCMCIA/ExpressCard, no.
+  adelante. Mientras, un adaptador USB-Ethernet no sirve todavía (HSPUSB no
+  tiene la clase de red) y una tarjeta PCMCIA/ExpressCard tampoco.
 - **Wi-Fi** (las tres): nada por ahora (ver «Pendiente»).
 
 Probar una tarjeta: `HSPRED /INFO` dice cuál ha encontrado y si hay enlace;
@@ -549,31 +428,6 @@ el proyecto).
 | DA02h | descargar (BL = 1: aunque haya programas usándolo) -> AL = 0 hecho, 1 hay otro residente encima, 2 en uso |
 | DA03h | ES:BX = datos del controlador (los que enseña `/INFO`) |
 
-### HSPUSB: INT 2Fh AX=DB00h (el adaptador de red USB, para HSPRED)
-
-Solo contesta si HSPUSB lleva un adaptador con CDC-ECM (si no lo hay, HSPUSB
-no atiende INT 2Fh):
-
-| | |
-|---|---|
-| Entrada | AX = DB00h |
-| Salida | AL = FFh, BX = 5552h («UR»), ES:DI = bloque de datos del adaptador |
-
-| Desplazamiento | Qué |
-|---|---|
-| +0 | la MAC (6 octetos) |
-| +6, +8 | VID y PID del aparato USB |
-| +10 | velocidad USB: 1 plena, 3 alta, 4 súper |
-| +11 | clase de la controladora: 0 UHCI, 1 OHCI, 2 EHCI, 3 xHCI |
-| +12 | enlace: 0 no, 1 sí, FFh no se sabe |
-| +13 | versión del bloque (1) |
-| +14 | **enviar** (puntero lejano, se llama con `CALL FAR`): DS:SI = trama, CX = octetos (14 a 1514; las cortas las rellena a 60) -> CF = 1 si no ha salido. Conserva los registros. |
-| +18 | **receptor** (puntero lejano; lo escribe quien quiera recibir, 0:0 = nadie): HSPUSB lo llama con ES:DI = trama, CX = octetos (14 a 1514), con las interrupciones cerradas, desde su INT 08h o su INT 16h, con su pila. Tiene que conservar SS:SP. |
-| +22, +24 | tramas recibidas con error o descartadas, y envíos fallidos (dos palabras) |
-
-HSPRED deja su receptor (`us_rx`) al quedarse residente y lo quita al
-descargarse (`HSPRED /U`).
-
 ### La pila TCP/IP: lib/red.inc
 
 Escrita aquí, desde las RFC (791 IP, 792 ICMP, 768 UDP, 793 TCP, 826 ARP,
@@ -612,22 +466,16 @@ igual que las del cliente: la pila no es residente.
 | HSPRED con la RTL8168 | unos 13.400 | 8.192 (descriptores y búferes) | unos 13.500 |
 | HSPRED con la PCnet | 13.424 | 7.840 (descriptores, bloque de inicialización, 4 búferes de recepción y uno de envío) | — |
 | HSPRED con la Tulip | 13.328 | 7.776 (descriptores, 4 búferes de recepción y uno de envío) | — |
-| HSPRED con un adaptador USB (CDC-ECM) | 5.152 | ninguno (los búferes son de HSPUSB: ver USB.md) | — |
 
-La PCnet, la Tulip y el adaptador USB no les cuestan nada a las demás: su
-parte residente (582, 556 y 152 octetos) va en tres secciones «de quita y
-pon» del archivo, ensambladas las tres para la misma dirección (justo detrás de la pila), y la instalación
+La PCnet y la Tulip no les cuestan nada a las demás: su parte residente (582
+y 556 octetos) va en dos secciones «de quita y pon» del archivo, ensambladas
+las dos para la misma dirección (justo detrás de la pila), y la instalación
 deja en la memoria solo la de la tarjeta encontrada, si es una de ellas. Las
 otras cuatro siguen juntas en la parte común (se podrían pasar al mismo
 sistema: la NE2000 bajaría a unos 3 KB). Los nombres de las tarjetas ya no
 son residentes (se copia el de la encontrada): de ahí los 48 octetos menos.
 
-El adaptador USB tampoco gasta nada de lo común: como no tiene interrupción,
-la rutina de interrupción de HSPRED se queda en un vector libre (del 80h
-hacia abajo) al que no llama nadie, y así la descarga y lo demás son iguales
-que con una tarjeta PCI.
-
-El archivo `HSPRED.COM` ocupa 14,6 KB (antes 13,7; lo que no es residente
+El archivo `HSPRED.COM` ocupa 13,7 KB (antes 10,3; lo que no es residente
 se descarta al instalarse). Cada orden de red, de 6 a 8 KB (la pila TCP/IP
 va dentro).
 
@@ -663,25 +511,6 @@ QEMU y `VOLCAR=carpeta`, las tramas de cada uno (pcap, para `tcpdump -r`). Si no
 espacio de nombres ni usar el puerto 53, se saltan las pruebas de DNS (lo
 dice).
 
-`tests/run_red_usb_tests.sh` (en `make test`): la red por USB, con
-`-device usb-net` de QEMU (RNDIS en su configuración 1, CDC-ECM en la 2), en
-el mismo espacio de nombres de red y con los mismos servidores. El adaptador
-en un puerto raíz y detrás de un concentrador (`usb-hub`), con xHCI, UHCI y
-OHCI; con un EHCI y sus UHCI compañeras (el EHCI cede el adaptador, que es
-de USB 1.1, a una UHCI); con teclado, ratón y memoria USB a la vez (se
-descarga a la memoria USB y se copia de ella); con HSPEMM (`DEVICEHIGH` de
-HSPUSB y `LH HSPRED`); un adaptador «sin CDC-ECM» (HSPUSB ensamblado con
-`-DRED_SIN_ECM`); `/2` con el xHCI de Intel simulado (`-DINTEL_FAKE`); con
-una tarjeta PCI además (HSPRED elige la PCI; `HSPRED /USB`, el adaptador);
-`CONSOLA` (un servidor TCP) por el adaptador, con el cliente de
-`tests/run_consola_tests.sh`; y la memoria que queda libre con el adaptador
-y sin él. En cada caso de red:
-`HSPUSB /INFO`, `HSPRED`, `HSPRED /INFO`, `CONFRED` (DHCP), `PING`,
-`DESCARGAR` (150.000 octetos comparados con mtools, y un 404), `PING` por
-nombre, `HSPRED /U` y volver a cargarlo. Dos QEMU a la vez; unos 3 minutos.
-`CASOS="xhci uhcihub"` hace solo ésos. Lo que no puede probar: ver «Límites»
-de los adaptadores USB.
-
 ### Un fallo de la pila que sacó la PCnet (arreglado)
 
 Con la PCnet la prueba de la redirección fallaba más de la mitad de las veces
@@ -706,9 +535,6 @@ tardan más de un tic entre una conexión y la siguiente.
   SROM (10BASE-T, MII) y estado del enlace.
 - **Marvell Yukon** (HP Mini 5103) y **Broadcom tg3** (el adaptador
   Thunderbolt de los Mac), a partir de los controladores de Linux.
-- **Adaptadores USB**: probar el Realtek RTL8153 de verdad (MacBook Air), y
-  CDC-NCM, los modos propios (RTL8152/8153, AX88179) y RNDIS: ver «Lo que
-  falta» en «Adaptadores USB-Ethernet».
 - **Más tarjetas**: Intel e1000e integradas (ICH8 en adelante: I217/I218/I219,
   con otro PHY), virtio-net (para las máquinas virtuales), 3Com 3c59x/3c90x.
   Tarjetas ISA (NE2000 ISA, 3c509) con su dirección en la línea de órdenes.
