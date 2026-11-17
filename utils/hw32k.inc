@@ -3043,6 +3043,140 @@ k_GetComputerNameA:                 ; (buf, *n)
         xor eax, eax
         ret
 s_equipo    db 'HISPA-486', 0
+; ---- otros programas: CreateProcessA los ejecuta por COMMAND.COM (/C), así
+; que valen .COM, .EXE de DOS, .BAT y los de Windows (COMMAND.COM se los pasa a
+; HW32). Es síncrono: al volver, el hijo ya ha terminado y su código queda
+; guardado (WaitForSingleObject vuelve enseguida) ----
+N_PROC      equ 16
+H_PROC      equ 0x50000
+k_CreateProcessA:                   ; (app, línea, sa, sa, heredar, opciones, entorno, carpeta, *si, *pi)
+        ; el intérprete: COMSPEC
+        mov edi, s_comspec
+        call busca_env
+        jc .sin_comspec
+        xor edi, edi
+.cs:
+        mov al, [es:esi]
+        mov [gs:TB_NOM1 + edi], al
+        inc esi
+        inc edi
+        test al, al
+        jz .cola
+        cmp edi, 120
+        jb .cs
+        mov byte [gs:TB_NOM1 + edi], 0
+        jmp .cola
+.sin_comspec:
+        mov esi, s_command
+        xor edi, edi
+.cs2:
+        lodsb
+        mov [gs:TB_NOM1 + edi], al
+        inc edi
+        test al, al
+        jnz .cs2
+.cola:
+        ; la cola: « /C » + la línea (o el programa, si no hay línea)
+        mov dword [gs:TB_NOM2 + 1], ' /C '
+        mov edi, 5
+        mov esi, [ebp + 4]
+        test esi, esi
+        jnz .l
+        mov esi, [ebp]
+        test esi, esi
+        jz .mal_p
+.l:
+        mov al, [es:esi]
+        test al, al
+        jz .l_f
+        cmp edi, 127
+        jae .larga
+        mov [gs:TB_NOM2 + edi], al
+        inc esi
+        inc edi
+        jmp .l
+.l_f:
+        mov byte [gs:TB_NOM2 + edi], 13
+        lea eax, [edi - 1]
+        mov [gs:TB_NOM2], al
+        ; el bloque de parámetros (entorno heredado, la cola, FCB vacíos)
+        mov word [gs:TB_SAL], 0
+        mov word [gs:TB_SAL + 2], TB_NOM2
+        mov ax, [tb_seg]
+        mov [gs:TB_SAL + 4], ax
+        mov word [gs:TB_SAL + 6], TB_SAL + 0x40
+        mov [gs:TB_SAL + 8], ax
+        mov word [gs:TB_SAL + 10], TB_SAL + 0x40
+        mov [gs:TB_SAL + 12], ax
+        mov edi, TB_SAL + 0x40
+        mov ecx, 16
+.f:
+        mov byte [gs:edi], 0
+        inc edi
+        loop .f
+        mov byte [gs:TB_SAL + 0x41], ' '
+        mov word [rm_dx], TB_NOM1
+        mov word [rm_bx], TB_SAL
+        mov word [rm_ax], 0x4B00
+        call dos
+        jc .mal
+        mov word [rm_ax], 0x4D00
+        call dos
+        ; su ficha (dando la vuelta a las 16)
+        mov ebx, [proc_sig]
+        inc dword [proc_sig]
+        and ebx, N_PROC - 1
+        movzx eax, byte [rm_ax]
+        mov [proc_codigo + ebx * 4], eax
+        mov edi, [ebp + 36]         ; PROCESS_INFORMATION
+        test edi, edi
+        jz .bien
+        lea eax, [ebx + H_PROC]
+        mov [es:edi], eax
+        add eax, 0x100
+        mov [es:edi + 4], eax
+        lea eax, [ebx + 1000]
+        mov [es:edi + 8], eax
+        add eax, 1000
+        mov [es:edi + 12], eax
+.bien:
+        mov dword [ult_error], 0
+        mov eax, 1
+        ret
+.larga:
+        mov dword [ult_error], 206  ; ERROR_FILENAME_EXCED_RANGE
+        xor eax, eax
+        ret
+.mal_p:
+        mov dword [ult_error], 87
+        xor eax, eax
+        ret
+.mal:
+        call error_dos
+        xor eax, eax
+        ret
+s_comspec   db 'COMSPEC', 0
+s_command   db 'C:\COMMAND.COM', 0
+k_GetExitCodeProcess:               ; (h, *código)
+        mov eax, [ebp]
+        mov edi, [ebp + 4]
+        cmp eax, -1
+        je .yo
+        sub eax, H_PROC
+        cmp eax, N_PROC
+        jae .mal
+        mov eax, [proc_codigo + eax * 4]
+        mov [es:edi], eax
+        mov eax, 1
+        ret
+.yo:
+        mov dword [es:edi], 259     ; STILL_ACTIVE
+        mov eax, 1
+        ret
+.mal:
+        mov dword [ult_error], 6
+        xor eax, eax
+        ret
 k_WaitForSingleObject:              ; (h, ms): ya está
         xor eax, eax
         ret
@@ -3486,6 +3620,8 @@ funciones:
         FUNC k_Beep, 8, 'Beep'
         FUNC k_GetComputerNameA, 8, 'GetComputerNameA'
         FUNC k_WaitForSingleObject, 8, 'WaitForSingleObject'
+        FUNC k_CreateProcessA, 40, 'CreateProcessA'
+        FUNC k_GetExitCodeProcess, 8, 'GetExitCodeProcess'
         FUNC k_GetSystemDefaultLangID, 0, 'GetSystemDefaultLangID'
         FUNC k_GetUserDefaultLangID, 0, 'GetUserDefaultLangID'
         FUNC k_GetSystemDefaultLCID, 0, 'GetSystemDefaultLCID'
@@ -3586,4 +3722,6 @@ b_mem       times 48 db 0
 b_hex8      times 12 db 0
 b_nombre    times 64 db 0
 b_sp_nom    times 210 db 0
+proc_sig    dd 0
+proc_codigo times N_PROC dd 0
 b_sp_dir    times 130 db 0

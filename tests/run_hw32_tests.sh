@@ -19,13 +19,13 @@ for f in HW32.COM PEHOLA.EXE PEFALTA.EXE; do
   [ -f $B/$f ] || { echo "falta $B/$f (make nucprogs)"; exit 1; }
 done
 HAYC=0
-make -s $B/HOLAC.EXE $B/K32PRUE.EXE $B/K32CON.EXE $B/DLLPRUE.DLL $B/USADLL.EXE >/dev/null 2>&1 && HAYC=1
+make -s $B/HOLAC.EXE $B/K32PRUE.EXE $B/K32CON.EXE $B/DLLPRUE.DLL $B/USADLL.EXE $B/LANZA.EXE $B/MSVCRT.DLL >/dev/null 2>&1 && HAYC=1
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 for f in HW32.COM PEHOLA.EXE PEFALTA.EXE; do mcopy -o -i $T/f.img $B/$f ::BIN/$f; done
-[ $HAYC = 1 ] && for f in HOLAC.EXE K32PRUE.EXE K32CON.EXE DLLPRUE.DLL USADLL.EXE; do mcopy -o -i $T/f.img $B/$f ::BIN/$f; done
+[ $HAYC = 1 ] && for f in HOLAC.EXE K32PRUE.EXE K32CON.EXE DLLPRUE.DLL USADLL.EXE LANZA.EXE MSVCRT.DLL; do mcopy -o -i $T/f.img $B/$f ::BIN/$f; done
 fail=0
 ok() { echo "  OK   $1"; }
 ko() { echo "  FAIL $1"; fail=1; }
@@ -53,6 +53,8 @@ echo "== Hispa-486: HW32 (programas Win32 de consola) =="
     printf 'IF ERRORLEVEL 3 ECHO NIVEL-3\r'; sleep 1
     printf 'A:\\BIN\\HW32 A:\\BIN\\USADLL.EXE\r'; sleep 3
     printf 'IF ERRORLEVEL 5 ECHO NIVEL-5\r'; sleep 1
+    printf 'A:\\BIN\\HW32 A:\\BIN\\LANZA.EXE\r'; sleep 8
+    printf 'IF ERRORLEVEL 5 ECHO LANZA-5\r'; sleep 1
   fi
   for i in 1 2 3; do printf 'A:\\BIN\\HW32 A:\\BIN\\PEHOLA.EXE\r'; sleep 2.5; done
   printf 'A:\\BIN\\XMSTEST\r'; sleep 2.5
@@ -146,12 +148,19 @@ NIVEL-3
 Doble(20) = 41
 contador = 42
 NIVEL-5
+desde system
+system: 0
+Linea: A:\BIN\PEHOLA.EXE "dos palabras"
+spawn PEHOLA: 42
+fin de LANZA
+LANZA-5
 FIN
 else
   echo "  (sin gcc de 32 bits: HOLAC no se prueba)"
 fi
 n=$(grep -c "^Hola desde Win32" $T/log.txt)
-if [ "$n" = 5 ]; then ok "cinco veces PEHOLA/PEFALTA"; else ko "PEHOLA/PEFALTA: $n veces (esperadas 5)"; fi
+esp=$((5 + HAYC))   # (con C, LANZA también lanza PEHOLA)
+if [ "$n" = $esp ]; then ok "PEHOLA/PEFALTA: $esp veces"; else ko "PEHOLA/PEFALTA: $n veces (esperadas $esp)"; fi
 first=$(grep "largest free KB" $T/log.txt | head -1)
 last=$(grep "largest free KB" $T/log.txt | tail -1)
 if [ -n "$first" ] && [ "$first" = "$last" ]; then ok "no se pierde memoria XMS ($first)"; else ko "memoria XMS: «$first» y «$last»"; fi

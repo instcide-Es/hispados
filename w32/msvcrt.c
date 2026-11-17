@@ -1528,12 +1528,75 @@ void _fpreset(void) { __asm__ volatile("fninit"); }
 int _except_handler3(void *a, void *b, void *c, void *d) { return 1; }
 int _except_handler4_common(void *a, void *b, void *c, void *d, void *e, void *f) { return 1; }
 
-/* ---- otros programas: aún no (Hispa-486 todavía no lanza procesos) ---- */
-int _spawnvp(int modo, const char *n, const char *const *argv) { errno_v = ENOENT; return -1; }
-int _spawnv(int modo, const char *n, const char *const *argv) { errno_v = ENOENT; return -1; }
-int _spawnl(int modo, const char *n, ...) { errno_v = ENOENT; return -1; }
-int _cwait(int *r, int h, int a) { errno_v = ECHILD_; return -1; }
-int system(const char *c) { if (!c) return 0; errno_v = ENOENT; return -1; }
+/* ---- otros programas, por CreateProcessA de HW32 (síncrono: al volver ya
+ * ha terminado; P_NOWAIT devuelve su handle y _cwait da el código) ---- */
+typedef struct { u32 cb; char *r, *escritorio, *titulo; u32 x, y, xs, ys, xc, yc, rell, banderas; u16 mostrar, r2; void *r3; HANDLE e, s, err; } STARTUPINFOA;
+typedef struct { HANDLE proc, hilo; u32 pid, tid; } PROCINFO;
+int WINAPI CreateProcessA(const char *, char *, void *, void *, int, u32, void *, const char *, STARTUPINFOA *, PROCINFO *);
+int WINAPI GetExitCodeProcess(HANDLE, u32 *);
+static int lanza(char *linea, int modo) {
+  STARTUPINFOA si; PROCINFO pi;
+  memset(&si, 0, sizeof si); si.cb = sizeof si;
+  fflush(NULL);
+  if (!CreateProcessA(NULL, linea, NULL, NULL, 1, 0, NULL, NULL, &si, &pi)) { error_win(); return -1; }
+  if (modo == 1 || modo == 4) return (int)pi.proc;     /* P_NOWAIT, P_DETACH */
+  u32 c = 0; GetExitCodeProcess(pi.proc, &c);
+  if (modo == 2) exit(c);                               /* P_OVERLAY */
+  return c;
+}
+static char *une_args(const char *n, const char *const *argv) {
+  /* «n» y los argumentos, entre comillas los que llevan espacios */
+  size_t t = strlen(n) + 3;
+  for (int i = 1; argv && argv[i]; i++) t += strlen(argv[i]) + 3;
+  char *l = malloc(t), *p = l;
+  if (!l) return NULL;
+  p += strlen(strcpy(p, n));
+  for (int i = 1; argv && argv[i]; i++) {
+    int esp = strpbrk(argv[i], " \t") != NULL || !*argv[i];
+    *p++ = ' ';
+    if (esp) *p++ = '"';
+    p += strlen(strcpy(p, argv[i]));
+    if (esp) *p++ = '"';
+  }
+  *p = 0;
+  return l;
+}
+int _spawnvp(int modo, const char *n, const char *const *argv) {
+  char *l = une_args(n, argv);
+  if (!l) { errno_v = ENOMEM; return -1; }
+  int r = lanza(l, modo);
+  free(l);
+  return r;
+}
+int _spawnv(int modo, const char *n, const char *const *argv) { return _spawnvp(modo, n, argv); }
+int _spawnve(int modo, const char *n, const char *const *argv, const char *const *e) { return _spawnvp(modo, n, argv); }
+int _spawnvpe(int modo, const char *n, const char *const *argv, const char *const *e) { return _spawnvp(modo, n, argv); }
+int _spawnl(int modo, const char *n, const char *a0, ...) {
+  const char *v[64]; int k = 0; va_list ap; va_start(ap, a0);
+  for (const char *a = a0; a && k < 63; a = va_arg(ap, const char *)) v[k++] = a;
+  va_end(ap); v[k] = NULL;
+  return _spawnvp(modo, n, v);
+}
+int _spawnlp(int modo, const char *n, const char *a0, ...) {
+  const char *v[64]; int k = 0; va_list ap; va_start(ap, a0);
+  for (const char *a = a0; a && k < 63; a = va_arg(ap, const char *)) v[k++] = a;
+  va_end(ap); v[k] = NULL;
+  return _spawnvp(modo, n, v);
+}
+int _cwait(int *r, int h, int a) {
+  u32 c = 0;
+  if (!GetExitCodeProcess((HANDLE)h, &c)) { errno_v = ECHILD_; return -1; }
+  if (r) *r = c;
+  return h;
+}
+int system(const char *c) {
+  if (!c) return 1;           /* (hay intérprete) */
+  char *l = _strdup(c);
+  if (!l) return -1;
+  int r = lanza(l, 0);
+  free(l);
+  return r;
+}
 int __lconv_init(void) { return 0; }
 
 /* ---- consola (conio) ---- */

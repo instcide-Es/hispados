@@ -119,6 +119,9 @@ $(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
 $(B)/USADLL.EXE: tests/progs/usadll.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/usadll.o
 	python3 tools/elf2pe.py -o $@ -i DLLPRUE.DLL:Doble,contador $(B)/usadll.o
+$(B)/LANZA.EXE: tests/progs/lanza.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/lanza.o
+	python3 tools/elf2pe.py -o $@ -i msvcrt.dll:printf,system,_spawnvp,exit $(B)/lanza.o
 $(B)/K32CON.EXE: tests/progs/k32con.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/k32con.o
 	python3 tools/elf2pe.py -o $@ $(B)/k32con.o
