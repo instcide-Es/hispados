@@ -402,6 +402,15 @@ Decisiones y límites de la 3b (para las fases siguientes):
   montón (`HeapAlloc`, `GlobalAlloc`) ni archivos, y sin cargar DLL
   (MSVCRT.DLL): los programas de C con biblioteca aún no van.
 
+## Red inalámbrica (Wi-Fi)
+
+Decisión de Carlos (17/11/2026): el Wi-Fi no se hace en Hispa-386; es de
+Hispa-486 en adelante. Hace falta el firmware de cada tarjeta (las de los
+portátiles de prueba: Broadcom BCM43224 14E4:4353 del MacBook Air, Realtek
+RTL8822BE), la gestión 802.11 (buscar redes, asociarse) y WPA2 (AES y el acuerdo
+de claves de cuatro pasos). Irá detrás de la pila de red de Hispa-486 (Winsock),
+con una ventana de Hispa Ventanas para elegir la red.
+
 ## Relación con los demás
 
 - La familia: **Hispa-8086** (8086 a 286, gama MS-DOS de los 80), **Hispa-386**

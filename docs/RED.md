@@ -540,8 +540,9 @@ tardan más de un tic entre una conexión y la siguiente.
   Tarjetas ISA (NE2000 ISA, 3c509) con su dirección en la línea de órdenes.
 - **Wi-Fi**: las tarjetas de los portátiles (Broadcom BCM43224, Realtek
   RTL8822BE) necesitan su firmware, la gestión 802.11 y WPA2 (cifrado AES y
-  el acuerdo de claves). No hay nada parecido en DOS; es para mucho después,
-  o para Hispa 32.
+  el acuerdo de claves). No hay nada parecido en DOS. **Decisión (Carlos,
+  17/11/2026): en Hispa-386 no se hace Wi-Fi** (HSPRED solo enseña la tarjeta);
+  queda para Hispa-486 y posteriores (ver docs/486/HISPA-486.md).
 - **WINSOCK.DLL (Winsock 1.1)** para Windows para Trabajo en Grupo 3.11 y
   Hispa Ventanas: una DLL de 16 bits (Open Watcom) sobre una pila TCP/IP en
   la memoria (la de `lib/red.inc` hecha residente, con varias conexiones y
