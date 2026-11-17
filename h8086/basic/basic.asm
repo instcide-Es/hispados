@@ -517,6 +517,8 @@ lee_car_ent:
 ; =============================================================================
 ; AL a la salida, llevando la columna
 pon_car:
+        cmp word [v_sal_mem], 0     ; EDIT: a la memoria
+        jne pon_car_mem
         cmp word [v_sal_f], 0       ; PRINT #: al archivo
         jne pon_car_f
         cmp word [v_sal_h], 0
@@ -571,6 +573,21 @@ pon_car:
         mov word [v_col], 0
         pop dx
         pop ax
+        ret
+; (EDIT) AL a la memoria, donde diga [v_sal_mem] (hasta llenar b_us), sin
+; los saltos de línea
+pon_car_mem:
+        cmp al, ' '
+        jb .x
+        push bx
+        mov bx, [v_sal_mem]
+        cmp bx, b_us + 254
+        jae .lleno
+        mov [bx], al
+        inc word [v_sal_mem]
+.lleno:
+        pop bx
+.x:
         ret
 pon_nl:
         push ax

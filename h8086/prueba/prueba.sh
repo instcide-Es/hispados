@@ -33,14 +33,14 @@ ko() { echo "  FAIL $1" | tee -a $T/salida.txt; fail=1; }
 : > $T/salida.txt
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.25}"; }
 tecla() { local k; for k in "$@"; do mon "sendkey $k" 0.12; done; }
-escribe() {
+escribe() { teclea "$1"; tecla ret; sleep 0.8; }
+teclea() {    # como escribe, pero sin el Intro del final
   local t="$1" i c
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
     case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; '/') tecla slash;; ':') tecla shift-semicolon;; '\') tecla backslash;;
       '|') tecla shift-backslash;; ';') tecla semicolon;; '$') tecla shift-4;; '"') tecla shift-apostrophe;; '%') tecla shift-5;; '(') tecla shift-9;; ')') tecla shift-0;; ',') tecla comma;; '-') tecla minus;; '+') tecla shift-equal;; '_') tecla shift-minus;; [A-Z]) tecla "shift-${c,,}";; *) tecla "$c";; esac
   done
-  tecla ret; sleep 0.8
 }
 # la pantalla de texto (80x25, un octeto de letra y otro de color), a texto
 pantalla() {
@@ -708,7 +708,8 @@ apaga
 
 . prueba/partes_09.sh
 . prueba/partes_10.sh
-PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 v86 pasar duro formatea sistema partir medidas fuentes"
+. prueba/partes_11.sh
+PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 flechas v86 v86_flechas pasar duro formatea sistema partir medidas fuentes"
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

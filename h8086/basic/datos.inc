@@ -116,6 +116,7 @@ v_err_ptr   resw 1                  ; RESUME: dónde se vuelve
 v_en_trampa resb 1                  ; dentro de la rutina de ON ERROR
             alignb 2
 v_sal_f     resw 1                  ; PRINT #: el archivo al que va (0: pantalla)
+v_sal_mem   resw 1                  ; EDIT: lo escrito va a la memoria, aquí (0: no)
 v_col_guard resw 1                  ;  la columna y el ancho de la pantalla, guardados
 v_ancho_g   resw 1
 v_lp_x      resw 1                  ; gráficos (grafico.inc): el último punto
