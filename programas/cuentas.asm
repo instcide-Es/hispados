@@ -386,6 +386,112 @@ m_inm   db "no", 0
         dw 0xFFFF
         db 0
 
+; ---- los menús del botón secundario (comun/contexto.inc) ----
+ctx_celda:                          ; sobre una celda o un rango
+        dw O_CORTAR
+        db "Cor&tar             Ctrl+X", 0
+        dw O_COPIAR
+        db "&Copiar             Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar              Ctrl+V", 0
+        dw O_BORRAR
+        db "&Borrar             Supr", 0
+        dw 0
+        db 0
+        dw O_INS_FILA
+        db "Insertar &filas", 0
+        dw O_INS_COL
+        db "Insertar c&olumnas", 0
+        dw O_ELI_FILA
+        db "&Eliminar filas", 0
+        dw O_ELI_COL
+        db "Eliminar co&lumnas", 0
+        dw 0
+        db 0
+        dw O_AUTOSUMA
+        db "&Autosuma", 0
+        dw O_ORD_ASC
+        db "Ordenar de &menor a mayor", 0
+        dw O_ORD_DESC
+        db "Ordenar de ma&yor a menor", 0
+        dw 0
+        db 0
+        dw O_CELDAS
+        db "Formato de celda&s...", 0
+        dw 0xFFFF
+ctx_columna:                        ; sobre el rótulo de una columna
+        dw O_CORTAR
+        db "Cor&tar             Ctrl+X", 0
+        dw O_COPIAR
+        db "&Copiar             Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar              Ctrl+V", 0
+        dw O_BORRAR
+        db "&Borrar             Supr", 0
+        dw 0
+        db 0
+        dw O_INS_COL
+        db "Insertar c&olumnas", 0
+        dw O_ELI_COL
+        db "Eliminar co&lumnas", 0
+        dw 0
+        db 0
+        dw O_ANCHO
+        db "&Ancho de columna...", 0
+        dw O_CELDAS
+        db "Formato de celda&s...", 0
+        dw 0xFFFF
+ctx_fila:                           ; sobre el rótulo de una fila
+        dw O_CORTAR
+        db "Cor&tar             Ctrl+X", 0
+        dw O_COPIAR
+        db "&Copiar             Ctrl+C", 0
+        dw O_PEGAR
+        db "&Pegar              Ctrl+V", 0
+        dw O_BORRAR
+        db "&Borrar             Supr", 0
+        dw 0
+        db 0
+        dw O_INS_FILA
+        db "Insertar &filas", 0
+        dw O_ELI_FILA
+        db "&Eliminar filas", 0
+        dw 0
+        db 0
+        dw O_ALTO
+        db "&Alto de fila...", 0
+        dw O_CELDAS
+        db "Formato de celda&s...", 0
+        dw 0xFFFF
+ctx_hoja:                           ; sobre la pestaña de una hoja
+        dw O_HOJA_NUEVA
+        db "&Hoja nueva", 0
+        dw O_HOJA_ELIM
+        db "&Eliminar hoja", 0
+        dw O_HOJA_NOM
+        db "&Nombre de la hoja...", 0
+        dw 0
+        db 0
+        dw O_HOJA_IZQ
+        db "Mover la hoja a la i&zquierda", 0
+        dw O_HOJA_DER
+        db "Mover la hoja a la de&recha", 0
+        dw 0xFFFF
+            align 4
+ctx_menus   dd ctx_celda, ctx_columna, ctx_fila, ctx_hoja
+ctx_gris:                           ; las que pueden ir en gris, y cuándo
+        dw O_PEGAR
+        dd ctx_porta
+        dw O_HOJA_NUEVA
+        dd cg_hoja_nueva
+        dw O_HOJA_ELIM
+        dd cg_hoja_sola
+        dw O_HOJA_IZQ
+        dd cg_hoja_izq
+        dw O_HOJA_DER
+        dd cg_hoja_der
+        dw 0
+
 ; ---- los atajos del teclado: la tecla (Ctrl+letra) y su orden ----
             align 2
 atajos      dw TC_CTRL + 21, O_NUEVO            ; Ctrl+U
@@ -886,6 +992,10 @@ cue_proc:
         je raton_suelta
         cmp eax, WM_LBUTTONDBLCLK
         je raton_doble
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: se coloca y, al
+        je raton_der                ; soltarlo, su menú
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je .rueda
         cmp eax, WM_VSCROLL
@@ -2070,6 +2180,178 @@ raton:
         jc hecho
         mov ecx, [esi+12]
         jmp orden
+
+; ---- el botón secundario ----
+; Se aprieta: sobre una celda que no está en lo elegido, se va a ella (como un
+; clic); en lo elegido no cambia nada, para cortarlo, copiarlo o darle formato.
+; Lo mismo con el rótulo de una columna o de una fila (se elige entera) y con
+; la pestaña de una hoja (se pasa a ella). [ctx_donde] apunta dónde ha sido,
+; para el menú: 1 celdas, 2 una columna, 3 una fila, 4 una hoja (0: nada)
+raton_der:
+        mov byte [ctx_donde], 0
+        call ctx_punto              ; EAX=x EBX=y
+        cmp ebx, HY0                ; (en las barras de arriba no hay menú)
+        jl hecho
+        cmp byte [vp_on], 0
+        jne hecho
+        cmp byte [arrastra], 0      ; (a medio arrastrar con el otro botón)
+        jne hecho
+        cmp byte [editando], 0      ; lo que se estaba escribiendo se acepta
+        je .r1
+        push eax
+        push ebx
+        call commit_edit
+        pop ebx
+        pop eax
+.r1:
+        cmp ebx, [gy1]
+        jge .pestana
+        cmp eax, [gx1]
+        jge hecho
+        call sel_rect
+        cmp ebx, GY0
+        jl .rot_col
+        cmp eax, ROT_AN
+        jl .rot_fil
+        call x_col                  ; una celda
+        call y_fil
+        mov byte [ctx_donde], 1
+        cmp ecx, [r_c1]
+        jb .celda
+        cmp ecx, [r_c2]
+        ja .celda
+        cmp edx, [r_f1]
+        jb .celda
+        cmp edx, [r_f2]
+        jbe hecho
+.celda:
+        call comb_ancla
+        mov [cur_col], ecx
+        mov [cur_fil], edx
+        mov [sel_c2], ecx
+        mov [sel_f2], edx
+        call inval
+        jmp hecho
+.rot_col:
+        mov byte [ctx_donde], 1
+        cmp eax, ROT_AN             ; la esquina: toda la hoja
+        jl .todo
+        mov byte [ctx_donde], 2
+        call x_col
+        cmp dword [r_f1], 0         ; ¿está entre las columnas elegidas enteras?
+        jne .col
+        cmp dword [r_f2], NFIL - 1
+        jne .col
+        cmp ecx, [r_c1]
+        jb .col
+        cmp ecx, [r_c2]
+        jbe hecho
+.col:
+        mov [cur_col], ecx
+        mov [sel_c2], ecx
+        mov dword [cur_fil], 0
+        mov dword [sel_f2], NFIL - 1
+        call inval
+        jmp hecho
+.rot_fil:
+        mov byte [ctx_donde], 3
+        call y_fil
+        cmp dword [r_c1], 0
+        jne .fil
+        cmp dword [r_c2], NCOL - 1
+        jne .fil
+        cmp edx, [r_f1]
+        jb .fil
+        cmp edx, [r_f2]
+        jbe hecho
+.fil:
+        mov [cur_fil], edx
+        mov [sel_f2], edx
+        mov dword [cur_col], 0
+        mov dword [sel_c2], NCOL - 1
+        call inval
+        jmp hecho
+.todo:
+        call todo
+        jmp hecho
+.pestana:
+        call tab_en                 ; la pestaña de una hoja: se pasa a ella
+        jc hecho
+        cmp eax, [lib_n]            ; (la de añadir, «+», no tiene menú)
+        jae hecho
+        mov byte [ctx_donde], 4
+        call cambia_hoja
+        jmp hecho
+
+; El menú: EDX=el punto de la pantalla, o -1 si se pide con el teclado
+; (Mayús+F10 o la tecla de menú): entonces es el de las celdas, junto a la
+; celda activa
+menu_ctx:
+        cmp byte [vp_on], 0
+        jne .no
+        mov eax, -1
+        cmp edx, -1
+        jne .raton
+        cmp byte [editando], 0
+        je .t1
+        call commit_edit
+.t1:
+        mov byte [ctx_donde], 1
+        mov ecx, [cur_col]          ; debajo de la celda activa, si se ve
+        mov edx, [cur_fil]
+        call col_x
+        call fil_y
+        cmp eax, ROT_AN
+        jl .esquina
+        cmp eax, [gx1]
+        jge .esquina
+        cmp ebx, GY0
+        jl .esquina
+        cmp ebx, [gy1]
+        jge .esquina
+        add eax, 8
+        push eax
+        call fil_alto
+        add ebx, eax
+        pop eax
+        jmp .raton
+.esquina:
+        mov eax, -1
+.raton:
+        movzx ecx, byte [ctx_donde]
+        test ecx, ecx
+        jz hecho
+        mov esi, [ctx_menus+ecx*4-4]
+        mov edi, ctx_gris
+        call ctx_abre
+        jmp hecho
+.no:
+        HVJ ven_defecto
+
+; (ctx_gris) lo que ahora no se puede hacer: CF=1
+cg_hoja_nueva:                      ; no caben más hojas
+        cmp dword [lib_n], NHOJAS
+        jae cg_no
+        jmp short cg_si
+cg_hoja_sola:                       ; la única hoja no se elimina
+        cmp dword [lib_n], 1
+        jbe cg_no
+        jmp short cg_si
+cg_hoja_izq:
+        cmp dword [lib_act], 0
+        je cg_no
+        jmp short cg_si
+cg_hoja_der:
+        mov eax, [lib_act]
+        inc eax
+        cmp eax, [lib_n]
+        jae cg_no
+cg_si:
+        clc
+        ret
+cg_no:
+        stc
+        ret
 
 raton_mueve:
         movsx eax, dx
@@ -3351,6 +3633,8 @@ simbolo:
 ; tests/tools/cuentas_calc.py
 %include "calculo.inc"
 %include "barra.inc"
+%define CTX_PUENTE
+%include "contexto.inc"
 %include "hvplib.inc"
 
 ; =============================================================================
@@ -3359,6 +3643,8 @@ simbolo:
         section .bss
         alignb 4
 ven         resd 1                  ; la ventana
+ctx_donde   resb 1                  ; dónde se apretó el botón secundario (raton_der)
+            alignb 4
 puente      resd 1                  ; el cuadro de texto escondido
 barra_v     resd 1                  ; las barras de desplazamiento
 barra_h     resd 1

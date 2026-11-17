@@ -979,6 +979,39 @@ cel b10 1 1 "14";  cel b10 2 1 "7"                                # y calcula co
 chk $T/b11.ppm texto 101 216 0 9 fina "uno";  chk $T/b11.ppm texto 263 180 0 9 fina "7";  chk $T/b11.ppm busca $TABS 0 7 "Hoja1"
 fi
 
+if quiero contexto; then
+echo "== Cuentas: el botón secundario (el menú contextual) =="
+reabre ''
+{ arranca
+  escribe "10"; tecla ret; escribe "20"; tecla ret; escribe "30"; tecla ret
+  derecho 140 206; shot k1                     # A2, que no está elegida: se va a ella
+  tecla c; sleep 0.5                           # Copiar
+  derecho 230 188; sleep 0.5; shot k2          # B1: ya hay algo que pegar
+  tecla p; sleep 0.8; tecla down; aparca; shot k3   # Pegar (y a la celda de abajo, para ver la pegada sin el cursor)
+  arrastra 140 188 140 224
+  derecho 140 206; shot k4                     # dentro de lo elegido (A1:A3): sigue elegido
+  tecla esc
+  derecho 140 170; shot k5                     # el rótulo de la columna A: entera, y su menú
+  tecla esc
+  derecho 88 526; shot k6                      # la pestaña de la hoja
+  tecla esc
+  clic 230 206; tecla shift-f10; sleep 0.6; shot k7   # con el teclado: junto a la celda activa (B2)
+  tecla esc
+  derecho 300 110; sleep 0.5; shot k8          # en la barra de botones no hay menú
+  sal; } | run 150 -vga std
+chk $T/k1.ppm busca $PIE "A2: un número" busca 140 206 240 440 0 8 "opiar" busca 140 206 240 440 7 8 "egar" \
+  busca 140 206 240 440 0 8 "Insertar c" busca 140 206 240 440 0 8 "liminar filas" busca 140 206 240 520 0 8 "Formato de celda"
+chk $T/k2.ppm busca 230 188 330 420 0 8 "egar"
+chk $T/k3.ppm busca $PIE "B2: celda vac"
+cel k3 1 0 "20"
+chk $T/k4.ppm busca $PIE "A1:A3" busca 140 206 240 440 0 8 "egar"
+chk $T/k5.ppm busca $PIE "A1:A1000" busca 140 170 240 400 0 8 "ncho de columna..." nobusca 140 170 240 400 0 8 "liminar filas"
+chk $T/k6.ppm busca 80 300 200 560 0 8 "oja nueva" busca 80 300 200 560 7 8 "liminar hoja" busca 80 300 200 560 0 8 "ombre de la hoja..."
+chk $T/k7.ppm busca 190 200 330 500 0 8 "Formato de celda"
+chk $T/k8.ppm nobusca 280 100 420 420 0 8 "Formato de celda"
+muestra k1 cuentas_contexto; muestra k5 cuentas_contexto_columna; muestra k6 cuentas_contexto_hoja
+fi
+
 # (GUARDA=carpeta deja ahí las capturas y lo demás de la prueba, para mirarlo)
 [ -n "${GUARDA:-}" ] && { rm -rf "$GUARDA"; cp -r $T "$GUARDA"; }
 rm -rf $T
