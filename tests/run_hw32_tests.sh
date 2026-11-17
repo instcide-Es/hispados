@@ -62,7 +62,7 @@ echo "== Hispa-486: HW32 (programas Win32 de consola) =="
 tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
 
 check "HW32: hace falta HSPDPMI (cliente DPMI de 32 bits)."
-check "HW32 PROGRAMA.EXE [parametros]"
+check "HW32 [/T] PROGRAMA.EXE [parametros]"
 check "HW32: no existe el programa."
 check "HW32: no es un programa Win32 (PE de 32 bits)."
 check "Hola desde Win32"
@@ -234,9 +234,11 @@ if [ $HAYC = 1 ] && [ -f $NASMW ] && make -s $B/MSVCRT.DLL >/dev/null 2>&1; then
   echo "drive c: file=\"$T/c.img\" offset=1048576" > $T/mtoolsrc
   printf 'mov ax, 1234h\r\nint 21h\r\nret\r\n' > $T/P.ASM
   MTOOLSRC=$T/mtoolsrc mcopy -o $NASMW c:NASM.EXE
+  MTOOLSRC=$T/mtoolsrc mcopy -o ${NASMW%nasm.exe}ndisasm.exe c:NDISASM.EXE
   MTOOLSRC=$T/mtoolsrc mcopy -o $B/MSVCRT.DLL c:MSVCRT.DLL
   MTOOLSRC=$T/mtoolsrc mcopy -o $B/HW32.COM c:HW32.COM
   MTOOLSRC=$T/mtoolsrc mcopy -o $T/P.ASM c:P.ASM
+  MTOOLSRC=$T/mtoolsrc mcopy -o $B/PEHOLA.EXE c:PEHOLA.EXE
   printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   printf '@ECHO OFF\r\n' > $T/AUTOEXEC.BAT
@@ -249,7 +251,11 @@ if [ $HAYC = 1 ] && [ -f $NASMW ] && make -s $B/MSVCRT.DLL >/dev/null 2>&1; then
     printf 'IF ERRORLEVEL 1 ECHO NASM-FALLA\r'; sleep 1
     printf 'HW32 NASM.EXE -f bin -o Q.BIN NOHAY.ASM\r'; sleep 9
     printf 'IF ERRORLEVEL 1 ECHO NASM-NIVEL-1\r'; sleep 1
-  } | timeout 70 qemu-system-i386 -display none -serial stdio -monitor none -parallel none -m 32 \
+    printf 'NASM -f bin -l P.LST -o P3.BIN P.ASM\r'; sleep 12
+    printf 'TYPE P.LST\r'; sleep 2
+    printf 'NDISASM -b 16 P.BIN\r'; sleep 10
+    printf 'HW32 /T PEHOLA.EXE\r'; sleep 4
+  } | timeout 120 qemu-system-i386 -display none -serial stdio -monitor none -parallel none -m 32 \
       -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
       -boot a -no-reboot > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
@@ -259,6 +265,15 @@ if [ $HAYC = 1 ] && [ -f $NASMW ] && make -s $B/MSVCRT.DLL >/dev/null 2>&1; then
   if [ "$(xxd -p $T/P.BIN 2>/dev/null)" = "b83412cd21c3" ]; then ok "NASM ensambla bien (B8 34 12 CD 21 C3)"; else ko "lo que ha ensamblado NASM: $(xxd -p $T/P.BIN 2>/dev/null)"; fi
   check "nasm: fatal: unable to open input file \`NOHAY.ASM' No existe el archivo o el directorio"
   check "NASM-NIVEL-1"
+  # el listado (un FILE que el programa toca por dentro: se vacía al salir)
+  check "     1 00000000 B83412                  mov ax, 1234h"
+  check "     3 00000005 C3                      ret"
+  # NDISASM (el desensamblador de NASM)
+  check "00000000  B83412            mov ax,0x1234"
+  check "00000005  C3                ret"
+  # la traza de HW32 (/T)
+  check "· GetStdHandle(FFFFFFF5) = 00000011"
+  check "· ExitProcess(0000002A)"
   checkn "Hispa-486: falta"
   checkn "HSPDPMI: excepción"
   cp $T/log1.txt $T/log.txt

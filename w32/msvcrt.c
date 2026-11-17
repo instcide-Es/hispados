@@ -730,7 +730,11 @@ typedef struct {
 #define F_ERR 0x20
 #define F_MIBUF 0x08
 #define F_SINBUF 0x04
-#define F_EN_USO 0x8000
+#define F_EN_USO 0
+/* en uso: con lectura, escritura o las dos (las banderas de Microsoft; los
+ * programas pueden tocar «flag», que es público en su FILE: nada de banderas
+ * propias aquí) */
+#define EN_USO(f) (((f)->flag & (F_LEE | F_ESC | F_LEEESC)) != 0)
 #define N_IOB 20
 FILE _iob[N_IOB];
 FILE *__iob_func(void) { return _iob; }
@@ -755,7 +759,7 @@ static int pide_buf(FILE *f) {
   return 0;
 }
 int fflush(FILE *f) {
-  if (!f) { int r = 0; for (int i = 0; i < N_IOB; i++) if (_iob[i].flag & F_EN_USO) r |= fflush(&_iob[i]);
+  if (!f) { int r = 0; for (int i = 0; i < N_IOB; i++) if (EN_USO(&_iob[i])) r |= fflush(&_iob[i]);
             for (int i = 0; i < N_FD; i++) if (mas_files[i]) r |= fflush(mas_files[i]); return r; }
   if (f->flag & F_ESC) return vacia(f);
   if (f->flag & F_LEE) {      /* lo leído de más: volver atrás */
@@ -766,7 +770,7 @@ int fflush(FILE *f) {
 }
 int _flushall(void) { fflush(NULL); return 0; }
 static FILE *file_libre(void) {
-  for (int i = 3; i < N_IOB; i++) if (!(_iob[i].flag & F_EN_USO)) { memset(&_iob[i], 0, sizeof(FILE)); return &_iob[i]; }
+  for (int i = 3; i < N_IOB; i++) if (!EN_USO(&_iob[i])) { memset(&_iob[i], 0, sizeof(FILE)); return &_iob[i]; }
   for (int i = 0; i < N_FD; i++) if (!mas_files[i]) { mas_files[i] = calloc(1, sizeof(FILE)); return mas_files[i]; }
   return NULL;
 }
@@ -805,7 +809,7 @@ FILE *fopen(const char *nombre, const char *m) {
 }
 FILE *_fsopen(const char *n, const char *m, int sh) { return fopen(n, m); }
 int fclose(FILE *f) {
-  if (!f || !(f->flag & F_EN_USO)) return EOF;
+  if (!f || !EN_USO(f)) return EOF;
   int r = fflush(f);
   if (f->file > 2) r |= _close(f->file);
   if (f->flag & F_MIBUF) free(f->base);
@@ -815,7 +819,7 @@ int fclose(FILE *f) {
   memset(f, 0, sizeof *f);
   return r;
 }
-int _fcloseall(void) { int n = 0; for (int i = 3; i < N_IOB; i++) if (_iob[i].flag & F_EN_USO) { fclose(&_iob[i]); n++; } return n; }
+int _fcloseall(void) { int n = 0; for (int i = 3; i < N_IOB; i++) if (EN_USO(&_iob[i])) { fclose(&_iob[i]); n++; } return n; }
 FILE *freopen(const char *n, const char *m, FILE *f) {
   int fl, o = modo_de(m, &fl);
   if (o < 0) return NULL;
@@ -864,7 +868,7 @@ static int llena(FILE *f) {      /* -> el carácter siguiente o EOF */
   f->cnt--; return (u8)*f->ptr++;
 }
 int fgetc(FILE *f) {
-  if (f->flag & F_EN_USO && f->charbuf) { int c = f->charbuf & 0xFF; f->charbuf = 0; return c; }
+  if (f->charbuf) { int c = f->charbuf & 0xFF; f->charbuf = 0; return c; }
   if (f->cnt > 0 && (f->flag & F_LEE)) { f->cnt--; return (u8)*f->ptr++; }
   return llena(f);
 }
@@ -1072,7 +1076,9 @@ static void termina(int correr) {
   if (correr) while (n_al_salir) al_salir[--n_al_salir]();
   fflush(NULL);
 }
-void exit(int c) { termina(1); ExitProcess(c); }
+/* (si una función de atexit vuelve a llamar a exit, termina no repite las
+ * funciones; pero los búferes se vacían siempre antes de acabar) */
+void exit(int c) { termina(1); fflush(NULL); ExitProcess(c); }
 void _exit(int c) { fflush(NULL); ExitProcess(c); }
 void _cexit(void) { termina(1); saliendo = 0; }
 void _c_exit(void) { }

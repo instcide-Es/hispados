@@ -176,6 +176,20 @@ principal:
         dec esi
         test al, al
         jz uso
+        ; /T: la traza (cada llamada a KERNEL32, con sus argumentos y lo que
+        ; devuelve, por la salida de errores)
+        cmp al, '/'
+        jne .no_t
+        mov al, [esi + 1]
+        and al, 0xDF
+        cmp al, 'T'
+        jne .no_t
+        cmp byte [esi + 2], ' '
+        ja .no_t
+        mov byte [traza], 1
+        add esi, 2
+        jmp .e
+.no_t:
         mov edi, nombre
 .n:
         lodsb
@@ -1370,7 +1384,10 @@ despacho:
         imul eax, IMP_FICHA
         add eax, imp_tab
         mov [ficha_act], eax
+        cmp byte [traza], 0
+        jne .con_traza
         call [eax]                  ; EAX (y EDX): lo que devuelve
+.vuelve:
         ; volver: EIP y CS del programa encima de los argumentos (RETF)
         mov ecx, [ficha_act]
         movzx ecx, word [ecx + 4]   ; los octetos de argumentos
@@ -1388,6 +1405,123 @@ despacho:
         pop ds
         add esp, ecx
         retf
+.con_traza:
+        call traza_antes
+        mov eax, [ficha_act]
+        call [eax]
+        call traza_despues
+        jmp .vuelve
+
+; ---- la traza (HW32 /T), por el handle 2: «Nombre(a, b, c, d)» antes y
+; « = valor» después ----
+traza_antes:
+        pushad
+        mov edi, b_traza
+        mov word [edi], '· '
+        add edi, 2
+        mov ebx, [ficha_act]
+        mov esi, [ebx + 6]          ; el nombre (en el programa)
+        test esi, esi
+        jz .sin_nom
+.n:
+        mov al, [es:esi]
+        test al, al
+        jz .n_f
+        mov [edi], al
+        inc esi
+        inc edi
+        cmp edi, b_traza + 60
+        jb .n
+        jmp .n_f
+.sin_nom:
+        mov dword [edi], '(num'
+        add edi, 4
+.n_f:
+        mov byte [edi], '('
+        inc edi
+        movzx ecx, word [ebx + 4]   ; los octetos de argumentos
+        shr ecx, 2
+        cmp ecx, 6
+        jbe .a
+        mov ecx, 6
+.a:
+        xor edx, edx
+.a1:
+        cmp edx, ecx
+        jae .a_f
+        test edx, edx
+        jz .a2
+        mov word [edi], ', '
+        add edi, 2
+.a2:
+        mov eax, [ebp + edx * 4]
+        call hex_a_edi
+        inc edx
+        jmp .a1
+.a_f:
+        mov byte [edi], ')'
+        inc edi
+        call traza_sale
+        popad
+        ret
+traza_despues:
+        pushad
+        mov edi, b_traza
+        mov dword [edi], ' = '
+        add edi, 3
+        call hex_a_edi
+        mov word [edi], 0x0A0D
+        add edi, 2
+        call traza_sale
+        popad
+        ret
+; EAX en hexadecimal (8 cifras) en DS:EDI
+hex_a_edi:
+        push ecx
+        push ebx
+        mov ecx, 8
+.c:
+        rol eax, 4
+        mov bl, al
+        and bl, 15
+        add bl, '0'
+        cmp bl, '9'
+        jbe .c1
+        add bl, 7
+.c1:
+        mov [edi], bl
+        inc edi
+        loop .c
+        pop ebx
+        pop ecx
+        ret
+; lo que hay en b_traza hasta EDI, por el handle 2
+traza_sale:
+        push dword [rm_bx]
+        push dword [rm_cx]
+        push dword [rm_dx]
+        push dword [rm_ax]
+        push dword [rm_flags]
+        mov ecx, edi
+        sub ecx, b_traza
+        xor esi, esi
+.c:
+        mov al, [b_traza + esi]
+        mov [gs:TB_TROZO - 256 + esi], al
+        inc esi
+        cmp esi, ecx
+        jb .c
+        mov word [rm_bx], 2
+        mov [rm_cx], cx
+        mov word [rm_dx], TB_TROZO - 256
+        mov word [rm_ax], 0x4000
+        call dos
+        pop dword [rm_flags]
+        pop dword [rm_ax]
+        pop dword [rm_dx]
+        pop dword [rm_cx]
+        pop dword [rm_bx]
+        ret
 
 ; ---- una función que no está: lo dice y acaba ----
 f_falta:
@@ -1424,7 +1558,8 @@ f_falta:
 %include "utils/hw32k.inc"
 
 m_uso       db "Hispa-486: ejecuta programas Win32 de consola.", 13, 10
-            db "  HW32 PROGRAMA.EXE [parametros]", 13, 10
+            db "  HW32 [/T] PROGRAMA.EXE [parametros]", 13, 10
+            db "  /T  traza: cada llamada a KERNEL32 (por la salida de errores)", 13, 10
             db "Necesita un 386 o superior, HSPXMS y HSPDPMI.", 13, 10, 0
 m_no_esta   db "HW32: no existe el programa.", 13, 10, 0
 m_no_pe     db "HW32: no es un programa Win32 (PE de 32 bits).", 13, 10, 0
@@ -1490,6 +1625,8 @@ cmd_dir     dd 0
 ficha_act   dd 0
 ult_error   dd 0
 ult_handle  dd 0
+traza       db 0
+b_traza     times 160 db 0
 h_base      dd 0
 pila_res    dd 0
 exp_rva     dd 0
