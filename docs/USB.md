@@ -15,7 +15,9 @@ Encima de cualquiera de ellas funciona lo mismo:
 - **memorias USB** (almacenamiento masivo, Bulk-Only + SCSI) como una unidad
   de DOS (FAT12/FAT16), con cambio de memoria en caliente;
 - **teclado y ratón** USB (HID, protocolo de arranque), entregados como si
-  fueran PS/2 (o a HSPRATON, o al búfer de la BIOS si no hay 8042);
+  fueran PS/2 (o a HSPRATON, o al búfer de la BIOS si no hay 8042); hasta
+  **dos teclados y dos ratones a la vez** (el de dentro y el de fuera de un
+  portátil);
 - **mandos de juego** (HID genéricos y tipo Xbox 360) para HSPJOY
   ([MANDOS.md](MANDOS.md));
 - **adaptadores de red** USB-Ethernet con la clase estándar CDC-ECM (los
@@ -147,6 +149,12 @@ que ve el usuario, los adaptadores que valen y la interfaz entre los dos
 (INT 2Fh AX=DB00h) están en [RED.md](RED.md), «Adaptadores USB-Ethernet
 (CDC-ECM)». Aquí, lo que toca a HSPUSB (`lib/usb_red.inc`):
 
+- **El adaptador, lo último.** `[USB-TARDE]` Al enumerarlo solo se apunta
+  (`role_net`, `nh_*`); se pone en marcha al acabar la enumeración
+  (`net_late`), con la memoria que quede. Si no queda («Adaptador de red
+  USB: no queda memoria para él...») no se usa y todo lo demás sigue igual:
+  la red nunca le quita el sitio a un teclado, a un ratón ni a un
+  concentrador que se enumere después.
 - **Elegir la configuración.** HSPUSB solo leía la primera configuración de
   cada aparato. Para lo que no es concentrador, memoria, teclado, ratón ni
   mando, `role_net` lee las demás (`bNumConfigurations`) y se queda con la
@@ -251,8 +259,24 @@ corriente a los puertos. Reinicio de puerto: tres de 10 ms seguidos.
 Lista asíncrona con dos colas en anillo (la cabecera y la de trabajo, que se
 rellena en cada transferencia de control o bulk); un qTD lleva una
 transferencia entera. La lista periódica (4 KB) solo se crea cuando hay
-alguna tubería de interrupción en el EHCI. Traspaso desde la BIOS con
-USBLEGSUP (espacio de configuración PCI), CONFIGFLAG = 1.
+alguna tubería de interrupción en el EHCI, y `[USB-TARDE]` **se reserva al
+final de la inicialización** (`fl_fin`), no al abrir la primera tubería:
+mientras tanto las colas se encadenan en `hc_per`, y lo residente rellena
+la lista y arranca la planificación periódica en el primer tic del reloj
+(`fl_late`). Traspaso desde la BIOS con USBLEGSUP (espacio de configuración
+PCI), CONFIGFLAG = 1.
+
+Por qué al final: mientras dura la inicialización la zona de trabajo acaba
+en `INIT_ORG`, y la lista pide 4 KB **en una página**. En el MacBook Air de
+2012, arrancando con un adaptador de red con concentrador ya puesto (dos
+concentradores y el RTL8153 en el xHCI, además de la memoria de arranque),
+ya no cabía: `fl_alloc` fallaba, nadie miraba el error, y el teclado
+interno (en el EHCI) salía como «Teclado USB preparado» sin que la
+controladora lo sondeara nunca. Enchufando el adaptador después no pasaba
+porque entonces no se enumera. Reservada al final, la lista cae donde
+estaba el código de inicialización (por eso no la puede escribir la
+inicialización misma) y solo tiene que caber en la memoria que `init_go`
+comprobó que había.
 
 **Controladoras compañeras.** Al reiniciar un puerto raíz, si el aparato no
 es de alta velocidad no queda habilitado: se cede a la compañera (UHCI u
@@ -293,6 +317,18 @@ Es el camino del teclado y del panel de un MacBook (y del Intel de la serie
 Como hasta ahora (anillos, contextos, Configure Endpoint, concentradores con
 su cadena de ruta y su traductor). Se lleva **un** xHCI: el primero.
 
+## Dos teclados y dos ratones
+
+`[USB-DOS]` Un portátil con un teclado enchufado tiene dos teclados; antes
+HSPUSB se quedaba con el primero que enumeraba (el xHCI va antes que los
+EHCI: en un MacBook, el de fuera) y el otro no iba. Ahora hay dos tuberías
+más (`PIPE_K2` y `PIPE_M2`): el segundo teclado lleva su propio informe
+anterior (`oldrep2`) y el segundo ratón su propio mapa de informe (`hr2`,
+que `mouse_report` cambia por el del primero mientras atiende el suyo). Las
+teclas y los movimientos de los dos van al mismo sitio. Al arrancar: «Otro
+teclado USB preparado (van los dos).» y «Otro ratón USB preparado (van los
+dos).». Un tercero no se usa.
+
 ## Memoria
 
 Lo que se queda residente es **lo de `.text`** (las transferencias, los
@@ -303,7 +339,7 @@ alineada a una página, con todo lo que ven las controladoras. La
 ponerlas en marcha, el teclado, el ratón y los mandos, el análisis del
 descriptor de informe HID, el reconocimiento del adaptador de red, `/INFO` y
 los mensajes; unos 17 KB) va en el fichero detrás de `.text`, pero se
-ejecuta en `CS:INIT_ORG` (AC00h; B000h hasta el 17/11/2026), por encima de
+ejecuta en `CS:INIT_ORG` (A800h; B000h y AC00h hasta el 17/11/2026), por encima de
 donde irá la zona, y **se descarta**: la zona se monta justo encima de lo
 residente, donde estaba `.init` en el fichero. Detrás de `.init` va en el
 fichero el bloque residente de la red (`.red`), que durante la
@@ -314,8 +350,8 @@ si hay adaptador.
 |---|---|
 | Búfer de datos del disco | 4 KB |
 | Búferes comunes (descriptores, CBW/CSW, informes) | 640 bytes |
-| xHCI (si lo hay): anillos y contexto de entrada | 6,7 KB, y 1 o 2 KB por aparato (según el tamaño de sus contextos) |
-| Clásicas (si las hay): reserva de TD y colas de las tuberías | 1,2 KB |
+| xHCI (si lo hay): anillos y contexto de entrada | 7,2 KB, y 1 o 2 KB por aparato (según el tamaño de sus contextos) |
+| Clásicas (si las hay): reserva de TD y colas de las tuberías | 1,5 KB |
 | Cada UHCI | 16 bytes, y 4 KB (lista de tramas) si tiene algo conectado |
 | Cada OHCI | 288 bytes |
 | Cada EHCI | 192 bytes, y 4 KB si lleva teclado, ratón, mando o adaptador de red |
@@ -334,13 +370,24 @@ reserva al final de la inicialización, detrás de lo demás.
 
 Mientras se inicializa hace falta memoria hasta `CS:red_hold + RED_LEN`
 (unos 61,5 KB desde el principio del driver; 58 hasta el 17/11/2026).
-Mientras tanto la zona no puede pasar de `CS:INIT_ORG`: le quedan entre
-22,4 y 26,4 KB, según dónde caiga la página (antes, entre 23,5 y 27,5). Con
-el xHCI son 11,25 KB fijos, 1 KB por aparato si sus contextos son de 32
-octetos (2 KB si son de 64) y 2,5 KB del adaptador de red; con controladoras
-clásicas, 1,2 KB más. El búfer de recepción del adaptador de red se reserva
-al final (`net_fin`) y puede caer por encima de `INIT_ORG`: no se usa hasta
-que la inicialización ha terminado. Con `DEVICEHIGH` en un bloque de memoria
+Mientras tanto la zona no puede pasar de `CS:INIT_ORG`. `[USB-HUECO]` La
+zona empieza en una página física, así que entre el final de lo residente
+y ella queda un hueco de 0 a 4 KB (todo dentro de una página) que antes se
+perdía: la zona útil bailaba entre 22,4 y 26,4 KB según dónde cargara DOS
+el driver. Ahora `zalloc` mira primero en ese hueco (`gtop`, `gend`), y lo
+que cabe ahí (colas, TD, contextos de aparato, el bloque de la red) no
+gasta zona: entre los dos hay siempre unos 25,5 KB. Con el xHCI son 11,75 KB
+fijos, 1 KB por aparato si sus contextos son de 32 octetos (2 KB si son de
+64) y 2,5 KB del adaptador de red; con controladoras clásicas, 1,5 KB más,
+y 4 KB de la lista de tramas de cada UHCI con algo conectado. Lo que no
+hace falta hasta que la inicialización ha terminado se reserva al final y
+puede caer por encima de `INIT_ORG`: las listas periódicas de los EHCI
+(`fl_fin`) y el búfer de recepción del adaptador de red (`net_fin`).
+Reparto cuando no cabe todo: primero lo que se enumera (teclados, ratones,
+mandos, memoria, concentradores) y, lo último, el adaptador de red
+(`net_late`). Con `/INFO`, una línea dice lo que queda al acabar la
+enumeración: «Memoria de trabajo libre: N octetos en la zona y M en el
+hueco. Aparatos en uso: K.» Con `DEVICEHIGH` en un bloque de memoria
 superior más pequeño, HSPUSB dice «no me quedo, me falta memoria» sin tocar
 nada (estado de INIT con el bit 9 puesto) y el núcleo lo carga abajo.
 
@@ -385,9 +432,12 @@ Dos reglas para quien toque el código:
 
 ## Límites
 
-- Un solo xHCI (el primero), 8 controladoras en total, 8 aparatos a la vez
-  (concentradores incluidos), 6 concentradores, una memoria USB, un teclado,
-  un ratón, dos mandos y un adaptador de red.
+- Un solo xHCI (el primero), 8 controladoras en total, 12 aparatos en uso a
+  la vez (concentradores incluidos; de ellos, 8 como mucho en el xHCI), 8
+  concentradores, una memoria USB, dos teclados, dos ratones, dos mandos y
+  un adaptador de red. Eran 8 aparatos y 6 concentradores: un MacBook Air
+  con un adaptador de red con concentrador los llenaba («USB: demasiados
+  dispositivos» en el lector de tarjetas).
 - Teclado, ratón, mandos y adaptador de red tienen que estar conectados al
   cargar el driver;
   la memoria USB se puede cambiar después (si no había ninguna al cargar, no
@@ -412,7 +462,13 @@ Dos reglas para quien toque el código:
 La red por USB: `tests/run_red_usb_tests.sh` (ver [RED.md](RED.md),
 «Pruebas»): `-device usb-net` de QEMU en un puerto raíz y detrás de un
 concentrador, con cada clase de controladora, en modo V86 y con los demás
-aparatos a la vez.
+aparatos a la vez. Ahí están también las pruebas de que el adaptador no
+deja a nadie sin teclado, tecleando por el teclado USB con el `sendkey` del
+monitor de QEMU: `tecladoehci` (lo del MacBook Air: el teclado en un EHCI y
+el xHCI con memoria, dos concentradores, ratón y adaptador; con el HSPUSB
+de antes el teclado no escribe), `dosteclados` y `dosratones`, `muchos` (10
+aparatos en uso), `sinsitio` (`-DRED_SIN_SITIO`: el adaptador se queda sin
+memoria y cede) y `sinlista` (`-DFL_FIN_FALLA`).
 
 `tests/run_usbauto_tests.sh build/hispados.img [modo]`: RATONTST (el
 descriptor de informe de los ratones), PC sin 8042 con xHCI y con EHCI

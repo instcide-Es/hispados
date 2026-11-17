@@ -484,6 +484,10 @@ pipe_done:
         je kbd_report
         cmp bx, 1
         je mouse_report
+        cmp bx, PIPE_K2             ; [USB-DOS] el otro teclado y el otro ratón
+        je kbd_report
+        cmp bx, PIPE_M2
+        je mouse_report
         push bx
         sub bx, 2
         call joy_report
@@ -572,6 +576,14 @@ hc_idle:
 ; ---- reserva de memoria (tras lo residente; solo durante el inicio) ----
 ; CX = bytes, DX = alineación (potencia de 2, hasta 4096)
 ; -> BX = desplazamiento en CS, a cero; CF si no cabe
+; [USB-HUECO] La zona empieza en una página física, así que entre el final
+; de lo residente (res_end) y ella queda un hueco de 0 a 4 KB, todo dentro
+; de una página. Antes se perdía, y con él la zona útil bailaba 4 KB según
+; dónde cargara DOS el driver. Ahora se mira primero ahí (gtop): lo que
+; quepa (colas, TD, contextos, el bloque de la red) no gasta zona. La
+; alineación se cuenta desde el final del hueco (una página física), hacia
+; atrás; un desplazamiento «en la zona» (restando mem_off) sale entonces
+; negativo, y zone lo deshace igual.
 zalloc:
         push eax
         push ecx
@@ -583,8 +595,27 @@ zalloc:
         movzx ecx, cx
         movzx edx, dx
         dec edx
-        mov eax, [cs:ztop]
+        movzx ebx, word [cs:gend]       ; (el hueco acaba en una página física)
+        movzx eax, word [cs:gtop]
+        test eax, eax
+        jz .zone0                       ; (todavía no hay hueco)
+        sub eax, ebx
+        add eax, edx
+        not edx
+        and eax, edx
+        not edx
+        add eax, ebx                    ; el sitio, alineado
+        push eax
+        add eax, ecx
+        cmp eax, ebx
+        pop ebx
+        ja .zone0                       ; no cabe en el hueco
+        mov [cs:gtop], ax
+        jmp .fill
+.zone0:
         movzx ebx, word [cs:mem_off]    ; (la zona empieza en una página física)
+
+        mov eax, [cs:ztop]
         sub eax, ebx
         add eax, edx
         not edx
@@ -597,6 +628,7 @@ zalloc:
         cmp eax, [cs:zlimit]
         ja .no
         mov [cs:ztop], eax
+.fill:
         push cs
         pop es
         mov di, bx
@@ -614,6 +646,8 @@ zalloc:
         pop ecx
         pop eax
         ret
+gtop        dw 0                    ; [USB-HUECO] hasta dónde está usado el hueco (0 = no lo hay)
+gend        dw 0                    ; ...y dónde acaba: la primera página física tras lo residente
 
 ; una lista de tramas nueva (4 KB en una página, puede quedar más allá de
 ; los 64 KB de CS) -> EAX = dirección lineal (la física la da lphys); CF si

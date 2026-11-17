@@ -112,21 +112,49 @@ role_net:
         jc .cl
         call net_iftab              ; /INFO: las interfaces de esta configuración
 .found:
-        cmp word [n_blk], 0
+        cmp byte [nh_on], 0
         je .set
         mov byte [d_role], 11       ; ya hay uno: solo se lleva el primero
         mov al, 2
         ret
 .set:
-        call net_setup
-        jc .bad
+        ; [USB-TARDE] No se pone en marcha ahora: gasta memoria de la zona
+        ; (su bloque residente y sus anillos o colas, 2,5 KB), y lo que se
+        ; enumere después (el teclado, el ratón, un concentrador) va
+        ; antes. Se apunta lo necesario y lo hace net_late al acabar la
+        ; enumeración, con lo que quede.
+        push es
+        push cs
+        pop es
+        mov si, np_first
+        mov di, nh_np
+        mov cx, np_last - np_first
+        cld
+        rep movsb
+        pop es
+        mov al, [speed]
+        mov [nh_speed], al
+        mov al, [port]
+        mov [nh_port], al
+        mov eax, [route]
+        mov [nh_route], eax
+        mov ax, [tt_slot]           ; (y tt_port)
+        mov [nh_tt], ax
+        mov al, [cur_slot]
+        mov [nh_slot], al
+        mov al, [cur_pool]
+        mov [nh_pool], al
+        mov ax, [mps0]
+        mov [nh_mps0], ax
+        mov ax, [d_vid]
+        mov [nh_vid], ax
+        mov ax, [d_pid]
+        mov [nh_pid], ax
+        mov byte [nh_on], 1
         mov byte [d_role], 9
         mov al, 1
         ret
-.bad:
-        mov byte [d_role], 6
-        mov al, 2
-        ret
+
 .none:
         cmp byte [np_seen], 0
         jne .unsup
@@ -150,6 +178,80 @@ role_net:
         mov byte [d_role], 10
         mov al, 2
         ret
+
+; [USB-TARDE] Al acabar la enumeración: poner en marcha el adaptador de red
+; que role_net dejó apuntado (nh_*), con la memoria que quede. Si no se
+; puede (no queda sitio, o el adaptador no contesta), se dice, se suelta el
+; aparato y todo lo demás sigue igual: la red nunca le quita el sitio a un
+; teclado o a un ratón.
+net_late:
+        cmp byte [nh_on], 1
+        jne .r
+        mov byte [nh_on], 2         ; (visto: no se admite otro)
+        push es
+        push cs
+        pop es
+        mov si, nh_np
+        mov di, np_first
+        mov cx, np_last - np_first
+        cld
+        rep movsb
+        pop es
+        mov al, [nh_speed]
+        mov [speed], al
+        mov al, [nh_port]
+        mov [port], al
+        mov eax, [nh_route]
+        mov [route], eax
+        mov ax, [nh_tt]
+        mov [tt_slot], ax
+        mov ax, [nh_mps0]
+        mov [mps0], ax
+        mov ax, [nh_vid]
+        mov [d_vid], ax
+        mov ax, [nh_pid]
+        mov [d_pid], ax
+        mov byte [hubf], 0
+        mov word [hub_np], 0        ; (y hub_ttt)
+        mov al, [nh_pool]
+        call pool_sel
+        mov al, [nh_slot]
+        mov [cur_slot], al
+%ifdef RED_SIN_SITIO
+        mov word [fail_msg], msg_nomem
+        jmp .bad                    ; (prueba: como si no quedara memoria)
+%endif
+        call net_setup
+        jnc .r
+.bad:
+        mov si, msg_netsitio
+        cmp word [fail_msg], msg_nomem
+        je .say
+        mov si, msg_netfail
+        call puts
+        mov si, [fail_msg]
+.say:
+        call puts
+        movzx bx, byte [nh_pool]
+        mov byte [pool_used+bx], 0
+        mov al, bl
+        call dev_free
+.r:
+        ret
+nh_on       db 0                    ; 1 = hay un adaptador apuntado; 2 = ya atendido
+nh_speed    db 0
+nh_port     db 0
+nh_slot     db 0
+nh_pool     db 0
+            align 2
+nh_tt       dw 0
+nh_mps0     dw 0
+nh_vid      dw 0
+nh_pid      dw 0
+nh_route    dd 0
+msg_netfail db "Adaptador de red USB: no se usa. ", 0
+msg_netsitio db "Adaptador de red USB: no queda memoria para él (hay muchos aparatos USB", 13, 10
+            db "conectados); no se usa. Lo demás funciona igual.", 13, 10, 0
 
 ; Recorrer el descriptor de configuración que hay en DESC ([ctl_setup+6]
 ; octetos) buscando CDC-ECM -> CF = 0 si lo trae completo (np_*); si no,
@@ -434,6 +536,8 @@ zalloc_np:
 net_setup:
         mov eax, [ztop]
         mov [ns_ztop], eax
+        mov ax, [gtop]
+        mov [ns_gtop], ax
         mov word [fail_msg], msg_nomem
         ; el bloque residente: de red_hold a la zona, ajustado a su sitio
         mov cx, RED_LEN
@@ -647,6 +751,8 @@ net_setup:
 .fail:
         mov eax, [ns_ztop]
         mov [ztop], eax
+        mov ax, [ns_gtop]
+        mov [gtop], ax
         mov word [n_pblk], 0
         stc
         ret
@@ -820,6 +926,7 @@ net_ready:
 .r:
         ret
 
+np_first:
 np_seen     db 0                    ; se ha visto alguna interfaz de red
 np_idx      db 0
 np_mode     db 0                    ; 1 dentro de la de comunicaciones, 2 de la de datos
@@ -839,8 +946,11 @@ np_int_ival db 0
 np_mps_in   dw 0
 np_mps_out  dw 0
 np_int_mps  dw 0
+np_last:
+nh_np       times np_last - np_first db 0   ; [USB-TARDE] los del adaptador apuntado
 ns_blk      dw 0
 ns_ztop     dd 0
+ns_gtop     dw 0
 msg_netok   db "Adaptador de red USB preparado (CDC-ECM), MAC ", 0
 msg_netok2  db ": cargue HSPRED.", 13, 10, 0
 msg_netno   db "Adaptador de red USB ", 0
@@ -1517,6 +1627,8 @@ n_int16:
         pushad
         push es
         push fs
+        mov al, [cur_hc]            ; la controladora elegida se deja como
+        push ax                     ; estaba (aquí se entra desde cualquier sitio)
         ; ¿Hay algo que hacer? Con la trama pedida y sin llegar, nada: se
         ; mira solo en la memoria (el anillo de eventos del xHCI, los TD de
         ; las clásicas), sin tocar las controladoras ni cambiar de pila, que
@@ -1551,6 +1663,8 @@ n_int16:
         call n_pump
         call n_leave
 .y:
+        pop ax
+        MCALL hc_sel
         pop fs
         pop es
         popad

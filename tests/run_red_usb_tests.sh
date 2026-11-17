@@ -28,6 +28,27 @@
 #   memoria                 la memoria convencional libre (MEM /C) con el
 #                           adaptador y sin él: sin él, HSPUSB no se queda
 #                           con nada de la red
+#   tecladoehci             [USB-TARDE] lo del MacBook Air (17/11/2026): el
+#                           teclado en un EHCI y, en el xHCI, memoria, dos
+#                           concentradores encadenados, ratón y el adaptador,
+#                           todo puesto al arrancar. La lista periódica del
+#                           EHCI no cabía en la zona y el teclado salía
+#                           «preparado» y mudo. Se teclea por el teclado USB
+#                           (sendkey del monitor) antes y después de poner
+#                           la red en marcha
+#   dosteclados             [USB-DOS] dos teclados (xHCI y EHCI) y dos
+#                           ratones, con el adaptador: van los cuatro (se
+#                           quita un teclado y se teclea por el otro, en los
+#                           dos sentidos; se mueve un ratón y luego el otro)
+#   muchos                  más de 8 aparatos en uso a la vez (10: la reserva
+#                           era de 8 y en el MacBook se llenaba)
+#   sinsitio                HSPUSB con -DRED_SIN_SITIO (como si al acabar la
+#                           enumeración no quedara memoria para el
+#                           adaptador): se dice, la red no se usa y el
+#                           teclado sigue yendo
+#   sinlista                HSPUSB con -DFL_FIN_FALLA (como si no cupiera la
+#                           lista periódica del EHCI): se dice y no se
+#                           cuelga
 # En cada uno de los de red: HSPUSB /INFO («red (CDC-ECM)», eligiendo la
 # configuración 2), HSPRED lo carga con la MAC del adaptador, HSPRED /INFO,
 # CONFRED (DHCP: 10.0.2.15), PING 10.0.2.2, DESCARGAR de un servidor HTTP
@@ -406,8 +427,215 @@ t_memoria() {
   return $mal
 }
 
+# ---- [USB-TARDE] [USB-DOS] el teclado no se pierde por el adaptador ----
+# El monitor de QEMU (además de la serie): sendkey va al teclado USB.
+MON="-chardev socket,id=mon,path=@T@/mon,server=on,wait=off -mon chardev=mon,mode=readline"
+mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon 2>/dev/null | tr -d '\r'; }
+teclea() {  # una orden, por el teclado USB; espera a que vuelva el indicador
+  local n=$(veces 'A:\>') k
+  python3 -c "
+import sys
+m = {' ': 'spc', '.': 'dot', '\\\\': 'backslash', '-': 'minus'}
+for ch in sys.argv[1]: print(m.get(ch, ch))
+print('ret')" "$1" | while read -r k; do mon "sendkey $k" > /dev/null; sleep 0.15; done
+  espera 'A:\>' $((n + 1)) ${2:-100}
+}
+llega() { if grep -qx -- "$1" $T/log.txt; then ok "tecleado por el teclado USB: $2"; else ko "no llega lo tecleado por el teclado USB: $2"; fi; }
+# lo del Mac: el xHCI lleno de cosas y el teclado en el EHCI
+MACXHCI="-device usb-ehci,id=he -device qemu-xhci,id=hc
+    -device usb-hub,bus=hc.0,port=1,id=hub1 -device usb-hub,bus=hc.0,port=1.1,id=hub2
+    -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1.1"
+usbimg() {
+  dd if=/dev/zero of=$T/usb.img bs=1M count=32 status=none
+  mformat -i $T/usb.img -T 65536 -h 64 -s 32 -v USBDATA ::
+}
+t_tecladoehci() {
+  caso tecladoehci "teclado en un EHCI con el xHCI lleno (memoria, 2 concentradores, ratón y adaptador)" "$SOLOUSB"
+  usbimg
+  arranca $MON $MACXHCI $NET -device usb-mouse,bus=hc.0,port=1.2 $(STICK hc.0),port=2 \
+      -device usb-kbd,bus=he.0,id=k1
+  teclea "echo antesdelared"
+  orden "HSPRED"
+  orden "CONFRED"
+  orden "PING 10.0.2.2 /N:3"
+  teclea "echo conlared"
+  orden "DESCARGAR $U/PRUEBA.BIN" 900
+  teclea "echo trasdescargar"
+  orden "ECHO fin-de-la-prueba"
+  fin c_tecladoehci
+}
+c_tecladoehci() {
+  check "      5.1.1 $ECM"
+  check "  1 HS 0627:0001 03/01/01 -> teclado"
+  check "USB: teclado por EHCI 8086:24CD, ratón por xHCI 1B36:000D."
+  check "Disco USB: 32 MB en la unidad D:"
+  check "Adaptador de red USB preparado (CDC-ECM), MAC $MAC: cargue HSPRED."
+  llega antesdelared "antes de cargar HSPRED"
+  check "Dirección IP  . . . . : 10.0.2.15"
+  check "Paquetes: enviados = 3, recibidos = 3, perdidos = 0"
+  llega conlared "con la red en marcha"
+  check "Guardado en PRUEBA.BIN (150.000 octetos)."
+  llega trasdescargar "después de descargar"
+  checkn "no queda memoria"
+  check "fin-de-la-prueba"
+}
+# dos teclados y dos ratones; $1 = el teclado que se quita a mitad
+dosteclados() {
+  local quitar=$1 i a b
+  arranca $MON $MACXHCI $NET -device usb-mouse,bus=hc.0,port=1.2 \
+      -device usb-kbd,bus=hc.0,port=1.3,id=k1 -device usb-kbd,bus=he.0,id=k2 \
+      -device usb-tablet,bus=he.0,id=t1
+  teclea "echo unteclado$quitar"
+  mon "device_del $quitar" > /dev/null
+  sleep 2
+  teclea "echo elotro$quitar"
+  orden "HSPRED"
+  orden "CONFRED"
+  orden "PING 10.0.2.2 /N:2"
+  teclea "echo conlared$quitar"
+  orden "ECHO fin-de-la-prueba"
+}
+c_dosteclados() {
+  check "    5.3 FS 0627:0001 03/01/01 -> teclado"
+  check "  1 HS 0627:0001 03/01/01 -> teclado"
+  check "Teclado USB preparado."
+  check "Otro teclado USB preparado (van los dos)."
+  llega "unteclado$1" "con los dos teclados puestos"
+  llega "elotro$1" "por el otro teclado, quitado $1"
+  check "Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
+  llega "conlared$1" "por el otro teclado, con la red en marcha"
+  check "fin-de-la-prueba"
+}
+t_dosteclados() {
+  local mal=0
+  caso dosteclados "dos teclados (xHCI y EHCI) con el adaptador; se quita el del xHCI" "$SOLOUSB"
+  dosteclados k1
+  fin c_dosteclados k1 || mal=1
+  caso dosteclados2 "dos teclados (xHCI y EHCI) con el adaptador; se quita el del EHCI" "$SOLOUSB"
+  dosteclados k2
+  fin c_dosteclados k2 || mal=1
+  return $mal
+}
+# dos ratones (uno detrás del concentrador del xHCI y otro en una UHCI): se
+# mueve uno, luego el otro (mouse_set del monitor elige cuál) y MOUSETST ve
+# los dos movimientos
+t_dosratones() {
+  local m1 m2
+  caso dosratones "dos ratones (xHCI y UHCI) con el adaptador: van los dos" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /INFO\r\n'
+  arranca $MON -device qemu-xhci,id=hc -device piix3-usb-uhci,id=hu \
+      -device usb-hub,bus=hc.0,port=1,id=hub1 $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1 \
+      -device usb-mouse,bus=hc.0,port=1.2,id=m1 -device usb-kbd,bus=hc.0,port=1.3 \
+      -device usb-mouse,bus=hu.0,id=m2
+  orden 'A:\HISPADOS\HSPRATON'
+  printf 'BIN\\MOUSETST\r' >&3
+  sleep 3
+  mon "info mice" > $T/mice.txt
+  m1=$(grep -o "Mouse #[0-9]*: QEMU HID" $T/mice.txt | sed -n 1p | tr -dc 0-9)
+  m2=$(grep -o "Mouse #[0-9]*: QEMU HID" $T/mice.txt | sed -n 2p | tr -dc 0-9)
+  echo "  ratones de QEMU: #$m1 y #$m2"
+  mon "mouse_set $m1" > /dev/null; sleep 1; mon "mouse_move 40 0" > /dev/null
+  sleep 1; mon "mouse_set $m2" > /dev/null; sleep 1; mon "mouse_move 0 24" > /dev/null
+  sleep 1; mon "mouse_set $m1" > /dev/null; sleep 1; mon "mouse_move 0 24" > /dev/null
+  sleep 1; mon "mouse_set $m2" > /dev/null; sleep 1; mon "mouse_move 40 0" > /dev/null
+  sleep 1; mon "mouse_button 1" > /dev/null; sleep 1; mon "mouse_button 0" > /dev/null
+  sleep 1; mon "sendkey ret" > /dev/null
+  espera 'A:\>' 3 100
+  orden "ECHO fin-de-la-prueba"
+  fin c_dosratones "$m1" "$m2"
+}
+c_dosratones() {
+  if [ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]; then ok "QEMU ve los dos ratones activos (los sondea HSPUSB)"; else ko "QEMU no ve dos ratones activos"; fi
+  check "Ratón USB preparado."
+  check "Otro ratón USB preparado (van los dos)."
+  check "Adaptador de red USB preparado (CDC-ECM)"
+  check "X=320 Y=100 B=0"
+  # cada ratón mueve 40 en X y 24 en Y (12 en la pantalla): con los dos, el doble que con uno
+  local x y
+  x=$(grep -oE "^X=[0-9]+ Y=[0-9]+ B=" $T/log.txt | sed 's/^X=\([0-9]*\).*/\1/' | sort -n | tail -1)
+  y=$(grep -oE "^X=[0-9]+ Y=[0-9]+ B=" $T/log.txt | sed 's/.* Y=\([0-9]*\).*/\1/' | sort -n | tail -1)
+  x1=$(grep -oE "^X=[0-9]+ Y=100 B=0" $T/log.txt | sed 's/^X=\([0-9]*\).*/\1/' | sort -n | tail -1)
+  echo "  X llega a ${x:-?} (con el primer ratón solo, a ${x1:-?}); Y llega a ${y:-?}"
+  if [ -n "$x" ] && [ -n "$x1" ] && [ "$x1" -gt 320 ] && [ "$x" -gt "$x1" ]; then ok "los dos ratones mueven en X"; else ko "los dos ratones mueven en X"; fi
+  if [ -n "$y" ] && [ "$y" -gt 112 ]; then ok "los dos ratones mueven en Y"; else ko "los dos ratones mueven en Y"; fi
+  check "Pulsaciones del botón izquierdo: 1"
+  check "fin-de-la-prueba"
+}
+# Más de 8 aparatos en uso (lo que llenaba la reserva en el MacBook Air: con
+# el adaptador y sus dos concentradores ya no cabía el lector de tarjetas):
+# 3 en el xHCI (dos concentradores y el adaptador) y, en un EHCI con UHCI
+# compañeras, cinco concentradores, el teclado y un ratón
+t_muchos() {
+  caso muchos "más de 8 aparatos en uso (3 en el xHCI y 7 en las UHCI compañeras de un EHCI)" "$SOLOUSB"
+  arranca $MON -device qemu-xhci,id=hc \
+      -device ich9-usb-ehci1,id=he,addr=1d.7,multifunction=on \
+      -device ich9-usb-uhci1,masterbus=he.0,firstport=0,addr=1d.0,multifunction=on \
+      -device ich9-usb-uhci2,masterbus=he.0,firstport=2,addr=1d.1,multifunction=on \
+      -device ich9-usb-uhci3,masterbus=he.0,firstport=4,addr=1d.2,multifunction=on \
+      -device usb-hub,bus=hc.0,port=1,id=hub1 -device usb-hub,bus=hc.0,port=1.1,id=hub2 \
+      $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1.1 \
+      -device usb-hub,bus=he.0,port=1,id=c1 -device usb-hub,bus=he.0,port=1.1,id=c2 \
+      -device usb-hub,bus=he.0,port=1.2,id=c3 -device usb-kbd,bus=he.0,port=1.1.1,id=k1 \
+      -device usb-hub,bus=he.0,port=1.3,id=c4 -device usb-hub,bus=he.0,port=1.4,id=c5 \
+      -device usb-mouse,bus=he.0,port=1.2.1
+  teclea "echo diezaparatos"
+  orden "HSPRED"
+  orden "CONFRED"
+  orden "PING 10.0.2.2 /N:2"
+  teclea "echo conlared"
+  orden "ECHO fin-de-la-prueba"
+  fin c_muchos
+}
+c_muchos() {
+  check "      5.1.1 $ECM"
+  check "      1.1.1 FS 0627:0001 03/01/01 -> teclado"
+  check "      1.2.1 FS 0627:0001 03/01/02 -> ratón"
+  check "Aparatos en uso: 10."
+  checkn "demasiados dispositivos"
+  check "Ratón USB preparado."
+  check "Adaptador de red USB preparado (CDC-ECM), MAC $MAC: cargue HSPRED."
+  llega diezaparatos "con 10 aparatos en uso"
+  check "Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
+  llega conlared "con la red en marcha"
+  check "fin-de-la-prueba"
+}
+
+# sin sitio para el adaptador: no se usa, y el teclado no lo nota
+t_sinsitio() {
+  caso sinsitio "sin memoria para el adaptador (HSPUSB con -DRED_SIN_SITIO): la red cede" "$SOLOUSB" "-DRED_SIN_SITIO"
+  arranca $MON $MACXHCI $NET -device usb-kbd,bus=he.0,id=k1
+  teclea "echo sigueelteclado"
+  orden "HSPRED"
+  orden "ECHO fin-de-la-prueba"
+  fin c_sinsitio
+}
+c_sinsitio() {
+  check "      5.1.1 $ECM"
+  check "Adaptador de red USB: no queda memoria para él (hay muchos aparatos USB"
+  checkn "Adaptador de red USB preparado"
+  check "Teclado USB preparado."
+  llega sigueelteclado "sin la red"
+  check "No se ha encontrado ninguna tarjeta de red que HSPRED sepa usar."
+  check "fin-de-la-prueba"
+}
+# sin sitio para la lista periódica del EHCI: se dice (y lo del xHCI sigue)
+t_sinlista() {
+  caso sinlista "sin memoria para la lista periódica del EHCI (HSPUSB con -DFL_FIN_FALLA)" "$SOLOUSB" "-DFL_FIN_FALLA"
+  arranca -device usb-ehci,id=he -device qemu-xhci,id=hc -device usb-kbd,bus=he.0 $NET $(USBNET hc.0)
+  orden "HSPRED"
+  orden "CONFRED"
+  orden "PING 10.0.2.2 /N:2"
+  orden "ECHO fin-de-la-prueba"
+  fin c_sinlista
+}
+c_sinlista() {
+  check "USB: no queda memoria para la lista periódica de un EHCI: su teclado, ratón,"
+  check "Adaptador de red USB preparado (CDC-ECM)"
+  check "Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
+  check "fin-de-la-prueba"
+}
+
 # ---- todos, de dos en dos ----
-TODOS="xhci xhcihub uhci uhcihub ohci ohcihub ehci todo v86 v86uhci sinecm sinusb3 pciusb consola memoria"
+TODOS="xhci xhcihub uhci uhcihub ohci ohcihub ehci todo v86 v86uhci sinecm sinusb3 pciusb consola memoria tecladoehci dosteclados dosratones muchos sinsitio sinlista"
 CASOS=${CASOS:-$TODOS}
 JOBS=${JOBS:-2}
 fail=0

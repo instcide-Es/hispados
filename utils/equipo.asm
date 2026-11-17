@@ -5446,8 +5446,39 @@ sec_res:
         je .dve
         loop .dv
 .dve:
+        ; Sin unidad de DOS (solo teclado y ratón, o la memoria de arranque
+        ; que sigue atendiendo por INT 13h, como en un MacBook), HSPUSB no
+        ; está en esa cadena: se le busca también por sus vectores (INT 08h
+        ; siempre que lleva teclado, ratón, mando o red; INT 13h con el
+        ; disco de arranque), mirando su nombre en la cabecera (CS:000Bh).
+        cmp byte [usb_res], 0
+        jne .dvu
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x08*4+2]
+        call .eshu
+        mov ax, [es:0x13*4+2]
+        call .eshu
+        cmp byte [usb_res], 0
+        je .dvu
+        PR "(HSPUSB, sin unidad)"
+.dvu:
         call crlf
         call fixseg
+        jmp .dvx
+; ¿es AX el segmento de HSPUSB? -> usb_res = 1 (conserva ES)
+.eshu:
+        push es
+        mov es, ax
+        cmp dword [es:11], 0x55505348       ; "HSPU"
+        jne .eshn
+        cmp word [es:15], 0x4253            ; "SB"
+        jne .eshn
+        mov byte [usb_res], 1
+.eshn:
+        pop es
+        ret
+.dvx:
         ; ---- XMS ----
         mov ax, 0x4300
         int 0x2F

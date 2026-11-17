@@ -20,6 +20,7 @@ hr_yo       dw 0xFFFF
 hr_b1       dw 0xFFFF               ; botones 1 (izquierdo), 2 (derecho) y 3
 hr_b2       dw 0xFFFF
 hr_b3       dw 0xFFFF
+HR_LEN      equ $ - hr_on
 
 ; CS:SI = informe -> CF si es otro informe (otro identificador); si no, BX =
 ; botones (bit 0 izquierdo, 1 derecho, 2 central), CX = movimiento en X y

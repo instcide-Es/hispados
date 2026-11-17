@@ -433,6 +433,11 @@ no se admite (sin CDC-ECM)».
   a alta velocidad.
 - El adaptador tiene que estar conectado al cargar HSPUSB, y no se puede
   quitar con HSPRED cargado (los envíos fallarían tras 2 s cada uno).
+- El adaptador es lo último que HSPUSB pone en marcha, con la memoria de
+  trabajo que quede después del teclado, el ratón, la memoria USB y los
+  concentradores: si no queda (muchos aparatos USB a la vez), lo dice
+  («Adaptador de red USB: no queda memoria para él...») y no se usa; lo
+  demás sigue igual. Ver USB.md, «Memoria».
 - Un adaptador a la vez (el primero). Sin multidifusión.
 - La velocidad del enlace (10/100/1000) no se dice.
 - Un programa que no consulte el teclado mientras espera recibe solo con el
@@ -674,11 +679,16 @@ HSPUSB y `LH HSPRED`); un adaptador «sin CDC-ECM» (HSPUSB ensamblado con
 `-DRED_SIN_ECM`); `/2` con el xHCI de Intel simulado (`-DINTEL_FAKE`); con
 una tarjeta PCI además (HSPRED elige la PCI; `HSPRED /USB`, el adaptador);
 `CONSOLA` (un servidor TCP) por el adaptador, con el cliente de
-`tests/run_consola_tests.sh`; y la memoria que queda libre con el adaptador
-y sin él. En cada caso de red:
+`tests/run_consola_tests.sh`; la memoria que queda libre con el adaptador
+y sin él; y que el adaptador no deja a nadie sin teclado (tecleando por el
+teclado USB con el `sendkey` del monitor de QEMU): el teclado en un EHCI con
+el xHCI lleno, como en el MacBook Air (`tecladoehci`), dos teclados y dos
+ratones a la vez (`dosteclados`, `dosratones`), 10 aparatos en uso
+(`muchos`), y el adaptador sin memoria (`sinsitio`) o el EHCI sin lista
+periódica (`sinlista`). En cada caso de red:
 `HSPUSB /INFO`, `HSPRED`, `HSPRED /INFO`, `CONFRED` (DHCP), `PING`,
 `DESCARGAR` (150.000 octetos comparados con mtools, y un 404), `PING` por
-nombre, `HSPRED /U` y volver a cargarlo. Dos QEMU a la vez; unos 3 minutos.
+nombre, `HSPRED /U` y volver a cargarlo. Dos QEMU a la vez; unos 5 minutos.
 `CASOS="xhci uhcihub"` hace solo ésos. Lo que no puede probar: ver «Límites»
 de los adaptadores USB.
 

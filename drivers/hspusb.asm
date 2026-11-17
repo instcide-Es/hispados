@@ -45,10 +45,11 @@
 ;  (hubs; hasta HUB_DEPTH encadenados, HUB_N a la vez, POOL_N dispositivos):
 ;   - la primera memoria USB (clase 08h, SCSI, Bulk-Only Transport), que se
 ;     ofrece a DOS como una unidad nueva (FAT12/FAT16, con o sin particiones);
-;   - un teclado USB (HID, protocolo de arranque): las teclas se entregan como
+;   - teclados USB (HID, protocolo de arranque; [USB-DOS] hasta dos a la vez:
+;     el de dentro y el de fuera de un portátil): las teclas se entregan como
 ;     si vinieran del teclado PS/2 (orden D2h del controlador 8042), así que
 ;     funcionan la BIOS, KEYB y todos los programas;
-;   - un ratón USB (o un panel táctil que ofrezca una interfaz de ratón de
+;   - ratones USB (hasta dos; o un panel táctil que ofrezca una interfaz de ratón de
 ;     arranque, 03/01/02; en un dispositivo con varias interfaces se elige
 ;     esa): se entrega a HSPRATON (INT 33h AX=48D0h) o, si no está, como
 ;     paquetes PS/2 (orden D3h del 8042);
@@ -158,15 +159,20 @@ red_start:
 ; durante el inicio), los búferes comunes y, si hay xHCI, sus anillos y
 ; contextos. Lo demás (colas de las controladoras clásicas, contextos de
 ; salida de cada aparato del xHCI, listas de tramas) se reserva detrás según
-; hace falta (zalloc, fl_alloc: lib/usb_hc.inc).
+; hace falta (zalloc, fl_alloc: lib/usb_hc.inc), o [USB-HUECO] en el hueco
+; que queda entre res_end y esa página. [USB-TARDE] Lo que no hace falta
+; hasta que la inicialización termina se reserva al final, donde estaba
+; ella: las listas periódicas de los EHCI (fl_fin) y el búfer de recepción
+; del adaptador de red (net_fin). El adaptador de red es lo último que se
+; pone en marcha (net_late): nunca le quita la memoria a un teclado.
 DESC        equ 0x1000
 PIPE_BUF    equ 0x1100                ; un búfer de informe (40h) por tubería
 KBD_BUF     equ PIPE_BUF
 MOU_BUF     equ PIPE_BUF + 0x40
 JOY_BUF     equ PIPE_BUF + 0x80
-CBW_BUF     equ 0x1200
-CSW_BUF     equ 0x1240
-COM_END     equ 0x1280                ; fin de lo común
+CBW_BUF     equ 0x1280
+CSW_BUF     equ 0x12C0
+COM_END     equ 0x1300                ; fin de lo común
 IN_CTX      equ 0x1300                ; xHCI (900h: no cruza de página)
 CMD_RING    equ 0x1C00
 EVT_RING    equ 0x1D00
@@ -176,19 +182,24 @@ PINT_RING   equ 0x2000                ; un anillo (100h) por tubería
 KINT_RING   equ PINT_RING
 MINT_RING   equ PINT_RING + 0x100
 JINT_RING   equ PINT_RING + 0x200
-EP0_RINGS   equ 0x2400                ; un anillo de EP0 por dispositivo
-ERST        equ 0x2C00
-DCBAA       equ 0x2C40                ; MAX_SLOTS + 1 entradas de 8 bytes
-X_END       equ 0x2D00                ; fin de lo del xHCI
+EP0_RINGS   equ 0x2600                ; un anillo de EP0 por dispositivo (XPOOL_N)
+ERST        equ 0x2E00
+DCBAA       equ 0x2E40                ; MAX_SLOTS + 1 entradas de 8 bytes
+X_END       equ 0x2F00                ; fin de lo del xHCI
 JOY_N       equ 2                     ; mandos de juego a la vez
-PIPE_N      equ 2 + JOY_N             ; tuberías de interrupción: teclado, ratón y mandos
+PIPE_K2     equ 2 + JOY_N             ; [USB-DOS] el segundo teclado y el segundo ratón (el
+PIPE_M2     equ 3 + JOY_N             ; de dentro y el de fuera de un portátil)
+PIPE_N      equ 4 + JOY_N             ; tuberías de interrupción: teclado, ratón, mandos y
+                                      ; el otro teclado y el otro ratón
 PIPE_NET    equ PIPE_N                ; [USB-RED] y dos más, las del adaptador de red: la
 PIPE_NST    equ PIPE_N + 1            ; de recepción (bulk) y la de avisos (interrupción),
                                       ; que usan las mismas rutinas
-POOL_N      equ 8                     ; dispositivos a la vez (concentradores incluidos)
+POOL_N      equ 12                    ; dispositivos a la vez (concentradores incluidos)
+XPOOL_N     equ 8                     ; ...de ellos, en el xHCI (los primeros de la reserva:
+                                      ; anillo de EP0, contexto de salida y slot cada uno)
 INIT_ORG    equ 0xA800                ; dónde se ejecuta la inicialización (.init)
-MAX_SLOTS   equ POOL_N
-HUB_N       equ 6                     ; concentradores a la vez
+MAX_SLOTS   equ XPOOL_N
+HUB_N       equ 8                     ; concentradores a la vez
 HUB_DEPTH   equ 3                     ; niveles de concentradores encadenados
 REP_DELAY   equ 9                   ; repetición: 0,5 s y unas 9 por segundo
 REP_RATE    equ 2
@@ -245,7 +256,9 @@ ip_pool     times PIPE_N + 2 db 0   ; su aparato en la reserva
 ip_tog      times PIPE_N + 2 db 0   ; UHCI: testigo de alternancia
             align 2
 ip_len      dw 8, 4
-            times JOY_N + 2 dw 0    ; bytes que se piden
+            times JOY_N dw 0        ; bytes que se piden
+            dw 8, 4
+            times 2 dw 0
 ip_mps      times PIPE_N + 2 dw 0
 ip_ring     times PIPE_N db 0, 1    ; xHCI: índice y ciclo de su anillo
 ip_got      dw 0                    ; bytes del informe que acaba de llegar
@@ -272,6 +285,7 @@ n_blk       dw 0                    ; el bloque (código y datos), en CS; 0 = no
 n_pblk      dw 0                    ; clásicas: cola y TD de sus dos tuberías (c_pipe_blk)
 n_rxbuf     dw 0                    ; búfer de la trama que llega (y, detrás, los demás)
 oldrep      times 8 db 0
+oldrep2     times 8 db 0            ; [USB-DOS] el del segundo teclado
 newrep      times 8 db 0
 rep_key     db 0
 rep_cnt     db 0
@@ -2343,23 +2357,17 @@ ev_ok:
         ret
 
 ; pedir el siguiente informe
-kbd_queue:
-        push bx
-        xor bx, bx
-        call pipe_queue
-        pop bx
-        ret
-mou_queue:
-        push bx
-        mov bx, 1
-        call pipe_queue
-        pop bx
-        ret
-
 ; ---- teclado: comparar el informe con el anterior ----
+; BX = su tubería (0 o PIPE_K2): cada teclado, con su informe anterior
 kbd_report:
         pushad
-        mov bx, KBD_BUF
+        mov bp, oldrep
+        test bx, bx
+        jz .k1
+        mov bp, oldrep2
+.k1:
+        shl bx, 6
+        add bx, PIPE_BUF
         call zone
         xor di, di
 .cp:
@@ -2378,7 +2386,7 @@ kbd_report:
         jb .ro
         ; modificadores
         mov dl, [cs:newrep]
-        mov dh, [cs:oldrep]
+        mov dh, [cs:bp]
         xor bx, bx
 .mo:
         mov al, dl
@@ -2399,7 +2407,7 @@ kbd_report:
         ; teclas soltadas
         mov di, 2
 .rl:
-        mov al, [cs:oldrep+di]
+        mov al, [cs:bp+di]
         cmp al, 4
         jb .rn
         mov si, newrep
@@ -2422,7 +2430,7 @@ kbd_report:
         mov al, [cs:newrep+di]
         cmp al, 4
         jb .pn
-        mov si, oldrep
+        mov si, bp
         call in_rep
         jnc .pn
         mov [cs:rep_key], al
@@ -2438,7 +2446,7 @@ kbd_report:
         xor di, di
 .sv:
         mov al, [cs:newrep+di]
-        mov [cs:oldrep+di], al
+        mov [cs:bp+di], al
         inc di
         cmp di, 8
         jb .sv
@@ -2851,10 +2859,38 @@ kbc_drain:
         ret
 
 ; ---- ratón ----
+; BX = su tubería (1 o PIPE_M2). [USB-DOS] El mapa del informe (hr_*) es el
+; del primer ratón; el del segundo está en hr2 y se cambia por él mientras
+; se atiende su informe.
 mouse_report:
+        cmp bx, 1
+        je mouse_rep1
+        call hr_swap
+        call mouse_rep1
+        call hr_swap
+        ret
+; cambiar el mapa del informe (hr_*) por el del otro ratón (hr2)
+hr_swap:
+        push bx
+        push ax
+        xor bx, bx
+.l:
+        mov al, [cs:hr_on+bx]
+        xchg al, [cs:hr2+bx]
+        mov [cs:hr_on+bx], al
+        inc bx
+        cmp bx, HR_LEN
+        jb .l
+        pop ax
+        pop bx
+        ret
+hr2         db 0, 0, 0, 0, 0, 0, 0, 0
+            dw 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF
+mouse_rep1:
         pushad
         push es
-        mov bx, MOU_BUF
+        shl bx, 6
+        add bx, PIPE_BUF
         call zone
         mov si, bx
         cmp byte [cs:hr_on], 0
@@ -3252,13 +3288,28 @@ init:
         mov si, msg_no8042
         call puts
 .k8042:
-        call kbd_queue
+        xor bx, bx
+        call pipe_queue
+        ; [USB-DOS] ¿otro teclado?
+        cmp byte [ip_on+PIPE_K2], 0
+        je .h1
+        mov si, msg_kbd2
+        call puts
+        mov bx, PIPE_K2
+        call pipe_queue
 .h1:
         cmp byte [m_on], 0
         je .h2
         mov si, msg_mouse
         call puts
-        call mou_queue
+        mov bx, 1
+        call pipe_queue
+        cmp byte [ip_on+PIPE_M2], 0
+        je .h2
+        mov si, msg_mouse2
+        call puts
+        mov bx, PIPE_M2
+        call pipe_queue
 .h2:
         call hid_where
         ; mandos de juego
@@ -4588,16 +4639,30 @@ enum_one:
 .np0:
         mov byte [want_k], 0
         mov byte [want_m], 0
+        ; [USB-DOS] hasta dos teclados y dos ratones (el primero que
+        ; aparece, en la tubería de siempre; el otro, en PIPE_K2 o PIPE_M2)
         cmp byte [p_kbd], 0
         je .hm
+        xor al, al
         cmp byte [k_on], 0
+        je .wk
+        mov al, PIPE_K2
+        cmp byte [ip_on+PIPE_K2], 0
         jne .hm
+.wk:
+        mov [kp], al
         mov byte [want_k], 1
 .hm:
         cmp byte [p_mou], 0
         je .hc
+        mov al, 1
         cmp byte [m_on], 0
+        je .wm
+        mov al, PIPE_M2
+        cmp byte [ip_on+PIPE_M2], 0
         jne .hc
+.wm:
+        mov [mp], al
         mov byte [want_m], 1
 .hc:
         mov al, [want_k]
@@ -4704,14 +4769,14 @@ pool_find:
         jne .ok
 .x2:
         inc bx
-        cmp bx, POOL_N
+        cmp bx, XPOOL_N
         jb .x1
         xor bx, bx
 .x3:
         cmp byte [pool_used+bx], 0
         je .x4
         inc bx
-        cmp bx, POOL_N
+        cmp bx, XPOOL_N
         jb .x3
 .full:
         stc
@@ -5258,6 +5323,13 @@ role_hid:
         je .m2
         movzx eax, byte [pm_if]
         call set_boot
+        cmp byte [mp], 1
+        je .ml
+        call hr_swap                ; [USB-DOS] el segundo ratón: su mapa, en hr2
+        call m_layout
+        call hr_swap
+        jmp .m2
+.ml:
         call m_layout
 .m2:
         cmp byte [cur_type], HCT_XHCI
@@ -5297,7 +5369,9 @@ role_hid:
         or eax, edx
         mov [ep_d4], eax
         mov al, [pk_dci]
-        mov dx, KINT_RING
+        movzx dx, byte [kp]
+        shl dx, 8
+        add dx, PINT_RING
         mov cx, [pk_mps]
         mov ah, 7                               ; interrupción IN
         call set_ep
@@ -5313,7 +5387,9 @@ role_hid:
         or eax, edx
         mov [ep_d4], eax
         mov al, [pm_dci]
-        mov dx, MINT_RING
+        movzx dx, byte [mp]
+        shl dx, 8
+        add dx, PINT_RING
         mov cx, [pm_mps]
         mov ah, 7
         call set_ep
@@ -5321,39 +5397,37 @@ role_hid:
         call cfg_ep_cmd
         jc .err
 .cfgd:
-        mov al, [cur_slot]
         cmp byte [want_k], 0
         je .o1
-        mov [k_slot], al
-        mov ah, [pk_dci]
-        mov [k_dci], ah
+        movzx bx, byte [kp]
+        mov al, [pk_dci]
         mov cx, [pk_mps]
-        mov [ip_mps], cx
-        call cap_len
-        mov [k_len], cx
-        mov ah, [cur_pool]
-        mov [ip_pool], ah
-        xor bx, bx
-        call pipe_ready
-        mov byte [k_on], 1
+        call .pipe
 .o1:
         cmp byte [want_m], 0
         je .o2
-        mov [m_slot], al
-        mov ah, [pm_dci]
-        mov [m_dci], ah
+        movzx bx, byte [mp]
+        mov al, [pm_dci]
         mov cx, [pm_mps]
-        mov [ip_mps+2], cx
-        call cap_len
-        mov [m_len], cx
-        mov ah, [cur_pool]
-        mov [ip_pool+1], ah
-        mov bx, 1
-        call pipe_ready
-        mov byte [m_on], 1
+        call .pipe
 .o2:
         clc
 .err:
+        ret
+; la tubería BX, del aparato actual: AL = su extremo (DCI), CX = paquete máximo
+.pipe:
+        mov [ip_dci+bx], al
+        mov al, [cur_slot]
+        mov [ip_slot+bx], al
+        mov al, [cur_pool]
+        mov [ip_pool+bx], al
+        mov si, bx
+        shl si, 1
+        mov [ip_mps+si], cx
+        call cap_len
+        mov [ip_len+si], cx
+        call pipe_ready
+        mov byte [ip_on+bx], 1
         ret
 ; [USB-RATON] el ratón (interfaz pm_if): ¿da los informes de arranque que
 ; se le acaban de pedir? GET_PROTOCOL = 0, sí. Si no lo dice, o no es de
@@ -5485,6 +5559,8 @@ zero_zone:
 
 want_k      db 0
 want_m      db 0
+kp          db 0                    ; [USB-DOS] la tubería que le toca al teclado (0 o PIPE_K2)
+mp          db 1                    ; ...y al ratón (1 o PIPE_M2)
 disk_found  db 0
             db 0
 mps0        dw 8
@@ -6205,6 +6281,8 @@ msg_disk    db "Disco USB: ", 0
 msg_cc      db "xHCI: código de finalización ", 0
 msg_kbd     db "Teclado USB preparado.", 13, 10, 0
 msg_mouse   db "Ratón USB preparado.", 13, 10, 0
+msg_kbd2    db "Otro teclado USB preparado (van los dos).", 13, 10, 0
+msg_mouse2  db "Otro ratón USB preparado (van los dos).", 13, 10, 0
 msg_joy     db "Mando USB preparado: ", 0
 msg_joy2    db ", ", 0
 msg_joy3    db " ejes y ", 0

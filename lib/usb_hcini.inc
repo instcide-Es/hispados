@@ -455,7 +455,7 @@ init_fin:
         jz .s2
 .sn:
         inc bx
-        cmp bx, POOL_N
+        cmp bx, XPOOL_N
         jb .sl
         mov [.spare], al
 .s2:
@@ -500,7 +500,7 @@ init_fin:
         ret
 .gn:
         inc bx
-        cmp bx, POOL_N
+        cmp bx, XPOOL_N
         jb .gl
         ret
 .parked     db 0
@@ -575,6 +575,47 @@ fl_fin:
 msg_nolist  db "USB: no queda memoria para la lista periódica de un EHCI: su teclado, ratón,", 13, 10
             db "mando o adaptador de red no se usa.", 13, 10, 0
 
+; /INFO: la memoria de trabajo que queda al acabar la enumeración (antes
+; de poner en marcha el adaptador de red, que es el último)
+info_mem:
+        cmp byte [opt_info], 0
+        jne .go
+        ret
+.go:
+        pushad
+        mov si, msg_imem
+        call puts
+        mov eax, [zlimit]
+        sub eax, [ztop]
+        call putdec
+        mov si, msg_imem2
+        call puts
+        movzx eax, word [gend]
+        movzx edx, word [gtop]
+        sub eax, edx
+        call putdec
+        mov si, msg_imem3
+        call puts
+        xor eax, eax
+        xor bx, bx
+.l:
+        cmp byte [pool_used+bx], 0
+        je .n
+        inc eax
+.n:
+        inc bx
+        cmp bx, POOL_N
+        jb .l
+        call putdec
+        mov si, msg_imem4
+        call puts
+        popad
+        ret
+msg_imem    db "Memoria de trabajo libre: ", 0
+msg_imem2   db " octetos en la zona y ", 0
+msg_imem3   db " en el hueco. Aparatos en uso: ", 0
+msg_imem4   db ".", 13, 10, 0
+
 ; ---- la zona de memoria (tras lo residente, en una página física) ----
 ; -> CF si no hay memoria
 mem_setup:
@@ -606,6 +647,8 @@ mem_setup:
         and eax, 0xFFFFF000
         sub eax, ebx
         mov [ztop], eax
+        mov [gend], ax              ; [USB-HUECO] el hueco: de lo residente a
+        mov word [gtop], res_end    ; la primera página
         ; con alguna UHCI: una lista de tramas ya (la de la primera que
         ; tenga algo conectado, o la de reserva)
         cmp byte [n_hc+HCT_UHCI], 0
@@ -1120,6 +1163,9 @@ usb_enum:
         ; los receptores de Bluetooth que se hacen pasar por teclado o ratón
         ; (HID proxy), solo si no ha aparecido uno de verdad
         call proxy_retry
+        ; [USB-TARDE] y, lo último, el adaptador de red (con lo que quede)
+        call info_mem
+        call net_late
         mov al, [disk_found]
         or al, [k_on]
         or al, [m_on]
