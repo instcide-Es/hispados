@@ -147,6 +147,26 @@ def mkfloppy():
             o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
         run('mcopy', '-o', '-i', out, dst, '::' + f)
     print(out)
+    mkoficina()
+
+def mkoficina():
+    """[0.9.22] El disquete «Oficina»: la familia de oficina (HVPO del Makefile)
+    y sus datos (PROGSDAT), en \\HISPADOS\\PROGS, como quedan en el disco duro.
+    INSTALAR lo pide al acabar; también se puede copiar a mano con
+    XCOPIAR A:\\HISPADOS C:\\HISPADOS /S."""
+    hvpo = os.environ.get('HVPO', '').split()
+    if not hvpo:
+        return
+    out = os.path.join(B, 'hispados-oficina.img')
+    if os.path.exists(out):
+        os.remove(out)
+    run('mformat', '-C', '-f', '1440', '-v', 'OFICINA', '-i', out, '::')
+    run('mmd', '-i', out, '::HISPADOS', '::HISPADOS/PROGS')
+    for f in hvpo:
+        run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/PROGS/' + f)
+    for f in os.environ.get('PROGSDAT', '').split():
+        run('mcopy', '-i', out, f, '::HISPADOS/PROGS/' + os.path.basename(f))
+    print(out)
 
 if __name__ == '__main__':
     main()
