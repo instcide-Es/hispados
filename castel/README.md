@@ -1,36 +1,49 @@
-# Castel — el compilador (etapa 0)
+# Castel — el compilador
 
 **Castel** es el lenguaje de sistemas en español (familia Pascal/Oberon) para escribir
-los sistemas operativos de Rescoldo. Esta carpeta es el **primer compilador** (etapa 0):
-escrito en Python en el PC, lee Castel y **saca ensamblador para NASM**, que se ensambla a un
-`.COM` de DOS de 16 bits, solo con instrucciones del 8086. Es el espíritu de CIMIENTOS.md:
-algo vivo pronto, afinar sobre vivo.
+los sistemas operativos de Rescoldo. En esta carpeta hay **dos compiladores que hacen lo
+mismo**: el primero (etapa 0), `ccastel.py`, escrito en Python en el PC; y **el compilador
+escrito en Castel** (`compilador/`), que corre dentro de Hispa-8086 y **se compila a sí
+mismo**. Los dos leen Castel y sacan ensamblador de 16 bits, solo con instrucciones del
+8086; y hay **un ensamblador propio**, también escrito en Castel, que da el mismo programa
+que NASM. Es el espíritu de CIMIENTOS.md: algo vivo pronto, afinar sobre vivo.
 
 Definición del lenguaje: [docs/CASTEL.md](docs/CASTEL.md). Estrategia y fases:
 [docs/CIMIENTOS.md](docs/CIMIENTOS.md).
 
 Estado (17/11/2026): hechas la **Fase 1** (subconjunto mínimo), la **Fase 3** (crecer el
 lenguaje), la **Fase 2** (el hito real: la orden **MAS** de Hispa-8086, escrita en Castel
-y comprobada contra la de ensamblador) y la **primera parte de la Fase 4**: lo que hace
-falta para que el compilador se pueda escribir en Castel (números de 32 bits, programas en
-varios archivos y una biblioteca escrita en Castel). Lo siguiente es la segunda parte: el
-ensamblador propio y el compilador en Castel.
+y comprobada contra la de ensamblador) y la **Fase 4 entera, el autohospedaje**: primero lo
+que hacía falta (números de 32 bits, programas en varios archivos y una biblioteca escrita
+en Castel) y después el **ensamblador propio**, el **compilador escrito en Castel** y el
+**arranque en tres pasos**: el compilador, dentro de Hispa-8086, se compila a sí mismo y el
+resultado, compilado otra vez, sale idéntico. Lo siguiente es la Fase 5 (32 bits).
 
 ## Qué hay aquí
 
-- `ccastel.py` — el compilador: léxico (UTF-8, palabras clave con sus acentos) → análisis
-  sintáctico descendente → tipos y comprobaciones → NASM de 16 bits para `.COM`. Lee el
-  programa y los módulos que importa, y lo deja todo en un solo `.asm`.
+- `ccastel.py` — el compilador de la etapa 0, en Python: léxico (UTF-8, palabras clave con
+  sus acentos) → análisis sintáctico descendente → tipos y comprobaciones → NASM de 16 bits.
+  Lee el programa y los módulos que importa, y lo deja todo en un solo `.asm`.
+- `compilador/` — **el compilador escrito en Castel** (`castel.cas` y sus módulos): lo
+  mismo que `ccastel.py`, parte por parte, para correr dentro de Hispa-8086. Ver más abajo.
+  `compilador/pruebas/prueba_frente.sh` prueba aparte su lector y su gramática (el árbol
+  que montan, contra el de `ccastel.py`).
+- `ensambla.py` y `ensamblador/ensambla.cas` — **el ensamblador propio**: la referencia en
+  Python y ENSAMBLA, el de verdad, en Castel. Dan el mismo archivo que NASM
+  ([docs/ENSAMBLADOR.md](docs/ENSAMBLADOR.md)).
 - `biblioteca/` — **la biblioteca, escrita en Castel**: `textos.cas`, `archivos.cas`,
-  `memoria.cas` y `argumentos.cas` (CASTEL.md §12). Se usan con `importar`.
-- `compilar.sh ENTRADA.cas [SALIDA.COM] [-I CARPETA]` — compila a `.asm` y ensambla a
-  `NOMBRE.COM` (`-I`: una carpeta más donde buscar módulos).
+  `memoria.cas`, `argumentos.cas` y `lejos.cas` (CASTEL.md §12). Se usan con `importar`.
+- `compilar.sh ENTRADA.cas [SALIDA.COM] [-I CARPETA]` — compila (con `ccastel.py`) a
+  `.asm` y ensambla (con NASM) a `NOMBRE.COM`, o a `NOMBRE.EXE` si el programa es de
+  «modelo grande» (`-I`: una carpeta más donde buscar módulos).
 - `probar.sh PROGRAMA.COM [argumentos]` — lo ejecuta dentro de Hispa-8086 (QEMU) y enseña
   lo que escribe.
-- `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA). Tarda
-  cerca de un minuto. Con `AZAR=3 ./pruebas.sh`, además, tres programas de cuentas al azar
-  de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits (`azar32.py`, unas
-  200), comparadas con lo que tienen que dar.
+- `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA,
+  el ensamblador propio contra NASM, el compilador en Castel contra `ccastel.py` y el
+  arranque en tres pasos). Tarda unos minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el
+  arranque, que es lo más largo). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
+  cuentas al azar de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits
+  (`azar32.py`, unas 200), comparadas con lo que tienen que dar.
 - `ejemplos/` — los programas de ejemplo; `ejemplos/esperado/` — lo que tiene que escribir
   cada uno; `ejemplos/errores/` — programas mal escritos, con el error que tienen que dar;
   `ejemplos/partes/` — los módulos que importan `modulos.cas` y algunos de los errores.
@@ -44,7 +57,7 @@ $ ./probar.sh ejemplos/PARES.COM
 ...
 $ ./pruebas.sh
 ...
-== 117 bien, 0 mal ==
+== 128 bien, 0 mal ==
 ```
 
 ## Qué entiende Castel hoy
@@ -53,6 +66,8 @@ $ ./pruebas.sh
 - **Varios archivos**: `importar Módulo` trae lo `público` de otro archivo (constantes,
   tipos, variables y funciones), que se usa por su nombre o como `Módulo.nombre`. Todo
   acaba en un solo `.COM`, y de cada módulo solo entra lo que se usa.
+- **Programas grandes**: con `modelo grande` el programa es un `.EXE` con un segmento de
+  código por módulo y otro para los datos y la pila (CASTEL.md §11 bis).
 - **Tipos**: `nat8`/`byte`, `nat16`, `ent16`, `bool`; **`nat32` y `ent32`** (32 bits en
   `DX:AX`, solo con instrucciones del 8086: variables, parámetros, resultados, arreglos,
   campos, todas las cuentas, comparaciones, conversiones, `escribir` y `para`);
@@ -141,18 +156,92 @@ NUMERA** (un TYPE con el número de cada línea delante). Cada una ocupa menos d
 `pruebas.sh` las ejecuta en Hispa-8086 y compara lo que escriben con la misma cuenta hecha
 en Python.
 
+## La Fase 4, segunda parte: el autohospedaje
+
+Tres piezas, y las tres están hechas y probadas (`pruebas.sh`):
+
+### 1. El ensamblador propio
+
+El compilador sigue sacando **texto de ensamblador** (el mismo que antes entendía solo
+NASM), y un ensamblador nuestro lo convierte en el programa: `ensambla.py` (la referencia,
+en Python) y **ENSAMBLA** (`ensamblador/ensambla.cas`, escrito en Castel, un `.COM` de
+17 K). Entienden la parte de NASM que el compilador usa y dan **el mismo archivo que NASM,
+octeto a octeto**: la forma más corta de cada instrucción y los mismos saltos cortos y
+largos. Detalles en [docs/ENSAMBLADOR.md](docs/ENSAMBLADOR.md).
+
+### 2. El compilador, escrito en Castel
+
+`compilador/castel.cas` es `ccastel.py` pasado a Castel, función por función: **CASTEL**.
+
+```
+A:\> CASTEL PROG.CAS            (deja PROG.ASM; -o OTRO.ASM, -I CARPETA, --todo, --gasto)
+A:\> ENSAMBLA PROG.ASM          (deja PROG.COM, o PROG.EXE si es de modelo grande)
+A:\> PROG
+```
+
+| Archivo | Qué es | En `ccastel.py` |
+|---|---|---|
+| `base.cas` | los nombres («átomos»), los textos, el árbol y los errores | las listas y diccionarios de Python |
+| `lexico.cas` | el lector | 1. `Lexico` |
+| `sintactico.cas` | la gramática (el árbol) y los archivos de los módulos | 2. `Sintactico` y 5. `Cargador` |
+| `cuentas.cas` | cuentas de 64 bits para las constantes | los enteros sin límite de Python |
+| `tablas.cas` | los tipos, lo declarado en cada módulo, las locales | `Tipo`, `Modulo`, `Var` |
+| `tipos.cas` | tipos y comprobaciones: `resuelve`, `const`, `tipo`, `compatible` | 3 y media 4 |
+| `salida.cas` | las líneas que se generan y su limpieza | `self.lineas` y `limpia()` |
+| `expr.cas` | generar: lugares, operandos, expresiones, llamadas | 4, de «lugares» a `gen_int` |
+| `sent.cas` | generar: sentencias y funciones | 4, `gen_funcion`, `gen_sent`... |
+| `apoyo.cas` | las rutinas de apoyo (lo escribe `haz_apoyo.py` desde `ccastel.py`) | `APOYO` |
+| `programa.cas` | declarar, generar todo, ver qué va y escribirlo | `declara`, `genera` |
+
+Saca **el mismo ensamblador que `ccastel.py`, letra a letra** (los 24 ejemplos, la
+biblioteca entera, ENSAMBLA y él mismo) y **dice los mismos errores**, con su archivo, su
+línea y su columna. Las decisiones que pedía un 8086 con 640 K:
+
+- **No cabe en un `.COM`**: el compilador son unos 77 K de código. Por eso existe el
+  **«modelo grande»** (CASTEL.md §11 bis): un `.EXE` con un segmento de código por módulo
+  (el mayor ocupa 14 K) y otro de datos y pila. CASTEL.EXE ocupa 95 K.
+- **Las tablas no caben en el segmento de datos**: van a **memoria lejana** (módulo `Lejos`:
+  bloques pedidos al DOS, leídos y escritos con `leer_palabra`/`poner_palabra`). Todo son
+  referencias de 16 bits a párrafos de esos bloques: cada nombre distinto se guarda una vez
+  (un «átomo»), cada nudo del árbol ocupa 16 octetos, cada tipo y cada nombre declarado,
+  otros 16. Pide unos 380 K de bloques; para compilarse a sí mismo usa menos de la mitad
+  (`CASTEL ... --gasto` lo dice al acabar).
+- **El árbol entero no cabe**: de cada módulo se guarda el árbol de las declaraciones; el
+  cuerpo de cada función se analiza al cargar (para decir los errores de sintaxis en su
+  sitio) y se suelta, y se vuelve a leer del archivo cuando toca generarla.
+- **El ensamblador generado tampoco cabe** (700 K el del propio compilador): las líneas de
+  cada función se guardan en memoria mientras se genera, se limpian (`limpia()` solo junta
+  líneas vecinas de un mismo trozo) y van a un archivo temporal (`CASTEL.$$$`). Al final se
+  lee dos veces: una para ver a quién nombra cada trozo vivo (qué va al programa) y otra
+  para copiarlo.
+- **Los nombres de archivo del DOS**: `importar Argumentos` busca `ARGUMENT.CAS` (las ocho
+  primeras letras) en la carpeta del programa, en las de `-I` y en la del propio CASTEL.
+- Sus límites (función de hasta unas 4000 líneas de ensamblador, 160 variables por función,
+  24 módulos, 1000 piezas en una lista de valores iniciales...) los dice con un mensaje si
+  se tocan. La columna de un error se queda en 255 en las líneas más largas.
+
+### 3. El arranque en tres pasos
+
+```
+paso 1   ccastel.py   compila  compilador/castel.cas   ->  CASTEL.EXE       (en el PC, con NASM)
+paso 2   CASTEL.EXE   compila  CASTEL.CAS              ->  C2.ASM -> C2.EXE (en Hispa-8086, con ENSAMBLA)
+paso 3   C2.EXE       compila  CASTEL.CAS              ->  C3.ASM -> C3.EXE (en Hispa-8086, con ENSAMBLA)
+```
+
+Los pasos 2 y 3 dan **exactamente el mismo archivo** (el ensamblador y el `.EXE`), que es
+además el del paso 1: el compilador se sostiene solo. `pruebas.sh` lo hace en un disco duro
+de Hispa-8086 (C:, 20 megas), porque el ensamblador del compilador (700 K) y su temporal
+no caben en un disquete. Cada compilación tarda cerca de un minuto en QEMU.
+
 ## Lo que NO entra todavía
 
-Punteros lejanos como tipo, copiar arreglos y estructuras enteros, programas `.EXE`. Ver
-CASTEL.md §13.
+Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.md §13.
 
-## Lo siguiente: la segunda parte de la Fase 4
+## Lo siguiente
 
-1. **Decidir la salida** del compilador autohospedado: seguir sacando texto para NASM (hoy
-   NASM hace además el trabajo de los saltos largos) o un ensamblador propio mínimo; en
-   Hispa-8086 no hay NASM, así que para compilar *dentro* del sistema hace falta lo segundo.
-2. **Reescribir** léxico → sintáctico → generador en Castel, compilarlo con `ccastel.py`
-   (etapa 0) y, con el resultado, compilarse a sí mismo: las dos salidas tienen que ser
-   idénticas. `pruebas.sh` vale tal cual para comprobar el compilador nuevo.
-3. Lo que eso pida por el camino: casi seguro, más memoria que un segmento para las tablas
-   (programas `.EXE` o punteros lejanos) y escribir en archivos con memoria intermedia.
+1. **Usarlo**: llevar CASTEL y ENSAMBLA al disquete de Hispa-8086 y escribir en Castel más
+   órdenes del sistema (ya no hace falta el PC para compilarlas).
+2. **Que el lenguaje crezca escrito en sí mismo**: a partir de aquí cada mejora se hace en
+   `compilador/` (y, mientras se quiera conservar la etapa 0, también en `ccastel.py`: las
+   pruebas comparan los dos).
+3. **La Fase 5**: 32 bits de verdad (386, modo protegido), para el sistema de los 90.

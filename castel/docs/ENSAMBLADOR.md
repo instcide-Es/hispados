@@ -60,7 +60,14 @@ genera ese caso). Lo que no entiende lo dice con el archivo y la línea:
 
 ## ENSAMBLA por dentro
 
-Es un `.COM` de unos 14 K. El archivo se lee entero en cada pasada (no se guarda en memoria).
+Es un `.COM` de unos 17 K. El archivo no se guarda en memoria: se lee entero en la primera
+pasada y en la última. Las pasadas de en medio (el compilador entero necesita 35 para que
+todos sus saltos se asienten) solo mueven etiquetas y alargan saltos, así que se hacen sobre
+un **resumen** que deja la primera en memoria lejana: tramos de tamaño fijo, etiquetas y
+saltos. Sale lo mismo que leyendo el archivo cada vez, y es decenas de veces más rápido. (Si
+algún salto no va a una etiqueta sola, o el resumen no cabe, las hace todas sobre el archivo.)
+
 Las etiquetas van a **memoria lejana** (módulo `Lejos` de la biblioteca): las `L_n` y `T_n`,
 que son casi todas, en dos tablas por su número; las demás, con su nombre, en una tabla de
-dispersión. Así ensambla programas mucho mayores que él: el compilador entero.
+dispersión. Así ensambla programas mucho mayores que él: el compilador entero, de 37.000
+líneas y 95 K.

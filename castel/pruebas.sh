@@ -23,9 +23,18 @@
 #      ensamblan todos los ejemplos, la biblioteca entera, las formas de
 #      ensamblador/formas.asm y el propio ENSAMBLA, y cada archivo tiene que
 #      salir igual, octeto a octeto, que el de NASM.
+#   6. El compilador escrito en Castel (compilador/castel.cas -> CASTEL.EXE),
+#      dentro de Hispa-8086: saca el mismo ensamblador que ccastel.py para
+#      todos los ejemplos, la biblioteca entera y ENSAMBLA, y dice los mismos
+#      errores. Y EL ARRANQUE EN TRES PASOS, en un disco duro: (1) ccastel.py
+#      compila el compilador; (2) ese CASTEL.EXE, dentro de Hispa-8086, se
+#      compila a sí mismo y ENSAMBLA lo ensambla; (3) el resultado se compila
+#      otra vez. Los pasos 2 y 3 tienen que dar el mismo ensamblador y el
+#      mismo .EXE (que son, además, los del paso 1 con NASM).
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
+#   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos (lo más largo)
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
 #                                 (azar32.py): lo que calculan frente a lo
@@ -404,7 +413,112 @@ done
 if [ -z "$distintos" ]; then ok "ENSAMBLA (en Castel, dentro de Hispa-8086): los $iguales archivos, iguales que con NASM (él mismo incluido)"
 else ko "ENSAMBLA no da lo mismo que NASM en:$distintos"; fi
 
-# ------------------------------------------------- 6. cuentas al azar (AZAR=n)
+# ------------------------------------------------ 6. el compilador en Castel
+echo "== El compilador escrito en Castel, dentro de Hispa-8086 =="
+A=$T/aut
+mkdir $A $A/ref $A/sal
+# paso 1: ccastel.py compila el compilador, y NASM lo ensambla
+if python3 -I $AQUI/ccastel.py $AQUI/compilador/castel.cas -o $A/c1.asm > $T/comp.txt 2>&1 && nasm -f bin $A/c1.asm -o $A/CASTEL.EXE 2>> $T/comp.txt; then
+  ok "paso 1: ccastel.py compila el compilador (castel.cas -> CASTEL.EXE, $(stat -c %s $A/CASTEL.EXE) octetos)"
+else ko "el compilador en Castel no compila: $(head -1 $T/comp.txt)"; fi
+# un disquete con la biblioteca en \BIB, los módulos de ejemplo en \PARTES,
+# los ejemplos, la biblioteca entera (--todo), ENSAMBLA y los errores
+cp $H/build/hispa8086-1440.img $T/c.img
+mmd -i $T/c.img ::BIB ::PARTES
+for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+mcopy -i $T/c.img $A/CASTEL.EXE ::
+{ printf '@ECO OFF\r\n'
+  for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas; do
+    n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
+    todo=; [ $n = toda ] && todo=--todo
+    mcopy -i $T/c.img $f ::$N.CAS
+    python3 -I $AQUI/ccastel.py $todo $f -o $A/ref/$N.ASM -I $AQUI/ejemplos/partes > /dev/null 2>&1
+    printf 'CASTEL %s.CAS -I BIB -I PARTES %s > %s.SAL\r\n' $N "$todo" $N
+  done
+  i=0
+  for f in $AQUI/ejemplos/errores/*.cas; do
+    i=$((i + 1)); N=$(printf 'E%02d' $i)
+    mcopy -i $T/c.img $f ::$N.CAS
+    echo "$N $(basename $f .cas)" >> $A/errores.txt
+    printf 'CASTEL %s.CAS -I BIB -I PARTES > %s.SAL\r\n' $N $N
+  done
+  printf 'ECO [castel-fin]\r\n'; } > $T/AUTOEXEC.BAT
+mcopy -o -i $T/c.img $T/AUTOEXEC.BAT ::
+qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
+  -drive file=$T/c.img,format=raw,if=floppy,index=0 -boot a -no-reboot > /dev/null 2>&1 &
+QPID=$!
+sleep 4
+hecho=0
+for ((i = 0; i < 300; i++)); do
+  pantalla p
+  if grep -qF '[castel-fin]' $T/p.txt; then hecho=1; break; fi
+  sleep 1
+done
+mon quit 0.5
+wait $QPID 2>/dev/null
+QPID=
+[ $hecho = 1 ] || ko "CASTEL: el lote de los ejemplos no ha llegado al final"
+mcopy -n -i $T/c.img '::*.ASM' '::*.SAL' $A/sal/ > /dev/null 2>&1
+iguales=0
+distintos=
+for f in $A/ref/*.ASM; do
+  N=$(basename $f .ASM)
+  if cmp -s $f $A/sal/$N.ASM; then iguales=$((iguales + 1)); else distintos="$distintos $N"; fi
+done
+if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos, biblioteca entera y ENSAMBLA)"
+else ko "CASTEL no saca el mismo ensamblador que ccastel.py en:$distintos"; fi
+iguales=0
+distintos=
+while read N n; do
+  esperado=$(sed -n 's/^; ERROR: //p' $AQUI/ejemplos/errores/$n.cas | head -1)
+  dicho=$(tr -d '\r' < $A/sal/$N.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1 | sed 's/^.*\.CAS://')
+  if [ "$dicho" = "$esperado" ]; then iguales=$((iguales + 1)); else distintos="$distintos $n"; fi
+done < $A/errores.txt
+if [ -z "$distintos" ]; then ok "CASTEL: los $iguales errores, dichos igual que ccastel.py (con su línea y su columna)"
+else ko "CASTEL no dice igual que ccastel.py los errores de:$distintos"; fi
+
+# el arranque en tres pasos, en un disco duro (los archivos no caben en un disquete)
+if [ -z "${SIN_ARRANQUE:-}" ]; then
+  echo "== El arranque en tres pasos: el compilador se compila a sí mismo =="
+  python3 $H/prueba/haz_duro.py $A/hd.img > /dev/null
+  P=$A/hd.img@@32256
+  mmd -i $P ::BIB
+  mcopy -i $P $A/CASTEL.EXE ::
+  mcopy -i $P $T/ens/nasm/ensambla.bin ::ENSAMBLA.COM
+  for f in $AQUI/compilador/*.cas; do mcopy -i $P $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  for f in $AQUI/biblioteca/*.cas; do mcopy -i $P $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  cp $H/build/hispa8086-1440.img $T/d.img
+  printf '@ECO OFF\r\nC:\r\nCASTEL CASTEL.CAS -o C2.ASM -I BIB > P2.SAL\r\nENSAMBLA C2.ASM C2.EXE > E2.SAL\r\nC2 CASTEL.CAS -o C3.ASM -I BIB > P3.SAL\r\nENSAMBLA C3.ASM C3.EXE > E3.SAL\r\nECO [castel-fin]\r\n' > $T/AUTOEXEC.BAT
+  mcopy -o -i $T/d.img $T/AUTOEXEC.BAT ::
+  qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
+    -drive file=$T/d.img,format=raw,if=floppy,index=0 -drive file=$A/hd.img,format=raw,if=ide,index=0 \
+    -boot a -no-reboot > /dev/null 2>&1 &
+  QPID=$!
+  sleep 4
+  hecho=0
+  for ((i = 0; i < 900; i++)); do
+    pantalla p
+    if grep -qF '[castel-fin]' $T/p.txt; then hecho=1; break; fi
+    sleep 2
+  done
+  mon quit 0.5
+  wait $QPID 2>/dev/null
+  QPID=
+  [ $hecho = 1 ] || ko "el arranque no ha llegado al final"
+  mkdir $A/arr
+  mcopy -n -i $P '::C2.*' '::C3.*' '::*.SAL' $A/arr/ > /dev/null 2>&1
+  if [ -s $A/arr/C2.ASM ] && cmp -s $A/c1.asm $A/arr/C2.ASM; then ok "paso 2: CASTEL se compila a sí mismo dentro de Hispa-8086: el mismo ensamblador que el paso 1 ($(wc -l < $A/arr/C2.ASM) líneas)"
+  else ko "paso 2: el ensamblador no es el del paso 1: $(tr -d '\r' < $A/arr/P2.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1)"; fi
+  if [ -s $A/arr/C2.EXE ] && cmp -s $A/CASTEL.EXE $A/arr/C2.EXE; then ok "paso 2: ENSAMBLA lo ensambla: el mismo CASTEL.EXE que el paso 1 con NASM ($(stat -c %s $A/arr/C2.EXE) octetos)"
+  else ko "paso 2: el .EXE no es el del paso 1: $(tr -d '\r' < $A/arr/E2.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1)"; fi
+  if [ -s $A/arr/C3.ASM ] && cmp -s $A/arr/C2.ASM $A/arr/C3.ASM; then ok "paso 3: el resultado se compila otra vez: el mismo ensamblador que el paso 2"
+  else ko "paso 3: el ensamblador no es el del paso 2: $(tr -d '\r' < $A/arr/P3.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1)"; fi
+  if [ -s $A/arr/C3.EXE ] && cmp -s $A/arr/C2.EXE $A/arr/C3.EXE; then ok "paso 3: y el mismo .EXE: el compilador se sostiene solo"
+  else ko "paso 3: el .EXE no es el del paso 2: $(tr -d '\r' < $A/arr/E3.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1)"; fi
+fi
+
+# ------------------------------------------------- 7. cuentas al azar (AZAR=n)
 if [ -n "${AZAR:-}" ]; then
   echo "== Castel: cuentas al azar =="
   for ((s = 1; s <= AZAR; s++)); do

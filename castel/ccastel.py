@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # =============================================================================
-#  ccastel.py - compilador de Castel (etapa 0, Fases 1, 3 y primera parte de la 4).
+#  ccastel.py - compilador de Castel (etapa 0, Fases 1 a 4).
 #  Castel: lenguaje de sistemas en español, familia Pascal/Oberon.
 #  Este es el PRIMER compilador, escrito en Python en el PC: lee Castel
 #  (docs/CASTEL.md) y SACA ENSAMBLADOR (NASM) para un .COM de DOS de 16 bits,
 #  solo con instrucciones del 8086. Luego NASM remata.
 #
-#  uso:   python3 -I ccastel.py ENTRADA.cas [-o SALIDA.asm] [-I CARPETA]...
-#         (sin -o, escribe ENTRADA.asm al lado; -I: dónde más buscar módulos)
+#  uso:   python3 -I ccastel.py ENTRADA.cas [-o SALIDA.asm] [-I CARPETA]... [--todo]
+#         (sin -o, escribe ENTRADA.asm al lado; -I: dónde más buscar módulos;
+#         --todo: no deja fuera lo que no se usa, para las pruebas)
 #
-#  Entiende: módulo con principal; varios archivos (importar, público); constante
+#  Tiene un gemelo escrito en Castel, castel/compilador/ (CASTEL.EXE), que
+#  corre dentro de Hispa-8086 y saca el mismo ensamblador, letra a letra:
+#  LO QUE SE CAMBIE AQUÍ HAY QUE CAMBIARLO ALLÍ (pruebas.sh compara los dos).
+#  Si se tocan las rutinas de APOYO: python3 -I compilador/haz_apoyo.py
+#
+#  Entiende: módulo con principal; varios archivos (importar, público); «modelo
+#  grande» (un .EXE con un segmento de código por módulo); constante
 #  (con expresiones), variable (globales con valor inicial), tipo; nat8/byte,
 #  nat16, ent16, nat32, ent32 (32 bits en DX:AX), bool, arreglo
 #  [N] de T, estructura, puntero a T; funciones con y sin retorno, parámetros

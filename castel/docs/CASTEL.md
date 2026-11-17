@@ -2,11 +2,13 @@
 
 *Castel: un corte de «Castellano». Un lenguaje de sistemas en español, de la familia Pascal/Oberon,
 para escribir sistemas operativos. Este documento dice cómo se escribe y qué hace cada cosa;
-es lo que entiende hoy el compilador (`ccastel.py`). Primera versión: 15/11/2026 (Fase 0).
+es lo que entienden hoy los dos compiladores (`ccastel.py`, en Python, y CASTEL, el escrito
+en Castel, que hacen lo mismo). Primera versión: 15/11/2026 (Fase 0).
 Puesto al día el 17/11/2026 con la Fase 3 (arreglos, estructuras, punteros, `ref`, `paso`,
 `según`, bits, `interrupción`), la Fase 2 (la orden MAS, escrita en Castel) y la primera parte
 de la Fase 4 (números de 32 bits, programas en varios archivos y la biblioteca escrita en
-Castel).*
+Castel), y con la segunda (el «modelo grande» de la sección 11 bis, el módulo `Lejos` y el
+compilador y el ensamblador escritos en Castel).*
 
 Regla de oro: **el núcleo, pequeño.** Lo que el lenguaje no sabe decir se hace en un bloque
 `ensamblador`, y lo que queda para más adelante está en la sección 13.
@@ -599,8 +601,13 @@ fin Programa.
 - Los módulos no tienen código «de arranque»: sus variables empiezan a cero o con su valor
   inicial, y si algo hay que preparar, lo hace la primera función que lo necesite (así lo
   hace Memoria).
-- Todo acaba en **un solo `.COM`**: no hay archivos intermedios ni enlazador. Los errores de
-  dentro de un módulo se dicen con su archivo, su línea y su columna.
+- Todo acaba en **un solo `.COM`** (o un `.EXE`: sección 11 bis): no hay archivos intermedios
+  ni enlazador. Los errores de dentro de un módulo se dicen con su archivo, su línea y su
+  columna.
+- Dentro de Hispa-8086 (o de un DOS), donde los nombres de archivo son de ocho letras, CASTEL
+  busca el módulo en el archivo que se llama como sus **ocho primeras letras**:
+  `importar Argumentos` es `ARGUMENT.CAS`. Lo busca en la carpeta del programa, en las dadas
+  con `-I` y en la carpeta donde está el propio CASTEL.
 
 ---
 
@@ -727,9 +734,9 @@ dentro, cada una ocupa menos de 1,5 K.
 
 ## 13. Lo que queda para más adelante
 
-- **Autohospedaje** (segunda parte de la Fase 4): el compilador, escrito en Castel, y un
-  ensamblador propio mínimo para no depender de NASM dentro de Hispa-8086. Lo que hacía falta
-  antes (32 bits, módulos, textos, archivos y memoria) ya está. Ver CIMIENTOS.md y el README.
+- (El **autohospedaje** ya está: el compilador escrito en Castel, CASTEL, y el ensamblador
+  propio, ENSAMBLA, corren dentro de Hispa-8086 y el compilador se compila a sí mismo. Ver el
+  README y ENSAMBLADOR.md.)
 - **Punteros lejanos** (`seg:desp`) como tipo. Mientras, `leer_byte` y compañía.
 - **Copiar arreglos y estructuras enteros** (`a := b`) y valores iniciales de estructuras.
 - **El salto a 32 bits de verdad**, con los registros del 386 (Fase 5). (Los programas

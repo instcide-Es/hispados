@@ -204,7 +204,14 @@ la elijo: hace el primer compilador abordable.
   en Castel. Números de 32 bits (`nat32`, `ent32`), programas en varios archivos (`importar`
   y `público`) y una biblioteca escrita en Castel: textos, archivos del DOS, un montón de
   memoria y los argumentos; con un programa de verdad hecho con todo ello, la orden CONTAR.
-  Queda la segunda parte: el ensamblador propio y el compilador en Castel.)*
+  Segunda parte, hecha el 17/11/2026: el **ensamblador propio** (`ensambla.py` y ENSAMBLA,
+  escrito en Castel: el mismo archivo que NASM), el **«modelo grande»** (programas `.EXE` de
+  varios segmentos, para lo que no cabe en 64 K), **el compilador escrito en Castel**
+  (`castel/compilador/`: el mismo ensamblador que `ccastel.py`, letra a letra) y **el
+  arranque en tres pasos**: dentro de Hispa-8086 el compilador se compila a sí mismo y el
+  resultado, compilado otra vez, sale idéntico. Castel se sostiene solo. De las dos opciones
+  del apartado 4, hemos acabado con las dos: el compilador sigue sacando texto (A), y el
+  ensamblador es nuestro (B).)*
 - **Fase 5 — Saltar a 32 bits:** con el lenguaje ya sólido, empezar el SO de los 90.
 
 Cada fase es un hito pequeño y comprobable, al estilo de cómo venimos haciendo Hispa-DOS.
