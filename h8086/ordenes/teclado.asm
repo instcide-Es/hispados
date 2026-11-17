@@ -126,8 +126,24 @@ int9:
         cmp byte [activo], 0
         je .pasa
         in al, 0x60
+        ; el prefijo E0h de las teclas grises (las flechas del bloque aparte,
+        ; AltGr...) no se le pasa a la BIOS: con el controlador de los AT, al
+        ; leer ella el puerto otra vez ya le saldría el código de detrás, se
+        ; perdería el prefijo y la tecla contaría dos veces. Se atiende aquí,
+        ; y a la BIOS se le deja dicho donde ella lo apunta (40:96h, bit 1:
+        ; «lo último fue un E0h»), para que la tecla siguiente la tome por
+        ; gris (con BloqNum, una flecha y no una cifra)
+        cmp al, 0xE0
+        jne .normal
+        mov byte [con_e0], 1
+        mov bx, 0x40
+        mov ds, bx
+        or byte [0x96], 0x02
+        jmp short .atendida
+.normal:
         call traduce
         jnc .pasa
+.atendida:
         in al, 0x61                 ; la tecla, atendida
         mov ah, al
         or al, 0x80

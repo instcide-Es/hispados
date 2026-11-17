@@ -33,14 +33,14 @@ ko() { echo "  FAIL $1" | tee -a $T/salida.txt; fail=1; }
 : > $T/salida.txt
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.25}"; }
 tecla() { local k; for k in "$@"; do mon "sendkey $k" 0.12; done; }
-escribe() {
+escribe() { teclea "$1"; tecla ret; sleep 0.8; }
+teclea() {    # como escribe, pero sin el Intro del final
   local t="$1" i c
   for ((i=0; i<${#t}; i++)); do
     c="${t:$i:1}"
     case "$c" in ' ') tecla spc;; '.') tecla dot;; '*') tecla shift-8;; '<') tecla shift-comma;; '>') tecla shift-dot;; '=') tecla equal;; '/') tecla slash;; ':') tecla shift-semicolon;; '\') tecla backslash;;
       '|') tecla shift-backslash;; ';') tecla semicolon;; '$') tecla shift-4;; '"') tecla shift-apostrophe;; '%') tecla shift-5;; '(') tecla shift-9;; ')') tecla shift-0;; ',') tecla comma;; '-') tecla minus;; '+') tecla shift-equal;; '_') tecla shift-minus;; [A-Z]) tecla "shift-${c,,}";; *) tecla "$c";; esac
   done
-  tecla ret; sleep 0.8
 }
 # la pantalla de texto (80x25, un octeto de letra y otro de color), a texto
 pantalla() {
@@ -87,7 +87,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp $IMG/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.11 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.12 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -98,7 +98,7 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.11" "VER: "
+esta p2 "Hispa-8086 versión 0.12" "VER: "
 escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"; escribe "dir"
 pantalla p2
 esta p2 "23 archivos, " "DIR: "
@@ -138,7 +138,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.11" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.12" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -478,7 +478,7 @@ if mdir -i $T/part.img :: 2> /dev/null | grep -q "DURO"; then ok "la etiqueta (/
 # y ahora, sin disquete: tiene que arrancar solo
 arranca_duro $T/hd.img 486
 pantalla k6
-esta k6 "Hispa-8086 0.11 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
+esta k6 "Hispa-8086 0.12 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
 esta k6 'C:\>' "y se queda en C:: "
 escribe "limpiar"; escribe "dir"; escribe "hola desde el duro"; escribe "mostrar leeme.txt"
 pantalla k7
@@ -708,7 +708,8 @@ apaga
 
 . prueba/partes_09.sh
 . prueba/partes_10.sh
-PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 v86 pasar duro formatea sistema partir medidas fuentes"
+. prueba/partes_11.sh
+PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 flechas v86 v86_flechas pasar duro formatea sistema partir medidas fuentes"
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

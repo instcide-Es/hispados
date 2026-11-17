@@ -35,10 +35,11 @@
 DOS_MAYOR   equ 3                   ; lo que contesta INT 21h/30h: el nivel
 DOS_MENOR   equ 30                  ; de MS-DOS 3.30, que es el objetivo
 LIN_MAX     equ 126                 ; letras de una línea de órdenes
+HIST_TAM    equ 384                 ; octetos para las líneas tecleadas antes (flechas arriba y abajo)
 RUTA_MAX    equ 80
 DIR_MAX     equ 64                  ; letras del directorio de trabajo
 PILA_TAM    equ 768
-VERSION10   equ 11                  ; la versión del núcleo (0.11: el 11)
+VERSION10   equ 12                  ; la versión del núcleo (0.12: el 12)
 FILES_MAX   equ 64                  ; lo más que admite FILES= de CONFIG.SYS
 
 ; el procesador
@@ -530,6 +531,8 @@ f06:
         mov al, [bp+R_DX]
         cmp al, 0xFF
         jne pon_car_dos
+        cmp byte [tecla_cod], 0     ; (el código de una flecha, por dar)
+        jne .hay
         mov ah, 1
         int 0x16
         jnz .hay
@@ -578,6 +581,8 @@ f0A:
 f0B:
         mov al, 0xFF
         cmp word [red_ent], 0
+        jne .x
+        cmp byte [tecla_cod], 0     ; (el código de una flecha, por dar)
         jne .x
         mov ah, 1
         int 0x16
@@ -648,6 +653,9 @@ f35:
 ;   2  cuántos archivos hay abiertos en la unidad DL (0 = A:) -> AX
 ;   3  con una sola disquetera: el disquete que hay puesto es el de la unidad
 ;      DL (lo dicen FORMATEA y SISTEMA, que lo han pedido ellas)
+;   8  la línea que se lea a continuación del teclado empieza con el texto de
+;      DS:DX, acabado en 0 (EDIT, en BASIC) -> AX = 4564h; CF=1 si la entrada
+;      o la salida están redirigidas
 ;   4  cuántos sectores se han leído (AX) y escrito (DX) de verdad desde el
 ;      arranque: para medir lo que ahorra la reserva
 ;   5  las medidas de la unidad DL, en ES:DI (nueve palabras: sectores por
@@ -733,6 +741,18 @@ fE8:
         mov [bp+R_AX], ax
         ret
 .n7:
+        cmp al, 8                   ; 8: la línea que se lea a continuación
+        jne .n8                     ; del teclado empieza con el texto de
+        mov ax, [red_ent]           ; DS:DX (acabado en 0), para corregirlo
+        or ax, [red_sal]            ; -> AX = 4564h («dE»). Con la entrada o
+        jnz f_error                 ; la salida redirigidas, CF=1
+        mov ax, [bp+R_DX]
+        mov [ed_pre], ax
+        mov ax, [bp+R_DS]
+        mov [ed_pre+2], ax
+        mov word [bp+R_AX], 0x4564
+        ret
+.n8:
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
         mov bh, VERSION10
@@ -977,9 +997,10 @@ pon_num32_ancho:
         pop bx
         pop ax
         ret
-; espera una tecla -> AL (las que no son letra, como las flechas: 0). Si la
-; entrada está redirigida ([red_ent]), es el octeto siguiente del archivo;
-; cuando se acaba, vuelve el teclado
+; espera una tecla -> AL. Las que no son letra (las flechas, Inicio, las de
+; función...) llegan en dos veces, como en DOS: primero un 0 y, a la lectura
+; siguiente, el código de la tecla. Si la entrada está redirigida ([red_ent]),
+; es el octeto siguiente del archivo; cuando se acaba, vuelve el teclado
 tecla:
         cmp byte [con_directo], 0   ; (el dispositivo CON: siempre el teclado)
         jne .teclado
@@ -1015,12 +1036,52 @@ tecla:
 .fin:
         mov word [red_ent], 0
 .teclado:
+        xor al, al                  ; ¿queda por dar el código de una tecla
+        xchg al, [tecla_cod]        ; de las de dos veces?
+        test al, al
+        jnz .x
         xor ah, ah
         int 0x16
+        call tecla_es_ext
+        jne .x
+        mov [tecla_cod], ah         ; el código, para la lectura siguiente
+        xor al, al
+.x:
         ret
-; lee una línea en ES:DI, de CX letras como mucho, hasta Intro; Retroceso
-; borra. Deja un 0 al final y CX = las letras leídas. Conserva lo demás
+; ¿es AX (lo que da INT 16h) una tecla de las que no son letra? ZF=1 si lo es
+; (su código está en AH). Lo son las que traen AL=0 y, en los teclados de 101
+; teclas, las del bloque gris, que según la BIOS y la función pueden traer
+; AL=E0h (con AH=0, E0h es una letra: la que se teclea con Alt y el teclado
+; numérico)
+tecla_es_ext:
+        test al, al
+        jz .x
+        cmp al, 0xE0
+        jne .x
+        test ah, ah
+        jz .no
+        cmp al, al
+        ret
+.no:
+        test al, al                 ; (AL = E0h: ZF=0)
+.x:
+        ret
+
+; lee una línea en ES:DI, de CX letras como mucho, hasta Intro. Deja un 0 al
+; final y CX = las letras leídas. Conserva lo demás.
+; Del teclado y a la pantalla, la línea se edita (ed_linea, más abajo): las
+; flechas, Inicio, Fin, Supr, Insert, Esc y las líneas de antes. Con la
+; entrada o la salida redirigidas no hay cursor que mover: solo Retroceso
 lee_linea:
+        mov byte [tecla_cod], 0
+        cmp byte [con_directo], 0
+        jne ed_linea
+        push ax
+        mov ax, [red_ent]
+        or ax, [red_sal]
+        pop ax
+        jz ed_linea
+        mov word [ed_pre+2], 0      ; (y sin texto puesto de antemano)
         push ax
         push bx
         push dx
@@ -1028,6 +1089,11 @@ lee_linea:
         xor bx, bx                  ; lo que hay
 .t:
         call tecla
+        test al, al                 ; (una flecha: no cuenta, ni su código)
+        jnz .t0
+        mov byte [tecla_cod], 0
+        jmp .t
+.t0:
         cmp al, 13
         je .fin
         cmp al, 8
@@ -1060,6 +1126,437 @@ lee_linea:
         pop dx
         pop bx
         pop ax
+        ret
+
+; =============================================================================
+;  La línea que se teclea, con sus teclas de cursor
+;
+;       izquierda, derecha      mueven el cursor por la línea
+;       Inicio, Fin             al principio y al final
+;       Supr, Retroceso         borran la letra del cursor y la de delante
+;       Insert                  intercalar (lo normal) o escribir encima
+;       arriba, abajo           las líneas tecleadas antes (HIST_TAM octetos)
+;       F3                      lo que falta de la última línea, como en DOS
+;       Esc                     borra la línea
+;
+;  Sirve a todo el que lee una línea con el sistema: el intérprete, BASIC (su
+;  programa, INPUT), COPY CON... Valen las teclas grises del teclado de 101
+;  teclas y las del teclado numérico (sin BloqNum), que son las únicas del de
+;  83. La pantalla se maneja con la BIOS (INT 10h): se apunta dónde empieza
+;  la línea y, de ahí, sale el sitio de cada letra, aunque la línea ocupe más
+;  de un renglón o haga subir la pantalla.
+; =============================================================================
+ed_linea:
+        push ax
+        push bx
+        push dx
+        push si
+        cld
+        mov [ed_max], cx
+        xor ax, ax
+        mov [ed_n], ax
+        mov [ed_pos], ax
+        mov [ed_sobra], ax
+        mov [ed_sob], al
+        mov ax, [hist_fin]
+        mov [ed_h], ax
+        mov ah, 3                   ; dónde empieza la línea
+        xor bh, bh
+        call ed_v10
+        mov [ed_org], dx
+        ; ¿hay un texto puesto de antemano (INT 21h/E808h)? Es la línea
+        xor bx, bx
+        xor cx, cx
+        xchg cx, [ed_pre+2]
+        jcxz .t
+        mov si, [ed_pre]
+        mov dx, [ed_max]
+        push ds
+        mov ds, cx
+.pre:
+        lodsb
+        test al, al
+        jz .pre_f
+        cmp bx, dx
+        jae .pre_f
+        mov [es:di+bx], al
+        inc bx
+        jmp .pre
+.pre_f:
+        pop ds
+        jmp .puesta
+; ---- (los saltos largos de las teclas) ----
+.fin_j:
+        jmp .fin
+.arriba_j:
+        jmp .arriba
+.abajo_j:
+        jmp .abajo
+.f3_j:
+        jmp .f3
+.t:
+        mov ax, [ed_pos]
+        call ed_cursor
+        xor ah, ah
+        int 0x16
+        mov bx, [ed_pos]
+        call tecla_es_ext
+        je .ext
+        cmp al, 13
+        je .fin_j
+        cmp al, 8
+        je .borra
+        cmp al, 27
+        je .esc
+        cmp al, 0x1A                ; (Ctrl+Z: el «fin de archivo» del teclado)
+        je .vale
+        cmp al, ' '
+        jb .t
+.vale:
+        mov cx, [ed_n]
+        cmp byte [ed_sob], 0        ; ¿encima de la que hay?
+        je .mete
+        cmp bx, cx
+        jb .pon
+.mete:
+        cmp cx, [ed_max]
+        jae .t
+        push bx                     ; hueco: las de detrás, un sitio más allá
+        sub cx, bx
+        mov bx, [ed_n]
+        jcxz .m2
+.m1:
+        mov dl, [es:di+bx-1]
+        mov [es:di+bx], dl
+        dec bx
+        loop .m1
+.m2:
+        pop bx
+        inc word [ed_n]
+.pon:
+        mov [es:di+bx], al
+        mov ax, bx
+        call ed_pinta
+        inc word [ed_pos]
+        jmp .t
+.borra:
+        test bx, bx
+        jz .t
+        dec bx
+        mov [ed_pos], bx
+.supr:
+        mov cx, [ed_n]              ; fuera la letra BX: las de detrás, un
+        sub cx, bx                  ; sitio más acá
+        jbe .t
+        dec cx
+        push bx
+        jcxz .s2
+.s1:
+        mov al, [es:di+bx+1]
+        mov [es:di+bx], al
+        inc bx
+        loop .s1
+.s2:
+        pop bx
+        dec word [ed_n]
+        mov word [ed_sobra], 1
+        mov ax, bx
+        call ed_pinta
+        jmp .t
+.esc:
+        mov ax, [hist_fin]
+        mov [ed_h], ax
+        xor bx, bx
+.puesta:
+        ; la línea pasa a tener BX letras (las que hay ya en ES:DI): se pinta
+        ; entera, se borra lo que sobre de la de antes y el cursor va al final
+        mov cx, [ed_n]
+        mov [ed_n], bx
+        mov [ed_pos], bx
+        sub cx, bx
+        jbe .p1
+        mov [ed_sobra], cx
+.p1:
+        xor ax, ax
+        call ed_pinta
+.t_j:
+        jmp .t
+.ext:
+        mov al, ah
+        cmp al, 0x4B                ; izquierda
+        jne .e1
+        test bx, bx
+        jz .t_j
+        dec word [ed_pos]
+        jmp .t
+.e1:
+        cmp al, 0x4D                ; derecha
+        jne .e2
+        cmp bx, [ed_n]
+        jae .t_j
+        inc word [ed_pos]
+        jmp .t
+.e2:
+        cmp al, 0x47                ; Inicio
+        jne .e3
+        mov word [ed_pos], 0
+        jmp .t
+.e3:
+        cmp al, 0x4F                ; Fin
+        jne .e4
+        mov ax, [ed_n]
+        mov [ed_pos], ax
+        jmp .t
+.e4:
+        cmp al, 0x53                ; Supr
+        je .supr
+        cmp al, 0x48                ; arriba
+        je .arriba_j
+        cmp al, 0x50                ; abajo
+        je .abajo_j
+        cmp al, 0x3D                ; F3
+        je .f3_j
+        cmp al, 0x52                ; Insert
+        jne .t_j
+        xor byte [ed_sob], 1
+        jmp .t
+.puesta_j:
+        jmp .puesta
+.arriba:
+        mov si, [ed_h]              ; la línea de antes de la que se ve
+        test si, si
+        jz .t_j
+        call ed_h_antes
+        jmp short .trae
+.abajo:
+        mov si, [ed_h]              ; la de después (tras la última, nada)
+        cmp si, [hist_fin]
+        jae .t_j
+.b1:
+        inc si
+        cmp byte [hist+si-1], 0
+        jne .b1
+.trae:
+        mov [ed_h], si
+        xor bx, bx
+.copia:
+        ; del historial (desde SI, hasta su 0) a la línea, de la letra BX en
+        ; adelante
+        cmp si, [hist_fin]
+        jae .puesta_j
+        mov al, [hist+si]
+        test al, al
+        jz .puesta_j
+        cmp bx, [ed_max]
+        jae .puesta_j
+        mov [es:di+bx], al
+        inc si
+        inc bx
+        jmp .copia
+.f3:
+        mov si, [hist_fin]          ; de la última línea, lo de más allá del
+        test si, si                 ; cursor
+        jz .f3_no
+        call ed_h_antes
+        mov cx, bx
+        jcxz .copia
+.f1:
+        cmp byte [hist+si], 0
+        je .f3_no
+        inc si
+        loop .f1
+        jmp .copia
+.f3_no:
+        jmp .t
+.fin:
+        mov ax, [ed_n]              ; el cursor, al final (lo que se escriba
+        call ed_cursor              ; después va detrás de la línea)
+        call ed_guarda
+        mov bx, [ed_n]
+        mov byte [es:di+bx], 0
+        mov cx, bx
+        pop si
+        pop dx
+        pop bx
+        pop ax
+        ret
+
+; INT 10h, conservando BP, SI y DI (hay BIOS que los estropean al subir la
+; pantalla)
+ed_v10:
+        push bp
+        push si
+        push di
+        int 0x10
+        pop di
+        pop si
+        pop bp
+        ret
+; el ancho de la pantalla -> CX (lo dice la BIOS en 40:4Ah)
+ed_ancho:
+        push ds
+        mov cx, 0x40
+        mov ds, cx
+        mov cx, [0x4A]
+        pop ds
+        test cx, cx
+        jnz .x
+        mov cx, 80
+.x:
+        ret
+; pone el cursor en la letra AX de la línea. Conserva los registros
+ed_cursor:
+        push ax
+        push bx
+        push cx
+        push dx
+        call ed_ancho
+        mov bx, [ed_org]            ; BH = la fila, BL = la columna
+        mov dl, bl
+        xor dh, dh
+        add ax, dx
+        xor dx, dx
+        div cx                      ; AX = renglones más abajo, DX = columna
+        add al, bh
+        mov dh, al
+        xor bh, bh
+        mov ah, 2
+        call ed_v10
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+; pinta la línea desde la letra AX, y [ed_sobra] espacios detrás (para borrar
+; lo que quede de antes). Si con eso sube la pantalla, corrige dónde empieza
+; la línea. Deja el cursor detrás de lo pintado. Conserva los registros
+ed_pinta:
+        push ax
+        push bx
+        push cx
+        push dx
+        push si
+        call ed_cursor
+        mov si, ax
+.c:
+        cmp si, [ed_n]
+        jae .resto
+        mov bx, si
+        mov al, [es:di+bx]
+        call .pon
+        inc si
+        jmp .c
+.resto:
+        mov cx, [ed_sobra]
+        jcxz .ya
+.r:
+        mov al, ' '
+        call .pon
+        loop .r
+.ya:
+        ; el cursor ha quedado detrás de la última letra pintada: de su fila
+        ; y de las letras que hay hasta ahí sale la fila donde empieza todo
+        mov ah, 3
+        xor bh, bh
+        call ed_v10
+        push dx
+        call ed_ancho
+        mov ax, [ed_n]
+        add ax, [ed_sobra]
+        mov dl, [ed_org]
+        xor dh, dh
+        add ax, dx
+        xor dx, dx
+        div cx
+        pop dx
+        sub dh, al
+        mov [ed_org+1], dh
+        mov word [ed_sobra], 0
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+.pon:
+        push cx
+        mov ah, 0x0E
+        mov bx, 7
+        call ed_v10
+        pop cx
+        ret
+; (historial) SI = dónde acaba una línea (detrás de su 0, SI > 0) -> SI =
+; dónde empieza
+ed_h_antes:
+        dec si
+.a:
+        test si, si
+        jz .x
+        cmp byte [hist+si-1], 0
+        je .x
+        dec si
+        jmp .a
+.x:
+        ret
+; apunta en el historial la línea recién tecleada (si no es la misma que la
+; última, ni está vacía), tirando las más viejas si no cabe. Conserva ES:DI
+ed_guarda:
+        push di
+        push es
+        mov cx, [ed_n]
+        jcxz .x
+        mov si, [hist_fin]
+        test si, si
+        jz .sitio
+        call ed_h_antes
+        add si, hist                ; ¿la misma que la última?
+        push di
+        repe cmpsb
+        pop di
+        jne .sitio
+        cmp byte [si], 0
+        je .x
+.sitio:
+        mov ax, [hist_fin]
+        add ax, [ed_n]
+        inc ax
+        cmp ax, HIST_TAM
+        jbe .cabe
+        mov si, hist                ; fuera la más vieja
+.v:
+        lodsb
+        test al, al
+        jnz .v
+        mov cx, hist
+        add cx, [hist_fin]
+        sub cx, si                  ; lo que queda detrás
+        mov ax, si
+        sub ax, hist
+        sub [hist_fin], ax
+        push di
+        push es
+        push ds
+        pop es
+        mov di, hist
+        rep movsb
+        pop es
+        pop di
+        jmp .sitio
+.cabe:
+        mov bx, hist
+        add bx, [hist_fin]
+        mov [hist_fin], ax
+        mov cx, [ed_n]
+.c:
+        mov al, [es:di]
+        mov [bx], al
+        inc di
+        inc bx
+        loop .c
+        mov byte [bx], 0
+.x:
+        pop es
+        pop di
         ret
 
 ; =============================================================================
@@ -1140,7 +1637,7 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.11 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.12 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 m_sin_shell db "No se puede lanzar el intérprete de SHELL=: se usa COMMAND.COM.", 10, 0
@@ -1176,6 +1673,8 @@ disq_puesto resb 1                  ; de qué unidad es el disquete puesto
 verificar   resb 1                  ; VERIFICAR ON
 queda       resb 1                  ; el programa que termina se queda residente
 con_directo resb 1                  ; CON: sin redirección
+tecla_cod   resb 1                  ; el código de la tecla de dos veces, a medio dar
+ed_sob      resb 1                  ; la línea que se teclea: se escribe encima
 dos_alto    resb 1                  ; DOS=ALTO: se quiere el núcleo en la HMA
 como_8086   resb 1                  ; PROCESADOR=8086: como si no hubiera 286
 xms_hay     resb 1                  ; hay gestor de memoria extendida
@@ -1186,6 +1685,14 @@ a20_l       resb 1                  ; y cuántas veces «para mí»
 cf_bufs_hay resb 1
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
+ed_max      resw 1                  ; la línea que se teclea: lo que cabe,
+ed_n        resw 1                  ; las letras que tiene,
+ed_pos      resw 1                  ; en cuál está el cursor,
+ed_org      resw 1                  ; dónde empieza en la pantalla (columna y fila),
+ed_sobra    resw 1                  ; cuántas letras de antes hay que borrar detrás
+ed_h        resw 1                  ; y la línea del historial que se ve
+ed_pre      resw 2                  ; el texto puesto de antemano (E808h; segmento 0: no hay)
+hist_fin    resw 1                  ; el historial: los octetos que tiene
 cf_ficha    resw 1
 cf_tope     resw 1                  ; el segmento donde acaba el núcleo
 cf_arg      resw 1
@@ -1257,6 +1764,7 @@ cd_txt      resb DIR_MAX + 2
 ruta        resb RUTA_MAX + 2
 dta_int     resb 44                 ; la zona de búsquedas del intérprete
 linea       resb LIN_MAX + 4
+hist        resb HIST_TAM           ; las líneas tecleadas, una tras otra, cada una con su 0
 sh_ruta     resb RUTA_MAX + 2       ; SHELL= de CONFIG.SYS: el intérprete...
 sh_cola     resb 64                 ; ...y lo que se le pasa
             alignb 2

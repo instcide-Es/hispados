@@ -270,11 +270,36 @@ sent_auto:
 .mal:
         jmp err_funcion
 
-; ---- EDIT n: enseña la línea para escribirla otra vez ----
+; ---- EDIT n: deja la línea en la pantalla para corregirla ----
+; El texto de la línea se le da al sistema (Hispa-8086, INT 21h/E808h): la
+; línea que se teclee a continuación empieza con él, con el cursor al final,
+; y se corrige con las flechas, Inicio, Fin, Supr, Insert... Si no puede ser
+; (dentro de un programa, con la entrada o la salida redirigidas, o en otro
+; DOS), la línea se enseña y se escribe otra vez
 sent_edit:
         call lee_linea_cte
         call busca_linea
         jnc .no
+        cmp word [v_linea], 0xFFFF
+        jne .lista
+        mov word [v_sal_mem], b_us
+        call lista_linea
+        push bx
+        mov bx, [v_sal_mem]
+        mov byte [bx], 0
+        pop bx
+        mov word [v_sal_mem], 0
+        push bx
+        mov dx, b_us
+        mov ax, 0xE808
+        stc
+        int 0x21
+        pop bx
+        jc .lista
+        cmp ax, 0x4564
+        jne .lista
+        jmp ordenes                 ; (sin «Ok»: lo siguiente es esa línea)
+.lista:
         call lista_linea
         ret
 .no:

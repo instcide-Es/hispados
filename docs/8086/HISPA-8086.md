@@ -450,6 +450,35 @@ libre. Lee la FAT entera a la memoria (hasta 128 K) y usa un bit por grupo;
 las medidas del disco se las pide al núcleo, así que vale para cualquier
 unidad, también la de un controlador.
 
+## La línea que se teclea
+
+Toda línea que se teclea (una orden, una línea de un programa de BASIC, la
+respuesta a un INPUT, lo de `COPIAR CON`...) se puede corregir con las teclas
+de cursor antes de dar a Intro:
+
+| | |
+|---|---|
+| izquierda, derecha | mueven el cursor por la línea |
+| Inicio, Fin | al principio y al final |
+| Supr, Retroceso | borran la letra del cursor y la de delante |
+| Ins | intercalar (lo normal) o escribir encima |
+| arriba, abajo | las líneas tecleadas antes (las que quepan en 384 octetos) |
+| F3 | lo que falta de la última línea, como en DOS |
+| Esc | borra la línea |
+
+Valen las teclas grises del teclado de 101 teclas y las del teclado numérico
+(sin BloqNum), que son las únicas del de 83. Lo hace el núcleo, en la lectura
+de líneas (INT 21h/0Ah y la lectura de la consola con 3Fh), así que sirve a
+cualquier programa; con la entrada o la salida redirigidas no hay cursor que
+mover y solo vale Retroceso. La línea puede ocupar más de un renglón. Un
+programa puede dejar puesto el texto con el que empieza la línea siguiente
+(INT 21h/E8h con AL=8 y DS:DX = el texto, acabado en 0): así hace `EDIT` en
+BASIC.
+
+Las lecturas de una tecla (INT 21h/01h, 06h, 07h y 08h) dan las teclas que
+no son letra (las flechas, las de función) en dos veces, como en DOS: un 0
+y, a la lectura siguiente, el código de la tecla. Así las ve `INKEY$`.
+
 ## EDITAR
 
 ```
@@ -487,6 +516,10 @@ del teclado; las demás pasan a la BIOS como siempre. Pone la ñ y la ç, `º ª
 ¡ ¿`, los signos en su sitio, con AltGr (o Ctrl+Alt) `| @ # ~ [ ] { } \ ¬`,
 y los acentos (agudo, grave, diéresis y circunflejo) como teclas muertas: la
 tecla del acento no escribe hasta la vocal siguiente. Es la distribución de 102 teclas.
+Las flechas y las demás teclas de cursor no las toca. (Por la interrupción
+del teclado, que es el camino de los PC y XT y el de `TECLADO /9`, el
+prefijo E0h de las teclas grises lo atiende él y se lo deja apuntado a la
+BIOS: si lo leyeran los dos, en un AT la tecla contaría dos veces.)
 `TECLADO` en AUTOEXEC.BAT lo deja puesto desde el arranque.
 
 ## Dispositivos
@@ -864,6 +897,7 @@ partes (veintiuna) y tarda unos TIEMPO minutos;
 | `h8086/prueba/BUCLE.BAT`, `SUB.BAT`, `SUB2.BAT` | los lotes de la prueba de FOR, LLAMAR y DESPLAZAR |
 | `h8086/prueba/cuenta.asm`, `saludo.asm` | la cuenta de sectores leídos y un controlador de carácter, para la prueba |
 | `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
+| `h8086/prueba/partes_11.sh`, `v86_flechas.js` | las teclas de cursor: en la línea de órdenes, BASIC, INKEY$ y EDITAR, con las teclas grises y las del teclado numérico, sin TECLADO y con él; y lo mismo en el emulador v86 |
 | `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
 | `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
 | `h8086/prueba/prueba.sh` | la prueba automática, por partes: `SOLO="partir sistema" ./prueba/prueba.sh` corre solo esas |

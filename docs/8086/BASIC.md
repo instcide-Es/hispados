@@ -20,7 +20,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 | Versión | Qué | Estado |
 |---|---|---|
 | 0.11 | Lo esencial: edición de líneas, LIST/RUN/NEW/SAVE/LOAD en texto, PRINT, LET, INPUT, IF…THEN…ELSE, FOR…NEXT, WHILE…WEND, GOTO, GOSUB, ON…GOTO/GOSUB, DIM, DATA/READ/RESTORE, END/STOP/CONT, enteros (`%`), simple precisión (`!`) y cadenas (`$`), funciones de números y de cadenas, DEF FN, errores en español, palabras en español | hecha (Hispa-8086 0.11) |
-| 0.12 | Formato binario de GW-BASIC, doble precisión (`#`), PRINT USING, archivos (OPEN, PRINT#, INPUT#, LINE INPUT#, CLOSE, EOF), ON ERROR / RESUME, RENUM, AUTO, DELETE, EDIT | hecha: también WRITE, LOF, LOC, NAME, FILES; EDIT solo enseña la línea (se escribe otra vez); OPEN … FOR RANDOM, FIELD, GET y PUT, aún no |
+| 0.12 | Formato binario de GW-BASIC, doble precisión (`#`), PRINT USING, archivos (OPEN, PRINT#, INPUT#, LINE INPUT#, CLOSE, EOF), ON ERROR / RESUME, RENUM, AUTO, DELETE, EDIT | hecha: también WRITE, LOF, LOC, NAME, FILES; EDIT deja la línea en la pantalla para corregirla con las flechas (la edición de líneas es la del sistema: ver «La línea que se teclea» en HISPA-8086.md); OPEN … FOR RANDOM, FIELD, GET y PUT, aún no |
 | 0.13 | Pantalla y sonido: CLS, LOCATE, COLOR, WIDTH, SCREEN 1 y 2, PSET, LINE, CIRCLE, DRAW, PAINT, SOUND, PLAY, BEEP, INKEY$ | hecha: también PRESET y POINT; CIRCLE sin arcos ni aspecto propio; DRAW sin A, TA ni «=variable;» |
 
 ## Memoria
