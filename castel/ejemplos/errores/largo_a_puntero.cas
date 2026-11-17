@@ -1,0 +1,11 @@
+; Un número (tampoco uno de 32 bits) no es un puntero.
+; ERROR: 9:14: error: «p» es un puntero a byte y se le da un número (para convertir, puntero(...); el puntero vacío es «nulo»)
+módulo Error
+
+    función principal()
+        variable n: nat32
+        variable p: puntero a byte
+        n := 70000
+        p := n
+    fin
+fin Error.

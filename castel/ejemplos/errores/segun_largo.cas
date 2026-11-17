@@ -1,0 +1,12 @@
+; «según» elige por un número de 16 bits.
+; ERROR: 8:15: error: «según» elige por un número de 16 bits: convierta antes con nat16(...)
+módulo Error
+
+    función principal()
+        variable n: nat32
+        n := 70000
+        según n
+            caso 1: escribir("uno")
+        fin
+    fin
+fin Error.

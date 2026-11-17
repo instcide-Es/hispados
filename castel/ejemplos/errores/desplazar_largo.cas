@@ -1,0 +1,10 @@
+; Uno de 32 bits se desplaza de 0 a 31 bits.
+; ERROR: 8:19: error: se desplaza de 0 a 31 bits
+módulo Error
+
+    función principal()
+        variable n: nat32
+        n := 1
+        n := n << 32
+    fin
+fin Error.

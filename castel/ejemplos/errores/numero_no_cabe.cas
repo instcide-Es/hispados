@@ -1,0 +1,9 @@
+; Un número escrito que no cabe ni en 32 bits.
+; ERROR: 5:27: error: el número no cabe en 32 bits
+módulo Error
+
+    constante DEMASIADO = 4294967296
+
+    función principal()
+    fin
+fin Error.

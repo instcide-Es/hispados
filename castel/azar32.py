@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+"""azar32.py SEMILLA CUANTAS SALIDA.cas ESPERADO.txt
+Como azar.py, pero con los números de 32 bits por medio: escribe un programa
+Castel con CUANTAS cuentas al azar que mezclan nat32 y ent32 con los tipos de
+16 y 8 bits (variables, elementos, campos, punteros, parámetros de dos
+palabras, todos los operadores, comparaciones, conversiones, asignaciones) y,
+aparte, lo que tiene que escribir, calculado aquí con las reglas de CASTEL.md:
+la cuenta es de 32 bits si alguno de los dos lo es (o es un número escrito que
+no cabe en 16), y con signo si alguno de los dos lleva signo. Lo usa
+pruebas.sh con AZAR=n."""
+import random, sys
+random.seed(int(sys.argv[1]))
+N = int(sys.argv[2])
+ANCHO = {'nat8': 8, 'nat16': 16, 'ent16': 16, 'nat32': 32, 'ent32': 32}
+VARS = {'a': ('nat16', 40000), 'b': ('nat16', 7), 'e': ('ent16', -100), 'c': ('nat8', 200),
+        'la': ('nat32', 3000000000), 'lb': ('nat32', 70000), 'lc': ('nat32', 5), 'lz': ('nat32', 0xFFFFFFFF),
+        'sa': ('ent32', -100000), 'sb': ('ent32', 123456789), 'sc': ('ent32', -1),
+        'sd': ('ent32', -2147483648)}
+T32 = [11, 500000, 4000000000, 65536]
+def con_signo(t):
+    return t in ('ent16', 'ent32')
+def es32(t):
+    return t in ('nat32', 'ent32', 'lit32')
+def es_lit(t):
+    return t in ('lit', 'lit32')
+def corta(t, x):
+    return x & ((1 << ANCHO[t]) - 1)
+def num(t, v):
+    """El número que es (un entero de Python), dados sus bits y su tipo."""
+    if es_lit(t):
+        return v
+    n = ANCHO[t]
+    v &= (1 << n) - 1
+    return v - (1 << n) if con_signo(t) and v >> (n - 1) else v
+def tipo_res(ta, tb):
+    s = con_signo(ta) or con_signo(tb)
+    if es32(ta) or es32(tb):
+        return 'ent32' if s else 'nat32'
+    return 'ent16' if s else 'nat16'
+def visto(ta, tb, va, vb):
+    """Los dos operandos como los ve una comparación o una división: en 32 bits
+    si alguno lo es (si no, en 16), y con signo si alguno lo lleva."""
+    n = 32 if es32(ta) or es32(tb) else 16
+    x, y = num(ta, va) & ((1 << n) - 1), num(tb, vb) & ((1 << n) - 1)
+    if con_signo(ta) or con_signo(tb):
+        x = x - (1 << n) if x >> (n - 1) else x
+        y = y - (1 << n) if y >> (n - 1) else y
+    return x, y
+def par(s):
+    return s if s.replace('_', 'a').isalnum() else f"({s})"
+def hoja(prof):
+    r = random.random()
+    if r < 0.45:
+        n = random.choice(list(VARS))
+        return n, VARS[n][0], corta(VARS[n][0], VARS[n][1])
+    if r < 0.55:
+        v = random.choice([0, 1, 2, 3, 7, 8, 10, 16, 100, 255, 256, 300, 1000])
+        return str(v), 'lit', v
+    if r < 0.63:
+        v = random.choice([65536, 100000, 1000000, 0x12345678, 4000000000, 2147483648])
+        return (hex(v) if v == 0x12345678 else str(v)), 'lit32', v
+    if r < 0.72 and prof > 0:
+        s, t, v = expr(prof - 1)
+        return f"t32[{par(s)} yb 3]", 'nat32', T32[num(t, v) & 3]
+    if r < 0.86 and prof > 0:
+        s, t, v = expr(prof - 1)
+        k = random.random()
+        if k < 0.35:
+            return f"igual32({s})", 'nat32', corta('nat32', num(t, v))
+        if k < 0.7:
+            return f"igual_s32({s})", 'ent32', corta('ent32', num(t, v))
+        s2, t2, v2 = expr(prof - 1)
+        s3, t3, v3 = hoja(0)
+        x = corta('nat8', num(t, v))
+        n = num('ent32', corta('ent32', num(t2, v2)))
+        y = corta('nat16', num(t3, v3))
+        if es_lit(t):                       # una constante que no cabe no se deja pasar
+            s = f"nat8({s})"
+        if es_lit(t3):
+            s3 = f"nat16({s3})"
+        return f"tres({s}, {s2}, {s3})", 'ent32', corta('ent32', n + x - y)
+    n = random.choice(['r.largo', 'r.con', 'valor(p)', 'p[1]', 'r.corto'])
+    return {'r.largo': ('r.largo', 'nat32', 77000), 'r.con': ('r.con', 'ent32', corta('ent32', -2)),
+            'valor(p)': ('valor(p)', 'nat32', 11), 'p[1]': ('p[1]', 'nat32', 500000),
+            'r.corto': ('r.corto', 'nat8', 9)}[n]
+def expr(prof):
+    if prof == 0 or random.random() < 0.15:
+        return hoja(prof)
+    r = random.random()
+    if r < 0.1:
+        s, t, v = expr(prof - 1)
+        if es_lit(t):
+            return s, t, v
+        if random.random() < 0.5:
+            tr = 'ent32' if es32(t) else 'ent16'
+            return f"-{par(s)}", tr, corta(tr, -num(t, v))
+        tr = t if es32(t) else ('ent16' if t == 'ent16' else 'nat16')
+        return f"nob {par(s)}", tr, corta(tr, ~num(t, v))
+    if r < 0.2:
+        s, t, v = expr(prof - 1)
+        if es_lit(t):
+            return s, t, v
+        k = random.choice(['nat8', 'nat16', 'ent16', 'nat32', 'ent32', 'nat32', 'ent32'])
+        return f"{k}({s})", k, corta(k, num(t, v))
+    sa, ta, va = expr(prof - 1)
+    sb, tb, vb = expr(prof - 1)
+    if es_lit(ta) and es_lit(tb):
+        sb, tb, vb = hoja(0)
+        while es_lit(tb):
+            sb, tb, vb = hoja(0)
+    op = random.choice(['+', '-', '*', 'yb', 'ob', 'xob', '+', '-', '*', 'div', 'mod', 'div', 'mod', '<<', '>>'])
+    A, B = par(sa), par(sb)
+    if op in ('+', '-', '*', 'yb', 'ob', 'xob'):
+        x, y = num(ta, va), num(tb, vb)
+        v = {'+': x + y, '-': x - y, '*': x * y, 'yb': x & y, 'ob': x | y, 'xob': x ^ y}[op]
+        tr = tipo_res(ta, tb)
+        return f"{A} {op} {B}", tr, corta(tr, v)
+    if op in ('div', 'mod'):
+        # el divisor, nunca cero. Si la cuenta es de 16 bits, pequeño y positivo
+        # (para que no desborde con signo); si es de 32, lo que salga
+        k = random.random()
+        if k < 0.4 or es_lit(tb):
+            vb = random.choice([1, 2, 3, 4, 7, 8, 10, 16, 256, 300] + ([65536, 100000, 1000000007] if es32(ta) else []))
+            B, tb = str(vb), ('lit' if vb <= 0xFFFF else 'lit32')
+        elif k < 0.7 or not es32(tb):
+            B, vb = f"({B} yb 127 ob 1)", (num(tb, vb) & 127) | 1
+            tb = tipo_res(tb, 'lit')
+        else:
+            B, vb = f"({B} ob 1)", corta(tb, num(tb, vb) | 1)
+        if es_lit(ta) and es_lit(tb):
+            return hoja(0)
+        x, y = visto(ta, tb, va, vb)
+        q = abs(x) // abs(y) * (1 if (x < 0) == (y < 0) else -1)
+        m = x - q * y
+        tr = tipo_res(ta, tb)
+        return f"{A} {op} {B}", tr, corta(tr, q if op == 'div' else m)
+    # desplazamientos: manda el tipo de lo que se desplaza
+    tope = 31 if es32(ta) else 15
+    if random.random() < 0.6:
+        n = random.randint(0, tope)
+        B = str(n)
+        if es_lit(ta):
+            return hoja(0)
+    else:
+        n = num(tb, vb) & tope
+        B = f"({B} yb {tope})"
+    tr = ('ent32' if ta == 'ent32' else 'nat32') if es32(ta) else ('ent16' if ta == 'ent16' else 'nat16')
+    x = num(ta, va)
+    if op == '<<':
+        v = x << n
+    elif con_signo(ta):
+        v = x >> n
+    else:
+        v = corta(tr, x) >> n
+    return f"{A} {op} {B}", tr, corta(tr, v)
+lineas = []
+esperado = []
+i = 0
+while i < N:
+    s, t, v = expr(random.randint(1, 4))
+    if es_lit(t):
+        continue
+    i += 1
+    if random.random() < 0.3:
+        s2, t2, v2 = expr(random.randint(1, 3))
+        if es_lit(t2):
+            s2, t2, v2 = 'lb - 2', 'nat32', 69998
+        op = random.choice(['=', '<>', '<', '<=', '>', '>='])
+        x, y = visto(t, t2, v, v2)
+        res = {'=': x == y, '<>': x != y, '<': x < y, '<=': x <= y, '>': x > y, '>=': x >= y}[op]
+        lineas.append(f"        escribir({s} {op} {s2}, \"\\n\")")
+        esperado.append('cierto' if res else 'falso')
+        lineas.append(f"        si {s} {op} {s2} entonces escribir(\"s\") sino escribir(\"n\") fin")
+        lineas.append("        escribir(\"\\n\")")
+        esperado.append('s' if res else 'n')
+    else:
+        lineas.append(f"        escribir({s}, \"\\n\")")
+        esperado.append(str(num(t, v)))
+    if random.random() < 0.4:
+        # guardar en variables de cada tipo y enseñarlas
+        k = random.choice([('x8', 'nat8'), ('x16', 'nat16'), ('xs', 'ent16'), ('x32', 'nat32'), ('xs32', 'ent32'),
+                           ('x32', 'nat32'), ('xs32', 'ent32'), ('t32[b - 5]', 'nat32'), ('r.otro', 'ent32'),
+                           ('q[lc - 4]', 'ent32')])
+        lineas.append(f"        {k[0]} := {s}")
+        lineas.append(f"        escribir({k[0]}, \"\\n\")")
+        if k[0].startswith('t32'):
+            lineas.append("        t32[2] := 4000000000")
+        esperado.append(str(num(k[1], corta(k[1], num(t, v)))))
+decl = ''.join(f"    variable {n}: {'byte' if t == 'nat8' else t} = {v}\n" for n, (t, v) in VARS.items())
+prog = f"""módulo Azar
+    tipo Reg = estructura
+        corto: byte
+        largo: nat32
+        con: ent32
+        otro: ent32
+    fin
+{decl}    variable t32: arreglo [4] de nat32 = (11, 500000, 4000000000, 65536)
+    variable r: Reg
+    variable p: puntero a nat32
+    variable q: puntero a ent32
+    variable dos: arreglo [2] de ent32
+    función igual32(n: nat32): nat32
+        devolver n
+    fin
+    función igual_s32(n: ent32): ent32
+        variable local: ent32
+        local := n
+        devolver local
+    fin
+    función tres(x: byte, n: ent32, z: nat16): ent32
+        devolver n + x - z
+    fin
+    función principal()
+        variable x8: byte
+        variable x16: nat16
+        variable xs: ent16
+        variable x32: nat32
+        variable xs32: ent32
+        r.corto := 9
+        r.largo := 77000
+        r.con := -2
+        p := t32
+        q := dos
+""" + '\n'.join(lineas) + "\n    fin\nfin Azar.\n"
+open(sys.argv[3], 'w', encoding='utf-8').write(prog)
+open(sys.argv[4], 'w', encoding='utf-8').write('\n'.join(esperado) + '\n')

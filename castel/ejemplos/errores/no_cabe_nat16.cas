@@ -1,0 +1,10 @@
+; Un número de 32 bits, a una variable de 16: si es una constante, se avisa.
+; ERROR: 8:14: error: 70000 no cabe en nat16 (0 a 65535)
+módulo Error
+
+    función principal()
+        variable n: nat16
+        n := 65535
+        n := 70000
+    fin
+fin Error.

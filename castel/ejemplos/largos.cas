@@ -1,0 +1,222 @@
+; largos.cas - los números de 32 bits: nat32 y ent32 (Fase 4).
+; En la máquina van en dos palabras (DX:AX al calcular; en memoria, la baja
+; primero). Aquí se prueba todo lo que se hace con ellos: números escritos
+; grandes, variables, parámetros y resultados, arreglos, campos, punteros,
+; «ref», las cuentas, las comparaciones, los bits, las conversiones, escribir
+; y el «para».
+módulo Largos
+
+    constante MILLON = 1000000
+    constante TOPE = 0xFFFFFFFF
+    constante DIA = 24 * 60 * 60                ; 86400: la cuenta ya no cabe en 16 bits
+
+    tipo Archivo = estructura
+        nombre: arreglo [9] de byte
+        tamaño_en_octetos: nat32
+        posición: nat32
+        saldo: ent32
+    fin
+
+    variable total: nat32
+    variable inicial: nat32 = 3000000000
+    variable negativo: ent32 = -123456
+    variable tabla: arreglo [4] de nat32 = (1, 70000, 0x12345678)
+    variable pesos: arreglo [3] de ent32
+    variable a: Archivo
+
+    función suma(x: nat32, n: nat32): nat32
+        devolver x + n
+    fin
+
+    ; parámetros de una y de dos palabras, mezclados
+    función mezcla(b: byte, largo: ent32, n: nat16, otro: nat32): ent32
+        devolver largo + b - n + ent32(otro)
+    fin
+
+    función factorial(n: nat16): nat32
+        si n < 2 entonces devolver 1 fin
+        devolver factorial(n - 1) * n
+    fin
+
+    función doblar(ref x: nat32)
+        x := x * 2
+    fin
+
+    función absoluto(n: ent32): nat32
+        si n < 0 entonces devolver -n fin
+        devolver n
+    fin
+
+    ; la palabra alta de un parámetro, desde el ensamblador: {n+2}
+    función alta(n: nat32): nat16
+        ensamblador
+            mov ax, {n+2}
+        fin
+    fin
+
+    ; en hexadecimal, con sus ocho cifras
+    función hex(n: nat32)
+        variable i: ent16
+        variable c: byte
+        para i desde 28 hasta 0 paso -4 hacer
+            c := byte(n >> i yb 15)
+            si c < 10 entonces escribir_car('0' + c) sino escribir_car('A' + c - 10) fin
+        fin
+    fin
+
+    función cuentas()
+        variable x, z: nat32
+        variable s, t: ent32
+        variable n: nat16
+        variable e: ent16
+        x := 100000
+        z := 7
+        escribir("suma y resta: ", x + z, " ", x - z, " ", 65535 + x, " ", x - 100001, "\n")
+        x := 0xFFFF
+        x := x + 1                              ; el acarreo pasa a la palabra alta
+        escribir("acarreo: ", x, " ", x - 1, " ", suma(4294967295, 1), "\n")
+        x := 123456
+        escribir("por: ", x * 1000, " ", x * x, " ", x * z, " ", 70000 * z, "\n")
+        escribir("entre: ", inicial div 7, " ", inicial mod 7, " ", inicial div 100000, " ",
+                 inicial mod 100000, " ", inicial div inicial, "\n")
+        s := -1000000
+        t := 7
+        escribir("con signo: ", s div t, " ", s mod t, " ", s * t, " ", s div -3, " ", -s, "\n")
+        n := 50000
+        e := -2
+        escribir("mezclas: ", x + n, " ", s + e, " ", x * e, " ", n * 2, " ", nat32(n) * 2, "\n")
+        escribir("desplazar: ", z << 20, " ", inicial >> 4, " ", s >> 4, " ", x << 0, " ",
+                 inicial >> 31, " ", nat32(1) << 31, "\n")
+        n := 12
+        escribir("y cuántos: ", z << n, " ", inicial >> n, " ", s >> n, " ", x << (n + 8), "\n")
+        escribir("bits: ")
+        hex(0x12345678 yb 0xFF00FF00)
+        escribir(" ")
+        hex(0x12345678 ob 0x0F0F0F0F)
+        escribir(" ")
+        hex(inicial xob TOPE)
+        escribir(" ")
+        hex(nob inicial)
+        escribir(" ")
+        hex(tabla[2] yb 0xFFFF0000 ob 0xABCD)
+        escribir("\n")
+    fin
+
+    función comparaciones()
+        variable x, z: nat32
+        variable s: ent32
+        variable n: nat16
+        x := 70000
+        z := 4000000000
+        s := -5
+        n := 70
+        escribir("comparar: ", x < z, " ", z < x, " ", x = 70000, " ", x <> 70000, " ", z >= 4000000000,
+                 " ", z > 4000000000, "\n")
+        escribir("con signo: ", s < 0, " ", s < x, " ", s > -6, " ", s <= -5, " ", s = -5, "\n")
+        ; sin signo, 4000000000 es grande; visto con signo, negativo
+        escribir("sin y con: ", z > 5, " ", ent32(z) > 5, " ", nat32(s) > 5, "\n")
+        ; solo cambia la palabra alta, o solo la baja
+        escribir("mitades: ", 0x10000 > 0xFFFF + x - x, " ", x + 0x10000 > x, " ", x + 1 > x, " ",
+                 n < x, " ", n * 1000 = x, " ", nat32(n) * 1000 = x, "\n")
+        si x > 65535 y z > x y no (s > 0) entonces escribir("todo en su sitio\n") fin
+    fin
+
+    función conversiones()
+        variable x: nat32
+        variable s: ent32
+        variable b: byte
+        variable n: nat16
+        variable e: ent16
+        x := 0x12345678
+        b := x
+        n := x
+        e := x
+        escribir("recortar: ", b, " ", n, " ", e, " ", nat8(x), " ", nat16(x >> 16), " ", alta(x), "\n")
+        e := -2
+        n := 65534
+        b := 200
+        x := e
+        s := e
+        escribir("ensanchar: ", x, " ", s, " ", nat32(n), " ", ent32(n), " ", ent32(b), " ", nat32(ent16(n)), "\n")
+        s := -70000
+        escribir("signo: ", s, " ", nat32(s), " ", ent16(s), " ", absoluto(s), " ", absoluto(-s), "\n")
+    fin
+
+    función bucles()
+        variable i: nat32
+        variable j: ent32
+        variable veces: nat16
+        variable fin_: nat32
+        veces := 0
+        para i desde 65530 hasta 65540 hacer    ; cruza de una palabra a dos
+            veces := veces + 1
+        fin
+        escribir("para: ", veces, " vueltas, y acaba en ", i, "\n")
+        escribir("de cien mil en cien mil:")
+        para i desde 0 hasta 450000 paso 100000 hacer
+            escribir(" ", i)
+        fin
+        escribir("\nhacia atrás:")
+        para j desde 3 hasta -3 paso -2 hacer
+            escribir(" ", j)
+        fin
+        escribir("\nhasta el borde:")
+        fin_ := TOPE
+        para i desde 4294967293 hasta fin_ hacer
+            escribir(" ", i)
+        fin
+        escribir("\ny con paso, sin desbocarse:")
+        para i desde 4294967000 hasta fin_ paso 100 hacer
+            escribir(" ", i)
+        fin
+        escribir("\n")
+        total := 0
+        para veces desde 1 hasta 1000 hacer
+            total := total + veces * 1000       ; ojo: veces * 1000 es de 16 bits
+        fin
+        escribir("suma corta: ", total)
+        total := 0
+        para veces desde 1 hasta 1000 hacer
+            total := total + nat32(veces) * 1000
+        fin
+        escribir(", suma larga: ", total, "\n")
+    fin
+
+    función principal()
+        variable p: puntero a nat32
+        variable i: nat16
+        escribir("números: ", MILLON, " ", TOPE, " ", DIA, " ", -MILLON, " ", 65536, " ", 2147483648, "\n")
+        escribir("globales: ", total, " ", inicial, " ", negativo, " ", tabla[1], " ", tabla[2], " ", tabla[3], "\n")
+        cuentas()
+        comparaciones()
+        conversiones()
+        bucles()
+        escribir("funciones: ", suma(70000, 30000), " ", mezcla(200, -100000, 300, 1000000), " ",
+                 factorial(12), " ", factorial(13), "\n")
+        total := 1500000000
+        doblar(total)
+        doblar(tabla[1])
+        escribir("ref: ", total, " ", tabla[1], "\n")
+        para i desde 0 hasta 2 hacer
+            pesos[i] := (ent32(i) - 1) * 100000
+        fin
+        escribir("arreglo: ", pesos[0], " ", pesos[1], " ", pesos[2], " (", tamaño(pesos), " octetos)\n")
+        a.tamaño_en_octetos := 1474560
+        a.posición := a.tamaño_en_octetos - 512
+        a.saldo := -1
+        a.saldo := a.saldo - 99999
+        a.posición := a.posición + 70000
+        escribir("campos: ", a.tamaño_en_octetos, " ", a.posición, " ", a.saldo, " (", tamaño(Archivo), " octetos)\n")
+        p := tabla
+        valor(p) := valor(p) + 99999
+        p := p + 2
+        p[1] := valor(p) div 2
+        escribir("punteros: ", tabla[0], " ", valor(p), " ", tabla[3], "\n")
+        escribir("hex: ")
+        hex(3735928559)
+        escribir(" ")
+        hex(a.tamaño_en_octetos)
+        escribir("\n")
+    fin
+
+fin Largos.
