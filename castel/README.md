@@ -44,7 +44,7 @@ $ ./probar.sh ejemplos/PARES.COM
 ...
 $ ./pruebas.sh
 ...
-== 85 bien, 0 mal ==
+== 117 bien, 0 mal ==
 ```
 
 ## Qué entiende Castel hoy

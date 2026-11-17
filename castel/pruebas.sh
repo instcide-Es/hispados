@@ -127,6 +127,8 @@ open(t + '/contar1.esp', 'w').write(
     + renglon(cg, 'GRANDE.TXT') + renglon(tuple(a + b + c for a, b, c in zip(cl, cc, cg)), 'total'))
 open(t + '/contar2.esp', 'w').write(renglon(cc, 'CORTO.TXT'))
 open(t + '/contar3.esp', 'w').write(renglon(cc, ''))
+# (por la tubería llega lo que escribe TYPE, que acaba siempre con un fin de línea suyo)
+open(t + '/contar4.esp', 'w').write(renglon(cuenta(grande + b'\r\n'), ''))
 # y lo que tiene que escribir NUMERA: cada línea con su número delante, hasta
 # el fin de archivo de los textos (1Ah)
 def numera(d):
@@ -180,7 +182,7 @@ lote += [
     "CONTAR CORTO.TXT > CONTAR2.SAL",
     "IF ERRORLEVEL 1 ECO nivel 1 > CONTAR2N.SAL",
     "CONTAR < CORTO.TXT > CONTAR3.SAL",
-    "TYPE CORTO.TXT | CONTAR > CONTAR4.SAL",
+    "TYPE GRANDE.TXT | CONTAR > CONTAR4.SAL",
     "NUMERA LARGO.TXT > NUMERA1.SAL",
     "NUMERA < CORTO.TXT > NUMERA2.SAL",
     "NUMERA NOHAY.TXT > NUMERA3.SAL",
@@ -328,7 +330,7 @@ if [ -s $T/sal/CONTAR1N.SAL ]; then ok "y acaba con el nivel de error 1"; else k
 contar 2 2 "CONTAR de un archivo"
 if [ -s $T/sal/CONTAR2N.SAL ]; then ko "CONTAR de un archivo que está acaba con nivel de error"; else ok "y acaba con el nivel de error 0"; fi
 contar 3 3 "CONTAR < archivo"
-contar 4 3 "orden | CONTAR"
+contar 4 4 "orden | CONTAR (con el archivo de más de 65535 octetos)"
 numera() {     # número de la salida y lo que se prueba
   if [ ! -f $T/sal/NUMERA$1.SAL ]; then ko "$2: no ha dejado salida"
   elif cmp -s $T/sal/NUMERA$1.SAL $T/numera$1.esp; then ok "$2 ($(stat -c %s $T/sal/NUMERA$1.SAL) octetos, los mismos)"
