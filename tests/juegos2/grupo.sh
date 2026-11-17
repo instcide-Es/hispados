@@ -46,7 +46,7 @@ if [ "${libre:-0}" -ge 150000 ]; then ok "caben en el disquete: quedan $libre oc
   salir
 } | run 150 -vga std
 # -- el grupo: ocho accesos en dos filas, con su nombre y su icono; la ventana se ha alargado --
-chk $T/g1.ppm tam 800 600 marco 248 188 452 207 activa titulo 248 188 activa "Juegos" \
+chk $T/g1.ppm tam 800 600 marco 248 188 452 217 activa titulo 248 188 activa "Juegos" \
   texto 286 291 9 12 fina "Culebra" texto 386 291 0 8 fina "Campo de" texto 398 306 0 8 fina "minas" \
   texto 494 291 0 8 fina "Bloques" texto 590 291 0 8 fina "Solitario" \
   texto 274 367 0 8 fina "Tragabolas" texto 390 367 0 8 fina "Almacén" texto 486 367 0 8 fina "Hispa-Nes" texto 578 367 0 8 fina "Hispa-System" \
@@ -58,7 +58,7 @@ chk $T/g2.ppm marco 150 60 412 431 activa titulo 150 60 activa "Bloques"
 chk $T/g3.ppm marco 106 30 588 567 activa titulo 106 30 activa "Solitario"
 chk $T/g4.ppm marco 40 30 520 449 activa titulo 40 30 activa "Tragabolas"
 chk $T/g5.ppm marco 140 60 468 397 activa titulo 140 60 activa "Almacén"
-chk $T/g6.ppm marco 248 188 452 207 activa titulo 248 188 activa "Juegos" texto 390 367 9 12 fina "Almacén"
+chk $T/g6.ppm marco 248 188 452 217 activa titulo 248 188 activa "Juegos" texto 390 367 9 12 fina "Almacén"
 ini "Modulos=16"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\BLOQUES.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\SOLITARI.HVP"
 ini "Programa=A:\\HISPADOS\\JUEGOS\\TRAGABOL.HVP"; ini "Programa=A:\\HISPADOS\\JUEGOS\\ALMACEN.HVP"

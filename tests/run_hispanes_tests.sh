@@ -366,7 +366,7 @@ vivo)
     salir                                     # con el juego en marcha
   } | run 200 -vga std -audiodev wav,id=snd0,path=$T/nes.wav -device sb16,audiodev=snd0
   check "Sound Blaster 16"
-  chk $T/v1.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes" px 582 12 8 "altavoz encendido: hay HSPSND"
+  chk $T/v1.ppm marco 142 30 516 545 activa titulo 142 30 activa "Hispa-Nes" px 650 12 8 "altavoz encendido: hay HSPSND"
   hn pantalla $T/v1.ppm 144 75 2 $(esperada h1_titulo) "el título, quieto, en pausa (sin el letrero)" 0 0 256 104
   hn pantalla $T/v2.ppm 144 75 2 $(esperada h1_juego) "Start con la tecla mantenida: el marcador de la partida" 0 8 256 8
   chk $T/v3.ppm texto 150 556 0 6 fina "Pausa - HISPA1.NES" igual 144 75 512 480 $T/v4.ppm 144 75 0

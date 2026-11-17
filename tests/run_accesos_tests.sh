@@ -455,7 +455,7 @@ check "Variable puesta: BLASTER=A220"
 es 1 BLASTER SI "(1) el juego ve la variable BLASTER que pone HSPSND /SB"
 es 2 BLASTER SI "(2) y la segunda vez también"
 if [ "$(grep -c 'Sound Blaster 16 emulada en 220h' $T/log.txt)" = 1 ]; then ok "HSPSND /SB se carga una sola vez"; else ko "HSPSND /SB cargado $(grep -c 'Sound Blaster 16 emulada en 220h' $T/log.txt) veces"; fi
-chk $T/d2.ppm tam 800 600 marco 100 300 460 200 activa titulo 100 300 activa "Mis cosas" px 582 12 8 "altavoz encendido: HSPSND ha quedado cargado"
+chk $T/d2.ppm tam 800 600 marco 100 300 460 200 activa titulo 100 300 activa "Mis cosas" px 650 12 8 "altavoz encendido: HSPSND ha quedado cargado"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 checkn "No cabe en el entorno"

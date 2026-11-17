@@ -159,7 +159,7 @@ mcopy -i $T/f.img $T/JUGAR.BAT ::JUEGOS/BAT/JUGAR.BAT
   centro; aparca
   shot g16
   # ---- el volumen ----
-  clic 590 14; sleep 0.8
+  clic 658 14; sleep 0.8
   aparca
   shot g17
   clic 670 92; aparca                       # la barra, al 50 %
@@ -167,7 +167,7 @@ mcopy -i $T/f.img $T/JUGAR.BAT ::JUEGOS/BAT/JUGAR.BAT
   clic 576 125; aparca                      # casilla «Silencio»
   shot g19
   clic 576 125                              # y fuera
-  clic 590 14; sleep 0.8                    # se cierra con otro clic en el altavoz
+  clic 658 14; sleep 0.8                    # se cierra con otro clic en el altavoz
   aparca
   shot g20
   # ---- el volumen, visto desde un programa: el grupo «Juegos» y «Dos» ----
@@ -195,7 +195,7 @@ check "Hispa Ventanas: cargando el servidor DPMI (HSPDPMI)..."
 # -- el Centro recién creado: tres grupos y el altavoz encendido --
 chk $T/g1.ppm tam 800 600 cursor 400 300 marco 36 52 452 190 activa titulo 36 52 activa "Centro de programas" \
   texto 66 155 9 12 fina "Principal" texto 166 155 0 8 fina "Accesorios" texto 286 155 0 8 fina "Juegos" \
-  px 100 130 6 "icono de carpeta del grupo" px 582 12 8 "altavoz encendido: hay HSPSND"
+  px 100 130 6 "icono de carpeta del grupo" px 650 12 8 "altavoz encendido: hay HSPSND"
 # -- nuevo grupo --
 chk $T/g2.ppm marco 230 225 340 150 activa titulo 230 225 activa "Nuevo grupo" \
   texto 248 264 0 8 fina "Nombre del grupo:"
@@ -227,7 +227,7 @@ check "XMS=SI"
 check "LANZTEST: en marcha; pulse una tecla."
 check "Pulse una tecla para continuar..."
 chk $T/g12.ppm tam 800 600 marco 272 212 452 190 activa titulo 272 212 activa "Pruebas" titulo 36 52 no "Centro de programas" \
-  texto 314 315 9 12 fina "Prueba" texto 638 315 0 8 fina "Bat" px 582 12 8 "altavoz encendido"
+  texto 314 315 9 12 fina "Prueba" texto 638 315 0 8 fina "Bat" px 650 12 8 "altavoz encendido"
 # -- mover --
 chk $T/g13.ppm texto 314 315 0 8 fina "Prueba" texto 426 315 9 12 fina "Tres" texto 534 315 0 8 fina "Bat" \
   px 650 300 8 "ya no hay cuarto icono"
@@ -242,8 +242,8 @@ chk $T/g16.ppm tam 800 600 marco 272 212 452 190 activa titulo 272 212 activa "P
 chk $T/g17.ppm marco 550 34 236 146 activa titulo 550 34 activa "Volumen" \
   texto 568 63 0 8 fina "Volumen: 80 %" px 660 92 12 "barra al 80 % (lo que dice HSPSND al entrar)" px 750 92 7 "el final de la barra, sin poner"
 chk $T/g18.ppm texto 568 63 0 8 fina "Volumen: 50 %" px 600 92 12 "media barra puesta" px 740 92 7 "media barra sin poner"
-chk $T/g19.ppm px 576 125 4 "casilla «Silencio» marcada" px 598 15 5 "altavoz con el aspa de silencio"
-chk $T/g20.ppm px 600 100 2 "la ventanita del volumen se ha cerrado" px 598 15 1 "altavoz sin aspa"
+chk $T/g19.ppm px 576 125 4 "casilla «Silencio» marcada" px 666 15 5 "altavoz con el aspa de silencio"
+chk $T/g20.ppm px 600 100 2 "la ventanita del volumen se ha cerrado" px 666 15 1 "altavoz sin aspa"
 check "MIX=D0"                              # 80 %, antes de tocar el volumen
 check "MIX=98"                              # y 50 % después
 # -- el otro grupo --
@@ -324,7 +324,7 @@ RX=400; RY=300
 chk $T/h1.ppm tam 800 600 marco 100 300 460 200 activa titulo 100 300 activa "Mis juegos" \
   marco 300 60 380 170 no titulo 300 60 no "Centro de programas" \
   texto 138 403 9 12 fina "Memoria" texto 230 403 0 8 fina "Sin volver" texto 358 403 0 8 fina "Roto" \
-  texto 326 163 9 7 fina "Mis juegos" texto 442 163 0 8 fina "Cerrado" px 582 12 7 "altavoz gris: no hay HSPSND"
+  texto 326 163 9 7 fina "Mis juegos" texto 442 163 0 8 fina "Cerrado" px 650 12 7 "altavoz gris: no hay HSPSND"
 chk $T/h2.ppm tam 800 600 marco 100 300 460 200 activa titulo 100 300 activa "Mis juegos"
 chk $T/h3.ppm titulo 186 234 activa "Centro de programas" \
   texto 212 275 0 8 fina "No se encuentra el programa del acceso directo."

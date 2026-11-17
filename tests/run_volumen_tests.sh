@@ -172,7 +172,7 @@ RX=400; RY=300
   send 'A:\HISPADOS\HSPRATON' 2
   send 'A:\HISPADOS\HSPSND /SIMSORDO:02' 4
   send 'VENTANAS' 7
-  clic 590 14; sleep 1
+  clic 658 14; sleep 1
   # la barra: del 80 % (x = 570 + 2 * 80) al 20 % en 12 pasos
   ir 730 89
   mon "mouse_button 1" 0.1

@@ -196,12 +196,12 @@ EOF
     clic $(VOLX 100) $VOLY; sleep 2
     tecla esc; sleep 1.5
     # ---- la barra del altavoz de Hispa Ventanas ----
-    clic 590 14; sleep 1
+    clic 658 14; sleep 1
     clic 610 92; sleep 2
     clic 770 92; sleep 2
     aparca
     shot a11
-    clic 590 14; sleep 1
+    clic 658 14; sleep 1
     # ---- Configuración > Sonido ----
     doble 102 129; sleep 1.5
     tecla right right right right ret; sleep 2.5
