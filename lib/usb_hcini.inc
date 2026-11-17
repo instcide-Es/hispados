@@ -1056,8 +1056,6 @@ usb_enum:
         or al, [m_on]
         or al, [j_on]
         or al, [j_on+1]
-        or al, [n_blk]              ; [USB-RED] o un adaptador de red
-        or al, [n_blk+1]
         jz .none
         clc
         ret
