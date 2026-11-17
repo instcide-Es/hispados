@@ -685,6 +685,7 @@ ed_proc:
         jmp hecho
 .destruir:
         call ed_suelta              ; la memoria pedida, de vuelta
+        call tl_soltar              ; y la de los tipos de letra
         mov dword [ven], 0
         HV msg_salir
         jmp hecho
