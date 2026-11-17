@@ -1,0 +1,94 @@
+; contar.cas - CONTAR: cuenta las líneas, las palabras y los octetos de uno o
+; más archivos (como el «wc» de Unix). Un programa de verdad hecho con todo
+; lo de la Fase 4: varios archivos (importar), la biblioteca en Castel
+; (archivos, textos, argumentos) y cuentas de 32 bits (un archivo puede
+; pasar de 65535 octetos). Sin una línea de ensamblador.
+;
+;   CONTAR CARTA.TXT            de un archivo
+;   CONTAR A.TXT B.TXT          de varios, y el total
+;   CONTAR < CARTA.TXT          de la entrada (también ORDEN | CONTAR)
+;
+; Acaba con el nivel de error 1 si algún archivo no se ha podido abrir.
+módulo Contar
+
+    importar Archivos, Textos, Argumentos
+
+    variable lector: Lector
+    variable nombre: arreglo [80] de byte
+    variable cifras: arreglo [12] de byte
+    variable total_líneas, total_palabras, total_octetos: nat32
+
+    ; un número, arrimado a la derecha en una columna de 8
+    función columna(n: nat32)
+        variable i: nat16
+        natural_a_texto(n, cifras)
+        para i desde longitud(cifras) hasta 7 hacer
+            escribir_car(' ')
+        fin
+        escribir(cifras)
+    fin
+
+    función renglón(líneas: nat32, palabras: nat32, octetos: nat32, de: puntero a byte)
+        columna(líneas)
+        columna(palabras)
+        columna(octetos)
+        si valor(de) <> 0 entonces escribir(" ", de) fin
+        escribir("\r\n")
+    fin
+
+    ; cuenta lo que sale por un archivo abierto, hasta el final
+    función cuenta(m: ent16, de: puntero a byte)
+        variable líneas, palabras, octetos: nat32
+        variable c: ent16
+        variable en_palabra: bool
+        líneas := 0
+        palabras := 0
+        octetos := 0
+        en_palabra := falso
+        empezar_lector(lector, m)
+        mientras cierto hacer
+            c := leer_car(lector)
+            si c = FIN_DE_ARCHIVO entonces romper fin
+            octetos := octetos + 1
+            si c = '\n' entonces líneas := líneas + 1 fin
+            si es_espacio(c) entonces
+                en_palabra := falso
+            sino si no en_palabra entonces
+                en_palabra := cierto
+                palabras := palabras + 1
+            fin
+        fin
+        renglón(líneas, palabras, octetos, de)
+        total_líneas := total_líneas + líneas
+        total_palabras := total_palabras + palabras
+        total_octetos := total_octetos + octetos
+    fin
+
+    función principal(): byte
+        variable i, cuántos: nat16
+        variable m: ent16
+        variable nivel: byte
+        nivel := 0
+        cuántos := cuántos_argumentos()
+        si cuántos = 0 entonces
+            cuenta(ENTRADA, "")
+            devolver 0
+        fin
+        para i desde 1 hasta cuántos hacer
+            argumento(i, nombre, 80)
+            m := abrir(nombre, LEER)
+            si m = MAL entonces
+                escribir("CONTAR: no puedo abrir ", nombre, "\r\n")
+                nivel := 1
+            sino
+                cuenta(m, nombre)
+                cerrar(m)
+            fin
+        fin
+        si cuántos > 1 entonces
+            renglón(total_líneas, total_palabras, total_octetos, "total")
+        fin
+        devolver nivel
+    fin
+
+fin Contar.

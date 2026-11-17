@@ -197,9 +197,14 @@ la elijo: hace el primer compilador abordable.
 - **Fase 3 — Crecer el lenguaje:** estructuras, punteros con todas las de la ley, bloques
   `ensamblador`, módulos. Reescribir más piezas de Hispa-DOS.
   *(Hecha el 17/11/2026, antes que la 2 porque MAS la necesitaba: arreglos, estructuras,
-  punteros, `ref`, `paso`, `según`, bits, `interrupción`. Quedan los módulos, `nat32` y los
-  punteros lejanos: CASTEL.md §11.)*
+  punteros, `ref`, `paso`, `según`, bits, `interrupción`. Los módulos y `nat32` llegaron con
+  la Fase 4; quedan los punteros lejanos: CASTEL.md §13.)*
 - **Fase 4 — Autohospedaje:** reescribir el compilador en el propio lenguaje.
+  *(Primera parte, hecha el 17/11/2026: lo que el compilador necesita para poder escribirse
+  en Castel. Números de 32 bits (`nat32`, `ent32`), programas en varios archivos (`importar`
+  y `público`) y una biblioteca escrita en Castel: textos, archivos del DOS, un montón de
+  memoria y los argumentos; con un programa de verdad hecho con todo ello, la orden CONTAR.
+  Queda la segunda parte: el ensamblador propio y el compilador en Castel.)*
 - **Fase 5 — Saltar a 32 bits:** con el lenguaje ya sólido, empezar el SO de los 90.
 
 Cada fase es un hito pequeño y comprobable, al estilo de cómo venimos haciendo Hispa-DOS.

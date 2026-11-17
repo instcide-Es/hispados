@@ -1,22 +1,29 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# pruebas.sh - las pruebas de Castel. Tres partes:
+# pruebas.sh - las pruebas de Castel. Cuatro partes:
 #   1. Los errores: cada ejemplos/errores/*.cas tiene que dar, al compilar, el
 #      mensaje (con su línea y su columna) que lleva escrito en «; ERROR: ».
 #   2. Los ejemplos: se compilan todos, se ejecutan dentro de Hispa-8086 (en
 #      QEMU) con la salida mandada a un archivo, y cada una se compara con
-#      ejemplos/esperado/NOMBRE.txt.
+#      ejemplos/esperado/NOMBRE.txt. Entre ellos, los de la Fase 4: los
+#      números de 32 bits (largos), la biblioteca escrita en Castel (biblio,
+#      ficheros) y los programas en varios archivos (modulos, con los módulos
+#      de ejemplos/partes).
 #   3. MAS: la orden MAS escrita en Castel (ejemplos/mas.cas) frente a la de
 #      ensamblador (h8086/ordenes/mas.asm), con las mismas entradas y las
 #      mismas teclas: archivo, «<», tubería, archivo que no está, pausas,
 #      Esc. Tienen que escribir lo mismo, octeto a octeto, en la salida y en
 #      la pantalla.
+#   4. CONTAR (ejemplos/contar.cas): el programa de verdad de la Fase 4, con
+#      archivos, «<», tubería, uno que no está y uno de más de 65535 octetos;
+#      lo que cuenta se compara con lo que cuenta Python.
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
-#                                 (azar.py): lo que calculan frente a lo que
-#                                 tiene que dar. Unos 10 s más cada uno.
+#                                 de 16 bits (azar.py) y otros tres de 32
+#                                 (azar32.py): lo que calculan frente a lo
+#                                 que tiene que dar. Unos 10 s más cada uno.
 #   VER=1 ./pruebas.sh            deja lo que sale en /tmp/castel-pruebas
 set -u
 AQUI=$(dirname "$(readlink -f "$0")")
@@ -35,7 +42,7 @@ echo "== Castel: los errores se dicen en español, con línea y columna =="
 for f in $AQUI/ejemplos/errores/*.cas; do
   n=$(basename $f .cas)
   esperado=$(sed -n 's/^; ERROR: //p' $f | head -1)
-  if python3 -I $AQUI/ccastel.py $f -o $T/err.asm > $T/err.txt 2>&1; then
+  if python3 -I $AQUI/ccastel.py $f -o $T/err.asm -I $AQUI/ejemplos/partes > $T/err.txt 2>&1; then
     ko "$n: compila, y tenía que dar un error"
     continue
   fi
@@ -54,13 +61,18 @@ for f in $AQUI/ejemplos/*.cas; do
   n=$(basename $f .cas)
   N=$(echo $n | tr a-z A-Z)
   [ $n = mas ] && N=MASC               # MAS.COM es la de ensamblador
-  if $AQUI/compilar.sh $f $T/$N.COM > $T/comp.txt 2>&1; then
+  if $AQUI/compilar.sh $f $T/$N.COM -I $AQUI/ejemplos/partes > $T/comp.txt 2>&1; then
     ok "$n.cas -> $N.COM ($(stat -c %s $T/$N.COM) octetos)"
-    [ $n = mas ] || EJEMPLOS="$EJEMPLOS $n"
+    # MAS y CONTAR llevan argumentos y sus pruebas aparte
+    [ $n = mas ] || [ $n = contar ] || EJEMPLOS="$EJEMPLOS $n"
   else
     ko "$n.cas no compila: $(head -1 $T/comp.txt)"
   fi
 done
+
+if [ -f $T/modulos.asm ] && ! grep -q "F_Figuras__sin_usar" $T/modulos.asm && grep -q "F_Figuras__cuadrado" $T/modulos.asm; then
+  ok "de un módulo solo va al programa lo que se usa"
+else ko "de un módulo solo va al programa lo que se usa"; fi
 
 # el disquete: el de Hispa-8086 con los programas, los textos y un AUTOEXEC
 # que lo ejecuta todo con la salida en archivos .SAL
@@ -97,6 +109,23 @@ for i in range(1, 76):
         ln.append(f"Línea {i:02d} de la prueba de MAS:\t{'=' * (i % 30)}")
 largo = ("\r\n".join(ln) + "\r\nfin del texto\r\n").encode('cp437') + b"\x1aNO DEBE SALIR\r\n"
 open(t + '/LARGO.TXT', 'wb').write(largo)
+# GRANDE.TXT: más de 65535 octetos, para las cuentas de 32 bits de CONTAR
+grande = "".join(f"renglón {i} del archivo grande, que pasa de 65535 octetos\r\n"
+                 for i in range(1, 1501)).encode('cp437')
+open(t + '/GRANDE.TXT', 'wb').write(grande)
+# lo que tiene que decir CONTAR de cada uno (y el total): líneas, palabras y
+# octetos, en columnas de 8
+def cuenta(d):
+    return (d.count(b'\n'), len(d.split()), len(d))
+def renglon(c, nombre):
+    return "%8d%8d%8d" % c + (" " + nombre if nombre else "") + "\n"
+cl, cc, cg = cuenta(largo), cuenta(corto), cuenta(grande)
+assert cg[2] > 65535
+open(t + '/contar1.esp', 'w').write(
+    renglon(cl, 'LARGO.TXT') + renglon(cc, 'CORTO.TXT') + "CONTAR: no puedo abrir NOHAY.TXT\n"
+    + renglon(cg, 'GRANDE.TXT') + renglon(tuple(a + b + c for a, b, c in zip(cl, cc, cg)), 'total'))
+open(t + '/contar2.esp', 'w').write(renglon(cc, 'CORTO.TXT'))
+open(t + '/contar3.esp', 'w').write(renglon(cc, ''))
 # cuántas pausas tiene que haber (la misma cuenta que hace MAS)
 col = lin = pausas = 0
 for c in largo:
@@ -133,6 +162,14 @@ for n in sys.argv[2:]:
     lote.append(f"{N} > {N}.SAL")
     if N == "NIVEL":
         lote += ["IF ERRORLEVEL 7 ECO siete > NIV7.SAL", "IF ERRORLEVEL 8 ECO ocho > NIV8.SAL"]
+lote += [
+    "CONTAR LARGO.TXT CORTO.TXT NOHAY.TXT GRANDE.TXT > CONTAR1.SAL",
+    "IF ERRORLEVEL 1 ECO nivel 1 > CONTAR1N.SAL",
+    "CONTAR CORTO.TXT > CONTAR2.SAL",
+    "IF ERRORLEVEL 1 ECO nivel 1 > CONTAR2N.SAL",
+    "CONTAR < CORTO.TXT > CONTAR3.SAL",
+    "TYPE CORTO.TXT | CONTAR > CONTAR4.SAL",
+]
 for prog, l in (("MAS", "M"), ("MASC", "C")):
     lote += [
         "LIMPIAR",
@@ -160,7 +197,7 @@ lote += ["LIMPIAR", "ECO [castel-fin]"]
 open(t + '/AUTOEXEC.BAT', 'wb').write(("\r\n".join(lote) + "\r\n").encode('cp437'))
 PY
 [ $? = 0 ] || { echo "No se han podido preparar los textos de prueba"; exit 2; }
-mcopy -o -i $T/a.img $T/*.COM $T/CORTO.TXT $T/LARGO.TXT $T/AUTOEXEC.BAT ::
+mcopy -o -i $T/a.img $T/*.COM $T/CORTO.TXT $T/LARGO.TXT $T/GRANDE.TXT $T/AUTOEXEC.BAT ::
 POR_PROG=15         # pausas de cada una de las dos MAS
 ESC="8 15"          # las que se contestan con Esc
 
@@ -262,9 +299,34 @@ if [ -f $T/pausa_4.txt ] && grep -q "Línea 1[0-9] de la prueba" $T/pausa_4.txt 
   ok "en la pantalla: el texto y, debajo, «-- Más --»"
 else ko "en la pantalla no está el texto con el aviso"; fi
 
-# ------------------------------------------------- 4. cuentas al azar (AZAR=n)
+# ---------------------------------------------------------------- 4. CONTAR
+echo "== CONTAR: un programa con módulos, biblioteca y 32 bits =="
+contar() {     # número de la salida, la esperada y lo que se prueba
+  if [ ! -f $T/sal/CONTAR$1.SAL ]; then ko "$3: no ha dejado salida"; return; fi
+  tr -d '\r' < $T/sal/CONTAR$1.SAL | iconv -f CP437 -t UTF-8 > $T/sal/contar$1.txt
+  if cmp -s $T/sal/contar$1.txt $T/contar$2.esp; then ok "$3"
+  else ko "$3 (< esperado, > lo que sale):"; diff $T/contar$2.esp $T/sal/contar$1.txt | sed 's/^/        /' | head -8; fi
+}
+contar 1 1 "CONTAR de cuatro archivos (uno no está; otro pasa de 65535 octetos) y el total"
+if [ -s $T/sal/CONTAR1N.SAL ]; then ok "y acaba con el nivel de error 1"; else ko "CONTAR no ha acabado con el nivel de error 1"; fi
+contar 2 2 "CONTAR de un archivo"
+if [ -s $T/sal/CONTAR2N.SAL ]; then ko "CONTAR de un archivo que está acaba con nivel de error"; else ok "y acaba con el nivel de error 0"; fi
+contar 3 3 "CONTAR < archivo"
+contar 4 3 "orden | CONTAR"
+
+# ------------------------------------------------- 5. cuentas al azar (AZAR=n)
 if [ -n "${AZAR:-}" ]; then
   echo "== Castel: cuentas al azar =="
+  for ((s = 1; s <= AZAR; s++)); do
+    python3 -I $AQUI/azar32.py $s 120 $T/azar32_$s.cas $T/azar32_$s.esp
+    if ! $AQUI/compilar.sh $T/azar32_$s.cas $T/AZ32_$s.COM > $T/comp.txt 2>&1; then
+      ko "azar de 32 bits $s: no compila: $(head -1 $T/comp.txt)"
+      continue
+    fi
+    $AQUI/probar.sh $T/AZ32_$s.COM > $T/azar32_$s.sal 2>&1
+    if cmp -s $T/azar32_$s.esp $T/azar32_$s.sal; then ok "azar de 32 bits $s: $(wc -l < $T/azar32_$s.esp) resultados, todos bien"
+    else ko "azar de 32 bits $s: hay cuentas que no salen (< esperado, > lo que sale):"; diff $T/azar32_$s.esp $T/azar32_$s.sal | head -6 | sed 's/^/        /'; fi
+  done
   for ((s = 1; s <= AZAR; s++)); do
     python3 -I $AQUI/azar.py $s 250 $T/azar$s.cas $T/azar$s.esp
     if ! $AQUI/compilar.sh $T/azar$s.cas $T/AZAR$s.COM > $T/comp.txt 2>&1; then
