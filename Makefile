@@ -317,13 +317,30 @@ $(B)/ARCHIVOS.HVP: programas/archivos.asm $(wildcard programas/archivos/*.inc) $
 $(B)/PINTURA.HVP: programas/pintura.asm $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Pluma, el procesador de textos (Productividad: el 4 de HVP_CABECERA)
-$(B)/PLUMA.HVP: programas/pluma.asm $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+$(B)/PLUMA.HVP: programas/pluma.asm $(wildcard programas/pluma/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Cuentas, la hoja de cálculo (Productividad: el 4 de HVP_CABECERA)
-$(B)/CUENTAS.HVP: programas/cuentas.asm $(wildcard programas/cuentas/*.inc) $(HVPDEP) | $(B)
+$(B)/CUENTAS.HVP: programas/cuentas.asm $(wildcard programas/cuentas/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Facturas, la economía de casa y de un pequeño negocio (Productividad: el 4)
-$(B)/FACTURAS.HVP: programas/facturas.asm $(HVPDEP) | $(B)
+$(B)/FACTURAS.HVP: programas/facturas.asm $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# [0.9.22] el resto de la familia de oficina (docs/OFICINA.md): Datos, el Lector
+# de PDF, Publicaciones y Presentaciones (Productividad, el 4) y Mirador, el
+# visor de imágenes (Accesorios, el 1). Cada uno con sus .inc y los comunes.
+$(B)/DATOS.HVP: programas/datos.asm $(wildcard programas/datos/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/LECTOR.HVP: programas/lector.asm $(wildcard programas/lector/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/PUBLICA.HVP: programas/publica.asm $(wildcard programas/publica/*) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/PRESENTA.HVP: programas/presenta.asm $(wildcard programas/presenta/*) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+$(B)/MIRADOR.HVP: programas/mirador.asm $(wildcard programas/mirador/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+# [TAREAS] el Administrador de tareas (Accesorios, el 1; ventanas/tareas_api.inc).
+# CUELGA.HVP (programas/tareas/cuelga.asm) es solo para tests/run_tareas_tests.sh
+$(B)/TAREAS.HVP: programas/tareas.asm $(wildcard programas/tareas/*.inc) $(wildcard programas/comun/*.inc) $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 # Terminal, el símbolo del sistema (accesorio: el 1 de HVP_CABECERA)
 $(B)/TERMINAL.HVP: programas/terminal.asm $(wildcard programas/terminal/*.inc) lib/version.inc $(HVPDEP) | $(B)
