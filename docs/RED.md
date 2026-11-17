@@ -543,6 +543,9 @@ tardan más de un tic entre una conexión y la siguiente.
   el acuerdo de claves). No hay nada parecido en DOS. **Decisión (Carlos,
   17/11/2026): en Hispa-386 no se hace Wi-Fi** (HSPRED solo enseña la tarjeta);
   queda para Hispa-486 y posteriores (ver docs/486/HISPA-486.md).
+- **Marvell Yukon 88E8059** (11AB:4381, la de cable del HP Mini 5103): HSPRED no
+  la lleva. **Decisión (Carlos, 17/11/2026): para Hispa-Pentium**, la gama de
+  Windows XP; en Hispa-386 no se hace.
 - **WINSOCK.DLL (Winsock 1.1)** para Windows para Trabajo en Grupo 3.11 y
   Hispa Ventanas: una DLL de 16 bits (Open Watcom) sobre una pila TCP/IP en
   la memoria (la de `lib/red.inc` hecha residente, con varias conexiones y
