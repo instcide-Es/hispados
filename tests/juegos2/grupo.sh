@@ -22,7 +22,9 @@ if [ -f $B/hispados-usb.img ]; then
   fi
 fi
 libre=$(mdir -i "$IMG" :: | sed -n 's/^ *\([0-9 ]*\) bytes free.*/\1/p' | tr -d ' ')
-if [ "${libre:-0}" -ge 200000 ]; then ok "caben en el disquete: quedan $libre octetos libres"; else ko "disquete: solo quedan ${libre:-?} octetos libres"; fi
+# (desde la 0.9.22 la oficina va en su disquete; con Mirador y Tareas en este,
+# se piden 150 K libres para los archivos de quien lo use)
+if [ "${libre:-0}" -ge 150000 ]; then ok "caben en el disquete: quedan $libre octetos libres"; else ko "disquete: solo quedan ${libre:-?} octetos libres"; fi
 { entrar
   doble 310 129; sleep 1.5                  # el grupo Juegos
   aparca
