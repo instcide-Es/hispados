@@ -35,7 +35,7 @@ TB_NOM2     equ 0x3400
 TB_SAL      equ 0x3600              ; respuestas de DOS (directorio, nombre)
 MAX_IMP     equ 512                 ; funciones importadas como mucho
 TRAMP       equ 12                  ; lo que ocupa un trampolín (push 5 + jmp lejos 7)
-MISC_TAM    equ 0x4000              ; lo nuestro dentro del bloque
+MISC_TAM    equ 0x5000              ; lo nuestro dentro del bloque
 PILA_MAX    equ 0x100000            ; la pila: lo que pida, hasta 1 MB
 MONTON_TAM  equ 0x100000            ; cada trozo de montón que se pide
 
@@ -166,6 +166,7 @@ principal:
         call sel_de_seg
         mov [sel_env], ax
 .sin_env:
+        call carpeta_hw32
         ; el nombre del programa y lo demás de la línea
         mov esi, orden
 .e:
@@ -236,6 +237,48 @@ falla:
         mov ax, 0x4CFF
         int 0x21
 
+; ---- la carpeta de HW32 (de lo que hay tras el entorno) a hw32_dir ----
+carpeta_hw32:
+        cmp word [sel_env], 0
+        je .x
+        push ds
+        push es
+        push ds
+        pop es                      ; ES: lo nuestro
+        mov ax, [sel_env]
+        mov ds, ax                  ; DS: el entorno
+        xor esi, esi
+.b:
+        cmp word [esi], 0           ; el final del entorno
+        je .f
+        inc esi
+        cmp esi, 0x7FF0
+        jb .b
+        pop es
+        pop ds
+        ret
+.f:
+        add esi, 4                  ; los dos ceros y la cuenta
+        mov edi, hw32_dir
+        mov edx, edi                ; tras la última barra
+        mov ecx, 120
+.c:
+        lodsb
+        stosb
+        test al, al
+        jz .c_f
+        cmp al, '\'
+        jne .c1
+        mov edx, edi
+.c1:
+        loop .c
+.c_f:
+        pop es
+        pop ds
+        mov byte [edx], 0
+.x:
+        ret
+
 ; ---- un selector para el segmento de modo real BX (DPMI 0002h) ----
 sel_de_seg:
         mov ax, 0x0002
@@ -284,65 +327,26 @@ int_rm:
 ; =============================================================================
 ;  Cargar el PE
 ; =============================================================================
+; ---- las fichas de los módulos: el programa (la 0) y sus DLL ----
+N_MOD       equ 16
+MOD_TAM     equ 64
+M_DIR       equ 0                   ; dónde está (en el programa)
+M_TAM       equ 4
+M_EXP       equ 8                   ; las exportaciones (RVA, tamaño)
+M_EXPN      equ 12
+M_IMP       equ 16                  ; las importaciones (RVA)
+M_ENT       equ 20                  ; la entrada (RVA; 0: sin DllMain)
+M_DLL       equ 24
+M_NOM       equ 32                  ; el nombre (en mayúsculas)
+
 carga_pe:
-        ; abrirlo: el nombre, al búfer
         mov esi, nombre
-        push es
-        mov es, [sel_tb]
-        xor edi, edi
-.cp:
-        lodsb
-        stosb
-        test al, al
-        jnz .cp
-        pop es
-        mov word [rm_ax], 0x3D00
-        mov word [rm_dx], 0
-        call dos
+        call abre_pe
         jc .no_esta
-        mov ax, [rm_ax]
-        mov [h_exe], ax
-        ; las primeras 4 KB: MZ, PE, cabeceras y secciones
-        xor eax, eax
-        call lee_en_tb_desde        ; EAX = posición; lee TB_TAM -> ECX leídos
-        push ds
-        mov ds, [sel_tb]
-        cmp word [0], 'MZ'
-        jne .no_pe_ds
-        mov eax, [0x3C]
-        cmp eax, 0x1000 - 0xF8
-        ja .no_pe_ds
-        cmp dword [eax], 'PE'
-        jne .no_pe_ds
-        cmp word [eax + 4], 0x014C
-        jne .no_pe_ds
-        pop ds
-        mov [pe_cab], eax
-        ; los datos de la cabecera opcional
-        push ds
-        mov ds, [sel_tb]
-        mov ebx, eax
-        movzx ecx, word [ebx + 6]   ; secciones
-        movzx edx, word [ebx + 0x14] ; tamaño de la cabecera opcional
-        mov esi, [ebx + 0x18 + 0x10] ; punto de entrada
-        mov edi, [ebx + 0x18 + 0x1C] ; ImageBase
-        mov eax, [ebx + 0x18 + 0x38] ; SizeOfImage
-        mov ebp, [ebx + 0x18 + 0x48] ; pila reservada
-        pop ds
-        mov [n_sec], ecx
-        mov [entrada_rva], esi
-        mov [img_base], edi
-        mov [img_tam], eax
-        lea eax, [ebx + 0x18 + edx]
-        mov [tabla_sec], eax        ; dónde empieza la tabla de secciones
-        push ds
-        mov ds, [sel_tb]
-        mov eax, [ebx + 0x18 + 0x60 + 8]   ; directorio 1: importaciones
-        mov edx, [ebx + 0x18 + 0x54] ; SizeOfHeaders
-        pop ds
-        mov [imp_rva], eax
-        mov [cab_tam], edx
+        mov eax, [h_base]
+        mov [img_base], eax
         ; la pila
+        mov ebp, [pila_res]
         cmp ebp, PILA_MAX
         jbe .p
         mov ebp, PILA_MAX
@@ -383,22 +387,135 @@ carga_pe:
         xor eax, eax
         rep stosd
         pop es
-        ; las cabeceras
+        mov eax, [img_base]
+        mov [mod_dir], eax
+        call copia_secciones
+        call cierra_pe
+        ; su ficha (con el nombre del archivo, sin la ruta)
+        mov ebp, mods
+        mov esi, nombre
+        mov edi, nombre
+.n:
+        lodsb
+        test al, al
+        jz .n_f
+        cmp al, '\'
+        je .n_b
+        cmp al, ':'
+        jne .n
+.n_b:
+        mov edi, esi
+        jmp .n
+.n_f:
+        mov esi, edi
+        xor bl, bl
+        call llena_ficha
+        ; y la carpeta del programa (donde se buscan sus DLL primero)
+        mov ecx, edi
+        sub ecx, nombre
+        mov esi, nombre
+        mov edi, exe_dir
+        rep movsb
+        mov byte [edi], 0
+        mov dword [n_mods], 1
+        call importaciones          ; (EBP = la ficha)
+        ret
+.no_esta:
+        mov esi, m_no_esta
+        jmp falla
+.sin_mem:
+        mov esi, m_sin_mem
+        jmp falla
+
+; ---- abre el PE de nombre DS:ESI y lee sus cabeceras (h_base, img_tam,
+; n_sec...); CF=1 si no se puede abrir; si no es un PE, falla ----
+abre_pe:
+        push es
+        mov es, [sel_tb]
+        xor edi, edi
+.cp:
+        lodsb
+        stosb
+        test al, al
+        jnz .cp
+        pop es
+        mov word [rm_ax], 0x3D00
+        mov word [rm_dx], 0
+        call dos
+        jc .x
+        mov ax, [rm_ax]
+        mov [h_exe], ax
+        ; las primeras 4 KB: MZ, PE, cabeceras y secciones
+        xor eax, eax
+        call lee_en_tb_desde
+        push ds
+        mov ds, [sel_tb]
+        cmp word [0], 'MZ'
+        jne .no_pe_ds
+        mov eax, [0x3C]
+        cmp eax, 0x1000 - 0xF8
+        ja .no_pe_ds
+        cmp dword [eax], 'PE'
+        jne .no_pe_ds
+        cmp word [eax + 4], 0x014C
+        jne .no_pe_ds
+        mov ebx, eax
+        movzx ecx, word [ebx + 6]   ; secciones
+        movzx edx, word [ebx + 0x14] ; tamaño de la cabecera opcional
+        mov esi, [ebx + 0x18 + 0x10] ; punto de entrada
+        mov edi, [ebx + 0x18 + 0x1C] ; ImageBase
+        mov eax, [ebx + 0x18 + 0x38] ; SizeOfImage
+        mov ebp, [ebx + 0x18 + 0x48] ; pila reservada
+        pop ds
+        mov [n_sec], ecx
+        mov [entrada_rva], esi
+        mov [h_base], edi
+        mov [img_tam], eax
+        mov [pila_res], ebp
+        lea eax, [ebx + 0x18 + edx]
+        mov [tabla_sec], eax
+        push ds
+        mov ds, [sel_tb]
+        mov eax, [ebx + 0x18 + 0x60]       ; 0: exportaciones
+        mov ecx, [ebx + 0x18 + 0x60 + 4]
+        mov edx, [ebx + 0x18 + 0x60 + 8]   ; 1: importaciones
+        mov esi, [ebx + 0x18 + 0x60 + 40]  ; 5: reubicados
+        mov edi, [ebx + 0x18 + 0x60 + 44]
+        mov ebp, [ebx + 0x18 + 0x54]       ; SizeOfHeaders
+        pop ds
+        mov [exp_rva], eax
+        mov [exp_tam], ecx
+        mov [imp_rva], edx
+        mov [rel_rva], esi
+        mov [rel_tam], edi
+        mov [cab_tam], ebp
+        clc
+.x:
+        ret
+.no_pe_ds:
+        pop ds
+        mov esi, m_no_pe
+        jmp falla
+cierra_pe:
+        mov ax, [h_exe]
+        mov [rm_bx], ax
+        mov word [rm_ax], 0x3E00
+        jmp dos
+; ---- las cabeceras y las secciones del archivo abierto a [mod_dir] ----
+copia_secciones:
         xor eax, eax
         mov ecx, [cab_tam]
-        mov edx, [img_base]
+        mov edx, [mod_dir]
         call copia_del_exe          ; EAX posición, ECX octetos -> ES(pd):EDX
-        ; las secciones
         mov ecx, [n_sec]
         mov esi, [tabla_sec]
 .s:
         push ecx
         push esi
-        ; (la tabla está en las primeras 4 KB, que ya se han copiado a la
-        ; imagen: se lee de allí)
+        ; (la tabla de secciones, de las cabeceras ya copiadas)
         push es
         mov es, [sel_pd]
-        mov ebx, [img_base]
+        mov ebx, [mod_dir]
         add ebx, esi
         mov edx, [es:ebx + 12]      ; VirtualAddress
         mov ecx, [es:ebx + 16]      ; SizeOfRawData
@@ -407,11 +524,11 @@ carga_pe:
         pop es
         test edi, edi
         jz .s_bien
-        cmp ecx, edi                ; (no más de lo que ocupa en memoria)
+        cmp ecx, edi
         jbe .s_bien
         mov ecx, edi
 .s_bien:
-        add edx, [img_base]
+        add edx, [mod_dir]
         test ecx, ecx
         jz .s_sig
         test eax, eax
@@ -422,24 +539,169 @@ carga_pe:
         pop ecx
         add esi, 40
         loop .s
-        ; cerrar el archivo
-        mov ax, [h_exe]
-        mov [rm_bx], ax
-        mov word [rm_ax], 0x3E00
-        call dos
-        ; las importaciones
-        call importaciones
         ret
-.no_esta:
-        mov esi, m_no_esta
+; ---- la ficha EBP con lo leído de las cabeceras; ESI = el nombre (DS),
+; BL = 1 si es una DLL ----
+llena_ficha:
+        push edi
+        mov eax, [mod_dir]
+        mov [ebp + M_DIR], eax
+        mov eax, [img_tam]
+        mov [ebp + M_TAM], eax
+        mov eax, [exp_rva]
+        mov [ebp + M_EXP], eax
+        mov eax, [exp_tam]
+        mov [ebp + M_EXPN], eax
+        mov eax, [imp_rva]
+        mov [ebp + M_IMP], eax
+        mov eax, [entrada_rva]
+        mov [ebp + M_ENT], eax
+        mov [ebp + M_DLL], bl
+        lea edi, [ebp + M_NOM]
+        mov ecx, 31
+.c:
+        lodsb
+        cmp al, 'a'
+        jb .c1
+        cmp al, 'z'
+        ja .c1
+        sub al, 32
+.c1:
+        mov [edi], al               ; (con DS: ES puede ser el programa)
+        inc edi
+        test al, al
+        jz .x
+        loop .c
+        mov byte [edi], 0
+.x:
+        pop edi
+        ret
+
+; ---- carga la DLL de nombre b_dll (en mayúsculas): se busca en la carpeta
+; del programa, en la de HW32 y en la de ahora -> EBP = su ficha ----
+carga_dll:
+        cmp dword [n_mods], N_MOD
+        jae .muchas
+        mov esi, exe_dir
+        call prueba_dll
+        jnc .abierta
+        mov esi, hw32_dir
+        call prueba_dll
+        jnc .abierta
+        mov esi, b_vacio
+        call prueba_dll
+        jnc .abierta
+        mov esi, m_falta_dll
+        call pon_cad
+        mov esi, b_dll
+        call pon_cad
+        mov esi, m_nl
+        call pon_cad
+        mov ax, 0x4CFF
+        int 0x21
+.muchas:
+        mov esi, m_muchas_dll
         jmp falla
-.no_pe_ds:
-        pop ds
-        mov esi, m_no_pe
-        jmp falla
+.abierta:
+        mov eax, [img_tam]
+        add eax, 0xFFF
+        and eax, ~0xFFF
+        mov [img_tam], eax
+        call pide_bloque
+        jc .sin_mem
+        sub ebx, [prog_base]
+        mov [mod_dir], ebx
+        push es
+        mov es, [sel_pd]
+        mov edi, ebx
+        mov ecx, [img_tam]
+        shr ecx, 2
+        xor eax, eax
+        rep stosd
+        pop es
+        call copia_secciones
+        call cierra_pe
+        call reubica
+        ; la ficha
+        mov ebp, [n_mods]
+        imul ebp, MOD_TAM
+        add ebp, mods
+        mov esi, b_dll
+        mov bl, 1
+        call llena_ficha
+        inc dword [n_mods]
+        ; sus importaciones (puede cargar otras) y, luego, a la lista de
+        ; inicio (así las de las que depende van antes)
+        push ebp
+        call importaciones
+        pop ebp
+        mov eax, [n_init]
+        mov [init_lista + eax * 4], ebp
+        inc dword [n_init]
+        ret
 .sin_mem:
         mov esi, m_sin_mem
         jmp falla
+; la carpeta DS:ESI + b_dll a b_ruta, y abrirla (CF=1 si no está)
+prueba_dll:                         ; (con DS: aquí ES es el programa)
+        mov edi, b_ruta
+.c:
+        lodsb
+        test al, al
+        jz .n
+        mov [edi], al
+        inc edi
+        jmp .c
+.n:
+        mov esi, b_dll
+.d:
+        lodsb
+        mov [edi], al
+        inc edi
+        test al, al
+        jnz .d
+        mov esi, b_ruta
+        jmp abre_pe
+; ---- aplica los reubicados del módulo [mod_dir] (cargado en otro sitio que
+; su ImageBase [h_base]) ----
+reubica:
+        mov edx, [mod_dir]
+        sub edx, [h_base]           ; la diferencia
+        jz .x
+        mov esi, [rel_rva]
+        test esi, esi
+        jz .x
+        push es
+        mov es, [sel_pd]
+        add esi, [mod_dir]
+        mov ebp, esi
+        add ebp, [rel_tam]          ; el final
+.b:
+        cmp esi, ebp
+        jae .f
+        mov ebx, [es:esi]           ; la página (RVA)
+        mov ecx, [es:esi + 4]       ; el tamaño del bloque
+        cmp ecx, 8
+        jb .f
+        add ebx, [mod_dir]
+        lea edi, [esi + 8]
+        add esi, ecx
+.e:
+        cmp edi, esi
+        jae .b
+        movzx eax, word [es:edi]
+        add edi, 2
+        mov ecx, eax
+        shr ecx, 12
+        cmp ecx, 3                  ; IMAGE_REL_BASED_HIGHLOW
+        jne .e
+        and eax, 0xFFF
+        add [es:ebx + eax], edx
+        jmp .e
+.f:
+        pop es
+.x:
+        ret
 
 ; lee TB_TAM octetos del exe desde la posición EAX al búfer: ECX = leídos
 lee_en_tb_desde:
@@ -599,39 +861,78 @@ base_y_limite_4g:
 ;  (manejador 4, argumentos 2, el nombre: su dirección en el programa 4)
 ; =============================================================================
 IMP_FICHA   equ 10
+; ---- las importaciones del módulo de la ficha EBP ----
 importaciones:
-        mov eax, [imp_rva]
+        mov eax, [ebp + M_IMP]
         test eax, eax
         jz .x
         push es
         mov es, [sel_pd]
-        mov esi, [img_base]
+        mov esi, [ebp + M_DIR]
         add esi, eax                ; el primer descriptor
-        mov dword [n_imp], 0
 .d:
         mov eax, [es:esi + 12]      ; el nombre de la DLL
         test eax, eax
         jz .fin
-        add eax, [img_base]
-        mov [dll_nom], eax
+        add eax, [ebp + M_DIR]
         mov ebx, [es:esi]           ; la tabla de nombres (o la IAT)
         test ebx, ebx
         jnz .ilt
         mov ebx, [es:esi + 16]
 .ilt:
-        add ebx, [img_base]
+        add ebx, [ebp + M_DIR]
         mov edi, [es:esi + 16]      ; la IAT
-        add edi, [img_base]
+        add edi, [ebp + M_DIR]
+        call es_kernel32_nom        ; ES:EAX: ¿KERNEL32? (ZF=1)
+        je .f
+        ; otra DLL: la suya (cargándola si hace falta) -> EDX
+        push esi
+        push ebx
+        push edi
+        call dll_de_nombre
+        pop edi
+        pop ebx
+        pop esi
+.g:
+        mov eax, [es:ebx]
+        test eax, eax
+        jz .d_sig
+        test eax, 0x80000000
+        jnz .g_ord
+        add eax, [ebp + M_DIR]
+        add eax, 2                  ; (la pista) -> el nombre
+        mov ecx, eax
+        call busca_export           ; EDX ficha, ES:EAX nombre -> EAX o 0
+        test eax, eax
+        jnz .g_pon
+        mov eax, ecx                ; no la tiene: que lo diga al llamarla
+        jmp .g_falta
+.g_ord:
+        movzx eax, ax
+        call export_numero          ; EDX ficha, EAX número -> EAX o 0
+        test eax, eax
+        jnz .g_pon
+.g_falta:
+        mov ecx, f_falta
+        push edx
+        xor edx, edx
+        call nuevo_tramp
+        pop edx
+        jc .muchas
+.g_pon:
+        mov [es:edi], eax
+        add ebx, 4
+        add edi, 4
+        jmp .g
+        ; KERNEL32: las nuestras, por sus trampolines
 .f:
         mov eax, [es:ebx]
         test eax, eax
         jz .d_sig
-        cmp dword [n_imp], MAX_IMP
-        jae .muchas
         test eax, 0x80000000        ; por número: no se resuelve
         jnz .ordinal
-        add eax, [img_base]
-        add eax, 2                  ; (la pista) -> el nombre
+        add eax, [ebp + M_DIR]
+        add eax, 2
         call busca_funcion          ; ES:EAX nombre -> ECX manejador, DX args
         jmp .pon
 .ordinal:
@@ -640,7 +941,8 @@ importaciones:
         xor edx, edx
 .pon:
         call nuevo_tramp            ; -> EAX el trampolín
-        mov [es:edi], eax           ; la IAT apunta al trampolín
+        jc .muchas
+        mov [es:edi], eax
         add ebx, 4
         add edi, 4
         jmp .f
@@ -655,6 +957,197 @@ importaciones:
         pop es
         mov esi, m_muchas
         jmp falla
+
+; ¿el texto ES:EAX es «KERNEL32» (con .DLL o sin él)? ZF=1 si lo es
+es_kernel32_nom:
+        push esi
+        push edi
+        push eax
+        mov esi, eax
+        mov edi, s_k32
+.c:
+        mov al, [es:esi]
+        mov ah, [edi]
+        test ah, ah
+        jz .f
+        cmp al, 'a'
+        jb .c1
+        sub al, 32
+.c1:
+        cmp al, ah
+        jne .x
+        inc esi
+        inc edi
+        jmp .c
+.f:
+        test al, al
+        jz .x
+        cmp al, '.'
+.x:
+        pop eax
+        pop edi
+        pop esi
+        ret
+s_k32   db 'KERNEL32', 0
+
+; ---- la ficha de la DLL de nombre ES:EAX, cargándola si no está -> EDX ----
+dll_de_nombre:
+        push ebp
+        push ecx
+        ; el nombre, a b_dll en mayúsculas
+        mov esi, eax
+        mov edi, b_dll
+        mov ecx, 30
+.c:
+        mov al, [es:esi]
+        cmp al, 'a'
+        jb .c1
+        cmp al, 'z'
+        ja .c1
+        sub al, 32
+.c1:
+        mov [edi], al
+        test al, al
+        jz .c_f
+        inc esi
+        inc edi
+        loop .c
+        mov byte [edi], 0
+.c_f:
+        call ficha_de_b_dll
+        jnc .x
+        call carga_dll              ; -> EBP
+        mov edx, ebp
+.x:
+        pop ecx
+        pop ebp
+        ret
+; busca b_dll entre las DLL cargadas: EDX = su ficha; CF=1 si no está
+ficha_de_b_dll:
+        push esi
+        push edi
+        push ecx
+        mov ecx, 1
+.b:
+        cmp ecx, [n_mods]
+        jae .no
+        mov edx, ecx
+        imul edx, MOD_TAM
+        add edx, mods
+        lea esi, [edx + M_NOM]
+        mov edi, b_dll
+.c:
+        mov al, [esi]
+        cmp al, [edi]
+        jne .sig
+        test al, al
+        jz .si
+        inc esi
+        inc edi
+        jmp .c
+.sig:
+        inc ecx
+        jmp .b
+.si:
+        clc
+        jmp .x
+.no:
+        stc
+.x:
+        pop ecx
+        pop edi
+        pop esi
+        ret
+; ---- la exportación de nombre ES:EAX del módulo de la ficha EDX -> EAX (en
+; el programa) o 0 ----
+busca_export:
+        push ebx
+        push ecx
+        push esi
+        push edi
+        push ebp
+        mov ebp, [edx + M_EXP]
+        test ebp, ebp
+        jz .no
+        add ebp, [edx + M_DIR]      ; el directorio de exportaciones
+        mov ecx, [es:ebp + 24]      ; NumberOfNames
+        mov ebx, [es:ebp + 32]
+        add ebx, [edx + M_DIR]      ; los nombres
+        xor esi, esi
+.b:
+        cmp esi, ecx
+        jae .no
+        mov edi, [es:ebx + esi * 4]
+        add edi, [edx + M_DIR]
+        push eax
+        push esi
+        mov esi, eax
+.c:
+        mov al, [es:esi]
+        cmp al, [es:edi]
+        jne .sig
+        test al, al
+        jz .si
+        inc esi
+        inc edi
+        jmp .c
+.sig:
+        pop esi
+        pop eax
+        inc esi
+        jmp .b
+.si:
+        pop esi
+        pop eax
+        mov ebx, [es:ebp + 36]
+        add ebx, [edx + M_DIR]
+        movzx eax, word [es:ebx + esi * 2]
+        jmp export_indice
+.no:
+        xor eax, eax
+        pop ebp
+        pop edi
+        pop esi
+        pop ecx
+        pop ebx
+        ret
+; la exportación de número EAX (con su Base) de la ficha EDX -> EAX o 0
+export_numero:
+        push ebx
+        push ecx
+        push esi
+        push edi
+        push ebp
+        mov ebp, [edx + M_EXP]
+        test ebp, ebp
+        jz busca_export.no
+        add ebp, [edx + M_DIR]
+        sub eax, [es:ebp + 16]      ; - Base
+        jb busca_export.no
+; (sigue: EAX = el índice en las funciones; EBP = el directorio)
+export_indice:
+        cmp eax, [es:ebp + 20]      ; NumberOfFunctions
+        jae busca_export.no
+        mov ebx, [es:ebp + 28]
+        add ebx, [edx + M_DIR]
+        mov eax, [es:ebx + eax * 4]
+        test eax, eax
+        jz busca_export.no
+        ; (las que reenvían a otra DLL caen dentro del directorio: no)
+        cmp eax, [edx + M_EXP]
+        jb .bien
+        mov ecx, [edx + M_EXP]
+        add ecx, [edx + M_EXPN]
+        cmp eax, ecx
+        jb busca_export.no
+.bien:
+        add eax, [edx + M_DIR]
+        pop ebp
+        pop edi
+        pop esi
+        pop ecx
+        pop ebx
+        ret
 
 ; ---- una función nueva: su ficha (ECX manejador, DX octetos de argumentos,
 ; EAX su nombre en el programa o 0) y su trampolín «push n; jmp lejos
@@ -800,11 +1293,39 @@ ejecuta:
         sub eax, [pila_tam]
         mov [es:edi + 8], eax       ; el fondo
         mov [es:edi + 0x18], edi    ; (dirección lineal de la TIB, en el programa)
+        ; el trampolín de inicio (en lo nuestro +0x4000): el DllMain de cada
+        ; DLL (las de las que dependen otras, antes) y luego el programa
+        mov edi, [img_base]
+        add edi, [misc_off]
+        add edi, 0x4000
+        mov [salto], edi
+        xor ecx, ecx
+.ini:
+        cmp ecx, [n_init]
+        jae .ini_f
+        mov ebx, [init_lista + ecx * 4]
+        inc ecx
+        mov eax, [ebx + M_ENT]
+        test eax, eax
+        jz .ini
+        mov dword [es:edi], 0x016A006A      ; push 0 ; push 1
+        mov byte [es:edi + 4], 0x68         ; push hinst
+        mov edx, [ebx + M_DIR]
+        mov [es:edi + 5], edx
+        mov byte [es:edi + 9], 0xB8         ; mov eax, DllMain
+        add eax, edx
+        mov [es:edi + 10], eax
+        mov word [es:edi + 14], 0xD0FF      ; call eax
+        add edi, 16
+        jmp .ini
+.ini_f:
+        mov byte [es:edi], 0xB8             ; mov eax, la entrada
+        mov eax, [img_base]
+        add eax, [mods + M_ENT]
+        mov [es:edi + 1], eax
+        mov word [es:edi + 5], 0xE0FF       ; jmp eax
         pop es
         ; al programa
-        mov eax, [img_base]
-        add eax, [entrada_rva]
-        mov [salto], eax
         mov ax, [sel_pc]
         mov [salto + 4], ax
         mov ebx, [img_base]
@@ -910,6 +1431,9 @@ m_no_pe     db "HW32: no es un programa Win32 (PE de 32 bits).", 13, 10, 0
 m_sin_mem   db "HW32: no hay memoria bastante.", 13, 10, 0
 m_no_sel32  db "HW32: DPMI no da los selectores.", 13, 10, 0
 m_muchas    db "HW32: el programa importa demasiadas funciones.", 13, 10, 0
+m_muchas_dll db "HW32: demasiadas DLL.", 13, 10, 0
+m_falta_dll db "Hispa-486: falta la DLL ", 0
+m_nl        db 13, 10, 0
 m_falta     db "Hispa-486: falta la funcion ", 0
 m_ordinal   db "(por numero)", 13, 10, 0
 m_no_dpmi   db "HW32: hace falta HSPDPMI (cliente DPMI de 32 bits).", 13, 10, "$"
@@ -966,6 +1490,22 @@ cmd_dir     dd 0
 ficha_act   dd 0
 ult_error   dd 0
 ult_handle  dd 0
+h_base      dd 0
+pila_res    dd 0
+exp_rva     dd 0
+exp_tam     dd 0
+rel_rva     dd 0
+rel_tam     dd 0
+mod_dir     dd 0
+n_mods      dd 0
+n_init      dd 0
+init_lista  times N_MOD dd 0
+mods        times N_MOD * MOD_TAM db 0
+b_dll       times 32 db 0
+b_ruta      times 160 db 0
+b_vacio     db 0
+exe_dir     times 130 db 0
+hw32_dir    times 130 db 0
 env_dir     dd 0
 monton_ptr  dd 0
 monton_libre dd 0

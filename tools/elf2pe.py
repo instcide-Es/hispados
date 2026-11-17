@@ -6,6 +6,12 @@
 #
 #   tools/elf2pe.py -o PROG.EXE [-e entrada] [--reloc] [--base 0x400000]
 #                   [-i DLL:func,func...] obj.o ...
+#   tools/elf2pe.py --dll -o MSVCRT.DLL [-e DllMain] obj.o ...
+#
+# Con --dll sale una DLL: se exportan todos los símbolos globales definidos
+# (las funciones y los datos; lo que no deba verse, «static»), con su nombre
+# tal cual, y lleva siempre .reloc. La entrada (DllMain, si la hay) es
+# opcional.
 #
 # Los símbolos que quedan sin definir se importan: de la DLL que diga -i, o de
 # KERNEL32.dll si no lo dice. Con --reloc se añade la sección .reloc (para
@@ -43,13 +49,18 @@ class Obj:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-o', required=True)
-    ap.add_argument('-e', default='inicio')
-    ap.add_argument('--base', default='0x400000')
+    ap.add_argument('-e', default=None)
+    ap.add_argument('--dll', action='store_true')
+    ap.add_argument('--base', default=None)
     ap.add_argument('--reloc', action='store_true')
     ap.add_argument('-i', action='append', default=[])
     ap.add_argument('objs', nargs='+')
     a = ap.parse_args()
-    base = int(a.base, 0)
+    if a.dll:
+        a.reloc = True
+    base = int(a.base or ('0x10000000' if a.dll else '0x400000'), 0)
+    if a.e is None:
+        a.e = 'DllMain' if a.dll else 'inicio'
     dll_de = {}
     orden_dll = []
     for x in a.i:
@@ -91,8 +102,12 @@ def main():
     faltan = []
     for oi, o in enumerate(objs):
         for (n, val, bind, typ, shn) in o.simbolos:
-            if shn == 0 and n and n not in glob and n not in faltan:
-                faltan.append(n)
+            if shn == 0 and n and n not in glob:
+                # «__imp_nombre» es la casilla de la IAT de «nombre» (para
+                # importar datos, como _iob de msvcrt)
+                r = n[6:] if n.startswith('__imp_') else n
+                if r not in faltan:
+                    faltan.append(r)
     por_dll = {}
     for f in faltan:
         dll = dll_de.get(f, 'KERNEL32.dll')
@@ -159,6 +174,10 @@ def main():
             struct.pack_into('<I', t, salto[f] + 2, base + rd(iat_off[x] + 4 * j))
     imp_dir = (rd(imp_off), n_desc * 20)
     iat_dir = (rd(min(iat_off.values())), off - min(iat_off.values())) if dlls else (0, 0)
+    casilla = {}
+    for x in dlls:
+        for j, f in enumerate(por_dll[x]):
+            casilla[f] = base + rd(iat_off[x] + 4 * j)
     rva_b = al(rva_d + max(len(d), 1), SEC_AL)
     rva_de = {'t': rva_t, 'd': rva_d, 'b': rva_b}
     def dir_sec(oi, shn):
@@ -177,6 +196,8 @@ def main():
         if n in glob:
             g = glob[n]
             return dir_sec(g[0], g[1]) + g[2]
+        if n.startswith('__imp_') and n[6:] in casilla:
+            return casilla[n[6:]]
         if n in salto:
             return base + rva_t + salto[n]
         sys.exit(f'símbolo sin resolver: {n}')
@@ -220,16 +241,47 @@ def main():
             reloc += struct.pack('<II', pg, 8 + 2 * len(offs))
             for x in offs:
                 reloc += struct.pack('<H', 0 if x is None else (3 << 12) | x)
-    rva_r = al(rva_b + max(bss_tam, 1), SEC_AL)
+    # las exportaciones (.edata, tras .bss)
+    rva_e = al(rva_b + max(bss_tam, 1), SEC_AL)
+    edata = bytearray()
+    if a.dll:
+        nombre_dll = a.o.replace('\\', '/').split('/')[-1].upper()
+        exp = sorted((n for n in glob if not n.startswith('.')), key=lambda n: n.encode())
+        if a.e in exp:
+            exp.remove(a.e)
+        n = len(exp)
+        o_fun = 40
+        o_nom = o_fun + 4 * n
+        o_ord = o_nom + 4 * n
+        o_txt = o_ord + 2 * n
+        txt = bytearray(nombre_dll.encode() + b'\0')
+        pos_nom = []
+        for x in exp:
+            pos_nom.append(o_txt + len(txt))
+            txt += x.encode() + b'\0'
+        edata = bytearray(o_txt) + txt
+        struct.pack_into('<IIHHIIIIIII', edata, 0, 0, 0, 0, 0, rva_e + o_txt, 1, n, n,
+                         rva_e + o_fun, rva_e + o_nom, rva_e + o_ord)
+        for k, x in enumerate(exp):
+            g = glob[x]
+            struct.pack_into('<I', edata, o_fun + 4 * k, dir_sec(g[0], g[1]) + g[2] - base)
+            struct.pack_into('<I', edata, o_nom + 4 * k, rva_e + pos_nom[k])
+            struct.pack_into('<H', edata, o_ord + 2 * k, k)
+    rva_r = al(rva_e + max(len(edata), 1), SEC_AL) if edata else al(rva_b + max(bss_tam, 1), SEC_AL)
     secciones = [('.text', t, rva_t, len(t), 0x60000020),
                  ('.data', d, rva_d, len(d), 0xC0000040),
                  ('.bss', None, rva_b, bss_tam, 0xC0000080)]
+    if edata:
+        secciones.append(('.edata', edata, rva_e, len(edata), 0x40000040))
     if reloc:
         secciones.append(('.reloc', reloc, rva_r, len(reloc), 0x42000040))
     tam_img = al(secciones[-1][2] + max(secciones[-1][3], 1), SEC_AL)
-    if a.e not in glob:
+    if a.e in glob:
+        entrada = dir_sec(glob[a.e][0], glob[a.e][1]) + glob[a.e][2] - base
+    elif a.dll:
+        entrada = 0
+    else:
         sys.exit(f'no está la entrada {a.e}')
-    entrada = dir_sec(glob[a.e][0], glob[a.e][1]) + glob[a.e][2] - base
     # la cabecera
     cab_tam = ARCH_AL
     sal = bytearray(cab_tam)
@@ -238,6 +290,8 @@ def main():
     pe = 0x40
     sal[pe:pe + 4] = b'PE\0\0'
     caract = 0x0103 if not reloc else 0x0102
+    if a.dll:
+        caract = 0x2102
     struct.pack_into('<HHIIIHH', sal, pe + 4, 0x14C, len(secciones), 0, 0, 0, 224, caract)
     o = pe + 24
     struct.pack_into('<HBBIIIIIIIII', sal, o, 0x10B, 2, 0, len(t), len(d), bss_tam,
@@ -249,6 +303,8 @@ def main():
     dirs[12] = iat_dir
     if reloc:
         dirs[5] = (rva_r, len(reloc))
+    if edata:
+        dirs[0] = (rva_e, len(edata))
     for k, (r, n) in enumerate(dirs):
         struct.pack_into('<II', sal, o + 96 + 8 * k, r, n)
     st = o + 224

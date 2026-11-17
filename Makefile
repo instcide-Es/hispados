@@ -109,6 +109,12 @@ $(B)/HOLAC.EXE: tests/progs/holac.c tools/elf2pe.py | $(B)
 $(B)/K32PRUE.EXE: tests/progs/k32prue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/k32prue.o
 	python3 tools/elf2pe.py -o $@ $(B)/k32prue.o
+$(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/dllprue.o
+	python3 tools/elf2pe.py --dll -o $@ $(B)/dllprue.o
+$(B)/USADLL.EXE: tests/progs/usadll.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/usadll.o
+	python3 tools/elf2pe.py -o $@ -i DLLPRUE.DLL:Doble,contador $(B)/usadll.o
 $(B)/K32CON.EXE: tests/progs/k32con.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/k32con.o
 	python3 tools/elf2pe.py -o $@ $(B)/k32con.o
