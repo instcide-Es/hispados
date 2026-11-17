@@ -26,6 +26,13 @@
 
 TB_PARR     equ 0x400               ; el búfer de DOS: 16 KB
 TB_TAM      equ TB_PARR * 16
+; las zonas del búfer de DOS (con los programas ya en marcha)
+TB_TROZO    equ 0x3000              ; lo que se lee o escribe de una vez
+TB_DTA      equ 0x3000              ; las búsquedas de archivos (64 cada una)
+N_BUSCA     equ 8
+TB_NOM1     equ 0x3200              ; nombres de archivo
+TB_NOM2     equ 0x3400
+TB_SAL      equ 0x3600              ; respuestas de DOS (directorio, nombre)
 MAX_IMP     equ 512                 ; funciones importadas como mucho
 TRAMP       equ 12                  ; lo que ocupa un trampolín (push 5 + jmp lejos 7)
 MISC_TAM    equ 0x4000              ; lo nuestro dentro del bloque
@@ -34,6 +41,8 @@ MONTON_TAM  equ 0x100000            ; cada trozo de montón que se pide
 
 inicio:
         mov sp, pila16_cima
+        mov ax, [0x2C]              ; el entorno de DOS
+        mov [env_seg], ax
         ; las mitades altas de los registros, a cero: DOS no las toca y pueden
         ; traer lo del programa anterior (y DPMI las usa con los clientes de
         ; 32 bits)
@@ -141,6 +150,22 @@ principal:
         int 0x31
         jc .mal_sel
         mov [sel_tb], ax
+        ; la zona de la BIOS, la pantalla y el entorno
+        mov bx, 0x40
+        call sel_de_seg
+        mov [sel_bios], ax
+        mov bx, 0xB800
+        call sel_de_seg
+        mov [sel_vid], ax
+        mov bx, 0xB000
+        call sel_de_seg
+        mov [sel_mda], ax
+        mov bx, [env_seg]
+        test bx, bx
+        jz .sin_env
+        call sel_de_seg
+        mov [sel_env], ax
+.sin_env:
         ; el nombre del programa y lo demás de la línea
         mov esi, orden
 .e:
@@ -186,7 +211,7 @@ pon_cad:
         test al, al
         jz .f
         stosb
-        cmp edi, TB_TAM - 1
+        cmp edi, TB_TROZO - 1
         jb .c
 .f:
         mov ecx, edi
@@ -211,9 +236,26 @@ falla:
         mov ax, 0x4CFF
         int 0x21
 
+; ---- un selector para el segmento de modo real BX (DPMI 0002h) ----
+sel_de_seg:
+        mov ax, 0x0002
+        int 0x31
+        jnc .x
+        mov esi, m_no_sel32
+        jmp falla
+.x:
+        ret
+
 ; ---- una llamada a DOS (INT 21h) en modo real con los rm_*; DS y ES de
-; modo real = el búfer. CF=1 si DOS devuelve acarreo ----
+; modo real = el búfer. CF=1 si DOS devuelve acarreo. int_rm: la
+; interrupción BL ----
 dos:
+        push ebx
+        mov bl, 0x21
+        call int_rm
+        pop ebx
+        ret
+int_rm:
         push eax
         push ebx
         push ecx
@@ -228,7 +270,7 @@ dos:
         pop es
         mov edi, rmr
         mov ax, 0x0300
-        mov bx, 0x21
+        movzx ebx, bl
         xor ecx, ecx
         int 0x31
         pop es
@@ -478,6 +520,9 @@ pide_bloque:
         jc .x
         shl ebx, 16
         mov bx, cx
+        shl esi, 16                 ; el handle del bloque (para soltarlo)
+        mov si, di
+        mov [ult_handle], esi
         clc
 .x:
         pop edi
@@ -581,8 +626,7 @@ importaciones:
         mov eax, [es:ebx]
         test eax, eax
         jz .d_sig
-        mov edx, [n_imp]
-        cmp edx, MAX_IMP
+        cmp dword [n_imp], MAX_IMP
         jae .muchas
         test eax, 0x80000000        ; por número: no se resuelve
         jnz .ordinal
@@ -595,32 +639,8 @@ importaciones:
         mov ecx, f_falta
         xor edx, edx
 .pon:
-        ; la ficha
-        push edi
-        mov edi, [n_imp]
-        imul edi, IMP_FICHA
-        add edi, imp_tab
-        mov [edi], ecx
-        mov [edi + 4], dx
-        mov [edi + 6], eax          ; el nombre (dirección en el programa)
-        pop edi
-        ; el trampolín: push n ; jmp lejos sel_cs32:despacho
-        push edi
-        mov edi, [n_imp]
-        imul edi, TRAMP
-        add edi, [tramp_off]
-        add edi, [img_base]
-        mov edx, edi                ; (su dirección, para la IAT)
-        mov byte [es:edi], 0x68
-        mov eax, [n_imp]
-        mov [es:edi + 1], eax
-        mov byte [es:edi + 5], 0xEA
-        mov dword [es:edi + 6], despacho
-        mov ax, [sel_cs32]
-        mov [es:edi + 10], ax
-        pop edi
-        mov [es:edi], edx           ; la IAT apunta al trampolín
-        inc dword [n_imp]
+        call nuevo_tramp            ; -> EAX el trampolín
+        mov [es:edi], eax           ; la IAT apunta al trampolín
         add ebx, 4
         add edi, 4
         jmp .f
@@ -635,6 +655,44 @@ importaciones:
         pop es
         mov esi, m_muchas
         jmp falla
+
+; ---- una función nueva: su ficha (ECX manejador, DX octetos de argumentos,
+; EAX su nombre en el programa o 0) y su trampolín «push n; jmp lejos
+; despacho» -> EAX = la dirección del trampolín (en el programa); ES = el
+; programa. CF=1 si no caben más ----
+nuevo_tramp:
+        push edi
+        push edx
+        mov edi, [n_imp]
+        cmp edi, MAX_IMP
+        jae .no
+        imul edi, IMP_FICHA
+        add edi, imp_tab
+        mov [edi], ecx
+        mov [edi + 4], dx
+        mov [edi + 6], eax
+        mov edi, [n_imp]
+        imul edi, TRAMP
+        add edi, [tramp_off]
+        add edi, [img_base]
+        mov byte [es:edi], 0x68
+        mov eax, [n_imp]
+        mov [es:edi + 1], eax
+        mov byte [es:edi + 5], 0xEA
+        mov dword [es:edi + 6], despacho
+        mov ax, [sel_cs32]
+        mov [es:edi + 10], ax
+        mov eax, edi
+        inc dword [n_imp]
+        pop edx
+        pop edi
+        clc
+        ret
+.no:
+        pop edx
+        pop edi
+        stc
+        ret
 
 ; ---- busca la función de nombre ES:EAX en la tabla: ECX = manejador, DX =
 ; octetos de argumentos (si no está: f_falta) ----
@@ -706,6 +764,31 @@ ejecuta:
         stosb
         test al, al
         jnz .c3
+        ; el entorno de DOS (las cadenas «NOMBRE=valor» y un 0 más), en lo
+        ; nuestro +0x2000 (hasta 8 K)
+        mov edi, [img_base]
+        add edi, [misc_off]
+        add edi, 0x2000
+        mov [env_dir], edi
+        cmp word [sel_env], 0
+        je .env_f
+        push ds
+        mov ds, [sel_env]
+        xor esi, esi
+        mov ecx, 0x1FF0
+.env:
+        lodsb
+        stosb
+        test al, al
+        jnz .env_s
+        cmp byte [esi], 0           ; ¿dos ceros? se acabó
+        je .env_f0
+.env_s:
+        loop .env
+.env_f0:
+        pop ds
+.env_f:
+        mov word [es:edi], 0
         ; la TIB (FS:0): SEH -1, la pila, ella misma en +18h
         mov edi, [img_base]
         add edi, [misc_off]
@@ -752,14 +835,17 @@ ejecuta:
 despacho:
         push ds
         push es
+        push gs
         push ebp
         push ebx
         push esi
         push edi
         mov es, [cs:sel_pd_cs]
         mov ds, [cs:sel_ds_cs]
-        lea ebp, [esp + 32]         ; los argumentos
-        mov eax, [esp + 24]         ; el número
+        mov gs, [cs:sel_tb_cs]      ; GS: el búfer de DOS, a mano
+        cld
+        lea ebp, [esp + 36]         ; los argumentos
+        mov eax, [esp + 28]         ; el número
         imul eax, IMP_FICHA
         add eax, imp_tab
         mov [ficha_act], eax
@@ -767,15 +853,16 @@ despacho:
         ; volver: EIP y CS del programa encima de los argumentos (RETF)
         mov ecx, [ficha_act]
         movzx ecx, word [ecx + 4]   ; los octetos de argumentos
-        mov ebx, [esp + 28]         ; la vuelta
-        mov [esp + 24 + ecx], ebx
+        mov ebx, [esp + 32]         ; la vuelta
+        mov [esp + 28 + ecx], ebx
         mov bx, [sel_pc]
         movzx ebx, bx
-        mov [esp + 28 + ecx], ebx
+        mov [esp + 32 + ecx], ebx
         pop edi
         pop esi
         pop ebx
         pop ebp
+        pop gs
         pop es
         pop ds
         add esp, ecx
@@ -813,379 +900,7 @@ f_falta:
         mov ax, 0x4CFF
         int 0x21
 
-; =============================================================================
-;  KERNEL32 (fase 1)
-; =============================================================================
-; los handles de la consola: el de DOS + 0x10 (que no sea 0, NULL)
-H_BASE      equ 0x10
-k_GetStdHandle:                     ; (nStdHandle)
-        mov eax, [ebp]
-        cmp eax, -10
-        je .ent
-        cmp eax, -11
-        je .sal
-        cmp eax, -12
-        je .err
-        mov eax, -1
-        ret
-.ent:
-        mov eax, H_BASE + 0
-        ret
-.sal:
-        mov eax, H_BASE + 1
-        ret
-.err:
-        mov eax, H_BASE + 2
-        ret
-; el handle de Win32 de [EBP+n] a DOS en rm_bx
-win_a_dos:
-        sub eax, H_BASE
-        mov [rm_bx], ax
-        ret
-k_WriteFile:                        ; (h, buf, n, *escritos, ovl)
-k_WriteConsoleA:                    ; (h, buf, n, *escritos, reservado)
-        mov eax, [ebp]
-        call win_a_dos
-        mov esi, [ebp + 4]          ; el texto (en el programa: ES)
-        mov ecx, [ebp + 8]
-        xor ebx, ebx                ; lo escrito
-.t:
-        test ecx, ecx
-        jz .x
-        mov edx, ecx
-        cmp edx, TB_TAM
-        jbe .t1
-        mov edx, TB_TAM
-.t1:
-        push ecx
-        push esi
-        push ds
-        push es
-        mov ax, es
-        mov ds, ax
-        mov es, [cs:sel_tb_cs]
-        xor edi, edi
-        mov ecx, edx
-        rep movsb
-        pop es
-        pop ds
-        pop esi
-        pop ecx
-        push ecx
-        mov ecx, edx
-        mov ax, [rm_bx]
-        push eax
-        call escribe_tb_h
-        pop eax
-        mov [rm_bx], ax
-        pop ecx
-        jc .mal
-        movzx eax, word [rm_ax]
-        add ebx, eax
-        add esi, eax
-        sub ecx, eax
-        cmp eax, edx
-        jb .x                       ; (disco lleno)
-        jmp .t
-.x:
-        mov eax, [ebp + 12]
-        test eax, eax
-        jz .y
-        mov [es:eax], ebx
-.y:
-        mov eax, 1
-        ret
-.mal:
-        mov dword [ult_error], 6
-        xor eax, eax
-        ret
-k_ReadFile:                         ; (h, buf, n, *leídos, ovl)
-k_ReadConsoleA:
-        mov eax, [ebp]
-        call win_a_dos
-        mov ecx, [ebp + 8]
-        cmp ecx, TB_TAM
-        jbe .c
-        mov ecx, TB_TAM
-.c:
-        mov [rm_cx], cx
-        mov word [rm_dx], 0
-        mov word [rm_ax], 0x3F00
-        call dos
-        jc .mal
-        movzx ecx, word [rm_ax]
-        mov edi, [ebp + 4]
-        push ds
-        push ecx
-        mov ds, [cs:sel_tb_cs]
-        xor esi, esi
-        rep movsb
-        pop ecx
-        pop ds
-        mov eax, [ebp + 12]
-        test eax, eax
-        jz .y
-        mov [es:eax], ecx
-.y:
-        mov eax, 1
-        ret
-.mal:
-        mov dword [ult_error], 6
-        xor eax, eax
-        ret
-k_ExitProcess:                      ; (código)
-        mov al, [ebp]
-        mov ah, 0x4C
-        int 0x21
-k_GetCommandLineA:
-        mov eax, [cmd_dir]
-        ret
-k_GetModuleHandleA:                 ; (NULL: el programa)
-        mov eax, [ebp]
-        test eax, eax
-        jnz .otro
-        mov eax, [img_base]
-        ret
-.otro:
-        xor eax, eax                ; (aún no hay más módulos)
-        ret
-k_GetLastError:
-        mov eax, [ult_error]
-        ret
-k_SetLastError:
-        mov eax, [ebp]
-        mov [ult_error], eax
-        ret
-k_GetVersion:                       ; Windows 95: 4.0, build 950
-        mov eax, 0xC3B60004
-        ret
-k_GetACP:
-        mov eax, 1252
-        ret
-k_GetOEMCP:
-        mov eax, 437
-        ret
-k_GetTickCount:                     ; los tics de la BIOS (0040:006C) en ms
-        push es
-        mov ax, [sel_psp]           ; (cualquiera con base 0 no hay: por DOS)
-        pop es
-        mov word [rm_ax], 0x2C00     ; la hora de DOS -> ms del día
-        call dos
-        movzx eax, byte [rm_cx + 1]  ; horas
-        imul eax, 60
-        movzx ebx, byte [rm_cx]      ; minutos
-        add eax, ebx
-        imul eax, 60
-        movzx ebx, byte [rm_dx + 1]  ; segundos
-        add eax, ebx
-        imul eax, 1000
-        movzx ebx, byte [rm_dx]      ; centésimas
-        imul ebx, 10
-        add eax, ebx
-        ret
-k_GetFileType:                      ; la consola: FILE_TYPE_CHAR (2)
-        mov eax, 2
-        ret
-k_SetHandleCount:
-        mov eax, [ebp]
-        ret
-k_GetProcessHeap:
-k_HeapCreate:
-        mov eax, 0x00480001         ; (un número cualquiera: hay un solo montón)
-        ret
-k_HeapDestroy:
-k_HeapFree:
-k_VirtualFree:
-k_FreeEnvironmentStringsA:
-k_SetConsoleCtrlHandler:
-k_CloseHandle:
-        mov eax, 1
-        ret
-; ---- el montón: se van pidiendo trozos a DPMI y se reparte de arriba; cada
-; reserva lleva delante su tamaño (para HeapSize y HeapReAlloc) ----
-k_HeapAlloc:                        ; (montón, opciones, tamaño)
-        mov ecx, [ebp + 8]
-        call reserva                ; ECX -> EAX dirección en el programa
-        ret
-k_HeapSize:
-        mov eax, [ebp + 8]
-        mov eax, [es:eax - 4]
-        ret
-k_HeapReAlloc:                      ; (montón, opciones, viejo, tamaño)
-        mov ecx, [ebp + 12]
-        call reserva
-        test eax, eax
-        jz .x
-        mov esi, [ebp + 8]
-        mov ecx, [es:esi - 4]
-        cmp ecx, [ebp + 12]
-        jbe .c
-        mov ecx, [ebp + 12]
-.c:
-        push eax
-        push ds
-        mov edi, eax
-        mov dx, es
-        mov ds, dx
-        rep movsb
-        pop ds
-        pop eax
-.x:
-        ret
-k_VirtualAlloc:                     ; (dirección, tamaño, tipo, protección)
-        mov eax, [ebp]
-        test eax, eax
-        jnz .x                      ; (ya reservada: todo va comprometido)
-        mov eax, [ebp + 4]
-        add eax, 0xFFF
-        and eax, ~0xFFF
-        call pide_bloque
-        jc .no
-        mov eax, ebx
-        sub eax, [prog_base]
-        ; a cero
-        push eax
-        mov edi, eax
-        mov ecx, [ebp + 4]
-        add ecx, 3
-        shr ecx, 2
-        xor eax, eax
-        rep stosd
-        pop eax
-.x:
-        ret
-.no:
-        mov dword [ult_error], 8
-        xor eax, eax
-        ret
-; ECX octetos del montón: EAX = la dirección (en el programa), a cero
-reserva:
-        add ecx, 7
-        and ecx, ~3
-        mov eax, [monton_libre]
-        cmp eax, ecx
-        jae .hay
-        ; un trozo nuevo
-        mov eax, MONTON_TAM
-        cmp ecx, eax
-        jbe .t
-        mov eax, ecx
-        add eax, 0xFFF
-        and eax, ~0xFFF
-.t:
-        push eax
-        call pide_bloque
-        pop eax
-        jc .no
-        mov [monton_libre], eax
-        sub ebx, [prog_base]
-        mov [monton_ptr], ebx
-.hay:
-        mov eax, [monton_ptr]
-        add [monton_ptr], ecx
-        sub [monton_libre], ecx
-        sub ecx, 4
-        mov [es:eax], ecx           ; el tamaño, delante
-        add eax, 4
-        push eax
-        push ecx
-        mov edi, eax
-        shr ecx, 2
-        xor eax, eax
-        rep stosd
-        pop ecx
-        pop eax
-        ret
-.no:
-        xor eax, eax
-        ret
-k_lstrlenA:                         ; (texto)
-        mov esi, [ebp]
-        xor eax, eax
-        test esi, esi
-        jz .x
-.c:
-        cmp byte [es:esi + eax], 0
-        je .x
-        inc eax
-        jmp .c
-.x:
-        ret
-k_GetEnvironmentStrings:            ; un bloque vacío (dos ceros)
-        mov eax, [cmd_dir]
-        add eax, 0x800
-        mov word [es:eax], 0
-        ret
-k_GetStartupInfoA:                  ; (*STARTUPINFO): a cero, con su tamaño
-        mov edi, [ebp]
-        mov ecx, 68 / 4
-        xor eax, eax
-        push edi
-        rep stosd
-        pop edi
-        mov dword [es:edi], 68
-        ret
-k_Sleep:                            ; (ms): con los tics de la BIOS (55 ms)
-        mov eax, [ebp]
-        xor edx, edx
-        mov ecx, 55
-        div ecx
-        mov ecx, eax
-        jecxz .x
-.t:
-        mov word [rm_ax], 0x2C00
-        call dos
-        mov bx, [rm_dx]
-.e:
-        mov word [rm_ax], 0x2C00
-        call dos
-        cmp bx, [rm_dx]
-        je .e
-        loop .t
-.x:
-        ret
-
-; ---- la tabla de lo que hay: manejador, octetos de argumentos, nombre ----
-%macro FUNC 3
-        dd %1
-        dw %2
-        db %3, 0
-%endmacro
-funciones:
-        FUNC k_GetStdHandle, 4, 'GetStdHandle'
-        FUNC k_WriteFile, 20, 'WriteFile'
-        FUNC k_WriteConsoleA, 20, 'WriteConsoleA'
-        FUNC k_ReadFile, 20, 'ReadFile'
-        FUNC k_ReadConsoleA, 20, 'ReadConsoleA'
-        FUNC k_ExitProcess, 4, 'ExitProcess'
-        FUNC k_GetCommandLineA, 0, 'GetCommandLineA'
-        FUNC k_GetModuleHandleA, 4, 'GetModuleHandleA'
-        FUNC k_GetLastError, 0, 'GetLastError'
-        FUNC k_SetLastError, 4, 'SetLastError'
-        FUNC k_GetVersion, 0, 'GetVersion'
-        FUNC k_GetACP, 0, 'GetACP'
-        FUNC k_GetOEMCP, 0, 'GetOEMCP'
-        FUNC k_GetTickCount, 0, 'GetTickCount'
-        FUNC k_GetFileType, 4, 'GetFileType'
-        FUNC k_SetHandleCount, 4, 'SetHandleCount'
-        FUNC k_GetProcessHeap, 0, 'GetProcessHeap'
-        FUNC k_HeapCreate, 12, 'HeapCreate'
-        FUNC k_HeapDestroy, 4, 'HeapDestroy'
-        FUNC k_HeapAlloc, 12, 'HeapAlloc'
-        FUNC k_HeapFree, 12, 'HeapFree'
-        FUNC k_HeapSize, 12, 'HeapSize'
-        FUNC k_HeapReAlloc, 16, 'HeapReAlloc'
-        FUNC k_VirtualAlloc, 16, 'VirtualAlloc'
-        FUNC k_VirtualFree, 12, 'VirtualFree'
-        FUNC k_lstrlenA, 4, 'lstrlenA'
-        FUNC k_GetEnvironmentStrings, 0, 'GetEnvironmentStrings'
-        FUNC k_GetEnvironmentStrings, 0, 'GetEnvironmentStringsA'
-        FUNC k_FreeEnvironmentStringsA, 4, 'FreeEnvironmentStringsA'
-        FUNC k_GetStartupInfoA, 4, 'GetStartupInfoA'
-        FUNC k_SetConsoleCtrlHandler, 8, 'SetConsoleCtrlHandler'
-        FUNC k_CloseHandle, 4, 'CloseHandle'
-        FUNC k_Sleep, 4, 'Sleep'
-        dd 0
+%include "utils/hw32k.inc"
 
 m_uso       db "Hispa-486: ejecuta programas Win32 de consola.", 13, 10
             db "  HW32 PROGRAMA.EXE [parametros]", 13, 10
@@ -1222,6 +937,11 @@ sel_tb      dw 0
 sel_pc      dw 0
 sel_pd      dw 0
 sel_fs      dw 0
+sel_bios    dw 0
+sel_vid     dw 0
+sel_mda     dw 0
+sel_env     dw 0
+env_seg     dw 0
 h_exe       dw 0
         align 4
 pe_cab      dd 0
@@ -1245,6 +965,8 @@ resto       dd 0
 cmd_dir     dd 0
 ficha_act   dd 0
 ult_error   dd 0
+ult_handle  dd 0
+env_dir     dd 0
 monton_ptr  dd 0
 monton_libre dd 0
 salto       dd 0, 0

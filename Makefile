@@ -102,9 +102,16 @@ $(B)/PEFALTA.EXE: tests/progs/pehola.asm | $(B)
 	$(NASM) -f bin -DFALTA -o $@ $<
 # un Win32 hecho en C (gcc -m32 y tools/elf2pe.py); si no hay gcc de 32 bits,
 # la prueba lo salta
+CC32 = gcc -m32 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -fno-tree-loop-distribute-patterns
 $(B)/HOLAC.EXE: tests/progs/holac.c tools/elf2pe.py | $(B)
-	gcc -m32 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -c $< -o $(B)/holac.o
+	$(CC32) -c $< -o $(B)/holac.o
 	python3 tools/elf2pe.py -o $@ $(B)/holac.o
+$(B)/K32PRUE.EXE: tests/progs/k32prue.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/k32prue.o
+	python3 tools/elf2pe.py -o $@ $(B)/k32prue.o
+$(B)/K32CON.EXE: tests/progs/k32con.c tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/k32con.o
+	python3 tools/elf2pe.py -o $@ $(B)/k32con.o
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)

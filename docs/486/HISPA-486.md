@@ -41,8 +41,8 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | Fase | Qué | Hito |
 |---|---|---|
 | 0 | Este documento; la lista de funciones por orden de uso (`tools/importaciones.py`, con los programas que aporte cada uno) | documento hecho (17/11/2026) |
-| 1 | **Cargador PE** (`HW32.EXE`): cabeceras, secciones, importaciones, TLS no; KERNEL32 mínimo de consola (salida, entrada, salida del programa, línea de órdenes, memoria, montón, errores, versión) | un «Hola» de consola Win32 hecho por nosotros corre en Hispa-DOS |
-| 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | programas de consola reales de la época (compiladores, utilidades) |
+| 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
+| 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecho lo de KERNEL32 (17/11/2026)**: unas 180 funciones, K32PRUE da lo de Windows 98; falta MSVCRT.DLL (la biblioteca de C que traen los programas de MinGW y de Visual C++) y probar con programas reales de la época |
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana) |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
@@ -50,6 +50,29 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
 | 8 | Arranque UEFI nativo (cargador propio, disco y pantalla sin BIOS) | arranca en un PC sin CSM |
 | 9 | Programas propios de la época: la oficina «-486», audio y vídeo | versión 1.0 |
+
+## Cómo está hecho (fases 1 y 2)
+
+- `utils/hw32.asm`: el cargador. Entra en modo protegido como cliente DPMI de
+  32 bits, pide un bloque para la imagen, sus trampolines, lo suyo (TIB, línea
+  de órdenes, entorno) y la pila, y hace los selectores del programa con base
+  «bloque − ImageBase»: el programa ve las direcciones de siempre aunque no
+  traiga reubicados. Cada importación apunta a un trampolín «push n; jmp lejos
+  despacho»; el despacho llama a la función nuestra y vuelve quitando los
+  argumentos (stdcall).
+- `utils/hw32k.inc`: KERNEL32 de consola (se comporta como Windows 98, 4.10):
+  consola (colores y cursor por la BIOS, rellenar en la memoria de la
+  pantalla, teclado como eventos con pulsar y soltar), archivos y directorios
+  (por DOS, con los mismos números de error, que son los de Win32), búsquedas
+  (un DTA por búsqueda), hora (FILETIME desde 1601, sin husos), montón (clases
+  de potencias de dos con listas de sueltos; lo de más de 1 MB, en su bloque de
+  DPMI), VirtualAlloc, entorno de DOS, TLS, secciones críticas (un hilo),
+  GetProcAddress (crea trampolines nuevos) y textos.
+- `tools/elf2pe.py`: un enlazador pequeño de objetos ELF de `gcc -m32` a PE,
+  para hacer los programas de prueba en C sin compilador de Windows.
+- Prueba: `tests/run_hw32_tests.sh` (PEHOLA, PEFALTA, HOLAC, K32PRUE con los
+  resultados de Windows 98, K32CON mirando la pantalla, y que no se pierde
+  memoria).
 
 ## Fase 1: el cargador PE
 
