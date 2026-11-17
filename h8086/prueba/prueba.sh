@@ -87,7 +87,7 @@ echo "== Hispa-8086: arranque y órdenes (disquete de 360 K, en un 486) =="
 cp $IMG/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 pantalla p1
-esta p1 "Hispa-8086 0.10 - de la familia Hispa-DOS" ""
+esta p1 "Hispa-8086 0.11 - de la familia Hispa-DOS" ""
 esta p1 "Copyright (C) 2026 Carlos Sanz y contribuidores" ""
 esta p1 "Procesador: 80486 o superior" ""
 esta p1 "K libres para los programas)" ""
@@ -98,10 +98,10 @@ noesta p1 "ECO OFF" "«@» delante: la línea no se enseña: "
 noesta p1 "REM El arranque" "con ECO OFF no se enseñan las órdenes del lote: "
 escribe "limpiar"; escribe "ver"
 pantalla p2
-esta p2 "Hispa-8086 versión 0.10" "VER: "
+esta p2 "Hispa-8086 versión 0.11" "VER: "
 escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"; escribe "dir"
 pantalla p2
-esta p2 "22 archivos, " "DIR: "
+esta p2 "23 archivos, " "DIR: "
 escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"
 pantalla p2
 esta p2 "NUCLEO86.SYS" "DIR: "
@@ -138,7 +138,7 @@ escribe "limpiar"; escribe "mostrar sale.txt"; escribe "pausa < leeme.txt"; escr
 escribe "eco tecleado > t.txt"; escribe "if a==a mostrar t.txt"
 pantalla pr
 esta pr "Primera linea" "«>»: lo escrito está en el archivo: "
-esta pr "Hispa-8086 versión 0.10" "«>>»: y lo añadido detrás: "
+esta pr "Hispa-8086 versión 0.11" "«>>»: y lo añadido detrás: "
 esta pr "pausa < leeme.txt" "(la orden, como se tecleó) "
 esta pr "Pulse una tecla para seguir..." "«<»: la tecla sale del archivo: "
 noesta pr "Orden desconocida" "y la orden siguiente llega entera: "
@@ -478,7 +478,7 @@ if mdir -i $T/part.img :: 2> /dev/null | grep -q "DURO"; then ok "la etiqueta (/
 # y ahora, sin disquete: tiene que arrancar solo
 arranca_duro $T/hd.img 486
 pantalla k6
-esta k6 "Hispa-8086 0.10 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
+esta k6 "Hispa-8086 0.11 - de la familia Hispa-DOS" "ARRANCA DEL DISCO DURO, sin disquete: "
 esta k6 'C:\>' "y se queda en C:: "
 escribe "limpiar"; escribe "dir"; escribe "hola desde el duro"; escribe "mostrar leeme.txt"
 pantalla k7

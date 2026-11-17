@@ -2912,7 +2912,7 @@ clasicos    dw tc_format, tc_formatea, tc_sys, tc_sistema, tc_fdisk, tc_partir
             dw tc_more, tc_mas, tc_mas2, tc_mas, tc_sort, tc_ordenar
             dw tc_chkdsk, tc_revisar, tc_label, tc_etiqueta, tc_attrib, tc_atributo
             dw tc_tree, tc_arbol, tc_xcopy, tc_xcopiar, tc_keyb, tc_teclado
-            dw tc_edit, tc_editar, 0
+            dw tc_edit, tc_editar, tc_gwbasic, tc_basic, tc_basica, tc_basic, 0
 tc_format   db "FORMAT", 0
 tc_formatea db "FORMATEA", 0
 tc_sys      db "SYS", 0
@@ -2938,6 +2938,9 @@ tc_keyb     db "KEYB", 0
 tc_teclado  db "TECLADO", 0
 tc_edit     db "EDIT", 0
 tc_editar   db "EDITAR", 0
+tc_gwbasic  db "GWBASIC", 0
+tc_basica   db "BASICA", 0
+tc_basic    db "BASIC", 0
 t_exe       db ".EXE", 0
 t_bat       db ".BAT", 0
 t_autoexec  db "\AUTOEXEC.BAT", 0
@@ -3300,7 +3303,7 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.10", 10, 0
+m_ver       db "Hispa-8086 versión 0.11", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásico):", 10
             db "  AYUDA  VER  EQUIPO  MEMORIA (MEM)  LIMPIAR (CLS)  ACTUALIZAR", 10
             db "  DIR [ruta] [/P] [/W]   los archivos (LISTAR)    VOL  cómo se llama el disco", 10
@@ -3315,6 +3318,7 @@ m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásic
             db "  LLAMAR (CALL), DESPLAZAR (SHIFT). Detrás de una orden: > >> < |", 10
             db "Programas del disco:", 10
             db "  EDITAR archivo         el editor de texto", 10
+            db "  BASIC [programa]       el BASIC (como GW-BASIC, también en español)", 10
             db "  FORMATEA (FORMAT)  SISTEMA (SYS)  PARTIR (FDISK)    preparar discos", 10
             db "  REVISAR (CHKDSK)  ETIQUETA (LABEL)  ATRIBUTO (ATTRIB)", 10
             db "  ARBOL (TREE)  XCOPIAR (XCOPY)  MAS (MORE)  ORDENAR (SORT)", 10

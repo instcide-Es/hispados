@@ -1,0 +1,14 @@
+10 PRINT USING "##.##"; 3.14159; 2.5; -1.25; .05; 123.456
+20 PRINT USING "###,###.##"; 1234567.891; -1234.5
+30 PRINT USING "+###.#"; 5; -5
+40 PRINT USING "###.#-"; 5; -5
+50 PRINT USING "**###.##"; 12.5
+60 PRINT USING "$$###.##"; 12.5
+70 PRINT USING "##.##^^^^"; 234.56; .000123
+80 PRINT USING "!"; "HOLA"; "ADIOS"
+90 PRINT USING "\  \"; "ABCDEFG"
+100 PRINT USING "&!"; "X"; "Y"
+110 PRINT USING "TOTAL: ###.## EUR"; 42.5
+120 PRINT USING "_###"; 7
+130 PRINT USING "##"; 1234
+140 PRINT USING "#### ####"; 1; 2; 3
