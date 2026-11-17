@@ -17,10 +17,12 @@ HSPRED, CONFRED y CONSOLA, y después, por TCP, comprueba:
      intentos, corta.
 
 Uso: consola_cliente.py <imagen> <nic> <puerto_local>
+La variable CONSOLA_QEMU añade opciones a QEMU delante de la tarjeta (para
+tests/run_red_usb_tests.sh: la controladora USB del adaptador usb-net).
 No usa Internet: la red de usuario de QEMU va dentro del espacio de nombres de
 red que crea run_consola_tests.sh (unshare -rn).
 """
-import os, re, socket, subprocess, sys, time
+import os, re, shlex, socket, subprocess, sys, time
 
 IMG, NIC, PORT = sys.argv[1], sys.argv[2], int(sys.argv[3])
 
@@ -98,6 +100,7 @@ cmd = [
     "-monitor", "none", "-parallel", "none", "-m", "32",
     "-drive", "file=%s,format=raw,if=floppy" % IMG, "-boot", "a", "-no-reboot",
     "-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:%d-:2323" % PORT,
+] + shlex.split(os.environ.get("CONSOLA_QEMU", "")) + [
     "-device", "%s,netdev=n0" % NIC,
 ]
 qemu = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,

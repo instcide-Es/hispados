@@ -27,6 +27,11 @@
 ;         clase/subclase/protocolo de cada interfaz y el uso que se le da);
 ;         espera 15 s para poder hacer una foto.
 ;     /V  mensajes detallados
+;     /2  solo en los Intel de las series 7, 8 y 9 (ver [USB-INTEL]): no
+;         encender las terminaciones de USB 3 de los puertos, de modo que lo
+;         que se conecte vaya a alta velocidad (USB 2.0). Para probar un
+;         aparato de USB 3 (un adaptador de red con su concentrador) si a
+;         supervelocidad no aparece.
 ;
 ;  Busca las controladoras USB del equipo, de las cuatro clases que hay (UHCI
 ;  y OHCI de USB 1.x, EHCI de USB 2.0 y xHCI de USB 3; varias a la vez, hasta
@@ -57,6 +62,10 @@
 ;     Tras atender el informe de un mando, si HSPJOY está, se espera al
 ;     siguiente (lo que dure su intervalo, 10 ms como mucho, medido con
 ;     MFINDEX) para entregar un estado reciente y no el de hace un tic.
+;   - [USB-RED] un adaptador de red USB-Ethernet con la clase estándar
+;     CDC-ECM (los Realtek RTL8152/8153 la traen en su configuración 2: se
+;     miran todas), que HSPRED usa como una tarjeta más. Todo lo suyo está en
+;     lib/usb_red.inc, y lo residente solo se queda si hay adaptador.
 ;  Los informes del teclado y del ratón se recogen con la interrupción del
 ;  reloj (INT 08h). En modo real usa el modo "irreal" para los registros del
 ;  xHCI. En modo V86 con un gestor de memoria que dé VCPI (HSPEMM, EMM386) no
@@ -3054,6 +3063,10 @@ init:
         jne .nh
         mov byte [cs:opt_help], 1
 .nh:
+        cmp al, '2'
+        jne .n2
+        mov byte [cs:opt_usb2], 1
+.n2:
         and al, 0xDF
         cmp al, 'F'
         jne .nf
@@ -3279,7 +3292,9 @@ init:
         cmp bx, JOY_N
         jb .hj
 .tick:
-        ; [USB-RED] el adaptador de red: decirlo y atender INT 2Fh
+        ; el reparto final de la memoria y, después, [USB-RED] el adaptador
+        ; de red: su búfer, decirlo y atender INT 2Fh e INT 16h
+        call init_fin
         call net_ready
         ; reloj: recoger los informes
         mov ax, 0x3508
@@ -3289,11 +3304,13 @@ init:
         mov dx, int08
         mov ax, 0x2508
         int 0x21
+        jmp .resp2
 .resp:
         ; respuesta al núcleo: unidades, BPB y memoria residente
         ; memoria residente: hasta donde se haya reservado (init_fin hace
         ; el reparto final)
         call init_fin
+.resp2:
         mov eax, [cs:ztop]
         mov dx, ax
         and dx, 15
@@ -4081,7 +4098,10 @@ intel_routes:
         test byte [hc_flags+bx], HCF_OURS
         jz .r
         cmp byte [n_hc+HCT_EHCI], 0 ; y hay algún EHCI de donde traerlos
+        jne .go                     ; (o se ha pedido /2: sin USB 3)
+        cmp byte [opt_usb2], 0
         je .r
+.go:
         mov bx, [bdf]
         xor di, di
         call ir_rd
@@ -4113,6 +4133,10 @@ intel_routes:
         call ir_rd
         mov [ir_u3o], ecx
         mov ecx, [ir_u3m]
+        cmp byte [opt_usb2], 0
+        je .ss
+        xor ecx, ecx                ; /2: sin USB 3 (lo que se conecte, por USB 2)
+.ss:
         mov di, 0xD8                ; USB3_PSSEN
         call ir_wr
         mov ecx, [ir_u2m]
@@ -4158,6 +4182,19 @@ intel_routes:
         not dword [ir_u2o]
         not dword [ir_u3o]
         or eax, edx
+        ; /2 y había USB 3 encendido: lo que estuviera a supervelocidad se
+        ; desconecta y vuelve por los hilos de USB 2; se le dan dos segundos
+        cmp byte [opt_usb2], 0
+        je .n2
+        mov edx, [ir_u3o]
+        and edx, [ir_u3m]
+        jz .n2
+        push eax
+        mov cx, 36
+        call tick_wait
+        pop eax
+.n2:
+        test eax, eax
         jz .r
         mov al, [x_hc]
         call hc_sel
@@ -4229,6 +4266,7 @@ ir_fake     dd 0x1E318086, 0, 0x0F, 0, 0x0F
 %endif
 intel_xids  dw 0x1E31, 0x8C31, 0x9C31, 0x8CB1, 0x9CB1, 0x8D31, 0x0F35, 0
 ir_done     db 0
+opt_usb2    db 0                    ; /2: no encender el USB 3 (Intel series 7 a 9)
 ir_u2m      dd 0
 ir_u3m      dd 0
 ir_u2o      dd 0
