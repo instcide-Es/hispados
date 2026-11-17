@@ -13,15 +13,24 @@ printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDOS=HIGH\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/hdd.img bs=1M count=32 status=none
 send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
-# 1) FDISK + FORMAT sin sistema + INSTALAR C:
+# [0.9.22] el disquete «Oficina»: INSTALAR lo pide al acabar (desde disquete)
+OFI=${OFICINA:-build/hispados-oficina.img}
+cp "$OFI" $T/o.img 2>/dev/null || echo "  (falta $OFI: make usb)"
+mon1() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon1 > /dev/null 2>&1; }
+# 1) FDISK + FORMAT sin sistema + INSTALAR C: y, al final, el disquete Oficina
 {
   sleep 4
   send "FDISK /PRI" 2
   send "FORMAT C: /V:DESTINO /AUTOTEST" 4
   send "INSTALAR /?" 2
   send "INSTALAR A:" 2
-  send "INSTALAR C:" 8
-} | timeout 40 qemu-system-i386 -display none -serial stdio -monitor none \
+  send "INSTALAR C:" 2
+  sleep 10; mon1 "change floppy0 $T/o.img"; sleep 2
+  send "S" 1
+  sleep 20; mon1 "change floppy0 $T/f.img"; sleep 2
+  printf ' '; sleep 3
+  send "DIR C:\HISPADOS\PROGS\PLUMA.HVP" 2
+} | timeout 70 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
       -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/hdd.img,format=raw,if=ide -boot a -no-reboot > $T/l1 2>&1
 # 2) arrancar desde C: y usar el historial con teclas reales
@@ -49,6 +58,14 @@ check $T/l1.txt "Uso: INSTALAR unidad:"
 check $T/l1.txt "No se puede instalar sobre la unidad de arranque."
 check $T/l1.txt "Sistema transferido a la unidad C:"
 check $T/l1.txt "Hispa-DOS instalado en la unidad C:"
+check $T/l1.txt "va en el disquete «Oficina»."
+check $T/l1.txt " archivos copiados."
+check $T/l1.txt "Vuelva a poner el disquete de arranque y pulse una tecla."
+ofi=0
+for off in 32256 1048576; do
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/PROGS/PLUMA.HVP ::HISPADOS/PROGS/DICCIO.DAT ::HISPADOS/PROGS/PINTURA.HVP > /dev/null 2>&1 && ofi=1
+done
+if [ $ofi = 1 ]; then echo "  OK   Oficina: Pluma y el diccionario en C:\\HISPADOS\\PROGS, junto a Pintura"; else echo "  FAIL Oficina: faltan Pluma o el diccionario en el disco instalado"; fail=1; fi
 check $T/l2.txt "Hispa-DOS 0.9.21 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l2.txt "HISPADOS"
