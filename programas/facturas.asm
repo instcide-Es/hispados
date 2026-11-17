@@ -191,6 +191,88 @@ fac_menu:
         dw 0xFFFF
         db 0
 
+; ---- los menús del botón secundario (comun/contexto.inc) ----
+ctx_factura:                        ; en la lista, sobre una factura
+        dw O_ABRIR
+        db "&Abrir                 Intro", 0
+        dw O_DATOS
+        db "&Datos de la factura...   F2", 0
+        dw O_PAGADA
+        db "&Pagada: sí o no", 0
+        dw 0
+        db 0
+        dw O_DUPLICAR
+        db "D&uplicar factura", 0
+        dw O_BORRAR
+        db "&Borrar factura", 0
+        dw 0
+        db 0
+        dw O_TEXTO
+        db "&Guardar como texto...", 0
+        dw O_IMPRIMIR
+        db "&Imprimir", 0
+        dw 0
+        db 0
+        dw O_NUEVA
+        db "&Nueva factura...        Ins", 0
+        dw 0xFFFF
+ctx_lista:                          ; en la lista, donde no hay facturas
+        dw O_NUEVA
+        db "&Nueva factura...        Ins", 0
+        dw 0
+        db 0
+        dw O_EMITIDAS
+        db "Facturas &emitidas", 0
+        dw O_RECIBIDAS
+        db "Facturas &recibidas (gastos)", 0
+        dw O_RESUMEN
+        db "Re&sumen del año...", 0
+        dw 0
+        db 0
+        dw O_CSV
+        db "E&xportar la lista a Cuentas...", 0
+        dw 0xFFFF
+ctx_abierta:                        ; con una factura abierta
+        dw O_DATOS
+        db "&Datos de la factura...   F2", 0
+        dw O_PAGADA
+        db "&Pagada: sí o no           P", 0
+        dw 0
+        db 0
+        dw O_LIN_MAS
+        db "&Añadir línea...         Ins", 0
+        dw O_LIN_CAMB
+        db "&Cambiar línea...      Intro", 0
+        dw O_LIN_QUITA
+        db "&Quitar línea           Supr", 0
+        dw 0
+        db 0
+        dw O_TEXTO
+        db "&Guardar como texto...", 0
+        dw O_IMPRIMIR
+        db "&Imprimir", 0
+        dw 0
+        db 0
+        dw O_LISTA
+        db "&Volver a la lista       Esc", 0
+        dw 0xFFFF
+            align 4
+ctx_menus   dd ctx_factura, ctx_lista, ctx_abierta
+ctx_gris:                           ; las que pueden ir en gris, y cuándo
+        dw O_EMITIDAS
+        dd cg_emitidas
+        dw O_RECIBIDAS
+        dd cg_recibidas
+        dw O_CSV
+        dd cg_vacia
+        dw O_LIN_MAS
+        dd cg_lin_llena
+        dw O_LIN_CAMB
+        dd cg_sin_lineas
+        dw O_LIN_QUITA
+        dd cg_sin_lineas
+        dw 0
+
 ; ---- los botones de la barra (programas/comun/barra.inc): x, ancho, dibujo,
 ;      orden, nombre y clase ----
             align 4
@@ -530,6 +612,10 @@ fac_proc:
         je raton_mueve
         cmp eax, WM_LBUTTONDBLCLK
         je doble
+        cmp eax, WM_RBUTTONDOWN     ; el botón secundario: elige lo que hay
+        je raton_der                ; debajo y, al soltarlo, su menú
+        cmp eax, WM_CONTEXTMENU
+        je menu_ctx
         cmp eax, WM_MOUSEWHEEL
         je rueda
         cmp eax, WM_SIZE
@@ -907,6 +993,112 @@ raton:
         mov dword [br_sobre], 0     ; (pulsado: su nombre ya no hace falta)
         mov ecx, [esi+12]
         jmp orden
+
+; ---- el botón secundario ----
+; Se aprieta: en la lista, elige la factura que hay debajo; con una factura
+; abierta, la línea. [ctx_donde] apunta dónde ha sido, para el menú: 1 una
+; factura de la lista, 2 la lista (donde no hay facturas), 3 la factura
+; abierta (0: nada, la barra de botones)
+raton_der:
+        mov byte [ctx_donde], 0
+        call ctx_punto              ; EAX=x EBX=y
+        cmp ebx, TB_AL
+        jl hecho
+        cmp byte [modo], 0
+        jne .fac
+        mov byte [ctx_donde], 2
+        sub ebx, LY0
+        js hecho
+        mov eax, ebx
+        xor edx, edx
+        mov ecx, FIL_AL
+        div ecx
+        cmp eax, [vis]
+        jae hecho
+        add eax, [top]
+        cmp eax, [n_ord]
+        jae hecho
+        mov byte [ctx_donde], 1
+        mov [sel], eax
+        call inval
+        jmp hecho
+.fac:
+        mov byte [ctx_donde], 3
+        add ebx, [fv_y]
+        sub ebx, FLY0
+        js hecho
+        mov eax, ebx
+        xor edx, edx
+        mov ecx, FLIN_AL
+        div ecx
+        call fac_actual
+        movzx ecx, byte [ebx+F_NLIN]
+        cmp eax, ecx
+        jae hecho
+        mov [lsel], eax
+        call inval
+        jmp hecho
+
+; El menú: EDX=el punto de la pantalla, o -1 si se pide con el teclado
+; (Mayús+F10 o la tecla de menú): entonces es el de la factura elegida en la
+; lista (debajo de ella) o el de la factura abierta
+menu_ctx:
+        mov eax, -1
+        cmp edx, -1
+        jne .abre
+        mov byte [ctx_donde], 3
+        cmp byte [modo], 0
+        jne .abre
+        mov byte [ctx_donde], 2
+        mov ecx, [sel]
+        cmp ecx, [n_ord]
+        jae .abre
+        mov byte [ctx_donde], 1
+        sub ecx, [top]
+        jb .abre
+        cmp ecx, [vis]
+        jae .abre
+        inc ecx
+        imul ebx, ecx, FIL_AL
+        add ebx, LY0
+        mov eax, 40
+.abre:
+        movzx ecx, byte [ctx_donde]
+        test ecx, ecx
+        jz hecho
+        mov esi, [ctx_menus+ecx*4-4]
+        mov edi, ctx_gris
+        call ctx_abre
+        jmp hecho
+
+; (ctx_gris) lo que ahora no se puede hacer: CF=1
+cg_emitidas:                        ; la lista que ya se ve
+        cmp dword [ver_tipo], 0
+        je cg_no
+        jmp short cg_si
+cg_recibidas:
+        cmp dword [ver_tipo], 0
+        jne cg_no
+        jmp short cg_si
+cg_vacia:                           ; no hay nada que exportar
+        cmp dword [n_ord], 0
+        je cg_no
+        jmp short cg_si
+cg_lin_llena:                       ; no caben más líneas
+        call fac_actual
+        cmp byte [ebx+F_NLIN], MAX_LIN
+        jae cg_no
+        jmp short cg_si
+cg_sin_lineas:                      ; la factura no tiene líneas
+        call fac_actual
+        cmp byte [ebx+F_NLIN], 0
+        je cg_no
+cg_si:
+        clc
+        ret
+cg_no:
+        stc
+        ret
 
 doble:
         mov ebx, edx
@@ -3880,11 +4072,14 @@ imprimir:
         ret
 
 %include "barra.inc"
+%include "contexto.inc"
 %include "hvplib.inc"
 
         section .bss
             BARRA_BSS
 ven         resd 1
+ctx_donde   resb 1                  ; dónde se apretó el botón secundario (raton_der)
+            alignb 4
 modo        resb 1                  ; 0: la lista; 1: una factura
 lin_nueva   resb 1
 c_pag       resb 1

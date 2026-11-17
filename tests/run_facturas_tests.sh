@@ -154,6 +154,32 @@ else
   ko "EMITIDAS.CSV no es lo esperado"; cat $T/emi.csv
 fi
 
+echo "== Facturas: el botón secundario (el menú contextual) =="
+prepara $HVP
+{ arranca
+  derecho 300 300; shot y0; tecla esc       # la lista vacía: Nueva y las listas
+  tecla insert; sleep 1.2
+  tecla tab tab; escribe "Ana Soler"; tecla ret; sleep 2
+  escribe "Cosa"; tecla tab; escribe "1"; tecla tab; escribe "10"; tecla ret; sleep 1.2
+  derecho 300 272; shot y1                  # la factura abierta, sobre su línea
+  tecla esc; tecla esc; sleep 1
+  derecho 300 150; shot y2                  # en la lista, sobre la factura
+  tecla p; sleep 0.8; aparca; shot y3       # Pagada
+  tecla shift-f10; sleep 0.6; shot y4       # con el teclado: debajo de la factura elegida
+  tecla esc
+  derecho 300 96; sleep 0.5; shot y5        # en la barra de botones no hay menú
+  sal; } | run 150 -vga std
+chk $T/y0.ppm busca 300 300 400 420 0 8 "ueva factura..." busca 300 300 400 420 7 8 "mitidas" \
+  busca 300 300 400 420 0 8 "ecibidas (gastos)" busca 300 300 400 420 7 8 "portar la lista a Cuentas..."
+chk $T/y1.ppm busca 300 272 400 460 0 8 "atos de la factura..." busca 300 272 400 460 0 8 "ambiar l" \
+  busca 300 272 400 460 0 8 "uitar l" busca 300 272 400 460 0 8 "olver a la lista"
+chk $T/y2.ppm busca 300 150 400 340 0 8 "brir" busca 300 150 400 340 0 8 "plicar factura" busca 300 150 400 340 0 8 "orrar factura" \
+  busca 400 130 748 152 8 2 "Pendiente"
+chk $T/y3.ppm busca 400 130 748 152 8 2 "Cobrada"
+chk $T/y4.ppm busca 60 150 200 340 0 8 "orrar factura"
+chk $T/y5.ppm nobusca 280 90 420 300 0 8 "ueva factura..."
+muestra y2 facturas_contexto; muestra y1 facturas_contexto_abierta
+
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then cat $T/fac.txt; fi
 rm -rf $T
 exit $fail
