@@ -7,9 +7,9 @@
 ;  renglones al lado para apuntar) o 6 diapositivas por hoja, y las notas del
 ;  orador (la diapositiva arriba y sus notas debajo). Cada hoja se compone en
 ;  hoja_buf, un A4 de pie: cada diapositiva se dibuja con el motor, se reduce
-;  (lam_reduce) y se pega en su sitio con un filete; las notas las escribe el
-;  motor directamente en la hoja (lam_destino y lam_pinta_obj con una copia de
-;  la ficha de la caja de las notas). La hoja va a la impresora por la misma
+;  (lam_reduce) y se pega en su sitio con un filete y, en los folletos, con su
+;  número a la izquierda; las notas y los números los escribe el motor
+;  directamente en la hoja (lam_destino y lam_pinta_obj con una ficha de paso). La hoja va a la impresora por la misma
 ;  vía que todo (imp_prepara e imp_pagina del editor de láminas).
 ; =============================================================================
 ; de cada modo: cuántas por hoja, su ancho y su alto, y dónde va cada una
@@ -85,8 +85,11 @@ folleto:
         call hoja_renglones
 .n1:
         cmp esi, fo_n
-        jne .n2
+        jne .n3
         call hoja_notas
+        jmp .n2
+.n3:
+        call hoja_numero
 .n2:
         inc ebp
         inc dword [fo_k]
@@ -213,5 +216,50 @@ hoja_notas:
         xor edi, edi
         call lam_destino
 .x:
+        popad
+        ret
+
+; (interna) el número de la diapositiva EBP, a la izquierda de donde se acaba
+; de pegar, en (EAX, EBX): lo escribe el motor con una ficha de paso, arrimado
+; a la derecha de una caja que acaba junto a la diapositiva. El texto de una
+; caja se busca en lam_dat: aquí está en num_txt, y a la ficha se le da como
+; sitio lo que va de un puntero a otro
+hoja_numero:
+        pushad
+        mov edi, ficha_tmp
+        push eax
+        xor eax, eax
+        mov ecx, LO_TAM / 4
+        rep stosd
+        lea eax, [ebp+1]
+        mov edi, num_txt
+        call hvl_num
+        mov ecx, edi
+        sub ecx, num_txt
+        pop eax
+        mov esi, ficha_tmp
+        mov byte [esi+LO_TIPO], LT_TEXTO
+        sub eax, 68
+        mov [esi+LO_X], eax
+        mov [esi+LO_Y], ebx
+        mov dword [esi+LO_AN], 64
+        mov dword [esi+LO_AL], 40
+        mov byte [esi+LO_ALIN], 2
+        mov byte [esi+LO_ESTILO], LE_NEG
+        mov byte [esi+LO_TINTA], C_TINTA
+        mov byte [esi+LO_FONDO], LAM_NADA
+        mov byte [esi+LO_BORDE], LAM_NADA
+        mov byte [esi+LO_LETRA], 9
+        mov [esi+LO_LARGO], ecx
+        mov eax, num_txt
+        sub eax, [lam_dat]
+        mov [esi+LO_DAT], eax
+        mov edi, [hoja_buf]
+        mov ecx, HOJA_AN
+        mov edx, HOJA_AL
+        call lam_destino
+        call lam_pinta_obj
+        xor edi, edi
+        call lam_destino
         popad
         ret

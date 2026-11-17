@@ -19,7 +19,8 @@
 ;  100 % en [lam_buf] (un octeto por punto, colores de la paleta de Hispa
 ;  Ventanas) y lam_reduce la lleva al tamaño que se quiera enseñar.
 ;
-;  UN OBJETO es una ficha de LO_TAM (40) octetos; el orden de la tabla es el
+;  UN OBJETO es una ficha de LO_TAM (48) octetos (las de los archivos de antes
+;  eran de 40: se leen igual, con lo nuevo a cero); el orden de la tabla es el
 ;  de dibujo: el primero queda al fondo y el último, al frente.
 ;      LO_TIPO   db  LT_TEXTO, LT_RECT, LT_ELIPSE, LT_LINEA o LT_IMAGEN
 ;      LO_PAG    db  en qué lámina está (la primera es la 0)
@@ -43,9 +44,19 @@
 ;                    LB_OCULTO: no se dibuja ni se elige (lo guarda el
 ;                    programa para lo suyo: las notas de una diapositiva);
 ;                    LB_HUECO: una caja en la que no se escribe (guarda el
-;                    sitio de otra cosa: una imagen)
+;                    sitio de otra cosa: una imagen);
+;                    LB_NUMEROS: una lista como la de las viñetas, pero con
+;                    números (1., 2....; en el segundo nivel, letras: a), b)...)
 ;      LO_DAT    dd  dónde empiezan sus datos en lam_dat
 ;      LO_LARGO  dd  y cuántos octetos son
+;      LO_GRUPO  db  0, o el número de su grupo: los objetos de una lámina con
+;                    el mismo número van juntos (lo usa el editor al elegir)
+;      LO_CADENA db  0, o el número de su cadena de cajas de texto: el texto
+;                    que no cabe en una caja sigue en la siguiente
+;      LO_ESLABON db su puesto en la cadena. El texto de toda la cadena es el
+;                    de la caja del puesto más bajo (la cabeza); las demás no
+;                    tienen datos. Pueden estar en láminas distintas
+;      (y cinco octetos más, a cero, para lo que venga)
 ;  Los datos son el texto de una caja (página 437; el 10 acaba el párrafo) o
 ;  los puntos de una imagen (un octeto por punto, ya en la paleta de Hispa
 ;  Ventanas, por filas). Están todos seguidos en lam_dat; lam_dat_cambia
@@ -84,6 +95,23 @@
 ;    lam_obj_quita  EAX=objeto: lo quita, con sus datos
 ;    lam_obj_dup    EAX=objeto -> EAX=una copia, al frente; CF=1 si no cabe
 ;    lam_obj_orden  EAX=objeto EDX=1 al frente / 0 al fondo -> EAX=dónde queda
+;    lam_obj_gira   EAX=objeto: un cuarto de vuelta a la derecha alrededor de
+;                   su centro (formas, líneas e imágenes; de una imagen giran
+;                   sus puntos); CF=1 si no se puede (una caja de texto, o no
+;                   hay memoria)
+;    lam_caja_de    ESI=ficha -> EAX=x EBX=y ECX=ancho EDX=alto del rectángulo
+;                   que ocupa (el de una línea, con las medidas en positivo)
+;    lam_id_libre   EDX=LO_GRUPO o LO_CADENA -> AL=un número que no usa ningún
+;                   objeto (0: no queda ninguno)
+;    lam_renueva    EBX=objeto EDX=LO_GRUPO o LO_CADENA: a los objetos desde
+;                   ese (unas copias recién hechas), números nuevos en lugar
+;                   de los que comparten con los de antes
+;    lam_cad_cabeza ESI=ficha -> EAX=la caja con el texto de su cadena (ella
+;                   misma, si no está en ninguna) EDI=su ficha
+;    lam_cad_sig    ESI=ficha -> EAX=la caja siguiente de su cadena (-1: no hay)
+;    lam_cad_saca   EAX=objeto: lo saca de su cadena (si era la cabeza, el
+;                   texto pasa a la siguiente)
+;    lam_cad_limpia las cadenas que se han quedado con una sola caja dejan de serlo
 ;    lam_dat_cambia EAX=objeto EBX=sitio ECX=octetos que se quitan ESI=los que
 ;                   se ponen EDX=cuántos: cambia sus datos (escribir y borrar
 ;                   en una caja, ponerle el texto o la imagen); CF=1 si no
@@ -113,7 +141,14 @@
 ;                   o una elipse sin relleno solo cuenta el borde
 ;    lam_compone    ESI=ficha de una caja de texto: parte su texto en líneas
 ;                   ([lam_l_n] líneas; lam_l_ini, dónde empieza cada una, y
-;                   lam_l_y, a qué altura). Lo necesitan las dos siguientes
+;                   lam_l_y, a qué altura). Lo necesitan las dos siguientes.
+;                   En una caja encadenada compone la parte del texto de la
+;                   cadena que le toca: [lam_t_ini] es dónde empieza esa parte
+;                   en el texto de la cabeza (los sitios de lam_l_ini y de las
+;                   dos rutinas siguientes se cuentan desde ahí) y [lam_l_ve],
+;                   cuántas de sus líneas caben enteras (las demás son de la
+;                   caja siguiente). Sin cadena, [lam_t_ini] es 0 y
+;                   [lam_l_ve], [lam_l_n]
 ;    lam_sitio_xy   ESI=ficha EAX=sitio en el texto -> EAX=x EBX=y (desde la
 ;                   esquina de la caja) ECX=alto de la línea: dónde va el cursor
 ;    lam_xy_sitio   ESI=ficha EAX=x EBX=y (desde la esquina) -> EAX=el sitio
@@ -162,6 +197,8 @@ LT_IMAGEN   equ 5
 LB_VINETAS  equ 1                   ; (LO_BAND) cada párrafo, con su viñeta
 LB_OCULTO   equ 2                   ; ni se dibuja ni se elige con el ratón
 LB_HUECO    equ 4                   ; una caja en la que no se escribe (guarda un sitio)
+LB_NUMEROS  equ 8                   ; cada párrafo, con su número
+LB_LISTA    equ LB_VINETAS | LB_NUMEROS
 
 LE_NEG      equ 1
 LE_CUR      equ 2
@@ -187,7 +224,11 @@ LO_PAPEL    equ 30
 LO_BAND     equ 31
 LO_DAT      equ 32
 LO_LARGO    equ 36
-LO_TAM      equ 40
+LO_GRUPO    equ 40
+LO_CADENA   equ 41
+LO_ESLABON  equ 42
+LO_TAM      equ 48
+LO_TAM_V1   equ 40                  ; lo que medía una ficha en los primeros archivos
 
 LAM_DOC_TAM equ 28 + LAM_MAX_OBJ * LO_TAM
 
@@ -271,12 +312,20 @@ lam_guia_fn resd 1                  ; la que da el texto de ejemplo de una caja 
 lam_parr_max resd 1                 ; de las listas, solo los n-1 primeros puntos (0: todos)
 lam_t_txt   resd 1                  ; el texto que se compone
 lam_t_n     resd 1
+lam_t_ini   resd 1                  ; dónde empieza, en el texto de la cabeza de su cadena
+lam_l_ve    resd 1                  ; cuántas líneas se ven en la caja (las demás, en la siguiente)
+lam_k_txt   resd 1                  ; el texto de la cadena que se compone
+lam_k_n     resd 1
+lam_c_num   resd 3                  ; por qué número va la lista en cada nivel
+lam_giro    resd 3                  ; un bloque de paso, para girar una imagen
 lam_c_y     resd 1
 lam_d_antes resd 1
 lam_c_izq   resd 1
 lam_c_cabe  resd 1
 lam_p_parr  resd 1
-lam_t_vin   resb 1
+lam_t_vin   resb 1                  ; LB_VINETAS o LB_NUMEROS: el texto es una lista
+lam_t_medio resb 1                  ; 1: el texto que se compone empieza a mitad de un párrafo
+lam_num_txt resb 8                  ; el número de un punto de una lista, en letra
 lam_t_base  resb 1
 lam_c_par   resb 1
 lam_c_niv   resb 1
@@ -293,7 +342,9 @@ lam_l_ini   resd LAM_MAX_LIN + 2    ; de cada línea: dónde empieza en el texto
 lam_l_y     resd LAM_MAX_LIN + 2    ; a qué altura (desde la primera),
 lam_l_izq   resd LAM_MAX_LIN + 2    ; su sangría,
 lam_l_tam   resb LAM_MAX_LIN + 2    ; el tamaño de su letra
-lam_l_niv   resb LAM_MAX_LIN + 2    ; y su nivel (+40h si empieza párrafo, +80h con viñeta)
+lam_l_niv   resb LAM_MAX_LIN + 2    ; su nivel (+40h si empieza párrafo, +80h con viñeta)
+            alignb 2
+lam_l_num   resw LAM_MAX_LIN + 2    ; y, en una lista con números, el suyo
             alignb 4
 lam_r_x     resd LAM_MAX_LADO + 2
 lam_i_mapa  resb 256
@@ -556,6 +607,8 @@ lam_suelta:
         call lam_bloque_suelta
         mov ebx, lam_buf
         call lam_bloque_suelta
+        mov ebx, lam_giro
+        call lam_bloque_suelta
         pop ebx
         ret
 
@@ -563,6 +616,7 @@ lam_obj_quita:
         pushad
         cmp eax, [lam_n]
         jae .x
+        call lam_cad_saca           ; (si llevaba el texto de una cadena, lo hereda la siguiente)
         xor ebx, ebx                ; sus datos, fuera
         mov ecx, -1
         xor edx, edx
@@ -767,7 +821,7 @@ lam_pag_dup:
         xor edx, edx
 .b:
         cmp edx, ebx
-        jae .ok
+        jae .hechas
         mov eax, edx
         call lam_ptr
         cmp [esi+LO_PAG], cl
@@ -779,13 +833,354 @@ lam_pag_dup:
 .s:
         inc edx
         jmp .b
-.ok:
+.hechas:
+        mov edx, LO_CADENA          ; las cajas encadenadas de la copia hacen su
+        call lam_renueva            ; propia cadena (no se meten en la de antes)
+        call lam_cad_limpia
         clc
 .x:
         pop esi
         pop edx
         pop ebx
         pop eax
+        ret
+
+; EAX=objeto: un cuarto de vuelta a la derecha, alrededor de su centro. Un
+; rectángulo y una elipse cambian el ancho por el alto; una línea gira sus
+; extremos; de una imagen giran además los puntos (con una copia de paso, que
+; se pide y se devuelve aquí). CF=1 si no se puede
+lam_obj_gira:
+        pushad
+        call lam_ptr
+        movzx eax, byte [esi+LO_TIPO]
+        cmp eax, LT_LINEA
+        je .linea
+        cmp eax, LT_RECT
+        je .caja
+        cmp eax, LT_ELIPSE
+        je .caja
+        cmp eax, LT_IMAGEN
+        jne .no
+        ; los puntos: el de (x, y) de la imagen girada es el de (y, alto-1-x)
+        ; de la de antes
+        movzx ecx, word [esi+LO_IMG_AN]
+        movzx edx, word [esi+LO_IMG_AL]
+        imul ecx, edx
+        jz .caja
+        mov ebx, lam_giro
+        xor al, al
+        call lam_bloque
+        jc .no
+        push esi
+        mov edi, [lam_giro]
+        mov esi, [esi+LO_DAT]
+        add esi, [lam_dat]
+        mov ebp, esi                ; EBP=los puntos de la imagen (ahí va la girada)
+        rep movsb
+        pop esi
+        movzx ecx, word [esi+LO_IMG_AN]     ; ECX=ancho y EDX=alto de antes
+        movzx edx, word [esi+LO_IMG_AL]
+        mov edi, ebp
+        xor ebx, ebx                ; EBX=la fila de la nueva (una columna de la de antes)
+.gf:
+        cmp ebx, ecx
+        jae .gx
+        lea eax, [edx-1]            ; de abajo arriba
+.gc:
+        push eax
+        imul eax, ecx
+        add eax, ebx
+        add eax, [lam_giro]
+        mov al, [eax]
+        stosb
+        pop eax
+        dec eax
+        jns .gc
+        inc ebx
+        jmp .gf
+.gx:
+        mov [esi+LO_IMG_AN], dx
+        mov [esi+LO_IMG_AL], cx
+        mov ebx, lam_giro
+        call lam_bloque_suelta
+.caja:
+        mov eax, [esi+LO_AN]        ; el centro se queda donde está
+        mov ebx, [esi+LO_AL]
+        mov ecx, eax
+        sub ecx, ebx
+        sar ecx, 1
+        add [esi+LO_X], ecx
+        sub [esi+LO_Y], ecx
+        mov [esi+LO_AN], ebx
+        mov [esi+LO_AL], eax
+        jmp .ok
+.linea:
+        mov eax, [esi+LO_AN]        ; lo que va de un extremo a otro, (a, b), pasa
+        mov ebx, [esi+LO_AL]        ; a ser (-b, a); el punto medio no se mueve
+        mov ecx, eax
+        add ecx, ebx
+        sar ecx, 1
+        add [esi+LO_X], ecx
+        mov ecx, ebx
+        sub ecx, eax
+        sar ecx, 1
+        add [esi+LO_Y], ecx
+        neg ebx
+        mov [esi+LO_AN], ebx
+        mov [esi+LO_AL], eax
+.ok:
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
+        ret
+
+; ESI=ficha -> EAX=x EBX=y ECX=ancho EDX=alto del rectángulo que ocupa
+lam_caja_de:
+        mov eax, [esi+LO_X]
+        mov ebx, [esi+LO_Y]
+        mov ecx, [esi+LO_AN]
+        mov edx, [esi+LO_AL]
+        test ecx, ecx
+        jns .a
+        add eax, ecx
+        neg ecx
+.a:
+        test edx, edx
+        jns .b
+        add ebx, edx
+        neg edx
+.b:
+        ret
+
+; =============================================================================
+;  Los grupos y las cadenas: un número en la ficha (LO_GRUPO, LO_CADENA)
+; =============================================================================
+; EDX=el campo -> AL=un número (de 1 a 255) que no lleva ningún objeto; 0 si
+; están todos cogidos
+lam_id_libre:
+        push ebx
+        push ecx
+        push esi
+        mov al, 1
+.n:
+        mov esi, lam_obj
+        mov ecx, [lam_n]
+.b:
+        test ecx, ecx
+        jz .x                       ; nadie lo lleva
+        cmp [esi+edx], al
+        je .otro
+        add esi, LO_TAM
+        dec ecx
+        jmp .b
+.otro:
+        inc al
+        jnz .n
+.x:
+        pop esi
+        pop ecx
+        pop ebx
+        ret
+
+; EBX=objeto EDX=el campo: los objetos desde ese son copias recién hechas, y
+; llevan los números de sus originales. Los que comparten número con alguno
+; de los de antes toman uno nuevo (el mismo para las copias que iban juntas)
+lam_renueva:
+        pushad
+        mov ebp, ebx                ; EBP=la primera copia
+        mov eax, ebx
+.b:
+        cmp eax, [lam_n]
+        jae .x
+        call lam_ptr
+        mov cl, [esi+edx]
+        test cl, cl
+        jz .s
+        mov edi, lam_obj            ; ¿lo lleva alguno de los de antes?
+        mov ebx, ebp
+.v:
+        test ebx, ebx
+        jz .s
+        cmp [edi+edx], cl
+        je .nuevo
+        add edi, LO_TAM
+        dec ebx
+        jmp .v
+.nuevo:
+        push eax
+        call lam_id_libre           ; (si no queda ninguno, se quedan sueltas)
+        mov ch, al
+        pop eax
+        mov ebx, eax                ; desde esta copia, todas las que lo llevan
+.c:
+        cmp ebx, [lam_n]
+        jae .s
+        imul edi, ebx, LO_TAM
+        cmp [lam_obj+edi+edx], cl
+        jne .c1
+        mov [lam_obj+edi+edx], ch
+.c1:
+        inc ebx
+        jmp .c
+.s:
+        inc eax
+        jmp .b
+.x:
+        popad
+        ret
+
+; ESI=ficha -> EAX=la caja que lleva el texto de su cadena (la del eslabón más
+; bajo; ella misma si no está en ninguna) y EDI=su ficha. La ficha puede ser
+; una copia que no esté en la tabla: entonces EAX es -1 y EDI, la copia
+lam_cad_cabeza:
+        push ebx
+        push ecx
+        push edx
+        mov eax, esi                ; (su número en la tabla, si está en ella)
+        sub eax, lam_obj
+        cmp eax, LAM_MAX_OBJ * LO_TAM
+        jb .tabla
+        mov eax, -1
+        jmp .t1
+.tabla:
+        xor edx, edx
+        mov ecx, LO_TAM
+        div ecx
+.t1:
+        mov edi, esi
+        mov bl, [esi+LO_CADENA]
+        test bl, bl
+        jz .x
+        mov bh, [esi+LO_ESLABON]    ; BH=el más bajo hasta ahora
+        xor ecx, ecx
+        mov edx, lam_obj
+.b:
+        cmp ecx, [lam_n]
+        jae .x
+        cmp [edx+LO_CADENA], bl
+        jne .s
+        cmp byte [edx+LO_TIPO], LT_TEXTO
+        jne .s
+        cmp [edx+LO_ESLABON], bh
+        jae .s
+        mov bh, [edx+LO_ESLABON]
+        mov eax, ecx
+        mov edi, edx
+.s:
+        add edx, LO_TAM
+        inc ecx
+        jmp .b
+.x:
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
+; ESI=ficha -> EAX=la caja siguiente de su cadena (la del eslabón más bajo de
+; los mayores que el suyo); -1 si es la última o no está en ninguna
+lam_cad_sig:
+        push ebx
+        push ecx
+        push edx
+        push edi
+        mov eax, -1
+        mov bl, [esi+LO_CADENA]
+        test bl, bl
+        jz .x
+        mov bh, [esi+LO_ESLABON]
+        mov edi, 256                ; EDI=el más bajo de los mayores
+        xor ecx, ecx
+        mov edx, lam_obj
+.b:
+        cmp ecx, [lam_n]
+        jae .x
+        cmp [edx+LO_CADENA], bl
+        jne .s
+        cmp byte [edx+LO_TIPO], LT_TEXTO
+        jne .s
+        cmp [edx+LO_ESLABON], bh
+        jbe .s
+        push eax
+        movzx eax, byte [edx+LO_ESLABON]
+        cmp eax, edi
+        jae .s0
+        mov edi, eax
+        mov [esp], ecx
+.s0:
+        pop eax
+.s:
+        add edx, LO_TAM
+        inc ecx
+        jmp .b
+.x:
+        pop edi
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
+; EAX=objeto: sale de su cadena. Si llevaba el texto (era la cabeza), se lo
+; queda la caja siguiente: las dos fichas se cambian los datos, que no se
+; mueven de su sitio. Si la cadena se queda con una sola caja, deja de serlo
+lam_cad_saca:
+        pushad
+        call lam_ptr
+        cmp byte [esi+LO_CADENA], 0
+        je .x
+        mov ebx, eax
+        call lam_cad_cabeza
+        cmp eax, ebx
+        jne .fuera
+        call lam_cad_sig
+        test eax, eax
+        js .fuera
+        imul edi, eax, LO_TAM
+        add edi, lam_obj
+        mov eax, [esi+LO_DAT]
+        xchg eax, [edi+LO_DAT]
+        mov [esi+LO_DAT], eax
+        mov eax, [esi+LO_LARGO]
+        xchg eax, [edi+LO_LARGO]
+        mov [esi+LO_LARGO], eax
+.fuera:
+        mov word [esi+LO_CADENA], 0 ; (la cadena y el eslabón)
+        call lam_cad_limpia
+.x:
+        popad
+        ret
+
+; las cadenas de una sola caja dejan de ser cadenas
+lam_cad_limpia:
+        pushad
+        mov esi, lam_obj
+        mov ecx, [lam_n]
+.b:
+        test ecx, ecx
+        jz .x
+        mov al, [esi+LO_CADENA]
+        test al, al
+        jz .s
+        mov edi, lam_obj            ; ¿hay otra con ese número?
+        mov edx, [lam_n]
+.c:
+        cmp edi, esi
+        je .c1
+        cmp [edi+LO_CADENA], al
+        je .s
+.c1:
+        add edi, LO_TAM
+        dec edx
+        jnz .c
+        mov word [esi+LO_CADENA], 0
+.s:
+        add esi, LO_TAM
+        dec ecx
+        jmp .b
+.x:
+        popad
         ret
 
 ; =============================================================================
@@ -1347,6 +1742,8 @@ lam_ancho_car:
         ret
 
 lam_compone:
+        cmp byte [esi+LO_CADENA], 0
+        jne .cadena
         push eax
         mov eax, [esi+LO_DAT]
         add eax, [lam_dat]
@@ -1354,12 +1751,85 @@ lam_compone:
         mov eax, [esi+LO_LARGO]
         mov [lam_t_n], eax
         mov al, [esi+LO_BAND]
-        and al, LB_VINETAS
+        and al, LB_LISTA
         mov [lam_t_vin], al
+        mov dword [lam_t_ini], 0
         pop eax
+        jmp lam_compone_x
+; una caja encadenada: el texto es el de la cabeza de la cadena, y a esta
+; caja le toca desde donde lo deja la anterior. Para saberlo se componen por
+; orden las cajas de delante, cada una con su ancho y su letra
+.cadena:
+        pushad
+        mov ebp, esi                ; EBP=la caja que se quiere
+        call lam_cad_cabeza         ; EDI=la ficha de la cabeza
+        mov eax, [edi+LO_DAT]
+        add eax, [lam_dat]
+        mov [lam_k_txt], eax
+        mov eax, [edi+LO_LARGO]
+        mov [lam_k_n], eax
+        xor ebx, ebx                ; EBX=por dónde va el texto
+        mov esi, edi
+.k:
+        mov al, [esi+LO_ESLABON]    ; ¿se ha llegado a ella?
+        cmp al, [ebp+LO_ESLABON]
+        jae .mia
+        call .parte
+        mov eax, [lam_l_ve]         ; lo que cabe en esta: la siguiente sigue ahí
+        add ebx, [lam_l_ini+eax*4]
+        call lam_cad_sig
+        test eax, eax
+        js .mia
+        call lam_ptr
+        jmp .k
+.mia:
+        mov esi, ebp
+        call .parte
+        popad
+        ret
+; (interna) compone en la caja ESI el texto de la cadena desde el sitio EBX
+.parte:
+        mov eax, [lam_k_txt]
+        add eax, ebx
+        mov [lam_t_txt], eax
+        mov eax, [lam_k_n]
+        sub eax, ebx
+        mov [lam_t_n], eax
+        mov [lam_t_ini], ebx
+        mov al, [esi+LO_BAND]
+        and al, LB_LISTA
+        mov [lam_t_vin], al
+        test ebx, ebx               ; ¿empieza a mitad de un párrafo?
+        jz .p1
+        mov eax, [lam_k_txt]
+        cmp byte [eax+ebx-1], 10
+        je .p1
+        mov byte [lam_t_medio], 1
+.p1:
+        call lam_compone_x
+        ; las líneas que caben enteras, si detrás hay otra caja que las recoja
+        call lam_cad_sig
+        test eax, eax
+        js .p3
+        xor eax, eax
+.p2:
+        cmp eax, [lam_l_n]
+        jae .p4
+        mov ecx, [lam_l_y+eax*4+4]
+        add ecx, LAM_SEP
+        cmp ecx, [esi+LO_AL]
+        jg .p4
+        inc eax
+        jmp .p2
+.p4:
+        mov [lam_l_ve], eax
+.p3:
+        ret
 ; (interna) lo mismo, con el texto que haya en [lam_t_txt] ([lam_t_n] letras)
-; y con viñetas o sin ellas según [lam_t_vin]: así se compone también el
-; texto de ejemplo de una caja vacía, que no está en lam_dat
+; y como una lista o no según [lam_t_vin]: así se compone también el texto de
+; ejemplo de una caja vacía, que no está en lam_dat. Con [lam_t_medio] a 1 (se
+; pone a 0 aquí) el texto empieza a mitad de un párrafo: su primera línea no
+; lleva viñeta ni sangría
 lam_compone_x:
         pushad
         mov al, [esi+LO_LETRA]
@@ -1388,7 +1858,16 @@ lam_compone_x:
         xor edi, edi                ; EDI=la línea
         xor esi, esi                ; ESI=por dónde va
         mov dword [lam_c_y], 0
-        mov byte [lam_c_par], 1     ; la línea que viene empieza un párrafo
+        xor eax, eax                ; las listas con números empiezan a contar
+        mov [lam_c_num], eax
+        mov [lam_c_num+4], eax
+        mov [lam_c_num+8], eax
+        mov [lam_c_izq], eax
+        mov byte [lam_c_niv], 0
+        mov al, [lam_t_medio]       ; la línea que viene empieza un párrafo
+        xor al, 1                   ; (salvo que el texto venga de otra caja y
+        mov [lam_c_par], al         ; siga a mitad de uno)
+        mov byte [lam_t_medio], 0
 .lin:
         cmp esi, ebp
         jae .fin
@@ -1445,6 +1924,7 @@ lam_compone_x:
         call .abre
 .lleno:
         mov [lam_l_n], edi
+        mov [lam_l_ve], edi         ; (se ven todas; en una cadena, lam_compone lo corrige)
         mov [lam_l_ini+edi*4], esi
         mov eax, [lam_c_y]
         mov [lam_l_y+edi*4], eax
@@ -1477,6 +1957,21 @@ lam_compone_x:
         or al, 0xC0                 ; (0x80: lleva viñeta)
         mov [lam_c_niv], al
         lea eax, [ecx+1]
+        test byte [lam_t_vin], LB_NUMEROS
+        jz .ab1a
+        inc eax                     ; (los números piden más sitio que un punto)
+        inc dword [lam_c_num+ecx*4] ; otro de su nivel; los de más adentro
+        cmp ecx, 1                  ; empiezan otra vez
+        ja .ab1m
+        mov dword [lam_c_num+8], 0
+        je .ab1m
+        mov dword [lam_c_num+4], 0
+.ab1m:
+        push eax
+        mov eax, [lam_c_num+ecx*4]
+        mov [lam_l_num+edi*2], ax
+        pop eax
+.ab1a:
         imul eax, [lam_l_alto]
         mov [lam_c_izq], eax
         movzx eax, byte [lam_t_base]
@@ -1689,6 +2184,8 @@ lam_p_texto:
         pushad
         cmp dword [esi+LO_LARGO], 0
         jne .normal
+        cmp byte [esi+LO_CADENA], 0 ; (una caja encadenada: el texto es de la cabeza)
+        jne .normal
         cmp dword [lam_guia_fn], 0
         je .x
         cmp esi, [lam_guia_salta]   ; (en la que se está escribiendo, no)
@@ -1743,7 +2240,7 @@ lam_p_texto:
         mov dword [lam_p_parr], 0
         xor edi, edi
 .l:
-        cmp edi, [lam_l_n]
+        cmp edi, [lam_l_ve]         ; (las que no caben enteras van en la caja siguiente)
         jae .x
         mov ebx, [lam_l_y+edi*4]
         add ebx, LAM_SEP
@@ -1789,9 +2286,92 @@ lam_p_texto:
         popad
         ret
 ; (interna) la viñeta de la línea EDI (EBX=su y): un cuadrado del color de la
-; letra en el primer nivel y una raya en los demás, en el hueco de la sangría
+; letra en el primer nivel y una raya en los demás, en el hueco de la sangría.
+; En una lista con números, el número («3.») en el primer nivel y una letra
+; («c)») en el segundo, arrimados a la derecha de ese hueco; en el tercero,
+; la raya
 .vineta:
         pushad
+        test byte [lam_t_vin], LB_NUMEROS
+        jz .punto
+        mov al, [lam_l_niv+edi]
+        and al, 3
+        cmp al, 1
+        ja .punto
+        push edi
+        movzx eax, word [lam_l_num+edi*2]
+        mov edi, lam_num_txt
+        je .letra
+        xor edx, edx                ; el número (hasta 999) y un punto
+        mov ecx, 100
+        div ecx
+        mov ecx, eax                ; ECX=las centenas
+        mov eax, edx
+        mov dl, 10
+        div dl                      ; AL=decenas AH=unidades
+        test ecx, ecx
+        jz .n1
+        add cl, '0'
+        mov [edi], cl
+        inc edi
+        jmp .n2
+.n1:
+        test al, al
+        jz .n3
+.n2:
+        add al, '0'
+        mov [edi], al
+        inc edi
+.n3:
+        add ah, '0'
+        mov [edi], ah
+        mov byte [edi+1], '.'
+        jmp .n4
+.letra:
+        dec eax                     ; la letra (de la a a la z, y vuelta a empezar)
+        xor edx, edx
+        mov ecx, 26
+        div ecx
+        add dl, 'a'
+        mov [edi], dl
+        mov byte [edi+1], ')'
+.n4:
+        mov byte [edi+2], 0
+        pop edi
+        xor ebp, ebp                ; EBP=lo que mide
+        mov edx, lam_num_txt
+.n5:
+        movzx ecx, byte [edx]
+        test ecx, ecx
+        jz .n6
+        push edx
+        call lam_ancho_car
+        add ebp, edx
+        pop edx
+        inc edx
+        jmp .n5
+.n6:
+        mov eax, [esi+LO_X]         ; acaba un cuarto de línea antes del texto
+        add eax, LAM_SEP
+        add eax, [lam_l_izq+edi*4]
+        mov edx, [lam_l_alto]
+        shr edx, 2
+        sub eax, edx
+        sub eax, ebp
+        mov ebp, lam_num_txt
+.n7:
+        movzx ecx, byte [ebp]
+        test ecx, ecx
+        jz .n8
+        call lam_ancho_car
+        call lam_letra
+        add eax, edx
+        inc ebp
+        jmp .n7
+.n8:
+        popad
+        ret
+.punto:
         movzx edx, byte [lam_t_tam]
         call tl_alto_de             ; EAX=el alto de la línea
         mov ecx, eax
@@ -2433,8 +3013,8 @@ lam_carga:
         cmp edx, LAM_MAX_OBJ
         ja .malo
         movzx esi, word [lam_fila+18]
-        cmp esi, LO_TAM
-        jb .malo
+        cmp esi, LO_TAM_V1          ; (las fichas de antes eran más cortas: lo
+        jb .malo                    ; que les falta se queda a cero)
         cmp esi, 1024
         ja .malo
         mov edi, [lam_fila+20]
@@ -2453,6 +3033,10 @@ lam_carga:
 .f:
         cmp ebp, [lam_n]
         jae .datos
+        mov edi, lam_fila
+        mov ecx, LO_TAM / 4
+        xor eax, eax
+        rep stosd
         mov edi, lam_fila
         mov ecx, [lam_f_ficha]
         call lam_f_lee
@@ -2517,7 +3101,7 @@ lam_repasa:
         mov eax, [lam_n]
 .b:
         dec eax
-        js .x
+        js .fin
         call lam_ptr
         movzx ecx, byte [esi+LO_TIPO]
         dec ecx
@@ -2562,6 +3146,12 @@ lam_repasa:
         mov byte [esi+LO_LETRA], 0
 .n5:
         and byte [esi+LO_ESTILO], LE_NEG | LE_CUR | LE_SUB
+        cmp byte [esi+LO_TIPO], LT_TEXTO    ; solo se encadenan las cajas de texto
+        je .n5b
+        mov word [esi+LO_CADENA], 0
+.n5b:
+        mov byte [esi+LO_ESLABON+1], 0      ; (lo que queda libre, a cero)
+        mov dword [esi+LO_ESLABON+2], 0
         lea edi, [esi+LO_X]         ; la posición y el tamaño, sin disparates
         mov ecx, 4
 .n6:
@@ -2589,7 +3179,9 @@ lam_repasa:
         mov dword [esi+LO_AL], 1
         jmp .b
 .quita:
-        ; (sus datos pueden no cuadrar: se le dejan a cero antes de quitarlo)
+        ; (sus datos pueden no cuadrar: se le dejan a cero antes de quitarlo;
+        ; y fuera de toda cadena, que no hay nada suyo que heredar)
+        mov word [esi+LO_CADENA], 0
         mov ecx, [esi+LO_DAT]
         cmp ecx, [lam_dat_n]
         jbe .q1
@@ -2604,7 +3196,8 @@ lam_repasa:
 .q2:
         call lam_obj_quita
         jmp .b
-.x:
+.fin:
+        call lam_cad_limpia
         popad
         ret
 

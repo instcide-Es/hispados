@@ -6,14 +6,26 @@
 ;
 ;  El documento y su dibujo son de lamina.inc (el motor). Aquí está todo lo
 ;  que hace falta para trabajar con él en una ventana, igual en todos los
-;  programas: la vista (a qué tamaño se ve la lámina y dónde cae), elegir,
-;  mover y cambiar de tamaño con el ratón (tiradores), poner objetos con las
-;  herramientas, escribir en las cajas, la fila de botones del formato (tipo y
-;  tamaño de letra, negrita, cursiva, subrayado, alineación, viñetas, colores,
-;  grosor, orden), las listas de elegir, deshacer y rehacer, duplicar, el
-;  portapapeles, las láminas (añadir, quitar, pasar), abrir y guardar,
-;  exportar a BMP, imprimir en una matricial y poner plantillas. El usuario
-;  tiene que sentir que son el mismo programa con dos oficios.
+;  programas: la vista (a qué tamaño se ve la lámina y dónde cae), elegir uno
+;  o varios objetos (Mayús y clic, un marco arrastrando desde un sitio vacío,
+;  todos), mover y cambiar de tamaño con el ratón (tiradores), poner objetos
+;  con las herramientas, escribir en las cajas, la fila de botones del formato
+;  (tipo y tamaño de letra, negrita, cursiva, subrayado, alineación, viñetas,
+;  numeración, colores, grosor, orden), las listas de elegir, deshacer y
+;  rehacer de varios pasos, duplicar, el portapapeles, alinear, repartir,
+;  agrupar, girar, encadenar cajas de texto, las láminas (añadir, quitar,
+;  pasar), abrir y guardar, exportar a BMP, imprimir en una matricial, poner
+;  plantillas y las marcas del menú. El usuario tiene que sentir que son el
+;  mismo programa con dos oficios.
+;
+;  LO ELEGIDO. Puede haber varios objetos elegidos: sel_m dice cuáles y [sel]
+;  es el principal (el que enseña su formato y sus medidas; con uno solo, él).
+;  Lo que se hace con lo elegido se hace con todos: mover (ratón y flechas),
+;  borrar, duplicar, cortar, copiar y pegar, el orden, el formato, alinear,
+;  repartir, agrupar y girar. Los tiradores solo salen con uno. Los objetos de
+;  un grupo (LO_GRUPO) se eligen juntos. Quien quite o cambie de sitio objetos
+;  de la tabla por su cuenta tiene que dejar lo elegido al día (lo más fácil:
+;  «call elige» con el que deba quedar, o «call sel_nada»).
 ;
 ;  CÓMO SE USA. El programa incluye, por este orden, tipos.inc, lamina.inc,
 ;  lamina_ed.inc, barra.inc y hvplib.inc, y pone en su «section .bss»
@@ -35,6 +47,11 @@
 ;                   HV dc_cerrar; acaba en «jmp hecho»
 ;    barra_propia   como barra_estado (barra.inc) para sus botones: EDI=botón
 ;                   -> EBP=1 si está puesto (puede no hacer nada: ret)
+;    orden_antes    se llama antes de cada orden (ECX, que conserva): por si
+;                   el programa tiene que prepararse (puede no hacer nada)
+;    marcas_prog    las marcas de su menú (ver «marcas»): de cada una, dd
+;                   dónde va, dd el octeto que se mira, dd con qué valor está
+;                   puesta; y un 0
 ;    pie_papel      escribe en EDI (que avanza) lo que dice el pie cuando no
 ;                   hay nada elegido (el papel, el tema...)
 ;    nuevo          la orden Nuevo (cada programa, con sus plantillas)
@@ -55,13 +72,21 @@
 ;    cambio         el documento ha cambiado (hay cambios; se redibuja)
 ;    sucio          hay que dibujar la lámina otra vez (sin contar un cambio)
 ;    instantanea    antes de cambiar el documento: lo guarda para deshacer
+;    des_vuelve     deja el documento como en la última instantánea y la
+;                   olvida (para lo que se queda a medias)
 ;    calc_vista     después de cambiar [vista], la zona o el tamaño de la lámina
 ;    doc_estrena    después de poner otro documento
 ;    pag_ir         EAX=lámina: pasa a ella         fin_edicion  se deja de escribir
-;    elige          EAX=objeto (-1: ninguno): queda elegido
+;    elige          EAX=objeto (-1: ninguno): queda elegido, él solo (con su
+;                   grupo); sel_nada: nada elegido
 ;    al_dia         deja en lam_buf la lámina [pag] (si había cambiado)
 ;    pinta_botones, pinta_estado, pinta_vista       para «pintar»
 ;    plantilla_pon  ESI=plantilla (macros PL y PLX) CL=lámina: pone sus objetos
+;    plantilla_uno  EBX=un objeto de una plantilla: lo pone en la lámina
+;                   [pl_pag] -> EAX; plantilla_sitio (ESI=ficha EBX=ese
+;                   objeto): solo le da su sitio y su tamaño
+;    marcas         pone al día las marcas del menú (lo hace sola tras cada
+;                   orden y al cambiar de documento)
 ;    lista_elige    elegir de una lista ([le_titulo], [le_n], [le_texto], [le_sel])
 ;    imp_abre, imp_prepara, imp_pagina, imp_cierra  imprimir un búfer cualquiera
 ;    [ed_todo]      lo pone a 1 lo que cambia más de una lámina (deshacer,
@@ -80,6 +105,9 @@ ID_BH       equ 902
 D_MOVER     equ 1
 D_TAM       equ 2
 D_CREAR     equ 3
+D_MARCO     equ 4                   ; el marco que elige lo que encierra
+DES_PASOS   equ 16                  ; los cambios que se pueden deshacer, a lo más
+DES_TOPE    equ 1024 * 1024         ; y los octetos que pueden ocupar sus instantáneas
 
 ; ---- las órdenes comunes (las propias de cada programa, de 200 en adelante) ----
 O_NUEVO     equ 101
@@ -126,6 +154,15 @@ O_PAG_ANT   equ 180
 O_PAG_SIG   equ 181
 O_PAG_NUEVA equ 182
 O_PAG_QUITA equ 183
+O_TODO      equ 184
+O_ALINEAR   equ 185                 ; 185-190: izquierda, centro, derecha, arriba, medio, abajo
+O_REPARTIR  equ 191                 ; 191-192: a lo ancho y a lo alto
+O_AGRUPAR   equ 193
+O_DESAGRUPAR equ 194
+O_NUMEROS   equ 195
+O_GIRAR     equ 196
+O_ENCADENAR equ 197
+O_SOLTAR    equ 198
 
 ; las listas de los diálogos: la de Hispa Ventanas (c_lista), salvo el
 ; tabulador (ver lista2_proc). El fondo y las banderas se copian al empezar
@@ -169,6 +206,7 @@ botones     dd 6, 96, t_nada, O_TIPO, n_tipo, BT_TEXTO
             dd 590, 24, ic_frente, O_FRENTE, n_frente, BT_ICONO
             dd 616, 24, ic_alfondo, O_ALFONDO, n_alfondo, BT_ICONO
             dd 648, 24, ic_vinetas, O_VINETAS, n_vinetas, BT_ICONO
+            dd 674, 24, ic_numera, O_NUMEROS, n_numeros, BT_ICONO
             dd 0, 0, 0, 0, 0, 0
 BX_LETRA    equ 364                 ; las muestras de color, con su rótulo delante
 BX_FONDO    equ 444
@@ -198,6 +236,7 @@ n_grosor    db "Grosor del borde o de la línea", 0
 n_frente    db "Traer al frente (Ctrl+F)", 0
 n_alfondo   db "Enviar al fondo (Ctrl+O)", 0
 n_vinetas   db "Viñetas: cada párrafo de la caja, con su punto (Tab cambia de nivel)", 0
+n_numeros   db "Numeración: cada párrafo de la caja, con su número (Tab cambia de nivel)", 0
 
 ; ---- los iconos propios del editor (los comunes están en barra.inc, y con
 ;      la misma forma): las herramientas, pasar de lámina y el orden ----
@@ -399,7 +438,9 @@ ordenes     dd O_NUEVO, nuevo, O_ABRIR, abrir, O_GUARDAR, guardar, O_COMO, guard
             dd O_AJUSTAR, ajustar_orden, O_MARGENES, margenes, O_CAMBIA_V, cambia_vista
             dd O_PAG_ANT, pag_ant, O_PAG_SIG, pag_sig, O_PAG_NUEVA, pag_nueva
             dd O_PAG_QUITA, pag_quita, O_ACERCA, acerca, O_VINETAS, vinetas
-            dd O_SALIR, salir, 0
+            dd O_NUMEROS, numeros, O_TODO, elegir_todo, O_AGRUPAR, agrupar
+            dd O_DESAGRUPAR, desagrupar, O_GIRAR, girar, O_ENCADENAR, encadenar
+            dd O_SOLTAR, soltar, O_SALIR, salir, 0
 
 ; ---- textos ----
 t_guion     db " - ", 0
@@ -432,6 +473,25 @@ t_objetos   dd t_nada, t_o_caja, t_o_rect, t_o_elipse, t_o_linea, t_o_imagen
 t_escriba   db ": escriba; Esc o un clic fuera para acabar", 0
 t_ajustado  db "    Ajuste a la rejilla", 0
 t_no_cabe   db "; el texto no cabe", 0
+t_elegidos  db " objetos elegidos", 0
+t_agrupados db " objetos agrupados", 0
+t_cad_a     db "; encadenada (", 0
+t_cad_b     db ")", 0
+t_cad_pie   db "Haga clic en la caja de texto en la que debe seguir (Esc: dejarlo)", 0
+t_cad_que   db "Elija antes una caja de texto (una sola): la que tiene", 10
+            db "el texto que debe seguir en otra.", 0
+t_cad_texto db "Esa caja ya tiene texto. El texto solo puede seguir", 10
+            db "en una caja vacía.", 0
+t_cad_ya    db "Esa caja ya está encadenada con otras.", 0
+t_cad_llena db "No se pueden hacer más cadenas de cajas en este documento.", 0
+t_rep_tres  db "Para repartir hacen falta tres objetos elegidos o más.", 10
+            db "Elíjalos con Mayús y un clic en cada uno, o arrastrando", 10
+            db "un marco alrededor.", 0
+t_no_gira   db "Se pueden girar los rectángulos, las elipses, las líneas", 10
+            db "y las imágenes. Las cajas de texto, no.", 0
+t_sin_deshacer db "No queda memoria para guardar lo que haga falta para deshacer.", 10
+            db "Puede seguir trabajando, pero los cambios que haga desde ahora", 10
+            db "no se podrán deshacer. Guarde el documento y cierre otros programas.", 0
 t_sin_mem   db "No hay memoria bastante para hacer eso.", 10
             db "Cierre otros programas y pruebe otra vez.", 0
 t_sin_mem_v db "No hay memoria bastante para dibujar esto. Cierre otros programas.", 0
@@ -549,15 +609,16 @@ pon_titulo:
 ; (interna) después de poner otro documento: nada elegido, la primera página,
 ; nada que deshacer y sin cambios
 doc_estrena:
-        mov dword [sel], -1
+        call sel_nada
         mov byte [editando], 0
         mov byte [drag], 0
+        mov byte [encadenando], 0
         mov dword [herr], 0
         mov dword [pag], 0
         mov dword [sx], 0
         mov dword [sy], 0
-        mov byte [des_hay], 0
-        mov byte [des_hecho], 0
+        call des_vacia
+        call marcas
         mov byte [tecleando], 0
         mov byte [moviendo], 0
         mov byte [modif], 0
@@ -636,6 +697,7 @@ ed_proc:
         mov eax, BDM_LINEA
         mov ecx, 16
         HV msg_enviar
+        call marcas
 .tam:
         mov ebp, [ven]
         HV ven_cli                  ; ECX=ancho EDX=alto de la zona
@@ -704,7 +766,7 @@ hecho:
 ; devuelve la memoria que se ha ido pidiendo (al cerrar la ventana)
 ed_suelta:
         push ebx
-        mov ebx, des_dat
+        mov ebx, des_blq
         call lam_bloque_suelta
         mov ebx, clip_dat
         call lam_bloque_suelta
@@ -799,6 +861,17 @@ inval:
 ; después de cambiar el documento: hay cambios, y la página se dibuja otra vez
 cambio:
         mov byte [modif], 1
+        cmp byte [des_avisar], 0    ; (no ha habido memoria para la instantánea
+        je sucio                    ; de este cambio: se dice una vez)
+        mov byte [des_avisar], 0
+        mov byte [des_avisado], 1
+        mov byte [lam_sucio], 1
+        call inval
+        push esi
+        mov esi, t_sin_deshacer
+        call aviso
+        pop esi
+        ret
 sucio:
         mov byte [lam_sucio], 1
         jmp inval
@@ -1079,11 +1152,22 @@ a_mm:
 ; =============================================================================
 orden:
         call orden_haz
+        call marcas                 ; (las marcas del menú, al día)
         jmp hecho
 orden_haz:
+        call orden_antes            ; (del programa: por si tiene que prepararse)
         mov dword [br_sobre], 0
         mov byte [tecleando], 0     ; (cualquier orden acaba la tanda de teclas)
         mov byte [moviendo], 0
+        cmp byte [encadenando], 0   ; (y deja de esperar la caja en la que sigue
+        je .enc                     ; un texto, salvo las de ver otra lámina o a
+        mov eax, ecx                ; otro tamaño)
+        sub eax, O_VISTA
+        cmp eax, O_PAG_SIG - O_VISTA
+        jbe .enc
+        mov byte [encadenando], 0
+        call inval
+.enc:
         mov esi, ordenes_prog       ; antes, las del programa
 .p:
         mov eax, [esi]
@@ -1118,6 +1202,14 @@ orden_haz:
         sub eax, O_IZQ
         cmp eax, 2
         jbe alinea
+        mov eax, ecx
+        sub eax, O_ALINEAR
+        cmp eax, 5
+        jbe disp_alinea
+        mov eax, ecx
+        sub eax, O_REPARTIR
+        cmp eax, 1
+        jbe disp_reparte
         mov al, LE_NEG
         cmp ecx, O_NEG
         je estilo
@@ -1150,7 +1242,7 @@ herramienta:
         mov [herr], eax
         test eax, eax
         jz inval
-        mov dword [sel], -1         ; con una herramienta no hay nada elegido
+        call sel_nada               ; con una herramienta no hay nada elegido
         jmp inval
 
 ; EAX=vista (0 página entera, 1 al 50 %, 2 al 75 %, 3 al 100 %)
@@ -1192,7 +1284,7 @@ pag_sig:
 pag_ir:
         call fin_edicion
         mov [pag], eax
-        mov dword [sel], -1
+        call sel_nada
         mov dword [sx], 0
         mov dword [sy], 0
         call calc_vista
@@ -1263,15 +1355,186 @@ clase:
         pop esi
         ret
 
-; EAX=objeto (-1: ninguno): queda elegido, y la barra enseña su formato.
-; Conserva EAX
+; ---- lo elegido. [sel] es el objeto principal (-1: ninguno): el que enseña
+;      su formato en la barra y sus medidas en el pie, y el único cuando solo
+;      hay uno. sel_m dice de cada objeto si está elegido (bit 0; el bit 1 lo
+;      usan de paso las órdenes que los van colocando). Elegir uno de un grupo
+;      es elegirlos todos ----
+; nada elegido
+sel_nada:
+        mov dword [sel], -1
+sel_borra:
+        push eax
+        push ecx
+        push edi
+        mov edi, sel_m
+        mov ecx, LAM_MAX_OBJ / 4
+        xor eax, eax
+        rep stosd
+        pop edi
+        pop ecx
+        pop eax
+        ret
+; -> ECX=cuántos objetos hay elegidos
+sel_cuenta:
+        push eax
+        xor ecx, ecx
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .x
+        test byte [sel_m+eax], 1
+        jz .s
+        inc ecx
+.s:
+        inc eax
+        jmp .b
+.x:
+        pop eax
+        ret
+; -> CF=1 si hay más de un objeto elegido
+sel_varios:
+        push ecx
+        call sel_cuenta
+        cmp ecx, 2
+        cmc
+        pop ecx
+        ret
+; EAX=objeto ESI=su ficha BL=1 o 0: lo deja elegido o sin elegir, a él y a
+; los de su grupo (los de su lámina que llevan su mismo número)
+sel_pon:
+        pushad
+        mov [sel_m+eax], bl
+        mov dl, [esi+LO_GRUPO]
+        test dl, dl
+        jz .x
+        mov dh, [esi+LO_PAG]
+        xor eax, eax
+        mov edi, lam_obj
+.b:
+        cmp eax, [lam_n]
+        jae .x
+        cmp [edi+LO_GRUPO], dl
+        jne .s
+        cmp [edi+LO_PAG], dh
+        jne .s
+        test byte [edi+LO_BAND], LB_OCULTO
+        jnz .s
+        mov [sel_m+eax], bl
+.s:
+        add edi, LO_TAM
+        inc eax
+        jmp .b
+.x:
+        popad
+        ret
+; que el principal sea uno de los elegidos: si el que había ya no lo está, el
+; de más al frente (-1 si no queda ninguno)
+sel_principal:
+        push eax
+        mov eax, [sel]
+        cmp eax, [lam_n]            ; (-1 también es mayor)
+        jae .busca
+        test byte [sel_m+eax], 1
+        jnz .x
+.busca:
+        mov eax, [lam_n]
+.b:
+        dec eax
+        js .pon
+        test byte [sel_m+eax], 1
+        jz .b
+.pon:
+        mov [sel], eax
+.x:
+        pop eax
+        ret
+; ECX, EDX=cuánto: mueve eso todos los objetos elegidos
+sel_mueve:
+        pushad
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .x
+        test byte [sel_m+eax], 1
+        jz .s
+        call lam_ptr
+        add [esi+LO_X], ecx
+        add [esi+LO_Y], edx
+.s:
+        inc eax
+        jmp .b
+.x:
+        popad
+        ret
+; -> [al_x0], [al_y0], [al_x1] y [al_y1]: el rectángulo que ocupan entre todos
+; los objetos elegidos
+sel_caja:
+        pushad
+        mov dword [al_x0], 0x7FFFFFFF
+        mov dword [al_y0], 0x7FFFFFFF
+        mov dword [al_x1], 0x80000000
+        mov dword [al_y1], 0x80000000
+        xor ebp, ebp
+.b:
+        cmp ebp, [lam_n]
+        jae .x
+        test byte [sel_m+ebp], 1
+        jz .s
+        mov eax, ebp
+        call lam_ptr
+        call lam_caja_de            ; EAX=x EBX=y ECX=ancho EDX=alto
+        cmp eax, [al_x0]
+        jge .c1
+        mov [al_x0], eax
+.c1:
+        cmp ebx, [al_y0]
+        jge .c2
+        mov [al_y0], ebx
+.c2:
+        add eax, ecx
+        cmp eax, [al_x1]
+        jle .c3
+        mov [al_x1], eax
+.c3:
+        add ebx, edx
+        cmp ebx, [al_y1]
+        jle .s
+        mov [al_y1], ebx
+.s:
+        inc ebp
+        jmp .b
+.x:
+        popad
+        ret
+
+; EAX=objeto (-1: ninguno): queda elegido él solo (con su grupo, si lo tiene),
+; y la barra enseña su formato. Conserva EAX
 elige:
         push esi
         push ebx
-        push ecx
+        call sel_borra
         mov [sel], eax
         mov byte [tecleando], 0
         mov byte [moviendo], 0
+        test eax, eax
+        js .x
+        call lam_ptr
+        mov bl, 1
+        call sel_pon
+        call sel_formato
+.x:
+        pop ebx
+        pop esi
+        ret
+; la barra enseña el formato del objeto principal (y es el que llevará lo
+; próximo que se ponga)
+sel_formato:
+        push eax
+        push esi
+        push ebx
+        push ecx
+        mov eax, [sel]
         test eax, eax
         js .x
         call lam_ptr
@@ -1308,6 +1571,7 @@ elige:
         pop ecx
         pop ebx
         pop esi
+        pop eax
         ret
 
 ; se acaba de escribir en la caja. Una caja que se queda vacía y sin fondo ni
@@ -1322,7 +1586,16 @@ fin_edicion:
         test eax, eax
         js .f
         call lam_ptr
+        test byte [esi+LO_BAND], LB_OCULTO  ; una caja escondida (las notas de una
+        jz .ve                              ; diapositiva): no se queda elegida, y
+        cmp dword [esi+LO_LARGO], 0         ; vacía no hace falta
+        je .quita
+        call sel_nada
+        jmp .f
+.ve:
         cmp dword [esi+LO_LARGO], 0
+        jne .f
+        cmp byte [esi+LO_CADENA], 0 ; (las encadenadas no tienen texto propio)
         jne .f
         cmp byte [esi+LO_PAPEL], 0  ; (las que tienen un papel en la lámina, no)
         jne .f
@@ -1330,8 +1603,9 @@ fin_edicion:
         jne .f
         cmp byte [esi+LO_BORDE], LAM_NADA
         jne .f
+.quita:
         call lam_obj_quita
-        mov dword [sel], -1
+        call sel_nada
         mov byte [lam_sucio], 1
 .f:
         call inval
@@ -1344,11 +1618,14 @@ escribir:
         mov eax, [sel]
         test eax, eax
         js .x
+        call sel_varios             ; (con varios elegidos, no)
+        jc .x
         call lam_ptr
         cmp byte [esi+LO_TIPO], LT_TEXTO
         jne .x
         test byte [esi+LO_BAND], LB_HUECO
         jnz .x
+        call txt_obj
         mov eax, [esi+LO_LARGO]
         mov [cur], eax
         mov byte [editando], 1
@@ -1356,12 +1633,63 @@ escribir:
 .x:
         ret
 
-; (interna) la ficha de la caja en la que se escribe, compuesta -> ESI
-ed_ficha:
-        push eax
+; (interna) -> EAX=el objeto que tiene el texto de la caja elegida y ESI=su
+; ficha: ella misma o, si está encadenada, la cabeza de su cadena. [cur], el
+; cursor, es siempre un sitio de ese texto
+txt_obj:
+        push edi
         mov eax, [sel]
         call lam_ptr
+        cmp byte [esi+LO_CADENA], 0
+        je .x
+        call lam_cad_cabeza
+        mov esi, edi
+.x:
+        pop edi
+        ret
+
+; (interna) la caja en la que está el cursor, compuesta -> ESI=su ficha. El
+; cursor está en el sitio [cur] - [lam_t_ini] de lo compuesto. En una cadena
+; es la caja a la que le toca esa parte del texto: si no es la elegida, pasa
+; a serlo (el cursor salta de caja al llenarse una)
+ed_ficha:
+        push eax
+        push ebx
+        mov eax, [sel]
+        call lam_ptr
+        cmp byte [esi+LO_CADENA], 0
+        jne .cadena
         call lam_compone
+        pop ebx
+        pop eax
+        ret
+.cadena:
+        push edi
+        call lam_cad_cabeza         ; desde la cabeza, de caja en caja
+        pop edi
+.b:
+        mov ebx, eax                ; EBX=la caja que se mira
+        call lam_ptr
+        call lam_compone
+        call lam_cad_sig
+        test eax, eax
+        js .esta                    ; la última: lo que quede es suyo
+        push eax
+        mov eax, [lam_l_ve]         ; ¿lo suyo acaba antes del cursor?
+        mov eax, [lam_l_ini+eax*4]
+        add eax, [lam_t_ini]
+        cmp [cur], eax
+        pop eax
+        jae .b
+.esta:
+        cmp ebx, [sel]
+        je .x
+        mov eax, ebx
+        mov bl, [tecleando]         ; (la tanda de teclas sigue)
+        call elige
+        mov [tecleando], bl
+.x:
+        pop ebx
         pop eax
         ret
 
@@ -1369,12 +1697,11 @@ ed_ficha:
 ed_inserta:
         pushad
         mov [ed_car], al
-        mov eax, [sel]
-        call lam_ptr
+        call txt_obj
         cmp dword [esi+LO_LARGO], TXT_MAX
         jae .llena
         call inst_tecleo
-        mov eax, [sel]
+        call txt_obj
         mov ebx, [cur]
         xor ecx, ecx
         mov esi, ed_car
@@ -1400,7 +1727,7 @@ ed_borra:
         pushad
         mov ebx, eax
         call inst_tecleo
-        mov eax, [sel]
+        call txt_obj
         mov ecx, 1
         xor edx, edx
         call lam_dat_cambia
@@ -1454,8 +1781,9 @@ tecla:
         jmp orden
 .esc:
         mov dword [herr], 0         ; fuera la herramienta y lo elegido
-        mov dword [sel], -1
+        call sel_nada
         mov byte [drag], 0
+        mov byte [encadenando], 0
         call inval
         jmp hecho
 .tab:
@@ -1524,24 +1852,24 @@ tecla:
         call instantanea
         mov byte [moviendo], 1
 .mv2:
-        mov ecx, eax
-        mov eax, [sel]
-        call lam_ptr
+        mov ecx, eax                ; ECX, EDX=lo que se mueve
+        mov edx, ebx
         cmp byte [ajustar], 0
         je .libre
-        imul eax, ecx, 19
+        mov eax, [sel]              ; con el ajuste: el principal va al paso
+        call lam_ptr                ; siguiente de la rejilla, y los demás
+        imul eax, ecx, 19           ; elegidos se mueven lo mismo que él
         add eax, [esi+LO_X]
         call ajusta
-        mov [esi+LO_X], eax
-        imul eax, ebx, 19
+        sub eax, [esi+LO_X]
+        mov ecx, eax
+        imul eax, edx, 19
         add eax, [esi+LO_Y]
         call ajusta
-        mov [esi+LO_Y], eax
-        jmp .movido
+        sub eax, [esi+LO_Y]
+        mov edx, eax
 .libre:
-        add [esi+LO_X], ecx
-        add [esi+LO_Y], ebx
-.movido:
+        call sel_mueve
         call cambio
         jmp hecho
 .ctrl:
@@ -1581,11 +1909,14 @@ tecla:
 .e_tab:
         ; en una lista, el tabulador baja de nivel el párrafo del cursor (le
         ; pone delante un tabulador, hasta dos) y Mayús+Tab lo sube
-        call ed_ficha
-        test byte [esi+LO_BAND], LB_VINETAS
+        mov eax, [sel]
+        call lam_ptr
+        test byte [esi+LO_BAND], LB_LISTA
         jz hecho
+        call txt_obj                ; (ESI=la ficha que tiene el texto)
+        mov edi, [esi+LO_DAT]
+        add edi, [lam_dat]
         mov ebx, [cur]              ; EBX=donde empieza su párrafo
-        mov edi, [lam_t_txt]
 .et1:
         test ebx, ebx
         jz .et2
@@ -1610,7 +1941,7 @@ tecla:
         jae hecho
         call inst_tecleo
         mov byte [ed_car], 9
-        mov eax, [sel]
+        call txt_obj
         xor ecx, ecx
         mov esi, ed_car
         mov edx, 1
@@ -1623,7 +1954,7 @@ tecla:
         test ecx, ecx
         jz hecho
         call inst_tecleo
-        mov eax, [sel]
+        call txt_obj
         mov ecx, 1
         xor edx, edx
         call lam_dat_cambia
@@ -1638,12 +1969,15 @@ tecla:
         jmp hecho
 .e_intro:
         ; en una lista, el párrafo nuevo sigue en el nivel del que se parte
-        call ed_ficha
+        mov eax, [sel]
+        call lam_ptr
         xor ebp, ebp                ; EBP=los tabuladores que lleva delante
-        test byte [esi+LO_BAND], LB_VINETAS
+        test byte [esi+LO_BAND], LB_LISTA
         jz .ei3
+        call txt_obj
+        mov edi, [esi+LO_DAT]
+        add edi, [lam_dat]
         mov ebx, [cur]
-        mov edi, [lam_t_txt]
 .ei1:
         test ebx, ebx
         jz .ei2
@@ -1677,8 +2011,7 @@ tecla:
         call ed_borra
         jmp hecho
 .e_supr:
-        mov eax, [sel]
-        call lam_ptr
+        call txt_obj
         mov eax, [cur]
         cmp eax, [esi+LO_LARGO]
         jae hecho
@@ -1691,8 +2024,7 @@ tecla:
         dec eax
         jmp .e_pon
 .e_der:
-        mov eax, [sel]
-        call lam_ptr
+        call txt_obj
         mov eax, [cur]
         cmp eax, [esi+LO_LARGO]
         jae hecho
@@ -1701,32 +2033,58 @@ tecla:
 .e_arr:
         call ed_ficha
         mov eax, [cur]
+        sub eax, [lam_t_ini]
         call lam_sitio_xy           ; EAX=x EBX=y ECX=alto
         sub ebx, ecx
         cmp ebx, LAM_SEP
-        jl hecho
+        jl .e_arr0
         call lam_xy_sitio
+        add eax, [lam_t_ini]
+        jmp .e_pon
+.e_arr0:
+        mov eax, [lam_t_ini]        ; en la primera línea de una caja que sigue
+        test eax, eax               ; a otra: al final de lo de la anterior
+        jz hecho
+        dec eax
         jmp .e_pon
 .e_aba:
         call ed_ficha
         mov eax, [cur]
+        sub eax, [lam_t_ini]
         call lam_sitio_xy
         add ebx, ecx
+        mov edx, [lam_l_ve]         ; ¿era la última línea que cabe en la caja, y
+        cmp edx, [lam_l_n]          ; el texto sigue en otra? A lo primero de esa
+        jae .e_aba1
+        mov edx, [lam_l_y+edx*4]
+        add edx, LAM_SEP
+        cmp ebx, edx
+        jl .e_aba1
+        mov eax, [lam_l_ve]
+        mov eax, [lam_l_ini+eax*4]
+        add eax, [lam_t_ini]
+        jmp .e_pon
+.e_aba1:
         call lam_xy_sitio
+        add eax, [lam_t_ini]
         jmp .e_pon
 .e_ini:
         call ed_ficha
         mov eax, [cur]
+        sub eax, [lam_t_ini]
         call lam_sitio_xy
         xor eax, eax
         call lam_xy_sitio
+        add eax, [lam_t_ini]
         jmp .e_pon
 .e_fin:
         call ed_ficha
         mov eax, [cur]
+        sub eax, [lam_t_ini]
         call lam_sitio_xy
         mov eax, 100000
         call lam_xy_sitio
+        add eax, [lam_t_ini]
 .e_pon:
         mov [cur], eax
         mov byte [tecleando], 0
@@ -1746,11 +2104,14 @@ letra:
         mov eax, [sel]
         test eax, eax
         js hecho
+        call sel_varios             ; (con varios elegidos, no)
+        jc hecho
         call lam_ptr
         cmp byte [esi+LO_TIPO], LT_TEXTO
         jne hecho
         test byte [esi+LO_BAND], LB_HUECO
         jnz hecho
+        call txt_obj
         mov eax, [esi+LO_LARGO]
         mov [cur], eax
         mov byte [editando], 1
@@ -1767,17 +2128,25 @@ letra:
 ; nada elegido en esta página
 sel_rect:
         push eax
+        mov eax, [sel]
+        call sel_rect_de
+        pop eax
+        ret
+; (interna) lo mismo, del objeto EAX (lo escondido no tiene contorno)
+sel_rect_de:
+        push eax
         push ebx
         push ecx
         push edx
         push esi
-        mov eax, [sel]
         test eax, eax
         js .no
         call lam_ptr
         movzx eax, byte [esi+LO_PAG]
         cmp eax, [pag]
         jne .no
+        test byte [esi+LO_BAND], LB_OCULTO
+        jnz .no
         cmp byte [esi+LO_TIPO], LT_LINEA
         sete [sr_linea]
         mov eax, [esi+LO_X]
@@ -1889,6 +2258,7 @@ dr_toma:
         ret
 
 raton:
+        mov [m_mayus], ecx
         movsx eax, dx
         mov ebx, edx
         sar ebx, 16
@@ -1906,7 +2276,7 @@ raton:
         je .elegir
         ; con una herramienta: se empieza a arrastrar un objeto nuevo
         call fin_edicion
-        mov dword [sel], -1
+        call sel_nada
         mov eax, [m_ux]
         call ajusta
         mov [dr_ax], eax
@@ -1938,15 +2308,51 @@ raton:
         jge .fuera
         call lam_compone
         call lam_xy_sitio
+        add eax, [lam_t_ini]
         mov [cur], eax
         mov byte [tecleando], 0
         call inval
         jmp hecho
 .fuera:
+        ; ¿en otra caja de su misma cadena? El cursor pasa a ella
+        movzx eax, byte [esi+LO_CADENA]
+        test eax, eax
+        jz .fuera2
+        push eax
+        mov eax, [m_ux]
+        mov ebx, [m_uy]
+        mov ecx, [pag]
+        call holgura
+        call lam_en_punto
+        pop ecx
+        test eax, eax
+        js .fuera2
+        call lam_ptr
+        cmp [esi+LO_CADENA], cl
+        jne .fuera2
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .fuera2
+        call elige
+        call lam_compone
+        mov eax, [m_ux]
+        sub eax, [esi+LO_X]
+        mov ebx, [m_uy]
+        sub ebx, [esi+LO_Y]
+        call lam_xy_sitio
+        add eax, [lam_t_ini]
+        mov [cur], eax
+        mov byte [tecleando], 0
+        call inval
+        jmp hecho
+.fuera2:
         call fin_edicion
 .sin_ed:
+        cmp byte [encadenando], 0   ; se espera la caja en la que sigue un texto
+        jne cad_clic
         cmp dword [sel], 0
         jl .busca
+        call sel_varios             ; (con varios elegidos no hay tiradores)
+        jc .busca
         mov eax, [m_wx]             ; ¿en un tirador de lo elegido?
         mov ebx, [m_wy]
         call tirador_en
@@ -1958,15 +2364,54 @@ raton:
         mov byte [drag], D_TAM
         jmp .captura
 .busca:
-        mov eax, [m_ux]             ; el objeto que hay ahí, elegido
+        mov eax, [m_ux]             ; el objeto que hay ahí
         mov ebx, [m_uy]
         mov ecx, [pag]
         call holgura
         call lam_en_punto
-        call elige
         test eax, eax
-        js .nada
+        js .vacio
         call lam_ptr
+        test byte [m_mayus], TM_MAYUS
+        jnz .alterna
+        test byte [sel_m+eax], 1    ; ¿es uno de los varios elegidos? Se cogen
+        jz .solo                    ; todos por él (y pasa a ser el principal)
+        call sel_varios
+        jnc .solo
+        mov [sel], eax
+        call sel_formato
+        jmp .coge
+.alterna:
+        ; con Mayús: se añade a lo elegido, o se quita si ya lo estaba
+        mov bl, [sel_m+eax]
+        xor bl, 1
+        call sel_pon
+        test bl, bl
+        jz .alt1
+        mov [sel], eax
+.alt1:
+        call sel_principal
+        call sel_formato
+        jmp .nada
+.vacio:
+        ; en un sitio vacío: nada elegido (con Mayús se deja lo que hubiera),
+        ; y arrastrando sale un marco que elige lo que encierra
+        test byte [m_mayus], TM_MAYUS
+        jnz .vac1
+        call sel_nada
+.vac1:
+        mov eax, [m_ux]
+        mov [dr_ax], eax
+        mov [dr_x], eax
+        mov eax, [m_uy]
+        mov [dr_ay], eax
+        mov [dr_y], eax
+        mov dword [dr_an], 0
+        mov dword [dr_al], 0
+        mov byte [drag], D_MARCO
+        jmp .captura
+.solo:
+        call elige                  ; él solo
         cmp byte [esi+LO_TIPO], LT_TEXTO    ; una caja vacía que enseña su texto
         jne .coge                           ; de ejemplo («haga clic para...»):
         cmp byte [esi+LO_PAPEL], 0          ; un clic basta para escribir en ella
@@ -2068,6 +2513,12 @@ raton_mueve:
         je .tam
         cmp byte [drag], D_CREAR
         je .crear
+        cmp byte [drag], D_MARCO
+        jne .mover
+        mov ecx, [m_ux]             ; el marco: entre donde se apretó y aquí
+        mov edx, [m_uy]
+        jmp .caja
+.mover:
         ; ---- mover: hasta que el ratón no se aparta un poco no cuenta (un
         ;      clic para elegir no mueve nada) ----
         cmp byte [dr_movido], 0
@@ -2233,12 +2684,26 @@ raton_suelta:
         mov byte [drag], 0
         cmp al, D_CREAR
         je .crear
+        cmp al, D_MARCO
+        je .marco
         cmp al, D_TAM
         je .pon
         cmp byte [dr_movido], 0
         je .nada
+        call instantanea            ; mover: todo lo elegido, lo mismo que el
+        mov ecx, [dr_x]             ; objeto por el que se ha cogido
+        sub ecx, [or_x]
+        mov edx, [dr_y]
+        sub edx, [or_y]
+        call sel_mueve
+        call cambio
+        jmp hecho
+.marco:
+        call marco_elige
+        call inval
+        jmp hecho
 .pon:
-        call instantanea            ; el objeto, a donde se ha dejado
+        call instantanea            ; el objeto, con el tamaño que se le ha dado
         mov eax, [sel]
         call lam_ptr
         mov eax, [dr_x]
@@ -2267,7 +2732,9 @@ crea_obj:
         mov cl, [pag]
         call lam_obj_nuevo
         jc .lleno
+        call sel_borra
         mov [sel], eax
+        mov byte [sel_m+eax], 1
         mov eax, [dr_an]            ; ¿se ha arrastrado algo?
         cdq
         xor eax, edx
@@ -2360,6 +2827,52 @@ crea_obj:
         popad
         ret
 
+; (interna) al soltar el marco: quedan elegidos (además de los que hubiera,
+; si se empezó con Mayús) los objetos de la lámina que encierra enteros
+marco_elige:
+        pushad
+        mov eax, [dr_an]            ; (un clic sin arrastrar no elige nada)
+        add eax, [dr_al]
+        cmp eax, 3
+        jb .fin
+        xor ebp, ebp
+.b:
+        cmp ebp, [lam_n]
+        jae .fin
+        mov eax, ebp
+        call lam_ptr
+        movzx ecx, byte [esi+LO_PAG]
+        cmp ecx, [pag]
+        jne .s
+        test byte [esi+LO_BAND], LB_OCULTO
+        jnz .s
+        call lam_caja_de            ; EAX=x EBX=y ECX=ancho EDX=alto
+        cmp eax, [dr_x]
+        jl .s
+        cmp ebx, [dr_y]
+        jl .s
+        add eax, ecx
+        mov ecx, [dr_x]
+        add ecx, [dr_an]
+        cmp eax, ecx
+        jg .s
+        add ebx, edx
+        mov edx, [dr_y]
+        add edx, [dr_al]
+        cmp ebx, edx
+        jg .s
+        mov eax, ebp
+        mov bl, 1
+        call sel_pon
+.s:
+        inc ebp
+        jmp .b
+.fin:
+        call sel_principal
+        call sel_formato
+        popad
+        ret
+
 ; doble clic: en una caja de texto, a escribir dentro, donde se ha pulsado
 raton_doble:
         movsx eax, dx
@@ -2392,6 +2905,7 @@ raton_doble:
         mov ebx, [m_uy]
         sub ebx, [esi+LO_Y]
         call lam_xy_sitio
+        add eax, [lam_t_ini]
         mov [cur], eax
         mov byte [editando], 1
 .x:
@@ -2401,21 +2915,36 @@ raton_doble:
 ; =============================================================================
 ;  El formato
 ; =============================================================================
-; (interna) pone AL en el campo EBX de la ficha de lo elegido, si lo hay y es
-; de uno de los tipos de la máscara EDX (bit 1 texto, 2 rectángulo...)
+; (interna) pone AL en el campo EBX de la ficha de los objetos elegidos que
+; sean de uno de los tipos de la máscara EDX (bit 1 texto, 2 rectángulo...)
 pon_campo:
         pushad
-        mov edi, eax
-        mov eax, [sel]
-        test eax, eax
-        js .no
+        mov edi, eax                ; EDI=el valor
+        mov ebp, edx                ; EBP=los tipos
+        xor ecx, ecx                ; ECX=si ha cambiado alguno
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        test byte [sel_m+eax], 1
+        jz .s
         call lam_ptr
-        movzx ecx, byte [esi+LO_TIPO]
-        bt edx, ecx
-        jnc .no
+        movzx edx, byte [esi+LO_TIPO]
+        bt ebp, edx
+        jnc .s
+        test ecx, ecx               ; (antes del primer cambio, la instantánea)
+        jnz .p
         call instantanea
-        mov eax, edi
-        mov [esi+ebx], al
+        inc ecx
+.p:
+        mov edx, edi
+        mov [esi+ebx], dl
+.s:
+        inc eax
+        jmp .b
+.f:
+        test ecx, ecx
+        jz .no
         call cambio
         popad
         ret
@@ -2684,10 +3213,22 @@ grosor_elige:
         ret
 
 ; =============================================================================
-;  Deshacer. Antes de cada cambio se guarda el documento entero (los dos
-;  trozos del motor: lam_doc y lo usado de lam_dat); una tanda de teclas o de
-;  flechas seguidas cuenta como un solo cambio. Deshacer cambia el documento
-;  por lo guardado: por eso Rehacer es volver a cambiarlos.
+;  Deshacer y rehacer, de varios pasos. Antes de cada cambio se guarda una
+;  instantánea del documento (lo que hay usado de los dos trozos del motor:
+;  la cabecera y las fichas de lam_doc, y los datos de lam_dat); una tanda de
+;  teclas o de flechas seguidas cuenta como un solo cambio. Las instantáneas
+;  van una detrás de otra en un bloque, [des_blq], que se pide al usarlo y
+;  crece con ellas. De cada una:
+;      dd lo que ocupa (múltiplo de 4)    dd lo elegido    dd la lámina
+;      28 octetos de cabecera del documento, las fichas y los datos
+;  [des_n] es cuántas hay y [des_c], en cuál se está: deshacer es volver a la
+;  de antes ([des_c] - 1) y rehacer, pasar a la siguiente. Al deshacer desde
+;  lo último se guarda también el documento de ahora, que es a donde vuelve
+;  Rehacer. Un cambio nuevo quita lo que quedaba por rehacer.
+;  Se guardan hasta DES_PASOS cambios, sin pasar de DES_TOPE octetos entre
+;  todos (un documento con imágenes grandes ocupa mucho: entonces son menos
+;  pasos, pero siempre uno al menos). Cuando no caben más, o no hay memoria,
+;  se quita la más vieja.
 ; =============================================================================
 inst_tecleo:
         cmp byte [tecleando], 0
@@ -2695,167 +3236,283 @@ inst_tecleo:
         call instantanea
         mov byte [tecleando], 1
         ret
+; antes de un cambio: guarda el documento. CF=1 si no ha habido memoria (ese
+; cambio no se podrá deshacer: se avisa, una vez, al acabarlo)
 instantanea:
         pushad
-        mov byte [des_hecho], 0
         mov byte [tecleando], 0
         mov byte [moviendo], 0
-        mov ecx, [lam_dat_n]        ; sitio para los datos (se pide al usarlo);
-        mov ebx, des_dat            ; si no hay memoria, no hay qué deshacer
-        xor al, al
+        mov dword [des_min], 0
+        call des_guarda
+        jc .no
+        inc dword [des_c]
+        mov byte [des_avisado], 0
+        popad
+        clc
+        ret
+.no:
+        cmp byte [des_avisado], 0
+        jne .n1
+        mov byte [des_avisar], 1
+.n1:
+        popad
+        stc
+.x:
+        ret
+; (interna) EAX=instantánea -> ESI=dónde está
+des_ptr:
+        push ecx
+        mov esi, [des_blq]
+        mov ecx, eax
+.b:
+        test ecx, ecx
+        jz .x
+        add esi, [esi]
+        dec ecx
+        jmp .b
+.x:
+        pop ecx
+        ret
+; (interna) guarda el documento de ahora en el sitio [des_c] (lo que hubiera
+; desde ahí, lo deshecho, se pierde). Si no cabe, quita las más viejas, pero
+; sin dejar menos de [des_min]; CF=1 si ni así
+des_guarda:
+        pushad
+        mov eax, [des_c]
+        call des_ptr
+        sub esi, [des_blq]
+        mov [des_bytes], esi
+        mov eax, [des_c]
+        mov [des_n], eax
+        imul ebp, dword [lam_n], LO_TAM     ; EBP=lo que ocupa esta
+        add ebp, [lam_dat_n]
+        add ebp, 40 + 3
+        and ebp, ~3
+.sitio:
+        cmp dword [des_n], DES_PASOS + 1
+        jae .vieja
+        mov ecx, [des_bytes]
+        add ecx, ebp
+        cmp ecx, DES_TOPE
+        ja .vieja
+        mov ebx, des_blq
+        mov al, 1
         call lam_bloque
-        jnc .hay
-        mov byte [des_hay], 0
+        jnc .cabe
+.vieja:
+        mov eax, [des_n]
+        cmp eax, [des_min]
+        jbe .no
+        call des_quita
+        jmp .sitio
+.cabe:
+        mov edi, [des_blq]
+        add edi, [des_bytes]
+        mov eax, ebp
+        stosd
+        mov eax, [sel]
+        stosd
+        mov eax, [pag]
+        stosd
+        mov esi, lam_doc
+        mov ecx, 7
+        rep movsd
+        imul ecx, dword [lam_n], LO_TAM / 4
+        mov esi, lam_obj
+        rep movsd
+        mov esi, [lam_dat]
+        mov ecx, [lam_dat_n]
+        rep movsb
+        add [des_bytes], ebp
+        inc dword [des_n]
+        popad
+        clc
+        ret
+.no:
         popad
         stc
         ret
-.hay:
-        mov esi, lam_doc
-        mov edi, des_doc
-        mov ecx, LAM_DOC_TAM / 4
-        rep movsd
-        mov esi, [lam_dat]
-        mov edi, [des_dat]
-        mov ecx, [lam_dat_n]
-        add ecx, 3
-        shr ecx, 2
-        rep movsd
-        mov eax, [sel]
-        mov [des_sel], eax
-        mov eax, [pag]
-        mov [des_pag], eax
-        mov byte [des_hay], 1
-        popad
-        clc
+; (interna) quita la instantánea más vieja
+des_quita:
+        pushad
+        mov edi, [des_blq]
+        mov eax, [edi]
+        lea esi, [edi+eax]
+        mov ecx, [des_bytes]
+        sub ecx, eax
+        mov [des_bytes], ecx
+        rep movsb
+        dec dword [des_n]
+        cmp dword [des_c], 0
+        je .x
+        dec dword [des_c]
 .x:
+        popad
+        ret
+; nada que deshacer (otro documento): la memoria, de vuelta
+des_vacia:
+        push ebx
+        xor ebx, ebx
+        mov [des_n], ebx
+        mov [des_c], ebx
+        mov [des_bytes], ebx
+        mov [des_avisar], bl
+        mov ebx, des_blq
+        call lam_bloque_suelta
+        pop ebx
         ret
 deshacer:
-        cmp byte [des_hecho], 0     ; (deshacer dos veces no rehace: para eso
-        jne des_cambia.x            ; está Rehacer)
-        mov byte [des_hecho], 2
-rehacer:
-        dec byte [des_hecho]        ; (Rehacer solo vale detrás de Deshacer)
-        cmp byte [des_hecho], 0
-        jl .no
-        cmp byte [des_hay], 0
-        je des_cambia.x
-        call des_cambia
+        cmp dword [des_c], 0
+        je .x
+        mov eax, [des_c]
+        cmp eax, [des_n]            ; desde lo último: el documento de ahora se
+        jne .d                      ; guarda, para poder rehacer (sin quitar por
+        mov dword [des_min], 1      ; él lo que se va a deshacer; si no cabe, no
+        call des_guarda             ; habrá qué rehacer)
+.d:
+        dec dword [des_c]
+        mov eax, [des_c]
+        call des_pon
         mov byte [modif], 1
+.x:
         ret
-.no:
-        mov byte [des_hecho], 0
+rehacer:
+        mov eax, [des_c]
+        inc eax
+        cmp eax, [des_n]
+        jae .x
+        mov [des_c], eax
+        call des_pon
+        mov byte [modif], 1
+.x:
         ret
-; (interna) cambia el documento por el guardado, y al revés
-des_cambia:
+; vuelve a como estaba antes del último cambio y lo olvida (para lo que se
+; queda a medias: un archivo que no se acaba de leer, una copia que no cabe)
+des_vuelve:
+        cmp dword [des_c], 0
+        je .x
+        dec dword [des_c]
+        push eax
+        mov eax, [des_c]
+        call des_pon
+        pop eax
+.x:
+        ret
+; (interna) EAX=instantánea: pone ese documento
+des_pon:
         pushad
         mov byte [editando], 0
         mov byte [drag], 0
         mov byte [tecleando], 0
         mov byte [moviendo], 0
-        mov ecx, [lam_dat_n]        ; los datos: hasta donde llegue el más largo
-        cmp ecx, [des_doc+20]
-        jae .l
-        mov ecx, [des_doc+20]
-.l:
-        mov al, 1                   ; (y que quepa en los dos sitios)
+        mov byte [encadenando], 0
+        call des_ptr
+        mov ebp, esi                ; EBP=la instantánea
+        mov ecx, [ebp+12+20]        ; sitio para sus datos
         mov ebx, lam_dat
-        call lam_bloque
-        jc .sin
-        mov ebx, des_dat
+        xor al, al
         call lam_bloque
         jnc .cabe
-.sin:
         mov esi, t_sin_mem
         call aviso
         popad
         ret
 .cabe:
-        add ecx, 3
-        shr ecx, 2
-        mov esi, [lam_dat]
-        mov edi, [des_dat]
-        call .trueca
-        mov esi, lam_doc
-        mov edi, des_doc
-        mov ecx, LAM_DOC_TAM / 4
-        call .trueca
-        mov eax, [sel]
-        xchg eax, [des_sel]
-        cmp eax, [lam_n]
-        jb .s
-        mov eax, -1
-.s:
-        mov [sel], eax
-        mov eax, [pag]
-        xchg eax, [des_pag]
+        lea esi, [ebp+12]
+        mov edi, lam_doc
+        mov ecx, 7
+        rep movsd
+        imul ecx, dword [lam_n], LO_TAM / 4
+        mov edi, lam_obj
+        rep movsd
+        mov ecx, [lam_dat_n]
+        mov edi, [lam_dat]
+        rep movsb
+        mov eax, [ebp+8]
         cmp eax, [lam_pags]
         jb .p
         mov eax, [lam_pags]
         dec eax
 .p:
         mov [pag], eax
-        mov eax, [sel]              ; lo elegido, solo si está en esta página
-        test eax, eax
-        js .v
+        mov eax, [ebp+4]            ; lo elegido, solo si está en esta lámina (y
+        cmp eax, [lam_n]            ; no es una caja escondida)
+        jae .nada
         call lam_ptr
-        movzx eax, byte [esi+LO_PAG]
-        cmp eax, [pag]
+        test byte [esi+LO_BAND], LB_OCULTO
+        jnz .nada
+        movzx ecx, byte [esi+LO_PAG]
+        cmp ecx, [pag]
         je .v
-        mov dword [sel], -1
+.nada:
+        mov eax, -1
 .v:
-        mov eax, [sel]
         call elige
         mov byte [esc_sucio], 1
         mov byte [ed_todo], 1
         call calc_vista             ; (puede haber cambiado el papel)
         call sucio
         popad
-.x:
-        ret
-.trueca:
-        jecxz .t2
-.t1:
-        mov eax, [esi]
-        mov edx, [edi]
-        mov [esi], edx
-        mov [edi], eax
-        add esi, 4
-        add edi, 4
-        dec ecx
-        jnz .t1
-.t2:
         ret
 
 ; =============================================================================
-;  Borrar, duplicar, el orden y el portapapeles
+;  Borrar, duplicar, el orden y el portapapeles: de todo lo elegido
 ; =============================================================================
 borrar:
         call fin_edicion
-        mov eax, [sel]
-        test eax, eax
-        js .x
+        cmp dword [sel], 0
+        jl .x
         call instantanea
+        mov eax, [lam_n]            ; de arriba abajo: al quitar uno no cambian
+.b:                                 ; de número los que faltan
+        dec eax
+        js .f
+        test byte [sel_m+eax], 1
+        jz .b
         call lam_obj_quita
-        mov dword [sel], -1
+        jmp .b
+.f:
+        call sel_nada
         call cambio
 .x:
         ret
 
+; Duplicar: una copia de cada objeto elegido, un poco apartada; quedan
+; elegidas las copias
 duplicar:
         call fin_edicion
-        mov eax, [sel]
-        test eax, eax
-        js .x
+        cmp dword [sel], 0
+        jl .x
         call instantanea
+        mov ebx, [lam_n]            ; EBX=el primero de los nuevos
+        mov edi, -1                 ; EDI=la copia del principal
+        xor edx, edx
+.b:
+        cmp edx, ebx
+        jae .f
+        test byte [sel_m+edx], 1
+        jz .s
+        mov eax, edx
         call lam_obj_dup
-        jc sin_sitio
+        jc .mal
         call lam_ptr
         add dword [esi+LO_X], PASO  ; un poco apartada, para que se vea
         add dword [esi+LO_Y], PASO
-        call elige
+        cmp edx, [sel]
+        jne .s
+        mov edi, eax
+.s:
+        inc edx
+        jmp .b
+.f:
+        mov eax, edi
+        call nuevos_elige
         call cambio
 .x:
         ret
+.mal:
+        call des_vuelve             ; no caben todas: ninguna
+        jmp sin_sitio
 sin_sitio:
         mov esi, t_sin_sitio
         cmp dword [lam_n], LAM_MAX_OBJ
@@ -2863,66 +3520,195 @@ sin_sitio:
         mov esi, t_lleno
 .a:
         jmp aviso
+; (interna) los objetos desde el EBX son copias recién hechas (de duplicar o
+; de pegar): sus grupos y sus cadenas son otros que los de sus originales, y
+; quedan elegidas ellas; el principal, EAX
+nuevos_elige:
+        push edx
+        push eax
+        mov edx, LO_GRUPO
+        call lam_renueva
+        mov edx, LO_CADENA
+        call lam_renueva
+        call lam_cad_limpia
+        call sel_borra
+        mov eax, ebx
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        mov byte [sel_m+eax], 1
+        inc eax
+        jmp .b
+.f:
+        pop eax
+        mov [sel], eax
+        call sel_principal
+        call sel_formato
+        pop edx
+        ret
 
 al_frente:
         mov edx, 1
         jmp orden_z
 al_fondo:
         xor edx, edx
+; EDX=1 al frente / 0 al fondo: los objetos elegidos, sin cambiar el orden
+; que tienen entre ellos. Se llevan de uno en uno (al frente, empezando por
+; el de más atrás; al fondo, por el de más adelante), y la marca de cada uno
+; viaja con él en sel_m (el bit 1 señala al principal)
 orden_z:
         call fin_edicion
         mov eax, [sel]
         test eax, eax
         js .x
         call instantanea
+        or byte [sel_m+eax], 2
+        call sel_cuenta             ; ECX=cuántos son
+        xor ebx, ebx                ; EBX=los que ya están en su sitio
+.b:
+        cmp ebx, ecx
+        jae .f
+        test edx, edx
+        jz .fondo
+        xor eax, eax                ; al frente: el primero que esté elegido (los
+.f1:                                ; ya llevados quedan al final)
+        test byte [sel_m+eax], 1
+        jnz .lleva
+        inc eax
+        jmp .f1
+.fondo:
+        mov eax, [lam_n]            ; al fondo: el último (los ya llevados quedan
+.f2:                                ; al principio)
+        dec eax
+        test byte [sel_m+eax], 1
+        jz .f2
+.lleva:
+        push ecx
+        push esi
+        push edi
+        mov ch, [sel_m+eax]         ; su marca va con él
+        test edx, edx
+        jz .l_fondo
+        lea edi, [sel_m+eax]        ; las de detrás, una atrás
+        lea esi, [edi+1]
+        push ecx
+        mov ecx, [lam_n]
+        sub ecx, eax
+        dec ecx
+        rep movsb
+        pop ecx
+        mov [edi], ch
+        jmp .l1
+.l_fondo:
+        lea esi, [sel_m+eax-1]      ; las de delante, una adelante
+        lea edi, [esi+1]
+        push ecx
+        mov ecx, eax
+        std
+        rep movsb
+        cld
+        pop ecx
+        mov [sel_m], ch
+.l1:
         call lam_obj_orden
+        pop edi
+        pop esi
+        pop ecx
+        inc ebx
+        jmp .b
+.f:
+        xor eax, eax                ; el principal, donde haya quedado
+.p:
+        cmp eax, [lam_n]
+        jae .p2
+        test byte [sel_m+eax], 2
+        jnz .p1
+        inc eax
+        jmp .p
+.p1:
+        and byte [sel_m+eax], 1
         mov [sel], eax
+.p2:
         call cambio
 .x:
         ret
 
-; Copiar: el objeto elegido, a un portapapeles propio (la ficha y sus datos).
-; Si es una caja de texto, su texto va además al portapapeles de Hispa
-; Ventanas, por el cuadro de texto escondido (el «puente»), para pegarlo en
-; otro programa
+; Copiar: los objetos elegidos, a un portapapeles propio: en el bloque
+; [clip_dat], sus [clip_n] fichas y, detrás, los datos de todos seguidos (el
+; LO_DAT de cada ficha dice dónde empiezan los suyos ahí). Si el principal es
+; una caja de texto, su texto va además al portapapeles de Hispa Ventanas, por
+; el cuadro de texto escondido (el «puente»), para pegarlo en otro programa
 copiar:
         pushad
-        mov eax, [sel]
-        test eax, eax
-        js .x
+        cmp dword [sel], 0
+        jl .x
+        xor ebp, ebp                ; EBP=cuántos y ECX=lo que ocupan sus datos
+        xor ecx, ecx
+        xor eax, eax
+.m:
+        cmp eax, [lam_n]
+        jae .m2
+        test byte [sel_m+eax], 1
+        jz .m1
         call lam_ptr
-        mov ebx, esi
-        push ebx                    ; sitio para sus datos (se pide al usarlo)
-        mov ecx, [ebx+LO_LARGO]
+        add ecx, [esi+LO_LARGO]
+        inc ebp
+.m1:
+        inc eax
+        jmp .m
+.m2:
+        imul eax, ebp, LO_TAM
+        add ecx, eax
         mov ebx, clip_dat
         xor al, al
         call lam_bloque
-        pop ebx
         jnc .sitio
-        mov byte [clip_hay], 0
+        mov dword [clip_n], 0
         mov esi, t_sin_mem
         call aviso
         jmp .x
 .sitio:
-        mov edi, clip_ficha
+        mov [clip_n], ebp
+        mov edi, [clip_dat]         ; EDI=donde va la ficha
+        imul ebp, LO_TAM
+        add ebp, edi                ; EBP=donde empiezan los datos
+        xor edx, edx                ; EDX=por dónde van
+        xor eax, eax
+.c:
+        cmp eax, [lam_n]
+        jae .texto
+        test byte [sel_m+eax], 1
+        jz .c1
+        call lam_ptr
+        mov ebx, esi
         mov ecx, LO_TAM
         rep movsb
+        mov [edi-LO_TAM+LO_DAT], edx
+        push edi
+        lea edi, [ebp+edx]
         mov esi, [ebx+LO_DAT]
         add esi, [lam_dat]
-        mov edi, [clip_dat]
         mov ecx, [ebx+LO_LARGO]
+        add edx, ecx
         rep movsb
-        mov byte [clip_hay], 1
-        cmp byte [ebx+LO_TIPO], LT_TEXTO
+        pop edi
+.c1:
+        inc eax
+        jmp .c
+.texto:
+        mov eax, [sel]
+        call lam_ptr
+        cmp byte [esi+LO_TIPO], LT_TEXTO
         jne .x
-        mov esi, [ebx+LO_DAT]
+        call txt_obj                ; (el de su cadena, si está en una)
+        mov ecx, [esi+LO_LARGO]
+        mov esi, [esi+LO_DAT]
         add esi, [lam_dat]
         mov edi, pega_txt
-        mov ecx, [ebx+LO_LARGO]
         cmp ecx, TXT_MAX
-        jbe .c
+        jbe .t
         mov ecx, TXT_MAX
-.c:
+.t:
         rep movsb
         mov byte [edi], 0
         mov ebp, [puente]
@@ -2944,46 +3730,69 @@ cortar:
 .x:
         ret
 ; Pegar: escribiendo en una caja, el texto del portapapeles de Hispa
-; Ventanas, donde el cursor; si no, el objeto copiado, en esta página
+; Ventanas, donde el cursor; si no, los objetos copiados, en esta lámina (cada
+; vez, un poco más allá)
 pegar:
         cmp byte [editando], 0
         jne pegar_texto
-        cmp byte [clip_hay], 0
+        cmp dword [clip_n], 0
         je .x
         call instantanea
-        mov al, [clip_ficha+LO_TIPO]
+        pushad
+        mov ebp, [lam_n]            ; EBP=el primero de los nuevos
+        xor edi, edi                ; EDI=la ficha copiada que toca
+.b:
+        cmp edi, [clip_n]
+        jae .f
+        imul ebx, edi, LO_TAM
+        add ebx, [clip_dat]         ; EBX=la ficha copiada
+        add dword [ebx+LO_X], PASO
+        add dword [ebx+LO_Y], PASO
+        mov al, [ebx+LO_TIPO]
         mov cl, [pag]
         call lam_obj_nuevo
-        jc sin_sitio
-        mov ebx, eax                ; EBX=el objeto nuevo
-        add dword [clip_ficha+LO_X], PASO   ; (cada copia, un poco más allá)
-        add dword [clip_ficha+LO_Y], PASO
+        jc .mal
+        push eax
+        push edi
         mov edx, [esi+LO_DAT]
-        push esi
         mov edi, esi
-        mov esi, clip_ficha
+        push esi
+        mov esi, ebx
         mov ecx, LO_TAM
         rep movsb
         pop esi
+        pop edi
         mov [esi+LO_DAT], edx
         mov dword [esi+LO_LARGO], 0
         mov al, [pag]
         mov [esi+LO_PAG], al
-        mov eax, ebx
-        mov edx, [clip_ficha+LO_LARGO]
-        mov esi, [clip_dat]
+        pop eax
+        mov esi, [clip_n]           ; sus datos, del bloque
+        imul esi, LO_TAM
+        add esi, [clip_dat]
+        add esi, [ebx+LO_DAT]
+        mov edx, [ebx+LO_LARGO]
         xor ebx, ebx
         xor ecx, ecx
         call lam_dat_cambia
-        jnc .cabe
-        dec dword [lam_n]           ; no caben sus datos: fuera
-        jmp sin_sitio
-.cabe:
+        jc .mal_d
+        inc edi
+        jmp .b
+.f:
+        mov ebx, ebp
+        mov eax, -1                 ; (el principal: el de más al frente)
+        call nuevos_elige
         mov dword [herr], 0
-        call elige
+        popad
         call cambio
 .x:
         ret
+.mal_d:
+        dec dword [lam_n]           ; no caben sus datos
+.mal:
+        popad
+        call des_vuelve             ; no caben todos: ninguno
+        jmp sin_sitio
 pegar_texto:
         pushad
         mov ebp, [puente]
@@ -3010,8 +3819,7 @@ pegar_texto:
         mov ecx, edi
         sub ecx, pega_txt
         jz .x
-        mov eax, [sel]
-        call lam_ptr
+        call txt_obj
         mov eax, [esi+LO_LARGO]     ; lo que quepa en la caja
         add eax, ecx
         sub eax, TXT_MAX
@@ -3020,7 +3828,7 @@ pegar_texto:
         jbe .x
 .cabe:
         call instantanea
-        mov eax, [sel]
+        call txt_obj
         mov ebx, [cur]
         mov edx, ecx
         xor ecx, ecx
@@ -3143,9 +3951,24 @@ plantilla_pon:
         cmp eax, 600000
         setb [pl_peq]
 .b:
+        cmp byte [ebx], 0
+        je .x
+        call plantilla_uno
+        jc .x
+        add ebx, PL_TAM
+        jmp .b
+.x:
+        popad
+        ret
+; EBX=un objeto de una plantilla (PL o PLX): lo pone en la lámina [pl_pag]
+; (con la letra de [pl_peq]) -> EAX=el objeto; CF=1 si no cabe
+plantilla_uno:
+        push ebx
+        push ecx
+        push edx
+        push esi
+        push edi
         mov al, [ebx]
-        test al, al
-        jz .x
         mov cl, [pl_pag]
         call lam_obj_nuevo
         jc .x
@@ -3174,23 +3997,7 @@ plantilla_pon:
         mov al, [ebx+9]
 .c:
         mov [esi+LO_CUERPO], al
-        mov ecx, 1000               ; las medidas, de milésimas a puntos
-        movsx eax, word [ebx+12]
-        imul dword [lam_an]
-        idiv ecx
-        mov [esi+LO_X], eax
-        movsx eax, word [ebx+14]
-        imul dword [lam_al]
-        idiv ecx
-        mov [esi+LO_Y], eax
-        movsx eax, word [ebx+16]
-        imul dword [lam_an]
-        idiv ecx
-        mov [esi+LO_AN], eax
-        movsx eax, word [ebx+18]
-        imul dword [lam_al]
-        idiv ecx
-        mov [esi+LO_AL], eax
+        call plantilla_sitio        ; las medidas
         mov esi, [ebx+20]           ; y su texto
         test esi, esi
         jz .s
@@ -3208,10 +4015,41 @@ plantilla_pon:
         call lam_dat_cambia
         pop ebx
 .s:
-        add ebx, PL_TAM
-        jmp .b
+        mov eax, edi
+        clc
 .x:
-        popad
+        pop edi
+        pop esi
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+; ESI=ficha EBX=un objeto de una plantilla: le pone su sitio y su tamaño (de
+; milésimas de la lámina a puntos)
+plantilla_sitio:
+        push eax
+        push ecx
+        push edx
+        mov ecx, 1000
+        movsx eax, word [ebx+12]
+        imul dword [lam_an]
+        idiv ecx
+        mov [esi+LO_X], eax
+        movsx eax, word [ebx+14]
+        imul dword [lam_al]
+        idiv ecx
+        mov [esi+LO_Y], eax
+        movsx eax, word [ebx+16]
+        imul dword [lam_an]
+        idiv ecx
+        mov [esi+LO_AN], eax
+        movsx eax, word [ebx+18]
+        imul dword [lam_al]
+        idiv ecx
+        mov [esi+LO_AL], eax
+        pop edx
+        pop ecx
+        pop eax
         ret
 
 abrir:
@@ -3233,12 +4071,9 @@ abrir:
 cargar:
         pushad
         call fin_edicion
-        mov al, [des_hay]
-        mov ah, [des_hecho]
-        push eax
         call instantanea
         jnc .sigue
-        pop eax                     ; sin memoria para guardar lo que hay: no se abre
+        mov byte [des_avisar], 0    ; sin memoria para guardar lo que hay: no se abre
         mov esi, t_sin_mem
         call aviso
         popad
@@ -3249,10 +4084,7 @@ cargar:
         call lam_carga
         jnc .bien
         mov ebx, eax
-        call des_cambia             ; como estaba
-        pop eax
-        mov byte [des_hay], 0       ; (lo que había para deshacer se ha perdido)
-        mov byte [des_hecho], 0
+        call des_vuelve             ; como estaba
         mov esi, t_no_abrir
         test ebx, ebx
         jz .m
@@ -3262,7 +4094,6 @@ cargar:
         popad
         ret
 .bien:
-        pop eax
         mov esi, nom_tmp
         mov edi, nombre
         call copia
@@ -3949,6 +4780,8 @@ al_dia:
         mov eax, [sel]
         test eax, eax
         js .g
+        call ed_ficha               ; (en una cadena, la caja del cursor es la elegida)
+        mov eax, [sel]
         call lam_ptr
 .g:
         cmp esi, [lam_guia_salta]
@@ -4177,10 +5010,15 @@ texto_sobra:
         call lam_ptr
         cmp byte [esi+LO_TIPO], LT_TEXTO
         jne .no
+        cmp byte [esi+LO_CADENA], 0 ; (en una cadena, lo que sobra de una caja
+        jne .cad                    ; va a la siguiente: solo cuenta la última)
         cmp dword [esi+LO_LARGO], 0
         je .no
+.cad:
         call lam_compone
         mov eax, [lam_l_n]
+        cmp eax, [lam_l_ve]
+        ja .no
         mov eax, [lam_l_y+eax*4]
         add eax, LAM_SEP
         cmp eax, [esi+LO_AL]
@@ -4198,6 +5036,65 @@ texto_sobra:
 ; ---- lo elegido: su contorno y sus tiradores; escribiendo, el cursor ----
 pinta_sel:
         pushad
+        call sel_varios
+        jnc .uno
+        ; varios: el contorno de cada uno con una marca en las esquinas (las
+        ; del principal, en tinta); sin tiradores
+        xor ebp, ebp
+.v:
+        cmp ebp, [lam_n]
+        jae .x
+        test byte [sel_m+ebp], 1
+        jz .vs
+        mov eax, ebp
+        call sel_rect_de
+        jc .vs
+        cmp byte [sr_linea], 0
+        jne .vl
+        COLOR C_PETROLEO
+        mov eax, [sr_x0]
+        dec eax
+        mov ebx, [sr_y0]
+        dec ebx
+        mov ecx, [sr_x1]
+        sub ecx, eax
+        inc ecx
+        mov edx, [sr_y1]
+        sub edx, ebx
+        inc edx
+        HV dc_marco
+        mov eax, [sr_x1]
+        mov ebx, [sr_y0]
+        call .marca
+        mov eax, [sr_x0]
+        mov ebx, [sr_y1]
+        call .marca
+.vl:
+        mov eax, [sr_x0]
+        mov ebx, [sr_y0]
+        call .marca
+        mov eax, [sr_x1]
+        mov ebx, [sr_y1]
+        call .marca
+.vs:
+        inc ebp
+        jmp .v
+; (interna) una marca de 5 x 5 con el centro en (EAX, EBX); EBP=el objeto
+.marca:
+        pushad
+        COLOR C_PETROLEO
+        cmp ebp, [sel]
+        jne .m1
+        COLOR C_TINTA
+.m1:
+        sub eax, 2
+        sub ebx, 2
+        mov ecx, 5
+        mov edx, 5
+        HV dc_rect
+        popad
+        ret
+.uno:
         call sel_rect
         jc .x
         cmp byte [sr_linea], 0
@@ -4214,6 +5111,39 @@ pinta_sel:
         sub edx, ebx
         inc edx
         HV dc_marco
+        mov eax, [sel]              ; una caja encadenada cuyo texto sigue en
+        call lam_ptr                ; otra: una flecha petróleo abajo a la derecha
+        call lam_cad_sig
+        test eax, eax
+        js .sin_sig
+        COLOR C_PETROLEO
+        mov eax, [sr_x1]
+        sub eax, 12
+        mov ebx, [sr_y1]
+        sub ebx, 12
+        mov ecx, 9
+        mov edx, 9
+        HV dc_rect
+        COLOR C_BLANCO
+        add eax, 2
+        add ebx, 4
+        mov ecx, 4
+        mov edx, 1
+        HV dc_rect
+        add eax, 2
+        sub ebx, 2
+        mov ecx, 1
+        mov edx, 5
+        HV dc_rect
+        inc eax
+        inc ebx
+        mov edx, 3
+        HV dc_rect
+        inc eax
+        inc ebx
+        mov edx, 1
+        HV dc_rect
+.sin_sig:
         call texto_sobra            ; una caja con más texto del que cabe: una
         jnc .cabe                   ; marca granate abajo a la derecha
         COLOR C_GRANATE
@@ -4270,6 +5200,7 @@ pinta_sel:
         je .x
         call ed_ficha
         mov eax, [cur]
+        sub eax, [lam_t_ini]
         call lam_sitio_xy           ; EAX=x EBX=y ECX=alto, desde la esquina
         add eax, [esi+LO_X]
         add ebx, [esi+LO_Y]
@@ -4288,7 +5219,8 @@ pinta_sel:
         popad
         ret
 
-; ---- el contorno de lo que se arrastra ----
+; ---- el contorno de lo que se arrastra: lo que se mueve (todo lo elegido),
+;      lo que cambia de tamaño, lo que se está poniendo, o el marco de elegir ----
 pinta_arrastre:
         pushad
         mov al, [drag]
@@ -4296,28 +5228,79 @@ pinta_arrastre:
         jz .x
         cmp al, D_CREAR
         je .crear
+        cmp al, D_MARCO
+        je .marco
         cmp al, D_MOVER
-        jne .obj
+        jne .tam
         cmp byte [dr_movido], 0
         je .x
-.obj:
+        mov edi, [dr_x]             ; EDI, EBP=lo que se ha movido
+        sub edi, [or_x]
+        mov ebp, [dr_y]
+        sub ebp, [or_y]
+        xor eax, eax
+.m:
+        cmp eax, [lam_n]
+        jae .x
+        test byte [sel_m+eax], 1
+        jz .ms
+        call lam_ptr
+        push eax
+        mov eax, [esi+LO_X]
+        add eax, edi
+        mov ebx, [esi+LO_Y]
+        add ebx, ebp
+        mov ecx, [esi+LO_AN]
+        mov edx, [esi+LO_AL]
+        call rect_v
+        cmp byte [esi+LO_TIPO], LT_LINEA
+        je .ml
+        call .p_caja
+        jmp .m1
+.ml:
+        call .p_linea
+.m1:
+        pop eax
+.ms:
+        inc eax
+        jmp .m
+.tam:
         mov eax, [sel]
         test eax, eax
         js .x
         call lam_ptr
+        call .dr
         cmp byte [esi+LO_TIPO], LT_LINEA
         je .linea
-        jmp .caja
+        call .p_caja
+        jmp .x
 .crear:
+        call .dr
         cmp dword [herr], 4
         je .linea
-.caja:
+        call .p_caja
+        jmp .x
+.linea:
+        call .p_linea
+        jmp .x
+.marco:
+        call .dr
+        COLOR C_PETROLEO
+        call .p_marco
+.x:
+        popad
+        ret
+; (internas) lo que se arrastra, a la ventana (sr_*); y un contorno granate
+; con esas esquinas, o una línea de una a otra
+.dr:
         mov eax, [dr_x]
         mov ebx, [dr_y]
         mov ecx, [dr_an]
         mov edx, [dr_al]
-        call rect_v
+        jmp rect_v
+.p_caja:
         COLOR C_GRANATE
+.p_marco:
         mov eax, [sr_x0]
         mov ebx, [sr_y0]
         mov ecx, [sr_x1]
@@ -4325,21 +5308,14 @@ pinta_arrastre:
         mov edx, [sr_y1]
         sub edx, ebx
         HV dc_marco
-        jmp .x
-.linea:
-        mov eax, [dr_x]
-        mov ebx, [dr_y]
-        mov ecx, [dr_an]
-        mov edx, [dr_al]
-        call rect_v
+        ret
+.p_linea:
         COLOR C_GRANATE
         mov eax, [sr_x0]
         mov ebx, [sr_y0]
         mov ecx, [sr_x1]
         mov edx, [sr_y1]
         HV dc_linea
-.x:
-        popad
         ret
 
 ; ---- la barra de botones ----
@@ -4483,14 +5459,19 @@ barra_estado:
         mov cl, LE_SUB
         cmp eax, O_SUB
         je .bit
+        mov cl, LB_VINETAS
         cmp eax, O_VINETAS
+        je .lista
+        mov cl, LB_NUMEROS
+        cmp eax, O_NUMEROS
         jne barra_propia            ; (del programa) sus botones
-        mov eax, [sel]              ; las viñetas: las de la caja elegida
+.lista:
+        mov eax, [sel]              ; las viñetas y los números: los de la caja elegida
         test eax, eax
         js .no
         push esi
         call lam_ptr
-        test byte [esi+LO_BAND], LB_VINETAS
+        test [esi+LO_BAND], cl
         pop esi
         jnz .si
         ret
@@ -4541,9 +5522,29 @@ pinta_estado:
         call hvl_cad
         jmp .dr
 .sin_herr:
+        cmp byte [encadenando], 0   ; se espera la caja en la que sigue un texto
+        je .sh1
+        mov esi, t_cad_pie
+        call hvl_cad
+        jmp .fin
+.sh1:
         mov eax, [sel]
         test eax, eax
         js .papel
+        call sel_varios             ; varios: cuántos son (y si son un grupo)
+        jnc .uno
+        call sel_cuenta
+        mov eax, ecx
+        call hvl_num
+        mov esi, t_agrupados
+        call sel_un_grupo
+        je .v1
+        mov esi, t_elegidos
+.v1:
+        call hvl_cad
+        jmp .fin
+.uno:
+        mov eax, [sel]
         call lam_ptr
         mov ebx, esi
         movzx eax, byte [ebx+LO_TIPO]
@@ -4594,6 +5595,27 @@ pinta_estado:
         call num_mm
         mov esi, t_mm
         call hvl_cad
+        cmp byte [drag], 0
+        jne .fin
+        mov eax, [sel]              ; una caja encadenada: su puesto en la cadena
+        test eax, eax
+        js .fin
+        call lam_ptr
+        cmp byte [esi+LO_CADENA], 0
+        je .sobra
+        push esi
+        mov esi, t_cad_a
+        call hvl_cad
+        pop esi
+        call cad_puesto             ; EAX=su puesto ECX=cuántas son
+        call hvl_num
+        mov esi, t_de
+        call hvl_cad
+        mov eax, ecx
+        call hvl_num
+        mov esi, t_cad_b
+        call hvl_cad
+.sobra:
         call texto_sobra
         jnc .fin
         mov esi, t_no_cabe
@@ -4639,19 +5661,563 @@ num_mm:
         jmp hvl_num
 
 
-; ---- Formato > Viñetas: la caja elegida pasa a ser una lista (cada párrafo,
-;      con su punto), o deja de serlo ----
+; ---- Formato > Viñetas y Numeración: la caja elegida (y las demás cajas de
+;      texto elegidas con ella) pasa a ser una lista con puntos o con números,
+;      o deja de serlo si ya lo era ----
 vinetas:
+        mov bl, LB_VINETAS
+        jmp lista_pon
+numeros:
+        mov bl, LB_NUMEROS
+lista_pon:
         mov eax, [sel]
         test eax, eax
         js .x
         call lam_ptr
         cmp byte [esi+LO_TIPO], LT_TEXTO
         jne .x
+        mov bh, [esi+LO_BAND]
+        and bh, LB_LISTA
+        cmp bh, bl
+        jne .p
+        xor bl, bl
+.p:
         call instantanea
-        xor byte [esi+LO_BAND], LB_VINETAS
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        test byte [sel_m+eax], 1
+        jz .s
+        call lam_ptr
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .s
+        and byte [esi+LO_BAND], 0xFF - LB_LISTA
+        or [esi+LO_BAND], bl
+.s:
+        inc eax
+        jmp .b
+.f:
         call cambio
 .x:
+        ret
+
+; =============================================================================
+;  Disponer: elegir todo, alinear, repartir, agrupar y girar
+; =============================================================================
+; Edición > Elegir todo: todos los objetos de la lámina
+elegir_todo:
+        call fin_edicion
+        mov dword [herr], 0
+        call sel_nada
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        call lam_ptr
+        movzx ecx, byte [esi+LO_PAG]
+        cmp ecx, [pag]
+        jne .s
+        test byte [esi+LO_BAND], LB_OCULTO
+        jnz .s
+        mov byte [sel_m+eax], 1
+.s:
+        inc eax
+        jmp .b
+.f:
+        call sel_principal
+        call sel_formato
+        jmp inval
+
+; -> ZF=1 si todos los objetos elegidos son de un mismo grupo
+sel_un_grupo:
+        push eax
+        push ebx
+        push esi
+        mov eax, [sel]
+        call lam_ptr
+        mov bl, [esi+LO_GRUPO]
+        test bl, bl
+        jz .no
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .si
+        test byte [sel_m+eax], 1
+        jz .s
+        call lam_ptr
+        cmp [esi+LO_GRUPO], bl
+        jne .x                      ; (ZF=0)
+.s:
+        inc eax
+        jmp .b
+.no:
+        or eax, -1                  ; (ZF=0)
+        jmp .x
+.si:
+        xor eax, eax                ; (ZF=1)
+.x:
+        pop esi
+        pop ebx
+        pop eax
+        ret
+
+; EAX=0 a la izquierda, 1 centrados a lo ancho, 2 a la derecha, 3 arriba,
+; 4 centrados a lo alto, 5 abajo. Con varios objetos elegidos, respecto al
+; rectángulo que ocupan entre todos; con uno solo, respecto a la lámina
+disp_alinea:
+        mov ebp, eax
+        call fin_edicion
+        cmp dword [sel], 0
+        jl .x
+        call sel_caja
+        call sel_varios
+        jc .ref
+        xor eax, eax
+        mov [al_x0], eax
+        mov [al_y0], eax
+        mov eax, [lam_an]
+        mov [al_x1], eax
+        mov eax, [lam_al]
+        mov [al_y1], eax
+.ref:
+        call instantanea
+        xor edi, edi
+.b:
+        cmp edi, [lam_n]
+        jae .f
+        test byte [sel_m+edi], 1
+        jz .s
+        mov eax, edi
+        call lam_ptr
+        call lam_caja_de            ; EAX=x EBX=y ECX=ancho EDX=alto
+        cmp ebp, 3
+        jae .v
+        mov ebx, [al_x0]            ; EBX=donde tiene que quedar su lado izquierdo
+        cmp ebp, 0
+        je .h
+        mov ebx, [al_x1]
+        sub ebx, ecx
+        cmp ebp, 2
+        je .h
+        add ebx, [al_x0]            ; (centrado: a medio camino)
+        sar ebx, 1
+.h:
+        sub ebx, eax
+        add [esi+LO_X], ebx
+        jmp .s
+.v:
+        mov ecx, [al_y0]            ; y a lo alto, lo mismo con el de arriba
+        cmp ebp, 3
+        je .v1
+        mov ecx, [al_y1]
+        sub ecx, edx
+        cmp ebp, 5
+        je .v1
+        add ecx, [al_y0]
+        sar ecx, 1
+.v1:
+        sub ecx, ebx
+        add [esi+LO_Y], ecx
+.s:
+        inc edi
+        jmp .b
+.f:
+        call cambio
+.x:
+        ret
+
+; EAX=0 a lo ancho, 1 a lo alto: deja el mismo hueco entre los objetos
+; elegidos (tres o más). Los de los extremos no se mueven; los demás se
+; colocan por orden, de izquierda a derecha (o de arriba abajo)
+disp_reparte:
+        mov [rp_eje], eax
+        call fin_edicion
+        call sel_cuenta
+        cmp ecx, 3
+        jae .hay
+        mov esi, t_rep_tres
+        jmp aviso
+.hay:
+        mov [rp_n], ecx
+        call sel_caja
+        call instantanea
+        xor edi, edi                ; lo que miden entre todos
+        xor ebp, ebp
+.m:
+        cmp edi, [lam_n]
+        jae .m2
+        test byte [sel_m+edi], 1
+        jz .m1
+        mov eax, edi
+        call lam_ptr
+        call .mide
+        add ebp, ecx
+.m1:
+        inc edi
+        jmp .m
+.m2:
+        mov eax, [al_x1]            ; lo que queda para los huecos (puede ser
+        sub eax, [al_x0]            ; menos que nada: entonces se montan por igual)
+        mov ebx, [al_x0]
+        cmp dword [rp_eje], 0
+        je .m3
+        mov eax, [al_y1]
+        sub eax, [al_y0]
+        mov ebx, [al_y0]
+.m3:
+        sub eax, ebp
+        mov [rp_hueco], eax
+        mov [rp_base], ebx
+        mov dword [rp_ant], 0
+        mov dword [rp_k], 0
+.k:
+        mov eax, [rp_k]
+        cmp eax, [rp_n]
+        jae .f
+        ; el primero de los que faltan (los colocados llevan el bit 1)
+        mov dword [rp_mejor], -1
+        xor edi, edi
+.q:
+        cmp edi, [lam_n]
+        jae .q2
+        mov al, [sel_m+edi]
+        and al, 3
+        cmp al, 1
+        jne .q1
+        mov eax, edi
+        call lam_ptr
+        call .mide
+        cmp dword [rp_mejor], -1
+        je .q0
+        cmp eax, [rp_pos]
+        jge .q1
+.q0:
+        mov [rp_mejor], edi
+        mov [rp_pos], eax
+        mov [rp_tam], ecx
+.q1:
+        inc edi
+        jmp .q
+.q2:
+        mov edi, [rp_mejor]
+        or byte [sel_m+edi], 2
+        mov eax, [rp_hueco]         ; va detrás de los anteriores, con su parte
+        imul dword [rp_k]           ; de los huecos
+        mov ecx, [rp_n]
+        dec ecx
+        idiv ecx
+        add eax, [rp_base]
+        add eax, [rp_ant]
+        sub eax, [rp_pos]
+        mov ecx, eax                ; ECX=lo que se mueve
+        mov eax, edi
+        call lam_ptr
+        cmp dword [rp_eje], 0
+        jne .y
+        add [esi+LO_X], ecx
+        jmp .y1
+.y:
+        add [esi+LO_Y], ecx
+.y1:
+        mov eax, [rp_tam]
+        add [rp_ant], eax
+        inc dword [rp_k]
+        jmp .k
+.f:
+        xor eax, eax                ; las marcas de paso, fuera
+.l:
+        cmp eax, [lam_n]
+        jae .l1
+        and byte [sel_m+eax], 1
+        inc eax
+        jmp .l
+.l1:
+        jmp cambio
+; (interna) ESI=ficha -> EAX=dónde empieza y ECX=cuánto mide, a lo ancho o a lo alto
+.mide:
+        push ebx
+        push edx
+        call lam_caja_de
+        cmp dword [rp_eje], 0
+        je .md
+        mov eax, ebx
+        mov ecx, edx
+.md:
+        pop edx
+        pop ebx
+        ret
+
+; Disponer > Agrupar: los objetos elegidos (dos o más) van juntos desde
+; ahora: elegir uno es elegirlos todos. Desagrupar los suelta
+agrupar:
+        call fin_edicion
+        call sel_varios
+        jnc .x
+        mov edx, LO_GRUPO
+        call lam_id_libre
+        test al, al
+        jz .x
+        call instantanea
+        mov dl, al
+        jmp grupo_pon
+.x:
+        ret
+desagrupar:
+        call fin_edicion
+        cmp dword [sel], 0
+        jl agrupar.x
+        call instantanea
+        xor dl, dl
+; (interna) DL=grupo: se lo pone a todos los elegidos
+grupo_pon:
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        test byte [sel_m+eax], 1
+        jz .s
+        call lam_ptr
+        mov [esi+LO_GRUPO], dl
+.s:
+        inc eax
+        jmp .b
+.f:
+        jmp cambio
+
+; Disponer > Girar: un cuarto de vuelta a la derecha cada objeto elegido,
+; alrededor de su centro (las cajas de texto no giran)
+girar:
+        call fin_edicion
+        cmp dword [sel], 0
+        jl .x
+        xor eax, eax                ; ¿hay algo que se pueda girar?
+.q:
+        cmp eax, [lam_n]
+        jae .no
+        test byte [sel_m+eax], 1
+        jz .q1
+        call lam_ptr
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .si
+.q1:
+        inc eax
+        jmp .q
+.no:
+        mov esi, t_no_gira
+        jmp aviso
+.si:
+        call instantanea
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        test byte [sel_m+eax], 1
+        jz .s
+        call lam_obj_gira
+.s:
+        inc eax
+        jmp .b
+.f:
+        call cambio
+.x:
+        ret
+
+; =============================================================================
+;  Las cajas de texto encadenadas: el texto que no cabe en una sigue en otra
+;  (el motor explica cómo: LO_CADENA y LO_ESLABON)
+; =============================================================================
+; Disponer > Encadenar: con una caja de texto elegida, se queda esperando un
+; clic en la caja (vacía) en la que debe seguir su texto, que puede estar en
+; otra lámina
+encadenar:
+        call fin_edicion
+        mov eax, [sel]
+        test eax, eax
+        js .que
+        call sel_varios
+        jc .que
+        call lam_ptr
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .que
+        test byte [esi+LO_BAND], LB_HUECO
+        jnz .que
+        mov [cad_de], eax
+        mov byte [encadenando], 1
+        jmp inval
+.que:
+        mov esi, t_cad_que
+        jmp aviso
+; (interna, del ratón) el clic que se esperaba: la caja que hay ahí pasa a
+; ser el eslabón siguiente al de la caja [cad_de]
+cad_clic:
+        mov byte [encadenando], 0
+        mov eax, [m_ux]
+        mov ebx, [m_uy]
+        mov ecx, [pag]
+        call holgura
+        call lam_en_punto
+        test eax, eax
+        js .nada
+        cmp eax, [cad_de]
+        je .nada
+        call lam_ptr
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .nada
+        test byte [esi+LO_BAND], LB_HUECO
+        jnz .nada
+        mov edi, esi                ; EDI=la caja en la que sigue (EBP, su número)
+        mov ebp, eax
+        mov esi, t_cad_ya
+        cmp byte [edi+LO_CADENA], 0
+        jne .dice
+        mov esi, t_cad_texto
+        cmp dword [edi+LO_LARGO], 0
+        jne .dice
+        mov eax, [cad_de]
+        cmp eax, [lam_n]
+        jae .nada
+        call lam_ptr                ; ESI=la caja de la que sale
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .nada
+        mov al, [esi+LO_CADENA]
+        test al, al
+        jnz .hay
+        mov edx, LO_CADENA          ; no estaba en ninguna: una cadena nueva
+        call lam_id_libre
+        mov esi, t_cad_llena
+        test al, al
+        jz .dice
+.hay:
+        mov bl, al                  ; BL=la cadena
+        call instantanea
+        mov eax, [cad_de]
+        call lam_ptr
+        cmp byte [esi+LO_CADENA], 0
+        jne .h1
+        mov [esi+LO_CADENA], bl
+        mov byte [esi+LO_ESLABON], 0
+.h1:
+        mov bh, [esi+LO_ESLABON]    ; las que la seguían, un eslabón más allá
+        mov edx, lam_obj
+        mov ecx, [lam_n]
+.c:
+        cmp [edx+LO_CADENA], bl
+        jne .c1
+        cmp [edx+LO_ESLABON], bh
+        jbe .c1
+        inc byte [edx+LO_ESLABON]
+.c1:
+        add edx, LO_TAM
+        dec ecx
+        jnz .c
+        mov [edi+LO_CADENA], bl
+        inc bh
+        mov [edi+LO_ESLABON], bh
+        mov eax, ebp
+        call elige
+        call cambio
+        jmp hecho
+.dice:
+        call aviso
+.nada:
+        call inval
+        jmp hecho
+; Disponer > Soltar de la cadena: las cajas elegidas dejan su cadena; el
+; texto sigue en las demás
+soltar:
+        call fin_edicion
+        cmp dword [sel], 0
+        jl .x
+        xor eax, eax                ; ¿hay alguna encadenada?
+.q:
+        cmp eax, [lam_n]
+        jae .x
+        test byte [sel_m+eax], 1
+        jz .q1
+        call lam_ptr
+        cmp byte [esi+LO_CADENA], 0
+        jne .si
+.q1:
+        inc eax
+        jmp .q
+.si:
+        call instantanea
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .f
+        test byte [sel_m+eax], 1
+        jz .s
+        call lam_cad_saca
+.s:
+        inc eax
+        jmp .b
+.f:
+        call cambio
+.x:
+        ret
+; (interna) ESI=ficha de una caja encadenada -> EAX=su puesto en la cadena
+; (desde 1) y ECX=cuántas cajas tiene
+cad_puesto:
+        push ebx
+        push edx
+        push edi
+        mov bl, [esi+LO_CADENA]
+        mov bh, [esi+LO_ESLABON]
+        mov eax, 1
+        xor ecx, ecx
+        mov edi, lam_obj
+        mov edx, [lam_n]
+.b:
+        test edx, edx
+        jz .x
+        cmp [edi+LO_CADENA], bl
+        jne .s
+        inc ecx
+        cmp [edi+LO_ESLABON], bh
+        jae .s
+        inc eax
+.s:
+        add edi, LO_TAM
+        dec edx
+        jmp .b
+.x:
+        pop edi
+        pop edx
+        pop ebx
+        ret
+
+; =============================================================================
+;  Las marcas del menú: las órdenes que son de poner y quitar (ver los
+;  márgenes, la rejilla, el ajuste) y las de elegir una entre varias (la
+;  vista) llevan delante, en el texto del menú, una marca cuando están
+;  puestas. El programa da la lista en marcas_prog; de cada una:
+;      dd dónde está el carácter de la marca en el texto del menú
+;      dd el octeto que se mira      dd el valor con el que está puesta
+;  y acaba en un 0
+; =============================================================================
+MARCA       equ '*'                 ; (como en los menús de los emuladores: la letra de
+                                    ; Hispa Ventanas no trae un visto bueno)
+marcas:
+        pushad
+        mov esi, marcas_prog
+.b:
+        mov edi, [esi]
+        test edi, edi
+        jz .x
+        mov ebx, [esi+4]
+        mov al, [ebx]
+        mov dl, ' '
+        cmp al, [esi+8]
+        jne .p
+        mov dl, MARCA
+.p:
+        mov [edi], dl
+        add esi, 12
+        jmp .b
+.x:
+        popad
         ret
 
 %macro LAMINA_ED_BSS 0
@@ -4679,7 +6245,7 @@ sy          resd 1
 sx_max      resd 1
 sy_max      resd 1
 pag         resd 1                  ; la página que se ve
-sel         resd 1                  ; el objeto elegido (-1: ninguno)
+sel         resd 1                  ; el objeto elegido, o el principal de los elegidos (-1: ninguno)
 herr        resd 1                  ; la herramienta: 0 elegir, 1 texto, 2 rectángulo...
 cur         resd 1                  ; escribiendo: el cursor en el texto de la caja
 m_wx        resd 1                  ; el ratón al apretar, en la ventana
@@ -4688,6 +6254,7 @@ m_wx2       resd 1
 m_wy2       resd 1
 m_ux        resd 1                  ; y en la página
 m_uy        resd 1
+m_mayus     resd 1                  ; y las mayúsculas que había apretadas
 m_dx        resd 1                  ; de dónde se ha cogido el objeto
 m_dy        resd 1
 dr_x        resd 1                  ; lo que se arrastra: dónde quedaría
@@ -4719,8 +6286,25 @@ cur_forma_act resd 1                ; la forma que tiene ahora el cursor
 lista_orig  resd 1                  ; el procedimiento de las listas de Hispa Ventanas
 dl_plant    resd 1
 dl_papel    resd 1
-des_sel     resd 1
-des_pag     resd 1
+des_n       resd 1                  ; deshacer: cuántas instantáneas hay,
+des_c       resd 1                  ; en cuál se está,
+des_bytes   resd 1                  ; lo que ocupan
+des_min     resd 1                  ; y las que no se pueden quitar para hacer sitio
+clip_n      resd 1                  ; cuántos objetos hay copiados
+cad_de      resd 1                  ; la caja cuyo texto se va a encadenar con otra
+al_x0       resd 1                  ; el rectángulo de lo elegido (alinear y repartir)
+al_y0       resd 1
+al_x1       resd 1
+al_y1       resd 1
+rp_eje      resd 1                  ; repartir: a lo ancho (0) o a lo alto,
+rp_n        resd 1                  ; cuántos son,
+rp_hueco    resd 1                  ; lo que queda para los huecos,
+rp_base     resd 1                  ; dónde empieza el primero,
+rp_ant      resd 1                  ; lo que miden los ya colocados,
+rp_k        resd 1                  ; por cuál va
+rp_mejor    resd 1                  ; y el que toca: su número,
+rp_pos      resd 1                  ; dónde está
+rp_tam      resd 1                  ; y cuánto mide
 bmp_fila    resd 1
 imp_ppp     resd 1                  ; la impresora: puntos por pulgada a lo ancho,
 imp_ncol    resd 1                  ; columnas y filas de puntos de una página,
@@ -4752,9 +6336,9 @@ margen_ver  resb 1
 ajustar     resb 1                  ; las medidas se ajustan a la rejilla
 tecleando   resb 1                  ; en una tanda de teclas seguidas
 moviendo    resb 1                  ; o de flechas
-des_hay     resb 1                  ; hay algo que deshacer
-des_hecho   resb 1                  ; 1: lo último fue deshacer (se puede rehacer)
-clip_hay    resb 1
+des_avisar  resb 1                  ; no ha habido memoria para una instantánea: hay que decirlo
+des_avisado resb 1                  ; y ya se ha dicho
+encadenando resb 1                  ; se espera el clic en la caja en la que sigue un texto
 ed_car      resb 1
 pl_peq      resb 1
 imp_borr    resb 1
@@ -4775,17 +6359,16 @@ num_txt     resb 12
 t_vista_b   resb 12
 t_grosor_b  resb 8
 linea       resb 200
-clip_ficha  resb LO_TAM
+sel_m       resb LAM_MAX_OBJ        ; qué objetos están elegidos (bit 0)
 imp_luz     resb 256
             alignb 4
 imp_cx      resd 1024
 imp_buf     resb 1024
 fila        resb LAM_MAX_LADO + 1024 + 8
 pega_txt    resb TXT_MAX + 4
-des_doc     resb LAM_DOC_TAM        ; el documento de antes del último cambio
 ; lo grande no está aquí: son bloques que se piden al usarlos (lam_bloque:
 ; puntero, lo que cabe y mango) y se devuelven al cerrar (ed_suelta)
-des_dat     resd 3                  ; los datos del documento de antes del último cambio
-clip_dat    resd 3                  ; los datos del objeto copiado
+des_blq     resd 3                  ; las instantáneas para deshacer
+clip_dat    resd 3                  ; los objetos copiados: sus fichas y sus datos
 esc_buf     resd 3                  ; la lámina, reducida
 %endmacro

@@ -39,7 +39,7 @@ pres_empieza:
         mov esi, t_sin_mem
         jmp aviso
 .hay:
-        mov dword [sel], -1
+        call sel_nada
         mov dword [herr], 0
         mov byte [drag], 0
         mov [pres_pag], eax

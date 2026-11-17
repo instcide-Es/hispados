@@ -11,17 +11,23 @@
 ;    - a la izquierda, la tira de miniaturas: un clic va a esa diapositiva y
 ;      arrastrándola (o con Ctrl y las flechas) cambia de sitio; se añaden
 ;      (eligiendo un diseño), se duplican y se quitan;
+;    - el clasificador (menú Ver): todas las miniaturas en una rejilla, para
+;      ver la presentación entera y ordenarla arrastrando;
 ;    - los diseños: título, título y texto, dos columnas, solo título, en
 ;      blanco, título e imagen. Sus cajas dicen para qué son («Haga clic para
-;      poner el título») hasta que se escribe en ellas;
-;    - las listas: cada párrafo con su punto; Tab y Mayús+Tab cambian de nivel;
+;      poner el título») hasta que se escribe en ellas. A una diapositiva ya
+;      hecha se le puede cambiar el diseño: sus cajas van a su sitio nuevo;
+;    - las listas: cada párrafo con su punto o con su número; Tab y Mayús+Tab
+;      cambian de nivel;
 ;    - los temas: el fondo, el adorno y los colores y tipos de letra a juego
 ;      para toda la presentación;
 ;    - la presentación a pantalla completa (F5; Mayús+F5 desde la diapositiva
 ;      en la que se está), con transiciones y, si se quiere, los puntos de las
 ;      listas de uno en uno;
-;    - las notas del orador de cada diapositiva, que se ven debajo;
-;    - imprimir: una diapositiva por página, folletos de 2, 3 o 6, o las notas.
+;    - las notas del orador de cada diapositiva, que se ven y se escriben
+;      debajo, en su recuadro;
+;    - imprimir: una diapositiva por página, folletos de 2, 3 o 6 (cada una
+;      con su número), o las notas.
 ;
 ;  Cómo está hecho. El documento y su dibujo son de programas/comun/lamina.inc
 ;  (el motor) y el manejo, de programas/comun/lamina_ed.inc (el editor de
@@ -48,7 +54,13 @@ MINI_AL     equ 84
 MINI_X      equ 22
 MINI_PASO   equ 100                 ; de una a la siguiente
 NOTAS_AL    equ 56                  ; el recuadro de las notas
-NOTAS_MAX   equ 1000                ; letras de las notas de una diapositiva
+NOTAS_MAX   equ 4000                ; letras de las notas de una diapositiva (las de una caja)
+NOTAS_X     equ 66                  ; dónde empieza su texto en el recuadro
+notas_buf   equ pega_txt            ; el cuadro de las notas usa el búfer de pegar texto del editor
+CL_X0       equ 20                  ; el clasificador: dónde va la primera miniatura
+CL_Y0       equ 14
+CL_PASO_X   equ 136                 ; y de una a la siguiente
+CL_PASO_Y   equ 112
 PRES_AN     equ 1024                ; lo más grande que se presenta
 PRES_AL     equ 768
 HOJA_AN     equ 794                 ; la hoja de los folletos: un A4 de pie
@@ -74,6 +86,8 @@ O_FOLLETO2  equ 209
 O_FOLLETO3  equ 210
 O_FOLLETO6  equ 211
 O_IMP_NOTAS equ 212
+O_DISENO    equ 213
+O_CLASIF    equ 214
 
 HVP_CABECERA "Presentaciones", entrada, 4
         db "................................"
@@ -165,6 +179,8 @@ menu_prog:
         db "&Borrar el objeto        Supr", 0
         dw O_DUPLICAR
         db "D&uplicar el objeto    Ctrl+R", 0
+        dw O_TODO
+        db "Ele&gir todo           Ctrl+E", 0
         dw 0
         db 0
         dw O_ESCRIBIR
@@ -181,28 +197,32 @@ menu_prog:
         db "Ba&jarla un puesto   Ctrl+Dcha.", 0
         dw 0xFFFF
         db "&Ver", 0
-        dw O_VISTA
-        db "&Diapositiva entera", 0
+        dw O_VISTA                  ; (delante de cada orden, el sitio de su
+mk_v0   db "  &Diapositiva entera", 0   ; marca: ver «marcas» en lamina_ed.inc)
         dw O_VISTA + 1
-        db "Al &50 %", 0
+mk_v1   db "  Al &50 %", 0
         dw O_VISTA + 2
-        db "Al &75 %", 0
+mk_v2   db "  Al &75 %", 0
         dw O_VISTA + 3
-        db "Al &100 % (tamaño real)", 0
+mk_v3   db "  Al &100 % (tamaño real)", 0
         dw 0
         db 0
         dw O_MARGENES
-        db "Ver los &márgenes", 0
+mk_marg db "  Ver los &márgenes", 0
         dw O_REJILLA
-        db "Ver la &rejilla", 0
+mk_rej  db "  Ver la &rejilla", 0
         dw O_AJUSTAR
-        db "A&justar a la rejilla (5 mm): poner o quitar", 0
+mk_ajus db "  A&justar a la rejilla (5 mm)", 0
         dw 0
         db 0
         dw O_PAG_ANT
-        db "Diapositiva &anterior    RePág", 0
+        db "  Diapositiva &anterior    RePág", 0
         dw O_PAG_SIG
-        db "Diapositiva &siguiente   AvPág", 0
+        db "  Diapositiva &siguiente   AvPág", 0
+        dw 0
+        db 0
+        dw O_CLASIF
+mk_clas db "  &Clasificador de diapositivas", 0
         dw 0xFFFF
         db "&Insertar", 0
         dw O_PAG_NUEVA
@@ -227,6 +247,8 @@ menu_prog:
         db "&Formato", 0
         dw O_TEMA
         db "T&ema de la presentación...", 0
+        dw O_DISENO
+        db "&Diseño de esta diapositiva...", 0
         dw 0
         db 0
         dw O_TIPO
@@ -251,6 +273,8 @@ menu_prog:
         db "A la &derecha          Ctrl+D", 0
         dw O_VINETAS
         db "&Viñetas (una lista en la caja)", 0
+        dw O_NUMEROS
+        db "N&umeración (una lista con números)", 0
         dw 0
         db 0
         dw O_C_LETRA
@@ -261,24 +285,54 @@ menu_prog:
         db "Color del &borde o de la línea...", 0
         dw O_GROSOR
         db "Gr&osor del borde o de la línea...", 0
+        dw 0xFFFF
+        db "&Disponer", 0
+        dw O_FRENTE
+        db "Traer al &frente           Ctrl+F", 0
+        dw O_ALFONDO
+        db "Enviar al fond&o           Ctrl+O", 0
         dw 0
         db 0
-        dw O_FRENTE
-        db "Traer al &frente       Ctrl+F", 0
-        dw O_ALFONDO
-        db "Enviar al fond&o       Ctrl+O", 0
+        dw O_ALINEAR
+        db "Alinear a la &izquierda", 0
+        dw O_ALINEAR + 1
+        db "&Centrar a lo ancho", 0
+        dw O_ALINEAR + 2
+        db "Alinear a la &derecha", 0
+        dw O_ALINEAR + 3
+        db "Alinear &arriba", 0
+        dw O_ALINEAR + 4
+        db "Centrar a lo a&lto", 0
+        dw O_ALINEAR + 5
+        db "Alinear a&bajo", 0
+        dw 0
+        db 0
+        dw O_REPARTIR
+        db "Repartir a lo anc&ho", 0
+        dw O_REPARTIR + 1
+        db "Repartir a lo al&to", 0
+        dw 0
+        db 0
+        dw O_AGRUPAR
+        db "A&grupar", 0
+        dw O_DESAGRUPAR
+        db "Desagr&upar", 0
+        dw 0
+        db 0
+        dw O_GIRAR
+        db "Gi&rar un cuarto de vuelta  Ctrl+L", 0
         dw 0xFFFF
         db "&Presentación", 0
         dw O_PRES
-        db "&Empezar desde el principio       F5", 0
+        db "  &Empezar desde el principio       F5", 0
         dw O_PRES_AQUI
-        db "Empezar desde esta &diapositiva   Mayús+F5", 0
+        db "  Empezar desde esta &diapositiva   Mayús+F5", 0
         dw 0
         db 0
         dw O_TRANS
-        db "&Transición entre diapositivas...", 0
+        db "  &Transición entre diapositivas...", 0
         dw O_PASOS
-        db "&Puntos de las listas de uno en uno: poner o quitar", 0
+mk_pasos db "  &Puntos de las listas de uno en uno", 0
         dw 0xFFFF
         db "&?", 0
         dw O_ACERCA
@@ -357,8 +411,8 @@ ic_presentar:
         db "....00000000...."
 
 ; las órdenes de Ctrl+letra (de la A a la Z; 0: ninguna): las de la familia
-ctrl_ord    db 0, O_ABRIR, 0, O_COPIAR, O_DER, 0, O_FRENTE, O_GUARDAR, 0, 0, 0
-            db O_CUR, 0, 0, O_NEG, O_ALFONDO, O_IMPRIMIR, O_IZQ, O_DUPLICAR, O_SUB, O_CEN
+ctrl_ord    db 0, O_ABRIR, 0, O_COPIAR, O_DER, O_TODO, O_FRENTE, O_GUARDAR, 0, 0, 0
+            db O_CUR, O_GIRAR, 0, O_NEG, O_ALFONDO, O_IMPRIMIR, O_IZQ, O_DUPLICAR, O_SUB, O_CEN
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 ; las órdenes propias, y las del editor que aquí se hacen de otra manera
             align 4
@@ -367,7 +421,18 @@ ordenes_prog dd O_PAG_NUEVA, dia_nueva, O_IMAGEN, imagen_dia, O_DIA_DUP, dia_dup
             dd O_TEMA, tema_elige, O_PRES, pres_inicio, O_PRES_AQUI, pres_aqui
             dd O_TRANS, trans_elige, O_PASOS, pasos_orden
             dd O_FOLLETO2, folleto2, O_FOLLETO3, folleto3, O_FOLLETO6, folleto6
-            dd O_IMP_NOTAS, imp_notas, 0
+            dd O_IMP_NOTAS, imp_notas, O_DISENO, diseno_elige, O_CLASIF, clasif_orden, 0
+; las marcas del menú: dónde va cada una, qué se mira y con qué valor se pone
+marcas_prog dd mk_v0, vista, 0, mk_v1, vista, 1, mk_v2, vista, 2, mk_v3, vista, 3
+            dd mk_marg, margen_ver, 1, mk_rej, rejilla_ver, 1, mk_ajus, ajustar, 1
+            dd mk_pasos, lam_extra + 2, 1, mk_clas, clasif, 1, 0
+; las órdenes que se pueden dar sin salir del clasificador (las demás son de
+; trabajar en una diapositiva: antes de hacerlas se vuelve a ella)
+cl_ordenes  db O_NUEVO, O_ABRIR, O_GUARDAR, O_COMO, O_EXPORTAR, O_IMPRIMIR, O_BORRADOR
+            db O_FOLLETO2, O_FOLLETO3, O_FOLLETO6, O_IMP_NOTAS, O_SALIR, O_DESHACER
+            db O_REHACER, O_PAG_ANT, O_PAG_SIG, O_PAG_NUEVA, O_PAG_QUITA, O_DIA_DUP
+            db O_DIA_SUBE, O_DIA_BAJA, O_TEMA, O_DISENO, O_TRANS, O_PASOS, O_ACERCA
+            db O_CLASIF, 0
 
 ; ---- textos (los que pide el editor de láminas, y los propios) ----
 t_programa  db "Presentaciones", 0
@@ -393,6 +458,7 @@ t_n_tema    db "Tema:", 0
 t_d_notas   db "Notas del orador de esta diapositiva", 0
 t_d_tema    db "Tema de la presentación", 0
 t_d_diseno  db "Diseño de la diapositiva nueva", 0
+t_d_diseno2 db "Diseño de esta diapositiva", 0
 t_d_trans   db "Transición", 0
 t_tema      db "Tema: ", 0
 t_notas     db "Notas:", 0
@@ -511,7 +577,9 @@ pre_nueva:
 ; =============================================================================
 pre_proc:
         cmp byte [pres], 0
-        jne .pres
+        jne pre_pres
+        cmp byte [clasif], 0
+        jne cl_proc
         cmp eax, WM_LBUTTONDOWN
         je pr_raton
         cmp eax, WM_MOUSEMOVE
@@ -522,13 +590,16 @@ pre_proc:
         je pr_doble
         cmp eax, WM_KEYDOWN
         je pr_tecla
+pre_proc2:
         cmp eax, WM_DESTROY
         jne ed_proc
         call pre_suelta             ; la memoria pedida, de vuelta
         mov ebx, mini
         call lam_bloque_suelta
+        mov ebx, notas_blq
+        call lam_bloque_suelta
         jmp ed_proc
-.pres:
+pre_pres:
         cmp eax, WM_KEYDOWN
         je pres_tecla
         cmp eax, WM_CHAR
@@ -619,7 +690,7 @@ pr_tecla:
         cmp ecx, 0x91
         je .baja
         test edx, TM_CTRL
-        jz tecla
+        jz .resto
         cmp ecx, TC_ARRIBA
         je .sube
         cmp ecx, TC_IZQ
@@ -628,7 +699,10 @@ pr_tecla:
         je .baja
         cmp ecx, TC_DER
         je .baja
-        jmp tecla
+.resto:
+        cmp byte [clasif], 0
+        je tecla
+        jmp cl_tecla
 .sube:
         mov ecx, O_DIA_SUBE
         jmp orden
@@ -711,9 +785,13 @@ pr_raton:
         jmp hecho
 .notas:
         add esp, 8
-        mov ecx, O_NOTAS
-        jmp orden
+        call notas_clic             ; en las notas: a escribirlas ahí mismo
+        jmp hecho
 .editor:
+        call notas_en               ; (si se estaban escribiendo las notas, se acaba)
+        jnc .ed1
+        call fin_edicion
+.ed1:
         pop ecx
         pop edx
         jmp raton
@@ -770,6 +848,10 @@ pr_doble:
         mov ecx, O_IMAGEN
         jmp orden
 .ed:
+        call notas_en
+        jnc .ed1
+        call fin_edicion
+.ed1:
         pop ecx
         pop edx
         jmp raton_doble
@@ -828,8 +910,7 @@ dia_dup:
         inc eax
         jmp pag_ir
 .mal:
-        call des_cambia             ; a medias: como estaba
-        mov byte [des_hay], 0
+        call des_vuelve             ; a medias: como estaba
         jmp sin_sitio
 
 dia_sube:
@@ -924,7 +1005,9 @@ imagen_dia:
         mov [esi+LO_Y], eax
         pop eax                     ; y el hueco, fuera (la imagen, que va
         call lam_obj_quita          ; detrás en la tabla, baja un puesto)
-        dec dword [sel]
+        mov eax, [sel]
+        dec eax
+        call elige
         call cambio
 .x:
         ret
@@ -1011,19 +1094,22 @@ notas:
         jc sin_sitio
         mov byte [esi+LO_PAPEL], LP_NOTAS
         mov byte [esi+LO_BAND], LB_OCULTO
-        mov byte [esi+LO_LETRA], 9
-        mov dword [esi+LO_AN], 600
+        mov dword [esi+LO_AN], 600  ; (notas_norma le da sus medidas)
         mov dword [esi+LO_AL], 400
         jmp .pon
 .hay:
         test edx, edx               ; sin texto: la caja, fuera
         jnz .pon
         call lam_obj_quita
-        cmp dword [sel], 0          ; (lo elegido puede haber bajado un puesto)
-        jl .hecho
-        cmp eax, [sel]
-        jae .hecho
-        dec dword [sel]
+        mov ecx, [sel]              ; (lo elegido puede haber bajado un puesto)
+        test ecx, ecx
+        js .hecho
+        cmp eax, ecx
+        jae .q1
+        dec ecx
+.q1:
+        mov eax, ecx
+        call elige
         jmp .hecho
 .pon:
         xor ebx, ebx
@@ -1072,6 +1158,16 @@ notas_gancho:
 pintar:
         cmp byte [pres], 0
         jne pres_pinta
+        cmp byte [clasif], 0
+        je .normal
+        HV dc_pintar                ; el clasificador: las miniaturas, en rejilla
+        call minis_al_dia
+        call pinta_clasif           ; (antes que la barra y el pie, como la tira)
+        call pinta_botones
+        call pinta_estado
+        HV dc_cerrar
+        jmp hecho
+.normal:
         HV dc_pintar
         call minis_al_dia
         call pinta_tira             ; (antes que la barra y el pie, que tapan
@@ -1134,21 +1230,72 @@ minis_al_dia:
         je .os
         cmp byte [mini_ok+ebx], 0
         jne .os
-        mov ecx, ebx
-        call lam_pinta
-        call .reduce
+        call .sin_guia
         mov byte [lam_sucio], 1     ; (en lam_buf ya no está la que se ve)
 .os:
         inc ebx
         jmp .o
 .act:
-        call al_dia
+        ; la que se ve: su miniatura sale de la lámina ya dibujada, salvo que
+        ; tenga cajas vacías con su texto de ejemplo (en la miniatura no van):
+        ; entonces se dibuja una vez más, sin ellos
         mov ebx, [pag]
         cmp byte [mini_ok+ebx], 0
-        jne .x
+        jne .act2
+        call .con_guia
+        jnc .act1
+        call .sin_guia
+        mov byte [lam_sucio], 1
+        jmp .act2
+.act1:
+        call al_dia
         call .reduce
-.x:
+.act2:
+        call al_dia
         popad
+        ret
+; (interna) dibuja la diapositiva EBX sin los textos de ejemplo de las cajas
+; vacías y la deja en su miniatura
+.sin_guia:
+        push dword [lam_guia_fn]
+        mov dword [lam_guia_fn], 0
+        mov ecx, ebx
+        call lam_pinta
+        call .reduce
+        pop dword [lam_guia_fn]
+        ret
+; (interna) CF=1 si la diapositiva EBX tiene alguna caja vacía con texto de ejemplo
+.con_guia:
+        push eax
+        push esi
+        xor eax, eax
+.cg:
+        cmp eax, [lam_n]
+        jae .cg_no
+        call lam_ptr
+        movzx ecx, byte [esi+LO_PAG]
+        cmp ecx, ebx
+        jne .cg1
+        cmp byte [esi+LO_TIPO], LT_TEXTO
+        jne .cg1
+        cmp dword [esi+LO_LARGO], 0
+        jne .cg1
+        mov cl, [esi+LO_PAPEL]
+        dec cl
+        cmp cl, LP_IMAGEN - 1
+        jbe .cg_si
+.cg1:
+        inc eax
+        jmp .cg
+.cg_si:
+        pop esi
+        pop eax
+        stc
+        ret
+.cg_no:
+        pop esi
+        pop eax
+        clc
         ret
 ; (interna) lam_buf, reducida, a la miniatura EBX
 .reduce:
@@ -1278,8 +1425,10 @@ pinta_tira:
         popad
         ret
 
-; ---- las notas del orador, debajo de la diapositiva: las tres primeras
-;      líneas (un clic abre el cuadro para escribirlas) ----
+; ---- las notas del orador, debajo de la diapositiva. Las escribe el motor
+;      en un búfer del tamaño del recuadro (una copia de la ficha de su caja,
+;      puesta ahí); escribiéndolas, el texto sube lo que haga falta para que
+;      se vea el cursor ----
 pinta_notas:
         pushad
         mov ebx, [cli_al]
@@ -1287,95 +1436,736 @@ pinta_notas:
         cmp ebx, TB_AL
         jl .x
         mov [n_y], ebx
-        COLOR C_BLANCO
-        mov eax, TIRA_AN
         mov ecx, [cli_an]
         sub ecx, TIRA_AN
         jle .x
+        mov [n_an], ecx
+        COLOR C_BLANCO
+        mov eax, TIRA_AN
         mov edx, NOTAS_AL
         HV dc_rect
         COLOR C_ARENA_OSC
         mov edx, 1
         HV dc_rect
-        COLOR C_PETROLEO
-        NEGRITA 1
-        mov eax, TIRA_AN + 6
-        add ebx, 4
-        mov esi, t_notas
-        HV dc_texto
-        NEGRITA 0
-        sub ecx, 6 + 64 + 8         ; ECX=las letras que caben en una línea
-        shr ecx, 3
-        cmp ecx, 8
+        cmp ecx, NOTAS_X + 80       ; (si casi no hay sitio, solo el recuadro)
         jl .x
-        cmp ecx, 110
-        jbe .a
-        mov ecx, 110
-.a:
-        mov [n_cabe], ecx
         call notas_de
         test eax, eax
         jns .hay
+        call .rotulo
         COLOR C_ARENA_OSC
-        mov eax, TIRA_AN + 70
+        mov eax, TIRA_AN + NOTAS_X + 4
+        mov ebx, [n_y]
+        add ebx, 4
         mov esi, t_sin_notas
         HV dc_texto
         jmp .x
 .hay:
-        COLOR C_TINTA
-        mov ebp, [esi+LO_LARGO]     ; EBP=lo que queda
-        mov esi, [esi+LO_DAT]
-        add esi, [lam_dat]            ; ESI=por dónde va
-        mov dword [n_lin], 0
-.l:
-        test ebp, ebp
-        jz .x
-        cmp dword [n_lin], 3
-        jae .x
-        mov edi, linea              ; una línea: hasta el salto, o lo que quepa
-        xor ecx, ecx                ; (partida por el último espacio)
-        mov edx, -1
-.c:
-        cmp ecx, ebp
-        jae .fl
-        mov al, [esi+ecx]
-        cmp al, 10
-        je .fl
-        cmp ecx, [n_cabe]
-        jae .parte
-        cmp al, ' '
-        ja .c1
-        mov al, ' '
-        mov edx, ecx
+        call notas_norma
+        mov ecx, [n_an]             ; el búfer del recuadro (se pide al usarlo)
+        imul ecx, NOTAS_AL - 1
+        mov ebx, notas_blq
+        xor al, al
+        call lam_bloque
+        jc .x
+        mov edi, [notas_blq]
+        mov al, C_BLANCO
+        rep stosb
+        mov dword [n_cur_al], 0
+        call notas_en               ; escribiéndolas: que se vea el cursor
+        jc .cursor
+        mov dword [n_sube], 0
+        jmp .dibuja
+.cursor:
+        mov eax, [sel]
+        call lam_ptr
+        call lam_compone
+        mov eax, [cur]
+        call lam_sitio_xy           ; EAX=x EBX=y ECX=alto, desde la esquina de la caja
+        mov [n_cur_x], eax
+        mov [n_cur_y], ebx
+        mov [n_cur_al], ecx
+        lea eax, [ebx+ecx+2-NOTAS_AL]   ; lo menos que tiene que subir...
+        test eax, eax
+        jns .c1
+        xor eax, eax
 .c1:
-        mov [edi+ecx], al
-        inc ecx
-        jmp .c
-.parte:
-        cmp edx, -1
-        je .fl
-        mov ecx, edx
-.fl:
-        mov byte [edi+ecx], 0
-        add esi, ecx
-        sub ebp, ecx
-        jz .pl
-        cmp byte [esi], ' '         ; (el espacio o el salto por el que se parte)
-        ja .pl
-        inc esi
-        dec ebp
-.pl:
-        push esi
-        mov eax, [n_lin]
-        shl eax, 4
-        add eax, [n_y]
-        lea ebx, [eax+4]
-        mov eax, TIRA_AN + 70
-        mov esi, linea
+        cmp [n_sube], eax
+        jge .c2
+        mov [n_sube], eax
+.c2:
+        lea eax, [ebx-3]            ; ...y lo más
+        cmp [n_sube], eax
+        jle .dibuja
+        mov [n_sube], eax
+.dibuja:
+        call notas_de               ; una copia de su ficha, en su sitio del búfer
+        mov edi, ficha_tmp
+        mov ecx, LO_TAM
+        rep movsb
+        mov esi, ficha_tmp
+        mov dword [esi+LO_X], NOTAS_X
+        mov eax, -1
+        sub eax, [n_sube]
+        mov [esi+LO_Y], eax
+        mov byte [esi+LO_TINTA], C_TINTA
+        mov byte [esi+LO_FONDO], LAM_NADA
+        mov byte [esi+LO_BORDE], LAM_NADA
+        mov byte [esi+LO_BAND], 0
+        mov edi, [notas_blq]
+        mov ecx, [n_an]
+        mov edx, NOTAS_AL - 1
+        call lam_destino
+        call lam_pinta_obj
+        xor edi, edi
+        call lam_destino
+        mov eax, TIRA_AN
+        mov ebx, [n_y]
+        inc ebx
+        mov ecx, [n_an]
+        mov edx, NOTAS_AL - 1
+        mov esi, [notas_blq]
+        HV dc_copiar
+        call .rotulo
+        cmp dword [n_cur_al], 0     ; y el cursor
+        je .x
+        cmp byte [foco], 0
+        je .x
+        mov eax, [n_cur_x]
+        add eax, TIRA_AN + NOTAS_X
+        mov ebx, [n_cur_y]
+        sub ebx, [n_sube]
+        add ebx, [n_y]
+        mov ecx, 2
+        mov edx, [n_cur_al]
+        COLOR C_TINTA
+        HV dc_rect
+.x:
+        popad
+        ret
+; (interna) el rótulo «Notas:», a la izquierda
+.rotulo:
+        pushad
+        COLOR C_BLANCO
+        mov eax, TIRA_AN
+        mov ebx, [n_y]
+        inc ebx
+        mov ecx, NOTAS_X
+        mov edx, NOTAS_AL - 1
+        HV dc_rect
+        COLOR C_PETROLEO
+        NEGRITA 1
+        mov eax, TIRA_AN + 6
+        add ebx, 3
+        mov esi, t_notas
         HV dc_texto
+        NEGRITA 0
+        popad
+        ret
+
+; -> CF=1 si se está escribiendo en las notas (la caja en la que se escribe
+; es la de las notas de la diapositiva)
+notas_en:
+        push eax
+        push esi
+        cmp byte [editando], 0
+        je .no
+        mov eax, [sel]
+        test eax, eax
+        js .no
+        call lam_ptr
+        cmp byte [esi+LO_PAPEL], LP_NOTAS
+        jne .no
         pop esi
-        inc dword [n_lin]
-        jmp .l
+        pop eax
+        stc
+        ret
+.no:
+        pop esi
+        pop eax
+        clc
+        ret
+; (interna) la caja de las notas de la diapositiva, con las medidas del
+; recuadro y la letra de siempre: así el motor parte las líneas igual al
+; pintarlas que al mover el cursor por ellas. (Al imprimirlas se les dan
+; otras: hoja_notas)
+notas_norma:
+        pushad
+        call notas_de
+        test eax, eax
+        js .x
+        xor eax, eax
+        mov [esi+LO_X], eax
+        mov [esi+LO_Y], eax
+        mov [esi+LO_LETRA], al
+        mov [esi+LO_CUERPO], al
+        mov [esi+LO_ESTILO], al
+        mov [esi+LO_ALIN], al
+        mov byte [esi+LO_BAND], LB_OCULTO
+        mov eax, [cli_an]
+        sub eax, TIRA_AN + NOTAS_X + 8
+        cmp eax, 80
+        jge .a
+        mov eax, 80
+.a:
+        mov [esi+LO_AN], eax
+        mov dword [esi+LO_AL], 4000
+.x:
+        popad
+        ret
+; un clic en el recuadro de las notas, en (EAX, EBX) de la ventana: se escribe
+; ahí mismo (si la diapositiva no tenía notas, se le pone su caja, escondida)
+notas_clic:
+        push eax
+        push ebx
+        call notas_en
+        jc .dentro
+        call fin_edicion
+        mov dword [herr], 0
+        call notas_de
+        test eax, eax
+        jns .hay
+        call instantanea
+        mov al, LT_TEXTO
+        mov cl, [pag]
+        call lam_obj_nuevo
+        jc .lleno
+        mov byte [esi+LO_PAPEL], LP_NOTAS
+        mov byte [esi+LO_BAND], LB_OCULTO
+.hay:
+        call elige
+        mov byte [editando], 1
+        mov dword [n_sube], 0
+.dentro:
+        call notas_norma
+        pop ebx
+        pop eax
+        sub eax, TIRA_AN + NOTAS_X  ; el cursor, a donde se ha pulsado
+        sub ebx, [n_y]
+        add ebx, [n_sube]
+        push eax
+        mov eax, [sel]
+        call lam_ptr
+        call lam_compone
+        pop eax
+        call lam_xy_sitio
+        mov [cur], eax
+        mov byte [tecleando], 0
+        jmp inval
+.lleno:
+        pop ebx
+        pop eax
+        jmp sin_sitio
+
+; =============================================================================
+;  Cambiar el diseño de una diapositiva ya hecha
+; =============================================================================
+; (interna) DL=papel -> EAX=la caja de la diapositiva [pag] que lo tiene (-1:
+; ninguna) y ESI=su ficha
+dia_caja:
+        push ecx
+        xor eax, eax
+.b:
+        cmp eax, [lam_n]
+        jae .no
+        call lam_ptr
+        movzx ecx, byte [esi+LO_PAG]
+        cmp ecx, [pag]
+        jne .s
+        cmp [esi+LO_PAPEL], dl
+        je .x
+.s:
+        inc eax
+        jmp .b
+.no:
+        mov eax, -1
+.x:
+        pop ecx
+        test eax, eax
+        ret
+; (interna) AL=papel: CF=1 si el diseño [ds_nuevo] no trae una caja con él
+ds_tiene:
+        push ebx
+        mov ebx, [ds_nuevo]
+.b:
+        cmp byte [ebx], 0
+        je .no
+        cmp [ebx+10], al
+        je .si
+        add ebx, PL_TAM
+        jmp .b
+.no:
+        pop ebx
+        stc
+        ret
+.si:
+        pop ebx
+        clc
+        ret
+; Formato > Diseño de esta diapositiva. Las cajas que ya tiene van al sitio y
+; al tamaño que les da el diseño nuevo, cada una por su papel (el título, el
+; texto...), con lo que tengan escrito; las que le faltan se añaden; las que
+; sobran se quitan si están vacías (las que tienen algo se quedan donde
+; están). El subtítulo de una portada y el texto de las demás hacen el mismo
+; oficio: si el diseño trae uno y la diapositiva tiene el otro, se aprovecha
+diseno_elige:
+        mov dword [le_titulo], t_d_diseno2
+        mov dword [le_n], N_DISENOS
+        mov dword [le_texto], dia_nueva.texto
+        mov dword [le_sel], 1
+        call lista_elige
+        jne .x
+        call fin_edicion
+        call instantanea
+        call sel_nada
+        mov eax, [le_sel]
+        mov eax, [disenos+eax*4]
+        mov [ds_nuevo], eax
+        mov al, LP_CUERPO           ; el subtítulo pasa a ser el texto...
+        mov ah, LP_SUBTIT
+        call .oficio
+        mov al, LP_SUBTIT           ; ...o el texto, el subtítulo
+        mov ah, LP_CUERPO
+        call .oficio
+        mov eax, [lam_n]            ; lo que sobra y está vacío, fuera
+.q:
+        dec eax
+        js .pon
+        call lam_ptr
+        movzx ecx, byte [esi+LO_PAG]
+        cmp ecx, [pag]
+        jne .q
+        mov cl, [esi+LO_PAPEL]
+        test cl, cl
+        jz .q
+        cmp cl, LP_IMAGEN
+        ja .q
+        cmp dword [esi+LO_LARGO], 0
+        jne .q
+        push eax
+        mov al, cl
+        call ds_tiene
+        pop eax
+        jnc .q
+        call lam_obj_quita
+        jmp .q
+.pon:
+        mov al, [pag]               ; y las cajas del diseño: a su sitio las que
+        mov [pl_pag], al            ; hay, y nuevas las que faltan
+        mov byte [pl_peq], 1
+        mov ebx, [ds_nuevo]
+.e:
+        cmp byte [ebx], 0
+        je .hecho
+        mov dl, [ebx+10]
+        call dia_caja
+        js .falta
+        call plantilla_sitio
+        mov al, [ebx+9]             ; con el tamaño de letra y la alineación del
+        mov [esi+LO_CUERPO], al     ; diseño; y lista o no, como él diga (si ya
+        mov al, [ebx+2]             ; era una lista con números, lo sigue siendo)
+        mov [esi+LO_ALIN], al
+        mov al, [esi+LO_BAND]
+        mov ah, al
+        and al, 0xFF - LB_LISTA
+        test byte [ebx+11], LB_VINETAS
+        jz .e0
+        or al, LB_VINETAS
+        test ah, LB_NUMEROS
+        jz .e0
+        xor al, LB_LISTA
+.e0:
+        mov [esi+LO_BAND], al
+        jmp .e1
+.falta:
+        call plantilla_uno
+.e1:
+        add ebx, PL_TAM
+        jmp .e
+.hecho:
+        call tema_colores
+        call cambio
+.x:
+        ret
+; (interna) si el diseño nuevo trae una caja con el papel AL y la diapositiva
+; no la tiene, pero tiene la del papel AH (que el diseño no trae), esa cambia
+; de papel
+.oficio:
+        call ds_tiene
+        jc .o1
+        mov dl, al
+        push eax
+        call dia_caja
+        pop eax
+        jns .o1
+        xchg al, ah
+        call ds_tiene
+        xchg al, ah
+        jnc .o1
+        mov dl, ah
+        push eax
+        call dia_caja
+        pop eax
+        js .o1
+        mov [esi+LO_PAPEL], al
+.o1:
+        ret
+
+; =============================================================================
+;  El clasificador: todas las miniaturas en una rejilla, para ver la
+;  presentación entera y ordenarla. Un clic elige una diapositiva;
+;  arrastrándola cambia de sitio; un doble clic (o Intro, o Esc) vuelve a
+;  ella. Mientras está puesto solo valen las órdenes de la presentación
+;  entera (cl_ordenes); cualquier otra vuelve antes a la diapositiva
+; =============================================================================
+; (del editor de láminas) antes de cada orden: ECX=la orden
+orden_antes:
+        cmp byte [clasif], 0
+        je .x
+        push esi
+        mov esi, cl_ordenes
+.b:
+        cmp byte [esi], 0
+        je .sale
+        cmp [esi], cl
+        je .vale
+        inc esi
+        jmp .b
+.sale:
+        call clasif_sale
+.vale:
+        pop esi
+.x:
+        ret
+; Ver > Clasificador de diapositivas: ponerlo o quitarlo
+clasif_orden:
+        cmp byte [clasif], 0
+        jne clasif_sale
+        call fin_edicion
+        call sel_nada
+        mov dword [herr], 0
+        mov byte [clasif], 1
+        mov byte [cl_coge], 0
+        xor eax, eax                ; (las barras de desplazamiento, escondidas)
+        jmp clasif_sale.barras
+clasif_sale:
+        cmp byte [clasif], 0
+        je .x
+        mov byte [clasif], 0
+        mov byte [cl_coge], 0
+        mov eax, 1
+.barras:
+        push ebp
+        mov ebp, [barra_v]
+        HV ven_mostrar
+        mov ebp, [barra_h]
+        HV ven_mostrar
+        pop ebp
+        call marcas
+        call inval
+.x:
+        ret
+; el procedimiento de la ventana con el clasificador puesto
+cl_proc:
+        cmp eax, WM_LBUTTONDOWN
+        je cl_raton
+        cmp eax, WM_LBUTTONDBLCLK
+        je cl_doble
+        cmp eax, WM_MOUSEMOVE
+        je cl_mueve
+        cmp eax, WM_LBUTTONUP
+        je cl_suelta
+        cmp eax, WM_KEYDOWN
+        je pr_tecla
+        cmp eax, WM_CHAR
+        je hecho
+        cmp eax, WM_MOUSEWHEEL
+        je hecho
+        jmp pre_proc2
+; (interna) cuántas miniaturas caben en una fila -> ECX
+cl_cols:
+        push eax
+        push edx
+        mov eax, [cli_an]
+        sub eax, CL_X0
+        jns .a
+        xor eax, eax
+.a:
+        xor edx, edx
+        mov ecx, CL_PASO_X
+        div ecx
+        mov ecx, eax
+        test ecx, ecx
+        jnz .x
+        inc ecx
+.x:
+        pop edx
+        pop eax
+        ret
+; (interna) EDX=x + y*65536 de la ventana -> EAX=la diapositiva que hay en ese
+; sitio de la rejilla (la última, si cae más allá); CF=1 si es en la barra
+cl_cual:
+        push ebx
+        push ecx
+        push edx
+        movsx eax, dx
+        mov ebx, edx
+        sar ebx, 16
+        cmp ebx, TB_AL
+        jl .barra
+        call cl_cols
+        sub eax, CL_X0 - 12         ; la columna
+        jns .a
+        xor eax, eax
+.a:
+        xor edx, edx
+        push ecx
+        mov ecx, CL_PASO_X
+        div ecx
+        pop ecx
+        cmp eax, ecx
+        jb .b
+        lea eax, [ecx-1]
+.b:
+        push eax
+        mov eax, ebx                ; la fila
+        sub eax, TB_AL + CL_Y0 - 8
+        add eax, [cl_y]
+        jns .c
+        xor eax, eax
+.c:
+        xor edx, edx
+        mov ebx, CL_PASO_Y
+        div ebx
+        imul eax, ecx
+        pop edx
+        add eax, edx
+        mov edx, [lam_pags]
+        dec edx
+        cmp eax, edx
+        jbe .d
+        mov eax, edx
+.d:
+        pop edx
+        pop ecx
+        pop ebx
+        clc
+        ret
+.barra:
+        pop edx
+        pop ecx
+        pop ebx
+        stc
+        ret
+cl_raton:
+        call cl_cual
+        jc raton                    ; (la barra de botones, como siempre)
+        mov dword [br_sobre], 0
+        mov [cl_de], eax
+        mov [cl_a], eax
+        cmp eax, [pag]
+        je .coge
+        call pag_ir
+.coge:
+        mov byte [cl_coge], 1
+        mov ebp, [ven]
+        HV ven_capturar
+        call inval
+        jmp hecho
+cl_doble:
+        call cl_cual
+        jc raton
+        cmp eax, [pag]
+        je .va
+        call pag_ir
+.va:
+        call clasif_sale
+        jmp hecho
+cl_mueve:
+        cmp byte [cl_coge], 0
+        je raton_mueve
+        call cl_cual
+        jc hecho
+        cmp eax, [cl_a]
+        je hecho
+        mov [cl_a], eax
+        call inval
+        jmp hecho
+cl_suelta:
+        cmp byte [cl_coge], 0
+        je raton_suelta
+        mov byte [cl_coge], 0
+        mov ebp, [ven]
+        HV ven_soltar
+        mov ecx, [cl_de]
+        mov edx, [cl_a]
+        cmp ecx, edx
+        je .nada
+        call dia_mueve
+        jmp hecho
+.nada:
+        call inval
+        jmp hecho
+; el teclado: las flechas van de una a otra; Intro y Esc vuelven a la
+; diapositiva; Supr la quita (lo demás llega aquí desde pr_tecla)
+cl_tecla:
+        cmp ecx, TC_CTRL
+        jae tecla
+        cmp ecx, TC_ESC
+        je .sale
+        cmp ecx, TC_INTRO
+        je .sale
+        cmp ecx, TC_REPAG
+        je tecla
+        cmp ecx, TC_AVPAG
+        je tecla
+        cmp ecx, TC_SUPR
+        jne .n1
+        mov ecx, O_PAG_QUITA
+        jmp orden
+.n1:
+        mov eax, [pag]
+        mov ebx, ecx
+        call cl_cols
+        cmp ebx, TC_IZQ
+        jne .n2
+        dec eax
+        jmp .ir
+.n2:
+        cmp ebx, TC_DER
+        jne .n3
+        inc eax
+        jmp .ir
+.n3:
+        cmp ebx, TC_ARRIBA
+        jne .n4
+        sub eax, ecx
+        jmp .ir
+.n4:
+        cmp ebx, TC_ABAJO
+        jne hecho
+        add eax, ecx
+.ir:
+        test eax, eax
+        js hecho
+        cmp eax, [lam_pags]
+        jae hecho
+        call pag_ir
+        jmp hecho
+.sale:
+        call clasif_sale
+        jmp hecho
+; pinta la rejilla: cada miniatura con su número debajo; la de la diapositiva
+; en la que se está, con un marco petróleo. Arrastrando una, una raya ocre
+; dice dónde iría
+pinta_clasif:
+        pushad
+        mov edx, [cli_al]
+        sub edx, TB_AL + BR_PIE
+        jle .x
+        mov [tira_al], edx
+        COLOR C_PIEDRA
+        xor eax, eax
+        mov ebx, TB_AL
+        mov ecx, [cli_an]
+        HV dc_rect
+        call cl_cols
+        mov [cl_n], ecx
+        mov eax, [pag]              ; que la que se ve quede dentro
+        xor edx, edx
+        div ecx
+        imul eax, CL_PASO_Y
+        cmp eax, [cl_y]
+        jge .v1
+        mov [cl_y], eax
+.v1:
+        add eax, CL_PASO_Y + CL_Y0
+        sub eax, [tira_al]
+        cmp eax, [cl_y]
+        jle .v2
+        mov [cl_y], eax
+.v2:
+        xor edi, edi                ; EDI=la diapositiva
+.b:
+        cmp edi, [lam_pags]
+        jae .x
+        mov eax, edi
+        xor edx, edx
+        div dword [cl_n]
+        imul ebx, eax, CL_PASO_Y
+        add ebx, TB_AL + CL_Y0
+        sub ebx, [cl_y]             ; EBX=su y en la ventana
+        imul ebp, edx, CL_PASO_X
+        add ebp, CL_X0              ; EBP=su x
+        mov eax, [cli_al]
+        sub eax, BR_PIE
+        cmp ebx, eax
+        jge .x
+        lea eax, [ebx+CL_PASO_Y]
+        cmp eax, TB_AL
+        jle .s
+        cmp edi, [pag]              ; el marco
+        jne .m1
+        COLOR C_PETROLEO
+        lea eax, [ebp-4]
+        sub ebx, 4
+        mov ecx, MINI_AN + 8
+        mov edx, MINI_AL + 8
+        HV dc_rect
+        add ebx, 4
+        jmp .m2
+.m1:
+        COLOR C_ARENA_OSC
+        lea eax, [ebp-1]
+        dec ebx
+        mov ecx, MINI_AN + 2
+        mov edx, MINI_AL + 2
+        HV dc_marco
+        inc ebx
+.m2:
+        mov eax, ebp
+        mov ecx, MINI_AN
+        mov edx, MINI_AL
+        lea esi, [edi+1]            ; (si no ha habido memoria para ella, solo su marco)
+        imul esi, MINI_AN * MINI_AL
+        cmp esi, [mini+4]
+        ja .m3
+        sub esi, MINI_AN * MINI_AL
+        add esi, [mini]
+        HV dc_copiar
+.m3:
+        push edi                    ; su número, debajo
+        lea eax, [edi+1]
+        mov edi, num_txt
+        call hvl_num
+        mov byte [edi], 0
+        pop edi
+        COLOR C_TINTA
+        lea eax, [ebp+MINI_AN/2-8]
+        push ebx
+        add ebx, MINI_AL + 6
+        mov esi, num_txt
+        HV dc_texto
+        pop ebx
+        cmp byte [cl_coge], 0       ; arrastrando: la raya de dónde iría
+        je .s
+        cmp edi, [cl_a]
+        jne .s
+        COLOR C_OCRE
+        mov eax, [cl_a]
+        cmp eax, [cl_de]
+        je .s
+        lea eax, [ebp-11]           ; (hacia atrás: delante de esa)
+        jb .r1
+        lea eax, [ebp+MINI_AN+8]    ; (hacia delante: detrás)
+.r1:
+        sub ebx, 4
+        mov ecx, 3
+        mov edx, MINI_AL + 8
+        HV dc_rect
+.s:
+        inc edi
+        jmp .b
 .x:
         popad
         ret
@@ -1392,9 +2182,17 @@ tira_y      resd 1                  ; lo que está desplazada la tira
 tira_al     resd 1
 tira_de     resd 1                  ; la miniatura que se arrastra
 tira_a      resd 1                  ; y a qué sitio iría
-n_y         resd 1
-n_cabe      resd 1
-n_lin       resd 1
+n_y         resd 1                  ; el recuadro de las notas: dónde empieza,
+n_an        resd 1                  ; su ancho,
+n_sube      resd 1                  ; lo que está subido el texto (escribiendo)
+n_cur_x     resd 1                  ; y el cursor
+n_cur_y     resd 1
+n_cur_al    resd 1
+ds_nuevo    resd 1                  ; el diseño que se le pone a una diapositiva
+cl_y        resd 1                  ; el clasificador: lo que está desplazado,
+cl_n        resd 1                  ; las miniaturas de una fila,
+cl_de       resd 1                  ; la que se arrastra
+cl_a        resd 1                  ; y a qué sitio iría
 pc_estilo   resd 1                  ; la ventana, como estaba antes de presentar
 pc_menu     resd 1
 pc_x        resd 1
@@ -1415,16 +2213,18 @@ tr_k        resd 1
 fo_modo     resd 1
 fo_k        resd 1
 tira_coge   resb 1
+clasif      resb 1                  ; está puesto el clasificador
+cl_coge     resb 1                  ; se está arrastrando una de sus miniaturas
 pres        resb 1                  ; se está presentando a pantalla completa
 pres_fin    resb 1                  ; se ha pasado de la última
 mini_ok     resb LAM_MAX_PAG        ; qué miniaturas están al día
             alignb 4
 ficha_tmp   resb LO_TAM
-notas_buf   resb NOTAS_MAX + 8
 ; lo grande son bloques que se piden al usarlos (lam_bloque) y se devuelven
 ; al acabar de presentar o de imprimir (pre_suelta) y al cerrar
 mini        resd 3                  ; las miniaturas (MINI_AN x MINI_AL cada una)
 pres_buf    resd 3                  ; la diapositiva, al tamaño de la pantalla
 hoja_buf    resd 3                  ; la hoja de un folleto (y, al presentar, lo
                                     ; que se va poniendo en una transición)
+notas_blq   resd 3                  ; el recuadro de las notas, dibujado
 HVP_FIN

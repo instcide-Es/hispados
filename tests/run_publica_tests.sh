@@ -16,7 +16,14 @@
 #   6 varias páginas;
 #   7 las plantillas;
 #   8 imprimir (LPT1 a un archivo) y exportar la página como BMP;
-#   9 una imagen BMP.
+#   9 una imagen BMP (y girarla);
+#  10 elegir varios objetos (Mayús y clic, un marco, todos) y lo que se hace
+#     con ellos: mover, dar formato, alinear, repartir, agrupar, duplicar,
+#     borrar, copiar y pegar, el orden;
+#  11 deshacer y rehacer de varios pasos, y su tope;
+#  12 las listas con números, las cajas de texto encadenadas, girar y las
+#     marcas del menú;
+#  13 guardar con el disco lleno.
 # Lo que queda en cada .PUB guardado se comprueba leyendo el archivo.
 #
 # uso: run_publica_tests.sh [IMAGEN]      (FASES="2 5" corre solo esas)
@@ -26,7 +33,7 @@ IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/PUBLICA.HVP
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/publica.asm $HVP > /dev/null || { echo "  FAIL no se ensambla"; exit 1; }
-FASES=${FASES:-1 2 3 4 5 6 7 8 9}
+FASES=${FASES:-1 2 3 4 5 6 7 8 9 10 11 12 13}
 fase() { case " $FASES " in *" $1 "*) return 0;; esac; return 1; }
 reabre() { printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\PUBLICA.HVP %s\r\n' "$1" > $T/CENTRO.INI
            mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI; }
@@ -46,10 +53,13 @@ B_VISTA=522; B_ELEGIR=258; B_TEXTO=284; B_RECT=310; B_ELIPSE=336; B_LINEA=362
 al100() { boton1 $B_VISTA; sleep 0.8; }
 # un menú (la x de su nombre) y una orden suya (su y)
 menu() { clic $1 65; sleep 0.9; clic $(( $1 + 30 )) $2; sleep 0.9; }
-M_ARCH=50; M_EDIC=123; M_VER=178; M_INS=239; M_FORM=315; M_HERR=407
+M_ARCH=50; M_EDIC=123; M_VER=178; M_INS=239; M_FORM=315; M_DISP=390; M_HERR=486
+# un clic con Mayús apretada (se añade a lo elegido, o se quita)
+mclic() { ir $((PX + $1)) $((PY + $2)); mon "sendkey shift 1200" 0.3; mon "mouse_button 1" 0.25; mon "mouse_button 0" 0.9; }
 # elegir de una lista: tantas veces abajo desde la primera
 lista() { sleep 1; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
 guarda() { tecla ctrl-g; sleep 1.2; escribe "$1"; tecla ret; sleep 2.5; }
+guarda_como() { menu $M_ARCH 155; sleep 0.5; escribe "$1"; tecla ret; sleep 2.5; }    # cuando ya tiene nombre
 PIE="16 566 40 582 0 6"                                     # dónde se busca el texto del pie
 
 # lee un .PUB y comprueba una condición en Python: o[i] son sus objetos
@@ -68,11 +78,12 @@ for i in range(n):
     r.dat = b[24 + n * tam + dat:24 + n * tam + dat + largo]
     r.txt = r.dat.decode('cp437')
     r.caja = (r.x, r.y, r.an, r.al)
+    r.grupo, r.cadena, r.eslabon = b[24 + i * tam + 40:24 + i * tam + 43] if tam >= 48 else (0, 0, 0)
     o.append(r)
 TEXTO, RECT, ELIPSE, LINEA, IMAGEN = 1, 2, 3, 4, 5
 NADA = 255
 if len(sys.argv) > 3:
-    for r in o: print('   ', r.tipo, r.pag, r.caja, r.estilo, r.alin, r.tinta, r.fondo, r.borde, r.grosor, r.letra, r.cuerpo, repr(r.txt[:40]))
+    for r in o: print('   ', r.tipo, r.pag, r.caja, r.estilo, r.alin, r.tinta, r.fondo, r.borde, r.grosor, r.letra, r.cuerpo, r.band, (r.grupo, r.cadena, r.eslabon), repr(r.txt[:60]))
 sys.exit(0 if eval(sys.argv[2]) else 1)
 PY
 # mira_pub NOMBRE.PUB "lo que se comprueba" 'condición'
@@ -147,9 +158,9 @@ prepara $HVP
   menu $M_VER 195; aparca; shot v5                          # Ver > Ver la rejilla
   menu $M_VER 175; aparca; shot v6                          # Ver > Ver los márgenes: se quitan
   menu $M_VER 87; aparca; shot v7                           # Ver > Página entera
-  clic 475 65; sleep 0.9; clic 505 87; sleep 1.2; shot v8; tecla ret   # ? > Acerca de
+  clic 554 65; sleep 0.9; clic 584 87; sleep 1.2; shot v8; tecla ret   # ? > Acerca de
   sleep 0.8; tecla ctrl-p; sleep 2; shot v9; tecla ret; sleep 0.8      # imprimir, sin impresora
-  menu $M_EDIC 271; shot v10; tecla ret                     # Edición > Quitar esta página: es la única
+  menu $M_EDIC 291; shot v10; tecla ret                     # Edición > Quitar esta página: es la única
   sal; } | run 150 -vga std
 chk $T/v0.ppm titulo 8 30 activa "Publicaciones - (sin nombre)"
 chk $T/v0.ppm busca $PIE "Página 1 de 1    A4 vertical, 210 x 297 mm    Vista: 36 %"
@@ -297,14 +308,14 @@ echo "== Publicaciones: guardar y abrir =="
 prepara $HVP
 printf 'esto no es una publicacion' > $T/NOVALE.PUB
 # FUTURO.PUB: de un programa posterior (fichas más largas y un objeto de un tipo que no se conoce);
-# ROTO.PUB: dice que tiene cinco objetos y se acaba en el segundo
+# ROTO.PUB: dice que tiene cinco objetos (con las fichas de 40 de los primeros archivos) y se acaba en el segundo
 python3 -c "
 import struct, sys
 def ficha(tipo, x, y, an, al, fondo=255, borde=0, largo=0):
-    return struct.pack('<BBBBiiiiBBBBBBHHHII', tipo, 0, 0, 0, x, y, an, al, 0, fondo, borde, 1, 0, 0, 0, 0, 0, 0, largo).ljust(48, b'\\xEE')
+    return struct.pack('<BBBBiiiiBBBBBBHHHII', tipo, 0, 0, 0, x, y, an, al, 0, fondo, borde, 1, 0, 0, 0, 0, 0, 0, largo).ljust(48, b'\\0').ljust(56, b'\\xEE')
 t = b'del futuro'
 f = ficha(2, 40, 40, 200, 100, fondo=10) + ficha(9, 0, 0, 50, 50) + ficha(1, 60, 60, 180, 40, borde=255, largo=len(t))
-open(sys.argv[1] + '/FUTURO.PUB', 'wb').write(b'PUBLICA\\x1a' + struct.pack('<HHHHHHI', 559, 794, 38, 1, 3, 48, len(t)) + f + t)
+open(sys.argv[1] + '/FUTURO.PUB', 'wb').write(b'PUBLICA\\x1a' + struct.pack('<HHHHHHI', 559, 794, 38, 1, 3, 56, len(t)) + f + t)
 open(sys.argv[1] + '/ROTO.PUB', 'wb').write(b'PUBLICA\\x1a' + struct.pack('<HHHHHHI', 794, 1123, 38, 1, 5, 40, 0) + f[:60])
 " $T
 mcopy -o -i $T/f.img $T/NOVALE.PUB $T/FUTURO.PUB $T/ROTO.PUB ::
@@ -357,7 +368,7 @@ chk $T/a4.ppm titulo 8 30 activa "Publicaciones - futuro.pub"
 chk $T/a4.ppm busca $PIE "Página 1 de 1    A5 vertical, 148 x 210 mm    Vista: 100 %"
 chk $T/a4.ppm px $((112+45)) $((PY+45)) 10 "el archivo de mañana: su rectángulo" busca $((112+62)) $((PY+62)) $((112+66)) $((PY+66)) 0 10 "del futuro"
 mira_pub FUTURO.PUB "guardado otra vez, con las fichas de hoy y sin el objeto que no se entendía" \
-  "(an, al, n, tam) == (559, 794, 2, 40) and [r.tipo for r in o] == [RECT, TEXTO] and o[1].txt == 'del futuro'"
+  "(an, al, n, tam) == (559, 794, 2, 48) and [r.tipo for r in o] == [RECT, TEXTO] and o[1].txt == 'del futuro'"
 chk $T/a2.ppm busca 150 200 650 400 0 8 "La publicación tiene cambios sin guardar."
 chk $T/a3.ppm nobusca 8 30 400 50 8 4 "Publicaciones"       # cerrada
 chk $T/a5.ppm busca 100 200 700 400 0 8 "No se ha podido guardar la publicación."
@@ -425,7 +436,7 @@ prepara $HVP
   boton1 472; boton1 $B_LINEA; arr 60 60 200 60             # y la 3, con una línea
   tecla esc pgup; aparca; shot p2                           # RePág: a la 2
   boton1 420; aparca; shot p3; boton1 446                   # el botón de la anterior: la 1; y a la 2 otra vez
-  menu $M_EDIC 271; shot p4; tecla ret; sleep 0.8; aparca; shot p5     # Edición > Quitar esta página
+  menu $M_EDIC 291; shot p4; tecla ret; sleep 0.8; aparca; shot p5     # Edición > Quitar esta página
   tecla ctrl-z; shot p6; tecla ctrl-y; shot p7              # deshacer la devuelve; rehacer la quita
   guarda paginas
   sal; } | run 200 -vga std
@@ -457,7 +468,7 @@ nueva() { tecla ctrl-u; sleep 1.2; local i; for i in $(seq 1 $1); do tecla down;
   nueva 3 0; aparca; shot n3; guarda tarjeta                # tarjeta de visita (en su papel)
   nueva 4 1; aparca; shot n4; guarda anuncio                # anuncio con tiras, en A4 apaisado
   nueva 0 3; aparca; shot n5                                # en blanco, en A5 apaisado
-  menu $M_FORM 447; lista 0; aparca; shot n6                # Formato > Tamaño de la página: A4 de pie
+  menu $M_FORM 419; lista 0; aparca; shot n6                # Formato > Tamaño de la página: A4 de pie
   tecla ctrl-z; shot n7                                     # y se deshace
   sal; } | run 240 -vga std
 chk $T/n0.ppm busca 100 150 700 450 9 12 "Cartel"
@@ -519,6 +530,7 @@ mcopy -o -i $T/f.img $T/bmp/T4.BMP $T/bmp/T8.BMP $T/bmp/RLE.BMP $T/bmp/ENORME.BM
 { arranca
   al100
   menu $M_INS 175; sleep 0.5; escribe "t8.bmp"; tecla ret; sleep 2; aparca; shot b1      # Insertar > Imagen (256 colores)
+  menu $M_DISP 359; aparca; shot b1g; tecla ctrl-z; aparca; shot b1z                    # girada un cuarto de vuelta; y deshecho
   boton1 388; sleep 1; escribe "rle.bmp"; tecla ret; sleep 2; shot b2; tecla ret; sleep 0.8   # una comprimida: no vale
   boton1 388; sleep 1; escribe "enorme.bmp"; tecla ret; sleep 2; shot b3; tecla ret; sleep 0.8   # ni una de 2000 de ancho
   boton1 388; sleep 1; escribe "t4.bmp"; tecla ret; sleep 2                              # otra, de 16 colores
@@ -531,6 +543,11 @@ chk $T/b1.ppm px $((PX+38+10)) $((PY+38+2)) 11 "la imagen de 256 colores: arriba
               px $((PX+38+4)) $((PY+38+20)) 4 "la banda terracota" px $((PX+38+12)) $((PY+38+20)) 12 "la añil" \
               px $((PX+38+52)) $((PY+38+20)) 9 "la blanca" rgb $((PX+38+20)) $((PY+38+20)) FF0000 "y la roja, del cubo de colores"
 chk $T/b1.ppm busca $PIE "Página 1 de 1    Imagen: x 10, y 10 mm; 22 x 10 mm"
+# girada a la derecha alrededor de su centro: 37 x 83 desde (61, 15); lo de arriba queda a la derecha
+chk $T/b1g.ppm busca $PIE "Página 1 de 1    Imagen: x 16, y 4 mm; 10 x 22 mm"
+chk $T/b1g.ppm px $((PX+61+34)) $((PY+15+10)) 11 "la imagen, girada: el verde de arriba, a la derecha" \
+               px $((PX+61+16)) $((PY+15+4)) 4 "la banda terracota, arriba" px $((PX+61+16)) $((PY+15+12)) 12 "y debajo, la añil"
+chk $T/b1z.ppm igual $PX $PY 300 200 $T/b1.ppm $PX $PY 0      # deshecho: como estaba, punto por punto
 chk $T/b2.ppm busca 100 200 700 400 0 8 "Ese archivo no es una imagen BMP de las que se admiten"
 chk $T/b3.ppm busca 100 200 700 400 0 8 "La imagen es demasiado grande para la publicación."
 # T4.BMP (66 x 30, bandas de 4 con los 16 colores), en (38, 48) y al doble: bandas de 8
@@ -542,6 +559,217 @@ mira_pub IMAGEN.PUB "las dos imágenes, con sus puntos ya en la paleta" \
   "[r.tipo for r in o] == [IMAGEN, IMAGEN] and (o[0].ian, o[0].ial, len(o[0].dat)) == (83, 37, 83 * 37) and o[0].caja == (38, 38, 83, 37) \
    and (o[1].ian, o[1].ial) == (66, 30) and o[1].caja == (38, 48, 132, 60) and o[0].dat[0] == 11 and o[0].dat[5 * 83] == 4 \
    and all(o[1].dat[y * 66 + x] == (15 - x // 4 % 16 if y < 6 else x // 4 % 16) for y in range(30) for x in range(66))"
+fi
+
+if fase 10; then
+echo "== Publicaciones: elegir varios objetos =="
+prepara $HVP
+{ arranca
+  al100
+  boton1 $B_RECT; arr 60 60 160 120; boton2 444; lista 5    # A: 100 x 60, terracota
+  boton1 $B_RECT; arr 200 80 280 180                        # B: 80 x 100
+  boton1 $B_ELIPSE; arr 340 100 400 140                     # C: una elipse de 60 x 40
+  pc 100 90; mclic 240 130; aparca; shot m1                 # A, y con Mayús y un clic, también B
+  tecla right right; aparca; shot m2                        # las flechas mueven los dos
+  mclic 242 130; aparca; shot m3                            # otra vez con Mayús: B deja de estar elegido
+  arr 30 30 300 200; aparca; shot m4                        # un marco desde un sitio vacío: A y B (C queda fuera)
+  tecla ctrl-e; aparca; shot m5                             # Ctrl+E: todos
+  arr 110 90 130 100; aparca; shot m6                       # arrastrando uno se mueven los tres (20 a la derecha, 10 abajo)
+  boton2 524; lista 13                                      # el borde, añil, a los tres
+  menu $M_DISP 195; aparca; shot m7                         # Disponer > Alinear arriba
+  menu $M_DISP 263; aparca; shot m8                         # Disponer > Repartir a lo ancho
+  menu $M_DISP 311; tecla esc; pc 130 100; aparca; shot m9  # Agrupar; y un clic en uno los elige a todos
+  guarda grupo
+  tecla ctrl-r; aparca; shot m10                            # duplicar: tres copias, que son otro grupo
+  tecla delete; aparca; shot m11                            # y borrarlas
+  pc 130 100; menu $M_DISP 331; tecla esc; pc 130 100; aparca; shot m12   # Desagrupar: un clic ya elige uno solo
+  tecla ctrl-e ctrl-c ctrl-v; aparca; shot m13              # copiar y pegar los tres
+  tecla ctrl-o esc; pc 85 72                                # las copias, al fondo; y el A de antes...
+  menu $M_DISP 135; aparca; shot m14                        # ...Alinear a la izquierda: uno solo, respecto a la página
+  menu $M_DISP 155; aparca; shot m16                        # centrado a lo ancho
+  menu $M_DISP 175; menu $M_DISP 215; aparca; shot m17      # a la derecha y centrado a lo alto
+  menu $M_DISP 235; aparca; shot m18                        # y abajo
+  tecla ctrl-e; menu $M_DISP 283                            # los seis, repartidos a lo alto
+  pc 300 400; menu $M_DISP 263; aparca; shot m15; tecla ret; sleep 0.8   # repartir sin nada elegido: se explica
+  guarda_como varios
+  sal; } | run 300 -vga std
+chk $T/m1.ppm busca $PIE "Página 1 de 1    2 objetos elegidos"
+chk $T/m1.ppm px $((PX+60)) $((PY+60)) 2 "la marca del primero, en su esquina" px $((PX+280)) $((PY+180)) 0 "y la del principal (el último elegido), en tinta"
+chk $T/m2.ppm px $((PX+60)) $((PY+90)) 9 "las flechas mueven los dos: donde estaba el borde de A, blanco" px $((PX+200)) $((PY+130)) 9 "y donde estaba el de B"
+chk $T/m3.ppm busca $PIE "Página 1 de 1    Rectángulo: x 16, y 16 mm; 26 x 16 mm"
+chk $T/m4.ppm busca $PIE "Página 1 de 1    2 objetos elegidos"
+chk $T/m5.ppm busca $PIE "Página 1 de 1    3 objetos elegidos"
+chk $T/m6.ppm px $((PX+70)) $((PY+65)) 9 "arrastrando uno se mueven todos: A ya no está ahí" px $((PX+410)) $((PY+130)) 4 "y la elipse llega más allá"
+chk $T/m7.ppm px $((PX+250)) $((PY+75)) 4 "alineados arriba: B sube a la altura de A" px $((PX+390)) $((PY+90)) 4 "y la elipse"
+chk $T/m8.ppm px $((PX+226)) $((PY+100)) 9 "repartidos: B se aparta de A" px $((PX+240)) $((PY+100)) 4 "hasta dejar el mismo hueco a los dos lados"
+chk $T/m9.ppm busca $PIE "Página 1 de 1    3 objetos agrupados"
+chk $T/m10.ppm busca $PIE "Página 1 de 1    3 objetos agrupados"
+chk $T/m10.ppm px $((PX+425)) $((PY+100)) 4 "las copias, 10 puntos más allá: la de la elipse"
+chk $T/m11.ppm px $((PX+425)) $((PY+100)) 9 "borradas las tres copias"
+chk $T/m11.ppm busca $PIE "Página 1 de 1    A4 vertical, 210 x 297 mm    Vista: 100 %"
+chk $T/m12.ppm busca $PIE "Página 1 de 1    Rectángulo: x 22, y 19 mm; 26 x 16 mm"
+chk $T/m13.ppm busca $PIE "Página 1 de 1    3 objetos elegidos"
+chk $T/m14.ppm busca $PIE "Página 1 de 1    Rectángulo: x 0, y 19 mm; 26 x 16 mm"
+chk $T/m16.ppm busca $PIE "Página 1 de 1    Rectángulo: x 92, y 19 mm; 26 x 16 mm"
+chk $T/m17.ppm busca $PIE "Página 1 de 1    Rectángulo: x 184, y 140 mm; 26 x 16 mm"
+chk $T/m18.ppm busca $PIE "Página 1 de 1    Rectángulo: x 184, y 281 mm; 26 x 16 mm"
+chk $T/m15.ppm busca 100 200 700 400 0 8 "Para repartir hacen falta tres objetos elegidos o más."
+muestra m1 publica_varios; muestra m5 publica_todos; muestra m8 publica_repartir; muestra m13 publica_pegados; muestra m15 publica_repartir_aviso
+mira_pub GRUPO.PUB "los tres, movidos, alineados arriba y repartidos, con el borde añil y en un grupo" \
+  "[r.tipo for r in o] == [RECT, RECT, ELIPSE] and [r.caja for r in o] == [(82, 70, 100, 60), (231, 70, 80, 100), (360, 70, 60, 40)] \
+   and [r.borde for r in o] == [12, 12, 12] and o[0].grupo != 0 and [r.grupo for r in o] == [o[0].grupo] * 3"
+# (el primero de los de antes acaba abajo a la derecha de la página, en (694, 1063); repartidos a lo alto
+# los seis, de arriba abajo quedan con el mismo hueco: 130 puntos y pico)
+mira_pub VARIOS.PUB "las tres copias pegadas (al fondo, en su orden) y los de antes, ya sin grupo; alineados con la página y repartidos a lo alto" \
+  "[r.tipo for r in o] == [RECT, RECT, ELIPSE] * 2 and [r.caja for r in o] == [(92, 471, 100, 60), (241, 661, 80, 100), (370, 892, 60, 40), (694, 1063, 100, 60), (231, 70, 80, 100), (360, 300, 60, 40)] \
+   and all(r.grupo == 0 for r in o)"
+fi
+
+if fase 11; then
+echo "== Publicaciones: deshacer y rehacer de varios pasos =="
+prepara $HVP
+{ arranca
+  al100
+  boton1 $B_RECT; arr 60 60 160 120; boton2 444; lista 5    # un rectángulo terracota (dos cambios)
+  for i in $(seq 1 18); do tecla right tab; done             # y dieciocho más: cada vez, un punto a la derecha
+  aparca; shot u0
+  for i in $(seq 1 20); do tecla ctrl-z; done                # se deshacen los dieciséis últimos, y no más
+  aparca; shot u1
+  guarda tope
+  tecla ctrl-u; sleep 1.2; tecla ret; sleep 2                # otra, en blanco (se sigue viendo al 100 %)
+  boton1 $B_RECT; arr 60 60 160 120                         # 1: A
+  boton2 444; lista 5                                       # 2: terracota
+  tecla right                                               # 3: un punto a la derecha
+  boton1 $B_RECT; arr 200 60 300 120                        # 4: B
+  boton2 444; lista 11                                      # 5: ocre
+  tecla ctrl-r                                              # 6: su copia, 10 más allá
+  tecla delete                                              # 7: borrada
+  boton1 $B_ELIPSE; arr 60 200 160 260                      # 8: C, una elipse
+  boton2 554; lista 2; tecla esc; aparca; shot u2           # 9: con el borde de 3 (Esc: sin los tiradores, para verlo)
+  tecla ctrl-z esc; shot u3                                 # fuera el 9
+  tecla ctrl-z ctrl-z esc; shot u4                          # y el 8 y el 7: vuelve la copia borrada
+  tecla ctrl-z ctrl-z esc; shot u5                          # el 6 y el 5: B, terracota otra vez
+  tecla ctrl-z ctrl-z ctrl-z ctrl-z esc; shot u6            # hasta el principio: la página vacía
+  tecla ctrl-z esc; shot u7                                 # y no hay más
+  for i in $(seq 1 9); do tecla ctrl-y; done; tecla esc; shot u8   # rehacer los nueve
+  tecla ctrl-y esc; shot u9                                 # y no hay más
+  tecla ctrl-z ctrl-z esc; shot u10                         # fuera otra vez el 9 y el 8...
+  boton1 $B_LINEA; pc 400 300; tecla esc ctrl-y; aparca; shot u11   # ...y un cambio nuevo: ya no hay qué rehacer
+  guarda pasos
+  sal; } | run 300 -vga std
+chk $T/u0.ppm busca $PIE "Página 1 de 1    Rectángulo: x 21, y 16 mm; 26 x 16 mm"
+chk $T/u1.ppm busca $PIE "Página 1 de 1    Rectángulo: x 16, y 16 mm; 26 x 16 mm"
+chk $T/u2.ppm px $((PX+62)) $((PY+230)) 0 "la elipse, con el borde de 3"
+chk $T/u3.ppm px $((PX+62)) $((PY+230)) 10 "deshecho el grosor: ahí ya es relleno" px $((PX+61)) $((PY+230)) 0 "(y el borde, de 1)"
+chk $T/u4.ppm px $((PX+110)) $((PY+230)) 9 "deshecha la elipse" px $((PX+305)) $((PY+125)) 10 "y el borrado: vuelve la copia"
+chk $T/u5.ppm px $((PX+305)) $((PY+125)) 9 "deshecha la copia" px $((PX+250)) $((PY+90)) 4 "y el color: B, terracota"
+chk $T/u6.ppm px $((PX+110)) $((PY+90)) 9 "todo deshecho: la página, vacía" px $((PX+60)) $((PY+90)) 9 "(ni el borde del primero)"
+chk $T/u7.ppm igual $PX $PY 500 300 $T/u6.ppm $PX $PY 0
+chk $T/u8.ppm igual $PX $PY 500 300 $T/u2.ppm $PX $PY 0      # rehecho todo: como antes de deshacer
+chk $T/u9.ppm igual $PX $PY 500 300 $T/u2.ppm $PX $PY 0
+chk $T/u10.ppm px $((PX+110)) $((PY+230)) 9 "deshechos dos: sin la elipse"
+chk $T/u11.ppm px $((PX+110)) $((PY+230)) 9 "tras un cambio nuevo no se rehace lo de antes: sigue sin la elipse" px $((PX+475)) $((PY+300)) 0 "y con la línea nueva"
+muestra u2 publica_pasos; muestra u4 publica_deshecho
+mira_pub TOPE.PUB "se guardan dieciséis pasos: de veinte cambios, los cuatro primeros no se deshacen" \
+  "n == 1 and o[0].caja == (62, 60, 100, 60) and o[0].fondo == 4"
+mira_pub PASOS.PUB "los dos rectángulos y la línea nueva; la elipse deshecha no vuelve" \
+  "[r.tipo for r in o] == [RECT, RECT, LINEA] and o[0].caja == (61, 60, 100, 60) and (o[0].fondo, o[1].fondo) == (4, 10) and o[1].caja == (200, 60, 100, 60)"
+fi
+
+if fase 12; then
+echo "== Publicaciones: listas con números, cajas encadenadas, girar y las marcas del menú =="
+prepara $HVP
+{ arranca
+  al100
+  boton1 $B_TEXTO; arr 60 60 360 200; boton2 674            # una caja con numeración
+  escribe "uno"; tecla ret; escribe "dos"; aparca; shot l0
+  tecla ret tab; escribe "sub"; tecla ret shift-tab; escribe "tres"; aparca; shot l1; tecla esc
+  boton1 $B_TEXTO; arr 300 240 500 290; boton2 524; lista 1; tecla esc   # una caja vacía, con borde
+  boton1 $B_TEXTO; arr 60 240 260 290                       # y otra en la que no cabe lo que se escribe
+  escribe "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn"; tecla esc; aparca; shot c1
+  menu $M_DISP 387; aparca; shot c2                         # Disponer > Encadenar con otra caja...
+  pc 400 265; aparca; shot c3                               # ...un clic en la vacía: el texto sigue en ella
+  pc 100 260; escribe " zz"; aparca; shot c4                # escribiendo al final, el cursor está en la segunda
+  tecla up; escribe "Q"; tecla esc                          # y hacia arriba vuelve a la primera
+  guarda cadena
+  pc 100 260; tecla delete; aparca; shot c5                 # borrada la primera, el texto lo hereda la segunda
+  tecla ctrl-z; aparca; shot c6                             # y deshecho, como estaba
+  boton1 $B_RECT; arr 60 320 160 360                        # un rectángulo de 100 x 40...
+  menu $M_DISP 359; aparca; shot r1                         # ...Disponer > Girar un cuarto de vuelta
+  tecla ctrl-l; aparca; shot r2                             # y otra vez, con Ctrl+L
+  boton1 $B_LINEA; arr 300 320 400 320; tecla ctrl-l; aparca; shot r3   # una línea tumbada, girada: de pie
+  pc 100 100; tecla ctrl-l; shot r4; tecla ret               # una caja de texto no se gira: se dice
+  guarda_como girar
+  clic $M_VER 65; sleep 0.9; shot k1; tecla esc; sleep 0.5   # el menú Ver: las marcas
+  menu $M_VER 195; clic $M_VER 65; sleep 0.9; shot k2; tecla esc; sleep 0.5   # con la rejilla puesta
+  menu $M_VER 107; clic $M_VER 65; sleep 0.9; shot k3; tecla esc              # y al 50 %
+  sal; } | run 300 -vga std
+chk $T/l1.ppm busca $((PX+74)) $((PY+62)) $((PX+78)) $((PY+66)) 0 9 "1."
+chk $T/l1.ppm busca $((PX+94)) $((PY+62)) $((PX+98)) $((PY+66)) 0 9 "uno"
+chk $T/l1.ppm busca $((PX+74)) $((PY+78)) $((PX+78)) $((PY+82)) 0 9 "2."
+chk $T/l1.ppm cambia $((PX+90)) $((PY+96)) 60 12 $T/l0.ppm 20       # el segundo nivel (con letra más pequeña): «a)» y su texto
+chk $T/l1.ppm busca $((PX+74)) $((PY+106)) $((PX+78)) $((PY+110)) 0 9 "3."
+chk $T/l1.ppm busca $((PX+94)) $((PY+106)) $((PX+98)) $((PY+110)) 0 9 "tres"
+chk $T/l1.ppm px 686 108 2 "el botón de la numeración, puesto" px 660 108 8 "y el de las viñetas, no"
+chk $T/c1.ppm busca $PIE "Página 1 de 1    Caja de texto: x 16, y 64 mm; 53 x 13 mm; el texto no cabe"
+chk $T/c2.ppm busca $PIE "Página 1 de 1    Haga clic en la caja de texto en la que debe seguir (Esc: dejarlo)"
+chk $T/c3.ppm busca $PIE "Página 1 de 1    Caja de texto: x 79, y 64 mm; 53 x 13 mm; encadenada (2 de 2)"
+chk $T/c3.ppm busca $((PX+302)) $((PY+242)) $((PX+306)) $((PY+246)) 0 9 "mmm nnn"
+chk $T/c3.ppm busca $((PX+62)) $((PY+242)) $((PX+66)) $((PY+246)) 0 9 "aaa bbb ccc ddd eee fff"
+chk $T/c3.ppm busca $((PX+62)) $((PY+258)) $((PX+66)) $((PY+262)) 0 9 "ggg hhh iii jjj kkk lll"
+chk $T/c4.ppm busca $((PX+302)) $((PY+242)) $((PX+306)) $((PY+246)) 0 9 "mmm nnn zz"
+chk $T/c4.ppm px $((PX+384)) $((PY+252)) 0 "el cursor, en la segunda caja, detrás de lo escrito"
+chk $T/c5.ppm busca $((PX+302)) $((PY+242)) $((PX+306)) $((PY+246)) 0 9 "aaa bbb ccc ddd eee fff"
+chk $T/c5.ppm px $((PX+100)) $((PY+240)) 9 "la primera caja, borrada"
+chk $T/c6.ppm busca $((PX+302)) $((PY+242)) $((PX+306)) $((PY+246)) 0 9 "mmm nnn zz"
+chk $T/r1.ppm busca $PIE "Página 1 de 1    Rectángulo: x 24, y 77 mm; 11 x 26 mm"
+chk $T/r2.ppm busca $PIE "Página 1 de 1    Rectángulo: x 16, y 85 mm; 26 x 11 mm"
+chk $T/r3.ppm busca $PIE "Página 1 de 1    Línea: x 93, y 71 mm; 0 x 26 mm"
+chk $T/r4.ppm busca 100 200 700 400 0 8 "y las imágenes. Las cajas de texto, no."
+muestra l1 publica_numeros; muestra c3 publica_cadena; muestra c4 publica_cadena2; muestra r1 publica_girado
+muestra k1 publica_menu_ver; muestra k2 publica_menu_ver2
+# las marcas del menú Ver (un asterisco delante de lo que está puesto): al 100 % y con los márgenes;
+# después, también la rejilla; y al 50 %, la marca de la vista cambia de sitio
+chk $T/k2.ppm cambia 172 188 12 14 $T/k1.ppm 4                 # la rejilla, ya con su marca
+chk $T/k2.ppm igual 172 168 12 14 $T/k1.ppm 172 168 0          # los márgenes, igual que antes: marcados
+chk $T/k3.ppm cambia 172 100 12 14 $T/k2.ppm 4                 # al 50 %: su marca
+chk $T/k3.ppm cambia 172 140 12 14 $T/k2.ppm 4                 # y la del 100 %, quitada
+chk $T/k3.ppm igual 172 80 12 14 $T/k2.ppm 172 80 0            # (la página entera sigue sin marca)
+mira_pub CADENA.PUB "la lista con números y las dos cajas encadenadas: el texto entero, en la primera" \
+  "o[0].band == 8 and o[0].txt == 'uno\ndos\n\tsub\ntres' and o[1].band == 0 and o[1].txt == '' and o[1].cadena != 0 \
+   and (o[2].cadena, o[2].eslabon, o[1].eslabon) == (o[1].cadena, 0, 1) and o[0].cadena == 0 \
+   and o[2].txt == 'aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lllQ mmm nnn zz'"
+mira_pub GIRAR.PUB "el rectángulo, con dos cuartos de vuelta, como estaba; y la línea, de pie" \
+  "o[3].tipo == RECT and o[3].caja == (60, 320, 100, 40) and o[4].tipo == LINEA and o[4].caja == (350, 270, 0, 100) and o[1].cadena != 0"
+fi
+
+if fase 13; then
+echo "== Publicaciones: guardar con el disco lleno =="
+prepara $HVP
+mkdir -p $T/bmp; python3 tests/tools/pintura_bmp.py crea $T/bmp > /dev/null
+# LLENO.PUB: una publicación vacía, que se abre al arrancar. Después se llena el disco hasta dejar
+# libres 1024 octetos: lo que se va a guardar (una imagen de tres mil y pico) no cabe
+python3 -c "
+import struct, sys
+open(sys.argv[1], 'wb').write(b'PUBLICA\\x1a' + struct.pack('<HHHHHHI', 794, 1123, 38, 1, 0, 48, 0))" $T/LLENO.PUB
+mcopy -o -i $T/f.img $T/bmp/T8.BMP $T/LLENO.PUB ::
+reabre 'A:\LLENO.PUB'
+libre=$(mdir -i $T/f.img :: | grep 'bytes free' | tr -cd 0-9)
+head -c $((libre - 1024)) /dev/zero > $T/RELLENO.BIN; mcopy -o -i $T/f.img $T/RELLENO.BIN ::
+{ arranca
+  al100
+  boton1 388; sleep 1; escribe "t8.bmp"; tecla ret; sleep 2  # una imagen
+  tecla ctrl-g; sleep 4; shot x1; tecla ret; sleep 0.8; aparca; shot x2      # Guardar: no cabe
+  menu $M_ARCH 155; sleep 0.5; escribe "otro"; tecla ret; sleep 4; shot x3; tecla ret; sleep 0.8   # Guardar como: tampoco
+  sal; } | run 150 -vga std
+chk $T/x1.ppm busca 100 200 700 400 0 8 "No se ha podido guardar la publicación."
+chk $T/x1.ppm busca 100 200 700 400 0 8 "Compruebe que el disco no está lleno ni protegido."
+chk $T/x2.ppm px $((PX+38+10)) $((PY+38+2)) 11 "tras el aviso, el documento sigue ahí (la imagen)"
+chk $T/x3.ppm busca 100 200 700 400 0 8 "No se ha podido guardar la publicación."
+rm -f $T/lleno2.pub; mcopy -n -i $T/f.img ::LLENO.PUB $T/lleno2.pub 2>/dev/null
+if cmp -s $T/LLENO.PUB $T/lleno2.pub; then ok "disco lleno: el archivo que había sigue entero"; else ko "disco lleno: el archivo que había ha cambiado"; fi
+if mdir -i $T/f.img :: | grep -qi 'TMP\|OTRO'; then ko "disco lleno: ha quedado un archivo a medias"; mdir -i $T/f.img :: | grep -i 'TMP\|OTRO'
+else ok "disco lleno: no queda ningún archivo a medias (ni el temporal ni el del otro nombre)"; fi
 fi
 
 rm -rf $T

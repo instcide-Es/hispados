@@ -15,10 +15,16 @@
 ;  herramienta puesta (Texto, Rectángulo, Elipse, Línea) se arrastra sobre la
 ;  página para poner uno nuevo; un doble clic en una caja de texto (o Intro, o
 ;  ponerse a escribir) deja escribir dentro. Las flechas mueven lo elegido,
-;  Supr lo borra, Tab elige el siguiente. Se puede duplicar, traer al frente
-;  o enviar al fondo, cortar, copiar y pegar (el texto de una caja va además
-;  al portapapeles de Hispa Ventanas, y al escribir se pega el que haya),
-;  deshacer y rehacer el último cambio, y ajustar a una rejilla de 5 mm.
+;  Supr lo borra, Tab elige el siguiente. Con Mayús y un clic se eligen
+;  varios (o arrastrando un marco desde un sitio vacío, o todos con Ctrl+E),
+;  y lo que se hace es con todos: mover, borrar, duplicar, dar formato,
+;  alinear, repartir, agrupar, girar un cuarto de vuelta. Se puede duplicar,
+;  traer al frente o enviar al fondo, cortar, copiar y pegar (el texto de una
+;  caja va además al portapapeles de Hispa Ventanas, y al escribir se pega el
+;  que haya), deshacer y rehacer los últimos cambios, y ajustar a una rejilla
+;  de 5 mm. Las cajas de texto se pueden encadenar: lo que no cabe en una
+;  sigue en la siguiente (también en otra página). Una caja puede ser una
+;  lista, con viñetas o con números.
 ;
 ;  Archivo: Nuevo (con plantillas: cartel, panfleto, tarjeta de visita,
 ;  anuncio con tiras), Abrir, Guardar y Guardar como (.PUB), Exportar la
@@ -128,6 +134,8 @@ menu_prog:
         db "&Borrar el objeto        Supr", 0
         dw O_DUPLICAR
         db "D&uplicar              Ctrl+R", 0
+        dw O_TODO
+        db "Ele&gir todo           Ctrl+E", 0
         dw 0
         db 0
         dw O_ESCRIBIR
@@ -138,26 +146,26 @@ menu_prog:
         db "&Quitar esta página", 0
         dw 0xFFFF
         db "&Ver", 0
-        dw O_VISTA
-        db "&Página entera", 0
+        dw O_VISTA                  ; (delante de cada orden, el sitio de su
+mk_v0   db "  &Página entera", 0    ; marca: ver «marcas» en lamina_ed.inc)
         dw O_VISTA + 1
-        db "Al &50 %", 0
+mk_v1   db "  Al &50 %", 0
         dw O_VISTA + 2
-        db "Al &75 %", 0
+mk_v2   db "  Al &75 %", 0
         dw O_VISTA + 3
-        db "Al &100 % (tamaño real)", 0
+mk_v3   db "  Al &100 % (tamaño real)", 0
         dw 0
         db 0
         dw O_MARGENES
-        db "Ver los &márgenes", 0
+mk_marg db "  Ver los &márgenes", 0
         dw O_REJILLA
-        db "Ver la &rejilla", 0
+mk_rej  db "  Ver la &rejilla", 0
         dw 0
         db 0
         dw O_PAG_ANT
-        db "Página &anterior        RePág", 0
+        db "  Página &anterior        RePág", 0
         dw O_PAG_SIG
-        db "Página &siguiente       AvPág", 0
+        db "  Página &siguiente       AvPág", 0
         dw 0xFFFF
         db "&Insertar", 0
         dw O_HERR + 1
@@ -210,20 +218,58 @@ menu_prog:
         db 0
         dw O_VINETAS
         db "&Viñetas (una lista en la caja)", 0
-        dw 0
-        db 0
-        dw O_FRENTE
-        db "Traer al &frente       Ctrl+F", 0
-        dw O_ALFONDO
-        db "Enviar al fond&o       Ctrl+O", 0
+        dw O_NUMEROS
+        db "N&umeración (una lista con números)", 0
         dw 0
         db 0
         dw O_PAPEL
         db "Tamaño de la &página...", 0
         dw 0xFFFF
+        db "&Disponer", 0
+        dw O_FRENTE
+        db "Traer al &frente           Ctrl+F", 0
+        dw O_ALFONDO
+        db "Enviar al fond&o           Ctrl+O", 0
+        dw 0
+        db 0
+        dw O_ALINEAR
+        db "Alinear a la &izquierda", 0
+        dw O_ALINEAR + 1
+        db "&Centrar a lo ancho", 0
+        dw O_ALINEAR + 2
+        db "Alinear a la &derecha", 0
+        dw O_ALINEAR + 3
+        db "Alinear &arriba", 0
+        dw O_ALINEAR + 4
+        db "Centrar a lo a&lto", 0
+        dw O_ALINEAR + 5
+        db "Alinear a&bajo", 0
+        dw 0
+        db 0
+        dw O_REPARTIR
+        db "Repartir a lo anc&ho", 0
+        dw O_REPARTIR + 1
+        db "Repartir a lo al&to", 0
+        dw 0
+        db 0
+        dw O_AGRUPAR
+        db "A&grupar", 0
+        dw O_DESAGRUPAR
+        db "Desagr&upar", 0
+        dw 0
+        db 0
+        dw O_GIRAR
+        db "Gi&rar un cuarto de vuelta  Ctrl+L", 0
+        dw 0
+        db 0
+        dw O_ENCADENAR
+        db "&Encadenar con otra caja de texto...", 0
+        dw O_SOLTAR
+        db "&Soltar de la cadena", 0
+        dw 0xFFFF
         db "&Herramientas", 0
         dw O_AJUSTAR
-        db "&Ajustar a la rejilla (5 mm): poner o quitar", 0
+mk_ajus db "  &Ajustar a la rejilla (5 mm)", 0
         dw 0xFFFF
         db "&?", 0
         dw O_ACERCA
@@ -293,12 +339,15 @@ t_p_tarj    db "Tarjeta (85 x 55 mm)", 0
 t_p_medida  db "A medida", 0
 ; las órdenes de Ctrl+letra (de la A a la Z; 0: ninguna). Ctrl+H y Ctrl+M no
 ; valen: para el teclado son Retroceso e Intro
-ctrl_ord    db 0, O_ABRIR, 0, O_COPIAR, O_DER, 0, O_FRENTE, O_GUARDAR, 0, 0, 0
-            db O_CUR, 0, 0, O_NEG, O_ALFONDO, O_IMPRIMIR, O_IZQ, O_DUPLICAR, O_SUB, O_CEN
+ctrl_ord    db 0, O_ABRIR, 0, O_COPIAR, O_DER, O_TODO, O_FRENTE, O_GUARDAR, 0, 0, 0
+            db O_CUR, O_GIRAR, 0, O_NEG, O_ALFONDO, O_IMPRIMIR, O_IZQ, O_DUPLICAR, O_SUB, O_CEN
             db O_NUEVO, O_PEGAR, O_GRANDE, O_CORTAR, O_REHACER, O_DESHACER
 ; las órdenes propias (las demás son las del editor de láminas)
             align 4
 ordenes_prog dd O_PAPEL, papel_elige, 0
+; las marcas del menú: dónde va cada una, qué se mira y con qué valor se pone
+marcas_prog dd mk_v0, vista, 0, mk_v1, vista, 1, mk_v2, vista, 2, mk_v3, vista, 3
+            dd mk_marg, margen_ver, 1, mk_rej, rejilla_ver, 1, mk_ajus, ajustar, 1, 0
 
 ; ---- textos (los que el editor de láminas pide a cada programa, y los propios) ----
 t_programa  db "Publicaciones", 0
@@ -424,6 +473,9 @@ medidas:
 
 ; los botones de arriba no tienen ninguno que esté «puesto» fuera de los comunes
 barra_propia:
+        ret
+; ni hay nada que preparar antes de una orden
+orden_antes:
         ret
 
 ; el pie, sin nada elegido: el papel y sus medidas

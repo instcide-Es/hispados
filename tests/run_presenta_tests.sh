@@ -13,7 +13,9 @@
 #   4 la presentación a pantalla completa: avanzar, retroceder, ir a un
 #     número, los puntos de uno en uno, las transiciones y el final;
 #   5 las notas del orador, guardar y abrir, exportar a BMP e imprimir (una
-#     por página, folletos de 2, 3 y 6, y las notas).
+#     por página, folletos de 2, 3 y 6, y las notas);
+#   6 cambiar el diseño de una diapositiva, las listas con números, escribir
+#     las notas en su recuadro y el clasificador.
 # Lo que queda en cada .PRE guardado se comprueba leyendo el archivo.
 #
 # uso: run_presenta_tests.sh [IMAGEN]      (FASES="2 5" corre solo esas)
@@ -23,7 +25,7 @@ IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/PRESENTA.HVP
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/presenta.asm $HVP > /dev/null || { echo "  FAIL no se ensambla"; exit 1; }
-FASES=${FASES:-1 2 3 4 5}
+FASES=${FASES:-1 2 3 4 5 6}
 fase() { case " $FASES " in *" $1 "*) return 0;; esac; return 1; }
 reabre() { printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\PRESENTA.HVP %s\r\n' "$1" > $T/CENTRO.INI
            mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI; }
@@ -42,7 +44,7 @@ boton2() { clic $((10 + $1 + 11)) 117; }
 B_VISTA=522; B_NUEVA=472; B_PRES=572; B_VIN=648
 mini() { clic 88 $((183 + 100 * ($1 - 1))); }               # un clic en la miniatura de la diapositiva N
 menu() { clic $1 65; sleep 0.9; clic $(( $1 + 30 )) $2; sleep 0.9; }
-M_ARCH=50; M_EDIC=123; M_VER=178; M_INS=239; M_FORM=315; M_PRES=420
+M_ARCH=50; M_EDIC=123; M_VER=178; M_INS=239; M_FORM=315; M_DISP=390; M_PRES=500
 lista() { sleep 1; tecla home; local i; for i in $(seq 1 $1); do tecla down; done; [ "${2:-}" ] && shot $2; tecla ret; sleep 0.8; }
 nueva_dia() { boton1 $B_NUEVA; lista $1 ${2:-}; sleep 0.5; }        # una diapositiva nueva con el diseño N
 nueva() { tecla ctrl-u; sleep 1.2; local i; for i in $(seq 1 $1); do tecla down; done
@@ -73,6 +75,7 @@ for i in range(n):
     r.dat = b[24 + n * tam + dat:24 + n * tam + dat + largo]
     r.txt = r.dat.decode('cp437')
     r.caja = (r.x, r.y, r.an, r.al)
+    r.grupo, r.cadena, r.eslabon = b[24 + i * tam + 40:24 + i * tam + 43] if tam >= 48 else (0, 0, 0)
     o.append(r)
 TEXTO, RECT, ELIPSE, LINEA, IMAGEN = 1, 2, 3, 4, 5
 TITULO, CUERPO, CUERPO2, SUBTIT, HUECO, NOTAS = 1, 2, 3, 4, 5, 9
@@ -107,18 +110,22 @@ prepara $HVP
   tecla ctrl-right; aparca; shot v6                         # Ctrl+derecha: baja un puesto (Dos, Hola, Tres)
   ir 88 383; mon "mouse_button 1" 0.3; ir 88 300; ir 88 190; shot v7m; mon "mouse_button 0" 0.6   # la tercera, arrastrada arriba del todo
   aparca; shot v7
-  menu $M_EDIC 271; aparca; shot v8                         # Edición > Duplicar la diapositiva
-  menu $M_EDIC 291; shot v9; tecla ret; sleep 0.8; aparca; shot v10       # Edición > Quitar esta diapositiva
+  menu $M_EDIC 291; aparca; shot v8                         # Edición > Duplicar la diapositiva
+  menu $M_EDIC 311; shot v9; tecla ret; sleep 0.8; aparca; shot v10       # Edición > Quitar esta diapositiva
   tecla ctrl-z; aparca; shot v11                            # deshacer: vuelve
   tecla pgdn pgdn ctrl-left; aparca; shot v12               # a la cuarta (Hola); Ctrl+izquierda la sube
   guarda tira
-  clic 483 65; sleep 0.9; clic 513 87; sleep 1.2; shot v13; tecla ret     # ? > Acerca de
+  clic 554 65; sleep 0.9; clic 584 87; sleep 1.2; shot v13; tecla ret     # ? > Acerca de
   sal; } | run 240 -vga std
 chk $T/v0.ppm titulo 8 30 activa "Presentaciones - (sin nombre)"
 chk $T/v0.ppm busca $PIE "Diapositiva 1 de 1    Tema: Claro    Vista: 58 %"
 chk $T/v0.ppm px 400 200 9 "la diapositiva, blanca" px 400 480 2 "la franja del tema" px 250 480 10 "y su tramo ocre" \
               px 700 540 9 "el recuadro de las notas" px 30 150 2 "la miniatura de la que se ve, con su marco"
 chk $T/v0.ppm busca 215 514 225 524 7 9 "(haga clic aquí para escribir las notas del orador)"
+# la miniatura no enseña los textos de ejemplo de las cajas vacías: donde caen el título y el
+# subtítulo está tan en blanco como arriba, donde no hay nada
+chk $T/v0.ppm igual 40 165 96 16 $T/v0.ppm 40 143 0
+chk $T/v0.ppm igual 40 183 96 12 $T/v0.ppm 40 143 0
 chk $T/v1.ppm busca $PIE "Presentar a pantalla completa desde el principio (F5)"
 chk $T/v2.ppm busca $PIE "Diapositiva 1 de 1    Caja de texto: escriba; Esc o un clic fuera para acabar"
 chk $T/v3.ppm busca $PIE "Diapositiva 2 de 2    Tema: Claro    Vista: 58 %"
@@ -283,8 +290,8 @@ rm -f $T/prn.bin
 acepta() { clic 351 392; sleep 0.8; }                       # el botón Aceptar del cuadro de las notas
 { arranca
   nueva 2 0                                                 # «Informe», tema claro
-  clic 400 540; sleep 1.2; shot q0; escribe "Saludar y presentar el informe"; acepta; aparca; shot q1
-  tecla pgdn; menu $M_INS 223; sleep 0.5; escribe "Dar las cifras"; acepta   # la segunda: Insertar > Notas del orador
+  clic 400 540; sleep 1.2; escribe "Saludar y presentar el informe"; tecla esc; aparca; shot q1   # un clic en el recuadro: se escriben ahí
+  tecla pgdn; menu $M_INS 223; sleep 0.8; shot q0; escribe "Dar las cifras"; acepta   # la segunda: Insertar > Notas del orador (su cuadro)
   tecla pgup; guarda informe; aparca; shot q2
   menu $M_ARCH 175; sleep 0.5; escribe "dia"; tecla ret; espera 90 "La diapositiva se ha guardado" q3; tecla ret; sleep 0.8   # Exportar como BMP
   IMPRESA="La presentación se ha enviado a la impresora."
@@ -335,9 +342,11 @@ v.append(len(f) == 600 and dens(f, 3, 120, 32, 580) > 0.5 and dens(f, 60, 0, 150
 # folleto de 2: dos diapositivas de 640 x 480 con su filete, una encima de otra; la franja de cada una
 f = pags[4]
 v.append(len(f) == 848 and dens(f, 100, 43, 860, 46) > 0.2 and dens(f, 250, 391, 850, 402) > 0.5 and dens(f, 250, 796, 850, 807) > 0.5 and dens(f, 0, 412, 960, 440) == 0)
+v.append(dens(f, 52, 46, 74, 62) > 0.04 and dens(f, 52, 451, 74, 467) > 0.04)       # a la izquierda de cada una, su número
 # de 3: a la izquierda las diapositivas y a la derecha los renglones
 f = pags[6]
 v.append(dens(f, 500, 81, 900, 84) > 0.2 and dens(f, 500, 90, 900, 100) == 0 and dens(f, 120, 232, 440, 238) > 0.4)
+v.append(dens(f, 20, 61, 40, 77) > 0.04 and dens(f, 0, 100, 42, 300) == 0)              # su número, y debajo nada
 v.append(dens(pags[7], 120, 232, 440, 238) > 0.4 and dens(pags[7], 0, 300, 960, 800) == 0)      # la cuarta, sola en otra hoja
 # de 6: la cuarta va en la segunda fila, a la derecha
 f = pags[8]
@@ -352,7 +361,7 @@ if len(sys.argv) > 2:
 sys.exit(0 if all(v) else 1)
 PY
 if python3 $T/prn.py $T/prn.bin $T/hoja
-then ok "impresora: una por página (girada), folletos de 2, 3 y 6, y las notas: trece hojas"
+then ok "impresora: una por página (girada), folletos de 2, 3 y 6 con el número de cada una, y las notas: trece hojas"
 else ko "impresora: no ha salido lo esperado"; ls -l $T/prn.bin; fi
 for k in 0 4 6 8 9; do [ -f $T/hoja$k.pbm ] && convert $T/hoja$k.pbm -resize 50%x83% $B/presenta_hoja$k.png; done
 # se arranca otra vez abriendo la presentación: se ve igual que al guardarla
@@ -363,6 +372,63 @@ reabre 'A:\INFORME.PRE'
 chk $T/r0.ppm titulo 8 30 activa "Presentaciones - A:\\INFORME.PRE"
 chk $T/r0.ppm igual 12 134 776 436 $T/q2.ppm 12 134 0
 muestra q0 presenta_notas_dlg; muestra q1 presenta_notas; muestra r0 presenta_abierta
+fi
+
+if fase 6; then
+echo "== Presentaciones: cambiar el diseño, numeración, las notas en su recuadro y el clasificador =="
+prepara $HVP
+{ arranca
+  nueva 1 0                                                 # «Una asociación», tema claro: cinco diapositivas
+  aparca; shot f0
+  menu $M_FORM 107; lista 1 f0l; aparca; shot f1            # Formato > Diseño: la portada pasa a «título y texto»
+  tecla pgdn; menu $M_FORM 107; lista 2; aparca; shot f2    # la segunda (título y texto), a dos columnas
+  tecla pgdn; menu $M_FORM 107; lista 3; aparca; shot f3    # la tercera (dos columnas llenas), a solo título: se quedan
+  tecla pgdn; ec 400 300; boton2 674; aparca; shot f4       # la cuarta: su lista, con números
+  tecla esc
+  clic 400 540; sleep 0.8; escribe "Nota uno"; tecla ret; escribe "linea dos"; aparca; shot f5   # las notas, en su recuadro
+  tecla esc; aparca; shot f6
+  clic 228 526; sleep 0.5; escribe "X"; tecla esc           # un clic en ellas lleva el cursor ahí
+  menu $M_VER 291; aparca; shot k1                          # Ver > Clasificador de diapositivas
+  ir 630 189; mon "mouse_button 1" 0.3; ir 400 189; ir 90 189; shot k2; mon "mouse_button 0" 0.6   # la quinta, al principio
+  aparca; shot k3
+  tecla right right; aparca; shot k4                        # las flechas: a la tercera
+  ir 222 189; mon "mouse_button 1" 0.12; mon "mouse_button 0" 0.12; mon "mouse_button 1" 0.12; mon "mouse_button 0" 0.6
+  aparca; shot k5                                           # un doble clic en la segunda: se vuelve a ella
+  guarda clasif
+  clic $M_PRES 65; sleep 0.9; shot z1; tecla esc; sleep 0.5 # el menú Presentación: las marcas
+  menu $M_PRES 155; clic $M_PRES 65; sleep 0.9; shot z2; tecla esc   # con los puntos de uno en uno
+  sal; } | run 300 -vga std
+chk $T/f0l.ppm busca 200 100 600 500 9 12 "Título y texto"
+chk $T/f1.ppm cambia $(e 100 180) 350 60 $T/f0.ppm 200          # el título ya no está en medio
+chk $T/f1.ppm busca $PIE "Diapositiva 1 de 5    Tema: Claro    Vista: 58 %"
+chk $T/f2.ppm busca $PIE "Diapositiva 2 de 5    Tema: Claro    Vista: 58 %"
+chk $T/f4.ppm px 686 108 2 "la lista de la cuarta, con números: su botón, puesto"
+chk $T/f5.ppm busca 215 514 225 524 0 9 "Nota uno"
+chk $T/f5.ppm busca 215 530 225 540 0 9 "linea dos"
+chk $T/f5.ppm busca $PIE "Diapositiva 4 de 5    Caja de texto: escriba; Esc o un clic fuera para acabar"
+chk $T/f6.ppm busca 215 514 225 524 0 9 "Nota uno"
+chk $T/f6.ppm busca $PIE "Diapositiva 4 de 5    Tema: Claro    Vista: 58 %"
+chk $T/f5.ppm cambia 288 532 8 18 $T/f6.ppm 10                  # escribiendo, el cursor detrás de lo escrito
+chk $T/k1.ppm px 400 420 15 "el clasificador: el fondo" px 436 189 2 "la cuarta, con su marco" px 28 189 15 "y la primera, sin él"
+chk $T/k1.ppm busca $PIE "Diapositiva 4 de 5    Tema: Claro    Vista: 58 %"
+chk $T/k2.ppm px 20 189 10 "arrastrando una miniatura: la raya de dónde va"
+chk $T/k3.ppm busca $PIE "Diapositiva 1 de 5    Tema: Claro    Vista: 58 %"
+chk $T/k4.ppm busca $PIE "Diapositiva 3 de 5    Tema: Claro    Vista: 58 %"
+chk $T/k5.ppm busca $PIE "Diapositiva 2 de 5    Tema: Claro    Vista: 58 %"
+chk $T/k5.ppm px 30 250 2 "fuera del clasificador: la tira, con la segunda marcada" px 700 540 9 "y el recuadro de las notas"
+muestra f1 presenta_diseno2; muestra f2 presenta_columnas; muestra f4 presenta_numeros; muestra f5 presenta_notas_ed
+muestra k1 presenta_clasificador; muestra k2 presenta_clasif_arrastre; muestra z2 presenta_menu_pres
+chk $T/z2.ppm cambia 430 148 12 14 $T/z1.ppm 4                 # «puntos de uno en uno», ya con su marca
+chk $T/z2.ppm igual 430 80 12 60 $T/z1.ppm 430 80 0            # (y las demás órdenes del menú, como estaban)
+mira_pre CLASIF.PRE "el orden nuevo, los diseños cambiados (cada caja en su sitio, con su texto), la lista con números y las notas" \
+  "titulos == ['Gracias', 'Asociación de vecinos', 'Quiénes somos', 'Lo que hemos hecho', 'Las cuentas'] \
+   and sorted(r.papel for r in o if r.pag == 1) == [TITULO, CUERPO] and de(1, CUERPO) == 'Memoria del año' \
+   and [r.caja for r in o if r.pag == 1 and r.papel == TITULO] == [(40, 21, 720, 102)] \
+   and [(r.caja, r.band) for r in o if r.pag == 1 and r.papel == CUERPO] == [((40, 132, 720, 420), 1)] \
+   and sorted(r.papel for r in o if r.pag == 2) == [TITULO, CUERPO, CUERPO2] and de(2, CUERPO2) == '' \
+   and [r.caja for r in o if r.pag == 2 and r.papel == CUERPO] == [(40, 132, 352, 420)] and de(2, CUERPO).startswith('Una asociación') \
+   and sorted(r.papel for r in o if r.pag == 3) == [TITULO, CUERPO, CUERPO2] and 'Pintura' in de(3, CUERPO) and 'Biblioteca' in de(3, CUERPO2) \
+   and [r.band for r in o if r.pag == 4 and r.papel == CUERPO] == [8] and de(4, NOTAS) == 'NXota uno\nlinea dos'"
 fi
 
 rm -rf $T
