@@ -137,10 +137,10 @@ cp "$pag" $T/webf/index.html; cp $v86/libv86.js $v86/v86.wasm $v86/seabios.bin $
 cp ${V86_IMG:-$IMG/hispa8086-1440.img} $T/webf/v86/hispa8086.img
 printf '@ECO OFF\r\nTECLADO\r\n' > $T/AUTOEXEC.BAT
 mcopy -o -i $T/webf/v86/hispa8086.img $T/AUTOEXEC.BAT ::
-(cd $T/webf && exec python3 -m http.server 8933 --bind 127.0.0.1 > /dev/null 2>&1) &
+(cd $T/webf && exec python3 -m http.server $((${V86_PUERTO:-8932} + 1)) --bind 127.0.0.1 > /dev/null 2>&1) &
 local servidor=$!
 sleep 1
-timeout 240 node prueba/v86_flechas.js http://127.0.0.1:8933/ "$pw" "$cr" > $T/v86f.txt 2>&1
+timeout 240 node prueba/v86_flechas.js http://127.0.0.1:$((${V86_PUERTO:-8932} + 1))/ "$pw" "$cr" > $T/v86f.txt 2>&1
 kill $servidor 2> /dev/null
 local que r
 for que in grises numerico; do

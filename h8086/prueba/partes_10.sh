@@ -170,10 +170,10 @@ cp "$pag" $T/web/index.html; cp $v86/libv86.js $v86/v86.wasm $v86/seabios.bin $v
 cp $IMG/hispa8086-1440.img $T/web/v86/hispa8086.img
 printf '@ECO OFF\r\nTECLADO\r\n' > $T/AUTOEXEC.BAT
 mcopy -o -i $T/web/v86/hispa8086.img $T/AUTOEXEC.BAT ::
-(cd $T/web && exec python3 -m http.server 8932 --bind 127.0.0.1 > /dev/null 2>&1) &
+(cd $T/web && exec python3 -m http.server ${V86_PUERTO:-8932} --bind 127.0.0.1 > /dev/null 2>&1) &
 local servidor=$!
 sleep 1
-timeout 170 node prueba/v86_teclado.js http://127.0.0.1:8932/ "$pw" "$cr" > $T/v86.txt 2>&1
+timeout 170 node prueba/v86_teclado.js http://127.0.0.1:${V86_PUERTO:-8932}/ "$pw" "$cr" > $T/v86.txt 2>&1
 # y dos disqueteras: copiar a B: un archivo de un sector y otro de 40 K, y
 # mirar el disquete de B: tal como lo deja el emulador. En B: va uno de 720 K:
 # la unidad B: de v86 es de 3½, y una imagen de 360 K (5¼) la toma por un
@@ -184,7 +184,7 @@ if grep -q "dq-archivo" $T/web/index.html; then
   python3 -c "import sys; sys.stdout.buffer.write(bytes((i * 31 + (i >> 8) * 7 + 5) & 255 for i in range(40000)))" > $T/GRANDE.BIN
   mcopy -o -i $T/web/v86/hispa8086.img $T/GRANDE.BIN ::
   rm -f $T/b.img; mformat -C -f 720 -i $T/b.img ::
-  timeout 175 node prueba/v86_discos.js http://127.0.0.1:8932/ "$pw" "$cr" $T/b.img $T/b_v86.img "copy a:leeme.txt b:" "copy a:grande.bin b:" "dir b:" > $T/v86b.txt 2>&1
+  timeout 175 node prueba/v86_discos.js http://127.0.0.1:${V86_PUERTO:-8932}/ "$pw" "$cr" $T/b.img $T/b_v86.img "copy a:leeme.txt b:" "copy a:grande.bin b:" "dir b:" > $T/v86b.txt 2>&1
 fi
 kill $servidor 2> /dev/null
 sed 's/^/  /' $T/v86.txt
