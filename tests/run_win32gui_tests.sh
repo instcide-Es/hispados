@@ -10,8 +10,9 @@
 #  - WINFALTA.EXE: llama a una función que no hay (CreateWindowExA): sale
 #    «Hispa-486: falta la función CreateWindowExA (USER32.dll)», el programa
 #    termina y Hispa Ventanas sigue.
-#  - Dos a la vez (cada uno con su cuadro), y el Bloc de notas sigue
-#    funcionando con un programa de Windows abierto.
+#  - Con uno preguntando se abren el Bloc de notas y otro WINGUI (dos a la
+#    vez); el Administrador de tareas lo lista, lo termina a la fuerza y la
+#    memoria libre queda como antes de abrir ninguno.
 #  - HOLAC.EXE (de consola, subsistema 3) sigue saliendo a Hispa-DOS, donde lo
 #    ejecuta HW32, y se vuelve a Hispa Ventanas.
 #  (GUARDAR=carpeta deja las capturas.)
@@ -59,8 +60,8 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 for f in WINGUI.EXE WINFALTA.EXE HOLAC.EXE HW32.COM; do
   MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $B/$f ::BIN/$f || ko "no cabe $f en el disco"
 done
-# un grupo «Win32», abierto, con los accesos de la prueba (cuatro iconos en
-# fila: x = 90, 190, 290 y 390 dentro del grupo)
+# un grupo «Win32», abierto, con los accesos de la prueba (cinco iconos en
+# fila: sus nombres, en x = 125, 229, 333, 437 y 541 de la pantalla, y = 371)
 printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'SinRepetidos=1' 'TareasPrincipal=1' \
   '[Grupo]' 'Nombre=Win32' 'Ventana=60,260,600,200' 'Estado=1' \
   '[Acceso]' 'Nombre=Ventanas' 'Icono=4' 'Programa=A:\BIN\WINGUI.EXE' 'Parametros=uno dos' \
