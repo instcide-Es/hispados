@@ -90,7 +90,13 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 ## Lo siguiente
 
 1. Más programas reales de consola (de MinGW y de Visual C++), para ver qué
-   funciones piden («falta la función...») y completarlas.
+   funciones piden («falta la función...») y completarlas. Ya van: NASM y
+   NDISASM 2.16 (MinGW) y **TCC 0.9.27, el compilador de C de Windows, que
+   compila y ejecuta programas dentro de Hispa-DOS** (17/11/2026). Para verlo,
+   `HW32 /T programa` traza cada llamada a KERNEL32 con sus argumentos.
+   Lo que falta: lanzar otros procesos (`_spawn`, `CreateProcess`) y los
+   nombres largos (los programas que buscan archivos de nombre largo los
+   encuentran por su recorte 8+3, como en MS-DOS).
 2. ~~Que COMMAND.COM ejecute los PE solo~~: hecho (17/11/2026): un .EXE con cabecera PE se lanza con HW32 (de la carpeta de COMSPEC, del PATH o de la actual); si no hay HW32, lo dice y no se lanza.
 3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
 4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas.
