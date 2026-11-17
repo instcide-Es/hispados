@@ -690,6 +690,36 @@ opción oculta de depuración, **`/BATnn[C]`**, que fija el nivel sin tocar la
 BIOS: `/BAT85` lo pone al 85 %, y una `C` al final («`/BAT100C`») lo marca
 enchufado/cargando. La usa `tests/run_ventanas_bateria_tests.sh`.
 
+### ASOCIA.INI: qué programa abre cada tipo de archivo
+
+`\HISPADOS\ASOCIA.INI` (0.9.22) dice con qué programa se abre cada
+extensión al hacer doble clic (o Intro) en el Administrador de archivos.
+Una línea por extensión, `EXT=programa`, donde el programa va con su ruta
+desde `\HISPADOS` (`PROGS\PLUMA.HVP`), con la ruta entera
+(`C:\JUEGOS\X.HVP`) o es `:BLOC` (el Bloc de notas, que va dentro de Hispa
+Ventanas); `EXT=-` o no tener línea: ninguno. Las líneas que empiezan por
+`;` o `[` no cuentan. Si no existe, se escribe con los de serie la primera
+vez que hace falta:
+
+| Extensiones | Programa |
+|---|---|
+| TXT | Bloc de notas |
+| PLU | Pluma |
+| HOJ, CSV | Cuentas |
+| BDD | Datos |
+| PDF | Lector |
+| PUB | Publicaciones |
+| PRE | Presentaciones |
+| BMP, PCX, GIF, PNG, TGA, ICO, JPG, JPEG, PBM, PGM, PPM | Mirador |
+| WAV | Sonidos |
+
+Lo cambian «Abrir con…» del Administrador de archivos (menú Archivo y el del
+botón derecho; con «¿Usar siempre este programa para los .XXX?») y
+Configuración › Sistema › «Tipos de archivo...». Lo que no tiene programa
+pregunta «Abrir con…». Los programas, los .COM/.EXE/.BAT, las carpetas y los
+módulos .HVP no pasan por aquí. «Editar» con un BMP lo abre en Pintura (abrir
+lo lleva a Mirador). Lo común está en `programas/comun/asocia_ini.inc`.
+
 ### Configuración y VENTANAS.INI
 
 **Configuración** (`programas/config.asm`, `CONFIG.HVP`, en `\HISPADOS`, al
@@ -706,7 +736,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Teclado | Espera antes de repetir (250 a 1000 ms) y velocidad de repetición (2 a 30 por segundo), con un cuadro para probarlas; distribución española o estadounidense, si TECLADO (KEYB) está cargado |
 | Sonido | Volumen y silencio: los mismos del altavoz de la barra (si no hay HSPSND, lo dice); [MEZCLADOR] el botón «Mezclador...», la tarjeta que lleva HSPSND y si está la «Sound Blaster para juegos» (`HSPSND /SB`: sí, no o «es la propia tarjeta»), con lo que hay que hacer para ponerla o quitarla (no se puede sin volver a cargar HSPSND, así que lo explica). Además, Configuración guarda cada segundo el mezclador de HSPSND en `\HISPADOS\SONIDO.INI` si ha cambiado (docs/MEZCLADOR.md) |
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
-| Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país |
+| Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país. Abajo, **«Tipos de archivo...»** ([ASOCIA], 0.9.22): las extensiones con el programa que las abre (de `\HISPADOS\ASOCIA.INI`), más «Añadir un tipo...» y «Volver a los de serie»; al elegir una, la lista de programas (o «Ninguno», que la quita) |
 | Red | La red local del equipo (como las «Propiedades de TCP/IP» de Windows). Una casilla **«Obtener la dirección automáticamente (DHCP)»**; al quitarla, cuatro cuadros para la **IP**, la **máscara de subred**, la **puerta de enlace** y el **servidor DNS** a mano (cada uno `a.b.c.d`, con octetos de 0 a 255; con DHCP puesto, no salen). Arriba, el estado en marcha si HSPRED está cargado: la MAC y la IP que tiene. Se guarda en `\HISPADOS\RED.INI` (no en VENTANAS.INI); los cambios se aplican al reiniciar o al recargar HSPRED (`CONFRED /RENOVAR`). Ver docs/RED.md |
 
 Todo se aplica **al momento**. Lo de Pantalla, Ratón y Teclado se guarda en
@@ -1225,7 +1255,7 @@ estropeaba la x del clic).
 | `dlg_mensaje` | EBP=dueña ESI=texto EDI=título EAX=`DM_ACEPTAR`, `DM_ACEPTAR_CANCELAR` o `DM_SI_NO_CANCELAR` → EAX=`ID_ACEPTAR`, `ID_CANCELAR`, `ID_SI`, `ID_NO` |
 | `dlg_pedir` | EBP=dueña ESI=pregunta EDI=título EBX=búfer ECX=tamaño → EAX=1 si se acepta |
 | `dlg_archivo` | EBP=dueña EDI=título EBX=búfer del nombre → EAX=1; lista la carpeta actual y deja entrar en las carpetas |
-| `dlg_lista` | (en `centro.inc`) EBP=dueña EDI=título ESI=pregunta EBX=textos, uno cada EDX octetos, ECX=cuántos → EAX=el elegido (-1: ninguno) |
+| `dlg_lista` | (en `centro.inc`; para los módulos, la entrada 96 de la interfaz, desde la 0.9.22) EBP=dueña EDI=título ESI=pregunta EBX=textos, uno cada EDX octetos, ECX=cuántos → EAX=el elegido (-1: ninguno) |
 | `dlg_modal` | EBP=dueña ESI=plantilla del diálogo EDI=plantillas de los controles EBX=gancho EDX=parámetro → EAX=id del botón que lo cierra |
 
 En `dlg_modal`, cualquier botón con id menor que 16 cierra el diálogo y su id

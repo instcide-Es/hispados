@@ -3174,6 +3174,8 @@ escribir:
         ret
 .falla:
         HV dos_cerrar
+        mov esi, nombre             ; [0.9.22] sin dejar un BMP a medias
+        HV dos_borrar               ; (p. ej. con el disco lleno)
 .falla0:
         mov esi, t_no_guardar
         call mensaje
