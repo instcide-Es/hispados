@@ -61,7 +61,7 @@ PY
       python3 -c "
 import sys
 t=sys.stdin.buffer.read().decode('latin-1').replace('\r','').split('\n')
-while t and t[-1].strip(' \x00\x1a') in ('', 'Ok'): t.pop()
+while t and t[-1].strip(' \x00\x1a\xff') in ('', 'Ok'): t.pop()
 print('\n'.join(l.rstrip() for l in t))" > "$gw"
   fi
   if [ -f "$gw" ]; then

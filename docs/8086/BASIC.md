@@ -168,3 +168,16 @@ Con el número de GW-BASIC (para ERR) y el texto en español:
 | 64 | Bad file name | Nombre de archivo no válido |
 
 En un programa: «Error de sintaxis en 20».
+
+## Diferencias conocidas con GW-BASIC
+
+Se comprueban con PC-BASIC (que imita a GW-BASIC 3.23) en
+`h8086/prueba/basic_compara.sh`. Quedan estas, todas en la última cifra de lo
+que se escribe, no en los cálculos:
+
+- Las potencias de exponente entero negativo: GW-BASIC escribe `10^-3` como
+  `9.999999E-04`; Hispa-BASIC, `.001`.
+- `SQR(2)` y `2^.5`: GW-BASIC, `1.414213`; Hispa-BASIC, `1.414214` (el valor
+  bien redondeado es 1,41421356…).
+- `RANDOMIZE n` con un número dado no da la misma serie que en GW-BASIC (sí la
+  da `RND` sin `RANDOMIZE`, `RND(0)` y `RND` con un número negativo).

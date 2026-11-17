@@ -121,6 +121,7 @@ ac4         resb AC_TAM
 ac5         resb AC_TAM             ; (la base de f_pot10)
 ac_tan      resb AC_TAM             ; TAN
 ac_suma     resb AC_TAM             ; (de paso, solo para f_suma)
+ac_pot      resb AC_TAM             ; (^: el exponente, mientras se hace LOG)
 ac_tan2     resb AC_TAM
 v_temps     resb 3 * N_TEMP         ; los descriptores de paso
 v_desc_aux  resb 3                  ; uno más, para lo que no se guarda

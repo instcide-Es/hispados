@@ -1172,6 +1172,14 @@ num_a_texto:
 .e_div:
         call f_div
 .e_ya:
+        ; en simple, GW-BASIC escala en simple: el escalado se redondea a 24
+        ; bits (por eso 1/3 sale .3333334 y 1/7 .1428572, como en GW-BASIC)
+        cmp word [v_aux + 8], 7
+        jne .e_dob
+        mov byte [ac4 + AC_TIPO], T_SIM
+        mov di, ac4
+        call f_redondea
+.e_dob:
         ; ac4 + 0,5, truncado: el entero de D cifras (64 bits)
         mov si, f_medio_cte
         mov di, ac3

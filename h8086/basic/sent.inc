@@ -288,20 +288,21 @@ sent_print:
         ret
 .coma:
         inc si
-        ; a la siguiente zona de 14
+        ; a la siguiente zona de 14; si esa zona no cabe entera en la línea,
+        ; a la línea siguiente (como GW-BASIC: en 80 columnas, desde la 56)
         mov ax, [v_col]
-        mov cx, [v_ancho]
-        sub cx, 14
-        cmp ax, cx
-        jb .zona
-        call pon_nl
-        jmp .c_fin
-.zona:
         mov cl, 14
         div cl
         mov cl, 14
         sub cl, ah
-        xor ch, ch
+        xor ch, ch                  ; CX = lo que falta hasta la zona
+        mov ax, [v_col]
+        add ax, cx
+        add ax, 14
+        cmp ax, [v_ancho]
+        jbe .zc
+        call pon_nl
+        jmp .c_fin
 .zc:
         mov al, ' '
         call pon_car

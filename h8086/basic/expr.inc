@@ -720,14 +720,14 @@ op_pot:
         mov al, [ac + AC_TIPO]
         push ax
         mov si, ac
-        mov di, ac2
-        call f_copia                ; ac2 = y
+        mov di, ac_pot
+        call f_copia                ; ac_pot = y (LOG usa ac2-ac5)
         mov si, arg
         mov di, ac
         call f_copia                ; ac = x
         call fn_log_ac
         mov di, ac
-        mov si, ac2
+        mov si, ac_pot
         call f_mul
         call fn_exp_ac
         pop ax
@@ -868,8 +868,15 @@ ev_atomo:
 .instr:
         inc si
         jmp fn_instr
-.varptr:
-        jmp err_funcion
+.varptr:                            ; VARPTR(variable): su dirección
+        inc si
+        ESPERA '('
+        call salta_esp
+        xor al, al
+        call busca_var
+        ESPERA ')'
+        mov ax, bx
+        jmp ac_natural
 
 ; ---- AX como entero en el acumulador ----
 ac_entero:
@@ -1282,6 +1289,7 @@ elem_matriz:
         mul bx
         add ax, di
         mov bx, ax
+        mov dh, [v_tipo_var]        ; (los MUL de arriba pisan DX: el tipo)
         mov sp, bp
         pop bp
         ret
