@@ -15,7 +15,9 @@
 #     PING y DESCARGAR por nombre, y un nombre que no existe.
 #  6. RED.INI con DHCP=NO: la dirección a mano (10.0.2.20).
 #  7. HSPRED /U lo descarga.
-#  8. Con HSPEMM (modo V86, memoria superior): LH HSPRED con la NE2000, la
+#  8. La e1000 con los registros en memoria (modo «irreal») con los vectores
+#     2 y 3 a cero y, si hay KVM, con KVM: HSPRED pone la base de su GDT.
+#  9. Con HSPEMM (modo V86, memoria superior): LH HSPRED con la NE2000, la
 #     RTL8139, la PCnet, la Tulip y la e1000e (búferes de DMA en la memoria
 #     convencional, dirección física por VCPI), y la e1000 sin registros por
 #     puertos lo dice y no se carga.
@@ -71,7 +73,7 @@ corre() {
     for c in "$@"; do printf '%s\r' "${c#*|}"; sleep "${c%%|*}"; done
   } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
         -m 32 -drive file=$T/$n.img,format=raw,if=floppy -boot a -no-reboot \
-        -netdev user,id=n0 -device $nic,netdev=n0${NICOPT:-} \
+        -netdev user,id=n0 -device $nic,netdev=n0${NICOPT:-} ${QEMUOPT:-} \
         ${VOLCAR:+-object filter-dump,id=f0,netdev=n0,file=$VOLCAR/$n.pcap} > $T/$n.raw 2>&1
   tr -d '\r' < $T/$n.raw | iconv -f CP437 -t UTF-8 -c > $T/$n.txt
 }
@@ -155,6 +157,73 @@ for nic in $RONDA1; do
   if fsck.fat -n $T/$nic.img >/dev/null 2>&1; then ok "fsck.fat del disquete"; else ko "fsck.fat del disquete"; fi
   if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>HSPRED$/,$p' $T/$nic.txt | head -150; fi
 done
+
+# ---- e1000 con los registros en memoria (modo «irreal»): la GDT de HSPRED ----
+# HSPRED no ponía la base de su GDT: quedaba en 0 y el descriptor del modo
+# «irreal» salía de los vectores 2 y 3 de la tabla de interrupciones. Con la
+# BIOS de QEMU sin KVM colaba (esos vectores parecen un descriptor cargable y
+# QEMU no comprueba los límites de los segmentos); con HispaBIOS (UEFI) el
+# equipo se reiniciaba al cargar HSPRED, y con KVM o en un procesador de
+# verdad se colgaba. Dos pruebas:
+#  a) con los vectores 2 y 3 a cero (VEC23.COM, hecho aquí mismo): si HSPRED
+#     usara la GDT en 0, el descriptor no valdría y el equipo se reiniciaría;
+#  b) si hay KVM, con KVM (comprueba los límites, como un procesador real).
+if [ "${SOLO:-}" != v86 ] && [[ " $RONDA1 " == *" e1000 "* ]]; then
+  cat > $T/vec23.asm <<'FIN'
+        org 0x100
+        xor ax, ax
+        mov es, ax
+        cli
+        mov di, 8                   ; vectores 2 (NMI) y 3: a 0000:0000
+        mov cx, 4
+        cld
+        rep stosw
+        sti
+        mov dx, msg
+        mov ah, 9
+        int 0x21
+        mov ax, 0x4C00
+        int 0x21
+msg     db "vectores-2-y-3-a-cero", 13, 10, "$"
+FIN
+  nasm -f bin -o $T/VEC23.COM $T/vec23.asm || ko "no se puede ensamblar VEC23.COM"
+  CMDS3=('2|VEC23' '3|HSPRED' '2|HSPRED /INFO' '4|CONFRED' '5|PING 10.0.2.2 /N:2'
+         "12|DESCARGAR $U/PRUEBA.BIN" '2|HSPRED /U' '2|ECHO fin-de-la-prueba')
+  PIDS=()
+  mkimg $T/ge1000.img
+  mcopy -o -i $T/ge1000.img $T/VEC23.COM ::VEC23.COM
+  corre ge1000 e1000 60 "${CMDS3[@]}" &
+  PIDS+=($!)
+  KVM=0
+  if [ -w /dev/kvm ] && qemu-system-i386 -accel kvm -display none -monitor none -S -daemonize -pidfile $T/kvm.pid 2>/dev/null; then
+    kill "$(cat $T/kvm.pid)" 2>/dev/null
+    KVM=1
+    mkimg $T/ke1000.img
+    QEMUOPT="-accel kvm" corre ke1000 e1000 60 "${CMDS3[@]:1}" &
+    PIDS+=($!)
+  fi
+  wait "${PIDS[@]}"
+  for n in ge1000 ke1000; do
+    if [ $n = ge1000 ]; then
+      echo "== Hispa-DOS red: e1000 en modo «irreal» con los vectores 2 y 3 a cero =="
+      check $n "vectores-2-y-3-a-cero"
+    elif [ $KVM = 1 ]; then
+      echo "== Hispa-DOS red: e1000 en modo «irreal» con KVM (límites de segmento de verdad) =="
+    else
+      echo "  (sin KVM: se salta la prueba de la e1000 con KVM)"; continue
+    fi
+    check $n "Tarjeta Intel PRO/1000 (e1000), MAC 52:54:00:12:34:56"
+    check $n "(registros por memoria)"
+    check $n "Dirección IP  . . . . : 10.0.2.15"
+    check $n "Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
+    check $n "Guardado en PRUEBA.BIN (150.000 octetos)."
+    check $n "HSPRED descargado."
+    check $n "fin-de-la-prueba"
+    n1=$(grep -c "núcleo compatible con MS-DOS" $T/$n.txt)
+    if [ "$n1" -eq 1 ]; then ok "no se ha reiniciado"; else ko "se ha reiniciado o no ha arrancado ($n1 arranques)"; fi
+    if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>HSPRED$/,$p' $T/$n.txt | head -80; fi
+  done
+fi
 
 [ "${SOLO:-}" = tarjetas ] && exit $fail
 PIDS=()

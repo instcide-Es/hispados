@@ -3364,6 +3364,16 @@ e1_init:
         cmp byte [v86], 0
         jne .f
 .io:
+        ; la base de la GDT del modo «irreal» (e1_flat): sin esto quedaba en 0
+        ; y el descriptor salía de los vectores 2 y 3 de la tabla de
+        ; interrupciones. En QEMU sin KVM colaba (no comprueba los límites
+        ; de los segmentos); en un procesador de verdad, o con KVM, el
+        ; equipo se colgaba, y con HispaBIOS (UEFI) se reiniciaba.
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        add eax, gdt_tbl
+        mov [gdtr+2], eax
         push fs
         call e1_flat
         ; reinicio
