@@ -1,10 +1,10 @@
-# Las partes de la prueba que llegaron con la versión 0.9 (las carga
+# Las partes de la prueba que llegaron con la versión 0.10 (las carga
 # prueba.sh, que tiene las funciones: arranca, escribe, pantalla, esta...).
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
 p_ordenes() {
 echo "== Hispa-8086: las órdenes nuevas del intérprete =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 mcopy -i $T/a.img prueba/SIIR.BAT ::
 : > $T/lpt.txt
 QMAS="-parallel file:$T/lpt.txt" arranca $T/a.img 486
@@ -65,13 +65,13 @@ esta o9 "Si: fin" "IR A, y SI a==b: "
 noesta o9 "NO DEBE SALIR" ""
 apaga
 QMAS=
-if head -c 14 $T/lpt.txt | grep -qa "Hispa-8086 0.9" && grep -qa "HOLA.COM             206" $T/lpt.txt; then ok "lo mandado a PRN y a LPT1 ha salido por el puerto paralelo"; else ko "PRN: no ha salido lo esperado por el puerto paralelo"; fi
+if head -c 15 $T/lpt.txt | grep -qa "Hispa-8086 0.10" && grep -qa "HOLA.COM             206" $T/lpt.txt; then ok "lo mandado a PRN y a LPT1 ha salido por el puerto paralelo"; else ko "PRN: no ha salido lo esperado por el puerto paralelo"; fi
 if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 }
 
 p_dispositivos() {
 echo "== Hispa-8086: DEVICE= (un disco en memoria y un dispositivo de carácter) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 printf 'DEVICE=\\DISCORAM.SYS 100\r\nDEVICE=\\SALUDO.SYS\r\n' > $T/CONFIG.SYS
 mcopy -i $T/a.img $T/CONFIG.SYS build/SALUDO.SYS ::
 arranca $T/a.img 486
@@ -92,14 +92,14 @@ escribe "limpiar"; escribe "a:"; escribe "dir d:\\sub"; escribe "equipo"
 pantalla v4
 esta v4 "LEEME.TXT" "un directorio en D:, visto desde A:: "
 libres=$(grep -o "([0-9]* K libres" $T/v4.txt | tr -dc 0-9)
-if [ -n "$libres" ] && [ "$libres" -ge 480 ] && [ "$libres" -le 512 ]; then ok "el disco de 100 K se le quita a la memoria: quedan $libres K"; else ko "memoria libre con DISCORAM: $libres K"; fi
+if [ -n "$libres" ] && [ "$libres" -ge 480 ] && [ "$libres" -le 535 ]; then ok "el disco de 100 K se le quita a la memoria: quedan $libres K"; else ko "memoria libre con DISCORAM: $libres K"; fi
 apaga
 }
 
 p_reserva() {
 echo "== Hispa-8086: la reserva de sectores (BUFFERS=) =="
 for n in 0 4 20; do
-  cp build/hispa8086-360.img $T/a.img
+  cp $IMG/hispa8086-360.img $T/a.img
   printf 'BUFFERS=%d\r\n' $n > $T/CONFIG.SYS
   [ $n = 4 ] && : > $T/CONFIG.SYS        # (4 es lo que hay sin decir nada)
   mcopy -i $T/a.img $T/CONFIG.SYS build/CUENTA.COM ::
@@ -122,7 +122,7 @@ if [ "$escr_4" = "$escr_0" ] && [ "$escr_20" = "$escr_0" ]; then ok "escribir no
 
 p_discos() {
 echo "== Hispa-8086: REVISAR, ETIQUETA, ATRIBUTO, XCOPIAR y ARBOL =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 rm -f $T/b.img; mformat -C -f 360 -i $T/b.img ::; mcopy -i $T/b.img build/LEEME.TXT build/HOLA.COM ::; mmd -i $T/b.img ::SUB ::SUB/DENTRO; mcopy -i $T/b.img build/HOLA.COM ::SUB/UNO.COM; mcopy -i $T/b.img build/LEEME.TXT ::SUB/DENTRO/DOS.TXT
 # se estropea a propósito: una cadena de tres grupos que no es de nadie, y un
 # archivo que dice medir más de lo que tienen sus grupos
@@ -227,7 +227,7 @@ pon_el_que_pida() {
 
 p_fantasma() {
 echo "== Hispa-8086: una sola disquetera (B: es la misma) y los disquetes del PC original =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 rm -f $T/b.img; mformat -C -f 360 -i $T/b.img ::
 arranca $T/a.img 486
 puesto=A
@@ -269,7 +269,7 @@ done
 
 p_editar() {
 echo "== Hispa-8086: EDITAR =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 escribe "limpiar"; escribe "editar"
 pantalla e0
@@ -281,9 +281,16 @@ tecla u n o ret d o s ret t r e s; tecla up up end x f5 down f6 home insert shif
 pantalla e1
 esta e1 "Unox" "escribir, cortar una línea (F5), pegarla (F6) y sobrescribir: "
 esta e1 "2:2 SOB*" "la línea, la columna, el modo y la marca de cambios: "
-tecla f3 t r e s ret; sleep 0.5; tecla backspace; sleep 0.5
+tecla f3 t r e s ret; sleep 0.5
+# (la revisión en PCjs esperaba aquí «2:1»; pero «tres» es la tercera línea
+# del texto, dos, Unox y tres: lo que sale, «3:1», es lo bueno, y tras juntar
+# las líneas con Retroceso, «2:5»)
+pantalla e1b
+esta e1b " 3:1 SOB*" "F3 lleva el cursor a lo encontrado, y la línea de abajo lo dice: "
+tecla backspace; sleep 0.5
 pantalla e2
 esta e2 "Unoxtres" "buscar (F3) y juntar dos líneas con Retroceso: "
+esta e2 " 2:5 SOB*" "y la línea de abajo, al día: "
 tecla f10; sleep 0.5
 pantalla e3
 esta e3 "Hay cambios sin guardar. ¿Guardarlos?" "al salir con cambios, pregunta: "
@@ -292,7 +299,7 @@ pantalla e4
 esta e4 "El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20," "EDIT (el nombre clásico) abre un archivo que ya existe: "
 tecla esc; sleep 1; escribe "ver"
 pantalla e5
-esta e5 "Hispa-8086 versión 0.9" "Esc sale sin preguntar si no hay cambios: "
+esta e5 "Hispa-8086 versión 0.10" "Esc sale sin preguntar si no hay cambios: "
 apaga
 if [ "$(mtype -i $T/a.img ::NOTA.TXT | xxd -p)" = "$(printf 'dos\r\nUnoxtres' | xxd -p)" ]; then ok "lo guardado (F2) es exactamente lo escrito, con sus retornos"; else ko "NOTA.TXT no es lo esperado: $(mtype -i $T/a.img ::NOTA.TXT | xxd -p)"; fi
 if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi
@@ -300,7 +307,7 @@ if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ning�
 
 p_teclado() {
 echo "== Hispa-8086: TECLADO (el teclado español, residente) =="
-cp build/hispa8086-360.img $T/a.img
+cp $IMG/hispa8086-360.img $T/a.img
 arranca $T/a.img 486
 escribe "limpiar"; escribe "teclado /n"; escribe "memoria"; escribe "teclado"; sleep 1
 tecla e c o spc semicolon shift-semicolon spc apostrophe a apostrophe e spc minus shift-2 spc alt_r-2 spc equal shift-equal spc shift-apostrophe u spc shift-comma shift-minus spc apostrophe spc backslash shift-backslash ret; sleep 1

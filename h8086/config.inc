@@ -48,6 +48,17 @@ config_lee:
         mov [cf_ficha], bx
         call config_pasada
 .medidas:
+        ; ¿un 286 con memoria extendida? Entonces hay gestor (alta.inc); y si
+        ; el núcleo va a subir a la HMA, la reserva de sectores puede ser
+        ; mayor sin gastar memoria convencional
+        call xms_ini
+        mov al, [xms_hay]
+        and al, [dos_alto]
+        jz .tabla
+        cmp byte [cf_bufs_hay], 0
+        jne .tabla
+        mov byte [cf_bufs], BUF_ALTO
+.tabla:
         ; la tabla de archivos abiertos, del tamaño pedido: lo que crece, a cero
         mov al, [cf_files]
         mov [n_arch], al
@@ -70,10 +81,15 @@ config_lee:
 .sin:
         mov al, [cf_bufs]
         mov [n_cache], al
+        call alto_sube              ; (con DOS=ALTO, a la memoria alta)
+        cmp byte [alto], 0
+        je .abajo
+        mov di, bajo_fin            ; arriba: abajo solo queda el puente
+.abajo:
         add di, 15                  ; y detrás, los controladores
         mov cl, 4
         shr di, cl
-        mov ax, cs
+        mov ax, [bajo_seg]
         add ax, di
         mov [cf_tope], ax
         mov bx, [cf_ficha]
@@ -192,8 +208,42 @@ config_linea:
         mov ax, BUF_MAX
 .b1:
         mov [cf_bufs], al
+        mov byte [cf_bufs_hay], 1
         ret
 .shell:
+        mov di, t_dos               ; DOS=ALTO (o HIGH), DOS=BAJO (o LOW)
+        call cf_clave
+        jne .proc
+        call cf_igual
+        jne .mal
+        mov al, [si]
+        call mayus
+        mov ah, 1
+        cmp al, 'A'
+        je .d1
+        cmp al, 'H'
+        je .d1
+        dec ah
+        cmp al, 'B'
+        je .d1
+        cmp al, 'L'
+        jne .mal
+.d1:
+        mov [dos_alto], ah
+        ret
+.proc:
+        mov di, t_procesador        ; PROCESADOR=8086: como si no hubiera 286
+        call cf_clave
+        jne .shell2
+        call cf_igual
+        jne .mal
+        cmp word [si], '80'
+        jne .mal
+        cmp word [si+2], '86'
+        jne .mal
+        mov byte [como_8086], 1
+        ret
+.shell2:
         mov di, t_shell
         call cf_clave
         jne .mal
@@ -463,6 +513,8 @@ t_files     db "FILES", 0
 t_buffers   db "BUFFERS", 0
 t_shell     db "SHELL", 0
 t_device    db "DEVICE", 0
+t_dos       db "DOS", 0
+t_procesador db "PROCESADOR", 0
 m_cf_dev    db "CONFIG.SYS: no se puede cargar el controlador: ", 0
 m_cf_dev2   db "CONFIG.SYS: el controlador no se ha instalado: ", 0
 m_cf_no     db "CONFIG.SYS: no se entiende esta línea: ", 0

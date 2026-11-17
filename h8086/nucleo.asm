@@ -30,7 +30,7 @@
 ; =============================================================================
         cpu 8086
         bits 16
-        org 0
+        org 0x10                    ; (ver «el puente», aquí abajo)
 
 DOS_MAYOR   equ 3                   ; lo que contesta INT 21h/30h: el nivel
 DOS_MENOR   equ 30                  ; de MS-DOS 3.30, que es el objetivo
@@ -38,7 +38,7 @@ LIN_MAX     equ 126                 ; letras de una línea de órdenes
 RUTA_MAX    equ 80
 DIR_MAX     equ 64                  ; letras del directorio de trabajo
 PILA_TAM    equ 768
-VERSION10   equ 9                   ; la versión del núcleo por diez (0.9)
+VERSION10   equ 10                  ; la versión del núcleo por diez (0.10)
 FILES_MAX   equ 64                  ; lo más que admite FILES= de CONFIG.SYS
 
 ; el procesador
@@ -48,6 +48,201 @@ CPU_186     equ 2
 CPU_286     equ 3
 CPU_386     equ 4
 CPU_486     equ 5
+
+; =============================================================================
+;  El puente
+; =============================================================================
+; El núcleo se ensambla desde la dirección 10h y corre con su segmento un
+; párrafo por debajo de donde está cargado: así la misma imagen vale tal cual
+; en la memoria alta (FFFF:0010 es el primer octeto de más allá del mega),
+; adonde se muda en un 286 con DOS=ALTO (alta.inc). Lo primero, pues, es
+; pasar de 0070:0000, que es donde nos deja el sector de arranque, a
+; 006F:0010, que es el mismo sitio.
+entrada:
+        mov ax, cs
+        dec ax
+        push ax
+        mov ax, inicio
+        push ax
+        retf
+; Todas las interrupciones del sistema entran por aquí, por «el puente», que
+; es lo único que se queda en la memoria baja cuando el núcleo sube. Cada
+; entrada se asegura de que la puerta A20 está abierta (si hace falta: en un
+; 8086 es una comparación y sigue) y salta al núcleo, esté donde esté.
+N_PUENTES   equ 7
+%macro PUENTE 2
+%1:
+        call b_a20
+        jmp far [cs:%2]
+%endmacro
+        PUENTE b_int20, b_punteros
+        PUENTE b_int21, b_punteros + 4
+        PUENTE b_int25, b_punteros + 8
+        PUENTE b_int26, b_punteros + 12
+        PUENTE b_int27, b_punteros + 16
+        PUENTE b_int2f, b_punteros + 20
+; el punto de entrada del gestor de memoria extendida (empieza así para que
+; otro programa pueda engancharse, como manda la norma)
+b_xms:
+        jmp short .a
+        nop
+        nop
+        nop
+.a:
+        call b_a20
+        jmp far [cs:b_punteros + 24]
+; la BIOS copia memoria extendida (INT 15h/87h) y al volver puede dejar A20
+; cerrada: se la llama desde aquí abajo y se vuelve a abrir antes de volver
+b_mueve:
+        push ax                     ; (y se abre antes: hay BIOS que llevan su
+        call b_esta                 ; propia cuenta de A20 y, si se cerró por
+        jnz .a                      ; otro lado, no se enteran)
+        call b_abre
+.a:
+        pop ax
+        int 0x15
+        pushf
+        push ax
+        cmp byte [cs:b_quiere], 0
+        jne .q
+        call b_cierra               ; nadie la quiere: como estaba
+        jmp short .f
+.q:
+        call b_esta
+        jnz .f
+        call b_abre
+.f:
+        pop ax
+        popf
+        retf
+; si A20 tiene que estar abierta y no lo está, la abre. Conserva todo
+b_a20:
+        cmp byte [cs:b_quiere], 0
+        je .x
+        pushf
+        push ax
+        call b_esta
+        jnz .ok
+        call b_abre
+.ok:
+        pop ax
+        popf
+.x:
+        ret
+; ¿está abierta A20? Se mira de verdad: con ella cerrada, FFFF:0010 es el
+; mismo octeto que 0000:0000. ZF=0 si está abierta. No conserva AX
+b_esta:
+        push bx
+        push ds
+        push es
+        xor ax, ax
+        mov ds, ax
+        dec ax
+        mov es, ax
+        pushf
+        cli
+        mov bx, [0]
+        mov ax, bx
+        xor ax, [es:0x10]
+        jnz .f                      ; distintos: abierta
+        not word [0]                ; iguales: ¿por casualidad? Se cambia uno
+        mov ax, [0]
+        xor ax, [es:0x10]
+        mov [0], bx
+.f:
+        popf
+        pop es
+        pop ds
+        pop bx
+        test ax, ax
+        ret
+; abre A20: por el controlador del teclado (8042), como en el AT; y si no
+; basta, por el puerto 92h (PS/2 y posteriores). No conserva AX
+b_abre:
+        push cx
+        call b_8042
+        mov al, 0xD1                ; «escribir en el puerto de salida»
+        out 0x64, al
+        call b_8042
+        mov al, 0xDF                ; con A20 abierta
+        out 0x60, al
+        call b_8042
+        mov cx, 0x100               ; (tarda un poco)
+.v:
+        call b_esta
+        jnz .p92
+        loop .v
+.p92:
+        in al, 0x92                 ; el puerto 92h, si lo hay, también: que
+        cmp al, 0xFF                ; los dos digan lo mismo
+        je .x
+        test al, 0x02
+        jnz .x
+        or al, 0x02
+        and al, 0xFE                ; (el bit 0 reinicia la máquina)
+        out 0x92, al
+.x:
+        pop cx
+        ret
+; cierra A20, por donde se abriera
+b_cierra:
+        push cx
+        call b_8042
+        mov al, 0xD1
+        out 0x64, al
+        call b_8042
+        mov al, 0xDD
+        out 0x60, al
+        call b_8042
+        in al, 0x92
+        cmp al, 0xFF                ; (no hay tal puerto)
+        je .x
+        test al, 0x02
+        jz .x
+        and al, 0xFC
+        out 0x92, al
+.x:
+        pop cx
+        ret
+; espera a que el 8042 admita otro octeto
+b_8042:
+        push cx
+        xor cx, cx
+.e:
+        in al, 0x64
+        test al, 0x02
+        loopnz .e
+        pop cx
+        ret
+; lo mismo, para llamarlo desde el núcleo cuando está arriba (llamadas lejanas)
+b_f_esta:
+        call b_esta
+        retf
+b_f_abre:
+        push ax
+        call b_abre
+        pop ax
+        retf
+b_f_cierra:
+        push ax
+        call b_cierra
+        pop ax
+        retf
+            align 2
+b_punteros  dw int20, 0, int21, 0, int25, 0, int26, 0, int27, 0, int2f, 0, xms_entra, 0
+b_gdt       times 48 db 0           ; la tabla que pide INT 15h/87h
+b_quiere    db 0                    ; A20 tiene que estar abierta
+; para el banco de pruebas: «HCFG:» y un octeto con lo que vale sin decir nada
+; en CONFIG.SYS (bit 0: DOS=ALTO; bit 1: PROCESADOR=8086)
+            db "HCFG:"
+cfg_inicial db 0
+seg_bajo    dw 0                    ; el segmento del puente (el de la memoria baja)
+; Con el núcleo en la HMA, la BIOS no siempre llega por encima del mega
+; (SeaBIOS, por ejemplo, no lee el disco duro en FFFF:xxxx): cada sector que
+; lee o escribe el núcleo pasa por aquí abajo (disco.inc, bios_bajo)
+            align 2
+b_buf       times 512 db 0
+bajo_fin:
 
 inicio:
         cli
@@ -63,6 +258,7 @@ inicio:
         xor al, al
         rep stosb
         mov [arr_bios], dl          ; de dónde se ha arrancado
+        mov [seg_bajo], cs          ; (el del puente: el núcleo puede subir)
         mov word [buf_lba], 0xFFFF
         mov word [fat_lba], 0xFFFF
         mov byte [n_arch], N_ARCH
@@ -75,16 +271,38 @@ inicio:
         ; los vectores del sistema: INT 20h (terminar) e INT 21h
         xor ax, ax
         mov es, ax
-        mov word [es:0x20*4], int20
+        mov word [es:0x20*4], b_int20
         mov [es:0x20*4+2], cs
-        mov word [es:0x21*4], int21
+        mov word [es:0x21*4], b_int21
         mov [es:0x21*4+2], cs
-        mov word [es:0x25*4], int25
+        mov word [es:0x25*4], b_int25
         mov [es:0x25*4+2], cs
-        mov word [es:0x26*4], int26
+        mov word [es:0x26*4], b_int26
         mov [es:0x26*4+2], cs
-        mov word [es:0x27*4], int27
+        mov word [es:0x27*4], b_int27
         mov [es:0x27*4+2], cs
+        mov bx, b_punteros          ; el puente: de momento, el núcleo está aquí
+        mov cx, N_PUENTES
+.pt:
+        mov [bx+2], cs
+        add bx, 4
+        loop .pt
+        mov [bajo_seg], cs
+        mov word [p_esta], b_f_esta
+        mov [p_esta+2], cs
+        mov word [p_abre], b_f_abre
+        mov [p_abre+2], cs
+        mov word [p_cierra], b_f_cierra
+        mov [p_cierra+2], cs
+        mov word [p_mueve], b_mueve
+        mov [p_mueve+2], cs
+        mov al, [cfg_inicial]
+        mov ah, al
+        and al, 1
+        mov [dos_alto], al
+        shr ah, 1
+        and ah, 1
+        mov [como_8086], ah
         push cs
         pop es
         mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
@@ -292,6 +510,7 @@ f21:
         F21 0x51, f51
         F21 0x54, f54
         F21 0x56, f56
+        F21 0x57, f57
         F21 0x62, f51
         F21 0xE8, fE8
         db 0
@@ -492,6 +711,28 @@ fE8:
 .e5:
         jmp f_error
 .n5:
+        cmp al, 6                   ; 6: la memoria de más allá del mega ->
+        jne .n6                     ; AX: bit 0 hay gestor, bit 1 el núcleo
+        mov al, [xms_hay]           ; está en la HMA, bit 2 la tiene un
+        mov ah, [alto]              ; programa; BX = K de memoria extendida
+        shl ah, 1
+        or al, ah
+        mov ah, [hma_dueno]
+        shl ah, 1
+        shl ah, 1
+        or al, ah
+        xor ah, ah
+        mov [bp+R_AX], ax
+        mov ax, [ext_k]
+        mov [bp+R_BX], ax
+        ret
+.n6:
+        cmp al, 7                   ; 7: el último error de disco de la BIOS
+        jne .n7                     ; -> AL = su código, AH = lo que se pedía
+        mov ax, [err_bios]          ; (2 leer, 3 escribir)
+        mov [bp+R_AX], ax
+        ret
+.n7:
         mov word [bp+R_AX], 0x4869
         mov bl, [cpu_tipo]
         mov bh, VERSION10
@@ -894,11 +1135,12 @@ cpu_detecta:
 %include "archivos.inc"
 %include "proceso.inc"
 %include "config.inc"
+%include "alta.inc"
 
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.9 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.10 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 m_sin_shell db "No se puede lanzar el intérprete de SHELL=: se usa COMMAND.COM.", 10, 0
@@ -934,12 +1176,36 @@ disq_puesto resb 1                  ; de qué unidad es el disquete puesto
 verificar   resb 1                  ; VERIFICAR ON
 queda       resb 1                  ; el programa que termina se queda residente
 con_directo resb 1                  ; CON: sin redirección
+dos_alto    resb 1                  ; DOS=ALTO: se quiere el núcleo en la HMA
+como_8086   resb 1                  ; PROCESADOR=8086: como si no hubiera 286
+xms_hay     resb 1                  ; hay gestor de memoria extendida
+alto        resb 1                  ; el núcleo está en la HMA
+hma_dueno   resb 1                  ; un programa tiene la HMA
+a20_g       resb 1                  ; A20 pedida «para todos»
+a20_l       resb 1                  ; y cuántas veces «para mí»
+cf_bufs_hay resb 1
             alignb 2
 mem_kb      resw 1                  ; memoria convencional, en K
 cf_ficha    resw 1
 cf_tope     resw 1                  ; el segmento donde acaba el núcleo
 cf_arg      resw 1
 cf_tope2    resw 1
+bajo_seg    resw 1                  ; donde está el puente
+p_esta      resw 2                  ; sus rutinas, para llamarlas desde arriba
+p_abre      resw 2
+p_cierra    resw 2
+p_mueve     resw 2
+ant2f       resw 2                  ; la INT 2Fh que había
+err_bios    resw 1                  ; el último error de disco de la BIOS
+ext_k       resw 1                  ; memoria extendida, en K
+x_ini       resw 1                  ; de dónde a dónde se reparte (K)
+x_fin       resw 1
+x_si        resw 1
+x_ds        resw 1
+x_org       resw 2                  ; mover: de dónde, adónde y cuánto
+x_dst       resw 2
+x_len       resw 2
+x_tabla     resb N_XMS * X_ENT
 cache_p     resw 1                  ; la reserva de sectores
 n_lect      resw 1                  ; sectores leídos y escritos de verdad
 n_escr      resw 1

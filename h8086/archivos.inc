@@ -720,6 +720,43 @@ a_bcd:
         pop cx
         ret
 
+; ---- 57h: la fecha y la hora del archivo BX. AL=0: cuáles son -> CX=hora
+;      DX=fecha (como van en el disco); AL=1: ponerlas (quedan al cerrar) ----
+f57:
+        mov ax, [bp+R_BX]
+        call h_ficha
+        jc .err
+        cmp byte [bx+H_USO], 2      ; (un dispositivo no tiene)
+        je .x
+        cmp byte [bp+R_AX], 0
+        jne .pon
+        mov cx, [bx+H_HORA]
+        mov dx, [bx+H_FECHA]
+        test dx, dx
+        jnz .da
+        mov al, [bx+H_UNI]          ; las de su entrada del directorio
+        call unidad_pon
+        mov ax, [bx+H_DSEC]
+        call sec_trae
+        jc .err
+        mov si, sector
+        add si, [bx+H_DOFF]
+        mov cx, [si+22]
+        mov dx, [si+24]
+.da:
+        mov [bp+R_CX], cx
+        mov [bp+R_DX], dx
+.x:
+        ret
+.pon:
+        mov ax, [bp+R_CX]
+        mov [bx+H_HORA], ax
+        mov ax, [bp+R_DX]
+        mov [bx+H_FECHA], ax
+        ret
+.err:
+        jmp f_error
+
 ; ---- 39h: crear un directorio ----
 f39:
         call f_ruta_nombre

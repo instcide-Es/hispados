@@ -2,9 +2,13 @@
 ;  DISCORAM.SYS - un disco en la memoria (controlador de dispositivo de bloque)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  En CONFIG.SYS:      DEVICE=\DISCORAM.SYS [tamaño en K]
+;  En CONFIG.SYS:      DEVICE=\DISCORAM.SYS [tamaño en K] [/E]
 ;
-;  Sin tamaño, 64 K; de 16 a 512. El disco recibe la letra siguiente a las que
+;  Con /E el disco va en la memoria EXTENDIDA (hace falta un 286 o más con
+;  memoria por encima del mega: se la pide al gestor del núcleo, y los
+;  sectores van y vienen con su función de mover): no gasta memoria
+;  convencional y puede medir hasta 4.000 K.
+;  Sin tamaño, 64 K; sin /E, de 16 a 512. El disco recibe la letra siguiente a las que
 ;  hay (D:), ya con formato (FAT12, 64 entradas en la raíz) y vacío; lo que se
 ;  guarde en él se pierde al apagar. La memoria que ocupa se le quita a los
 ;  programas: en un PC de 256 K, un disco de 64 K ya es mucho.
@@ -68,13 +72,13 @@ interrupcion:
         cmp al, 1
         jne .n1
         mov byte [es:bx+14], 1      ; el disco no ha cambiado
-        jmp short fin
+        jmp fin
 .n1:
         cmp al, 2
         jne .n2
         mov word [es:bx+18], bpb
         mov [es:bx+20], cs
-        jmp short fin
+        jmp fin
 .n2:
         cmp al, 4
         je .es
@@ -93,8 +97,57 @@ interrupcion:
 .mal:
         mov word [es:bx+18], 0
         mov word [es:bx+3], 0x8108  ; ese sector no existe
-        jmp short fin
+        jmp fin
 .cabe:
+        cmp byte [extendida], 0
+        je .conv
+        ; en memoria extendida: se le pide al gestor que mueva
+        mov cl, 9                   ; cuántos octetos, y desde dónde del bloque
+        mov si, dx
+        shl si, cl
+        mov [mv_len], si
+        mov cl, 7
+        shr dx, cl
+        mov [mv_len+2], dx
+        mov si, ax
+        mov cl, 9
+        shl si, cl
+        mov cl, 7
+        shr ax, cl                  ; AX:SI = el sector, en octetos
+        mov cx, [es:bx+14]
+        mov dx, [es:bx+16]          ; DX:CX = la memoria de quien pide
+        mov di, [asa]
+        cmp byte [es:bx+2], 4
+        jne .e_esc
+        mov [mv_org], di            ; leer: del bloque a él
+        mov [mv_org_off], si
+        mov [mv_org_off+2], ax
+        mov word [mv_dst], 0
+        mov [mv_dst_off], cx
+        mov [mv_dst_off+2], dx
+        jmp short .e_va
+.e_esc:
+        mov word [mv_org], 0
+        mov [mv_org_off], cx
+        mov [mv_org_off+2], dx
+        mov [mv_dst], di
+        mov [mv_dst_off], si
+        mov [mv_dst_off+2], ax
+.e_va:
+        push bx
+        push es
+        mov si, mv
+        mov ah, 0x0B
+        call far [xms]
+        pop es
+        pop bx
+        cmp ax, 1
+        je .e_bien
+        mov word [es:bx+18], 0
+        mov word [es:bx+3], 0x810C  ; fallo general
+.e_bien:
+        jmp fin
+.conv:
         mov cl, 5                   ; cada sector, 32 párrafos
         shl ax, cl
         add ax, [datos_seg]
@@ -141,6 +194,18 @@ fin:
         pop ax
         retf
 
+xms         dd 0                    ; el gestor de memoria extendida
+asa         dw 0                    ; nuestro bloque
+extendida   db 0                    ; /E
+            align 2
+mv:                                 ; lo que se le pide al gestor: «mover»
+mv_len      dd 0
+mv_org      dw 0
+mv_org_off  dd 0
+mv_dst      dw 0
+mv_dst_off  dd 0
+residente_e:                        ; (con /E, hasta aquí se queda)
+
 ; ---- lo de aquí abajo solo hace falta al arrancar ----
 inicia:
         ; el tamaño: el número que venga detrás del nombre del archivo
@@ -175,6 +240,22 @@ inicia:
         inc si
         jmp .n
 .nf:
+        mov cx, ax
+.op:
+        mov al, [es:si]             ; ¿/E?
+        cmp al, ' '
+        jb .opf
+        inc si
+        cmp al, '/'
+        jne .op
+        mov al, [es:si]
+        and al, 0xDF
+        cmp al, 'E'
+        jne .op
+        mov byte [extendida], 1
+        jmp .op
+.opf:
+        mov ax, cx
         pop bx
         pop es
         test ax, ax
@@ -185,13 +266,23 @@ inicia:
         jae .t2
         mov ax, 16
 .t2:
-        cmp ax, 512
+        mov cx, 512
+        cmp byte [extendida], 0
+        je .t2b
+        mov cx, 4000
+.t2b:
+        cmp ax, cx
         jbe .t3
-        mov ax, 512
+        mov ax, cx
 .t3:
         mov [m_k], ax
         shl ax, 1
         mov [b_tot], ax
+        cmp ax, 4000                ; (más de 4.000 sectores: grupos de dos,
+        jbe .t4                     ; para no pasar de lo que da una FAT12)
+        mov byte [bpb+2], 2
+        shr ax, 1
+.t4:
         ; la FAT: doce bits por grupo
         add ax, 2
         mov cx, ax
@@ -209,6 +300,43 @@ inicia:
         mov dx, cs
         add ax, dx
         mov [datos_seg], ax
+        cmp byte [extendida], 0
+        je .baja
+        ; en memoria extendida: ¿hay gestor? Se le pide el bloque
+        push es
+        push bx
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .sin_ext
+        mov ax, 0x4310
+        int 0x2F
+        mov [xms], bx
+        mov [xms+2], es
+        mov dx, [m_k]
+        mov ah, 0x09
+        call far [xms]
+        cmp ax, 1
+        jne .sin_ext
+        mov [asa], dx
+        pop bx
+        pop es
+        mov dx, residente_e + 15    ; se queda solo lo de arriba
+        mov cl, 4
+        shr dx, cl
+        mov ax, cs
+        add dx, ax
+        jmp short .cabe
+.sin_ext:
+        pop bx
+        pop es
+        mov word [es:bx+14], 0
+        mov [es:bx+16], cs
+        mov dx, m_sin_ext
+        mov ah, 9
+        int 0x21
+        jmp fin
+.baja:
         mov dx, [b_tot]
         mov cl, 5
         shl dx, cl
@@ -265,9 +393,46 @@ inicia:
         mov cx, 12
         rep movsb
         pop es
+        cmp byte [extendida], 0
+        je .dice
+        ; lo preparado aquí abajo (arranque, FAT y raíz), al bloque
+        push es
+        push bx
+        mov ax, [b_spf]
+        add ax, 5
+        mov cl, 9
+        shl ax, cl
+        mov [mv_len], ax
+        mov word [mv_len+2], 0
+        mov word [mv_org], 0
+        mov word [mv_org_off], 0
+        mov ax, [datos_seg]
+        mov [mv_org_off+2], ax
+        mov ax, [asa]
+        mov [mv_dst], ax
+        mov word [mv_dst_off], 0
+        mov word [mv_dst_off+2], 0
+        mov si, mv
+        mov ah, 0x0B
+        call far [xms]
+        pop bx
+        pop es
+.dice:
         ; y se dice
+        mov dx, m_hay
+        mov ah, 9
+        int 0x21
+        cmp byte [extendida], 0
+        je .d0
+        mov dx, m_ext
+        mov ah, 9
+        int 0x21
+.d0:
+        mov dx, m_de
+        mov ah, 9
+        int 0x21
         mov ax, [m_k]
-        mov si, m_k_txt + 2
+        mov si, m_k_txt + 3
         mov cx, 10
 .d:
         xor dx, dx
@@ -277,7 +442,7 @@ inicia:
         dec si
         test ax, ax
         jnz .d
-        mov dx, m_hay
+        lea dx, [si+1]
         mov ah, 9
         int 0x21
         jmp fin
@@ -285,8 +450,11 @@ inicia:
 m_k         dw 0
 m_oem       db "DISCORAM"
 m_etiqueta  db "DISCO RAM  ", 0x08
-m_hay       db "DISCORAM: disco en memoria de "
-m_k_txt     db "    K en la unidad "
+m_sin_ext   db "DISCORAM: no hay memoria extendida para ese disco (/E).", 13, 10, "$"
+m_hay       db "DISCORAM: disco en memoria $"
+m_ext       db "extendida $"
+m_de        db "de $"
+m_k_txt     db "     K en la unidad "
 m_u         db "D:", 13, 10, "$"
 m_no_cabe   db "DISCORAM: no hay memoria para ese disco.", 13, 10, "$"
 final:

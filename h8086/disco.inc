@@ -38,6 +38,7 @@ C_UNI       equ 0                   ; db su unidad (FFh: libre), dw su sector
 C_LBA       equ 2                   ; (en 2) y los 512 octetos (en 4)
 BUF_DEF     equ 4                   ; sectores en la reserva, sin BUFFERS=
 BUF_MAX     equ 30
+BUF_ALTO    equ 20                  ; sin BUFFERS=, cuando el núcleo va en la HMA
 PRIMERO     equ 5                   ; el primer número de archivo (0-4: la consola)
 ; la ficha de un archivo abierto
 H_USO       equ 0                   ; db: 0 libre
@@ -52,7 +53,9 @@ H_CIDX      equ 18                  ; dw: ...y qué número hace en la cadena
 H_SUCIO     equ 20                  ; db: hay que poner al día su entrada
 H_UNI       equ 21                  ; db: su unidad (0 = A:)
 H_PSP       equ 22                  ; dw: el programa que lo abrió
-H_TAM_F     equ 24
+H_FECHA     equ 24                  ; dw: la fecha que se le ha puesto con 57h
+H_HORA      equ 26                  ; dw: (0: ninguna; al cerrar, la de entonces)
+H_TAM_F     equ 28
 ; errores de DOS
 E_FUNCION   equ 1
 E_ARCHIVO   equ 2                   ; no existe el archivo
@@ -273,9 +276,15 @@ disco_es:
         or cl, al
         pop bx
         mov dl, [u_bios]
+        cmp byte [alto], 0
+        jne .alto
         mov ah, [op13]
         mov al, 1
         int 0x13
+        jmp short .hecho13
+.alto:
+        call bios_bajo              ; (el núcleo en la HMA: por la memoria baja)
+.hecho13:
         jc .falla
         cmp byte [op13], 3          ; VERIFICAR ON: lo escrito se repasa
         jne .bien
@@ -285,6 +294,9 @@ disco_es:
         int 0x13
         jnc .bien
 .falla:
+        mov [err_bios], ah          ; (lo que ha dicho la BIOS, para quien
+        mov al, [op13]              ; quiera saberlo: INT 21h/E8h con AL=7)
+        mov [err_bios+1], al
         cmp ah, 3                   ; protegido contra escritura: no insistir
         je .prot
         cmp ah, 6                   ; han cambiado el disquete (lo dicen los
@@ -325,6 +337,56 @@ disco_es:
         pop dx
         pop cx
         pop bx
+        ret
+
+; con el núcleo en la HMA, un sector por la BIOS pasando por b_buf, en la
+; memoria baja (en el puente): hay BIOS que no leen ni escriben por encima del
+; mega. Como INT 13h: [op13] = 2 leer o 3 escribir, CX y DX como para la BIOS,
+; ES:BX = el sector de verdad. Devuelve CF y AH como la BIOS. Conserva BX, CX,
+; SI, DI y ES
+bios_bajo:
+        push si
+        push di
+        push cx
+        push es
+        push bx
+        cmp byte [op13], 3
+        jne .va
+        push ds                     ; escribir: el sector, antes, abajo
+        push cx
+        mov si, bx
+        mov ax, es
+        mov es, [seg_bajo]
+        mov ds, ax                  ; DS:SI = el sector, ES:DI = b_buf
+        mov di, b_buf
+        mov cx, 256
+        rep movsw
+        pop cx
+        pop ds
+.va:
+        mov es, [seg_bajo]
+        mov bx, b_buf
+        mov ah, [op13]
+        mov al, 1
+        int 0x13
+        pop bx
+        pop es                      ; ES:BX = adonde iba
+        jc .x
+        cmp byte [op13], 2
+        jne .bien
+        push ds                     ; leer: de abajo, a su sitio
+        mov di, bx
+        mov si, b_buf
+        mov ds, [seg_bajo]
+        mov cx, 256
+        rep movsw
+        pop ds
+.bien:
+        clc
+.x:
+        pop cx
+        pop di
+        pop si
         ret
 
 ; «Ponga el disquete de la unidad B:»: se pide por la BIOS (no por la consola,
@@ -2010,8 +2072,11 @@ h_cierra:
 .arch:
         mov al, [bx+H_UNI]
         call unidad_pon
+        cmp word [bx+H_FECHA], 0    ; (si se le ha puesto fecha, hay que
+        jne .guarda                 ; guardarla aunque no se haya escrito)
         cmp byte [bx+H_SUCIO], 0
         je .libre
+.guarda:
         mov ax, [bx+H_DSEC]
         call sec_trae
         jc .mal
@@ -2025,6 +2090,11 @@ h_cierra:
         mov [si+30], ax
         or byte [si+11], 0x20       ; cambiado desde la última copia
         call ahora
+        cmp word [bx+H_FECHA], 0
+        je .hoy
+        mov dx, [bx+H_FECHA]
+        mov cx, [bx+H_HORA]
+.hoy:
         mov [si+22], cx
         mov [si+24], dx
         mov byte [buf_sucio], 1
