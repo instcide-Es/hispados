@@ -28,7 +28,7 @@ if ! $SSH true 2>/dev/null; then
   exit 2
 fi
 # 1) herramientas (solo la primera vez)
-$SSH 'command -v make >/dev/null && command -v nasm >/dev/null && command -v mcopy >/dev/null && command -v qemu-system-i386 >/dev/null && command -v socat >/dev/null && command -v genisoimage >/dev/null && command -v fsck.fat >/dev/null && command -v zip >/dev/null && echo "int main(){return 0;}" | gcc -m32 -x c - -o /dev/null 2>/dev/null' \
+$SSH 'command -v make >/dev/null && command -v nasm >/dev/null && command -v mcopy >/dev/null && command -v qemu-system-i386 >/dev/null && command -v socat >/dev/null && command -v genisoimage >/dev/null && command -v fsck.fat >/dev/null && command -v zip >/dev/null && echo "int f(void){return 0;}" | gcc -m32 -ffreestanding -c -x c - -o /dev/null 2>/dev/null' \
   || $SSH 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq make nasm mtools qemu-system-x86 qemu-utils socat genisoimage dosfstools python3 zip unzip xxd gcc-multilib >/dev/null' \
   || { echo "No se han podido instalar las herramientas en el PC"; exit 3; }
 # 2) copiar el proyecto a la RAM del PC (sin build/, pero con los programas
