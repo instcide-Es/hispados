@@ -159,6 +159,34 @@ checkn "HSPDPMI: excepción"
 check "SIGUE-VIVO"
 cp $T/log.txt $T/log1.txt
 
+# ---- COMMAND.COM lanza los PE él solo (con HW32 en una carpeta del PATH) ----
+echo "-- COMMAND.COM y los programas de Windows --"
+cp "$IMG" $T/g.img
+mcopy -o -i $T/g.img $T/CONFIG.SYS ::CONFIG.SYS
+mcopy -o -i $T/g.img $B/HW32.COM ::HISPADOS/HW32.COM
+mcopy -o -i $T/g.img $B/PEHOLA.EXE ::BIN/PEHOLA.EXE
+{ sleep 6
+  printf 'A:\\HISPADOS\\HSPDPMI\r'; sleep 2
+  printf 'A:\\BIN\\PEHOLA uno "dos tres"\r'; sleep 3
+  printf 'IF ERRORLEVEL 42 ECHO DIRECTO-42\r'; sleep 1
+  printf 'CD BIN\r'; sleep 1
+  printf 'PEHOLA.EXE cuatro\r'; sleep 3
+  printf 'CD \\\r'; sleep 1
+  printf 'DEL A:\\HISPADOS\\HW32.COM\r'; sleep 2
+  printf 'A:\\BIN\\PEHOLA\r'; sleep 2
+  printf 'IF ERRORLEVEL 1 ECHO SIN-HW32-1\r'; sleep 1
+  printf 'ECHO VIVO-TRAS-PE\r'; sleep 1
+} | timeout 40 qemu-system-i386 -display none -serial stdio -monitor none -parallel none -m 16 \
+    -drive file=$T/g.img,format=raw,if=floppy,index=0 -boot a -no-reboot > $T/raw 2>&1
+tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
+check 'Linea: A:\BIN\PEHOLA.EXE uno "dos tres"'
+check "DIRECTO-42"
+check "Linea: PEHOLA.EXE cuatro"
+check "Es un programa de Windows y no se encuentra HW32.COM (Hispa-486)."
+check "SIN-HW32-1"
+check "VIVO-TRAS-PE"
+cp $T/log1.txt $T/log.txt
+
 # ---- la consola en la pantalla (K32CON), desde AUTOEXEC.BAT ----
 if [ $HAYC = 1 ]; then
   echo "-- K32CON: la pantalla --"

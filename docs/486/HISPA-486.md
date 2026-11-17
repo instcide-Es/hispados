@@ -91,7 +91,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 
 1. Más programas reales de consola (de MinGW y de Visual C++), para ver qué
    funciones piden («falta la función...») y completarlas.
-2. Que COMMAND.COM ejecute los PE solo (sin escribir `HW32` delante).
+2. ~~Que COMMAND.COM ejecute los PE solo~~: hecho (17/11/2026): un .EXE con cabecera PE se lanza con HW32 (de la carpeta de COMSPEC, del PATH o de la actual); si no hay HW32, lo dice y no se lanza.
 3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
 4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas.
 

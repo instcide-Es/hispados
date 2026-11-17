@@ -4312,6 +4312,13 @@ try_one:
         mov byte [warn_trunc], 0
         call print_trunc_warn
 .nowarn:
+        ; [HISPA-486] un .EXE de Windows (PE): lo lanza HW32
+        call quiza_pe
+        jnc .es_dos
+        mov byte [errlvl], 1        ; de Windows y sin HW32: no se lanza
+        clc
+        ret
+.es_dos:
         ; (el bloque de parámetros lo monta la parte residente: run_prog)
         cmp byte [lh_flag], 0
         je .low
@@ -4358,6 +4365,205 @@ try_one:
         ret
 .no:
         stc
+        ret
+
+; ---- [HISPA-486] si progpath es un programa de Windows (un .EXE con la
+; cabecera PE), lo cambia por HW32.COM con el programa delante de sus
+; parámetros (docs/486/HISPA-486.md). Si no encuentra HW32.COM, lo dice y deja
+; nada y devuelve CF=1 (no se lanza: la parte de DOS de un PE no sirve) ----
+quiza_pe:
+        pusha
+        mov si, progpath
+        call strlen
+        cmp cx, 4
+        jb .no
+        mov bx, si
+        add bx, cx
+        mov eax, [bx-4]
+        and eax, 0xDFDFDFFF
+        cmp eax, '.EXE'
+        jne .no
+        ; la cabecera MZ y, donde diga, «PE\0\0»
+        mov byte [pe_es], 0
+        mov dx, progpath
+        mov ax, 0x3D00
+        int 0x21
+        jc .no
+        mov bx, ax
+        mov dx, pe_buf
+        mov cx, 64
+        mov ah, 0x3F
+        int 0x21
+        jc .cierra
+        cmp ax, 64
+        jb .cierra
+        cmp word [pe_buf], 'MZ'
+        jne .cierra
+        mov dx, [pe_buf+0x3C]
+        mov cx, [pe_buf+0x3E]
+        mov ax, 0x4200
+        int 0x21
+        jc .cierra
+        mov dx, pe_buf
+        mov cx, 4
+        mov ah, 0x3F
+        int 0x21
+        jc .cierra
+        cmp ax, 4
+        jb .cierra
+        cmp dword [pe_buf], 0x00004550
+        jne .cierra
+        mov byte [pe_es], 1
+.cierra:
+        mov ah, 0x3E
+        int 0x21
+        cmp byte [pe_es], 0
+        je .no
+        call busca_hw32
+        jnc .hay
+        mov si, msg_sin_hw32
+        call puts
+        push ds
+        pop es
+        popa
+        stc
+        ret
+.hay:
+        ; la cola nueva: « programa» + la de antes
+        mov di, pe_tail+1
+        mov al, ' '
+        stosb
+        mov si, progpath
+.c1:
+        lodsb
+        test al, al
+        jz .c2
+        stosb
+        jmp .c1
+.c2:
+        mov si, tail+1
+        movzx cx, byte [tail]
+        jcxz .c4
+.c3:
+        mov ax, di
+        sub ax, pe_tail+1
+        cmp ax, 126
+        jae .c4
+        movsb
+        loop .c3
+.c4:
+        mov ax, di
+        sub ax, pe_tail+1
+        mov [pe_tail], al
+        mov byte [di], 13
+        mov si, pe_tail
+        mov di, tail
+        mov cx, 130
+        rep movsb
+        mov si, hw32path
+        mov di, progpath
+        mov cx, 160
+        rep movsb
+.no:
+        push ds
+        pop es
+        popa
+        clc
+        ret
+; HW32.COM: en la carpeta de COMSPEC, en las del PATH o en la de ahora ->
+; hw32path; CF=1 si no está
+busca_hw32:
+        mov si, s_comspec_n
+        mov di, pe_env
+        call env_get
+        push ds
+        pop es
+        jc .path
+        ; la carpeta: hasta la última barra
+        mov si, pe_env
+        mov bx, si
+.b:
+        lodsb
+        test al, al
+        jz .b_f
+        cmp al, '\'
+        jne .b
+        mov bx, si
+        jmp .b
+.b_f:
+        mov byte [bx], 0
+        mov si, pe_env
+        call prueba_hw32
+        jnc .x
+.path:
+        mov si, s_pathvar
+        mov di, pe_env
+        call env_get
+        push ds
+        pop es
+        jc .aqui
+        mov si, pe_env
+.p:
+        cmp byte [si], 0
+        je .aqui
+        ; un trozo hasta «;», a pe_dir con su barra
+        mov di, pe_dir
+.p1:
+        lodsb
+        test al, al
+        jz .p2
+        cmp al, ';'
+        je .p2
+        stosb
+        jmp .p1
+.p2:
+        dec si                      ; (en el ; o el 0)
+        cmp di, pe_dir
+        je .p_sig                   ; (trozo vacío)
+        cmp byte [di-1], '\'
+        je .p3
+        mov al, '\'
+        stosb
+.p3:
+        mov byte [di], 0
+        push si
+        mov si, pe_dir
+        call prueba_hw32
+        pop si
+        jnc .x
+.p_sig:
+        cmp byte [si], 0
+        je .aqui
+        inc si
+        jmp .p
+.aqui:
+        mov si, b_vacio_pe
+        call prueba_hw32
+.x:
+        ret
+; la carpeta DS:SI + «HW32.COM» -> hw32path; CF=1 si no existe
+prueba_hw32:
+        push si
+        mov di, hw32path
+.c:
+        lodsb
+        test al, al
+        jz .n
+        stosb
+        jmp .c
+.n:
+        mov si, s_hw32
+.d:
+        lodsb
+        stosb
+        test al, al
+        jnz .d
+        call set_dta
+        mov dx, hw32path
+        mov cx, 0x06
+        mov ah, 0x4E
+        int 0x21
+        pop si
         ret
 
 ; -> SI = valor de PATH en el entorno (offset), CF si no hay
@@ -7484,6 +7690,9 @@ s_exist     db "EXIST", 0
 s_in        db "IN", 0
 s_do        db "DO", 0
 s_pathvar   db "PATH", 0
+s_hw32      db "HW32.COM", 0
+b_vacio_pe  db 0
+msg_sin_hw32 db "Es un programa de Windows y no se encuentra HW32.COM (Hispa-486).", 13, 10, 0
 s_promptvar db "PROMPT", 0
 s_defprompt db "$P$G", 0
 s_autoexec  db "A:\AUTOEXEC.BAT", 0
@@ -7833,6 +8042,12 @@ haspath     resb 1
 pathptr     resw 1
 prefix      resb 80
 progpath    resb 160
+hw32path    resb 160
+pe_env      resb 260
+pe_dir      resb 160
+pe_tail     resb 130
+pe_buf      resb 64
+pe_es       resb 1
 tail        resb 130
 fcb1        resb 37
 fcb2        resb 37
