@@ -34,6 +34,7 @@
 ;
 ;    es_pe_gui    ESI=ruta: ZF=1 si es un .EXE de Win32 de ventanas
 ;    pe_abrir     EBX=acceso directo EBP=ventana desde la que se abre
+;    pe_marca_consola  (acc_lanzar) los de consola, por el intérprete de órdenes
 ;    pe_limpiar   (sistema) suelta los selectores y la memoria de los que han
 ;                 acabado
 ; =============================================================================
@@ -101,6 +102,15 @@ t_u32       db "USER32", 0
 ; ---- ¿es un programa de Windows de ventanas? ESI=ruta -> ZF=1 si lo es
 ; (acaba en .EXE, es un PE de 386 y su subsistema es el 2). Conserva todo ----
 es_pe_gui:
+        push eax
+        call pe_subsistema
+        cmp eax, 2
+        pop eax
+        ret
+
+; ---- ESI=ruta -> EAX=el subsistema del programa de Windows (2 ventanas,
+; 3 consola); 0 si no es un .EXE con cabecera PE de 386 ----
+pe_subsistema:
         pushad
         call cad_largo
         sub eax, 4
@@ -119,12 +129,29 @@ es_pe_gui:
         call dos_cerrar
         popf
         jc .no
-        cmp word [pe_cab+PC_SUBSIS], 2
+        movzx eax, word [pe_cab+PC_SUBSIS]
         jmp .x
 .no:
-        or eax, -1                  ; ZF=0
+        xor eax, eax
 .x:
+        mov [esp+28], eax
         popad
+        ret
+
+; ---- (acc_lanzar) EBX=acceso EDX=el lanzador: si el programa que va a
+; ejecutar Hispa-DOS es de Windows (de consola), que lo lance el intérprete
+; de órdenes (COMSPEC /C), que es quien sabe pasárselo a HW32 ----
+pe_marca_consola:
+        push eax
+        push esi
+        lea esi, [ebx+AC_PROG]
+        call pe_subsistema
+        test eax, eax
+        jz .x
+        or byte [edx+lz_band], 0x10
+.x:
+        pop esi
+        pop eax
         ret
 
 ; ---- lee la cabecera PE del archivo EBX a pe_cab (desde la firma «PE») y

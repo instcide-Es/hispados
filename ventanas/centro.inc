@@ -1412,6 +1412,7 @@ acc_lanzar:
         mov al, [ebx+AC_BAND]
         and al, AB_VOLVER | AB_PAUSA
         mov [edx+lz_band], al
+        call pe_marca_consola       ; [HISPA-486] un Win32 de consola: por COMSPEC /C
         call jd_componer            ; VELOCIDAD y LOADFIX delante, y el sonido
         jc .aviso
         mov byte [edx+lz_orden], 1

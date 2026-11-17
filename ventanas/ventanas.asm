@@ -102,6 +102,8 @@ lz_orden    db 0                    ; 1: hay un encargo (lo pone la parte gráfi
 lz_band     db 0                    ; bit 0 volver a Hispa Ventanas, bit 1 esperar una tecla,
                                     ; bit 2 va con VELOCIDAD (al volver se mira que no
                                     ; quede frenando), bit 3 cargar antes HSPSND /SB
+                                    ; bit 4 [HISPA-486] por el intérprete de órdenes
+                                    ; (un programa de Windows de consola: HW32)
 lz_velst    db 0                    ; cómo quedó VELOCIDAD tras el programa (LZV_*):
                                     ; lo lee y lo borra la parte gráfica al volver
 lz_dpmi     db 0                    ; HSPDPMI: 1 lo ha cargado el lanzador, 2 ya estaba
@@ -426,7 +428,10 @@ lz_quitar_dpmi:
 
 ; el encargo: ejecuta lz_prog con lz_param en la carpeta lz_dir
 lz_programa:
+        test byte [lz_band], 0x10   ; [HISPA-486] un programa de Windows de
+        jnz .condpmi                ; consola necesita HSPDPMI: se queda
         call lz_quitar_dpmi
+.condpmi:
         mov byte [lz_velst], 0
         test byte [lz_band], 8
         jz .sinsb
@@ -469,6 +474,8 @@ lz_programa:
         jnz .f
         mov di, 0x81
         mov dx, lz_prog
+        test byte [lz_band], 0x10   ; [HISPA-486] un programa de Windows de
+        jnz .bat                    ; consola: también por el intérprete (HW32)
         cmp byte [si-5], '.'
         jne .cola
         mov ax, [si-4]
@@ -479,6 +486,7 @@ lz_programa:
         and al, 0xDF
         cmp al, 'T'
         jne .cola
+.bat:
         call lz_comspec             ; COMSPEC /C programa parámetros
         mov ax, ' /'
         stosw

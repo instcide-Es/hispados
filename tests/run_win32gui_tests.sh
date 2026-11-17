@@ -74,8 +74,8 @@ printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'SinRepetidos=1' '
 MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
 
 if [ -n "${EXPLORA:-}" ]; then
-  { sleep 6; send 'VENTANAS' 9; tecla ret; sleep 2; shot e2; tecla esc; sleep 1; shot e3; tecla ret; sleep 2; shot e4; tecla ret; sleep 2; shot e5; mon quit; } | run
-  tail -5 $T/log.txt; cp $T/e?.ppm "$EXPLORA"/; rm -rf $T; exit 0
+  { sleep 6; send 'VENTANAS' 9; tecla right right ret; sleep 12; shot e2; mon quit; } | run
+  sed -n '/VENTANAS/,$p' $T/log.txt | tail -20; cp $T/e?.ppm "$EXPLORA"/; rm -rf $T; exit 0
 fi
 rm -rf $T
 exit $fail
