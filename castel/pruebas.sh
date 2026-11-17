@@ -18,6 +18,11 @@
 #      verdad de la Fase 4, con archivos, «<», tubería, uno que no está y uno
 #      de más de 65535 octetos; lo que escriben se compara con lo que sale de
 #      hacer la misma cuenta en Python.
+#   5. El ensamblador propio: ensambla.py (la referencia, en Python) y ENSAMBLA
+#      (ensamblador/ensambla.cas, escrito en Castel, corriendo en Hispa-8086)
+#      ensamblan todos los ejemplos, la biblioteca entera, las formas de
+#      ensamblador/formas.asm y el propio ENSAMBLA, y cada archivo tiene que
+#      salir igual, octeto a octeto, que el de NASM.
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
@@ -62,8 +67,10 @@ for f in $AQUI/ejemplos/*.cas; do
   n=$(basename $f .cas)
   N=$(echo $n | tr a-z A-Z)
   [ $n = mas ] && N=MASC               # MAS.COM es la de ensamblador
-  if $AQUI/compilar.sh $f $T/$N.COM -I $AQUI/ejemplos/partes > $T/comp.txt 2>&1; then
-    ok "$n.cas -> $N.COM ($(stat -c %s $T/$N.COM) octetos)"
+  X=COM
+  grep -q '^ *modelo grande' $f && X=EXE   # el «modelo grande» da un .EXE
+  if $AQUI/compilar.sh $f $T/$N.$X -I $AQUI/ejemplos/partes > $T/comp.txt 2>&1; then
+    ok "$n.cas -> $N.$X ($(stat -c %s $T/$N.$X) octetos)"
     # MAS, CONTAR y NUMERA llevan argumentos y sus pruebas aparte
     [ $n = mas ] || [ $n = contar ] || [ $n = numera ] || EJEMPLOS="$EJEMPLOS $n"
   else
@@ -215,7 +222,7 @@ lote += ["LIMPIAR", "ECO [castel-fin]"]
 open(t + '/AUTOEXEC.BAT', 'wb').write(("\r\n".join(lote) + "\r\n").encode('cp437'))
 PY
 [ $? = 0 ] || { echo "No se han podido preparar los textos de prueba"; exit 2; }
-mcopy -o -i $T/a.img $T/*.COM $T/CORTO.TXT $T/LARGO.TXT $T/GRANDE.TXT $T/AUTOEXEC.BAT ::
+mcopy -o -i $T/a.img $T/*.COM $T/*.EXE $T/CORTO.TXT $T/LARGO.TXT $T/GRANDE.TXT $T/AUTOEXEC.BAT ::
 POR_PROG=15         # pausas de cada una de las dos MAS
 ESC="8 15"          # las que se contestan con Esc
 
@@ -341,7 +348,63 @@ numera 2 "NUMERA < archivo"
 if [ -s $T/sal/NUMERA3N.SAL ] && grep -q "no puedo abrir NOHAY.TXT" $T/sal/NUMERA3.SAL; then ok "NUMERA de uno que no está: lo dice y acaba con el nivel de error 1"
 else ko "NUMERA de uno que no está: no lo dice o no acaba con el nivel de error 1"; fi
 
-# ------------------------------------------------- 5. cuentas al azar (AZAR=n)
+# ---------------------------------------------------- 5. el ensamblador propio
+echo "== El ensamblador propio: los mismos octetos que NASM =="
+mkdir $T/ens $T/ens/nasm
+cp $T/*.asm $T/ens/
+cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
+# la biblioteca entera (también lo que nadie usa) y el propio ensamblador
+printf 'm\xc3\xb3dulo Toda\n    importar Textos, Archivos, Memoria, Argumentos, Lejos\n    funci\xc3\xb3n principal()\n    fin\nfin Toda.\n' > $T/ens/toda.cas
+python3 -I $AQUI/ccastel.py --todo $T/ens/toda.cas -o $T/ens/toda.asm > /dev/null 2>&1 || ko "la biblioteca entera no compila"
+python3 -I $AQUI/ccastel.py $AQUI/ensamblador/ensambla.cas -o $T/ens/ensambla.asm > /dev/null 2>&1 || ko "ensambla.cas no compila"
+iguales=0
+distintos=
+for f in $T/ens/*.asm; do
+  n=$(basename $f .asm)
+  nasm -f bin $f -o $T/ens/nasm/$n.bin 2> /dev/null
+  python3 -I $AQUI/ensambla.py $f -o $T/ens/$n.py.bin 2> /dev/null
+  if cmp -s $T/ens/nasm/$n.bin $T/ens/$n.py.bin; then iguales=$((iguales + 1)); else distintos="$distintos $n"; fi
+done
+if [ -z "$distintos" ]; then ok "ensambla.py: los $iguales archivos (ejemplos, biblioteca entera, formas y ENSAMBLA), iguales que con NASM"
+else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
+# ENSAMBLA, dentro de Hispa-8086: los ensambla todos (también a sí mismo)
+cp $H/build/hispa8086-1440.img $T/e.img
+{ printf '@ECO OFF\r\n'
+  for f in $T/ens/*.asm; do
+    N=$(basename $f .asm | tr a-z A-Z)
+    mcopy -o -i $T/e.img $f ::$N.ASM
+    printf 'ENSAMBLA %s.ASM %s.BIN > %s.SAL\r\n' $N $N $N
+  done
+  printf 'ECO [castel-fin]\r\n'; } > $T/AUTOEXEC.BAT
+mcopy -o -i $T/e.img $T/ens/nasm/ensambla.bin ::ENSAMBLA.COM
+mcopy -o -i $T/e.img $T/AUTOEXEC.BAT ::
+qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
+  -drive file=$T/e.img,format=raw,if=floppy,index=0 -boot a -no-reboot > /dev/null 2>&1 &
+QPID=$!
+sleep 4
+hecho=0
+for ((i = 0; i < 300; i++)); do
+  pantalla p
+  if grep -qF '[castel-fin]' $T/p.txt; then hecho=1; break; fi
+  sleep 1
+done
+mon quit 0.5
+wait $QPID 2>/dev/null
+QPID=
+[ $hecho = 1 ] || ko "ENSAMBLA: el lote no ha llegado al final"
+mkdir $T/ens/sal
+mcopy -n -i $T/e.img '::*.BIN' $T/ens/sal/ > /dev/null 2>&1
+iguales=0
+distintos=
+for f in $T/ens/*.asm; do
+  n=$(basename $f .asm)
+  N=$(echo $n | tr a-z A-Z)
+  if cmp -s $T/ens/nasm/$n.bin $T/ens/sal/$N.BIN; then iguales=$((iguales + 1)); else distintos="$distintos $n"; fi
+done
+if [ -z "$distintos" ]; then ok "ENSAMBLA (en Castel, dentro de Hispa-8086): los $iguales archivos, iguales que con NASM (él mismo incluido)"
+else ko "ENSAMBLA no da lo mismo que NASM en:$distintos"; fi
+
+# ------------------------------------------------- 6. cuentas al azar (AZAR=n)
 if [ -n "${AZAR:-}" ]; then
   echo "== Castel: cuentas al azar =="
   for ((s = 1; s <= AZAR; s++)); do

@@ -604,9 +604,58 @@ fin Programa.
 
 ---
 
+## 11 bis. Programas grandes: `modelo grande`
+
+Un `.COM` es un solo segmento: código, datos y pila tienen que caber en 64 K. Para lo que no
+cabe (el compilador de Castel, sin ir más lejos), el programa lo dice entre sus declaraciones:
+
+```
+módulo Compilador
+
+    modelo grande
+
+    importar Textos, Archivos
+    ...
+```
+
+y entonces no sale un `.COM` sino un **`.EXE`** repartido así:
+
+- **un segmento de código por módulo** (el programa y cada módulo que importa), de hasta 64 K
+  cada uno;
+- **un segmento para los datos y la pila**, con sus 64 K enteros: las variables, los textos,
+  la pila y el montón de `Memoria`.
+
+Lo que se escribe en Castel **no cambia**: las mismas funciones, los mismos punteros (siguen
+siendo cercanos: apuntan dentro del segmento de datos), la misma biblioteca. Lo que cambia es
+cómo queda en la máquina:
+
+- Las funciones **públicas** son *lejanas*: se las puede llamar desde otro segmento. Vuelven
+  con `retf` y su primer parámetro está en `[bp+6]` en vez de `[bp+4]`. Llamarlas es
+  `push cs` y un `call` cercano: a la función, si está en el mismo segmento, o a un *puente*
+  (`J<segmento>_<función>`: un `jmp` lejano a la función) si está en otro. Las que no son
+  públicas siguen siendo cercanas, como en un `.COM`. `principal()` también.
+- Cada segmento lleva sus propias rutinas de apoyo (`escribir_cad_2`, `castel_mul32_3`...).
+- El archivo empieza con la cabecera `MZ` y la tabla de lo que el DOS tiene que reubicar al
+  cargarlo: el segmento de cada puente, nada más.
+- Al arrancar, `DS = SS =` el segmento de datos, y en sus primeros 256 octetos se deja **una
+  copia del prefijo del programa (PSP)**: `puntero(0x81)` sigue siendo la línea de órdenes, y
+  el módulo `Argumentos` vale tal cual.
+- El programa pide al DOS solo la memoria que necesita (su código y los 64 K de datos): el
+  resto queda libre para pedir bloques con el módulo `Lejos`.
+- En un bloque `ensamblador`, `{función}` sigue dando su etiqueta; si la función es pública,
+  hay que llamarla como lejana (`push cs` y `call {función}`, desde su mismo módulo).
+
+Solo cuenta el `modelo grande` del programa (el archivo que se compila): los módulos se
+compilan como diga él. `modelo` y `grande` no son palabras reservadas.
+
+`ejemplos/grande.cas` es un programa de modelo grande: textos, montón, 32 bits, `ref`,
+módulos que llaman a otros módulos y la línea de órdenes.
+
+---
+
 ## 12. La biblioteca, escrita en Castel
 
-En `biblioteca/` hay cuatro módulos escritos en Castel (sin ensamblador: los archivos van con
+En `biblioteca/` hay cinco módulos escritos en Castel (sin ensamblador: los archivos van con
 `interrupción`). Se usan con `importar`; lo que dan, con sus comentarios, está en cada archivo.
 
 **`Textos`** (`textos.cas`) — textos acabados en 0, como `puntero a byte`:
@@ -653,6 +702,21 @@ manejador); `ENTRADA`, `SALIDA` y `ERRORES` ya están abiertos:
 **`Argumentos`** (`argumentos.cas`) — lo escrito detrás del nombre del programa:
 `cuántos_argumentos()`, `argumento(n, destino, cabe)` y `línea_de_órdenes()`.
 
+**`Lejos`** (`lejos.cas`) — memoria **lejana**: bloques fuera del segmento del programa, para
+las tablas que no caben en él (las del ensamblador y las del compilador). Se piden al DOS por
+párrafos (16 octetos) y lo que se recibe es un segmento, que se lee y se escribe con
+`leer_byte`, `poner_byte`, `leer_palabra` y `poner_palabra`:
+
+| Función | Qué hace |
+|---|---|
+| `pedir(párrafos)` | un bloque de ese tamaño (`0x1000` son 64 K): su segmento, o 0 si no hay |
+| `devolver_bloque(seg)` | lo devuelve |
+| `borrar_bloque(seg, palabras)` | pone a cero sus primeras palabras |
+| `mayor_bloque()` | cuántos párrafos tiene el mayor que se puede pedir |
+
+(Un `.COM` recibe del DOS toda la memoria: la primera vez que pide un bloque, se queda con
+sus 64 K y devuelve el resto.)
+
 Los usan cuatro programas de `ejemplos/`: `biblio.cas` (textos y montón), `ficheros.cas`
 (archivos) y dos órdenes de verdad: **`contar.cas`**, CONTAR, que cuenta líneas, palabras y
 octetos de uno o más archivos (como el `wc` de Unix), con totales de 32 bits; y
@@ -668,8 +732,8 @@ dentro, cada una ocupa menos de 1,5 K.
   antes (32 bits, módulos, textos, archivos y memoria) ya está. Ver CIMIENTOS.md y el README.
 - **Punteros lejanos** (`seg:desp`) como tipo. Mientras, `leer_byte` y compañía.
 - **Copiar arreglos y estructuras enteros** (`a := b`) y valores iniciales de estructuras.
-- **Programas `.EXE`** y más de un segmento (las tablas del compilador pueden pedir más de
-  64 K); y el salto a 32 bits de verdad, con los registros del 386 (Fase 5).
+- **El salto a 32 bits de verdad**, con los registros del 386 (Fase 5). (Los programas
+  `.EXE` de varios segmentos ya están: sección 11 bis.)
 - **Comprobaciones al ejecutar** opcionales (índices, desbordamientos), para depurar.
 - **Más biblioteca** según haga falta: escribir en archivos con memoria intermedia, carpetas,
   fechas.
