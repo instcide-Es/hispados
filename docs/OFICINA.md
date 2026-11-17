@@ -65,6 +65,62 @@ Y unas reglas, que no son código:
 - **Números y fechas**, a la española: coma decimal, punto de millares,
   día/mes/año.
 
+## El botón secundario
+
+Pedido de Carlos: «Botón secundario en toda la suite Office». En todos los
+programas de la familia, el botón derecho del ratón (o Ctrl+clic, o Mayús+F10
+y la tecla de menú con el teclado) abre un menú contextual en el sitio del
+puntero con las órdenes que tocan para lo que hay debajo, como en Windows y
+como en el Administrador de archivos. Las reglas:
+
+- **Primero se coloca**: al apretar el botón sobre algo que no está elegido
+  (un sitio del texto, una celda, una factura, un registro, un objeto), se
+  elige eso, como con un clic; si ya estaba dentro de lo elegido, lo elegido
+  no cambia (para cortarlo, copiarlo o darle formato entero).
+- **Las mismas órdenes**: cada línea del menú es una orden de la barra de
+  menús, con su mismo número, su mismo texto y su misma tecla al lado. Un menú
+  contextual no hace nada que no se pueda hacer por la barra.
+- **En gris lo que ahora no se puede** (Pegar sin nada que pegar, Cortar sin
+  nada elegido, la página anterior en la primera...).
+- **En la barra de botones y en el pie no hay menú.** Con el teclado, el menú
+  es el de lo elegido y sale junto a ello cuando se puede.
+
+| Programa | Dónde | Menú |
+|---|---|---|
+| Pluma | el texto | Deshacer, Repetir, Cortar, Copiar, Pegar, Borrar, Seleccionar todo, Fuentes, Párrafo, Estilo del párrafo, Viñetas, Numeración, Ortografía |
+| Cuentas | una celda o un rango | Cortar, Copiar, Pegar, Borrar, insertar y eliminar filas y columnas, Autosuma, ordenar, Formato de celdas |
+| | el rótulo de una columna o de una fila (se elige entera) | Cortar, Copiar, Pegar, Borrar, insertar y eliminar, su ancho o su alto, Formato de celdas |
+| | la pestaña de una hoja (se pasa a ella) | Hoja nueva, Eliminar hoja, Nombre, moverla a la izquierda o a la derecha |
+| Facturas | una factura de la lista | Abrir, Datos, Pagada, Duplicar, Borrar, Guardar como texto, Imprimir, Nueva |
+| | la lista, donde no hay facturas | Nueva, emitidas, recibidas, Resumen, Exportar |
+| | la factura abierta (la línea queda elegida) | Datos, Pagada, añadir, cambiar y quitar línea, texto, imprimir, volver a la lista |
+| Datos | un registro (en la rejilla o en la ficha) | Cambiar, Duplicar, Borrar, Copiar, Pegar en el campo, Añadir, Buscar, Filtrar, Quitar el filtro, Resumen del campo |
+| | el encabezado de una columna | ordenar, filtrar, resumen y las órdenes del campo (añadir, cambiar, quitar, mover) |
+| | la tabla, donde no hay registros | Añadir, Elegir todos, Buscar, Filtrar, las vistas, Elegir tabla, Añadir un campo |
+| | sin tablas | Nueva base, Abrir base |
+| Lector | la página | Copiar el texto, Buscar, Buscar siguiente, página anterior y siguiente, Ir a la página, ampliar, reducir, tamaño real, ancho de página, página entera, guardar e imprimir el texto, Información, Abrir |
+| Mirador | la imagen | anterior, siguiente, ampliar, reducir, ajustar, tamaño real, pantalla completa, girar, elegir una zona, recortar, deshacer, copiar el nombre, guardar como BMP, información, miniaturas |
+| | una miniatura (queda elegida) | Abrir, Volver a la imagen |
+| Publicaciones y Presentaciones | un objeto (o varios elegidos) | Cortar, Copiar, Pegar, Borrar, Duplicar, Escribir en la caja, Traer al frente, Enviar al fondo, Agrupar, Desagrupar, Girar, tipo, tamaño y color de la letra, colores del relleno y del borde, grosor |
+| | escribiendo en una caja (el cursor va al punto) | Pegar, negrita, cursiva, subrayado, alineación, tipo, tamaño y color de la letra, viñetas, numeración |
+| | la página, donde no hay objetos | Deshacer, Pegar, Elegir todo, las herramientas (caja de texto, rectángulo, elipse, línea, imagen) y lo de la página o la diapositiva |
+| Presentaciones | una diapositiva de la tira o del clasificador (se pasa a ella) | nueva, duplicar, quitar, subir, bajar, diseño, transición, empezar desde ella |
+
+**Cómo está hecho.** Lo común está en `programas/comun/contexto.inc`:
+`ctx_abre` recibe el menú (el formato de un desplegable, con los números de
+las órdenes de la barra) y una tabla del programa con las órdenes que pueden
+ir en gris y la rutina que lo dice (CF=1: ahora no); con eso llama a
+`ctx_menu` de Hispa Ventanas, y la orden elegida llega a la ventana como
+`WM_COMMAND`, igual que si se hubiera elegido arriba. `ctx_porta` dice si hay
+texto que pegar. Cada programa atiende `WM_RBUTTONDOWN` (se coloca y apunta
+en `ctx_donde` qué había debajo) y `WM_CONTEXTMENU` (abre el menú que toca;
+con EDX = -1 viene del teclado). En Publicaciones y Presentaciones eso está
+en el editor de láminas (`lamina_ed.inc`: `raton_der`, `menu_ctx`); el
+programa solo pone el menú de su página (`ctx_fondo`), otro suyo si lo tiene
+(`ctx_prog`) y su tabla de gris (`ctx_gris_prog`, con la macro `CTX_GRIS_ED`).
+Las pruebas de cada programa tienen su parte del botón secundario (`derecho X
+Y` en `tests/tools/hvp_arnes.sh`).
+
 ## Cómo está hecho un programa
 
 Cada programa es un módulo `.HVP` (`ventanas/hvp.inc` explica la cabecera y la

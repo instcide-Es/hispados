@@ -1071,6 +1071,7 @@ a mediados de los 90; aquí tienen el aspecto de los menús de siempre.
 | Pintura | el botón derecho sigue siendo el color secundario: no hay menú con el ratón; con Mayús+F10, Deshacer, Rehacer, Cortar, Copiar, Pegar, Borrar, Seleccionar todo e Intercambiar los colores |
 | Mezclador | Vista sencilla / completa (en gris la que se ve), Avanzado..., Valores de fábrica... |
 | Reproductor de sonido | Sonido de prueba, Tono 440 Hz, Abrir WAV..., Parar (en gris si no suena), Mezclador... |
+| La familia de oficina (Pluma, Cuentas, Facturas, Datos, Lector, Publicaciones, Presentaciones, Mirador) | el de lo que hay bajo el puntero: el texto, la celda, la factura, el registro, la página, el objeto, la imagen (ver «El botón secundario» en `OFICINA.md`) |
 | Las demás ventanas (los juegos, la Calculadora...) | con el ratón, nada (el botón derecho es suyo: el Campo de minas pone banderas); con el teclado, el de la barra de título |
 
 **Ventanas en cascada** pone las ventanas visibles en escalera, de 26 en 26
