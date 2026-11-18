@@ -4,7 +4,7 @@
 # Compila un fuente Castel a ensamblador (ccastel.py) y lo ensambla a un .COM
 # de DOS (NASM). Sin SALIDA, deja NOMBRE.COM (en mayúsculas) al lado del fuente
 # (NOMBRE.EXE si el programa dice «modelo grande» o «modelo hispa32»;
-# NOMBRE.BIN si dice «modelo núcleo»).
+# NOMBRE.BIN si dice «modelo núcleo» o «modelo usuario»).
 # El ensamblador intermedio (NOMBRE.asm) queda al lado del .COM.
 # Los módulos que el programa importa se buscan en su carpeta, en las que se
 # den con -I y en biblioteca/ (la biblioteca de Castel).

@@ -21,8 +21,13 @@ resultado, compilado otra vez, sale idéntico) y la **Fase 5: Castel de 32 bits*
 ([docs/CASTEL32.md](docs/CASTEL32.md)) — el modelo plano del 386 en modo protegido, con dos
 salidas (`modelo núcleo`, un binario multiboot arrancable en QEMU; `modelo hispa32`, un
 programa Win32 de consola para HW32). Los dos compiladores y ENSAMBLA entienden 32 bits, y
-hay una **semilla de Hispa-Pentium** (`nucleo32/semilla.cas`): un núcleo con IDT, reloj,
-teclado y excepciones.
+hay una **semilla de Hispa-Pentium** (`nucleo32/semilla.cas`), que ya es un núcleo de
+verdad, todo en Castel ([../docs/PENTIUM.md](../docs/PENTIUM.md)): IDT, reloj, teclado y
+excepciones; marcos físicos con el mapa de memoria de multiboot; **paginación** con el fallo
+de página atendido; un montón con comprobación; **tareas** con el reloj repartiendo el
+procesador; y **programas del anillo 3** (el `modelo usuario`) con su llamada al sistema.
+Para él hay una **biblioteca de 32 bits** en Castel (`biblioteca32/`: textos, memoria y
+escribir con formato).
 
 ## Qué hay aquí
 
@@ -38,6 +43,12 @@ teclado y excepciones.
   ([docs/ENSAMBLADOR.md](docs/ENSAMBLADOR.md)).
 - `biblioteca/` — **la biblioteca, escrita en Castel**: `textos.cas`, `archivos.cas`,
   `memoria.cas`, `argumentos.cas` y `lejos.cas` (CASTEL.md §12). Se usan con `importar`.
+- `biblioteca32/` — la de **32 bits**: `textos32.cas`, `mem32.cas` y `formato.cas` (un
+  `printf` sencillo) (CASTEL32.md §7).
+- `nucleo32/` — **Hispa-Pentium**: el núcleo (`semilla.cas` y sus módulos), sus programas de
+  usuario (`uhola.cas`, `umalo.cas`, `ucli.cas`) y `probar.sh`, que lo arranca en QEMU y le
+  teclea órdenes ([../docs/PENTIUM.md](../docs/PENTIUM.md)).
+- `ejemplos32/` — ejemplos de 32 bits (`plano.cas`, `biblio32.cas`, `hola32.cas`).
 - `compilar.sh ENTRADA.cas [SALIDA.COM] [-I CARPETA]` — compila (con `ccastel.py`) a
   `.asm` y ensambla (con NASM) a `NOMBRE.COM`, o a `NOMBRE.EXE` si el programa es de
   «modelo grande» (`-I`: una carpeta más donde buscar módulos).
@@ -46,7 +57,8 @@ teclado y excepciones.
 - `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA,
   el ensamblador propio contra NASM, el compilador en Castel contra `ccastel.py` y el
   arranque en tres pasos). Tarda unos dos minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta
-  el arranque). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
+  el arranque; `SOLO=32 ./pruebas.sh`, solo los errores y lo de 32 bits, con el núcleo de
+  Hispa-Pentium). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
   cuentas al azar de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits
   (`azar32.py`, unas 200), comparadas con lo que tienen que dar.
 - `ejemplos/` — los programas de ejemplo; `ejemplos/esperado/` — lo que tiene que escribir
@@ -259,6 +271,6 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
 2. **Que el lenguaje crezca escrito en sí mismo**: a partir de aquí cada mejora se hace en
    `compilador/` (y, mientras se quiera conservar la etapa 0, también en `ccastel.py`: las
    pruebas comparan los dos).
-3. **Hispa-Pentium**: a partir de la semilla (`nucleo32/semilla.cas`), escribir en Castel el
-   núcleo de la gama XP (CASTEL32.md §10): más biblioteca de 32 bits, paginación, modo
-   usuario. La Fase 5 (los 32 bits) ya está.
+3. **Hispa-Pentium**: el núcleo de la gama XP, en Castel. Ya tiene paginación, tareas y
+   anillo 3 ([../docs/PENTIUM.md](../docs/PENTIUM.md)); lo siguiente, un disco con su sistema
+   de archivos, más llamadas al sistema y un intérprete de órdenes en el anillo 3.

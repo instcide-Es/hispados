@@ -18,8 +18,9 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
   la reimplementaron, Wine y ReactOS, para saber qué hace cada función); nunca
   se copia código de nadie.
 - **Lo que no es:** un núcleo nuevo. El núcleo sin DOS, con la tecnología de los
-  2000, es el sistema siguiente: **Hispa-Pentium**, la gama de Windows XP (y se
-  escribirá en [Castel](../../castel/)).
+  2000, es el sistema siguiente: **Hispa-Pentium**, la gama de Windows XP, que se
+  escribe en [Castel](../../castel/): su núcleo ya arranca, con paginación, tareas y
+  programas en el anillo 3 ([../PENTIUM.md](../PENTIUM.md)).
 
 ## Cómo se construye: por encima de Hispa-386
 
