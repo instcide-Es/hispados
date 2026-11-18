@@ -103,7 +103,6 @@ módulo Fat
     variable fat_buf_sector: nat32 = 0xFFFFFFFF
     variable fallo: bool                        ; el disco ha fallado en la última operación
     variable abiertos: arreglo [MAX_ABIERTOS] de Abierto
-    variable sonda: Abierto                     ; para mirar sin abrir
 
     ; -------------------------------------------------------------------------
     ;  Los sectores y la FAT

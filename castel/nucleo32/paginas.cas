@@ -7,7 +7,10 @@
 ;                             el núcleo, sus variables, la pantalla, los
 ;                             marcos. Solo para el anillo 0.
 ;    0x40000000 - 0xBFFFFFFF  el programa de usuario (anillo 3): cada uno, en
-;                             su espacio de direcciones (su directorio).
+;                             su espacio de direcciones (su directorio). Sus
+;                             últimos 4 MB (desde 0xBFC00000) son para su
+;                             pila, que empieza con una página y crece hacia
+;                             abajo: el fallo de página le pone las demás.
 ;    0xC0000000 - 0xC07FFFFF  el montón del núcleo (monton.cas).
 ;    0xD0000000 - 0xD03FFFFF  la zona «a la demanda»: no hay nada hasta que se
 ;                             toca; el fallo de página pone allí un marco.
@@ -30,6 +33,8 @@ módulo Paginas
     público constante PÁGINA = 4096
     público constante USUARIO_INICIO = 0x40000000
     público constante USUARIO_FINAL = 0xC0000000
+    público constante PILA_FINAL = 0xC0000000    ; donde empieza (arriba) la pila de un programa
+    público constante PILA_INICIO = 0xBFC00000   ; hasta donde puede bajar: 4 MB (y la primera página, nunca)
     público constante MONTÓN_INICIO = 0xC0000000
     público constante MONTÓN_TABLAS = 2         ; 8 MB
     público constante DEMANDA_INICIO = 0xD0000000
@@ -38,6 +43,7 @@ módulo Paginas
     público variable directorio_núcleo: nat32   ; el del núcleo (dirección física)
     público variable activa: bool
     público variable atendidos: nat32           ; fallos atendidos en la zona a la demanda
+    público variable pilas_crecidas: nat32      ; páginas puestas a las pilas de los programas
 
     ; la entrada del directorio y la de la tabla de una dirección
     función entrada_dir(dir: nat32, virtual: nat32): puntero a nat32
@@ -242,6 +248,30 @@ módulo Paginas
             devolver falso
         fin
         atendidos := atendidos + 1
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La pila de un programa, que crece
+    ; -------------------------------------------------------------------------
+    ; lo que hace el fallo de página con una dirección de la zona de la pila
+    ; del programa (directorio dir) que no tiene página: le pone un marco (a
+    ; cero). «esp» es por dónde va su pila: solo se atiende lo que cae de ahí
+    ; para arriba (o justo debajo: lo que una instrucción apila), no una
+    ; dirección cualquiera de la zona. La página de más abajo no se pone
+    ; nunca: una pila que se desboca acaba ahí, en un fallo de página.
+    público función atender_pila(dir: nat32, virtual: nat32, esp: nat32): bool
+        variable m: nat32
+        si virtual < PILA_INICIO + PÁGINA o virtual >= PILA_FINAL entonces devolver falso fin
+        si esp < PILA_INICIO o esp > PILA_FINAL o virtual + 64 < esp entonces devolver falso fin
+        si banderas_de(dir, virtual) <> 0 entonces devolver falso fin
+        m := reservar_marco()
+        si m = 0 entonces devolver falso fin
+        si no mapear(dir, virtual yb DIRECCIÓN, m, ESCRIBIR ob USUARIO) entonces
+            soltar_marco(m)
+            devolver falso
+        fin
+        pilas_crecidas := pilas_crecidas + 1
         devolver cierto
     fin
 

@@ -990,7 +990,7 @@ módulo Programa
         sl("; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----")
         sl("_vacio:")
         sl("    absolute _vacio")
-        si plano_bin entonces
+        si es_núcleo entonces                   ; (la de un programa de usuario la pone el núcleo)
             sl("C_pila:")
             sl("    resb 16384")
             sl("C_pila_fin:")

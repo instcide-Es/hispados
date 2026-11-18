@@ -52,6 +52,7 @@ módulo Tareas
         padre: nat32                            ; el número de la tarea que la hizo (0: huérfana)
         args: puntero a byte                    ; sus argumentos (del montón), o nulo
         quiebre_inicio, quiebre: nat32          ; del anillo 3: dónde acaba su memoria (sbrk)
+        esp_usuario: nat32                      ; por dónde iba su pila al entrar en la llamada al sistema
         nombre_propio: arreglo [16] de byte     ; donde se guarda su nombre
     fin
 
@@ -328,8 +329,8 @@ módulo Tareas
 
     ; una tarea del anillo 3: empieza en «entrada» con la pila en «pila», en
     ; el espacio de direcciones «directorio» (que pasa a ser suyo: se suelta
-    ; al recogerla)
-    público función crear_tarea_usuario(nombre: puntero a byte, directorio: nat32, entrada: nat32, pila: nat32): puntero a Tarea
+    ; al recogerla); su memoria acaba en «quiebre»
+    público función crear_tarea_usuario(nombre: puntero a byte, directorio: nat32, entrada: nat32, pila: nat32, quiebre: nat32): puntero a Tarea
         variable t: puntero a Tarea
         variable p: puntero a nat32
         variable b, i: nat32
@@ -351,8 +352,9 @@ módulo Tareas
         t.marco := nat32(p)
         t.cr3 := directorio
         t.usuario := cierto
-        t.quiebre_inicio := pila
-        t.quiebre := pila
+        t.quiebre_inicio := quiebre
+        t.quiebre := quiebre
+        t.esp_usuario := pila
         meter(listas, t)
         reponer(b)
         devolver t

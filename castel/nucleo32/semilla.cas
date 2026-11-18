@@ -122,12 +122,13 @@ módulo Semilla
         no_sigue(cs_, eip, 13)
     fin
 
-    ; el fallo de página: si es en la zona a la demanda, se le pone un marco y
-    ; se vuelve a la instrucción, que ahora sí llega. Si no, se dice dónde ha
+    ; el fallo de página: si es en la zona a la demanda (o en la pila de un
+    ; programa, que crece), se le pone un marco y se vuelve a la instrucción,
+    ; que ahora sí llega. Si no, se dice dónde ha
     ; sido y por qué (lo dice el código: bit 0, la página estaba pero no deja;
     ; bit 1, escribía; bit 2, desde el anillo 3)
     interrupción función fallo_de_página(código: nat32)
-        variable cs_, eip, dir: nat32
+        variable cs_, eip, dir, esp_u: nat32
         variable d: arreglo [4] de nat32
         dir := leer_cr2()
         ensamblador
@@ -135,8 +136,12 @@ módulo Semilla
             mov {eip}, eax
             mov eax, [ebp+40]
             mov {cs_}, eax
+            mov eax, [ebp+48]
+            mov {esp_u}, eax
         fin
         si código yb 4 = 0 y atender_demanda(dir) entonces devolver fin
+        ; un programa cuya pila baja a una página que aún no tiene: se le pone
+        si código yb 5 = 4 y atender_pila(actual.cr3, dir, esp_u) entonces devolver fin
         d[0] := dir
         si código yb 2 <> 0 entonces d[1] := nat32("escritura") sino d[1] := nat32("lectura") fin
         si código yb 4 <> 0 entonces d[2] := nat32("anillo 3") sino d[2] := nat32("núcleo") fin

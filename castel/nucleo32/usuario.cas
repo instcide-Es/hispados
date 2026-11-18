@@ -95,6 +95,21 @@ módulo Usuario
         devolver falso
     fin
 
+    ; ¿puede el programa leer (o escribir) ahí? Como usuario_puede, pero si
+    ; el trozo cae en su pila, donde aún no ha llegado a tocar (un arreglo
+    ; local recién hecho), antes se le ponen esas páginas
+    función puede(inicio: nat32, n: nat32, para_escribir: bool): bool
+        variable p: nat32
+        si n > 0 y inicio >= PILA_INICIO y inicio < PILA_FINAL y inicio + n > inicio y inicio + n <= PILA_FINAL entonces
+            p := inicio yb 0xFFFFF000
+            mientras p < inicio + n hacer
+                si banderas_de(actual.cr3, p) = 0 y no atender_pila(actual.cr3, p, actual.esp_usuario) entonces devolver falso fin
+                p := p + PÁGINA
+            fin
+        fin
+        devolver usuario_puede(actual.cr3, inicio, n, para_escribir)
+    fin
+
     ; mueve el final de la memoria del programa (su «quiebre»): hacia arriba
     ; le pone páginas nuevas (a cero); hacia abajo, las devuelve. Da el final
     ; de antes, o SIN_MEMORIA / NO_VALE.
@@ -104,7 +119,7 @@ módulo Usuario
         nuevo := antes + cuánto
         si cuánto = 0 entonces devolver antes fin
         si cuánto < 0x80000000 entonces
-            si nuevo < antes o nuevo > USUARIO_FINAL entonces devolver SIN_MEMORIA fin
+            si nuevo < antes o nuevo > PILA_INICIO entonces devolver SIN_MEMORIA fin
             v := redondear(antes, PÁGINA)
             mientras v < nuevo hacer
                 m := reservar_marco()
@@ -159,7 +174,7 @@ módulo Usuario
         variable p: puntero a byte
         según n
             caso 1:
-                si no usuario_puede(actual.cr3, a, b, falso) entonces devolver 0xFFFFFFFF fin
+                si no puede(a, b, falso) entonces devolver 0xFFFFFFFF fin
                 escribir_trozo(puntero(a), b)
                 devolver b
             caso 2:
@@ -179,7 +194,7 @@ módulo Usuario
                 si no texto_de_usuario(a, ruta, MAX_RUTA) entonces devolver NO_VALE fin
                 devolver abrir_archivo(ruta)
             caso 8:
-                si no usuario_puede(actual.cr3, b, c, cierto) entonces devolver NO_VALE fin
+                si no puede(b, c, cierto) entonces devolver NO_VALE fin
                 devolver leer_archivo(a, puntero(b), c)
             caso 9:
                 devolver cerrar_archivo(a)
@@ -195,7 +210,7 @@ módulo Usuario
                 si t = nulo o t.padre <> actual.id entonces devolver NO_VALE fin
                 devolver esperar(t)
             caso 12:
-                si no usuario_puede(actual.cr3, b, tamaño(Entrada), cierto) entonces devolver NO_VALE fin
+                si no puede(b, tamaño(Entrada), cierto) entonces devolver NO_VALE fin
                 devolver leer_entrada(a, puntero(b))
             caso 13:
                 devolver tamaño_archivo(a)
@@ -204,7 +219,7 @@ módulo Usuario
                 si actual.args <> nulo entonces
                     mientras actual.args[r] <> 0 hacer r := r + 1 fin
                 fin
-                si b = 0 o no usuario_puede(actual.cr3, a, b, cierto) entonces devolver NO_VALE fin
+                si b = 0 o no puede(a, b, cierto) entonces devolver NO_VALE fin
                 si r >= b entonces r := b - 1 fin
                 si r > 0 entonces copiar_memoria(puntero(a), actual.args, r) fin
                 p := puntero(a + r)
@@ -224,10 +239,13 @@ módulo Usuario
     ; la interrupción 0x80: lo que se pide va en los registros que guardó
     ; «pushad» (EAX en [ebp+28], EBX en [ebp+16], ECX en [ebp+24], EDX en
     ; [ebp+20]), y lo que se devuelve se deja donde estaba EAX, que «popad»
-    ; repone al volver. Se atiende con las interrupciones abiertas.
+    ; repone al volver. Se atiende con las interrupciones abiertas. Se apunta
+    ; por dónde iba la pila del programa ([ebp+44], lo que apiló el procesador).
     interrupción función llamada_al_sistema()
-        variable n, a, b, c, r: nat32
+        variable n, a, b, c, r, esp_u: nat32
         ensamblador
+            mov eax, [ebp+44]
+            mov {esp_u}, eax
             mov eax, [ebp+28]
             mov {n}, eax
             mov eax, [ebp+16]
@@ -238,6 +256,7 @@ módulo Usuario
             mov {c}, eax
             sti
         fin
+        actual.esp_usuario := esp_u
         r := atender(n, a, b, c)
         ensamblador
             cli
@@ -262,7 +281,7 @@ módulo Usuario
         si largo < tamaño(Cabecera) entonces devolver NO_PROGRAMA fin
         si c.magia <> MAGIA entonces devolver NO_PROGRAMA fin
         bien := c.inicio = USUARIO_INICIO y c.datos_fin >= c.inicio y c.datos_fin - c.inicio <= largo
-        bien := bien y c.vacío_fin >= c.datos_fin y c.vacío_fin <= USUARIO_FINAL
+        bien := bien y c.vacío_fin >= c.datos_fin y c.vacío_fin <= PILA_INICIO
         bien := bien y c.entrada >= c.inicio y c.entrada < c.datos_fin
         si no bien entonces devolver NO_VALE fin
         devolver 0
@@ -319,6 +338,14 @@ módulo Usuario
             fin
             v := v + PÁGINA
         fin
+        ; su pila: la última página de su zona; las de debajo las pondrá el
+        ; fallo de página según baje
+        m := reservar_marco()
+        si m = 0 o no mapear(d, PILA_FINAL - PÁGINA, m, ESCRIBIR ob USUARIO) entonces
+            si m <> 0 entonces soltar_marco(m) fin
+            soltar_espacio(d)
+            devolver nulo
+        fin
         copia := nulo
         si args <> nulo y args[0] <> 0 entonces
             n := 0
@@ -332,7 +359,7 @@ módulo Usuario
         fin
         ; la tarea y sus argumentos, de una vez (que no empiece sin ellos)
         b := sin_interrupciones()
-        t := crear_tarea_usuario(nombre, d, c.entrada, v)
+        t := crear_tarea_usuario(nombre, d, c.entrada, PILA_FINAL - 16, v)
         si t <> nulo entonces t.args := copia fin
         reponer(b)
         si t = nulo entonces

@@ -1,13 +1,15 @@
 ; =============================================================================
 ;  uprueba.cas - un programa de usuario de Hispa-Pentium que prueba las
-;  llamadas al sistema desde el anillo 3 (PRUEBA.BIN en el disco): la memoria
+;  llamadas al sistema desde el anillo 3 (PRUEBA.BIN en el disco): la pila
+;  que crece sola, la memoria
 ;  que crece y se devuelve, leer un archivo de varios clusters a trozos, abrir
 ;  más archivos de los que caben, darle al núcleo direcciones que no son del
 ;  programa, lanzar otros programas y esperarlos, y acabar dejando un archivo
 ;  abierto y un programa lanzado sin esperar (el núcleo lo recoge todo).
 ;  Con el argumento «ruido X» escribe líneas enteras sin parar (dos a la vez
 ;  no se mezclan: la pantalla tiene su cerrojo); con «fuera», toca memoria que
-;  ya ha devuelto (y el núcleo lo acaba); con «solo», duerme un rato, dice una
+;  ya ha devuelto (y el núcleo lo acaba); con «pozo», se llama a sí mismo sin
+;  fin hasta agotar su pila (y el núcleo lo acaba); con «solo», duerme un rato, dice una
 ;  línea y acaba (es el que se deja sin esperar).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -68,6 +70,45 @@ módulo UPrueba
     función sí_o_no(b: bool): puntero a byte
         si b entonces devolver "cierto" fin
         devolver "falso"
+    fin
+
+    ; llamadas dentro de llamadas, cada una con 4000 octetos suyos en la pila
+    función honda(n: nat32): nat32
+        variable t: arreglo [1000] de nat32
+        t[0] := n
+        t[999] := n + 1
+        si n = 0 entonces devolver 0 fin
+        devolver honda(n - 1) + t[999] - t[0]
+    fin
+
+    ; lee del disco a un arreglo local que nadie ha tocado todavía: sus
+    ; páginas de la pila se las pone el núcleo al ir a escribir en ellas
+    función lee_en_la_pila(): nat32
+        variable grande: arreglo [20000] de byte
+        variable m, n: nat32
+        m := abrir("textos\\largo.txt")
+        n := leer(m, grande, 20000)
+        cerrar(m)
+        si es_error(n) o n = 0 o grande[n - 1] <> '\n' entonces devolver 0 fin
+        devolver n
+    fin
+
+    función prueba_pila()
+        variable antes, mitad, r: nat32
+        antes := dato(DATO_MIS_PÁGINAS)
+        imprimir1("pila: leo %u octetos del disco a un arreglo local sin estrenar", lee_en_la_pila())
+        mitad := dato(DATO_MIS_PÁGINAS)
+        imprimir1(" (%u páginas más)\n", mitad - antes)
+        r := honda(200)
+        imprimir2("pila: 200 llamadas, una dentro de otra, con 4000 octetos cada una: %u; la pila ha crecido %u páginas\n",
+                  r, dato(DATO_MIS_PÁGINAS) - mitad)
+    fin
+
+    ; una llamada dentro de otra, sin fin: la pila baja hasta que no hay más
+    función pozo(n: nat32): nat32
+        variable t: arreglo [1000] de nat32
+        t[0] := n
+        devolver pozo(n + 1) + t[0]
     fin
 
     función prueba_archivo()
@@ -149,6 +190,7 @@ módulo UPrueba
 
     función principal(): byte
         variable p: puntero a byte
+        variable n: nat32
         argumentos(args, 128)
         palabra(args, 0, modo, 40)
         palabra(args, 1, quién, 40)
@@ -161,6 +203,12 @@ módulo UPrueba
             escribir("soy el que nadie espera: he dormido y acabo solo\n")
             devolver 0
         fin
+        si iguales(modo, "pozo") entonces
+            escribir("pozo: una función que se llama a sí misma sin fin...\n")
+            n := pozo(0)
+            escribir("pozo: he salido con ", n, " (esto no tenía que salir)\n")
+            devolver 0
+        fin
         si iguales(modo, "fuera") entonces
             p := más_memoria(8192)
             valor(p) := 1
@@ -171,6 +219,7 @@ módulo UPrueba
             escribir("fuera: he escrito (esto no tenía que salir)\n")
             devolver 0
         fin
+        prueba_pila()
         prueba_memoria()
         prueba_archivo()
         prueba_muchos()

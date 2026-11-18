@@ -4156,7 +4156,7 @@ class Generador32(Generador):
             sal += ARRANQUE32['hispa32_imp'].strip('\n').split('\n')
         sal += ['', '; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----',
                 '_vacio:', '    absolute _vacio']
-        if nucleo:
+        if self.modelo == 'núcleo':             # (la de un programa de usuario la pone el núcleo)
             sal += ['C_pila:', '    resb 16384', 'C_pila_fin:']
         sal += bss + ['_vacio_fin:']
         if '_fin_programa' in palabras:
@@ -4763,8 +4763,8 @@ C_usuario:
     dd _datos_fin
     dd _vacio_fin
     dd C_arranque
+; (la pila la pone el núcleo, arriba de la zona del programa, y crece sola)
 C_arranque:
-    mov esp, C_pila_fin
     cld
 """,
     'usuario2': r"""
