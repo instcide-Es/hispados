@@ -1,49 +1,73 @@
-PRUEBA DE HISPABIOS (arranque por UEFI) EN EL PC ACTUAL - Hispa-DOS
+PRUEBA DE HISPABIOS 0.3 (arranque por UEFI) - Hispa-DOS
 Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
 ===================================================================
 
-Que es: en el PC actual, arrancando por UEFI, la memoria USB se quedaba en
-    HispaBIOS 0.1 (x64) - paso 2: la memoria baja
-    Mapa de memoria por debajo de 1 MB (inicio, paginas, tipo):
-Era un fallo de HispaBIOS (llamaba al firmware con la pila sin alinear:
-QEMU y el MacBook lo perdonan, los PC actuales no). Esta imagen lleva el
-arreglo (HispaBIOS 0.2) y, ademas, va apuntando lo que hace en un archivo
-de la propia memoria USB, HISPABIOS.LOG, por si se para en otro sitio.
+Que es: con la imagen anterior (HispaBIOS 0.2) el ThinkPad E14 y el
+MacBook Air de 2017 arrancaban por UEFI, pero la pantalla iba "a 1 FPS"
+y Hispa Ventanas decia "no se ha podido poner el modo grafico". Esta
+imagen lleva HispaBIOS 0.3:
+  - el texto ya no va a tirones (DOS miraba el teclado en cada letra que
+    escribia y cada mirada era un viaje al firmware; y la pantalla se
+    pinta ahora con "escritura combinada");
+  - Hispa Ventanas tiene modos graficos (VBE de 32 bits: 640x480,
+    800x600 y 1024x768) aunque el equipo no tenga VESA ni VGA;
+  - DOS tiene mas memoria convencional (576 KB en los dos equipos; en
+    el Mac eran 352 KB);
+  - EQUIPO y la bateria (HSPACPI) ven las tablas ACPI y SMBIOS.
 
-QUE HACER (2 minutos)
----------------------
-1. Descomprima hispados-usb-hispabios.zip y grabe hispados-usb.img en una
-   memoria USB entera (como las otras veces: Rufus en modo DD, balenaEtcher
-   o dd). Se borra lo que tenga.
-2. Arranque el PC actual desde la memoria USB, por UEFI, igual que cuando
-   fallo.
-3. Mire que pasa:
-   a) Llega al menu de Hispa-DOS y a C:\> : arreglado. Pruebe DIR y
-      escriba algo con el teclado.
-   b) Sale un aviso en MAYUSCULAS (por ejemplo, ESTE EQUIPO NO DEJA LIBRE
-      LA MEMORIA BAJA...): dice que falta y que hacer. Pulse una tecla.
-   c) Se queda parado (pantalla negra, o la ultima linea "Arrancando la
-      BIOS de modo real..."): espere un minuto, haga una foto de la
-      pantalla y apague con el boton.
-4. EN LOS TRES CASOS suba al FTP, a la carpeta prueba-hispabios, el archivo
-       HISPABIOS.LOG
-   que ha quedado en la raiz de la memoria USB (se ve desde Windows, Linux
-   o Mac al pinchar la memoria; Hispa-DOS lo ensena como HISPAB~1.LOG).
-   Y la foto, si la hizo. Si puede, diga tambien la marca y el modelo del
-   equipo.
+QUE HACER (10 minutos por equipo)
+---------------------------------
+1. Descomprima hispados-usb-hispabios.zip y grabe hispados-usb.img en
+   una memoria USB entera (Rufus en modo DD, balenaEtcher o dd).
+2. Arranque el equipo desde la memoria USB, por UEFI.
+3. MIRE LA VELOCIDAD DEL TEXTO: el arranque, y luego escriba
+       DIR C:\HISPADOS
+   Son unas 75 lineas: deben pasar seguidas, en 1 o 2 segundos, no a
+   tirones. Mire tambien si las letras se ven bien (tamano, nitidez) y
+   si lo que teclea sale al momento.
+4. Escriba
+       PRUEBAHB
+   Guarda el registro (HBLOG), arranca Hispa Ventanas y, al salir de
+   ella, lo guarda otra vez. En Hispa Ventanas mire:
+     - si sale (o que mensaje da);
+     - si se ve bien y centrada (en una pantalla grande sale ampliada
+       al doble, con franjas negras a los lados);
+     - la velocidad: abrir un grupo con Intro, mover una ventana;
+     - si va el raton o el panel tactil (puede que no: con UEFI todavia
+       no hay raton USB).
+   Para salir: boton "Salir" de la barra de arriba; sin raton, pulse
+   F10, vaya con las flechas a Archivo > Salir e Intro. Si no hay manera,
+   Ctrl+Alt+Supr reinicia (y despues escriba solo HBLOG).
+5. Suba al FTP, a la carpeta de informes de ese equipo (o a
+   prueba-hispabios), estos dos archivos de la raiz de la memoria USB:
+       HISPABIOS.LOG   (DOS lo ensena como HISPAB~1.LOG)
+       HBLOG.TXT
+   y cuente como ha ido la velocidad del texto y la de Hispa Ventanas.
+   Si quiere, pase tambien EQUIPO /INFORME: ahora debe ver ACPI y SMBIOS.
 
-Que lleva HISPABIOS.LOG: el fabricante y la version del firmware, el mapa
-de memoria entero del equipo, las paginas de memoria baja que el firmware
-no da, donde se ha puesto la BIOS de modo real, la pantalla, los discos y
-el ultimo paso al que ha llegado. Es texto: se puede abrir con el Bloc de
-notas. No lleva nada personal.
+SI NO ARRANCA O VA PEOR QUE ANTES: MODO SEGURO
+----------------------------------------------
+Reinicie y, en cuanto salga "HispaBIOS 0.3", vaya pulsando la tecla S
+varias veces. Debe salir "MODO SEGURO": HispaBIOS deja de hacer lo que
+depende del equipo (la escritura combinada, cambiar de modo de pantalla
+y prestar a DOS las paginas de memoria baja del firmware). Diga si asi
+arranca y suba igualmente HISPABIOS.LOG: dira en que paso se quedo.
+
+Que llevan los archivos
+-----------------------
+HISPABIOS.LOG: el firmware, el mapa de memoria, las paginas de memoria
+baja prestadas, la pantalla (modos que da el firmware, tipo de cache,
+lo que cuesta pintarla entera con y sin escritura combinada, como se
+amplia el texto), el marco de VBE y las tablas ACPI/SMBIOS.
+HBLOG.TXT: si llega la interrupcion del reloj, cuantas veces se ha
+dibujado la pantalla y lo que ha tardado, y cada llamada de VBE que ha
+hecho Hispa Ventanas con lo que se le ha contestado.
+Son texto y no llevan nada personal.
 
 Notas
 -----
-- Si el PC tiene Secure Boot activado no arranca ninguna memoria USB que
-  no este firmada (ni llega a salir "HispaBIOS"): hay que desactivarlo en
-  la configuracion del equipo.
-- Esta imagen escribe HISPABIOS.LOG en cada arranque por UEFI. La imagen
-  normal solo lo escribira cuando algo falle.
-- Arrancando por BIOS clasica (CSM / Legacy) no interviene HispaBIOS y no
-  se escribe nada.
+- Con Secure Boot activado no arranca ninguna memoria USB sin firmar:
+  hay que desactivarlo en la configuracion del equipo.
+- Esta imagen escribe HISPABIOS.LOG en cada arranque por UEFI. La
+  imagen normal solo lo escribe cuando algo falla.
+- Arrancando por BIOS clasica (CSM / Legacy) no interviene HispaBIOS.

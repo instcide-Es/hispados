@@ -37,6 +37,9 @@ EFER            equ 0C0000080h
 ; zonas dentro de la BIOS (desplazamientos)
 PILA_REAL       equ 7FF0h           ; pila de la BIOS en modo real
 TX              equ 8000h           ; pantalla de texto 80x25 (4000 octetos)
+EBDA            equ 8FA0h           ; «EBDA»: las entradas de ACPI (+10h) y de SMBIOS (+40h)
+REG             equ 9000h           ; registro de la BIOS (texto: pantalla, VBE), REG_TAM octetos
+REG_TAM         equ 0FF0h
 PAG0_FW         equ 0A000h          ; la página 0 del firmware, guardada
 PAG0_DOS        equ 0B000h          ; la página 0 de DOS, guardada
 PILA32          equ 0EFF0h          ; pila de los tramos de 32 bits
@@ -44,6 +47,7 @@ PILA32          equ 0EFF0h          ; pila de los tramos de 32 bits
 ; peticiones al firmware
 PET_DIBUJAR     equ 1
 PET_ESPERAR     equ 2
+PET_MODO        equ 8               ; argumento: 0 = texto; 1... = modo VBE (bit 8: sin borrar)
 
 %define L(x) (BASE + (x))
 
@@ -74,6 +78,29 @@ P_N             dw 0                    ; +170 sectores (como mucho TROZO)
 P_LBA           dq 0                    ; +172 primer sector
 T_CURSOR        dw 0                    ; +180 posición del cursor (para dibujarlo)
 T_VEC0          db 0                    ; +182 vector de la IRQ 0 del firmware (0: no usa el 8259)
+                db 0
+; ---- (0.3) la pantalla gráfica (VBE) y las cuentas para depurar la velocidad ----
+T_VBE_LFB       dd 0                    ; +184 el marco lineal que se da a los programas
+                                        ;      (memoria normal por debajo de 4 GB; 0: no hay VBE)
+T_VBE_AN        dw 0                    ; +188 ancho y alto de la pantalla real: los modos
+T_VBE_AL        dw 0                    ; +190 mayores no se ofrecen
+T_GRAF          db 0                    ; +192 0: modo texto; 1..: modo VBE puesto (vbe_modos)
+T_SIN_IRQ       db 0                    ; +193 1: la IRQ 0 no está llegando; los tics los da k_tics
+T_REG_N         dw 0                    ; +194 octetos del registro de la BIOS (zona REG)
+T_DIB_N         dd 0                    ; +196 veces que se ha dibujado la pantalla
+T_DIB_ULT       dd 0                    ; +200 microsegundos del último dibujo
+T_DIB_MAX       dd 0                    ; +204 ... del más lento
+T_N_IRQ         dd 0                    ; +208 INT 08h recibidas
+T_N_SIN         dd 0                    ; +212 tics dados sin IRQ (al sondear el teclado)
+T_N_TECLA       dd 0                    ; +216 veces que se ha preguntado al firmware por el teclado
+T_N_FW          dd 0                    ; +220 viajes al firmware
+T_DIB_TOT       dd 0                    ; +224 microsegundos dibujando, en total
+T_TABLAS        db 0                    ; +228 bit 0: RSDP de ACPI en EBDA + 10h; 1: SMBIOS en
+                                        ;      EBDA + 40h; 2: copiadas también en F0000h
+T_INT_N         db 0                    ; +229 páginas del firmware prestadas a DOS
+                dw 0
+T_INT_GUARDA    dd 0                    ; +232 dónde está la otra versión de cada una
+T_INT_DIR       dd 0, 0, 0, 0           ; +236 sus direcciones
 
 %ifdef ARQ32
 ; =============================================================================
@@ -192,6 +219,7 @@ baja_32:
         xor edi, edi
         mov ecx, 1024
         rep movsd
+        call paginas_cambiar
         call reloj_dos
         jmp SEL_C16:baja_16
 
@@ -250,6 +278,7 @@ llamar_fw:
         mov ds, cx
         mov [T_CURSOR], dx
         mov byte [en_fw], 1
+        inc dword [T_N_FW]
         movzx eax, ax
         mov [T_PETICION], eax
         mov [T_ARG], ebx
@@ -281,6 +310,7 @@ sube_32:
         mov esp, L(PILA32)              ; pila propia: la de DOS o la del firmware
                                         ; no valen aquí (otra base, o > 4 GB)
         call reloj_fw
+        call paginas_cambiar
         cld                             ; la página 0: la de DOS se guarda y
         xor esi, esi                    ; vuelve la del firmware
         mov edi, L(PAG0_DOS)
@@ -376,6 +406,29 @@ sube_64:
 ;  TPR). Al volver al firmware se calla el 8259 y todo queda como estaba.
 ;  (Intel SDM vol. 3, 11.5 y 11.8.3.1; 8259A: hoja de datos de Intel.)
         bits 32
+; paginas_cambiar: las páginas de memoria baja que el firmware usa y se prestan
+; a DOS (T_INT_*: efi64.asm, paginas_prestar) cambian de contenido: al bajar
+; queda lo de DOS y se guarda lo del firmware; al subir, al revés
+paginas_cambiar:
+        pushad
+        movzx ecx, byte [L(T_INT_N)]
+        jecxz .f
+        mov ebx, L(T_INT_DIR)
+        mov edi, [L(T_INT_GUARDA)]
+.p:     mov esi, [ebx]
+        mov edx, 1024
+.x:     mov eax, [esi]
+        xchg eax, [edi]
+        mov [esi], eax
+        add esi, 4
+        add edi, 4
+        dec edx
+        jnz .x
+        add ebx, 4
+        loop .p
+.f:     popad
+        ret
+
 reloj_dos:
         push eax
         push ebx
@@ -617,6 +670,63 @@ bios_inicio:
         mov word [es:63h], 3D4h
         mov byte [es:84h], 24           ; filas - 1
         mov word [es:85h], 16           ; alto del carácter
+        ; ---- las tablas del equipo (ACPI y SMBIOS) a la vista: 40:0Eh apunta a
+        ;      la «EBDA» y, si F0000h es memoria libre que se puede escribir
+        ;      (lo que haría un CSM), también allí ----
+        test byte [T_TABLAS], 3
+        jz .sin_tablas
+        mov word [EBDA], 1              ; (la EBDA dice su tamaño: 1 KB)
+        mov word [es:0Eh], SEG_BIOS + (EBDA >> 4)
+        push es
+        mov ax, 0F000h
+        mov es, ax
+        xor di, di
+        mov al, [es:di]
+        cmp al, 0
+        je .f_igual
+        cmp al, 0FFh
+        jne .f_no
+.f_igual:
+        mov cx, 60h                     ; ¿libre? (todo a 00 o a FF)
+        cld
+        repe scasb
+        jne .f_no
+        mov byte [es:0], 5Ah            ; ¿se puede escribir?
+        mov byte [es:1], 0A5h           ; (otro valor en el bus, por si no hay nada)
+        cmp byte [es:0], 5Ah
+        jne .f_no
+        xor di, di
+        mov si, EBDA + 40h              ; SMBIOS en F000:0000, RSDP en F000:0020
+        mov cx, 20h
+        rep movsb
+        mov si, EBDA + 10h
+        mov cx, 30h
+        rep movsb
+        or byte [T_TABLAS], 4
+        mov si, t_r_f_si
+        jmp .f_ya
+.f_no:  mov si, t_r_f_no
+.f_ya:  call reg_txt
+        pop es
+.sin_tablas:
+        ; ---- los modos VBE que caben en la pantalla ----
+        push es
+        push ds
+        pop es
+        mov si, vbe_modos
+        mov di, vbe_lista
+.vm:    mov cx, [si]
+        test cx, cx
+        jz .vf
+        push si
+        call vbe_buscar
+        pop si
+        jc .vs
+        mov ax, cx
+        stosw
+.vs:    add si, 6
+        jmp .vm
+.vf:    pop es
         ; ---- pantalla limpia ----
         mov ax, 0003h
         int 10h
@@ -657,6 +767,7 @@ iret_nada:
 ; =============================================================================
 int10:
         sti
+        call k_tics                     ; (por si la IRQ 0 no llega)
         cmp ah, 00h
         je v_modo
         cmp ah, 01h
@@ -687,6 +798,8 @@ int10:
         je v_cadena
         cmp ah, 1Ah
         je v_combinacion
+        cmp ah, 4Fh
+        je v_vbe
         cmp ah, 0FEh
         je v_pantalla
 v_nada:
@@ -697,6 +810,22 @@ v_modo:                                 ; 00h: cualquier modo -> texto 80x25
         push cx
         push di
         push es
+        push ax                         ; un modo que no hay (gráfico de VGA...):
+        and al, 7Fh                     ; al registro, y queda el de texto
+        cmp al, 3
+        jbe .hay
+        cmp al, 7
+        je .hay
+        push si
+        mov si, t_r_modo
+        call reg_txt
+        xor ah, ah
+        call reg_hex8
+        mov si, t_r_modo2
+        call reg_txt
+        pop si
+.hay:   pop ax
+        call v_a_texto
         mov ax, SEG_BIOS + (TX >> 4)
         mov es, ax
         xor di, di
@@ -1043,6 +1172,280 @@ v_cadena:                               ; 13h: AL modo, BL atributo, CX largo,
         popa
         iret
 
+; v_a_texto: si había un modo gráfico (VBE), se deja y vuelve la pantalla de texto
+v_a_texto:
+        cmp byte [cs:T_GRAF], 0
+        je .f
+        push eax
+        push ebx
+        mov byte [cs:T_GRAF], 0
+        xor ebx, ebx
+        mov ax, PET_MODO
+        call llamar_fw
+        pop ebx
+        pop eax
+.f:     ret
+
+; =============================================================================
+;  VBE 2.0 (INT 10h AH = 4Fh) sobre la pantalla del firmware
+; =============================================================================
+;  Los equipos que solo tienen UEFI no llevan VBE ni VGA, y su pantalla puede
+;  estar por encima de los 4 GB, donde un programa de 32 bits no llega. Se
+;  ofrecen modos de color directo de 32 bits con marco lineal (640x480,
+;  800x600 y 1024x768, los que quepan en la pantalla): el marco es memoria
+;  normal por debajo de 4 GB (T_VBE_LFB, la pide efi64.asm) y en cada tic la
+;  parte UEFI lleva a la pantalla de verdad las líneas que han cambiado.
+;  No hay modos de 8 bits (su paleta se pone por los puertos de la VGA, que
+;  aquí no existen) ni ventanas de 64 KB en A0000h: solo el marco lineal.
+;  Cada llamada se apunta en el registro de la BIOS (zona REG), con lo que se
+;  contesta. Referencia: especificación VBE 2.0/3.0 de VESA.
+v_vbe:
+        push ds
+        push si
+        push ax
+        mov si, SEG_BIOS
+        mov ds, si
+        cmp byte [vbe_reg_n], 80        ; (como mucho 80 llamadas en el registro)
+        jae .sinreg
+        mov si, t_r_vbe
+        call reg_txt
+        call reg_hex16
+        mov si, t_r_bx
+        call reg_txt
+        mov ax, bx
+        call reg_hex16
+        mov si, t_r_cx
+        call reg_txt
+        mov ax, cx
+        call reg_hex16
+.sinreg:
+        pop ax
+        call vbe_hacer
+        cmp byte [vbe_reg_n], 80
+        jae .f
+        inc byte [vbe_reg_n]
+        mov si, t_r_res
+        call reg_txt
+        call reg_hex16
+        mov si, t_r_nl
+        call reg_txt
+.f:     pop si
+        pop ds
+        iret
+
+; vbe_hacer: la función AL (DS = BIOS) -> AX = 004Fh bien, 014Fh mal, 0100h no la hay
+vbe_hacer:
+        cmp dword [T_VBE_LFB], 0
+        je .no
+        cmp al, 00h
+        je vbe_info
+        cmp al, 01h
+        je vbe_modo_info
+        cmp al, 02h
+        je vbe_poner
+        cmp al, 03h
+        je vbe_actual
+.no:    mov ax, 0100h
+        ret
+
+vbe_info:                               ; 4F00h: ES:DI = búfer -> la tarjeta
+        push cx
+        push di
+        push di
+        xor al, al
+        mov cx, 22h
+        cld
+        rep stosb
+        pop di
+        mov dword [es:di], 'VESA'
+        mov word [es:di + 4], 0200h
+        mov word [es:di + 6], t_vbe_oem
+        mov word [es:di + 8], SEG_BIOS
+        mov dword [es:di + 0Ah], 1      ; (el DAC no cambia de anchura)
+        mov word [es:di + 0Eh], vbe_lista
+        mov word [es:di + 10h], SEG_BIOS
+        mov word [es:di + 12h], VBE_MEM >> 16   ; memoria, en bloques de 64 KB
+        mov word [es:di + 14h], 0003h
+        mov word [es:di + 16h], t_vbe_oem
+        mov word [es:di + 18h], SEG_BIOS
+        mov word [es:di + 1Ah], t_vbe_oem
+        mov word [es:di + 1Ch], SEG_BIOS
+        mov word [es:di + 1Eh], t_vbe_oem
+        mov word [es:di + 20h], SEG_BIOS
+        pop di
+        pop cx
+        mov ax, 004Fh
+        ret
+
+; vbe_buscar: CX = número de modo -> SI = su entrada en vbe_modos, AL = índice
+; (1...); CF si no lo hay o no cabe en la pantalla
+vbe_buscar:
+        push cx
+        push dx
+        and cx, 01FFh
+        mov si, vbe_modos
+        mov dl, 1
+.m:     cmp word [si], 0
+        je .no
+        cmp [si], cx
+        je .si
+        add si, 6
+        inc dl
+        jmp .m
+.si:    mov cx, [si + 2]
+        cmp cx, [T_VBE_AN]
+        ja .no
+        mov cx, [si + 4]
+        cmp cx, [T_VBE_AL]
+        ja .no
+        mov al, dl
+        pop dx
+        pop cx
+        clc
+        ret
+.no:    pop dx
+        pop cx
+        stc
+        ret
+
+vbe_modo_info:                          ; 4F01h: CX = modo, ES:DI = búfer de 256
+        push si
+        call vbe_buscar
+        jc .mal
+        push cx
+        push di
+        xor al, al
+        mov cx, 256
+        cld
+        rep stosb
+        pop di
+        pop cx
+        mov word [es:di], 00DBh         ; hay, color, gráfico, sin ventanas, marco lineal
+        mov ax, [si + 2]
+        mov [es:di + 12h], ax
+        shl ax, 2
+        mov [es:di + 10h], ax           ; octetos por línea
+        mov [es:di + 32h], ax
+        mov ax, [si + 4]
+        mov [es:di + 14h], ax
+        mov word [es:di + 16h], 1008h   ; celda de 8x16
+        mov word [es:di + 18h], 2001h   ; 1 plano, 32 bits por punto
+        mov word [es:di + 1Ah], 0601h   ; 1 banco, color directo
+        mov byte [es:di + 1Eh], 1
+        mov dword [es:di + 1Fh], 08081008h      ; rojo 8 en 16, verde 8 en 8,
+        mov dword [es:di + 23h], 18080008h      ; azul 8 en 0, reserva 8 en 24
+        mov dword [es:di + 36h], 08081008h      ; (las mismas, «lineales» de VBE 3.0)
+        mov dword [es:di + 3Ah], 18080008h
+        mov eax, [T_VBE_LFB]
+        mov [es:di + 28h], eax          ; el marco lineal
+        pop si
+        mov ax, 004Fh
+        ret
+.mal:   pop si
+        mov ax, 014Fh
+        ret
+
+vbe_poner:                              ; 4F02h: BX = modo (bit 14: marco lineal; 15: sin borrar)
+        push si
+        push cx
+        mov cx, bx
+        and cx, 3FFFh
+        cmp cx, 100h
+        jb .texto
+        call vbe_buscar
+        jc .mal
+        test bh, 40h                    ; solo con marco lineal
+        jz .mal
+        mov [T_GRAF], al
+        push ebx
+        push eax
+        movzx eax, al
+        and ebx, 8000h
+        shr ebx, 7                      ; bit 8: sin borrar
+        or ebx, eax
+        mov ax, PET_MODO
+        call llamar_fw
+        pop eax
+        pop ebx
+        jmp .bien
+.texto: mov ax, 0003h                   ; un modo de la VGA: el de texto
+        int 10h
+.bien:  pop cx
+        pop si
+        mov ax, 004Fh
+        ret
+.mal:   pop cx
+        pop si
+        mov ax, 014Fh
+        ret
+
+vbe_actual:                             ; 4F03h -> BX = modo puesto
+        mov bx, 0003h
+        cmp byte [T_GRAF], 0
+        je .f
+        push si
+        movzx si, byte [T_GRAF]
+        dec si
+        imul si, si, 6
+        mov bx, [vbe_modos + si]
+        or bh, 40h
+        pop si
+.f:     mov ax, 004Fh
+        ret
+
+; ---- el registro de la BIOS (texto en la zona REG; lo lee HBLOG.COM por
+;      INT 15h AX = 4844h) ----
+; reg_txt: CS:SI = texto terminado en 0
+reg_txt:
+        push ax
+        push bx
+        push si
+        mov bx, [cs:T_REG_N]
+.c:     mov al, [cs:si]
+        test al, al
+        jz .f
+        cmp bx, REG_TAM
+        jae .f
+        mov [cs:REG + bx], al
+        inc bx
+        inc si
+        jmp .c
+.f:     mov [cs:T_REG_N], bx
+        pop si
+        pop bx
+        pop ax
+        ret
+; reg_hex16: AX en hexadecimal (4 cifras); reg_hex8: AL (2 cifras)
+reg_hex16:
+        xchg al, ah
+        call reg_hex8
+        xchg al, ah
+reg_hex8:
+        push ax
+        push bx
+        push cx
+        mov cx, 2
+        mov bx, [cs:T_REG_N]
+        rol al, 4
+.d:     cmp bx, REG_TAM
+        jae .f
+        push ax
+        and al, 0Fh
+        add al, '0'
+        cmp al, '9'
+        jbe .n
+        add al, 'A' - '9' - 1
+.n:     mov [cs:REG + bx], al
+        inc bx
+        pop ax
+        rol al, 4
+        loop .d
+.f:     mov [cs:T_REG_N], bx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
 ; la pantalla ha cambiado: se dibujará en la próxima llamada al firmware
 pantalla_cambiada:
         push ds
@@ -1057,7 +1460,26 @@ pantalla_cambiada:
 ; =============================================================================
 ;  Datos
 ; =============================================================================
-t_prueba        db 'HispaBIOS 0.1 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
+t_prueba        db 'HispaBIOS 0.3 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
+t_vbe_oem       db 'HispaBIOS (VBE sobre la pantalla del firmware UEFI)', 0
+t_r_vbe         db 'INT 10h AX=', 0
+t_r_bx          db ' BX=', 0
+t_r_cx          db ' CX=', 0
+t_r_res         db ' -> AX=', 0
+t_r_nl          db 13, 10, 0
+t_r_f_si        db 'Tablas (ACPI, SMBIOS): en la EBDA de la BIOS y copiadas tambien en F0000h', 13, 10, 0
+t_r_f_no        db 'Tablas (ACPI, SMBIOS): solo en la EBDA de la BIOS (F0000h no es memoria libre que se pueda escribir)', 13, 10, 0
+t_r_modo        db 'INT 10h AH=00 AL=', 0
+t_r_modo2       db ': ese modo de la VGA no lo hay (queda el de texto)', 13, 10, 0
+vbe_reg_n       db 0
+        align 2
+; los modos VBE: número, ancho, alto (color directo de 32 bits); acaba en 0
+VBE_MEM         equ 300000h             ; 3 MB: 1024x768 de 32 bits
+vbe_modos       dw 112h, 640, 480
+                dw 115h, 800, 600
+                dw 118h, 1024, 768
+                dw 0
+vbe_lista       dw 0FFFFh, 0FFFFh, 0FFFFh, 0FFFFh   ; (la rellena bios_inicio)
 primera         db 0
 mask_dos        db 0FAh, 0FFh          ; DOS: IRQ 0 y la cascada
 mask_fw         db 0FFh, 0FFh

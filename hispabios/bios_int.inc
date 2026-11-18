@@ -53,8 +53,9 @@ irq_fw0:
         pop eax
         jmp .tic
 .dibujar:
-        cmp byte [sucia], 0
-        je .fin
+        mov al, [sucia]                 ; (en un modo gráfico, en cada tic: el
+        or al, [T_GRAF]                 ; programa pinta en el marco sin avisar)
+        jz .fin
         cmp byte [en_fw], 0
         jne .fin
         mov byte [sucia], 0
@@ -91,6 +92,11 @@ int08:                                  ; IRQ 0: el tic de DOS
         push ds
         mov ax, SEG_BIOS
         mov ds, ax
+        inc dword [T_N_IRQ]
+        cmp byte [de_k_tics], 0         ; una IRQ de verdad: la IRQ 0 llega
+        jne .cuenta
+        mov byte [T_SIN_IRQ], 0
+.cuenta:
         cmp dword [T_TSC_TICK], 0
         je .uno
         rdtsc
@@ -141,9 +147,10 @@ tic_fin:
         mov al, 20h                     ; fin de interrupción
         out 20h, al
         mov ax, SEG_BIOS                ; si la pantalla ha cambiado, se dibuja
-        mov ds, ax
-        cmp byte [sucia], 0
-        je .fin
+        mov ds, ax                      ; (en un modo gráfico, en cada tic)
+        mov al, [sucia]
+        or al, [T_GRAF]
+        jz .fin
         cmp byte [en_fw], 0
         jne .fin
         mov byte [sucia], 0
@@ -158,6 +165,7 @@ tic_fin:
 ; =============================================================================
 int13:
         sti
+        call k_tics                     ; (por si la IRQ 0 no llega)
         push ax                         ; [depuración] 'D' y la función por COM1
         mov al, 'D'
         call dbg
@@ -530,25 +538,42 @@ k_leer:                                 ; 00h/10h: espera una tecla -> AX
         push ax                         ; espera al siguiente tic
         mov ax, SEG_BIOS
         mov ds, ax
-        cmp byte [sucia], 0
-        je .espera
+        mov al, [sucia]
+        or al, [T_GRAF]
+        jz .espera
         mov byte [sucia], 0
         mov ax, PET_DIBUJAR
         call llamar_fw
 .espera:
+        cmp byte [T_SIN_IRQ], 0         ; (si la IRQ 0 no llega, o no ha llegado
+        jne .sin_hlt                    ; nunca, HLT no despertaría: se sigue
+        cmp dword [T_N_IRQ], 0          ; sondeando, que el firmware ya espera
+        je .sin_hlt                     ; 1 ms en cada pregunta)
         pop ax
         pop ds
         hlt
+        jmp .otra
+.sin_hlt:
+        pop ax
+        pop ds
         jmp .otra
 .hay:   iret
 
 k_mirar:                                ; 01h/11h: ¿hay tecla? -> ZF, AX
         call k_mirar_buf
         jnc .hay
+        ; Preguntar al firmware cuesta un viaje (cambio de modo, 1 ms de espera
+        ; y lo que tarde su teclado) y DOS mira el teclado en cada letra que
+        ; escribe (Ctrl+C): sin medida, la pantalla va a tirones. Se pregunta
+        ; como mucho cada octavo de tic (unos 7 ms).
+%ifndef PRUEBA_TECLADO_SIEMPRE          ; (pruebas: como antes, sin medida)
+        call k_toca
+        jc .nohay
+%endif
         call k_sondear
         call k_mirar_buf
         jnc .hay
-        push bp
+.nohay: push bp
         mov bp, sp
         or byte [bp + 6], 40h           ; ZF = 1: no hay
         pop bp
@@ -616,11 +641,74 @@ k_poner:                                ; BX = tecla -> CF si lleno
         pop ds
         ret
 
+; k_toca: ¿toca ya preguntar al firmware por el teclado? CF = 1: todavía no
+k_toca:
+        push eax
+        push edx
+        push ebx
+        push ecx
+        rdtsc
+        mov ebx, eax
+        mov ecx, edx
+        sub eax, [cs:k_ult]
+        sbb edx, [cs:k_ult + 4]
+        jnz .si
+        mov edx, [cs:T_TSC_TICK]
+        shr edx, 3
+        cmp eax, edx
+        jb .no                          ; (CF = 1)
+.si:    mov [cs:k_ult], ebx
+        mov [cs:k_ult + 4], ecx
+        clc
+.no:    pop ecx
+        pop ebx
+        pop edx
+        pop eax
+        ret
+
+; k_tics: si la IRQ 0 no llega (equipos con el 8254 parado, o sin el cableado
+; de siempre), los tics que falten se dan aquí: al sondear el teclado y al
+; entrar en las interrupciones de la BIOS (10h, 13h, 15h, 16h y 1Ah). Sin
+; ellos el reloj de DOS no anda y la pantalla no se dibuja. (Un programa que
+; espere mirando 40:6Ch sin llamar a la BIOS se quedaría parado: HBLOG dice
+; si la IRQ llega.)
+k_tics:
+        push eax
+        push edx
+        cmp dword [cs:T_TSC_TICK], 0
+        je .f
+        cmp byte [cs:en_fw], 0
+        jne .f
+        pushf                           ; solo con las interrupciones abiertas:
+        pop ax                          ; con ellas cerradas la IRQ puede estar
+        test ah, 2                      ; esperando
+        jz .f
+        rdtsc
+        sub eax, [cs:tsc0]
+        sbb edx, [cs:tsc0 + 4]
+        cmp edx, [cs:T_TSC_TICK]
+        jae .f
+        div dword [cs:T_TSC_TICK]       ; EAX = tics desde el arranque
+        sub eax, [cs:tics_dados]
+        cmp eax, 2                      ; (con la IRQ en marcha no se llega a 2)
+        jl .f
+        mov byte [cs:T_SIN_IRQ], 1
+        inc dword [cs:T_N_SIN]
+        dec dword [cs:T_N_IRQ]          ; (esta INT 08h no es una IRQ)
+        mov byte [cs:de_k_tics], 1
+        int 08h
+        mov byte [cs:de_k_tics], 0
+.f:     pop edx
+        pop eax
+        ret
+
 ; k_sondear: pregunta al firmware por una tecla y la deja en el búfer
 k_sondear:
+        call k_tics
         push eax
         push bx
         push si
+        inc dword [cs:T_N_TECLA]
         mov ax, PET_TECLA
         call llamar_fw
         cmp eax, -1
@@ -685,12 +773,23 @@ k_sondear:
 ; =============================================================================
 int15:
         sti
+        call k_tics                     ; (por si la IRQ 0 no llega)
         cmp ax, 4842h                   ; 'HB': ¿es HispaBIOS? -> AX = 'hb',
-        jne .no_hb                      ; BX = versión (0.1), CF = 0
+        jne .no_hb                      ; BX = versión (0.3), CF = 0
         mov ax, 6862h
-        mov bx, 0001h
+        mov bx, 0003h
         jmp d_bien
 .no_hb:
+        cmp ax, 4844h                   ; 'HD': los datos para depurar (HBLOG.COM)
+        jne .no_hd                      ; -> AX = 'hd', ES:BX = tabla de traspaso
+        mov ax, SEG_BIOS                ; (T_*), ES:SI = registro de la BIOS,
+        mov es, ax                      ; CX = octetos que lleva
+        xor bx, bx
+        mov si, REG
+        mov cx, [es:T_REG_N]
+        mov ax, 6864h
+        jmp d_bien
+.no_hd:
         cmp ah, 88h
         je s_ext
         cmp ax, 0E801h
@@ -853,6 +952,7 @@ s_mover:
 ; =============================================================================
 int1a:
         sti
+        call k_tics                     ; (por si la IRQ 0 no llega)
         cmp ah, 00h
         je r_tics
         cmp ah, 01h
@@ -1234,6 +1334,8 @@ d_n             dw 0
 d_buf           dd 0
 d_lba           dq 0
 tics_dados      dd 0
+de_k_tics       db 0                    ; 1: la INT 08h la da k_tics, no una IRQ
+k_ult           dq 0                    ; TSC de la última pregunta por el teclado
 tics_tope       dd 0
 tsc0            dq 0
 en_fw           db 0

@@ -843,7 +843,10 @@ $(HDD): | $(B)
 # BOOTX64.EFI y BOOTIA32.EFI van en \EFI\BOOT de la imagen USB (tools/mkusb.py).
 # Con «make HBFLAGS=-DDEPURA» la BIOS cuenta lo que hace por el puerto serie.
 HBSRC = hispabios/bios64.asm hispabios/bios_int.inc
-HBEFI = $(B)/BOOTX64.EFI $(B)/BOOTIA32.EFI
+HBEFI = $(B)/BOOTX64.EFI $(B)/BOOTIA32.EFI $(B)/HBLOG.COM
+# HBLOG.COM: enseña y guarda (\HBLOG.TXT) el registro de la BIOS de HispaBIOS
+$(B)/HBLOG.COM: hispabios/hblog.asm | $(B)
+	$(NASM) -f bin -o $@ hispabios/hblog.asm
 $(B)/FUENTE16.BIN: $(B)/VENTANAS.COM tools/mkfuentebios.py tools/hispa437.py
 	python3 tools/mkfuentebios.py $(B)/gen/ventanas/fuente.inc $@
 $(B)/BIOS64.BIN: $(HBSRC) | $(B)

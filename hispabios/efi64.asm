@@ -14,6 +14,12 @@
 ;       (hay una copia de la BIOS ensamblada para cada sitio);
 ;    5. busca la pantalla (GOP) y los discos (Block I/O), copia la BIOS y la
 ;       arranca. Después atiende sus peticiones (despachador).
+;  Desde la 0.3 (docs/HISPABIOS.md): presta a DOS las páginas sueltas de
+;  memoria baja del firmware (paginas_prestar), copia las entradas de ACPI y
+;  SMBIOS a la BIOS (tablas_copiar), pinta la pantalla por un alias con
+;  escritura combinada y mide su velocidad (wc_preparar), da a la BIOS el
+;  marco lineal de sus modos VBE (vbe_preparar, graf_presentar) y tiene un
+;  modo seguro (tecla S al arrancar: seguro_mirar) que no hace nada de eso.
 ;
 ;  Convención de llamadas de UEFI en x64 (la de Microsoft): argumentos en RCX,
 ;  RDX, R8, R9 y la pila; 32 octetos de hueco por encima de la dirección de
@@ -29,6 +35,11 @@
 ;    -DPRUEBA_OCUPA=dir,n,...  ocupa antes esas páginas (el firmware no las
 ;                              dará: como un equipo con la memoria baja usada)
 ;    -DPRUEBA_SIN_GOP          como si no hubiera pantalla gráfica
+;    -DPRUEBA_LENTA=us         como si pintar un millón de puntos costara eso
+;    -DPRUEBA_SIN_WC           sin el alias de escritura combinada
+;    -DPRUEBA_SIN_PRESTAR      sin prestar a DOS las páginas bajas del firmware
+;    -DPANTALLA_NATIVA         no cambiar de modo de pantalla aunque sea lenta
+;    -DPRUEBA_SEGURO           como si se hubiera pulsado S al arrancar (modo seguro)
 ;    -DREGISTRO_PASOS          guarda HISPABIOS.LOG en cada paso aunque todo
 ;                              vaya bien (la imagen de prueba para un equipo
 ;                              que se queda parado: tools/mkprueba_hispabios.sh)
@@ -38,7 +49,7 @@
 %define PE_ARQ 64
 %include "pe.inc"
 
-%define HB_VERSION '0.2'
+%define HB_VERSION '0.3'
 
 ; ---- tablas de UEFI (x64) ----
 ST_VENDOR       equ 24          ; FirmwareVendor (CHAR16 *)
@@ -65,7 +76,19 @@ F_CLOSE         equ 16
 F_DELETE        equ 24
 F_WRITE         equ 40
 
+ALLOC_ANY       equ 0           ; AllocateAnyPages
+ALLOC_MAX       equ 1           ; AllocateMaxAddress
 ALLOC_ADDRESS   equ 2           ; AllocateAddress
+VBE_MEM         equ 300000h     ; el marco lineal de VBE (1024x768 de 32 bits)
+VBE_PAGS        equ (2 * VBE_MEM) >> 12   ; el marco y la copia de lo ya pintado
+REG_BIOS        equ 9000h       ; el registro de la BIOS de modo real (zona REG)
+REG_BIOS_TAM    equ 0FF0h
+LIN_MAX         equ 8192        ; puntos de la línea de trabajo (linea_buf)
+T_LENTO         equ 100000      ; microsegundos: pintar la zona entera no debe pasar de aquí
+EBDA            equ 8FA0h       ; en la BIOS: las entradas de ACPI (+10h) y SMBIOS (+40h)
+PRESTA_MAX      equ 4           ; páginas del firmware que se prestan a DOS, como mucho
+ST_NTABLAS      equ 104         ; NumberOfTableEntries
+ST_TABLAS       equ 112         ; ConfigurationTable (GUID de 16 octetos y puntero)
 MEM_RESERVADA   equ 0           ; EfiReservedMemoryType
 MEM_LOADERDATA  equ 2           ; EfiLoaderData
 EFI_CHICO       equ 8000000000000005h   ; EFI_BUFFER_TOO_SMALL
@@ -136,6 +159,7 @@ pe_entrada:
 
         DI t_titulo
         call anotar_firmware
+        call seguro_mirar               ; ¿se ha pulsado S? -> modo seguro
         call registro_paso
 
 %ifdef PRUEBA_OCUPA
@@ -234,11 +258,12 @@ pe_entrada:
         DI t_sin_base
         jmp .fallo
 .hay_base:
-        cmp byte [rel dada + PAG_ARRANQUE], 0
-        je .sin_arranque
         mov r15d, [rbx]                 ; R15 = base de la BIOS
         mov [rel bios_base], r15
         mov [rel bios_cual], rbx
+        call paginas_prestar            ; las del firmware que hay por debajo
+        cmp byte [rel dada + PAG_ARRANQUE], 0
+        je .sin_arranque
         ; la memoria convencional de DOS: hasta la primera página (de la 1 en
         ; adelante) que el firmware no ha dado, o hasta la BIOS
         lea rsi, [rel dada]
@@ -273,6 +298,8 @@ pe_entrada:
         call registro_paso
 
         ; ---- la pantalla y la BIOS de modo real ----
+        mov rax, [rel reg_n]            ; (de aquí en adelante, también al
+        mov [rel reg_marca], rax        ; registro de la BIOS: registro_a_bios)
         call gop_buscar
         setc r12b                       ; R12B = 1: no hay pantalla que valga
         mov byte [rel callado], 1       ; (solo al registro)
@@ -309,6 +336,15 @@ pe_entrada:
         rep movsb
         lea rax, [rel despachador]
         mov [r15 + 8], rax              ; T_DESPACHADOR
+        mov al, [rel presta_n]          ; T_INT_*: las páginas prestadas
+        mov [r15 + 229], al
+        mov eax, [rel presta_guarda]
+        mov [r15 + 232], eax
+        mov rax, [rel presta_dir]
+        mov [r15 + 236], rax
+        mov rax, [rel presta_dir + 8]
+        mov [r15 + 244], rax
+        call tablas_copiar              ; ACPI y SMBIOS, a la vista del modo real
         mov rax, [rel bajo_tope]        ; T_MEMKB: hasta la primera página ocupada
         shr eax, 10
         mov [r15 + 28], ax
@@ -317,7 +353,9 @@ pe_entrada:
         mov r12d, eax
         call tsc_calibrar               ; T_TSC_TICK
         mov [r15 + 36], eax
+        mov [rel tsc_tic], eax
         mov r13d, eax
+        call vbe_preparar               ; T_VBE_*: el marco lineal por debajo de 4 GB
         call vector_irq0                ; T_VEC0
         mov [r15 + 182], al
         movzx r14d, al
@@ -345,6 +383,46 @@ pe_entrada:
         DI t_sin_discos
         jmp .fallo
 .hay_discos:
+        mov byte [rel callado], 1       ; (solo al registro)
+        call gop_modos                  ; los modos que da el firmware
+        call wc_preparar                ; la pantalla con escritura combinada y su velocidad
+%ifndef PANTALLA_NATIVA
+        ; si aun así es lenta, un modo más pequeño del firmware, si lo da (el
+        ; equipo lo amplía a toda la pantalla y hay menos puntos que escribir)
+        cmp dword [rel t_pant], T_LENTO
+        jbe .pant_ya
+        cmp byte [rel seguro], 0
+        jne .pant_ya
+        call gop_menor
+        jc .pant_ya
+        call gop_buscar
+        mov ecx, 0FFFFh
+        mov eax, [rel fb_ancho]
+        cmp eax, ecx
+        cmova eax, ecx
+        mov [r15 + 188], ax             ; T_VBE_AN
+        mov eax, [rel fb_alto]
+        cmp eax, ecx
+        cmova eax, ecx
+        mov [r15 + 190], ax             ; T_VBE_AL
+        DI t_g_cambio
+        mov eax, [rel fb_ancho]
+        call decimal
+        DI t_por
+        mov eax, [rel fb_alto]
+        call decimal
+        DI t_gop_l
+        mov eax, [rel fb_linea]
+        call decimal
+        DI t_gop_d
+        mov rax, [rel fb]
+        call hex64
+        DI t_nl
+        call wc_preparar
+.pant_ya:
+%endif
+        call registro_a_bios            ; (lo de la pantalla, también para HBLOG)
+        mov byte [rel callado], 0
         DI t_viaje
         call registro_paso
         mov rax, r15
@@ -624,6 +702,44 @@ anotar_firmware:
         ret
 
 ; ---- tecla_esperar: hasta que se pulse una tecla o pasen 2 minutos ----
+; ---- seguro_mirar: el modo seguro ----
+; Si al arrancar se va pulsando la tecla S, HispaBIOS no hace nada de lo que
+; depende del equipo y podría sentarle mal a algún firmware: ni el alias de
+; escritura combinada, ni cambiar de modo de pantalla, ni prestar a DOS las
+; páginas bajas del firmware. (Con -DPRUEBA_SEGURO, siempre.)
+seguro_mirar:
+        push rbx
+        sub rsp, 32                     ; (8 + 8 + 32 = 48: alineada)
+        DI t_seguro_s
+%ifdef PRUEBA_SEGURO
+        mov byte [rel seguro], 1
+%endif
+        mov rax, [rel bootserv]
+        mov ecx, 400000                 ; 0,4 s para que dé tiempo a la tecla
+        FW [rax + BS_STALL]
+        mov ebx, 32                     ; se leen las teclas que haya
+.otra:  mov rax, [rel sistema]
+        mov rcx, [rax + ST_CONIN]
+        test rcx, rcx
+        jz .fin
+        lea rdx, [rel tecla_efi]
+        FW [rcx + 8]                    ; ReadKeyStroke
+        test rax, rax
+        jnz .fin
+        mov ax, [rel tecla_efi + 2]     ; el carácter
+        or al, 20h
+        cmp ax, 's'
+        jne .sig
+        mov byte [rel seguro], 1
+.sig:   dec ebx
+        jnz .otra
+.fin:   cmp byte [rel seguro], 0
+        je .f
+        DI t_seguro
+.f:     add rsp, 32
+        pop rbx
+        ret
+
 tecla_esperar:
         push rbx
         sub rsp, 32                     ; (8 + 8 + 32 = 48: alineada)
@@ -982,7 +1098,13 @@ despachador:
         je .microseg
         cmp ecx, 7                      ; reiniciar (EDX = 0) o apagar (2)
         je .reiniciar
+        cmp ecx, 8                      ; modo de pantalla: texto (0) o VBE (1...)
+        je .modo
         mov eax, -1
+        jmp .fin
+.modo:
+        call modo_poner
+        xor eax, eax
         jmp .fin
 .dibujar:
         call pantalla_dibujar
@@ -1143,12 +1265,874 @@ gop_buscar:
         stc
         ret
 
+; =============================================================================
+;  La pantalla
+; =============================================================================
+;  La pantalla del firmware (GOP) es un marco de 32 bits por punto que puede
+;  estar por encima de los 4 GB. Escribir en él es lento si su memoria no tiene
+;  «escritura combinada» (WC): el firmware la suele dejar sin caché (UC) y cada
+;  punto escrito va al bus por separado; pintar 1920x1200 así cuesta del orden
+;  de un segundo (el «1 FPS» del ThinkPad E14 y del MacBook Air de 2017). Por
+;  eso:
+;    - se pinta por un ALIAS del marco con escritura combinada: unas tablas de
+;      páginas propias (copia del nivel 4 del firmware más una entrada con el
+;      marco en páginas de 2 MB de tipo WC, por el PAT), que solo se usan
+;      mientras se dibuja (wc_preparar);
+;    - se mide lo que cuesta pintar la pantalla entera, directamente y por el
+;      alias, se usa el camino más rápido y queda en el registro;
+;    - si aun así es lenta, se amplía menos (un múltiplo entero de 640x400):
+;      menos puntos que escribir (escala_tope);
+;    - solo se pintan las celdas que han cambiado, cada fila de puntos se
+;      prepara en memoria normal (linea_buf) y va a la pantalla de una vez.
+;  Los modos gráficos (VBE) se dan a los programas en un marco de memoria
+;  normal por debajo de 4 GB (vbe_lfb); en cada tic se llevan a la pantalla
+;  las líneas que han cambiado (graf_presentar).
+;  Referencias: Intel SDM vol. 3, 4.5 (paginación), 11.11 (MTRR) y 11.12 (PAT).
+
+; ---- vbe_preparar: la memoria del marco lineal de VBE (por debajo de 4 GB) ----
+vbe_preparar:
+        push rbx
+        sub rsp, 32
+        mov byte [rel callado], 1
+        mov rax, 0FFFFFFFFh
+        mov [rel dir_pag], rax
+        mov rax, [rel bootserv]
+        mov ecx, ALLOC_MAX
+        mov edx, MEM_LOADERDATA
+        mov r8d, VBE_PAGS
+        lea r9, [rel dir_pag]
+        FW [rax + BS_ALLOCPAGES]
+        test rax, rax
+        jnz .no
+        mov rax, [rel dir_pag]
+        mov [rel vbe_lfb], rax
+        mov rbx, [rel bios_base]
+        mov [rbx + 184], eax            ; T_VBE_LFB
+        add rax, VBE_MEM
+        mov [rel vbe_ant], rax
+        mov ecx, 0FFFFh
+        mov eax, [rel fb_ancho]
+        cmp eax, ecx
+        cmova eax, ecx
+        mov [rbx + 188], ax             ; T_VBE_AN
+        mov eax, [rel fb_alto]
+        cmp eax, ecx
+        cmova eax, ecx
+        mov [rbx + 190], ax             ; T_VBE_AL
+        DI t_v_lfb
+        mov rax, [rel vbe_lfb]
+        call hex64
+        DI t_v_lfb2
+        jmp .f
+.no:    DI t_v_no
+.f:     mov byte [rel callado], 0
+        add rsp, 32
+        pop rbx
+        ret
+
+; ---- gop_modos: los modos de pantalla que da el firmware, al registro ----
+gop_modos:
+        push rbx
+        push r12
+        push r13
+        sub rsp, 48                     ; (8 + 24 + 48 = 80: pila alineada)
+        DI t_g_modos
+        mov rbx, [rel gop]
+        mov rax, [rbx + 24]             ; Mode
+        mov r13d, [rax]                 ; MaxMode
+        xor r12d, r12d
+.m:     cmp r12d, r13d
+        jae .f
+        cmp r12d, 40
+        jae .mas
+        mov rcx, rbx
+        mov edx, r12d
+        lea r8, [rsp + 32]
+        lea r9, [rsp + 40]
+        FW [rbx]                        ; QueryMode
+        test rax, rax
+        jnz .sig
+        test r12d, r12d
+        jz .p
+        DI t_g_coma
+.p:     mov r8, [rsp + 40]
+        mov eax, [r8 + 4]
+        call decimal
+        DI t_por
+        mov eax, [r8 + 8]
+        call decimal
+        mov rax, [rbx + 24]
+        cmp r12d, [rax + 4]
+        jne .sig
+        DI t_g_ast
+.sig:   inc r12d
+        jmp .m
+.mas:   DI t_g_mas
+.f:     DI t_nl
+        add rsp, 48
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
+; ---- gop_menor: con la pantalla lenta, pone el modo del firmware de 800x600 o
+;      más (32 bits) que se pinte entero en T_LENTO (el mayor que lo cumpla o,
+;      si ninguno, el más pequeño). CF si se queda el que había. ----
+gop_menor:
+        push rbx
+        push r12
+        push r13
+        push r14
+        push r15
+        sub rsp, 64                     ; (8 + 40 + 64 = 112: pila alineada)
+        mov rbx, [rel gop]
+        mov rax, [rbx + 24]             ; Mode
+        mov r13d, [rax]                 ; MaxMode
+        mov r14d, -1                    ; R14 = el elegido, R15 = sus puntos
+        xor r15d, r15d
+        mov byte [rsp + 56], 0          ; 1: el elegido se pinta en T_LENTO
+        xor r12d, r12d
+.m:     cmp r12d, r13d
+        jae .elegido
+        mov rcx, rbx
+        mov edx, r12d
+        lea r8, [rsp + 32]
+        lea r9, [rsp + 40]
+        FW [rbx]                        ; QueryMode
+        test rax, rax
+        jnz .sig
+        mov r8, [rsp + 40]
+        cmp dword [r8 + 12], 1          ; color de 32 bits
+        ja .sig
+        mov eax, [r8 + 4]
+        cmp eax, 800
+        jb .sig
+        cmp eax, LIN_MAX
+        ja .sig
+        mov ecx, [r8 + 8]
+        cmp ecx, 600
+        jb .sig
+        imul rax, rcx                   ; RAX = puntos del modo
+        mov ecx, [rel fb_ancho]
+        mov edx, [rel fb_alto]
+        imul rcx, rdx                   ; RCX = los del modo puesto
+        cmp rax, rcx
+        jae .sig
+        mov r9, rax
+        mov edx, [rel t_pant]
+        mul rdx
+        div rcx                         ; RAX = lo que costaría pintarlo
+        cmp rax, T_LENTO
+        setbe dl                        ; DL = 1: cumple
+        cmp r14d, -1
+        je .toma
+        test dl, dl
+        jz .no_cumple
+        cmp byte [rsp + 56], 0          ; cumple: mejor que uno que no, o el mayor
+        je .toma
+        cmp r9, r15
+        ja .toma
+        jmp .sig
+.no_cumple:
+        cmp byte [rsp + 56], 0          ; no cumple: solo si es más pequeño que
+        jne .sig                        ; otro que tampoco
+        cmp r9, r15
+        jae .sig
+.toma:  mov r14d, r12d
+        mov r15, r9
+        mov [rsp + 56], dl
+.sig:   inc r12d
+        jmp .m
+.elegido:
+        cmp r14d, -1
+        je .no
+        mov rcx, rbx
+        mov edx, r14d
+        FW [rbx + 8]                    ; SetMode
+        test rax, rax
+        jnz .no
+        clc
+        jmp .f
+.no:    stc
+.f:     lea rsp, [rsp + 64]
+        pop r15
+        pop r14
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
+; ---- wc_preparar: el alias de la pantalla con escritura combinada, la medida
+;      de la velocidad y la ampliación del texto; todo al registro ----
+wc_preparar:
+        push rbx
+        push r12
+        push r13
+        push r14
+        push r15
+        sub rsp, 32                     ; (8 + 40 + 32 = 80: pila alineada)
+        mov rax, [rel fb]
+        mov [rel fbv], rax
+        mov qword [rel wc_cr3], 0
+        mov byte [rel wc_usar], 0
+        ; el tipo de caché que tiene la pantalla según los MTRR
+        DI t_w_mtrr
+        mov ecx, 2FFh                   ; IA32_MTRR_DEF_TYPE
+        rdmsr
+        and eax, 0FFFh
+        mov ecx, 3
+        call hex
+        DI t_w_mtrr2
+        mov ecx, 0FEh                   ; IA32_MTRRCAP: cuántos variables
+        rdmsr
+        movzx r13d, al
+        xor r14d, r14d
+.v:     cmp r14d, r13d
+        jae .ninguno
+        lea ecx, [r14 * 2 + 201h]       ; máscara
+        rdmsr
+        shl rdx, 32
+        or rax, rdx
+        mov rbx, rax
+        bt rbx, 11                      ; ¿en uso?
+        jnc .vs
+        lea ecx, [r14 * 2 + 200h]       ; base y tipo
+        rdmsr
+        shl rdx, 32
+        or rax, rdx
+        mov r15, rax
+        and rbx, -4096
+        mov rdx, [rel fb]
+        and rdx, rbx
+        and rax, -4096
+        and rax, rbx
+        cmp rax, rdx
+        jne .vs
+        DI t_w_var
+        mov eax, r14d
+        call decimal
+        DI t_w_tipo
+        movzx eax, r15b
+        and eax, 7
+        lea rsi, [rel t_w_tipos]
+        lea rsi, [rsi + rax * 4]
+        call escribir
+        jmp .pat
+.vs:    inc r14d
+        jmp .v
+.ninguno:
+        DI t_w_nomtrr
+.pat:   mov eax, 1
+        cpuid                           ; (RBX está guardado)
+        bt edx, 16                      ; ¿PAT?
+        jc .con_pat
+        DI t_nl
+        DI t_w_no_pat
+        jmp .medir
+.con_pat:
+        DI t_w_pat
+        mov ecx, 277h                   ; IA32_PAT
+        rdmsr
+        shl rdx, 32
+        or rax, rdx
+        call hex64
+        DI t_nl
+%ifdef PRUEBA_SIN_WC
+        jmp .medir
+%endif
+        cmp byte [rel seguro], 0
+        jne .medir
+        mov rax, cr4
+        bt rax, 12                      ; LA57: tablas de 5 niveles (no se toca)
+        jnc .niveles4
+        DI t_w_no_la57
+        jmp .medir
+.niveles4:
+        ; cuántas páginas de 2 MB ocupa el marco
+        mov eax, [rel fb_linea]
+        mov edx, [rel fb_alto]
+        imul rax, rdx
+        shl rax, 2
+        mov rdx, [rel fb]
+        and edx, 1FFFFFh
+        add rax, rdx
+        add rax, 1FFFFFh
+        shr rax, 21
+        cmp rax, 512
+        ja .no_mem
+        mov r13, rax
+        ; tres páginas: copia del nivel 4, y los niveles 3 y 2 del alias
+        mov rax, [rel bootserv]
+        mov ecx, ALLOC_ANY
+        mov edx, MEM_LOADERDATA
+        mov r8d, 3
+        lea r9, [rel dir_pag]
+        FW [rax + BS_ALLOCPAGES]
+        test rax, rax
+        jnz .no_mem
+        cld
+        mov rbx, [rel dir_pag]
+        mov rdi, rbx
+        mov ecx, 3 * 512
+        xor eax, eax
+        rep stosq
+        mov rsi, cr3
+        and rsi, -4096
+        mov rdi, rbx
+        mov ecx, 512
+        rep movsq
+        mov ecx, 255                    ; una entrada libre de la mitad baja
+.libre: cmp qword [rbx + rcx * 8], 0
+        je .hay
+        dec ecx
+        jnz .libre
+        jmp .no_mem
+.hay:   mov r14d, ecx
+        lea rax, [rbx + 1000h]
+        or rax, 3                       ; presente, se puede escribir
+        mov [rbx + rcx * 8], rax
+        lea rax, [rbx + 2000h]
+        or rax, 3
+        mov [rbx + 1000h], rax
+        mov rax, [rel fb]
+        and rax, -200000h
+        or rax, 108Bh                   ; presente, escribir, 2 MB, PAT = 1 y PWT = 1:
+        lea rdi, [rbx + 2000h]          ; la entrada 5 del PAT
+        mov rcx, r13
+.pd:    stosq
+        add rax, 200000h
+        dec rcx
+        jnz .pd
+        mov ecx, 277h                   ; la entrada 5 del PAT, de WT a WC (01h);
+        rdmsr                           ; el firmware no usa el bit PAT de sus
+        and edx, 0FFFF00FFh             ; tablas, así que a él no le cambia nada
+        or edx, 00000100h
+        wrmsr
+        shl rdx, 32
+        mov eax, eax
+        or rax, rdx
+        mov r15, rax
+        mov [rel wc_cr3], rbx
+        mov rax, r14
+        shl rax, 39
+        mov rdx, [rel fb]
+        and edx, 1FFFFFh
+        or rax, rdx
+        mov [rel wc_alias], rax
+        DI t_w_alias
+        call hex64
+        DI t_w_alias2
+        mov rax, rbx
+        call hex64
+        DI t_w_alias3
+        mov eax, r14d
+        call decimal
+        DI t_w_alias4
+        mov rax, r15
+        call hex64
+        DI t_nl
+        jmp .medir
+.no_mem:
+        DI t_w_no_mem
+.medir:
+        ; lo que cuesta pintar la pantalla entera (en negro) por cada camino
+        pushfq
+        cli
+        mov rdi, [rel fb]
+        call medir_borrado
+        mov r12d, eax
+        xor r13d, r13d
+        cmp qword [rel wc_cr3], 0
+        je .medido
+        mov rbx, cr3
+        mov rax, [rel wc_cr3]
+        mov cr3, rax
+        mov rdi, [rel wc_alias]
+        call medir_borrado
+        mov r13d, eax
+        mov cr3, rbx
+.medido:
+        popfq
+        mov [rel t_pant], r12d
+        cmp qword [rel wc_cr3], 0
+        je .log
+        mov eax, r12d                   ; por el alias, salvo que salga claramente
+        shr eax, 2                      ; más lento (un cuarto más): en un equipo
+        add eax, r12d                   ; de verdad el alias es mucho más rápido o,
+        cmp r13d, eax                   ; si la pantalla ya tenía WC, igual
+        ja .log
+        mov byte [rel wc_usar], 1
+        mov rax, [rel wc_alias]
+        mov [rel fbv], rax
+        mov [rel t_pant], r13d
+.log:
+%ifdef PRUEBA_LENTA
+        mov eax, [rel fb_linea]         ; (pruebas) como una pantalla lenta:
+        imul eax, [rel fb_alto]         ; PRUEBA_LENTA microsegundos por cada
+        mov edx, PRUEBA_LENTA           ; millón de puntos
+        mul rdx
+        mov ecx, 1000000
+        div rcx
+        mov [rel t_pant], eax
+        mov r12d, eax
+        mov r13d, eax
+%endif
+        DI t_w_medida
+        mov eax, r12d
+        call decimal
+        DI t_w_medida2
+        mov eax, r13d
+        call decimal
+        DI t_w_medida3
+        lea rsi, [rel t_w_directo]
+        cmp byte [rel wc_usar], 0
+        je .cual
+        lea rsi, [rel t_w_poralias]
+.cual:  call escribir
+        DI t_nl
+        ; la ampliación del texto
+        call escala
+        DI t_w_esc
+        cmp dword [rel esc_k], 0
+        jne .ek
+        DI t_w_esc_todo
+        jmp .et
+.ek:    DI t_w_esc_k
+        mov eax, [rel esc_k]
+        call decimal
+        DI t_w_esc_k2
+.et:    mov eax, [rel dib_an]
+        call decimal
+        DI t_por
+        mov eax, [rel dib_al]
+        call decimal
+        DI t_w_cierra
+        add rsp, 32
+        pop r15
+        pop r14
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
+; medir_borrado: pone en negro la pantalla entera escribiendo desde RDI
+; -> EAX = microsegundos que ha costado (0 si no hay medida del TSC)
+medir_borrado:
+        push rcx
+        push rdx
+        push r8
+        rdtsc
+        shl rdx, 32
+        or rax, rdx
+        mov r8, rax
+        mov ecx, [rel fb_linea]
+        imul ecx, [rel fb_alto]
+        xor eax, eax
+        cld
+        rep stosd
+        sfence
+        rdtsc
+        shl rdx, 32
+        or rax, rdx
+        sub rax, r8
+        mov ecx, [rel tsc_tic]
+        test ecx, ecx
+        jz .cero
+        mov edx, 54925                  ; un tic = 54925 us
+        mul rdx
+        div rcx
+        jmp .f
+.cero:  xor eax, eax
+.f:     pop r8
+        pop rdx
+        pop rcx
+        ret
+
+; registro_a_bios: lo apuntado desde reg_marca (pantalla, memoria, VBE) se copia
+; al registro de la BIOS de modo real, que HBLOG.COM enseña desde DOS
+registro_a_bios:
+        push rax
+        push rcx
+        push rsi
+        push rdi
+        mov rsi, [rel reg_dir]
+        test rsi, rsi
+        jz .f
+        mov rax, [rel reg_marca]
+        mov rcx, [rel reg_n]
+        sub rcx, rax
+        jbe .f
+        cmp rcx, REG_BIOS_TAM - 1280    ; (queda sitio para lo de VBE)
+        jbe .c
+        mov ecx, REG_BIOS_TAM - 1280
+.c:     add rsi, rax
+        mov rdi, [rel bios_base]
+        mov [rdi + 194], cx             ; T_REG_N
+        add rdi, REG_BIOS
+        cld
+        rep movsb
+.f:     pop rdi
+        pop rsi
+        pop rcx
+        pop rax
+        ret
+
+; escala_tope: EAX = ancho, EDX = alto de lo que hay que enseñar -> ECX = por
+; cuánto (entero) se amplía: lo que quepa en la pantalla y en linea_buf y, si
+; la pantalla es lenta, lo que se pinte entero en T_LENTO. Cambia RAX y RDX.
+escala_tope:
+        push rbx
+        push rsi
+        push rdi
+        push r8
+        push r9
+        mov r8d, eax
+        mov r9d, edx
+        mov eax, [rel fb_ancho]
+        xor edx, edx
+        div r8d
+        mov ecx, eax
+        mov eax, [rel fb_alto]
+        xor edx, edx
+        div r9d
+        cmp eax, ecx
+        cmovb ecx, eax
+        mov eax, LIN_MAX
+        xor edx, edx
+        div r8d
+        cmp eax, ecx
+        cmovb ecx, eax
+        cmp ecx, 1
+        jae .vel
+        mov ecx, 1
+.vel:   cmp dword [rel t_pant], T_LENTO
+        jbe .f
+.prueba:
+        cmp ecx, 1
+        jbe .f
+        mov eax, r8d                    ; lo que costaría: t_pant por la parte
+        imul eax, ecx                   ; de la pantalla que se pinta
+        mov ebx, r9d
+        imul ebx, ecx
+        imul rax, rbx
+        mov ebx, [rel t_pant]
+        imul rax, rbx
+        mov esi, [rel fb_linea]
+        mov edi, [rel fb_alto]
+        imul rsi, rdi
+        xor edx, edx
+        div rsi
+        cmp rax, T_LENTO
+        jbe .f
+        dec ecx
+        jmp .prueba
+.f:     pop r9
+        pop r8
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; ---- modo_poner: EDX = 0 texto; 1... modo VBE (g_modos), bit 8: sin borrar ----
+modo_poner:
+        push rbx
+        push rsi
+        push rdi
+        movzx eax, dl
+        test eax, eax
+        jz .texto
+        cmp eax, G_NMODOS
+        ja .texto
+        cmp qword [rel vbe_lfb], 0
+        je .texto
+        lea rsi, [rel g_modos]
+        mov ecx, [rsi + rax * 8 - 8]
+        mov ebx, [rsi + rax * 8 - 4]
+        cmp ecx, [rel fb_ancho]
+        ja .texto
+        cmp ebx, [rel fb_alto]
+        ja .texto
+        mov [rel graf], al
+        mov [rel g_an], ecx
+        mov [rel g_al], ebx
+        push rdx
+        mov eax, ecx
+        mov edx, ebx
+        call escala_tope
+        pop rdx
+        mov [rel g_k], ecx
+        mov eax, [rel g_an]             ; centrado
+        imul eax, ecx
+        mov ebx, [rel fb_ancho]
+        sub ebx, eax
+        shr ebx, 1
+        mov [rel g_x0], ebx
+        mov eax, [rel g_al]
+        imul eax, ecx
+        mov ebx, [rel fb_alto]
+        sub ebx, eax
+        shr ebx, 1
+        mov [rel g_y0], ebx
+        mov byte [rel g_todo], 1
+        test edx, 100h
+        jnz .f
+        mov rdi, [rel vbe_lfb]          ; el marco, en negro
+        mov ecx, [rel g_an]
+        imul ecx, [rel g_al]
+        xor eax, eax
+        cld
+        rep stosd
+        jmp .f
+.texto: mov byte [rel graf], 0
+        mov byte [rel borrada], 0       ; (el texto se pinta entero otra vez)
+.f:     pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; =============================================================================
+;  La memoria baja que usa el firmware y las tablas del equipo
+; =============================================================================
+; ---- paginas_prestar: las páginas de memoria baja que el firmware no da ----
+; En casi todos los equipos el firmware se queda una o dos páginas sueltas de
+; la memoria baja (el arranque de los otros procesadores: 87000h en el ThinkPad
+; E14, 58000h en el MacBook Air), y DOS se quedaba sin lo que hay por encima
+; (352 KB en el Mac). Esas páginas se PRESTAN: como la página 0, en cada cambio
+; de modo se intercambia su contenido (bios64.asm, paginas_cambiar), de manera
+; que el firmware ve siempre lo suyo y DOS lo suyo. Solo las que son memoria
+; normal del firmware (tipos 0 a 4 del mapa, con atributos de caché); como
+; mucho PRESTA_MAX, por debajo de la BIOS de modo real. R15 = base de la BIOS.
+paginas_prestar:
+        push rbx
+        push r12
+        push r13
+        sub rsp, 32                     ; (8 + 24 + 32 = 64: pila alineada)
+%ifdef PRUEBA_SIN_PRESTAR
+        jmp .f
+%endif
+        cmp byte [rel seguro], 0
+        jne .f
+        mov r12d, 1                     ; R12 = página
+        mov r13, r15
+        shr r13, 12                     ; R13 = la primera de la BIOS
+        lea rbx, [rel dada]
+.p:     cmp r12, r13
+        jae .hecho
+        cmp byte [rbx + r12], 0
+        jne .sig
+        movzx eax, byte [rel presta_n]
+        cmp eax, PRESTA_MAX
+        jae .hecho
+        mov rax, r12
+        shl rax, 12
+        call pagina_tipo
+        jc .hecho
+        cmp eax, 4
+        ja .hecho
+        test edx, 0Fh                   ; (sin atributos de caché no es memoria)
+        jz .hecho
+        movzx eax, byte [rel presta_n]
+        lea rcx, [rel presta_dir]
+        mov rdx, r12
+        shl rdx, 12
+        mov [rcx + rax * 4], edx
+        inc byte [rel presta_n]
+        mov byte [rbx + r12], 2
+.sig:   inc r12
+        jmp .p
+.hecho: cmp byte [rel presta_n], 0
+        je .f
+        mov rax, 0FFFFFFFFh             ; dónde se guarda la otra versión de
+        mov [rel dir_pag], rax          ; cada página (por debajo de 4 GB)
+        mov rax, [rel bootserv]
+        mov ecx, ALLOC_MAX
+        mov edx, MEM_LOADERDATA
+        mov r8d, PRESTA_MAX
+        lea r9, [rel dir_pag]
+        FW [rax + BS_ALLOCPAGES]
+        test rax, rax
+        jnz .sin_mem
+        mov rdi, [rel dir_pag]
+        mov [rel presta_guarda], edi
+        mov ecx, PRESTA_MAX * 512       ; (DOS las ve a cero)
+        xor eax, eax
+        cld
+        rep stosq
+        DI t_presta
+        xor r12d, r12d
+.e:     lea rcx, [rel presta_dir]
+        mov eax, [rcx + r12 * 4]
+        mov ecx, 5
+        call hex
+        DI t_espacio
+        inc r12d
+        cmp r12b, [rel presta_n]
+        jb .e
+        DI t_nl
+        jmp .f
+.sin_mem:                               ; sin sitio para guardarlas: no se prestan
+        movzx ecx, byte [rel presta_n]
+        lea rdx, [rel presta_dir]
+.q:     mov eax, [rdx + rcx * 4 - 4]
+        shr eax, 12
+        mov byte [rbx + rax], 0
+        dec ecx
+        jnz .q
+        mov byte [rel presta_n], 0
+.f:     add rsp, 32
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
+; pagina_tipo: RAX = dirección -> EAX = tipo en el mapa de memoria y RDX = sus
+; atributos; CF si no está en el mapa
+pagina_tipo:
+        push rbx
+        push rcx
+        push rsi
+        mov rsi, [rel mapa_dir]
+        mov rcx, [rel mapa_tam]
+        add rcx, rsi
+.e:     cmp rsi, rcx
+        jae .no
+        mov rbx, [rsi + 8]
+        cmp rax, rbx
+        jb .sig
+        mov rdx, [rsi + 24]
+        shl rdx, 12
+        add rdx, rbx
+        cmp rax, rdx
+        jae .sig
+        mov eax, [rsi]
+        mov rdx, [rsi + 32]
+        clc
+        jmp .f
+.sig:   add rsi, [rel desc_tam]
+        jmp .e
+.no:    stc
+.f:     pop rsi
+        pop rcx
+        pop rbx
+        ret
+
+; ---- tablas_copiar: las entradas de ACPI (RSDP) y de SMBIOS, a la BIOS ----
+; Con UEFI esas entradas no están donde las busca un programa de modo real
+; (la EBDA y de E0000h a FFFFFh): solo se llega a ellas por la tabla de
+; configuración del firmware. Se copian a la zona EBDA de la BIOS de modo
+; real (RSDP en +10h, SMBIOS en +40h), que las pone a la vista (bios_inicio):
+; 40:0Eh apunta a la EBDA y, si F0000h es memoria que se puede escribir,
+; también allí. Las tablas en sí se quedan donde están. R15 = la BIOS.
+tablas_copiar:
+        push rbx
+        push r12
+        push r13
+        push r14
+        sub rsp, 40                     ; (8 + 32 + 40 = 80: pila alineada)
+        mov byte [rel callado], 1
+        xor r12d, r12d                  ; R12 = RSDP, R13 = SMBIOS, R14 = SMBIOS 3
+        xor r13d, r13d
+        xor r14d, r14d
+        mov rax, [rel sistema]
+        mov rcx, [rax + ST_NTABLAS]
+        mov rbx, [rax + ST_TABLAS]
+        test rbx, rbx
+        jz .buscadas
+.t:     test rcx, rcx
+        jz .buscadas
+        mov rax, [rbx]
+        mov rdx, [rbx + 8]
+        cmp rax, [rel guid_acpi2]
+        jne .t1
+        cmp rdx, [rel guid_acpi2 + 8]
+        jne .t1
+        mov r12, [rbx + 16]             ; (la de ACPI 2.0 manda)
+        jmp .ts
+.t1:    cmp rax, [rel guid_acpi1]
+        jne .t2
+        cmp rdx, [rel guid_acpi1 + 8]
+        jne .t2
+        test r12, r12
+        jnz .ts
+        mov r12, [rbx + 16]
+        jmp .ts
+.t2:    cmp rax, [rel guid_smbios]
+        jne .t3
+        cmp rdx, [rel guid_smbios + 8]
+        jne .t3
+        mov r13, [rbx + 16]
+        jmp .ts
+.t3:    cmp rax, [rel guid_smbios3]
+        jne .ts
+        cmp rdx, [rel guid_smbios3 + 8]
+        jne .ts
+        mov r14, [rbx + 16]
+.ts:    add rbx, 24
+        dec rcx
+        jmp .t
+.buscadas:
+        xor ebx, ebx                    ; EBX = T_TABLAS
+        DI t_t_acpi
+        test r12, r12
+        jz .sin_acpi
+        mov rax, r12
+        call hex64
+        DI t_t_rev
+        movzx eax, byte [r12 + 15]
+        call decimal
+        DI t_parentesis2
+        mov rsi, r12                    ; 20 octetos (ACPI 1.0) o 36
+        lea rdi, [r15 + EBDA + 10h]
+        mov ecx, 20
+        cmp byte [r12 + 15], 2
+        jb .ac
+        mov ecx, 36
+.ac:    cld
+        rep movsb
+        or ebx, 1
+        cmp dword [r12 + 16], 0         ; ¿hay RSDT (de 32 bits)?
+        jne .smbios
+        DI t_t_xsdt
+        jmp .smbios
+.sin_acpi:
+        DI t_t_no
+.smbios:
+        DI t_t_smbios
+        mov rsi, r13
+        mov ecx, 31                     ; «_SM_»: 31 octetos
+        test rsi, rsi
+        jnz .sm
+        mov rsi, r14
+        mov ecx, 24                     ; «_SM3_»: 24
+        test rsi, rsi
+        jz .sin_smbios
+.sm:    mov rax, rsi
+        call hex64
+        lea rdi, [r15 + EBDA + 40h]
+        cld
+        rep movsb
+        or ebx, 2
+        jmp .fin
+.sin_smbios:
+        DI t_t_no
+.fin:   DI t_nl
+        mov [r15 + 228], bl             ; T_TABLAS
+        mov byte [rel callado], 0
+        add rsp, 40
+        pop r14
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
 ; ---- escala: tablas de dónde cae cada punto de 640x400 en la pantalla real ----
-; Se amplía lo más posible sin deformar (8:5): en 1920x1080, a 1728x1080.
+; Se amplía lo más posible sin deformar (8:5): en 1920x1080, a 1728x1080. Si la
+; pantalla es lenta (t_pant), por un entero (esc_k): menos puntos que pintar.
 escala:
         push rbx
         push rsi
         push rdi
+        mov dword [rel esc_k], 0
         mov eax, [rel fb_ancho]
         mov ecx, [rel fb_alto]
         lea edx, [eax * 4 + eax]        ; An*5 <= Al*8: manda el ancho
@@ -1158,13 +2142,23 @@ escala:
         mov [rel dib_an], eax
         shr edx, 3
         mov [rel dib_al], edx
-        jmp .origen
+        jmp .lenta
 .alto:  mov [rel dib_al], ecx
         mov eax, ebx                    ; Al*8/5
         xor edx, edx
         mov ebx, 5
         div ebx
         mov [rel dib_an], eax
+.lenta: cmp dword [rel t_pant], T_LENTO
+        jbe .origen
+        mov eax, 640
+        mov edx, 400
+        call escala_tope
+        mov [rel esc_k], ecx
+        imul eax, ecx, 640
+        mov [rel dib_an], eax
+        imul eax, ecx, 400
+        mov [rel dib_al], eax
 .origen:
         lea rdi, [rel tab_x]
         mov eax, [rel fb_ancho]
@@ -1201,8 +2195,65 @@ escala:
         pop rbx
         ret
 
-; ---- pantalla_dibujar: pinta la pantalla de texto de la BIOS (80x25), ampliada ----
+; ---- pantalla_dibujar: lleva a la pantalla lo que haya cambiado (el texto o
+;      el modo gráfico) y apunta lo que ha tardado (T_DIB_*) ----
+; (con las interrupciones cerradas; mientras, con las tablas del alias WC)
 pantalla_dibujar:
+        push rbx
+        push rsi
+        push rdi
+        push r12
+        push r13
+        push r14
+        push r15
+        rdtsc
+        shl rdx, 32
+        or rax, rdx
+        mov r14, rax
+        xor r15d, r15d
+        cmp byte [rel wc_usar], 0
+        je .sin
+        mov r15, cr3
+        mov rax, [rel wc_cr3]
+        mov cr3, rax
+.sin:   cld
+        cmp byte [rel graf], 0
+        je .texto
+        call graf_presentar
+        jmp .hecho
+.texto: call texto_dibujar
+.hecho: test r15, r15
+        jz .cuenta
+        mov cr3, r15
+.cuenta:
+        rdtsc
+        shl rdx, 32
+        or rax, rdx
+        sub rax, r14
+        mov ecx, [rel tsc_tic]
+        test ecx, ecx
+        jz .fin
+        mov edx, 54925
+        mul rdx
+        div rcx                         ; RAX = microsegundos
+        mov rbx, [rel bios_base]
+        inc dword [rbx + 196]           ; T_DIB_N
+        mov [rbx + 200], eax            ; T_DIB_ULT
+        add [rbx + 224], eax            ; T_DIB_TOT
+        cmp eax, [rbx + 204]            ; T_DIB_MAX
+        jbe .fin
+        mov [rbx + 204], eax
+.fin:   pop r15
+        pop r14
+        pop r13
+        pop r12
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; texto_dibujar: pinta la pantalla de texto de la BIOS (80x25), ampliada
+texto_dibujar:
         push rbx
         push rsi
         push rdi
@@ -1210,14 +2261,11 @@ pantalla_dibujar:
         push r13
         mov r13, [rel bios_base]
         ; la primera vez se borra todo en negro; después solo se pintan las
-        ; celdas que han cambiado (escribir en la memoria de vídeo real es
-        ; lento y mientras tanto el reloj de DOS no corre)
-        cld
+        ; celdas que han cambiado
         cmp byte [rel borrada], 0
         jne .ya_borrada
         mov byte [rel borrada], 1
-        call escala
-        mov rdi, [rel fb]
+        mov rdi, [rel fbv]
         mov eax, [rel fb_linea]
         imul eax, [rel fb_alto]
         mov ecx, eax
@@ -1273,6 +2321,8 @@ pantalla_dibujar:
         ret
 
 ; pintar_celda: EAX = fila, EBX = columna, RSI = letra, ECX = tinta, EDX = fondo
+; Cada fila de puntos de la letra se amplía una vez en linea_buf (memoria
+; normal) y se copia a la pantalla tantas veces como líneas ocupe.
 pintar_celda:
         push rbx
         push rsi
@@ -1292,41 +2342,126 @@ pintar_celda:
         mov r10d, 16
 .fila:  mov r11b, [rsi]
         inc rsi
-        push rsi
-        mov esi, [r13 + r8 * 4]         ; ESI = y0
+        mov edx, [r13 + r8 * 4]         ; EDX = primera línea de la pantalla
+        cmp edx, [r13 + r8 * 4 + 4]
+        jae .sig
+        lea rdi, [rel linea_buf]
         mov ebx, r9d
-        mov ecx, 8
 .punto: mov eax, r15d
         shl r11b, 1
         cmovc eax, r14d
-        push rcx
-        mov ecx, [r12 + rbx * 4]        ; x
-        mov edx, [r12 + rbx * 4 + 4]
-        sub edx, ecx                    ; ancho
+        mov ecx, [r12 + rbx * 4 + 4]
+        sub ecx, [r12 + rbx * 4]
+        rep stosd
+        inc ebx
+        lea ecx, [r9 + 8]
+        cmp ebx, ecx
+        jb .punto
+        mov ebx, [r12 + r9 * 4 + 32]
+        sub ebx, [r12 + r9 * 4]         ; EBX = ancho de la celda en la pantalla
         jz .sig
         push rsi
-.y:     cmp esi, [r13 + r8 * 4 + 4]
-        jae .ya
-        mov edi, esi
-        imul edi, [rel fb_linea]
-        add edi, ecx
+.y:     mov edi, [rel fb_linea]
+        imul rdi, rdx
+        mov eax, [r12 + r9 * 4]
+        add rdi, rax
         shl rdi, 2
-        add rdi, [rel fb]
-        push rcx
-        mov ecx, edx
-        rep stosd
-        pop rcx
-        inc esi
-        jmp .y
-.ya:    pop rsi
-.sig:   pop rcx
-        inc ebx
-        dec ecx
-        jnz .punto
+        add rdi, [rel fbv]
+        lea rsi, [rel linea_buf]
+        mov ecx, ebx
+        rep movsd
+        inc edx
+        cmp edx, [r13 + r8 * 4 + 4]
+        jb .y
         pop rsi
-        inc r8d
+.sig:   inc r8d
         dec r10d
         jnz .fila
+        pop r15
+        pop r14
+        pop r13
+        pop r12
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; graf_presentar: lleva a la pantalla las líneas del marco lineal de VBE que
+; han cambiado desde la última vez (se comparan con la copia vbe_ant), cada
+; punto ampliado G_K veces y la imagen centrada
+graf_presentar:
+        push rbx
+        push rsi
+        push rdi
+        push r12
+        push r13
+        push r14
+        push r15
+        cmp byte [rel g_todo], 0
+        je .lineas
+        mov rdi, [rel fbv]              ; modo recién puesto: todo en negro
+        mov ecx, [rel fb_linea]
+        imul ecx, [rel fb_alto]
+        xor eax, eax
+        rep stosd
+.lineas:
+        xor r12d, r12d                  ; R12 = línea
+        mov r13d, [rel g_an]
+        mov r14d, [rel g_k]
+        mov r15d, [rel fb_formato]
+.linea: mov eax, r12d
+        imul eax, r13d
+        shl rax, 2
+        mov rbx, rax                    ; RBX = dónde empieza la línea en el marco
+        cmp byte [rel g_todo], 0
+        jne .pinta
+        mov rsi, [rel vbe_lfb]
+        add rsi, rbx
+        mov rdi, [rel vbe_ant]
+        add rdi, rbx
+        mov ecx, r13d
+        repe cmpsd
+        je .sig
+.pinta: mov rsi, [rel vbe_lfb]
+        add rsi, rbx
+        mov rdi, [rel vbe_ant]
+        add rdi, rbx
+        mov ecx, r13d
+        rep movsd
+        mov rsi, [rel vbe_ant]          ; la línea, ampliada, en linea_buf
+        add rsi, rbx
+        lea rdi, [rel linea_buf]
+        mov edx, r13d
+.px:    lodsd
+        test r15d, r15d
+        jnz .bgr
+        bswap eax                       ; (pantalla con el rojo abajo)
+        shr eax, 8
+.bgr:   mov ecx, r14d
+        rep stosd
+        dec edx
+        jnz .px
+        mov edx, r12d                   ; y a la pantalla, G_K líneas iguales
+        imul edx, r14d
+        add edx, [rel g_y0]
+        mov ebx, r14d
+.fila:  mov edi, [rel fb_linea]
+        imul rdi, rdx
+        mov eax, [rel g_x0]
+        add rdi, rax
+        shl rdi, 2
+        add rdi, [rel fbv]
+        lea rsi, [rel linea_buf]
+        mov ecx, r13d
+        imul ecx, r14d
+        rep movsd
+        inc edx
+        dec ebx
+        jnz .fila
+.sig:   inc r12d
+        cmp r12d, [rel g_al]
+        jb .linea
+        mov byte [rel g_todo], 0
         pop r15
         pop r14
         pop r13
@@ -1536,6 +2671,64 @@ t_gop_f         db ', formato ', 0
 t_gop_l         db ', puntos por linea ', 0
 t_gop_d         db ', en ', 0
 t_r_ext         db 'Memoria extendida: ', 0
+t_presta        db 'Paginas del firmware en la memoria baja que se prestan a DOS (se cambian en cada viaje): ', 0
+t_t_acpi        db 'Tablas del equipo: ACPI (RSDP) en ', 0
+t_t_rev         db ' (revision ', 0
+t_t_xsdt        db '; OJO: sin RSDT de 32 bits, solo XSDT', 0
+t_t_smbios      db '; SMBIOS en ', 0
+t_parentesis2   db ')', 0
+t_t_no          db 'no hay', 0
+        align 8
+guid_acpi2      dd 8868E871h
+                dw 0E4F1h, 11D3h
+                db 0BCh, 22h, 00h, 80h, 0C7h, 3Ch, 88h, 81h
+guid_acpi1      dd 0EB9D2D30h
+                dw 2D88h, 11D3h
+                db 9Ah, 16h, 00h, 90h, 27h, 3Fh, 0C1h, 4Dh
+guid_smbios     dd 0EB9D2D31h
+                dw 2D88h, 11D3h
+                db 9Ah, 16h, 00h, 90h, 27h, 3Fh, 0C1h, 4Dh
+guid_smbios3    dd 0F2FD1544h
+                dw 9794h, 4A2Ch
+                db 99h, 2Eh, 0E5h, 0BBh, 0CFh, 20h, 0E3h, 94h
+presta_dir      dd 0, 0, 0, 0           ; las páginas prestadas
+presta_guarda   dd 0                    ; dónde se guarda su otra versión
+presta_n        db 0
+seguro          db 0                    ; 1: modo seguro (tecla S al arrancar)
+t_seguro_s      db '(Si no arranca o va mal: reinicie y vaya pulsando la tecla S = modo seguro)', 13, 10, 0
+t_seguro        db 'MODO SEGURO: sin escritura combinada, sin cambiar de modo de pantalla y sin prestar paginas', 13, 10, 0
+t_g_modos       db 'Modos de pantalla del firmware (GOP; * el puesto): ', 0
+t_g_cambio      db 'Pantalla lenta: se pasa a un modo mas pequeno del firmware: ', 0
+t_g_coma        db ', ', 0
+t_g_ast         db '*', 0
+t_g_mas         db '...', 0
+t_w_mtrr        db 'Cache de la pantalla: MTRR por omision ', 0
+t_w_mtrr2       db 'h; la pantalla, ', 0
+t_w_var         db 'en el MTRR variable ', 0
+t_w_tipo        db ' de tipo ', 0
+t_w_nomtrr      db 'en ninguno (vale el tipo por omision)', 0
+t_w_tipos       db 'UC', 0, 0, 'WC', 0, 0, '??', 0, 0, '??', 0, 0, 'WT', 0, 0, 'WP', 0, 0, 'WB', 0, 0, '??', 0, 0
+t_w_pat         db '; PAT ', 0
+t_w_alias       db 'Escritura combinada (WC): alias de la pantalla en ', 0
+t_w_alias2      db ' (tablas en ', 0
+t_w_alias3      db ', entrada ', 0
+t_w_alias4      db ' del nivel 4), PAT nuevo ', 0
+t_w_no_pat      db 'Escritura combinada (WC): no se pone (el procesador no tiene PAT)', 13, 10, 0
+t_w_no_la57     db 'Escritura combinada (WC): no se pone (tablas de paginas de 5 niveles)', 13, 10, 0
+t_w_no_mem      db 'Escritura combinada (WC): no se pone (sin memoria o sin hueco en las tablas)', 13, 10, 0
+t_w_medida      db 'Pintar la pantalla entera: ', 0
+t_w_medida2     db ' us escribiendo directamente, ', 0
+t_w_medida3     db ' us por el alias con WC. Se pinta ', 0
+t_w_directo     db 'directamente', 0
+t_w_poralias    db 'por el alias', 0
+t_w_esc         db 'Texto: ', 0
+t_w_esc_todo    db 'ampliado a toda la pantalla (', 0
+t_w_esc_k       db 'la pantalla es lenta: ampliado solo por ', 0
+t_w_esc_k2      db ' (', 0
+t_w_cierra      db ')', 13, 10, 0
+t_v_lfb         db 'VBE: marco lineal para los programas en ', 0
+t_v_lfb2        db ' (3 MB, por debajo de 4 GB); modos de 32 bits: 640x480, 800x600 y 1024x768 (los que quepan)', 13, 10, 0
+t_v_no          db 'VBE: no hay memoria por debajo de 4 GB para el marco lineal: sin modos graficos', 13, 10, 0
 t_r_tsc         db ' KB; TSC por tic: ', 0
 t_r_vec         db '; vector de la IRQ 0 (8259): ', 0
 t_r_discos      db 'h; discos: ', 0
@@ -1610,6 +2803,28 @@ fb_ancho        dd 0
 fb_alto         dd 0
 fb_formato      dd 0
 fb_linea        dd 0
+fbv             dq 0                    ; por dónde se escribe en la pantalla: fb o su
+                                        ; alias con escritura combinada (wc_alias)
+wc_alias        dq 0
+wc_cr3          dq 0                    ; tablas de páginas con el alias (0: no hay)
+reg_marca       dq 0
+vbe_lfb         dq 0                    ; el marco lineal que ven los programas
+vbe_ant         dq 0                    ; lo que hay pintado de él
+tsc_tic         dd 0                    ; cuentas del TSC por tic (54925 us)
+t_pant          dd 0                    ; microsegundos que cuesta pintar la pantalla entera
+esc_k           dd 0                    ; texto: 0 = ampliado a toda la pantalla; k = 640k x 400k
+g_an            dd 0                    ; el modo VBE puesto: ancho, alto, ampliación
+g_al            dd 0                    ; y dónde cae en la pantalla
+g_k             dd 0
+g_x0            dd 0
+g_y0            dd 0
+; los modos VBE (los mismos de vbe_modos en bios64.asm): ancho, alto
+g_modos         dd 640, 480, 800, 600, 1024, 768
+G_NMODOS        equ 3
+wc_usar         db 0                    ; 1: se pinta por el alias
+graf            db 0                    ; 0: texto; 1...: modo VBE puesto
+g_todo          db 0                    ; 1: hay que pintar el marco entero
+        align 4
 guid_gop        dd 9042A9DEh
                 dw 23DCh, 4A38h
                 db 96h, 0FBh, 7Ah, 0DEh, 0D0h, 80h, 51h, 6Ah
@@ -1644,6 +2859,8 @@ buf_txt         times 64 db 0
                 align 8
 buf16           times 256 dw 0
 sombra          times 2000 dw 0         ; lo que hay pintado (carácter y atributo)
+        align 16
+linea_buf       times LIN_MAX dd 0      ; una línea de puntos ya ampliada
 tab_x           times 641 dd 0
 tab_y           times 401 dd 0
 dib_an          dd 0

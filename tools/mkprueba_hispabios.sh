@@ -1,6 +1,7 @@
 #!/bin/bash
-# Hispa-DOS - imagen de prueba de HispaBIOS para un equipo de verdad que se
-# queda parado al arrancar por UEFI (docs/HISPABIOS.md). A partir de
+# Hispa-DOS - imagen de prueba de HispaBIOS para un equipo de verdad que
+# arranca por UEFI (docs/HISPABIOS.md): la velocidad de la pantalla, Hispa
+# Ventanas (VBE) y el registro. A partir de
 # build/hispados-usb.img (make usb): el mismo BOOTX64.EFI ensamblado con
 # -DREGISTRO_PASOS, que guarda \HISPABIOS.LOG en la memoria USB en cada paso
 # aunque todo vaya bien (la imagen normal solo lo guarda si algo falla). Deja
@@ -30,6 +31,10 @@ nasm -f bin -I hispabios/ -I $B/ -DREGISTRO_PASOS -o $T/BOOTX64.EFI hispabios/ef
 mcopy -o -i "$P" $T/BOOTX64.EFI ::EFI/BOOT/BOOTX64.EFI
 txt usb/prueba-hispabios/LEEME.TXT $T/LEEME-HB.TXT
 mcopy -o -i "$P" $T/LEEME-HB.TXT ::
+# PRUEBAHB.BAT: guarda el registro de la BIOS (HBLOG), arranca Hispa Ventanas
+# y lo guarda otra vez al salir (con las llamadas de VBE que haya hecho)
+printf '@ECHO OFF\r\nC:\r\nCD \\\r\nC:\\HISPADOS\\HBLOG\r\nC:\\HISPADOS\\VENTANAS\r\nC:\\HISPADOS\\HBLOG\r\n' > $T/PRUEBAHB.BAT
+mcopy -o -i "$P" $T/PRUEBAHB.BAT ::
 [ ! -e "$D/hispados-usb-hispabios.zip" ] || mv -f "$D/hispados-usb-hispabios.zip" "$D/hispados-usb-hispabios.zip.ant"
 (cd $T && zip -q -9 "$D/hispados-usb-hispabios.zip" hispados-usb.img)
 txt usb/prueba-hispabios/LEEME.TXT "$D/LEEME.TXT"

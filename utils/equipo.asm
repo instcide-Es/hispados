@@ -1287,7 +1287,36 @@ rom_find:
 
 ; ---- SMBIOS (tablas DMI): fabricante y modelo del sistema, placa, memoria ----
 smbios:
-        mov ax, 0xF000
+        mov ax, 0xF000                      ; donde la deja una BIOS: F0000h-FFFFFh
+        mov word [sm_fin], 0
+        call sm_busca
+        jnz .hay
+        ; en un equipo arrancado por UEFI (HispaBIOS) F0000h no se puede
+        ; escribir y la entrada está en el primer KB de la EBDA
+        xor ax, ax
+        mov es, ax
+        mov ax, [es:0x40E]
+        cmp ax, 0x8000
+        jb .nohay
+        cmp ax, 0xA000
+        jae .nohay
+        mov word [sm_fin], 0x400
+        call sm_busca
+        jnz .hay
+.nohay:
+        push cs
+        pop es
+        PR "SMBIOS: no hay tablas", NL
+        ret
+.hay:
+        mov [sm_seg], es
+        cmp al, 3
+        je sm_found3
+        jmp sm_found
+
+; sm_busca: AX = segmento, [sm_fin] = hasta dónde (0: los 64 KB) -> ES:DI = la
+; entrada y AL = 1 («_SM_») o 3 («_SM3_», la de 64 bits); ZF si no la hay
+sm_busca:
         mov es, ax
         xor di, di
 .s:
@@ -1306,23 +1335,31 @@ smbios:
         loop .ck
         pop di
         test al, al
-        jz .found
+        jnz .n
+        mov al, 1
+        or al, al
+        ret
 .n:
         add di, 16
-        jnz .s
+        cmp di, [sm_fin]
+        jne .s
         ; la entrada de 64 bits (SMBIOS 3)
         xor di, di
 .s3:
         cmp dword [es:di], 0x334D535F       ; "_SM3"
         jne .n3
         cmp byte [es:di+4], '_'
-        je .found3
+        jne .n3
+        mov al, 3
+        or al, al
+        ret
 .n3:
         add di, 16
-        jnz .s3
-        PR "SMBIOS: no hay tablas", NL
+        cmp di, [sm_fin]
+        jne .s3
+        xor al, al
         ret
-.found3:
+sm_found3:
         mov [sm_ep], di
         mov al, [es:di+6]
         mov [sm_eplen], al
@@ -1334,10 +1371,10 @@ smbios:
         mov [sm_addr], eax
         mov word [sm_cnt], 400
         cmp dword [es:di+0x14], 0
-        je .go
+        je sm_found.go
         PR "SMBIOS 3: tablas por encima de 4 GB (no se leen)", NL
         ret
-.found:
+sm_found:
         mov [sm_ep], di
         mov al, [es:di+5]
         mov [sm_eplen], al
@@ -1373,8 +1410,12 @@ smbios:
         ; el punto de entrada y la tabla entera, en binario
         cmp byte [opt_inf], 0
         je .next
-        movzx eax, word [sm_ep]
-        add eax, 0xF0000
+        movzx eax, word [sm_seg]
+        shl eax, 4
+        push edx
+        movzx edx, word [sm_ep]
+        add eax, edx
+        pop edx
         mov [d_addr], eax
         movzx eax, byte [sm_eplen]
         mov [d_len], eax
@@ -7092,6 +7133,8 @@ mcfg_b0     resb 2
 dmp_h       resw 1
 dir_end     resw 1
 sm_ep       resw 1
+sm_seg      resw 1                  ; el segmento donde está la entrada
+sm_fin      resw 1                  ; hasta dónde se busca en él (0: entero)
 a_n         resw 1
 a_i         resw 1
 a_nseen     resw 1
