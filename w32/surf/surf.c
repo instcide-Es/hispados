@@ -288,7 +288,9 @@ static void pinta_barra(HANDLE dc) {
 static void pinta_estado(HANDLE dc) {
   int y = al - ESTADO_H, n, max;
   int carga = cargando();
-  const char *d = carga ? "Espere, por favor" : actual && surf_cifrada ? "Conexi\363n cifrada" : "";
+  nsurl *u = actual ? browser_window_access_url(actual->bw) : NULL;
+  int https = u && !strncmp(nsurl_access(u), "https:", 6);
+  const char *d = carga ? "Espere, por favor" : https && surf_cifrada ? "Conexi\363n cifrada" : "";
   caja(dc, 0, y, an, ESTADO_H, P(carga ? P_OCRE : P_PIEDRA));
   caja(dc, 0, y, an, 1, P(P_ARENA_OSC));
   SetBkMode(dc, 1);
