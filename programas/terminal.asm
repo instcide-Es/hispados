@@ -594,20 +594,27 @@ disponer:
 .x:
         ret
 
-; (interna) invalida solo la fila de la línea de entrada (para el parpadeo)
+; (interna) invalida solo la fila de la línea de entrada (para el parpadeo y
+; para cada tecla). La fila es la MISMA que pinta «pintar»: vis_rows*FILA, que
+; no es «alto - FILA» cuando el alto de la zona no es múltiplo de FILA (antes
+; se invalidaba esa otra franja y de lo tecleado solo se repintaba el pie de
+; las letras: «no veo lo que escribo»). Se invalida hasta el borde de abajo.
 inval_entrada:
         pushad
+        cmp dword [ven], 0
+        je .x
+        call calcula                ; vis_rows y cli_al, como al pintar
         mov ebp, [ven]
-        test ebp, ebp
-        jz .x
-        HV ven_cli                  ; ECX=ancho EDX=alto
-        mov ebx, edx
-        sub ebx, FILA
-        jns .r1
-        xor ebx, ebx
-.r1:
+        mov ebx, [vis_rows]
+        imul ebx, FILA              ; y de la línea de entrada
         xor eax, eax
+        mov ecx, [cli_an]
+        mov edx, [cli_al]
+        sub edx, ebx
+        cmp edx, FILA
+        jge .r1
         mov edx, FILA
+.r1:
         HV ven_invalidar_rect       ; EAX=x EBX=y ECX=ancho EDX=alto
 .x:
         popad

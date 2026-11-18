@@ -5,9 +5,15 @@
 # sexto icono: Bloc, Calculadora, Reloj, Sistema, Pintura,
 # Terminal). Comprueba que:
 #  - la ventana «Terminal» se abre (título en 100,60);
+#  - lo que se teclea SE VE en la línea de órdenes antes de pulsar Intro
+#    (blanco sobre negro, tras el símbolo «C:\>»): durante un tiempo solo se
+#    repintaba el pie de las letras («no veo lo que escribo»);
 #  - VER escribe la versión del sistema en el área de texto;
 #  - ECHO escribe su argumento;
-#  - al salir, Hispa-DOS sigue vivo.
+#  - al salir, Hispa-DOS sigue vivo;
+#  - 2.ª sesión, VENTANAS /486 (barra de tareas): el Terminal se abre desde
+#    Inicio > Accesorios y también enseña lo que se teclea, borra con
+#    Retroceso y ejecuta la orden.
 #
 # Necesita qemu-system-i386, mtools, socat e ImageMagick (como las demás).
 set -u
@@ -83,10 +89,12 @@ fi
   tecla right right right right right ret; sleep 2.5
   aparca
   shot t1
-  escribe "ver"; tecla ret; sleep 1    # la versión del sistema
+  escribe "ver"; sleep 0.6; shot e1    # tecleado y a la vista, antes de Intro
+  tecla ret; sleep 1                   # la versión del sistema
   aparca
   shot t2
-  escribe "echo hola terminal"; tecla ret; sleep 1
+  escribe "echo hola terminal"; sleep 0.6; shot e2
+  tecla ret; sleep 1
   aparca
   shot t3
   clic 756 13; sleep 1; tecla ret; sleep 2.5    # salir de Hispa Ventanas
@@ -97,6 +105,9 @@ fi
 
 # -- la ventana del Terminal, abierta en (100,60) --
 chk $T/t1.ppm titulo 100 60 activa "Terminal"
+# -- lo tecleado se ve en la línea de órdenes (blanco sobre negro) antes de Intro --
+chk $T/e1.ppm busca 106 105 656 414 14 0 ":\\>" busca 106 105 656 414 9 0 "ver"
+chk $T/e2.ppm busca 106 105 656 414 9 0 "echo hola terminal"
 # -- VER: la versión, escrita en el área de texto (claro sobre negro) --
 chk $T/t2.ppm busca 106 105 656 414 15 0 "Hispa-DOS 0.9.25"
 # -- ECHO: su argumento --
@@ -109,7 +120,40 @@ check "SIGUE-VIVO"
 if grep -qxF -- "Modulos=16" $T/ini.txt; then ok "CENTRO.INI: Modulos=16"; else ko "CENTRO.INI sin Modulos=16"; fi
 if grep -qF -- "Nombre=Terminal" $T/ini.txt; then ok "CENTRO.INI: Nombre=Terminal"; else ko "CENTRO.INI sin Nombre=Terminal"; fi
 
-muestra t1 abierto; muestra t2 ver; muestra t3 echo
+muestra t1 abierto; muestra e1 tecleado; muestra t2 ver; muestra t3 echo
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; cat $T/ini.txt; fi
+
+echo "== Terminal en el escritorio de Hispa-486 (VENTANAS /486): se ve lo que se teclea =="
+cp "$IMG" $T/f.img
+mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
+RX=400; RY=300
+{ sleep 6
+  send 'KEYB SP' 2
+  send 'A:\HISPADOS\HSPRATON' 2
+  send 'VENTANAS /486' 10
+  # Inicio (Ctrl+Esc) > Accesorios > el sexto: Terminal
+  tecla ctrl-esc; sleep 1; tecla down; sleep 0.3; tecla right; sleep 0.8
+  tecla down down down down down; sleep 0.4; tecla ret; sleep 3
+  aparca
+  shot f1
+  escribe "dir"; sleep 0.6; shot f2    # tecleado, antes de Intro
+  tecla backspace; sleep 0.6; shot f3  # Retroceso: queda «di»
+  tecla backspace backspace; escribe "echo hola barra"; sleep 0.6; shot f4
+  tecla ret; sleep 1
+  aparca
+  shot f5
+  tecla alt-f4; sleep 1.5
+  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 4   # «Salir de Hispa Ventanas...»
+  send 'ECHO TRAS-SALIR-486'
+  mon quit
+} | run 200 -vga std
+chk $T/f1.ppm titulo 100 60 activa "Terminal" px 84 590 1 "la barra de tareas"
+chk $T/f2.ppm busca 106 105 656 414 14 0 ":\\>" busca 106 105 656 414 9 0 "dir"
+chk $T/f3.ppm busca 106 105 656 414 9 0 "di" nobusca 106 105 656 414 9 0 "dir"
+chk $T/f4.ppm busca 106 105 656 414 9 0 "echo hola barra"
+chk $T/f5.ppm busca 106 105 656 414 15 0 "hola barra" nobusca 106 105 656 414 9 0 "echo hola barra"
+check "TRAS-SALIR-486"
+muestra f2 tecleado486; muestra f5 echo486
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; fi
 rm -rf $T
 exit $fail
