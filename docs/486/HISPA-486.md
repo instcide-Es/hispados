@@ -462,6 +462,82 @@ completo, en docs/RED.md, «Formato de versiones.txt».
   partición. INSTALAR llama a FORMATEA y a SISTEMA: lo que cambie en ellos
   para FAT32 le llega solo; el `/V:HISPADOS /AUTOTEST` de FORMATEA, a revisar.
 
+## Discos grandes y FAT32 (hecha, 18/11/2026)
+
+Pedido de Carlos: «Hispa-486 tendría que ser compatible con discos duros
+grandes». Es lo que trajo MS-DOS 7.1 (el DOS de Windows 95 OSR2 y 98): FAT32
+y discos de más de 128 GB. Está en el núcleo de siempre, así que también lo
+tiene Hispa-386; allí **FAT16 sigue siendo lo de por omisión** (FDISK solo
+crea FAT32 si se pide).
+
+- **Núcleo** (`kernel/kernel.asm`): monta las particiones 0Bh y 0Ch,
+  primarias y lógicas (y una FAT32 sin particiones); FAT de 28 bits, raíz en
+  cadena de clústeres, FSInfo (libres y siguiente libre, que se escriben al
+  acabar cada función), FAT sin espejo (bit 7 de +28h); clústeres de 32 bits
+  en la SFT, la DTA y las FCB (la parte alta en +14h de la entrada). INT 21h
+  **7302h** (DPB ampliado), **7303h** (espacio libre sin tope) y **7305h**
+  (sectores absolutos de 32 bits); 36h da como mucho 2 GB, como MS-DOS 7.1;
+  INT 25h/26h no valen en una FAT32 (los programas de disco viejos la
+  estropearían); 440Dh/60h con CH=48h da el BPB de 53 octetos y, en una
+  partición 0Bh/0Ch sin formato, uno de FAT32 (así FORMAT sabe qué le toca).
+  Los discos van por INT 13h con LBA (paquete de 64 bits): por encima de
+  128 GB la BIOS usa el LBA de 48 bits de la controladora; con la tabla de
+  particiones de MS-DOS (32 bits) el tope es 2 TB.
+- **FDISK** (`PARTIR`): `/FAT32` o, en el menú, la pregunta «¿Desea activar
+  la compatibilidad con discos grandes (S/N)?» cuando el disco pasa de
+  512 MB (Intro = no). Con ella, las unidades de 512 MB o más son FAT32 (0Bh,
+  o 0Ch si pasan del cilindro 1024), sin el tope de 2.047 MB; primarias y
+  lógicas. `PARTIR /INSTALAR` (INSTALAR) hace la misma pregunta.
+- **FORMAT**: FAT32 si la partición es 0Bh/0Ch, si pasa de 2 GB o con
+  `/FAT32`; clústeres como los de Microsoft (512 octetos hasta 260 MB, 4 KB
+  hasta 8 GB, 8 KB hasta 16 GB, 16 KB hasta 32 GB, 32 KB por encima); 32
+  sectores reservados con FSInfo en el 1 y copias en el 6 y el 7; escribe con
+  7305h; `/S` con el arranque de FAT32 (`boot/boot32.asm`: un sector, LBA o
+  CHS). Las cifras, en 64 bits («214.695.870.464 bytes»).
+- **SYS**, **ETIQUETA**: leen y escriben con 7305h; en FAT32 el BPB ampliado
+  va en +40h (unidad, firma, serie, etiqueta) y se escribe también la copia
+  del sector de arranque.
+- **REVISAR** (CHKDSK): como el CHKDSK de MS-DOS 7.1, en FAT32 **informa sin
+  corregir** (con /F lo dice). La FAT se lee a trozos y de cada clúster se
+  guarda un bit; si el mapa no cabe (200 GB son 6,5 millones de clústeres),
+  se repite el recorrido por ventanas. Encuentra cadenas rotas, tamaños que
+  no cuadran, vínculos cruzados y unidades perdidas.
+- **DIR** y el intérprete, el **Gestor** y el **Administrador de archivos**:
+  espacio libre con 7303h (más de 2 GB sin desbordar).
+- **HSPUSB**: memorias USB con FAT32 (particiones 0Bh/0Ch o sin particiones);
+  el núcleo la monta leyendo su sector de arranque. Los discos IDE/SATA van
+  por la BIOS (no hay camino AHCI propio para discos: el de HSPCD es solo
+  para CD).
+- **Memoria**: el núcleo crece unos 2,5 KB (sin DOS=HIGH un programa recibe
+  572 KB en vez de 575; con DOS=HIGH el código de FAT32 va a la HMA).
+- **Prueba:** `tests/run_fat32_tests.sh` (en `make test`): discos dispersos
+  de 4, 40 y 200 GB (FDISK, FORMAT, copiar, DIR, libres, ETIQUETA, REVISAR,
+  SYS, arrancar de la FAT32, primaria y lógica), un disco de `mkfs.fat`
+  leído y escrito, `fsck.fat` limpio en todo lo nuestro y REVISAR con un
+  vínculo cruzado y cadenas perdidas puestos a mano.
+
+### Lo que faltaría: nombres largos (LFN)
+
+FAT32 y los nombres largos son cosas distintas (los nombres largos de
+Windows 95 también van en FAT12/16). Hoy las entradas de nombre largo
+(atributo 0Fh) se respetan: no se enseñan, REVISAR no las toma por archivos
+y los archivos se ven por su nombre corto. Para tenerlos haría falta:
+
+1. En el núcleo, las funciones 71xxh de INT 21h (las de Windows 95 en DOS:
+   714Eh/714Fh/71A1h buscar, 716Ch abrir/crear, 7139h/713Ah/713Bh carpetas,
+   7141h borrar, 7156h renombrar, 7143h atributos, 7147h carpeta actual,
+   7160h nombre completo, 71A0h información del volumen): leer y escribir
+   la cadena de entradas 0Fh (UCS-2, suma de comprobación del nombre corto)
+   delante de la entrada 8.3, y generar el nombre corto («NOMBRE~1.TXT»).
+2. Que al borrar o renombrar con las funciones de siempre se marquen
+   también sus entradas de nombre largo (si no, quedan huérfanas, como en
+   MS-DOS 6.22; SCANDISK las limpia).
+3. COMMAND.COM (DIR con el nombre largo a la derecha, como Windows 95),
+   COPY/MOVER/REN con comillas, el Administrador de archivos y HW32
+   (`FindFirstFileA`, `CreateFileA`... con nombres largos de verdad).
+4. REVISAR: comprobar las cadenas de nombre largo (orden, suma de
+   comprobación) y quitar las huérfanas.
+
 ## Fase 1: el cargador PE
 
 - **Nombre:** `HW32.EXE` («Hispa Win32»). Se usa como `HW32 PROGRAMA.EXE
