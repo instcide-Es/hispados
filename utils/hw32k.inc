@@ -209,6 +209,8 @@ k_GetFileType:                      ; (h)
 k_WriteFile:                        ; (h, buf, n, *escritos, ovl)
 k_WriteConsoleA:                    ; (h, buf, n, *escritos, reservado)
         mov eax, [ebp]
+        cmp eax, H_LPT              ; [IMPRIMIR] la impresora
+        je lpt_escribe
         call handle_dos
         jc .mal_h
         mov esi, [ebp + 4]          ; el texto (en el programa: ES)
@@ -728,6 +730,11 @@ k_FlushConsoleInputBuffer:          ; (h)
 ; Los nombres especiales de la consola
 s_conin     db 'CONIN$', 0
 s_conout    db 'CONOUT$', 0
+; [IMPRIMIR] y los de la impresora del puerto paralelo (ver lpt_escribe)
+s_lpt1      db 'LPT1', 0
+s_lpt1p     db 'LPT1:', 0
+s_prn       db 'PRN', 0
+s_lpt1u     db '\\.\LPT1', 0
 k_CreateFileA:                      ; (nombre, acceso, compartir, seg, cómo, opciones, plantilla)
         mov esi, [ebp]
         mov edi, s_conin
@@ -742,6 +749,32 @@ k_CreateFileA:                      ; (nombre, acceso, compartir, seg, cómo, op
         mov eax, H_BASE + 1
         ret
 .no_out:
+        mov edi, s_lpt1             ; [IMPRIMIR] LPT1, LPT1:, PRN, \\.\LPT1
+        call iguala_ci
+        je .lpt
+        mov edi, s_lpt1p
+        call iguala_ci
+        je .lpt
+        mov edi, s_prn
+        call iguala_ci
+        je .lpt
+        mov edi, s_lpt1u
+        call iguala_ci
+        jne .no_lpt
+.lpt:
+        mov dword [rm_ax], 0        ; ¿hay puerto paralelo? (INT 11h: bits 14 y 15)
+        mov bl, 0x11
+        call int_rm_real
+        test word [rm_ax], 0xC000
+        jz .sin_lpt
+        mov dword [ult_error], 0
+        mov eax, H_LPT
+        ret
+.sin_lpt:
+        mov dword [ult_error], 2    ; ERROR_FILE_NOT_FOUND
+        mov eax, -1
+        ret
+.no_lpt:
         mov edi, TB_NOM1
         call nom_a_tb
         ; el modo de abrir: 0 leer, 1 escribir, 2 los dos
@@ -813,6 +846,87 @@ abre_bl:
         mov [rm_ax], bx
         mov word [rm_dx], TB_NOM1
         jmp dos
+
+; [IMPRIMIR] La impresora (CreateFileA de «LPT1», «LPT1:», «PRN» o
+; «\\.\LPT1»): lo que se le escribe va al puerto paralelo, carácter a carácter,
+; con la BIOS (INT 17h, como Pluma y el Lector), esperando a que no esté
+; ocupada (hasta 20 s: una de verdad se para a ratos). Con un error, sin papel
+; o si no contesta, WriteFile da FALSE (error 29, ERROR_WRITE_FAULT) y lo
+; escrito hasta ahí. CloseHandle no hace nada (ver k_CloseHandle).
+H_LPT       equ 0x4D00
+lpt_escribe:                        ; (h, buf, n, *escritos, ovl)
+        mov esi, [ebp + 4]
+        mov ecx, [ebp + 8]
+        xor ebx, ebx                ; lo escrito
+.c:
+        test ecx, ecx
+        jz .bien
+        call lpt_lista
+        jc .mal
+        movzx eax, byte [es:esi]    ; AH = 0: imprimir AL
+        mov [rm_ax], eax
+        mov dword [rm_dx], 0        ; (LPT1)
+        push ebx
+        mov bl, 0x17
+        call int_rm_real
+        pop ebx
+        test byte [rm_ax + 1], 0x28 ; error de E/S o sin papel (el «tiempo agotado» de
+                                    ; algunas BIOS no cuenta: como Pluma y el Lector)
+        jnz .mal
+        inc esi
+        inc ebx
+        dec ecx
+        jmp .c
+.bien:
+        mov eax, [ebp + 12]
+        test eax, eax
+        jz .b1
+        mov [es:eax], ebx
+.b1:
+        mov eax, 1
+        ret
+.mal:
+        mov eax, [ebp + 12]
+        test eax, eax
+        jz .m1
+        mov [es:eax], ebx
+.m1:
+        mov dword [ult_error], 29   ; ERROR_WRITE_FAULT
+        xor eax, eax
+        ret
+; espera a que la impresora no esté ocupada; CF=1 si tiene un error o no
+; contesta en 20 s
+lpt_lista:
+        push eax
+        push ebx
+        push edx
+        push es
+        mov es, [sel_bios]
+        mov edx, [es:0x6C]
+.l:
+        mov dword [rm_ax], 0x0200   ; AH = 2: el estado
+        mov dword [rm_dx], 0
+        mov bl, 0x17
+        call int_rm_real
+        test byte [rm_ax + 1], 0x28 ; error de E/S o sin papel
+        jnz .no
+        test byte [rm_ax + 1], 0x80 ; no está ocupada
+        jnz .si
+        mov eax, [es:0x6C]
+        sub eax, edx
+        cmp eax, 20 * 18
+        jb .l
+.no:
+        stc
+        jmp .x
+.si:
+        clc
+.x:
+        pop es
+        pop edx
+        pop ebx
+        pop eax
+        ret
 
 k_CloseHandle:                      ; (h)
         mov eax, [ebp]
