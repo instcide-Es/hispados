@@ -121,11 +121,39 @@ módulo Programa
     fin
 
     ; el número de la rutina de apoyo de ese nombre, o -1
+    ; el número de rutinas de apoyo y la i-ésima: las de 32 bits en el modelo plano
+    función napoyo(): nat16
+        si plano entonces
+            si es_núcleo entonces devolver N_APOYO_NÚCLEO fin
+            devolver N_APOYO_HISPA32
+        fin
+        devolver N_APOYO
+    fin
+
+    función ap_nombre(i: nat16): puntero a byte
+        si plano entonces devolver apoyo32_nombre(es_núcleo, i) fin
+        devolver apoyo_nombre(i)
+    fin
+
+    función ap_texto(i: nat16): puntero a byte
+        si plano entonces devolver apoyo32_texto(es_núcleo, i) fin
+        devolver apoyo_texto(i)
+    fin
+
+    ; el número de la rutina «castel_salir» (el arranque salta a ella)
+    función i_salir(): nat16
+        variable i: nat16
+        para i desde 0 hasta napoyo() - 1 hacer
+            si iguales(ap_nombre(i), "castel_salir") entonces devolver i fin
+        fin
+        devolver 0
+    fin
+
     función cuál_apoyo(p: puntero a byte, n: nat16): ent16
         variable i: nat16
         variable q: puntero a byte
-        para i desde 0 hasta N_APOYO - 1 hacer
-            q := apoyo_nombre(i)
+        para i desde 0 hasta napoyo() - 1 hacer
+            q := ap_nombre(i)
             si longitud(q) = n entonces
                 si empieza_por(p, q) entonces devolver i fin
             fin
@@ -631,7 +659,7 @@ módulo Programa
         variable n: nat16
         variable c: byte
         variable palabra: bool
-        p := apoyo_texto(i)
+        p := ap_texto(i)
         n := 0
         mientras cierto hacer
             c := valor(p)
@@ -681,6 +709,7 @@ módulo Programa
 
     función vive()
         variable m_, d, f, r, i, k, nm, v: nat16
+        si plano entonces ap_vivo[1][i_salir()] := cierto fin
         ; con --todo, todo va al programa
         si todo entonces
             para i desde 0 hasta N_R - 1 hacer
@@ -688,7 +717,7 @@ módulo Programa
             fin
             para k desde 1 hasta MAX_MODULOS hacer
                 si k = 1 o (grande y k <= n_modulos) entonces
-                    para i desde 0 hasta N_APOYO - 1 hacer
+                    para i desde 0 hasta napoyo() - 1 hacer
                         ap_vivo[k][i] := cierto
                     fin
                 fin
@@ -753,7 +782,7 @@ módulo Programa
                 m_ := m_ + 1
             fin
             para k desde 1 hasta MAX_MODULOS hacer
-                para i desde 0 hasta N_APOYO - 1 hacer
+                para i desde 0 hasta napoyo() - 1 hacer
                     si ap_vivo[k][i] y no ap_visto[k][i] entonces
                         ap_visto[k][i] := cierto
                         apoyo_va(i, k, falso)
@@ -806,7 +835,7 @@ módulo Programa
 
     función apoyo_de(k: nat16)
         variable i: nat16
-        para i desde 0 hasta N_APOYO - 1 hacer
+        para i desde 0 hasta napoyo() - 1 hacer
             si ap_vivo[k][i] entonces apoyo_va(i, k, cierto) fin
         fin
     fin
@@ -867,10 +896,112 @@ módulo Programa
         devolver falso
     fin
 
+    ; escribir el programa de 32 bits (modelo núcleo y modelo hispa32)
+    función escribe32(pr: nat16)
+        variable k, i, n, v, r, m_, d, nm: nat16
+        variable t: arreglo [TXT] de byte
+        variable vacío: bool
+        vacío := hay_vacío()
+        sl("; -----------------------------------------------------------------")
+        s("; Generado por ccastel desde el m\xC3\xB3dulo ")
+        at_texto(mod_nombre[prog], t)
+        s(t)
+        sl(". NO editar a mano.")
+        si es_núcleo entonces sl("; Ensamblar:  nasm -f bin ESTE.asm -o NUCLEO.BIN") sino sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.EXE") fin
+        sl("; -----------------------------------------------------------------")
+        sl("cpu 386")
+        sl("bits 32")
+        si es_núcleo entonces s(ARRANQUE_NUCLEO) sino s(ARRANQUE_HISPA32) fin
+        si vacío o es_núcleo entonces
+            sl("    mov edi, _vacio")
+            sl("    mov ecx, _vacio_fin-_vacio")
+            sl("    xor eax, eax")
+            sl("    rep stosb")
+        fin
+        si es_núcleo entonces s(ARRANQUE_NUCLEO2) sino s(ARRANQUE_HISPA32_2) fin
+        sl("    call F_principal")
+        si f_tret(pr) = T_NADA entonces sl("    xor eax, eax") fin
+        sl("    jmp castel_salir")
+        código_de(prog)
+        m_ := 0
+        mientras m_ + 1 < n_modulos hacer
+            código_de(m_)
+            m_ := m_ + 1
+        fin
+        apoyo_de(1)
+        sl("")
+        sl("; ---- datos ----")
+        destino := A_SALIDA
+        i := 0
+        mientras i < n_datos hacer
+            v := dato(i)
+            si v yb DATO_GLOBAL <> 0 entonces
+                r := v yb 0x7FFF
+                si s_marcas(r) yb SM_VIVO <> 0 entonces línea_global(r) fin
+            sino si tx_vivo(v) entonces
+                s("T_")
+                s_nat(tx_etiqueta(v))
+                s(": db ")
+                n := tx_largo(v)
+                k := 0
+                mientras k < n hacer
+                    s_nat(tx_byte(v, k))
+                    s(",")
+                    k := k + 1
+                fin
+                sl("0")
+            fin
+            i := i + 1
+        fin
+        si es_núcleo entonces
+            sl("    align 4, db 0")
+            sl("_datos_fin:")
+        sino
+            s(ARRANQUE_HISPA32_IMP)
+        fin
+        sl("")
+        sl("; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----")
+        sl("_vacio:")
+        sl("    absolute _vacio")
+        si es_núcleo entonces
+            sl("C_pila:")
+            sl("    resb 16384")
+            sl("C_pila_fin:")
+        fin
+        m_ := 0
+        mientras m_ < n_modulos hacer
+            d := nb(mod_arbol[m_])
+            mientras d <> 0 hacer
+                si nk(d) = K_VAR y nc(d) = 0 entonces
+                    nm := na(d)
+                    mientras nm <> 0 hacer
+                        r := sim_propio(m_, na(nm))
+                        si s_marcas(r) yb SM_VIVO <> 0 entonces
+                            etq_nombre('G', m_, na(nm), t)
+                            s(t)
+                            s(": resb ")
+                            s_nat(ttam(s_a(r)))
+                            s("\n")
+                        fin
+                        nm := nsig(nm)
+                    fin
+                fin
+                d := nsig(d)
+            fin
+            m_ := m_ + 1
+        fin
+        sl("_vacio_fin:")
+        si fin_programa_usado entonces sl("_fin_programa:") fin
+    fin
+
     función escribe(pr: nat16)
         variable k, i, n, v, r, m_, d, nm: nat16
         variable t: arreglo [TXT] de byte
         variable vacío, hay_datos: bool
+        si plano entonces
+            escribe32(pr)
+            devolver
+        fin
         vacío := hay_vacío()
         sl("; -----------------------------------------------------------------")
         s("; Generado por ccastel desde el m\xC3\xB3dulo ")

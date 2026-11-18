@@ -115,7 +115,10 @@ módulo Tablas
         base: byte
         sim: nat16                              ; la variable global (su nombre declarado), o 0
         off: ent32
+        índice: byte                            ; 32 bits: SIN_REG, o el índice (6 = esi)
+        escala: byte                            ; 32 bits: 1, 2, 4 u 8
     fin
+    público constante SIN_ÍNDICE = 255
     público tipo Var = estructura
         tipo_: nat16
         por_ref: bool                           ; parámetro por referencia: en [bp+off] va la dirección

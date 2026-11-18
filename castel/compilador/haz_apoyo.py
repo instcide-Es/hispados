@@ -33,7 +33,8 @@ lineas = [
     "; =============================================================================",
     ";  apoyo.cas - las rutinas de apoyo en ensamblador que el compilador añade a",
     ";  los programas (solo las que se usan): escribir números y textos, y",
-    ";  multiplicar, dividir y desplazar en 32 bits. NO editar a mano: lo escribe",
+    ";  multiplicar, dividir y desplazar en 32 bits; y las de los programas de",
+    ";  32 bits (modelo núcleo y modelo hispa32), con su arranque. NO editar a mano: lo escribe",
     ";  compilador/haz_apoyo.py con el texto de APOYO de ccastel.py, para que los",
     ";  dos compiladores pongan lo mismo, letra a letra.",
     ";  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.",
@@ -46,6 +47,41 @@ lineas = [
 for i, (nombre, txt) in enumerate(ccastel.APOYO.items()):
     lineas.append('    constante N_%d = "%s"' % (i, nombre))
     lineas.append('    constante T_%d = "%s"' % (i, literal(txt.strip('\n') + '\n')))
+# las de 32 bits: las de escribir y las de cada modelo (núcleo y hispa32)
+NUCLEO = dict(ccastel.APOYO32)
+NUCLEO.update(ccastel.APOYO_NUCLEO)
+HISPA32 = dict(ccastel.APOYO32)
+HISPA32.update(ccastel.APOYO_HISPA32)
+lineas.append("    público constante N_APOYO_NÚCLEO = %d" % len(NUCLEO))
+lineas.append("    público constante N_APOYO_HISPA32 = %d" % len(HISPA32))
+for letra, tabla in (('N', NUCLEO), ('H', HISPA32)):
+    for i, (nombre, txt) in enumerate(tabla.items()):
+        lineas.append('    constante %sN_%d = "%s"' % (letra, i, nombre))
+        lineas.append('    constante %sT_%d = "%s"' % (letra, i, literal(txt.strip('\n') + '\n')))
+# y el arranque de 32 bits (lo que va delante del programa, y la tabla de lo
+# que importa un programa hispa32)
+for nombre, txt in ccastel.ARRANQUE32.items():
+    clave = {'núcleo': 'NUCLEO', 'núcleo2': 'NUCLEO2', 'hispa32': 'HISPA32', 'hispa32_2': 'HISPA32_2',
+             'hispa32_imp': 'HISPA32_IMP'}[nombre]
+    lineas.append('    público constante ARRANQUE_%s = "%s"' % (clave, literal(txt.strip('\n') + '\n')))
+lineas += [
+    "",
+    "    variable nombres_n: arreglo [N_APOYO_NÚCLEO] de puntero a byte = (%s)" % ', '.join('NN_%d' % i for i in range(len(NUCLEO))),
+    "    variable textos_n: arreglo [N_APOYO_NÚCLEO] de puntero a byte = (%s)" % ', '.join('NT_%d' % i for i in range(len(NUCLEO))),
+    "    variable nombres_h: arreglo [N_APOYO_HISPA32] de puntero a byte = (%s)" % ', '.join('HN_%d' % i for i in range(len(HISPA32))),
+    "    variable textos_h: arreglo [N_APOYO_HISPA32] de puntero a byte = (%s)" % ', '.join('HT_%d' % i for i in range(len(HISPA32))),
+    "",
+    "    ; las de 32 bits: las del modelo núcleo (núcleo = cierto) o las del hispa32",
+    "    público función apoyo32_nombre(núcleo: bool, i: nat16): puntero a byte",
+    "        si núcleo entonces devolver nombres_n[i] fin",
+    "        devolver nombres_h[i]",
+    "    fin",
+    "",
+    "    público función apoyo32_texto(núcleo: bool, i: nat16): puntero a byte",
+    "        si núcleo entonces devolver textos_n[i] fin",
+    "        devolver textos_h[i]",
+    "    fin",
+]
 lineas += [
     "",
     "    variable nombres: arreglo [N_APOYO] de puntero a byte = (%s)" % ', '.join('N_%d' % i for i in range(len(ccastel.APOYO))),

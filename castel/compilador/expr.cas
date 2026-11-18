@@ -74,10 +74,26 @@ módulo Expr
     público función texto_lugar(ref r: Lugar, t: puntero a byte)
         variable n: nat16
         t[0] := 0
-        según r.base
-            caso B_BP: copiar(t, "bp")
-            caso B_BX: copiar(t, "bx")
-            caso B_BPSI: copiar(t, "bp+si")
+        si plano entonces
+            según r.base
+                caso B_BP: copiar(t, "ebp")
+                caso B_BX: copiar(t, "ebx")
+            fin
+            si r.índice = 6 entonces           ; el índice esi, con su escala
+                si t[0] <> 0 entonces concatenar(t, "+") fin
+                concatenar(t, "esi")
+                si r.escala > 1 entonces
+                    concatenar(t, "*")
+                    n := longitud(t)
+                    número_a_texto(r.escala, dirección(t[n]))
+                fin
+            fin
+        sino
+            según r.base
+                caso B_BP: copiar(t, "bp")
+                caso B_BX: copiar(t, "bx")
+                caso B_BPSI: copiar(t, "bp+si")
+            fin
         fin
         si r.sim <> 0 entonces
             si t[0] <> 0 entonces concatenar(t, "+") fin
@@ -189,11 +205,13 @@ módulo Expr
 
     público función lugar_de(e: nat16, emitir: bool, ref r: Lugar): bool
         variable k: byte
+        si plano entonces devolver lugar32_de(e, emitir, r) fin
         variable v: Var
         variable to, est, obj, idx, tam, off, tc: nat16
         variable ci: N64
         variable hay_ci, bien: bool
         variable q: Lugar
+        variable buf: arreglo [TXT] de byte
         k := nk(e)
         si k = K_REF entonces
             var(na(e), nlin(e), ncol(e), v)
@@ -334,6 +352,7 @@ módulo Expr
     ; ¿se llega al lugar de e sin gastar AX?
     público función limpio(e: nat16): bool
         variable k: byte
+        si plano entonces devolver limpio32(e) fin
         variable obj, idx: nat16
         k := nk(e)
         si k = K_REF entonces devolver cierto fin
@@ -371,6 +390,7 @@ módulo Expr
         variable k: byte
         variable r, a: nat16
         variable q: Lugar
+        variable buf: arreglo [TXT] de byte
         si const(e, c) entonces
             n2t(c.bajo yb 0xFFFF, t)
             devolver cierto
@@ -427,6 +447,7 @@ módulo Expr
     ; su tamaño); -1 si e no es tan sencillo
     público función opnd(e: nat16, t: puntero a byte): ent16
         variable r: arreglo [TXT] de byte
+        si plano entonces devolver opnd32p(e, t) fin
         variable tt: nat16
         si inmediato(e, t) entonces devolver 0 fin
         si es_lugar(e) entonces
@@ -490,6 +511,10 @@ módulo Expr
     ; salta a destino si la condición e vale «si»; si no, sigue
     público función salta(e: nat16, destino: nat16, si_: bool)
         variable t, l_: nat16
+        si plano entonces
+            salta32(e, destino, si_)
+            devolver
+        fin
         variable c: N64
         variable cc: byte
         variable tm: ent16
@@ -761,6 +786,10 @@ módulo Expr
     fin
 
     público función gen_expr(e: nat16)
+        si plano entonces
+            gen_expr32p(e)
+            devolver
+        fin
         variable t, l_no, l_fin: nat16
         variable tx: arreglo [TXT] de byte
         variable k: byte
@@ -1593,6 +1622,10 @@ módulo Expr
 
     público función gen_llamada(e: nat16, solo_al: bool)
         variable nm, r, a0, a1, a2: nat16
+        si plano entonces
+            gen_llamada32(e, solo_al)
+            devolver
+        fin
         variable i: byte
         variable c: N64
         variable t, dónde: arreglo [TXT] de byte
@@ -1712,6 +1745,835 @@ módulo Expr
             caso I_REG_SI: em("mov ax, [R_si]")
             caso I_REG_DI: em("mov ax, [R_di]")
             caso I_REG_ES: em("mov ax, [R_es]")
+        fin
+    fin
+
+
+    ; =========================================================================
+    ;  La generación de 32 bits (CASTEL32.md): «modelo núcleo» y «modelo
+    ;  hispa32». El valor de una expresión va a EAX, entero (los de 8 y 16
+    ;  bits, ensanchados: con su signo los ent16). Un lugar es base (B_FIJA,
+    ;  B_BP = ebp, B_BX = ebx), un índice (esi, con su escala) y el
+    ;  desplazamiento. Es lo mismo que la clase Generador32 de ccastel.py,
+    ;  función por función: el ensamblador tiene que salir igual, letra a letra.
+    ; =========================================================================
+    función reg32_de(t: nat16): puntero a byte
+        si ttam(t) = 1 entonces devolver "al" fin
+        si ttam(t) = 2 entonces devolver "ax" fin
+        devolver "eax"
+    fin
+
+    función máscara32(t: nat16): nat32
+        si ttam(t) = 1 entonces devolver 0xFF fin
+        si ttam(t) = 2 entonces devolver 0xFFFF fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; EAX, que vale como te, recortado y ensanchado a lo que es t
+    público función ajusta32(te: nat16, t: nat16)
+        si ttam(t) = 4 o (ttam(te) = ttam(t) y tk(te) = tk(t)) entonces devolver fin
+        si ttam(t) = 1 entonces
+            si ttam(te) <> 1 entonces em("movzx eax, al") fin
+        sino si tk(t) = TK_ENT16 entonces
+            si ttam(te) <> 1 entonces em("movsx eax, ax") fin
+        sino si ttam(te) <> 1 entonces
+            em("movzx eax, ax")
+        fin
+    fin
+
+    ; ---- lugares de 32 bits ----
+    función en_ebx(ref r: Lugar)
+        r.base := B_BX
+        r.sim := 0
+        r.off := 0
+        r.índice := SIN_ÍNDICE
+        r.escala := 1
+    fin
+
+    función punt_a_ebx32(obj: nat16, emitir: bool, ref r: Lugar): bool
+        variable t: arreglo [TXT] de byte
+        variable tm: ent16
+        si no emitir entonces devolver falso fin
+        tm := opnd(obj, t)
+        si tm = 0 o tm = 4 entonces
+            em2("mov ebx, ", t)
+        sino
+            gen_expr(obj)
+            em("mov ebx, eax")
+        fin
+        en_ebx(r)
+        devolver cierto
+    fin
+
+    función a_ebx32(ref r: Lugar)
+        variable t: arreglo [TXT] de byte
+        si r.base = B_BX y r.índice = SIN_ÍNDICE entonces devolver fin
+        texto_lugar(r, t)
+        si r.base = B_FIJA y r.índice = SIN_ÍNDICE entonces em2("mov ebx, ", t) sino em3("lea ebx, [", t, "]") fin
+        en_ebx(r)
+    fin
+
+    ; «<ins> <reg>, <n>»
+    función emrn(ins: puntero a byte, reg: puntero a byte, n: nat32)
+        ini()
+        l(ins)
+        l(reg)
+        l(", ")
+        l_nat(n)
+        cruda()
+    fin
+
+    función escala32(reg: puntero a byte, tam: nat16)
+        si tam = 1 entonces devolver fin
+        si tam = 2 o tam = 4 o tam = 8 entonces
+            emrn("shl ", reg, doblar32(tam))
+        sino
+            em5("imul ", reg, ", ", reg, ", ")
+            l_nat(tam)
+            cruda()
+        fin
+    fin
+
+    función doblar32(v: nat16): nat16
+        variable n: nat16
+        n := 0
+        mientras v > 1 hacer
+            v := v >> 1
+            n := n + 1
+        fin
+        devolver n
+    fin
+
+    función carga32v(reg: puntero a byte, t: nat16, lug: puntero a byte)
+        si ttam(t) = 4 entonces
+            em5("mov ", reg, ", [", lug, "]")
+        sino si ttam(t) = 2 entonces
+            si tk(t) = TK_ENT16 entonces em5("movsx ", reg, ", word [", lug, "]") sino em5("movzx ", reg, ", word [", lug, "]") fin
+        sino
+            em5("movzx ", reg, ", byte [", lug, "]")
+        fin
+    fin
+
+    función carga_reg32(reg: puntero a byte, e: nat16)
+        variable t: arreglo [TXT] de byte
+        variable tm: ent16
+        tm := opnd(e, t)
+        si tm = 0 entonces
+            em4("mov ", reg, ", ", t)
+        sino
+            carga32v(reg, tipo_de(e), dirección(t[1]))      ; t es «[...]»: su interior
+        fin
+    fin
+
+    ; el lugar r con el índice que hay en ESI (de elementos de tam octetos)
+    función indexa32(ref r: Lugar, tam: nat16)
+        si tam = 1 o tam = 2 o tam = 4 o tam = 8 entonces
+            r.índice := 6
+            r.escala := byte(tam)
+        sino
+            ini()
+            l("imul esi, esi, ")
+            l_nat(tam)
+            cruda()
+            r.índice := 6
+            r.escala := 1
+        fin
+    fin
+
+    público función lugar32_de(e: nat16, emitir: bool, ref r: Lugar): bool
+        variable k: byte
+        variable v: Var
+        variable to, est, obj, idx, tam, off, tc: nat16
+        variable ci: N64
+        variable hay_ci, bien: bool
+        variable q: Lugar
+        variable buf: arreglo [TXT] de byte
+        k := nk(e)
+        si k = K_REF entonces
+            var(na(e), nlin(e), ncol(e), v)
+            si v.por_ref entonces
+                si no emitir entonces devolver falso fin
+                em_n("mov ebx, [ebp+", v.off, "]")
+                en_ebx(r)
+                devolver cierto
+            fin
+            r.base := v.lugar.base
+            r.sim := v.lugar.sim
+            r.off := v.lugar.off
+            r.índice := SIN_ÍNDICE
+            r.escala := 1
+            devolver cierto
+        fin
+        si k = K_CAMPO entonces
+            to := tipo_de(na(e))
+            tipo_de(e)
+            si tk(to) = TK_PUNT entonces
+                bien := punt_a_ebx32(na(e), emitir, r)
+                est := tbase(to)
+            sino
+                bien := lugar32_de(na(e), emitir, r)
+                est := to
+            fin
+            si no bien entonces devolver falso fin
+            t_campo(est, nb(e), off, tc)
+            r.off := r.off + off
+            devolver cierto
+        fin
+        idx := 0
+        si k = K_INDICE entonces
+            obj := na(e)
+            idx := nb(e)
+            tipo_de(e)
+            hay_ci := const(idx, ci)
+        sino si k = K_LLAMADA y at_interna(na(e)) = I_VALOR entonces
+            tipo_de(e)
+            obj := nb(nb(e))
+            hay_ci := cierto
+            n_nat(ci, 0)
+        sino
+            m("aquí hace falta una variable, un elemento o un campo")
+            falla(nlin(e), ncol(e))
+        fin
+        to := tipo_de(obj)
+        tam := ttam(tbase(to))
+        si tk(to) = TK_ARR entonces
+            si hay_ci entonces
+                si no lugar32_de(obj, emitir, r) entonces devolver falso fin
+                r.off := r.off + ent32(ci.bajo) * tam
+                devolver cierto
+            fin
+            si no emitir entonces devolver falso fin
+            si opnd(idx, buf) >= 0 entonces
+                lugar32_de(obj, cierto, r)
+                si r.índice <> SIN_ÍNDICE entonces a_ebx32(r) fin
+                carga_reg32("esi", idx)
+                indexa32(r, tam)
+                devolver cierto
+            fin
+            gen_expr(idx)
+            bien := lugar32_de(obj, falso, q)
+            si bien y (q.base = B_FIJA o q.base = B_BP) y q.índice = SIN_ÍNDICE entonces
+                em("mov esi, eax")
+                r.base := q.base
+                r.sim := q.sim
+                r.off := q.off
+                r.índice := SIN_ÍNDICE
+                r.escala := 1
+                indexa32(r, tam)
+                devolver cierto
+            fin
+            em("push eax")
+            lugar32_de(obj, cierto, r)
+            a_ebx32(r)
+            em("pop esi")
+            indexa32(r, tam)
+            devolver cierto
+        fin
+        ; puntero
+        si hay_ci entonces
+            si no punt_a_ebx32(obj, emitir, r) entonces devolver falso fin
+            r.off := ent32(ci.bajo) * tam
+            devolver cierto
+        fin
+        si no emitir entonces devolver falso fin
+        si opnd(idx, buf) >= 0 entonces
+            punt_a_ebx32(obj, cierto, r)
+            carga_reg32("esi", idx)
+        sino
+            gen_expr(idx)
+            em("push eax")
+            punt_a_ebx32(obj, cierto, r)
+            em("pop esi")
+        fin
+        indexa32(r, tam)
+        devolver cierto
+    fin
+
+    función dos32p(a: nat16, b: nat16)
+        variable t: arreglo [TXT] de byte
+        si opnd32p(b, t) >= 0 entonces
+            gen_expr(a)
+            carga_reg32("ecx", b)
+        sino
+            gen_expr(a)
+            em("push eax")
+            gen_expr(b)
+            em("mov ecx, eax")
+            em("pop eax")
+        fin
+    fin
+
+    función suma_const32(op: byte, n: nat32)
+        variable i: nat32
+        si op = O_MENOS entonces n := 0 - n fin
+        si n = 0 entonces devolver fin
+        si n <= 2 entonces
+            para i desde 1 hasta n hacer em("inc eax") fin
+        sino si n >= 0xFFFFFFFE entonces
+            para i desde n hasta 0xFFFFFFFF hacer em("dec eax") fin
+        sino
+            em_n("add eax, ", n, "")
+        fin
+    fin
+
+    función desplaza32p(ins: puntero a byte, n: nat16)
+        si n > 0 entonces emrn(ins, "eax", n) fin
+    fin
+
+    función gen_arit32p(e: nat16)
+        variable op, ins: byte
+        variable a, b, ta, tb, tam: nat16
+        variable cb: N64
+        variable hay_cb, signo: bool
+        variable ob_: arreglo [TXT] de byte
+        variable ptr_ins, ptr_sh: puntero a byte
+        op := nop(e)
+        a := na(e)
+        b := nb(e)
+        ta := tipo_de(a)
+        tb := tipo_de(b)
+        hay_cb := const(b, cb)
+        signo := con_signo(ta, tb)
+        ; punteros: de elemento en elemento
+        si tk(ta) = TK_PUNT o tk(tb) = TK_PUNT entonces
+            si tk(ta) = TK_PUNT y (tk(tb) = TK_PUNT o tk(tb) = TK_ARR) entonces
+                dos32p(a, b)
+                em("sub eax, ecx")
+                devolver
+            fin
+            si tk(tb) = TK_PUNT entonces
+                tam := a
+                a := b
+                b := tam
+                ta := tb
+                hay_cb := const(b, cb)
+            fin
+            tam := ttam(tbase(ta))
+            si hay_cb entonces
+                gen_expr(a)
+                suma_const32(op, cb.bajo * tam)
+            sino
+                gen_expr(b)
+                escala32("eax", tam)
+                em("push eax")
+                gen_expr(a)
+                em("pop ecx")
+                si op = O_MAS entonces em("add eax, ecx") sino em("sub eax, ecx") fin
+            fin
+            devolver
+        fin
+        si op = O_MAS o op = O_MENOS o op = O_YB o op = O_OB o op = O_XOB entonces
+            según op
+                caso O_MAS: ptr_ins := "add eax, "
+                caso O_MENOS: ptr_ins := "sub eax, "
+                caso O_YB: ptr_ins := "and eax, "
+                caso O_OB: ptr_ins := "or eax, "
+                si no: ptr_ins := "xor eax, "
+            fin
+            si hay_cb y (op = O_MAS o op = O_MENOS) entonces
+                gen_expr(a)
+                suma_const32(op, cb.bajo)
+            sino si opnd32p(b, ob_) = 0 o opnd32p(b, ob_) = 4 entonces
+                gen_expr(a)
+                opnd32p(b, ob_)
+                em2(ptr_ins, ob_)
+            sino
+                dos32p(a, b)
+                em2(ptr_ins, "ecx")
+            fin
+            devolver
+        fin
+        si op = O_POR entonces
+            si hay_cb y potencia2(cb) entonces
+                gen_expr(a)
+                desplaza32p("shl", doblar32(nat16(cb.bajo)))
+                devolver
+            fin
+            si hay_cb entonces
+                gen_expr(a)
+                ini()
+                l("imul eax, eax, ")
+                l_nat(cb.bajo)
+                cruda()
+                devolver
+            fin
+            si opnd32p(b, ob_) = 4 entonces
+                gen_expr(a)
+                em2("imul eax, ", ob_)
+            sino
+                dos32p(a, b)
+                em("imul eax, ecx")
+            fin
+            devolver
+        fin
+        si op = O_DIV o op = O_MOD entonces
+            si hay_cb y n_cero(cb) entonces
+                m("división por cero")
+                falla(nlin(b), ncol(b))
+            fin
+            si hay_cb y potencia2(cb) y no signo entonces
+                gen_expr(a)
+                si op = O_DIV entonces desplaza32p("shr", doblar32(nat16(cb.bajo))) sino em_n("and eax, ", cb.bajo - 1, "") fin
+                devolver
+            fin
+            dos32p(a, b)
+            si signo entonces
+                em("cdq")
+                em("idiv ecx")
+            sino
+                em("xor edx, edx")
+                em("div ecx")
+            fin
+            si op = O_MOD entonces em("mov eax, edx") fin
+            devolver
+        fin
+        si op = O_IZQ o op = O_DER entonces
+            si op = O_IZQ entonces
+                ptr_sh := "shl"
+            sino si tk(ta) = TK_ENT16 o tk(ta) = TK_ENT32 entonces
+                ptr_sh := "sar"
+            sino
+                ptr_sh := "shr"
+            fin
+            si hay_cb entonces
+                si cb.bajo > 31 entonces
+                    m("se desplaza de 0 a 31 bits")
+                    falla(nlin(b), ncol(b))
+                fin
+                gen_expr(a)
+                desplaza32p(ptr_sh, nat16(cb.bajo))
+            sino
+                dos32p(a, b)
+                em3(ptr_sh, " eax, ", "cl")
+            fin
+            devolver
+        fin
+    fin
+
+    ; ---- llamadas de 32 bits ----
+    función llama_función32(e: nat16, f: nat16)
+        variable args, params: arreglo [MAX_ARGS] de nat16
+        variable n, x, p, a, tp: nat16
+        variable r: Lugar
+        variable v: Var
+        variable t: arreglo [TXT] de byte
+        variable tm: ent16
+        si f = la_principal entonces
+            m("principal() no se llama: es por donde se empieza")
+            falla(nlin(e), ncol(e))
+        fin
+        n := 0
+        x := nb(e)
+        p := nb(f_nudo(f))
+        mientras x <> 0 hacer
+            si n >= MAX_ARGS entonces
+                m("demasiados argumentos en una llamada")
+                falla(nlin(e), ncol(e))
+            fin
+            args[n] := nb(x)
+            params[n] := p
+            n := n + 1
+            x := nsig(x)
+            p := nsig(p)
+        fin
+        mientras n > 0 hacer
+            n := n - 1
+            a := args[n]
+            p := params[n]
+            tp := nt(p)
+            si nmarcas(p) yb M_REF <> 0 entonces
+                si lugar32_de(a, falso, r) y r.base = B_FIJA y r.índice = SIN_ÍNDICE entonces
+                    texto_lugar(r, t)
+                    em2("push ", t)
+                sino si nk(a) = K_REF y es_var(na(a)) y por_ref_de(na(a), a) entonces
+                    var(na(a), nlin(a), ncol(a), v)
+                    em_n("push dword [ebp+", v.off, "]")
+                sino
+                    lugar(a, t)
+                    em3("lea eax, [", t, "]")
+                    em("push eax")
+                fin
+            sino
+                tm := opnd32p(a, t)
+                si tm = 0 entonces
+                    em2("push ", t)
+                sino si tm = 4 entonces
+                    em2("push dword ", t)
+                sino
+                    gen_expr(a)
+                    em("push eax")
+                fin
+            fin
+        fin
+        f_etq('F', f, t)
+        em2("call ", t)
+    fin
+
+    función por_ref_de(a: nat16, nudo: nat16): bool
+        variable v: Var
+        var(a, nlin(nudo), ncol(nudo), v)
+        devolver v.por_ref
+    fin
+
+    función llama_escribir32(e: nat16)
+        variable x, a, t, l_no, l_fin: nat16
+        variable tx: arreglo [TXT] de byte
+        variable tm: ent16
+        variable c: N64
+        variable signo: bool
+        x := nb(e)
+        mientras x <> 0 hacer
+            a := nb(x)
+            t := tipo_de(a)
+            si es_texto(t) entonces
+                tm := opnd32p(a, tx)
+                si tm = 0 o tm = 4 entonces em2("mov esi, ", tx) sino em("mov esi, eax") fin
+                si tm <> 0 y tm <> 4 entonces gen_expr(a) fin
+                em("call escribir_cad")
+            sino si tk(t) = TK_BOOL entonces
+                l_no := nueva()
+                l_fin := nueva()
+                salta(a, l_no, falso)
+                etq_T(etiqueta_cadena(texto("cierto", 6)), tx)
+                em2("mov esi, ", tx)
+                jmp(l_fin)
+                et(l_no)
+                etq_T(etiqueta_cadena(texto("falso", 5)), tx)
+                em2("mov esi, ", tx)
+                et(l_fin)
+                em("call escribir_cad")
+            sino
+                gen_expr(a)
+                signo := tk(t) = TK_ENT16 o tk(t) = TK_ENT32
+                si const(a, c) y n_negativo(c) entonces signo := cierto fin
+                si signo entonces em("call escribir_num") sino em("call escribir_nat") fin
+            fin
+            x := nsig(x)
+        fin
+    fin
+
+    público función gen_llamada32(e: nat16, solo_al: bool)
+        variable nm, r, a0, a1, a2, ta: nat16
+        variable i: byte
+        variable t, dentro: arreglo [TXT] de byte
+        nm := na(e)
+        r := busca(nm)
+        si r <> 0 y s_clase(r) = S_FUNC entonces
+            llama_función32(e, s_a(r))
+            devolver
+        fin
+        i := at_interna(nm)
+        a0 := 0
+        a1 := 0
+        a2 := 0
+        si nb(e) <> 0 entonces
+            a0 := nb(nb(e))
+            si nsig(nb(e)) <> 0 entonces
+                a1 := nb(nsig(nb(e)))
+                si nsig(nsig(nb(e))) <> 0 entonces a2 := nb(nsig(nsig(nb(e)))) fin
+            fin
+        fin
+        según i
+            caso I_ESCRIBIR: llama_escribir32(e)
+            caso I_ESCRIBIR_CAR:
+                gen_expr(a0)
+                em("call escribir_car")
+            caso I_SALIR:
+                si a0 = 0 entonces em("xor eax, eax") sino gen_expr(a0) fin
+                em("jmp castel_salir")
+            caso I_METER_PUERTO:
+                si opnd32p(a0, t) >= 0 entonces
+                    carga_reg32("edx", a0)
+                sino
+                    gen_expr(a0)
+                    em("mov edx, eax")
+                fin
+                em("in al, dx")
+                em("movzx eax, al")
+            caso I_SACAR_PUERTO:
+                dos32p(a1, a0)                  ; dato -> EAX, puerto -> ECX
+                em("mov edx, ecx")
+                em("out dx, al")
+            caso I_DIRECCION:
+                lugar(a0, t)
+                em3("lea eax, [", t, "]")
+            caso I_PUNTERO, I_NAT32, I_ENT32: gen_expr(a0)
+            caso I_NAT8, I_BYTE, I_NAT16, I_ENT16:
+                ta := tipo_de(a0)
+                gen_expr(a0)
+                ajusta32(ta, tipo_de_nombre(nm))
+            caso I_FIN_PROGRAMA: em("mov eax, _fin_programa")
+        fin
+    fin
+
+
+    ; ¿se llega al lugar de e sin gastar EAX?
+    función limpio32(e: nat16): bool
+        variable k: byte
+        variable obj, idx: nat16
+        variable t: arreglo [TXT] de byte
+        variable tm: ent16
+        k := nk(e)
+        si k = K_REF entonces devolver cierto fin
+        si k = K_CAMPO entonces
+            si tk(tipo_de(na(e))) = TK_PUNT entonces
+                tm := opnd(na(e), t)
+                devolver tm = 0 o tm = 4
+            fin
+            devolver limpio32(na(e))
+        fin
+        si k = K_INDICE entonces
+            obj := na(e)
+            idx := nb(e)
+        sino
+            obj := nb(nb(e))
+            idx := 0
+        fin
+        si idx <> 0 entonces
+            si no es_const(idx) y opnd(idx, t) < 0 entonces devolver falso fin
+        fin
+        si tk(tipo_de(obj)) = TK_PUNT entonces
+            tm := opnd(obj, t)
+            devolver tm = 0 o tm = 4
+        fin
+        devolver limpio32(obj)
+    fin
+
+    ; un inmediato, incluida la dirección de una función («modelo núcleo»)
+    público función inmediato32(e: nat16, t: puntero a byte): bool
+        variable c: N64
+        variable a, r: nat16
+        si const(e, c) entonces
+            n2t(c.bajo, t)
+            devolver cierto
+        fin
+        si nk(e) = K_LLAMADA y at_interna(na(e)) = I_DIRECCION y nb(e) <> 0 y nsig(nb(e)) = 0 entonces
+            a := nb(nb(e))
+            si nk(a) = K_REF y no es_var(na(a)) entonces
+                r := busca(na(a))
+                si r <> 0 y s_clase(r) = S_FUNC entonces
+                    tipo_de(e)
+                    f_etq('F', s_a(r), t)
+                    devolver cierto
+                fin
+            fin
+        fin
+        devolver inmediato(e, t)
+    fin
+
+    ; (texto, tamaño): un inmediato (0) o una variable en sitio fijo (1, 2 o 4)
+    público función opnd32p(e: nat16, t: puntero a byte): ent16
+        variable r: arreglo [TXT] de byte
+        variable tt: nat16
+        si inmediato32(e, t) entonces devolver 0 fin
+        si es_lugar(e) entonces
+            tt := tipo_de(e)
+            si tk(tt) <> TK_ARR y tk(tt) <> TK_EST entonces
+                si lugar_fijo(e, r) entonces
+                    copiar(t, "[")
+                    concatenar(t, r)
+                    concatenar(t, "]")
+                    devolver ent16(ttam(tt))
+                fin
+            fin
+        fin
+        devolver -1
+    fin
+
+    función tam_txt32(t: nat16): puntero a byte
+        si ttam(t) = 1 entonces devolver "byte" fin
+        si ttam(t) = 2 entonces devolver "word" fin
+        devolver "dword"
+    fin
+
+    ; salta a destino si la condición e vale «si»; si no, sigue (32 bits)
+    público función salta32(e: nat16, destino: nat16, si_: bool)
+        variable t, l_: nat16
+        variable c: N64
+        variable cc: byte
+        variable tm: ent16
+        variable tx: arreglo [TXT] de byte
+        t := valor_tipo(e)
+        si tk(t) <> TK_BOOL entonces
+            m("aquí va una condición (bool), no un ")
+            m_tipo(t)
+            falla(nlin(e), ncol(e))
+        fin
+        si const(e, c) entonces
+            si (no n_cero(c)) = si_ entonces jmp(destino) fin
+            devolver
+        fin
+        si nk(e) = K_UN y nop(e) = O_NO entonces
+            salta(na(e), destino, no si_)
+            devolver
+        fin
+        si nk(e) = K_BIN y (nop(e) = O_Y o nop(e) = O_O) entonces
+            si (nop(e) = O_Y) <> si_ entonces
+                salta(na(e), destino, si_)
+                salta(nb(e), destino, si_)
+            sino
+                l_ := nueva()
+                salta(na(e), l_, no si_)
+                salta(nb(e), destino, si_)
+                et(l_)
+            fin
+            devolver
+        fin
+        si nk(e) = K_BIN entonces
+            cc := compara32p(e)
+            si no si_ entonces cc := cc xob 1 fin
+            salto_cc(cc, destino)
+            devolver
+        fin
+        tm := opnd32p(e, tx)
+        si tm = 1 entonces
+            em3("cmp byte ", tx, ", 0")
+        sino
+            gen_expr(e)
+            em("test al, al")
+        fin
+        si si_ entonces salto_cc(CC_NZ, destino) sino salto_cc(CC_Z, destino) fin
+    fin
+
+    función cabe_en32(ref c: N64, t: nat16): bool
+        si ttam(t) = 4 entonces devolver cierto fin
+        si tk(t) = TK_ENT16 entonces devolver n_entre(c, -0x8000, 0x7FFF) fin
+        si ttam(t) = 2 entonces devolver n_entre(c, 0, 0xFFFF) fin
+        devolver n_entre(c, 0, 0xFF)
+    fin
+
+    función compara32p(e: nat16): byte
+        variable a, b, ta, tb, x, tx: nat16
+        variable op, cc: byte
+        variable signo: bool
+        variable ib, txb, t: arreglo [TXT] de byte
+        variable tam_ob: ent16
+        variable cb, n: N64
+        a := na(e)
+        b := nb(e)
+        op := nop(e)
+        ta := tipo_de(a)
+        tb := tipo_de(b)
+        signo := con_signo(ta, tb)
+        si inmediato32(a, t) entonces
+            si no inmediato32(b, t) entonces
+                x := a
+                a := b
+                b := x
+                x := ta
+                ta := tb
+                tb := x
+                según op
+                    caso O_MENOR: op := O_MAYOR
+                    caso O_MAYOR: op := O_MENOR
+                    caso O_MENIG: op := O_MAYIG
+                    caso O_MAYIG: op := O_MENIG
+                fin
+            fin
+        fin
+        cc := cc_de(op, signo)
+        ; (x yb n) = 0: un «test» sobre la propia memoria
+        si const(b, cb) y n_cero(cb) y (op = O_IGUAL o op = O_DIST) y nk(a) = K_BIN y nop(a) = O_YB entonces
+            si no es_const(a) y const(nb(a), n) y es_lugar(na(a)) y es_num(tipo_de(na(a))) entonces
+                tipo_de(a)
+                tx := tipo_de(na(a))
+                si n.bajo <= máscara32(tx) entonces
+                    lugar(na(a), t)
+                    ini()
+                    l("test ")
+                    l(tam_txt32(tx))
+                    l(" [")
+                    l(t)
+                    l("], ")
+                    l_nat(n.bajo)
+                    cruda()
+                    devolver cc
+                fin
+            fin
+        fin
+        si inmediato32(b, ib) entonces
+            si es_lugar(a) y tk(ta) <> TK_ARR y tk(ta) <> TK_EST y (ttam(ta) = 4 o (const(b, cb) y cabe_en32(cb, ta))) entonces
+                lugar(a, t)
+                si const(b, cb) entonces n2t(cb.bajo yb máscara32(ta), ib) fin
+                ini()
+                l("cmp ")
+                l(tam_txt32(ta))
+                l(" [")
+                l(t)
+                l("], ")
+                l(ib)
+                cruda()
+                devolver cc
+            fin
+            gen_expr(a)
+            si const(b, cb) y n_cero(cb) y (op = O_IGUAL o op = O_DIST) entonces em("test eax, eax") sino em2("cmp eax, ", ib) fin
+            devolver cc
+        fin
+        tam_ob := opnd32p(b, txb)
+        si tam_ob >= 0 entonces
+            gen_expr(a)
+            si tam_ob = 4 entonces
+                em2("cmp eax, ", txb)
+            sino
+                carga_reg32("ecx", b)
+                em("cmp eax, ecx")
+            fin
+            devolver cc
+        fin
+        gen_expr(a)
+        em("push eax")
+        gen_expr(b)
+        em("pop ecx")
+        em("cmp ecx, eax")
+        devolver cc
+    fin
+
+    ; la expresión, a EAX (32 bits)
+    público función gen_expr32p(e: nat16)
+        variable t: nat16
+        variable k, op: byte
+        variable im, lug: arreglo [TXT] de byte
+        variable l_no, l_fin: nat16
+        t := valor_tipo(e)
+        si inmediato32(e, im) entonces
+            si iguales(im, "0") entonces em("xor eax, eax") sino em2("mov eax, ", im) fin
+            devolver
+        fin
+        k := nk(e)
+        si es_lugar(e) entonces
+            si tk(t) = TK_ARR entonces
+                lugar(e, lug)
+                em3("lea eax, [", lug, "]")
+            sino
+                lugar(e, lug)
+                carga32v("eax", t, lug)
+            fin
+            devolver
+        fin
+        si k = K_UN entonces
+            gen_expr(na(e))
+            op := nop(e)
+            si op = O_NO entonces em("xor eax, 1") sino si op = O_MENOS entonces em("neg eax") sino em("not eax") fin
+            devolver
+        fin
+        si k = K_LLAMADA entonces
+            gen_llamada32(e, falso)
+            devolver
+        fin
+        si k = K_BIN entonces
+            si tk(t) = TK_BOOL entonces
+                l_no := nueva()
+                l_fin := nueva()
+                salta(e, l_no, falso)
+                em("mov eax, 1")
+                jmp(l_fin)
+                et(l_no)
+                em("xor eax, eax")
+                et(l_fin)
+            sino
+                gen_arit32p(e)
+            fin
+            devolver
         fin
     fin
 

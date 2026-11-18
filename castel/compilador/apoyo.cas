@@ -1,7 +1,8 @@
 ; =============================================================================
 ;  apoyo.cas - las rutinas de apoyo en ensamblador que el compilador añade a
 ;  los programas (solo las que se usan): escribir números y textos, y
-;  multiplicar, dividir y desplazar en 32 bits. NO editar a mano: lo escribe
+;  multiplicar, dividir y desplazar en 32 bits; y las de los programas de
+;  32 bits (modelo núcleo y modelo hispa32), con su arranque. NO editar a mano: lo escribe
 ;  compilador/haz_apoyo.py con el texto de APOYO de ccastel.py, para que los
 ;  dos compiladores pongan lo mismo, letra a letra.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -32,6 +33,55 @@ módulo Apoyo
     constante T_9 = "; castel_shr32: DX:AX desplazado CX bits a la derecha, metiendo ceros\ncastel_shr32:\n    cmp cx, 32\n    jbe .cabe\n    mov cx, 32\n.cabe:\n    jcxz .fin\n.otro:\n    shr dx, 1\n    rcr ax, 1\n    loop .otro\n.fin:\n    ret\n"
     constante N_10 = "castel_sar32"
     constante T_10 = "; castel_sar32: DX:AX desplazado CX bits a la derecha, conservando el signo\ncastel_sar32:\n    cmp cx, 32\n    jbe .cabe\n    mov cx, 32\n.cabe:\n    jcxz .fin\n.otro:\n    sar dx, 1\n    rcr ax, 1\n    loop .otro\n.fin:\n    ret\n"
+    público constante N_APOYO_NÚCLEO = 7
+    público constante N_APOYO_HISPA32 = 6
+    constante NN_0 = "escribir_num"
+    constante NT_0 = "; escribir_num: ense\xC3\xB1a EAX como entero con signo, en decimal\nescribir_num:\n    test eax, eax\n    jns escribir_nat\n    push eax\n    mov al, \'-\'\n    call escribir_car\n    pop eax\n    neg eax\n"
+    constante NN_1 = "escribir_nat"
+    constante NT_1 = "; escribir_nat: ense\xC3\xB1a EAX como natural, en decimal\nescribir_nat:\n    sub esp, 12\n    lea edi, [esp+12]\n    mov ebx, 10\n.cifra:\n    xor edx, edx\n    div ebx\n    add dl, \'0\'\n    dec edi\n    mov [edi], dl\n    test eax, eax\n    jnz .cifra\n    mov esi, edi\n    lea ecx, [esp+12]\n    sub ecx, edi\n    call castel_salida\n    add esp, 12\n    ret\n"
+    constante NN_2 = "escribir_cad"
+    constante NT_2 = "; escribir_cad: ense\xC3\xB1a el texto acabado en 0 que hay en ESI\nescribir_cad:\n    xor ecx, ecx\n.mide:\n    cmp byte [esi+ecx], 0\n    je .va\n    inc ecx\n    jmp .mide\n.va:\n    jmp castel_salida\n"
+    constante NN_3 = "escribir_car"
+    constante NT_3 = "; escribir_car: ense\xC3\xB1a la letra que hay en AL\nescribir_car:\n    push eax\n    mov esi, esp\n    mov ecx, 1\n    call castel_salida\n    pop eax\n    ret\n"
+    constante NN_4 = "castel_salida"
+    constante NT_4 = "; castel_salida: escribe ECX octetos desde ESI (puerto serie y pantalla)\ncastel_salida:\n    jecxz .fin\n.otra:\n    lodsb\n    call castel_pon_car\n    loop .otra\n.fin:\n    ret\n"
+    constante NN_5 = "castel_pon_car"
+    constante NT_5 = "; castel_pon_car: la letra de AL, al puerto serie COM1 y a la pantalla de texto\n; (con su cursor, C_cursor, y subiendo las l\xC3\xADneas al llegar abajo). Lo conserva todo.\ncastel_pon_car:\n    push edx\n    push eax\n    mov edx, 0x3FD\n.espera:\n    in al, dx\n    test al, 0x20\n    jz .espera\n    pop eax\n    push eax\n    mov edx, 0x3F8\n    out dx, al\n    mov edx, [C_cursor]\n    cmp al, 10\n    je .nueva\n    cmp al, 13\n    je .principio\n    mov ah, 7\n    mov [edx*2+0xB8000], ax\n    inc edx\n    jmp .mira\n.nueva:\n    add edx, 80\n.principio:\n    push ecx\n    mov eax, edx\n    xor edx, edx\n    mov ecx, 80\n    div ecx\n    imul edx, eax, 80\n    pop ecx\n.mira:\n    cmp edx, 2000\n    jb .bien\n    push esi\n    push edi\n    push ecx\n    mov esi, 0xB80A0\n    mov edi, 0xB8000\n    mov ecx, 960\n    rep movsd\n    mov eax, 0x07200720\n    mov ecx, 40\n    rep stosd\n    pop ecx\n    pop edi\n    pop esi\n    sub edx, 80\n.bien:\n    mov [C_cursor], edx\n    push ebx\n    mov ebx, edx\n    mov edx, 0x3D4\n    mov al, 0x0F\n    out dx, al\n    inc edx\n    mov al, bl\n    out dx, al\n    dec edx\n    mov al, 0x0E\n    out dx, al\n    inc edx\n    mov al, bh\n    out dx, al\n    pop ebx\n    pop eax\n    pop edx\n    ret\n"
+    constante NN_6 = "castel_salir"
+    constante NT_6 = "; castel_salir: el programa acaba (con el c\xC3\xB3digo de AL): se dice por el puerto\n; 0xF4 (en QEMU, el dispositivo isa-debug-exit) y el procesador se para\ncastel_salir:\n    mov edx, 0xF4\n    out dx, al\n    cli\n.para:\n    hlt\n    jmp .para\n"
+    constante HN_0 = "escribir_num"
+    constante HT_0 = "; escribir_num: ense\xC3\xB1a EAX como entero con signo, en decimal\nescribir_num:\n    test eax, eax\n    jns escribir_nat\n    push eax\n    mov al, \'-\'\n    call escribir_car\n    pop eax\n    neg eax\n"
+    constante HN_1 = "escribir_nat"
+    constante HT_1 = "; escribir_nat: ense\xC3\xB1a EAX como natural, en decimal\nescribir_nat:\n    sub esp, 12\n    lea edi, [esp+12]\n    mov ebx, 10\n.cifra:\n    xor edx, edx\n    div ebx\n    add dl, \'0\'\n    dec edi\n    mov [edi], dl\n    test eax, eax\n    jnz .cifra\n    mov esi, edi\n    lea ecx, [esp+12]\n    sub ecx, edi\n    call castel_salida\n    add esp, 12\n    ret\n"
+    constante HN_2 = "escribir_cad"
+    constante HT_2 = "; escribir_cad: ense\xC3\xB1a el texto acabado en 0 que hay en ESI\nescribir_cad:\n    xor ecx, ecx\n.mide:\n    cmp byte [esi+ecx], 0\n    je .va\n    inc ecx\n    jmp .mide\n.va:\n    jmp castel_salida\n"
+    constante HN_3 = "escribir_car"
+    constante HT_3 = "; escribir_car: ense\xC3\xB1a la letra que hay en AL\nescribir_car:\n    push eax\n    mov esi, esp\n    mov ecx, 1\n    call castel_salida\n    pop eax\n    ret\n"
+    constante HN_4 = "castel_salida"
+    constante HT_4 = "; castel_salida: escribe ECX octetos desde ESI en la salida (WriteFile)\ncastel_salida:\n    push 0\n    push C_escritos\n    push ecx\n    push esi\n    push dword [C_salida]\n    call [C_WriteFile]\n    ret\n"
+    constante HN_5 = "castel_salir"
+    constante HT_5 = "; castel_salir: el programa acaba con el c\xC3\xB3digo de AL (ExitProcess)\ncastel_salir:\n    movzx eax, al\n    push eax\n    call [C_ExitProcess]\n"
+    público constante ARRANQUE_NUCLEO = "org 0x100000\n; un n\xC3\xBAcleo multiboot (lo carga QEMU con -kernel, o GRUB): la cabecera dice\n; d\xC3\xB3nde va cada cosa, as\xC3\xAD que vale tal cual, sin formato ELF\nC_ini:\n    jmp C_arranque\n    align 4, db 0\nC_multiboot:\n    dd 0x1BADB002\n    dd 0x00010000\n    dd 0xE4514FFE\n    dd C_multiboot\n    dd C_ini\n    dd _datos_fin\n    dd _vacio_fin\n    dd C_arranque\n; la tabla de descriptores: c\xC3\xB3digo (0x08) y datos (0x10), planos, de 4 GB\nC_gdt:\n    dd 0, 0\n    dd 0x0000FFFF, 0x00CF9A00\n    dd 0x0000FFFF, 0x00CF9200\nC_gdtr:\n    dw 23\n    dd C_gdt\nC_mb_magia:\n    dd 0\nC_mb_info:\n    dd 0\nC_cursor:\n    dd 0\nC_arranque:\n    cli\n    mov [C_mb_magia], eax\n    mov [C_mb_info], ebx\n    lgdt [C_gdtr]\n    jmp 0x08:C_plano\nC_plano:\n    mov ax, 0x10\n    mov ds, ax\n    mov es, ax\n    mov fs, ax\n    mov gs, ax\n    mov ss, ax\n    mov esp, C_pila_fin\n    cld\n"
+    público constante ARRANQUE_NUCLEO2 = "; la pantalla, en blanco; y el puerto serie COM1 a 115200, 8N1\n    mov edi, 0xB8000\n    mov ecx, 1000\n    mov eax, 0x07200720\n    rep stosd\n    mov edx, 0x3F9\n    xor al, al\n    out dx, al\n    mov edx, 0x3FB\n    mov al, 0x80\n    out dx, al\n    mov edx, 0x3F8\n    mov al, 1\n    out dx, al\n    mov edx, 0x3F9\n    xor al, al\n    out dx, al\n    mov edx, 0x3FB\n    mov al, 3\n    out dx, al\n    mov edx, 0x3FA\n    mov al, 0xC7\n    out dx, al\n    mov edx, 0x3FC\n    mov al, 3\n    out dx, al\n"
+    público constante ARRANQUE_HISPA32 = "org 0x400E00\n; un programa Win32 de consola (PE): las cabeceras, a mano, y una sola secci\xC3\xB3n\n; en 0x401000 con el c\xC3\xB3digo, los datos y, detr\xC3\xA1s, lo que empieza a cero\nP_mz:\n    db 77, 90\n    times 58 db 0\n    dd 64\n    db 80, 69, 0, 0\n    dw 0x014C\n    dw 1\n    dd 0, 0, 0\n    dw 224\n    dw 0x0103\n    dw 0x010B\n    db 1, 0\n    dd P_arch_fin-P_texto\n    dd 0, 0\n    dd C_arranque-0x400000\n    dd 0x1000, 0x1000\n    dd 0x400000\n    dd 0x1000, 0x200\n    dw 4, 0, 0, 0, 4, 0\n    dd 0\n    dd (_vacio_fin-P_texto+0x1FFF)/0x1000*0x1000\n    dd 0x200\n    dd 0\n    dw 3, 0\n    dd 0x100000, 0x1000, 0x100000, 0x1000\n    dd 0, 16\n    dd 0, 0\n    dd P_imp-0x400000, P_imp_fin-P_imp\n    times 28 dd 0\n    db 46, 116, 101, 120, 116, 0, 0, 0\n    dd _vacio_fin-P_texto\n    dd 0x1000\n    dd P_arch_fin-P_texto\n    dd 0x200\n    dd 0, 0, 0\n    dd 0xE0000060\n    align 512, db 0\nP_texto:\nC_arranque:\n    cld\n"
+    público constante ARRANQUE_HISPA32_2 = "    push -11\n    call [C_GetStdHandle]\n    mov [C_salida], eax\n"
+    público constante ARRANQUE_HISPA32_IMP = "; lo que se importa de KERNEL32\n    align 4, db 0\nP_imp:\n    dd P_ilt-0x400000, 0, 0, P_dll-0x400000, P_iat-0x400000\n    dd 0, 0, 0, 0, 0\nP_imp_fin:\nP_ilt:\n    dd P_h1-0x400000, P_h2-0x400000, P_h3-0x400000, 0\nP_iat:\nC_GetStdHandle:\n    dd P_h1-0x400000\nC_WriteFile:\n    dd P_h2-0x400000\nC_ExitProcess:\n    dd P_h3-0x400000\n    dd 0\nC_salida:\n    dd 0\nC_escritos:\n    dd 0\nP_dll:\n    db \'KERNEL32.dll\', 0\n    align 2, db 0\nP_h1:\n    dw 0\n    db \'GetStdHandle\', 0\n    align 2, db 0\nP_h2:\n    dw 0\n    db \'WriteFile\', 0\n    align 2, db 0\nP_h3:\n    dw 0\n    db \'ExitProcess\', 0\n    align 512, db 0\nP_arch_fin:\n"
+
+    variable nombres_n: arreglo [N_APOYO_NÚCLEO] de puntero a byte = (NN_0, NN_1, NN_2, NN_3, NN_4, NN_5, NN_6)
+    variable textos_n: arreglo [N_APOYO_NÚCLEO] de puntero a byte = (NT_0, NT_1, NT_2, NT_3, NT_4, NT_5, NT_6)
+    variable nombres_h: arreglo [N_APOYO_HISPA32] de puntero a byte = (HN_0, HN_1, HN_2, HN_3, HN_4, HN_5)
+    variable textos_h: arreglo [N_APOYO_HISPA32] de puntero a byte = (HT_0, HT_1, HT_2, HT_3, HT_4, HT_5)
+
+    ; las de 32 bits: las del modelo núcleo (núcleo = cierto) o las del hispa32
+    público función apoyo32_nombre(núcleo: bool, i: nat16): puntero a byte
+        si núcleo entonces devolver nombres_n[i] fin
+        devolver nombres_h[i]
+    fin
+
+    público función apoyo32_texto(núcleo: bool, i: nat16): puntero a byte
+        si núcleo entonces devolver textos_n[i] fin
+        devolver textos_h[i]
+    fin
 
     variable nombres: arreglo [N_APOYO] de puntero a byte = (N_0, N_1, N_2, N_3, N_4, N_5, N_6, N_7, N_8, N_9, N_10)
     variable textos: arreglo [N_APOYO] de puntero a byte = (T_0, T_1, T_2, T_3, T_4, T_5, T_6, T_7, T_8, T_9, T_10)

@@ -739,8 +739,9 @@ dentro, cada una ocupa menos de 1,5 K.
   README y ENSAMBLADOR.md.)
 - **Punteros lejanos** (`seg:desp`) como tipo. Mientras, `leer_byte` y compañía.
 - **Copiar arreglos y estructuras enteros** (`a := b`) y valores iniciales de estructuras.
-- **El salto a 32 bits de verdad**, con los registros del 386 (Fase 5). (Los programas
-  `.EXE` de varios segmentos ya están: sección 11 bis.)
+- (El **salto a 32 bits** ya está: la **Fase 5**, con los registros del 386 y la
+  memoria plana, para el núcleo de Hispa-Pentium. Es un modo aparte: `modelo núcleo`
+  y `modelo hispa32`. Lo cuenta [CASTEL32.md](CASTEL32.md).)
 - **Comprobaciones al ejecutar** opcionales (índices, desbordamientos), para depurar.
 - **Más biblioteca** según haga falta: escribir en archivos con memoria intermedia, carpetas,
   fechas.
