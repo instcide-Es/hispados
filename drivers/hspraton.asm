@@ -5,8 +5,10 @@
 ;  Uso:  HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/BORDE] [/INFO]  (en AUTOEXEC.BAT)
 ;
 ;    (sin opciones)  prueba primero la BIOS (INT 15h C2xxh) y, si no ofrece
-;                    ratón, habla directamente con el controlador 8042
-;    /BIOS           solo por la BIOS
+;                    ratón, habla directamente con el controlador 8042; si
+;                    el ratón tiene rueda (IntelliMouse), también va directo
+;                    para tenerla (y si no va, vuelve a la BIOS)
+;    /BIOS           solo por la BIOS (sin rueda en un ratón PS/2)
 ;    /DIRECTO        solo directamente por el 8042 (puerto auxiliar, IRQ 12)
 ;    /SIMPLE         sin sondeos (rueda, Synaptics): reinicio y activación
 ;    /BORDE          [RUEDA] touchpad Synaptics: el borde derecho hace de rueda
@@ -42,7 +44,10 @@
 ;  los pasos en BH (positivo: hacia el usuario); 03h da en BH los pasos desde
 ;  la última vez. [RUEDA] La dan:
 ;   - un IntelliMouse (PS/2 con rueda), solo por la vía directa (la BIOS
-;     solo da paquetes de 3 bytes);
+;     solo da paquetes de 3 bytes). Sin opciones se sondea por la BIOS
+;     (frecuencias 200, 100, 80 con C202h y el identificador con C204h: 3 =
+;     IntelliMouse) y, si lo es, se pasa a la vía directa; si esa no va, se
+;     vuelve a la BIOS (sin rueda). /BIOS o /SIMPLE no sondean;
 ;   - un ratón USB con rueda, por HSPUSB (en BH de la entrada privada 48D0h);
 ;     la función 11h lo dice desde el primer paso que llega;
 ;   - el borde derecho de un touchpad Synaptics: por la vía directa se pone
@@ -153,6 +158,7 @@ c_bad       dw 0                    ; bytes y paquetes descartados
 c_kbd       dw 0                    ; IRQ 12 con un byte que era del teclado
 c_rst       dw 0                    ; reinicios del dispositivo (AA 00)
 i_abs       db 0                    ; [RUEDA] el touchpad, en modo absoluto
+i_bid       db 0                    ; [RUEDA] identificador por la BIOS (C204h) tras 200, 100, 80
 INFO_LEN    equ $ - info
 
 H_CTR0      equ 0x0001
@@ -166,6 +172,7 @@ H_SYN       equ 0x0080
 H_BIOS      equ 0x0100              ; se probó la vía BIOS
 H_DIR       equ 0x0200              ; se probó la vía directa
 H_NOIRQ     equ 0x0400              ; el dispositivo contesta, la IRQ 12 no
+H_BID       equ 0x0800              ; [RUEDA] se preguntó el identificador por la BIOS
 
 dmask:  ; máscaras por defecto (para el reinicio)
             dw 0x3FFF, 0x1FFF, 0x0FFF, 0x07FF, 0x03FF, 0x01FF, 0x00FF, 0x007F
@@ -1290,16 +1297,42 @@ init:
         cmp byte [o_via], 0
         jne .ready
         cmp byte [o_noborde], 0
-        jne .ready
+        jne .rueda
         test word [i_have], H_SYN
-        jz .ready
+        jz .rueda
         cmp byte [i_syn+1], 0x47
+        jne .rueda
+        jmp .adir
+.rueda:
+        ; [RUEDA] un IntelliMouse (ratón PS/2 con rueda) por la BIOS solo da
+        ; paquetes de 3 bytes, sin la rueda: sin /BIOS (ni /SIMPLE), si
+        ; bios_init lo ha reconocido, por la vía directa (paquetes de 4); si
+        ; no va, vuelve a la BIOS (ya sin rueda)
+        ; Si la BIOS no ha sabido decirlo (C204h falla o da algo que no es
+        ; un identificador de ratón: la de QEMU da AAh), se prueba la vía
+        ; directa, que lo pregunta ella; y si ahí tampoco es un
+        ; IntelliMouse, de vuelta a la BIOS (d_rueda)
+        cmp byte [o_via], 0
         jne .ready
+        cmp byte [b_probado], 0
+        je .ready
+        test word [i_have], H_BID
+        jz .duda
+        cmp byte [i_bid], 3
+        je .adir
+        cmp byte [i_bid], 4
+        jbe .ready                  ; 0 o 4: un ratón sin rueda (o sin la de 3)
+.duda:
+        mov byte [d_rueda], 1
+.adir:
         mov ax, 0xC200              ; la BIOS lo deja parado
         xor bh, bh
         int 0x15
         mov byte [i_via], 0
+        mov byte [d_estricto], 1    ; (la BIOS iba: sin la IRQ 12, no vale)
         call dir_init
+        mov byte [d_estricto], 0
+        mov byte [d_rueda], 0
         jnc .ready
         call bios_init              ; no va: otra vez por la BIOS
         jmp .ready
@@ -1463,6 +1496,9 @@ o_help      db 0
 o_noborde   db 1                    ; [RUEDA] sin el borde salvo con /BORDE (18/11/2026:
                                     ; hasta probarlo en un touchpad de verdad)
 o_synpr     db 0                    ; [RUEDA] /SYNPRUEBA (las pruebas)
+d_estricto  db 0                    ; [RUEDA] dir_init al dejar la BIOS: sin IRQ 12 es un fallo
+d_rueda     db 0                    ; [RUEDA] y solo si es un IntelliMouse (la BIOS no lo sabía)
+b_probado   db 0                    ; [RUEDA] bios_init ya ha preguntado por la rueda
 
 ; -----------------------------------------------------------------------------
 ;  Vía BIOS (INT 15h C2xxh). CF = 0 si el ratón queda activado.
@@ -1506,6 +1542,49 @@ bios_init:
         mov [i_syn+2], dl
         or word [i_have], H_SYN
 .conf:
+        ; [RUEDA] ¿IntelliMouse? Solo sin /BIOS (si no, no se usaría) y una
+        ; vez (si la vía directa no va y se vuelve aquí, ya no): frecuencias
+        ; 200, 100 y 80 (C202h, BH = 6, 5, 4) y el identificador (C204h). Un
+        ; IntelliMouse contesta 3 y desde ahí manda paquetes de 4 bytes, que
+        ; la BIOS no entiende: se reinicia (C205h) para que vuelva a los de 3
+        ; mientras no se cambia de vía.
+        cmp byte [o_simple], 0
+        jne .conf2
+        cmp byte [o_via], 0
+        jne .conf2
+        cmp byte [b_probado], 0
+        jne .conf2
+        mov byte [b_probado], 1
+        mov ax, 0xC202
+        mov bh, 6
+        int 0x15
+        jc .conf2
+        mov ax, 0xC202
+        mov bh, 5
+        int 0x15
+        jc .conf2
+        mov ax, 0xC202
+        mov bh, 4
+        int 0x15
+        jc .conf2
+        mov byte [tries], 3         ; (alguna BIOS da antes un byte que se
+.bid:                               ; quedó: el AAh del reinicio. Un
+        mov ax, 0xC204              ; identificador de ratón es 0, 3 o 4)
+        int 0x15
+        jc .conf2
+        mov [i_bid], bh
+        or word [i_have], H_BID
+        cmp bh, 4
+        jbe .bidok
+        dec byte [tries]
+        jnz .bid
+.bidok:
+        cmp bh, 3
+        jne .conf2
+        mov ax, 0xC205
+        mov bh, 3
+        int 0x15
+.conf2:
         mov ax, 0xC203              ; resolución: 4 puntos/mm
         mov bh, 2
         int 0x15
@@ -2055,6 +2134,11 @@ dir_init:
         mov [i_syn+2], al
         or word [i_have], H_SYN
 .conf:
+        cmp byte [d_rueda], 0       ; [RUEDA] se ha venido por la rueda y no
+        je .conf1                   ; la hay: mejor la BIOS
+        cmp byte [i_dev], 2
+        jne .fail
+.conf1:
         mov ax, 0x64F3              ; 100 paquetes por segundo
         call m_send2
         mov ax, 0x02E8              ; 4 puntos por milímetro
@@ -2115,6 +2199,8 @@ dir_init:
         sti
         cmp al, 0xFA
         jne .enr
+        cmp byte [d_estricto], 0    ; [RUEDA] viniendo de una BIOS que iba,
+        jne .enr                    ; mejor ella (deshacer y volver a la BIOS)
         or word [i_have], H_NOIRQ   ; contesta, pero sin interrupción
         jmp .eok
 .enx:
@@ -2314,6 +2400,11 @@ show_info:
         mov al, 'h'
         call pc
 .b9:
+        mov si, mi_id               ; [RUEDA] el identificador por la BIOS
+        call puts
+        mov al, [i_bid]
+        mov dx, H_BID
+        call pval
         call crlf
         ; 8042
         mov si, mi_8042
@@ -2566,7 +2657,8 @@ msg_d4      db "el dispositivo no se deja activar", 0
 msg_nops2   db "No hay ratón PS/2: se usará un ratón USB (HSPUSB.SYS) si lo hay.", 13, 10, 0
 msg_already db "HSPRATON ya está instalado.", 13, 10, 0
 msg_usage   db "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/BORDE] [/INFO]", 13, 10
-            db "  (sin opciones) prueba la BIOS y, si no ofrece ratón, el 8042 directamente", 13, 10
+            db "  (sin opciones) prueba la BIOS y, si no ofrece ratón o el ratón tiene", 13, 10
+            db "            rueda (IntelliMouse), el 8042 directamente", 13, 10
             db "  /BIOS     solo por la BIOS (INT 15h)", 13, 10
             db "  /DIRECTO  solo directamente por el controlador 8042 (IRQ 12)", 13, 10
             db "  /SIMPLE   sin sondeos (rueda, Synaptics): solo reinicio y activación", 13, 10

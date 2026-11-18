@@ -2,14 +2,16 @@
 # Prueba del ratón: HSPRATON (INT 33h) con el ratón PS/2 de QEMU, movido y
 # pulsado desde el monitor (mouse_move, mouse_button) y leído con MOUSETST
 # (INT 33h AX=3):
-#   bios      vía BIOS (INT 15h), la automática cuando la BIOS ofrece ratón
+#   bios      vía BIOS (INT 15h; /BIOS: sin opciones, con el IntelliMouse de
+#             QEMU va por la directa, por la rueda: run_rueda_tests.sh, 1c)
 #   directo   vía directa por el 8042 (/DIRECTO), con IntelliMouse y /INFO
 #   simple    vía directa sin sondeos (/DIRECTO /SIMPLE): paquetes de 3 bytes
 #   reserva   la BIOS no ofrece ratón (NOC2): la automática pasa a la directa
 #   teclado   vía directa + KEYB SP: se teclea con el ratón moviéndose y no
 #             se pierde ni se cambia ninguna tecla
 #   sin8042   PC sin controlador 8042: se avisa y no se cuelga
-#   imgusb    arranque de la imagen USB (su AUTOEXEC.BAT carga HSPRATON)
+#   imgusb    arranque de la imagen USB (su AUTOEXEC.BAT carga HSPRATON sin
+#             opciones: la vía directa, por la rueda)
 #   usb       ratón y teclado USB a través de HSPUSB.SYS (xHCI)
 # Sin segundo argumento se hacen todas menos «usb».
 # Mouse test: INT 33h driver, BIOS and direct 8042 paths, under QEMU.
@@ -75,10 +77,10 @@ fin() {
   rm -rf $T
 }
 
-# ---- vía BIOS (automática) ----
+# ---- vía BIOS (/BIOS; sin opciones, un IntelliMouse va por la directa) ----
 g_bios() {
   sleep 6
-  send "A:\\HISPADOS\\HSPRATON" 2
+  send "A:\\HISPADOS\\HSPRATON /BIOS" 2
   send "BIN\\MOUSETST" 2
   gestos
   send "A:\\HISPADOS\\HSPRATON" 2
@@ -257,9 +259,9 @@ t_imgusb() {
       -device usb-storage,bus=xhci.0,drive=usbd,bootindex=0 -no-reboot > $T/log 2>&1
   tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
   check "HSPRATON 0.1 - ratón de Hispa-DOS (INT 33h)"
-  check "Ratón PS/2 preparado."
+  check "Vía directa (8042, IRQ 12). Ratón PS/2 con rueda (IntelliMouse) preparado."
   check_gestos
-  check "En uso:  vía BIOS, Ratón PS/2, paquetes de 3 bytes"
+  check "En uso:  vía directa, Ratón PS/2 con rueda (IntelliMouse), paquetes de 4 bytes"
   fin
 }
 

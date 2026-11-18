@@ -6,7 +6,13 @@
 # abajo). Sesiones:
 #  1. DOS: HSPUSB /F y HSPRATON /DIRECTO; MOUSETST cuenta los pasos (función
 #     03h, BH) primero con el ratón PS/2 y después con el USB; la función 11h
-#     dice que hay rueda.
+#     dice que hay rueda. 1b: el ratón USB en una UHCI. 1c: HSPRATON sin
+#     opciones (como en el AUTOEXEC.BAT de las imágenes): pregunta por la
+#     BIOS si el ratón PS/2 es un IntelliMouse (C202h 200, 100, 80 y C204h;
+#     la SeaBIOS de QEMU contesta AAh, que no es un identificador: se prueba
+#     la vía directa, que lo pregunta ella) y pasa a la vía directa: la rueda
+#     del PS/2 y la del USB llegan; con /BIOS, por la BIOS y sin rueda en el
+#     PS/2 (el USB sigue con la suya).
 #  2. DOS: el touchpad Synaptics en modo absoluto, sin touchpad (HSPRATON
 #     /DIRECTO /SYNPRUEBA; SYNTEST mete paquetes de 6 bytes por el 8042): el
 #     dedo en el centro mueve el puntero, por el borde derecho da pasos de
@@ -21,7 +27,8 @@
 #  4. El Navegador (NAVEGA.EXE) con una página larga del servidor de pruebas
 #     (tests/tools/nav_servidor.py, /larga): la rueda desplaza la página tres
 #     filas por paso (igual que tres flechas) y, con una lista desplegable
-#     abierta, sus opciones. Con el ratón PS/2 y con el USB.
+#     abierta, sus opciones. Con el ratón PS/2 y con el USB, y con HSPRATON
+#     sin opciones (el de la imagen de Hispa-486).
 #  (GUARDAR=carpeta deja las capturas; SOLO=1,2,3,4 elige sesiones.)
 # Mouse wheel test: PS/2 IntelliMouse and USB mouse, DOS, Win32 programs and
 # the browser.
@@ -119,6 +126,40 @@ if quiere 1; then
   if [ $fail -ne $f0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/HSPRATON/,$p' $T/log.txt | tail -20; cat $T/ratones; fi
 fi
 
+# ---- 1c. HSPRATON sin opciones: la BIOS, y por la rueda, la vía directa ----
+if quiere 1; then
+  echo "-- 1c. DOS: HSPRATON sin opciones con un IntelliMouse: la vía directa, con la rueda --"
+  f0=$fail
+  cp "$IMG" $T/f.img
+  config 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n'
+  { sleep 9; send 'A:\HISPADOS\HSPRATON' 3
+    send 'BIN\MOUSETST' 2; raton ps2; rueda 3; rueda -1; tecla ret; sleep 1.5
+    send 'BIN\MOUSETST' 2; raton usb; rueda -2; rueda 1; rueda -1; tecla ret; sleep 1.5
+    send 'A:\HISPADOS\HSPRATON /INFO' 3
+    mon quit; } | qemu 60 $USB
+  check "Vía directa (8042, IRQ 12). Ratón PS/2 con rueda (IntelliMouse) preparado."
+  n=$(grep -c "^Pasos de la rueda: 2$" $T/log.txt)
+  [ "$n" -eq 1 ] && ok "sin opciones, PS/2: 3 pasos hacia abajo y 1 hacia arriba = 2" || ko "sin opciones, PS/2: pasos de la rueda ($(grep '^Pasos de la rueda' $T/log.txt | head -1))"
+  n=$(grep -c "^Pasos de la rueda: -2$" $T/log.txt)
+  [ "$n" -eq 1 ] && ok "sin opciones, USB: 3 pasos hacia arriba y 1 hacia abajo = -2" || ko "sin opciones, USB: pasos de la rueda ($(grep '^Pasos de la rueda' $T/log.txt | tail -1))"
+  guarda sinopc
+  if [ $fail -ne $f0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/HSPRATON/,$p' $T/log.txt | tail -40; cat $T/ratones; fi
+  echo "-- 1c. DOS: HSPRATON /BIOS: sin sondear, por la BIOS (el PS/2, sin rueda) --"
+  f0=$fail
+  cp "$IMG" $T/f.img
+  config 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n'
+  { sleep 9; send 'A:\HISPADOS\HSPRATON /BIOS' 3
+    send 'BIN\MOUSETST' 2; raton ps2; rueda 3; tecla ret; sleep 1.5
+    send 'BIN\MOUSETST' 2; raton usb; rueda 2; tecla ret; sleep 1.5
+    mon quit; } | qemu 60 $USB
+  check "Vía BIOS (INT 15h). Ratón PS/2 preparado."
+  n=$(grep -c "^Pasos de la rueda: 0$" $T/log.txt)
+  [ "$n" -eq 1 ] && ok "/BIOS, PS/2: la rueda no llega (0)" || ko "/BIOS, PS/2: pasos de la rueda ($(grep '^Pasos de la rueda' $T/log.txt | head -1))"
+  n=$(grep -c "^Pasos de la rueda: 2$" $T/log.txt)
+  [ "$n" -eq 1 ] && ok "/BIOS, USB: la rueda sí (2)" || ko "/BIOS, USB: pasos de la rueda ($(grep '^Pasos de la rueda' $T/log.txt | tail -1))"
+  if [ $fail -ne $f0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/HSPRATON/,$p' $T/log.txt | tail -30; cat $T/ratones; fi
+fi
+
 # ---- 2. el touchpad Synaptics en modo absoluto (sin touchpad) ----
 if quiere 2; then
   echo "-- 2. touchpad Synaptics en modo absoluto: el borde derecho es la rueda --"
@@ -202,7 +243,7 @@ if quiere 4 && [ $CON32 = 1 ]; then
     RX=400; RY=300
     # La ventana va a toda la pantalla: la fila f de la página, en y = 80 + 18 f.
     PAG="0 80 780 460"
-    { sleep 9; send 'A:\HISPADOS\HSPRED' 2; send 'A:\HISPADOS\HSPRATON /DIRECTO' 3; send 'C:\HISPADOS\VENTANAS /486' 10
+    { sleep 9; send 'A:\HISPADOS\HSPRED' 2; send 'A:\HISPADOS\HSPRATON' 3; send 'C:\HISPADOS\VENTANAS /486' 10
       tecla ctrl-esc; sleep 1; tecla i; sleep 0.5; tecla right; sleep 1; tecla ret; sleep 12
       raton ps2; ir 400 300; shot n0
       rueda 2; shot n1                                 # dos pasos: seis filas
