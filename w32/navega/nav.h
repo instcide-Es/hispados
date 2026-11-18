@@ -80,6 +80,7 @@ struct Nodo {
 #define EN_BOTON 16      /* un enlace con aspecto de botón (.btn) */
 #define EN_VISTO 32      /* el estilo ya está calculado */
 #define EN_SUBRAYA 64
+#define EN_BLOQUE 128     /* la hoja de estilo lo hace bloque (display: block, flex...) */
 const char *atr(const Nodo *, const char *);       /* NULL si no lo tiene */
 int tiene_clase(const Nodo *, const char *);
 
@@ -140,6 +141,7 @@ extern char http_idioma[32];
 enum { C_TEXTO, C_CLAVE, C_CASILLA, C_RADIO, C_ENVIAR, C_BOTON, C_REINICIO, C_LISTA, C_AREA, C_OCULTO, C_ARCHIVO };
 typedef struct {
   u8 tipo, desactivado, sololee, marcado, marcado0, visible, obligado, cambia_envia;
+  u8 solo_js;                             /* un botón que solo hace algo con JavaScript */
   Nodo *nodo, *forma;
   const char *nombre;
   char *valor; int n_valor, cap_valor;   /* texto, área, y el valor de las casillas */
@@ -163,6 +165,7 @@ typedef struct {
   char *url;
   Fila *filas; int n_filas, cap_filas;
   int ancho;                              /* la fila más larga */
+  int y_cont;                             /* la fila donde empieza lo principal (<main>), o -1 */
   Atr *atrs; int n_atrs, cap_atrs;
   Enlace *enl; int n_enl, cap_enl;
   Ctl *ctl; int n_ctl, cap_ctl;

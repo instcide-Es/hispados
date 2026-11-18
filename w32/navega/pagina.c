@@ -15,7 +15,7 @@
  *  El estilo
  * ============================================================================= */
 typedef struct {
-  u8 etq, oculto, negrita, alin, subraya, hay_color, hay_fondo, del_atr_hidden;
+  u8 etq, oculto, negrita, alin, subraya, hay_color, hay_fondo, del_atr_hidden, bloque;
   const char *clase, *clase2, *id;
   u32 color, fondo;
 } Regla;
@@ -81,7 +81,14 @@ static void declaraciones(const char *t, const char *fin, Regla *r) {
       prop[n] = 0;
       v = dp + 1;
       while (v < pc && *v <= ' ') v++;
-      if (!strcmp(prop, "display")) { if (!_strnicmp(v, "none", 4)) r->oculto = 1; else r->oculto = 2; }
+      if (!strcmp(prop, "display")) {
+        if (!_strnicmp(v, "none", 4)) r->oculto = 1;
+        else {
+          r->oculto = 2;
+          if (!_strnicmp(v, "block", 5) || !_strnicmp(v, "flex", 4) || !_strnicmp(v, "grid", 4) || !_strnicmp(v, "list-item", 9)
+              || (!_strnicmp(v, "table", 5) && v[5] != '-')) r->bloque = 1;
+        }
+      }
       else if (!strcmp(prop, "visibility")) { if (!_strnicmp(v, "hidden", 6)) r->oculto = 1; }
       else if (!strcmp(prop, "color")) { if (color_css(v, &r->color)) r->hay_color = 1; }
       else if (!strcmp(prop, "background-color") || !strcmp(prop, "background")) { if (color_css(v, &r->fondo)) r->hay_fondo = 1; }
@@ -171,7 +178,7 @@ static void css_lee(Pagina *p, const char *c, const char *fin, int px) {
       memset(&r, 0, sizeof r);
       if (p->n_reglas < REGLAS_MAX && selector(p, s, coma, &r)) {
         declaraciones(llave + 1, cierre < fin ? cierre : fin, &r);
-        if (r.oculto || r.negrita || r.alin || r.subraya || r.hay_color || r.hay_fondo) rs[p->n_reglas++] = r;
+        if (r.oculto || r.negrita || r.alin || r.subraya || r.hay_color || r.hay_fondo || r.bloque) rs[p->n_reglas++] = r;
       }
       s = coma + 1;
     }
@@ -234,6 +241,7 @@ static void estilo(Pagina *p, Nodo *n) {
     if (q->clase2 && !tiene_clase(n, q->clase2)) continue;
     if (q->oculto == 1) oculto = 1;
     if (q->oculto == 2 && !atr(n, "hidden")) oculto = 0;
+    if (q->bloque) r.bloque = 1;
     if (q->negrita) r.negrita = 1;
     if (q->alin) r.alin = q->alin;
     if (q->subraya) r.subraya = 1;
@@ -246,6 +254,7 @@ static void estilo(Pagina *p, Nodo *n) {
     declaraciones(st, st + strlen(st), &q);
     if (q.oculto == 1) oculto = 1;
     if (q.oculto == 2 && !atr(n, "hidden")) oculto = 0;
+    if (q.bloque) r.bloque = 1;
     if (q.negrita) r.negrita = 1;
     if (q.alin) r.alin = q.alin;
     if (q.subraya) r.subraya = 1;
@@ -256,6 +265,7 @@ static void estilo(Pagina *p, Nodo *n) {
   if ((t = atr(n, "align"))) { if (!_stricmp(t, "center")) r.alin = 1; else if (!_stricmp(t, "right")) r.alin = 2; }
   n->oculto = (u8)oculto;
   if (r.negrita) n->est |= EN_NEGRITA;
+  if (r.bloque) n->est |= EN_BLOQUE;
   if (r.subraya) n->est |= EN_SUBRAYA;
   if (r.alin == 1) n->est |= EN_CENTRO;
   if (r.alin == 2) n->est |= EN_DERECHA;
@@ -302,7 +312,6 @@ static void ctl_crea(Pagina *p, Nodo *n) {
   Ctl *c;
   const char *t = atr(n, "type"), *v = atr(n, "value");
   Nodo *f;
-  char b[600];
   if (p->n_ctl == p->cap_ctl) {
     Ctl *q = realloc(p->ctl, (p->cap_ctl + 32) * sizeof(Ctl));
     if (!q) return;
@@ -325,7 +334,7 @@ static void ctl_crea(Pagina *p, Nodo *n) {
     else if (!_stricmp(t, "checkbox")) c->tipo = C_CASILLA;
     else if (!_stricmp(t, "radio")) c->tipo = C_RADIO;
     else if (!_stricmp(t, "submit") || !_stricmp(t, "image")) c->tipo = C_ENVIAR;
-    else if (!_stricmp(t, "button")) c->tipo = C_BOTON;
+    else if (!_stricmp(t, "button")) { c->tipo = C_BOTON; c->solo_js = 1; }
     else if (!_stricmp(t, "reset")) c->tipo = C_REINICIO;
     else if (!_stricmp(t, "file")) c->tipo = C_ARCHIVO;
     else c->tipo = C_TEXTO;
@@ -339,10 +348,10 @@ static void ctl_crea(Pagina *p, Nodo *n) {
   } else if (n->etq == E_BUTTON) {
     c->tipo = !t || !_stricmp(t, "submit") ? C_ENVIAR : !_stricmp(t, "reset") ? C_REINICIO : C_BOTON;
     ctl_pon(c, v ? v : "", -1);
+    if (c->tipo == C_BOTON || (c->tipo == C_ENVIAR && !f)) c->solo_js = 1;
   } else if (n->etq == E_TEXTAREA) {
     c->tipo = C_AREA;
     c->max = 20000;
-    b[0] = 0;
     if (n->hijo && n->hijo->texto) {
       const char *x = n->hijo->t;
       u32 l = n->hijo->n;
@@ -531,6 +540,7 @@ typedef struct { u8 est, fg, bg; short enlace; } Est;
 typedef struct {
   Pagina *p;
   int x0, ancho, y, col, espacio, margen, vacio, alin, pre, medir, max_an, min_an;
+  int pegado;                   /* lo siguiente va pegado a lo de antes (tras «[») */
   char pref[8];                 /* lo que va delante de la primera línea (la viñeta) */
   u8 lc[LMAX];
   u16 la[LMAX];
@@ -542,7 +552,7 @@ static void hijos(Ctx *c, Nodo *n, Est e) {
 }
 static void ctx_nuevo(Ctx *c, Pagina *p, int x0, int ancho, int y, int medir) {
   c->p = p; c->x0 = x0; c->ancho = ancho < 1 ? 1 : ancho > LMAX - 1 ? LMAX - 1 : ancho; c->y = y;
-  c->col = c->espacio = c->margen = c->alin = c->pre = c->max_an = c->min_an = 0;
+  c->col = c->espacio = c->margen = c->alin = c->pre = c->max_an = c->min_an = c->pegado = 0;
   c->vacio = 1; c->medir = medir; c->pref[0] = 0;
 }
 /* la línea que se estaba llenando, a la página */
@@ -582,6 +592,7 @@ static void empieza(Ctx *c) {
 }
 /* una palabra (no se parte si cabe en una línea) con su atributo */
 static void pon(Ctx *c, const u8 *t, int n, int a) {
+  if (c->pegado) { c->espacio = 0; c->pegado = 0; }
   if (n > c->min_an) c->min_an = n > c->ancho && !c->medir ? c->ancho : n;
   if (c->col && !c->pre && c->col + c->espacio + n > c->ancho) salta(c);
   if (!c->col) empieza(c);
@@ -708,6 +719,7 @@ static void control(Ctx *c, Nodo *n, Est e) {
   k = &p->ctl[idx];
   if (k->tipo == C_OCULTO) return;
   w = ctl_ancho(c, k);
+  if (k->solo_js && w <= 4) return;            /* un botón sin rótulo y que solo va con JavaScript: nada */
   if (w > LMAX - 2) w = LMAX - 2;
   a = atr_id(p, 0, e.fg, e.bg, -1, idx);
   if (k->tipo == C_AREA) {
@@ -891,6 +903,15 @@ static void caja(Ctx *c, Nodo *n, Est e) {
   if (band & EF_FUERA) return;
   if (!(n->est & EN_VISTO)) estilo(p, n);
   if (n->oculto) return;
+  if (n->est & EN_BLOQUE) band |= EF_BLOQUE;
+  if (p->y_cont < 0 && !c->medir && (band & EF_BLOQUE)) {
+    t = atr(n, "role");
+    if (n->etq == E_MAIN || (t && !_stricmp(t, "main")) || tiene_clase(n, "main") || tiene_clase(n, "content")
+        || ((t = atr(n, "id")) && (!strcmp(t, "main") || !strcmp(t, "content") || !strcmp(t, "contenido")))) {
+      salta(c);
+      p->y_cont = c->y + (c->margen && !c->vacio);
+    }
+  }
   if (n->fg) e.fg = n->fg;
   if (n->bg) e.bg = n->bg;
   if (n->est & EN_NEGRITA) e.est |= A_NEGRITA;
@@ -925,21 +946,25 @@ static void caja(Ctx *c, Nodo *n, Est e) {
     return;
   case E_A:
     t = atr(n, "href");
+    if (band & EF_BLOQUE) salta(c);
     if (t) {
       e.enlace = (short)enlace_nuevo(c, t, n);
       e.fg = K_ENLACE;
       if (n->est & EN_BOTON) {
         e.est |= A_BOTON | A_NEGRITA;
         a = atr_de(c, e);
+        if (c->col) c->espacio = 1;
         literal(c, "[", a);
+        c->pegado = 1;
         hijos(c, n, e);
-        c->espacio = 0;
+        c->espacio = 0; c->pegado = 0;
         literal(c, "]", a);
         return;
       }
       e.est |= A_SUBRAYA;
     }
     hijos(c, n, e);
+    if (band & EF_BLOQUE) salta(c);
     return;
   case E_B: case E_STRONG:
     e.est |= A_NEGRITA;
@@ -958,7 +983,7 @@ static void caja(Ctx *c, Nodo *n, Est e) {
     e.est |= A_NEGRITA;
     if (n->etq <= E_H3 && !n->fg) e.fg = K_TITULO;
     hijos(c, n, e);
-    if (n->etq == E_H1 && c->col) { k = c->col; salta(c); c->alin = 0; raya(c, k); }
+    if (n->etq == E_H1 && c->col && !c->alin) { k = c->col; salta(c); raya(c, k); }
     margen(c);
     c->alin = alin0;
     return;
@@ -1090,7 +1115,9 @@ static void caja(Ctx *c, Nodo *n, Est e) {
     c->alin = alin0;
     return;
   }
+  if (n->bg && c->col && c->lc[c->col - 1] != ' ') c->espacio = 1;   /* (una etiqueta con fondo: separada) */
   hijos(c, n, e);
+  if (n->bg) c->espacio = 1;
   (void)x0; (void)an0;
 }
 
@@ -1132,7 +1159,7 @@ Pagina *pag_nueva(const char *url, const u8 *fuente, u32 n, int latin1, int text
 static void estilo_fuera(Nodo *n) {
   Nodo *h;
   if (n->texto) return;
-  n->est &= ~(EN_VISTO | EN_NEGRITA | EN_CENTRO | EN_DERECHA | EN_PLEGABLE | EN_BOTON | EN_SUBRAYA);
+  n->est = 0;
   n->fg = n->bg = 0;
   for (h = n->hijo; h; h = h->sig) estilo_fuera(h);
 }
@@ -1142,7 +1169,7 @@ void pag_maqueta(Pagina *p, int columnas) {
   int k;
   for (k = 0; k < p->n_filas; k++) { free(p->filas[k].c); free(p->filas[k].a); }
   if (p->filas) memset(p->filas, 0, p->cap_filas * sizeof(Fila));
-  p->n_filas = 0; p->ancho = 0; p->n_atrs = 0; p->n_enl = 0; p->n_foco = 0;
+  p->n_filas = 0; p->ancho = 0; p->n_atrs = 0; p->n_enl = 0; p->n_foco = 0; p->y_cont = -1;
   for (k = 0; k < p->n_ctl; k++) p->ctl[k].visible = 0;
   if (columnas < 20) columnas = 20;
   if (columnas > LMAX - 2) columnas = LMAX - 2;

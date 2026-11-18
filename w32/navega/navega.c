@@ -112,6 +112,7 @@ static int sobre_enl = -1;
 static Pet pet;
 static int cargando, redirs, modo_hist, sy_tras;
 static char inicio[300] = "about:inicio";
+static int al_contenido = 1;
 static char carpeta[150];
 /* el historial */
 #define HIST 40
@@ -327,7 +328,7 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
     if (tiene) marco(dc, x + 2, y + 2, w - 4, h - 4, P(P_TERRACOTA));
     n = strlen(b);
     if (n > c->w - 2) n = c->w - 2;
-    txt(dc, x + (w - n * LW) / 2, y + 1, b, n, P(c->desactivado ? P_ARENA_OSC : P_TINTA), 0);
+    txt(dc, x + (w - n * LW) / 2, y + 1, b, n, P(c->desactivado || c->solo_js ? P_ARENA_OSC : P_TINTA), 0);
     break;
   case C_LISTA:
     rotulo(c, b, sizeof b);
@@ -468,6 +469,9 @@ static void muestra(Pagina *p, const char *url_hist) {
       if (n_hist == HIST) { free(hist[0].url); memmove(hist, hist + 1, (HIST - 1) * sizeof hist[0]); n_hist--; }
       hist[n_hist].url = malloc(strlen(url_hist) + 1);
       if (hist[n_hist].url) { strcpy(hist[n_hist].url, url_hist); hist[n_hist].sy = 0; i_hist = n_hist++; }
+      /* se empieza por lo principal de la página (<main>), si lo dice: lo de
+       * antes (menús, avisos) queda arriba, a un paso */
+      if (al_contenido && pag->y_cont > 3) desplaza(0, pag->y_cont);
     } else if (i_hist >= 0) {
       char *q = malloc(strlen(url_hist) + 1);
       if (q) { strcpy(q, url_hist); free(hist[i_hist].url); hist[i_hist].url = q; }
@@ -1073,7 +1077,8 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   return DefWindowProcA(h, m, w, l);
 }
 
-/* NAVEGA.INI, junto al programa: Inicio=dirección, Idioma=es, Favorito=nombre|dirección */
+/* NAVEGA.INI, junto al programa: Inicio=dirección, Idioma=es, AlContenido=NO,
+ * Favorito=nombre|dirección */
 static void lee_ini(void) {
   char ruta[200], l[400];
   FILE *f;
@@ -1089,6 +1094,7 @@ static void lee_ini(void) {
     *fin = 0;
     if (!_strnicmp(l, "Inicio=", 7) && l[7]) sprintf(inicio, "%.290s", l + 7);
     if (!_strnicmp(l, "Idioma=", 7) && l[7]) sprintf(http_idioma, "%.30s", l + 7);
+    if (!_strnicmp(l, "AlContenido=", 12)) al_contenido = !(l[12] == 'N' || l[12] == 'n' || l[12] == '0');
   }
   fclose(f);
 }
