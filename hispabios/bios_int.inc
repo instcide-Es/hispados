@@ -83,6 +83,51 @@ irq_esclavo:                            ; IRQ 8-15 sin dueño: fin en los dos
         pop ax
         iret
 
+; irq_rtc: la IRQ 8. Cuando el reloj CMOS hace de reloj de DOS (T_RELOJ =
+; RJ_RTC: ni el 8254 ni el HPET dan la IRQ 0) llega 64 veces por segundo: se
+; le contesta (leer el registro C), se da el fin a los dos 8259 y, si por el
+; TSC toca ya un tic de DOS, se llama a INT 08h como si hubiera llegado la
+; IRQ 0 (su fin de interrupción de más no molesta: no hay nada en curso).
+irq_rtc:
+        push eax
+        push edx
+        push ds
+        mov ax, SEG_BIOS
+        mov ds, ax
+        inc dword [rj_irq8]
+        cmp byte [T_RELOJ], RJ_RTC
+        jne .fin
+        mov al, 0Ch
+        out 70h, al
+        in al, 71h
+        mov al, 0Dh
+        out 70h, al
+        mov al, 20h
+        out 0A0h, al
+        out 20h, al
+        cmp dword [T_TSC_TICK], 0
+        je .dar
+        rdtsc
+        sub eax, [tsc0]
+        sbb edx, [tsc0 + 4]
+        cmp edx, [T_TSC_TICK]
+        jae .dar
+        div dword [T_TSC_TICK]          ; EAX = tics desde el arranque
+        cmp eax, [tics_dados]
+        jbe .nada
+.dar:   pop ds
+        pop edx
+        pop eax
+        int 08h
+        iret
+.fin:   mov al, 20h
+        out 0A0h, al
+        out 20h, al
+.nada:  pop ds
+        pop edx
+        pop eax
+        iret
+
 int08:                                  ; IRQ 0: el tic de DOS
         ; En un equipo real la IRQ 0 se pierde mientras el firmware trabaja
         ; (dibujar, disco, teclado) con las interrupciones cerradas: los tics
@@ -96,6 +141,7 @@ int08:                                  ; IRQ 0: el tic de DOS
         cmp byte [de_k_tics], 0         ; una IRQ de verdad: la IRQ 0 llega
         jne .cuenta
         mov byte [T_SIN_IRQ], 0
+        inc dword [rj_vistas]
 .cuenta:
         cmp dword [T_TSC_TICK], 0
         je .uno
@@ -775,9 +821,9 @@ int15:
         sti
         call k_tics                     ; (por si la IRQ 0 no llega)
         cmp ax, 4842h                   ; 'HB': ¿es HispaBIOS? -> AX = 'hb',
-        jne .no_hb                      ; BX = versión (0.3), CF = 0
+        jne .no_hb                      ; BX = versión (0.4), CF = 0
         mov ax, 6862h
-        mov bx, 0003h
+        mov bx, 0004h
         jmp d_bien
 .no_hb:
         cmp ax, 4844h                   ; 'HD': los datos para depurar (HBLOG.COM)
@@ -994,16 +1040,22 @@ r_poner_tics:
         jmp d_bien
 
 ; cmos_leer: AL = registro -> AL = valor
-cmos_leer:
+cmos_leer:                              ; (con las interrupciones cerradas: la
+        pushf                           ; IRQ 8 del reloj CMOS cambia el registro
+        cli                             ; elegido en el puerto 70h)
         out 70h, al
         jmp $ + 2
         in al, 71h
+        popf
         ret
 cmos_escribir:                          ; AL = registro, AH = valor
+        pushf
+        cli
         out 70h, al
         jmp $ + 2
         mov al, ah
         out 71h, al
+        popf
         ret
 r_espera_cmos:                          ; espera a que no se esté actualizando
         push cx

@@ -40,6 +40,11 @@
 ;    -DPRUEBA_SIN_PRESTAR      sin prestar a DOS las páginas bajas del firmware
 ;    -DPANTALLA_NATIVA         no cambiar de modo de pantalla aunque sea lenta
 ;    -DPRUEBA_SEGURO           como si se hubiera pulsado S al arrancar (modo seguro)
+;    -DPRUEBA_P2SB             un P2SB de mentira con el 8254 bloqueado (el camino
+;                              de quitar el «clock gating», que QEMU no tiene)
+;    -DPRUEBA_RELOJ=mascara    fuentes del reloj que la BIOS no prueba (bit 0: el
+;                              8254 por LINT0; 1: por el IOAPIC; 2 y 3: el HPET;
+;                              4 y 5: el reloj CMOS), como si no dieran la IRQ 0
 ;    -DREGISTRO_PASOS          guarda HISPABIOS.LOG en cada paso aunque todo
 ;                              vaya bien (la imagen de prueba para un equipo
 ;                              que se queda parado: tools/mkprueba_hispabios.sh)
@@ -49,7 +54,7 @@
 %define PE_ARQ 64
 %include "pe.inc"
 
-%define HB_VERSION '0.3'
+%define HB_VERSION '0.4'
 
 ; ---- tablas de UEFI (x64) ----
 ST_VENDOR       equ 24          ; FirmwareVendor (CHAR16 *)
@@ -421,6 +426,7 @@ pe_entrada:
         call wc_preparar
 .pant_ya:
 %endif
+        call reloj_mirar                ; el 8254, el HPET y los APIC: T_PIT, T_HPET...
         call registro_a_bios            ; (lo de la pantalla, también para HBLOG)
         mov byte [rel callado], 0
         DI t_viaje
@@ -1077,6 +1083,673 @@ vector_irq0:
         pop rbx
         ret
 
+; =============================================================================
+;  reloj_mirar: el reloj de DOS (IRQ 0) en este equipo
+; =============================================================================
+;  DOS vive del 8254 (PIT) por la IRQ 0. En los equipos de Intel recientes el
+;  firmware lo deja PARADO («8254 clock gating»: Windows y Linux usan el HPET
+;  o el APIC) y entonces no cuenta ni interrumpe: Hispa-DOS se quedaba a la
+;  mitad del arranque (Monovate 14.1, Core i3-1115G4). Aquí:
+;   1. se mira si el contador del canal 0 se mueve;
+;   2. si no, y el puente es un PCH de Intel, se le quita el bloqueo: registro
+;      ITSSPRC (desplazamiento 3300h del puerto ITSS, C4h, de la banda lateral
+;      del PCH), bit 2 = 8254CGE. Los registros de la banda lateral están en
+;      SBREG_BAR, la BAR 10h del dispositivo P2SB (00:1F.1), que el firmware
+;      deja oculto (bit 8 de su registro E0h): se muestra, se lee la BAR y se
+;      vuelve a ocultar. (coreboot: soc/intel/common/block/itss y p2sb; Linux:
+;      drivers/platform/x86/p2sb.c; hojas de datos de los PCH de Intel de las
+;      series 100 a 700, vol. 2, «ITSS Power Reduction Control».)
+;   3. se apunta lo que hay (tablas HPET y APIC de ACPI, el HPET, el APIC local
+;      y el IOAPIC) y se pasa a la BIOS la dirección del HPET y del IOAPIC: es
+;      ella la que prueba, con las interrupciones abiertas, qué fuente da la
+;      IRQ 0 (bios64.asm, reloj_elegir).
+;  En el modo seguro no se toca nada de eso y la BIOS solo prueba el 8254 y
+;  el reloj CMOS por LINT0.
+;  Los registros que no estén en las tablas de páginas del firmware no se
+;  tocan (mapeada). R15 = la BIOS.
+P2SB            equ (31 << 11) | (1 << 8)   ; 00:1F.1 en CF8h
+LPC             equ (31 << 11)              ; 00:1F.0
+ITSSPRC         equ (0C4h << 16) + 3300h    ; puerto ITSS, registro ITSSPRC
+reloj_mirar:
+        push rbx
+        push r12
+        push r13
+        push r14
+        sub rsp, 40                     ; (8 + 32 + 40 = 80: pila alineada)
+        mov al, [rel callado]
+        mov [rel rj_callado], al
+        mov byte [rel callado], 1       ; (solo al registro)
+%ifdef PRUEBA_RELOJ
+        mov byte [r15 + 255], PRUEBA_RELOJ      ; T_PRUEBA
+%endif
+        cmp byte [rel seguro], 0
+        je .mirar
+        or byte [r15 + 255], 2Eh        ; modo seguro: solo el 8254 y el reloj CMOS
+                                        ; por LINT0 (puertos de siempre)
+        DI t_k_seguro
+        jmp .fin
+.mirar:
+        ; ---- 1. ¿cuenta el 8254? ----
+        call pit_cuenta
+        DI t_k_pit
+        call pit_decir
+        jc .parado
+        or byte [r15 + 254], 3          ; T_PIT: contaba y cuenta
+        jmp .tablas
+.parado:
+        ; ---- 2. el bloqueo del 8254 en el PCH de Intel ----
+        call itss_abrir
+        jc .tablas
+%ifdef PRUEBA_P2SB
+        DI t_sim                        ; (pruebas) cómo ha quedado el P2SB de mentira
+        movzx eax, byte [rel sim_oculto]
+        call decimal
+        DI t_sim2
+        movzx eax, byte [rel sim_cambios]
+        call decimal
+        DI t_sim3
+        mov eax, [rel sim_prc]
+        mov ecx, 8
+        call hex
+        DI t_nl
+%endif
+        call pit_cuenta
+        DI t_k_pit2
+        call pit_decir
+        jc .tablas
+        or byte [r15 + 254], 6          ; T_PIT: cuenta ahora, tras quitar el bloqueo
+.tablas:
+        ; ---- 3. lo que hay: HPET, APIC local, IOAPIC ----
+        mov eax, 'HPET'
+        call acpi_tabla
+        test rax, rax
+        jnz .hpet
+        DI t_k_sin_hpet
+        jmp .apic
+.hpet:  mov rbx, [rax + 44]             ; la dirección (en +40, el tipo de espacio)
+        mov r12d, [rax + 36]            ; el identificador del bloque
+        DI t_k_hpet
+        mov rax, rbx
+        call hex64
+        DI t_k_hpet_id
+        mov eax, r12d
+        mov ecx, 8
+        call hex
+        mov rax, rbx
+        shr rax, 32
+        jnz .hpet_alto
+        test rbx, rbx
+        jz .hpet_nl
+        mov [r15 + 256], ebx            ; T_HPET
+        mov rax, rbx
+        call mapeada
+        jc .hpet_nomap
+        DI t_k_hpet_cap
+        mov rax, [rbx]
+        call hex64
+        DI t_k_hpet_cfg
+        mov eax, [rbx + 10h]
+        mov ecx, 8
+        call hex
+        DI t_k_hpet_t0
+        mov rax, [rbx + 100h]
+        call hex64
+        jmp .hpet_nl
+.hpet_alto:
+        DI t_k_alto
+        jmp .hpet_nl
+.hpet_nomap:
+        DI t_k_nomap
+.hpet_nl:
+        DI t_nl
+.apic:  mov ecx, 1Bh                    ; IA32_APIC_BASE
+        rdmsr
+        shl rdx, 32
+        or rax, rdx
+        mov r12, rax
+        DI t_k_lapic
+        mov rax, r12
+        call hex64
+        bt r12, 11
+        jnc .lapic_nl
+        bt r12, 10
+        jc .x2
+        mov rbx, r12
+        mov rax, 0FFFFFF000h
+        and rbx, rax
+        mov rax, rbx
+        call mapeada
+        jc .lapic_nomap
+        mov r13d, [rbx + 0F0h]          ; SVR, LINT0, LINT1, temporizador
+        mov r14d, [rbx + 350h]
+        mov eax, [rbx + 360h]
+        mov [rsp + 32], eax
+        mov r12d, [rbx + 320h]
+        jmp .lapic_decir
+.x2:    DI t_k_x2
+        mov ecx, 80Fh
+        rdmsr
+        mov r13d, eax
+        mov ecx, 835h
+        rdmsr
+        mov r14d, eax
+        mov ecx, 836h
+        rdmsr
+        mov [rsp + 32], eax
+        mov ecx, 832h
+        rdmsr
+        mov r12d, eax
+.lapic_decir:
+        DI t_k_svr
+        mov eax, r13d
+        mov ecx, 8
+        call hex
+        DI t_k_lint0
+        mov eax, r14d
+        call hex
+        DI t_k_lint1
+        mov eax, [rsp + 32]
+        call hex
+        DI t_k_lvtt
+        mov eax, r12d
+        call hex
+        jmp .lapic_nl
+.lapic_nomap:
+        DI t_k_nomap
+.lapic_nl:
+        DI t_nl
+        ; la tabla APIC (MADT): el IOAPIC y a qué entrada va la IRQ 0
+        mov eax, 'APIC'
+        call acpi_tabla
+        test rax, rax
+        jnz .madt
+        DI t_k_sin_madt
+        jmp .fin
+.madt:  mov rbx, rax
+        DI t_k_madt
+        mov eax, [rbx + 40]
+        mov ecx, 8
+        call hex
+        mov r12d, [rbx + 4]             ; R12 = fin de la tabla
+        add r12, rbx
+        lea r13, [rbx + 44]
+        xor r14d, r14d                  ; R14 = el IOAPIC de la entrada 0
+.e:     lea rax, [r13 + 2]
+        cmp rax, r12
+        ja .madt_f
+        movzx eax, byte [r13 + 1]
+        cmp eax, 2
+        jb .madt_f
+        cmp byte [r13], 1               ; IOAPIC
+        jne .e2
+        DI t_k_ioapic
+        mov eax, [r13 + 4]
+        mov ecx, 8
+        call hex
+        DI t_k_gsi
+        mov eax, [r13 + 8]
+        call decimal
+        cmp dword [r13 + 8], 0
+        jne .es
+        mov r14d, [r13 + 4]
+        jmp .es
+.e2:    cmp byte [r13], 2               ; una IRQ que va a otra entrada
+        jne .es
+        cmp byte [r13 + 3], 0
+        jne .es
+        DI t_k_irq0
+        mov eax, [r13 + 4]
+        call decimal
+.es:    movzx eax, byte [r13 + 1]
+        add r13, rax
+        jmp .e
+.madt_f:
+        test r14, r14
+        jz .madt_nl
+        mov [r15 + 260], r14d           ; T_IOAPIC
+        mov rax, r14
+        call mapeada
+        jc .ioa_nomap
+        pushfq                          ; sus entradas 0 (el 8259) y 2 (la IRQ 0)
+        cli
+        mov dword [r14], 10h
+        mov ebx, [r14 + 10h]
+        mov dword [r14], 14h
+        mov r12d, [r14 + 10h]
+        popfq
+        DI t_k_ioa0
+        mov eax, ebx
+        mov ecx, 8
+        call hex
+        DI t_k_ioa2
+        mov eax, r12d
+        call hex
+        jmp .madt_nl
+.ioa_nomap:
+        DI t_k_nomap
+.madt_nl:
+        DI t_nl
+.fin:   mov al, [rel rj_callado]
+        mov [rel callado], al
+        add rsp, 40
+        pop r14
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
+; pit_cuenta: programa el canal 0 del 8254 como lo quiere DOS (modo 3, 65536
+; cuentas: 18,2 Hz) y lee el contador dos veces con 2 ms entre medias -> EAX =
+; primera lectura, EDX = segunda; CF si no se ha movido
+pit_cuenta:
+        push rbx
+        push rcx
+        pushfq
+        cli
+        mov al, 36h
+        out 43h, al
+        xor al, al
+        out 40h, al
+        out 40h, al
+        popfq
+        call .espera
+        call .leer
+        mov [rel pit_l1], eax
+        call .espera
+        call .leer
+        mov [rel pit_l2], eax
+        mov edx, eax
+        mov eax, [rel pit_l1]
+        cmp eax, edx
+        clc
+        jne .f
+        stc
+.f:     pop rcx
+        pop rbx
+        ret
+.leer:  pushfq
+        cli
+        xor eax, eax
+        out 43h, al                     ; (la cuenta del canal 0, retenida)
+        in al, 40h
+        mov ah, al
+        in al, 40h
+        xchg al, ah
+        popfq
+        ret
+.espera:                                ; 2 ms por el TSC (o unas vueltas, sin él)
+        push rax
+        push rdx
+        mov ecx, [rel tsc_tic]
+        shr ecx, 5
+        jnz .t
+        mov ecx, 2000000
+.v:     pause
+        dec ecx
+        jnz .v
+        jmp .ef
+.t:     rdtsc
+        shl rdx, 32
+        or rax, rdx
+        mov rbx, rax
+.te:    pause
+        rdtsc
+        shl rdx, 32
+        or rax, rdx
+        sub rax, rbx
+        cmp rax, rcx
+        jb .te
+.ef:    pop rdx
+        pop rax
+        ret
+; pit_decir: apunta «cuenta» o «NO cuenta» con las dos lecturas -> CF si no cuenta
+pit_decir:
+        mov eax, [rel pit_l1]
+        cmp eax, [rel pit_l2]
+        jne .si
+        DI t_k_no
+        jmp .l
+.si:    DI t_k_si
+.l:     mov eax, [rel pit_l1]
+        mov ecx, 4
+        call hex
+        DI t_k_y
+        mov eax, [rel pit_l2]
+        call hex
+        DI t_k_fin
+        mov eax, [rel pit_l1]
+        cmp eax, [rel pit_l2]
+        clc
+        jne .f
+        stc
+.f:     ret
+
+; pci_leer: EAX = dispositivo y registro (bus 0) -> EAX = la doble palabra
+pci_leer:
+%ifdef PRUEBA_P2SB
+        ; (pruebas) un P2SB de mentira, oculto, con el bit 8254CGE puesto en un
+        ; ITSSPRC de mentira (sim_prc): QEMU no tiene PCH con banda lateral
+        push rax
+        and eax, 0FF00h
+        cmp eax, P2SB
+        pop rax
+        jne .real
+        cmp byte [rel sim_oculto], 0
+        jne .sim_ff
+        cmp al, 00h
+        je .sim_id
+        cmp al, 08h
+        je .sim_clase
+        cmp al, 10h
+        je .sim_bar
+        cmp al, 14h
+        je .sim_bar2
+        xor eax, eax
+        ret
+.sim_ff:
+        mov eax, -1
+        ret
+.sim_id:
+        mov eax, 0A0A08086h
+        ret
+.sim_clase:
+        mov eax, 05800020h
+        ret
+.sim_bar:
+        lea rax, [rel sim_prc]
+        sub rax, ITSSPRC
+        and eax, 0FFFFFFF0h
+        or eax, 4
+        ret
+.sim_bar2:
+        lea rax, [rel sim_prc]
+        sub rax, ITSSPRC
+        shr rax, 32
+        ret
+.real:
+%endif
+        push rdx
+        pushfq
+        cli
+        or eax, 80000000h
+        and al, 0FCh
+        mov dx, 0CF8h
+        out dx, eax
+        mov dx, 0CFCh
+        in eax, dx
+        popfq
+        pop rdx
+        ret
+; pci_poner8: EAX = dispositivo y registro, CL = el octeto
+pci_poner8:
+%ifdef PRUEBA_P2SB
+        cmp eax, P2SB + 0E1h
+        jne .real
+        mov [rel sim_oculto], cl
+        inc byte [rel sim_cambios]
+        ret
+.real:
+%endif
+        push rax
+        push rbx
+        push rdx
+        pushfq
+        cli
+        mov ebx, eax
+        or eax, 80000000h
+        and al, 0FCh
+        mov dx, 0CF8h
+        out dx, eax
+        mov edx, ebx
+        and edx, 3
+        add dx, 0CFCh
+        mov al, cl
+        out dx, al
+        popfq
+        pop rdx
+        pop rbx
+        pop rax
+        ret
+
+; itss_abrir: quita el «clock gating» del 8254 en un PCH de Intel -> CF = 0 si
+; el bit estaba puesto y se ha quitado. Apunta cada cosa que ve.
+itss_abrir:
+        push rbx
+        push r12
+        push r13
+        push r14
+        sub rsp, 40
+        xor r14d, r14d                  ; R14 = 1: hay que volver a ocultar el P2SB
+        mov eax, LPC
+        call pci_leer
+        mov r12d, eax
+        DI t_i_lpc
+        mov eax, r12d
+        mov ecx, 8
+        call hex
+        cmp r12w, 8086h
+        je .intel
+        DI t_i_no_intel
+        jmp .no
+.intel: mov eax, P2SB
+        call pci_leer
+        mov r12d, eax                   ; R12 = identificador del P2SB
+        mov eax, P2SB + 0E0h
+        call pci_leer
+        mov r13d, eax
+        DI t_i_p2sb
+        mov eax, r12d
+        mov ecx, 8
+        call hex
+        DI t_i_e0
+        mov eax, r13d
+        call hex
+        cmp r12d, -1
+        jne .visible
+        mov eax, P2SB + 0E1h            ; oculto: se muestra (bit 8 de E0h a 0)
+        xor ecx, ecx
+        call pci_poner8
+        mov r14d, 1
+        mov eax, P2SB
+        call pci_leer
+        mov r12d, eax
+        DI t_i_mostrado
+        mov eax, r12d
+        mov ecx, 8
+        call hex
+        cmp r12d, -1
+        jne .visible
+        DI t_i_no_hay
+        jmp .ocultar_no
+.visible:
+        cmp r12w, 8086h
+        jne .raro
+        mov eax, P2SB + 08h             ; clase 0580h: memoria (otra)
+        call pci_leer
+        shr eax, 16
+        cmp eax, 0580h
+        jne .raro
+        mov eax, P2SB + 10h             ; SBREG_BAR (de 64 bits)
+        call pci_leer
+        mov ebx, eax
+        mov eax, P2SB + 14h
+        call pci_leer
+        mov r13d, eax
+        call .ocultar
+        test bl, 1                      ; (de E/S: no es)
+        jnz .sin_bar
+        mov eax, ebx
+        and eax, 6
+        cmp eax, 4                      ; ¿BAR de 64 bits?
+        je .b64
+        xor r13d, r13d
+.b64:   and ebx, 0FFFFFFF0h
+        shl r13, 32
+        or rbx, r13
+        DI t_i_bar
+        mov rax, rbx
+        call hex64
+        test rbx, rbx
+        jz .sin_bar
+        lea rax, [rbx + ITSSPRC]
+        call mapeada
+        jc .nomap
+        mov r12d, [rbx + ITSSPRC]
+        DI t_i_prc
+        mov eax, r12d
+        mov ecx, 8
+        call hex
+        cmp r12d, -1
+        je .sin_bar
+        test r12d, 4                    ; 8254CGE
+        jnz .quitar
+        DI t_i_ya
+        jmp .no
+.quitar:
+        and r12d, ~4
+        mov [rbx + ITSSPRC], r12d
+        mov r12d, [rbx + ITSSPRC]
+        DI t_i_quitado
+        mov eax, r12d
+        mov ecx, 8
+        call hex
+        DI t_nl
+        test r12d, 4
+        jnz .no_nl
+        clc
+        jmp .fin
+.nomap: DI t_k_nomap
+        jmp .no
+.sin_bar:
+        DI t_i_sin_bar
+        jmp .no
+.raro:  DI t_i_raro
+.ocultar_no:
+        call .ocultar
+.no:    DI t_nl
+.no_nl: stc
+.fin:   lea rsp, [rsp + 40]
+        pop r14
+        pop r13
+        pop r12
+        pop rbx
+        ret
+.ocultar:
+        test r14d, r14d
+        jz .of
+        push rax
+        push rcx
+        mov eax, P2SB + 0E1h
+        mov ecx, 1
+        call pci_poner8
+        pop rcx
+        pop rax
+        xor r14d, r14d
+.of:    ret
+
+; mapeada: RAX = dirección -> CF = 1 si no está en las tablas de páginas del
+; firmware (cuatro niveles; con cinco no se mira y se da por buena)
+mapeada:
+        push rbx
+        push rcx
+        push rdx
+        mov rdx, cr4
+        bt rdx, 12                      ; LA57
+        jc .si
+        mov rcx, 000FFFFFFFFFF000h
+        mov rbx, cr3
+        and rbx, rcx
+        mov rdx, rax
+        shr rdx, 39
+        and edx, 1FFh
+        mov rbx, [rbx + rdx * 8]
+        test bl, 1
+        jz .no
+        and rbx, rcx
+        mov rdx, rax
+        shr rdx, 30
+        and edx, 1FFh
+        mov rbx, [rbx + rdx * 8]
+        test bl, 1
+        jz .no
+        test bl, 80h                    ; página de 1 GB
+        jnz .si
+        and rbx, rcx
+        mov rdx, rax
+        shr rdx, 21
+        and edx, 1FFh
+        mov rbx, [rbx + rdx * 8]
+        test bl, 1
+        jz .no
+        test bl, 80h                    ; página de 2 MB
+        jnz .si
+        and rbx, rcx
+        mov rdx, rax
+        shr rdx, 12
+        and edx, 1FFh
+        mov rbx, [rbx + rdx * 8]
+        test bl, 1
+        jz .no
+.si:    clc
+        jmp .f
+.no:    stc
+.f:     pop rdx
+        pop rcx
+        pop rbx
+        ret
+
+; acpi_tabla: EAX = firma -> RAX = la tabla de ACPI con esa firma (0: no hay)
+acpi_tabla:
+        push rbx
+        push rcx
+        push rdx
+        push rsi
+        mov edx, eax
+        mov rbx, [rel rsdp]
+        test rbx, rbx
+        jz .no
+        cmp byte [rbx + 15], 2          ; ACPI 2.0: la XSDT (punteros de 64 bits)
+        jb .rsdt
+        mov rsi, [rbx + 24]
+        test rsi, rsi
+        jz .rsdt
+        mov ecx, [rsi + 4]
+        sub ecx, 36
+        jbe .no
+        shr ecx, 3
+        add rsi, 36
+.x:     mov rax, [rsi]
+        test rax, rax
+        jz .xs
+        cmp [rax], edx
+        je .f
+.xs:    add rsi, 8
+        dec ecx
+        jnz .x
+        jmp .no
+.rsdt:  mov esi, [rbx + 16]
+        test rsi, rsi
+        jz .no
+        mov ecx, [rsi + 4]
+        sub ecx, 36
+        jbe .no
+        shr ecx, 2
+        add rsi, 36
+.r:     mov eax, [rsi]
+        test rax, rax
+        jz .rs
+        cmp [rax], edx
+        je .f
+.rs:    add rsi, 4
+        dec ecx
+        jnz .r
+.no:    xor eax, eax
+.f:     pop rsi
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
+
 ; ---- despachador: las peticiones de la BIOS (ECX = petición, EDX = argumento) ----
 ; (llega con las interrupciones cerradas; las abre mientras trabaja el firmware)
 despachador:
@@ -1100,7 +1773,42 @@ despachador:
         je .reiniciar
         cmp ecx, 8                      ; modo de pantalla: texto (0) o VBE (1...)
         je .modo
-        mov eax, -1
+        cmp ecx, 9                      ; lo apuntado por la BIOS, a HISPABIOS.LOG
+        je .registro
+        mov eax, -1                     ; (0: un viaje sin más)
+        jmp .fin
+.registro:
+        ; EDX = desde dónde (desplazamiento en el registro de la BIOS); bit 16:
+        ; guardarlo ya en la memoria USB (algo va mal)
+        mov ebx, edx
+        mov rdi, [rel bios_base]
+        movzx ecx, word [rdi + 194]     ; T_REG_N
+        movzx esi, bx
+        cmp ecx, REG_BIOS_TAM
+        ja .reg_f
+        sub ecx, esi
+        jbe .reg_f
+        lea rsi, [rdi + rsi + REG_BIOS]
+        mov dil, [rel callado]
+        mov byte [rel callado], 1       ; (solo al registro: la pantalla es de DOS)
+        sti
+.reg_c: mov al, [rsi]
+        mov [rel buf_car], al
+        push rsi
+        lea rsi, [rel buf_car]
+        call escribir
+        pop rsi
+        inc rsi
+        dec ecx
+        jnz .reg_c
+        mov [rel callado], dil
+        bt ebx, 16
+        jnc .reg_p
+        call registro_guardar
+        jmp .reg_g
+.reg_p: call registro_paso
+.reg_g: cli
+.reg_f: xor eax, eax
         jmp .fin
 .modo:
         call modo_poner
@@ -2071,6 +2779,7 @@ tablas_copiar:
         dec rcx
         jmp .t
 .buscadas:
+        mov [rel rsdp], r12             ; (para reloj_mirar: las tablas HPET y APIC)
         xor ebx, ebx                    ; EBX = T_TABLAS
         DI t_t_acpi
         test r12, r12
@@ -2735,6 +3444,47 @@ t_r_discos      db 'h; discos: ', 0
 t_sin_discos    db 13, 10, 'NO SE ENCUENTRA EL DISCO DE ARRANQUE (la memoria USB) entre los discos', 13, 10
                 db 'del firmware (hacen falta sectores de 512 octetos).', 13, 10, 0
 t_viaje         db 'Arrancando la BIOS de modo real...', 13, 10, 0
+; el reloj (reloj_mirar)
+t_k_seguro      db 'Reloj: modo seguro, no se toca el PCH, el HPET ni el IOAPIC; la BIOS solo prueba el 8254 y el reloj CMOS', 13, 10, 0
+t_k_pit         db 'Reloj 8254 (PIT), canal 0: ', 0
+t_k_pit2        db 'Reloj 8254 (PIT) despues de quitar el bloqueo: ', 0
+t_k_si          db 'CUENTA (lecturas ', 0
+t_k_no          db 'NO CUENTA: esta parado (lecturas ', 0
+t_k_y           db 'h y ', 0
+t_k_fin         db 'h con 2 ms entre medias)', 13, 10, 0
+t_i_lpc         db 'Bloqueo del 8254 (clock gating) del PCH: el puente 00:1F.0 es ', 0
+t_i_no_intel    db ', que no es de Intel: no se sabe quitar', 0
+t_i_p2sb        db '; P2SB (00:1F.1): identificador ', 0
+t_i_e0          db ', registro E0h ', 0
+t_i_mostrado    db '; al mostrarlo, ', 0
+t_i_no_hay      db ': no aparece (este puente no lo tiene)', 0
+t_i_raro        db ': no es el P2SB de un PCH', 0
+t_i_bar         db '; SBREG_BAR ', 0
+t_i_sin_bar     db ': sin registros que valgan', 0
+t_i_prc         db '; ITSSPRC (puerto C4h, 3300h) = ', 0
+t_i_ya          db ': el bit 2 (8254CGE) ya esta a 0, el bloqueo no es este', 0
+t_i_quitado     db ' con el bit 2 (8254CGE) puesto: se quita y queda ', 0
+t_k_sin_hpet    db 'HPET: la tabla de ACPI no esta (no hay HPET)', 13, 10, 0
+t_k_hpet        db 'HPET: en ', 0
+t_k_hpet_id     db ', identificador ', 0
+t_k_hpet_cap    db '; capacidades ', 0
+t_k_hpet_cfg    db ', configuracion ', 0
+t_k_hpet_t0     db ', temporizador 0 ', 0
+t_k_alto        db ' (por encima de 4 GB: no se usa)', 0
+t_k_nomap       db ' (no esta en las tablas de paginas del firmware: no se mira)', 0
+t_k_lapic       db 'APIC local: IA32_APIC_BASE ', 0
+t_k_x2          db ' (x2APIC)', 0
+t_k_svr         db '; SVR ', 0
+t_k_lint0       db ', LINT0 ', 0
+t_k_lint1       db ', LINT1 ', 0
+t_k_lvtt        db ', temporizador ', 0
+t_k_sin_madt    db 'Tabla APIC de ACPI: no esta', 13, 10, 0
+t_k_madt        db 'Tabla APIC de ACPI: banderas ', 0
+t_k_ioapic      db '; IOAPIC en ', 0
+t_k_gsi         db ' desde la entrada ', 0
+t_k_irq0        db '; la IRQ 0 va a la entrada ', 0
+t_k_ioa0        db '; el IOAPIC tiene la entrada 0 = ', 0
+t_k_ioa2        db ' y la 2 = ', 0
 t_sin_gop       db 13, 10, 'ESTE EQUIPO NO DA UNA PANTALLA GRAFICA (GOP) DE 640x400 O MAS con color', 13, 10
                 db 'de 32 bits, que es donde HispaBIOS dibuja la pantalla de DOS.', 13, 10
                 db 'Que hacer: si la configuracion del equipo (BIOS/UEFI) tiene "CSM" o', 13, 10
@@ -2778,6 +3528,21 @@ guid_8259       dd 38321DBAh
                 db 8Ah, 0ECh, 41h, 30h, 55h, 0EAh, 0EDh, 0C1h
         align 8
 p8259           dq 0
+rsdp            dq 0                    ; la RSDP de ACPI (tablas_copiar)
+%ifdef PRUEBA_P2SB
+        align 16
+sim_prc         dd 00000007h            ; ITSSPRC de mentira: 8254CGE (bit 2) puesto
+sim_oculto      db 1
+sim_cambios     db 0
+t_sim           db '(prueba) P2SB de mentira: oculto = ', 0
+t_sim2          db ', cambios de ocultacion = ', 0
+t_sim3          db ', ITSSPRC = ', 0
+%endif
+pit_l1          dd 0                    ; las dos lecturas del 8254 (pit_cuenta)
+pit_l2          dd 0
+rj_callado      db 0
+buf_car         db 0, 0
+        align 8
 vec0            dq 0
 imagen_cargada  dq 0
 camino_arranque dq 0

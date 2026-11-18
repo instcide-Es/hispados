@@ -1054,7 +1054,7 @@ sec_bios:
         mov al, 'h'
         call putc
         pop ax
-        cmp ax, 0x8000
+        cmp ax, 0x4000                      ; (con HispaBIOS en 70000h o 60000h queda por debajo de 8000h)
         jb .ebe
         cmp ax, 0xA000
         jae .ebe
@@ -1296,7 +1296,7 @@ smbios:
         xor ax, ax
         mov es, ax
         mov ax, [es:0x40E]
-        cmp ax, 0x8000
+        cmp ax, 0x4000                      ; (con HispaBIOS en 70000h o 60000h queda por debajo de 8000h)
         jb .nohay
         cmp ax, 0xA000
         jae .nohay
@@ -1843,7 +1843,7 @@ acpi:
         xor ax, ax
         mov es, ax
         mov ax, [es:0x40E]
-        cmp ax, 0x8000
+        cmp ax, 0x4000                      ; (con HispaBIOS en 70000h o 60000h queda por debajo de 8000h)
         jb .rom
         cmp ax, 0xA000
         jae .rom
@@ -2222,7 +2222,7 @@ bios_dumps:
         mov es, ax
         mov ax, [es:0x40E]
         pop es
-        cmp ax, 0x8000
+        cmp ax, 0x4000                      ; (con HispaBIOS en 70000h o 60000h queda por debajo de 8000h)
         jb .ne
         cmp ax, 0xA000
         jae .ne

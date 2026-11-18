@@ -1,11 +1,13 @@
 # HispaBIOS: Hispa-DOS en equipos que solo arrancan por UEFI
 
-**Estado (18/11/2026):** versión 0.3. Probada en QEMU con OVMF (64 y 32 bits,
-i440fx y q35, hasta 8 GB, pantalla de 1920x1200). La 0.2 arrancó en dos equipos
-de verdad —ThinkPad E14 (Raptor Lake, 1920x1200, la pantalla en 256 GB) y
-MacBook Air de 2017 (1440x900)— pero «a 1 FPS» y sin Hispa Ventanas; la 0.3
-lleva el arreglo (ver «La lentitud de la 0.2») y **está pendiente de probar en
-esos equipos** con la imagen de prueba del FTP, carpeta `prueba-hispabios`.
+**Estado (18/11/2026):** versión 0.4. Probada en QEMU con OVMF (64 y 32 bits,
+i440fx y q35, hasta 8 GB, pantalla de 1920x1200, con y sin 8254 y HPET). La
+0.3 arranca en equipos de verdad: ThinkPad E14 (Raptor Lake), MacBook Air de
+2017 y Asus GL553V (Kaby Lake; con sonido). En el **Monovate 14.1** (Core
+i3-1115G4, Tiger Lake) se quedaba a la mitad: el reloj no andaba. La 0.4 lleva
+el arreglo (ver «El reloj en los equipos con el 8254 parado») y **está
+pendiente de probar en ese equipo** con la imagen de prueba del FTP, carpeta
+`prueba-hispabios`.
 
 ## Qué es
 
@@ -120,9 +122,85 @@ existen) ni ventanas de 64 KB en A0000h. INT 10h AH = 00h vuelve al texto.
   un viaje al firmware con 1 ms de espera: era lo que más frenaba. Ahora INT
   16h AH = 01h pregunta al firmware **como mucho cada octavo de tic** (7 ms).
 - El reloj de DOS es el PIT por el 8259 y LINT0; los tics que se pierden se
-  recuperan con el TSC. Si la IRQ 0 no llega (hay placas con el 8254 parado),
-  los tics se dan al entrar en las interrupciones de la BIOS (`k_tics`) y la
-  espera de tecla no usa HLT. `HBLOG` dice si llega.
+  recuperan con el TSC. Desde la 0.4 la BIOS **comprueba al arrancar que la
+  interrupción llega** y, si no, busca otra fuente (apartado siguiente). Si
+  ninguna llega, lo dice en pantalla, guarda el registro y los tics se dan al
+  entrar en las interrupciones de la BIOS (`k_tics`), como en la 0.3; la
+  espera de tecla no usa HLT. `HBLOG` dice si llega y de dónde.
+
+## El reloj en los equipos con el 8254 parado (0.4)
+
+**El fallo.** En el Monovate 14.1 (Core i3-1115G4, firmware AMI de 2024) la
+0.3 llegaba a DOS pero se quedaba a la mitad, y EQUIPO decía «Velocidad: no se
+ha podido medir (el reloj no avanza)». En las plataformas de Intel recientes
+el firmware deja el temporizador **8254 parado** para ahorrar energía («8254
+clock gating»: Windows y Linux usan el HPET, el TSC o el APIC): ni cuenta ni
+da la IRQ 0. Todo lo que espera tics —el menú de arranque de 5 s, las esperas
+de los controladores, HSPSND, Hispa Ventanas, la hora— se queda parado. Se
+reproduce en QEMU con `-machine q35,pit=off`: la 0.3 se para tras «HSPJOY».
+
+**El arreglo**, en dos sitios:
+
+1. `efi64.asm`, `reloj_mirar` (antes de arrancar la BIOS):
+   - mira si el 8254 **cuenta** (dos lecturas del canal 0 con 2 ms entre
+     medias);
+   - si no, y el puente 00:1F.0 es de Intel, le **quita el bloqueo**: registro
+     ITSSPRC (desplazamiento 3300h del puerto ITSS, C4h, de la «banda lateral»
+     del PCH), bit 2 = 8254CGE. Esos registros están en la memoria que dice
+     SBREG_BAR, la BAR 10h del dispositivo P2SB (00:1F.1), que el firmware
+     deja oculto: se muestra (bit 8 de su registro E0h), se lee la BAR y se
+     vuelve a ocultar. Luego mira otra vez si cuenta. (Fuentes: coreboot,
+     `soc/intel/common/block/itss` —`itss_clock_gate_8254`— y `p2sb`; Linux,
+     `drivers/platform/x86/p2sb.c`; las hojas de datos de los PCH de Intel.
+     Vale para los PCH de las series 100 en adelante: Skylake a Raptor Lake.)
+     Es lo único que devuelve el **contador** del 8254 a los programas que lo
+     leen (el canal 2: el altavoz, las medidas de velocidad): en modo real
+     los puertos no se pueden emular;
+   - apunta lo que hay —la tabla HPET de ACPI y sus registros, el APIC local
+     (LINT0), la tabla APIC (IOAPIC, a qué entrada va la IRQ 0) y las entradas
+     0 y 2 del IOAPIC— y pasa a la BIOS la dirección del HPET y del IOAPIC.
+     No toca ningún registro que no esté en las tablas de páginas del firmware.
+2. `bios64.asm`, `reloj_elegir` (al arrancar la BIOS de modo real): **prueba**,
+   con las interrupciones abiertas, si llegan dos interrupciones en cinco tics
+   (medidos con el TSC), por este orden:
+
+   | N.º | Fuente | Camino del 8259 al procesador |
+   |---|---|---|
+   | 0 | La IRQ 0 tal cual: el 8254 (lo de siempre) | LINT0 del APIC local (ExtINT) |
+   | 1 | Lo mismo | La entrada 0 del IOAPIC como ExtINT («virtual wire» por el IOAPIC) |
+   | 2 y 3 | El **HPET** en el sitio del 8254 («legacy replacement»: el temporizador 0, periódico a 18,2 Hz, entra por la IRQ 0) | Los dos |
+   | 4 y 5 | La interrupción periódica del **reloj CMOS** (IRQ 8, 64 Hz); `irq_rtc` llama a INT 08h cuando por el TSC toca un tic | Los dos |
+
+   La fuente y el camino se ponen en 32 bits sin paginación al bajar del
+   firmware (`reloj_aplicar`, `reloj_dos`); la entrada 0 del IOAPIC vuelve a
+   ser la del firmware en cada viaje. El HPET solo se usa si el firmware no
+   lo está usando (temporizador 0 sin interrupción y sin «legacy
+   replacement»), y al dejarlo queda como estaba. En el **modo seguro** solo
+   se prueban el 8254 y el reloj CMOS por LINT0 (no se tocan el PCH, el HPET
+   ni el IOAPIC).
+
+**El registro.** `HISPABIOS.LOG` lleva lo visto por `reloj_mirar` y, por la
+petición `PET_REGISTRO`, lo que apunta la BIOS: cada prueba con las
+interrupciones recibidas, el estado del 8259 (IRR, ISR, IMR: si la petición
+está y no llega al procesador, el fallo es el camino; si no está, la fuente),
+dos lecturas del contador del 8254, y cómo queda. Lo mismo sale en `HBLOG`
+(`HBLOG.TXT`), que además dice si el 8254 cuenta. Si se usa algo que no sea el
+8254, sale una línea en pantalla al arrancar; si **nada** llega, un aviso de
+6 segundos y el registro se guarda aunque la imagen no sea la de prueba.
+
+**Límites.** Con el HPET o el reloj CMOS la IRQ 0 llega, pero el contador del
+8254 sigue parado: lo que lo lea directamente (el altavoz, algún juego que
+mida con el canal 0 o el 2) no irá bien. Con el reloj CMOS, un programa que
+use él mismo la IRQ 8 se queda sin ella. No se ha hecho el temporizador del
+APIC local: no puede entrar por el vector 08h (los vectores por debajo de 16
+no valen en el APIC) y habría que darle el fin de interrupción desde modo
+real.
+
+**La «EBDA» por debajo de 8000h.** En el Asus GL553V (la BIOS en 70000h)
+EQUIPO decía «ACPI: no hay» y «SMBIOS: no hay tablas» aunque HispaBIOS las
+había copiado: la «EBDA» quedaba en 78FAh y EQUIPO, APAGAR y HSPACPI
+(`acpi/nucleo/maquina.c`) solo miraban la de 40:0Eh si estaba de 8000h para
+arriba. Ahora, de 4000h para arriba.
 
 ## Cuando algo falla
 
@@ -242,6 +320,8 @@ ratón funciona (con UEFI no hay ratón USB: HSPUSB no se carga).
 | `-DPRUEBA_SIN_PRESTAR` | Sin prestar a DOS las páginas bajas del firmware |
 | `-DPRUEBA_SEGURO` | Como si se hubiera pulsado S (modo seguro) |
 | `-DPANTALLA_NATIVA` | No cambiar de modo de pantalla aunque sea lenta |
+| `-DPRUEBA_RELOJ=máscara` | Fuentes del reloj que la BIOS no prueba (bit = número de la tabla de arriba) |
+| `-DPRUEBA_P2SB` | Un P2SB de mentira con el 8254 bloqueado (QEMU no tiene PCH con banda lateral) |
 
 Casos: equipo «actual» (q35, 8 GB) con la pila comprobada; memoria baja
 ocupada (BIOS en 70000h y en 60000h, en 64 y 32 bits) hasta `C:\>` y con el
@@ -252,20 +332,30 @@ ACPI y SMBIOS, Hispa Ventanas en VBE con captura); pantalla lenta simulada
 (modo menor del firmware) con `VBEPRU.COM` (`tests/progs/vbepru.asm`: las
 llamadas de VBE de Hispa Ventanas, el marco lineal y el registro).
 
+El reloj: equipo sin 8254 (`-machine q35,pit=off`: el HPET; con `hpet=off`,
+el reloj CMOS; en 32 bits, el reloj CMOS), el P2SB de mentira (se muestra, se
+quita el bit y se vuelve a ocultar), y ninguna fuente (`PRUEBA_RELOJ=15h`: se
+prueban los tres caminos por el IOAPIC, que en QEMU no lleva el 8259, sale el
+aviso y se guarda el registro). EQUIPO con la BIOS en 70000h y en 60000h
+(ACPI y SMBIOS). Lo que QEMU no puede probar: quitar el bloqueo en un PCH de
+verdad y el camino por el IOAPIC llegando de verdad.
+
 OJO con QEMU y KVM: con el 8259 del núcleo (KVM) la IRQ 0 por LINT0 no llega
 tras enmascarar y abrir LINT0, cosa que un equipo de verdad sí hace; las
 pruebas van sin KVM.
 
 ## Pendiente
 
-- Probar la 0.3 en el ThinkPad E14 y el MacBook Air (imagen de prueba) y ver
-  `HISPABIOS.LOG` y `HBLOG.TXT`.
+- Probar la 0.4 en el Monovate 14.1 (y que el ThinkPad E14, el MacBook Air y
+  el Asus GL553V siguen bien) con la imagen de prueba, y ver `HISPABIOS.LOG` y
+  `HBLOG.TXT`.
 - **Ratón** con UEFI: no hay ratón USB (el USB lo lleva el firmware). Haría
   falta sacarlo del firmware (Simple Pointer) y darlo por INT 33h / INT 15h C2h.
 - **Alt y Ctrl** con las teclas de función (Alt+F4 en Hispa Ventanas): el
   teclado del firmware da el estado de las teclas, la BIOS aún no lo traduce.
 - Modos VBE de 8 bits (con la paleta por INT 10h 4F09h) para juegos.
-- Si en algún equipo la IRQ 0 no llega: el temporizador del APIC local.
+- Si en algún equipo no llega ninguna fuente por el 8259: el temporizador del
+  APIC local (ver «Límites» del reloj).
 - La memoria extendida se pide a potencias de dos desde 1 MB (en OVMF, 4 MB;
   64 MB como mucho): usar el mapa para pedir el tramo entero.
 - En `efi32.asm`: el registro, el mapa, VBE, la escritura combinada, las

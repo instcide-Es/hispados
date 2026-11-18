@@ -5,7 +5,7 @@
 ;  HispaBIOS (docs/HISPABIOS.md) apunta, mientras DOS funciona, lo que sirve
 ;  para depurar la pantalla y el reloj: cómo es la pantalla del firmware y lo
 ;  que cuesta pintarla, cuántas veces se ha dibujado y cuánto ha tardado,
-;  si llega la IRQ 0, y cada llamada de VBE (INT 10h AX = 4Fxxh) con lo que
+;  si llega la IRQ 0 y de dónde sale (el 8254, el HPET o el reloj CMOS), y cada llamada de VBE (INT 10h AX = 4Fxxh) con lo que
 ;  se ha contestado. Este programa lo pide por INT 15h AX = 4844h ('HD'), lo
 ;  enseña y lo guarda en \HBLOG.TXT de la unidad actual.
 ;  (Texto sin acentos: sale igual en cualquier página de códigos.)
@@ -27,6 +27,7 @@ T_N_SIN         equ 212
 T_N_TECLA       equ 216
 T_N_FW          equ 220
 T_DIB_TOT       equ 224
+T_PIT           equ 254                 ; bit 0: el 8254 contaba; 1: cuenta ahora; 2: desbloqueado
 
 inicio:
         cld
@@ -92,6 +93,19 @@ inicio:
         jz .irq
         mov si, m_irq_no
 .irq:   call txt
+        cmp word [version], 4           ; (desde la 0.4: de dónde sale el reloj)
+        jb .sin_pit
+        mov bx, T_PIT
+        call leer_tab
+        mov si, m_pit_abierto
+        test al, 4
+        jnz .pit
+        mov si, m_pit_si
+        test al, 3
+        jnz .pit
+        mov si, m_pit_no
+.pit:   call txt
+.sin_pit:
         mov si, m_fw
         call txt
         mov bx, T_N_FW
@@ -223,6 +237,9 @@ m_irq           db '; INT 08h recibidas: ', 0
 m_sin           db '; tics dados sin IRQ: ', 0
 m_irq_si        db ' (ahora la IRQ 0 llega)', 13, 10, 0
 m_irq_no        db ' (AHORA LA IRQ 0 NO LLEGA: los tics se dan al llamar a la BIOS)', 13, 10, 0
+m_pit_si        db 'Temporizador 8254 (PIT): cuenta', 13, 10, 0
+m_pit_abierto   db 'Temporizador 8254 (PIT): el firmware lo tenia PARADO; HispaBIOS le ha quitado el bloqueo y cuenta', 13, 10, 0
+m_pit_no        db 'Temporizador 8254 (PIT): PARADO. Lo que lea su contador o use el altavoz no ira bien', 13, 10, 0
 m_fw            db 'Viajes al firmware: ', 0
 m_tecla         db '; preguntas por el teclado: ', 0
 m_dib           db 13, 10, 'Pantalla: dibujada ', 0

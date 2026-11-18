@@ -250,7 +250,7 @@ acpi_buscar:
         xor ax, ax
         mov es, ax
         mov ax, [es:0x40E]
-        cmp ax, 0x8000
+        cmp ax, 0x4000                      ; (con HispaBIOS en 70000h o 60000h queda por debajo de 8000h)
         jb .rom
         cmp ax, 0xA000
         jae .rom

@@ -161,8 +161,12 @@ for caso in "70000h 448 58000h,1,9E000h,2" "60000h 384 7E000h,1,9E000h,2"; do
   set -- $caso
   echo "== HispaBIOS: el firmware usa la memoria baja ($3): la BIOS en $1 =="
   n=ocupa${1%0000h}
-  if hb_variante $n "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_OCUPA=$3" && HB_MEM=2G HB_MAQ="-machine q35" arranca 64 $T/$n.img $n "d i r ret" "bytes libres"; then
+  # (EQUIPO tiene que ver ACPI y SMBIOS también con la BIOS aquí: la «EBDA» de
+  # HispaBIOS queda en 78FAh o 68FAh y EQUIPO, APAGAR y HSPACPI solo la miraban
+  # de 8000h para arriba: en el Asus GL553V, «ACPI: no hay»)
+  if hb_variante $n "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_OCUPA=$3" && HB_MEM=2G HB_MAQ="-machine q35" arranca 64 $T/$n.img $n "d i r ret w3 e q u i p o ret w25" "bytes libres"; then
     S=$T/serie_$n.txt
+    grep -aq 'ACPI: RSDP en 000[0-9A-F]*h' $S && grep -aq 'SMBIOS [0-9]\.[0-9]* (tablas en' $S && ok "EQUIPO encuentra ACPI y SMBIOS con la BIOS en $1 (EBDA por debajo de 8000h)" || ko "EQUIPO no encuentra ACPI o SMBIOS con la BIOS en $1"
     grep -aq "La BIOS de modo real va en $1. Memoria convencional para DOS: $2 KB" $S && ok "elige la base $1 y da $2 KB a DOS" || ko "no elige la base $1 con $2 KB"
     grep -aq 'bytes libres' $S && ok "llega a C:\\> y DIR responde" || ko "no llega a C:\\> o DIR no responde"
     grep -aq "$2 KB convencional" $S && ok "DOS ve $2 KB de memoria convencional" || ko "DOS no ve $2 KB"
@@ -272,7 +276,7 @@ if hb_variante rapida "-DPRUEBA_PILA -DREGISTRO_PASOS"; then
   # se puede (la serie no las lleva): se cuenta que HBLOG, tecleado 6 s después, sale
   # DESPUÉS de la lista entera (con la 0.2 la lista tardaba 11 s y HBLOG no llegaba a verse)
   awk '/HBLOG: registro de la BIOS/ { h = NR } /bytes libres/ { b = NR } END { exit !(h && b && b < h) }' $S && ok "DIR C:\\HISPADOS (75 líneas) acaba en menos de 6 s (con la 0.2, 11 s)" || ko "DIR C:\\HISPADOS tarda más de 6 s"
-  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.3' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
+  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.4' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
   grep -aq 'tics dados sin IRQ: [0-9]* (ahora la IRQ 0 llega)' $S && ok "HBLOG: la IRQ 0 llega" || ko "HBLOG: la IRQ 0 no llega"
   grep -aq 'Pantalla: dibujada [0-9]* veces; el ultimo dibujo, [0-9]* us' $S && ok "HBLOG: las cuentas de la pantalla" || ko "HBLOG sin las cuentas de la pantalla"
   mtype -i $T/rapida.img@@1048576 ::HBLOG.TXT 2>/dev/null | grep -q 'lo apuntado por HispaBIOS' && ok "HBLOG guarda \\HBLOG.TXT" || ko "HBLOG no guarda \\HBLOG.TXT"
@@ -317,6 +321,99 @@ if hb_variante lenta "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_LENTA=100000"; the
   fi
 else
   ko "no se ha podido ensamblar la variante de la pantalla lenta"
+fi
+
+# ---- El reloj de DOS (IRQ 0) en los equipos con el 8254 parado ----
+# En un portátil con Core de 11.ª generación (Monovate 14.1, i3-1115G4) el
+# firmware deja el 8254 (PIT) parado («clock gating») y la IRQ 0 no llegaba:
+# Hispa-DOS se quedaba a la mitad del arranque (EQUIPO: «el reloj no avanza»).
+# HispaBIOS 0.4 mira si el 8254 cuenta, le quita el bloqueo en el PCH de Intel
+# (eso no se puede probar en QEMU: no tiene P2SB; aquí se ve que lo intenta y
+# lo apunta) y la BIOS PRUEBA cada fuente con las interrupciones abiertas: el
+# 8254, el HPET en su sitio («legacy replacement») y el reloj CMOS (IRQ 8), con
+# el 8259 por LINT0 o por la entrada 0 del IOAPIC. QEMU sin 8254: -machine
+# pit=off (con la 0.3 se quedaba parado tras «HSPJOY»).
+hb_reloj() { echo "$L" | grep -q "$1" && ok "$2" || ko "$3"; }
+echo "== HispaBIOS: equipo sin 8254 (pit=off) con HPET: el reloj de DOS sale del HPET =="
+if hb_variante sinpit "-DPRUEBA_PILA -DREGISTRO_PASOS" && HB_MEM=1G HB_MAQ="-machine q35,pit=off" arranca 64 $T/sinpit.img sinpit "h b l o g ret w3 d i r ret" "bytes libres"; then
+  S=$T/serie_sinpit.txt
+  L=$(hb_log sinpit)
+  hb_reloj 'Reloj 8254 (PIT), canal 0: NO CUENTA' "ve que el 8254 no cuenta" "no ve que el 8254 está parado"
+  hb_reloj 'Bloqueo del 8254 (clock gating) del PCH: el puente 00:1F.0 es [0-9A-F]*8086; P2SB (00:1F.1): identificador FFFFFFFF.*no aparece' "busca el P2SB del PCH para quitar el bloqueo (QEMU no lo tiene) y lo apunta" "no busca el P2SB"
+  hb_reloj 'HPET: en 00000000FED00000, identificador 8086A201; capacidades' "HISPABIOS.LOG: el HPET de la tabla de ACPI" "HISPABIOS.LOG sin el HPET"
+  hb_reloj 'APIC local: IA32_APIC_BASE .*LINT0 [0-9A-F]*' "HISPABIOS.LOG: el APIC local (LINT0)" "HISPABIOS.LOG sin el APIC local"
+  hb_reloj 'Tabla APIC de ACPI: banderas .*IOAPIC en FEC00000 .*la IRQ 0 va a la entrada 2; el IOAPIC tiene la entrada 0 = ' "HISPABIOS.LOG: el IOAPIC y a dónde va la IRQ 0" "HISPABIOS.LOG sin el IOAPIC"
+  hb_reloj 'la IRQ 0 del 8254 (PIT), con el 8259 por LINT0 del APIC local: interrupciones 0; 8259 IRR=' "la BIOS prueba el 8254 y ve que no interrumpe (con el estado del 8259)" "la BIOS no prueba el 8254"
+  hb_reloj 'el HPET en el sitio del 8254 (IRQ 0), con el 8259 por LINT0 del APIC local: interrupciones 2;.*HPET: estado 1 ' "pone el HPET en el sitio del 8254 y las interrupciones llegan" "el HPET no da la IRQ 0"
+  hb_reloj 'Reloj de DOS: LLEGA. Queda: el HPET en el sitio del 8254' "HISPABIOS.LOG: el reloj queda en el HPET" "el reloj no queda en el HPET"
+  grep -aq 'bytes libres' $S && ok "arranca hasta C:\\> (el menú de 5 s y las esperas pasan solos) y DIR responde" || ko "no llega a C:\\> sin el 8254"
+  grep -aq 'tics dados sin IRQ: [0-9]* (ahora la IRQ 0 llega)' $S && ok "HBLOG: la IRQ 0 llega" || ko "HBLOG: la IRQ 0 no llega"
+  grep -aq 'Temporizador 8254 (PIT): PARADO' $S && ok "HBLOG dice que el 8254 está parado" || ko "HBLOG no dice que el 8254 está parado"
+  grep -aq 'PILA-MAL' $S && ko "llamadas al firmware con la pila sin alinear" || ok "la pila, alineada"
+else
+  ko "no se ha podido ensamblar o arrancar la variante sin 8254"
+fi
+
+# (el camino de quitar el bloqueo, con un P2SB de mentira: oculto, se muestra,
+# se lee SBREG_BAR, se quita el bit 2 de ITSSPRC y se vuelve a ocultar; y el
+# modo seguro, que no toca nada de eso y se queda con el reloj CMOS)
+echo "== HispaBIOS: quitar el bloqueo del 8254 (P2SB de mentira) y el modo seguro sin 8254 =="
+if hb_variante p2sb "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_P2SB" && HB_MEM=1G HB_MAQ="-machine q35,pit=off" HB_HASTA="Hispa-DOS 0\.9" arranca 64 $T/p2sb.img p2sb "" "nada"; then
+  L=$(hb_log p2sb)
+  hb_reloj 'P2SB (00:1F.1): identificador FFFFFFFF, registro E0h FFFFFFFF; al mostrarlo, A0A08086; SBREG_BAR [0-9A-F]*; ITSSPRC (puerto C4h, 3300h) = 00000007 con el bit 2 (8254CGE) puesto: se quita y queda 00000003' "muestra el P2SB oculto, lee SBREG_BAR y quita el bit 8254CGE de ITSSPRC" "no quita el bloqueo del 8254"
+  hb_reloj '(prueba) P2SB de mentira: oculto = 1, cambios de ocultacion = 2, ITSSPRC = 00000003' "y deja el P2SB oculto otra vez" "no vuelve a ocultar el P2SB"
+  hb_reloj 'Reloj 8254 (PIT) despues de quitar el bloqueo: ' "vuelve a mirar si el 8254 cuenta" "no vuelve a mirar el 8254"
+else
+  ko "no se ha podido ensamblar o arrancar la variante del P2SB"
+fi
+if hb_variante segrel "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_SEGURO" && HB_MEM=1G HB_MAQ="-machine q35,pit=off" arranca 64 $T/segrel.img segrel "d i r ret" "bytes libres"; then
+  S=$T/serie_segrel.txt
+  L=$(hb_log segrel)
+  hb_reloj 'Reloj: modo seguro, no se toca el PCH, el HPET ni el IOAPIC' "modo seguro: no toca el PCH, el HPET ni el IOAPIC" "el modo seguro no se nota en el reloj"
+  echo "$L" | grep -q 'HPET en el sitio\|por la entrada 0 del IOAPIC\|Bloqueo del 8254' && ko "el modo seguro prueba el HPET, el IOAPIC o el PCH" || ok "modo seguro: no prueba el HPET ni el IOAPIC"
+  hb_reloj 'Reloj de DOS: LLEGA. Queda: el reloj CMOS' "modo seguro sin 8254: el reloj CMOS" "modo seguro sin 8254: sin reloj"
+  grep -aq 'bytes libres' $S && ok "modo seguro sin 8254: llega a C:\\> y DIR responde" || ko "modo seguro sin 8254: no llega a C:\\>"
+else
+  ko "no se ha podido ensamblar o arrancar la variante del modo seguro"
+fi
+
+echo "== HispaBIOS: equipo sin 8254 ni HPET (pit=off, hpet=off): el reloj de DOS sale del reloj CMOS (IRQ 8) =="
+if hb_variante sinhpet "-DPRUEBA_PILA -DREGISTRO_PASOS" && HB_MEM=1G HB_MAQ="-machine q35,pit=off,hpet=off" arranca 64 $T/sinhpet.img sinhpet "h b l o g ret w3 d i r ret" "bytes libres"; then
+  S=$T/serie_sinhpet.txt
+  L=$(hb_log sinhpet)
+  hb_reloj 'HPET: la tabla de ACPI no esta' "ve que no hay HPET" "no ve que falta el HPET"
+  hb_reloj 'el reloj CMOS (IRQ 8, 64 Hz), con el 8259 por LINT0 del APIC local: interrupciones 2;.*CMOS: A=[0-9A-F]* B=[0-9A-F]*, IRQ 8 recibidas' "el reloj CMOS da los tics por la IRQ 8" "el reloj CMOS no da los tics"
+  hb_reloj 'Reloj de DOS: LLEGA. Queda: el reloj CMOS' "HISPABIOS.LOG: el reloj queda en el reloj CMOS" "el reloj no queda en el reloj CMOS"
+  grep -aq 'bytes libres' $S && ok "arranca hasta C:\\> y DIR responde" || ko "no llega a C:\\> sin 8254 ni HPET"
+  grep -aq 'tics dados sin IRQ: [0-9]* (ahora la IRQ 0 llega)' $S && ok "HBLOG: los tics llegan por interrupción" || ko "HBLOG: los tics no llegan"
+else
+  ko "no se ha podido ensamblar o arrancar la variante sin 8254 ni HPET"
+fi
+
+# (PRUEBA_RELOJ=15h: no se prueba nada por LINT0; quedan los tres caminos por el
+# IOAPIC, que en QEMU no llevan el 8259: se ve que se ponen, se quitan y no
+# rompen nada, y el aviso de que no hay reloj. El registro se guarda aunque la
+# imagen no sea la de prueba.)
+echo "== HispaBIOS: ninguna fuente da la IRQ 0 (simulado): prueba el IOAPIC, avisa y guarda el registro =="
+if hb_variante sinreloj "-DPRUEBA_PILA -DPRUEBA_RELOJ=15h" && HB_MEM=1G HB_MAQ="-machine q35" arranca 64 $T/sinreloj.img sinreloj "d i r ret" "bytes libres"; then
+  S=$T/serie_sinreloj.txt
+  L=$(hb_log sinreloj)
+  [ "$(echo "$L" | grep -c 'con el 8259 por la entrada 0 del IOAPIC: interrupciones 0')" = 3 ] && ok "prueba el 8254, el HPET y el reloj CMOS con el 8259 por el IOAPIC" || ko "no prueba los tres por el IOAPIC"
+  hb_reloj 'Reloj de DOS: NO LLEGA ninguna interrupcion' "dice que el reloj no llega y guarda HISPABIOS.LOG sin ser la imagen de prueba" "no guarda el registro cuando el reloj no llega"
+  grep -aq 'bytes libres' $S && ok "sigue hasta C:\\> (el HPET y el IOAPIC quedan como estaban)" || ko "no llega a C:\\> después de probar el IOAPIC"
+  grep -aq 'PILA-MAL' $S && ko "llamadas al firmware con la pila sin alinear" || ok "la pila, alineada"
+else
+  ko "no se ha podido ensamblar o arrancar la variante sin reloj"
+fi
+
+echo "== HispaBIOS de 32 bits sin 8254 (pit=off): el reloj CMOS =="
+cp --sparse=always $USB $T/sp32.img
+if HB_MAQ="-machine pc,pit=off" arranca 32 $T/sp32.img sp32 "h b l o g ret w3 d i r ret" "bytes libres"; then
+  S=$T/serie_sp32.txt
+  grep -aq 'Reloj de DOS: LLEGA. Queda: el reloj CMOS' $S && ok "la BIOS de 32 bits pone el reloj CMOS" || ko "la BIOS de 32 bits no encuentra reloj"
+  grep -aq 'bytes libres' $S && ok "arranca hasta C:\\> y DIR responde" || ko "no llega a C:\\> (32 bits, sin 8254)"
+else
+  echo "  (sin OVMF de 32 bits: se salta)"
 fi
 
 exit $fail

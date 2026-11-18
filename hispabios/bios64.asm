@@ -48,6 +48,17 @@ PILA32          equ 0EFF0h          ; pila de los tramos de 32 bits
 PET_DIBUJAR     equ 1
 PET_ESPERAR     equ 2
 PET_MODO        equ 8               ; argumento: 0 = texto; 1... = modo VBE (bit 8: sin borrar)
+PET_NADA        equ 0               ; un viaje de ida y vuelta sin más (aplica el reloj)
+PET_REGISTRO    equ 9               ; lo apuntado en el registro de la BIOS desde el
+                                    ; desplazamiento del argumento, a HISPABIOS.LOG
+                                    ; (bit 16: se guarda ya en la memoria USB)
+
+; las fuentes del reloj (T_RELOJ)
+RJ_NADA         equ 0
+RJ_PIT          equ 1               ; lo que llegue por la IRQ 0: el 8254 (o lo que tenga
+                                    ; puesto el firmware)
+RJ_HPET         equ 2               ; el temporizador 0 del HPET en el sitio del 8254
+RJ_RTC          equ 3               ; la interrupción periódica del reloj CMOS (IRQ 8, 64 Hz)
 
 %define L(x) (BASE + (x))
 
@@ -101,6 +112,28 @@ T_INT_N         db 0                    ; +229 páginas del firmware prestadas a
                 dw 0
 T_INT_GUARDA    dd 0                    ; +232 dónde está la otra versión de cada una
 T_INT_DIR       dd 0, 0, 0, 0           ; +236 sus direcciones
+;  ---- (0.4) el reloj: de dónde sale la IRQ 0 (reloj_elegir, reloj_aplicar) ----
+T_RELOJ         db 0                    ; +252 fuente elegida: RJ_NADA (los tics los da k_tics),
+                                        ;      RJ_PIT, RJ_HPET o RJ_RTC
+T_CABLE         db 0                    ; +253 por dónde llega el 8259 al procesador: 0 = LINT0
+                                        ;      del APIC local; 1 = la entrada 0 del IOAPIC
+T_PIT           db 0                    ; +254 lo que vio efi64.asm: bit 0, el 8254 contaba al
+                                        ;      llegar; 1, cuenta ahora; 2, se le ha quitado el
+                                        ;      «clock gating» (ITSS del PCH de Intel)
+T_PRUEBA        db 0                    ; +255 candidatos del reloj que NO se prueban (bit = su
+                                        ;      número: modo seguro y pruebas)
+T_HPET          dd 0                    ; +256 dirección del HPET (0: no hay, o por encima de 4 GB)
+T_IOAPIC        dd 0                    ; +260 dirección del IOAPIC (0: no hay)
+T_HPET_EST      db 0                    ; +264 el HPET: 0 sin mirar; 1 puesto; 2 no puede (sin
+                                        ;      «legacy replacement» o sin modo periódico); 3 lo usa
+                                        ;      el firmware (no se toca); 4 periodo raro
+T_RTC_A         db 0                    ; +265 registros A y B del reloj CMOS antes de tocarlos
+T_RTC_B         db 0                    ; +266
+                db 0
+T_HPET_CFG      dd 0                    ; +268 HPET: configuración general que tenía
+T_HPET_T0       dd 0                    ; +272 ... y la del temporizador 0
+T_HPET_PER      dd 0                    ; +276 cuentas del HPET por tic
+T_HPET_FS       dd 0                    ; +280 femtosegundos por cuenta del HPET
 
 %ifdef ARQ32
 ; =============================================================================
@@ -434,6 +467,11 @@ reloj_dos:
         push ebx
         push ecx
         push edx
+        cmp byte [L(reloj_cambio)], 0   ; ¿ha cambiado la fuente del reloj?
+        je .misma
+        mov byte [L(reloj_cambio)], 0
+        call reloj_aplicar
+.misma:
         cmp byte [L(T_VEC0)], 0         ; ¿el firmware usa el 8259?
         je .apic
         in al, 21h                      ; sí: se guardan sus máscaras y se
@@ -463,7 +501,14 @@ reloj_dos:
         mov [ebx + 320h], eax
         mov eax, [ebx + 350h]           ; LINT0: ExtINT
         mov [L(sv_lint0)], eax
-        mov dword [ebx + 350h], 700h
+        mov eax, 700h
+        cmp byte [L(T_CABLE)], 0        ; (si el 8259 llega por el IOAPIC, LINT0
+        je .l0                          ; se calla: no dos veces la misma)
+        mov eax, 10700h
+.l0:    mov [ebx + 350h], eax
+        mov eax, [ebx + 20h]            ; (el número de este APIC, para el IOAPIC)
+        shr eax, 24
+        call ioapic_dos
         jmp .fin
 .x2:    mov ecx, 808h
         rdmsr
@@ -481,8 +526,14 @@ reloj_dos:
         rdmsr
         mov [L(sv_lint0)], eax
         mov eax, 700h
-        xor edx, edx
+        cmp byte [L(T_CABLE)], 0
+        je .l0x
+        mov eax, 10700h
+.l0x:   xor edx, edx
         wrmsr
+        mov ecx, 802h                   ; (el número de este APIC)
+        rdmsr
+        call ioapic_dos
 .fin:   pop edx
         pop ecx
         pop ebx
@@ -501,6 +552,7 @@ reloj_fw:
         mov al, 0FFh
         out 21h, al
         out 0A1h, al
+        call ioapic_fw
         mov ecx, 1Bh
         rdmsr
         test eax, 800h
@@ -549,6 +601,177 @@ lint0_fw:
         jne .r
         or eax, 10000h
 .r:     ret
+
+; ---- el 8259 por el IOAPIC («virtual wire» por el IOAPIC: su entrada 0 como
+;      ExtINT; especificación MP 1.4, 3.6.2.2) ----
+; ioapic_dos: EAX = número del APIC local. Si T_CABLE = 1, guarda la entrada 0
+; del IOAPIC y la pone como ExtINT hacia este procesador.
+ioapic_dos:
+        cmp byte [L(T_CABLE)], 0
+        je .f
+        mov ebx, [L(T_IOAPIC)]
+        test ebx, ebx
+        jz .f
+        mov edx, eax
+        shl edx, 24
+        mov dword [ebx], 10h            ; la entrada 0: registros 10h y 11h
+        mov eax, [ebx + 10h]
+        mov [L(sv_ioa)], eax
+        or eax, 10000h                  ; (enmascarada mientras se cambia)
+        mov [ebx + 10h], eax
+        mov dword [ebx], 11h
+        mov eax, [ebx + 10h]
+        mov [L(sv_ioa + 4)], eax
+        mov [ebx + 10h], edx            ; destino: este procesador
+        mov dword [ebx], 10h
+        mov dword [ebx + 10h], 700h     ; ExtINT, por flanco, sin máscara
+        mov byte [L(ioa_puesta)], 1
+.f:     ret
+; ioapic_fw: la entrada 0 del IOAPIC, como la tenía el firmware
+ioapic_fw:
+        cmp byte [L(ioa_puesta)], 0
+        je .f
+        mov byte [L(ioa_puesta)], 0
+        mov ebx, [L(T_IOAPIC)]
+        mov dword [ebx], 10h
+        mov eax, [L(sv_ioa)]
+        or eax, 10000h
+        mov [ebx + 10h], eax
+        mov dword [ebx], 11h
+        mov eax, [L(sv_ioa + 4)]
+        mov [ebx + 10h], eax
+        mov dword [ebx], 10h
+        mov eax, [L(sv_ioa)]
+        mov [ebx + 10h], eax
+.f:     ret
+
+; ---- reloj_aplicar: pone la fuente del reloj T_RELOJ (y quita la anterior).
+;      Se llama al bajar al modo real cuando reloj_elegir ha cambiado de
+;      fuente (reloj_cambio); 32 bits sin paginación: los registros del HPET
+;      se alcanzan tal cual. ----
+;  RJ_PIT: nada que poner (el 8254 lo programa bios_inicio).
+;  RJ_HPET: el temporizador 0 del HPET, periódico a 18,2 Hz, en modo «legacy
+;    replacement» (LEG_RT_CNF): entra por la IRQ 0 del 8259 en el sitio del
+;    8254. Solo si el firmware no lo está usando. (Especificación IA-PC HPET
+;    1.0a, 2.3.4 a 2.3.9.)
+;  RJ_RTC: la interrupción periódica del reloj CMOS (MC146818: registro A,
+;    ritmo; registro B, bit 6) a 64 Hz por la IRQ 8; irq_rtc da los tics.
+reloj_aplicar:
+        ; -- fuera la anterior --
+        cmp byte [L(rj_puesta)], RJ_HPET
+        jne .q_rtc
+        mov ebx, [L(T_HPET)]
+        mov eax, [L(T_HPET_T0)]
+        and eax, ~4                     ; (sin interrupción, como estaba)
+        mov [ebx + 100h], eax
+        mov eax, [L(T_HPET_CFG)]
+        mov [ebx + 10h], eax
+.q_rtc: cmp byte [L(rj_puesta)], RJ_RTC
+        jne .quitada
+        mov al, 0Bh
+        out 70h, al
+        mov al, [L(T_RTC_B)]
+        out 71h, al
+        mov al, 0Ah
+        out 70h, al
+        mov al, [L(T_RTC_A)]
+        out 71h, al
+        mov al, 0Ch                     ; (lo pendiente, fuera)
+        out 70h, al
+        in al, 71h
+        or byte [L(mask_dos + 1)], 1    ; la IRQ 8, cerrada
+.quitada:
+        mov byte [L(rj_puesta)], RJ_NADA
+        ; -- la nueva --
+        cmp byte [L(T_RELOJ)], RJ_HPET
+        je .hpet
+        cmp byte [L(T_RELOJ)], RJ_RTC
+        je .rtc
+        ret
+.rtc:   mov al, 0Ah
+        out 70h, al
+        in al, 71h
+        mov [L(T_RTC_A)], al
+        and al, 70h                     ; (el divisor, el suyo; ritmo 1010b: 64 Hz)
+        or al, 0Ah
+        mov ah, al
+        mov al, 0Ah
+        out 70h, al
+        mov al, ah
+        out 71h, al
+        mov al, 0Bh
+        out 70h, al
+        in al, 71h
+        mov [L(T_RTC_B)], al
+        and al, 0Fh                     ; (sin alarma ni la de actualización; no se
+        or al, 40h                      ; para el reloj: el bit 7 a 0)
+        mov ah, al
+        mov al, 0Bh
+        out 70h, al
+        mov al, ah
+        out 71h, al
+        mov al, 0Ch                     ; lo pendiente, fuera
+        out 70h, al
+        in al, 71h
+        mov al, 0Dh
+        out 70h, al
+        and byte [L(mask_dos + 1)], 0FEh ; la IRQ 8, abierta
+        mov byte [L(rj_puesta)], RJ_RTC
+        ret
+.hpet:  mov ebx, [L(T_HPET)]
+        test ebx, ebx
+        jz .h_no
+        mov eax, [ebx]                  ; capacidades: bit 15, «legacy replacement»
+        mov edx, [ebx + 4]              ; femtosegundos por cuenta
+        mov [L(T_HPET_FS)], edx
+        mov ecx, [ebx + 10h]
+        mov [L(T_HPET_CFG)], ecx
+        mov ecx, [ebx + 100h]
+        mov [L(T_HPET_T0)], ecx
+        cmp eax, -1
+        je .h_no
+        test eax, 8000h
+        jz .h_no
+        test byte [L(T_HPET_T0)], 10h   ; ¿el temporizador 0 puede ser periódico?
+        jz .h_no
+        test byte [L(T_HPET_T0)], 4     ; ¿lo usa el firmware? (con interrupción, o
+        jnz .h_fw                       ; ya en el sitio del 8254)
+        test byte [L(T_HPET_CFG)], 2
+        jnz .h_fw
+        ; cuentas por tic: 54 925 416 ns (65536 / 1 193 182 Hz) en femtosegundos
+        cmp edx, 100000                 ; (el periodo: de 0,1 ns a 100 ns)
+        jb .h_raro
+        cmp edx, 100000000
+        ja .h_raro
+        mov ecx, edx
+        mov eax, 5F7E5E00h              ; 54 925 416 000 000 = 31F4h:5F7E5E00h
+        mov edx, 31F4h
+        div ecx
+        mov [L(T_HPET_PER)], eax
+        mov ecx, eax
+        mov eax, [L(T_HPET_CFG)]        ; el contador, parado mientras se pone
+        and eax, ~3
+        mov [ebx + 10h], eax
+        mov dword [ebx + 100h], 14Ch    ; por flanco, con interrupción, periódico,
+                                        ; se va a poner el periodo, de 32 bits
+        mov eax, [ebx + 0F0h]           ; el primer aviso: dentro de un tic
+        add eax, ecx
+        mov [ebx + 108h], eax
+        mov [ebx + 108h], ecx           ; y el periodo
+        mov dword [ebx + 20h], 1        ; (lo que hubiera pendiente, fuera)
+        mov eax, [L(T_HPET_CFG)]
+        or eax, 3                       ; en marcha y en el sitio del 8254
+        mov [ebx + 10h], eax
+        mov byte [L(T_HPET_EST)], 1
+        mov byte [L(rj_puesta)], RJ_HPET
+        ret
+.h_no:  mov byte [L(T_HPET_EST)], 2
+        ret
+.h_fw:  mov byte [L(T_HPET_EST)], 3
+        ret
+.h_raro:
+        mov byte [L(T_HPET_EST)], 4
+        ret
 
 ; pic_vectores: BL = vector de la IRQ 0 (el esclavo, a BL + 8); todo enmascarado
 pic_vectores:
@@ -611,6 +834,7 @@ bios_inicio:
 .e:     mov word [es:di], irq_esclavo
         add di, 4
         loop .e
+        mov word [es:70h * 4], irq_rtc  ; (la IRQ 8: el reloj CMOS, si hace de reloj)
         ; ---- el reloj de DOS: 8259 en 08h/70h y PIT a 18,2 Hz ----
         mov al, 11h
         out 20h, al
@@ -733,9 +957,10 @@ bios_inicio:
         mov word [es:1Ah], 1Eh          ; búfer del teclado vacío
         mov word [es:1Ch], 1Eh
         mov dword [es:6Ch], 0           ; tics
-        ; ---- letrero y a arrancar el disco ----
+        ; ---- letrero, el reloj y a arrancar el disco ----
         mov si, t_prueba
         call escribir_bios
+        call reloj_elegir               ; de dónde sale la IRQ 0 en este equipo
         mov ax, PET_DIBUJAR
         call llamar_fw
         sti
@@ -743,6 +968,263 @@ bios_inicio:
 .para:  cli
         hlt
         jmp .para
+
+; =============================================================================
+;  reloj_elegir: de dónde sale el tic de DOS (IRQ 0) en este equipo
+; =============================================================================
+;  En los equipos de Intel recientes el firmware deja el 8254 parado («clock
+;  gating»: efi64.asm se lo quita si puede, reloj_mirar) y la IRQ 0 no llega:
+;  DOS se quedaba «a la mitad» (el menú de arranque sin cuenta atrás, las
+;  esperas de los controladores). Aquí se PRUEBA, con las interrupciones
+;  abiertas, si llegan dos IRQ en cinco tics (medidos con el TSC), por orden:
+;    0. la IRQ 0 tal cual (el 8254) por LINT0 del APIC local (lo de siempre);
+;    1. lo mismo con el 8259 por la entrada 0 del IOAPIC;
+;    2 y 3. el temporizador 0 del HPET en el sitio del 8254, por los dos caminos;
+;    4 y 5. la interrupción periódica del reloj CMOS (IRQ 8), por los dos.
+;  La fuente y el camino se ponen al bajar del firmware (reloj_aplicar,
+;  reloj_dos): por eso cada cambio es un viaje de ida y vuelta (PET_NADA).
+;  Si nada llega, se dice en pantalla y los tics los da k_tics, como antes.
+;  Todo queda apuntado en el registro de la BIOS (HBLOG) y, por PET_REGISTRO,
+;  en HISPABIOS.LOG.
+reloj_elegir:
+        pushad
+        mov ax, [T_REG_N]
+        mov [rj_reg0], ax
+        mov byte [T_RELOJ], RJ_PIT
+        cmp dword [T_TSC_TICK], 0       ; sin TSC no se puede medir: como antes
+        je .fin
+        mov si, t_rj_tit
+        call reg_txt
+        xor bx, bx                      ; BX = candidato
+.c:     movzx ax, byte [T_PRUEBA]       ; (los que no se prueban: bit = número)
+        mov cx, bx
+        shr cx, 1
+        bt ax, cx
+        jc .sig
+        mov ax, [rj_cand + bx]          ; AL = fuente, AH = camino
+        cmp al, RJ_HPET
+        jne .c1
+        cmp dword [T_HPET], 0
+        je .sig
+.c1:    test ah, ah
+        jz .c2
+        cmp dword [T_IOAPIC], 0
+        je .sig
+.c2:    call reloj_probar
+        jnc .elegido
+.sig:   add bx, 2
+        cmp bx, 12
+        jb .c
+        ; nada da la IRQ 0
+        xor ax, ax
+        call reloj_poner
+        mov byte [T_SIN_IRQ], 1
+        mov si, t_rj_nada
+        call reg_txt
+        mov si, t_rj_aviso
+        call escribir_bios
+        mov ax, PET_DIBUJAR
+        call llamar_fw
+        movzx ebx, word [rj_reg0]
+        or ebx, 10000h                  ; (el registro, ya a la memoria USB)
+        mov ax, PET_REGISTRO
+        call llamar_fw
+        mov ebx, 6                      ; que se pueda leer
+        mov ax, PET_ESPERAR
+        call llamar_fw
+        jmp .fin
+.elegido:
+        mov si, t_rj_si
+        call reg_txt
+        call rj_nombre
+        mov si, t_nl_bios
+        call reg_txt
+        test bx, bx                     ; lo de siempre: sin más
+        jz .reg
+        mov si, t_rj_otro               ; otra cosa: se dice
+        call escribir_bios
+        mov al, [T_RELOJ]
+        mov si, t_rj_p_pit
+        cmp al, RJ_PIT
+        je .o1
+        mov si, t_rj_p_hpet
+        cmp al, RJ_HPET
+        je .o1
+        mov si, t_rj_p_rtc
+.o1:    call escribir_bios
+        cmp byte [T_CABLE], 0
+        je .o2
+        mov si, t_rj_p_ioa
+        call escribir_bios
+.o2:    mov si, t_rj_punto
+        call escribir_bios
+.reg:   movzx ebx, word [rj_reg0]
+        mov ax, PET_REGISTRO
+        call llamar_fw
+.fin:   popad
+        ret
+
+; reloj_poner: AL = fuente, AH = camino; se ponen con un viaje al firmware
+reloj_poner:
+        mov [T_RELOJ], al
+        mov [T_CABLE], ah
+        mov byte [reloj_cambio], 1
+        mov ax, PET_NADA
+        call llamar_fw
+        ret
+
+; rj_nombre: apunta «fuente por camino» de lo puesto (T_RELOJ, T_CABLE)
+rj_nombre:
+        push si
+        mov si, t_rj_pit
+        cmp byte [T_RELOJ], RJ_PIT
+        je .n
+        mov si, t_rj_hpet
+        cmp byte [T_RELOJ], RJ_HPET
+        je .n
+        mov si, t_rj_rtc
+.n:     call reg_txt
+        mov si, t_rj_lint0
+        cmp byte [T_CABLE], 0
+        je .c
+        mov si, t_rj_ioa
+.c:     call reg_txt
+        pop si
+        ret
+
+; reloj_probar: AL = fuente, AH = camino -> CF = 0 si llegan dos interrupciones
+; en cinco tics. Apunta lo visto (también el 8259 y el contador del 8254).
+reloj_probar:
+        pushad
+        call reloj_poner
+        mov si, t_rj_esp
+        call reg_txt
+        call rj_nombre
+        mov dword [rj_vistas], 0
+        mov dword [rj_irq8], 0
+        rdtsc
+        mov esi, eax
+        mov edi, edx
+        mov ecx, [T_TSC_TICK]
+        lea ecx, [ecx + ecx * 4]        ; cinco tics
+        sti
+.e:     cmp dword [rj_vistas], 2
+        jae .ya
+        rdtsc
+        sub eax, esi
+        sbb edx, edi
+        jnz .ya
+        cmp eax, ecx
+        jb .e
+.ya:    cli
+        mov si, t_rj_dos
+        call reg_txt
+        mov al, [rj_vistas]
+        add al, '0'
+        mov [rj_cifra], al
+        mov si, rj_cifra
+        call reg_txt
+        mov si, t_rj_irr                ; el 8259: lo pedido (IRR), lo que está
+        call reg_txt                    ; en curso (ISR) y las máscaras
+        mov al, 0Ah
+        out 20h, al
+        in al, 20h
+        call reg_hex8
+        mov si, t_rj_isr
+        call reg_txt
+        mov al, 0Bh
+        out 20h, al
+        in al, 20h
+        call reg_hex8
+        mov si, t_rj_imr
+        call reg_txt
+        in al, 21h
+        call reg_hex8
+        mov si, t_rj_esc
+        call reg_txt
+        mov al, 0Ah
+        out 0A0h, al
+        in al, 0A0h
+        call reg_hex8
+        mov si, t_rj_imr
+        call reg_txt
+        in al, 0A1h
+        call reg_hex8
+        mov si, t_rj_cnt                ; el contador del 8254, dos veces
+        call reg_txt
+        call .pit
+        call reg_hex16
+        mov dx, ax
+        mov cx, 2000
+.p:     in al, 61h                      ; (un momento)
+        loop .p
+        mov si, t_rj_y
+        call reg_txt
+        call .pit
+        call reg_hex16
+        cmp ax, dx                      ; (si se mueve, el 8254 cuenta: T_PIT)
+        je .quieto
+        or byte [T_PIT], 2
+.quieto:
+        cmp byte [T_RELOJ], RJ_HPET
+        jne .rtc
+        mov si, t_rj_h1
+        call reg_txt
+        mov al, [T_HPET_EST]
+        add al, '0'
+        mov [rj_cifra], al
+        mov si, rj_cifra
+        call reg_txt
+        mov si, t_rj_h2
+        call reg_txt
+        mov ax, [T_HPET_CFG + 2]
+        call reg_hex16
+        mov ax, [T_HPET_CFG]
+        call reg_hex16
+        mov si, t_rj_h3
+        call reg_txt
+        mov ax, [T_HPET_T0 + 2]
+        call reg_hex16
+        mov ax, [T_HPET_T0]
+        call reg_hex16
+        mov si, t_rj_h4
+        call reg_txt
+        mov ax, [T_HPET_FS + 2]
+        call reg_hex16
+        mov ax, [T_HPET_FS]
+        call reg_hex16
+        mov si, t_rj_h5
+        call reg_txt
+        mov ax, [T_HPET_PER + 2]
+        call reg_hex16
+        mov ax, [T_HPET_PER]
+        call reg_hex16
+.rtc:   cmp byte [T_RELOJ], RJ_RTC
+        jne .nl
+        mov si, t_rj_r1
+        call reg_txt
+        mov al, [T_RTC_A]
+        call reg_hex8
+        mov si, t_rj_r2
+        call reg_txt
+        mov al, [T_RTC_B]
+        call reg_hex8
+        mov si, t_rj_r3
+        call reg_txt
+        mov ax, [rj_irq8]
+        call reg_hex16
+.nl:    mov si, t_nl_bios
+        call reg_txt
+        cmp dword [rj_vistas], 2        ; CF = 1 si no han llegado dos
+        popad
+        ret
+.pit:   mov al, 00h                     ; el contador del canal 0 -> AX
+        out 43h, al
+        in al, 40h
+        mov ah, al
+        in al, 40h
+        xchg al, ah
+        ret
 
 ; escribir_bios: DS:SI = texto terminado en 0, por INT 10h 0Eh
 escribir_bios:
@@ -1460,7 +1942,49 @@ pantalla_cambiada:
 ; =============================================================================
 ;  Datos
 ; =============================================================================
-t_prueba        db 'HispaBIOS 0.3 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
+; el reloj: los candidatos (fuente, camino), por orden
+rj_cand         db RJ_PIT, 0, RJ_PIT, 1, RJ_HPET, 0, RJ_HPET, 1, RJ_RTC, 0, RJ_RTC, 1
+rj_reg0         dw 0                    ; dónde empieza lo del reloj en el registro
+rj_cifra        db '0', 0
+        align 4
+rj_vistas       dd 0                    ; interrupciones del reloj vistas (la prueba)
+rj_irq8         dd 0                    ; IRQ 8 recibidas
+t_nl_bios       db 13, 10, 0
+t_rj_tit        db 'Reloj de DOS (IRQ 0): se prueba cada fuente con las interrupciones abiertas (dos en cinco tics)', 13, 10, 0
+t_rj_esp        db '  ', 0
+t_rj_pit        db 'la IRQ 0 del 8254 (PIT)', 0
+t_rj_hpet       db 'el HPET en el sitio del 8254 (IRQ 0)', 0
+t_rj_rtc        db 'el reloj CMOS (IRQ 8, 64 Hz)', 0
+t_rj_lint0      db ', con el 8259 por LINT0 del APIC local', 0
+t_rj_ioa        db ', con el 8259 por la entrada 0 del IOAPIC', 0
+t_rj_dos        db ': interrupciones ', 0
+t_rj_irr        db '; 8259 IRR=', 0
+t_rj_isr        db ' ISR=', 0
+t_rj_imr        db ' IMR=', 0
+t_rj_esc        db ', esclavo IRR=', 0
+t_rj_cnt        db '; contador del 8254: ', 0
+t_rj_y          db ' y ', 0
+t_rj_h1         db '; HPET: estado ', 0
+t_rj_h2         db ' (1 puesto, 2 no puede, 3 lo usa el firmware, 4 periodo raro), configuracion ', 0
+t_rj_h3         db ', temporizador 0 ', 0
+t_rj_h4         db ', fs por cuenta ', 0
+t_rj_h5         db ', cuentas por tic ', 0
+t_rj_r1         db '; CMOS: A=', 0
+t_rj_r2         db ' B=', 0
+t_rj_r3         db ', IRQ 8 recibidas ', 0
+t_rj_si         db 'Reloj de DOS: LLEGA. Queda: ', 0
+t_rj_nada       db 'Reloj de DOS: NO LLEGA ninguna interrupcion. Los tics se dan al entrar en la BIOS (INT 10h, 13h, 15h, 16h y 1Ah)', 13, 10, 0
+t_rj_otro       db 'Reloj: el temporizador 8254 de este equipo no da su interrupcion; se usa ', 0
+t_rj_p_pit      db 'el 8254', 0
+t_rj_p_hpet     db 'el HPET', 0
+t_rj_p_rtc      db 'el reloj CMOS', 0
+t_rj_p_ioa      db ' (por el IOAPIC)', 0
+t_rj_punto      db '.', 13, 10, 13, 10, 0
+t_rj_aviso      db 'AVISO: en este equipo no llega la interrupcion del reloj (IRQ 0).', 13, 10
+                db 'Hispa-DOS arranca, pero las esperas y los programas que usan el reloj', 13, 10
+                db 'pueden ir a saltos o quedarse parados (pulsar una tecla los despierta).', 13, 10
+                db 'Suba al FTP el archivo HISPABIOS.LOG de la memoria USB.', 13, 10, 13, 10, 0
+t_prueba        db 'HispaBIOS 0.4 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
 t_vbe_oem       db 'HispaBIOS (VBE sobre la pantalla del firmware UEFI)', 0
 t_r_vbe         db 'INT 10h AX=', 0
 t_r_bx          db ' BX=', 0
@@ -1483,6 +2007,11 @@ vbe_lista       dw 0FFFFh, 0FFFFh, 0FFFFh, 0FFFFh   ; (la rellena bios_inicio)
 primera         db 0
 mask_dos        db 0FAh, 0FFh          ; DOS: IRQ 0 y la cascada
 mask_fw         db 0FFh, 0FFh
+reloj_cambio    db 0                    ; 1: al bajar hay que poner la fuente T_RELOJ
+rj_puesta       db 0                    ; la fuente que está puesta (reloj_aplicar)
+ioa_puesta      db 0                    ; 1: la entrada 0 del IOAPIC es la nuestra
+        align 4
+sv_ioa          dd 0, 0                 ; la entrada 0 del IOAPIC del firmware
         align 4
 sv_tpr          dd 0
 sv_lvtt         dd 0

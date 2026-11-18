@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hispa-DOS - imagen de prueba de HispaBIOS para un equipo de verdad que
-# arranca por UEFI (docs/HISPABIOS.md): la velocidad de la pantalla, Hispa
-# Ventanas (VBE) y el registro. A partir de
+# arranca por UEFI (docs/HISPABIOS.md): el reloj, la velocidad de la pantalla,
+# Hispa Ventanas (VBE) y el registro. A partir de
 # build/hispados-usb.img (make usb): el mismo BOOTX64.EFI ensamblado con
 # -DREGISTRO_PASOS, que guarda \HISPABIOS.LOG en la memoria USB en cada paso
 # aunque todo vaya bien (la imagen normal solo lo guarda si algo falla). Deja

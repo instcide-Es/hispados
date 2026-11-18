@@ -1,19 +1,34 @@
-PRUEBA DE HISPABIOS 0.3 (arranque por UEFI) - Hispa-DOS
+PRUEBA DE HISPABIOS 0.4 (arranque por UEFI) - Hispa-DOS
 Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
 ===================================================================
 
-Que es: con la imagen anterior (HispaBIOS 0.2) el ThinkPad E14 y el
-MacBook Air de 2017 arrancaban por UEFI, pero la pantalla iba "a 1 FPS"
-y Hispa Ventanas decia "no se ha podido poner el modo grafico". Esta
-imagen lleva HispaBIOS 0.3:
-  - el texto ya no va a tirones (DOS miraba el teclado en cada letra que
-    escribia y cada mirada era un viaje al firmware; y la pantalla se
-    pinta ahora con "escritura combinada");
-  - Hispa Ventanas tiene modos graficos (VBE de 32 bits: 640x480,
-    800x600 y 1024x768) aunque el equipo no tenga VESA ni VGA;
-  - DOS tiene mas memoria convencional (576 KB en los dos equipos; en
-    el Mac eran 352 KB);
-  - EQUIPO y la bateria (HSPACPI) ven las tablas ACPI y SMBIOS.
+Que es: con la imagen anterior (HispaBIOS 0.3) el Monovate 14.1 (Core
+i3-1115G4) llegaba a DOS pero se quedaba a la mitad, y EQUIPO decia
+"el reloj no avanza": en los equipos de Intel recientes el firmware
+deja parado el temporizador de siempre (el 8254) y a DOS no le llegaba
+la interrupcion del reloj. Esta imagen lleva HispaBIOS 0.4:
+  - mira si el 8254 cuenta y, si esta parado, le quita el bloqueo;
+  - comprueba al arrancar que la interrupcion del reloj llega y, si no,
+    la saca de otro sitio (el HPET o el reloj CMOS). Si usa otro sitio
+    sale una linea "Reloj: ..." al arrancar; si no hay manera, un AVISO;
+  - EQUIPO ve ACPI y SMBIOS tambien en el Asus GL553V (decia "no hay").
+Lo de la 0.3 sigue igual: texto sin tirones, Hispa Ventanas con modos
+graficos (VBE), mas memoria convencional.
+Vale para todos los equipos que arrancan por UEFI: Monovate 14.1,
+ThinkPad E14, MacBook Air de 2017 y Asus GL553V (en estos tres no debe
+cambiar nada: digalo si algo va peor).
+
+EN EL MONOVATE 14.1, SOBRE TODO
+-------------------------------
+  a) Sin tocar nada, el menu de arranque debe contar 5, 4, 3... y
+     seguir solo hasta C:\> (antes habia que pulsar una tecla, o se
+     quedaba parado). Diga hasta donde llega.
+  b) Escriba DIR y luego PRUEBAHB (paso 4 de abajo).
+  c) Suba HISPABIOS.LOG y HBLOG.TXT (paso 5). Si se queda parado antes
+     de C:\>, apague, lleve la memoria a otro equipo y suba igualmente
+     HISPABIOS.LOG: dice que fuentes del reloj se han probado y cuales
+     han llegado.
+  d) Si quiere, EQUIPO: "Velocidad" ya debe salir medida.
 
 QUE HACER (10 minutos por equipo)
 ---------------------------------
@@ -47,10 +62,11 @@ QUE HACER (10 minutos por equipo)
 
 SI NO ARRANCA O VA PEOR QUE ANTES: MODO SEGURO
 ----------------------------------------------
-Reinicie y, en cuanto salga "HispaBIOS 0.3", vaya pulsando la tecla S
+Reinicie y, en cuanto salga "HispaBIOS 0.4", vaya pulsando la tecla S
 varias veces. Debe salir "MODO SEGURO": HispaBIOS deja de hacer lo que
-depende del equipo (la escritura combinada, cambiar de modo de pantalla
-y prestar a DOS las paginas de memoria baja del firmware). Diga si asi
+depende del equipo (la escritura combinada, cambiar de modo de pantalla,
+prestar a DOS las paginas de memoria baja del firmware, y tocar el
+bloqueo del 8254 o el HPET). Diga si asi
 arranca y suba igualmente HISPABIOS.LOG: dira en que paso se quedo.
 
 Que llevan los archivos
@@ -58,8 +74,10 @@ Que llevan los archivos
 HISPABIOS.LOG: el firmware, el mapa de memoria, las paginas de memoria
 baja prestadas, la pantalla (modos que da el firmware, tipo de cache,
 lo que cuesta pintarla entera con y sin escritura combinada, como se
-amplia el texto), el marco de VBE y las tablas ACPI/SMBIOS.
-HBLOG.TXT: si llega la interrupcion del reloj, cuantas veces se ha
+amplia el texto), el marco de VBE, las tablas ACPI/SMBIOS y el reloj
+(si el 8254 cuenta, el bloqueo del PCH, el HPET, los APIC y la prueba
+de cada fuente de la interrupcion).
+HBLOG.TXT: si llega la interrupcion del reloj y de donde sale, cuantas veces se ha
 dibujado la pantalla y lo que ha tardado, y cada llamada de VBE que ha
 hecho Hispa Ventanas con lo que se le ha contestado.
 Son texto y no llevan nada personal.

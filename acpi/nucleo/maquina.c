@@ -103,7 +103,7 @@ u32 mq_rsdp(void)
 {
 	u32 ebda = *(const u16 *)mq_mapa(0x40E, 2) << 4, d = 0;
 
-	if (ebda >= 0x80000 && ebda < 0xA0000)
+	if (ebda >= 0x40000 && ebda < 0xA0000)	/* (HispaBIOS en 70000h o 60000h: por debajo de 80000h) */
 		d = busca_rsdp(ebda, ebda + 1024);
 	if (!d)
 		d = busca_rsdp(0xE0000, 0x100000);
