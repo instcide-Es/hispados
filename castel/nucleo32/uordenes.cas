@@ -1,0 +1,236 @@
+; =============================================================================
+;  uordenes.cas - el intérprete de órdenes de Hispa-Pentium: un programa del
+;  anillo 3 («modelo usuario»), escrito en Castel, que lee una línea del
+;  teclado y hace lo que dice. En el disco es ORDENES.BIN; lo lanza el núcleo
+;  (la orden «ordenes» de su consola, o él solo si se arranca con «ordenes»).
+;
+;    AYUDA            las órdenes
+;    VER              la versión del sistema
+;    CLS              borra la pantalla
+;    MEM              la memoria
+;    DIR [carpeta]    los archivos de una carpeta del disco (la raíz, si no se dice)
+;    TYPE archivo     enseña un archivo de texto
+;    SALIR            acaba el intérprete (se vuelve a la consola del núcleo)
+;
+;  y cualquier otra cosa es el nombre de un programa del disco (con .BIN o
+;  sin él), que se lanza con lo que siga como sus argumentos y se le espera.
+;  Todo lo hace por las llamadas al sistema (llamadas.cas): no toca nada del
+;  núcleo. Las órdenes valen en mayúsculas o en minúsculas.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UOrdenes
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato
+
+    constante LÍNEA = 128
+
+    variable línea: arreglo [LÍNEA] de byte
+    variable orden: arreglo [80] de byte
+    variable ruta: arreglo [LÍNEA + 8] de byte
+    variable trozo: arreglo [512] de byte
+    variable e: Entrada
+
+    función orden_ayuda()
+        escribir("Las órdenes de Hispa-Pentium:\n")
+        escribir("  AYUDA           esta lista\n")
+        escribir("  VER             la versión del sistema\n")
+        escribir("  CLS             borra la pantalla\n")
+        escribir("  MEM             la memoria que hay y la que queda libre\n")
+        escribir("  DIR [carpeta]   los archivos de una carpeta del disco\n")
+        escribir("  TYPE archivo    enseña un archivo de texto\n")
+        escribir("  SALIR           acaba el intérprete de órdenes\n")
+        escribir("Cualquier otro nombre es un programa del disco: se lanza (PROGRAMA o\n")
+        escribir("PROGRAMA.BIN) con lo que se escriba detrás como sus argumentos.\n")
+    fin
+
+    función orden_ver()
+        variable v: nat32
+        v := dato(DATO_VERSIÓN)
+        imprimir2("Hispa-Pentium %u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF)
+        escribir("Intérprete de órdenes del anillo 3 (ORDENES.BIN).\n")
+    fin
+
+    función orden_mem()
+        variable libres, hay: nat32
+        libres := dato(DATO_MARCOS_LIBRES)
+        hay := dato(DATO_MARCOS)
+        imprimir3("Memoria: %u K en total, %u K libres (%u marcos de 4 K).\n", hay * 4, libres * 4, libres)
+        imprimir2("Este intérprete ocupa %u K. Tareas en marcha: %u.\n", dato(DATO_MIS_PÁGINAS) * 4, dato(DATO_TAREAS))
+    fin
+
+    ; una entrada de DIR: el nombre y la extensión en sus columnas, el
+    ; tamaño (o <DIR>), la fecha y la hora
+    función enseña_entrada()
+        variable nombre, ext: arreglo [12] de byte
+        variable i, j: nat32
+        variable d: arreglo [5] de nat32
+        i := 0
+        mientras e.nombre[i] <> 0 y (e.nombre[i] <> '.' o i = 0 o e.nombre[0] = '.') hacer
+            nombre[i] := e.nombre[i]
+            i := i + 1
+        fin
+        nombre[i] := 0
+        j := 0
+        si e.nombre[i] = '.' entonces
+            i := i + 1
+            mientras e.nombre[i] <> 0 hacer
+                ext[j] := e.nombre[i]
+                i := i + 1
+                j := j + 1
+            fin
+        fin
+        ext[j] := 0
+        imprimir2("%-8s %-3s", nat32(dirección(nombre[0])), nat32(dirección(ext[0])))
+        si e.atributos yb CARPETA <> 0 entonces
+            escribir("  <DIR>      ")
+        sino
+            imprimir1(" %11u ", e.tamaño)
+        fin
+        d[0] := e.fecha yb 31
+        d[1] := (e.fecha >> 5) yb 15
+        d[2] := 1980 + (e.fecha >> 9)
+        d[3] := e.hora >> 11
+        d[4] := (e.hora >> 5) yb 63
+        imprimir(" %02u/%02u/%u  %02u:%02u\n", d)
+    fin
+
+    función orden_dir(dónde: puntero a byte)
+        variable m, archivos, carpetas, octetos, libres, cluster: nat32
+        si valor(dónde) = 0 entonces dónde := "\\" fin
+        m := abrir(dónde)
+        si es_error(m) entonces
+            imprimir2("No puedo abrir %s: %s.\n", nat32(dónde), nat32(texto_error(m)))
+            devolver
+        fin
+        ; ¿es un archivo, y no una carpeta? (un archivo se deja leer)
+        si no es_error(leer(m, trozo, 0)) entonces
+            imprimir2("%s es un archivo de %u octetos.\n", nat32(dónde), largo_de(m))
+            cerrar(m)
+            devolver
+        fin
+        ; el nombre de la carpeta, entero: C:\CARPETA
+        copiar(ruta, "C:")
+        si valor(dónde) <> '\\' y valor(dónde) <> '/' entonces concatenar(ruta, "\\") fin
+        concatenar(ruta, dónde)
+        a_mayúsculas(ruta)
+        imprimir1(" Directorio de %s\n\n", nat32(dirección(ruta[0])))
+        archivos := 0
+        carpetas := 0
+        octetos := 0
+        mientras entrada(m, e) hacer
+            si e.atributos yb OCULTO = 0 entonces
+                enseña_entrada()
+                si e.atributos yb CARPETA <> 0 entonces
+                    carpetas := carpetas + 1
+                sino
+                    archivos := archivos + 1
+                    octetos := octetos + e.tamaño
+                fin
+            fin
+        fin
+        cerrar(m)
+        imprimir2("%8u archivos  %12u octetos\n", archivos, octetos)
+        imprimir1("%8u carpetas", carpetas)
+        libres := dato(DATO_CLUSTERS_LIBRES)
+        cluster := dato(DATO_CLUSTER)
+        si libres = 0xFFFFFFFF entonces
+            escribir("\n")
+        sino si libres < 0xFFFFFFFF div cluster entonces
+            imprimir1("  %12u octetos libres\n", libres * cluster)
+        sino
+            imprimir1("  %12u K libres\n", libres * (cluster div 512) div 2)
+        fin
+    fin
+
+    función orden_type(nombre: puntero a byte)
+        variable m, n: nat32
+        si valor(nombre) = 0 entonces
+            escribir("Falta el nombre del archivo: TYPE archivo\n")
+            devolver
+        fin
+        m := abrir(nombre)
+        si es_error(m) entonces
+            imprimir2("No puedo abrir %s: %s.\n", nat32(nombre), nat32(texto_error(m)))
+            devolver
+        fin
+        n := leer(m, trozo, 512)
+        si es_error(n) entonces
+            imprimir1("%s es una carpeta (o el disco falla).\n", nat32(nombre))
+        fin
+        mientras no es_error(n) y n > 0 hacer
+            escribir_trozo(trozo, n)
+            n := leer(m, trozo, 512)
+        fin
+        cerrar(m)
+    fin
+
+    ; lanza el programa «orden» (añadiéndole .BIN si no lleva extensión) con
+    ; esos argumentos, y lo espera
+    función lanza(args: puntero a byte)
+        variable i, punto, t, c: nat32
+        ; ¿lleva extensión? (un punto detrás de la última barra)
+        punto := 0
+        i := 0
+        mientras orden[i] <> 0 hacer
+            si orden[i] = '.' entonces punto := 1 fin
+            si orden[i] = '\\' o orden[i] = '/' entonces punto := 0 fin
+            i := i + 1
+        fin
+        copiar(ruta, orden)
+        si punto = 0 entonces concatenar(ruta, ".BIN") fin
+        a_mayúsculas(ruta)
+        t := lanzar(ruta, args)
+        si t = NO_HAY entonces
+            imprimir1("Orden o nombre de programa desconocido: %s (escriba AYUDA).\n", nat32(dirección(orden[0])))
+            devolver
+        fin
+        si es_error(t) entonces
+            imprimir2("No puedo lanzar %s: %s.\n", nat32(dirección(ruta[0])), nat32(texto_error(t)))
+            devolver
+        fin
+        c := esperar(t)
+        si c <> 0 entonces
+            imprimir2("(%s ha acabado con el código %u)\n", nat32(dirección(ruta[0])), c)
+        fin
+    fin
+
+    función principal(): byte
+        variable resto: puntero a byte
+        variable mayús: arreglo [80] de byte
+        escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
+        escribir("Escriba AYUDA para ver las órdenes.\n")
+        mientras cierto hacer
+            escribir("C:\\>")
+            leer_línea(línea, LÍNEA)
+            si no palabra(línea, 0, orden, 80) entonces seguir fin
+            ; lo que va detrás de la primera palabra
+            resto := saltar_espacios(línea)
+            mientras valor(resto) <> 0 y no es_espacio(valor(resto)) hacer resto := resto + 1 fin
+            resto := saltar_espacios(resto)
+            copiar(mayús, orden)
+            a_mayúsculas(mayús)
+            si iguales(mayús, "AYUDA") o iguales(mayús, "?") entonces
+                orden_ayuda()
+            sino si iguales(mayús, "VER") entonces
+                orden_ver()
+            sino si iguales(mayús, "CLS") entonces
+                borrar_pantalla()
+            sino si iguales(mayús, "MEM") entonces
+                orden_mem()
+            sino si iguales(mayús, "DIR") entonces
+                orden_dir(resto)
+            sino si iguales(mayús, "TYPE") entonces
+                orden_type(resto)
+            sino si iguales(mayús, "SALIR") entonces
+                escribir("Hasta luego.\n")
+                devolver 0
+            sino
+                lanza(resto)
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UOrdenes.

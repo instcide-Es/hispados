@@ -1,0 +1,27 @@
+; =============================================================================
+;  ueco.cas - un programa de usuario de Hispa-Pentium que enseña los
+;  argumentos con que lo han lanzado (ECO hola y adiós) y acaba con tantas
+;  palabras como le han dado.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UEco
+
+    modelo usuario
+
+    importar Llamadas, Textos32
+
+    variable args: arreglo [128] de byte
+    variable una: arreglo [40] de byte
+
+    función principal(): byte
+        variable n: nat32
+        argumentos(args, 128)
+        n := 0
+        mientras palabra(args, n, una, 40) hacer
+            n := n + 1
+        fin
+        escribir(args, "\n")
+        devolver n
+    fin
+
+fin UEco.

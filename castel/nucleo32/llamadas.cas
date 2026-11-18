@@ -1,0 +1,201 @@
+; =============================================================================
+;  llamadas.cas - las llamadas al sistema de Hispa-Pentium, para los programas
+;  del anillo 3 («modelo usuario»): el teclado, los archivos del disco, lanzar
+;  otros programas y esperarlos, los argumentos, la memoria. Cada función es
+;  una «int 0x80» con su número (los de nucleo32/usuario.cas). escribir() y
+;  salir() son del lenguaje y ya van por ahí.
+;  Lo que no puede ser da un número de PRIMER_ERROR para arriba: se mira con
+;  es_error().
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Llamadas
+
+    ; ---- los errores ----
+    público constante NO_HAY = 0xFFFFFFFF       ; no existe ese archivo
+    público constante SIN_DISCO = 0xFFFFFFFE    ; no hay disco, o no es FAT
+    público constante LLENO = 0xFFFFFFFD        ; demasiados archivos abiertos
+    público constante MAL = 0xFFFFFFFC          ; el manejador no vale, o el disco falla
+    público constante NO_PROGRAMA = 0xFFFFFFFB  ; el archivo no es un programa de Hispa-Pentium
+    público constante SIN_MEMORIA = 0xFFFFFFFA  ; no hay memoria (o no quedan tareas)
+    público constante NO_VALE = 0xFFFFFFF9      ; lo que se pide no tiene sentido
+    público constante PRIMER_ERROR = 0xFFFFFFF0
+
+    ; ---- los atributos de una entrada de carpeta ----
+    público constante SOLO_LECTURA = 0x01
+    público constante OCULTO = 0x02
+    público constante DE_SISTEMA = 0x04
+    público constante CARPETA = 0x10
+
+    ; ---- los datos del sistema: dato(...) ----
+    público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
+    público constante DATO_MARCOS = 1           ; los que hay
+    público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
+    público constante DATO_VERSIÓN = 3          ; 0x0002 es la 0.2
+    público constante DATO_TAREAS = 4
+    público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
+    público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
+    público constante DATO_CLUSTERS_LIBRES = 7  ; (0xFFFFFFFF si no se sabe)
+    público constante DATO_CLUSTERS = 8
+    público constante DATO_HZ = 9               ; los tics por segundo
+
+    ; una entrada de una carpeta (32 octetos)
+    público tipo Entrada = estructura
+        nombre: arreglo [13] de byte            ; «NOMBRE.EXT», acabado en 0
+        atributos: byte
+        reservado: nat16
+        tamaño: nat32
+        fecha, hora: nat16                      ; como las guarda la FAT
+        cluster: nat32
+        libre: nat32
+    fin
+
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    público función es_error(r: nat32): bool
+        devolver r >= PRIMER_ERROR
+    fin
+
+    ; por qué no ha podido ser, para decirlo
+    público función texto_error(e: nat32): puntero a byte
+        según e
+            caso NO_HAY: devolver "no existe"
+            caso SIN_DISCO: devolver "no hay disco (o no es FAT)"
+            caso LLENO: devolver "hay demasiados archivos abiertos"
+            caso MAL: devolver "el disco falla"
+            caso NO_PROGRAMA: devolver "no es un programa de Hispa-Pentium"
+            caso SIN_MEMORIA: devolver "no hay memoria"
+        fin
+        devolver "no puede ser"
+    fin
+
+    ; ---- las tareas y el reloj ----
+    público función dormir(n: nat32)
+        llamada(3, n, 0, 0)
+    fin
+
+    público función tics(): nat32
+        devolver llamada(4, 0, 0, 0)
+    fin
+
+    público función mi_tarea(): nat32
+        devolver llamada(5, 0, 0, 0)
+    fin
+
+    ; lanza el programa de ese archivo, con esos argumentos (un texto, o
+    ; nulo): da el número de su tarea, o un error
+    público función lanzar(nombre: puntero a byte, args: puntero a byte): nat32
+        devolver llamada(10, nat32(nombre), nat32(args), 0)
+    fin
+
+    ; espera a que acabe una tarea que se ha lanzado: da su código de salida
+    ; (255 si el núcleo ha tenido que acabarla)
+    público función esperar(tarea: nat32): nat32
+        devolver llamada(11, tarea, 0, 0)
+    fin
+
+    ; los argumentos con que se ha lanzado este programa, a «destino» (donde
+    ; caben «cabe» octetos, con el 0 del final). Da su largo.
+    público función argumentos(destino: puntero a byte, cabe: nat32): nat32
+        devolver llamada(14, nat32(destino), cabe, 0)
+    fin
+
+    ; ---- el teclado y la pantalla ----
+    ; espera una tecla y da su letra
+    público función tecla(): byte
+        devolver llamada(6, 0, 0, 0)
+    fin
+
+    ; la tecla que haya pulsada, o 0 si no hay ninguna (no espera)
+    público función tecla_si_hay(): byte
+        devolver llamada(6, 1, 0, 0)
+    fin
+
+    público función borrar_pantalla()
+        llamada(16, 0, 0, 0)
+    fin
+
+    ; escribe n octetos tal cual
+    público función escribir_trozo(p: puntero a byte, n: nat32): nat32
+        devolver llamada(1, nat32(p), n, 0)
+    fin
+
+    ; lee una línea del teclado (hasta Intro), enseñándola y dejando borrar
+    ; con la tecla de retroceso; la deja en «destino» (donde caben «cabe»
+    ; octetos, con el 0 del final). Da su largo.
+    público función leer_línea(destino: puntero a byte, cabe: nat32): nat32
+        variable c: byte
+        variable largo: nat32
+        largo := 0
+        mientras cierto hacer
+            c := tecla()
+            si c = '\n' entonces
+                escribir("\n")
+                destino[largo] := 0
+                devolver largo
+            sino si c = 8 entonces
+                si largo > 0 entonces
+                    largo := largo - 1
+                    escribir("\x08 \x08")
+                fin
+            sino si c >= ' ' y largo + 1 < cabe entonces
+                destino[largo] := c
+                largo := largo + 1
+                escribir_car(c)
+            fin
+        fin
+        devolver largo
+    fin
+
+    ; ---- los archivos ----
+    ; abre un archivo o una carpeta («\» es la raíz): da su manejador, o un error
+    público función abrir(nombre: puntero a byte): nat32
+        devolver llamada(7, nat32(nombre), 0, 0)
+    fin
+
+    ; lee hasta n octetos: da los leídos (0 al final), o un error
+    público función leer(m: nat32, destino: puntero a byte, n: nat32): nat32
+        devolver llamada(8, m, nat32(destino), n)
+    fin
+
+    público función cerrar(m: nat32)
+        llamada(9, m, 0, 0)
+    fin
+
+    ; la entrada siguiente de una carpeta abierta; falso cuando no hay más
+    público función entrada(m: nat32, ref e: Entrada): bool
+        devolver llamada(12, m, nat32(dirección(e)), 0) = 1
+    fin
+
+    ; lo que mide un archivo abierto
+    público función largo_de(m: nat32): nat32
+        devolver llamada(13, m, 0, 0)
+    fin
+
+    ; ---- la memoria y el sistema ----
+    público función dato(cuál: nat32): nat32
+        devolver llamada(15, cuál, 0, 0)
+    fin
+
+    ; pide n octetos más de memoria, detrás de lo que ya tiene el programa:
+    ; da dónde empiezan (a cero), o nulo si no hay
+    público función más_memoria(n: nat32): puntero a byte
+        variable r: nat32
+        r := llamada(17, n, 0, 0)
+        si r >= PRIMER_ERROR entonces devolver nulo fin
+        devolver puntero(r)
+    fin
+
+    ; devuelve los n últimos octetos pedidos con más_memoria()
+    público función menos_memoria(n: nat32): bool
+        devolver llamada(17, 0 - n, 0, 0) < PRIMER_ERROR
+    fin
+
+fin Llamadas.

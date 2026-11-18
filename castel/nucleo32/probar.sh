@@ -10,6 +10,10 @@
 # de usuario (uhola.cas, umalo.cas y ucli.cas), que se le dan como módulos de multiboot
 # (-initrd). Con MODULOS="a.bin,b.bin", esos módulos (MODULOS= para ninguno).
 # Con MEMORIA=n, n MB (32 si no se dice).
+# Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
+# primario; no se escribe en ella): la hace nucleo32/disco.sh, con el
+# intérprete de órdenes y los programas. Con ARRANQUE="texto", lo que se le
+# dice al núcleo al arrancar (ARRANQUE=ordenes: lanza el intérprete de órdenes).
 # Necesita python3, nasm, qemu-system-i386 y socat.
 set -u
 AQUI=$(dirname "$(readlink -f "$0")")
@@ -34,6 +38,8 @@ fi
 INITRD=()
 [ -n "${MODULOS:-}" ] && INITRD=(-initrd "$MODULOS")
 [ $# -gt 0 ] || set -- ayuda apagar
+[ -n "${DISCO:-}" ] && INITRD+=(-drive "file=$DISCO,format=raw,if=ide,index=0,snapshot=on")
+[ -n "${ARRANQUE:-}" ] && INITRD+=(-append "$ARRANQUE")
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
   -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!
@@ -42,6 +48,7 @@ mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep
 tecla() {
   case "$1" in
     ' ') echo spc ;; '-') echo minus ;; '.') echo dot ;; ',') echo comma ;; '_') echo shift-minus ;;
+    "\\") echo backslash ;; '/') echo slash ;; '?') echo shift-slash ;; ':') echo shift-semicolon ;;
     [A-Z]) echo "shift-$(echo $1 | tr A-Z a-z)" ;;
     *) echo "$1" ;;
   esac

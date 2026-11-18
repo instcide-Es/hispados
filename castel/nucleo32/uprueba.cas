@@ -1,0 +1,186 @@
+; =============================================================================
+;  uprueba.cas - un programa de usuario de Hispa-Pentium que prueba las
+;  llamadas al sistema desde el anillo 3 (PRUEBA.BIN en el disco): la memoria
+;  que crece y se devuelve, leer un archivo de varios clusters a trozos, abrir
+;  más archivos de los que caben, darle al núcleo direcciones que no son del
+;  programa, lanzar otros programas y esperarlos, y acabar dejando un archivo
+;  abierto y un programa lanzado sin esperar (el núcleo lo recoge todo).
+;  Con el argumento «ruido X» escribe líneas enteras sin parar (dos a la vez
+;  no se mezclan: la pantalla tiene su cerrojo); con «fuera», toca memoria que
+;  ya ha devuelto (y el núcleo lo acaba); con «solo», duerme un rato, dice una
+;  línea y acaba (es el que se deja sin esperar).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UPrueba
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato
+
+    constante RUIDOS = 120
+
+    variable args: arreglo [128] de byte
+    variable modo, quién: arreglo [40] de byte
+    variable trozo: arreglo [777] de byte
+    variable línea: arreglo [100] de byte
+    variable d: arreglo [4] de nat32
+
+    ; escribe líneas enteras, cada una con una sola llamada al sistema
+    función ruido()
+        variable i, n: nat32
+        para i desde 1 hasta RUIDOS hacer
+            d[0] := nat32(dirección(quién[0]))
+            d[1] := i
+            n := formatear(línea, 100, "ruido %s %03u: una línea entera, de principio a fin, sin letras de otro\n", d)
+            escribir_trozo(línea, n)
+        fin
+    fin
+
+    función prueba_memoria()
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        variable i, suma, antes, con, después: nat32
+        variable ceros: bool
+        antes := dato(DATO_MIS_PÁGINAS)
+        q := más_memoria(100000)
+        p := puntero(q)
+        con := dato(DATO_MIS_PÁGINAS)
+        ceros := cierto
+        suma := 0
+        si q <> nulo entonces
+            para i desde 0 hasta 24999 hacer
+                si p[i] <> 0 entonces ceros := falso fin
+                p[i] := i
+            fin
+            para i desde 0 hasta 24999 hacer
+                suma := suma + p[i]
+            fin
+        fin
+        imprimir3("memoria: pido 100000 octetos: %u páginas más, a cero: %s, y la suma de lo escrito es %u\n",
+                  con - antes, nat32(sí_o_no(q <> nulo y ceros)), suma)
+        escribir("memoria: la devuelvo: ", menos_memoria(100000))
+        después := dato(DATO_MIS_PÁGINAS)
+        imprimir1(", y quedan %u páginas de más\n", después - antes)
+        escribir("memoria: no me dan 3 GB: ", más_memoria(0x7FFFFFFF) = nulo, "; ni devuelvo lo que no pedí: ",
+                 no menos_memoria(4096), "\n")
+    fin
+
+    función sí_o_no(b: bool): puntero a byte
+        si b entonces devolver "cierto" fin
+        devolver "falso"
+    fin
+
+    función prueba_archivo()
+        variable m, n, total, líneas, suma, i: nat32
+        m := abrir("textos\\largo.txt")
+        si es_error(m) entonces
+            imprimir1("archivo: no puedo abrir TEXTOS\\LARGO.TXT: %s\n", nat32(texto_error(m)))
+            devolver
+        fin
+        total := 0
+        líneas := 0
+        suma := 0
+        n := leer(m, trozo, 777)
+        mientras no es_error(n) y n > 0 hacer
+            para i desde 0 hasta n - 1 hacer
+                suma := suma + trozo[i]
+                si trozo[i] = '\n' entonces líneas := líneas + 1 fin
+            fin
+            total := total + n
+            n := leer(m, trozo, 777)
+        fin
+        d[0] := largo_de(m)
+        d[1] := total
+        d[2] := líneas
+        d[3] := suma
+        imprimir("archivo: TEXTOS\\LARGO.TXT mide %u octetos; leídos %u a trozos de 777, %u líneas, suma %u\n", d)
+        escribir("archivo: al final ya no da más: ", leer(m, trozo, 777) = 0, "\n")
+        cerrar(m)
+        escribir("archivo: cerrado, ya no se deja leer: ", leer(m, trozo, 10) = MAL, "\n")
+    fin
+
+    función prueba_muchos()
+        variable m, n, i: nat32
+        variable ms: arreglo [40] de nat32
+        n := 0
+        m := abrir("LEEME.TXT")
+        mientras no es_error(m) y n < 40 hacer
+            ms[n] := m
+            n := n + 1
+            m := abrir("LEEME.TXT")
+        fin
+        imprimir2("abiertos: caben %u a la vez; el siguiente: %s\n", n, nat32(texto_error(m)))
+        para i desde 0 hasta n - 1 hacer cerrar(ms[i]) fin
+        m := abrir("LEEME.TXT")
+        escribir("abiertos: cerrados todos, se puede abrir otra vez: ", no es_error(m), "\n")
+        cerrar(m)
+    fin
+
+    función prueba_punteros()
+        variable m: nat32
+        m := abrir("LEEME.TXT")
+        escribir("punteros: leer a la memoria del núcleo: ", leer(m, puntero(0x100000), 16) = NO_VALE)
+        escribir("; a donde no tengo nada: ", leer(m, puntero(0x7FFFF000), 16) = NO_VALE)
+        escribir("; un nombre que no es mío: ", abrir(puntero(0x100000)) = NO_VALE, "\n")
+        cerrar(m)
+        escribir("punteros: un manejador que no existe: ", leer(99, trozo, 10) = MAL)
+        escribir("; esperar a una tarea que no es mía: ", esperar(1) = NO_VALE, "\n")
+    fin
+
+    función prueba_hijos()
+        variable a, b, ca, cb: nat32
+        a := lanzar("ECO.BIN", "soy el hijo uno")
+        b := lanzar("ECO.BIN", "y yo soy el dos")
+        si es_error(a) o es_error(b) entonces
+            escribir("hijos: no puedo lanzar ECO.BIN\n")
+            devolver
+        fin
+        cb := esperar(b)
+        ca := esperar(a)
+        imprimir2("hijos: los dos han acabado, con los códigos %u y %u", ca, cb)
+        escribir("; ya no se les puede esperar: ", esperar(a) = NO_VALE, "\n")
+        ; dos que escriben a la vez, sin parar
+        a := lanzar("PRUEBA.BIN", "ruido A")
+        b := lanzar("PRUEBA.BIN", "ruido B")
+        ca := esperar(a)
+        cb := esperar(b)
+        imprimir2("hijos: los dos ruidosos han acabado, con los códigos %u y %u\n", ca, cb)
+    fin
+
+    función principal(): byte
+        variable p: puntero a byte
+        argumentos(args, 128)
+        palabra(args, 0, modo, 40)
+        palabra(args, 1, quién, 40)
+        si iguales(modo, "ruido") entonces
+            ruido()
+            devolver 9
+        fin
+        si iguales(modo, "solo") entonces
+            dormir(40)
+            escribir("soy el que nadie espera: he dormido y acabo solo\n")
+            devolver 0
+        fin
+        si iguales(modo, "fuera") entonces
+            p := más_memoria(8192)
+            valor(p) := 1
+            escribir("fuera: escribo en la memoria que me han dado: ", valor(p) = 1, "\n")
+            menos_memoria(8192)
+            escribir("fuera: la devuelvo y vuelvo a escribir...\n")
+            valor(p) := 2
+            escribir("fuera: he escrito (esto no tenía que salir)\n")
+            devolver 0
+        fin
+        prueba_memoria()
+        prueba_archivo()
+        prueba_muchos()
+        prueba_punteros()
+        prueba_hijos()
+        ; se acaba con un archivo abierto y un programa lanzado sin esperar
+        abrir("LEEME.TXT")
+        lanzar("PRUEBA.BIN", "solo")
+        escribir("prueba: acabo con el código 7, un archivo abierto y un programa sin esperar\n")
+        devolver 7
+    fin
+
+fin UPrueba.
