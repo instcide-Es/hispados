@@ -134,7 +134,6 @@ cerca:
     mov ecx, [ebp+esi*4-20]
     movzx eax, byte [ebx+esi]
     movsx ecx, byte [ebp-1]
-    movsx eax, ax
     neg eax
     not eax
     idiv ecx

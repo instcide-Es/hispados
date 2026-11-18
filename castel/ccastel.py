@@ -3420,7 +3420,7 @@ class Generador32(Generador):
                 self.em('movzx eax, al')
         elif t.k == 'ent16':
             if te.tam != 1:
-                self.em('movsx eax, ax')
+                self.em('cwde')                 # (= movsx eax, ax: NASM 3 lo pone así)
         elif te.tam != 1:
             self.em('movzx eax, ax')
 

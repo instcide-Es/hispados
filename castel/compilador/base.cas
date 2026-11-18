@@ -205,7 +205,7 @@ módulo Base
                                                 ;   t: el tipo resuelto; c: dónde cae ([bp+c])
     público constante K_TIPO = 44               ; a: el átomo; b: el tipo escrito
     público constante K_IMPORTAR = 45           ; a: el primer K_NOMBRE
-    público constante K_MODELO = 46             ; «modelo grande»
+    público constante K_MODELO = 46             ; «modelo grande», «modelo núcleo»...; a: el átomo
     público constante K_NOMBRE = 47             ; a: el átomo (y su posición)
     ; tipos escritos
     público constante K_TARR = 50               ; a: el tamaño (expresión); b: el tipo de los elementos
@@ -221,6 +221,7 @@ módulo Base
     público constante M_NO_CONST = 4            ; expresiones: ya se sabe que no es constante
     público constante M_TIPANDO = 8             ; expresiones: se está mirando su tipo
     público constante M_CONST = 16              ; expresiones: ya se sabe que es constante
+    público constante M_ATIENDE = 32            ; K_FUNC: atiende una interrupción («interrupción función»)
 
     ; ---- los bloques de memoria lejana ----
     constante PARRAFOS_AT = 0x0A00              ; 40 K de nombres
@@ -237,6 +238,7 @@ módulo Base
     público variable at_palabra: arreglo [N_PALABRAS + 1] de nat16
     variable at_simbolo: arreglo [N_SIMBOLOS + 1] de nat16
     público variable a_de, a_a, a_ref, a_modelo, a_grande, a_principal: nat16
+    público variable a_núcleo, a_hispa32, a_interrupción: nat16
 
     ; ---- los módulos: el programa (el último) y los que importa, cada uno detrás de los suyos ----
     público constante MAX_MODULOS = 24
@@ -798,6 +800,9 @@ módulo Base
         a_ref := átomo_de("ref")
         a_modelo := átomo_de("modelo")
         a_grande := átomo_de("grande")
+        a_núcleo := átomo_de("n\xC3\xBAcleo")
+        a_hispa32 := átomo_de("hispa32")
+        a_interrupción := átomo_de("interrupci\xC3\xB3n")
         a_principal := átomo_de("principal")
     fin
 

@@ -358,7 +358,7 @@ módulo Salida
         devolver falso
     fin
 
-    ; «    mov [X], ax» (o al): deja «[X]» y el registro
+    ; «    mov [X], ax» (o al, o eax): deja «[X]» y el registro
     función es_guardar(t: puntero a byte, mem: puntero a byte, reg: puntero a byte): bool
         variable n: nat16
         si no empieza_por(t, "    mov [") entonces devolver falso fin
@@ -373,7 +373,7 @@ módulo Salida
         mem[n] := ']'
         mem[n + 1] := 0
         t := t + 1
-        si no (iguales(t, ", ax") o iguales(t, ", al")) entonces devolver falso fin
+        si no (iguales(t, ", ax") o iguales(t, ", al") o iguales(t, ", eax")) entonces devolver falso fin
         copiar(reg, t + 2)
         devolver cierto
     fin

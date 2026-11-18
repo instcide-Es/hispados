@@ -411,6 +411,40 @@ módulo Programa
         devolver nsig(nt(d))
     fin
 
+    ; los parámetros de una función de 32 bits: cuatro octetos cada uno, desde
+    ; [ebp+8]. La que atiende una interrupción no devuelve nada y lleva como mucho
+    ; uno, el código de error que deja el procesador (en [ebp+32], tras pushad)
+    función declara_func32(d: nat16, f: nat16, m_: nat16)
+        variable p, off, n: nat16
+        si es_programa(m_) entonces f_marca(f, FM_VIVO) fin
+        off := 8
+        n := f_nparams(f)
+        si nmarcas(d) yb M_ATIENDE <> 0 entonces
+            f_marca(f, FM_ATIENDE)
+            si f_tret(f) <> T_NADA entonces
+                m("una función de interrupción no devuelve nada")
+                falla(nlin(nc(d)), ncol(nc(d)))
+            fin
+            p := nb(d)
+            si n > 1 o (n = 1 y (nmarcas(p) yb M_REF <> 0 o no es_num(nt(p)))) entonces
+                m("una función de interrupción lleva como mucho un parámetro: el número de error que deja el procesador")
+                falla(nlin(d), ncol(d))
+            fin
+            off := 32
+        fin
+        p := nb(d)
+        mientras p <> 0 hacer
+            si (tk(nt(p)) = TK_ARR o tk(nt(p)) = TK_EST) y nmarcas(p) yb M_REF = 0 entonces
+                m("los arreglos y las estructuras se pasan con «ref»")
+                falla(nlin(p), ncol(p))
+            fin
+            pon_c(p, off)
+            off := off + 4
+            p := nsig(p)
+        fin
+        f_pon_nbytes(f, 4 * n)
+    fin
+
     función declara(m_: nat16)
         variable d, nm, t, r, f, p, off, n: nat16
         variable lejos: bool
@@ -456,6 +490,10 @@ módulo Programa
                     fin
                 caso K_FUNC:
                     declarado(na(d), nlin(d), ncol(d), falso)
+                    si nmarcas(d) yb M_ATIENDE <> 0 y no plano entonces
+                        m("las funciones de interrupción son de 32 bits (modelo núcleo)")
+                        falla(nlin(d), ncol(d))
+                    fin
                     f := func_nueva(d, m_)
                     pon_sig(nt(d), f)
                     n := 0
@@ -489,6 +527,11 @@ módulo Programa
                 mientras p <> 0 hacer
                     pon_t(p, resuelve(nb(p)))
                     p := nsig(p)
+                fin
+                si plano entonces
+                    declara_func32(d, f, m_)
+                    d := nsig(d)
+                    seguir
                 fin
                 ; modelo grande: las funciones públicas son lejanas (se las llama desde
                 ; otro segmento): vuelven con «retf» y sus parámetros caen dos más allá
@@ -1030,10 +1073,21 @@ módulo Programa
         todo := con_todo
         prog := n_modulos - 1
         grande := falso
+        plano := falso
+        es_núcleo := falso
         d := nb(mod_arbol[prog])
         mientras d <> 0 hacer
-            si nk(d) = K_MODELO entonces grande := cierto fin
+            si nk(d) = K_MODELO entonces
+                grande := na(d) = a_grande
+                ; «modelo núcleo» o «modelo hispa32»: 32 bits, memoria plana (CASTEL32.md)
+                es_núcleo := na(d) = a_núcleo
+                plano := es_núcleo o na(d) = a_hispa32
+            fin
             d := nsig(d)
+        fin
+        si plano entonces
+            t_pon_tam(T_PUNT_U, 4)
+            t_pon_tam(T_TEXTO, 4)
         fin
         m_ := 0
         mientras m_ < n_modulos hacer

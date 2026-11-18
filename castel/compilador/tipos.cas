@@ -158,7 +158,7 @@ módulo Tipos
                 si r = 0 entonces no_está("tipo desconocido", na(t), nlin(t), ncol(t)) fin
                 devolver r
             caso K_TPUNT:
-                r := tip_nuevo(TK_PUNT, 2)      ; lo apuntado se mira más tarde, pero en este módulo
+                r := tip_nuevo(TK_PUNT, tam_punt())     ; lo apuntado se mira más tarde, pero en este módulo
                 t_pon_base(r, 1, na(t))
                 t_pon_mod(r, el_mod)
                 devolver r
@@ -265,7 +265,7 @@ módulo Tipos
         ; uno de 32 bits (o un número que no cabe en 16) se desplaza como uno de 32
         ta := tipo_de(na(e))
         tb := tipo_de(nb(e))
-        largo_ := es32(ta) o no n_cabe16(a)
+        largo_ := es32(ta) o no n_cabe16(a) o plano
         si op = O_IZQ o op = O_DER entonces
             bits := 15
             si largo_ entonces bits := 31 fin
@@ -327,7 +327,7 @@ módulo Tipos
         si es_num(ta) y es_num(tb) y no (es_lit(ta) y es_lit(tb)) y cmp = 0 entonces
             ; con un tipo por medio, la cuenta da la vuelta como al ejecutar
             si op <> O_IZQ y op <> O_DER entonces
-                largo_ := es32(ta) o es32(tb)
+                largo_ := es32(ta) o es32(tb) o plano
                 signo := con_signo(ta, tb)
             sino
                 signo := tk(ta) = TK_ENT16 o tk(ta) = TK_ENT32
@@ -363,7 +363,7 @@ módulo Tipos
         si k = K_UN entonces
             si no const(na(e), v) entonces devolver falso fin
             comprueba(e)
-            ancho32 := es32(tipo_de(na(e))) o no n_cabe16(v)
+            ancho32 := es32(tipo_de(na(e))) o no n_cabe16(v) o plano
             según nop(e)
                 caso O_MENOS: n_niega(v)
                 caso O_NOB:
@@ -545,10 +545,14 @@ módulo Tipos
                     devolver tipo_lit(v)
                 fin
                 si nop(e) = O_MENOS entonces
-                    si es32(t) entonces devolver T_ENT32 fin
+                    si es32(t) o plano entonces devolver T_ENT32 fin
                     devolver T_ENT16
                 fin
                 si es32(t) entonces devolver t fin
+                si plano entonces                   ; en 32 bits, las cuentas son de 32
+                    si tk(t) = TK_ENT16 entonces devolver T_ENT32 fin
+                    devolver T_NAT32
+                fin
                 si tk(t) = TK_ENT16 entonces devolver T_ENT16 fin
                 devolver T_NAT16
             caso K_BIN: devolver tipo_bin(e)
@@ -685,6 +689,7 @@ módulo Tipos
                 m("solo se restan dos punteros a byte")
                 falla(nlin(e), ncol(e))
             fin
+            si plano entonces devolver T_NAT32 fin
             devolver T_NAT16
         fin
         cuenta_con(op, ta, na(e))
@@ -694,15 +699,15 @@ módulo Tipos
             devolver tipo_lit(v)
         fin
         si op = O_IZQ o op = O_DER entonces     ; manda el que se desplaza
-            si es32(ta) entonces
-                si tk(ta) = TK_ENT32 entonces devolver T_ENT32 fin
+            si es32(ta) o plano entonces
+                si tk(ta) = TK_ENT32 o tk(ta) = TK_ENT16 entonces devolver T_ENT32 fin
                 devolver T_NAT32
             fin
             si tk(ta) = TK_ENT16 entonces devolver T_ENT16 fin
             devolver T_NAT16
         fin
         signo := tk(ta) = TK_ENT16 o tk(tb) = TK_ENT16 o tk(ta) = TK_ENT32 o tk(tb) = TK_ENT32
-        si es32(ta) o es32(tb) entonces
+        si es32(ta) o es32(tb) o plano entonces
             si signo entonces devolver T_ENT32 fin
             devolver T_NAT32
         fin
@@ -879,9 +884,28 @@ módulo Tipos
             m(" es una variable, no una función")
             falla(nlin(e), ncol(e))
         fin
+        i := at_interna(nm)
+        si plano entonces
+            si i = I_LEER_BYTE o i = I_LEER_PALABRA o i = I_PONER_BYTE o i = I_PONER_PALABRA entonces
+                m("en 32 bits no hay memoria lejana: ")
+                m_at(nm)
+                m("() no está (la memoria es plana: se usa un puntero, como puntero(0xB8000))")
+                falla(nlin(e), ncol(e))
+            fin
+            si i = I_INTERRUPCION o (i >= I_ACARREO y i <= I_REG_ES) entonces
+                m_at(nm)
+                m("() es del modo real (BIOS y DOS): en 32 bits no está (se usa un bloque «ensamblador»)")
+                falla(nlin(e), ncol(e))
+            fin
+        fin
         r := busca(nm)
         si r <> 0 y s_clase(r) = S_FUNC entonces
             f := s_a(r)
+            si f_marcas(f) yb FM_ATIENDE <> 0 entonces
+                m_at(nm)
+                m("() atiende una interrupción: no se la llama (la llama el procesador)")
+                falla(nlin(e), ncol(e))
+            fin
             args_simples(e, f_nparams(f), 0)
             x := nb(e)
             p := nb(f_nudo(f))
@@ -951,6 +975,10 @@ módulo Tipos
             caso I_DIRECCION:
                 args_simples(e, 1, 0)
                 a := arg(e, 0)
+                si plano y nk(a) = K_REF y no es_var(na(a)) entonces
+                    r := busca(na(a))
+                    si r <> 0 y s_clase(r) = S_FUNC entonces devolver T_PUNT_U fin  ; la dirección de una función
+                fin
                 si no es_lugar(a) entonces
                     si nk(a) = K_CAD entonces devolver T_TEXTO fin
                     si tipo_de(a) = T_TEXTO entonces devolver T_TEXTO fin
@@ -959,7 +987,7 @@ módulo Tipos
                 fin
                 t := tipo_de(a)
                 si tk(t) = TK_ARR entonces t := tbase(t) fin
-                r := tip_nuevo(TK_PUNT, 2)
+                r := tip_nuevo(TK_PUNT, tam_punt())
                 t_pon_base(r, 2, t)
                 devolver r
             caso I_VALOR:

@@ -328,11 +328,18 @@ módulo Sintactico
         si es_pal(P_CONSTANTE, 0) entonces devolver constante_() fin
         si es_pal(P_VARIABLE, 0) entonces devolver variable_(cierto) fin
         si es_pal(P_FUNCION, 0) entonces devolver función_() fin
+        si es_id(a_interrupción, 0) y es_pal(P_FUNCION, 1) entonces
+            pp := pp + 1                        ; una función que atiende una interrupción (32 bits)
+            d := función_()
+            pon_marca(d, M_ATIENDE)
+            devolver d
+        fin
         si es_pal(P_TIPO, 0) entonces devolver decl_tipo() fin
         si es_pal(P_ENSAMBLADOR, 0) entonces devolver ensamblador_() fin
-        si es_id(a_modelo, 0) y es_id(a_grande, 1) entonces
-            d := nudo_aquí(K_MODELO)            ; «modelo grande»: un .EXE de varios segmentos
-            pp := pp + 2
+        si es_id(a_modelo, 0) y (es_id(a_grande, 1) o es_id(a_núcleo, 1) o es_id(a_hispa32, 1)) entonces
+            d := nudo_aquí(K_MODELO)            ; «modelo grande»: un .EXE de varios segmentos;
+            pp := pp + 1                        ; «modelo núcleo» y «modelo hispa32»: 32 bits
+            pon_a(d, come_id("el modelo"))
             devolver d
         fin
         si es_id(nombre_modulo, 0) o es_cl(T_EOF, 0) entonces falta_fin() fin

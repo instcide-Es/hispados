@@ -1121,9 +1121,15 @@ módulo Ensambla
     ; ¿vale el inmediato como un octeto con signo (para la forma 83h)? Como en
     ; NASM: con una etiqueta, no (aunque el número quepa); con una que aún no
     ; se sabe (en la primera pasada), se supone que sí
-    función corto(ref op: Op, t: byte): bool
+    ; (más: los octetos que tendrá de más la forma larga, la que lleva el número
+    ; entero: con una etiqueta que aún no se sabe, en la pasada siguiente ya se
+    ; sabrá y la forma será esa, así que el resumen cuenta con ella)
+    función corto(ref op: Op, t: byte, más: byte): bool
         variable v: nat16
-        si op.falta entonces devolver cierto fin
+        si op.falta entonces
+            apunta_fijo(más)
+            devolver cierto
+        fin
         si op.sim entonces devolver falso fin
         si t = 4 entonces devolver op.v <= 0x7F o op.v >= 0xFFFFFF80 fin
         v := nat16(op.v)
@@ -1247,7 +1253,7 @@ módulo Ensambla
             modrm(a.reg, c, 8 * i + 2 + ancho(t), t)
         sino si es_rm(a) y c.k = K_INM entonces
             t := tam_de(a, c)
-            si t <> 1 y corto(c, t) entonces
+            si t <> 1 y corto(c, t, t - 1 - byte(a.k <> K_MEM y a.reg = 0)) entonces
                 modrm(i, a, 0x83, t)
                 b(byte(c.v))
             sino si a.k <> K_MEM y a.reg = 0 entonces
@@ -1307,7 +1313,7 @@ módulo Ensambla
         si no es_r1632(a) entonces mal("imul") fin
         si n = 2 y c.k = K_INM entonces       ; imul eax, 10 = imul eax, eax, 10
             t := tam_de(a, a)
-            si corto(c, t) entonces
+            si corto(c, t, t - 1) entonces
                 modrm(a.reg, a, 0x6B, t)
                 b(byte(c.v))
             sino
@@ -1323,7 +1329,7 @@ módulo Ensambla
             devolver
         fin
         si i.k <> K_INM entonces mal("imul") fin
-        si corto(i, t) entonces
+        si corto(i, t, t - 1) entonces
             modrm(a.reg, c, 0x6B, t)
             b(byte(i.v))
         sino
@@ -1762,7 +1768,7 @@ módulo Ensambla
                     si t = 0 entonces t := bits >> 3 fin
                     modrm(6, op_a, 0xFF, t)
                 sino si op_a.k = K_INM y bits = 32 entonces
-                    si corto(op_a, 4) entonces
+                    si corto(op_a, 4, 3) entonces
                         b(0x6A)
                         b(byte(op_a.v))
                     sino

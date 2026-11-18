@@ -81,6 +81,7 @@ módulo Tablas
     público constante FM_VIVO = 2
     público constante FM_PUBLICO = 4
     público constante FM_VISTO = 8
+    público constante FM_ATIENDE = 16           ; atiende una interrupción (32 bits)
 
     constante PARRAFOS_SIM = 0x0E00             ; 56 K
     constante CUBOS_SIM = 1024
@@ -91,6 +92,8 @@ módulo Tablas
     ; ---- el módulo del que se habla (self.el_mod de ccastel.py) ----
     público variable el_mod: nat16
     público variable grande: bool               ; el programa es de «modelo grande»
+    público variable plano: bool                ; «modelo núcleo» o «modelo hispa32»: 32 bits (CASTEL32.md)
+    público variable es_núcleo: bool            ; «modelo núcleo»
     ; de la última búsqueda: los módulos importados que traen ese nombre (si son dos o más)
     público variable amb_n: nat16
     público variable amb_mod: arreglo [MAX_MODULOS] de byte
@@ -171,6 +174,16 @@ módulo Tablas
     ; ¿es de los que no se sueltan?
     público función tip_fijo(t: nat16): bool
         devolver t < tip_abajo
+    fin
+
+    ; lo que ocupa un puntero: 2 octetos, o 4 en 32 bits
+    público función tam_punt(): nat16
+        si plano entonces devolver 4 fin
+        devolver 2
+    fin
+
+    público función t_pon_tam(t: nat16, tam: nat16)
+        poner_palabra(seg_tip + t, 2, tam)
     fin
 
     público función tk(t: nat16): byte
