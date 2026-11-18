@@ -414,7 +414,19 @@ suma:
 			a.estado = 3;
 			a.banderas |= 8;
 		}
-		if (descargando && ritmo_ok && ritmo) {
+		/* Los minutos, solo con un ritmo creíble: justo al quitar el
+		 * cable algunas baterías dan unas lecturas un ritmo de casi nada
+		 * (el Toshiba NB250: 11h → «quedan 6564 min») o el de carga en 16
+		 * bits con signo (FFAAh → «quedan 1 min»). La lectura en que se
+		 * pasa de cargar o tener cable a descargar no da minutos (la
+		 * primera de todas sí), y el ritmo tiene que estar entre llena/50
+		 * (50 horas) y llena×2 (media hora). (18/11/2026, BATERIA.LOG del
+		 * Toshiba) */
+		static int antes = -1;	/* -1: primera lectura; 0/1: descargaba */
+		int recien = descargando && antes == 0;
+		antes = descargando;
+		if (descargando && ritmo_ok && ritmo && !recien &&
+		    ritmo >= llena / 50 && ritmo <= llena * 2) {
 			u32 m = (u32)((u64)queda * 60 / ritmo);
 
 			if (m && m < 0x7FFF)
