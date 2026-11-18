@@ -106,6 +106,7 @@ static Pagina *pag;
 static int sx, sy;             /* desde dónde se ve la página (letras, filas) */
 static int foco = -1;          /* en pag->foco; -1 nadie */
 static int foco_dir;           /* 1: se escribe en la dirección */
+static int dir_sel;            /* la dirección está elegida entera: lo que se escriba la sustituye */
 static Ctl dir;                /* el campo de la dirección */
 static char estado[200], sobre[200];   /* la línea de estado y el enlace de debajo del ratón */
 static int sobre_enl = -1;
@@ -191,8 +192,9 @@ static void pinta_dir(HANDLE dc) {
   if (dir.desp < 0) dir.desp = 0;
   n = dir.n_valor - dir.desp;
   if (n > vis) n = vis;
-  txt(dc, dir_rect.left + LW, dir_rect.top + 3, dir.valor + dir.desp, n, P(P_TINTA), 0);
-  if (foco_dir) rect(dc, dir_rect.left + LW + (dir.cursor - dir.desp) * LW, dir_rect.top + 3, 2, 16, P(P_TERRACOTA));
+  if (foco_dir && dir_sel && n > 0) rect(dc, dir_rect.left + LW, dir_rect.top + 3, n * LW, 16, P(P_ANIL));
+  txt(dc, dir_rect.left + LW, dir_rect.top + 3, dir.valor + dir.desp, n, P(foco_dir && dir_sel ? P_BLANCO : P_TINTA), 0);
+  if (foco_dir && !dir_sel) rect(dc, dir_rect.left + LW + (dir.cursor - dir.desp) * LW, dir_rect.top + 3, 2, 16, P(P_TERRACOTA));
 }
 static void pinta_barra(HANDLE dc) {
   int k;
@@ -281,10 +283,11 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
   switch (c->tipo) {
   case C_TEXTO: case C_CLAVE: {
     int vis = c->w - 2;
-    const char *ph = atr(c->nodo, "placeholder");
+    const char *ph = atr(c->nodo, "placeholder"), *tp = atr(c->nodo, "type");
+    if (!ph && tp && !_stricmp(tp, "date")) ph = "aaaa-mm-dd";
     rect(dc, x, y, w, h, P(c->desactivado || c->sololee ? P_CREMA : P_BLANCO));
     marco(dc, x, y, w, h, borde);
-    if (tiene) marco(dc, x + 1, y + 1, w - 2, h - 2, borde);
+    if (tiene) marco(dc, x - 1, y - 1, w + 2, h + 2, borde);
     if (c->cursor < c->desp) c->desp = c->cursor;
     if (c->cursor > c->desp + vis - 1) c->desp = c->cursor - vis + 1;
     if (c->desp < 0) c->desp = 0;
@@ -300,7 +303,7 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
     int lc, total = area_linea(c, -1, 0, NULL), l;
     rect(dc, x, y, w, h, P(P_BLANCO));
     marco(dc, x, y, w, h, borde);
-    if (tiene) marco(dc, x + 1, y + 1, w - 2, h - 2, borde);
+    if (tiene) marco(dc, x - 1, y - 1, w + 2, h + 2, borde);
     area_linea(c, -2, c->cursor, &lc);
     if (lc < c->desp) c->desp = lc;
     if (lc > c->desp + c->h - 1) c->desp = lc - c->h + 1;
@@ -335,7 +338,7 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
     rect(dc, x, y, w, h, P(c->desactivado ? P_CREMA : P_BLANCO));
     rect(dc, x + w - 2 * LW, y, 2 * LW, h, P(P_ARENA));
     marco(dc, x, y, w, h, borde);
-    if (tiene) marco(dc, x + 1, y + 1, w - 2, h - 2, borde);
+    if (tiene) marco(dc, x - 1, y - 1, w + 2, h + 2, borde);
     n = strlen(b);
     if (n > c->w - 4) n = c->w - 4;
     txt(dc, x + LW, y + 1, b, n, P(c->desactivado ? P_ARENA_OSC : P_TINTA), 0);
@@ -372,7 +375,7 @@ static void pinta_fila(HANDLE dc, int f) {
       while (j > ini && fl->c[j - 1] == ' ') j--;
       txt(dc, x, y + 1, (const char *)fl->c + ini, j - ini, fg, at->est & A_NEGRITA);
     }
-    if (at->est & A_SUBRAYA) rect(dc, x, y + 16, w, 1, fg);
+    if (at->est & A_SUBRAYA) rect(dc, x, y + 17, w, 1, fg);    /* (debajo de la letra, que ocupa de y+1 a y+16) */
     if (at->est & A_TACHA) rect(dc, x, y + 9, w, 1, fg);
   }
 }
@@ -687,9 +690,15 @@ static void remaqueta(void) {
   if (sy > pag->n_filas - filas_vis) { sy = pag->n_filas - filas_vis; if (sy < 0) sy = 0; }
   repinta();
 }
+static void pulsa_ctl(int idx);
 static void abre_enlace(int e) {
   Enlace *en = &pag->enl[e];
   char b[300], *u;
+  if (!en->href && en->nodo->etq == E_LABEL) {   /* el texto de una etiqueta: su control */
+    int k = pag_ctl_de_label(pag, en->nodo);
+    if (k >= 0 && pag->ctl[k].visible) pulsa_ctl(k);
+    return;
+  }
   if (!en->href) {                               /* algo que se pliega */
     en->nodo->abierto = !en->nodo->abierto;
     remaqueta();
@@ -793,7 +802,12 @@ static void pulsa_ctl(int idx) {
 }
 /* escribir en un campo de una línea: 1 si ha cambiado algo que pintar */
 static int edita(Ctl *c, int vk, int ch) {
-  if (ch >= 32) {
+  if (c == &dir && dir_sel) {                    /* la dirección, elegida entera */
+    dir_sel = 0;
+    if (ch >= 32 || vk == VK_BACK || vk == VK_DELETE) { ctl_pon(c, "", 0); c->cursor = c->desp = 0; if (ch < 32) return 1; }
+    else return 1;
+  }
+  if (ch >= 32 || ch == '\n') {
     if (c->sololee || c->n_valor >= c->max) return 0;
     if (c->n_valor + 2 > c->cap_valor) {
       char *v = realloc(c->valor, c->n_valor + 128);
@@ -852,11 +866,15 @@ static void tecla(int vk) {
     return;
   }
   if (vk == VK_F5) { recarga(); return; }
-  if (vk == VK_F6) { foco_dir = 1; foco = -1; dir.cursor = dir.n_valor; repinta(); return; }
+  if (vk == VK_F6) { foco_dir = 1; dir_sel = 1; foco = -1; dir.cursor = dir.n_valor; dir.desp = 0; repinta(); return; }
   if (foco_dir) {
     if (vk == VK_RETURN) { foco_dir = 0; ir_dir(dir.valor); repinta(); return; }
     if (vk == VK_TAB) { foco_dir = 0; if (pag && pag->n_foco) foco_pon(0); else repinta(); return; }
-    if (edita(&dir, vk, 0)) { HANDLE dc = GetDC(vent); pinta_dir(dc); ReleaseDC(vent, dc); }
+    if ((vk == VK_BACK || vk == VK_DELETE || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_HOME || vk == VK_END) && edita(&dir, vk, 0)) {
+      HANDLE dc = GetDC(vent);
+      pinta_dir(dc);
+      ReleaseDC(vent, dc);
+    }
     return;
   }
   if (!pag) return;
@@ -975,6 +993,7 @@ static void clic(int px, int py) {
         return;
       }
     if (en_rect(&dir_rect, px, py)) {
+      dir_sel = !foco_dir;                         /* el primer clic la elige entera; otro pone el cursor */
       foco_dir = 1; foco = -1;
       dir.cursor = dir.desp + (px - dir_rect.left - LW + LW / 2) / LW;
       if (dir.cursor > dir.n_valor) dir.cursor = dir.n_valor;
@@ -1114,8 +1133,8 @@ void inicio_prog(void) {
   if (h > 720) h = 720;
   vent = CreateWindowExA(0, "HispaNavegador", "Navegador", WS_OVERLAPPEDWINDOW, 8, 30, w - 16, h - 14, NULL, NULL, inst, NULL);
   if (!vent) ExitProcess(1);
+  ShowWindow(vent, 3);                           /* a toda la pantalla: la página necesita sitio */
   coloca();
-  ShowWindow(vent, 5);
   UpdateWindow(vent);
   /* la dirección de la línea de órdenes, si la hay; si no, el inicio */
   if (*cmd == '"') { for (cmd++; *cmd && *cmd != '"'; cmd++) ; if (*cmd) cmd++; }

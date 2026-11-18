@@ -7,6 +7,7 @@
 #   tools/elf2pe.py -o PROG.EXE [-e entrada] [--reloc] [--base 0x400000]
 #                   [--gui] [-i DLL:func,func...] obj.o ...
 #                   [-l UNA.DLL] [-t ventanas/win32.inc] [--res recursos.rc]
+#                   [--pila octetos]   (la pila que pide: 1 MB si no se dice)
 #   tools/elf2pe.py --dll -o MSVCRT.DLL [-e DllMain] obj.o ...
 #
 # Con --dll sale una DLL: se exportan todos los símbolos globales definidos
@@ -99,6 +100,7 @@ def main():
     ap.add_argument('-t', action='append', default=[])
     ap.add_argument('--res', default=None)
     ap.add_argument('--exp', default=None)
+    ap.add_argument('--pila', default='0x100000')
     ap.add_argument('objs', nargs='+')
     a = ap.parse_args()
     if a.dll:
@@ -366,7 +368,7 @@ def main():
     struct.pack_into('<HBBIIIIIIIII', sal, o, 0x10B, 2, 0, len(t), len(d), bss_tam,
                      entrada, rva_t, rva_d, base, SEC_AL, ARCH_AL)
     struct.pack_into('<HHHHHHIIIIHHIIIIII', sal, o + 40, 4, 0, 0, 0, 4, 0, 0, tam_img,
-                     cab_tam, 0, 2 if a.gui else 3, 0, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16)
+                     cab_tam, 0, 2 if a.gui else 3, 0, int(a.pila, 0), 0x1000, 0x100000, 0x1000, 0, 16)
     dirs = [(0, 0)] * 16
     dirs[1] = imp_dir
     dirs[12] = iat_dir

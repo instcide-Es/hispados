@@ -164,7 +164,18 @@ NAVOBJ = $(patsubst w32/navega/%.c,$(B)/nav_%.o,$(NAVSRC))
 $(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h | $(B)
 	$(CC32) -march=i486 -Wall -Wextra -Wno-parentheses -Wno-sign-compare -c $< -o $@
 $(B)/NAVEGA.EXE: $(NAVOBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
-	python3 tools/elf2pe.py --gui -e inicio_prog -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(NAVOBJ)
+	python3 tools/elf2pe.py --gui --pila 0x30000 -e inicio_prog -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(NAVOBJ)
+# El segundo disquete de Hispa-486: «Internet» (el Navegador, HTTPS y sus DLL;
+# con HW32.COM y MSVCRT.DLL al lado para que se puedan abrir desde él)
+INTERNET = $(B)/NAVEGA.EXE $(B)/HTTPS.EXE $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL $(B)/HW32.COM
+$(B)/internet.img: $(INTERNET) w32/navega/NAVEGA.INI w32/navega/LEEME.TXT
+	rm -f $@
+	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
+	MTOOLS_SKIP_CHECK=1 mformat -i $@ -f 1440 -v INTERNET ::
+	for f in $(INTERNET) w32/navega/NAVEGA.INI; do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f :: || exit 1; done
+	iconv -f UTF-8 -t CP437 w32/navega/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet_leeme.txt
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet_leeme.txt ::LEEME.TXT
+internet: $(B)/internet.img
 # [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
 # Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
 $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
@@ -905,6 +916,8 @@ test: $(TEST_DEPS)
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)
 	tests/run_yukon_tests.sh
+	tests/run_red32_tests.sh $(IMG)
+	tests/run_navegador_tests.sh $(IMG)
 	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_wifi_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)

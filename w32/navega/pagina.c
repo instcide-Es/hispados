@@ -547,8 +547,14 @@ typedef struct {
 } Ctx;
 static void caja(Ctx *c, Nodo *n, Est e);
 static void hijos(Ctx *c, Nodo *n, Est e) {
-  Nodo *h;
-  for (h = n->hijo; h; h = h->sig) caja(c, h, e);
+  Nodo *h, *ant = NULL;
+  for (h = n->hijo; h; ant = h, h = h->sig) {
+    /* dos elementos con clase, pegados (</span><span...): en la página son
+     * cajas aparte (lo dice una hoja de estilo que aquí no está): un espacio */
+    if (ant && !ant->texto && !h->texto && c->col && atr(ant, "class") && atr(h, "class")
+        && !(etq_band[h->etq] & EF_FUERA) && h->etq != E_INPUT && ant->etq != E_INPUT) c->espacio = 1;
+    caja(c, h, e);
+  }
 }
 static void ctx_nuevo(Ctx *c, Pagina *p, int x0, int ancho, int y, int medir) {
   c->p = p; c->x0 = x0; c->ancho = ancho < 1 ? 1 : ancho > LMAX - 1 ? LMAX - 1 : ancho; c->y = y;
@@ -653,7 +659,7 @@ static void foco_pon(Pagina *p, int enlace, int n) {
   p->foco[p->n_foco].enlace = (u8)enlace; p->foco[p->n_foco].n = (short)n;
   p->n_foco++;
 }
-static int enlace_nuevo(Ctx *c, const char *href, Nodo *n) {
+static int enlace_nuevo2(Ctx *c, const char *href, Nodo *n, int con_foco) {
   Pagina *p = c->p;
   if (c->medir) return -1;
   if (p->n_enl == p->cap_enl) {
@@ -663,8 +669,24 @@ static int enlace_nuevo(Ctx *c, const char *href, Nodo *n) {
   }
   if (p->n_enl >= 32000) return -1;
   p->enl[p->n_enl].href = href; p->enl[p->n_enl].nodo = n; p->enl[p->n_enl].x = 0; p->enl[p->n_enl].y = -1;
-  foco_pon(p, 1, p->n_enl);
+  if (con_foco) foco_pon(p, 1, p->n_enl);
   return p->n_enl++;
+}
+static int enlace_nuevo(Ctx *c, const char *href, Nodo *n) { return enlace_nuevo2(c, href, n, 1); }
+/* el control de un <label>: el de su «for», o el primero que lleve dentro; -1 si no hay */
+static int ctl_dentro(Nodo *n) {
+  Nodo *h;
+  int k;
+  if (!n->texto && n->ctl) return n->ctl - 1;
+  for (h = n->hijo; h; h = h->sig) if (!h->texto && (k = ctl_dentro(h)) >= 0) return k;
+  return -1;
+}
+int pag_ctl_de_label(Pagina *p, Nodo *n) {
+  const char *para = atr(n, "for"), *id;
+  int k;
+  if (para && para[0])
+    for (k = 0; k < p->n_ctl; k++) if ((id = atr(p->ctl[k].nodo, "id")) && !strcmp(id, para)) return k;
+  return ctl_dentro(n);
 }
 /* el ancho, en letras, de un control */
 static int ctl_ancho(Ctx *c, Ctl *k) {
@@ -743,6 +765,7 @@ static void control(Ctx *c, Nodo *n, Est e) {
   }
   memset(b, ' ', w);
   pon(c, b, w, a);
+  if (k->tipo == C_CASILLA || k->tipo == C_RADIO) c->espacio = 1;   /* (su texto, separado) */
   if (!c->medir) {
     k->w = w; k->h = 1; k->visible = 1;
     if (!k->desactivado) foco_pon(p, 0, idx);
@@ -966,6 +989,11 @@ static void caja(Ctx *c, Nodo *n, Est e) {
     hijos(c, n, e);
     if (band & EF_BLOQUE) salta(c);
     return;
+  case E_LABEL:
+    /* pulsar el texto de una etiqueta es pulsar su control (una casilla, un
+     * campo): va como un enlace sin dirección y sin aspecto de enlace */
+    if (e.enlace < 0 && (k = pag_ctl_de_label(p, n)) >= 0 && p->ctl[k].tipo != C_OCULTO) e.enlace = (short)enlace_nuevo2(c, NULL, n, 0);
+    break;
   case E_B: case E_STRONG:
     e.est |= A_NEGRITA;
     break;

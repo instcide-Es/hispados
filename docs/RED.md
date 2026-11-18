@@ -62,12 +62,13 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 | `CONSOLA [/PUERTO:n]` | Consola remota por red (servidor TCP, puerto 2323 por omisión): deja entrar a otra persona a este equipo, con un código de acceso de 6 cifras por conexión que solo se ve aquí. Abierta y controlada por el usuario. Ver [docs/CONSOLA.md](CONSOLA.md). |
 | `ACTUALIZAR [url]` | Instalador por red. Mira por HTTP (`versiones.txt`) si hay una versión más nueva o una edición más rica que la instalada (`lib/version.inc`), según la CPU/RAM/disco del equipo; y, si el usuario quiere, **baja el paquete `.PAQ` y lo instala en el sitio** conservando `*.INI`/`*.REC`. La dirección sale, por orden, de lo que se escriba, de `ACTUALIZAR=` en `RED.INI`, o de la de por omisión. Ver más abajo. |
 
-**HTTPS no**: las direcciones `https://` (cifradas, hoy casi todas) se
-rechazan con un mensaje claro, y también una redirección a `https://`. Para
-TLS hace falta criptografía (RSA/ECDHE, AES/ChaCha, SHA-2) y certificados: es
-un trabajo grande, más propio de Hispa 32. `DESCARGAR` sirve para servidores
-de la red de casa (otro PC con `python3 -m http.server`, un NAS) y para los
-sitios de archivos antiguos que siguen dando HTTP.
+**HTTPS, en `DESCARGAR`, no**: las direcciones `https://` (cifradas, hoy casi
+todas) se rechazan con un mensaje claro, y también una redirección a
+`https://`. `DESCARGAR` sirve para servidores de la red de casa (otro PC con
+`python3 -m http.server`, un NAS) y para los sitios de archivos antiguos que
+siguen dando HTTP. **Las cifradas las baja `HTTPS`** (`HTTPS.EXE`, un programa
+Hispa32 del disquete «Internet» de Hispa-486: necesita HSPDPMI): ver «La red
+de los programas Hispa32», más abajo; `DESCARGAR` lo dice en su mensaje.
 
 `AYUDA` las lista y `AYUDA CONFRED` (o `CONFRED /?`), `AYUDA PING`,
 `AYUDA DESCARGAR` y `AYUDA ACTUALIZAR` las explican.
@@ -742,6 +743,185 @@ medio establecer), un SYN nuevo a ese puerto se descarta (una sola a la vez).
 Estas rutinas van en `lib/red.inc` (cada programa lleva su copia de la pila),
 igual que las del cliente: la pila no es residente.
 
+## La red de los programas Hispa32 (Hispa-486)
+
+Desde el 18/11/2026 los programas de 32 bits (Hispa32: docs/486/HISPA-486.md)
+tienen red, y cifrada. Son tres piezas, las tres en el disquete «Internet»
+de Hispa-486 (`make internet`), y un programa que las usa además del
+Navegador (docs/486/NAVEGADOR.md):
+
+```
+A:\>HSPDPMI
+A:\>HSPRED
+A:\>B:\HW32 B:\HTTPS.EXE /V https://clicgest.es/login PAGINA.HTM
+Servidor clicgest.es: 31.70.156.143:443 (cifrado)
+Conexión segura: TLS 1.2, ECDHE-ECDSA, ChaCha20-Poly1305 (280 ms; 21942 miles de ciclos de cálculo)
+HTTP/1.1 200 OK
+...
+Guardado en PAGINA.HTM (8764 octetos).
+```
+
+`HTTPS [/V] [/N] dirección [archivo]`: baja por HTTP o HTTPS, sigue hasta 5
+redirecciones y guarda el archivo (sin nombre: el de la ruta en 8.3, o
+`INDEX.HTM`). `/N`: no guarda, dice los octetos y su suma. `/V`: las
+cabeceras, el cifrado y lo que ha costado el apretón de manos. Sale con 0 si
+todo va bien (4: la conexión segura falla; 8: el servidor no da un 200).
+(COMMAND.COM lanza los `.EXE` de Hispa32 con HW32 él solo: basta `HTTPS ...`
+si HW32.COM está junto a COMMAND.COM o en el PATH.)
+
+### 1. HW32: las tramas (utils/hw32k.inc)
+
+Tres funciones nuestras en el KERNEL32 de HW32 (no son del API de Windows):
+`HispaRedAbrir(info)`, `HispaRedEnviar(trama, octetos)` y `HispaRedCerrar()`.
+Al abrir, HW32 busca el packet driver, pide los tipos IP y ARP y pone como
+receptor un trozo de código de modo real que copia a un bloque de memoria
+convencional (19 KB): desde la interrupción de la tarjeta, cada trama cae en
+una ranura de un anillo de 12, y el programa (en modo protegido) lo lee
+directamente de esa memoria, sin llamar a nadie. Enviar es una llamada al
+packet driver por DPMI. `info` trae la MAC, el anillo y la configuración IP
+compartida de HSPRED.
+
+Al acabar el programa, **como sea** (`ExitProcess`, un error, que lo termine
+el Administrador de tareas, Ctrl+C en la consola), HW32 suelta los tipos y el
+bloque: si no, el controlador llamaría a un receptor que ya no está. Lo único
+que no se cubre: un programa de consola que el procesador tumbe con una
+excepción (dentro de Hispa Ventanas sí se cubre).
+
+Los tipos IP y ARP son de uno solo a la vez: **un programa con la red abierta
+cada vez** (el segundo recibe «la red no está disponible»). Dos programas de
+red a la vez pedirán la pila residente de «Pendiente».
+
+### 2. WSOCK32.DLL: la pila TCP/IP y Winsock 1.1 (w32/wsock32.c)
+
+**Una pila nueva, en C**, y no la de `lib/red.inc`. El porqué: aquella es
+ensamblador de 16 bits de modo real, con sus datos en el segmento del
+programa, una sola conexión y el receptor en su propio código; usarla desde
+un programa de 32 bits en modo protegido era pasar a modo real en cada
+llamada y copiar cada dato, y aun así faltaban varias conexiones y los
+sockets sin bloqueo que pide un navegador. Las DLL de Hispa32 se escriben en
+C (como MSVCRT.DLL), TLS (BearSSL) es C y lo que hay que compartir con la de
+16 bits no es el código sino lo que ya se comparte: el packet driver y la
+configuración IP que guarda HSPRED.
+
+- Ethernet II, ARP (8 direcciones; la trama que espera a que ARP conteste
+  se guarda y sale al llegar la respuesta), IPv4 sin fragmentos, ICMP
+  (contesta al eco), UDP, cliente de DHCP y de DNS (registros A, con una
+  memoria de 8 nombres durante 10 minutos).
+- TCP de cliente con hasta 8 conexiones: reenvíos (1 s, doblando, hasta 8
+  veces; el SYN, 4), ventana según el sitio que queda (16 KB por conexión,
+  8 segmentos como mucho, que es lo que cabe en el anillo), MSS negociado,
+  cierre ordenado (el FIN sale tras los datos; la ficha se suelta cuando el
+  otro lado acaba o a los 5 s), RST a lo que no es de nadie. Lo que llega
+  desordenado se tira y se repite el acuse (el otro lado reenvía).
+- La configuración IP es la de HSPRED (la que dejó `CONFRED`); si no hay,
+  la consigue como `lib/red.inc` (RED.INI de la unidad de COMSPEC: DHCP o a
+  mano, `DNS=` manda) y se la deja a HSPRED para los demás.
+- No hay hilos: la pila avanza cada vez que el programa llama a una función.
+  Las llamadas que esperan ceden el turno (`Sleep(0)`: dentro de Hispa
+  Ventanas, a las demás tareas).
+- **Winsock 1.1**, por nombre: `WSAStartup`, `WSACleanup`,
+  `WSAGetLastError`, `socket` (TCP y UDP), `connect`, `send`, `recv`,
+  `sendto`, `recvfrom`, `bind`, `closesocket`, `shutdown`, `select`,
+  `ioctlsocket` (`FIONBIO`, `FIONREAD`), `gethostbyname`, `gethostname`,
+  `getsockname`, `getpeername`, `setsockopt`, `getsockopt` (`SO_ERROR`),
+  `inet_addr`, `inet_ntoa`, `htons` y compañía, `__WSAFDIsSet`. Los números
+  de error son los de Winsock. Faltan: servidores (`listen` y `accept`
+  devuelven `WSAEOPNOTSUPP`), las `WSAAsync*`, los datos urgentes y la
+  importación por número (los programas de Visual C++ importan WSOCK32 así;
+  los de MinGW, por nombre).
+
+### 3. HSPTLS.DLL: TLS 1.2 con comprobación del certificado (w32/tls/)
+
+La criptografía y el protocolo son de **BearSSL 0.6** (Thomas Pornin,
+licencia MIT, compatible con la GPL: `terceros/bearssl`, solo los 60 archivos
+que se enlazan, sin tocar), hecho para máquinas pequeñas: sin memoria
+dinámica y con implementaciones de 32 bits. Lo nuestro (`hsptls.c`):
+
+- **El perfil:** solo TLS 1.2; intercambio ECDHE (Curve25519, P-256, P-384);
+  servidor con certificado ECDSA o RSA; ChaCha20-Poly1305 o AES-GCM. Es lo
+  que piden hoy los servidores corrientes (clicgest.es: ECDHE-ECDSA con
+  ChaCha20-Poly1305). Sin TLS 1.3, sin RSA como intercambio, sin CBC.
+- **El certificado se comprueba:** la cadena hasta una autoridad raíz, el
+  nombre del servidor y las fechas, con el reloj del equipo. Las raíces
+  (`w32/tls/raices/*.pem`, 20: las de Let's Encrypt —ISRG Root X1, X2 y las
+  nuevas Root YE y Root YR, que son las de clicgest.es—, DigiCert, GlobalSign,
+  Google, Amazon, Sectigo/USERTrust, GoDaddy, Starfield, Microsoft, Certum,
+  SSL.com) van dentro de la DLL (`anclas.h`; se rehace con
+  `tools/mkanclas.sh`). Además vale como raíz cualquier certificado `*.CER`
+  (X.509 en DER, de una autoridad) que haya **en la carpeta del programa**:
+  para la intranet de una asociación, y para las pruebas. Sin revocación
+  (ni CRL ni OCSP).
+- **La memoria de certificados.** La cadena de clicgest.es son dos firmas
+  ECDSA P-384, que con aritmética genérica de 32 bits son lo más caro con
+  diferencia. La cadena que ya se dio por buena para un servidor (el resumen
+  SHA-256 del nombre y de los certificados) se recuerda **una semana**
+  (`HSPTLS.CCH`, junto al programa, 16 servidores): mientras tanto no se
+  vuelve a comprobar, solo se lee la clave del servidor. Si el servidor
+  cambia de certificado, o pasa la semana, se comprueba otra vez entera.
+- **El azar.** No hay generador del sistema. Se junta (SHA-256) lo
+  imprevisible que hay: el contador del reloj (PIT, 0,8 µs) y el de ciclos
+  (TSC, si lo hay) cada vez que llega algo de la red o se llama a la DLL, la
+  hora, las teclas y el ratón (el Navegador se los pasa) y una semilla que
+  se guarda de una vez para otra (`HSPTLS.SEM`). En un equipo recién
+  instalado y sin tocar es poco azar para lo que se pide hoy: es el punto
+  flaco, y está dicho.
+- Las sesiones se reanudan si el servidor guarda su identificador (los
+  «tickets» no están).
+- Los tiempos de las multiplicaciones dependen de los datos en un 486 (y
+  BearSSL no puede evitarlo en ese procesador): no se promete resistencia a
+  quien mida tiempos desde la misma red.
+
+Las funciones (`TlsAbrir`, `TlsConectar`, `TlsLeer`, `TlsEscribir`,
+`TlsCerrar`, `TlsError`, `TlsTextoError`, `TlsInfo`, `TlsAzar`,
+`TlsCiclos`) van sobre un socket de WSOCK32 sin bloqueo; están descritas al
+principio de `w32/tls/hsptls.c`. Los errores salen en español: «El
+certificado del servidor ha caducado o aún no vale. Compruebe la fecha del
+equipo.», «...no lo firma ninguna autoridad conocida.», «El certificado es de
+otro sitio, no del que se ha pedido.».
+
+### Lo que cuesta el apretón de manos
+
+Medido en QEMU con `-icount` (cuenta instrucciones; `HTTPS /V` las enseña) y
+contando en el anfitrión las multiplicaciones de 32×32 bits de cada
+operación (BearSSL, implementaciones «m31» e «i31»):
+
+| | Instrucciones | Multiplicaciones | 486DX2-66 (estimado) |
+|---|---|---|---|
+| Firma ECDSA P-384 (comprobar): cada certificado de la cadena de clicgest.es | 91 M | 4,8 M | 6,5 s |
+| Firma ECDSA P-256 (comprobar): la del intercambio de claves | 13 M | 0,48 M | 0,8 s |
+| Curve25519 (cada una de las dos del intercambio) | 2,6 M | 0,2 M | 0,2 s |
+| **Apretón de manos con clicgest.es, la primera vez** (dos P-384) | **216 M** | 10,5 M | **unos 15 s** |
+| **El mismo, con la cadena recordada** | **22 M** | 0,9 M | **1,4 s** |
+
+La estimación: 2,75 ciclos por instrucción corriente y 40 por multiplicación
+(en un 486, `MUL` de 32 bits tarda de 13 a 42 ciclos según el multiplicador),
+a 66 MHz. En un Pentium a 100 MHz, la tercera parte más o menos. En QEMU en
+este servidor, 0,3 s la primera vez. El cifrado de los datos
+(ChaCha20-Poly1305) no se ha medido aparte; son operaciones de 32 bits sin
+tablas.
+
+### Tamaños y memoria
+
+| | En disco | |
+|---|---|---|
+| `HW32.COM` | 32 KB | (+0,6 KB por las tres funciones de red) |
+| `WSOCK32.DLL` | 23 KB | 24 KB de búferes por conexión TCP abierta |
+| `HSPTLS.DLL` | 87 KB | 37 KB por conexión cifrada (los búferes de TLS y la cadena) |
+| `HTTPS.EXE` | 7 KB | |
+| Memoria convencional | | 19 KB con la red abierta (el anillo), además de los 16 KB de HW32 |
+
+### Pruebas
+
+`tests/run_red32_tests.sh` (sin Internet: servidor propio en el anfitrión,
+`tests/tools/nav_servidor.py`, con certificados hechos en la prueba por
+`tests/tools/nav_certs.sh`): DHCP, ARP y una descarga de 150 KB con su suma
+(RTL8139 y NE2000), conexión rechazada, sockets sin bloqueo con `select`,
+redirecciones, descargas cifradas ECDSA (AES-256-GCM) y RSA
+(ChaCha20-Poly1305), el certificado recordado, guardar en un archivo, los
+certificados que no valen (de otro nombre, sin autoridad conocida, caducado,
+sin la raíz de pruebas), el reloj mal puesto, un 404, un servidor que no
+existe y que después HSPRED se descarga (los programas soltaron la red).
+
 ## Memoria
 
 | | Residente en total | de ello, búferes de DMA | Antes del 16/11/2026 |
@@ -923,7 +1103,8 @@ tardan más de un tic entre una conexión y la siguiente.
   Microsoft (que usa NDIS, no packet drivers).
 - **Pila residente** con varias conexiones a la vez, ventana que crece y
   renovación de la concesión de DHCP.
-- **Un navegador** para Hispa Ventanas (HTML sencillo por HTTP) y un cliente
+- ~~Un navegador para Hispa Ventanas~~: hecho en Hispa-486 (18/11/2026,
+  docs/486/NAVEGADOR.md), con HTTPS. Queda un cliente
   de FTP.
 - `PING` con milisegundos (el temporizador 8254, en vez del reloj de la
   BIOS).

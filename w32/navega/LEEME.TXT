@@ -1,0 +1,14 @@
+Hispa-486: disquete «Internet»
+
+  NAVEGA.EXE   el Navegador (se abre desde Hispa Ventanas: menú Inicio >
+               Internet > Navegador, o desde el Administrador de archivos)
+  HTTPS.EXE    descarga por HTTP o HTTPS desde Hispa-DOS:  HTTPS dirección
+  WSOCK32.DLL  la red de los programas Hispa32 (TCP/IP y Winsock 1.1)
+  HSPTLS.DLL   las conexiones cifradas (TLS 1.2)
+  HW32.COM y MSVCRT.DLL   lo que necesita todo programa Hispa32
+  NAVEGA.INI   los ajustes del Navegador (la página de inicio, los favoritos)
+
+Antes de entrar en Hispa Ventanas hay que cargar el controlador de la
+tarjeta de red:  HSPRED  (y hace falta HSPXMS en CONFIG.SYS).
+Para copiarlo al disco duro:  XCOPIAR B:\*.* C:\HISPADOS\INTERNET\
+Más, en docs/486/NAVEGADOR.md y docs/RED.md.

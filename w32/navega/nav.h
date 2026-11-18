@@ -184,4 +184,5 @@ void pag_suelta(Pagina *);
 int pag_formulario(Pagina *, Nodo *forma, int con, char **url, char **cuerpo, u32 *n_cuerpo, int *post);
 const char *pag_confirma(Nodo *n, char *b, int max);   /* el texto de confirm('...') o NULL */
 void ctl_pon(Ctl *, const char *t, int n);
+int pag_ctl_de_label(Pagina *, Nodo *label);          /* el control de un <label>, o -1 */
 #endif

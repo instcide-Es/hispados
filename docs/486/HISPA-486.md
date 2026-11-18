@@ -46,7 +46,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. Falta: los iconos del escritorio y «Mi PC» |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
-| 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador |
+| 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Falta: imágenes, hojas de estilo de fuera |
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
 | 8 | Arranque UEFI nativo (cargador propio, disco y pantalla sin BIOS) | arranca en un PC sin CSM |
 | 9 | Programas propios de la época: la oficina «-486», audio y vídeo | versión 1.0 |
@@ -119,6 +119,40 @@ sobre una capa propia; la gestión 802.11 y WPA2 son nuestras. Va en un
 núcleo de 32 bits en memoria extendida (2 MB), con un residente de 4,6 KB.
 Todo, en [docs/WIFI.md](../WIFI.md). Falta la prueba en el equipo de verdad
 (hay una imagen preparada) y la ventana de Hispa Ventanas para elegir red.
+
+## Fase 6a: la red, HTTPS y el Navegador (hecha, 18/11/2026)
+
+Pedido de Carlos: «Si le ponemos un explorador web al 486 ya lo podemos usar
+para la biblio» (la biblioteca de la asociación, en ClicGest).
+
+- **Qué hay:** el segundo disquete de Hispa-486, «Internet» (`make internet`,
+  279 KB): el **Navegador** (`NAVEGA.EXE`, en Inicio › Internet), `HTTPS.EXE`
+  (descargas cifradas desde la consola) y las dos DLL que les dan la red:
+  `WSOCK32.DLL` (una pila TCP/IP propia en C y el subconjunto de Winsock 1.1)
+  y `HSPTLS.DLL` (TLS 1.2 de cliente sobre BearSSL, con comprobación del
+  certificado). Todo son programas Hispa32: en lo que ve el usuario se llaman
+  así, no «de Windows».
+- **Dónde se cuenta:** el Navegador, en [NAVEGADOR.md](NAVEGADOR.md) (qué
+  entiende, cómo se maneja, cómo va con ClicGest, medidas y límites); la red
+  y TLS, en [docs/RED.md](../RED.md), «La red de los programas Hispa32».
+- **Lo que ha tocado de lo que había:**
+  - HW32 (`utils/hw32k.inc`): tres funciones nuestras en KERNEL32
+    (`HispaRedAbrir`, `HispaRedEnviar`, `HispaRedCerrar`) para las tramas del
+    packet driver, y soltar la red al acabar el programa.
+  - Hispa Ventanas: los colores de GDI admiten `PALETTEINDEX(n)` (los de su
+    paleta: así un programa Hispa32 se pinta con la crema, la arena y la
+    terracota de verdad, no con lo más parecido del cubo de colores); y el
+    grupo «Internet» del Centro de programas, que se crea solo la primera vez
+    que `NAVEGA.EXE` está en `\HISPADOS\INTERNET` (`ventanas/accesos.inc`,
+    `inet_arranque`; clave `Internet=1`).
+  - `tools/elf2pe.py`: `--exp a,b,c` (una DLL que solo exporta eso) y
+    `w32/crt0.c` (el arranque de los programas de consola con `main`).
+- **Pruebas:** `tests/run_red32_tests.sh` (la red y TLS desde la consola) y
+  `tests/run_navegador_tests.sh` (el Navegador dentro de Hispa Ventanas),
+  las dos sin Internet, con un servidor propio en el anfitrión.
+- **Lo que sigue:** imágenes (GIF, JPEG y PNG pequeños), las hojas de estilo
+  de fuera cuando sean pequeñas, subir archivos, y la pila residente para
+  que dos programas usen la red a la vez.
 
 ## Fase 4a: la barra de tareas y el menú Inicio (hecha, 18/11/2026)
 
