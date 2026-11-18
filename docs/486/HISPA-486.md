@@ -323,6 +323,12 @@ instalar desde disquetes son los de Hispa-386 (el de arranque,
 tres .INI de la edición en `\HISPADOS` y el `AUTOEXEC.BAT` que arranca el
 escritorio.
 
+Tamaños (18/11/2026, con el Navegador y la red): la imagen USB,
+512 MB (536.870.912 octetos) con 3,5 MB de archivos (3.665.995 octetos en
+142 archivos; la de Hispa-386, 3.384.791 en 121); en `.zip`, 2,2 MB
+(2.267.184 octetos). El disquete «Hispa-486», 33 KB ocupados de 1.440; el
+de «Internet», 283 KB (282.691 octetos en 8 archivos).
+
 ### Cómo se publica
 
 1. `make usb486` (y `make test`, o al menos `tests/run_imagen486_tests.sh`,
