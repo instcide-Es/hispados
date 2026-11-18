@@ -35,6 +35,7 @@ mi_tipo     resb INI_MAX             ; 0 raya, 1 grupo, 2 orden fija
 ini_nivel   resb 1                  ; 0: se maneja el menú; 1: el submenú
 ms_mas      resb 1                  ; 1: no cabían todos: la última es «Más...»
 bt_win_ant  resb 1                  ; la tecla de Windows, la última vez
+bt_est_pend resb 1                  ; [ESTILO] el escritorio que se ha pedido (0: ninguno; 1 el clásico, 2 el de la barra)
 bt_ico16    resb 256                ; un icono a mitad de tamaño
 ; ---- los iconos del escritorio (los accesos de los grupos con «Escritorio=1») ----
             alignb 4

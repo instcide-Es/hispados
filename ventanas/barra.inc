@@ -138,8 +138,20 @@ bt_iniciar:
         cmp byte [op_486], 0
         je .x
 .si:
+        call bt_crear
+.x:
+        popad
+        ret
+
+; (interna) el escritorio de Hispa-486: el área de trabajo, el escritorio sin
+; la barra de arriba y la barra de tareas (al arrancar y, [ESTILO], al
+; cambiarlo en Configuración)
+bt_crear:
+        pushad
         mov dword [area_y0], 0
-        sub dword [area_y1], BT_H
+        mov eax, [vid_alto]
+        sub eax, BT_H
+        mov [area_y1], eax
         mov ebp, [escritorio]       ; el escritorio, con el procedimiento de
         mov dword [ebp+V_PROC], bt_esc_proc ; Hispa-486 (sin barra arriba)
         call ven_invalidar
@@ -162,7 +174,6 @@ bt_iniciar:
         call ven_crear
         add esp, P_TAM
         mov [bt_ven], eax
-.x:
         popad
         ret
 
@@ -243,6 +254,213 @@ bt_ini_leer:
         jne .salta
         jmp .linea
 .x:
+        popad
+        ret
+
+; =============================================================================
+;  [ESTILO] Pasar de un escritorio al otro sin salir de Hispa Ventanas
+;  (Configuración › Escritorio › «Estilo del escritorio»; pedido de Carlos,
+;  18/11/2026: «pasar de menú de inicio a menú de Ventanas»). Configuración
+;  lo pide por la interfaz (esc_imagen, EAX=4) y se hace aquí, en la vuelta
+;  siguiente del bucle del sistema (bt_vigilar), como lo demás de la barra:
+;    - a la barra de tareas: el área de trabajo sin la barra de arriba, el
+;      escritorio de Hispa-486, la barra; el Centro y sus grupos, ocultos
+;      (como al entrar en Hispa-486: todo está en el menú Inicio);
+;    - al clásico: se cierran el menú Inicio y las ventanitas de la bandeja,
+;      se quita la barra, vuelven la barra de arriba y el escritorio de
+;      siempre (lo minimizado, en iconos), y el Centro y los grupos que se
+;      escondieron, a la vista.
+;  En los dos casos, las ventanas maximizadas se ajustan al área nueva, las
+;  que quedarían debajo de una barra se corren lo justo y la que estaba
+;  delante (Configuración) sigue delante.
+; =============================================================================
+; (esc_imagen, EAX=3) -> EAX=0 el clásico, 1 el de la barra de tareas (el que
+; se va a poner, si ya se ha pedido otro)
+bt_estilo_leer:
+        movzx eax, byte [bt_est_pend]
+        dec eax
+        jns .r
+        movzx eax, byte [op_486]
+.r:
+        clc
+        ret
+
+; (esc_imagen, EAX=4) EDX=0 el clásico, 1 el de la barra de tareas -> CF=0 y
+; EAX=0 (se pone en la vuelta siguiente); CF=1 y EAX=1 si no se puede (la
+; demostración, /DEMO, no tiene ninguno de los dos)
+bt_estilo_pedir:
+        cmp byte [op_demo], 0
+        jne .no
+        cmp edx, 1
+        ja .no
+        lea eax, [edx+1]
+        mov [bt_est_pend], al
+        mov byte [actividad], 1     ; (que la vuelta no se duerma)
+        xor eax, eax
+        clc
+        ret
+.no:
+        mov eax, 1
+        stc
+        ret
+
+; (bt_vigilar) si se ha pedido el otro escritorio, se pone
+bt_estilo:
+        cmp byte [bt_est_pend], 0
+        jne .si
+        ret
+.si:
+        pushad
+        movzx eax, byte [bt_est_pend]
+        mov byte [bt_est_pend], 0
+        dec eax
+        cmp al, [op_486]
+        je .x
+        mov ebx, [activa]           ; la de delante, que siga delante
+        push ebx
+        push eax
+        ; las ventanitas de la bandeja (salen junto a una barra u otra)
+        mov ebp, [vol_ven]
+        test ebp, ebp
+        jz .v1
+        call ven_destruir
+.v1:
+        mov ebp, [wf_ven]
+        test ebp, ebp
+        jz .v2
+        call ven_destruir
+.v2:
+        pop eax
+        test eax, eax
+        jz .clasico
+        ; ---- a la barra de tareas ----
+        mov byte [op_486], 1
+        call bt_crear
+        mov ebp, [cen_ven]          ; el Centro y sus grupos, ocultos
+        call bt_est_ocultar
+        mov edi, [gr_tabla]
+        mov ecx, MAX_GR
+.g:
+        mov ebp, [edi+GR_VEN]
+        call bt_est_ocultar
+        add edi, GR_TAM
+        dec ecx
+        jnz .g
+        jmp .comun
+.clasico:
+        call ini_cerrar             ; el menú Inicio, si estaba abierto
+        mov dword [ini_pend], 0
+        mov ebp, [bt_ven]
+        mov dword [bt_ven], 0
+        mov dword [bt_n], 0
+        test ebp, ebp
+        jz .c1
+        call ven_destruir
+.c1:
+        mov byte [op_486], 0
+        mov dword [area_y0], BARRA_H
+        mov eax, [vid_alto]
+        mov [area_y1], eax
+        mov ebp, [escritorio]       ; el escritorio de siempre: la barra de
+        mov dword [ebp+V_PROC], esc_proc    ; arriba y los iconos de lo minimizado
+        call ven_invalidar
+        mov ebp, [cen_ven]          ; el Centro y los grupos que se escondieron
+        call bt_est_mostrar
+        mov edi, [gr_tabla]
+        mov ecx, MAX_GR
+.h:
+        mov ebp, [edi+GR_VEN]
+        call bt_est_mostrar
+        add edi, GR_TAM
+        dec ecx
+        jnz .h
+.comun:
+        call bt_est_acomodar
+        pop ebp                     ; la que estaba delante, otra vez delante
+        test ebp, ebp
+        jz .x
+        cmp dword [ebp+V_USO], 1
+        jne .x
+        call ven_visible
+        jc .x
+        call ven_activar
+.x:
+        popad
+        ret
+
+; (interna) EBP=ventana (0: ninguna): si se ve, se esconde
+bt_est_ocultar:
+        test ebp, ebp
+        jz .r
+        test dword [ebp+V_ESTADO], S_VISIBLE
+        jz .r
+        push eax
+        xor eax, eax
+        call ven_mostrar
+        pop eax
+.r:
+        ret
+
+; (interna) EBP=ventana (0: ninguna): si está escondida, a la vista
+bt_est_mostrar:
+        test ebp, ebp
+        jz .r
+        test dword [ebp+V_ESTADO], S_VISIBLE
+        jnz .r
+        push eax
+        mov eax, 1
+        call ven_mostrar
+        pop eax
+.r:
+        ret
+
+; (interna) las ventanas con título, dentro del área de trabajo nueva: las
+; maximizadas, a toda ella; las demás, sin quedar debajo de una barra
+bt_est_acomodar:
+        pushad
+        mov ebp, [ven_tabla]
+        mov ecx, MAX_VEN
+.v:
+        cmp dword [ebp+V_USO], 1
+        jne .s
+        cmp dword [ebp+V_PADRE], 0
+        jne .s
+        test dword [ebp+V_ESTILO], E_TITULO
+        jz .s
+        test dword [ebp+V_ESTILO], E_EMERGENTE | E_HIJA
+        jnz .s
+        cmp ebp, [escritorio]
+        je .s
+        push ecx
+        test dword [ebp+V_ESTADO], S_MAXIM
+        jz .n
+        call bt_area
+        call ven_mover
+        jmp .s1
+.n:
+        mov eax, [ebp+V_X]
+        mov ebx, [ebp+V_Y]
+        mov ecx, [ebp+V_AN]
+        mov edx, [ebp+V_AL]
+        mov esi, [area_y1]          ; lo más abajo que puede empezar
+        sub esi, edx
+        cmp ebx, esi
+        jle .n1
+        mov ebx, esi
+.n1:
+        cmp ebx, [area_y0]          ; y lo más arriba
+        jge .n2
+        mov ebx, [area_y0]
+.n2:
+        cmp ebx, [ebp+V_Y]
+        je .s1
+        call ven_mover
+.s1:
+        pop ecx
+.s:
+        add ebp, V_TAM
+        dec ecx
+        jnz .v
         popad
         ret
 
@@ -1103,6 +1321,7 @@ bt_boton_en:
 ;  Una vez por vuelta del bucle del sistema
 ; =============================================================================
 bt_vigilar:
+        call bt_estilo              ; [ESTILO] el otro escritorio, si se ha pedido
         cmp dword [bt_ven], 0
         je .r
         pushad

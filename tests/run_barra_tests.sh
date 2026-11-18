@@ -29,6 +29,15 @@
 #     clic, el suyo; las flechas cambian el marcado. «Salir de Hispa
 #     Ventanas...»: «Apagar el equipo» arriba, con el foco, e Intro apaga
 #     (QEMU termina: APAGAR.COM) tras guardar CENTRO.INI con «Escritorio=1».
+#  5.ª sesión, [ESTILO] el cambio en marcha (Configuración › Escritorio ›
+#     «Estilo del escritorio»): del clásico a la barra de tareas (sin barra
+#     arriba ni Centro; el menú Inicio), un programa minimizado en su botón,
+#     vuelta al clásico (la barra de arriba, el Centro y el programa en un
+#     icono del escritorio) y otra vez a la barra; VENTANAS.INI se queda con
+#     «Escritorio=486».
+#  6.ª sesión, [ESTILO] con «Escritorio=486» en VENTANAS.INI y el grupo
+#     «Escritorio=1» de la 4.ª: al clásico en marcha; los iconos del
+#     escritorio se van con la barra; VENTANAS.INI se queda sin la clave.
 #  (GUARDAR=carpeta deja las capturas.)
 # Hispa-486 desktop test: bottom taskbar and Start menu.
 set -u
@@ -282,6 +291,83 @@ check "Apagando el equipo..."
 MTOOLS_SKIP_CHECK=1 mtype -i $T/f.img ::HISPADOS/CENTRO.INI 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/cen.txt
 if grep -qx 'Escritorio=1' $T/cen.txt; then ok "CENTRO.INI guardado al apagar, con «Escritorio=1»"; else ko "CENTRO.INI sin «Escritorio=1»"; fi
 [ -n "${GUARDAR:-}" ] && for f in $T/d[0-9].ppm; do cp $f "$GUARDAR"/barra_$(basename $f); done 2>/dev/null
+
+# ---- 5.ª: [ESTILO] del clásico a la barra de tareas y vuelta, en marcha ----
+# Configuración: en 124,110 (su zona, en 126,137); el apartado «Escritorio»,
+# en 196,400; «Clásico (Centro de programas)», en 286,205; «Barra de tareas
+# con menú Inicio», en 286,225. En la barra, el botón de Configuración va en
+# 150 y el del Bloc de notas en 310 (al minimizarlo, Configuración queda
+# delante).
+cp $T/base.img $T/f.img
+RX=400; RY=300; BY=588
+estilo() { ir 700 540; clic 286 $1; sleep 2.5; ir 700 540; }
+{ sleep 6; send 'VENTANAS' 10
+  ir 700 450; shot g1                               # el clásico
+  derecho 700 450; sleep 1; tecla c; sleep 4; clic 196 400; sleep 1; ir 700 540; shot g2   # Configuración › Escritorio
+  estilo 225; shot g3                               # «Barra de tareas con menú Inicio»
+  tecla ctrl-esc; sleep 1; shot g4; tecla esc; sleep 0.8    # el menú Inicio
+  tecla ctrl-esc; sleep 1; tecla down right; sleep 0.6; tecla ret; sleep 3   # el Bloc de notas
+  clic 310 $BY; sleep 1; ir 700 540; shot g5        # su botón: minimizado
+  estilo 205; shot g6                               # «Clásico»: el Centro y el icono del Bloc
+  estilo 225; shot g8                               # y otra vez la barra
+  sleep 4
+  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla down; tecla down; tecla ret; sleep 4   # (en 486, «Apagar» es lo elegido: dos abajo, «Volver a Hispa-DOS»)
+  send 'ECHO TRAS-SALIR' 2
+  mon quit; } | TMAX=200 run
+echo "-- [ESTILO] Configuración › Escritorio: el estilo, en marcha --"
+chk $T/g1.ppm px 400 10 1 "la barra de arriba" titulo 36 52 activa "Centro de programas" nopx 400 590 1 "sin barra de tareas"
+chk $T/g2.ppm titulo 124 110 activa "Configuración" busca 270 172 290 190 0 8 "Estilo del escritorio:" \
+  busca 290 192 320 212 0 8 "Clásico (Centro de programas)" busca 290 212 320 232 0 8 "Barra de tareas con menú Inicio" \
+  busca 270 236 290 254 0 8 "Imagen de fondo del escritorio:"
+chk $T/g3.ppm px 400 572 10 "el filete de la barra de tareas" px 84 590 1 "la barra de tareas" texto 26 578 8 4 negrita "Inicio" \
+  nopx 400 10 1 "sin barra arriba" px 40 100 2 "el fondo, donde estaba el Centro" titulo 124 110 activa "Configuración" \
+  busca 100 574 130 582 0 8 "Configuración"
+chk $T/g4.ppm texto 29 326 8 1 negrita "Hispa Ventanas" busca 20 340 60 372 9 12 "Principal" busca 20 520 60 566 0 8 "Salir de Hispa Ventanas..."
+chk $T/g5.ppm busca 260 574 290 582 0 7 "Bloc de notas - " nobusca 140 80 400 110 8 4 "Bloc de notas" titulo 124 110 activa "Configuración"
+chk $T/g6.ppm px 400 10 1 "la barra de arriba otra vez" texto 12 5 8 1 negrita "Hispa Ventanas" nopx 400 590 1 "sin barra de tareas" \
+  titulo 36 52 no "Centro de programas" titulo 124 110 activa "Configuración" \
+  texto 20 578 8 2 fina "Bloc de not" px 58 554 9 "el icono del Bloc minimizado"
+chk $T/g8.ppm px 400 572 10 "el filete de la barra de tareas" texto 26 578 8 4 negrita "Inicio" nopx 400 10 1 "sin barra arriba" \
+  busca 260 574 290 582 0 7 "Bloc de notas - " titulo 124 110 activa "Configuración" nobusca 0 540 200 572 8 2 "Bloc de not"
+check "Hispa Ventanas ha terminado."
+ini
+if grep -qx 'Escritorio=486' $T/ven.txt; then ok "VENTANAS.INI: «Escritorio=486»"; else ko "VENTANAS.INI sin «Escritorio=486»"; cat $T/ven.txt; fi
+[ -n "${GUARDAR:-}" ] && for f in $T/g[0-9].ppm; do cp $f "$GUARDAR"/barra_$(basename $f); done 2>/dev/null
+
+# ---- 6.ª: [ESTILO] con «Escritorio=486» en VENTANAS.INI, al clásico ----
+cp $T/base.img $T/f.img
+printf '%s\r\n' '[Escritorio]' 'Escritorio=486' > $T/VENTANAS.INI
+MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/VENTANAS.INI ::HISPADOS/VENTANAS.INI
+# el grupo «Escritorio=1» de la 4.ª (sus iconos, arriba a la izquierda); el
+# Centro y los grupos, abajo a la derecha, para ver que los iconos se van
+printf '%s\r\n' '[Centro]' 'Ventana=420,330,360,190' 'Activo=-1' 'SinRepetidos=1' 'TareasPrincipal=1' \
+  '[Grupo]' 'Nombre=Principal' 'Ventana=420,330,360,190' 'Estado=0' \
+  '[Acceso]' 'Nombre=Configuración' 'Icono=herramienta' 'Programa=A:\HISPADOS\CONFIG.HVP' \
+  '[Grupo]' 'Nombre=Escritorio' 'Escritorio=1' 'Ventana=420,330,360,190' 'Estado=0' \
+  '[Acceso]' 'Nombre=Biblioteca' 'Icono=documento' 'Programa=:CALC' \
+  '[Acceso]' 'Nombre=Bloc de notas' 'Icono=bloc' 'Programa=:BLOC' \
+  | iconv -f UTF-8 -t CP437 > $T/CENTRO.INI
+MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
+RX=400; RY=300
+{ sleep 6; send 'VENTANAS' 10
+  ir 700 450; shot e1                               # la barra de tareas (de VENTANAS.INI)
+  derecho 700 450; sleep 1; tecla c; sleep 4; clic 196 400; sleep 1; ir 700 540; shot e2
+  estilo 205; shot e3                               # «Clásico»
+  sleep 4
+  clic 756 13; sleep 1; tecla ret; sleep 4          # «Salir», en la barra de arriba
+  send 'ECHO TRAS-SALIR' 2
+  mon quit; } | TMAX=150 run
+echo "-- [ESTILO] de la barra de tareas al clásico --"
+chk $T/e1.ppm px 400 572 10 "el filete de la barra de tareas" nopx 400 10 1 "sin barra arriba" \
+  texto 32 102 9 12 doble "Biblioteca" nopx 100 180 2 "el icono de «Bloc de notas»"
+chk $T/e2.ppm titulo 124 110 activa "Configuración" busca 290 212 320 232 0 8 "Barra de tareas con menú Inicio"
+chk $T/e3.ppm px 400 10 1 "la barra de arriba" nopx 400 590 1 "sin barra de tareas" \
+  titulo 124 110 activa "Configuración" px 100 180 2 "sin el icono de «Bloc de notas» (el fondo)" \
+  px 40 110 2 "sin la etiqueta de «Biblioteca» (el fondo)"
+check "Hispa Ventanas ha terminado."
+ini
+if grep -qi '^Escritorio=' $T/ven.txt; then ko "VENTANAS.INI sigue con la clave Escritorio"; cat $T/ven.txt; else ok "VENTANAS.INI: sin la clave Escritorio"; fi
+[ -n "${GUARDAR:-}" ] && for f in $T/e[0-9].ppm; do cp $f "$GUARDAR"/barra_$(basename $f); done 2>/dev/null
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/VENTANAS/,$p' $T/log.txt | tail -20; fi
 rm -rf $T

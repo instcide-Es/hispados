@@ -127,5 +127,5 @@
         ; ---- 0.9.22: elegir de una lista (Archivos: «Abrir con…»; Configuración) ----
         HVF dlg_lista               ; 96  EBP=dueña EDI=título ESI=pregunta EBX=textos (uno cada EDX octetos) ECX=cuántos -> EAX=el elegido (-1: ninguno)
         ; ---- [FONDO] la imagen de fondo del escritorio (98 entradas; ventanas/fondo.inc) ----
-        HVF esc_imagen              ; 97  EAX=0 -> EAX=ajuste ESI=ruta ECX=estado EDX=serie; EAX=1 ESI=ruta EDX=ajuste: la pone -> EAX=0 o error (CF=1); EAX=2 EDI=búfer: la carpeta de VENTANAS.COM
+        HVF esc_imagen              ; 97  EAX=0 -> EAX=ajuste ESI=ruta ECX=estado EDX=serie; EAX=1 ESI=ruta EDX=ajuste: la pone -> EAX=0 o error (CF=1); EAX=2 EDI=búfer: la carpeta de VENTANAS.COM; [ESTILO] EAX=3 -> EAX=0 clásico / 1 barra de tareas; EAX=4 EDX=0/1: ponerlo (CF=1 si no se puede)
 %endmacro

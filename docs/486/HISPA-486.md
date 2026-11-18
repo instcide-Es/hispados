@@ -214,13 +214,20 @@ inicio, porque así respeta la estética de Win 3.11».
   abierto, el icono lo trae delante en vez de abrir otro. Y en «Salir de
   Hispa Ventanas», en Hispa-486, **«Apagar el equipo» va arriba y es la
   elegida** (el foco e Intro); en Hispa-386, como siempre.
-- **Cómo se pone:** es un ajuste de la instalación de Hispa-486, no un botón
-  de Configuración: la opción `VENTANAS /486` o la clave `Escritorio=486` en
-  `\HISPADOS\VENTANAS.INI` (sección `[Escritorio]`). **La imagen y la
-  instalación de Hispa-486 tienen que llevar una de las dos** (lo natural:
-  la clave en el VENTANAS.INI que instalan; Configuración la conserva).
-  Hispa-386 no lleva ninguna y su escritorio, el de la gama de Windows 3.1,
-  sigue exactamente igual.
+- **Cómo se pone:** es lo de serie de Hispa-486: la clave `Escritorio=486`
+  en `\HISPADOS\VENTANAS.INI` (sección `[Escritorio]`), que llevan su
+  imagen y su instalación, o la opción `VENTANAS /486`. Hispa-386 no lleva
+  ninguna: su escritorio de serie es el clásico, el de la gama de
+  Windows 3.1.
+- **[ESTILO] Cambiarlo (18/11/2026):** pedido de Carlos: «crea una
+  configuración en Ventanas para pasar de menú de inicio a menú de
+  Ventanas». En las dos ediciones, Configuración › Escritorio › «Estilo del
+  escritorio»: «Clásico (Centro de programas)» o «Barra de tareas con menú
+  Inicio». Se aplica **al momento, sin salir de Hispa Ventanas** (se crea o
+  se quita la barra de tareas y la de arriba; el Centro se esconde o vuelve;
+  lo minimizado pasa de botón a icono y al revés; lo maximizado se ajusta; los iconos del escritorio salen o se van con la barra) y
+  queda en VENTANAS.INI: `Escritorio=486`, o sin la clave para el clásico.
+  Detalles en docs/VENTANAS.md, «El cambio en marcha».
 - **Aspecto:** el de Hispa Ventanas (marrón con filete ocre, terracota,
   crema, el rombo). Hace lo que hacían los escritorios de mediados de los 90,
   sin copiar el dibujo de ninguno.
@@ -232,8 +239,10 @@ inicio, porque así respeta la estética de Win 3.11».
   Inicio».
 - **Prueba:** `tests/run_barra_tests.sh` (en `make test`): 800×600 con
   `/486`, VGA de 640×480 y 16 colores con la clave de VENTANAS.INI y un
-  programa de Windows, el escritorio de Hispa-386 sin el ajuste, y los
-  iconos del escritorio con el cuadro de salir (Intro apaga).
+  programa de Windows, el escritorio de Hispa-386 sin el ajuste, los
+  iconos del escritorio con el cuadro de salir (Intro apaga) y, [ESTILO],
+  el cambio en marcha desde Configuración (del clásico a la barra, vuelta y
+  otra vez; y de la barra al clásico), con lo que queda en VENTANAS.INI.
 - **Lo que sigue de la fase 4:** «Mi PC» con las unidades en el escritorio,
   arrastrar los iconos y crearlos desde el escritorio, y «Ejecutar...» y
   «Documentos» en el menú. La

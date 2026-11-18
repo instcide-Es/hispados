@@ -20,7 +20,10 @@
 ;    Escritorio     [FONDO] la imagen de fondo del escritorio: elegirla (un
 ;                   BMP), cómo se pone (ajustada, centrada, en mosaico,
 ;                   estirada o rellenando) y
-;                   «Sin fondo» (ventanas/fondo.inc; la entrada esc_imagen)
+;                   «Sin fondo» (ventanas/fondo.inc; la entrada esc_imagen);
+;                   [ESTILO] y el estilo: el clásico (Centro de programas) o
+;                   la barra de tareas con el menú Inicio (Escritorio=486),
+;                   que se cambia en marcha (ventanas/barra.inc)
 ;  [MEZCLADOR] Mientras está en marcha (siempre, con la ventana oculta),
 ;  cada segundo mira si el mezclador de HSPSND ha cambiado y, si es así, lo
 ;  guarda en \HISPADOS\SONIDO.INI (ventanas/hvpmez.inc): el estado del sonido
@@ -73,6 +76,7 @@ ESC_SIN     equ 119                 ; «Sin fondo»
 ESC_AJ      equ 127                 ; las opciones: 127 ajustada, 128 centrada, 129 mosaico
 ESC_AJ2     equ 138                 ; y 138 estirada, 139 rellenar (del 130 al 136 son de Sonido)
 ESC_NOTA    equ 137                 ; lo que hay que saber (o lo que pasa)
+ESC_EST     equ 160                 ; [ESTILO] las opciones: 160 clásico, 161 barra de tareas
 SEC_ESCRITORIO equ 7                ; el apartado
 ; la configuración IP compartida que da HSPRED (INT 2Fh DA00h; ver drivers/
 ; hspred.asm y docs/RED.md); la MAC sale de DA03h (los datos de /INFO)
@@ -306,17 +310,20 @@ pl_red_manual:
 
 ; ---- [FONDO] Escritorio: la imagen de fondo ----
 pl_escritorio:
-        PLANTILLA EST, t_e_img, H, PX, 40, PAN_AN, 18, ID_FIJO
-        PLANTILLA EST, l_fon, H | SS_NEGRITA, PX, 62, PAN_AN, 18, ESC_NOMBRE
-        PLANTILLA BOT, t_e_elegir, HT, PX, 90, 150, 26, ESC_ELEGIR
-        PLANTILLA BOT, t_e_sin, HT, PX + 160, 90, 110, 26, ESC_SIN
-        PLANTILLA EST, t_e_como, H, PX, 134, PAN_AN, 18, ID_FIJO
-        PLANTILLA BOT, t_e_aj0, HT | BS_OPCION, PX, 156, 380, 20, ESC_AJ
-        PLANTILLA BOT, t_e_aj1, HT | BS_OPCION, PX, 180, 380, 20, ESC_AJ + 1
-        PLANTILLA BOT, t_e_aj2, HT | BS_OPCION, PX, 204, 380, 20, ESC_AJ + 2
-        PLANTILLA BOT, t_e_aj3, HT | BS_OPCION, PX, 228, 380, 20, ESC_AJ2
-        PLANTILLA BOT, t_e_aj4, HT | BS_OPCION, PX, 252, 380, 20, ESC_AJ2 + 1
-        PLANTILLA EST, 0, H, PX, 280, PAN_AN, 50, ESC_NOTA
+        PLANTILLA EST, t_e_estilo, H, PX, 40, PAN_AN, 18, ID_FIJO   ; [ESTILO]
+        PLANTILLA BOT, t_e_est0, HT | BS_OPCION, PX, 58, 380, 20, ESC_EST
+        PLANTILLA BOT, t_e_est1, HT | BS_OPCION, PX, 78, 380, 20, ESC_EST + 1
+        PLANTILLA EST, t_e_img, H, PX, 106, PAN_AN, 18, ID_FIJO
+        PLANTILLA EST, l_fon, H | SS_NEGRITA, PX, 124, PAN_AN, 18, ESC_NOMBRE
+        PLANTILLA BOT, t_e_elegir, HT, PX, 144, 150, 24, ESC_ELEGIR
+        PLANTILLA BOT, t_e_sin, HT, PX + 160, 144, 110, 24, ESC_SIN
+        PLANTILLA EST, t_e_como, H, PX, 174, PAN_AN, 18, ID_FIJO
+        PLANTILLA BOT, t_e_aj0, HT | BS_OPCION, PX, 192, 380, 20, ESC_AJ
+        PLANTILLA BOT, t_e_aj1, HT | BS_OPCION, PX, 212, 380, 20, ESC_AJ + 1
+        PLANTILLA BOT, t_e_aj2, HT | BS_OPCION, PX, 232, 380, 20, ESC_AJ + 2
+        PLANTILLA BOT, t_e_aj3, HT | BS_OPCION, PX, 252, 380, 20, ESC_AJ2
+        PLANTILLA BOT, t_e_aj4, HT | BS_OPCION, PX, 272, 380, 20, ESC_AJ2 + 1
+        PLANTILLA EST, 0, H, PX, 294, PAN_AN, 48, ESC_NOTA
         dd 0
 
 listas      dd pl_fijos, pl_pantalla, pl_raton, pl_teclado, pl_tecl_si, pl_tecl_no
@@ -345,9 +352,10 @@ ini_tabla:
         dd k_espera, a_espera, 0, 3, T_MS250, s_teclado
         dd k_repet, a_repet, 0, 31, T_NUM, 0
         dd k_dist, a_dist, 0, 1, T_DIST, 0
-        ; [BARRA] el escritorio (386 o 486): no se cambia aquí (lo pone la
-        ; instalación de Hispa-486 y lo lee VENTANAS.COM, ventanas/barra.inc);
-        ; solo se conserva al guardar. Sin la clave, ni se escribe la sección
+        ; [BARRA] el escritorio (386 o 486): lo lee VENTANAS.COM al arrancar
+        ; (ventanas/barra.inc) y lo pone la instalación de Hispa-486; [ESTILO]
+        ; aquí se cambia en Escritorio › «Estilo del escritorio» (486, o -1:
+        ; se quita la clave). Sin la clave, ni se escribe la sección
 ini_e_escr:
         dd k_escritorio, a_escritorio, 386, 486, T_NUM, s_escritorio
         dd 0
@@ -475,6 +483,10 @@ n_s5        db "Sistema", 0
 n_s6        db "Red", 0
 n_s7        db "Escritorio", 0
 ; ---- [FONDO] Escritorio ----
+t_e_estilo  db "Estilo del escritorio:", 0        ; [ESTILO]
+t_e_est0    db "Clásico (Centro de programas)", 0
+t_e_est1    db "Barra de tareas con menú Inicio", 0
+t_e_estno   db "La demostración no puede cambiar de escritorio.", 0
 t_e_img     db "Imagen de fondo del escritorio:", 0
 t_e_ninguna db "(ninguna: se ve el dibujo de Pantalla)", 0
 t_e_elegir  db "Elegir imagen...", 0
@@ -1070,6 +1082,12 @@ ordenes:
         call esc_poner
         jmp .hecho
 .e2:
+        lea ebx, [ecx-ESC_EST]      ; [ESTILO] el clásico o la barra de tareas
+        cmp ebx, 1
+        ja .e2b
+        call esc_estilo
+        jmp .hecho
+.e2b:
         lea ebx, [ecx-ESC_AJ]       ; ajustada, centrada, mosaico
         cmp ebx, 2
         jbe .e2a
@@ -1081,14 +1099,17 @@ ordenes:
 .e2a:
         xor eax, eax
         HV esc_imagen
-        cmp eax, ebx                ; (la que ya estaba)
-        je .hecho
+        cmp eax, ebx                ; (la que ya estaba: las opciones, como
+        je .e2c                     ;  estaban: el clic quita las del estilo)
         mov edi, e_ruta             ; la misma imagen, puesta de otra forma
         call hvl_cad
         mov byte [edi], 0
         mov esi, e_ruta
         mov edx, ebx
         call esc_poner
+        jmp .hecho
+.e2c:
+        call esc_refrescar
         jmp .hecho
 .e3:
         ; ---- Pantalla ----
@@ -1484,7 +1505,7 @@ panel_desmontar:
         jmp .b
 .s:
         inc ecx
-        cmp ecx, ID_PAN + 60
+        cmp ecx, ID_PAN + 62        ; (del 100 al 159, y [ESTILO] 160 y 161)
         jb .b
         popad
         ret
@@ -2574,6 +2595,17 @@ esc_refrescar:
         inc edi
         cmp edi, 5
         jb .o
+        mov eax, 3                  ; [ESTILO] el escritorio que hay
+        HV esc_imagen
+        mov ebx, eax
+        mov ecx, ESC_EST
+        xor edx, edx
+        test ebx, ebx
+        setz dl
+        call marca_poner
+        inc ecx
+        xor dl, 1
+        call marca_poner
         mov esi, t_e_nota
         cmp ebp, 2                  ; hay imagen apuntada pero no se ve
         jne .t
@@ -2586,6 +2618,35 @@ esc_refrescar:
 .t:
         mov ecx, ESC_NOTA
         call texto_poner
+        popad
+        ret
+
+; [ESTILO] EBX=0 el escritorio clásico (Centro de programas), 1 la barra de
+; tareas con el menú Inicio: se lo pide a Hispa Ventanas, que lo cambia en
+; marcha (ventanas/barra.inc), y se apunta para VENTANAS.INI: con la barra,
+; «Escritorio=486»; con el clásico, sin la clave (lo de siempre)
+esc_estilo:
+        pushad
+        mov eax, 3
+        HV esc_imagen
+        cmp eax, ebx
+        je .marcas                  ; (el que ya estaba)
+        mov eax, 4
+        mov edx, ebx
+        HV esc_imagen
+        jnc .bien
+        mov esi, t_e_estno
+        call esc_aviso
+        jmp .marcas
+.bien:
+        mov dword [a_escritorio], -1
+        test ebx, ebx
+        jz .c
+        mov dword [a_escritorio], 486
+.c:
+        call cambio
+.marcas:
+        call esc_refrescar
         popad
         ret
 
@@ -4878,7 +4939,7 @@ a_ctrlclic  resd 1                  ; [CONTEXTO] Ctrl+clic = botón derecho (0/1
 a_espera    resd 1                  ; teclado: 0-3 (-1: no se toca)
 a_repet     resd 1                  ; 0-31, 31 lo más rápido (-1: no se toca)
 a_dist      resd 1                  ; 1 española, 0 estadounidense (-1: no se toca)
-a_escritorio resd 1                 ; [BARRA] 386 o 486 (-1: no está en VENTANAS.INI); no es de «fabrica»
+a_escritorio resd 1                 ; [BARRA] 386 o 486 (-1: no está en VENTANAS.INI); no es de «fabrica»; [ESTILO] lo cambia «Estilo del escritorio»
 ; [RED] el modelo del apartado «Red» (RED.INI, aparte de VENTANAS.INI)
 a_dhcp      resd 1                  ; 1 DHCP (automática), 0 IP a mano
 ; el salvapantallas

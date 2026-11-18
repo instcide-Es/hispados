@@ -310,6 +310,11 @@ grupo_abrir:
         mov ebp, [ebx+GR_VEN]
         test ebp, ebp
         jz .nueva
+        test dword [ebp+V_ESTADO], S_VISIBLE    ; [ESTILO] (escondido al pasar
+        jnz .vis                    ;   a la barra de tareas: barra.inc)
+        mov eax, 1
+        call ven_mostrar
+.vis:
         test dword [ebp+V_ESTADO], S_MINIM
         jz .a
         mov eax, 4

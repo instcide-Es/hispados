@@ -773,9 +773,8 @@ menú de inicio para que quede el escritorio despejado» y «en 386 no hace
 falta poner ese menú de inicio, porque así respeta la estética de Win 3.11».
 Por eso Hispa Ventanas tiene **dos escritorios**:
 
-- el de **Hispa-386**, el de siempre: la barra arriba, el Centro de
-  programas abierto y los iconos de lo minimizado abajo. No ha cambiado nada
-  y no tiene ninguna opción nueva en Configuración;
+- el **clásico**, el de siempre de Hispa-386: la barra arriba, el Centro de
+  programas abierto y los iconos de lo minimizado abajo;
 - el de **Hispa-486**: una **barra de tareas abajo** con el botón
   **«Inicio»**, un botón por ventana y, a la derecha, la red, el volumen, la
   batería y la hora; el escritorio **empieza despejado** (el Centro de
@@ -785,19 +784,49 @@ Es una función equivalente a la de los sistemas de mediados de los 90 con el
 aspecto de Hispa Ventanas (marrón con filete ocre, terracota, el rombo): no
 copia el dibujo de ninguno.
 
-**Cómo se pide.** No es un botón de Configuración: es un ajuste de la
-instalación de Hispa-486. Vale cualquiera de los dos:
+**Cómo se pide.** Cada edición trae el suyo: Hispa-386, el clásico;
+Hispa-486, el de la barra de tareas (su imagen y su instalación ponen la
+clave). Se elige con cualquiera de estas tres:
 
+- **[ESTILO] Configuración › Escritorio › «Estilo del escritorio»**, en las
+  dos ediciones (pedido de Carlos, 18/11/2026: «crea una configuración en
+  Ventanas para pasar de menú de inicio a menú de Ventanas»): **«Clásico
+  (Centro de programas)»** o **«Barra de tareas con menú Inicio»**. Se
+  aplica **al momento**, sin salir de Hispa Ventanas (ver «El cambio en
+  marcha», abajo), y se guarda en VENTANAS.INI como lo demás: con la barra,
+  `Escritorio=486`; con el clásico, la clave se quita. «De fábrica» no lo
+  toca (cada edición tiene el suyo).
 - la opción **`/486`** de la línea de órdenes (`VENTANAS /486`; se puede
-  juntar con las demás: `VENTANAS /486 /640`);
+  juntar con las demás: `VENTANAS /486 /640`), para esa sesión;
 - la clave **`Escritorio=486`** en `VENTANAS.INI` (sección `[Escritorio]`,
   aunque las claves no miran la sección), que es lo que pone la imagen o la
-  instalación de Hispa-486. La lee el propio VENTANAS.COM al arrancar
-  (`bt_ini_leer`, antes de crear nada); Configuración no la enseña ni la
-  cambia, pero la **conserva** cuando guarda el archivo. `Escritorio=386` (o
-  no poner la clave) es el escritorio de siempre.
+  instalación de Hispa-486 y lo que escribe Configuración. La lee el propio
+  VENTANAS.COM al arrancar (`bt_ini_leer`, antes de crear nada).
+  `Escritorio=386` (o no poner la clave) es el clásico.
 
-No se cambia en marcha: vale para toda la sesión.
+**[ESTILO] El cambio en marcha** (`bt_estilo`, en `barra.inc`).
+Configuración lo pide por la interfaz (entrada 97, `esc_imagen`, EAX=4; ver
+«La imagen de fondo del escritorio») y Hispa Ventanas lo hace en la vuelta
+siguiente del bucle del sistema, dentro de `bt_vigilar`:
+
+- **a la barra de tareas:** el área de trabajo pasa a ser la pantalla menos
+  la barra de abajo; el escritorio cambia de procedimiento (`bt_esc_proc`:
+  sin barra arriba, con los iconos de los grupos con `Escritorio=1`); se crea la barra; el Centro de programas y
+  los grupos que hubiera abiertos se **esconden** (como al entrar en
+  Hispa-486: todo está en el menú Inicio; «Centro de programas» los vuelve a
+  enseñar). Las ventanas minimizadas pasan de icono a su botón.
+- **al clásico:** se cierran el menú Inicio y las ventanitas del volumen y
+  de la red, se quita la barra, vuelven el área de debajo de la barra de
+  arriba y el escritorio de siempre (`esc_proc`: la barra de arriba con
+  «Salir», el volumen y la hora, y los iconos de lo minimizado), y el Centro
+  y los grupos que se escondieron, a la vista.
+- en los dos: las ventanas **maximizadas** se ajustan al área nueva y las
+  demás que quedarían debajo de una barra se corren lo justo; la ventana que
+  estaba delante (Configuración) sigue delante.
+
+Nada más depende del escritorio elegido: el gestor y el Centro miran
+`op_486` y `bt_ven` cada vez (la barra no guarda estado de las ventanas),
+así que no hace falta volver a entrar.
 
 **La barra de tareas** (28 puntos, como la de arriba; la misma en 800×600,
 640×480 y en la VGA de 16 colores):
@@ -909,7 +938,9 @@ opción `/486` y su línea de ayuda; `barra.inc` ocupa unos 6 KB de la alta):
 
 | Gancho | Dónde | Qué hace |
 |---|---|---|
-| `bt_iniciar` | `principal` | pone el área de trabajo; lee `Escritorio=486`; en Hispa-486 crea la barra y le cambia el procedimiento al escritorio (`bt_esc_proc`: el fondo entero, sin barra arriba, y los iconos de los grupos con `Escritorio=1`) |
+| `bt_iniciar` | `principal` | pone el área de trabajo; lee `Escritorio=486`; en Hispa-486 crea la barra y le cambia el procedimiento al escritorio (`bt_crear`; `bt_esc_proc`: el fondo entero, sin barra arriba, y los iconos de los grupos con `Escritorio=1`) |
+| `bt_estilo` | `bt_vigilar` | [ESTILO] el otro escritorio, si Configuración lo ha pedido (`bt_estilo_pedir`, desde `esc_imagen`) |
+| `grupo_abrir` | `centro.inc` | [ESTILO] un grupo escondido al pasar a la barra se vuelve a enseñar al abrirlo |
 | `bt_vigilar` | bucle del sistema, una vez por vuelta | la lista de ventanas con botón y la «firma» de lo que enseña cada una (estado, si está delante, título, icono) y de la bandeja: si algo cambia, repinta la barra. También hace lo que se ha elegido en el menú y mira la tecla de Windows |
 | `bt_orden` | `orden_poner` | la ventana con título que pasa delante se queda justo debajo de la barra (la barra está siempre encima de las ventanas; los menús y lo emergente, encima de ella) |
 | `bt_area` | `ven_mostrar` (maximizar) | el área de trabajo |
@@ -933,14 +964,17 @@ vuelta siguiente (`ini_pendiente`); un programa se abre con `acc_lanzar`
 (`bt_lz_tarea`), porque lee del disco y puede sacar un aviso.
 
 Límites: 32 ventanas con botón (las de primer nivel que admite el gestor);
-el escritorio no se cambia sin reiniciar Hispa Ventanas; 8 iconos en el
-escritorio, que no se arrastran (van en el orden de CENTRO.INI); todavía no
-hay «Mi PC» (lo siguiente de la fase 4).
+el escritorio se cambia en marcha desde Configuración ([ESTILO], «El cambio
+en marcha»); 8 iconos en el escritorio, que no se arrastran (van en el orden
+de CENTRO.INI) y que salen o se van con la barra; todavía no hay «Mi PC» (lo
+siguiente de la fase 4). [ESTILO] al pasar al clásico, una búsqueda o una
+conexión Wi-Fi a medias se queda parada (el clásico no lleva el icono de red).
 
 Prueba: `tests/run_barra_tests.sh` (4.ª sesión: los iconos, Intro, un clic,
 las flechas, el menú Inicio sin el grupo, y el cuadro de salir con «Apagar
-el equipo» arriba e Intro, que apaga); `tests/run_imagen486_tests.sh` (el
-icono «Biblioteca» de la imagen abre el Navegador).
+el equipo» arriba e Intro, que apaga; 5.ª y 6.ª: el estilo en marcha);
+`tests/run_imagen486_tests.sh` (el icono «Biblioteca» de la imagen abre el
+Navegador).
 
 ### La imagen de fondo del escritorio
 
@@ -1060,6 +1094,8 @@ programas usan una entrada nueva de la interfaz, la 97, **`esc_imagen`**:
 | 0 | lo que hay: → EAX=forma (0 ajustada, 1 centrada, 2 mosaico, 3 estirada, 4 rellenar), ESI=la ruta (vacía: sin imagen), ECX=0 sin imagen, 1 a la vista, 2 apuntada pero no se ve (16 colores, o no se pudo cargar), EDX=un número que cambia cada vez que se pone otra |
 | 1 | ESI=ruta (0 o vacía: sin fondo), EDX=forma: la pone y repinta el escritorio → EAX=0 y CF=0; o CF=1 y EAX=1 (no se puede abrir o leer), 2 (no es un BMP de 8 o 24 bits sin comprimir), 3 (no hay memoria: en los tres casos sigue la que había) o 4 (VGA de 16 colores: queda apuntada) |
 | 2 | EDI=búfer de 80: la carpeta de VENTANAS.COM, con su `\` al final (donde Mirador deja `MIFONDO.BMP`) |
+| 3 | [ESTILO] el estilo del escritorio → EAX=0 el clásico, 1 el de la barra de tareas (el que se va a poner, si ya se ha pedido otro) |
+| 4 | [ESTILO] EDX=0 el clásico, 1 el de la barra de tareas: pasar a ese escritorio en marcha (en la vuelta siguiente del bucle del sistema) → EAX=0 y CF=0; o CF=1 y EAX=1 (no se puede: la demostración, `/DEMO`) |
 
 Configuración mira ese número una vez por segundo: si otro programa
 (Mirador) ha cambiado el fondo, lo apunta en VENTANAS.INI a los tres
@@ -1135,7 +1171,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
 | Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país. Abajo, **«Tipos de archivo...»** ([ASOCIA], 0.9.22): las extensiones con el programa que las abre (de `\HISPADOS\ASOCIA.INI`), más «Añadir un tipo...» y «Volver a los de serie»; al elegir una, la lista de programas (o «Ninguno», que la quita) |
 | Red | La red local del equipo (como las «Propiedades de TCP/IP» de Windows). Una casilla **«Obtener la dirección automáticamente (DHCP)»**; al quitarla, cuatro cuadros para la **IP**, la **máscara de subred**, la **puerta de enlace** y el **servidor DNS** a mano (cada uno `a.b.c.d`, con octetos de 0 a 255; con DHCP puesto, no salen). Arriba, el estado en marcha si HSPRED está cargado: la MAC y la IP que tiene. Se guarda en `\HISPADOS\RED.INI` (no en VENTANAS.INI); los cambios se aplican al reiniciar o al recargar HSPRED (`CONFRED /RENOVAR`). Ver docs/RED.md |
-| Escritorio | [FONDO] La imagen de fondo del escritorio: la que hay puesta, **«Elegir imagen...»** (un BMP, con el diálogo de abrir), **«Sin fondo»** y cómo se pone: ajustada a la pantalla (con su proporción), centrada, en mosaico, estirada (toda la pantalla, aunque se deforme) o rellenando (toda la pantalla, recortando lo que sobra). Ver «La imagen de fondo del escritorio» |
+| Escritorio | [ESTILO] Arriba, el **estilo del escritorio**: «Clásico (Centro de programas)» o «Barra de tareas con menú Inicio», que se cambia al momento (ver «El escritorio de Hispa-486»). [FONDO] Debajo, la imagen de fondo del escritorio: la que hay puesta, **«Elegir imagen...»** (un BMP, con el diálogo de abrir), **«Sin fondo»** y cómo se pone: ajustada a la pantalla (con su proporción), centrada, en mosaico, estirada (toda la pantalla, aunque se deforme) o rellenando (toda la pantalla, recortando lo que sobra). Ver «La imagen de fondo del escritorio» |
 
 Todo se aplica **al momento**. Lo de Pantalla, Ratón y Teclado se guarda en
 `VENTANAS.INI`: con «Guardar», al cerrar la ventana y, solo, unos tres
@@ -2615,7 +2651,13 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   (WINCALC.EXE, si hay gcc de 32 bits) sale en la barra y se minimiza desde
   su botón, y Configuración guarda VENTANAS.INI conservando la clave.
   Tercera, sin el ajuste: el escritorio de Hispa-386 de siempre (y Ctrl+Esc
-  no hace nada). `GUARDAR=carpeta` deja las capturas.
+  no hace nada). Cuarta, [ESTILO]: Configuración › Escritorio › «Estilo del
+  escritorio» en marcha: del clásico a la barra de tareas (sin barra arriba
+  ni Centro, con el menú Inicio), el Bloc de notas minimizado en su botón,
+  vuelta al clásico (la barra de arriba, el Centro y el Bloc en un icono) y
+  otra vez a la barra; VENTANAS.INI queda con `Escritorio=486`. Quinta,
+  desde `Escritorio=486` al clásico: VENTANAS.INI queda sin la clave.
+  `GUARDAR=carpeta` deja las capturas.
 - `tests/run_win32crt_tests.sh`, `run_win32ctl_tests.sh`,
   `run_win32menu_tests.sh` y `run_win32calc_tests.sh` ([Hispa-486], fase 3c):
   un Win32 de ventanas en C con MSVCRT.DLL y una DLL propia (KERNEL32 es el

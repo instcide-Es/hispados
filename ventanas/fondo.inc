@@ -51,6 +51,10 @@
 ;                           no vale, se queda la que había
 ;                  EAX=2 EDI=búfer de 80: la carpeta de VENTANAS.COM, con
 ;                        su «\» al final (donde Mirador deja MIFONDO.BMP)
+;                  EAX=3 [ESTILO] -> EAX=0 el escritorio clásico, 1 el de la
+;                        barra de tareas (barra.inc: bt_estilo_leer)
+;                  EAX=4 [ESTILO] EDX=0/1: pasar a ese escritorio en marcha
+;                        -> CF=1 si no se puede (barra.inc: bt_estilo_pedir)
 ;  La ruta sin unidad ni «\» delante es de la carpeta de VENTANAS.COM (así
 ;  la misma VENTANAS.INI vale en la memoria USB y en el disco duro).
 ; =============================================================================
@@ -206,6 +210,10 @@ fon_clave:
 ;  La interfaz (entrada 97): leer lo puesto o poner otra imagen
 ; =============================================================================
 esc_imagen:
+        cmp eax, 3                  ; [ESTILO] el estilo del escritorio (barra.inc):
+        je bt_estilo_leer           ;   EAX=3 -> EAX=0 clásico, 1 barra de tareas
+        cmp eax, 4                  ;   EAX=4 EDX=0/1: ponerlo -> CF=1 si no se puede
+        je bt_estilo_pedir
         cmp eax, 2
         je .carpeta
         test eax, eax
