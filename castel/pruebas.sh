@@ -31,6 +31,11 @@
 #      mismo y ENSAMBLA lo ensambla; (3) el resultado se compila otra vez.
 #      Los pasos 2 y 3 tienen que dar el mismo ensamblador y el mismo .EXE
 #      (que son, además, los del paso 1 con NASM).
+#   8. Castel de 32 bits (CASTEL32.md): los ejemplos de 16 bits que no tocan
+#      el DOS, compilados como núcleo de 32 bits, escriben lo mismo; los de
+#      ejemplos32 (núcleos en QEMU y programas Hispa32 con HW32, si está el
+#      disquete de Hispa-DOS); cuentas al azar con las reglas de 32 bits; y la
+#      semilla de Hispa-Pentium (nucleo32): IDT, reloj, teclado, excepciones.
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
@@ -54,7 +59,7 @@ ko() { echo "  FAIL $1"; fail=$((fail + 1)); }
 
 # ---------------------------------------------------------------- 1. errores
 echo "== Castel: los errores se dicen en español, con línea y columna =="
-for f in $AQUI/ejemplos/errores/*.cas; do
+for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
   n=$(basename $f .cas)
   esperado=$(sed -n 's/^; ERROR: //p' $f | head -1)
   if python3 -I $AQUI/ccastel.py $f -o $T/err.asm -I $AQUI/ejemplos/partes > $T/err.txt 2>&1; then
@@ -362,6 +367,14 @@ echo "== El ensamblador propio: los mismos octetos que NASM =="
 mkdir $T/ens $T/ens/nasm
 cp $T/*.asm $T/ens/
 cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
+# y los de 32 bits: las formas de 32, los ejemplos de ejemplos32, la semilla
+# de Hispa-Pentium y unas cuentas al azar (CASTEL32.md)
+cp $AQUI/ensamblador/formas32.asm $T/ens/formas32.asm
+python3 -I $AQUI/azar32.py 9 150 $T/ens/az32p.cas $T/ens/az32p.esp plano
+for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $T/ens/az32p.cas; do
+  python3 -I $AQUI/ccastel.py $f -o $T/ens/$(basename $f .cas).asm > /dev/null 2>&1 || ko "$(basename $f) no compila"
+done
+rm -f $T/ens/az32p.cas $T/ens/az32p.esp
 # la biblioteca entera (también lo que nadie usa) y el propio ensamblador
 printf 'm\xc3\xb3dulo Toda\n    importar Textos, Archivos, Memoria, Argumentos, Lejos\n    funci\xc3\xb3n principal()\n    fin\nfin Toda.\n' > $T/ens/toda.cas
 python3 -I $AQUI/ccastel.py --todo $T/ens/toda.cas -o $T/ens/toda.asm > /dev/null 2>&1 || ko "la biblioteca entera no compila"
@@ -374,7 +387,7 @@ for f in $T/ens/*.asm; do
   python3 -I $AQUI/ensambla.py $f -o $T/ens/$n.py.bin 2> /dev/null
   if cmp -s $T/ens/nasm/$n.bin $T/ens/$n.py.bin; then iguales=$((iguales + 1)); else distintos="$distintos $n"; fi
 done
-if [ -z "$distintos" ]; then ok "ensambla.py: los $iguales archivos (ejemplos, biblioteca entera, formas y ENSAMBLA), iguales que con NASM"
+if [ -z "$distintos" ]; then ok "ensambla.py: los $iguales archivos (ejemplos de 16 y de 32 bits, biblioteca entera, formas y ENSAMBLA), iguales que con NASM"
 else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
 # ENSAMBLA, dentro de Hispa-8086: los ensambla todos (también a sí mismo)
 cp $H/build/hispa8086-1440.img $T/e.img
@@ -431,7 +444,9 @@ mcopy -i $T/c.img $A/CASTEL.EXE ::
 { printf '@ECO OFF\r\n'
   python3 -I $AQUI/azar.py 7 45 $A/azar16.cas $A/azar16.esp
   python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
-  for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas; do
+  python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
+  for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas \
+           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $A/azar32p.cas; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
     mcopy -i $T/c.img $f ::$N.CAS
@@ -439,7 +454,7 @@ mcopy -i $T/c.img $A/CASTEL.EXE ::
     printf 'CASTEL %s.CAS -I BIB -I PARTES %s > %s.SAL\r\n' $N "$todo" $N
   done
   i=0
-  for f in $AQUI/ejemplos/errores/*.cas; do
+  for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
     i=$((i + 1)); N=$(printf 'E%02d' $i)
     mcopy -i $T/c.img $f ::$N.CAS
     echo "$N $(basename $f .cas)" >> $A/errores.txt
@@ -468,12 +483,12 @@ for f in $A/ref/*.ASM; do
   N=$(basename $f .ASM)
   if cmp -s $f $A/sal/$N.ASM; then iguales=$((iguales + 1)); else distintos="$distintos $N"; fi
 done
-if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos, biblioteca entera, ENSAMBLA y dos de cuentas al azar)"
+if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos de 16 y de 32 bits, biblioteca entera, ENSAMBLA, la semilla y tres de cuentas al azar)"
 else ko "CASTEL no saca el mismo ensamblador que ccastel.py en:$distintos"; fi
 iguales=0
 distintos=
 while read N n; do
-  esperado=$(sed -n 's/^; ERROR: //p' $AQUI/ejemplos/errores/$n.cas | head -1)
+  esperado=$(sed -n 's/^; ERROR: //p' $AQUI/ejemplos/errores/$n.cas $AQUI/ejemplos32/errores/$n.cas 2> /dev/null | head -1)
   dicho=$(tr -d '\r' < $A/sal/$N.SAL 2> /dev/null | iconv -f CP437 -t UTF-8 | head -1 | sed 's/^.*\.CAS://')
   if [ "$dicho" = "$esperado" ]; then iguales=$((iguales + 1)); else distintos="$distintos $n"; fi
 done < $A/errores.txt
@@ -557,6 +572,86 @@ if [ -n "${AZAR:-}" ]; then
     else ko "azar $s: hay cuentas que no salen (< esperado, > lo que sale):"; diff $T/azar$s.esp $T/azar$s.sal | head -6 | sed 's/^/        /'; fi
   done
 fi
+
+# ------------------------------------------------- 8. Castel de 32 bits
+echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
+P=$T/p32
+mkdir $P
+# los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
+# bits: tienen que escribir lo mismo
+MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
+iguales=0
+distintos=
+for n in $MISMOS; do
+  python3 - $AQUI/ejemplos/$n.cas $P/$n.cas <<'PY'
+import sys, re
+s = open(sys.argv[1], encoding='utf-8').read().split('\n')
+for i, l in enumerate(s):
+    if re.match(r'^módulo \w+', l):
+        s.insert(i + 1, '    modelo núcleo')
+        break
+open(sys.argv[2], 'w', encoding='utf-8').write('\n'.join(s))
+PY
+  if ! $AQUI/compilar.sh $P/$n.cas $P/$n.bin -I $AQUI/ejemplos/partes > $T/comp.txt 2>&1; then
+    distintos="$distintos $n(no compila)"; continue
+  fi
+  $AQUI/probar32.sh $P/$n.bin > $P/$n.sal 2>&1
+  cod=$(tail -1 $P/$n.sal); sed -i '$d' $P/$n.sal
+  esperado_c="[código 0]"; [ $n = nivel ] && esperado_c="[código 7]"
+  if cmp -s $P/$n.sal $AQUI/ejemplos/esperado/$n.txt && [ "$cod" = "$esperado_c" ]; then iguales=$((iguales + 1))
+  else distintos="$distintos $n"; fi
+done
+if [ -z "$distintos" ]; then ok "los $iguales ejemplos de 16 bits sin DOS, como núcleos de 32 bits: escriben lo mismo (y nivel acaba con 7)"
+else ko "como núcleos de 32 bits, no escriben lo mismo:$distintos"; fi
+# los de ejemplos32: los núcleos, en QEMU; los de hispa32, con HW32 (si está el
+# disquete de Hispa-DOS: make y make nucprogs en la raíz)
+for f in $AQUI/ejemplos32/*.cas; do
+  n=$(basename $f .cas)
+  if grep -q '^ *modelo hispa32' $f; then X=EXE; else X=BIN; fi
+  if ! $AQUI/compilar.sh $f $P/$n.$X > $T/comp.txt 2>&1; then ko "$n.cas no compila: $(head -1 $T/comp.txt)"; continue; fi
+  if [ $X = BIN ]; then
+    $AQUI/probar32.sh $P/$n.$X > $P/$n.sal 2>&1
+    cod=$(tail -1 $P/$n.sal); sed -i '$d' $P/$n.sal
+  elif [ -f $AQUI/../build/hispados.img ] && [ -f $AQUI/../build/HW32.COM ]; then
+    NIVEL=42 $AQUI/probar32.sh $P/$n.$X > $P/$n.log 2>&1
+    sed '/^A:\\>/,$d' $P/$n.log | sed '/^$/d' > $P/$n.sal
+    cod="[código ?]"
+    grep -qx '\[nivel-42\]' $P/$n.log && ! grep -qx '\[nivel-43\]' $P/$n.log && cod="[código 42]"
+  else
+    echo "  (sin el disquete de Hispa-DOS no se prueba $n.EXE: make y make nucprogs en la raíz)"
+    continue
+  fi
+  esp_cod="[código $(sed -n 's/^; código de salida: //p' $f)]"
+  if cmp -s $P/$n.sal $AQUI/ejemplos32/esperado/$n.txt && [ "$cod" = "$esp_cod" ]; then
+    ok "$n.$X ($(stat -c %s $P/$n.$X) octetos): la salida es la esperada y acaba con el código que toca ($cod)"
+  else
+    ko "$n.$X: la salida no es la esperada o acaba con otro código ($cod y no $esp_cod; < esperada, > la que sale):"
+    diff $AQUI/ejemplos32/esperado/$n.txt $P/$n.sal | sed 's/^/        /' | head -12
+  fi
+done
+# cuentas al azar, con las reglas de 32 bits
+for s in 1 2; do
+  python3 -I $AQUI/azar32.py $s 150 $P/az$s.cas $P/az$s.esp plano
+  $AQUI/compilar.sh $P/az$s.cas $P/az$s.bin > /dev/null 2>&1
+  $AQUI/probar32.sh $P/az$s.bin > $P/az$s.sal 2>&1
+  sed -i '$d' $P/az$s.sal
+  if cmp -s $P/az$s.esp $P/az$s.sal; then ok "azar de 32 bits en el modelo plano $s: $(wc -l < $P/az$s.esp) resultados, todos bien"
+  else ko "azar plano $s: hay cuentas que no salen"; diff $P/az$s.esp $P/az$s.sal | head -6 | sed 's/^/        /'; fi
+done
+# la semilla de Hispa-Pentium: la IDT, el reloj, el teclado y las excepciones
+$AQUI/nucleo32/probar.sh "" ayuda hora :espera hora Hola teclas apagar > $P/semilla.sal 2>&1
+if grep -q "^órdenes: ayuda hora memoria teclas cero apagar" $P/semilla.sal && grep -q "^no conozco «Hola»" $P/semilla.sal \
+    && grep -q "^\[código 5\]" $P/semilla.sal; then ok "la semilla de Hispa-Pentium arranca, lee el teclado y entiende sus órdenes"
+else ko "la semilla de Hispa-Pentium no hace lo que debe:"; sed 's/^/        /' $P/semilla.sal | head -12; fi
+s1=$(grep "^llevo" $P/semilla.sal | head -1 | awk '{print $2 * 100 + $5}')
+s2=$(grep "^llevo" $P/semilla.sal | tail -1 | awk '{print $2 * 100 + $5}')
+if [ -n "$s1" ] && [ -n "$s2" ] && [ $((s2 - s1)) -ge 100 ]; then ok "el reloj (IRQ 0) corre: $s1 y luego $s2 centésimas"
+else ko "el reloj no corre: «$s1» y «$s2»"; fi
+if grep -q "^28 teclas pulsadas" $P/semilla.sal; then ok "el teclado (IRQ 1) cuenta las teclas, mayúsculas incluidas"
+else ko "el teclado no cuenta bien las teclas: $(grep teclas $P/semilla.sal | tail -1)"; fi
+$AQUI/nucleo32/probar.sh "" cero > $P/cero.sal 2>&1
+if grep -q "excepción 0: división por cero" $P/cero.sal && grep -q "^\[código 9\]" $P/cero.sal; then ok "una división por cero llega a su excepción (la 0, por la IDT)"
+else ko "la división por cero no llega a la excepción"; sed 's/^/        /' $P/cero.sal | head -6; fi
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))

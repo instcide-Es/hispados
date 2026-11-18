@@ -1,0 +1,9 @@
+; Una función de interrupción lleva como mucho el número de error.
+; ERROR: 5:18: error: una función de interrupción lleva como mucho un parámetro: el número de error que deja el procesador
+módulo Error
+    modelo núcleo
+    interrupción función fallo(a: nat32, b: nat32)
+    fin
+    función principal()
+    fin
+fin Error.

@@ -1,0 +1,9 @@
+; En 32 bits se desplaza de 0 a 31.
+; ERROR: 7:19: error: se desplaza de 0 a 31 bits
+módulo Error
+    modelo núcleo
+    función principal()
+        variable n: nat16
+        n := n << 32
+    fin
+fin Error.

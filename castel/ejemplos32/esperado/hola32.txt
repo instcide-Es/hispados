@@ -1,0 +1,8 @@
+Hola desde Castel, en 32 bits (Hispa32)
+fibonacci(25) = 75025
+primos por debajo de 1000: 168
+4000000000 div 3 = 1333333333, -7 div 2 = -3
+A: (3, -4) a 7
+B: (-100000, 250000) a 350000
+origen: (0, 0) a 0
+un puntero ocupa 4 octetos; un Punto, 12

@@ -2,6 +2,7 @@
 ; se compila con «modelo hispa32» y se ejecuta en Hispa-DOS con HW32
 ; (HW32 HOLA32.EXE). Cuentas de 32 bits, arreglos, estructuras, punteros y
 ; recursión; acaba con el código de salida 42.
+; código de salida: 42
 ; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 módulo Hola32
 

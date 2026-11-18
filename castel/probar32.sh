@@ -8,7 +8,9 @@
 #     código, por el dispositivo isa-debug-exit (puerto 0xF4);
 #   - un programa Hispa32 (NOMBRE.EXE, de «modelo hispa32»): se copia al
 #     disquete de Hispa-DOS (../build/hispados.img, o HISPADOS_IMG=ruta) y
-#     se lanza con HW32 (y HSPDPMI), tecleando por el puerto serie.
+#     se lanza con HW32 (y HSPDPMI), tecleando por el puerto serie. Con
+#     NIVEL=n, detrás se mira el código de salida: si es n o más, escribe
+#     «[nivel-n]», y si es más, «[nivel-n+1]».
 # Necesita qemu-system-i386 y, para los .EXE, mtools y el disquete hecho
 # (make y make nucprogs en la raíz del proyecto).
 set -u
@@ -40,6 +42,10 @@ mcopy -o -i $T/f.img "$P" ::BIN/$NOM.EXE
 { sleep 6
   printf 'A:\\HISPADOS\\HSPDPMI\r'; sleep 2
   printf 'A:\\BIN\\HW32 A:\\BIN\\%s.EXE %s\r' $NOM "$*"; sleep ${ESPERA:-5}
+  if [ -n "${NIVEL:-}" ]; then        # el código de salida: ¿llega a NIVEL? ¿lo pasa?
+    printf 'IF ERRORLEVEL %d ECHO [nivel-%d]\r' $NIVEL $NIVEL; sleep 1
+    printf 'IF ERRORLEVEL %d ECHO [nivel-%d]\r' $((NIVEL + 1)) $((NIVEL + 1)); sleep 1
+  fi
   printf 'ECHO [fin-programa]\r'; sleep 1
 } | timeout 60 qemu-system-i386 -display none -serial stdio -monitor none -parallel none -m 16 \
     -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot > $T/raw 2>&1

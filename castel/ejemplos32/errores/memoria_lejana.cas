@@ -1,0 +1,8 @@
+; En 32 bits no hay memoria lejana: se usa un puntero.
+; ERROR: 6:18: error: en 32 bits no hay memoria lejana: leer_byte() no está (la memoria es plana: se usa un puntero, como puntero(0xB8000))
+módulo Error
+    modelo núcleo
+    función principal()
+        escribir(leer_byte(0xB800, 0))
+    fin
+fin Error.

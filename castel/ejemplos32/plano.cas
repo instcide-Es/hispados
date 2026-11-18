@@ -1,0 +1,127 @@
+; plano.cas - lo propio de los 32 bits («modelo núcleo»): las cuentas son de
+; 32 bits aunque los operandos sean de 16; punteros de 4 octetos a cualquier
+; sitio de la memoria (la pantalla, en 0xB8000); estructuras y arreglos
+; grandes; ensamblador con registros de 32 bits; la dirección de una función;
+; una función de interrupción (que se instala y se dispara con «int»); y
+; salir() desde dentro de una función.
+; código de salida: 77
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Plano
+
+    modelo núcleo
+
+    tipo Ficha = estructura
+        número: nat32
+        corto: nat16
+        signo: ent16
+        letra: byte
+        sig: puntero a Ficha
+    fin
+
+    tipo Puerta = estructura
+        desp_bajo, selector: nat16
+        cero, clase: byte
+        desp_alto: nat16
+    fin
+
+    variable fichas: arreglo [5] de Ficha
+    variable tabla: arreglo [3000] de nat32
+    variable veces: nat32
+    variable idt: arreglo [64] de Puerta
+    variable idtr: arreglo [3] de nat16
+
+    función cuadrado(x: nat16): nat32
+        devolver x * x                          ; en 32 bits: no se recorta
+    fin
+
+    función suma_asm(a: nat32, b: nat32): nat32
+        ensamblador
+            mov eax, {a}
+            add eax, {b}
+        fin
+    fin
+
+    función rellena(ref t: arreglo [3000] de nat32, n: nat32)
+        variable i: nat32
+        para i desde 0 hasta n - 1 hacer
+            t[i] := i * 3 + 1
+        fin
+    fin
+
+    interrupción función prueba()
+        veces := veces + 1
+    fin
+
+    función acaba(código: byte)
+        escribir("me voy con el código ", código, "\n")
+        salir(código)
+    fin
+
+    función principal(): byte
+        variable a, b: nat16
+        variable e: ent16
+        variable p: puntero a Ficha
+        variable pan: puntero a nat16
+        variable i, total, dir: nat32
+        a := 40000
+        b := 3
+        e := -2
+        escribir("en 32 bits: ", a * b, " ", a + a, " ", e * a, " ", cuadrado(65535), "\n")
+        escribir("desplazar: ", a << 4, " ", e >> 1, " ", nob a, " ", -a, "\n")
+        escribir("tamaños: ", tamaño(Ficha), " ", tamaño(p), " ", tamaño(tabla), "\n")
+        ; una lista con punteros
+        para i desde 0 hasta 4 hacer
+            fichas[i].número := i * 1000000
+            fichas[i].corto := i + 60000
+            fichas[i].signo := ent16(i) - 3
+            fichas[i].letra := 'a' + i
+            si i < 4 entonces fichas[i].sig := dirección(fichas[i + 1]) sino fichas[i].sig := nulo fin
+        fin
+        p := dirección(fichas[0])
+        mientras p <> nulo hacer
+            escribir(p.número, "/", p.corto, "/", p.signo, "/")
+            escribir_car(p.letra)
+            escribir(" ")
+            p := p.sig
+        fin
+        escribir("\n")
+        ; un arreglo grande
+        rellena(tabla, 3000)
+        total := 0
+        para i desde 0 hasta 2999 hacer
+            total := total + tabla[i]
+        fin
+        escribir("tabla: ", tabla[2999], " ", total, "\n")
+        ; la pantalla, con un puntero
+        pan := puntero(0xB8000)
+        pan[80 * 24 + 79] := 0x4E21
+        escribir("pantalla: ", pan[80 * 24 + 79], "\n")
+        ; según con números de 32 bits
+        para i desde 999998 hasta 1000001 hacer
+            según i
+                caso 999998: escribir("a")
+                caso 999999..1000000: escribir("b")
+                si no: escribir("c")
+            fin
+        fin
+        escribir(" ", suma_asm(3000000000, 1000000000), "\n")
+        ; una función de interrupción: a la IDT (la 0x30) y se dispara dos veces
+        dir := nat32(dirección(prueba))
+        idt[0x30].desp_bajo := dir
+        idt[0x30].selector := 8
+        idt[0x30].clase := 0x8E
+        idt[0x30].desp_alto := dir >> 16
+        idtr[0] := tamaño(idt) - 1
+        idtr[1] := nat32(dirección(idt))
+        idtr[2] := nat32(dirección(idt)) >> 16
+        ensamblador
+            lidt {idtr}
+            int 0x30
+            int 0x30
+        fin
+        escribir("interrupciones atendidas: ", veces, "\n")
+        acaba(77)
+        devolver 1
+    fin
+
+fin Plano.

@@ -1,0 +1,8 @@
+; interrupción() es del modo real.
+; ERROR: 6:9: error: interrupción() es del modo real (BIOS y DOS): en 32 bits no está (se usa un bloque «ensamblador»)
+módulo Error
+    modelo hispa32
+    función principal()
+        interrupción(0x21, ah: 2, dl: 'A')
+    fin
+fin Error.

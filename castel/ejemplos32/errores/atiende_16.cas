@@ -1,0 +1,8 @@
+; Las funciones de interrupción son de 32 bits.
+; ERROR: 4:18: error: las funciones de interrupción son de 32 bits (modelo núcleo)
+módulo Error
+    interrupción función reloj()
+    fin
+    función principal()
+    fin
+fin Error.

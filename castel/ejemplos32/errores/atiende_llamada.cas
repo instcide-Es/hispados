@@ -1,0 +1,10 @@
+; A una función de interrupción la llama el procesador, no el programa.
+; ERROR: 8:9: error: reloj() atiende una interrupción: no se la llama (la llama el procesador)
+módulo Error
+    modelo núcleo
+    interrupción función reloj()
+    fin
+    función principal()
+        reloj()
+    fin
+fin Error.

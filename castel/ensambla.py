@@ -706,7 +706,7 @@ class Ensamblador:
             bajo = s.lower()
         for pal in (b'short', b'near', b'dword'):
             if bajo.startswith(pal + b' '):
-                forma = pal
+                forma = pal if pal != b'dword' else None
                 s = s[len(pal):].strip()
                 bajo = s.lower()
         b32 = self.bits == 32

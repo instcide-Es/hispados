@@ -39,6 +39,8 @@ módulo Ensambla
     constante K_MEM = 4
     constante K_INM = 5
     constante K_LEJOS = 6
+    constante K_R32 = 7
+    constante K_RC = 8                  ; cr0 a cr4
     constante SIN_REG = 255
 
     ; las clases de instrucción (TABLA_n)
@@ -70,26 +72,33 @@ módulo Ensambla
     constante C_SECTION = 26
     constante C_ALIGN = 27
     constante C_TIMES = 28
+    constante C_SUELTA_W = 29           ; las sueltas de 16 bits (en «bits 32», con 66h delante)
+    constante C_SUELTA_D = 30           ; y las de 32 (en «bits 16», con 66h)
+    constante C_MOVX = 31               ; movzx y movsx (y lgdt, lidt, sgdt y sidt: código < 16)
 
     ; las instrucciones y órdenes: nombre, clase y código + 1 (hecha con un guion a partir
     ; de las tablas de ensambla.py; por delante, las más frecuentes)
-    constante TABLA_1 = "mov\x08\x01call\x14\x01push\x0B\x01cmp\x02\x08pop\x0C\x01xor\x02\x07jmp\x13\x01add\x02\x01ret\x10\xC3inc\x0A\x01or\x02\x02je\x05\x05int\x0F\x01sub\x02\x06jne\x05\x06db\x15\x02retf\x10\xCBlea\x0E\x01dec\x0A\x02test\x09\x01xchg\x0D\x01in\x11\x01out\x12\x01retn\x10\xC3dw\x15\x03dd\x15\x05resb\x16\x02resw\x16\x03resd\x16\x05cpu\x17\x01bits\x17\x01org\x18\x01absolute\x19\x01section\x1A\x01align\x1B\x01times\x1C\x01"
+    constante TABLA_1 = "mov\x08\x01call\x14\x01push\x0B\x01cmp\x02\x08pop\x0C\x01xor\x02\x07jmp\x13\x01add\x02\x01ret\x10\xC3inc\x0A\x01or\x02\x02je\x05\x05int\x0F\x01sub\x02\x06jne\x05\x06db\x15\x02retf\x10\xCBlea\x0E\x01dec\x0A\x02test\x09\x01xchg\x0D\x01in\x11\x01out\x12\x01retn\x10\xC3dw\x15\x03dd\x15\x05resb\x16\x02resw\x16\x03resd\x16\x05cpu\x17\x01bits\x17\x02org\x18\x01absolute\x19\x01section\x1A\x01align\x1B\x01times\x1C\x01"
     constante TABLA_2 = "adc\x02\x03sbb\x02\x04and\x02\x05rol\x03\x01ror\x03\x02rcl\x03\x03rcr\x03\x04shl\x03\x05sal\x03\x05shr\x03\x06sar\x03\x08not\x04\x03neg\x04\x04mul\x04\x05imul\x04\x06div\x04\x07idiv\x04\x08jo\x05\x01jno\x05\x02jb\x05\x03jc\x05\x03jnae\x05\x03jnb\x05\x04jnc\x05\x04jae\x05\x04jz\x05\x05jnz\x05\x06jbe\x05\x07jna\x05\x07ja\x05\x08jnbe\x05\x08js\x05\x09jns\x05\x0Ajp\x05\x0Bjpe\x05\x0Bjnp\x05\x0Cjpo\x05\x0Cjl\x05\x0D"
-    constante TABLA_3 = "jnge\x05\x0Djge\x05\x0Ejnl\x05\x0Ejle\x05\x0Fjng\x05\x0Fjg\x05\x10jnle\x05\x10loopne\x06\xE1loopnz\x06\xE1loope\x06\xE2loopz\x06\xE2loop\x06\xE3jcxz\x06\xE4rep\x07\xF4repe\x07\xF4repz\x07\xF4repne\x07\xF3repnz\x07\xF3cld\x01\xFDstd\x01\xFEcli\x01\xFBsti\x01\xFCclc\x01\xF9stc\x01\xFAcmc\x01\xF6cwd\x01\x9Acbw\x01\x99pushf\x01\x9Dpopf\x01\x9Elodsb\x01\xADlodsw\x01\xAEstosb\x01\xABstosw\x01\xACmovsb\x01\xA5movsw\x01\xA6"
-    constante TABLA_4 = "cmpsb\x01\xA7cmpsw\x01\xA8scasb\x01\xAFscasw\x01\xB0nop\x01\x91hlt\x01\xF5lahf\x01\xA0sahf\x01\x9Fxlatb\x01\xD8iret\x01\xD0into\x01\xCF"
-    constante TABLAS = 4
+    constante TABLA_3 = "jnge\x05\x0Djge\x05\x0Ejnl\x05\x0Ejle\x05\x0Fjng\x05\x0Fjg\x05\x10jnle\x05\x10loopne\x06\xE1loopnz\x06\xE1loope\x06\xE2loopz\x06\xE2loop\x06\xE3jcxz\x06\xE4rep\x07\xF4repe\x07\xF4repz\x07\xF4repne\x07\xF3repnz\x07\xF3cld\x01\xFDstd\x01\xFEcli\x01\xFBsti\x01\xFCclc\x01\xF9stc\x01\xFAcmc\x01\xF6cwd\x1D\x9Acbw\x1D\x99pushf\x01\x9Dpopf\x01\x9Elodsb\x01\xADlodsw\x1D\xAEstosb\x01\xABstosw\x1D\xACmovsb\x01\xA5movsw\x1D\xA6"
+    constante TABLA_4 = "cmpsb\x01\xA7cmpsw\x1D\xA8scasb\x01\xAFscasw\x1D\xB0nop\x01\x91hlt\x01\xF5lahf\x01\xA0sahf\x01\x9Fxlatb\x01\xD8iret\x01\xD0into\x01\xCF"
+    constante TABLA_5 = "movzx\x1F\xB7movsx\x1F\xBFsgdt\x1F\x01sidt\x1F\x02lgdt\x1F\x03lidt\x1F\x04cdq\x1E\x9Acwde\x1E\x99lodsd\x1E\xAEstosd\x1E\xACmovsd\x1E\xA6cmpsd\x1E\xA8scasd\x1E\xB0pushad\x1E\x61popad\x1E\x62pushfd\x1E\x9Dpopfd\x1E\x9Eiretd\x1E\xD0pusha\x01\x61popa\x01\x62int3\x01\xCDjecxz\x06\xE5"
+    constante TABLAS = 5
 
-    variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4)
+    variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4, TABLA_5)
 
     tipo Op = estructura
         k: byte
         reg: byte
-        tam: byte                       ; 1, 2 o 0 (no se sabe)
+        tam: byte                       ; 1, 2, 4 o 0 (no se sabe)
         seg: byte                       ; el prefijo de segmento, o 0
         rm: byte                        ; memoria: 0 a 7, o SIN_REG (dirección sin registros)
         sim: bool                       ; ¿lleva alguna etiqueta la cuenta?
         v: nat32                        ; el número (inmediato o desplazamiento)
         v2: nat32                       ; K_LEJOS: el segmento
+        falta: bool                     ; K_INM: ¿alguna etiqueta que aún no se sabe?
+        a32: bool                       ; memoria con registros de 32 bits (o sin registros en «bits 32»)
+        base, índice, escala: byte      ; [base+índice*escala]: SIN_REG si no está
     fin
 
     variable nombre_ent: arreglo [80] de byte
@@ -109,6 +118,8 @@ módulo Ensambla
     variable visto_L: arreglo [4096] de byte
     variable visto_T: arreglo [2048] de byte
     variable seg_L, seg_T, seg_cubos, seg_sim, libre_sim: nat16
+    variable seg_LA, seg_TA: nat16      ; la palabra alta de las L_n y de las T_n
+    variable bits: byte                 ; el modo: 16 o 32 («bits 32»)
     variable e_sim, e_falta: bool       ; de la última cuenta
     ; el resumen de la primera pasada (ver más abajo)
     constante R_FIN = 0                 ; las marcas del resumen: el final,
@@ -116,6 +127,7 @@ módulo Ensambla
     constante R_PC = 4                  ; la dirección pasa a ser otra: valor (4),
     constante R_ALINEA = 5              ; ceros hasta un múltiplo de n (2),
     constante R_ABSOLUTO = 6            ; lo que sigue va o no al archivo: sí (1),
+    constante R_BITS = 7                ; el modo pasa a ser otro: 16 o 32 (1),
     constante R_ETIQUETA = 0x10         ; + clase (1 L_n, 2 T_n, 3 con nombre): una etiqueta: cuál (2),
     constante R_SALTO = 0x40            ; + forma * 4 + clase: un salto a esa etiqueta: cuál (2),
     constante R_FIJO_CORTO = 0x80       ; + n: un tramo fijo de menos de 128 octetos
@@ -129,7 +141,7 @@ módulo Ensambla
     variable apuntando: bool            ; se está apuntando (en la primera pasada)
     variable fijo_n: nat16              ; octetos de tamaño fijo aún sin apuntar
     variable ei, efin: puntero a byte   ; por dónde va la cuenta y dónde acaba
-    variable op_a, op_c: Op
+    variable op_a, op_c, op_3: Op
 
     ; ---- errores ----
     función error2(msg: puntero a byte, más: puntero a byte)
@@ -248,6 +260,25 @@ módulo Ensambla
         devolver 0
     fin
 
+    ; el valor de una L_n o una T_n (dos palabras: la baja y la alta, en dos tablas)
+    función l_valor(i: nat16): nat32
+        devolver nat32(leer_palabra(seg_LA, i * 2)) << 16 ob leer_palabra(seg_L, i * 2)
+    fin
+
+    función t_valor(i: nat16): nat32
+        devolver nat32(leer_palabra(seg_TA, i * 2)) << 16 ob leer_palabra(seg_T, i * 2)
+    fin
+
+    función l_pon(i: nat16, v: nat32)
+        poner_palabra(seg_L, i * 2, nat16(v))
+        poner_palabra(seg_LA, i * 2, nat16(v >> 16))
+    fin
+
+    función t_pon(i: nat16, v: nat32)
+        poner_palabra(seg_T, i * 2, nat16(v))
+        poner_palabra(seg_TA, i * 2, nat16(v >> 16))
+    fin
+
     ; el valor de una etiqueta; falso si (aún) no está
     función busca(n: puntero a byte, largo_: nat16, ref v: nat32): bool
         variable num: ent32
@@ -256,14 +287,14 @@ módulo Ensambla
         si num >= 0 entonces
             i := nat16(num)
             si visto_L[i >> 3] yb (1 << (i yb 7)) = 0 entonces devolver falso fin
-            v := leer_palabra(seg_L, i * 2)
+            v := l_valor(i)
             devolver cierto
         fin
         num := número_de(n, largo_, 'T', MAX_T)
         si num >= 0 entonces
             i := nat16(num)
             si visto_T[i >> 3] yb (1 << (i yb 7)) = 0 entonces devolver falso fin
-            v := leer_palabra(seg_T, i * 2)
+            v := t_valor(i)
             devolver cierto
         fin
         r := entrada(n, largo_)
@@ -392,14 +423,21 @@ módulo Ensambla
         devolver v ob (nat16(r_lee()) << 8)
     fin
 
+    ; ¿llega un salto corto con esa distancia (ya recortada a 16 bits en «bits 16»)?
+    función llega(d: nat32): bool
+        si bits = 16 entonces devolver d <= 0x7F o d >= 0xFF80 fin
+        devolver d <= 0x7F o d >= 0xFFFFFF80
+    fin
+
     ; una pasada sobre el resumen: lo mismo que una sobre el archivo
     función pasada_rápida()
         variable marca, forma, clase, bit: byte
-        variable cuál, d, n: nat16
-        variable v: nat32
+        variable cuál, n: nat16
+        variable v, d: nat32
         variable está, largo_: bool
         pc := 0
         pos := 0
+        bits := 16
         absoluto := falso
         cambio := falso
         res_seg := seg_res
@@ -418,22 +456,28 @@ módulo Ensambla
                 si clase = 1 entonces
                     bit := 1 << (cuál yb 7)
                     está := visto_L[cuál >> 3] yb bit <> 0
-                    d := leer_palabra(seg_L, cuál * 2)
+                    d := l_valor(cuál)
                 sino si clase = 2 entonces
                     bit := 1 << (cuál yb 7)
                     está := visto_T[cuál >> 3] yb bit <> 0
-                    d := leer_palabra(seg_T, cuál * 2)
+                    d := t_valor(cuál)
                 sino
                     está := leer_byte(seg_sim + cuál, 7) <> 0
-                    d := leer_palabra(seg_sim + cuál, 2)
+                    d := nat32(leer_palabra(seg_sim + cuál, 4)) << 16 ob leer_palabra(seg_sim + cuál, 2)
                 fin
-                d := d - (nat16(pc) + 2)
+                d := d - (pc + 2)
+                si bits = 16 entonces d := d yb 0xFFFF fin
                 ; (lo que no está definido se supone cerca: el error lo dirá la última pasada)
-                largo_ := forma yb F_CERCA <> 0 o (forma yb F_CORTO = 0 y no (d <= 0x7F o d >= 0xFF80 o no está))
+                largo_ := forma yb F_CERCA <> 0 o (forma yb F_CORTO = 0 y no (llega(d) o no está))
                 n := 2
                 si largo_ entonces
-                    n := 3
-                    si forma yb F_JCC <> 0 entonces n := 5 fin
+                    si bits = 32 entonces
+                        n := 5
+                        si forma yb F_JCC <> 0 entonces n := 6 fin
+                    sino
+                        n := 3
+                        si forma yb F_JCC <> 0 entonces n := 5 fin
+                    fin
                 fin
                 pc := pc + n
                 si no absoluto entonces pos := pos + n fin
@@ -441,14 +485,14 @@ módulo Ensambla
                 clase := marca - R_ETIQUETA
                 cuál := r_lee_palabra()
                 si clase = 1 entonces
-                    si leer_palabra(seg_L, cuál * 2) <> nat16(pc) entonces
+                    si l_valor(cuál) <> pc entonces
                         cambio := cierto
-                        poner_palabra(seg_L, cuál * 2, nat16(pc))
+                        l_pon(cuál, pc)
                     fin
                 sino si clase = 2 entonces
-                    si leer_palabra(seg_T, cuál * 2) <> nat16(pc) entonces
+                    si t_valor(cuál) <> pc entonces
                         cambio := cierto
-                        poner_palabra(seg_T, cuál * 2, nat16(pc))
+                        t_pon(cuál, pc)
                     fin
                 sino
                     d := seg_sim + cuál
@@ -473,6 +517,8 @@ módulo Ensambla
                 fin
             sino si marca = R_ABSOLUTO entonces
                 absoluto := r_lee() <> 0
+            sino si marca = R_BITS entonces
+                bits := r_lee()
             sino
                 romper                          ; R_FIN
             fin
@@ -492,9 +538,9 @@ módulo Ensambla
                 cambio := cierto
             sino
                 si primera entonces error2("etiqueta repetida: ", n) fin
-                si leer_palabra(seg_L, i * 2) <> nat16(pc) entonces cambio := cierto fin
+                si l_valor(i) <> pc entonces cambio := cierto fin
             fin
-            poner_palabra(seg_L, i * 2, nat16(pc))
+            l_pon(i, pc)
             apunta_etiqueta(R_ETIQUETA, 0, 1, i)
             devolver
         fin
@@ -507,9 +553,9 @@ módulo Ensambla
                 cambio := cierto
             sino
                 si primera entonces error2("etiqueta repetida: ", n) fin
-                si leer_palabra(seg_T, i * 2) <> nat16(pc) entonces cambio := cierto fin
+                si t_valor(i) <> pc entonces cambio := cierto fin
             fin
-            poner_palabra(seg_T, i * 2, nat16(pc))
+            t_pon(i, pc)
             apunta_etiqueta(R_ETIQUETA, 0, 2, i)
             devolver
         fin
@@ -703,23 +749,110 @@ módulo Ensambla
         devolver SIN_REG
     fin
 
+    ; el registro de tres letras de [p, p+3) en la lista (de tres en tres), o SIN_REG
+    función registro3(p: puntero a byte, lista: puntero a byte): byte
+        variable i: byte
+        i := 0
+        mientras valor(lista) <> 0 hacer
+            si minus(p[0]) = lista[0] y minus(p[1]) = lista[1] y minus(p[2]) = lista[2] entonces devolver i fin
+            lista := lista + 3
+            i := i + 1
+        fin
+        devolver SIN_REG
+    fin
+
+    ; «esi», «esi*4» o «4*esi» en [t, tf): el registro y la escala (0 si no la lleva)
+    función escalado(t: puntero a byte, tf: puntero a byte, ref r: byte, ref e: byte): bool
+        variable x, a, af, b, bf: puntero a byte
+        variable n: nat32
+        si tf - t = 3 entonces
+            r := registro3(t, "eaxecxedxebxespebpesiedi")
+            e := 0
+            devolver r <> SIN_REG
+        fin
+        x := corta(t, tf, '*')
+        si x >= tf entonces devolver falso fin
+        a := t
+        af := x
+        recorta(a, af)
+        b := x + 1
+        bf := tf
+        recorta(b, bf)
+        si bf - b = 3 entonces              ; «4*esi»: se da la vuelta
+            x := a
+            a := b
+            b := x
+            x := af
+            af := bf
+            bf := x
+        fin
+        si af - a <> 3 o bf <= b entonces devolver falso fin
+        r := registro3(a, "eaxecxedxebxespebpesiedi")
+        si r = SIN_REG entonces devolver falso fin
+        n := 0
+        mientras b < bf hacer
+            si valor(b) < '0' o valor(b) > '9' entonces devolver falso fin
+            n := n * 10 + (valor(b) - '0')
+            b := b + 1
+        fin
+        si n > 9 entonces error("la escala es 1, 2, 4 u 8") fin
+        e := byte(n)
+        devolver cierto
+    fin
+
+    ; [base+índice*escala]: como NASM, el primero sin escala es la base y el
+    ; otro el índice (salvo esp, que no puede ser índice); un índice por 2, 3,
+    ; 5 o 9 sin base se parte en base e índice ([esi*2] es [esi+esi])
+    función memoria32(ref op: Op, r: byte, e: byte)
+        si op.base = SIN_REG y e = 0 entonces
+            op.base := r
+        sino si op.índice = SIN_REG entonces
+            op.índice := r
+            op.escala := e
+            si e = 0 entonces op.escala := 1 fin
+        sino
+            error("demasiados registros en la dirección")
+        fin
+    fin
+
+    función acaba32(ref op: Op)
+        variable x: byte
+        si op.índice = 4 entonces
+            si op.escala <> 1 o op.base = 4 entonces error("esp no vale como índice") fin
+            x := op.base
+            op.base := op.índice
+            op.índice := x
+        fin
+        si op.base = SIN_REG y (op.escala = 2 o op.escala = 3 o op.escala = 5 o op.escala = 9) entonces
+            op.base := op.índice
+            op.escala := op.escala - 1
+        fin
+        si op.índice <> SIN_REG y op.escala <> 1 y op.escala <> 2 y op.escala <> 4 y op.escala <> 8 entonces
+            error("la escala es 1, 2, 4 u 8")
+        fin
+    fin
+
     función memoria(p: puntero a byte, fin_: puntero a byte, ref op: Op)
         variable resto: arreglo [256] de byte
         variable dos, j, t, tf: puntero a byte
-        variable regs, r: byte
+        variable regs, r, e: byte
         variable prof: ent16
         variable n: nat16
         variable signo: byte
+        variable hay32: bool
         op.k := K_MEM
+        hay32 := falso
         dos := corta(p, fin_, ':')
         si dos < fin_ entonces
             t := p
             tf := dos
             recorta(t, tf)
             r := SIN_REG
-            si tf - t = 2 entonces r := registro(t, "escsssds") fin
+            si tf - t = 2 entonces r := registro(t, "escsssdsfsgs") fin
             si r = SIN_REG entonces error("delante de «:» va un registro de segmento") fin
             op.seg := 0x26 + 8 * r
+            si r = 4 entonces op.seg := 0x64 fin
+            si r = 5 entonces op.seg := 0x65 fin
             p := dos + 1
         fin
         ; los registros (sumados) y lo demás, que es una cuenta
@@ -742,6 +875,9 @@ módulo Ensambla
             si r <> SIN_REG entonces
                 si regs yb (1 << r) <> 0 entonces error("dirección mal escrita") fin
                 regs := regs ob (1 << r)
+            sino si signo = '+' y escalado(t, tf, r, e) entonces
+                hay32 := cierto
+                memoria32(op, r, e)
             sino si tf > t entonces
                 si n + (tf - t) + 2 >= 256 entonces error("dirección demasiado larga") fin
                 resto[n] := signo
@@ -757,6 +893,15 @@ módulo Ensambla
             si j >= fin_ entonces romper fin
             signo := valor(j)
             p := j + 1
+        fin
+        si hay32 entonces
+            si regs <> 0 entonces error("no se mezclan registros de 16 y de 32 bits en una dirección") fin
+            si bits <> 32 entonces error("en 16 bits las direcciones van con registros de 16 (bx, bp, si, di)") fin
+            acaba32(op)
+            op.a32 := cierto
+        sino si bits = 32 entonces
+            si regs <> 0 entonces error("en 32 bits las direcciones van con registros de 32 (ebx, esi...)") fin
+            op.a32 := cierto
         fin
         ; bx = 1, bp = 2, si = 4, di = 8
         según regs
@@ -788,6 +933,11 @@ módulo Ensambla
         op.sim := falso
         op.v := 0
         op.v2 := 0
+        op.falta := falso
+        op.a32 := falso
+        op.base := SIN_REG
+        op.índice := SIN_REG
+        op.escala := 1
         recorta(p, fin_)
         si fin_ - p > 4 y (es_blanco(p[4]) o p[4] = '[') entonces
             si empieza(p, fin_, "byte") entonces op.tam := 1 fin
@@ -795,6 +945,27 @@ módulo Ensambla
             si op.tam <> 0 entonces
                 p := p + 4
                 recorta(p, fin_)
+            fin
+        fin
+        si fin_ - p > 5 y (es_blanco(p[5]) o p[5] = '[') y empieza(p, fin_, "dword") entonces
+            op.tam := 4
+            p := p + 5
+            recorta(p, fin_)
+        fin
+        si fin_ - p = 3 entonces
+            r := registro3(p, "eaxecxedxebxespebpesiedi")
+            si r <> SIN_REG entonces
+                op.k := K_R32
+                op.reg := r
+                op.tam := 4
+                devolver
+            fin
+            r := registro3(p, "cr0cr1cr2cr3cr4")
+            si r <> SIN_REG entonces
+                op.k := K_RC
+                op.reg := r
+                op.tam := 4
+                devolver
             fin
         fin
         si fin_ - p = 2 entonces
@@ -812,7 +983,7 @@ módulo Ensambla
                 op.tam := 1
                 devolver
             fin
-            r := registro(p, "escsssds")
+            r := registro(p, "escsssdsfsgs")
             si r <> SIN_REG entonces
                 op.k := K_RS
                 op.reg := r
@@ -835,6 +1006,7 @@ módulo Ensambla
         op.k := K_INM
         op.v := cuenta(p, fin_)
         op.sim := e_sim
+        op.falta := e_falta
     fin
 
     ; ---- sacar octetos ----
@@ -855,18 +1027,35 @@ módulo Ensambla
         b(byte(v >> 8))
     fin
 
-    ; el prefijo de segmento, el código y el octeto ModRM (con su desplazamiento)
-    función modrm(reg: byte, ref op: Op, código: byte)
+    función d4(v: nat32)
+        w(nat16(v))
+        w(nat16(v >> 16))
+    fin
+
+    ; el prefijo de tamaño (66h) si la operación es de t octetos y no es la del modo
+    función p66(t: byte)
+        si (t = 2 y bits = 32) o (t = 4 y bits = 16) entonces b(0x66) fin
+    fin
+
+    ; el prefijo de segmento, el de tamaño, el código (de uno o dos octetos: n) y
+    ; el octeto ModRM (con su desplazamiento)
+    función modrm_n(reg: byte, ref op: Op, n: byte, c1: byte, c2: byte, t: byte)
         variable d: ent32
         si op.k <> K_MEM entonces
-            b(código)
+            p66(t)
+            b(c1)
+            si n = 2 entonces b(c2) fin
             b(0xC0 ob (reg << 3) ob op.reg)
             devolver
         fin
         si op.seg <> 0 entonces b(op.seg) fin
-        b(código)
+        p66(t)
+        b(c1)
+        si n = 2 entonces b(c2) fin
         d := ent32(op.v)
-        si op.rm = SIN_REG entonces
+        si op.a32 entonces
+            modrm32(reg, op, d)
+        sino si op.rm = SIN_REG entonces
             b(0x06 ob (reg << 3))
             w(nat16(op.v))
         sino si op.sim o d < -128 o d > 127 entonces
@@ -880,15 +1069,68 @@ módulo Ensambla
         fin
     fin
 
-    ; ¿vale el inmediato como un octeto con signo (para la forma 83h)?
-    función corto(ref op: Op): bool
+    función modrm(reg: byte, ref op: Op, código: byte, t: byte)
+        modrm_n(reg, op, 1, código, 0, t)
+    fin
+
+    función escala_bits(e: byte): byte
+        si e = 2 entonces devolver 0x40 fin
+        si e = 4 entonces devolver 0x80 fin
+        si e = 8 entonces devolver 0xC0 fin
+        devolver 0
+    fin
+
+    ; ModRM (y SIB) de una dirección de 32 bits, con el desplazamiento más corto
+    función modrm32(reg: byte, ref op: Op, d: ent32)
+        variable modo, ind: byte
+        variable largo_: bool
+        largo_ := op.sim o d < -128 o d > 127
+        si op.base = SIN_REG y op.índice = SIN_REG entonces
+            b(0x05 ob (reg << 3))
+            d4(op.v)
+            devolver
+        fin
+        si op.base = SIN_REG entonces       ; índice sin base: SIB con 32 bits de desplazamiento
+            b(0x04 ob (reg << 3))
+            b(escala_bits(op.escala) ob (op.índice << 3) ob 5)
+            d4(op.v)
+            devolver
+        fin
+        si largo_ entonces
+            modo := 0x80
+        sino si d = 0 y op.base <> 5 entonces
+            modo := 0
+        sino
+            modo := 0x40
+        fin
+        si op.índice = SIN_REG y op.base <> 4 entonces
+            b(modo ob (reg << 3) ob op.base)
+        sino
+            ind := op.índice
+            si ind = SIN_REG entonces ind := 4 fin
+            b(modo ob (reg << 3) ob 4)
+            b(escala_bits(op.escala) ob (ind << 3) ob op.base)
+        fin
+        si modo = 0x80 entonces
+            d4(op.v)
+        sino si modo = 0x40 entonces
+            b(byte(op.v))
+        fin
+    fin
+
+    ; ¿vale el inmediato como un octeto con signo (para la forma 83h)? Como en
+    ; NASM: con una etiqueta, no (aunque el número quepa); con una que aún no
+    ; se sabe (en la primera pasada), se supone que sí
+    función corto(ref op: Op, t: byte): bool
         variable v: nat16
+        si op.falta entonces devolver cierto fin
         si op.sim entonces devolver falso fin
+        si t = 4 entonces devolver op.v <= 0x7F o op.v >= 0xFFFFFF80 fin
         v := nat16(op.v)
         devolver v <= 0x7F o v >= 0xFF80
     fin
 
-    ; el tamaño de la operación: 1 o 2, lo que digan los operandos
+    ; el tamaño de la operación: 1, 2 o 4, lo que digan los operandos
     función tam_de(ref a: Op, ref c: Op): byte
         variable t: byte
         t := a.tam
@@ -896,65 +1138,99 @@ módulo Ensambla
         si a.tam <> 0 y c.tam <> 0 y a.tam <> c.tam y c.k <> K_INM entonces
             error("los dos operandos no son del mismo tamaño")
         fin
-        si t = 0 entonces error("no se sabe el tamaño: falta «byte» o «word»") fin
+        si t = 0 entonces error("no se sabe el tamaño: falta «byte», «word» o «dword»") fin
         devolver t
     fin
 
     función tam_uno(ref a: Op): byte
-        si a.tam = 0 entonces error("no se sabe el tamaño: falta «byte» o «word»") fin
+        si a.tam = 0 entonces error("no se sabe el tamaño: falta «byte», «word» o «dword»") fin
         devolver a.tam
     fin
 
     función es_rm(ref op: Op): bool
-        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_MEM
+        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_MEM o op.k = K_R32
     fin
 
     función es_reg(ref op: Op): bool
-        devolver op.k = K_R16 o op.k = K_R8
+        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_R32
     fin
 
-    ; 1 si la operación es de 16 bits; 0 si es de 8
+    función es_r1632(ref op: Op): bool
+        devolver op.k = K_R16 o op.k = K_R32
+    fin
+
+    ; 1 si la operación es de 16 o de 32 bits; 0 si es de 8
     función ancho(t: byte): byte
-        si t = 2 entonces devolver 1 fin
+        si t >= 2 entonces devolver 1 fin
         devolver 0
     fin
 
     función inm(v: nat32, t: byte)
-        si t = 1 entonces b(byte(v)) sino w(nat16(v)) fin
+        si t = 1 entonces
+            b(byte(v))
+        sino si t = 4 entonces
+            d4(v)
+        sino
+            w(nat16(v))
+        fin
     fin
 
     función mal(qué: puntero a byte)
         error2("operandos que no valen para ", qué)
     fin
 
+    ; la dirección de una memoria sin registros: de 16 o de 32 bits según la dirección
+    función dir_fija(ref op: Op)
+        si op.a32 entonces d4(op.v) sino w(nat16(op.v)) fin
+    fin
+
+    función sin_regs(ref op: Op): bool
+        devolver op.k = K_MEM y op.rm = SIN_REG y op.base = SIN_REG y op.índice = SIN_REG
+    fin
+
     ; ---- las instrucciones ----
     función i_mov(ref a: Op, ref c: Op)
         variable t: byte
-        si es_reg(a) y a.reg = 0 y c.k = K_MEM y c.rm = SIN_REG entonces
+        si es_reg(a) y a.reg = 0 y sin_regs(c) entonces
             si c.seg <> 0 entonces b(c.seg) fin
+            p66(a.tam)
             b(0xA0 + ancho(a.tam))
-            w(nat16(c.v))
-        sino si es_reg(c) y c.reg = 0 y a.k = K_MEM y a.rm = SIN_REG entonces
+            dir_fija(c)
+        sino si es_reg(c) y c.reg = 0 y sin_regs(a) entonces
             si a.seg <> 0 entonces b(a.seg) fin
+            p66(c.tam)
             b(0xA2 + ancho(c.tam))
-            w(nat16(a.v))
+            dir_fija(a)
         sino si es_rm(a) y es_reg(c) entonces
-            modrm(c.reg, a, 0x88 + ancho(tam_de(a, c)))
+            t := tam_de(a, c)
+            modrm(c.reg, a, 0x88 + ancho(t), t)
         sino si es_reg(a) y c.k = K_MEM entonces
-            modrm(a.reg, c, 0x8A + ancho(tam_de(a, c)))
-        sino si (a.k = K_R16 o a.k = K_MEM) y c.k = K_RS entonces
-            modrm(c.reg, a, 0x8C)
-        sino si a.k = K_RS y (c.k = K_R16 o c.k = K_MEM) entonces
-            modrm(a.reg, c, 0x8E)
+            t := tam_de(a, c)
+            modrm(a.reg, c, 0x8A + ancho(t), t)
+        sino si (es_r1632(a) o a.k = K_MEM) y c.k = K_RS entonces
+            t := 0
+            si a.k = K_R16 entonces t := 2 fin
+            modrm(c.reg, a, 0x8C, t)
+        sino si a.k = K_RS y (es_r1632(c) o c.k = K_MEM) entonces
+            modrm(a.reg, c, 0x8E, 0)
+        sino si a.k = K_RC y c.k = K_R32 entonces
+            b(0x0F)
+            b(0x22)
+            b(0xC0 ob (a.reg << 3) ob c.reg)
+        sino si a.k = K_R32 y c.k = K_RC entonces
+            b(0x0F)
+            b(0x20)
+            b(0xC0 ob (c.reg << 3) ob a.reg)
         sino si a.k = K_R8 y c.k = K_INM entonces
             b(0xB0 + a.reg)
             b(byte(c.v))
-        sino si a.k = K_R16 y c.k = K_INM entonces
+        sino si es_r1632(a) y c.k = K_INM entonces
+            p66(a.tam)
             b(0xB8 + a.reg)
-            w(nat16(c.v))
+            inm(c.v, a.tam)
         sino si a.k = K_MEM y c.k = K_INM entonces
             t := tam_de(a, c)
-            modrm(0, a, 0xC6 + ancho(t))
+            modrm(0, a, 0xC6 + ancho(t), t)
             inm(c.v, t)
         sino
             mal("mov")
@@ -964,19 +1240,22 @@ módulo Ensambla
     función i_cuenta(i: byte, ref a: Op, ref c: Op)
         variable t: byte
         si es_rm(a) y es_reg(c) entonces
-            modrm(c.reg, a, 8 * i + ancho(tam_de(a, c)))
+            t := tam_de(a, c)
+            modrm(c.reg, a, 8 * i + ancho(t), t)
         sino si es_reg(a) y c.k = K_MEM entonces
-            modrm(a.reg, c, 8 * i + 2 + ancho(tam_de(a, c)))
+            t := tam_de(a, c)
+            modrm(a.reg, c, 8 * i + 2 + ancho(t), t)
         sino si es_rm(a) y c.k = K_INM entonces
             t := tam_de(a, c)
-            si t = 2 y corto(c) entonces
-                modrm(i, a, 0x83)
+            si t <> 1 y corto(c, t) entonces
+                modrm(i, a, 0x83, t)
                 b(byte(c.v))
             sino si a.k <> K_MEM y a.reg = 0 entonces
+                p66(t)
                 b(8 * i + 4 + ancho(t))
                 inm(c.v, t)
             sino
-                modrm(i, a, 0x80 + ancho(t))
+                modrm(i, a, 0x80 + ancho(t), t)
                 inm(c.v, t)
             fin
         sino
@@ -987,15 +1266,18 @@ módulo Ensambla
     función i_test(ref a: Op, ref c: Op)
         variable t: byte
         si es_reg(a) y c.k = K_MEM entonces
-            modrm(a.reg, c, 0x84 + ancho(tam_de(c, a)))
+            t := tam_de(c, a)
+            modrm(a.reg, c, 0x84 + ancho(t), t)
         sino si es_rm(a) y es_reg(c) entonces
-            modrm(c.reg, a, 0x84 + ancho(tam_de(a, c)))
+            t := tam_de(a, c)
+            modrm(c.reg, a, 0x84 + ancho(t), t)
         sino si es_rm(a) y c.k = K_INM entonces
             t := tam_de(a, c)
             si a.k <> K_MEM y a.reg = 0 entonces
+                p66(t)
                 b(0xA8 + ancho(t))
             sino
-                modrm(0, a, 0xF6 + ancho(t))
+                modrm(0, a, 0xF6 + ancho(t), t)
             fin
             inm(c.v, t)
         sino
@@ -1004,14 +1286,49 @@ módulo Ensambla
     fin
 
     función i_xchg(ref a: Op, ref c: Op)
-        si a.k = K_R16 y c.k = K_R16 y (a.reg = 0 o c.reg = 0) entonces
+        variable t: byte
+        si es_r1632(a) y c.k = a.k y (a.reg = 0 o c.reg = 0) entonces
+            p66(a.tam)
             b(0x90 + a.reg + c.reg)
         sino si es_reg(a) y es_rm(c) entonces
-            modrm(a.reg, c, 0x86 + ancho(tam_de(a, c)))
+            t := tam_de(a, c)
+            modrm(a.reg, c, 0x86 + ancho(t), t)
         sino si a.k = K_MEM y es_reg(c) entonces
-            modrm(c.reg, a, 0x86 + ancho(tam_de(a, c)))
+            t := tam_de(a, c)
+            modrm(c.reg, a, 0x86 + ancho(t), t)
         sino
             mal("xchg")
+        fin
+    fin
+
+    ; imul de dos o tres operandos (386): registro, r/m e inmediato
+    función i_imul(n: nat16, ref a: Op, ref c: Op, ref i: Op)
+        variable t: byte
+        si no es_r1632(a) entonces mal("imul") fin
+        si n = 2 y c.k = K_INM entonces       ; imul eax, 10 = imul eax, eax, 10
+            t := tam_de(a, a)
+            si corto(c, t) entonces
+                modrm(a.reg, a, 0x6B, t)
+                b(byte(c.v))
+            sino
+                modrm(a.reg, a, 0x69, t)
+                inm(c.v, t)
+            fin
+            devolver
+        fin
+        si no es_rm(c) entonces mal("imul") fin
+        t := tam_de(a, c)
+        si n = 2 entonces
+            modrm_n(a.reg, c, 2, 0x0F, 0xAF, t)
+            devolver
+        fin
+        si i.k <> K_INM entonces mal("imul") fin
+        si corto(i, t) entonces
+            modrm(a.reg, c, 0x6B, t)
+            b(byte(i.v))
+        sino
+            modrm(a.reg, c, 0x69, t)
+            inm(i.v, t)
         fin
     fin
 
@@ -1058,9 +1375,8 @@ módulo Ensambla
 
     ; jmp, call, los saltos condicionales y loop/jcxz
     función i_salto(clase: byte, cod: byte, p: puntero a byte, fin_: puntero a byte)
-        variable destino: nat32
-        variable d: nat16
-        variable llega, corto_, cerca, era: bool
+        variable destino, d: nat32
+        variable llega_, corto_, cerca, era: bool
         variable forma: byte
         recorta(p, fin_)
         corto_ := falso
@@ -1077,16 +1393,18 @@ módulo Ensambla
         sino si fin_ - p > 5 y empieza(p, fin_, "near") y es_blanco(p[4]) entonces
             cerca := cierto
             p := p + 5
+        sino si fin_ - p > 6 y empieza(p, fin_, "dword") y es_blanco(p[5]) entonces
+            p := p + 6
         fin
         si clase = C_JMP o clase = C_CALL entonces
             operando(p, fin_, op_a)
-            si op_a.k = K_R16 o op_a.k = K_MEM entonces
-                si clase = C_JMP entonces modrm(4, op_a, 0xFF) sino modrm(2, op_a, 0xFF) fin
+            si es_r1632(op_a) o op_a.k = K_MEM entonces
+                si clase = C_JMP entonces modrm(4, op_a, 0xFF, 0) sino modrm(2, op_a, 0xFF, 0) fin
                 devolver
             fin
             si op_a.k = K_LEJOS entonces
                 si clase = C_JMP entonces b(0xEA) sino b(0x9A) fin
-                w(nat16(op_a.v))
+                si bits = 32 entonces d4(op_a.v) sino w(nat16(op_a.v)) fin
                 w(nat16(op_a.v2))
                 devolver
             fin
@@ -1095,20 +1413,31 @@ módulo Ensambla
         sino
             destino := cuenta(p, fin_)
         fin
-        d := nat16(destino) - (nat16(pc) + 2)
-        llega := d <= 0x7F o d >= 0xFF80 o e_falta      ; (lo que aún no se sabe, se supone cerca)
+        d := destino - (pc + 2)
+        si bits = 16 entonces d := d yb 0xFFFF fin
+        llega_ := llega(d) o e_falta              ; (lo que aún no se sabe, se supone cerca)
         si clase = C_CALL entonces
             b(0xE8)
-            w(nat16(destino) - (nat16(pc) + 2))
+            si bits = 32 entonces d4(destino - (pc + 4)) sino w(nat16(destino) - (nat16(pc) + 2)) fin
             devolver
         fin
         si clase = C_BUCLE entonces
-            si no llega y final entonces error("ese salto no llega tan lejos (127 octetos)") fin
+            si no llega_ y final entonces error("ese salto no llega tan lejos (127 octetos)") fin
+            ; jcxz en «bits 32» y jecxz en «bits 16» llevan el prefijo 67h (en la
+            ; tabla, jecxz es E4h: el código es E3h, como jcxz)
+            si cod = 0xE4 o cod = 0xE3 entonces
+                si (cod = 0xE4) <> (bits = 32) entonces
+                    b(0x67)                     ; (la cuenta, desde detrás del prefijo)
+                    d := destino - (pc + 2)
+                    si bits = 16 entonces d := d yb 0xFFFF fin
+                fin
+                cod := 0xE3
+            fin
             b(cod)
             b(byte(d))
             devolver
         fin
-        si corto_ y no llega y final entonces error("el salto corto no llega") fin
+        si corto_ y no llega_ y final entonces error("el salto corto no llega") fin
         si apuntando entonces
             ; al resumen: a qué etiqueta va (si el destino no es una etiqueta sola, no hay resumen)
             forma := 0
@@ -1119,13 +1448,23 @@ módulo Ensambla
         fin
         era := apuntando
         apuntando := falso
-        si cerca o (no corto_ y no llega) entonces
-            si clase = C_JCC entonces
-                b(0x70 + (cod xob 1))
-                b(3)
+        si cerca o (no corto_ y no llega_) entonces
+            si bits = 32 entonces
+                si clase = C_JCC entonces
+                    b(0x0F)
+                    b(0x80 + cod)
+                sino
+                    b(0xE9)
+                fin
+                d4(destino - (pc + 4))
+            sino
+                si clase = C_JCC entonces
+                    b(0x70 + (cod xob 1))
+                    b(3)
+                fin
+                b(0xE9)
+                w(nat16(destino) - (nat16(pc) + 2))
             fin
-            b(0xE9)
-            w(nat16(destino) - (nat16(pc) + 2))
         sino
             si clase = C_JMP entonces b(0xEB) sino b(0x70 + cod) fin
             b(byte(d))
@@ -1285,8 +1624,10 @@ módulo Ensambla
                     veces := veces - 1
                 fin
                 devolver
-            caso C_SUELTA:
+            caso C_SUELTA, C_SUELTA_W, C_SUELTA_D:
                 si n <> 0 entonces mal("eso") fin
+                si clase = C_SUELTA_W entonces p66(2) fin
+                si clase = C_SUELTA_D entonces p66(4) fin
                 b(cod)
                 devolver
             caso C_JCC, C_BUCLE, C_JMP, C_CALL:
@@ -1309,6 +1650,16 @@ módulo Ensambla
                 fin
                 devolver
             caso C_NADA:
+                si cod = 1 entonces             ; «bits 16» o «bits 32»
+                    veces := cuenta(p, fin_)
+                    si veces <> 16 y veces <> 32 entonces error("«bits» es 16 o 32") fin
+                    bits := byte(veces)
+                    si apuntando entonces
+                        vuelca_fijo()
+                        r_byte(R_BITS)
+                        r_byte(bits)
+                    fin
+                fin
                 devolver
             caso C_ORG:
                 pon_pc(cuenta(p, fin_))
@@ -1332,8 +1683,15 @@ módulo Ensambla
         ; las que llevan operandos de verdad
         si n >= 1 entonces operando(p, c, op_a) fin
         si n = 2 entonces
-            si corta(c + 1, fin_, ',') < fin_ entonces error("sobran operandos") fin
-            operando(c + 1, fin_, op_c)
+            j := corta(c + 1, fin_, ',')
+            si j < fin_ entonces
+                si clase <> C_UNARIA o cod <> 5 o corta(j + 1, fin_, ',') < fin_ entonces error("sobran operandos") fin
+                n := 3                          ; imul de tres operandos
+                operando(j + 1, fin_, op_3)
+            sino
+                j := fin_
+            fin
+            operando(c + 1, j, op_c)
         fin
         según clase
             caso C_MOV:
@@ -1347,45 +1705,87 @@ módulo Ensambla
                 i_test(op_a, op_c)
             caso C_INCDEC:
                 si n <> 1 entonces mal("inc y dec") fin
-                si op_a.k = K_R16 entonces
+                si es_r1632(op_a) entonces
+                    p66(op_a.tam)
                     b(0x40 + 8 * cod + op_a.reg)
                 sino si es_rm(op_a) entonces
-                    modrm(cod, op_a, 0xFE + ancho(tam_uno(op_a)))
+                    t := tam_uno(op_a)
+                    modrm(cod, op_a, 0xFE + ancho(t), t)
                 sino
                     mal("inc y dec")
                 fin
             caso C_UNARIA:
+                si n >= 2 y cod = 5 entonces
+                    i_imul(n, op_a, op_c, op_3)
+                    devolver
+                fin
                 si n <> 1 o no es_rm(op_a) entonces mal("esa instrucción") fin
-                modrm(cod, op_a, 0xF6 + ancho(tam_uno(op_a)))
+                t := tam_uno(op_a)
+                modrm(cod, op_a, 0xF6 + ancho(t), t)
             caso C_GIRO:
                 si n <> 2 o no es_rm(op_a) entonces mal("desplazar") fin
                 t := tam_uno(op_a)
                 si op_c.k = K_R8 y op_c.reg = 1 entonces
-                    modrm(cod, op_a, 0xD2 + ancho(t))
+                    modrm(cod, op_a, 0xD2 + ancho(t), t)
                 sino si op_c.k = K_INM y op_c.v = 1 y no op_c.sim entonces
-                    modrm(cod, op_a, 0xD0 + ancho(t))
+                    modrm(cod, op_a, 0xD0 + ancho(t), t)
+                sino si op_c.k = K_INM y bits = 32 entonces
+                    modrm(cod, op_a, 0xC0 + ancho(t), t)
+                    b(byte(op_c.v))
                 sino
                     error("en el 8086 se desplaza 1 o «cl»")
                 fin
+            caso C_MOVX:
+                si cod < 16 entonces            ; lgdt, lidt, sgdt y sidt
+                    si n <> 1 o op_a.k <> K_MEM entonces mal("esa instrucción") fin
+                    modrm_n(cod, op_a, 2, 0x0F, 0x01, 0)
+                    devolver
+                fin
+                si n <> 2 o no es_r1632(op_a) o no es_rm(op_c) entonces mal("movzx y movsx") fin
+                t := op_c.tam
+                si t = 0 o t = 4 o (t = 2 y op_a.tam = 2) entonces
+                    error("movzx y movsx: lo de la derecha es un byte o una palabra (falta «byte» o «word»)")
+                fin
+                modrm_n(op_a.reg, op_c, 2, 0x0F, cod + ancho(t), op_a.tam)
             caso C_PUSH:
                 si n <> 1 entonces mal("push") fin
-                si op_a.k = K_R16 entonces
+                si es_r1632(op_a) entonces
+                    p66(op_a.tam)
                     b(0x50 + op_a.reg)
-                sino si op_a.k = K_RS entonces
+                sino si op_a.k = K_RS y op_a.reg < 4 entonces
                     b(0x06 + 8 * op_a.reg)
+                sino si op_a.k = K_RS entonces
+                    b(0x0F)
+                    b(0xA0 + 8 * (op_a.reg - 4))
                 sino si op_a.k = K_MEM entonces
-                    modrm(6, op_a, 0xFF)
+                    t := op_a.tam
+                    si t = 0 entonces t := bits >> 3 fin
+                    modrm(6, op_a, 0xFF, t)
+                sino si op_a.k = K_INM y bits = 32 entonces
+                    si corto(op_a, 4) entonces
+                        b(0x6A)
+                        b(byte(op_a.v))
+                    sino
+                        b(0x68)
+                        d4(op_a.v)
+                    fin
                 sino
                     mal("push")
                 fin
             caso C_POP:
                 si n <> 1 entonces mal("pop") fin
-                si op_a.k = K_R16 entonces
+                si es_r1632(op_a) entonces
+                    p66(op_a.tam)
                     b(0x58 + op_a.reg)
-                sino si op_a.k = K_RS y op_a.reg <> 1 entonces
+                sino si op_a.k = K_RS y op_a.reg < 4 y op_a.reg <> 1 entonces
                     b(0x07 + 8 * op_a.reg)
+                sino si op_a.k = K_RS y op_a.reg >= 4 entonces
+                    b(0x0F)
+                    b(0xA1 + 8 * (op_a.reg - 4))
                 sino si op_a.k = K_MEM entonces
-                    modrm(0, op_a, 0x8F)
+                    t := op_a.tam
+                    si t = 0 entonces t := bits >> 3 fin
+                    modrm(0, op_a, 0x8F, t)
                 sino
                     mal("pop")
                 fin
@@ -1393,8 +1793,8 @@ módulo Ensambla
                 si n <> 2 entonces mal("xchg") fin
                 i_xchg(op_a, op_c)
             caso C_LEA:
-                si n <> 2 o op_a.k <> K_R16 o op_c.k <> K_MEM entonces mal("lea") fin
-                modrm(op_a.reg, op_c, 0x8D)
+                si n <> 2 o no es_r1632(op_a) o op_c.k <> K_MEM entonces mal("lea") fin
+                modrm(op_a.reg, op_c, 0x8D, op_a.tam)
             caso C_INT:
                 si n <> 1 o op_a.k <> K_INM entonces mal("int") fin
                 b(0xCD)
@@ -1410,6 +1810,7 @@ módulo Ensambla
                 fin
             caso C_IN:
                 si n <> 2 o no es_reg(op_a) o op_a.reg <> 0 entonces mal("in") fin
+                p66(op_a.tam)
                 si op_c.k = K_R16 y op_c.reg = 2 entonces
                     b(0xEC + ancho(op_a.tam))
                 sino si op_c.k = K_INM entonces
@@ -1420,6 +1821,7 @@ módulo Ensambla
                 fin
             caso C_OUT:
                 si n <> 2 o no es_reg(op_c) o op_c.reg <> 0 entonces mal("out") fin
+                p66(op_c.tam)
                 si op_a.k = K_R16 y op_a.reg = 2 entonces
                     b(0xEE + ancho(op_c.tam))
                 sino si op_a.k = K_INM entonces
@@ -1460,7 +1862,7 @@ módulo Ensambla
         mientras j < fin_ y es_de_nombre(valor(j)) hacer
             j := j + 1
         fin
-        si j < fin_ y valor(j) = ':' y j > p y no (p[0] >= '0' y p[0] <= '9') y no (j - p = 2 y registro(p, "escsssds") <> SIN_REG) entonces
+        si j < fin_ y valor(j) = ':' y j > p y no (p[0] >= '0' y p[0] <= '9') y no (j - p = 2 y registro(p, "escsssdsfsgs") <> SIN_REG) entonces
             m := 0
             si p[0] = '.' entonces
                 copiar(nom, ambito)
@@ -1489,6 +1891,7 @@ módulo Ensambla
         empezar_lector(ent, m)
         pc := 0
         pos := 0
+        bits := 16
         absoluto := falso
         ambito[0] := 0
         cambio := falso
@@ -1545,7 +1948,9 @@ módulo Ensambla
             devolver 1
         fin
         seg_L := pide(0x1000)
+        seg_LA := pide(0x1000)
         seg_T := pide(0x800)
+        seg_TA := pide(0x800)
         seg_cubos := pide(CUBOS div 8)
         seg_sim := pide(PARRAFOS_SIM)
         borrar_bloque(seg_cubos, CUBOS)
@@ -1589,8 +1994,10 @@ módulo Ensambla
                 si nombre_sal[i] = '\\' o nombre_sal[i] = ':' entonces p := nulo fin
             fin
             si p <> nulo entonces valor(p) := 0 fin
-            si busca("C_cab", 5, v) entonces
+            si busca("C_cab", 5, v) o busca("P_mz", 4, v) entonces
                 concatenar(nombre_sal, ".EXE")
+            sino si busca("C_multiboot", 11, v) entonces
+                concatenar(nombre_sal, ".BIN")
             sino
                 concatenar(nombre_sal, ".COM")
             fin

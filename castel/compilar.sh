@@ -3,7 +3,8 @@
 # compilar.sh ENTRADA.cas [SALIDA.COM] [-I CARPETA]...
 # Compila un fuente Castel a ensamblador (ccastel.py) y lo ensambla a un .COM
 # de DOS (NASM). Sin SALIDA, deja NOMBRE.COM (en mayúsculas) al lado del fuente
-# (NOMBRE.EXE si el programa dice «modelo grande»).
+# (NOMBRE.EXE si el programa dice «modelo grande» o «modelo hispa32»;
+# NOMBRE.BIN si dice «modelo núcleo»).
 # El ensamblador intermedio (NOMBRE.asm) queda al lado del .COM.
 # Los módulos que el programa importa se buscan en su carpeta, en las que se
 # den con -I y en biblioteca/ (la biblioteca de Castel).
@@ -27,6 +28,8 @@ python3 -I "$AQUI/ccastel.py" "$ENT" -o "$ASM" "${RUTAS[@]}"
 # un programa con «modelo grande» es un .EXE
 EXT=COM
 grep -q '^C_cab:' "$ASM" && EXT=EXE
+grep -q '^P_mz:' "$ASM" && EXT=EXE           # «modelo hispa32»: un programa Win32 (PE)
+grep -q '^C_multiboot:' "$ASM" && EXT=BIN    # «modelo núcleo»: un núcleo multiboot
 COM=${COM:-$DIR/$(echo "$BASE" | tr 'a-z' 'A-Z').$EXT}
 nasm -f bin "$ASM" -o "$COM"
 echo "compilar: $ENT -> $COM"

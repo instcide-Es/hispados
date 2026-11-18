@@ -3444,6 +3444,13 @@ class Generador32(Generador):
             codigo, punto, comentario = ln.partition(';')
             self.lineas.append(re.sub(r'\{([\w.]+)(?:\+(\d+))?\}', cambia, codigo) + punto + comentario)
 
+    def valor_inicial(self, t, e):
+        v = Generador.valor_inicial(self, t, e)
+        c = self.const(e)
+        if c is not None:                       # recortado a lo que ocupa
+            return str(c & self.mascara(t))
+        return v
+
     def tam_txt(self, t):
         return {1: 'byte', 2: 'word'}.get(t.tam, 'dword')
 

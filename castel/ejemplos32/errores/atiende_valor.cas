@@ -1,0 +1,10 @@
+; Una función de interrupción no devuelve nada.
+; ERROR: 5:35: error: una función de interrupción no devuelve nada
+módulo Error
+    modelo núcleo
+    interrupción función reloj(): nat32
+        devolver 1
+    fin
+    función principal()
+    fin
+fin Error.

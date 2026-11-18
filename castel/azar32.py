@@ -9,10 +9,13 @@ palabras, todos los operadores, comparaciones, conversiones, asignaciones) y,
 aparte, lo que tiene que escribir, calculado aquí con las reglas de CASTEL.md:
 la cuenta es de 32 bits si alguno de los dos lo es (o es un número escrito que
 no cabe en 16), y con signo si alguno de los dos lleva signo. Lo usa
-pruebas.sh con AZAR=n."""
+pruebas.sh con AZAR=n. Con un quinto argumento, «plano», el programa es de
+32 bits («modelo núcleo», CASTEL32.md): todas las cuentas son de 32 bits.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior."""
 import random, sys
 random.seed(int(sys.argv[1]))
 N = int(sys.argv[2])
+PLANO = len(sys.argv) > 5 and sys.argv[5] == 'plano'
 ANCHO = {'nat8': 8, 'nat16': 16, 'ent16': 16, 'nat32': 32, 'ent32': 32}
 VARS = {'a': ('nat16', 40000), 'b': ('nat16', 7), 'e': ('ent16', -100), 'c': ('nat8', 200),
         'la': ('nat32', 3000000000), 'lb': ('nat32', 70000), 'lc': ('nat32', 5), 'lz': ('nat32', 0xFFFFFFFF),
@@ -25,6 +28,9 @@ def es32(t):
     return t in ('nat32', 'ent32', 'lit32')
 def es_lit(t):
     return t in ('lit', 'lit32')
+def ancha(t):
+    """¿Se hace en 32 bits la cuenta? (en el modelo plano, todas)"""
+    return PLANO or es32(t)
 def corta(t, x):
     return x & ((1 << ANCHO[t]) - 1)
 def num(t, v):
@@ -36,13 +42,13 @@ def num(t, v):
     return v - (1 << n) if con_signo(t) and v >> (n - 1) else v
 def tipo_res(ta, tb):
     s = con_signo(ta) or con_signo(tb)
-    if es32(ta) or es32(tb):
+    if ancha(ta) or ancha(tb):
         return 'ent32' if s else 'nat32'
     return 'ent16' if s else 'nat16'
 def visto(ta, tb, va, vb):
     """Los dos operandos como los ve una comparación o una división: en 32 bits
     si alguno lo es (si no, en 16), y con signo si alguno lo lleva."""
-    n = 32 if es32(ta) or es32(tb) else 16
+    n = 32 if ancha(ta) or ancha(tb) else 16
     x, y = num(ta, va) & ((1 << n) - 1), num(tb, vb) & ((1 << n) - 1)
     if con_signo(ta) or con_signo(tb):
         x = x - (1 << n) if x >> (n - 1) else x
@@ -94,9 +100,9 @@ def expr(prof):
         if es_lit(t):
             return s, t, v
         if random.random() < 0.5:
-            tr = 'ent32' if es32(t) else 'ent16'
+            tr = 'ent32' if ancha(t) else 'ent16'
             return f"-{par(s)}", tr, corta(tr, -num(t, v))
-        tr = t if es32(t) else ('ent16' if t == 'ent16' else 'nat16')
+        tr = t if es32(t) else (('ent32' if t == 'ent16' else 'nat32') if PLANO else ('ent16' if t == 'ent16' else 'nat16'))
         return f"nob {par(s)}", tr, corta(tr, ~num(t, v))
     if r < 0.2:
         s, t, v = expr(prof - 1)
@@ -137,7 +143,7 @@ def expr(prof):
         tr = tipo_res(ta, tb)
         return f"{A} {op} {B}", tr, corta(tr, q if op == 'div' else m)
     # desplazamientos: manda el tipo de lo que se desplaza
-    tope = 31 if es32(ta) else 15
+    tope = 31 if ancha(ta) else 15
     if random.random() < 0.6:
         n = random.randint(0, tope)
         B = str(n)
@@ -146,7 +152,7 @@ def expr(prof):
     else:
         n = num(tb, vb) & tope
         B = f"({B} yb {tope})"
-    tr = ('ent32' if ta == 'ent32' else 'nat32') if es32(ta) else ('ent16' if ta == 'ent16' else 'nat16')
+    tr = ('ent32' if ta in ('ent32', 'ent16') else 'nat32') if ancha(ta) else ('ent16' if ta == 'ent16' else 'nat16')
     x = num(ta, va)
     if op == '<<':
         v = x << n
@@ -190,7 +196,7 @@ while i < N:
         esperado.append(str(num(k[1], corta(k[1], num(t, v)))))
 decl = ''.join(f"    variable {n}: {'byte' if t == 'nat8' else t} = {v}\n" for n, (t, v) in VARS.items())
 prog = f"""módulo Azar
-    tipo Reg = estructura
+{'    modelo núcleo' + chr(10) if PLANO else ''}    tipo Reg = estructura
         corto: byte
         largo: nat32
         con: ent32
