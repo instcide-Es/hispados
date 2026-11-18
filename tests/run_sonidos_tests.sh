@@ -129,7 +129,7 @@ done
 python3 - $B/HISPA.WAV $B/CAMPANA.WAV <<'EOF' || fail=1
 import sys, wave
 bien = True
-for ruta, quiero in ((sys.argv[1], (1, 2, 22050)), (sys.argv[2], (1, 1, 11025))):
+for ruta, quiero in ((sys.argv[1], (1, 2, 11025)), (sys.argv[2], (1, 1, 11025))):
     w = wave.open(ruta, 'rb')
     es = (w.getnchannels(), w.getsampwidth(), w.getframerate())
     dura = w.getnframes() / w.getframerate()
@@ -186,7 +186,7 @@ EOF
     hasta w 20 $EST "Terminado."; sleep 0.5
     clic $PRUEBA
     aparca
-    hasta a3 15 $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)" px 180 446 12 "empezada"
+    hasta a3 15 $EST "Sonando... sonido de prueba (11025 Hz, 16 bits, mono)" px 180 446 12 "empezada"
     hasta a4 30 $EST "Terminado."; sleep 0.5
     clic $IZQ
     hasta a5 15 $EST "Sonando... $LADO"
@@ -196,7 +196,7 @@ EOF
     hasta w 30 $EST "Terminado."; sleep 0.5
     # ---- parar a medias ----
     clic $PRUEBA
-    hasta w 15 $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)"
+    hasta w 15 $EST "Sonando... sonido de prueba (11025 Hz, 16 bits, mono)"
     sleep 0.5
     clic $PARAR
     aparca
@@ -257,7 +257,7 @@ EOF
     texto 174 168 0 8 negrita "Tarjeta: $NAME" $EST "Listo." \
     texto 174 412 0 8 fina "Volumen:" texto 474 412 0 8 fina "100 %"
   chk $T/a2.ppm $EST "Sonando... tono de 440 Hz (2 segundos)"
-  chk $T/a3.ppm $EST "Sonando... sonido de prueba (22050 Hz, 16 bits, mono)" px 180 446 12 "la barra de por dónde va, empezada" px 600 446 9 "y sin acabar"
+  chk $T/a3.ppm $EST "Sonando... sonido de prueba (11025 Hz, 16 bits, mono)" px 180 446 12 "la barra de por dónde va, empezada" px 600 446 9 "y sin acabar"
   chk $T/a4.ppm $EST "Terminado." px 180 446 9 "la barra de por dónde va, vacía"
   chk $T/a5.ppm $EST "Sonando... $LADO"
   chk $T/a6.ppm $EST "Parado."

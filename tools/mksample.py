@@ -105,8 +105,9 @@ def main():
     carpeta = sys.argv[1] if len(sys.argv) > 1 else '.'
     os.makedirs(carpeta, exist_ok=True)
     # mono: los dos canales eran iguales (el Reproductor hace izquierda y
-    # derecha al vuelo) y así ocupa la mitad (206 KB) en el disquete
-    wav(os.path.join(carpeta, 'HISPA.WAV'), 22050, 16, 1, melodia(22050))
+    # derecha al vuelo); y a 11.025 Hz (18/11/2026: con todo lo de Hispa-486
+    # el disquete de arranque se quedaba sin sitio): unos 100 KB
+    wav(os.path.join(carpeta, 'HISPA.WAV'), 11025, 16, 1, melodia(11025))
     wav(os.path.join(carpeta, 'CAMPANA.WAV'), 11025, 8, 1, campana(11025))
 
 
