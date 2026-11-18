@@ -53,6 +53,7 @@ typedef struct { HANDLE hdc; int fErase; RECT rcPaint; int fRestore, fIncUpdate;
 #define VK_DELETE 46
 #define VK_F5 0x74
 #define VK_F6 0x75
+#define VK_SHIFT 0x10
 #define MB_YESNO 4
 #define MB_OK 0
 #define MB_ICONQUESTION 0x20
@@ -93,6 +94,9 @@ u32 WINAPI SetTimer(HANDLE, u32, u32, void *);
 int WINAPI KillTimer(HANDLE, u32);
 short WINAPI GetKeyState(int);
 u32 WINAPI WinExec(const char *, u32);
+HANDLE WINAPI LoadCursorA(HANDLE, u32);
+HANDLE WINAPI SetCursor(HANDLE);
+int WINAPI CreateDirectoryA(const char *, void *);
 typedef struct { u32 biSize; int biWidth, biHeight; u16 biPlanes, biBitCount; u32 biCompression, biSizeImage;
                  int biXPelsPerMeter, biYPelsPerMeter; u32 biClrUsed, biClrImportant; u16 colores[256]; } BMI;
 int WINAPI SetDIBitsToDevice(HANDLE, int, int, u32, u32, int, int, u32, u32, const void *, const BMI *, u32);
@@ -126,13 +130,16 @@ static Ctl dir;                /* el campo de la dirección */
 static char estado[200], sobre[200];   /* la línea de estado y el enlace de debajo del ratón */
 static int sobre_enl = -1;
 static Pet pet;
-static int cargando, redirs, modo_hist, sy_tras;
+static int cargando, redirs, modo_hist;
+static char *marca;            /* la marca (#nombre) de la dirección que se está pidiendo, o NULL */
+static int tab_fila;           /* desde dónde empieza el Tab cuando no hay foco (lo principal, la marca) */
+static int toco;               /* el usuario ha movido el ratón o una tecla en esta página */
 static char inicio[300] = "about:inicio";
 static int al_contenido = 1;
 static char carpeta[150];
 /* el historial */
 #define HIST 40
-static struct { char *url; int sy; } hist[HIST];
+static struct { char *url; int sy, f, d; } hist[HIST];   /* y dónde se estaba: la fila, y el foco f a d filas de arriba */
 static int n_hist, i_hist = -1;
 /* la lista desplegada de un <select> */
 static struct { int activa, ctl, sel, top, x, y, w, vis; } lista;
@@ -152,11 +159,21 @@ static struct { char *url; int pw, ph, w, h; u8 *px; u32 uso; } cache[CACHE_N];
 static u32 cache_uso;
 /* el refresco de <meta http-equiv=refresh>, y lo de las descargas */
 static char *refresco;
-static char dir_descargas[150], dir_hispados[150];
+static char dir_descargas[150], dir_hispados[150], dir_auto[150];
 #define T_REFRESCO 1
 static void img_cancela(void);
 static void remaqueta(void);
 static void guarda_galletas(void);
+/* lo que se teclea mientras llega una página: se guarda y va a la nueva */
+#define COLA 96
+static struct { u8 letra; u8 mayus; u16 v; } cola[COLA];
+static int n_cola, mayus_forzada = -1;
+static void cola_suelta(void);
+static void imprime(void);
+static void foco_pon(int f);
+static void remaqueta2(int fija);
+static int mayus(void) { return mayus_forzada >= 0 ? mayus_forzada : (GetKeyState(VK_SHIFT) & 0x8000) != 0; }
+static void cursor_pon(int espera) { SetCursor(LoadCursorA(NULL, espera ? 32514 : 32512)); }
 
 static HANDLE pincel(u32 c) {
   int k;
@@ -187,8 +204,9 @@ static void txt(HANDLE dc, int x, int y, const char *t, int n, u32 c, int negrit
 /* =============================================================================
  *  La barra de arriba y la de estado
  * ============================================================================= */
-enum { B_ATRAS, B_ADELANTE, B_RECARGA, B_INICIO, B_IR, B_N };
-static const char *const b_texto[B_N] = { "< Atr\341s", "Adelante >", "Recargar", "Inicio", "Ir" };
+enum { B_ATRAS, B_ADELANTE, B_RECARGA, B_INICIO, B_IMPRIME, B_IR, B_N };
+static const char *const b_texto[B_N] = { "< Atr\341s", "Adelante >", "Recargar", "Inicio", "Imprimir", "Ir" };
+static const char *b_rotulo(int k) { return k == B_RECARGA && cargando ? "Parar" : b_texto[k]; }   /* (mientras carga, «Parar»: Esc) */
 static RECT b_rect[B_N];
 static RECT dir_rect;
 static void coloca(void) {
@@ -200,7 +218,7 @@ static void coloca(void) {
   filas_vis = (al - BARRA_H - ESTADO_H) / LH;
   if (cols < 20) cols = 20;
   if (filas_vis < 1) filas_vis = 1;
-  for (k = 0; k < 4; k++) {
+  for (k = 0; k < B_IR; k++) {
     int w = (strlen(b_texto[k]) + 2) * LW;
     b_rect[k].left = x; b_rect[k].top = 4; b_rect[k].right = x + w; b_rect[k].bottom = 26;
     x += w + 6;
@@ -208,9 +226,12 @@ static void coloca(void) {
   b_rect[B_IR].right = an - 6; b_rect[B_IR].left = an - 6 - 4 * LW; b_rect[B_IR].top = 29; b_rect[B_IR].bottom = 51;
   dir_rect.left = 6 + 11 * LW; dir_rect.top = 29; dir_rect.right = b_rect[B_IR].left - 6; dir_rect.bottom = 51;
 }
+/* ¿se está esperando una página? (no mientras se pregunta dónde guardar una descarga) */
+static int espera_vis(void) { return cargando && !(pet.decidido && !pet.disco); }
 static int b_activo(int k) {
   if (k == B_ATRAS) return i_hist > 0;
   if (k == B_ADELANTE) return i_hist >= 0 && i_hist < n_hist - 1;
+  if (k == B_IMPRIME) return pag && !cargando;
   return 1;
 }
 static int dir_vis(void) { return (dir_rect.right - dir_rect.left) / LW - 2; }
@@ -218,8 +239,9 @@ static void pinta_dir(HANDLE dc) {
   int vis = dir_vis(), n;
   rect(dc, dir_rect.left, dir_rect.top, dir_rect.right - dir_rect.left, 22, P(P_BLANCO));
   marco(dc, dir_rect.left, dir_rect.top, dir_rect.right - dir_rect.left, 22, P(foco_dir ? P_TERRACOTA : P_TINTA));
-  if (dir.cursor < dir.desp) dir.desp = dir.cursor;
-  if (dir.cursor > dir.desp + vis - 1) dir.desp = dir.cursor - vis + 1;
+  if (!foco_dir) dir.desp = 0;                   /* (sin el foco, desde el principio: el servidor) */
+  else if (dir.cursor < dir.desp) dir.desp = dir.cursor;
+  if (foco_dir && dir.cursor > dir.desp + vis - 1) dir.desp = dir.cursor - vis + 1;
   if (dir.desp < 0) dir.desp = 0;
   n = dir.n_valor - dir.desp;
   if (n > vis) n = vis;
@@ -236,21 +258,27 @@ static void pinta_barra(HANDLE dc) {
     RECT *r = &b_rect[k];
     rect(dc, r->left, r->top, r->right - r->left, r->bottom - r->top, P(P_ARENA));
     marco(dc, r->left, r->top, r->right - r->left, r->bottom - r->top, P(P_TINTA));
-    txt(dc, r->left + LW, r->top + 3, b_texto[k], -1, P(b_activo(k) ? P_TINTA : P_ARENA_OSC), 0);
+    if (k == B_RECARGA && cargando) rect(dc, r->left + 1, r->top + 1, r->right - r->left - 2, r->bottom - r->top - 2, P(P_OCRE));
+    txt(dc, r->left + LW, r->top + 3, b_rotulo(k), -1, P(b_activo(k) ? P_TINTA : P_ARENA_OSC), k == B_RECARGA && cargando);
   }
   txt(dc, 6, 32, "Direcci\363n:", -1, P(P_TINTA), 0);
   pinta_dir(dc);
 }
 static void pinta_estado(HANDLE dc) {
   int y = al - ESTADO_H, n, seguro = pag && !_strnicmp(pag->url, "https:", 6);
+  int cargando = espera_vis();
   const char *t = sobre[0] ? sobre : estado, *d = "";
-  rect(dc, 0, y, an, ESTADO_H, P(P_PIEDRA));
+  /* mientras llega una página, la línea entera en ocre y en negrita, con
+   * «Espere»: en un 486 son unos segundos y hay que ver que está en ello */
+  rect(dc, 0, y, an, ESTADO_H, P(cargando && !sobre[0] ? P_OCRE : P_PIEDRA));
   rect(dc, 0, y, an, 1, P(P_ARENA_OSC));
   SetBkMode(dc, 1);
   if (pag && !cargando && !_strnicmp(pag->url, "http", 4)) d = seguro ? "Conexi\363n cifrada" : "Sin cifrar";
+  if (cargando && !sobre[0]) d = "Espere, por favor";
   n = strlen(t);
   if (n > (an - 12) / LW - (int)strlen(d) - 2) n = (an - 12) / LW - strlen(d) - 2;
   txt(dc, 6, y + 2, t, n, P(P_TINTA), 0);
+  if (cargando && !sobre[0]) { txt(dc, an - 6 - strlen(d) * LW, y + 2, d, -1, P(P_TINTA), 0); return; }
   txt(dc, an - 6 - strlen(d) * LW, y + 2, d, -1, P(seguro ? P_OLIVA : P_GRANATE), 0);
 }
 static void di(const char *t) {
@@ -282,6 +310,7 @@ static void rotulo(Ctl *c, char *b, int max) {
   int n;
   b[0] = 0;
   if (c->tipo == C_LISTA) { if (c->n_opc) texto_de(c->opc[c->elegida], b, max); }
+  else if (c->tipo == C_ENVIAR || c->tipo == C_BOTON || c->tipo == C_REINICIO) { pag_rotulo_boton(c, b, max); return; }
   else if (c->nodo->etq == E_BUTTON) texto_de(c->nodo, b, max);
   else { n = c->n_valor < max - 1 ? c->n_valor : max - 1; memcpy(b, c->valor, n); b[n] = 0; }
   if (c->tipo != C_LISTA) pag_rotulo_vacio(c, b, max);   /* [JS] */
@@ -330,9 +359,14 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
     rect(dc, x, y, w, h, P(c->desactivado || c->sololee ? P_CREMA : P_BLANCO));
     marco(dc, x, y, w, h, borde);
     if (tiene) marco(dc, x - 1, y - 1, w + 2, h + 2, borde);
-    if (c->cursor < c->desp) c->desp = c->cursor;
-    if (c->cursor > c->desp + vis - 1) c->desp = c->cursor - vis + 1;
-    if (c->desp < 0) c->desp = 0;
+    /* sin el foco se ve desde la primera letra (no el final: «015» por
+     * «2015»); con él, lo que rodea al cursor; si cabe todo, todo */
+    if (!tiene || c->n_valor <= vis) c->desp = 0;
+    else {
+      if (c->cursor < c->desp) c->desp = c->cursor;
+      if (c->cursor > c->desp + vis - 1) c->desp = c->cursor - vis + 1;
+      if (c->desp < 0) c->desp = 0;
+    }
     n = c->n_valor - c->desp;
     if (n > vis) n = vis;
     if (!c->n_valor && ph) { n = strlen(ph); txt(dc, x + LW, y + 1, ph, n > vis ? vis : n, P(P_ARENA_OSC), 0); }
@@ -367,13 +401,15 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
     }
     break;
   case C_ENVIAR: case C_BOTON: case C_REINICIO:
+    /* con su marco; el de lo que no tiene vuelta (btn-danger), en granate (marco y letra) y
+     * «!» delante */
     rotulo(c, b, sizeof b);
     rect(dc, x, y, w, h, P(P_ARENA));
-    marco(dc, x, y, w, h, P(P_TINTA));
+    marco(dc, x, y, w, h, P(c->peligro ? P_GRANATE : P_TINTA));
     if (tiene) marco(dc, x + 2, y + 2, w - 4, h - 4, P(P_TERRACOTA));
     n = strlen(b);
     if (n > c->w - 2) n = c->w - 2;
-    txt(dc, x + (w - n * LW) / 2, y + 1, b, n, P(c->desactivado || c->solo_js ? P_ARENA_OSC : P_TINTA), 0);
+    txt(dc, x + (w - n * LW) / 2, y + 1, b, n, P(c->desactivado || c->solo_js ? P_ARENA_OSC : c->peligro ? P_GRANATE : P_TINTA), 0);
     break;
   case C_LISTA:
     rotulo(c, b, sizeof b);
@@ -395,6 +431,19 @@ static void pinta_fila(HANDLE dc, int f) {
   if (!fl || !fl->n) return;
   if (x1 > fl->n) x1 = fl->n;
   SetBkMode(dc, 1);
+  /* los enlaces con aspecto de botón (.btn): primero su relleno y su marco,
+   * del principio al final de cada uno (aunque dentro cambie la letra) */
+  for (k = x0; k < x1; ) {
+    Atr *at = &pag->atrs[fl->a[k]];
+    int ini = k, en = at->enlace, pel, foc, bx, bw;
+    if (!(at->est & A_BOTON) || at->ctl >= 0) { k++; continue; }
+    pel = (at->est & A_PELIGRO) != 0;
+    while (k < x1 && (pag->atrs[fl->a[k]].est & A_BOTON) && pag->atrs[fl->a[k]].enlace == en) k++;
+    foc = en >= 0 && en == ef;
+    bx = (ini - sx) * LW; bw = (k - ini) * LW;
+    rect(dc, bx, y, bw, LH, P(foc ? P_ANIL : P_ARENA));
+    marco(dc, bx, y, bw, LH, P(pel ? P_GRANATE : P_TINTA));
+  }
   for (k = x0; k < x1; ) {
     int ini = k, a = fl->a[k], x, w, blanco = 1, j;
     Atr *at = &pag->atrs[a];
@@ -410,7 +459,8 @@ static void pinta_fila(HANDLE dc, int f) {
     fg = color_de(at->fg);
     bg = at->bg ? pag->color[at->bg] : P(P_BLANCO);
     if (at->enlace >= 0 && at->enlace == ef) { bg = P(P_ANIL); fg = P(P_BLANCO); }   /* el enlace con el foco */
-    else if (at->est & A_BOTON) bg = P(P_CREMA);
+    else if (at->est & A_BOTON) fg = P(at->est & A_PELIGRO ? P_GRANATE : P_TINTA);
+    if (at->est & A_BOTON) bg = P(P_BLANCO);    /* (el relleno ya está: ver arriba) */
     if (bg != P(P_BLANCO)) rect(dc, x, y, w, LH, bg);
     if (at->est & A_RAYA) { rect(dc, x, y + LH / 2, w, 1, fg); continue; }
     if (!blanco) {
@@ -538,38 +588,73 @@ static void dir_pon(const char *u) {
   ctl_pon(&dir, u, -1);
   dir.cursor = dir.n_valor; dir.desp = 0;
 }
+/* dónde se está mirando la página: en su entrada del historial (la fila y,
+ * por si al volver la página sale algo distinta, el primer enlace o campo
+ * que se veía y a cuántas filas de arriba) */
+static void hist_guarda(void) {
+  int f;
+  if (!pag || i_hist < 0 || i_hist >= n_hist) return;
+  f = pag_foco_desde(pag, sy);
+  hist[i_hist].sy = sy;
+  hist[i_hist].f = f;
+  hist[i_hist].d = f >= 0 ? pag_foco_y(pag, f) - sy : 0;
+}
+/* y volver a ese sitio */
+static void hist_vuelve(int i) {
+  int ny = hist[i].sy, f = hist[i].f;
+  if (f >= 0 && f < pag->n_foco && pag_foco_y(pag, f) >= 0) ny = pag_foco_y(pag, f) - hist[i].d;
+  desplaza(0, ny);
+}
+/* la dirección con su marca (malloc) */
+static char *con_marca(const char *u) {
+  char *q = malloc(strlen(u) + (marca ? strlen(marca) : 0) + 1);
+  if (q) { strcpy(q, u); if (marca) strcat(q, marca); }
+  return q;
+}
 static void muestra(Pagina *p, const char *url_hist) {
   char t[260];
   int seg;
   if (!p) return;
   lista.activa = 0;
   img_cancela();
+  if (pag && url_hist && modo_hist == 0) hist_guarda();   /* (la de antes: dónde se estaba, para «Atrás») */
   if (pag) { js_suelta(); pag_suelta(pag); }   /* [JS] lo de JavaScript de la página de antes, fuera */
   pag = p;
+  if (marca && marca[1] && url_hist) pag->ancla = ar_texto(&pag->doc.ar, marca + 1, -1);
   pag_maqueta(pag, cols);
-  sx = 0; sy = 0; foco = -1; foco_dir = 0; sobre[0] = 0; sobre_enl = -1;
+  sx = 0; sy = 0; foco = -1; foco_dir = 0; sobre[0] = 0; sobre_enl = -1; toco = 0;
+  tab_fila = pag_tab_inicio(pag);
   if (url_hist) {
+    char *uh = con_marca(url_hist);
     if (modo_hist == 0) {                       /* una entrada nueva, tras la de ahora */
       int k;
       for (k = i_hist + 1; k < n_hist; k++) free(hist[k].url);
       n_hist = i_hist + 1;
-      if (n_hist == HIST) { free(hist[0].url); memmove(hist, hist + 1, (HIST - 1) * sizeof hist[0]); n_hist--; }
-      hist[n_hist].url = malloc(strlen(url_hist) + 1);
-      if (hist[n_hist].url) { strcpy(hist[n_hist].url, url_hist); hist[n_hist].sy = 0; i_hist = n_hist++; }
-      /* se empieza por lo principal de la página (<main>), si lo dice: lo de
-       * antes (menús, avisos) queda arriba, a un paso */
-      if (al_contenido && pag->y_cont > 3) desplaza(0, pag->y_cont);
+      if (n_hist == HIST) { free(hist[0].url); memmove(hist, hist + 1, (HIST - 1) * sizeof hist[0]); n_hist--; i_hist--; }
+      hist[n_hist].url = uh; uh = NULL;
+      if (hist[n_hist].url) { hist[n_hist].sy = 0; hist[n_hist].f = -1; i_hist = n_hist++; }
+      /* a la marca de la dirección (#resultados), si está; si no, se empieza
+       * por lo principal de la página (<main>), si lo dice: lo de antes
+       * (menús, avisos) queda arriba, a un paso */
+      if (pag->y_ancla >= 0) { desplaza(0, pag->y_ancla); tab_fila = pag->y_ancla; }
+      else if (al_contenido && pag->y_cont > 3) desplaza(0, pag->y_cont);
     } else if (i_hist >= 0) {
-      char *q = malloc(strlen(url_hist) + 1);
-      if (q) { strcpy(q, url_hist); free(hist[i_hist].url); hist[i_hist].url = q; }
-      desplaza(0, sy_tras);
+      if (uh) { free(hist[i_hist].url); hist[i_hist].url = uh; uh = NULL; }
+      hist_vuelve(i_hist);                      /* Atrás, Adelante, Recargar: donde se estaba */
     }
-    dir_pon(url_hist);
+    dir_pon(i_hist >= 0 ? hist[i_hist].url : url_hist);
+    free(uh);
   }
   sprintf(t, "%.200s - Navegador", pag->doc.titulo && pag->doc.titulo[0] ? pag->doc.titulo : url_hist ? url_hist : "Navegador");
   SetWindowTextA(vent, t);
   estado[0] = 0;
   js_pagina(pag);                               /* [JS] sus <script> */
+  /* autofocus: el campo que pide la página, con el foco (y a la vista, si es
+   * una página nueva; al volver a una, solo si ya se ve) */
+  if (pag && url_hist && foco < 0 && pag->autofoco >= 0 && pag->autofoco < pag->n_foco && !foco_dir) {
+    int fy = pag_foco_y(pag, pag->autofoco);
+    if ((modo_hist == 0 && pag->y_ancla < 0) || (fy >= sy && fy < sy + filas_vis)) foco_pon(pag->autofoco);   /* (con marca, la marca manda) */
+  }
   repinta();
   /* <meta http-equiv="refresh">: a la dirección que diga, pasado el tiempo */
   free(refresco); refresco = NULL;
@@ -614,7 +699,8 @@ static void pagina_inicio(void) {
     "<li><b>Tab</b> pasa al enlace o al campo siguiente; <b>Intro</b> lo abre o env\355a el formulario.</li>"
     "<li>Las <b>flechas</b>, <b>Re P\341g</b> y <b>Av P\341g</b> mueven la p\341gina; <b>Retroceso</b> vuelve atr\341s.</li>"
     "<li><b>F6</b> lleva a la direcci\363n, <b>F5</b> recarga y <b>Esc</b> para la carga.</li>"
-    "<li><b>May\372s+Tab</b> vuelve al anterior. Los archivos que no son p\341ginas (un PDF) se guardan en el disco.</li></ul>"
+    "<li><b>May\372s+Tab</b> vuelve al anterior. <b>Ctrl+P</b> (o <b>Imprimir</b>) imprime la p\341gina.</li>"
+    "<li>Un PDF se guarda en \\HISPADOS\\INTERNET\\DESCARGA y se abre con el Lector, que lo imprime tal como se ve.</li></ul>"
     "<p><small>Navegador " NAV_VERSION ". Entiende HTML sencillo, formularios (tambi\351n los de subir archivos), im\341genes PNG, GIF y JPEG "
     "y JavaScript (se apaga con JavaScript=NO en NAVEGA.INI). Las conexiones https van cifradas con TLS 1.2 y se comprueba el certificado del servidor. "
     "Las galletas que lo piden se guardan al cerrar, para no tener que entrar cada vez.</small></p>");
@@ -650,8 +736,10 @@ static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo,
   js_para_red();                                /* [JS] (la conexión es una: para la página) */
   lista.activa = 0;
   modo_hist = modo;
+  free(marca); marca = NULL;
   if (!_strnicmp(url, "about:", 6)) {
     free(cuerpo);
+    cola_suelta();
     if (!_stricmp(url, "about:blank")) pagina_propia("about:blank", "<title>En blanco</title>");
     else pagina_inicio();
     return;
@@ -659,7 +747,12 @@ static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo,
   u = malloc(strlen(url) + 1);
   if (!u) { free(cuerpo); return; }
   strcpy(u, url);
-  if (strchr(u, '#')) *strchr(u, '#') = 0;
+  if (strchr(u, '#')) {                         /* la marca (#resultados): para ir a ella al llegar */
+    char *m = strchr(u, '#');
+    marca = malloc(strlen(m) + 1);
+    if (marca) strcpy(marca, m);
+    *m = 0;
+  }
   memset(&pet, 0, sizeof pet);
   pet.url = u; pet.post = post; pet.cuerpo = cuerpo; pet.n_cuerpo = n_cuerpo;
   if (tipo) sprintf(pet.tipo_cuerpo, "%.94s", tipo);
@@ -668,7 +761,10 @@ static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo,
   cargando = 1;
   redirs = 0;
   sobre[0] = 0; sobre_enl = -1;
+  n_cola = 0;
+  cursor_pon(1);                                /* el reloj, hasta que llegue */
   di("Abriendo...");
+  if (vent) { RECT r; r.left = 0; r.top = 0; r.right = an; r.bottom = BARRA_H; InvalidateRect(vent, &r, 0); }   /* («Parar») */
 }
 static void ir_dir(const char *t) {
   char b[1200];
@@ -678,23 +774,30 @@ static void ir_dir(const char *t) {
   else sprintf(b, "http://%.1100s", t);
   ir(b, 0, NULL, 0, 0);
 }
-static void atras(void) {
-  if (i_hist <= 0) return;
-  if (pag) hist[i_hist].sy = sy;
-  i_hist--;
-  sy_tras = hist[i_hist].sy;
-  ir(hist[i_hist].url, 0, NULL, 0, 1);
+/* ¿la entrada i es esta misma página (con otra marca, o sin ella)? */
+static int misma_pagina(int i) {
+  const char *u = hist[i].url, *m = strchr(u, '#');
+  u32 n = m ? (u32)(m - u) : strlen(u);
+  return pag && !cargando && strlen(pag->url) == n && !strncmp(pag->url, u, n) && _strnicmp(u, "about:", 6);
 }
-static void adelante(void) {
-  if (i_hist < 0 || i_hist >= n_hist - 1) return;
-  if (pag) hist[i_hist].sy = sy;
-  i_hist++;
-  sy_tras = hist[i_hist].sy;
-  ir(hist[i_hist].url, 0, NULL, 0, 1);
+static void va_hist(int i) {
+  if (pag) hist_guarda();
+  if (misma_pagina(i)) {                         /* (la misma página: solo se mueve) */
+    i_hist = i;
+    hist_vuelve(i);
+    dir_pon(hist[i].url);
+    foco = -1;
+    repinta();
+    return;
+  }
+  i_hist = i;
+  ir(hist[i].url, 0, NULL, 0, 1);
 }
+static void atras(void) { if (i_hist > 0) va_hist(i_hist - 1); }
+static void adelante(void) { if (i_hist >= 0 && i_hist < n_hist - 1) va_hist(i_hist + 1); }
 static void recarga(void) {
   if (i_hist < 0) return;
-  sy_tras = sy;
+  hist_guarda();
   ir(hist[i_hist].url, 0, NULL, 0, 1);
 }
 static int es_latin1(const Pet *p) {
@@ -797,15 +900,42 @@ static int es_descarga(const Pet *p) {
   if (p->estado < 200 || p->estado >= 300 || p->estado == 204) return 0;
   return (cd && !_strnicmp(cd, "attachment", 10)) || (!html && !plano);
 }
-/* las cabeceras de una descarga: dónde se guarda (el diálogo de Guardar
- * como); lo que llegue desde ahora va derecho al archivo. 0 si no se guarda */
+/* las cabeceras de una descarga: dónde se guarda; lo que llegue desde ahora
+ * va derecho al archivo. 0 si no se guarda. Lo que tiene programa para
+ * verlo (un PDF: el Lector) va sin preguntar nada a la carpeta de las
+ * descargas (\HISPADOS\INTERNET\DESCARGA, o la de Descargas= en NAVEGA.INI),
+ * con un nombre que no esté ya (RECIBO20.PDF, RECIBO01.PDF...), y al acabar
+ * se abre; lo demás, con el diálogo de Guardar como */
 static char desc_ruta[260];
+static int desc_abrir;          /* se abre sola al acabar (con desc_prog) */
+static char desc_prog[200];
 static int descarga_empieza(Pet *p) {
   OPENFILENAMEA o;
-  char m[400];
+  char m[400], nom[20], *ext;
   FILE *f;
   int k;
   nombre_descarga(p, desc_ruta);
+  ext = strrchr(desc_ruta, '.');
+  desc_abrir = 0;
+  if (ext && visor_de(ext + 1, desc_prog, sizeof desc_prog) && dir_auto[0]) {
+    int n = 0, lb = ext - desc_ruta, ne;
+    sprintf(nom, "%.12s", desc_ruta);
+    CreateDirectoryA(dir_auto, NULL);            /* (si ya está, nada) */
+    for (n = 0; n < 1000; n++) {
+      char num[8];
+      if (!n) sprintf(desc_ruta, "%.140s%s", dir_auto, nom);
+      else {
+        ne = sprintf(num, "%02d", n);
+        sprintf(desc_ruta, "%.140s%.*s%s%s", dir_auto, lb + ne > 8 ? 8 - ne : lb, nom, num, ext ? nom + lb : "");
+      }
+      if (!existe(desc_ruta)) break;
+    }
+    desc_abrir = 1;
+    if (p->largo > 0) sprintf(m, "Descarga: %.60s (%u K)...", desc_ruta, ((u32)p->largo + 1023) / 1024);
+    else sprintf(m, "Descarga: %.60s...", desc_ruta);
+    di(m);
+    goto abre;
+  }
   if (p->largo > 0) sprintf(m, "Descarga: %.60s (%u K). Elija d\363nde guardarla.", desc_ruta, ((u32)p->largo + 1023) / 1024);
   else sprintf(m, "Descarga: %.60s. Elija d\363nde guardarla.", desc_ruta);
   di(m);
@@ -817,6 +947,7 @@ static int descarga_empieza(Pet *p) {
     sprintf(m, "Ya hay un archivo %.200s.\n\n\277Sustituirlo por el que se est\341 descargando?", desc_ruta);
     if (MessageBoxA(vent, m, "Navegador", MB_YESNO | MB_ICONQUESTION) != IDYES) { di("No se ha guardado la descarga."); return 0; }
   }
+abre:
   f = fopen(desc_ruta, "wb");
   if (!f || (p->n_datos && fwrite(p->datos, 1, p->n_datos, f) != p->n_datos)) {
     if (f) { fclose(f); remove(desc_ruta); }
@@ -830,7 +961,7 @@ static int descarga_empieza(Pet *p) {
   p->max = 64u << 20;
   /* la carpeta, para la siguiente */
   for (k = strlen(desc_ruta); k > 0 && desc_ruta[k - 1] != '\\'; k--) ;
-  if (k > 0 && k < (int)sizeof dir_descargas) { memcpy(dir_descargas, desc_ruta, k); dir_descargas[k] = 0; if (k > 3) dir_descargas[k - 1] = 0; }
+  if (!desc_abrir && k > 0 && k < (int)sizeof dir_descargas) { memcpy(dir_descargas, desc_ruta, k); dir_descargas[k] = 0; if (k > 3) dir_descargas[k - 1] = 0; }
   return 1;
 }
 /* la descarga ha acabado (bien, si ok): se cierra el archivo y se ofrece
@@ -849,6 +980,14 @@ static void descarga_acaba(Pet *p, int ok) {
   }
   sprintf(m, "Guardado en %.200s", desc_ruta);
   di(m);
+  if (desc_abrir) {                              /* derecho a su programa (el Lector: desde él se imprime) */
+    char l[480];
+    sprintf(m, "Guardado en %.200s: se abre con %s.", desc_ruta, strstr(desc_prog, "LECTOR") ? "el Lector" : strstr(desc_prog, "MIRADOR") ? "Mirador" : "su programa");
+    di(m);
+    sprintf(l, "%.200s %.250s", desc_prog, desc_ruta);
+    WinExec(l, 1);
+    return;
+  }
   ext = strrchr(desc_ruta, '.');
   if (ext && !strchr(ext, '\\') && visor_de(ext + 1, prog, sizeof prog)) {
     const char *quien = strstr(prog, "LECTOR") ? "el Lector" : strstr(prog, "MIRADOR") ? "Mirador" : "su programa";
@@ -949,12 +1088,12 @@ static void img_avanza(void) {
   if (icarga < 0) {
     k = img_pendiente();
     if (k < 0) {
-      if (i_remaq) { i_remaq = 0; remaqueta(); }
+      if (i_remaq) { i_remaq = 0; remaqueta2(1); }
       if (i_hechas) { i_hechas = 0; if (!cargando) di(""); }
       return;
     }
     /* de vez en cuando, la página maquetada otra vez con las que ya han llegado */
-    if (i_remaq && GetTickCount() - i_remaq_t > 2500u) { i_remaq = 0; remaqueta(); }
+    if (i_remaq && GetTickCount() - i_remaq_t > 2500u) { i_remaq = 0; remaqueta2(1); }
     im = &pag->img[k];
     {                                            /* ¿ya vista? */
       int c;
@@ -1028,10 +1167,10 @@ static void img_avanza(void) {
 static void carga_avanza(void) {
   static const char *const fases[] = { "Abriendo...", "Buscando el servidor...", "Conectando con el servidor...",
     "Abriendo la conexi\363n segura...", "Enviando la petici\363n...", "Esperando la respuesta...", "Recibiendo la p\341gina..." };
-  int r = http_avanza(&pet);
+  int r = http_avanza(&pet), luego = 0;
   if (r >= 0 && !pet.decidido && pet.fase >= H_CUERPO) {     /* las cabeceras: ¿es para guardar? */
     pet.decidido = 1;
-    if (es_descarga(&pet) && !descarga_empieza(&pet)) { cargando = 0; http_suelta(&pet); return; }
+    if (es_descarga(&pet) && !descarga_empieza(&pet)) { cargando = 0; n_cola = 0; cursor_pon(0); repinta(); http_suelta(&pet); return; }
   }
   if (r == 0) {
     char b[160];
@@ -1045,7 +1184,9 @@ static void carga_avanza(void) {
     return;
   }
   cargando = 0;
-  if (pet.disco) { descarga_acaba(&pet, r > 0); http_suelta(&pet); return; }
+  cursor_pon(0);
+  if (vent) { RECT rb; rb.left = 0; rb.top = 0; rb.right = an; rb.bottom = BARRA_H; InvalidateRect(vent, &rb, 0); }
+  if (pet.disco) { n_cola = 0; descarga_acaba(&pet, r > 0); http_suelta(&pet); return; }
   if (r < 0) {
     char *u = pet.url;
     pet.url = NULL;
@@ -1068,7 +1209,13 @@ static void carga_avanza(void) {
       tc[0] = 0;
       if ((pet.estado == 307 || pet.estado == 308) && pet.post) { post = 1; cuerpo = pet.cuerpo; nc = pet.n_cuerpo; pet.cuerpo = NULL; memcpy(tc, pet.tipo_cuerpo, sizeof tc); }
       http_suelta(&pet);
-      if (strchr(nueva, '#')) *strchr(nueva, '#') = 0;
+      if (strchr(nueva, '#')) {                  /* (la marca de la redirección manda; si no trae, la de antes) */
+        char *m = strchr(nueva, '#');
+        free(marca);
+        marca = malloc(strlen(m) + 1);
+        if (marca) strcpy(marca, m);
+        *m = 0;
+      }
       pet.url = nueva; pet.post = post; pet.cuerpo = cuerpo; pet.n_cuerpo = nc;
       memcpy(pet.tipo_cuerpo, tc, sizeof tc);
       http_empieza(&pet);
@@ -1089,7 +1236,7 @@ static void carga_avanza(void) {
     int html = !pet.tipo[0] || strstr(pet.tipo, "html") != NULL, plano = !strncmp(pet.tipo, "text/", 5) && !html;
     Pagina *p = NULL;
     if ((html || plano) && pet.n_datos) p = pag_nueva(pet.url, pet.datos, pet.n_datos, es_latin1(&pet), plano);
-    if (p) muestra(p, pet.url);
+    if (p) { muestra(p, pet.url); luego = 1; }
     else {
       static char h[900];
       if (pet.estado >= 400)
@@ -1103,6 +1250,7 @@ static void carga_avanza(void) {
     }
   }
   http_suelta(&pet);
+  if (luego) cola_suelta();                     /* (lo tecleado mientras llegaba; ya sin la petición) */
 }
 
 /* =============================================================================
@@ -1131,17 +1279,51 @@ static int foco_de_ctl(int idx) {
   for (k = 0; k < pag->n_foco; k++) if (!pag->foco[k].enlace && pag->foco[k].n == idx) return k;
   return -1;
 }
-static void remaqueta(void) {
-  int f = foco;
+static void remaqueta2(int fija) {
+  int f = foco, a = -1, d = 0, ny = sy;
   if (!pag) return;
+  /* fija: que no se mueva lo que se está mirando (una imagen sin medidas que
+   * llega y empuja lo de debajo): el primer enlace o campo que se ve se
+   * queda en su fila; si el usuario aún no ha tocado nada y está arriba del
+   * todo, la página se rehace sin más (y se ve el logotipo) */
+  if (fija && (toco || sy > 0) && (a = pag_foco_desde(pag, sy)) >= 0) d = pag_foco_y(pag, a) - sy;
   pag_maqueta(pag, cols);
   foco = f < pag->n_foco ? f : -1;
-  desplaza(sx, sy);
+  if (a >= 0 && a < pag->n_foco && pag_foco_y(pag, a) >= 0) ny = pag_foco_y(pag, a) - d;
+  sy = -1;                                       /* (que desplaza no se lo salte) */
+  desplaza(sx, ny);
+  if (sy < 0) sy = 0;
   if (sy > pag->n_filas - filas_vis) { sy = pag->n_filas - filas_vis; if (sy < 0) sy = 0; }
+  if (tab_fila >= pag->n_filas) tab_fila = 0;
   repinta();
 }
+static void remaqueta(void) { remaqueta2(0); }
 static void pulsa_ctl(int idx);
 static int js_clic_enlace(int *e);
+/* un enlace a una marca de esta misma página (#resultados): allí, sin
+ * pedirla otra vez; es una entrada más del historial (Atrás vuelve) */
+static void ve_marca(const char *u) {
+  const char *m = strchr(u, '#') + 1;
+  int k;
+  char *q;
+  hist_guarda();
+  pag->ancla = m[0] ? ar_texto(&pag->doc.ar, m, -1) : NULL;
+  remaqueta();
+  if ((q = malloc(strlen(u) + 1))) {
+    strcpy(q, u);
+    for (k = i_hist + 1; k < n_hist; k++) free(hist[k].url);
+    n_hist = i_hist + 1;
+    if (n_hist == HIST) { free(hist[0].url); memmove(hist, hist + 1, (HIST - 1) * sizeof hist[0]); n_hist--; i_hist--; }
+    hist[n_hist].url = q; hist[n_hist].f = -1;
+    i_hist = n_hist++;
+  }
+  foco = -1;
+  if (pag->y_ancla >= 0) { sy = -1; desplaza(sx, pag->y_ancla); tab_fila = pag->y_ancla; }
+  else if (!m[0] || !_stricmp(m, "top")) { desplaza(sx, 0); tab_fila = pag_tab_inicio(pag); }
+  hist_guarda();
+  dir_pon(u);
+  repinta();
+}
 static void abre_enlace(int e) {
   Enlace *en;
   char b[300], *u;
@@ -1158,9 +1340,9 @@ static void abre_enlace(int e) {
     return;
   }
   if (!js_en_pagina() && pag_confirma(en->nodo, b, sizeof b) && MessageBoxA(vent, b, "Navegador", MB_YESNO) != IDYES) return;
-  if (en->href[0] == '#') { desplaza(sx, 0); return; }
   u = url_absoluta(pag->doc.base ? pag->doc.base : pag->url, en->href);
   if (!u) { di("Este enlace no se puede abrir aqu\355 (no es una p\341gina web)."); return; }
+  if (strchr(u, '#') && !strncmp(u, pag->url, strlen(pag->url)) && u[strlen(pag->url)] == '#') { ve_marca(u); free(u); return; }
   ir2(u, 0, NULL, 0, 0, NULL, pag->url);
   free(u);
 }
@@ -1392,6 +1574,17 @@ static int edita(Ctl *c, int vk, int ch) {
   }
   return 0;
 }
+/* el primer foco del Tab cuando no hay ninguno: el de lo principal de la
+ * página (o de la marca); si eso no se ve, el primero de lo que se ve */
+static int tab_primero(void) {
+  int f = pag_foco_desde(pag, tab_fila), y;
+  y = pag_foco_y(pag, f);
+  if (f < 0 || y < sy || y >= sy + filas_vis) {
+    int g = pag_foco_desde(pag, sy);
+    if (g >= 0 && pag_foco_y(pag, g) < sy + filas_vis) f = g;
+  }
+  return f < 0 ? 0 : f;
+}
 static void tecla(int vk) {
   Ctl *c = ctl_foco();
   int e;
@@ -1421,7 +1614,7 @@ static void tecla(int vk) {
     c = ctl_foco();
   }
   if (vk == VK_ESCAPE) {
-    if (cargando) { http_suelta(&pet); cargando = 0; di("Carga parada."); }
+    if (cargando) { http_suelta(&pet); cargando = 0; n_cola = 0; cursor_pon(0); repinta(); di("Carga parada."); }
     else if (icarga >= 0 || img_pendiente() >= 0) {      /* (y las imágenes que faltan, sin ellas) */
       int k;
       img_cancela();
@@ -1436,7 +1629,7 @@ static void tecla(int vk) {
   if (vk == VK_F6) { foco_dir = 1; dir_sel = 1; foco = -1; dir.cursor = dir.n_valor; dir.desp = 0; repinta(); return; }
   if (foco_dir) {
     if (vk == VK_RETURN) { foco_dir = 0; ir_dir(dir.valor); repinta(); return; }
-    if (vk == VK_TAB) { foco_dir = 0; if (pag && pag->n_foco) foco_pon((GetKeyState(0x10) & 0x8000) ? pag->n_foco - 1 : 0); else repinta(); return; }
+    if (vk == VK_TAB) { foco_dir = 0; if (pag && pag->n_foco) foco_pon(mayus() ? pag->n_foco - 1 : tab_primero()); else repinta(); return; }
     if ((vk == VK_BACK || vk == VK_DELETE || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_HOME || vk == VK_END) && edita(&dir, vk, 0)) {
       HANDLE dc = GetDC(vent);
       pinta_dir(dc);
@@ -1447,7 +1640,8 @@ static void tecla(int vk) {
   if (!pag) return;
   if (vk == VK_TAB) {
     if (!pag->n_foco) return;
-    if (GetKeyState(0x10) & 0x8000) foco_pon(foco > 0 ? foco - 1 : pag->n_foco - 1);   /* Mayús+Tab: hacia atrás */
+    if (mayus()) foco_pon(foco > 0 ? foco - 1 : pag->n_foco - 1);   /* Mayús+Tab: hacia atrás */
+    else if (foco < 0) foco_pon(tab_primero());   /* (el primero: el del contenido, no el del menú) */
     else foco_pon(foco + 1 < pag->n_foco ? foco + 1 : 0);
     return;
   }
@@ -1496,6 +1690,7 @@ static void letra(int ch) {
   Ctl *c = ctl_foco();
   if (ch == 12) { tecla(VK_F6); return; }       /* Ctrl+L: a la dirección */
   if (ch == 18) { recarga(); return; }          /* Ctrl+R */
+  if (ch == 16) { imprime(); return; }          /* Ctrl+P: imprimir */
   if (ch < 32) return;
   if (lista.activa) {                           /* la opción siguiente que empieza por esa letra */
     Ctl *l = &pag->ctl[lista.ctl];
@@ -1520,6 +1715,21 @@ static void letra(int ch) {
     Pagina *p0 = pag;
     if (js_tecla(c->nodo, 0, ch) || pag != p0 || cargando) return;
     c = ctl_foco();
+  }
+  if (!c && pag && ch != ' ' && foco < 0) {
+    /* sin foco: si en lo que se ve hay un solo campo donde escribir, la letra
+     * va a él (quien escribe sin mirar la pantalla no la pierde) */
+    int k, uno = -1, n = 0;
+    for (k = 0; k < pag->n_ctl && n < 2; k++) {
+      Ctl *o = &pag->ctl[k];
+      if (o->visible && (o->tipo == C_TEXTO || o->tipo == C_AREA) && !o->desactivado && !o->sololee
+          && o->y + o->h > sy && o->y < sy + filas_vis) { uno = k; n++; }
+    }
+    if (n == 1 && foco_de_ctl(uno) >= 0) {
+      foco_pon(foco_de_ctl(uno));
+      c = ctl_foco();
+      if (c) c->cursor = c->n_valor;
+    }
   }
   if (es_texto(c)) { if (edita(c, 0, ch)) { Nodo *n = c->nodo; repinta_ctl(c); js_evento(n, "input", NULL); } return; }   /* [JS] input */
   if (ch == ' ') {
@@ -1560,7 +1770,9 @@ static void clic(int px, int py) {
         foco_dir = 0;
         if (k == B_ATRAS) atras();
         else if (k == B_ADELANTE) adelante();
+        else if (k == B_RECARGA && cargando) tecla(VK_ESCAPE);
         else if (k == B_RECARGA) recarga();
+        else if (k == B_IMPRIME) imprime();
         else if (k == B_INICIO) ir(inicio, 0, NULL, 0, 0);
         else ir_dir(dir.valor);
         repinta();
@@ -1745,7 +1957,14 @@ static void jn_remaqueta(void) {
   remaqueta();
   foco = foco_de_nodo(n);
 }
-static void jn_ir(const char *url, int post, char *cuerpo, u32 nc) { ir2(url, post, cuerpo, nc, 0, NULL, pag ? pag->url : NULL); }
+static void jn_ir(const char *url, int post, char *cuerpo, u32 nc) {
+  if (!post && pag && strchr(url, '#') && !strncmp(url, pag->url, strlen(pag->url)) && url[strlen(pag->url)] == '#') {
+    free(cuerpo);                                /* (location.hash: a la marca, sin pedirla otra vez) */
+    ve_marca(url);
+    return;
+  }
+  ir2(url, post, cuerpo, nc, 0, NULL, pag ? pag->url : NULL);
+}
 static void jn_envia(Nodo *forma, Nodo *boton) {   /* form.submit(): sin validar, como los demás */
   char *url, *cuerpo, tipo[96];
   u32 nc;
@@ -1797,6 +2016,123 @@ static void jn_a_la_vista(Nodo *n) {
 static const JsNav js_nav = { jn_remaqueta, jn_ir, jn_envia, jn_pon_url, jn_historia, jn_foco, jn_cuadro, jn_pregunta,
                               jn_titulo, di, jn_a_la_vista };
 
+/* lo tecleado mientras llegaba la página, a ella (en un campo con autofocus,
+ * o con Tab, Av Pág...). Retroceso sin un campo con el foco no vuelve atrás
+ * (era para corregir lo escrito) */
+static void cola_suelta(void) {
+  int k, n = n_cola;
+  n_cola = 0;
+  for (k = 0; k < n && pag && !cargando; k++) {
+    if (cola[k].letra) { letra(cola[k].v); continue; }
+    if (cola[k].v == VK_BACK && !es_texto(ctl_foco())) continue;
+    mayus_forzada = cola[k].mayus;
+    tecla(cola[k].v);
+    mayus_forzada = -1;
+  }
+}
+
+/* =============================================================================
+ *  Imprimir la página: como texto, por la impresora de Hispa-DOS (LPT1, una
+ *  de agujas con ESC/P, como Pluma y el Lector: HW32 manda lo que se escribe
+ *  en «LPT1» al puerto paralelo con la BIOS). Lo que se ve en la rejilla,
+ *  fila a fila, con la negrita; los campos con lo que tienen escrito
+ *  ([...]), las casillas ([X]) y los botones ([Prestar]); las imágenes, no.
+ *  Si la página es ancha, a 12 o 15 letras por pulgada para que quepa.
+ * ============================================================================= */
+/* de la página 1252 a la 437 de la impresora (ESC t 1); las que la 437 no
+ * tiene, sin la tilde */
+static const char de_a0[] = "\377\255\233\234o\235|S\042c\246\256\252-r-\370\361\3753'\346P\372,1\247\257\254\253?\250AAAA\216\217\222\200E\220EEIIII?\245OOOO\231x?UUU\232Y?\341\205\240\203a\204\206\221\207\212\202\210\211\215\241\214\213?\244\225\242\223o\224\366?\227\243\226\201y?\230";
+static int imp_n;
+static FILE *imp_f;
+static u8 imp_b[512];
+static int imp_pon(const void *d, int n) {
+  const u8 *t = d;
+  while (n--) {
+    imp_b[imp_n++] = *t++;
+    if (imp_n == sizeof imp_b) { if (fwrite(imp_b, 1, imp_n, imp_f) != (u32)imp_n) return 0; imp_n = 0; }
+  }
+  return 1;
+}
+static void imprime(void) {
+  int f, k, ancho = 0, ok = 1, neg = 0;
+  char m[300];
+  if (!pag || cargando) return;
+  /* lo ancho que es (sin los blancos de la derecha) */
+  for (f = 0; f < pag->n_filas; f++) {
+    Fila *fl = &pag->filas[f];
+    for (k = fl->n; k > 0 && fl->c[k - 1] == ' ' && pag->atrs[fl->a[k - 1]].ctl < 0; k--) ;
+    if (k > ancho) ancho = k;
+  }
+  if (ancho > 136) ancho = 136;
+  di("Imprimiendo la p\341gina...");
+  cursor_pon(1);
+  imp_f = fopen("LPT1", "wb");
+  imp_n = 0;
+  if (!imp_f) ok = 0;
+  else {
+    /* ESC @ (como de fábrica), ESC t 1 (la tabla de la 437), 1/6 de pulgada
+     * por línea y las letras por pulgada que hagan falta */
+    static const u8 ini[] = { 27, '@', 27, 't', 1, 27, '2' };
+    ok = imp_pon(ini, sizeof ini);
+    if (ok && ancho > 96) ok = imp_pon("\033g", 2);         /* 15 por pulgada: 120 letras */
+    else if (ok && ancho > 78) ok = imp_pon("\033M", 2);    /* 12: 96 */
+    for (f = 0; ok && f < pag->n_filas; f++) {
+      Fila *fl = &pag->filas[f];
+      u8 lin[140], ng[140];
+      int n = fl->n < ancho ? fl->n : ancho, j;
+      for (k = 0; k < n; k++) {
+        Atr *at = &pag->atrs[fl->a[k]];
+        lin[k] = fl->c[k];
+        ng[k] = (at->est & A_NEGRITA) != 0;
+        if (at->est & A_RAYA) lin[k] = '-';
+        if (at->img >= 0) lin[k] = ' ';
+      }
+      /* los controles: lo que tienen */
+      for (j = 0; j < pag->n_ctl; j++) {
+        Ctl *c = &pag->ctl[j];
+        char v[300];
+        int q, l;
+        if (!c->visible || c->tipo == C_OCULTO || f < c->y || f >= c->y + c->h) continue;
+        if (c->tipo == C_CASILLA || c->tipo == C_RADIO) sprintf(v, "[%c]", c->marcado ? 'X' : ' ');
+        else if (c->tipo == C_AREA) {
+          int ini = area_linea(c, f - c->y + c->desp, 0, NULL), fin = area_linea(c, f - c->y + c->desp + 1, 0, NULL);
+          if (f - c->y + c->desp >= area_linea(c, -1, 0, NULL)) fin = ini;
+          if (fin > ini && c->valor[fin - 1] == '\n') fin--;
+          sprintf(v, "|%.*s", fin - ini < 200 ? fin - ini : 200, c->valor + ini);
+        } else if (c->tipo == C_CLAVE) { for (l = 0; l < c->n_valor && l < 60; l++) v[l + 1] = '*'; v[0] = '['; v[l + 1] = ']'; v[l + 2] = 0; }
+        else { char r[260]; rotulo(c, r, sizeof r); sprintf(v, "[%.250s]", r); }
+        l = strlen(v);
+        for (q = 0; q < l && q < c->w && c->x + q < ancho; q++) {
+          if (c->x + q >= n) { while (n <= c->x + q) { lin[n] = ' '; ng[n] = 0; n++; } }
+          lin[c->x + q] = (u8)v[q];
+          ng[c->x + q] = c->tipo == C_ENVIAR || c->tipo == C_BOTON;
+        }
+      }
+      while (n && lin[n - 1] == ' ') n--;
+      for (k = 0; ok && k < n; k++) {
+        u8 ch = lin[k];
+        if (ng[k] != neg) { neg = ng[k]; ok = imp_pon(neg ? "\033E" : "\033F", 2); }
+        if (ch == 0x80) { ok = ok && imp_pon("EUR", 3); continue; }
+        if (ch >= 0xA0) ch = (u8)de_a0[ch - 0xA0];
+        else if (ch >= 0x80) ch = ch == 0x85 ? '.' : ch == 0x91 || ch == 0x92 ? '\'' : ch == 0x93 || ch == 0x94 ? '"' : ch == 0x96 || ch == 0x97 ? '-' : '?';
+        else if (ch < 32) ch = ' ';
+        ok = ok && imp_pon(&ch, 1);
+      }
+      ok = ok && imp_pon("\r\n", 2);
+    }
+    if (ok && neg) ok = imp_pon("\033F", 2);
+    ok = ok && imp_pon("\014", 1);                          /* la hoja, fuera */
+    if (ok && imp_n) ok = fwrite(imp_b, 1, imp_n, imp_f) == (u32)imp_n;
+    if (fclose(imp_f)) ok = 0;
+  }
+  cursor_pon(0);
+  if (ok) { di("P\341gina impresa."); return; }
+  di("No se ha podido imprimir.");
+  sprintf(m, "No se ha podido imprimir.\n\nCompruebe que la impresora (la del puerto paralelo, LPT1) est\341 encendida, "
+             "conectada y con papel.");
+  MessageBoxA(vent, m, "Navegador", MB_OK);
+}
+
 static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   switch (m) {
   case WM_PAINT: {
@@ -1818,19 +2154,35 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   }
   case WM_KEYDOWN:
     TlsAzar(&l, 4);
+    toco = 1;
+    /* mientras llega una página (no en la dirección): lo que mueve o escribe
+     * se guarda para la nueva (Esc, F5 y F6 van ya; lo demás, fuera) */
+    if (cargando && !foco_dir && w != VK_ESCAPE && w != VK_F5 && w != VK_F6) {
+      if ((w == VK_TAB || w == VK_RETURN || w == VK_BACK || w == VK_DELETE || (w >= VK_PRIOR && w <= VK_DOWN)) && n_cola < COLA) {
+        cola[n_cola].letra = 0; cola[n_cola].mayus = (u8)mayus(); cola[n_cola].v = (u16)w; n_cola++;
+      }
+      return 0;
+    }
     tecla((int)w);
     return 0;
   case WM_CHAR:
+    if (cargando && !foco_dir) {
+      if (w >= 32 && n_cola < COLA) { cola[n_cola].letra = 1; cola[n_cola].mayus = 0; cola[n_cola].v = (u16)w; n_cola++; }
+      return 0;
+    }
     letra((int)w);
     return 0;
   case WM_LBUTTONDOWN:
     TlsAzar(&l, 4);
+    toco = 1;
     clic((short)(l & 0xFFFF), (short)(l >> 16));
     return 0;
   case WM_LBUTTONUP:
     arrastra = 0;
     return 0;
   case WM_MOUSEMOVE:
+    if ((short)(l >> 16) >= BARRA_H) toco = 1;
+    if (cargando) cursor_pon(1);
     raton((short)(l & 0xFFFF), (short)(l >> 16), w & 1);
     return 0;
   case WM_TIMER:
@@ -1874,6 +2226,7 @@ static void lee_ini(void) {
   if (k >= 9 && !_stricmp(carpeta + k - 9, "INTERNET\\")) sprintf(dir_hispados, "%.*s", k - 9, carpeta);
   else strcpy(dir_hispados, "C:\\HISPADOS\\");
   if ((carpeta[0] | 32) == 'c') strcpy(dir_descargas, "C:\\");
+  sprintf(dir_auto, "%.130sDESCARGA\\", carpeta);   /* (lo que se abre solo: \HISPADOS\INTERNET\DESCARGA) */
   sprintf(ruta, "%sGALLETAS.TXT", carpeta);
   http_galletas_carga(ruta);
   sprintf(ruta, "%sNAVEGA.INI", carpeta);
@@ -1885,7 +2238,10 @@ static void lee_ini(void) {
     if (!_strnicmp(l, "Inicio=", 7) && l[7]) sprintf(inicio, "%.290s", l + 7);
     if (!_strnicmp(l, "Idioma=", 7) && l[7]) sprintf(http_idioma, "%.30s", l + 7);
     if (!_strnicmp(l, "AlContenido=", 12)) al_contenido = !(l[12] == 'N' || l[12] == 'n' || l[12] == '0');
-    if (!_strnicmp(l, "Descargas=", 10) && l[10]) sprintf(dir_descargas, "%.140s", l + 10);
+    if (!_strnicmp(l, "Descargas=", 10) && l[10]) {
+      sprintf(dir_descargas, "%.140s", l + 10);
+      sprintf(dir_auto, "%.140s%s", l + 10, l[strlen(l) - 1] == '\\' ? "" : "\\");
+    }
     if (!_strnicmp(l, "Galletas=", 9) && (l[9] == 'N' || l[9] == 'n' || l[9] == '0')) guardar_galletas = 0;
     if (!_strnicmp(l, "JavaScript=", 11)) js_activo = !(l[11] == 'N' || l[11] == 'n' || l[11] == '0');   /* [JS] */
     if (!_strnicmp(l, "TiempoJS=", 9) && atoi(l + 9) > 0) js_tope_ms = atoi(l + 9) * 1000;

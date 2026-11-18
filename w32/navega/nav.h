@@ -53,7 +53,7 @@ int remove(const char *);
 #endif
 
 /* cómo se presenta el Navegador a los servidores (User-Agent) */
-#define NAV_VERSION "0.2"
+#define NAV_VERSION "0.3"
 #define HTTP_AGENTE "HispaNavegador/" NAV_VERSION " (Hispa-486)"
 
 /* ---- textos y memoria (html.c) ---- */
@@ -187,6 +187,7 @@ enum { C_TEXTO, C_CLAVE, C_CASILLA, C_RADIO, C_ENVIAR, C_BOTON, C_REINICIO, C_LI
 typedef struct {
   u8 tipo, desactivado, sololee, marcado, marcado0, visible, obligado, cambia_envia;
   u8 solo_js;                             /* un botón que solo hace algo con JavaScript */
+  u8 peligro;                             /* un botón de lo que no tiene vuelta (btn-danger): granate y con «!» */
   Nodo *nodo, *forma;
   const char *nombre;
   char *valor; int n_valor, cap_valor;   /* texto, área, y el valor de las casillas */
@@ -201,7 +202,8 @@ typedef struct { u8 est, fg, bg; short enlace, ctl, img; } Atr;
 #define A_SUBRAYA 2
 #define A_RAYA 4         /* una raya horizontal en vez de letras */
 #define A_TACHA 8
-#define A_BOTON 16       /* enlace con aspecto de botón */
+#define A_BOTON 16       /* enlace con aspecto de botón (.btn): se pinta con su marco */
+#define A_PELIGRO 32     /*   y de lo que no tiene vuelta (btn-danger): en granate */
 typedef struct { u16 n; u8 *c; u16 *a; } Fila;
 typedef struct { const char *href; Nodo *nodo; int x, y; } Enlace;
 typedef struct { u8 enlace; short n; } Foco;   /* enlace: 1 = enlace n; 0 = control n */
@@ -227,6 +229,10 @@ typedef struct {
   Fila *filas; int n_filas, cap_filas;
   int ancho;                              /* la fila más larga */
   int y_cont;                             /* la fila donde empieza lo principal (<main>), o -1 */
+  int y_menu, y_menu_ini;                 /* el primer menú (<nav>, .navbar): la fila de debajo y la suya (-1: no hay) */
+  const char *ancla; int y_ancla;         /* la marca de la dirección (#nombre, sin «#»; la pone quien
+                                           * maqueta) y la fila donde está (-1: no está) */
+  int autofoco;                           /* el control con autofocus (el primero a la vista), o -1 */
   Atr *atrs; int n_atrs, cap_atrs;
   Enlace *enl; int n_enl, cap_enl;
   Ctl *ctl; int n_ctl, cap_ctl;
@@ -239,6 +245,10 @@ typedef struct {
 enum { K_TINTA = 1, K_FONDO, K_ENLACE, K_GRIS, K_ROJO, K_VERDE, K_TITULO, K_ZEBRA, K_MARCA, K_CABEZA, K_AVISO, K_N };
 Pagina *pag_nueva(const char *url, const u8 *fuente, u32 n, int latin1, int texto_plano);
 void pag_maqueta(Pagina *, int columnas);
+int pag_foco_y(const Pagina *, int f);                /* la fila del foco f (enlace o control) */
+int pag_foco_desde(const Pagina *, int fila);         /* el primer foco de esa fila o de más abajo, o -1 */
+int pag_tab_inicio(const Pagina *);                   /* la fila donde empieza el Tab: lo principal o lo de tras el menú */
+void pag_rotulo_boton(const Ctl *, char *b, int max); /* el texto de un botón tal como se ve (con «! » si es peligroso) */
 void pag_suelta(Pagina *);
 /* el formulario del control «con» (el que se ha pulsado, o -1): la dirección
  * y, si es POST, el cuerpo; devuelve 0 si no hay a dónde enviar. aviso: lo

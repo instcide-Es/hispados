@@ -99,13 +99,18 @@ static void declaraciones(const char *t, const char *fin, Regla *r) {
         else if (!_strnicmp(v, "right", 5) || !_strnicmp(v, "end", 3)) r->alin = 2;
       } else if (!strcmp(prop, "text-decoration")) { if (!_strnicmp(v, "underline", 9)) r->subraya = 1; }
       else if (!strcmp(prop, "width") || !strcmp(prop, "height")) {
-        /* solo en puntos (px): lo demás (%, em, auto) no se sabe aquí */
+        /* en puntos (px); y el ancho también en letras (ch: 8 puntos), em o rem
+         * (16) y % (negativo: lo que se sabe al maquetar; para los campos) */
         const char *q = v;
         int x = 0;
         while (q < pc && *q >= '0' && *q <= '9') x = x * 10 + *q++ - '0';
         if (q < pc && *q == '.') { q++; while (q < pc && *q >= '0' && *q <= '9') q++; }
-        if (q > v && q + 1 < pc + 1 && !_strnicmp(q, "px", 2) && x > 0 && x < 4000) {
-          if (prop[0] == 'w') r->ancho = (short)x; else r->alto = (short)x;
+        if (q > v && x > 0 && x < 4000) {
+          if (q + 1 < pc + 1 && !_strnicmp(q, "px", 2)) { if (prop[0] == 'w') r->ancho = (short)x; else r->alto = (short)x; }
+          else if (prop[0] == 'w' && q + 1 < pc + 1 && !_strnicmp(q, "ch", 2)) r->ancho = (short)(x * 8);
+          else if (prop[0] == 'w' && q + 1 < pc + 1 && !_strnicmp(q, "em", 2) && x < 250) r->ancho = (short)(x * 16);
+          else if (prop[0] == 'w' && q + 2 < pc + 1 && !_strnicmp(q, "rem", 3) && x < 250) r->ancho = (short)(x * 16);
+          else if (prop[0] == 'w' && q < pc && *q == '%' && x <= 100) r->ancho = (short)-x;
         }
       }
     }
@@ -297,7 +302,13 @@ static void estilo(Pagina *p, Nodo *n) {
 /* el ancho y el alto en puntos que la página pide para un elemento (una
  * imagen): sus atributos width y height, las reglas de los <style> y su
  * style; 0 si no lo dice */
+static void css_medidas2(Pagina *p, Nodo *n, int *w, int *h);
 static void css_medidas(Pagina *p, Nodo *n, int *w, int *h) {
+  css_medidas2(p, n, w, h);
+  if (*w < 0) *w = 0;                            /* (un %: para una imagen, no se sabe) */
+}
+/* lo mismo, con el ancho en % negativo (-50: la mitad) */
+static void css_medidas2(Pagina *p, Nodo *n, int *w, int *h) {
   Regla *rs = p->reglas, q;
   const char *t, *cl = atr(n, "class"), *id = atr(n, "id");
   int k;
@@ -368,6 +379,7 @@ static void ctl_crea(Pagina *p, Nodo *n) {
   c->desactivado = atr(n, "disabled") != NULL;
   c->sololee = atr(n, "readonly") != NULL;
   c->obligado = atr(n, "required") != NULL;
+  c->peligro = tiene_clase(n, "btn-danger") || tiene_clase(n, "btn-outline-danger");
   c->max = 4000;
   for (f = n->padre; f && f->etq != E_FORM; f = f->padre) ;
   c->forma = f;
@@ -439,7 +451,25 @@ const char *pag_confirma(Nodo *n, char *b, int max) {
   c += 8;
   while (*c == ' ') c++;
   q = *c;
-  if (q != '\'' && q != '"') return NULL;
+  if (q != '\'' && q != '"') {
+    /* confirm(this.dataset.confirmar) (lo de ClicGest), o una variable: el
+     * atributo data-... que diga, o data-confirmar; y si no, una pregunta
+     * de siempre (nunca se hace sin preguntar lo que la página pregunta) */
+    const char *d = NULL;
+    if (!strncmp(c, "this.dataset.", 13)) {
+      char nom[48] = "data-";
+      int j = 5;
+      for (c += 13; j < 45 && ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9')); c++) {
+        if (*c >= 'A' && *c <= 'Z') { nom[j++] = '-'; nom[j++] = (char)(*c + 32); } else nom[j++] = *c;
+      }
+      nom[j] = 0;
+      d = atr(n, nom);
+    }
+    if (!d) d = atr(n, "data-confirmar");
+    if (!d || !d[0]) d = "\277Seguro?";
+    sprintf(b, "%.*s", max - 1, d);
+    return b;
+  }
   for (c++; *c && *c != q && k < max - 1; c++) {
     if (*c == '\\' && c[1]) {
       c++;
@@ -606,8 +636,7 @@ int pag_formulario(Pagina *p, Nodo *forma, int con, char **url, char **cuerpo, u
     if (!formulario_mp(p, forma, con, &b, tipo)) { free(b.d); return 0; }
     abs = url_absoluta(p->doc.base ? p->doc.base : p->url, accion && accion[0] ? accion : p->url);
     if (!abs) { free(b.d); return 0; }
-    if (strchr(abs, '#')) *strchr(abs, '#') = 0;
-    *url = abs; *cuerpo = b.d; *n_cuerpo = b.n;
+    *url = abs; *cuerpo = b.d; *n_cuerpo = b.n;   /* (con su #marca: la quita quien la pide) */
     return 1;
   }
   for (k = 0; k < p->n_ctl; k++) {
@@ -643,14 +672,19 @@ int pag_formulario(Pagina *p, Nodo *forma, int con, char **url, char **cuerpo, u
   d[nd] = 0;
   abs = url_absoluta(p->doc.base ? p->doc.base : p->url, accion && accion[0] ? accion : p->url);
   if (!abs) { free(d); return 0; }
-  if (strchr(abs, '#')) *strchr(abs, '#') = 0;
   if (*post) { *url = abs; *cuerpo = d; *n_cuerpo = nd; return 1; }
-  /* GET: los campos van en la dirección, en lugar de la consulta que hubiera */
-  if (strchr(abs, '?')) *strchr(abs, '?') = 0;
-  *url = malloc(strlen(abs) + nd + 2);
-  if (!*url) { free(abs); free(d); return 0; }
-  strcpy(*url, abs);
-  if (nd) { strcat(*url, "?"); strcat(*url, d); }
+  /* GET: los campos van en la dirección, en lugar de la consulta que hubiera;
+   * la marca (#resultados), detrás */
+  {
+    char *marca = strchr(abs, '#');
+    if (marca) *marca++ = 0;
+    if (strchr(abs, '?')) *strchr(abs, '?') = 0;
+    *url = malloc(strlen(abs) + nd + (marca ? strlen(marca) : 0) + 3);
+    if (!*url) { free(abs); free(d); return 0; }
+    strcpy(*url, abs);
+    if (nd) { strcat(*url, "?"); strcat(*url, d); }
+    if (marca) { strcat(*url, "#"); strcat(*url, marca); }
+  }
   free(abs); free(d);
   *cuerpo = NULL; *n_cuerpo = 0;
   return 1;
@@ -762,7 +796,7 @@ static void salta(Ctx *c) {
   Pagina *p = c->p;
   int k, desp = 0;
   if (!c->col) return;
-  while (c->col > 0 && c->lc[c->col - 1] == ' ' && p->atrs[c->la[c->col - 1]].ctl < 0 && !(p->atrs[c->la[c->col - 1]].est & A_RAYA)) c->col--;
+  while (c->col > 0 && c->lc[c->col - 1] == ' ' && p->atrs[c->la[c->col - 1]].ctl < 0 && !(p->atrs[c->la[c->col - 1]].est & (A_RAYA | A_BOTON))) c->col--;
   if (c->col > c->max_an) c->max_an = c->col;
   if (!c->medir && c->col) {
     if (c->alin == 1) desp = (c->ancho - c->col) / 2;
@@ -894,13 +928,8 @@ static int ctl_ancho(Ctx *c, Ctl *k) {
   switch (k->tipo) {
   case C_CASILLA: case C_RADIO: return 3;
   case C_ENVIAR: case C_BOTON: case C_REINICIO:
-    b[0] = 0;
-    if (k->nodo->etq == E_BUTTON) texto_de(k->nodo, b, sizeof b);
-    else { j = k->n_valor < 290 ? k->n_valor : 290; memcpy(b, k->valor, j); b[j] = 0; }
-    pag_rotulo_vacio(k, b, sizeof b);           /* [JS] */
-    w = strlen(b);
-    while (w && b[w - 1] == ' ') w--;
-    return w + 4;
+    pag_rotulo_boton(k, b, sizeof b);
+    return strlen(b) + 4;
   case C_LISTA:
     for (j = 0; j < k->n_opc; j++) {
       int l;
@@ -917,18 +946,27 @@ static int ctl_ancho(Ctx *c, Ctl *k) {
     w = (t = atr(k->nodo, "cols")) ? atoi(t) : 60;
     if (w < 20) w = 20;
     return w > c->ancho ? c->ancho : w;
-  default:
+  default: {
+    /* lo que diga la página (size, o el ancho de su estilo: px, ch, em o
+     * %); si no dice nada, 40 letras (en una página de 97 columnas cabe lo
+     * que se escribe de un título o un nombre sin que se corte) */
+    int cw, ch, tope = 60;
     t = atr(k->nodo, "size");
     w = t && atoi(t) > 0 ? atoi(t) + 2 : 0;
+    if (!w) {
+      css_medidas2(c->p, k->nodo, &cw, &ch);
+      if (cw > 0) w = (cw + 7) / 8;
+      else if (cw < 0) { w = c->ancho * -cw / 100; tope = c->ancho; }
+    }
     t = atr(k->nodo, "type");
     if (!w) {
       if (t && (!_stricmp(t, "number") || !_stricmp(t, "date") || !_stricmp(t, "time"))) w = 14;
-      else if (t && (!_stricmp(t, "search") || !_stricmp(t, "email") || !_stricmp(t, "url"))) w = 32;
-      else w = k->tipo == C_CLAVE ? 22 : 28;
+      else w = k->tipo == C_CLAVE ? 30 : 42;
       if (k->max + 2 < w) w = k->max + 2;
     }
     if (w < 4) w = 4;
-    return w > c->ancho ? c->ancho : w > 60 ? 60 : w;
+    return w > c->ancho ? c->ancho : w > tope ? tope : w;
+  }
   }
 }
 static void control(Ctx *c, Nodo *n, Est e) {
@@ -956,6 +994,7 @@ static void control(Ctx *c, Nodo *n, Est e) {
       memset(b, ' ', w);
       for (j = 0; j < h; j++) { u16 at[LMAX]; int q; for (q = 0; q < w; q++) at[q] = (u16)a; fila_pon(p, c->y + j, c->x0, b, at, w); }
       k->x = c->x0; k->y = c->y; k->w = w; k->h = h; k->visible = 1;
+      if (p->autofoco < 0 && atr(n, "autofocus") && !k->desactivado) p->autofoco = p->n_foco;
       foco_pon(p, 0, idx);
     }
     c->y += h;
@@ -967,7 +1006,10 @@ static void control(Ctx *c, Nodo *n, Est e) {
   if (k->tipo == C_CASILLA || k->tipo == C_RADIO) c->espacio = 1;   /* (su texto, separado) */
   if (!c->medir) {
     k->w = w; k->h = 1; k->visible = 1;
-    if (!k->desactivado) foco_pon(p, 0, idx);
+    if (!k->desactivado) {
+      if (p->autofoco < 0 && atr(n, "autofocus")) p->autofoco = p->n_foco;
+      foco_pon(p, 0, idx);
+    }
   }
 }
 static void raya(Ctx *c, int n) {
@@ -1227,7 +1269,16 @@ static int imagen(Ctx *c, Nodo *n, Est e) {
 
 static void caja2(Ctx *c, Nodo *n, Est e);
 static void caja(Ctx *c, Nodo *n, Est e) {
+  int menu = 0, y0 = c->y;
+  if (!n->texto && !c->medir && c->p->y_menu < 0) {
+    const char *r = atr(n, "role");
+    menu = n->etq == E_NAV || (r && !_stricmp(r, "navigation")) || tiene_clase(n, "navbar");
+  }
   caja2(c, n, e);
+  if (menu && !n->oculto && c->p->y_menu < 0 && c->y + (c->col > 0) > y0) {   /* (lo que sigue al menú) */
+    c->p->y_menu_ini = y0;
+    c->p->y_menu = c->y + (c->col > 0);
+  }
   if (c->fl_padre == n) {                        /* se acaba el bloque de la imagen: lo que siga, debajo */
     salta(c);
     if (c->fl_padre) { if (c->y < c->fl_hasta) c->y = c->fl_hasta; fin_flota(c); }
@@ -1247,6 +1298,12 @@ static void caja2(Ctx *c, Nodo *n, Est e) {
   if (n->oculto) return;
   if (n->est & EN_BLOQUE) band |= EF_BLOQUE;
   if (c->linea) { if (band & EF_BLOQUE) c->espacio = 1; band &= ~EF_BLOQUE; }   /* (dentro de un botón, todo seguido) */
+  /* la marca de la dirección (#nombre): su id, o el name de un <a> */
+  if (p->ancla && p->y_ancla < 0 && !c->medir
+      && (((t = atr(n, "id")) && !strcmp(t, p->ancla)) || (n->etq == E_A && (t = atr(n, "name")) && !strcmp(t, p->ancla)))) {
+    if (band & EF_BLOQUE) salta(c);
+    p->y_ancla = c->y + (!c->col && c->margen && !c->vacio);
+  }
   if (p->y_cont < 0 && !c->medir && (band & EF_BLOQUE)) {
     t = atr(n, "role");
     if (n->etq == E_MAIN || (t && !_stricmp(t, "main")) || tiene_clase(n, "main") || tiene_clase(n, "content")
@@ -1298,16 +1355,30 @@ static void caja2(Ctx *c, Nodo *n, Est e) {
       e.enlace = (short)enlace_nuevo(c, t, n);
       e.fg = K_ENLACE;
       if (n->est & EN_BOTON) {
-        e.est |= A_BOTON | A_NEGRITA;
+        /* un botón de verdad (navega.c le pone el marco y el relleno): con
+         * aire a los lados, entero en una línea (si no cabe en lo que queda,
+         * a la siguiente) y, si es de lo que no tiene vuelta (btn-danger),
+         * en granate y con «!» delante: no solo el color */
+        int pel = tiene_clase(n, "btn-danger") || tiene_clase(n, "btn-outline-danger"), lw;
+        e.est |= A_BOTON;
+        e.est &= ~(A_SUBRAYA | A_NEGRITA);
+        if (pel) e.est |= A_PELIGRO;
         a = atr_de(c, e);
+        b[0] = 0;
+        texto_de(n, b, sizeof b);
+        lw = strlen(b);
+        while (lw && b[lw - 1] == ' ') lw--;
+        if (b[0] == ' ') lw--;
+        lw += 2 + (pel ? 2 : 0);
+        if (c->col && !c->pre && c->col + 1 + lw > c->ancho && lw <= c->ancho) salta(c);
         if (c->col) c->espacio = 1;
-        literal(c, "[", a);
-        c->pegado = 1;
+        literal(c, pel ? " !" : " ", a);
+        if (pel) c->espacio = 1; else c->pegado = 1;
         c->linea++;
         hijos(c, n, e);
         c->linea--;
         c->espacio = 0; c->pegado = 0;
-        literal(c, "]", a);
+        literal(c, " ", a);
         return;
       }
       e.est |= A_SUBRAYA;
@@ -1524,6 +1595,7 @@ void pag_maqueta(Pagina *p, int columnas) {
   for (k = 0; k < p->n_filas; k++) { free(p->filas[k].c); free(p->filas[k].a); }
   if (p->filas) memset(p->filas, 0, p->cap_filas * sizeof(Fila));
   p->n_filas = 0; p->ancho = 0; p->n_atrs = 0; p->n_enl = 0; p->n_foco = 0; p->y_cont = -1;
+  p->y_menu = p->y_menu_ini = -1; p->y_ancla = -1; p->autofoco = -1;
   for (k = 0; k < p->n_img; k++) { p->img[k].y = -1; p->img[k].visto = 0; }
   for (k = 0; k < p->n_ctl; k++) p->ctl[k].visible = 0;
   if (columnas < 20) columnas = 20;
@@ -1538,6 +1610,39 @@ void pag_maqueta(Pagina *p, int columnas) {
   caja(&c, p->doc.body, e);
   salta(&c);
   fila(p, c.y, 0);
+}
+/* la fila del foco f */
+int pag_foco_y(const Pagina *p, int f) {
+  if (f < 0 || f >= p->n_foco) return -1;
+  return p->foco[f].enlace ? p->enl[p->foco[f].n].y : p->ctl[p->foco[f].n].y;
+}
+/* el primer foco (en el orden de la página) que está en la fila o más abajo */
+int pag_foco_desde(const Pagina *p, int fila) {
+  int k;
+  for (k = 0; k < p->n_foco; k++) if (pag_foco_y(p, k) >= fila) return k;
+  return -1;
+}
+/* donde empieza el Tab: lo principal (<main>, id="contenido"...) o, si la
+ * página no lo dice, lo de debajo del primer menú; 0 si tampoco */
+int pag_tab_inicio(const Pagina *p) {
+  int y = p->y_cont > 0 ? p->y_cont : 0;
+  /* (un menú al principio de todo, o al principio de lo principal: lo de debajo) */
+  if (p->y_menu_ini >= 0 && p->y_menu_ini <= y + 2 && p->y_menu > y) y = p->y_menu;
+  return y;
+}
+/* el texto de un botón de formulario, tal como se ve */
+void pag_rotulo_boton(const Ctl *k, char *b, int max) {
+  int j, w, o = k->peligro ? 2 : 0;
+  b[0] = 0;
+  if (max < 8) return;
+  b[1] = b[2] = 0;
+  if (k->nodo->etq == E_BUTTON) texto_de(k->nodo, b + o, max - o);
+  else { j = k->n_valor < max - 1 - o ? k->n_valor : max - 1 - o; memcpy(b + o, k->valor, j); b[o + j] = 0; }
+  pag_rotulo_vacio(k, b + o, max - o);          /* [JS] */
+  w = strlen(b + o);
+  while (w && b[o + w - 1] == ' ') b[o + --w] = 0;
+  if (b[o] == ' ') memmove(b + o, b + o + 1, w--);
+  if (o) { b[0] = '!'; b[1] = ' '; }
 }
 void pag_suelta(Pagina *p) {
   int k;
