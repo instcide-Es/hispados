@@ -1,0 +1,568 @@
+; =============================================================================
+;  fat.cas - el sistema de archivos FAT del núcleo de Hispa-Pentium, de solo
+;  lectura: FAT12, FAT16 y FAT32, en un disco entero o en su primera partición
+;  FAT (tabla de particiones del MBR). Nombres de 8+3 (los largos se saltan),
+;  sin distinguir mayúsculas; carpetas con «\» o «/».
+;
+;  Un archivo (o una carpeta) abierto es un número, su «manejador»; es de la
+;  tarea que lo abrió. De un archivo se leen octetos; de una carpeta, sus
+;  entradas, una a una (leer_entrada). El disco se lee por ata.cas, sector a
+;  sector, con un sector de datos y uno de la FAT en la memoria.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Fat
+
+    importar Ata, Tareas, Mem32
+
+    ; ---- lo que devuelven las funciones cuando no puede ser ----
+    público constante NO_HAY = 0xFFFFFFFF       ; no existe ese archivo
+    público constante SIN_DISCO = 0xFFFFFFFE    ; no hay disco, o no es FAT
+    público constante LLENO = 0xFFFFFFFD        ; demasiados archivos abiertos
+    público constante MAL = 0xFFFFFFFC          ; el manejador no vale, o el disco falla
+    público constante PRIMER_ERROR = 0xFFFFFFF0 ; de aquí arriba, todo son errores
+
+    público constante MAX_ABIERTOS = 16
+
+    ; ---- los atributos de una entrada ----
+    público constante SOLO_LECTURA = 0x01
+    público constante OCULTO = 0x02
+    público constante DE_SISTEMA = 0x04
+    público constante ETIQUETA = 0x08
+    público constante CARPETA = 0x10
+
+    constante NINGUNO = 0xFFFFFFFF
+
+    tipo Bpb = estructura                       ; el principio del primer sector del volumen
+        salto: arreglo [3] de byte
+        oem: arreglo [8] de byte
+        octetos_sector: nat16                   ; 11
+        sectores_cluster: byte                  ; 13
+        reservados: nat16                       ; 14
+        fats: byte                              ; 16
+        entradas_raíz: nat16                    ; 17
+        total16: nat16                          ; 19
+        medio: byte                             ; 21
+        fat16_sectores: nat16                   ; 22
+        sectores_pista, cabezas: nat16          ; 24
+        ocultos: nat32                          ; 28
+        total32: nat32                          ; 32
+        fat32_sectores: nat32                   ; 36 (de aquí abajo, solo en FAT32)
+        banderas, versión: nat16                ; 40
+        raíz_cluster: nat32                     ; 44
+        info_sector: nat16                      ; 48
+    fin
+
+    tipo Cruda = estructura                     ; una entrada de directorio, tal cual está en el disco
+        nombre: arreglo [11] de byte
+        atributos: byte
+        nt, décimas: byte
+        hora_alta, fecha_alta, fecha_acceso: nat16
+        cluster_alto: nat16
+        hora, fecha: nat16
+        cluster_bajo: nat16
+        tamaño: nat32
+    fin
+
+    ; una entrada de directorio como se la da el núcleo a quien la pide
+    ; (32 octetos; es la misma de llamadas.cas)
+    público tipo Entrada = estructura
+        nombre: arreglo [13] de byte            ; «NOMBRE.EXT», acabado en 0
+        atributos: byte
+        reservado: nat16
+        tamaño: nat32
+        fecha, hora: nat16                      ; como las guarda la FAT
+        cluster: nat32
+        libre: nat32
+    fin
+
+    tipo Abierto = estructura
+        usado: bool
+        carpeta: bool
+        fija: bool                              ; la raíz de FAT12/16, que no va por clusters
+        dueño: nat32                            ; el número de la tarea que lo abrió
+        primero: nat32                          ; su primer cluster
+        tamaño: nat32
+        posición: nat32
+        cluster, índice: nat32                  ; el cluster donde cae la posición, y cuál es de la cadena
+    fin
+
+    ; ---- el volumen ----
+    público variable montado: bool
+    público variable clase: nat32               ; 12, 16 o 32
+    público variable base: nat32                ; el sector del disco donde empieza el volumen
+    público variable sectores_cluster: nat32
+    público variable clusters: nat32
+    público variable total: nat32               ; los sectores del volumen
+    variable unidad: nat32
+    variable fat_inicio, fat_sectores, raíz_inicio, raíz_entradas, datos_inicio, raíz_cluster, info_sector: nat32
+
+    variable cerrojo: Cerrojo
+    variable buf: arreglo [512] de byte         ; un sector de datos
+    variable buf_sector: nat32 = 0xFFFFFFFF
+    variable fat_buf: arreglo [512] de byte     ; un sector de la FAT
+    variable fat_buf_sector: nat32 = 0xFFFFFFFF
+    variable fallo: bool                        ; el disco ha fallado en la última operación
+    variable abiertos: arreglo [MAX_ABIERTOS] de Abierto
+    variable sonda: Abierto                     ; para mirar sin abrir
+
+    ; -------------------------------------------------------------------------
+    ;  Los sectores y la FAT
+    ; -------------------------------------------------------------------------
+    ; el sector n del volumen, en buf
+    función trae(n: nat32): bool
+        si buf_sector = n entonces devolver cierto fin
+        buf_sector := NINGUNO
+        si no leer_sectores(unidad, base + n, 1, buf) entonces
+            fallo := cierto
+            devolver falso
+        fin
+        buf_sector := n
+        devolver cierto
+    fin
+
+    ; el octeto número d de la FAT
+    función fat_octeto(d: nat32): nat32
+        variable s: nat32
+        s := fat_inicio + d div SECTOR
+        si fat_buf_sector <> s entonces
+            fat_buf_sector := NINGUNO
+            si no leer_sectores(unidad, base + s, 1, fat_buf) entonces
+                fallo := cierto
+                devolver 0xFF
+            fin
+            fat_buf_sector := s
+        fin
+        devolver fat_buf[d mod SECTOR]
+    fin
+
+    ; lo que dice la FAT del cluster c, tal cual
+    función fat_de(c: nat32): nat32
+        variable d, v: nat32
+        si clase = 12 entonces
+            d := c + c div 2
+            v := fat_octeto(d) ob (fat_octeto(d + 1) << 8)
+            si c yb 1 <> 0 entonces devolver v >> 4 fin
+            devolver v yb 0xFFF
+        sino si clase = 16 entonces
+            d := c * 2
+            devolver fat_octeto(d) ob (fat_octeto(d + 1) << 8)
+        fin
+        d := c * 4
+        v := fat_octeto(d) ob (fat_octeto(d + 1) << 8) ob (fat_octeto(d + 2) << 16) ob (fat_octeto(d + 3) << 24)
+        devolver v yb 0x0FFFFFFF
+    fin
+
+    ; el cluster que sigue a c en su cadena; 0 si es el último (o si la FAT
+    ; dice algo que no puede ser)
+    función siguiente(c: nat32): nat32
+        variable v: nat32
+        v := fat_de(c)
+        si fallo o v < 2 o v >= clusters + 2 entonces devolver 0 fin
+        devolver v
+    fin
+
+    función sector_de_cluster(c: nat32): nat32
+        devolver datos_inicio + (c - 2) * sectores_cluster
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Leer de un archivo o de una carpeta
+    ; -------------------------------------------------------------------------
+    ; el sector del volumen donde cae la posición de a; 0 si ya no hay más
+    función sector_de(ref a: Abierto): nat32
+        variable oc, quiero, s: nat32
+        si a.fija entonces
+            si a.posición >= raíz_entradas * 32 entonces devolver 0 fin
+            devolver raíz_inicio + a.posición div SECTOR
+        fin
+        oc := sectores_cluster * SECTOR
+        quiero := a.posición div oc
+        si quiero < a.índice entonces
+            a.cluster := a.primero
+            a.índice := 0
+        fin
+        si a.cluster < 2 o a.cluster >= clusters + 2 entonces devolver 0 fin
+        mientras a.índice < quiero hacer
+            s := siguiente(a.cluster)
+            si s = 0 entonces devolver 0 fin
+            a.cluster := s
+            a.índice := a.índice + 1
+        fin
+        devolver sector_de_cluster(a.cluster) + (a.posición mod oc) div SECTOR
+    fin
+
+    ; hasta n octetos desde la posición de a (que avanza). Da los leídos.
+    función lee(ref a: Abierto, destino: puntero a byte, n: nat32): nat32
+        variable hechos, s, d, k: nat32
+        hechos := 0
+        mientras hechos < n hacer
+            si no a.carpeta y a.posición >= a.tamaño entonces romper fin
+            s := sector_de(a)
+            si s = 0 entonces romper fin
+            si no trae(s) entonces romper fin
+            d := a.posición mod SECTOR
+            k := SECTOR - d
+            si k > n - hechos entonces k := n - hechos fin
+            si no a.carpeta y k > a.tamaño - a.posición entonces k := a.tamaño - a.posición fin
+            copiar_memoria(destino + hechos, dirección(buf[d]), k)
+            hechos := hechos + k
+            a.posición := a.posición + k
+        fin
+        devolver hechos
+    fin
+
+    ; la entrada siguiente de la carpeta a que sea de un archivo o de una
+    ; carpeta (se saltan las borradas, los trozos de nombre largo y la
+    ; etiqueta del volumen). Falso cuando no hay más.
+    función entrada_cruda(ref a: Abierto, ref c: Cruda): bool
+        mientras lee(a, puntero(dirección(c)), 32) = 32 hacer
+            si c.nombre[0] = 0 entonces devolver falso fin
+            si c.nombre[0] <> 0xE5 y c.atributos yb ETIQUETA = 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función cluster_de(ref c: Cruda): nat32
+        si clase = 32 entonces devolver (nat32(c.cluster_alto) << 16) ob c.cluster_bajo fin
+        devolver c.cluster_bajo
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los nombres
+    ; -------------------------------------------------------------------------
+    función mayúscula(c: byte): byte
+        si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        devolver c
+    fin
+
+    ; un trozo de ruta de n letras («hola.txt») como lo guarda la FAT: once
+    ; letras, el nombre y la extensión rellenos con espacios. Falso si no
+    ; cabe en 8+3.
+    función a_once(t: puntero a byte, n: nat32, once: puntero a byte): bool
+        variable i, j: nat32
+        para i desde 0 hasta 10 hacer once[i] := ' ' fin
+        si n = 0 entonces devolver falso fin
+        si t[0] = '.' entonces                          ; «.» y «..»
+            si n > 2 o (n = 2 y t[1] <> '.') entonces devolver falso fin
+            para i desde 0 hasta n - 1 hacer once[i] := '.' fin
+            devolver cierto
+        fin
+        i := 0
+        j := 0
+        mientras i < n y t[i] <> '.' hacer
+            si j >= 8 o t[i] = ' ' entonces devolver falso fin
+            once[j] := mayúscula(t[i])
+            i := i + 1
+            j := j + 1
+        fin
+        si i < n entonces
+            i := i + 1
+            j := 8
+            mientras i < n hacer
+                si j >= 11 o t[i] = '.' o t[i] = ' ' entonces devolver falso fin
+                once[j] := mayúscula(t[i])
+                i := i + 1
+                j := j + 1
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; y al revés: las once letras de la FAT como «NOMBRE.EXT»
+    función de_once(once: puntero a byte, t: puntero a byte)
+        variable i, j: nat32
+        j := 0
+        para i desde 0 hasta 7 hacer
+            si once[i] <> ' ' entonces
+                t[j] := once[i]
+                j := j + 1
+            fin
+        fin
+        si once[8] <> ' ' entonces
+            t[j] := '.'
+            j := j + 1
+            para i desde 8 hasta 10 hacer
+                si once[i] <> ' ' entonces
+                    t[j] := once[i]
+                    j := j + 1
+                fin
+            fin
+        fin
+        t[j] := 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Buscar por la ruta
+    ; -------------------------------------------------------------------------
+    función pon_raíz(ref a: Abierto)
+        a.carpeta := cierto
+        a.fija := clase <> 32
+        si a.fija entonces a.primero := 0 sino a.primero := raíz_cluster fin
+        a.tamaño := 0
+        a.posición := 0
+        a.cluster := a.primero
+        a.índice := 0
+    fin
+
+    ; deja en a el archivo o la carpeta de esa ruta («», «\» o «C:\» son la
+    ; raíz). Da 0, o por qué no.
+    función busca(ruta: puntero a byte, ref a: Abierto): nat32
+        variable p: puntero a byte
+        variable n, cl: nat32
+        variable once: arreglo [11] de byte
+        variable c: Cruda
+        variable hallado: bool
+        fallo := falso
+        pon_raíz(a)
+        p := ruta
+        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        mientras cierto hacer
+            mientras valor(p) = '\\' o valor(p) = '/' hacer p := p + 1 fin
+            si valor(p) = 0 entonces devolver 0 fin
+            n := 0
+            mientras p[n] <> 0 y p[n] <> '\\' y p[n] <> '/' hacer n := n + 1 fin
+            si no a.carpeta entonces devolver NO_HAY fin
+            si no a_once(p, n, once) entonces devolver NO_HAY fin
+            hallado := falso
+            mientras no hallado y entrada_cruda(a, c) hacer
+                hallado := c.atributos yb 0x0F <> 0x0F y comparar_memoria(dirección(c.nombre[0]), once, 11) = 0
+            fin
+            si fallo entonces devolver MAL fin
+            si no hallado entonces devolver NO_HAY fin
+            cl := cluster_de(c)
+            si c.atributos yb CARPETA <> 0 entonces
+                si cl = 0 entonces
+                    pon_raíz(a)                         ; el «..» de una carpeta de la raíz
+                sino
+                    a.carpeta := cierto
+                    a.fija := falso
+                    a.primero := cl
+                    a.tamaño := 0
+                fin
+            sino
+                a.carpeta := falso
+                a.fija := falso
+                a.primero := cl
+                a.tamaño := c.tamaño
+            fin
+            a.posición := 0
+            a.cluster := a.primero
+            a.índice := 0
+            p := p + n
+        fin
+        devolver NO_HAY
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que se ve desde fuera
+    ; -------------------------------------------------------------------------
+    función vale(m: nat32): bool
+        devolver m < MAX_ABIERTOS y abiertos[m].usado y abiertos[m].dueño = actual.id
+    fin
+
+    ; abre un archivo o una carpeta: da su manejador, o un error (NO_HAY...)
+    público función abrir_archivo(ruta: puntero a byte): nat32
+        variable i, r: nat32
+        si no montado entonces devolver SIN_DISCO fin
+        tomar(cerrojo)
+        i := 0
+        mientras i < MAX_ABIERTOS y abiertos[i].usado hacer i := i + 1 fin
+        si i = MAX_ABIERTOS entonces
+            r := LLENO
+        sino
+            r := busca(ruta, abiertos[i])
+            si r = 0 entonces
+                abiertos[i].usado := cierto
+                abiertos[i].dueño := actual.id
+                r := i
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; lee hasta n octetos del archivo: da los leídos (0 al final), o MAL
+    público función leer_archivo(m: nat32, destino: puntero a byte, n: nat32): nat32
+        variable r: nat32
+        tomar(cerrojo)
+        si no vale(m) o abiertos[m].carpeta entonces
+            r := MAL
+        sino
+            fallo := falso
+            r := lee(abiertos[m], destino, n)
+            si fallo entonces r := MAL fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; la entrada siguiente de una carpeta abierta: 1 si la hay, 0 si se han
+    ; acabado, o MAL
+    público función leer_entrada(m: nat32, e: puntero a Entrada): nat32
+        variable r: nat32
+        variable c: Cruda
+        variable hay: bool
+        tomar(cerrojo)
+        si no vale(m) o no abiertos[m].carpeta entonces
+            r := MAL
+        sino
+            fallo := falso
+            hay := entrada_cruda(abiertos[m], c)
+            mientras hay y c.atributos yb 0x0F = 0x0F hacer        ; un trozo de nombre largo
+                hay := entrada_cruda(abiertos[m], c)
+            fin
+            si fallo entonces
+                r := MAL
+            sino si hay entonces
+                de_once(dirección(c.nombre[0]), dirección(e.nombre[0]))
+                e.atributos := c.atributos
+                e.reservado := 0
+                e.tamaño := c.tamaño
+                e.fecha := c.fecha
+                e.hora := c.hora
+                e.cluster := cluster_de(c)
+                e.libre := 0
+                r := 1
+            sino
+                r := 0
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; lo que mide un archivo abierto (0 una carpeta), o MAL
+    público función tamaño_archivo(m: nat32): nat32
+        si no vale(m) entonces devolver MAL fin
+        devolver abiertos[m].tamaño
+    fin
+
+    público función es_carpeta(m: nat32): bool
+        devolver vale(m) y abiertos[m].carpeta
+    fin
+
+    público función cerrar_archivo(m: nat32): nat32
+        si no vale(m) entonces devolver MAL fin
+        abiertos[m].usado := falso
+        devolver 0
+    fin
+
+    ; cierra todo lo que tenía abierto una tarea (cuando acaba). Da cuántos.
+    público función cerrar_todos(dueño: nat32): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+            si abiertos[i].usado y abiertos[i].dueño = dueño entonces
+                abiertos[i].usado := falso
+                n := n + 1
+            fin
+        fin
+        devolver n
+    fin
+
+    público función cuántos_abiertos(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+            si abiertos[i].usado entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; los clusters libres del volumen (NINGUNO = 0xFFFFFFFF si no se sabe):
+    ; en FAT12 y FAT16 se cuentan en la FAT; en FAT32, lo que diga su sector
+    ; de información
+    público función clusters_libres(): nat32
+        variable c, n: nat32
+        variable p: puntero a nat32
+        si no montado entonces devolver NINGUNO fin
+        tomar(cerrojo)
+        fallo := falso
+        n := NINGUNO
+        si clase = 32 entonces
+            si info_sector <> 0 y info_sector <> 0xFFFF y trae(info_sector) entonces
+                p := puntero(dirección(buf))
+                si p[0] = 0x41615252 y p[121] = 0x61417272 y p[122] <= clusters entonces n := p[122] fin
+            fin
+        sino
+            n := 0
+            para c desde 2 hasta clusters + 1 hacer
+                si fat_de(c) = 0 entonces n := n + 1 fin
+            fin
+            si fallo entonces n := NINGUNO fin
+        fin
+        soltar(cerrojo)
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Montar
+    ; -------------------------------------------------------------------------
+    ; ¿es lo de buf el primer sector de un volumen FAT?
+    función es_volumen(): bool
+        variable b: puntero a Bpb
+        variable s: nat32
+        b := puntero(dirección(buf))
+        si buf[510] <> 0x55 o buf[511] <> 0xAA entonces devolver falso fin
+        si b.octetos_sector <> SECTOR o b.reservados = 0 o b.fats = 0 entonces devolver falso fin
+        s := b.sectores_cluster
+        devolver s <> 0 y s yb (s - 1) = 0
+    fin
+
+    ; mira el disco u: si es FAT (entero, o su primera partición FAT), lo
+    ; deja listo para abrir archivos
+    público función montar(u: nat32): bool
+        variable b: puntero a Bpb
+        variable i, t: nat32
+        variable p: puntero a nat32
+        montado := falso
+        si u >= DISCOS entonces devolver falso fin
+        si no discos[u].hay entonces devolver falso fin
+        tomar(cerrojo)
+        unidad := u
+        base := 0
+        buf_sector := NINGUNO
+        fat_buf_sector := NINGUNO
+        si trae(0) y no es_volumen() y buf[510] = 0x55 y buf[511] = 0xAA entonces
+            ; una tabla de particiones: la primera que sea FAT
+            para i desde 0 hasta 3 hacer
+                t := buf[446 + i * 16 + 4]
+                si t = 0x01 o t = 0x04 o t = 0x06 o t = 0x0B o t = 0x0C o t = 0x0E entonces
+                    p := puntero(dirección(buf[446 + i * 16 + 8]))
+                    base := valor(p)
+                    romper
+                fin
+            fin
+            buf_sector := NINGUNO
+        fin
+        si trae(0) y es_volumen() entonces
+            b := puntero(dirección(buf))
+            sectores_cluster := b.sectores_cluster
+            fat_sectores := b.fat16_sectores
+            si fat_sectores = 0 entonces fat_sectores := b.fat32_sectores fin
+            total := b.total16
+            si total = 0 entonces total := b.total32 fin
+            raíz_entradas := b.entradas_raíz
+            fat_inicio := b.reservados
+            raíz_inicio := fat_inicio + b.fats * fat_sectores
+            datos_inicio := raíz_inicio + (raíz_entradas * 32 + SECTOR - 1) div SECTOR
+            raíz_cluster := b.raíz_cluster
+            info_sector := b.info_sector
+            si fat_sectores <> 0 y total > datos_inicio entonces
+                clusters := (total - datos_inicio) div sectores_cluster
+                si clusters < 4085 entonces
+                    clase := 12
+                sino si clusters < 65525 entonces
+                    clase := 16
+                sino
+                    clase := 32
+                fin
+                montado := clusters > 0 y (clase = 32 o raíz_entradas <> 0)
+            fin
+        fin
+        para i desde 0 hasta MAX_ABIERTOS - 1 hacer abiertos[i].usado := falso fin
+        soltar(cerrojo)
+        devolver montado
+    fin
+
+fin Fat.

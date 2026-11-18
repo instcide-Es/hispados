@@ -103,6 +103,13 @@ módulo Multiboot
         devolver info().mapa_largo
     fin
 
+    ; lo que se le ha dicho al núcleo al arrancarlo (en QEMU, -append "..."):
+    ; un texto, vacío si no se ha dicho nada
+    público función línea_del_cargador(): puntero a byte
+        si no hay_multiboot() o info().banderas yb 4 = 0 entonces devolver "" fin
+        devolver puntero(info().línea)
+    fin
+
     ; ---- los módulos ----
     público función módulos(): nat32
         si no hay_multiboot() o info().banderas yb 8 = 0 entonces devolver 0 fin

@@ -80,7 +80,10 @@ módulo Paginas
     fin
 
     ; quita la página: da el marco que tenía (0 si no tenía). Si es el
-    ; directorio en uso, que el procesador olvide lo que sabía (CR3 otra vez).
+    ; directorio en uso, que el procesador olvide lo que sabía (CR3 otra vez);
+    ; y también si la página es del núcleo (el montón, la zona a la demanda),
+    ; que está en todos los directorios: el núcleo puede estar atendiendo a un
+    ; programa, con el directorio de él puesto.
     público función desmapear(dir: nat32, virtual: nat32): nat32
         variable e: puntero a nat32
         variable f, b: nat32
@@ -92,7 +95,9 @@ módulo Paginas
         fin
         f := valor(e) yb DIRECCIÓN
         valor(e) := 0
-        si activa y leer_cr3() = dir entonces poner_cr3(dir) fin
+        si activa y (leer_cr3() = dir o virtual < USUARIO_INICIO o virtual >= USUARIO_FINAL) entonces
+            poner_cr3(leer_cr3())
+        fin
         reponer(b)
         devolver f
     fin

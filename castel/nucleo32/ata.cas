@@ -1,0 +1,190 @@
+; =============================================================================
+;  ata.cas - los discos duros ATA (IDE) del núcleo de Hispa-Pentium: el canal
+;  primario (puertos 0x1F0-0x1F7 y 0x3F6), sus dos discos (maestro y esclavo),
+;  en PIO y con direcciones LBA de 28 bits (hasta 128 GB).
+;
+;  identificar() pregunta a cada disco quién es (la orden IDENTIFY: el modelo y
+;  cuántos sectores tiene); leer_sectores() trae sectores de 512 octetos, de
+;  palabra en palabra por el puerto de datos. No se usa la interrupción del
+;  disco (se le dice que no la dé): se mira el estado hasta que tiene el dato.
+;  Un cerrojo hace que las tareas usen el canal de una en una.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ata
+
+    importar Tareas
+
+    ; ---- los puertos del canal primario ----
+    constante DATOS = 0x1F0
+    constante CUENTA = 0x1F2
+    constante LBA_BAJO = 0x1F3
+    constante LBA_MEDIO = 0x1F4
+    constante LBA_ALTO = 0x1F5
+    constante UNIDAD = 0x1F6
+    constante ORDEN = 0x1F7                     ; al escribir; al leer, el estado
+    constante CONTROL = 0x3F6                   ; al escribir; al leer, el estado (sin más efecto)
+
+    ; ---- los bits del estado ----
+    constante OCUPADO = 0x80
+    constante FALLO_DISCO = 0x20
+    constante PIDE_DATOS = 0x08
+    constante ERROR = 0x01
+
+    constante ORDEN_LEER = 0x20
+    constante ORDEN_IDENTIFICAR = 0xEC
+
+    constante PACIENCIA = 4000000               ; las veces que se mira el estado antes de rendirse
+
+    público constante SECTOR = 512
+    público constante DISCOS = 2
+
+    público tipo Disco = estructura
+        hay: bool
+        lba: bool                               ; si entiende direcciones LBA
+        sectores: nat32                         ; los que tiene (LBA de 28 bits)
+        modelo: arreglo [41] de byte
+    fin
+
+    público variable discos: arreglo [DISCOS] de Disco
+    público variable sectores_leídos: nat32
+    público variable fallos_de_disco: nat32
+
+    variable cerrojo: Cerrojo
+    variable identidad: arreglo [256] de nat16
+
+    ; lo que tarda el disco en poner su estado al día: cuatro lecturas (400 ns)
+    función pausa()
+        variable i: nat32
+        variable e: byte
+        para i desde 1 hasta 4 hacer
+            e := meter_puerto(CONTROL)
+        fin
+    fin
+
+    ; espera a que el disco no esté ocupado; falso si se pasa de tiempo
+    función espera_libre(): bool
+        variable i: nat32
+        para i desde 1 hasta PACIENCIA hacer
+            si meter_puerto(ORDEN) yb OCUPADO = 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; espera a que el disco tenga un sector que dar; falso si da un error o se
+    ; pasa de tiempo
+    función espera_datos(): bool
+        variable i: nat32
+        variable e: byte
+        para i desde 1 hasta PACIENCIA hacer
+            e := meter_puerto(ORDEN)
+            si e yb OCUPADO = 0 entonces
+                si e yb (ERROR ob FALLO_DISCO) <> 0 entonces devolver falso fin
+                si e yb PIDE_DATOS <> 0 entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; un sector (256 palabras) del puerto de datos a la memoria
+    función trae_sector(destino: puntero a byte)
+        ensamblador
+            mov edi, {destino}
+            mov ecx, 256
+            mov edx, 0x1F0
+        .otra:
+            in ax, dx
+            stosw
+            loop .otra
+        fin
+    fin
+
+    función identifica(u: nat32): bool
+        variable i: nat32
+        variable e: byte
+        discos[u].hay := falso
+        sacar_puerto(UNIDAD, 0xA0 ob (u << 4))
+        pausa()
+        e := meter_puerto(ORDEN)
+        si e = 0xFF entonces devolver falso fin         ; no hay nada en el cable
+        sacar_puerto(CUENTA, 0)
+        sacar_puerto(LBA_BAJO, 0)
+        sacar_puerto(LBA_MEDIO, 0)
+        sacar_puerto(LBA_ALTO, 0)
+        sacar_puerto(ORDEN, ORDEN_IDENTIFICAR)
+        pausa()
+        si meter_puerto(ORDEN) = 0 entonces devolver falso fin      ; no hay disco
+        si no espera_libre() entonces devolver falso fin
+        ; un lector de CD (ATAPI) deja aquí su firma: no es un disco duro
+        si meter_puerto(LBA_MEDIO) <> 0 o meter_puerto(LBA_ALTO) <> 0 entonces devolver falso fin
+        si no espera_datos() entonces devolver falso fin
+        trae_sector(puntero(dirección(identidad)))
+        discos[u].lba := identidad[49] yb 0x200 <> 0
+        discos[u].sectores := nat32(identidad[60]) ob (nat32(identidad[61]) << 16)
+        ; el modelo: 40 letras, de dos en dos y con cada par al revés
+        para i desde 0 hasta 19 hacer
+            discos[u].modelo[i * 2] := identidad[27 + i] >> 8
+            discos[u].modelo[i * 2 + 1] := identidad[27 + i]
+        fin
+        i := 40
+        mientras i > 0 y (discos[u].modelo[i - 1] = ' ' o discos[u].modelo[i - 1] = 0) hacer
+            i := i - 1
+        fin
+        discos[u].modelo[i] := 0
+        discos[u].hay := discos[u].lba y discos[u].sectores <> 0
+        devolver discos[u].hay
+    fin
+
+    ; mira qué discos hay en el canal primario. Da cuántos.
+    público función identificar(): nat32
+        variable u, n: nat32
+        tomar(cerrojo)
+        sacar_puerto(CONTROL, 2)                ; sin interrupciones del disco: se mira el estado
+        n := 0
+        para u desde 0 hasta DISCOS - 1 hacer
+            si identifica(u) entonces n := n + 1 fin
+        fin
+        soltar(cerrojo)
+        devolver n
+    fin
+
+    ; trae n sectores del disco u, desde el sector lba, a destino. Da falso si
+    ; no hay tal disco, si se sale de él o si el disco da un error.
+    público función leer_sectores(u: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        variable k, i: nat32
+        variable bien: bool
+        si u >= DISCOS entonces devolver falso fin
+        si no discos[u].hay o lba >= discos[u].sectores o n > discos[u].sectores - lba entonces devolver falso fin
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > 255 entonces k := 255 fin
+            bien := espera_libre()
+            si bien entonces
+                sacar_puerto(UNIDAD, 0xE0 ob (u << 4) ob ((lba >> 24) yb 0x0F))
+                sacar_puerto(CUENTA, k)
+                sacar_puerto(LBA_BAJO, lba)
+                sacar_puerto(LBA_MEDIO, lba >> 8)
+                sacar_puerto(LBA_ALTO, lba >> 16)
+                sacar_puerto(ORDEN, ORDEN_LEER)
+                i := 0
+                mientras bien y i < k hacer
+                    pausa()
+                    bien := espera_datos()
+                    si bien entonces
+                        trae_sector(destino)
+                        destino := destino + SECTOR
+                        sectores_leídos := sectores_leídos + 1
+                        i := i + 1
+                    fin
+                fin
+            fin
+            lba := lba + k
+            n := n - k
+        fin
+        si no bien entonces fallos_de_disco := fallos_de_disco + 1 fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+fin Ata.

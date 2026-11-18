@@ -32,6 +32,7 @@ módulo Tareas
     público constante DORMIDA = 3               ; hasta un tic
     público constante ESPERANDO = 4             ; hasta que alguien la despierte
     público constante ACABADA = 5               ; ha terminado; falta recogerla
+    público constante EN_CERROJO = 6            ; en la cola de un cerrojo, hasta que se lo den
 
     público tipo Tarea = estructura
         marco: nat32                            ; dónde quedó su marco (en su pila)
@@ -48,10 +49,24 @@ módulo Tareas
         turnos: nat32                           ; las veces que ha entrado a correr
         tics_usados: nat32                      ; los tics que la han pillado corriendo
         usuario: bool                           ; si es del anillo 3
+        padre: nat32                            ; el número de la tarea que la hizo (0: huérfana)
+        args: puntero a byte                    ; sus argumentos (del montón), o nulo
+        quiebre_inicio, quiebre: nat32          ; del anillo 3: dónde acaba su memoria (sbrk)
+        nombre_propio: arreglo [16] de byte     ; donde se guarda su nombre
     fin
 
-    tipo Cola = estructura
+    público tipo Cola = estructura
         primera, última: puntero a Tarea
+    fin
+
+    ; un cerrojo: lo tiene una sola tarea a la vez; las demás que lo piden
+    ; esperan en su cola (sin tapar las interrupciones mientras tanto), y
+    ; quien lo suelta se lo da a la primera. La misma tarea lo puede tomar
+    ; varias veces (y lo suelta otras tantas).
+    público tipo Cerrojo = estructura
+        dueño: puntero a Tarea
+        veces: nat32
+        cola: Cola
     fin
 
     público variable tareas: arreglo [MAX_TAREAS] de Tarea
@@ -100,6 +115,48 @@ módulo Tareas
         si antes = nulo entonces c.primera := t.sig sino antes.sig := t.sig fin
         si c.última = t entonces c.última := antes fin
         t.sig := nulo
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los cerrojos
+    ; -------------------------------------------------------------------------
+    ; toma el cerrojo; si lo tiene otra tarea, espera a que se lo den. (Antes
+    ; de que haya tareas no hace nada: no hay con quién pelearse.)
+    público función tomar(ref c: Cerrojo)
+        variable b: nat32
+        si actual = nulo entonces devolver fin
+        b := sin_interrupciones()
+        si c.dueño = nulo entonces
+            c.dueño := actual
+            c.veces := 1
+        sino si c.dueño = actual entonces
+            c.veces := c.veces + 1
+        sino
+            actual.estado := EN_CERROJO
+            meter(c.cola, actual)
+            ceder()                             ; al volver, quien lo soltó ya me lo ha dado
+        fin
+        reponer(b)
+    fin
+
+    ; suelta el cerrojo: si hay quien lo espera, pasa a ser suyo y entra en
+    ; la cola de las listas
+    público función soltar(ref c: Cerrojo)
+        variable b: nat32
+        variable t: puntero a Tarea
+        si actual = nulo o c.dueño <> actual entonces devolver fin
+        b := sin_interrupciones()
+        c.veces := c.veces - 1
+        si c.veces = 0 entonces
+            t := sacar(c.cola)
+            c.dueño := t
+            si t <> nulo entonces
+                c.veces := 1
+                t.estado := LISTA
+                meter(listas, t)
+            fin
+        fin
+        reponer(b)
     fin
 
     ; -------------------------------------------------------------------------
@@ -196,13 +253,26 @@ módulo Tareas
     función nueva(nombre: puntero a byte): puntero a Tarea
         variable t: puntero a Tarea
         variable p: puntero a byte
+        variable i: nat32
+        recoger_huérfanas()
         t := ficha_libre()
         si t = nulo entonces devolver nulo fin
         p := reservar(PILA)
         si p = nulo entonces devolver nulo fin
         siguiente_id := siguiente_id + 1
         t.id := siguiente_id
-        t.nombre := nombre
+        ; el nombre se copia: el de un programa del disco no dura más que su carga
+        i := 0
+        mientras i < 15 y nombre[i] <> 0 hacer
+            t.nombre_propio[i] := nombre[i]
+            i := i + 1
+        fin
+        t.nombre_propio[i] := 0
+        t.nombre := dirección(t.nombre_propio[0])
+        si actual <> nulo entonces t.padre := actual.id sino t.padre := 0 fin
+        t.args := nulo
+        t.quiebre_inicio := 0
+        t.quiebre := 0
         t.pila := p
         t.pila_tope := nat32(p) + PILA
         t.cr3 := directorio_núcleo
@@ -281,6 +351,8 @@ módulo Tareas
         t.marco := nat32(p)
         t.cr3 := directorio
         t.usuario := cierto
+        t.quiebre_inicio := pila
+        t.quiebre := pila
         meter(listas, t)
         reponer(b)
         devolver t
@@ -294,6 +366,8 @@ módulo Tareas
         siguiente_id := 1
         t.id := 1
         t.nombre := "consola"
+        t.padre := 0
+        t.args := nulo
         t.pila := nulo
         t.pila_tope := 0
         t.cr3 := leer_cr3()
@@ -301,6 +375,7 @@ módulo Tareas
         t.turnos := 1
         actual := t
         ociosa := nueva("ociosa")
+        ociosa.padre := 1
         crear_marco_ocioso()
         pon_puerta(0x20, nat32(dirección(reloj)), PUERTA_NÚCLEO)
         pon_puerta(0x30, nat32(dirección(cambio)), PUERTA_NÚCLEO)
@@ -354,8 +429,13 @@ módulo Tareas
 
     ; la tarea que corre acaba, con ese código. No vuelve.
     público función terminar(código: nat32)
-        variable b: nat32
+        variable b, i: nat32
         b := sin_interrupciones()
+        ; las tareas que hizo y no ha recogido se quedan huérfanas: las
+        ; recogerá el núcleo cuando acaben
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si tareas[i].estado <> LIBRE y tareas[i].padre = actual.id entonces tareas[i].padre := 0 fin
+        fin
         actual.código := código
         actual.estado := ACABADA
         si actual.esperador <> nulo entonces despertar_tarea(actual.esperador) fin
@@ -373,10 +453,37 @@ módulo Tareas
         fin
         c := t.código
         liberar(t.pila)
+        si t.args <> nulo entonces
+            liberar(t.args)
+            t.args := nulo
+        fin
         si t.usuario entonces soltar_espacio(t.cr3) fin
         t.estado := LIBRE
         reponer(b)
         devolver c
+    fin
+
+    ; recoge las tareas acabadas a las que ya nadie va a esperar (las que
+    ; hizo un programa que acabó antes que ellas)
+    público función recoger_huérfanas()
+        variable i, b: nat32
+        variable t: puntero a Tarea
+        si actual = nulo entonces devolver fin
+        b := sin_interrupciones()
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            si t.estado = ACABADA y t.padre = 0 y t.esperador = nulo y t <> actual entonces esperar(t) fin
+        fin
+        reponer(b)
+    fin
+
+    ; la tarea que tiene ese número (nulo si no hay ninguna)
+    público función tarea_de(id: nat32): puntero a Tarea
+        variable i: nat32
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si tareas[i].estado <> LIBRE y tareas[i].id = id entonces devolver dirección(tareas[i]) fin
+        fin
+        devolver nulo
     fin
 
     ; -------------------------------------------------------------------------
@@ -389,6 +496,7 @@ módulo Tareas
             caso DORMIDA: devolver "dormida"
             caso ESPERANDO: devolver "esperando"
             caso ACABADA: devolver "acabada"
+            caso EN_CERROJO: devolver "en cerrojo"
         fin
         devolver "libre"
     fin

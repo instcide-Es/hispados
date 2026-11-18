@@ -1,0 +1,126 @@
+; =============================================================================
+;  consola.cas - la consola del núcleo de Hispa-Pentium: el teclado (IRQ 1,
+;  con su cola de letras) y la pantalla, cada uno con su cerrojo.
+;
+;  Leer una tecla deja a la tarea esperando hasta que la haya (y corren las
+;  demás); el cerrojo del teclado hace que, si varias leen, esperen en fila.
+;  Escribir un trozo entero (lo que hace la llamada al sistema «escribir») va
+;  con el cerrojo de la pantalla: dos tareas que escriben a la vez no se
+;  mezclan las letras, y ninguna tiene que tapar las interrupciones para ello.
+;  Lo que escribe el núcleo con escribir() va directo, sin cerrojo (así una
+;  excepción siempre puede decir lo suyo): si una tarea del núcleo quiere una
+;  línea entera sin que se le cuele otra, la envuelve en tomar_consola() y
+;  soltar_consola().
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Consola
+
+    importar Cpu, Tareas
+
+    constante TECLADO = 0x60
+
+    público variable teclas: nat32              ; las teclas (letras) que han llegado
+    constante COLA = 64
+    variable cola: arreglo [COLA] de byte
+    variable cola_ent, cola_sal: nat32
+    variable mayúsculas: bool
+    variable esperando_tecla: puntero a Tarea
+    variable minúsculas_tabla: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
+    variable mayúsculas_tabla: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
+
+    variable cerrojo_teclado: Cerrojo
+    variable cerrojo_pantalla: Cerrojo
+
+    ; -------------------------------------------------------------------------
+    ;  El teclado
+    ; -------------------------------------------------------------------------
+    ; cada tecla, de su código a su letra, a la cola; y si alguien estaba
+    ; esperando, se le despierta
+    interrupción función teclado()
+        variable código: byte
+        variable c: byte
+        código := meter_puerto(TECLADO)
+        si código = 0x2A o código = 0x36 entonces
+            mayúsculas := cierto
+        sino si código = 0xAA o código = 0xB6 entonces
+            mayúsculas := falso
+        sino si código <= 0x39 entonces
+            si mayúsculas entonces c := mayúsculas_tabla[código] sino c := minúsculas_tabla[código] fin
+            si c <> 0 y cola_ent - cola_sal < COLA entonces
+                cola[cola_ent mod COLA] := c
+                cola_ent := cola_ent + 1
+                teclas := teclas + 1
+            fin
+        fin
+        sacar_puerto(PIC1, FIN_INT)
+        si esperando_tecla <> nulo entonces
+            despertar_tarea(esperando_tecla)
+            esperando_tecla := nulo
+        fin
+    fin
+
+    público función prepara_consola()
+        pon_puerta(33, nat32(dirección(teclado)), PUERTA_NÚCLEO)
+    fin
+
+    ; ¿hay alguna tecla en la cola?
+    público función hay_tecla(): bool
+        devolver cola_sal <> cola_ent
+    fin
+
+    ; espera una tecla de la cola: mientras no la hay, la tarea se queda
+    ; esperando (y corren las demás, o la ociosa)
+    público función leer_tecla(): byte
+        variable c: byte
+        variable b: nat32
+        tomar(cerrojo_teclado)
+        b := sin_interrupciones()
+        mientras cola_sal = cola_ent hacer
+            esperando_tecla := actual
+            bloquear()
+        fin
+        c := cola[cola_sal mod COLA]
+        cola_sal := cola_sal + 1
+        reponer(b)
+        soltar(cerrojo_teclado)
+        devolver c
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La pantalla
+    ; -------------------------------------------------------------------------
+    público función tomar_consola()
+        tomar(cerrojo_pantalla)
+    fin
+
+    público función soltar_consola()
+        soltar(cerrojo_pantalla)
+    fin
+
+    ; escribe n letras seguidas, sin que se cuele lo de otra tarea
+    público función escribir_trozo(p: puntero a byte, n: nat32)
+        variable i: nat32
+        tomar(cerrojo_pantalla)
+        i := 0
+        mientras i < n hacer
+            escribir_car(p[i])
+            i := i + 1
+        fin
+        soltar(cerrojo_pantalla)
+    fin
+
+    ; la pantalla en blanco y el cursor arriba (por el puerto serie no va nada)
+    público función borrar_pantalla()
+        tomar(cerrojo_pantalla)
+        ensamblador
+            mov edi, 0xB8000
+            mov ecx, 1000
+            mov eax, 0x07200720
+            rep stosd
+            xor eax, eax
+            mov [C_cursor], eax
+        fin
+        soltar(cerrojo_pantalla)
+    fin
+
+fin Consola.

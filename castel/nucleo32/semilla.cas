@@ -12,32 +12,26 @@
 ;     zona a la demanda y un espacio de direcciones por programa);
 ;   - monton.cas: el montón del núcleo (reservar y liberar, con comprobación
 ;     de que nadie lo estropea);
-;   - tareas.cas: las tareas, con el reloj repartiendo el procesador, y
-;     dormir, esperar y acabar;
-;   - usuario.cas: los programas del anillo 3 (de los módulos de multiboot)
-;     y su llamada al sistema, la int 0x80;
-;  y aquí, las excepciones (con el fallo de página, que se atiende), el
-;  teclado y una consola con sus órdenes. Lo que escribe va a la pantalla y
-;  al puerto serie (COM1).
+;   - tareas.cas: las tareas, con el reloj repartiendo el procesador,
+;     dormir, esperar y acabar, y los cerrojos;
+;   - consola.cas: el teclado y la pantalla, cada uno con su cerrojo;
+;   - ata.cas: los discos duros ATA (PIO, LBA de 28 bits);
+;   - fat.cas: el sistema de archivos FAT12/16/32, de solo lectura;
+;   - usuario.cas: los programas del anillo 3 (del disco, o de los módulos
+;     de multiboot) y su llamada al sistema, la int 0x80;
+;  y aquí, las excepciones (con el fallo de página, que se atiende) y la
+;  consola del núcleo con sus órdenes. Lo que escribe va a la pantalla y al
+;  puerto serie (COM1). El intérprete de órdenes de verdad es un programa del
+;  anillo 3 (uordenes.cas, ORDENES.BIN en el disco): la orden «ordenes» lo
+;  lanza, y si el cargador le dice «ordenes» al núcleo (QEMU: -append
+;  ordenes), se lanza él solo al arrancar.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Usuario, Textos32, Mem32, Formato
-
-    constante TECLADO = 0x60
-
-    ; ---- el teclado ----
-    variable teclas: nat32
-    constante COLA = 64
-    variable cola: arreglo [COLA] de byte
-    variable cola_ent, cola_sal: nat32
-    variable mayúsculas: bool
-    variable esperando_tecla: puntero a Tarea
-    variable minúsculas_tabla: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
-    variable mayúsculas_tabla: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Ata, Fat, Usuario, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -171,53 +165,11 @@ módulo Semilla
         para i desde 32 hasta 47 hacer
             pon_puerta(i, nat32(dirección(irq_perdida)), PUERTA_NÚCLEO)
         fin
-        pon_puerta(33, nat32(dirección(teclado)), PUERTA_NÚCLEO)
     fin
 
     ; -------------------------------------------------------------------------
-    ;  El teclado
+    ;  La línea de órdenes (el teclado está en consola.cas)
     ; -------------------------------------------------------------------------
-    ; cada tecla, de su código a su letra, a la cola; y si la consola estaba
-    ; esperando, se la despierta
-    interrupción función teclado()
-        variable código: byte
-        variable c: byte
-        código := meter_puerto(TECLADO)
-        si código = 0x2A o código = 0x36 entonces
-            mayúsculas := cierto
-        sino si código = 0xAA o código = 0xB6 entonces
-            mayúsculas := falso
-        sino si código <= 0x39 entonces
-            si mayúsculas entonces c := mayúsculas_tabla[código] sino c := minúsculas_tabla[código] fin
-            si c <> 0 y cola_ent - cola_sal < COLA entonces
-                cola[cola_ent mod COLA] := c
-                cola_ent := cola_ent + 1
-                teclas := teclas + 1
-            fin
-        fin
-        sacar_puerto(PIC1, FIN_INT)
-        si esperando_tecla <> nulo entonces
-            despertar_tarea(esperando_tecla)
-            esperando_tecla := nulo
-        fin
-    fin
-
-    ; espera una tecla de la cola: mientras no la hay, la tarea se queda
-    ; esperando (y corren las demás, o la ociosa)
-    función leer_tecla(): byte
-        variable c: byte
-        variable b: nat32
-        b := sin_interrupciones()
-        mientras cola_sal = cola_ent hacer
-            esperando_tecla := actual
-            bloquear()
-        fin
-        c := cola[cola_sal mod COLA]
-        cola_sal := cola_sal + 1
-        reponer(b)
-        devolver c
-    fin
-
     función lee_línea()
         variable c: byte
         largo := 0
@@ -395,12 +347,12 @@ módulo Semilla
     fin
 
     función dormilona(n: nat32)
-        variable t0, b: nat32
+        variable t0: nat32
         t0 := tics
         dormir(n * 20)
-        b := sin_interrupciones()
+        tomar_consola()                         ; la línea entera, sin que se cuele otra tarea
         imprimir3("la dormilona %u se despierta: ha dormido %u tics (pidió %u)\n", n, tics - t0, n * 20)
-        reponer(b)
+        soltar_consola()
     fin
 
     función orden_dormir()
@@ -454,6 +406,102 @@ módulo Semilla
                   antes, marcos_libres())
     fin
 
+    ; lanza un programa del disco (con lo que quede de la línea como sus
+    ; argumentos) y espera a que acabe
+    función lanza(ruta: puntero a byte, args: puntero a byte)
+        variable c, e, antes: nat32
+        variable t: puntero a Tarea
+        variable nombre: arreglo [16] de byte
+        antes := marcos_libres()
+        t := cargar_archivo(ruta, args, e)
+        si t = nulo entonces
+            imprimir2("no puedo lanzar %s: %s\n", nat32(ruta), nat32(texto_error(e)))
+            devolver
+        fin
+        copiar_hasta(nombre, t.nombre, 16)
+        imprimir2("lanzo %s del disco (la tarea %u, en el anillo 3)\n", nat32(dirección(nombre[0])), t.id)
+        c := esperar(t)
+        recoger_huérfanas()
+        tomar_consola()                         ; (puede quedar algún programa escribiendo)
+        imprimir4("%s ha acabado con el código %u; marcos libres: %u antes y %u después\n", nat32(dirección(nombre[0])), c,
+                  antes, marcos_libres())
+        soltar_consola()
+    fin
+
+    función orden_lanzar()
+        variable args: puntero a byte
+        si no palabra(línea, 1, palabra1, 40) entonces
+            escribir("¿qué programa? (lanzar NOMBRE.BIN [argumentos]; los hay con «dir»)\n")
+            devolver
+        fin
+        ; los argumentos: lo que va detrás de la segunda palabra
+        args := saltar_espacios(línea)
+        mientras valor(args) <> 0 y no es_espacio(valor(args)) hacer args := args + 1 fin
+        args := saltar_espacios(args)
+        mientras valor(args) <> 0 y no es_espacio(valor(args)) hacer args := args + 1 fin
+        args := saltar_espacios(args)
+        lanza(palabra1, args)
+    fin
+
+    función orden_disco()
+        variable u, libres: nat32
+        variable d: arreglo [4] de nat32
+        para u desde 0 hasta DISCOS - 1 hacer
+            si discos[u].hay entonces
+                d[0] := u
+                d[1] := nat32(dirección(discos[u].modelo[0]))
+                d[2] := discos[u].sectores
+                d[3] := discos[u].sectores div 2048
+                imprimir("disco %u: %s, %u sectores (%u MB), LBA\n", d)
+            sino
+                imprimir1("disco %u: no hay\n", u)
+            fin
+        fin
+        si no montado entonces
+            escribir("sistema de archivos: no hay (el disco 0 no es FAT)\n")
+            devolver
+        fin
+        d[0] := clase
+        d[1] := base
+        d[2] := clusters
+        d[3] := sectores_cluster * SECTOR
+        imprimir("sistema de archivos: FAT%u, desde el sector %u, %u clusters de %u octetos", d)
+        libres := clusters_libres()
+        si libres <> 0xFFFFFFFF entonces imprimir1(", %u libres", libres) fin
+        imprimir2("\nsectores leídos: %u; archivos abiertos: %u\n", sectores_leídos, cuántos_abiertos())
+    fin
+
+    ; las entradas de una carpeta del disco (la raíz, si no se dice otra)
+    función orden_dir()
+        variable m, r, n: nat32
+        variable e: Entrada
+        palabra(línea, 1, palabra1, 40)
+        m := abrir_archivo(palabra1)
+        si m >= PRIMER_ERROR entonces
+            imprimir2("no puedo abrir «%s»: %s\n", nat32(dirección(palabra1[0])), nat32(texto_error(m)))
+            devolver
+        fin
+        si no es_carpeta(m) entonces
+            imprimir2("%s es un archivo de %u octetos\n", nat32(dirección(palabra1[0])), tamaño_archivo(m))
+            cerrar_archivo(m)
+            devolver
+        fin
+        n := 0
+        r := leer_entrada(m, dirección(e))
+        mientras r = 1 hacer
+            si e.atributos yb CARPETA <> 0 entonces
+                imprimir1("%-12s  <carpeta>\n", nat32(dirección(e.nombre[0])))
+            sino
+                imprimir2("%-12s  %9u\n", nat32(dirección(e.nombre[0])), e.tamaño)
+            fin
+            n := n + 1
+            r := leer_entrada(m, dirección(e))
+        fin
+        cerrar_archivo(m)
+        si r <> 0 entonces escribir("*** el disco falla\n") fin
+        imprimir1("%u entradas\n", n)
+    fin
+
     función es(t: puntero a byte): bool
         devolver iguales(línea, t)
     fin
@@ -476,12 +524,20 @@ módulo Semilla
             devolver 12
         fin
         prepara_tareas()
+        prepara_consola()
         prepara_usuario()
         permitir_interrupciones()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
+        si identificar() > 0 y montar(0) entonces
+            imprimir3("disco 0: %s, %u MB, FAT%u.\n", nat32(dirección(discos[0].modelo[0])), discos[0].sectores div 2048, clase)
+        fin
+        ; si el cargador lo pide («ordenes» en su línea), el intérprete de
+        ; órdenes del anillo 3, ya
+        si buscar(línea_del_cargador(), "ordenes") <> nulo entonces lanza("ORDENES.BIN", nulo) fin
         escribir("Escriba «ayuda».\n")
         mientras cierto hacer
+            recoger_huérfanas()
             escribir("> ")
             lee_línea()
             palabra(línea, 0, palabra1, 40)
@@ -490,6 +546,7 @@ módulo Semilla
             sino si es("ayuda") entonces
                 escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
                 escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
+                escribir("         disco dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
             sino si es("memoria") entonces
@@ -512,6 +569,14 @@ módulo Semilla
                 enseña_programas()
             sino si iguales(palabra1, "ejecutar") entonces
                 orden_ejecutar()
+            sino si es("disco") entonces
+                orden_disco()
+            sino si iguales(palabra1, "dir") entonces
+                orden_dir()
+            sino si iguales(palabra1, "lanzar") entonces
+                orden_lanzar()
+            sino si es("ordenes") entonces
+                lanza("ORDENES.BIN", nulo)
             sino si es("toca") entonces
                 orden_toca()
             sino si es("teclas") entonces
