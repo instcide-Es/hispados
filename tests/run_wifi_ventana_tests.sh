@@ -57,8 +57,8 @@ ir() {   # ir S X Y (el ratón de QEMU va de 2 en 2 con HSPRATON)
   RX[$s]=$2; RY[$s]=$3; sleep 0.3
 }
 clic() { ir $1 $2 $3; mon $1 "mouse_button 1" 0.25; mon $1 "mouse_button 0" 0.5; }
-salir() {   # salir S: Inicio > Salir de Hispa Ventanas > Aceptar
-  tecla $1 ctrl-esc; sleep 0.8; tecla $1 up; sleep 0.4; tecla $1 ret; sleep 2; tecla $1 ret; sleep 4
+salir() {   # salir S: Inicio > Salir de Hispa Ventanas > Volver a Hispa-DOS (el 3.º en Hispa-486)
+  tecla $1 ctrl-esc; sleep 0.8; tecla $1 up; sleep 0.4; tecla $1 ret; sleep 2; tecla $1 down down; sleep 0.4; tecla $1 ret; sleep 4
 }
 qemu() {   # qemu S plazo [opciones de QEMU]
   local s=$1 tmo=$2; shift 2

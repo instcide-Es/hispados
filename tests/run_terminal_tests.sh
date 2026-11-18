@@ -143,7 +143,7 @@ RX=400; RY=300
   aparca
   shot f5
   tecla alt-f4; sleep 1.5
-  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 4   # «Salir de Hispa Ventanas...»
+  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla down down; sleep 0.4; tecla ret; sleep 4   # «Salir de Hispa Ventanas...» › «Volver a Hispa-DOS» (el 3.º en Hispa-486)
   send 'ECHO TRAS-SALIR-486'
   mon quit
 } | run 200 -vga std

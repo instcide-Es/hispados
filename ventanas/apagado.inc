@@ -10,7 +10,11 @@
 ;  Hispa-DOS» abren el mismo cuadro: «¿Qué quiere hacer?», con un botón
 ;  grande y su dibujo para cada cosa (Volver a Hispa-DOS, Reiniciar el
 ;  equipo, Apagar el equipo) y Cancelar. Intro es «Volver a Hispa-DOS»; las
-;  flechas pasan de un botón a otro; Esc cancela.
+;  flechas pasan de un botón a otro; Esc cancela. En el escritorio de
+;  Hispa-486 (op_486), el mismo cuadro al revés: «Apagar el equipo» arriba,
+;  con el foco y de Intro (al acabar en el equipo de la biblioteca, lo que se
+;  quiere es apagar: docs/486/USABILIDAD-NAVEGADOR.md, M11), luego
+;  Reiniciar y abajo «Volver a Hispa-DOS».
 ;  Reiniciar y apagar lo hacen REINICIA.COM y APAGAR.COM, de la carpeta de
 ;  Hispa Ventanas, como un juego: Hispa Ventanas guarda CENTRO.INI como al
 ;  salir, deja el encargo al lanzador (ventanas.asm) sin «volver», vuelve a
@@ -57,6 +61,15 @@ apa_hijos:
         PLANTILLA c_estatico, apa_preg, E_HIJA | SS_NEGRITA, 24, 14, 300, 18, 0
         dd 0
 apa_dibujos dd ico_ordenes, ico_reiniciar, ico_apagar
+; [BARRA] el de Hispa-486: «Apagar el equipo», el primero (el foco) y el de Intro
+apa_hijos486:
+        PLANTILLA c_boton, apa_t_apagar, E_HIJA | E_TABULA | BS_DEFECTO, 68, APA_FILA + 3, 280, 28, APA_APAGAR
+        PLANTILLA c_boton, apa_t_reini, E_HIJA | E_TABULA, 68, APA_FILA + APA_PASO + 3, 280, 28, APA_REINI
+        PLANTILLA c_boton, apa_t_volver, E_HIJA | E_TABULA, 68, APA_FILA + 2*APA_PASO + 3, 280, 28, APA_VOLVER
+        PLANTILLA c_boton, t_cancelar, E_HIJA | E_TABULA, APA_AN - 24 - 100, APA_LINEA + 14, 100, 26, ID_CANCELAR
+        PLANTILLA c_estatico, apa_preg, E_HIJA | SS_NEGRITA, 24, 14, 300, 18, 0
+        dd 0
+apa_dibujos486 dd ico_apagar, ico_reiniciar, ico_ordenes
 
 apa_pedir:
         pushad
@@ -80,6 +93,10 @@ apa_dialogo:
         mov dword [apa_abierto], 1
         mov esi, apa_ventana
         mov edi, apa_hijos
+        cmp byte [op_486], 0        ; [BARRA] en Hispa-486, Apagar arriba
+        je .l
+        mov edi, apa_hijos486
+.l:
         mov ebx, apa_gancho
         xor edx, edx
         call dlg_modal
@@ -211,6 +228,13 @@ apa_encargo:
 apa_gancho:
         cmp eax, WM_PAINT
         je .pintar
+        cmp eax, DM_INICIO          ; [BARRA] en Hispa-486, Intro es Apagar
+        jne .k
+        cmp byte [op_486], 0
+        je .no
+        mov dword [ebp+V_D4], APA_APAGAR
+        jmp .no
+.k:
         cmp eax, WM_KEYDOWN
         jne .no
         xor eax, eax
@@ -236,9 +260,14 @@ apa_gancho:
         ret
 .pintar:
         call dc_pintar
+        mov edi, apa_dibujos
+        cmp byte [op_486], 0        ; [BARRA]
+        je .d0
+        mov edi, apa_dibujos486
+.d0:
         xor ecx, ecx
 .d:
-        mov esi, [apa_dibujos+ecx*4]
+        mov esi, [edi+ecx*4]
         mov eax, 24
         imul ebx, ecx, APA_PASO
         add ebx, APA_FILA
