@@ -15,9 +15,9 @@ QUE HACER (5 minutos)
    una memoria USB entera (como las otras veces). Se borra lo que tenga.
 2. Arranque el MacBook Air 2017 desde la memoria (tecla Opcion/Alt al
    encender, "EFI Boot"), igual que la otra vez.
-3. En el menu elija "Normal". Al cargarse el sonido deberia salir una linea
+3. En el menu elija "Normal". (Si quiere verlo: HSPSND /INFO deberia decir
        Proteccion de DMA del firmware (VT-d, unidad en ...): abierta ...
-   No hace falta apuntarla: queda en el informe.
+   No hace falta apuntarlo: queda en el informe.)
 4. Escriba DIAGNOSTICO y haga la prueba de sonido como siempre (S si lo
    oye, N si no). Suba el volumen del Mac por si acaso.
 5. Suba al FTP la carpeta INFORMES de la memoria USB (a HispaDOS/informes),
