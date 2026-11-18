@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Genera la fuente de mapa de bits de Hispa Ventanas (8x16, CP437) a partir
-del diseño propio en texto de ventanas/fuente.txt.
+del diseño propio en texto de ventanas/fuente.txt. Las letras que la 437 no
+tiene (Á, Ó, €...) van en los códigos que dice tools/hispa437.py.
 
 uso: mkfuente.py fuente.txt salida.inc [vista.ppm]
 
@@ -17,6 +18,8 @@ Los caracteres que no se diseñan salen como un recuadro.
 Builds the Hispa Ventanas bitmap font from our own text design.
 """
 import sys
+
+from hispa437 import codigo     # la 437 de Ventanas, con las letras de más
 
 ALTO, ANCHO = 16, 8
 
@@ -76,13 +79,10 @@ def main():
     for nombre, g in glifos.items():
         if nombre.startswith(':') and len(nombre) > 1:
             continue
-        try:
-            cod = nombre.encode('cp437')
-        except UnicodeEncodeError:
-            sys.exit('«%s» no existe en CP437' % nombre)
-        if len(cod) != 1:
-            sys.exit('«%s» no es un solo carácter' % nombre)
-        tabla[cod[0]] = g
+        cod = codigo(nombre) if len(nombre) == 1 else None
+        if cod is None:
+            sys.exit('«%s» no está en la página de Ventanas (tools/hispa437.py)' % nombre)
+        tabla[cod] = g
         hechos += 1
     with open(dst, 'w') as f:
         f.write('; Generado por tools/mkfuente.py a partir de ventanas/fuente.txt\n')

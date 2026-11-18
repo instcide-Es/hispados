@@ -14,6 +14,8 @@ Escribe 4096 bytes (256 caracteres x 16 filas).
 import re
 import sys
 
+from hispa437 import EXTRA      # letras de Ventanas en códigos de la 437
+
 ALTO = 16
 CAJA = [0, 0, 0, 0x7C, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x7C, 0, 0, 0, 0]
 
@@ -79,6 +81,12 @@ def dibujar(lineas):
 
 
 def rellenar(tabla):
+    # el modo texto es la 437 de siempre: las letras que Ventanas pone en
+    # códigos de la 437 (Á, €...: tools/hispa437.py) aquí no van; lo que no se
+    # dibuja abajo queda como la caja, igual que antes
+    for c in EXTRA:
+        tabla[c] = list(CAJA)
+
     def libre(c):
         return tabla[c] == CAJA
     for c, (a, b, i, d) in LINEAS.items():

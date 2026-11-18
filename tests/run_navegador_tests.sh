@@ -200,7 +200,9 @@ chk $T/g1.ppm busca $PAG 0 9 "Párrafo número 1 de la página grande" nobusca $
 chk $T/g2.ppm busca $PAG 0 9 "FIN-DE-LA-GRANDE" busca $PAG 0 9 "Párrafo número 400 de" cambia 784 82 12 200 $T/g1.ppm 100
 chk $T/g3.ppm nobusca $PAG 0 9 "FIN-DE-LA-GRANDE" busca $PAG 0 9 "Párrafo número 39"
 echo "-- redirecciones, sin longitud, 404, un archivo, javascript: --"
-chk $T/r1.ppm busca 96 56 130 74 0 9 "http://10.0.2.2:$P/final" busca $PAG 0 9 "Llegada tras dos redirecciones."
+chk $T/r1.ppm busca 96 56 130 74 0 9 "http://10.0.2.2:$P/final" busca $PAG 0 9 "Llegada tras dos redirecciones." \
+  busca $PAG 0 9 "Últimos 33,00 € - Àngel, Òscar, Íñigo, Ïsona, Ëlia" \
+  busca $PAG 0 9 "São João: Ã Õ Â Ê Ô Û Î È Ì Ù Ú Ó - Œuvre, cœur © ® €…"     # [GLIFOS] Á, €... (tools/hispa437.py)
 chk $T/r2.ppm busca $PAG 0 9 "Hasta el cierre de la conexión."
 chk $T/r3.ppm busca $PAG 0 9 "Aquí no hay nada."
 chk $T/r4.ppm titulo 222 136 activa "Guardar la descarga" busca 0 548 600 570 0 15 "Descarga: ARCHIVO.BIN (147 K). Elija dónde guardarla."

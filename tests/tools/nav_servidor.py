@@ -257,7 +257,10 @@ class Pedido(BaseHTTPRequestHandler):
         elif u.path == '/redir2':
             self.redirige('http://10.0.2.2:%d/final' % PUERTO, estado=301)
         elif u.path == '/final':
-            self.manda(pagina('Final', '<p>Llegada tras dos redirecciones.</p>'))
+            self.manda(pagina('Final', '<p>Llegada tras dos redirecciones.</p>'
+                              # [GLIFOS] las letras que la 437 no tiene (en UTF-8 y con entidades)
+                              '<p>Últimos 33,00 € - &Agrave;ngel, Òscar, &Iacute;ñigo, Ïsona, Ëlia</p>'
+                              '<p>São João: Ã Õ Â Ê Ô Û Î È Ì Ù &Uacute; &Oacute; - Œuvre, cœur &copy; &reg; &euro;&hellip;</p>'))
         elif u.path == '/latin1':
             self.manda('<html><head><title>Página en Latin-1</title></head><body><p>Año, cigüeña y camión en ISO-8859-1.</p></body></html>'
                        .encode('latin-1'), tipo='text/html; charset=ISO-8859-1')

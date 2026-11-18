@@ -463,8 +463,8 @@ joyprogs: $(JOYPROGS)
 # Hispa Ventanas (docs/VENTANAS.md): el entorno gráfico, en ventanas/.
 # La fuente de mapa de bits sale del diseño en texto ventanas/fuente.txt.
 VENSRC = $(wildcard ventanas/*.asm ventanas/*.inc)
-$(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack.py | $(B)
-	for f in $(VENSRC); do python3 tools/cp437.py $$f $(B)/gen/$$f || exit 1; done
+$(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/hispa437.py tools/cp437.py tools/icopack.py | $(B)
+	for f in $(VENSRC); do python3 tools/cp437.py --ventanas $$f $(B)/gen/$$f || exit 1; done
 	python3 tools/mkfuente.py ventanas/fuente.txt $(B)/gen/ventanas/fuente.inc $(B)/gen/ventanas/fuente.ppm
 	python3 tools/icopack.py $(B)/gen/ventanas/iconos.inc $(B)/gen/ventanas/iconos2.inc $(B)/gen/ventanas/apagado.inc
 	# (lo que usa la parte de modo real tiene que caber en 64 KB: si no, error)
@@ -476,7 +476,7 @@ $(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/icopack
 # programas/ (HVPA: a \HISPADOS\PROGS). tools/mkhvp.py los ensambla y
 # saca las reubicaciones.
 HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/defs.inc ventanas/api.inc ventanas/hvpmez.inc \
-         tools/mkhvp.py tools/icopack.py tools/cp437.py
+         tools/mkhvp.py tools/icopack.py tools/cp437.py tools/hispa437.py
 HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP \
        $(B)/BLOQUES.HVP $(B)/SOLITARI.HVP $(B)/TRAGABOL.HVP $(B)/ALMACEN.HVP \
        $(B)/HISPANES.HVP $(B)/HISPASMS.HVP
@@ -735,7 +735,7 @@ $(HDD): | $(B)
 # Con «make HBFLAGS=-DDEPURA» la BIOS cuenta lo que hace por el puerto serie.
 HBSRC = hispabios/bios64.asm hispabios/bios_int.inc
 HBEFI = $(B)/BOOTX64.EFI $(B)/BOOTIA32.EFI
-$(B)/FUENTE16.BIN: $(B)/VENTANAS.COM tools/mkfuentebios.py
+$(B)/FUENTE16.BIN: $(B)/VENTANAS.COM tools/mkfuentebios.py tools/hispa437.py
 	python3 tools/mkfuentebios.py $(B)/gen/ventanas/fuente.inc $@
 $(B)/BIOS64.BIN: $(HBSRC) | $(B)
 	$(NASM) -f bin $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm

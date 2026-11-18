@@ -484,7 +484,9 @@ run:
 ; [0.9.24] Lo que ya no cabe en el disquete de arranque (los programas de
 ; Windows de consola: HW32 y MSVCRT.DLL, de Hispa-486) va en el disquete
 ; «Instalación 2», en su \HISPADOS. Igual que «Oficina»: si se instala desde
-; A: o B: y el origen no lo trae, se ofrece ese disquete y se copia.
+; A: o B: y el origen no lo trae, se ofrece ese disquete y se copia. [GLIFOS]
+; También su \HISPADOS\PROGS: lo de la oficina que ya no cabe en «Oficina»
+; (TIPOS32.DAT, los tipos de letra grandes).
 instal2:
         mov al, [src]
         and al, 0xDF
@@ -523,6 +525,10 @@ instal2:
         mov byte [fix], 0
         mov si, s_hsp
         mov di, s_hdir
+        call make_dir
+        call copy_set
+        mov si, s_hspp              ; [GLIFOS] y su \HISPADOS\PROGS (si lo trae)
+        mov di, s_hpdir
         call make_dir
         call copy_set
         mov si, msg_i2_hecho

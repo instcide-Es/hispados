@@ -1621,6 +1621,20 @@ tec_instalar:
         mov [eax+0x15*4], edx
         mov byte [tec_puesto], 1
         call tar_rm_poner           ; [TAREAS] el tic del reloj, INT 3 y las envolturas
+        mov dl, 1                   ; [GLIFOS] KEYB: Á, Ó, €... con las letras
+        call tec_keyb_vent          ; de Ventanas
+        popad
+        ret
+; [GLIFOS] DL=1: que KEYB dé las letras de Ventanas que la 437 no tiene (Á,
+; €...: tools/hispa437.py); DL=0: las de modo texto. INT 2Fh AX=AD82h BL=DL
+; (un KEYB viejo, u otro, no la conoce y no hace nada)
+tec_keyb_vent:
+        pushad
+        mov dword [rmcs+0x1C], 0xAD82
+        movzx edx, dl
+        mov [rmcs+0x10], edx
+        mov bl, 0x2F
+        call rm_int
         popad
         ret
 tec_quitar:
@@ -1633,6 +1647,10 @@ tec_quitar:
         mov [eax+0x15*4], edx
         mov byte [tec_puesto], 0
         call tar_rm_quitar          ; [TAREAS]
+        push edx
+        mov dl, 0                   ; [GLIFOS] KEYB: otra vez la 437 de modo texto
+        call tec_keyb_vent
+        pop edx
         pop edx
         pop eax
 .x:

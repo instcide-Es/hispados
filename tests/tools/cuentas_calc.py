@@ -377,12 +377,22 @@ def cad_a_num(t):
     return -r[0] if neg else r[0]
 
 
-MAY = str.maketrans('abcdefghijklmnopqrstuvwxyzñéüç', 'ABCDEFGHIJKLMNOPQRSTUVWXYZÑÉÜÇ')
-MIN = str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZÑÉÜÇ', 'abcdefghijklmnopqrstuvwxyzñéüç')
+MAY = str.maketrans('abcdefghijklmnopqrstuvwxyzñéüçáíóúàèìòùâêîôûëïãõœ', 'ABCDEFGHIJKLMNOPQRSTUVWXYZÑÉÜÇÁÍÓÚÀÈÌÒÙÂÊÎÔÛËÏÃÕŒ')
+MIN = str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZÑÉÜÇÁÍÓÚÀÈÌÒÙÂÊÎÔÛËÏÃÕŒ', 'abcdefghijklmnopqrstuvwxyzñéüçáíóúàèìòùâêîôûëïãõœ')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'tools'))
+import hispa437                     # la 437 de Ventanas (Á, Ó, €...)
+
+
+def a437(t):
+    return bytes(63 if hispa437.codigo(c) is None else hispa437.codigo(c) for c in t)
+
+
+def de437(b):
+    return ''.join(hispa437.letra(c) for c in b)
 
 
 def cad_cmp(a, b):
-    a, b = a.translate(MAY).encode('cp437'), b.translate(MAY).encode('cp437')
+    a, b = a437(a.translate(MAY)), a437(b.translate(MAY))
     return (a > b) - (a < b)
 
 
@@ -1410,6 +1420,8 @@ LARGO("")
 LARGO(12345)
 LARGO(1/3)
 MAYUSC("hola Ñandú")
+MAYUSC("Últimos ÀÈÒ àèò ã õ")
+MINUSC("ÁRBOL CANÇÓ JOÃO")
 MINUSC("HOLA ÑANDU É")
 mayusc("año")
 "a"+1
@@ -1860,8 +1872,8 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         prog = hacer(tmp)
-        sal = subprocess.run([prog], input=('\n'.join(entrada) + '\n').encode('cp437'),
-                             capture_output=True).stdout.decode('cp437').split('\n')
+        sal = de437(subprocess.run([prog], input=a437('\n'.join(entrada) + '\n'),
+                                   capture_output=True).stdout).split('\n')
     mal = 0
     for (rot, _, _, _), r, esp in zip(casos, sal, esperado):
         if os.environ.get('VER') and re.search(os.environ['VER'], rot):

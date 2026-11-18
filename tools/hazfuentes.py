@@ -4,7 +4,8 @@
 
   Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
-Dibuja cada letra de la página 437, en blanco y negro, en casillas de cuatro
+Dibuja cada letra de la página 437 (la de Ventanas, con las letras de más de
+tools/hispa437.py), en blanco y negro, en casillas de cuatro
 altos: 12, 16, 24 y 32 puntos de pantalla (la línea base, a tres cuartos). De
 cada alto sale un archivo: TIPOS12.DAT, TIPOS.DAT (el de 16), TIPOS24.DAT y
 TIPOS32.DAT. Los lee programas/comun/tipos.inc. El archivo:
@@ -32,6 +33,7 @@ fonts-* que dice la tabla, desempaquetados (dpkg -x) en la carpeta que se da.
 uso: hazfuentes.py carpeta-de-los-paquetes carpeta-de-salida TIPOS-DE-LETRA.md
 """
 import os, struct, sys
+from hispa437 import EXTRA, letra   # la 437 de Ventanas: Á, Ó, €... (tools/hispa437.py)
 from PIL import Image, ImageDraw, ImageFont
 
 X = os.path.join(sys.argv[1], 'usr/share/fonts')
@@ -64,7 +66,7 @@ TIPOS = [
 ]
 HISPA = S + '/truetype/dejavu/DejaVuSansMono.ttf'      # «Hispa» en los altos que no son 16
 ALTOS = (12, 16, 24, 32)
-LETRAS = list(range(32, 176)) + [225, 230, 241, 246, 248, 250, 253]
+LETRAS = list(range(32, 176)) + [225, 230, 241, 246, 248, 250, 253] + sorted(EXTRA)
 MARGEN = 16
 
 
@@ -95,7 +97,7 @@ def tipo(ruta, t, alto, base):
     falta = bytes(f.getmask('￿', mode='1')), f.getmask('￿', mode='1').size
     tabla, datos, pos = [], [], 448
     for c in range(32, 256):
-        ch = bytes([c]).decode('cp437')
+        ch = letra(c)
         m = f.getmask(ch, mode='1')
         if c not in LETRAS or (c != 32 and (bytes(m), m.size) == falta):
             tabla.append(0)

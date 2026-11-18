@@ -6,9 +6,12 @@ línea de muestra de cada uno (para repasarlos sin arrancar el sistema).
 
 uso: vertipos.py TIPOS.DAT salida.ppm ["texto de muestra"]
 """
-import struct, sys
+import os, struct, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hispa437 import codigo     # la 437 de Ventanas (Á, Ó, €...)
 d = open(sys.argv[1], 'rb').read()
-texto = (sys.argv[3] if len(sys.argv) > 3 else 'El veloz murciélago hindú comía feliz. ¿Ñ? 0123456789').encode('cp437')
+texto = bytes(63 if codigo(c) is None else codigo(c)
+              for c in (sys.argv[3] if len(sys.argv) > 3 else 'El veloz murciélago hindú comía feliz. ¿Ñ? 0123456789'))
 n, alto = d[8], d[9]
 AN = 640 * alto // 12
 px = [[1] * AN for _ in range(n * (alto + 2) + 2)]

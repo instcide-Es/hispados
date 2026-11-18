@@ -1121,6 +1121,51 @@ Tiene ASCII completo y las letras acentuadas y los signos de la página 437
 que usan el español, el catalán, el gallego y el francés. La negrita la hace
 `gdi_texto`. `make` deja una vista en `build/gen/ventanas/fuente.ppm`.
 
+**Las letras que la 437 no tiene.** Para escribir bien español, catalán,
+valenciano, gallego, portugués y francés, Ventanas pone 26 letras más en
+códigos de la 437 que nunca pintaba (recuadros que mezclan línea sencilla y
+doble, dos medios bloques y unos signos griegos y de fórmulas sin dibujo). La
+lista está en un solo sitio, `tools/hispa437.py`, y la usan la fuente
+(`tools/mkfuente.py`), los tipos de la oficina (`tools/hazfuentes.py`), las
+tablas de la página 1252 de los programas Hispa32 (`tools/mk1252.py`:
+`w32_1252` y `w32_437`), el paso de los fuentes a la 437
+(`tools/cp437.py --ventanas`, para Ventanas y los .HVP) y la letra de
+HispaBIOS (`tools/mkfuentebios.py`, que los deja como en la 437):
+
+| Código | Letra | En la 437 | | Código | Letra | En la 437 |
+|---|---|---|---|---|---|---|
+| B5h | À | ╡ | | D2h | Ò | ╥ |
+| B6h | Á | ╢ | | D3h | Ó | ╙ |
+| B7h | Â | ╖ | | D4h | Ô | ╘ |
+| B8h | Ã | ╕ | | D5h | Õ | ╒ |
+| BDh | È | ╜ | | D6h | Ù | ╓ |
+| BEh | Ê | ╛ | | D7h | Ú | ╫ |
+| C6h | Ë | ╞ | | D8h | Û | ╪ |
+| C7h | Ì | ╟ | | DDh | ã | ▌ |
+| CFh | Í | ╧ | | DEh | õ | ▐ |
+| D0h | Î | ╨ | | E2h | Œ | Γ |
+| D1h | Ï | ╤ | | E5h | œ | σ |
+| E7h | © | τ | | F4h | € | ⌠ |
+| E8h | ® | Φ | | F5h | … | ⌡ |
+
+Los recuadros de siempre (sencillos y dobles enteros), las tramas y los
+bloques enteros siguen como estaban. Es **solo de Ventanas**: el modo texto
+(la VGA y la letra de HispaBIOS) sigue con la 437 de siempre. Por eso un texto
+guardado desde Ventanas (Bloc de notas, Pluma...) con «Á» lleva B6h, que en
+un programa de modo texto (EDIT, TYPE) se ve «╢»; y un .TXT de DOS con esos
+recuadros mezclados se ve en Ventanas con estas letras. Lo que ya estaba
+guardado no cambia (antes esas letras no se podían escribir). Los códigos no
+se cambian de sitio: hay textos guardados con ellos.
+
+Con el teclado español (KEYB SP), Ventanas pide a KEYB al arrancar (INT 2Fh
+AX=AD82h BL=1; BL=0 al salir) que las mayúsculas con acento (´ ` ^ ¨ y la
+vocal: Á Í Ó Ú À È Ì Ò Ù Â Ê Î Ô Û Ë Ï) y el euro (AltGr+E) salgan con estos
+códigos; fuera de Ventanas, como siempre (´ y A = A). Lector (PDF) sigue
+pasando el texto a la 437 de siempre (€ = «EUR»), porque guarda .TXT para DOS.
+Con estas letras los tipos de la oficina crecieron y `TIPOS32.DAT` ya no cabe
+en el disquete «Oficina»: va en el de «Instalación 2», en su
+`\HISPADOS\PROGS`, que INSTALAR también copia.
+
 Los **iconos** (32×32) también están en texto, en `ventanas/iconos.inc` y
 `ventanas/iconos2.inc`: un carácter por punto, `.` transparente y `0`-`9`,
 `a`-`f` los 16 colores. La plantilla la dibuja `tools/mkiconos.py`; luego se

@@ -2375,6 +2375,33 @@ es_letra:
         jbe .si
         cmp al, 225
         je .si
+        ; las letras de Ventanas que la 437 no tiene (tools/hispa437.py):
+        ; À Á Â Ã (B5-B8), È Ê (BD, BE), Ë Ì (C6, C7), Í...Û (CF-D8), ã õ
+        ; (DD, DE), Œ œ (E2, E5)
+        cmp al, 0xB5
+        jb .no
+        cmp al, 0xB8
+        jbe .si
+        cmp al, 0xBD
+        je .si
+        cmp al, 0xBE
+        je .si
+        cmp al, 0xC6
+        je .si
+        cmp al, 0xC7
+        je .si
+        cmp al, 0xCF
+        jb .no
+        cmp al, 0xD8
+        jbe .si
+        cmp al, 0xDD
+        je .si
+        cmp al, 0xDE
+        je .si
+        cmp al, 0xE2
+        je .si
+        cmp al, 0xE5
+        je .si
 .no:
         push eax
         or eax, 1                   ; (ZF=0)

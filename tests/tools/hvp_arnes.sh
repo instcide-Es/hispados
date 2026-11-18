@@ -66,6 +66,10 @@ prepara() {
   mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null; mdeltree -i $T/f.img ::HISPADOS/JUEGOS 2>/dev/null
   # (0.9.25: el disquete va más lleno; estos tampoco los usan los módulos)
   mdel -i $T/f.img ::HISPADOS/AUDICION.COM ::HISPADOS/EQUIPO.COM 2>/dev/null
+  # [GLIFOS] (los tipos crecieron con Á, Ó, €...: 90 K más; tampoco usan el
+  # Mirador ni HSPUSB, salvo la prueba del propio Mirador)
+  mdel -i $T/f.img ::HISPADOS/HSPUSB.SYS 2>/dev/null
+  [ "$nom" = MIRADOR.HVP ] || mdel -i $T/f.img ::HISPADOS/PROGS/MIRADOR.HVP 2>/dev/null
   mcopy -o -i $T/f.img programas/comun/TIPOS*.DAT ::HISPADOS/PROGS/ || echo "  FAIL no caben los tipos de letra en el disquete de la prueba"
   printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\%s\r\n' "$nom" > $T/CENTRO.INI
   mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI

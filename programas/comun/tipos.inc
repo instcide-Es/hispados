@@ -9,6 +9,9 @@
 ;  tools/hazfuentes.py, que explica el archivo; de dónde sale cada tipo y su
 ;  licencia, en docs/TIPOS-DE-LETRA.md.
 ;
+;  Los caracteres, en la página de Ventanas: la 437 con Á, Ó, €... en códigos
+;  que no se pintaban (tools/hispa437.py).
+;
 ;  El tipo 0 es «Hispa», la letra de ancho fijo de Hispa Ventanas (8x16). Si
 ;  falta un archivo, o un tipo no trae un carácter, se pone esa letra, a la
 ;  escala que más se acerque: todo sigue funcionando.
@@ -26,7 +29,7 @@
 ;  Se incluye en el código del programa y, en su «section .bss», se pone la
 ;  macro TIPOS_BSS. Usa la API de Hispa Ventanas. La memoria de cada archivo
 ;  se pide al leerlo (mem_bloque), justo la que ocupa: un programa que solo
-;  usa la letra normal gasta unos 73 K, no los 640 K de todos los tamaños.
+;  usa la letra normal gasta unos 86 K, no los 640 K de todos los tamaños.
 ;  Al cerrarse, el programa llama a tl_soltar para devolverla.
 ;
 ;    tl_cargar   ESI=ruta del módulo (la que recibe en su entrada): lee los

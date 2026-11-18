@@ -12,25 +12,25 @@ que lo cambiado no use el nombre original, y conserva la licencia de su fuente d
 
 | N.º | Tipo | Sale de | Licencia | Octetos (los cuatro tamaños) |
 |---|---|---|---|---|
-| 1 | Roble | DejaVu Serif | licencia Bitstream Vera (libre) y dominio público | 26872 |
-| 2 | Roble negra | DejaVu Serif Bold | licencia Bitstream Vera (libre) y dominio público | 28784 |
-| 3 | Imprenta | Linux Libertine (fonts-linuxlibertine) | GPL-2.0 o posterior con excepción de fuentes, y OFL-1.1 | 24372 |
-| 4 | Carta | Bitstream Charter (xfonts-scalable) | licencia libre de Bitstream (1989-1992) | 24100 |
-| 5 | Clásica | Old Standard (fonts-oldstandard) | OFL-1.1 | 24796 |
-| 6 | Elegante | GFS Didot (fonts-gfs-didot) | OFL-1.1 | 24168 |
-| 7 | Pergamino | EB Garamond (fonts-ebgaramond) | OFL-1.1 | 23684 |
-| 8 | Losa | Roboto Slab (fonts-roboto-slab) | Apache-2.0 | 24484 |
-| 9 | Llano | DejaVu Sans | licencia Bitstream Vera (libre) y dominio público | 26096 |
-| 10 | Llano negra | DejaVu Sans Bold | licencia Bitstream Vera (libre) y dominio público | 29136 |
-| 11 | Claro | Open Sans (fonts-open-sans) | Apache-2.0 | 23620 |
-| 12 | Pantalla | Play (fonts-play) | OFL-1.1 | 24148 |
-| 13 | Técnica | Jura (fonts-jura) | OFL-1.1 | 25748 |
-| 14 | Redonda | Quicksand (fonts-quicksand) | OFL-1.1 | 24196 |
-| 15 | Rótulo | Linux Biolinum (fonts-linuxlibertine) | GPL-2.0 o posterior con excepción de fuentes, y OFL-1.1 | 24252 |
-| 16 | Estrecha | Dosis (fonts-dosis) | OFL-1.1 | 21368 |
-| 17 | Máquina | Courier Prime (fonts-courier-prime) | OFL-1.1 | 28252 |
-| 18 | Fiesta | Lobster (fonts-lobster) | OFL-1.1 | 24948 |
-| 19 | Manuscrita | Breip (fonts-breip) | OFL-1.0 | 28156 |
+| 1 | Roble | DejaVu Serif | licencia Bitstream Vera (libre) y dominio público | 31860 |
+| 2 | Roble negra | DejaVu Serif Bold | licencia Bitstream Vera (libre) y dominio público | 34172 |
+| 3 | Imprenta | Linux Libertine (fonts-linuxlibertine) | GPL-2.0 o posterior con excepción de fuentes, y OFL-1.1 | 28972 |
+| 4 | Carta | Bitstream Charter (xfonts-scalable) | licencia libre de Bitstream (1989-1992) | 28464 |
+| 5 | Clásica | Old Standard (fonts-oldstandard) | OFL-1.1 | 29528 |
+| 6 | Elegante | GFS Didot (fonts-gfs-didot) | OFL-1.1 | 28972 |
+| 7 | Pergamino | EB Garamond (fonts-ebgaramond) | OFL-1.1 | 28296 |
+| 8 | Losa | Roboto Slab (fonts-roboto-slab) | Apache-2.0 | 29064 |
+| 9 | Llano | DejaVu Sans | licencia Bitstream Vera (libre) y dominio público | 30812 |
+| 10 | Llano negra | DejaVu Sans Bold | licencia Bitstream Vera (libre) y dominio público | 34248 |
+| 11 | Claro | Open Sans (fonts-open-sans) | Apache-2.0 | 27916 |
+| 12 | Pantalla | Play (fonts-play) | OFL-1.1 | 28676 |
+| 13 | Técnica | Jura (fonts-jura) | OFL-1.1 | 30360 |
+| 14 | Redonda | Quicksand (fonts-quicksand) | OFL-1.1 | 28612 |
+| 15 | Rótulo | Linux Biolinum (fonts-linuxlibertine) | GPL-2.0 o posterior con excepción de fuentes, y OFL-1.1 | 28796 |
+| 16 | Estrecha | Dosis (fonts-dosis) | OFL-1.1 | 25160 |
+| 17 | Máquina | Courier Prime (fonts-courier-prime) | OFL-1.1 | 32932 |
+| 18 | Fiesta | Lobster (fonts-lobster) | OFL-1.1 | 29836 |
+| 19 | Manuscrita | Breip (fonts-breip) | OFL-1.0 | 32392 |
 
 Tamaños: 9, 12, 18 y 24 puntos son los dibujados (casillas de 12, 16, 24 y 32 puntos de
 pantalla); 36 y 48 son el doble de 18 y de 24.

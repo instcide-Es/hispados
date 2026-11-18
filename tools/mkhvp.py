@@ -33,9 +33,9 @@ def main():
     os.makedirs(gen, exist_ok=True)
     cp437 = os.path.join(RAIZ, 'tools', 'cp437.py')
     asm = os.path.join(gen, os.path.basename(fuente))
-    subprocess.run([sys.executable, cp437, fuente, asm], check=True)
+    subprocess.run([sys.executable, cp437, '--ventanas', fuente, asm], check=True)
     for inc in INCS:
-        subprocess.run([sys.executable, cp437, os.path.join(RAIZ, 'ventanas', inc),
+        subprocess.run([sys.executable, cp437, '--ventanas', os.path.join(RAIZ, 'ventanas', inc),
                         os.path.join(gen, inc)], check=True)
     # los .inc propios del programa: en su carpeta (FUENTE sin «.asm»); si no
     # está ahí, se busca en programas/comun/ (lo que comparten varios) y en lib/ (así TERMINAL.HVP incluye lib/version.inc)
@@ -46,7 +46,7 @@ def main():
         for cand in (os.path.join(propios, inc), os.path.join(RAIZ, 'programas', 'comun', inc),
                      os.path.join(RAIZ, 'lib', inc)):
             if os.path.isfile(cand):
-                subprocess.run([sys.executable, cp437, cand, os.path.join(gen, inc)], check=True)
+                subprocess.run([sys.executable, cp437, '--ventanas', cand, os.path.join(gen, inc)], check=True)
                 break
     subprocess.run([sys.executable, os.path.join(RAIZ, 'tools', 'icopack.py'), asm], check=True)
     img = []

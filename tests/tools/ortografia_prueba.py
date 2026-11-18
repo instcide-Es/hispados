@@ -772,6 +772,13 @@ def main():
     ]
     for o, e in usuario:
         pon(o, e, 'usuario')
+    # [GLIFOS] las mayúsculas con acento de Hispa Ventanas (Á B6h, Í CFh, Ó D3h,
+    # Ú D7h: tools/hispa437.py): valen como la minúscula y, en los nombres
+    # propios (guardados sin acento), como la letra sin él
+    for o, e in ((b'P \xb6rbol', b'1'), (b'P \xb6RBOL', b'1'), (b'P CAMI\xd3N', b'1'), (b'P \xb6vila', b'1'),
+                 (b'P \xb6VILA', b'1'), (b'P \xd3scar', b'1'), (b'P \xcfndice', b'1'), (b'P \xd7ltimo', b'1'),
+                 (b'P \xb6rbolx', b'0'), (b'P \xd3rbol', b'0'), (b'P \xb6', b'1')):
+        pon(o, e, 'usuario-ventanas')
     # llenarla: 4096 octetos; cada una ocupa su largo y dos más
     pon(b'C', b'', 'usuario')
     for i in range(420):

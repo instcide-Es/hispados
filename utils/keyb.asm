@@ -14,6 +14,11 @@
 ;                      es de Apple (fabricante de la tabla SMBIOS tipo 1).
 ;  KEYB ... /NOMAC     las quita
 ;
+;  INT 2Fh AX=AD82h BL=1 (lo pide Hispa Ventanas al arrancar; BL=0 al salir o
+;  al abrir un programa de DOS): las mayúsculas con acento que la 437 no tiene
+;  (Á Í Ó Ú À È Ì Ò Ù Â Ê Î Ô Û Ë Ï) y el euro (AltGr+E) salen con los códigos
+;  de la letra de Ventanas (tools/hispa437.py). Sin eso, como siempre: Á = A.
+;
 ;  Se engancha al aviso de teclado de la BIOS (INT 15h, AH=4Fh: la BIOS lo
 ;  llama desde INT 09h con cada código de tecla): traduce las teclas que
 ;  cambian y pone el carácter (página de códigos 437) en el búfer de la BIOS
@@ -43,6 +48,7 @@ insdn       db 0                    ; Alt+Retroceso sigue pulsado (no repetir)
 e0          db 0                    ; último código fue E0h
 altgr       db 0                    ; Alt derecho pulsado
 remap_n     db 0                    ; remapeos activos de \HISPADOS\TECLAS.INI
+vent        db 0                    ; [GLIFOS] Hispa Ventanas: Á, Í, Ó, Ú, €...
 
 ; código de tecla, normal, Mayús, AltGr (0 = lo que dé la BIOS)
 keytab:
@@ -81,6 +87,14 @@ circ_up     db 'A',  'E',  'I',  'O',  'U'
 diaer_lo    db 0x84, 0x89, 0x8B, 0x94, 0x81
 diaer_up    db 0x8E, 'E',  'I',  0x99, 0x9A
 accent_ch   db 0x27, '`', '^', '"'
+; [GLIFOS] las mayúsculas con acento en Hispa Ventanas, que tiene esas letras
+; en códigos de la 437 que no pinta (tools/hispa437.py); solo mientras
+; Ventanas lo pide (INT 2Fh AX=AD82h BL=1): en modo texto serían recuadros
+acute_upv   db 0xB6, 0x90, 0xCF, 0xD3, 0xD7     ; Á É Í Ó Ú
+grave_upv   db 0xB5, 0xBD, 0xC7, 0xD2, 0xD6     ; À È Ì Ò Ù
+circ_upv    db 0xB7, 0xBE, 0xD0, 0xD4, 0xD8     ; Â Ê Î Ô Û
+diaer_upv   db 0x8E, 0xC6, 0xD1, 0x99, 0x9A     ; Ä Ë Ï Ö Ü
+VENT_EURO   equ 0xF4                            ; € (AltGr+E)
 
 int2f:
         cmp ax, 0xAD80
@@ -94,6 +108,12 @@ int2f:
 .chain:
         cmp ax, 0xAD81
         je .soft
+        cmp ax, 0xAD82              ; [GLIFOS] BL=1: letras de Hispa Ventanas
+        jne .ch2                    ; (Á, €...); BL=0: las de modo texto
+        mov [cs:vent], bl
+        mov al, 0xFF
+        iret
+.ch2:
         jmp far [cs:old2f]
 ; código de tecla que no viene del 8042 (HSPUSB en equipos sin controlador
 ; de teclado): BL = código -> AX = 4B01h atendida, 4B00h sin cambios
@@ -221,6 +241,16 @@ int09:
         test bh, bh
         jz .chain
 .noalt:
+        ; [GLIFOS] AltGr+E = € (solo en Hispa Ventanas: la 437 no lo tiene)
+        cmp ah, 0x12
+        jne .noeuro
+        test bh, bh
+        jz .noeuro
+        cmp byte [cs:vent], 0
+        je .noeuro
+        mov al, VENT_EURO
+        jmp .plain
+.noeuro:
         ; buscar la tecla en la tabla
         mov si, keytab
 .find:
@@ -317,6 +347,10 @@ int09:
         shl si, 1
         add si, ax                  ; (acento-1)*2 + mayúscula
         shl si, 1                   ; entradas de 2 bytes
+        cmp byte [cs:vent], 0       ; [GLIFOS] en Ventanas, las mayúsculas
+        je .vt                      ; con su acento
+        add si, vtabv - vtab
+.vt:
         mov si, [cs:vtab+si]        ; tabla de esa forma
         mov bx, cx
         mov al, [cs:si+bx]
@@ -394,6 +428,8 @@ flush_dead:
 
 vtab        dw acute_lo, acute_up, grave_lo, grave_up
             dw circ_lo, circ_up, diaer_lo, diaer_up
+vtabv       dw acute_lo, acute_upv, grave_lo, grave_upv     ; [GLIFOS]
+            dw circ_lo, circ_upv, diaer_lo, diaer_upv
 
 ; =============================================================================
 ;  Remapeo de teclas (lo configura \HISPADOS\TECLAS.INI; lo lee load_teclas al

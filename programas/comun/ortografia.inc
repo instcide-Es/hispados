@@ -16,7 +16,9 @@
 ;  10-31; 0, a ninguno). Mirar una palabra es seguirla letra a letra desde el
 ;  arco 0: no se descomprime nada y la memoria que hace falta es el archivo.
 ;
-;  Las letras, en la página de códigos 437. Como ahí no hay Á, Í, Ó ni Ú:
+;  Las letras, en la página de códigos 437. Como ahí no hay Á, Í, Ó ni Ú (Hispa
+;  Ventanas las pone en B6h, CFh, D3h y D7h, tools/hispa437.py: también valen,
+;  como mayúsculas de á, í, ó y ú y, en los nombres propios, como A, I, O, U):
 ;    - tal cual: «árbol», «Madrid», «ADSL»;
 ;    - con la primera en mayúscula: «Casa»; y «Arbol» vale por «árbol»;
 ;    - toda en mayúsculas: «CASA», «MADRID»; y «ARBOL», «CAMION» o «MALAGA»
@@ -120,8 +122,8 @@ ort_dic     resb ORT_MAX
 %endrep
 %endmacro
 
-; a minúscula:  Ñ É Ü Ç Ä Å Æ Ö
-ort_min:    ORT_TABLA 1, 165,164, 144,130, 154,129, 128,135, 142,132, 143,134, 146,145, 153,148
+; a minúscula:  Ñ É Ü Ç Ä Å Æ Ö, y las de Ventanas Á Í Ó Ú
+ort_min:    ORT_TABLA 1, 165,164, 144,130, 154,129, 128,135, 142,132, 143,134, 146,145, 153,148, 0xB6,160, 0xCF,161, 0xD3,162, 0xD7,163
 ; a mayúscula: ñ é ü, y á í ó ú a la letra sin acento (no hay otra); ç ä å æ ö
 ort_may:    ORT_TABLA 2, 164,165, 130,144, 129,154, 160,'A', 161,'I', 162,'O', 163,'U', 135,128, 132,142, 134,143, 145,146, 148,153
 ; sin acento: á é í ó ú ü
@@ -337,7 +339,9 @@ ort_prepara:
         ret
 
 ; (interna) la letra EDX de la palabra es una mayúscula: vale también por su
-; minúscula y, si es A, I, O o U, por la acentuada (que en mayúscula no existe)
+; minúscula y, si es A, I, O o U, por la acentuada (que en mayúscula no existe);
+; si es la Á, Í, Ó o Ú de Ventanas, por la letra sin acento (los nombres
+; propios se guardan así: «Avila»)
 ort_abre:
         push eax
         push ebx
@@ -345,6 +349,22 @@ ort_abre:
         mov bl, [ort_min+eax]
         mov [ort_alt+edx*4+1], bl
         xor bl, bl
+        cmp al, 0xB6
+        jne .ii
+        mov bl, 'A'
+.ii:
+        cmp al, 0xCF
+        jne .oo
+        mov bl, 'I'
+.oo:
+        cmp al, 0xD3
+        jne .uu
+        mov bl, 'O'
+.uu:
+        cmp al, 0xD7
+        jne .vv
+        mov bl, 'U'
+.vv:
         cmp al, 'A'
         jne .i
         mov bl, 160

@@ -301,19 +301,29 @@ def mkfloppy():
     mkoficina()
     mkinstal2()
 
+# [GLIFOS] los datos de la oficina (PROGSDAT) que van en el disquete
+# «Instalación 2» en vez de en el de «Oficina», que ya no tiene sitio
+INSTAL2_PROGS = ('TIPOS32.DAT',)
+
 def mkinstal2():
     """[0.9.24] El disquete «Instalación 2»: lo que ya no cabe en el de
     arranque (los programas de Windows de consola de Hispa-486: HW32 y
-    MSVCRT.DLL), en \\HISPADOS, como queda en el disco duro. INSTALAR lo pide
+    MSVCRT.DLL), en \\HISPADOS, como queda en el disco duro, y lo de la
+    oficina que ya no cabe en «Oficina» (INSTAL2_PROGS), en \\HISPADOS\\PROGS. INSTALAR lo pide
     antes que el de Oficina; también se puede copiar a mano con
     XCOPIAR A:\\HISPADOS C:\\HISPADOS."""
     out = os.path.join(B, 'hispados-instal2.img')
     if os.path.exists(out):
         os.remove(out)
     run('mformat', '-C', '-f', '1440', '-v', 'INSTAL2', '-i', out, '::')
-    run('mmd', '-i', out, '::HISPADOS')
+    run('mmd', '-i', out, '::HISPADOS', '::HISPADOS/PROGS')
     for f in ('HW32.COM', 'MSVCRT.DLL'):
         run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
+    # [GLIFOS] lo de la oficina que ya no cabe en el de «Oficina» (con Á, Ó,
+    # €... los tipos crecieron): en su \HISPADOS\PROGS, que INSTALAR copia
+    for f in os.environ.get('PROGSDAT', '').split():
+        if os.path.basename(f) in INSTAL2_PROGS:
+            run('mcopy', '-i', out, f, '::HISPADOS/PROGS/' + os.path.basename(f))
     print(out)
 
 def mkoficina():
@@ -332,7 +342,8 @@ def mkoficina():
     for f in hvpo:
         run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/PROGS/' + f)
     for f in os.environ.get('PROGSDAT', '').split():
-        run('mcopy', '-i', out, f, '::HISPADOS/PROGS/' + os.path.basename(f))
+        if os.path.basename(f) not in INSTAL2_PROGS:      # [GLIFOS] ese va en «Instalación 2»
+            run('mcopy', '-i', out, f, '::HISPADOS/PROGS/' + os.path.basename(f))
     print(out)
 
 if __name__ == '__main__':

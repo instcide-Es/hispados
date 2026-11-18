@@ -73,12 +73,12 @@ check $T/l1.txt "No se puede instalar sobre la unidad de arranque."
 check $T/l1.txt "Sistema transferido a la unidad C:"
 check $T/l1.txt "Hispa-DOS instalado en la unidad C:"
 check $T/l1.txt "disquete «Instalación 2»."
-check $T/l1.txt "Instalación 2: 2 archivos copiados."
+check $T/l1.txt "Instalación 2: 3 archivos copiados."                # (HW32, MSVCRT.DLL y TIPOS32.DAT)
 in2=0
 for off in 32256 1048576; do
-  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/HW32.COM ::HISPADOS/MSVCRT.DLL > /dev/null 2>&1 && in2=1
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/HW32.COM ::HISPADOS/MSVCRT.DLL ::HISPADOS/PROGS/TIPOS32.DAT > /dev/null 2>&1 && in2=1
 done
-if [ $in2 = 1 ]; then echo "  OK   Instalación 2: HW32 y MSVCRT.DLL en C:\\HISPADOS"; else echo "  FAIL Instalación 2: faltan HW32 o MSVCRT.DLL en el disco instalado"; fail=1; fi
+if [ $in2 = 1 ]; then echo "  OK   Instalación 2: HW32 y MSVCRT.DLL en C:\\HISPADOS, TIPOS32.DAT en PROGS"; else echo "  FAIL Instalación 2: faltan HW32 o MSVCRT.DLL en el disco instalado"; fail=1; fi
 check $T/l1.txt "va en el disquete «Oficina»."
 check $T/l1.txt " archivos copiados."
 check $T/l1.txt "Vuelva a poner el disquete de arranque y pulse una tecla."

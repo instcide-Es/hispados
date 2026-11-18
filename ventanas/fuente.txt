@@ -938,6 +938,78 @@
 + Ä A :dieresis -3
 + Ö O :dieresis -3
 + Ç C :cedilla
+; las letras que la 437 no tiene: van en códigos que Ventanas no pintaba
+; (recuadros mezclados, medios bloques, griegas sueltas; tools/hispa437.py)
++ À A :grave -3
++ Á A :agudo -3
++ Â A :circunflejo -3
++ Ã A :tilde -3
++ È E :grave -3
++ Ê E :circunflejo -3
++ Ë E :dieresis -3
++ Ì I :grave -3
++ Í I :agudo -3
++ Î I :circunflejo -3
++ Ï I :dieresis -3
++ Ò O :grave -3
++ Ó O :agudo -3
++ Ô O :circunflejo -3
++ Õ O :tilde -3
++ Ù U :grave -3
++ Ú U :agudo -3
++ Û U :circunflejo -3
++ ã a :tilde
++ õ o :tilde
+= Œ
+.######
+#..#...
+#..#...
+#..#...
+#..####
+#..#...
+#..#...
+#..#...
+.######
+= œ 6
+.##.##.
+#..#..#
+#..####
+#..#...
+#..#..#
+.##.##.
+= €
+...###
+..#...
+.#....
+#####.
+.#....
+#####.
+.#....
+..#...
+...###
+= …  10
+##.##.##
+##.##.##
+= ©
+..###..
+.#...#.
+#..##.#
+#.#...#
+#.#...#
+#.#...#
+#..##.#
+.#...#.
+..###..
+= ®
+..###..
+.#...#.
+#.##..#
+#.#.#.#
+#.##..#
+#.#.#.#
+#.#.#.#
+.#...#.
+..###..
 
 ; ---------------- letras griegas y signos (la «Lluvia verde» de CONFIG.HVP) ----------------
 = Σ

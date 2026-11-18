@@ -36,6 +36,13 @@ Pixel checks on Hispa Ventanas screenshots.
 import os, re, sys
 
 RAIZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+sys.path.insert(0, os.path.join(RAIZ, 'tools'))
+import hispa437                     # la 437 de Ventanas: Á, Ó, €... (tools/hispa437.py)
+
+
+def a437(texto):
+    """el texto en la página de Ventanas (lo que no hay, «?»)"""
+    return bytes(63 if hispa437.codigo(c) is None else hispa437.codigo(c) for c in texto)
 MARGEN = 10
 BORDE, TIT_H, SOMBRA = 2, 22, 5
 TINTA, MARRON, PETROLEO, PETROLEO_CL, TERRACOTA = 0, 1, 2, 3, 4
@@ -111,7 +118,7 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto, paso=8):
     por letra; 7 en los nombres largos de los iconos, «apretada»)."""
     F = fuente()
     mal = 0
-    for i, ch in enumerate(texto.encode('cp437')):
+    for i, ch in enumerate(a437(texto)):
         for fila in range(16):
             bits = F[ch][fila] << 1
             if negrita:
@@ -120,7 +127,7 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto, paso=8):
                 # (la novena columna de la negrita cae en el carácter siguiente)
                 enc = bits & (0x100 >> col)
                 if negrita and col == 0 and i > 0:
-                    enc = enc or (F[texto.encode('cp437')[i - 1]][fila] & 1)
+                    enc = enc or (F[a437(texto)[i - 1]][fila] & 1)
                 c = cap.px(x + i * paso + col, y + fila)
                 if not es(c, fg if enc else bg):
                     mal += 1
@@ -141,7 +148,7 @@ def texto_en(cap, x, y, fg, bg, cod):
 
 def busca(cap, x0, y0, x1, y1, fg, bg, texto):
     F = fuente()
-    cod = texto.encode('cp437')
+    cod = a437(texto)
     # los puntos del texto (primero los de tinta: descartan antes)
     pts = []
     for fila in range(16):
@@ -172,7 +179,7 @@ def indice_ok(cap, x, y, fg, texto, girado=False):
     F = fuente()
     marca = [[False] * 14 for _ in range(9)]
     x0 = 3 if len(texto) == 1 else 0
-    for ch in texto.encode('cp437'):
+    for ch in a437(texto):
         for fila in range(9):
             b = F[ch][3 + fila]
             b |= b >> 1
