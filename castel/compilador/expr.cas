@@ -392,7 +392,7 @@ módulo Expr
         variable q: Lugar
         variable buf: arreglo [TXT] de byte
         si const(e, c) entonces
-            n2t(c.bajo yb 0xFFFF, t)
+            si plano entonces n2t(c.bajo, t) sino n2t(c.bajo yb 0xFFFF, t) fin
             devolver cierto
         fin
         k := nk(e)
@@ -1775,7 +1775,7 @@ módulo Expr
         si ttam(t) = 1 entonces
             si ttam(te) <> 1 entonces em("movzx eax, al") fin
         sino si tk(t) = TK_ENT16 entonces
-            si ttam(te) <> 1 entonces em("movsx eax, ax") fin
+            si ttam(te) <> 1 entonces em("cwde") fin
         sino si ttam(te) <> 1 entonces
             em("movzx eax, ax")
         fin
@@ -1817,6 +1817,7 @@ módulo Expr
     función emrn(ins: puntero a byte, reg: puntero a byte, n: nat32)
         ini()
         l(ins)
+        l(" ")
         l(reg)
         l(", ")
         l_nat(n)
@@ -1826,7 +1827,7 @@ módulo Expr
     función escala32(reg: puntero a byte, tam: nat16)
         si tam = 1 entonces devolver fin
         si tam = 2 o tam = 4 o tam = 8 entonces
-            emrn("shl ", reg, doblar32(tam))
+            emrn("shl", reg, doblar32(tam))
         sino
             em5("imul ", reg, ", ", reg, ", ")
             l_nat(tam)
@@ -1834,7 +1835,7 @@ módulo Expr
         fin
     fin
 
-    función doblar32(v: nat16): nat16
+    función doblar32(v: nat32): nat16
         variable n: nat16
         n := 0
         mientras v > 1 hacer
@@ -1855,13 +1856,19 @@ módulo Expr
     fin
 
     función carga_reg32(reg: puntero a byte, e: nat16)
-        variable t: arreglo [TXT] de byte
+        variable t, dentro: arreglo [TXT] de byte
         variable tm: ent16
+        variable n, i: nat16
         tm := opnd(e, t)
         si tm = 0 entonces
             em4("mov ", reg, ", ", t)
         sino
-            carga32v(reg, tipo_de(e), dirección(t[1]))      ; t es «[...]»: su interior
+            n := longitud(t)                            ; t es «[...]»: su interior
+            para i desde 1 hasta n - 2 hacer
+                dentro[i - 1] := t[i]
+            fin
+            dentro[n - 2] := 0
+            carga32v(reg, tipo_de(e), dentro)
         fin
     fin
 
@@ -2086,7 +2093,7 @@ módulo Expr
         si op = O_POR entonces
             si hay_cb y potencia2(cb) entonces
                 gen_expr(a)
-                desplaza32p("shl", doblar32(nat16(cb.bajo)))
+                desplaza32p("shl", doblar32(cb.bajo))
                 devolver
             fin
             si hay_cb entonces
@@ -2113,7 +2120,7 @@ módulo Expr
             fin
             si hay_cb y potencia2(cb) y no signo entonces
                 gen_expr(a)
-                si op = O_DIV entonces desplaza32p("shr", doblar32(nat16(cb.bajo))) sino em_n("and eax, ", cb.bajo - 1, "") fin
+                si op = O_DIV entonces desplaza32p("shr", doblar32(cb.bajo)) sino em_n("and eax, ", cb.bajo - 1, "") fin
                 devolver
             fin
             dos32p(a, b)
@@ -2227,8 +2234,12 @@ módulo Expr
             t := tipo_de(a)
             si es_texto(t) entonces
                 tm := opnd32p(a, tx)
-                si tm = 0 o tm = 4 entonces em2("mov esi, ", tx) sino em("mov esi, eax") fin
-                si tm <> 0 y tm <> 4 entonces gen_expr(a) fin
+                si tm = 0 o tm = 4 entonces
+                    em2("mov esi, ", tx)
+                sino
+                    gen_expr(a)
+                    em("mov esi, eax")
+                fin
                 em("call escribir_cad")
             sino si tk(t) = TK_BOOL entonces
                 l_no := nueva()

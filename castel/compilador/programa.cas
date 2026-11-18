@@ -301,6 +301,11 @@ módulo Programa
             dp_nat(c.bajo)
             devolver
         fin
+        ; en 32 bits, el valor cabe en lo que ocupa el campo (dw, db, dd)
+        si plano y const(e, c) entonces
+            si ttam(t) = 1 entonces dp_nat(c.bajo yb 0xFF) sino si ttam(t) = 2 entonces dp_nat(c.bajo yb 0xFFFF) sino dp_nat(c.bajo) fin
+            devolver
+        fin
         si no inmediato(e, im) entonces
             m("el valor inicial de una variable global tiene que ser constante")
             falla(nlin(e), ncol(e))

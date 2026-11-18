@@ -8,16 +8,21 @@ mismo**. Los dos leen Castel y sacan ensamblador de 16 bits, solo con instruccio
 8086; y hay **un ensamblador propio**, también escrito en Castel, que da el mismo programa
 que NASM. Es el espíritu de CIMIENTOS.md: algo vivo pronto, afinar sobre vivo.
 
-Definición del lenguaje: [docs/CASTEL.md](docs/CASTEL.md). Estrategia y fases:
-[docs/CIMIENTOS.md](docs/CIMIENTOS.md).
+Definición del lenguaje: [docs/CASTEL.md](docs/CASTEL.md) (y, para los 32 bits,
+[docs/CASTEL32.md](docs/CASTEL32.md)). Estrategia y fases: [docs/CIMIENTOS.md](docs/CIMIENTOS.md).
 
-Estado (17/11/2026): hechas la **Fase 1** (subconjunto mínimo), la **Fase 3** (crecer el
+Estado (18/11/2026): hechas la **Fase 1** (subconjunto mínimo), la **Fase 3** (crecer el
 lenguaje), la **Fase 2** (el hito real: la orden **MAS** de Hispa-8086, escrita en Castel
-y comprobada contra la de ensamblador) y la **Fase 4 entera, el autohospedaje**: primero lo
-que hacía falta (números de 32 bits, programas en varios archivos y una biblioteca escrita
-en Castel) y después el **ensamblador propio**, el **compilador escrito en Castel** y el
+y comprobada contra la de ensamblador), la **Fase 4 entera, el autohospedaje** (primero lo
+que hacía falta —números de 32 bits, programas en varios archivos y una biblioteca escrita
+en Castel— y después el **ensamblador propio**, el **compilador escrito en Castel** y el
 **arranque en tres pasos**: el compilador, dentro de Hispa-8086, se compila a sí mismo y el
-resultado, compilado otra vez, sale idéntico. Lo siguiente es la Fase 5 (32 bits).
+resultado, compilado otra vez, sale idéntico) y la **Fase 5: Castel de 32 bits**
+([docs/CASTEL32.md](docs/CASTEL32.md)) — el modelo plano del 386 en modo protegido, con dos
+salidas (`modelo núcleo`, un binario multiboot arrancable en QEMU; `modelo hispa32`, un
+programa Win32 de consola para HW32). Los dos compiladores y ENSAMBLA entienden 32 bits, y
+hay una **semilla de Hispa-Pentium** (`nucleo32/semilla.cas`): un núcleo con IDT, reloj,
+teclado y excepciones.
 
 ## Qué hay aquí
 
@@ -254,4 +259,6 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
 2. **Que el lenguaje crezca escrito en sí mismo**: a partir de aquí cada mejora se hace en
    `compilador/` (y, mientras se quiera conservar la etapa 0, también en `ccastel.py`: las
    pruebas comparan los dos).
-3. **La Fase 5**: 32 bits de verdad (386, modo protegido), para el sistema de los 90.
+3. **Hispa-Pentium**: a partir de la semilla (`nucleo32/semilla.cas`), escribir en Castel el
+   núcleo de la gama XP (CASTEL32.md §10): más biblioteca de 32 bits, paginación, modo
+   usuario. La Fase 5 (los 32 bits) ya está.
