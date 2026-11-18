@@ -7,7 +7,10 @@
 #     vuelta a texto: el buscador que sugiere al escribir (fetch, JSON,
 #     flechas, Intro, clic en una sugerencia), pestañas, <details>, confirm y
 #     alert, onsubmit, localStorage, setTimeout, XMLHttpRequest,
-#     DOMContentLoaded, un error al registro y un bucle sin fin cortado.
+#     DOMContentLoaded, un error al registro y un bucle sin fin cortado; y
+#     lo de la maqueta de la prueba de uso (/uso: autofocus, dónde empieza el
+#     Tab, la marca #resultados, los botones .btn y btn-danger, los campos
+#     desde la primera letra y la pregunta de confirm(this.dataset...)).
 #  2. En Hispa Ventanas (QEMU): NAVEGA.EXE con HSPJS.DLL por HTTPS: lo
 #     mismo con el ratón y el teclado, mirando las capturas, el registro
 #     (NAVEGA.LOG) y lo que recibe el servidor; el tope de tiempo (TiempoJS=3);
@@ -72,6 +75,19 @@ if tests/navjs/hazlo.sh > $T/hazlo.log 2>&1; then
   tiene gal "ECO galletas=[vista=1; sesion=S1; js=1] agente=[HispaNavegador/"
   notiene gal "oculta"
   tiene gal "[log] HispaNavegador/"
+  an uso /uso uso
+  tiene uso "AUTOFOCO: q"
+  tiene uso "(sin texto)"
+  notiene uso "MARCA resultados: fila -1"
+  tiene uso "PREGUNTA: ¿Seguro que se ha perdido? No tiene vuelta."
+  tiene uso "[! Dar por perdido]"
+  tiene uso "[Prestar]"
+  tiene uso "<! Perdido de verdad>"
+  tiene uso "[Real Academia Española / Alfaguara"
+  tiene uso "[Reseñas de los lectores]"
+  an usotab /uso/tab uso_tab
+  tiene usotab "Primero del contenido"
+  tiene usotab "AUTOFOCO: nadie"
   an bucle /js/bucle bucle
   tiene bucle "Sigue: sí"
   tiene bucle "un guion ha tardado mas de"

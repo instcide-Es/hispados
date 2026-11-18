@@ -15,10 +15,18 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
 
 ## Qué hace
 
-- **Barra:** Atrás, Adelante, Recargar, Inicio y la dirección (con «Ir»).
-  Abajo, la línea de estado: lo que está haciendo, la dirección del enlace que
-  hay bajo el ratón y si la conexión va cifrada («Conexión cifrada», en
-  verde) o no («Sin cifrar», en granate).
+- **Barra:** Atrás, Adelante, Recargar, Inicio, **Imprimir** y la dirección
+  (con «Ir»; sin el foco se ve desde el principio, el servidor). Abajo, la
+  línea de estado: lo que está haciendo, la dirección del enlace que hay
+  bajo el ratón y si la conexión va cifrada («Conexión cifrada», en verde)
+  o no («Sin cifrar», en granate). **Mientras llega una página** (en un 486,
+  unos segundos) se nota: la línea de estado entera en ocre con «Espere, por
+  favor» a la derecha, el cursor del ratón es el reloj y «Recargar» pasa a
+  ser «Parar» (en ocre). Lo que se teclea mientras tanto **no se pierde**: va
+  a la página nueva cuando llega (las letras, al campo con `autofocus`; Tab,
+  Intro, Av Pág, las flechas...; un lector de códigos que escribe el número
+  e Intro funciona aunque la página aún no esté). Esc, F5 y F6 van en el
+  acto; Retroceso solo borra si hay un campo con el foco.
 - **HTTP/1.1 y HTTPS** (TLS 1.2 con comprobación del certificado: ver
   docs/RED.md, «La red de los programas Hispa32»). Redirecciones (hasta 10),
   respuestas a trozos (`chunked`), con longitud o hasta el cierre; la
@@ -42,19 +50,41 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
   `formaction`, `formmethod`, `formenctype`, `novalidate`. Lo que falta o no
   vale se dice en un cuadro («Falta rellenar «Email».», «No tiene la forma
   que se pide «Título».» con el `title` del campo) y el foco va al campo.
-  Intro en un campo envía el formulario.
+  Intro en un campo envía el formulario. **`autofocus`:** el campo que lo
+  lleva tiene el foco al llegar la página (y se pone a la vista), así que se
+  escribe sin pulsar antes en él; si la dirección trae una marca (`#...`),
+  manda la marca y el campo solo recibe el foco si se ve. Una letra que se
+  escribe sin ningún foco va al campo de texto si en lo que se ve hay **uno
+  solo**. Los campos **sin el foco se ven desde la primera letra** (no el
+  final de lo escrito: «2015», no «015»); con el foco, lo que rodea al
+  cursor, y si cabe todo, todo. Su ancho: el de `size`, o el de su estilo
+  (`width` en `px`, `ch`, `em`, `rem` o `%`), o si no dicen nada, 40 letras
+  (las claves, 28; número y fecha, 12).
 - **Subir archivos:** `<input type=file>` es un campo con la ruta y un botón
   «Examinar...» que abre el diálogo de abrir de Hispa Ventanas (o se escribe
   la ruta). El formulario con `enctype="multipart/form-data"` se envía como
   tal (RFC 7578), con el tipo del archivo por su extensión; hasta 2 MB.
 - **Descargas:** lo que no es una página (un PDF, un recibo, un adjunto con
-  `Content-Disposition`) se guarda en el disco: en cuanto llegan las
-  cabeceras sale el diálogo de guardar, con el nombre que propone el
-  servidor en 8+3 (`Recibo 2026-11.pdf` → `RECIBO20.PDF`), y lo demás va
-  derecho al archivo (no a la memoria: hasta 64 MB). Al acabar, si hay un
-  programa para ese tipo (`\HISPADOS\ASOCIA.INI`, como el Administrador de
-  archivos; o el Lector para los PDF y Mirador para las imágenes), se ofrece
-  abrirlo con él; desde el Lector se imprime.
+  `Content-Disposition`) se guarda en el disco, con el nombre que propone el
+  servidor en 8+3 (`Recibo 2026-11.pdf` → `RECIBO20.PDF`), y va derecho al
+  archivo (no a la memoria: hasta 64 MB). Si hay un programa para ese tipo
+  (`\HISPADOS\ASOCIA.INI`, como el Administrador de archivos; o el Lector
+  para los PDF y Mirador para las imágenes), **no se pregunta nada**: va a la
+  carpeta de las descargas (`\HISPADOS\INTERNET\DESCARGA`, que se crea sola,
+  o la de `Descargas=`), con un nombre que no esté ya (`RECIBO20.PDF`,
+  `RECIBO01.PDF`, `RECIBO02.PDF`...: nunca se pisa otro) y al acabar **se
+  abre con él** (el recibo, en el Lector, que lo imprime tal como se ve). Lo
+  que no tiene programa, con el diálogo de guardar.
+- **Imprimir** (el botón de la barra o Ctrl+P): la página entera, como
+  texto, por la impresora de Hispa-DOS (la del puerto paralelo, LPT1, de
+  agujas con ESC/P, como Pluma y el Lector): fila a fila lo que se ve en la
+  rejilla, con la negrita, los campos con lo que tienen (`[con prisa]`), las
+  casillas (`[X]`) y los botones (`[Prestar]`); las imágenes no. Si la
+  página es ancha, a 12 o 15 letras por pulgada para que quepa (hasta 136
+  columnas); las letras van en la tabla 437 de la impresora (`ESC t 1`). Si
+  no hay puerto o la impresora no contesta, un cuadro lo dice. Para lo que
+  tiene que salir como se ve (una etiqueta con código de barras, un PDF):
+  el Lector («Imprimir esta página (como se ve)»: docs/OFICINA.md).
 - **Imágenes:** PNG, GIF, JPEG (también progresivo), BMP e ICO, y las de
   `data:`. Se bajan después de la página, una a una y por la misma
   conexión, y se ven en la rejilla de letras: una imagen ocupa un bloque de
@@ -65,7 +95,12 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
   Una imagen que es lo primero de un bloque con más cosas (la portada de una
   ficha) va a la izquierda y el texto a su lado. Lo ya visto se recuerda
   (320 KB): el logotipo no se baja en cada página. Si no se puede ver (un
-  SVG, una rota), su texto alternativo. Esc deja de bajarlas.
+  SVG, una rota), su texto alternativo. Esc deja de bajarlas. Con `width` y
+  `height` (o su estilo en `px`) el hueco se guarda antes de que llegue; una
+  **sin medidas que llega tarde no mueve lo que se está mirando**: si el
+  usuario ya ha movido el ratón o una tecla (o no está arriba del todo), el
+  primer enlace o campo que se veía se queda en su fila y lo de arriba crece
+  hacia arriba (el clic que iba a «Probar la demo» no cae en otra línea).
 - **HTML tolerante** (etiquetas sin cerrar o mal anidadas): títulos,
   párrafos, negrita, subrayado, tachado, listas, definiciones, citas, `<pre>`,
   enlaces, tablas (anchos según el contenido, filas alternas sombreadas;
@@ -76,18 +111,29 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
   diseño: de los `<style>` de la página y de los atributos `style`,
   `display: none` (y `block`, `flex`...: lo que hace línea aparte),
   `visibility: hidden`, `color` y `background-color` (si quedan legibles),
-  `font-weight`, `text-align`, `text-decoration`, con selectores sencillos
+  `font-weight`, `text-align`, `text-decoration`, `width` (de las imágenes
+  y los campos), con selectores sencillos
   (etiqueta, `.clase`, `#id`) y `@media` según el ancho de la ventana. El
   atributo `hidden`. Las hojas de estilo de fuera (`<link>`) no se bajan; de
   las de Bootstrap, que son las de ClicGest, se sabe de memoria qué clases
   esconden cosas (`d-none`, `collapse`, `modal`, `dropdown-menu`...) y unas
   pocas más (`text-center`, `fw-bold`, `text-danger`, `alert`, `badge`,
-  `btn`).
+  `btn`). **Un enlace con `class="btn"` es un botón de verdad**: con su
+  relleno arena, su marco y un espacio de aire a cada lado, entero en una
+  línea (si no cabe en lo que queda, pasa a la siguiente: no sale
+  «[» al final de una y «Reseñas]» en la otra); y el de lo que no tiene
+  vuelta (`btn-danger`, `btn-outline-danger`), en granate (el marco y la
+  letra) y con **«!» delante** (no solo el color: «! Dar por perdido»). Igual los
+  botones de formulario con esas clases.
 - **JavaScript** (ES2020, con QuickJS: ver «JavaScript», más abajo). Se
   apaga con `JavaScript=NO` en NAVEGA.INI; entonces, lo que se puede suplir
   sin él, se suple:
   - `onsubmit="return confirm('...')"` (y en `onclick`): antes de enviar sale
-    la pregunta en un cuadro de Hispa Ventanas (Sí o No);
+    la pregunta en un cuadro de Hispa Ventanas (Sí o No); con
+    `confirm(this.dataset.confirmar)` (lo de ClicGest), la pregunta es el
+    atributo `data-confirmar` del formulario (o el `data-...` que diga); si
+    no se encuentra el texto, «¿Seguro?»: lo que la página pregunta nunca se
+    hace sin preguntar;
   - `<select onchange="this.form.submit()">`: al elegir, se envía;
   - `<noscript>` se enseña; `<script>` no se enseña ni se ejecuta;
   - un botón `type="button"` (solo hace algo con JavaScript) sale en gris y,
@@ -95,15 +141,32 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
 - **Menús largos, plegados.** Un `<nav>` o `<aside>` con más de 8 enlaces
   (el menú lateral de ClicGest tiene 30) sale en una línea, «[+] Menú
   principal (30 enlaces)», que se despliega al pulsarla. Y si la página dice
-  cuál es su parte principal (`<main>`, `role="main"`, la clase `main`), al
-  abrirla se empieza por ahí: lo de antes queda arriba, a un paso.
+  cuál es su parte principal (`<main>`, `role="main"`, la clase `main`,
+  `id="contenido"`), al abrirla se empieza por ahí: lo de antes queda
+  arriba, a un paso. **El Tab empieza en el contenido**, no en el menú: el
+  primer Tab de una página va al primer enlace o campo de lo principal (o de
+  lo que hay tras el primer menú, `<nav>`, `role="navigation"` o `.navbar`,
+  si está al principio de la página o de lo principal; o de la marca); si
+  eso no se ve, al primero de lo que se ve.
+- **Marcas (`#nombre`) en las direcciones:** al llegar una página con marca
+  (`…/catalogo?q=tren#resultados`, también tras una redirección o un
+  formulario cuyo `action` la lleve) se va a ella (el `id` del elemento, o
+  el `name` de un `<a>`), arriba de la ventana; un enlace a una marca de la
+  misma página (o `location.hash` con JavaScript) va allí sin pedirla otra
+  vez, y es una entrada del historial (Atrás vuelve donde se estaba, también
+  sin pedirla). La marca no se manda al servidor.
+- **Atrás y Adelante vuelven a donde se estaba** en cada página (la fila, y
+  el enlace o campo que se veía arriba, por si la página sale algo distinta);
+  Recargar, igual.
 
 ## Cómo se maneja
 
 | | |
 |---|---|
 | Ratón | un clic en un enlace, un botón o un campo; la barra de la derecha desplaza (se puede arrastrar); la rueda desplaza la página (3 filas por paso) y, con una lista abierta, sus opciones |
-| Tab | al enlace o campo siguiente (el enlace elegido sale en blanco sobre añil); Mayús+Tab, al anterior |
+| Tab | al enlace o campo siguiente (el enlace elegido sale en blanco sobre añil); el primero, el del contenido (no el del menú); Mayús+Tab, al anterior |
+| Letras sin foco | si en lo que se ve hay un solo campo de texto, van a él |
+| Ctrl+P | imprimir la página (también el botón «Imprimir») |
 | Intro | abre el enlace, pulsa el botón, envía el formulario del campo; en el de un archivo, abre el diálogo |
 | Espacio | marca la casilla o abre la lista; fuera de un campo, baja una pantalla |
 | Flechas, Re Pág, Av Pág, Inicio, Fin | mueven la página (en un campo, el cursor) |
@@ -111,7 +174,8 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
 | F6 o Ctrl+L | a la dirección (queda elegida entera: lo que se escriba la sustituye) |
 | F5 o Ctrl+R | recargar |
 | (con JavaScript) | las teclas y los clics van primero a la página: en el buscador de «Prestar», las flechas eligen y Intro abre |
-| Esc | para la carga; en la dirección, la deja como estaba |
+| Esc | para la carga (también «Parar»); en la dirección, la deja como estaba |
+| Mientras carga | lo que se teclea (letras, Tab, Intro, Av Pág, flechas) se guarda y va a la página nueva |
 
 Una dirección sin `http://` delante se pide por HTTP (si el sitio es de
 HTTPS, él mismo redirige).
@@ -123,7 +187,7 @@ Inicio=https://clicgest.es/biblioteca     ; la página de arranque y del botón 
 Idioma=es                                 ; el idioma que se pide (Accept-Language): es, ca, en
 AlContenido=NO                            ; no empezar por la parte principal de la página
 Favorito=La biblioteca|https://clicgest.es/biblioteca    ; enlaces de la página de inicio
-Descargas=C:\DOCUMEN                     ; la carpeta que propone para guardar lo que se baja (si no: C:\)
+Descargas=C:\DOCUMEN                     ; la carpeta de lo que se baja (si no: \HISPADOS\INTERNET\DESCARGA; el diálogo de guardar propone C:\)
 Galletas=NO                               ; no guardar las galletas al cerrar (un equipo de todos)
 JavaScript=NO                             ; sin JavaScript (por omisión, con)
 TiempoJS=15                               ; segundos que puede tardar un guion o un evento (15)
@@ -143,7 +207,7 @@ Cada petición lleva estas cabeceras (y nada más):
 ```
 GET /biblioteca/catalogo HTTP/1.1
 Host: clicgest.es
-User-Agent: HispaNavegador/0.2 (Hispa-486)
+User-Agent: HispaNavegador/0.3 (Hispa-486)
 Accept: text/html,text/plain;q=0.9,*/*;q=0.5
 Accept-Language: es
 Connection: keep-alive
@@ -278,7 +342,7 @@ lecturas: ni préstamos ni cambios), capturas en `docs/486/navegador/`
   servidor de pruebas.)
 - **Con JavaScript:** el mismo User-Agent va en las peticiones de `fetch` y
   `XMLHttpRequest`, y `navigator.userAgent` dice lo mismo
-  (`HispaNavegador/0.2 (Hispa-486)`); `document.cookie` lee y escribe las
+  (`HispaNavegador/0.3 (Hispa-486)`); `document.cookie` lee y escribe las
   mismas galletas, las que se guardan en `GALLETAS.TXT` también, pero no ve
   las `HttpOnly` ni las puede pisar; `fetch` sigue SameSite como lo demás
   (a otro sitio solo van las `SameSite=None`). Si un guion cambia el `src`
@@ -428,11 +492,23 @@ En `w32/navega/` (C, `gcc -m32` sin biblioteca y `tools/elf2pe.py --gui`;
   barra, los campos, las listas, la barra de desplazamiento), con los colores
   de la paleta de Hispa Ventanas (`PALETTEINDEX`, que Hispa Ventanas entiende
   desde ahora en los colores de GDI), y las imágenes con `SetDIBitsToDevice`
-  (8 bits, colores de la paleta). El historial guarda 40 direcciones y
-  por dónde se iba en cada una; volver atrás pide la página otra vez. Aquí
-  también: la cola de las imágenes (una petición aparte, después de la
-  página; lo ya visto), las descargas (el diálogo de guardar al llegar las
-  cabeceras; el cuerpo, al archivo) y la validación de los formularios.
+  (8 bits, colores de la paleta). El historial guarda 40 direcciones (con
+  su marca) y por dónde se iba en cada una (la fila y el primer foco que se
+  veía); volver atrás pide la página otra vez, salvo que sea la misma con
+  otra marca. Aquí también: la cola de las imágenes (una petición aparte,
+  después de la página; lo ya visto; al rehacer la página porque llega una,
+  lo que se mira no se mueve), la cola de lo tecleado mientras llega una
+  página, las descargas (al llegar las cabeceras: a la carpeta de las
+  descargas, o el diálogo de guardar; el cuerpo, al archivo), imprimir y la
+  validación de los formularios.
+- Imprimir: el KERNEL32 de HW32 (`utils/hw32k.inc`) abre `LPT1`, `LPT1:`,
+  `PRN` y `\\.\LPT1` como la impresora (si la BIOS dice que hay puerto
+  paralelo: INT 11h) y lo que se escribe va al puerto con la BIOS (INT 17h),
+  carácter a carácter, esperando a que no esté ocupada (hasta 20 s); con un
+  error o sin papel, `WriteFile` da error 29. Así cualquier programa de
+  Windows de Hispa-486 imprime con `fopen("LPT1", "wb")`. (El núcleo de
+  Hispa-DOS tiene `PRN` y `LPT1` como dispositivos nulos: desde DOS no se
+  imprime así.)
 - `imagen.asm`: los formatos de imagen de Mirador **tal cual**
   (`programas/mirador/nucleo.inc`, un `.inc` por formato, y
   `programas/comun/desinfla_t.inc` y `jpeg.inc`), ensamblados con NASM en un
@@ -537,6 +613,17 @@ tarde el servidor, descifrar la página y maquetarla.
   `<meta>`, y las galletas de «recordarme»: se cierra el Navegador, se mira
   `GALLETAS.TXT` (sin las de sesión ni las caducadas) y al abrirlo otra vez
   se entra sin clave. Mira las capturas y lo que recibe el servidor.
+  Y lo de la prueba de uso (`/uso` del servidor; docs/486/USABILIDAD-NAVEGADOR.md):
+  autofocus, la marca al llegar y en un enlace de la misma página (Atrás sin
+  pedirla), los campos desde la primera letra, los botones `.btn` y el
+  peligroso, `confirm(this.dataset.confirmar)` (Esc no envía, Intro sí),
+  Atrás a la misma fila (la zona igual punto por punto), el Tab tras el
+  menú, una letra sin foco al único campo, lo tecleado (con Intro) mientras
+  llega una página lenta (y la línea de estado en ocre), una imagen sin
+  medidas que llega a los 9 s sin mover el enlace que se mira, imprimir con
+  el botón y con Ctrl+P (QEMU con `-parallel file:`: lo que llega a LPT1
+  se mira octeto a octeto) y la descarga del PDF abierta derecha en el
+  Lector, dos veces (`RECIBO20.PDF` y `RECIBO01.PDF`).
   Va con `JavaScript=NO`: el Navegador sin guiones.
 - `tests/run_navegador_js_tests.sh`: el JavaScript, contra las páginas
   `/js/` del mismo servidor (`tests/tools/nav_js.py`): un buscador que sugiere

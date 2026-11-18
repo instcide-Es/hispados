@@ -11,8 +11,12 @@
  * Las órdenes (una por línea, # para comentar): «clic SELECTOR»,
  * «escribe SELECTOR | texto», «tecla SELECTOR | Abajo, Arriba, Intro, Esc o
  * Tab», «elige SELECTOR | índice», «foco SELECTOR», «espera ms», «vuelca» (la
- * página como texto), «registro» (NAVEGA.LOG), «responde si|no» (a los
- * confirm que vengan) y «js código» (se ejecuta en la página).
+ * página como texto; los enlaces-botón, entre «[» y «]»), «registro»
+ * (NAVEGA.LOG), «responde si|no» (a los confirm que vengan), «js código»
+ * (se ejecuta en la página), «marca nombre» (la fila de #nombre), «focos»
+ * (el autofocus y dónde empieza el Tab) y «pregunta SELECTOR» (lo que
+ * preguntaría sin JavaScript su onsubmit u onclick). La dirección puede
+ * llevar #marca.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "dom.h"
 #include <stdio.h>
@@ -144,6 +148,13 @@ static void vuelca(void) {
     Fila *r = &pag->filas[y];
     int n = r->n < 380 ? r->n : 380;
     memcpy(f, r->c, n);
+    /* los enlaces-botón: «[» y «]» en sus puntas (el aire de los lados) */
+    for (k = 0; k < n; k++) {
+      Atr *a = &pag->atrs[r->a[k]];
+      if (!(a->est & A_BOTON) || a->ctl >= 0) continue;
+      if (!k || !(pag->atrs[r->a[k - 1]].est & A_BOTON) || pag->atrs[r->a[k - 1]].enlace != a->enlace) f[k] = '[';
+      if (k == n - 1 || !(pag->atrs[r->a[k + 1]].est & A_BOTON) || pag->atrs[r->a[k + 1]].enlace != a->enlace) f[k] = ']';
+    }
     /* los controles, con lo que tienen */
     for (k = 0; k < pag->n_ctl; k++) {
       Ctl *c = &pag->ctl[k];
@@ -154,8 +165,7 @@ static void vuelca(void) {
       else if (c->tipo == C_LISTA) { v[0] = '['; v[1] = 0; if (c->n_opc && c->elegida < c->n_opc) texto_de(c->opc[c->elegida], v + 1, 200); strcat(v, "]"); }
       else if (c->tipo == C_ENVIAR || c->tipo == C_BOTON || c->tipo == C_REINICIO) {
         char t[200] = "";
-        if (c->nodo->etq == E_BUTTON) texto_de(c->nodo, t, 190); else snprintf(t, 190, "%s", c->valor);
-        pag_rotulo_vacio(c, t, 190);
+        pag_rotulo_boton(c, t, 190);
         sprintf(v, "<%s>", t);
       } else sprintf(v, "[%.*s]", c->n_valor < 200 ? c->n_valor : 200, c->valor);
       l = strlen(v);
@@ -246,6 +256,7 @@ int main(int argc, char **argv) {
   if (r < 0) { printf("ERROR: %s\n", p.error); return 1; }
   pag = pag_nueva(p.url, p.datos, p.n_datos, 0, 0);
   http_suelta(&p);
+  if (strchr(argv[1], '#')) pag->ancla = strchr(argv[1], '#') + 1;
   pag_maqueta(pag, COLS);
   js_inicia((HANDLE)1, &nav, "./");
   js_pagina(pag);
@@ -265,6 +276,26 @@ int main(int argc, char **argv) {
     else if (!strcmp(orden, "registro")) registro();
     else if (!strcmp(orden, "espera")) espera(arg ? atoi(arg) : 100);
     else if (!strcmp(orden, "responde")) responde = arg && !strcmp(arg, "si");
+    else if (!strcmp(orden, "marca")) {
+      pag->ancla = arg;
+      pag_maqueta(pag, COLS);
+      printf("MARCA %s: fila %d\n", arg ? arg : "", pag->y_ancla);
+      pag->ancla = NULL;
+    } else if (!strcmp(orden, "focos")) {
+      int t = pag_tab_inicio(pag), f = pag_foco_desde(pag, t);
+      Nodo *n2;
+      printf("CONTENIDO: fila %d; MENU: filas %d a %d; TAB: fila %d\n", pag->y_cont, pag->y_menu_ini, pag->y_menu, t);
+      if (pag->autofoco >= 0) {
+        n2 = pag->foco[pag->autofoco].enlace ? pag->enl[pag->foco[pag->autofoco].n].nodo : pag->ctl[pag->foco[pag->autofoco].n].nodo;
+        printf("AUTOFOCO: %s\n", atr(n2, "name") ? atr(n2, "name") : "?");
+      } else printf("AUTOFOCO: nadie\n");
+      if (f >= 0) {
+        char b[200] = "";
+        n2 = pag->foco[f].enlace ? pag->enl[pag->foco[f].n].nodo : pag->ctl[pag->foco[f].n].nodo;
+        texto_de(n2, b, sizeof b);
+        sale(b[0] ? b : "(sin texto)");
+      }
+    }
     else if (!strcmp(orden, "js")) {
       char b[4200];
       if (resto) { resto[-3] = ' '; }
@@ -273,6 +304,11 @@ int main(int argc, char **argv) {
     } else if (!arg || !(n = busca(arg))) continue;
     else if (!strcmp(orden, "clic")) clic(n);
     else if (!strcmp(orden, "foco")) cb_foco(n);
+    else if (!strcmp(orden, "pregunta")) {
+      char b[600];
+      const char *q = pag_confirma(n, b, sizeof b);
+      if (q) { char s2[700]; sprintf(s2, "PREGUNTA: %s", q); sale(s2); } else printf("PREGUNTA: (ninguna)\n");
+    }
     else if (!strcmp(orden, "escribe")) {
       char t[2000];
       int k, m;

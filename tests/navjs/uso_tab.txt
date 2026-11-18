@@ -1,0 +1,2 @@
+# [USO] sin <main>: el Tab empieza tras el menú
+focos

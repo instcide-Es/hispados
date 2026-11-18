@@ -1,0 +1,7 @@
+# [USO] lo de la prueba de uso (docs/486/USABILIDAD-NAVEGADOR.md): el
+# autofocus, dónde empieza el Tab, la marca, los botones y la pregunta de
+# confirm(this.dataset.confirmar) sin JavaScript
+focos
+marca resultados
+pregunta form[data-confirmar]
+vuelca

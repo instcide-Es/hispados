@@ -8,6 +8,11 @@ Y lo que se añadió para usar ClicGest entero: la galleta de «recordarme»
 data:, una rota y un SVG que no se puede ver), subir un archivo
 (multipart/form-data, con required y pattern), una descarga (un PDF con
 Content-Disposition) y <meta http-equiv=refresh>.
+Y lo de la prueba de uso (docs/486/USABILIDAD-NAVEGADOR.md), en /uso: el
+campo con autofocus, el Tab que empieza tras el menú, una página que tarda
+(lo tecleado mientras llega), las marcas (#resultados), los campos que se ven
+desde el principio, los botones (.btn, btn-danger), confirm(this.dataset...),
+una imagen sin medidas que llega tarde y un recibo para imprimir.
 
 uso: nav_servidor.py CARPETA PUERTO
   CARPETA: donde están los certificados (los hace la prueba con openssl) y
@@ -21,7 +26,7 @@ uso: nav_servidor.py CARPETA PUERTO
 Solo escucha en 127.0.0.1 (QEMU lo ve como 10.0.2.2).
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 """
-import base64, binascii, hashlib, os, random, ssl, struct, sys, threading, zlib
+import base64, binascii, hashlib, os, random, ssl, struct, sys, threading, time, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(globals().get('__file__', 'tests/tools/nav_servidor.py'))))
@@ -81,6 +86,7 @@ def gif(w, h, color):
 
 TAPA_JPG = base64.b64decode('''/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAFoAPADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDgqKKK/LT8ZCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA9t/4UJ/1Nf8A5Tv/ALZR/wAKE/6mv/ynf/bK9tor8j/1nzT/AJ+/+Sx/yP2b/VPKf+fX/k0v8zxL/hQn/U1/+U7/AO2Uf8KE/wCpr/8AKd/9sr22ij/WfNP+fv8A5LH/ACD/AFTyn/n1/wCTS/zPEv8AhQn/AFNf/lO/+2Uf8KE/6mv/AMp3/wBsr22ij/WfNP8An7/5LH/IP9U8p/59f+TS/wAzxL/hQn/U1/8AlO/+2Uf8KE/6mv8A8p3/ANsr22ij/WfNP+fv/ksf8g/1Tyn/AJ9f+TS/zPEv+FCf9TX/AOU7/wC2Uf8AChP+pr/8p3/2yvbaKP8AWfNP+fv/AJLH/IP9U8p/59f+TS/zPEv+FCf9TX/5Tv8A7ZR/woT/AKmv/wAp3/2yvbaKP9Z80/5+/wDksf8AIP8AVPKf+fX/AJNL/M8S/wCFCf8AU1/+U7/7ZR/woT/qa/8Aynf/AGyvbaKP9Z80/wCfv/ksf8g/1Tyn/n1/5NL/ADPEv+FCf9TX/wCU7/7ZR/woT/qa/wDynf8A2yvbaKP9Z80/5+/+Sx/yD/VPKf8An1/5NL/M8S/4UJ/1Nf8A5Tv/ALZR/wAKE/6mv/ynf/bK9too/wBZ80/5+/8Aksf8g/1Tyn/n1/5NL/M8S/4UJ/1Nf/lO/wDtlH/ChP8Aqa//ACnf/bK9too/1nzT/n7/AOSx/wAg/wBU8p/59f8Ak0v8zxL/AIUJ/wBTX/5Tv/tlH/ChP+pr/wDKd/8AbK9too/1nzT/AJ+/+Sx/yD/VPKf+fX/k0v8AM8S/4UJ/1Nf/AJTv/tlH/ChP+pr/APKd/wDbK9too/1nzT/n7/5LH/IP9U8p/wCfX/k0v8zxL/hQn/U1/wDlO/8AtlH/AAoT/qa//Kd/9sr22ij/AFnzT/n7/wCSx/yD/VPKf+fX/k0v8zxL/hQn/U1/+U7/AO2Uf8KE/wCpr/8AKd/9sr22ij/WfNP+fv8A5LH/ACD/AFTyn/n1/wCTS/zPEv8AhQn/AFNf/lO/+2Uf8KE/6mv/AMp3/wBsr22ij/WfNP8An7/5LH/IP9U8p/59f+TS/wAwooorwD6IKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigD/2Q==''')   # 240x360: arriba verde (0,153,0), abajo amarillo (Pillow, calidad 85)
 LOGO_PNG = png(96, 36, (255, 0, 0))           # rojo, con width y height en la página
+LENTA_PNG = png(200, 90, (0, 128, 0))          # verde, sin medidas en la página y tarda (/uso/salta)
 AZUL_GIF = gif(40, 40, (0, 0, 255))           # azul, sin medidas en la página
 ICONO_PNG = png(16, 16, (255, 0, 255), alfa=True)   # magenta y transparente: un icono en la línea
 DATA_PNG = base64.b64encode(png(8, 8, (0, 255, 255))).decode()
@@ -287,8 +293,56 @@ class Pedido(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(pagina('Sin longitud', '<p>Hasta el cierre de la conexi&oacute;n.</p>'))
             self.close_connection = True
+        elif u.path.startswith('/uso'):
+            self.uso(u, q)
+        elif u.path == '/lenta.png':
+            time.sleep(9)
+            self.manda(LENTA_PNG, tipo='image/png')
         elif u.path.startswith('/js') and nav_js.atiende(self, u, q):    # [JS] las páginas con JavaScript
             pass
+        else:
+            self.manda(pagina('No existe', '<h1>404</h1><p>Aqu&iacute; no hay nada.</p>'), estado=404)
+
+    def uso(self, u, q):
+        """las páginas de la prueba de uso"""
+        menu = ('<nav aria-label="Men&uacute;">' + ' '.join('<a href="/uso?m=%d">Men&uacute; %d</a>' % (n, n) for n in range(1, 7))
+                + '</nav>')
+        if u.path == '/uso':
+            busca = q.get('q', [''])[0]
+            relleno = lambda a, b: ''.join(
+                '<p>Relleno %02d: un p&aacute;rrafo para que la p&aacute;gina sea larga.%s</p>' % (
+                    n, ' <a href="/final">Enlace del relleno %02d</a>' % n if n % 6 == 0 else '') for n in range(a, b))
+            self.manda(pagina('Uso', menu + '<main id="contenido"><h1>Prueba de uso</h1>'
+                '<form method="get" action="/uso#resultados"><p>Buscar <input type="search" name="q" autofocus> '
+                '<button type="submit" class="btn btn-primary">Buscar</button></p></form>'
+                '<p>Editorial <input type="text" name="ed" value="Real Academia Espa&ntilde;ola / Alfaguara, Madrid, segunda edici&oacute;n">'
+                ' A&ntilde;o <input type="text" name="an" size="4" value="2015"></p>'
+                '<p>Este p&aacute;rrafo es largo a prop&oacute;sito, para que el bot&oacute;n de despu&eacute;s no quepa entero al final de la '
+                'l&iacute;nea: <a class="btn btn-secondary" href="/uso?r=1">Rese&ntilde;as de los lectores</a></p>'
+                '<p><a class="btn btn-success" href="/final">Prestar</a> <a class="btn btn-outline-danger" href="/uso?perdido=1">Dar por perdido</a> '
+                '<a href="#resultados">Ir a los resultados</a></p>'
+                '<form method="post" action="/uso/perdido" onsubmit="return confirm(this.dataset.confirmar)" '
+                'data-confirmar="&iquest;Seguro que se ha perdido? No tiene vuelta.">'
+                '<button type="submit" class="btn btn-danger">Perdido de verdad</button></form>'
+                + relleno(1, 41) + '<h2 id="resultados">Resultados</h2><p>RESULTADO: %s</p>' % (busca or '(nada)')
+                + relleno(41, 71) + '<p>FIN-DE-USO</p></main>'))
+        elif u.path == '/uso/tab':
+            self.manda(pagina('Tab', menu + '<h1>Tab y letras</h1><p><a href="/final">Primero del contenido</a> '
+                '<a href="/final">Segundo del contenido</a></p><p>Nombre <input type="text" name="solo"></p>'
+                '<p><a href="/uso/lenta">Una p&aacute;gina que tarda</a></p>'))
+        elif u.path == '/uso/lenta':
+            time.sleep(5)
+            self.manda(pagina('Lenta', '<h1>P&aacute;gina lenta</h1><form method="get" action="/uso/lenta2">'
+                '<p>C&oacute;digo <input type="text" name="cod" autofocus></p></form>'))
+        elif u.path == '/uso/lenta2':
+            self.manda(pagina('Lenta 2', '<p>COD: %s</p>' % q.get('cod', [''])[0]))
+        elif u.path == '/uso/salta':
+            self.manda(pagina('Salta', '<p>Arriba del todo.</p><p><img src="/lenta.png" alt=""></p>'
+                '<p><a href="/final">Enlace que no se mueve</a></p><p>Debajo del enlace.</p>'))
+        elif u.path == '/uso/recibo':
+            self.manda(pagina('Recibo', '<h1>Recibo de pr&eacute;stamo</h1><p>Libro: <b>Don Quijote</b> (n&ordm; 13)</p>'
+                '<p>Para: Mar&iacute;a Garc&iacute;a &middot; devolver el 18/12/2026</p><p>Nota <input type="text" name="n" value="con prisa"></p>'
+                '<p>FIN-DEL-RECIBO</p>'))
         else:
             self.manda(pagina('No existe', '<h1>404</h1><p>Aqu&iacute; no hay nada.</p>'), estado=404)
 
@@ -325,6 +379,8 @@ class Pedido(BaseHTTPRequestHandler):
         v = lambda k: q.get(k, [''])[0]
         if self.path.startswith('/js') and nav_js.atiende_post(self, self.path, cuerpo):    # [JS]
             return
+        if self.path == '/uso/perdido':
+            return self.manda(pagina('Perdido', '<p>DADO-POR-PERDIDO</p>'))
         if self.path == '/entrar':
             if v('usuario') == 'maria' and v('clave') == 'secreto' and v('ficha') == FICHA:
                 seguro = '; Secure' if isinstance(self.connection, ssl.SSLSocket) else ''

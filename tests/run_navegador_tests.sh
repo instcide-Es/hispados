@@ -25,8 +25,20 @@
 #    rota y un SVG: su texto alternativo); Mayús+Tab;
 #  - subir un archivo (multipart/form-data): required y pattern lo paran; el
 #    diálogo de abrir elige C:\FOTOS\TAPA.PNG; llega entero y se ve;
-#  - una descarga (un PDF con Content-Disposition): el diálogo de guardar, el
-#    archivo en el disco y abrirlo con el Lector; <meta http-equiv=refresh>;
+#  - una descarga (un PDF con Content-Disposition): sin preguntar nada, a
+#    C:\HISPADOS\INTERNET\DESCARGA (la segunda vez, con otro nombre) y abierta
+#    con el Lector; <meta http-equiv=refresh>;
+#  - lo de la prueba de uso (docs/486/USABILIDAD-NAVEGADOR.md; /uso del
+#    servidor): autofocus (se escribe sin pulsar en el campo), la marca de la
+#    dirección (#resultados) al llegar y en un enlace de la misma página (y
+#    Atrás sin pedirla otra vez), los campos que se ven desde la primera
+#    letra, los botones (.btn) con su marco y el peligroso (btn-danger) en
+#    granate y con «!», sin partirse; confirm(this.dataset.confirmar) sin
+#    JavaScript; «Atrás» vuelve a la fila donde se estaba; el Tab empieza tras
+#    el menú; una letra sin foco va al único campo; lo tecleado mientras llega
+#    una página (y la línea de estado en ocre, «Espere»); una imagen sin
+#    medidas que llega tarde (9 s) no mueve lo que se mira; imprimir la página
+#    (botón «Imprimir» y Ctrl+P: lo que llega a LPT1, QEMU -parallel file);
 #  - las galletas de «recordarme» se guardan al cerrar (GALLETAS.TXT, sin las
 #    de sesión ni las caducadas) y, al abrirlo otra vez, se entra sin clave;
 #  - se cierra y no queda memoria.
@@ -72,8 +84,8 @@ printf 'Inicio=https://10.0.2.2:%d/\r\nIdioma=es-ES\r\nJavaScript=NO\r\n' $((P +
 python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS $T/c/FOTOS > /dev/null
 corre() {
   rm -f $T/mon
-  timeout ${TMAX:-700} qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
-    -parallel none -m 16 -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
+  timeout ${TMAX:-950} qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+    -parallel file:$T/lpt.bin -m 16 -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
     -boot a -no-reboot -netdev user,id=n0 -device rtl8139,netdev=n0 > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 -c > $T/log.txt
 }
@@ -140,11 +152,28 @@ fy() { echo $((89 + 18 * $1)); }
   sleep 0.5; tecla ret; sleep 3; aparta; shot u3
   clic 150 $(fy 5); tecla a b; clic 40 $(fy 7); sleep 3; shot u4; tecla ret; sleep 2        # «ab»: el pattern lo para
   clic 150 $(fy 5); tecla end c; clic 40 $(fy 7); sleep 15; aparta; shot u5                 # «abc»: se sube y se ve
-  dir_https r e c i b o dot p d f; sleep 8; shot s1                                         # el recibo: el diálogo de guardar
-  tecla ret; sleep 4; shot s2                                                               # guardado: ¿abrirlo con el Lector?
-  tecla ret; sleep 10; shot s3                                                              # el Lector, con el recibo
+  dir_https r e c i b o dot p d f; sleep 16; shot s3                                        # el recibo: derecho al Lector
+  tecla alt-f4; sleep 3; aparta
+  dir_https r e c i b o dot p d f; sleep 16; shot s4                                        # otra vez: con otro nombre, sin preguntar
   tecla alt-f4; sleep 3; aparta
   dir_https r e f r e s c a; sleep 10; aparta; shot f1                                      # <meta http-equiv=refresh>
+  # ---- la prueba de uso ----
+  dir_https u s o; sleep 9; shot w0                                                         # autofocus, campos, botones
+  tecla t r e n; sleep 0.5; shot w1; tecla ret; sleep 9; shot w2                            # sin pulsar en el campo; a #resultados
+  aparta; tecla pgdn; sleep 1; shot a1                                                       # un poco más abajo...
+  tecla tab; sleep 1; tecla ret; sleep 7; atras 9; aparta; shot a2                          # ...a otra página y Atrás: ahí mismo
+  tecla home; sleep 1.5; shot w3
+  clic 300 $(fy 12); sleep 3; aparta; shot w5                          # «Ir a los resultados» (la misma página)
+  atras 3; aparta; shot w6                                                                  # Atrás: arriba, sin pedirla otra vez
+  clic 60 $(fy 14); sleep 3; shot w7; tecla esc; sleep 2                  # «Perdido de verdad»: la pregunta; Esc, no
+  clic 60 $(fy 14); sleep 3; tecla ret; sleep 7; aparta; shot w8          # Intro: sí
+  dir_https u s o slash t a b; sleep 8; aparta; tecla tab; sleep 1; shot x1                 # el Tab empieza tras el menú
+  tecla f5; sleep 8; aparta; tecla h o l a; sleep 1; shot x2                                # una letra sin foco: al único campo
+  tecla tab; sleep 0.5; tecla ret; sleep 0.5; tecla a b c ret; shot x3; sleep 14; aparta; shot x4   # tecleado mientras llega
+  dir_https u s o slash s a l t a; sleep 4; ir 320 500; aparta; shot y0; sleep 14; shot y1               # la imagen que llega tarde
+  tecla home; sleep 1.5; shot y2
+  dir_https u s o slash r e c i b o; sleep 8; aparta; clic 385 40; sleep 6; shot z1           # «Imprimir»
+  tecla ctrl-p; sleep 6; shot z2                                                             # y Ctrl+P
   tecla ctrl-esc; sleep 1; tecla a a a; sleep 0.5; tecla ret; sleep 5; aparta; shot m2       # la memoria con el Navegador
   tecla alt-f4; sleep 1.5; tecla alt-f4; sleep 4                                             # fuera los dos (las galletas, al disco)
   tecla ctrl-esc; sleep 1; tecla i; sleep 0.5; tecla right; sleep 1; tecla ret; sleep 12; aparta; shot k1   # otra vez: dentro sin clave
@@ -152,7 +181,8 @@ fy() { echo $((89 + 18 * $1)); }
   tecla ctrl-esc; sleep 1; tecla a a a; sleep 0.5; tecla ret; sleep 5; aparta; shot m1       # y la memoria después
   mon quit; } | corre
 mcopy -n -i $T/c.img@@32256 ::HISPADOS/INTERNET/GALLETAS.TXT $T/galletas.txt 2> /dev/null
-mcopy -n -i $T/c.img@@32256 ::RECIBO20.PDF $T/recibo.pdf 2> /dev/null
+mcopy -n -i $T/c.img@@32256 ::HISPADOS/INTERNET/DESCARGA/RECIBO20.PDF $T/recibo.pdf 2> /dev/null
+mcopy -n -i $T/c.img@@32256 ::HISPADOS/INTERNET/DESCARGA/RECIBO01.PDF $T/recibo1.pdf 2> /dev/null
 PAG="0 78 640 548"
 echo "-- el menú Inicio: el grupo «Internet» con el Navegador --"
 chk $T/i1.ppm busca 20 410 60 440 9 7 "Internet" busca 270 410 320 440 9 12 "Navegador"
@@ -216,7 +246,7 @@ chk $T/t3.ppm busca $PAG 9 12 "Un archivo" nobusca $PAG 9 12 "Solo JavaScript"
 chk $T/t2.ppm busca $PAG 0 9 "ninguna autoridad conocida."
 echo "-- lo que ha recibido el servidor --"
 pedido() { if grep -qF -- "$1" $T/pedidos.log; then ok "$2"; else ko "$2 (falta: $1)"; fi; }
-pedido "GET / | - |  | HispaNavegador/0.2 (Hispa-486) | es-ES | text/html" "la primera petición: sin galletas, con su nombre y el idioma de NAVEGA.INI"
+pedido "GET / | - |  | HispaNavegador/0.3 (Hispa-486) | es-ES | text/html" "la primera petición: sin galletas, con su nombre y el idioma de NAVEGA.INI"
 pedido "POST /entrar | - | ficha=abc123&usuario=maria&clave=secreto&recordar=1 |" "el POST de la entrada"
 pedido "GET /biblioteca | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |" "la galleta de sesión vuelve (y la caducada, no)"
 pedido "GET /prestar?qs=garc | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |" "el formulario GET"
@@ -240,7 +270,7 @@ chk $T/im1.ppm $IMGS busca $PAG 0 9 "Una portada con enlace" busca $PAG 0 9 "sin
 chk $T/im2.ppm busca $PAG 0 9 "Llegada tras dos redirecciones."
 chk $T/im3.ppm $IMGS
 [ "$(grep -c '^GET /tapa.jpg' $T/pedidos.log)" = 1 ] && ok "al volver, las imágenes salen de lo ya visto (no se piden otra vez)" || ko "la portada se pidió $(grep -c '^GET /tapa.jpg' $T/pedidos.log) veces"
-pedido "GET /logo.png | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |  | HispaNavegador/0.2 (Hispa-486) | es-ES | image/png" "las imágenes se piden con las galletas y diciendo que son imágenes"
+pedido "GET /logo.png | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |  | HispaNavegador/0.3 (Hispa-486) | es-ES | image/png" "las imágenes se piden con las galletas y diciendo que son imágenes"
 grep -q "^GET /data:\|^GET /dentro" $T/pedidos.log && ko "la imagen data: se pidió al servidor" || ok "la imagen data: no se pide (va en la página)"
 echo "-- subir un archivo (multipart/form-data) --"
 chk $T/u0.ppm busca $PAG 7 9 "(ningún archivo)"
@@ -254,14 +284,13 @@ pedido "POST /portada | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | 
   "el POST multipart: el campo oculto, el archivo entero (tamaño y SHA-1) y el texto"
 [ "$(grep -c '^POST /portada' $T/pedidos.log)" = 1 ] && ok "required y pattern pararon los otros envíos" || ko "la portada se envió $(grep -c '^POST /portada' $T/pedidos.log) veces"
 pedido "GET /subida.img | SESION=" "la imagen subida se pidió para verla"
-echo "-- una descarga: guardarla y abrirla con el Lector --"
-chk $T/s1.ppm titulo 222 136 activa "Guardar la descarga" busca 0 548 600 570 0 15 "Descarga: RECIBO20.PDF (1 K). Elija dónde guardarla."
-chk $T/s2.ppm busca 150 150 650 450 0 8 "Guardado en C:\\RECIBO20.PDF (1 K)." busca 150 150 650 450 0 8 "¿Abrirlo ahora con el Lector?"
-chk $T/s3.ppm titulo 40 32 activa "Lector - C:\\RECIBO20.PDF"
+echo "-- una descarga: sin preguntar, a DESCARGA y abierta con el Lector --"
+chk $T/s3.ppm titulo 40 32 activa "Lector - C:\\HISPADOS\\INTERNET\\DESCARGA\\RECIBO20.PDF"
+chk $T/s4.ppm titulo 40 32 activa "Lector - C:\\HISPADOS\\INTERNET\\DESCARGA\\RECIBO01.PDF"
 python3 -c "
 import sys; sys.argv = ['', '$T', '0']
 exec(open('tests/tools/nav_servidor.py').read().split('class Pedido')[0])
-sys.exit(0 if open('$T/recibo.pdf', 'rb').read() == PDF else 1)" 2> /dev/null && ok "C:\\RECIBO20.PDF es el PDF que dio el servidor" || ko "C:\\RECIBO20.PDF no está o no es el del servidor"
+sys.exit(0 if open('$T/recibo.pdf', 'rb').read() == PDF and open('$T/recibo1.pdf', 'rb').read() == PDF else 1)" 2> /dev/null && ok "DESCARGA\\RECIBO20.PDF y RECIBO01.PDF son el PDF que dio el servidor" || ko "DESCARGA\\RECIBO20.PDF o RECIBO01.PDF no están o no son el del servidor"
 echo "-- <meta http-equiv=refresh> --"
 chk $T/f1.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/final" busca $PAG 0 9 "Llegada tras dos redirecciones."
 grep -A1 "^GET /refresca" $T/pedidos.log | tail -1 | grep -q "^GET /final" && ok "el refresco pidió /final" || ko "el refresco no pidió /final"
@@ -273,5 +302,39 @@ else ko "no se ha escrito GALLETAS.TXT"; fi
 pedido "GET / | RECUERDA=R3CU3RDA; PREF=azul |" "al abrirlo otra vez: con las galletas guardadas (sin la de sesión)"
 grep -q "caduca=1" $T/pedidos.log && ko "se envió la galleta caducada (Expires de 2015)" || ok "la galleta caducada (Expires de 2015) no se envió nunca"
 chk $T/k1.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/biblioteca" busca $PAG 0 8 "Pilar Esteve"
-[ -n "${GUARDAR:-}" ] && cp $T/pedidos.log $T/log.txt $T/galletas.txt "$GUARDAR"/ 2> /dev/null
+echo "-- la prueba de uso: autofocus, marcas, campos y botones --"
+chk $T/w0.ppm busca $PAG 0 9 "Real Academia Española / Alfaguara" busca $PAG 0 9 "2015" \
+  busca $PAG 0 6 "Reseñas de los lectores" busca $PAG 0 6 "Prestar" busca $PAG 13 6 "! Dar por perdido" busca $PAG 13 6 "! Perdido de verdad"
+chk $T/w1.ppm busca $PAG 0 9 "tren"
+pedido "GET /uso?q=tren |" "autofocus: lo escrito sin pulsar en el campo se ha enviado"
+chk $T/w2.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/uso?q=tren#resultados" busca 0 78 640 135 0 9 "RESULTADO: tren" \
+  nobusca $PAG 0 9 "Prueba de uso"
+chk $T/a2.ppm igual 0 80 640 460 $T/a1.ppm 0 80 0
+chk $T/w5.ppm busca 0 78 640 135 0 9 "RESULTADO: tren" nobusca $PAG 0 9 "Prueba de uso"
+chk $T/w6.ppm busca $PAG 0 6 "Buscar" busca $PAG 0 9 "Relleno 01" nobusca $PAG 0 9 "RESULTADO"
+[ "$(grep -c '^GET /uso?q=tren |' $T/pedidos.log)" = 2 ] && ok "la marca de la misma página y Atrás no piden la página otra vez" || ko "GET /uso?q=tren se pidió $(grep -c '^GET /uso?q=tren |' $T/pedidos.log) veces (2: al buscar y al volver de /final)"
+chk $T/w7.ppm busca 150 150 650 450 0 8 "¿Seguro que se ha perdido? No tiene vuelta."
+chk $T/w8.ppm busca $PAG 0 9 "DADO-POR-PERDIDO"
+[ "$(grep -c '^POST /uso/perdido' $T/pedidos.log)" = 1 ] && ok "confirm(this.dataset.confirmar): con Esc no se envió; con Intro, sí" || ko "POST /uso/perdido: $(grep -c '^POST /uso/perdido' $T/pedidos.log) veces"
+echo "-- el Tab, las letras sin foco y lo tecleado mientras llega una página --"
+chk $T/x1.ppm busca $PAG 9 12 "Primero del contenido" nobusca $PAG 9 12 "Menú 1"
+chk $T/x2.ppm busca $PAG 0 9 "hola"
+chk $T/x3.ppm busca 600 548 800 570 0 10 "Espere, por favor"
+chk $T/x4.ppm busca $PAG 0 9 "COD: abc"
+pedido "GET /uso/lenta2?cod=abc |" "lo tecleado mientras llegaba (abc e Intro) fue al campo con autofocus"
+echo "-- una imagen sin medidas que llega tarde no mueve lo que se mira --"
+chk $T/y0.ppm busca 0 112 640 135 12 9 "Enlace que no se mueve"
+chk $T/y1.ppm busca 0 112 640 135 12 9 "Enlace que no se mueve" nobusca $PAG 0 9 "Arriba del todo."
+chk $T/y2.ppm busca 0 78 640 100 0 9 "Arriba del todo." nobusca 0 112 640 135 12 9 "Enlace que no se mueve" busca $PAG 12 9 "Enlace que no se mueve"
+echo "-- imprimir la página (LPT1) --"
+chk $T/z1.ppm busca 0 548 300 570 0 15 "Página impresa."
+python3 - "$T/lpt.bin" << 'FIN_PY' && ok "lo impreso: ESC @, ESC t 1, el texto en la 437 (con lo de los campos) y el salto de hoja, dos veces" || ko "lo impreso no es lo que se esperaba"
+import sys
+d = open(sys.argv[1], 'rb').read()
+ok = d.count(b'\x1b@\x1bt\x01\x1b2') == 2 and d.count('Recibo de préstamo'.encode('cp437')) == 2 \
+    and d.count('María García'.encode('cp437')) == 2 and d.count(b'[con prisa') == 2 and d.count(b'FIN-DEL-RECIBO') == 2 \
+    and d.endswith(b'\x0c') and b'\x1bE' in d
+sys.exit(0 if ok else 1)
+FIN_PY
+[ -n "${GUARDAR:-}" ] && cp $T/pedidos.log $T/log.txt $T/galletas.txt $T/lpt.bin "$GUARDAR"/ 2> /dev/null
 fin

@@ -174,7 +174,7 @@ para la biblio» (la biblioteca de la asociación, en ClicGest).
   archivos (`multipart/form-data`, con el diálogo de abrir), descargas al
   disco (el diálogo de guardar, y abrir el PDF con el Lector), `pattern`,
   `<meta http-equiv=refresh>`, Mayús+Tab, y el User-Agent
-  `HispaNavegador/0.2 (Hispa-486)`. Para eso usa de Hispa Ventanas
+  `HispaNavegador/0.3 (Hispa-486)`. Para eso usa de Hispa Ventanas
   `SetDIBitsToDevice` (mapas de 8 bits de arriba abajo con `DIB_PAL_COLORS`
   y la tabla 0..255: los octetos son colores de su paleta), `GetKeyState`
   (Mayús+Tab), `GetOpenFileNameA` y `GetSaveFileNameA` (de `COMDLG32`: el
