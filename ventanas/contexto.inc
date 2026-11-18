@@ -878,7 +878,8 @@ ctx_centro:
         ret
 
 ; (interna) abre Configuración (CONFIG.HVP, que ya está en marcha con la
-; ventana oculta); EDX=1: en el apartado Pantalla (el fondo)
+; ventana oculta); EDX=n (1 o más): en el apartado n-1 (1: Pantalla, el
+; fondo; [WIFI] 7: Red)
 ctx_config:
         pushad
         mov edi, ctx_acc + AC_PROG
@@ -919,7 +920,8 @@ ctx_config:
         cmp dword [ebp+V_PADRE], 0
         jne .vs
         mov eax, WM_APARTADO
-        xor ecx, ecx                ; 0: Pantalla
+        mov ecx, [esp+20]           ; (el EDX de quien llama, en la pila de pushad)
+        dec ecx
         xor edx, edx
         call msg_poner
         jmp .x

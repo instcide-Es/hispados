@@ -2073,6 +2073,7 @@ alto_ini:
 %include "contexto.inc"             ; [CONTEXTO] el botón derecho: menús contextuales
 %include "archapi.inc"              ; [ARCHIVOS] lo que pide el Administrador de archivos
 %include "barra.inc"                ; [BARRA] Hispa-486: barra de tareas y menú Inicio
+%include "wifi.inc"                 ; [WIFI] el icono de red de la barra y su ventanita
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
@@ -2095,6 +2096,7 @@ pila_fin:
 %include "bssctx.inc"               ; [CONTEXTO]
 %include "bssarch.inc"              ; [ARCHIVOS]
 %include "bssbarra.inc"             ; [BARRA]
+%include "bsswifi.inc"              ; [WIFI]
 %ifdef CON_PROGRAMAS
 %define TAREAS_BSS                  ; [TAREAS] las variables del Administrador de tareas
 %include "tareas_api.inc"

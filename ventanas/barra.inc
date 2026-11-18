@@ -619,6 +619,7 @@ bt_vigilar:
         call ges_activar_otra
 .a1:
         call ini_pendiente
+        call wf_vigilar             ; [WIFI] cómo está la red (y lo que tarda)
         ; la tecla de Windows (la BIOS no la da: se mira en tec_mapa)
         mov al, [tec_mapa+0x5B]
         or al, [tec_mapa+0x5C]
@@ -705,6 +706,7 @@ bt_vigilar:
         pop edx
         shl eax, 3
         xor al, [red_hay]
+        xor eax, [wf_firma]         ; [WIFI] el icono de red
         mov ebx, [vol_mudo]
         and ebx, 1
         shl ebx, 1
@@ -785,6 +787,8 @@ bt_proc:
 .p1:
         push eax
         sub eax, BT_DESP
+        call wf_en_icono            ; [WIFI] el icono de red: su ventanita
+        jc .red
         call vol_en_icono           ; el altavoz: abre o cierra el volumen
         pop eax
         jnc .p2
@@ -806,6 +810,10 @@ bt_proc:
         jc .nada
         mov ebp, [bt_lista+ecx*4]
         call bt_pulsar
+        jmp .nada
+.red:
+        pop eax
+        call wf_alternar
         jmp .nada
 
 ; (interna) la ventanita del volumen, encima de la barra (nace arriba)
@@ -1057,7 +1065,7 @@ bt_pintar:
         inc dword [dc_oy]
         call vol_pintar_icono
         call bat_pintar_icono
-        call red_pintar_icono
+        call wf_pintar_icono        ; [WIFI] el icono de red, con su estado
         call rel_pintar
         call dc_cerrar
         xor eax, eax

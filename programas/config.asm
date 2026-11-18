@@ -570,6 +570,7 @@ t_rd_mask   db "Máscara de subred:", 0
 t_rd_gw     db "Puerta de enlace:", 0
 t_rd_dns    db "Servidor DNS:", 0
 t_rd_hay    db "Controlador de red cargado (HSPRED).", 0
+t_rd_hayw   db "Controlador Wi-Fi cargado (HSPWIFI).", 0   ; [WIFI]
 t_rd_nohay  db "No hay controlador de red cargado.", 10
             db "Cargue HSPRED (está en \HISPADOS) para la red.", 0
 t_rd_mac    db "Dirección MAC: ", 0
@@ -2672,6 +2673,10 @@ red_estado:
         cmp byte [red_hay], 0
         je .nohay
         mov esi, t_rd_hay
+        cmp byte [red_hay], 2       ; [WIFI] (HSPWIFI hace de HSPRED)
+        jne .h
+        mov esi, t_rd_hayw
+.h:
         call hvl_cad
         mov al, 10
         stosb
@@ -2735,6 +2740,24 @@ red_detectar:
         mov ecx, RC_LEN
         rep movsb
         mov byte [red_hay], 1
+        ; [WIFI] ¿es HSPWIFI (INT 2Fh DC00h)? -> red_hay = 2
+        mov edi, rmreg
+        mov ecx, 13
+        xor eax, eax
+        rep stosd
+        mov dword [rmreg + 0x1C], 0xDC00
+        mov edi, rmreg
+        mov eax, 0x0300
+        mov ebx, 0x002F
+        xor ecx, ecx
+        int 0x31
+        jc .dc
+        cmp byte [rmreg + 0x1C], 0xFF
+        jne .dc
+        cmp word [rmreg + 0x10], 0x5746     ; «WF»
+        jne .dc
+        mov byte [red_hay], 2
+.dc:
         ; --- DA03h: ES:BX = datos de /INFO; la MAC en +RC_MACOFF ---
         mov edi, rmreg
         mov ecx, 13
@@ -2897,6 +2920,8 @@ red_capturar:
 ; lee RED.INI al modelo (a_dhcp y r_*_txt). Por omisión DHCP=SI.
 red_ini_leer:
         pushad
+        cmp byte [red_solo_wifi], 0 ; [WIFI] solo lo del Wi-Fi: lo demás se deja
+        jne .wifi
         mov dword [a_dhcp], 1
         mov byte [r_ip_txt], 0
         mov edi, r_mask_txt
@@ -2906,6 +2931,7 @@ red_ini_leer:
         mov byte [r_gw_txt], 0
         mov byte [r_dns_txt], 0
         mov byte [r_act_txt], 0
+.wifi:
         mov byte [r_wifi_txt], 0
         mov byte [r_wclave_txt], 0
         mov esi, red_ruta
@@ -2960,6 +2986,11 @@ red_ini_leer:
         inc edx
         jmp .fe
 .val:
+        cmp byte [red_solo_wifi], 0 ; [WIFI] (solo las del Wi-Fi: tipo 3)
+        je .v0
+        cmp dword [ebx + 8], 3
+        jne .salta
+.v0:
         cmp dword [ebx + 8], 0      ; tipo 0 = DHCP
         jne .txt
         mov al, [edx]
@@ -3060,6 +3091,12 @@ red_escribir_ini:
         mov esi, t_rd_maldns
         jc .error
 .ok:
+        ; [WIFI] la red Wi-Fi, como esté ahora en el disco: la ventanita de la
+        ; red de Hispa-486 o la orden WIFI pueden haberla cambiado después
+        ; de leer RED.INI (Configuración está en marcha todo el rato)
+        mov byte [red_solo_wifi], 1
+        call red_ini_leer
+        mov byte [red_solo_wifi], 0
         mov edi, red_buf
         mov esi, k_red_cab
         call hvl_cad
@@ -4574,8 +4611,9 @@ cambiado    resb 1
 ult_seg     resb 1
 salva_listo resb 1
 salva_hora  resb 1
-red_hay     resb 1                  ; [RED] HSPRED cargado
+red_hay     resb 1                  ; [RED] HSPRED cargado (2: es HSPWIFI)
 red_cambiado resb 1                 ; hay cambios de red sin guardar
+red_solo_wifi resb 1                ; [WIFI] red_ini_leer: solo WIFI= y WIFICLAVE=
             alignb 4
 plant       resb P_TAM
 plant2      resb P_TAM

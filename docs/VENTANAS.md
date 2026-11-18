@@ -769,12 +769,24 @@ No se cambia en marcha: vale para toda la sesión.
   primera suya; los cuadros de diálogo de un programa con ventana no salen
   (el botón de su dueña los trae delante). Los programas de Windows
   (`win32*.inc`) salen como cualquier otro: son ventanas del mismo gestor.
-- **La bandeja**, a la derecha: el icono de red, el altavoz (un clic, la
-  ventanita del volumen, que aquí sale encima de la barra; doble clic, el
-  Mezclador), la batería si la hay y la hora. Son los mismos dibujos y las
-  mismas rutinas de la barra de arriba (`vol_pintar_icono`,
-  `bat_pintar_icono`, `red_pintar_icono`, `rel_pintar`), corridos al sitio
-  que deja «Salir».
+- **La bandeja**, a la derecha: el icono de red (un clic, la ventanita de
+  la red: ver abajo), el altavoz (un clic, la ventanita del volumen, que
+  aquí sale encima de la barra; doble clic, el Mezclador), la batería si la
+  hay y la hora. Son los mismos dibujos y las mismas rutinas de la barra de
+  arriba (`vol_pintar_icono`, `bat_pintar_icono`, `rel_pintar`), corridos
+  al sitio que deja «Salir»; el de red es propio de esta barra
+  (`wf_pintar_icono`).
+- **[WIFI] El icono de red** dice por la forma (no solo por el color) si no
+  hay red (nodos huecos y un aspa), si hay cable con o sin enlace (nodos
+  llenos; con aspa, sin enlace) o Wi-Fi (cuatro rayitas: llenas, las de la
+  señal; huecas y con aspa, sin conectar). Un clic abre encima de la barra
+  una ventanita: con HSPWIFI, el estado, la lista de redes con su señal y su
+  seguridad, la contraseña (en asteriscos) y «Buscar», «Conectar»,
+  «Desconectar» y «Olvidar»; con HSPRED, el enlace, la IP y la puerta de
+  enlace; y siempre «Configuración de red...» (Configuración › Red). Todo
+  en `ventanas/wifi.inc` (parte alta: 6.784 octetos; la parte baja no cambia) y `bsswifi.inc`; los
+  detalles, en docs/WIFI.md («En Hispa Ventanas»). En Hispa-386 no cambia
+  nada.
 - **Botón derecho** en la barra: «Ventanas en cascada», «Ventanas en
   mosaico», «Administrador de tareas...» y «Configuración...». En el botón
   de una ventana: el menú de esa ventana (Restaurar, Minimizar, Maximizar,
@@ -837,6 +849,8 @@ opción `/486` y su línea de ayuda; `barra.inc` ocupa unos 6 KB de la alta):
 | `bt_centro_ini`, `bt_centro_cerrar` | `centro_tarea`, `vista_proc` | el Centro, oculto al entrar y al cerrarlo |
 | `bt_tecla` | `ctx_tecla` (de `ges_tecla`) | Ctrl+Esc y, con el menú abierto, todas las teclas |
 | `bt_clic_fuera` | `ctx_ctrl_clic` (de `eventos`) | un clic fuera del menú lo cierra |
+| `wf_vigilar` | `bt_vigilar` | [WIFI] mira la red cada segundo (cada 3 tics con la ventanita abierta o algo en marcha) y lleva a trozos buscar, preparar la clave y conectar |
+| `wf_pintar_icono`, `wf_en_icono`, `wf_alternar` | `bt_pintar`, `bt_proc` | [WIFI] el icono de red y su ventanita |
 
 La barra es una ventana de primer nivel sin título, de la tarea del sistema;
 el menú y el submenú, dos ventanas emergentes con su propia clase

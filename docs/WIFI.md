@@ -85,6 +85,63 @@ hay que recalcularla en cada arranque (8.192 HMAC-SHA1: medio segundo en un
 Atom, bastante más en un 486). `WIFI CONECTAR red clave` admite también esas
 64 cifras en vez de la contraseña.
 
+### En Hispa Ventanas (Hispa-486): el icono de red y su ventanita
+
+En el escritorio de Hispa-486 (`VENTANAS /486`), el **icono de red** de la
+barra de tareas (a la izquierda del altavoz) dice cómo está la red **por la
+forma**, no solo por el color:
+
+| Icono | Qué quiere decir |
+|---|---|
+| dos nodos huecos y un aspa | sin red: no hay ningún controlador cargado |
+| dos nodos llenos y un aspa | cable (HSPRED) sin enlace |
+| dos nodos llenos unidos | cable (HSPRED u otro *packet driver*) |
+| cuatro rayitas de alto creciente | Wi-Fi conectado: llenas, las de la señal (de 1 a 4, como en `WIFI REDES`); huecas, las demás |
+| las cuatro rayitas huecas | Wi-Fi conectando |
+| las cuatro huecas y un aspa | Wi-Fi sin conectar |
+
+**Un clic** en el icono abre (o cierra) una ventanita encima de la barra,
+como la del volumen:
+
+- **Con HSPWIFI**: arriba, cómo está la conexión («Conectado a «red»» con la
+  señal en rayitas, «Conectando con...», «Buscando redes...», «Wi-Fi: sin
+  conectar») y debajo la señal en dBm y la IP, o por qué no conecta, o lo
+  que toca hacer. Después, **la lista de redes** (la de más señal arriba;
+  la conectada, en negrita) con su señal en rayitas y su seguridad
+  («WPA2», «abierta» o «no admitida»), que se maneja con el ratón o con
+  las flechas (doble clic o Intro: conectar). Al abrirla, si no se conoce
+  ninguna red, busca sola. El cuadro **«Contraseña»** enseña asteriscos.
+  Botones: **«Buscar»**, **«Conectar»** (si la red es WPA2 y no se escribe
+  contraseña, usa la de `RED.INI` si es esa red; si no, la pide),
+  **«Desconectar»**, **«Olvidar»** (desconecta y quita la red de
+  `RED.INI`) y **«Configuración de red...»**.
+- **Con HSPRED**: el enlace (conectado, «no hay (¿está el cable?)» o «no se
+  sabe»), la dirección IP y la puerta de enlace (o «todavía sin dirección»).
+- **Sin red**: lo dice (hay que cargar HSPRED o HSPWIFI).
+- Siempre, **«Configuración de red...»**: abre Configuración en el
+  apartado «Red».
+
+Lo que hace es lo mismo que la orden `WIFI`, por la misma interfaz del
+residente (`INT 2Fh AX=DC01h` con las funciones de
+`wifi/nucleo/llamadas.h`: buscar, lista, conectar, desconectar, estado y
+preparar la clave por trozos); **no ha hecho falta ninguna llamada nueva en
+HSPWIFI**. Al conectar guarda en `RED.INI` `WIFI=` y `WIFICLAVE=` (la clave
+preparada, nunca la contraseña) y borra la configuración IP de la red
+anterior, como `WIFI CONECTAR`; la dirección IP se pide luego con `CONFRED`
+(la segunda línea lo recuerda: «sin IP: falta CONFRED»). La contraseña
+escrita se borra de la memoria en cuanto se prepara la clave (o al cerrar
+la ventanita). Lo que tarda (buscar, unos 2 s; preparar la clave, 8.192
+HMAC-SHA1; conectar) no para el escritorio: se lleva a trozos en cada vuelta
+de la barra; si se cierra la ventanita conectando, la conexión sigue y se
+guarda igual. Ver `ventanas/wifi.inc` y docs/VENTANAS.md.
+
+Configuración (`CONFIG.HVP`, que está en marcha todo el rato) vuelve a leer
+`WIFI=` y `WIFICLAVE=` del disco justo antes de escribir `RED.INI`: así no
+deshace lo que haya cambiado la ventanita o la orden `WIFI` mientras tanto.
+
+En Hispa-386 (sin barra de tareas) no cambia nada: el icono de la barra de
+arriba sigue siendo el de siempre y no se pulsa.
+
 ### Lo que admite
 
 - Redes **abiertas** y con **WPA2-Personal (clave compartida) con AES/CCMP**:
@@ -299,8 +356,10 @@ tiene).
 - Solo 802.11b/g, sin ahorro de energía, sin 802.11n (agregación) ni 5 GHz.
 - El nombre de la red se escribe tal cual: con eñes o acentos (UTF-8 en el
   router) no coincide con lo que se teclea; para esas, el número de la lista.
-- La ventanita de Hispa Ventanas para elegir red (junto al icono de red de
-  la barra de tareas) **no está hecha**: de momento, la orden `WIFI`.
+- La ventanita de Hispa Ventanas no pide la dirección IP: tras conectar,
+  `CONFRED` (o `WIFI /AUTO` y `CONFRED` en `AUTOEXEC.BAT`). Enseña las 6
+  primeras redes a la vista (16 en la lista, con las flechas); las redes
+  ocultas salen sin nombre.
 
 ## Pruebas
 
@@ -333,6 +392,13 @@ tiene).
    camino completo del controlador, y el registro en el disco.
 6. Con HSPEMM: lo dice y no se carga. Con HSPRED: tampoco, salvo con
    `/JUNTO` (y entonces la red sigue por el cable).
+
+`tests/run_wifi_ventana_tests.sh` (en `make test`): el icono y la ventanita
+de Hispa Ventanas en QEMU, con `HSPWIFI /SIMULA` (sin conectar, la lista,
+la contraseña pedida y en asteriscos, la equivocada, conectado y el icono
+lleno, `RED.INI` sin la contraseña, desconectar, conectar con la clave
+guardada, olvidar, «Configuración de red...»), con una e1000 y HSPRED
+(enlace, IP, puerta de enlace) y sin red.
 
 Fallos que sacaron estas pruebas (y que en el equipo habrían sido un cuelgue
 sin explicación): un puntero nulo al encender la radio (el canal tiene que
@@ -378,8 +444,8 @@ Qué mirar primero si falla, por orden:
 ## Lo que sigue
 
 - **Probarlo en el HP Mini** y corregir con el registro.
-- La ventana de Hispa Ventanas (elegir red y escribir la clave) y el icono de
-  red de la barra con la señal.
+- Que la ventanita de la red pida también la dirección IP (DHCP) al
+  conectar, sin `CONFRED`.
 - 802.11n (MCS, agregación) y 5 GHz: el controlador de la radio ya los lleva.
 - La clave de grupo TKIP (routers en modo mixto WPA/WPA2).
 - Usar la interrupción de la tarjeta cuando se sepa que su línea es solo suya.
