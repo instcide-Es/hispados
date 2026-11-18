@@ -150,7 +150,7 @@ config() { tecla ctrl-esc; sleep 0.8; tecla c; sleep 0.4; tecla ret; sleep 3; }
   tecla ret; sleep 1; shot b0; clic 286 303; sleep 2; tecla esc; sleep 1.5; ir 700 540; shot b9    # «Ajustada»
   config; clic 286 375; sleep 2; ir 700 540; shot e0; tecla esc; sleep 1.5; shot e1    # «Estirada»
   config; clic 286 399; sleep 2; tecla esc; sleep 1.5; ir 700 540; shot e2    # «Rellenar»
-  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 4
+  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla down; tecla down; tecla ret; sleep 4   # (en 486, «Apagar» es lo elegido: dos abajo, «Volver a Hispa-DOS»)
   send 'ECHO TRAS-SALIR' 2
   mon quit; } | TMAX=270 run
 echo "-- el fondo, ajustado a la pantalla, detrás de la barra de tareas --"
@@ -227,7 +227,7 @@ RX=320; RY=240
   ir 300 460; shot v1
   config; clic 116 338; sleep 1; ir 620 20; shot v2
   clic 206 265; sleep 1.5; tecla esc; sleep 2; ir 300 460; shot v3
-  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 4
+  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla down; tecla down; tecla ret; sleep 4
   send 'ECHO TRAS-SALIR' 2
   mon quit; } | TMAX=150 run
 echo "-- VGA de 16 colores: no hay imagen, queda el dibujo; la clave no se pierde --"

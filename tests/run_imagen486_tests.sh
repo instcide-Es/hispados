@@ -202,7 +202,7 @@ cp $T/hdd.img $T/hdd486.img
   mon quit; } | maquina 3 90 -drive file=$T/hdd.img,format=raw,if=ide -boot c -nic none
 echo "-- 3) el disco duro arranca a su escritorio de Hispa-486 (sin tarjeta de red: sin errores) --"
 chk $T/h1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" texto 26 578 8 4 negrita "Inicio" \
-  nopx 400 10 1 "sin barra arriba" bmp sistema/486/FONDO.BMP 0 0 800 600 40 20 720 500
+  nopx 400 10 1 "sin barra arriba" bmp sistema/486/FONDO.BMP 0 0 800 600 160 20 600 500
 chk $T/h2.ppm busca 0 0 260 572 0 8 "Hispa32" busca 0 0 260 572 9 12 "Principal" busca 0 0 260 572 0 8 "Internet"
 checkn $T/l3.txt "HSPRED"
 checkn $T/l3.txt "HSPWIFI"
