@@ -154,7 +154,7 @@ empiece por `HispaNavegador/`; la versión es la de `NAV_VERSION` en
 
 ## Dónde está y qué necesita
 
-- **El disquete «Internet»** (`make internet` → `build/internet.img`, 279 KB
+- **El disquete «Internet»** (`make internet` → `build/internet.img`, 336 KB
   ocupados): `NAVEGA.EXE`, `HTTPS.EXE`, `WSOCK32.DLL`, `HSPTLS.DLL`,
   `MSVCRT.DLL`, `HW32.COM`, `NAVEGA.INI` y `LEEME.TXT`. Se puede usar desde el
   disquete (abriendo `B:\NAVEGA.EXE` desde el Administrador de archivos) o,
@@ -167,6 +167,9 @@ empiece por `HispaNavegador/`; la versión es la de `NAV_VERSION` en
 - **Antes de entrar en Hispa Ventanas:** `HSPXMS` en CONFIG.SYS y `HSPRED`
   cargado (el controlador de la tarjeta de red: docs/RED.md). Si no hay red,
   el Navegador lo dice en la propia página.
+- **Para abrir lo que se descarga:** el Lector (los PDF) va en el disquete
+  «Oficina» y Mirador (las imágenes) en el primero; si no están, lo bajado
+  se guarda igual y se dice dónde.
 - **El reloj en hora.** Un certificado solo vale entre dos fechas: con el
   reloj del equipo en 1980 (la pila gastada) ninguna página https se abre, y
   el aviso lo dice («Compruebe la fecha del equipo»).
@@ -214,17 +217,25 @@ Probado otra vez contra clicgest.es de verdad (la demostración, solo
 lecturas: ni préstamos ni cambios), capturas en `docs/486/navegador/`
 (desde la 22):
 
-- **Portadas e imágenes:** el catálogo con las portadas al lado de cada
-  libro (`22_catalogo_portadas.png`), la ficha con la portada grande y sus
-  datos al lado (`23_ficha_portada.png`).
+- **Se reconoce:** ClicGest ya le da su versión adaptada por el User-Agent
+  (el menú en dos líneas arriba, «Ver la versión normal»):
+  `23_catalogo_menu_adaptado.png`, `31_panel.png`.
+- **Portadas e imágenes:** el catálogo con las portadas (JPEG de 600×900,
+  56×80 en la página) al lado de cada libro (`22_catalogo_portadas.png`), la
+  ficha con la portada grande y sus datos al lado (`24_ficha_portada.png`).
+  Con el catálogo y sus 10 portadas abierto, el Navegador gasta lo mismo que
+  con la biblioteca de la prueba: 1,7 MB (`32_memoria_catalogo.png`: 13.740 K
+  libres antes, 12.036 K con él).
 - **Subir la portada:** la ficha del libro, «Portada», tiene su campo de
-  archivo con «Examinar...» y el diálogo de abrir (`24_portada_examinar.png`,
-  `25_portada_dialogo.png`). No se ha subido nada a la demostración; la
-  subida entera (el diálogo, `multipart/form-data`, y que llega el archivo
-  igual) la comprueba la prueba automática.
+  archivo con «Examinar...» y el diálogo de abrir (`25_portada_examinar.png`,
+  `26_portada_dialogo.png`); «Subir» sin archivo no envía nada y lo dice
+  (`27_portada_falta_archivo.png`). No se ha subido nada a la demostración;
+  la subida entera (el diálogo, `multipart/form-data`, y que llega el
+  archivo igual) la comprueba la prueba automática.
 - **Descargas:** el «Manual (PDF)» del panel (3,3 MB, con
-  `Content-Disposition`) va al diálogo de guardar y luego, al disco y al
-  Lector (`26_manual_guardar.png`, `27_manual_lector.png`).
+  `Content-Disposition`) va al diálogo de guardar (`28_manual_guardar.png`),
+  al disco sin pasar por la memoria (`29_manual_guardado.png`) y al Lector,
+  con sus 653 páginas (`30_manual_lector.png`).
 - **La sesión guardada:** con «Mantener la sesión iniciada» marcada, ClicGest
   da una galleta de 180 días que ahora se guarda (`GALLETAS.TXT`); la prueba
   automática cierra el Navegador, lo abre otra vez y entra sin clave. (La
@@ -278,12 +289,14 @@ texto (no dependen de Hispa Ventanas).
 
 | | |
 |---|---|
-| `NAVEGA.EXE` | 78 KB |
+| `NAVEGA.EXE` | 130 KB (78 antes de lo de ClicGest entero: 23 KB son los formatos de Mirador) |
 | `HSPTLS.DLL` (TLS, con BearSSL y 20 autoridades raíz) | 87 KB |
 | `WSOCK32.DLL` (TCP/IP y Winsock) | 23 KB |
-| El disquete «Internet» entero | 279 KB de 1.440 |
-| Memoria con una página de la biblioteca abierta | 1,6 MB (1.608 KB) |
-| Memoria con una página de 121 KB de HTML (unas 2.170 filas) | 2,6 MB (2.632 KB); no crece más con el resto de páginas de la prueba |
+| El disquete «Internet» entero | 336 KB de 1.440 |
+| Memoria con una página de la biblioteca abierta | 1,7 MB (1.704 KB; 1.608 antes de las imágenes) |
+| La misma, con el catálogo de ClicGest y sus 10 portadas | 1,7 MB (1.704 KB) |
+| Memoria con una página de 121 KB de HTML (unas 2.170 filas) | 2,7 MB (2.728 KB); no crece más con el resto de páginas de la prueba |
+| Lo que se recuerda de las imágenes ya vistas | 320 KB como mucho |
 | Memoria convencional | 16 KB (el búfer de DOS de HW32) + 19 KB (las tramas de red) |
 | Apretón de manos de TLS con clicgest.es, la primera vez | 216 millones de instrucciones: unos 15 s en un 486DX2-66 |
 | El mismo, con el certificado recordado (una semana) | 22 millones: 1,4 s en un 486DX2-66 |
