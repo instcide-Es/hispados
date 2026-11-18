@@ -515,6 +515,7 @@ crea FAT32 si se pide).
   SYS, arrancar de la FAT32, primaria y lógica), un disco de `mkfs.fat`
   leído y escrito, `fsck.fat` limpio en todo lo nuestro y REVISAR con un
   vínculo cruzado y cadenas perdidas puestos a mano.
+  55 comprobaciones, unos 5 minutos (los discos no ocupan lo que miden).
 
 ### Lo que faltaría: nombres largos (LFN)
 
