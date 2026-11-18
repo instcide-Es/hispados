@@ -24,7 +24,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 import base64, binascii, hashlib, os, random, ssl, struct, sys, threading, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(globals().get('__file__', 'tests/tools/nav_servidor.py'))))
 import nav_js    # [JS] tests/tools/nav_js.py
 
 CARPETA, PUERTO = sys.argv[1], int(sys.argv[2])

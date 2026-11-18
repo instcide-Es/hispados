@@ -29,21 +29,28 @@ char *strrchr(const char *, int);
 char *strstr(const char *, const char *);
 int atoi(const char *);
 int sprintf(char *, const char *, ...);
+#ifdef NAV_ANFITRION
+/* [JS] la prueba en el anfitrión (tests/navjs/hazlo.sh): las del sistema */
+#include <stdio.h>
+#include <time.h>
+unsigned long strtoul(const char *, char **, int);
+#else
 u32 strtoul(const char *, char **, int);
 long time(long *);
 /* [JS] script.c trae antes el stdio.h de w32/js/inc (el de QuickJS): su FILE */
-#ifndef HJ_STDIO_H
+#ifndef EOF
 typedef struct FILE FILE;
 FILE *fopen(const char *, const char *);
 char *fgets(char *, int, FILE *);
 int fputs(const char *, FILE *);
 u32 fread(void *, u32, u32, FILE *);
 u32 fwrite(const void *, u32, u32, FILE *);
+int fclose(FILE *);
 #endif
 int fseek(FILE *, long, int);
 long ftell(FILE *);
-int fclose(FILE *);
 int remove(const char *);
+#endif
 
 /* cómo se presenta el Navegador a los servidores (User-Agent) */
 #define NAV_VERSION "0.2"

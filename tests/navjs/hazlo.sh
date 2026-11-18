@@ -14,7 +14,7 @@ for f in quickjs libregexp libunicode cutils dtoa; do
   [ $B/$f.o -nt $Q/$f.c ] || gcc $QF -c $Q/$f.c -o $B/$f.o
 done
 python3 -c "import sys; d = open(sys.argv[1], 'rb').read(); print('static const char dom_js[] = {' + ','.join(str(b) for b in d) + ',0};')" w32/navega/dom.js > $B/nav_domjs.h
-NF="-m32 -O0 -g -Wall -Wno-parentheses -Wno-sign-compare -Wno-unused-parameter -Wno-builtin-declaration-mismatch -Wno-incompatible-pointer-types -Iw32/navega -I$B -I$Q"
+NF="-m32 -O0 -g -DNAV_ANFITRION -Wall -Wno-parentheses -Wno-sign-compare -Wno-unused-parameter -Wno-builtin-declaration-mismatch -Wno-incompatible-pointer-types -Iw32/navega -I$B -I$Q"
 W="-Dsocket=w_socket -Dconnect=w_connect -Dsend=w_send -Drecv=w_recv -Dclosesocket=w_closesocket -Dioctlsocket=w_ioctlsocket -Dselect=w_select -Dgethostbyname=w_gethostbyname -Dhtons=w_htons"
 gcc $NF -c w32/navega/html.c -o $B/html.o
 gcc $NF -c w32/navega/pagina.c -o $B/pagina.o

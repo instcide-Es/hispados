@@ -1919,7 +1919,7 @@ void inicio_prog(void) {
   while (*cmd == ' ') cmd++;
   if (*cmd) ir_dir(cmd); else ir(inicio, 0, NULL, 0, 0);
   for (;;) {
-    if (cargando || img_trabajo()) {
+    if (cargando || js_ocupado() || img_trabajo()) {
       while (PeekMessageA(&m, NULL, 0, 0, 1)) {
         if (m.message == WM_QUIT) goto fin;
         TranslateMessage(&m);
@@ -1929,7 +1929,7 @@ void inicio_prog(void) {
         carga_avanza();
         if (!cargando) guarda_galletas();
       } else if (icarga < 0 && js_ocupado()) js_avanza();   /* [JS] guiones que llegan, fetch (antes que las imágenes; la conexión es una) */
-      else img_avanza();
+      else if (img_trabajo()) img_avanza();
     } else {
       if (!GetMessageA(&m, NULL, 0, 0)) break;
       TranslateMessage(&m);

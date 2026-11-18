@@ -111,14 +111,16 @@ static void sale(const char *t) {
   b[n] = 0;
   printf("%s\n", b);
 }
+/* (la de navega.c: aquí todo es del mismo servidor de pruebas) */
+int nav_cruzada(const char *de, const char *a) { (void)de; (void)a; return 0; }
 static void cb_remaqueta(void) { pag_maqueta(pag, COLS); }
 static void cb_ir(const char *u, int post, char *c, u32 n) { char b[1200]; sprintf(b, "IR: %.1000s", u); sale(b); free(c); (void)post; (void)n; se_va = 1; }
 static void cb_envia(Nodo *f, Nodo *bt) {
-  char *url, *cuerpo, b[2400];
+  char *url, *cuerpo, b[2400], tipo[96];
   u32 nc;
   int post, k = -1, j;
   for (j = 0; bt && j < pag->n_ctl; j++) if (pag->ctl[j].nodo == bt) k = j;
-  if (!pag_formulario(pag, f, k, &url, &cuerpo, &nc, &post)) { sale("ENVIA: no se puede"); return; }
+  if (!pag_formulario(pag, f, k, &url, &cuerpo, &nc, &post, tipo)) { sale("ENVIA: no se puede"); return; }
   sprintf(b, "ENVIA: %s %.1000s %.1000s", post ? "POST" : "GET", url, cuerpo ? cuerpo : "");
   sale(b);
   free(url); free(cuerpo);
