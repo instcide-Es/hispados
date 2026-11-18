@@ -369,6 +369,12 @@ Se aceptan *pull requests*. Normas importantes:
 - Cada función nueva de INT 21h debe ir acompañada de una comprobación en `tests/`.
 - Windows 3.1 y otros programas de terceros no se incluyen en el repositorio: cada uno usa su propia copia legal.
 
+## Agradecimientos
+
+A [ClicGest](https://clicgest.es/), que presta su servidor al proyecto: en él se
+compila y se prueba Hispa-DOS, sirve las actualizaciones por la red
+(`ACTUALIZAR`, en actualiza.clicgest.es) y la web [hispados.es](https://hispados.es/).
+
 ## Licencia
 
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior (GPL-2.0-or-later). Ver [LICENSE](LICENSE).
@@ -391,3 +397,5 @@ make test            # automated end-to-end test over the serial port
 ```
 
 Contributions are welcome. Please never submit Microsoft code or disassembly. Copyright (C) 2026 Carlos Sanz y contribuidores. Licensed under GPL-2.0-or-later.
+
+Thanks to [ClicGest](https://clicgest.es/), which lends its server to the project: building and testing, the network updates (`ACTUALIZAR`) and the hispados.es website.
