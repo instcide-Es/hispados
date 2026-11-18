@@ -102,7 +102,8 @@ PE_CAR_N    equ PE_CAR_H + 4        ;     las veces que se ha escondido
 PE_CAR_DIB  equ PE_CAR_N + 4        ;     y si está en la pantalla
 PE_SICO     equ PE_CAR_DIB + 4      ;   los iconos de serie (6)
 PE_TEC_ULT  equ PE_SICO + 6 * 4     ;   el carácter de la última tecla (ToAscii)
-PE_TAM      equ PE_TEC_ULT + 4
+PE_DXTIC    equ PE_TEC_ULT + 4      ; [DX] la función de HispaDXTic (suya)
+PE_TAM      equ PE_DXTIC + 4
 
 PT_TAM      equ 28                  ; un trampolín: push (5), jmp lejos (7) y
 PT_PE       equ 12                  ;   la ficha del programa,
@@ -271,6 +272,7 @@ pe_abrir:
         lea edi, [edx+PE_PARAM]
         mov ecx, 71
         call cad_copiar
+        call dx_carpeta             ; [DX] la carpeta de trabajo: la suya
         mov dword [edx+PE_USO], 2   ; (si algo falla, pe_limpiar lo suelta)
         mov ecx, PE_TRAMP_TAM       ; el sitio de sus trampolines
         call mem_pedir
@@ -1097,6 +1099,7 @@ pe_limpiar:
 .b2:
         cmp dword [edx+PE_USO], 2
         jne .s
+        call dx_fin_prog            ; [DX] si tenía la pantalla, se devuelve
         mov esi, [edx+PE_MOD]
         test esi, esi
         jz .m
@@ -1154,6 +1157,18 @@ w32_tabla:
         W32F k_LockResource, 4, 0, 'LockResource'
         W32F k_SizeofResource, 8, 0, 'SizeofResource'
         W32F u_MessageBoxA, 16, 1, 'MessageBoxA'
+        W32F u_HispaDXPantalla, 16, 1, 'HispaDXPantalla'    ; [DX] fase 5 (win32dx.inc)
+        W32F u_HispaDXSonido, 16, 1, 'HispaDXSonido'        ; [DX]
+        W32F u_HispaDXEntrada, 12, 1, 'HispaDXEntrada'      ; [DX]
+        W32F u_HispaDXTic, 4, 1, 'HispaDXTic'               ; [DX]
+        W32F u_ShowCursor, 4, 1, 'ShowCursor'               ; [DX]
+        W32F u_uno, 4, 1, 'ClipCursor'                      ; [DX]
+        W32F u_CreateMenu, 8, 1, 'GetSystemMenu'            ; [DX] (un menú vacío: el del sistema es el de Hispa Ventanas)
+        W32F u_cero, 16, 1, 'GetMenuItemInfoA'              ; [DX] lo justo para FCE Ultra: se dice que
+        W32F u_uno, 16, 1, 'SetMenuItemInfoA'               ;   no se sabe (0) o que se ha hecho, sin
+        W32F u_uno, 16, 1, 'InsertMenuItemA'                ;   tocar el menú (los menús por posición
+        W32F u_uno, 12, 1, 'RemoveMenu'                     ;   y MENUITEMINFO, más adelante)
+        W32F u_cero, 12, 1, 'GetKeyNameTextA'               ; [DX]
         ; fase 3b: USER32 (win32u.inc)
         W32F u_RegisterClassA, 4, 1, 'RegisterClassA'
         W32F u_RegisterClassExA, 4, 1, 'RegisterClassExA'

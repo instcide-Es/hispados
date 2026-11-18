@@ -2975,13 +2975,244 @@ k_IsDBCSLeadByteEx:                 ; (página, c): sin páginas de dos octetos
 k_IsDBCSLeadByte:
         xor eax, eax
         ret
+;  [DX] Los átomos (AddAtomA, FindAtomA, GetAtomNameA, DeleteAtom): una
+;  tabla de N_ATOMO textos de hasta 63 letras, sin distinguir mayúsculas. El
+;  arranque de los programas de MinGW los usa para compartir un puntero.
+;  Un átomo es C000h + su número. («#123» es el átomo entero 123.)
+N_ATOMO     equ 16
+; ES:ESI = un texto del programa -> CF=0 y EAX = su número en la tabla, si
+; está; ECX = el primero libre (o -1)
+atomo_busca:
+        push ebx
+        push edx
+        push edi
+        or ecx, -1
+        xor ebx, ebx
+.b:
+        mov edi, ebx
+        shl edi, 6
+        add edi, atomos
+        cmp byte [edi], 0
+        jne .c
+        cmp ecx, -1
+        jne .s
+        mov ecx, ebx
+        jmp .s
+.c:
+        xor edx, edx
+.c1:
+        mov al, [es:esi + edx]
+        mov ah, [edi + edx]
+        call mayus2
+        cmp al, ah
+        jne .s
+        test al, al
+        jz .si
+        inc edx
+        cmp edx, 63
+        jb .c1
+.s:
+        inc ebx
+        cmp ebx, N_ATOMO
+        jb .b
+        stc
+        jmp .x
+.si:
+        mov eax, ebx
+        clc
+.x:
+        pop edi
+        pop edx
+        pop ebx
+        ret
+k_FindAtomA:                        ; (nombre)
+        mov esi, [ebp]
+        call atomo_busca
+        jc .no
+        add eax, 0xC000
+        ret
+.no:
+        mov dword [ult_error], 2    ; ERROR_FILE_NOT_FOUND
+        xor eax, eax
+        ret
+k_AddAtomA:                         ; (nombre)
+        mov esi, [ebp]
+        call atomo_busca
+        jnc .ya
+        cmp ecx, -1
+        je .no
+        mov edi, ecx
+        shl edi, 6
+        add edi, atomos
+        xor edx, edx
+.c:
+        mov al, [es:esi + edx]
+        mov [edi + edx], al
+        test al, al
+        jz .f
+        inc edx
+        cmp edx, 63
+        jb .c
+        mov byte [edi + edx], 0
+.f:
+        mov eax, ecx
+.ya:
+        mov word [atomos_n + eax * 2], 0
+        inc word [atomos_n + eax * 2]
+        add eax, 0xC000
+        ret
+.no:
+        mov dword [ult_error], 8
+        xor eax, eax
+        ret
+k_GetAtomNameA:                     ; (átomo, búfer, tamaño) -> letras
+        mov eax, [ebp]
+        sub eax, 0xC000
+        jb .no
+        cmp eax, N_ATOMO
+        jae .no
+        mov esi, eax
+        shl esi, 6
+        add esi, atomos
+        cmp byte [esi], 0
+        je .no
+        mov edi, [ebp + 4]
+        mov ecx, [ebp + 8]
+        xor eax, eax
+        jecxz .no
+        dec ecx
+.c:
+        cmp eax, ecx
+        jae .f
+        mov dl, [esi + eax]
+        test dl, dl
+        jz .f
+        mov [es:edi + eax], dl
+        inc eax
+        jmp .c
+.f:
+        mov byte [es:edi + eax], 0
+        ret
+.no:
+        mov dword [ult_error], 6    ; ERROR_INVALID_HANDLE
+        xor eax, eax
+        ret
+k_DeleteAtom:                       ; (átomo) -> 0 si bien
+        mov eax, [ebp]
+        sub eax, 0xC000
+        jb .x
+        cmp eax, N_ATOMO
+        jae .x
+        shl eax, 6
+        mov byte [atomos + eax], 0
+.x:
+        xor eax, eax
+        ret
+
 k_LoadLibraryA:                     ; (nombre)
 k_LoadLibraryExA:                   ; (nombre, 0, opciones)
         mov esi, [ebp]
         call dll_cargada            ; (las que ya trae el programa)
         jnc .x
-        jmp es_kernel32
+        call es_kernel32
+        test eax, eax
+        jnz .x
+        ; [DX] una que no trae: se carga ahora (con las suyas) y se llama a
+        ; sus DllMain. Así van los programas que piden DDRAW.DLL o DSOUND.DLL
+        ; con LoadLibraryA, y los comprimidos con UPX (que lo cargan todo así)
+        mov esi, [ebp]
+        call dll_cargada            ; (el nombre otra vez a b_dll)
+        call alias_ucrt
+        call ficha_de_b_dll
+        jnc .ya
+        ; carga_dll trabaja con [EBP+...] (por SS): en la pila de HW32, no
+        ; en la del programa, que es donde se está ahora
+        mov [dll_args], ebp
+        mov eax, [n_init]
+        mov [dll_n0], eax
+        mov [dll_esp_p], esp
+        mov [dll_ss_p], ss
+        mov ss, [sel_ss32]
+        mov esp, pila16_cima
+        mov byte [dll_suave], 1
+        call carga_dll              ; -> EBP su ficha; CF=1 si no está
+        mov byte [dll_suave], 0
+        mov eax, 0
+        jc .c1
+        mov eax, [ebp + M_DIR]
+.c1:
+        mov ss, [dll_ss_p]
+        mov esp, [dll_esp_p]
+        mov ebp, [dll_args]
+        test eax, eax
+        jz .no
+        push eax
+        mov ecx, [dll_n0]
+        call dll_iniciar            ; los DllMain de las nuevas (desde ECX)
+        pop eax
+        ret
+.no:
+        mov dword [ult_error], 126  ; ERROR_MOD_NOT_FOUND
+        xor eax, eax
+        ret
+.ya:
+        mov eax, [edx + M_DIR]
 .x:
+        ret
+; [DX] (k_LoadLibraryA) los DllMain de init_lista desde ECX hasta n_init, con
+; un trampolín en lo nuestro (+0x4000, el de inicio, que ya no hace falta)
+; que acaba saltando lejos a dll_vuelve. Corren en la pila del programa, por
+; debajo de esta llamada, como un hilo (hw32hilo.inc)
+dll_iniciar:
+        push es
+        mov es, [sel_pd]
+        mov edi, [img_base]
+        add edi, [misc_off]
+        add edi, 0x4000
+        mov esi, edi
+        xor edx, edx                ; ¿alguno tiene DllMain?
+.b:
+        cmp ecx, [n_init]
+        jae .f
+        mov ebx, [init_lista + ecx * 4]
+        inc ecx
+        mov eax, [ebx + M_ENT]
+        test eax, eax
+        jz .b
+        inc edx
+        mov dword [es:edi], 0x016A006A      ; push 0 ; push 1
+        mov byte [es:edi + 4], 0x68         ; push hinst
+        mov ebx, [ebx + M_DIR]
+        mov [es:edi + 5], ebx
+        mov byte [es:edi + 9], 0xB8         ; mov eax, DllMain
+        add eax, ebx
+        mov [es:edi + 10], eax
+        mov word [es:edi + 14], 0xD0FF      ; call eax
+        add edi, 16
+        jmp .b
+.f:
+        test edx, edx
+        jz .x
+        mov byte [es:edi], 0xEA             ; jmp lejos dll_vuelve
+        mov dword [es:edi + 1], dll_vuelve
+        mov [es:edi + 5], cs
+        mov [dll_esp], esp
+        mov [dll_ebp], ebp
+        movzx eax, word [sel_pc]
+        push eax
+        push esi
+        mov ax, [sel_pd]
+        mov ds, ax
+        retf
+.x:
+        pop es
+        ret
+dll_vuelve:
+        mov ds, [cs:sel_ds_cs]
+        cld
+        mov esp, [dll_esp]
+        mov ebp, [dll_ebp]
+        pop es
         ret
 es_kernel32:
         ; ¿KERNEL32 (con .DLL o sin él)?
@@ -4107,6 +4338,10 @@ funciones:
         FUNC k_LoadLibraryA, 4, 'LoadLibraryA'
         FUNC k_LoadLibraryExA, 12, 'LoadLibraryExA'
         FUNC k_FreeLibrary, 4, 'FreeLibrary'
+        FUNC k_AddAtomA, 4, 'AddAtomA'              ; [DX] (el arranque de MinGW)
+        FUNC k_FindAtomA, 4, 'FindAtomA'
+        FUNC k_GetAtomNameA, 12, 'GetAtomNameA'
+        FUNC k_DeleteAtom, 4, 'DeleteAtom'
         FUNC k_GetModuleFileNameA, 12, 'GetModuleFileNameA'
         FUNC k_GetProcAddress, 8, 'GetProcAddress'
         FUNC k_GetVersion, 0, 'GetVersion'

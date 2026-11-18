@@ -714,6 +714,7 @@ w32_traducir:
         or ecx, 8
 .r7:
         pop ebx
+        call dx_raton               ; [DX] en pantalla completa, a las coordenadas del juego
         clc
         ret
 .nor:
@@ -957,6 +958,12 @@ w32_ven_proc:
 .foco:
         cmp dword [ebp+V_PADRE], 0
         jne .f1
+        mov eax, 0x001C             ; [DX] WM_ACTIVATEAPP (TRUE): los juegos de
+        mov ecx, 1                  ; DirectX solo pintan si les ha llegado
+        xor edx, edx
+        call w32_proc
+        call w32_viva
+        jne .cero
         mov eax, 0x0006             ; WM_ACTIVATE, WA_ACTIVE
         mov ecx, 1
         xor edx, edx
@@ -979,6 +986,12 @@ w32_ven_proc:
         jne .cero
         mov eax, 0x0006             ; WM_ACTIVATE, WA_INACTIVE
         xor ecx, ecx
+        call w32_proc
+        call w32_viva               ; [DX] y WM_ACTIVATEAPP (FALSE)
+        jne .cero
+        mov eax, 0x001C
+        xor ecx, ecx
+        xor edx, edx
         jmp w32_proc
 ; una tecla: WM_KEYDOWN, WM_CHAR (si escribe) y WM_KEYUP
 .tecla:
@@ -1860,6 +1873,7 @@ u_PeekMessageA:
 ; puntero de Hispa Ventanas). AL=0: espera (cede el turno); 1: no espera
 ; -> CF=1 si no hay ninguno; EAX=0 si es WM_QUIT. Conserva EBP, EDX y EDI
 w32_tomar:
+        call dx_tic                 ; [DX] WINMM: el sonido y sus temporizadores
         push ebp
         push ebx
         push esi
@@ -1997,6 +2011,7 @@ w32_tomar:
         cmp dword [esp], 0
         jne .n1
         call tar_ceder
+        call dx_tic                 ; [DX] (mientras espera, también)
         jmp .l
 .n1:
         cmp dword [esp], 2
@@ -2477,6 +2492,8 @@ u_tmp_quitar:
 ; int GetSystemMetrics(cuál)
 u_GetSystemMetrics:
         mov ecx, [ebp]
+        call dx_metricas            ; [DX] con la pantalla tomada, el modo del juego
+        jc .x
         mov eax, [vid_ancho]        ; SM_CXSCREEN, SM_CXFULLSCREEN
         test ecx, ecx
         jz .x

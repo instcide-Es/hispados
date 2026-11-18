@@ -792,12 +792,16 @@ carga_dll:
         mov esi, b_vacio
         call prueba_dll
         jnc .abierta
+        cmp byte [dll_suave], 0     ; [DX]
+        jne .suave
         cmp byte [md_modulo], 0
         je .dos
         mov dword [md_error2], b_dll
         mov esi, m_falta_dll
         jmp falla
 .dos:
+        cmp byte [dll_suave], 0     ; [DX] (LoadLibraryA) no está: se dice y ya
+        jne .suave
         mov esi, m_falta_dll
         call pon_cad
         mov esi, b_dll
@@ -807,9 +811,15 @@ carga_dll:
         mov ax, 0x4CFF
         int 0x21
 .muchas:
+        cmp byte [dll_suave], 0     ; [DX]
+        jne .suave
         mov esi, m_muchas_dll
         jmp falla
+.suave:
+        stc
+        ret
 .abierta:
+        mov byte [dll_suave], 0     ; [DX] (las que pida esta, como siempre)
         mov eax, [img_tam]
         add eax, 0xFFF
         and eax, ~0xFFF
@@ -845,6 +855,7 @@ carga_dll:
         mov eax, [n_init]
         mov [init_lista + eax * 4], ebp
         inc dword [n_init]
+        clc                         ; [DX]
         ret
 .sin_mem:
         mov esi, m_sin_mem
@@ -1726,6 +1737,7 @@ mod_cargar:
         call sel_de_seg
         mov [sel_env], ax
 .sin_env:
+        call traza_dx               ; [DX] SET HISPADX=TRAZA: la traza, por COM1
         mov dword [resto], mod_param
         call carga_pe
         call prepara
@@ -1957,8 +1969,70 @@ hex_a_edi:
         pop ebx
         pop ecx
         ret
-; lo que hay en b_traza hasta EDI, por el handle 2
+; [DX] (módulo, dentro de Hispa Ventanas) con «SET HISPADX=TRAZA», la traza
+; de HW32 /T, pero por el puerto serie COM1 (no hay consola): así se ve qué
+; pide un programa de DirectX que no arranca
+traza_dx:
+        cmp word [sel_env], 0
+        je .x
+        push es
+        mov es, [sel_env]
+        xor esi, esi
+.v:
+        cmp byte [es:esi], 0        ; (el entorno acaba con una cadena vacía)
+        je .n
+        xor ecx, ecx
+.c:
+        mov al, [s_hispadx + ecx]
+        test al, al
+        jz .si
+        cmp al, [es:esi + ecx]
+        jne .sig
+        inc ecx
+        jmp .c
+.si:
+        mov al, [es:esi + ecx]
+        or al, 0x20
+        cmp al, 't'
+        jne .n
+        mov byte [traza], 1
+        jmp .n
+.sig:
+        cmp byte [es:esi], 0
+        je .s2
+        inc esi
+        cmp esi, 0x8000
+        jb .sig
+        jmp .n
+.s2:
+        inc esi
+        jmp .v
+.n:
+        pop es
+.x:
+        ret
+; lo que hay en b_traza hasta EDI, por el handle 2 ([DX] en el módulo, por COM1)
 traza_sale:
+        cmp byte [md_modulo], 0
+        je .dos
+        push eax
+        push edx
+        push esi
+        mov edx, 0x3F8
+        mov esi, b_traza
+.s:
+        cmp esi, edi
+        jae .sf
+        mov al, [esi]
+        out dx, al
+        inc esi
+        jmp .s
+.sf:
+        pop esi
+        pop edx
+        pop eax
+        ret
+.dos:
         push dword [rm_bx]
         push dword [rm_cx]
         push dword [rm_dx]
@@ -2107,6 +2181,18 @@ rel_tam     dd 0
 mod_dir     dd 0
 n_mods      dd 0
 n_init      dd 0
+s_hispadx   db "HISPADX=", 0
+            align 4
+atomos      times N_ATOMO * 64 db 0  ; [DX] los átomos (hw32k.inc)
+atomos_n    times N_ATOMO dw 0          ; [DX] (traza_dx)
+dll_suave   db 0                    ; [DX] carga_dll: si no está, CF=1 (LoadLibraryA)
+            align 4
+dll_esp     dd 0                    ; [DX] (dll_iniciar)
+dll_ebp     dd 0
+dll_args    dd 0                    ; [DX] (k_LoadLibraryA)
+dll_n0      dd 0
+dll_esp_p   dd 0
+dll_ss_p    dw 0
 init_lista  times N_MOD dd 0
 mods        times N_MOD * MOD_TAM db 0
 b_dll       times 32 db 0
@@ -2176,6 +2262,6 @@ rm_ss_sp    dd 0
 orden       times 130 db 0
 nombre      times 130 db 0
 imp_tab     times MAX_IMP * IMP_FICHA db 0
-            times 512 db 0
+            times 512 + 2048 db 0   ; [DX] (y la pila de LoadLibraryA en marcha)
 pila16_cima:
 fin_prog:

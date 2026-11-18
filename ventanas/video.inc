@@ -190,6 +190,11 @@ vid_paleta:
 
 ; EAX=x0 EBX=y0 ECX=x1 EDX=y1: de la superficie a la pantalla
 vid_presentar:
+        cmp dword [dx_prog], 0      ; [DX] la pantalla es de un programa de DirectX
+        je .dx
+        call dx_tapa
+        jz .dxno
+.dx:
         pushad
         test eax, eax
         jns .a
@@ -214,6 +219,7 @@ vid_presentar:
         call [vid_presenta]
 .x:
         popad
+.dxno:
         ret
 
 ; Los presentadores reciben EAX=x EBX=y ECX=ancho EDX=alto, ya dentro de la

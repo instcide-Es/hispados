@@ -1332,6 +1332,10 @@ rm_int15:
         and bx, 0x007F
         test al, 0x80
         setz [cs:tec_mapa+bx]
+        test al, 0x80               ; [DX] y las que se pulsan, aunque se suelten
+        jnz .dx                     ; antes de que DirectInput mire (tec_dx)
+        mov byte [cs:tec_dx+bx], 1
+.dx:
         call tar_rm_tecla           ; [TAREAS] Ctrl+Alt+Supr: se apunta y a la BIOS le llega otra cosa
         ; [TECLADO] si hay una ventana «Teclado» suscrita, se le reenvía el
         ; código CRUDO (lo ve antes que el remapeo de KEYB, que corre en el
@@ -1371,6 +1375,7 @@ rm_int15:
         jmp far [cs:tec_ant15]
 tec_ant15   dd 0
 tec_mapa    times 128 db 0
+tec_dx      times 128 db 0          ; [DX] pulsadas desde la última vez (HispaDXEntrada 4)
 
 %include "video16.inc"
 %define TAREAS_RM                   ; [TAREAS] el Administrador de tareas: su parte de modo real
@@ -2108,6 +2113,7 @@ alto_ini:
 %include "win32ga.inc"              ; [HISPA-486]   las funciones
 %include "win32x.inc"               ; [HISPA-486]   USER32 de más, COMDLG32, ADVAPI32, SHELL32
 %include "win32n.inc"               ; [NAVEGADOR] WinExec (lo demás, en la fase 3d)
+%include "win32dx.inc"              ; [DX] fase 5: lo que piden DDRAW, DSOUND, DINPUT y WINMM
 %endif
         align 16
 fin_archivo:
@@ -2118,6 +2124,7 @@ pila_fin:
 %ifdef CON_PROGRAMAS
 %include "bss3.inc"
 %include "bss4.inc"                 ; [HISPA-486] fase 3d
+%include "bssdx.inc"                ; [DX] fase 5
 %endif
 %include "bsstam.inc"               ; [TAMAÑO]
 %include "bssctx.inc"               ; [CONTEXTO]
