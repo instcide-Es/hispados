@@ -1358,13 +1358,8 @@ pit_cuenta:
         call .espera
         call .leer
         mov [rel pit_l2], eax
-        mov edx, eax
-        mov eax, [rel pit_l1]
-        cmp eax, edx
-        clc
-        jne .f
-        stc
-.f:     pop rcx
+        call pit_avanza
+        pop rcx
         pop rbx
         ret
 .leer:  pushfq
@@ -1406,8 +1401,12 @@ pit_cuenta:
 pit_decir:
         mov eax, [rel pit_l1]
         cmp eax, [rel pit_l2]
-        jne .si
+        jne .mueve
         DI t_k_no
+        jmp .l
+.mueve: call pit_avanza
+        jnc .si
+        DI t_k_lento
         jmp .l
 .si:    DI t_k_si
 .l:     mov eax, [rel pit_l1]
@@ -1417,12 +1416,19 @@ pit_decir:
         mov eax, [rel pit_l2]
         call hex
         DI t_k_fin
+        jmp pit_avanza
+
+; pit_avanza: ¿han pasado entre las dos lecturas (pit_l1 y pit_l2, 2 ms) al
+; menos 256 cuentas? A 1,19 MHz son unas 2.400 (el doble en el modo 3). El
+; Monovate 14.1 (Tiger Lake) con el «clock gating» del PCH da un 8254 que solo
+; baja 12 cuentas por lectura: se mueve, pero no cuenta el tiempo, y sin esto
+; se tomaba por bueno y no se probaba a quitar el bloqueo. -> CF si no avanza
+pit_avanza:
         mov eax, [rel pit_l1]
-        cmp eax, [rel pit_l2]
-        clc
-        jne .f
-        stc
-.f:     ret
+        sub eax, [rel pit_l2]           ; (baja: la primera es la mayor)
+        and eax, 0FFFFh
+        cmp eax, 256                    ; CF = 1 si son menos de 256
+        ret
 
 ; pci_leer: EAX = dispositivo y registro (bus 0) -> EAX = la doble palabra
 pci_leer:
@@ -3450,6 +3456,7 @@ t_k_pit         db 'Reloj 8254 (PIT), canal 0: ', 0
 t_k_pit2        db 'Reloj 8254 (PIT) despues de quitar el bloqueo: ', 0
 t_k_si          db 'CUENTA (lecturas ', 0
 t_k_no          db 'NO CUENTA: esta parado (lecturas ', 0
+t_k_lento       db 'NO CUENTA el tiempo: se mueve, pero muy despacio (bloqueado; lecturas ', 0
 t_k_y           db 'h y ', 0
 t_k_fin         db 'h con 2 ms entre medias)', 13, 10, 0
 t_i_lpc         db 'Bloqueo del 8254 (clock gating) del PCH: el puente 00:1F.0 es ', 0
