@@ -4,8 +4,8 @@
 #ifndef LLAMADAS_H
 #define LLAMADAS_H
 #define LL_VERSION 10		/* 0.10 */
-#define LL_INICIA 0		/* petición: struct ll_inicio */
-#define LL_ENCIENDE 1
+#define LL_INICIA 0		/* petición: struct ll_inicio. Busca la tarjeta */
+#define LL_ENCIENDE 1		/* enciende la radio (tras LL_MONTA) */
 #define LL_SONDEA 2		/* -> bit 0: hay una trama; bit 1: hay registro */
 #define LL_RECIBE 3		/* [0] búfer -> octetos */
 #define LL_ENVIA 4		/* [0] trama, [1] octetos */
@@ -19,6 +19,7 @@
 #define LL_PMK_SIGUE 12		/* [0] PMK (32) -> 1 cuando ha terminado */
 #define LL_PARA 13
 #define LL_MAC 14		/* [0] búfer de 6 */
+#define LL_MONTA 15		/* (solo el residente) entre LL_INICIA y LL_ENCIENDE */
 #define LL_OP_SIMULA 1
 #define LL_OP_DETALLE 2
 #define LL_OP_PANTALLA 4

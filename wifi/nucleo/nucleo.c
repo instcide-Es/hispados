@@ -11,6 +11,7 @@
 #include "nucleo.h"
 #include "llamadas.h"
 
+int brcm_busca(void);
 int brcm_monta(struct radio **r);
 int brcm_enciende(void);
 void brcm_cuentas(d32 *bien, d32 *mal, int *vel);
@@ -117,9 +118,23 @@ static int inicia(struct ll_inicio *p)
 #endif
 	hl_fw_pon(0, "brcm/bcm43xx-0.fw", (const u8 *)p->fw_des[0], p->fw_tam[0]);
 	hl_fw_pon(1, "brcm/bcm43xx_hdr-0.fw", (const u8 *)p->fw_des[1], p->fw_tam[1]);
+	r = brcm_busca();
+	if (r == 0)
+		hl_log(2, "PASO 1 de 3 hecho: tarjeta encontrada. Sigue el 2: despertarla, leer sus núcleos y su SPROM y montar el controlador\n");
+	return r;
+}
+
+static int monta(void)
+{
+	u32 t, u, pk;
+	int r;
+
+	if (simulada)
+		return 0;
 	r = brcm_monta(&la_radio);
 	hl_monton_info(&t, &u, &pk);
-	hl_log(2, "Memoria del montón usada: %u KB\n", u >> 10);
+	if (r == 0)
+		hl_log(2, "PASO 2 de 3 hecho: controlador montado (montón: %u KB). Sigue el 3: cargar el microcódigo y encender la radio\n", u >> 10);
 	return r;
 }
 
@@ -142,7 +157,7 @@ static int enciende(void)
 	w80211_inicia(la_radio);
 	listo = 1;
 	hl_monton_info(&t, &u, &pk);
-	hl_log(2, "Memoria del montón usada: %u KB (pico %u KB de %u)\n", u >> 10, pk >> 10, t >> 10);
+	hl_log(2, "PASO 3 de 3 hecho: radio en marcha (montón: %u KB, pico %u KB de %u)\n", u >> 10, pk >> 10, t >> 10);
 	return 0;
 }
 
@@ -160,6 +175,8 @@ int nucleo_llamada(u32 fn, u32 dir)
 	switch (fn) {
 	case LL_INICIA:
 		return inicia((struct ll_inicio *)p);
+	case LL_MONTA:
+		return monta();
 	case LL_ENCIENDE:
 		return enciende();
 	case LL_SONDEA:

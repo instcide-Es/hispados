@@ -1,0 +1,116 @@
+PRUEBA DEL WI-FI DE HISPA-486 EN EL HP MINI 5103 (18/11/2026)
+=============================================================
+
+Que es: el Wi-Fi nuevo (HSPWIFI) para la tarjeta Broadcom BCM43224 del HP
+Mini, con WPA2. Esta probado entero con una tarjeta SIMULADA, pero nunca en
+la tarjeta de verdad: esta prueba es para eso. Lo mas probable es que la
+primera vez NO funcione; lo importante es el archivo WIFI.LOG que deja en
+la memoria USB, que dice hasta donde ha llegado y por que se ha parado.
+
+Hace falta: el HP Mini 5103, una memoria USB (de 1 GB o mas; se borra
+entera) y el Wi-Fi de casa con su contrasena (red WPA2, la normal).
+
+
+A. PREPARAR LA MEMORIA USB (en otro ordenador)
+----------------------------------------------
+1. Bajar  hispados-usb-wifi.zip  y descomprimirlo: sale hispados-usb.img
+2. Grabar hispados-usb.img en la memoria USB, como las otras veces
+   (Rufus o balenaEtcher en Windows; en Linux Mint: clic derecho sobre el
+   .img > "Abrir con Grabador de imagenes de disco").
+
+
+B. LA PRUEBA (en el HP Mini)
+----------------------------
+1. Con el HP Mini apagado, enchufar la memoria USB.
+2. Encender y pulsar F9 varias veces para elegir de donde arranca
+   (o Esc y luego F9). Elegir la memoria USB.
+3. Sale el menu de Hispa-DOS. La primera opcion es
+       PRUEBA DEL WI-FI (lo guarda todo en WIFI.LOG)
+   Pulsar Intro (o esperar 20 segundos).
+4. Empiezan a salir lineas en la parte de abajo de la pantalla: es la
+   tarjeta poniendose en marcha (tarda unos segundos).
+
+   - Si la pantalla se queda PARADA mas de un minuto: hacerle una FOTO,
+     apagar con el boton, y pasar al apartado C (subir la foto).
+   - Si dice "El Wi-Fi NO ha arrancado": hacer una foto, escribir APAGAR
+     y pasar al apartado C.
+   - Si dice que la radio esta APAGADA por el interruptor: pulsar el boton
+     del Wi-Fi del HP Mini (el de la antenita, encima del teclado; la luz
+     tiene que quedar blanca o azul, no naranja), y reiniciar (Ctrl+Alt+Supr).
+
+5. Si arranca bien, limpia la pantalla y ensena la lista de redes Wi-Fi que
+   ve, con un numero cada una:
+
+       N.  Red                    Canal  Senal        Seguridad
+        1  MiCasa                    6   #### -52 dBm WPA2
+        2  ...
+
+   Escribir (con el numero de TU red) y pulsar Intro:
+
+       WIFI CONECTAR 1
+
+   Pide la contrasena del Wi-Fi; al escribirla salen asteriscos. Intro.
+   (El teclado esta en espanol.) Tarda unos segundos y dice "Conectado a..."
+   o un error. En los dos casos, seguir con el paso 6.
+
+   Si tu red NO sale en la lista, seguir tambien con el paso 6.
+
+6. Escribir y pulsar Intro:
+
+       PASO2
+
+   Hace solo las pruebas de red (pide la direccion, sale a Internet) y lo
+   guarda todo. Al acabar dice "PRUEBA TERMINADA".
+
+7. Escribir APAGAR (o apagar con el boton).
+
+
+C. SUBIR EL RESULTADO
+---------------------
+1. Llevar la memoria USB a otro ordenador. Dentro, en la carpeta principal,
+   esta el archivo  WIFI.LOG
+2. Subir WIFI.LOG al FTP, a esta misma carpeta (prueba-wifi). Si hay fotos
+   de la pantalla, subirlas tambien.
+
+Con eso basta. No hace falta apuntar nada mas.
+
+
+OPCIONAL: PRUEBA CON CONSOLA REMOTA (si esta a mano el adaptador USB de red)
+-----------------------------------------------------------------------------
+Si tienes el adaptador USB-Ethernet Realtek RTL8153 (el del MacBook), se
+puede hacer la prueba "en directo", sin ir y venir con la memoria:
+
+1. Enchufar el adaptador con su cable de red al HP Mini ANTES de encender.
+2. Arrancar de la memoria USB y, en el menu, elegir la SEGUNDA opcion:
+       Prueba del Wi-Fi con consola remota por el adaptador USB de red
+3. Si el adaptador funciona, pide la direccion al router y abre CONSOLA:
+   ensena una direccion (192.168.x.x) y dice que espera una conexion.
+   Hay que abrir el puerto 2323 en el router hacia esa direccion, como la
+   otra vez con el Toshiba, y avisar; al conectar saldra un codigo de 6
+   cifras en la pantalla, que hay que decir.
+   OJO: esta opcion usa el USB propio de Hispa-DOS (HSPUSB /F) con la
+   memoria de arranque, que en el HP Mini no esta probado. Si se queda
+   colgado al arrancar, apagar y usar la primera opcion del menu.
+
+
+SI YA TIENES UNA MEMORIA USB CON HISPA-DOS QUE ARRANCA EN EL HP MINI
+--------------------------------------------------------------------
+En vez de grabar la imagen, se pueden copiar los archivos de la carpeta
+"sueltos":
+  - HSPWIFI.COM, HSPWIFI.BIN, WIFI.COM, BCM43XX.FW, BCM43XXH.FW, BCM43XX.TXT
+    y PASO2.BAT           ->  a la carpeta  \HISPADOS  de la memoria
+  - PRUWIFI.BAT           ->  a la carpeta principal de la memoria
+Arrancar con la opcion "Normal" y escribir:   PRUWIFI
+(Tiene que ser la opcion Normal: con la de Juegos el Wi-Fi no se carga.)
+
+
+QUE HACE EXACTAMENTE (por si hay curiosidad)
+--------------------------------------------
+PRUWIFI:  HSPWIFI /PANTALLA /REG:C:\WIFI.LOG   (el controlador, con registro)
+          WIFI REDES                           (busca redes)
+PASO2:    WIFI, CONFRED, PING 8.8.8.8 y hispados.es, DESCARGAR un archivo pequeno y
+          WIFI REGISTRO (guarda el registro del controlador).
+La contrasena no se guarda en ningun sitio; en RED.INI queda una clave
+derivada que solo vale para esa red. Para borrarla: WIFI OLVIDAR.
+BCM43XX.FW es el microcodigo de la tarjeta, de Broadcom (su licencia, en
+BCM43XX.TXT): hace falta para que la radio funcione.

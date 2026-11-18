@@ -823,6 +823,14 @@ conecta:
         mov si, m_dbm3
         call puts
         ; la configuración IP que hubiera es de otra red: que se pida otra vez
+        ; (salvo con HSPWIFI /JUNTO: esa configuración es la de HSPRED)
+        mov ax, 0xDC02
+        int 0x2F
+        mov al, [es:bx+64]
+        push cs
+        pop es
+        test al, 8
+        jnz .r
         mov ax, 0xDA00
         xor bx, bx
         int 0x2F

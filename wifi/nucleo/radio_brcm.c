@@ -516,14 +516,11 @@ static int busca_pci(void)
 	return hallada ? 0 : -1;
 }
 
-/* Paso 1: encontrar la tarjeta, leer su bus interno y montar el controlador
- * (sin encender la radio todavía). */
-int brcm_monta(struct radio **r)
+/* Paso 1: encontrar la tarjeta en el bus PCI (solo mira: no la toca). */
+int brcm_busca(void)
 {
-	const struct pci_device_id *id;
 	u32 b0, b1, sub;
 	u16 cmd;
-	int err;
 
 	if (busca_pci() < 0) {
 		hl_log(0, "no hay ninguna tarjeta Wi-Fi Broadcom de las admitidas (BCM43224 14E4:4353, BCM43225 14E4:4357)\n");
@@ -547,6 +544,15 @@ int brcm_monta(struct radio **r)
 	}
 	tarjeta.bar0 = b0 & ~0xfu;
 	brcm.nombre = tarjeta.device == 0x4353 ? "Broadcom BCM43224" : "Broadcom 802.11n";
+	return 0;
+}
+
+/* Paso 2: despertarla, leer su bus interno (núcleos, SPROM) y montar el
+ * controlador, sin encender la radio todavía. */
+int brcm_monta(struct radio **r)
+{
+	const struct pci_device_id *id;
+	int err;
 
 	bcma_host_pci_init();
 	hl_modinit_brcms_module_init();
@@ -571,7 +577,7 @@ int brcm_monta(struct radio **r)
 	return 0;
 }
 
-/* Paso 2: encender (microcódigo, PHY y radio), modo estación, canal 1. */
+/* Paso 3: encender (microcódigo, PHY y radio), modo estación, canal 1. */
 int brcm_enciende(void)
 {
 	static const struct ieee80211_tx_queue_params cola_normal = { .txop = 0, .cw_min = 15, .cw_max = 1023, .aifs = 2 };

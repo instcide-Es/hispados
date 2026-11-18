@@ -58,7 +58,7 @@ C:\>CONFRED
 
 | Orden | Para qué |
 |---|---|
-| `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx]` | El controlador. `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del packet driver. `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
+| `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO]` | El controlador. `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del packet driver. `/JUNTO`: cargarse al lado de `HSPRED` (para depurar el Wi-Fi por la consola remota de la red por cable: las órdenes de red siguen yendo por el cable y `HSPWIFI` deja `INT 2Fh AH=DAh` a `HSPRED`). `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
 | `WIFI` | Cómo está la conexión: red, canal, señal, punto de acceso, paquetes, velocidad y, si no hay conexión, por qué. |
 | `WIFI REDES` | Busca (unos 2 segundos) y enseña las redes, con su señal y su seguridad. |
 | `WIFI CONECTAR red [clave]` | Conecta. «red» es el nombre (entre comillas si lleva espacios) o su número en la lista de `WIFI REDES` (lo más cómodo si el nombre lleva eñes o símbolos). Si la red pide contraseña y no se da, la pregunta **sin enseñarla** (asteriscos). Al conectar la guarda en `RED.INI`. |
@@ -178,7 +178,7 @@ carga programas de Windows), para las tarjetas sin controlador libre.
  CONFRED, PING, DESCARGAR, CONSOLA, navegador...   (lib/red.inc, sin cambios)
         │  packet driver (INT 60h), INT 2Fh AH=DAh
  ┌──────┴───────────────────────────┐   WIFI.COM ── INT 2Fh AH=DCh
- │ HSPWIFI.COM (modo real, 4,5 KB)  │◄──────────────┘
+ │ HSPWIFI.COM (modo real, 4,6 KB)  │◄──────────────┘
  └──────┬───────────────────────────┘
         │  paso a modo protegido de 32 bits (tabla de segmentos propia)
  ┌──────┴────────────────────────────────────────────────────────────┐
@@ -197,12 +197,12 @@ carga programas de Windows), para las tarjetas sin controlador libre.
 
 ### El residente (drivers/hspwifi.asm)
 
-Lo que queda en la memoria convencional son unos **4,5 KB** (código, el
+Lo que queda en la memoria convencional son **4,6 KB** (código, el
 búfer de una trama y la pila). Hace de *packet driver* (las mismas funciones
 que `HSPRED`, copiadas de él) y contesta a `INT 2Fh AH=DAh` como `HSPRED`
 (configuración IP compartida, enlace, descarga, datos de `/INFO` con la MAC
 en el mismo sitio: Configuración de Hispa Ventanas la lee igual). Por eso
-**no puede estar cargado a la vez que HSPRED** (lo dice).
+**no puede estar cargado a la vez que HSPRED** (lo dice), salvo con `/JUNTO`.
 
 Para cada llamada al núcleo (`nuc`): cierra las interrupciones, abre la línea
 A20, guarda la pila y las tablas (`SGDT`/`SIDT`), pone su tabla de segmentos
@@ -222,7 +222,8 @@ cada vuelta), como `HSPUSB` con la red por USB.
 
 `INT 2Fh AH=DCh` (para `WIFI` y lo que venga): AL=00h, ¿está? (AL = FFh, BX
 = 5746h «WF»); AL=01h, llamar al núcleo (CX = función, DS:SI = petición);
-AL=02h, datos del residente (archivo del registro y opciones). Las funciones
+AL=02h, datos del residente (archivo del registro y opciones); AL=03h,
+descargarlo. Las funciones
 están en `wifi/nucleo/llamadas.h`: buscar, lista de redes, conectar,
 desconectar, estado, registro, preparar la clave por trozos.
 
@@ -256,6 +257,12 @@ desconectar, estado, registro, preparar la clave por trozos.
 - `wifi/nucleo/entrada.asm` y `nucleo.ld`: la entrada (cabecera `HWF1`, pila
   de 64 KB, tabla de excepciones) y el enlazado a un binario plano.
 
+La puesta en marcha va en **tres pasos**, y tras cada uno el registro se
+escribe en el archivo de `/REG:` (si el siguiente se cuelga, queda escrito
+hasta dónde se llegó): 1, buscar la tarjeta en el PCI (solo mira); 2,
+despertarla, leer sus núcleos y su SPROM y montar el controlador; 3, cargar
+el microcódigo y encender la radio.
+
 Si dentro del núcleo salta una **excepción del procesador**, no se cuelga el
 equipo: se apunta en el registro (vector, EIP), el Wi-Fi queda parado y lo
 demás sigue.
@@ -264,7 +271,7 @@ demás sigue.
 
 | | |
 |---|---|
-| Convencional (residente) | unos 4,5 KB |
+| Convencional (residente) | 4.708 octetos (4,6 KB) |
 | Extendida (XMS) | un bloque de **2 MB**: el núcleo, 632 KB (403 KB de archivo y el resto datos: registro de 96 KB, cola de recepción, pila de 64 KB); el microcódigo, 96 KB; y el montón, del que el controlador usa unos 210 KB |
 | En el disco | `HSPWIFI.COM` 8 KB, `HSPWIFI.BIN` 403 KB, `WIFI.COM` 5,5 KB, microcódigo 97 KB |
 
@@ -277,7 +284,8 @@ tiene).
 - **No funciona con HSPEMM** (modo V86): el residente tiene que pasar a modo
   protegido por su cuenta. Lo dice y no se carga. Con HSPDPMI (Hispa
   Ventanas, programas de Windows) sí: probado en QEMU.
-- **No a la vez que HSPRED** (cable y Wi-Fi a la vez, no).
+- **No a la vez que HSPRED**: cable y Wi-Fi a la vez, no (con `/JUNTO` se
+  cargan los dos, pero la red va solo por el cable: es para depurar).
 - Sin interrupción: entre tic y tic (55 ms) la tarjeta guarda hasta 256
   tramas, pero la respuesta de un programa que no consulte el teclado espera
   al tic. Para navegar y descargar va de sobra.
@@ -319,7 +327,8 @@ tiene).
 5. **En QEMU, el núcleo de verdad con el modelo de la tarjeta dentro**
    (`build/HSPWSIM.BIN`) y el microcódigo cargado del disco: lo mismo, por el
    camino completo del controlador, y el registro en el disco.
-6. Con HSPEMM: lo dice y no se carga.
+6. Con HSPEMM: lo dice y no se carga. Con HSPRED: tampoco, salvo con
+   `/JUNTO` (y entonces la red sigue por el cable).
 
 Fallos que sacaron estas pruebas (y que en el equipo habrían sido un cuelgue
 sin explicación): un puntero nulo al encender la radio (el canal tiene que
@@ -330,10 +339,15 @@ bucles.
 
 ## Prueba en el equipo de verdad
 
-En `/root/FTP/HispaDOS/prueba-wifi/` (ver su `LEEME.TXT`): una imagen USB de
-arranque que carga `HSPWIFI /V /PANTALLA /REG:C:\WIFI.LOG`, busca redes, pide
-la red y la clave, hace `CONFRED` y `PING`, y lo deja todo en `C:\WIFI.LOG`
-(en el pendrive) para subirlo. El registro lleva: las tarjetas PCI de red, la
+`tools/mkprueba_wifi.sh carpeta` hace, a partir de `build/hispados-usb.img`,
+la imagen USB de la prueba (`usb/prueba-wifi/`: `PRUWIFI.BAT`, `PASO2.BAT`,
+`WIFIUSB.BAT` y el `LEEME.TXT` para quien la hace). Está en el FTP, en
+`HispaDOS/prueba-wifi/`. Arranca con un menú cuya primera opción carga
+`HSPWIFI /PANTALLA /REG:C:\WIFI.LOG` y busca redes; se conecta a mano (`WIFI
+CONECTAR n`) y `PASO2` hace `CONFRED`, `PING`, una descarga y `WIFI
+REGISTRO`. Todo queda en `C:\WIFI.LOG` (en el pendrive) para subirlo. La
+segunda opción del menú es para tener consola remota por un adaptador USB de
+red (HSPUSB `/F /RED`, `HSPRED /USB`, `CONSOLA`, y el Wi-Fi con `/JUNTO`). El registro lleva: las tarjetas PCI de red, la
 tarjeta (BAR0, IRQ, subsistema), el chip y sus núcleos con sus revisiones,
 la SPROM (revisión, placa, país, MAC), el PHY y la radio, cada aviso del
 controlador de Linux, las redes vistas con su señal, la autenticación, la

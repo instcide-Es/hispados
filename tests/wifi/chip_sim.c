@@ -26,6 +26,7 @@
 #include "d11.h"
 
 extern unsigned long hl_reloj_falso;
+int brcm_busca(void);
 int brcm_monta(struct radio **r);
 int brcm_enciende(void);
 void brcm_cuentas(d32 *bien, d32 *mal, int *vel);
@@ -187,8 +188,10 @@ static void prueba(void)
 	hl_fw_pon(0, "brcm/bcm43xx-0.fw", fw_ini, fw_fin - fw_ini);
 	hl_fw_pon(1, "brcm/bcm43xx_hdr-0.fw", fwh_ini, fwh_fin - fwh_ini);
 
+	k = brcm_busca();
+	comprueba(k == 0, "se encuentra la tarjeta en el PCI");
 	k = brcm_monta(&r);
-	comprueba(k == 0, "se encuentra la tarjeta y se monta el controlador");
+	comprueba(k == 0, "se leen sus núcleos y su SPROM y se monta el controlador");
 	if (k)
 		return;
 	comprueba(r->mac[0] == 0x00 && r->mac[1] == 0x26 && r->mac[5] == 0x56, "la MAC sale de la SPROM");

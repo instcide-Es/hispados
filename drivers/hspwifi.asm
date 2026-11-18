@@ -2,8 +2,12 @@
 ;  HSPWIFI.COM - controlador Wi-Fi de Hispa-486 (residente, packet driver)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Uso:  HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/SIMULA]
+;  Uso:  HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO] [/SIMULA]
 ;        HSPWIFI /U        descargarlo
+;  /JUNTO: convivir con HSPRED ya cargado (para depurar el Wi-Fi por la
+;  consola remota de la red por cable): HSPWIFI no contesta a INT 2Fh AH=DAh
+;  y su packet driver queda en otro vector; las órdenes de red siguen
+;  usando el de HSPRED.
 ;
 ;  Para las tarjetas Broadcom BCM43224/43225 (PCI 14E4:4353, 14E4:4357), con
 ;  WPA2-Personal. Se presenta como un packet driver Ethernet corriente (la
@@ -36,7 +40,10 @@
 ;            a la 14), DS:SI = petición (dobles palabras; las direcciones,
 ;            lineales: segmento*16+desplazamiento) -> DX:AX = resultado
 ;    AL=02h -> ES:BX = datos del residente: +0 el archivo del registro
-;            (ASCIIZ, vacío si no hay), +64 opciones (bit 0 simulada, bit 1 /V)
+;            (ASCIIZ, vacío si no hay), +64 opciones (bit 0 simulada, bit 1
+;            /V, bit 2 /PANTALLA, bit 3 /JUNTO)
+;    AL=03h  descargar (BL = 1: aunque haya programas usándolo) -> AL = 0
+;            hecho, 1 otro residente encima, 2 en uso
 ; =============================================================================
         cpu 586
         bits 16
@@ -63,6 +70,7 @@ LL_ESTADO   equ 9
 LL_REGISTRO equ 10
 LL_PARA     equ 13
 LL_MAC      equ 14
+LL_MONTA    equ 15
 
 ; selectores de la tabla propia
 SEL_C32     equ 0x08                ; código de 32 bits, base = el bloque
@@ -123,7 +131,7 @@ info_end:
 ; lo que lee la orden WIFI (INT 2Fh AX=DC02h)
 datos_wifi:
 reg_ruta    times 64 db 0
-opciones    db 0
+opciones    db 0                    ; bit 0 /SIMULA, 1 /V, 2 /PANTALLA, 3 /JUNTO
 
 old2f       dd 0
 old08       dd 0
@@ -820,8 +828,12 @@ int2f:
         je .red
         cmp ah, 0xDC
         je .wifi
+.otro:
         jmp far [cs:old2f]
 .red:
+        ; con /JUNTO la interfaz de HSPRED es de HSPRED (el de la red por cable)
+        test byte [cs:opciones], 8
+        jnz .otro
         cmp al, 0
         jne .n1
         mov al, 0xFF
@@ -894,7 +906,16 @@ int2f:
         push cs
         pop es
         mov bx, datos_wifi
+        iret
 .w3:
+        cmp al, 3
+        jne .w4
+        push ds
+        push cs
+        pop ds
+        call unload
+        pop ds
+.w4:
         iret
 
 ; AL = enlace (1 conectado a una red, 0 no), AH = 0 (velocidad: no se dice)
@@ -972,7 +993,7 @@ init:
         mov si, msg_already
         jmp fin_mal
 .unl:
-        mov ax, 0xDA02
+        mov ax, 0xDC03
         xor bl, bl
         int 0x2F
         mov si, msg_unloaded
@@ -991,13 +1012,17 @@ init:
         mov si, msg_notres
         cmp byte [o_unload], 0
         jne fin_mal
-        ; otro controlador de red con la interfaz de HSPRED
+        ; otro controlador de red con la interfaz de HSPRED (con /JUNTO se
+        ; convive con él: HSPRED se queda con INT 2Fh AH=DAh)
+        test byte [opciones], 8
+        jnz .sin_red
         mov ax, 0xDA00
         xor bx, bx
         int 0x2F
         mov si, msg_hspred
         cmp al, 0xFF
         je fin_mal
+.sin_red:
         ; modo V86: no se puede pasar a modo protegido por nuestra cuenta
         smsw ax
         mov si, msg_v86
@@ -1134,7 +1159,9 @@ init:
         mov eax, [tbuf_cab+20]
         add eax, [bloque]
         mov [idtr+2], eax
-        ; paso 1: buscar la tarjeta y montar el controlador
+        ; paso 1: preparar el núcleo y buscar la tarjeta (tras cada paso, el
+        ; registro va a la pantalla y al archivo: si el siguiente se cuelga,
+        ; queda escrito hasta dónde se llegó)
         mov eax, [bloque]
         mov [p_ini], eax
         mov dword [p_ini+4], BLOQUE_KB * 1024
@@ -1151,7 +1178,16 @@ init:
         pop eax
         test eax, eax
         jnz .falla
-        ; paso 2: encender la radio
+        ; paso 2: leer el bus interno de la tarjeta y montar el controlador
+        mov eax, LL_MONTA
+        xor edx, edx
+        call nuc
+        push eax
+        call vuelca_registro
+        pop eax
+        test eax, eax
+        jnz .falla
+        ; paso 3: encender la radio
         mov eax, LL_ENCIENDE
         xor edx, edx
         call nuc
@@ -1451,6 +1487,8 @@ parse:
         je .r
         cmp al, 'I'
         je .i
+        cmp al, 'J'
+        je .j
         jmp .bad
 .help:
         mov byte [o_help], 1
@@ -1467,6 +1505,9 @@ parse:
         jmp .skip
 .s:
         or byte [opciones], 1
+        jmp .skip
+.j:
+        or byte [opciones], 8
         jmp .skip
 .r:
         ; /REG:archivo
@@ -1714,6 +1755,7 @@ msg_usage   db "Uso: HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx]", 13, 10
             db "  /PANTALLA   el registro, además, directo a la pantalla (por si se cuelga)", 13, 10
             db "  /REG:arch   guarda el registro en ese archivo (se añade al final)", 13, 10
             db "  /INT:xx     vector del packet driver (60 a 80; si no, el primero libre)", 13, 10
+            db "  /JUNTO      convive con HSPRED (la red sigue yendo por el cable)", 13, 10
             db "  /U          lo descarga", 13, 10
             db "Tarjetas: Broadcom BCM43224 y BCM43225. Después, la orden WIFI elige la red.", 13, 10, 0
 msg_already db "HSPWIFI ya está cargado.", 13, 10, 0

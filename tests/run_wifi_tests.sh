@@ -14,6 +14,8 @@
 #     de la tarjeta dentro) y el microcódigo de verdad: puesta en marcha,
 #     WPA2, DHCP, PING y el registro en el disco.
 #  5. QEMU con HSPEMM (modo V86): lo dice y no se carga.
+#  6. QEMU con HSPRED y una NE2000: HSPWIFI no se carga al lado... salvo con
+#     /JUNTO, y entonces la red sigue yendo por el cable.
 # Dos QEMU a la vez como mucho. Wi-Fi tests without the hardware.
 set -u
 cd "$(dirname "$0")/.."
@@ -133,6 +135,29 @@ corre v86 30 '4|HSPWIFI /SIMULA' '2|WIFI' '2|ECHO fin-de-la-prueba'
 check v86 "HSPWIFI no funciona con HSPEMM"
 check v86 "HSPWIFI no está cargado."
 check v86 "fin-de-la-prueba"
+
+echo "== Wi-Fi en QEMU: /JUNTO, al lado de HSPRED (la red sigue por el cable) =="
+mkimg junto HSPWIFI.BIN "$XMS"
+{ sleep 7
+  for c in '4|HSPRED' '5|CONFRED' '3|HSPWIFI /SIMULA' '6|HSPWIFI /SIMULA /JUNTO' \
+           '9|WIFI CONECTAR HispaPrueba clave de prueba' '5|PING 10.0.2.2 /N:2' '3|CONFRED' \
+           '3|HSPWIFI /U' '3|PING 10.0.2.2 /N:1' '2|HSPRED /U' '2|ECHO fin-de-la-prueba'; do
+    printf '%s\r' "${c#*|}"; sleep "${c%%|*}"
+  done
+} | timeout 70 qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
+      -m 32 -drive file=$T/junto.img,format=raw,if=floppy -boot a -no-reboot \
+      -netdev user,id=n0 -device ne2k_pci,netdev=n0 > $T/junto.raw 2>&1
+tr -d '\r' < $T/junto.raw | iconv -f CP437 -t UTF-8 -c > $T/junto.txt
+check junto "Ya hay un controlador de red cargado (HSPRED). Descárguelo antes: HSPRED /U"
+check junto "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, packet driver en INT 61h"
+check junto "Conectado a «HispaPrueba» (señal -47 dBm)."
+n=$(grep -c "Respuesta desde 10.0.2.2: octetos=32" $T/junto.txt)
+if [ "$n" -eq 3 ]; then ok "PING por el cable con el Wi-Fi al lado, y tras descargarlo: 3 respuestas"; else ko "PING 10.0.2.2: $n respuestas"; fi
+n=$(grep -c "Dirección IP  . . . . : 10.0.2.15" $T/junto.txt)
+if [ "$n" -eq 2 ]; then ok "la configuración IP de HSPRED no se toca al conectar el Wi-Fi"; else ko "CONFRED: $n veces 10.0.2.15"; fi
+check junto "HSPWIFI descargado."
+check junto "HSPRED descargado."
+check junto "fin-de-la-prueba"
 
 if [ $fail -eq 0 ]; then echo "Wi-Fi: todas las pruebas pasan"; else echo "Wi-Fi: HAY FALLOS"; fi
 exit $fail

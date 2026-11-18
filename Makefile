@@ -250,7 +250,7 @@ $(WIFI_OL): $(B)/wifi/%.o: %.c $(WIFI_DEP) | $(B)/wifi
 	nice gcc $(WIFI_CF) -w -Werror=implicit-function-declaration -Werror=int-conversion \
 	    -Werror=incompatible-pointer-types -Werror=return-type -c $< -o $@
 $(WIFI_OP): $(B)/wifi/%.o: %.c $(WIFI_DEP) | $(B)/wifi
-	nice gcc $(WIFI_CF) -Wall -Wno-unused -c $< -o $@
+	nice gcc $(WIFI_CF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
 $(B)/wifi/entrada.o: wifi/nucleo/entrada.asm | $(B)/wifi
 	$(NASM) -f elf32 -o $@ $<
 $(B)/HSPWIFI.BIN: $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP) wifi/nucleo/nucleo.ld
@@ -279,7 +279,7 @@ $(B)/wifisim:
 $(WIFI_SL): $(B)/wifisim/%.o: %.c $(WIFI_DEP) | $(B)/wifisim
 	nice gcc $(WIFI_SIMF) -w -c $< -o $@
 $(WIFI_SP): $(B)/wifisim/%.o: %.c $(WIFI_DEP) wifi/firmware/bcm43xx-0.fw | $(B)/wifisim
-	nice gcc $(WIFI_SIMF) -Wall -Wno-unused -c $< -o $@
+	nice gcc $(WIFI_SIMF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
 $(B)/chip_sim: $(WIFI_SL) $(WIFI_SP)
 	ld -m elf_i386 -static -z noexecstack -o $@ $(WIFI_SL) $(WIFI_SP)
 # HSPWSIM.BIN: el núcleo de verdad con el modelo de la tarjeta dentro, para
@@ -292,7 +292,7 @@ $(B)/wifichip:
 $(WIFI_CL): $(B)/wifichip/%.o: %.c $(WIFI_DEP) | $(B)/wifichip
 	nice gcc $(WIFI_CHF) -w -c $< -o $@
 $(WIFI_CP): $(B)/wifichip/%.o: %.c $(WIFI_DEP) | $(B)/wifichip
-	nice gcc $(WIFI_CHF) -Wall -Wno-unused -c $< -o $@
+	nice gcc $(WIFI_CHF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
 $(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) wifi/nucleo/nucleo.ld
 	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack -T wifi/nucleo/nucleo.ld -o $(B)/wifichip/nucleo.elf \
 	    $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP)
