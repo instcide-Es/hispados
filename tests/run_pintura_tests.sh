@@ -117,8 +117,13 @@ echo "== Pintura: el grupo Accesorios, dibujar con cada herramienta, deshacer y 
 cp "$IMG" $T/f.img
 # sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
 # los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
-# comprueba)
-for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM ::HISPADOS/EQUIPO.COM ::HISPADOS/HSPUSB.SYS; do
+# comprueba). Los dos que se guardan (COPIA.BMP y G2.BMP, 241 078 octetos)
+# piden unos 246 KB libres después de copiar los de prueba: se quita de sobra
+# y se comprueba aquí, para que, si el disquete vuelve a crecer, la prueba lo
+# diga claro en vez de dar «No se ha podido guardar la imagen.»
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM ::HISPADOS/EQUIPO.COM ::HISPADOS/HSPUSB.SYS \
+    ::HISPADOS/HSPSND.COM ::HISPADOS/HSPRED.COM ::HISPADOS/CONFRED.COM ::HISPADOS/PING.COM ::HISPADOS/DESCARGA.COM ::HISPADOS/CONSOLA.COM ::HISPADOS/ACTUALIZ.COM \
+    ::HISPADOS/PARTIR.COM ::HISPADOS/FORMATEA.COM ::HISPADOS/INSTALAR.COM ::HISPADOS/REVISAR.COM; do
   mdel -i $T/f.img $f > /dev/null 2>&1
 done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
@@ -331,8 +336,13 @@ echo "== Pintura: abrir BMP de 1, 4, 8 y 24 bits, lienzo nuevo y una imagen que 
 cp "$IMG" $T/f.img
 # sitio para los BMP grandes que se guardan (el disquete ya va lleno): fuera
 # los datos que Pintura no usa, sin tocar los módulos (la lista de accesos se
-# comprueba)
-for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM ::HISPADOS/EQUIPO.COM ::HISPADOS/HSPUSB.SYS; do
+# comprueba). Los dos que se guardan (COPIA.BMP y G2.BMP, 241 078 octetos)
+# piden unos 246 KB libres después de copiar los de prueba: se quita de sobra
+# y se comprueba aquí, para que, si el disquete vuelve a crecer, la prueba lo
+# diga claro en vez de dar «No se ha podido guardar la imagen.»
+for f in ::HISPADOS/HISPA.WAV ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/NES/HISPA1.NES ::HISPADOS/AUDICION.COM ::BIN/FSTEST.COM ::HISPADOS/EQUIPO.COM ::HISPADOS/HSPUSB.SYS \
+    ::HISPADOS/HSPSND.COM ::HISPADOS/HSPRED.COM ::HISPADOS/CONFRED.COM ::HISPADOS/PING.COM ::HISPADOS/DESCARGA.COM ::HISPADOS/CONSOLA.COM ::HISPADOS/ACTUALIZ.COM \
+    ::HISPADOS/PARTIR.COM ::HISPADOS/FORMATEA.COM ::HISPADOS/INSTALAR.COM ::HISPADOS/REVISAR.COM; do
   mdel -i $T/f.img $f > /dev/null 2>&1
 done
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
@@ -348,6 +358,12 @@ printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'Modulos=16' '' \
   '[Acceso]' 'Nombre=Arriba' 'Programa=A:\HISPADOS\PROGS\PINTURA.HVP' 'Parametros=A:\TD24.BMP' '' \
   '[Acceso]' 'Nombre=Grande' 'Programa=A:\HISPADOS\PROGS\PINTURA.HVP' 'Parametros=A:\GRANDE.BMP' > $T/CENTRO.INI
 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
+libre=$(mdir -i $T/f.img :: | sed -n 's/ bytes free.*//p' | tr -dc 0-9)
+if [ "${libre:-0}" -ge 300000 ]; then
+  ok "sitio en el disquete para los BMP que se guardan ($libre octetos libres)"
+else
+  ko "sitio en el disquete para los BMP que se guardan: solo ${libre:-0} octetos libres (hacen falta 300 000)"
+fi
 RX=400; RY=300
 { sleep 6
   send 'KEYB SP' 2
