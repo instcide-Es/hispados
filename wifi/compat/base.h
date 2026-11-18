@@ -4,6 +4,7 @@
 #define HISPA_BASE_H
 void hl_monton(void *ini, u32 tam);
 void hl_monton_info(u32 *tam, u32 *usado, u32 *pico);
+int hl_monton_repasa(void);
 int hl_tiempo_inicia(void);
 u32 hl_tsc_khz(void);
 void hl_trabajos(void);

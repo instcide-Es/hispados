@@ -179,7 +179,7 @@ static void prueba(void)
 
 	hl_base = 0;
 	hl_nivel = 3;
-	hl_monton(monton, sizeof(monton));
+	hl_monton(monton, 1036288);
 	hl_tiempo_inicia();
 	hl_reloj_falso = 1000;
 	sim_configura("Biblioteca", "clave de la prueba", 6);
@@ -248,6 +248,7 @@ static void prueba(void)
 	comprueba(entregadas == 1, "tras renovar la clave de grupo, sigue");
 	corre(3000);
 	comprueba(hl_skb_vivos() < 80, "no se quedan paquetes sin soltar");
+	comprueba(hl_monton_repasa() == 0, "el montón está entero (nadie escribe fuera de lo suyo)");
 	hl_monton_info(&t, &u, &pk);
 	comprueba(pk < 2 * 1024 * 1024, "el montón no pasa de 2 MB");
 	w80211_desconectar();

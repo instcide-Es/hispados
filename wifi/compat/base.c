@@ -209,6 +209,19 @@ u32 hl_azar(void) { return prandom_u32(); }
 
 /* ---------------------------------------------------------------- montón */
 struct trozo { u32 tam; u32 libre; struct trozo *sig, *ant; };	/* 16 octetos */
+/* «libre» lleva además una marca: si un trozo se sale de lo suyo y pisa la
+ * cabecera del siguiente, se nota y se dice (en vez de fallar más tarde) */
+#define T_LIBRE 0x4c494201u
+#define T_USADO 0x55534100u
+static int monton_roto;
+static int trozo_bien(struct trozo *t, const char *donde)
+{
+	if (t->libre == T_LIBRE || t->libre == T_USADO)
+		return 1;
+	if (!monton_roto++)
+		hl_log(0, "MEMORIA: el montón está dañado en %p (%s): algo ha escrito fuera de su sitio\n", t, donde);
+	return 0;
+}
 static struct trozo *monton;
 static u32 monton_tam, monton_usado, monton_pico;
 
@@ -217,7 +230,7 @@ void hl_monton(void *ini, u32 tam)
 	monton = (struct trozo *)(((u32)ini + 15) & ~15u);
 	tam = (tam - ((u32)monton - (u32)ini)) & ~15u;
 	monton->tam = tam - sizeof(struct trozo);
-	monton->libre = 1;
+	monton->libre = T_LIBRE;
 	monton->sig = monton->ant = NULL;
 	monton_tam = tam;
 	monton_usado = monton_pico = 0;
@@ -231,19 +244,21 @@ void *hl_malloc(size_t n)
 	if (!n)
 		n = 16;
 	for (t = monton; t; t = t->sig) {
-		if (!t->libre || t->tam < n)
+		if (!trozo_bien(t, "al pedir"))
+			return NULL;
+		if (t->libre != T_LIBRE || t->tam < n)
 			continue;
 		if (t->tam >= n + sizeof(struct trozo) + 32) {
 			struct trozo *r = (struct trozo *)((u8 *)(t + 1) + n);
 			r->tam = t->tam - n - sizeof(struct trozo);
-			r->libre = 1;
+			r->libre = T_LIBRE;
 			r->sig = t->sig; r->ant = t;
 			if (t->sig)
 				t->sig->ant = r;
 			t->sig = r;
 			t->tam = n;
 		}
-		t->libre = 0;
+		t->libre = T_USADO;
 		monton_usado += t->tam;
 		if (monton_usado > monton_pico)
 			monton_pico = monton_usado;
@@ -268,19 +283,23 @@ void hl_free(const void *p)
 	if (!p)
 		return;
 	t = (struct trozo *)p - 1;
-	if (t->libre) {
+	if (!trozo_bien(t, "al soltar"))
+		return;
+	if (t->libre == T_LIBRE) {
 		hl_log(0, "MEMORIA: se suelta dos veces %p\n", p);
 		return;
 	}
-	t->libre = 1;
+	if (t->sig && !trozo_bien(t->sig, "detrás de lo que se suelta"))
+		return;
+	t->libre = T_LIBRE;
 	monton_usado -= t->tam;
-	if (t->sig && t->sig->libre) {
+	if (t->sig && t->sig->libre == T_LIBRE) {
 		t->tam += sizeof(struct trozo) + t->sig->tam;
 		t->sig = t->sig->sig;
 		if (t->sig)
 			t->sig->ant = t;
 	}
-	if (t->ant && t->ant->libre) {
+	if (t->ant && t->ant->libre == T_LIBRE) {
 		t->ant->tam += sizeof(struct trozo) + t->tam;
 		t->ant->sig = t->sig;
 		if (t->sig)
@@ -290,6 +309,23 @@ void hl_free(const void *p)
 
 void hl_monton_info(u32 *tam, u32 *usado, u32 *pico) { *tam = monton_tam; *usado = monton_usado; *pico = monton_pico; }
 
+/* repasar el montón entero (las cabeceras, una a una): 0 si está bien */
+int hl_monton_repasa(void)
+{
+	struct trozo *t;
+
+	for (t = monton; t; t = t->sig) {
+		if (!trozo_bien(t, "al repasar"))
+			return -1;
+		if (t->sig && (u8 *)t->sig != (u8 *)(t + 1) + t->tam) {
+			if (!monton_roto++)
+				hl_log(0, "MEMORIA: el montón está dañado en %p (los trozos no casan)\n", t);
+			return -1;
+		}
+	}
+	return monton_roto ? -1 : 0;
+}
+
 void *kmemdup(const void *s, size_t n, gfp_t g)
 {
 	void *p = hl_malloc(n);
@@ -298,14 +334,17 @@ void *kmemdup(const void *s, size_t n, gfp_t g)
 	return p;
 }
 
-/* memoria para DMA: alineada a 4 KB y a cero */
+/* Memoria para DMA: a cero y con la dirección FÍSICA alineada a 8 KB (lo que
+ * piden los anillos de la tarjeta). El puntero queda alineado igual porque
+ * la base del núcleo está alineada a 64 KB (lo comprueba el arranque). */
+#define DMA_ALIN 8192u
 void *dma_alloc_coherent(struct device *d, size_t n, dma_addr_t *pa, gfp_t g)
 {
-	u8 *bruto = hl_malloc(n + 4096 + 8), *p;
+	u8 *bruto = hl_malloc(n + DMA_ALIN + 8), *p;
 
 	if (!bruto)
 		return NULL;
-	p = (u8 *)((hl_fis(bruto) + 8 + 4095) & ~4095u);
+	p = (u8 *)((hl_fis(bruto) + 8 + DMA_ALIN - 1) & ~(DMA_ALIN - 1));
 	p = hl_virt((u32)p);
 	((void **)p)[-1] = bruto;
 	memset(p, 0, n);

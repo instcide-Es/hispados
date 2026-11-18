@@ -58,7 +58,8 @@ PILA        equ 768
 VERSION     equ 1
 C_WIFI      equ 8                   ; «tarjeta» para quien lea los datos de /INFO
 CFG_LEN     equ 30
-BLOQUE_KB   equ 2048                ; memoria extendida para el núcleo
+BLOQUE_KB   equ 2048                ; memoria extendida para el núcleo (más 64 KB
+                                    ; para alinear su base)
 
 ; funciones del núcleo (wifi/nucleo/llamadas.h)
 LL_INICIA   equ 0
@@ -1074,7 +1075,7 @@ init:
 .cab:
         ; la memoria: el bloque entero
         mov ah, 0x09                ; pedir bloque
-        mov dx, BLOQUE_KB
+        mov dx, BLOQUE_KB + 64      ; (y 64 KB para alinear: ver abajo)
         call far [xms]
         cmp ax, 1
         mov si, msg_nomem
@@ -1087,6 +1088,16 @@ init:
         jne fin_mal_xms
         mov [bloque], bx
         mov [bloque+2], dx
+        ; La base del núcleo se alinea a 64 KB dentro del bloque. Tiene que
+        ; ser así: el núcleo ve la memoria desplazada (puntero = dirección
+        ; física - base) y el controlador de la tarjeta alinea sus anillos de
+        ; DMA (a 4 y a 8 KB) por el puntero; con una base sin alinear, la
+        ; dirección física no quedaría alineada (y la tarjeta lo exige).
+        mov eax, [bloque]
+        neg eax
+        and eax, 0xFFFF
+        mov [relleno], eax
+        add [bloque], eax
         mov ah, 0x03                ; A20 abierta (global)
         call far [xms]
         ; copiar el núcleo al bloque
@@ -1366,7 +1377,9 @@ copia_archivo:
         mov dx, [xms_h]
         mov [x_mov+10], dx
         mov edx, [x_des]
+        add edx, [relleno]          ; (dentro del bloque de XMS, tras el relleno)
         mov [x_mov+12], edx
+        mov edx, [x_des]
         add edx, eax
         ; no pasarse del bloque
         cmp edx, BLOQUE_KB * 1024 - 0x80000
@@ -1740,6 +1753,7 @@ fh          dw 0
 reg_fh      dw 0
 x_des       dd 0
 x_tam       dd 0                    ; octetos de verdad del archivo copiado
+relleno     dd 0                    ; del principio del bloque de XMS a la base alineada
 x_mov       times 16 db 0           ; longitud, origen (0, puntero), destino (bloque, desplazamiento)
 p_ini       times 7 dd 0            ; struct ll_inicio
 tbuf_cab    times 32 db 0
@@ -1770,7 +1784,7 @@ msg_noxms   db "HSPWIFI necesita memoria extendida: cargue HSPXMS.SYS en CONFIG.
 msg_novec   db "No queda ningún vector libre para el packet driver (60h-80h).", 13, 10, 0
 msg_nobin   db "Falta el archivo ", 0
 msg_badbin  db "El archivo HSPWIFI.BIN no vale (dañado o de otra versión).", 13, 10, 0
-msg_nomem   db "No hay 2 MB de memoria extendida libres para HSPWIFI.", 13, 10, 0
+msg_nomem   db "No hay 2,1 MB de memoria extendida libres para HSPWIFI.", 13, 10, 0
 msg_nofw    db "Falta el microcódigo de la tarjeta: ", 0
 msg_nl      db 13, 10, 0
 msg_card    db "Tarjeta ", 0

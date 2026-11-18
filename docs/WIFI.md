@@ -211,7 +211,10 @@ y vuelve a modo real restaurándolo todo. Los segmentos de 32 bits tienen la
 **base en el principio del bloque** de memoria extendida: el núcleo está
 enlazado para la dirección 0 y no hay que reubicarlo (una dirección física
 *F* es, para el núcleo, el puntero *F − base*; da la vuelta por 2³² y cae en
-su sitio). Sin paginación.
+su sitio). Sin paginación. La base se alinea a 64 KB dentro del bloque: el
+controlador alinea sus anillos de DMA (a 4 y 8 KB) por el puntero y la
+tarjeta los quiere alineados por la dirección física, así que las dos tienen
+que coincidir en los bits bajos.
 
 La tarjeta **no usa su interrupción** (se apaga en el PCI, bit 10 de la
 orden): compartir una línea de IRQ con el USB sin controlar quién la atiende
@@ -272,8 +275,8 @@ demás sigue.
 | | |
 |---|---|
 | Convencional (residente) | 4.708 octetos (4,6 KB) |
-| Extendida (XMS) | un bloque de **2 MB**: el núcleo, 632 KB (403 KB de archivo y el resto datos: registro de 96 KB, cola de recepción, pila de 64 KB); el microcódigo, 96 KB; y el montón, del que el controlador usa unos 210 KB |
-| En el disco | `HSPWIFI.COM` 8 KB, `HSPWIFI.BIN` 403 KB, `WIFI.COM` 5,5 KB, microcódigo 97 KB |
+| Extendida (XMS) | un bloque de **2 MB** (más 64 KB para alinear): el núcleo, 632 KB (404 KB de archivo y el resto datos: registro de 96 KB, cola de recepción, pila de 64 KB); el microcódigo, 96 KB; y el montón, del que el controlador usa unos 225 KB |
+| En el disco | `HSPWIFI.COM` 8 KB, `HSPWIFI.BIN` 404 KB, `WIFI.COM` 5,5 KB, microcódigo 97 KB |
 
 Necesita un procesador con contador TSC (cualquiera con ranura PCIe lo
 tiene).
@@ -334,8 +337,12 @@ Fallos que sacaron estas pruebas (y que en el equipo habrían sido un cuelgue
 sin explicación): un puntero nulo al encender la radio (el canal tiene que
 estar puesto antes), las velocidades básicas dadas a destiempo, una petición
 de envío que pisaba la dirección de entrada del núcleo, las trampas de
-excepción mal alineadas y lecturas de puertos que el compilador sacaba de los
-bucles.
+excepción mal alineadas, lecturas de puertos que el compilador sacaba de los
+bucles y, el más serio, **los anillos de DMA mal alineados** (la base del
+núcleo no estaba alineada y el controlador alineaba por el puntero: en la
+tarjeta de verdad no habría funcionado nada, y además se escribía fuera de
+la memoria pedida). Desde entonces el montón lleva marcas y se repasa: si
+algo escribe fuera de su sitio, el registro lo dice.
 
 ## Prueba en el equipo de verdad
 

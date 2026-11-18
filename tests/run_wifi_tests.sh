@@ -69,8 +69,8 @@ corre sim 150 '3|WIFI' '6|HSPWIFI /SIMULA' '2|HSPWIFI' '5|WIFI REDES' '3|WIFI' \
   '2|WIFI /AUTO' '3|HSPWIFI /U' '2|WIFI' '2|WIFI /AUTO' '2|ECHO fin-de-la-prueba' &
 P1=$!
 mkimg chip HSPWSIM.BIN "$XMS"
-corre chip 90 '14|HSPWIFI /REG:A:\WIFI.LOG' '10|WIFI CONECTAR HispaPrueba clave de prueba' '6|CONFRED' \
-  '7|PING 192.168.77.1 /N:3' '3|WIFI' '3|HSPWIFI /U' '2|ECHO fin-de-la-prueba' &
+corre chip 95 '14|HSPWIFI /REG:A:\WIFI.LOG' '10|WIFI CONECTAR HispaPrueba clave de prueba' '6|CONFRED' \
+  '7|PING 192.168.77.1 /N:3' '3|WIFI' '3|WIFI REGISTRO' '3|HSPWIFI /U' '2|ECHO fin-de-la-prueba' &
 P2=$!
 wait $P1 $P2
 
@@ -126,6 +126,11 @@ check clog "SPROM: revisión 8"
 check clog "Microcódigo brcm/bcm43xx-0.fw: 96224 octetos"
 check clog "Radio encendida en el canal 1"
 check clog "802.11: CONECTADO a «HispaPrueba»"
+check clog "PASO 3 de 3 hecho: radio en marcha"
+# (la base del núcleo, alineada a 64 KB: si no, los anillos de DMA quedan mal)
+if grep -Eq "Memoria: bloque de 2048 KB en [0-9A-F]{4}0000;" $T/clog.txt; then ok "la base del núcleo está alineada a 64 KB"; else ko "base del núcleo sin alinear"; fi
+check clog "ESTADO: el montón está entero"
+checkn clog "MEMORIA:"
 checkn clog "EXCEPCI"
 check chip "fin-de-la-prueba"
 

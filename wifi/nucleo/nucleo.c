@@ -79,6 +79,10 @@ static int inicia(struct ll_inicio *p)
 	int r;
 
 	hl_base = p->base;
+	if (p->base & 0xffff) {
+		hl_log(0, "la base del núcleo (%08X) no está alineada a 64 KB\n", p->base);
+		return -22;
+	}
 	hl_nivel = (p->opciones & LL_OP_DETALLE) ? 3 : 2;
 	hl_pantalla = (p->opciones & LL_OP_PANTALLA) != 0;
 	simulada = (p->opciones & LL_OP_SIMULA) != 0;
@@ -157,6 +161,8 @@ static int enciende(void)
 	w80211_inicia(la_radio);
 	listo = 1;
 	hl_monton_info(&t, &u, &pk);
+	if (hl_monton_repasa() < 0)
+		return -23;
 	hl_log(2, "PASO 3 de 3 hecho: radio en marcha (montón: %u KB, pico %u KB de %u)\n", u >> 10, pk >> 10, t >> 10);
 	return 0;
 }
@@ -248,6 +254,8 @@ int nucleo_llamada(u32 fn, u32 dir)
 			if (!simulada)
 				brcm_cuentas(&b, &m, &v);
 			hl_monton_info(&t, &u, &pk);
+			if (hl_monton_repasa() == 0)
+				hl_log(2, "ESTADO: el montón está entero\n");
 			hl_log(2, "ESTADO: %s, fallo %d, red «%s», canal %d, señal %d dBm, seguridad %d\n",
 			       est[i->estado], i->fallo, i->ssid, i->canal, i->senal, i->seguridad);
 			hl_log(2, "ESTADO: enviados %u, recibidos %u, sin acuse %u, descartados %u, reconexiones %u, cola llena %u\n",
