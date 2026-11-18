@@ -219,6 +219,53 @@ $(B)/CONSOLA.COM: utils/consola.asm $(RED_DEP) | $(B)
  $(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc lib/copiaarbol.inc lib/equipodet.inc | $(B)
 	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
 RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM $(B)/ACTUALIZAR.COM
+# Wi-Fi de Hispa-486 (docs/WIFI.md): HSPWIFI.COM (residente, packet driver),
+# su núcleo de 32 bits HSPWIFI.BIN (wifi/: la radio Broadcom con los fuentes
+# de brcmsmac y bcma de Linux, 802.11 y WPA2 propios) y la orden WIFI. El
+# núcleo es un binario plano enlazado para la dirección 0 (wifi/nucleo/
+# nucleo.ld); gcc es solo la herramienta, como con MSVCRT.DLL.
+$(B)/HSPWIFI.COM: drivers/hspwifi.asm | $(B)
+	$(ASM) -l $(B)/gen/HSPWIFI.lst -o $@ $(B)/gen/$<
+	python3 tools/initcheck.py $(B)/gen/HSPWIFI.lst init || { rm -f $@; exit 1; }
+$(B)/WIFI.COM: utils/wifi.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+WIFI_INC = -Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/brcminc \
+           -Iwifi/linux/brcmsmac -Iwifi/linux/brcmsmac/phy -Iwifi/linux/bcma -Iwifi/linux -Iwifi/nucleo
+WIFI_CF = -m32 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+          -fno-strict-aliasing -fno-common -mno-80387 -nostdinc -isystem $(shell gcc -m32 -print-file-name=include) \
+          $(WIFI_INC) -D__HISPA__ -DCONFIG_BCMA_HOST_PCI -DCONFIG_BCMA_HOST_PCI_POSSIBLE -DCONFIG_BCMA_DRIVER_PCI
+WIFI_LINUX = $(wildcard wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil/*.c \
+             wifi/linux/bcma/*.c) wifi/linux/cordic.c
+WIFI_PROPIO = wifi/compat/base.c $(wildcard wifi/nucleo/*.c)
+WIFI_DEP = $(wildcard wifi/compat/*.h wifi/nucleo/*.h wifi/linux/brcmsmac/*.h wifi/linux/brcmsmac/phy/*.h \
+           wifi/linux/bcma/*.h wifi/linux/include/linux/bcma/*.h)
+WIFI_OL = $(patsubst %.c,$(B)/wifi/%.o,$(notdir $(WIFI_LINUX)))
+WIFI_OP = $(patsubst %.c,$(B)/wifi/%.o,$(notdir $(WIFI_PROPIO)))
+vpath %.c wifi/linux/brcmsmac wifi/linux/brcmsmac/phy wifi/linux/brcmutil wifi/linux/bcma wifi/linux wifi/compat wifi/nucleo
+$(B)/wifi:
+	mkdir -p $(B)/wifi
+# los fuentes de Linux, sin avisos (no son nuestros) salvo los que serían un
+# fallo de la capa de compatibilidad; los propios, con todos
+$(WIFI_OL): $(B)/wifi/%.o: %.c $(WIFI_DEP) | $(B)/wifi
+	nice gcc $(WIFI_CF) -w -Werror=implicit-function-declaration -Werror=int-conversion \
+	    -Werror=incompatible-pointer-types -Werror=return-type -c $< -o $@
+$(WIFI_OP): $(B)/wifi/%.o: %.c $(WIFI_DEP) | $(B)/wifi
+	nice gcc $(WIFI_CF) -Wall -Wno-unused -c $< -o $@
+$(B)/wifi/entrada.o: wifi/nucleo/entrada.asm | $(B)/wifi
+	$(NASM) -f elf32 -o $@ $<
+$(B)/HSPWIFI.BIN: $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP) wifi/nucleo/nucleo.ld
+	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack -T wifi/nucleo/nucleo.ld -o $(B)/wifi/nucleo.elf \
+	    $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP)
+	objcopy -O binary $(B)/wifi/nucleo.elf $@
+# el microcódigo de Broadcom (wifi/firmware/, con su licencia), con nombres 8.3
+$(B)/BCM43XX.FW: wifi/firmware/bcm43xx-0.fw | $(B)
+	cp $< $@
+$(B)/BCM43XXH.FW: wifi/firmware/bcm43xx_hdr-0.fw | $(B)
+	cp $< $@
+WIFI = $(B)/HSPWIFI.COM $(B)/WIFI.COM $(B)/HSPWIFI.BIN $(B)/BCM43XX.FW $(B)/BCM43XXH.FW
+# la prueba del anfitrión (tests/run_wifi_tests.sh)
+$(B)/prueba_wifi: tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c wifi/nucleo/nucleo.h | $(B)
+	gcc -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)

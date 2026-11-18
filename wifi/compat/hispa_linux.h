@@ -561,7 +561,6 @@ void __iomem *pci_iomap(struct pci_dev *d, int bar, unsigned long max);
 #define pci_restore_state(d) do { } while (0)
 #define pci_enable_wake(d, s, e) 0
 #define pci_choose_state(d, s) 0
-#define pci_register_driver(d) 0
 #define pci_unregister_driver(d) do { } while (0)
 #define to_pci_dev(d) container_of(d, struct pci_dev, dev)
 #define dev_is_pci(d) 1
@@ -725,6 +724,12 @@ static inline void *bcm47xx_wdt_get_drvdata(struct bcm47xx_wdt *w) { return w->d
 #define platform_device_register_data(a, b, c, d, e) ((struct platform_device *)0)
 #define platform_device_unregister(p) do { } while (0)
 #define WIPHY_FLAG_AP_PROBE_RESP_OFFLOAD 0
+#define kvmalloc(n, g) hl_malloc(n)
+#define no_printk(f, a...) do { } while (0)
+#define printk_once(f, a...) hl_log(1, f, ##a)
+#define skb_queue_splice_tail(de, a) skb_queue_splice_tail_init(de, a)
+void __iomem *ioremap(u32 fis, unsigned long tam);
+int pci_register_driver(struct pci_driver *d);
 #define SIMPLE_DEV_PM_OPS(a, b, c)
 struct uart_port;
 
