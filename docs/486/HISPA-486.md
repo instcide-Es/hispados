@@ -45,8 +45,8 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado. **3d hecha (18/11/2026)**: GDI completo (figuras, letras de cualquier tamaño, mapas de bits y DIB, regiones, ROP, paletas), barras de desplazamiento, caret, aceleradores, iconos y cursores, portapapeles, diálogos comunes y COMCTL32.DLL: **FASMW 1.73, el flat assembler de Windows, abre, edita y ensambla dentro de Hispa Ventanas** |
-| 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. **4b (18/11/2026)**: iconos grandes en el escritorio (los grupos con `Escritorio=1`; el de la imagen, «Biblioteca»), con un clic. Falta: «Mi PC» |
-| 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
+| 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. **4b (18/11/2026)**: iconos grandes en el escritorio (los grupos con `Escritorio=1`; el de la imagen, «Biblioteca»), con un clic; y el estilo del escritorio se cambia en marcha desde Configuración (clásico o barra). Falta: «Mi PC» |
+| 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98. **Hecha sin Direct3D (18/11/2026)**: `WINMM.DLL`, `DDRAW.DLL` (DirectDraw 1-7), `DSOUND.DLL` (3-7) y `DINPUT.DLL` (3-7) en C; «Naves», el juego de ejemplo de Hispa32; y tres programas de otros que van: el ejemplo de DirectDraw del flat assembler (ensamblado dentro de Hispa-DOS), TinyPTC (UPX, en pantalla completa y en ventana) y el emulador FCE Ultra (DirectDraw 7, DirectInput 7, DirectSound). Ver «Fase 5: DirectX». Falta Direct3D (su plan, ahí) |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Después, ClicGest entero: imágenes, subir y bajar archivos, galletas guardadas. Falta: hojas de estilo de fuera |
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
 | 8 | Arranque UEFI nativo (cargador propio, disco y pantalla sin BIOS) | arranca en un PC sin CSM |
@@ -265,8 +265,9 @@ pocos archivos; los programas y el núcleo son los mismos.
 | `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje), **«Internet»** (Navegador), con `Internet=1`, y **«Escritorio»** (`Escritorio=1`: el icono **«Biblioteca»** del escritorio, que abre el Navegador) | `sistema/486/CENTRO.INI` |
 | `\HISPADOS\INTERNET\` | **el Navegador** (docs/486/NAVEGADOR.md): `NAVEGA.EXE`, `HTTPS.EXE`, `HSPTLS.DLL`, `WSOCK32.DLL`, `MSVCRT.DLL`, `NAVEGA.INI` y `LEEME.TXT` (lo del disquete «Internet» menos `HW32.COM`, que ya está en `\HISPADOS`) | `build/` y `w32/navega/` (la tabla `INTERNET` de `tools/mkusb.py`) |
 | `\HISPADOS\COMCTL32.DLL`, `UCRT.DLL` | las DLL de la fase 3d, al lado de `HW32.COM` y `MSVCRT.DLL`: los controles comunes y el CRT de Visual C++ 2015 | `build/` (la tabla `DLL486` de `tools/mkusb.py`; también en el disquete «Hispa-486») |
+| `\HISPADOS\WINMM.DLL`, `DDRAW.DLL`, `DSOUND.DLL`, `DINPUT.DLL`, `OLE32.DLL` | las DLL de la fase 5 (DirectX sin Direct3D, 63,5 KB las cinco) | `build/` (la misma tabla `DLL486`) |
 | `\HISPADOS\EDICION.INI` | `[Edicion]` `Gama=486` `Nombre=Hispa-486`: la **edición** instalada | `sistema/486/EDICION.INI` |
-| `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) |
+| `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE` y (fase 5) el juego `NAVES.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) y `NAVES.EXE` |
 
 En lo visible se dice **«Hispa32»**, no «Windows» ni «Win32» (decisión de
 Carlos). Los programas se siguen llamando `WIN*.EXE` en `build/`, en sus
@@ -1354,6 +1355,293 @@ Decisiones y límites de la 3d (para las fases siguientes):
   poco sitio (las pruebas quitan `HISPA.WAV`). La imagen de Hispa-486 (y su
   disquete «Hispa-486») lleva COMCTL32.DLL y UCRT.DLL en `\HISPADOS`, al
   lado de MSVCRT.DLL (la tabla `DLL486` de `tools/mkusb.py`).
+
+## Fase 5: DirectX (hecha sin Direct3D, 18/11/2026)
+
+### Cómo está hecho (fase 5)
+
+Encargo de Carlos (18/11/2026): «Adelante con DirectX». DirectX hasta el 7
+(el de Windows 98) **sin Direct3D**, para los juegos 2D de la época: cuatro
+DLL nuevas hechas en C, como MSVCRT.DLL y COMCTL32.DLL (`gcc -m32` y
+`tools/elf2pe.py --dll`), sobre el USER32 y el GDI32 de Hispa Ventanas y sobre
+cuatro funciones propias de Hispa Ventanas para lo que solo sabe el entorno
+(la pantalla, HSPSND, el teclado y los mandos). Todo es de sala limpia: la
+documentación pública del API (los números de las tablas COM, las
+estructuras, los GUID y los códigos de error), sin copiar código de nadie.
+
+| Archivo | Qué | Tamaño |
+|---|---|---|
+| `w32/dx/winmm.c` → `WINMM.DLL` | la hora, los temporizadores, **la mezcla del sonido** (que usan también DSOUND), waveOut, PlaySound, mciSendString (WAV) y los mandos (joyGetPos...) | 16.896 octetos |
+| `w32/dx/ddraw.c` → `DDRAW.DLL` | DirectDraw 1, 2, 4 y 7 | 26.112 |
+| `w32/dx/dsound.c` → `DSOUND.DLL` | DirectSound 3 a 7 (y lo de DirectSound 8 que es igual) | 7.680 |
+| `w32/dx/dinput.c` → `DINPUT.DLL` | DirectInput 3 a 7 | 11.264 |
+| `w32/dx/ole32.c` → `OLE32.DLL` | lo mínimo de COM (CoInitialize, CoTaskMem*): la piden los programas de MinGW de la época | 3.072 |
+| `ventanas/win32dx.inc` (y `bssdx.inc`) | las cuatro funciones `HispaDX*` de USER32 y los ganchos de Hispa Ventanas | `VENTANAS.COM` pasa de 172.032 a 173.920 octetos |
+| `w32/naves/naves.c` → `NAVES.EXE` | «Naves», el juego de ejemplo de Hispa32 | 11.264 |
+
+Las cinco DLL ocupan 63,5 KB y van en `\HISPADOS`, al lado de `MSVCRT.DLL`
+(HW32 busca las DLL en la carpeta del programa, en la suya y en la de
+trabajo): la tabla `DLL486` de `tools/mkusb.py` las pone en la imagen de
+Hispa-486 (`make usb486`) y en su disquete «Hispa-486». `NAVES.EXE` va en
+`\HISPA32` (tabla `HISPA32`) y en el grupo «Hispa32» del menú Inicio
+(`sistema/486/CENTRO.INI`). `w32/dx/dxapi.h` tiene lo que necesita un
+programa en C para usarlas (las estructuras y las llamadas a los métodos COM
+por su número), y `w32/dx/dx.h` lo común de las DLL.
+
+**Lo que pone Hispa Ventanas** (`ventanas/win32dx.inc`, funciones de la tabla
+de USER32; los cambios en lo que ya había llevan la marca `[DX]`):
+
+- `HispaDXPantalla`: **tomar la pantalla** para un programa (le da el marco
+  lineal de VESA —su dirección en el programa—, el ancho, el alto, el paso,
+  los bits y las máscaras), soltarla, poner su paleta en el DAC (en los
+  modos de 8 bits), esperar el retrazo vertical (puerto 3DAh, con tope),
+  decir cómo se ve (para el ratón) y cómo es la pantalla sin tomarla.
+  Mientras la pantalla es de un programa, Hispa Ventanas sigue pintando en
+  su superficie, pero `vid_presentar` no la lleva a la pantalla. **Se
+  devuelve sola** (la paleta de Hispa Ventanas y todo lo pintado) en cuanto
+  la ventana del programa deja de ser la activa: otra ventana, el
+  Administrador de tareas (Ctrl+Alt+Supr), un `MessageBox` del juego, o el
+  programa que acaba o se termina a la fuerza (`pe_limpiar`).
+- `HispaDXSonido`: HSPSND (la tarjeta, un trozo de sonido, cuántos trozos
+  caben sin esperar, parar), con las funciones de siempre (`snd_pcm2`...).
+- `HispaDXEntrada`: las teclas pulsadas (`tec_mapa`, por el gancho de INT
+  15h), **las pulsadas desde la última vez** (`tec_dx`, nuevo: el gancho
+  apunta cada pulsación, para que DirectInput no pierda una tecla que se
+  pulsa y se suelta entre dos lecturas), el ratón, un mando de HSPJOY (INT
+  2Fh AX=D902h; el del jugador 1 o 2) y la dirección lineal 0 (los tics de
+  la BIOS).
+- `HispaDXTic`: una función del programa a la que se llama cada vez que pide
+  un mensaje (`GetMessageA`, `PeekMessageA`) y mientras espera uno, y en
+  `Sleep`: **ahí se mezcla el sonido y se lanzan los temporizadores**, sin
+  hilos.
+- Además: en pantalla completa los mensajes del ratón llegan en las
+  coordenadas del modo del juego y `GetSystemMetrics` da su tamaño;
+  `WM_ACTIVATEAPP` (antes de `WM_ACTIVATE`: los juegos de DirectDraw no
+  pintan si no les llega); si el acceso de un programa de Windows dice su
+  carpeta («Carpeta=»), la de trabajo pasa a ser esa (los juegos leen sus
+  datos así, «DDRAW.GIF»; sin ella, se queda como estaba, que es lo que
+  esperan los diálogos de archivos de FASMW y compañía); y `ShowCursor`, `ClipCursor`,
+  `GetSystemMenu`, `GetMenuItemInfoA`, `SetMenuItemInfoA`,
+  `InsertMenuItemA`, `RemoveMenu` y `GetKeyNameTextA` (lo justo: que
+  existan).
+
+**HW32** (`utils/hw32.asm`, `hw32k.inc`, marcas `[DX]`):
+
+- `LoadLibraryA` **carga en marcha** una DLL que el programa no traía (con
+  las que ella pida y sus `DllMain`, en la pila del programa, como
+  `CreateThread`). Así van los que cargan `DDRAW.DLL` o `DSOUND.DLL` a mano
+  y **los comprimidos con UPX** (que lo cargan todo así). Mientras carga,
+  HW32 usa una pila suya (2 KB más en `HW32.COM`): el cargador lee sus
+  fichas con `[EBP+...]`, que va por SS.
+- Los átomos (`AddAtomA`, `FindAtomA`, `GetAtomNameA`, `DeleteAtom`): el
+  arranque de los programas de MinGW los usa.
+- `SET HISPADX=TRAZA`: la traza de HW32 (`HW32 /T`) también dentro de Hispa
+  Ventanas, por el puerto serie COM1 (en QEMU, la consola), y las DLL de
+  DirectX apuntan ahí sus llamadas importantes. Es como se ha visto qué le
+  faltaba a cada programa de los de abajo.
+- `HW32.COM` pasa de 34.804 a 38.504 octetos.
+
+**La hora y los temporizadores** (WINMM): `timeGetTime` mide con RDTSC (si
+la CPU lo tiene: Pentium en adelante) contra los tics de la BIOS (se calibra
+al empezar, unos 110 ms, y se vuelve a ajustar si se va más de 200 ms); en un
+486, los tics (55 ms). `timeSetEvent` (periódico o de una vez, con función o
+con evento) se lanza desde el «tic» y desde `timeGetTime` (los juegos que
+esperan mirando la hora).
+
+**La mezcla** (WINMM, `HispaMez*`): cada sonido es una voz (las muestras, 8
+o 16 bits, mono o estéreo; por dónde va, con fracción; el paso, de su
+frecuencia a la de la mezcla; bucle; volumen de cada lado). Se suman por
+programa a 32 bits (interpolando entre muestras), se recortan a 16 y se
+mandan a HSPSND por trozos enteros de lo que la tarjeta toca de una vez (así
+HSPSND no mete silencios): 2.048 tramas a 48.000 Hz con AC'97 y HD Audio,
+2.048 a 44.100 con la Sound Blaster 16 (dos de sus trozos) y 4.096 muestras
+de 8 bits a 22.050 con las de 8 bits. La cola de HSPSND se llena entera
+(unos 170 ms): aguanta lo que tarde el programa entre dos mensajes. Sin
+tarjeta, el tiempo pasa igual (los sonidos «acaban» cuando tocaría).
+waveOut, PlaySound, mciSendString y cada búfer de DirectSound son voces.
+
+**DirectDraw** (DDRAW):
+
+- **No se cambia el modo de la tarjeta.** El modo que pide el juego
+  (`SetDisplayMode`: de 320×200 a 1600×1200, en 8, 15, 16, 24 o 32 bits) es
+  el de sus superficies, en memoria; al presentar (`Flip`, `Blt` o
+  `BltFast` a la primaria, `Unlock` de la primaria, `ReleaseDC`) se pasa a
+  la pantalla de Hispa Ventanas **agrandado un número entero de veces y
+  centrado** (320×240 en 800×600: al doble, desde 80,60), o reducido si no
+  cabe, y **convertido** a su formato: un juego de 8 bits en una pantalla
+  de 8 pone su paleta en el DAC tal cual (y el borde con su color más
+  oscuro); uno de 16 o 32 bits en una de 8, una paleta 3-3-2; en una
+  pantalla de 15, 16, 24 o 32 bits, por tablas. Así no hay que volver a
+  poner el modo de Hispa Ventanas al acabar ni con Alt+Tab, y funciona en
+  cualquier tarjeta VESA.
+- Superficies: primaria con uno o más búferes traseros (`Flip` gira la
+  cadena), fuera de pantalla con el formato que se diga (o el de la
+  primaria), `Lock`/`Unlock` (con rectángulo), `Blt` (rellenar con color o
+  con profundidad, estirar con el punto más cercano, recortar, clave de
+  color de origen y de destino, y por encima de sí misma), `BltFast`,
+  claves de color con intervalo, `GetDC`/`ReleaseDC` (un DIB del GDI de la
+  fase 3d con el formato y la paleta de la superficie: se puede escribir con
+  `TextOutA` en ella), `GetSurfaceDesc`, `GetPixelFormat`,
+  `GetAttachedSurface`, `EnumAttachedSurfaces`, `IsLost`/`Restore`,
+  `SetSurfaceDesc`.
+- Paletas (`CreatePalette`, `SetEntries` al DAC en el momento) y
+  recortadores (`SetHWnd`, `GetClipList`).
+- **En una ventana** (`DDSCL_NORMAL`): la primaria es la pantalla; lo que se
+  copia a ella va a la ventana del recortador (o la del programa) con
+  `StretchDIBits`. Con la pantalla de 8 bits se dice que es de 32 (todo
+  pasa por el GDI, que convierte; los programas de la época pedían color
+  verdadero en ventana).
+- **Superficies perdidas**: si la pantalla se devuelve (otra ventana), las
+  superficies dan `DDERR_SURFACELOST` hasta `Restore`, que la vuelve a
+  tomar si la ventana del juego vuelve a ser la activa.
+- `EnumDisplayModes` (de 320×200 a 1024×768 en 8, 16, 24 y 32),
+  `GetDisplayMode`, `GetCaps` (sin aceleradora: 8 MB «de vídeo»),
+  `WaitForVerticalBlank`, `GetVerticalBlankStatus`, `TestCooperativeLevel`,
+  `GetDeviceIdentifier`, `DirectDrawEnumerate(Ex)A`,
+  `DirectDrawCreateClipper`. `QueryInterface` de Direct3D: no.
+
+**DirectSound** (DSOUND): un búfer secundario es una voz de la mezcla:
+`Play` (con bucle o sin él), `Stop`, `GetCurrentPosition` (lo que ya se ha
+mezclado: el juego escribe siempre por delante), `SetCurrentPosition`,
+`Lock`/`Unlock` con la vuelta del anillo, `SetVolume` y `SetPan` (centésimas
+de dB, por una tabla de 2^(−n/16)), `SetFrequency`, `GetStatus`,
+`DuplicateSoundBuffer` (comparten las muestras: el mismo efecto varias veces
+a la vez). El primario acepta `SetFormat` y, con `DSSCL_WRITEPRIMARY`, se
+escribe en él y suena. `IDirectSoundNotify` se acepta (sin hilos, nadie
+espera los avisos). Sin HSPSND, `DirectSoundCreate` dice `DSERR_NODRIVER`,
+como Windows sin tarjeta.
+
+**DirectInput** (DINPUT): el teclado (estado inmediato y por búfer, con
+`DIPROP_BUFFERSIZE`; las teclas con E0h —flechas, Intro del teclado
+numérico...— salen con su código DIK y el del teclado numérico: la BIOS no
+las distingue), el ratón (relativo —con `DISCL_EXCLUSIVE` el cursor vuelve
+al centro para no topar con el borde— o absoluto; tres botones) y los mandos
+de HSPJOY (`EnumDevices` da los que hay; ejes con `DIPROP_RANGE` y
+`DIPROP_DEADZONE`, botones y la cruceta como POV; un mando sin palanca, la
+cruceta como ejes). Con el formato que diga el programa: `c_dfDIKeyboard`,
+`c_dfDIMouse`, `c_dfDIJoystick`... (los da su `DINPUT.LIB`, no la DLL) o uno
+hecho a mano: se mira cada objeto.
+
+### Las funciones de DirectX hechas
+
+| Interfaz / DLL | Hecho | Lo que dice que no (o no hace nada) |
+|---|---|---|
+| WINMM: la hora | `timeGetTime`, `timeBeginPeriod`, `timeEndPeriod`, `timeGetDevCaps`, `timeGetSystemTime`, `timeSetEvent` (periódico, de una vez, función o `TIME_CALLBACK_EVENT_SET`), `timeKillEvent` | — |
+| WINMM: sonido | `PlaySoundA`/`PlaySound` (archivo, memoria, recurso `WAVE`; `SND_ASYNC`, `SND_SYNC`, `SND_LOOP`, `SND_NOSTOP`, `SND_PURGE`), `sndPlaySoundA`, `waveOutGetNumDevs`, `waveOutGetDevCapsA`, `waveOutOpen` (`CALLBACK_WINDOW`, `_FUNCTION`, `_EVENT`; `WAVE_FORMAT_QUERY`), `waveOutPrepareHeader`, `waveOutUnprepareHeader`, `waveOutWrite` (con `WHDR_BEGINLOOP`/`ENDLOOP`), `waveOutReset`, `waveOutPause`, `waveOutRestart`, `waveOutBreakLoop`, `waveOutClose`, `waveOutGetPosition` (ms, muestras, octetos), `waveOutSetVolume`, `waveOutGetVolume`, `waveOutGetID`, `waveOutGetErrorTextA`; `mciSendStringA` con WAV: `open` (con `alias` y `type waveaudio`), `play` (`wait`, `repeat`), `stop`, `pause`, `resume`, `close` (`all`), `status ... mode`, `seek`, `set`; `mciGetErrorStringA` | MIDI y CD (`sequencer`, `cdaudio`: «dispositivo no admitido»), grabar (`waveIn*`: 0 dispositivos), `mixer*`, `aux*`, `mciSendCommandA` |
+| WINMM: mandos | `joyGetNumDevs`, `joyGetDevCapsA`, `joyGetPos`, `joyGetPosEx` (seis ejes, 16 botones, POV), `joyGetThreshold`, `joySetThreshold`, `joyReleaseCapture` | `joySetCapture` (los avisos `MM_JOY*`) |
+| IDirectDraw 1, 2, 4, 7 | `DirectDrawCreate`, `DirectDrawCreateEx`, `DirectDrawCreateClipper`, `DirectDrawEnumerateA`, `DirectDrawEnumerateExA`; `QueryInterface` (entre las cuatro), `CreateSurface`, `CreatePalette`, `CreateClipper`, `SetCooperativeLevel`, `SetDisplayMode` (las dos formas), `RestoreDisplayMode`, `EnumDisplayModes`, `GetDisplayMode`, `GetCaps`, `WaitForVerticalBlank`, `GetVerticalBlankStatus`, `GetScanLine`, `GetMonitorFrequency`, `GetFourCCCodes` (ninguno), `GetGDISurface`, `FlipToGDISurface`, `Compact`, `GetAvailableVidMem`, `GetSurfaceFromDC`, `RestoreAllSurfaces`, `TestCooperativeLevel`, `GetDeviceIdentifier` | `DuplicateSurface`, `EnumSurfaces` (no enumera), `StartModeTest`, `EvaluateMode`; Direct3D |
+| IDirectDrawSurface 1, 2, 3, 4, 7 | `Blt` (`COLORFILL`, `DEPTHFILL`, estirar, `KEYSRC`, `KEYDEST`, sus `OVERRIDE`), `BltFast` (`SRCCOLORKEY`, `DESTCOLORKEY`), `Flip`, `Lock`, `Unlock`, `GetDC`, `ReleaseDC`, `GetAttachedSurface`, `EnumAttachedSurfaces`, `AddAttachedSurface` y `DeleteAttachedSurface` (se aceptan), `SetColorKey`, `GetColorKey`, `SetPalette`, `GetPalette`, `SetClipper`, `GetClipper`, `GetSurfaceDesc`, `GetPixelFormat`, `GetCaps`, `IsLost`, `Restore`, `GetBltStatus`, `GetFlipStatus`, `GetDDInterface`, `PageLock`, `PageUnlock`, `SetSurfaceDesc`, `GetUniquenessValue`, `ChangeUniquenessValue`, `SetPriority`, `GetPriority`, `SetLOD`, `GetLOD` | las superposiciones (`UpdateOverlay`... `DDERR_NOOVERLAYHW`), `BltBatch`, los efectos de `DDBLTFX` (espejo, giro, ROP que no sea copiar), `SetPrivateData`; `Blt` entre formatos distintos (`DDERR_INVALIDPIXELFORMAT`) |
+| IDirectDrawPalette, IDirectDrawClipper | `GetEntries`, `SetEntries`, `GetCaps`; `SetHWnd`, `GetHWnd`, `GetClipList`, `SetClipList` (su caja), `IsClipListChanged` | — |
+| IDirectSound (3-7, y 8) | `DirectSoundCreate` (también por su número, el 1), `DirectSoundCreate8`, `DirectSoundEnumerateA` (el 2); `CreateSoundBuffer`, `DuplicateSoundBuffer`, `GetCaps`, `SetCooperativeLevel`, `Compact`, `GetSpeakerConfig`, `SetSpeakerConfig`, `VerifyCertification` | la captura (`DirectSoundCapture`), el 3D (`IDirectSound3DBuffer`/`Listener`: `E_NOINTERFACE`) |
+| IDirectSoundBuffer | `GetCaps`, `GetCurrentPosition`, `SetCurrentPosition`, `GetFormat`, `SetFormat` (primario), `GetVolume`, `SetVolume`, `GetPan`, `SetPan`, `GetFrequency`, `SetFrequency`, `GetStatus`, `Lock`, `Unlock`, `Play`, `Stop`, `Restore`; `IDirectSoundNotify::SetNotificationPositions` (se acepta) | los avisos de posición no se dan (no hay hilos que esperen) |
+| IDirectInput 1, 2, 7 | `DirectInputCreateA`, `DirectInputCreateW`, `DirectInputCreateEx`; `CreateDevice`, `CreateDeviceEx`, `EnumDevices`, `GetDeviceStatus`, `Initialize`, `RunControlPanel` | `FindDevice` |
+| IDirectInputDevice 1, 2, 7 | `SetDataFormat`, `SetCooperativeLevel`, `Acquire`, `Unacquire`, `GetDeviceState`, `GetDeviceData` (con `DIGDD_PEEK`), `Poll`, `SetProperty`/`GetProperty` (`BUFFERSIZE`, `AXISMODE`, `RANGE`, `DEADZONE`, `SATURATION`, `GRANULARITY`), `GetCapabilities`, `EnumObjects`, `GetObjectInfo`, `GetDeviceInfo`, `SetEventNotification` | la fuerza (`CreateEffect`...: `DIERR_UNSUPPORTED`), `SendDeviceData`, `Escape` |
+| OLE32 | `CoInitialize`, `CoInitializeEx`, `CoUninitialize`, `OleInitialize`, `OleUninitialize`, `CoTaskMemAlloc`, `CoTaskMemRealloc`, `CoTaskMemFree`, `CoCreateGuid` | `CoCreateInstance` y `CoGetClassObject`: «clase no registrada» (no hay registro) |
+
+**El juego de ejemplo: «Naves»** (`w32/naves/naves.c`, Inicio › Hispa32 ›
+Naves): un matamarcianos en 320×240 a 8 bits, con todo lo de arriba: la
+paleta propia, los dibujos en superficies con clave de color (`BltFast`), el
+fondo con `Blt` de color, las estrellas y la puntuación con `Lock` (unas
+letras de 3×5 propias: el GDI en cada fotograma sería lento), la portada con
+`GetDC` y `TextOutA`, `Flip`; la música (hecha por el propio programa: bajo y
+melodía, 3,2 s en bucle) y los efectos (el disparo y la explosión,
+duplicados para que suenen varios a la vez, con panorama según dónde pasan)
+por DirectSound; las flechas, el espacio y Esc por DirectInput (estado
+inmediato y búfer) y el mando por `joyGetPosEx`; y 50 fotogramas por segundo
+con `timeGetTime`. Con `/PRUEBA` la oleada no se mueve ni dispara (para las
+capturas).
+
+**Programas de DirectX de otros** (libres; `tests/thirdparty/fetch_dx.sh` los
+baja a `tests/thirdparty/dl/`, que no va en el repositorio):
+
+| Programa | Licencia | Qué usa | Cómo va |
+|---|---|---|---|
+| Ejemplo `DDRAW` del flat assembler 1.73 (`EXAMPLES/DDRAW` de `fasmw17332.zip`) | la de fasm (tipo BSD) | DirectDraw 1 en 640×480×8: paleta, un GIF cargado con `Lock`, `BltFast` con clave, `Flip`, `IsLost`/`Restore` | **va**: `FASM.EXE` lo ensambla dentro de Hispa-DOS (HW32) y corre en pantalla completa; Esc vuelve |
+| TinyPTC 0.8 para Windows (`fullscreen.exe`, `windowed.exe`) | dominio público / LGPL | UPX; `LoadLibraryA("ddraw.dll")`; 320×200 en 32, 24 o 16 bits; en ventana, recortador y `Blt` a la primaria | **van los dos** (lo que faltaba: cargar DLL en marcha, `GetSystemMenu`, `WM_ACTIVATEAPP` y el formato de 32 bits en ventana) |
+| FCE Ultra 0.98.8 para Win32 | GPL | DirectDraw 7 (por `QueryInterface`), DirectInput 7, DirectSound, OLE32, menús, MinGW | **va** en su ventana con el juego de NES propio («Cometas», `HISPA1.NES`); suena con cortes en QEMU, que no emula un NES a tiempo real (lo que faltaba: `OLE32.DLL`, los átomos, las funciones de `MENUITEMINFO`, `DSCAPS` de 96 octetos sin `DSCAPS_EMULDRIVER`) |
+| Cave Story 1.0.0.6 (Pixel, 2004) | freeware sin permiso escrito de redistribuir | DirectDraw 1, DirectInput, DirectSound, `timeSetEvent` (la música) | no se ha probado: no se puede bajar en las pruebas sin permiso; lo que pide (`timeSetEvent`, `StretchBlt`, `CreateFontA`) ya está, falta `IMM32`, `VERSION` y `SHLWAPI` (`PathRemoveFileSpecA`) |
+| Dink Smallwood 1.08 | freeware; la fuente, con su licencia | DirectDraw 1, DirectSound 3D, DirectInput (ratón), MIDI y CD por MCI | no se ha probado: el juego viene en un instalador NSIS de 16 MB; le faltaría el 3D de DirectSound (que podría ser una interfaz que no hace nada) y el MIDI |
+
+**Pruebas** (en el PC: `tests/run_dx_tests.sh`, `run_naves_tests.sh` y
+`run_dxterceros_tests.sh`; el sonido lo graba QEMU con una AC'97 y lo mide
+`tests/tools/audio.py`):
+
+- `run_dx_tests.sh` (`WINDX.EXE`, `tests/progs/windx.c`): 320×240×8 al doble
+  y centrado (Blt de color, BltFast con clave, Blt estirado con clave,
+  mirado punto a punto, y el borde negro); el espacio por DirectInput; 640×480
+  a 16 bits en la pantalla de 8 (la paleta 3-3-2, `Lock`, el texto de
+  `GetDC`); la pantalla de vuelta y «Comprobaciones: 24 de 24 bien.»
+  (`timeGetTime`, `timeSetEvent`, `waveOutGetNumDevs`, `GetSystemMetrics` en
+  pantalla completa, `GetSurfaceDesc`, `Lock`, `DirectSoundCreate`, que el
+  búfer avanza, DirectInput, `PlaySound` de memoria, `waveOut` con su
+  `WOM_DONE`, `joyGetPos`...); en el sonido grabado, el la de 440 Hz por los
+  dos canales, sin cortes (salvo quizá uno al cambiar a 640×480×16, cuyo
+  `GetDC` pasa 307.200 puntos por el GDI y vuelta).
+- `run_naves_tests.sh`: la portada (el título con el GDI, la nave), la
+  partida (las 24 enemigas, nuestra nave, «PUNTOS 0»), un disparo que
+  derriba la de encima («PUNTOS 10»), la nave que se mueve con la flecha, Esc
+  que devuelve la pantalla, y la música seguida, sin cortes, con los efectos
+  encima.
+- `run_dxterceros_tests.sh`: los tres de arriba (si se han bajado).
+- Siguen pasando `run_win32*` (gui, hola, calc, ctl, menu, crt, gdi, var,
+  fasmw), `run_hw32`, `run_imagen486` (que mira también las DLL nuevas y
+  `NAVES.EXE` en el disco instalado), `run_sonidos`, `run_barra`,
+  `run_rueda` y `run_navegador`.
+
+Decisiones y límites de la fase 5:
+
+- **No hay hilos**: lo que en Windows corre en otro hilo (la mezcla de
+  DirectSound, los temporizadores de `timeSetEvent`, `WOM_DONE`) corre cuando
+  el programa pide un mensaje, duerme (`Sleep`) o llama a DirectX/WINMM. Un
+  juego que se quede un rato largo sin hacer nada de eso se queda sin sonido
+  ese rato (con la cola llena, unos 170 ms aguanta). Los avisos de posición
+  de DirectSound no se dan. Los programas que dejan un hilo en marcha (SDL,
+  Allegro y los de su clase) siguen sin ir.
+- No se cambia el modo de la tarjeta (ver arriba): un juego de 640×480 en
+  una pantalla de 640×480 sale tal cual, y en una de 800×600, con borde. Los
+  de 16 o 32 bits en una pantalla de 8 se ven con 256 colores (3-3-2). El
+  modo X de verdad no hace falta: 320×240 y 320×200 son superficies en
+  memoria como las demás.
+- En pantalla completa el cursor de Hispa Ventanas no se ve (los juegos
+  dibujan el suyo) y se cuenta con que la ventana del juego empieza en 0,0
+  al pasar el ratón a sus coordenadas.
+- `Blt` y `BltFast` solo entre superficies del mismo formato; sin espejo,
+  giro ni ROP; estirar es «el punto más cercano».
+- Las teclas con E0h no se distinguen de las del teclado numérico.
+- El ratón de DirectInput, tres botones; el de la rueda (`DIMOFS_Z`), 0.
+- La VGA de 16 colores (sin VESA) no tiene DirectDraw de pantalla completa
+  (`SetCooperativeLevel` en exclusiva no puede tomar la pantalla).
+
+### Lo que sigue: Direct3D por programa (plan)
+
+Direct3D no entra en esta fase. Cuando se haga, por programa (sin
+aceleradora) y sobre lo de ahora:
+
+1. **`D3DIM.DLL` dentro de DDRAW** (como en Windows, Direct3D sale de
+   `IDirectDraw::QueryInterface(IID_IDirect3D3/7)` y de superficies con
+   `DDSCAPS_3DDEVICE`): `IDirect3D3`/`7`, `IDirect3DDevice3`/`7` sobre una
+   superficie de DDRAW (el destino, en memoria, de 16 bits) y su búfer Z
+   (`DDSCAPS_ZBUFFER`: ya se crea, de 16 bits).
+2. **El rasterizador**, en C primero y lo caliente en ensamblador:
+   triángulos con coordenadas transformadas (`D3DTLVERTEX`: lo que usan los
+   juegos 2D con 3D y los que transforman ellos), relleno plano y de
+   Gouraud, texturas afines y con corrección de perspectiva por tramos de 16
+   puntos, búfer Z de 16 bits, clave de color en las texturas, mezcla alfa
+   (`SRCALPHA`/`INVSRCALPHA`, la suma), niebla por vértice. Formatos de
+   textura: 16 bits (5-6-5, 1-5-5-5, 4-4-4-4) y 8 bits con paleta.
+3. **La transformación y la luz** (`SetTransform`, `DrawPrimitive` con
+   `D3DVERTEX`, luces direccionales y de punto, materiales) en coma fija o
+   con el x87; el recorte contra el volumen de vista en el espacio de
+   recorte.
+4. **Las listas de ejecución de Direct3D 3/5** (`IDirect3DExecuteBuffer`), si
+   algún juego de los que se quieran las pide.
+5. Pruebas como las de ahora: una escena fija mirada punto a punto, y un
+   juego de ejemplo; después, aceleradoras de la época (las Voodoo, por
+   Glide), que es otra fase.
+
+Lo que costará: el rasterizador con texturas a 320×240 en un Pentium a
+100 MHz va justo (la época lo hacía igual: Direct3D por programa era
+lento); en un 486, solo lo plano.
 
 ## Red inalámbrica (Wi-Fi)
 
