@@ -1,0 +1,14 @@
+BearSSL 0.6 (Thomas Pornin), licencia MIT: ver LICENSE.txt.
+https://bearssl.org/  -  bearssl-0.6.tar.gz
+SHA-256: 6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14
+
+Lo usa HSPTLS.DLL de Hispa-486 (w32/tls/hsptls.c, docs/RED.md): TLS 1.2 de
+cliente para los programas Hispa32. Aquí va, sin cambiar nada, solo lo que se
+enlaza: las cabeceras públicas (inc/), src/inner.h, src/config.h y los
+archivos de src/ que hacen falta para el perfil de hsptls.c (todos juntos en
+src/, sin las subcarpetas del original). Si un cambio del perfil pide más
+archivos (el enlazado dirá qué símbolo br_... falta), se copian del original.
+
+Se compila con las opciones del Makefile (BEARCF): sin biblioteca del
+sistema, para i486, y con todo lo que BearSSL detecta solo del sistema
+anfitrión (generador de azar, reloj, SSE2, AES-NI) desactivado.

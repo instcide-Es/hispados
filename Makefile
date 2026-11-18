@@ -135,6 +135,29 @@ $(B)/crt0.o: w32/crt0.c | $(B)
 $(B)/REDPRUE.EXE: tests/progs/redprue.c $(B)/crt0.o $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL tools/elf2pe.py | $(B)
 	$(CC32) -march=i486 -Wall -c $< -o $(B)/redprue.o
 	python3 tools/elf2pe.py -o $@ -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/redprue.o
+# HSPTLS.DLL: TLS 1.2 de cliente (w32/tls/hsptls.c sobre BearSSL, que va en
+# terceros/bearssl con su licencia MIT) y HTTPS.EXE, la descarga de consola
+BEARCF = -m32 -march=i486 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+  -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections \
+  -Iw32/inc -Iterceros/bearssl/inc -Iterceros/bearssl/src \
+  -DBR_USE_URANDOM=0 -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 -DBR_USE_WIN32_RAND=0 -DBR_USE_GETENTROPY=0 \
+  -DBR_SSE2=0 -DBR_AES_X86NI=0 -DBR_RDRAND=0 -DBR_LE_UNALIGNED=1 -DBR_64=0 -DBR_INT128=0 -DBR_UMUL128=0 -DBR_POWER8=0
+BEARSRC = $(wildcard terceros/bearssl/src/*.c)
+BEAROBJ = $(patsubst terceros/bearssl/src/%.c,$(B)/bearssl/%.o,$(BEARSRC))
+TLSEXP = TlsAbrir,TlsConectar,TlsLeer,TlsEscribir,TlsCerrar,TlsError,TlsTextoError,TlsInfo,TlsAzar
+empty :=
+space := $(empty) $(empty)
+comma := ,
+$(B)/bearssl/%.o: terceros/bearssl/src/%.c | $(B)
+	@mkdir -p $(B)/bearssl
+	gcc $(BEARCF) -c $< -o $@
+$(B)/HSPTLS.DLL: w32/tls/hsptls.c w32/tls/anclas.h $(BEAROBJ) $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL tools/elf2pe.py
+	gcc $(BEARCF) -Wall -Iw32/tls -c w32/tls/hsptls.c -o $(B)/hsptls.o
+	ld -m elf_i386 -r --gc-sections $(addprefix -u ,$(subst $(comma),$(space),$(TLSEXP))) -o $(B)/hsptls_todo.o $(B)/hsptls.o $(BEAROBJ)
+	python3 tools/elf2pe.py --dll --exp $(TLSEXP) -o $@ -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/hsptls_todo.o
+$(B)/HTTPS.EXE: w32/https.c $(B)/crt0.o $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL tools/elf2pe.py | $(B)
+	$(CC32) -march=i486 -Wall -c $< -o $(B)/https.o
+	python3 tools/elf2pe.py -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/https.o
 # [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
 # Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
 $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)

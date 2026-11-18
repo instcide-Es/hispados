@@ -11,7 +11,8 @@
 #
 # Con --dll sale una DLL: se exportan todos los símbolos globales definidos
 # (las funciones y los datos; lo que no deba verse, «static»), con su nombre
-# tal cual, y lleva siempre .reloc. La entrada (DllMain, si la hay) es
+# tal cual (o solo los de --exp a,b,c), y lleva siempre .reloc. La entrada
+# (DllMain, si la hay) es
 # opcional. Con --gui el programa es de ventanas (subsistema 2) en vez de
 # consola (3): Hispa Ventanas lo abre dentro, como una tarea.
 #
@@ -97,6 +98,7 @@ def main():
     ap.add_argument('-l', action='append', default=[])
     ap.add_argument('-t', action='append', default=[])
     ap.add_argument('--res', default=None)
+    ap.add_argument('--exp', default=None)
     ap.add_argument('objs', nargs='+')
     a = ap.parse_args()
     if a.dll:
@@ -297,6 +299,12 @@ def main():
     if a.dll:
         nombre_dll = a.o.replace('\\', '/').split('/')[-1].upper()
         exp = sorted((n for n in glob if not n.startswith('.')), key=lambda n: n.encode())
+        if a.exp:
+            solo = a.exp.split(',')
+            for x in solo:
+                if x not in exp:
+                    sys.exit(f'--exp: no está {x}')
+            exp = [x for x in exp if x in solo]
         if a.e in exp:
             exp.remove(a.e)
         n = len(exp)
