@@ -1628,6 +1628,7 @@ k_Sleep:
         mov ebx, eax
 .b:
         call ceder
+        call dx_tic                 ; [DX] WINMM: el sonido y sus temporizadores
         call tics
         sub eax, ebx
         imul eax, eax, 55

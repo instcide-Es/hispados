@@ -34,7 +34,8 @@ hasta() {
   done
 }
 # prepara $T/f.img (con las DLL y un grupo «DirectX» con los accesos que se
-# digan: «programa|parámetros» ...) y $T/b.img (vacío, para lo que se ponga)
+# digan: «programa|parámetros|carpeta» ...) y $T/b.img (vacío, para lo que
+# se ponga)
 prepara() {
   local a
   imagen WINDX.EXE
@@ -44,7 +45,8 @@ prepara() {
   done
   local ini=('[Centro]' 'Ventana=36,52,452,190' 'Activo=0' 'SinRepetidos=1' 'TareasPrincipal=1' \
     '[Grupo]' 'Nombre=DirectX' 'Ventana=60,330,600,200' 'Estado=1')
-  for a in "$@"; do ini+=('[Acceso]' 'Nombre=P' 'Icono=4' "Programa=${a%%|*}" "Parametros=${a#*|}"); done
+  local p q c
+  for a in "$@"; do IFS='|' read -r p q c <<< "$a"; ini+=('[Acceso]' 'Nombre=P' 'Icono=4' "Programa=$p" "Parametros=$q" "Carpeta=$c"); done
   printf '%s\r\n' "${ini[@]}" > $T/CENTRO.INI
   MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
   rm -f $T/b.img
@@ -65,7 +67,7 @@ check() { if grep -qF -- "$1" $T/log.txt; then ok "$1"; else ko "$1"; fi; }
 F=$DL/win32-fasmw
 if [ -f $F/FASM.EXE ] && [ -f $F/EXAMPLES/DDRAW/DDRAW.ASM ]; then
   echo "== DirectX de otros: el ejemplo DDRAW del flat assembler (ensamblado en Hispa-DOS) =="
-  prepara 'B:\DDRAW\DDRAW.EXE|'
+  prepara 'B:\DDRAW\DDRAW.EXE||B:\DDRAW'
   mcopy -i $T/b.img $F/FASM.EXE ::
   mcopy -s -i $T/b.img $F/INCLUDE ::
   mmd -i $T/b.img ::DDRAW
@@ -99,7 +101,7 @@ fi
 P=$DL/dx-tinyptc/0.8/windows
 if [ -f $P/fullscreen.exe ]; then
   echo "== DirectX de otros: TinyPTC (UPX, LoadLibraryA, 32 bits, pantalla completa y ventana) =="
-  prepara 'B:\PTCFULL.EXE|' 'B:\PTCVEN.EXE|'
+  prepara 'B:\PTCFULL.EXE||B:\' 'B:\PTCVEN.EXE||B:\'
   mcopy -i $T/b.img $P/fullscreen.exe ::PTCFULL.EXE
   mcopy -i $T/b.img $P/windowed.exe ::PTCVEN.EXE
   { sleep 6
@@ -129,7 +131,7 @@ fi
 E=$DL/dx-fceu
 if [ -f $E/fceu.exe ] && make -s build/HISPA1.NES > /dev/null 2>&1; then
   echo "== DirectX de otros: FCE Ultra 0.98.8 (DirectDraw 7, DirectInput 7, DirectSound) con «Cometas» =="
-  prepara 'B:\FCEU.EXE|HISPA1.NES'
+  prepara 'B:\FCEU.EXE|HISPA1.NES|B:\'
   mcopy -i $T/b.img $E/fceu.exe ::FCEU.EXE
   mcopy -i $T/b.img $B/HISPA1.NES ::HISPA1.NES
   { sleep 6

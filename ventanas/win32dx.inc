@@ -467,51 +467,19 @@ dx_tic:
 .x:
         ret
 
-; (pe_abrir) EBX = el acceso, EDX = el programa: la carpeta de trabajo pasa a
-; ser la del acceso («Carpeta=») o, si no tiene, la del programa. Los juegos
-; de la época leen sus datos así («DDRAW.GIF», «DATOS\NIVEL1.DAT»). Si no se
-; puede, se queda como estaba. Conserva los registros
+; (pe_abrir) EBX = el acceso, EDX = el programa: si el acceso dice su carpeta
+; («Carpeta=»), la de trabajo pasa a ser esa (los juegos de la época leen sus
+; datos así: «DDRAW.GIF»). Sin ella, se queda como estaba (como hasta ahora:
+; los diálogos de archivos de los programas empiezan en ella). Si no se puede,
+; también. Conserva los registros
 dx_carpeta:
-        pushad
-        sub esp, 84
-        mov edi, esp
-        lea esi, [ebx+AC_DIR]
-        cmp byte [esi], 0
-        jne .copia
-        lea esi, [edx+PE_RUTA]
-.copia:
-        mov ecx, 79
-        call cad_copiar
-        mov byte [esp+79], 0
         cmp byte [ebx+AC_DIR], 0
-        jne .ir
-        mov edi, esp                ; de la ruta del programa, lo de antes de
-        xor ecx, ecx                ; la última «\»
-.b:
-        mov al, [edi]
-        test al, al
-        jz .f
-        cmp al, '\'
-        jne .s
-        mov ecx, edi
-.s:
-        inc edi
-        jmp .b
-.f:
-        jecxz .x
-        mov byte [ecx], 0
-        cmp byte [esp+1], ':'       ; «A:\PROG.EXE»: la raíz, «A:\»
-        jne .ir
-        lea eax, [esp+2]
-        cmp ecx, eax
-        jne .ir
-        mov word [ecx], '\'
-.ir:
-        mov esi, esp
+        je .x
+        pushad
+        lea esi, [ebx+AC_DIR]
         call dos_ir_carpeta
-.x:
-        add esp, 84
         popad
+.x:
         ret
 
 ; [DX] ShowCursor(mostrar) -> la cuenta (el cursor de Hispa Ventanas sigue
