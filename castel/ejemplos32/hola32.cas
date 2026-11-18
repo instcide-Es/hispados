@@ -1,0 +1,76 @@
+; hola32.cas - un programa Hispa32 (Win32 de consola, PE) escrito en Castel:
+; se compila con «modelo hispa32» y se ejecuta en Hispa-DOS con HW32
+; (HW32 HOLA32.EXE). Cuentas de 32 bits, arreglos, estructuras, punteros y
+; recursión; acaba con el código de salida 42.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Hola32
+
+    modelo hispa32
+
+    tipo Punto = estructura
+        px, py: ent32
+        nombre: puntero a byte
+    fin
+
+    variable criba: arreglo [1000] de bool
+    variable puntos: arreglo [3] de Punto
+
+    función fibonacci(n: nat32): nat32
+        si n < 2 entonces devolver n fin
+        devolver fibonacci(n - 1) + fibonacci(n - 2)
+    fin
+
+    ; cuántos primos hay por debajo de n (la criba de Eratóstenes)
+    función primos(n: nat32): nat32
+        variable i, j, cuántos: nat32
+        para i desde 2 hasta n - 1 hacer
+            criba[i] := cierto
+        fin
+        cuántos := 0
+        para i desde 2 hasta n - 1 hacer
+            si criba[i] entonces
+                cuántos := cuántos + 1
+                j := i * i
+                mientras j < n hacer
+                    criba[j] := falso
+                    j := j + i
+                fin
+            fin
+        fin
+        devolver cuántos
+    fin
+
+    función distancia(ref p: Punto): nat32
+        variable dx, dy: ent32
+        dx := p.px
+        dy := p.py
+        si dx < 0 entonces dx := -dx fin
+        si dy < 0 entonces dy := -dy fin
+        devolver dx + dy
+    fin
+
+    función principal(): byte
+        variable i: nat16
+        variable p: puntero a Punto
+        escribir("Hola desde Castel, en 32 bits (Hispa32)\n")
+        escribir("fibonacci(25) = ", fibonacci(25), "\n")
+        escribir("primos por debajo de 1000: ", primos(1000), "\n")
+        escribir("4000000000 div 3 = ", 4000000000 div 3, ", -7 div 2 = ", -7 div 2, "\n")
+        puntos[0].px := 3
+        puntos[0].py := -4
+        puntos[0].nombre := "A"
+        puntos[1].px := -100000
+        puntos[1].py := 250000
+        puntos[1].nombre := "B"
+        puntos[2].px := 0
+        puntos[2].py := 0
+        puntos[2].nombre := "origen"
+        para i desde 0 hasta 2 hacer
+            p := dirección(puntos[i])
+            escribir(p.nombre, ": (", p.px, ", ", p.py, ") a ", distancia(puntos[i]), "\n")
+        fin
+        escribir("un puntero ocupa ", tamaño(p), " octetos; un Punto, ", tamaño(Punto), "\n")
+        devolver 42
+    fin
+
+fin Hola32.
