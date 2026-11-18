@@ -31,12 +31,15 @@ int atoi(const char *);
 int sprintf(char *, const char *, ...);
 u32 strtoul(const char *, char **, int);
 long time(long *);
+/* [JS] script.c trae antes el stdio.h de w32/js/inc (el de QuickJS): su FILE */
+#ifndef HJ_STDIO_H
 typedef struct FILE FILE;
 FILE *fopen(const char *, const char *);
 char *fgets(char *, int, FILE *);
 int fputs(const char *, FILE *);
 u32 fread(void *, u32, u32, FILE *);
 u32 fwrite(const void *, u32, u32, FILE *);
+#endif
 int fseek(FILE *, long, int);
 long ftell(FILE *);
 int fclose(FILE *);
@@ -73,6 +76,7 @@ enum {
 #define EF_CRUDO_ENT 8   /*   o texto con entidades (title, textarea) */
 #define EF_FUERA 16      /* no se enseña (script, style, head...) */
 extern const u8 etq_band[E_N];
+extern const char *const etq_nom[E_N];    /* [JS] los nombres («div»...) */
 
 typedef struct Nodo Nodo;
 struct Nodo {
@@ -149,6 +153,8 @@ typedef struct {
   u32 trozo_q; int trozo_f;
   char tipo[80];
   char error[200];
+  const char *js_cab;    /* [JS] cabeceras de más («Nombre: valor\r\n»...; las de fetch). Se pone tras http_empieza */
+  const char *js_metodo; /* [JS] otro método (PUT, DELETE...) o NULL */
 } Pet;
 void http_inicia(void);
 void http_fin(void);
@@ -165,6 +171,9 @@ void http_galletas_carga(const char *ruta);
 int http_galletas_de(const char *servidor);
 void http_galletas_borra(void);
 extern int http_galletas_cambio;
+char *http_galletas(const char *url);              /* [JS] document.cookie: «a=b; c=d» (malloc) o NULL */
+void http_pon_galleta(const char *url, const char *linea);   /* [JS] document.cookie = «a=b; path=/» */
+int nav_cruzada(const char *de, const char *a);     /* de otro sitio (SameSite): navega.c */
 
 /* ---- la página: del documento a la rejilla de letras (pagina.c) ---- */
 enum { C_TEXTO, C_CLAVE, C_CASILLA, C_RADIO, C_ENVIAR, C_BOTON, C_REINICIO, C_LISTA, C_AREA, C_OCULTO, C_ARCHIVO };
@@ -237,4 +246,7 @@ u8 *img_descodifica(const u8 *d, u32 n, int pw, int ph, int max_w, int max_h, in
 const char *pag_confirma(Nodo *n, char *b, int max);   /* el texto de confirm('...') o NULL */
 void ctl_pon(Ctl *, const char *t, int n);
 int pag_ctl_de_label(Pagina *, Nodo *label);          /* el control de un <label>, o -1 */
+void pag_ctl_rehaz(Pagina *, int con_js);             /* [JS] los controles otra vez (el árbol ha cambiado) */
+void pag_rotulo_vacio(const Ctl *, char *b, int max); /* [JS] el rótulo de un botón sin texto */
+extern int (*pag_clicable)(Nodo *);                   /* [JS] ¿tiene un clic de JavaScript? (NULL sin JavaScript) */
 #endif

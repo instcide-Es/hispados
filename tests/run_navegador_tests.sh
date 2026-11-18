@@ -33,11 +33,13 @@
 #  (GUARDAR=carpeta deja las capturas y el registro del servidor; MEDIR=1
 #  además captura el Administrador de tareas con la página de la biblioteca
 #  abierta, mb, y con /grande?n=720 —121 KB de HTML—, mg; ver NAVEGADOR.md.)
+# (Con JavaScript=NO en NAVEGA.INI: así se prueba el Navegador sin guiones;
+# el JavaScript lo prueba tests/run_navegador_js_tests.sh.)
 # Browser test (offline, against a local HTTPS test server).
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
-make -s build/NAVEGA.EXE build/HSPTLS.DLL build/WSOCK32.DLL build/MSVCRT.DLL build/HW32.COM build/LECTOR.HVP > /dev/null 2>&1 || {
+make -s build/NAVEGA.EXE build/HSPJS.DLL build/HSPTLS.DLL build/WSOCK32.DLL build/MSVCRT.DLL build/HW32.COM build/LECTOR.HVP > /dev/null 2>&1 || {
   echo "== Hispa-486: el Navegador: sin gcc de 32 bits, se salta =="; exit 0; }
 . tests/tools/win32_ventanas.sh
 . tests/tools/nav_certs.sh
@@ -57,7 +59,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/c
 mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
 mkdir -p $T/c/HISPADOS/INTERNET
-cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
+cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
 cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
 mkdir -p $T/c/HISPADOS/PROGS $T/c/FOTOS
 cp $B/LECTOR.HVP $T/c/HISPADOS/PROGS/
@@ -66,7 +68,7 @@ python3 -c "
 import sys; sys.argv = ['', '$T', '0']
 exec(open('tests/tools/nav_servidor.py').read().split('class Pedido')[0])
 open('$T/c/FOTOS/TAPA.PNG', 'wb').write(png(64, 48, (255, 153, 0)))"
-printf 'Inicio=https://10.0.2.2:%d/\r\nIdioma=es-ES\r\n' $((P + 1)) > $T/c/HISPADOS/INTERNET/NAVEGA.INI
+printf 'Inicio=https://10.0.2.2:%d/\r\nIdioma=es-ES\r\nJavaScript=NO\r\n' $((P + 1)) > $T/c/HISPADOS/INTERNET/NAVEGA.INI
 python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS $T/c/FOTOS > /dev/null
 corre() {
   rm -f $T/mon
@@ -173,7 +175,7 @@ chk $T/p3.ppm busca $PAG 9 12 "El niño y la cigüeña" busca $PAG 0 9 "Canción
   busca $PAG 0 9 "Paseos por la sierra"
 chk $T/p4.ppm busca 50 160 110 190 0 9 "Recetas de la abuela" busca 0 220 60 250 0 9 "hola luis" busca 0 238 60 268 0 9 "dos" \
   px 22 $(fy 12) 0 "15 días, marcado" nopx 118 $(fy 12) 0 "30 días, sin marcar" busca 90 360 200 390 7 6 "Solo JavaScript"
-chk $T/p5.ppm busca 0 548 100 570 0 15 "Este botón necesita JavaScript, que el Navegador no tiene."
+chk $T/p5.ppm busca 0 548 100 570 0 15 "Este botón necesita JavaScript, que está apagado (NAVEGA.INI)."
 chk $T/p6.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/biblioteca" \
   busca $PAG 237 230 "Hecho: prestado «Recetas de la abuela» a María García (15 días, con aviso)." \
   busca $PAG 0 8 "Prestado a María García"

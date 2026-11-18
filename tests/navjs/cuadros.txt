@@ -1,0 +1,12 @@
+espera 1300
+vuelca
+responde no
+clic #borra
+responde si
+clic #borra
+clic button[onclick]
+responde no
+clic form button
+responde si
+clic form button
+registro

@@ -173,18 +173,24 @@ $(B)/HTTPS.EXE: w32/https.c $(B)/crt0.o $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MS
 	$(CC32) -march=i486 -Wall -c $< -o $(B)/https.o
 	python3 tools/elf2pe.py -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/https.o
 # El Navegador de Hispa-486 (docs/486/NAVEGADOR.md): programa Hispa32 de ventanas
-NAVSRC = w32/navega/navega.c w32/navega/pagina.c w32/navega/html.c w32/navega/http.c w32/navega/imagen.c
+# [JS] con JavaScript: dom.c (el DOM), script.c (la unión con HSPJS.DLL) y
+# dom.js (el preludio, que va dentro del programa como texto)
+NAVSRC = w32/navega/navega.c w32/navega/pagina.c w32/navega/html.c w32/navega/http.c w32/navega/imagen.c w32/navega/dom.c w32/navega/script.c
 NAVOBJ = $(patsubst w32/navega/%.c,$(B)/nav_%.o,$(NAVSRC)) $(B)/nav_formatos.o
-$(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h | $(B)
+$(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h w32/navega/dom.h | $(B)
 	$(CC32) -march=i486 -Wall -Wextra -Wno-parentheses -Wno-sign-compare -c $< -o $@
 # las imágenes: el núcleo de Mirador tal cual (programas/mirador, programas/comun)
 $(B)/nav_formatos.o: w32/navega/imagen.asm $(wildcard programas/mirador/*.inc) programas/comun/desinfla_t.inc programas/comun/jpeg.inc | $(B)
 	$(NASM) -f elf32 -i programas/mirador/ -i programas/comun/ -o $@ $<
-$(B)/NAVEGA.EXE: $(NAVOBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
-	python3 tools/elf2pe.py --gui --pila 0x30000 -e inicio_prog -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(NAVOBJ)
+$(B)/nav_domjs.h: w32/navega/dom.js | $(B)
+	python3 -c "import sys; d = open(sys.argv[1], 'rb').read(); print('static const char dom_js[] = {' + ','.join(str(b) for b in d) + ',0};')" $< > $@
+$(B)/nav_script.o: w32/navega/script.c w32/navega/nav.h w32/navega/dom.h $(B)/nav_domjs.h terceros/quickjs/quickjs.h | $(B)
+	gcc $(QJSCF) -Iw32/navega -I$(B) -Wall -Wextra -Wno-parentheses -Wno-sign-compare -Wno-unused-parameter -c $< -o $@
+$(B)/NAVEGA.EXE: $(NAVOBJ) $(B)/HSPJS.DLL $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
+	python3 tools/elf2pe.py --gui --pila 0x30000 -e inicio_prog -o $@ -l $(B)/HSPJS.DLL -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(NAVOBJ)
 # El segundo disquete de Hispa-486: «Internet» (el Navegador, HTTPS y sus DLL;
 # con HW32.COM y MSVCRT.DLL al lado para que se puedan abrir desde él)
-INTERNET = $(B)/NAVEGA.EXE $(B)/HTTPS.EXE $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL $(B)/HW32.COM
+INTERNET = $(B)/NAVEGA.EXE $(B)/HSPJS.DLL $(B)/HTTPS.EXE $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL $(B)/HW32.COM
 $(B)/internet.img: $(INTERNET) w32/navega/NAVEGA.INI w32/navega/LEEME.TXT
 	rm -f $@
 	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
@@ -193,6 +199,30 @@ $(B)/internet.img: $(INTERNET) w32/navega/NAVEGA.INI w32/navega/LEEME.TXT
 	iconv -f UTF-8 -t CP437 w32/navega/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet_leeme.txt
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet_leeme.txt ::LEEME.TXT
 internet: $(B)/internet.img
+# [JS] HSPJS.DLL: JavaScript para los programas Hispa32 (QuickJS, que va en
+# terceros/quickjs con su licencia MIT, más w32/js: memoria, hora, Math) y
+# JS.EXE, la consola para probarlo. docs/486/NAVEGADOR.md, «JavaScript»
+QJSCF = -m32 -march=i486 -O2 -ffreestanding -fbuiltin -nostdinc -isystem $(shell gcc -print-file-name=include) -Iw32/js/inc \
+  -Iterceros/quickjs -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-tree-loop-distribute-patterns \
+  -fno-common -fwrapv -funsigned-char -ffunction-sections -fdata-sections \
+  -DCONFIG_VERSION=\"$(shell cat terceros/quickjs/VERSION)\" -DCONFIG_SIN_HILOS -D_GNU_SOURCE -DNDEBUG
+QJSSRC = quickjs libregexp libunicode cutils dtoa
+QJSOBJ = $(patsubst %,$(B)/qjs/%.o,$(QJSSRC)) $(B)/qjs/hspjs.o $(B)/qjs/mates.o
+$(B)/qjs/%.o: terceros/quickjs/%.c terceros/quickjs/quickjs.h | $(B)
+	@mkdir -p $(B)/qjs
+	nice -n 19 gcc $(QJSCF) -c $< -o $@
+$(B)/qjs/%.o: w32/js/%.c | $(B)
+	@mkdir -p $(B)/qjs
+	gcc $(QJSCF) -Wall -c $< -o $@
+$(B)/HSPJS.DLL: $(QJSOBJ) $(B)/MSVCRT.DLL tools/elf2pe.py
+	ld -m elf_i386 -r -o $(B)/qjs/todo0.o $(QJSOBJ)
+	nm -g --defined-only $(B)/qjs/todo0.o | awk '$$3 ~ /^(_*JS_|Hj|js_free|js_malloc|js_realloc|js_mallocz|js_strdup)/ {print $$3}' | sort -u > $(B)/qjs/exporta.txt
+	ld -m elf_i386 -r --gc-sections -e DllMain $$(sed 's/^/-u /' $(B)/qjs/exporta.txt) -o $(B)/qjs/todo.o $(QJSOBJ)
+	python3 tools/elf2pe.py --dll --exp $$(paste -sd, $(B)/qjs/exporta.txt) -o $@ -l $(B)/MSVCRT.DLL $(B)/qjs/todo.o
+$(B)/JS.EXE: w32/js/js.c $(B)/crt0.o $(B)/HSPJS.DLL $(B)/MSVCRT.DLL tools/elf2pe.py | $(B)
+	gcc $(QJSCF) -Wall -c $< -o $(B)/qjs/js.o
+	python3 tools/elf2pe.py -o $@ -l $(B)/HSPJS.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/qjs/js.o
+js: $(B)/HSPJS.DLL $(B)/JS.EXE
 # [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
 # Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
 $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
@@ -1014,6 +1044,8 @@ test: $(TEST_DEPS)
 	tests/run_yukon_tests.sh
 	tests/run_red32_tests.sh $(IMG)
 	tests/run_navegador_tests.sh $(IMG)
+	tests/run_navegador_js_tests.sh $(IMG)
+	tests/run_js_tests.sh $(IMG)
 	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_wifi_tests.sh $(IMG)
 	tests/run_wifi_ventana_tests.sh $(IMG)

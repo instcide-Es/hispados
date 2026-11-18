@@ -245,6 +245,7 @@ static void estilo(Pagina *p, Nodo *n) {
     if (tiene_clase(n, "badge")) n->bg = K_CABEZA;
     if (n->etq == E_A && tiene_clase(n, "btn")) n->est |= EN_BOTON;
   }
+  if ((t = atr(n, "aria-selected")) && !strcmp(t, "true") && !n->bg) n->bg = K_MARCA;   /* [JS] la fila elegida de una lista (con las flechas) */
   for (k = 0; k < p->n_reglas; k++) {
     Regla *q = &rs[k];
     if (q->del_atr_hidden) continue;
@@ -896,6 +897,7 @@ static int ctl_ancho(Ctx *c, Ctl *k) {
     b[0] = 0;
     if (k->nodo->etq == E_BUTTON) texto_de(k->nodo, b, sizeof b);
     else { j = k->n_valor < 290 ? k->n_valor : 290; memcpy(b, k->valor, j); b[j] = 0; }
+    pag_rotulo_vacio(k, b, sizeof b);           /* [JS] */
     w = strlen(b);
     while (w && b[w - 1] == ' ') w--;
     return w + 4;
@@ -1255,6 +1257,9 @@ static void caja2(Ctx *c, Nodo *n, Est e) {
   }
   if (n->fg) e.fg = n->fg;
   if (n->bg) e.bg = n->bg;
+  /* [JS] algo que se pulsa con JavaScript (una fila de una lista...): como un enlace sin dirección */
+  if (pag_clicable && !c->medir && (e.enlace < 0 || (!p->enl[e.enlace].href && p->enl[e.enlace].nodo->etq != E_LABEL
+      && !(p->enl[e.enlace].nodo->est & EN_PLEGABLE) && p->enl[e.enlace].nodo->etq != E_DETAILS)) && pag_clicable(n)) {   /* (el de dentro gana: la fila, no la lista) */ e.enlace = (short)enlace_nuevo2(c, NULL, n, 0); if (!n->fg) e.fg = K_ENLACE; }
   if (n->est & EN_NEGRITA) e.est |= A_NEGRITA;
   if (n->est & EN_SUBRAYA) e.est |= A_SUBRAYA;
   alin0 = c->alin;
@@ -1778,4 +1783,46 @@ int pag_refresco(Pagina *p, char **url) {
     }
   }
   return s > 3600 ? 3600 : s;
+}
+
+int (*pag_clicable)(Nodo *);    /* [JS] */
+/* [JS] un botón sin texto (un icono, «☰»): su aria-label o su title */
+void pag_rotulo_vacio(const Ctl *k, char *b, int max) {
+  const char *t;
+  int j;
+  for (j = 0; b[j] == ' '; j++) ;
+  if (b[j] || k->nodo->etq != E_BUTTON) return;
+  if (!(t = atr(k->nodo, "aria-label")) && !(t = atr(k->nodo, "title"))) return;
+  for (j = 0; t[j] && j < max - 1; j++) b[j] = t[j];
+  b[j] = 0;
+}
+/* [JS] los controles otra vez, tras cambiar el árbol desde JavaScript: los
+ * que siguen ahí conservan lo suyo (lo escrito, marcado, elegido); los nuevos
+ * salen como al cargar. con_js: los botones que solo hacen algo con
+ * JavaScript ya no salen en gris */
+void pag_ctl_rehaz(Pagina *p, int con_js) {
+  Ctl *viejos = p->ctl;
+  int n = p->n_ctl, k, j;
+  p->ctl = NULL; p->n_ctl = p->cap_ctl = 0;
+  for (k = 0; k < n; k++) viejos[k].nodo->ctl = 0;
+  ctl_todos(p, p->doc.raiz);
+  for (k = 0; k < p->n_ctl; k++) {
+    Ctl *c = &p->ctl[k];
+    if (con_js) c->solo_js = 0;
+    for (j = 0; j < n && viejos[j].nodo != c->nodo; j++) ;
+    if (j < n) {
+      Ctl *v = &viejos[j];
+      if (c->tipo != C_LISTA && c->tipo != C_ENVIAR && c->tipo != C_BOTON && c->tipo != C_REINICIO) {
+        free(c->valor);
+        c->valor = v->valor; c->n_valor = v->n_valor; c->cap_valor = v->cap_valor;
+        v->valor = NULL;
+        c->valor0 = v->valor0;
+        c->cursor = v->cursor; c->desp = v->desp;
+      }
+      c->marcado = v->marcado; c->marcado0 = v->marcado0;
+      if (c->tipo == C_LISTA && v->tipo == C_LISTA && v->n_opc == c->n_opc) { c->elegida = v->elegida; c->elegida0 = v->elegida0; }
+    }
+  }
+  for (k = 0; k < n; k++) free(viejos[k].valor);
+  free(viejos);
 }

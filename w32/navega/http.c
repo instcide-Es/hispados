@@ -239,8 +239,9 @@ u32 http_fecha(const char *t, const char *fin) {
   return dias_de(anio, mes, dia) * 86400u + (u32)(h * 3600 + mi * 60 + se);
 }
 u32 http_ahora(void) { return (u32)time(NULL); }
-/* «Set-Cookie: nombre=valor; Path=/; Secure...» de una respuesta de u */
-static void gal_pon(const Url *u, const char *l) {
+/* «Set-Cookie: nombre=valor; Path=/; Secure...» de una respuesta de u (de_js:
+ * la pone document.cookie, que no puede poner ni pisar una HttpOnly) */
+static void gal_pon(const Url *u, const char *l, int de_js) {
   const char *f, *ig, *p;
   char dom[128], ruta[256], atrib[24];
   int borra = 0, seguro = 0, exacto = 1, k, n, libre = -1, viejo = -1, solo_http = 0, mismo = SS_LAX, hay_edad = 0;
@@ -294,6 +295,11 @@ static void gal_pon(const Url *u, const char *l) {
   }
   /* una galleta «segura» solo la puede poner una página cifrada */
   if (seguro && !u->seguro) return;
+  if (de_js && solo_http) return;
+  if (de_js)
+    for (k = 0; k < N_GAL; k++)
+      if (gal[k].nombre && gal[k].solo_http && (int)strlen(gal[k].nombre) == ig - l && !memcmp(gal[k].nombre, l, ig - l)
+          && !strcmp(gal[k].dom, dom) && !strcmp(gal[k].ruta, ruta)) return;
   for (k = 0; k < N_GAL; k++) {
     Galleta *g = &gal[k];
     if (!g->nombre) { if (libre < 0) libre = k; continue; }
@@ -318,7 +324,7 @@ static void gal_pon(const Url *u, const char *l) {
 /* la cabecera «Cookie: a=b; c=d\r\n» para u, en d (malloc) o NULL. cruzada:
  * la pide una página de otro sitio (un enlace o un formulario de fuera); sub:
  * no es la página sino algo de dentro (una imagen) */
-static char *gal_para(const Url *u, int cruzada, int sub, int post) {
+static char *gal_para(const Url *u, int cruzada, int sub, int post, int para_js) {
   char *d = NULL;
   u32 n = 0, k, ls = strlen(u->servidor), ahora = http_ahora();
   for (k = 0; k < N_GAL; k++) {
@@ -329,6 +335,7 @@ static char *gal_para(const Url *u, int cruzada, int sub, int post) {
     if (g->caduca && g->caduca <= ahora) { gal_quita(g); continue; }
     if (g->seguro && !u->seguro) continue;
     if (cruzada && g->mismo != SS_NONE && (g->mismo == SS_STRICT || sub || post)) continue;
+    if (para_js && g->solo_http) continue;    /* [JS] las HttpOnly no las ve document.cookie */
     ld = strlen(g->dom); lr = strlen(g->ruta);
     if (g->exacto ? strcmp(g->dom, u->servidor) != 0
                   : !(ld <= ls && !strcmp(u->servidor + ls - ld, g->dom) && (ld == ls || u->servidor[ls - ld - 1] == '.'))) continue;
@@ -473,22 +480,37 @@ void http_suelta(Pet *p) {
   free(p->url); free(p->cuerpo); free(p->pet); free(p->cab); free(p->datos); free(p->u.ruta);
   memset(p, 0, sizeof *p);
 }
+/* [JS] ¿trae la lista de cabeceras c («Nombre: valor\r\n»...) la cabecera nombre? */
+static int cab_de(const char *c, const char *nombre) {
+  u32 n = strlen(nombre);
+  while (c && *c) {
+    if (!_strnicmp(c, nombre, n) && c[n] == ':') return 1;
+    while (*c && *c != '\n') c++;
+    if (*c) c++;
+  }
+  return 0;
+}
 static int pet_arma(Pet *p) {
-  char *g = gal_para(&p->u, p->cruzada, p->sub, p->post), host[150];
-  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 900;
+  char *g = gal_para(&p->u, p->cruzada, p->sub, p->post, 0), host[150];
+  const char *acc;
+  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 900 + (p->js_cab ? 2010 : 0);
   free(p->pet);
   p->pet = malloc(n);
   if (!p->pet) { free(g); return 0; }
   if (p->u.puerto != (p->u.seguro ? 443 : 80)) sprintf(host, "%s:%d", p->u.servidor, p->u.puerto);
   else strcpy(host, p->u.servidor);
+  /* [JS] fetch puede traer su Accept y su Content-Type: entonces mandan los suyos */
+  acc = cab_de(p->js_cab, "Accept") ? NULL : p->js_cab ? "*/*"
+      : p->sub ? "image/png,image/gif,image/jpeg,image/bmp,image/x-icon;q=0.9,*/*;q=0.1" : "text/html,text/plain;q=0.9,*/*;q=0.5";
   n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: " HTTP_AGENTE "\r\n"
-              "Accept: %s\r\nAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
-              p->post ? "POST" : "GET", p->u.ruta, host,
-              p->sub ? "image/png,image/gif,image/jpeg,image/bmp,image/x-icon;q=0.9,*/*;q=0.1" : "text/html,text/plain;q=0.9,*/*;q=0.5",
-              http_idioma, g ? g : "");
+              "%s%s%sAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
+              p->js_metodo ? p->js_metodo : p->post ? "POST" : "GET", p->u.ruta, host,
+              acc ? "Accept: " : "", acc ? acc : "", acc ? "\r\n" : "", http_idioma, g ? g : "");
   free(g);
-  if (p->post) n += sprintf(p->pet + n, "Content-Type: %s\r\nContent-Length: %u\r\n",
-                            p->tipo_cuerpo[0] ? p->tipo_cuerpo : "application/x-www-form-urlencoded", p->n_cuerpo);
+  if (p->js_cab) n += sprintf(p->pet + n, "%.2000s", p->js_cab);     /* [JS] las de fetch */
+  if (p->post && !cab_de(p->js_cab, "Content-Type"))
+    n += sprintf(p->pet + n, "Content-Type: %s\r\n", p->tipo_cuerpo[0] ? p->tipo_cuerpo : "application/x-www-form-urlencoded");
+  if (p->post) n += sprintf(p->pet + n, "Content-Length: %u\r\n", p->n_cuerpo);
   memcpy(p->pet + n, "\r\n", 2); n += 2;
   if (p->post && p->n_cuerpo) { memcpy(p->pet + n, p->cuerpo, p->n_cuerpo); n += p->n_cuerpo; }
   p->n_pet = n;
@@ -562,7 +584,7 @@ static int cabeceras(Pet *p) {
   p->estado = atoi(t + 1);
   for (l = p->cab; (l = strchr(l, '\n')); ) {
     l++;
-    if (!_strnicmp(l, "Set-Cookie:", 11)) { l += 11; while (*l == ' ') l++; gal_pon(&p->u, l); }
+    if (!_strnicmp(l, "Set-Cookie:", 11)) { l += 11; while (*l == ' ') l++; gal_pon(&p->u, l, 0); }
   }
   p->cerrar = !v11;
   if ((t = http_cabecera(p, "Connection"))) { if (!_strnicmp(t, "close", 5)) p->cerrar = 1; else if (!_strnicmp(t, "keep-alive", 10)) p->cerrar = 0; }
@@ -741,4 +763,24 @@ cortada:
     return 0;
   }
   return falla(p, "Se ha cortado la conexi\363n con el servidor.");
+}
+
+/* [JS] document.cookie: las galletas de url («a=b; c=d», malloc) y poner una */
+char *http_galletas(const char *url) {
+  Url u;
+  char *g, *r;
+  if (!url_parte(url, &u)) return NULL;
+  g = gal_para(&u, 0, 0, 0, 1);
+  free(u.ruta);
+  if (!g) return NULL;
+  r = g;
+  memmove(r, g + 8, strlen(g + 8) + 1);         /* sin «Cookie: » */
+  if (strlen(r) >= 2) r[strlen(r) - 2] = 0;      /* ni el \r\n */
+  return r;
+}
+void http_pon_galleta(const char *url, const char *linea) {
+  Url u;
+  if (!url_parte(url, &u)) return;
+  gal_pon(&u, linea, 1);
+  free(u.ruta);
 }

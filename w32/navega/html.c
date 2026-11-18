@@ -185,7 +185,7 @@ static int decodifica(const u8 *o, u32 n, char *d, int latin1, int ent) {
 }
 
 /* ---- las etiquetas ---- */
-static const char *const etq_nom[E_N] = {
+const char *const etq_nom[E_N] = {   /* [JS] (no estática: la usa dom.c) */
   "", "html", "head", "body", "title", "meta", "link", "base", "script", "style", "noscript", "template",
   "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "dl", "dt", "dd", "pre", "blockquote",
   "hr", "br", "table", "caption", "thead", "tbody", "tfoot", "tr", "td", "th", "form", "fieldset", "legend",
@@ -471,7 +471,17 @@ void doc_lee(Doc *d, const u8 *f, u32 n, int latin1) {
           c[d->n_css++] = '\n'; c[d->n_css] = 0;
           d->css = c;
         }
-      } else if (etq != E_SCRIPT) {
+      } else if (etq == E_SCRIPT) {
+        /* [JS] el código, tal cual, para script.c (en UTF-8: si la página
+         * es de la 1252, se pasa) */
+        Nodo *x = p > k ? nodo_nuevo(&l, 0) : NULL;
+        char *b = x ? ar_pide(&d->ar, latin1 ? (p - k) * 3 + 1 : p - k + 1) : NULL;
+        if (b) {
+          x->texto = 1; x->t = b;
+          if (latin1) x->n = a_utf8((const char *)f + k, p - k, b); else { memcpy(b, f + k, p - k); x->n = p - k; }
+          b[x->n] = 0;
+        }
+      } else {
         Nodo *e = l.pila[l.np - 1];
         pon_texto(&l, f + k, p - k, 1);
         if (etq == E_TITLE && !d->titulo && e->etq == E_TITLE && e->hijo) {

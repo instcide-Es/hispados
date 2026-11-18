@@ -36,7 +36,7 @@ DLL486 = ('COMCTL32.DLL', 'UCRT.DLL')
 # del disquete «Internet» (make internet) menos HW32.COM, que ya está en
 # \HISPADOS. Hispa Ventanas crea solo el grupo «Internet» si lo encuentra ahí
 # (y la plantilla sistema/486/CENTRO.INI ya lo trae)
-INTERNET = ('NAVEGA.EXE', 'HTTPS.EXE', 'HSPTLS.DLL', 'WSOCK32.DLL', 'MSVCRT.DLL')
+INTERNET = ('NAVEGA.EXE', 'HSPJS.DLL', 'HTTPS.EXE', 'HSPTLS.DLL', 'WSOCK32.DLL', 'MSVCRT.DLL')
 INTERNET_TXT = ('w32/navega/NAVEGA.INI', 'w32/navega/LEEME.TXT')
 SIZE_MB = int(os.environ.get('USB_MB', '512'))   # Carlos 14/11: 512 MB (el .zip apenas crece)
 START = 2048
