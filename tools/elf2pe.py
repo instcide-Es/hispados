@@ -56,13 +56,15 @@ def exporta(nombre):
     return sal
 
 def tabla_hv(nombre):
-    """las funciones de USER32 y GDI32 de Hispa Ventanas: nombre -> DLL"""
+    """las funciones de USER32 y GDI32 (y, desde la fase 3d, COMDLG32,
+    ADVAPI32 y SHELL32) de Hispa Ventanas: nombre -> DLL"""
     import re
     sal = {}
+    dlls = ('USER32.dll', 'GDI32.dll', 'COMDLG32.dll', 'ADVAPI32.dll', 'SHELL32.dll')
     for l in open(nombre, encoding='utf-8'):
         m = re.match(r"\s+W32F\s+\w+,\s*\d+,\s*(\d+),\s*'(\w+)'", l)
-        if m and m.group(1) in '123':
-            sal[m.group(2)] = ('USER32.dll', 'GDI32.dll', 'COMDLG32.dll')[int(m.group(1)) - 1]
+        if m and m.group(1) in '12345':
+            sal[m.group(2)] = dlls[int(m.group(1)) - 1]
     return sal
 
 class Obj:
@@ -101,6 +103,8 @@ def main():
     ap.add_argument('--res', default=None)
     ap.add_argument('--exp', default=None)
     ap.add_argument('--pila', default='0x100000')
+    ap.add_argument('--ordinal', action='append', default=[],
+                    help='NOMBRE=N: exporta NOMBRE con ese número (las DLL que se importan por número)')
     ap.add_argument('objs', nargs='+')
     a = ap.parse_args()
     if a.dll:
@@ -310,8 +314,21 @@ def main():
         if a.e in exp:
             exp.remove(a.e)
         n = len(exp)
+        # el número de cada una (desde 1): las de --ordinal, el suyo; las demás,
+        # los huecos que queden, por orden
+        fijos = dict((x.split('=')[0], int(x.split('=')[1])) for x in a.ordinal)
+        nf = max([n] + list(fijos.values()))
+        hueco = [None] * nf
+        for x, k in fijos.items():
+            if x in exp:
+                hueco[k - 1] = x
+        libres = (i for i in range(nf) if hueco[i] is None)
+        for x in exp:
+            if x not in fijos:
+                hueco[next(libres)] = x
+        indice = dict((x, i) for i, x in enumerate(hueco) if x)
         o_fun = 40
-        o_nom = o_fun + 4 * n
+        o_nom = o_fun + 4 * nf
         o_ord = o_nom + 4 * n
         o_txt = o_ord + 2 * n
         txt = bytearray(nombre_dll.encode() + b'\0')
@@ -320,13 +337,13 @@ def main():
             pos_nom.append(o_txt + len(txt))
             txt += x.encode() + b'\0'
         edata = bytearray(o_txt) + txt
-        struct.pack_into('<IIHHIIIIIII', edata, 0, 0, 0, 0, 0, rva_e + o_txt, 1, n, n,
+        struct.pack_into('<IIHHIIIIIII', edata, 0, 0, 0, 0, 0, rva_e + o_txt, 1, nf, n,
                          rva_e + o_fun, rva_e + o_nom, rva_e + o_ord)
         for k, x in enumerate(exp):
             g = glob[x]
-            struct.pack_into('<I', edata, o_fun + 4 * k, dir_sec(g[0], g[1]) + g[2] - base)
+            struct.pack_into('<I', edata, o_fun + 4 * indice[x], dir_sec(g[0], g[1]) + g[2] - base)
             struct.pack_into('<I', edata, o_nom + 4 * k, rva_e + pos_nom[k])
-            struct.pack_into('<H', edata, o_ord + 2 * k, k)
+            struct.pack_into('<H', edata, o_ord + 2 * k, indice[x])
     rva_r = al(rva_e + max(len(edata), 1), SEC_AL) if edata else al(rva_b + max(bss_tam, 1), SEC_AL)
     # los recursos (.rsrc), delante de .reloc
     rva_rs, rsrc = rva_r, b''

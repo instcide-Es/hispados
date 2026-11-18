@@ -21,6 +21,8 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
                                     la esquina dentro del rectángulo
   nobusca X0 Y0 X1 Y1 COLOR FONDO TEXTO  y que no está
   cambia X Y ANCHO ALTO OTRA.ppm MINDIF        la zona ha cambiado respecto a OTRA
+  cuenta X Y ANCHO ALTO RRGGBB MIN MAX NOMBRE  los puntos de ese color (rojo,
+                                    verde, azul) en la zona: entre MIN y MAX
   centrado X0 X1 Y FONDO HOLGURA NOMBRE        en la fila Y, entre X0 y X1 (sin
                                     contar X1), lo que no es del color FONDO
                                     (una hoja, una fila de botones) deja a los
@@ -301,6 +303,15 @@ def main():
             res(dif >= mindif, '%s: zona (%d,%d) %dx%d distinta de la de %s: %d puntos' % (
                 nombre, x, y, w, h, os.path.basename(a[i + 5]).replace('.ppm', ''), dif))
             i += 7
+        elif op == 'cuenta':
+            x, y, w, h = (int(v) for v in a[i + 1:i + 5])
+            quiere = tuple(bytes.fromhex(a[i + 5]))
+            mn, mx = int(a[i + 6]), int(a[i + 7])
+            n = sum(1 for yy in range(h) for xx in range(w)
+                    if all(abs(p - q) <= MARGEN for p, q in zip(cap.px(x + xx, y + yy), quiere)))
+            res(mn <= n <= mx, '%s: %s: %d puntos de %s en (%d,%d) %dx%d (entre %d y %d)' % (
+                nombre, a[i + 8], n, a[i + 5], x, y, w, h, mn, mx))
+            i += 9
         elif op == 'centrado':
             x0, x1, y, n, holgura = (int(v) for v in a[i + 1:i + 6])
             xs = [x for x in range(x0, x1) if not es(cap.px(x, y), n)]

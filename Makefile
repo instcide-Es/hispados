@@ -96,7 +96,7 @@ $(B)/DPMI16.COM: tests/progs/dpmi16.asm | $(B)
 $(B)/DPMI32.COM: tests/progs/dpmi32.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # [HISPA-486] HW32: programas Win32 de consola sobre HSPDPMI (docs/486/HISPA-486.md)
-$(B)/HW32.COM: utils/hw32.asm utils/hw32k.inc lib/version.inc | $(B)
+$(B)/HW32.COM: utils/hw32.asm utils/hw32k.inc utils/hw32hilo.inc lib/version.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PEHOLA.EXE: tests/progs/pehola.asm | $(B)
 	$(NASM) -f bin -o $@ $<
@@ -115,6 +115,11 @@ $(B)/K32PRUE.EXE: tests/progs/k32prue.c tools/elf2pe.py | $(B)
 $(B)/MSVCRT.DLL: w32/msvcrt.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/msvcrt.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/msvcrt.o
+# [HISPA-486] fase 3d: los controles comunes (barra de estado, pestañas,
+# progreso, listas de imágenes); InitCommonControls con su número, el 17
+$(B)/COMCTL32.DLL: w32/comctl32.c tools/elf2pe.py ventanas/win32.inc | $(B)
+	$(CC32) -c $< -o $(B)/comctl32.o
+	python3 tools/elf2pe.py --dll --ordinal InitCommonControls=17 -t ventanas/win32.inc -o $@ $(B)/comctl32.o
 $(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/dllprue.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/dllprue.o
@@ -224,6 +229,15 @@ $(B)/WINRUEDA.EXE: tests/progs/winrueda.c $(W32DEP) | $(B)
 $(B)/WINCALC.EXE: tests/progs/wincalc.c tests/progs/wincalc.rc tools/rcmini.py $(W32DEP) | $(B)
 	$(CC32) -c $< -o $(B)/wincalc.o
 	python3 tools/elf2pe.py --gui -o $@ --res tests/progs/wincalc.rc $(W32L) $(B)/wincalc.o
+# [HISPA-486] fase 3d: el GDI (tests/run_win32gdi_tests.sh)
+$(B)/WINGDI.EXE: tests/progs/wingdi.c tests/progs/win32gdi.h $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/wingdi.o
+	python3 tools/elf2pe.py --gui -o $@ $(W32L) $(B)/wingdi.o
+# USER32 y COMDLG32 de la fase 3d (tests/run_win32var_tests.sh): los dibujos de
+# sus recursos los hace tests/progs/mkwinvar.py (están en el repositorio)
+$(B)/WINVAR.EXE: tests/progs/winvar.c tests/progs/winvar.rc tests/progs/win32gdi.h tests/progs/winvar.ico tests/progs/winvar.cur tests/progs/winvar.bmp tools/rcmini.py $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/winvar.o
+	python3 tools/elf2pe.py --gui -o $@ --res tests/progs/winvar.rc $(W32L) $(B)/winvar.o
 $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
@@ -868,6 +882,8 @@ test: $(TEST_DEPS)
 	tests/run_win32ctl_tests.sh $(IMG)
 	tests/run_win32menu_tests.sh $(IMG)
 	tests/run_win32calc_tests.sh $(IMG)
+	tests/run_win32gdi_tests.sh $(IMG)
+	tests/run_win32var_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)

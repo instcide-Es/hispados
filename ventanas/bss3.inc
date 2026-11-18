@@ -129,6 +129,7 @@ vis_ficha_p resd 1                  ; el acceso que se está pintando
 bp_auto     resb 1                  ; 1: bp_carpeta sin preguntar (carpeta del grupo)
 jd_arr      resb 1                  ; arrancando: los grupos ya están al día
 da_carpeta  resb 1                  ; dlg_archivo en modo «elegir carpeta»
+da_pasada   resb 1                  ; [HISPA-486] da_llenar: 1 las carpetas, 0 los archivos
 jd_emm      resb 1
 gr_dirs     resb MAX_GR * JD_DIRTAM ; la carpeta de juegos de cada grupo («»: ninguna)
 jd_buf      resb 100
@@ -160,22 +161,8 @@ w32d_arg    resd 1                  ;   los argumentos
 w32d_tipo   resd 1                  ;   y la clase del control (0 a 4; -1: ninguna)
 w32_crea    resd 8                  ; lo de la ventana que se está creando (V_D0...V_D7)
 w32_cascada resd 1                  ; cuántas ventanas se han puesto con CW_USEDEFAULT
-w32_dt_dc   resd 1                  ; DrawTextA: el contexto,
-w32_dt_ini  resd 1                  ;   dónde empieza la línea,
-w32_dt_y    resd 1                  ;   su y
-w32_dt_alto resd 1                  ;   y el alto de todo
 w32_wsp_delta resd 1                ; wsprintfA: PE_DELTA del programa,
 w32_wsp     resw 1                  ;   el relleno y la letra de las cifras
-            alignb 4
-dib_w       resd 1                  ; [NAVEGADOR] SetDIBitsToDevice: el mapa (ancho,
-dib_h       resd 1                  ;   alto, octetos por fila, de arriba abajo,
-dib_paso    resd 1                  ;   dónde están los puntos)
-dib_arriba  resd 1
-dib_bits    resd 1
-dib_cw      resd 1                  ;   lo que se copia de cada fila
-dib_n       resd 1                  ;   y las filas copiadas
-dib_mapa    resb 256                ;   la tabla de colores, a la paleta
-dib_fila    resb DIB_FILA           ;   una fila, ya en la paleta
 ; ---- [Configuración] ajustes (ajustes.inc) ----
             alignb 4
 aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados

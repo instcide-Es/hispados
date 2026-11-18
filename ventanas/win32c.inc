@@ -114,6 +114,26 @@ w32c_hacer:
         dec ecx
         call w32_texto
         pop edi
+        cmp ebp, 2                  ; (fase 3d) un texto fijo: sin los «&» (con
+        jne .t2                     ; «&&», uno), salvo con SS_NOPREFIX
+        test ebx, 0x80
+        jnz .t2
+        push esi
+        push edi
+        mov esi, [w32c_p+P_TEXTO]
+        mov edi, esi
+.t3:
+        lodsb
+        cmp al, '&'
+        jne .t4
+        lodsb
+.t4:
+        stosb
+        test al, al
+        jnz .t3
+        pop edi
+        pop esi
+.t2:
         ; el estilo
         mov ecx, E_HIJA
         test ebx, WS_VISIBLE

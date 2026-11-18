@@ -243,7 +243,11 @@ CUR_HORIZ       equ 1               ; doble flecha izquierda-derecha (bordes de 
 CUR_VERT        equ 2               ; doble flecha arriba-abajo (bordes de arriba y abajo)
 CUR_DIAG1       equ 3               ; en diagonal, arriba a la izquierda-abajo a la derecha
 CUR_DIAG2       equ 4               ; en diagonal, arriba a la derecha-abajo a la izquierda
-CUR_N           equ 5
+CUR_TEXTO       equ 5               ; [HISPA-486] la barra de escribir (IDC_IBEAM)
+CUR_ESPERA      equ 6               ;   el reloj de arena (IDC_WAIT)
+CUR_CRUZ        equ 7               ;   la cruz (IDC_CROSS)
+CUR_PROG        equ 8               ;   el de un programa de Windows (SetCursor)
+CUR_N           equ 9
 
 ; ---- zonas de una ventana (ges_donde) ----
 Z_NADA          equ 0

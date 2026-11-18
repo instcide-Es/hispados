@@ -97,6 +97,59 @@ cd_diag2:
         db "................"
         db "................"
 
+; [HISPA-486] los de los programas de Windows: escribir, esperar y la cruz
+cd_texto:
+        db "...XXX.XXX......"
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "......X........."
+        db "...XXX.XXX......"
+cd_espera:
+        db "XXXXXXXXXXXXX..."
+        db "XoooooooooooX..."
+        db ".XoooooooooX...."
+        db "..XoooooooX....."
+        db "...XoooooX......"
+        db "....XoooX......."
+        db ".....XoX........"
+        db "......X........."
+        db ".....XoX........"
+        db "....XoooX......."
+        db "...XoooooX......"
+        db "..XoooooooX....."
+        db ".XoooooooooX...."
+        db "XoooooooooooX..."
+        db "XXXXXXXXXXXXX..."
+        db "................"
+cd_cruz:
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db "................"
+        db "XXXXXX...XXXXXX."
+        db "................"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db ".......X........"
+        db "................"
+
 ; por forma: dibujo, ancho del dibujo, filas, punta x, punta y
 CT_TAM      equ 20
 cur_tabla:
@@ -105,6 +158,10 @@ cur_tabla:
         dd cd_vert, 16, 16, 7, 7
         dd cd_diag1, 16, 16, 7, 7
         dd cd_diag2, 16, 16, 8, 7
+        dd cd_texto, 16, 16, 6, 8
+        dd cd_espera, 16, 16, 6, 7
+        dd cd_cruz, 16, 16, 7, 7
+        dd cursor_dib, 12, 18, 0, 0     ; (lo cambia SetCursor)
 CUR_IMG     equ CUR_ANCHO * CUR_ALTO
 
 cur_preparar:

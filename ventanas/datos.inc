@@ -107,6 +107,8 @@ t_no            db "No", 0
 t_nombre        db "Nombre del archivo:", 0
 t_carpeta       db "Carpeta: ", 0
 t_todos         db "*.*", 0
+            align 4
+da_patron       dd t_todos          ; [HISPA-486] lo que lista dlg_archivo (GetOpenFileNameA)
 t_centro        db "Centro de programas", 0
 t_centro_pista  db "Doble clic o Intro para abrir un grupo.", 0
 t_grupo_vacio   db "Este grupo está vacío.", 0

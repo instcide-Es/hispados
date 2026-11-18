@@ -24,6 +24,7 @@ T=$(mktemp -d)
 cp "$IMG" $T/f.img
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
+MTOOLS_SKIP_CHECK=1 mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null   # (sitio: aquí no suena)
 for f in HW32.COM PEHOLA.EXE PEFALTA.EXE; do mcopy -o -i $T/f.img $B/$f ::BIN/$f; done
 [ $HAYC = 1 ] && for f in HOLAC.EXE K32PRUE.EXE K32CON.EXE DLLPRUE.DLL USADLL.EXE LANZA.EXE MSVCRT.DLL; do mcopy -o -i $T/f.img $B/$f ::BIN/$f; done
 fail=0

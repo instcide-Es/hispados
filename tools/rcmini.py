@@ -6,6 +6,14 @@
 #
 #   STRING número "texto"
 #   ICON número [archivo.ico]            (sin archivo: uno de relleno, 16x16)
+#   CURSOR número archivo.cur
+#   BITMAP número archivo.bmp
+#   ACCELERATORS número|"NOMBRE"          (fase 3d: los aceleradores)
+#     "^C" número                         (Ctrl+C, como carácter de control)
+#     "a" número                          (un carácter)
+#     VK_F5 número VIRTKEY [SHIFT] [CONTROL] [ALT]   (una tecla virtual)
+#     "O" número VIRTKEY CONTROL
+#   END
 #   MENU número|"NOMBRE"
 #     POPUP "&Archivo" [GRAYED]
 #       ITEM "&Abrir\tCtrl+A" número [CHECKED] [GRAYED]
@@ -28,6 +36,12 @@
 import os, struct, sys
 
 RT_ICON, RT_MENU, RT_DIALOG, RT_STRING, RT_GROUP_ICON = 3, 4, 5, 6, 14
+RT_CURSOR, RT_BITMAP, RT_ACCELERATOR, RT_GROUP_CURSOR = 1, 2, 9, 12
+# las teclas virtuales con nombre (las que no son una letra o una cifra)
+VKS = {'VK_BACK': 8, 'VK_TAB': 9, 'VK_RETURN': 13, 'VK_ESCAPE': 27, 'VK_SPACE': 32, 'VK_PRIOR': 33,
+       'VK_NEXT': 34, 'VK_END': 35, 'VK_HOME': 36, 'VK_LEFT': 37, 'VK_UP': 38, 'VK_RIGHT': 39,
+       'VK_DOWN': 40, 'VK_INSERT': 45, 'VK_DELETE': 46}
+VKS.update({'VK_F%d' % i: 0x6F + i for i in range(1, 13)})
 IDIOMA = 0x0C0A                     # español
 ATOMOS = {'BUTTON': 0x80, 'EDIT': 0x81, 'STATIC': 0x82, 'LISTBOX': 0x83, 'COMBOBOX': 0x85}
 # los controles con nombre propio: clase y estilo (con WS_CHILD | WS_VISIBLE)
@@ -194,6 +208,54 @@ def icono(archivo, ident, rec, n):
     rec.setdefault(RT_GROUP_ICON, {})[ident] = grupo
 
 
+def cursor(archivo, ident, rec, n):
+    """un .cur -> RT_CURSOR (uno por imagen, con su punto caliente delante) y
+    RT_GROUP_CURSOR"""
+    d = open(archivo, 'rb').read()
+    _, tipo, cuantos = struct.unpack_from('<HHH', d, 0)
+    if tipo != 2:
+        sys.exit(f'recursos, línea {n}: {archivo} no es un .cur')
+    grupo = struct.pack('<HHH', 0, 2, cuantos)
+    for k in range(cuantos):
+        an, al, _, _, hx, hy, tam, pos = struct.unpack_from('<BBBBHHII', d, 6 + 16 * k)
+        datos = struct.pack('<HH', hx, hy) + d[pos:pos + tam]
+        j = len(rec.setdefault(RT_CURSOR, {})) + 1
+        rec[RT_CURSOR][j] = datos
+        grupo += struct.pack('<HHHHIH', an, al * 2, 1, 1, len(datos), j)
+    rec.setdefault(RT_GROUP_CURSOR, {})[ident] = grupo
+
+
+def lee_aceleradores(lec, n0):
+    """las entradas hasta END: banderas, tecla, número y relleno"""
+    ent = []
+    while True:
+        n, tr = lec.sig()
+        if tr is None:
+            sys.exit(f'recursos, línea {n0}: ACCELERATORS sin END')
+        p = tr[0][1]
+        if p.upper() == 'END':
+            break
+        mods = [x[1].upper() for x in tr[2:]]
+        fl = 0
+        if tr[0][0] == 't':
+            t = p
+            key = (ord(t[1].upper()) - 64) if t.startswith('^') and len(t) == 2 else ord(t[0])
+        elif p.upper() in VKS:
+            key = VKS[p.upper()]
+        else:
+            key = num(tr[0], n)
+        if 'VIRTKEY' in mods:
+            fl |= 1
+            if tr[0][0] == 't':
+                key = ord(p[0].upper())
+        fl |= (4 if 'SHIFT' in mods else 0) | (8 if 'CONTROL' in mods else 0) | (16 if 'ALT' in mods else 0)
+        ent.append([fl, key, num(tr[1], n)])
+    if not ent:
+        sys.exit(f'recursos, línea {n0}: ACCELERATORS vacío')
+    ent[-1][0] |= 0x80
+    return b''.join(struct.pack('<HHHH', f, k, i, 0) for f, k, i in ent)
+
+
 def compila(texto, carpeta, rva):
     """el texto de los recursos -> los octetos de la sección .rsrc, que irá en esa RVA"""
     rec, textos = {}, {}
@@ -207,6 +269,13 @@ def compila(texto, carpeta, rva):
             textos[num(tr[1], n)] = tr[2][1]
         elif p == 'ICON':
             icono(os.path.join(carpeta, tr[2][1]) if len(tr) > 2 else None, nombre(tr[1], n), rec, n)
+        elif p == 'CURSOR':
+            cursor(os.path.join(carpeta, tr[2][1]), nombre(tr[1], n), rec, n)
+        elif p == 'BITMAP':
+            d = open(os.path.join(carpeta, tr[2][1]), 'rb').read()
+            rec.setdefault(RT_BITMAP, {})[nombre(tr[1], n)] = d[14:]
+        elif p == 'ACCELERATORS':
+            rec.setdefault(RT_ACCELERATOR, {})[nombre(tr[1], n)] = lee_aceleradores(lec, n)
         elif p == 'MENU':
             rec.setdefault(RT_MENU, {})[nombre(tr[1], n)] = struct.pack('<HH', 0, 0) + lee_menu(lec, n)
         elif p == 'DIALOG':

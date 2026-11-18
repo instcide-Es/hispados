@@ -642,20 +642,26 @@ da_llenar:
         mov eax, LM_VACIAR
         call msg_enviar
         call da_unidades            ; las unidades (A:, C:, D:...) al principio
-        mov esi, t_todos
+        mov esi, t_todos            ; [HISPA-486] primero las carpetas (todas);
+        mov byte [da_pasada], 1     ; luego los archivos (los de da_patron)
+.p:
         mov ecx, 0x10
         call dos_primero
 .b:
-        jc .x
+        jc .pf
         sub esp, 16
         mov edi, esp
         mov esi, dos_dta + 0x1E
         test byte [dos_dta+0x15], 0x10
         jnz .d
+        cmp byte [da_pasada], 0
+        jne .s
         cmp byte [da_carpeta], 0    ; eligiendo carpeta: solo las carpetas
         jne .s
         jmp .n
 .d:
+        cmp byte [da_pasada], 0
+        je .s
         cmp word [esi], '.'         ; la propia carpeta no se lista
         je .s
         mov al, '['
@@ -675,6 +681,11 @@ da_llenar:
         add esp, 16
         call dos_siguiente
         jmp .b
+.pf:
+        dec byte [da_pasada]
+        js .x
+        mov esi, [da_patron]
+        jmp .p
 .x:
         popad
         ret

@@ -681,7 +681,8 @@ abre_pe:
         mov edx, [ebx + 0x18 + 0x60 + 8]   ; 1: importaciones
         mov esi, [ebx + 0x18 + 0x60 + 40]  ; 5: reubicados
         mov edi, [ebx + 0x18 + 0x60 + 44]
-        mov ebp, [ebx + 0x18 + 0x54]       ; SizeOfHeaders
+        mov ebp, [ebx + 0x18 + 0x3C]       ; SizeOfHeaders (fase 3d: antes 0x54, el
+                                           ; SizeOfHeapCommit; con FASM, 0)
         pop ds
         mov [exp_rva], eax
         mov [exp_tam], ecx

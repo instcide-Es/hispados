@@ -2099,7 +2099,13 @@ alto_ini:
 %include "win32u.inc"               ; [HISPA-486] su USER32 y su GDI32
 %include "win32c.inc"               ; [HISPA-486] sus controles de serie
 %include "win32m.inc"               ; [HISPA-486] sus menús, recursos y diálogos
-%include "win32n.inc"               ; [NAVEGADOR] imágenes, Mayús, abrir y guardar, WinExec
+%include "win32g.inc"               ; [HISPA-486] fase 3d: GDI32 (contextos, figuras)
+%include "win32t.inc"               ; [HISPA-486]   las letras y el texto
+%include "win32b.inc"               ; [HISPA-486]   mapas de bits y DIB
+%include "win32r.inc"               ; [HISPA-486]   regiones y recortes
+%include "win32ga.inc"              ; [HISPA-486]   las funciones
+%include "win32x.inc"               ; [HISPA-486]   USER32 de más, COMDLG32, ADVAPI32, SHELL32
+%include "win32n.inc"               ; [NAVEGADOR] WinExec (lo demás, en la fase 3d)
 %endif
         align 16
 fin_archivo:
@@ -2109,6 +2115,7 @@ pila_fin:
 %include "bss2.inc"
 %ifdef CON_PROGRAMAS
 %include "bss3.inc"
+%include "bss4.inc"                 ; [HISPA-486] fase 3d
 %endif
 %include "bsstam.inc"               ; [TAMAÑO]
 %include "bssctx.inc"               ; [CONTEXTO]

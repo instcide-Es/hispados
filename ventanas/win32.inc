@@ -87,7 +87,22 @@ PE_MOD      equ PE_PEND + PE_PEND_MAX * 16  ; HW32.COM en memoria (su 100h)
 PE_MD       equ PE_MOD + 4          ; su mod_d (MD_*)
 PE_MODSEL   equ PE_MOD + 8          ; su selector de código (+8: datos)
 PE_TRAMPS   equ PE_MOD + 12         ; los trampolines de lo de aquí (del montón)
-PE_TAM      equ PE_MOD + 16
+PE_BLQS     equ PE_MOD + 16         ; (fase 3d) los bloques de DPMI de sus mapas (32)
+PE_TEC_MOD  equ PE_BLQS + 32 * 4    ; (fase 3d) Mayús., Ctrl y Alt del último mensaje
+PE_RVEN     equ PE_TEC_MOD + 4      ;   su ventana con el ratón encima
+PE_CURSOR   equ PE_RVEN + 4         ;   SetCursor
+PE_CAPT     equ PE_CURSOR + 4       ;   SetCapture
+PE_PP       equ PE_CAPT + 4         ;   lo de GetClipboardData
+PE_CAR_VEN  equ PE_PP + 4           ;   el caret: su ventana,
+PE_CAR_X    equ PE_CAR_VEN + 4      ;     dónde,
+PE_CAR_Y    equ PE_CAR_X + 4
+PE_CAR_W    equ PE_CAR_Y + 4        ;     cuánto mide,
+PE_CAR_H    equ PE_CAR_W + 4
+PE_CAR_N    equ PE_CAR_H + 4        ;     las veces que se ha escondido
+PE_CAR_DIB  equ PE_CAR_N + 4        ;     y si está en la pantalla
+PE_SICO     equ PE_CAR_DIB + 4      ;   los iconos de serie (6)
+PE_TEC_ULT  equ PE_SICO + 6 * 4     ;   el carácter de la última tecla (ToAscii)
+PE_TAM      equ PE_TEC_ULT + 4
 
 PT_TAM      equ 28                  ; un trampolín: push (5), jmp lejos (7) y
 PT_PE       equ 12                  ;   la ficha del programa,
@@ -128,8 +143,10 @@ t_pe_titulo db "Hispa-486", 0
 t_pe_error  db "Error", 0
 t_k32       db "KERNEL32", 0
 t_u32       db "USER32", 0
+t_cd32      db "COMDLG32", 0        ; (fase 3d)
+t_adv32     db "ADVAPI32", 0
+t_sh32      db "SHELL32", 0
 t_g32       db "GDI32", 0
-t_c32       db "COMDLG32", 0
 
 ; ---- ¿es un programa de Windows de ventanas? ESI=ruta -> ZF=1 si lo es
 ; (acaba en .EXE, es un PE de 386 y su subsistema es el 2). Conserva todo ----
@@ -607,7 +624,7 @@ pe_tramp:
 H_KERNEL32  equ 0xBFF70000
 H_USER32    equ 0xBFF50000
 H_GDI32     equ 0xBFF20000
-H_COMDLG32  equ 0xBFF10000
+H_OTRAS     equ 0xBFC00000          ; (fase 3d) + DLL << 16: COMDLG32, ADVAPI32, SHELL32
 pe_resolver:
         push ds
         push es
@@ -666,10 +683,14 @@ pe_resolver:
         mov eax, H_GDI32
         cmp bl, 2
         je .x
-        mov eax, H_COMDLG32
-        cmp bl, 3
-        je .x
-        jmp .cero
+        movzx eax, bl               ; (fase 3d) COMDLG32, ADVAPI32 y SHELL32
+        cmp eax, 3
+        jb .cero
+        cmp eax, 5
+        ja .cero
+        shl eax, 16
+        add eax, H_OTRAS
+        jmp .x
 .mango:
         mov ecx, ebx
         xor bl, bl
@@ -681,9 +702,13 @@ pe_resolver:
         inc bl
         cmp ecx, H_GDI32
         je .m1
-        inc bl
-        cmp ecx, H_COMDLG32
-        jne .cero
+        mov eax, ecx                ; (fase 3d) las otras
+        sub eax, H_OTRAS + 0x30000
+        jb .cero
+        shr eax, 16
+        cmp eax, 2
+        ja .cero
+        lea ebx, [eax+3]
 .m1:
         lea eax, [edi+ebp]
         call w32_busca
@@ -724,8 +749,16 @@ pe_que_dll:
         mov edi, t_g32
         call pe_es_dll
         je .x
-        mov bl, 3
-        mov edi, t_c32
+        mov bl, 3                   ; (fase 3d)
+        mov edi, t_cd32
+        call pe_es_dll
+        je .x
+        mov bl, 4
+        mov edi, t_adv32
+        call pe_es_dll
+        je .x
+        mov bl, 5
+        mov edi, t_sh32
         call pe_es_dll
         je .x
         mov bl, 0xFF
@@ -939,6 +972,7 @@ pe_despacho:
         mov eax, [ebx+PT_FUN]
         movzx ecx, word [eax+4]     ; los octetos de argumentos
         push ecx
+        mov [wg_prog], edx          ; (fase 3d: el programa, para GDI32)
         call [eax]
         pop ecx
         pop esi
@@ -1086,6 +1120,7 @@ pe_limpiar:
 .m:
         mov eax, [edx+PE_TRAMPS]
         call mem_soltar
+        call wg_limpiar             ; (fase 3d) los bloques de sus mapas
         mov dword [edx+PE_USO], 0
 .s:
         add edx, PE_TAM
@@ -1149,7 +1184,7 @@ w32_tabla:
         W32F u_KillTimer, 8, 1, 'KillTimer'
         W32F u_LoadCursorA, 8, 1, 'LoadCursorA'
         W32F u_LoadIconA, 8, 1, 'LoadIconA'
-        W32F u_cero, 4, 1, 'SetCursor'
+        W32F u_SetCursor, 4, 1, 'SetCursor'
         W32F u_uno, 4, 1, 'MessageBeep'
         W32F u_GetSystemMetrics, 4, 1, 'GetSystemMetrics'
         W32F u_SystemParametersInfoA, 16, 1, 'SystemParametersInfoA'   ; [RUEDA]
@@ -1223,11 +1258,295 @@ w32_tabla:
         W32F g_GetTextExtentPoint32A, 16, 2, 'GetTextExtentPointA'
         W32F g_GetTextMetricsA, 8, 2, 'GetTextMetricsA'
         ; [NAVEGADOR] (win32n.inc)
-        W32F g_SetDIBitsToDevice, 48, 2, 'SetDIBitsToDevice'
-        W32F u_GetKeyState, 4, 1, 'GetKeyState'
-        W32F u_GetOpenFileNameA, 4, 3, 'GetOpenFileNameA'
-        W32F u_GetSaveFileNameA, 4, 3, 'GetSaveFileNameA'
         W32F k_WinExec, 8, 0, 'WinExec'
+        ; fase 3d: GDI32 (win32g.inc, win32t.inc, win32b.inc, win32r.inc, win32ga.inc)
+        W32F g_TextOutW, 20, 2, 'TextOutW'
+        W32F g_ExtTextOutA, 32, 2, 'ExtTextOutA'
+        W32F g_ExtTextOutW, 32, 2, 'ExtTextOutW'
+        W32F g_TabbedTextOutA, 32, 2, 'TabbedTextOutA'
+        W32F g_GetTabbedTextExtentA, 20, 2, 'GetTabbedTextExtentA'
+        W32F g_GetTextExtentPoint32W, 16, 2, 'GetTextExtentPoint32W'
+        W32F g_GetTextExtentExPointA, 28, 2, 'GetTextExtentExPointA'
+        W32F g_GetCharWidth32A, 16, 2, 'GetCharWidth32A'
+        W32F g_GetCharWidth32A, 16, 2, 'GetCharWidthA'
+        W32F g_GetCharABCWidthsA, 16, 2, 'GetCharABCWidthsA'
+        W32F g_GetTextFaceA, 12, 2, 'GetTextFaceA'
+        W32F g_SetTextCharacterExtra, 8, 2, 'SetTextCharacterExtra'
+        W32F g_GetTextCharacterExtra, 4, 2, 'GetTextCharacterExtra'
+        W32F g_GetTextAlign, 4, 2, 'GetTextAlign'
+        W32F g_CreateFontA, 56, 2, 'CreateFontA'
+        W32F g_CreateFontIndirectA, 4, 2, 'CreateFontIndirectA'
+        W32F g_CreateCompatibleDC, 4, 2, 'CreateCompatibleDC'
+        W32F g_DeleteDC, 4, 2, 'DeleteDC'
+        W32F g_CreateCompatibleBitmap, 12, 2, 'CreateCompatibleBitmap'
+        W32F g_CreateCompatibleBitmap, 12, 2, 'CreateDiscardableBitmap'
+        W32F g_CreateBitmap, 20, 2, 'CreateBitmap'
+        W32F g_CreateBitmapIndirect, 4, 2, 'CreateBitmapIndirect'
+        W32F g_GetBitmapBits, 12, 2, 'GetBitmapBits'
+        W32F g_SetBitmapBits, 12, 2, 'SetBitmapBits'
+        W32F g_CreateDIBSection, 24, 2, 'CreateDIBSection'
+        W32F g_SetDIBitsToDevice, 48, 2, 'SetDIBitsToDevice'
+        W32F g_StretchDIBits, 52, 2, 'StretchDIBits'
+        W32F g_SetDIBits, 28, 2, 'SetDIBits'
+        W32F g_GetDIBits, 28, 2, 'GetDIBits'
+        W32F g_CreateDIBitmap, 24, 2, 'CreateDIBitmap'
+        W32F g_BitBlt, 36, 2, 'BitBlt'
+        W32F g_StretchBlt, 44, 2, 'StretchBlt'
+        W32F g_PatBlt, 24, 2, 'PatBlt'
+        W32F g_GetPixel, 12, 2, 'GetPixel'
+        W32F g_CreateRectRgn, 16, 2, 'CreateRectRgn'
+        W32F g_CreateRectRgnIndirect, 4, 2, 'CreateRectRgnIndirect'
+        W32F g_CreateEllipticRgn, 16, 2, 'CreateEllipticRgn'
+        W32F g_CreateEllipticRgnIndirect, 4, 2, 'CreateEllipticRgnIndirect'
+        W32F g_CreateRoundRectRgn, 24, 2, 'CreateRoundRectRgn'
+        W32F g_CreatePolygonRgn, 12, 2, 'CreatePolygonRgn'
+        W32F g_CombineRgn, 16, 2, 'CombineRgn'
+        W32F g_SetRectRgn, 20, 2, 'SetRectRgn'
+        W32F g_OffsetRgn, 12, 2, 'OffsetRgn'
+        W32F g_GetRgnBox, 8, 2, 'GetRgnBox'
+        W32F g_PtInRegion, 12, 2, 'PtInRegion'
+        W32F g_RectInRegion, 8, 2, 'RectInRegion'
+        W32F g_EqualRgn, 8, 2, 'EqualRgn'
+        W32F g_FillRgn, 12, 2, 'FillRgn'
+        W32F g_PaintRgn, 8, 2, 'PaintRgn'
+        W32F g_InvertRgn, 8, 2, 'InvertRgn'
+        W32F g_FrameRgn, 20, 2, 'FrameRgn'
+        W32F g_SelectClipRgn, 8, 2, 'SelectClipRgn'
+        W32F g_ExtSelectClipRgn, 12, 2, 'ExtSelectClipRgn'
+        W32F g_IntersectClipRect, 20, 2, 'IntersectClipRect'
+        W32F g_ExcludeClipRect, 20, 2, 'ExcludeClipRect'
+        W32F g_OffsetClipRgn, 12, 2, 'OffsetClipRgn'
+        W32F g_GetClipBox, 8, 2, 'GetClipBox'
+        W32F g_GetClipRgn, 8, 2, 'GetClipRgn'
+        W32F g_PtVisible, 12, 2, 'PtVisible'
+        W32F g_RectVisible, 8, 2, 'RectVisible'
+        W32F g_CreatePenIndirect, 4, 2, 'CreatePenIndirect'
+        W32F g_ExtCreatePen, 20, 2, 'ExtCreatePen'
+        W32F g_CreateHatchBrush, 8, 2, 'CreateHatchBrush'
+        W32F g_CreatePatternBrush, 4, 2, 'CreatePatternBrush'
+        W32F g_CreateBrushIndirect, 4, 2, 'CreateBrushIndirect'
+        W32F g_CreateDIBPatternBrushPt, 8, 2, 'CreateDIBPatternBrushPt'
+        W32F g_CreateDIBPatternBrushPt, 8, 2, 'CreateDIBPatternBrush'
+        W32F g_UnrealizeObject, 4, 2, 'UnrealizeObject'
+        W32F g_GetObjectType, 4, 2, 'GetObjectType'
+        W32F g_GetCurrentObject, 8, 2, 'GetCurrentObject'
+        W32F g_GetObjectA, 12, 2, 'GetObjectA'
+        W32F g_Ellipse, 20, 2, 'Ellipse'
+        W32F g_RoundRect, 28, 2, 'RoundRect'
+        W32F g_Arc, 36, 2, 'Arc'
+        W32F g_Pie, 36, 2, 'Pie'
+        W32F g_Chord, 36, 2, 'Chord'
+        W32F g_GetCurrentPositionEx, 8, 2, 'GetCurrentPositionEx'
+        W32F g_Polyline, 12, 2, 'Polyline'
+        W32F g_PolylineTo, 12, 2, 'PolylineTo'
+        W32F g_PolyPolyline, 16, 2, 'PolyPolyline'
+        W32F g_Polygon, 12, 2, 'Polygon'
+        W32F g_PolyPolygon, 16, 2, 'PolyPolygon'
+        W32F g_PolyBezier, 12, 2, 'PolyBezier'
+        W32F g_PolyBezierTo, 12, 2, 'PolyBezierTo'
+        W32F g_SetPixelV, 16, 2, 'SetPixelV'
+        W32F g_SetROP2, 8, 2, 'SetROP2'
+        W32F g_GetROP2, 4, 2, 'GetROP2'
+        W32F g_GetBkMode, 4, 2, 'GetBkMode'
+        W32F g_SetPolyFillMode, 8, 2, 'SetPolyFillMode'
+        W32F g_GetPolyFillMode, 4, 2, 'GetPolyFillMode'
+        W32F g_SetStretchBltMode, 8, 2, 'SetStretchBltMode'
+        W32F g_GetStretchBltMode, 4, 2, 'GetStretchBltMode'
+        W32F g_SetArcDirection, 8, 2, 'SetArcDirection'
+        W32F g_GetArcDirection, 4, 2, 'GetArcDirection'
+        W32F g_SetMapMode, 8, 2, 'SetMapMode'
+        W32F g_GetMapMode, 4, 2, 'GetMapMode'
+        W32F g_SetViewportOrgEx, 16, 2, 'SetViewportOrgEx'
+        W32F g_SetWindowOrgEx, 16, 2, 'SetWindowOrgEx'
+        W32F g_OffsetViewportOrgEx, 16, 2, 'OffsetViewportOrgEx'
+        W32F g_OffsetWindowOrgEx, 16, 2, 'OffsetWindowOrgEx'
+        W32F g_GetViewportOrgEx, 8, 2, 'GetViewportOrgEx'
+        W32F g_GetWindowOrgEx, 8, 2, 'GetWindowOrgEx'
+        W32F g_SetViewportExtEx, 16, 2, 'SetViewportExtEx'
+        W32F g_SetViewportExtEx, 16, 2, 'SetWindowExtEx'
+        W32F g_GetViewportExtEx, 8, 2, 'GetViewportExtEx'
+        W32F g_GetViewportExtEx, 8, 2, 'GetWindowExtEx'
+        W32F g_DPtoLP, 12, 2, 'DPtoLP'
+        W32F g_LPtoDP, 12, 2, 'LPtoDP'
+        W32F g_SetBrushOrgEx, 16, 2, 'SetBrushOrgEx'
+        W32F g_GetBrushOrgEx, 8, 2, 'GetBrushOrgEx'
+        W32F g_SaveDC, 4, 2, 'SaveDC'
+        W32F g_RestoreDC, 8, 2, 'RestoreDC'
+        W32F g_GetDeviceCaps, 8, 2, 'GetDeviceCaps'
+        W32F g_GdiFlush, 0, 2, 'GdiFlush'
+        W32F g_GdiFlush, 4, 2, 'GdiSetBatchLimit'
+        W32F g_CreatePalette, 4, 2, 'CreatePalette'
+        W32F g_SelectPalette, 12, 2, 'SelectPalette'
+        W32F g_RealizePalette, 4, 2, 'RealizePalette'
+        W32F g_GetPaletteEntries, 16, 2, 'GetPaletteEntries'
+        W32F g_SetPaletteEntries, 16, 2, 'SetPaletteEntries'
+        W32F g_GetNearestPaletteIndex, 8, 2, 'GetNearestPaletteIndex'
+        W32F g_GetSystemPaletteEntries, 16, 2, 'GetSystemPaletteEntries'
+        W32F g_GetNearestColor, 8, 2, 'GetNearestColor'
+        W32F g_GetSystemPaletteUse, 4, 2, 'GetSystemPaletteUse'
+        W32F g_GdiFlush, 8, 2, 'SetSystemPaletteUse'
+        W32F g_GdiFlush, 16, 2, 'AnimatePalette'
+        W32F g_GdiFlush, 8, 2, 'ResizePalette'
+        W32F g_GdiFlush, 12, 2, 'SetTextJustification'
+        ; fase 3d: USER32 que pinta
+        W32F u_DrawTextW, 20, 1, 'DrawTextW'
+        W32F u_DrawTextExA, 24, 1, 'DrawTextExA'
+        W32F u_FrameRect, 12, 1, 'FrameRect'
+        W32F u_InvertRect, 8, 1, 'InvertRect'
+        W32F u_DrawFocusRect, 8, 1, 'DrawFocusRect'
+        W32F u_DrawEdge, 16, 1, 'DrawEdge'
+        W32F u_InvalidateRgn, 12, 1, 'InvalidateRgn'
+        W32F u_ValidateRgn, 8, 1, 'ValidateRgn'
+        W32F u_GetUpdateRgn, 12, 1, 'GetUpdateRgn'
+        W32F u_GetUpdateRect, 12, 1, 'GetUpdateRect'
+        W32F u_LoadBitmapA, 8, 1, 'LoadBitmapA'
+        ; fase 3d: USER32 (win32x.inc)
+        W32F u_SetScrollInfo, 16, 1, 'SetScrollInfo'
+        W32F u_GetScrollInfo, 12, 1, 'GetScrollInfo'
+        W32F u_SetScrollPos, 16, 1, 'SetScrollPos'
+        W32F u_GetScrollPos, 8, 1, 'GetScrollPos'
+        W32F u_SetScrollRange, 20, 1, 'SetScrollRange'
+        W32F u_GetScrollRange, 16, 1, 'GetScrollRange'
+        W32F u_nada1, 12, 1, 'ShowScrollBar'
+        W32F u_nada1, 12, 1, 'EnableScrollBar'
+        W32F u_CreateCaret, 16, 1, 'CreateCaret'
+        W32F u_DestroyCaret, 0, 1, 'DestroyCaret'
+        W32F u_ShowCaret, 4, 1, 'ShowCaret'
+        W32F u_HideCaret, 4, 1, 'HideCaret'
+        W32F u_SetCaretPos, 8, 1, 'SetCaretPos'
+        W32F u_GetCaretPos, 4, 1, 'GetCaretPos'
+        W32F u_GetCaretBlinkTime, 0, 1, 'GetCaretBlinkTime'
+        W32F u_nada1, 4, 1, 'SetCaretBlinkTime'
+        W32F u_GetKeyState, 4, 1, 'GetKeyState'
+        W32F u_GetAsyncKeyState, 4, 1, 'GetAsyncKeyState'
+        W32F u_GetKeyboardState, 4, 1, 'GetKeyboardState'
+        W32F u_ToAscii, 20, 1, 'ToAscii'
+        W32F u_ToAscii, 24, 1, 'ToAsciiEx'
+        W32F u_MapVirtualKeyA, 8, 1, 'MapVirtualKeyA'
+        W32F u_VkKeyScanA, 4, 1, 'VkKeyScanA'
+        W32F u_LoadAcceleratorsA, 8, 1, 'LoadAcceleratorsA'
+        W32F u_CreateAcceleratorTableA, 8, 1, 'CreateAcceleratorTableA'
+        W32F u_DestroyAcceleratorTable, 4, 1, 'DestroyAcceleratorTable'
+        W32F u_CopyAcceleratorTableA, 12, 1, 'CopyAcceleratorTableA'
+        W32F u_TranslateAcceleratorA, 12, 1, 'TranslateAcceleratorA'
+        W32F u_TranslateAcceleratorA, 12, 1, 'TranslateAccelerator'
+        W32F u_LoadImageA, 24, 1, 'LoadImageA'
+        W32F u_DestroyIcon, 4, 1, 'DestroyIcon'
+        W32F u_DestroyIcon, 4, 1, 'DestroyCursor'
+        W32F u_CopyIcon, 4, 1, 'CopyIcon'
+        W32F u_DrawIcon, 16, 1, 'DrawIcon'
+        W32F u_DrawIconEx, 36, 1, 'DrawIconEx'
+        W32F u_GetCursor, 0, 1, 'GetCursor'
+        W32F u_GetClassLongA, 8, 1, 'GetClassLongA'
+        W32F u_SetClassLongA, 12, 1, 'SetClassLongA'
+        W32F u_OpenClipboard, 4, 1, 'OpenClipboard'
+        W32F u_OpenClipboard, 0, 1, 'CloseClipboard'
+        W32F u_EmptyClipboard, 0, 1, 'EmptyClipboard'
+        W32F u_SetClipboardData, 8, 1, 'SetClipboardData'
+        W32F u_GetClipboardData, 4, 1, 'GetClipboardData'
+        W32F u_IsClipboardFormatAvailable, 4, 1, 'IsClipboardFormatAvailable'
+        W32F u_CountClipboardFormats, 0, 1, 'CountClipboardFormats'
+        W32F u_EnumClipboardFormats, 4, 1, 'EnumClipboardFormats'
+        W32F u_cero, 0, 1, 'GetClipboardOwner'
+        W32F u_TrackPopupMenu, 28, 1, 'TrackPopupMenu'
+        W32F u_SetRect, 20, 1, 'SetRect'
+        W32F u_SetRectEmpty, 4, 1, 'SetRectEmpty'
+        W32F u_CopyRect, 8, 1, 'CopyRect'
+        W32F u_InflateRect, 12, 1, 'InflateRect'
+        W32F u_OffsetRect, 12, 1, 'OffsetRect'
+        W32F u_IsRectEmpty, 4, 1, 'IsRectEmpty'
+        W32F u_EqualRect, 8, 1, 'EqualRect'
+        W32F u_PtInRect, 12, 1, 'PtInRect'
+        W32F u_IntersectRect, 12, 1, 'IntersectRect'
+        W32F u_UnionRect, 12, 1, 'UnionRect'
+        W32F u_SubtractRect, 12, 1, 'SubtractRect'
+        W32F u_ClientToScreen, 8, 1, 'ClientToScreen'
+        W32F u_ScreenToClient, 8, 1, 'ScreenToClient'
+        W32F u_MapWindowPoints, 16, 1, 'MapWindowPoints'
+        W32F u_GetCursorPos, 4, 1, 'GetCursorPos'
+        W32F u_nada1, 8, 1, 'SetCursorPos'
+        W32F u_WindowFromPoint, 8, 1, 'WindowFromPoint'
+        W32F u_ChildWindowFromPoint, 12, 1, 'ChildWindowFromPoint'
+        W32F u_AdjustWindowRect, 12, 1, 'AdjustWindowRect'
+        W32F u_AdjustWindowRectEx, 16, 1, 'AdjustWindowRectEx'
+        W32F u_SetCapture, 4, 1, 'SetCapture'
+        W32F u_ReleaseCapture, 0, 1, 'ReleaseCapture'
+        W32F u_GetCapture, 0, 1, 'GetCapture'
+        W32F u_GetDesktopWindow, 0, 1, 'GetDesktopWindow'
+        W32F u_GetActiveWindow, 0, 1, 'GetActiveWindow'
+        W32F u_GetActiveWindow, 0, 1, 'GetForegroundWindow'
+        W32F u_SetActiveWindow, 4, 1, 'SetActiveWindow'
+        W32F u_SetActiveWindow, 4, 1, 'SetForegroundWindow'
+        W32F u_SetActiveWindow, 4, 1, 'BringWindowToTop'
+        W32F u_GetWindowPlacement, 8, 1, 'GetWindowPlacement'
+        W32F u_SetWindowPlacement, 8, 1, 'SetWindowPlacement'
+        W32F u_FindWindowA, 8, 1, 'FindWindowA'
+        W32F u_WinHelpA, 16, 1, 'WinHelpA'
+        W32F u_GetMessagePos, 0, 1, 'GetMessagePos'
+        W32F u_GetMessageTime, 0, 1, 'GetMessageTime'
+        W32F u_CheckMenuRadioItem, 20, 1, 'CheckMenuRadioItem'
+        W32F u_MapDialogRect, 8, 1, 'MapDialogRect'
+        W32F u_MessageBoxIndirectA, 4, 1, 'MessageBoxIndirectA'
+        W32F u_SystemParametersInfoA, 16, 1, 'SystemParametersInfoA'
+        W32F u_GetClassNameA, 12, 1, 'GetClassNameA'
+        W32F u_ScrollWindow, 20, 1, 'ScrollWindow'
+        W32F u_ScrollWindowEx, 32, 1, 'ScrollWindowEx'
+        W32F u_ScrollDC, 28, 1, 'ScrollDC'
+        W32F u_RedrawWindow, 16, 1, 'RedrawWindow'
+        W32F u_GetWindow, 8, 1, 'GetWindow'
+        W32F u_IsChild, 8, 1, 'IsChild'
+        W32F u_EnumChildWindows, 12, 1, 'EnumChildWindows'
+        W32F u_DefDlgProcA, 16, 1, 'DefDlgProcA'
+        W32F u_nada1, 4, 1, 'LockWindowUpdate'
+        W32F u_cero, 4, 1, 'GetQueueStatus'
+        W32F u_cero, 0, 1, 'GetInputState'
+        W32F u_CharUpperA, 4, 1, 'CharUpperA'
+        W32F u_CharLowerA, 4, 1, 'CharLowerA'
+        W32F u_CharUpperBuffA, 8, 1, 'CharUpperBuffA'
+        W32F u_CharLowerBuffA, 8, 1, 'CharLowerBuffA'
+        W32F u_CharNextA, 4, 1, 'CharNextA'
+        W32F u_CharPrevA, 8, 1, 'CharPrevA'
+        W32F u_IsCharAlphaA, 4, 1, 'IsCharAlphaA'
+        W32F u_IsCharAlphaNumericA, 4, 1, 'IsCharAlphaNumericA'
+        W32F u_IsCharUpperA, 4, 1, 'IsCharUpperA'
+        W32F u_IsCharLowerA, 4, 1, 'IsCharLowerA'
+        W32F u_wvsprintfA, 12, 1, 'wvsprintfA'
+        ; fase 3d: COMDLG32, ADVAPI32 y SHELL32 (win32x.inc)
+        W32F c_GetOpenFileNameA, 4, 3, 'GetOpenFileNameA'
+        W32F c_GetSaveFileNameA, 4, 3, 'GetSaveFileNameA'
+        W32F c_GetFileTitleA, 12, 3, 'GetFileTitleA'
+        W32F c_ChooseColorA, 4, 3, 'ChooseColorA'
+        W32F c_ChooseFontA, 4, 3, 'ChooseFontA'
+        W32F c_CommDlgExtendedError, 0, 3, 'CommDlgExtendedError'
+        W32F c_CommDlgExtendedError, 4, 3, 'PrintDlgA'
+        W32F c_CommDlgExtendedError, 4, 3, 'PageSetupDlgA'
+        W32F a_no_esta, 20, 4, 'RegOpenKeyExA'
+        W32F a_no_esta, 12, 4, 'RegOpenKeyA'
+        W32F a_no_puede, 36, 4, 'RegCreateKeyExA'
+        W32F a_no_puede, 12, 4, 'RegCreateKeyA'
+        W32F a_no_esta, 24, 4, 'RegQueryValueExA'
+        W32F a_no_esta, 16, 4, 'RegQueryValueA'
+        W32F a_no_puede, 24, 4, 'RegSetValueExA'
+        W32F a_no_puede, 20, 4, 'RegSetValueA'
+        W32F a_no_hay_mas, 32, 4, 'RegEnumKeyExA'
+        W32F a_no_hay_mas, 16, 4, 'RegEnumKeyA'
+        W32F a_no_hay_mas, 32, 4, 'RegEnumValueA'
+        W32F a_no_esta, 8, 4, 'RegDeleteKeyA'
+        W32F a_no_esta, 8, 4, 'RegDeleteValueA'
+        W32F u_cero, 4, 4, 'RegCloseKey'
+        W32F u_cero, 4, 4, 'RegFlushKey'
+        W32F a_GetUserNameA, 8, 4, 'GetUserNameA'
+        W32F u_cero, 8, 5, 'DragAcceptFiles'
+        W32F u_cero, 16, 5, 'DragQueryFileA'
+        W32F u_cero, 16, 5, 'DragQueryFile'
+        W32F u_cero, 4, 5, 'DragFinish'
+        W32F s_ShellExecuteA, 24, 5, 'ShellExecuteA'
+        W32F s_ShellAboutA, 16, 5, 'ShellAboutA'
+        W32F u_cero, 16, 5, 'SHGetSpecialFolderPathA'
+        W32F u_cero, 12, 5, 'ExtractIconA'
+        W32F u_cero, 8, 5, 'Shell_NotifyIconA'
+        W32F u_cero, 4, 5, 'SHBrowseForFolderA'
+        W32F u_cero, 8, 5, 'SHGetPathFromIDListA'
         dd 0
 %unmacro W32F 4
 

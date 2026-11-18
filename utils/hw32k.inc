@@ -3971,7 +3971,7 @@ funciones:
         FUNC k_IsBadStringPtrA, 8, 'IsBadStringPtrA'
         ; proceso
         FUNC k_ExitProcess, 4, 'ExitProcess'
-        FUNC k_ExitThread, 4, 'ExitThread'
+        FUNC k_ExitThread3d, 4, 'ExitThread'
         FUNC k_TerminateProcess, 8, 'TerminateProcess'
         FUNC k_FatalAppExitA, 8, 'FatalAppExitA'
         FUNC k_RaiseException, 16, 'RaiseException'
@@ -4048,6 +4048,24 @@ funciones:
         FUNC k_lstrcmpA, 8, 'lstrcmp'
         FUNC k_lstrcmpiA, 8, 'lstrcmpiA'
         FUNC k_lstrcmpiA, 8, 'lstrcmpi'
+        ; [HISPA-486] fase 3d: hilos, exclusiones, eventos, .INI (hw32hilo.inc)
+        FUNC k_CreateThread, 24, 'CreateThread'
+        FUNC k_GetExitCodeThread, 8, 'GetExitCodeThread'
+        FUNC k_uno, 8, 'TerminateThread'
+        FUNC k_uno, 8, 'SetThreadPriority'
+        FUNC k_cero, 4, 'GetThreadPriority'
+        FUNC k_cero, 4, 'ResumeThread'
+        FUNC k_cero, 4, 'SuspendThread'
+        FUNC k_CreateMutexA, 12, 'CreateMutexA'
+        FUNC k_uno, 4, 'ReleaseMutex'
+        FUNC k_CreateEventA, 16, 'CreateEventA'
+        FUNC k_uno, 4, 'SetEvent'
+        FUNC k_uno, 4, 'ResetEvent'
+        FUNC k_uno, 4, 'PulseEvent'
+        FUNC k_MulDiv, 12, 'MulDiv'
+        FUNC k_GetPrivateProfileStringA, 24, 'GetPrivateProfileStringA'
+        FUNC k_GetPrivateProfileIntA, 16, 'GetPrivateProfileIntA'
+        FUNC k_WritePrivateProfileStringA, 16, 'WritePrivateProfileStringA'
         dd 0
 
 ; ---- las teclas virtuales de los códigos de la BIOS (0 a 58h) ----
@@ -4068,6 +4086,8 @@ vk_ext:
         db 0x5E, 0x70, 0x5F, 0x71, 0x60, 0x72, 0x61, 0x73, 0x62, 0x74, 0x63, 0x75, 0x64, 0x76, 0x65, 0x77, 0x66, 0x78, 0x67, 0x79
         db 0x68, 0x70, 0x69, 0x71, 0x6A, 0x72, 0x6B, 0x73, 0x6C, 0x74, 0x6D, 0x75, 0x6E, 0x76, 0x6F, 0x77, 0x70, 0x78, 0x71, 0x79
         db 0
+
+%include "utils/hw32hilo.inc"       ; [HISPA-486] fase 3d
 
 m_excepcion db 'Hispa-486: excepcion', 0
 m_exc_cod   db '00000000', 0         ; (justo detras: de modulo se dice todo junto)

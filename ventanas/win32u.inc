@@ -51,9 +51,13 @@ W32V_MOSTRADA equ 4                 ; ya se ha mostrado una vez
 ; el bloque de una ventana (V_D4)
 VB_TITULO   equ 0                   ; 256: el título, en la página 437
 VB_USER     equ 256                 ; GWL_USERDATA
-VB_EXTRA    equ 260                 ; los octetos de más de la clase
+VB_SBV      equ 260                 ; (fase 3d) sus barras de desplazamiento (c_barra):
+VB_SBH      equ 264                 ;   la vertical y la horizontal
+VB_SIV      equ 268                 ;   y su SCROLLINFO (mín., máx., página, pos., arrastre)
+VB_SIH      equ 288
+VB_EXTRA    equ 308                 ; los octetos de más de la clase
 ; una clase
-WC_MAX      equ 12
+WC_MAX      equ 20
 WC_VCLASE   equ 0                   ; la clase de Hispa Ventanas (C_PROC, C_FONDO...)
 WC_USO      equ 8
 WC_PROC     equ 12                  ; su WndProc (del programa)
@@ -67,15 +71,15 @@ WC_NOMBRE   equ 40                  ; 39 letras y el 0
 WC_TAM      equ 80
 WC_EXTRA_MAX equ 64
 ; un objeto de GDI
-GO_MAX      equ 96
+GO_MAX      equ 128
 GO_SERIE    equ 20                  ; los primeros: los de GetStockObject
 GO_TIPO     equ 0                   ; 0 libre, 1 pluma, 2 pincel, 3 letra, 4 otro
 GO_ESTILO   equ 1                   ; pluma: PS_* (5: ninguna); pincel: 0 liso, 1 ninguno
 GO_ANCHO    equ 2
 GO_COLOR    equ 4                   ; COLORREF
-GO_TAM      equ 8
+GO_TAM      equ 32
 ; un contexto de dispositivo
-DC_MAX      equ 8
+DC_MAX      equ 16
 DC_USO      equ 0                   ; 0 libre, 1 GetDC, 2 BeginPaint
 DC_VEN      equ 4
 DC_X0       equ 8                   ; BeginPaint: lo que hay que pintar (pantalla)
@@ -91,7 +95,24 @@ DC_LETRA    equ 44
 DC_PX       equ 48                  ; donde está la pluma
 DC_PY       equ 52
 DC_ALIN     equ 56                  ; SetTextAlign
-DC_TAM      equ 64
+; (fase 3d: win32g.inc)
+DC_ROP2     equ 60                  ; SetROP2 (R2_*)
+DC_BMP      equ 64                  ; (de memoria) el mapa elegido
+DC_PALETA   equ 68                  ; la paleta elegida
+DC_RELLENO  equ 72                  ; SetPolyFillMode (1 ALTERNATE, 2 WINDING)
+DC_DX       equ 76                  ; el origen de la vista (viewport),
+DC_DY       equ 80
+DC_WX       equ 84                  ;   el de la ventana (window)
+DC_WY       equ 88
+DC_RECORTE  equ 92                  ; su recorte (un bloque RG_*; 0: ninguno)
+DC_ESTIRA   equ 96                  ; SetStretchBltMode
+DC_EXTRA    equ 100                 ; SetTextCharacterExtra
+DC_GUARDA   equ 104                 ; lo guardado con SaveDC (lista)
+DC_ARCO     equ 108                 ; SetArcDirection (0 o 1: al revés de las agujas)
+DC_BRX      equ 112                 ; SetBrushOrgEx
+DC_BRY      equ 116
+DC_MAPA     equ 120                 ; SetMapMode (0: MM_TEXT)
+DC_TAM      equ 128
 ; un temporizador con función
 TP_MAX      equ 8
 TP_VEN      equ 0
@@ -160,12 +181,14 @@ w32_serie:
         db 3, 0
         dd 0                        ; 17 DEFAULT_GUI_FONT
 W32_NSERIE  equ 18
+WG_MAPA0    equ 18                  ; (fase 3d) el mapa de 1×1 de los contextos de memoria
 ; los colores del sistema (GetSysColor), los de Windows 95
 w32_syscol:
         dd 0xC0C0C0, 0x808000, 0x800000, 0x808080, 0xC0C0C0, 0xFFFFFF, 0x000000
         dd 0x000000, 0x000000, 0xFFFFFF, 0xC0C0C0, 0xC0C0C0, 0x808080, 0x800000
         dd 0xFFFFFF, 0xC0C0C0, 0x808080, 0x808080, 0x000000, 0xC0C0C0, 0xFFFFFF
-W32_NSYSCOL equ 21
+        dd 0x000000, 0xC0C0C0, 0x000000, 0xE1FFFF   ; 3DDKSHADOW, 3DLIGHT, INFOTEXT, INFOBK
+W32_NSYSCOL equ 25
 ; teclas de WM_KEYDOWN de Hispa Ventanas (TC_*: el código de la tecla) y su
 ; tecla virtual de Windows (VK_*)
 w32_vk:
@@ -183,6 +206,7 @@ w32_metricas:
         db 11, 32, 12, 32, 13, 32, 14, 32, 15, MENU_H, 19, 1
         db 28, MIN_AN, 29, MIN_AL, 30, BOT_NC, 31, BOT_NC, 32, BORDE, 33, BORDE
         db 34, MIN_AN, 35, MIN_AL, 43, 2
+        db 20, BD_AN, 21, BD_AN, 45, 2, 46, 2, 49, 16, 50, 16, 9, BD_AN, 10, BD_AN
         db 0xFF
 ; ShowWindow: lo que pide (0 a 10) -> 0 ocultar, 1 mostrar, 2 minimizar,
 ; 3 maximizar, 4 mostrar y restaurar
@@ -300,6 +324,7 @@ w32_iniciar:
         dec ecx
         jnz .b
         call w32_dlg_clase          ; (fase 3c) la clase de los diálogos
+        call wg_iniciar             ; (fase 3d) los objetos de GDI de más
         clc
 .x:
         popad
@@ -354,195 +379,6 @@ w32_color:
         pop edx
         pop ecx
         pop ebx
-        ret
-; ---- EAX=objeto de GDI EDX=programa -> ESI=su ficha; CF=1 si no vale ----
-w32_obj:
-        push eax
-        sub eax, W32_HGDI
-        jb .no
-        cmp eax, GO_MAX
-        jae .no
-        mov esi, [edx+PE_W32]
-        lea esi, [esi+eax*8+WB_OBJ]
-        cmp byte [esi+GO_TIPO], 0
-        je .no
-        pop eax
-        clc
-        ret
-.no:
-        pop eax
-        stc
-        ret
-; ---- EAX=pincel (un objeto, o un color del sistema + 1) EDX=programa: lo
-; pone de color de dibujo; CF=1 si no hay con qué pintar ----
-w32_pincel:
-        push eax
-        push esi
-        cmp eax, 0x100
-        jae .obj
-        dec eax
-        js .no
-        cmp eax, W32_NSYSCOL
-        jae .no
-        mov eax, [w32_syscol+eax*4]
-        jmp .c
-.obj:
-        call w32_obj
-        jc .no
-        cmp word [esi+GO_TIPO], 2   ; un pincel liso
-        jne .no
-        mov eax, [esi+GO_COLOR]
-.c:
-        call w32_color
-        mov [gdi_color], al
-        pop esi
-        pop eax
-        clc
-        ret
-.no:
-        pop esi
-        pop eax
-        stc
-        ret
-; ---- EAX=pluma EDX=programa: la pone de color de dibujo; CF=1 si no pinta ----
-w32_pluma:
-        push eax
-        push esi
-        call w32_obj
-        jc w32_pincel.no
-        cmp byte [esi+GO_TIPO], 1
-        jne w32_pincel.no
-        cmp byte [esi+GO_ESTILO], 5
-        je w32_pincel.no
-        mov eax, [esi+GO_COLOR]
-        jmp w32_pincel.c
-; ---- EAX=HDC EDX=programa -> EDI=su ficha; CF=1 si no vale ----
-w32_dc:
-        push eax
-        sub eax, W32_HDC
-        jb .no
-        cmp eax, DC_MAX
-        jae .no
-        shl eax, 6
-        mov edi, [edx+PE_W32]
-        lea edi, [edi+eax+WB_DC]
-        cmp dword [edi+DC_USO], 0
-        je .no
-        mov eax, [edi+DC_VEN]
-        cmp dword [eax+V_USO], 1
-        jne .no
-        pop eax
-        clc
-        ret
-.no:
-        pop eax
-        stc
-        ret
-; ---- lo mismo, y abre el contexto de Hispa Ventanas de su ventana (el que
-; hay que cerrar con dc_cerrar): toda la zona, o lo que había que pintar ----
-w32_dc_abrir:
-        call w32_dc
-        jc .x
-        pushad
-        mov ebp, [edi+DC_VEN]
-        xor al, al
-        call reg_ventana
-        cmp dword [edi+DC_USO], 2
-        jne .o
-        mov eax, [edi+DC_X0]
-        mov ebx, [edi+DC_Y0]
-        mov ecx, [edi+DC_X1]
-        mov edx, [edi+DC_Y1]
-        call reg_cortar
-.o:
-        call dc_origen
-        mov byte [gdi_negrita], 0
-        popad
-        clc
-.x:
-        ret
-; ---- un contexto nuevo para la ventana EBP del programa EDX, del tipo ECX
-; (DC_USO) -> EDI=su ficha EAX=el HDC; CF=1 si no quedan ----
-w32_dc_nuevo:
-        mov edi, [edx+PE_W32]
-        add edi, WB_DC
-        xor eax, eax
-.b:
-        cmp dword [edi+DC_USO], 0
-        je .hay
-        add edi, DC_TAM
-        inc eax
-        cmp eax, DC_MAX
-        jb .b
-        xor eax, eax
-        stc
-        ret
-.hay:
-        push eax
-        push ecx
-        push edi
-        xor eax, eax
-        mov ecx, DC_TAM / 4
-        rep stosd
-        pop edi
-        pop ecx
-        pop eax
-        mov [edi+DC_USO], ecx
-        mov [edi+DC_VEN], ebp
-        mov dword [edi+DC_CFONDO], 0xFFFFFF
-        mov dword [edi+DC_MODO], 2
-        mov dword [edi+DC_PLUMA], W32_HGDI + 7
-        mov dword [edi+DC_PINCEL], W32_HGDI + 0
-        mov dword [edi+DC_LETRA], W32_HGDI + 13
-        add eax, W32_HDC
-        clc
-        ret
-; ---- EDI=contexto (abierto) EAX=x EBX=y ESI=texto (página 1252) ECX=letras:
-; lo escribe, con su fondo si es opaco ----
-w32_linea_texto:
-        pushad
-        cmp ecx, 255
-        jbe .n
-        mov ecx, 255
-.n:
-        test ecx, ecx
-        jle .x
-        sub esp, 256
-        xor edx, edx
-.c:
-        mov al, [esi+edx]
-        test al, al
-        jns .p
-        movzx eax, al
-        mov al, [w32_1252+eax-0x80]
-.p:
-        mov [esp+edx], al
-        inc edx
-        cmp edx, ecx
-        jb .c
-        cmp dword [edi+DC_MODO], 2
-        jne .t
-        mov eax, [edi+DC_CFONDO]
-        call w32_color
-        mov [gdi_color], al
-        mov eax, [esp+256+28]
-        mov ebx, [esp+256+16]
-        push ecx
-        shl ecx, 3
-        mov edx, 16
-        call dc_rect
-        pop ecx
-.t:
-        mov eax, [edi+DC_CTEXTO]
-        call w32_color
-        mov [gdi_color], al
-        mov eax, [esp+256+28]
-        mov ebx, [esp+256+16]
-        mov esi, esp
-        call dc_texto_n
-        add esp, 256
-.x:
-        popad
         ret
 ; ---- ¿son iguales los textos ESI y EDI, sin mirar mayúsculas? ZF=1 si sí ----
 w32_cmp_i:
@@ -746,6 +582,30 @@ w32_tecla:
         mov edx, 1
         ret
 .tc:
+        cmp ecx, 0x54               ; (fase 3d) F1 a F10 con Mayús., Ctrl o Alt
+        jb .tc1
+        cmp ecx, 0x71
+        ja .tc0
+        sub ecx, 0x54
+        push eax
+        push edx
+        mov eax, ecx
+        xor edx, edx
+        mov ecx, 10
+        div ecx
+        lea ecx, [edx+0x3B]
+        pop edx
+        pop eax
+        jmp .tc1
+.tc0:
+        cmp ecx, 0x87               ; F11 y F12 con Mayús., Ctrl o Alt
+        jb .tc1
+        cmp ecx, 0x8C
+        ja .tc1
+        sub ecx, 0x87
+        and ecx, 1
+        add ecx, 0x85
+.tc1:
         mov edx, ecx
         shl edx, 16
         inc edx
@@ -808,6 +668,12 @@ w32_traducir:
         jb .nor
         cmp eax, WM_RBUTTONUP
         ja .nor
+        mov [esi+PE_TEC_MOD], ecx   ; (fase 3d) Mayús., Ctrl, Alt (GetKeyState)
+        and dword [esi+PE_TEC_MOD], TM_MAYUS | TM_CTRL | TM_ALT
+        cmp eax, WM_MOUSEMOVE
+        jne .r0
+        call w32x_raton             ; el cursor de su clase
+.r0:
         cmp eax, WM_LBUTTONDBLCLK   ; el doble clic, solo con CS_DBLCLKS
         jne .r1
         push edi
@@ -861,6 +727,10 @@ w32_traducir:
         je .tmp
         cmp eax, WM_COMMAND
         je .ord
+        cmp eax, WM_VSCROLL         ; (fase 3d) de una barra de desplazamiento
+        je .bar
+        cmp eax, WM_HSCROLL
+        je .bar
         cmp eax, WM_PAINT
         je .sin
         cmp eax, WM_CLOSE
@@ -878,7 +748,11 @@ w32_traducir:
         xor edx, edx
         clc
         ret
+.bar:
+        jmp w32x_scroll
 .ord:
+        call w32x_tpm_orden         ; (fase 3d) lo espera TrackPopupMenu
+        jc .tpm
         test edx, edx               ; de un control: lParam = su HWND
         jz .o1
         push eax
@@ -916,10 +790,14 @@ w32_traducir:
         pop eax
         clc
         ret
+.tpm:
+        stc
+        ret
 .tam:
+        call w32x_colocar           ; (fase 3d) sus barras, a su sitio
         push eax                    ; lo que mide ahora su zona
         push ebx
-        call ven_cli
+        call w32_cli
         shl edx, 16
         mov dx, cx
         pop ebx
@@ -1015,6 +893,26 @@ w32_ven_proc:
 .trad:
         mov ebx, eax
         and eax, ~W32_DIFERIDO
+        call w32x_tpm_mira          ; (fase 3d) la orden que espera TrackPopupMenu
+        jc .cero
+        cmp eax, WM_VSCROLL         ; (fase 3d) de una barra: lo que se ha
+        je .bar                     ; apretado, en el byte alto de la posición
+        cmp eax, WM_HSCROLL
+        jne .nobar
+.bar:
+        test ecx, 0xFF000000
+        jnz .nobar
+        test edx, edx
+        jz .nobar
+        cmp dword [edx+V_CLASE], c_barra
+        jne .nobar
+        push edx
+        mov edx, [edx+V_D4]
+        and edx, 7
+        shl edx, 24
+        or ecx, edx
+        pop edx
+.nobar:
         cmp eax, WM_DESTROY
         je .destruir
         cmp dword [esi+PE_USO], 1
@@ -1084,9 +982,11 @@ w32_ven_proc:
         jmp w32_proc
 ; una tecla: WM_KEYDOWN, WM_CHAR (si escribe) y WM_KEYUP
 .tecla:
+        call w32x_tecla_mod         ; (fase 3d) las de mayúsculas, para GetKeyState
         push esi
         call w32_tecla
         pop esi
+        mov [esi+PE_TEC_ULT], ecx   ; (fase 3d) para ToAscii
         push edx                    ; [esp+8] lParam
         push ecx                    ; [esp+4] el carácter
         push ebx                    ; [esp] la tecla
@@ -1429,6 +1329,7 @@ u_CreateWindowExA:
         call w32_menu_hacer
         pop ebp
 .sinmenu:
+        call w32x_nueva             ; (fase 3d) sus barras y su icono
         mov eax, [esp+P_X]
         mov ecx, [esp+P_Y]
         add esp, P_TAM
@@ -1708,6 +1609,10 @@ u_DefWindowProcA:
         je .borrar
         cmp eax, 0x0081             ; WM_NCCREATE
         je u_uno
+        cmp eax, 0x0080             ; (fase 3d) WM_SETICON y WM_GETICON
+        je w32x_seticon
+        cmp eax, 0x007F
+        je w32x_geticon
         cmp eax, WM_SETTEXT
         je .ptexto
         cmp eax, WM_GETTEXT
@@ -1757,20 +1662,28 @@ u_DefWindowProcA:
 ; (interna) EBP=ventana EAX=HDC EDX=programa: borra la zona con el pincel de
 ; su clase -> EAX=1 si la ha borrado
 w32_borrar:
-        call w32_dc_abrir
+        call wg_abrir
         jc u_cero
         mov esi, [ebp+V_D2]
         mov eax, [esi+WC_FONDO]
-        call w32_pincel
+        call wg_ppincel
         jc .no
-        call ven_cli
-        xor eax, eax
-        xor ebx, ebx
-        call dc_rect
-        call dc_cerrar
+        call w32_cli
+        mov eax, [wg_dox]
+        add ecx, eax
+        mov ebx, [wg_doy]
+        add edx, ebx
+.f:
+        cmp ebx, edx
+        jge .s
+        call wg_tramo
+        inc ebx
+        jmp .f
+.s:
+        call wg_cerrar
         jmp u_uno
 .no:
-        call dc_cerrar
+        call wg_cerrar
         jmp u_cero
 ; (interna) BeginPaint: EBP=ventana EDX=programa -> EDI=el contexto (con lo
 ; que había que pintar, que queda dado por pintado) EAX=1 si el programa no
@@ -1835,6 +1748,7 @@ u_BeginPaint:
         mov esi, [ebp+4]
         add esi, [edx+PE_DELTA]     ; ESI = PAINTSTRUCT
         mov ebp, eax
+        call w32x_caret_antes       ; (fase 3d) el caret, fuera mientras se pinta
         push esi
         call w32_empezar_pintar     ; EDI=contexto EAX=fErase ECX=HDC
         pop esi
@@ -1878,6 +1792,14 @@ u_BeginPaint:
         ret
 ; BOOL EndPaint(ventana, PAINTSTRUCT*)
 u_EndPaint:
+        mov eax, [ebp]
+        call w32_ven
+        jz .s
+        push ebp
+        mov ebp, eax
+        call w32x_caret_despues     ; (fase 3d) el caret, otra vez
+        pop ebp
+.s:
         mov esi, [ebp+4]
         add esi, [edx+PE_DELTA]
         mov eax, [esi]
@@ -1885,8 +1807,16 @@ u_EndPaint:
 ; HDC GetDC(ventana) y int ReleaseDC(ventana, HDC)
 u_GetDC:
         mov eax, [ebp]
+        test eax, eax               ; (fase 3d) la pantalla: el escritorio
+        jz .esc
+        cmp eax, W32_HESC
+        je .esc
         call w32_ven
         jz u_cero
+        jmp .v
+.esc:
+        mov eax, [escritorio]
+.v:
         mov ebp, eax
         mov ecx, 1
         call w32_dc_nuevo
@@ -2021,6 +1951,12 @@ w32_tomar:
         clc
         jmp .sal
 .tecla:
+        push esi
+        mov esi, edx
+        mov edx, ebx
+        call w32x_tecla_mod         ; (fase 3d) las de mayúsculas, para GetKeyState
+        mov edx, esi
+        pop esi
         push edx
         call w32_tecla              ; EBX=tecla ECX=carácter EDX=lParam
         mov esi, edx
@@ -2032,6 +1968,7 @@ w32_tomar:
         mov [edi+8], ebx
         mov [edi+12], esi
         mov [edx+PE_TEC_CAR], ecx   ; (para TranslateMessage)
+        mov [edx+PE_TEC_ULT], ecx   ; (fase 3d: y para ToAscii)
         mov [edx+PE_TEC_VEN], eax
         mov [edx+PE_TEC_L], esi
         push edi                    ; y detrás, que se suelta
@@ -2168,12 +2105,16 @@ u_SendMessageA:
 ; BOOL GetClientRect(ventana, RECT*) y GetWindowRect(ventana, RECT*)
 u_GetClientRect:
         mov eax, [ebp]
+        test eax, eax               ; (fase 3d) el escritorio: la pantalla
+        jz u_GetWindowRect.esc
+        cmp eax, W32_HESC
+        je u_GetWindowRect.esc
         call w32_ven
         jz u_cero
         mov edi, [ebp+4]
         add edi, [edx+PE_DELTA]
         mov ebp, eax
-        call ven_cli
+        call w32_cli
         xor eax, eax
         stosd
         stosd
@@ -2184,8 +2125,25 @@ u_GetClientRect:
         jmp u_uno
 u_GetWindowRect:
         mov eax, [ebp]
+        test eax, eax               ; (fase 3d) el escritorio: la pantalla
+        jz .esc
+        cmp eax, W32_HESC
+        je .esc
         call w32_ven
         jz u_cero
+        jmp .v
+.esc:
+        mov edi, [ebp+4]
+        add edi, [edx+PE_DELTA]
+        xor eax, eax
+        stosd
+        stosd
+        mov eax, [vid_ancho]
+        stosd
+        mov eax, [vid_alto]
+        stosd
+        jmp u_uno
+.v:
         mov edi, [ebp+4]
         add edi, [edx+PE_DELTA]
         mov ecx, [eax+V_X]
@@ -2566,195 +2524,22 @@ u_GetSysColorBrush:
         jae u_cero
         inc eax
         ret
-; int FillRect(HDC, RECT*, pincel)
-u_FillRect:
-        mov eax, [ebp]
-        call w32_dc_abrir
-        jc u_cero
-        mov eax, [ebp+8]
-        call w32_pincel
-        jc .f
-        mov esi, [ebp+4]
-        add esi, [edx+PE_DELTA]
-        mov eax, [esi]
-        mov ebx, [esi+4]
-        mov ecx, [esi+8]
-        sub ecx, eax
-        mov edx, [esi+12]
-        sub edx, ebx
-        call dc_rect
-.f:
-        call dc_cerrar
-        jmp u_uno
-; int DrawTextA(HDC, texto, letras o -1, RECT*, formato): líneas partidas
-; por los saltos de línea; DT_CENTER, DT_RIGHT, DT_VCENTER y DT_BOTTOM (estos
-; dos, con DT_SINGLELINE), DT_CALCRECT y DT_NOCLIP -> el alto
-DT_CENTER   equ 1
-DT_RIGHT    equ 2
-DT_VCENTER  equ 4
-DT_BOTTOM   equ 8
-DT_SINGLELINE equ 0x20
-DT_NOCLIP   equ 0x100
-DT_CALCRECT equ 0x400
-u_DrawTextA:
-        mov eax, [ebp]
-        call w32_dc_abrir
-        jc u_cero
-        mov dword [w32_dt_alto], 0
-        mov [w32_dt_dc], edi
-        mov esi, [ebp+4]
-        test esi, esi
-        jz .fin
-        add esi, [edx+PE_DELTA]
-        mov ecx, [ebp+8]
-        test ecx, ecx
-        jns .n
-        call cad_largo
-        mov ecx, eax
-.n:
-        mov ebx, [ebp+12]
-        add ebx, [edx+PE_DELTA]     ; EBX = el rectángulo
-        push esi                    ; 1.ª pasada: cuántas líneas y la más larga
-        push ecx
-        xor edx, edx
-        xor eax, eax
-.m:
-        call .linea
-        inc edx
-        cmp edi, eax
-        jbe .m1
-        mov eax, edi
-.m1:
-        test ecx, ecx
-        jnz .m
-        pop ecx
-        pop esi
-        shl edx, 4
-        mov [w32_dt_alto], edx
-        test dword [ebp+16], DT_CALCRECT
-        jz .dib
-        shl eax, 3
-        add eax, [ebx]
-        mov [ebx+8], eax
-        mov eax, [ebx+4]
-        add eax, edx
-        mov [ebx+12], eax
-        jmp .fin
-.dib:
-        test dword [ebp+16], DT_NOCLIP
-        jnz .y
-        push ecx
-        push ebx
-        mov eax, [ebx]
-        mov ecx, [ebx+8]
-        sub ecx, eax
-        mov edx, [ebx+12]
-        mov ebx, [ebx+4]
-        sub edx, ebx
-        call dc_cortar
-        pop ebx
-        pop ecx
-.y:
-        mov eax, [ebx+4]            ; la y de la primera línea
-        test dword [ebp+16], DT_SINGLELINE
-        jz .y2
-        test dword [ebp+16], DT_VCENTER
-        jz .y1
-        mov eax, [ebx+12]
-        sub eax, [ebx+4]
-        sub eax, 16
-        sar eax, 1
-        add eax, [ebx+4]
-.y1:
-        test dword [ebp+16], DT_BOTTOM
-        jz .y2
-        mov eax, [ebx+12]
-        sub eax, 16
-.y2:
-        mov [w32_dt_y], eax
-.l:
-        call .linea                 ; EDI = sus letras; ESI y ECX avanzan
-        mov eax, [ebx]              ; la x, según cómo se alinee
-        test dword [ebp+16], DT_CENTER
-        jz .x1
-        mov eax, [ebx+8]
-        sub eax, [ebx]
-        lea edx, [edi*8]
-        sub eax, edx
-        sar eax, 1
-        add eax, [ebx]
-.x1:
-        test dword [ebp+16], DT_RIGHT
-        jz .x2
-        mov eax, [ebx+8]
-        lea edx, [edi*8]
-        sub eax, edx
-.x2:
-        push ebx
-        push ecx
-        push esi
-        mov ebx, [w32_dt_y]
-        mov ecx, edi
-        mov esi, [w32_dt_ini]
-        mov edi, [w32_dt_dc]
-        call w32_linea_texto
-        pop esi
-        pop ecx
-        pop ebx
-        add dword [w32_dt_y], 16
-        test ecx, ecx
-        jnz .l
-.fin:
-        call dc_cerrar
-        mov eax, [w32_dt_alto]
-        ret
-; (interna) la línea que empieza en ESI (quedan ECX letras): -> EDI=sus
-; letras, [w32_dt_ini]=dónde empieza; ESI y ECX pasan a la siguiente
-.linea:
-        mov [w32_dt_ini], esi
-        xor edi, edi
-.ln:
-        test ecx, ecx
-        jz .lx
-        cmp byte [esi], 10
-        je .lf
-        cmp byte [esi], 13
-        je .lf
-        cmp byte [esi], 0
-        je .l0
-        inc esi
-        inc edi
-        dec ecx
-        jmp .ln
-.l0:
-        xor ecx, ecx
-        ret
-.lf:
-        test dword [ebp+16], DT_SINGLELINE  ; (en una sola línea: hasta ahí)
-        jnz .l0
-        cmp byte [esi], 13
-        jne .lf1
-        inc esi
-        dec ecx
-        jz .lx
-        cmp byte [esi], 10
-        jne .lx
-.lf1:
-        inc esi
-        dec ecx
-.lx:
-        ret
-
 ; int wsprintfA(búfer, formato, ...): %d %i %u %x %X %c %s %%, con ancho,
 ; ceros a la izquierda y «l» (los argumentos los quita el programa)
+; (fase 3d) int wvsprintfA(búfer, formato, va_list)
+u_wvsprintfA:
+        mov ebx, [ebp+8]
+        add ebx, [edx+PE_DELTA]
+        jmp u_wsprintfA.va
 u_wsprintfA:
+        lea ebx, [ebp+8]            ; EBX = el argumento siguiente
+.va:
         mov edi, [ebp]
         add edi, [edx+PE_DELTA]
         mov esi, [ebp+4]
         add esi, [edx+PE_DELTA]
         mov eax, [edx+PE_DELTA]
         mov [w32_wsp_delta], eax
-        lea ebx, [ebp+8]            ; EBX = el argumento siguiente
         push edi
 .c:
         lodsb
@@ -2899,29 +2684,6 @@ u_wsprintfA:
 ; =============================================================================
 ;  GDI32
 ; =============================================================================
-; BOOL TextOutA(HDC, x, y, texto, letras)
-g_TextOutA:
-        mov eax, [ebp]
-        call w32_dc_abrir
-        jc u_cero
-        mov esi, [ebp+12]
-        add esi, [edx+PE_DELTA]
-        mov ecx, [ebp+16]
-        mov eax, [ebp+4]
-        mov ebx, [ebp+8]
-        mov edx, [edi+DC_ALIN]      ; TA_RIGHT (2) y TA_CENTER (6)
-        and edx, 6
-        cmp edx, 2
-        jb .t
-        lea edx, [ecx*8]
-        je .d
-        shr edx, 1
-.d:
-        sub eax, edx
-.t:
-        call w32_linea_texto
-        call dc_cerrar
-        jmp u_uno
 ; COLORREF SetTextColor(HDC, color), SetBkColor(HDC, color), int SetBkMode(HDC,
 ; modo) y UINT SetTextAlign(HDC, cómo): devuelven lo de antes
 g_SetTextColor:
@@ -2966,101 +2728,6 @@ g_GetStockObject:
         call w32_obj
         jc u_cero
         ret
-; (interna) un objeto nuevo del programa EDX -> ESI=su ficha EAX=el objeto;
-; CF=1 si no caben más
-g_nuevo:
-        mov esi, [edx+PE_W32]
-        add esi, WB_OBJ + GO_SERIE * GO_TAM
-        mov eax, GO_SERIE
-.b:
-        cmp byte [esi+GO_TIPO], 0
-        je .hay
-        add esi, GO_TAM
-        inc eax
-        cmp eax, GO_MAX
-        jb .b
-        xor eax, eax
-        stc
-        ret
-.hay:
-        add eax, W32_HGDI
-        clc
-        ret
-; HBRUSH CreateSolidBrush(color)
-g_CreateSolidBrush:
-        call g_nuevo
-        jc .x
-        mov dword [esi+GO_TIPO], 2
-        mov ecx, [ebp]
-        mov [esi+GO_COLOR], ecx
-.x:
-        ret
-; HPEN CreatePen(estilo, ancho, color): de un punto de ancho
-g_CreatePen:
-        call g_nuevo
-        jc .x
-        mov ecx, [ebp]
-        shl ecx, 8
-        mov cl, 1
-        mov [esi+GO_TIPO], ecx
-        mov ecx, [ebp+4]
-        mov [esi+GO_ANCHO], cx
-        mov ecx, [ebp+8]
-        mov [esi+GO_COLOR], ecx
-.x:
-        ret
-; HGDIOBJ SelectObject(HDC, objeto) -> el que había de su tipo
-g_SelectObject:
-        mov eax, [ebp]
-        call w32_dc
-        jc u_cero
-        mov eax, [ebp+4]
-        call w32_obj
-        jc u_cero
-        movzx ecx, byte [esi+GO_TIPO]
-        cmp ecx, 3
-        ja u_cero
-        xchg eax, [edi+ecx*4+DC_PLUMA-4]
-        ret
-; BOOL DeleteObject(objeto): los de serie no se borran
-g_DeleteObject:
-        mov eax, [ebp]
-        call w32_obj
-        jc u_cero
-        cmp eax, W32_HGDI + GO_SERIE
-        jb u_uno
-        mov dword [esi+GO_TIPO], 0
-        jmp u_uno
-; BOOL Rectangle(HDC, izquierda, arriba, derecha, abajo): lleno con el pincel
-; y con el borde de la pluma
-g_Rectangle:
-        mov eax, [ebp]
-        call w32_dc_abrir
-        jc u_cero
-        mov esi, edx
-        mov eax, [edi+DC_PINCEL]
-        call w32_pincel
-        jc .p
-        call .medidas
-        call dc_rect
-.p:
-        mov edx, esi
-        mov eax, [edi+DC_PLUMA]
-        call w32_pluma
-        jc .f
-        call .medidas
-        call dc_marco
-.f:
-        call dc_cerrar
-        jmp u_uno
-.medidas:
-        mov eax, [ebp+4]
-        mov ebx, [ebp+8]
-        mov ecx, [ebp+12]
-        sub ecx, eax
-        mov edx, [ebp+16]
-        sub edx, ebx
-        ret
 ; BOOL MoveToEx(HDC, x, y, POINT* donde estaba) y LineTo(HDC, x, y)
 g_MoveToEx:
         mov eax, [ebp]
@@ -3080,65 +2747,6 @@ g_MoveToEx:
         mov eax, [ebp+8]
         mov [edi+DC_PY], eax
         jmp u_uno
-g_LineTo:
-        mov eax, [ebp]
-        call w32_dc_abrir
-        jc u_cero
-        mov eax, [edi+DC_PLUMA]
-        call w32_pluma
-        mov ecx, [ebp+4]
-        mov edx, [ebp+8]
-        jc .f
-        mov eax, [edi+DC_PX]
-        mov ebx, [edi+DC_PY]
-        call dc_linea
-.f:
-        mov [edi+DC_PX], ecx
-        mov [edi+DC_PY], edx
-        call dc_cerrar
-        jmp u_uno
-; COLORREF SetPixel(HDC, x, y, color)
-g_SetPixel:
-        mov eax, [ebp]
-        call w32_dc_abrir
-        jc g_mal
-        mov eax, [ebp+12]
-        call w32_color
-        mov [gdi_color], al
-        mov eax, [ebp+4]
-        mov ebx, [ebp+8]
-        call dc_punto
-        call dc_cerrar
-        mov eax, [ebp+12]
-        ret
-; BOOL GetTextExtentPoint32A(HDC, texto, letras, SIZE*): 8 × 16 por letra
-g_GetTextExtentPoint32A:
-        mov edi, [ebp+12]
-        add edi, [edx+PE_DELTA]
-        mov eax, [ebp+8]
-        shl eax, 3
-        mov [edi], eax
-        mov dword [edi+4], 16
-        jmp u_uno
-; BOOL GetTextMetricsA(HDC, TEXTMETRICA*): la letra de Hispa Ventanas
-g_GetTextMetricsA:
-        mov edi, [ebp+4]
-        add edi, [edx+PE_DELTA]
-        mov ebx, edi
-        xor eax, eax
-        mov ecx, 14
-        rep stosd
-        mov dword [ebx], 16         ; tmHeight
-        mov dword [ebx+4], 13       ; tmAscent
-        mov dword [ebx+8], 3        ; tmDescent
-        mov dword [ebx+20], 8       ; tmAveCharWidth
-        mov dword [ebx+24], 8       ; tmMaxCharWidth
-        mov dword [ebx+28], 400     ; tmWeight
-        mov dword [ebx+36], 96      ; tmDigitizedAspectX
-        mov dword [ebx+40], 96      ; tmDigitizedAspectY
-        mov dword [ebx+44], 0x2020FF20  ; primera, última, por defecto y de corte
-        jmp u_uno
-
 ; de la página 437 (80h a FFh) a la 1252 (tools/mk1252.py); [GLIFOS] la 437 de Ventanas,
 ; con Á, Ó, €... en códigos que no se pintaban (tools/hispa437.py)
 w32_437:

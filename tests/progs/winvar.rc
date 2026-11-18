@@ -1,0 +1,31 @@
+# Los recursos de WINVAR.EXE (tests/progs/winvar.c), en el formato de
+# tools/rcmini.py (los dibujos los hace tests/progs/mkwinvar.py).
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+ICON 1 winvar.ico
+CURSOR 2 winvar.cur
+BITMAP 3 winvar.bmp
+MENU 1
+  POPUP "&Archivo"
+    ITEM "&Abrir...\tCtrl+O" 101
+    ITEM "&Guardar como..." 102
+    SEPARATOR
+    ITEM "&Salir" 109
+  END
+  POPUP "&Ver"
+    ITEM "&Color..." 201
+    ITEM "&Letra..." 202
+  END
+END
+MENU 2
+  ITEM "Primera" 2001
+  ITEM "Segunda" 2002
+  ITEM "Tercera" 2003
+END
+ACCELERATORS 1
+  "O" 101 VIRTKEY CONTROL
+  VK_F5 103 VIRTKEY
+  VK_F5 104 VIRTKEY SHIFT
+  "^L" 105
+  "C" 106 VIRTKEY CONTROL
+  "V" 107 VIRTKEY CONTROL
+END

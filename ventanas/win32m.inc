@@ -828,26 +828,6 @@ u_LoadStringA:
 .f:
         mov byte [edi+eax], 0
         ret
-; HICON LoadIconA(módulo, cuál) y HCURSOR LoadCursorA(módulo, cuál): sin
-; módulo, los de serie; con él, los del programa (si están). El icono y el
-; cursor que se ven son los de Hispa Ventanas
-u_LoadIconA:
-        mov eax, 14                 ; RT_GROUP_ICON
-        mov edi, 0x40000
-        jmp u_carga
-u_LoadCursorA:
-        mov eax, 12                 ; RT_GROUP_CURSOR
-        mov edi, 0x30000
-u_carga:
-        mov ebx, [ebp+4]
-        cmp dword [ebp], 0
-        je .serie
-        call w32_recurso
-        jc u_cero
-.serie:
-        movzx eax, bx
-        or eax, edi
-        ret
 ; HMENU LoadMenuA(módulo, nombre)
 u_LoadMenuA:
         mov ebx, [ebp+4]
@@ -857,8 +837,10 @@ w32_menu_recurso:
         mov eax, 4                  ; RT_MENU
         call w32_recurso
         jc u_cero
+        cmp word [esi], 1           ; (fase 3d) MENUEX: el de los menús extendidos
         movzx eax, word [esi+2]     ; (la cabecera: versión y lo que la sigue)
         lea esi, [esi+eax+4]
+        je w32_menu_leer_ex
 ; (interna) lee un menú de la plantilla ESI (sus órdenes, hasta la que lleva
 ; MF_END) -> EAX=su HMENU (0: no caben más); ESI queda detrás
 w32_menu_leer:
@@ -914,6 +896,65 @@ w32_menu_leer:
 .sig:
         add esp, 64
         test ebx, 0x80              ; MF_END: la última
+        jz .i
+        pop eax
+        ret
+
+; (interna, fase 3d) lo mismo con una plantilla MENUEX: cada orden, tipo,
+; estado, número, banderas (1: desplegable, 80h: la última), su texto y,
+; si es un desplegable, su ayuda y sus órdenes; todo de 4 en 4 octetos
+w32_menu_leer_ex:
+        push esi
+        call u_CreateMenu
+        pop esi
+        push eax                    ; [ESP] = el menú
+.i:
+        mov ebx, [esi]              ; tipo (MFT_SEPARATOR: 800h)
+        and ebx, MF_RAYA
+        mov eax, [esi+4]            ; estado (MFS_GRAYED, MFS_CHECKED)
+        and eax, 3 | 8
+        or ebx, eax
+        mov ecx, [esi+8]            ; su número
+        movzx eax, word [esi+12]    ; 1: desplegable; 80h: la última
+        add esi, 14
+        sub esp, 64                 ; su texto, aquí (el menú queda en [ESP+68])
+        push eax
+        lea edi, [esp+4]
+        push ecx
+        mov ecx, 63
+        call w32_u16
+        pop ecx
+        add esi, 3                  ; (de 4 en 4)
+        and esi, ~3
+        test byte [esp], 1
+        jz .pon
+        add esi, 4                  ; (su ayuda)
+        or ebx, MF_POPUP
+        push ebx
+        call w32_menu_leer_ex       ; su desplegable
+        pop ebx
+        mov ecx, eax
+        test eax, eax
+        jnz .pon
+        and ebx, ~MF_POPUP
+.pon:
+        mov eax, [esp+68]
+        test eax, eax
+        jz .sig
+        push esi
+        call w32_menu
+        mov eax, ebx
+        push ebx
+        mov ebx, ecx
+        lea ecx, [esp+12]           ; (el texto, como puntero del programa)
+        sub ecx, [edx+PE_DELTA]
+        call w32_menu_pon
+        pop ebx
+        pop esi
+.sig:
+        pop eax
+        add esp, 64
+        test al, 0x80               ; la última
         jz .i
         pop eax
         ret
