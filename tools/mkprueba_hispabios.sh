@@ -2,11 +2,15 @@
 # Hispa-DOS - imagen de prueba de HispaBIOS para un equipo de verdad que
 # arranca por UEFI (docs/HISPABIOS.md): el reloj, la velocidad de la pantalla,
 # Hispa Ventanas (VBE) y el registro. A partir de
-# build/hispados-usb.img (make usb): el mismo BOOTX64.EFI ensamblado con
-# -DREGISTRO_PASOS, que guarda \HISPABIOS.LOG en la memoria USB en cada paso
-# aunque todo vaya bien (la imagen normal solo lo guarda si algo falla). Deja
-# en la carpeta de destino el .zip con la imagen, el LEEME.TXT y el .EFI suelto.
-#   tools/mkprueba_hispabios.sh [carpeta de destino]   (por omisión, build/prueba-hispabios)
+# build/hispados-usb.img (make usb): los mismos BOOTX64.EFI y BOOTIA32.EFI
+# ensamblados con -DREGISTRO_PASOS, que guardan \HISPABIOS.LOG en la memoria
+# USB en cada paso aunque todo vaya bien (la imagen normal solo lo guarda si
+# algo falla). Deja en la carpeta de destino el .zip con la imagen, los LEEME
+# y los .EFI sueltos.
+#   tools/mkprueba_hispabios.sh [carpeta de destino] [acer]
+# (por omisión, build/prueba-hispabios). Con «acer», la misma imagen con otro
+# nombre (hispados-usb-acer-one-10.zip) y solo lo del firmware de 32 bits
+# (LEEME-ACER.TXT, sueltos/BOOTIA32.EFI): no toca lo que haya de la de 64.
 set -eu
 cd "$(dirname "$0")/.."
 B=build
@@ -29,15 +33,25 @@ for k in ('FECHA', 'HORA', 'VERSION'): t = t.replace('@' + k + '@', os.environ[k
 open(sys.argv[2], 'wb').write(t.encode('cp437'))" "$1" "$2"; }
 nasm -f bin -I hispabios/ -I $B/ -DREGISTRO_PASOS -o $T/BOOTX64.EFI hispabios/efi64.asm
 mcopy -o -i "$P" $T/BOOTX64.EFI ::EFI/BOOT/BOOTX64.EFI
+nasm -f bin -I hispabios/ -I $B/ -DREGISTRO_PASOS -o $T/BOOTIA32.EFI hispabios/efi32.asm
+mcopy -o -i "$P" $T/BOOTIA32.EFI ::EFI/BOOT/BOOTIA32.EFI
 txt usb/prueba-hispabios/LEEME.TXT $T/LEEME-HB.TXT
 mcopy -o -i "$P" $T/LEEME-HB.TXT ::
+txt usb/prueba-hispabios/LEEME-ACER.TXT $T/LEEME-AC.TXT
+mcopy -o -i "$P" $T/LEEME-AC.TXT ::
 # PRUEBAHB.BAT: guarda el registro de la BIOS (HBLOG), arranca Hispa Ventanas
 # y lo guarda otra vez al salir (con las llamadas de VBE que haya hecho)
 printf '@ECHO OFF\r\nC:\r\nCD \\\r\nC:\\HISPADOS\\HBLOG\r\nC:\\HISPADOS\\VENTANAS\r\nC:\\HISPADOS\\HBLOG\r\n' > $T/PRUEBAHB.BAT
 mcopy -o -i "$P" $T/PRUEBAHB.BAT ::
-[ ! -e "$D/hispados-usb-hispabios.zip" ] || mv -f "$D/hispados-usb-hispabios.zip" "$D/hispados-usb-hispabios.zip.ant"
-(cd $T && zip -q -9 "$D/hispados-usb-hispabios.zip" hispados-usb.img)
-txt usb/prueba-hispabios/LEEME.TXT "$D/LEEME.TXT"
-cp $T/BOOTX64.EFI "$D/sueltos/"
+Z=hispados-usb-hispabios.zip
+[ "${2:-}" = acer ] && Z=hispados-usb-acer-one-10.zip
+[ ! -e "$D/$Z" ] || mv -f "$D/$Z" "$D/$Z.ant"
+(cd $T && zip -q -9 "$D/$Z" hispados-usb.img)
+txt usb/prueba-hispabios/LEEME-ACER.TXT "$D/LEEME-ACER.TXT"
+cp $T/BOOTIA32.EFI "$D/sueltos/"
+if [ "${2:-}" != acer ]; then
+  txt usb/prueba-hispabios/LEEME.TXT "$D/LEEME.TXT"
+  cp $T/BOOTX64.EFI "$D/sueltos/"
+fi
 ls -l "$D" "$D/sueltos"
-echo "imagen de prueba: $IMG (y $D/hispados-usb-hispabios.zip)"
+echo "imagen de prueba: $IMG (y $D/$Z)"

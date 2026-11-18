@@ -9,6 +9,12 @@ el arreglo (ver «El reloj en los equipos con el 8254 parado») y **está
 pendiente de probar en ese equipo** con la imagen de prueba del FTP, carpeta
 `prueba-hispabios`.
 
+La parte de **32 bits** (`efi32.asm`, para firmware UEFI de 32 bits) está al
+nivel de la de 64 desde el 18/11/2026 y lleva además la **pantalla girada** de
+las tabletas (ver «La parte de 32 bits»). Probada en QEMU con OVMF de 32 bits
+(procesador de 64 y de 32, 1 GB, 1280x800 y 800x1280 vertical); **pendiente de
+probar en un equipo de verdad**: el Acer One 10 (Atom «Bay Trail»).
+
 ## Qué es
 
 Los equipos sin CSM (sin «arranque heredado») no tienen BIOS: no hay INT 13h,
@@ -24,7 +30,8 @@ interviene: la memoria arranca por el MBR.
 | Fichero | Qué es |
 |---|---|
 | `hispabios/efi64.asm` | La parte UEFI de 64 bits: memoria, pantalla, discos, el registro y el despachador de las peticiones |
-| `hispabios/efi32.asm` | Lo mismo para firmware de 32 bits (tabletas y portátiles con Atom) |
+| `hispabios/efi32.asm` | Lo mismo para firmware de 32 bits (tabletas y portátiles con Atom): arranque, memoria, registro, discos y tablas |
+| `hispabios/efi32_reloj.inc`, `efi32_pant.inc`, `efi32_datos.inc` | El resto de la parte de 32 bits: el reloj y el despachador; la pantalla (escritura combinada, VBE, el giro); textos y variables |
 | `hispabios/bios64.asm`, `bios_int.inc` | La BIOS de modo real y los cambios de modo (con `-DARQ32`, para firmware de 32 bits) |
 | `hispabios/pe.inc` | La cabecera PE/COFF, escrita a mano |
 | `hispabios/hblog.asm` | `HBLOG.COM`: enseña y guarda (`\HBLOG.TXT`) el registro de la BIOS de modo real |
@@ -248,8 +255,73 @@ queda parado sin llegar a avisar está la **imagen de prueba**
 (`tools/mkprueba_hispabios.sh`, ensamblada con `-DREGISTRO_PASOS`): guarda el
 registro en cada paso, así que el archivo dice hasta dónde llegó.
 
-De momento el registro y el mapa solo los tiene la parte de 64 bits;
-`efi32.asm` tiene la elección de la base, los avisos y el vigilante.
+La parte de 32 bits escribe el mismo registro, con dos cosas más: el
+**equipo** (fabricante, modelo y BIOS según SMBIOS) y **cada disco** que da el
+firmware.
+
+## La parte de 32 bits (`efi32.asm`): Atom «Bay Trail», Acer One 10
+
+Muchas tabletas y 2 en 1 con Atom (Z3735F/G y parecidos) tienen un procesador
+de 64 bits pero un **firmware UEFI de 32 bits** y sin CSM: solo arrancan
+`\EFI\BOOT\BOOTIA32.EFI`. Esa parte hace **todo lo de la de 64** (el
+vigilante, el mapa con `AllocatePool` y el tamaño de entrada del firmware, la
+base de la BIOS, las páginas prestadas, los avisos, `HISPABIOS.LOG`, el modo
+seguro, las entradas de ACPI y SMBIOS en la EBDA, VBE con marco lineal, la
+medida de la pantalla y el modo menor si es lenta, y el reloj: `reloj_mirar`
+con el 8254 —también el que «se mueve pero no cuenta»—, el bloqueo del PCH, el
+HPET y los APIC). La BIOS de modo real es la misma (`bios64.asm` con `ARQ32`),
+así que el teclado sin viajes continuos, `reloj_elegir`, VBE y `HBLOG` son los
+mismos. Lo que cambia o es propio:
+
+- **Las llamadas al firmware** (convención de C, argumentos en la pila) van
+  todas por la macro `FW` y `fw_llamar`, que deja la **pila alineada a 16** en
+  cada llamada (lo pide la especificación también en IA32, y es la lección de
+  la 0.1 de 64 bits).
+- **Escritura combinada.** Un firmware de 32 bits casi nunca usa paginación
+  (OVMF sí), así que no hay tablas suyas donde poner un alias: HispaBIOS se
+  hace unas **tablas propias** (PAE, 4 GB en páginas de 2 MB tal cual, y las
+  del marco de la pantalla con el tipo WC por la entrada 5 del PAT) y las pone
+  **solo mientras dibuja**, con las interrupciones cerradas; al acabar
+  devuelve al firmware su CR0, CR3 y CR4 (`wc_entrar`, `wc_salir`). Mide los
+  dos caminos y usa el más rápido; el registro dice cómo tiene el firmware la
+  paginación. Hace falta PAE y PAT (cualquier Atom).
+- **La pantalla girada.** Muchas tabletas llevan un panel **vertical**
+  (800x1280) puesto de lado: el firmware da un modo de 800x1280 y todo saldría
+  tumbado. Otro modo del firmware no lo arregla (el panel sigue de lado). Si
+  el modo es más alto que ancho, HispaBIOS **gira la imagen 90 grados a la
+  derecha** (lo que piden casi todas: es el «right side up» de la lista de
+  paneles de Linux, donde está el Acer One 10 S1003): DOS ve 1280x800 y los
+  modos de VBE se ofrecen según esa medida. Todo se dibuja en una **pantalla
+  lógica** apaisada en memoria normal y se apunta el rectángulo que cambia;
+  `girar_sucio` lo lleva a la pantalla de verdad, girado, por teselas de
+  256x16 puntos compuestas en memoria y escritas por filas enteras (tiras
+  seguidas: como rinde la escritura combinada). En VBE solo va el trozo de
+  cada línea que ha cambiado. **Si el giro no es el bueno**: la tecla **G** al
+  arrancar (junto a la S del modo seguro) o **Ctrl+Alt+G** con DOS en marcha
+  (en modo texto) dan un cuarto de vuelta más, y queda **guardado en
+  `\HBGIRO.CFG`** de la memoria USB (un número: 0 sin giro, 1 a la derecha,
+  2 del revés, 3 a la izquierda) para los arranques siguientes. Vale también
+  en una pantalla apaisada (una que esté del revés). Se acepta una pantalla de
+  640x400 «de frente o de lado».
+- **Los discos.** Arrancando «deprisa», el firmware solo pone en marcha el
+  dispositivo del que arranca, y la eMMC no aparecería: HispaBIOS le pide que
+  **conecte sus controladoras de disco** (`ConnectController` recursivo sobre
+  los dispositivos PCI de clase 01h y 0805h; `discos_conectar`). El disco del
+  que se arranca es el 80h (la memoria USB, o la eMMC si Hispa-DOS está en
+  ella) y los demás, 81h en adelante. Una eMMC se presenta además con sus dos
+  **particiones de arranque** (4 MB) como discos aparte: un disco fijo de menos
+  de 32 MB que no sea el de arranque no se da a DOS. Hacen falta sectores de
+  512. Cada disco va al registro con su tamaño y lo que se ha hecho con él.
+- **La memoria extendida** se pide según el mapa: el tramo libre entero que
+  empieza en 1 MB (64 MB como mucho; en OVMF, 7 MB en vez de 4).
+- El **modo seguro** deja además de conectar controladoras; el giro se
+  mantiene (es solo dibujo).
+
+Lo que QEMU no puede decir del Acer One 10 (lo dirá `HISPABIOS.LOG`): si el
+firmware usa paginación, lo que cuesta pintar con y sin escritura combinada,
+si el modo es de 800x1280 o de 1280x800 y hacia dónde hay que girar, cómo se
+presenta la eMMC, y por dónde llega la IRQ 0 (en Bay Trail el 8254 anda; el
+camino 8259-LINT0 es lo dudoso: `reloj_elegir` prueba los seis).
 
 ## El fallo de la 0.9.26 en un PC actual
 
@@ -306,13 +378,14 @@ ratón funciona (con UEFI no hay ratón USB: HSPUSB no se carga).
 ## Pruebas
 
 `tests/run_hispabios_tests.sh` (en `make test`; necesita los paquetes `ovmf` y
-`ovmf-ia32`). Además del arranque de siempre (64 y 32 bits, «Juegos», modo
+`ovmf-ia32`). Los casos de la parte de 32 bits están en
+`tests/hispabios32_casos.sh` (a solas: `HB_SOLO=32 tests/run_hispabios_tests.sh`). Además del arranque de siempre (64 y 32 bits, «Juegos», modo
 «irreal»), ensambla variantes de `BOOTX64.EFI` con las opciones de prueba:
 
 | Opción de `efi64.asm` | Para qué |
 |---|---|
 | `-DPRUEBA_PILA` | Avisa por COM1 de una llamada al firmware con la pila sin alinear |
-| `-DPRUEBA_OCUPA=dir,n,...` | Ocupa antes esas páginas, como un equipo cuyo firmware las usa (también en `efi32.asm`) |
+| `-DPRUEBA_OCUPA=dir,n,...` | Ocupa antes esas páginas, como un equipo cuyo firmware las usa |
 | `-DPRUEBA_SIN_GOP` | Como si no hubiera pantalla gráfica |
 | `-DREGISTRO_PASOS` | Guarda `HISPABIOS.LOG` en cada paso (la imagen de prueba) |
 | `-DPRUEBA_LENTA=us` | Como si pintar un millón de puntos costara eso (pantalla lenta) |
@@ -322,6 +395,12 @@ ratón funciona (con UEFI no hay ratón USB: HSPUSB no se carga).
 | `-DPANTALLA_NATIVA` | No cambiar de modo de pantalla aunque sea lenta |
 | `-DPRUEBA_RELOJ=máscara` | Fuentes del reloj que la BIOS no prueba (bit = número de la tabla de arriba) |
 | `-DPRUEBA_P2SB` | Un P2SB de mentira con el 8254 bloqueado (QEMU no tiene PCH con banda lateral) |
+
+`efi32.asm` tiene las mismas (menos `PRUEBA_PILA`: la pila la alinea
+`fw_llamar`) y dos más: `-DPRUEBA_GIRO=n` (el giro por omisión aunque la
+pantalla sea apaisada) y `-DPRUEBA_SIN_PAG` (las tablas propias se ponen y se
+quitan desde un estado sin paginación ni PAE, como en un firmware que no la
+usa).
 
 Casos: equipo «actual» (q35, 8 GB) con la pila comprobada; memoria baja
 ocupada (BIOS en 70000h y en 60000h, en 64 y 32 bits) hasta `C:\>` y con el
@@ -340,12 +419,32 @@ aviso y se guarda el registro). EQUIPO con la BIOS en 70000h y en 60000h
 (ACPI y SMBIOS). Lo que QEMU no puede probar: quitar el bloqueo en un PCH de
 verdad y el camino por el IOAPIC llegando de verdad.
 
+Los casos de 32 bits: un «Acer One 10» (QEMU de 64 bits con OVMF de 32, 1 GB,
+1280x800: el registro entero, las tablas propias de WC, la velocidad de `DIR`,
+`HBLOG`, EQUIPO con ACPI y SMBIOS, Hispa Ventanas en VBE); la **pantalla
+vertical** de 800x1280 (la captura de Hispa Ventanas, girada de vuelta, tiene
+que ser la de la pantalla apaisada); el giro guardado en `HBGIRO.CFG` y
+Ctrl+Alt+G (con `PRUEBA_SIN_PAG`); la memoria USB y un **segundo disco** (D:,
+leer y escribir; el de 4 MB no se da); sin 8254 con el P2SB de mentira y
+arrancando de un disco fijo (el HPET); el modo seguro en un procesador de 32
+bits sin 8254 (el reloj CMOS); la memoria baja ocupada (70000h, 448 KB con la
+página prestada), sin memoria baja (aviso y registro) y la pantalla lenta
+simulada con `VBEPRU`.
+
 OJO con QEMU y KVM: con el 8259 del núcleo (KVM) la IRQ 0 por LINT0 no llega
 tras enmascarar y abrir LINT0, cosa que un equipo de verdad sí hace; las
 pruebas van sin KVM.
 
 ## Pendiente
 
+- Probar la parte de 32 bits en el **Acer One 10** con la imagen de prueba
+  (`LEEME-ACER.TXT` en la carpeta `prueba-hispabios` del FTP).
+- Llevar a `efi64.asm` lo que ha estrenado la de 32: la pantalla girada (hay
+  tabletas con firmware de 64 bits y panel vertical), conectar las
+  controladoras de disco, los discos y el equipo en el registro, y la memoria
+  extendida según el mapa.
+- Un modo de VBE con la medida de la pantalla (1280x800): hoy Hispa Ventanas
+  sale en 800x600 o 1024x768, centrada.
 - Probar la 0.4 en el Monovate 14.1 (y que el ThinkPad E14, el MacBook Air y
   el Asus GL553V siguen bien) con la imagen de prueba, y ver `HISPABIOS.LOG` y
   `HBLOG.TXT`.
@@ -356,7 +455,5 @@ pruebas van sin KVM.
 - Modos VBE de 8 bits (con la paleta por INT 10h 4F09h) para juegos.
 - Si en algún equipo no llega ninguna fuente por el 8259: el temporizador del
   APIC local (ver «Límites» del reloj).
-- La memoria extendida se pide a potencias de dos desde 1 MB (en OVMF, 4 MB;
-  64 MB como mucho): usar el mapa para pedir el tramo entero.
-- En `efi32.asm`: el registro, el mapa, VBE, la escritura combinada, las
-  páginas prestadas y las tablas (la BIOS de 32 bits contesta que no hay VBE).
+- En `efi64.asm` la memoria extendida se pide a potencias de dos desde 1 MB
+  (en OVMF, 4 MB; 64 MB como mucho): usar el mapa, como en `efi32.asm`.

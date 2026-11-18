@@ -19,16 +19,22 @@ export MTOOLS_SKIP_CHECK=1
 
 if [ ! -f "$USB" ]; then echo "  (no hay $USB: haga «make usb»; se salta)"; exit 0; fi
 
-# arranca ARQ (64 o 32) con la imagen IMG; espera a C:\>, escribe TECLAS y espera
-# a que aparezca ESPERA en la salida (la consola de Hispa-DOS sale también por COM1)
+# arranca ARQ (64, 32 o a32) con la imagen IMG; espera a C:\>, escribe TECLAS y espera
+# a que aparezca ESPERA en la salida (la consola de Hispa-DOS sale también por COM1).
+# «a32» es un procesador de 64 bits con firmware UEFI de 32 (los Atom «Bay Trail»:
+# Acer One 10); «32», procesador y firmware de 32. HB_EXTRA: más opciones de QEMU
+# (otros discos); HB_ARR=fijo: la imagen es un disco fijo (SATA) y no una memoria USB.
 arranca() {
   local arq=$1 img=$2 nombre=$3 teclas=$4 espera=$5
-  local code vars q
+  local code vars q disco
   if [ "$arq" = 64 ]; then
     code=/usr/share/OVMF/OVMF_CODE_4M.fd; vars=/usr/share/OVMF/OVMF_VARS_4M.fd; q=qemu-system-x86_64
   else
     code=/usr/share/OVMF/OVMF32_CODE_4M.fd; vars=/usr/share/OVMF/OVMF32_VARS_4M.fd; q=qemu-system-i386
+    [ "$arq" = a32 ] && q=qemu-system-x86_64
   fi
+  disco="-device qemu-xhci -device usb-storage,drive=u,bootindex=1"
+  [ "${HB_ARR:-}" = fijo ] && disco="-device ide-hd,drive=u,bootindex=1"
   if [ ! -f $code ]; then echo "  (falta $code: instale ovmf/ovmf-ia32; se salta $nombre)"; return 1; fi
   cp $vars $T/vars_$nombre.fd
   rm -f $T/serie_$nombre.txt $T/mon_$nombre
@@ -37,7 +43,7 @@ arranca() {
     -drive if=pflash,format=raw,readonly=on,file=$code \
     -drive if=pflash,format=raw,file=$T/vars_$nombre.fd \
     -netdev user,id=n0 -device e1000,netdev=n0 \
-    -drive file=$img,format=raw,if=none,id=u -device qemu-xhci -device usb-storage,drive=u,bootindex=1 &
+    -drive file=$img,format=raw,if=none,id=u $disco ${HB_EXTRA:-} &
   local pid=$! i
   for i in $(seq 1 ${HB_SEG:-240}); do
     sleep 1
@@ -62,6 +68,23 @@ arranca() {
   wait $pid 2>/dev/null
   return 0
 }
+
+# ---- ayudas de las pruebas con variantes de HispaBIOS ----
+#   hb_variante nombre "opciones de nasm" [32] -> $T/nombre.img con ese
+#   BOOTX64.EFI (o BOOTIA32.EFI, de efi32.asm)
+hb_variante() {
+  nasm -f bin -I hispabios/ -I $B/ $2 -o $T/$1.EFI hispabios/efi${3:-64}.asm || return 1
+  cp --sparse=always $USB $T/$1.img
+  mcopy -o -i $T/$1.img@@1048576 $T/$1.EFI ::EFI/BOOT/BOOT$( [ "${3:-64}" = 64 ] && echo X64 || echo IA32 ).EFI
+}
+hb_log() { mtype -i $T/$1.img@@1048576 ::HISPABIOS.LOG 2>/dev/null | tr -d '\r'; }
+# hb_colores captura -> cuántos colores distintos tiene (0 si no hay ImageMagick)
+hb_colores() { convert "$1" -format %k info: 2>/dev/null || echo 0; }
+# hb_reloj patrón "bien" "mal": el patrón tiene que estar en $L (HISPABIOS.LOG)
+hb_reloj() { echo "$L" | grep -q "$1" && ok "$2" || ko "$3"; }
+
+# HB_SOLO=32: solo las pruebas de la parte de 32 bits (tests/hispabios32_casos.sh)
+if [ "${HB_SOLO:-}" = 32 ]; then . tests/hispabios32_casos.sh; exit $fail; fi
 
 for arq in 64 32; do
   echo "== HispaBIOS: arranque por UEFI de $arq bits (sin CSM) =="
@@ -131,15 +154,6 @@ fi
 # llamada al firmware con la pila mal; PRUEBA_OCUPA ocupa antes páginas bajas
 # (como un equipo cuyo firmware las usa); REGISTRO_PASOS guarda HISPABIOS.LOG
 # aunque todo vaya bien (la imagen de prueba: tools/mkprueba_hispabios.sh).
-#   hb_variante nombre "opciones de nasm" [32] -> $T/nombre.img con ese
-#   BOOTX64.EFI (o BOOTIA32.EFI, de efi32.asm, que solo tiene PRUEBA_OCUPA)
-hb_variante() {
-  nasm -f bin -I hispabios/ -I $B/ $2 -o $T/$1.EFI hispabios/efi${3:-64}.asm || return 1
-  cp --sparse=always $USB $T/$1.img
-  mcopy -o -i $T/$1.img@@1048576 $T/$1.EFI ::EFI/BOOT/BOOT$( [ "${3:-64}" = 64 ] && echo X64 || echo IA32 ).EFI
-}
-hb_log() { mtype -i $T/$1.img@@1048576 ::HISPABIOS.LOG 2>/dev/null | tr -d '\r'; }
-
 echo "== HispaBIOS: equipo «actual» (q35, 8 GB) y la pila alineada en las llamadas al firmware =="
 if hb_variante pila "-DPRUEBA_PILA" && HB_MEM=8G HB_MAQ="-machine q35" arranca 64 $T/pila.img pila "d i r ret" "bytes libres"; then
   S=$T/serie_pila.txt
@@ -181,18 +195,6 @@ for caso in "70000h 448 58000h,1,9E000h,2" "60000h 384 7E000h,1,9E000h,2"; do
     ko "no se ha podido ensamblar o arrancar la variante $n"
   fi
 done
-
-echo "== HispaBIOS de 32 bits: el firmware usa la memoria baja (58000h, 8E000h, 9E000h-9FFFFh): la BIOS en 70000h =="
-if hb_variante ocupa32 "-DPRUEBA_OCUPA=58000h,1,8E000h,1,9E000h,2" 32 && arranca 32 $T/ocupa32.img ocupa32 "d i r ret" "bytes libres"; then
-  S=$T/serie_ocupa32.txt
-  grep -aq 'La BIOS de modo real va en 00070000' $S && ok "elige la base 70000h" || ko "no elige la base 70000h"
-  grep -aq '352 KB convencional' $S && ok "DOS ve 352 KB de memoria convencional" || ko "DOS no ve 352 KB"
-  grep -aq 'bytes libres' $S && ok "llega a C:\\> y DIR responde" || ko "no llega a C:\\> o DIR no responde"
-  n2=$(grep -ac 'BdsDxe: loading' $S)
-  [ "$n2" -le 1 ] && ok "no se ha reiniciado" || ko "se ha reiniciado ($n2 arranques)"
-else
-  echo "  (sin OVMF de 32 bits: se salta)"
-fi
 
 # Las páginas sueltas de memoria baja que usa el firmware (87000h en el ThinkPad
 # E14, 58000h en el MacBook Air de 2017, que dejaba a DOS con 352 KB) se prestan
@@ -256,8 +258,6 @@ fi
 # escritura combinada (por encima de 4 GB: la entrada 255 del nivel 4), HBLOG,
 # las tablas de ACPI y SMBIOS a la vista de EQUIPO, y Hispa Ventanas en un modo
 # VBE de 32 bits (captura: tiene que haber colores, no solo texto).
-# hb_colores captura -> cuántos colores distintos tiene (0 si no hay ImageMagick)
-hb_colores() { convert "$1" -format %k info: 2>/dev/null || echo 0; }
 echo "== HispaBIOS: pantalla de 1920x1200: velocidad del texto, HBLOG, EQUIPO y Hispa Ventanas (VBE) =="
 if hb_variante rapida "-DPRUEBA_PILA -DREGISTRO_PASOS"; then
   HB_MEM=2G HB_MAQ="-machine q35" HB_VGA="-vga none -device VGA,xres=1920,yres=1200,vgamem_mb=32" \
@@ -333,7 +333,6 @@ fi
 # 8254, el HPET en su sitio («legacy replacement») y el reloj CMOS (IRQ 8), con
 # el 8259 por LINT0 o por la entrada 0 del IOAPIC. QEMU sin 8254: -machine
 # pit=off (con la 0.3 se quedaba parado tras «HSPJOY»).
-hb_reloj() { echo "$L" | grep -q "$1" && ok "$2" || ko "$3"; }
 echo "== HispaBIOS: equipo sin 8254 (pit=off) con HPET: el reloj de DOS sale del HPET =="
 if hb_variante sinpit "-DPRUEBA_PILA -DREGISTRO_PASOS" && HB_MEM=1G HB_MAQ="-machine q35,pit=off" arranca 64 $T/sinpit.img sinpit "h b l o g ret w3 d i r ret" "bytes libres"; then
   S=$T/serie_sinpit.txt
@@ -406,14 +405,7 @@ else
   ko "no se ha podido ensamblar o arrancar la variante sin reloj"
 fi
 
-echo "== HispaBIOS de 32 bits sin 8254 (pit=off): el reloj CMOS =="
-cp --sparse=always $USB $T/sp32.img
-if HB_MAQ="-machine pc,pit=off" arranca 32 $T/sp32.img sp32 "h b l o g ret w3 d i r ret" "bytes libres"; then
-  S=$T/serie_sp32.txt
-  grep -aq 'Reloj de DOS: LLEGA. Queda: el reloj CMOS' $S && ok "la BIOS de 32 bits pone el reloj CMOS" || ko "la BIOS de 32 bits no encuentra reloj"
-  grep -aq 'bytes libres' $S && ok "arranca hasta C:\\> y DIR responde" || ko "no llega a C:\\> (32 bits, sin 8254)"
-else
-  echo "  (sin OVMF de 32 bits: se salta)"
-fi
+# ---- La parte de 32 bits (firmware UEFI de 32: Atom «Bay Trail», Acer One 10) ----
+. tests/hispabios32_casos.sh
 
 exit $fail

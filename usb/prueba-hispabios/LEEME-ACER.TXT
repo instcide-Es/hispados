@@ -1,0 +1,98 @@
+PRUEBA DE HISPABIOS 0.4 DE 32 BITS - ACER ONE 10 (Atom "Bay Trail")
+Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
+===================================================================
+
+Que es: el Acer One 10 (y casi todas las tabletas y 2 en 1 con Atom
+Z3735) tiene un procesador de 64 bits pero un firmware UEFI de 32 bits,
+sin arranque heredado (CSM). Arranca \EFI\BOOT\BOOTIA32.EFI, la parte
+de 32 bits de HispaBIOS, que hasta ahora se habia quedado atras. Esta
+imagen la lleva al nivel de la de 64 bits (0.4): registro en la memoria
+USB, memoria baja prestada, texto sin tirones, modos graficos (VBE)
+para Hispa Ventanas, ACPI y SMBIOS para EQUIPO, y el reloj comprobado
+al arrancar (8254, HPET o reloj CMOS). Y dos cosas nuevas:
+  - LA PANTALLA GIRADA: si el panel es vertical (800x1280 puesto de
+    lado, como en muchas tabletas), HispaBIOS gira la imagen para que
+    se vea derecha;
+  - el disco de dentro (la eMMC) como segundo disco de DOS (D:).
+Solo esta probada en un emulador: es la primera prueba en un equipo de
+verdad. La misma memoria USB sirve para los demas equipos (lleva
+tambien BOOTX64.EFI, la 0.4 de 64 bits).
+
+ANTES: QUE EL ACER ARRANQUE DE LA MEMORIA USB
+---------------------------------------------
+1. Con la base del teclado puesta, encienda y vaya pulsando F2: entra
+   en la configuracion (BIOS).
+2. Secure Boot tiene que estar desactivado (Boot > Secure Boot:
+   Disabled). En muchos Acer esa opcion sale en gris hasta que se pone
+   una contrasena de supervisor (Security > Set Supervisor Password:
+   ponga una facil y apuntela); despues ya deja cambiarla.
+3. Main > F12 Boot Menu: Enabled. Guarde con F10.
+4. Con la memoria USB puesta (en el USB de la base o con un adaptador
+   en el micro-USB), encienda pulsando F12 y elija la memoria USB.
+   Si F12 no sale, en Boot ponga la memoria USB la primera.
+
+QUE HACER (15 minutos)
+----------------------
+1. Descomprima el .zip y grabe hispados-usb.img en una memoria USB
+   entera (Rufus en modo DD, balenaEtcher o dd).
+2. Arranque el Acer desde la memoria. Deben salir unas lineas de
+   "HispaBIOS 0.4 (IA32)" (el equipo, la memoria, la pantalla) y luego
+   Hispa-DOS hasta C:\>. El menu de arranque debe contar 5, 4, 3...
+   y seguir solo.
+
+3. SI LA IMAGEN SALE TUMBADA O DEL REVES
+   Las primeras lineas (las del firmware) pueden salir tumbadas: eso
+   no se puede cambiar. Lo que cuenta es Hispa-DOS:
+   - Con Hispa-DOS en C:\>, pulse Ctrl+Alt+G: la imagen da un cuarto
+     de vuelta. Repita hasta que se vea derecha (cuatro posiciones).
+   - Si Ctrl+Alt+G no hace nada: reinicie y, en cuanto salga
+     "HispaBIOS", vaya pulsando la tecla G. Cada arranque asi da un
+     cuarto de vuelta mas.
+   El giro queda guardado en la memoria USB (archivo HBGIRO.CFG): los
+   arranques siguientes ya salen bien. Diga cuantas veces ha hecho
+   falta y si fue con Ctrl+Alt+G o con G.
+
+4. En C:\> escriba, y cuente lo que ve:
+       DIR C:\HISPADOS      (unas 75 lineas: seguidas, en 1 o 2 s,
+                             o a tirones?)
+       DIR D:               (ve el disco de dentro? Puede decir que no
+                             es valida si la eMMC solo tiene Windows o
+                             Android: no pasa nada, dira el registro)
+       PRUEBAHB             (guarda el registro, arranca Hispa Ventanas
+                             y lo guarda otra vez al salir)
+   En Hispa Ventanas: si sale, si esta derecha y centrada, la
+   velocidad, y si va el panel tactil de la base o la pantalla tactil
+   (lo normal es que todavia no: con UEFI no hay raton). Para salir sin
+   raton: F10, flechas hasta Archivo > Salir, Intro. Si no hay manera,
+   Ctrl+Alt+Supr reinicia (y despues escriba solo HBLOG).
+       EQUIPO               (debe decir el procesador, ACPI y SMBIOS)
+
+5. Suba al FTP, a informes (carpeta nueva "Acer One 10") estos
+   archivos de la raiz de la memoria USB:
+       HISPABIOS.LOG   (DOS lo ensena como HISPAB~1.LOG)
+       HBLOG.TXT
+       HBGIRO.CFG      (si existe)
+   y, si puede, una foto de la pantalla en C:\>. Con eso se ve todo:
+   el modelo, el firmware, la memoria, la pantalla y su velocidad, el
+   giro, los discos y el reloj.
+
+SI NO ARRANCA, SE QUEDA PARADO O VA PEOR
+----------------------------------------
+- Reinicie y, en cuanto salga "HispaBIOS 0.4", vaya pulsando la tecla S
+  (MODO SEGURO): deja de hacer lo que depende del equipo (escritura
+  combinada, prestar memoria, poner en marcha las controladoras de
+  disco, tocar el HPET). Diga si asi arranca.
+- En cualquier caso, lleve la memoria a otro ordenador y suba
+  HISPABIOS.LOG: esta imagen lo guarda en cada paso y dice hasta donde
+  llego.
+- Si no sale ni "HispaBIOS": el equipo no ha arrancado de la memoria
+  (Secure Boot, o el orden de arranque). Diga que mensaje da.
+- Si sale un aviso en mayusculas (ESTE EQUIPO NO DEJA LIBRE..., NO SE
+  ENCUENTRA EL DISCO...), haga una foto.
+
+Notas
+-----
+- No se escribe nada en el disco de dentro del Acer: HispaBIOS solo
+  escribe HISPABIOS.LOG y HBGIRO.CFG en la memoria USB. Hispa-DOS no
+  toca D: si no se le manda (no use INSTALL ni PARTIR en esta prueba).
+- Los archivos son texto y no llevan nada personal.

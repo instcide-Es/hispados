@@ -864,7 +864,8 @@ HBBIOS64 = $(B)/BIOS64.BIN $(B)/BIOS64_7.BIN $(B)/BIOS64_6.BIN
 HBBIOS32 = $(B)/BIOS32.BIN $(B)/BIOS32_7.BIN $(B)/BIOS32_6.BIN
 $(B)/BOOTX64.EFI: hispabios/efi64.asm hispabios/pe.inc $(HBBIOS64) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi64.asm
-$(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
+HBEFI32 = hispabios/efi32.asm hispabios/efi32_reloj.inc hispabios/efi32_pant.inc hispabios/efi32_datos.inc
+$(B)/BOOTIA32.EFI: $(HBEFI32) hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
