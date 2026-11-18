@@ -12,13 +12,23 @@
 #     delante, otro la minimiza (va a su botón, no a un icono del escritorio)
 #     y otro la recupera; maximizar no tapa la barra; el botón derecho en la
 #     barra (cascada) y en un botón (el menú de la ventana); «Centro de
-#     programas» desde Inicio, y cerrarlo lo esconde; «Salir» desde Inicio.
+#     programas» desde Inicio, y cerrarlo lo esconde; «Salir» desde Inicio:
+#     el cuadro de Hispa-486, con «Apagar el equipo» arriba y con el foco
+#     (dos flechas abajo, «Volver a Hispa-DOS»).
 #  2.ª sesión, 640x480 en VGA de 16 colores, sin /486: el ajuste es la clave
 #     «Escritorio=486» de VENTANAS.INI. El menú cabe; un programa de Windows
 #     (WINCALC.EXE, si hay gcc de 32 bits) sale en la barra como los demás;
 #     Configuración guarda VENTANAS.INI y conserva la clave.
 #  3.ª sesión, sin el ajuste: el escritorio de Hispa-386 es el de siempre (la
 #     barra arriba, el Centro abierto, nada abajo) y Ctrl+Esc no hace nada.
+#  4.ª sesión, VENTANAS /486 con un CENTRO.INI con un grupo «Escritorio=1»
+#     («Biblioteca», que abre la Calculadora, y «Bloc de notas»): sus accesos
+#     son iconos grandes en el escritorio (el dibujo y el nombre a doble
+#     tamaño; el largo, en negrita normal), el primero marcado; el grupo no
+#     sale en el menú Inicio. Intro (sin ninguna ventana) abre el marcado; un
+#     clic, el suyo; las flechas cambian el marcado. «Salir de Hispa
+#     Ventanas...»: «Apagar el equipo» arriba, con el foco, e Intro apaga
+#     (QEMU termina: APAGAR.COM) tras guardar CENTRO.INI con «Escritorio=1».
 #  (GUARDAR=carpeta deja las capturas.)
 # Hispa-486 desktop test: bottom taskbar and Start menu.
 set -u
@@ -90,7 +100,7 @@ BY=588
   tecla ctrl-esc; sleep 0.8; tecla c c; sleep 0.4; tecla ret; sleep 2; ir 300 500; shot c1   # «Centro de programas»
   tecla alt-f4; sleep 1.5; shot c2                  # cerrarlo: se esconde (no se sale)
   tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; shot c3   # «Salir de Hispa Ventanas...»
-  tecla ret; sleep 4
+  tecla down down; sleep 0.4; tecla ret; sleep 4     # (en Hispa-486, «Volver» es el tercero)
   send 'ECHO TRAS-SALIR' 2
   mon quit; } | TMAX=200 run
 echo "-- el escritorio de Hispa-486: despejado, con la barra de tareas abajo --"
@@ -135,7 +145,11 @@ chk $T/c1.ppm titulo 36 52 activa "Centro de programas" busca 420 574 450 582 0 
 chk $T/c2.ppm nobusca 0 40 200 70 8 4 "Centro de programas" nobusca 420 574 450 582 0 8 "Centro de progra" \
   px 84 590 1 "la barra de tareas sigue (no se ha salido)"
 echo "-- «Salir», desde Inicio --"
-chk $T/c3.ppm titulo 212 157 activa "Salir de Hispa Ventanas"
+chk $T/c3.ppm titulo 212 157 activa "Salir de Hispa Ventanas" \
+  texto 358 235 0 6 fina "Apagar el equipo" texto 346 279 0 6 fina "Reiniciar el equipo" \
+  texto 350 323 0 6 fina "Volver a Hispa-DOS" px 285 232 4 "el foco en «Apagar el equipo» (marco terracota)" \
+  nopx 285 320 4 "«Volver» sin el foco" px 253 230 13 "arriba, el dibujo de apagar (granate)" \
+  px 243 339 0 "abajo, el de Hispa-DOS (pantalla negra)"
 check "Hispa Ventanas ha terminado."
 if sed -n '/Hispa Ventanas ha terminado/,$p' $T/log.txt | grep -qF 'TRAS-SALIR'; then ok "después, el intérprete de órdenes sigue"; else ko "sin el intérprete tras salir"; fi
 [ -n "${GUARDAR:-}" ] && for f in $T/[abc][0-9].ppm; do cp $f "$GUARDAR"/barra_$(basename $f); done 2>/dev/null
@@ -175,7 +189,7 @@ RX=320; RY=240; BY=468
   fi
   tecla ctrl-esc; sleep 0.8; tecla c; sleep 0.4; tecla ret; sleep 4; ir 300 20; shot v6   # Configuración
   clic 416 155; sleep 1; clic 446 430; sleep 2.5; ir 300 20; shot v7    # otro dibujo, y «Guardar»
-  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 4
+  tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla down down; sleep 0.4; tecla ret; sleep 4
   send 'ECHO TRAS-SALIR' 2
   mon quit; } | TMAX=200 run
 echo "-- 640x480 en VGA de 16 colores, con «Escritorio=486» en VENTANAS.INI --"
@@ -223,6 +237,51 @@ check "Hispa Ventanas ha terminado."
 ini
 if [ -s $T/ven.txt ] && grep -q 'Escritorio' $T/ven.txt; then ko "VENTANAS.INI de Hispa-386 con la clave Escritorio"; else ok "VENTANAS.INI de Hispa-386, sin la clave Escritorio"; fi
 [ -n "${GUARDAR:-}" ] && for f in $T/h[0-9].ppm; do cp $f "$GUARDAR"/barra_$(basename $f); done 2>/dev/null
+
+# ---- 4.ª: los iconos del escritorio de Hispa-486 y apagar con Intro ----
+cp $T/base.img $T/f.img
+printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=-1' 'SinRepetidos=1' 'TareasPrincipal=1' \
+  '[Grupo]' 'Nombre=Principal' 'Ventana=200,140,452,260' 'Estado=0' \
+  '[Acceso]' 'Nombre=Configuración' 'Icono=herramienta' 'Programa=A:\HISPADOS\CONFIG.HVP' \
+  '[Grupo]' 'Nombre=Escritorio' 'Escritorio=1' 'Ventana=60,120,452,190' 'Estado=0' \
+  '[Acceso]' 'Nombre=Biblioteca' 'Icono=documento' 'Programa=:CALC' \
+  '[Acceso]' 'Nombre=Bloc de notas' 'Icono=bloc' 'Programa=:BLOC' \
+  | iconv -f UTF-8 -t CP437 > $T/CENTRO.INI
+MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
+# Las casillas de los iconos: desde 24,24, de 176x128, en columnas de 4 (hasta
+# la barra, en y = 572). El dibujo (64x64), en x + 56, y + 4; la etiqueta, en
+# y + 74, centrada: «Biblioteca» (10 letras a doble tamaño, 160x32) en 24,98
+# (176x40, el texto en 32,102); «Bloc de notas» (13: en negrita normal) en
+# 52,226 (120x24, el texto en 60,230).
+RX=400; RY=300; BY=588
+{ sleep 6; send 'VENTANAS /486' 10
+  ir 600 400; shot d1                               # los iconos
+  tecla ret; sleep 2; ir 600 400; shot d2           # Intro: el marcado («Biblioteca»: la Calculadora)
+  tecla alt-f4; sleep 1.5
+  clic 112 188; sleep 2; ir 600 400; shot d3        # un clic en «Bloc de notas»
+  tecla alt-f4; sleep 1.5; ir 600 400; shot d4      # cerrado: el escritorio, con «Bloc de notas» marcado
+  tecla up; sleep 0.8; shot d5                      # flecha arriba: «Biblioteca»
+  tecla ctrl-esc; sleep 1; shot d6                  # el menú Inicio, sin el grupo «Escritorio»
+  tecla up; sleep 0.4; tecla ret; sleep 2; shot d7  # «Salir de Hispa Ventanas...»
+  tecla ret; sleep 6                                # Intro: apagar
+  mon quit; } | TMAX=120 run
+echo "-- los iconos del escritorio de Hispa-486 (el grupo con «Escritorio=1») --"
+chk $T/d1.ppm px 24 98 1 "el marco de la etiqueta de «Biblioteca»" \
+  texto 32 102 9 12 doble "Biblioteca" texto 60 230 0 8 negrita "Bloc de notas" \
+  nopx 100 40 2 "el dibujo de «Biblioteca» (64x64, en 80,28)" nopx 100 180 2 "el de «Bloc de notas» (en 80,156)" \
+  px 40 300 2 "debajo, el fondo" px 84 590 1 "la barra de tareas"
+chk $T/d2.ppm titulo 500 60 activa "Calculadora" busca 100 574 130 582 0 8 "Calculadora"
+chk $T/d3.ppm titulo 150 90 activa "Bloc de notas - (sin nombre)" nobusca 100 574 130 582 0 8 "Calculadora"
+chk $T/d4.ppm texto 32 102 0 8 doble "Biblioteca" texto 60 230 9 12 negrita "Bloc de notas"
+chk $T/d5.ppm texto 32 102 9 12 doble "Biblioteca" texto 60 230 0 8 negrita "Bloc de notas"
+chk $T/d6.ppm busca 20 300 60 572 9 12 "Principal" nobusca 0 300 260 572 0 8 "Escritorio" \
+  nobusca 0 300 260 572 0 8 "Biblioteca" busca 20 300 60 572 0 8 "Salir de Hispa Ventanas..."
+chk $T/d7.ppm titulo 212 157 activa "Salir de Hispa Ventanas" texto 358 235 0 6 fina "Apagar el equipo" \
+  px 285 232 4 "el foco en «Apagar el equipo»"
+check "Apagando el equipo..."
+MTOOLS_SKIP_CHECK=1 mtype -i $T/f.img ::HISPADOS/CENTRO.INI 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 > $T/cen.txt
+if grep -qx 'Escritorio=1' $T/cen.txt; then ok "CENTRO.INI guardado al apagar, con «Escritorio=1»"; else ko "CENTRO.INI sin «Escritorio=1»"; fi
+[ -n "${GUARDAR:-}" ] && for f in $T/d[0-9].ppm; do cp $f "$GUARDAR"/barra_$(basename $f); done 2>/dev/null
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/VENTANAS/,$p' $T/log.txt | tail -20; fi
 rm -rf $T

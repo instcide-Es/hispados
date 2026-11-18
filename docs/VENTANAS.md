@@ -202,7 +202,11 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   «Archivo > Salir a Hispa-DOS». Todos abren el mismo cuadro, «¿Qué quiere
   hacer?», con tres botones grandes con su dibujo: **Volver a Hispa-DOS**
   (Intro), **Reiniciar el equipo** y **Apagar el equipo**, y Cancelar (Esc);
-  las flechas pasan de uno a otro (`ventanas/apagado.inc`). Los grupos
+  las flechas pasan de uno a otro (`ventanas/apagado.inc`). En el
+  escritorio de Hispa-486 el cuadro va al revés: **Apagar el equipo**
+  arriba, con el foco y de Intro (en el equipo de una biblioteca, lo que se
+  quiere al acabar es apagar), Reiniciar en medio y **Volver a Hispa-DOS**
+  abajo. Los grupos
   abiertos y el sitio de cada ventana se guardan en CENTRO.INI y la próxima
   vez salen igual; VENTANAS.INI ya lo escribe Configuración cuando cambia.
   Reiniciar y apagar van como un juego (ver «Programas de Hispa-DOS desde
@@ -273,9 +277,12 @@ probándolo en un ThinkPad con touchpad.
   los pasos en BH; [RUEDA] siempre, porque de un ratón USB solo se sabe que
   tiene rueda cuando se mueve: a un driver sin rueda ese bit no le dice
   nada). La da HSPRATON (ver su cabecera) con un ratón IntelliMouse (PS/2
-  con rueda, por la vía directa), con un ratón USB con rueda (por HSPUSB:
+  con rueda, por la vía directa: **sin opciones**, como lo cargan los
+  AUTOEXEC.BAT de las imágenes, pregunta por la BIOS si el ratón es un
+  IntelliMouse y, si lo es, pasa solo a la vía directa; `/BIOS` lo deja sin
+  rueda), con un ratón USB con rueda (por HSPUSB:
   [USB.md](USB.md)) y con el borde derecho de un touchpad Synaptics (los
-  netbooks: modo absoluto; `/SINBORDE` lo quita); la dan también otros
+  netbooks: modo absoluto; solo con `/BORDE`, en pruebas); la dan también otros
   drivers como CuteMouse. Un touchpad sin nada de esto se desplaza con la
   barra o el teclado.
 - [RUEDA] A los **programas de Windows** (Hispa-486) les llega como el
@@ -486,6 +493,30 @@ Pausa=0
 `Medida=1` ([TAMAÑO]) solo se escribe si el usuario ha cambiado el tamaño
 del grupo con el ratón: entonces no se alarga solo al abrirse aunque no
 quepan sus iconos.
+
+`Escritorio=1` ([BARRA]) en un `[Grupo]`: sus accesos son **los iconos del
+escritorio de Hispa-486** (ver «El escritorio de Hispa-486»), y el grupo no
+sale en el menú Inicio. Solo se escribe en los grupos que la tienen; en
+Hispa-386 el grupo es uno más del Centro. Es lo que trae la imagen de
+Hispa-486 (`sistema/486/CENTRO.INI`) para el icono «Biblioteca»:
+
+```
+[Grupo]
+Nombre=Escritorio
+Escritorio=1
+Ventana=60,120,452,190
+Estado=0
+Marcado=0
+
+[Acceso]
+Nombre=Biblioteca
+Icono=documento
+Programa=C:\HISPADOS\INTERNET\NAVEGA.EXE
+Carpeta=C:\
+Parametros=
+Volver=1
+Pausa=0
+```
 
 Un grupo ligado a una carpeta de juegos y un acceso con opciones de juego
 llevan además estas claves (**solo se escriben cuando hacen falta**: un
@@ -810,6 +841,27 @@ No se cambia en marcha: vale para toda la sesión.
 - Las ventanas minimizadas **no van como icono al escritorio**: se quedan en
   su botón.
 
+**Los iconos del escritorio** (`be_*`): los accesos de los grupos con
+`Escritorio=1` en CENTRO.INI (ver «CENTRO.INI»; hasta 8) salen en el fondo,
+en columnas desde arriba a la izquierda, **grandes**: el dibujo a doble
+tamaño (64×64) y el nombre debajo en una etiqueta crema con filete marrón, a
+doble tamaño (16×32 por letra) si tiene hasta 10 letras y, si no, en negrita
+normal (hasta 20). Lo pide la prueba de uso con la biblioteca
+(docs/486/USABILIDAD-NAVEGADOR.md, M11): el icono **«Biblioteca»** abre el
+Navegador en su página de inicio (`Inicio=` de NAVEGA.INI).
+
+- **Un clic** abre el acceso (no hace falta doble clic: a la gente mayor le
+  cuesta; el segundo clic de un doble clic, en el segundo siguiente, no abre
+  otro). Si es un programa de Windows que ya está en marcha, no abre otro:
+  trae su ventana delante (en el equipo de la biblioteca, un solo
+  Navegador).
+- Uno está siempre **marcado** (en añil, letras blancas; al entrar, el
+  primero): sin ninguna ventana activa, **Intro** lo abre y las **flechas**
+  cambian de icono (izquierda y derecha, de columna).
+- El grupo no sale en el menú Inicio (sus accesos ya están a la vista); se
+  cambia desde el Centro de programas, como los demás, y el escritorio se
+  repinta solo.
+
 **La barra de arriba no está** en este escritorio (es lo más limpio: dos
 barras para lo mismo estorban, y en 640×480 se comerían 56 puntos). Lo que
 tenía se reparte: el nombre «Hispa Ventanas», en la cabecera del menú
@@ -857,13 +909,14 @@ opción `/486` y su línea de ayuda; `barra.inc` ocupa unos 6 KB de la alta):
 
 | Gancho | Dónde | Qué hace |
 |---|---|---|
-| `bt_iniciar` | `principal` | pone el área de trabajo; lee `Escritorio=486`; en Hispa-486 crea la barra y le cambia el procedimiento al escritorio (`bt_esc_proc`: el fondo entero, sin barra arriba ni iconos) |
+| `bt_iniciar` | `principal` | pone el área de trabajo; lee `Escritorio=486`; en Hispa-486 crea la barra y le cambia el procedimiento al escritorio (`bt_esc_proc`: el fondo entero, sin barra arriba, y los iconos de los grupos con `Escritorio=1`) |
 | `bt_vigilar` | bucle del sistema, una vez por vuelta | la lista de ventanas con botón y la «firma» de lo que enseña cada una (estado, si está delante, título, icono) y de la bandeja: si algo cambia, repinta la barra. También hace lo que se ha elegido en el menú y mira la tecla de Windows |
 | `bt_orden` | `orden_poner` | la ventana con título que pasa delante se queda justo debajo de la barra (la barra está siempre encima de las ventanas; los menús y lo emergente, encima de ella) |
 | `bt_area` | `ven_mostrar` (maximizar) | el área de trabajo |
 | `bt_colocar` | `ven_crear` | que una ventana no nazca detrás de la barra |
 | `bt_centro_ini`, `bt_centro_cerrar` | `centro_tarea`, `vista_proc` | el Centro, oculto al entrar y al cerrarlo |
-| `bt_tecla` | `ctx_tecla` (de `ges_tecla`) | Ctrl+Esc y, con el menú abierto, todas las teclas |
+| `bt_tecla` | `ctx_tecla` (de `ges_tecla`) | Ctrl+Esc y, con el menú abierto, todas las teclas; sin ventana activa, Intro y las flechas de los iconos del escritorio (`be_tecla`) |
+| `bt_esc_inv` | `vistas_repintar` | los iconos del escritorio, a repintar (han cambiado los accesos) |
 | `bt_clic_fuera` | `ctx_ctrl_clic` (de `eventos`) | un clic fuera del menú lo cierra |
 | `wf_vigilar` | `bt_vigilar` | [WIFI] mira la red cada segundo (cada 3 tics con la ventanita abierta o algo en marcha) y lleva a trozos buscar, preparar la clave y conectar |
 | `wf_pintar_icono`, `wf_en_icono`, `wf_alternar` | `bt_pintar`, `bt_proc` | [WIFI] el icono de red y su ventanita |
@@ -880,9 +933,14 @@ vuelta siguiente (`ini_pendiente`); un programa se abre con `acc_lanzar`
 (`bt_lz_tarea`), porque lee del disco y puede sacar un aviso.
 
 Límites: 32 ventanas con botón (las de primer nivel que admite el gestor);
-el escritorio no se cambia sin reiniciar Hispa Ventanas; el escritorio de
-Hispa-486 todavía no tiene iconos propios ni «Mi PC» (lo siguiente de la
-fase 4).
+el escritorio no se cambia sin reiniciar Hispa Ventanas; 8 iconos en el
+escritorio, que no se arrastran (van en el orden de CENTRO.INI); todavía no
+hay «Mi PC» (lo siguiente de la fase 4).
+
+Prueba: `tests/run_barra_tests.sh` (4.ª sesión: los iconos, Intro, un clic,
+las flechas, el menú Inicio sin el grupo, y el cuadro de salir con «Apagar
+el equipo» arriba e Intro, que apaga); `tests/run_imagen486_tests.sh` (el
+icono «Biblioteca» de la imagen abre el Navegador).
 
 ### La imagen de fondo del escritorio
 

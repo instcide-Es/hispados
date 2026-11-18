@@ -11,6 +11,9 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
                                     con controles o maximizadas)
   titulo X Y activa|no TEXTO        el título de la ventana que está en X,Y
   texto X Y COLOR FONDO fina|negrita TEXTO   texto dibujado con la fuente propia
+                                    (doble: a doble tamaño, cada punto 2x2, 16
+                                    puntos por letra: los iconos del escritorio
+                                    de Hispa-486)
   indice X Y COLOR TEXTO            el índice de una carta del Solitario (14x9
                                     puntos: las filas 3 a 11 de la fuente, en
                                     negrita; dos cifras, juntas) sobre blanco
@@ -170,6 +173,21 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto, paso=8):
     return mal
 
 
+def texto2_ok(cap, x, y, fg, bg, texto):
+    """Como texto_ok, fino y a doble tamaño (be_texto2 de ventanas/barra.inc)."""
+    F = fuente()
+    mal = 0
+    for i, ch in enumerate(a437(texto)):
+        for fila in range(16):
+            for col in range(8):
+                enc = F[ch][fila] & (0x80 >> col)
+                for d in range(4):
+                    c = cap.px(x + i * 16 + 2 * col + d % 2, y + 2 * fila + d // 2)
+                    if not es(c, fg if enc else bg):
+                        mal += 1
+    return mal
+
+
 def texto_en(cap, x, y, fg, bg, cod):
     """Como texto_ok, fino, parando en el primer punto distinto."""
     F = fuente()
@@ -293,7 +311,10 @@ def main():
         elif op == 'texto':
             x, y, fg, bg = (int(v) for v in a[i + 1:i + 5])
             t = a[i + 6]
-            mal = texto_ok(cap, x, y, fg, bg, a[i + 5] == 'negrita', t, 7 if a[i + 5] == 'apretada' else 8)
+            if a[i + 5] == 'doble':
+                mal = texto2_ok(cap, x, y, fg, bg, t)
+            else:
+                mal = texto_ok(cap, x, y, fg, bg, a[i + 5] == 'negrita', t, 7 if a[i + 5] == 'apretada' else 8)
             res(mal == 0, '%s: texto «%s»%s' % (nombre, t, '' if mal == 0 else ' (%d puntos distintos)' % mal))
             i += 7
         elif op in ('busca', 'nobusca'):

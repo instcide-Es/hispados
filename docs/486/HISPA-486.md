@@ -45,7 +45,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado. **3d hecha (18/11/2026)**: GDI completo (figuras, letras de cualquier tamaño, mapas de bits y DIB, regiones, ROP, paletas), barras de desplazamiento, caret, aceleradores, iconos y cursores, portapapeles, diálogos comunes y COMCTL32.DLL: **FASMW 1.73, el flat assembler de Windows, abre, edita y ensambla dentro de Hispa Ventanas** |
-| 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. Falta: los iconos del escritorio y «Mi PC» |
+| 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. **4b (18/11/2026)**: iconos grandes en el escritorio (los grupos con `Escritorio=1`; el de la imagen, «Biblioteca»), con un clic. Falta: «Mi PC» |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Después, ClicGest entero: imágenes, subir y bajar archivos, galletas guardadas. Falta: hojas de estilo de fuera |
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
@@ -204,6 +204,16 @@ inicio, porque así respeta la estética de Win 3.11».
   escritorio arranca despejado: el Centro no se abre (se abre desde Inicio,
   para crear grupos y accesos) y no hay barra arriba. Los programas de
   Windows (fase 3) salen en la barra como cualquier ventana.
+- **Iconos en el escritorio (18/11/2026):** los accesos de los grupos con
+  `Escritorio=1` en CENTRO.INI salen en el fondo, grandes (dibujo de 64×64 y
+  el nombre a doble tamaño) y se abren con **un clic** (o con Intro, el
+  marcado). La imagen trae el icono **«Biblioteca»**, que abre el Navegador
+  en la biblioteca de ClicGest (`Inicio=https://clicgest.es/biblioteca` en
+  NAVEGA.INI): es lo que pide la prueba de uso del equipo de la biblioteca
+  (docs/486/USABILIDAD-NAVEGADOR.md, tarea 1 y M11). Si el Navegador ya está
+  abierto, el icono lo trae delante en vez de abrir otro. Y en «Salir de
+  Hispa Ventanas», en Hispa-486, **«Apagar el equipo» va arriba y es la
+  elegida** (el foco e Intro); en Hispa-386, como siempre.
 - **Cómo se pone:** es un ajuste de la instalación de Hispa-486, no un botón
   de Configuración: la opción `VENTANAS /486` o la clave `Escritorio=486` en
   `\HISPADOS\VENTANAS.INI` (sección `[Escritorio]`). **La imagen y la
@@ -222,9 +232,11 @@ inicio, porque así respeta la estética de Win 3.11».
   Inicio».
 - **Prueba:** `tests/run_barra_tests.sh` (en `make test`): 800×600 con
   `/486`, VGA de 640×480 y 16 colores con la clave de VENTANAS.INI y un
-  programa de Windows, y el escritorio de Hispa-386 sin el ajuste.
-- **Lo que sigue de la fase 4:** iconos en el escritorio (accesos directos y
-  «Mi PC» con las unidades) y «Ejecutar...» y «Documentos» en el menú. La
+  programa de Windows, el escritorio de Hispa-386 sin el ajuste, y los
+  iconos del escritorio con el cuadro de salir (Intro apaga).
+- **Lo que sigue de la fase 4:** «Mi PC» con las unidades en el escritorio,
+  arrastrar los iconos y crearlos desde el escritorio, y «Ejecutar...» y
+  «Documentos» en el menú. La
   clave la ponen ya la imagen y el instalador de Hispa-486 (ver «La imagen,
   la instalación y las actualizaciones»).
 
@@ -241,7 +253,7 @@ pocos archivos; los programas y el núcleo son los mismos.
 | `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, en vez de las líneas de la red con `REM`: `HSPRED /AUTO`, `HSPWIFI /AUTO` y `WIFI /AUTO` (la red puesta sola: ver «La red al arrancar»), `IF EXIST C:\HISPADOS\HSPACPI.COM C:\HISPADOS\HSPACPI /AUTO` (la batería por ACPI: docs/ACPI.md) y `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `autoexec486()` de `tools/mkusb.py` |
 | `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio; `Fondo=FONDO.BMP` y `Ajuste=ajustada`: la imagen de fondo | `sistema/486/VENTANAS.INI` |
 | `\HISPADOS\FONDO.BMP` | **la imagen de fondo del escritorio** (ver «La imagen de fondo»): 800×600, 8 bits, 481.078 octetos (470 KB) | `sistema/486/FONDO.BMP`, que `tools/mkfondo.py` saca de `sistema/486/HISPADOS.JPG` (`make fondo486`) |
-| `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) e **«Internet»** (Navegador), con `Internet=1` | `sistema/486/CENTRO.INI` |
+| `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje), **«Internet»** (Navegador), con `Internet=1`, y **«Escritorio»** (`Escritorio=1`: el icono **«Biblioteca»** del escritorio, que abre el Navegador) | `sistema/486/CENTRO.INI` |
 | `\HISPADOS\INTERNET\` | **el Navegador** (docs/486/NAVEGADOR.md): `NAVEGA.EXE`, `HTTPS.EXE`, `HSPTLS.DLL`, `WSOCK32.DLL`, `MSVCRT.DLL`, `NAVEGA.INI` y `LEEME.TXT` (lo del disquete «Internet» menos `HW32.COM`, que ya está en `\HISPADOS`) | `build/` y `w32/navega/` (la tabla `INTERNET` de `tools/mkusb.py`) |
 | `\HISPADOS\COMCTL32.DLL`, `UCRT.DLL` | las DLL de la fase 3d, al lado de `HW32.COM` y `MSVCRT.DLL`: los controles comunes y el CRT de Visual C++ 2015 | `build/` (la tabla `DLL486` de `tools/mkusb.py`; también en el disquete «Hispa-486») |
 | `\HISPADOS\EDICION.INI` | `[Edicion]` `Gama=486` `Nombre=Hispa-486`: la **edición** instalada | `sistema/486/EDICION.INI` |
@@ -843,7 +855,10 @@ y en `win32.inc` la llamada de vuelta. Prueba:
   una ventana de Windows por dentro (un cuadro que reparte, lo diferido) pasa
   por `w32_ven_proc`, que traduce igual y llama al `WndProc` (una tecla: los
   tres mensajes seguidos).
-- **[RUEDA] La rueda del ratón.** El `WM_MOUSEWHEEL` de Hispa Ventanas
+- **[RUEDA] La rueda del ratón.** (HSPRATON la da con el ratón PS/2 con
+  rueda también cargado sin opciones, como en el AUTOEXEC.BAT de la imagen:
+  la pregunta por la BIOS y pasa a la vía directa; con el ratón USB, por
+  HSPUSB.) El `WM_MOUSEWHEEL` de Hispa Ventanas
   (pasos, positivo hacia abajo; el punto en la zona) pasa a ser el de
   Windows (0x020A): wParam alto = el delta, 120 por paso y positivo hacia
   arriba (el signo cambia), wParam bajo = `MK_*` (los botones apretados);

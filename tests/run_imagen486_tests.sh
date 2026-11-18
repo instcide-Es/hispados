@@ -4,7 +4,8 @@
 # actualizarla.
 #  1) Arrancar la memoria USB de Hispa-486: el AUTOEXEC.BAT abre el escritorio
 #     de Hispa-486 (la barra de tareas abajo con «Inicio», sin el Centro de
-#     programas ni la barra de arriba; [FONDO] con su imagen de fondo,
+#     programas ni la barra de arriba) y con el icono «Biblioteca» (el
+#     grupo «Escritorio» de CENTRO.INI); [FONDO] con su imagen de fondo,
 #     sistema/486/FONDO.BMP, que también queda en el disco duro en la 2.ª, se
 #     ve en la 3.ª y llega con el disquete «Hispa-486» en la 8.ª); el menú Inicio lleva el grupo
 #     «Hispa32» con sus programas; desde él se abre la calculadora de 32 bits
@@ -30,7 +31,8 @@
 #  9) La red al arrancar (QEMU con una e1000): HSPRED /AUTO se queda,
 #     HSPWIFI /AUTO no (no hay tarjeta Wi-Fi ni red guardada) y no dice nada;
 #     Inicio › Internet › Navegador abre una página del servidor de pruebas
-#     (tests/tools/nav_servidor.py, por HTTP: sin Internet) y después CONFRED
+#     (tests/tools/nav_servidor.py, por HTTP: sin Internet), y otra vez con
+#     Intro en el escritorio (el icono «Biblioteca», marcado) y después CONFRED
 #     dice la dirección que dio el DHCP. La 3.ª arranca sin tarjeta de red:
 #     sin errores. La 1.ª y la 2.ª miran también la red y \HISPADOS\INTERNET.
 #  (GUARDAR=carpeta deja las capturas.)
@@ -86,7 +88,7 @@ USBD="-drive file=$T/usb.img,format=raw,if=ide,index=0"
 HDD="-drive file=$T/hdd.img,format=raw,if=ide,index=1"
 # salir de Hispa Ventanas por el menú Inicio («Salir de Hispa Ventanas...», el
 # último) y aceptar
-salir() { tecla ctrl-esc; sleep 1; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 5; }
+salir() { tecla ctrl-esc; sleep 1; tecla up; sleep 0.4; tecla ret; sleep 2; tecla down down; sleep 0.4; tecla ret; sleep 5; }   # «Volver a Hispa-DOS»: el 3.º en Hispa-486
 
 cp "$USB" $T/usb.img
 tests/tools/sinmenu.sh $T/usb.img || exit 1
@@ -113,9 +115,11 @@ echo "== Hispa-486: la imagen USB, instalarla y actualizarla =="
 echo "-- 1) la memoria de Hispa-486 arranca a su escritorio --"
 chk $T/a1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" px 84 590 1 "la barra de tareas" \
   texto 26 578 8 4 negrita "Inicio" nopx 400 10 1 "sin barra arriba" \
-  nobusca 0 0 500 300 1 6 "Centro de programas"
+  nobusca 0 0 500 300 1 6 "Centro de programas" \
+  texto 32 102 9 12 doble "Biblioteca" nopx 100 40 2 "el dibujo del icono «Biblioteca»"
 # [FONDO] la imagen de fondo de la edición, tal cual (800x600), detrás de la barra
-chk $T/a1.ppm bmp sistema/486/FONDO.BMP 0 0 800 600 40 20 720 500 bmp sistema/486/FONDO.BMP 0 0 800 600 0 0 800 20
+# (a la derecha del icono «Biblioteca», que va encima)
+chk $T/a1.ppm bmp sistema/486/FONDO.BMP 0 0 800 600 160 20 600 500 bmp sistema/486/FONDO.BMP 0 0 800 600 0 0 800 20
 echo "-- el menú Inicio, con el grupo «Hispa32» --"
 chk $T/a2.ppm busca 0 0 260 572 9 12 "Principal" busca 0 0 260 572 0 8 "Accesorios" \
   busca 0 0 260 572 0 8 "Productividad" busca 0 0 260 572 0 8 "Hispa32" \
@@ -170,6 +174,10 @@ grep -qx 'Nombre=Hispa32' $T/cen.txt && ok "CENTRO.INI: el grupo «Hispa32»" ||
 grep -qx 'Programa=C:\\HISPA32\\CALC32.EXE' $T/cen.txt && ok "CENTRO.INI: la calculadora, en C:\\HISPA32" || ko "CENTRO.INI sin CALC32.EXE"
 grep -qx 'Nombre=Internet' $T/cen.txt && grep -qx 'Programa=C:\\HISPADOS\\INTERNET\\NAVEGA.EXE' $T/cen.txt \
   && ok "CENTRO.INI: el grupo «Internet» con el Navegador" || ko "CENTRO.INI sin el grupo Internet"
+grep -qx 'Escritorio=1' $T/cen.txt && grep -qx 'Nombre=Biblioteca' $T/cen.txt \
+  && ok "CENTRO.INI: el grupo del escritorio con «Biblioteca»" || ko "CENTRO.INI sin el icono «Biblioteca»"
+hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -qx 'Inicio=https://clicgest.es/biblioteca' \
+  && ok "NAVEGA.INI: empieza en la biblioteca de ClicGest" || ko "NAVEGA.INI sin Inicio=https://clicgest.es/biblioteca"
 hd ::AUTOEXEC.BAT > $T/aut.txt
 grep -qx 'C:\\HISPADOS\\VENTANAS' $T/aut.txt && ok "AUTOEXEC.BAT: arranca el escritorio" || ko "AUTOEXEC.BAT sin C:\\HISPADOS\\VENTANAS"
 red_auto() {   # red_auto archivo: las tres líneas de la red, en orden y antes del escritorio
@@ -376,6 +384,8 @@ mcopy -o -i $T/usb.img@@1048576 $T/NAVEGA.INI ::HISPADOS/INTERNET/NAVEGA.INI
   tecla ctrl-esc; sleep 1.2; tecla down down down down down down; sleep 0.4; tecla right; sleep 1.2; shot r2   # «Internet»
   tecla ret; sleep 15; shot r3                      # el Navegador, con la página
   tecla alt-f4; sleep 2
+  tecla ret; sleep 15; shot r4                      # Intro en el escritorio: «Biblioteca», el Navegador
+  tecla alt-f4; sleep 2
   salir
   send 'CONFRED' 4
   send 'ECHO =N9=' 2
@@ -388,6 +398,10 @@ chk $T/r2.ppm busca 250 0 600 572 9 12 "Navegador"
 chk $T/r3.ppm busca 0 30 800 80 0 9 "http://10.0.2.2:$P9/" busca 0 70 800 572 0 9 "Escriba su usuario y su clave."
 grep -q "^GET / " $T/srv/pedidos.log 2> /dev/null && ok "el servidor ha recibido la petición del Navegador" \
   || ko "el servidor no ha recibido nada"
+echo "-- 9) el icono «Biblioteca» (Intro en el escritorio) abre el Navegador en su página de inicio --"
+chk $T/r4.ppm busca 0 30 800 80 0 9 "http://10.0.2.2:$P9/" busca 0 70 800 572 0 9 "Escriba su usuario y su clave."
+[ "$(grep -c "^GET / " $T/srv/pedidos.log 2> /dev/null)" -ge 2 ] && ok "el servidor ha recibido la segunda petición" \
+  || ko "el icono no ha pedido la página"
 check $T/l9.txt "por DHCP"
 check $T/l9.txt "Dirección IP  . . . . : 10.0.2.15"
 [ -n "${GUARDAR:-}" ] && for f in $T/r[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null

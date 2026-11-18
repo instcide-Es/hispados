@@ -523,6 +523,7 @@ vista_en:
 ; (interna) todas las vistas, a repintar
 vistas_repintar:
         pushad
+        call bt_esc_inv             ; [BARRA] y los iconos del escritorio de Hispa-486
         mov edi, hvi_de             ; (y los iconos de los .HVP se leen otra vez)
         mov ecx, HVI_N
         xor eax, eax

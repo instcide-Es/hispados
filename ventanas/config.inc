@@ -27,6 +27,7 @@ GR_USO      equ 0
 GR_ESTADO   equ 1                   ; 0 cerrado, 1 abierto, 2 minimizado, 3 maximizado
 GR_BAND     equ 2                   ; [TAMAÑO] banderas del grupo:
 GRB_MEDIDA  equ 1                   ;   el usuario le ha dado el tamaño (no se alarga sola)
+GRB_ESCRITORIO equ 2                ;   [BARRA] sus accesos, iconos del escritorio de Hispa-486
 GR_NOMBRE   equ 4                   ; 27 letras
 GR_X        equ 32
 GR_Y        equ 36
@@ -131,6 +132,8 @@ cfg_claves:
         dd GR_SEL, k_marcado
         db 2, T_BIT, GRB_MEDIDA, 0  ; [TAMAÑO]
         dd GR_BAND, k_medida
+        db 2, T_BIT, GRB_ESCRITORIO, 0  ; [BARRA]
+        dd GR_BAND, k_escritorio
         db 3, T_CAD, 31, 0
         dd AC_NOMBRE, k_nombre
         db 3, T_ICONO, 0, 0
@@ -169,6 +172,7 @@ k_nombre    db "Nombre", 0
 k_estado    db "Estado", 0
 k_marcado   db "Marcado", 0
 k_medida    db "Medida", 0          ; [TAMAÑO]
+k_escritorio db "Escritorio", 0     ; [BARRA]
 k_icono     db "Icono", 0
 k_programa  db "Programa", 0
 k_carpeta   db "Carpeta", 0
@@ -1260,6 +1264,12 @@ cfg_guardar:
         mov eax, 1
         call pon_clave_num
 .sinmedida:
+        test byte [ebx+GR_BAND], GRB_ESCRITORIO ; [BARRA] solo si lo es
+        jz .sinesc
+        mov esi, k_escritorio
+        mov eax, 1
+        call pon_clave_num
+.sinesc:
         imul edx, ecx, JD_DIRTAM    ; su carpeta de juegos, si la tiene
         add edx, gr_dirs
         cmp byte [edx], 0

@@ -19,6 +19,11 @@
 ;      volumen, la red, la batería y la hora, a la derecha de la barra de
 ;      abajo. El Centro de programas no se abre al entrar (queda oculto: se
 ;      abre desde Inicio) y las ventanas minimizadas van a su botón.
+;      Los accesos de los grupos con «Escritorio=1» en CENTRO.INI salen como
+;      iconos grandes en el escritorio (no en el menú Inicio): un clic (o
+;      Intro, con el marcado) los abre. Lo pide la prueba de uso con la
+;      biblioteca (docs/486/USABILIDAD-NAVEGADOR.md, M11): un icono
+;      «Biblioteca» que abre el Navegador.
 ;  Es una función equivalente a la de otros sistemas de la época con el
 ;  aspecto de Hispa Ventanas (marrón, ocre, terracota y el rombo): no copia
 ;  el dibujo de ninguno.
@@ -40,6 +45,7 @@
 ;    bt_centro_cerrar (vista_proc) EBP=el Centro: se esconde -> CF=1
 ;    bt_tecla        (ctx_tecla) AX=tecla: Ctrl+Esc y las del menú -> CF=1
 ;    bt_clic_fuera   (ctx_ctrl_clic) BL, BH=botones: un clic fuera lo cierra
+;    bt_esc_inv      (vistas_repintar) los iconos del escritorio, a repintar
 ; =============================================================================
 
 BT_H        equ 28                  ; alto de la barra (como la de arriba)
@@ -63,6 +69,21 @@ MI_SEP      equ 8                   ; una raya
 INI_P_CERRAR equ 1                  ; lo pendiente: cerrar el menú,
 INI_P_ORDEN equ 2                   ;   una orden del menú,
 INI_P_PROG  equ 3                   ;   un programa del submenú
+; los iconos del escritorio de Hispa-486 (los accesos de los grupos con
+; «Escritorio=1»): en columnas desde arriba a la izquierda, cada uno en una
+; casilla de BE_AN x BE_AL, con el dibujo a doble tamaño (64x64) y el nombre
+; debajo, en una etiqueta crema: a doble tamaño si tiene hasta BE_GRANDE
+; letras y, si no, en negrita normal (hasta BE_LETRAS)
+BE_MAX      equ 8                   ; iconos, como mucho
+BE_X0       equ 24                  ; la primera casilla
+BE_Y0       equ 24
+BE_AN       equ 176
+BE_AL       equ 128
+BE_ICO      equ 64                  ; el dibujo
+BE_ETQ      equ 4 + BE_ICO + 6      ; donde empieza la etiqueta (desde la casilla)
+BE_GRANDE   equ 10
+BE_LETRAS   equ 20
+BE_ESPERA   equ 18                  ; tics (1 s) en los que otro clic no abre otra vez
 
 c_barra_t   dd bt_proc
             db SIN_FONDO, 0, 0, 0
@@ -359,15 +380,16 @@ bt_centro_abrir:
         ret
 
 ; =============================================================================
-;  El escritorio de Hispa-486: el fondo entero, sin barra arriba ni iconos
+;  El escritorio de Hispa-486: el fondo entero, sin barra arriba, y los
+;  iconos de los accesos de los grupos con «Escritorio=1»
 ; =============================================================================
 bt_esc_proc:
         cmp eax, WM_PAINT
         je .pintar
         cmp eax, WM_LBUTTONDOWN
-        je .nada
+        je .pulsa
         cmp eax, WM_LBUTTONDBLCLK
-        je .nada
+        je .pulsa
         cmp eax, WM_LBUTTONUP
         je .nada
         cmp eax, WM_CONTEXTMENU
@@ -380,6 +402,25 @@ bt_esc_proc:
 .nada:
         xor eax, eax
         ret
+.pulsa:
+        ; un clic (no hace falta el doble: la gente mayor se lía con él) en
+        ; un icono lo marca y lo abre; el segundo clic de un doble clic no
+        ; abre otro (be_lanzar)
+        call be_lista
+        movsx eax, dx
+        mov ebx, edx
+        sar ebx, 16
+        call be_en
+        test eax, eax
+        js .nada
+        mov ecx, eax
+        cmp ecx, [be_sel]
+        je .p1
+        mov [be_sel], ecx
+        call bt_esc_inv
+.p1:
+        call be_lanzar
+        jmp .nada
 .menu:
         cmp edx, -1
         jne .m1
@@ -399,8 +440,466 @@ bt_esc_proc:
         mov ecx, [vid_ancho]
         mov edx, [vid_alto]
         call fon_pintar             ; [FONDO] la imagen o el mosaico (fondo.inc)
+        call be_pintar              ; los iconos del escritorio, encima del fondo
         call dc_cerrar
         xor eax, eax
+        ret
+
+; (vistas_repintar: han cambiado los accesos) los iconos del escritorio de
+; Hispa-486, a repintar
+bt_esc_inv:
+        cmp dword [bt_ven], 0
+        je .r
+        push ebp
+        mov ebp, [escritorio]
+        test ebp, ebp
+        jz .x
+        call ven_invalidar
+.x:
+        pop ebp
+.r:
+        ret
+
+; (interna) los accesos que van en el escritorio -> be_acc, be_n
+be_lista:
+        pushad
+        xor edi, edi
+        mov ebx, [ac_tabla]
+        test ebx, ebx
+        jz .f
+        cmp dword [gr_tabla], 0
+        je .f
+        mov ecx, MAX_AC
+.a:
+        cmp byte [ebx+AC_USO], 0
+        je .s
+        test byte [ebx+AC_BAND2], AB2_OCULTO
+        jnz .s
+        movzx eax, byte [ebx+AC_GRUPO]
+        cmp eax, MAX_GR
+        jae .s
+        imul eax, GR_TAM
+        add eax, [gr_tabla]
+        cmp byte [eax+GR_USO], 0
+        je .s
+        test byte [eax+GR_BAND], GRB_ESCRITORIO
+        jz .s
+        mov [be_acc+edi*4], ebx
+        inc edi
+        cmp edi, BE_MAX
+        jae .f
+.s:
+        add ebx, AC_TAM
+        dec ecx
+        jnz .a
+.f:
+        mov [be_n], edi
+        popad
+        ret
+
+; (interna) -> EAX=casillas que caben de arriba abajo (1 como poco)
+be_filas:
+        push ecx
+        push edx
+        mov eax, [area_y1]
+        sub eax, BE_Y0
+        jns .a
+        xor eax, eax
+.a:
+        xor edx, edx
+        mov ecx, BE_AL
+        div ecx
+        test eax, eax
+        jnz .x
+        inc eax
+.x:
+        pop edx
+        pop ecx
+        ret
+
+; (interna) ECX=icono -> EAX=x EBX=y de su casilla
+be_pos:
+        push edx
+        call be_filas
+        mov ebx, eax
+        mov eax, ecx
+        xor edx, edx
+        div ebx                     ; EAX=columna EDX=fila
+        imul eax, BE_AN
+        add eax, BE_X0
+        imul edx, BE_AL
+        add edx, BE_Y0
+        mov ebx, edx
+        pop edx
+        ret
+
+; (interna) EAX=x EBX=y en el escritorio -> EAX=el icono que hay ahí (-1:
+; ninguno). Vale toda la casilla menos un margen (el dibujo y la etiqueta)
+be_en:
+        push ecx
+        push edx
+        push esi
+        push edi
+        mov esi, eax
+        mov edi, ebx
+        xor ecx, ecx
+.b:
+        cmp ecx, [be_n]
+        jae .no
+        call be_pos
+        mov edx, esi
+        sub edx, eax
+        sub edx, 8
+        js .s
+        cmp edx, BE_AN - 16
+        jae .s
+        mov edx, edi
+        sub edx, ebx
+        js .s
+        cmp edx, BE_AL - 8
+        jae .s
+        mov eax, ecx
+        jmp .x
+.s:
+        inc ecx
+        jmp .b
+.no:
+        mov eax, -1
+.x:
+        pop edi
+        pop esi
+        pop edx
+        pop ecx
+        ret
+
+; (interna) ECX=icono: abre su acceso (en una tarea, como el menú Inicio).
+; No lo abre otra vez si se acaba de abrir (el segundo clic de un doble
+; clic, BE_ESPERA) ni si es un programa de Windows que ya está en marcha: lo
+; trae delante (en el equipo de la biblioteca, un solo Navegador)
+be_lanzar:
+        pushad
+        cmp ecx, [be_n]
+        jae .x
+        call tics
+        mov edx, eax
+        sub eax, [be_tic]
+        cmp dword [be_tic], 0
+        je .t
+        cmp eax, BE_ESPERA
+        jb .x
+.t:
+        mov [be_tic], edx
+        mov ebx, [be_acc+ecx*4]
+        ; ¿un programa de Windows suyo ya en marcha?
+        mov edx, pe_tabla
+        mov ecx, PE_MAX
+.p:
+        cmp dword [edx+PE_USO], 1
+        jne .ps
+        lea esi, [edx+PE_RUTA]
+        lea edi, [ebx+AC_PROG]
+        call cad_igual_i
+        je .ya
+.ps:
+        add edx, PE_TAM
+        dec ecx
+        jnz .p
+        mov [bt_lz_acc], ebx
+        mov eax, bt_lz_tarea
+        call tar_crear
+.x:
+        popad
+        ret
+.ya:
+        ; su ventana (de primer nivel, con título y a la vista), delante; si
+        ; aún no tiene (se está cargando), nada
+        mov eax, [edx+PE_TAREA]
+        mov ebp, [ven_tabla]
+        mov ecx, MAX_VEN
+.v:
+        cmp dword [ebp+V_USO], 1
+        jne .vs
+        cmp [ebp+V_TAREA], eax
+        jne .vs
+        cmp dword [ebp+V_PADRE], 0
+        jne .vs
+        test dword [ebp+V_ESTILO], E_TITULO
+        jz .vs
+        test dword [ebp+V_ESTADO], S_VISIBLE
+        jz .vs
+        call bt_pulsar.trae0
+        jmp .x
+.vs:
+        add ebp, V_TAM
+        dec ecx
+        jnz .v
+        jmp .x
+
+; (interna, con el escritorio en un dc_pintar) los iconos
+be_pintar:
+        pushad
+        call be_lista
+        mov eax, [be_n]
+        test eax, eax
+        jz .x
+        cmp [be_sel], eax
+        jb .s0
+        dec eax
+        mov [be_sel], eax
+.s0:
+        xor edi, edi
+.i:
+        cmp edi, [be_n]
+        jae .x
+        mov ecx, edi
+        call be_pos
+        mov [be_sx], eax
+        mov [be_sy], ebx
+        ; el dibujo, a doble tamaño
+        mov ebx, [be_acc+edi*4]
+        movzx eax, byte [ebx+AC_ICONO]
+        cmp eax, ICO_N
+        jb .ia
+        xor eax, eax
+.ia:
+        mov esi, [ico_tabla+eax*8]
+        call hvp_icono              ; (un .HVP trae el suyo)
+        call be_ico64
+        mov eax, [be_sx]
+        add eax, (BE_AN - BE_ICO) / 2
+        mov ebx, [be_sy]
+        add ebx, 4
+        mov esi, bt_ico64
+        mov ecx, BE_ICO
+        mov edx, BE_ICO
+        call dc_copiar_clave
+        ; la etiqueta con el nombre: a doble tamaño o, si es largo, normal
+        mov ebx, [be_acc+edi*4]
+        lea esi, [ebx+AC_NOMBRE]
+        call cad_largo
+        mov ecx, eax
+        mov byte [be_dob], 1
+        mov eax, ecx
+        shl eax, 4
+        mov edx, 32
+        cmp ecx, BE_GRANDE
+        jbe .t1
+        mov byte [be_dob], 0
+        cmp ecx, BE_LETRAS
+        jbe .t0
+        mov ecx, BE_LETRAS
+.t0:
+        mov eax, ecx
+        shl eax, 3
+        mov edx, 16
+.t1:
+        mov [be_cnt], ecx
+        add eax, 16                 ; EAX, EDX = la etiqueta
+        add edx, 8
+        mov [be_w], eax
+        mov [be_h], edx
+        shr eax, 1
+        neg eax
+        add eax, [be_sx]
+        add eax, BE_AN / 2
+        mov ebx, [be_sy]
+        add ebx, BE_ETQ
+        mov ecx, [be_w]
+        mov edx, [be_h]
+        COLOR C_CREMA
+        cmp edi, [be_sel]
+        jne .c1
+        COLOR C_ANIL                ; el marcado (el de Intro)
+.c1:
+        call dc_rect
+        COLOR C_MARRON
+        call dc_marco
+        add eax, 8
+        add ebx, 4
+        mov ecx, [be_cnt]
+        COLOR C_TINTA
+        cmp edi, [be_sel]
+        jne .c2
+        COLOR C_BLANCO
+.c2:
+        cmp byte [be_dob], 0
+        je .n
+        call be_texto2
+        jmp .sig
+.n:
+        mov byte [gdi_negrita], 1
+        call dc_texto_n
+        mov byte [gdi_negrita], 0
+.sig:
+        inc edi
+        jmp .i
+.x:
+        popad
+        ret
+
+; (interna) ESI=icono de 32x32 (a 4 bits por punto, como los lee dc_icono)
+; -> bt_ico64: a 64x64, un punto por cada cuatro (el 3, transparente: CLAVE)
+be_ico64:
+        pushad
+        mov edi, bt_ico64
+        mov edx, 32
+.f:
+        mov ecx, 16
+.c:
+        lodsb
+        mov ah, al
+        and al, 0x0F
+        cmp al, 3
+        jne .c1
+        mov al, CLAVE
+.c1:
+        mov [edi], al
+        mov [edi+1], al
+        mov al, ah
+        shr al, 4
+        cmp al, 3
+        jne .c2
+        mov al, CLAVE
+.c2:
+        mov [edi+2], al
+        mov [edi+3], al
+        add edi, 4
+        dec ecx
+        jnz .c
+        push esi                    ; la fila, otra vez debajo
+        lea esi, [edi-BE_ICO]
+        mov ecx, BE_ICO / 4
+        rep movsd
+        pop esi
+        dec edx
+        jnz .f
+        popad
+        ret
+
+; (interna) ESI=texto ECX=letras EAX=x EBX=y: con la fuente de 8x16 a doble
+; tamaño (cada punto, 2x2; los tramos seguidos de una fila, de una vez), con
+; el color puesto
+be_texto2:
+        pushad
+        mov [be_ty], ebx
+.ch:
+        test ecx, ecx
+        jz .x
+        push ecx
+        push esi
+        movzx edi, byte [esi]
+        shl edi, 4
+        add edi, fuente8x16
+        xor esi, esi                ; ESI = la fila
+.fila:
+        mov dl, [edi+esi]
+        xor ecx, ecx                ; ECX = la columna
+.col:
+        cmp ecx, 8
+        jae .fs
+        mov dh, dl
+        shl dh, cl
+        test dh, 0x80
+        jnz .tramo
+        inc ecx
+        jmp .col
+.tramo:
+        mov ebx, ecx                ; EBX = donde empieza
+.t2:
+        inc ecx
+        cmp ecx, 8
+        jae .t3
+        mov dh, dl
+        shl dh, cl
+        test dh, 0x80
+        jnz .t2
+.t3:
+        pushad
+        sub ecx, ebx
+        add ecx, ecx
+        lea eax, [eax+ebx*2]
+        mov ebx, [be_ty]
+        lea ebx, [ebx+esi*2]
+        mov edx, 2
+        call dc_rect
+        popad
+        jmp .col
+.fs:
+        inc esi
+        cmp esi, 16
+        jb .fila
+        pop esi
+        pop ecx
+        inc esi
+        dec ecx
+        add eax, 16
+        jmp .ch
+.x:
+        popad
+        ret
+
+; (bt_tecla, sin el menú abierto) AX=tecla: sin ninguna ventana activa (en el
+; escritorio), las flechas cambian de icono e Intro abre el marcado -> CF=1
+be_tecla:
+        cmp dword [activa], 0
+        jne .no
+        cmp dword [foco], 0
+        jne .no
+        pushad
+        mov byte [be_hecho], 0
+        call be_lista
+        mov ecx, [be_n]
+        test ecx, ecx
+        jz .x
+        mov ecx, [be_sel]
+        cmp al, 13
+        jne .e
+        mov byte [be_hecho], 1
+        call be_lanzar
+        jmp .x
+.e:
+        test al, al
+        jz .ext
+        cmp al, 0xE0
+        jne .x
+.ext:
+        push eax
+        call be_filas
+        mov edx, eax                ; EDX=filas
+        pop eax
+        cmp ah, TC_ABAJO
+        jne .e1
+        inc ecx
+        jmp .pon
+.e1:
+        cmp ah, TC_ARRIBA
+        jne .e2
+        dec ecx
+        jmp .pon
+.e2:
+        cmp ah, TC_DER
+        jne .e3
+        add ecx, edx
+        jmp .pon
+.e3:
+        cmp ah, TC_IZQ
+        jne .x
+        sub ecx, edx
+.pon:
+        mov byte [be_hecho], 1
+        test ecx, ecx
+        js .x
+        cmp ecx, [be_n]
+        jae .x
+        mov [be_sel], ecx
+        call bt_esc_inv
+.x:
+        popad
+        cmp byte [be_hecho], 1
+        cmc
+        ret
+.no:
+        clc
         ret
 
 ; =============================================================================
@@ -838,9 +1337,17 @@ bt_pulsar:
         pushad
         test dword [ebp+V_ESTADO], S_MINIM
         jz .vista
+.recupera:
         mov eax, 4
         call ven_mostrar
         jmp .cuadro
+; (be_lanzar) EBP=ventana: delante (recuperada si está minimizada), o su
+; cuadro si tiene uno abierto; sin minimizarla si ya lo está
+.trae0:
+        pushad
+        test dword [ebp+V_ESTADO], S_MINIM
+        jnz .recupera
+        jmp .trae
 .vista:
         call bt_delante
         jnc .trae
@@ -1142,6 +1649,8 @@ ini_abrir:
 .g:
         cmp byte [ebx+GR_USO], 0
         je .gs
+        test byte [ebx+GR_BAND], GRB_ESCRITORIO ; (los del escritorio, no:
+        jnz .gs                     ; sus accesos ya están a la vista)
         mov byte [mi_tipo+edi], 1
         mov [mi_dato+edi*4], ebx
         inc edi
@@ -1789,9 +2298,9 @@ bt_tecla:
         cmp dword [mi_ven], 0
         jne .mia
         cmp al, 27
-        jne .no
+        jne be_tecla                ; (las teclas del escritorio)
         test byte [tec_mayus], TM_CTRL
-        jz .no
+        jz be_tecla
         call ini_abrir
         cmp dword [mi_ven], 0
         je .si
