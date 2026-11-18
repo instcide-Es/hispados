@@ -40,6 +40,7 @@ void WINAPI TlsCerrar(TLS *);
 int WINAPI TlsError(TLS *);
 const char *WINAPI TlsTextoError(int);
 int WINAPI TlsInfo(TLS *, char *, int);
+u32 WINAPI TlsCiclos(TLS *);
 u32 WINAPI GetTickCount(void);
 typedef struct FILE FILE;
 int printf(const char *, ...);
@@ -180,7 +181,7 @@ int main(int argc, char **argv) {
       }
       if (verboso) {
         TlsInfo(t, buf, 100);
-        printf("Conexi\242n segura: %s (%u ms)\n", buf, GetTickCount() - t0);
+        printf("Conexi\242n segura: %s (%u ms; %u miles de ciclos de c\240lculo)\n", buf, GetTickCount() - t0, TlsCiclos(t));
       }
     }
     n = sprintf(pet, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Hispa-486 (HTTPS.EXE)\r\nAccept: */*\r\n\r\n", ruta, servidor);

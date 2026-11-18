@@ -12,6 +12,13 @@
  *     raíz de anclas.h (hechas con tools/mkanclas.sh de w32/tls/raices) o de
  *     los archivos *.CER (X.509 en DER) que haya en la carpeta del programa,
  *     nombre del servidor y fechas con el reloj del equipo;
+ *   - la memoria de certificados: comprobar la cadena de clicgest.es (dos
+ *     firmas ECDSA P-384) le cuesta a un 486 a 66 MHz unos 13 segundos, así
+ *     que la cadena que ya se dio por buena para un servidor (su resumen
+ *     SHA-256, con el nombre) se recuerda una semana (HSPTLS.CCH, junto al
+ *     programa) y mientras tanto no se vuelve a comprobar: el apretón de
+ *     manos baja a unos 2 segundos. Si el servidor cambia de certificado, o
+ *     pasa la semana, se comprueba otra vez entera;
  *   - el azar: no hay generador del sistema, así que se junta lo imprevisible
  *     que hay (el contador del reloj —PIT— y el de ciclos —TSC, si lo hay—
  *     cada vez que llega algo de la red o se llama aquí, la hora, lo que
@@ -27,6 +34,9 @@
  *    TlsEscribir(t, datos, n)           -> n (espera lo que haga falta)
  *    TlsCerrar(t)                       (no cierra el socket)
  *    TlsError(t), TlsTextoError(código), TlsInfo(t, texto, n), TlsAzar(d, n)
+ *    TlsCiclos(t)  -> lo que lleva gastado el procesador en cifrar y en el
+ *                     apretón de manos, en unidades de 1024 ciclos (por el
+ *                     TSC; 0 si no lo hay): para medir
  *  «ms»: lo que se espera como mucho; 0 = nada (para programas con ventana,
  *  que vuelven a llamar), -1 = lo que haga falta.
  * ============================================================================= */
@@ -62,12 +72,20 @@ void *malloc(size_t);
 void free(void *);
 
 #define SALIDA (4096 + 85)     /* el búfer de lo que se envía */
+#define CAD_MAX 10240          /* la cadena de certificados, para recordarla */
+#define CAD_N 8
 typedef struct TLS {
   br_ssl_client_context cc;
   br_x509_minimal_context xc;
+  const br_x509_class *xv;     /* lo que ve BearSSL: la memoria, delante */
+  br_x509_decoder_context dc;
+  u32 cad_n, cad_len[CAD_N], n_cert, dias;
+  u8 directo, de_memoria;
   u32 s;
   int error, fin_tcp, hecho;
+  unsigned long long ciclos;
   char servidor[64];
+  u8 cadena[CAD_MAX];
   u8 entrada[BR_SSL_BUFSIZE_INPUT];
   u8 salida[SALIDA];
 } TLS;
@@ -207,6 +225,110 @@ static void anclas_inicia(void) {
   FindClose(h);
 }
 
+/* ---- la memoria de certificados: delante de la comprobación de BearSSL.
+ * Guarda la cadena según llega; al acabar, si su resumen (con el nombre del
+ * servidor) está entre los que se dieron por buenos hace menos de una
+ * semana, solo se lee la clave del primer certificado; si no, se le pasa
+ * entera a la comprobación de verdad y, si vale, se apunta ---- */
+#define MEM_N 16
+#define MEM_DIAS 7
+static struct { u8 h[32]; u32 dia; } memoria[MEM_N];
+static int mem_leida, mem_sig;
+#define TLS_DE(c) ((TLS *)((char *)(c) - offsetof(TLS, xv)))
+static void mem_archivo(int escribir) {
+  char ruta[170];
+  u32 k = strlen(carpeta), n;
+  HANDLE h;
+  memcpy(ruta, carpeta, k);
+  memcpy(ruta + k, "HSPTLS.CCH", 11);
+  h = escribir ? CreateFileA(ruta, 0x40000000u, 0, NULL, 2, 0x80, NULL) : CreateFileA(ruta, 0x80000000u, 1, NULL, 3, 0, NULL);
+  if (h == (HANDLE)-1) return;
+  if (escribir) WriteFile(h, memoria, sizeof memoria, &n, NULL);
+  else if (!ReadFile(h, memoria, sizeof memoria, &n, NULL) || n != sizeof memoria) memset(memoria, 0, sizeof memoria);
+  CloseHandle(h);
+}
+static void mem_resumen(TLS *t, u8 *h) {
+  br_sha256_context c;
+  br_sha256_init(&c);
+  br_sha256_update(&c, t->servidor, strlen(t->servidor) + 1);
+  br_sha256_update(&c, t->cad_len, t->n_cert * sizeof t->cad_len[0]);
+  br_sha256_update(&c, t->cadena, t->cad_n);
+  br_sha256_out(&c, h);
+}
+/* lo guardado, a la comprobación de verdad */
+static void mem_vuelca(TLS *t) {
+  const br_x509_class **x = &t->xc.vtable;
+  u32 k, o = 0;
+  (*x)->start_chain(x, t->servidor);
+  for (k = 0; k < t->n_cert; k++) {
+    (*x)->start_cert(x, t->cad_len[k]);
+    (*x)->append(x, t->cadena + o, t->cad_len[k]);
+    (*x)->end_cert(x);
+    o += t->cad_len[k];
+  }
+}
+static void xm_start_chain(const br_x509_class **c, const char *servidor) {
+  TLS *t = TLS_DE(c);
+  (void)servidor;
+  t->cad_n = 0; t->n_cert = 0; t->directo = 0; t->de_memoria = 0;
+}
+static void xm_start_cert(const br_x509_class **c, uint32_t n) {
+  TLS *t = TLS_DE(c);
+  if (!t->directo && (t->n_cert == CAD_N || t->cad_n + n > CAD_MAX)) {
+    mem_vuelca(t);             /* no cabe: sin memoria, como siempre */
+    t->directo = 1;
+  }
+  if (t->directo) t->xc.vtable->start_cert(&t->xc.vtable, n);
+  else t->cad_len[t->n_cert] = n;
+}
+static void xm_append(const br_x509_class **c, const unsigned char *b, size_t n) {
+  TLS *t = TLS_DE(c);
+  if (t->directo) t->xc.vtable->append(&t->xc.vtable, b, n);
+  else if (t->cad_n + n <= CAD_MAX) { memcpy(t->cadena + t->cad_n, b, n); t->cad_n += n; }
+}
+static void xm_end_cert(const br_x509_class **c) {
+  TLS *t = TLS_DE(c);
+  if (t->directo) t->xc.vtable->end_cert(&t->xc.vtable);
+  else t->n_cert++;
+}
+static unsigned xm_end_chain(const br_x509_class **c) {
+  TLS *t = TLS_DE(c);
+  u8 h[32];
+  unsigned r;
+  int k;
+  if (t->directo) return t->xc.vtable->end_chain(&t->xc.vtable);
+  if (!t->n_cert) return BR_ERR_X509_EMPTY_CHAIN;
+  if (!mem_leida) { mem_leida = 1; mem_archivo(0); }
+  mem_resumen(t, h);
+  for (k = 0; k < MEM_N; k++)
+    if (memoria[k].dia && !memcmp(memoria[k].h, h, 32) && t->dias >= memoria[k].dia && t->dias < memoria[k].dia + MEM_DIAS) {
+      br_x509_decoder_init(&t->dc, 0, 0);
+      br_x509_decoder_push(&t->dc, t->cadena, t->cad_len[0]);
+      if (br_x509_decoder_get_pkey(&t->dc)) { t->de_memoria = 1; return 0; }
+    }
+  mem_vuelca(t);
+  r = t->xc.vtable->end_chain(&t->xc.vtable);
+  if (r == 0) {
+    for (k = 0; k < MEM_N && memcmp(memoria[k].h, h, 32); k++) ;
+    if (k == MEM_N) k = mem_sig = (mem_sig + 1) % MEM_N;
+    memcpy(memoria[k].h, h, 32);
+    memoria[k].dia = t->dias;
+    mem_archivo(1);
+  }
+  return r;
+}
+static const br_x509_pkey *xm_get_pkey(const br_x509_class *const *c, unsigned *usos) {
+  TLS *t = TLS_DE(c);
+  if (t->de_memoria) {
+    if (usos) *usos = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+    return br_x509_decoder_get_pkey(&t->dc);
+  }
+  return t->xc.vtable->get_pkey(&t->xc.vtable, usos);
+}
+static const br_x509_class xm_vtable = {
+  sizeof(TLS), xm_start_chain, xm_start_cert, xm_append, xm_end_cert, xm_end_chain, xm_get_pkey
+};
+
 /* ---- las sesiones, para reanudarlas si el servidor quiere ---- */
 static struct { char servidor[64]; br_ssl_session_parameters sp; } sesiones[4];
 static int ses_sig;
@@ -230,7 +352,7 @@ TLS *WINAPI TlsAbrir(u32 s, const char *servidor) {
   if (!n_anclas) anclas_inicia();
   t = malloc(sizeof *t);
   if (!t) return NULL;
-  memset(t, 0, sizeof *t - sizeof t->entrada - sizeof t->salida);
+  memset(t, 0, sizeof *t - sizeof t->entrada - sizeof t->salida - sizeof t->cadena);
   t->s = s;
   memcpy(t->servidor, servidor, n + 1);
   ioctlsocket(s, 0x8004667Eu, &uno);           /* sin bloqueo */
@@ -267,7 +389,9 @@ TLS *WINAPI TlsAbrir(u32 s, const char *servidor) {
     dias += (k == 2) ? (((a % 4 == 0 && a % 100 != 0) || a % 400 == 0) ? 29 : 28) : ((k == 4 || k == 6 || k == 9 || k == 11) ? 30 : 31);
   dias += st.dia - 1;
   br_x509_minimal_set_time(&t->xc, dias, st.hora * 3600u + st.min * 60u + st.seg);
-  br_ssl_engine_set_x509(&t->cc.eng, &t->xc.vtable);
+  t->dias = dias;
+  t->xv = &xm_vtable;
+  br_ssl_engine_set_x509(&t->cc.eng, &t->xv);
 
   br_ssl_engine_set_buffers_bidi(&t->cc.eng, t->entrada, sizeof t->entrada, t->salida, sizeof t->salida);
   ruido();
@@ -283,8 +407,20 @@ TLS *WINAPI TlsAbrir(u32 s, const char *servidor) {
   return t;
 }
 
-/* pasa registros entre BearSSL y el socket mientras se pueda */
+static u32 tsc(void) {
+  u32 a = 0, d;
+  if (hay_tsc) __asm__ volatile("rdtsc" : "=a"(a), "=d"(d));
+  return a;
+}
+/* pasa registros entre BearSSL y el socket mientras se pueda (y cuenta los
+ * ciclos que se van en BearSSL: todo menos send y recv) */
+static void bombea2(TLS *t, u32 *c0);
 static void bombea(TLS *t) {
+  u32 c0 = tsc();
+  bombea2(t, &c0);
+  t->ciclos += tsc() - c0;
+}
+static void bombea2(TLS *t, u32 *c0) {
   br_ssl_engine_context *e = &t->cc.eng;
   for (;;) {
     unsigned st = br_ssl_engine_current_state(e);
@@ -297,13 +433,17 @@ static void bombea(TLS *t) {
     }
     if (st & BR_SSL_SENDREC) {
       b = br_ssl_engine_sendrec_buf(e, &n);
+      t->ciclos += tsc() - *c0;
       k = send(t->s, (const char *)b, (int)n, 0);
+      *c0 = tsc();
       if (k > 0) { br_ssl_engine_sendrec_ack(e, k); algo = 1; }
       else if (k < 0 && WSAGetLastError() != 10035) { t->fin_tcp = 1; if (!t->error) t->error = -WSAGetLastError(); return; }
     }
     if ((st & BR_SSL_RECVREC) && !t->fin_tcp) {
       b = br_ssl_engine_recvrec_buf(e, &n);
+      t->ciclos += tsc() - *c0;
       k = recv(t->s, (char *)b, (int)n, 0);
+      *c0 = tsc();
       if (k > 0) { ruido(); br_ssl_engine_recvrec_ack(e, k); algo = 1; }
       else if (k == 0) t->fin_tcp = 1;         /* cerró sin avisar (o tras avisar) */
       else if (WSAGetLastError() != 10035) { t->fin_tcp = 1; if (!t->error) t->error = -WSAGetLastError(); return; }
@@ -398,6 +538,7 @@ void WINAPI TlsCerrar(TLS *t) {
   free(t);
 }
 int WINAPI TlsError(TLS *t) { return t ? t->error : 0; }
+u32 WINAPI TlsCiclos(TLS *t) { return t ? (u32)(t->ciclos >> 10) : 0; }
 const char *WINAPI TlsTextoError(int e) {
   switch (e) {
   case 0: return "Sin error.";

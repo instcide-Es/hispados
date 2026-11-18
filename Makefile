@@ -144,7 +144,7 @@ BEARCF = -m32 -march=i486 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-
   -DBR_SSE2=0 -DBR_AES_X86NI=0 -DBR_RDRAND=0 -DBR_LE_UNALIGNED=1 -DBR_64=0 -DBR_INT128=0 -DBR_UMUL128=0 -DBR_POWER8=0
 BEARSRC = $(wildcard terceros/bearssl/src/*.c)
 BEAROBJ = $(patsubst terceros/bearssl/src/%.c,$(B)/bearssl/%.o,$(BEARSRC))
-TLSEXP = TlsAbrir,TlsConectar,TlsLeer,TlsEscribir,TlsCerrar,TlsError,TlsTextoError,TlsInfo,TlsAzar
+TLSEXP = TlsAbrir,TlsConectar,TlsLeer,TlsEscribir,TlsCerrar,TlsError,TlsTextoError,TlsInfo,TlsAzar,TlsCiclos
 empty :=
 space := $(empty) $(empty)
 comma := ,
