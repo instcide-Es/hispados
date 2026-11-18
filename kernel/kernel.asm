@@ -97,13 +97,18 @@ SFT_TIME        equ 0x0D
 SFT_DATE        equ 0x0F
 SFT_SIZE        equ 0x11            ; (dispositivos: también el driver)
 SFT_POS         equ 0x15
-SFT_CIX         equ 0x19            ; cluster relativo en caché
-SFT_DIRC        equ 0x1B            ; propio: cluster del directorio
-SFT_DIRI        equ 0x1D            ; propio: índice en el directorio
+SFT_CIX         equ 0x19            ; cluster relativo en caché (24 bits con SFT_CIXH)
+SFT_DSEC        equ 0x1B            ; sector de su entrada de directorio (dword,
+                                    ; como en DOS; ISO: carpeta e índice)
+SFT_DIDX        equ 0x1F            ; número de la entrada dentro del sector
 SFT_NAME        equ 0x20            ; nombre en formato FCB (11)
 SFT_TYPE        equ 0x2B            ; propio (zona de SHARE): tipo
 SFT_DRV         equ 0x2C            ; propio: unidad
 SFT_FLAGS       equ 0x2D            ; propio
+SFT_CLUSH       equ 0x2E            ; propio: parte alta del primer clúster (FAT32;
+                                    ; ISO 9660: del sector inicial)
+SFT_CIXH        equ 0x30            ; propio: octeto alto del clúster relativo
+SFT_CCLH        equ 0x33            ; propio: parte alta del clúster en caché
 SFT_PSP         equ 0x31            ; PSP propietario
 SFT_CCL         equ 0x35            ; cluster absoluto en caché
 SFT_VSER        equ 0x37            ; propio: huella del disco al abrir (dword)
@@ -182,20 +187,23 @@ D_EPC           equ 18
 D_BPC           equ 20
 D_FATLBA        equ 22
 D_NFATS         equ 26
-D_SPF           equ 28
+D_FATFL         equ 28              ; FAT32: indicadores del BPB (FAT activa)
 D_ROOTENT       equ 30
 D_ROOTLBA       equ 32
 D_ROOTSECS      equ 36
 D_DATALBA       equ 38
-D_NCLUS         equ 42
-D_HINT          equ 44
+D_FSINFO        equ 42              ; FAT32: sector FSInfo (0 = no tiene)
+D_ROOTCLUS      equ 44              ; FAT32: primer clúster de la raíz
 D_DRVHDR        equ 48
 D_UNIT          equ 52
 D_BPBPTR        equ 56
 D_HIDDEN        equ 60              ; sectores ocultos que se declaran (BPB)
+D_NCLUS         equ 64              ; clústeres de datos (dword)
+D_HINT          equ 68              ; por dónde buscar el siguiente libre (dword)
+D_SPF           equ 72              ; sectores por FAT (dword)
 DF_DRIVER       equ 32
 NEXT            equ 6
-DRV_LEN         equ 64
+DRV_LEN         equ 76
 NDRV            equ 16
 
 DF_EXISTS       equ 1
@@ -204,6 +212,9 @@ DF_LBA          equ 4
 DF_FIXED        equ 8
 DF_FAT16        equ 16
 DF_ISO          equ 64
+DF_FAT32        equ 128
+CLUS_EOC        equ 0x0FFFFFF7      ; de aquí arriba: fin de cadena (o malo)
+CLUS_END        equ 0x0FFFFFFF      ; lo que devuelve fat_next al acabar
 ISO_ND          equ 24
 ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 
@@ -251,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xE000          ; .init, al arrancar (por debajo de BOOT_TMP)
+INIT_ORG        equ 0xF000          ; .init, al arrancar (por debajo de BOOT_TMP)
         section .low
 start:
         jmp short .go
@@ -478,7 +489,7 @@ drives_scan:
         xor dl, dl
 .flop:
         movzx bx, dl
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         add bx, drv_tab
         mov byte [bx+D_FLAGS], DF_EXISTS
         mov [bx+D_BIOS], dl
@@ -592,6 +603,14 @@ drives_scan:
         mov byte [si+4], 0x06
         mov dword [si+8], 0
         mov eax, [cur_drv+D_SIZE]
+        ; (un disco grande no cabe en la geometría de INT 13h 08h: vale el
+        ; total del sector de arranque)
+        cmp word [secbuf+0x13], 0
+        jne .sfs
+        cmp eax, [secbuf+0x20]
+        jae .sfs
+        mov eax, [secbuf+0x20]
+.sfs:
         mov [si+12], eax
         mov cx, 1
         mov al, 0x06
@@ -611,13 +630,7 @@ drives_scan:
         cmp dword [si+12], 0
         je .np
         mov al, [si+4]
-        cmp al, 0x01
-        je .add
-        cmp al, 0x04
-        je .add
-        cmp al, 0x06
-        je .add
-        cmp al, 0x0E
+        call is_fat_type
         je .add
         jmp .np
 .add:
@@ -663,13 +676,7 @@ drives_scan:
         jne .nextdisk
         mov si, secbuf+0x1BE
         mov al, [si+4]
-        cmp al, 0x01
-        je .ladd
-        cmp al, 0x04
-        je .ladd
-        cmp al, 0x06
-        je .ladd
-        cmp al, 0x0E
+        call is_fat_type
         jne .lnext
 .ladd:
         mov edx, [si+8]             ; sectores ocultos: desde su EBR
@@ -707,6 +714,23 @@ drives_scan:
         popad
         ret
 
+; AL = tipo de partición: ZF si es una de DOS con FAT (FAT12, FAT16 y, como
+; en MS-DOS 7.1, FAT32: 0Bh y 0Ch)
+is_fat_type:
+        cmp al, 0x01
+        je .r
+        cmp al, 0x04
+        je .r
+        cmp al, 0x06
+        je .r
+        cmp al, 0x0E
+        je .r
+        cmp al, 0x0B
+        je .r
+        cmp al, 0x0C
+.r:
+        ret
+
 ; AL = tipo de partición: ZF si es una extendida
 is_ext_type:
         cmp al, 0x05
@@ -726,7 +750,7 @@ drv_add:
         movzx bx, byte [ndrives]
         cmp bx, NDRV
         jae .r
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         add bx, drv_tab
         push si
         push cx
@@ -760,7 +784,7 @@ append_ext:
         movzx bx, byte [ndrives]
         cmp bx, NDRV
         jae .noext
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         add bx, drv_tab
         mov byte [bx+D_FLAGS], DF_EXISTS | DF_DRIVER | DF_FIXED
         ; soporte extraíble (bit 11 de los atributos del driver, como los
@@ -822,11 +846,11 @@ drives_ext:
         movzx ax, byte [bios_nd]
         mov [ndrives], al
         mov di, ax
-        shl di, 6
+        imul di, di, DRV_LEN
         add di, drv_tab
         mov cx, NDRV
         sub cx, ax
-        shl cx, 5
+        imul cx, cx, DRV_LEN/2
         xor ax, ax
         rep stosw
         pop es
@@ -845,7 +869,7 @@ boot_select:
         xor bx, bx
 .fl:
         mov ax, bx
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         add bx, drv_tab
         test byte [bx+D_FLAGS], DF_EXISTS
         jnz .set
@@ -3613,7 +3637,7 @@ select_raw:
         push di
         push es
         movzx si, al
-        shl si, 6
+        imul si, si, DRV_LEN
         add si, drv_tab
         test byte [si+D_FLAGS], DF_EXISTS
         jz .badp
@@ -3894,7 +3918,7 @@ drv_store:
         push ds
         pop es
         movzx di, byte [sel_drv]
-        shl di, 6
+        imul di, di, DRV_LEN
         add di, drv_tab
         mov si, cur_drv
         mov cx, DRV_LEN/2
@@ -3946,10 +3970,12 @@ mount:
         cmp ecx, 2
         ja .bad
         mov [cur_drv+D_NFATS], cx
+        and byte [cur_drv+D_FLAGS], 0xFF ^ (DF_FAT16 | DF_FAT32)
+        mov word [cur_drv+D_FSINFO], 0
         movzx edx, word [secbuf+0x16]
         test edx, edx
-        jz .bad
-        mov [cur_drv+D_SPF], dx
+        jz .f32
+        mov [cur_drv+D_SPF], edx
         imul edx, ecx
         add eax, edx
         mov [cur_drv+D_ROOTLBA], eax
@@ -3977,12 +4003,97 @@ mount:
         jz .bad
         cmp eax, 65524
         ja .bad
-        mov [cur_drv+D_NCLUS], ax
-        and byte [cur_drv+D_FLAGS], 0xFF ^ DF_FAT16
+        mov [cur_drv+D_NCLUS], eax
         cmp eax, 4085
         jb .f12
         or byte [cur_drv+D_FLAGS], DF_FAT16
+        jmp .f12
+        ; ---- FAT32 (MS-DOS 7.1): sin sectores por FAT de 16 bits. La FAT
+        ; mide [+24h] sectores, la raíz es una cadena de clústeres que
+        ; empieza en [+2Ch] y el sector [+30h] (FSInfo) lleva la cuenta de
+        ; los libres. El BPB de un driver (25 octetos) no llega para esto.
+.f32:
+        cmp byte [mnt_try], 0
+        jne .bad
+        cmp word [cur_drv+D_SPCW], 64       ; (clústeres de 64 KB: no)
+        ja .bad
+        mov edx, [secbuf+0x24]
+        test edx, edx
+        jz .bad
+        cmp word [secbuf+0x2A], 0           ; versión 0.0
+        jne .bad
+        cmp word [secbuf+0x11], 0
+        jne .bad
+        mov [cur_drv+D_SPF], edx
+        mov bx, [secbuf+0x28]
+        mov [cur_drv+D_FATFL], bx
+        push edx
+        imul edx, ecx
+        add eax, edx                        ; EAX = primer sector de datos
+        pop edx
+        jc .bad
+        test bl, 0x80
+        jz .mirror
+        ; sin espejo: solo vale (y solo se escribe) la FAT que dice el BPB
+        and ebx, 0x0F
+        cmp ebx, ecx
+        jae .bad
+        imul ebx, edx
+        add [cur_drv+D_FATLBA], ebx
+        mov word [cur_drv+D_NFATS], 1
+.mirror:
+        mov [cur_drv+D_ROOTLBA], eax
+        mov [cur_drv+D_DATALBA], eax
+        mov word [cur_drv+D_ROOTENT], 0
+        mov word [cur_drv+D_ROOTSECS], 0
+        movzx edx, word [secbuf+0x13]
+        test edx, edx
+        jnz .ts32
+        mov edx, [secbuf+0x20]
+.ts32:
+        sub edx, eax
+        jbe .bad
+        mov eax, edx
+        xor edx, edx
+        movzx ecx, word [cur_drv+D_SPCW]
+        div ecx
+        test eax, eax
+        jz .bad
+        cmp eax, 0x0FFFFFF5
+        ja .bad
+        ; la FAT tiene que llegar para todos los clústeres
+        mov edx, [cur_drv+D_SPF]
+        cmp edx, 0x00200000
+        jae .fok                            ; (128 entradas por sector)
+        shl edx, 7
+        sub edx, 2
+        cmp eax, edx
+        ja .bad
+.fok:
+        mov [cur_drv+D_NCLUS], eax
+        mov edx, [secbuf+0x2C]
+        cmp edx, 2
+        jb .bad
+        sub edx, 2
+        cmp edx, eax
+        jae .bad
+        add edx, 2
+        mov [cur_drv+D_ROOTCLUS], edx
+        mov ax, [secbuf+0x30]
+        cmp ax, 0xFFFF
+        je .nofsi
+        cmp ax, [secbuf+0x0E]               ; dentro de los reservados
+        jae .nofsi
+        mov [cur_drv+D_FSINFO], ax
+.nofsi:
+        or byte [cur_drv+D_FLAGS], DF_FAT32
 .f12:
+        mov dword [cur_drv+D_HINT], 0
+        movzx di, byte [sel_drv]
+        mov byte [fs_dirty+di], 0
+        mov byte [fs_full+di], 0
+        shl di, 2
+        mov dword [fs_free+di], 0xFFFFFFFF  ; libres: sin contar todavía
         mov al, [secbuf+0x15]
         mov [cur_drv+D_MEDIA], al
         test byte [cur_drv+D_FLAGS], DF_FIXED
@@ -3998,30 +4109,37 @@ mount:
         xor eax, eax
         cmp byte [mnt_try], 0
         jne .ns
-        cmp byte [secbuf+0x26], 0x29
-        jne .ns
-        ; huella: número de serie mezclado con la etiqueta (+2Bh, 11 octetos)
-        mov eax, [secbuf+0x27]
         push si
         push cx
-        mov si, secbuf+0x2B
+        mov si, secbuf+0x26
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .sg
+        mov si, secbuf+0x42                 ; FAT32: 1Ch más allá
+.sg:
+        cmp byte [si], 0x29
+        jne .ns0
+        ; huella: número de serie mezclado con la etiqueta (+2Bh, 11 octetos)
+        mov eax, [si+1]
+        add si, 5
         mov cx, 11
 .lb:
         rol eax, 5
         xor al, [si]
         inc si
         loop .lb
+        test eax, eax
+        jnz .ns0
+        inc eax
+.ns0:
         pop cx
         pop si
-        test eax, eax
-        jnz .ns
-        inc eax
 .ns:
         movzx di, byte [sel_drv]
         shl di, 2
         mov [vol_ser+di], eax
         or byte [cur_drv+D_FLAGS], DF_MOUNTED
         call drv_store
+        call fsinfo_load                    ; (FAT32: libres y por dónde buscar)
         mov al, [sel_drv]
         call cds_update
         pop es
@@ -6024,7 +6142,7 @@ cds_update:
         cmp bx, NDRV
         jae .nodpb
         push bx
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         add bx, drv_tab
         test byte [bx+D_FLAGS], DF_MOUNTED
         jz .dpbpart
@@ -6050,10 +6168,18 @@ cds_update:
         mov [di+0x09], ax
         mov ax, [bx+D_DATALBA]
         mov [di+0x0B], ax
-        mov ax, [bx+D_NCLUS]
-        inc ax
+        mov eax, [bx+D_NCLUS]
+        inc eax
+        cmp eax, 0xFFF6             ; (FAT32: el DPB de DOS 4-6 no da más;
+        jbe .dn                     ; el de verdad, con INT 21h 7302h)
+        mov ax, 0xFFF6
+.dn:
         mov [di+0x0D], ax
-        mov ax, [bx+D_SPF]
+        mov eax, [bx+D_SPF]
+        cmp eax, 0xFFFF
+        jbe .ds
+        mov ax, 0xFFFF
+.ds:
         mov [di+0x0F], ax
         mov ax, [bx+D_ROOTLBA]
         mov [di+0x11], ax
@@ -6082,7 +6208,7 @@ cds_update:
         cmp bx, NDRV
         jae .r
         push bx
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         add bx, drv_tab
         test byte [bx+D_FLAGS], DF_EXISTS
         pop bx
@@ -6135,7 +6261,7 @@ cds_all:
         cmp bx, NDRV
         jae .ce
         push bx
-        shl bx, 6
+        imul bx, bx, DRV_LEN
         test byte [drv_tab+bx+D_FLAGS], DF_EXISTS
         pop bx
         jz .cn
@@ -6391,13 +6517,12 @@ iso_dirh:
         pop edx
         ret
 
-; fentry es una carpeta -> AX = su clúster (FAT) o su manejador (ISO)
+; fentry es una carpeta -> EAX = su clúster (FAT) o su manejador (ISO)
 dir_clus:
-        mov ax, [fentry+26]
         test byte [cur_drv+D_FLAGS], DF_ISO
-        jz .r
+        jz fent_clus
         call iso_dirh
-.r:
+        movzx eax, ax
         ret
 
 ; como find_entry: AX = carpeta, CX = índice inicial, SI = patrón, DL = atrib.
@@ -6616,9 +6741,7 @@ iso_file_read:
         sub eax, [di+SFT_POS]
         jbe .out
         push eax
-        movzx eax, word [di+SFT_CCL]
-        shl eax, 16
-        mov ax, [di+SFT_CLUS]
+        call sft_first
         shl eax, 2                  ; bloques de 2048 -> sectores de 512
         mov edx, [di+SFT_POS]
         shr edx, 9
@@ -7058,10 +7181,23 @@ fat_byte:
         pop eax
         ret
 
-; AX = clúster -> AX = siguiente (0xFFFF = fin de cadena o error)
+; Los números de clúster van en registros de 32 bits. En FAT12 y FAT16 solo
+; cuenta la mitad baja (la alta se pone a cero aquí): quien llama con AX
+; sigue valiendo.
+%macro CLUS32 2                     ; registro de 32 bits, su mitad baja
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jnz %%s
+        movzx %1, %2
+%%s:
+%endmacro
+
+; EAX = clúster -> EAX = siguiente (CLUS_END = fin de cadena o error; así
+; AX = 0xFFFF, como antes). Lo de CLUS_EOC para arriba es «no hay más».
 fat_next:
         push ecx
         push edx
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jnz .f32
         movzx ecx, ax
         test byte [cur_drv+D_FLAGS], DF_FAT16
         jnz .f16
@@ -7078,7 +7214,7 @@ fat_next:
         mov [fn_lo+1], dl
         pop ax
         test al, 1
-        mov ax, [fn_lo]
+        movzx eax, word [fn_lo]
         jz .even
         shr ax, 4
         jmp .c12
@@ -7087,35 +7223,60 @@ fat_next:
 .c12:
         cmp ax, 0x0FF7
         jb .r
-        mov ax, 0xFFFF
-        jmp .r
+        jmp .end
 .e12:
         pop ax
-        mov ax, 0xFFFF
-        jmp .r
+        jmp .end
 .f16:
         shl ecx, 1
         call fat_byte
-        jc .e16
+        jc .end
         mov [fn_lo], dl
         inc ecx
         call fat_byte
-        jc .e16
+        jc .end
         mov [fn_lo+1], dl
-        mov ax, [fn_lo]
+        movzx eax, word [fn_lo]
         cmp ax, 0xFFF7
         jb .r
-.e16:
-        mov ax, 0xFFFF
+.end:
+        mov eax, CLUS_END
 .r:
         pop edx
         pop ecx
         ret
+        ; FAT32: 128 entradas de 32 bits por sector (los 4 bits altos, que
+        ; están reservados, no cuentan)
+.f32:
+        mov ecx, eax
+        sub ecx, 2
+        cmp ecx, [cur_drv+D_NCLUS]
+        jae .end                    ; fuera del disco
+        mov ecx, eax
+        shr eax, 7
+        add eax, [cur_drv+D_FATLBA]
+        call fat_load_sec
+        jc .end
+        and ecx, 127
+        mov eax, [fatsec+ecx*4]
+        and eax, 0x0FFFFFFF
+        cmp eax, CLUS_EOC
+        jb .r
+        jmp .end
 
-; AX = clúster -> EAX = primer sector relativo
+; EAX = clúster -> CF si no es uno de los de datos del disco (2...)
+clus_ok:
+        push eax
+        sub eax, 2
+        cmp eax, [cur_drv+D_NCLUS]
+        cmc
+        pop eax
+        ret
+
+; EAX = clúster -> EAX = primer sector relativo
 clus_lba:
         push edx
-        movzx eax, ax
+        CLUS32 eax, ax
         sub eax, 2
         movzx edx, word [cur_drv+D_SPCW]
         imul eax, edx
@@ -7123,44 +7284,191 @@ clus_lba:
         pop edx
         ret
 
-; contar clústeres libres de la unidad seleccionada -> AX
+; clústeres libres de la unidad seleccionada -> EAX. Se cuentan una vez por
+; montaje (en FAT32 vale la cuenta del sector FSInfo, como en MS-DOS 7.1) y
+; después se llevan al día en fat_set.
 fat_free_count:
         push bx
-        push cx
-        xor bx, bx
-        mov cx, 2
+        movzx bx, byte [sel_drv]
+        shl bx, 2
+        mov eax, [fs_free+bx]
+        cmp eax, 0xFFFFFFFF
+        jne .r
+        push ecx
+        push edx
+        push si
+        xor edx, edx                ; libres
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jnz .f32
+        mov ecx, 2
 .l:
-        mov ax, cx
-        sub ax, 2
-        cmp ax, [cur_drv+D_NCLUS]
+        mov eax, ecx
+        sub eax, 2
+        cmp eax, [cur_drv+D_NCLUS]
         jae .d
-        mov ax, cx
+        mov eax, ecx
         call fat_next
-        test ax, ax
+        test eax, eax
         jnz .n
-        inc bx
+        inc edx
 .n:
-        inc cx
-        jnz .l
+        inc ecx
+        jmp .l
+        ; FAT32: sector a sector (una FAT de 200 GB son 6 millones de entradas)
+.f32:
+        mov ecx, [cur_drv+D_NCLUS]
+        add ecx, 2                  ; entradas que quedan (con las 2 primeras)
+        mov eax, [cur_drv+D_FATLBA]
+.s:
+        call fat_load_sec
+        jc .d
+        mov si, fatsec
+.e:
+        test dword [si], 0x0FFFFFFF
+        jnz .u
+        inc edx
+.u:
+        add si, 4
+        dec ecx
+        jz .d
+        cmp si, fatsec+512
+        jb .e
+        inc eax
+        jmp .s
 .d:
-        mov ax, bx
-        pop cx
+        mov eax, edx
+        mov [fs_free+bx], eax
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .nd
+        shr bx, 2
+        mov byte [fs_dirty+bx], 1   ; al sector FSInfo
+        mov byte [fs_any], 1
+        shl bx, 2
+.nd:
+        pop si
+        pop edx
+        pop ecx
+.r:
         pop bx
+        ret
+
+; FAT32, al montar: la cuenta de libres y el siguiente libre del sector
+; FSInfo, si son creíbles (firmas en su sitio y valores dentro del disco)
+fsinfo_load:
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .r
+        cmp word [cur_drv+D_FSINFO], 0
+        je .r
+        pushad
+        movzx eax, word [cur_drv+D_FSINFO]
+        call cache_read
+        jc .x
+        call fsinfo_sig
+        jne .x
+        movzx bx, byte [sel_drv]
+        shl bx, 2
+        mov eax, [secbuf+488]
+        cmp eax, [cur_drv+D_NCLUS]
+        ja .nf
+        mov [fs_free+bx], eax
+.nf:
+        mov eax, [secbuf+492]
+        mov edx, eax
+        sub edx, 2
+        cmp edx, [cur_drv+D_NCLUS]
+        jae .x
+        mov [cur_drv+D_HINT], eax
+        call drv_store
+.x:
+        popad
+.r:
+        ret
+
+; ¿secbuf es un sector FSInfo? -> ZF
+fsinfo_sig:
+        cmp dword [secbuf], 0x41615252
+        jne .r
+        cmp dword [secbuf+484], 0x61417272
+        jne .r
+        cmp dword [secbuf+508], 0xAA550000
+.r:
+        ret
+
+; llevar al disco la cuenta de libres de las unidades FAT32 que la han
+; cambiado (al acabar la función de INT 21h en curso)
+fsinfo_flush:
+        cmp byte [fs_any], 0
+        jne .go
+        ret
+.go:
+        pushad
+        mov byte [fs_any], 0
+        mov al, [sel_drv]
+        mov [fsf_sel], al
+        xor bx, bx
+.l:
+        cmp byte [fs_dirty+bx], 0
+        je .n
+        mov byte [fs_dirty+bx], 0
+        mov al, bl
+        call select_raw
+        jc .n
+        mov al, [cur_drv+D_FLAGS]
+        and al, DF_FAT32 | DF_MOUNTED
+        cmp al, DF_FAT32 | DF_MOUNTED
+        jne .n
+        cmp word [cur_drv+D_FSINFO], 0
+        je .n
+        movzx eax, word [cur_drv+D_FSINFO]
+        call cache_read
+        jc .n
+        call fsinfo_sig
+        jne .n
+        mov si, bx
+        shl si, 2
+        mov eax, [fs_free+si]
+        mov edx, [cur_drv+D_HINT]
+        cmp edx, 2
+        jae .h
+        mov edx, 0xFFFFFFFF         ; (no se sabe)
+.h:
+        cmp eax, [secbuf+488]
+        jne .w
+        cmp edx, [secbuf+492]
+        je .n
+.w:
+        mov [secbuf+488], eax
+        mov [secbuf+492], edx
+        call cache_write
+.n:
+        inc bx
+        cmp bl, [ndrives]
+        jb .l
+        mov al, [fsf_sel]
+        call select_raw
+        popad
         ret
 
 ; -----------------------------------------------------------------------------
 ;  Directorios
 ; -----------------------------------------------------------------------------
-; AX = clúster del directorio (0 = raíz), CX = índice -> SI = entrada en secbuf
-; CF=1 si el índice sale del directorio
+; EAX = clúster del directorio (0 = raíz), CX = índice -> SI = entrada en secbuf
+; CF=1 si el índice sale del directorio. En FAT32 la raíz es una cadena de
+; clústeres como las demás carpetas (empieza en D_ROOTCLUS).
 dir_get:
         push eax
-        push bx
+        push ebx
         push cx
         push dx
         mov [dg_idx], cx
-        test ax, ax
+        CLUS32 eax, ax
+        test eax, eax
         jnz .sub
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .root
+        mov eax, [cur_drv+D_ROOTCLUS]
+        jmp .sub
+.root:
         cmp cx, [cur_drv+D_ROOTENT]
         jae .end
         movzx eax, cx
@@ -7168,20 +7476,18 @@ dir_get:
         add eax, [cur_drv+D_ROOTLBA]
         jmp .read
 .sub:
-        mov bx, ax
+        mov ebx, eax
         mov ax, cx
         xor dx, dx
         div word [cur_drv+D_EPC]
         mov cx, ax
-        mov ax, bx
+        mov eax, ebx
         mov [dg_in], dx
 .walk:
+        call clus_ok
+        jc .end
         jcxz .got
         call fat_next
-        cmp ax, 0xFFF7
-        jae .end
-        cmp ax, 2
-        jb .end
         dec cx
         jmp .walk
 .got:
@@ -7198,36 +7504,73 @@ dir_get:
         add si, secbuf
         pop dx
         pop cx
-        pop bx
+        pop ebx
         pop eax
         clc
         ret
 .end:
         pop dx
         pop cx
-        pop bx
+        pop ebx
         pop eax
         stc
         ret
 
-; AX = directorio, CX = índice inicial, SI = patrón (11), DL = atributos
+; fentry -> EAX = su primer clúster (en FAT32, con la parte alta de +20)
+fent_clus:
+        movzx eax, word [fentry+26]
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .r
+        mov ax, [fentry+20]
+        shl eax, 16
+        mov ax, [fentry+26]
+.r:
+        ret
+
+; SI = entrada de directorio (en secbuf), EAX = primer clúster -> apuntado
+ent_setclus:
+        mov [si+26], ax
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .r
+        push eax
+        shr eax, 16
+        mov [si+20], ax
+        pop eax
+.r:
+        ret
+
+; EAX = directorio, CX = índice -> EAX = sector de esa entrada y DL = su
+; número dentro del sector (lo que identifica a un fichero abierto); CF
+dir_ident:
+        push si
+        call dir_get
+        pop si
+        jc .r
+        mov eax, [cache_rel]
+        mov dl, cl
+        and dl, 15
+.r:
+        ret
+
+; EAX = directorio, CX = índice inicial, SI = patrón (11), DL = atributos
 ; -> CF=0: CX = índice encontrado, fentry = copia de la entrada
 find_entry:
         test byte [cur_drv+D_FLAGS], DF_ISO
         jz .fat
         jmp iso_find_entry
 .fat:
-        push ax
+        push eax
         push bx
         push si
         push di
         push es
-        mov [fe_dir], ax
+        CLUS32 eax, ax
+        mov [fe_dir], eax
         mov [fe_pat], si
         push ds
         pop es
 .next:
-        mov ax, [fe_dir]
+        mov eax, [fe_dir]
         call dir_get
         jc .nf
         mov bl, [si]
@@ -7277,7 +7620,7 @@ find_entry:
         pop di
         pop si
         pop bx
-        pop ax
+        pop eax
         clc
         ret
 .bad:
@@ -7285,13 +7628,13 @@ find_entry:
         pop cx
 .skip:
         inc cx
-        jmp .next
+        jnz .next                   ; (65536 entradas: no hay más)
 .nf:
         pop es
         pop di
         pop si
         pop bx
-        pop ax
+        pop eax
         stc
         ret
 
@@ -7566,7 +7909,7 @@ walk:
         push dx
         push si
         push di
-        mov word [w_dir], 0
+        mov dword [w_dir], 0
         mov byte [w_has], 0
         mov si, npath
         cmp byte [si], 0
@@ -7578,7 +7921,7 @@ walk:
         je .last
         inc si
         push si
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x16
@@ -7588,7 +7931,7 @@ walk:
         test byte [fentry+11], 0x10
         jz .nf
         call dir_clus
-        mov [w_dir], ax
+        mov [w_dir], eax
         jmp .comp
 .last:
         mov byte [w_has], 1
@@ -7616,7 +7959,7 @@ resolve_dir:
         jc .r
         call walk
         jc .r
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         cmp byte [w_has], 0
         je .ok
         push cx
@@ -7889,43 +8232,78 @@ file_read:
         clc
         ret
 
-; DI = SFT, AX = índice de clúster dentro del fichero -> AX = clúster
-sft_seek_clus:
-        push bx
-        push cx
-        cmp ax, [di+SFT_CIX]
-        jb .restart
-        mov cx, [di+SFT_CCL]
+; DI = SFT -> EAX = su primer clúster
+sft_first:
+        movzx eax, word [di+SFT_CLUSH]
+        shl eax, 16
+        mov ax, [di+SFT_CLUS]
+        ret
+; DI = SFT, EAX = su primer clúster
+sft_setfirst:
+        mov [di+SFT_CLUS], ax
+        ror eax, 16
+        mov [di+SFT_CLUSH], ax
+        ror eax, 16
+        ret
+; DI = SFT -> EBX = clúster relativo en caché (24 bits; FFFFFFh = ninguno) y
+; ECX = ese clúster
+sft_cache_get:
+        movzx ebx, byte [di+SFT_CIXH]
+        shl ebx, 16
         mov bx, [di+SFT_CIX]
-        jmp .walk
-.restart:
-        mov cx, [di+SFT_CLUS]
-        xor bx, bx
+        movzx ecx, word [di+SFT_CCLH]
+        shl ecx, 16
+        mov cx, [di+SFT_CCL]
+        ret
+sft_cache_set:
+        mov [di+SFT_CIX], bx
+        mov [di+SFT_CCL], cx
+        ror ebx, 16
+        mov [di+SFT_CIXH], bl
+        ror ebx, 16
+        ror ecx, 16
+        mov [di+SFT_CCLH], cx
+        ror ecx, 16
+        ret
+sft_cache_bad:
+        mov word [di+SFT_CIX], 0xFFFF
+        mov byte [di+SFT_CIXH], 0xFF
+        ret
+
+; DI = SFT, EAX = índice de clúster dentro del fichero -> EAX = clúster
+sft_seek_clus:
+        push ebx
+        push ecx
+        push edx
+        mov edx, eax
+        call sft_cache_get
+        cmp edx, ebx
+        jae .walk
+        call sft_first
+        mov ecx, eax
+        xor ebx, ebx
 .walk:
-        cmp cx, 2
-        jb .fail
-        cmp cx, 0xFFF7
-        jae .fail
-        cmp bx, ax
+        mov eax, ecx
+        call clus_ok
+        jc .fail
+        cmp ebx, edx
         je .done
-        push ax
-        mov ax, cx
         call fat_next
-        mov cx, ax
-        pop ax
-        inc bx
+        mov ecx, eax
+        inc ebx
         jmp .walk
 .done:
-        mov [di+SFT_CCL], cx
-        mov [di+SFT_CIX], bx
-        mov ax, cx
-        pop cx
-        pop bx
+        call sft_cache_set
+        mov eax, ecx
+        pop edx
+        pop ecx
+        pop ebx
         clc
         ret
 .fail:
-        pop cx
-        pop bx
+        pop edx
+        pop ecx
+        pop ebx
         stc
         ret
 
@@ -7972,15 +8350,34 @@ sft_fill_file:
         mov [di+SFT_ATTR], al
         mov ax, [fentry+26]
         mov [di+SFT_CLUS], ax
-        mov ax, [fentry+20]         ; ISO 9660: parte alta del sector inicial
-        mov [di+SFT_CCL], ax
+        xor ax, ax
+        test byte [cur_drv+D_FLAGS], DF_FAT32 | DF_ISO
+        jz .lo
+        mov ax, [fentry+20]         ; parte alta del clúster (FAT32) o del
+.lo:                                ; sector inicial (ISO 9660)
+        mov [di+SFT_CLUSH], ax
         mov eax, [fentry+28]
         mov [di+SFT_SIZE], eax
         mov dword [di+SFT_POS], 0
-        mov word [di+SFT_CIX], 0xFFFF
+        call sft_cache_bad
+        ; quién es: el sector de su entrada de directorio y su número en él
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jnz .iso
+        push edx
+        mov eax, [w_dir]
+        call dir_ident
+        jnc .idok
+        mov eax, 0xFFFFFFFF
+.idok:
+        mov [di+SFT_DSEC], eax
+        mov [di+SFT_DIDX], dl
+        pop edx
+        jmp .idd
+.iso:
+        mov [di+SFT_DSEC], cx
         mov ax, [w_dir]
-        mov [di+SFT_DIRC], ax
-        mov [di+SFT_DIRI], cx
+        mov [di+SFT_DSEC+2], ax
+.idd:
         mov ax, [fentry+22]
         mov [di+SFT_TIME], ax
         mov ax, [fentry+24]
@@ -8031,7 +8428,7 @@ open_path:
         ret
 .file:
         push si
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x16
@@ -8121,8 +8518,7 @@ fat_flush:
         jnc .wok
         mov dword [fatc_lba], 0xFFFFFFFF    ; la copia en memoria no vale
 .wok:
-        movzx edx, word [cur_drv+D_SPF]
-        add eax, edx
+        add eax, [cur_drv+D_SPF]
         loop .l
         mov byte [fat_dirty], 0
         pop ax
@@ -8155,11 +8551,46 @@ fat_mod_byte:
         pop eax
         ret
 
-; AX = clúster, DX = valor
+; EAX = clúster, EDX = valor (0 = libre, CLUS_END = fin de cadena)
 fat_set:
         push bx
         push ecx
         push edx
+        push si
+        push eax
+        CLUS32 eax, ax
+        CLUS32 edx, dx
+        ; la cuenta de libres, al día: ¿estaba libre?, ¿queda libre?
+        movzx si, byte [sel_drv]
+        shl si, 2
+        cmp dword [fs_free+si], 0xFFFFFFFF
+        je .nc
+        push eax
+        call fat_next
+        test eax, eax
+        pop eax
+        jnz .used
+        test edx, edx
+        jz .nc
+        dec dword [fs_free+si]
+        jmp .cd
+.used:
+        test edx, edx
+        jnz .nc
+        inc dword [fs_free+si]
+.cd:
+        shr si, 2
+        mov byte [fs_dirty+si], 1
+        mov byte [fs_any], 1
+        shl si, 2
+.nc:
+        test edx, edx
+        jnz .nf
+        shr si, 2
+        mov byte [fs_full+si], 0
+.nf:
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jnz .f32
         movzx ecx, ax
         test byte [cur_drv+D_FLAGS], DF_FAT16
         jnz .f16
@@ -8196,89 +8627,116 @@ fat_set:
         mov bh, dh
         call fat_mod_byte
 .r:
+        pop eax
+        pop si
         pop edx
         pop ecx
         pop bx
         ret
+.f32:
+        mov ecx, eax
+        sub ecx, 2
+        cmp ecx, [cur_drv+D_NCLUS]
+        jae .r
+        push eax
+        mov ecx, eax
+        shr eax, 7
+        add eax, [cur_drv+D_FATLBA]
+        call fat_load_sec
+        pop eax
+        jc .r
+        and ecx, 127
+        and edx, 0x0FFFFFFF
+        and dword [fatsec+ecx*4], 0xF0000000    ; (reservados: se conservan)
+        or [fatsec+ecx*4], edx
+        mov byte [fat_dirty], 1
+        jmp .r
 
-; AX = clúster anterior (0 = ninguno) -> AX = clúster nuevo (fin de cadena)
+; EAX = clúster anterior (0 = ninguno) -> EAX = clúster nuevo (fin de cadena)
 ; CF = 1 si el disco está lleno
 fat_alloc:
-        push bx
-        push cx
-        push dx
-        push ax
-        mov cx, [cur_drv+D_NCLUS]
-        mov bx, [cur_drv+D_HINT]
-        mov dx, [cur_drv+D_NCLUS]
-        inc dx
-        cmp bx, 2
+        push ebx
+        push ecx
+        push edx
+        CLUS32 eax, ax
+        push eax
+        movzx bx, byte [sel_drv]
+        cmp byte [fs_full+bx], 0    ; ya se recorrió entera y no había
+        jne .full
+        mov ecx, [cur_drv+D_NCLUS]
+        mov ebx, [cur_drv+D_HINT]
+        mov edx, ecx
+        inc edx                     ; EDX = último clúster
+        cmp ebx, 2
         jb .h0
-        cmp bx, dx
+        cmp ebx, edx
         jbe .l
 .h0:
-        mov bx, 2
+        mov ebx, 2
 .l:
-        mov ax, bx
+        mov eax, ebx
         call fat_next
-        test ax, ax
+        test eax, eax
         jz .found
-        inc bx
-        cmp bx, dx
+        inc ebx
+        cmp ebx, edx
         jbe .n
-        mov bx, 2
+        mov ebx, 2
 .n:
-        loop .l
-        pop ax
-        pop dx
-        pop cx
-        pop bx
+        dec ecx
+        jnz .l
+        movzx bx, byte [sel_drv]
+        mov byte [fs_full+bx], 1
+.full:
+        pop eax
+        pop edx
+        pop ecx
+        pop ebx
         stc
         ret
 .found:
-        mov ax, bx
-        mov dx, 0xFFFF
+        mov eax, ebx
+        mov edx, CLUS_END
         call fat_set
-        pop ax
-        test ax, ax
+        pop eax
+        test eax, eax
         jz .nolink
-        mov dx, bx
+        mov edx, ebx
         call fat_set
 .nolink:
-        mov ax, bx
-        inc bx
-        mov [cur_drv+D_HINT], bx
+        mov eax, ebx
+        inc ebx
+        mov [cur_drv+D_HINT], ebx
         call drv_store
-        pop dx
-        pop cx
-        pop bx
+        pop edx
+        pop ecx
+        pop ebx
         clc
         ret
 
-; AX = primer clúster -> liberar toda la cadena
+; EAX = primer clúster -> liberar toda la cadena
 fat_free_chain:
-        push ax
-        push dx
+        push eax
+        push edx
+        CLUS32 eax, ax
 .l:
-        cmp ax, 2
-        jb .d
-        cmp ax, 0xFFF7
-        jae .d
-        push ax
+        call clus_ok
+        jc .d
+        push eax
         call fat_next
-        mov dx, ax
-        pop ax
-        push dx
-        xor dx, dx
+        mov edx, eax
+        pop eax
+        push edx
+        xor edx, edx
         call fat_set
-        pop ax
+        pop eax
         jmp .l
 .d:
-        pop dx
-        pop ax
+        pop edx
+        pop eax
         ret
 
-; AX = clúster -> llenarlo de ceros
+; EAX = clúster -> llenarlo de ceros
 zero_cluster:
         push eax
         push cx
@@ -8333,11 +8791,13 @@ dos_now:
         pop ebx
         ret
 
-; AX = directorio -> CX = índice de una entrada libre (amplía subdirectorios)
-; CF y AX = error si el directorio raíz está lleno o el disco lleno
+; EAX = directorio -> CX = índice de una entrada libre (amplía subdirectorios
+; y, en FAT32, también la raíz). CF y AX = error si el directorio raíz está
+; lleno o el disco lleno
 dir_free_slot:
-        push ax
+        push eax
         push si
+        CLUS32 eax, ax
         xor cx, cx
 .l:
         call dir_get
@@ -8348,48 +8808,52 @@ dir_free_slot:
         je .ok
         inc cx
         jnz .l
+        jmp .full                   ; 65536 entradas: no caben más
 .end:
-        test ax, ax
+        test eax, eax
+        jnz .grow
+        test byte [cur_drv+D_FLAGS], DF_FAT32
         jz .full
-        ; ampliar el subdirectorio con un clúster nuevo
+        mov eax, [cur_drv+D_ROOTCLUS]
+.grow:
+        ; ampliar el directorio con un clúster nuevo
         push cx
+        push ebx
 .last:
-        mov si, ax
+        mov ebx, eax
         call fat_next
-        cmp ax, 0xFFF7
-        jae .gotl
-        cmp ax, 2
-        jb .gotl
-        jmp .last
-.gotl:
-        mov ax, si
+        call clus_ok
+        jnc .last
+        mov eax, ebx
         call fat_alloc
+        pop ebx
         pop cx
         jc .full
         call zero_cluster
 .ok:
         pop si
-        pop ax
+        pop eax
         clc
         ret
 .full:
         pop si
-        pop ax
+        pop eax
         mov ax, E_ACCESS
         stc
         ret
 
-; AX = directorio, CX = índice, SI = nombre (11), BL = atributos,
-; DX = primer clúster -> entrada nueva con la fecha y hora actuales
+; EAX = directorio, CX = índice, SI = nombre (11), BL = atributos,
+; EDX = primer clúster -> entrada nueva con la fecha y hora actuales
 dir_make:
         push eax
         push di
         push es
         push si
-        push dx
+        push edx
         call dir_get
-        pop dx
+        pop edx
         jc .r
+        CLUS32 edx, dx
         mov di, si
         pop si
         push si
@@ -8400,7 +8864,7 @@ dir_make:
         rep movsb
         pop cx
         mov [di], bl
-        push dx
+        push edx
         push di
         push cx
         inc di
@@ -8412,8 +8876,14 @@ dir_make:
         call dos_now
         mov [di+11], ax
         mov [di+13], dx
-        pop dx
+        pop edx
         mov [di+15], dx
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .lo
+        ror edx, 16
+        mov [di+9], dx              ; parte alta del clúster
+        ror edx, 16
+.lo:
         mov dword [di+17], 0
         call cache_write
 .r:
@@ -8437,12 +8907,16 @@ dir_update:
         mov byte [wr_fail], 0x22    ; es otro disco: no se toca
         jmp .r
 .same:
-        mov ax, [di+SFT_DIRC]
-        mov cx, [di+SFT_DIRI]
-        call dir_get
+        mov eax, [di+SFT_DSEC]
+        cmp eax, 0xFFFFFFFF
+        je .r
+        call cache_read
         jc .r
-        mov ax, [di+SFT_CLUS]
-        mov [si+26], ax
+        movzx si, byte [di+SFT_DIDX]
+        shl si, 5
+        add si, secbuf
+        call sft_first
+        call ent_setclus
         mov eax, [di+SFT_SIZE]
         mov [si+28], eax
         mov ax, [di+SFT_TIME]
@@ -8488,11 +8962,13 @@ share_open:
         mov al, [si+SFT_DRV]
         cmp al, [di+SFT_DRV]
         jne .n
-        mov ax, [si+SFT_DIRC]
-        cmp ax, [di+SFT_DIRC]
+        push eax
+        mov eax, [si+SFT_DSEC]
+        cmp eax, [di+SFT_DSEC]
+        pop eax
         jne .n
-        mov ax, [si+SFT_DIRI]
-        cmp ax, [di+SFT_DIRI]
+        mov al, [si+SFT_DIDX]
+        cmp al, [di+SFT_DIDX]
         jne .n
         ; mismo fichero: ¿la otra apertura niega lo que pedimos, o al revés?
         mov bl, [si+SFT_MODE]       ; su modo
@@ -8682,11 +9158,13 @@ lk_same:
         mov al, [si+SFT_DRV]
         cmp al, [di+SFT_DRV]
         jne .r
-        mov ax, [si+SFT_DIRC]
-        cmp ax, [di+SFT_DIRC]
+        push eax
+        mov eax, [si+SFT_DSEC]
+        cmp eax, [di+SFT_DSEC]
+        pop eax
         jne .r
-        mov ax, [si+SFT_DIRI]
-        cmp ax, [di+SFT_DIRI]
+        mov al, [si+SFT_DIDX]
+        cmp al, [di+SFT_DIDX]
 .r:
         pop ax
         pop si
@@ -8706,68 +9184,56 @@ sft_release:
 .r:
         ret
 
-; DI = SFT, AX = índice de clúster -> AX = clúster (amplía la cadena)
+; DI = SFT, EAX = índice de clúster -> EAX = clúster (amplía la cadena)
 sft_seek_alloc:
-        push bx
-        push cx
-        cmp word [di+SFT_CLUS], 0
-        jne .have
-        push ax
-        xor ax, ax
+        push ebx
+        push ecx
+        push edx
+        mov edx, eax
+        call sft_first
+        test eax, eax
+        jnz .have
         call fat_alloc
         jc .full0
-        mov [di+SFT_CLUS], ax
-        mov [di+SFT_CCL], ax
-        mov word [di+SFT_CIX], 0
-        pop ax
+        call sft_setfirst
+        mov ecx, eax
+        xor ebx, ebx
+        call sft_cache_set
 .have:
-        cmp ax, [di+SFT_CIX]
-        jb .restart
-        mov cx, [di+SFT_CCL]
-        mov bx, [di+SFT_CIX]
-        jmp .walk
-.restart:
-        mov cx, [di+SFT_CLUS]
-        xor bx, bx
+        call sft_cache_get
+        cmp edx, ebx
+        jae .walk
+        call sft_first
+        mov ecx, eax
+        xor ebx, ebx
 .walk:
-        cmp bx, ax
+        cmp ebx, edx
         je .done
-        push ax
-        mov ax, cx
+        mov eax, ecx
         call fat_next
-        cmp ax, 2
-        jb .ext
-        cmp ax, 0xFFF7
-        jb .nx
-.ext:
-        mov ax, cx
+        call clus_ok
+        jnc .nx
+        mov eax, ecx
         call fat_alloc
         jc .full1
 .nx:
-        mov cx, ax
-        pop ax
-        inc bx
+        mov ecx, eax
+        inc ebx
         jmp .walk
 .done:
-        mov [di+SFT_CCL], cx
-        mov [di+SFT_CIX], bx
-        mov ax, cx
-        pop cx
-        pop bx
+        call sft_cache_set
+        mov eax, ecx
+        pop edx
+        pop ecx
+        pop ebx
         clc
         ret
 .full1:
-        pop ax
-        mov [di+SFT_CCL], cx
-        mov [di+SFT_CIX], bx
-        pop cx
-        pop bx
-        stc
-        ret
+        call sft_cache_set
 .full0:
-        pop ax
-        pop cx
-        pop bx
+        pop edx
+        pop ecx
+        pop ebx
         stc
         ret
 
@@ -8902,7 +9368,7 @@ file_truncate:
         div ecx
         call sft_seek_alloc
         jc .full
-        mov word [di+SFT_CIX], 0xFFFF
+        call sft_cache_bad
         mov eax, [di+SFT_POS]
         mov [di+SFT_SIZE], eax
         jmp .r
@@ -8919,9 +9385,10 @@ sft_trim:
         mov eax, [di+SFT_SIZE]
         test eax, eax
         jnz .part
-        mov ax, [di+SFT_CLUS]
+        call sft_first
         call fat_free_chain
-        mov word [di+SFT_CLUS], 0
+        xor eax, eax
+        call sft_setfirst
         jmp .r
 .part:
         dec eax
@@ -8930,18 +9397,18 @@ sft_trim:
         div ecx
         call sft_seek_clus
         jc .r
-        mov bx, ax
+        mov ebx, eax
         call fat_next
-        cmp ax, 0xFFF7
+        cmp eax, CLUS_EOC
         jae .r                      ; ya termina ahí
-        push ax
-        mov ax, bx
-        mov dx, 0xFFFF
+        push eax
+        mov eax, ebx
+        mov edx, CLUS_END
         call fat_set
-        pop ax
+        pop eax
         call fat_free_chain
 .r:
-        mov word [di+SFT_CIX], 0xFFFF
+        call sft_cache_bad
         popad
         ret
 
@@ -8982,7 +9449,7 @@ create_file:
         je .nopath
         inc si
         loop .chk
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x16
@@ -8993,12 +9460,13 @@ create_file:
         test byte [fentry+11], 0x19
         jnz .acc
         ; vaciar el fichero existente
-        mov ax, [fentry+26]
+        call fent_clus
         call fat_free_chain
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_get
         jc .acc
-        mov word [si+26], 0
+        xor eax, eax
+        call ent_setclus
         mov dword [si+28], 0
         mov al, [cf_attr]
         and al, 0x27
@@ -9006,19 +9474,19 @@ create_file:
         call cache_write
         jmp .open
 .new:
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_free_slot
         jc .r
         mov si, w_name
         mov bl, [cf_attr]
         and bl, 0x27
-        xor dx, dx
+        xor edx, edx
         call dir_make
         jc .acc
 .open:
         ; releer la entrada creada en fentry
         push cx
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_get
         mov di, fentry
         push es
@@ -9057,8 +9525,12 @@ create_file:
 ; entrada de directorio que ya no es suya. Con SHARE, MS-DOS lo niega.
 file_is_open:
         push si
-        push ax
+        push eax
         push bx
+        push edx
+        mov eax, [w_dir]
+        call dir_ident              ; EAX = su sector, DL = entrada
+        jc .no
         mov si, sft_table
         xor bl, bl
 .l:
@@ -9066,16 +9538,16 @@ file_is_open:
         je .n
         cmp byte [si+SFT_TYPE], T_FILE
         jne .n
-        mov al, [sel_drv]
-        cmp al, [si+SFT_DRV]
+        mov bh, [sel_drv]
+        cmp bh, [si+SFT_DRV]
         jne .n
-        mov ax, [w_dir]
-        cmp ax, [si+SFT_DIRC]
+        cmp eax, [si+SFT_DSEC]
         jne .n
-        cmp cx, [si+SFT_DIRI]
+        cmp dl, [si+SFT_DIDX]
         jne .n
+        pop edx
         pop bx
-        pop ax
+        pop eax
         pop si
         stc
         ret
@@ -9088,8 +9560,10 @@ file_is_open:
 .nb:
         cmp bl, NSFT
         jb .l
+.no:
+        pop edx
         pop bx
-        pop ax
+        pop eax
         pop si
         clc
         ret
@@ -9132,7 +9606,7 @@ find_path:
         je .nf
         call name_nowild
         jc .nf
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         call find_entry
@@ -9804,6 +10278,10 @@ i21_ret:
         cmp byte [indos], 1
         jne .nofl
         call fat_flush
+        cmp byte [F_AH], 0x40       ; (escribir: al cerrar o al confirmar)
+        je .nofs
+        call fsinfo_flush
+.nofs:
         call wr_check
 .nofl:
         K_LEAVE
@@ -10058,17 +10536,234 @@ fn_36:
         mov [F_DX], ax
         ret
 .fat:
+        ; Un disco FAT32 no cabe en estos registros: como MS-DOS 7.1, se
+        ; dan clústeres «más grandes» (hasta 32 KB) y, si aun así no cabe,
+        ; se recorta a 2 GB. Lo de verdad, con la función 7303h.
         call fat_free_count
+        mov edx, [cur_drv+D_NCLUS]
+        mov cx, [cur_drv+D_SPCW]
+.sc:
+        cmp edx, 0xFFF6
+        jbe .fit
+        cmp cx, 64
+        jae .clip
+        shl cx, 1
+        shr edx, 1
+        shr eax, 1
+        jmp .sc
+.clip:
+        mov edx, 0xFFF6
+        cmp eax, edx
+        jbe .fit
+        mov eax, edx
+.fit:
         mov [F_BX], ax
-        mov ax, [cur_drv+D_SPCW]
-        mov [F_AX], ax
+        mov [F_AX], cx
         mov word [F_CX], 512
-        mov ax, [cur_drv+D_NCLUS]
-        mov [F_DX], ax
+        mov [F_DX], dx
         ret
 .bad:
         mov word [F_AX], 0xFFFF
         ret
+
+; ---- 73h: las funciones de FAT32 de MS-DOS 7.1 ----
+;   7302h  DPB extendido de la unidad DL -> ES:DI (CX = tamaño del búfer)
+;   7303h  espacio libre de la unidad de la ruta DS:DX -> ES:DI (CX = tamaño)
+;   7305h  leer o escribir sectores absolutos: DL = unidad (1 = A:), CX = FFFFh,
+;          SI bit 0 = escribir, DS:BX -> {dd sector, dw cuenta, dd búfer}
+; Valen con cualquier FAT; las demás (7300h, 7301h, 7304h) no están.
+fn_73:
+        mov al, [F_AL]
+        cmp al, 0x02
+        je .dpb
+        cmp al, 0x03
+        je .free
+        cmp al, 0x05
+        je .abs
+        mov byte [F_AL], 0          ; (como una función que no existe)
+        mov ax, 0x7300
+        jmp ret_err
+.baddrv:
+        mov ax, E_DRIVE
+        jmp ret_err
+.small:
+        mov ax, 0x18                ; longitud de estructura incorrecta
+        jmp ret_err
+; -- 7303h --
+.free:
+        cmp word [F_CX], 0x2C
+        jb .small
+        mov es, [F_DS]
+        mov si, [F_DX]
+        mov al, [cur_drive]
+        cmp byte [es:si+1], ':'
+        jne .fd
+        mov al, [es:si]
+        and al, 0xDF
+        sub al, 'A'
+.fd:
+        call select_drive
+        jc .baddrv
+        mov es, [F_ES]
+        mov di, [F_DI]
+        push di
+        mov cx, 0x2C
+        xor al, al
+        rep stosb
+        pop di
+        mov word [es:di], 0x2C
+        mov dword [es:di+0x08], 512
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jz .ffat
+        mov dword [es:di+0x04], 4
+        mov eax, [cur_drv+D_SIZE]
+        mov [es:di+0x18], eax
+        shr eax, 2
+        mov [es:di+0x10], eax
+        mov [es:di+0x20], eax
+        ret
+.ffat:
+        movzx ecx, word [cur_drv+D_SPCW]
+        mov [es:di+0x04], ecx
+        call fat_free_count
+        mov [es:di+0x0C], eax
+        mov [es:di+0x1C], eax
+        imul eax, ecx
+        mov [es:di+0x14], eax
+        mov eax, [cur_drv+D_NCLUS]
+        mov [es:di+0x10], eax
+        mov [es:di+0x20], eax
+        imul eax, ecx
+        mov [es:di+0x18], eax
+        ret
+; -- 7302h --
+.dpb:
+        cmp word [F_CX], 0x3F
+        jb .small
+        mov al, [F_DL]
+        test al, al
+        jnz .dd
+        mov al, [cur_drive]
+        inc al
+.dd:
+        dec al
+        call select_drive
+        jc .baddrv
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jnz .baddrv
+        call cds_update             ; (el DPB de siempre, al día)
+        movzx si, al
+        imul si, si, DPB_LEN
+        add si, dpb_tab
+        mov es, [F_ES]
+        mov di, [F_DI]
+        mov word [es:di], 0x3D
+        add di, 2
+        push di
+        mov cx, DPB_LEN
+        rep movsb                   ; los 21h primeros octetos son los mismos
+        mov cx, 0x3D - DPB_LEN
+        xor al, al
+        rep stosb
+        pop di
+        call fat_free_count
+        mov [es:di+0x1F], ax
+        shr eax, 16
+        mov [es:di+0x21], ax
+        mov eax, [cur_drv+D_DATALBA]
+        mov [es:di+0x29], eax
+        mov eax, [cur_drv+D_NCLUS]
+        inc eax
+        mov [es:di+0x2D], eax
+        mov eax, [cur_drv+D_SPF]
+        mov [es:di+0x31], eax
+        mov eax, [cur_drv+D_HINT]
+        mov [es:di+0x39], eax
+        mov word [es:di+0x25], 0xFFFF
+        mov word [es:di+0x27], 0xFFFF
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .dr
+        ; FAT32: los campos de 16 bits del DPB viejo que no valen, a cero
+        mov word [es:di+0x09], 0
+        mov word [es:di+0x0F], 0
+        mov ax, [cur_drv+D_FATFL]
+        mov [es:di+0x23], ax
+        mov ax, [cur_drv+D_FSINFO]
+        test ax, ax
+        jz .nfi
+        mov [es:di+0x25], ax
+.nfi:
+        mov eax, [cur_drv+D_ROOTCLUS]
+        mov [es:di+0x35], eax
+        xor eax, eax
+        call cache_read
+        jc .dr
+        mov ax, [secbuf+0x32]       ; copia del sector de arranque
+        test ax, ax
+        jz .dr
+        mov [es:di+0x27], ax
+.dr:
+        ret
+; -- 7305h --
+.abs:
+        cmp word [F_CX], 0xFFFF
+        jne .afn
+        mov al, [F_DL]
+        dec al
+        js .baddrv
+        call select_raw
+        jc .baddrv
+        mov es, [F_DS]
+        mov bx, [F_BX]
+        mov eax, [es:bx]
+        mov cx, [es:bx+4]
+        les bx, [es:bx+6]
+        mov byte [crit_off], 1
+        jcxz .aok
+.al:
+        cmp eax, [cur_drv+D_SIZE]
+        jae .aerr
+        test byte [F_SI], 1
+        jnz .aw
+        call read_sector
+        jmp .ac
+.aw:
+        call write_sector
+.ac:
+        jc .aerr
+        inc eax
+        mov dx, es
+        add dx, 0x20
+        mov es, dx
+        loop .al
+.aok:
+        mov byte [crit_off], 0
+        test byte [F_SI], 1
+        jz .ar
+        call .stale
+.ar:
+        mov byte [wr_fail], 0
+        ret
+.aerr:
+        mov byte [crit_off], 0
+        mov byte [wr_fail], 0
+        mov ax, 0x1E                ; fallo de lectura
+        test byte [F_SI], 1
+        jz ret_err
+        call .stale
+        mov ax, 0x1D                ; fallo de escritura
+        jmp ret_err
+.afn:
+        mov ax, E_FUNC
+        jmp ret_err
+; se ha escrito por debajo del sistema de ficheros: lo que hubiera en las
+; cachés ya no vale y la unidad se vuelve a montar en el próximo acceso
+.stale:
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        mov byte [fat_dirty], 0
+        and byte [cur_drv+D_FLAGS], 0xFF ^ DF_MOUNTED
+        jmp drv_store
 
 ; ---- vectores ----
 fn_25:
@@ -11142,7 +11837,7 @@ fn_43:
         je .nf
         call name_nowild
         jc .nf
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x16
@@ -11165,7 +11860,7 @@ fn_43:
         jc ret_err
         test byte [fentry+11], 0x08
         jnz .sacc
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_get
         jc .sacc
         mov al, [F_CL]
@@ -11259,7 +11954,8 @@ fn_44:
         mov di, [F_DX]
         mov word [es:di], 0
         add di, 2
-        mov si, secbuf+0x27
+        call ebr_off
+        lea si, [bx+1]
         mov cx, 4 + 11 + 8
         rep movsb
         ret
@@ -11270,15 +11966,16 @@ fn_44:
         xor eax, eax
         call cache_read
         jc .baddrv
-        cmp byte [secbuf+0x26], 0x29
+        call ebr_off
+        cmp byte [bx], 0x29
         jne .baddrv
+        lea di, [bx+1]
         push ds
         mov ds, [F_DS]
         mov si, [F_DX]
         add si, 2
         push ds
         pop ax
-        mov di, secbuf+0x27
         push es
         push ds
         mov ax, KSEG
@@ -11329,6 +12026,10 @@ fn_44:
         add di, 7
         mov si, secbuf+0x0B
         mov cx, 25
+        cmp byte [F_CH], 0x48       ; categoría de FAT32 (MS-DOS 7.1): el
+        jne .gb                     ; BPB ampliado, de 53 octetos
+        mov cx, 53
+.gb:
         rep movsb
         pop di
         jmp .gcommon
@@ -11572,9 +12273,9 @@ fn_41:
         jnz .acc
         call file_is_open
         jc .shr
-        mov ax, [fentry+26]
+        call fent_clus
         call fat_free_chain
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_get
         jc .acc
         mov byte [si], 0xE5
@@ -11601,16 +12302,16 @@ fn_39:
         je .acc
         call name_ok
         jc .acc
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x16
         call find_entry
         jnc .acc
-        xor ax, ax
+        xor eax, eax
         call fat_alloc
         jc .acc
-        mov [md_clus], ax
+        mov [md_clus], eax
         call zero_cluster
         ; "." y ".."
         call clus_lba
@@ -11646,25 +12347,27 @@ fn_39:
         mov [di+24], dx
         mov [di+32+22], ax
         mov [di+32+24], dx
-        mov ax, [md_clus]
-        mov [di+26], ax
-        mov ax, [w_dir]
-        mov [di+32+26], ax
+        mov si, di
+        mov eax, [md_clus]
+        call ent_setclus
+        add si, 32
+        mov eax, [w_dir]            ; (la raíz, también en FAT32, es el 0)
+        call ent_setclus
         mov dword [di+28], 0
         mov dword [di+32+28], 0
         call cache_write
         ; entrada en el directorio padre
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_free_slot
         jc .free
         mov si, w_name
         mov bl, 0x10
-        mov dx, [md_clus]
+        mov edx, [md_clus]
         call dir_make
         ret
 .free:
         push ax
-        mov ax, [md_clus]
+        mov eax, [md_clus]
         call fat_free_chain
         pop ax
         jmp ret_err
@@ -11708,8 +12411,10 @@ fn_3a:
         pop cx
         ; ¿vacío?
         mov [md_idx], cx
-        mov ax, [fentry+26]
-        mov [md_clus], ax
+        call fent_clus
+        test eax, eax               ; (una entrada rota que apunta a la raíz)
+        jz .np
+        mov [md_clus], eax
         mov cx, 2
 .l:
         call dir_get
@@ -11727,9 +12432,9 @@ fn_3a:
         inc cx
         jmp .l
 .empty:
-        mov ax, [md_clus]
+        mov eax, [md_clus]
         call fat_free_chain
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         mov cx, [md_idx]
         call dir_get
         jc .np
@@ -11758,8 +12463,8 @@ fn_56:
         call file_is_open
         jc .shr
         mov [rn_idx], cx
-        mov ax, [w_dir]
-        mov [rn_dir], ax
+        mov eax, [w_dir]
+        mov [rn_dir], eax
         mov al, [op_drv]
         mov [rn_drv], al
         push es
@@ -11784,14 +12489,14 @@ fn_56:
         je .acc
         call name_ok
         jc .acc
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x16
         call find_entry
         jnc .acc
-        mov ax, [w_dir]
-        cmp ax, [rn_dir]
+        mov eax, [w_dir]
+        cmp eax, [rn_dir]
         je .inplace
         test byte [rn_ent+11], 0x10
         jnz .acc
@@ -11815,7 +12520,7 @@ fn_56:
         rep movsb
         pop es
         call cache_write
-        mov ax, [rn_dir]
+        mov eax, [rn_dir]
         mov cx, [rn_idx]
         call dir_get
         jc .acc
@@ -12235,7 +12940,7 @@ fn_4e:
         ; la etiqueta de volumen se busca siempre en la raíz
         cmp byte [F_CL], 0x08
         jne .nolab
-        mov word [w_dir], 0
+        mov dword [w_dir], 0
 .nolab:
         les di, [dta_off]
         mov al, [op_drv]
@@ -12279,8 +12984,10 @@ fn_4e:
         mov al, [F_CL]
         mov [es:di+12], al
         mov word [es:di+13], 0
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         mov [es:di+15], ax
+        shr eax, 16
+        mov [es:di+19], ax          ; (parte alta del clúster: FAT32)
         mov word [es:di+17], 0x444E
         call find_step
         jnc .r
@@ -12325,6 +13032,8 @@ find_step:
         pop ds
         pop di
         push di
+        mov ax, [es:di+19]
+        shl eax, 16
         mov ax, [es:di+15]
         mov cx, [es:di+13]
         mov dl, [es:di+12]
@@ -12401,7 +13110,7 @@ fn_4b:
         jc ret_err
         cmp byte [w_has], 0
         je .nf
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x06
@@ -12819,7 +13528,7 @@ exec_overlay:
         jc ret_err
         cmp byte [w_has], 0
         je .nf
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, 0x06
@@ -13255,7 +13964,7 @@ fcb_resolve:
         ; la etiqueta de volumen vive siempre en la raíz
         cmp byte [fcb_attr], 0x08
         jne .nolab
-        mov word [w_dir], 0
+        mov dword [w_dir], 0
 .nolab:
         ; el nombre conserva los '?' del FCB
         push es
@@ -13449,6 +14158,17 @@ fcb_write_recs:
 .r:
         ret
 
+; -> BX = dónde está en secbuf (el sector de arranque de la unidad
+; seleccionada) la marca 29h del registro ampliado: tras ella van el número
+; de serie, la etiqueta y el nombre del sistema de ficheros
+ebr_off:
+        mov bx, secbuf+0x26
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jz .r
+        mov bx, secbuf+0x42
+.r:
+        ret
+
 ; SI = etiqueta (11) -> copiarla en el sector de arranque si tiene BPB extendido
 boot_label:
         pushad
@@ -13456,11 +14176,12 @@ boot_label:
         xor eax, eax
         call cache_read
         jc .r
-        cmp byte [secbuf+0x26], 0x29
+        call ebr_off
+        cmp byte [bx], 0x29
         jne .r
         push ds
         pop es
-        mov di, secbuf+0x2B
+        lea di, [bx+5]
         mov cx, 11
         rep movsb
         call cache_write
@@ -13497,7 +14218,7 @@ fn_0f:
         mov byte [F_AL], 0
         ret
 .file:
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, [fcb_attr]
@@ -13619,18 +14340,18 @@ fn_16:
         call iso_deny
         jc .fail
         ; solo puede haber una
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, all11
         mov dl, 0x08
         call find_entry
         jnc .fail
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_free_slot
         jc .fail
         mov si, w_name
         mov bl, 0x08
-        xor dx, dx
+        xor edx, edx
         call dir_make
         mov si, w_name
         call boot_label
@@ -13650,7 +14371,7 @@ fn_13:
         mov word [fcb_cnt], 0
         xor cx, cx
 .l:
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         mov si, w_name
         mov dl, [fcb_attr]
         call find_entry
@@ -13663,10 +14384,10 @@ fn_13:
         jnz .n
         call file_is_open
         jc .n
-        mov ax, [fentry+26]
+        call fent_clus
         call fat_free_chain
 .del:
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_get
         jc .end
         mov bl, [si+11]             ; (cache_write no conserva los indicadores)
@@ -13716,7 +14437,7 @@ fn_17:
         mov word [fcb_cnt], 0
         xor cx, cx
 .l:
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         mov si, w_name
         mov dl, [fcb_attr]
         call find_entry
@@ -13739,14 +14460,14 @@ fn_17:
         inc bx
         loop .m
         ; ¿ya existe?
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, fcb_res11
         mov dl, 0x16
         call find_entry
         pop cx
         jnc .fail
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         call dir_get
         jc .fail
         push es
@@ -13779,8 +14500,10 @@ fn_11:
         jc .fail
         mov es, [F_DS]
         mov bx, [fcb_off]
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         mov [es:bx+0x0C], ax
+        shr eax, 16
+        mov [es:bx+0x1A], ax        ; (parte alta del clúster: FAT32)
         mov word [es:bx+0x0E], 0
         mov al, [op_drv]
         mov [es:bx+0x18], al
@@ -13812,13 +14535,15 @@ fn_12:
         rep movsb
         pop es
         pop ds
+        mov ax, [es:bx+0x1A]
+        shl eax, 16
         mov ax, [es:bx+0x0C]
-        mov [w_dir], ax
+        mov [w_dir], eax
 fcb_find_step:
         mov es, [F_DS]
         mov bx, [fcb_off]
         mov cx, [es:bx+0x0E]
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         mov si, w_name
         mov dl, [fcb_attr]
         call find_entry
@@ -13980,7 +14705,7 @@ fn_23:
         call fcb_setup
         call fcb_resolve
         jc .fail
-        mov ax, [w_dir]
+        mov eax, [w_dir]
         xor cx, cx
         mov si, w_name
         mov dl, [fcb_attr]
@@ -14103,6 +14828,11 @@ abs_io:
         pop bx
         pop es
         jc .bdrv
+        ; como MS-DOS 7.1: en una unidad FAT32 estas dos no valen (los
+        ; programas de disco que no la conocen la estropearían); para eso
+        ; está INT 21h AX=7305h
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jnz .b32
         cmp cx, 0xFFFF
         jne .short
         mov eax, [es:bx]
@@ -14149,6 +14879,9 @@ abs_io:
         retf
 .bdrv:
         mov word [abs_err], 0x0201
+        jmp .fail
+.b32:
+        mov word [abs_err], 0x0207  ; soporte desconocido
         jmp .fail
 .bsec:
         mov word [abs_err], 0x0408
@@ -14478,7 +15211,7 @@ msg_nohma   db "Hispa-DOS se carga en la memoria convencional.", 13, 10, 0
 ; =============================================================================
 ;  Datos
 ; =============================================================================
-MAXFN   equ 0x6C
+MAXFN   equ 0x73
 ; pilas del núcleo (índices KS_*): fondo y tope
 k_base      dw k_stk_disk, k_stk_io, k_stk_aux
 k_tops      dw k_top_disk, k_top_io, k_top_aux
@@ -14539,7 +15272,8 @@ fntable:
         dw fn_50, fn_51, fn_52, fn_unsup, fn_54, fn_55, fn_56, fn_57 ; 50
         dw fn_58, fn_59, fn_5a, fn_5b, fn_5c, fn_5d, fn_unsup, fn_unsup ; 58
         dw fn_60, fn_unsup, fn_62, fn_unsup, fn_unsup, fn_65, fn_66, fn_67 ; 60
-        dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c                       ; 68
+        dw fn_68, fn_unsup, fn_68, fn_unsup, fn_6c, fn_unsup, fn_unsup, fn_unsup ; 68
+        dw fn_unsup, fn_unsup, fn_unsup, fn_73                          ; 70
 
 msg_bootkeys db "Iniciando Hispa-DOS...  F5 = arranque limpio  ", 0xFA, "  F8 = men", 0xA3, " de arranque", 13, 10, 0
 msg_clean   db "Arranque limpio: sin CONFIG.SYS ni AUTOEXEC.BAT.", 13, 10, 0
@@ -14764,14 +15498,19 @@ cf_attr     resb 1
 cf_new      resb 1
 x6c_act     resb 1
 rn_drv      resb 1
-md_clus     resw 1
+md_clus     resd 1
 md_idx      resw 1
 rn_idx      resw 1
-rn_dir      resw 1
+rn_dir      resd 1
 rn_ent      resb 32
 mnt_try     resb 1
 mc_old      resd 1
 vol_ser     resd NDRV               ; huella (serie + etiqueta) de cada unidad montada
+fs_free     resd NDRV               ; clústeres libres (FFFFFFFFh = sin contar)
+fs_dirty    resb NDRV               ; FAT32: la cuenta va por delante del FSInfo
+fs_full     resb NDRV               ; se recorrió la FAT entera y no hay libres
+fs_any      resb 1                  ; alguna unidad con fs_dirty
+fsf_sel     resb 1
 io_nrdy     resb 1
 wr_fail     resb 1                  ; error de la escritura que falló (0 = ninguna)
 wr_fn       resb 1                  ; función de INT 21h en curso
@@ -14909,9 +15648,9 @@ root_psp    resw 1
 cur_clus    resw 1
 dg_idx      resw 1
 dg_in       resw 1
-fe_dir      resw 1
+fe_dir      resd 1
 fe_pat      resw 1
-w_dir       resw 1
+w_dir       resd 1
 w_has       resb 1
 w_name      resb 12
 fentry      resb 32
