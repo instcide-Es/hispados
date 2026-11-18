@@ -961,11 +961,26 @@ box_text_transform(char *s, unsigned int len, enum css_text_transform_e tt)
 			for (i = 0; i < len; ++i)
 				if ((unsigned char) s[i] < 0x80)
 					s[i] = ascii_to_upper(s[i]);
+#ifdef nshispa
+				/* [HISPA] y las de Latin-1 (ñ -> Ñ, á -> Á): mismo largo en UTF-8 */
+				else if ((unsigned char) s[i] == 0xC3 && i + 1 < len &&
+					 (unsigned char) s[i + 1] >= 0xA0 &&
+					 (unsigned char) s[i + 1] <= 0xBE &&
+					 (unsigned char) s[i + 1] != 0xB7)
+					s[++i] -= 0x20;
+#endif
 			break;
 		case CSS_TEXT_TRANSFORM_LOWERCASE:
 			for (i = 0; i < len; ++i)
 				if ((unsigned char) s[i] < 0x80)
 					s[i] = ascii_to_lower(s[i]);
+#ifdef nshispa
+				else if ((unsigned char) s[i] == 0xC3 && i + 1 < len &&
+					 (unsigned char) s[i + 1] >= 0x80 &&
+					 (unsigned char) s[i + 1] <= 0x9E &&
+					 (unsigned char) s[i + 1] != 0x97)
+					s[++i] += 0x20;
+#endif
 			break;
 		case CSS_TEXT_TRANSFORM_CAPITALIZE:
 			if ((unsigned char) s[0] < 0x80)

@@ -120,6 +120,7 @@ bp_dirs     resb BP_MAXDIR * 13
 jd_hecho    resd 1                  ; ya se creó (o se ligó) el grupo de juegos de DOS
 inet_hecho  resd 1                  ; [INTERNET] ya se miró si está el Navegador (grupo «Internet»)
 inet_ruta   resb 100
+inet2_hecho resd 1                  ; [NETSURF] ya se miró si está el Navegador completo
 pr_hecho    resd 1                  ; [0.9.22] Principal ya sin Editar, Gestor ni Información (SinRepetidos)
 tp_hecho    resd 1                  ; [TAREAS] el Administrador de tareas ya pasó a Principal (TareasPrincipal)
 jd_tam      resd BP_MAXCAND         ; tamaño de cada candidato de bp_carpeta

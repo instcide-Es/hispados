@@ -34,6 +34,7 @@ typedef struct Pedido {
   unsigned enviado;         /* lo del cuerpo que ya ha ido a NetSurf */
   int con_cab;              /* ya se le han dado las cabeceras */
   int abortado, en_uso;
+  int de_golpe;             /* HTML: el cuerpo entero de una vez (ver cabeceras) */
 } Pedido;
 
 static Pedido *cola, *activo;
@@ -177,6 +178,9 @@ static bool cabeceras(Pedido *p) {
     if (n >= sizeof linea) n = sizeof linea - 1;
     memcpy(linea, l, n); linea[n] = 0;
     if (!strncasecmp(linea, "Location:", 9)) { loc = l + 9; while (*loc == ' ') loc++; }
+    /* una página HTML se le da a NetSurf entera, no a trozos: con los trozos
+     * de la red, un <style> partido entre dos se perdía (la hoja no se leía) */
+    if (!strncasecmp(linea, "Content-Type:", 13) && strstr(linea, "html")) p->de_golpe = 1;
     m.type = FETCH_HEADER;
     m.data.header_or_data.buf = (const uint8_t *)linea;
     m.data.header_or_data.len = n;
@@ -269,7 +273,7 @@ static void r_sondea2(void) {
     if (p->con_cab) {
       unsigned n;
       const unsigned char *d = rh_datos(p->r, &n);
-      if (n > p->enviado) {
+      if (n > p->enviado && (!p->de_golpe || k == 1)) {
         fetch_msg m;
         m.type = FETCH_DATA;
         m.data.header_or_data.buf = d + p->enviado;

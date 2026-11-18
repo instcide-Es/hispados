@@ -18,16 +18,16 @@ SURF_NSCF = -Iw32/surf -Iw32/surf/ns -I$(SURF_T)/netsurf -I$(SURF_T)/netsurf/inc
   -DNETSURF_BUILTIN_VERBOSE_FILTER=\"\" '-DNETSURF_UA_FORMAT_STRING="HispaSurf/0.1 (%s; NetSurf %d.%d)"'
 # (SURF_REGISTRO=INFO para ver en NS.LOG lo que hace NetSurf: ver NAVEGADOR2.md)
 SURF_REGISTRO ?= WARNING
-SURF_UA = '-DHTTP_AGENTE="HispaSurf/0.1 (Hispa-486; NetSurf 3.11)"'
+SURF_UA = '-DHTTP_AGENTE="HispaSurf/0.1 (NetSurf 3.11; Hispa-DOS 486)"'
 surf_cf = $(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
   -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src)))
 $(B)/surf/%.o: %.c
 	@mkdir -p $(dir $@)
 	@nice -n 19 gcc $(SURF_CF) $(call surf_cf,$<) -c $< -o $@
-$(B)/surf/http.o: w32/navega/http.c w32/navega/nav.h | $(B)
+$(B)/surf/http.o: w32/navega/http.c w32/navega/nav.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
-$(B)/surf/red_http.o: w32/surf/red_http.c w32/surf/rh.h w32/navega/nav.h | $(B)
+$(B)/surf/red_http.o: w32/surf/red_http.c w32/surf/rh.h w32/navega/nav.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
 $(B)/NAVEGA2.EXE: $(SURF_OBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py

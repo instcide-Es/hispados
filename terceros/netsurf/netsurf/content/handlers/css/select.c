@@ -31,6 +31,9 @@
 #include "css/internal.h"
 #include "css/hints.h"
 #include "css/select.h"
+#ifdef nshispa
+#include "cssvar.h" /* [HISPA] */
+#endif
 
 static css_error node_name(void *pw, void *node, css_qname *qname);
 static css_error node_classes(void *pw, void *node,
@@ -174,7 +177,21 @@ css_stylesheet *nscss_create_inline_style(const uint8_t *data, size_t len,
 		return NULL;
 	}
 
+#ifdef nshispa
+	/* [HISPA] las variables de CSS (var()), que libcss no entiende: w32/surf/cssvar.c */
+	{
+		size_t n2;
+		char *x = cssvar_estilo((const char *) data, len, &n2);
+		if (x != NULL) {
+			error = css_stylesheet_append_data(sheet, (const uint8_t *) x, n2);
+			free(x);
+		} else {
+			error = css_stylesheet_append_data(sheet, data, len);
+		}
+	}
+#else
 	error = css_stylesheet_append_data(sheet, data, len);
+#endif
 	if (error != CSS_OK && error != CSS_NEEDDATA) {
 		NSLOG(netsurf, INFO, "failed appending data: %d", error);
 		css_stylesheet_destroy(sheet);

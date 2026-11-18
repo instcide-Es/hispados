@@ -62,7 +62,7 @@ int _putenv(const char *);
 /* ---- cadenas ---- */
 int strcasecmp(const char *a, const char *b) { return _stricmp(a, b); }
 int strncasecmp(const char *a, const char *b, size_t n) { return n ? _strnicmp(a, b, n) : 0; }
-char *strdup(const char *s) { return _strdup(s); }
+char *strdup(const char *s) { size_t l = strlen(s) + 1; char *d = malloc(l); if (d) memcpy(d, s, l); return d; }   /* (con el malloc de memoria.c) */
 size_t strnlen(const char *s, size_t n) { size_t i = 0; while (i < n && s[i]) i++; return i; }
 void *memrchr(const void *s, int c, size_t n) {
   const unsigned char *p = (const unsigned char *)s + n;
@@ -183,7 +183,7 @@ int setenv(const char *n, const char *v, int o) {
 int unsetenv(const char *n) { char b[300]; snprintf(b, sizeof b, "%s=", n); return _putenv(b); }
 int open(const char *n, int m, ...) { return _open(n, m | O_BINARY, 0x180); }
 int uname(struct utsname *u) {
-  strcpy(u->sysname, "Hispa-486"); strcpy(u->nodename, "hispa486"); strcpy(u->release, "0.9");
+  strcpy(u->sysname, "Hispa-DOS"); strcpy(u->nodename, "hispa486"); strcpy(u->release, "0.9");
   strcpy(u->version, "Hispa-DOS"); strcpy(u->machine, "i486");
   return 0;
 }

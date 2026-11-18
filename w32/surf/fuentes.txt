@@ -596,3 +596,5 @@ w32/surf/ns/plot.c
 w32/surf/ns/schedule.c
 w32/surf/red.c
 w32/surf/surf.c
+w32/surf/cssvar.c
+w32/surf/memoria.c

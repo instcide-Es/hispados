@@ -118,6 +118,8 @@ cfg_claves:
         dd tp_hecho, k_tareaspr
         db 1, T_NUM, 0, 0           ; [INTERNET]
         dd inet_hecho, k_internet
+        db 1, T_NUM, 0, 0           ; [NETSURF] el Navegador completo
+        dd inet2_hecho, k_internet2
         db 1, T_CAD, 119, 0         ; [ARCHIVOS] el módulo que se abre al volver
         dd cen_reabrir, k_reabrir
         db 2, T_GDIR, 0, 0
@@ -586,6 +588,11 @@ cfg_cargar:
         jz .h3i
         mov dword [cfg_len], 0
 .h3i:
+        call inet2_arranque         ; [NETSURF] y el Navegador completo, una vez
+        test eax, eax
+        jz .h3n
+        mov dword [cfg_len], 0
+.h3n:
         call pr_limpiar             ; [0.9.22] una sola vez
         test eax, eax
         jz .h3b

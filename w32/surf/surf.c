@@ -47,6 +47,7 @@
 
 #include "surf.h"
 #include "rh.h"
+#include "cssvar.h"
 
 /* ---- lo justo de USER32, GDI32 y KERNEL32 ---- */
 #define WINAPI __attribute__((stdcall))
@@ -495,7 +496,15 @@ static nserror v_url(struct gui_window *g, struct nsurl *u) {
   repinta_barras();
   return NSERROR_OK;
 }
-static void v_estado(struct gui_window *g, const char *t) { surf_reg("estado: %s", t); if (g == actual) surf_estado(t); }
+void memoria_cuenta(unsigned *bloques, unsigned *ahora, unsigned *max);
+static void v_estado(struct gui_window *g, const char *t) {
+  if (registro) {
+    unsigned b, a, m;
+    memoria_cuenta(&b, &a, &m);
+    surf_reg("estado: %s  [memoria: %u KB pedidos, %u KB en uso, %u KB lo más]", t, b, a, m);
+  }
+  if (g == actual) surf_estado(t);
+}
 static void v_puntero(struct gui_window *g, enum gui_pointer_shape s) {
   (void)g;
   SetCursor(LoadCursorA(NULL, s == GUI_POINTER_CARET ? 32513 : s == GUI_POINTER_WAIT || s == GUI_POINTER_PROGRESS ? 32514
@@ -807,7 +816,7 @@ static nserror opciones(struct nsoption_s *d) {
   (void)d;
   nsoption_set_bool(core_select_menu, true);
   nsoption_set_bool(enable_javascript, false);
-  nsoption_set_int(memory_cache_size, 2 * 1024 * 1024);
+  nsoption_set_int(memory_cache_size, 1024 * 1024);   /* (1 MB: en 16 MB de memoria cuenta) */
   nsoption_set_int(max_fetchers, 8);
   nsoption_set_int(max_fetchers_per_host, 4);
   nsoption_set_int(max_cached_fetch_handles, 2);

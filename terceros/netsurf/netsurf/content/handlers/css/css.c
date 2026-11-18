@@ -34,6 +34,9 @@
 #include "desktop/system_colour.h"
 
 #include "css/css.h"
+#ifdef nshispa
+#include "cssvar.h" /* [HISPA] */
+#endif
 #include "css/hints.h"
 #include "css/internal.h"
 
@@ -254,6 +257,11 @@ nscss_process_data(struct content *c, const char *data, unsigned int size)
 {
 	nscss_content *css = (nscss_content *) c;
 	css_error error;
+#ifdef nshispa
+	/* [HISPA] la hoja se lee entera al final (nscss_convert): así se pueden
+	 * cambiar antes sus variables (var(), w32/surf/cssvar.c) */
+	return true;
+#endif
 
 	error = nscss_process_css_data(&css->data, data, size);
 	if (error != CSS_OK && error != CSS_NEEDDATA) {
@@ -289,6 +297,26 @@ bool nscss_convert(struct content *c)
 	nscss_content *css = (nscss_content *) c;
 	css_error error;
 
+#ifdef nshispa
+	/* [HISPA] ahora, la hoja entera, con las variables ya cambiadas */
+	{
+		size_t n, n2;
+		const uint8_t *d = content__get_source_data(c, &n);
+		char *x = d != NULL ? cssvar_expande((const char *) d, n, &n2) : NULL;
+		if (x != NULL) {
+			error = nscss_process_css_data(&css->data, x, n2);
+			free(x);
+		} else if (d != NULL && n > 0) {
+			error = nscss_process_css_data(&css->data, (const char *) d, n);
+		} else {
+			error = CSS_OK;
+		}
+		if (error != CSS_OK && error != CSS_NEEDDATA) {
+			content_broadcast_error(c, NSERROR_CSS, NULL);
+			return false;
+		}
+	}
+#endif
 	error = nscss_convert_css_data(&css->data);
 	if (error != CSS_OK) {
 		content_broadcast_error(c, NSERROR_CSS, NULL);

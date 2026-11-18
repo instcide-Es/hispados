@@ -1285,4 +1285,79 @@ inet_guardar:
         mov esi, k_internet
         call pon_clave_num
 .x:
+        mov eax, [inet2_hecho]      ; [NETSURF]
+        test eax, eax
+        jz .x2
+        mov esi, k_internet2
+        call pon_clave_num
+.x2:
+        ret
+
+; =============================================================================
+;  [NETSURF] El acceso al Navegador completo (NAVEGA2.EXE, NetSurf:
+;  docs/486/NAVEGADOR2.md), en el grupo «Internet» (si no está, se crea). Como
+;  el del Navegador, una sola vez (la clave Internet2 de [Centro]): si
+;  INTERNET\NAVEGA2.EXE está, al copiar el disquete «Internet 2».
+;  -> EAX = 1 si ha creado algo (hay que guardar CENTRO.INI)
+; =============================================================================
+k_internet2 db "Internet2", 0
+ti_acceso2  db "Navegador completo", 0
+ti_ruta3    db "INTERNET\NAVEGA2.EXE", 0
+ti_ruta4    db "NAVEGA2.EXE", 0
+inet2_arranque:
+        pushad
+        xor ebp, ebp
+        cmp dword [inet2_hecho], 0
+        jne .x
+        mov ebx, ti_ruta3
+        call inet_arranque.prueba
+        jnc .hay
+        mov ebx, ti_ruta4
+        call inet_arranque.prueba
+        jc .x
+.hay:
+        mov eax, [gr_tabla]         ; el grupo «Internet», si ya está
+        xor edx, edx
+.b:
+        cmp byte [eax+GR_USO], 0
+        je .sig
+        lea esi, [eax+GR_NOMBRE]
+        mov edi, ti_grupo
+        call cad_igual_i
+        je .grupo
+.sig:
+        add eax, GR_TAM
+        inc edx
+        cmp edx, MAX_GR
+        jb .b
+        call gr_nuevo               ; si no, uno nuevo: EAX = el grupo, EDX = su número
+        test eax, eax
+        jz .x
+        lea edi, [eax+GR_NOMBRE]
+        mov esi, ti_grupo
+        mov ecx, 27
+        call cad_copiar
+.grupo:
+        call ac_nuevo
+        test eax, eax
+        jz .marca
+        mov ebx, eax
+        lea edi, [ebx+AC_PROG]
+        mov esi, inet_ruta
+        mov ecx, 79
+        call cad_copiar
+        lea edi, [ebx+AC_NOMBRE]
+        mov esi, ti_acceso2
+        mov ecx, 31
+        call cad_copiar
+        mov byte [ebx+AC_ICONO], 0
+        mov eax, [inet_ruta]
+        and eax, 0x00FFFFFF
+        mov [ebx+AC_DIR], eax
+.marca:
+        mov dword [inet2_hecho], 1
+        inc ebp
+.x:
+        mov [esp+28], ebp
+        popad
         ret
