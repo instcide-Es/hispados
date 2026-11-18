@@ -23,6 +23,9 @@ trap 'rm -rf "$T"' EXIT
 fail=0
 Q="qemu-system-i386 -display none -serial stdio -monitor none"
 send() { sleep "${2:-0.8}"; printf '%s\r' "$1"; }
+# esperar (como mucho $3 s) a que el registro $1 tenga $2 veces el texto $4
+# (en CP437: solo letras ASCII)
+espera() { local i=0; while [ "$(grep -aoF -- "$4" "$1" 2>/dev/null | wc -l)" -lt "$2" ] && [ $i -lt $(( $3 * 2 )) ]; do sleep 0.5; i=$((i + 1)); done; }
 conv() { tr -d '\r' < "$1" | iconv -f CP437 -t UTF-8 > "$1.txt"; }
 check() { if grep -qF -- "$2" "$1.txt"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi; }
 checkn() { if grep -qF -- "$2" "$1.txt"; then echo "  FAIL (no debía salir) $2"; fail=1; else echo "  OK   sin «$2»"; fi; }
@@ -65,7 +68,7 @@ fsck() {  # disco partición nombre
   rm -f $T/p.img
 }
 boot_c() {  # disco registro
-  { sleep 4; send "VER" 1; send "DIR" 2; send "MEM" 2; sleep 1; } |
+  { sleep 4; send "VER" 1; send "DIR" 2; send "MEM" 2; send "APAGAR" 1; sleep 3; } |
     timeout 25 $Q -drive file="$1",format=raw,if=ide -boot c -no-reboot > "$2" 2>&1
   conv "$2"
 }
@@ -81,7 +84,8 @@ truncate -s 4G $T/d4.img
   send "N" 2
   printf '\033'; sleep 1
   send "FDISK /FAT32 /PRI" 3
-  send "FORMAT C: /S /V:GRANDE /AUTOTEST" 15
+  send "FORMAT C: /S /V:GRANDE /AUTOTEST" 1
+  espera $T/l1 1 120 "n disponibles en el disco"
   send "C:" 1
   send "MD DOCS" 1
   send "COPY A:\\COMMAND.COM C:\\DOCS\\OTRO.COM" 3
@@ -89,10 +93,12 @@ truncate -s 4G $T/d4.img
   send "DIR" 2
   send "ETIQUETA C:NUEVA" 2
   send "VOL C:" 1
-  send "REVISAR C:" 6
+  send "REVISAR C:" 1
+  espera $T/l1 2 120 "n disponibles en el disco"
   send "A:" 1
-  sleep 1
-} | timeout 90 $Q -drive file=$T/f.img,format=raw,if=floppy \
+  send "A:\\HISPADOS\\APAGAR" 1
+  sleep 3
+} | timeout 400 $Q -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/d4.img,format=raw,if=ide -boot a -no-reboot > $T/l1 2>&1
 conv $T/l1
 boot_c $T/d4.img $T/l1b
@@ -124,11 +130,13 @@ show $T/l1 $T/l1b
 truncate -s 0 $T/d4.img; truncate -s 4G $T/d4.img
 { sleep 4
   send "FDISK /FAT32 /PRI" 3
-  send "FORMAT C: /AUTOTEST" 12
+  send "FORMAT C: /AUTOTEST" 1
+  espera $T/l2 1 120 "n disponibles en el disco"
   send "SYS C:" 4
   send "FDISK /ARRANQUE:C:" 3
-  sleep 1
-} | timeout 40 $Q -drive file=$T/f.img,format=raw,if=floppy \
+  send "A:\\HISPADOS\\APAGAR" 1
+  sleep 3
+} | timeout 200 $Q -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/d4.img,format=raw,if=ide -boot a -no-reboot > $T/l2 2>&1
 conv $T/l2
 boot_c $T/d4.img $T/l2b
@@ -148,12 +156,15 @@ truncate -s 40G $T/d40.img
   send "FDISK /FAT32 /EXT" 3
   send "FDISK /FAT32 /LOG" 3
   send "FDISK /STATUS" 2
-  send "FORMAT C: /S /V:PRIMARIA /AUTOTEST" 15
-  send "FORMAT D: /V:LOGICA /AUTOTEST" 15
+  send "FORMAT C: /S /V:PRIMARIA /AUTOTEST" 1
+  espera $T/l3 1 200 "n disponibles en el disco"
+  send "FORMAT D: /V:LOGICA /AUTOTEST" 1
+  espera $T/l3 2 200 "n disponibles en el disco"
   send "COPY A:\\COMMAND.COM D:\\" 3
   send "DIR D:" 2
-  sleep 1
-} | timeout 90 $Q -drive file=$T/f.img,format=raw,if=floppy \
+  send "A:\\HISPADOS\\APAGAR" 1
+  sleep 3
+} | timeout 500 $Q -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/d40.img,format=raw,if=ide -boot a -no-reboot > $T/l3 2>&1
 conv $T/l3
 echo "== Hispa-DOS FAT32: disco de 40 GB (primaria y lógica) =="
@@ -171,14 +182,17 @@ rm -f $T/d40.img
 truncate -s 200G $T/d200.img
 { sleep 4
   send "FDISK /FAT32 /PRI" 3
-  send "FORMAT C: /S /V:ENORME /AUTOTEST" 35
+  send "FORMAT C: /S /V:ENORME /AUTOTEST" 1
+  espera $T/l4 1 300 "n disponibles en el disco"
   send "C:" 1
   send "MD DOCS" 1
   send "COPY A:\\COMMAND.COM C:\\DOCS\\OTRO.COM" 3
   send "DIR" 2
-  send "REVISAR C:" 25
-  sleep 1
-} | timeout 120 $Q -drive file=$T/f.img,format=raw,if=floppy \
+  send "REVISAR C:" 1
+  espera $T/l4 2 300 "n disponibles en el disco"
+  send "A:\\HISPADOS\\APAGAR" 1
+  sleep 3
+} | timeout 700 $Q -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/d200.img,format=raw,if=ide -boot a -no-reboot > $T/l4 2>&1
 conv $T/l4
 boot_c $T/d200.img $T/l4b
@@ -219,9 +233,11 @@ mcopy -i $T/f.img ::COMMAND.COM $T/COMMAND.COM
   send "DEL HOLA.TXT" 1
   send "REN AZAR.BIN AZAR2.BIN" 1
   send "DIR" 2
-  send "REVISAR" 6
-  sleep 1
-} | timeout 60 $Q -drive file=$T/f.img,format=raw,if=floppy \
+  send "REVISAR" 1
+  espera $T/l5 1 120 "n disponibles en el disco"
+  send "A:\\HISPADOS\\APAGAR" 1
+  sleep 3
+} | timeout 300 $Q -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/lx.img,format=raw,if=ide -boot a -no-reboot > $T/l5 2>&1
 conv $T/l5
 echo "== Hispa-DOS FAT32: disco de mkfs.fat =="
@@ -258,7 +274,7 @@ t = e2[b'DENTRO  TXT']
 s[t+20:t+22] = r[a+20:a+22]; s[t+26:t+28] = r[a+26:a+28]
 f.seek(data + (docs-2)*spc*512); f.write(s)
 PY
-{ sleep 4; send "REVISAR C: /F" 8; sleep 1; } | timeout 30 $Q -drive file=$T/f.img,format=raw,if=floppy \
+{ sleep 4; send "REVISAR C: /F" 1; espera $T/l6 1 120 "n disponibles en el disco"; send "A:\\HISPADOS\\APAGAR" 1; sleep 3; } | timeout 200 $Q -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/lx.img,format=raw,if=ide -boot a -no-reboot > $T/l6 2>&1
 conv $T/l6
 echo "== Hispa-DOS FAT32: REVISAR con errores =="
