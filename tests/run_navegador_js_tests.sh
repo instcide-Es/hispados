@@ -61,6 +61,8 @@ if tests/navjs/hazlo.sh > $T/hazlo.log 2>&1; then
   tiene cuad "ALERT: Aviso de la página"
   tiene cuad "(submit impedido)"
   tiene cuad "ENVIA: POST http://127.0.0.1:$P/js/envio dato=uno"
+  tiene cuad "CONFIRM: ¿Enviar el formulario?"
+  notiene cuad "_cg_sin_js"
   tiene cuad "[error] ReferenceError: 'noExiste' is not defined"
   an cuad2 /js/cuadros raiz
   tiene cuad2 "Visitas: 2"

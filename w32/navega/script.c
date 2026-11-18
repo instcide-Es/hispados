@@ -1136,7 +1136,14 @@ static int pide_js(const Nodo *n) {
 static void recoge(Nodo *n, int diferidos) {
   Nodo *h;
   if (n->texto) return;
-  if (n->etq == E_NOSCRIPT && !diferidos) dom_pon_atr(n, "hidden", "");
+  /* con JavaScript, <noscript> es como si fuera texto: lo de dentro ni se ve
+   * ni existe (sus <input> no van en el formulario: ClicGest pone ahí
+   * «_cg_sin_js» para preguntar él cuando no hay confirm()) */
+  if (n->etq == E_NOSCRIPT && !diferidos) {
+    dom_pon_atr(n, "hidden", "");
+    while (n->hijo) dom_quita(n->hijo);
+    return;
+  }
   if (n->etq == E_SCRIPT && es_js(n)) {
     int dif = atr(n, "src") && (atr(n, "defer") || atr(n, "async") || ((atr(n, "type") && !_stricmp(atr(n, "type"), "module"))));
     if (dif == diferidos) guion_nuevo(n);

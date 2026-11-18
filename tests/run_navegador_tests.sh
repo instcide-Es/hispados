@@ -222,7 +222,7 @@ pedido "GET /biblioteca | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul 
 pedido "GET /prestar?qs=garc | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |" "el formulario GET"
 pedido "POST /prestar | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | ficha=abc123&socio_id=2&marca=a%C3%B1o+%C2%AB%E2%82%AC%C2%BB&libro=3&nota=hola+luis%0D%0Ados&dias=15&avisar=si&accion=prestar |" \
   "el POST del préstamo: ocultos, lista, área de dos líneas, radio, casilla y botón; UTF-8"
-pedido "POST /devolver | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | ficha=abc123&libro=3&estado=bien |" "el POST de la devolución"
+pedido "POST /devolver | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | ficha=abc123&libro=3&estado=bien&_cg_sin_js=1 |" "el POST de la devolución (con JavaScript=NO, el <noscript> del formulario cuenta)"
 [ "$(grep -c '^POST /devolver' $T/pedidos.log)" = 1 ] && ok "con «No», la devolución no se envió" || ko "la devolución se envió $(grep -c '^POST /devolver' $T/pedidos.log) veces"
 [ "$(grep -c '^POST /prestar' $T/pedidos.log)" = 1 ] && ok "el botón de JavaScript no envió nada" || ko "el préstamo se envió $(grep -c '^POST /prestar' $T/pedidos.log) veces"
 grep -q "^GET /archivo.bin" $T/pedidos.log && ok "el archivo se pidió" || ko "el archivo no se pidió"

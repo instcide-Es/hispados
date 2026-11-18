@@ -205,6 +205,7 @@ class Pedido(BaseHTTPRequestHandler):
                 fs = ''.join('<li>%s (%s) <form method="post" action="/devolver" onsubmit="return confirm(\'&iquest;Seguro que lo han devuelto?\')">'
                              '<input type="hidden" name="ficha" value="%s"><input type="hidden" name="libro" value="%d">'
                              '<select name="estado"><option value="bien" selected>Bien</option><option value="desgaste">Con desgaste</option></select> '
+                             '<noscript><input type="hidden" name="_cg_sin_js" value="1"></noscript>'   # (como ClicGest: sin JavaScript, cuenta)
                              '<button type="submit">Devuelto</button></form></li>' % (LIBROS[n][0], SOCIOS[p[0]], FICHA, n)
                              for n, p in prestamos.items())
             self.manda(pagina('Devolver - Biblioteca de pruebas', '<h1>Devolver</h1>'
