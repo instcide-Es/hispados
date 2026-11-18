@@ -1,0 +1,21 @@
+QuickJS 2026-06-04 (Fabrice Bellard y Charlie Gordon), licencia MIT: ver LICENSE.
+https://bellard.org/quickjs/  -  quickjs-2026-06-04.tar.xz
+SHA-256: b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
+
+Es el motor de JavaScript de HSPJS.DLL de Hispa-486 (w32/js, el Navegador:
+docs/486/NAVEGADOR.md, «JavaScript»). Aquí va solo lo que se compila (el
+motor, las expresiones regulares, Unicode, dtoa y cutils), qjsc.c (para
+hacer código ya compilado en el anfitrión) y unas pruebas de tests/ (las que
+no piden quickjs-libc: el lenguaje, clausuras, bucles, lo de serie, BigInt).
+Sin quickjs-libc.c (el «std» y el «os» de qjs): HSPJS.DLL pone lo suyo.
+
+Un solo cambio en quickjs.c (línea 71, marcado «[Hispa-486]»): con
+CONFIG_SIN_HILOS no se define CONFIG_ATOMICS (Atomics.wait y los
+SharedArrayBuffer entre hilos piden pthreads, que Hispa-486 no tiene).
+
+Se compila con las opciones del Makefile (QJSCF): sin biblioteca del sistema
+(las cabeceras mínimas de w32/js/inc), para i486 (el x87 para la coma
+flotante; la DLL lo pone a 53 bits, como Windows), -fwrapv y -funsigned-char
+como pide QuickJS. Lo que QuickJS pide a la biblioteca de C y no está en
+MSVCRT.DLL lo pone w32/js/hspjs.c (memoria, divisiones de 64 bits, salida,
+hora) y w32/js/mates.c (Math).

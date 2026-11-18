@@ -176,6 +176,30 @@ $(B)/internet.img: $(INTERNET) w32/navega/NAVEGA.INI w32/navega/LEEME.TXT
 	iconv -f UTF-8 -t CP437 w32/navega/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet_leeme.txt
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet_leeme.txt ::LEEME.TXT
 internet: $(B)/internet.img
+# [JS] HSPJS.DLL: JavaScript para los programas Hispa32 (QuickJS, que va en
+# terceros/quickjs con su licencia MIT, más w32/js: memoria, hora, Math) y
+# JS.EXE, la consola para probarlo. docs/486/NAVEGADOR.md, «JavaScript»
+QJSCF = -m32 -march=i486 -O2 -ffreestanding -fbuiltin -nostdinc -isystem $(shell gcc -print-file-name=include) -Iw32/js/inc \
+  -Iterceros/quickjs -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-tree-loop-distribute-patterns \
+  -fno-common -fwrapv -funsigned-char -ffunction-sections -fdata-sections \
+  -DCONFIG_VERSION=\"$(shell cat terceros/quickjs/VERSION)\" -DCONFIG_SIN_HILOS -D_GNU_SOURCE
+QJSSRC = quickjs libregexp libunicode cutils dtoa
+QJSOBJ = $(patsubst %,$(B)/qjs/%.o,$(QJSSRC)) $(B)/qjs/hspjs.o $(B)/qjs/mates.o
+$(B)/qjs/%.o: terceros/quickjs/%.c terceros/quickjs/quickjs.h | $(B)
+	@mkdir -p $(B)/qjs
+	nice -n 19 gcc $(QJSCF) -c $< -o $@
+$(B)/qjs/%.o: w32/js/%.c | $(B)
+	@mkdir -p $(B)/qjs
+	gcc $(QJSCF) -Wall -c $< -o $@
+$(B)/HSPJS.DLL: $(QJSOBJ) $(B)/MSVCRT.DLL tools/elf2pe.py
+	ld -m elf_i386 -r -o $(B)/qjs/todo0.o $(QJSOBJ)
+	nm -g --defined-only $(B)/qjs/todo0.o | awk '$$3 ~ /^(_*JS_|Hj)/ {print $$3}' | sort -u > $(B)/qjs/exporta.txt
+	ld -m elf_i386 -r --gc-sections -e DllMain $$(sed 's/^/-u /' $(B)/qjs/exporta.txt) -o $(B)/qjs/todo.o $(QJSOBJ)
+	python3 tools/elf2pe.py --dll --exp $$(paste -sd, $(B)/qjs/exporta.txt) -o $@ -l $(B)/MSVCRT.DLL $(B)/qjs/todo.o
+$(B)/JS.EXE: w32/js/js.c $(B)/crt0.o $(B)/HSPJS.DLL $(B)/MSVCRT.DLL tools/elf2pe.py | $(B)
+	gcc $(QJSCF) -Wall -c $< -o $(B)/qjs/js.o
+	python3 tools/elf2pe.py -o $@ -l $(B)/HSPJS.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/qjs/js.o
+js: $(B)/HSPJS.DLL $(B)/JS.EXE
 # [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
 # Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
 $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
