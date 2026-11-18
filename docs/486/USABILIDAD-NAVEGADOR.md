@@ -82,12 +82,15 @@ texto) lo lleva otra sesión. Detalle en docs/486/NAVEGADOR.md; pruebas en
 | M2 | «Atrás» vuelve arriba | **Hecho:** Atrás, Adelante y Recargar vuelven a la fila donde se estaba |
 | M3 | la página salta con una imagen sin medidas | **Hecho:** con `width`/`height` se reserva el hueco; sin ellas, lo que se mira no se mueve |
 | M4 | los campos enseñan el final | **Hecho:** sin el foco, desde la primera letra; ancho por omisión 40 letras; `size` y `width` (px, ch, em, %) se respetan |
-| M5 | la rueda | ver M11 (HSPRATON) |
+| M5 | la rueda | **Hecho:** HSPRATON sin opciones sondea por la BIOS si es un IntelliMouse y entonces pasa a la vía directa (con rueda); si no va, vuelve a la BIOS. El AUTOEXEC.BAT no cambia; en QEMU llegan la rueda del PS/2 y la del USB (`tests/run_rueda_tests.sh`, sesión 1c). `/BIOS` deja lo de antes |
 | M6, M7 | teclas mientras carga; no se nota que carga | **Hecho:** se guardan y van a la página nueva (letras al campo con autofocus, Tab, Intro, Av Pág...); línea de estado en ocre con «Espere, por favor», cursor de reloj y «Parar» |
 | M10 | un `[botón]` partido en dos líneas | **Hecho** |
-| M11 | llegar y salir | ver la parte de Hispa-486 (icono «Biblioteca», «Apagar el equipo» por omisión) |
+| G4 (Lector) | imprimir un PDF | **Hecho:** «Imprimir esta página (como se ve)» (Ctrl+P, el botón de la impresora): la página pintada como en pantalla, a su tamaño (72 ppp), en ESC/P de agujas por LPT1; el texto y las barras, negro macizo; lo gris, tramado. «Imprimir solo el texto», en el menú (docs/OFICINA.md) |
+| M11 | llegar y salir | **Hecho:** en el escritorio de Hispa-486, un icono grande **«Biblioteca»** que abre el Navegador con un clic (o Intro) en la página `Inicio=` de NAVEGA.INI, que ahora es `https://clicgest.es/biblioteca` (si ya está abierto, lo trae delante); los iconos del escritorio son un grupo de CENTRO.INI con `Escritorio=1` (docs/VENTANAS.md). En «Salir de Hispa Ventanas» de Hispa-486, **«Apagar el equipo»** va arriba, con el foco, e Intro apaga |
 
-Queda: medir dónde se van los 5 s por página (G3); el cuadro de abrir
+Queda: medir dónde se van los 5 s por página (G3); el menú de arranque
+sin espera y el Navegador abierto solo al arrancar (M11); un icono propio
+(un libro) para «Biblioteca»; el cuadro de abrir
 (M10: carpeta, filtro de imágenes con `accept`); el punto suelto de una
 lista sin imagen y el subrayado de las tarjetas-enlace (M10); probarlo en un
 486 y una impresora de verdad.
