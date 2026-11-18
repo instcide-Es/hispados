@@ -102,7 +102,7 @@ $(B)/PEFALTA.EXE: tests/progs/pehola.asm | $(B)
 	$(NASM) -f bin -DFALTA -o $@ $<
 # un Win32 hecho en C (gcc -m32 y tools/elf2pe.py); si no hay gcc de 32 bits,
 # la prueba lo salta
-CC32 = gcc -m32 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -fno-tree-loop-distribute-patterns
+CC32 = gcc -m32 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -fno-tree-loop-distribute-patterns
 $(B)/HOLAC.EXE: tests/progs/holac.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/holac.o
 	python3 tools/elf2pe.py -o $@ $(B)/holac.o
@@ -137,7 +137,7 @@ $(B)/REDPRUE.EXE: tests/progs/redprue.c $(B)/crt0.o $(B)/WSOCK32.DLL $(B)/MSVCRT
 	python3 tools/elf2pe.py -o $@ -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/redprue.o
 # HSPTLS.DLL: TLS 1.2 de cliente (w32/tls/hsptls.c sobre BearSSL, que va en
 # terceros/bearssl con su licencia MIT) y HTTPS.EXE, la descarga de consola
-BEARCF = -m32 -march=i486 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+BEARCF = -m32 -std=gnu11 -march=i486 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
   -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections \
   -Iw32/inc -Iterceros/bearssl/inc -Iterceros/bearssl/src \
   -DBR_USE_URANDOM=0 -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 -DBR_USE_WIN32_RAND=0 -DBR_USE_GETENTROPY=0 \
@@ -282,7 +282,7 @@ $(B)/WIFI.COM: utils/wifi.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 WIFI_INC = -Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/brcminc \
            -Iwifi/linux/brcmsmac -Iwifi/linux/brcmsmac/phy -Iwifi/linux/bcma -Iwifi/linux -Iwifi/nucleo
-WIFI_CF = -m32 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+WIFI_CF = -m32 -std=gnu11 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
           -fno-strict-aliasing -fno-common -mno-80387 -nostdinc -isystem $(shell gcc -m32 -print-file-name=include) \
           $(WIFI_INC) -D__HISPA__ -DCONFIG_BCMA_HOST_PCI -DCONFIG_BCMA_HOST_PCI_POSSIBLE -DCONFIG_BCMA_DRIVER_PCI
 WIFI_LINUX = $(wildcard wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil/*.c \
@@ -350,7 +350,7 @@ $(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) wifi/nucleo/nucleo.l
 	objcopy -O binary $(B)/wifichip/nucleo.elf $@
 # la prueba del anfitrión (tests/run_wifi_tests.sh)
 $(B)/prueba_wifi: tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c wifi/nucleo/nucleo.h | $(B)
-	gcc -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c
+	gcc -std=gnu11 -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
