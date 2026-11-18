@@ -305,8 +305,14 @@ w32_iniciar:
         popad
         ret
 ; ---- COLORREF (EAX = 00BBGGRR) -> AL=el color de la paleta de Hispa
-; Ventanas: el gris más cercano (232 a 255) o el del cubo de 6×6×6 (16 a 231) ----
+; Ventanas: el gris más cercano (232 a 255) o el del cubo de 6×6×6 (16 a 231);
+; con el octeto alto a 1 (la macro PALETTEINDEX de Windows), el propio índice ----
 w32_color:
+        test eax, 0x01000000        ; PALETTEINDEX(n): ese color de la paleta
+        jz .rgb                     ; (los 16 primeros, los de Hispa Ventanas)
+        movzx eax, al
+        ret
+.rgb:
         push ebx
         push ecx
         push edx

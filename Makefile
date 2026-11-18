@@ -158,6 +158,13 @@ $(B)/HSPTLS.DLL: w32/tls/hsptls.c w32/tls/anclas.h $(BEAROBJ) $(B)/WSOCK32.DLL $
 $(B)/HTTPS.EXE: w32/https.c $(B)/crt0.o $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL tools/elf2pe.py | $(B)
 	$(CC32) -march=i486 -Wall -c $< -o $(B)/https.o
 	python3 tools/elf2pe.py -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/https.o
+# El Navegador de Hispa-486 (docs/486/NAVEGADOR.md): programa Hispa32 de ventanas
+NAVSRC = w32/navega/navega.c w32/navega/pagina.c w32/navega/html.c w32/navega/http.c
+NAVOBJ = $(patsubst w32/navega/%.c,$(B)/nav_%.o,$(NAVSRC))
+$(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h | $(B)
+	$(CC32) -march=i486 -Wall -Wextra -Wno-parentheses -Wno-sign-compare -c $< -o $@
+$(B)/NAVEGA.EXE: $(NAVOBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
+	python3 tools/elf2pe.py --gui -e inicio_prog -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(NAVOBJ)
 # [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
 # Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
 $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)
