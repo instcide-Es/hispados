@@ -385,7 +385,7 @@ chip se porte como se cree. La prueba de verdad es la memoria USB de
 `tools/prueba-cable` (más abajo).
 
 Cómo está hecha (sección `.yukon` de `drivers/hspred.asm`, de quita y pon:
-1.512 octetos residentes solo si la tarjeta es ésta):
+1.516 octetos residentes solo si la tarjeta es ésta):
 
 - **Registros** (16 KB, BAR0, de 64 bits, en memoria): por **memoria** con
   el modo «irreal», como la e1000 (es lo que hace Linux, lo más seguro), o
@@ -1005,7 +1005,7 @@ existe y que después HSPRED se descarga (los programas soltaron la red).
 | HSPRED con la Marvell Yukon | de 16.368 a 18.928 (16.512 en la prueba) | de 9.840 a 12.400 (tres anillos, cada uno al principio de una página, y 4 búferes de recepción y uno de envío repartidos por los huecos, también el de antes del primer anillo) | — |
 
 La PCnet, la Tulip, el adaptador USB y la Yukon no les cuestan nada a las demás: su
-parte residente (582, 556, 152 y 1.512 octetos) va en cuatro secciones «de quita y
+parte residente (582, 556, 152 y 1.516 octetos) va en cuatro secciones «de quita y
 pon» del archivo, ensambladas las cuatro para la misma dirección (justo detrás de la pila), y la instalación
 deja en la memoria solo la de la tarjeta encontrada, si es una de ellas. Las
 otras cuatro siguen juntas en la parte común (se podrían pasar al mismo
@@ -1028,7 +1028,7 @@ se recorta (AH=4Ah) a lo que se usa. Cuando funcione en el equipo de verdad
 se podrá probar a quitar la alineación (y a usar 2 búferes de recepción en
 vez de 4): ver «Pendiente».
 
-El archivo `HSPRED.COM` ocupa 20,7 KB (14,6 antes de la Yukon, de los que
+El archivo `HSPRED.COM` ocupa 21,0 KB (14,6 antes de la Yukon, de los que
 1,5 son su parte residente y el resto su instalación, su informe de `/INFO`
 y `/DEPURA`; lo que no es residente se descarta al instalarse). Cada orden de red, de 6 a 8 KB (la pila TCP/IP
 va dentro).
@@ -1041,7 +1041,7 @@ comprueba que el bloque es continuo. Medido en QEMU con HSPEMM: `LH HSPRED`
 deja 5.008 octetos en la memoria superior (5.600 con la PCnet, 5.568 con la
 Tulip) y, con la RTL8139, 9.776 en la convencional (los búferes; 7.872 con
 la PCnet y 7.824 con la Tulip). Para cargarse arriba, `LH` necesita un hueco
-del tamaño del archivo (20,7 KB desde que lleva la Yukon; antes, 14,6); si no
+del tamaño del archivo (21,0 KB desde que lleva la Yukon; antes, 14,6); si no
 lo hay, se queda abajo.
 
 ## Pruebas
