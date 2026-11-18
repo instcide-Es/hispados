@@ -1,0 +1,313 @@
+; =============================================================================
+;  monton.cas - el montón del núcleo de Hispa-Pentium: memoria que el núcleo
+;  pide y devuelve mientras corre (las pilas de las tareas, sus fichas...).
+;  Vive en sus propias direcciones (desde 0xC0000000, paginas.cas): crece de
+;  página en página, poniendo marcos debajo según hace falta, y al soltar lo
+;  de arriba del todo, los devuelve.
+;
+;  Cada bloque va así:
+;
+;    cabecera (16 octetos)        lo pedido        relleno        pie (8)
+;    magia, tamaño, estado, pedido                 0xCD...        tamaño, magia
+;
+;  El tamaño (de todo el bloque) es múltiplo de 16, y queda siempre un
+;  relleno de 4 octetos por lo menos. Al soltar se comprueba todo (la magia
+;  de los dos lados, el estado, que el relleno siga intacto): un bloque que
+;  se suelta dos veces, un puntero que no es de un bloque o lo escrito más
+;  allá de lo pedido se dicen, y el montón no se toca. Los huecos vecinos se
+;  juntan siempre (no hay dos seguidos).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Monton
+
+    importar Paginas, Marcos, Cpu, Mem32, Formato
+
+    constante MAGIA = 0x4E4F4D48                ; «HMON»
+    constante MAGIA_PIE = 0x4549504D            ; «MPIE»
+    constante OCUPADO = 0x4F435550              ; «PUCO»
+    constante LIBRE = 0x4552424C                ; «LBRE»
+    constante SUELTO = 0x544C5553               ; la cabecera de un bloque que se ha juntado con otro hueco
+    constante RELLENO = 0xCD
+    constante CABECERA = 16
+    constante PIE = 8
+    constante MÍNIMO = 48                       ; lo más pequeño que se deja como hueco
+    constante MÁXIMO = 0x400000                 ; lo más que se pide de una vez
+
+    tipo Bloque = estructura
+        magia, tam, estado, pedido: nat32
+    fin
+    tipo Pie = estructura
+        tam, magia: nat32
+    fin
+
+    variable inicio, cima, mapeado, tope: nat32
+    variable listo: bool
+    público variable errores: nat32             ; los fallos que se han visto al soltar o al revisar
+    público variable reservas, liberaciones: nat32
+
+    función prepara()
+        inicio := MONTÓN_INICIO
+        cima := inicio
+        mapeado := inicio
+        tope := MONTÓN_INICIO + MONTÓN_TABLAS * 0x400000
+        listo := cierto
+    fin
+
+    función bloque(dir: nat32): puntero a Bloque
+        devolver puntero(dir)
+    fin
+
+    ; el tamaño y el estado del bloque que hay en dir
+    función tam_de(dir: nat32): nat32
+        variable b: puntero a Bloque
+        b := puntero(dir)
+        devolver b.tam
+    fin
+
+    función estado_de(dir: nat32): nat32
+        variable b: puntero a Bloque
+        b := puntero(dir)
+        devolver b.estado
+    fin
+
+    ; la cabecera de un bloque que deja de serlo (se junta con el de delante)
+    función suelta(dir: nat32)
+        variable b: puntero a Bloque
+        b := puntero(dir)
+        b.magia := SUELTO
+    fin
+
+    ; pone la cabecera y el pie de un bloque
+    función marca(dir: nat32, tam: nat32, estado: nat32, pedido: nat32)
+        variable b: puntero a Bloque
+        variable p: puntero a Pie
+        b := puntero(dir)
+        b.magia := MAGIA
+        b.tam := tam
+        b.estado := estado
+        b.pedido := pedido
+        p := puntero(dir + tam - PIE)
+        p.tam := tam
+        p.magia := MAGIA_PIE
+    fin
+
+    ; pone marcos debajo del montón hasta «hasta» (sin incluir)
+    función crece_hasta(final: nat32): bool
+        variable m: nat32
+        mientras mapeado < final hacer
+            m := reservar_marco()
+            si m = 0 entonces devolver falso fin
+            si no mapear(directorio_núcleo, mapeado, m, ESCRIBIR) entonces
+                soltar_marco(m)
+                devolver falso
+            fin
+            mapeado := mapeado + PÁGINA
+        fin
+        devolver cierto
+    fin
+
+    ; devuelve los marcos de encima de la cima
+    función mengua()
+        variable m: nat32
+        mientras mapeado - PÁGINA >= redondear(cima, PÁGINA) y mapeado > inicio hacer
+            mapeado := mapeado - PÁGINA
+            m := desmapear(directorio_núcleo, mapeado)
+            si m <> 0 entonces soltar_marco(m) fin
+        fin
+    fin
+
+    ; deja el bloque ocupado, con lo pedido, y el relleno detrás
+    función ocupa(dir: nat32, tam: nat32, n: nat32): puntero a byte
+        marca(dir, tam, OCUPADO, n)
+        llenar(puntero(dir + CABECERA + n), tam - CABECERA - PIE - n, RELLENO)
+        reservas := reservas + 1
+        devolver puntero(dir + CABECERA)
+    fin
+
+    ; pide n octetos. Da dónde están (alineados a 16), o nulo si no hay sitio.
+    ; Lo que hay dentro no está a cero.
+    público función reservar(n: nat32): puntero a byte
+        variable b, tam, t, último, f: nat32
+        variable p: puntero a Pie
+        variable r: puntero a byte
+        si n = 0 o n > MÁXIMO entonces devolver nulo fin
+        f := sin_interrupciones()
+        si no listo entonces prepara() fin
+        tam := redondear(n + CABECERA + PIE + 4, 16)
+        ; el primer hueco que valga
+        b := inicio
+        mientras b < cima hacer
+            t := tam_de(b)
+            si estado_de(b) = LIBRE y t >= tam entonces
+                si t - tam >= MÍNIMO entonces
+                    marca(b + tam, t - tam, LIBRE, 0)
+                sino
+                    tam := t
+                fin
+                r := ocupa(b, tam, n)
+                reponer(f)
+                devolver r
+            fin
+            b := b + t
+        fin
+        ; no hay: el montón crece (desde el último hueco, si lo hay)
+        último := cima
+        si cima > inicio entonces
+            p := puntero(cima - PIE)
+            si estado_de(cima - p.tam) = LIBRE entonces último := cima - p.tam fin
+        fin
+        si último + tam > tope o no crece_hasta(último + tam) entonces
+            reponer(f)
+            devolver nulo
+        fin
+        cima := último + tam
+        r := ocupa(último, tam, n)
+        reponer(f)
+        devolver r
+    fin
+
+    ; ¿está bien el bloque ocupado que hay en dir? Si no, lo dice (con «qué»:
+    ; quién mira) y da falso
+    función sano(dir: nat32, qué: puntero a byte): bool
+        variable b: puntero a Bloque
+        variable p: puntero a Pie
+        variable t: nat32
+        si dir < inicio o dir >= cima o dir yb 15 <> 0 entonces
+            imprimir2("*** montón (%s): 0x%08X no es de un bloque\n", nat32(qué), dir + CABECERA)
+            devolver falso
+        fin
+        b := puntero(dir)
+        si b.magia <> MAGIA entonces
+            imprimir2("*** montón (%s): la cabecera del bloque de 0x%08X está estropeada\n", nat32(qué), dir + CABECERA)
+            devolver falso
+        fin
+        t := b.tam
+        si t < CABECERA + PIE + 4 o t yb 15 <> 0 o dir + t > cima entonces
+            imprimir2("*** montón (%s): el tamaño del bloque de 0x%08X está estropeado\n", nat32(qué), dir + CABECERA)
+            devolver falso
+        fin
+        p := puntero(dir + t - PIE)
+        si p.magia <> MAGIA_PIE o p.tam <> t entonces
+            imprimir2("*** montón (%s): el pie del bloque de 0x%08X está estropeado\n", nat32(qué), dir + CABECERA)
+            devolver falso
+        fin
+        si b.estado = OCUPADO entonces
+            si b.pedido > t - CABECERA - PIE - 4 entonces
+                imprimir2("*** montón (%s): lo pedido del bloque de 0x%08X está estropeado\n", nat32(qué), dir + CABECERA)
+                devolver falso
+            fin
+            si no todo_igual(puntero(dir + CABECERA + b.pedido), t - CABECERA - PIE - b.pedido, RELLENO) entonces
+                imprimir3("*** montón (%s): se ha escrito más allá de los %u octetos del bloque de 0x%08X\n", nat32(qué), b.pedido, dir + CABECERA)
+                devolver falso
+            fin
+        sino si b.estado <> LIBRE entonces
+            imprimir2("*** montón (%s): el estado del bloque de 0x%08X está estropeado\n", nat32(qué), dir + CABECERA)
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; devuelve lo que dio reservar(). Da falso (y no toca nada) si p no es un
+    ; bloque ocupado o está estropeado.
+    público función liberar(p: puntero a byte): bool
+        variable dir, t, f, sig: nat32
+        variable pp: puntero a Pie
+        variable b: puntero a Bloque
+        si p = nulo entonces devolver cierto fin
+        f := sin_interrupciones()
+        si no listo entonces prepara() fin
+        dir := nat32(p) - CABECERA
+        si dir >= inicio y dir < cima y dir yb 15 = 0 entonces
+            b := puntero(dir)
+            si b.magia = SUELTO o (b.magia = MAGIA y b.estado = LIBRE) entonces
+                imprimir1("*** montón (liberar): el bloque de 0x%08X ya estaba libre (¿se suelta dos veces?)\n", nat32(p))
+                errores := errores + 1
+                reponer(f)
+                devolver falso
+            fin
+        fin
+        si no sano(dir, "liberar") entonces
+            errores := errores + 1
+            reponer(f)
+            devolver falso
+        fin
+        liberaciones := liberaciones + 1
+        t := tam_de(dir)
+        ; con el de detrás, si es un hueco
+        sig := dir + t
+        si sig < cima y estado_de(sig) = LIBRE entonces
+            t := t + tam_de(sig)
+            suelta(sig)
+        fin
+        ; y con el de delante
+        si dir > inicio entonces
+            pp := puntero(dir - PIE)
+            si estado_de(dir - pp.tam) = LIBRE entonces
+                suelta(dir)
+                dir := dir - pp.tam
+                t := t + pp.tam
+            fin
+        fin
+        marca(dir, t, LIBRE, 0)
+        si dir + t = cima entonces              ; el último: el montón baja
+            cima := dir
+            mengua()
+        fin
+        reponer(f)
+        devolver cierto
+    fin
+
+    ; recorre el montón entero comprobando cada bloque. Da cuántos fallos ha
+    ; visto (0: está bien) y deja en las variables lo que hay.
+    público variable ocupados, octetos, huecos, octetos_huecos: nat32
+    público función revisar(): nat32
+        variable dir, mal, f: nat32
+        variable b: puntero a Bloque
+        variable antes_libre: bool
+        f := sin_interrupciones()
+        si no listo entonces prepara() fin
+        ocupados := 0
+        octetos := 0
+        huecos := 0
+        octetos_huecos := 0
+        mal := 0
+        antes_libre := falso
+        dir := inicio
+        mientras dir < cima hacer
+            si no sano(dir, "revisar") entonces
+                mal := mal + 1
+                romper
+            fin
+            b := puntero(dir)
+            si b.estado = OCUPADO entonces
+                ocupados := ocupados + 1
+                octetos := octetos + b.pedido
+                antes_libre := falso
+            sino
+                si antes_libre entonces
+                    imprimir1("*** montón (revisar): dos huecos seguidos en 0x%08X\n", dir)
+                    mal := mal + 1
+                fin
+                huecos := huecos + 1
+                octetos_huecos := octetos_huecos + b.tam
+                antes_libre := cierto
+            fin
+            dir := dir + b.tam
+        fin
+        errores := errores + mal
+        reponer(f)
+        devolver mal
+    fin
+
+    ; lo que ocupa el montón (con cabeceras y huecos) y lo que tiene debajo
+    público función tamaño_montón(): nat32
+        si no listo entonces devolver 0 fin
+        devolver cima - inicio
+    fin
+
+    público función páginas_montón(): nat32
+        si no listo entonces devolver 0 fin
+        devolver (mapeado - inicio) div PÁGINA
+    fin
+
+fin Monton.

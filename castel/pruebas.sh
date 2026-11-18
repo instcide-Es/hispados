@@ -34,11 +34,17 @@
 #   8. Castel de 32 bits (CASTEL32.md): los ejemplos de 16 bits que no tocan
 #      el DOS, compilados como núcleo de 32 bits, escriben lo mismo; los de
 #      ejemplos32 (núcleos en QEMU y programas Hispa32 con HW32, si está el
-#      disquete de Hispa-DOS); cuentas al azar con las reglas de 32 bits; y la
-#      semilla de Hispa-Pentium (nucleo32): IDT, reloj, teclado, excepciones.
+#      disquete de Hispa-DOS), con la biblioteca de 32 bits (biblio32);
+#      cuentas al azar con las reglas de 32 bits; y la semilla de
+#      Hispa-Pentium (nucleo32): IDT, reloj, teclado, excepciones, la
+#      paginación con su fallo de página atendido, el montón (sin fugas, y
+#      viendo lo que lo estropea), las tareas que se alternan con el reloj,
+#      dormir y esperar, y los programas del anillo 3 con su llamada al
+#      sistema (y los que hacen lo que no deben, que se acaban).
 # Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
+#   SOLO=32 ./pruebas.sh          la primera y la octava (lo de 32 bits)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -74,6 +80,8 @@ if [ "${SOLO:-}" = errores ]; then
   exit $((fail > 0))
 fi
 
+# SOLO=32: solo la primera parte y la octava (los 32 bits)
+if [ "${SOLO:-}" != 32 ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -371,7 +379,7 @@ cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
 # de Hispa-Pentium y unas cuentas al azar (CASTEL32.md)
 cp $AQUI/ensamblador/formas32.asm $T/ens/formas32.asm
 python3 -I $AQUI/azar32.py 9 150 $T/ens/az32p.cas $T/ens/az32p.esp plano
-for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $T/ens/az32p.cas; do
+for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/u*.cas $T/ens/az32p.cas; do
   python3 -I $AQUI/ccastel.py $f -o $T/ens/$(basename $f .cas).asm > /dev/null 2>&1 || ko "$(basename $f) no compila"
 done
 rm -f $T/ens/az32p.cas $T/ens/az32p.esp
@@ -434,14 +442,17 @@ mkdir $A $A/ref $A/sal
 if python3 -I $AQUI/ccastel.py $AQUI/compilador/castel.cas -o $A/c1.asm > $T/comp.txt 2>&1 && nasm -f bin $A/c1.asm -o $A/CASTEL.EXE 2>> $T/comp.txt; then
   ok "paso 1: ccastel.py compila el compilador (castel.cas -> CASTEL.EXE, $(stat -c %s $A/CASTEL.EXE) octetos)"
 else ko "el compilador en Castel no compila: $(head -1 $T/comp.txt)"; fi
-# dos disquetes: en A: la biblioteca en \BIB, los módulos de ejemplo en \PARTES,
+# dos disquetes: en A: la biblioteca en \BIB (la de 32 bits en \BIB32), los
+# módulos de ejemplo en \PARTES, los de la semilla de Hispa-Pentium,
 # los ejemplos, la biblioteca entera (--todo), ENSAMBLA, los errores y el
 # temporal de CASTEL; en B:, lo que sale (el ensamblador de cada uno son, todos
 # juntos, más de un disquete si va con los fuentes: el de ENSAMBLA solo pasa de
 # 250 K)
 cp $H/build/hispa8086-1440.img $T/c.img
-mmd -i $T/c.img ::BIB ::PARTES
+mmd -i $T/c.img ::BIB ::PARTES ::BIB32
 for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+for f in $AQUI/biblioteca32/*.cas; do mcopy -i $T/c.img $f ::BIB32/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+for f in $AQUI/nucleo32/*.cas; do mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 mcopy -i $T/c.img $A/CASTEL.EXE ::
 mformat -C -f 1440 -i $T/cb.img ::
@@ -450,12 +461,12 @@ mformat -C -f 1440 -i $T/cb.img ::
   python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
   python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
   for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas \
-           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $A/azar32p.cas; do
+           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/u*.cas $A/azar32p.cas; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
-    mcopy -i $T/c.img $f ::$N.CAS
+    mcopy -o -i $T/c.img $f ::$N.CAS
     python3 -I $AQUI/ccastel.py $todo $f -o $A/ref/$N.ASM -I $AQUI/ejemplos/partes > /dev/null 2>&1
-    printf 'CASTEL %s.CAS -o B:%s.ASM -I BIB -I PARTES %s > B:%s.SAL\r\n' $N $N "$todo" $N
+    printf 'CASTEL %s.CAS -o B:%s.ASM -I BIB -I PARTES -I BIB32 %s > B:%s.SAL\r\n' $N $N "$todo" $N
   done
   i=0
   for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
@@ -488,7 +499,7 @@ for f in $A/ref/*.ASM; do
   N=$(basename $f .ASM)
   if cmp -s $f $A/sal/$N.ASM; then iguales=$((iguales + 1)); else distintos="$distintos $N"; fi
 done
-if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos de 16 y de 32 bits, biblioteca entera, ENSAMBLA, la semilla y tres de cuentas al azar)"
+if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos de 16 y de 32 bits, biblioteca entera, ENSAMBLA, la semilla con sus módulos, los programas de usuario y tres de cuentas al azar)"
 else ko "CASTEL no saca el mismo ensamblador que ccastel.py en:$distintos"; fi
 iguales=0
 distintos=
@@ -578,6 +589,8 @@ if [ -n "${AZAR:-}" ]; then
   done
 fi
 
+fi   # SOLO=32
+
 # ------------------------------------------------- 8. Castel de 32 bits
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
@@ -645,7 +658,7 @@ for s in 1 2; do
 done
 # la semilla de Hispa-Pentium: la IDT, el reloj, el teclado y las excepciones
 $AQUI/nucleo32/probar.sh "" ayuda hora :espera hora Hola teclas apagar > $P/semilla.sal 2>&1
-if grep -q "^órdenes: ayuda hora memoria teclas cero apagar" $P/semilla.sal && grep -q "^no conozco «Hola»" $P/semilla.sal \
+if grep -q "^órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N" $P/semilla.sal && grep -q "^no conozco «Hola»" $P/semilla.sal \
     && grep -q "^\[código 5\]" $P/semilla.sal; then ok "la semilla de Hispa-Pentium arranca, lee el teclado y entiende sus órdenes"
 else ko "la semilla de Hispa-Pentium no hace lo que debe:"; sed 's/^/        /' $P/semilla.sal | head -12; fi
 s1=$(grep "^llevo" $P/semilla.sal | head -1 | awk '{print $2 * 100 + $5}')
@@ -657,6 +670,51 @@ else ko "el teclado no cuenta bien las teclas: $(grep teclas $P/semilla.sal | ta
 $AQUI/nucleo32/probar.sh "" cero > $P/cero.sal 2>&1
 if grep -q "excepción 0: división por cero" $P/cero.sal && grep -q "^\[código 9\]" $P/cero.sal; then ok "una división por cero llega a su excepción (la 0, por la IDT)"
 else ko "la división por cero no llega a la excepción"; sed 's/^/        /' $P/cero.sal | head -6; fi
+# la memoria, las tareas y el anillo 3 (con los programas uhola, umalo y ucli
+# como módulos de multiboot)
+$AQUI/nucleo32/probar.sh "" memoria paginas toca monton estropear turnos dormir tareas programas \
+  "ejecutar 0" "ejecutar 1" "ejecutar 2" memoria apagar > $P/pentium.sal 2>&1
+S=$P/pentium.sal
+mira() {       # lo que se prueba, y las líneas que tienen que salir (expresiones de grep)
+  local que=$1 l; shift
+  for l in "$@"; do
+    if ! grep -q -- "$l" $S; then ko "$que: falta «$l»"; sed 's/^/        /' $S | grep -v '^ *$' | head -60 | tail -20; return; fi
+  done
+  ok "$que"
+}
+mira "la memoria: el mapa de multiboot da los marcos de 4 K (mapa de bits)" "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 3 programas de usuario" \
+  "^marcos: [0-9]* libres de 8160 "
+mira "la paginación está encendida (CR0.PG), con la identidad para el núcleo" "^paginación: activa (CR0 = 0x8" "^  identidad: de 0 a 0x01FDFFFF, 8160 páginas en 8 tablas"
+mira "un fallo de página en la zona a la demanda se atiende (un marco nuevo) y la escritura llega" \
+  "^escribo en 0xD0000123 (fallos de página atendidos: 1) y leo 0xCAFE0001" "^otra vez (fallos de página atendidos: 0) y leo 0xCAFE0002"
+mira "el montón: 3000 vueltas de reservar y liberar, sin fugas (ni de bloques ni de marcos)" "^montón: 3000 vueltas de reservar y liberar (y [0-9]* al final), 0 fallos" "^montón sin fugas"
+mira "el montón ve lo que lo estropea: escribir de más, soltar dos veces, soltar lo que no es suyo" \
+  "se ha escrito más allá de los 10 octetos del bloque" "^falso" "^lo arreglo y suelto: cierto" "ya estaba libre (¿se suelta dos veces?)" \
+  "no es de un bloque" "^suelto el otro: cierto" "^el montón ha visto 3 fallos; revisado, 0"
+t=$(grep "^turnos:" $S)
+a=$(echo "$t" | awk '{print $5}'); b=$(echo "$t" | awk '{print $9}' | tr -d ';'); n=$(echo "$t" | awk '{print $13}')
+if [ -n "$t" ] && [ "${a:-0}" -gt 0 ] && [ "${b:-0}" -gt 0 ] && [ "${n:-0}" -ge 50 ]; then ok "dos tareas que no ceden nunca se alternan con el reloj (multitarea apropiativa): $n veces"
+else ko "las tareas no se alternan: «$t»"; fi
+if [ "$(grep '^la dormilona' $S | awk '{print $3}' | tr -d '\n')" = 123 ] && grep -q "^la dormilona 2 se despierta: ha dormido 4[0-9] tics (pidió 40)" $S \
+    && grep -q "^las tres han acabado" $S; then ok "dormir y esperar: tres dormilonas despiertan cada una a su hora, y se las espera"
+else ko "las dormilonas no despiertan en orden:"; grep dormilona $S | sed 's/^/        /'; fi
+mira "las tareas, con sus turnos" "^   1  consola       corriendo       0" "^   2  ociosa  " "cambios de tarea en"
+m1=$(grep "^uhola.bin ha acabado" $S | awk '{print $10, $13}')
+mira "un programa del anillo 3, en su espacio de direcciones, escribe por la int 0x80, duerme y acaba con su código" \
+  "^ejecuto uhola.bin (la tarea [0-9]*, en el anillo 3)" "^hola desde el anillo 3: soy la tarea" "^1 + 2 + ... + 1000 = 500500" \
+  "^he dormido 10 tics: cierto" "^uhola.bin ha acabado con el código 3; marcos libres"
+mira "la llamada al sistema no deja escribir desde la memoria del núcleo ni desde lo que no es del programa" \
+  "^el núcleo no me deja enseñar su memoria: cierto" "^ni lo que no tengo: cierto"
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ]; then ok "al acabar el programa, su espacio de direcciones vuelve entero: los mismos marcos libres ($m1)"
+else ko "el programa de usuario se deja marcos: «$m1»"; fi
+mira "un programa que lee la memoria del núcleo: fallo de página de protección, se acaba él y el núcleo sigue" \
+  "fallo de página en 0x00100000 (lectura, anillo 3, protección)" "^\*\*\* se acaba la tarea [0-9]* (umalo.bin)" "^umalo.bin ha acabado con el código 255"
+mira "un programa que hace «cli» en el anillo 3: protección general, y se acaba" \
+  "excepción 13: protección general (código 0)" "^ucli.bin ha acabado con el código 255" "^\[código 5\]"
+if grep -q "no tenía que salir" $S; then ko "un programa del anillo 3 ha seguido después de lo que no podía hacer"; else ok "lo que no podían hacer, no lo han hecho"; fi
+$AQUI/nucleo32/probar.sh "" fallo > $P/fallo.sal 2>&1
+if grep -q "fallo de página en 0xDEAD0000 (lectura, núcleo, no presente)" $P/fallo.sal && grep -q "^\[código 14\]" $P/fallo.sal; then ok "un fallo de página del núcleo fuera de la zona a la demanda: lo dice con la dirección y se para (código 14)"
+else ko "el fallo de página del núcleo no se dice bien"; sed 's/^/        /' $P/fallo.sal | head -6; fi
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))

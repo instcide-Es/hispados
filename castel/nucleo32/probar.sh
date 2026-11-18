@@ -6,7 +6,10 @@
 # teclado de verdad) y enseña lo que escribe por el puerto serie y su código
 # de salida. Sin órdenes: «ayuda» y «apagar». Una orden «:espera» se queda
 # un segundo y medio sin teclear (para que corra el reloj).
-# Sin NUCLEO.BIN (o si no existe), compila antes semilla.cas.
+# Sin NUCLEO.BIN (o si no existe), compila antes semilla.cas y los programas
+# de usuario (uhola.cas, umalo.cas y ucli.cas), que se le dan como módulos de multiboot
+# (-initrd). Con MODULOS="a.bin,b.bin", esos módulos (MODULOS= para ninguno).
+# Con MEMORIA=n, n MB (32 si no se dice).
 # Necesita python3, nasm, qemu-system-i386 y socat.
 set -u
 AQUI=$(dirname "$(readlink -f "$0")")
@@ -19,16 +22,26 @@ if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
   python3 -I $AQUI/../ccastel.py $AQUI/semilla.cas -o $T/semilla.asm > /dev/null || exit 1
   nasm -f bin $T/semilla.asm -o $T/SEMILLA.BIN || exit 1
   BIN=$T/SEMILLA.BIN
+  if [ -z "${MODULOS+x}" ]; then
+    MODULOS=
+    for u in uhola umalo ucli; do
+      python3 -I $AQUI/../ccastel.py $AQUI/$u.cas -o $T/$u.asm > /dev/null || exit 1
+      nasm -f bin $T/$u.asm -o $T/$u.bin || exit 1
+      MODULOS=$MODULOS${MODULOS:+,}$T/$u.bin
+    done
+  fi
 fi
+INITRD=()
+[ -n "${MODULOS:-}" ] && INITRD=(-initrd "$MODULOS")
 [ $# -gt 0 ] || set -- ayuda apagar
-qemu-system-i386 -kernel "$BIN" -display none -monitor unix:$T/mon,server,nowait \
-  -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -m 32 > /dev/null 2>&1 &
+qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
+  -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.08}"; }
 # la tecla de cada letra, como la llama «sendkey»
 tecla() {
   case "$1" in
-    ' ') echo spc ;; '-') echo minus ;; '.') echo dot ;; ',') echo comma ;;
+    ' ') echo spc ;; '-') echo minus ;; '.') echo dot ;; ',') echo comma ;; '_') echo shift-minus ;;
     [A-Z]) echo "shift-$(echo $1 | tr A-Z a-z)" ;;
     *) echo "$1" ;;
   esac

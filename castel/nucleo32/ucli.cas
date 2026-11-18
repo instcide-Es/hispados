@@ -1,0 +1,20 @@
+; =============================================================================
+;  ucli.cas - un programa de usuario de Hispa-Pentium que intenta tapar las
+;  interrupciones («cli»), cosa que en el anillo 3 no se puede: protección
+;  general, y el núcleo acaba la tarea.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UCli
+
+    modelo usuario
+
+    función principal(): byte
+        escribir("voy a tapar las interrupciones desde el anillo 3...\n")
+        ensamblador
+            cli
+        fin
+        escribir("las he tapado (esto no tenía que salir)\n")
+        devolver 0
+    fin
+
+fin UCli.

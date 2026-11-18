@@ -1,0 +1,164 @@
+; =============================================================================
+;  marcos.cas - el gestor de marcos físicos del núcleo de Hispa-Pentium: la
+;  memoria de verdad, en trozos de 4 K (los «marcos»), con un mapa de bits que
+;  dice cuál está ocupado (1) y cuál libre (0).
+;  Al empezar, todo está ocupado; luego se sueltan las regiones que el mapa
+;  de memoria de multiboot dice libres, y se vuelven a tapar el primer mega
+;  (la BIOS, la pantalla, la información del cargador), el propio núcleo (de
+;  0x100000 hasta fin_programa()) y los módulos que ha cargado el cargador.
+;  Llega hasta 1 GB: es lo que el núcleo ve con la identidad (paginas.cas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Marcos
+
+    importar Multiboot, Cpu, Mem32
+
+    público constante MARCO = 4096
+    público constante MAX_MARCOS = 262144        ; 1 GB
+    constante PALABRAS = MAX_MARCOS div 32
+
+    variable mapa: arreglo [PALABRAS] de nat32  ; un bit por marco: 1, ocupado
+    variable total: nat32                       ; los marcos que hay (la memoria vista)
+    variable libres: nat32
+    variable pista: nat32                       ; por dónde buscar el siguiente libre
+    público variable límite: nat32              ; el final de la memoria vista (en octetos)
+
+    función ocupado(m: nat32): bool
+        devolver mapa[m >> 5] yb (nat32(1) << (m yb 31)) <> 0
+    fin
+
+    función tapa(m: nat32)
+        si m < MAX_MARCOS y no ocupado(m) entonces
+            mapa[m >> 5] := mapa[m >> 5] ob (nat32(1) << (m yb 31))
+            libres := libres - 1
+        fin
+    fin
+
+    función destapa(m: nat32)
+        si m < MAX_MARCOS y ocupado(m) entonces
+            mapa[m >> 5] := mapa[m >> 5] yb nob (nat32(1) << (m yb 31))
+            libres := libres + 1
+        fin
+    fin
+
+    ; tapa los marcos que tocan de «inicio» a «final» (sin incluir este)
+    función tapa_trozo(inicio: nat32, final: nat32)
+        variable m: nat32
+        si final <= inicio entonces devolver fin
+        m := inicio div MARCO
+        mientras m < (final + MARCO - 1) div MARCO y m < MAX_MARCOS hacer
+            tapa(m)
+            m := m + 1
+        fin
+    fin
+
+    ; prepara el mapa con lo que cuenta el cargador. «fin_núcleo», donde acaba
+    ; el núcleo con sus variables (fin_programa()).
+    público función prepara_marcos(fin_núcleo: nat32)
+        variable i, n, base, final, m: nat32
+        variable r: puntero a Región
+        llenar32(dirección(mapa[0]), PALABRAS, 0xFFFFFFFF)
+        libres := 0
+        total := 0
+        límite := 0
+        n := regiones()
+        si n = 0 entonces
+            ; sin mapa: la memoria alta que diga, seguida
+            base := 0x100000
+            final := base + memoria_alta() * 1024
+            m := base div MARCO
+            mientras m < final div MARCO y m < MAX_MARCOS hacer
+                destapa(m)
+                m := m + 1
+            fin
+            límite := final
+        sino
+            para i desde 0 hasta n - 1 hacer
+                r := región(i)
+                ; solo lo libre y lo que cae por debajo de 1 GB (lo de 4 GB
+                ; en adelante tiene la parte alta distinta de 0)
+                si r.clase = LIBRE y r.base_alta = 0 entonces
+                    base := (r.base + MARCO - 1) div MARCO
+                    si r.largo_alto <> 0 o r.base + r.largo < r.base entonces
+                        final := 0xFFFFFFFF div MARCO
+                    sino
+                        final := (r.base + r.largo) div MARCO
+                    fin
+                    m := base
+                    mientras m < final y m < MAX_MARCOS hacer
+                        destapa(m)
+                        m := m + 1
+                    fin
+                    si final > MAX_MARCOS entonces final := MAX_MARCOS fin
+                    si final * MARCO > límite entonces límite := final * MARCO fin
+                fin
+            fin
+        fin
+        ; lo que no se puede dar: el primer mega, el núcleo, lo del cargador
+        tapa_trozo(0, 0x100000)
+        tapa_trozo(0x100000, fin_núcleo)
+        tapa_trozo(dirección_info(), dirección_info() + 88)
+        tapa_trozo(dirección_mapa(), dirección_mapa() + largo_mapa())
+        si módulos() > 0 entonces
+            tapa_trozo(dirección_módulos(), dirección_módulos() + 16 * módulos())
+            para i desde 0 hasta módulos() - 1 hacer
+                tapa_trozo(módulo_inicio(i), módulo_final(i))
+            fin
+        fin
+        total := límite div MARCO
+        pista := 0
+    fin
+
+    ; un marco libre, ya puesto a cero: su dirección física (0 si no queda
+    ; ninguno). Mientras la paginación lleva la identidad, esa dirección
+    ; también vale para tocarlo.
+    público función reservar_marco(): nat32
+        variable i, j, b, m: nat32
+        b := sin_interrupciones()
+        i := pista
+        mientras i < PALABRAS hacer
+            si mapa[i] <> 0xFFFFFFFF entonces
+                j := 0
+                mientras mapa[i] yb (nat32(1) << j) <> 0 hacer
+                    j := j + 1
+                fin
+                m := i * 32 + j
+                si m * MARCO >= límite entonces romper fin
+                tapa(m)
+                pista := i
+                reponer(b)
+                llenar(puntero(m * MARCO), MARCO, 0)
+                devolver m * MARCO
+            fin
+            i := i + 1
+        fin
+        reponer(b)
+        devolver 0
+    fin
+
+    ; devuelve un marco. Da falso (y no hace nada) si ya estaba libre o no es
+    ; un marco: así no se cuenta dos veces
+    público función soltar_marco(dir: nat32): bool
+        variable m, b: nat32
+        m := dir div MARCO
+        si dir yb (MARCO - 1) <> 0 o m >= MAX_MARCOS o dir >= límite entonces devolver falso fin
+        b := sin_interrupciones()
+        si no ocupado(m) entonces
+            reponer(b)
+            devolver falso
+        fin
+        destapa(m)
+        si m >> 5 < pista entonces pista := m >> 5 fin
+        reponer(b)
+        devolver cierto
+    fin
+
+    público función marcos_libres(): nat32
+        devolver libres
+    fin
+
+    público función marcos_totales(): nat32
+        devolver total
+    fin
+
+fin Marcos.

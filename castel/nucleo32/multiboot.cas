@@ -1,0 +1,146 @@
+; =============================================================================
+;  multiboot.cas - lo que cuenta el cargador (QEMU con -kernel, o GRUB) al
+;  arrancar el núcleo de Hispa-Pentium: la memoria que hay (el mapa de
+;  memoria, región a región) y los módulos que ha cargado con él (los
+;  programas de usuario: en QEMU, -initrd "uno.bin,otro.bin").
+;  El arranque que pone Castel (modelo núcleo) guarda la magia (EAX) y la
+;  dirección de la información (EBX) en C_mb_magia y C_mb_info.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Multiboot
+
+    constante MAGIA = 0x2BADB002
+
+    tipo Info = estructura                      ; la información de multiboot (lo que se usa)
+        banderas: nat32                         ; qué campos valen
+        mem_baja, mem_alta: nat32               ; bit 0: la memoria baja y la alta, en K
+        disco, línea: nat32
+        mods_cuántos, mods_dir: nat32           ; bit 3: los módulos
+        sim1, sim2, sim3, sim4: nat32
+        mapa_largo, mapa_dir: nat32             ; bit 6: el mapa de memoria
+    fin
+    público tipo Región = estructura            ; una entrada del mapa de memoria
+        tam: nat32                              ; lo que ocupa la entrada (sin contar este campo)
+        base, base_alta: nat32
+        largo, largo_alto: nat32
+        clase: nat32                            ; 1: memoria libre; lo demás, reservado
+    fin
+    tipo Módulo = estructura
+        inicio, final: nat32
+        nombre: puntero a byte
+        reservado: nat32
+    fin
+
+    público constante LIBRE = 1
+
+    función magia(): nat32
+        ensamblador
+            mov eax, [C_mb_magia]
+        fin
+    fin
+
+    función info(): puntero a Info
+        ensamblador
+            mov eax, [C_mb_info]
+        fin
+    fin
+
+    ; ¿ha arrancado con un cargador multiboot (que ha dejado su información)?
+    público función hay_multiboot(): bool
+        devolver magia() = MAGIA
+    fin
+
+    ; dónde está la información (para no pisarla)
+    público función dirección_info(): nat32
+        devolver nat32(info())
+    fin
+
+    ; la memoria de encima del primer mega, en K (0 si no se sabe)
+    público función memoria_alta(): nat32
+        si no hay_multiboot() o info().banderas yb 1 = 0 entonces devolver 0 fin
+        devolver info().mem_alta
+    fin
+
+    ; ---- el mapa de memoria ----
+    ; cuántas regiones tiene (0 si el cargador no lo da)
+    público función regiones(): nat32
+        variable p, fin_, n: nat32
+        variable r: puntero a Región
+        si no hay_multiboot() o info().banderas yb 0x40 = 0 entonces devolver 0 fin
+        p := info().mapa_dir
+        fin_ := p + info().mapa_largo
+        n := 0
+        mientras p < fin_ hacer
+            r := puntero(p)
+            n := n + 1
+            p := p + r.tam + 4
+        fin
+        devolver n
+    fin
+
+    ; la región número i (desde 0)
+    público función región(i: nat32): puntero a Región
+        variable p: nat32
+        variable r: puntero a Región
+        p := info().mapa_dir
+        r := puntero(p)
+        mientras i > 0 hacer
+            p := p + r.tam + 4
+            r := puntero(p)
+            i := i - 1
+        fin
+        devolver r
+    fin
+
+    ; dónde está el mapa y cuánto ocupa (para no pisarlo)
+    público función dirección_mapa(): nat32
+        si no hay_multiboot() o info().banderas yb 0x40 = 0 entonces devolver 0 fin
+        devolver info().mapa_dir
+    fin
+
+    público función largo_mapa(): nat32
+        si no hay_multiboot() o info().banderas yb 0x40 = 0 entonces devolver 0 fin
+        devolver info().mapa_largo
+    fin
+
+    ; ---- los módulos ----
+    público función módulos(): nat32
+        si no hay_multiboot() o info().banderas yb 8 = 0 entonces devolver 0 fin
+        devolver info().mods_cuántos
+    fin
+
+    función ficha_módulo(i: nat32): puntero a Módulo
+        variable m: puntero a Módulo
+        m := puntero(info().mods_dir)
+        devolver m + i
+    fin
+
+    público función módulo_inicio(i: nat32): nat32
+        devolver ficha_módulo(i).inicio
+    fin
+
+    público función módulo_final(i: nat32): nat32
+        devolver ficha_módulo(i).final
+    fin
+
+    ; su nombre: lo que se dijo al cargarlo (en QEMU, la ruta del archivo); de
+    ; él, lo que va detrás de la última «/»
+    público función módulo_nombre(i: nat32): puntero a byte
+        variable t, último: puntero a byte
+        t := ficha_módulo(i).nombre
+        si t = nulo entonces devolver "(sin nombre)" fin
+        último := t
+        mientras valor(t) <> 0 hacer
+            si valor(t) = '/' entonces último := t + 1 fin
+            t := t + 1
+        fin
+        devolver último
+    fin
+
+    ; dónde está la lista de módulos (para no pisarla)
+    público función dirección_módulos(): nat32
+        si módulos() = 0 entonces devolver 0 fin
+        devolver info().mods_dir
+    fin
+
+fin Multiboot.

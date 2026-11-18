@@ -1,0 +1,20 @@
+; =============================================================================
+;  umalo.cas - un programa de usuario de Hispa-Pentium que hace lo que no
+;  debe: leer la memoria del núcleo (0x100000, que es solo del anillo 0). El
+;  procesador da un fallo de página (de protección) y el núcleo acaba la
+;  tarea; él sigue como si nada.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UMalo
+
+    modelo usuario
+
+    función principal(): byte
+        variable p: puntero a nat32
+        escribir("soy un programa malo: voy a leer la memoria del núcleo\n")
+        p := puntero(0x100000)
+        escribir("he leído ", valor(p), " (esto no tenía que salir)\n")
+        devolver 0
+    fin
+
+fin UMalo.

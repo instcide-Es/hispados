@@ -1,0 +1,425 @@
+; =============================================================================
+;  tareas.cas - las tareas del núcleo de Hispa-Pentium: varias a la vez, con
+;  el reloj repartiendo el procesador (multitarea apropiativa: a cada tic, si
+;  hay otra lista, le toca a ella).
+;
+;  Cada tarea tiene su ficha y su pila del núcleo. Lo que hay en la pila de
+;  una tarea que no corre es lo que dejó la interrupción que la paró: lo que
+;  apila el procesador (EIP, CS, EFLAGS y, si venía del anillo 3, ESP y SS) y
+;  lo que guarda «pushad». La ficha guarda dónde empieza eso (el «marco»).
+;  Cambiar de tarea es, entonces, cambiar de marco: las dos funciones de
+;  interrupción que cambian (el reloj y la 0x30, la que llama ceder()) ponen
+;  en EBP el marco de la siguiente, y su salida (popad e iretd) la reanuda.
+;  Una tarea nueva lleva su marco hecho a mano, como si la hubieran parado
+;  justo al empezar.
+;
+;  Las listas (la cola de las listas para correr, las dormidas) van con un
+;  puntero «sig» en la ficha. Si no hay nadie listo, corre la tarea ociosa
+;  (un «hlt» detrás de otro).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tareas
+
+    importar Cpu, Monton, Paginas, Formato
+
+    público constante MAX_TAREAS = 16
+    público constante PILA = 8192               ; la pila del núcleo de cada tarea
+
+    ; los estados de una tarea
+    público constante LIBRE = 0                 ; la ficha no se usa
+    público constante LISTA = 1                 ; en la cola, esperando su turno
+    público constante CORRIENDO = 2
+    público constante DORMIDA = 3               ; hasta un tic
+    público constante ESPERANDO = 4             ; hasta que alguien la despierte
+    público constante ACABADA = 5               ; ha terminado; falta recogerla
+
+    público tipo Tarea = estructura
+        marco: nat32                            ; dónde quedó su marco (en su pila)
+        estado: nat32
+        id: nat32
+        nombre: puntero a byte
+        pila: puntero a byte                    ; su pila del núcleo (del montón)
+        pila_tope: nat32
+        cr3: nat32                              ; su directorio de páginas
+        despertar: nat32                        ; el tic en que despierta (si duerme)
+        sig: puntero a Tarea                    ; la siguiente de su lista
+        esperador: puntero a Tarea              ; quien espera a que acabe
+        código: nat32                           ; con lo que ha acabado
+        turnos: nat32                           ; las veces que ha entrado a correr
+        tics_usados: nat32                      ; los tics que la han pillado corriendo
+        usuario: bool                           ; si es del anillo 3
+    fin
+
+    tipo Cola = estructura
+        primera, última: puntero a Tarea
+    fin
+
+    público variable tareas: arreglo [MAX_TAREAS] de Tarea
+    público variable actual: puntero a Tarea
+    variable ociosa: puntero a Tarea
+    variable listas: Cola
+    variable dormidas: Cola
+    variable siguiente_id: nat32
+    público variable tics: nat32
+    público variable cambios: nat32             ; las veces que ha cambiado de tarea
+    variable pantalla: puntero a nat16 = puntero(0xB8000)
+
+    ; -------------------------------------------------------------------------
+    ;  Las colas
+    ; -------------------------------------------------------------------------
+    función meter(ref c: Cola, t: puntero a Tarea)
+        t.sig := nulo
+        si c.última = nulo entonces
+            c.primera := t
+        sino
+            c.última.sig := t
+        fin
+        c.última := t
+    fin
+
+    función sacar(ref c: Cola): puntero a Tarea
+        variable t: puntero a Tarea
+        t := c.primera
+        si t <> nulo entonces
+            c.primera := t.sig
+            si c.primera = nulo entonces c.última := nulo fin
+            t.sig := nulo
+        fin
+        devolver t
+    fin
+
+    función quitar(ref c: Cola, t: puntero a Tarea)
+        variable p, antes: puntero a Tarea
+        antes := nulo
+        p := c.primera
+        mientras p <> nulo y p <> t hacer
+            antes := p
+            p := p.sig
+        fin
+        si p = nulo entonces devolver fin
+        si antes = nulo entonces c.primera := t.sig sino antes.sig := t.sig fin
+        si c.última = t entonces c.última := antes fin
+        t.sig := nulo
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El cambio de tarea
+    ; -------------------------------------------------------------------------
+    ; guarda el marco de la que corre, la deja en la cola si sigue lista, y
+    ; elige la siguiente: su pila del anillo 0 (para el TSS), su directorio y
+    ; su marco, que es lo que devuelve. (Con las interrupciones tapadas.)
+    función cambiar(marco: nat32): nat32
+        variable t: puntero a Tarea
+        actual.marco := marco
+        si actual.estado = CORRIENDO entonces
+            actual.estado := LISTA
+            si actual <> ociosa entonces meter(listas, actual) fin
+        fin
+        t := sacar(listas)
+        si t = nulo entonces t := ociosa fin
+        t.estado := CORRIENDO
+        t.turnos := t.turnos + 1
+        si t <> actual entonces cambios := cambios + 1 fin
+        actual := t
+        pon_pila_núcleo(t.pila_tope)
+        si leer_cr3() <> t.cr3 entonces poner_cr3(t.cr3) fin
+        devolver t.marco
+    fin
+
+    ; el reloj: cuenta el tic, despierta a las dormidas a las que les toca,
+    ; enseña los segundos arriba a la derecha y cambia de tarea
+    interrupción función reloj()
+        variable marco, s, i: nat32
+        variable t, sig: puntero a Tarea
+        tics := tics + 1
+        si tics mod HZ = 0 entonces
+            s := tics div HZ
+            para i desde 0 hasta 5 hacer
+                pantalla[79 - i] := 0x1F00 ob (s mod 10 + '0')
+                s := s div 10
+            fin
+        fin
+        sacar_puerto(PIC1, FIN_INT)
+        si actual = nulo entonces devolver fin
+        actual.tics_usados := actual.tics_usados + 1
+        t := dormidas.primera
+        mientras t <> nulo hacer
+            sig := t.sig
+            si t.despertar <= tics entonces
+                quitar(dormidas, t)
+                t.estado := LISTA
+                meter(listas, t)
+            fin
+            t := sig
+        fin
+        si listas.primera = nulo entonces devolver fin
+        ensamblador
+            mov {marco}, ebp
+        fin
+        marco := cambiar(marco)
+        ensamblador
+            mov ebp, {marco}
+        fin
+    fin
+
+    ; la interrupción 0x30: ceder el procesador ya (la usan ceder(), dormir,
+    ; esperar y acabar)
+    interrupción función cambio()
+        variable marco: nat32
+        ensamblador
+            mov {marco}, ebp
+        fin
+        marco := cambiar(marco)
+        ensamblador
+            mov ebp, {marco}
+        fin
+    fin
+
+    público función ceder()
+        ensamblador
+            int 0x30
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Hacer tareas
+    ; -------------------------------------------------------------------------
+    función ficha_libre(): puntero a Tarea
+        variable i: nat32
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si tareas[i].estado = LIBRE entonces devolver dirección(tareas[i]) fin
+        fin
+        devolver nulo
+    fin
+
+    ; una ficha con su pila; sin meterla en ninguna cola
+    función nueva(nombre: puntero a byte): puntero a Tarea
+        variable t: puntero a Tarea
+        variable p: puntero a byte
+        t := ficha_libre()
+        si t = nulo entonces devolver nulo fin
+        p := reservar(PILA)
+        si p = nulo entonces devolver nulo fin
+        siguiente_id := siguiente_id + 1
+        t.id := siguiente_id
+        t.nombre := nombre
+        t.pila := p
+        t.pila_tope := nat32(p) + PILA
+        t.cr3 := directorio_núcleo
+        t.estado := LISTA
+        t.sig := nulo
+        t.esperador := nulo
+        t.código := 0
+        t.turnos := 0
+        t.tics_usados := 0
+        t.usuario := falso
+        devolver t
+    fin
+
+    ; adonde vuelve la función de una tarea del núcleo cuando acaba
+    función fin_de_tarea()
+        terminar(0)
+    fin
+
+    función bucle_ocioso(n: nat32)
+        mientras cierto hacer
+            esperar_interrupción()
+        fin
+    fin
+
+    ; una tarea del núcleo que corre la función que está en «rutina» (una
+    ; «función f(n: nat32)», dada con nat32(dirección(f))) con el argumento
+    ; «arg». Entra en la cola de las listas. Da su ficha, o nulo.
+    público función crear_tarea(nombre: puntero a byte, rutina: nat32, arg: nat32): puntero a Tarea
+        variable t: puntero a Tarea
+        variable p: puntero a nat32
+        variable b, i: nat32
+        b := sin_interrupciones()
+        t := nueva(nombre)
+        si t = nulo entonces
+            reponer(b)
+            devolver nulo
+        fin
+        ; el marco: pushad (8 palabras), EIP, CS, EFLAGS; y, encima, lo que
+        ; ve la función: adónde vuelve y su argumento
+        p := puntero(t.pila_tope)
+        p := p - 13
+        para i desde 0 hasta 7 hacer p[i] := 0 fin
+        p[8] := rutina
+        p[9] := CÓDIGO_NÚCLEO
+        p[10] := 0x202                          ; con las interrupciones abiertas
+        p[11] := nat32(dirección(fin_de_tarea))
+        p[12] := arg
+        t.marco := nat32(p)
+        meter(listas, t)
+        reponer(b)
+        devolver t
+    fin
+
+    ; una tarea del anillo 3: empieza en «entrada» con la pila en «pila», en
+    ; el espacio de direcciones «directorio» (que pasa a ser suyo: se suelta
+    ; al recogerla)
+    público función crear_tarea_usuario(nombre: puntero a byte, directorio: nat32, entrada: nat32, pila: nat32): puntero a Tarea
+        variable t: puntero a Tarea
+        variable p: puntero a nat32
+        variable b, i: nat32
+        b := sin_interrupciones()
+        t := nueva(nombre)
+        si t = nulo entonces
+            reponer(b)
+            devolver nulo
+        fin
+        ; el marco: pushad, y lo que apila el procesador al venir del anillo 3
+        p := puntero(t.pila_tope)
+        p := p - 13
+        para i desde 0 hasta 7 hacer p[i] := 0 fin
+        p[8] := entrada
+        p[9] := CÓDIGO_USUARIO
+        p[10] := 0x202
+        p[11] := pila
+        p[12] := DATOS_USUARIO
+        t.marco := nat32(p)
+        t.cr3 := directorio
+        t.usuario := cierto
+        meter(listas, t)
+        reponer(b)
+        devolver t
+    fin
+
+    ; las fichas de la consola (la que corre ahora, con la pila del arranque) y
+    ; de la ociosa, y las dos interrupciones que cambian de tarea
+    público función prepara_tareas()
+        variable t: puntero a Tarea
+        t := dirección(tareas[0])
+        siguiente_id := 1
+        t.id := 1
+        t.nombre := "consola"
+        t.pila := nulo
+        t.pila_tope := 0
+        t.cr3 := leer_cr3()
+        t.estado := CORRIENDO
+        t.turnos := 1
+        actual := t
+        ociosa := nueva("ociosa")
+        crear_marco_ocioso()
+        pon_puerta(0x20, nat32(dirección(reloj)), PUERTA_NÚCLEO)
+        pon_puerta(0x30, nat32(dirección(cambio)), PUERTA_NÚCLEO)
+    fin
+
+    función crear_marco_ocioso()
+        variable p: puntero a nat32
+        variable i: nat32
+        p := puntero(ociosa.pila_tope)
+        p := p - 13
+        para i desde 0 hasta 7 hacer p[i] := 0 fin
+        p[8] := nat32(dirección(bucle_ocioso))
+        p[9] := CÓDIGO_NÚCLEO
+        p[10] := 0x202
+        p[11] := nat32(dirección(fin_de_tarea))
+        p[12] := 0
+        ociosa.marco := nat32(p)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Dormir, esperar, acabar
+    ; -------------------------------------------------------------------------
+    ; la tarea que corre se duerme n tics
+    público función dormir(n: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        actual.despertar := tics + n
+        actual.estado := DORMIDA
+        meter(dormidas, actual)
+        ceder()
+        reponer(b)
+    fin
+
+    ; la tarea que corre se queda esperando hasta que la despierten (hay que
+    ; llamarla con las interrupciones tapadas, y mirar luego si lo que se
+    ; esperaba ha llegado)
+    público función bloquear()
+        actual.estado := ESPERANDO
+        ceder()
+    fin
+
+    público función despertar_tarea(t: puntero a Tarea)
+        variable b: nat32
+        b := sin_interrupciones()
+        si t.estado = ESPERANDO entonces
+            t.estado := LISTA
+            meter(listas, t)
+        fin
+        reponer(b)
+    fin
+
+    ; la tarea que corre acaba, con ese código. No vuelve.
+    público función terminar(código: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        actual.código := código
+        actual.estado := ACABADA
+        si actual.esperador <> nulo entonces despertar_tarea(actual.esperador) fin
+        ceder()
+    fin
+
+    ; espera a que acabe la tarea t, la recoge (su pila y, si es del usuario,
+    ; su espacio de direcciones vuelven a estar libres) y da su código
+    público función esperar(t: puntero a Tarea): nat32
+        variable b, c: nat32
+        b := sin_interrupciones()
+        mientras t.estado <> ACABADA hacer
+            t.esperador := actual
+            bloquear()
+        fin
+        c := t.código
+        liberar(t.pila)
+        si t.usuario entonces soltar_espacio(t.cr3) fin
+        t.estado := LIBRE
+        reponer(b)
+        devolver c
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Para la consola
+    ; -------------------------------------------------------------------------
+    función nombre_estado(e: nat32): puntero a byte
+        según e
+            caso LISTA: devolver "lista"
+            caso CORRIENDO: devolver "corriendo"
+            caso DORMIDA: devolver "dormida"
+            caso ESPERANDO: devolver "esperando"
+            caso ACABADA: devolver "acabada"
+        fin
+        devolver "libre"
+    fin
+
+    público función enseña_tareas()
+        variable i: nat32
+        variable t: puntero a Tarea
+        variable d: arreglo [6] de nat32
+        escribir("  id  nombre        estado     anillo  turnos   tics\n")
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            si t.estado <> LIBRE entonces
+                d[0] := t.id
+                d[1] := nat32(t.nombre)
+                d[2] := nat32(nombre_estado(t.estado))
+                si t.usuario entonces d[3] := 3 sino d[3] := 0 fin
+                d[4] := t.turnos
+                d[5] := t.tics_usados
+                imprimir("%4u  %-12s  %-9s  %6u  %6u  %5u\n", d)
+            fin
+        fin
+        imprimir2("%u cambios de tarea en %u tics\n", cambios, tics)
+    fin
+
+    público función cuántas_tareas(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si tareas[i].estado <> LIBRE entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+fin Tareas.

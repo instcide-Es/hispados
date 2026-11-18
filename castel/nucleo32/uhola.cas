@@ -1,0 +1,54 @@
+; =============================================================================
+;  uhola.cas - un programa de usuario de Hispa-Pentium («modelo usuario»):
+;  corre en el anillo 3, en su propio espacio de direcciones, y habla con el
+;  núcleo por la llamada al sistema (int 0x80, usuario.cas). escribir() y el
+;  código de salida ya van por ella; dormir, los tics y el número de tarea se
+;  piden aquí, con un poco de ensamblador.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UHola
+
+    modelo usuario
+
+    variable números: arreglo [1000] de nat32  ; empiezan a cero (en sus páginas)
+
+    función llamada(n: nat32, a: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            int 0x80
+        fin
+    fin
+
+    ; escribir, a mano: c octetos desde la dirección a
+    función escribe(a: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, 1
+            mov ebx, {a}
+            mov ecx, {c}
+            int 0x80
+        fin
+    fin
+
+    función principal(): byte
+        variable i, suma, t0, t1: nat32
+        escribir("hola desde el anillo 3: soy la tarea ", llamada(5, 0), ", en 0x40000000 de mi espacio\n")
+        para i desde 0 hasta 999 hacer
+            números[i] := i + 1
+        fin
+        suma := 0
+        para i desde 0 hasta 999 hacer
+            suma := suma + números[i]
+        fin
+        escribir("1 + 2 + ... + 1000 = ", suma, "\n")
+        t0 := llamada(4, 0)
+        llamada(3, 10)
+        t1 := llamada(4, 0)
+        escribir("he dormido 10 tics: ", t1 - t0 >= 10, "\n")
+        escribir("el núcleo no me deja enseñar su memoria: ", escribe(0x100000, 16) = 0xFFFFFFFF, "\n")
+        escribir("ni lo que no tengo: ", escribe(0x7FFFF000, 16) = 0xFFFFFFFF, "\n")
+        escribir("y acabo con el código 3\n")
+        devolver 3
+    fin
+
+fin UHola.

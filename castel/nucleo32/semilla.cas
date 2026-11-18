@@ -2,134 +2,153 @@
 ;  semilla.cas - la semilla de Hispa-Pentium: un núcleo de 32 bits escrito en
 ;  Castel («modelo núcleo»). Lo arranca un cargador multiboot (QEMU con
 ;  -kernel, o GRUB) en modo protegido con la memoria plana; el arranque que
-;  pone el compilador (CASTEL32.md) le da su tabla de descriptores, su pila y
-;  la pantalla en blanco, y llama a principal(). Desde ahí, todo es Castel:
-;   - la tabla de interrupciones (IDT): las 32 excepciones del procesador y
-;     las 16 líneas del controlador (PIC 8259), ya movidas a 0x20-0x2F;
-;   - el reloj (PIT 8253 a 100 Hz): cuenta los tics y enseña los segundos
-;     en la esquina de la pantalla;
-;   - el teclado (8042): cada tecla, de su código a su letra, a una cola que
-;     lee el bucle principal;
-;   - una consola mínima con unas órdenes: ayuda, hora, memoria, teclas,
-;     cero (una división por cero, para ver la excepción) y apagar.
-;  Lo que escribe va a la pantalla y al puerto serie (COM1).
+;  pone el compilador (CASTEL32.md) le da su pila y la pantalla en blanco, y
+;  llama a principal(). Desde ahí, todo es Castel, repartido en módulos:
+;   - cpu.cas: la GDT (anillos 0 y 3) y el TSS, la IDT, el 8259 y el reloj;
+;   - multiboot.cas: lo que cuenta el cargador (el mapa de memoria, los
+;     módulos que trae);
+;   - marcos.cas: los marcos físicos de 4 K, con un mapa de bits;
+;   - paginas.cas: la paginación (la identidad para el núcleo, el montón, la
+;     zona a la demanda y un espacio de direcciones por programa);
+;   - monton.cas: el montón del núcleo (reservar y liberar, con comprobación
+;     de que nadie lo estropea);
+;   - tareas.cas: las tareas, con el reloj repartiendo el procesador, y
+;     dormir, esperar y acabar;
+;   - usuario.cas: los programas del anillo 3 (de los módulos de multiboot)
+;     y su llamada al sistema, la int 0x80;
+;  y aquí, las excepciones (con el fallo de página, que se atiende), el
+;  teclado y una consola con sus órdenes. Lo que escribe va a la pantalla y
+;  al puerto serie (COM1).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Semilla
 
     modelo núcleo
 
-    ; ---- los puertos ----
-    constante PIC1 = 0x20                       ; el controlador principal (y 0x21, sus datos)
-    constante PIC2 = 0xA0                       ; el secundario (y 0xA1)
-    constante FIN_INT = 0x20                    ; «fin de interrupción»
-    constante PIT_CANAL0 = 0x40
-    constante PIT_ORDEN = 0x43
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Usuario, Textos32, Mem32, Formato
+
     constante TECLADO = 0x60
-    constante PIT_HZ = 1193182
-    constante HZ = 100
 
-    ; ---- la tabla de interrupciones ----
-    tipo Puerta = estructura                    ; una entrada de la IDT (8 octetos)
-        desp_bajo: nat16
-        selector: nat16
-        cero: byte
-        clase: byte                             ; 0x8E: puerta de interrupción de 32 bits, presente
-        desp_alto: nat16
-    fin
-    tipo Registro_tabla = estructura            ; lo que carga «lidt»
-        límite: nat16
-        base: nat32
-    fin
-    variable idt: arreglo [256] de Puerta
-    variable idtr: Registro_tabla
-
-    ; ---- el reloj y el teclado ----
-    variable tics: nat32
+    ; ---- el teclado ----
     variable teclas: nat32
     constante COLA = 64
     variable cola: arreglo [COLA] de byte
     variable cola_ent, cola_sal: nat32
     variable mayúsculas: bool
+    variable esperando_tecla: puntero a Tarea
     variable minúsculas_tabla: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
     variable mayúsculas_tabla: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
-    variable pantalla: puntero a nat16 = puntero(0xB8000)
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
     variable largo: nat32
+    variable palabra1: arreglo [40] de byte
+
+    ; ---- para las pruebas de la consola ----
+    variable semilla_azar: nat32 = 12345
+    variable vivos: arreglo [64] de puntero a byte
+    variable largos: arreglo [64] de nat32
+    variable cuentas: arreglo [2] de nat32
+    variable alternancias, última, hasta_tic: nat32
+    variable toques: nat32
 
     ; -------------------------------------------------------------------------
-    ;  La IDT
+    ;  Las excepciones
     ; -------------------------------------------------------------------------
-    función pon_puerta(n: nat32, rutina: nat32)
-        idt[n].desp_bajo := rutina
-        idt[n].selector := 0x08
-        idt[n].cero := 0
-        idt[n].clase := 0x8E
-        idt[n].desp_alto := rutina >> 16
-    fin
-
-    ; los dos 8259, a 0x20-0x27 y 0x28-0x2F (la BIOS los deja encima de las
-    ; excepciones); todas las líneas tapadas menos el reloj (0) y el teclado (1)
-    función prepara_pic()
-        sacar_puerto(PIC1, 0x11)
-        sacar_puerto(PIC2, 0x11)
-        sacar_puerto(PIC1 + 1, 0x20)
-        sacar_puerto(PIC2 + 1, 0x28)
-        sacar_puerto(PIC1 + 1, 4)
-        sacar_puerto(PIC2 + 1, 2)
-        sacar_puerto(PIC1 + 1, 1)
-        sacar_puerto(PIC2 + 1, 1)
-        sacar_puerto(PIC1 + 1, 0xFC)
-        sacar_puerto(PIC2 + 1, 0xFF)
-    fin
-
-    función prepara_reloj()
-        variable divisor: nat32
-        divisor := PIT_HZ div HZ
-        sacar_puerto(PIT_ORDEN, 0x36)           ; canal 0, las dos mitades, onda cuadrada
-        sacar_puerto(PIT_CANAL0, divisor)
-        sacar_puerto(PIT_CANAL0, divisor >> 8)
-    fin
-
-    función prepara_idt()
-        variable i: nat32
-        para i desde 0 hasta 31 hacer
-            según i
-                caso 8, 10..14, 17: pon_puerta(i, nat32(dirección(excepción_con_código)))
-                si no: pon_puerta(i, nat32(dirección(excepción)))
-            fin
+    ; lo que pasa cuando el procesador no puede seguir: si estaba en el anillo
+    ; 3 (cs), se acaba esa tarea y el núcleo sigue; si estaba en el núcleo, se
+    ; para con el código «n»
+    función no_sigue(cs_: nat32, eip: nat32, n: byte)
+        imprimir1(" en 0x%08X", eip)
+        si cs_ yb 3 = 3 entonces
+            escribir(", en el anillo 3\n")
+            matar_actual()
         fin
-        pon_puerta(0, nat32(dirección(división_por_cero)))
-        para i desde 32 hasta 47 hacer
-            pon_puerta(i, nat32(dirección(irq_perdida)))
-        fin
-        pon_puerta(32, nat32(dirección(reloj)))
-        pon_puerta(33, nat32(dirección(teclado)))
-        idtr.límite := tamaño(idt) - 1
-        idtr.base := nat32(dirección(idt))
-        ensamblador
-            lidt {idtr}
-        fin
+        escribir(". El núcleo se para.\n")
+        salir(n)
     fin
 
-    ; -------------------------------------------------------------------------
-    ;  Lo que atiende las interrupciones
-    ; -------------------------------------------------------------------------
     interrupción función división_por_cero()
-        escribir("\n*** excepción 0: división por cero. El núcleo se para.\n")
-        salir(9)
+        variable cs_, eip: nat32
+        ensamblador
+            mov eax, [ebp+32]
+            mov {eip}, eax
+            mov eax, [ebp+36]
+            mov {cs_}, eax
+        fin
+        escribir("\n*** excepción 0: división por cero")
+        no_sigue(cs_, eip, 9)
+    fin
+
+    interrupción función instrucción_mala()
+        variable cs_, eip: nat32
+        ensamblador
+            mov eax, [ebp+32]
+            mov {eip}, eax
+            mov eax, [ebp+36]
+            mov {cs_}, eax
+        fin
+        escribir("\n*** excepción 6: instrucción que no existe")
+        no_sigue(cs_, eip, 10)
     fin
 
     interrupción función excepción()
-        escribir("\n*** excepción del procesador. El núcleo se para.\n")
-        salir(10)
+        variable cs_, eip: nat32
+        ensamblador
+            mov eax, [ebp+32]
+            mov {eip}, eax
+            mov eax, [ebp+36]
+            mov {cs_}, eax
+        fin
+        escribir("\n*** excepción del procesador")
+        no_sigue(cs_, eip, 10)
     fin
 
     interrupción función excepción_con_código(código: nat32)
-        escribir("\n*** excepción del procesador (código ", código, "). El núcleo se para.\n")
-        salir(11)
+        variable cs_, eip: nat32
+        ensamblador
+            mov eax, [ebp+36]
+            mov {eip}, eax
+            mov eax, [ebp+40]
+            mov {cs_}, eax
+        fin
+        imprimir1("\n*** excepción del procesador (código %u)", código)
+        no_sigue(cs_, eip, 11)
+    fin
+
+    interrupción función protección_general(código: nat32)
+        variable cs_, eip: nat32
+        ensamblador
+            mov eax, [ebp+36]
+            mov {eip}, eax
+            mov eax, [ebp+40]
+            mov {cs_}, eax
+        fin
+        imprimir1("\n*** excepción 13: protección general (código %u)", código)
+        no_sigue(cs_, eip, 13)
+    fin
+
+    ; el fallo de página: si es en la zona a la demanda, se le pone un marco y
+    ; se vuelve a la instrucción, que ahora sí llega. Si no, se dice dónde ha
+    ; sido y por qué (lo dice el código: bit 0, la página estaba pero no deja;
+    ; bit 1, escribía; bit 2, desde el anillo 3)
+    interrupción función fallo_de_página(código: nat32)
+        variable cs_, eip, dir: nat32
+        variable d: arreglo [4] de nat32
+        dir := leer_cr2()
+        ensamblador
+            mov eax, [ebp+36]
+            mov {eip}, eax
+            mov eax, [ebp+40]
+            mov {cs_}, eax
+        fin
+        si código yb 4 = 0 y atender_demanda(dir) entonces devolver fin
+        d[0] := dir
+        si código yb 2 <> 0 entonces d[1] := nat32("escritura") sino d[1] := nat32("lectura") fin
+        si código yb 4 <> 0 entonces d[2] := nat32("anillo 3") sino d[2] := nat32("núcleo") fin
+        si código yb 1 <> 0 entonces d[3] := nat32("protección") sino d[3] := nat32("no presente") fin
+        imprimir("\n*** excepción 14: fallo de página en 0x%08X (%s, %s, %s)", d)
+        no_sigue(cs_, eip, 14)
     fin
 
     interrupción función irq_perdida()
@@ -137,21 +156,29 @@ módulo Semilla
         sacar_puerto(PIC1, FIN_INT)
     fin
 
-    ; los segundos desde que se arrancó, arriba a la derecha (sin mover el cursor)
-    interrupción función reloj()
-        variable s: nat32
+    función prepara_excepciones()
         variable i: nat32
-        tics := tics + 1
-        si tics mod HZ = 0 entonces
-            s := tics div HZ
-            para i desde 0 hasta 5 hacer
-                pantalla[79 - i] := 0x1F00 ob (s mod 10 + '0')
-                s := s div 10
+        para i desde 0 hasta 31 hacer
+            según i
+                caso 8, 10..14, 17: pon_puerta(i, nat32(dirección(excepción_con_código)), PUERTA_NÚCLEO)
+                si no: pon_puerta(i, nat32(dirección(excepción)), PUERTA_NÚCLEO)
             fin
         fin
-        sacar_puerto(PIC1, FIN_INT)
+        pon_puerta(0, nat32(dirección(división_por_cero)), PUERTA_NÚCLEO)
+        pon_puerta(6, nat32(dirección(instrucción_mala)), PUERTA_NÚCLEO)
+        pon_puerta(13, nat32(dirección(protección_general)), PUERTA_NÚCLEO)
+        pon_puerta(14, nat32(dirección(fallo_de_página)), PUERTA_NÚCLEO)
+        para i desde 32 hasta 47 hacer
+            pon_puerta(i, nat32(dirección(irq_perdida)), PUERTA_NÚCLEO)
+        fin
+        pon_puerta(33, nat32(dirección(teclado)), PUERTA_NÚCLEO)
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  El teclado
+    ; -------------------------------------------------------------------------
+    ; cada tecla, de su código a su letra, a la cola; y si la consola estaba
+    ; esperando, se la despierta
     interrupción función teclado()
         variable código: byte
         variable c: byte
@@ -161,40 +188,34 @@ módulo Semilla
         sino si código = 0xAA o código = 0xB6 entonces
             mayúsculas := falso
         sino si código <= 0x39 entonces
-                si mayúsculas entonces c := mayúsculas_tabla[código] sino c := minúsculas_tabla[código] fin
-                si c <> 0 y cola_ent - cola_sal < COLA entonces
-                    cola[cola_ent mod COLA] := c
-                    cola_ent := cola_ent + 1
-                    teclas := teclas + 1
-                fin
+            si mayúsculas entonces c := mayúsculas_tabla[código] sino c := minúsculas_tabla[código] fin
+            si c <> 0 y cola_ent - cola_sal < COLA entonces
+                cola[cola_ent mod COLA] := c
+                cola_ent := cola_ent + 1
+                teclas := teclas + 1
+            fin
         fin
         sacar_puerto(PIC1, FIN_INT)
+        si esperando_tecla <> nulo entonces
+            despertar_tarea(esperando_tecla)
+            esperando_tecla := nulo
+        fin
     fin
 
-    ; -------------------------------------------------------------------------
-    ;  La consola
-    ; -------------------------------------------------------------------------
-    ; espera una tecla de la cola (con «hlt»: el procesador duerme hasta la
-    ; interrupción siguiente)
+    ; espera una tecla de la cola: mientras no la hay, la tarea se queda
+    ; esperando (y corren las demás, o la ociosa)
     función leer_tecla(): byte
         variable c: byte
-        mientras cierto hacer
-            ensamblador
-                cli
-            fin
-            si cola_sal <> cola_ent entonces
-                c := cola[cola_sal mod COLA]
-                cola_sal := cola_sal + 1
-                ensamblador
-                    sti
-                fin
-                devolver c
-            fin
-            ensamblador
-                sti
-                hlt
-            fin
+        variable b: nat32
+        b := sin_interrupciones()
+        mientras cola_sal = cola_ent hacer
+            esperando_tecla := actual
+            bloquear()
         fin
+        c := cola[cola_sal mod COLA]
+        cola_sal := cola_sal + 1
+        reponer(b)
+        devolver c
     fin
 
     función lee_línea()
@@ -219,56 +240,286 @@ módulo Semilla
         fin
     fin
 
-    función es(t: puntero a byte): bool
+    ; -------------------------------------------------------------------------
+    ;  Las órdenes
+    ; -------------------------------------------------------------------------
+    función orden_memoria()
+        revisar()
+        imprimir4("marcos: %u libres de %u (%u K libres de %u K)\n", marcos_libres(), marcos_totales(),
+                  marcos_libres() * 4, marcos_totales() * 4)
+        imprimir4("montón: %u bloques ocupados con %u octetos, %u huecos; %u páginas debajo\n", ocupados, octetos,
+                  huecos, páginas_montón())
+        imprimir3("montón: %u reservas, %u liberaciones, %u fallos vistos\n", reservas, liberaciones, errores)
+    fin
+
+    función orden_mapa()
+        variable i, n: nat32
+        variable r: puntero a Región
+        variable d: arreglo [4] de nat32
+        n := regiones()
+        si n = 0 entonces
+            imprimir1("el cargador no da el mapa de memoria; dice %u K por encima del primer mega\n", memoria_alta())
+            devolver
+        fin
+        para i desde 0 hasta n - 1 hacer
+            r := región(i)
+            d[0] := r.base
+            d[1] := r.base + r.largo - 1
+            d[2] := r.largo div 1024
+            si r.clase = 1 entonces d[3] := nat32("libre") sino d[3] := nat32("reservada") fin
+            imprimir("0x%08X-0x%08X  %7u K  %s\n", d)
+        fin
+    fin
+
+    función orden_páginas()
+        variable tablas, n, cr0, mt, md: nat32
+        variable t2: nat32
+        cr0 := leer_cr0()
+        si cr0 yb 0x80000000 <> 0 entonces escribir("paginación: activa") sino escribir("paginación: apagada") fin
+        imprimir2(" (CR0 = 0x%08X), directorio en 0x%08X\n", cr0, leer_cr3())
+        n := cuenta_páginas(directorio_núcleo, 0, (límite - 1) >> 22, tablas)
+        imprimir3("  identidad: de 0 a 0x%08X, %u páginas en %u tablas (solo el anillo 0)\n", límite - 1, n, tablas)
+        mt := cuenta_páginas(directorio_núcleo, MONTÓN_INICIO >> 22, (MONTÓN_INICIO >> 22) + MONTÓN_TABLAS - 1, t2)
+        md := cuenta_páginas(directorio_núcleo, DEMANDA_INICIO >> 22, DEMANDA_INICIO >> 22, t2)
+        imprimir3("  montón: %u páginas; a la demanda: %u páginas y %u fallos atendidos\n", mt, md, atendidos)
+    fin
+
+    función azar(): nat32
+        semilla_azar := semilla_azar * 1103515245 + 12345
+        devolver semilla_azar >> 8
+    fin
+
+    ; reserva y libera a lo loco, con lo de dentro comprobado, y al final
+    ; mira que todo vuelve a estar como antes
+    función orden_montón()
+        variable k, i, n, malos, marcos0, tam0, ocup0: nat32
+        variable p: puntero a byte
+        variable d: arreglo [4] de nat32
+        revisar()
+        marcos0 := marcos_libres()
+        tam0 := tamaño_montón()
+        ocup0 := ocupados
+        malos := 0
+        para i desde 0 hasta 63 hacer vivos[i] := nulo fin
+        para k desde 1 hasta 3000 hacer
+            i := azar() mod 64
+            si vivos[i] = nulo entonces
+                n := azar() mod 5000 + 1
+                p := reservar(n)
+                si p = nulo entonces
+                    malos := malos + 1
+                sino
+                    llenar(p, n, byte(i))
+                    vivos[i] := p
+                    largos[i] := n
+                fin
+            sino
+                si no todo_igual(vivos[i], largos[i], byte(i)) entonces malos := malos + 1 fin
+                si no liberar(vivos[i]) entonces malos := malos + 1 fin
+                vivos[i] := nulo
+            fin
+            si k mod 500 = 0 y revisar() <> 0 entonces malos := malos + 1 fin
+        fin
+        d[0] := 0
+        para i desde 0 hasta 63 hacer
+            si vivos[i] <> nulo entonces
+                d[0] := d[0] + 1
+                si no liberar(vivos[i]) entonces malos := malos + 1 fin
+                vivos[i] := nulo
+            fin
+        fin
+        si revisar() <> 0 entonces malos := malos + 1 fin
+        imprimir2("montón: 3000 vueltas de reservar y liberar (y %u al final), %u fallos\n", d[0], malos)
+        d[0] := ocupados - ocup0
+        d[1] := tamaño_montón()
+        d[2] := tam0
+        d[3] := marcos_libres()
+        imprimir("montón: quedan %u bloques de más; mide %u octetos (antes %u); %u marcos libres", d)
+        imprimir1(" (antes %u)\n", marcos0)
+        si malos = 0 y ocupados = ocup0 y tamaño_montón() = tam0 y marcos_libres() = marcos0 entonces
+            escribir("montón sin fugas\n")
+        sino
+            escribir("*** el montón pierde o se estropea\n")
+        fin
+    fin
+
+    ; estropea el montón a propósito: escribe un octeto más allá de lo pedido,
+    ; suelta dos veces y suelta lo que no es de un bloque
+    función orden_estropear()
+        variable p, q: puntero a byte
+        variable e: nat32
+        e := errores
+        p := reservar(10)
+        q := reservar(100)
+        p[10] := 'x'
+        escribir("escribo un octeto de más y suelto: ", liberar(p), "\n")
+        p[10] := 0xCD
+        escribir("lo arreglo y suelto: ", liberar(p), "\n")
+        escribir("lo suelto otra vez: ", liberar(p), "\n")
+        escribir("suelto lo que no es de un bloque: ", liberar(q + 1), "\n")
+        escribir("suelto el otro: ", liberar(q), "\n")
+        imprimir2("el montón ha visto %u fallos; revisado, %u\n", errores - e, revisar())
+    fin
+
+    ; dos tareas que cuentan sin parar (no ceden nunca): si se alternan es
+    ; que el reloj les quita el procesador
+    función contadora(n: nat32)
+        mientras tics < hasta_tic hacer
+            cuentas[n] := cuentas[n] + 1
+            si última <> n entonces
+                alternancias := alternancias + 1
+                última := n
+            fin
+        fin
+    fin
+
+    función orden_turnos()
+        variable a, b: puntero a Tarea
+        variable t0: nat32
+        cuentas[0] := 0
+        cuentas[1] := 0
+        alternancias := 0
+        última := 9
+        t0 := tics
+        hasta_tic := tics + HZ
+        a := crear_tarea("contadora-A", nat32(dirección(contadora)), 0)
+        b := crear_tarea("contadora-B", nat32(dirección(contadora)), 1)
+        si a = nulo o b = nulo entonces
+            escribir("no se pueden hacer las tareas\n")
+            devolver
+        fin
+        esperar(a)
+        esperar(b)
+        imprimir4("turnos: A ha contado %u veces y B %u; se han alternado %u veces en %u tics\n",
+                  cuentas[0], cuentas[1], alternancias, tics - t0)
+    fin
+
+    función dormilona(n: nat32)
+        variable t0, b: nat32
+        t0 := tics
+        dormir(n * 20)
+        b := sin_interrupciones()
+        imprimir3("la dormilona %u se despierta: ha dormido %u tics (pidió %u)\n", n, tics - t0, n * 20)
+        reponer(b)
+    fin
+
+    función orden_dormir()
+        variable t: arreglo [3] de puntero a Tarea
         variable i: nat32
-        i := 0
-        mientras t[i] <> 0 hacer
-            si línea[i] <> t[i] entonces devolver falso fin
-            i := i + 1
+        ; se hacen en otro orden del que despiertan
+        t[0] := crear_tarea("dormilona-3", nat32(dirección(dormilona)), 3)
+        t[1] := crear_tarea("dormilona-1", nat32(dirección(dormilona)), 1)
+        t[2] := crear_tarea("dormilona-2", nat32(dirección(dormilona)), 2)
+        para i desde 0 hasta 2 hacer
+            si t[i] <> nulo entonces esperar(t[i]) fin
         fin
-        devolver línea[i] = 0
+        escribir("las tres han acabado\n")
     fin
 
-    ; la memoria que dice el cargador (multiboot): la de encima del primer mega, en K
-    función memoria_alta(): nat32
-        ensamblador
-            xor eax, eax
-            mov ebx, [C_mb_info]
-            cmp dword [C_mb_magia], 0x2BADB002
-            jne .no
-            test byte [ebx], 1
-            jz .no
-            mov eax, [ebx+8]
-        .no:
-        fin
+    ; escribe en la zona a la demanda, donde no hay nada: el fallo de página
+    ; le pone un marco, y la escritura llega
+    función orden_toca()
+        variable v, antes: nat32
+        variable p: puntero a nat32
+        v := DEMANDA_INICIO + (toques mod 1024) * PÁGINA + 0x123
+        toques := toques + 1
+        antes := atendidos
+        p := puntero(v)
+        valor(p) := 0xCAFE0000 + toques
+        imprimir3("escribo en 0x%08X (fallos de página atendidos: %u) y leo 0x%08X\n", v, atendidos - antes, valor(p))
+        antes := atendidos
+        valor(p) := valor(p) + 1
+        imprimir2("otra vez (fallos de página atendidos: %u) y leo 0x%08X\n", atendidos - antes, valor(p))
     fin
 
-    función divide(a: nat32, b: nat32): nat32
-        devolver a div b
+    función orden_ejecutar()
+        variable n, c, antes: nat32
+        variable t: puntero a Tarea
+        variable nombre: puntero a byte
+        si no palabra(línea, 1, palabra1, 40) o no texto_a_natural(palabra1, n) entonces
+            escribir("¿qué programa? (ejecutar N; los hay con «programas»)\n")
+            devolver
+        fin
+        si n >= módulos() entonces
+            imprimir1("no hay programa %u\n", n)
+            devolver
+        fin
+        antes := marcos_libres()
+        t := cargar(n)
+        si t = nulo entonces devolver fin
+        nombre := t.nombre
+        imprimir2("ejecuto %s (la tarea %u, en el anillo 3)\n", nat32(nombre), t.id)
+        c := esperar(t)
+        imprimir4("%s ha acabado con el código %u; marcos libres: %u antes y %u después\n", nat32(nombre), c,
+                  antes, marcos_libres())
+    fin
+
+    función es(t: puntero a byte): bool
+        devolver iguales(línea, t)
     fin
 
     función principal(): byte
-        prepara_idt()
+        variable malo: puntero a nat32
+        prepara_gdt()
+        prepara_excepciones()
         prepara_pic()
         prepara_reloj()
-        ensamblador
-            sti
-        fin
+        carga_idt()
         escribir("Hispa-Pentium (semilla), un núcleo de 32 bits escrito en Castel\n")
-        escribir("memoria: ", memoria_alta() div 1024 + 1, " MB. Escriba «ayuda».\n")
+        prepara_marcos(nat32(fin_programa()))
+        si límite = 0 entonces
+            escribir("*** el cargador no dice cuánta memoria hay. El núcleo se para.\n")
+            devolver 12
+        fin
+        si no prepara_paginación(límite) entonces
+            escribir("*** no se puede encender la paginación. El núcleo se para.\n")
+            devolver 12
+        fin
+        prepara_tareas()
+        prepara_usuario()
+        permitir_interrupciones()
+        imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
+                  (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
+        escribir("Escriba «ayuda».\n")
         mientras cierto hacer
             escribir("> ")
             lee_línea()
+            palabra(línea, 0, palabra1, 40)
             si es("") entonces
                 ; nada
             sino si es("ayuda") entonces
-                escribir("órdenes: ayuda hora memoria teclas cero apagar\n")
+                escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
+                escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
             sino si es("memoria") entonces
-                escribir(memoria_alta(), " K por encima del primer mega\n")
+                orden_memoria()
+            sino si es("mapa") entonces
+                orden_mapa()
+            sino si es("paginas") entonces
+                orden_páginas()
+            sino si es("monton") entonces
+                orden_montón()
+            sino si es("estropear") entonces
+                orden_estropear()
+            sino si es("tareas") entonces
+                enseña_tareas()
+            sino si es("turnos") entonces
+                orden_turnos()
+            sino si es("dormir") entonces
+                orden_dormir()
+            sino si es("programas") entonces
+                enseña_programas()
+            sino si iguales(palabra1, "ejecutar") entonces
+                orden_ejecutar()
+            sino si es("toca") entonces
+                orden_toca()
             sino si es("teclas") entonces
                 escribir(teclas, " teclas pulsadas\n")
+            sino si es("fallo") entonces
+                escribir("leo 0xDEAD0000, donde no hay nada...\n")
+                malo := puntero(0xDEAD0000)
+                escribir(valor(malo), "\n")
             sino si es("cero") entonces
                 escribir(divide(1, 0), "\n")
             sino si es("apagar") entonces
@@ -278,6 +529,10 @@ módulo Semilla
                 escribir("no conozco «", línea, "»\n")
             fin
         fin
+    fin
+
+    función divide(a: nat32, b: nat32): nat32
+        devolver a div b
     fin
 
 fin Semilla.

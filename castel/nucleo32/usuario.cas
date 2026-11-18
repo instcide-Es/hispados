@@ -1,0 +1,170 @@
+; =============================================================================
+;  usuario.cas - los programas del anillo 3 en el núcleo de Hispa-Pentium: se
+;  cargan de los módulos de multiboot (en QEMU, -initrd "uno.bin,otro.bin"),
+;  cada uno en su espacio de direcciones (su directorio de páginas), y hablan
+;  con el núcleo por la interrupción 0x80, la llamada al sistema:
+;
+;    EAX = 1  escribir: ECX octetos desde EBX        -> EAX: los escritos
+;    EAX = 2  acabar, con el código de EBX           (no vuelve)
+;    EAX = 3  dormir EBX tics
+;    EAX = 4  los tics desde que arrancó el núcleo   -> EAX
+;    EAX = 5  el número de la tarea                  -> EAX
+;
+;  (lo de otro número da 0xFFFFFFFF). Un programa de usuario se escribe en
+;  Castel con «modelo usuario» (CASTEL32.md): escribir y salir ya van por aquí.
+;  Su archivo empieza con una cabecera: la magia «HPU3», dónde va (0x40000000),
+;  hasta dónde llega lo que hay en el archivo, hasta dónde lo que empieza a
+;  cero, y por dónde empieza.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usuario
+
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Mem32, Formato
+
+    constante MAGIA = 0x33555048                ; «HPU3»
+    público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
+
+    tipo Cabecera = estructura
+        salto: nat32
+        magia, inicio, datos_fin, vacío_fin, entrada: nat32
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La llamada al sistema
+    ; -------------------------------------------------------------------------
+    función atender(n: nat32, a: nat32, b: nat32): nat32
+        variable p: puntero a byte
+        variable i: nat32
+        según n
+            caso 1:
+                si no usuario_puede(actual.cr3, a, b, falso) entonces devolver 0xFFFFFFFF fin
+                p := puntero(a)
+                i := 0
+                mientras i < b hacer
+                    escribir_car(p[i])
+                    i := i + 1
+                fin
+                devolver b
+            caso 2:
+                terminar(a)
+            caso 3:
+                dormir(a)
+                devolver 0
+            caso 4:
+                devolver tics
+            caso 5:
+                devolver actual.id
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; la interrupción 0x80: lo que se pide va en los registros que guardó
+    ; «pushad» (EAX en [ebp+28], EBX en [ebp+16], ECX en [ebp+24]), y lo que
+    ; se devuelve se deja donde estaba EAX, que «popad» repone al volver
+    interrupción función llamada_al_sistema()
+        variable n, a, b, r: nat32
+        ensamblador
+            mov eax, [ebp+28]
+            mov {n}, eax
+            mov eax, [ebp+16]
+            mov {a}, eax
+            mov eax, [ebp+24]
+            mov {b}, eax
+        fin
+        r := atender(n, a, b)
+        ensamblador
+            mov eax, {r}
+            mov [ebp+28], eax
+        fin
+    fin
+
+    público función prepara_usuario()
+        pon_puerta(0x80, nat32(dirección(llamada_al_sistema)), PUERTA_USUARIO)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Cargar un programa
+    ; -------------------------------------------------------------------------
+    ; ¿es el módulo i un programa de usuario que se puede cargar? Si no, dice
+    ; por qué (si decir) y da falso
+    público función es_programa(i: nat32, decir: bool): bool
+        variable c: puntero a Cabecera
+        variable largo: nat32
+        variable bien: bool
+        largo := módulo_final(i) - módulo_inicio(i)
+        c := puntero(módulo_inicio(i))
+        si largo < tamaño(Cabecera) o c.magia <> MAGIA entonces
+            si decir entonces escribir("no es un programa de Hispa-Pentium (le falta la cabecera «HPU3»)\n") fin
+            devolver falso
+        fin
+        bien := c.inicio = USUARIO_INICIO y c.datos_fin >= c.inicio y c.datos_fin - c.inicio <= largo
+        bien := bien y c.vacío_fin >= c.datos_fin y c.vacío_fin <= USUARIO_FINAL
+        bien := bien y c.entrada >= c.inicio y c.entrada < c.datos_fin
+        si no bien entonces
+            si decir entonces escribir("la cabecera del programa no tiene sentido\n") fin
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; carga el módulo i en un espacio de direcciones nuevo y hace su tarea
+    ; (que entra en la cola). Da la tarea, o nulo.
+    público función cargar(i: nat32): puntero a Tarea
+        variable c: puntero a Cabecera
+        variable d, v, m, origen, cuánto, ini: nat32
+        variable t: puntero a Tarea
+        si no es_programa(i, cierto) entonces devolver nulo fin
+        ini := módulo_inicio(i)
+        c := puntero(ini)
+        d := nuevo_espacio()
+        si d = 0 entonces
+            escribir("no hay memoria para su directorio de páginas\n")
+            devolver nulo
+        fin
+        ; una página detrás de otra: un marco nuevo (a cero) y, encima, lo que
+        ; toque del archivo (el marco se ve por la identidad)
+        v := c.inicio
+        mientras v < c.vacío_fin hacer
+            m := reservar_marco()
+            si m = 0 o no mapear(d, v, m, ESCRIBIR ob USUARIO) entonces
+                si m <> 0 entonces soltar_marco(m) fin
+                soltar_espacio(d)
+                escribir("no hay memoria para el programa\n")
+                devolver nulo
+            fin
+            si v < c.datos_fin entonces
+                origen := ini + (v - c.inicio)
+                cuánto := c.datos_fin - v
+                si cuánto > PÁGINA entonces cuánto := PÁGINA fin
+                copiar_memoria(puntero(m), puntero(origen), cuánto)
+            fin
+            v := v + PÁGINA
+        fin
+        t := crear_tarea_usuario(módulo_nombre(i), d, c.entrada, v)
+        si t = nulo entonces
+            soltar_espacio(d)
+            escribir("no quedan tareas libres\n")
+        fin
+        devolver t
+    fin
+
+    ; la tarea del anillo 3 que corre ha hecho algo que no puede (lo dice
+    ; quien llama): se acaba con el código MATADA. No vuelve.
+    público función matar_actual()
+        imprimir2("*** se acaba la tarea %u (%s)\n", actual.id, nat32(actual.nombre))
+        terminar(MATADA)
+    fin
+
+    público función enseña_programas()
+        variable i: nat32
+        si módulos() = 0 entonces
+            escribir("el cargador no ha traído ningún programa\n")
+            devolver
+        fin
+        para i desde 0 hasta módulos() - 1 hacer
+            imprimir3("%3u  %-14s  %6u octetos", i, nat32(módulo_nombre(i)), módulo_final(i) - módulo_inicio(i))
+            si es_programa(i, falso) entonces escribir("  programa de usuario\n") sino escribir("  (no es un programa)\n") fin
+        fin
+    fin
+
+fin Usuario.

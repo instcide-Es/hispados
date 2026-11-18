@@ -1,0 +1,256 @@
+; =============================================================================
+;  paginas.cas - la paginación del núcleo de Hispa-Pentium (la MMU del 386):
+;  un directorio de páginas de 1024 entradas, cada una con su tabla de 1024
+;  páginas de 4 K. Cómo se reparten los 4 GB de direcciones:
+;
+;    0x00000000 - límite      la memoria de verdad, tal cual (la identidad):
+;                             el núcleo, sus variables, la pantalla, los
+;                             marcos. Solo para el anillo 0.
+;    0x40000000 - 0xBFFFFFFF  el programa de usuario (anillo 3): cada uno, en
+;                             su espacio de direcciones (su directorio).
+;    0xC0000000 - 0xC07FFFFF  el montón del núcleo (monton.cas).
+;    0xD0000000 - 0xD03FFFFF  la zona «a la demanda»: no hay nada hasta que se
+;                             toca; el fallo de página pone allí un marco.
+;
+;  Lo del núcleo (la identidad, el montón y la zona a la demanda) está en
+;  todos los directorios, con las mismas tablas: las del montón y la demanda
+;  se hacen al empezar, para que lo que se ponga en ellas lo vean todos.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Paginas
+
+    importar Marcos, Cpu
+
+    ; ---- los bits de una entrada (de directorio o de tabla) ----
+    público constante PRESENTE = 1
+    público constante ESCRIBIR = 2
+    público constante USUARIO = 4
+    constante DIRECCIÓN = 0xFFFFF000
+
+    público constante PÁGINA = 4096
+    público constante USUARIO_INICIO = 0x40000000
+    público constante USUARIO_FINAL = 0xC0000000
+    público constante MONTÓN_INICIO = 0xC0000000
+    público constante MONTÓN_TABLAS = 2         ; 8 MB
+    público constante DEMANDA_INICIO = 0xD0000000
+    público constante DEMANDA_FINAL = 0xD0400000 ; 4 MB, una tabla
+
+    público variable directorio_núcleo: nat32   ; el del núcleo (dirección física)
+    público variable activa: bool
+    público variable atendidos: nat32           ; fallos atendidos en la zona a la demanda
+
+    ; la entrada del directorio y la de la tabla de una dirección
+    función entrada_dir(dir: nat32, virtual: nat32): puntero a nat32
+        variable d: puntero a nat32
+        d := puntero(dir)
+        devolver d + (virtual >> 22)
+    fin
+
+    ; la entrada de la tabla de una dirección (nulo si no tiene tabla). Si
+    ; crear, hace la tabla que falte (con los bits que se digan).
+    función entrada(dir: nat32, virtual: nat32, crear: bool, bits: nat32): puntero a nat32
+        variable de: puntero a nat32
+        variable t: nat32
+        variable tabla: puntero a nat32
+        de := entrada_dir(dir, virtual)
+        si valor(de) yb PRESENTE = 0 entonces
+            si no crear entonces devolver nulo fin
+            t := reservar_marco()
+            si t = 0 entonces devolver nulo fin
+            valor(de) := t ob PRESENTE ob ESCRIBIR ob (bits yb USUARIO)
+        fin
+        tabla := puntero(valor(de) yb DIRECCIÓN)
+        devolver tabla + ((virtual >> 12) yb 1023)
+    fin
+
+    ; pone la página virtual sobre el marco físico, en el directorio dir.
+    ; Da falso si no hay memoria para la tabla.
+    público función mapear(dir: nat32, virtual: nat32, físico: nat32, bits: nat32): bool
+        variable e: puntero a nat32
+        variable b: nat32
+        b := sin_interrupciones()
+        e := entrada(dir, virtual, cierto, bits)
+        si e = nulo entonces
+            reponer(b)
+            devolver falso
+        fin
+        valor(e) := (físico yb DIRECCIÓN) ob (bits yb 0xFFF) ob PRESENTE
+        reponer(b)
+        devolver cierto
+    fin
+
+    ; quita la página: da el marco que tenía (0 si no tenía). Si es el
+    ; directorio en uso, que el procesador olvide lo que sabía (CR3 otra vez).
+    público función desmapear(dir: nat32, virtual: nat32): nat32
+        variable e: puntero a nat32
+        variable f, b: nat32
+        b := sin_interrupciones()
+        e := entrada(dir, virtual, falso, 0)
+        si e = nulo o valor(e) yb PRESENTE = 0 entonces
+            reponer(b)
+            devolver 0
+        fin
+        f := valor(e) yb DIRECCIÓN
+        valor(e) := 0
+        si activa y leer_cr3() = dir entonces poner_cr3(dir) fin
+        reponer(b)
+        devolver f
+    fin
+
+    ; las banderas de la página (0 si no está)
+    público función banderas_de(dir: nat32, virtual: nat32): nat32
+        variable e: puntero a nat32
+        e := entrada(dir, virtual, falso, 0)
+        si e = nulo entonces devolver 0 fin
+        si valor(e) yb PRESENTE = 0 entonces devolver 0 fin
+        devolver valor(e) yb 0xFFF
+    fin
+
+    ; el marco donde cae una dirección virtual (más su desplazamiento), o 0
+    público función traducir(dir: nat32, virtual: nat32): nat32
+        variable e: puntero a nat32
+        e := entrada(dir, virtual, falso, 0)
+        si e = nulo entonces devolver 0 fin
+        si valor(e) yb PRESENTE = 0 entonces devolver 0 fin
+        devolver (valor(e) yb DIRECCIÓN) ob (virtual yb (PÁGINA - 1))
+    fin
+
+    ; ¿puede el anillo 3 leer (o escribir, si para_escribir) de «inicio» a «inicio+n»?
+    público función usuario_puede(dir: nat32, inicio: nat32, n: nat32, para_escribir: bool): bool
+        variable p, b, pide: nat32
+        si n = 0 entonces devolver cierto fin
+        si inicio < USUARIO_INICIO o inicio + n < inicio o inicio + n > USUARIO_FINAL entonces devolver falso fin
+        pide := PRESENTE ob USUARIO
+        si para_escribir entonces pide := pide ob ESCRIBIR fin
+        p := inicio yb DIRECCIÓN
+        mientras p < inicio + n hacer
+            b := banderas_de(dir, p)
+            si b yb pide <> pide entonces devolver falso fin
+            p := p + PÁGINA
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El directorio del núcleo
+    ; -------------------------------------------------------------------------
+    ; hace el directorio del núcleo con la identidad hasta «tope» (la memoria
+    ; que hay), y las tablas del montón y de la zona a la demanda, y enciende
+    ; la paginación. Da falso si no hay marcos para ello.
+    público función prepara_paginación(tope: nat32): bool
+        variable v: nat32
+        variable i: nat32
+        directorio_núcleo := reservar_marco()
+        si directorio_núcleo = 0 entonces devolver falso fin
+        v := 0
+        mientras v < tope hacer
+            si no mapear(directorio_núcleo, v, v, ESCRIBIR) entonces devolver falso fin
+            v := v + PÁGINA
+        fin
+        ; las tablas del montón y de la demanda, vacías, ya hechas
+        para i desde 0 hasta MONTÓN_TABLAS - 1 hacer
+            si entrada(directorio_núcleo, MONTÓN_INICIO + i * 0x400000, cierto, 0) = nulo entonces devolver falso fin
+        fin
+        si entrada(directorio_núcleo, DEMANDA_INICIO, cierto, 0) = nulo entonces devolver falso fin
+        activar_paginación(directorio_núcleo)
+        activa := leer_cr0() yb 0x80000000 <> 0
+        devolver activa
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los espacios de direcciones de los programas
+    ; -------------------------------------------------------------------------
+    ; un directorio nuevo: con lo del núcleo (las mismas tablas) y nada en la
+    ; parte del usuario. 0 si no hay marcos.
+    público función nuevo_espacio(): nat32
+        variable d: nat32
+        variable de, dn: puntero a nat32
+        variable i: nat32
+        d := reservar_marco()
+        si d = 0 entonces devolver 0 fin
+        de := puntero(d)
+        dn := puntero(directorio_núcleo)
+        para i desde 0 hasta 1023 hacer
+            de[i] := dn[i]
+        fin
+        devolver d
+    fin
+
+    ; suelta un espacio de direcciones: los marcos de las páginas del usuario,
+    ; sus tablas y el directorio. Da cuántos marcos ha devuelto.
+    público función soltar_espacio(d: nat32): nat32
+        variable de, tabla: puntero a nat32
+        variable i, j, n: nat32
+        de := puntero(d)
+        n := 0
+        para i desde USUARIO_INICIO >> 22 hasta (USUARIO_FINAL >> 22) - 1 hacer
+            si de[i] yb PRESENTE <> 0 entonces
+                tabla := puntero(de[i] yb DIRECCIÓN)
+                para j desde 0 hasta 1023 hacer
+                    si tabla[j] yb PRESENTE <> 0 entonces
+                        si soltar_marco(tabla[j] yb DIRECCIÓN) entonces n := n + 1 fin
+                    fin
+                fin
+                si soltar_marco(de[i] yb DIRECCIÓN) entonces n := n + 1 fin
+                de[i] := 0
+            fin
+        fin
+        si soltar_marco(d) entonces n := n + 1 fin
+        devolver n
+    fin
+
+    ; cuántas tablas y cuántas páginas presentes tiene un directorio, de la
+    ; entrada «primera» a la «última» del directorio
+    público función cuenta_páginas(d: nat32, primera: nat32, última: nat32, ref tablas: nat32): nat32
+        variable de, tabla: puntero a nat32
+        variable i, j, n: nat32
+        de := puntero(d)
+        n := 0
+        tablas := 0
+        para i desde primera hasta última hacer
+            si de[i] yb PRESENTE <> 0 entonces
+                tablas := tablas + 1
+                tabla := puntero(de[i] yb DIRECCIÓN)
+                para j desde 0 hasta 1023 hacer
+                    si tabla[j] yb PRESENTE <> 0 entonces n := n + 1 fin
+                fin
+            fin
+        fin
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La zona a la demanda
+    ; -------------------------------------------------------------------------
+    ; lo que hace el fallo de página con una dirección de la zona a la
+    ; demanda que aún no tiene página: le pone un marco (a cero). Da falso si
+    ; la dirección no es de la zona, si ya tenía página (entonces el fallo es
+    ; otra cosa) o si no quedan marcos.
+    público función atender_demanda(virtual: nat32): bool
+        variable m: nat32
+        si virtual < DEMANDA_INICIO o virtual >= DEMANDA_FINAL entonces devolver falso fin
+        si banderas_de(directorio_núcleo, virtual) <> 0 entonces devolver falso fin
+        m := reservar_marco()
+        si m = 0 entonces devolver falso fin
+        si no mapear(directorio_núcleo, virtual yb DIRECCIÓN, m, ESCRIBIR) entonces
+            soltar_marco(m)
+            devolver falso
+        fin
+        atendidos := atendidos + 1
+        devolver cierto
+    fin
+
+    ; devuelve los marcos de la zona a la demanda (para volver a probarla)
+    público función vaciar_demanda(): nat32
+        variable v, m, n: nat32
+        n := 0
+        v := DEMANDA_INICIO
+        mientras v < DEMANDA_FINAL hacer
+            m := desmapear(directorio_núcleo, v)
+            si m <> 0 y soltar_marco(m) entonces n := n + 1 fin
+            v := v + PÁGINA
+        fin
+        devolver n
+    fin
+
+fin Paginas.
