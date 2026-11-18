@@ -58,6 +58,23 @@ $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS=
 # 4) traer los registros y resumir
 rm -rf build/pc && mkdir -p build/pc
 $SSH "cd /dev/shm/$NOMBRE/build/pc && tar -cf - ." | tar -xf - -C build/pc
+# 5) las que necesitan KVM: el WSL del PC (Windows 10) no lo tiene (sin
+# virtualización anidada); si aquí sí hay /dev/kvm, se repiten aquí, con nice,
+# y su resultado sustituye al del PC (18/11/2026).
+if [ -c /dev/kvm ] && ! $SSH 'timeout 8 qemu-system-i386 -enable-kvm -display none -nodefaults -m 16 -S -monitor none </dev/null 2>&1 | grep -q "No such device\|failed to initialize kvm"; [ $? -ne 0 ]'; then
+  for t in $(grep -l -E '/dev/kvm|enable-kvm|accel=kvm' tests/run_*.sh 2>/dev/null); do
+    n=$(grep -n -F "$t" build/pc/lista.txt | head -1 | cut -d: -f1)
+    [ -n "$n" ] || continue
+    l=build/pc/$(printf %02d $n)
+    # solo las que en el PC no han podido probar nada (las que usan KVM si
+    # lo hay, como run_red, ya pasaron sin él)
+    [ "$(grep -c '  OK ' $l.log 2>/dev/null)" = 0 ] || continue
+    echo "  (sin KVM en el PC: $t se pasa aquí)"
+    make -s para-pruebas > /dev/null 2>&1
+    l2=$(sed -n "${n}p" build/pc/lista.txt)
+    timeout -k 20 ${TMAX_PRUEBA:-3600} nice -n 19 bash -c "$l2" > $l.log 2>&1; echo "$? $l2 (aquí, con KVM)" > $l.rc
+  done
+fi
 ok=0; fail=0
 for r in build/pc/*.rc; do
   n=${r%.rc}
