@@ -40,10 +40,12 @@ módulo Programa
   de este modelo.
 - **`modelo usuario`** da un **programa de usuario de Hispa-Pentium** (`USUARIO.BIN`,
   un binario plano con su cabecera): corre en el **anillo 3**, en su propio espacio
-  de direcciones, a partir de `0x40000000`. Lo carga el núcleo (de los módulos de
-  multiboot) y habla con él por la **llamada al sistema** (`int 0x80`): `escribir`
-  va por ella, y `salir` también. `nucleo32/uhola.cas`, `umalo.cas` y `ucli.cas`
-  son de este modelo.
+  de direcciones, a partir de `0x40000000`. Lo carga el núcleo (del disco, o de los
+  módulos de multiboot) y habla con él por la **llamada al sistema** (`int 0x80`):
+  `escribir` va por ella, y `salir` también; lo demás (el teclado, los archivos,
+  lanzar otros programas, pedir memoria) lo da el módulo `Llamadas`
+  (`nucleo32/llamadas.cas`), que se importa. `nucleo32/uordenes.cas` (el intérprete
+  de órdenes de Hispa-Pentium), `uhola.cas`, `ueco.cas`... son de este modelo.
 
 ```
 módulo Hola
@@ -314,8 +316,10 @@ falta enlazar con otras cosas; de momento no hace falta.
   serie); un `.EXE` con HW32 dentro de Hispa-DOS.
 - **`nucleo32/probar.sh`** arranca el núcleo de Hispa-Pentium y le teclea órdenes
   (por el monitor de QEMU, como un teclado de verdad), con los programas de
-  usuario como módulos de multiboot (`-initrd`): sirve para ver el reloj, el
-  teclado, las excepciones, la memoria, las tareas y el anillo 3.
+  usuario como módulos de multiboot (`-initrd`) y, con `DISCO=imagen`, un disco
+  duro IDE (lo hace **`nucleo32/disco.sh`**, con FAT y los programas dentro):
+  sirve para ver el reloj, el teclado, las excepciones, la memoria, las tareas, el
+  anillo 3, el disco y el intérprete de órdenes.
 - `pruebas.sh` (parte 8) comprueba: los ejemplos de 16 bits sin DOS, compilados
   como núcleos de 32 bits, escriben lo mismo; los de `ejemplos32/` (núcleos en
   QEMU y programas Hispa32 con HW32) dan su salida esperada y su código; cuentas
@@ -342,6 +346,8 @@ falta enlazar con otras cosas; de momento no hace falta.
 - **Funciones de interrupción públicas** (`público interrupción función`): hoy cada
   módulo pone en la IDT las suyas.
 - **ELF32** de salida, si algún día hay que enlazar con código de fuera.
-- **El núcleo de Hispa-Pentium**: ha crecido desde la semilla (PENTIUM.md); lo
-  siguiente, un sistema de archivos, más llamadas al sistema y cargar programas
-  del disco.
+- **El núcleo de Hispa-Pentium**: ha crecido desde la semilla (PENTIUM.md) y ya
+  lee discos FAT, carga los programas del disco y tiene su intérprete de órdenes
+  en el anillo 3, todo sin tocar el lenguaje. Lo siguiente que sí lo toca: que la
+  **pila de un programa de `modelo usuario`** la ponga el núcleo (para que crezca a
+  la demanda) y no el arranque del programa, en los dos compiladores.

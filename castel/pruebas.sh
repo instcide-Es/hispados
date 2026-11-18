@@ -40,8 +40,12 @@
 #      paginación con su fallo de página atendido, el montón (sin fugas, y
 #      viendo lo que lo estropea), las tareas que se alternan con el reloj,
 #      dormir y esperar, y los programas del anillo 3 con su llamada al
-#      sistema (y los que hacen lo que no deben, que se acaban).
-# Necesita python3, nasm, qemu-system-i386, socat y mtools. El disquete de
+#      sistema (y los que hacen lo que no deben, que se acaban). Y con un
+#      disco duro IDE de imagen (nucleo32/disco.sh; FAT12, FAT16, FAT32 y con
+#      tabla de particiones): el controlador ATA, la FAT, cargar programas
+#      del disco, las llamadas al sistema nuevas (teclado, archivos, lanzar y
+#      esperar, memoria que crece) y el intérprete de órdenes del anillo 3.
+# Necesita python3, nasm, qemu-system-i386, socat, mtools y mkfs.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera y la octava (lo de 32 bits)
@@ -54,6 +58,8 @@
 set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
+# los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
+USU="$AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -379,7 +385,7 @@ cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
 # de Hispa-Pentium y unas cuentas al azar (CASTEL32.md)
 cp $AQUI/ensamblador/formas32.asm $T/ens/formas32.asm
 python3 -I $AQUI/azar32.py 9 150 $T/ens/az32p.cas $T/ens/az32p.esp plano
-for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $T/ens/az32p.cas; do
+for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $T/ens/az32p.cas; do
   python3 -I $AQUI/ccastel.py $f -o $T/ens/$(basename $f .cas).asm > /dev/null 2>&1 || ko "$(basename $f) no compila"
 done
 rm -f $T/ens/az32p.cas $T/ens/az32p.esp
@@ -461,7 +467,7 @@ mformat -C -f 1440 -i $T/cb.img ::
   python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
   python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
   for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas \
-           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $A/azar32p.cas; do
+           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $A/azar32p.cas; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
     mcopy -o -i $T/c.img $f ::$N.CAS
@@ -715,6 +721,109 @@ if grep -q "no tenía que salir" $S; then ko "un programa del anillo 3 ha seguid
 $AQUI/nucleo32/probar.sh "" fallo > $P/fallo.sal 2>&1
 if grep -q "fallo de página en 0xDEAD0000 (lectura, núcleo, no presente)" $P/fallo.sal && grep -q "^\[código 14\]" $P/fallo.sal; then ok "un fallo de página del núcleo fuera de la zona a la demanda: lo dice con la dirección y se para (código 14)"
 else ko "el fallo de página del núcleo no se dice bien"; sed 's/^/        /' $P/fallo.sal | head -6; fi
+
+# ---- el disco, la FAT, las llamadas nuevas y el intérprete de órdenes ----
+# (un disco duro IDE de imagen, hecho con mkfs.fat y mtools: nucleo32/disco.sh)
+echo "== Hispa-Pentium con disco: ATA, FAT, programas del disco y el intérprete de órdenes del anillo 3 =="
+hechos=1
+for c in 12 16 32 mbr; do
+  $AQUI/nucleo32/disco.sh $P/d$c.img $c > $P/disco$c.txt 2>&1 || { hechos=0; ko "no se puede hacer el disco de prueba ($c): $(tail -1 $P/disco$c.txt)"; }
+done
+if [ $hechos = 1 ]; then
+# lo que tiene que sumar TEXTOS\LARGO.TXT (el mismo que escribe disco.sh)
+suma=$(python3 -c "print(sum(sum(('linea %03d de un archivo de varios clusters\r\n' % i).encode()) for i in range(1, 401)))")
+# 1. desde la consola del núcleo, con FAT16
+DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" disco dir "dir textos" "dir nada" "lanzar hola.bin" "lanzar eco.bin uno dos tres" \
+  "lanzar noprog.bin" "lanzar nada.bin" disco apagar > $P/disco.sal 2>&1
+S=$P/disco.sal
+mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primario, y cuántos sectores" \
+  "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: no hay"
+mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
+  "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
+  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^11 entradas"
+mira "una carpeta dentro de otra, y una que no está" "^LARGO.TXT  *17600$" "^PIRATA.TXT  *110$" "^5 entradas" "^no puedo abrir «nada»: no existe"
+m1=$(grep "^hola.bin ha acabado" $S | awk '{print $10, $13}')
+mira "un programa del anillo 3 cargado del disco (no de multiboot): corre y acaba con su código" \
+  "^lanzo hola.bin del disco (la tarea [0-9]*, en el anillo 3)" "^1 + 2 + ... + 1000 = 500500" "^hola.bin ha acabado con el código 3; marcos libres"
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ]; then ok "al acabar el programa del disco, la memoria vuelve entera: los mismos marcos libres ($m1)"
+else ko "el programa del disco se deja marcos: «$m1»"; fi
+mira "un programa del disco recibe sus argumentos" "^uno dos tres$" "^eco.bin ha acabado con el código 3"
+mira "lo que no es un programa, o no está, no se lanza (y se dice por qué)" "^no puedo lanzar noprog.bin: no es un programa de Hispa-Pentium" \
+  "^no puedo lanzar nada.bin: no existe" "; archivos abiertos: 0$" "^\[código 5\]"
+# 2. el intérprete de órdenes del anillo 3 (ORDENES.BIN, del disco)
+DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" ordenes ayuda ver mem dir "dir textos" "dir nada" "type leeme.txt" "type textos\\pirata.txt" \
+  "type nada.txt" "TYPE textos" "eco hola y adios" "textos\\eco2 desde una carpeta" hola malo nada noprog prueba :espera "prueba fuera" \
+  :espera salir tareas memoria disco apagar > $P/ordenes.sal 2>&1
+S=$P/ordenes.sal
+mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
+  "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
+  "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
+mira "VER y MEM" "^Hispa-Pentium 0\.2: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+  "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
+mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
+  "^TEXTOS  *<DIR>  " "^ *9 archivos  *[0-9]* octetos$" "^ *2 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
+  "^LARGO    TXT  *17600  " "^ *3 archivos  *18198 octetos$" "^No puedo abrir nada: no existe\.$"
+mira "TYPE: un archivo de la raíz y uno de una carpeta (abrir, leer y cerrar por la llamada al sistema)" \
+  "^Este archivo está en un disco FAT y lo enseña la orden TYPE\.$" "^Con diez cañones por banda,$" "^un velero bergantín\.$" \
+  "^No puedo abrir nada.txt: no existe\.$" "^textos es una carpeta"
+mira "un programa se lanza por su nombre, con sus argumentos, y se le espera (también de una carpeta)" "^hola y adios$" \
+  "^(ECO.BIN ha acabado con el código 3)$" "^desde una carpeta$" "^(TEXTOS.ECO2.BIN ha acabado con el código 3)$" "^(HOLA.BIN ha acabado con el código 3)$"
+mira "un programa que hace lo que no debe se acaba, y el intérprete sigue; lo desconocido se dice" \
+  "^\*\*\* se acaba la tarea [0-9]* (MALO.BIN)" "^(MALO.BIN ha acabado con el código 255)$" \
+  "^Orden o nombre de programa desconocido: nada (escriba AYUDA)\.$" "^No puedo lanzar NOPROG.BIN: no es un programa de Hispa-Pentium\.$"
+mira "la memoria del programa crece y se devuelve (sbrk): páginas nuevas a cero, y vuelven" \
+  "^memoria: pido 100000 octetos: 25 páginas más, a cero: cierto, y la suma de lo escrito es 312487500$" \
+  "^memoria: la devuelvo: cierto, y quedan 0 páginas de más$" "^memoria: no me dan 3 GB: cierto; ni devuelvo lo que no pedí: cierto$"
+mira "leer un archivo de varios clusters a trozos de 777 octetos: lo mismo que hay en el disco" \
+  "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" \
+  "^archivo: al final ya no da más: cierto$" "^archivo: cerrado, ya no se deja leer: cierto$"
+mira "los archivos abiertos tienen un tope, y las direcciones que no son del programa no se tocan" \
+  "^abiertos: caben 16 a la vez; el siguiente: hay demasiados archivos abiertos$" "^abiertos: cerrados todos, se puede abrir otra vez: cierto$" \
+  "^punteros: leer a la memoria del núcleo: cierto; a donde no tengo nada: cierto; un nombre que no es mío: cierto$" \
+  "^punteros: un manejador que no existe: cierto; esperar a una tarea que no es mía: cierto$"
+mira "un programa lanza otros dos a la vez y los espera" "^soy el hijo uno$" "^y yo soy el dos$" \
+  "^hijos: los dos han acabado, con los códigos 4 y 5; ya no se les puede esperar: cierto$" "^hijos: los dos ruidosos han acabado, con los códigos 9 y 9$"
+ra=$(grep -c "^ruido A [0-9]\{3\}: una línea entera, de principio a fin, sin letras de otro$" $S)
+rb=$(grep -c "^ruido B [0-9]\{3\}: una línea entera, de principio a fin, sin letras de otro$" $S)
+rm_=$(grep -a "ruido [AB]" $S | grep -vc "^ruido [AB] [0-9]\{3\}: una línea entera, de principio a fin, sin letras de otro$")
+alt=$(grep "^ruido [AB] " $S | awk '{print $2}' | uniq | wc -l)
+if [ "$ra" = 120 ] && [ "$rb" = 120 ] && [ "$rm_" = 0 ] && [ "$alt" -gt 2 ]; then ok "la consola con su cerrojo: dos programas que escriben a la vez (240 líneas, $alt turnos) no se mezclan ni una letra"
+else ko "las líneas de dos programas que escriben a la vez se mezclan o se pierden: $ra de A, $rb de B, $rm_ rotas, $alt turnos"; fi
+mira "la memoria devuelta ya no se puede tocar: fallo de página, y se acaba el programa" "^fuera: escribo en la memoria que me han dado: cierto$" \
+  "fallo de página en 0x4000[0-9A-F]*000 (escritura, anillo 3, no presente)" "^(PRUEBA.BIN ha acabado con el código 255)$"
+if grep -q "no tenía que salir" $S; then ko "un programa ha seguido después de lo que no podía hacer"; else ok "lo que no podían hacer (leer el núcleo, tocar lo devuelto), no lo han hecho"; fi
+m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
+mira "al salir, el núcleo ha recogido lo que dejó PRUEBA sin cerrar ni esperar (un archivo abierto y un programa)" \
+  "^prueba: acabo con el código 7, un archivo abierto y un programa sin esperar$" "^(PRUEBA.BIN ha acabado con el código 7)$" \
+  "soy el que nadie espera: he dormido y acabo solo$" \
+  "^Hasta luego\.$" "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 1 bloques ocupados con 8192 octetos"
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 2 ]; then
+  ok "y no queda nada: los mismos marcos libres que antes de lanzar el intérprete ($m1) y solo las dos tareas del núcleo"
+else ko "tras el intérprete queda memoria o tareas sin recoger: «$m1»"; grep -A6 "^> tareas" $S | sed 's/^/        /'; fi
+# CLS: se mira la pantalla (lo que hay justo antes de la última orden)
+VER=1 DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" ordenes dir cls apagar > $P/cls.sal 2>&1
+if [ "$(sed -n '/^\[pantalla\]/,$p' $P/cls.sal | sed -n '2p')" = '|C:\>' ] && [ "$(sed -n '/^\[pantalla\]/,$p' $P/cls.sal | sed '1,2d' | grep -vc '^|$')" = 0 ]; then
+  ok "CLS deja la pantalla en blanco, con la petición de órdenes arriba"
+else ko "CLS no borra la pantalla:"; sed -n '/^\[pantalla\]/,$p' $P/cls.sal | head -5 | sed 's/^/        /'; fi
+# 3. las otras FAT, y el disco con tabla de particiones
+for c in 12 32 mbr; do
+  case $c in 12) que="FAT12"; f=FAT12; s0=0 ;; 32) que="FAT32"; f=FAT32; s0=0 ;; mbr) que="un disco con tabla de particiones (la FAT16, en la primera)"; f=FAT16; s0=63 ;; esac
+  DISCO=$P/d$c.img $AQUI/nucleo32/probar.sh "" disco "dir textos" "lanzar prueba.bin" :espera "lanzar textos\\eco2.bin hola" apagar > $P/fat$c.sal 2>&1
+  S=$P/fat$c.sal
+  mira "$que: se monta, se lee una carpeta, un archivo de varios clusters y se cargan programas" \
+    "^sistema de archivos: $f, desde el sector $s0, " "^LARGO.TXT  *17600$" \
+    "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" \
+    "^hijos: los dos ruidosos han acabado, con los códigos 9 y 9$" "^prueba.bin ha acabado con el código 7" "^hola$" "^eco2.bin ha acabado con el código 1"
+done
+# 4. el intérprete, él solo al arrancar (si el cargador dice «ordenes»); y sin disco
+DISCO=$P/d16.img ARRANQUE=ordenes $AQUI/nucleo32/probar.sh "" ver salir apagar > $P/arranque.sal 2>&1
+S=$P/arranque.sal
+mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes" \
+  "^C:.>ver$" "^Hispa-Pentium 0\.2" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+$AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
+S=$P/sindisco.sal
+mira "sin disco, el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
+fi
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))
