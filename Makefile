@@ -287,7 +287,7 @@ WIFI_CF = -m32 -std=gnu11 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-pro
           $(WIFI_INC) -D__HISPA__ -DCONFIG_BCMA_HOST_PCI -DCONFIG_BCMA_HOST_PCI_POSSIBLE -DCONFIG_BCMA_DRIVER_PCI
 WIFI_LINUX = $(wildcard wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil/*.c \
              wifi/linux/bcma/*.c) wifi/linux/cordic.c
-WIFI_PROPIO = wifi/compat/base.c $(wildcard wifi/nucleo/*.c)
+WIFI_PROPIO = wifi/compat/base.c $(filter-out wifi/nucleo/radio_ath9k.c,$(wildcard wifi/nucleo/*.c))
 WIFI_DEP = $(wildcard tests/wifi/*.h wifi/compat/*.h wifi/nucleo/*.h wifi/linux/brcmsmac/*.h wifi/linux/brcmsmac/phy/*.h \
            wifi/linux/bcma/*.h wifi/linux/include/linux/bcma/*.h)
 WIFI_OL = $(patsubst %.c,$(B)/wifi/%.o,$(notdir $(WIFI_LINUX)))

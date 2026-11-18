@@ -641,8 +641,14 @@ void hl_log(int nivel, const char *f, ...)
 int printk(const char *f, ...)
 {
 	va_list ap;
+	int n = 2;
+
+	if (f[0] == '\001' && f[1]) {		/* KERN_...: el nivel */
+		n = f[1] <= '3' ? 0 : f[1] == '4' ? 1 : f[1] == '7' ? 3 : 2;
+		f += 2;
+	}
 	va_start(ap, f);
-	hl_vlog(2, f, ap);
+	hl_vlog(n, f, ap);
 	va_end(ap);
 	return 0;
 }

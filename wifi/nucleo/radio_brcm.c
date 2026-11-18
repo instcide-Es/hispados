@@ -505,9 +505,6 @@ static int busca_pci(void)
 				continue;
 			}
 			clase = hl_pci_lee(bus, df, 8);
-			if ((clase >> 24) == 0x02 || (id & 0xffff) == 0x14e4)
-				hl_log(2, "PCI %02x:%02x.%d: %04X:%04X clase %06X rev. %02X\n", bus, df >> 3, df & 7,
-				       id & 0xffff, id >> 16, clase >> 8, clase & 0xff);
 			if ((id & 0xffff) == 0x14e4 && !hallada) {
 				for (i = 0; admitidas[i]; i++)
 					if ((id >> 16) == admitidas[i])
@@ -527,16 +524,15 @@ static int busca_pci(void)
 	return hallada ? 0 : -1;
 }
 
-/* Paso 1: encontrar la tarjeta en el bus PCI (solo mira: no la toca). */
+/* Paso 1: encontrar la tarjeta en el bus PCI (solo mira: no la toca).
+ * 1 si no hay ninguna de las admitidas. */
 int brcm_busca(void)
 {
 	u32 b0, b1, sub;
 	u16 cmd;
 
-	if (busca_pci() < 0) {
-		hl_log(0, "no hay ninguna tarjeta Wi-Fi Broadcom de las admitidas (BCM43224 14E4:4353, BCM43225 14E4:4357)\n");
-		return -1;
-	}
+	if (busca_pci() < 0)
+		return 1;
 	pci_read_config_dword(&tarjeta, 0x10, &b0);
 	pci_read_config_dword(&tarjeta, 0x14, &b1);
 	pci_read_config_dword(&tarjeta, 0x2c, &sub);

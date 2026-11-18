@@ -157,6 +157,7 @@ static inline u8 *ieee80211_get_DA(struct ieee80211_hdr *h)
 #define IEEE80211_HT_CAP_SGI_40 0x0040
 #define IEEE80211_HT_CAP_TX_STBC 0x0080
 #define IEEE80211_HT_CAP_RX_STBC 0x0300
+#define IEEE80211_HT_CAP_RX_STBC_SHIFT 8
 #define IEEE80211_HT_CAP_DELAY_BA 0x0400
 #define IEEE80211_HT_CAP_MAX_AMSDU 0x0800
 #define IEEE80211_HT_CAP_DSSSCCK40 0x1000
@@ -164,6 +165,8 @@ static inline u8 *ieee80211_get_DA(struct ieee80211_hdr *h)
 #define IEEE80211_HT_AMPDU_PARM_FACTOR 0x03
 #define IEEE80211_HT_AMPDU_PARM_DENSITY 0x1C
 #define IEEE80211_HT_MCS_TX_DEFINED 0x01
+#define IEEE80211_HT_MCS_TX_RX_DIFF 0x02
+#define IEEE80211_HT_MCS_TX_MAX_STREAMS_SHIFT 2
 #define IEEE80211_HT_OP_MODE_PROTECTION 0x0003
 #define IEEE80211_HT_OP_MODE_NON_GF_STA_PRSNT 0x0004
 #define IEEE80211_HT_OP_MODE_NON_HT_STA_PRSNT 0x0010
@@ -188,16 +191,19 @@ enum nl80211_band { NL80211_BAND_2GHZ, NL80211_BAND_5GHZ, NL80211_BAND_60GHZ, NU
 enum nl80211_iftype {
 	NL80211_IFTYPE_UNSPECIFIED, NL80211_IFTYPE_ADHOC, NL80211_IFTYPE_STATION,
 	NL80211_IFTYPE_AP, NL80211_IFTYPE_AP_VLAN, NL80211_IFTYPE_WDS,
-	NL80211_IFTYPE_MONITOR, NL80211_IFTYPE_MESH_POINT
+	NL80211_IFTYPE_MONITOR, NL80211_IFTYPE_MESH_POINT,
+	NL80211_IFTYPE_P2P_CLIENT, NL80211_IFTYPE_P2P_GO, NL80211_IFTYPE_P2P_DEVICE,
+	NL80211_IFTYPE_OCB
 };
-enum nl80211_chan_width { NL80211_CHAN_WIDTH_20_NOHT, NL80211_CHAN_WIDTH_20, NL80211_CHAN_WIDTH_40 };
+enum nl80211_chan_width { NL80211_CHAN_WIDTH_20_NOHT, NL80211_CHAN_WIDTH_20, NL80211_CHAN_WIDTH_40,
+	NL80211_CHAN_WIDTH_80, NL80211_CHAN_WIDTH_80P80, NL80211_CHAN_WIDTH_160, NL80211_CHAN_WIDTH_5, NL80211_CHAN_WIDTH_10 };
 enum nl80211_channel_type { NL80211_CHAN_NO_HT, NL80211_CHAN_HT20, NL80211_CHAN_HT40MINUS, NL80211_CHAN_HT40PLUS };
 enum nl80211_reg_initiator {
 	NL80211_REGDOM_SET_BY_CORE, NL80211_REGDOM_SET_BY_USER,
 	NL80211_REGDOM_SET_BY_DRIVER, NL80211_REGDOM_SET_BY_COUNTRY_IE
 };
 enum nl80211_ext_feature_index { NL80211_EXT_FEATURE_CQM_RSSI_LIST = 1 };
-enum nl80211_dfs_regions { NL80211_DFS_UNSET };
+enum nl80211_dfs_regions { NL80211_DFS_UNSET, NL80211_DFS_FCC, NL80211_DFS_ETSI, NL80211_DFS_JP };
 #define NL80211_RRF_NO_OFDM (1 << 0)
 #define NL80211_RRF_NO_CCK (1 << 1)
 #define NL80211_RRF_NO_INDOOR (1 << 2)
@@ -228,7 +234,8 @@ struct ieee80211_channel {
 	u32 orig_flags;
 	int orig_mag, orig_mpwr;
 };
-enum ieee80211_rate_flags { IEEE80211_RATE_SHORT_PREAMBLE = 1 << 0, IEEE80211_RATE_MANDATORY_B = 1 << 2, IEEE80211_RATE_ERP_G = 1 << 4 };
+enum ieee80211_rate_flags { IEEE80211_RATE_SHORT_PREAMBLE = 1 << 0, IEEE80211_RATE_MANDATORY_A = 1 << 1, IEEE80211_RATE_MANDATORY_B = 1 << 2,
+	IEEE80211_RATE_MANDATORY_G = 1 << 3, IEEE80211_RATE_ERP_G = 1 << 4, IEEE80211_RATE_SUPPORTS_5MHZ = 1 << 5, IEEE80211_RATE_SUPPORTS_10MHZ = 1 << 6 };
 struct ieee80211_rate { u32 flags; u16 bitrate; u16 hw_value, hw_value_short; };
 struct ieee80211_sta_ht_cap {
 	u16 cap;
@@ -260,7 +267,7 @@ struct ieee80211_regdomain {
 	enum nl80211_dfs_regions dfs_region;
 	struct ieee80211_reg_rule reg_rules[8];
 };
-struct regulatory_request { enum nl80211_reg_initiator initiator; char alpha2[3]; };
+struct regulatory_request { enum nl80211_reg_initiator initiator; char alpha2[3]; enum nl80211_dfs_regions dfs_region; };
 #define MHZ_TO_KHZ(f) ((f) * 1000)
 #define KHZ_TO_MHZ(f) ((f) / 1000)
 #define DBI_TO_MBI(g) ((g) * 100)
@@ -276,6 +283,9 @@ struct regulatory_request { enum nl80211_reg_initiator initiator; char alpha2[3]
 	.flags = reg_flags }
 #define REGULATORY_CUSTOM_REG 1
 #define REGULATORY_STRICT_REG 2
+#define REGULATORY_DISABLE_BEACON_HINTS 4
+#define REGULATORY_COUNTRY_IE_FOLLOW_POWER 8
+#define REGULATORY_COUNTRY_IE_IGNORE 16
 struct wiphy {
 	struct ieee80211_supported_band *bands[NUM_NL80211_BANDS];
 	u32 flags;
@@ -324,6 +334,7 @@ enum mac80211_rate_control_flags {
 #define IEEE80211_TX_INFO_RATE_DRIVER_DATA_SIZE 24
 struct ieee80211_tx_rate { s8 idx; u16 count:5, flags:11; } __packed;
 struct ieee80211_vif;
+struct ieee80211_key_conf;
 struct ieee80211_tx_info {
 	u32 flags;
 	u8 band;
@@ -342,7 +353,7 @@ struct ieee80211_tx_info {
 				};
 			};
 			struct ieee80211_vif *vif;
-			void *hw_key;
+			struct ieee80211_key_conf *hw_key;
 			u32 flags;
 		} control;
 		struct {
@@ -365,11 +376,13 @@ struct ieee80211_tx_info {
 enum mac80211_rx_flags {
 	RX_FLAG_MMIC_ERROR = BIT(0), RX_FLAG_DECRYPTED = BIT(1), RX_FLAG_MACTIME_PLCP_START = BIT(2),
 	RX_FLAG_MMIC_STRIPPED = BIT(3), RX_FLAG_IV_STRIPPED = BIT(4), RX_FLAG_FAILED_FCS_CRC = BIT(5),
-	RX_FLAG_FAILED_PLCP_CRC = BIT(6), RX_FLAG_MACTIME_START = BIT(7),
+	RX_FLAG_FAILED_PLCP_CRC = BIT(6), RX_FLAG_MACTIME_START = BIT(7), RX_FLAG_NO_SIGNAL_VAL = BIT(8),
 };
 enum mac80211_rx_encoding { RX_ENC_LEGACY = 0, RX_ENC_HT, RX_ENC_VHT };
-enum mac80211_rx_encoding_flags { RX_ENC_FLAG_SHORTPRE = BIT(0), RX_ENC_FLAG_SHORT_GI = BIT(2), RX_ENC_FLAG_HT_GF = BIT(3) };
-enum rate_info_bw { RATE_INFO_BW_20 = 0, RATE_INFO_BW_40 = 3 };
+enum mac80211_rx_encoding_flags { RX_ENC_FLAG_SHORTPRE = BIT(0), RX_ENC_FLAG_SHORT_GI = BIT(2), RX_ENC_FLAG_HT_GF = BIT(3),
+	RX_ENC_FLAG_STBC_MASK = BIT(4) | BIT(5), RX_ENC_FLAG_LDPC = BIT(6), RX_ENC_FLAG_BF = BIT(7) };
+#define RX_ENC_FLAG_STBC_SHIFT 4
+enum rate_info_bw { RATE_INFO_BW_20 = 0, RATE_INFO_BW_5 = 1, RATE_INFO_BW_10 = 2, RATE_INFO_BW_40 = 3 };
 struct ieee80211_rx_status {
 	u64 mactime;
 	u32 flag;
@@ -380,6 +393,8 @@ struct ieee80211_rx_status {
 	u8 band;
 	u8 antenna;
 	s8 signal;
+	u8 chains;
+	s8 chain_signal[IEEE80211_MAX_CHAINS];
 };
 static inline struct ieee80211_tx_info *IEEE80211_SKB_CB(struct sk_buff *s) { return (struct ieee80211_tx_info *)s->cb; }
 static inline struct ieee80211_rx_status *IEEE80211_SKB_RXCB(struct sk_buff *s) { return (struct ieee80211_rx_status *)s->cb; }
@@ -399,6 +414,7 @@ enum ieee80211_conf_changed {
 };
 struct ieee80211_conf {
 	u32 flags;
+	bool radar_enabled;
 	int power_level;
 	u16 listen_interval;
 	u8 long_frame_max_tx_count, short_frame_max_tx_count;
@@ -450,6 +466,21 @@ struct ieee80211_sta {
 	bool wme;
 	u8 drv_priv[0] __aligned(sizeof(void *));
 };
+/* las claves (las usa ath/key.c; aquí el cifrado es por programa, wpa.c) */
+#define SUITE(oui, id) (((oui) << 8) | (id))
+#define WLAN_CIPHER_SUITE_WEP40 SUITE(0x000FAC, 1)
+#define WLAN_CIPHER_SUITE_TKIP SUITE(0x000FAC, 2)
+#define WLAN_CIPHER_SUITE_CCMP SUITE(0x000FAC, 4)
+#define WLAN_CIPHER_SUITE_WEP104 SUITE(0x000FAC, 5)
+#define WLAN_CIPHER_SUITE_AES_CMAC SUITE(0x000FAC, 6)
+enum { WLAN_KEY_LEN_WEP40 = 5, WLAN_KEY_LEN_WEP104 = 13, WLAN_KEY_LEN_CCMP = 16, WLAN_KEY_LEN_TKIP = 32 };
+enum nl80211_tkip_data_offset { NL80211_TKIP_DATA_OFFSET_ENCR_KEY = 0, NL80211_TKIP_DATA_OFFSET_TX_MIC_KEY = 16,
+	NL80211_TKIP_DATA_OFFSET_RX_MIC_KEY = 24 };
+enum ieee80211_key_flags { IEEE80211_KEY_FLAG_GENERATE_IV_MGMT = BIT(0), IEEE80211_KEY_FLAG_GENERATE_IV = BIT(1),
+	IEEE80211_KEY_FLAG_GENERATE_MMIC = BIT(2), IEEE80211_KEY_FLAG_PAIRWISE = BIT(3),
+	IEEE80211_KEY_FLAG_SW_MGMT_TX = BIT(4), IEEE80211_KEY_FLAG_PUT_IV_SPACE = BIT(5),
+	IEEE80211_KEY_FLAG_RX_MGMT = BIT(6), IEEE80211_KEY_FLAG_RESERVE_TAILROOM = BIT(7) };
+struct ieee80211_key_conf { u64 tx_pn; u32 cipher; u8 icv_len; u8 iv_len; u8 hw_key_idx; s8 keyidx; u16 flags; u8 keylen; u8 key[]; };
 struct ieee80211_tx_queue_params { u16 txop; u16 cw_min; u16 cw_max; u8 aifs; bool acm; bool uapsd; };
 struct ieee80211_tx_control { struct ieee80211_sta *sta; };
 enum ieee80211_ampdu_mlme_action {

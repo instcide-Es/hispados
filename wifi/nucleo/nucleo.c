@@ -15,6 +15,29 @@ int brcm_busca(void);
 int brcm_monta(struct radio **r);
 int brcm_enciende(void);
 void brcm_cuentas(d32 *bien, d32 *mal, int *vel);
+int ath_busca(void);
+int ath_monta(struct radio **r);
+int ath_enciende(void);
+void ath_cuentas(d32 *bien, d32 *mal, int *vel);
+void ath_resumen(void);
+
+/* Las tarjetas que se saben llevar: cada una con su «radio» (el controlador
+ * de Linux que la mueve y lo que lo une a w80211.c). Se usa la primera que
+ * se encuentre en el PCI. La gestión 802.11, WPA2 y el residente son los
+ * mismos para todas. */
+struct conductor {
+	const char *familia;
+	int (*busca)(void);		/* 0 está, 1 no hay, <0 está pero no se puede usar */
+	int (*monta)(struct radio **r);
+	int (*enciende)(void);
+	void (*cuentas)(d32 *bien, d32 *mal, int *vel);
+	void (*resumen)(void);
+};
+static const struct conductor conductores[] = {
+	{ "Broadcom BCM43224/43225 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
+	{ "Atheros AR9285/AR9280/AR9287 (ath9k)", ath_busca, ath_monta, ath_enciende, ath_cuentas, ath_resumen },
+};
+static const struct conductor *cond;
 
 #ifdef CHIP_SIMULADO
 /* núcleo de pruebas (HSPWSIM.BIN): el controlador de verdad contra el modelo
@@ -73,6 +96,28 @@ void nucleo_excepcion(u32 vector, u32 *pila)
 	hl_log(0, "  El Wi-Fi queda parado. Mande este registro (WIFI.LOG) para arreglarlo.\n");
 }
 
+/* las tarjetas de red del PCI, para el registro */
+static void lista_pci(void)
+{
+	int bus, df;
+
+	for (bus = 0; bus < 256; bus++)
+		for (df = 0; df < 256; df++) {
+			u32 id = hl_pci_lee(bus, df, 0), clase;
+			if (id == 0xffffffff || (id & 0xffff) == 0xffff) {
+				if (!(df & 7))
+					df += 7;
+				continue;
+			}
+			clase = hl_pci_lee(bus, df, 8);
+			if ((clase >> 24) == 0x02 || (id & 0xffff) == 0x14e4 || (id & 0xffff) == 0x168c)
+				hl_log(2, "PCI %02x:%02x.%d: %04X:%04X clase %06X rev. %02X\n", bus, df >> 3, df & 7,
+				       id & 0xffff, id >> 16, clase >> 8, clase & 0xff);
+			if (!(df & 7) && !(hl_pci_lee(bus, df, 0x0c) & 0x800000))
+				df += 7;
+		}
+}
+
 static int inicia(struct ll_inicio *p)
 {
 	u32 fin_nucleo = ((u32)_fin_bss + 4095) & ~4095u, tope, t, u, pk;
@@ -122,9 +167,22 @@ static int inicia(struct ll_inicio *p)
 #endif
 	hl_fw_pon(0, "brcm/bcm43xx-0.fw", (const u8 *)p->fw_des[0], p->fw_tam[0]);
 	hl_fw_pon(1, "brcm/bcm43xx_hdr-0.fw", (const u8 *)p->fw_des[1], p->fw_tam[1]);
-	r = brcm_busca();
+	lista_pci();
+	for (r = 1, t = 0; t < ARRAY_SIZE(conductores) && r == 1; t++) {
+		r = conductores[t].busca();
+		if (r == 0) {
+			cond = &conductores[t];
+			hl_log(2, "Se usa la radio de las %s\n", cond->familia);
+		}
+	}
+	if (r == 1) {
+		hl_log(0, "no hay ninguna tarjeta Wi-Fi de las admitidas:\n");
+		for (t = 0; t < ARRAY_SIZE(conductores); t++)
+			hl_log(0, "  %s\n", conductores[t].familia);
+		return -1;
+	}
 	if (r == 0)
-		hl_log(2, "PASO 1 de 3 hecho: tarjeta encontrada. Sigue el 2: despertarla, leer sus núcleos y su SPROM y montar el controlador\n");
+		hl_log(2, "PASO 1 de 3 hecho: tarjeta encontrada. Sigue el 2: despertarla, leer sus datos de fábrica y montar el controlador\n");
 	return r;
 }
 
@@ -135,10 +193,12 @@ static int monta(void)
 
 	if (simulada)
 		return 0;
-	r = brcm_monta(&la_radio);
+	if (!cond)
+		return -1;
+	r = cond->monta(&la_radio);
 	hl_monton_info(&t, &u, &pk);
 	if (r == 0)
-		hl_log(2, "PASO 2 de 3 hecho: controlador montado (montón: %u KB). Sigue el 3: cargar el microcódigo y encender la radio\n", u >> 10);
+		hl_log(2, "PASO 2 de 3 hecho: controlador montado (montón: %u KB). Sigue el 3: encender la radio\n", u >> 10);
 	return r;
 }
 
@@ -151,7 +211,7 @@ static int enciende(void)
 		return 0;
 	if (!la_radio)
 		return -1;
-	r = brcm_enciende();
+	r = cond->enciende();
 	if (r < 0)
 		return r;
 #ifdef CHIP_SIMULADO
@@ -251,8 +311,8 @@ int nucleo_llamada(u32 fn, u32 dir)
 			d32 b = 0, m = 0;
 			int v = 0;
 			static const char *const est[] = { "parado", "buscando", "autenticando", "asociando", "claves", "CONECTADO" };
-			if (!simulada)
-				brcm_cuentas(&b, &m, &v);
+			if (cond)
+				cond->cuentas(&b, &m, &v);
 			hl_monton_info(&t, &u, &pk);
 			if (hl_monton_repasa() == 0)
 				hl_log(2, "ESTADO: el montón está entero\n");
@@ -262,12 +322,14 @@ int nucleo_llamada(u32 fn, u32 dir)
 			       i->tx, i->rx, i->tx_err, i->rx_desc, i->reconexiones, perdidas);
 			hl_log(2, "ESTADO: radio: acuses %u, sin acuse %u, velocidad %d,%d Mbit/s; montón %u KB (pico %u); paquetes vivos %u\n",
 			       b, m, v / 2, (v & 1) * 5, u >> 10, pk >> 10, hl_skb_vivos());
+			if (cond && cond->resumen)
+				cond->resumen();
 		}
-		if (!simulada && p[1] >= sizeof(*i) + 12) {
+		if (cond && p[1] >= sizeof(*i) + 12) {
 			/* detrás: aciertos y fallos de envío y la velocidad */
 			d32 x[3];
 			int v;
-			brcm_cuentas(&x[0], &x[1], &v);
+			cond->cuentas(&x[0], &x[1], &v);
 			x[2] = v;
 			memcpy(i + 1, x, 12);
 		} else if (p[1] >= sizeof(*i) + 12) {
@@ -290,6 +352,18 @@ int nucleo_llamada(u32 fn, u32 dir)
 			return -1;
 		memcpy(hl_virt(p[0]), la_radio->mac, 6);
 		return 0;
+	case LL_NOMBRE: {
+		/* el nombre de la tarjeta, acabado en 0 */
+		char *d = hl_virt(p[0]);
+		const char *n = la_radio && la_radio->nombre ? la_radio->nombre : "?";
+		u32 k;
+		if (!p[1])
+			return -1;
+		for (k = 0; k + 1 < p[1] && n[k]; k++)
+			d[k] = n[k];
+		d[k] = 0;
+		return k;
+	}
 	}
 	return -98;
 }

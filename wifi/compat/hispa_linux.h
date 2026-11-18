@@ -42,6 +42,11 @@ typedef u32 __le32;
 typedef u64 __le64;
 typedef u16 __be16;
 typedef u32 __be32;
+typedef u64 __be64;
+typedef u8 u_int8_t;
+typedef u16 u_int16_t;
+typedef u32 u_int32_t;
+typedef long off_t;
 typedef u16 __sum16;
 typedef unsigned int uint;
 typedef unsigned long ulong;
@@ -252,12 +257,17 @@ static inline int toupper(int c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }
 void hl_log(int nivel, const char *f, ...) __printf(2, 3);
 void hl_vlog(int nivel, const char *f, va_list ap);
 int printk(const char *f, ...) __printf(1, 2);
-#define KERN_ERR ""
-#define KERN_WARNING ""
-#define KERN_INFO ""
-#define KERN_DEBUG ""
-#define KERN_CONT ""
-#define KERN_NOTICE ""
+/* los niveles, como en Linux (un 01h y una cifra delante del texto): printk
+ * y ath_printk los pasan a los del registro */
+#define KERN_EMERG "\0010"
+#define KERN_ALERT "\0011"
+#define KERN_CRIT "\0012"
+#define KERN_ERR "\0013"
+#define KERN_WARNING "\0014"
+#define KERN_NOTICE "\0015"
+#define KERN_INFO "\0016"
+#define KERN_DEBUG "\0017"
+#define KERN_CONT "\001c"
 #define pr_fmt(f) f
 #define pr_err(f, a...) hl_log(0, f, ##a)
 #define pr_warn(f, a...) hl_log(1, f, ##a)
@@ -340,6 +350,8 @@ static inline void clear_bit(int n, unsigned long *a) { a[n / 32] &= ~(1UL << (n
 #define __clear_bit clear_bit
 static inline int test_and_set_bit(int n, unsigned long *a) { int v = test_bit(n, a); set_bit(n, a); return v; }
 static inline int test_and_clear_bit(int n, unsigned long *a) { int v = test_bit(n, a); clear_bit(n, a); return v; }
+#define for_each_set_bit(b, mapa, tam) \
+	for ((b) = 0; (b) < (tam); (b)++) if (test_bit((b), (const unsigned long *)(mapa)))
 static inline int ffs(int x) { return __builtin_ffs(x); }
 static inline int fls(unsigned int x) { return x ? 32 - __builtin_clz(x) : 0; }
 static inline unsigned long __ffs(unsigned long x) { return __builtin_ctzl(x); }
@@ -395,6 +407,8 @@ u32 hl_isqrt(u32 x);
 #define lockdep_assert_held(l) do { } while (0)
 
 /* ---------------------------------------------------------------- tiempo */
+#define NR_CPUS 1
+#define num_possible_cpus() 1
 #define HZ 1000
 unsigned long hl_jiffies(void);
 #define jiffies hl_jiffies()
@@ -416,6 +430,9 @@ void hl_udelay(unsigned long us);
 #define NSEC_PER_MSEC 1000000L
 static inline ktime_t ktime_get(void) { return (s64)hl_jiffies() * 1000000; }
 static inline u64 ktime_get_ns(void) { return (u64)hl_jiffies() * 1000000; }
+struct timespec64 { s64 tv_sec; long tv_nsec; };
+static inline void ktime_get_raw_ts64(struct timespec64 *t)
+{ unsigned long ms = hl_jiffies(); t->tv_sec = ms / 1000; t->tv_nsec = (ms % 1000) * 1000000L; }
 
 /* trabajos aplazados y «tasklets»: los corre hl_trabajos() en cada pasada */
 struct work_struct;
@@ -521,6 +538,7 @@ struct pci_driver { const char *name; const struct pci_device_id *id_table;
 #define PCI_COMMAND_MASTER 0x4
 #define PCI_STATUS 0x06
 #define PCI_REVISION_ID 0x08
+#define PCI_CACHE_LINE_SIZE 0x0c
 #define PCI_LATENCY_TIMER 0x0d
 #define PCI_BASE_ADDRESS_0 0x10
 #define PCI_INTERRUPT_LINE 0x3c
@@ -720,6 +738,13 @@ struct led_classdev { const char *name; const char *default_trigger; int brightn
 struct led_trigger { const char *name; };
 struct gpio_chip { int base; };
 struct gpio_desc;
+/* las patas GPIO del sistema (solo en los chips de placa, no en PCI) */
+#define GPIOF_IN 1
+#define GPIOF_OUT_INIT_LOW 0
+#define gpio_request_one(g, f, n) (-ENODEV)
+#define gpio_free(g) do { } while (0)
+#define gpio_get_value(g) 0
+#define gpio_set_value(g, v) do { } while (0)
 struct bcm47xx_wdt { u32 (*timer_set)(struct bcm47xx_wdt *, u32); u32 (*timer_set_ms)(struct bcm47xx_wdt *, u32); u32 max_timer_ms; void *driver_data; };
 static inline void *bcm47xx_wdt_get_drvdata(struct bcm47xx_wdt *w) { return w->driver_data; }
 #define platform_device_register_data(a, b, c, d, e) ((struct platform_device *)0)
