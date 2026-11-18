@@ -528,7 +528,7 @@ texto (no dependen de Hispa Ventanas).
 
 | | |
 |---|---|
-| `NAVEGA.EXE` | 275 KB (130 KB sin JavaScript; 78 antes de lo de ClicGest entero: 23 KB son los formatos de Mirador; el preludio, `dom.js`, va dentro: 70 KB de texto) |
+| `NAVEGA.EXE` | 280 KB (275 antes de lo de la prueba de uso; 130 KB sin JavaScript; 78 antes de lo de ClicGest entero: 23 KB son los formatos de Mirador; el preludio, `dom.js`, va dentro: 70 KB de texto) |
 | `HSPJS.DLL` (QuickJS, con -O2: con -Os serían 513 KB, pero 1,8 veces más lento) | 851 KB |
 | `JS.EXE` | 7 KB |
 | `HSPTLS.DLL` (TLS, con BearSSL y 20 autoridades raíz) | 87 KB |
