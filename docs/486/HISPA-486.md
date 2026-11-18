@@ -1077,7 +1077,9 @@ para la parte baja quedan 1,2 KB libres.
 - **Los colores y las ROP:** COLORREF -> el gris o el color del cubo de
   6×6×6 más cercano (por tablas; también `PALETTEINDEX` con la paleta del
   contexto; con la de serie, `PALETTEINDEX(n)` es el color n de la paleta de
-  Hispa Ventanas, como lo usa el Navegador). Las ROP2 (`SetROP2`) y las ROP3 de `BitBlt` se hacen con los
+  Hispa Ventanas, como lo usa el Navegador; y un RGB que es justo uno de los
+  16 colores propios de Hispa Ventanas, crema, arena, terracota..., se
+  queda en ese color y no en el más parecido del cubo). Las ROP2 (`SetROP2`) y las ROP3 de `BitBlt` se hacen con los
   colores RGB de los puntos, como en una pantalla de color verdadero, y el
   resultado vuelve a la paleta: así funcionan las máscaras (`SRCAND` y
   `SRCPAINT` con un mapa monocromo) y el XOR. De monocromo a color, 0 es el

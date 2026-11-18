@@ -248,6 +248,19 @@ wg_idx:
         push ebx
         push ecx
         push edx
+        cmp byte [wg_mono], 0       ; los 16 de Hispa Ventanas (crema, arena,
+        jne .no16                   ; terracota...), si es justo uno de ellos:
+        and eax, 0xFFFFFF           ; así PALETTEINDEX y lo copiado de la
+        xor ebx, ebx                ; pantalla no se van al cubo
+.c16:
+        mov ecx, [pal_rgb+ebx*4]
+        and ecx, 0xFFFFFF
+        cmp eax, ecx
+        je .es16
+        inc ebx
+        cmp ebx, 16
+        jb .c16
+.no16:
         movzx ebx, al
         movzx ecx, ah
         shr eax, 16
@@ -273,6 +286,9 @@ wg_idx:
         pop ecx
         pop ebx
         ret
+.es16:
+        mov eax, ebx
+        jmp .x
 .mono:
         imul ebx, 30                ; claro u oscuro
         imul ecx, 59
