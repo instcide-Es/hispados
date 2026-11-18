@@ -158,16 +158,16 @@ para la biblio» (la biblioteca de la asociación, en ClicGest).
   archivos (`multipart/form-data`, con el diálogo de abrir), descargas al
   disco (el diálogo de guardar, y abrir el PDF con el Lector), `pattern`,
   `<meta http-equiv=refresh>`, Mayús+Tab, y el User-Agent
-  `HispaNavegador/0.2 (Hispa-486)`. Para eso, Hispa Ventanas da a los
-  programas Hispa32 cinco funciones más (`ventanas/win32n.inc`):
-  `SetDIBitsToDevice` (mapas de 8 bits: de abajo arriba o de arriba abajo;
-  con `DIB_PAL_COLORS` los octetos son colores de su paleta),
-  `GetKeyState` (Mayús, Ctrl y Alt), `GetOpenFileNameA` y `GetSaveFileNameA`
-  (de `COMDLG32`, la cuarta DLL que reconoce: el diálogo de elegir archivo
-  de Hispa Ventanas, que deja la carpeta de trabajo como estaba) y `WinExec`
-  (abre otro programa como un acceso directo: un `.HVP` se abre dentro).
-  `tools/elf2pe.py -t` importa también de `COMDLG32.dll`. Todo en
-  [NAVEGADOR.md](NAVEGADOR.md).
+  `HispaNavegador/0.2 (Hispa-486)`. Para eso usa de Hispa Ventanas
+  `SetDIBitsToDevice` (mapas de 8 bits de arriba abajo con `DIB_PAL_COLORS`
+  y la tabla 0..255: los octetos son colores de su paleta), `GetKeyState`
+  (Mayús+Tab), `GetOpenFileNameA` y `GetSaveFileNameA` (de `COMDLG32`: el
+  diálogo de elegir archivo de Hispa Ventanas, que deja la carpeta de
+  trabajo como estaba) y `WinExec` (abre otro programa como un acceso
+  directo: un `.HVP` se abre dentro; en `ventanas/win32n.inc`). Las cuatro
+  primeras se hicieron primero para el Navegador y luego las dio, más
+  completas, la fase 3d (`win32b.inc` y `win32x.inc`): queda una sola de
+  cada una. Todo en [NAVEGADOR.md](NAVEGADOR.md).
 - **Lo que sigue:** las hojas de estilo de fuera cuando sean pequeñas, y la
   pila residente para que dos programas usen la red a la vez.
 
@@ -226,6 +226,7 @@ pocos archivos; los programas y el núcleo son los mismos.
 | `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio | `sistema/486/VENTANAS.INI` |
 | `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) e **«Internet»** (Navegador), con `Internet=1` | `sistema/486/CENTRO.INI` |
 | `\HISPADOS\INTERNET\` | **el Navegador** (docs/486/NAVEGADOR.md): `NAVEGA.EXE`, `HTTPS.EXE`, `HSPTLS.DLL`, `WSOCK32.DLL`, `MSVCRT.DLL`, `NAVEGA.INI` y `LEEME.TXT` (lo del disquete «Internet» menos `HW32.COM`, que ya está en `\HISPADOS`) | `build/` y `w32/navega/` (la tabla `INTERNET` de `tools/mkusb.py`) |
+| `\HISPADOS\COMCTL32.DLL`, `UCRT.DLL` | las DLL de la fase 3d, al lado de `HW32.COM` y `MSVCRT.DLL`: los controles comunes y el CRT de Visual C++ 2015 | `build/` (la tabla `DLL486` de `tools/mkusb.py`; también en el disquete «Hispa-486») |
 | `\HISPADOS\EDICION.INI` | `[Edicion]` `Gama=486` `Nombre=Hispa-486`: la **edición** instalada | `sistema/486/EDICION.INI` |
 | `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) |
 
@@ -1075,7 +1076,8 @@ para la parte baja quedan 1,2 KB libres.
   programa: se suelta al acabar).
 - **Los colores y las ROP:** COLORREF -> el gris o el color del cubo de
   6×6×6 más cercano (por tablas; también `PALETTEINDEX` con la paleta del
-  contexto). Las ROP2 (`SetROP2`) y las ROP3 de `BitBlt` se hacen con los
+  contexto; con la de serie, `PALETTEINDEX(n)` es el color n de la paleta de
+  Hispa Ventanas, como lo usa el Navegador). Las ROP2 (`SetROP2`) y las ROP3 de `BitBlt` se hacen con los
   colores RGB de los puntos, como en una pantalla de color verdadero, y el
   resultado vuelve a la paleta: así funcionan las máscaras (`SRCAND` y
   `SRCPAINT` con un mapa monocromo) y el XOR. De monocromo a color, 0 es el
@@ -1171,7 +1173,10 @@ para la parte baja quedan 1,2 KB libres.
 5 de la tabla). `GetOpenFileNameA` y `GetSaveFileNameA` son el diálogo de
 archivos de Hispa Ventanas: el patrón del filtro elegido, primero todas las
 carpetas, la carpeta de empezar, la extensión de serie, «¿Quiere
-reemplazarlo?» y «No se encuentra ese archivo»; devuelve la ruta entera.
+reemplazarlo?» y «No se encuentra ese archivo»; devuelve la ruta entera
+(también si se escribe una ruta con su unidad o desde `\`), sin pasar de
+`nMaxFile`. La carpeta de trabajo, que en Hispa Ventanas es de todos los
+programas, queda siempre como estaba (como si llevara `OFN_NOCHANGEDIR`).
 `ChooseColorA` (los 16 colores de siempre) y `ChooseFontA` (el tamaño,
 negrita y cursiva) son diálogos con una lista. El registro no hay (dice que
 no está) y SHELL32 tiene lo justo (`ShellAboutA`, arrastrar archivos: nada).
@@ -1246,8 +1251,9 @@ Decisiones y límites de la 3d (para las fases siguientes):
   listas de imágenes (ni barras de herramientas, ni listas de columnas, ni
   árboles).
 - `VENTANAS.COM` ha crecido unos 40 KB: en el disquete de Hispa-386 queda
-  poco sitio (las pruebas quitan `HISPA.WAV`); la imagen de Hispa-486 tiene
-  que llevar COMCTL32.DLL al lado de MSVCRT.DLL.
+  poco sitio (las pruebas quitan `HISPA.WAV`). La imagen de Hispa-486 (y su
+  disquete «Hispa-486») lleva COMCTL32.DLL y UCRT.DLL en `\HISPADOS`, al
+  lado de MSVCRT.DLL (la tabla `DLL486` de `tools/mkusb.py`).
 
 ## Red inalámbrica (Wi-Fi)
 

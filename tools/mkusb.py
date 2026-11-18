@@ -28,6 +28,10 @@ HISPA32 = (('WINCALC.EXE', 'CALC32.EXE'), ('WINHOLA.EXE', 'HOLA32.EXE'),
            ('WINGUI.EXE', 'AVISO32.EXE'))
 # y lo que la edición pone en \HISPADOS (en sistema/486/, en UTF-8)
 SIS486 = ('EDICION.INI', 'VENTANAS.INI', 'CENTRO.INI')
+# [HISPA-486] fase 3d: las DLL de Win32 que van en \HISPADOS al lado de
+# MSVCRT.DLL (HW32 busca las DLL en su carpeta): los controles comunes y el
+# CRT de Visual C++ 2015 (docs/486/HISPA-486.md, «Cómo está hecho (fase 3d)»)
+DLL486 = ('COMCTL32.DLL', 'UCRT.DLL')
 # [HISPA-486] el Navegador (docs/486/NAVEGADOR.md), en \HISPADOS\INTERNET: lo
 # del disquete «Internet» (make internet) menos HW32.COM, que ya está en
 # \HISPADOS. Hispa Ventanas crea solo el grupo «Internet» si lo encuentra ahí
@@ -231,6 +235,8 @@ def main(edicion='386'):
         md('HISPA32')
         for src, dst in HISPA32:
             cp(os.path.join(B, src), 'HISPA32/' + dst)
+        for f in DLL486:
+            cp(os.path.join(B, f), 'HISPADOS/' + f)
         md('HISPADOS/INTERNET')
         for f in INTERNET:
             cp(os.path.join(B, f), 'HISPADOS/INTERNET/' + f)
@@ -282,6 +288,8 @@ def mkdisq486(en_imagen):
         run('mcopy', '-i', out, os.path.join(d, f), '::' + dst)
     for src, dst in HISPA32:
         run('mcopy', '-i', out, os.path.join(B, src), '::HISPA32/' + dst)
+    for f in DLL486:
+        run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
     print(out)
 
 def mkfloppy():

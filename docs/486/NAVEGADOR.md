@@ -277,9 +277,10 @@ En `w32/navega/` (C, `gcc -m32` sin biblioteca y `tools/elf2pe.py --gui`;
   objeto de 32 bits que se enlaza con lo demás, y un puente para llamarlos
   desde C. Ni una línea copiada: si Mirador mejora un formato, el Navegador
   también. `imagen.c`: del archivo a lo que se ve (reducir, a la paleta).
-- Lo que el Navegador necesitaba de Hispa Ventanas está en
-  `ventanas/win32n.inc`: `SetDIBitsToDevice`, `GetKeyState`,
-  `GetOpenFileNameA` y `GetSaveFileNameA` (`COMDLG32`) y `WinExec`.
+- Lo que el Navegador necesitaba de Hispa Ventanas: `SetDIBitsToDevice`,
+  `GetKeyState`, `GetOpenFileNameA` y `GetSaveFileNameA` (`COMDLG32`), que
+  ahora son los de la fase 3d (`ventanas/win32b.inc` y `win32x.inc`,
+  docs/486/HISPA-486.md), y `WinExec` (`ventanas/win32n.inc`).
 
 Para trabajar en la maqueta sin arrancar el sistema, `html.c` y `pagina.c`
 se pueden compilar en el anfitrión con un `main` que vuelque la rejilla como

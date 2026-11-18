@@ -307,16 +307,26 @@ wg_colref:
         jae .rgb
         push esi
         push ecx
-        movzx ecx, ax               ; PALETTEINDEX(n): el n de su paleta
+        movzx ecx, ax               ; PALETTEINDEX(n): el n de su paleta (con la de serie, el de Hispa Ventanas)
         mov eax, [edi+DC_PALETA]
         call w32_obj
         jc .sin
         cmp byte [esi+GO_TIPO], GT_PALETA
         jne .sin
         mov esi, [esi+GO_A]
+        cmp esi, wg_pal20_blq       ; la de serie: la paleta de Hispa Ventanas
+        je .hv                      ; (como la entendía w32_color: el Navegador)
         cmp ecx, [esi]
         jae .sin
         mov eax, [esi+4+ecx*4]
+        and eax, 0xFFFFFF
+        pop ecx
+        pop esi
+        ret
+.hv:
+        cmp ecx, 256
+        jae .sin
+        mov eax, [pal_rgb+ecx*4]
         and eax, 0xFFFFFF
         pop ecx
         pop esi
