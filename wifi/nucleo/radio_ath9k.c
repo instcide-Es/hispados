@@ -30,6 +30,15 @@
 #include "nucleo.h"
 
 /* ---------------------------------------------------------------- estado */
+/* De ath/main.c de Linux (no se copia entero): ¿es la baliza de nuestro
+   punto de acceso? */
+bool ath_is_mybeacon(struct ath_common *common, struct ieee80211_hdr *hdr)
+{
+	return ieee80211_is_beacon(hdr->frame_control) &&
+	       !is_zero_ether_addr(common->curbssid) &&
+	       ether_addr_equal_64bits(hdr->addr3, common->curbssid);
+}
+
 static struct pci_dev tarjeta;
 static struct ath_hw hw_ath;
 static struct ath_hw *const ah = &hw_ath;

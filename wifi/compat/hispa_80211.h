@@ -143,6 +143,13 @@ static inline unsigned int ieee80211_hdrlen(__le16 fc)
 	}
 	return n;
 }
+/* la cabecera 802.11 de un paquete (0 si el paquete es más corto) */
+static inline unsigned int ieee80211_get_hdrlen_from_skb(const struct sk_buff *skb)
+{
+	if (skb->len < 10) return 0;
+	unsigned int n = ieee80211_hdrlen(((const struct ieee80211_hdr *)skb->data)->frame_control);
+	return n > skb->len ? 0 : n;
+}
 static inline u8 *ieee80211_get_qos_ctl(struct ieee80211_hdr *h)
 { return ieee80211_has_a4(h->frame_control) ? (u8 *)h + 30 : (u8 *)h + 24; }
 static inline u8 *ieee80211_get_DA(struct ieee80211_hdr *h)
@@ -296,6 +303,27 @@ struct wiphy {
 	struct device dev;
 	void *hw;
 };
+/* el canal de esa frecuencia (MHz) entre las bandas de la tarjeta, o NULL */
+static inline struct ieee80211_channel *ieee80211_get_channel(struct wiphy *w, int frec)
+{
+	for (int b = 0; b < NUM_NL80211_BANDS; b++) {
+		struct ieee80211_supported_band *sb = w->bands[b];
+		if (!sb) continue;
+		for (int i = 0; i < sb->n_channels; i++)
+			if ((int)sb->channels[i].center_freq == frec) return &sb->channels[i];
+	}
+	return NULL;
+}
+static inline const char *reg_initiator_name(enum nl80211_reg_initiator q)
+{
+	switch (q) {
+	case NL80211_REGDOM_SET_BY_CORE: return "núcleo";
+	case NL80211_REGDOM_SET_BY_USER: return "usuario";
+	case NL80211_REGDOM_SET_BY_DRIVER: return "controlador";
+	case NL80211_REGDOM_SET_BY_COUNTRY_IE: return "punto de acceso";
+	}
+	return "?";
+}
 #define wiphy_err(w, f, a...) hl_log(0, f, ##a)
 #define wiphy_warn(w, f, a...) hl_log(1, f, ##a)
 #define wiphy_info(w, f, a...) hl_log(2, f, ##a)

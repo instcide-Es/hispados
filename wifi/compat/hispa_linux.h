@@ -367,6 +367,12 @@ static inline void atomic_inc(atomic_t *a) { a->counter++; }
 static inline void atomic_dec(atomic_t *a) { a->counter--; }
 static inline int atomic_dec_and_test(atomic_t *a) { return --a->counter == 0; }
 static inline int atomic_inc_return(atomic_t *a) { return ++a->counter; }
+static inline int atomic_inc_and_test(atomic_t *a) { return ++a->counter == 0; }
+/* lecturas y escrituras de una vez (ath9k: descriptores que la tarjeta cambia) */
+#define READ_ONCE(x) (*(const volatile __typeof__(x) *)&(x))
+#define WRITE_ONCE(x, v) (*(volatile __typeof__(x) *)&(x) = (v))
+/* extiende el signo del bit «indice» (ath9k: lecturas del ruido del PHY) */
+static inline s32 sign_extend32(u32 v, int indice) { u8 d = 31 - indice; return (s32)(v << d) >> d; }
 static inline int atomic_add_return(int n, atomic_t *a) { return a->counter += n; }
 #define ATOMIC_INIT(v) { (v) }
 u64 hl_div64(u64 n, u32 d, u32 *resto);

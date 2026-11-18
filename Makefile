@@ -282,9 +282,21 @@ $(B)/WIFI.COM: utils/wifi.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 WIFI_INC = -Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/brcminc \
            -Iwifi/linux/brcmsmac -Iwifi/linux/brcmsmac/phy -Iwifi/linux/bcma -Iwifi/linux -Iwifi/nucleo
-WIFI_CF = -m32 -std=gnu11 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
-          -fno-strict-aliasing -fno-common -mno-80387 -nostdinc -isystem $(shell gcc -m32 -print-file-name=include) \
-          $(WIFI_INC) -D__HISPA__ -DCONFIG_BCMA_HOST_PCI -DCONFIG_BCMA_HOST_PCI_POSSIBLE -DCONFIG_BCMA_DRIVER_PCI
+WIFI_BASEF = -m32 -std=gnu11 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+          -fno-strict-aliasing -fno-common -mno-80387 -nostdinc -isystem $(shell gcc -m32 -print-file-name=include)
+WIFI_CF = $(WIFI_BASEF) $(WIFI_INC) -D__HISPA__ -DCONFIG_BCMA_HOST_PCI -DCONFIG_BCMA_HOST_PCI_POSSIBLE -DCONFIG_BCMA_DRIVER_PCI
+# La Atheros AR9002 (ath9k_hw de Linux, wifi/linux/ath/): sus propias rutas
+# (sin las de brcmsmac) y objetos con prefijo, porque ath/hw.c y ath9k/hw.c
+# se llaman igual.
+ATH_INC = -Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/ath -Iwifi/linux/ath/ath9k \
+          -Iwifi/linux -Iwifi/nucleo
+ATH_CF = $(WIFI_BASEF) $(ATH_INC) -D__HISPA__ -DCONFIG_ATH_DEBUG -DCONFIG_ATH9K_RFKILL
+ATH_SA = $(wildcard wifi/linux/ath/*.c)
+ATH_S9 = $(wildcard wifi/linux/ath/ath9k/*.c)
+ATH_DEP = $(wildcard wifi/compat/*.h wifi/nucleo/*.h wifi/linux/ath/*.h wifi/linux/ath/ath9k/*.h)
+# ath_obj(dir): los objetos de la Atheros en esa carpeta de build
+ath_obj = $(patsubst wifi/linux/ath/%.c,$(1)/ath_%.o,$(ATH_SA)) \
+          $(patsubst wifi/linux/ath/ath9k/%.c,$(1)/ath9k_%.o,$(ATH_S9)) $(1)/radio_ath9k.o
 WIFI_LINUX = $(wildcard wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil/*.c \
              wifi/linux/bcma/*.c) wifi/linux/cordic.c
 WIFI_PROPIO = wifi/compat/base.c $(filter-out wifi/nucleo/radio_ath9k.c,$(wildcard wifi/nucleo/*.c))
@@ -304,9 +316,18 @@ $(WIFI_OP): $(B)/wifi/%.o: %.c $(WIFI_DEP) | $(B)/wifi
 	nice gcc $(WIFI_CF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
 $(B)/wifi/entrada.o: wifi/nucleo/entrada.asm | $(B)/wifi
 	$(NASM) -f elf32 -o $@ $<
-$(B)/HSPWIFI.BIN: $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP) wifi/nucleo/nucleo.ld
+$(B)/wifi/ath_%.o: wifi/linux/ath/%.c $(ATH_DEP) | $(B)/wifi
+	nice gcc $(ATH_CF) -w -Werror=implicit-function-declaration -Werror=int-conversion \
+	    -Werror=incompatible-pointer-types -Werror=return-type -c $< -o $@
+$(B)/wifi/ath9k_%.o: wifi/linux/ath/ath9k/%.c $(ATH_DEP) | $(B)/wifi
+	nice gcc $(ATH_CF) -w -Werror=implicit-function-declaration -Werror=int-conversion \
+	    -Werror=incompatible-pointer-types -Werror=return-type -c $< -o $@
+$(B)/wifi/radio_ath9k.o: wifi/nucleo/radio_ath9k.c $(ATH_DEP) | $(B)/wifi
+	nice gcc $(ATH_CF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
+WIFI_OA = $(call ath_obj,$(B)/wifi)
+$(B)/HSPWIFI.BIN: $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP) $(WIFI_OA) wifi/nucleo/nucleo.ld
 	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack -T wifi/nucleo/nucleo.ld -o $(B)/wifi/nucleo.elf \
-	    $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP)
+	    $(B)/wifi/entrada.o $(WIFI_OL) $(WIFI_OP) $(WIFI_OA)
 	objcopy -O binary $(B)/wifi/nucleo.elf $@
 # el microcódigo de Broadcom (wifi/firmware/, con su licencia), con nombres 8.3
 $(B)/BCM43XX.FW: wifi/firmware/bcm43xx-0.fw | $(B)
@@ -344,9 +365,18 @@ $(WIFI_CL): $(B)/wifichip/%.o: %.c $(WIFI_DEP) | $(B)/wifichip
 	nice gcc $(WIFI_CHF) -w -c $< -o $@
 $(WIFI_CP): $(B)/wifichip/%.o: %.c $(WIFI_DEP) | $(B)/wifichip
 	nice gcc $(WIFI_CHF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
-$(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) wifi/nucleo/nucleo.ld
+# (la Atheros va también, para que enlace; el modelo de la tarjeta es de la Broadcom)
+ATH_CHF = $(ATH_CF) -DHL_SIMULA_ES -DCHIP_SIMULADO -Itests/wifi
+$(B)/wifichip/ath_%.o: wifi/linux/ath/%.c $(ATH_DEP) | $(B)/wifichip
+	nice gcc $(ATH_CHF) -w -c $< -o $@
+$(B)/wifichip/ath9k_%.o: wifi/linux/ath/ath9k/%.c $(ATH_DEP) | $(B)/wifichip
+	nice gcc $(ATH_CHF) -w -c $< -o $@
+$(B)/wifichip/radio_ath9k.o: wifi/nucleo/radio_ath9k.c $(ATH_DEP) | $(B)/wifichip
+	nice gcc $(ATH_CHF) -Wall -Wno-unused -Wno-packed-not-aligned -c $< -o $@
+WIFI_CA = $(call ath_obj,$(B)/wifichip)
+$(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) $(WIFI_CA) wifi/nucleo/nucleo.ld
 	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack -T wifi/nucleo/nucleo.ld -o $(B)/wifichip/nucleo.elf \
-	    $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP)
+	    $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) $(WIFI_CA)
 	objcopy -O binary $(B)/wifichip/nucleo.elf $@
 # la prueba del anfitrión (tests/run_wifi_tests.sh)
 $(B)/prueba_wifi: tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c wifi/nucleo/nucleo.h | $(B)
