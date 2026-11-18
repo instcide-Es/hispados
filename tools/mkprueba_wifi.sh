@@ -15,9 +15,14 @@ T=$B/prueba-wifi-tmp
 IMG=$T/hispados-usb.img
 cp $B/hispados-usb.img $IMG
 P="$IMG@@$((2048 * 512))"
+# la fecha, la hora y la versión de la imagen, en el LEEME (@FECHA@ ...)
+FECHA=$(date +%d/%m/%Y); HORA=$(date +%H:%M)
+VERSION=$(git describe --always --dirty 2>/dev/null || echo "sin git")
+export FECHA HORA VERSION
 txt() { python3 -c "
-import sys
+import os, sys
 t = open(sys.argv[1], encoding='utf-8').read().replace('\r\n', '\n').replace('\n', '\r\n')
+for k in ('FECHA', 'HORA', 'VERSION'): t = t.replace('@' + k + '@', os.environ[k])
 open(sys.argv[2], 'wb').write(t.encode('cp437'))" "$1" "$2"; }
 # CONFIG.SYS: dos opciones nuevas en el menú, la del Wi-Fi por omisión
 python3 - usb/CONFIG.SYS $T/CONFIG.SYS <<'PY'

@@ -1,5 +1,7 @@
-PRUEBA DEL WI-FI DE HISPA-486 EN EL HP MINI 5103 (18/11/2026)
-=============================================================
+PRUEBA DEL WI-FI DE HISPA-486 EN EL HP MINI 5103
+================================================
+Imagen hecha el @FECHA@ a las @HORA@ (version @VERSION@).
+Si se bajo antes una imagen de prueba del Wi-Fi mas antigua, usar esta.
 
 Que es: el Wi-Fi nuevo (HSPWIFI) para la tarjeta Broadcom BCM43224 del HP
 Mini, con WPA2. Esta probado entero con una tarjeta SIMULADA, pero nunca en
