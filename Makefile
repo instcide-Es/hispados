@@ -441,6 +441,53 @@ $(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) $(WIFI_CA) wifi/nucl
 # la prueba del anfitrión (tests/run_wifi_tests.sh)
 $(B)/prueba_wifi: tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c wifi/nucleo/nucleo.h | $(B)
 	gcc -std=gnu11 -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c
+# ACPI de Hispa-486 (docs/ACPI.md): la batería de los portátiles que no tienen
+# APM. HSPACPI.COM (residente: contesta INT 15h AX=530Ah como una BIOS con
+# APM) y su núcleo de 32 bits HSPACPI.BIN: ACPICA de Intel (acpi/acpica/, sin
+# modificar salvo el entorno) sobre acpi/nucleo/. Como HSPWIFI.BIN, un binario
+# plano enlazado para la dirección 0 que el residente carga en memoria
+# extendida. De ACPICA no se compila rsdump.c (solo sirve con su depurador).
+$(B)/HSPACPI.COM: drivers/hspacpi.asm | $(B)
+	$(ASM) -l $(B)/gen/HSPACPI.lst -o $@ $(B)/gen/$<
+	python3 tools/initcheck.py $(B)/gen/HSPACPI.lst init || { rm -f $@; exit 1; }
+ACPI_BASEF = -m32 -std=gnu11 -march=i586 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+             -D__HISPA__ -Iacpi/acpica/include -Iacpi/nucleo
+ACPI_CF = $(ACPI_BASEF) -Os -ffunction-sections -fdata-sections
+ACPI_SA = $(filter-out acpi/acpica/resources/rsdump.c,$(wildcard acpi/acpica/*/*.c))
+ACPI_SP = $(addprefix acpi/nucleo/,base.c osl.c ec.c nucleo.c bateria.c)
+ACPI_DEP = $(wildcard acpi/nucleo/*.h acpi/acpica/include/*.h acpi/acpica/include/platform/*.h tests/acpi/*.h)
+acpi_obj = $(patsubst %.c,$(1)/%.o,$(notdir $(2)))
+# $(1) fuente, $(2) carpeta de objetos, $(3) opciones
+define ACPI_REGLA
+$(2)/$(notdir $(basename $(1))).o: $(1) $$(ACPI_DEP) | $(2)
+	nice gcc $(3) -c $$< -o $$@
+endef
+$(B)/acpi $(B)/acpisim:
+	mkdir -p $@
+$(foreach f,$(ACPI_SA),$(eval $(call ACPI_REGLA,$(f),$(B)/acpi,$$(ACPI_CF) -w)))
+$(foreach f,$(ACPI_SP) acpi/nucleo/maquina.c,$(eval $(call ACPI_REGLA,$(f),$(B)/acpi,$$(ACPI_CF) -Wall -Wno-unused)))
+$(B)/acpi/entrada.o: acpi/nucleo/entrada.asm | $(B)/acpi
+	$(NASM) -f elf32 -o $@ $<
+$(B)/acpi/tarea.o: acpi/nucleo/tarea.asm | $(B)/acpi
+	$(NASM) -f elf32 -o $@ $<
+ACPI_O = $(call acpi_obj,$(B)/acpi,$(ACPI_SP) acpi/nucleo/maquina.c) $(B)/acpi/tarea.o $(call acpi_obj,$(B)/acpi,$(ACPI_SA))
+$(B)/HSPACPI.BIN: $(B)/acpi/entrada.o $(ACPI_O) acpi/nucleo/nucleo.ld
+	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T acpi/nucleo/nucleo.ld -o $(B)/acpi/nucleo.elf \
+	    $(B)/acpi/entrada.o $(ACPI_O)
+	objcopy -O binary $(B)/acpi/nucleo.elf $@
+ACPI = $(B)/HSPACPI.COM $(B)/HSPACPI.BIN
+# El mismo núcleo, para el equipo de compilación, con un portátil de mentira
+# debajo (tests/acpi/: las tablas ACPI volcadas del Toshiba NB250 y del HP
+# Mini 5103 y un controlador embebido simulado): tests/run_acpi_tests.sh
+ACPI_SIMF = $(ACPI_BASEF) -DANFITRION -O1 -g -Itests/acpi
+ACPI_SS = tests/acpi/maquina_sim.c tests/acpi/anfitrion.c
+$(foreach f,$(ACPI_SA),$(eval $(call ACPI_REGLA,$(f),$(B)/acpisim,$$(ACPI_SIMF) -w)))
+$(foreach f,$(ACPI_SP) $(ACPI_SS),$(eval $(call ACPI_REGLA,$(f),$(B)/acpisim,$$(ACPI_SIMF) -Wall -Wno-unused)))
+$(B)/acpisim/tarea.o: acpi/nucleo/tarea.asm | $(B)/acpisim
+	$(NASM) -f elf32 -o $@ $<
+ACPI_SO = $(call acpi_obj,$(B)/acpisim,$(ACPI_SP) $(ACPI_SS) $(ACPI_SA)) $(B)/acpisim/tarea.o
+$(B)/acpi_sim: $(ACPI_SO)
+	ld -m elf_i386 -static -z noexecstack -o $@ $(ACPI_SO)
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)

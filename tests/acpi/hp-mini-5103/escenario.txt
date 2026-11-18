@@ -1,0 +1,23 @@
+# HP Mini 5103: el controlador embebido, como lo lee su DSDT (región ECRM de
+# \_SB.PCI0.LPCB.EC0). Batería de 4800 al 50 %, sin cable, gastando 1200;
+# antes de la lectura 3 baja al 45 % (sin aviso del controlador: tiene que
+# verse igual); antes de la 4 se enchufa y carga; antes de la 5, un aviso
+# (_Q03) como el que manda el controlador de verdad.
+es 434 0        # APMS (bit 5 de PM1+34h): la BIOS ya ha atendido la llamada (SMI)
+ec 84 10        # ADP (bit 0) = 0: sin cable; BATP (bits 4-7) = 1: batería 1 puesta
+ec16 89 1450    # BDC: 5200 de diseño
+ec16 8D 12C0    # BFC: 4800 llena
+ec16 95 2A30    # BDV: 10800 mV de diseño
+ec 99 01        # BST: descargando
+ec16 9D 04B0    # BPR: 1200
+ec16 A1 0960    # BRC: quedan 2400
+ec16 A5 2AF8    # BPV: 11000 mV
+@3
+ec16 A1 0870    # 2160
+@4
+ec 84 11        # con cable
+ec 99 02        # cargando
+ec16 A1 08FC    # 2300
+@5
+ec16 A1 0A8C    # 2700
+evento 03

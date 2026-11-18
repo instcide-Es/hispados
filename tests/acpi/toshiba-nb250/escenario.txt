@@ -1,0 +1,20 @@
+# Toshiba NB250-10N: el controlador embebido, como lo lee su DSDT (región
+# ERAM de \_SB.PCI0.LPC0.EC0). Batería de 4400 mAh al 72 %, sin cable,
+# gastando 1499 mA; antes de la lectura 3 se enchufa y carga.
+ec 9A 01        # BAL0 (bit 0): la batería está puesta
+ec A3 00        # ADPT (bit 5): sin cable
+ec C1 01        # BST0: descargando
+ec16 C2 0C60    # BRC0: quedan 3168 mAh
+ec16 C6 2CEC    # BPV0: 11500 mV
+ec16 C8 2A30    # BDV0: 10800 mV de diseño
+ec16 CA 1130    # BDC0: 4400 mAh de diseño
+ec16 CC 1130    # BFC0: 4400 mAh llena
+ec16 D2 FA24    # BAC0: -1500 mA (en complemento a dos)
+ec F8 01        # BDN0: el modelo de batería
+@3
+ec A3 20        # con cable
+ec C1 02        # cargando
+ec16 C2 0CE4    # 3300 mAh
+ec16 D2 03E8    # +1000 mA
+@4
+ec 9A 00        # se quita la batería
