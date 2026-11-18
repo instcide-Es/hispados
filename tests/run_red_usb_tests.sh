@@ -96,7 +96,11 @@ fi
 trap 'kill $HTTP_PID $DNS_PID $(jobs -p) 2>/dev/null; [ -n "${GUARDAR:-}" ] && cp $W/*.txt "$GUARDAR"/ 2>/dev/null; rm -rf $W' EXIT
 printf 'DHCP=SI\r\nDNS=10.0.2.2\r\n' > $W/RED2.INI
 U="http://10.0.2.2:$PORT"
-MAC="40:54:00:12:34:56"     # la que da usb-net en su cadena iMACAddress
+# La MAC del adaptador se le dice a QEMU (mac=): sin decirla, los QEMU de
+# hasta la versión 8 dan en la cadena iMACAddress 40:54:00:12:34:56 (el primer
+# octeto, fijo) y los nuevos (10.2) la de verdad, 52:54:00:12:34:56. Con esta,
+# los dos dan la misma.
+MAC="40:54:00:12:34:56"
 
 # ---- herramientas de cada caso (cada caso corre en su subproceso) ----
 T=""
@@ -174,7 +178,7 @@ fin() {
   return $cfail
 }
 NET="-netdev user,id=n0"
-USBNET() { echo "-device usb-net,netdev=n0,id=red,bus=$1"; }
+USBNET() { echo "-device usb-net,netdev=n0,id=red,mac=$MAC,bus=$1"; }
 STICK() { echo "-drive if=none,id=u,format=raw,file=@T@/usb.img -device usb-storage,bus=$1,drive=u,id=mem"; }
 SOLOUSB='DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED /INFO\r\n'
 
@@ -250,7 +254,7 @@ t_ehci() { directo ehci "EHCI con UHCI compañeras (el adaptador, cedido a una U
 conhub() {  # nombre, título, clase, opciones de QEMU...
   local n=$1 t=$2 hc=$3; shift 3
   caso $n "$t" "$SOLOUSB"
-  arranca "$@" -device usb-hub,bus=hc.0,port=1,id=hub1 $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.2
+  arranca "$@" -device usb-hub,bus=hc.0,port=1,id=hub1 $NET -device usb-net,netdev=n0,id=red,mac=$MAC,bus=hc.0,port=1.2
   ordenes_red
   fin c_hub "$hc"
 }
@@ -272,7 +276,7 @@ t_todo() {
   mcopy -i $T/usb.img $T/HOLA.TXT ::HOLA.TXT
   arranca -device qemu-xhci,id=hc -device usb-hub,bus=hc.0,port=1,id=hub1 \
       -device usb-kbd,bus=hc.0,port=1.1 -device usb-mouse,bus=hc.0,port=1.3 \
-      $(STICK hc.0),port=1.4 $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.2
+      $(STICK hc.0),port=1.4 $NET -device usb-net,netdev=n0,id=red,mac=$MAC,bus=hc.0,port=1.2
   orden "HSPRED"
   orden "CONFRED"
   orden "PING 10.0.2.2 /N:3"
@@ -464,7 +468,7 @@ llega() { if grep -qx -- "$1" $T/log.txt; then ok "tecleado por el teclado USB: 
 # lo del Mac: el xHCI lleno de cosas y el teclado en el EHCI
 MACXHCI="-device usb-ehci,id=he -device qemu-xhci,id=hc
     -device usb-hub,bus=hc.0,port=1,id=hub1 -device usb-hub,bus=hc.0,port=1.1,id=hub2
-    -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1.1"
+    -device usb-net,netdev=n0,id=red,mac=$MAC,bus=hc.0,port=1.1.1"
 usbimg() {
   dd if=/dev/zero of=$T/usb.img bs=1M count=32 status=none
   mformat -i $T/usb.img -T 65536 -h 64 -s 32 -v USBDATA ::
@@ -543,7 +547,7 @@ t_dosratones() {
   local m1 m2
   caso dosratones "dos ratones (xHCI y UHCI) con el adaptador: van los dos" 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F /RED /INFO\r\n'
   arranca $MON -device qemu-xhci,id=hc -device piix3-usb-uhci,id=hu \
-      -device usb-hub,bus=hc.0,port=1,id=hub1 $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1 \
+      -device usb-hub,bus=hc.0,port=1,id=hub1 $NET -device usb-net,netdev=n0,id=red,mac=$MAC,bus=hc.0,port=1.1 \
       -device usb-mouse,bus=hc.0,port=1.2,id=m1 -device usb-kbd,bus=hc.0,port=1.3 \
       -device usb-mouse,bus=hu.0,id=m2
   orden 'A:\HISPADOS\HSPRATON'
@@ -592,7 +596,7 @@ t_muchos() {
       -device ich9-usb-uhci2,masterbus=he.0,firstport=2,addr=1d.1,multifunction=on \
       -device ich9-usb-uhci3,masterbus=he.0,firstport=4,addr=1d.2,multifunction=on \
       -device usb-hub,bus=hc.0,port=1,id=hub1 -device usb-hub,bus=hc.0,port=1.1,id=hub2 \
-      $NET -device usb-net,netdev=n0,id=red,bus=hc.0,port=1.1.1 \
+      $NET -device usb-net,netdev=n0,id=red,mac=$MAC,bus=hc.0,port=1.1.1 \
       -device usb-hub,bus=he.0,port=1,id=c1 -device usb-hub,bus=he.0,port=1.1,id=c2 \
       -device usb-hub,bus=he.0,port=1.2,id=c3 -device usb-kbd,bus=he.0,port=1.1.1,id=k1 \
       -device usb-hub,bus=he.0,port=1.3,id=c4 -device usb-hub,bus=he.0,port=1.4,id=c5 \
