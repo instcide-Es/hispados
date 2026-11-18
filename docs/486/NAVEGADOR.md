@@ -183,11 +183,19 @@ texto (no dependen de Hispa Ventanas).
 | `HSPTLS.DLL` (TLS, con BearSSL y 20 autoridades raíz) | 87 KB |
 | `WSOCK32.DLL` (TCP/IP y Winsock) | 23 KB |
 | El disquete «Internet» entero | 279 KB de 1.440 |
-| Memoria con una página de la biblioteca abierta | MEM_BIBLIO |
-| Memoria con una página de 120 KB de HTML (1.200 filas) | MEM_GRANDE |
+| Memoria con una página de la biblioteca abierta | 1,6 MB (1.608 KB) |
+| Memoria con una página de 121 KB de HTML (unas 2.170 filas) | 2,6 MB (2.632 KB); no crece más con el resto de páginas de la prueba |
 | Memoria convencional | 16 KB (el búfer de DOS de HW32) + 19 KB (las tramas de red) |
 | Apretón de manos de TLS con clicgest.es, la primera vez | 216 millones de instrucciones: unos 15 s en un 486DX2-66 |
 | El mismo, con el certificado recordado (una semana) | 22 millones: 1,4 s en un 486DX2-66 |
+
+La memoria se mide con el Administrador de tareas de Hispa Ventanas (lo
+«Libre» antes de abrir el Navegador menos lo «Libre» con la página abierta,
+en un equipo de 16 MB): `MEDIR=1 GUARDAR=carpeta tests/run_navegador_tests.sh`
+deja las capturas `mb` (la biblioteca) y `mg` (`/grande?n=720`, 121 KB). El
+montón del Navegador no devuelve memoria al sistema mientras está abierto (la
+reutiliza de una página a otra); al cerrarlo vuelve toda. Hispa Ventanas y el
+Navegador con la biblioteca abierta ocupan unos 2,9 MB de memoria extendida.
 
 Las cuentas del 486 salen de contar instrucciones en QEMU (`-icount`) y
 multiplicaciones en el anfitrión, a 2,75 ciclos por instrucción y 40 por

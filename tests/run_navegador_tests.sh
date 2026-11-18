@@ -21,7 +21,9 @@
 #    grande y su desplazamiento; redirecciones a http (sin cifrar); respuesta
 #    sin longitud; el 404; un archivo que no es una página; javascript:;
 #  - se cierra y no queda memoria.
-#  (GUARDAR=carpeta deja las capturas y el registro del servidor.)
+#  (GUARDAR=carpeta deja las capturas y el registro del servidor; MEDIR=1
+#  además captura el Administrador de tareas con la página de la biblioteca
+#  abierta, mb, y con /grande?n=720 —121 KB de HTML—, mg; ver NAVEGADOR.md.)
 # Browser test (offline, against a local HTTPS test server).
 set -u
 cd "$(dirname "$0")/.."
@@ -69,6 +71,13 @@ fy() { echo $((89 + 18 * $1)); }
   tecla ret; sleep 10; aparta; shot n1                                                       # el Navegador: la entrada
   clic 150 $(fy 5); tecla m a r i a; tecla tab; tecla s e c r e t o; sleep 0.5; aparta; shot n2
   tecla ret; sleep 8; aparta; shot n3                                                        # dentro: la lista
+  if [ -n "${MEDIR:-}" ]; then                                                               # MEDIR=1: la memoria con la biblioteca
+    tecla ctrl-esc; sleep 1; tecla a a a; sleep 0.5; tecla ret; sleep 5; aparta; shot mb; tecla alt-f4; sleep 1.5
+    tecla f6; sleep 1; tecla 1 0 dot 0 dot 2 dot 2 shift-semicolon; for c in $(echo $P | sed 's/./& /g'); do tecla $c; done
+    tecla slash g r a n d e shift-slash n equal 7 2 0 ret; sleep 20; aparta; shot mg0     # y con 121 KB de HTML
+    tecla ctrl-esc; sleep 1; tecla a a a; sleep 0.5; tecla ret; sleep 5; aparta; shot mg; tecla alt-f4; sleep 1.5
+    atras 8
+  fi
   clic 20 $(fy 10); sleep 2; aparta; shot n4                                                 # «Más datos»: se despliega
   clic 100 $(fy 0); sleep 6; clic 180 $(fy 3); tecla g a r c; tecla ret; sleep 6; aparta; shot p1   # prestar: buscar
   clic 60 $(fy 7); sleep 6; aparta; shot p2                                                  # la ficha del préstamo

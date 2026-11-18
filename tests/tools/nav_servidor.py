@@ -167,7 +167,8 @@ class Pedido(BaseHTTPRequestHandler):
                        .encode('latin-1'), tipo='text/html; charset=ISO-8859-1')
         elif u.path == '/grande':
             c = ''.join('<p>P&aacute;rrafo n&uacute;mero %d de la p&aacute;gina grande, con texto bastante para ocupar una l&iacute;nea '
-                        'entera y algo m&aacute;s de la ventana del navegador.</p>' % n for n in range(1, 401))
+                        'entera y algo m&aacute;s de la ventana del navegador.</p>' % n
+                        for n in range(1, min(int(q.get('n', ['400'])[0]), 3000) + 1))
             self.manda(pagina('Página grande', '<h1>P&aacute;gina grande</h1>' + c + '<p id="fin">FIN-DE-LA-GRANDE</p>'), trozos=True)
         elif u.path == '/texto.txt':
             self.manda('Texto sin formato.\nSegunda línea: ñandú.\n'.encode('utf-8'), tipo='text/plain; charset=UTF-8')

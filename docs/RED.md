@@ -170,8 +170,8 @@ la línea de órdenes, (2) la clave `ACTUALIZAR=` de `RED.INI`, (3) una de por
 omisión compilada: `http://actualiza.clicgest.es/versiones.txt` (servidor
 propio por HTTP).
 
-**Importante**: como no hay HTTPS (ver abajo) y **GitHub es todo HTTPS**, el
-archivo y los paquetes no se pueden leer de GitHub: tienen que estar en un
+**Importante**: como `ACTUALIZAR` (de 16 bits) no habla HTTPS y **GitHub es
+todo HTTPS**, el archivo y los paquetes no se pueden leer de GitHub: tienen que estar en un
 servidor propio por HTTP. Las direcciones `https://` se rechazan con un mensaje
 claro. Si falta la red (sin `HSPRED` o sin IP), lo dice y no hace nada.
 
@@ -1108,4 +1108,6 @@ tardan más de un tic entre una conexión y la siguiente.
   de FTP.
 - `PING` con milisegundos (el temporizador 8254, en vez del reloj de la
   BIOS).
-- HTTPS (TLS): ver arriba.
+- ~~HTTPS (TLS)~~: hecho para los programas Hispa32 (18/11/2026,
+  `HSPTLS.DLL`: «La red de los programas Hispa32», arriba). Los programas de
+  16 bits (`DESCARGAR`, `ACTUALIZAR`) siguen sin cifrar.
