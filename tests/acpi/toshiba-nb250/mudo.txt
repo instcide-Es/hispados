@@ -1,0 +1,17 @@
+# Toshiba NB250: el controlador embebido deja de contestar antes de la
+# lectura 2 (no se puede colgar el equipo ni inventar un nivel) y vuelve
+# antes de la 5.
+ec 9A 01
+ec A3 00
+ec C1 01
+ec16 C2 0C60
+ec16 C6 2CEC
+ec16 C8 2A30
+ec16 CA 1130
+ec16 CC 1130
+ec16 D2 FA24
+ec F8 01
+@2
+mudo 1
+@5
+mudo 0

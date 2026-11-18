@@ -171,6 +171,6 @@ void nucleo_excepcion(u32 vector, u32 *pila)
 	apm.banderas = 0x80;
 	apm.pct = 0xFF;
 	apm_publica();
-	reg("NÚCLEO: excepción %u del procesador; en la pila: %08X %08X %08X %08X\n", vector, pila[0], pila[1],
+	reg("HSPACPI: excepción %u del procesador; en la pila: %08X %08X %08X %08X\n", vector, pila[0], pila[1],
 	    pila[2], pila[3]);
 }

@@ -27,16 +27,24 @@ static u32 detalle_quedan = 600;	/* accesos que se apuntan uno a uno */
 
 void *ec_disp(void) { return ec; }
 
+/* Lo normal es que conteste en microsegundos. Si tarda más de 2 ms, se
+ * suelta el procesador entre miradas (el equipo sigue) hasta el plazo. */
 static int espera(u32 mascara, u32 valor)
 {
-	u64 fin = mq_ahora_us() + EC_ESPERA_US;
+	u64 ini = mq_ahora_us();
 
 	for (;;) {
+		u64 va;
+
 		if ((mq_es_lee(p_orden, 1) & mascara) == valor)
 			return 0;
-		if (mq_ahora_us() > fin)
+		va = mq_ahora_us() - ini;
+		if (va > EC_ESPERA_US)
 			return -1;
-		mq_espera_us(10);
+		if (va > 2000)
+			tarea_duerme(10);
+		else
+			mq_espera_us(10);
 	}
 }
 
@@ -75,7 +83,7 @@ static int orden_insiste(u32 cmd, int dir, int dato)
 			estado.ec_fallos++;
 			reg("EC: sin respuesta a la orden %02Xh (dirección %02Xh, estado %02Xh), intento %d\n",
 			    cmd, dir & 0xFF, mq_es_lee(p_orden, 1), i + 1);
-			mq_espera_us(2000);
+			tarea_duerme(10);
 		}
 	}
 	return r;

@@ -452,7 +452,8 @@ $(B)/HSPACPI.COM: drivers/hspacpi.asm | $(B)
 	python3 tools/initcheck.py $(B)/gen/HSPACPI.lst init || { rm -f $@; exit 1; }
 ACPI_BASEF = -m32 -std=gnu11 -march=i586 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
              -D__HISPA__ -Iacpi/acpica/include -Iacpi/nucleo
-ACPI_CF = $(ACPI_BASEF) -Os -ffunction-sections -fdata-sections
+# (los textos del registro, en la página 437, que es como los enseña DOS)
+ACPI_CF = $(ACPI_BASEF) -Os -ffunction-sections -fdata-sections -fexec-charset=CP437
 ACPI_SA = $(filter-out acpi/acpica/resources/rsdump.c,$(wildcard acpi/acpica/*/*.c))
 ACPI_SP = $(addprefix acpi/nucleo/,base.c osl.c ec.c nucleo.c bateria.c)
 ACPI_DEP = $(wildcard acpi/nucleo/*.h acpi/acpica/include/*.h acpi/acpica/include/platform/*.h tests/acpi/*.h)
@@ -488,6 +489,9 @@ $(B)/acpisim/tarea.o: acpi/nucleo/tarea.asm | $(B)/acpisim
 ACPI_SO = $(call acpi_obj,$(B)/acpisim,$(ACPI_SP) $(ACPI_SS) $(ACPI_SA)) $(B)/acpisim/tarea.o
 $(B)/acpi_sim: $(ACPI_SO)
 	ld -m elf_i386 -static -z noexecstack -o $@ $(ACPI_SO)
+# (pruebas) escribe en la CMOS: la batería de mentira de QEMU (tests/acpi/bateria-qemu.asl)
+$(B)/CMOSW.COM: tests/progs/cmosw.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
@@ -952,7 +956,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN
+TEST_DEPS = $(IMG) usb usb486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM
 
 para-pruebas: $(TEST_DEPS)
 
@@ -1104,6 +1108,7 @@ test: $(TEST_DEPS)
 	tests/run_js_tests.sh $(IMG)
 	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_wifi_tests.sh $(IMG)
+	tests/run_acpi_tests.sh $(IMG)
 	tests/run_wifi_ventana_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)
 	tests/run_actualizar_tests.sh $(IMG)
