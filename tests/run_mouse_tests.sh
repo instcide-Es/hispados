@@ -98,7 +98,7 @@ t_bios() {
   check "En uso:  vía BIOS, Ratón PS/2, paquetes de 3 bytes"
   # los paquetes de los gestos están contados; ninguna IRQ 12 nuestra
   if grep -qE "IRQ12=0  bytes=0  paquetes=[1-9][0-9]*  descartes=" $T/log.txt; then echo "  OK   contadores de la vía BIOS"; else echo "  FAIL contadores de la vía BIOS"; cfail=1; fi
-  check "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/INFO]"
+  check "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/SINBORDE] [/INFO]"
   fin
 }
 

@@ -769,6 +769,20 @@ y en `win32.inc` la llamada de vuelta. Prueba:
   una ventana de Windows por dentro (un cuadro que reparte, lo diferido) pasa
   por `w32_ven_proc`, que traduce igual y llama al `WndProc` (una tecla: los
   tres mensajes seguidos).
+- **[RUEDA] La rueda del ratón.** El `WM_MOUSEWHEEL` de Hispa Ventanas
+  (pasos, positivo hacia abajo; el punto en la zona) pasa a ser el de
+  Windows (0x020A): wParam alto = el delta, 120 por paso y positivo hacia
+  arriba (el signo cambia), wParam bajo = `MK_*` (los botones apretados);
+  lParam = el punto en la pantalla. Llega a la ventana que hay debajo del
+  cursor (como en Windows 10 con «desplazar las ventanas inactivas»; el
+  Windows de la época lo mandaba a la del foco: aquí es lo mismo que hacen
+  las ventanas de Hispa Ventanas). Si su `WndProc` lo pasa a
+  `DefWindowProcA`, se lo da a la madre si es una ventana de Windows (como
+  Windows). Las listas, cuadros de texto y listas desplegables de serie son
+  controles de Hispa Ventanas: se desplazan solos (tres líneas por paso).
+  `SystemParametersInfoA` solo contesta `SPI_GETWHEELSCROLLLINES` y
+  `SPI_GETWHEELSCROLLCHARS`: 3 (lo demás, FALSE). Prueba:
+  `tests/run_rueda_tests.sh` con `tests/progs/winrueda.c`.
 - **Crear y destruir.** `CreateWindowExA` busca la clase, pide el bloque,
   hace la plantilla (con título: `E_TITULO` y `E_CERRAR`, y `E_MAXIM`,
   `E_MINIM` y `E_TAMANO` según `WS_MAXIMIZEBOX`, `WS_MINIMIZEBOX` y

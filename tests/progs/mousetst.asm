@@ -82,6 +82,19 @@
         and al, 15
         call pnum
         call crlf
+        ; [RUEDA] ¿hay rueda? (función 11h de CuteMouse)
+        mov ax, 0x11
+        xor cx, cx
+        int 0x33
+        mov dx, m_wno
+        cmp ax, 0x574D
+        jne .wp
+        test cl, 1
+        jz .wp
+        mov dx, m_wsi
+.wp:
+        mov ah, 9
+        int 0x21
         ; rutina del usuario: botón izquierdo pulsado
         push cs
         pop es
@@ -97,6 +110,24 @@
         jnz .key
         mov ax, 3
         int 0x33
+        test bh, bh                 ; [RUEDA] pasos desde la última vez
+        jz .nw
+        push bx
+        push cx
+        push dx
+        movsx ax, bh
+        add [wsum], ax
+        mov dx, m_wpas
+        mov ah, 9
+        int 0x21
+        movsx ax, bh
+        call psig
+        call crlf
+        pop dx
+        pop cx
+        pop bx
+.nw:
+        xor bh, bh
         cmp cx, [lx]
         jne .ch
         cmp dx, [ly]
@@ -151,6 +182,12 @@
         mov ax, [calls]
         call pnum
         call crlf
+        mov dx, m_wtot              ; [RUEDA]
+        mov ah, 9
+        int 0x21
+        mov ax, [wsum]
+        call psig
+        call crlf
         ; quitar la rutina
         xor cx, cx
         mov ax, 0x0C
@@ -162,6 +199,16 @@ handler:
         inc word [cs:calls]
         retf
 
+; AX con signo
+psig:
+        test ax, ax
+        jns pnum
+        push ax
+        mov dl, '-'
+        mov ah, 2
+        int 0x21
+        pop ax
+        neg ax
 pnum:
         xor cx, cx
         mov bx, 10
@@ -189,6 +236,11 @@ lx      dw 0xFFFF
 ly      dw 0xFFFF
 lb      dw 0xFFFF
 calls   dw 0
+wsum    dw 0
+m_wsi   db "Rueda: sí", 13, 10, "$"
+m_wno   db "Rueda: no", 13, 10, "$"
+m_wpas  db "Rueda: $"
+m_wtot  db "Pasos de la rueda: $"
 m_none  db "No hay driver de ratón.", 13, 10, "$"
 m_reset db "Ratón: botones $"
 m_ver   db "Versión del driver: $"

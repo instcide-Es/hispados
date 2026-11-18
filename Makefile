@@ -216,6 +216,10 @@ $(B)/WINCTL.EXE: tests/progs/winctl.c $(W32DEP) | $(B)
 $(B)/WINMENU.EXE: tests/progs/winmenu.c tests/progs/winmenu.rc tools/rcmini.py $(W32DEP) | $(B)
 	$(CC32) -c $< -o $(B)/winmenu.o
 	python3 tools/elf2pe.py --gui -o $@ --res tests/progs/winmenu.rc $(W32L) $(B)/winmenu.o
+# [RUEDA] la rueda del ratón en los programas de Windows (tests/run_rueda_tests.sh)
+$(B)/WINRUEDA.EXE: tests/progs/winrueda.c $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/winrueda.o
+	python3 tools/elf2pe.py --gui -o $@ $(W32L) $(B)/winrueda.o
 # la calculadora: la prueba final de la fase 3c (tests/run_win32calc_tests.sh)
 $(B)/WINCALC.EXE: tests/progs/wincalc.c tests/progs/wincalc.rc tools/rcmini.py $(W32DEP) | $(B)
 	$(CC32) -c $< -o $(B)/wincalc.o
@@ -393,6 +397,9 @@ $(B)/SHARETST.COM: tests/progs/sharetst.asm | $(B)
 $(B)/TECLAS.COM: tests/progs/teclas.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MOUSETST.COM: tests/progs/mousetst.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+# [RUEDA] el touchpad Synaptics en modo absoluto, sin touchpad (tests/run_rueda_tests.sh)
+$(B)/SYNTEST.COM: tests/progs/syntest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/NOC2.COM: tests/progs/noc2.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<

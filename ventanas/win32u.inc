@@ -851,6 +851,8 @@ w32_traducir:
         clc
         ret
 .nor:
+        cmp eax, WM_MOUSEWHEEL      ; [RUEDA]
+        je .rueda
         cmp eax, WM_SIZE
         je .tam
         cmp eax, WM_MOVE
@@ -889,6 +891,29 @@ w32_traducir:
         ret
 .tmp:
         call w32_tmp_proc
+        clc
+        ret
+; [RUEDA] ECX=pasos (positivo: hacia abajo), EDX=x,y en la zona -> wParam =
+; delta (120 por paso, positivo: hacia arriba) << 16 | MK_*, lParam = x,y
+; en la pantalla
+.rueda:
+        push eax
+        push ebx
+        push ecx
+        push edx
+        call ven_cli
+        pop edx
+        add ax, dx
+        shr edx, 16
+        add dx, bx
+        shl edx, 16
+        mov dx, ax
+        pop ecx
+        imul ecx, ecx, -120
+        shl ecx, 16
+        or ecx, [esi+PE_BOT]
+        pop ebx
+        pop eax
         clc
         ret
 .tam:
@@ -1687,10 +1712,21 @@ u_DefWindowProcA:
         je .ptexto
         cmp eax, WM_GETTEXT
         je .texto
+        cmp eax, WM_MOUSEWHEEL      ; [RUEDA] a la madre, si es de Windows
+        je .rueda
         cmp eax, 0x000E             ; WM_GETTEXTLENGTH
         jne u_cero
         mov esi, [esi+V_D4]
         jmp cad_largo
+.rueda:                             ; [RUEDA]
+        mov ecx, [ebp+8]
+        mov edx, [ebp+12]
+        mov ebp, [esi+V_PADRE]
+        test ebp, ebp
+        jz u_cero
+        cmp dword [ebp+V_PROC], w32_ven_proc
+        jne u_cero
+        jmp w32_proc
 .cerrar:
         test byte [esi+V_D5], W32V_DESTRUYE
         jnz u_cero
@@ -2504,6 +2540,19 @@ u_GetSystemMetrics:
         movzx eax, ah
 .x:
         ret
+; [RUEDA] BOOL SystemParametersInfoA(acción, uiParam, pvParam, fWinIni): solo
+; SPI_GETWHEELSCROLLLINES (68h) y SPI_GETWHEELSCROLLCHARS (6Ch) = 3
+u_SystemParametersInfoA:
+        mov eax, [ebp]
+        or al, 4
+        cmp eax, 0x6C
+        jne u_cero
+        mov edi, [ebp+8]
+        test edi, edi
+        jz u_cero
+        add edi, [edx+PE_DELTA]
+        mov dword [edi], 3
+        jmp u_uno
 ; DWORD GetSysColor(cuál) y HBRUSH GetSysColorBrush(cuál)
 u_GetSysColor:
         mov eax, [ebp]

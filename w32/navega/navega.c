@@ -1589,6 +1589,26 @@ static void raton(int px, int py, int boton) {
   ReleaseDC(vent, dc);
 }
 
+// [RUEDA] la rueda del ratón (WM_MOUSEWHEEL: 120 por paso, positivo hacia
+// arriba): 3 filas por paso; con una lista desplegada abierta, 3 opciones
+static void rueda(int delta) {
+  static int resto;
+  int pasos;
+  resto += delta;
+  pasos = resto / 120;
+  resto -= pasos * 120;
+  if (!pasos || !pag) return;
+  if (lista.activa) {
+    Ctl *c = &pag->ctl[lista.ctl];
+    int t = lista.top - 3 * pasos;
+    if (t > c->n_opc - lista.vis) t = c->n_opc - lista.vis;
+    if (t < 0) t = 0;
+    if (t != lista.top) { lista.top = t; repinta_pagina(); }
+    return;
+  }
+  desplaza(sx, sy - 3 * pasos);
+}
+
 static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   switch (m) {
   case WM_PAINT: {
@@ -1630,6 +1650,9 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
       KillTimer(h, T_REFRESCO);
       if (refresco && !cargando) { char *u = refresco; refresco = NULL; ir2(u, 0, NULL, 0, 0, NULL, u); free(u); }
     }
+    return 0;
+  case 0x020A:                 // [RUEDA] WM_MOUSEWHEEL
+    rueda((short)(w >> 16));
     return 0;
   case WM_DESTROY:
     guarda_galletas();

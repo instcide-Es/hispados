@@ -15,7 +15,8 @@
 ;
 ;  Qué se busca: las entradas (Input) variables y relativas de la página 1
 ;  con los usos X (30h) e Y (31h), y los botones 1-3 de la página 9, todo en
-;  el mismo informe (mismo identificador). Se respetan los identificadores
+;  el mismo informe (mismo identificador). [RUEDA] Y la rueda (uso 38h,
+;  relativa), si va en ese informe. Se respetan los identificadores
 ;  de informe (hasta 15), Push/Pop, las listas de usos, los rangos (Usage
 ;  Minimum/Maximum), los usos de 4 bytes (con la página dentro) y los
 ;  elementos largos (se saltan). Lo absoluto (tabletas, pantallas táctiles)
@@ -47,6 +48,8 @@ hr_parse:
         mov [hr_b1], ax
         mov [hr_b2], ax
         mov [hr_b3], ax
+        mov [hr_wo], ax             ; [RUEDA]
+        mov byte [hrp_wr], 0xFF
         mov byte [hrp_xr], 0xFF
         mov byte [hrp_yr], 0xFF
         mov byte [hrp_br], 0xFF
@@ -219,6 +222,10 @@ hr_parse:
         mov [hr_rid], al
         mov ah, [hrp_ids]
         mov [hr_hasid], ah
+        cmp al, [hrp_wr]            ; [RUEDA] la rueda, si va con ellas
+        je .w
+        mov word [hr_wo], 0xFFFF
+.w:
         cmp al, [hrp_br]
         je .ok
         mov word [hr_b1], 0xFFFF
@@ -360,6 +367,18 @@ hr_parse:
         mov [hr_xsg], al
         jmp .fe
 .fy:
+        cmp eax, 0x00010038         ; [RUEDA] la rueda
+        jne .fy2
+        cmp byte [hrp_wr], 0xFF
+        jne .fe
+        mov [hrp_wr], dl
+        mov [hr_wo], bx
+        mov al, [hrp_fs]
+        mov [hr_ws], al
+        mov al, [hrp_g+HRG_NEG]
+        mov [hr_wsg], al
+        jmp .fe
+.fy2:
         cmp eax, 0x00010031         ; Y
         jne .fe
         cmp byte [hrp_yr], 0xFF
@@ -395,6 +414,7 @@ hrp_rng     db 0
 hrp_xr      db 0                    ; informe de X, de Y y de los botones
 hrp_yr      db 0
 hrp_br      db 0
+hrp_wr      db 0                    ; [RUEDA] y el de la rueda
             align 4
 hrp_list    times HR_NLIST dd 0
 hrp_umin    dd 0

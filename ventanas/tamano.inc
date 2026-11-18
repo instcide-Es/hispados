@@ -526,9 +526,12 @@ con_tiras:
 
 ; ---- la rueda del ratón (API de CuteMouse: INT 33h AX=11h y el bit 7 de
 ; la máscara de sucesos, con los pasos en BH) ----
-; (rat_iniciar) con [rmcs+0x18] = la máscara: le añade la rueda si la hay
+; (rat_iniciar) con [rmcs+0x18] = la máscara: le añade la rueda. [RUEDA]
+; Siempre: un ratón USB (HSPRATON por HSPUSB) solo se sabe que tiene rueda
+; cuando la mueve, y a los drivers sin rueda el bit 7 no les dice nada.
 rueda_mascara:
         pushad
+        or dword [rmcs+0x18], 0x80
         mov eax, 0x0011
         xor ecx, ecx
         int 0x33
@@ -536,7 +539,6 @@ rueda_mascara:
         jne .x
         test cl, 1
         jz .x
-        or dword [rmcs+0x18], 0x80
         mov byte [hay_rueda], 1
 .x:
         popad

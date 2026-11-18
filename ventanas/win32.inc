@@ -1152,6 +1152,7 @@ w32_tabla:
         W32F u_cero, 4, 1, 'SetCursor'
         W32F u_uno, 4, 1, 'MessageBeep'
         W32F u_GetSystemMetrics, 4, 1, 'GetSystemMetrics'
+        W32F u_SystemParametersInfoA, 16, 1, 'SystemParametersInfoA'   ; [RUEDA]
         W32F u_GetSysColor, 4, 1, 'GetSysColor'
         W32F u_GetSysColorBrush, 4, 1, 'GetSysColorBrush'
         W32F u_GetDC, 4, 1, 'GetDC'

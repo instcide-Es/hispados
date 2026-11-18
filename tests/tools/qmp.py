@@ -7,6 +7,7 @@ uso: qmp.py SOCKET ORDEN...
   combo DISPOSITIVO A+B    pulsa varias a la vez (ctrl+backspace, alt+left...)
   move DISPOSITIVO DX DY   movimiento relativo del ratón
   btn DISPOSITIVO 0|1      botón izquierdo soltado / pulsado
+  rueda DISPOSITIVO N      N pasos de la rueda (positivo: hacia abajo, hacia el usuario)
   down DISPOSITIVO QCODE   aprieta una tecla y la deja apretada (ctrl...)
   up DISPOSITIVO QCODE     la suelta
   (DISPOSITIVO "-": sin dispositivo, al que QEMU tenga activo)
@@ -82,6 +83,14 @@ def main():
             i += 4
         elif op == 'btn':
             ev(a[i + 1], [{'type': 'btn', 'data': {'down': a[i + 2] == '1', 'button': 'left'}}])
+            i += 3
+        elif op == 'rueda':
+            n = int(a[i + 2])
+            b = 'wheel-down' if n > 0 else 'wheel-up'
+            for _ in range(abs(n)):
+                ev(a[i + 1], [{'type': 'btn', 'data': {'down': True, 'button': b}}])
+                ev(a[i + 1], [{'type': 'btn', 'data': {'down': False, 'button': b}}])
+                time.sleep(0.15)
             i += 3
         elif op == 'wait':
             time.sleep(float(a[i + 1]))

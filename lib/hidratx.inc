@@ -20,11 +20,15 @@ hr_yo       dw 0xFFFF
 hr_b1       dw 0xFFFF               ; botones 1 (izquierdo), 2 (derecho) y 3
 hr_b2       dw 0xFFFF
 hr_b3       dw 0xFFFF
+hr_wo       dw 0xFFFF               ; [RUEDA] la rueda (FFFFh: no la hay)
+hr_ws       db 0                    ; sus bits y si lleva signo
+hr_wsg      db 0
 HR_LEN      equ $ - hr_on
 
-; CS:SI = informe -> CF si es otro informe (otro identificador); si no, BX =
-; botones (bit 0 izquierdo, 1 derecho, 2 central), CX = movimiento en X y
-; DX en Y (positivo hacia abajo), con signo y sin recortar
+; CS:SI = informe -> CF si es otro informe (otro identificador); si no, BL =
+; botones (bit 0 izquierdo, 1 derecho, 2 central), BH = la rueda [RUEDA]
+; (como en HID: positivo, hacia arriba; 0 si no la hay), CX = movimiento en X
+; y DX en Y (positivo hacia abajo), con signo y sin recortar
 hr_extract:
         cmp byte [cs:hr_hasid], 0
         je .d
@@ -45,6 +49,11 @@ hr_extract:
         mov ax, [cs:hr_b1]
         call .bit
         or bl, al
+        mov ax, [cs:hr_wo]          ; [RUEDA]
+        mov cl, [cs:hr_ws]
+        mov ch, [cs:hr_wsg]
+        call .field
+        mov bh, al
         mov ax, [cs:hr_yo]
         mov cl, [cs:hr_ys]
         mov ch, [cs:hr_ysg]

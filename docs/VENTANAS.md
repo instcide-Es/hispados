@@ -269,11 +269,22 @@ probándolo en un ThinkPad con touchpad.
 - **La rueda del ratón** llega como `WM_MOUSEWHEEL` (ECX=pasos, positivo
   hacia abajo; EDX=x,y en la zona) a la ventana que hay debajo del cursor;
   la que no la quiere la pasa a su madre (`ven_defecto`). Hispa Ventanas la
-  pide con la interfaz de CuteMouse (INT 33h AX=11h y el bit 7 de la máscara
-  de sucesos, con los pasos en BH): la da HSPRATON por la vía directa con un
-  ratón IntelliMouse (PS/2 con rueda; ver su cabecera) y la dan otros
-  drivers como CuteMouse. Un touchpad sin rueda se desplaza con la barra o
-  el teclado.
+  pide con la interfaz de CuteMouse (el bit 7 de la máscara de sucesos, con
+  los pasos en BH; [RUEDA] siempre, porque de un ratón USB solo se sabe que
+  tiene rueda cuando se mueve: a un driver sin rueda ese bit no le dice
+  nada). La da HSPRATON (ver su cabecera) con un ratón IntelliMouse (PS/2
+  con rueda, por la vía directa), con un ratón USB con rueda (por HSPUSB:
+  [USB.md](USB.md)) y con el borde derecho de un touchpad Synaptics (los
+  netbooks: modo absoluto; `/SINBORDE` lo quita); la dan también otros
+  drivers como CuteMouse. Un touchpad sin nada de esto se desplaza con la
+  barra o el teclado.
+- [RUEDA] A los **programas de Windows** (Hispa-486) les llega como el
+  `WM_MOUSEWHEEL` de Windows (docs/486/HISPA-486.md); el **Navegador**
+  desplaza la página tres filas por paso y, con una lista desplegable
+  abierta, sus opciones. El Administrador de archivos (árbol y lista) y el
+  Centro de programas ya la usaban; el menú Inicio de Hispa-486 no la
+  necesita (no se desplaza: lo que no cabe va en columnas y «Más...»).
+  Prueba: `tests/run_rueda_tests.sh` (con el ratón PS/2 y con el USB).
 - **Se recuerda.** El sitio y el tamaño de las ventanas de los grupos y del
   Centro van a CENTRO.INI (`Ventana=`) al cerrarlas y al salir. Un grupo al
   que el usuario ha dado el tamaño con el ratón lleva `Medida=1` y ya no se

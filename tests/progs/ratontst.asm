@@ -65,6 +65,14 @@
         call putc
         movsx eax, word [hr_b3]
         call putsig
+        mov si, m_w                 ; [RUEDA] la rueda: bit/bits (-1: no hay)
+        call puts
+        movsx eax, word [hr_wo]
+        call putsig
+        mov al, '/'
+        call putc
+        movzx eax, byte [hr_ws]
+        call putnum
         call crlf
         pop si
         ; los informes de ejemplo (DW: puntero, bytes; 0 = fin)
@@ -87,11 +95,12 @@
         call puts
         jmp .rn
 .ex:
+        push bx
         push dx
         push cx
         mov si, m_lee
         call puts
-        movzx eax, bx
+        movzx eax, bl
         call putnum
         mov si, m_dx
         call puts
@@ -102,6 +111,11 @@
         call puts
         pop ax
         movsx eax, ax
+        call putsig
+        mov si, m_r                 ; [RUEDA]
+        call puts
+        pop bx
+        movsx eax, bh
         call putsig
         call crlf
 .rn:
@@ -149,7 +163,7 @@ d1      db 0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x01, 0xA1, 0x00, 0x05, 0x0
         db 0x81, 0x06, 0xC0, 0xC0
 d1_len  equ $ - d1
 r1      dw i1a, 4, 0
-i1a     db 0x01, 0x05, 0xFB, 0x00
+i1a     db 0x01, 0x05, 0xFB, 0x01
 ; 2) como el panel de un MacBook en su modo HID: identificador delante, un
 ;    botón (el clic del panel), 7 de relleno, X e Y de 8 bits
 n2      db "Panel con identificador:", 0
@@ -176,7 +190,7 @@ d3      db 0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01, 0x05, 0x07, 0x19, 0xE
         db 0x25, 0x7F, 0x75, 0x08, 0x95, 0x01, 0x09, 0x38, 0x81, 0x06, 0xC0, 0xC0
 d3_len  equ $ - d3
 r3      dw i3a, 7, i3b, 7, 0
-i3a     db 0x02, 0x02, 0x00, 0xFD, 0x4F, 0x00, 0x00
+i3a     db 0x02, 0x02, 0x00, 0xFD, 0x4F, 0x00, 0xFE
 i3b     db 0x01, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00
 ; 4) la tableta de QEMU (usb-tablet): X e Y absolutas -> no vale
 n4      db "Tableta:", 0
@@ -205,6 +219,8 @@ m_b     db " botones=", 0
 m_lee   db "  b=", 0
 m_dx    db " dx=", 0
 m_dy    db " dy=", 0
+m_w     db " rueda=", 0
+m_r     db " r=", 0
 m_otro  db "  otro informe", 13, 10, 0
 bufer   times 72 db 0
 u_numbuf    times 16 db 0

@@ -2886,6 +2886,9 @@ hr_swap:
         ret
 hr2         db 0, 0, 0, 0, 0, 0, 0, 0
             dw 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF
+            dw 0xFFFF                   ; [RUEDA] hr_wo, hr_ws, hr_wsg
+            db 0, 0
+HR2_LEN     equ $ - hr2                 ; (= HR_LEN: se comprueba tras hidratx.inc)
 mouse_rep1:
         pushad
         push es
@@ -2900,11 +2903,17 @@ mouse_rep1:
         jc .r                       ; otro informe del mismo aparato
         jmp .have
 .boot:
-        movzx bx, byte [cs:si]      ; botones
+        ; [RUEDA] informe de arranque: 3 bytes y, en casi todos los ratones
+        ; con rueda, la rueda en el 4.º (se piden 4: ip_len). Se pone a cero
+        ; al leerlo: un ratón que solo manda 3 no lo toca.
+        mov bl, [cs:si]             ; botones
         and bl, 7
+        mov bh, 0
+        xchg bh, [cs:si+3]          ; la rueda
         movsx cx, byte [cs:si+1]    ; x
         movsx dx, byte [cs:si+2]    ; y (positivo hacia abajo)
 .have:
+        neg bh                      ; [RUEDA] HID: positivo hacia arriba; CuteMouse, al revés
         ; ¿está HSPRATON?
         xor ax, ax
         mov es, ax
@@ -2962,6 +2971,7 @@ clamp127:
 .b:
         ret
 %include "hidratx.inc"
+        times -(HR2_LEN != HR_LEN) db 0     ; (error si hr2 no mide lo que el mapa)
 
 ; ---- INT 08h: recoger informes y repetir la tecla mantenida ----
 int08:

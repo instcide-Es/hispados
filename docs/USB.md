@@ -131,6 +131,35 @@ pedírselo con una orden propia de Apple, que no se usa). HSPUSB lleva las
 dos interfaces del mismo aparato («teclado y ratón»). Tocar para hacer clic
 y el desplazamiento con dos dedos no van (son del modo multitáctil).
 
+## La rueda del ratón
+
+`[RUEDA]` La rueda de un ratón USB llega a HSPRATON (INT 33h, la interfaz
+de CuteMouse: suceso 80h y BH con los pasos; [VENTANAS.md](VENTANAS.md)):
+
+- **Informes de arranque**: la norma solo fija los 3 primeros bytes
+  (botones, X e Y), pero casi todos los ratones con rueda la mandan en el
+  4.º también en el protocolo de arranque (es lo que lee, por ejemplo, el
+  `usbmouse` de Linux; el `usb-mouse` de QEMU también). HSPUSB ya pedía 4
+  bytes al ratón (`ip_len`); ahora lee el 4.º como la rueda y lo pone a
+  cero al leerlo, así que un ratón que solo manda 3 no da pasos falsos. Se
+  ha elegido esto y no pasar todos los ratones al protocolo de informe
+  porque no cambia nada para los que ya funcionan (los que no confirman el
+  de arranque ya van por su descriptor).
+- **Informes según su descriptor** (`[USB-RATON]`, `lib/hidraton.inc`): se
+  busca también la rueda (página 1, uso 38h, relativa) en el informe del
+  movimiento y `hr_extract` la da en BH. Así vale para los paneles y
+  receptores que la tienen en su descriptor; el panel del MacBook en su
+  modo HID de ratón no la tiene (el desplazamiento con dos dedos es del
+  modo multitáctil, que no se usa).
+- Se entrega en BH de la entrada privada `INT 33h AX=48D0h` (positivo hacia
+  el usuario, como en CuteMouse: el signo de HID es el contrario). Sin
+  HSPRATON (paquetes PS/2 por el 8042) no hay rueda: la BIOS no la entiende.
+- Memoria residente: 34 bytes más.
+- Prueba: `tests/run_rueda_tests.sh` (MOUSETST con el ratón USB en una xHCI
+  y en una UHCI; en Hispa Ventanas, un programa de Windows y el Navegador);
+  `RATONTST` (`tests/run_usbauto_tests.sh raton`) mira dónde encuentra la
+  rueda en cada descriptor y lo que lee.
+
 ## Receptores de Bluetooth («HID proxy»)
 
 `[USB-BT]` El Bluetooth de los Mac (y otros de Broadcom) se presenta, recién

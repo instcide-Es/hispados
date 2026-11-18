@@ -2,13 +2,15 @@
 ;  HSPRATON.COM - driver de ratón (INT 33h) de Hispa-DOS
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Uso:  HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/INFO]     (en AUTOEXEC.BAT)
+;  Uso:  HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/SINBORDE] [/INFO]  (en AUTOEXEC.BAT)
 ;
 ;    (sin opciones)  prueba primero la BIOS (INT 15h C2xxh) y, si no ofrece
 ;                    ratón, habla directamente con el controlador 8042
 ;    /BIOS           solo por la BIOS
 ;    /DIRECTO        solo directamente por el 8042 (puerto auxiliar, IRQ 12)
 ;    /SIMPLE         sin sondeos (rueda, Synaptics): reinicio y activación
+;    /SINBORDE       [RUEDA] touchpad Synaptics como ratón PS/2, sin la rueda
+;                    del borde derecho (y sin pasar a la vía directa por él)
 ;    /INFO           diagnóstico en pantalla; con el driver ya cargado enseña
 ;                    lo que se anotó al cargar y los contadores en vivo
 ;
@@ -33,10 +35,25 @@
 ;  8042) o, si no hay ratón PS/2, por la entrada privada INT 33h AX=48D0h.
 ;  Cursor por software en los modos de texto y en el modo 13h (320x200x256).
 ;  Funciones: 00h-0Fh, 10h, 11h, 13h-1Fh, 20h-24h, 26h, 2Ah.
-;  [TAMAÑO] La rueda (solo por la vía directa, con IntelliMouse), con la interfaz de
-;  CuteMouse: 11h -> AX=574Dh y CX bit 0 si la hay; suceso 80h en la máscara
-;  de la rutina del usuario, con los pasos en BH (positivo: hacia el
-;  usuario); 03h da en BH los pasos desde la última vez.
+;  [TAMAÑO] La rueda, con la interfaz de CuteMouse: 11h -> AX=574Dh y CX
+;  bit 0 si la hay; suceso 80h en la máscara de la rutina del usuario, con
+;  los pasos en BH (positivo: hacia el usuario); 03h da en BH los pasos desde
+;  la última vez. [RUEDA] La dan:
+;   - un IntelliMouse (PS/2 con rueda), solo por la vía directa (la BIOS
+;     solo da paquetes de 3 bytes);
+;   - un ratón USB con rueda, por HSPUSB (en BH de la entrada privada 48D0h);
+;     la función 11h lo dice desde el primer paso que llega;
+;   - el borde derecho de un touchpad Synaptics: por la vía directa se pone
+;     en modo absoluto (paquetes de 6 bytes) y un dedo que empieza en el
+;     borde derecho da pasos de rueda (unos 1,75 mm por paso); en el resto
+;     mueve el puntero, y el toque corto lo sigue reconociendo el touchpad
+;     (bit del gesto = botón izquierdo). Sin opciones, si la BIOS dice que
+;     hay un Synaptics se pasa a la vía directa por esto (si no va, vuelve a
+;     la BIOS); /SINBORDE lo deja todo como antes. El borde de abajo
+;     (horizontal) no se hace: la interfaz de CuteMouse no tiene rueda
+;     horizontal. Lo que lee los paquetes absolutos (syn_pkt) solo se queda
+;     residente si hace falta. /SYNPRUEBA (para las pruebas: SYNTEST.COM y
+;     tests/run_rueda_tests.sh) hace como si hubiera un Synaptics.
 ;  Privadas: AX=48D0h (movimiento de HSPUSB), 48D2h (¿está?), 48D3h (ES:BX =
 ;  datos del diagnóstico).
 ; =============================================================================
@@ -102,11 +119,13 @@ gsave       times 256 db 0
 
 ; ---- vía directa (8042) ----
 old74       dd 0
-pk_len      db 3                    ; bytes por paquete (4 = IntelliMouse)
+pk_len      db 3                    ; bytes por paquete (4 = IntelliMouse, 6 = Synaptics absoluto)
 pk_n        db 0                    ; bytes recibidos del paquete en curso
-pk_buf      db 0, 0, 0, 0
+pk_buf      db 0, 0, 0, 0, 0, 0     ; [RUEDA] (6: Synaptics absoluto)
 pk_tick     dw 0                    ; reloj de la BIOS en el último byte
 ack_wait    db 0                    ; se espera el FAh de una orden F4h
+w_hay       db 0                    ; [RUEDA] 1 = la rueda puede llegar (función 11h)
+s_abs       db 0                    ; [RUEDA] 1 = touchpad Synaptics en modo absoluto
 
 ; ---- datos del diagnóstico (/INFO; INT 33h AX=48D3h -> ES:BX) ----
 info:
@@ -131,6 +150,7 @@ c_pkts      dw 0                    ; paquetes completos
 c_bad       dw 0                    ; bytes y paquetes descartados
 c_kbd       dw 0                    ; IRQ 12 con un byte que era del teclado
 c_rst       dw 0                    ; reinicios del dispositivo (AA 00)
+i_abs       db 0                    ; [RUEDA] el touchpad, en modo absoluto
 INFO_LEN    equ $ - info
 
 H_CTR0      equ 0x0001
@@ -352,11 +372,7 @@ f03:
 ; 11h: ¿hay rueda? (la interfaz de CuteMouse) -> AX=574Dh «WM», CX bit 0
 f11:
         mov ax, 0x574D
-        xor cx, cx
-        cmp byte [pk_len], 4
-        jne .r
-        inc cx
-.r:
+        movzx cx, byte [w_hay]      ; [RUEDA] IntelliMouse, borde del touchpad o ratón USB
         xor bx, bx
         ret
 ; 04h: colocar
@@ -701,13 +717,20 @@ whd         db 0                    ; pasos de la rueda de este paquete (con sig
 whacc       db 0                    ; los de la función 03h
 mickd       dw 0
 
-; entrada privada de HSPUSB: BX botones, CX dx, DX dy (hacia abajo)
+; entrada privada de HSPUSB: BL botones, CX dx, DX dy (hacia abajo); [RUEDA]
+; BH = pasos de la rueda (como en CuteMouse: positivo, hacia el usuario)
 feed:
         push ds
         pusha
         push es
         push cs
         pop ds
+        mov [whd], bh
+        test bh, bh                 ; (desde el primer paso, la función 11h lo dice)
+        jz .f
+        mov byte [w_hay], 1
+.f:
+        xor bh, bh
         mov [mickd], dx
         call motion
         pop es
@@ -805,12 +828,34 @@ irq12:
         cmp al, 0xFA                ; el «recibido» de nuestra orden F4h
         je .eoi
 .data:
+        cmp byte [s_abs], 0         ; [RUEDA] Synaptics absoluto: 10xx0xxxb (o AAh)
+        je .d3
+        mov ah, al
+        and ah, 0xC8
+        cmp ah, 0x80
+        je .store
+        cmp al, 0xAA
+        je .store
+        jmp .dbad
+.d3:
         test al, 8                  ; el primer byte siempre lleva el bit 3
         jnz .store
+.dbad:
         inc word [c_bad]
         jmp .eoi
 .store:
         movzx bx, byte [pk_n]
+        cmp byte [s_abs], 0         ; [RUEDA] y el cuarto, 11xx0xxxb
+        je .st
+        cmp bl, 3
+        jne .st
+        mov ah, al
+        and ah, 0xC8
+        cmp ah, 0xC0
+        je .st
+        mov byte [pk_n], 0
+        jmp .dbad
+.st:
         mov [pk_buf+bx], al
         inc bx
         mov [pk_n], bl
@@ -820,6 +865,7 @@ irq12:
         jne .len                    ; (p. ej. al volver de una suspensión)
         mov byte [pk_n], 0
         mov byte [pk_len], 3
+        mov byte [s_abs], 0         ; (vuelve en modo relativo)
         call rearm
         jmp .eoi
 .len:
@@ -830,6 +876,11 @@ irq12:
         mov al, 0x20                ; fin de interrupción a los dos PIC
         out 0xA0, al
         out 0x20, al
+        cmp byte [s_abs], 0         ; [RUEDA]
+        je .rel
+        call syn_pkt
+        jmp .ret
+.rel:
         mov bl, [pk_buf]
         mov cl, [pk_buf+1]
         mov dl, [pk_buf+2]
@@ -1066,6 +1117,102 @@ int10:
 .old:
         jmp far [cs:old10]
 
+syn_ini:
+;  [RUEDA] (lo último de lo residente: solo se queda si el touchpad está en
+;  modo absoluto) Paquete de 6 bytes del touchpad Synaptics en modo absoluto (sin
+;  modo W; «Synaptics PS/2 TouchPad Interfacing Guide»): byte 0 = 1 0 dedo
+;  x 0 gesto der izq; X de 13 bits (byte 3 bit 4, byte 1 bits 0-3, byte 4),
+;  Y de 13 bits hacia arriba (byte 3 bit 5, byte 1 bits 4-7, byte 5). El
+;  toque corto (gesto) lo reconoce el touchpad: cuenta como botón izquierdo.
+;  Un dedo que empieza en el borde derecho es la rueda: SYN_PASO unidades
+;  por paso; si no, mueve el puntero (1/8: unos 7 puntos por milímetro).
+SYN_BORDE   equ 5150                ; X desde donde empieza el borde derecho
+SYN_PASO    equ 100                 ; unidades del borde por paso de rueda
+syn_pkt:
+        mov si, pk_buf
+        mov bl, [si]
+        mov al, bl
+        shr al, 2                   ; el gesto (toque): botón izquierdo
+        or bl, al
+        and bx, 3
+        mov ah, [si+3]
+        mov al, [si+1]
+        mov ch, ah                  ; CX = X
+        and ch, 0x10
+        mov cl, al
+        and cl, 0x0F
+        or ch, cl
+        mov cl, [si+4]
+        shr al, 4                   ; DX = Y
+        shr ah, 1
+        and ah, 0x10
+        or ah, al
+        mov al, [si+5]
+        xchg ax, dx
+        xor ax, ax
+        test byte [si], 0x20        ; ¿dedo?
+        jz .suelto
+        cmp [s_toque], al
+        jne .sigue
+        inc ax                      ; empieza: 1 puntero, 2 en el borde
+        cmp cx, SYN_BORDE
+        jb .z
+        inc ax
+.z:
+        mov [s_x], cx
+        mov [s_y], dx
+.suelto:
+        mov [s_toque], al
+        xor ax, ax
+        mov [s_acc], ax
+        mov [s_rx], ax
+        mov [s_ry], ax
+        jmp .quieto
+.sigue:
+        sub cx, [s_x]               ; lo movido desde el anterior
+        add [s_x], cx
+        sub dx, [s_y]
+        add [s_y], dx
+        cmp byte [s_toque], 2
+        je .borde
+        mov si, s_rx
+        call .octavo
+        xchg cx, dx
+        inc si
+        inc si
+        call .octavo
+        xchg cx, dx
+        neg dx
+        jmp .mov
+.borde:
+        sub [s_acc], dx             ; hacia abajo: positivo (como la rueda)
+        mov ax, [s_acc]
+        cwd
+        mov si, SYN_PASO
+        idiv si
+        mov [s_acc], dx
+        mov [whd], al
+.quieto:
+        xor cx, cx
+        xor dx, dx
+.mov:
+        mov [mickd], dx
+        jmp motion
+; CX = CX/8, con lo que sobra guardado en [SI]
+.octavo:
+        add cx, [si]
+        mov ax, cx
+        and ax, 7
+        mov [si], ax
+        sar cx, 3
+        ret
+s_toque     db 0                    ; 0 sin dedo, 1 mueve el puntero, 2 en el borde: rueda
+s_x         dw 0                    ; dónde estaba el dedo
+s_y         dw 0
+s_rx        dw 0                    ; lo que sobra de dividir el movimiento
+s_ry        dw 0
+s_acc       dw 0                    ; lo recorrido por el borde (unidades del touchpad)
+
 resident_end:
 
 ; =============================================================================
@@ -1135,7 +1282,26 @@ init:
         cmp byte [o_via], 2
         je .dir
         call bios_init
+        jc .nob
+        ; [RUEDA] un touchpad Synaptics por la BIOS solo da movimiento: sin
+        ; /BIOS (ni /SINBORDE o /SIMPLE), por la vía directa, para el borde
+        cmp byte [o_via], 0
+        jne .ready
+        cmp byte [o_noborde], 0
+        jne .ready
+        test word [i_have], H_SYN
+        jz .ready
+        cmp byte [i_syn+1], 0x47
+        jne .ready
+        mov ax, 0xC200              ; la BIOS lo deja parado
+        xor bh, bh
+        int 0x15
+        mov byte [i_via], 0
+        call dir_init
         jnc .ready
+        call bios_init              ; no va: otra vez por la BIOS
+        jmp .ready
+.nob:
         cmp byte [o_via], 1
         je .ready
 .dir:
@@ -1166,6 +1332,10 @@ init:
         mov ah, 0x49
         int 0x21
         mov dx, resident_end + 15
+        cmp byte [s_abs], 0         ; [RUEDA] sin modo absoluto, sin syn_pkt
+        jne .tam
+        mov dx, syn_ini + 15
+.tam:
         shr dx, 4
         mov ax, 0x3100
         int 0x21
@@ -1256,8 +1426,16 @@ parse:
         mov byte [o_simple], 1
 .h5:
         cmp al, 5
-        jne .l
+        jne .h6
         mov byte [o_help], 1
+.h6:
+        cmp al, 6
+        jne .h7
+        mov byte [o_noborde], 1
+.h7:
+        cmp al, 7
+        jne .l
+        mov byte [o_synpr], 1
         jmp .l
 
 opts        db "INFO", 0, 1
@@ -1266,11 +1444,15 @@ opts        db "INFO", 0, 1
             db "DIRECTA", 0, 3
             db "SIMPLE", 0, 4
             db "?", 0, 5
+            db "SINBORDE", 0, 6
+            db "SYNPRUEBA", 0, 7
             db 0
 o_info      db 0
 o_via       db 0                    ; 0 automática, 1 BIOS, 2 directa
 o_simple    db 0
 o_help      db 0
+o_noborde   db 0                    ; [RUEDA] /SINBORDE
+o_synpr     db 0                    ; [RUEDA] /SYNPRUEBA (las pruebas)
 
 ; -----------------------------------------------------------------------------
 ;  Vía BIOS (INT 15h C2xxh). CF = 0 si el ratón queda activado.
@@ -1363,6 +1545,63 @@ set_dev:
         cmp byte [i_syn+1], 0x47
         jne .r
         mov byte [i_dev], 3
+.r:
+        ret
+
+; [RUEDA] (vía directa) touchpad Synaptics con el formato absoluto «nuevo»
+; (bit 7 del modelo, petición 01h): se pone en modo absoluto, 80 paquetes por
+; segundo, con gestos y sin modo W (byte de modo C0h: E8h × 4 y F3h 14h), y
+; el borde derecho hace de rueda. No con /SINBORDE ni con /SIMPLE. Con
+; /SYNPRUEBA (las pruebas: tests/run_rueda_tests.sh) se hace como si lo
+; hubiera, sin preguntar al dispositivo.
+syn_abs_on:
+        cmp byte [o_noborde], 0
+        jne .r
+        cmp byte [o_synpr], 0
+        jne .si
+        cmp byte [i_dev], 3
+        jne .r
+        mov al, 0x01                ; ¿modelo?
+        call syn_arg
+        jc .r
+        mov al, 0xE9
+        call m_send
+        jc .r
+        mov byte [tries], 3
+.m:
+        mov cx, 10
+        call m_read
+        jc .r
+        dec byte [tries]
+        jnz .m
+        test al, 0x80               ; (el tercero: bit 7, formato nuevo)
+        jz .r
+        mov al, 0xC0                ; modo: absoluto, 80/s
+        call syn_arg
+        jc .r
+        mov ax, 0x14F3
+        call m_send2
+        jc .r
+.si:
+        mov byte [s_abs], 1
+        mov byte [i_abs], 1
+        mov byte [pk_len], 6
+        mov byte [w_hay], 1
+.r:
+        ret
+; las cuatro E8h que llevan el byte AL, de dos en dos bits (de arriba abajo)
+syn_arg:
+        mov cx, 4
+.l:
+        rol al, 2
+        push ax
+        and al, 3
+        mov ah, al
+        mov al, 0xE8
+        call m_send2
+        pop ax
+        jc .r
+        loop .l
 .r:
         ret
 
@@ -1778,6 +2017,7 @@ dir_init:
         cmp al, 3
         jne .syn
         mov byte [pk_len], 4
+        mov byte [w_hay], 1         ; [RUEDA]
         mov byte [i_dev], 2
 .syn:
         ; ¿touchpad Synaptics? Cuatro «resolución 0» y petición de estado
@@ -1812,6 +2052,7 @@ dir_init:
         mov al, 0xE6                ; escala 1:1
         call m_send
         call set_dev
+        call syn_abs_on             ; [RUEDA] el borde del touchpad
         ; nuestra IRQ 12
         mov ax, 0x3574
         int 0x21
@@ -1951,6 +2192,9 @@ report:
         cmp byte [i_dev], 3
         jne .p
         mov si, msg_readyt
+        cmp byte [s_abs], 0         ; [RUEDA]
+        je .p
+        mov si, msg_readyb
 .p:
         call puts
         test word [i_have], H_NOIRQ
@@ -2178,8 +2422,12 @@ show_info:
         call pdev
         mov si, mi_p3
         cmp byte [i_dev], 2
-        jne .u2
+        jne .u1
         mov si, mi_p4
+.u1:
+        cmp byte [i_abs], 0         ; [RUEDA] Synaptics absoluto
+        je .u2
+        mov si, mi_p6
 .u2:
         call puts
         test word [i_have], H_NOIRQ
@@ -2293,6 +2541,7 @@ msg_dim     db "Ratón PS/2 con rueda (IntelliMouse)", 0
 msg_dsyn    db "Touchpad Synaptics ", 0
 msg_ready   db " preparado.", 13, 10, 0
 msg_readyt  db " preparado (funciona como ratón PS/2).", 13, 10, 0
+msg_readyb  db " preparado; el borde derecho hace de rueda (/SINBORDE: sin ello).", 13, 10, 0
 msg_noirq   db "Aviso: el dispositivo contesta, pero su interrupción (IRQ 12) no llega.", 13, 10, 0
 msg_nobios  db "La BIOS no ofrece ratón PS/2 (INT 15h C2", 0
 msg_nobios2 db "h, AH=", 0
@@ -2306,11 +2555,12 @@ msg_d3      db "nada contesta en el puerto auxiliar del 8042", 0
 msg_d4      db "el dispositivo no se deja activar", 0
 msg_nops2   db "No hay ratón PS/2: se usará un ratón USB (HSPUSB.SYS) si lo hay.", 13, 10, 0
 msg_already db "HSPRATON ya está instalado.", 13, 10, 0
-msg_usage   db "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/INFO]", 13, 10
+msg_usage   db "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/SINBORDE] [/INFO]", 13, 10
             db "  (sin opciones) prueba la BIOS y, si no ofrece ratón, el 8042 directamente", 13, 10
             db "  /BIOS     solo por la BIOS (INT 15h)", 13, 10
             db "  /DIRECTO  solo directamente por el controlador 8042 (IRQ 12)", 13, 10
             db "  /SIMPLE   sin sondeos (rueda, Synaptics): solo reinicio y activación", 13, 10
+            db "  /SINBORDE touchpad Synaptics sin rueda en el borde derecho (como ratón PS/2)", 13, 10
             db "  /INFO     diagnóstico en pantalla (también con el driver ya cargado)", 13, 10, 0
 mi_head     db "--- HSPRATON /INFO ---", 13, 10, 0
 mi_bios     db "BIOS:    INT 11h ratón=", 0
@@ -2338,6 +2588,7 @@ mi_vbios    db "vía BIOS, ", 0
 mi_vdir     db "vía directa, ", 0
 mi_p3       db ", paquetes de 3 bytes", 0
 mi_p4       db ", paquetes de 4 bytes", 0
+mi_p6       db ", paquetes de 6 bytes (absolutos: el borde derecho es la rueda)", 0
 mi_noirq    db ", SIN IRQ 12", 0
 mi_c1       db "Cuenta:  IRQ12=", 0
 mi_c2b      db "  bytes=", 0

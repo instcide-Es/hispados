@@ -100,7 +100,7 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
 
 | | |
 |---|---|
-| Ratón | un clic en un enlace, un botón o un campo; la barra de la derecha desplaza (se puede arrastrar) |
+| Ratón | un clic en un enlace, un botón o un campo; la barra de la derecha desplaza (se puede arrastrar); la rueda desplaza la página (3 filas por paso) y, con una lista abierta, sus opciones |
 | Tab | al enlace o campo siguiente (el enlace elegido sale en blanco sobre añil); Mayús+Tab, al anterior |
 | Intro | abre el enlace, pulsa el botón, envía el formulario del campo; en el de un archivo, abre el diálogo |
 | Espacio | marca la casilla o abre la lista; fuera de un campo, baja una pantalla |

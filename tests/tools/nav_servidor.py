@@ -269,6 +269,10 @@ class Pedido(BaseHTTPRequestHandler):
                         'entera y algo m&aacute;s de la ventana del navegador.</p>' % n
                         for n in range(1, min(int(q.get('n', ['400'])[0]), 3000) + 1))
             self.manda(pagina('Página grande', '<h1>P&aacute;gina grande</h1>' + c + '<p id="fin">FIN-DE-LA-GRANDE</p>'), trozos=True)
+        elif u.path == '/larga':        # [RUEDA] tests/run_rueda_tests.sh: una lista larga y mucho texto
+            ops = ''.join('<option value="%d">Opci&oacute;n %02d</option>' % (n, n) for n in range(1, 41))
+            c = ''.join('<p>L&iacute;nea larga %03d.</p>' % n for n in range(1, 121))
+            self.manda(pagina('Lista larga', '<p>Elija: <select name="n">%s</select></p>%s' % (ops, c)))
         elif u.path == '/texto.txt':
             self.manda('Texto sin formato.\nSegunda línea: ñandú.\n'.encode('utf-8'), tipo='text/plain; charset=UTF-8')
         elif u.path == '/archivo.bin':
