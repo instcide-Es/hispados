@@ -21,6 +21,10 @@ IN2=${INSTAL2:-build/hispados-instal2.img}
 cp "$IN2" $T/i2.img 2>/dev/null || echo "  (falta $IN2: make usb)"
 mon1() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon1 > /dev/null 2>&1; }
 # 1) FDISK + FORMAT sin sistema + INSTALAR C: y, al final, el disquete Oficina
+# (los disquetes se cambian cuando INSTALAR los pide, no a tiempo fijo: con el
+# PC cargado la copia tarda más)
+# espera N TEXTO: hasta que TEXTO haya salido N veces por la consola (2 min como mucho)
+espera() { local i=0; until [ "$(grep -caF -- "$2" $T/l1 2>/dev/null)" -ge $1 ] || [ $i -ge 240 ]; do sleep 0.5; i=$((i+1)); done; sleep 0.5; }
 {
   sleep 4
   send "FDISK /PRI" 2
@@ -28,17 +32,19 @@ mon1() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon1 > /dev/null 2>&1; }
   send "INSTALAR /?" 2
   send "INSTALAR A:" 2
   send "INSTALAR C:" 2
-  sleep 10; mon1 "change floppy0 $T/i2.img"; sleep 2
+  espera 1 "(N para seguir sin"; mon1 "change floppy0 $T/i2.img"; sleep 2
   send "S" 1
-  sleep 8; mon1 "change floppy0 $T/f.img"; sleep 2
-  printf ' '; sleep 3
+  espera 1 "pulse una tecla."; mon1 "change floppy0 $T/f.img"; sleep 2
+  printf ' '
+  espera 1 "(N para terminar sin"
   mon1 "change floppy0 $T/o.img"; sleep 2
   send "S" 1
-  sleep 20; mon1 "change floppy0 $T/f.img"; sleep 2
-  printf ' '; sleep 3
+  espera 2 "pulse una tecla."; mon1 "change floppy0 $T/f.img"; sleep 2
+  printf ' '
+  espera 1 "(N para quedarse con"
   send "N" 1                # [HISPA-486] el disquete «Hispa-486»: no (queda Hispa-386)
   send "DIR C:\HISPADOS\PROGS\PLUMA.HVP" 2
-} | timeout 100 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
+} | timeout 240 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
       -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/hdd.img,format=raw,if=ide -boot a -no-reboot > $T/l1 2>&1
 # 2) arrancar desde C: y usar el historial con teclas reales
