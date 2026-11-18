@@ -115,6 +115,12 @@ nuevo() {  # nombre imagen: carpeta, copia de la imagen y disco vacío de 32 MB
   printf x > $T/pluma.hvp; MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/$1/f.img $T/pluma.hvp ::HISPADOS/PROGS/PLUMA.HVP 2>/dev/null || true
   # [0.9.24] y con HW32 (así tampoco pregunta por «Instalación 2»)
   MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/$1/f.img $T/pluma.hvp ::HISPADOS/HW32.COM 2>/dev/null || true
+  # [HISPA-486] y como si fuera ya de Hispa-486 con el Navegador: así no pregunta
+  # por los disquetes «Hispa-486» ni «Internet» (eso lo mira run_imagen486_tests.sh)
+  if [ "$(stat -c %s "$2")" -le 2949120 ]; then
+    MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/$1/f.img $T/pluma.hvp ::HISPADOS/EDICION.INI 2>/dev/null || true
+    MTOOLS_SKIP_CHECK=1 mmd -i $T/$1/f.img ::HISPADOS/INTERNET 2>/dev/null || true
+  fi
   dd if=/dev/zero of=$T/$1/hdd.img bs=1M count=32 status=none
 }
 PREC="PARTIR /PRI|FORMATEA C: /V:DESTINO /AUTOTEST"
