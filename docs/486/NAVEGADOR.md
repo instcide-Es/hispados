@@ -1,7 +1,7 @@
 # El Navegador de Hispa-486
 
-Un navegador web sencillo para Hispa Ventanas: páginas HTML con formularios,
-por HTTP y por HTTPS. Es un programa Hispa32 (`NAVEGA.EXE`) y va, con lo que
+Un navegador web sencillo para Hispa Ventanas: páginas HTML con formularios y
+JavaScript, por HTTP y por HTTPS. Es un programa Hispa32 (`NAVEGA.EXE`) y va, con lo que
 necesita, en el segundo disquete de Hispa-486: «Internet».
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
@@ -48,7 +48,9 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
   esconden cosas (`d-none`, `collapse`, `modal`, `dropdown-menu`...) y unas
   pocas más (`text-center`, `fw-bold`, `text-danger`, `alert`, `badge`,
   `btn`).
-- **Sin JavaScript.** Lo que se puede suplir sin él, se suple:
+- **JavaScript** (ES2020, con QuickJS: ver «JavaScript», más abajo). Se
+  apaga con `JavaScript=NO` en NAVEGA.INI; entonces, lo que se puede suplir
+  sin él, se suple:
   - `onsubmit="return confirm('...')"` (y en `onclick`): antes de enviar sale
     la pregunta en un cuadro de Hispa Ventanas (Sí o No);
   - `<select onchange="this.form.submit()">`: al elegir, se envía;
@@ -73,6 +75,7 @@ entera: catálogo, prestar, devolver, lectores, historial (ver «Con ClicGest»)
 | Retroceso | fuera de un campo: Atrás |
 | F6 o Ctrl+L | a la dirección (queda elegida entera: lo que se escriba la sustituye) |
 | F5 o Ctrl+R | recargar |
+| (con JavaScript) | las teclas y los clics van primero a la página: en el buscador de «Prestar», las flechas eligen y Intro abre |
 | Esc | para la carga; en la dirección, la deja como estaba |
 
 Una dirección sin `http://` delante se pide por HTTP (si el sitio es de
@@ -85,6 +88,9 @@ Inicio=https://clicgest.es/biblioteca     ; la página de arranque y del botón 
 Idioma=es                                 ; el idioma que se pide (Accept-Language): es, ca, en
 AlContenido=NO                            ; no empezar por la parte principal de la página
 Favorito=La biblioteca|https://clicgest.es/biblioteca    ; enlaces de la página de inicio
+JavaScript=NO                             ; sin JavaScript (por omisión, con)
+TiempoJS=15                               ; segundos que puede tardar un guion o un evento (15)
+MemoriaJS=7168                            ; KB que puede usar el JavaScript de una página (7168)
 ```
 
 Sin `Inicio=`, arranca en una página propia (`about:inicio`) con los
@@ -92,9 +98,12 @@ favoritos y cómo se maneja. Si se le pasa una dirección al abrirlo, abre esa.
 
 ## Dónde está y qué necesita
 
-- **El disquete «Internet»** (`make internet` → `build/internet.img`, 279 KB
-  ocupados): `NAVEGA.EXE`, `HTTPS.EXE`, `WSOCK32.DLL`, `HSPTLS.DLL`,
-  `MSVCRT.DLL`, `HW32.COM`, `NAVEGA.INI` y `LEEME.TXT`. Se puede usar desde el
+- **El disquete «Internet»** (`make internet` → `build/internet.img`, 1.299 KB
+  ocupados de 1.440; caben todavía en uno): `NAVEGA.EXE`, `HSPJS.DLL` (el
+  JavaScript), `HTTPS.EXE`, `WSOCK32.DLL`, `HSPTLS.DLL`, `MSVCRT.DLL`,
+  `HW32.COM`, `NAVEGA.INI` y `LEEME.TXT`. Si el Navegador crece más, el
+  JavaScript irá en un segundo disquete («Internet 2»: `HSPJS.DLL` y `JS.EXE`),
+  que se copia a la misma carpeta del disco duro. Se puede usar desde el
   disquete (abriendo `B:\NAVEGA.EXE` desde el Administrador de archivos) o,
   lo normal, copiado al disco duro: `XCOPIAR B:\*.* C:\HISPADOS\INTERNET\`.
 - **En el menú Inicio:** si al arrancar Hispa Ventanas `NAVEGA.EXE` está en
@@ -131,19 +140,159 @@ tenant 1), desde QEMU:
   corriente, con su campo oculto `_csrf`: funciona igual. No hay captcha ni
   comprobación por JavaScript.
 
-Lo que se nota al usar ClicGest sin JavaScript ni sus hojas de estilo:
+ClicGest reconoce al Navegador por su nombre (User-Agent) y le da su **modo
+ligero** (un menú corto arriba, sin el armazón del teléfono): ver
+docs/navegador_ligero.md en ClicGest. Desde «Ver la versión normal» se pasa a
+la de siempre, la de un ordenador, que es la que tiene JavaScript de verdad.
 
-- El menú lateral no se ve hasta desplegar «[+] Menú principal».
-- Los pasos del tutorial de la portada de la biblioteca («Ver desde el paso
-  1», «Anterior», «Siguiente», «Ocultar pasos») son botones de JavaScript:
-  salen en gris y no hacen nada. Los enlaces y formularios de cada paso sí.
-- En «Prestar», la lista que va saliendo mientras se escribe es de
-  JavaScript: aquí se escribe y se pulsa «Buscar» (o Intro), que es el
-  formulario normal que la página ya trae.
+Con JavaScript (18/11/2026, contra clicgest.es de verdad, desde QEMU; capturas
+en `docs/486/navegador/js_*.png`):
+
+- **El menú lateral:** el botón «Menú» (el ☰ de ClicGest, con su nombre: el
+  dibujo no está en la letra de Hispa Ventanas) lo despliega y lo vuelve a
+  plegar; «[+] Menú principal» sigue sirviendo igual.
+- **El tutorial de la biblioteca:** «Ver desde el paso 1», «Anterior»,
+  «Siguiente», «Cerrar el repaso» y «Ocultar pasos» (que se recuerda, en
+  localStorage).
+- **El buscador de «Prestar»:** al escribir sale la lista de personas que
+  casan («4 coinciden...»), se acota con cada letra, las flechas marcan una
+  fila (en ocre) e Intro, o un clic en la fila, la elige. (Sin elegir a
+  nadie: en la prueba no se prestó nada.)
+- **Las pestañas** de una salida («Falta pagar», «Pagado todo»,
+  «Asientos»...): son las de Bootstrap, con su JavaScript de verdad
+  (bootstrap.bundle.min.js, 80 KB).
+- Ninguna página de la biblioteca deja errores de JavaScript en NAVEGA.LOG
+  (portada, prestar, catálogo, devolver, lectores, historial, ajustes,
+  comprobar, etiquetas, por atender, reseñas, sugerencias y suspensiones).
+
+Lo que se sigue notando (con y sin JavaScript):
+
+- Sin las hojas de estilo de fuera, la página se ve en una columna, como
+  siempre; lo que esconde o enseña ClicGest con sus clases propias (y no con
+  las de Bootstrap o con `hidden`) puede salir de más.
 - Las letras mayúsculas con acento que no están en la letra de Hispa
   Ventanas salen sin él («Ultimos»), y el euro, como «E».
 - No se pueden subir archivos (la portada de un libro) ni abrir los PDF
   (recibos, etiquetas): eso sigue haciéndose desde otro equipo.
+- Sin JavaScript (`JavaScript=NO`): el menú lateral, plegado en «[+] Menú
+  principal»; los botones del tutorial, en gris; en «Prestar», se escribe y
+  se pulsa «Buscar».
+
+## JavaScript
+
+El motor es **QuickJS** (Fabrice Bellard y Charlie Gordon, licencia MIT,
+versión 2026-06-04: `terceros/quickjs`, con su LEEME): JavaScript moderno
+(ES2020 y más: funciones flecha, clases, `const`/`let`, plantillas,
+`async`/`await`, Map, Set, Proxy, expresiones regulares de Unicode, BigInt,
+JSON), que es lo que usa ClicGest (5.400 funciones flecha, `fetch`, clases).
+Duktape, la otra opción pequeña, se queda en ES5. Va en una DLL aparte,
+**HSPJS.DLL**, que también usa **JS.EXE**, la consola para probarlo:
+
+```
+JS [/M] [/T:segundos] archivo.js     (/M: memoria y tiempo al acabar)
+JS /E "print(2 ** 10)"
+```
+
+### Qué hay
+
+- **document y los nodos:** `getElementById`, `querySelector(All)`,
+  `matches` y `closest` con los selectores de CSS corrientes (etiqueta,
+  `#id`, `.clase`, `[atributo=valor]` y los `^= $= *= ~= |=`, los
+  combinadores ` > + ~`, listas con comas, `:not() :is() :has()
+  :first-child :last-child :nth-child() :checked :disabled :scope`...),
+  `createElement`, `textContent`, `innerHTML` y `outerHTML` (se leen con el
+  mismo lector de HTML de la página), `insertAdjacentHTML`, `appendChild`,
+  `insertBefore`, `append`, `prepend`, `before`, `after`, `remove`,
+  `replaceChildren`, `cloneNode`, `children`, `parentElement`, `dataset`,
+  `classList`, `style` (se escribe en el atributo `style`; la maqueta mira
+  `display`, `visibility`, colores, negrita y alineación), `hidden`,
+  atributos, `DocumentFragment`, `<template>`, `<details open>`, `<dialog>`
+  (`showModal`, `close`).
+- **Formularios:** `value`, `checked`, `selected`, `selectedIndex`,
+  `disabled`, `options`, `elements`, `form`, `submit()`,
+  `requestSubmit()`, `reset()`, `FormData`, `checkValidity()`.
+- **Eventos:** `addEventListener` (con captura y burbuja, `once`, `signal`),
+  los `onclick="..."` del HTML y las propiedades `onclick = ...`;
+  `preventDefault`, `stopPropagation`, `CustomEvent` y `dispatchEvent`. Los
+  que manda el Navegador: `click` (y `mousedown`, `mouseup`), `input`,
+  `change`, `submit`, `keydown` (con `key` y `code`: flechas, Intro, Esc,
+  Tab, letras...), `focus`, `blur`, `focusin`, `focusout`, `toggle`,
+  `DOMContentLoaded`, `load`, `pageshow`, `readystatechange`, `resize`.
+  Lo que tiene un clic de la página (una fila de una lista, un `<li>` cuyo
+  contenedor escucha los clics) se puede pulsar, como un enlace.
+- **window:** `setTimeout`, `setInterval`, `requestAnimationFrame`,
+  `queueMicrotask`; `alert` y `confirm` (con los cuadros de Hispa Ventanas);
+  `prompt` (Hispa Ventanas no tiene un cuadro para escribir: pregunta si
+  vale la respuesta que trae la página); `location` (y sus partes, `assign`,
+  `replace`, `reload`), `history` (`back`, `pushState`...), `navigator`,
+  `matchMedia` (una pantalla de ordenador, sin ratón que pase por encima: sin
+  globos de ayuda, ni animaciones), `getComputedStyle` (lo justo:
+  `display`), `localStorage` (en `NAVEGA.ALM`, junto al programa, por sitio)
+  y `sessionStorage` (mientras el Navegador está abierto), `document.cookie`
+  (las galletas de http.c), `URL`, `URLSearchParams`, `Headers`, `Blob`,
+  `TextEncoder`, `btoa`/`atob`, `crypto.getRandomValues`, `performance.now`,
+  `Intl.NumberFormat` y `DateTimeFormat` y `toLocaleString` en español
+  («1.234,50 €», «18 de noviembre de 2026»), `MutationObserver` e
+  `IntersectionObserver` (de mentira: no avisan / avisan una vez).
+- **La red:** `fetch` y `XMLHttpRequest` (GET y POST, y otros métodos;
+  cabeceras, JSON, `FormData` y `URLSearchParams`, que van como un
+  formulario corriente), por http.c, con las galletas y siguiendo las
+  redirecciones. Una petición a la vez, y solo cuando el Navegador no está
+  cargando una página.
+- **console:** `log`, `warn`, `error`... van a **NAVEGA.LOG**, junto al
+  programa, con los errores que nadie recoge (con su pila: archivo, línea y
+  columna) y las promesas rechazadas sin `catch`. Cada página empieza con
+  «== dirección» y acaba con una línea «[memoria]». El registro empieza de
+  nuevo cada vez que se abre el Navegador.
+
+### Cómo va
+
+- Por cada página que tiene algún `<script>` (o algún `onclick="..."`), un
+  motor nuevo (`JSRuntime` y `JSContext`): primero el **preludio**
+  (`w32/navega/dom.js`, el DOM y lo de window, hecho en JavaScript sobre lo
+  que da el C), luego sus guiones en orden: los de dentro, los de fuera (se
+  piden a la red sin parar la ventana; la página ya se ve mientras), los
+  `defer` y `async`, y después `DOMContentLoaded` y `load`. Los
+  `<noscript>` no se enseñan. Al irse de la página, el motor se suelta entero
+  y su memoria vuelve al sistema.
+- Lo compilado se guarda mientras el Navegador está abierto (450 KB como
+  mucho): el preludio, una vez; los guiones de fuera, por su dirección (con su
+  `?v=` de versión, como los pone ClicGest: no se vuelven a pedir); los de
+  dentro, por su contenido. Así, en ClicGest, `mobile.js` y los guiones del
+  menú de cada página no se piden ni se compilan más que la primera vez.
+- Tras cada guion, evento o temporizador, si el árbol ha cambiado, los
+  controles del formulario se rehacen (lo escrito se queda) y la página se
+  vuelve a maquetar sin perder el sitio ni el foco.
+- **El tope:** un guion o un evento que tarde más de `TiempoJS` segundos (15)
+  se para (en NAVEGA.LOG: «un guion ha tardado más de 15 s y se ha parado»;
+  abajo, en la línea de estado, también) y el Navegador sigue. Y el
+  JavaScript de una página no puede usar más de `MemoriaJS` KB (7 MB).
+
+### Cómo está hecho
+
+- `terceros/quickjs/`: QuickJS tal cual, menos una línea (sin `Atomics`,
+  que piden hilos). `w32/js/hspjs.c`: lo que QuickJS pide a la biblioteca de
+  C y MSVCRT.DLL no tiene: la memoria (un repartidor propio, en zonas de
+  256 KB pedidas con VirtualAlloc; el montón de HW32 da potencias de dos y
+  desperdiciaba la mitad), las divisiones de 64 bits, la salida y la hora.
+  `w32/js/mates.c`: las cuentas de Math con el x87 (fsin, fyl2x, f2xm1,
+  fpatan...); la DLL pone el x87 a 53 bits, como Windows, para que las sumas
+  redondeen como manda JavaScript. `w32/js/inc/`: las cabeceras mínimas.
+- `w32/navega/dom.c`: el árbol desde JavaScript (crear, mover, quitar,
+  atributos, `innerHTML` con html.c, sacar el HTML y el texto) y los
+  selectores de CSS. `w32/navega/script.c`: la unión: un objeto por nodo
+  (siempre el mismo), los guiones, los turnos (y sus promesas), los
+  temporizadores (uno de la ventana mientras haya alguno), la cola de la red,
+  el almacén, el registro. `w32/navega/dom.js`: el preludio (va dentro de
+  NAVEGA.EXE como texto; se compila al abrir el Navegador).
+- En los archivos de antes, solo ganchos pequeños marcados `[JS]`: en
+  navega.c (los eventos, el foco, el temporizador, el bucle de mensajes, lo
+  que JavaScript pide a la ventana), en pagina.c (rehacer los controles, el
+  rótulo de un botón sin texto, lo que se pulsa con JavaScript, la fila
+  elegida de una lista), en html.c (el código de los `<script>`, que antes
+  se tiraba) y en http.c (las cabeceras de `fetch` y `document.cookie`).
+- Los textos de la página van en la página 1252 (como siempre); hacia
+  JavaScript, en UTF-8. El código de los `<script>` se guarda tal cual.
 
 ## Cómo está hecho
 

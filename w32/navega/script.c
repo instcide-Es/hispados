@@ -30,6 +30,7 @@ int WINAPI KillTimer(HANDLE, u32);
 typedef struct { int left, top, right, bottom; } RECTJ;
 int WINAPI GetClientRect(HANDLE, RECTJ *);
 void HjMemoria(u32 *uso, u32 *maximo, u32 *sistema);   /* (HSPJS.DLL) */
+void HjReinicia(void);
 
 int js_activo = 1;
 int js_tope_ms = 15000;
@@ -886,7 +887,7 @@ static void rechazo(JSContext *c, JSValueConst prom, JSValueConst razon, JS_BOOL
  * por su contenido), mientras el Navegador está abierto ---- */
 typedef struct { u32 clave, largo, uso; u8 *bc; size_t n_bc; } Comp;
 #define COMP_MAX 48
-#define COMP_TOPE (900 * 1024)
+#define COMP_TOPE (450 * 1024)
 static Comp comp[COMP_MAX];
 static u32 comp_uso, comp_total;
 static u32 fnv(const char *t, u32 n, u32 h) { u32 k; for (k = 0; k < n; k++) h = (h ^ (u8)t[k]) * 16777619u; return h; }
@@ -895,17 +896,21 @@ static Comp *comp_busca(u32 clave, u32 largo) {
   for (k = 0; k < COMP_MAX; k++) if (comp[k].bc && comp[k].clave == clave && comp[k].largo == largo) { comp[k].uso = ++comp_uso; return &comp[k]; }
   return NULL;
 }
-static void comp_guarda(u32 clave, u32 largo, u8 *bc, size_t n) {
+static void comp_guarda(u32 clave, u32 largo, u8 *bc0, size_t n) {
   int k, viejo = 0;
-  if (n > COMP_TOPE / 2) { js_free_rt(rt, bc); return; }
+  u8 *bc = malloc(n);                            /* (en la memoria del Navegador: la de JavaScript se suelta con cada página) */
+  if (bc) memcpy(bc, bc0, n);
+  js_free_rt(rt, bc0);
+  if (!bc) return;
+  if (n > COMP_TOPE / 2) { free(bc); return; }
   while (comp_total + n > COMP_TOPE) {
     int v = -1;
     for (k = 0; k < COMP_MAX; k++) if (comp[k].bc && (v < 0 || comp[k].uso < comp[v].uso)) v = k;
     if (v < 0) break;
-    comp_total -= comp[v].n_bc; js_free_rt(rt, comp[v].bc); comp[v].bc = NULL;
+    comp_total -= comp[v].n_bc; free(comp[v].bc); comp[v].bc = NULL;
   }
   for (k = 0; k < COMP_MAX && comp[k].bc; k++) if (comp[k].uso < comp[viejo].uso) viejo = k;
-  if (k == COMP_MAX) { k = viejo; comp_total -= comp[k].n_bc; js_free_rt(rt, comp[k].bc); }
+  if (k == COMP_MAX) { k = viejo; comp_total -= comp[k].n_bc; free(comp[k].bc); }
   comp[k].clave = clave; comp[k].largo = largo; comp[k].uso = ++comp_uso; comp[k].bc = bc; comp[k].n_bc = n;
   comp_total += n;
 }
@@ -1051,6 +1056,26 @@ static void guion_dinamico(Nodo *n) {
 /* =============================================================================
  *  Lo que llama navega.c
  * ============================================================================= */
+/* un motor nuevo (uno por página: al irse, se suelta entero y su memoria
+ * vuelve al sistema con HjReinicia) */
+static int rt_nuevo(void) {
+  static JSClassDef def = { "Nodo", NULL, NULL, NULL, NULL };
+  rt = JS_NewRuntime();
+  if (!rt) return 0;
+  JS_SetMemoryLimit(rt, (u32)js_memoria_kb * 1024);
+  JS_SetMaxStackSize(rt, 120 * 1024);
+  JS_SetInterruptHandler(rt, corta, NULL);
+  JS_SetHostPromiseRejectionTracker(rt, rechazo, NULL);
+  if (!clase_nodo) JS_NewClassID(&clase_nodo);
+  JS_NewClass(rt, clase_nodo, &def);
+  return 1;
+}
+static void rt_suelta(void) {
+  if (!rt) return;
+  JS_FreeRuntime(rt);
+  rt = NULL;
+  HjReinicia();
+}
 void js_inicia(HANDLE v, const JsNav *n, const char *carp) {
   JSContext *c;
   JSValue f;
@@ -1063,21 +1088,12 @@ void js_inicia(HANDLE v, const JsNav *n, const char *carp) {
     if ((fl = fopen(ruta, "wb"))) fclose(fl);    /* el registro, nuevo cada vez */
   }
   if (!js_activo) return;
-  rt = JS_NewRuntime();
-  if (!rt) { js_activo = 0; return; }
-  JS_SetMemoryLimit(rt, (u32)js_memoria_kb * 1024);
-  JS_SetMaxStackSize(rt, 120 * 1024);
-  JS_SetInterruptHandler(rt, corta, NULL);
-  JS_SetHostPromiseRejectionTracker(rt, rechazo, NULL);
-  JS_NewClassID(&clase_nodo);
-  {
-    static JSClassDef def = { "Nodo", NULL, NULL, NULL, NULL };
-    JS_NewClass(rt, clase_nodo, &def);
-  }
-  /* el preludio, compilado una vez */
+  if (!rt_nuevo()) { js_activo = 0; return; }
+  /* el preludio, compilado una vez (y guardado en la memoria del Navegador) */
   c = JS_NewContext(rt);
-  f = JS_Eval(c, dom_js, sizeof dom_js - 1, "dom.js", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
-  if (JS_IsException(f)) {
+  f = c ? JS_Eval(c, dom_js, sizeof dom_js - 1, "dom.js", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY) : JS_EXCEPTION;
+  if (!c) js_activo = 0;
+  else if (JS_IsException(f)) {
     JSValue e = JS_GetException(c);
     const char *t = JS_ToCString(c, e);
     reg("[error] dom.js: ", t ? t : "?", t ? strlen(t) : 1);
@@ -1085,21 +1101,22 @@ void js_inicia(HANDLE v, const JsNav *n, const char *carp) {
     JS_FreeValue(c, e);
     js_activo = 0;
   } else {
-    preludio_bc = JS_WriteObject(c, &n_preludio_bc, f, JS_WRITE_OBJ_BYTECODE);
+    size_t nb;
+    u8 *bc = JS_WriteObject(c, &nb, f, JS_WRITE_OBJ_BYTECODE);
+    if (bc && (preludio_bc = malloc(nb))) { memcpy(preludio_bc, bc, nb); n_preludio_bc = nb; }
+    if (bc) js_free_rt(rt, bc);
     JS_FreeValue(c, f);
   }
-  JS_FreeContext(c);
+  if (c) JS_FreeContext(c);
+  rt_suelta();
   reg_vacia();
 }
 void js_fin(void) {
   int k;
   js_suelta();
-  if (rt) {
-    for (k = 0; k < COMP_MAX; k++) if (comp[k].bc) js_free_rt(rt, comp[k].bc);
-    if (preludio_bc) js_free_rt(rt, preludio_bc);
-    JS_FreeRuntime(rt);
-    rt = NULL;
-  }
+  for (k = 0; k < COMP_MAX; k++) if (comp[k].bc) { free(comp[k].bc); comp[k].bc = NULL; }
+  free(preludio_bc);
+  preludio_bc = NULL;
   reg_vacia();
 }
 /* ¿hace falta JavaScript en esta página? (algún <script> u onalgo="...") */
@@ -1127,13 +1144,14 @@ static int clicable(Nodo *n);
 void js_pagina(Pagina *p) {
   JSValue g, nobj, f, r;
   js_suelta();
-  if (!js_activo || !rt || !preludio_bc || !p) return;
+  if (!js_activo || !preludio_bc || !p) return;
   t_pagina = GetTickCount();
   if (!pide_js(p->doc.raiz)) return;
   pg = p; dom_pag = p;
   dom_prepara(&p->doc);
+  if (!rt_nuevo()) return;
   cx = JS_NewContext(rt);
-  if (!cx) return;
+  if (!cx) { rt_suelta(); return; }
   g = JS_GetGlobalObject(cx);
   nobj = JS_NewObject(cx);
   JS_SetPropertyFunctionList(cx, nobj, funciones_n, sizeof funciones_n / sizeof funciones_n[0]);
@@ -1201,7 +1219,7 @@ void js_suelta(void) {
   proto_el = proto_tx = proto_doc = fn_evento = fn_tic = fn_llega = fn_foco = fn_cargado = fn_guion = fn_informa = fn_ev = JS_UNDEFINED;
   JS_FreeContext(cx);
   cx = NULL;
-  JS_RunGC(rt);
+  rt_suelta();
   reg_vacia();
   pg = NULL;
 }

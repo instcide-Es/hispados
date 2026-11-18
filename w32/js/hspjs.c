@@ -29,6 +29,8 @@ typedef long long s64;
 
 typedef struct { u32 lo, hi; } FT;
 HANDLE WINAPI GetProcessHeap(void);
+void *WINAPI VirtualAlloc(void *, u32, u32, u32);
+int WINAPI VirtualFree(void *, u32, u32);
 void *WINAPI HeapAlloc(HANDLE, u32, u32);
 int WINAPI HeapFree(HANDLE, u32, void *);
 void WINAPI GetSystemTimeAsFileTime(FT *);
@@ -89,33 +91,45 @@ int __popcountdi2(u64 x) { return __popcountsi2((u32)x) + __popcountsi2((u32)(x 
 
 /* =============================================================================
  *  La memoria. QuickJS pide muchísimos trozos pequeños (objetos, textos,
- *  formas) y algunos grandes (tablas, código, textos largos). El montón de
- *  HW32 da bloques de potencias de dos (con 16 octetos de cabecera): pedirle
- *  cada trozo, o un bloque de 64 KB justos, desperdiciaría hasta la mitad.
- *  Así que se le piden zonas que caben justas en su clase y se reparten aquí:
- *   - los de hasta 1 KB, de bloques de casi 64 KB, por clases de 8 en 8
- *     octetos, cada clase con su lista de sueltos; delante, 4 octetos con la
- *     clase (1 a 128);
- *   - los de más, de zonas de casi 1 MB, con el primero que quepa y
- *     juntando los sueltos vecinos; delante, 8 octetos: el tamaño del de
- *     antes y el suyo (con el bit 0 a 1 si está en uso);
- *   - los que no caben en una zona, al montón tal cual: delante, el tamaño
- *     y un 0.
+ *  formas) y algunos grandes (tablas, código, textos largos). Se reparten
+ *  aquí, de zonas de 256 KB que se piden al sistema con VirtualAlloc (a
+ *  DPMI, sin pasar por el montón de HW32, que da bloques de potencias de dos
+ *  y no los devuelve): así, al acabar con una página, HjReinicia() devuelve
+ *  todo al sistema y el Navegador lo puede usar para la siguiente.
+ *   - los de hasta 1 KB, de bloques de 32 KB (sacados de las zonas), por
+ *     clases de 8 en 8 octetos, cada clase con su lista de sueltos; delante,
+ *     4 octetos con la clase (1 a 128);
+ *   - los de más, de las zonas, con el primero que quepa y juntando los
+ *     sueltos vecinos; delante, 8 octetos: el tamaño del de antes y el suyo
+ *     (con el bit 0 a 1 si está en uso);
+ *   - los que no caben en una zona, con su propio VirtualAlloc (o, si se
+ *     acaban, del montón): delante, el tamaño y un 0.
  * ============================================================================= */
 #define PEQ_MAX 1024
-#define BLOQUE (65536 - 64)
-#define ZONA (1048576 - 64)
+#define BLOQUE (32768 - 16)
+#define ZONA (262144)
+#define ZONAS_MAX 40
 static void *libres[PEQ_MAX / 8 + 1];
 static char *bump, *bump_fin;
 static u32 en_uso, pedido_sistema, pico;
 static HANDLE monton;
 typedef struct Suelto { u32 ant, tam; struct Suelto *sig, *prev; } Suelto;   /* (las dos primeras: la cabecera) */
 static Suelto *sueltos;
+static void *zonas[ZONAS_MAX];
+static u32 tam_zona[ZONAS_MAX];
 
-static void *del_sistema(u32 n) {
-  void *p;
-  if (!monton) monton = GetProcessHeap();
-  p = HeapAlloc(monton, 0, n);
+/* un trozo del sistema: VirtualAlloc (apuntado, para devolverlo), o el montón */
+static void *del_sistema(u32 n, int *virt) {
+  void *p = NULL;
+  int k;
+  n = (n + 4095) & ~4095u;
+  for (k = 0; k < ZONAS_MAX && zonas[k]; k++) ;
+  if (k < ZONAS_MAX && (p = VirtualAlloc(NULL, n, 0x3000, 4))) { zonas[k] = p; tam_zona[k] = n; *virt = 1; }
+  else {
+    if (!monton) monton = GetProcessHeap();
+    p = HeapAlloc(monton, 0, n);
+    *virt = 0;
+  }
   if (p) pedido_sistema += n;
   return p;
 }
@@ -130,12 +144,13 @@ static void s_pon(Suelto *b) {
 }
 #define SIG_DE(b) ((Suelto *)((char *)(b) + ((b)->tam & ~7u)))
 static int zona_nueva(void) {
-  char *z = del_sistema(ZONA);
+  int v;
+  char *z = del_sistema(ZONA, &v);
   Suelto *b, *fin;
   if (!z) return 0;
   b = (Suelto *)z;
   b->ant = 0;
-  b->tam = (ZONA - 8) & ~7u;                     /* (libre) */
+  b->tam = ZONA - 8;                             /* (libre) */
   fin = SIG_DE(b);
   fin->ant = b->tam; fin->tam = 1;               /* el centinela: en uso, tamaño 0 */
   s_pon(b);
@@ -145,7 +160,8 @@ static void *grande(u32 n) {
   u32 total = (n + 8 + 7) & ~7u;
   Suelto *b;
   if (total > ZONA - 64) {                       /* (no cabe en una zona) */
-    u32 *p = del_sistema(n + 8);
+    int v;
+    u32 *p = del_sistema(n + 8, &v);
     if (!p) return NULL;
     p[0] = n; p[1] = 0;
     en_uso += n + 8;
@@ -181,6 +197,16 @@ static void grande_suelta(u32 *p) {
   }
   s_pon(b);
 }
+/* todo lo repartido, fuera (tras JS_FreeRuntime: ya nadie lo usa): las
+ * zonas vuelven al sistema */
+void HjReinicia(void) {
+  int k;
+  for (k = 0; k < ZONAS_MAX; k++) if (zonas[k]) { VirtualFree(zonas[k], 0, 0x8000); pedido_sistema -= tam_zona[k]; zonas[k] = NULL; }
+  for (k = 0; k <= PEQ_MAX / 8; k++) libres[k] = NULL;
+  bump = bump_fin = NULL;
+  sueltos = NULL;
+  en_uso = 0;
+}
 void *malloc(size_t n) {
   u32 total, k;
   u32 *p;
@@ -198,8 +224,9 @@ void *malloc(size_t n) {
     libres[k] = *(void **)p;
   } else {
     if (bump_fin - bump < (int)total) {
-      bump = del_sistema(BLOQUE);
+      bump = grande(BLOQUE);
       if (!bump) { bump_fin = NULL; return NULL; }
+      en_uso -= (BLOQUE + 8 + 7) & ~7u;          /* (lo que cuenta es lo repartido de dentro) */
       bump_fin = bump + BLOQUE;
     }
     p = (u32 *)bump;
@@ -227,9 +254,11 @@ void free(void *v) {
     libres[k] = p;
   } else if (k) grande_suelta(p);
   else {
+    int k;
     en_uso -= p[-2] + 8;
-    pedido_sistema -= p[-2] + 8;
-    HeapFree(monton, 0, p - 2);
+    for (k = 0; k < ZONAS_MAX && zonas[k] != (void *)(p - 2); k++) ;
+    if (k < ZONAS_MAX) { VirtualFree(p - 2, 0, 0x8000); pedido_sistema -= tam_zona[k]; zonas[k] = NULL; }
+    else { pedido_sistema -= (p[-2] + 8 + 4095) & ~4095u; HeapFree(monton, 0, p - 2); }
   }
 }
 void *calloc(size_t a, size_t b) {

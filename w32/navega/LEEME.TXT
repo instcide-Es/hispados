@@ -5,6 +5,9 @@ Hispa-486: disquete «Internet»
   HTTPS.EXE    descarga por HTTP o HTTPS desde Hispa-DOS:  HTTPS dirección
   WSOCK32.DLL  la red de los programas Hispa32 (TCP/IP y Winsock 1.1)
   HSPTLS.DLL   las conexiones cifradas (TLS 1.2)
+  HSPJS.DLL    el JavaScript de las páginas (QuickJS); se apaga con
+               JavaScript=NO en NAVEGA.INI. Lo que dicen las páginas
+               (console.log y sus errores) queda en NAVEGA.LOG
   HW32.COM y MSVCRT.DLL   lo que necesita todo programa Hispa32
   NAVEGA.INI   los ajustes del Navegador (la página de inicio, los favoritos)
 

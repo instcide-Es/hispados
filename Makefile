@@ -188,7 +188,7 @@ internet: $(B)/internet.img
 QJSCF = -m32 -march=i486 -O2 -ffreestanding -fbuiltin -nostdinc -isystem $(shell gcc -print-file-name=include) -Iw32/js/inc \
   -Iterceros/quickjs -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-tree-loop-distribute-patterns \
   -fno-common -fwrapv -funsigned-char -ffunction-sections -fdata-sections \
-  -DCONFIG_VERSION=\"$(shell cat terceros/quickjs/VERSION)\" -DCONFIG_SIN_HILOS -D_GNU_SOURCE
+  -DCONFIG_VERSION=\"$(shell cat terceros/quickjs/VERSION)\" -DCONFIG_SIN_HILOS -D_GNU_SOURCE -DNDEBUG
 QJSSRC = quickjs libregexp libunicode cutils dtoa
 QJSOBJ = $(patsubst %,$(B)/qjs/%.o,$(QJSSRC)) $(B)/qjs/hspjs.o $(B)/qjs/mates.o
 $(B)/qjs/%.o: terceros/quickjs/%.c terceros/quickjs/quickjs.h | $(B)

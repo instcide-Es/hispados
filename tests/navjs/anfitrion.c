@@ -305,3 +305,4 @@ int main(int argc, char **argv) {
 }
 /* (HSPJS.DLL la da; aquí, nada) */
 void HjMemoria(u32 *uso, u32 *maximo, u32 *sistema) { *uso = *maximo = *sistema = 0; }
+void HjReinicia(void) {}
