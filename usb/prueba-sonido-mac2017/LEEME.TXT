@@ -1,4 +1,4 @@
-PRUEBA DE SONIDO EN EL MACBOOK AIR 2017 (A1466) - Hispa-DOS 0.9.26
+PRUEBA DE SONIDO: MACBOOK AIR 2017 (A1466) Y MINI-PC MSI - Hispa-DOS 0.9.26
 Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
 ===================================================================
 
@@ -24,14 +24,28 @@ QUE HACER (5 minutos)
    suene o no suene: el informe nuevo dice que tenia puesto el firmware y
    que se ha hecho.
 
-Si suena: ademas de la prueba, puede probar SONAR, un juego o Hispa
-Ventanas (escriba HISPA).
+Si suena: ademas de la prueba, puede probar SONAR /TONE 440 1000 (un
+pitido de un segundo), un juego o Hispa Ventanas (escriba VENTANAS).
 
 Si algo va peor que antes (se queda parado al cargar el sonido o durante la
 prueba): apague con el boton, arranque otra vez y, en el menu, elija "Prueba
 del equipo y del sonido"; y si tambien se para, arranque en "Normal"
 pulsando F8 al salir "Iniciando Hispa-DOS" y diga que NO a la linea de
 HSPSND. Suba igualmente la carpeta INFORMES si existe.
+
+TAMBIEN PARA EL MINI-PC MSI (MS-7468)
+-------------------------------------
+La misma memoria vale para el Mini-PC MSI, donde tampoco sono nada. Alli la
+causa es otra: la BIOS no dice cuales conectores son salidas, y la prueba
+solo hizo un intento. Ahora los prueba uno a uno.
+1. Enchufe los altavoces o auriculares donde los usa siempre y dejelos
+   puestos (si el sonido va por el cable HDMI a la pantalla, digalo: esa
+   salida la prueba aparte y HSPSND todavia no la maneja).
+2. Arranque desde la memoria, elija "Normal" y escriba DIAGNOSTICO.
+3. En la prueba de sonido habra mas preguntas que la otra vez (una por
+   conector, hasta unas doce): conteste S en cuanto lo oiga y N si no.
+4. Suba la carpeta INFORMES al FTP (HispaDOS/informes), suene o no.
+Si suena, queda aprendido en la memoria USB y HSPSND usara ese conector.
 
 Notas
 -----

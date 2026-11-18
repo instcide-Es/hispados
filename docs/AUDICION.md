@@ -448,6 +448,36 @@ enciende la traducción con todo cerrado y se queda residente. `/SIMVTD`
 unidad de QEMU (FED90000h: no tiene `MCHBAR`); `/SIMVTD:B` y `/SIM:VTB`
 saltan el paso directo, para probar el apagado.
 
+## Conectores sin configurar o mal detectados [SINCFG]
+
+En el MSI MS-7468 (Atom D510, Realtek ALC888, BIOS AMI de 2010) no sonó nada
+(informe del 18/11/2026) y solo se hizo un intento. La BIOS de esa placa
+deja casi todos los conectores como «sin conexión» (411111F0h) y como
+entrada; el único declarado de salida (14h, línea trasera) decía «nada
+enchufado», así que se saltó; el único que decía «enchufado» era el 18h, que
+la BIOS llama micrófono. Quedó solo el «todo abierto», que no sonó. Cambios
+en AUDICION:
+
+- «todo abierto» pone cada pin **solo de salida** (antes añadía la salida a
+  lo que hubiera: entrada y tensión de micrófono a la vez);
+- si no suena y no se había probado antes ningún pin con las variantes de
+  GPIO, lo repite con las GPIO como las dejó la BIOS y con todas a 0 (hay
+  placas donde una GPIO a 1 calla el amplificador);
+- si tampoco, prueba **una a una, por su ruta**, las salidas que quedaban
+  sin probar: primero las que dicen tener algo enchufado (aunque la BIOS
+  las llame de otra manera) y después las demás: las declaradas que se
+  saltaron por «nada enchufado» (la detección puede no ir) y todas las «sin
+  declarar» que puedan ser salida (una pregunta por conector);
+- si suena con todo abierto, la búsqueda del conector incluye también las
+  declaradas que se saltaron, empieza por las enchufadas y usa las GPIO con
+  las que sonó;
+- una presencia de 7FFFFFFFh (el HDMI de ATI/AMD antiguo) no es una medida:
+  la salida se prueba como si no supiera detectar.
+
+El conector que suene queda en SONIDO.INI con su ruta y HSPSND lo usa (solo
+no lo elegiría: un conector de micrófono con algo enchufado suele ser un
+micrófono).
+
 ## Equipos probados por Carlos
 
 Con su informe (`SONIDO.TXT`) en el FTP, `HispaDOS/Pruebas Sonido/`:
@@ -459,6 +489,7 @@ Con su informe (`SONIDO.TXT`) en el FTP, `HispaDOS/Pruebas Sonido/`:
 | MacBook Air 13" 2012 (A1466) | Cirrus Logic CS4206 (1013:4206, 00100302h) | pin 0Bh ← DAC 04h, GPIO de Apple 0Ah | DAC 04h, 127 pasos de 0,5 dB (0 dB en el 115) | suena (18/11, arrancado por el CSM de Apple): volumen, silencio, izquierda y derecha bien |
 | MacBook Air 13" 2017 (A1466) | Cirrus Logic CS4208 (1013:4208, 00100300h; subsistema 106B:7E00) | (pin 12h ← DAC 03h, GPIO 0) | DAC 03h, 127 pasos de 0,5 dB | NO sonó el 18/11 (arrancado con HispaBIOS): la DMA cerrada por el firmware → arreglo [VTD], por probar en el equipo |
 | Toshiba NB250-10N | Realtek ALC269VB (10EC:0269, 00100100h; subsistema 1179:FF6C) | pin 14h ← 0Ch ← DAC 02h, EAPD, GPIO 03h | DAC 02h, 87 pasos de 0,75 dB | suena; bajar y subir el volumen: NO (11/11) → arreglo [TOSHIBA], por probar en el equipo |
+| MSI MS-7468 (Mini-PC) | Realtek ALC888 (10EC:0888, 00100202h; subsistema 1462:7468) | (por saber: 14h línea trasera o 18h) | mezcladores 0Ch-0Fh, 31 pasos de 1,5 dB | NO sonó el 18/11 (1 intento, todo abierto) → arreglo [SINCFG], por probar en el equipo |
 
 ## El volumen del Toshiba NB250 (Realtek ALC269) [TOSHIBA]
 

@@ -14,8 +14,8 @@
 #   nada   sin tarjeta: el altavoz del PC, /?, AYUDA y el informe en carpeta
 #   hsp    con HSPSND cargado: avisa, pregunta y sigue
 #   v86    con HSPEMM (modo V86): solo el altavoz del PC
-#   sim1-4 /SIM: las variantes de GPIO, EAPD y «snoop», los auriculares y
-#          «todo abierto»
+#   sim1-5 /SIM: las variantes de GPIO, EAPD y «snoop», los auriculares,
+#          «todo abierto» y [SINCFG] las salidas una a una cuando ni así
 #   mac1-2 [CIRRUS] /SIM:MAC: el códec Cirrus CS4206 del MacBook Air 2012
 #          (simulado con su volcado real) y una controladora que a la primera
 #          no arranca el flujo: todos los intentos tienen que avanzar; el
@@ -114,6 +114,8 @@ lote; run sim1 "default=N;P01=S;P07=S;$SI" --cmd 'AUDICION /SIM' -- $HDA &
 lote; run sim2 "default=N;P10=S" --cmd 'AUDICION /sim' -- $HDA &
 lote; run sim3 "default=N;P03=S" --cmd 'AUDICION /SIM' -- $HDA &
 lote; run sim4 "default=N;P13=S;/segundo/=S" --cmd 'AUDICION /SIM' -- $HDA &
+# [SINCFG] ni con todo abierto: una a una las salidas que se saltaron
+lote; run sim5 "default=N;P01=S;P14=S;$SI" --cmd 'AUDICION /SIM' -- $HDA &
 # [CIRRUS] el MacBook Air 2012 de Carlos, simulado
 lote; run mac1 "default=N;P01=S" --cmd 'AUDICION /SIM:MAC' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO /NOGPIO' -- $HDA &
 lote; run mac2 "default=S" --cmd 'AUDICION /SIM:MAC' --post 'A:\HISPADOS\HSPSND /SIMMAC /INFO' -- $HDA &
@@ -293,6 +295,19 @@ has $R "Volumen: el camino no tiene amplificador regulable; se prueba por progra
 has $R "FALTA en HSPSND: solo ha sonado con TODO ABIERTO" "sim4: "
 audio sim4; entre sim4 bajo 30 60 "sim4: el volumen por programa baja (dos segundos más bajo)"; entre sim4 fuerte 15 30 "sim4: y sube"
 
+# [SINCFG] (MSI MS-7468) no suena ni con todo abierto: se prueban una a una
+# las salidas que quedaban, también la declarada que se saltó por «nada
+# enchufado»; esa suena, y queda aprendida
+informe sim5 SONIDO01.TXT; R=$T/sim5/rep.txt
+has $R "Pin 03h: nada enchufado o sin conexión; no se prueba ahora." "sim5: "
+has $R "P13. ¿Lo oye? (S/N/R) N" "sim5: "
+has $R "No suena con todo abierto: se prueban una a una las salidas que quedan." "sim5: "
+has $R "P14. ¿Lo oye? (S/N/R) S" "sim5: "
+has $R "SUENA: HD Audio 00:04.0 códec 0, pin 03h (auriculares), ruta 03h 02h (el último es el DAC), control del pin C0h" "sim5: "
+has $R "Línea sugerida: HSPSND" "sim5: "
+hasnt $R "solo ha sonado con TODO ABIERTO" "sim5: "
+audio sim5; entre sim5 ambos 100 900 "sim5: suena"
+
 echo "== [CIRRUS] AUDICION /SIM:MAC: el Cirrus CS4206 del MacBook Air 2012, todo que no =="
 informe mac1 SONIDO01.TXT; R=$T/mac1/rep.txt; L=$T/mac1/log.txt
 for w in "Identificador (fabricante:dispositivo) 1013:4206 (Cirrus Logic)  revisión 00100302h" \
@@ -304,7 +319,7 @@ for w in "Identificador (fabricante:dispositivo) 1013:4206 (Cirrus Logic)  revis
   "Intento: HD Audio 00:04.0 códec 0, pin 0Bh (altavoz interno), ruta 0Bh 04h (el último es el DAC), control del pin 40h, EAPD no hay, GPIO de Apple (los amplificadores): máscara 0Ah dirección 0Ah datos 0Ah, 48000 Hz 16 bits estéreo" \
   "GPIO como la BIOS: máscara 08h dirección 08h datos 00h" "GPIO máscara 0Fh dirección 0Fh datos 08h" \
   "(a la primera no arrancó; se ha reiniciado el flujo y a la segunda sí." \
-  "NO suena: HD Audio 00:04.0 códec 0 (9 intentos)"; do has $R "$w" "mac1: "; done
+  "NO suena: HD Audio 00:04.0 códec 0 (11 intentos)"; do has $R "$w" "mac1: "; done
 hasnt $R "NO AVANZA" "mac1: "
 hasnt $R "AVISO: en algún intento la posición del flujo no avanzó" "mac1: "
 # el primer intento, con las GPIO de Apple

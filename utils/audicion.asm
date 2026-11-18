@@ -4058,8 +4058,12 @@ build_cands:
         jz .f1
         test byte [dw_cfg+1], 0x01
         jnz .f1
-        or dl, 2
         call pin_sense
+        ; [SINCFG] 7FFFFFFFh no es una medida (el HDMI ATI/AMD antiguo lo
+        ; contesta siempre): como si no supiera detectar, y se prueba
+        cmp eax, 0x7FFFFFFF
+        je .f1
+        or dl, 2
         test eax, 0x80000000
         jz .f1
         or dl, 4
@@ -4262,6 +4266,38 @@ sweep_codec:
         PR "  (todas las salidas a la vez)", NL
         call try
         je .loc
+        cmp byte [no_path], 0
+        jne .bnf
+        ; [SINCFG] «todo abierto» con las GPIO como las dejó la BIOS y a 0
+        ; (hay placas donde una GPIO a 1 calla el amplificador), si no se han
+        ; probado ya las variantes con un pin
+        cmp byte [g_n], 0
+        je .bnf
+        cmp byte [first], 0
+        je .bnf
+        cmp byte [gs_have], 0
+        je .bg0
+        mov byte [c_gmode], 0
+        call try
+        je .loc
+.bg0:
+        mov byte [c_gmode], 1
+        mov byte [c_gdata], 0
+        call try
+        je .loc
+.bnf:
+        ; [SINCFG] ni así: una a una, por su ruta, las salidas que no se han
+        ; probado (lo que dice la BIOS de los conectores puede no valer)
+        cmp byte [no_path], 0
+        jne .bn2
+        mov byte [first], 0
+        mov byte [after_br], 0
+        MODE O_REP
+        PR "No suena con todo abierto: se prueban una a una las salidas que quedan.", NL
+        call uno_a_uno
+        cmp byte [found], 0
+        jne .r0
+.bn2:
         cmp byte [tried], 0
         je .r0
         inc byte [an_prev]
@@ -4287,25 +4323,13 @@ sweep_codec:
         mov byte [first], 0
         mov byte [found], 0
         mov byte [after_br], 1
-        xor di, di
-.ll:
-        mov ax, di
-        cmp al, [ncand]
-        jae .ld
-        mov si, di
-        shl si, 2
-        add si, cands
-        cmp byte [si+1], 4
-        jne .ln
-        mov [c_ci], al
-        push di
-        call sweep_pin
-        pop di
+        mov al, [c_gmode]           ; [SINCFG] con las GPIO con que ha sonado
+        mov [br_gmode], al
+        mov al, [c_gdata]
+        mov [br_gdata], al
+        call uno_a_uno
         cmp byte [found], 0
         jne .r0
-.ln:
-        inc di
-        jmp .ll
 .ld:
         ; ninguna por separado: se vuelve a «todo abierto»
         mov byte [found], 1
@@ -4320,6 +4344,61 @@ sweep_codec:
         MODE O_REP | O_SUM
         PR "  (ninguna salida sin declarar suena por separado: se sigue con todo abierto)", NL
         ret
+
+; [SINCFG] Las salidas analógicas que no se han probado una a una, cada una
+; por su ruta: las «sin declarar» (clase 4) y las declaradas que se saltaron
+; por no tener nada enchufado (la detección puede no ir). Primero las que
+; dicen tener algo enchufado. -> [found]
+uno_a_uno:
+        mov byte [uno_paso], 4      ; primera pasada: las enchufadas
+.p:
+        xor di, di
+.l:
+        mov ax, di
+        cmp al, [ncand]
+        jae .pn
+        mov si, di
+        shl si, 2
+        add si, cands
+        mov ah, [si+2]
+        mov dl, ah
+        and dl, 4
+        cmp dl, [uno_paso]
+        jne .n
+        test ah, 0x01               ; digital
+        jnz .n
+        cmp byte [si+1], 4
+        je .c4
+        cmp byte [si+1], 2          ; declarada (auriculares o línea) y
+        jb .n                       ; saltada por no tener nada enchufado
+        cmp byte [si+1], 3
+        ja .n
+        mov dl, ah
+        and dl, 6
+        cmp dl, 2
+        jne .n
+        jmp .do
+.c4:
+.do:
+        mov [c_ci], al
+        push di
+        call sweep_pin
+        pop di
+        cmp byte [found], 0
+        jne .r
+.n:
+        inc di
+        jmp .l
+.pn:
+        cmp byte [uno_paso], 0
+        je .r
+        mov byte [uno_paso], 0      ; segunda: las demás
+        jmp .p
+.r:
+        ret
+uno_paso    db 0
+br_gmode    db 1
+br_gdata    db 0
 
 ; valores de partida de un intento: como lo hace HSPSND sin opciones
 combo_base:
@@ -4354,6 +4433,13 @@ sweep_pin:
         mov al, [si+2]
         mov [c_flags], al
         call combo_base
+        cmp byte [after_br], 0      ; [SINCFG] tras «todo abierto»: sus GPIO
+        je .nbr
+        mov al, [br_gmode]
+        mov [c_gmode], al
+        mov al, [br_gdata]
+        mov [c_gdata], al
+.nbr:
         mov al, [c_flags]
         shr al, 4
         and al, 1
@@ -5203,6 +5289,11 @@ brute:
         mov ax, 0xF07
         xor cl, cl
         call hda_verb
+        ; [SINCFG] solo salida: fuera la entrada y la tensión de micrófono
+        ; (VREF) que tuviera el pin (en el Realtek ALC888 del MSI MS-7468
+        ; todos los conectores estaban como entrada; con las dos cosas a la
+        ; vez no está dicho que el pin saque nada)
+        and al, 0x18
         or al, 0x40
         test dl, 0x08
         jz .p1
