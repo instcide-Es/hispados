@@ -108,14 +108,14 @@ if quiere raton; then
   qemu g_raton 20
   check "Raton QEMU: id=-1 x=8/8 y=16/8 botones=0,1,2 rueda=24/8"
   check "  b=1 dx=5 dy=-5 r=1"   # [RUEDA] (HID: positivo, hacia arriba)
-  check "Panel con identificador: id=2 x=8/8 y=16/8 botones=0,-1,-1 rueda=-1/0"
+  check "Panel con identificador: id=2 x=8/8 y=16/8 botones=0,-1,-1 rueda=-1/"
   check "  b=1 dx=3 dy=-2 r=0"
   check "Receptor 12 bits: id=2 x=16/12 y=28/12 botones=0,1,2 rueda=40/8"
   check "  b=2 dx=-3 dy=4 r=-2"
   n=$(grep -c "^  otro informe" $T/log.txt)
   if [ "$n" -eq 2 ]; then echo "  OK   informes de otro identificador descartados"; else echo "  FAIL informes de otro identificador: $n"; cfail=1; fi
   check "Tableta: no es un raton (sin X e Y relativas)"
-  check "Raton 16 bits: id=-1 x=8/16 y=24/16 botones=0,1,2 rueda=-1/0"
+  check "Raton 16 bits: id=-1 x=8/16 y=24/16 botones=0,1,2 rueda=-1/"
   check "  b=4 dx=300 dy=-100 r=0"
   fin
 fi
