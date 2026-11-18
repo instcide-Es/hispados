@@ -178,7 +178,7 @@ start:
 ;  Entrada del packet driver (el vector apunta aquí; la firma, 3 más allá)
 ; =============================================================================
 pkt_entry:
-        jmp near pkt_main           ; 3 octetos
+        jmp strict near pkt_main    ; 3 octetos (strict: NASM 3 lo acortaría)
         db "PKT DRVR", 0
 
 ; =============================================================================

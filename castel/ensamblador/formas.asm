@@ -221,7 +221,7 @@ inicio:
 .cerca:
     jmp .cerca
     jmp short .cerca
-    jmp near .cerca
+    jmp strict near .cerca
     je .cerca
     jne .cerca
     jz .lejos

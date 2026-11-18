@@ -35,11 +35,11 @@
         bits 16
         org 0
 
-        jmp near alc_reset
+        jmp strict near alc_reset
         nop
-        jmp near alc_cmd
+        jmp strict near alc_cmd
         nop
-        jmp near alc_tsr            ; 08h
+        jmp strict near alc_tsr     ; 08h
         nop
 alc_fwd dd 0                        ; 0Ch
 alc_modo db 0                       ; 10h

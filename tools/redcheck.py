@@ -65,7 +65,7 @@ def main():
         if mn in DATOS or mn == 'mcall' or mn.startswith('%'):
             continue
         if mn in SALTOS or (mn.startswith('j') and len(mn) <= 4):
-            d = re.sub(r'^(near|short|far|word|dword)\s+', '', op.strip(), flags=re.I)
+            d = re.sub(r'^(?:strict\s+)?(near|short|far|word|dword)\s+', '', op.strip(), flags=re.I)
             if d.startswith('.') or d.startswith('[') or d in suyas:
                 continue
             if re.fullmatch(r'(?:e?[abcd]x|e?[sd]i|e?bp)', d, re.I):

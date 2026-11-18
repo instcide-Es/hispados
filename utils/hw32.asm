@@ -40,7 +40,10 @@ PILA_MAX    equ 0x100000            ; la pila: lo que pida, hasta 1 MB
 MONTON_TAM  equ 0x100000            ; cada trozo de montón que se pide
 
 inicio:
-        jmp near inicio16
+        ; («strict»: el salto mide tres octetos siempre y la firma queda en
+        ; 103h; con «near» a secas NASM 3 lo acorta a dos y Hispa Ventanas no
+        ; encuentra el módulo)
+        jmp strict near inicio16
 ; ---- [fase 3c] HW32 como MÓDULO de Hispa Ventanas. Hispa Ventanas carga este
 ; mismo archivo en memoria extendida, le hace dos selectores de 32 bits (código
 ; y datos, con la base en «copia − 100h»), rellena mod_d y llama (lejos) a
@@ -55,6 +58,9 @@ inicio:
         dd nombre                   ; +12 el programa (hasta 129 letras)
         dd mod_param                ; +16 sus parámetros (con el espacio delante)
         dd hw32_dir                 ; +20 la carpeta de HW32 (acabada en barra)
+%if ($ - inicio) != 3 + 8 + 6 * 4
+ %error "la cabecera de módulo de HW32 no está en 103h"
+%endif
 inicio16:
         mov sp, pila16_cima
         mov ax, [0x2C]              ; el entorno de DOS

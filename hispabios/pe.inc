@@ -22,6 +22,9 @@
 %endif
 
         bits PE_ARQ
+        ; las direcciones sin «rel» son absolutas (dicho aquí: en 64 bits
+        ; NASM 3 avisa de que dejará de ser lo que se entiende por omisión)
+        default abs
         org 0
 
 pe_inicio:

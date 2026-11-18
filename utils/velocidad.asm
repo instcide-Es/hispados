@@ -75,7 +75,7 @@ M_PCT    equ 1
 M_XT     equ 2                  ; 2.. = índice en tabla_obj + 2
 
 start:
-        jmp near init
+        jmp strict near init
 firma       db "HSPVEL1", 0
 ; ---- estado: «VELOCIDAD x programa» lo guarda y lo repone entero ----
 r_estado:

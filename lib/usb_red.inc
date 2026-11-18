@@ -999,8 +999,10 @@ red_fix:
 ;  del driver. DI (o BX) = principio del bloque en todas sus rutinas.
 ; =============================================================================
 section .red
-        jmp near n_pump             ; +0: desde INT 08h
-        jmp near n_event            ; +3: evento de transferencia del xHCI
+        ; («strict»: tres octetos cada salto, siempre; con «near» a secas
+        ; NASM 3 los acorta a dos y la entrada +3 cae en medio de una orden)
+        jmp strict near n_pump      ; +0: desde INT 08h
+        jmp strict near n_event     ; +3: evento de transferencia del xHCI
 
 ; ---- sondeo, desde INT 08h (busy tomado, pila propia, A20 y modo irreal) ----
 n_pump:

@@ -1065,6 +1065,12 @@ módulo Ensambla
         recorta(p, fin_)
         corto_ := falso
         cerca := falso
+        ; «strict»: como en NASM, el tamaño que se dice y no otro (aquí «short»
+        ; y «near» ya se cumplen siempre; NASM 3, sin él, acorta un «jmp near»)
+        si fin_ - p > 7 y empieza(p, fin_, "strict") y es_blanco(p[6]) entonces
+            p := p + 7
+            recorta(p, fin_)
+        fin
         si fin_ - p > 6 y empieza(p, fin_, "short") y es_blanco(p[5]) entonces
             corto_ := cierto
             p := p + 6

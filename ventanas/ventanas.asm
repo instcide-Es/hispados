@@ -73,7 +73,7 @@ RAT_COLA    equ 64                  ; sucesos de ratón que caben en la cola
 CRU_COLA    equ 16                  ; [TECLADO] códigos crudos de teclado en la cola
 
 inicio:
-        jmp near arranque
+        jmp strict near arranque
 
 ; =============================================================================
 ;  El lanzador: lo único de VENTANAS.COM que se queda en la memoria

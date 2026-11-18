@@ -498,6 +498,12 @@ class Ensamblador:
         s = ops[0].strip()
         bajo = s.lower()
         forma = None
+        # «strict»: como en NASM, el tamaño que se dice y no otro (aquí
+        # «short» y «near» ya se cumplen siempre; NASM 3, sin él, acorta
+        # un «jmp near» que llega con un octeto)
+        if bajo.startswith(b'strict ') or bajo.startswith(b'strict\t'):
+            s = s[6:].strip()
+            bajo = s.lower()
         for pal in (b'short', b'near'):
             if bajo.startswith(pal + b' '):
                 forma = pal

@@ -23,7 +23,7 @@
 BASURA  equ 0x8000
 
 start:
-        jmp near inicio
+        jmp strict near inicio
 
 ; ---- lo que se queda con /T ----
 old08   dd 0
