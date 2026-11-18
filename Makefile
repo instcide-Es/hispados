@@ -125,6 +125,16 @@ $(B)/LANZA.EXE: tests/progs/lanza.c tools/elf2pe.py | $(B)
 $(B)/K32CON.EXE: tests/progs/k32con.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/k32con.o
 	python3 tools/elf2pe.py -o $@ $(B)/k32con.o
+# [HISPA-486] la red de los programas Hispa32 (docs/RED.md): WSOCK32.DLL (la
+# pila TCP/IP en C y Winsock 1.1) y su programa de prueba
+$(B)/WSOCK32.DLL: w32/wsock32.c tools/elf2pe.py $(B)/MSVCRT.DLL | $(B)
+	$(CC32) -march=i486 -Wall -Wextra -c $< -o $(B)/wsock32.o
+	python3 tools/elf2pe.py --dll -o $@ -l $(B)/MSVCRT.DLL $(B)/wsock32.o
+$(B)/crt0.o: w32/crt0.c | $(B)
+	$(CC32) -march=i486 -c $< -o $@
+$(B)/REDPRUE.EXE: tests/progs/redprue.c $(B)/crt0.o $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL tools/elf2pe.py | $(B)
+	$(CC32) -march=i486 -Wall -c $< -o $(B)/redprue.o
+	python3 tools/elf2pe.py -o $@ -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/redprue.o
 # [HISPA-486] fase 3a: programas Win32 de ventanas, que corren dentro de Hispa
 # Ventanas (ventanas/win32.inc; tests/run_win32gui_tests.sh)
 $(B)/WINGUI.EXE: tests/progs/wingui.c tools/elf2pe.py | $(B)

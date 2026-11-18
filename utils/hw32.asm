@@ -272,6 +272,7 @@ falla:
         cmp byte [md_modulo], 0
         jne falla_mod
         call pon_cad
+        call red_soltar
         mov ax, 0x4CFF
         int 0x21
 ; (módulo) al cargar: se vuelve a Hispa Ventanas con el texto; ya en marcha:
@@ -294,6 +295,7 @@ aviso_y_fin:
         jmp dword far [md_falta]
 ; ---- el programa acaba con el código AL ----
 acaba:
+        call red_soltar             ; (la red, si la abrió: ver hw32k.inc)
         cmp byte [md_modulo], 0
         jne .mod
         mov ah, 0x4C
@@ -1770,6 +1772,7 @@ mod_fin:
         pop es
         cmp word [tb_seg], 0
         je .mem
+        call red_soltar             ; la red, si la dejó abierta
         xor ebx, ebx
 .arch:
         bt [mod_abiertos], ebx
@@ -2016,6 +2019,7 @@ f_falta:
         mov esi, m_ordinal
         call pon_cad
 .fin:
+        call red_soltar
         mov ax, 0x4CFF
         int 0x21
 

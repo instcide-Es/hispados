@@ -3513,6 +3513,342 @@ lstrcmp_com:
         ret
 
 ; =============================================================================
+;  La red para los programas Hispa32 (WSOCK32.DLL, docs/RED.md): tramas
+;  Ethernet crudas por el «packet driver» (HSPRED u otro). No son del API
+;  Win32: son nuestras, y las usa la pila TCP/IP de WSOCK32.DLL, que va en C.
+;    HispaRedAbrir(*info)   -> 0 bien; 1 no hay controlador de red; 2 sin
+;                              memoria convencional; 3 la red la usa otro
+;                              programa; 4 la tarjeta no es Ethernet
+;    HispaRedEnviar(*trama, octetos) -> 0 bien
+;    HispaRedCerrar()
+;  Recibir: el controlador llama, desde su interrupción y en modo real, a un
+;  receptor que va en un bloque de memoria convencional (red_stub, copiado
+;  allí): deja cada trama en una ranura de un anillo y avanza «cola». El
+;  programa lee el anillo directamente (info: +8) y avanza «cabeza»; no hace
+;  falta llamar a nadie para saber si ha llegado algo.
+;  red_soltar (al acabar el programa, como sea) suelta los tipos y el bloque:
+;  si no, el controlador llamaría a un receptor que ya no está.
+; =============================================================================
+RED_NRAN    equ 12                  ; ranuras del anillo
+RED_TRAN    equ 1520                ; cada una: longitud (2) y la trama
+RED_TAM     equ (red_stub_fin - red_stub) + RED_NRAN * RED_TRAN
+%define RS(x) ((x) - red_stub)
+
+; ---- lo que se copia a la memoria convencional (se ejecuta en modo real,
+; con CS = su segmento y desplazamiento 0) ----
+        bits 16
+red_stub:
+rs_cabeza   dw 0                    ; +0 la ranura que toca leer (el programa)
+rs_cola     dw 0                    ; +2 la que toca llenar (el receptor)
+rs_perdidas dw 0                    ; +4 tramas que no cupieron
+rs_hip      dw 0                    ; +6 los manejadores: IP
+rs_harp     dw 0                    ; +8   y ARP
+rs_mac      times 6 db 0            ; +10
+rs_tip      db 0x08, 0x00           ; +16 los tipos
+rs_tarp     db 0x08, 0x06           ; +18
+rs_rcv:                             ; AX=0: CX=longitud -> ES:DI; AX=1: copiada
+        test ax, ax
+        jnz .hecha
+        cmp cx, RED_TRAN - 2
+        ja .no
+        push ax
+        mov di, [cs:RS(rs_cola)]
+        mov ax, di
+        inc ax
+        cmp ax, RED_NRAN
+        jb .a
+        xor ax, ax
+.a:
+        cmp ax, [cs:RS(rs_cabeza)]
+        pop ax
+        je .no                      ; lleno
+        imul di, di, RED_TRAN
+        add di, RS(red_stub_fin)
+        mov [cs:di], cx
+        add di, 2
+        push cs
+        pop es
+        retf
+.no:
+        inc word [cs:RS(rs_perdidas)]
+        xor di, di
+        mov es, di
+        retf
+.hecha:
+        push ax
+        mov ax, [cs:RS(rs_cola)]
+        inc ax
+        cmp ax, RED_NRAN
+        jb .b
+        xor ax, ax
+.b:
+        mov [cs:RS(rs_cola)], ax
+        pop ax
+        retf
+; Ctrl+C en un programa de consola: DOS lo va a terminar; antes, soltar los
+; tipos. Se vuelve con RETF y acarreo: «terminar»
+rs_i23:
+        pusha
+        push ds
+        push es
+        mov bx, [cs:RS(rs_hip)]
+        mov ah, 3
+        call rs_int
+        mov bx, [cs:RS(rs_harp)]
+        mov ah, 3
+        call rs_int
+        pop es
+        pop ds
+        popa
+        stc
+        retf
+rs_int:
+        db 0xCD
+rs_vec  db 0x60
+        ret
+        align 2, db 0
+red_stub_fin:
+        bits 32
+
+; el receptor ya no hace falta: soltar los tipos y el bloque. Conserva todo
+; (DS = lo nuestro)
+red_soltar:
+        cmp word [red_sel], 0
+        je .x
+        pushad
+        mov ax, [red_hip]
+        call .tipo
+        mov ax, [red_harp]
+        call .tipo
+        cmp byte [md_modulo], 0
+        jne .mem
+        mov eax, [red_i23]          ; (consola) el Ctrl+C, como estaba
+        mov [rm_dx], ax
+        shr eax, 16
+        mov [rm_ds], ax
+        mov [rm_es], ax
+        mov word [rm_ax], 0x2523
+        mov bl, 0x21
+        call int_rm_cru
+.mem:
+        mov dx, [red_sel]
+        mov ax, 0x0101
+        int 0x31
+        mov word [red_sel], 0
+        mov word [red_hip], 0
+        mov word [red_harp], 0
+        popad
+.x:
+        ret
+.tipo:
+        test ax, ax
+        jz .t
+        mov [rm_bx], ax
+        mov word [rm_ax], 0x0300
+        mov bl, [red_vec]
+        call int_rm_real
+.t:
+        ret
+
+k_HispaRedCerrar:
+        call red_soltar
+        xor eax, eax
+        ret
+
+k_HispaRedEnviar:                   ; (*trama, octetos)
+        cmp word [red_sel], 0
+        je .mal
+        mov ecx, [ebp + 4]
+        cmp ecx, 14
+        jb .mal
+        cmp ecx, 1514
+        ja .mal
+        mov esi, [ebp]
+        xor edi, edi
+        push ecx
+.c:
+        mov al, [es:esi]
+        mov [gs:edi], al
+        inc esi
+        inc edi
+        loop .c
+        pop ecx
+        mov [rm_cx], ecx
+        mov dword [rm_esi], 0
+        mov word [rm_ax], 0x0400
+        mov bl, [red_vec]
+        call int_rm_real
+        jc .mal
+        xor eax, eax
+        ret
+.mal:
+        mov eax, 1
+        ret
+
+k_HispaRedAbrir:                    ; (*info)
+        cld
+        cmp word [red_sel], 0
+        jne .info
+        ; ¿hay un packet driver? («PKT DRVR» 3 octetos tras el vector)
+        mov byte [red_vec], 0x60
+.v:
+        mov al, [red_vec]
+        mov ah, 0x35
+        mov [rm_ax], ax
+        call dos
+        movzx eax, word [rm_es]
+        shl eax, 4
+        movzx edx, word [rm_bx]
+        lea eax, [eax + edx + 3]
+        sub eax, [prog_base]
+        cmp dword [es:eax], 'PKT '
+        jne .otro
+        cmp dword [es:eax + 4], 'DRVR'
+        je .hay
+.otro:
+        inc byte [red_vec]
+        cmp byte [red_vec], 0x80
+        jbe .v
+        mov eax, 1
+        ret
+.hay:
+        mov word [rm_ax], 0x01FF    ; driver_info: la clase, en CH
+        mov dword [rm_bx], 0
+        mov bl, [red_vec]
+        call int_rm_real
+        jc .clase_s
+        cmp byte [rm_cx + 1], 1
+        je .clase_s
+        mov eax, 4
+        ret
+.clase_s:
+        mov ax, 0x0100              ; el bloque de memoria convencional
+        mov bx, (RED_TAM + 15) / 16
+        int 0x31
+        jnc .mem
+        mov eax, 2
+        ret
+.mem:
+        mov [red_seg], ax
+        mov [red_sel], dx
+        movzx edi, ax
+        shl edi, 4
+        sub edi, [prog_base]
+        mov [red_ptr], edi
+        mov esi, red_stub
+        mov ecx, red_stub_fin - red_stub
+        rep movsb
+        mov edi, [red_ptr]
+        mov al, [red_vec]
+        mov [es:edi + RS(rs_vec)], al
+        ; los tipos IP y ARP
+        mov dword [rm_esi], RS(rs_tip)
+        call .tipo
+        jc .en_uso
+        mov [red_hip], ax
+        mov [es:edi + RS(rs_hip)], ax
+        mov dword [rm_esi], RS(rs_tarp)
+        call .tipo
+        jc .en_uso
+        mov [red_harp], ax
+        mov [es:edi + RS(rs_harp)], ax
+        ; la MAC
+        mov word [rm_ax], 0x0600
+        movzx eax, word [red_hip]
+        mov [rm_bx], eax
+        mov dword [rm_edi], RS(rs_mac)
+        mov dword [rm_cx], 6
+        call .llama
+        ; (consola) Ctrl+C: que suelte los tipos antes de que DOS nos termine
+        cmp byte [md_modulo], 0
+        jne .info
+        mov word [rm_ax], 0x3523
+        call dos
+        mov ax, [rm_es]
+        shl eax, 16
+        mov ax, [rm_bx]
+        mov [red_i23], eax
+        mov word [rm_ax], 0x2523
+        mov dword [rm_dx], RS(rs_i23)
+        call .llama_dos
+.info:
+        mov edi, [ebp]
+        mov esi, [red_ptr]
+        mov eax, [es:esi + RS(rs_mac)]
+        mov [es:edi], eax
+        mov ax, [es:esi + RS(rs_mac) + 4]
+        mov [es:edi + 4], ax
+        movzx ax, byte [red_vec]
+        mov [es:edi + 6], ax
+        mov [es:edi + 8], esi       ; el anillo (cabeza, cola, perdidas)
+        mov dword [es:edi + 16], RED_NRAN
+        mov dword [es:edi + 20], RED_TRAN
+        lea eax, [esi + RS(red_stub_fin)]
+        mov [es:edi + 24], eax      ; la primera ranura
+        movzx eax, word [red_seg]
+        shl eax, 4
+        mov [es:edi + 28], eax      ; y la dirección lineal del anillo: con
+                                    ; ella el programa sabe llegar a la
+                                    ; memoria baja (los tics de la BIOS)
+        ; la configuración IP compartida de HSPRED (INT 2Fh AX=DA00h)
+        mov dword [es:edi + 12], 0
+        mov word [rm_ax], 0xDA00
+        mov dword [rm_bx], 0
+        mov bl, 0x2F
+        call int_rm_real
+        cmp byte [rm_ax], 0xFF
+        jne .sin_cfg
+        cmp word [rm_bx], 0x5248
+        jne .sin_cfg
+        movzx eax, word [rm_es]
+        shl eax, 4
+        movzx edx, word [rm_edi]
+        add eax, edx
+        sub eax, [prog_base]
+        mov edi, [ebp]
+        mov [es:edi + 12], eax
+.sin_cfg:
+        xor eax, eax
+        ret
+.en_uso:
+        call red_soltar
+        mov eax, 3
+        ret
+; access_type con el tipo de rm_esi -> AX = manejador; CF si no deja
+.tipo:
+        mov word [rm_ax], 0x0201
+        mov dword [rm_bx], 0xFFFF
+        mov dword [rm_dx], 0
+        mov dword [rm_cx], 2
+        mov dword [rm_edi], RS(rs_rcv)
+        call .llama
+        mov ax, [rm_ax]
+        ret
+; el controlador (o DOS), con DS y ES de modo real = el bloque
+.llama:
+        mov bl, [red_vec]
+        jmp .ll
+.llama_dos:
+        mov bl, 0x21
+.ll:
+        push eax
+        mov ax, [red_seg]
+        mov [rm_ds], ax
+        mov [rm_es], ax
+        pop eax
+        jmp int_rm_cru
+
+        align 4
+red_ptr     dd 0                    ; el bloque, visto desde el programa
+red_i23     dd 0                    ; el Ctrl+C de antes (consola)
+red_sel     dw 0                    ; su selector (0: la red no está abierta)
+red_seg     dw 0                    ; su segmento de modo real
+red_hip     dw 0
+red_harp    dw 0
+red_vec     db 0x60
+        align 4
+
+; =============================================================================
 ;  La tabla: manejador, octetos de argumentos (stdcall), nombre
 ; =============================================================================
 %macro FUNC 3
@@ -3523,6 +3859,10 @@ lstrcmp_com:
 funciones:
         ; consola
         FUNC k_GetStdHandle, 4, 'GetStdHandle'
+        ; la red de los programas Hispa32 (nuestras: para WSOCK32.DLL)
+        FUNC k_HispaRedAbrir, 4, 'HispaRedAbrir'
+        FUNC k_HispaRedEnviar, 8, 'HispaRedEnviar'
+        FUNC k_HispaRedCerrar, 0, 'HispaRedCerrar'
         FUNC k_SetStdHandle, 8, 'SetStdHandle'
         FUNC k_GetFileType, 4, 'GetFileType'
         FUNC k_WriteFile, 20, 'WriteFile'
