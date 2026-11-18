@@ -29,6 +29,20 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
                                     dos lados el mismo hueco, con esa holgura
   alineado X0 X1 Y1 Y2 FONDO NOMBRE            lo que no es del color FONDO empieza
                                     en la misma x en las filas Y1 e Y2
+  trama X Y ANCHO ALTO              [FONDO] la zona es el dibujo del escritorio
+                                    (el mosaico de 16x16: se repite cada 16
+                                    puntos) con los colores de fábrica (azul
+                                    petróleo y petróleo claro), los dos
+  bmp ARCHIVO.BMP DX DY AN AL X Y ANCHO ALTO   [FONDO] la zona X,Y (ANCHO x ALTO) es
+                                    la del BMP (de 8 bits con paleta o de 24)
+                                    pintado en DX,DY a AN x AL puntos (ampliado
+                                    o a su tamaño: cada punto, el del BMP que
+                                    le toca); vale con el 99 % de los puntos
+  bmpmos ARCHIVO.BMP X Y ANCHO ALTO            lo mismo, con el BMP en mosaico
+                                    (repetido desde la esquina de la pantalla)
+  bmpmedia ARCHIVO.BMP DX DY AN AL X Y ANCHO ALTO TOL   el BMP, reducido a AN x AL
+                                    en DX,DY: el color medio de la zona es el
+                                    de ese trozo del BMP, con TOL de margen
 Los colores se dan por su número (0-15) en la paleta de ventanas/datos.inc (o
 16-255: el cubo de 6x6x6 y los grises de ventanas/video.inc) y se comparan con un margen (las pantallas de 15/16 bits y el DAC de 6 bits
 redondean). La fuente esperada se lee de build/gen/ventanas/fuente.inc.
@@ -98,6 +112,26 @@ class Captura:
             return (-999, -999, -999)
         o = (y * self.w + x) * 3
         return tuple(self.d[o:o + 3])
+
+
+class Bmp:
+    """[FONDO] un BMP sin comprimir, de 8 bits con paleta o de 24."""
+    def __init__(self, ruta):
+        import struct
+        d = open(ruta, 'rb').read()
+        off, tam, self.w, h, _, self.bpp, comp, _, _, _, usados = struct.unpack_from('<IIiiHHIIiiI', d, 10)
+        assert d[:2] == b'BM' and comp == 0 and self.bpp in (8, 24), 'BMP que no vale: ' + ruta
+        self.h, self.arriba = abs(h), h < 0
+        self.fila = (self.w * self.bpp // 8 + 3) & ~3
+        self.d, self.off = d, off
+        self.pal = [(d[14 + tam + i * 4 + 2], d[14 + tam + i * 4 + 1], d[14 + tam + i * 4])
+                    for i in range(usados or 256)] if self.bpp == 8 else None
+
+    def px(self, x, y):
+        o = self.off + (y if self.arriba else self.h - 1 - y) * self.fila
+        if self.bpp == 8:
+            return self.pal[self.d[o + x]]
+        return (self.d[o + x * 3 + 2], self.d[o + x * 3 + 1], self.d[o + x * 3])
 
 
 PAL = paleta()
@@ -328,6 +362,62 @@ def main():
             res(ini[0] == ini[1] and ini[0] >= 0, '%s: %s (empiezan en %d y en %d)' % (
                 nombre, a[i + 6], ini[0], ini[1]))
             i += 7
+        elif op == 'trama':
+            x, y, w, h = (int(v) for v in a[i + 1:i + 5])
+            mal, claros = 0, 0
+            for yy in range(y, y + h):
+                for xx in range(x, x + w):
+                    c = cap.px(xx, yy)
+                    if es(c, PETROLEO_CL):
+                        claros += 1
+                    elif not es(c, PETROLEO):
+                        mal += 1
+                    if (xx + 16 < x + w and c != cap.px(xx + 16, yy)) or (yy + 16 < y + h and c != cap.px(xx, yy + 16)):
+                        mal += 1
+            res(mal == 0 and 0 < claros < w * h // 2, '%s: el dibujo del escritorio en la zona (%d,%d) %dx%d%s' % (
+                nombre, x, y, w, h, '' if mal == 0 and 0 < claros < w * h // 2 else
+                ' (%d puntos que no son; %d claros)' % (mal, claros)))
+            i += 5
+        elif op in ('bmp', 'bmpmos'):
+            b = Bmp(a[i + 1])
+            if op == 'bmp':
+                dx, dy, an, al, x, y, w, h = (int(v) for v in a[i + 2:i + 10])
+                i += 10
+            else:
+                x, y, w, h = (int(v) for v in a[i + 2:i + 6])
+                dx, dy, an, al = 0, 0, 0, 0
+                i += 6
+            mal = 0
+            for yy in range(y, y + h):
+                for xx in range(x, x + w):
+                    if op == 'bmp':
+                        q = b.px((xx - dx) * b.w // an, (yy - dy) * b.h // al)
+                    else:
+                        q = b.px(xx % b.w, yy % b.h)
+                    if any(abs(p1 - q1) > MARGEN for p1, q1 in zip(cap.px(xx, yy), q)):
+                        mal += 1
+            res(mal * 100 <= w * h, '%s: la imagen %s%s en la zona (%d,%d) %dx%d: %d puntos distintos de %d' % (
+                nombre, os.path.basename(a[i - (10 if op == 'bmp' else 6) + 1]),
+                ' en mosaico' if op == 'bmpmos' else '', x, y, w, h, mal, w * h))
+        elif op == 'bmpmedia':
+            b = Bmp(a[i + 1])
+            dx, dy, an, al, x, y, w, h, tol = (int(v) for v in a[i + 2:i + 11])
+            m1, m2, n2 = [0, 0, 0], [0, 0, 0], 0
+            for yy in range(y, y + h):
+                for xx in range(x, x + w):
+                    for k, v in enumerate(cap.px(xx, yy)):
+                        m1[k] += v
+            for yy in range((y - dy) * b.h // al, max((y - dy) * b.h // al + 1, (y + h - dy) * b.h // al)):
+                for xx in range((x - dx) * b.w // an, max((x - dx) * b.w // an + 1, (x + w - dx) * b.w // an)):
+                    n2 += 1
+                    for k, v in enumerate(b.px(xx, yy)):
+                        m2[k] += v
+            m1 = [v // (w * h) for v in m1]
+            m2 = [v // n2 for v in m2]
+            res(all(abs(p1 - q1) <= tol for p1, q1 in zip(m1, m2)),
+                '%s: la imagen %s reducida, zona (%d,%d) %dx%d: color medio %s (el del BMP: %s)' % (
+                    nombre, os.path.basename(a[i + 1]), x, y, w, h, tuple(m1), tuple(m2)))
+            i += 11
         else:
             raise SystemExit('comprobación desconocida: ' + op)
     sys.exit(1 if fallos else 0)

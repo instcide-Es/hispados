@@ -32,6 +32,11 @@ SIS486 = ('EDICION.INI', 'VENTANAS.INI', 'CENTRO.INI')
 # MSVCRT.DLL (HW32 busca las DLL en su carpeta): los controles comunes y el
 # CRT de Visual C++ 2015 (docs/486/HISPA-486.md, «Cómo está hecho (fase 3d)»)
 DLL486 = ('COMCTL32.DLL', 'UCRT.DLL')
+# [FONDO] y la imagen de fondo del escritorio de Hispa-486, también en
+# \HISPADOS: un BMP de 800x600 ya con los colores de Hispa Ventanas, que
+# tools/mkfondo.py saca de sistema/486/HISPADOS.JPG («make fondo486»); la
+# pone la clave «Fondo=FONDO.BMP» de sistema/486/VENTANAS.INI
+FONDO486 = os.path.join('sistema', '486', 'FONDO.BMP')
 # [HISPA-486] el Navegador (docs/486/NAVEGADOR.md), en \HISPADOS\INTERNET: lo
 # del disquete «Internet» (make internet) menos HW32.COM, que ya está en
 # \HISPADOS. Hispa Ventanas crea solo el grupo «Internet» si lo encuentra ahí
@@ -251,6 +256,7 @@ def main(edicion='386'):
             with open(dst, 'wb') as o:
                 o.write(dos(txt))
             cp(dst, 'HISPADOS/' + f)
+        cp(FONDO486, 'HISPADOS/FONDO.BMP')
         print(out)
         mkdisq486(en_imagen)
         return
@@ -269,8 +275,8 @@ def mkdisq486(en_imagen):
     r"""[HISPA-486] El disquete «Hispa-486»: lo que la edición añade a la
     instalación desde disquetes (los de Hispa-386: el de arranque,
     «Instalación 2» y «Oficina»). INSTALAR lo pide el último; trae \HISPA32,
-    lo de \HISPADOS de la edición (EDICION.INI, VENTANAS.INI, CENTRO.INI) y el
-    AUTOEXEC.BAT que arranca el escritorio. Para el CENTRO.INI vale la lista
+    lo de \HISPADOS de la edición (EDICION.INI, VENTANAS.INI, CENTRO.INI y la
+    imagen de fondo, FONDO.BMP) y el AUTOEXEC.BAT que arranca el escritorio. Para el CENTRO.INI vale la lista
     de la imagen USB: con los tres disquetes, el disco duro queda igual."""
     out = os.path.join(B, 'hispa486-disquete.img')
     d = os.path.join(B, 'disq486')
@@ -290,6 +296,7 @@ def mkdisq486(en_imagen):
         run('mcopy', '-i', out, os.path.join(B, src), '::HISPA32/' + dst)
     for f in DLL486:
         run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
+    run('mcopy', '-i', out, FONDO486, '::HISPADOS/FONDO.BMP')
     print(out)
 
 def mkfloppy():

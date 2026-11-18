@@ -46,6 +46,15 @@ t_no_guardar db "No se ha podido guardar la imagen.", 10
 t_encima    db "Va a escribir encima de la imagen que está viendo.", 10
             db "¿Quiere seguir?", 0
 t_impreso   db "La imagen se ha enviado a la impresora.", 0
+; [FONDO] poner como fondo de escritorio
+t_mifondo   db "MIFONDO.BMP", 0
+t_fondo_ok  db "La imagen se ha puesto de fondo del escritorio.", 10
+            db "Cómo se pone (ajustada, centrada o en mosaico) y", 10
+            db "«Sin fondo»: en Configuración, apartado Escritorio.", 0
+t_fondo_16  db "La imagen queda apuntada, pero en la VGA de 16 colores", 10
+            db "no se ve: saldrá de fondo con 256 colores o más.", 0
+t_fondo_mal db "No se ha podido poner la imagen de fondo.", 10
+            db "Puede que falte memoria: cierre otros programas.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
             db "Compruebe que la impresora (la del puerto paralelo, LPT1)", 10
             db "está encendida, en línea y con papel.", 0
@@ -242,6 +251,47 @@ guarda_haz:
         call aviso
         popad
         clc
+        ret
+
+; [FONDO] «Poner como fondo de escritorio»: la imagen, como se ve (girada,
+; recortada...), se guarda como BMP de 256 colores con la paleta de Hispa
+; Ventanas (MIFONDO.BMP, en la carpeta de Hispa Ventanas: así se lee tal cual
+; al arrancar) y se le pide a Hispa Ventanas que la ponga (la entrada
+; esc_imagen; ventanas/fondo.inc). Configuración, que está en marcha, lo ve y
+; lo apunta en VENTANAS.INI
+poner_fondo:
+        pushad
+        mov eax, 2                  ; la carpeta de Hispa Ventanas
+        mov edi, ruta2
+        HV esc_imagen
+.b:
+        cmp byte [edi], 0
+        je .f
+        inc edi
+        jmp .b
+.f:
+        mov esi, t_mifondo
+        call hvl_cad
+        mov byte [edi], 0
+        mov dword [sal_24], 0
+        call escribe_bmp
+        mov esi, t_no_guardar
+        jc .dice
+        xor eax, eax                ; puesta como estuviera la de antes
+        HV esc_imagen
+        mov edx, eax
+        mov esi, t_mifondo
+        mov eax, 1
+        HV esc_imagen
+        mov esi, t_fondo_ok
+        jnc .dice
+        mov esi, t_fondo_16
+        cmp eax, 4
+        je .dice
+        mov esi, t_fondo_mal
+.dice:
+        call aviso
+        popad
         ret
 
 ; escribe la imagen en ruta2: de 24 bits si [sal_24]; si no, de 8. CF=1 si

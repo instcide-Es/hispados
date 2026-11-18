@@ -4,7 +4,9 @@
 # actualizarla.
 #  1) Arrancar la memoria USB de Hispa-486: el AUTOEXEC.BAT abre el escritorio
 #     de Hispa-486 (la barra de tareas abajo con «Inicio», sin el Centro de
-#     programas ni la barra de arriba); el menú Inicio lleva el grupo
+#     programas ni la barra de arriba; [FONDO] con su imagen de fondo,
+#     sistema/486/FONDO.BMP, que también queda en el disco duro en la 2.ª, se
+#     ve en la 3.ª y llega con el disquete «Hispa-486» en la 8.ª); el menú Inicio lleva el grupo
 #     «Hispa32» con sus programas; desde él se abre la calculadora de 32 bits
 #     (CALC32.EXE), que calcula, y «Hola, mundo». Al salir de Hispa Ventanas,
 #     el intérprete de órdenes con el aviso de INSTALL.
@@ -112,6 +114,8 @@ echo "-- 1) la memoria de Hispa-486 arranca a su escritorio --"
 chk $T/a1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" px 84 590 1 "la barra de tareas" \
   texto 26 578 8 4 negrita "Inicio" nopx 400 10 1 "sin barra arriba" \
   nobusca 0 0 500 300 1 6 "Centro de programas"
+# [FONDO] la imagen de fondo de la edición, tal cual (800x600), detrás de la barra
+chk $T/a1.ppm bmp sistema/486/FONDO.BMP 0 0 800 600 40 20 720 500 bmp sistema/486/FONDO.BMP 0 0 800 600 0 0 800 20
 echo "-- el menú Inicio, con el grupo «Hispa32» --"
 chk $T/a2.ppm busca 0 0 260 572 9 12 "Principal" busca 0 0 260 572 0 8 "Accesorios" \
   busca 0 0 260 572 0 8 "Productividad" busca 0 0 260 572 0 8 "Hispa32" \
@@ -147,6 +151,7 @@ checkn $T/l2.txt "Hispa-486 (el escritorio con el menú Inicio"     # (el disque
 for f in HISPA32/CALC32.EXE HISPA32/HOLA32.EXE HISPA32/CTL32.EXE HISPA32/MENU32.EXE HISPA32/AVISO32.EXE \
          HISPADOS/EDICION.INI HISPADOS/VENTANAS.INI HISPADOS/CENTRO.INI HISPADOS/HW32.COM HISPADOS/MSVCRT.DLL \
          HISPADOS/COMCTL32.DLL HISPADOS/UCRT.DLL \
+         HISPADOS/FONDO.BMP \
          HISPADOS/INTERNET/NAVEGA.EXE HISPADOS/INTERNET/HSPJS.DLL HISPADOS/INTERNET/HTTPS.EXE HISPADOS/INTERNET/HSPTLS.DLL \
          HISPADOS/INTERNET/WSOCK32.DLL HISPADOS/INTERNET/MSVCRT.DLL HISPADOS/INTERNET/NAVEGA.INI \
          HISPADOS/INTERNET/LEEME.TXT HISPADOS/HSPRED.COM HISPADOS/HSPWIFI.COM HISPADOS/HSPWIFI.BIN \
@@ -185,7 +190,7 @@ cp $T/hdd.img $T/hdd486.img
   mon quit; } | maquina 3 90 -drive file=$T/hdd.img,format=raw,if=ide -boot c -nic none
 echo "-- 3) el disco duro arranca a su escritorio de Hispa-486 (sin tarjeta de red: sin errores) --"
 chk $T/h1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" texto 26 578 8 4 negrita "Inicio" \
-  nopx 400 10 1 "sin barra arriba"
+  nopx 400 10 1 "sin barra arriba" bmp sistema/486/FONDO.BMP 0 0 800 600 40 20 720 500
 chk $T/h2.ppm busca 0 0 260 572 0 8 "Hispa32" busca 0 0 260 572 9 12 "Principal" busca 0 0 260 572 0 8 "Internet"
 checkn $T/l3.txt "HSPRED"
 checkn $T/l3.txt "HSPWIFI"
@@ -242,6 +247,8 @@ check $T/l5.txt "Hispa-DOS actualizado en la unidad D:"
 hd ::HISPADOS/VENTANAS.ANT | grep -qx 'Dibujo=liso' && ok "VENTANAS.ANT: el del usuario" || ko "VENTANAS.ANT"
 hd ::HISPADOS/CENTRO.ANT | grep -qx 'Nombre=Lo mio' && ok "CENTRO.ANT: el del usuario" || ko "CENTRO.ANT"
 hd ::HISPADOS/VENTANAS.INI | grep -qx 'Escritorio=486' && ok "VENTANAS.INI: el de Hispa-486" || ko "VENTANAS.INI sin Escritorio=486"
+hd ::HISPADOS/VENTANAS.INI | grep -qx 'Fondo=FONDO.BMP' && ok "VENTANAS.INI: con la imagen de fondo" || ko "VENTANAS.INI sin Fondo=FONDO.BMP"
+hdtiene HISPADOS/FONDO.BMP
 hd ::HISPADOS/CENTRO.INI | grep -qx 'Nombre=Hispa32' && ok "CENTRO.INI: el de Hispa-486" || ko "CENTRO.INI sin Hispa32"
 hd ::HISPADOS/EDICION.INI | grep -qx 'Gama=486' && ok "EDICION.INI puesto" || ko "sin EDICION.INI"
 hdtiene HISPA32/CALC32.EXE
@@ -337,7 +344,7 @@ for off in 32256 1048576; do mdir -i $T/hdd.img@@$off ::HISPADOS > /dev/null 2>&
 if [ -n "$OFF8" ]; then
   OFF=$OFF8
   for f in HISPA32/CALC32.EXE HISPADOS/EDICION.INI HISPADOS/VENTANAS.INI HISPADOS/CENTRO.INI HISPADOS/HW32.COM \
-           HISPADOS/COMCTL32.DLL HISPADOS/UCRT.DLL \
+           HISPADOS/COMCTL32.DLL HISPADOS/UCRT.DLL HISPADOS/FONDO.BMP \
            HISPADOS/INTERNET/NAVEGA.EXE HISPADOS/INTERNET/HSPTLS.DLL HISPADOS/INTERNET/WSOCK32.DLL \
            HISPADOS/INTERNET/MSVCRT.DLL HISPADOS/INTERNET/NAVEGA.INI; do hdtiene $f; done
   hdnotiene HISPADOS/INTERNET/HW32.COM

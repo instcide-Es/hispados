@@ -820,6 +820,14 @@ H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)
 usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
+# [FONDO] la imagen de fondo del escritorio de Hispa-486 (sistema/486/FONDO.BMP,
+# que va en el repositorio ya hecha): 800x600 con los colores fijos de Hispa
+# Ventanas y difuminado, a partir de sistema/486/HISPADOS.JPG (la imagen es de
+# Carlos Sanz). Solo hace falta repetirlo si cambia la foto (docs/VENTANAS.md,
+# «La imagen de fondo»; para leer el JPEG: Pillow, ImageMagick, ffmpeg o djpeg)
+fondo486:
+	python3 tools/mkfondo.py sistema/486/HISPADOS.JPG sistema/486/FONDO.BMP
+
 # [HISPA-486] los paquetes de ACTUALIZAR (docs/RED.md, «Formato del paquete
 # .PAQ»), hechos de la imagen USB de cada edición (sin INSTALL.BAT ni \EFI, que
 # en un disco duro no hacen falta): build/hispados.paq (Hispa-386) y
@@ -1026,6 +1034,7 @@ test: $(TEST_DEPS)
 	tests/run_tamano_tests.sh $(IMG)
 	tests/run_contexto_tests.sh $(IMG)
 	tests/run_barra_tests.sh $(IMG)
+	tests/run_fondo_tests.sh $(IMG)
 	tests/run_accesos_tests.sh $(IMG)
 	tests/run_juegos_tests.sh $(IMG)
 	tests/run_juegos2_tests.sh $(IMG)
@@ -1058,4 +1067,4 @@ test: $(TEST_DEPS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb usb486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs
+.PHONY: all usb usb486 fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs

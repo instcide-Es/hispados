@@ -112,6 +112,7 @@ O_IMPRIMIR  equ 105
 O_SALIR     equ 106
 O_GUARDA_PNG equ 107
 O_GUARDA_PCX equ 108
+O_FONDO     equ 109                 ; [FONDO] poner como fondo de escritorio
 O_COPIAR    equ 111
 O_DESHACER  equ 112
 O_ELEGIR_T  equ 113
@@ -301,6 +302,10 @@ mm_mini     db "  M&iniaturas de la carpeta        M", 0
         db "I&nvertir los colores", 0
         dw O_BRILLO
         db "&Brillo y contraste...", 0
+        dw 0
+        db 0
+        dw O_FONDO
+        db "Poner como &fondo de escritorio", 0
         dw 0xFFFF
         db "&?", 0
         dw O_ACERCA
@@ -1062,6 +1067,8 @@ orden_haz:
         je guardar
         cmp ecx, O_GUARDA_PCX
         je guardar
+        cmp ecx, O_FONDO            ; [FONDO]
+        je poner_fondo
         cmp ecx, O_INFO
         je informacion
         cmp ecx, O_IMPRIMIR

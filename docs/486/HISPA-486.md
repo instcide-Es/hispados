@@ -223,7 +223,8 @@ pocos archivos; los programas y el núcleo son los mismos.
 | Dónde | Qué | De dónde sale |
 |---|---|---|
 | `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, en vez de las líneas de la red con `REM`: `HSPRED /AUTO`, `HSPWIFI /AUTO` y `WIFI /AUTO` (la red puesta sola: ver «La red al arrancar») y `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `autoexec486()` de `tools/mkusb.py` |
-| `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio | `sistema/486/VENTANAS.INI` |
+| `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio; `Fondo=FONDO.BMP` y `Ajuste=ajustada`: la imagen de fondo | `sistema/486/VENTANAS.INI` |
+| `\HISPADOS\FONDO.BMP` | **la imagen de fondo del escritorio** (ver «La imagen de fondo»): 800×600, 8 bits, 481.078 octetos (470 KB) | `sistema/486/FONDO.BMP`, que `tools/mkfondo.py` saca de `sistema/486/HISPADOS.JPG` (`make fondo486`) |
 | `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) e **«Internet»** (Navegador), con `Internet=1` | `sistema/486/CENTRO.INI` |
 | `\HISPADOS\INTERNET\` | **el Navegador** (docs/486/NAVEGADOR.md): `NAVEGA.EXE`, `HTTPS.EXE`, `HSPTLS.DLL`, `WSOCK32.DLL`, `MSVCRT.DLL`, `NAVEGA.INI` y `LEEME.TXT` (lo del disquete «Internet» menos `HW32.COM`, que ya está en `\HISPADOS`) | `build/` y `w32/navega/` (la tabla `INTERNET` de `tools/mkusb.py`) |
 | `\HISPADOS\COMCTL32.DLL`, `UCRT.DLL` | las DLL de la fase 3d, al lado de `HW32.COM` y `MSVCRT.DLL`: los controles comunes y el CRT de Visual C++ 2015 | `build/` (la tabla `DLL486` de `tools/mkusb.py`; también en el disquete «Hispa-486») |
@@ -306,6 +307,63 @@ la unidad de arranque) y lo que INSTALAR y ACTUALIZAR ya copian enteros: no
 hizo falta otra carpeta. Su licencia (`LICENCE.broadcom_bcm43xx`) deja
 repartirlo completo y sin cambios con una copia de ella, que va al lado.
 
+### La imagen de fondo
+
+El escritorio de Hispa-486 sale con una imagen de fondo (pedido de Carlos,
+18/11/2026): **un monitor de los 90 con Hispa-DOS e Hispa Ventanas en la
+pantalla**. La imagen es de Carlos Sanz (`sistema/486/HISPADOS.JPG`,
+1376×768, 560 KB). Cómo se pinta, las formas de ponerla, la memoria y
+cómo se cambia (Configuración › Escritorio; Mirador), en docs/VENTANAS.md,
+«La imagen de fondo del escritorio»; aquí, lo propio de la edición.
+
+- **El archivo que se instala** no es el JPEG (Hispa Ventanas no lo
+  descodifica al arrancar), sino `\HISPADOS\FONDO.BMP`: un BMP de 8 bits de
+  **800×600** (el modo normal de Hispa Ventanas), ya con los colores fijos
+  de su paleta (el cubo de 6×6×6 y los 24 grises) y difuminado
+  (Floyd-Steinberg). Se lee tal cual, sin convertir nada: **481.078 octetos
+  (470 KB)** en el disco y 480.000 (469 KB) de memoria extendida mientras
+  Hispa Ventanas está en marcha; nada de memoria convencional.
+- **De 1376×768 a 800×600:** la foto es más ancha que la pantalla (16:9
+  frente a 4:3). Se ha **recortado por los lados** (`mkfondo.py --modo
+  recortar`, lo normal: quedan los 1024 puntos del centro, con el monitor y
+  el teclado enteros; lo que se pierde es fondo oscuro) para que llene la
+  pantalla, en vez de dejar dos franjas del color del escritorio arriba y
+  abajo. Con `--modo ajustar` saldría entera en 800×447 (358 KB) con esas
+  franjas. La barra de tareas tapa los 28 puntos de abajo.
+- **En otras resoluciones:** con `Ajuste=ajustada`, en 640×480 se reduce
+  (cada punto, la media de los que le caen encima) y en 1024×768 se amplía;
+  la proporción es la misma (4:3), así que siempre llena la pantalla. En la
+  VGA de 16 colores no hay imagen: queda el dibujo de rombos.
+- **Cómo se rehace** (solo si cambia la foto; el BMP va en el repositorio,
+  así que `make usb486` no necesita leer JPEG):
+
+  ```
+  make fondo486   # python3 tools/mkfondo.py sistema/486/HISPADOS.JPG sistema/486/FONDO.BMP
+  ```
+
+- **Dónde va:** en la imagen USB, en `\HISPADOS` (la clave `Fondo=FONDO.BMP`
+  no lleva unidad: es de la carpeta de VENTANAS.COM, así que vale igual
+  arrancando de la memoria y del disco duro instalado). En los disquetes,
+  en el de **«Hispa-486»** (`\HISPADOS\FONDO.BMP`: INSTALAR copia todo su
+  `\HISPADOS`), que tenía sitio de sobra: pasa de 33 KB a unos 505 KB
+  ocupados de 1.440 (quedan 919 KB libres). No cabe en el de arranque ni hace falta. El paquete de
+  ACTUALIZAR (`make paq486`) la lleva como cualquier otro archivo de
+  `\HISPADOS`.
+- **Quien ya tiene Hispa-486** y actualiza: recibe `FONDO.BMP`, pero su
+  `VENTANAS.INI` se conserva (es suyo), así que no le cambia el escritorio;
+  la pone, si quiere, en Configuración › Escritorio › «Elegir imagen...»
+  (`C:\HISPADOS\FONDO.BMP`). En una instalación nueva, o al pasar de
+  Hispa-386 a Hispa-486 (que estrena `VENTANAS.INI`), sale puesta.
+- **Quitarla:** Configuración › Escritorio › «Sin fondo» (vuelve el dibujo
+  de Configuración › Pantalla).
+- **Hispa-386 no cambia:** no lleva `FONDO.BMP` ni la clave; su escritorio
+  es el de siempre. Puede poner cualquier imagen igual que Hispa-486.
+
+Pruebas: `tests/run_imagen486_tests.sh` (al arrancar la memoria, la pantalla
+se compara con `sistema/486/FONDO.BMP`; el disco duro instalado lleva
+`\HISPADOS\FONDO.BMP` y el disquete «Hispa-486» también) y
+`tests/run_fondo_tests.sh` (todo lo demás).
+
 ### Cómo se hace
 
 ```
@@ -320,8 +378,8 @@ que `make usb` con lo de la tabla. Necesita lo mismo que `make usb` más
 instalar desde disquetes son los de Hispa-386 (el de arranque,
 `hispados-disquete.img`; «Instalación 2», `hispados-instal2.img`; y
 «Oficina», `hispados-oficina.img`) y este, el último. Lleva `\HISPA32`, los
-tres .INI de la edición en `\HISPADOS` y el `AUTOEXEC.BAT` que arranca el
-escritorio.
+tres .INI de la edición y la imagen de fondo (`FONDO.BMP`) en `\HISPADOS` y
+el `AUTOEXEC.BAT` que arranca el escritorio.
 
 Tamaños (18/11/2026, con el Navegador y la red): la imagen USB,
 512 MB (536.870.912 octetos) con 3,5 MB de archivos (3.665.995 octetos en

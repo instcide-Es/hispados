@@ -426,8 +426,7 @@ esc_proc:
         mov ebx, BARRA_H
         mov ecx, [vid_ancho]
         mov edx, [vid_alto]
-        mov esi, mosaico
-        call dc_mosaico
+        call fon_pintar             ; [FONDO] la imagen o el mosaico (fondo.inc)
         COLOR C_MARRON              ; la barra superior
         xor ebx, ebx
         mov edx, BARRA_H - 2

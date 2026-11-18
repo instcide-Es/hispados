@@ -879,6 +879,150 @@ el escritorio no se cambia sin reiniciar Hispa Ventanas; el escritorio de
 Hispa-486 todavía no tiene iconos propios ni «Mi PC» (lo siguiente de la
 fase 4).
 
+### La imagen de fondo del escritorio
+
+[FONDO] (`ventanas/fondo.inc`; pedido de Carlos, 18/11/2026: «igual ya tenemos
+imagen para el fondo de escritorio de 486»). Detrás de las ventanas, en vez
+del dibujo de 16×16, puede ir **una imagen**. Vale para los dos escritorios
+(el de Hispa-386 y el de Hispa-486) y es opcional: **sin la clave `Fondo=` en
+VENTANAS.INI no hay imagen** y todo es como antes (Hispa-386, de serie); la
+imagen de Hispa-486 la trae puesta (docs/486/HISPA-486.md).
+
+Tres formas de ponerla (`Ajuste=`):
+
+| Forma | Qué hace |
+|---|---|
+| `ajustada` (la de serie) | a la pantalla, **conservando la proporción**: llena el ancho o el alto y queda en el centro; lo que sobra se rellena con el **color del escritorio** (el del fondo del dibujo elegido en Configuración › Pantalla: el que más sale en el mosaico). Una imagen pequeña se amplía; una grande se reduce |
+| `centrada` | a su tamaño, en el centro, con el color del escritorio alrededor; si es mayor que la pantalla, se ve su parte central |
+| `mosaico` | a su tamaño, repetida desde la esquina de arriba a la izquierda |
+
+**Dónde se ve.** En todos los modos de VESA (640×480, 800×600 y 1024×768, de
+256 colores o de color verdadero: la superficie de dibujo es siempre de un
+octeto por punto con la paleta de Hispa Ventanas). En la **VGA de 16
+colores no hay imagen**: queda el dibujo; la clave no se pierde (sale otra
+vez al entrar con VESA). Con `VENTANAS /DEMO`, tampoco.
+
+**El archivo.** Un **BMP sin comprimir, de 8 bits (con su paleta) o de 24**,
+de 4.096 puntos de lado como mucho. Hispa Ventanas no descodifica aquí nada
+más (VENTANAS.COM no carga con JPEG ni con Deflate): los demás formatos se
+convierten antes, con Mirador o con `tools/mkfondo.py` (abajo). Al leerlo,
+cada color pasa a la paleta de Hispa Ventanas:
+
+- un color del BMP que es **exactamente uno de los 256** de la paleta (los 16
+  propios, el cubo de 6×6×6 o los 24 grises) se queda tal cual. Un BMP ya
+  preparado (los de `mkfondo.py` y los que guarda Mirador «con los 256
+  colores de Hispa Ventanas») **se lee y se pinta sin convertir nada**: lo
+  más rápido al arrancar;
+- los demás van al cubo de 6×6×6 con un **difuminado ordenado** (matriz de
+  4×4), y los grises (rojo = verde = azul), a la escala de 24 grises. Así
+  vale cualquier BMP de 24 bits o con otra paleta, aunque queda mejor uno
+  preparado con `mkfondo.py` (Floyd-Steinberg).
+
+**Escalar.** Al ampliar, cada punto se repite (no se difumina otra vez). Al
+reducir, cada punto de la pantalla es la **media** de los del original que
+le caen encima (en rojo, verde y azul), que vuelve a la paleta con el mismo
+difuminado ordenado: una imagen preparada para 800×600 se ve bien también en
+640×480.
+
+**Memoria.** La imagen lista (ya escalada o recortada: nunca más que la
+pantalla) queda en **un bloque de memoria extendida** (`mem_bloque`, la
+función 0501h del DPMI), un octeto por punto: 480.000 octetos (469 KB) una
+de 800×600 y 307.200 (300 KB) una de 640×480; nada en la memoria
+convencional. Mientras se lee hay otro bloque con el original (ancho × alto
+octetos, más una fila del archivo), que se suelta al acabar; si la imagen
+ya tiene el tamaño con el que se pone (la de Hispa-486 en 800×600), el
+original pasa a ser el definitivo y no hay segundo bloque. Si no hay memoria
+(o el archivo no está o no vale), queda el dibujo y la clave se conserva.
+VENTANAS.COM crece 2,7 KB (de 130.736 a 133.488 octetos: el código, en la
+parte alta; en los 64 KB de la parte de modo real no hay nada nuevo: los dos
+escritorios llaman a `fon_pintar` donde llamaban a `dc_mosaico`) y medio KB
+de variables; lo que solo hace falta al cargar (VENTANAS.INI, la paleta del
+BMP) usa el búfer con el que `barra.inc` lee VENTANAS.INI al arrancar.
+CONFIG.HVP crece 2,2 KB y MIRADOR.HVP, 0,6 KB.
+
+**Pintar.** `fon_pintar` (lo llaman `esc_proc` y `bt_esc_proc` al pintar el
+escritorio) copia del bloque a la superficie **solo en los rectángulos del
+escritorio que están a la vista** (`dc_cada`, como las demás primitivas):
+al mover una ventana se repinta lo que destapa, tan deprisa como el dibujo
+de antes (un `rep movsb` por fila), y sin parpadeo, porque la pantalla solo
+recibe la superficie ya compuesta. Con mosaico solo se copian las piezas
+que tocan el rectángulo. La barra de tareas de Hispa-486 y la barra de
+arriba de Hispa-386 se pintan encima, como siempre (tapan esa franja de la
+imagen: la imagen se coloca respecto a la pantalla entera).
+
+**Las claves** (en VENTANAS.INI, sección `[Escritorio]`; las lee VENTANAS.COM
+al arrancar, antes de pintar nada: `fon_iniciar`):
+
+```
+[Escritorio]
+Fondo=FONDO.BMP
+Ajuste=ajustada
+```
+
+- `Fondo`: la ruta del BMP. **Sin unidad ni `\` delante es de la carpeta de
+  VENTANAS.COM** (`FONDO.BMP` es `C:\HISPADOS\FONDO.BMP`: la misma
+  VENTANAS.INI vale en la memoria USB y en el disco duro); con ellas, la que
+  diga (`C:\FOTOS\MAR.BMP`). Hasta 79 letras. Sin la clave (o vacía), no hay
+  imagen.
+- `Ajuste`: `ajustada`, `centrada` o `mosaico` (o 0, 1, 2). Sin ella,
+  `ajustada`.
+
+**Cómo se cambia.**
+
+- **Configuración › Escritorio** (el octavo apartado): la imagen puesta,
+  **«Elegir imagen...»** (el diálogo de abrir de Hispa Ventanas: un BMP),
+  **«Sin fondo»** y las tres formas. Se aplica al momento; si el archivo no
+  vale (no es un BMP de 8 o 24 bits sin comprimir, no se puede abrir o no
+  hay memoria) lo dice y **se queda la que había**. En la VGA de 16 colores
+  lo explica («no se ve la imagen: queda el dibujo») y la elección queda
+  apuntada. «De fábrica» no toca la imagen.
+- **Mirador › Imagen › «Poner como fondo de escritorio»**: la imagen que se
+  está viendo (de cualquier formato de los que lee: JPEG, PNG, GIF, PCX,
+  TGA...; como se ve: girada, recortada, retocada) se guarda como
+  `MIFONDO.BMP` en la carpeta de VENTANAS.COM (un BMP de 256 colores con la
+  paleta de Hispa Ventanas, con el paso a 256 colores que tenga puesto
+  Mirador: difusión de error de serie) y pasa a ser el fondo, con la forma
+  que hubiera.
+- A mano, en VENTANAS.INI, con Hispa Ventanas cerrado.
+
+**Quién hace qué.** La imagen la lleva VENTANAS.COM; CONFIG.HVP no lee esas
+dos claves: al guardar VENTANAS.INI le pregunta a Hispa Ventanas lo que hay
+puesto y lo escribe (si no hay `Escritorio=`, pone también la sección). Los
+programas usan una entrada nueva de la interfaz, la 97, **`esc_imagen`**:
+
+| EAX | Qué hace |
+|---|---|
+| 0 | lo que hay: → EAX=forma (0 ajustada, 1 centrada, 2 mosaico), ESI=la ruta (vacía: sin imagen), ECX=0 sin imagen, 1 a la vista, 2 apuntada pero no se ve (16 colores, o no se pudo cargar), EDX=un número que cambia cada vez que se pone otra |
+| 1 | ESI=ruta (0 o vacía: sin fondo), EDX=forma: la pone y repinta el escritorio → EAX=0 y CF=0; o CF=1 y EAX=1 (no se puede abrir o leer), 2 (no es un BMP de 8 o 24 bits sin comprimir), 3 (no hay memoria: en los tres casos sigue la que había) o 4 (VGA de 16 colores: queda apuntada) |
+| 2 | EDI=búfer de 80: la carpeta de VENTANAS.COM, con su `\` al final (donde Mirador deja `MIFONDO.BMP`) |
+
+Configuración mira ese número una vez por segundo: si otro programa
+(Mirador) ha cambiado el fondo, lo apunta en VENTANAS.INI a los tres
+segundos, como cualquier otro cambio.
+
+**`tools/mkfondo.py`** prepara un fondo fuera de Hispa-DOS:
+
+```
+python3 tools/mkfondo.py FOTO.JPG FONDO.BMP [--tam 800x600]
+                         [--modo recortar|ajustar|estirar] [--sin-difuminar]
+```
+
+Reduce la foto al tamaño de la pantalla (`recortar`, lo normal: llena la
+pantalla y deja fuera lo que sobra por los lados; `ajustar`: entera, con su
+proporción, y el BMP sale más corto por un lado; `estirar`: deformada) y la
+pasa a los **240 colores fijos** de la paleta (del 16 al 255: no usa los 16
+propios) con difuminado de Floyd-Steinberg en zigzag. Escribe un BMP de
+8 bits con la paleta de Hispa Ventanas (la lee de `ventanas/datos.inc`).
+Lee PPM y BMP de 24 bits por sí mismo; JPEG, PNG y demás, con Pillow si
+está o, si no, con ImageMagick, ffmpeg o djpeg; reducir, difuminar y
+escribir el BMP es suyo (Python sin bibliotecas).
+
+Límites: una sola imagen para todas las resoluciones (se escala al
+arrancar); no hay «estirada» (deformar) ni «rellenar recortando» dentro de
+Hispa Ventanas (para eso, `mkfondo.py --modo recortar`); los nombres de los
+iconos de lo minimizado (Hispa-386) y el menú del botón derecho se pintan
+igual sobre la imagen. Pruebas: `tests/run_fondo_tests.sh`.
+
 ### ASOCIA.INI: qué programa abre cada tipo de archivo
 
 `\HISPADOS\ASOCIA.INI` (0.9.22) dice con qué programa se abre cada
@@ -927,6 +1071,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
 | Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país. Abajo, **«Tipos de archivo...»** ([ASOCIA], 0.9.22): las extensiones con el programa que las abre (de `\HISPADOS\ASOCIA.INI`), más «Añadir un tipo...» y «Volver a los de serie»; al elegir una, la lista de programas (o «Ninguno», que la quita) |
 | Red | La red local del equipo (como las «Propiedades de TCP/IP» de Windows). Una casilla **«Obtener la dirección automáticamente (DHCP)»**; al quitarla, cuatro cuadros para la **IP**, la **máscara de subred**, la **puerta de enlace** y el **servidor DNS** a mano (cada uno `a.b.c.d`, con octetos de 0 a 255; con DHCP puesto, no salen). Arriba, el estado en marcha si HSPRED está cargado: la MAC y la IP que tiene. Se guarda en `\HISPADOS\RED.INI` (no en VENTANAS.INI); los cambios se aplican al reiniciar o al recargar HSPRED (`CONFRED /RENOVAR`). Ver docs/RED.md |
+| Escritorio | [FONDO] La imagen de fondo del escritorio: la que hay puesta, **«Elegir imagen...»** (un BMP, con el diálogo de abrir), **«Sin fondo»** y cómo se pone: ajustada a la pantalla (con su proporción), centrada o en mosaico. Ver «La imagen de fondo del escritorio» |
 
 Todo se aplica **al momento**. Lo de Pantalla, Ratón y Teclado se guarda en
 `VENTANAS.INI`: con «Guardar», al cerrar la ventana y, solo, unos tres
@@ -1002,6 +1147,8 @@ Distribucion=SP
 
 [Escritorio]
 Escritorio=486
+Fondo=FONDO.BMP
+Ajuste=ajustada
 ```
 
 - Líneas `clave=valor`; no importan las mayúsculas de las claves ni los
@@ -1031,6 +1178,12 @@ Escritorio=486
   Hispa-486**: la pone la instalación, la lee VENTANAS.COM al arrancar y
   Configuración no la enseña; si está, la conserva al guardar, y si no,
   no escribe ni la sección (ver «El escritorio de Hispa-486»).
+- [FONDO] `Fondo` = la imagen de fondo del escritorio (un BMP; sin unidad
+  ni `\` delante, de la carpeta de VENTANAS.COM) y `Ajuste` = `ajustada`,
+  `centrada` o `mosaico`. Las lee VENTANAS.COM al arrancar y se cambian en
+  Configuración › Escritorio (o desde Mirador); Configuración las escribe
+  con lo que le diga Hispa Ventanas. Sin `Fondo`, no hay imagen y no se
+  escribe ninguna de las dos (ver «La imagen de fondo del escritorio»).
 
 ### Memoria y modo del procesador
 
@@ -1080,6 +1233,8 @@ devuelven algo.
                  juego de un acceso (va en la parte alta del archivo)
   barra.inc      [BARRA] el escritorio de Hispa-486: barra de tareas y menú
                  Inicio (parte alta)
+  fondo.inc      [FONDO] la imagen de fondo del escritorio (BMP): leerla,
+                 escalarla y pintarla; la entrada esc_imagen
   config.inc     CENTRO.INI: grupos, accesos directos, ventanas
   volumen.inc    el altavoz de la barra y su ventanita (HSPSND)
         |
@@ -1895,6 +2050,13 @@ Reproductor de sonido (que ahora también acepta un WAV en los parámetros y
 lo toca) abren ese archivo; los demás lo pasan a `ven_defecto`, que no hace
 nada. El grupo 3 de la cabecera de un módulo es «Principal».
 
+Añadida para la imagen de fondo del escritorio ([FONDO]; 98 entradas: la
+97, detrás de `dlg_lista`, la 96; `ventanas/fondo.inc`, en la parte alta):
+
+| Entrada | Para qué |
+|---|---|
+| `esc_imagen` (EAX=0: lo que hay puesto → EAX=forma, ESI=ruta, ECX=estado, EDX=número de cambio; EAX=1, ESI=ruta, EDX=forma: la pone → CF=1 y EAX=el error; EAX=2, EDI=búfer: la carpeta de VENTANAS.COM) | la imagen de fondo del escritorio: la usan Configuración (apartado Escritorio y al guardar VENTANAS.INI) y Mirador («Poner como fondo de escritorio»). Los registros, en «La imagen de fondo del escritorio» |
+
 Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80, 82, 84, 85 u 86) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
@@ -2352,6 +2514,29 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 
 ## Pruebas
 
+- `tests/run_fondo_tests.sh` ([FONDO]): la imagen de fondo del escritorio.
+  La prueba hace sus imágenes (con `tools/mkfondo.py` las de 8 bits, y una
+  de 24 bits) y compara zonas enteras de la pantalla con el BMP
+  (`ventanas_check.py`: `bmp`, `bmpmos` y, para lo reducido, `bmpmedia`, el
+  color medio; `trama`, el dibujo de siempre). Con el escritorio de
+  Hispa-486 en 800×600 y `Fondo=`: la imagen ajustada (ampliada dos veces y
+  media) detrás de la barra de tareas; el Bloc de notas se abre, se arrastra
+  (donde estaba vuelve a verse el fondo, punto por punto), se maximiza (no
+  tapa la barra) y se cierra; Configuración › Escritorio: «En mosaico»,
+  «Centrada» (con el color del escritorio alrededor), «Sin fondo» (vuelve
+  el dibujo), «Elegir imagen...» con el diálogo de abrir (un BMP de 24 bits:
+  los colores de la paleta, exactos, y uno que no está, difuminado), un
+  archivo que no es una imagen (lo dice y sigue la que había) y «Ajustada»;
+  al salir, VENTANAS.INI con `Fondo=`, `Ajuste=` y `Escritorio=486`.
+  Segunda sesión, 640×480 y el escritorio de Hispa-386 (`Fondo = ...` y
+  `AJUSTE=Ajustada`, con espacios y mayúsculas): una imagen de 1000×60
+  reducida a 640×38, en el centro. Tercera, VGA de 16 colores: el dibujo
+  de siempre, Configuración lo explica y al guardar no se pierde la clave.
+  Cuarta, sin VENTANAS.INI (sin imagen: el dibujo): Mirador, Imagen › «Poner
+  como fondo de escritorio»: deja `MIFONDO.BMP`, el fondo cambia y
+  Configuración lo apunta (con su sección `[Escritorio]`, sin
+  `Escritorio=`). La imagen de Hispa-486 de verdad (`FONDO.BMP`, 800×600)
+  se mira en `tests/run_imagen486_tests.sh`.
 - `tests/run_barra_tests.sh` ([BARRA]): el escritorio de Hispa-486. Con
   `VENTANAS /486` en 800×600: el escritorio despejado con la barra de tareas
   abajo; el menú Inicio con el ratón (los grupos, las órdenes fijas, el

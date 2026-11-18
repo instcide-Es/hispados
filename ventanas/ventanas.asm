@@ -1418,6 +1418,7 @@ principal:
         call ges_iniciar
         call esc_iniciar
         call bt_iniciar             ; [BARRA] el área de trabajo y, en Hispa-486, la barra de tareas
+        call fon_iniciar            ; [FONDO] la imagen de fondo de VENTANAS.INI
         call programas_iniciar
         cmp byte [op_fallo], 0
         je .bucle
@@ -2092,6 +2093,7 @@ alto_ini:
 %include "archapi.inc"              ; [ARCHIVOS] lo que pide el Administrador de archivos
 %include "barra.inc"                ; [BARRA] Hispa-486: barra de tareas y menú Inicio
 %include "wifi.inc"                 ; [WIFI] el icono de red de la barra y su ventanita
+%include "fondo.inc"                ; [FONDO] la imagen de fondo del escritorio
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
@@ -2122,6 +2124,7 @@ pila_fin:
 %include "bssarch.inc"              ; [ARCHIVOS]
 %include "bssbarra.inc"             ; [BARRA]
 %include "bsswifi.inc"              ; [WIFI]
+%include "bssfondo.inc"             ; [FONDO]
 %ifdef CON_PROGRAMAS
 %define TAREAS_BSS                  ; [TAREAS] las variables del Administrador de tareas
 %include "tareas_api.inc"

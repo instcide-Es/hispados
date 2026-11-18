@@ -398,8 +398,7 @@ bt_esc_proc:
         xor ebx, ebx
         mov ecx, [vid_ancho]
         mov edx, [vid_alto]
-        mov esi, mosaico
-        call dc_mosaico
+        call fon_pintar             ; [FONDO] la imagen o el mosaico (fondo.inc)
         call dc_cerrar
         xor eax, eax
         ret

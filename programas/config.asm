@@ -17,6 +17,9 @@
 ;                   /SB) y el botón «Mezclador...» ([MEZCLADOR])
 ;    Fecha y hora   las enseña y las cambia (INT 21h, 2Ah-2Dh)
 ;    Sistema        versión, procesador, memoria, pantalla, ratón, sonido
+;    Escritorio     [FONDO] la imagen de fondo del escritorio: elegirla (un
+;                   BMP), cómo se pone (ajustada, centrada o en mosaico) y
+;                   «Sin fondo» (ventanas/fondo.inc; la entrada esc_imagen)
 ;  [MEZCLADOR] Mientras está en marcha (siempre, con la ventana oculta),
 ;  cada segundo mira si el mezclador de HSPSND ha cambiado y, si es así, lo
 ;  guarda en \HISPADOS\SONIDO.INI (ventanas/hvpmez.inc): el estado del sonido
@@ -42,7 +45,7 @@ CLI_AL      equ 376
 PX          equ 152                 ; donde empieza el apartado
 PAN_AN      equ 388
 SEC_AL      equ 34                  ; alto de cada apartado en el selector
-N_SEC       equ 7                   ; (Pantalla..Sistema y Red)
+N_SEC       equ 8                   ; (Pantalla..Sistema, Red y Escritorio)
 N_DIB       equ 10                  ; dibujos del fondo
 N_TEMAS     equ 8
 ID_SEC      equ 10
@@ -62,6 +65,13 @@ RED_MASK    equ 154
 RED_GW      equ 155
 RED_DNS     equ 156
 RED_BUFSZ   equ 2048                ; RED.INI es pequeño
+; [FONDO] los controles del apartado «Escritorio» (ids libres, 100-159)
+ESC_NOMBRE  equ 157                 ; la imagen puesta
+ESC_ELEGIR  equ 158                 ; «Elegir imagen...»
+ESC_SIN     equ 119                 ; «Sin fondo»
+ESC_AJ      equ 127                 ; las opciones: 127 ajustada, 128 centrada, 129 mosaico
+ESC_NOTA    equ 137                 ; lo que hay que saber (o lo que pasa)
+SEC_ESCRITORIO equ 7                ; el apartado
 ; la configuración IP compartida que da HSPRED (INT 2Fh DA00h; ver drivers/
 ; hspred.asm y docs/RED.md); la MAC sale de DA03h (los datos de /INFO)
 RC_FLAGS    equ 0                   ; bit 0 válida, bit 1 por DHCP
@@ -292,10 +302,24 @@ pl_red_manual:
         PLANTILLA EDT, 0, HT, PX + 168, 254, 180, 22, RED_DNS
         dd 0
 
+; ---- [FONDO] Escritorio: la imagen de fondo ----
+pl_escritorio:
+        PLANTILLA EST, t_e_img, H, PX, 40, PAN_AN, 18, ID_FIJO
+        PLANTILLA EST, l_fon, H | SS_NEGRITA, PX, 62, PAN_AN, 18, ESC_NOMBRE
+        PLANTILLA BOT, t_e_elegir, HT, PX, 90, 150, 26, ESC_ELEGIR
+        PLANTILLA BOT, t_e_sin, HT, PX + 160, 90, 110, 26, ESC_SIN
+        PLANTILLA EST, t_e_como, H, PX, 134, PAN_AN, 18, ID_FIJO
+        PLANTILLA BOT, t_e_aj0, HT | BS_OPCION, PX, 156, 380, 20, ESC_AJ
+        PLANTILLA BOT, t_e_aj1, HT | BS_OPCION, PX, 180, 380, 20, ESC_AJ + 1
+        PLANTILLA BOT, t_e_aj2, HT | BS_OPCION, PX, 204, 380, 20, ESC_AJ + 2
+        PLANTILLA EST, 0, H, PX, 240, PAN_AN, 84, ESC_NOTA
+        dd 0
+
 listas      dd pl_fijos, pl_pantalla, pl_raton, pl_teclado, pl_tecl_si, pl_tecl_no
-            dd pl_sonido, pl_sonido_no, pl_fecha, pl_sistema, pl_red, pl_red_manual, 0
+            dd pl_sonido, pl_sonido_no, pl_fecha, pl_sistema, pl_red, pl_red_manual
+            dd pl_escritorio, 0
 paneles     dd pan_pantalla, pan_raton, pan_teclado, pan_sonido, pan_fecha, pan_sistema
-            dd pan_red
+            dd pan_red, pan_escritorio
 sel_pintores dd pin_color, pin_dibujo, pin_seccion
 dib_tabla   dd dib_rombos, dib_liso, dib_puntos, dib_rayas, dib_cuadros
             dd dib_ladrillos, dib_olas, dib_damero, dib_trama, dib_zigzag
@@ -348,6 +372,12 @@ k_espera    db "Espera", 0
 k_repet     db "Repeticion", 0
 k_dist      db "Distribucion", 0
 s_escritorio db "[Escritorio]", 0
+k_fondo     db "Fondo=", 0          ; [FONDO] la imagen de fondo y cómo se pone:
+k_ajuste    db "Ajuste=", 0         ; las lleva VENTANAS.COM; aquí se escriben
+aj_nombres  dd n_aj0, n_aj1, n_aj2
+n_aj0       db "ajustada", 0
+n_aj1       db "centrada", 0
+n_aj2       db "mosaico", 0
 k_escritorio db "Escritorio", 0     ; [BARRA] 486: barra de tareas y menú Inicio
 n_ini       db "VENTANAS.INI", 0
 
@@ -429,7 +459,7 @@ ritmos      dw 300, 267, 240, 218, 200, 185, 171, 160, 150, 133, 120, 109, 100, 
 
 ; ---- textos ----
 t_titulo    db "Configuración", 0
-secc_nombres dd n_s0, n_s1, n_s2, n_s3, n_s4, n_s5, n_s6
+secc_nombres dd n_s0, n_s1, n_s2, n_s3, n_s4, n_s5, n_s6, n_s7
 n_s0        db "Pantalla", 0
 n_s1        db "Ratón", 0
 n_s2        db "Teclado", 0
@@ -437,6 +467,32 @@ n_s3        db "Sonido", 0
 n_s4        db "Fecha y hora", 0
 n_s5        db "Sistema", 0
 n_s6        db "Red", 0
+n_s7        db "Escritorio", 0
+; ---- [FONDO] Escritorio ----
+t_e_img     db "Imagen de fondo del escritorio:", 0
+t_e_ninguna db "(ninguna: se ve el dibujo de Pantalla)", 0
+t_e_elegir  db "Elegir imagen...", 0
+t_e_sin     db "Sin fondo", 0
+t_e_como    db "Cómo se pone:", 0
+t_e_aj0     db "Ajustada a la pantalla (con su proporción)", 0
+t_e_aj1     db "Centrada (a su tamaño)", 0
+t_e_aj2     db "En mosaico (repetida)", 0
+t_e_nota    db "Vale un BMP sin comprimir, de 8 o de 24 bits.", 10
+            db "Las fotos en JPEG, PNG o GIF se ponen desde", 10
+            db "Mirador: «Poner como fondo de escritorio».", 0
+t_e_nota16  db "En la VGA de 16 colores no se ve la imagen:", 10
+            db "queda el dibujo de Pantalla. La imagen sigue", 10
+            db "apuntada y saldrá con 256 colores o más.", 0
+t_e_notamal db "No se ha podido cargar esta imagen: se ve el", 10
+            db "dibujo de Pantalla. Elija otra o «Sin fondo».", 0
+t_e_titulo  db "Imagen de fondo", 0
+t_e_abrir   db "No se puede abrir esa imagen.", 0
+t_e_formato db "La imagen tiene que ser un BMP sin comprimir, de 8 o de", 10
+            db "24 bits. Las de otros formatos (JPEG, PNG, GIF...) se", 10
+            db "ponen desde Mirador: «Poner como fondo de escritorio».", 0
+t_e_memoria db "No hay memoria suficiente para esa imagen.", 0
+t_e_larga   db "La ruta de esa imagen es demasiado larga.", 0
+e_errores   dd t_e_abrir, t_e_formato, t_e_memoria
 t_est0      db "Se aplica al momento.", 0
 t_est1      db "Hay cambios sin guardar.", 0
 t_est2      db "Guardado en VENTANAS.INI.", 0
@@ -905,6 +961,18 @@ reloj:
         jb .t3
         call guardar
 .t3:
+        xor eax, eax                ; [FONDO] ¿ha puesto alguien otra imagen de
+        HV esc_imagen               ; fondo (Mirador)? A VENTANAS.INI
+        cmp edx, [e_serie]
+        je .t3b
+        mov [e_serie], edx
+        call cambio
+        cmp byte [montado], 0
+        je .x
+        cmp dword [seccion], SEC_ESCRITORIO
+        jne .t3b
+        call esc_refrescar
+.t3b:
         cmp byte [montado], 0
         je .x
         cmp dword [seccion], 4
@@ -977,6 +1045,40 @@ ordenes:
         mov byte [red_cambiado], 1
         jmp .cambio
 .nored:
+        ; ---- [FONDO] Escritorio ----
+        cmp ecx, ESC_ELEGIR
+        jne .e1
+        call esc_elegir
+        jmp .hecho
+.e1:
+        cmp ecx, ESC_SIN
+        jne .e2
+        xor eax, eax
+        HV esc_imagen
+        cmp byte [esi], 0           ; (ya no había)
+        je .hecho
+        mov edx, eax
+        xor esi, esi
+        call esc_poner
+        jmp .hecho
+.e2:
+        cmp ecx, ESC_AJ
+        jb .e3
+        cmp ecx, ESC_AJ + 2
+        ja .e3
+        lea ebx, [ecx-ESC_AJ]
+        xor eax, eax
+        HV esc_imagen
+        cmp eax, ebx                ; (la que ya estaba)
+        je .hecho
+        mov edi, e_ruta             ; la misma imagen, puesta de otra forma
+        call hvl_cad
+        mov byte [edi], 0
+        mov esi, e_ruta
+        mov edx, ebx
+        call esc_poner
+        jmp .hecho
+.e3:
         ; ---- Pantalla ----
         cmp ecx, 100
         jne .p1
@@ -2405,6 +2507,159 @@ dib_zigzag:
         ret
 
 ; =============================================================================
+;  [FONDO] Escritorio: la imagen de fondo. La lleva VENTANAS.COM (fondo.inc):
+;  lee «Fondo=» y «Ajuste=» de VENTANAS.INI al arrancar y carga la imagen; aquí
+;  se le pregunta lo que hay y se le pide otra (la entrada esc_imagen), y al
+;  guardar se escriben las dos claves con lo que diga
+; =============================================================================
+pan_escritorio:
+        mov esi, pl_escritorio
+        HV ven_lista
+        ; sigue: lo que hay puesto
+
+esc_refrescar:
+        pushad
+        xor eax, eax
+        HV esc_imagen               ; EAX=ajuste ESI=ruta ECX=estado
+        mov ebx, eax
+        mov ebp, ecx
+        mov edi, l_fon
+        cmp byte [esi], 0
+        jne .n1
+        mov esi, t_e_ninguna
+.n1:
+        mov edx, esi                ; (una ruta larga: el final, tras «...»)
+        xor ecx, ecx
+.n2:
+        cmp byte [edx+ecx], 0
+        je .n3
+        inc ecx
+        jmp .n2
+.n3:
+        cmp ecx, 46
+        jbe .n4
+        lea esi, [edx+ecx-43]
+        mov eax, '...'
+        stosd
+        dec edi
+.n4:
+        call hvl_cad
+        mov byte [edi], 0
+        mov ecx, ESC_NOMBRE
+        mov esi, l_fon
+        call texto_poner
+        xor edi, edi
+.o:
+        lea ecx, [edi+ESC_AJ]
+        xor edx, edx
+        cmp edi, ebx
+        sete dl
+        call marca_poner
+        inc edi
+        cmp edi, 3
+        jb .o
+        mov esi, t_e_nota
+        cmp ebp, 2                  ; hay imagen apuntada pero no se ve
+        jne .t
+        mov esi, t_e_notamal
+        mov eax, AJ_VID_TIPO
+        HV aj_leer
+        test eax, eax
+        jnz .t
+        mov esi, t_e_nota16
+.t:
+        mov ecx, ESC_NOTA
+        call texto_poner
+        popad
+        ret
+
+; ESI=ruta (0: sin fondo) EDX=ajuste: se lo pide a Hispa Ventanas; si no
+; vale, lo dice (y sigue la que había)
+esc_poner:
+        pushad
+        mov eax, 1
+        HV esc_imagen
+        jnc .bien
+        cmp eax, 3
+        ja .bien                    ; (16 colores: apuntada; lo dice la nota)
+        mov esi, [e_errores+eax*4-4]
+        call esc_aviso
+        jmp .x
+.bien:
+        call cambio
+.x:
+        xor eax, eax                ; (este cambio es de aquí: ya está contado)
+        HV esc_imagen
+        mov [e_serie], edx
+        cmp byte [montado], 0
+        je .r
+        cmp dword [seccion], SEC_ESCRITORIO
+        jne .r
+        call esc_refrescar
+.r:
+        popad
+        ret
+
+; (interna) ESI=texto: un aviso con «Aceptar»
+esc_aviso:
+        pushad
+        mov ebp, [ven]
+        mov edi, t_e_titulo
+        mov eax, DM_ACEPTAR
+        HV dlg_mensaje
+        popad
+        ret
+
+; «Elegir imagen...»: el diálogo de abrir; con el nombre, la ruta completa
+esc_elegir:
+        pushad
+        mov byte [e_nom], 0
+        mov ebp, [ven]
+        mov ebx, e_nom
+        mov edi, t_e_titulo
+        HV dlg_archivo
+        test eax, eax
+        jz .x
+        cmp byte [e_nom], 0
+        je .x
+        mov edi, e_dir              ; la carpeta en la que se ha quedado
+        HV dos_dir_actual
+        mov esi, e_nom
+        mov edi, e_larga
+        cmp byte [esi+1], ':'       ; ya viene con todo
+        je .nom
+        mov ax, [e_dir]             ; la unidad
+        stosw
+        cmp byte [esi], '\'         ; desde la raíz
+        je .nom
+        push esi
+        mov esi, e_dir + 2
+        call hvl_cad
+        pop esi
+        cmp byte [edi-1], '\'
+        je .nom
+        mov al, '\'
+        stosb
+.nom:
+        call hvl_cad
+        mov byte [edi], 0
+        sub edi, e_larga
+        cmp edi, 79
+        jbe .cabe
+        mov esi, t_e_larga
+        call esc_aviso
+        jmp .x
+.cabe:
+        xor eax, eax
+        HV esc_imagen
+        mov edx, eax                ; como estuviera puesta la de antes
+        mov esi, e_larga
+        call esc_poner
+.x:
+        popad
+        ret
+
+; =============================================================================
 ;  VENTANAS.INI
 ; =============================================================================
 ini_leer:
@@ -2627,6 +2882,36 @@ ini_escribir:
         add ebx, INI_E
         jmp .e
 .fin:
+        xor eax, eax                ; [FONDO] la imagen de fondo, si hay: lo
+        HV esc_imagen               ; que diga Hispa Ventanas (EAX, ESI)
+        cmp byte [esi], 0
+        je .ff
+        cmp dword [a_escritorio], 0 ; (sin «Escritorio=», falta la sección)
+        jge .f1
+        push eax
+        push esi
+        mov ax, 0x0A0D
+        stosw
+        mov esi, s_escritorio
+        call hvl_cad
+        stosw
+        pop esi
+        pop eax
+.f1:
+        push esi
+        mov esi, k_fondo
+        call hvl_cad
+        pop esi
+        call hvl_cad
+        mov word [edi], 0x0A0D
+        add edi, 2
+        mov esi, k_ajuste
+        call hvl_cad
+        mov esi, [aj_nombres+eax*4]
+        call hvl_cad
+        mov word [edi], 0x0A0D
+        add edi, 2
+.ff:
         mov ecx, edi
         mov edx, ini_buf
         sub ecx, edx
@@ -4638,6 +4923,14 @@ l_fecha     resb 48
 l_hora      resb 12
 l_res       resb 40
 sis_txt     resb 800
+; [FONDO] el apartado «Escritorio»
+l_fon       resb 84                 ; la imagen puesta (como se enseña)
+e_nom       resb 84                 ; lo que da el diálogo de abrir
+e_dir       resb 84                 ; la carpeta de trabajo
+e_ruta      resb 84                 ; una ruta para esc_imagen
+e_larga     resb 176                ; la ruta completa, antes de ver si cabe
+            alignb 4
+e_serie     resd 1                  ; el número de la última imagen que se sabe
 ; [RED] el apartado «Red»
 red_ruta    resb 100
 r_ip_txt    resb 20
