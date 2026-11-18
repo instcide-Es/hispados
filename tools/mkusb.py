@@ -25,13 +25,14 @@ OUT486 = os.path.join(B, 'hispa486-usb.img')
 # build/ (el de sus reglas y sus pruebas) y el que llevan en la imagen
 HISPA32 = (('WINCALC.EXE', 'CALC32.EXE'), ('WINHOLA.EXE', 'HOLA32.EXE'),
            ('WINCTL.EXE', 'CTL32.EXE'), ('WINMENU.EXE', 'MENU32.EXE'),
-           ('WINGUI.EXE', 'AVISO32.EXE'))
+           ('WINGUI.EXE', 'AVISO32.EXE'), ('NAVES.EXE', 'NAVES.EXE'))   # [DX] el juego de ejemplo
 # y lo que la edición pone en \HISPADOS (en sistema/486/, en UTF-8)
 SIS486 = ('EDICION.INI', 'VENTANAS.INI', 'CENTRO.INI')
 # [HISPA-486] fase 3d: las DLL de Win32 que van en \HISPADOS al lado de
 # MSVCRT.DLL (HW32 busca las DLL en su carpeta): los controles comunes y el
 # CRT de Visual C++ 2015 (docs/486/HISPA-486.md, «Cómo está hecho (fase 3d)»)
-DLL486 = ('COMCTL32.DLL', 'UCRT.DLL')
+# [DX] fase 5: DirectX (DDRAW, DSOUND, DINPUT), WINMM y una OLE32 mínima
+DLL486 = ('COMCTL32.DLL', 'UCRT.DLL', 'WINMM.DLL', 'DDRAW.DLL', 'DSOUND.DLL', 'DINPUT.DLL', 'OLE32.DLL')
 # [FONDO] y la imagen de fondo del escritorio de Hispa-486, también en
 # \HISPADOS: un BMP de 800x600 ya con los colores de Hispa Ventanas, que
 # tools/mkfondo.py saca de sistema/486/HISPADOS.JPG («make fondo486»); la
