@@ -336,6 +336,13 @@ texto (no dependen de Hispa Ventanas).
 | El disquete «Internet» entero | 1.276 KB de 1.440 (con HSPJS.DLL; sin ella, 405) |
 | JavaScript de una página de la biblioteca de ClicGest | 670-720 KB (1,2 MB como mucho); la de una salida (`/eventos/1`, 351 KB de HTML y Bootstrap), 1,9 MB. Se devuelve todo al dejar la página |
 | El motor recién hecho, sin página (JS.EXE) | 163 KB |
+| Compilar el preludio (`dom.js`, 82 KB), una vez al abrir el Navegador | 56 millones de instrucciones: unos 2,3 s en un 486DX2-66 |
+| Compilar `mobile.js` de ClicGest (36 KB), la primera vez | 10 millones: 0,4 s (luego, guardado) |
+| Compilar Bootstrap (`bootstrap.bundle.min.js`, 80 KB) | 73 millones: 3 s |
+| Los guiones de una página de la biblioteca, ya compilados (desde que llega la página hasta `load`) | hasta 60 millones: 2,5 s como mucho |
+| La de una salida (`/eventos/1`: 351 KB de HTML, Bootstrap y sus pestañas) | 380 millones: unos 16 s |
+| Filtrar 20.000 nombres como el buscador de «Prestar» | 220 millones: 9 s (la demostración tiene 60 personas: un instante) |
+| Un bucle de un millón de vueltas (`x += i % 7`) | 380 millones: 16 s |
 | Memoria con una página de la biblioteca abierta | 1,6 MB (1.608 KB) |
 | Memoria con una página de 121 KB de HTML (unas 2.170 filas) | 2,6 MB (2.632 KB); no crece más con el resto de páginas de la prueba |
 | Memoria convencional | 16 KB (el búfer de DOS de HW32) + 19 KB (las tramas de red) |
@@ -349,6 +356,11 @@ deja las capturas `mb` (la biblioteca) y `mg` (`/grande?n=720`, 121 KB). El
 montón del Navegador no devuelve memoria al sistema mientras está abierto (la
 reutiliza de una página a otra); al cerrarlo vuelve toda. Hispa Ventanas y el
 Navegador con la biblioteca abierta ocupan unos 2,9 MB de memoria extendida.
+
+Lo del JavaScript se mide con `-icount shift=0` (una instrucción, un
+nanosegundo del reloj del equipo): con JS.EXE y `tests/navjs/clicgest_real.sh`
+con `ICOUNT="-icount shift=0"` (las líneas `[memoria]` de NAVEGA.LOG, con la
+resolución del reloj de DOS: 55 ms, o sea 55 millones).
 
 Las cuentas del 486 salen de contar instrucciones en QEMU (`-icount`) y
 multiplicaciones en el anfitrión, a 2,75 ciclos por instrucción y 40 por

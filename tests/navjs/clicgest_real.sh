@@ -60,7 +60,7 @@ dir() { tecla f6; sleep 1; escribe "$1"; tecla ret; sleep ${2:-60}; }
   done
   dir https://clicgest.es/eventos/1 150; aparta
   tecla pgdn; sleep 4; tecla pgdn; sleep 4; tecla pgdn; sleep 4; tecla pgdn; sleep 4; tecla pgup; sleep 6; foto 20_salida_pestanas
-  clic 80 178; sleep 10; aparta; foto 21_salida_pagado_todo           # la pestaña «Pagado todo»
+  clic 80 88; sleep 10; aparta; foto 21_salida_pagado_todo           # la pestaña «Pagado todo»
   mon quit; } | { rm -f $T/mon; timeout 3000 qemu-system-i386 ${ICOUNT:-} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 16 -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
     -boot a -no-reboot -netdev user,id=n0 -device rtl8139,netdev=n0 > $T/raw 2>&1; }
