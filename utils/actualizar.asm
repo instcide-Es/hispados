@@ -17,8 +17,13 @@
 ;      disco=4            ; MiB libres mínimos en el disco de destino
 ;      nivel=0            ; "riqueza" de la edición (mayor = más completa)
 ;      edicion=Hispa-386 (con Hispa Ventanas)
+;      gama=386           ; [HISPA-486] la gama: 386 (por omisión) o 486
 ;      paquete=http://actualiza.clicgest.es/hispados-0.9.16.paq
 ;      nota=Novedades...
+;  [HISPA-486] Cada instalación se actualiza en su gama: la de la instalada
+;  sale de \HISPADOS\EDICION.INI («Gama=486»; sin el archivo, 386) y las
+;  secciones de otra gama no se miran (ni se ofrecen ni se avisan). Para pasar
+;  de Hispa-386 a Hispa-486: la imagen de Hispa-486 e INSTALAR (Actualizar).
 ;  También entiende el formato viejo (solo «version=X»): lo trata como una única
 ;  versión sin requisitos y sin paquete (solo avisa, como antes).
 ;
@@ -79,6 +84,7 @@ start:
         mov dl, [boot_num]
         call det_disco
         mov [det_free_mib], eax
+        call lee_gama               ; [HISPA-486] la gama de lo instalado
         ; ---- la dirección: ¿viene en la línea de órdenes? ----
         mov si, 0x81
         call blancos
@@ -280,6 +286,81 @@ ini_actualizar:
 .r:
         ret
 
+; [HISPA-486] la gama de lo instalado: «Gama=» de \HISPADOS\EDICION.INI de la
+; unidad de arranque -> [inst_gama] (386 si no está el archivo o la clave)
+lee_gama:
+        mov word [inst_gama], 386
+        mov al, [boot_letter]
+        mov [edi_ruta], al
+        mov dx, edi_ruta
+        mov ax, 0x3D00
+        int 0x21
+        jc .r
+        mov bx, ax
+        mov dx, ini_buf
+        mov cx, INI_MAX - 1
+        mov ah, 0x3F
+        int 0x21
+        pushf
+        push ax
+        mov ah, 0x3E
+        int 0x21
+        pop ax
+        popf
+        jc .r
+        mov si, ini_buf
+        add si, ax
+        mov byte [si], 0
+        mov si, ini_buf
+.linea:
+        call .blancos
+        mov di, k_gama              ; «GAMA», sin mirar mayúsculas
+.k:
+        mov ah, [di]
+        test ah, ah
+        jz .ke
+        mov al, [si]
+        call upcase
+        cmp al, ah
+        jne .salta
+        inc si
+        inc di
+        jmp .k
+.ke:
+        call .blancos
+        cmp byte [si], '='
+        jne .salta
+        inc si
+        call .blancos
+        call parse_num
+        jc .salta
+        cmp eax, 386
+        jb .salta
+        cmp eax, 9999
+        ja .salta
+        mov [inst_gama], ax
+        ret
+.salta:
+        mov al, [si]
+        test al, al
+        jz .r
+        inc si
+        cmp al, 10
+        jne .salta
+        jmp .linea
+.r:
+        ret
+.blancos:
+        cmp byte [si], ' '
+        je .b1
+        cmp byte [si], 9
+        jne .b2
+.b1:
+        inc si
+        jmp .blancos
+.b2:
+        ret
+
 ; =============================================================================
 ;  Leer versiones.txt (en body_buf, acaba en 0) a las tablas de secciones.
 ;  Entiende secciones [x.y.z] con claves cpu/ram/disco/nivel/edicion/paquete/
@@ -429,6 +510,7 @@ nueva_seccion:
         shl bx, 1
         mov word [v_disco + bx], 0
         mov word [v_nivel + bx], 0
+        mov word [v_gama + bx], 386
         mov bx, [cur_i]
         shl bx, 2
         mov dword [v_ram + bx], 0
@@ -491,6 +573,10 @@ aplica_clave:
         call kcmp
         jnc .nota
         mov di, p_clave
+        mov bp, k_gama
+        call kcmp
+        jnc .gama
+        mov di, p_clave
         mov bp, k_descarga
         call kcmp
         jnc .descarga
@@ -525,6 +611,14 @@ aplica_clave:
         mov bx, [cur_i]
         shl bx, 1
         mov [v_nivel + bx], ax
+        ret
+.gama:
+        mov si, p_valor
+        call parse_num
+        jc .r
+        mov bx, [cur_i]
+        shl bx, 1
+        mov [v_gama + bx], ax
         ret
 .paquete:
         mov si, p_valor
@@ -715,6 +809,12 @@ decide:
         jz .vacio
         xor bx, bx
 .cl:
+        ; [HISPA-486] otra gama: como si no estuviera
+        mov di, bx
+        shl di, 1
+        mov ax, [v_gama + di]
+        cmp ax, [inst_gama]
+        jne .no
         ; cpu
         mov al, [v_cpu + bx]
         test al, al
@@ -818,6 +918,11 @@ es_mejora:
         push ecx
         push edx
         mov cx, bx
+        shl bx, 1                   ; [HISPA-486] otra gama: no mejora nada
+        mov dx, [v_gama + bx]
+        cmp dx, [inst_gama]
+        jne .nomej
+        mov bx, cx
         shl bx, 2
         mov edx, [v_num + bx]
         cmp edx, VER_NUM
@@ -827,6 +932,7 @@ es_mejora:
         movzx edx, word [v_nivel + bx]
         cmp edx, VER_EDI
         ja .si
+.nomej:
         xor al, al
         jmp .r
 .si:
@@ -888,6 +994,11 @@ mostrar_veredicto:
         call puts
         mov si, s_verstr
         call puts
+        cmp word [inst_gama], 486   ; [HISPA-486] la edición, si no es la de siempre
+        jne .g386
+        mov si, m_ed486
+        call puts
+.g386:
         mov si, m_inst2
         call puts
         cmp byte [nver], 0
@@ -1236,6 +1347,7 @@ apply_update:
         mov di, s_hpdir
         call make_dir
         call copy_set
+        call copia_h32              ; [HISPA-486] y \HISPA32, si el paquete la trae
         mov byte [keepdata], 0
         mov byte [fix], 0
         mov si, s_kernel
@@ -1255,6 +1367,27 @@ apply_update:
         mov di, s_root
         call copy_set
         mov byte [fix], 0
+        ret
+
+; [HISPA-486] \HISPA32 del paquete (los programas de 32 bits), si la trae
+copia_h32:
+        mov al, [boot_letter]
+        mov [h32_ruta], al
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        mov dx, h32_ruta
+        mov cx, 0x10
+        mov ah, 0x4E
+        int 0x21
+        jc .r
+        test byte [dta+0x15], 0x10
+        jz .r
+        mov si, s_h32
+        mov di, s_h32dir
+        call make_dir
+        call copy_set
+.r:
         ret
 
 ; guardar CONFIG.SYS y AUTOEXEC.BAT del usuario como .ANT (unidad de arranque)
@@ -2366,6 +2499,12 @@ k_disco     db "DISCO", 0
 k_nivel     db "NIVEL", 0
 k_paquete   db "PAQUETE", 0
 k_edicion   db "EDICION", 0
+k_gama      db "GAMA", 0
+edi_ruta    db "A:\HISPADOS\EDICION.INI", 0
+h32_ruta    db "A:\ACTUALIZA\HISPA32", 0
+s_h32dir    db "\HISPA32\", 0
+s_h32       db "\HISPA32\*.*", 0
+m_ed486     db " (Hispa-486)", 0
 s_https     db "HTTPS://", 0
 s_http      db "HTTP://", 0
 s_httpm     db "http://", 0
@@ -2459,6 +2598,8 @@ v_num       resd MAX_VER
 v_ram       resd MAX_VER
 v_disco     resw MAX_VER
 v_nivel     resw MAX_VER
+v_gama      resw MAX_VER            ; [HISPA-486] 386 o 486
+inst_gama   resw 1                  ; la gama de lo instalado (EDICION.INI)
 v_cpu       resb MAX_VER
 v_haspaq    resb MAX_VER
 v_cumple    resb MAX_VER

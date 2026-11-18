@@ -715,6 +715,33 @@ hispabios: $(HBEFI)
 usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(wildcard usb/* floppy/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
+# [HISPA-486] la imagen USB de Hispa-486 (build/hispa486-usb.img) y su disquete
+# «Hispa-486» (build/hispa486-disquete.img, el último de la instalación desde
+# disquetes): lo de Hispa-386 más el escritorio de Hispa-486 (la clave de
+# VENTANAS.INI y el AUTOEXEC.BAT que lo arranca), el Centro de programas con
+# el grupo «Hispa32», la edición (EDICION.INI) y los programas de 32 bits de
+# ejemplo en \HISPA32. Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
+# imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
+H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(H32EXE) $(wildcard usb/* floppy/* sistema/486/*)
+	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
+
+# [HISPA-486] los paquetes de ACTUALIZAR (docs/RED.md, «Formato del paquete
+# .PAQ»), hechos de la imagen USB de cada edición (sin INSTALL.BAT ni \EFI, que
+# en un disco duro no hacen falta): build/hispados.paq (Hispa-386) y
+# build/hispa486.paq (Hispa-486, con \HISPA32 y EDICION.INI). En
+# versiones.txt, el de Hispa-486 va en una sección con «gama=486».
+paq: usb
+	rm -rf $(B)/paq386 && mkdir -p $(B)/paq386
+	MTOOLS_SKIP_CHECK=1 mcopy -s -n -i $(B)/hispados-usb.img@@1M ::/ $(B)/paq386/
+	rm -rf $(B)/paq386/INSTALL.BAT $(B)/paq386/EFI
+	python3 -I tools/paquete.py $(B)/paq386 $(B)/hispados.paq
+paq486: usb486
+	rm -rf $(B)/paq486 && mkdir -p $(B)/paq486
+	MTOOLS_SKIP_CHECK=1 mcopy -s -n -i $(B)/hispa486-usb.img@@1M ::/ $(B)/paq486/
+	rm -rf $(B)/paq486/INSTALL.BAT $(B)/paq486/EFI
+	python3 -I tools/paquete.py $(B)/paq486 $(B)/hispa486.paq
+
 run: $(IMG)
 	$(QEMU) -rtc base=localtime -drive file=$(IMG),format=raw,if=floppy -boot a
 
@@ -776,7 +803,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN
+TEST_DEPS = $(IMG) usb usb486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN
 
 para-pruebas: $(TEST_DEPS)
 
@@ -814,6 +841,7 @@ test: $(TEST_DEPS)
 	tests/run_sbvga_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_instalar_usb_tests.sh
+	tests/run_imagen486_tests.sh
 	tests/run_actualizar_disco_tests.sh
 	tests/run_actualizar_instala_tests.sh
 	tests/run_partir_modelo_tests.sh $(IMG)
@@ -929,4 +957,4 @@ test: $(TEST_DEPS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs
+.PHONY: all usb usb486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs

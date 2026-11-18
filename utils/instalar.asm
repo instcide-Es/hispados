@@ -25,6 +25,13 @@
 ;                     si el disco no tiene, el MBR de Hispa-DOS (PARTIR
 ;                     /ARRANQUE:unidad:). El sector de arranque lleva la
 ;                     unidad 80h y la geometría de ESE disco (SYS).
+;  [HISPA-486] La edición la da el origen: si trae \HISPADOS\EDICION.INI
+;  (la imagen USB de Hispa-486) se copia como todo \HISPADOS, y además la
+;  carpeta \HISPA32 si la trae. Al ACTUALIZAR un Hispa-386 con un origen de
+;  Hispa-486, el VENTANAS.INI y el CENTRO.INI del disco se guardan como .ANT
+;  (los nuevos traen el escritorio de Hispa-486 y el grupo «Hispa32»); un
+;  Hispa-486 no se actualiza con un origen de Hispa-386 (sí con [N]). Desde
+;  disquetes, al final se ofrece el disquete «Hispa-486» (docs/486/HISPA-486.md).
 ;  Último paso, la comprobación del sonido: AUDICION /RAPIDA (la versión
 ;  corta de la prueba de sonido) guarda lo que suena en el SONIDO.INI del
 ;  disco instalado (unidad:\HISPADOS\SONIDO.INI, con su informe SONIDO.TXT
@@ -179,6 +186,26 @@ start:
         jc cancel
         jmp .fmt
 .upd_confirm:
+        ; [HISPA-486] ¿de qué edición son el disco y el origen?
+        call ed_mirar
+        cmp byte [ed_dst], 0
+        je .ed_conv
+        cmp byte [ed_src], 0
+        jne .ed_ok
+        mov al, [src]               ; desde disquetes, el de Hispa-486 se pide
+        and al, 0xDF                ; al final (disq486)
+        cmp al, 'B'
+        jbe .ed_ok
+        mov si, msg_ed_baja         ; un Hispa-486 con un origen de Hispa-386: no
+        call puts
+        jmp cancel
+.ed_conv:
+        cmp byte [ed_src], 0
+        je .ed_ok
+        mov byte [ed_pasar], 1      ; de Hispa-386 a Hispa-486
+        mov si, msg_ed_pasa
+        call puts
+.ed_ok:
         ; ACTUALIZAR en el sitio: resumen y confirmación; nunca se formatea
         mov si, msg_upd1
         call puts
@@ -190,6 +217,9 @@ start:
         call puts
         ; guardar el CONFIG.SYS y el AUTOEXEC.BAT del usuario como .ANT
         call backup_user_cfg
+        cmp byte [ed_pasar], 0      ; [HISPA-486] y, al pasar de edición, su
+        je .fmt                     ; VENTANAS.INI y su CENTRO.INI
+        call ed_guardar
 .fmt:
         ; 1) sistema: SYS unidad:
         mov dx, sys_path
@@ -232,6 +262,7 @@ start:
         mov di, s_hpdir
         call make_dir
         call copy_set
+        call copia_h32              ; [HISPA-486] y \HISPA32, si la trae
         mov byte [keepdata], 0
         ; AUTOEXEC.BAT y CONFIG.SYS
         cmp byte [updmode], 0
@@ -241,7 +272,7 @@ start:
         mov di, s_root
         mov byte [keep], 1
         mov byte [fix], 1
-        call copy_set
+        call copia_auto
         mov si, s_config
         mov di, s_root
         call copy_set
@@ -252,7 +283,7 @@ start:
         mov byte [fix], 1
         mov si, s_autoexec
         mov di, s_root
-        call copy_set
+        call copia_auto
         mov si, s_config
         mov di, s_root
         call copy_set
@@ -336,6 +367,7 @@ start:
 .end:
         call instal2                ; [0.9.24] el disquete «Instalación 2», si hace falta
         call oficina                ; [0.9.22] el disquete «Oficina», si hace falta
+        call disq486                ; [HISPA-486] y el disquete «Hispa-486», si se quiere
         cmp byte [updmode], 0
         jne .end_upd
         mov si, msg_boot
@@ -567,6 +599,164 @@ oficina:
         mov si, msg_crlf
         jmp puts
 
+; [HISPA-486] Instalando desde disquetes (los de Hispa-386), el último que se
+; ofrece es el de «Hispa-486»: \HISPA32, lo de la edición en \HISPADOS
+; (EDICION.INI, VENTANAS.INI, CENTRO.INI) y el AUTOEXEC.BAT que arranca el
+; escritorio (si el de Hispa-386 se ha puesto ahora). Con N, queda Hispa-386.
+disq486:
+        mov al, [src]
+        and al, 0xDF
+        cmp al, 'B'
+        ja .r
+        mov [d4_ruta], al
+        mov dx, d4_ruta             ; ¿el origen ya es de Hispa-486?
+        call existe
+        jnc .r
+.pregunta:
+        mov si, msg_d4_preg
+        call puts
+        call ask_yes
+        jc .r
+        mov dx, d4_ruta             ; ¿es el de Hispa-486?
+        call existe
+        jnc .es
+        mov si, msg_d4_no
+        call puts
+        jmp .pregunta
+.es:
+        mov al, [dst]               ; un Hispa-386 que pasa a Hispa-486: sus
+        mov [ed_ruta], al           ; VENTANAS.INI y CENTRO.INI, a .ANT
+        mov dx, ed_ruta
+        call existe
+        jnc .yaes
+        call ed_guardar
+.yaes:
+        mov word [ncopied], 0
+        mov word [nfailed], 0
+        mov byte [keep], 0
+        mov byte [fix], 0
+        mov al, [updmode]
+        mov [keepdata], al
+        mov si, s_hsp
+        mov di, s_hdir
+        call make_dir
+        call copy_set
+        call copia_h32
+        mov byte [keepdata], 0
+        cmp byte [auto_puesto], 0
+        je .sinauto
+        mov byte [fix], 1
+        mov si, s_autoexec
+        mov di, s_root
+        call copy_set
+        mov byte [fix], 0
+.sinauto:
+        mov si, msg_d4_hecho
+        call puts
+        movzx eax, word [ncopied]
+        call putnum
+        mov si, msg_of_hecho2
+        call puts
+        cmp word [nfailed], 0
+        je .vuelta
+        mov si, msg_of_fallo
+        call puts
+.vuelta:
+        mov si, msg_of_vuelve       ; (el intérprete vuelve a leerse del disquete)
+        call puts
+        mov ah, 0x08
+        int 0x21
+        mov si, msg_crlf
+        jmp puts
+.r:
+        ret
+
+; [HISPA-486] \HISPA32 (los programas de 32 bits), si el origen la trae
+copia_h32:
+        mov al, [src]
+        mov [h32_ruta], al
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        mov dx, h32_ruta
+        mov cx, 0x10
+        mov ah, 0x4E
+        int 0x21
+        jc .r
+        test byte [dta+0x15], 0x10
+        jz .r
+        mov si, s_h32
+        mov di, s_h32dir
+        call make_dir
+        call copy_set
+.r:
+        ret
+
+; AUTOEXEC.BAT (SI, DI y las señales ya puestas): copy_set, y apuntar si se ha
+; puesto el del sistema (el disquete «Hispa-486» lo cambia entonces por el suyo)
+copia_auto:
+        mov ax, [ncopied]
+        push ax
+        call copy_set
+        pop ax
+        cmp ax, [ncopied]
+        je .r
+        mov byte [auto_puesto], 1
+.r:
+        ret
+
+; DX = ruta -> CF=0 si el archivo existe (se abre y se cierra)
+existe:
+        mov ax, 0x3D00
+        int 0x21
+        jc .r
+        mov bx, ax
+        mov ah, 0x3E
+        int 0x21
+        clc
+.r:
+        ret
+
+; [HISPA-486] ¿llevan el origen y el destino \HISPADOS\EDICION.INI?
+; -> [ed_src], [ed_dst] = 1 si sí
+ed_mirar:
+        mov al, [src]
+        mov [ed_ruta], al
+        mov dx, ed_ruta
+        call existe
+        setnc [ed_src]
+        mov al, [dst]
+        mov [ed_ruta], al
+        mov dx, ed_ruta
+        call existe
+        setnc [ed_dst]
+        ret
+
+; [HISPA-486] al pasar un Hispa-386 a Hispa-486: su VENTANAS.INI y su
+; CENTRO.INI, como VENTANAS.ANT y CENTRO.ANT (así se ponen los de la edición:
+; el escritorio de Hispa-486 y el grupo «Hispa32»)
+ed_guardar:
+        mov al, [dst]
+        mov [bk_vi], al
+        mov [bk_va], al
+        mov [bk_ci], al
+        mov [bk_cn], al
+        mov si, bk_vi
+        mov di, bk_va
+        call backup_one
+        jc .c
+        mov si, msg_bak_v
+        call puts
+.c:
+        mov si, bk_ci
+        mov di, bk_cn
+        call backup_one
+        jc .r
+        mov si, msg_bak_n
+        call puts
+.r:
+        ret
+
 ; ¿S/N? (se escribe la respuesta y se pulsa Intro) -> CF=0 si es que sí
 ask_yes:
         mov byte [lbuf], 8
@@ -773,6 +963,17 @@ bk_ab       db "C:\AUTOEXEC.BAT", 0
 bk_aa       db "C:\AUTOEXEC.ANT", 0
 bk_cs       db "C:\CONFIG.SYS", 0
 bk_ca       db "C:\CONFIG.ANT", 0
+bk_vi       db "C:\HISPADOS\VENTANAS.INI", 0
+bk_va       db "C:\HISPADOS\VENTANAS.ANT", 0
+bk_ci       db "C:\HISPADOS\CENTRO.INI", 0
+bk_cn       db "C:\HISPADOS\CENTRO.ANT", 0
+ed_ruta     db "C:\HISPADOS\EDICION.INI", 0
+d4_ruta     db "A:\HISPADOS\EDICION.INI", 0
+h32_ruta    db "C:\HISPA32", 0
+ed_src      db 0                ; el origen es de Hispa-486
+ed_dst      db 0                ; el destino ya es de Hispa-486
+ed_pasar    db 0                ; ACTUALIZAR un Hispa-386 con uno de Hispa-486
+auto_puesto db 0                ; se ha puesto el AUTOEXEC.BAT del origen
 part_path   db "A:\HISPADOS\PARTIR.COM", 0
 inst_tail   db 10, " /INSTALAR", 13
 arr_tail    db 13, " /ARRANQUE:"
@@ -795,6 +996,8 @@ s_hsdir     db "\HISPADOS\JUEGOS\SMS\", 0
 s_hsps      db "\HISPADOS\JUEGOS\SMS\*.*", 0
 s_hpdir     db "\HISPADOS\PROGS\", 0
 s_hspp      db "\HISPADOS\PROGS\*.*", 0
+s_h32dir    db "\HISPA32\", 0
+s_h32       db "\HISPA32\*.*", 0
 s_autoexec  db "\AUTOEXEC.BAT", 0
 s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0
@@ -809,7 +1012,9 @@ msg_usage   db "Uso: INSTALAR unidad: [/NOSONIDO]   o   INSTALAR [/NOSONIDO]", 1
             db "Si el destino ya tiene Hispa-DOS, ofrece ACTUALIZARLO en el sitio: cambia", 13, 10
             db "los programas del sistema por los nuevos y conserva tus datos y ajustes", 13, 10
             db "(*.INI, *.REC) y tus carpetas; no formatea nada. Lo normal: arranca desde", 13, 10
-            db "el USB nuevo y actualiza el disco interno.", 13, 10, 0
+            db "el USB nuevo y actualiza el disco interno.", 13, 10
+            db "La edición (Hispa-386 o Hispa-486) es la del origen; desde disquetes, al", 13, 10
+            db "final se ofrece el de Hispa-486.", 13, 10, 0
 msg_same    db "No se puede instalar sobre la unidad de arranque.", 13, 10, 0
 msg_nofmt   db "La unidad "
 msg_drv1    db "C: no existe.", 13, 10
@@ -839,6 +1044,19 @@ msg_i2_preg db 13, 10, "Los programas de Windows de consola (HW32, de Hispa-486)
             db "(N para seguir sin ", 0x82, "l; se puede copiar despu", 0x82, "s): ", 0
 msg_i2_no   db "Ese no es el disquete ", 0xAE, "Instalaci", 0xA2, "n 2", 0xAF, ".", 13, 10, 0
 msg_i2_hecho db "Instalaci", 0xA2, "n 2: ", 0
+msg_d4_preg db 13, 10, "Hispa-486 (el escritorio con el men", 0xA3, " Inicio y los programas Hispa32)", 13, 10
+            db "va en el disquete ", 0xAE, "Hispa-486", 0xAF, ". Para instalarlo, p", 0xA2, "ngalo en la unidad", 13, 10
+            db "de arranque y escriba S (N para quedarse con Hispa-386): ", 0
+msg_d4_no   db "Ese no es el disquete ", 0xAE, "Hispa-486", 0xAF, ".", 13, 10, 0
+msg_d4_hecho db "Hispa-486: ", 0
+msg_ed_baja db 13, 10, "Esa unidad tiene Hispa-486 y este origen es de Hispa-386: para", 13, 10
+            db "actualizarla, arranque con la memoria USB de Hispa-486 (o use sus", 13, 10
+            db "disquetes). Con [N] se puede poner Hispa-386 de nuevo (se borra todo).", 13, 10, 0
+msg_ed_pasa db 13, 10, "Esa unidad tiene Hispa-386 y este origen es de Hispa-486: al actualizar", 13, 10
+            db "pasa a Hispa-486 (el escritorio con el men", 0xA3, " Inicio). Su VENTANAS.INI y su", 13, 10
+            db "CENTRO.INI se guardan como VENTANAS.ANT y CENTRO.ANT.", 13, 10, 0
+msg_bak_v   db "Tu VENTANAS.INI anterior se ha guardado como VENTANAS.ANT.", 13, 10, 0
+msg_bak_n   db "Tu CENTRO.INI anterior se ha guardado como CENTRO.ANT.", 13, 10, 0
 msg_of_fallo db "Alguno no se ha podido copiar (", 0xA8, "disco lleno?).", 13, 10, 0
 msg_of_vuelve db "Vuelva a poner el disquete de arranque y pulse una tecla.", 0
 msg_nopart  db "No se encuentra \HISPADOS\PARTIR.COM en la unidad de arranque.", 13, 10, 0

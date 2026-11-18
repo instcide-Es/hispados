@@ -98,7 +98,9 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    nombres largos (los programas que buscan archivos de nombre largo los
    encuentran por su recorte 8+3, como en MS-DOS).
 2. ~~Que COMMAND.COM ejecute los PE solo~~: hecho (17/11/2026): un .EXE con cabecera PE se lanza con HW32 (de la carpeta de COMSPEC, del PATH o de la actual); si no hay HW32, lo dice y no se lanza.
-3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23).
+3. HW32 y MSVCRT.DLL en el sistema instalado (Hispa-386 0.9.23). La imagen
+   y la instalación propias de Hispa-486: hechas (18/11/2026), ver «La
+   imagen, la instalación y las actualizaciones de Hispa-486».
 4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a, la 3b (el «Hola,
    mundo» de ventana) y la 3c (KERNEL32 y las DLL dentro de Hispa Ventanas,
    los controles, los menús, los recursos y los diálogos) están hechas; sigue
@@ -191,8 +193,190 @@ inicio, porque así respeta la estética de Win 3.11».
   `/486`, VGA de 640×480 y 16 colores con la clave de VENTANAS.INI y un
   programa de Windows, y el escritorio de Hispa-386 sin el ajuste.
 - **Lo que sigue de la fase 4:** iconos en el escritorio (accesos directos y
-  «Mi PC» con las unidades), «Ejecutar...» y «Documentos» en el menú, y que
-  el instalador de Hispa-486 ponga la clave.
+  «Mi PC» con las unidades) y «Ejecutar...» y «Documentos» en el menú. La
+  clave la ponen ya la imagen y el instalador de Hispa-486 (ver «La imagen,
+  la instalación y las actualizaciones»).
+
+## La imagen, la instalación y las actualizaciones de Hispa-486 (18/11/2026)
+
+La imagen de Hispa-486 sale del proyecto, igual que la de Hispa-386: nada
+se hace a mano. Lo que Hispa-486 tiene de más que Hispa-386 (hoy) son unos
+pocos archivos; los programas y el núcleo son los mismos.
+
+### Qué lleva de más
+
+| Dónde | Qué | De dónde sale |
+|---|---|---|
+| `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, tras `REM C:\HISPADOS\HSPRED /AUTO`, `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `tools/mkusb.py` |
+| `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio | `sistema/486/VENTANAS.INI` |
+| `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) | `sistema/486/CENTRO.INI` |
+| `\HISPADOS\EDICION.INI` | `[Edicion]` `Gama=486` `Nombre=Hispa-486`: la **edición** instalada | `sistema/486/EDICION.INI` |
+| `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) |
+
+En lo visible se dice **«Hispa32»**, no «Windows» ni «Win32» (decisión de
+Carlos). Los programas se siguen llamando `WIN*.EXE` en `build/`, en sus
+reglas del Makefile y en sus pruebas (las de las fases 3a-3c); solo al
+copiarlos a la imagen toman el nombre sin «WIN» (la tabla `HISPA32` de
+`tools/mkusb.py`). Lo que todavía dice «Win32» son los títulos de algunas
+ventanas de esos programas («Hola desde Win32», «Controles de Win32»,
+«Prueba de Win32», el «Acerca de» de los menús): están en `tests/progs/` y
+los miran las pruebas de la fase 3; se cambiarán con ellas.
+
+El `CENTRO.INI` de `sistema/486/` es el que hace Hispa Ventanas la primera
+vez (los grupos Principal, Accesorios, Juegos, Sonido y Productividad, con
+sus accesos) más el grupo «Hispa32». `mkusb.py` quita los accesos a
+programas que no estén en la imagen y pone `Modulos=` al número de módulos
+.HVP de `JUEGOS` y `PROGS`; si alguno no tiene acceso en la plantilla (un
+programa nuevo), pone `Modulos=0` y Hispa Ventanas lo añade solo a su grupo
+al arrancar (docs/VENTANAS.md, «CENTRO.INI»). Así un programa nuevo no
+obliga a tocar la plantilla, aunque conviene ponerlo en ella para que salga
+en su sitio.
+
+Hispa-386 no cambia: no lleva nada de esto y su escritorio es el de la gama
+de Windows 3.1 (sin menú Inicio).
+
+### Cómo se hace
+
+```
+make usb486     # build/hispa486-usb.img y build/hispa486-disquete.img
+make paq486     # build/hispa486.paq (el paquete de ACTUALIZAR)
+```
+
+`make usb486` (`python3 tools/mkusb.py 486`) hace la misma imagen de 512 MB
+que `make usb` con lo de la tabla. Necesita lo mismo que `make usb` más
+`gcc -m32` (los programas de 32 bits). También hace el disquete
+**«Hispa-486»** (`build/hispa486-disquete.img`, etiqueta `HISPA486`): para
+instalar desde disquetes son los de Hispa-386 (el de arranque,
+`hispados-disquete.img`; «Instalación 2», `hispados-instal2.img`; y
+«Oficina», `hispados-oficina.img`) y este, el último. Lleva `\HISPA32`, los
+tres .INI de la edición en `\HISPADOS` y el `AUTOEXEC.BAT` que arranca el
+escritorio.
+
+### Cómo se publica
+
+1. `make usb486` (y `make test`, o al menos `tests/run_imagen486_tests.sh`,
+   `tests/run_barra_tests.sh` y las de las fases 3; mejor en el PC con
+   `tools/pruebas_pc.sh`, que ya compila `usb486`).
+2. La descarga: `cd build && zip -9 hispa486-usb.zip hispa486-usb.img`
+   (y, si se quieren, los cuatro disquetes en `hispa486-disquetes.zip`).
+3. La Release de GitHub (`hispa486-0.x`) con el `.zip` y sus sumas
+   (`sha256sum`), y la demo de hispados.es: la imagen tal cual en
+   `v86/hispa486.img`.
+4. Para ACTUALIZAR: `make paq486`, subir `build/hispa486.paq` al servidor y
+   poner su sección, con `gama=486`, en `versiones.txt` (ver abajo).
+
+### La instalación (INSTALAR)
+
+**La edición la decide el origen**, sin preguntar nada: lo que se instala
+desde la memoria de Hispa-486 es Hispa-486 y desde la de Hispa-386, Hispa-386.
+INSTALAR copia `\HISPADOS` entero (así llegan `EDICION.INI`, `VENTANAS.INI`
+y `CENTRO.INI`), la carpeta `\HISPA32` si el origen la trae y el
+`AUTOEXEC.BAT` del origen (con las letras pasadas a C:). Es lo mismo que ya
+hacía con todo lo demás; así una memoria USB de otra edición futura no
+necesita otro instalador.
+
+Al **actualizar** ([A]) un disco que ya tiene Hispa-DOS se mira
+`\HISPADOS\EDICION.INI` en el origen y en el disco:
+
+| Disco | Origen | Qué hace |
+|---|---|---|
+| Hispa-386 | Hispa-386 | lo de siempre |
+| Hispa-486 | Hispa-486 | lo de siempre: se conservan los `*.INI` (su `CENTRO.INI`, su `VENTANAS.INI`...) |
+| Hispa-386 | Hispa-486 | **pasa a Hispa-486**: lo dice antes de confirmar; su `VENTANAS.INI` y su `CENTRO.INI` se guardan como `VENTANAS.ANT` y `CENTRO.ANT` (como ya se hacía con `CONFIG.SYS` y `AUTOEXEC.BAT`) y se ponen los de Hispa-486 |
+| Hispa-486 | Hispa-386 (memoria USB) | **no se deja**: lo dice y no toca nada. Con [N] (instalación nueva, se borra todo) sí se puede volver a Hispa-386 |
+
+**Desde disquetes** (los de Hispa-386), la elección es una **pregunta**: al
+final, después de «Instalación 2» y «Oficina», INSTALAR ofrece el disquete
+«Hispa-486»; con S se pone (y si el disco era un Hispa-386 que se actualiza,
+con los `.ANT` de arriba); con N queda Hispa-386. El `AUTOEXEC.BAT` del
+disquete «Hispa-486» solo sustituye al de Hispa-386 si este se acaba de
+poner (en una instalación nueva sobre un disco que ya tenía uno propio, se
+respeta el suyo, como siempre). El `CENTRO.INI` del disquete es el de la
+imagen USB: si no se ha puesto «Oficina», sus accesos (Pluma, Cuentas...)
+quedan en el menú sin programa hasta que se copie (`XCOPIAR A:\HISPADOS
+C:\HISPADOS /S` con el disquete «Oficina»).
+
+### Las actualizaciones por la red (ACTUALIZAR)
+
+Cada instalación se actualiza **en su gama**:
+
+- La gama instalada es la clave `Gama=` de `\HISPADOS\EDICION.INI` (sin el
+  archivo o sin la clave, 386). ACTUALIZAR la enseña: «Tienes instalado
+  Hispa-DOS 0.9.25 (Hispa-486).».
+- En `versiones.txt`, cada sección puede llevar `gama=486`; sin ella es de
+  la gama 386 (así el `versiones.txt` de hoy sigue valiendo para todas las
+  instalaciones de Hispa-386, y un Hispa-486 no se «actualiza» a Hispa-386).
+- Las secciones de **otra** gama no se miran: ni se ofrecen ni se avisan.
+  Dentro de la gama, todo es como antes (versión, `nivel`, requisitos).
+- El paquete de Hispa-486 (`make paq486`) trae también `\HISPA32`; al
+  aplicarlo se copia, si está. Sus `*.INI` solo se ponen si el disco no los
+  tiene (los del usuario se conservan).
+- Para pasar de Hispa-386 a Hispa-486 no se usa ACTUALIZAR: se arranca la
+  memoria de Hispa-486 e INSTALAR, [A] (ver arriba).
+
+```
+[0.9.26]
+cpu=386
+edicion=Hispa-386 (con Hispa Ventanas)
+paquete=http://actualiza.clicgest.es/hispados-0.9.26.paq
+
+[0.9.26]
+gama=486
+cpu=386
+edicion=Hispa-486
+paquete=http://actualiza.clicgest.es/hispa486-0.9.26.paq
+```
+
+(El número de la sección es el de Hispa-DOS, `lib/version.inc`, el mismo
+para las dos gamas; «Hispa-486 0.1» es el nombre de la entrega.) El formato
+completo, en docs/RED.md, «Formato de versiones.txt».
+
+### Las pruebas
+
+- `tests/run_imagen486_tests.sh` (en `make test`; sin `gcc -m32` se salta):
+  arranca `build/hispa486-usb.img` en QEMU y mira el escritorio (la barra de
+  tareas, sin el Centro ni la barra de arriba), el menú Inicio con el grupo
+  «Hispa32» y sus cinco programas, la calculadora de 32 bits abierta desde
+  él (6 × 7 = 42) y «Hola, mundo»; instala en un disco duro vacío (y mira
+  lo que queda en él) y arranca solo el disco duro (su escritorio);
+  actualiza un Hispa-486 con la memoria de Hispa-486 (conserva los ajustes),
+  un Hispa-386 con la de Hispa-486 (pasa, con los `.ANT`) y un Hispa-486 con
+  la de Hispa-386 (no se deja, el disco no cambia); y ACTUALIZAR por la red
+  en el Hispa-486 instalado (dice su gama, no mira la sección de 386, baja e
+  instala la de 486 con su `\HISPA32`).
+- `tests/run_actualizar_tests.sh`: en un Hispa-386, una sección con
+  `gama=486` no se mira.
+- Siguen igual las de Hispa-386: `run_usb_tests.sh`, `run_instalar_usb_tests.sh`,
+  `run_instalar_tests.sh`, `run_actualizar_*_tests.sh`.
+
+### Lo que habrá que añadir con las piezas que vienen
+
+- **Navegador (disquete «Internet»)**: sus programas y DLL (el navegador,
+  `WSOCK32.DLL`, `HSPTLS`) en la imagen USB (otra carpeta o `\HISPA32`, en
+  `tools/mkusb.py`, junto a la tabla `HISPA32`), su acceso en
+  `sistema/486/CENTRO.INI` (un grupo «Internet» o en «Hispa32»), su
+  disquete «Internet» en `mkusb.py` (como `mkdisq486`) y en INSTALAR (como
+  `disq486`: una pregunta más al final, si el origen no lo trae), y su
+  carpeta en `copia_h32` de INSTALAR y de ACTUALIZAR si no va en `\HISPA32`.
+  Las reglas del Makefile, como dependencias de `usb486`.
+- **Wi-Fi (HSPWIFI + microcódigo)**: el controlador en `\HISPADOS` (lo copia
+  todo INSTALAR) y el microcódigo de cada tarjeta, que es grande: o en su
+  carpeta (`\HISPADOS\FIRMWARE`?, que habrá que añadir a las listas de
+  carpetas de INSTALAR y de ACTUALIZAR, que solo copian `\HISPADOS`,
+  `JUEGOS`, `JUEGOS\NES`, `JUEGOS\SMS`, `PROGS` y ahora `\HISPA32`) o en un
+  disquete propio. Su línea en el `AUTOEXEC.BAT` de Hispa-486 (como la de
+  `VENTANAS`, en `autoexec486()` de `mkusb.py`) y su configuración (un
+  `WIFI.INI` en `sistema/486/`, que como todo `*.INI` se conserva al
+  actualizar). Revisar la licencia del microcódigo antes de meterlo en la
+  imagen.
+- **FAT32**: si la imagen USB pasa a FAT32 (más de 2 GB o para el
+  navegador), `tools/mkusb.py` tiene que formatear en FAT32 (`mformat -F`,
+  con el sector de arranque FAT32 propio en vez de `boot16.bin`, y el tipo
+  de partición 0Bh/0Ch en el MBR, hoy 06h fijo) para las dos ediciones; y
+  `tests/tools/sinmenu.sh` y las pruebas que montan la imagen con
+  `@@1048576` o `OFF=32256` siguen valiendo si no cambia el comienzo de la
+  partición. INSTALAR llama a FORMATEA y a SISTEMA: lo que cambie en ellos
+  para FAT32 le llega solo; el `/V:HISPADOS /AUTOTEST` de FORMATEA, a revisar.
 
 ## Fase 1: el cargador PE
 

@@ -5,12 +5,29 @@ MBR de Hispa-DOS + una partición FAT16 activa que empieza en el sector 2048
 (alineada a 1 MB). La partición se formatea con mtools usando el sector de
 arranque FAT16 de Hispa-DOS. Grábala con Rufus (modo DD), balenaEtcher o dd.
 
+  python3 tools/mkusb.py        Hispa-386: build/hispados-usb.img y los
+                                disquetes (de arranque, «Instalación 2» y
+                                «Oficina»)
+  python3 tools/mkusb.py 486    Hispa-486: build/hispa486-usb.img (lo mismo
+                                más el escritorio de Hispa-486 y los programas
+                                Hispa32) y el disquete «Hispa-486»
+                                (build/hispa486-disquete.img). Ver
+                                docs/486/HISPA-486.md, «La imagen».
+
 Creates the USB disk image (Hispa-DOS MBR + active FAT16 partition).
 """
-import os, struct, subprocess, sys
+import os, re, struct, subprocess, sys
 
 B = 'build'
 OUT = os.path.join(B, 'hispados-usb.img')
+OUT486 = os.path.join(B, 'hispa486-usb.img')
+# [HISPA-486] los programas de 32 bits de ejemplo, en C:\HISPA32: el nombre en
+# build/ (el de sus reglas y sus pruebas) y el que llevan en la imagen
+HISPA32 = (('WINCALC.EXE', 'CALC32.EXE'), ('WINHOLA.EXE', 'HOLA32.EXE'),
+           ('WINCTL.EXE', 'CTL32.EXE'), ('WINMENU.EXE', 'MENU32.EXE'),
+           ('WINGUI.EXE', 'AVISO32.EXE'))
+# y lo que la edición pone en \HISPADOS (en sistema/486/, en UTF-8)
+SIS486 = ('EDICION.INI', 'VENTANAS.INI', 'CENTRO.INI')
 SIZE_MB = int(os.environ.get('USB_MB', '512'))   # Carlos 14/11: 512 MB (el .zip apenas crece)
 START = 2048
 HEADS, SPT = 255, 63
@@ -30,26 +47,71 @@ def run(*args):
     env = dict(os.environ, MTOOLS_SKIP_CHECK='1', MTOOLS_NO_VFAT='1')
     subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL)
 
-def main():
+def dos(txt):
+    """Texto del proyecto (UTF-8, LF) a texto de DOS (página 437, CR+LF)."""
+    return txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437')
+
+def autoexec486(txt, letra):
+    """[HISPA-486] El AUTOEXEC.BAT de Hispa-486: el de Hispa-386 y, en el
+    arranque normal, el escritorio (Hispa Ventanas, que con la clave de
+    VENTANAS.INI sale con la barra de tareas y el menú Inicio)."""
+    ancla = 'REM %s:\\HISPADOS\\HSPRED /AUTO\n' % letra
+    if txt.count(ancla) != 1:
+        sys.exit('mkusb: el AUTOEXEC.BAT no tiene la línea «%s»: no sé dónde '
+                 'poner Hispa Ventanas' % ancla.strip())
+    return txt.replace(ancla, ancla +
+        'REM [Hispa-486] El escritorio, con la barra de tareas y el menú Inicio\n'
+        '%s:\\HISPADOS\\VENTANAS\n' % letra)
+
+def centro486(en_imagen):
+    """[HISPA-486] sistema/486/CENTRO.INI para una imagen que lleva los
+    archivos en_imagen (rutas «C:\\...» en mayúsculas): sin los accesos a
+    programas que no estén y, si a algún .HVP de JUEGOS o PROGS le falta su
+    acceso, con Modulos=0 (Hispa Ventanas lo añade solo al arrancar)."""
+    txt = open(os.path.join('sistema', '486', 'CENTRO.INI'), encoding='utf-8').read()
+    bloques = re.split(r'(?m)^(?=\[)', txt)
+    fuera, progs = [], set()
+    for b in bloques:
+        m = re.search(r'(?m)^Programa=(.*)$', b)
+        if b.startswith('[Acceso]') and m:
+            prog = m.group(1).strip().upper()
+            if prog.startswith('C:\\') and prog not in en_imagen:
+                print('mkusb: CENTRO.INI de Hispa-486: «%s» no está en la imagen: '
+                      'se quita su acceso' % prog)
+                continue
+            progs.add(prog)
+        fuera.append(b)
+    txt = ''.join(fuera)
+    modulos = [f for f in en_imagen if re.match(r'C:\\HISPADOS\\(JUEGOS|PROGS)\\[^\\]+\.HVP$', f)]
+    if all(f in progs for f in modulos):
+        txt = re.sub(r'(?m)^Modulos=.*$', 'Modulos=%d' % len(modulos), txt)
+    else:
+        txt = re.sub(r'(?m)^Modulos=.*$', 'Modulos=0', txt)
+    return txt
+
+def main(edicion='386'):
+    out = OUT486 if edicion == '486' else OUT
     total = SIZE_MB * 2048
     psize = total - START
-    with open(OUT, 'wb') as f:
+    with open(out, 'wb') as f:
         f.truncate(total * 512)
     mbr = bytearray(open(os.path.join(B, 'mbr.bin'), 'rb').read()[:446])
     entry = bytes([0x80]) + chs(START) + bytes([0x06]) + chs(START + psize - 1) \
         + struct.pack('<II', START, psize)
     mbr += entry + bytes(48) + b'\x55\xAA'
-    with open(OUT, 'r+b') as f:
+    with open(out, 'r+b') as f:
         f.write(mbr)
-    img = '%s@@%d' % (OUT, START * 512)
+    img = '%s@@%d' % (out, START * 512)
     # sectores por clúster: el menor que deje FAT16 por debajo de 65.525 clústeres
     spc = 4
     while psize // spc >= 65000:
         spc *= 2
     run('mformat', '-i', img, '-T', str(psize), '-h', str(HEADS), '-s', str(SPT),
         '-H', str(START), '-c', str(spc), '-v', 'HISPADOS', '-B', os.path.join(B, 'boot16.bin'), '::')
+    en_imagen = set()                # lo copiado, como «C:\\HISPADOS\\...»
     def cp(src, dst):
         run('mcopy', '-o', '-i', img, src, '::' + dst)
+        en_imagen.add('C:\\' + dst.replace('/', '\\').upper())
     def md(d):
         run('mmd', '-i', img, '::' + d)
     cp(os.path.join(B, 'KERNEL.SYS'), 'KERNEL.SYS')
@@ -62,12 +124,15 @@ def main():
         md('EFI/BOOT')
         for f in ('BOOTX64.EFI', 'BOOTIA32.EFI'):
             cp(os.path.join(B, f), 'EFI/BOOT/' + f)
-    os.makedirs(os.path.join(B, 'usb'), exist_ok=True)
+    dusb = os.path.join(B, 'usb486' if edicion == '486' else 'usb')
+    os.makedirs(dusb, exist_ok=True)
     for f in ('AUTOEXEC.BAT', 'CONFIG.SYS', 'INSTALL.BAT', 'LEEME.TXT'):
         txt = open(os.path.join('usb', f), encoding='utf-8').read()
-        dst = os.path.join(B, 'usb', f)
+        if edicion == '486' and f == 'AUTOEXEC.BAT':
+            txt = autoexec486(txt, 'C')
+        dst = os.path.join(dusb, f)
         with open(dst, 'wb') as o:
-            o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
+            o.write(dos(txt))
         cp(dst, f)
     # el sistema en \HISPADOS: nombres en español (los clásicos en ALIAS.INI)
     md('HISPADOS')
@@ -140,8 +205,55 @@ def main():
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/SMS/' + f)
     for f in SONS:
         cp(os.path.join(B, f), 'HISPADOS/' + f)
-    print(OUT)
+    if edicion == '486':
+        # [HISPA-486] los programas Hispa32 y, en \HISPADOS, la edición, la
+        # clave del escritorio y el Centro de programas con el grupo «Hispa32»
+        md('HISPA32')
+        for src, dst in HISPA32:
+            cp(os.path.join(B, src), 'HISPA32/' + dst)
+        for f, txt in sis486(en_imagen):
+            dst = os.path.join(dusb, f)
+            with open(dst, 'wb') as o:
+                o.write(dos(txt))
+            cp(dst, 'HISPADOS/' + f)
+        print(out)
+        mkdisq486(en_imagen)
+        return
+    print(out)
     mkfloppy()
+
+def sis486(en_imagen):
+    r"""[HISPA-486] (nombre, texto) de lo que la edición pone en \HISPADOS."""
+    for f in SIS486:
+        if f == 'CENTRO.INI':
+            yield f, centro486(en_imagen)
+        else:
+            yield f, open(os.path.join('sistema', '486', f), encoding='utf-8').read()
+
+def mkdisq486(en_imagen):
+    r"""[HISPA-486] El disquete «Hispa-486»: lo que la edición añade a la
+    instalación desde disquetes (los de Hispa-386: el de arranque,
+    «Instalación 2» y «Oficina»). INSTALAR lo pide el último; trae \HISPA32,
+    lo de \HISPADOS de la edición (EDICION.INI, VENTANAS.INI, CENTRO.INI) y el
+    AUTOEXEC.BAT que arranca el escritorio. Para el CENTRO.INI vale la lista
+    de la imagen USB: con los tres disquetes, el disco duro queda igual."""
+    out = os.path.join(B, 'hispa486-disquete.img')
+    d = os.path.join(B, 'disq486')
+    os.makedirs(d, exist_ok=True)
+    if os.path.exists(out):
+        os.remove(out)
+    run('mformat', '-C', '-f', '1440', '-v', 'HISPA486', '-i', out, '::')
+    run('mmd', '-i', out, '::HISPADOS', '::HISPA32')
+    txt = autoexec486(open(os.path.join('floppy', 'AUTOEXEC.BAT'), encoding='utf-8').read(), 'A')
+    pon = [('AUTOEXEC.BAT', txt, 'AUTOEXEC.BAT')]
+    pon += [(f, t, 'HISPADOS/' + f) for f, t in sis486(en_imagen)]
+    for f, t, dst in pon:
+        with open(os.path.join(d, f), 'wb') as o:
+            o.write(dos(t))
+        run('mcopy', '-i', out, os.path.join(d, f), '::' + dst)
+    for src, dst in HISPA32:
+        run('mcopy', '-i', out, os.path.join(B, src), '::HISPA32/' + dst)
+    print(out)
 
 def mkfloppy():
     """Disquete para usar: el de las pruebas con CONFIG.SYS y AUTOEXEC.BAT
@@ -195,4 +307,4 @@ def mkoficina():
     print(out)
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else '386')

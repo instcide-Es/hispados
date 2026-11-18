@@ -124,6 +124,7 @@ ram=0              ; KiB mínimos de memoria extendida (0 = no exige)
 disco=4            ; MiB libres mínimos en el disco de destino
 nivel=0            ; "riqueza" de la edición (mayor = más completa)
 edicion=Hispa-386 (con Hispa Ventanas)
+gama=386           ; la gama: 386 (por omisión) o 486 (Hispa-486)
 paquete=http://actualiza.clicgest.es/hispados-0.9.16.paq
 nota=Novedades de esta versión
 ```
@@ -136,15 +137,47 @@ ediciones). **Compatibilidad**: si el archivo trae el formato viejo (solo
 `version=X`, con `descarga=`/`nota=` opcionales), se trata como una única
 versión sin requisitos y sin paquete (solo avisa, como antes).
 
+**Gamas** ([HISPA-486], 18/11/2026): cada instalación se actualiza en su
+gama. La de la instalada es la clave `Gama=` de `\HISPADOS\EDICION.INI`
+(sección `[Edicion]`; la pone la imagen de Hispa-486 con `Gama=486`; sin el
+archivo o sin la clave, 386) y ACTUALIZAR la enseña («Tienes instalado
+Hispa-DOS 0.9.25 (Hispa-486).»). Una sección sin `gama=` es de la 386: el
+`versiones.txt` de siempre sigue valiendo para Hispa-386 y nunca hace bajar a
+un Hispa-486 a Hispa-386. Las secciones de otra gama **no se miran** (ni se
+ofrecen, ni se avisan, ni cuentan para «hasta dónde llega el equipo»); dentro
+de la gama, todo sigue igual (`nivel`, requisitos). Se pasa de Hispa-386 a
+Hispa-486 con la imagen de Hispa-486 e INSTALAR, no con ACTUALIZAR. Más, en
+docs/486/HISPA-486.md, «Las actualizaciones por la red». Ejemplo, las dos
+gamas de la misma versión:
+
+```
+[0.9.26]
+cpu=386
+edicion=Hispa-386 (con Hispa Ventanas)
+paquete=http://actualiza.clicgest.es/hispados-0.9.26.paq
+
+[0.9.26]
+gama=486
+cpu=386
+edicion=Hispa-486
+paquete=http://actualiza.clicgest.es/hispa486-0.9.26.paq
+```
+
 Para subir una versión en el servidor: cambia `lib/version.inc` y
 `actualiza.clicgest.es/versiones.txt`, y sube el `.PAQ` generado con
-`tools/paquete.py`.
+`tools/paquete.py` (`make paq` hace `build/hispados.paq` de la imagen USB de
+Hispa-386 y `make paq486`, `build/hispa486.paq` de la de Hispa-486).
 
 ### Formato del paquete .PAQ
 
 Lo genera `tools/paquete.py` a partir de una carpeta con la **misma estructura**
 que tendrá el sistema (`KERNEL.SYS`, `COMMAND.COM`, `CONFIG.SYS`,
-`AUTOEXEC.BAT` en la raíz y `HISPADOS\...` con sus subcarpetas). Sin compresión.
+`AUTOEXEC.BAT` en la raíz y `HISPADOS\...` con sus subcarpetas; en el de
+Hispa-486, también `HISPA32\...`). Sin compresión. ACTUALIZAR aplica del
+paquete `HISPADOS` y sus subcarpetas `JUEGOS`, `JUEGOS\NES`, `JUEGOS\SMS` y
+`PROGS`, `HISPA32` (si la trae), y en la raíz `KERNEL.SYS`, `COMMAND.COM`,
+`LEEME.TXT`, `CONFIG.SYS` y `AUTOEXEC.BAT`; otra carpeta del paquete no se
+copia (hay que añadirla en `apply_update`).
 Todos los enteros en *little-endian*:
 
 ```

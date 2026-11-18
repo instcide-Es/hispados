@@ -36,8 +36,9 @@ mon1() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon1 > /dev/null 2>&1; }
   send "S" 1
   sleep 20; mon1 "change floppy0 $T/f.img"; sleep 2
   printf ' '; sleep 3
+  send "N" 1                # [HISPA-486] el disquete «Hispa-486»: no (queda Hispa-386)
   send "DIR C:\HISPADOS\PROGS\PLUMA.HVP" 2
-} | timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
+} | timeout 100 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon1,server,nowait \
       -drive file=$T/f.img,format=raw,if=floppy \
       -drive file=$T/hdd.img,format=raw,if=ide -boot a -no-reboot > $T/l1 2>&1
 # 2) arrancar desde C: y usar el historial con teclas reales
@@ -80,6 +81,14 @@ for off in 32256 1048576; do
   MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/PROGS/PLUMA.HVP ::HISPADOS/PROGS/DICCIO.DAT ::HISPADOS/PROGS/PINTURA.HVP > /dev/null 2>&1 && ofi=1
 done
 if [ $ofi = 1 ]; then echo "  OK   Oficina: Pluma y el diccionario en C:\\HISPADOS\\PROGS, junto a Pintura"; else echo "  FAIL Oficina: faltan Pluma o el diccionario en el disco instalado"; fail=1; fi
+# [HISPA-486] al final se ofrece el disquete «Hispa-486»; con N, queda Hispa-386
+check $T/l1.txt "va en el disquete «Hispa-486»."
+h486=0
+for off in 32256 1048576; do
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/EDICION.INI > /dev/null 2>&1 && h486=1
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPA32 > /dev/null 2>&1 && h486=1
+done
+if [ $h486 = 0 ]; then echo "  OK   con N, Hispa-386: sin EDICION.INI ni \\HISPA32"; else echo "  FAIL con N al disquete «Hispa-486» ha quedado algo de Hispa-486"; fail=1; fi
 check $T/l2.txt "Hispa-DOS 0.9.25 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l2.txt "HISPADOS"

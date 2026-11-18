@@ -296,6 +296,7 @@ make          # crea build/hispados.img (disquete de 1,44 MB)
 make run      # arranca en QEMU
 make run-hdd  # arranca con un disco duro vacío de 64 MB (build/hdd.img)
 make usb      # imagen para memoria USB: build/hispados-usb.img
+make usb486   # la de Hispa-486: build/hispa486-usb.img (docs/486/HISPA-486.md)
 make test     # pruebas automáticas por el puerto serie
 tests/thirdparty/fetch.sh   # (opcional) descarga programas de FreeDOS para
                             # la prueba de compatibilidad

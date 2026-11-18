@@ -13,6 +13,8 @@
 #       a esa edición y pregunta; contestamos N y queda en «solo mirar».
 #   (f) límite por hardware: una edición que pide 586 y mucha RAM no se puede;
 #       dice hasta dónde llega el equipo y por qué la otra no.
+#   (g) [HISPA-486] las gamas: una sección con «gama=486» no es para este
+#       Hispa-386 (ni se ofrece ni se avisa); la de su gama, sí.
 #   (d) la dirección tomada de la clave ACTUALIZAR= de \HISPADOS\RED.INI.
 #   (+) una dirección https:// se rechaza con su mensaje.
 # Todo en un espacio de nombres de red propio (unshare -rn): no usa Internet.
@@ -61,6 +63,13 @@ printf '[0.9.25]\ncpu=386\n'                                        > $T/www/ald
   printf 'nivel=2\n'
   printf 'edicion=Edicion Total\n'
   printf 'nota=Nueva edicion grafica superior\n'; } | iconv -f UTF-8 -t CP437 > $T/www/limite.txt
+{ printf '[0.9.98]\n'
+  printf 'gama=486\n'
+  printf 'cpu=386\n'
+  printf 'nota=Solo para Hispa-486\n\n'
+  printf '[0.9.97]\n'
+  printf 'cpu=386\n'
+  printf 'nota=La de Hispa-386\n'; } | iconv -f UTF-8 -t CP437 > $T/www/gamas.txt
 { printf '[0.9.50]\n'
   printf 'nota=Esta vino de RED.INI\n'; } | iconv -f UTF-8 -t CP437  > $T/www/redini.txt
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
@@ -97,6 +106,7 @@ CMDS=("8|ACTUALIZAR $U/aldia.txt"                    # (c) sin HSPRED a mano -> 
       "7|ACTUALIZAR $U/nueva.txt"                    # (b) versión nueva (avisa)
       "7|ACTUALIZAR $U/recom.txt" '2|N'              # (e) recomienda edición más rica; N
       "7|ACTUALIZAR $U/limite.txt"                   # (f) límite por hardware
+      "7|ACTUALIZAR $U/gamas.txt"                    # (g) las gamas
       '3|ACTUALIZAR https://ejemplo.org/x.txt'       # (+) https:// rechazado
       '2|DEL A:\HISPADOS\RED.INI'
       '2|COPY A:\REDACT.INI A:\HISPADOS\RED.INI'
@@ -129,6 +139,12 @@ check f "De acuerdo: solo mirar"
 check f "Tu equipo llega hasta la 0.9.25"
 check f "Edicion Total"
 check f "Pentium o superior"
+# (g) las gamas: la de Hispa-486 no se mira; la de Hispa-386, sí
+check f "Hay una versión nueva: 0.9.97"
+check f "La de Hispa-386"
+if grep -qF -- "Solo para Hispa-486" $T/f.txt || grep -qF -- "0.9.98" $T/f.txt; then
+  ko "una sección de gama=486 no es para Hispa-386"; else ok "la sección de gama=486 no se mira en Hispa-386"; fi
+if grep -qF -- "(Hispa-486)" $T/f.txt; then ko "Hispa-386 dice que es Hispa-486"; else ok "lo instalado no dice «(Hispa-486)»"; fi
 # (+) https:// rechazado
 check f "Las direcciones https:// (cifradas) todavía no funcionan"
 # (d) la URL tomada de RED.INI
