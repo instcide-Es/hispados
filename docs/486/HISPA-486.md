@@ -1431,8 +1431,13 @@ de USER32; los cambios en lo que ya había llevan la marca `[DX]`):
   las que ella pida y sus `DllMain`, en la pila del programa, como
   `CreateThread`). Así van los que cargan `DDRAW.DLL` o `DSOUND.DLL` a mano
   y **los comprimidos con UPX** (que lo cargan todo así). Mientras carga,
-  HW32 usa una pila suya (2 KB más en `HW32.COM`): el cargador lee sus
-  fichas con `[EBP+...]`, que va por SS.
+  HW32 usa una pila suya de 2 KB (el cargador lee sus fichas con
+  `[EBP+...]`, que va por SS), **tras el archivo y no dentro** (`PILA_LL`):
+  como módulo, en los 4 KB que Hispa Ventanas deja tras HW32 (libres
+  mientras el programa va); en DOS, pedida con el resto. Con esos 2 KB
+  dentro de `HW32.COM`, FASMW dejaba de ensamblar en la prueba de 16 MB
+  (`run_win32fasmw_tests.sh`; sin explicar del todo: queda por mirar por
+  qué un HW32.COM 2 KB más grande le estorba).
 - Los átomos (`AddAtomA`, `FindAtomA`, `GetAtomNameA`, `DeleteAtom`): el
   arranque de los programas de MinGW los usa.
 - `SET HISPADX=TRAZA`: la traza de HW32 (`HW32 /T`) también dentro de Hispa
