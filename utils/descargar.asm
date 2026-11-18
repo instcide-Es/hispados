@@ -824,8 +824,9 @@ m_uso       db "Baja un archivo de un servidor web (HTTP) y lo guarda en el disc
             db "            INDEX.HTM)", 13, 10
             db 13, 10
             db "Solo HTTP sin cifrar: las direcciones https:// (cifradas) todavía no", 13, 10
-            db "funcionan, y hoy casi todas las páginas lo son. Sirve para servidores de", 13, 10
-            db "la red de casa o de archivos antiguos. Esc para la descarga.", 13, 10
+            db "funcionan, y hoy casi todas las páginas lo son (esas las baja HTTPS, del", 13, 10
+            db "disquete «Internet» de Hispa-486). Sirve para servidores de la red de", 13, 10
+            db "casa o de archivos antiguos. Esc para la descarga.", 13, 10
             db "Necesita HSPRED (ver CONFRED).", 13, 10, 0
 m_buscando  db "Servidor ", 0
 m_puntos    db ": ", 0
@@ -841,9 +842,11 @@ m_llevo     db "Recibidos ", 0
 m_redir     db "El servidor manda a otra dirección: ", 0
 m_muchas    db "Demasiadas redirecciones.", 0
 m_https     db "Las direcciones https:// (cifradas) todavía no funcionan en Hispa-DOS;", 13, 10
-            db "pruebe con http://, si el servidor lo admite.", 0
+            db "pruebe con http://, si el servidor lo admite, o con la orden HTTPS del", 13, 10
+            db "disquete «Internet» de Hispa-486 (HTTPS dirección).", 0
 m_redircifr db "El servidor manda a una dirección https:// (cifrada), que todavía no", 13, 10
-            db "funciona en Hispa-DOS.", 0
+            db "funciona en Hispa-DOS. La orden HTTPS del disquete «Internet» de", 13, 10
+            db "Hispa-486 sí las baja (HTTPS dirección).", 0
 m_urlmal    db "Esa dirección no es válida (ejemplo: http://servidor/archivo.zip).", 0
 m_nohttp    db "El servidor no contesta como un servidor web (HTTP).", 0
 m_servidor  db "El servidor contesta: "
