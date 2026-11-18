@@ -219,9 +219,24 @@ User-Agent que ClicGest tomaba por el del Navegador ligero.
 
 En QEMU (sin KVM, en el VPS), 32 MB, 800×600, por la red de QEMU a Internet:
 
-| Página | Tiempo (de pedirla a «Hecho») | Memoria en uso (NetSurf) |
-|---|---|---|
-| (ver tabla de la última medida en el informe de la sesión) | | |
+| Página (por orden, en la misma ventana) | Tiempo (de pedirla a «Hecho») | Memoria en uso (`memoria.c`, KB) | Pedida al sistema (KB) |
+|---|---|---|---|
+| Página HTML+CSS del disco | 0,3-0,7 s | 2.000 | 4.600 |
+| https://clicgest.es/login (Bootstrap 5, primera vez) | 3,7 s | 5.350 (lo más: 7.590) | 7.680 |
+| demo: panel (`/demo` → `/dashboard`) | 4,2 s | 6.660 (8.760) | 9.730 |
+| demo: catálogo de la biblioteca | 5,4 s | 7.490 (9.600) | 9.730 |
+| demo: socios (54 filas en una tabla) | 22,1 s | 10.960 (13.060) | 13.820 |
+| https://hispados.es/ | 4,6 s | 10.850 | 13.820 |
+
+Con el Administrador de tareas (`navegador2/07_memoria.png`): 30.120 KB
+libres antes de abrirlo, 13.392 KB tras esas cuatro páginas de ClicGest: el
+Navegador completo gasta ~16,7 MB con todo (el programa, el montón, la pila,
+el búfer de la página, las letras). Con 16 MB de memoria (14 MB libres en
+Hispa Ventanas) entran las páginas sencillas, hispados.es y ClicGest hasta el
+catálogo (probado en QEMU con `-m 16`: el entrar, el panel y el catálogo van,
+con 3 MB libres tras el panel: `navegador2/09_memoria_16mb.png`); la lista de
+socios (54 filas) **no cabe con 16 MB**: se queda en «Pidiendo» sin avisar.
+Con 24-32 MB va todo. Ver «Lo que falta».
 
 - **Tamaño:** NAVEGA2.EXE 1.096 KB (código 1,06 MB: libcss 330 KB,
   NetSurf 420 KB, libdom+hubbub 200 KB...); con las letras y los recursos,
@@ -257,14 +272,16 @@ En QEMU (sin KVM, en el VPS), 32 MB, 800×600, por la red de QEMU a Internet:
    e **imprimir** (la página en puntos al Lector).
 6. **Grid** y `gap`: en el `layout` de NetSurf (los de NetSurf lo tienen
    pedido; el flexbox de 3.11 es reciente).
-7. **Memoria** para 16 MB justos: soltar las páginas del historial, una
+7. **Memoria** para 16 MB justos: que una página que no cabe dé un aviso
+   (ahora se queda en «Pidiendo»), soltar las páginas del historial, una
    caché de letras más pequeña, Bootstrap sin las reglas añadidas que no se
-   usan.
+   usan, el búfer de la página en 8 bits.
 8. **Tramado** de colores al pasar a la paleta (los fondos pastel).
 
 ## Pruebas
 
-`tests/run_navegador2_tests.sh` (sin Internet: `tests/tools/surf_servidor.py`
+`tests/run_navegador2_tests.sh` (en `make test`; 25 comprobaciones, unos 6
+minutos; sin Internet: `tests/tools/surf_servidor.py`
 por HTTPS con la raíz de pruebas de `tests/tools/nav_certs.sh`): el acceso
 del menú Inicio, una página moderna (hoja de fuera con variables de CSS,
 botones con variables por clase, degradado, flexbox, PNG y JPEG; el
