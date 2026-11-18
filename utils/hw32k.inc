@@ -3133,7 +3133,7 @@ k_LoadLibraryExA:                   ; (nombre, 0, opciones)
         mov [dll_esp_p], esp
         mov [dll_ss_p], ss
         mov ss, [sel_ss32]
-        mov esp, pila16_cima
+        mov esp, fin_prog + PILA_LL ; (tras el archivo: hw32.asm, PILA_LL)
         mov byte [dll_suave], 1
         call carga_dll              ; -> EBP su ficha; CF=1 si no está
         mov byte [dll_suave], 0

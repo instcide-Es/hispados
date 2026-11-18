@@ -34,6 +34,13 @@ TB_NOM1     equ 0x3200              ; nombres de archivo
 TB_NOM2     equ 0x3400
 TB_SAL      equ 0x3600              ; respuestas de DOS (directorio, nombre)
 MAX_IMP     equ 512                 ; funciones importadas como mucho
+PILA_LL     equ 0x800               ; [DX] la pila de LoadLibraryA en marcha: tras
+                                    ;   el archivo, sin ocupar en él (como
+                                    ;   módulo, en los 4 KB que deja Hispa
+                                    ;   Ventanas, libres mientras el programa va;
+                                    ;   en DOS, se pide con el resto). Con 2 KB
+                                    ;   más en el archivo, FASMW ya no ensamblaba
+                                    ;   en 16 MB (run_win32fasmw_tests.sh)
 TRAMP       equ 12                  ; lo que ocupa un trampolín (push 5 + jmp lejos 7)
 MISC_TAM    equ 0x5000              ; lo nuestro dentro del bloque
 PILA_MAX    equ 0x100000            ; la pila: lo que pida, hasta 1 MB
@@ -84,7 +91,7 @@ inicio16:
         rep movsb
         mov byte [di], 0
         ; menos memoria para nosotros, y el búfer de DOS
-        mov bx, (fin_prog - inicio + 0x100 + 15) / 16
+        mov bx, (fin_prog - inicio + 0x100 + PILA_LL + 15) / 16  ; ([DX] y la pila de LoadLibraryA)
         mov ah, 0x4A
         int 0x21
         mov bx, TB_PARR
@@ -2262,6 +2269,6 @@ rm_ss_sp    dd 0
 orden       times 130 db 0
 nombre      times 130 db 0
 imp_tab     times MAX_IMP * IMP_FICHA db 0
-            times 512 + 2048 db 0   ; [DX] (y la pila de LoadLibraryA en marcha)
+            times 512 db 0
 pila16_cima:
 fin_prog:
