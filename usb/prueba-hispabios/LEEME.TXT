@@ -20,6 +20,16 @@ cambiar nada: digalo si algo va peor).
 
 EN EL MONOVATE 14.1, SOBRE TODO
 -------------------------------
+  NUEVO EN ESTA IMAGEN (18/11, noche): la anterior llegaba a C:\> en
+  el Monovate, pero el 8254 de ese equipo "se mueve" muy despacio (12
+  cuentas cada vez que se le pregunta, unas 200 veces menos de lo
+  normal). HispaBIOS lo daba por bueno y no le quitaba el bloqueo: por
+  eso EQUIPO decia "el reloj no avanza" y se quedaba a medias. Ahora lo
+  trata como parado y le quita el bloqueo. En HISPABIOS.LOG debe salir
+  "NO CUENTA el tiempo" y luego "despues de quitar el bloqueo: CUENTA".
+  SI SE QUEDA PARADO: apunte la ULTIMA LINEA que se ve en la pantalla
+  (o una foto con el movil) y diga que estaba haciendo en ese momento.
+
   a) Sin tocar nada, el menu de arranque debe contar 5, 4, 3... y
      seguir solo hasta C:\> (antes habia que pulsar una tecla, o se
      quedaba parado). Diga hasta donde llega.
