@@ -2,15 +2,17 @@
 ;  HSPRATON.COM - driver de ratón (INT 33h) de Hispa-DOS
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Uso:  HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/SINBORDE] [/INFO]  (en AUTOEXEC.BAT)
+;  Uso:  HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/BORDE] [/INFO]  (en AUTOEXEC.BAT)
 ;
 ;    (sin opciones)  prueba primero la BIOS (INT 15h C2xxh) y, si no ofrece
 ;                    ratón, habla directamente con el controlador 8042
 ;    /BIOS           solo por la BIOS
 ;    /DIRECTO        solo directamente por el 8042 (puerto auxiliar, IRQ 12)
 ;    /SIMPLE         sin sondeos (rueda, Synaptics): reinicio y activación
-;    /SINBORDE       [RUEDA] touchpad Synaptics como ratón PS/2, sin la rueda
-;                    del borde derecho (y sin pasar a la vía directa por él)
+;    /BORDE          [RUEDA] touchpad Synaptics: el borde derecho hace de rueda
+;                    (pasa a la vía directa por él). Sin /BORDE, como siempre
+;                    (ratón PS/2). /SINBORDE se acepta y no hace nada (es lo de
+;                    siempre). Apagado por omisión hasta probarlo en un equipo.
 ;    /INFO           diagnóstico en pantalla; con el driver ya cargado enseña
 ;                    lo que se anotó al cargar y los contadores en vivo
 ;
@@ -1434,8 +1436,14 @@ parse:
         mov byte [o_noborde], 1
 .h7:
         cmp al, 7
-        jne .l
+        jne .h8
         mov byte [o_synpr], 1
+        mov byte [o_noborde], 0     ; (las pruebas: con el borde)
+        jmp .l
+.h8:
+        cmp al, 8
+        jne .l
+        mov byte [o_noborde], 0     ; [RUEDA] /BORDE: el borde del touchpad, rueda
         jmp .l
 
 opts        db "INFO", 0, 1
@@ -1446,12 +1454,14 @@ opts        db "INFO", 0, 1
             db "?", 0, 5
             db "SINBORDE", 0, 6
             db "SYNPRUEBA", 0, 7
+            db "BORDE", 0, 8
             db 0
 o_info      db 0
 o_via       db 0                    ; 0 automática, 1 BIOS, 2 directa
 o_simple    db 0
 o_help      db 0
-o_noborde   db 0                    ; [RUEDA] /SINBORDE
+o_noborde   db 1                    ; [RUEDA] sin el borde salvo con /BORDE (18/11/2026:
+                                    ; hasta probarlo en un touchpad de verdad)
 o_synpr     db 0                    ; [RUEDA] /SYNPRUEBA (las pruebas)
 
 ; -----------------------------------------------------------------------------
@@ -2541,7 +2551,7 @@ msg_dim     db "Ratón PS/2 con rueda (IntelliMouse)", 0
 msg_dsyn    db "Touchpad Synaptics ", 0
 msg_ready   db " preparado.", 13, 10, 0
 msg_readyt  db " preparado (funciona como ratón PS/2).", 13, 10, 0
-msg_readyb  db " preparado; el borde derecho hace de rueda (/SINBORDE: sin ello).", 13, 10, 0
+msg_readyb  db " preparado; el borde derecho hace de rueda (/BORDE).", 13, 10, 0
 msg_noirq   db "Aviso: el dispositivo contesta, pero su interrupción (IRQ 12) no llega.", 13, 10, 0
 msg_nobios  db "La BIOS no ofrece ratón PS/2 (INT 15h C2", 0
 msg_nobios2 db "h, AH=", 0
@@ -2555,12 +2565,12 @@ msg_d3      db "nada contesta en el puerto auxiliar del 8042", 0
 msg_d4      db "el dispositivo no se deja activar", 0
 msg_nops2   db "No hay ratón PS/2: se usará un ratón USB (HSPUSB.SYS) si lo hay.", 13, 10, 0
 msg_already db "HSPRATON ya está instalado.", 13, 10, 0
-msg_usage   db "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/SINBORDE] [/INFO]", 13, 10
+msg_usage   db "Uso: HSPRATON [/BIOS | /DIRECTO] [/SIMPLE] [/BORDE] [/INFO]", 13, 10
             db "  (sin opciones) prueba la BIOS y, si no ofrece ratón, el 8042 directamente", 13, 10
             db "  /BIOS     solo por la BIOS (INT 15h)", 13, 10
             db "  /DIRECTO  solo directamente por el controlador 8042 (IRQ 12)", 13, 10
             db "  /SIMPLE   sin sondeos (rueda, Synaptics): solo reinicio y activación", 13, 10
-            db "  /SINBORDE touchpad Synaptics sin rueda en el borde derecho (como ratón PS/2)", 13, 10
+            db "  /BORDE    touchpad Synaptics: el borde derecho hace de rueda (en pruebas)", 13, 10
             db "  /INFO     diagnóstico en pantalla (también con el driver ya cargado)", 13, 10, 0
 mi_head     db "--- HSPRATON /INFO ---", 13, 10, 0
 mi_bios     db "BIOS:    INT 11h ratón=", 0
