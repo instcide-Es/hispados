@@ -422,14 +422,21 @@ class Sintactico:
             return self.variable(True)
         if self.es('PAL', 'función'):
             return self.funcion()
+        if self.es('ID', 'interrupción') and self.es('PAL', 'función', 1):
+            self.p += 1                         # una función que atiende una interrupción (32 bits)
+            d = self.funcion()
+            d.atiende = True
+            return d
         if self.es('PAL', 'tipo'):
             return self.decl_tipo()
         if self.es('PAL', 'ensamblador'):
             return self.ensamblador()
-        if self.es('ID', 'modelo') and self.es('ID', 'grande', 1):
-            pos = self.pos()                    # «modelo grande»: un .EXE de varios segmentos
+        if self.es('ID', 'modelo') and (self.es('ID', 'grande', 1) or self.es('ID', 'núcleo', 1)
+                                        or self.es('ID', 'hispa32', 1)):
+            pos = self.pos()                    # «modelo grande»: un .EXE de varios segmentos;
+            cual = self.tok(1)[1]               # «modelo núcleo» y «modelo hispa32»: 32 bits
             self.p += 2
-            return N('modelo', pos)
+            return N('modelo', pos, cual=cual)
         if self.es('ID', self.nombre_modulo) or self.es('EOF'):
             self.falta_fin()
         self.error("esperaba constante, variable, tipo, función o ensamblador")
@@ -1015,7 +1022,15 @@ class Generador:
         self.todo = todo            # no dejar fuera lo que no se usa (para probar la biblioteca entera)
         # «modelo grande» en el programa: un .EXE con un segmento de código por
         # módulo y otro para los datos y la pila (ver genera)
-        self.grande = any(d.k == 'modelo' for d in modulos[-1].arbol.decls)
+        self.modelo = ''
+        for d in modulos[-1].arbol.decls:
+            if d.k == 'modelo':
+                self.modelo = d.cual
+        self.grande = self.modelo == 'grande'
+        # «modelo núcleo» o «modelo hispa32»: 32 bits, memoria plana (CASTEL32.md)
+        self.plano = self.modelo in ('núcleo', 'hispa32')
+        self.tpunt = 4 if self.plano else 2     # lo que ocupa un puntero
+        T_PUNT_U.tam = T_TEXTO.tam = self.tpunt
         for i, m in enumerate(modulos[:-1]):
             m.seg = i + 2
         self.puentes = {}           # etiqueta del puente -> (segmento que lo usa, la función lejana)
@@ -1118,7 +1133,7 @@ class Generador:
             return self.tipos[t.nombre]
         if t.k == 'tpunt':
             m = self.mod                        # lo apuntado se mira más tarde, pero en este módulo
-            return Tipo('punt', 2, lambda: self.en(m, lambda: self.resuelve(t.base)))
+            return Tipo('punt', self.tpunt, lambda: self.en(m, lambda: self.resuelve(t.base)))
         if t.k == 'tarr':
             n = self.const(t.n)
             if n is None:
@@ -1192,6 +1207,8 @@ class Generador:
                     publica(d, 'globales', nm)
             elif d.k == 'func':
                 self.declarado(d.nombre, d.pos)
+                if getattr(d, 'atiende', False) and not self.plano:
+                    self.error("las funciones de interrupción son de 32 bits (modelo núcleo)", d.pos)
                 d.mod = m
                 d.etq = m.etiqueta('F', d.nombre)
                 d.fin = m.etiqueta('X', d.nombre)
@@ -1204,6 +1221,9 @@ class Generador:
                     self.error("una función no devuelve arreglos ni estructuras (use un parámetro «ref»)", d.t.pos)
                 d.ptipos = [self.resuelve(p.t) for p in d.params]
                 d.poff = []                     # dónde cae cada parámetro: [bp+4], [bp+6]...
+                if self.plano:                  # 32 bits: [ebp+8], [ebp+12]... (CASTEL32.md)
+                    self.declara_func32(d)
+                    continue
                 # modelo grande: las funciones públicas son lejanas (se las llama desde
                 # otro segmento): vuelven con «retf» y sus parámetros caen dos más allá
                 d.lejos = self.grande and getattr(d, 'publico', False) \
@@ -1215,6 +1235,26 @@ class Generador:
                     d.poff.append(off)
                     off += 4 if es32(t) and not p.ref else 2
                 d.nbytes = off - (6 if d.lejos else 4)
+
+    def declara_func32(self, d):
+        """Los parámetros de una función de 32 bits: cuatro octetos cada uno, desde
+        [ebp+8]. La que atiende una interrupción no devuelve nada y lleva como mucho
+        uno, el código de error que deja el procesador (en [ebp+32], tras pushad)."""
+        d.lejos = False
+        off = 8
+        if getattr(d, 'atiende', False):
+            if d.tret is not T_NADA:
+                self.error("una función de interrupción no devuelve nada", d.t.pos)
+            if len(d.params) > 1 or (d.params and (d.params[0].ref or not es_num(d.ptipos[0]))):
+                self.error("una función de interrupción lleva como mucho un parámetro: el número"
+                           " de error que deja el procesador", d.pos)
+            off = 32
+        for p, t in zip(d.params, d.ptipos):
+            if t.k in ('arr', 'est') and not p.ref:
+                self.error("los arreglos y las estructuras se pasan con «ref»", p.pos)
+            d.poff.append(off)
+            off += 4
+        d.nbytes = 4 * len(d.params)
 
     # ---- el programa entero ----
     def genera(self):
@@ -1253,7 +1293,13 @@ class Generador:
                             and not (ln == '    pushf' and c[i + 1:i + 2] == ['    pop word [R_ban]'])]
         for r in sorted(set(SALIDAS_INT.values())):
             self.bss.append(Trozo(f'R_{r}', [f"R_{r}: resw 1"], False))
-        apoyo = [Trozo(nombre, txt.strip('\n').split('\n'), False) for nombre, txt in APOYO.items()]
+        apoyos = APOYO
+        if self.plano:
+            apoyos = dict(APOYO32)
+            apoyos.update(APOYO_NUCLEO if self.modelo == 'núcleo' else APOYO_HISPA32)
+        apoyo = [Trozo(nombre, txt.strip('\n').split('\n'), False) for nombre, txt in apoyos.items()]
+        if self.plano:                          # el arranque acaba en castel_salir
+            apoyo[list(apoyos).index('castel_salir')].vivo = True
         nsegs = len(self.modulos) if self.grande else 1
         for k in range(2, nsegs + 1):
             # las rutinas de apoyo de cada segmento: las mismas, con su número detrás
@@ -1273,6 +1319,9 @@ class Generador:
             pendientes = [t for t in todos if not t.vivo and (t.etq in palabras or self.todo)]
             for t in pendientes:
                 t.vivo = True
+
+        if self.plano:
+            return self.escribe32(prog, pr, codigo, apoyo, palabras)
 
         def vivos(lista, seg=None):
             return [ln for t in lista if t.vivo and (seg is None or t.seg == seg) for ln in t.lineas]
@@ -1508,7 +1557,7 @@ class Generador:
             if x is None:
                 return None
             self.comprueba(e)
-            ancho = MAX32 if es32(self.tipo(e.x)) or not cabe16(x) else 0xFFFF
+            ancho = MAX32 if es32(self.tipo(e.x)) or not cabe16(x) or self.plano else 0xFFFF
             v = {'-': -x, 'nob': ~x & ancho, 'no': 1 - x}[e.op]
             if not MIN32 <= v <= MAX32:
                 self.error("la cuenta con constantes no cabe en 32 bits", e.pos)
@@ -1523,7 +1572,7 @@ class Generador:
                 self.error("división por cero", e.pos)
             # uno de 32 bits (o un número que no cabe en 16) se desplaza como uno de 32
             ta, tb = self.tipo(e.a), self.tipo(e.b)
-            largo = es32(ta) or not cabe16(a)
+            largo = es32(ta) or not cabe16(a) or self.plano
             ancho = MAX32 if largo else 0xFFFF
             if op in ('<<', '>>') and not 0 <= b <= (31 if largo else 15):
                 self.error(f"se desplaza de 0 a {31 if largo else 15} bits", e.b.pos)
@@ -1543,7 +1592,7 @@ class Generador:
                     and op not in ('=', '<>', '<', '<=', '>', '>='):
                 # con un tipo por medio, la cuenta da la vuelta como al ejecutar
                 if op not in ('<<', '>>'):
-                    largo = es32(ta) or es32(tb)
+                    largo = es32(ta) or es32(tb) or self.plano
                     signo = self.con_signo(ta, tb)
                 else:
                     signo = ta.k in ('ent16', 'ent32')
@@ -1645,9 +1694,11 @@ class Generador:
             if es_lit(t):
                 return tipo_lit(self.const(e))
             if e.op == '-':
-                return T_ENT32 if es32(t) else T_ENT16
+                return T_ENT32 if es32(t) or self.plano else T_ENT16
             if es32(t):
                 return t
+            if self.plano:                      # en 32 bits, las cuentas son de 32
+                return T_ENT32 if t.k == 'ent16' else T_NAT32
             return T_ENT16 if t.k == 'ent16' else T_NAT16
         if k == 'bin':
             return self.tipo_bin(e)
@@ -1709,7 +1760,7 @@ class Generador:
             # (el nombre de un arreglo de byte vale como puntero a su primer elemento)
             if ta._base is None or tb._base is None or ta.base.tam != 1 or not igual(ta.base, tb.base):
                 self.error("solo se restan dos punteros a byte", e.pos)
-            return T_NAT16
+            return T_NAT32 if self.plano else T_NAT16
         for x, t in ((e.a, ta), (e.b, tb)):
             if not es_num(t):
                 if t.k == 'bool' and op in ('yb', 'ob', 'xob'):
@@ -1718,11 +1769,11 @@ class Generador:
         if es_lit(ta) and es_lit(tb):
             return tipo_lit(self.const(e))
         if op in ('<<', '>>'):              # manda el que se desplaza
-            if es32(ta):
-                return T_ENT32 if ta.k == 'ent32' else T_NAT32
+            if es32(ta) or self.plano:
+                return T_ENT32 if ta.k in ('ent16', 'ent32') else T_NAT32
             return T_ENT16 if ta.k == 'ent16' else T_NAT16
         signo = 'ent16' in (ta.k, tb.k) or 'ent32' in (ta.k, tb.k)
-        if es32(ta) or es32(tb):
+        if es32(ta) or es32(tb) or self.plano:
             return T_ENT32 if signo else T_NAT32
         return T_ENT16 if signo else T_NAT16
 
@@ -1747,8 +1798,16 @@ class Generador:
         nm = e.nombre
         if self.es_var(nm):
             self.error(f"«{nm}» es una variable, no una función", e.pos)
+        if self.plano and nm in ('leer_byte', 'leer_palabra', 'poner_byte', 'poner_palabra'):
+            self.error(f"en 32 bits no hay memoria lejana: {nm}() no está (la memoria es plana:"
+                       " se usa un puntero, como puntero(0xB8000))", e.pos)
+        if self.plano and (nm == 'interrupción' or nm in SALIDAS_INT):
+            self.error(f"{nm}() es del modo real (BIOS y DOS): en 32 bits no está"
+                       " (se usa un bloque «ensamblador»)", e.pos)
         if nm in self.funcs:
             f = self.funcs[nm]
+            if getattr(f, 'atiende', False):
+                self.error(f"{nm}() atiende una interrupción: no se la llama (la llama el procesador)", e.pos)
             args = self.args_simples(e, len(f.params))
             for a, p, t in zip(args, f.params, f.ptipos):
                 if p.ref:
@@ -1779,12 +1838,14 @@ class Generador:
             return {'meter_puerto': T_NAT8, 'leer_byte': T_NAT8, 'leer_palabra': T_NAT16}.get(nm, T_NADA)
         if nm == 'dirección':
             a = self.args_simples(e, 1)[0]
+            if self.plano and a.k == 'ref' and a.nombre in self.funcs and not self.es_var(a.nombre):
+                return T_PUNT_U                 # en 32 bits, la dirección de una función
             if not self.es_lugar(a):
                 if a.k == 'cad' or self.tipo(a) is T_TEXTO:
                     return T_TEXTO
                 self.error("dirección() lleva una variable (o un elemento o un campo)", a.pos)
             t = self.tipo(a)
-            return Tipo('punt', 2, t.base if t.k == 'arr' else t)
+            return Tipo('punt', self.tpunt, t.base if t.k == 'arr' else t)
         if nm == 'valor':
             a = self.args_simples(e, 1)[0]
             t = self.valor_tipo(a)
@@ -3243,6 +3304,855 @@ class Generador:
             if r in guardar:
                 self.em(f'mov [R_{r}], {r}')
 
+# =============================================================================
+#  4 bis. La generación de 32 bits («modelo núcleo» y «modelo hispa32»)
+#
+#  Lo mismo que el Generador, para el 386 en modo protegido con la memoria
+#  plana (docs/CASTEL32.md). Las comprobaciones son las de siempre (con las
+#  cuentas de 32 bits: self.plano); lo que cambia es el código:
+#   - Una expresión deja su valor en EAX, entero: los de 8 y 16 bits,
+#     ensanchados (con su signo los ent16). Evaluar puede gastar EAX, EBX,
+#     ECX, EDX, ESI y EDI; se conservan EBP y ESP.
+#   - Llamada: los argumentos se apilan de derecha a izquierda, cuatro octetos
+#     cada uno (de un «ref», la dirección); la función los quita (ret n); el
+#     resultado vuelve en EAX. Marco con EBP: parámetros en [ebp+8...],
+#     locales en [ebp-4...], cada una en un múltiplo de cuatro octetos.
+#   - Los lugares: (base, símbolo, desplazamiento) como en 16 bits, con la
+#     base '', 'ebp', 'ebx' y, si hay un índice calculado, '...+esi*N'.
+#   - Lo que no es del Generador se hereda tal cual (y en el compilador escrito
+#     en Castel está repetido en plano.cas: tiene que salir lo mismo).
+# =============================================================================
+MAX32M = 0xFFFFFFFF
+
+
+class Generador32(Generador):
+    # ---- funciones ----
+    def gen_funcion(self, d):
+        self.func = d
+        self.locales = {}
+        self.fin_usado = False
+        nparams = len(d.params)
+        for i, (p, t) in enumerate(zip(d.params, d.ptipos)):
+            self.declarado(p.nombre, p.pos, local=True)
+            if p.ref:
+                self.locales[p.nombre] = Var(t, None, ref=True, off=d.poff[i])
+            else:
+                self.locales[p.nombre] = Var(t, ('ebp', '', d.poff[i]))
+        marco = 0
+        for s in recorre(d.cuerpo):
+            if s.k == 'var' and not s.global_:
+                s.tipo_res = self.resuelve(s.t)
+        for s in recorre(d.cuerpo):
+            if s.k == 'var' and not s.global_:
+                t = s.tipo_res
+                for nm in s.nombres:
+                    self.declarado(nm, s.pos, local=True)
+                    marco += (t.tam + 3) & ~3
+                    self.locales[nm] = Var(t, ('ebp', '', -marco))
+            elif s.k == 'para':
+                marco += 4                      # sitio para el tope, si no es constante
+                s.tope = ('ebp', '', -marco)
+        d.usa_int = set()
+        if d.tret is not T_NADA and not any(s.k in ('devolver', 'asm') for s in recorre(d.cuerpo)):
+            self.error(f"{d.nombre}() devuelve un {d.tret}, pero no tiene ningún «devolver»", d.pos)
+        atiende = getattr(d, 'atiende', False)
+        con_marco = bool(marco or nparams or atiende or any(s.k == 'asm' for s in recorre(d.cuerpo)))
+        self.con_marco = con_marco
+        self.fin_func = d.fin
+        self.lineas.append('')
+        self.et(d.etq)
+        if atiende:                             # la llama el procesador: se guarda todo
+            self.em('pushad')
+            self.em('mov ebp, esp')
+            if marco:
+                self.em(f'sub esp, {marco}')
+            self.em('cld')
+        elif con_marco:
+            self.em('push ebp')
+            self.em('mov ebp, esp')
+            if marco:
+                self.em(f'sub esp, {marco}')
+        self.gen_bloque(d.cuerpo, ultimo=True)
+        if self.fin_usado:
+            self.et(self.fin_func)
+        if atiende:
+            if marco:
+                self.em('mov esp, ebp')
+            self.em('popad')
+            if nparams:
+                self.em('add esp, 4')           # el número de error
+            self.em('iretd')
+        else:
+            if con_marco:
+                if marco:
+                    self.em('mov esp, ebp')
+                self.em('pop ebp')
+            self.em(f'ret {d.nbytes}' if nparams else 'ret')
+        self.func = None
+
+    # ---- sentencias ----
+    def gen_sent(self, s, ultimo=False):
+        if s.k != 'devolver':
+            Generador.gen_sent(self, s, ultimo)
+            return
+        f = self.func
+        if s.e is None:
+            if f.tret is not T_NADA:
+                self.error(f"{f.nombre}() devuelve un {f.tret}: falta el valor", s.pos)
+        else:
+            if f.tret is T_NADA:
+                self.error(f"{f.nombre}() no devuelve nada (no lleva tipo)", s.e.pos)
+            self.compatible(f.tret, s.e, "lo que se devuelve")
+            self.gen_expr(s.e)
+            if self.const(s.e) is None:
+                self.ajusta(self.tipo(s.e), f.tret)
+        if not ultimo:
+            self.fin_usado = True
+            self.em(f'jmp {self.fin_func}')
+
+    def ajusta(self, te, t):
+        """EAX, que vale como te, recortado y ensanchado a lo que es t (de 8 o
+        16 bits): así quien recibe un valor de una función lo tiene entero."""
+        if t.tam == 4 or (te.tam == t.tam and te.k == t.k):
+            return
+        if t.tam == 1:
+            if te.tam != 1:
+                self.em('movzx eax, al')
+        elif t.k == 'ent16':
+            if te.tam != 1:
+                self.em('movsx eax, ax')
+        elif te.tam != 1:
+            self.em('movzx eax, ax')
+
+    def gen_asm(self, s):
+        def cambia(m):
+            nm = m.group(1)
+            mas = int(m.group(2) or 0)          # {x+2}: dos octetos más allá
+            if self.es_var(nm):
+                v = self.var(nm, s.pos)
+                if v.ref:
+                    return f'[ebp+{v.off}]'
+                return f'[{texto_lugar((v.lugar[0], v.lugar[1], v.lugar[2] + mas))}]'
+            if nm in self.consts:
+                c = self.consts[nm]
+                return c[1] if c[0] == 'cad' else str((c[1] + mas) & MAX32M)
+            if nm in self.funcs:
+                return self.funcs[nm].etq
+            self.error(f"en el ensamblador, «{{{nm}}}» no es nada declarado en Castel",
+                       (lin, ln.find('{' + nm) + 1))
+        for ln, lin in s.lineas:
+            codigo, punto, comentario = ln.partition(';')
+            self.lineas.append(re.sub(r'\{([\w.]+)(?:\+(\d+))?\}', cambia, codigo) + punto + comentario)
+
+    def tam_txt(self, t):
+        return {1: 'byte', 2: 'word'}.get(t.tam, 'dword')
+
+    def reg_de(self, t):
+        return {1: 'al', 2: 'ax'}.get(t.tam, 'eax')
+
+    def mascara(self, t):
+        return {1: 0xFF, 2: 0xFFFF}.get(t.tam, MAX32M)
+
+    def gen_asig(self, dest, e):
+        if not self.es_lugar(dest):
+            if dest.k == 'ref' and dest.nombre in self.consts:
+                self.error(f"«{dest.nombre}» es una constante: no se le asigna", dest.pos)
+            self.error("a la izquierda de «:=» va una variable, un elemento o un campo", dest.pos)
+        td = self.tipo(dest)
+        self.compatible(td, e, "el destino" if dest.k != 'ref' else f"«{dest.nombre}»")
+        tt = self.tam_txt(td)
+        reg = self.reg_de(td)
+        im = self.inmediato(e)
+        fijo = self.lugar_fijo(dest)
+        if im is not None:
+            if self.const(e) is not None:
+                im = str(self.const(e) & self.mascara(td))
+            self.em(f'mov {tt} [{fijo or self.lugar(dest)}], {im}')
+            return
+        # x := x + n, x := x yb n...: sobre la propia memoria
+        if fijo and e.k == 'bin' and e.op in ('+', '-', 'yb', 'ob', 'xob') and self.es_lugar(e.a) \
+                and self.lugar_fijo(e.a) == fijo and self.const(e.b) is not None:
+            self.tipo(e)
+            n = self.const(e.b)
+            if td.k == 'punt':
+                n *= td.base.tam
+            n &= self.mascara(td)
+            if e.op in ('+', '-') and n == 1:
+                self.em(f"{'inc' if e.op == '+' else 'dec'} {tt} [{fijo}]")
+            else:
+                ins = {'+': 'add', '-': 'sub', 'yb': 'and', 'ob': 'or', 'xob': 'xor'}[e.op]
+                self.em(f'{ins} {tt} [{fijo}], {n}')
+            return
+        self.gen_expr(e)
+        if fijo:
+            self.em(f'mov [{fijo}], {reg}')
+        elif self.limpio(dest):
+            self.em(f'mov [{self.lugar(dest)}], {reg}')
+        else:
+            self.em('push eax')
+            lug = self.lugar(dest)
+            self.em('pop eax')
+            self.em(f'mov [{lug}], {reg}')
+
+    def gen_para(self, s):
+        tv = self.tipo(s.var)
+        lug = self.lugar_fijo(s.var)
+        if not es_num(tv) or lug is None:
+            self.error("la variable del «para» es una variable numérica sencilla", s.var.pos)
+        self.numero(s.hasta, "el final del «para»")
+        paso = 1
+        if s.paso is not None:
+            paso = self.const(s.paso)
+            if paso is None or not es_lit(self.tipo(s.paso)):
+                self.error("el «paso» es un número constante", s.paso.pos)
+            if paso == 0:
+                self.error("el «paso» no puede ser 0", s.paso.pos)
+            self.rango(abs(paso), tv, s.paso.pos)
+        tt = self.tam_txt(tv)
+        signo = tv.k in ('ent16', 'ent32')
+        self.gen_asig(s.var, s.desde)
+        ch = self.const(s.hasta)
+        if ch is not None:
+            self.rango(ch, tv, s.hasta.pos)
+            ch &= self.mascara(tv)
+
+            def compara():
+                self.em(f'cmp {tt} [{lug}], {ch}')
+        else:
+            tope = texto_lugar(s.tope)
+            self.gen_expr(s.hasta)
+            self.em(f'mov [{tope}], eax')
+            reg = self.reg_de(tv)
+
+            def compara():
+                self.em(f'mov {reg}, [{tope}]')
+                self.em(f'cmp [{lug}], {reg}')
+        l_cuerpo = self.nueva()
+        l_seguir = self.nueva()
+        l_fin = self.nueva()
+        if paso > 0:
+            pasado = 'g' if signo else 'a'
+        else:
+            pasado = 'l' if signo else 'b'
+        compara()
+        self.salto(pasado, l_fin)
+        self.et(l_cuerpo)
+        self.bucles.append((l_seguir, l_fin))
+        self.gen_bloque(s.cuerpo)
+        self.bucles.pop()
+        self.et(l_seguir)
+        if abs(paso) == 1:
+            compara()
+            self.salto('e', l_fin)
+            self.em(f"{'inc' if paso > 0 else 'dec'} {tt} [{lug}]")
+            self.em(f'jmp {l_cuerpo}')
+        else:
+            self.em(f"{'add' if paso > 0 else 'sub'} {tt} [{lug}], {abs(paso)}")
+            self.salto(('o' if signo else 'c'), l_fin)
+            compara()
+            self.salto('n' + pasado, l_cuerpo)
+        self.et(l_fin)
+
+    def gen_segun(self, s, ultimo=False):
+        t = self.valor_tipo(s.e)
+        if not es_num(t):
+            self.error(f"«según» elige por un número, no por un {t}", s.e.pos)
+        signo = t.k in ('ent16', 'ent32')
+        self.gen_expr(s.e)
+        l_fin = self.nueva()
+        vistos = []
+        ets = []
+        for c in s.casos:
+            l_c = self.nueva()
+            ets.append(l_c)
+            for a, b in c.vals:
+                va = self.const(a)
+                vb = va if b is None else self.const(b)
+                if va is None or vb is None:
+                    self.error("los valores de un «caso» son constantes", (a if va is None else b).pos)
+                if vb < va:
+                    self.error("el intervalo del «caso» va de menor a mayor", a.pos)
+                for x, y in vistos:
+                    if va <= y and x <= vb:
+                        self.error("ese valor ya está en otro «caso»", a.pos)
+                vistos.append((va, vb))
+                if va == vb:
+                    self.em(f'cmp eax, {va & MAX32M}')
+                    self.salto('e', l_c)
+                else:
+                    l_no = self.nueva()
+                    self.em(f'cmp eax, {va & MAX32M}')
+                    self.salto('l' if signo else 'b', l_no)
+                    self.em(f'cmp eax, {vb & MAX32M}')
+                    self.salto('le' if signo else 'be', l_c)
+                    self.et(l_no)
+        if s.otro:
+            self.gen_bloque(s.otro)
+        self.em(f'jmp {l_fin}')
+        for c, l_c in zip(s.casos, ets):
+            self.et(l_c)
+            self.gen_bloque(c.cuerpo)
+            if not self.acaba(c.cuerpo):
+                self.em(f'jmp {l_fin}')
+        self.et(l_fin)
+
+    # ---- condiciones ----
+    def salta(self, e, destino, si):
+        """Salta a destino si la condición e vale «si»; si no, sigue."""
+        t = self.valor_tipo(e)
+        if t.k != 'bool':
+            self.error(f"aquí va una condición (bool), no un {t}", e.pos)
+        c = self.const(e)
+        if c is not None:
+            if bool(c) == si:
+                self.em(f'jmp {destino}')
+            return
+        if e.k == 'un' and e.op == 'no':
+            self.salta(e.x, destino, not si)
+            return
+        if e.k == 'bin' and e.op in ('y', 'o'):
+            if (e.op == 'y') != si:
+                self.salta(e.a, destino, si)
+                self.salta(e.b, destino, si)
+            else:
+                l = self.nueva()
+                self.salta(e.a, l, not si)
+                self.salta(e.b, destino, si)
+                self.et(l)
+            return
+        if e.k == 'bin':
+            cc = self.compara(e)
+            self.salto(cc if si else self.INVERSA[cc], destino)
+            return
+        o = self.opnd(e)
+        if o and o[1] == 1:
+            self.em(f'cmp byte {o[0]}, 0')
+        else:
+            self.gen_expr(e)
+            self.em('test al, al')
+        self.salto('nz' if si else 'z', destino)
+
+    def cabe_en(self, c, t):
+        """¿Cabe la constante c en lo que es t (para compararla en su memoria)?"""
+        if t.tam == 4:
+            return True
+        if t.k == 'ent16':
+            return -0x8000 <= c <= 0x7FFF
+        if t.tam == 2:
+            return 0 <= c <= 0xFFFF
+        return 0 <= c <= 0xFF
+
+    def compara(self, e):
+        """Deja las banderas de comparar e.a con e.b; da la condición del salto."""
+        a, b, op = e.a, e.b, e.op
+        ta, tb = self.tipo(a), self.tipo(b)
+        signo = self.con_signo(ta, tb)
+        if self.inmediato(a) is not None and self.inmediato(b) is None:
+            a, b = b, a
+            ta, tb = tb, ta
+            op = {'<': '>', '>': '<', '<=': '>=', '>=': '<='}.get(op, op)
+        cc = {'=': 'e', '<>': 'ne',
+              '<': 'l' if signo else 'b', '<=': 'le' if signo else 'be',
+              '>': 'g' if signo else 'a', '>=': 'ge' if signo else 'ae'}[op]
+        ib = self.inmediato(b)
+        # (x yb n) = 0: un «test» sobre la propia memoria
+        if self.const(b) == 0 and op in ('=', '<>') and a.k == 'bin' and a.op == 'yb' \
+                and self.const(a) is None and self.const(a.b) is not None \
+                and self.es_lugar(a.a) and es_num(self.tipo(a.a)):
+            self.tipo(a)
+            n = self.const(a.b) & MAX32M
+            tx = self.tipo(a.a)
+            if n <= self.mascara(tx):
+                self.em(f'test {self.tam_txt(tx)} [{self.lugar(a.a)}], {n}')
+                return cc
+        if ib is not None:
+            cb = self.const(b)
+            if self.es_lugar(a) and ta.k not in ('arr', 'est') \
+                    and (ta.tam == 4 or (cb is not None and self.cabe_en(cb, ta))):
+                if cb is not None:
+                    ib = str(cb & self.mascara(ta))
+                self.em(f'cmp {self.tam_txt(ta)} [{self.lugar(a)}], {ib}')
+                return cc
+            self.gen_expr(a)
+            if cb == 0 and op in ('=', '<>'):
+                self.em('test eax, eax')
+            else:
+                self.em(f'cmp eax, {ib}')
+            return cc
+        ob = self.opnd(b)
+        if ob:
+            self.gen_expr(a)
+            if ob[1] == 4:
+                self.em(f'cmp eax, {ob[0]}')
+            else:
+                self.carga_reg('ecx', b)
+                self.em('cmp eax, ecx')
+            return cc
+        self.gen_expr(a)
+        self.em('push eax')
+        self.gen_expr(b)
+        self.em('pop ecx')
+        self.em('cmp ecx, eax')
+        return cc
+
+    # ---- lugares ----
+    def _lugar(self, e, emitir):
+        k = e.k
+        if k == 'ref':
+            v = self.var(e.nombre, e.pos)
+            if v.ref:
+                if not emitir:
+                    return None
+                self.em(f'mov ebx, [ebp+{v.off}]')
+                return ('ebx', '', 0)
+            return v.lugar
+        if k == 'campo':
+            to = self.tipo(e.obj)
+            self.tipo(e)
+            if to.k == 'punt':
+                r = self.punt_a_bx(e.obj, emitir)
+                est = to.base
+            else:
+                r = self._lugar(e.obj, emitir)
+                est = to
+            if r is None:
+                return None
+            return (r[0], r[1], r[2] + est.campos[e.nombre][0])
+        if k == 'indice':
+            obj, idx = e.obj, e.idx
+            self.tipo(e)
+        elif k == 'llamada' and e.nombre == 'valor':
+            self.tipo(e)
+            obj, idx = e.args[0][1], N('num', e.pos, v=0)
+        else:
+            self.error("aquí hace falta una variable, un elemento o un campo", e.pos)
+        to = self.tipo(obj)
+        tam = to.base.tam
+        ci = self.const(idx)
+        if to.k == 'arr':
+            if ci is not None:
+                r = self._lugar(obj, emitir)
+                return r and (r[0], r[1], r[2] + ci * tam)
+            if not emitir:
+                return None
+            if self.opnd(idx):
+                r = self._lugar(obj, True)
+                if r[0] not in ('', 'ebp', 'ebx'):
+                    r = self.a_bx(r)
+                self.carga_reg('esi', idx)
+                return self.indexa(r, tam)
+            self.gen_expr(idx)
+            r = self._lugar(obj, False)
+            if r is not None and r[0] in ('', 'ebp'):
+                self.em('mov esi, eax')
+                return self.indexa(r, tam)
+            self.em('push eax')
+            r = self.a_bx(self._lugar(obj, True))
+            self.em('pop esi')
+            return self.indexa(r, tam)
+        # puntero
+        if ci is not None:
+            r = self.punt_a_bx(obj, emitir)
+            return r and ('ebx', '', ci * tam)
+        if not emitir:
+            return None
+        if self.opnd(idx):
+            self.punt_a_bx(obj, True)
+            self.carga_reg('esi', idx)
+        else:
+            self.gen_expr(idx)
+            self.em('push eax')
+            self.punt_a_bx(obj, True)
+            self.em('pop esi')
+        return self.indexa(('ebx', '', 0), tam)
+
+    def indexa(self, r, tam):
+        """El lugar r con el índice que hay en ESI (de elementos de tam octetos)."""
+        if tam in (1, 2, 4, 8):
+            ind = 'esi' if tam == 1 else f'esi*{tam}'
+        else:
+            self.em(f'imul esi, esi, {tam}')
+            ind = 'esi'
+        return (ind if r[0] == '' else r[0] + '+' + ind, r[1], r[2])
+
+    def punt_a_bx(self, obj, emitir):
+        if not emitir:
+            return None
+        o = self.opnd(obj)
+        if o and o[1] in (0, 4):
+            self.em(f'mov ebx, {o[0]}')
+        else:
+            self.gen_expr(obj)
+            self.em('mov ebx, eax')
+        return ('ebx', '', 0)
+
+    def a_bx(self, r):
+        if r[0] == 'ebx':
+            return r
+        if r[0] == '':
+            self.em(f'mov ebx, {texto_lugar(r)}')
+        else:
+            self.em(f'lea ebx, [{texto_lugar(r)}]')
+        return ('ebx', '', 0)
+
+    def carga(self, reg, t, lug):
+        """reg := lo que hay en [lug], que es de tipo t (ensanchado a 32 bits)."""
+        if t.tam == 4:
+            self.em(f'mov {reg}, [{lug}]')
+        elif t.tam == 2:
+            self.em(f"{'movsx' if t.k == 'ent16' else 'movzx'} {reg}, word [{lug}]")
+        else:
+            self.em(f'movzx {reg}, byte [{lug}]')
+
+    def carga_reg(self, reg, e):
+        """reg := e, que es sencilla (un inmediato o una variable en sitio fijo)."""
+        o = self.opnd(e)
+        if o[1] == 0:
+            self.em(f'mov {reg}, {o[0]}')
+        else:
+            self.carga(reg, self.tipo(e), o[0][1:-1])
+
+    def limpio(self, e):
+        """¿Se llega al lugar de e sin gastar EAX?"""
+        k = e.k
+        if k == 'ref':
+            return True
+        if k == 'campo':
+            if self.tipo(e.obj).k == 'punt':
+                o = self.opnd(e.obj)
+                return bool(o) and o[1] in (0, 4)
+            return self.limpio(e.obj)
+        if k == 'indice':
+            obj, idx = e.obj, e.idx
+        else:
+            obj, idx = e.args[0][1], None
+        if idx is not None and self.const(idx) is None and not self.opnd(idx):
+            return False
+        if self.tipo(obj).k == 'punt':
+            o = self.opnd(obj)
+            return bool(o) and o[1] in (0, 4)
+        return self.limpio(obj)
+
+    # ---- operandos sencillos ----
+    def inmediato(self, e):
+        c = self.const(e)
+        if c is not None:
+            return str(c & MAX32M)
+        if e.k == 'llamada' and e.nombre == 'dirección' and len(e.args) == 1:
+            a = e.args[0][1]
+            if a.k == 'ref' and a.nombre in self.funcs and not self.es_var(a.nombre):
+                self.tipo(e)
+                return self.funcs[a.nombre].etq
+        return Generador.inmediato(self, e)
+
+    def opnd(self, e):
+        """(texto, tamaño): un inmediato (tamaño 0) o una variable en sitio fijo (1, 2 o 4)."""
+        im = self.inmediato(e)
+        if im is not None:
+            return (im, 0)
+        if self.es_lugar(e) and self.tipo(e).k not in ('arr', 'est'):
+            r = self.lugar_fijo(e)
+            if r:
+                return (f'[{r}]', self.tipo(e).tam)
+        return None
+
+    # ---- expresiones: el valor, a EAX ----
+    def gen_expr(self, e):
+        t = self.valor_tipo(e)
+        im = self.inmediato(e)
+        if im is not None:
+            self.em('xor eax, eax' if im == '0' else f'mov eax, {im}')
+            return
+        k = e.k
+        if self.es_lugar(e):
+            if t.k == 'arr':
+                self.em(f'lea eax, [{self.lugar(e)}]')
+            else:
+                self.carga('eax', t, self.lugar(e))
+            return
+        if k == 'un':
+            self.gen_expr(e.x)
+            self.em({'no': 'xor eax, 1', '-': 'neg eax', 'nob': 'not eax'}[e.op])
+            return
+        if k == 'llamada':
+            self.gen_llamada(e)
+            return
+        if k == 'bin':
+            if t.k == 'bool':
+                l_no = self.nueva()
+                l_fin = self.nueva()
+                self.salta(e, l_no, False)
+                self.em('mov eax, 1')
+                self.em(f'jmp {l_fin}')
+                self.et(l_no)
+                self.em('xor eax, eax')
+                self.et(l_fin)
+            else:
+                self.gen_arit(e)
+            return
+        raise AssertionError(k)
+
+    def dos(self, a, b):
+        """a -> EAX y b -> ECX."""
+        if self.opnd(b):
+            self.gen_expr(a)
+            self.carga_reg('ecx', b)
+        else:
+            self.gen_expr(a)
+            self.em('push eax')
+            self.gen_expr(b)
+            self.em('mov ecx, eax')
+            self.em('pop eax')
+
+    def gen_arit(self, e):
+        op, a, b = e.op, e.a, e.b
+        ta, tb = self.tipo(a), self.tipo(b)
+        cb = self.const(b)
+        signo = self.con_signo(ta, tb)
+        # punteros: se avanza de elemento en elemento
+        if ta.k == 'punt' or tb.k == 'punt':
+            if ta.k == 'punt' and tb.k in ('punt', 'arr'):
+                self.dos(a, b)
+                self.em('sub eax, ecx')
+                return
+            if tb.k == 'punt':
+                a, b, ta, tb = b, a, tb, ta
+                cb = self.const(b)
+            tam = ta.base.tam
+            if cb is not None:
+                self.gen_expr(a)
+                self.suma_const(op, cb * tam)
+            else:
+                self.gen_expr(b)
+                self.escala('eax', tam)
+                self.em('push eax')
+                self.gen_expr(a)
+                self.em('pop ecx')
+                self.em(f"{'add' if op == '+' else 'sub'} eax, ecx")
+            return
+        if op in ('+', '-', 'yb', 'ob', 'xob'):
+            ins = {'+': 'add', '-': 'sub', 'yb': 'and', 'ob': 'or', 'xob': 'xor'}[op]
+            o = self.opnd(b)
+            if cb is not None and op in ('+', '-'):
+                self.gen_expr(a)
+                self.suma_const(op, cb)
+            elif o and o[1] in (0, 4):
+                self.gen_expr(a)
+                self.em(f'{ins} eax, {o[0]}')
+            else:
+                self.dos(a, b)
+                self.em(f'{ins} eax, ecx')
+            return
+        if op == '*':
+            if cb is not None and potencia2(cb):
+                self.gen_expr(a)
+                self.desplaza('shl', cb.bit_length() - 1)
+                return
+            o = self.opnd(b)
+            if cb is not None:
+                self.gen_expr(a)
+                self.em(f'imul eax, eax, {cb & MAX32M}')
+            elif o and o[1] == 4:
+                self.gen_expr(a)
+                self.em(f'imul eax, {o[0]}')
+            else:
+                self.dos(a, b)
+                self.em('imul eax, ecx')
+            return
+        if op in ('div', 'mod'):
+            if cb == 0:
+                self.error("división por cero", b.pos)
+            if cb is not None and potencia2(cb) and not signo:
+                self.gen_expr(a)
+                if op == 'div':
+                    self.desplaza('shr', cb.bit_length() - 1)
+                else:
+                    self.em(f'and eax, {cb - 1}')
+                return
+            self.dos(a, b)
+            if signo:
+                self.em('cdq')
+                self.em('idiv ecx')
+            else:
+                self.em('xor edx, edx')
+                self.em('div ecx')
+            if op == 'mod':
+                self.em('mov eax, edx')
+            return
+        if op in ('<<', '>>'):
+            ins = 'shl' if op == '<<' else ('sar' if ta.k in ('ent16', 'ent32') else 'shr')
+            if cb is not None:
+                if not 0 <= cb <= 31:
+                    self.error("se desplaza de 0 a 31 bits", b.pos)
+                self.gen_expr(a)
+                self.desplaza(ins, cb)
+            else:
+                self.dos(a, b)
+                self.em(f'{ins} eax, cl')
+            return
+        raise AssertionError(op)
+
+    def suma_const(self, op, n):
+        n &= MAX32M
+        if op == '-':
+            n = -n & MAX32M
+        if n == 0:
+            return
+        if n <= 2:
+            for _ in range(n):
+                self.em('inc eax')
+        elif n >= 0xFFFFFFFE:
+            for _ in range(0x100000000 - n):
+                self.em('dec eax')
+        else:
+            self.em(f'add eax, {n}')
+
+    def desplaza(self, ins, n):
+        if n:
+            self.em(f'{ins} eax, {n}')
+
+    def escala(self, reg, tam):
+        if tam == 1:
+            return
+        if potencia2(tam):
+            self.em(f'shl {reg}, {tam.bit_length() - 1}')
+        else:
+            self.em(f'imul {reg}, {reg}, {tam}')
+
+    # ---- llamadas ----
+    def gen_llamada(self, e, sentencia=False, solo_al=False):
+        nm = e.nombre
+        args = [a for _, a in e.args]
+        if nm in self.funcs:
+            f = self.funcs[nm]
+            if f is self.principal:
+                self.error("principal() no se llama: es por donde se empieza", e.pos)
+            for a, p in reversed(list(zip(args, f.params))):
+                if p.ref:
+                    r = self._lugar(a, False)
+                    if r and r[0] == '':
+                        self.em(f'push {texto_lugar(r)}')
+                    elif a.k == 'ref' and self.var(a.nombre, a.pos).ref:
+                        self.em(f'push dword [ebp+{self.var(a.nombre, a.pos).off}]')
+                    else:
+                        self.em(f'lea eax, [{self.lugar(a)}]')
+                        self.em('push eax')
+                else:
+                    o = self.opnd(a)
+                    if o and o[1] == 0:
+                        self.em(f'push {o[0]}')
+                    elif o and o[1] == 4:
+                        self.em(f'push dword {o[0]}')
+                    else:
+                        self.gen_expr(a)
+                        self.em('push eax')
+            self.em(f'call {f.etq}')
+            return
+        if nm == 'escribir':
+            for a in args:
+                t = self.tipo(a)
+                if self.es_texto(t):
+                    o = self.opnd(a)
+                    if o and o[1] in (0, 4):
+                        self.em(f'mov esi, {o[0]}')
+                    else:
+                        self.gen_expr(a)
+                        self.em('mov esi, eax')
+                    self.em('call escribir_cad')
+                elif t.k == 'bool':
+                    l_no = self.nueva()
+                    l_fin = self.nueva()
+                    self.salta(a, l_no, False)
+                    self.em(f"mov esi, {self.etiqueta_cadena(b'cierto')}")
+                    self.em(f'jmp {l_fin}')
+                    self.et(l_no)
+                    self.em(f"mov esi, {self.etiqueta_cadena(b'falso')}")
+                    self.et(l_fin)
+                    self.em('call escribir_cad')
+                else:
+                    self.gen_expr(a)
+                    c = self.const(a)
+                    con_signo = t.k in ('ent16', 'ent32') or (c is not None and c < 0)
+                    self.em(f"call {'escribir_num' if con_signo else 'escribir_nat'}")
+            return
+        if nm == 'escribir_car':
+            self.gen_expr(args[0])
+            self.em('call escribir_car')
+            return
+        if nm == 'salir':
+            if args:
+                self.gen_expr(args[0])
+            else:
+                self.em('xor eax, eax')
+            self.em('jmp castel_salir')
+            return
+        if nm == 'meter_puerto':
+            if self.opnd(args[0]):
+                self.carga_reg('edx', args[0])
+            else:
+                self.gen_expr(args[0])
+                self.em('mov edx, eax')
+            self.em('in al, dx')
+            self.em('movzx eax, al')
+            return
+        if nm == 'sacar_puerto':
+            self.dos(args[1], args[0])          # dato -> EAX, puerto -> ECX
+            self.em('mov edx, ecx')
+            self.em('out dx, al')
+            return
+        if nm == 'dirección':
+            self.em(f'lea eax, [{self.lugar(args[0])}]')
+            return
+        if nm in ('puntero', 'nat32', 'ent32'):
+            self.gen_expr(args[0])
+            return
+        if nm in CONVERSIONES:
+            ta = self.tipo(args[0])
+            self.gen_expr(args[0])
+            self.ajusta(ta, BASICOS[nm])
+            return
+        if nm == 'fin_programa':
+            self.em('mov eax, _fin_programa')
+            return
+        raise AssertionError(nm)
+
+    # ---- el programa entero, en 32 bits ----
+    def escribe32(self, prog, pr, codigo, apoyo, palabras):
+        def vivos(lista):
+            return [ln for t in lista if t.vivo for ln in t.lineas]
+        nucleo = self.modelo == 'núcleo'
+        bss = vivos(self.bss)
+        sal = [
+            '; -----------------------------------------------------------------',
+            f'; Generado por ccastel desde el módulo {prog.nombre}. NO editar a mano.',
+            '; Ensamblar:  nasm -f bin ESTE.asm -o ' + ('NUCLEO.BIN' if nucleo else 'PROGRAMA.EXE'),
+            '; -----------------------------------------------------------------',
+            'cpu 386',
+            'bits 32',
+        ]
+        sal += ARRANQUE32['núcleo' if nucleo else 'hispa32'].strip('\n').split('\n')
+        if bss or nucleo:
+            sal += ['    mov edi, _vacio', '    mov ecx, _vacio_fin-_vacio', '    xor eax, eax', '    rep stosb']
+        sal += ARRANQUE32['núcleo2' if nucleo else 'hispa32_2'].strip('\n').split('\n')
+        sal.append('    call F_principal')
+        if pr.tret is T_NADA:
+            sal.append('    xor eax, eax')
+        sal.append('    jmp castel_salir')
+        sal += vivos(codigo) + vivos(apoyo)
+        sal += ['', '; ---- datos ----'] + vivos(self.datos)
+        if nucleo:
+            sal += ['    align 4, db 0', '_datos_fin:']
+        else:
+            sal += ARRANQUE32['hispa32_imp'].strip('\n').split('\n')
+        sal += ['', '; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----',
+                '_vacio:', '    absolute _vacio']
+        if nucleo:
+            sal += ['C_pila:', '    resb 16384', 'C_pila_fin:']
+        sal += bss + ['_vacio_fin:']
+        if '_fin_programa' in palabras:
+            sal.append('_fin_programa:')        # el primer octeto libre detrás del programa
+        return '\n'.join(limpia(sal)) + '\n'
+
 
 HACEN_ALGO = {'escribir', 'escribir_car', 'salir', 'sacar_puerto', 'poner_byte', 'poner_palabra',
               'interrupción'}
@@ -3293,7 +4203,7 @@ def limpia(lineas):
                     cambio = True
                     continue
             # «mov [X], ax / mov ax, [X]»: lo segundo sobra
-            m = re.match(r'^    mov (\[[^\]]+\]), (ax|al)$', ln)
+            m = re.match(r'^    mov (\[[^\]]+\]), (eax|ax|al)$', ln)
             if m and i + 1 < len(sal) and sal[i + 1] == f'    mov {m.group(2)}, {m.group(1)}':
                 nuevo.append(ln)
                 i += 2
@@ -3546,6 +4456,355 @@ castel_sar32:
 })
 
 
+# Las rutinas de apoyo de 32 bits (solo van las que se usan). Las de escribir
+# son las mismas en los dos modelos; por debajo, castel_salida (escribe ECX
+# octetos desde ESI) y castel_salir (acaba con el código de AL) son de cada uno.
+APOYO32 = {
+    'escribir_num': r"""
+; escribir_num: enseña EAX como entero con signo, en decimal
+escribir_num:
+    test eax, eax
+    jns escribir_nat
+    push eax
+    mov al, '-'
+    call escribir_car
+    pop eax
+    neg eax
+""",
+    'escribir_nat': r"""
+; escribir_nat: enseña EAX como natural, en decimal
+escribir_nat:
+    sub esp, 12
+    lea edi, [esp+12]
+    mov ebx, 10
+.cifra:
+    xor edx, edx
+    div ebx
+    add dl, '0'
+    dec edi
+    mov [edi], dl
+    test eax, eax
+    jnz .cifra
+    mov esi, edi
+    lea ecx, [esp+12]
+    sub ecx, edi
+    call castel_salida
+    add esp, 12
+    ret
+""",
+    'escribir_cad': r"""
+; escribir_cad: enseña el texto acabado en 0 que hay en ESI
+escribir_cad:
+    xor ecx, ecx
+.mide:
+    cmp byte [esi+ecx], 0
+    je .va
+    inc ecx
+    jmp .mide
+.va:
+    jmp castel_salida
+""",
+    'escribir_car': r"""
+; escribir_car: enseña la letra que hay en AL
+escribir_car:
+    push eax
+    mov esi, esp
+    mov ecx, 1
+    call castel_salida
+    pop eax
+    ret
+""",
+}
+
+# modelo núcleo: la salida va al puerto serie (COM1) y a la pantalla de texto
+APOYO_NUCLEO = {
+    'castel_salida': r"""
+; castel_salida: escribe ECX octetos desde ESI (puerto serie y pantalla)
+castel_salida:
+    jecxz .fin
+.otra:
+    lodsb
+    call castel_pon_car
+    loop .otra
+.fin:
+    ret
+""",
+    'castel_pon_car': r"""
+; castel_pon_car: la letra de AL, al puerto serie COM1 y a la pantalla de texto
+; (con su cursor, C_cursor, y subiendo las líneas al llegar abajo). Lo conserva todo.
+castel_pon_car:
+    push edx
+    push eax
+    mov edx, 0x3FD
+.espera:
+    in al, dx
+    test al, 0x20
+    jz .espera
+    pop eax
+    push eax
+    mov edx, 0x3F8
+    out dx, al
+    mov edx, [C_cursor]
+    cmp al, 10
+    je .nueva
+    cmp al, 13
+    je .principio
+    mov ah, 7
+    mov [edx*2+0xB8000], ax
+    inc edx
+    jmp .mira
+.nueva:
+    add edx, 80
+.principio:
+    push ecx
+    mov eax, edx
+    xor edx, edx
+    mov ecx, 80
+    div ecx
+    imul edx, eax, 80
+    pop ecx
+.mira:
+    cmp edx, 2000
+    jb .bien
+    push esi
+    push edi
+    push ecx
+    mov esi, 0xB80A0
+    mov edi, 0xB8000
+    mov ecx, 960
+    rep movsd
+    mov eax, 0x07200720
+    mov ecx, 40
+    rep stosd
+    pop ecx
+    pop edi
+    pop esi
+    sub edx, 80
+.bien:
+    mov [C_cursor], edx
+    push ebx
+    mov ebx, edx
+    mov edx, 0x3D4
+    mov al, 0x0F
+    out dx, al
+    inc edx
+    mov al, bl
+    out dx, al
+    dec edx
+    mov al, 0x0E
+    out dx, al
+    inc edx
+    mov al, bh
+    out dx, al
+    pop ebx
+    pop eax
+    pop edx
+    ret
+""",
+    'castel_salir': r"""
+; castel_salir: el programa acaba (con el código de AL): se dice por el puerto
+; 0xF4 (en QEMU, el dispositivo isa-debug-exit) y el procesador se para
+castel_salir:
+    mov edx, 0xF4
+    out dx, al
+    cli
+.para:
+    hlt
+    jmp .para
+""",
+}
+
+# modelo hispa32: un programa Win32 de consola (WriteFile y ExitProcess de KERNEL32)
+APOYO_HISPA32 = {
+    'castel_salida': r"""
+; castel_salida: escribe ECX octetos desde ESI en la salida (WriteFile)
+castel_salida:
+    push 0
+    push C_escritos
+    push ecx
+    push esi
+    push dword [C_salida]
+    call [C_WriteFile]
+    ret
+""",
+    'castel_salir': r"""
+; castel_salir: el programa acaba con el código de AL (ExitProcess)
+castel_salir:
+    movzx eax, al
+    push eax
+    call [C_ExitProcess]
+""",
+}
+
+# El arranque de 32 bits: lo que va delante del programa (y, en hispa32, la
+# tabla de lo que se importa, detrás de los datos). Entre el primer trozo y el
+# segundo, si hay variables sin valor inicial, se ponen a cero.
+ARRANQUE32 = {
+    'núcleo': r"""
+org 0x100000
+; un núcleo multiboot (lo carga QEMU con -kernel, o GRUB): la cabecera dice
+; dónde va cada cosa, así que vale tal cual, sin formato ELF
+C_ini:
+    jmp C_arranque
+    align 4, db 0
+C_multiboot:
+    dd 0x1BADB002
+    dd 0x00010000
+    dd 0xE4514FFE
+    dd C_multiboot
+    dd C_ini
+    dd _datos_fin
+    dd _vacio_fin
+    dd C_arranque
+; la tabla de descriptores: código (0x08) y datos (0x10), planos, de 4 GB
+C_gdt:
+    dd 0, 0
+    dd 0x0000FFFF, 0x00CF9A00
+    dd 0x0000FFFF, 0x00CF9200
+C_gdtr:
+    dw 23
+    dd C_gdt
+C_mb_magia:
+    dd 0
+C_mb_info:
+    dd 0
+C_cursor:
+    dd 0
+C_arranque:
+    cli
+    mov [C_mb_magia], eax
+    mov [C_mb_info], ebx
+    lgdt [C_gdtr]
+    jmp 0x08:C_plano
+C_plano:
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, C_pila_fin
+    cld
+""",
+    'núcleo2': r"""
+; la pantalla, en blanco; y el puerto serie COM1 a 115200, 8N1
+    mov edi, 0xB8000
+    mov ecx, 1000
+    mov eax, 0x07200720
+    rep stosd
+    mov edx, 0x3F9
+    xor al, al
+    out dx, al
+    mov edx, 0x3FB
+    mov al, 0x80
+    out dx, al
+    mov edx, 0x3F8
+    mov al, 1
+    out dx, al
+    mov edx, 0x3F9
+    xor al, al
+    out dx, al
+    mov edx, 0x3FB
+    mov al, 3
+    out dx, al
+    mov edx, 0x3FA
+    mov al, 0xC7
+    out dx, al
+    mov edx, 0x3FC
+    mov al, 3
+    out dx, al
+""",
+    'hispa32': r"""
+org 0x400E00
+; un programa Win32 de consola (PE): las cabeceras, a mano, y una sola sección
+; en 0x401000 con el código, los datos y, detrás, lo que empieza a cero
+P_mz:
+    db 77, 90
+    times 58 db 0
+    dd 64
+    db 80, 69, 0, 0
+    dw 0x014C
+    dw 1
+    dd 0, 0, 0
+    dw 224
+    dw 0x0103
+    dw 0x010B
+    db 1, 0
+    dd P_arch_fin-P_texto
+    dd 0, 0
+    dd C_arranque-0x400000
+    dd 0x1000, 0x1000
+    dd 0x400000
+    dd 0x1000, 0x200
+    dw 4, 0, 0, 0, 4, 0
+    dd 0
+    dd (_vacio_fin-P_texto+0x1FFF)/0x1000*0x1000
+    dd 0x200
+    dd 0
+    dw 3, 0
+    dd 0x100000, 0x1000, 0x100000, 0x1000
+    dd 0, 16
+    dd 0, 0
+    dd P_imp-0x400000, P_imp_fin-P_imp
+    times 28 dd 0
+    db 46, 116, 101, 120, 116, 0, 0, 0
+    dd _vacio_fin-P_texto
+    dd 0x1000
+    dd P_arch_fin-P_texto
+    dd 0x200
+    dd 0, 0, 0
+    dd 0xE0000060
+    align 512, db 0
+P_texto:
+C_arranque:
+    cld
+""",
+    'hispa32_2': r"""
+    push -11
+    call [C_GetStdHandle]
+    mov [C_salida], eax
+""",
+    'hispa32_imp': r"""
+; lo que se importa de KERNEL32
+    align 4, db 0
+P_imp:
+    dd P_ilt-0x400000, 0, 0, P_dll-0x400000, P_iat-0x400000
+    dd 0, 0, 0, 0, 0
+P_imp_fin:
+P_ilt:
+    dd P_h1-0x400000, P_h2-0x400000, P_h3-0x400000, 0
+P_iat:
+C_GetStdHandle:
+    dd P_h1-0x400000
+C_WriteFile:
+    dd P_h2-0x400000
+C_ExitProcess:
+    dd P_h3-0x400000
+    dd 0
+C_salida:
+    dd 0
+C_escritos:
+    dd 0
+P_dll:
+    db 'KERNEL32.dll', 0
+    align 2, db 0
+P_h1:
+    dw 0
+    db 'GetStdHandle', 0
+    align 2, db 0
+P_h2:
+    dw 0
+    db 'WriteFile', 0
+    align 2, db 0
+P_h3:
+    dw 0
+    db 'ExitProcess', 0
+    align 512, db 0
+P_arch_fin:
+""",
+}
+
+
 # =============================================================================
 #  5. Los archivos: el programa y los módulos que importa
 # =============================================================================
@@ -3631,7 +4890,10 @@ def compila(ruta, rutas=(), todo=False):
     c = Cargador(list(rutas))
     try:
         c.carga(ruta).principal = True
-        return Generador(c.orden, todo).genera()
+        clase = Generador
+        if any(d.k == 'modelo' and d.cual in ('núcleo', 'hispa32') for d in c.orden[-1].arbol.decls):
+            clase = Generador32                 # 32 bits (CASTEL32.md)
+        return clase(c.orden, todo).genera()
     except ErrorCastel as e:
         e.textos = c.textos
         raise

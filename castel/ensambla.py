@@ -29,10 +29,12 @@
 # =============================================================================
 import sys
 
+R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']
-RS = ['es', 'cs', 'ss', 'ds']
-PREF_SEG = {'es': 0x26, 'cs': 0x2E, 'ss': 0x36, 'ds': 0x3E}
+RS = ['es', 'cs', 'ss', 'ds', 'fs', 'gs']
+RC = ['cr0', 'cr1', 'cr2', 'cr3', 'cr4']
+PREF_SEG = {'es': 0x26, 'cs': 0x2E, 'ss': 0x36, 'ds': 0x3E, 'fs': 0x64, 'gs': 0x65}
 BASES = {('bx', 'si'): 0, ('bx', 'di'): 1, ('bp', 'si'): 2, ('bp', 'di'): 3,
          ('si',): 4, ('di',): 5, ('bp',): 6, ('bx',): 7}
 CUENTAS = {'add': 0, 'or': 1, 'adc': 2, 'sbb': 3, 'and': 4, 'sub': 5, 'xor': 6, 'cmp': 7}
@@ -46,9 +48,19 @@ SUELTAS = {'cld': 0xFC, 'std': 0xFD, 'cli': 0xFA, 'sti': 0xFB, 'clc': 0xF8, 'stc
            'cwd': 0x99, 'cbw': 0x98, 'pushf': 0x9C, 'popf': 0x9D, 'lodsb': 0xAC, 'lodsw': 0xAD,
            'stosb': 0xAA, 'stosw': 0xAB, 'movsb': 0xA4, 'movsw': 0xA5, 'cmpsb': 0xA6, 'cmpsw': 0xA7,
            'scasb': 0xAE, 'scasw': 0xAF, 'nop': 0x90, 'hlt': 0xF4, 'lahf': 0x9F, 'sahf': 0x9E,
-           'xlatb': 0xD7, 'iret': 0xCF, 'into': 0xCE}
+           'xlatb': 0xD7, 'iret': 0xCF, 'into': 0xCE,
+           'cdq': 0x99, 'cwde': 0x98, 'lodsd': 0xAD, 'stosd': 0xAB, 'movsd': 0xA5, 'cmpsd': 0xA7,
+           'scasd': 0xAF, 'pushad': 0x60, 'popad': 0x61, 'pushfd': 0x9C, 'popfd': 0x9D, 'iretd': 0xCF,
+           'pusha': 0x60, 'popa': 0x61, 'int3': 0xCC}
+# las sueltas que son de 16 o de 32 bits (las otras van como diga «bits»): en
+# el otro modo llevan delante el prefijo 66h
+TAM_SUELTA = {'cwd': 2, 'cbw': 2, 'lodsw': 2, 'stosw': 2, 'movsw': 2, 'cmpsw': 2, 'scasw': 2,
+              'cdq': 4, 'cwde': 4, 'lodsd': 4, 'stosd': 4, 'movsd': 4, 'cmpsd': 4, 'scasd': 4,
+              'pushad': 4, 'popad': 4, 'pushfd': 4, 'popfd': 4, 'iretd': 4}
 PREFIJOS = {'rep': 0xF3, 'repe': 0xF3, 'repz': 0xF3, 'repne': 0xF2, 'repnz': 0xF2}
-BUCLES = {'loopne': 0xE0, 'loopnz': 0xE0, 'loope': 0xE1, 'loopz': 0xE1, 'loop': 0xE2, 'jcxz': 0xE3}
+BUCLES = {'loopne': 0xE0, 'loopnz': 0xE0, 'loope': 0xE1, 'loopz': 0xE1, 'loop': 0xE2, 'jcxz': 0xE3,
+          'jecxz': 0xE3}
+ESCALAS = {1: 0, 2: 1, 4: 2, 8: 3}
 
 
 class ErrorEns(Exception):
@@ -56,16 +68,21 @@ class ErrorEns(Exception):
 
 
 class Op:
-    """Un operando: k es 'r16', 'r8', 'rs', 'mem', 'inm' o 'lejos'."""
+    """Un operando: k es 'r32', 'r16', 'r8', 'rs', 'rc', 'mem', 'inm' o 'lejos'."""
     def __init__(self, k):
         self.k = k
         self.reg = 0
-        self.tam = 0                # 1, 2 o 0 (no se sabe)
+        self.tam = 0                # 1, 2, 4 o 0 (no se sabe)
         self.seg = None             # prefijo de segmento
         self.rm = -1                # memoria: 0-7, o -1 si es una dirección sin registros
         self.v = 0                  # el número (inmediato o desplazamiento)
         self.sim = False            # ¿lleva alguna etiqueta la cuenta?
+        self.falta = False          # ¿alguna que aún no se sabe? (la primera pasada)
         self.v2 = 0                 # 'lejos': el segmento
+        self.a32 = False            # memoria con registros de 32 bits: [base+índice*escala+n]
+        self.base = -1
+        self.indice = -1
+        self.escala = 1
 
 
 class Ensamblador:
@@ -195,12 +212,22 @@ class Ensamblador:
         s = s.strip()
         tam = 0
         bajo = s.lower()
-        for pal, t in ((b'byte', 1), (b'word', 2)):
-            if bajo.startswith(pal) and len(s) > 4 and s[4] in b' \t[':
+        for pal, t in ((b'byte', 1), (b'word', 2), (b'dword', 4)):
+            if bajo.startswith(pal) and len(s) > len(pal) and s[len(pal)] in b' \t[':
                 tam = t
-                s = s[4:].strip()
+                s = s[len(pal):].strip()
                 bajo = s.lower()
         nombre = bajo.decode('latin-1')
+        if nombre in R32:
+            o = Op('r32')
+            o.reg = R32.index(nombre)
+            o.tam = 4
+            return o
+        if nombre in RC:
+            o = Op('rc')
+            o.reg = RC.index(nombre)
+            o.tam = 4
+            return o
         if nombre in R16:
             o = Op('r16')
             o.reg = R16.index(nombre)
@@ -229,6 +256,7 @@ class Ensamblador:
         o = Op('inm')
         o.tam = tam
         o.v, o.sim = self.cuenta(s)
+        o.falta = self.e_falta
         return o
 
     def memoria(self, s, tam):
@@ -243,6 +271,7 @@ class Ensamblador:
             s = dos[1]
         # los registros (sumados) y lo demás, que es una cuenta
         regs = []
+        regs32 = []                 # (registro, escala)
         resto = b''
         i = 0
         signo = b'+'
@@ -257,8 +286,11 @@ class Ensamblador:
                 j += 1
             t = s[i:j].strip()
             n = t.lower().decode('latin-1')
+            r32 = reg_escalado(n)
             if n in ('bx', 'bp', 'si', 'di') and signo == b'+':
                 regs.append(n)
+            elif r32 is not None and signo == b'+':
+                regs32.append(r32)
             elif t:
                 resto += signo + t
             elif j < len(s) or i == 0:
@@ -268,7 +300,15 @@ class Ensamblador:
                 break
             signo = s[j:j + 1]
             i = j + 1
+        if regs32:
+            if regs:
+                self.error("no se mezclan registros de 16 y de 32 bits en una dirección")
+            self.memoria32(o, regs32)
+        elif self.bits == 32:
+            o.a32 = True
         if regs:
+            if self.bits == 32:
+                self.error("en 32 bits las direcciones van con registros de 32 (ebx, esi...)")
             regs.sort(key=lambda r: ('bx', 'bp', 'si', 'di').index(r))
             if tuple(regs) not in BASES:
                 self.error("esos registros no valen juntos en una dirección")
@@ -276,6 +316,34 @@ class Ensamblador:
         if resto:
             o.v, o.sim = self.cuenta(resto)
         return o
+
+    def memoria32(self, o, regs):
+        """[base+índice*escala]: como NASM, el primero sin escala es la base y el
+        otro el índice (salvo esp, que no puede ser índice); un índice por 2, 3,
+        5 o 9 sin base se parte en base e índice ([esi*2] es [esi+esi])."""
+        if self.bits != 32:
+            self.error("en 16 bits las direcciones van con registros de 16 (bx, bp, si, di)")
+        o.a32 = True
+        base = indice = -1
+        escala = 1
+        for r, e in regs:
+            if e is None and base < 0:
+                base = r
+            elif indice < 0:
+                indice = r
+                escala = e or 1
+            else:
+                self.error("demasiados registros en la dirección")
+        if indice == 4:
+            if escala != 1 or base == 4:
+                self.error("esp no vale como índice")
+            base, indice = indice, base
+        if base < 0 and escala in (2, 3, 5, 9):
+            base = indice
+            escala -= 1
+        if escala not in ESCALAS:
+            self.error("la escala es 1, 2, 4 u 8")
+        o.base, o.indice, o.escala = base, indice, escala
 
     # ---- sacar octetos ----
     def b(self, *octetos):
@@ -289,15 +357,29 @@ class Ensamblador:
     def w(self, v):
         self.b(v, v >> 8)
 
-    def modrm(self, reg, o, codigo):
-        """El prefijo de segmento, el código y el octeto ModRM (con su desplazamiento)."""
+    def d(self, v):
+        self.b(v, v >> 8, v >> 16, v >> 24)
+
+    def p66(self, t):
+        """El prefijo de tamaño (66h) si la operación no es del tamaño del modo."""
+        if t in (2, 4) and t != self.bits // 8:
+            self.b(0x66)
+
+    def modrm(self, reg, o, codigo, t=0):
+        """El prefijo de segmento, el de tamaño (si la operación es de t octetos y
+        no es la del modo), el código y el octeto ModRM (con su desplazamiento)."""
         if o.k != 'mem':
+            self.p66(t)
             self.b(*codigo, 0xC0 | (reg << 3) | o.reg)
             return
         if o.seg:
             self.b(PREF_SEG[o.seg])
+        self.p66(t)
         self.b(*codigo)
         d = o.v if o.v < 0x80000000 else o.v - 0x100000000
+        if o.a32:
+            self.modrm32(reg, o, d)
+            return
         if o.rm < 0:
             self.b(0x06 | (reg << 3))
             self.w(o.v)
@@ -309,10 +391,44 @@ class Ensamblador:
         else:
             self.b(0x40 | (reg << 3) | o.rm, d)
 
-    def corto(self, o):
-        """¿Vale el inmediato como un octeto con signo (para la forma 83h)?"""
+    def modrm32(self, reg, o, d):
+        """ModRM (y SIB) de una dirección de 32 bits, con el desplazamiento más corto."""
+        base, ind = o.base, o.indice
+        largo = o.sim or not -128 <= d <= 127
+        if base < 0 and ind < 0:
+            self.b(0x05 | (reg << 3))
+            self.d(o.v)
+            return
+        if base < 0:                            # índice sin base: SIB con 32 bits de desplazamiento
+            self.b(0x04 | (reg << 3), (ESCALAS[o.escala] << 6) | (ind << 3) | 5)
+            self.d(o.v)
+            return
+        if largo:
+            mod = 0x80
+        elif d == 0 and base != 5:
+            mod = 0
+        else:
+            mod = 0x40
+        if ind < 0 and base != 4:
+            self.b(mod | (reg << 3) | base)
+        else:
+            self.b(mod | (reg << 3) | 4, (ESCALAS[o.escala] << 6) | ((4 if ind < 0 else ind) << 3) | base)
+        if mod == 0x80:
+            self.d(o.v)
+        elif mod == 0x40:
+            self.b(d)
+
+    def corto(self, o, t=2):
+        """¿Vale el inmediato como un octeto con signo (para la forma 83h)? Como en
+        NASM: con una etiqueta, no (aunque el número quepa); con una que aún no
+        se sabe (en la primera pasada), se supone que sí."""
+        if o.falta:
+            return True
         if o.sim:
             return False
+        if t == 4:
+            v = o.v & 0xFFFFFFFF
+            return v <= 0x7F or v >= 0xFFFFFF80
         v = o.v & 0xFFFF
         return v <= 0x7F or v >= 0xFF80
 
@@ -321,16 +437,20 @@ class Ensamblador:
         if a.tam and b is not None and b.tam and a.tam != b.tam and b.k != 'inm':
             self.error("los dos operandos no son del mismo tamaño")
         if not t:
-            self.error("no se sabe el tamaño: falta «byte» o «word»")
+            self.error("no se sabe el tamaño: falta «byte», «word» o «dword»")
         return t
 
     def es_rm(self, o):
-        return o.k in ('r16', 'r8', 'mem')
+        return o.k in ('r32', 'r16', 'r8', 'mem')
+
+    def es_reg(self, o):
+        return o.k in ('r32', 'r16', 'r8')
 
     # ---- una instrucción ----
     def instruccion(self, nem, ops):
         n = len(ops)
         if nem in SUELTAS and n == 0:
+            self.p66(TAM_SUELTA.get(nem, 0))
             self.b(SUELTAS[nem])
             return
         if nem in CONDICIONES_J or nem == 'jmp' or nem == 'call' or nem in BUCLES:
@@ -344,70 +464,102 @@ class Ensamblador:
         elif nem in CUENTAS and n == 2:
             self.cuenta2(CUENTAS[nem], a, c)
         elif nem == 'test' and n == 2:
-            if a.k in ('r8', 'r16') and c.k == 'mem':
+            if self.es_reg(a) and c.k == 'mem':
                 a, c = c, a
-            if self.es_rm(a) and c.k in ('r8', 'r16'):
-                self.modrm(c.reg, a, [0x84 + (self.tam_de(a, c) == 2)])
+            if self.es_rm(a) and self.es_reg(c):
+                t = self.tam_de(a, c)
+                self.modrm(c.reg, a, [0x84 + (t != 1)], t)
             elif self.es_rm(a) and c.k == 'inm':
                 t = self.tam_de(a, c)
                 if a.k != 'mem' and a.reg == 0:
-                    self.b(0xA8 + (t == 2))
+                    self.p66(t)
+                    self.b(0xA8 + (t != 1))
                 else:
-                    self.modrm(0, a, [0xF6 + (t == 2)])
+                    self.modrm(0, a, [0xF6 + (t != 1)], t)
                 self.inm(c.v, t)
             else:
                 self.error("operandos que no valen para «test»")
         elif nem in ('inc', 'dec') and n == 1:
             d = nem == 'dec'
-            if a.k == 'r16':
+            if a.k in ('r16', 'r32'):
+                self.p66(a.tam)
                 self.b(0x40 + 8 * d + a.reg)
             elif self.es_rm(a):
-                self.modrm(d, a, [0xFE + (self.tam_de(a) == 2)])
+                t = self.tam_de(a)
+                self.modrm(d, a, [0xFE + (t != 1)], t)
             else:
                 self.error(f"operando que no vale para «{nem}»")
+        elif nem == 'imul' and n >= 2:
+            self.imul(ops)
         elif nem in UNARIAS and n == 1:
             if not self.es_rm(a):
                 self.error(f"operando que no vale para «{nem}»")
-            self.modrm(UNARIAS[nem], a, [0xF6 + (self.tam_de(a) == 2)])
+            t = self.tam_de(a)
+            self.modrm(UNARIAS[nem], a, [0xF6 + (t != 1)], t)
         elif nem in GIROS and n == 2:
             if not self.es_rm(a):
                 self.error(f"operando que no vale para «{nem}»")
             t = self.tam_de(a)
             if c.k == 'r8' and c.reg == 1:
-                self.modrm(GIROS[nem], a, [0xD2 + (t == 2)])
+                self.modrm(GIROS[nem], a, [0xD2 + (t != 1)], t)
             elif c.k == 'inm' and c.v == 1 and not c.sim:
-                self.modrm(GIROS[nem], a, [0xD0 + (t == 2)])
+                self.modrm(GIROS[nem], a, [0xD0 + (t != 1)], t)
+            elif c.k == 'inm' and self.bits == 32:
+                self.modrm(GIROS[nem], a, [0xC0 + (t != 1)], t)
+                self.b(c.v)
             else:
                 self.error("en el 8086 se desplaza 1 o «cl»")
+        elif nem in ('movzx', 'movsx') and n == 2 and a.k in ('r16', 'r32') and self.es_rm(c):
+            t = c.tam
+            if t not in (1, 2) or (t == 2 and a.tam == 2):
+                self.error(f"«{nem}»: lo de la derecha es un byte o una palabra (falta «byte» o «word»)")
+            self.modrm(a.reg, c, [0x0F, (0xB6 if nem == 'movzx' else 0xBE) + (t == 2)], a.tam)
         elif nem == 'push' and n == 1:
-            if a.k == 'r16':
+            if a.k in ('r16', 'r32'):
+                self.p66(a.tam)
                 self.b(0x50 + a.reg)
-            elif a.k == 'rs':
+            elif a.k == 'rs' and a.reg < 4:
                 self.b(0x06 + 8 * a.reg)
+            elif a.k == 'rs':
+                self.b(0x0F, 0xA0 + 8 * (a.reg - 4))
             elif a.k == 'mem':
-                self.modrm(6, a, [0xFF])
+                self.modrm(6, a, [0xFF], a.tam or self.bits // 8)
+            elif a.k == 'inm' and self.bits == 32:
+                if self.corto(a, 4):
+                    self.b(0x6A, a.v)
+                else:
+                    self.b(0x68)
+                    self.d(a.v)
             else:
                 self.error("operando que no vale para «push»")
         elif nem == 'pop' and n == 1:
-            if a.k == 'r16':
+            if a.k in ('r16', 'r32'):
+                self.p66(a.tam)
                 self.b(0x58 + a.reg)
-            elif a.k == 'rs' and a.reg != 1:
+            elif a.k == 'rs' and a.reg < 4 and a.reg != 1:
                 self.b(0x07 + 8 * a.reg)
+            elif a.k == 'rs' and a.reg >= 4:
+                self.b(0x0F, 0xA1 + 8 * (a.reg - 4))
             elif a.k == 'mem':
-                self.modrm(0, a, [0x8F])
+                self.modrm(0, a, [0x8F], a.tam or self.bits // 8)
             else:
                 self.error("operando que no vale para «pop»")
         elif nem == 'xchg' and n == 2:
-            if a.k == 'r16' and c.k == 'r16' and (a.reg == 0 or c.reg == 0):
+            if a.k in ('r16', 'r32') and c.k == a.k and (a.reg == 0 or c.reg == 0):
+                self.p66(a.tam)
                 self.b(0x90 + a.reg + c.reg)
-            elif a.k in ('r8', 'r16') and self.es_rm(c):
-                self.modrm(a.reg, c, [0x86 + (self.tam_de(a, c) == 2)])
-            elif a.k == 'mem' and c.k in ('r8', 'r16'):
-                self.modrm(c.reg, a, [0x86 + (self.tam_de(a, c) == 2)])
+            elif self.es_reg(a) and self.es_rm(c):
+                t = self.tam_de(a, c)
+                self.modrm(a.reg, c, [0x86 + (t != 1)], t)
+            elif a.k == 'mem' and self.es_reg(c):
+                t = self.tam_de(a, c)
+                self.modrm(c.reg, a, [0x86 + (t != 1)], t)
             else:
                 self.error("operandos que no valen para «xchg»")
-        elif nem == 'lea' and n == 2 and a.k == 'r16' and c.k == 'mem':
-            self.modrm(a.reg, c, [0x8D])
+        elif nem == 'lea' and n == 2 and a.k in ('r16', 'r32') and c.k == 'mem':
+            self.modrm(a.reg, c, [0x8D], a.tam)
+        elif nem in ('lgdt', 'lidt', 'sgdt', 'sidt') and n == 1 and a.k == 'mem':
+            self.modrm({'sgdt': 0, 'sidt': 1, 'lgdt': 2, 'lidt': 3}[nem], a, [0x0F, 0x01])
         elif nem == 'int' and n == 1 and a.k == 'inm':
             self.b(0xCD, a.v)
         elif nem in ('ret', 'retn', 'retf'):
@@ -419,75 +571,123 @@ class Ensamblador:
                 self.w(a.v)
             else:
                 self.error(f"operando que no vale para «{nem}»")
-        elif nem == 'in' and n == 2 and a.k in ('r8', 'r16') and a.reg == 0:
+        elif nem == 'in' and n == 2 and self.es_reg(a) and a.reg == 0:
+            self.p66(a.tam)
             if c.k == 'r16' and c.reg == 2:
-                self.b(0xEC + (a.tam == 2))
+                self.b(0xEC + (a.tam != 1))
             elif c.k == 'inm':
-                self.b(0xE4 + (a.tam == 2), c.v)
+                self.b(0xE4 + (a.tam != 1), c.v)
             else:
                 self.error("el puerto es «dx» o un número")
-        elif nem == 'out' and n == 2 and c.k in ('r8', 'r16') and c.reg == 0:
+        elif nem == 'out' and n == 2 and self.es_reg(c) and c.reg == 0:
+            self.p66(c.tam)
             if a.k == 'r16' and a.reg == 2:
-                self.b(0xEE + (c.tam == 2))
+                self.b(0xEE + (c.tam != 1))
             elif a.k == 'inm':
-                self.b(0xE6 + (c.tam == 2), a.v)
+                self.b(0xE6 + (c.tam != 1), a.v)
             else:
                 self.error("el puerto es «dx» o un número")
         else:
             self.error(f"instrucción que no entiendo: «{nem}» con {n} operando{'s' if n != 1 else ''}")
 
+    def imul(self, ops):
+        """imul de dos o tres operandos (386): registro, r/m e inmediato."""
+        a = ops[0]
+        c = ops[1]
+        if a.k not in ('r16', 'r32') or len(ops) > 3:
+            self.error("operandos que no valen para «imul»")
+        if len(ops) == 2 and c.k == 'inm':
+            c, i = a, c                         # imul eax, 10 = imul eax, eax, 10
+        elif len(ops) == 3:
+            i = ops[2]
+            if not self.es_rm(c) or i.k != 'inm':
+                self.error("operandos que no valen para «imul»")
+        else:
+            if not self.es_rm(c):
+                self.error("operandos que no valen para «imul»")
+            self.modrm(a.reg, c, [0x0F, 0xAF], self.tam_de(a, c))
+            return
+        t = self.tam_de(a, c)
+        if self.corto(i, t):
+            self.modrm(a.reg, c, [0x6B], t)
+            self.b(i.v)
+        else:
+            self.modrm(a.reg, c, [0x69], t)
+            self.inm(i.v, t)
+
     def inm(self, v, t):
         if t == 1:
             self.b(v)
+        elif t == 4:
+            self.d(v)
         else:
             self.w(v)
 
+    def dir_fija(self, o):
+        """La dirección de una memoria sin registros: de 16 o de 32 bits según el modo."""
+        if o.a32:
+            self.d(o.v)
+        else:
+            self.w(o.v)
+
     def mov(self, a, c):
-        if a.k in ('r8', 'r16') and a.reg == 0 and c.k == 'mem' and c.rm < 0:
+        if self.es_reg(a) and a.reg == 0 and c.k == 'mem' and c.rm < 0 and c.base < 0 and c.indice < 0:
             if c.seg:
                 self.b(PREF_SEG[c.seg])
-            self.b(0xA0 + (a.tam == 2))
-            self.w(c.v)
-        elif c.k in ('r8', 'r16') and c.reg == 0 and a.k == 'mem' and a.rm < 0:
+            self.p66(a.tam)
+            self.b(0xA0 + (a.tam != 1))
+            self.dir_fija(c)
+        elif self.es_reg(c) and c.reg == 0 and a.k == 'mem' and a.rm < 0 and a.base < 0 and a.indice < 0:
             if a.seg:
                 self.b(PREF_SEG[a.seg])
-            self.b(0xA2 + (c.tam == 2))
-            self.w(a.v)
-        elif self.es_rm(a) and c.k in ('r8', 'r16'):
-            self.modrm(c.reg, a, [0x88 + (self.tam_de(a, c) == 2)])
-        elif a.k in ('r8', 'r16') and c.k == 'mem':
-            self.modrm(a.reg, c, [0x8A + (self.tam_de(a, c) == 2)])
-        elif a.k in ('r16', 'mem') and c.k == 'rs':
-            self.modrm(c.reg, a, [0x8C])
-        elif a.k == 'rs' and c.k in ('r16', 'mem'):
+            self.p66(c.tam)
+            self.b(0xA2 + (c.tam != 1))
+            self.dir_fija(a)
+        elif self.es_rm(a) and self.es_reg(c):
+            t = self.tam_de(a, c)
+            self.modrm(c.reg, a, [0x88 + (t != 1)], t)
+        elif self.es_reg(a) and c.k == 'mem':
+            t = self.tam_de(a, c)
+            self.modrm(a.reg, c, [0x8A + (t != 1)], t)
+        elif a.k in ('r16', 'r32', 'mem') and c.k == 'rs':
+            self.modrm(c.reg, a, [0x8C], a.tam if a.k == 'r16' else 0)
+        elif a.k == 'rs' and c.k in ('r16', 'r32', 'mem'):
             self.modrm(a.reg, c, [0x8E])
+        elif a.k == 'rc' and c.k == 'r32':
+            self.b(0x0F, 0x22, 0xC0 | (a.reg << 3) | c.reg)
+        elif a.k == 'r32' and c.k == 'rc':
+            self.b(0x0F, 0x20, 0xC0 | (c.reg << 3) | a.reg)
         elif a.k == 'r8' and c.k == 'inm':
             self.b(0xB0 + a.reg, c.v)
-        elif a.k == 'r16' and c.k == 'inm':
+        elif a.k in ('r16', 'r32') and c.k == 'inm':
+            self.p66(a.tam)
             self.b(0xB8 + a.reg)
-            self.w(c.v)
+            self.inm(c.v, a.tam)
         elif a.k == 'mem' and c.k == 'inm':
             t = self.tam_de(a, c)
-            self.modrm(0, a, [0xC6 + (t == 2)])
+            self.modrm(0, a, [0xC6 + (t != 1)], t)
             self.inm(c.v, t)
         else:
             self.error("operandos que no valen para «mov»")
 
     def cuenta2(self, i, a, c):
-        if self.es_rm(a) and c.k in ('r8', 'r16'):
-            self.modrm(c.reg, a, [8 * i + (self.tam_de(a, c) == 2)])
-        elif a.k in ('r8', 'r16') and c.k == 'mem':
-            self.modrm(a.reg, c, [8 * i + 2 + (self.tam_de(a, c) == 2)])
+        if self.es_rm(a) and self.es_reg(c):
+            t = self.tam_de(a, c)
+            self.modrm(c.reg, a, [8 * i + (t != 1)], t)
+        elif self.es_reg(a) and c.k == 'mem':
+            t = self.tam_de(a, c)
+            self.modrm(a.reg, c, [8 * i + 2 + (t != 1)], t)
         elif self.es_rm(a) and c.k == 'inm':
             t = self.tam_de(a, c)
-            if t == 2 and self.corto(c):
-                self.modrm(i, a, [0x83])
+            if t != 1 and self.corto(c, t):
+                self.modrm(i, a, [0x83], t)
                 self.b(c.v)
             elif a.k != 'mem' and a.reg == 0:
-                self.b(8 * i + 4 + (t == 2))
+                self.p66(t)
+                self.b(8 * i + 4 + (t != 1))
                 self.inm(c.v, t)
             else:
-                self.modrm(i, a, [0x80 + (t == 2)])
+                self.modrm(i, a, [0x80 + (t != 1)], t)
                 self.inm(c.v, t)
         else:
             self.error("operandos que no valen para esa cuenta")
@@ -504,18 +704,23 @@ class Ensamblador:
         if bajo.startswith(b'strict ') or bajo.startswith(b'strict\t'):
             s = s[6:].strip()
             bajo = s.lower()
-        for pal in (b'short', b'near'):
+        for pal in (b'short', b'near', b'dword'):
             if bajo.startswith(pal + b' '):
                 forma = pal
                 s = s[len(pal):].strip()
+                bajo = s.lower()
+        b32 = self.bits == 32
         if nem in ('jmp', 'call'):
             o = self.operando(s)
-            if o.k in ('r16', 'mem'):
+            if o.k in ('r16', 'r32', 'mem'):
                 self.modrm(4 if nem == 'jmp' else 2, o, [0xFF])
                 return
             if o.k == 'lejos':
                 self.b(0xEA if nem == 'jmp' else 0x9A)
-                self.w(o.v)
+                if b32:
+                    self.d(o.v)
+                else:
+                    self.w(o.v)
                 self.w(o.v2)
                 return
             if o.k != 'inm':
@@ -523,14 +728,24 @@ class Ensamblador:
             destino = o.v
         else:
             destino, _ = self.cuenta(s)
-        d = (destino - (self.pc + 2)) & 0xFFFF
-        llega = d <= 0x7F or d >= 0xFF80 or self.e_falta    # (lo que aún no se sabe, se supone cerca)
+        if b32:
+            d = (destino - (self.pc + 2)) & 0xFFFFFFFF
+            llega = d <= 0x7F or d >= 0xFFFFFF80 or self.e_falta
+        else:
+            d = (destino - (self.pc + 2)) & 0xFFFF
+            llega = d <= 0x7F or d >= 0xFF80 or self.e_falta    # (lo que aún no se sabe, se supone cerca)
         if nem == 'call':
             self.b(0xE8)
-            self.w(destino - (self.pc + 2))
+            if b32:
+                self.d(destino - (self.pc + 4))
+            else:
+                self.w(destino - (self.pc + 2))
         elif nem in BUCLES:
             if not llega and self.final:
                 self.error(f"«{nem}» no llega tan lejos (127 octetos)")
+            if (nem == 'jcxz' and b32) or (nem == 'jecxz' and not b32):
+                self.b(0x67)                    # (la cuenta, desde detrás del prefijo)
+                d = (destino - (self.pc + 2)) & (0xFFFFFFFF if b32 else 0xFFFF)
             self.b(BUCLES[nem], d)
         else:
             if forma == b'short' and not llega and self.final:
@@ -538,7 +753,13 @@ class Ensamblador:
             if forma == b'near' or (forma is None and not llega):
                 if nem == 'jmp':
                     self.b(0xE9)
-                    self.w(destino - (self.pc + 2))
+                    if b32:
+                        self.d(destino - (self.pc + 4))
+                    else:
+                        self.w(destino - (self.pc + 2))
+                elif b32:
+                    self.b(0x0F, 0x80 + CONDICIONES_J[nem])
+                    self.d(destino - (self.pc + 4))
                 else:
                     self.b(0x70 + (CONDICIONES_J[nem] ^ 1), 3, 0xE9)
                     self.w(destino - (self.pc + 2))
@@ -624,8 +845,12 @@ class Ensamblador:
             self.datos({'db': 1, 'dw': 2, 'dd': 4}[nem], resto)
         elif nem in ('resb', 'resw', 'resd'):
             self.reserva(self.fijo(resto, nem) * {'resb': 1, 'resw': 2, 'resd': 4}[nem])
-        elif nem in ('cpu', 'bits'):
+        elif nem == 'cpu':
             pass
+        elif nem == 'bits':
+            self.bits = self.fijo(resto, nem)
+            if self.bits not in (16, 32):
+                self.error("«bits» es 16 o 32")
         elif nem == 'org':
             self.pc = self.fijo(resto, nem)
         elif nem == 'absolute':
@@ -659,6 +884,7 @@ class Ensamblador:
     def pasada(self):
         self.pc = 0                 # la dirección
         self.pos = 0                # la posición en el archivo
+        self.bits = 16              # el modo: 16 o 32 bits («bits 32»)
         self.absoluto = False
         self.ambito = b''
         self.sal = bytearray()
@@ -684,6 +910,19 @@ class Ensamblador:
 
 
 CONDICIONES_J = {'j' + k: v for k, v in CONDICIONES.items()}
+
+
+def reg_escalado(n):
+    """«esi», «esi*4» o «4*esi»: (registro, escala); la escala, None si no la lleva."""
+    if n in R32:
+        return (R32.index(n), None)
+    dos = n.replace(' ', '').replace('\t', '').split('*')
+    if len(dos) == 2:
+        if dos[1] in R32:
+            dos.reverse()
+        if dos[0] in R32 and dos[1].isdigit():
+            return (R32.index(dos[0]), int(dos[1]))
+    return None
 
 
 def es_de_nombre(ch):
