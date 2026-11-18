@@ -2498,19 +2498,7 @@ u_GetSystemMetrics:
         movzx eax, ah
 .x:
         ret
-; [RUEDA] BOOL SystemParametersInfoA(acción, uiParam, pvParam, fWinIni): solo
-; SPI_GETWHEELSCROLLLINES (68h) y SPI_GETWHEELSCROLLCHARS (6Ch) = 3
-u_SystemParametersInfoA:
-        mov eax, [ebp]
-        or al, 4
-        cmp eax, 0x6C
-        jne u_cero
-        mov edi, [ebp+8]
-        test edi, edi
-        jz u_cero
-        add edi, [edx+PE_DELTA]
-        mov dword [edi], 3
-        jmp u_uno
+; [RUEDA] SystemParametersInfoA: con la de la fase 3d (win32x.inc)
 ; DWORD GetSysColor(cuál) y HBRUSH GetSysColorBrush(cuál)
 u_GetSysColor:
         mov eax, [ebp]

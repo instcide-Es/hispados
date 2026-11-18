@@ -2507,6 +2507,14 @@ u_SystemParametersInfoA:
         jz u_cero
         add edi, [edx+PE_DELTA]
         mov eax, [ebp]
+        push eax                    ; [RUEDA] SPI_GETWHEELSCROLLLINES (68h) y
+        or al, 4                    ; ...CHARS (6Ch): 3
+        cmp eax, 0x6C
+        pop eax
+        jne .nr
+        mov dword [edi], 3
+        jmp u_uno
+.nr:
         cmp eax, 0x30               ; SPI_GETWORKAREA
         jne .nc
         xor eax, eax
