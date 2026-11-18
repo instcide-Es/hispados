@@ -110,11 +110,21 @@ veces() { grep -aoF -- "$1" $T/log 2>/dev/null | wc -l; }
 # Se espera a lo que se busca (no un tiempo fijo), con un tope generoso: el
 # de cada espera por TOPE (3 de serie), para que con la máquina cargada (la
 # batería entera a la vez) no se quede corto. Si llega antes, no se espera.
+# Una máquina que no contesta no puede tener la prueba parada horas (pasó: 58
+# esperas agotadas, casi 3 horas): tras la primera espera agotada de un caso,
+# las siguientes aguardan 30 s como mucho, y tras la segunda, 2 s. Y el tope
+# se mide con el reloj (SECONDS), no contando vueltas, que con la máquina
+# cargada duran bastante más de una décima.
 TOPE=${TOPE:-3}
+SIN=0       # esperas agotadas en este caso
 espera() {  # texto [veces] [décimas de segundo]
-  local n=${2:-1} i=0 max=$(( ${3:-600} * TOPE ))
-  while [ "$(veces "$1")" -lt "$n" ] && [ $i -lt $max ]; do sleep 0.1; i=$((i + 1)); done
-  [ $i -lt $max ] || echo "  (no llega: $1)"
+  local n=${2:-1} max=$(( ${3:-600} * TOPE )) hasta
+  if [ $SIN -ge 2 ]; then max=20; elif [ $SIN -ge 1 ] && [ $max -gt 300 ]; then max=300; fi
+  hasta=$(( SECONDS + (max + 9) / 10 ))
+  while [ "$(veces "$1")" -lt "$n" ]; do
+    if [ $SECONDS -ge $hasta ]; then SIN=$((SIN + 1)); echo "  (no llega: $1)"; return; fi
+    sleep 0.1
+  done
 }
 orden() {   # teclear una orden y esperar a que vuelva el indicador
   local n=$(veces 'A:\>')
@@ -125,6 +135,7 @@ caso() {  # nombre, título, líneas de CONFIG.SYS (con \r\n), [variante -D...]
   NOMBRE=$1
   T=$W/$1
   mkdir -p $T
+  SIN=0
   cp "$IMG" $T/f.img
   mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null   # sitio para lo que se descarga
   cfail=0

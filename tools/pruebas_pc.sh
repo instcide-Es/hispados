@@ -14,6 +14,9 @@ set -u
 # carpeta en la RAM del PC (para que varias copias puedan probarse a la vez).
 # SOLO: expresión (grep -E) para lanzar solo algunas pruebas de `make test`,
 # p. ej. SOLO='audicion|sound' (por omisión, todas).
+# TMAX_PRUEBA: segundos que puede durar cada prueba como mucho (por omisión
+# una hora: la más larga tarda media); si se pasa, se corta (con sus máquinas)
+# y cuenta como fallo, para que una prueba colgada no pare la batería horas.
 # Límite acordado con Carlos: como mucho el 80 % del PC (16 de 20 hilos).
 cd "${SRC:-$(dirname "$0")/..}"
 NOMBRE=${NOMBRE:-hispados}
@@ -50,7 +53,7 @@ $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS=
   sed -n '/^test:/,/^\$/p' Makefile | grep 'tests/' | sed 's/^\t//; s/\$(IMG)/build\/hispados.img/g' | grep -E -- '${SOLO:-.}' > build/pc/lista.txt && \
   echo \"\$(wc -l < build/pc/lista.txt) pruebas, $J a la vez\" && \
   date +%s > build/pc/inicio && \
-  cat -n build/pc/lista.txt | xargs -P $J -L 1 bash -c 'n=\$0; bash -c \"\$*\" > build/pc/\$(printf %02d \$n).log 2>&1; echo \"\$? \$*\" > build/pc/\$(printf %02d \$n).rc' ; \
+  cat -n build/pc/lista.txt | xargs -P $J -L 1 bash -c 'n=\$0; l=build/pc/\$(printf %02d \$n); timeout -k 20 ${TMAX_PRUEBA:-3600} bash -c \"\$*\" > \$l.log 2>&1; r=\$?; [ \$r -ge 124 ] && echo \"  FAIL la prueba no ha acabado en ${TMAX_PRUEBA:-3600} s: cortada\" >> \$l.log; echo \"\$r \$*\" > \$l.rc' ; \
   echo \"tiempo: \$(( \$(date +%s) - \$(cat build/pc/inicio) )) s\""
 # 4) traer los registros y resumir
 rm -rf build/pc && mkdir -p build/pc
