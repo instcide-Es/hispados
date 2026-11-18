@@ -77,6 +77,7 @@ printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 disco() {
   local h
   cp "$IMG" $T/f.img
+  mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null   # (sitio: los juegos no lo usan)
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   for h in $HVP2; do
     if ! mdir -i $T/f.img ::HISPADOS/JUEGOS/$h > /dev/null 2>&1 && [ -f $B/$h ]; then

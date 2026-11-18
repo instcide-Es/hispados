@@ -64,6 +64,8 @@ prepara() {
   mcopy -o -i $T/f.img $hvp ::HISPADOS/PROGS/$nom
   # los tipos de letra (medio mega): se hace sitio quitando lo que la prueba no usa
   mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null; mdeltree -i $T/f.img ::HISPADOS/JUEGOS 2>/dev/null
+  # (0.9.25: el disquete va más lleno; estos tampoco los usan los módulos)
+  mdel -i $T/f.img ::HISPADOS/AUDICION.COM ::HISPADOS/EQUIPO.COM 2>/dev/null
   mcopy -o -i $T/f.img programas/comun/TIPOS*.DAT ::HISPADOS/PROGS/ || echo "  FAIL no caben los tipos de letra en el disquete de la prueba"
   printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\%s\r\n' "$nom" > $T/CENTRO.INI
   mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI

@@ -126,6 +126,7 @@ caso() {  # nombre, título, líneas de CONFIG.SYS (con \r\n), [variante -D...]
   T=$W/$1
   mkdir -p $T
   cp "$IMG" $T/f.img
+  mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null   # sitio para lo que se descarga
   cfail=0
   echo "== Hispa-DOS red por USB: $2 =="
   printf '%b' "$3" > $T/CONFIG.SYS

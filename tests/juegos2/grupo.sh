@@ -23,8 +23,10 @@ if [ -f $B/hispados-usb.img ]; then
 fi
 libre=$(mdir -i "$IMG" :: | sed -n 's/^ *\([0-9 ]*\) bytes free.*/\1/p' | tr -d ' ')
 # (desde la 0.9.22 la oficina va en su disquete; con Mirador y Tareas en este,
-# se piden 150 K libres para los archivos de quien lo use)
-if [ "${libre:-0}" -ge 150000 ]; then ok "caben en el disquete: quedan $libre octetos libres"; else ko "disquete: solo quedan ${libre:-?} octetos libres"; fi
+# se piden 140 K libres para los archivos de quien lo use; eran 150 K hasta la
+# 0.9.25, que trae Hispa-486 en VENTANAS.COM y la red por USB en HSPUSB; lo que
+# no quepa va al disquete «Instalación 2»)
+if [ "${libre:-0}" -ge 140000 ]; then ok "caben en el disquete: quedan $libre octetos libres"; else ko "disquete: solo quedan ${libre:-?} octetos libres"; fi
 { entrar
   doble 310 129; sleep 1.5                  # el grupo Juegos
   aparca

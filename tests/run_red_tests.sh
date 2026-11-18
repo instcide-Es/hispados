@@ -63,6 +63,7 @@ printf 'DHCP=SI\r\nDNS=10.0.2.2\r\n' > $T/RED2.INI
 printf '; a mano\r\nDHCP=NO\r\nIP=10.0.2.20\r\nMASCARA=255.255.255.0\r\nPUERTA=10.0.2.2\r\nDNS=10.0.2.2\r\n' > $T/RED3.INI
 mkimg() {   # mkimg destino
   cp "$IMG" $1
+  mdel -i $1 ::HISPADOS/HISPA.WAV 2>/dev/null   # sitio para lo que se descarga
   mcopy -o -i $1 $T/RED2.INI ::RED2.INI
   mcopy -o -i $1 $T/RED3.INI ::RED3.INI
 }
