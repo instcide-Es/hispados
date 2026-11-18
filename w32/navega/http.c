@@ -343,7 +343,7 @@ void http_suelta(Pet *p) {
 }
 static int pet_arma(Pet *p) {
   char *g = gal_para(&p->u), host[150];
-  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 600;
+  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 600 + (p->js_cab ? 2010 : 0);
   free(p->pet);
   p->pet = malloc(n);
   if (!p->pet) { free(g); return 0; }
@@ -351,9 +351,12 @@ static int pet_arma(Pet *p) {
   else strcpy(host, p->u.servidor);
   n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Navegador/0.1 (Hispa-486; Hispa32)\r\n"
               "Accept: text/html,text/plain;q=0.9,*/*;q=0.5\r\nAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
-              p->post ? "POST" : "GET", p->u.ruta, host, http_idioma, g ? g : "");
+              p->js_metodo ? p->js_metodo : p->post ? "POST" : "GET", p->u.ruta, host, http_idioma, g ? g : "");
   free(g);
-  if (p->post) n += sprintf(p->pet + n, "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %u\r\n", p->n_cuerpo);
+  if (p->js_cab) n += sprintf(p->pet + n, "%.2000s", p->js_cab);     /* [JS] las de fetch */
+  if (p->post && (!p->js_cab || !strstr(p->js_cab, "Content-Type:")))
+    n += sprintf(p->pet + n, "Content-Type: application/x-www-form-urlencoded\r\n");
+  if (p->post) n += sprintf(p->pet + n, "Content-Length: %u\r\n", p->n_cuerpo);
   memcpy(p->pet + n, "\r\n", 2); n += 2;
   if (p->post && p->n_cuerpo) { memcpy(p->pet + n, p->cuerpo, p->n_cuerpo); n += p->n_cuerpo; }
   p->n_pet = n;
@@ -592,4 +595,24 @@ cortada:
     return 0;
   }
   return falla(p, "Se ha cortado la conexi\363n con el servidor.");
+}
+
+/* [JS] document.cookie: las galletas de url («a=b; c=d», malloc) y poner una */
+char *http_galletas(const char *url) {
+  Url u;
+  char *g, *r;
+  if (!url_parte(url, &u)) return NULL;
+  g = gal_para(&u);
+  free(u.ruta);
+  if (!g) return NULL;
+  r = g;
+  memmove(r, g + 8, strlen(g + 8) + 1);         /* sin «Cookie: » */
+  if (strlen(r) >= 2) r[strlen(r) - 2] = 0;      /* ni el \r\n */
+  return r;
+}
+void http_pon_galleta(const char *url, const char *linea) {
+  Url u;
+  if (!url_parte(url, &u)) return;
+  gal_pon(&u, linea);
+  free(u.ruta);
 }

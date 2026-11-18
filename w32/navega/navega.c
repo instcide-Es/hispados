@@ -12,6 +12,7 @@
  *  Los textos, en la página 1252 (la de los programas Hispa32).
  * ============================================================================= */
 #include "nav.h"
+#include "dom.h"                 /* [JS] */
 
 /* ---- lo justo de USER32, GDI32 y KERNEL32 ---- */
 typedef struct { int left, top, right, bottom; } RECT;
@@ -31,6 +32,7 @@ typedef struct { HANDLE hdc; int fErase; RECT rcPaint; int fRestore, fIncUpdate;
 #define WM_ERASEBKGND 0x0014
 #define WM_KEYDOWN 0x0100
 #define WM_CHAR 0x0102
+#define WM_TIMER 0x0113
 #define WM_MOUSEMOVE 0x0200
 #define WM_LBUTTONDOWN 0x0201
 #define WM_LBUTTONUP 0x0202
@@ -252,6 +254,7 @@ static void rotulo(Ctl *c, char *b, int max) {
   if (c->tipo == C_LISTA) { if (c->n_opc) texto_de(c->opc[c->elegida], b, max); }
   else if (c->nodo->etq == E_BUTTON) texto_de(c->nodo, b, max);
   else { n = c->n_valor < max - 1 ? c->n_valor : max - 1; memcpy(b, c->valor, n); b[n] = 0; }
+  if (c->tipo != C_LISTA) pag_rotulo_vacio(c, b, max);   /* [JS] */
   n = strlen(b);
   while (n && b[n - 1] == ' ') b[--n] = 0;
   if (b[0] == ' ') memmove(b, b + 1, n);
@@ -460,7 +463,7 @@ static void muestra(Pagina *p, const char *url_hist) {
   char t[260];
   if (!p) return;
   lista.activa = 0;
-  if (pag) pag_suelta(pag);
+  if (pag) { js_suelta(); pag_suelta(pag); }   /* [JS] lo de JavaScript de la página de antes, fuera */
   pag = p;
   pag_maqueta(pag, cols);
   sx = 0; sy = 0; foco = -1; foco_dir = 0; sobre[0] = 0; sobre_enl = -1;
@@ -485,6 +488,7 @@ static void muestra(Pagina *p, const char *url_hist) {
   sprintf(t, "%.200s - Navegador", pag->doc.titulo && pag->doc.titulo[0] ? pag->doc.titulo : url_hist ? url_hist : "Navegador");
   SetWindowTextA(vent, t);
   estado[0] = 0;
+  js_pagina(pag);                               /* [JS] sus <script> */
   repinta();
 }
 /* una página hecha aquí: el inicio, los avisos */
@@ -522,13 +526,14 @@ static void pagina_inicio(void) {
     "<li><b>Tab</b> pasa al enlace o al campo siguiente; <b>Intro</b> lo abre o env\355a el formulario.</li>"
     "<li>Las <b>flechas</b>, <b>Re P\341g</b> y <b>Av P\341g</b> mueven la p\341gina; <b>Retroceso</b> vuelve atr\341s.</li>"
     "<li><b>F6</b> lleva a la direcci\363n, <b>F5</b> recarga y <b>Esc</b> para la carga.</li></ul>"
-    "<p><small>Navegador 0.1. Entiende HTML sencillo y formularios; no ejecuta JavaScript ni ense\361a im\341genes. "
+    "<p><small>Navegador 0.2. Entiende HTML sencillo, formularios y JavaScript (se apaga con JavaScript=NO en NAVEGA.INI); no ense\361a im\341genes. "
     "Las conexiones https van cifradas con TLS 1.2 y se comprueba el certificado del servidor.</small></p>");
   pagina_propia("about:inicio", h);
 }
 static void ir(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo) {
   char *u;
   if (cargando) { http_suelta(&pet); cargando = 0; }
+  js_para_red();                                /* [JS] (la conexión es una: para la página) */
   lista.activa = 0;
   modo_hist = modo;
   if (!_strnicmp(url, "about:", 6)) {
@@ -667,6 +672,7 @@ static void a_la_vista(int x, int y, int h) {
   else if (y + h > sy + filas_vis) ny = y + h - filas_vis + 2;
   desplaza(sx, ny);
 }
+static Nodo *nodo_foco(void);
 static void foco_pon(int f) {
   foco = f;
   foco_dir = 0;
@@ -675,6 +681,7 @@ static void foco_pon(int f) {
     else { Ctl *c = &pag->ctl[pag->foco[f].n]; a_la_vista(c->x, c->y, c->h); }
   }
   repinta();
+  js_foco(nodo_foco());                         /* [JS] focus y blur */
 }
 static int foco_de_ctl(int idx) {
   int k;
@@ -691,9 +698,12 @@ static void remaqueta(void) {
   repinta();
 }
 static void pulsa_ctl(int idx);
+static int js_clic_enlace(int *e);
 static void abre_enlace(int e) {
-  Enlace *en = &pag->enl[e];
+  Enlace *en;
   char b[300], *u;
+  if (js_clic_enlace(&e)) return;              /* [JS] primero, el clic de la página */
+  en = &pag->enl[e];
   if (!en->href && en->nodo->etq == E_LABEL) {   /* el texto de una etiqueta: su control */
     int k = pag_ctl_de_label(pag, en->nodo);
     if (k >= 0 && pag->ctl[k].visible) pulsa_ctl(k);
@@ -704,19 +714,22 @@ static void abre_enlace(int e) {
     remaqueta();
     return;
   }
-  if (pag_confirma(en->nodo, b, sizeof b) && MessageBoxA(vent, b, "Navegador", MB_YESNO) != IDYES) return;
+  if (!js_en_pagina() && pag_confirma(en->nodo, b, sizeof b) && MessageBoxA(vent, b, "Navegador", MB_YESNO) != IDYES) return;
   if (en->href[0] == '#') { desplaza(sx, 0); return; }
   u = url_absoluta(pag->doc.base ? pag->doc.base : pag->url, en->href);
   if (!u) { di("Este enlace no se puede abrir aqu\355 (no es una p\341gina web)."); return; }
   ir(u, 0, NULL, 0, 0);
   free(u);
 }
+static int js_envia(Ctl **boton);
 static void envia(Ctl *boton) {
   Nodo *forma = boton->forma;
   char b[300], *url, *cuerpo;
   u32 nc;
-  int k, post, con = boton->tipo == C_ENVIAR ? (int)(boton - pag->ctl) : -1;
+  int k, post, con;
   if (!forma) return;
+  if (js_envia(&boton)) return;                 /* [JS] el evento submit (y lo obligatorio) */
+  con = boton->tipo == C_ENVIAR ? (int)(boton - pag->ctl) : -1;
   if (con < 0)                                   /* Intro en un campo: como pulsar el primer botón de enviar */
     for (k = 0; k < pag->n_ctl; k++)
       if (pag->ctl[k].forma == forma && pag->ctl[k].tipo == C_ENVIAR && !pag->ctl[k].desactivado) { con = k; break; }
@@ -728,7 +741,7 @@ static void envia(Ctl *boton) {
       return;
     }
   }
-  if ((pag_confirma(forma, b, sizeof b) || (con >= 0 && pag_confirma(pag->ctl[con].nodo, b, sizeof b)))
+  if (!js_en_pagina() && (pag_confirma(forma, b, sizeof b) || (con >= 0 && pag_confirma(pag->ctl[con].nodo, b, sizeof b)))
       && MessageBoxA(vent, b, "Navegador", MB_YESNO) != IDYES) return;
   if (!pag_formulario(pag, forma, con, &url, &cuerpo, &nc, &post)) { di("Este formulario no se puede enviar."); return; }
   ir(url, post, cuerpo, nc, 0);
@@ -759,12 +772,21 @@ static void lista_cierra(int elige) {
   lista.activa = 0;
   if (cambia) c->elegida = lista.sel;
   repinta_pagina();
+  if (cambia && js_en_pagina()) {               /* [JS] input y change (y lo de onchange, en la página) */
+    Nodo *n = c->nodo;
+    js_evento(n, "input", NULL);
+    js_evento(n, "change", NULL);
+    return;
+  }
   if (cambia && c->cambia_envia) envia(c);
 }
+static int js_pulsa(int *idx);
 static void pulsa_ctl(int idx) {
   Ctl *c = &pag->ctl[idx];
   int k;
   if (c->desactivado) return;
+  if (js_pulsa(&idx)) return;                   /* [JS] el clic de la página (y su foco) */
+  c = &pag->ctl[idx];
   foco = foco_de_ctl(idx);
   foco_dir = 0;
   switch (c->tipo) {
@@ -791,7 +813,7 @@ static void pulsa_ctl(int idx) {
     }
     break;
   case C_BOTON:
-    di("Este bot\363n necesita JavaScript, que el Navegador no tiene.");
+    if (!js_en_pagina()) di(js_activo ? "Este bot\363n no hace nada." : "Este bot\363n necesita JavaScript, que est\341 apagado (NAVEGA.INI).");
     break;
   case C_LISTA:
     repinta();
@@ -860,6 +882,11 @@ static void tecla(int vk) {
     repinta_pagina();
     return;
   }
+  if (!foco_dir && pag && js_en_pagina() && vk != VK_F5 && vk != VK_F6) {   /* [JS] keydown */
+    Pagina *p0 = pag;
+    if (js_tecla(nodo_foco(), vk, 0) || pag != p0 || cargando) return;
+    c = ctl_foco();
+  }
   if (vk == VK_ESCAPE) {
     if (cargando) { http_suelta(&pet); cargando = 0; di("Carga parada."); }
     else if (foco_dir) { foco_dir = 0; if (i_hist >= 0) dir_pon(hist[i_hist].url); repinta(); }
@@ -886,7 +913,7 @@ static void tecla(int vk) {
   if (es_texto(c)) {
     if (c->tipo == C_AREA) {
       int lc, total = area_linea(c, -1, 0, NULL);
-      if (vk == VK_RETURN) { if (edita(c, 0, '\n')) repinta_ctl(c); return; }
+      if (vk == VK_RETURN) { if (edita(c, 0, '\n')) { Nodo *n = c->nodo; repinta_ctl(c); js_evento(n, "input", NULL); } return; }
       if (vk == VK_UP || vk == VK_DOWN) {
         int ini, col;
         area_linea(c, -2, c->cursor, &lc);
@@ -903,7 +930,8 @@ static void tecla(int vk) {
       }
     } else if (vk == VK_RETURN) { envia(c); return; }
     if (vk == VK_BACK || vk == VK_DELETE || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_HOME || vk == VK_END) {
-      if (edita(c, vk, 0)) repinta_ctl(c);
+      int n0 = c->n_valor;
+      if (edita(c, vk, 0)) { Nodo *n = c->nodo; repinta_ctl(c); if (c->n_valor != n0) js_evento(n, "input", NULL); }   /* [JS] */
       return;
     }
   }
@@ -947,7 +975,12 @@ static void letra(int ch) {
     if (edita(&dir, 0, ch)) { HANDLE dc = GetDC(vent); pinta_dir(dc); ReleaseDC(vent, dc); }
     return;
   }
-  if (es_texto(c)) { if (edita(c, 0, ch)) repinta_ctl(c); return; }
+  if (c && js_en_pagina() && ch != ' ' ) {     /* [JS] keydown de una letra */
+    Pagina *p0 = pag;
+    if (js_tecla(c->nodo, 0, ch) || pag != p0 || cargando) return;
+    c = ctl_foco();
+  }
+  if (es_texto(c)) { if (edita(c, 0, ch)) { Nodo *n = c->nodo; repinta_ctl(c); js_evento(n, "input", NULL); } return; }   /* [JS] input */
   if (ch == ' ') {
     if (c && (c->tipo == C_CASILLA || c->tipo == C_RADIO || c->tipo == C_LISTA)) pulsa_ctl((int)(c - pag->ctl));
     else if (pag) desplaza(sx, sy + (filas_vis - 2));
@@ -1031,7 +1064,8 @@ static void clic(int px, int py) {
     abre_enlace(a->enlace);
     return;
   }
-  if (foco >= 0 || foco_dir) { foco = -1; foco_dir = 0; repinta(); }
+  if (foco >= 0 || foco_dir) { foco = -1; foco_dir = 0; repinta(); js_foco(NULL); }
+  if (js_en_pagina() && pag->doc.body) js_evento(pag->doc.body, "click", NULL);   /* [JS] un clic fuera de todo */
 }
 static void raton(int px, int py, int boton) {
   Atr *a;
@@ -1053,6 +1087,163 @@ static void raton(int px, int py, int boton) {
   ReleaseDC(vent, dc);
 }
 
+/* =============================================================================
+ *  [JS] JavaScript: lo que la página hace al pulsar, escribir y enfocar, y lo
+ *  que JavaScript pide a la ventana (script.c, docs/486/NAVEGADOR.md)
+ * ============================================================================= */
+/* el nodo del foco: el de su control o su enlace (NULL: nadie) */
+static Nodo *nodo_foco(void) {
+  if (!pag || foco < 0 || foco >= pag->n_foco) return NULL;
+  return pag->foco[foco].enlace ? pag->enl[pag->foco[foco].n].nodo : pag->ctl[pag->foco[foco].n].nodo;
+}
+static int foco_de_nodo(Nodo *n) {
+  int k;
+  if (!pag || !n) return -1;
+  for (k = 0; k < pag->n_foco; k++)
+    if ((pag->foco[k].enlace ? pag->enl[pag->foco[k].n].nodo : pag->ctl[pag->foco[k].n].nodo) == n) return k;
+  return -1;
+}
+static int ctl_de_nodo(Nodo *n) {
+  int k;
+  for (k = 0; pag && k < pag->n_ctl; k++) if (pag->ctl[k].nodo == n) return k;
+  return -1;
+}
+/* el clic en un enlace (o en algo que se pulsa con JavaScript): 1 si ya está
+ * todo hecho (la página lo ha impedido, o ha cambiado de página, o no hay
+ * nada más que hacer); si no, *e es el enlace (otra vez, por si la página se
+ * ha vuelto a maquetar) */
+static int js_clic_enlace(int *e) {
+  Enlace *en = &pag->enl[*e];
+  Nodo *n = en->nodo;
+  const char *h = en->href;
+  Pagina *p0 = pag;
+  int k;
+  if (!js_en_pagina()) return 0;
+  if (js_evento(n, "mousedown", NULL) || pag != p0 || cargando) return 1;
+  if (js_evento(n, "click", NULL) || pag != p0 || cargando) return 1;
+  for (k = 0; k < pag->n_enl && pag->enl[k].nodo != n; k++) ;
+  if (k == pag->n_enl) return 1;
+  *e = k;
+  h = pag->enl[k].href;
+  if (h && !_strnicmp(h, "javascript:", 11)) { js_enlace(h); return 1; }
+  if (!h && pag_clicable && pag_clicable(n)) return 1;   /* (solo tenía el clic de la página) */
+  return 0;
+}
+/* pulsar un control: el foco, mousedown, click (y en las casillas, input y
+ * change). 1 si ya está todo hecho; si no, *idx es el control otra vez */
+static int js_pulsa(int *idx) {
+  Ctl *c = &pag->ctl[*idx];
+  Nodo *n = c->nodo;
+  Pagina *p0 = pag;
+  int tipo = c->tipo, antes = c->marcado, k;
+  if (!js_en_pagina()) return 0;
+  k = foco_de_ctl(*idx);
+  if (k >= 0 && k != foco) { foco = k; foco_dir = 0; repinta(); js_foco(n); if (pag != p0 || cargando) return 1; }
+  if (js_evento(n, "mousedown", NULL) || pag != p0 || cargando) return 1;
+  if ((k = ctl_de_nodo(n)) < 0) return 1;
+  c = &pag->ctl[k];
+  if (tipo == C_CASILLA || tipo == C_RADIO) {
+    int j;
+    if (tipo == C_RADIO)
+      for (j = 0; j < pag->n_ctl; j++) {
+        Ctl *o = &pag->ctl[j];
+        if (o->tipo == C_RADIO && o->forma == c->forma && o->nombre && c->nombre && !strcmp(o->nombre, c->nombre)) o->marcado = 0;
+      }
+    c->marcado = tipo == C_RADIO ? 1 : !antes;
+    repinta();
+    if (js_evento(n, "click", NULL)) {           /* impedido: como estaba */
+      if ((k = ctl_de_nodo(n)) >= 0) pag->ctl[k].marcado = (u8)antes;
+      repinta();
+      return 1;
+    }
+    if (pag != p0 || cargando) return 1;
+    if ((k = ctl_de_nodo(n)) >= 0 && pag->ctl[k].marcado != antes) { js_evento(n, "input", NULL); js_evento(n, "change", NULL); }
+    return 1;
+  }
+  if (js_evento(n, "click", NULL) || pag != p0 || cargando) return 1;
+  if ((k = ctl_de_nodo(n)) < 0) return 1;
+  *idx = k;
+  if (tipo == C_BOTON) return 1;
+  return 0;
+}
+/* antes de enviar un formulario: lo obligatorio y el evento submit. 1 si no
+ * hay que enviarlo; si no, *boton es el control otra vez */
+static int js_envia(Ctl **boton) {
+  Nodo *bn = (*boton)->nodo, *forma = (*boton)->forma, *sub = (*boton)->tipo == C_ENVIAR ? bn : NULL;
+  Pagina *p0 = pag;
+  int k;
+  if (!js_en_pagina()) return 0;
+  if (!atr(forma, "novalidate") && !(sub && atr(sub, "formnovalidate")))
+    for (k = 0; k < pag->n_ctl; k++) {
+      Ctl *c = &pag->ctl[k];
+      if (c->forma == forma && c->obligado && !c->desactivado && c->visible && es_texto(c) && !c->n_valor) {
+        MessageBoxA(vent, "Falta rellenar un campo obligatorio.", "Navegador", MB_OK);
+        foco_pon(foco_de_ctl(k));
+        return 1;
+      }
+    }
+  if (js_evento(forma, "submit", sub) || pag != p0 || cargando) return 1;
+  if ((k = ctl_de_nodo(bn)) < 0) return 1;
+  *boton = &pag->ctl[k];
+  return 0;
+}
+/* lo que JavaScript pide a la ventana */
+static void jn_remaqueta(void) {
+  Nodo *n = nodo_foco();
+  lista.activa = 0;
+  remaqueta();
+  foco = foco_de_nodo(n);
+}
+static void jn_ir(const char *url, int post, char *cuerpo, u32 nc) { ir(url, post, cuerpo, nc, 0); }
+static void jn_envia(Nodo *forma, Nodo *boton) {
+  char *url, *cuerpo;
+  u32 nc;
+  int post;
+  if (!pag_formulario(pag, forma, boton ? ctl_de_nodo(boton) : -1, &url, &cuerpo, &nc, &post)) { di("Este formulario no se puede enviar."); return; }
+  ir(url, post, cuerpo, nc, 0);
+  free(url);
+}
+static void jn_pon_url(const char *u) {
+  char *q = malloc(strlen(u) + 1);
+  dir_pon(u);
+  if (q && i_hist >= 0) { strcpy(q, u); free(hist[i_hist].url); hist[i_hist].url = q; } else free(q);
+  repinta();
+}
+static void jn_historia(int k) { if (k < 0) atras(); else if (k > 0) adelante(); else recarga(); }
+static void jn_foco(Nodo *n) {
+  int f = foco_de_nodo(n);
+  if (!n) { if (foco >= 0) { foco = -1; repinta(); js_foco(NULL); } return; }
+  if (f >= 0) foco_pon(f);
+}
+static int jn_cuadro(const char *t, int tipo) { return MessageBoxA(vent, t, "Navegador", tipo ? MB_YESNO : MB_OK) == IDYES; }
+/* prompt(): Hispa Ventanas no tiene un cuadro para escribir; se pregunta si
+ * vale la respuesta que trae la página */
+static int jn_pregunta(const char *t, const char *def, char *resp, int max) {
+  static char b[700];
+  sprintf(b, "%.400s\n\nRespuesta: %.200s\n\n(\277Vale esta respuesta?)", t, def[0] ? def : "(nada)");
+  if (MessageBoxA(vent, b, "Navegador", MB_YESNO) != IDYES) return 0;
+  sprintf(resp, "%.*s", max - 1, def);
+  return 1;
+}
+static void jn_titulo(const char *t) {
+  char b[260];
+  sprintf(b, "%.200s - Navegador", t[0] ? t : "Navegador");
+  SetWindowTextA(vent, b);
+}
+static void jn_a_la_vista(Nodo *n) {
+  int k;
+  for (k = 0; pag && k < pag->n_foco; k++) {
+    Nodo *x = pag->foco[k].enlace ? pag->enl[pag->foco[k].n].nodo : pag->ctl[pag->foco[k].n].nodo;
+    if (dom_dentro(n, x)) {
+      if (pag->foco[k].enlace) { Enlace *e = &pag->enl[pag->foco[k].n]; a_la_vista(e->x, e->y < 0 ? 0 : e->y, 1); }
+      else { Ctl *c = &pag->ctl[pag->foco[k].n]; a_la_vista(c->x, c->y, c->h); }
+      return;
+    }
+  }
+}
+static const JsNav js_nav = { jn_remaqueta, jn_ir, jn_envia, jn_pon_url, jn_historia, jn_foco, jn_cuadro, jn_pregunta,
+                              jn_titulo, di, jn_a_la_vista };
+
 static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   switch (m) {
   case WM_PAINT: {
@@ -1069,9 +1260,12 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   case WM_SIZE: {
     int c0 = cols;
     coloca();
-    if (pag && cols != c0) remaqueta(); else repinta();
+    if (pag && cols != c0) { remaqueta(); js_redimensiona(); } else repinta();
     return 0;
   }
+  case WM_TIMER:                                /* [JS] setTimeout */
+    if (w == JS_TIMER) js_tic();
+    return 0;
   case WM_KEYDOWN:
     TlsAzar(&l, 4);
     tecla((int)w);
@@ -1114,6 +1308,9 @@ static void lee_ini(void) {
     if (!_strnicmp(l, "Inicio=", 7) && l[7]) sprintf(inicio, "%.290s", l + 7);
     if (!_strnicmp(l, "Idioma=", 7) && l[7]) sprintf(http_idioma, "%.30s", l + 7);
     if (!_strnicmp(l, "AlContenido=", 12)) al_contenido = !(l[12] == 'N' || l[12] == 'n' || l[12] == '0');
+    if (!_strnicmp(l, "JavaScript=", 11)) js_activo = !(l[11] == 'N' || l[11] == 'n' || l[11] == '0');   /* [JS] */
+    if (!_strnicmp(l, "TiempoJS=", 9) && atoi(l + 9) > 0) js_tope_ms = atoi(l + 9) * 1000;
+    if (!_strnicmp(l, "MemoriaJS=", 10) && atoi(l + 10) >= 512) js_memoria_kb = atoi(l + 10);
   }
   fclose(f);
 }
@@ -1136,6 +1333,7 @@ void inicio_prog(void) {
   ShowWindow(vent, 3);                           /* a toda la pantalla: la página necesita sitio */
   coloca();
   UpdateWindow(vent);
+  js_inicia(vent, &js_nav, carpeta);             /* [JS] */
   /* la dirección de la línea de órdenes, si la hay; si no, el inicio */
   if (*cmd == '"') { for (cmd++; *cmd && *cmd != '"'; cmd++) ; if (*cmd) cmd++; }
   else while (*cmd && *cmd != ' ') cmd++;
@@ -1149,6 +1347,13 @@ void inicio_prog(void) {
         DispatchMessageA(&m);
       }
       if (cargando) carga_avanza();
+    } else if (js_ocupado()) {                   /* [JS] guiones que llegan, fetch */
+      while (PeekMessageA(&m, NULL, 0, 0, 1)) {
+        if (m.message == WM_QUIT) goto fin;
+        TranslateMessage(&m);
+        DispatchMessageA(&m);
+      }
+      if (!cargando && js_ocupado()) js_avanza();
     } else {
       if (!GetMessageA(&m, NULL, 0, 0)) break;
       TranslateMessage(&m);
@@ -1157,6 +1362,7 @@ void inicio_prog(void) {
   }
 fin:
   if (cargando) http_suelta(&pet);
+  js_fin();                                     /* [JS] */
   http_fin();
   ExitProcess(0);
 }

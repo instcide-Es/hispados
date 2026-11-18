@@ -16,10 +16,7 @@
 
 typedef unsigned int u32;
 #define WINAPI __attribute__((stdcall))
-typedef struct MFILE MFILE;
-MFILE *fopen(const char *, const char *);
-int fclose(MFILE *);
-size_t fread(void *, size_t, size_t, MFILE *);
+#define MFILE FILE
 int fseek(MFILE *, long, int);
 long ftell(MFILE *);
 int printf(const char *, ...);
