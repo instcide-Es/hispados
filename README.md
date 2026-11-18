@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo/hispados.svg" alt="Logo de Hispa-DOS: un disquete con la H y el cursor" width="128" height="128"></p>
+
 # Hispa-DOS
 
 **La familia de sistemas operativos libres en español, compatibles con MS-DOS, para devolver a la vida los ordenadores viejos.** Es parte de **Rescoldo**: [hispados.es](https://hispados.es).
