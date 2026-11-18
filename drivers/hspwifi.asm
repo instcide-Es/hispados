@@ -1128,8 +1128,9 @@ init:
         mov [p_ini+8], eax          ; fw_des[0]
         mov dx, ruta_fw
         call carga_fw
-        mov si, msg_nofw
-        jc fin_mal_xms_ruta
+        ; Sin el microcódigo de Broadcom se sigue: la Atheros (ath9k) no lo
+        ; necesita; si la tarjeta es una Broadcom, el núcleo dirá que falta.
+        jc .fw_falta
         mov eax, [x_tam]
         mov [p_ini+16], eax         ; fw_tam[0]
         mov eax, [x_des]
@@ -1142,6 +1143,13 @@ init:
         mov si, msg_nofw
         jc fin_mal_xms_ruta
         mov eax, [x_tam]
+        mov [p_ini+20], eax
+        jmp .sin_fw
+.fw_falta:
+        xor eax, eax
+        mov [p_ini+8], eax          ; fw_des[0..1] y fw_tam[0..1] a cero
+        mov [p_ini+12], eax
+        mov [p_ini+16], eax
         mov [p_ini+20], eax
 .sin_fw:
         ; la tabla de segmentos
