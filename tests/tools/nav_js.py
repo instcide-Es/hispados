@@ -111,6 +111,20 @@ def atiende(h, u, q):
         t = q.get('q', [''])[0].lower()
         h.manda(json.dumps([n for n in NOMBRES if t in n.lower()], ensure_ascii=False).encode('utf-8'), tipo='application/json')
         return True
+    if u.path == '/js/galletas':      # document.cookie y fetch con las galletas de http.c
+        js = ('<h1>Galletas</h1><p id="c">?</p><p id="e">?</p><script>'
+              'document.getElementById("c").textContent = "COOKIE: " + document.cookie;'
+              'document.cookie = "sesion=pisada; path=/"; document.cookie = "js=1; path=/";'
+              'document.cookie = "oculta=1; path=/; HttpOnly";'
+              'fetch("/js/eco").then(r => r.text()).then(t => { document.getElementById("e").textContent = t; console.log(navigator.userAgent); });'
+              '</script>')
+        h.manda((CAB % 'Galletas' + js + PIE).encode('utf-8'),
+                cab=(('Set-Cookie', 'vista=1; Path=/'), ('Set-Cookie', 'sesion=S1; Path=/; HttpOnly')))
+        return True
+    if u.path == '/js/eco':           # lo que llega: las galletas y el User-Agent
+        h.manda(('ECO galletas=[%s] agente=[%s]' % (h.headers.get('Cookie', ''), h.headers.get('User-Agent', ''))).encode('utf-8'),
+                tipo='text/plain; charset=UTF-8')
+        return True
     if u.path == '/js/ficha':
         h.manda((CAB % 'Ficha' + '<h1>Ficha</h1><p>FICHA DE %s</p>' % q.get('n', ['?'])[0] + PIE).encode('utf-8'))
         return True

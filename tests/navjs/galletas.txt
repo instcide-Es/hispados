@@ -1,0 +1,3 @@
+espera 1500
+vuelca
+registro

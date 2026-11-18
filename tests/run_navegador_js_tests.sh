@@ -64,6 +64,12 @@ if tests/navjs/hazlo.sh > $T/hazlo.log 2>&1; then
   tiene cuad "[error] ReferenceError: 'noExiste' is not defined"
   an cuad2 /js/cuadros raiz
   tiene cuad2 "Visitas: 2"
+  an gal /js/galletas galletas
+  tiene gal "COOKIE: vista=1"
+  notiene gal "COOKIE: vista=1; sesion"
+  tiene gal "ECO galletas=[vista=1; sesion=S1; js=1] agente=[HispaNavegador/"
+  notiene gal "oculta"
+  tiene gal "[log] HispaNavegador/"
   an bucle /js/bucle bucle
   tiene bucle "Sigue: sí"
   tiene bucle "un guion ha tardado mas de"
