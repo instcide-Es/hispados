@@ -44,7 +44,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 0 | Este documento; la lista de funciones por orden de uso (`tools/importaciones.py`, con los programas que aporte cada uno) | documento hecho (17/11/2026) |
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
-| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado |
+| 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado. **3d hecha (18/11/2026)**: GDI completo (figuras, letras de cualquier tamaño, mapas de bits y DIB, regiones, ROP, paletas), barras de desplazamiento, caret, aceleradores, iconos y cursores, portapapeles, diálogos comunes y COMCTL32.DLL: **FASMW 1.73, el flat assembler de Windows, abre, edita y ensambla dentro de Hispa Ventanas** |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. Falta: los iconos del escritorio y «Mi PC» |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Después, ClicGest entero: imágenes, subir y bajar archivos, galletas guardadas. Falta: hojas de estilo de fuera |
@@ -103,12 +103,11 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    y la instalación propias de Hispa-486: hechas (18/11/2026), ver «La
    imagen, la instalación y las actualizaciones de Hispa-486».
 4. Fase 3: USER32 y GDI32 sobre Hispa Ventanas. La 3a, la 3b (el «Hola,
-   mundo» de ventana) y la 3c (KERNEL32 y las DLL dentro de Hispa Ventanas,
-   los controles, los menús, los recursos y los diálogos) están hechas; sigue
-   la 3d: GDI completa para los programas sencillos de la época (mapas de
-   bits, tipos de letra, regiones), los iconos y los cursores del programa,
-   los aceleradores y los diálogos comunes (abrir y guardar), probando con
-   programas reales pequeños.
+   mundo» de ventana), la 3c (KERNEL32 y las DLL dentro de Hispa Ventanas,
+   los controles, los menús, los recursos y los diálogos) y la 3d (el GDI de
+   los programas sencillos, los iconos y los cursores, los aceleradores, los
+   diálogos comunes y COMCTL32.DLL, con FASMW de prueba) están hechas. Lo
+   que sigue, en «Lo que queda tras la 3d».
 
 ## Wi-Fi (hecho el 18/11/2026; sin probar en la tarjeta)
 
@@ -1035,6 +1034,220 @@ Decisiones y límites de la 3c (para las fases siguientes):
 - Diálogos: la letra es la de Hispa Ventanas (DS_SETFONT se salta); el fondo,
   el de los cuadros de Hispa Ventanas; `DialogBoxIndirectParamA` y
   `DWL_MSGRESULT` faltan; `DS_CENTER` o no, salen centrados en la pantalla.
+
+### Cómo está hecho (fase 3d)
+
+Lo que piden los programas sencillos de Windows 95/98 además de lo de la 3c:
+el GDI de verdad, los iconos y los cursores, los aceleradores, los diálogos
+comunes y los controles comunes. La prueba con un programa de verdad es
+**FASMW 1.73.32** (el entorno de ventanas del flat assembler, licencia de
+fasm, de tipo BSD; lo baja `tests/thirdparty/fetch_win32.sh`): dentro de
+Hispa Ventanas abre un archivo con su diálogo, lo enseña con colores en su
+editor propio, se escribe en él y lo ensambla en «otro hilo» con su barra de
+progreso; el `.COM` que sale funciona en Hispa-DOS. De paso, **FASM.EXE**
+(el de consola) también ensambla con HW32.
+
+Todo va en la parte alta de `VENTANAS.COM` (de la baja solo se han tocado
+unas decenas de octetos de `dlg_archivo`: el patrón de lo que lista y las
+carpetas primero):
+`ventanas/win32g.inc` (contextos y figuras), `win32t.inc` (letras y texto),
+`win32b.inc` (mapas de bits y DIB), `win32r.inc` (regiones y recortes),
+`win32ga.inc` (las funciones de GDI32) y `win32x.inc` (USER32 de más,
+COMDLG32, ADVAPI32 y SHELL32); sus variables, en `bss4.inc`.
+`VENTANAS.COM` pasa de 122 a unos 162 KB (y unos 30 KB más de variables);
+para la parte baja quedan 1,2 KB libres.
+
+**El GDI** (`win32g.inc` y los demás):
+
+- **Abrir un contexto** (`wg_abrir`) deja en la región de Hispa Ventanas
+  (`reg`) los rectángulos donde se puede pintar, ya en la superficie (la zona
+  de la ventana, lo que había que pintar en `BeginPaint`, sin las barras de
+  desplazamiento y cortado con el recorte del contexto), y en `wg_ox`,
+  `wg_oy` lo que se suma a las coordenadas lógicas (el origen de la zona, el
+  de la vista y el de la ventana: `SetViewportOrgEx`, `SetWindowOrgEx`).
+  Las primitivas (`wg_punto`, `wg_tramo`, `wg_linea`, `wg_blt`) escriben en
+  la superficie recortando con esa región y con la ROP2 del contexto.
+- **Los contextos de memoria** (`CreateCompatibleDC`): al abrirlos, la
+  superficie de Hispa Ventanas pasa a ser su mapa de bits y al cerrar vuelve
+  a ser la pantalla. Un mapa (HBITMAP) es un octeto por punto con los colores
+  de la paleta de Hispa Ventanas (como la pantalla), o 0 y 1 si es
+  monocromo; los de más de 48 KB, en su bloque de DPMI (apuntado en el
+  programa: se suelta al acabar).
+- **Los colores y las ROP:** COLORREF -> el gris o el color del cubo de
+  6×6×6 más cercano (por tablas; también `PALETTEINDEX` con la paleta del
+  contexto). Las ROP2 (`SetROP2`) y las ROP3 de `BitBlt` se hacen con los
+  colores RGB de los puntos, como en una pantalla de color verdadero, y el
+  resultado vuelve a la paleta: así funcionan las máscaras (`SRCAND` y
+  `SRCPAINT` con un mapa monocromo) y el XOR. De monocromo a color, 0 es el
+  color del texto y 1 el del fondo; de color a monocromo, 1 es lo del color
+  de fondo del origen.
+- **Plumas y pinceles:** plumas lisas, de rayas, de puntos y sus mezclas (de
+  un punto; las anchas, lisas, como en Windows 95), de cualquier ancho;
+  pinceles lisos, los seis rayados (`CreateHatchBrush`; el hueco, del color
+  de fondo si es opaco) y de dibujo (`CreatePatternBrush`,
+  `CreateDIBPatternBrushPt`, 8×8).
+- **Las figuras** (Rectangle, Ellipse, RoundRect, Arc, Pie, Chord) se hacen
+  por filas: cada fila es un tramo que se rellena con el pincel, y su borde
+  (los puntos que no tienen sus cuatro vecinos dentro) se pinta con la
+  pluma. Las elipses salen de una raíz cuadrada entera de 64 bits; los
+  quesos y las cuerdas, filtrando por el sector (productos cruzados) o por el
+  lado de la cuerda. Polygon y PolyPolygon, por filas con sus cortes
+  (ALTERNATE y WINDING); Polyline, PolylineTo, PolyPolyline y PolyBezier (16
+  trozos por curva).
+- **Las letras:** una letra de Windows (`CreateFontA`) es la de Hispa
+  Ventanas (8×16, página 437) estirada a su tamaño: alto de la celda (de
+  lfHeight; negativo, el de las letras: × 16/13; de 14 a 18, la de siempre,
+  que se ve mejor; como poco 12) y ancho (la mitad, si no se da), con
+  negrita, cursiva, subrayado y tachado; todas son de paso fijo. TextOut,
+  ExtTextOut (opaco, recortado, con avances), TabbedTextOut, las W (de
+  UTF-16 a la página 1252 y de ahí a la 437), GetTextMetrics,
+  GetTextExtentPoint32 y GetTextExtentExPoint, GetCharWidth. DrawText parte
+  las palabras (`DT_WORDBREAK`), expande los tabuladores, subraya la letra
+  de «&», centra, pone «...» si no cabe y calcula el rectángulo.
+- **Los DIB** de 1, 4, 8, 16 (5-5-5 y 5-6-5), 24 y 32 bits se pasan a la
+  paleta fila a fila al dibujarlos (`SetDIBitsToDevice`, `StretchDIBits`, de
+  abajo arriba o al revés). Con `CreateDIBSection` el programa escribe sus
+  puntos directamente; al copiarlos se leen de ahí, y al pintar en ellos con
+  GDI se pasan al mapa y vuelven (solo los puntos que han cambiado, para no
+  perder colores). `GetDIBits`, `SetDIBits`, `CreateDIBitmap` y
+  `LoadBitmapA` (de los recursos).
+- **BitBlt y StretchBlt** con cualquier ROP3 (estirando con el punto más
+  cercano, y al revés si el ancho o el alto es negativo); de una ventana se
+  copia antes lo que hay en la pantalla. PatBlt, GetPixel, SetPixel.
+- **Regiones:** listas de hasta 64 rectángulos que no se pisan
+  (`CreateRectRgn`; las elípticas y las de esquinas redondas, por franjas;
+  las de polígono, su caja); `CombineRgn` (y, o, xor, menos), `OffsetRgn`,
+  `PtInRegion`, `FillRgn`, `InvalidateRgn`... El recorte de un contexto
+  (`SelectClipRgn`, `ExtSelectClipRgn`, `IntersectClipRect`,
+  `ExcludeClipRect`, `GetClipBox`) es una región suya.
+- **Lo demás:** `SaveDC` y `RestoreDC`, `GetDeviceCaps` (8 bits con paleta,
+  96 puntos por pulgada), las paletas (`CreatePalette`, `SelectPalette`,
+  `RealizePalette`: el color más cercano, sin cambiar la de la pantalla),
+  `GetObjectA` de todo, `GetCurrentObject`, `GetObjectType`, y de USER32
+  `FillRect`, `FrameRect`, `InvertRect`, `DrawFocusRect` y `DrawEdge`.
+
+**USER32** (`win32x.inc`):
+
+- **Barras de desplazamiento:** una ventana con `WS_VSCROLL` o `WS_HSCROLL`
+  lleva barras `c_barra` de Hispa Ventanas como hijas, en el borde de su
+  zona, y para el programa su zona es lo que queda (`w32_cli`). Lo que se
+  aprieta (flechas, pista, pulgar, rueda) llega como `WM_VSCROLL` o
+  `WM_HSCROLL` con su `SB_*`; `SetScrollInfo`, `GetScrollInfo`,
+  `SetScrollPos`, `SetScrollRange`... Se ven siempre (como con
+  `SIF_DISABLENOSCROLL`): así la zona no cambia al cambiar el recorrido.
+- **El caret:** uno por programa, invertido, sin parpadear (las capturas de
+  las pruebas salen siempre igual); se quita mientras se pinta la ventana.
+- **El teclado:** `GetKeyState` (cómo estaban Mayús., Ctrl y Alt con el
+  último mensaje del teclado), `GetAsyncKeyState`, `GetKeyboardState`,
+  `ToAscii` (el carácter de la última tecla: FASMW escribe así), `VkKeyScanA`,
+  `MapVirtualKeyA`; F1 a F12 con Mayús., Ctrl o Alt ya llegan como teclas
+  virtuales.
+- **Los aceleradores:** `LoadAcceleratorsA` (de los recursos),
+  `CreateAcceleratorTableA`, `TranslateAcceleratorA` (teclas virtuales con
+  sus mayúsculas, o caracteres) -> `WM_COMMAND`.
+- **Iconos y cursores:** de los recursos (el mejor de 32 de ancho, con su
+  máscara, a 32×32) o los de serie (de Hispa Ventanas). `DrawIcon`,
+  `DrawIconEx`, `LoadImageA`. El icono de la clase (o `WM_SETICON`,
+  `SetClassLongA`) va a su botón de la barra de tareas de Hispa-486, a 16
+  colores. El cursor de la clase se pone sobre la zona; `SetCursor` con uno
+  de serie (flecha, escribir, esperar, cruz, flechas dobles: formas nuevas
+  de `tamano.inc`) o con uno de los recursos (a la mitad, en la forma
+  `CUR_PROG`).
+- **El portapapeles** es el de Hispa Ventanas (texto: `CF_TEXT` y
+  `CF_OEMTEXT`); `GetClipboardData` da un bloque que `GlobalLock` y
+  `GlobalSize` entienden.
+- **Menús:** las plantillas MENUEX (FASMW las usa); `TrackPopupMenu` con el
+  menú emergente de Hispa Ventanas (con `TPM_RETURNCMD`, espera atendiendo
+  los mensajes de la tarea); `CheckMenuRadioItem`.
+- **Lo demás:** rectángulos (`SetRect`, `IntersectRect`, `UnionRect`...),
+  coordenadas (`ClientToScreen`, `MapWindowPoints`, `AdjustWindowRect`...),
+  `SetCapture`, `GetWindowPlacement`, `FindWindowA` (en el programa),
+  `SystemParametersInfoA`, `GetClassNameA`, `GetWindow`, `EnumChildWindows`,
+  `CharUpperA` y compañía, `wvsprintfA`, `MessageBoxIndirectA`...
+  `ScrollWindow` repinta toda la zona. Los textos fijos (STATIC) quitan los
+  «&».
+
+**COMDLG32, ADVAPI32 y SHELL32** (en `win32x.inc`, como USER32: DLL 3, 4 y
+5 de la tabla). `GetOpenFileNameA` y `GetSaveFileNameA` son el diálogo de
+archivos de Hispa Ventanas: el patrón del filtro elegido, primero todas las
+carpetas, la carpeta de empezar, la extensión de serie, «¿Quiere
+reemplazarlo?» y «No se encuentra ese archivo»; devuelve la ruta entera.
+`ChooseColorA` (los 16 colores de siempre) y `ChooseFontA` (el tamaño,
+negrita y cursiva) son diálogos con una lista. El registro no hay (dice que
+no está) y SHELL32 tiene lo justo (`ShellAboutA`, arrastrar archivos: nada).
+
+**COMCTL32.DLL** (`w32/comctl32.c`, en C como MSVCRT.DLL): la barra de
+estado (partes, textos, tabuladores para centrar), las pestañas (arriba o
+abajo, con sus octetos de más, imágenes y `TCN_SELCHANGE`), la barra de
+progreso y las listas de imágenes. `InitCommonControls` lleva el número 17
+(`tools/elf2pe.py --ordinal`): muchos programas la importan así. Va con
+MSVCRT.DLL, al lado de HW32.COM.
+
+**HW32** (`utils/hw32hilo.inc`): hay un solo hilo, así que `CreateThread`
+ejecuta el hilo entero antes de volver (vale para los programas que lanzan
+un trabajo y esperan a que acabe, como el ensamblador de FASMW);
+`ExitThread` dentro de él vuelve a `CreateThread`; `WaitForSingleObject`,
+las exclusiones y los eventos están siempre libres. Los `.INI`
+(`GetPrivateProfileStringA`, `GetPrivateProfileIntA` y
+`WritePrivateProfileStringA`, con listas de secciones y claves y borrar), y
+`MulDiv`. Y un arreglo de la fase 1: el tamaño de las cabeceras se leía de
+`SizeOfHeapCommit` en vez de `SizeOfHeaders` (los PE de FASM, que lo tienen
+a 0, no cargaban).
+
+**UCRT.DLL** (`w32/ucrt.c` con `w32/msvcrt.c`): el CRT «universal» de los
+programas de Visual C++ 2015 y siguientes. HW32 lleva a ella todas las
+`api-ms-win-crt-*.dll`, `VCRUNTIME140.DLL` y `UCRTBASE.DLL`
+(`alias_ucrt`), y KERNEL32 tiene lo que pide su arranque
+(`GetStartupInfoW`, `InitializeSListHead`, `IsProcessorFeaturePresent`,
+`IsDebuggerPresent`, `MoveFileExA`, `FormatMessageA`). Está empezada: el
+buscaminas («Mines») de los rompecabezas de Simon Tatham (MIT) ya carga con
+ella, pero se cierra al empezar sin decir nada; queda averiguar dónde (haría
+falta la traza de HW32 dentro de Hispa Ventanas).
+
+**Herramientas:** `tools/rcmini.py` hace también ACCELERATORS, CURSOR y
+BITMAP; `tools/elf2pe.py`, `--ordinal NOMBRE=N` y las importaciones de
+COMDLG32, ADVAPI32 y SHELL32 de la tabla.
+
+**Pruebas** (en `make test`):
+
+- `tests/run_win32gdi_tests.sh` (WINGDI.EXE, `tests/progs/wingdi.c`): una
+  cuadrícula con todas las figuras, plumas, rayados, ROP2, bordes, letras,
+  DrawText, mapas en memoria, máscaras, StretchDIBits, CreateDIBSection y un
+  recorte elíptico con agujero, mirada punto a punto, y 12 comprobaciones de
+  valores (GetTextMetrics, CombineRgn, GetDIBits, las paletas...).
+- `tests/run_win32var_tests.sh` (WINVAR.EXE, `winvar.c` y `winvar.rc`, con
+  sus dibujos de `mkwinvar.py`), en el escritorio de Hispa-486: el icono en
+  la barra de tareas y dibujado, el cursor, la barra de desplazamiento, el
+  caret, el portapapeles, los aceleradores (F5, Mayús.+F5, Ctrl+letra, un
+  carácter de control), TrackPopupMenu, abrir, color y letra.
+- `tests/run_win32fasmw_tests.sh`: FASMW (si se ha bajado): su menú
+  MENUEX, sus pestañas y su barra de estado, abrir `HOLA486.ASM`, escribir en
+  su editor, ensamblar con Ctrl+F9 («2 passes, 29 bytes.») y, en el disco,
+  el `.COM` y su `FASMW.INI`.
+- Las pruebas de Win32 que usan el disquete de siempre quitan
+  `HISPA.WAV` de su copia para tener sitio (HW32, MSVCRT y los programas).
+
+Decisiones y límites de la 3d (para las fases siguientes):
+
+- Una sola letra (la de Hispa Ventanas) a cualquier tamaño, de paso fijo:
+  los nombres de las letras no cambian nada y no hay `EnumFontFamilies`; las
+  letras pequeñas (menos de 12 puntos de alto) no se leen y se agrandan; no
+  hay texto girado.
+- Los colores son los 256 de la paleta de Hispa Ventanas: una paleta del
+  programa no cambia la de la pantalla (se usa el color más cercano), y lo
+  pintado con GDI en un DIB de 8 bits toma el más cercano de los suyos.
+- Las regiones son rectángulos: las elípticas, por franjas (64); si una
+  operación da más de 64, los últimos se juntan en su caja.
+- No se imprime (`PrintDlgA` dice que no; `StartDocA` falta).
+- `ScrollWindow` repinta todo en vez de copiar; el caret no parpadea.
+- Un hilo de verdad no hay: un programa que deja un hilo en marcha esperando
+  algo (un servidor, un temporizador propio) no va.
+- COMCTL32 tiene solo la barra de estado, las pestañas, el progreso y las
+  listas de imágenes (ni barras de herramientas, ni listas de columnas, ni
+  árboles).
+- `VENTANAS.COM` ha crecido unos 40 KB: en el disquete de Hispa-386 queda
+  poco sitio (las pruebas quitan `HISPA.WAV`); la imagen de Hispa-486 tiene
+  que llevar COMCTL32.DLL al lado de MSVCRT.DLL.
 
 ## Red inalámbrica (Wi-Fi)
 

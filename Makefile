@@ -120,6 +120,13 @@ $(B)/MSVCRT.DLL: w32/msvcrt.c tools/elf2pe.py | $(B)
 $(B)/COMCTL32.DLL: w32/comctl32.c tools/elf2pe.py ventanas/win32.inc | $(B)
 	$(CC32) -c $< -o $(B)/comctl32.o
 	python3 tools/elf2pe.py --dll --ordinal InitCommonControls=17 -t ventanas/win32.inc -o $@ $(B)/comctl32.o
+# [HISPA-486] fase 3d: el CRT de Visual C++ 2015 (api-ms-win-crt-*.dll,
+# VCRUNTIME140.DLL, UCRTBASE.DLL: HW32 los lleva todos a UCRT.DLL): MSVCRT y
+# lo del CRT «universal»
+$(B)/UCRT.DLL: w32/msvcrt.c w32/ucrt.c tools/elf2pe.py | $(B)
+	$(CC32) -c w32/msvcrt.c -o $(B)/ucrt_msvcrt.o
+	$(CC32) -c w32/ucrt.c -o $(B)/ucrt.o
+	python3 tools/elf2pe.py --dll -o $@ $(B)/ucrt_msvcrt.o $(B)/ucrt.o
 $(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/dllprue.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/dllprue.o
@@ -884,6 +891,7 @@ test: $(TEST_DEPS)
 	tests/run_win32calc_tests.sh $(IMG)
 	tests/run_win32gdi_tests.sh $(IMG)
 	tests/run_win32var_tests.sh $(IMG)
+	tests/run_win32fasmw_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)

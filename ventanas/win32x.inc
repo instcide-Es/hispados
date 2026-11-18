@@ -1141,27 +1141,25 @@ w32x_ic_recurso:
         add esi, 6
         xor edi, edi                ; el mejor: el de 32 de ancho con más colores
         xor ebx, ebx                ; (su número)
-        or edx, edx
+        mov dword [w32x_ic_bits], -1
 .b:
         movzx eax, byte [esi]       ; ancho (0: 256)
         cmp ecx, 12                 ; (de cursor: ancho y alto en palabras)
         jne .b1
         movzx eax, word [esi]
 .b1:
-        test edi, edi
-        jz .toma
-        cmp eax, 32
-        jne .s
-        movzx eax, word [esi+6]     ; bits
-        cmp ecx, 12
-        jne .b2
-        movzx eax, word [esi+6]
-.b2:
+        cmp eax, 32                 ; los puntos: 32 de ancho, mil más; y sus bits
+        sete al
+        movzx eax, al
+        imul eax, 1000
+        movzx edx, word [esi+6]
+        add eax, edx
         cmp eax, [w32x_ic_bits]
-        jbe .s
+        jle .s
+        cmp dword [w32x_ic_bits], -1
+        je .toma
 .toma:
         mov edi, esi
-        movzx eax, word [esi+6]
         mov [w32x_ic_bits], eax
         movzx ebx, word [esi+12]
 .s:

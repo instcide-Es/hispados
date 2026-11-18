@@ -142,6 +142,7 @@ if sed -n '/Hispa Ventanas ha terminado/,$p' $T/log.txt | grep -qF 'TRAS-SALIR';
 
 # ---- 2.ª: 640x480, VGA de 16 colores, con la clave de VENTANAS.INI ----
 cp $T/base.img $T/f.img
+MTOOLS_SKIP_CHECK=1 mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null   # (sitio para Win32: aquí no suena)
 W32=0
 if make -s build/WINCALC.EXE build/MSVCRT.DLL build/HW32.COM > /dev/null 2>&1; then
   W32=1

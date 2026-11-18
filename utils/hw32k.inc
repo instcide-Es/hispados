@@ -4066,6 +4066,12 @@ funciones:
         FUNC k_GetPrivateProfileStringA, 24, 'GetPrivateProfileStringA'
         FUNC k_GetPrivateProfileIntA, 16, 'GetPrivateProfileIntA'
         FUNC k_WritePrivateProfileStringA, 16, 'WritePrivateProfileStringA'
+        FUNC k_GetStartupInfoW, 4, 'GetStartupInfoW'
+        FUNC k_InitializeSListHead, 4, 'InitializeSListHead'
+        FUNC k_IsProcessorFeaturePresent, 4, 'IsProcessorFeaturePresent'
+        FUNC k_cero, 0, 'IsDebuggerPresent'
+        FUNC k_MoveFileExA, 12, 'MoveFileExA'
+        FUNC k_FormatMessageA, 28, 'FormatMessageA'
         dd 0
 
 ; ---- las teclas virtuales de los códigos de la BIOS (0 a 58h) ----

@@ -138,6 +138,63 @@ k_MulDiv:
         or eax, -1
         ret
 
+; ---- (dll_de_nombre) las DLL del CRT de Visual C++ 2015 y siguientes
+; (api-ms-win-crt-*.dll, VCRUNTIME140.DLL, UCRTBASE.DLL) son una sola, la
+; nuestra: UCRT.DLL (b_dll, en mayúsculas) ----
+alias_ucrt:
+        push esi
+        push edi
+        push ecx
+        push es
+        push ds
+        pop es
+        mov esi, b_dll
+        mov edi, t_apims
+        mov ecx, 15
+        repe cmpsb
+        je .si
+        mov esi, b_dll
+        mov edi, t_vcrt
+        mov ecx, 12
+        repe cmpsb
+        je .si
+        mov esi, b_dll
+        mov edi, t_ucrtb
+        mov ecx, 8
+        repe cmpsb
+        jne .x
+.si:
+        mov esi, t_ucrt
+        mov edi, b_dll
+        mov ecx, 9
+        rep movsb
+.x:
+        pop es
+        pop ecx
+        pop edi
+        pop esi
+        ret
+t_apims     db 'API-MS-WIN-CRT-'
+t_vcrt      db 'VCRUNTIME140'
+t_ucrtb     db 'UCRTBASE'
+t_ucrt      db 'UCRT.DLL', 0
+; ---- lo que piden los programas de Visual C++ 2015 al arrancar ----
+k_GetStartupInfoW:                  ; (STARTUPINFOW*): como la A (sin textos)
+        jmp k_GetStartupInfoA
+k_InitializeSListHead:              ; (cabeza): a cero
+        mov edi, [ebp]
+        mov dword [es:edi], 0
+        mov dword [es:edi + 4], 0
+        ret
+k_IsProcessorFeaturePresent:        ; (qué): PF_FLOATING_POINT_EMULATED (1) no, lo demás no
+        xor eax, eax
+        ret
+k_MoveFileExA:                      ; (de, a, opciones): como MoveFileA
+        jmp k_MoveFileA
+k_FormatMessageA:                   ; (...): no hay textos de los errores
+        xor eax, eax
+        ret
+
 ; =============================================================================
 ;  Los .INI
 ; =============================================================================

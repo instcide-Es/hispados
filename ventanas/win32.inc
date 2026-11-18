@@ -1511,6 +1511,12 @@ w32_tabla:
         W32F u_IsCharUpperA, 4, 1, 'IsCharUpperA'
         W32F u_IsCharLowerA, 4, 1, 'IsCharLowerA'
         W32F u_wvsprintfA, 12, 1, 'wvsprintfA'
+        W32F u_cero, 16, 1, 'GetMenuItemRect'
+        W32F u_cero, 8, 2, 'StartDocA'
+        W32F u_cero, 4, 2, 'StartPage'
+        W32F u_cero, 4, 2, 'EndPage'
+        W32F u_cero, 4, 2, 'EndDoc'
+        W32F u_cero, 4, 2, 'AbortDoc'
         ; fase 3d: COMDLG32, ADVAPI32 y SHELL32 (win32x.inc)
         W32F c_GetOpenFileNameA, 4, 3, 'GetOpenFileNameA'
         W32F c_GetSaveFileNameA, 4, 3, 'GetSaveFileNameA'

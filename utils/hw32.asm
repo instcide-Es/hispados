@@ -1330,6 +1330,7 @@ dll_de_nombre:
         loop .c
         mov byte [edi], 0
 .c_f:
+        call alias_ucrt             ; [fase 3d] las del CRT de Visual C++ 2015: UCRT.DLL
         call ficha_de_b_dll
         jnc .x
         call carga_dll              ; -> EBP
