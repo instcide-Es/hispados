@@ -386,10 +386,15 @@ suma:
 			cargando = 1;
 		if (b->estado & 4)
 			critica = 1;
-		if (desconocido(b->ritmo) || b->ritmo > 0x7FFFFFFF)
-			ritmo_ok = 0;
-		else
-			ritmo += b->ritmo;
+		/* el ritmo, solo de las que se están gastando: con dos baterías
+		 * (ThinkPad A275), la que está quieta da ritmo 0 y no debe anular
+		 * los minutos de la otra (18/11/2026, su BATERIA.LOG) */
+		if (b->estado & 1) {
+			if (desconocido(b->ritmo) || b->ritmo > 0x7FFFFFFF)
+				ritmo_ok = 0;
+			else
+				ritmo += b->ritmo;
+		}
 	}
 	AcpiOsWaitEventsComplete();
 
