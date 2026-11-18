@@ -856,7 +856,7 @@ $(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUE
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(wildcard usb/* floppy/*)
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 # [HISPA-486] la imagen USB de Hispa-486 (build/hispa486-usb.img) y su disquete
@@ -868,7 +868,7 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSD
 # «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
 H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [FONDO] la imagen de fondo del escritorio de Hispa-486 (sistema/486/FONDO.BMP,

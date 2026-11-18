@@ -20,7 +20,7 @@
 #    (los mismos puntos que tests/run_ventanas_bateria_tests.sh), también al
 #    cambiar el nivel y enchufar con Ventanas en marcha; /E, /U, /AUTO y el
 #    registro en un archivo. Y en un QEMU sin batería: /AUTO calla y no se
-#    queda.
+#    queda. Y que APAGAR sigue apagando con HSPACPI cargado.
 # Deja capturas en build/acpi_*.png.
 set -u
 cd "$(dirname "$0")/.."
@@ -210,6 +210,17 @@ n=$(grep -cF "HSPACPI 0.1: la batería del portátil por ACPI" $T/log.txt)
 [ "$n" = 2 ] && ok "sin batería, HSPACPI /AUTO no dice nada" || ko "sin batería, HSPACPI /AUTO no dice nada ($n títulos, deben ser 2)"
 check "HSPACPI no está cargado."
 check "Este equipo no declara ninguna batería por ACPI: HSPACPI no se queda."
+[ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/Ejecutando/,$p' $T/log.txt
+
+# -- 4: con HSPACPI cargado (contesta «hay APM» a INT 15h AX=5300h), APAGAR
+#       sigue apagando por ACPI por su cuenta --
+run "$SSDT" '
+  send "A:\\HISPADOS\\CMOSW 61 02" 1
+  send "A:\\HISPADOS\\HSPACPI" 6
+  send "APAGAR" 6
+' 60
+check "Batería: 0 %, sin cable"
+grep -q "terminating on signal" $T/raw && ko "APAGAR con HSPACPI cargado apaga el equipo" || ok "APAGAR con HSPACPI cargado apaga el equipo"
 [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/Ejecutando/,$p' $T/log.txt
 rm -rf $T
 exit $fail

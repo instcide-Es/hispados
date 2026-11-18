@@ -155,7 +155,8 @@ for f in HISPA32/CALC32.EXE HISPA32/HOLA32.EXE HISPA32/CTL32.EXE HISPA32/MENU32.
          HISPADOS/INTERNET/NAVEGA.EXE HISPADOS/INTERNET/HSPJS.DLL HISPADOS/INTERNET/HTTPS.EXE HISPADOS/INTERNET/HSPTLS.DLL \
          HISPADOS/INTERNET/WSOCK32.DLL HISPADOS/INTERNET/MSVCRT.DLL HISPADOS/INTERNET/NAVEGA.INI \
          HISPADOS/INTERNET/LEEME.TXT HISPADOS/HSPRED.COM HISPADOS/HSPWIFI.COM HISPADOS/HSPWIFI.BIN \
-         HISPADOS/WIFI.COM HISPADOS/BCM43XX.FW HISPADOS/BCM43XXH.FW HISPADOS/BCM43XX.TXT; do
+         HISPADOS/WIFI.COM HISPADOS/BCM43XX.FW HISPADOS/BCM43XXH.FW HISPADOS/BCM43XX.TXT \
+         HISPADOS/HSPACPI.COM HISPADOS/HSPACPI.BIN; do
   hdtiene $f
 done
 hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -qx 'Favorito=ClicGest: la biblioteca|https://clicgest.es/biblioteca' \
@@ -178,6 +179,9 @@ red_auto() {   # red_auto archivo: las tres líneas de la red, en orden y antes 
   else ko "AUTOEXEC.BAT sin la red puesta sola"; fi
 }
 red_auto $T/aut.txt
+# [ACPI] la batería por ACPI, antes del escritorio (en QEMU no hay batería: calla)
+grep -x -e 'IF EXIST C:\\HISPADOS\\HSPACPI.COM C:\\HISPADOS\\HSPACPI /AUTO' -e 'C:\\HISPADOS\\VENTANAS' $T/aut.txt | head -1 | grep -q HSPACPI \
+  && ok "AUTOEXEC.BAT: HSPACPI /AUTO antes del escritorio" || ko "AUTOEXEC.BAT sin HSPACPI /AUTO"
 if grep -qi "[ABD]:\\\\" $T/aut.txt; then ko "AUTOEXEC.BAT con otra letra que C:"; else ok "AUTOEXEC.BAT: solo C:"; fi
 cp $T/hdd.img $T/hdd486.img
 

@@ -237,13 +237,17 @@ static ACPI_STATUS acpi_arranca(void)
 	PASO("los métodos de arranque (_INI, _STA, _REG)",
 	     AcpiInitializeObjects((ini.opciones & LL_OP_SININI) ? ACPI_NO_DEVICE_INIT : 0));
 	AcpiOsWaitEventsComplete();
+	/* sin baterías declaradas (un sobremesa) no hay nada que leer: no se
+	 * le dice nada al controlador embebido */
+	AcpiGetDevices("PNP0C0A", bat_hallada, NULL, NULL);
+	AcpiGetDevices("ACPI0003", ca_hallado, NULL, NULL);
+	if (!nbat)
+		return AE_OK;
 	ec_reg(1);
 	AcpiOsWaitEventsComplete();
 	reg("ACPI: equipo preparado; memoria en uso %u KB (máximo %u KB); %u avisos o errores de ACPICA; "
 	    "los métodos han dormido %u ms\n", mem_usada >> 10, mem_max >> 10, osl_errores, osl_dormido_ms);
 
-	AcpiGetDevices("PNP0C0A", bat_hallada, NULL, NULL);
-	AcpiGetDevices("ACPI0003", ca_hallado, NULL, NULL);
 	for (i = 0; i < nbat; i++)
 		reg("Batería %d: %s\n", i + 1, estado.bat[i].ruta);
 	reg(ca ? "Adaptador de corriente: %s\n" : "Adaptador de corriente: el equipo no lo declara (ACPI0003)\n",

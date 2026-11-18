@@ -88,8 +88,13 @@ def autoexec486(txt, letra):
              'REM cable no tiene enlace la descarga. La red se elige una vez, a mano:\n'
              'REM HSPWIFI, WIFI REDES y WIFI CONECTAR (docs/WIFI.md).\n'
              '%sHSPRED /AUTO\n%sHSPWIFI /AUTO\n%sWIFI /AUTO\n'
+             'REM [Hispa-486] La batería de los portátiles sin APM (casi todos desde\n'
+             'REM 2008): HSPACPI la lee por ACPI y la enseña el indicador de la barra.\n'
+             'REM Con /AUTO solo se queda si el equipo tiene batería y la BIOS no la da\n'
+             'REM por APM; si no, sale sin ocupar memoria (docs/ACPI.md).\n'
+             'IF EXIST %sHSPACPI.COM %sHSPACPI /AUTO\n'
              'REM [Hispa-486] El escritorio, con la barra de tareas y el menú Inicio\n'
-             '%sVENTANAS\n' % (d, d, d, d))
+             '%sVENTANAS\n' % (d, d, d, d, d, d))
     return red.sub(lambda m: nuevo, txt)
 
 def centro486(en_imagen):
@@ -189,6 +194,9 @@ def main(edicion='386'):
                      ('HSPWIFI.COM', 'HSPWIFI.COM'), ('HSPWIFI.BIN', 'HSPWIFI.BIN'),
                      ('WIFI.COM', 'WIFI.COM'), ('BCM43XX.FW', 'BCM43XX.FW'),
                      ('BCM43XXH.FW', 'BCM43XXH.FW'), ('BCM43XX.TXT', 'BCM43XX.TXT'),
+                     # [ACPI] la batería por ACPI (docs/ACPI.md): el residente
+                     # y su núcleo de 32 bits
+                     ('HSPACPI.COM', 'HSPACPI.COM'), ('HSPACPI.BIN', 'HSPACPI.BIN'),
                      # [HISPA-486] los programas de Windows de consola
                      # (docs/486/HISPA-486.md): HW32 y su MSVCRT.DLL, juntos
                      # (HW32 busca las DLL en su carpeta)

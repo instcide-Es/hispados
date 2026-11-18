@@ -1,0 +1,89 @@
+PRUEBA DE LA BATERIA POR ACPI (HSPACPI) - Hispa-486
+Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
+===================================================================
+
+Que es: el indicador de bateria de la barra no salia en el HP Mini 5103 (ni
+en el Toshiba NB250) porque esos portatiles no tienen APM, que es por donde
+Hispa Ventanas preguntaba la bateria. HSPACPI, nuevo, la lee por ACPI y se
+la da a la barra. Esta probado con las tablas ACPI de los dos equipos (las
+de sus informes) y un portatil simulado, pero NO en los equipos de verdad:
+esto es esa prueba. Sirve para el HP Mini y para el Toshiba; el HP Mini,
+primero.
+
+QUE HACER (unos 5 minutos por equipo)
+-------------------------------------
+1. Descomprima hispados-usb-bateria.zip y grabe hispa486-usb.img en una
+   memoria USB entera (como las otras veces: Rufus en modo DD, balenaEtcher
+   o dd). Se borra lo que tenga.
+2. Arranque el portatil desde la memoria USB, con la BATERIA PUESTA y el
+   cargador ENCHUFADO.
+3. En el menu de arranque ya viene elegida la primera opcion,
+   "PRUEBA DE LA BATERIA". Pulse Intro (o espere 20 segundos).
+4. Van saliendo lineas (lo que HSPACPI encuentra) y al final una como:
+       Bateria: 87 %, con cable, cargando
+   Siga lo que dice la pantalla. Son 4 pasos:
+     1) ensena la bateria;
+     2) le pide ENCHUFAR o DESENCHUFAR el cargador, esperar 15 segundos y
+        pulsar una tecla: tiene que cambiar "con cable" / "sin cable";
+     3) le pide dejarlo como estaba y pulsar otra tecla;
+     4) abre el escritorio: MIRE LA BARRA, junto a la hora. Tiene que salir
+        la pila con el porcentaje. Cambie el cargador y espere 20 segundos:
+        con cable sale un rayo blanco sobre la pila. Hagale una foto.
+        Para volver: Inicio y, abajo del todo, "Salir de Hispa Ventanas...".
+5. Al acabar dice HECHO.
+   - Si la pila ha salido y cambiaba con el cargador: escriba APAGAR.
+   - Si NO ha salido, o el porcentaje no era el de verdad (compare con el
+     que le da Linux o Windows, si lo sabe): escriba COMPLETO y repita los
+     4 pasos (es la otra manera de leerla; ver abajo).
+6. Suba al FTP, a la carpeta prueba-bateria, el archivo BATERIA.LOG que ha
+   quedado en la memoria USB (en la raiz), y las fotos si las hizo. Si
+   prueba los dos equipos, cambie el nombre: BATERIA-HP.LOG y
+   BATERIA-TOSHIBA.LOG (o hagalo con dos memorias).
+
+SI ALGO VA MAL
+--------------
+- La pantalla se queda parada mas de un minuto: foto, y apagar con el
+  boton. BATERIA.LOG se va guardando a cada paso: subalo igual, dice hasta
+  donde llego.
+- "No se ha podido leer la bateria por ACPI (codigo ...)": la prueba pasa
+  sola a la segunda manera. Si tampoco, suba BATERIA.LOG.
+- Para arrancar sin la prueba: en el menu, elija "Normal". (En esta imagen
+  el arranque normal ya lleva HSPACPI /AUTO: si la prueba fue bien, en
+  Normal la pila tiene que salir sola en la barra.)
+
+LAS DOS MANERAS
+---------------
+HSPACPI ejecuta los metodos de la bateria que trae el propio portatil en
+sus tablas ACPI (los mismos que usan Windows y Linux).
+- Primera (la normal, "modo minimo"): solo avisa al controlador de la
+  bateria de que se le va a leer, y lee. No cambia nada mas del equipo.
+- Segunda (COMPLETO): antes arranca ACPI entero, como haria Windows XP.
+  En el HP Mini eso le dice a su controlador que hay un sistema con ACPI
+  (cambia como lleva el ventilador y algunas teclas): por eso no es la
+  normal, y por eso se le pide que se fije en el ventilador. Al apagar o
+  reiniciar, todo vuelve a como estaba.
+En ninguna de las dos se pasa el equipo a "modo ACPI": el boton de
+encendido, el brillo y la tapa los sigue llevando la BIOS.
+
+QUE HAY EN ESTA CARPETA
+-----------------------
+- hispados-usb-bateria.zip  la imagen USB de Hispa-486 con la prueba
+- LEEME.TXT                 esto
+- sueltos\                  HSPACPI.COM, HSPACPI.BIN y los .BAT, por si
+                            prefiere copiarlos a un Hispa-486 que ya
+                            arranque: HSPACPI.COM y HSPACPI.BIN a
+                            C:\HISPADOS; PRUBAT.BAT, PASOSBAT.BAT y
+                            COMPLETO.BAT a C:\ ; arrancar, salir del
+                            escritorio (Inicio, "Salir de Hispa Ventanas...") y escribir
+                            PRUBAT.
+                            (Sin HSPEMM: en la configuracion "Normal".)
+
+ORDENES, POR SI QUIERE PROBAR A MANO
+------------------------------------
+  HSPACPI                 lo carga (modo minimo) y dice como esta la bateria
+  HSPACPI /E              (ya cargado) la bateria, con detalle
+  HSPACPI /U              lo descarga
+  HSPACPI /COMPLETO       lo carga de la segunda manera
+  HSPACPI /V              ensena el registro
+  HSPACPI /REG:C:\X.LOG   lo guarda en ese archivo
+  HSPACPI /?              todas las opciones
