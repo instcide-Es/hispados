@@ -454,8 +454,43 @@ interrupciones (`ISRC`, `IMSK`, `HWE_ISRC`), configuración PCI propia
 controlador), los contadores de tramas del MAC (recibidas y enviadas, con
 error de CRC, desbordamientos), once registros del PHY y los contadores del
 controlador (interrupciones atendidas, última causa, elementos de estado
-tratados, envíos sin confirmar). Y avisa con «(!)» de lo raro: elementos de
-estado sin leer (la interrupción no llega), envíos sin confirmar, búfer RAM.
+tratados, envíos sin confirmar), y la línea `Yukon, IRQ:` (interrupciones
+que llegaron y no eran de la tarjeta, `ajenas`: si suben, el IRQ está
+compartido con otro aparato; `ELCR`: bit n = IRQ n por nivel; `IMR` e `IRR`
+de los dos PIC, esclavo:maestro: el bit 3 de la parte alta es el IRQ 11). Y
+avisa con «(!)» de lo raro: elementos de estado sin leer (la interrupción no
+llega), envíos sin confirmar, búfer RAM.
+
+El aviso de elementos sin leer compara, **en el mismo momento** (con las
+interrupciones cerradas), el índice de la tarjeta (`STAT_PUT_IDX`) y el que
+lleva el residente, y si no coinciden vuelve a mirar durante unos 220 ms con
+las interrupciones abiertas (el chip retrasa la interrupción unos
+microsegundos con sus temporizadores); solo avisa si en ese tiempo no se han
+leído, y entonces dice `PUT`, hasta dónde ha leído el residente, el código
+del elemento siguiente (80h o más: ya vale) e `ISRC`. Los contadores del
+controlador también se leen del residente justo antes de escribirlos.
+
+**El aviso falso del 18/11/2026.** En el HP Mini (desde CONSOLA, con la
+salida a un archivo) `/INFO` dijo «Hay elementos de estado sin leer» con la
+tarjeta recibiendo bien (2.601 tramas). No era la interrupción: `/INFO`
+comparaba el índice de la tarjeta, leído al final, con una **foto** del
+residente sacada al principio, y mientras escribía el informe llegaron unas
+40 tramas. Se ve en el propio informe: la foto decía `rx_put=0005` y el
+registro de la tarjeta ya estaba en `PUT=000D` (ese registro solo lo escribe
+la interrupción al devolver búferes: 40 más, que dan la vuelta a los 16),
+igual que el anillo de estado (`i_estado=003C` → `PUT=0024`, 40 más en 64);
+`ISRC=00000000` (nada pendiente), `causa=40000000` (la del anillo de estado,
+la que se espera) e `irqs` frente a `elem_estado` (1.947 frente a 2.812: 1,4
+elementos por interrupción, lo normal con la moderación del chip). Arreglado
+como se dice arriba; `tests/yukon_sim.py` lo reproduce (tramas llegando
+mientras `/INFO` escribe) y prueba que con la IRQ cortada sí avisa.
+
+**«Descartados»** (`Paquetes: ... descartados`) no son errores: son tramas
+que han llegado bien y que **ningún programa ha pedido** (el packet driver
+las tira porque nadie se ha apuntado a su tipo): IPv6, tipos que no son IP
+ni ARP, y todo lo que llega cuando no hay ningún programa de red abierto
+(entre `CONFRED` y `CONSOLA`, por ejemplo). Los errores van aparte
+(`errores`).
 
 Cómo leer el informe si no va:
 
@@ -464,7 +499,8 @@ Cómo leer el informe si no va:
 | «La tarjeta Yukon no contesta ni por memoria ni por los puertos» | Ningún camino lee un identificador de chip de la familia (B3h a BEh). `/DEPURA` dice lo que se lee por cada uno. |
 | `PHY: 02=FFFF 03=FFFF` | El PHY no contesta por SMI: no ha salido del reinicio o sigue apagado (`REG1`, bit 26). |
 | `Enlace: no` con el cable puesto y `11=` sin el bit 10 | La autonegociación no acaba: mirar `01=` (bit 5: acabada; bit 2: enlace) y `05=` (lo que anuncia el otro extremo). |
-| `irqs=00000000` y «(!) Hay elementos de estado sin leer» | La tarjeta recibe y lo apunta, pero la interrupción no llega: IRQ equivocado o tapado. Con `/SONDEO` debería ir. |
+| `irqs=00000000` y «(!) Hay elementos de estado sin leer» | La tarjeta recibe y lo apunta, pero la interrupción no llega: IRQ equivocado o tapado (mirar `IMR` en `Yukon, IRQ:`). Con `/SONDEO` debería ir. |
+| «(!) Hay elementos de estado sin leer» con `irqs` subiendo | Se pierden interrupciones de vez en cuando: `siguiente=` menor de 80h (el elemento aún no vale cuando se lee el índice), `ajenas` alto (IRQ compartido) o `ELCR` sin el bit del IRQ (por flanco: con otro aparato en la misma línea, el flanco se pierde). |
 | `rx_uni`/`rx_dif` suben y `elem_estado` no | El MAC recibe, pero no llega al anillo de estado: cola de recepción o unidad de estado mal arrancadas (`CSR`, `GET`/`PUT`). |
 | `tx_sin_confirmar` sube | La tarjeta no dice que ha leído lo enviado: `HECHO`/`DICHO` frente a `PUT` del envío; si `tx_uni`/`tx_dif` suben, sí que sale. |
 | `ISRC` con los bits 0 a 3 o el 31 | Error de descriptores (0: envío, 2: recepción), del MAC (3) o de hardware (31, con el detalle en `HWE_ISRC`). |
@@ -1050,7 +1086,8 @@ quitar y poner el cable en marcha), `send_pkt` (60 octetos mínimos, la
 vuelta al anillo, sin enlace dice que no), 40 tramas recibidas de varios
 tamaños de una en una y a ráfagas (la vuelta a los anillos de recepción y
 de estado), las que no son para la tarjeta o traen error, `HSPRED /INFO` con
-el residente, `/U` (la tarjeta queda en reinicio y los vectores como
+el residente (también con tramas llegando mientras escribe: sin el aviso
+falso del 18/11; y con la IRQ cortada: con el aviso), `/U` (la tarjeta queda en reinicio y los vectores como
 estaban) y volver a cargar; también cargado arriba (como con `LH`: los
 búferes en un bloque de la convencional, recortado a lo que usa); y que otro chip de la familia, o una tarjeta que
 no contesta, lo dicen y no se quedan. Unos 15 segundos. **Lo que no prueba:**

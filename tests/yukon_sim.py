@@ -439,6 +439,7 @@ class VM:
         self.bloque = 0x2001        # lo que da AH=48h (sin alinear)
         self.bloque_paras = None
         self.irq_roto = False       # la interrupción de la tarjeta no llega
+        self.al_escribir = None     # se llama cada vez que el programa escribe
         self.sin_puertos = False
         # vectores: cada uno a su «push ax; mov al, n; out E6h, al; pop ax;
         # iret» (el puerto E6h no es de nadie: sale aquí, a servicio())
@@ -548,6 +549,8 @@ class VM:
             ip, cs = struct.unpack('<HH', self.rmem(pila + 2, 4))
             raise Fallo('excepción %d del procesador en %04X:%04X (%s)' %
                         (n, cs, ip, self.rmem(cs * 16 + ip, 8).hex()))
+        if n == 0x21 and self.al_escribir and ah in (0x02, 0x09, 0x40):
+            self.al_escribir()
         if n == 0x21:
             if ah == 0x02:
                 self.salida.append(dx & 0xFF)
@@ -946,6 +949,63 @@ def escenario(com, modo, rev=1, cable=True, vel=1000, detalle=False, sondeo=Fals
     return vm
 
 
+def escenario_info_ocupada(com):
+    """/INFO con tramas llegando mientras escribe, y con la IRQ que no llega.
+
+    En el HP Mini, /INFO (lanzado desde CONSOLA, con la salida a un archivo)
+    avisó «Hay elementos de estado sin leer» con la tarjeta recibiendo bien:
+    comparaba el índice de la tarjeta, leído al final, con una foto del
+    residente sacada al principio, y entre medias habían llegado ~40 tramas
+    (rx_put de la foto 0005 y el registro de la tarjeta ya en 000D: ese
+    registro solo lo escribe la interrupción). Aquí: el aviso no debe salir
+    cuando las tramas llegan y se atienden, y sí cuando la IRQ no llega."""
+    print('Yukon simulada: /INFO con tramas llegando mientras escribe, y sin IRQ')
+    vm = VM()
+    chip = vm.chip = Yukon(vm)
+    fin, txt = vm.programa(com, '')
+    comprueba(fin == 'residente', 'HSPRED se queda residente')
+    if fin != 'residente':
+        print(txt)
+        return
+    r, cf = vm.pkt(ax=0x0201, bx=0xFFFF, cx=0, dx=0, si=0, di=0x0100, ds=0x5000, es=0x5000)
+    llegadas = []
+    cuenta = [0]
+
+    def llega():
+        cuenta[0] += 1
+        if cuenta[0] % 20 == 0 and len(llegadas) < 60:
+            t = trama(b'\xff' * 6, b'\x02\x00\x00\x00\x00\x07', 0x0800, 60 + len(llegadas))
+            if chip.recibe(t):
+                llegadas.append(t)
+    vm.al_escribir = llega
+    antes = len(vm.recibidas)
+    fin, info = vm.programa(com, '/INFO', seg=0x3000)
+    vm.al_escribir = None
+    vm.espera(30)
+    comprueba(len(llegadas) >= 40 and vm.recibidas[antes:] == llegadas,
+              '%d tramas llegan mientras /INFO escribe y se entregan todas' % len(llegadas))
+    comprueba('Yukon, IRQ:' in info and 'ajenas=' in info and 'ELCR=' in info,
+              '/INFO dice cómo está la IRQ en el PIC (ELCR, IMR, IRR) y las ajenas')
+    comprueba('(!)' not in info,
+              'sin aviso falso de «elementos de estado sin leer» (se miran en vivo)')
+    # la IRQ no llega: los elementos se quedan sin leer de verdad
+    vm.irq_roto = True
+    chip.irq_act()
+    for i in range(3):
+        chip.recibe(trama(MAC, b'\x02\x00\x00\x00\x00\x07', 0x0800, 70 + i))
+    fin, info = vm.programa(com, '/INFO', seg=0x3000)
+    comprueba('(!) Hay elementos de estado sin leer' in info and 'PUT=' in info
+              and 'ISRC=' in info,
+              'con la IRQ cortada, /INFO sí avisa, con PUT, lo leído e ISRC')
+    vm.irq_roto = False
+    chip.irq_act()
+    n = len(vm.recibidas)
+    vm.espera(50)
+    comprueba(len(vm.recibidas) == n + 3, 'al volver la IRQ, se leen las tres que esperaban')
+    comprueba(not chip.avisos, 'el modelo del chip no tiene quejas' +
+              (': ' + '; '.join(chip.avisos) if chip.avisos else ''))
+
+
 FALLOS = 0
 
 
@@ -958,6 +1018,7 @@ def main():
     escenario(com, 'memoria', sondeo=True)
     escenario(com, 'puertos', sondeo=True, cable=False)
     escenario(com, 'memoria', lh=True)
+    escenario_info_ocupada(com)
     print('Yukon simulada: sin contestar por ningún camino')
     vm = VM()
     vm.chip = Yukon(vm)

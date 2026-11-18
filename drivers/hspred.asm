@@ -2697,6 +2697,8 @@ yk_irqs     dd 0                    ; interrupciones atendidas
 yk_stle     dd 0                    ; elementos de estado tratados
 yk_lastis   dd 0                    ; la última causa de interrupción
 yk_lastrx   dd 0                    ; el último estado de recepción del MAC
+yk_ajenas   dd 0                    ; interrupciones que no eran de la tarjeta
+                                    ; (IRQ compartida; con /SONDEO, los tics)
 yk_diag_end:
 YK_DIAG_LEN equ yk_diag_end - yk_diag
 
@@ -3053,6 +3055,7 @@ yk_isr:
         cmc                         ; siempre «no era mía», y sigue la BIOS
         ret
 .no:
+        inc dword [yk_ajenas]
         mov dx, 0x002C              ; B0_Y2_SP_ICR
         mov eax, 2
         call yk_w32
@@ -5316,7 +5319,24 @@ yk_info:
         jmp .p
 .pd:
         call crlf
-        ; lo que lleva contado el controlador
+        ; lo que lleva contado el controlador: otra foto del residente AHORA
+        ; (la de antes es de cuando empezó /INFO; mientras se escriben los
+        ; registros, sobre todo a un archivo, siguen llegando tramas)
+        cmp byte [yk_live], 0
+        je .cnt
+        push ds
+        mov ds, [res_seg]
+        mov si, yk_diag
+        mov di, yk_diag
+        push cs
+        pop es
+        mov cx, YK_DIAG_LEN
+        pushf
+        cli
+        rep movsb
+        popf
+        pop ds
+.cnt:
         mov si, yk_cnt
 .c:
         lodsw
@@ -5342,12 +5362,40 @@ yk_info:
         ; pistas
         cmp byte [yk_live], 0
         je .r
-        mov dx, 0x0E9C              ; ¿elementos de estado sin leer?
-        call yk_r16
-        cmp ax, [yk_st_i]
-        je .h2
+        call yk_irq_pic             ; la IRQ en el PIC (nivel/flanco, tapada...)
+        call yk_pend                ; ¿elementos de estado sin leer DE VERDAD?
+        jnc .h2
+        push bx
+        push ax
         mov si, msg_yk_h_irq
         call puts
+        mov si, msg_yk_h_irq2
+        call puts
+        pop ax
+        call hex4                   ; PUT de la tarjeta
+        mov si, msg_yk_h_irq3
+        call puts
+        pop bx
+        mov ax, bx
+        call hex4                   ; hasta dónde ha leído el residente
+        mov si, msg_yk_h_irq4
+        call puts
+        push es
+        mov es, [dma_seg]
+        shl bx, 3
+        mov al, [es:bx+YK_ST+7]
+        pop es
+        call hex2                   ; el código del elemento siguiente
+        mov si, msg_yk_h_irq5
+        call puts
+        mov dx, 0x0008              ; B0_ISRC (sin tapar nada al leerlo)
+        call yk_r32
+        push eax
+        shr eax, 16
+        call hex4
+        pop eax
+        call hex4
+        call crlf
 .h2:
         cmp word [yk_txto], 0
         je .h3
@@ -5404,6 +5452,99 @@ yk_info:
         call hex4
         jmp .dump
 .dr:
+        ret
+
+; ¿Quedan de verdad elementos de estado sin leer? Compara el índice de la
+; tarjeta (STAT_PUT_IDX) con el del residente EN EL MISMO MOMENTO (con las
+; interrupciones cerradas: no una foto vieja). Si no coinciden, puede ser que
+; la interrupción esté en camino (el chip la retrasa con sus temporizadores):
+; se vuelve a mirar durante unos 4 tics (~220 ms) con las interrupciones
+; abiertas. CF = 1 si en todo ese tiempo el residente no los ha leído;
+; AX = PUT de la tarjeta, BX = índice del residente.
+yk_pend:
+        push es
+        push ecx
+        push esi
+        mov es, [res_seg]
+        call .tic
+        mov ecx, eax
+.l:
+        cli
+        mov dx, 0x0E9C
+        call yk_r16
+        mov bx, [es:yk_st_i]
+        sti
+        cmp ax, bx
+        je .ok
+        mov si, ax
+        call .tic
+        sub eax, ecx
+        cmp eax, 4
+        mov ax, si
+        jb .l
+        stc
+        jmp short .r
+.ok:
+        clc
+.r:
+        pop esi
+        pop ecx
+        pop es
+        ret
+.tic:
+        push ds
+        xor ax, ax
+        mov ds, ax
+        mov eax, [0x46C]
+        pop ds
+        ret
+
+; «Yukon, IRQ:» la línea de la tarjeta en el PIC: si va por nivel o por flanco
+; (ELCR, puertos 4D0h-4D1h; FFFF si no hay), las máscaras (IMR) y las
+; peticiones pendientes (IRR) de los dos PIC, y las interrupciones que han
+; llegado y no eran de la tarjeta (IRQ compartida con otro aparato).
+yk_irq_pic:
+        mov si, msg_yk_pic1
+        call puts
+        mov eax, [yk_ajenas]
+        push eax
+        shr eax, 16
+        call hex4
+        pop eax
+        call hex4
+        mov si, msg_yk_pic2
+        call puts
+        pushf
+        cli
+        mov dx, 0x4D1
+        in al, dx
+        mov ah, al
+        dec dx
+        in al, dx
+        popf
+        call hex4                   ; ELCR (bit n = IRQ n por nivel)
+        mov si, msg_yk_pic3
+        call puts
+        pushf
+        cli
+        in al, 0xA1
+        mov ah, al
+        in al, 0x21
+        popf
+        call hex4                   ; IMR esclavo:maestro (bit = tapada)
+        mov si, msg_yk_pic4
+        call puts
+        pushf
+        cli
+        mov al, 0x0A                ; OCW3: leer IRR (lo normal)
+        out 0xA0, al
+        out 0x20, al
+        in al, 0xA0
+        mov ah, al
+        in al, 0x20
+        popf
+        call hex4                   ; IRR esclavo:maestro
+        call crlf
         ret
 
 %macro ydump 3
@@ -5543,6 +5684,14 @@ msg_yk_ids3 db "h (FF: no se pudo)", 13, 10, 0
 msg_yk_chip db "Chip:            Yukon 2, identificador ", 0
 msg_yk_chip2 db "h (BC = Optima), revisión ", 0
 msg_yk_h_irq db "  (!) Hay elementos de estado sin leer: ¿no llega la interrupción?", 13, 10, 0
+msg_yk_h_irq2 db "      (mirado durante ~220 ms) PUT=", 0
+msg_yk_h_irq3 db " leído=", 0
+msg_yk_h_irq4 db " siguiente=", 0
+msg_yk_h_irq5 db " (80+: vale) ISRC=", 0
+msg_yk_pic1 db "Yukon, IRQ:      ajenas=", 0
+msg_yk_pic2 db " ELCR=", 0
+msg_yk_pic3 db " IMR=", 0
+msg_yk_pic4 db " IRR=", 0
 msg_yk_h_tx db "  (!) Hay envíos que la tarjeta no ha confirmado (HECHO/DICHO no avanzan).", 13, 10, 0
 msg_yk_h_ram db "  (!) La tarjeta tiene búfer RAM y aquí no se programa.", 13, 10, 0
 msg_yk_tr   db "  [Yukon] ", 0
