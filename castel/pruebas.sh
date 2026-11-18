@@ -434,13 +434,17 @@ mkdir $A $A/ref $A/sal
 if python3 -I $AQUI/ccastel.py $AQUI/compilador/castel.cas -o $A/c1.asm > $T/comp.txt 2>&1 && nasm -f bin $A/c1.asm -o $A/CASTEL.EXE 2>> $T/comp.txt; then
   ok "paso 1: ccastel.py compila el compilador (castel.cas -> CASTEL.EXE, $(stat -c %s $A/CASTEL.EXE) octetos)"
 else ko "el compilador en Castel no compila: $(head -1 $T/comp.txt)"; fi
-# un disquete con la biblioteca en \BIB, los módulos de ejemplo en \PARTES,
-# los ejemplos, la biblioteca entera (--todo), ENSAMBLA y los errores
+# dos disquetes: en A: la biblioteca en \BIB, los módulos de ejemplo en \PARTES,
+# los ejemplos, la biblioteca entera (--todo), ENSAMBLA, los errores y el
+# temporal de CASTEL; en B:, lo que sale (el ensamblador de cada uno son, todos
+# juntos, más de un disquete si va con los fuentes: el de ENSAMBLA solo pasa de
+# 250 K)
 cp $H/build/hispa8086-1440.img $T/c.img
 mmd -i $T/c.img ::BIB ::PARTES
 for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 mcopy -i $T/c.img $A/CASTEL.EXE ::
+mformat -C -f 1440 -i $T/cb.img ::
 { printf '@ECO OFF\r\n'
   python3 -I $AQUI/azar.py 7 45 $A/azar16.cas $A/azar16.esp
   python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
@@ -451,19 +455,20 @@ mcopy -i $T/c.img $A/CASTEL.EXE ::
     todo=; [ $n = toda ] && todo=--todo
     mcopy -i $T/c.img $f ::$N.CAS
     python3 -I $AQUI/ccastel.py $todo $f -o $A/ref/$N.ASM -I $AQUI/ejemplos/partes > /dev/null 2>&1
-    printf 'CASTEL %s.CAS -I BIB -I PARTES %s > %s.SAL\r\n' $N "$todo" $N
+    printf 'CASTEL %s.CAS -o B:%s.ASM -I BIB -I PARTES %s > B:%s.SAL\r\n' $N $N "$todo" $N
   done
   i=0
   for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
     i=$((i + 1)); N=$(printf 'E%02d' $i)
     mcopy -i $T/c.img $f ::$N.CAS
     echo "$N $(basename $f .cas)" >> $A/errores.txt
-    printf 'CASTEL %s.CAS -I BIB -I PARTES > %s.SAL\r\n' $N $N
+    printf 'CASTEL %s.CAS -I BIB -I PARTES > B:%s.SAL\r\n' $N $N
   done
   printf 'ECO [castel-fin]\r\n'; } > $T/AUTOEXEC.BAT
 mcopy -o -i $T/c.img $T/AUTOEXEC.BAT ::
 qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
-  -drive file=$T/c.img,format=raw,if=floppy,index=0 -boot a -no-reboot > /dev/null 2>&1 &
+  -drive file=$T/c.img,format=raw,if=floppy,index=0 -drive file=$T/cb.img,format=raw,if=floppy,index=1 \
+  -boot a -no-reboot > /dev/null 2>&1 &
 QPID=$!
 sleep 4
 hecho=0
@@ -476,7 +481,7 @@ mon quit 0.5
 wait $QPID 2>/dev/null
 QPID=
 [ $hecho = 1 ] || ko "CASTEL: el lote de los ejemplos no ha llegado al final"
-mcopy -n -i $T/c.img '::*.ASM' '::*.SAL' $A/sal/ > /dev/null 2>&1
+mcopy -n -i $T/cb.img '::*.ASM' '::*.SAL' $A/sal/ > /dev/null 2>&1
 iguales=0
 distintos=
 for f in $A/ref/*.ASM; do
