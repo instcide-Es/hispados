@@ -1824,12 +1824,19 @@ módulo Expr
         cruda()
     fin
 
+    ; multiplica reg por el tamaño de un elemento: con un desplazamiento si es
+    ; una potencia de 2 (de cualquier tamaño: un elemento de 16 octetos es «shl 4»)
     función escala32(reg: puntero a byte, tam: nat16)
         si tam = 1 entonces devolver fin
-        si tam = 2 o tam = 4 o tam = 8 entonces
+        si tam yb (tam - 1) = 0 entonces
             emrn("shl", reg, doblar32(tam))
         sino
-            em5("imul ", reg, ", ", reg, ", ")
+            ini()
+            l("imul ")
+            l(reg)
+            l(", ")
+            l(reg)
+            l(", ")
             l_nat(tam)
             cruda()
         fin

@@ -3,14 +3,17 @@
 *Fase 5 de CIMIENTOS.md. 18/11/2026. Define cómo Castel genera código de 32 bits
 para el 386 en adelante, en modo protegido con la memoria plana: la base para
 escribir el núcleo de Hispa-Pentium (la gama XP, sin DOS). Lo de 16 bits
-(CASTEL.md) no cambia; esto es un modo nuevo que se pide con `modelo`.*
+(CASTEL.md) no cambia; esto es un modo nuevo que se pide con `modelo`.
+Puesto al día el mismo 18/11 con el **`modelo usuario`** (los programas del anillo 3 de
+Hispa-Pentium), la **biblioteca de 32 bits** (`biblioteca32/`) y el núcleo que ha crecido
+desde la semilla ([../../docs/PENTIUM.md](../../docs/PENTIUM.md)).*
 
 Regla de oro, la de siempre: **el núcleo, pequeño.** Lo que el lenguaje no sabe
 decir se hace en un bloque `ensamblador`, ahora con los registros del 386.
 
 ---
 
-## 1. Dos modelos nuevos
+## 1. Tres modelos nuevos
 
 El programa dice al principio, entre sus declaraciones, de qué modelo es:
 
@@ -35,11 +38,23 @@ módulo Programa
   KERNEL32: escribe con `WriteFile` y acaba con `ExitProcess`. Sirve para escribir
   utilidades de 32 bits antes de tener el núcleo entero. `ejemplos32/hola32.cas` es
   de este modelo.
+- **`modelo usuario`** da un **programa de usuario de Hispa-Pentium** (`USUARIO.BIN`,
+  un binario plano con su cabecera): corre en el **anillo 3**, en su propio espacio
+  de direcciones, a partir de `0x40000000`. Lo carga el núcleo (de los módulos de
+  multiboot) y habla con él por la **llamada al sistema** (`int 0x80`): `escribir`
+  va por ella, y `salir` también. `nucleo32/uhola.cas`, `umalo.cas` y `ucli.cas`
+  son de este modelo.
 
-Los dos comparten **toda la generación de 32 bits** (lo de esta nota); solo
-cambian el arranque (sección 8) y adónde va lo que se escribe. A los dos se les
-llama aquí **«el modelo plano»**. `modelo`, `núcleo` e `hispa32` no son palabras
-reservadas (solo cuentan detrás de `modelo`, al principio del programa).
+```
+módulo Hola
+    modelo usuario        ; un programa del anillo 3 de Hispa-Pentium
+    ...
+```
+
+Los tres comparten **toda la generación de 32 bits** (lo de esta nota); solo
+cambian el arranque (sección 8) y adónde va lo que se escribe. A los tres se les
+llama aquí **«el modelo plano»**. `modelo`, `núcleo`, `hispa32` y `usuario` no son
+palabras reservadas (solo cuentan detrás de `modelo`, al principio del programa).
 
 El modelo lo pone **el programa** (el archivo que se compila); sus módulos se
 compilan como diga él. No se mezcla con `modelo grande` (ese es de 16 bits).
@@ -191,11 +206,11 @@ estructuras y `ensamblador` para las dos instrucciones que faltan (`lidt`,
 
 ---
 
-## 7. La biblioteca mínima de 32 bits
+## 7. La biblioteca de 32 bits
 
-Lo justo para que un programa plano escriba y acabe, dentro del propio compilador
-(no hay módulos aparte todavía): **`escribir`** (números y textos),
-**`escribir_car`** y **`salir`**. Por debajo:
+Dentro del propio compilador va lo justo para que un programa plano escriba y
+acabe: **`escribir`** (números y textos), **`escribir_car`** y **`salir`**. Por
+debajo:
 
 - `castel_salida(ECX octetos desde ESI)` manda el texto adonde toque;
 - `castel_salir(código en AL)` acaba el programa.
@@ -204,11 +219,45 @@ En `modelo núcleo`, `castel_salida` escribe en la **pantalla de texto VGA** (co
 su cursor, subiendo las líneas al llegar abajo) y en el **puerto serie COM1** (a
 115200, 8N1: así `probar32.sh` lo lee); `castel_salir` lo dice por el puerto
 `0xF4` (el `isa-debug-exit` de QEMU) y para el procesador. En `modelo hispa32`,
-`castel_salida` es `WriteFile` y `castel_salir` es `ExitProcess`. Como siempre,
-**solo van al programa las rutinas que se usan**.
+`castel_salida` es `WriteFile` y `castel_salir` es `ExitProcess`. En `modelo
+usuario`, las dos son la llamada al sistema: `int 0x80` con `EAX = 1` (escribir
+`ECX` octetos desde `EBX`) y con `EAX = 2` (acabar con el código de `EBX`). Como
+siempre, **solo van al programa las rutinas que se usan**.
 
-Lo demás (textos, memoria, archivos) se escribirá en Castel cuando haga falta,
-como la biblioteca de 16 bits (CASTEL.md §12), a medida que crezca Hispa-Pentium.
+Lo demás está **escrito en Castel**, en `biblioteca32/` (el compilador la busca
+ahí sola; CASTEL, dentro de Hispa-DOS, con `-I BIB32`). Vale para los tres modelos
+(no toca el sistema: solo memoria):
+
+**`Textos32`** (`textos32.cas`): la de textos de 16 bits (CASTEL.md §12) con los
+largos y las cuentas de 32 bits — `longitud`, `copiar`, `copiar_hasta`,
+`concatenar`, `añadir_car`, `comparar`, `iguales`, `iguales_sin_caja`,
+`empieza_por`, `buscar_car`, `buscar`, `a_mayúsculas`, `mayúscula`, `minúscula`,
+`es_letra`, `es_cifra`, `es_espacio`, `natural_a_texto`, `número_a_texto`,
+`hex_a_texto`, `texto_a_natural`, `texto_a_número` — y dos más para trocear una
+línea de órdenes: `saltar_espacios(t)` y `palabra(t, n, destino, cabe)` (la palabra
+número `n`).
+
+**`Mem32`** (`mem32.cas`): memoria a granel. `llenar(p, n, con)` (de cuatro en
+cuatro si se puede), `llenar32(p, n, con)`, `copiar_memoria(destino, origen, n)`
+(aunque se pisen, como el `memmove` de C), `comparar_memoria(a, b, n)`,
+`todo_igual(p, n, con)` y `redondear(n, a)`.
+
+**`Formato`** (`formato.cas`): escribir con formato, un `printf` sencillo. La
+plantilla lleva marcas: `%d` (entero), `%u` (natural), `%x`/`%X` (hexadecimal),
+`%s` (texto), `%c` (letra) y `%%`; con ancho (`%8u`), con ceros (`%08X`) o a la
+izquierda (`%-10s`). Castel no tiene funciones con un número variable de
+argumentos: los datos van en un arreglo de `nat32` (un texto, como `nat32(t)`):
+
+```
+importar Formato
+...
+imprimir2("fallo de página en 0x%08X (%s)\n", dir, nat32("escritura"))
+n := formatear(línea, 80, "%5u marcos libres", datos)      ; datos: arreglo de nat32
+```
+
+`formatear(destino, cabe, plantilla, datos)` lo deja en un texto (corta lo que no
+cabe); `imprimir(plantilla, datos)` lo escribe; `imprimir1` a `imprimir4`, con uno
+a cuatro datos sueltos. `ejemplos32/biblio32.cas` prueba las tres.
 
 ---
 
@@ -230,6 +279,17 @@ compilador según el modelo.
   multiboot dice dónde empieza y acaba). Es lo más barato y es lo que arranca en
   QEMU con una orden.
 
+### `modelo usuario` → un programa del anillo 3 (`org 0x40000000`)
+
+- Delante, una **cabecera** (detrás del salto del principio): la magia `HPU3`
+  (`0x33555048`), dónde va (`0x40000000`), dónde acaba lo que hay en el archivo
+  (`_datos_fin`), dónde acaba lo que empieza a cero (`_vacio_fin`) y por dónde se
+  empieza (`C_arranque`). Con eso el núcleo sabe cuántas páginas ponerle y qué
+  copiar en ellas (`nucleo32/usuario.cas`).
+- El arranque pone la pila (la suya, de 16 K, dentro de lo que empieza a cero),
+  borra sus variables y llama a `principal()`; al volver, `castel_salir`, que es la
+  llamada al sistema de acabar.
+
 ### `modelo hispa32` → un programa Win32 de consola (PE, `ImageBase 0x400000`)
 
 - Las **cabeceras PE a mano** (MZ + PE + una sección en `0x401000`) y la tabla de
@@ -247,32 +307,41 @@ falta enlazar con otras cosas; de momento no hace falta.
 
 ## 9. Probar y comprobar
 
-- `compilar.sh` reconoce los dos modelos y saca `NOMBRE.BIN` (núcleo) o
+- `compilar.sh` reconoce los tres modelos y saca `NOMBRE.BIN` (núcleo o usuario) o
   `NOMBRE.EXE` (hispa32).
 - **`probar32.sh PROGRAMA`** lo ejecuta y enseña lo que escribe y su código de
   salida: un núcleo con `qemu-system-i386 -kernel` (la salida por el puerto
   serie); un `.EXE` con HW32 dentro de Hispa-DOS.
-- **`nucleo32/probar.sh`** arranca la semilla y le teclea órdenes (por el monitor
-  de QEMU, como un teclado de verdad): sirve para ver el reloj, el teclado y las
-  excepciones.
+- **`nucleo32/probar.sh`** arranca el núcleo de Hispa-Pentium y le teclea órdenes
+  (por el monitor de QEMU, como un teclado de verdad), con los programas de
+  usuario como módulos de multiboot (`-initrd`): sirve para ver el reloj, el
+  teclado, las excepciones, la memoria, las tareas y el anillo 3.
 - `pruebas.sh` (parte 8) comprueba: los ejemplos de 16 bits sin DOS, compilados
   como núcleos de 32 bits, escriben lo mismo; los de `ejemplos32/` (núcleos en
   QEMU y programas Hispa32 con HW32) dan su salida esperada y su código; cuentas
-  al azar con las reglas de 32 bits (`azar32.py ... plano`); y la semilla, con su
-  IDT, su reloj, su teclado y su excepción de división por cero. Y, como siempre,
+  al azar con las reglas de 32 bits (`azar32.py ... plano`); y el núcleo de
+  Hispa-Pentium, con su IDT, su reloj, su teclado, sus excepciones, la paginación y
+  el fallo de página, el montón, las tareas y los programas del anillo 3
+  (`SOLO=32 ./pruebas.sh` hace solo esto y los errores). Y, como siempre,
   **los dos compiladores** (`ccastel.py` y CASTEL, el escrito en Castel) sacan el
   **mismo** ensamblador también para los programas de 32 bits, y **ENSAMBLA** da
   el **mismo archivo que NASM** para ellos (las instrucciones del 386: prefijos
-  de tamaño `66h`, SIB, `0F`, saltos largos...).
+  de tamaño `66h`, SIB, `0F`, saltos largos, `ltr`, los registros de control...).
 
 ---
 
 ## 10. Lo que queda para más adelante
 
-- **Más biblioteca de 32 bits** escrita en Castel (textos, memoria, un montón),
-  a medida que crezca Hispa-Pentium.
-- **Paginación** (la MMU del 386) y el salto a modo usuario: cuando el núcleo lo
-  necesite.
+- (La **biblioteca de 32 bits**, la **paginación** y el **modo usuario** ya están:
+  ver la sección 7 y [PENTIUM.md](../../docs/PENTIUM.md).)
+- **Llamar a una función por su dirección** (un tipo «función»): hoy, para que una
+  tarea empiece en una función, se da `nat32(dirección(f))` y se arma su pila a
+  mano; para las tablas de rutinas de un núcleo hará falta llamarlas desde Castel.
+- **Sumar a un arreglo** (`tabla + 4`, como con un puntero): hoy hay que escribir
+  `dirección(tabla[4])`.
+- **Funciones de interrupción públicas** (`público interrupción función`): hoy cada
+  módulo pone en la IDT las suyas.
 - **ELF32** de salida, si algún día hay que enlazar con código de fuera.
-- **El núcleo de Hispa-Pentium de verdad**: la semilla (`nucleo32/semilla.cas`)
-  es el primer ladrillo; a partir de aquí, todo en Castel.
+- **El núcleo de Hispa-Pentium**: ha crecido desde la semilla (PENTIUM.md); lo
+  siguiente, un sistema de archivos, más llamadas al sistema y cargar programas
+  del disco.

@@ -379,7 +379,7 @@ cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
 # de Hispa-Pentium y unas cuentas al azar (CASTEL32.md)
 cp $AQUI/ensamblador/formas32.asm $T/ens/formas32.asm
 python3 -I $AQUI/azar32.py 9 150 $T/ens/az32p.cas $T/ens/az32p.esp plano
-for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/u*.cas $T/ens/az32p.cas; do
+for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $T/ens/az32p.cas; do
   python3 -I $AQUI/ccastel.py $f -o $T/ens/$(basename $f .cas).asm > /dev/null 2>&1 || ko "$(basename $f) no compila"
 done
 rm -f $T/ens/az32p.cas $T/ens/az32p.esp
@@ -461,7 +461,7 @@ mformat -C -f 1440 -i $T/cb.img ::
   python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
   python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
   for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas \
-           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/u*.cas $A/azar32p.cas; do
+           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $A/azar32p.cas; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
     mcopy -o -i $T/c.img $f ::$N.CAS
