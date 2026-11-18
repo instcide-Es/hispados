@@ -28,6 +28,12 @@ HISPA32 = (('WINCALC.EXE', 'CALC32.EXE'), ('WINHOLA.EXE', 'HOLA32.EXE'),
            ('WINGUI.EXE', 'AVISO32.EXE'))
 # y lo que la edición pone en \HISPADOS (en sistema/486/, en UTF-8)
 SIS486 = ('EDICION.INI', 'VENTANAS.INI', 'CENTRO.INI')
+# [HISPA-486] el Navegador (docs/486/NAVEGADOR.md), en \HISPADOS\INTERNET: lo
+# del disquete «Internet» (make internet) menos HW32.COM, que ya está en
+# \HISPADOS. Hispa Ventanas crea solo el grupo «Internet» si lo encuentra ahí
+# (y la plantilla sistema/486/CENTRO.INI ya lo trae)
+INTERNET = ('NAVEGA.EXE', 'HTTPS.EXE', 'HSPTLS.DLL', 'WSOCK32.DLL', 'MSVCRT.DLL')
+INTERNET_TXT = ('w32/navega/NAVEGA.INI', 'w32/navega/LEEME.TXT')
 SIZE_MB = int(os.environ.get('USB_MB', '512'))   # Carlos 14/11: 512 MB (el .zip apenas crece)
 START = 2048
 HEADS, SPT = 255, 63
@@ -53,15 +59,29 @@ def dos(txt):
 
 def autoexec486(txt, letra):
     """[HISPA-486] El AUTOEXEC.BAT de Hispa-486: el de Hispa-386 y, en el
-    arranque normal, el escritorio (Hispa Ventanas, que con la clave de
-    VENTANAS.INI sale con la barra de tareas y el menú Inicio)."""
-    ancla = 'REM %s:\\HISPADOS\\HSPRED /AUTO\n' % letra
-    if txt.count(ancla) != 1:
-        sys.exit('mkusb: el AUTOEXEC.BAT no tiene la línea «%s»: no sé dónde '
-                 'poner Hispa Ventanas' % ancla.strip())
-    return txt.replace(ancla, ancla +
-        'REM [Hispa-486] El escritorio, con la barra de tareas y el menú Inicio\n'
-        '%s:\\HISPADOS\\VENTANAS\n' % letra)
+    arranque normal, la red puesta sola (el cable si lo hay y, si no, el
+    Wi-Fi con la red guardada) y el escritorio (Hispa Ventanas, que con la
+    clave de VENTANAS.INI sale con la barra de tareas y el menú Inicio). Los
+    comentarios de Hispa-386 sobre la red (que dicen cómo ponerla a mano) se
+    cambian por los de Hispa-486."""
+    d = '%s:\\HISPADOS\\' % letra
+    # de «REM Red por cable: el controlador...» a la línea con REM de HSPRED
+    # y, si están (la imagen USB), las del Wi-Fi con REM
+    red = re.compile(r'REM Red por cable: el controlador \(HSPRED\).*?\nREM ' + re.escape(d) +
+                     r'HSPRED /AUTO\n(REM Wi-Fi .*?\nREM ' + re.escape(d) + r'WIFI /AUTO\n)?', re.S)
+    if len(red.findall(txt)) != 1:
+        sys.exit('mkusb: el AUTOEXEC.BAT no tiene la línea «REM %sHSPRED /AUTO» con sus '
+                 'comentarios: no sé dónde poner la red y Hispa Ventanas' % d)
+    nuevo = ('REM [Hispa-486] La red, sola: el cable si hay tarjeta (sin ella, HSPRED\n'
+             'REM /AUTO sale sin ocupar memoria) y, si no hay cable, el Wi-Fi (tarjetas\n'
+             'REM Broadcom BCM43224/43225) con la red guardada en RED.INI. HSPWIFI /AUTO\n'
+             'REM solo se queda si hay tarjeta Wi-Fi y red guardada, y si la tarjeta de\n'
+             'REM cable no tiene enlace la descarga. La red se elige una vez, a mano:\n'
+             'REM HSPWIFI, WIFI REDES y WIFI CONECTAR (docs/WIFI.md).\n'
+             '%sHSPRED /AUTO\n%sHSPWIFI /AUTO\n%sWIFI /AUTO\n'
+             'REM [Hispa-486] El escritorio, con la barra de tareas y el menú Inicio\n'
+             '%sVENTANAS\n' % (d, d, d, d))
+    return red.sub(lambda m: nuevo, txt)
 
 def centro486(en_imagen):
     """[HISPA-486] sistema/486/CENTRO.INI para una imagen que lleva los
@@ -211,6 +231,15 @@ def main(edicion='386'):
         md('HISPA32')
         for src, dst in HISPA32:
             cp(os.path.join(B, src), 'HISPA32/' + dst)
+        md('HISPADOS/INTERNET')
+        for f in INTERNET:
+            cp(os.path.join(B, f), 'HISPADOS/INTERNET/' + f)
+        for src in INTERNET_TXT:
+            f = os.path.basename(src)
+            dst = os.path.join(dusb, f)
+            with open(dst, 'wb') as o:
+                o.write(dos(open(src, encoding='utf-8').read()))
+            cp(dst, 'HISPADOS/INTERNET/' + f)
         for f, txt in sis486(en_imagen):
             dst = os.path.join(dusb, f)
             with open(dst, 'wb') as o:

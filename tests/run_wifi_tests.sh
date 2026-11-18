@@ -164,5 +164,36 @@ check junto "HSPWIFI descargado."
 check junto "HSPRED descargado."
 check junto "fin-de-la-prueba"
 
+echo "== Wi-Fi en QEMU: HSPWIFI /AUTO (el AUTOEXEC.BAT de Hispa-486: cable primero) =="
+# sin red guardada calla; sin tarjeta (sin /SIMULA, QEMU no tiene Broadcom)
+# calla; con HSPRED con enlace calla y se queda el cable; con el cable
+# quitado (set_link off), descarga HSPRED y se carga el Wi-Fi
+mkimg auto HSPWIFI.BIN "$XMS"
+rm -f $T/amon
+{ sleep 7
+  for c in '4|HSPWIFI /AUTO /SIMULA' '1|ECHO =A1=' '2|WIFI' \
+           '6|HSPWIFI /SIMULA' '9|WIFI CONECTAR HispaPrueba clave de prueba' '3|HSPWIFI /U' \
+           '6|HSPWIFI /AUTO' '1|ECHO =A2=' '2|WIFI' \
+           '4|HSPRED /AUTO' '4|HSPWIFI /AUTO /SIMULA' '1|ECHO =A3=' '2|WIFI' '3|PING 10.0.2.2 /N:1' \
+           'L|' '9|HSPWIFI /AUTO /SIMULA' '9|WIFI /AUTO' '6|CONFRED' '3|HSPRED /U' '3|HSPWIFI /U' '2|ECHO fin-de-la-prueba'; do
+    if [ "${c%%|*}" = L ]; then printf 'set_link n0 off\n' | socat - UNIX-CONNECT:$T/amon > /dev/null 2>&1; sleep 1; continue; fi
+    printf '%s\r' "${c#*|}"; sleep "${c%%|*}"
+  done
+} | timeout 120 qemu-system-i386 -display none -serial stdio -monitor unix:$T/amon,server,nowait -parallel none \
+      -m 32 -drive file=$T/auto.img,format=raw,if=floppy -boot a -no-reboot \
+      -netdev user,id=n0 -device e1000,netdev=n0 > $T/auto.raw 2>&1
+tr -d '\r' < $T/auto.raw | iconv -f CP437 -t UTF-8 -c > $T/auto.txt
+sed -n '/HSPWIFI \/AUTO \/SIMULA/,/=A1=/p' $T/auto.txt | head -3 > $T/auto1.txt
+if grep -q "HSPWIFI 0.1" $T/auto1.txt; then ko "/AUTO sin red guardada: tenía que callar"; else ok "/AUTO sin red guardada: calla"; fi
+sed -n '/^.*>HSPWIFI \/AUTO$/,/=A2=/p' $T/auto.txt > $T/auto2.txt
+if grep -q "HSPWIFI 0.1" $T/auto2.txt; then ko "/AUTO sin tarjeta: tenía que callar"; else ok "/AUTO sin tarjeta Wi-Fi: calla"; fi
+sed -n '/HSPRED \/AUTO/,/=A3=/p' $T/auto.txt > $T/auto3.txt
+if grep -q "HSPWIFI 0.1" $T/auto3.txt; then ko "/AUTO con cable: tenía que callar"; else ok "/AUTO con HSPRED y enlace: calla y se queda el cable"; fi
+check auto "La red por cable no tiene enlace (sin cable): HSPRED descargado."
+check auto "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, packet driver en INT 60h"
+check auto "  Dirección IP  . . . . : 192.168.77.10"
+check auto "HSPWIFI descargado."
+check auto "fin-de-la-prueba"
+
 if [ $fail -eq 0 ]; then echo "Wi-Fi: todas las pruebas pasan"; else echo "Wi-Fi: HAY FALLOS"; fi
 exit $fail

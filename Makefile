@@ -752,11 +752,12 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSD
 # «Hispa-486» (build/hispa486-disquete.img, el último de la instalación desde
 # disquetes): lo de Hispa-386 más el escritorio de Hispa-486 (la clave de
 # VENTANAS.INI y el AUTOEXEC.BAT que lo arranca), el Centro de programas con
-# el grupo «Hispa32», la edición (EDICION.INI) y los programas de 32 bits de
-# ejemplo en \HISPA32. Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
+# el grupo «Hispa32», la edición (EDICION.INI), los programas de 32 bits de
+# ejemplo en \HISPA32, el Navegador en \HISPADOS\INTERNET (lo del disquete
+# «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
 H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(H32EXE) $(wildcard usb/* floppy/* sistema/486/*)
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [HISPA-486] los paquetes de ACTUALIZAR (docs/RED.md, «Formato del paquete

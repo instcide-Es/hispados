@@ -1348,6 +1348,7 @@ apply_update:
         call make_dir
         call copy_set
         call copia_h32              ; [HISPA-486] y \HISPA32, si el paquete la trae
+        call copia_inet             ; [INTERNET] y \HISPADOS\INTERNET (el Navegador), si lo trae
         mov byte [keepdata], 0
         mov byte [fix], 0
         mov si, s_kernel
@@ -1385,6 +1386,28 @@ copia_h32:
         jz .r
         mov si, s_h32
         mov di, s_h32dir
+        call make_dir
+        call copy_set
+.r:
+        ret
+
+; [INTERNET] \HISPADOS\INTERNET del paquete (el Navegador de Hispa-486), si
+; lo trae; su NAVEGA.INI, si el disco ya lo tiene, se conserva (keepdata)
+copia_inet:
+        mov al, [boot_letter]
+        mov [in_ruta], al
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        mov dx, in_ruta
+        mov cx, 0x10
+        mov ah, 0x4E
+        int 0x21
+        jc .r
+        test byte [dta+0x15], 0x10
+        jz .r
+        mov si, s_in
+        mov di, s_indir
         call make_dir
         call copy_set
 .r:
@@ -2504,6 +2527,9 @@ edi_ruta    db "A:\HISPADOS\EDICION.INI", 0
 h32_ruta    db "A:\ACTUALIZA\HISPA32", 0
 s_h32dir    db "\HISPA32\", 0
 s_h32       db "\HISPA32\*.*", 0
+in_ruta     db "A:\ACTUALIZA\HISPADOS\INTERNET", 0
+s_indir     db "\HISPADOS\INTERNET\", 0
+s_in        db "\HISPADOS\INTERNET\*.*", 0
 m_ed486     db " (Hispa-486)", 0
 s_https     db "HTTPS://", 0
 s_http      db "HTTP://", 0

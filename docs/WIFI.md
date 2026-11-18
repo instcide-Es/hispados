@@ -58,7 +58,8 @@ C:\>CONFRED
 
 | Orden | Para qué |
 |---|---|
-| `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO]` | El controlador. `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del packet driver. `/JUNTO`: cargarse al lado de `HSPRED` (para depurar el Wi-Fi por la consola remota de la red por cable: las órdenes de red siguen yendo por el cable y `HSPWIFI` deja `INT 2Fh AH=DAh` a `HSPRED`). `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
+| `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO]` | El controlador. Si `HSPRED` está cargado sin enlace (sin cable), lo descarga y sigue; con enlace no se carga (salvo `/JUNTO`). `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del packet driver. `/JUNTO`: cargarse al lado de `HSPRED` (para depurar el Wi-Fi por la consola remota de la red por cable: las órdenes de red siguen yendo por el cable y `HSPWIFI` deja `INT 2Fh AH=DAh` a `HSPRED`). `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
+| `HSPWIFI /AUTO` | Para el `AUTOEXEC.BAT` (el de Hispa-486 la lleva: docs/486/HISPA-486.md, «La red al arrancar»). Solo se carga si hay una red guardada en `RED.INI` (`WIFI=`), una tarjeta admitida en el PCI (lo pregunta a la BIOS, sin cargar el núcleo) y no hay red por cable con enlace; si no, sale en silencio con nivel de error 1. Si `HSPRED` está cargado y su tarjeta no tiene enlace (3 segundos de espera), lo descarga y se carga; con enlace, o si no se sabe, se queda el cable. |
 | `WIFI` | Cómo está la conexión: red, canal, señal, punto de acceso, paquetes, velocidad y, si no hay conexión, por qué. |
 | `WIFI REDES` | Busca (unos 2 segundos) y enseña las redes, con su señal y su seguridad. |
 | `WIFI CONECTAR red [clave]` | Conecta. «red» es el nombre (entre comillas si lleva espacios) o su número en la lista de `WIFI REDES` (lo más cómodo si el nombre lleva eñes o símbolos). Si la red pide contraseña y no se da, la pregunta **sin enseñarla** (asteriscos). Al conectar la guarda en `RED.INI`. |
@@ -287,7 +288,7 @@ tiene).
 - **No funciona con HSPEMM** (modo V86): el residente tiene que pasar a modo
   protegido por su cuenta. Lo dice y no se carga. Con HSPDPMI (Hispa
   Ventanas, programas de Windows) sí: probado en QEMU.
-- **No a la vez que HSPRED**: cable y Wi-Fi a la vez, no (con `/JUNTO` se
+- **No a la vez que HSPRED**: cable y Wi-Fi a la vez, no (`HSPWIFI` descarga `HSPRED` si su tarjeta no tiene enlace; con `/JUNTO` se
   cargan los dos, pero la red va solo por el cable: es para depurar).
 - Sin interrupción: entre tic y tic (55 ms) la tarjeta guarda hasta 256
   tramas, pero la respuesta de un programa que no consulte el teclado espera

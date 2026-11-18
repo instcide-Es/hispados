@@ -32,6 +32,10 @@
 ;  (los nuevos traen el escritorio de Hispa-486 y el grupo «Hispa32»); un
 ;  Hispa-486 no se actualiza con un origen de Hispa-386 (sí con [N]). Desde
 ;  disquetes, al final se ofrece el disquete «Hispa-486» (docs/486/HISPA-486.md).
+;  [INTERNET] El Navegador, en \HISPADOS\INTERNET: se copia si el origen lo
+;  trae (la memoria USB de Hispa-486); desde disquetes, si el disco ha quedado
+;  de Hispa-486, se ofrece después el disquete «Internet» (sus archivos van a
+;  \HISPADOS\INTERNET). Al actualizar se conserva su NAVEGA.INI.
 ;  Último paso, la comprobación del sonido: AUDICION /RAPIDA (la versión
 ;  corta de la prueba de sonido) guarda lo que suena en el SONIDO.INI del
 ;  disco instalado (unidad:\HISPADOS\SONIDO.INI, con su informe SONIDO.TXT
@@ -263,6 +267,7 @@ start:
         call make_dir
         call copy_set
         call copia_h32              ; [HISPA-486] y \HISPA32, si la trae
+        call copia_inet             ; [INTERNET] y \HISPADOS\INTERNET, si lo trae
         mov byte [keepdata], 0
         ; AUTOEXEC.BAT y CONFIG.SYS
         cmp byte [updmode], 0
@@ -368,6 +373,7 @@ start:
         call instal2                ; [0.9.24] el disquete «Instalación 2», si hace falta
         call oficina                ; [0.9.22] el disquete «Oficina», si hace falta
         call disq486                ; [HISPA-486] y el disquete «Hispa-486», si se quiere
+        call disqinet               ; [INTERNET] y, en Hispa-486, el disquete «Internet»
         cmp byte [updmode], 0
         jne .end_upd
         mov si, msg_boot
@@ -692,6 +698,114 @@ copia_h32:
 .r:
         ret
 
+; [INTERNET] \HISPADOS\INTERNET (el Navegador), si el origen lo trae
+copia_inet:
+        mov al, [src]
+        mov [in_ruta], al
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        mov dx, in_ruta
+        mov cx, 0x10
+        mov ah, 0x4E
+        int 0x21
+        jc .r
+        test byte [dta+0x15], 0x10
+        jz .r
+        mov si, s_in
+        mov di, s_indir
+        call make_dir
+        call copy_set
+.r:
+        ret
+
+; [INTERNET] Instalando desde disquetes un Hispa-486 (el disco tiene ya
+; EDICION.INI), se ofrece al final el disquete «Internet» (make internet: el
+; Navegador y sus DLL, en la raíz): sus programas, DLL, NAVEGA.INI y
+; LEEME.TXT van a \HISPADOS\INTERNET (HW32.COM ya está en \HISPADOS). Hispa
+; Ventanas tiene ya su acceso en el grupo «Internet» de CENTRO.INI.
+disqinet:
+        mov al, [src]
+        and al, 0xDF
+        cmp al, 'B'
+        ja .r
+        mov [in_ruta], al           ; ¿el origen ya lo trae?
+        mov dx, in_ruta
+        call existe_dir
+        jnc .r
+        mov al, [dst]               ; ¿el disco ha quedado de Hispa-486?
+        mov [ed_ruta], al
+        mov dx, ed_ruta
+        call existe
+        jc .r
+        mov al, [src]
+        mov [di_ruta], al
+.pregunta:
+        mov si, msg_di_preg
+        call puts
+        call ask_yes
+        jc .r
+        mov dx, di_ruta             ; ¿es el disquete «Internet»?
+        call existe
+        jnc .es
+        mov si, msg_di_no
+        call puts
+        jmp .pregunta
+.es:
+        mov word [ncopied], 0
+        mov word [nfailed], 0
+        mov byte [keep], 0
+        mov byte [fix], 0
+        mov al, [updmode]           ; al actualizar, su NAVEGA.INI se conserva
+        mov [keepdata], al
+        mov di, s_indir
+        call make_dir
+        mov si, s_di_exe
+        call copy_set
+        mov si, s_di_dll
+        call copy_set
+        mov si, s_di_ini
+        call copy_set
+        mov si, s_di_txt
+        call copy_set
+        mov byte [keepdata], 0
+        mov si, msg_di_hecho
+        call puts
+        movzx eax, word [ncopied]
+        call putnum
+        mov si, msg_of_hecho2
+        call puts
+        cmp word [nfailed], 0
+        je .vuelta
+        mov si, msg_of_fallo
+        call puts
+.vuelta:
+        mov si, msg_of_vuelve       ; (el intérprete vuelve a leerse del disquete)
+        call puts
+        mov ah, 0x08
+        int 0x21
+        mov si, msg_crlf
+        jmp puts
+.r:
+        ret
+
+; DX = ruta -> CF=0 si es una carpeta que existe
+existe_dir:
+        push dx
+        mov dx, dta
+        mov ah, 0x1A
+        int 0x21
+        pop dx
+        mov cx, 0x10
+        mov ah, 0x4E
+        int 0x21
+        jc .r
+        test byte [dta+0x15], 0x10
+        jnz .r
+        stc
+.r:
+        ret
+
 ; AUTOEXEC.BAT (SI, DI y las señales ya puestas): copy_set, y apuntar si se ha
 ; puesto el del sistema (el disquete «Hispa-486» lo cambia entonces por el suyo)
 copia_auto:
@@ -998,6 +1112,14 @@ s_hpdir     db "\HISPADOS\PROGS\", 0
 s_hspp      db "\HISPADOS\PROGS\*.*", 0
 s_h32dir    db "\HISPA32\", 0
 s_h32       db "\HISPA32\*.*", 0
+in_ruta     db "C:\HISPADOS\INTERNET", 0
+s_indir     db "\HISPADOS\INTERNET\", 0
+s_in        db "\HISPADOS\INTERNET\*.*", 0
+di_ruta     db "A:\NAVEGA.EXE", 0
+s_di_exe    db "\*.EXE", 0
+s_di_dll    db "\*.DLL", 0
+s_di_ini    db "\*.INI", 0
+s_di_txt    db "\*.TXT", 0
 s_autoexec  db "\AUTOEXEC.BAT", 0
 s_config    db "\CONFIG.SYS", 0
 s_leeme     db "\LEEME.TXT", 0
@@ -1049,6 +1171,11 @@ msg_d4_preg db 13, 10, "Hispa-486 (el escritorio con el men", 0xA3, " Inicio y l
             db "de arranque y escriba S (N para quedarse con Hispa-386): ", 0
 msg_d4_no   db "Ese no es el disquete ", 0xAE, "Hispa-486", 0xAF, ".", 13, 10, 0
 msg_d4_hecho db "Hispa-486: ", 0
+msg_di_preg db 13, 10, "El Navegador (para entrar en p", 0xA0, "ginas web, como la biblioteca de ClicGest)", 13, 10
+            db "va en el disquete ", 0xAE, "Internet", 0xAF, ". Si lo tiene, p", 0xA2, "ngalo en la unidad de", 13, 10
+            db "arranque y escriba S (N para terminar sin ", 0x82, "l; se puede copiar despu", 0x82, "s): ", 0
+msg_di_no   db "Ese no es el disquete ", 0xAE, "Internet", 0xAF, ".", 13, 10, 0
+msg_di_hecho db "Internet: ", 0
 msg_ed_baja db 13, 10, "Esa unidad tiene Hispa-486 y este origen es de Hispa-386: para", 13, 10
             db "actualizarla, arranque con la memoria USB de Hispa-486 (o use sus", 13, 10
             db "disquetes). Con [N] se puede poner Hispa-386 de nuevo (se borra todo).", 13, 10, 0

@@ -22,8 +22,15 @@
 #     no mira la sección de Hispa-386 (gama sin poner), recomienda la de
 #     «gama=486» y la instala, con su \HISPA32.
 #  8) Instalar desde disquetes: el de arranque, «Instalación 2», «Oficina»
-#     (aquí, no) y al final «Hispa-486» (sí): el disco queda de Hispa-486,
-#     con el AUTOEXEC.BAT que arranca el escritorio.
+#     (aquí, no), «Hispa-486» (sí) y al final «Internet» (sí): el disco queda
+#     de Hispa-486, con el AUTOEXEC.BAT que arranca el escritorio y la red, y
+#     el Navegador en \HISPADOS\INTERNET.
+#  9) La red al arrancar (QEMU con una e1000): HSPRED /AUTO se queda,
+#     HSPWIFI /AUTO no (no hay tarjeta Wi-Fi ni red guardada) y no dice nada;
+#     Inicio › Internet › Navegador abre una página del servidor de pruebas
+#     (tests/tools/nav_servidor.py, por HTTP: sin Internet) y después CONFRED
+#     dice la dirección que dio el DHCP. La 3.ª arranca sin tarjeta de red:
+#     sin errores. La 1.ª y la 2.ª miran también la red y \HISPADOS\INTERNET.
 #  (GUARDAR=carpeta deja las capturas.)
 #  uso: run_imagen486_tests.sh [hispa486-usb.img] [hispados-usb.img]
 # Hispa-486 USB image, hard disk install and update tests.
@@ -34,6 +41,7 @@ USB386=${2:-build/hispados-usb.img}
 FLOPPY=${FLOPPY:-build/hispados.img}               # los disquetes de la 8.ª
 IN2=${INSTAL2:-build/hispados-instal2.img}
 D486=${DISQ486:-build/hispa486-disquete.img}
+DINET=${INTERNET:-build/internet.img}
 # sin imagen dada, la de ahora (make usb486; sin gcc de 32 bits no se puede)
 if [ $# -eq 0 ] && [ -z "${ACT_NS:-}" ]; then
   make -s usb486 > /dev/null 2>&1 || { echo "== Hispa-486: la imagen USB: sin gcc de 32 bits (make usb486), se salta =="; exit 0; }
@@ -118,6 +126,8 @@ chk $T/a6.ppm titulo 48 52 activa "Hola desde Win32" texto 60 87 16 231 fina "¡
 check $T/l1.txt "Hispa Ventanas ha terminado."
 if sed -n '/Hispa Ventanas ha terminado/,$p' $T/l1.txt | grep -qF 'TRAS-SALIR'; then ok "después, el intérprete de órdenes"; else ko "sin el intérprete tras salir"; fi
 check $T/l1.txt "Para instalarlo en el disco duro escriba INSTALL"
+checkn $T/l1.txt "HSPWIFI"                 # sin tarjeta Wi-Fi ni red guardada: calla
+chk $T/a2.ppm busca 0 0 260 572 0 8 "Internet"
 [ -n "${GUARDAR:-}" ] && for f in $T/a[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null
 
 # ------------------------------------------------------------------ 2
@@ -135,9 +145,15 @@ check $T/l2.txt "Hispa-DOS instalado en la unidad D:"
 check $T/l2.txt "Hispa-DOS esta instalado."
 checkn $T/l2.txt "Hispa-486 (el escritorio con el menú Inicio"     # (el disquete: aquí no)
 for f in HISPA32/CALC32.EXE HISPA32/HOLA32.EXE HISPA32/CTL32.EXE HISPA32/MENU32.EXE HISPA32/AVISO32.EXE \
-         HISPADOS/EDICION.INI HISPADOS/VENTANAS.INI HISPADOS/CENTRO.INI HISPADOS/HW32.COM HISPADOS/MSVCRT.DLL; do
+         HISPADOS/EDICION.INI HISPADOS/VENTANAS.INI HISPADOS/CENTRO.INI HISPADOS/HW32.COM HISPADOS/MSVCRT.DLL \
+         HISPADOS/INTERNET/NAVEGA.EXE HISPADOS/INTERNET/HTTPS.EXE HISPADOS/INTERNET/HSPTLS.DLL \
+         HISPADOS/INTERNET/WSOCK32.DLL HISPADOS/INTERNET/MSVCRT.DLL HISPADOS/INTERNET/NAVEGA.INI \
+         HISPADOS/INTERNET/LEEME.TXT HISPADOS/HSPRED.COM HISPADOS/HSPWIFI.COM HISPADOS/HSPWIFI.BIN \
+         HISPADOS/WIFI.COM HISPADOS/BCM43XX.FW HISPADOS/BCM43XXH.FW HISPADOS/BCM43XX.TXT; do
   hdtiene $f
 done
+hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -qx 'Favorito=ClicGest: la biblioteca|https://clicgest.es/biblioteca' \
+  && ok "NAVEGA.INI: el favorito de la biblioteca" || ko "NAVEGA.INI sin el favorito de la biblioteca"
 hd ::HISPADOS/EDICION.INI > $T/edi.txt
 grep -qx 'Gama=486' $T/edi.txt && ok "EDICION.INI: Gama=486" || ko "EDICION.INI sin Gama=486"
 hd ::HISPADOS/VENTANAS.INI > $T/ven.txt
@@ -145,8 +161,17 @@ grep -qx 'Escritorio=486' $T/ven.txt && ok "VENTANAS.INI: Escritorio=486" || ko 
 hd ::HISPADOS/CENTRO.INI > $T/cen.txt
 grep -qx 'Nombre=Hispa32' $T/cen.txt && ok "CENTRO.INI: el grupo «Hispa32»" || ko "CENTRO.INI sin el grupo Hispa32"
 grep -qx 'Programa=C:\\HISPA32\\CALC32.EXE' $T/cen.txt && ok "CENTRO.INI: la calculadora, en C:\\HISPA32" || ko "CENTRO.INI sin CALC32.EXE"
+grep -qx 'Nombre=Internet' $T/cen.txt && grep -qx 'Programa=C:\\HISPADOS\\INTERNET\\NAVEGA.EXE' $T/cen.txt \
+  && ok "CENTRO.INI: el grupo «Internet» con el Navegador" || ko "CENTRO.INI sin el grupo Internet"
 hd ::AUTOEXEC.BAT > $T/aut.txt
 grep -qx 'C:\\HISPADOS\\VENTANAS' $T/aut.txt && ok "AUTOEXEC.BAT: arranca el escritorio" || ko "AUTOEXEC.BAT sin C:\\HISPADOS\\VENTANAS"
+red_auto() {   # red_auto archivo: las tres líneas de la red, en orden y antes del escritorio
+  if grep -x -e 'C:\\HISPADOS\\HSPRED /AUTO' -e 'C:\\HISPADOS\\HSPWIFI /AUTO' -e 'C:\\HISPADOS\\WIFI /AUTO' \
+       -e 'C:\\HISPADOS\\VENTANAS' $1 | tr '\n' '|' | grep -qx 'C:\\HISPADOS\\HSPRED /AUTO|C:\\HISPADOS\\HSPWIFI /AUTO|C:\\HISPADOS\\WIFI /AUTO|C:\\HISPADOS\\VENTANAS|'; then
+    ok "AUTOEXEC.BAT: HSPRED /AUTO, HSPWIFI /AUTO y WIFI /AUTO antes del escritorio"
+  else ko "AUTOEXEC.BAT sin la red puesta sola"; fi
+}
+red_auto $T/aut.txt
 if grep -qi "[ABD]:\\\\" $T/aut.txt; then ko "AUTOEXEC.BAT con otra letra que C:"; else ok "AUTOEXEC.BAT: solo C:"; fi
 cp $T/hdd.img $T/hdd486.img
 
@@ -156,11 +181,14 @@ cp $T/hdd.img $T/hdd486.img
   tecla esc; sleep 0.8
   salir
   send 'VER' 2
-  mon quit; } | maquina 3 90 -drive file=$T/hdd.img,format=raw,if=ide -boot c
-echo "-- 3) el disco duro arranca a su escritorio de Hispa-486 --"
+  mon quit; } | maquina 3 90 -drive file=$T/hdd.img,format=raw,if=ide -boot c -nic none
+echo "-- 3) el disco duro arranca a su escritorio de Hispa-486 (sin tarjeta de red: sin errores) --"
 chk $T/h1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" texto 26 578 8 4 negrita "Inicio" \
   nopx 400 10 1 "sin barra arriba"
-chk $T/h2.ppm busca 0 0 260 572 0 8 "Hispa32" busca 0 0 260 572 9 12 "Principal"
+chk $T/h2.ppm busca 0 0 260 572 0 8 "Hispa32" busca 0 0 260 572 9 12 "Principal" busca 0 0 260 572 0 8 "Internet"
+checkn $T/l3.txt "HSPRED"
+checkn $T/l3.txt "HSPWIFI"
+checkn $T/l3.txt "Wi-Fi"                   # (HSPSND sí avisa de la tarjeta de sonido, como siempre)
 check $T/l3.txt "Hispa Ventanas ha terminado."
 check $T/l3.txt "Hispa-DOS versión 0.9.25"
 [ -n "${GUARDAR:-}" ] && for f in $T/h[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null
@@ -239,6 +267,9 @@ mkdir -p $T/www $T/p386/HISPADOS $T/p486/HISPADOS $T/p486/HISPA32
 printf 'de 386\r\n' > $T/p386/HISPADOS/NUEVO386.TXT
 printf 'de 486\r\n' > $T/p486/HISPADOS/NUEVO486.TXT
 printf 'de 486\r\n' > $T/p486/HISPA32/NUEVO32.TXT
+mkdir -p $T/p486/HISPADOS/INTERNET
+printf 'de 486\r\n' > $T/p486/HISPADOS/INTERNET/NUEVOIN.TXT
+printf 'Inicio=http://paquete/\r\n' > $T/p486/HISPADOS/INTERNET/NAVEGA.INI
 python3 -I tools/paquete.py $T/p386 $T/www/h386.paq > /dev/null || ko "paquete.py (386)"
 python3 -I tools/paquete.py $T/p486 $T/www/h486.paq > /dev/null || ko "paquete.py (486)"
 { printf '[0.9.99]\ncpu=386\nnota=Paquete de Hispa-386\npaquete=http://10.0.2.2:%s/h386.paq\n\n' "$PORT"
@@ -262,10 +293,13 @@ checkn $T/l7.txt "Paquete de Hispa-386"
 checkn $T/l7.txt "0.9.99"
 hdtiene HISPADOS/NUEVO486.TXT
 hdtiene HISPA32/NUEVO32.TXT
+hdtiene HISPADOS/INTERNET/NUEVOIN.TXT
+hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -q 'Inicio=http://paquete/' && ko "ACTUALIZAR ha cambiado el NAVEGA.INI" \
+  || ok "ACTUALIZAR conserva el NAVEGA.INI"
 hdnotiene HISPADOS/NUEVO386.TXT
 
 # ------------------------------------------------------------------ 8
-cp "$FLOPPY" $T/f.img; cp "$IN2" $T/i2.img; cp "$D486" $T/d4.img
+cp "$FLOPPY" $T/f.img; cp "$IN2" $T/i2.img; cp "$D486" $T/d4.img; cp "$DINET" $T/di.img
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDOS=HIGH\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/hdd.img bs=1M count=32 status=none
@@ -285,6 +319,10 @@ espera() { local i=0; until [ "$(grep -caF -- "$2" $T/l8 2>/dev/null)" -ge $1 ] 
   espera 1 '(N para quedarse con'
   cambia $T/d4.img; send 'S' 1                       # «Hispa-486»: sí
   espera 2 'pulse una tecla.'
+  cambia $T/f.img; printf ' '
+  espera 1 'va en el disquete «Internet»'
+  cambia $T/di.img; send 'S' 1                       # «Internet»: sí
+  espera 3 'pulse una tecla.'
   cambia $T/f.img; printf ' '; sleep 3
   send 'ECHO =F2=' 2
   mon quit; } | maquina 8 200 -drive file=$T/f.img,format=raw,if=floppy -drive file=$T/hdd.img,format=raw,if=ide -boot a
@@ -292,20 +330,64 @@ echo "-- 8) desde disquetes, con el de Hispa-486 al final --"
 check $T/l8.txt "Hispa-DOS instalado en la unidad C:"
 check $T/l8.txt "va en el disquete «Hispa-486»."
 check $T/l8.txt "Hispa-486: "
+check $T/l8.txt "Internet: "
 OFF8=
 for off in 32256 1048576; do mdir -i $T/hdd.img@@$off ::HISPADOS > /dev/null 2>&1 && OFF8=$off; done
 if [ -n "$OFF8" ]; then
   OFF=$OFF8
-  for f in HISPA32/CALC32.EXE HISPADOS/EDICION.INI HISPADOS/VENTANAS.INI HISPADOS/CENTRO.INI HISPADOS/HW32.COM; do hdtiene $f; done
+  for f in HISPA32/CALC32.EXE HISPADOS/EDICION.INI HISPADOS/VENTANAS.INI HISPADOS/CENTRO.INI HISPADOS/HW32.COM \
+           HISPADOS/INTERNET/NAVEGA.EXE HISPADOS/INTERNET/HSPTLS.DLL HISPADOS/INTERNET/WSOCK32.DLL \
+           HISPADOS/INTERNET/MSVCRT.DLL HISPADOS/INTERNET/NAVEGA.INI; do hdtiene $f; done
+  hdnotiene HISPADOS/INTERNET/HW32.COM
   hd ::AUTOEXEC.BAT > $T/aut8.txt
   grep -qx 'C:\\HISPADOS\\VENTANAS' $T/aut8.txt && ok "AUTOEXEC.BAT: el de Hispa-486" || ko "AUTOEXEC.BAT sin C:\\HISPADOS\\VENTANAS"
+  red_auto $T/aut8.txt
   if grep -qi "[AB]:\\\\" $T/aut8.txt; then ko "AUTOEXEC.BAT con A: o B:"; else ok "AUTOEXEC.BAT: solo C:"; fi
 else
   ko "el disco duro no tiene \\HISPADOS"
 fi
 
+# ------------------------------------------------------------------ 9
+# la memoria de Hispa-486 con una e1000 y el servidor de pruebas del Navegador
+# (por HTTP, en el anfitrión: 10.0.2.2 para QEMU); el NAVEGA.INI de la copia
+# empieza en él
+P9=$((PORT + 10))
+mkdir -p $T/srv
+python3 -I tests/tools/nav_servidor.py $T/srv $P9 > $T/srv.log 2>&1 &
+SRV_PID=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do grep -q listo $T/srv.log 2> /dev/null && break; sleep 0.5; done
+cp $T/usb0.img $T/usb.img
+printf 'Inicio=http://10.0.2.2:%d/\r\nIdioma=es\r\n' $P9 > $T/NAVEGA.INI
+mcopy -o -i $T/usb.img@@1048576 $T/NAVEGA.INI ::HISPADOS/INTERNET/NAVEGA.INI
+{ sleep 24; shot r1
+  tecla ctrl-esc; sleep 1.2; tecla down down down down down down; sleep 0.4; tecla right; sleep 1.2; shot r2   # «Internet»
+  tecla ret; sleep 15; shot r3                      # el Navegador, con la página
+  tecla alt-f4; sleep 2
+  salir
+  send 'CONFRED' 4
+  send 'ECHO =N9=' 2
+  mon quit; } | maquina 9 150 $USBD -boot c -netdev user,id=n0 -device e1000,netdev=n0
+kill $SRV_PID 2> /dev/null
+echo "-- 9) la red al arrancar (e1000) y el Navegador desde el menú Inicio --"
+check $T/l9.txt "Intel"                             # HSPRED: la tarjeta
+checkn $T/l9.txt "HSPWIFI"
+chk $T/r2.ppm busca 250 0 600 572 9 12 "Navegador"
+chk $T/r3.ppm busca 0 30 800 80 0 9 "http://10.0.2.2:$P9/" busca 0 70 800 572 0 9 "Escriba su usuario y su clave."
+grep -q "^GET / " $T/srv/pedidos.log 2> /dev/null && ok "el servidor ha recibido la petición del Navegador" \
+  || ko "el servidor no ha recibido nada"
+check $T/l9.txt "por DHCP"
+check $T/l9.txt "Dirección IP  . . . . : 10.0.2.15"
+[ -n "${GUARDAR:-}" ] && for f in $T/r[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null
+
+# Hispa-386 no cambia: su AUTOEXEC.BAT sigue con la red a mano y sin el Navegador
+mtype -i "$USB386"@@1048576 ::AUTOEXEC.BAT | tr -d '\r' > $T/a386.txt
+grep -qx 'REM C:\\HISPADOS\\HSPRED /AUTO' $T/a386.txt && ! grep -qi '^C:\\HISPADOS\\HSPWIFI' $T/a386.txt \
+  && ok "Hispa-386: el AUTOEXEC.BAT de siempre (la red a mano)" || ko "Hispa-386: el AUTOEXEC.BAT ha cambiado"
+if mdir -i "$USB386"@@1048576 ::HISPADOS/INTERNET > /dev/null 2>&1; then ko "Hispa-386 con \\HISPADOS\\INTERNET"
+else ok "Hispa-386 sin \\HISPADOS\\INTERNET"; fi
+
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then
-  for i in 1 2 3 4 5 6 7 8; do echo "--- máquina $i ---"; tail -40 $T/l$i.txt; done
+  for i in 1 2 3 4 5 6 7 8 9; do echo "--- máquina $i ---"; tail -40 $T/l$i.txt; done
 fi
 rm -rf $T
 exit $fail

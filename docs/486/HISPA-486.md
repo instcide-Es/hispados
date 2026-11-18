@@ -223,9 +223,10 @@ pocos archivos; los programas y el núcleo son los mismos.
 
 | Dónde | Qué | De dónde sale |
 |---|---|---|
-| `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, tras `REM C:\HISPADOS\HSPRED /AUTO`, `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `tools/mkusb.py` |
+| `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, en vez de las líneas de la red con `REM`: `HSPRED /AUTO`, `HSPWIFI /AUTO` y `WIFI /AUTO` (la red puesta sola: ver «La red al arrancar») y `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `autoexec486()` de `tools/mkusb.py` |
 | `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio | `sistema/486/VENTANAS.INI` |
-| `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) | `sistema/486/CENTRO.INI` |
+| `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) e **«Internet»** (Navegador), con `Internet=1` | `sistema/486/CENTRO.INI` |
+| `\HISPADOS\INTERNET\` | **el Navegador** (docs/486/NAVEGADOR.md): `NAVEGA.EXE`, `HTTPS.EXE`, `HSPTLS.DLL`, `WSOCK32.DLL`, `MSVCRT.DLL`, `NAVEGA.INI` y `LEEME.TXT` (lo del disquete «Internet» menos `HW32.COM`, que ya está en `\HISPADOS`) | `build/` y `w32/navega/` (la tabla `INTERNET` de `tools/mkusb.py`) |
 | `\HISPADOS\EDICION.INI` | `[Edicion]` `Gama=486` `Nombre=Hispa-486`: la **edición** instalada | `sistema/486/EDICION.INI` |
 | `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) |
 
@@ -248,8 +249,62 @@ al arrancar (docs/VENTANAS.md, «CENTRO.INI»). Así un programa nuevo no
 obliga a tocar la plantilla, aunque conviene ponerlo en ella para que salga
 en su sitio.
 
-Hispa-386 no cambia: no lleva nada de esto y su escritorio es el de la gama
-de Windows 3.1 (sin menú Inicio).
+Hispa-386 no cambia: no lleva nada de esto (ni el Navegador ni la red al
+arrancar: su `AUTOEXEC.BAT` sigue con las líneas de la red con `REM`) y su
+escritorio es el de la gama de Windows 3.1 (sin menú Inicio). El controlador
+Wi-Fi y su microcódigo ya iban en las dos (en `\HISPADOS`).
+
+### El Navegador y su página de inicio
+
+El `NAVEGA.INI` de la imagen es el del disquete «Internet»
+(`w32/navega/NAVEGA.INI`): sin `Inicio=`, así que el Navegador arranca en su
+página de bienvenida, con el favorito **«ClicGest: la biblioteca»**
+(`https://clicgest.es/biblioteca`) y cómo se maneja. Se eligió así, y no
+empezar directamente en la biblioteca, porque: es el mismo archivo que el
+del disquete (el disco duro queda igual se instale de la memoria o de los
+disquetes); la primera vez el equipo aún no tiene la red elegida (el Wi-Fi
+se elige a mano una vez) y la bienvenida no da un error; y la biblioteca
+queda a un clic. Quien quiera arrancar en ella pone en
+`C:\HISPADOS\INTERNET\NAVEGA.INI` la línea
+`Inicio=https://clicgest.es/biblioteca` (al actualizar, el `NAVEGA.INI` se
+conserva, como todo `*.INI`).
+
+### La red al arrancar
+
+En el arranque normal («Normal» del menú de CONFIG.SYS), el `AUTOEXEC.BAT`
+de Hispa-486 pone la red solo, eligiendo la que haya, **el cable primero**:
+
+```
+C:\HISPADOS\HSPRED /AUTO
+C:\HISPADOS\HSPWIFI /AUTO
+C:\HISPADOS\WIFI /AUTO
+C:\HISPADOS\VENTANAS
+```
+
+- `HSPRED /AUTO`: si hay tarjeta de cable de las admitidas, se queda
+  (13 KB de memoria convencional); si no, sale en silencio sin ocupar nada.
+- `HSPWIFI /AUTO` (nuevo, docs/WIFI.md): solo se carga si hay **una red
+  guardada** en `RED.INI` (la clave `WIFI=`, que escribe `WIFI CONECTAR`) y
+  **una tarjeta Wi-Fi** de las admitidas (se pregunta a la BIOS del PCI, sin
+  cargar los 400 KB del núcleo: el arranque sin Wi-Fi no se alarga). Si
+  `HSPRED` está cargado y su tarjeta **tiene enlace**, o no lo sabe (NE2000,
+  Tulip), se queda el cable y `HSPWIFI` calla. Si **no tiene enlace** (no
+  hay cable) y no le llega en 3 segundos, `HSPWIFI` descarga `HSPRED` y se
+  carga él. En todos los casos en que no se carga, no dice nada.
+- `WIFI /AUTO`: conecta con la red guardada (sin `HSPWIFI`, calla).
+
+Las dos a la vez no van (docs/WIFI.md, «Límites»); así siempre queda una
+sola. La primera vez, en el HP Mini, se elige la red a mano: `HSPWIFI`
+(si se cargó `HSPRED` y no hay cable, `HSPWIFI` lo descarga solo),
+`WIFI REDES` y `WIFI CONECTAR número`; desde el siguiente arranque, sola.
+La dirección (DHCP) la pide el primer programa que usa la red (el Navegador
+o `CONFRED`), como siempre.
+
+El microcódigo de la Broadcom (`BCM43XX.FW`, `BCM43XXH.FW` y su licencia
+`BCM43XX.TXT`) se queda en `\HISPADOS`, que es donde lo busca `HSPWIFI` (en
+la unidad de arranque) y lo que INSTALAR y ACTUALIZAR ya copian enteros: no
+hizo falta otra carpeta. Su licencia (`LICENCE.broadcom_bcm43xx`) deja
+repartirlo completo y sin cambios con una copia de ella, que va al lado.
 
 ### Cómo se hace
 
@@ -286,7 +341,8 @@ escritorio.
 **La edición la decide el origen**, sin preguntar nada: lo que se instala
 desde la memoria de Hispa-486 es Hispa-486 y desde la de Hispa-386, Hispa-386.
 INSTALAR copia `\HISPADOS` entero (así llegan `EDICION.INI`, `VENTANAS.INI`
-y `CENTRO.INI`), la carpeta `\HISPA32` si el origen la trae y el
+y `CENTRO.INI`), `\HISPADOS\INTERNET` (el Navegador) y la carpeta `\HISPA32`
+si el origen las trae, y el
 `AUTOEXEC.BAT` del origen (con las letras pasadas a C:). Es lo mismo que ya
 hacía con todo lo demás; así una memoria USB de otra edición futura no
 necesita otro instalador.
@@ -312,6 +368,14 @@ imagen USB: si no se ha puesto «Oficina», sus accesos (Pluma, Cuentas...)
 quedan en el menú sin programa hasta que se copie (`XCOPIAR A:\HISPADOS
 C:\HISPADOS /S` con el disquete «Oficina»).
 
+Después, si el disco ha quedado de Hispa-486, INSTALAR ofrece el disquete
+**«Internet»** (`make internet`, `build/internet.img`): sus `*.EXE`, `*.DLL`,
+`NAVEGA.INI` y `LEEME.TXT` van a `\HISPADOS\INTERNET` (al actualizar se
+conserva el `NAVEGA.INI` que hubiera). Con N, el acceso «Navegador» queda en
+el menú sin programa hasta que se copie (`XCOPIAR A:\*.* C:\HISPADOS\INTERNET\`).
+Así, desde disquetes son cinco: el de arranque, «Instalación 2», «Oficina»,
+«Hispa-486» e «Internet» (y el de arranque otra vez entre uno y otro).
+
 ### Las actualizaciones por la red (ACTUALIZAR)
 
 Cada instalación se actualiza **en su gama**:
@@ -324,8 +388,8 @@ Cada instalación se actualiza **en su gama**:
   instalaciones de Hispa-386, y un Hispa-486 no se «actualiza» a Hispa-386).
 - Las secciones de **otra** gama no se miran: ni se ofrecen ni se avisan.
   Dentro de la gama, todo es como antes (versión, `nivel`, requisitos).
-- El paquete de Hispa-486 (`make paq486`) trae también `\HISPA32`; al
-  aplicarlo se copia, si está. Sus `*.INI` solo se ponen si el disco no los
+- El paquete de Hispa-486 (`make paq486`) trae también `\HISPA32` y
+  `\HISPADOS\INTERNET`; al aplicarlo se copian, si están. Sus `*.INI` solo se ponen si el disco no los
   tiene (los del usuario se conservan).
 - Para pasar de Hispa-386 a Hispa-486 no se usa ACTUALIZAR: se arranca la
   memoria de Hispa-486 e INSTALAR, [A] (ver arriba).
@@ -357,9 +421,21 @@ completo, en docs/RED.md, «Formato de versiones.txt».
   lo que queda en él) y arranca solo el disco duro (su escritorio);
   actualiza un Hispa-486 con la memoria de Hispa-486 (conserva los ajustes),
   un Hispa-386 con la de Hispa-486 (pasa, con los `.ANT`) y un Hispa-486 con
-  la de Hispa-386 (no se deja, el disco no cambia); y ACTUALIZAR por la red
+  la de Hispa-386 (no se deja, el disco no cambia); ACTUALIZAR por la red
   en el Hispa-486 instalado (dice su gama, no mira la sección de 386, baja e
-  instala la de 486 con su `\HISPA32`).
+  instala la de 486 con su `\HISPA32` y su `\HISPADOS\INTERNET`,
+  conservando el `NAVEGA.INI`); la instalación desde los disquetes, con
+  «Hispa-486» e «Internet» al final; y **la red**: el disco duro instalado
+  lleva `\HISPADOS\INTERNET`, el Wi-Fi con su microcódigo y las tres líneas
+  de la red en el `AUTOEXEC.BAT`; la memoria arranca con una e1000
+  (`HSPRED` se queda, `HSPWIFI` calla), Inicio › Internet › Navegador abre
+  una página del servidor de pruebas del Navegador (`tests/tools/nav_servidor.py`,
+  por HTTP, sin Internet) y `CONFRED` enseña la dirección del DHCP; el disco
+  duro arranca sin tarjeta de red y sin ningún aviso. Y que Hispa-386 sigue
+  con su `AUTOEXEC.BAT` (la red a mano) y sin `\HISPADOS\INTERNET`.
+- `tests/run_wifi_tests.sh`: `HSPWIFI /AUTO` calla sin red guardada, sin
+  tarjeta y con `HSPRED` con enlace; con el cable quitado (`set_link off`
+  de QEMU) descarga `HSPRED` y se carga.
 - `tests/run_actualizar_tests.sh`: en un Hispa-386, una sección con
   `gama=486` no se mira.
 - Siguen igual las de Hispa-386: `run_usb_tests.sh`, `run_instalar_usb_tests.sh`,
@@ -367,24 +443,10 @@ completo, en docs/RED.md, «Formato de versiones.txt».
 
 ### Lo que habrá que añadir con las piezas que vienen
 
-- **Navegador (disquete «Internet»)**: sus programas y DLL (el navegador,
-  `WSOCK32.DLL`, `HSPTLS`) en la imagen USB (otra carpeta o `\HISPA32`, en
-  `tools/mkusb.py`, junto a la tabla `HISPA32`), su acceso en
-  `sistema/486/CENTRO.INI` (un grupo «Internet» o en «Hispa32»), su
-  disquete «Internet» en `mkusb.py` (como `mkdisq486`) y en INSTALAR (como
-  `disq486`: una pregunta más al final, si el origen no lo trae), y su
-  carpeta en `copia_h32` de INSTALAR y de ACTUALIZAR si no va en `\HISPA32`.
-  Las reglas del Makefile, como dependencias de `usb486`.
-- **Wi-Fi (HSPWIFI + microcódigo)**: el controlador en `\HISPADOS` (lo copia
-  todo INSTALAR) y el microcódigo de cada tarjeta, que es grande: o en su
-  carpeta (`\HISPADOS\FIRMWARE`?, que habrá que añadir a las listas de
-  carpetas de INSTALAR y de ACTUALIZAR, que solo copian `\HISPADOS`,
-  `JUEGOS`, `JUEGOS\NES`, `JUEGOS\SMS`, `PROGS` y ahora `\HISPA32`) o en un
-  disquete propio. Su línea en el `AUTOEXEC.BAT` de Hispa-486 (como la de
-  `VENTANAS`, en `autoexec486()` de `mkusb.py`) y su configuración (un
-  `WIFI.INI` en `sistema/486/`, que como todo `*.INI` se conserva al
-  actualizar). Revisar la licencia del microcódigo antes de meterlo en la
-  imagen.
+- ~~Navegador~~ y ~~Wi-Fi~~: hechos (18/11/2026; arriba, «El Navegador y su
+  página de inicio» y «La red al arrancar»). Si llegan más tarjetas Wi-Fi
+  con microcódigo grande, valorar entonces una carpeta propia
+  (`\HISPADOS\FIRMWARE`) o un disquete.
 - **FAT32**: si la imagen USB pasa a FAT32 (más de 2 GB o para el
   navegador), `tools/mkusb.py` tiene que formatear en FAT32 (`mformat -F`,
   con el sector de arranque FAT32 propio en vez de `boot16.bin`, y el tipo
