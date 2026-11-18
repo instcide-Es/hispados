@@ -541,7 +541,9 @@ tarde el servidor, descifrar la página y maquetarla.
   al escribir (fetch y JSON, flechas, Intro y clic en una sugerencia),
   pestañas y `<details>`, confirm y alert, onsubmit, localStorage (en
   NAVEGA.ALM), setTimeout, XMLHttpRequest, DOMContentLoaded, un error que va
-  a NAVEGA.LOG, un bucle sin fin que se corta (`TiempoJS=3`), y con
+  a NAVEGA.LOG, las galletas desde JavaScript (`document.cookie` sin las
+  `HttpOnly`, que tampoco se pueden pisar; `fetch` con las galletas y el
+  User-Agent del Navegador), un bucle sin fin que se corta (`TiempoJS=3`), y con
   `JavaScript=NO` el `<noscript>`. Primero en el anfitrión, si hay `gcc -m32`
   con su biblioteca (`tests/navjs/`: html.c, pagina.c, http.c, dom.c y
   script.c tal cual, con QuickJS para Linux, la página vuelta a texto y unas
