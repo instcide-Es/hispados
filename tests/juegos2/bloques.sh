@@ -10,7 +10,7 @@
 #  - al abrirlo otra vez, el récord sale del archivo.
 echo "== Bloques: piezas con la semilla fija, una fila, récord en el disco y ratón =="
 disco
-centro_ini '[Acceso]' 'Nombre=Bloques' 'Programa=A:\HISPADOS\JUEGOS\BLOQUES.HVP' 'Parametros=/S=7 /P'
+centro_ini '[Acceso]' 'Nombre=Bloques' 'Programa=A:\HISPADOS\JUEGOS\BLOQUES.HVP' 'Parametros=/S=7 /P /V'
 { entrar
   shot b0
   tecla ret; sleep 2.5
@@ -69,13 +69,13 @@ chk $T/b4.ppm texto 408 262 0 9 negrita "97" texto 408 312 0 9 negrita "1" texto
   px 196 467 8 "un hueco" px 171 442 8 "encima, nada" px 251 122 4 "arriba, la Losa" px 256 127 10 "con su rombo ocre"
 chk $T/b5.ppm texto 256 247 4 8 negrita "Pausa" texto 224 269 0 8 fina "P para seguir"
 chk $T/b6.ppm texto 183 109 9 12 fina "ueva partida" px 300 117 12 "la primera orden del menú Juego, marcada" \
-  texto 175 157 0 8 fina "Empezar en el nivel" texto 175 225 0 8 fina "Mejores p"
-chk $T/b7.ppm titulo 138 162 activa "Cómo se juega" \
-  texto 164 203 0 8 fina "Encaje las piezas que caen: cada fila completa desaparece."
+  texto 175 157 0 8 fina "Empezar en el nivel" texto 175 273 0 8 fina "Mejores p" texto 175 225 0 8 fina "Solo piezas de"
+chk $T/b7.ppm titulo 138 135 activa "Cómo se juega" \
+  texto 164 176 0 8 fina "Encaje las piezas que caen: cada fila completa desaparece."
 chk $T/b8.ppm texto 220 247 4 8 negrita "¡Nuevo récord!" texto 200 269 0 8 fina "Intro: otra partida" \
   texto 408 262 0 9 negrita "194" texto 408 312 0 9 negrita "1" texto 408 412 0 9 negrita "194" \
   px 251 122 10 "el pozo, lleno hasta arriba: el Codo ya no cabe" px 291 142 1 "debajo, el Cazo"
-rec BLOQUES.REC "Puntos=194,0,0,0,0"; rec BLOQUES.REC "Nivel=1"
+rec BLOQUES.REC "Puntos=194,0,0,0,0"; rec BLOQUES.REC "Nivel=1"; rec BLOQUES.REC "Piezas=345"
 chk $T/b9.ppm texto 408 262 0 9 negrita "0" texto 408 412 0 9 negrita "194" texto 220 269 0 8 fina "Intro: empezar" \
   px 171 462 8 "el pozo, vacío"
 chk $T/b10.ppm texto 408 262 0 9 negrita "20" px 251 462 4 "botón derecho: la Losa, abajo" px 271 442 4 "su otra esquina" \
@@ -84,6 +84,6 @@ chk $T/b11.ppm px 271 162 11 "clic: el Gancho, girado" px 291 162 11 "su pie" px
   texto 408 262 0 9 negrita "20"
 chk $T/b12.ppm marco 150 60 412 431 activa titulo 150 60 activa "Bloques" texto 408 412 0 9 negrita "194" \
   texto 408 262 0 9 negrita "0" texto 220 269 0 8 fina "Intro: empezar"
-muestra b1 bloques; muestra b4 bloques_fila; muestra b5 bloques_pausa; muestra b6 bloques_menu
+muestra b1 bloques; muestra b4 bloques_fila; muestra b5 bloques_pausa; muestra b6 bloques_menu; muestra b7 bloques_ayuda
 muestra b8 bloques_record; muestra b11 bloques_raton
 salida_bien

@@ -7,7 +7,9 @@
 ;  desaparece y lo de encima baja. La partida acaba cuando una pieza nueva ya
 ;  no cabe. Hay once piezas: dos de tres casillas (Barrita y Codo), siete de
 ;  cuatro (Losa, Viga, Gancho, Garfio, Peldaño, Escalón y Pico) y dos de
-;  cinco (Cruz y Cazo). Una sombra marca dónde caería la pieza.
+;  cinco (Cruz y Cazo). Por omisión solo salen las siete de cuatro; las de
+;  tres y cinco, con «Piezas variadas» del menú Juego (se guarda en
+;  BLOQUES.REC). Una sombra marca dónde caería la pieza.
 ;
 ;  Puntos: uno por cada casilla de la pieza encajada y uno por cada fila que
 ;  baja al soltarla de golpe; 20, 50, 90 o 140 por quitar una, dos, tres o
@@ -31,6 +33,7 @@
 ;    /S=n   semilla de los números aleatorios (salen siempre las mismas piezas)
 ;    /P     paso a paso: la pieza no cae sola (solo con la flecha abajo o
 ;           soltándola)
+;    /V     piezas variadas (las once), aunque BLOQUES.REC diga otra cosa
 ; =============================================================================
 %include "hvp.inc"
 
@@ -121,6 +124,12 @@ blo_menu:
         db "Empezar en el nivel &7", 0
         dw 0
         db 0
+        dw 111
+        db "Solo piezas de &cuatro casillas", 0
+        dw 112
+        db "Piezas &variadas (de 3, 4 y 5 casillas)", 0
+        dw 0
+        db 0
         dw 107
         db "Mejores p&untuaciones...", 0
         dw 0
@@ -190,10 +199,14 @@ t_ayuda     db "Encaje las piezas que caen: cada fila completa desaparece.", 10
             db "a la vez, por el nivel. Cada ocho filas sube el nivel.", 10
             db "Desde el nivel 5, cada diez piezas sube una fila de piedra.", 10
             db 10
+            db "Menú Juego: solo piezas de cuatro casillas (por omisión) o", 10
+            db "piezas variadas, también de tres y de cinco.", 10
+            db 10
             db "P: pausa.    F2: otra partida.", 0
 k_cab       db "Bloques - mejores puntuaciones (Hispa Ventanas)", 13, 10, 0
 k_puntos    db "Puntos=", 0
 k_nivel     db "Nivel=", 0
+k_piezas    db "Piezas=", 0
 
 ; ---- la entrada: EBX=base ESI=ruta del módulo EDI=parámetros ----
 entrada:
@@ -217,7 +230,14 @@ entrada:
         call hvl_opcion
         setnc byte [a_pasos]
         mov byte [nivel_ini], 1
+        mov byte [variadas], 0
         call rec_leer
+        mov esi, edi                ; los parámetros otra vez, desde el principio
+        mov al, 'V'
+        call hvl_opcion
+        jc .sin_v
+        mov byte [variadas], 1
+.sin_v:
         mov esi, blo_plant
         xor ebp, ebp
         HV ven_crear
@@ -340,6 +360,16 @@ blo_proc:
         call poner_reloj
         jmp .hecho
 .orden:
+        cmp ecx, 111                ; 111: solo de cuatro; 112: variadas
+        jb .o1
+        cmp ecx, 112
+        ja .o1
+        sub ecx, 111
+        mov [variadas], cl
+        call rec_guardar
+        call nueva
+        jmp .hecho
+.o1:
         cmp ecx, 101
         jne .o2
 .nueva:
@@ -460,12 +490,25 @@ nueva:
         mov dword [estado], E_LISTO
         mov ecx, 1
         HV tmp_quitar
-        mov eax, N_PIEZAS
-        HV azar
+        call sortea
         mov [sig_tipo], eax
         call pieza_nueva
         HV ven_invalidar
         popad
+        ret
+
+; -> EAX: la pieza que toca (las once, o solo las siete de cuatro casillas,
+; que en «formas» van de la 3 a la 9)
+sortea:
+        cmp byte [variadas], 0
+        jne .v
+        mov eax, 7
+        HV azar
+        add eax, 2
+        ret
+.v:
+        mov eax, N_PIEZAS
+        HV azar
         ret
 
 ; la pieza siguiente entra por arriba y se sortea otra; si no cabe, se acabó
@@ -475,8 +518,7 @@ pieza_nueva:
         mov [pz_tipo], eax
         imul esi, eax, 12
         add esi, formas
-        mov eax, N_PIEZAS
-        HV azar
+        call sortea
         mov [sig_tipo], eax
         movzx eax, byte [esi]
         mov [pz_lado], eax
@@ -869,6 +911,16 @@ rec_guardar:
         call hvl_num
         mov ax, 0x0A0D
         stosw
+        mov esi, k_piezas
+        call hvl_cad
+        mov eax, 4                  ; 4: solo de cuatro; 345: variadas
+        cmp byte [variadas], 0
+        je .p4
+        mov eax, 345
+.p4:
+        call hvl_num
+        mov ax, 0x0A0D
+        stosw
         mov ecx, edi
         mov edx, txt
         sub ecx, edx
@@ -915,6 +967,14 @@ rec_leer:
 .n1:
         mov [nivel_ini], al
 .x:
+        mov esi, txt
+        mov edi, k_piezas
+        call hvl_clave
+        jc .y
+        call hvl_lee_num
+        cmp eax, 345
+        sete byte [variadas]
+.y:
         popad
         ret
 
@@ -1352,6 +1412,7 @@ p_f0        resd 1
 p_f1        resd 1
 rec         resd 5                  ; las cinco mejores
 nivel_ini   resb 1                  ; 1, 4 o 7
+variadas    resb 1                  ; 0: solo las de cuatro; 1: las once
 a_pasos     resb 1
 nuevo_rec   resb 1
 p_som       resb 1
