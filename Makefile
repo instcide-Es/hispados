@@ -23,6 +23,8 @@ $(B)/boot.bin: boot/boot.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/boot16.bin: boot/boot16.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+$(B)/boot32.bin: boot/boot32.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/mbr.bin: boot/mbr.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/KERNEL.SYS: kernel/kernel.asm lib/version.inc | $(B)
@@ -31,7 +33,7 @@ $(B)/COMMAND.COM: shell/command.asm lib/version.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/FDISK.COM: utils/fdisk.asm lib/util.inc lib/version.inc $(B)/mbr.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/FORMAT.COM: utils/format.asm lib/util.inc $(B)/boot.bin $(B)/boot16.bin | $(B)
+$(B)/FORMAT.COM: utils/format.asm lib/util.inc $(B)/boot.bin $(B)/boot16.bin $(B)/boot32.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HELLO.COM: tests/progs/hello.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -246,7 +248,7 @@ $(B)/HSPCD.SYS: drivers/hspcd.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/KEYB.COM: utils/keyb.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin | $(B)
+$(B)/SYS.COM: utils/sys.asm $(B)/boot.bin $(B)/boot16.bin $(B)/boot32.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPRATON.COM: drivers/hspraton.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -414,7 +416,7 @@ $(B)/TECLA.COM: utils/tecla.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XCOPIAR.COM: utils/xcopiar.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/REVISAR.COM: utils/revisar.asm lib/util.inc | $(B)
+$(B)/REVISAR.COM: utils/revisar.asm utils/revisar32.inc lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/EXPANDIR.COM: utils/expandir.asm lib/util.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<

@@ -569,6 +569,23 @@ read_dir:
         mov dl, 0
         mov ah, 0x47
         int 0x21
+        ; KB libres: con INT 21h 7303h (FAT32, sin el tope de 2 GB) o 36h
+        mov di, fsbuf
+        mov word [di], 0x2C
+        mov dx, path
+        mov cx, 0x2C
+        mov ax, 0x7303
+        stc
+        int 0x21
+        jc .v
+        mov eax, [fsbuf+0x04]
+        imul eax, [fsbuf+0x08]
+        shr eax, 9                  ; medios KB por grupo
+        mul dword [fsbuf+0x0C]
+        shrd eax, edx, 1
+        mov [freeb], eax
+        ret
+.v:
         mov ah, 0x36
         mov dl, 0
         int 0x21
@@ -577,6 +594,7 @@ read_dir:
         movzx ecx, cx
         mul ebx
         mul ecx
+        shr eax, 10
         mov [freeb], eax
         ret
 
@@ -831,8 +849,7 @@ draw:
         mov si, msg_free
         mov ah, A_PANEL
         call vputs
-        mov eax, [freeb]
-        shr eax, 10
+        mov eax, [freeb]            ; (ya en KB)
         mov [numv], eax
         mov byte [numw], 0
         mov ah, A_PANEL
@@ -1158,7 +1175,8 @@ numw        resb 1
             resb 1
 numv        resd 1
 vn_dx       resw 1
-freeb       resd 1
+freeb       resd 1                  ; KB libres
+fsbuf       resb 0x2C
 path        resb 72
 nbuf        resb 16
 inbuf       resb 64

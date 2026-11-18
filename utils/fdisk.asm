@@ -12,6 +12,12 @@
 ;  PARTIR [n] /ACT:p      marcar activa la partición p
 ;  PARTIR [n] /DEL:p      borrar la partición p (la extendida, si está vacía)
 ;  PARTIR [n] /DELLOG:u   borrar la unidad lógica u (1 = la primera)
+;  PARTIR ... /FAT32      con la compatibilidad con discos grandes (como FDISK
+;                         de MS-DOS 7.1): las unidades de más de 512 MB que se
+;                         creen serán FAT32 (tipo 0Bh, o 0Ch si pasan del
+;                         cilindro 1024), sin el tope de 2 GB. Sin ella (lo de
+;                         siempre, como Hispa-386 y MS-DOS 6.22), FAT16. En el
+;                         menú se pregunta si el disco pasa de 512 MB.
 ;  PARTIR [n] /MBR        escribir el código de arranque de Hispa-DOS en el MBR
 ;  PARTIR [n] /EMPTY      nivel de error 0 si el disco no tiene particiones,
 ;                         1 si tiene alguna, 2 si no existe (para instaladores)
@@ -49,6 +55,7 @@
         org 0x100
 
 MAX_FAT16   equ 2047 * 2048         ; 2047 MB en sectores
+BIG_MIN     equ 512 * 2048          ; con discos grandes: FAT32 desde 512 MB
 MIN_PART    equ 4200                ; ~2 MB: mínimo para FAT16
 MAXDISK     equ 8
 MAXLOG      equ 24
@@ -138,6 +145,11 @@ start:
         je .arg
         cmp dword [di], 'IDE:'
         je .arg
+        cmp dword [di], 'FAT3'
+        jne .nf32
+        mov byte [big], 1
+        jmp .arg
+.nf32:
         cmp word [di], 'PR'
         jne .n1
         cmp byte [di+2], 'I'
@@ -461,17 +473,7 @@ find_boot:
         dec dl
         mov [bootltr], dl
         mov al, dl
-        mov dword [pk_sec], 0
-        mov word [pk_cnt], 1
-        mov word [pk_off], bsbuf
-        mov [pk_seg], ds
-        mov cx, 0xFFFF
-        mov bx, packet
-        push bp
-        call paso25
-        int 0x25
-        pop ax                      ; (las banderas que deja INT 25h)
-        pop bp
+        call read_bs
         jc .r
         cmp word [bsbuf+0x0B], 512
         jne .r
@@ -966,6 +968,42 @@ paso13:
         call paso_car
         popad
 .r:     ret
+; AL = unidad (0 = A:) -> su sector de arranque en bsbuf; CF si no se puede.
+; Con INT 21h AX=7305h (la de FAT32: en una unidad FAT32 INT 25h no vale)
+; o, si el sistema no la tiene, con INT 25h
+read_bs:
+        mov dword [pk_sec], 0
+        mov word [pk_cnt], 1
+        mov word [pk_off], bsbuf
+        mov [pk_seg], ds
+        push ax
+        mov dl, al
+        inc dl
+        mov cx, 0xFFFF
+        mov bx, packet
+        xor si, si
+        mov ax, 0x7305
+        stc
+        int 0x21
+        pop dx
+        jnc .r
+        cmp ax, 0x7300
+        je .old
+        cmp ax, 1
+        stc
+        jne .r
+.old:
+        mov al, dl
+        mov cx, 0xFFFF
+        mov bx, packet
+        push bp
+        call paso25
+        int 0x25
+        pop ax                      ; (las banderas que deja INT 25h)
+        pop bp
+.r:
+        ret
+
 paso25:
         cmp byte [cs:pasos], 0
         je .r
@@ -1140,6 +1178,7 @@ tick_over:
 ;  Menú interactivo
 ; -----------------------------------------------------------------------------
 menu:
+        call ask_big
         cmp byte [ndisks], 1
         jbe menu_loop
         call crlf
@@ -1257,9 +1296,10 @@ menu_loop:
         jnc .c3b
         xor eax, eax
 .c3b:
-        cmp eax, MAX_FAT16
+        call part_cap
+        cmp eax, ecx
         jbe .c3c
-        mov eax, MAX_FAT16
+        mov eax, ecx
 .c3c:
         shr eax, 11
 .cask:
@@ -2099,8 +2139,20 @@ beyond_chs:
         pop eax
         ret
 
-; tipo de una unidad DOS de [p_size] sectores en [p_start] -> BL
+; tipo de una unidad DOS de [p_size] sectores en [p_start] -> BL. Con la
+; compatibilidad con discos grandes, las de 512 MB o más, FAT32 (como FDISK
+; de MS-DOS 7.1: 0Bh y, si pasa del cilindro 1024, 0Ch, la de LBA)
 dos_type:
+        cmp byte [big], 0
+        je .f16
+        cmp dword [p_size], BIG_MIN
+        jb .f16
+        mov bl, 0x0B
+        call beyond_chs
+        jnc .r
+        mov bl, 0x0C
+        ret
+.f16:
         mov bl, 0x04
         cmp dword [p_size], 65536
         jb .r
@@ -2108,6 +2160,32 @@ dos_type:
         call beyond_chs
         jnc .r
         mov bl, 0x0E
+.r:
+        ret
+
+; -> ECX = tamaño máximo de una unidad DOS en sectores (FAT16: 2047 MB; con
+; FAT32, lo que quepa en la tabla de particiones)
+part_cap:
+        mov ecx, MAX_FAT16
+        cmp byte [big], 0
+        je .r
+        mov ecx, 0xFFFFFFFF
+.r:
+        ret
+
+; si el disco pasa de 512 MB, preguntar si se quiere la compatibilidad con
+; discos grandes (FAT32), como FDISK de MS-DOS 7.1; Intro = no (FAT16, lo de
+; Hispa-386)
+ask_big:
+        cmp byte [big], 0
+        jne .r
+        cmp dword [total], BIG_MIN
+        jbe .r
+        mov si, msg_askbig
+        call puts
+        call ask_yes
+        jc .r
+        mov byte [big], 1
 .r:
         ret
 
@@ -2233,7 +2311,7 @@ create_log:
         ret
 .sz:
         mov eax, [req_mb]
-        mov ecx, MAX_FAT16
+        call part_cap
         call pick_size
         cmp dword [p_size], MIN_PART
         jae .big
@@ -2415,6 +2493,10 @@ is_dos:
         je .y
         cmp al, 0x0E
         je .y
+        cmp al, 0x0B                ; FAT32 (MS-DOS 7.1)
+        je .y
+        cmp al, 0x0C
+        je .y
         stc
         ret
 .y:
@@ -2456,14 +2538,17 @@ free_space:
         pop si
         ret
 
-; -> EAX = MB libres utilizables (máximo 2047)
+; -> EAX = MB libres utilizables (máximo 2047, sin FAT32)
 max_free_mb:
         call free_space
         mov eax, edx
-        cmp eax, MAX_FAT16
+        push ecx
+        call part_cap
+        cmp eax, ecx
         jbe .s
-        mov eax, MAX_FAT16
+        mov eax, ecx
 .s:
+        pop ecx
         shr eax, 11
         ret
 
@@ -2493,11 +2578,13 @@ create_primary:
         call free_space
         mov [p_start], eax
         mov eax, [req_mb]
+        cmp byte [big], 0
+        jne .c1
         cmp eax, 2048                   ; más que el máximo = el máximo
         jb .c1
         xor eax, eax
 .c1:
-        mov ecx, MAX_FAT16
+        call part_cap
         call pick_size
         cmp dword [p_size], MIN_PART
         jae .big
@@ -2703,6 +2790,7 @@ c_inst:
         call ask_yes
         jc .cancel
 .create:
+        call ask_big                ; (disco de más de 512 MB: ¿FAT32?)
         xor eax, eax
         call create_primary
         jc exit_err
@@ -2749,17 +2837,7 @@ c_inst:
 c_arr:
         mov al, [arr_letter]
         sub al, 'A'
-        mov dword [pk_sec], 0
-        mov word [pk_cnt], 1
-        mov word [pk_off], bsbuf
-        mov [pk_seg], ds
-        mov cx, 0xFFFF
-        mov bx, packet
-        push bp
-        call paso25
-        int 0x25
-        pop ax
-        pop bp
+        call read_bs
         jc .notpart
         cmp word [bsbuf+0x0B], 512
         jne .notpart
@@ -3115,6 +3193,14 @@ show_table:
         pop ax
         jc .lnd
         mov si, tn_log16
+        cmp al, 0x0B
+        je .l32
+        cmp al, 0x0C
+        jne .l12
+.l32:
+        mov si, tn_log32
+        jmp .lp
+.l12:
         cmp al, 0x01
         jne .lp
         mov si, tn_log12
@@ -3194,8 +3280,8 @@ types:
         db 0x05, "EXT DOS             ", 0
         db 0x0F, "EXT DOS  LBA        ", 0
         db 0x85, "EXT Linux           ", 0
-        db 0x0B, "No DOS   FAT32      ", 0
-        db 0x0C, "No DOS   FAT32 LBA  ", 0
+        db 0x0B, "PRI DOS  FAT32      ", 0
+        db 0x0C, "PRI DOS  FAT32 LBA  ", 0
         db 0x07, "No DOS   NTFS/exFAT ", 0
         db 0x82, "No DOS   Linux swap ", 0
         db 0x83, "No DOS   Linux      ", 0
@@ -3204,6 +3290,12 @@ types:
 tn_other    db "No DOS              ", 0
 tn_log16    db "LOG DOS  FAT16      ", 0
 tn_log12    db "LOG DOS  FAT12      ", 0
+tn_log32    db "LOG DOS  FAT32      ", 0
+msg_askbig  db 13, 10, "Este disco tiene más de 512 MB. Hispa-DOS puede crear en él unidades", 13, 10
+            db "FAT32, como MS-DOS 7.1 (Windows 95 OSR2 y 98): de más de 2 GB y con", 13, 10
+            db "el espacio mejor aprovechado. MS-DOS 6.22, Windows 3.1 y el primer", 13, 10
+            db "Windows 95 no las pueden leer.", 13, 10
+            db "¿Desea activar la compatibilidad con discos grandes (S/N)? [N] ", 0
 
 s_instbat   db "C:\INSTALL.BAT", 0
 
@@ -3212,7 +3304,7 @@ msg_title   db 13, 10, "Programa de configuración del disco duro de Hispa-DOS "
 msg_nodisk  db "No hay discos duros.", 13, 10, 0
 msg_baddisk db "Número de disco duro no válido.", 13, 10, 0
 msg_badopt  db "Opción no válida. Use /STATUS /PRI[:MB] /EXT[:MB] /LOG[:MB] /ACT:n /DEL:n", 13, 10
-            db "/DELLOG:n /MBR /EMPTY /DISCO:n", 13, 10, 0
+            db "/DELLOG:n /MBR /EMPTY /DISCO:n /FAT32", 13, 10, 0
 msg_isempty db "El disco duro no tiene particiones.", 13, 10, 0
 msg_notempty db "El disco duro ya tiene particiones.", 13, 10, 0
 msg_ioerr   db "Error al leer o escribir el disco duro. No se ha terminado el cambio.", 13, 10, 0
@@ -3301,9 +3393,10 @@ msg_slow    db "(Leyendo el modelo de los discos; Esc lo salta)", 13, 10, 0
 msg_untouched db "No se ha cambiado nada.", 13, 10, 0
 msg_noother db "No hay ningún disco duro aparte del de arranque: no hay dónde instalar.", 13, 10, 0
 msg_inst_all db "Se puede crear una partición para Hispa-DOS con todo el disco (hasta", 13, 10
-            db "2.047 MB). ¡Se borrará todo lo que haya en este disco duro!", 13, 10
+            db "2.047 MB con FAT16; sin tope con FAT32). ¡Se borrará todo lo que haya", 13, 10
+            db "en este disco duro!", 13, 10
             db "¿Crear la partición (S/N)? ", 0
-msg_inst_nodos db "El disco duro ya tiene particiones, pero ninguna primaria de DOS (FAT16).", 13, 10, 0
+msg_inst_nodos db "El disco duro ya tiene particiones, pero ninguna primaria de DOS (FAT).", 13, 10, 0
 msg_inst_full db "No queda espacio libre en él. Para hacer sitio, elimine alguna partición con", 13, 10
             db "PARTIR (opción 3; se pierde lo que tenga) y vuelva a escribir INSTALAR.", 13, 10, 0
 msg_inst_free1 db "Hay ", 0
@@ -3328,6 +3421,7 @@ bss_start:
 ndisks      resb 1
 disk        resb 1
 mode        resb 1
+big         resb 1                  ; compatibilidad con discos grandes (FAT32)
 req_part    resb 1
 lba         resb 1
             resb 1

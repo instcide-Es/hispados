@@ -27,6 +27,7 @@ start:
 ;  guarda segmentos propios de una orden a otra.
 ; =============================================================================
 R_STACK     equ 384
+NUMBUF      equ 24                  ; cifras con puntos de 64 bits
 r_psp       dw 0                    ; segmento del PSP (y de esta parte)
 r_body      dw 0                    ; segmento del cuerpo
 r_swap      db 0                    ; 1 = el cuerpo está aparte y se guarda en XMS
@@ -1836,8 +1837,31 @@ dir_sum:
         call puts
         jmp d_line
 
-; "n bytes libres" de la unidad listada
+; "n bytes libres" de la unidad listada: con INT 21h AX=7303h (la de FAT32,
+; sin el tope de 2 GB) o, si no está, con AH=36h
 dir_freeln:
+        mov al, [truebuf]
+        mov ah, ':'
+        mov [fsp_path], ax
+        mov word [fsp_path+2], '\'
+        push es
+        push ds
+        pop es
+        mov di, fsp_buf
+        mov word [di], 0x2C
+        mov word [di+2], 0
+        mov dx, fsp_path
+        mov cx, 0x2C
+        mov ax, 0x7303
+        stc
+        int 0x21
+        pop es
+        jc .old
+        mov eax, [fsp_buf+0x04]     ; sectores por clúster
+        mul dword [fsp_buf+0x08]    ; octetos por sector
+        mul dword [fsp_buf+0x0C]    ; clústeres libres
+        jmp .p
+.old:
         mov ah, 0x36
         mov dl, [truebuf]
         sub dl, 'A' - 1
@@ -1847,8 +1871,9 @@ dir_freeln:
         movzx ecx, cx
         mul ebx
         mul ecx
+.p:
         mov cl, 25
-        call putnum_w
+        call putnum64_w
         mov si, msg_free
         call puts
         jmp d_line
@@ -4694,19 +4719,31 @@ putnum:
         mov cl, 0
 ; EAX con separador de miles, alineado a la derecha en CL columnas
 putnum_w:
+        push edx
+        xor edx, edx
+        call putnum64_w
+        pop edx
+        ret
+; lo mismo con EDX:EAX (64 bits: los discos de más de 4 GB)
+putnum64_w:
         push eax
         push ebx
         push ecx
         push edx
         push si
         push di
-        mov di, numbuf+15
+        push esi
+        mov di, numbuf+NUMBUF-1
         mov byte [di], 0
         mov ebx, 10
         xor ch, ch
 .l:
+        mov esi, eax
+        mov eax, edx
         xor edx, edx
         div ebx
+        xchg eax, esi
+        div ebx                     ; ESI:EAX = cociente, DL = la cifra
         add dl, '0'
         cmp ch, 3
         jne .nc
@@ -4717,10 +4754,13 @@ putnum_w:
         dec di
         mov [di], dl
         inc ch
+        mov edx, esi
+        test esi, esi
+        jnz .l
         test eax, eax
         jnz .l
         ; relleno
-        mov ax, numbuf+15
+        mov ax, numbuf+NUMBUF-1
         sub ax, di
         movzx cx, cl
         sub cx, ax
@@ -4732,6 +4772,7 @@ putnum_w:
 .p:
         mov si, di
         call puts
+        pop esi
         pop di
         pop si
         pop edx
@@ -8003,7 +8044,9 @@ pat_end     resw 1
 truebuf     resb 132
 nfiles      resd 1
 nbytes      resd 1
-numbuf      resb 16
+numbuf      resb NUMBUF
+fsp_path    resb 4                  ; «X:\» para INT 21h 7303h
+fsp_buf     resb 0x2C
 nm11        resb 12
 d_args      resw 1
 d_opts:                             ; opciones de DIR (se ponen a cero)

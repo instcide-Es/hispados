@@ -1,24 +1,31 @@
 ; =============================================================================
-;  Hispa-DOS FORMAT.COM - dar formato FAT12/FAT16 a una unidad
+;  Hispa-DOS FORMAT.COM - dar formato FAT12/FAT16/FAT32 a una unidad
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/Q] [/U] [/AUTOTEST]
+;  FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/FAT32] [/Q] [/U] [/AUTOTEST]
 ;     /S         copiar el sistema (KERNEL.SYS y COMMAND.COM): disco de arranque
 ;     /V:nombre  etiqueta de volumen (11 caracteres como máximo)
 ;     /F:tamaño  capacidad del disquete: 360, 720, 1200 (1.2), 1440 (1.44)
 ;                o 2880 (2.88); hace falta para un disquete nuevo de menos
 ;                capacidad que la unidad
+;     /FAT32     disco duro: FAT32 aunque la partición sea de FAT16
 ;     /Q /U      aceptadas por compatibilidad (el formato siempre es rápido)
 ;     /AUTOTEST  no pedir confirmación (para guiones y pruebas)
 ;
-;  Disquetes: FAT12 con la geometría estándar. Discos duros: FAT16.
-;  Escribe con INT 26h y avisa al núcleo con INT 21h AH=0Dh.
+;  Disquetes: FAT12 con la geometría estándar. Discos duros: FAT16 o, como
+;  MS-DOS 7.1 (Windows 95 OSR2/98), FAT32 si la partición es de FAT32 (tipo
+;  0Bh/0Ch: el núcleo lo dice con el BPB de la categoría 48h de 440Dh/60h),
+;  si pasa de 2 GB o con /FAT32; los clústeres, como los de Microsoft.
+;  Escribe con INT 21h AX=7305h (en un disco duro; si no existe, y en los
+;  disquetes, con INT 26h) y avisa al núcleo con INT 21h AH=0Dh.
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
 
-ZCHUNK      equ 16                  ; sectores por escritura de ceros
+ZCHUNK      equ 32                  ; sectores por escritura de ceros
+FATBUF      equ 4                   ; sectores de FAT en memoria (el sistema)
+F32RSV      equ 32                  ; FAT32: sectores reservados
 
 start:
         mov sp, stack_top
@@ -34,7 +41,15 @@ start:
         call puts
         call parse_args
         jc usage
-        ; parámetros de la unidad
+        ; parámetros de la unidad (la categoría 48h, la de FAT32, da el BPB
+        ; ampliado; si no existe, la de siempre)
+        mov ax, 0x440D
+        mov bl, [drv]
+        inc bl
+        mov cx, 0x4860
+        mov dx, params
+        int 0x21
+        jnc .pok
         mov ax, 0x440D
         mov bl, [drv]
         inc bl
@@ -42,6 +57,7 @@ start:
         mov dx, params
         int 0x21
         jc bad_drive
+.pok:
         mov al, [params+2]
         and al, 1
         mov [fixed], al
@@ -63,6 +79,21 @@ start:
         cmp byte [fixed], 0
         je .lay
         call real_size
+        ; ¿FAT32? Si la partición lo es (BPB de FAT32: sin raíz fija, sin
+        ; sectores por FAT de 16 bits y con el clúster de la raíz), si no
+        ; cabe en FAT16 o si se pide
+        cmp byte [opt_f32], 0
+        jne .f32
+        cmp dword [tot], 65524 * 64 + 1 + 2*256 + 32
+        ja .f32
+        cmp word [params+7+6], 0
+        jne .lay
+        cmp word [params+7+11], 0
+        jne .lay
+        cmp dword [params+7+33], 0
+        je .lay
+.f32:
+        mov byte [fat32], 1
 .lay:
         call layout
         jc fail
@@ -77,14 +108,14 @@ start:
         mov si, msg_formatting
         call puts
         mov eax, [tot]
-        imul eax, eax, 100
-        shr eax, 11
-        xor edx, edx
         mov ecx, 100
+        mul ecx
+        shrd eax, edx, 11
+        xor edx, edx
         div ecx
         push edx
         call putnum
-        mov al, '.'
+        mov al, ','                 ; (coma decimal: «4.095,00M»)
         call putc
         pop eax
         cmp eax, 10
@@ -199,6 +230,15 @@ parse_args:
         je .f
         jmp .bad
 .f:
+        ; /FAT32
+        mov eax, [si]
+        and eax, 0xFFFFDFDF
+        cmp eax, 'AT32'
+        jne .fnot
+        add si, 4
+        mov byte [opt_f32], 1
+        jmp .skip
+.fnot:
         ; /F:tamaño en KB (360, 720, 1200, 1440, 2880) o en MB (1.2, 1.44, 2.88)
         cmp byte [si], ':'
         jne .bad
@@ -350,6 +390,8 @@ layout:
         ret
 .hd:
         mov byte [media], 0xF8
+        cmp byte [fat32], 0
+        jne layout32
         mov word [rootent], 512
         mov byte [fat16], 1
         ; clúster más pequeño que deje como mucho 65524 clústeres
@@ -412,6 +454,78 @@ layout:
         call puts
         stc
         ret
+
+; FAT32 (MS-DOS 7.1): 32 reservados (arranque, FSInfo y sus copias en 6 y
+; 7), dos FAT de 28 bits, la raíz en el clúster 2. Clústeres como los de
+; Microsoft: 512 octetos hasta 260 MB, 4 KB hasta 8 GB, 8 KB hasta 16 GB,
+; 16 KB hasta 32 GB y 32 KB por encima.
+layout32:
+        mov byte [fat16], 1
+        mov word [rsv], F32RSV
+        mov word [rootent], 0
+        mov word [rootsecs], 0
+        mov eax, [tot]
+        mov si, f32_tab
+.t:
+        cmp eax, [si]
+        jbe .tf
+        add si, 5
+        jmp .t
+.tf:
+        movzx cx, byte [si+4]
+        jcxz .small
+        mov [spc], cx
+        ; sectores por FAT (la cuenta de Microsoft): (total - reservados) /
+        ; (128 * spc + 1), redondeando hacia arriba
+        sub eax, F32RSV
+        movzx ecx, cx
+        shl ecx, 7
+        inc ecx
+        add eax, ecx
+        dec eax
+        xor edx, edx
+        div ecx
+        mov [spf32], eax
+        shl eax, 1
+        add eax, F32RSV
+        mov [datalba], eax
+        mov [rootlba], eax
+        mov edx, [tot]
+        sub edx, eax
+        jbe .small
+        mov eax, edx
+        xor edx, edx
+        movzx ecx, word [spc]
+        div ecx
+        mov [nclus], eax
+        cmp eax, 65525
+        jb .small
+        movzx eax, word [spc]
+        shl eax, 9
+        mov [bpc], eax
+        mov dword [rclus], 1        ; la raíz ocupa un clúster
+        clc
+        ret
+.small:
+        mov si, msg_small32
+        call puts
+        stc
+        ret
+
+; hasta cuántos sectores, sectores por clúster
+f32_tab:
+        dd 66600
+        db 0
+        dd 532480
+        db 1
+        dd 16777216
+        db 8
+        dd 33554432
+        db 16
+        dd 67108864
+        db 32
+        dd 0xFFFFFFFF
+        db 64
 
 ; tamaños que admite /F (en KB)
 fsz_tab     dw 360, 720, 1200, 1440, 2880, 0
@@ -496,12 +610,49 @@ abs_write:
         mov [pk_cnt], cx
         mov [pk_off], bx
         mov [pk_seg], dx
+        mov si, 1                   ; (7305h: escribir)
+        call abs_7305
+        jnc .r
+        jz .r
         mov al, [drv]
         mov cx, 0xFFFF
         mov bx, packet
         int 0x26
         pop word [junk]             ; INT 26h deja los indicadores en la pila
+.r:
         popad
+        ret
+
+; con SI = 0 (leer) o 1 (escribir), el paquete de [packet] por INT 21h
+; AX=7305h (la de FAT32: INT 25h/26h no valen en una unidad FAT32). En un
+; disquete, o si el sistema no la tiene, ZF=0 y CF=1: hay que usar INT 25h o
+; 26h; si no, CF y ZF=1 si ha fallado
+abs_7305:
+        cmp byte [fixed], 0
+        je .no
+        cmp byte [no7305], 0
+        jne .no
+        mov dl, [drv]
+        inc dl
+        mov cx, 0xFFFF
+        mov bx, packet
+        mov ax, 0x7305
+        stc
+        int 0x21
+        jnc .r
+        cmp ax, 0x7300
+        je .none
+        cmp ax, 1                   ; (función que no existe)
+        je .none
+        xor ax, ax                  ; ZF=1, CF=1: error de verdad
+        stc
+        ret
+.none:
+        mov byte [no7305], 1
+.no:
+        or al, 1                    ; ZF=0
+        stc
+.r:
         ret
 
 ; EAX = sector -> CF si no se puede leer (búfer: secb)
@@ -511,11 +662,16 @@ abs_read:
         mov word [pk_cnt], 1
         mov word [pk_off], secb
         mov [pk_seg], ds
+        xor si, si
+        call abs_7305
+        jnc .r
+        jz .r
         mov al, [drv]
         mov cx, 0xFFFF
         mov bx, packet
         int 0x25
         pop word [junk]
+.r:
         popad
         ret
 
@@ -557,6 +713,8 @@ real_size:
         ret
 
 write_boot:
+        cmp byte [fat32], 0
+        jne write_boot32
         mov si, boot12
         cmp byte [fat16], 0
         je .c
@@ -625,10 +783,73 @@ write_boot:
         mov bx, secb
         jmp abs_write
 
-; poner a cero las FAT y el directorio raíz
+; FAT32: el sector de arranque (BPB de 53 octetos y lo de detrás); la copia
+; del sector 6 y los FSInfo van con las tablas (write_tables)
+write_boot32:
+        mov si, boot32
+        mov di, secb
+        mov cx, 512
+        rep movsb
+        mov word [secb+0x0B], 512
+        mov al, [spc]
+        mov [secb+0x0D], al
+        mov ax, [rsv]
+        mov [secb+0x0E], ax
+        mov al, [nfats]
+        mov [secb+0x10], al
+        xor eax, eax
+        mov [secb+0x11], ax         ; sin raíz fija
+        mov [secb+0x13], ax
+        mov [secb+0x16], ax         ; sin sectores por FAT de 16 bits
+        mov [secb+0x28], eax        ; FAT en espejo, versión 0.0
+        mov al, [media]
+        mov [secb+0x15], al
+        mov ax, [spt]
+        mov [secb+0x18], ax
+        mov ax, [heads]
+        mov [secb+0x1A], ax
+        mov eax, [hidden]
+        mov [secb+0x1C], eax
+        mov eax, [tot]
+        mov [secb+0x20], eax
+        mov eax, [spf32]
+        mov [secb+0x24], eax
+        mov dword [secb+0x2C], 2    ; la raíz, en el clúster 2
+        mov word [secb+0x30], 1     ; FSInfo
+        mov word [secb+0x32], 6     ; copia del arranque
+        mov byte [secb+0x40], 0x80
+        mov byte [secb+0x42], 0x29
+        mov eax, [serial]
+        mov [secb+0x43], eax
+        mov si, label
+        cmp byte [opt_v], 0
+        jne .lb
+        mov si, noname
+.lb:
+        mov di, secb+0x47
+        mov cx, 11
+        rep movsb
+        mov si, fs32
+        mov di, secb+0x52
+        mov cx, 8
+        rep movsb
+        xor eax, eax
+        mov cx, 1
+        mov dx, ds
+        mov bx, secb
+        jmp abs_write
+
+; poner a cero las FAT y el directorio raíz (FAT32: también los reservados
+; detrás del arranque y el primer clúster, el de la raíz)
 zero_system_area:
         movzx eax, word [rsv]
         mov ecx, [datalba]
+        cmp byte [fat32], 0
+        je .z
+        mov eax, 1
+        movzx edx, word [spc]
+        add ecx, edx
+.z:
         sub ecx, eax
 .l:
         jecxz .ok
@@ -673,6 +894,16 @@ init_tables:
         mov word [next_clus], 2
         mov word [dirpos], rootb
         mov dword [used], 0
+        mov dword [uclus], 0
+        cmp byte [fat32], 0
+        je .n32
+        ; FAT32: 0FFFFFF8h, 0FFFFFFFh y la raíz (clúster 2), una cadena de uno
+        mov dword [fatb], 0x0FFFFF00
+        mov [fatb], al
+        mov dword [fatb+4], 0x0FFFFFFF
+        mov dword [fatb+8], 0x0FFFFFFF
+        mov word [next_clus], 3
+.n32:
         cmp byte [opt_v], 0
         je .r
         ; etiqueta de volumen en el directorio raíz
@@ -722,6 +953,18 @@ set_fat:
         push ax
         push bx
         push dx
+        cmp byte [fat32], 0
+        je .n32
+        mov bx, ax
+        shl bx, 2
+        movzx edx, dx
+        cmp dx, 0xFFFF
+        jne .w32
+        mov edx, 0x0FFFFFFF
+.w32:
+        mov [fatb+bx], edx
+        jmp .r
+.n32:
         cmp byte [fat16], 0
         je .f12
         mov bx, ax
@@ -749,23 +992,70 @@ set_fat:
         ret
 
 write_tables:
+        ; los FATBUF primeros sectores de cada FAT (o menos, si es más corta)
+        movzx edx, word [spf]
+        cmp byte [fat32], 0
+        je .s
+        mov edx, [spf32]
+.s:
+        mov ebx, edx
+        cmp edx, FATBUF
+        jbe .n
+        mov edx, FATBUF
+.n:
+        mov [wt_n], dx
         movzx eax, word [rsv]
         movzx ecx, byte [nfats]
 .l:
         push ecx
-        mov cx, 1
+        push ebx
+        mov cx, [wt_n]
         mov dx, ds
         mov bx, fatb
         call abs_write
+        pop ebx
         pop ecx
         jc .r
-        movzx edx, word [spf]
-        add eax, edx
+        add eax, ebx
         loop .l
         mov eax, [rootlba]
         mov cx, 1
         mov dx, ds
         mov bx, rootb
+        call abs_write
+        jc .r
+        cmp byte [fat32], 0
+        je .r
+        ; FAT32: FSInfo (libres y siguiente libre) en el 1, la copia del
+        ; arranque en el 6 y la del FSInfo en el 7
+        mov di, fsib
+        mov cx, 256
+        xor ax, ax
+        rep stosw
+        mov dword [fsib], 0x41615252
+        mov dword [fsib+0x1E4], 0x61417272
+        mov eax, [nclus]
+        sub eax, [uclus]
+        sub eax, [rclus]
+        mov [fsib+0x1E8], eax
+        movzx eax, word [next_clus]
+        mov [fsib+0x1EC], eax
+        mov dword [fsib+0x1FC], 0xAA550000
+        mov eax, 1
+        call .fsi
+        jc .r
+        mov eax, 7
+        call .fsi
+        jc .r
+        mov eax, 6
+        mov cx, 1
+        mov dx, ds
+        mov bx, secb
+        jmp abs_write
+.fsi:
+        mov cx, 1
+        mov dx, ds
+        mov bx, fsib
         jmp abs_write
 .r:
         ret
@@ -902,18 +1192,24 @@ put_file:
         inc eax
 .nz:
         mov [pf_n], ax
-        ; ¿cabe la cadena en el primer sector de la FAT?
+        ; ¿cabe en el disco y la cadena en los FATBUF primeros sectores de
+        ; la FAT?
         movzx ecx, word [next_clus]
         add ecx, eax
+        mov edx, [nclus]
+        add edx, 2
+        cmp ecx, edx
+        ja .toolong
+        mov edx, FATBUF*128 - 1
+        cmp byte [fat32], 0
+        jne .cl
+        mov edx, FATBUF*256 - 1
         cmp byte [fat16], 0
-        je .c12
-        cmp ecx, 255
+        jne .cl
+        mov edx, FATBUF*512*2/3 - 1
+.cl:
+        cmp ecx, edx
         ja .toolong
-        jmp .cok
-.c12:
-        cmp ecx, 340
-        ja .toolong
-.cok:
         ; escribir los datos
         movzx eax, word [next_clus]
         sub eax, 2
@@ -962,6 +1258,7 @@ put_file:
         mov ax, [pf_n]
         add [next_clus], ax
         movzx eax, ax
+        add [uclus], eax
         imul eax, [bpc]
         add [used], eax
         clc
@@ -977,10 +1274,9 @@ put_file:
 report:
         call crlf
         mov eax, [nclus]
-        imul eax, [bpc]
-        mov [totb], eax
+        mul dword [bpc]             ; (más de 4 GB: en 64 bits)
         mov cl, 15
-        call putnum_w
+        call putnum64_w
         mov si, msg_total
         call puts
         cmp byte [opt_s], 0
@@ -991,10 +1287,13 @@ report:
         mov si, msg_sysused
         call puts
 .nos:
-        mov eax, [totb]
-        sub eax, [used]
+        mov eax, [nclus]
+        sub eax, [uclus]
+        sub eax, [rclus]
+        mov [totb], eax             ; unidades libres
+        mul dword [bpc]
         mov cl, 15
-        call putnum_w
+        call putnum64_w
         mov si, msg_avail
         call puts
         call crlf
@@ -1004,9 +1303,6 @@ report:
         mov si, msg_unit
         call puts
         mov eax, [totb]
-        sub eax, [used]
-        xor edx, edx
-        div dword [bpc]
         mov cl, 15
         call putnum_w
         mov si, msg_units
@@ -1021,6 +1317,49 @@ report:
         mov ax, [serial]
         call puthex4
         call crlf
+        ret
+
+; EDX:EAX con separador de miles, alineado a la derecha en CL columnas
+putnum64_w:
+        pushad
+        mov di, n64buf + 31
+        mov byte [di], 0
+        mov ebx, 10
+        xor ch, ch
+.l:
+        mov esi, eax
+        mov eax, edx
+        xor edx, edx
+        div ebx
+        xchg eax, esi
+        div ebx                     ; ESI:EAX = cociente, DL = cifra
+        add dl, '0'
+        cmp ch, 3
+        jne .nc
+        dec di
+        mov byte [di], '.'
+        mov ch, 0
+.nc:
+        dec di
+        mov [di], dl
+        inc ch
+        mov edx, esi
+        mov ebp, eax
+        or ebp, edx
+        jnz .l
+        mov ax, n64buf + 31
+        sub ax, di
+        movzx cx, cl
+        sub cx, ax
+        jle .p
+.pad:
+        mov al, ' '
+        call putc
+        loop .pad
+.p:
+        mov si, di
+        call puts
+        popad
         ret
 
 %include "util.inc"
@@ -1042,16 +1381,18 @@ sysname2    db "A:\COMMAND.COM", 0
 noname      db "NO NAME    "
 fs12        db "FAT12   "
 fs16        db "FAT16   "
+fs32        db "FAT32   "
 label       db "           "
 
 msg_title   db 13, 10, "Hispa-DOS FORMAT 0.9", 13, 10, 0
-msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/Q] [/U] [/AUTOTEST]", 13, 10
+msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/FAT32] [/Q] [/U] [/AUTOTEST]", 13, 10
             db "  /F:tamaño  capacidad del disquete: 360, 720, 1200, 1440 o 2880 (KB)", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_ioerr   db "Error de escritura en el disco: formato interrumpido", 13, 10, 0
 msg_badfl   db "Tamaño de disquete no admitido", 13, 10, 0
 msg_toobig  db "Partición demasiado grande para FAT16 (máximo 2 GB)", 13, 10, 0
 msg_small   db "Unidad demasiado pequeña para darle formato", 13, 10, 0
+msg_small32 db "Unidad demasiado pequeña para FAT32 (mínimo 33 MB)", 13, 10, 0
 msg_warn1   db 13, 10, "Atención: se perderán todos los datos del", 13, 10, "disco fijo de la unidad ", 0
 msg_warn2   db ":", 13, 10, "¿Desea continuar con el formato (S/N)? ", 0
 msg_insert  db 13, 10, "Inserte un disquete nuevo en la unidad ", 0
@@ -1070,6 +1411,7 @@ msg_serial  db "El número de serie del volumen es ", 0
 
 boot12:     incbin "build/boot.bin"
 boot16:     incbin "build/boot16.bin"
+boot32:     incbin "build/boot32.bin"
 
         section .bss
 bss_start:
@@ -1079,6 +1421,9 @@ fat16       resb 1
 opt_s       resb 1
 opt_v       resb 1
 opt_auto    resb 1
+opt_f32     resb 1
+fat32       resb 1
+no7305      resb 1
 nfats       resb 1
 media       resb 1
             alignb 4
@@ -1090,6 +1435,9 @@ nclus       resd 1
 bpc         resd 1
 used        resd 1
 totb        resd 1
+spf32       resd 1
+uclus       resd 1
+rclus       resd 1
 serial      resd 1
 spt         resw 1
 heads       resw 1
@@ -1102,6 +1450,7 @@ next_clus   resw 1
 fsz         resw 1
 dirpos      resw 1
 pf_n        resw 1
+wt_n        resw 1
 lf_name     resw 1
 lf_paras    resw 1
 junk        resw 1
@@ -1113,10 +1462,12 @@ pk_seg      resw 1
 params      resb 64
 u_numbuf    resb 16
 u_lbuf      resb 84
+n64buf      resb 32
             alignb 16
 secb        resb 512
-fatb        resb 512
+fatb        resb 512*FATBUF
 rootb       resb 512
+fsib        resb 512
 zbuf        resb 512*ZCHUNK
             resb 1024
 stack_top:

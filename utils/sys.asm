@@ -3,8 +3,10 @@
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  SYS unidad:     copia KERNEL.SYS y COMMAND.COM desde la unidad de arranque
-;                  y escribe el código de arranque de Hispa-DOS (FAT12/FAT16),
-;                  conservando los parámetros (BPB) de la unidad.
+;                  y escribe el código de arranque de Hispa-DOS (FAT12, FAT16
+;                  o FAT32), conservando los parámetros (BPB) de la unidad.
+;                  Lee y escribe el sector de arranque con INT 21h AX=7305h
+;                  (INT 25h/26h no valen en FAT32; si no existe, con ellas).
 ;  SYS origen: unidad:   como en MS-DOS: con dos parámetros el primero es el
 ;                  origen (unidad y, si se quiere, carpeta) y el segundo el
 ;                  destino.
@@ -106,19 +108,27 @@ start:
         mov ax, 0x4C01
         int 0x21
 .diff:
-        ; sector de arranque de la unidad (INT 25h, paquete de 32 bits)
+        ; sector de arranque de la unidad (paquete de 32 bits)
         mov dword [pk_sec], 0
         mov word [pk_cnt], 1
         mov word [pk_off], boot
         mov [pk_seg], ds
-        mov al, [drv]
-        mov cx, 0xFFFF
-        mov bx, packet
-        int 0x25
-        pop word [junk]
+        xor si, si
+        call abs_io
         jc ioerr
         cmp word [boot+0x0B], 512
         jne nofat
+        ; FAT32: sin sectores por FAT de 16 bits (van en +24h) y sin raíz fija
+        cmp word [boot+0x16], 0
+        jne .n32
+        cmp dword [boot+0x24], 0
+        je nofat
+        cmp byte [boot+0x0D], 0
+        je nofat
+        mov byte [is32], 1
+        mov si, boot32
+        jmp .geo
+.n32:
         ; FAT16 si tiene 4085 clústeres o más
         movzx eax, word [boot+0x13]
         test eax, eax
@@ -168,15 +178,26 @@ start:
         mov [boot+0x1A], ax
         mov eax, [params+7+17]
         mov [boot+0x1C], eax
-        mov byte [boot+0x24], 0x80
+        mov bx, 0x24
+        cmp byte [is32], 0
+        je .dn
+        mov bx, 0x40
+.dn:
+        mov byte [boot+bx], 0x80
 .copy:
-        ; código de arranque nuevo sin tocar el BPB (0Bh-3Dh)
+        ; código de arranque nuevo sin tocar el BPB (0Bh-3Dh; FAT32: 0Bh-59h)
         mov di, boot
         mov cx, 0x0B
         rep movsb
-        add si, 0x3E - 0x0B
-        add di, 0x3E - 0x0B
-        mov cx, 512 - 0x3E
+        mov ax, 0x3E - 0x0B
+        cmp byte [is32], 0
+        je .cb
+        mov ax, 0x5A - 0x0B
+.cb:
+        add si, ax
+        add di, ax
+        mov cx, 512 - 0x0B
+        sub cx, ax
         rep movsb
         ; copiar los ficheros del sistema
         mov si, src_k
@@ -191,19 +212,60 @@ start:
         mov ax, 0x4301
         mov cx, 0x07                ; sistema, oculto, solo lectura
         int 0x21
-        ; escribir el sector de arranque
-        mov al, [drv]
-        mov cx, 0xFFFF
-        mov bx, packet
-        int 0x26
-        pop word [junk]
+        ; escribir el sector de arranque (FAT32: también su copia, la que
+        ; dice +32h, normalmente en el 6)
+        mov si, 1
+        call abs_io
         jc ioerr
+        cmp byte [is32], 0
+        je .wd
+        movzx eax, word [boot+0x32]
+        test eax, eax
+        jz .wd
+        cmp ax, [boot+0x0E]
+        jae .wd
+        mov [pk_sec], eax
+        mov si, 1
+        call abs_io
+        jc ioerr
+.wd:
         mov ah, 0x0D
         int 0x21
         mov si, msg_ok
         call puts
         mov ax, 0x4C00
         int 0x21
+
+; SI = 0 (leer) o 1 (escribir) el paquete [packet] de la unidad [drv]: con
+; INT 21h AX=7305h (la de FAT32) o, si el sistema no la tiene, INT 25h/26h
+abs_io:
+        mov dl, [drv]
+        inc dl
+        mov cx, 0xFFFF
+        mov bx, packet
+        mov ax, 0x7305
+        stc
+        int 0x21
+        jnc .r
+        cmp ax, 0x7300
+        je .old
+        cmp ax, 1
+        stc
+        jne .r
+.old:
+        mov al, [drv]
+        mov cx, 0xFFFF
+        mov bx, packet
+        test si, si
+        jnz .w
+        int 0x25
+        pop word [junk]
+        ret
+.w:
+        int 0x26
+        pop word [junk]
+.r:
+        ret
 
 usage:
         mov si, msg_usage
@@ -329,13 +391,15 @@ msg_title   db "Hispa-DOS SYS 0.9", 13, 10, 0
 msg_usage   db "Uso: SYS [origen:[ruta]] unidad:", 13, 10, 0
 msg_same    db "No se puede transferir el sistema a la unidad de arranque.", 13, 10, 0
 msg_ioerr   db "Error al leer o escribir el disco.", 13, 10, 0
-msg_nofat   db "La unidad no tiene un sistema de ficheros FAT12/FAT16.", 13, 10, 0
+msg_nofat   db "La unidad no tiene un sistema de ficheros FAT.", 13, 10, 0
 msg_cperr   db "No se han podido copiar los ficheros del sistema.", 13, 10, 0
 msg_ok      db "Sistema transferido a la unidad "
 msg_drv     db "?:", 13, 10, 0
 
 boot12:     incbin "build/boot.bin"
 boot16:     incbin "build/boot16.bin"
+boot32:     incbin "build/boot32.bin"
+is32:       db 0
 boot:       times 512 db 0
 params:     times 40 db 0
 buf:

@@ -172,6 +172,50 @@ d_dta_poner:
 ; leer; ECX=1 si es un CD (sus datos son de ISO 9660)
 d_libre:
         push ebx
+        ; primero, la de FAT32 (INT 21h 7303h: sin el tope de 2 GB de 36h)
+        push esi
+        push edi
+        push eax
+        mov edi, [dbuf]
+        add al, 'A'
+        mov [edi], al
+        mov dword [edi+1], 0x005C3A     ; «:\»
+        mov dword [rl+RL_EAX], 0x7303
+        mov [rl+RL_EDX], edi
+        add edi, DB_R2
+        mov word [edi], 0x2C
+        mov [rl+RL_EDI], edi
+        mov dword [rl+RL_ECX], 0x2C
+        call d_int21
+        pop eax
+        jc .v
+        mov esi, edi
+        mov eax, [esi+0x04]             ; sectores por grupo
+        imul eax, [esi+0x08]            ; octetos por sector
+        shr eax, 9                      ; en medios KB
+        mov ebx, eax
+        mul dword [esi+0x10]            ; grupos en total
+        shrd eax, edx, 1
+        push eax
+        mov eax, ebx
+        mul dword [esi+0x0C]            ; grupos libres
+        shrd eax, edx, 1
+        pop edx
+        xor ecx, ecx
+        cmp dword [esi+0x0C], 0         ; (un CD: 4 sectores por grupo y nada libre)
+        jne .f
+        cmp dword [esi+0x04], 4
+        jne .f
+        inc ecx
+.f:
+        pop edi
+        pop esi
+        pop ebx
+        clc
+        ret
+.v:
+        pop edi
+        pop esi
         movzx edx, al
         inc edx
         mov dword [rl+RL_EAX], 0x3600

@@ -12007,6 +12007,10 @@ fn_44:
         push di
         add di, 1
         mov cx, 6 + 25
+        cmp byte [F_CH], 0x48
+        jne .gz
+        mov cx, 6 + 53
+.gz:
         xor al, al
         rep stosb
         pop di
@@ -12047,6 +12051,16 @@ fn_44:
         jmp .gcommon
 .g32:
         mov [es:di+7+21], eax
+        ; partición FAT32 (0Bh/0Ch) sin formato: como IO.SYS de MS-DOS 7.1,
+        ; el BPB de la categoría 48h es de FAT32 (raíz en el clúster 2):
+        ; así FORMAT sabe qué sistema de ficheros le toca
+        cmp byte [F_CH], 0x48
+        jne .gcommon
+        mov al, [cur_drv+D_PTYPE]
+        sub al, 0x0B
+        cmp al, 1
+        ja .gcommon
+        mov byte [es:di+7+33], 2
 .gcommon:
         mov ax, [cur_drv+D_SPT]
         mov [es:di+7+13], ax

@@ -12,7 +12,9 @@
 ;  procesador) y sigue la cadena de clústeres de cada archivo y carpeta.
 ;  Para cada clúster guarda qué archivo lo usa (un número por entrada), y así
 ;  encuentra los vínculos cruzados y las unidades de asignación perdidas.
-;  Discos FAT12 y FAT16 con sectores de 512 bytes, con o sin particiones.
+;  Discos FAT12 y FAT16 con sectores de 512 bytes, con o sin particiones. En
+;  FAT32 (revisar32.inc), como CHKDSK de MS-DOS 7.1: informe sin corregir.
+;  Sectores absolutos con INT 21h AX=7305h (si no existe, con INT 25h/26h).
 ; =============================================================================
         cpu 386
         bits 16
@@ -359,6 +361,29 @@ disk_io:
         mov [pk_cnt], cx
         mov [pk_buf], bx
         mov [pk_buf+2], dx
+        cmp byte [no7305], 0
+        jne .old
+        xor si, si
+        cmp byte [io_fn], 0x26
+        jne .r7
+        inc si
+.r7:
+        mov dl, [drive]
+        inc dl
+        mov bx, packet
+        mov cx, 0xFFFF
+        mov ax, 0x7305
+        stc
+        int 0x21
+        jnc .x
+        cmp ax, 0x7300                  ; (no existe: INT 25h/26h)
+        je .no
+        cmp ax, 1
+        stc
+        jne .x
+.no:
+        mov byte [no7305], 1
+.old:
         mov al, [drive]
         mov bx, packet
         mov cx, 0xFFFF
@@ -370,6 +395,7 @@ disk_io:
         int 0x26
 .f:
         pop dx                          ; los indicadores que deja en la pila
+.x:
         popad
         ret
 
@@ -436,7 +462,7 @@ read_boot:
         mov [nfats], cl
         movzx edx, word [boot+0x16]     ; sectores por FAT (0 = FAT32)
         test edx, edx
-        jz not_fat
+        jz r32_main
         mov [spf], dx
         imul edx, ecx
         add eax, edx
@@ -766,15 +792,22 @@ show_head:
 .nd:
         call crlf
 .ser:
-        cmp byte [boot+0x26], 0x29
+        mov bx, [ebpb]                  ; (FAT32: 42h)
+        test bx, bx
+        jnz .sb
+        mov bx, 0x26
+        mov [ebpb], bx
+.sb:
+        cmp byte [boot+bx], 0x29
         jne .r
         mov si, msg_ser
         call puts
-        mov ax, [boot+0x29]
+        mov ax, [boot+bx+3]
         call puthex4
         mov al, '-'
         call putc
-        mov ax, [boot+0x27]
+        mov bx, [ebpb]
+        mov ax, [boot+bx+1]
         call puthex4
         call crlf
 .r:
@@ -2021,6 +2054,7 @@ summary:
         call puts
         ret
 
+%include "utils/revisar32.inc"
 %include "util.inc"
 
 s_dot       db ".          "
@@ -2038,7 +2072,10 @@ msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_badpath db "Ruta no válida", 13, 10, 0
 msg_net     db "REVISAR no se puede usar en una unidad de red", 13, 10, 0
 msg_cd      db "REVISAR no se puede usar en una unidad de CD/DVD", 13, 10, 0
-msg_notfat  db "El disco no tiene un sistema de archivos FAT12 o FAT16 válido", 13, 10, 0
+msg_notfat  db "El disco no tiene un sistema de archivos FAT válido", 13, 10, 0
+msg_f32nof  db "La unidad es FAT32: como CHKDSK de MS-DOS 7.1, REVISAR solo informa", 13, 10
+            db "(no corrige nada aunque se indique /F).", 13, 10, 13, 10, 0
+msg_xl32    db "   Tiene un vínculo cruzado en la unidad de asignación ", 0
 msg_mem     db "No hay memoria suficiente", 13, 10, 0
 msg_rderr   db "No se puede leer el disco", 13, 10, 0
 msg_wrerr   db "No se puede escribir en el disco", 13, 10, 0
@@ -2115,6 +2152,7 @@ noncontig   resb 1
 fl_xl       resb 1
 fl_rep      resb 1
 partial     resb 1
+no7305      resb 1
             alignb 4
 bpc         resd 1
 fat_lba     resd 1
@@ -2134,6 +2172,27 @@ nchains     resd 1
 b_lost      resd 1
 n_rec       resd 1
 b_rec       resd 1
+spf32       resd 1
+nclus32     resd 1
+endc        resd 1
+rootc       resd 1
+dircap      resd 1
+fc_sec      resd 1
+win_lo      resd 1
+win_hi      resd 1
+winsz       resd 1
+lb_clus     resd 1
+e_first     resd 1
+e_need      resd 1
+e_blocks    resd 1
+e_prev      resd 1
+e_next      resd 1
+c_hid       resd 1
+c_dir       resd 1
+c_usr       resd 1
+bmseg       resw 1
+bmpar       resw 1
+ebpb        resw 1
 spf         resw 1
 root_secs   resw 1
 nclus       resw 1
@@ -2166,6 +2225,10 @@ spec_dir    resb 132
 path        resb 600
 frames      resb FRSZ*MAXDEPTH
 xl_tab      resb XLSZ*XLMAX
+frames32    resb G_SZ*MAXDEPTH
+ent32       resb 32
+n64buf      resb 32
+fatc        resb 512*R32_FATN
 u_numbuf    resb 16
 u_lbuf      resb 84
 boot        resb 512

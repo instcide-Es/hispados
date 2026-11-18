@@ -6151,6 +6151,10 @@ disk_sec0:
         je .gotp
         cmp al, 0x0E
         je .gotp
+        cmp al, 0x0B                ; FAT32 (MS-DOS 7.1)
+        je .gotp
+        cmp al, 0x0C
+        je .gotp
         add si, 16
         loop .pe
         jmp .err
@@ -6167,10 +6171,9 @@ disk_sec0:
         cmp word [cs:bx+0x0B], 512
         jne .err
 .bpb:
-        ; ¿de verdad FAT12/FAT16? Un FAT32 o un NTFS sin particiones también
-        ; llevan 512 en +0Bh y F8h en +15h, pero no tienen sectores por FAT
-        ; de 16 bits ni entradas de directorio raíz: al núcleo no se le da
-        ; un BPB así
+        ; ¿de verdad FAT? Un NTFS sin particiones también lleva 512 en +0Bh
+        ; y F8h en +15h, pero no tiene sectores por FAT ni de 16 bits ni de
+        ; 32 (FAT32): al núcleo no se le da un BPB así
         mov word [fail_msg], msg_nofat
         cmp byte [cs:bx+0x0D], 0            ; sectores por clúster
         je .err
@@ -6178,10 +6181,22 @@ disk_sec0:
         je .err
         cmp byte [cs:bx+0x10], 0            ; número de FAT
         je .err
+        cmp word [cs:bx+0x16], 0            ; sectores por FAT
+        jne .f16
+        ; FAT32 (MS-DOS 7.1): sin raíz fija, con los sectores por FAT en
+        ; +24h y la versión 0.0; el núcleo lo monta leyendo el sector de
+        ; arranque (el BPB de 25 octetos no llega para FAT32)
+        cmp word [cs:bx+0x11], 0
+        jne .err
+        cmp dword [cs:bx+0x24], 0
+        je .err
+        cmp word [cs:bx+0x2A], 0
+        jne .err
+        jmp .cpy
+.f16:
         cmp word [cs:bx+0x11], 0            ; entradas del directorio raíz
         je .err
-        cmp word [cs:bx+0x16], 0            ; sectores por FAT
-        je .err
+.cpy:
         mov si, bx
         add si, 0x0B
         mov di, bpb
@@ -6326,7 +6341,7 @@ msg_cfg     db "USB: ha fallado Set Configuration.", 13, 10, 0
 msg_epcfg   db "USB: ha fallado Configure Endpoint.", 13, 10, 0
 msg_scsi    db "El disco USB no responde.", 13, 10, 0
 msg_bsize   db "El disco USB no tiene sectores de 512 bytes.", 13, 10, 0
-msg_nofat   db "El disco USB no tiene un sistema de archivos FAT12/FAT16.", 13, 10, 0
+msg_nofat   db "El disco USB no tiene un sistema de archivos FAT.", 13, 10, 0
 %include "usb_hcini.inc"
 %include "usb_red.inc"
 section .text

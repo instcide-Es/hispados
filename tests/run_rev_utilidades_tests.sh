@@ -141,7 +141,7 @@ run $T/log3 "" $G 4 "FORMATEA C: /AUTOTEST" "COPY A:\\KERNEL.SYS C:\\"
 ptable $G > $T/pt
 read -r _ _ st1 sz1 tot1 < <(sed -n 1p $T/pt)
 [ "${tot1:-0}" = 20480 ] && ok "FORMATEA usa el tamaño de la partición (20.480 sectores)" || ko "FORMATEA: BPB de ${tot1:-?} sectores en una partición de 20.480"
-check $T/log3 "Formateando 10.00M"
+check $T/log3 "Formateando 10,00M"
 dd if=$G of=$T/p.img bs=512 skip=63 count=20480 status=none
 fsck_ok $T/p.img "C: recién formateada"
 if mtype -i $G@@$((21168 * 512)) ::DATOS.BIN 2>/dev/null | cmp -s - $T/DATOS.BIN; then ok "D: intacta"; else ko "D:"; fi

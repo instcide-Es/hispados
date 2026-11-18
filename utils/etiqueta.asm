@@ -8,7 +8,10 @@
 ;     (ENTRAR sin escribir nada = ninguna; si había una, pregunta si se quita).
 ;  La etiqueta se guarda en la entrada de volumen del directorio raíz y, si
 ;  el disco tiene BPB extendido, también en el sector de arranque.
-;  Usa INT 25h/26h (sectores absolutos): discos FAT12/FAT16.
+;  Sectores absolutos con INT 21h AX=7305h (si el sistema no la tiene, con
+;  INT 25h/26h): discos FAT12, FAT16 y FAT32 (en FAT32 la raíz es una cadena
+;  de clústeres y el BPB extendido va 1Ch más allá; se escribe también la
+;  copia del sector de arranque).
 ; =============================================================================
         cpu 386
         bits 16
@@ -146,6 +149,29 @@ abs_sec:
         mov word [pk_cnt], 1
         mov [pk_buf], bx
         mov [pk_buf+2], ds
+        cmp byte [no7305], 0
+        jne .old
+        xor si, si
+        cmp byte [io_fn], 0x26
+        jne .r7
+        inc si
+.r7:
+        mov dl, [drive]
+        inc dl
+        mov bx, packet
+        mov cx, 0xFFFF
+        mov ax, 0x7305
+        stc
+        int 0x21
+        jnc .x
+        cmp ax, 0x7300              ; (no existe: INT 25h/26h)
+        je .no
+        cmp ax, 1
+        stc
+        jne .x
+.no:
+        mov byte [no7305], 1
+.old:
         mov al, [drive]
         mov bx, packet
         mov cx, 0xFFFF
@@ -157,6 +183,7 @@ abs_sec:
         int 0x26
 .f:
         pop dx                      ; los indicadores que deja en la pila
+.x:
         popad
         ret
 
@@ -171,9 +198,10 @@ read_boot:
         movzx eax, word [boot+0x0E]     ; reservados
         movzx ecx, byte [boot+0x10]     ; número de FAT
         jecxz .e
+        mov word [ebpb], 0x26
         movzx edx, word [boot+0x16]     ; sectores por FAT
         test edx, edx
-        jz .e                           ; FAT32: no se admite
+        jz .f32
         imul edx, ecx
         add eax, edx
         mov [root_lba], eax
@@ -189,16 +217,94 @@ read_boot:
 .e:
         stc
         ret
+        ; FAT32: la raíz empieza en el clúster [+2Ch]; sus sectores se buscan
+        ; siguiendo la cadena (root_sec)
+.f32:
+        mov [fat_lba], eax
+        mov edx, [boot+0x24]
+        test edx, edx
+        jz .e
+        imul edx, ecx
+        add eax, edx
+        mov [data_lba], eax
+        cmp byte [boot+0x0D], 0
+        je .e
+        mov eax, [boot+0x2C]
+        cmp eax, 2
+        jb .e
+        mov [root_clus], eax
+        mov byte [is32], 1
+        mov word [ebpb], 0x42
+        mov word [root_secs], 0xFFFF    ; (hasta el final de la cadena)
+        clc
+        ret
+
+; CX = sector del directorio raíz -> EAX = su sector en el disco; CF al
+; acabarse (FAT32: la cadena de clústeres de la raíz)
+root_sec:
+        cmp byte [is32], 0
+        jne .f32
+        cmp cx, [root_secs]
+        cmc
+        jc .r
+        movzx eax, cx
+        add eax, [root_lba]
+.r:
+        ret
+.f32:
+        push ebx
+        push ecx
+        push edx
+        movzx eax, cx
+        movzx ecx, byte [boot+0x0D]
+        xor edx, edx
+        div ecx                         ; EAX = clúster de la cadena, EDX = sector
+        mov ecx, eax
+        mov eax, [root_clus]
+.c:
+        jecxz .got
+        ; el siguiente de la cadena: FAT32, 128 entradas por sector
+        push eax
+        shr eax, 7
+        add eax, [fat_lba]
+        mov bx, fatbuf
+        call read_sec
+        pop ebx
+        jc .x
+        and bx, 127
+        shl bx, 2
+        mov eax, [fatbuf+bx]
+        and eax, 0x0FFFFFFF
+        cmp eax, 2
+        jb .end
+        cmp eax, 0x0FFFFFF7
+        jae .end
+        dec ecx
+        jmp .c
+.got:
+        sub eax, 2
+        movzx ecx, byte [boot+0x0D]
+        imul eax, ecx
+        add eax, edx
+        add eax, [data_lba]
+        clc
+        jmp .x
+.end:
+        stc
+.x:
+        pop edx
+        pop ecx
+        pop ebx
+        ret
 
 ; buscar la entrada de volumen (y un hueco libre) en el directorio raíz
 find_label:
         mov word [free_off], 0xFFFF
         xor cx, cx
 .s:
-        cmp cx, [root_secs]
-        jae .end
-        movzx eax, cx
-        add eax, [root_lba]
+        call root_sec
+        jc .end
+        mov [cur_lba], eax
         mov bx, dirbuf
         call read_sec
         jc .r
@@ -215,8 +321,7 @@ find_label:
         jz .n
         ; la etiqueta
         mov byte [have_lab], 1
-        movzx eax, cx
-        add eax, [root_lba]
+        mov eax, [cur_lba]
         mov [lab_lba], eax
         sub si, dirbuf
         mov [lab_off], si
@@ -244,8 +349,7 @@ find_label:
 note_free:
         cmp word [free_off], 0xFFFF
         jne .r
-        movzx eax, cx
-        add eax, [root_lba]
+        mov eax, [cur_lba]
         mov [free_lba], eax
         mov ax, si
         sub ax, dirbuf
@@ -282,15 +386,17 @@ show_info:
         mov si, msg_nol
         call puts
 .ser:
-        cmp byte [boot+0x26], 0x29
+        mov bx, [ebpb]
+        cmp byte [boot+bx], 0x29
         jne .r
         mov si, msg_ser
         call puts
-        mov ax, [boot+0x29]
+        mov ax, [boot+bx+3]
         call puthex4
         mov al, '-'
         call putc
-        mov ax, [boot+0x27]
+        mov bx, [ebpb]
+        mov ax, [boot+bx+1]
         call puthex4
         call crlf
 .r:
@@ -426,12 +532,24 @@ del_label:
         mov si, s_noname
 ; la copia de la etiqueta en el sector de arranque (BPB extendido)
 boot_label:
-        cmp byte [boot+0x26], 0x29
+        mov bx, [ebpb]
+        cmp byte [boot+bx], 0x29
         jne .r
-        mov di, boot+0x2B
+        lea di, [boot+bx+5]
         mov cx, 11
         rep movsb
         xor eax, eax
+        mov bx, boot
+        call write_sec
+        jc wr_err
+        ; FAT32: también la copia (normalmente en el sector 6)
+        cmp byte [is32], 0
+        je .r
+        movzx eax, word [boot+0x32]
+        test eax, eax
+        jz .r
+        cmp ax, [boot+0x0E]
+        jae .r
         mov bx, boot
         call write_sec
         jc wr_err
@@ -456,7 +574,7 @@ msg_del     db 13, 10, "¿Quitar la etiqueta actual del volumen (S/N)? ", 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_long    db "La etiqueta tiene más de 11 caracteres", 13, 10, 0
 msg_chars   db "Caracteres no válidos en la etiqueta del volumen", 13, 10, 0
-msg_rderr   db "No se puede leer el disco (o no es FAT12/FAT16)", 13, 10, 0
+msg_rderr   db "No se puede leer el disco (o no es FAT)", 13, 10, 0
 msg_wrerr   db "No se puede escribir en el disco", 13, 10, 0
 msg_full    db "No queda sitio en el directorio raíz", 13, 10, 0
 
@@ -480,11 +598,19 @@ lab_lba     resd 1
 free_lba    resd 1
 dir_time    resw 1
 dir_date    resw 1
+ebpb        resw 1                  ; dónde empieza el BPB extendido (29h)
+is32        resb 1
+no7305      resb 1
+fat_lba     resd 1
+data_lba    resd 1
+root_clus   resd 1
+cur_lba     resd 1
 newlab      resb 12
 curlab      resb 12
 u_numbuf    resb 16
 u_lbuf      resb 84
 boot        resb 512
 dirbuf      resb 512
+fatbuf      resb 512
             resb 512
 stack_top:

@@ -271,7 +271,7 @@ dd if=/dev/zero of=$T/z.img bs=1k count=1440 status=none
 tr -d '\r' < $T/log4.raw | iconv -f CP437 -t UTF-8 > $T/log4
 check $T/log4 "REVISAR no se puede usar en una unidad de CD/DVD"
 check $T/log4 "nivel-cd"
-check $T/log4 "El disco no tiene un sistema de archivos FAT12 o FAT16 válido"
+check $T/log4 "El disco no tiene un sistema de archivos FAT válido"
 check $T/log4 "nivel-nofat"
 [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/>REVISAR/,$p' $T/log4
 rm -rf $T

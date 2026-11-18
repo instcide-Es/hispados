@@ -1,7 +1,7 @@
 #!/bin/bash
 # Casos límite de los drivers (revisión de noviembre):
 #  1) HSPUSB y HSPCD no cambian FS/GS del programa que lee (usan el modo irreal);
-#  2) HSPUSB rechaza una memoria con FAT32 sin particiones (no es FAT12/16)
+#  2) HSPUSB monta una memoria con FAT32 sin particiones (como MS-DOS 7.1)
 #     en vez de dar al núcleo un BPB imposible;
 #  3) HSPRAM no escribe más allá de la memoria que tiene: si el disco pedido
 #     no cabe, lo dice y no se instala;
@@ -72,8 +72,11 @@ mkfs.fat -F 32 -n FAT32 $T/usb.img > /dev/null
     -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
 conv
 echo "== Hispa-DOS drivers: memoria USB con FAT32 =="
-check "El disco USB no tiene un sistema de archivos FAT12/FAT16."
-checkn "Disco USB: 64 MB en la unidad"
+# (hasta la 0.9.25 se rechazaba; desde FAT32 en el núcleo, como MS-DOS 7.1,
+# se monta: el núcleo lee el sector de arranque de FAT32 por el driver)
+checkn "El disco USB no tiene un sistema de archivos FAT"
+check "Disco USB: 64 MB en la unidad"
+check "El volumen de la unidad D es FAT32"
 if grep -q "^sigue-vivo" $T/log.txt && grep -q "^y-sigue" $T/log.txt; then echo "  OK   el sistema sigue en marcha"; else echo "  FAIL el sistema no sigue en marcha"; fail=1; fi
 show
 
