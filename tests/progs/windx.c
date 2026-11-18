@@ -201,12 +201,13 @@ static void fase_c(void) {
   if (prim) { Release(prim); prim = atras = NULL; }
   if (dd) { DD_RestoreDisplayMode(dd); Release(dd); dd = NULL; }
   comprueba(20, GetSystemMetrics(0) != 320 && GetSystemMetrics(0) != 640);
+  bombea(1000);                     /* (un silencio: en la grabación, cada cosa aparte) */
   /* un WAV en memoria con PlaySound y otro trozo por waveOut */
   memcpy(wav, "RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0data", 40);
   *(u32 *)(wav + 4) = 36 + 4000; *(u32 *)(wav + 40) = 4000;
   for (k = 0; k < 4000; k++) wav[44 + k] = (k / 8) & 1 ? 0xA0 : 0x60;
   comprueba(21, PlaySoundA((const char *)wav, NULL, 4 | 1) == 1);   /* SND_MEMORY | SND_ASYNC */
-  bombea(700);
+  bombea(1200);
   if (waveOutOpen(&wo, 0xFFFFFFFF, &f, (u32)al_wave, 0, 0x30000) == 0) {
     memset(&h, 0, sizeof h); h.d = wav + 44; h.n = 1600;
     waveOutPrepareHeader(wo, &h, sizeof h);
