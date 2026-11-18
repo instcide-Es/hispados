@@ -976,6 +976,8 @@ test: $(TEST_DEPS)
 	tests/run_yukon_tests.sh
 	tests/run_red32_tests.sh $(IMG)
 	tests/run_navegador_tests.sh $(IMG)
+	tests/run_navegador_js_tests.sh $(IMG)
+	tests/run_js_tests.sh $(IMG)
 	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_wifi_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)

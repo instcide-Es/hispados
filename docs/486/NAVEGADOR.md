@@ -328,10 +328,14 @@ texto (no dependen de Hispa Ventanas).
 
 | | |
 |---|---|
-| `NAVEGA.EXE` | 78 KB |
+| `NAVEGA.EXE` | 213 KB (78 KB sin JavaScript; el preludio, `dom.js`, va dentro: 70 KB de texto) |
+| `HSPJS.DLL` (QuickJS, con -O2: con -Os serían 513 KB, pero 1,8 veces más lento) | 851 KB |
+| `JS.EXE` | 7 KB |
 | `HSPTLS.DLL` (TLS, con BearSSL y 20 autoridades raíz) | 87 KB |
 | `WSOCK32.DLL` (TCP/IP y Winsock) | 23 KB |
-| El disquete «Internet» entero | 279 KB de 1.440 |
+| El disquete «Internet» entero | 1.276 KB de 1.440 (con HSPJS.DLL; sin ella, 405) |
+| JavaScript de una página de la biblioteca de ClicGest | 670-720 KB (1,2 MB como mucho); la de una salida (`/eventos/1`, 351 KB de HTML y Bootstrap), 1,9 MB. Se devuelve todo al dejar la página |
+| El motor recién hecho, sin página (JS.EXE) | 163 KB |
 | Memoria con una página de la biblioteca abierta | 1,6 MB (1.608 KB) |
 | Memoria con una página de 121 KB de HTML (unas 2.170 filas) | 2,6 MB (2.632 KB); no crece más con el resto de páginas de la prueba |
 | Memoria convencional | 16 KB (el búfer de DOS de HW32) + 19 KB (las tramas de red) |
@@ -354,7 +358,14 @@ tarde el servidor, descifrar la página y maquetarla.
 
 ## Límites
 
-- Sin JavaScript, sin imágenes, sin marcos (`<iframe>`), sin hojas de estilo
+- JavaScript: sin `prompt()` de verdad (pregunta si vale la respuesta que
+  trae la página), sin hojas de estilo calculadas (`getComputedStyle` sabe
+  si algo se ve, y poco más), sin medidas (`getBoundingClientRect`,
+  `offsetWidth`: de mentira, 0 si no se ve), sin `<canvas>`, sin
+  `Worker`, sin módulos (`import`) en las páginas, sin subir archivos con
+  `fetch` y sin `Atomics`. `MutationObserver` no avisa. Una petición de red a
+  la vez. Los guiones de otros sitios se cargan igual (no hay CORS).
+- Sin imágenes, sin marcos (`<iframe>`), sin hojas de estilo
   de fuera, sin subir archivos, sin descargas (para eso, `HTTPS.EXE`).
 - Una sola letra (fija): no hay cursiva ni tamaños; los títulos van en
   negrita y color. Las columnas de una página (rejillas de CSS, `float`) se
@@ -376,4 +387,22 @@ tarde el servidor, descifrar la página y maquetarla.
   prestar, devolver con su pregunta, Atrás y Adelante, la dirección a mano,
   los certificados malos, texto, Latin-1, una página grande, redirecciones y
   la memoria al cerrar. Mira las capturas y lo que recibe el servidor.
+  Va con `JavaScript=NO`: el Navegador sin guiones.
+- `tests/run_navegador_js_tests.sh`: el JavaScript, contra las páginas
+  `/js/` del mismo servidor (`tests/tools/nav_js.py`): un buscador que sugiere
+  al escribir (fetch y JSON, flechas, Intro y clic en una sugerencia),
+  pestañas y `<details>`, confirm y alert, onsubmit, localStorage (en
+  NAVEGA.ALM), setTimeout, XMLHttpRequest, DOMContentLoaded, un error que va
+  a NAVEGA.LOG, un bucle sin fin que se corta (`TiempoJS=3`), y con
+  `JavaScript=NO` el `<noscript>`. Primero en el anfitrión, si hay `gcc -m32`
+  con su biblioteca (`tests/navjs/`: html.c, pagina.c, http.c, dom.c y
+  script.c tal cual, con QuickJS para Linux, la página vuelta a texto y unas
+  órdenes: `clic`, `escribe`, `tecla`...), y luego en Hispa Ventanas.
+- `tests/run_js_tests.sh`: HSPJS.DLL con JS.EXE: las pruebas de QuickJS (el
+  lenguaje, clausuras, bucles, lo de serie y BigInt), lo que usa ClicGest y
+  las cuentas de Math, una excepción, el tope de tiempo.
+- `tests/navjs/clicgest_real.sh CARPETA`: contra clicgest.es de verdad (con
+  Internet; no va en `make test`): la demostración, el menú, el tutorial,
+  «Prestar» (sin prestar nada), las páginas de la biblioteca y las pestañas
+  de una salida; deja las capturas y NAVEGA.LOG.
 - `tests/run_red32_tests.sh`: la pila TCP/IP y TLS desde la consola.
