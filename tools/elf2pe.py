@@ -61,8 +61,8 @@ def tabla_hv(nombre):
     sal = {}
     for l in open(nombre, encoding='utf-8'):
         m = re.match(r"\s+W32F\s+\w+,\s*\d+,\s*(\d+),\s*'(\w+)'", l)
-        if m and m.group(1) in '12':
-            sal[m.group(2)] = ('USER32.dll', 'GDI32.dll')[int(m.group(1)) - 1]
+        if m and m.group(1) in '123':
+            sal[m.group(2)] = ('USER32.dll', 'GDI32.dll', 'COMDLG32.dll')[int(m.group(1)) - 1]
     return sal
 
 class Obj:

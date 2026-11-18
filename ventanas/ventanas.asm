@@ -2080,6 +2080,7 @@ alto_ini:
 %include "win32u.inc"               ; [HISPA-486] su USER32 y su GDI32
 %include "win32c.inc"               ; [HISPA-486] sus controles de serie
 %include "win32m.inc"               ; [HISPA-486] sus menús, recursos y diálogos
+%include "win32n.inc"               ; [NAVEGADOR] imágenes, Mayús, abrir y guardar, WinExec
 %endif
         align 16
 fin_archivo:

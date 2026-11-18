@@ -167,6 +167,15 @@ w32_dt_alto resd 1                  ;   y el alto de todo
 w32_wsp_delta resd 1                ; wsprintfA: PE_DELTA del programa,
 w32_wsp     resw 1                  ;   el relleno y la letra de las cifras
             alignb 4
+dib_w       resd 1                  ; [NAVEGADOR] SetDIBitsToDevice: el mapa (ancho,
+dib_h       resd 1                  ;   alto, octetos por fila, de arriba abajo,
+dib_paso    resd 1                  ;   dónde están los puntos)
+dib_arriba  resd 1
+dib_bits    resd 1
+dib_cw      resd 1                  ;   lo que se copia de cada fila
+dib_n       resd 1                  ;   y las filas copiadas
+dib_mapa    resb 256                ;   la tabla de colores, a la paleta
+dib_fila    resb DIB_FILA           ;   una fila, ya en la paleta
 ; ---- [Configuración] ajustes (ajustes.inc) ----
             alignb 4
 aj_rat_zurdo resd 1                 ; 1: botones del ratón intercambiados

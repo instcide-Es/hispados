@@ -3,6 +3,11 @@
 (tests/run_navegador_tests.sh, tests/run_red32_tests.sh): una «biblioteca» de
 mentira, parecida a la de ClicGest (entrada con galleta de sesión, lista en
 una tabla, préstamo y devolución con POST y redirección), por HTTP y HTTPS.
+Y lo que se añadió para usar ClicGest entero: la galleta de «recordarme»
+(que se guarda en el disco: Max-Age y Expires), imágenes (PNG, GIF, JPEG,
+data:, una rota y un SVG que no se puede ver), subir un archivo
+(multipart/form-data, con required y pattern), una descarga (un PDF con
+Content-Disposition) y <meta http-equiv=refresh>.
 
 uso: nav_servidor.py CARPETA PUERTO
   CARPETA: donde están los certificados (los hace la prueba con openssl) y
@@ -16,7 +21,7 @@ uso: nav_servidor.py CARPETA PUERTO
 Solo escucha en 127.0.0.1 (QEMU lo ve como 10.0.2.2).
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 """
-import os, random, ssl, sys, threading
+import base64, binascii, hashlib, os, random, ssl, struct, sys, threading, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
@@ -31,6 +36,57 @@ aviso = ['']
 cerrojo = threading.Lock()
 random.seed(7)
 BIN = bytes(random.getrandbits(8) for _ in range(150000))
+RECUERDA = 'R3CU3RDA'
+
+
+# ---- imágenes hechas aquí (sin Pillow): PNG, GIF; el JPEG lo hizo Pillow ----
+def png(w, h, color, alfa=False):
+    """un PNG liso (RGB, o RGBA con la mitad derecha transparente)"""
+    def trozo(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', binascii.crc32(t + d) & 0xFFFFFFFF)
+    filas = b''
+    for y in range(h):
+        if alfa:
+            filas += b'\0' + b''.join(bytes(color) + (b'\xff' if x < w // 2 else b'\0') for x in range(w))
+        else:
+            filas += b'\0' + bytes(color) * w
+    return (b'\x89PNG\r\n\x1a\n' + trozo(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6 if alfa else 2, 0, 0, 0))
+            + trozo(b'IDAT', zlib.compress(filas)) + trozo(b'IEND', b''))
+
+
+def gif(w, h, color):
+    """un GIF liso de 2 colores: LZW de 9 bits, con «borrar» cada poco (sin tabla que crezca)"""
+    pal = bytes(color) + b'\xff\xff\xff' + b'\0' * 762
+    cods, bits, nb, sal = [], 0, 0, bytearray()
+    for i in range(w * h):
+        if i % 200 == 0:
+            cods.append(256)
+        cods.append(0)
+    cods.append(257)
+    for c in cods:
+        bits |= c << nb
+        nb += 9
+        while nb >= 8:
+            sal.append(bits & 255)
+            bits >>= 8
+            nb -= 8
+    if nb:
+        sal.append(bits & 255)
+    bloques = b''.join(bytes([len(sal[i:i + 255])]) + bytes(sal[i:i + 255]) for i in range(0, len(sal), 255))
+    return (b'GIF89a' + struct.pack('<HHBBB', w, h, 0xF7, 0, 0) + pal + b',' + struct.pack('<HHHHB', 0, 0, w, h, 0)
+            + b'\x08' + bloques + b'\0;')
+
+
+TAPA_JPG = base64.b64decode('''/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAFoAPADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDgqKKK/LT8ZCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA9t/4UJ/1Nf8A5Tv/ALZR/wAKE/6mv/ynf/bK9tor8j/1nzT/AJ+/+Sx/yP2b/VPKf+fX/k0v8zxL/hQn/U1/+U7/AO2Uf8KE/wCpr/8AKd/9sr22ij/WfNP+fv8A5LH/ACD/AFTyn/n1/wCTS/zPEv8AhQn/AFNf/lO/+2Uf8KE/6mv/AMp3/wBsr22ij/WfNP8An7/5LH/IP9U8p/59f+TS/wAzxL/hQn/U1/8AlO/+2Uf8KE/6mv8A8p3/ANsr22ij/WfNP+fv/ksf8g/1Tyn/AJ9f+TS/zPEv+FCf9TX/AOU7/wC2Uf8AChP+pr/8p3/2yvbaKP8AWfNP+fv/AJLH/IP9U8p/59f+TS/zPEv+FCf9TX/5Tv8A7ZR/woT/AKmv/wAp3/2yvbaKP9Z80/5+/wDksf8AIP8AVPKf+fX/AJNL/M8S/wCFCf8AU1/+U7/7ZR/woT/qa/8Aynf/AGyvbaKP9Z80/wCfv/ksf8g/1Tyn/n1/5NL/ADPEv+FCf9TX/wCU7/7ZR/woT/qa/wDynf8A2yvbaKP9Z80/5+/+Sx/yD/VPKf8An1/5NL/M8S/4UJ/1Nf8A5Tv/ALZR/wAKE/6mv/ynf/bK9too/wBZ80/5+/8Aksf8g/1Tyn/n1/5NL/M8S/4UJ/1Nf/lO/wDtlH/ChP8Aqa//ACnf/bK9too/1nzT/n7/AOSx/wAg/wBU8p/59f8Ak0v8zxL/AIUJ/wBTX/5Tv/tlH/ChP+pr/wDKd/8AbK9too/1nzT/AJ+/+Sx/yD/VPKf+fX/k0v8AM8S/4UJ/1Nf/AJTv/tlH/ChP+pr/APKd/wDbK9too/1nzT/n7/5LH/IP9U8p/wCfX/k0v8zxL/hQn/U1/wDlO/8AtlH/AAoT/qa//Kd/9sr22ij/AFnzT/n7/wCSx/yD/VPKf+fX/k0v8zxL/hQn/U1/+U7/AO2Uf8KE/wCpr/8AKd/9sr22ij/WfNP+fv8A5LH/ACD/AFTyn/n1/wCTS/zPEv8AhQn/AFNf/lO/+2Uf8KE/6mv/AMp3/wBsr22ij/WfNP8An7/5LH/IP9U8p/59f+TS/wAwooorwD6IKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigD/2Q==''')   # 240x360: arriba verde (0,153,0), abajo amarillo (Pillow, calidad 85)
+LOGO_PNG = png(96, 36, (255, 0, 0))           # rojo, con width y height en la página
+AZUL_GIF = gif(40, 40, (0, 0, 255))           # azul, sin medidas en la página
+ICONO_PNG = png(16, 16, (255, 0, 255), alfa=True)   # magenta y transparente: un icono en la línea
+DATA_PNG = base64.b64encode(png(8, 8, (0, 255, 255))).decode()
+PDF = (b'%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+       b'3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n'
+       b'4 0 obj<</Length 52>>stream\nBT /F1 18 Tf 20 120 Td (RECIBO DE PRUEBA 42) Tj ET\nendstream endobj\n'
+       b'5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n')
+subida = {}             # la portada subida: nombre, tipo, datos
 
 CAB = ('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>%s</title>'
        '<style>body{font-family:sans-serif}.oculto{display:none}.aviso{background:#fff3cd;color:#333}'
@@ -51,8 +107,9 @@ class Pedido(BaseHTTPRequestHandler):
 
     def apunta(self, cuerpo=''):
         with cerrojo, open(os.path.join(CARPETA, 'pedidos.log'), 'a', encoding='utf-8') as f:
-            f.write('%s %s | %s | %s | %s | %s\n' % (self.command, self.path, self.headers.get('Cookie', '-'), cuerpo,
-                                                     self.headers.get('User-Agent', '-'), self.headers.get('Accept-Language', '-')))
+            f.write('%s %s | %s | %s | %s | %s | %s\n' % (self.command, self.path, self.headers.get('Cookie', '-'), cuerpo,
+                                                          self.headers.get('User-Agent', '-'), self.headers.get('Accept-Language', '-'),
+                                                          self.headers.get('Accept', '-')))
 
     def manda(self, datos, tipo='text/html; charset=UTF-8', estado=200, cab=(), trozos=False):
         self.send_response(estado)
@@ -75,12 +132,15 @@ class Pedido(BaseHTTPRequestHandler):
         self.manda(b'', estado=estado, cab=(('Location', a),) + tuple(cab))
 
     def con_sesion(self):
-        return ('SESION=' + SESION) in self.headers.get('Cookie', '')
+        c = self.headers.get('Cookie', '')
+        return ('SESION=' + SESION) in c or ('RECUERDA=' + RECUERDA) in c
 
     def do_GET(self):
         u = urlsplit(self.path)
         q = parse_qs(u.query)
         self.apunta()
+        if u.path == '/' and ('RECUERDA=' + RECUERDA) in self.headers.get('Cookie', ''):
+            return self.redirige('/biblioteca')      # «recordarme»: dentro sin escribir la clave
         if u.path == '/':
             err = '<p class="aviso">Usuario o clave incorrectos.</p>' if 'error' in q else ''
             self.manda(pagina('Entrada - Biblioteca de pruebas',
@@ -100,7 +160,7 @@ class Pedido(BaseHTTPRequestHandler):
                     for n, (t, a) in LIBROS.items())
             self.manda(pagina('Libros - Biblioteca de pruebas',
                 '<nav><a href="/biblioteca">Libros</a> <a href="/prestar">Prestar un libro</a> '
-                '<a href="/devolver">Devolver</a></nav><h1>Libros</h1>'
+                '<a href="/devolver">Devolver</a> <a href="/imagenes">Im&aacute;genes</a> <a href="/portada">Portada</a></nav><h1>Libros</h1>'
                 + ('<div class="aviso">%s</div>' % av if av else '') +
                 '<div style="display:none">NO-DEBE-VERSE-1</div><p hidden>NO-DEBE-VERSE-2</p>'
                 '<div class="d-none">NO-DEBE-VERSE-3</div><span class="oculto">NO-DEBE-VERSE-5</span>'
@@ -156,6 +216,42 @@ class Pedido(BaseHTTPRequestHandler):
                   ('/cierra', 'Sin longitud'), ('/noesta', 'No existe'), ('/archivo.bin', 'Un archivo'),
                   ('javascript:alert(1)', 'Solo JavaScript'))
             self.manda(pagina('Enlaces de prueba', ''.join('<p><a href="%s">%s</a></p>' % l for l in ls)))
+        elif u.path == '/imagenes':
+            self.manda(pagina('Imágenes de prueba',
+                '<style>.portada{width:56px;height:80px;border:1px solid #ccc}</style><h1>Im&aacute;genes</h1>'
+                '<p>Logo: <img src="/logo.png" alt="Logo" width="96" height="36"></p>'
+                '<p><a href="/final"><img src="/tapa.jpg" class="portada" alt=""></a> Una portada con enlace</p>'
+                '<p><img src="/azul.gif" alt="Azul"> sin medidas</p>'
+                '<p>Icono <img src="/icono.png" width="16" height="16" alt="i"> en la l&iacute;nea y '
+                '<img src="data:image/png;base64,' + DATA_PNG + '" alt="dentro"> dentro de la p&aacute;gina.</p>'
+                '<p>Rota: <img src="/rota.png" alt="ROTA"> y un dibujo: <img src="/dibujo.svg" alt="SVG"></p>'
+                '<p>FIN-IMAGENES</p>'))
+        elif u.path in ('/logo.png', '/tapa.jpg', '/azul.gif', '/icono.png', '/subida.img'):
+            if u.path == '/subida.img':
+                if not subida:
+                    return self.manda(b'', estado=404)
+                return self.manda(subida['datos'], tipo=subida['tipo'])
+            d = {'/logo.png': (LOGO_PNG, 'image/png'), '/tapa.jpg': (TAPA_JPG, 'image/jpeg'),
+                 '/azul.gif': (AZUL_GIF, 'image/gif'), '/icono.png': (ICONO_PNG, 'image/png')}[u.path]
+            self.manda(d[0], tipo=d[1], cab=(('Cache-Control', 'max-age=2592000'),))
+        elif u.path == '/dibujo.svg':
+            self.manda(b'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>', tipo='image/svg+xml')
+        elif u.path == '/portada':
+            if not self.con_sesion():
+                return self.redirige('/?error=sesion')
+            hecho = ('<div class="aviso">Subida: %s (%d octetos, %s).</div><p><img src="/subida.img" alt="la subida"></p>'
+                     % (subida['nombre'], len(subida['datos']), subida['tipo'])) if 'hecho' in q and subida else ''
+            self.manda(pagina('Portada - Biblioteca de pruebas', '<h1>Portada del libro</h1>' + hecho +
+                '<form method="post" action="/portada" enctype="multipart/form-data">'
+                '<input type="hidden" name="ficha" value="%s">'
+                '<p><label for="portada">Portada</label> <input type="file" id="portada" name="portada" accept="image/jpeg,image/png" required></p>'
+                '<p><label for="titulo">T&iacute;tulo</label> <input type="text" id="titulo" name="titulo" pattern="[A-Za-z ]{3,}" title="Solo letras, tres o m&aacute;s." size="20"></p>'
+                '<p><button type="submit">Subir</button></p></form>'
+                '<p><a href="/recibo.pdf">Recibo en PDF</a> &middot; <a href="/refresca">Se refresca solo</a></p>' % FICHA))
+        elif u.path == '/recibo.pdf':
+            self.manda(PDF, tipo='application/pdf', cab=(('Content-Disposition', 'attachment; filename="Recibo 2026-11.pdf"'),))
+        elif u.path == '/refresca':
+            self.manda(pagina('Se refresca', '<meta http-equiv="refresh" content="1; url=/final"><p>Espere un momento...</p>'))
         elif u.path == '/redir':
             self.redirige('/redir2')
         elif u.path == '/redir2':
@@ -186,15 +282,45 @@ class Pedido(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get('Content-Length', '0'))
-        cuerpo = self.rfile.read(n).decode('ascii', 'replace')
-        q = parse_qs(cuerpo, keep_blank_values=True)
-        self.apunta(cuerpo)
+        crudo = self.rfile.read(n)
+        tipo = self.headers.get('Content-Type', '')
+        if tipo.startswith('multipart/form-data'):
+            # las partes, una a una: los campos y el archivo (lo que se apunta
+            # del archivo: nombre, tipo, octetos y el principio de su SHA-1)
+            frontera = tipo.split('boundary=', 1)[1].strip('"').encode()
+            q, apunte = {}, []
+            for parte in crudo.split(b'--' + frontera)[1:]:
+                if parte.startswith(b'--'):
+                    break
+                cab, _, datos = parte[2:].partition(b'\r\n\r\n')
+                datos = datos[:-2] if datos.endswith(b'\r\n') else datos
+                cab = cab.decode('utf-8', 'replace')
+                nombre = cab.split('name="', 1)[1].split('"', 1)[0]
+                if 'filename="' in cab:
+                    fn = cab.split('filename="', 1)[1].split('"', 1)[0]
+                    ct = cab.split('Content-Type:', 1)[1].strip() if 'Content-Type:' in cab else '?'
+                    q[nombre] = [(fn, ct, datos)]
+                    apunte.append('%s=%s:%s:%d:%s' % (nombre, fn, ct, len(datos), hashlib.sha1(datos).hexdigest()[:8]))
+                else:
+                    q[nombre] = [datos.decode('utf-8', 'replace')]
+                    apunte.append('%s=%s' % (nombre, q[nombre][0]))
+            cuerpo = '&'.join(apunte)
+            self.apunta('[multipart] ' + cuerpo)
+        else:
+            cuerpo = crudo.decode('ascii', 'replace')
+            q = parse_qs(cuerpo, keep_blank_values=True)
+            self.apunta(cuerpo)
         v = lambda k: q.get(k, [''])[0]
         if self.path == '/entrar':
             if v('usuario') == 'maria' and v('clave') == 'secreto' and v('ficha') == FICHA:
                 seguro = '; Secure' if isinstance(self.connection, ssl.SSLSocket) else ''
-                return self.redirige('/biblioteca', cab=(('Set-Cookie', 'SESION=%s; Path=/; HttpOnly; SameSite=Lax%s' % (SESION, seguro)),
-                                                         ('Set-Cookie', 'vieja=1; Path=/; Max-Age=0')))
+                cab = (('Set-Cookie', 'SESION=%s; Path=/; HttpOnly; SameSite=Lax%s' % (SESION, seguro)),
+                       ('Set-Cookie', 'vieja=1; Path=/; Max-Age=0'),
+                       ('Set-Cookie', 'caduca=1; Path=/; Expires=Thu, 01 Jan 2015 00:00:00 GMT'))
+                if v('recordar') == '1':        # «recordarme»: una galleta que dura 180 días, y otra con Expires
+                    cab += (('Set-Cookie', 'RECUERDA=%s; Path=/; Max-Age=15552000; HttpOnly; SameSite=Lax%s' % (RECUERDA, seguro)),
+                            ('Set-Cookie', 'PREF=azul; Path=/; Expires=Wed, 21 Oct 2037 07:28:00 GMT'))
+                return self.redirige('/biblioteca', cab=cab)
             return self.redirige('/?error=1')
         if not self.con_sesion() or v('ficha') != FICHA:
             return self.redirige('/?error=sesion')
@@ -208,6 +334,12 @@ class Pedido(BaseHTTPRequestHandler):
                 else:
                     aviso[0] = 'No se ha podido prestar.'
             return self.redirige('/biblioteca', estado=303)
+        if self.path == '/portada':
+            if 'portada' in q and isinstance(q['portada'][0], tuple) and q['portada'][0][2]:
+                fn, ct, datos = q['portada'][0]
+                subida.update(nombre=fn, tipo=ct, datos=datos)
+                return self.redirige('/portada?hecho=1', estado=303)
+            return self.redirige('/portada?falta=1', estado=303)
         if self.path == '/devolver':
             with cerrojo:
                 lib = int(v('libro') or 0)

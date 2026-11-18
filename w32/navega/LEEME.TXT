@@ -7,6 +7,10 @@ Hispa-486: disquete «Internet»
   HSPTLS.DLL   las conexiones cifradas (TLS 1.2)
   HW32.COM y MSVCRT.DLL   lo que necesita todo programa Hispa32
   NAVEGA.INI   los ajustes del Navegador (la página de inicio, los favoritos)
+  GALLETAS.TXT (lo escribe el Navegador al cerrarse) las galletas que piden
+               durar, como la de «Mantener la sesión iniciada» de ClicGest:
+               así no hay que entrar cada vez. Borrarlo es «cerrar la sesión»
+               en este equipo. Con Galletas=NO en NAVEGA.INI no se escribe.
 
 Antes de entrar en Hispa Ventanas hay que cargar el controlador de la
 tarjeta de red:  HSPRED  (y hace falta HSPXMS en CONFIG.SYS).

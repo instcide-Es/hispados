@@ -29,6 +29,7 @@ typedef struct { HANDLE hdc; int fErase; RECT rcPaint; int fRestore, fIncUpdate;
 #define WM_CLOSE 0x0010
 #define WM_QUIT 0x0012
 #define WM_ERASEBKGND 0x0014
+#define WM_TIMER 0x0113
 #define WM_KEYDOWN 0x0100
 #define WM_CHAR 0x0102
 #define WM_MOUSEMOVE 0x0200
@@ -52,6 +53,7 @@ typedef struct { HANDLE hdc; int fErase; RECT rcPaint; int fRestore, fIncUpdate;
 #define VK_F6 0x75
 #define MB_YESNO 4
 #define MB_OK 0
+#define MB_ICONQUESTION 0x20
 #define IDYES 6
 HANDLE WINAPI GetModuleHandleA(const char *);
 u32 WINAPI GetModuleFileNameA(HANDLE, char *, u32);
@@ -84,10 +86,21 @@ int WINAPI SetBkMode(HANDLE, int);
 HANDLE WINAPI CreateSolidBrush(u32);
 int WINAPI DeleteObject(HANDLE);
 void WINAPI TlsAzar(const void *, int);
-typedef struct FILE FILE;
-FILE *fopen(const char *, const char *);
-char *fgets(char *, int, FILE *);
-int fclose(FILE *);
+u32 WINAPI GetTickCount(void);
+u32 WINAPI SetTimer(HANDLE, u32, u32, void *);
+int WINAPI KillTimer(HANDLE, u32);
+short WINAPI GetKeyState(int);
+u32 WINAPI WinExec(const char *, u32);
+typedef struct { u32 biSize; int biWidth, biHeight; u16 biPlanes, biBitCount; u32 biCompression, biSizeImage;
+                 int biXPelsPerMeter, biYPelsPerMeter; u32 biClrUsed, biClrImportant; u16 colores[256]; } BMI;
+int WINAPI SetDIBitsToDevice(HANDLE, int, int, u32, u32, int, int, u32, u32, const void *, const BMI *, u32);
+typedef struct {
+  u32 lStructSize; HANDLE hwndOwner, hInstance; const char *lpstrFilter; char *lpstrCustomFilter; u32 nMaxCustFilter, nFilterIndex;
+  char *lpstrFile; u32 nMaxFile; char *lpstrFileTitle; u32 nMaxFileTitle; const char *lpstrInitialDir, *lpstrTitle;
+  u32 Flags; u16 nFileOffset, nFileExtension; const char *lpstrDefExt; u32 lCustData; void *lpfnHook; const char *lpTemplateName;
+} OPENFILENAMEA;
+int WINAPI GetOpenFileNameA(OPENFILENAMEA *);
+int WINAPI GetSaveFileNameA(OPENFILENAMEA *);
 
 /* ---- medidas (puntos) y colores (la paleta de Hispa Ventanas) ---- */
 #define LW 8                   /* una letra */
@@ -126,6 +139,22 @@ static int arrastra;           /* se arrastra el cursor de la barra de desplazam
 static HANDLE pinceles[80];
 static u32 pincel_color[80];
 static int n_pinceles;
+/* las imágenes: la que se está bajando, la petición y lo ya visto (para no
+ * bajar otra vez el logotipo en cada página) */
+static Pet ipet;
+static int icarga = -1, iredirs, i_remaq, i_hechas;
+static u32 i_remaq_t;
+#define CACHE_N 16
+#define CACHE_MAX (320u << 10)
+static struct { char *url; int pw, ph, w, h; u8 *px; u32 uso; } cache[CACHE_N];
+static u32 cache_uso;
+/* el refresco de <meta http-equiv=refresh>, y lo de las descargas */
+static char *refresco;
+static char dir_descargas[150], dir_hispados[150];
+#define T_REFRESCO 1
+static void img_cancela(void);
+static void remaqueta(void);
+static void guarda_galletas(void);
 
 static HANDLE pincel(u32 c) {
   int k;
@@ -244,7 +273,8 @@ static int enl_foco(void) {
   if (!pag || foco < 0 || foco >= pag->n_foco || !pag->foco[foco].enlace) return -1;
   return pag->foco[foco].n;
 }
-static int es_texto(const Ctl *c) { return c && (c->tipo == C_TEXTO || c->tipo == C_CLAVE || c->tipo == C_AREA); }
+static int es_texto(const Ctl *c) { return c && (c->tipo == C_TEXTO || c->tipo == C_CLAVE || c->tipo == C_AREA || c->tipo == C_ARCHIVO); }
+#define ARCH_BOTON 12                /* «Examinar...» a la derecha del campo de subir un archivo */
 /* el texto de un botón o de la opción elegida de una lista */
 static void rotulo(Ctl *c, char *b, int max) {
   int n;
@@ -281,9 +311,18 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
   if (y + h <= BARRA_H || y >= al - ESTADO_H || x + w <= 0 || x >= an - DESP_W) return;
   SetBkMode(dc, 1);
   switch (c->tipo) {
-  case C_TEXTO: case C_CLAVE: {
+  case C_TEXTO: case C_CLAVE: case C_ARCHIVO: {
     int vis = c->w - 2;
     const char *ph = atr(c->nodo, "placeholder"), *tp = atr(c->nodo, "type");
+    if (c->tipo == C_ARCHIVO) {                /* el campo de la ruta y el botón de elegirla */
+      int bw = ARCH_BOTON * LW;
+      w -= bw + LW;
+      vis = c->w - ARCH_BOTON - 3;
+      rect(dc, x + w + LW, y, bw, h, P(P_ARENA));
+      marco(dc, x + w + LW, y, bw, h, P(P_TINTA));
+      txt(dc, x + w + LW + LW, y + 1, "Examinar...", 11, P(c->desactivado ? P_ARENA_OSC : P_TINTA), 0);
+      ph = "(ning\372n archivo)";
+    }
     if (!ph && tp && !_stricmp(tp, "date")) ph = "aaaa-mm-dd";
     rect(dc, x, y, w, h, P(c->desactivado || c->sololee ? P_CREMA : P_BLANCO));
     marco(dc, x, y, w, h, borde);
@@ -344,9 +383,6 @@ static void pinta_ctl(HANDLE dc, Ctl *c) {
     txt(dc, x + LW, y + 1, b, n, P(c->desactivado ? P_ARENA_OSC : P_TINTA), 0);
     txt(dc, x + w - 2 * LW + 4, y + 1, "v", 1, P(P_TINTA), 0);
     break;
-  case C_ARCHIVO:
-    txt(dc, x, y + 1, "[no se pueden subir archivos]", c->w, P(P_ARENA_OSC), 0);
-    break;
   }
 }
 static void pinta_fila(HANDLE dc, int f) {
@@ -363,6 +399,11 @@ static void pinta_fila(HANDLE dc, int f) {
     while (k < x1 && fl->a[k] == a) { if (fl->c[k] != ' ') blanco = 0; k++; }
     if (at->ctl >= 0) continue;                 /* (un control: se pinta aparte) */
     x = (ini - sx) * LW; w = (k - ini) * LW;
+    if (at->img >= 0) {                         /* (una imagen: se pinta aparte; aquí, su fondo) */
+      bg = at->enlace >= 0 && at->enlace == ef ? P(P_ANIL) : at->bg ? pag->color[at->bg] : P(P_BLANCO);
+      if (bg != P(P_BLANCO)) rect(dc, x, y, w, LH, bg);
+      continue;
+    }
     fg = color_de(at->fg);
     bg = at->bg ? pag->color[at->bg] : P(P_BLANCO);
     if (at->enlace >= 0 && at->enlace == ef) { bg = P(P_ANIL); fg = P(P_BLANCO); }   /* el enlace con el foco */
@@ -408,6 +449,43 @@ static void pinta_lista(HANDLE dc) {
     txt(dc, lista.x + LW, lista.y + 2 + k * LH, b[0] == ' ' ? b + 1 : b, n, P(o == lista.sel ? P_BLANCO : P_TINTA), 0);
   }
 }
+/* las imágenes que se ven; las que aún no han llegado (con su sitio
+ * guardado), un marco */
+static void pinta_imgs(HANDLE dc, int y0, int y1) {
+  static BMI bmi;
+  int k, ab = al - ESTADO_H, de = an - DESP_W;
+  if (!bmi.biSize) { bmi.biSize = 40; bmi.biPlanes = 1; bmi.biBitCount = 8; for (k = 0; k < 256; k++) bmi.colores[k] = (u16)k; }
+  for (k = 0; k < pag->n_img; k++) {
+    Img *im = &pag->img[k];
+    int px, py, xs, ys, w, h;
+    if (im->y < 0 || !im->cw || im->y + im->ch <= sy || im->y >= sy + filas_vis + 1) continue;
+    px = (im->x - sx) * LW;
+    py = BARRA_H + (im->y - sy) * LH;
+    if (py >= y1 || py + im->ch * LH <= y0) continue;
+    if (im->estado != IM_LISTA || !im->px) {
+      if (im->estado != IM_FALLO && px < de && py + 2 < ab) {
+        int ww = im->cw * LW, hh = im->ch * LH - 2;
+        if (px + ww > de) ww = de - px;
+        if (py < BARRA_H) { hh -= BARRA_H - py; py = BARRA_H; }
+        if (py + hh > ab) hh = ab - py;
+        marco(dc, px, py + 1, ww, hh, P(P_ARENA));
+      }
+      continue;
+    }
+    /* (dentro de su bloque: si la columna es más estrecha que la imagen, se corta) */
+    w = im->w < im->cw * LW ? im->w : im->cw * LW;
+    h = im->h < im->ch * LH ? im->h : im->ch * LH;
+    py += (im->ch * LH - h) / 2;
+    xs = px < 0 ? -px : 0;
+    ys = py < BARRA_H ? BARRA_H - py : 0;
+    w -= xs; h -= ys;
+    if (px + xs + w > de) w = de - px - xs;
+    if (py + ys + h > ab) h = ab - py - ys;
+    if (w <= 0 || h <= 0) continue;
+    bmi.biWidth = im->w; bmi.biHeight = -im->h;
+    SetDIBitsToDevice(dc, px + xs, py + ys, w, h, xs, ys, 0, im->h, im->px, &bmi, 1);
+  }
+}
 static void pinta_pagina(HANDLE dc, int y0, int y1) {
   int f, k;
   if (!pag) { rect(dc, 0, BARRA_H, an - DESP_W, al - BARRA_H - ESTADO_H, P(P_BLANCO)); pinta_desp(dc); return; }
@@ -419,6 +497,7 @@ static void pinta_pagina(HANDLE dc, int y0, int y1) {
   /* lo que sobra por abajo (menos de una fila) */
   k = BARRA_H + filas_vis * LH;
   if (k < al - ESTADO_H) rect(dc, 0, k, an - DESP_W, al - ESTADO_H - k, P(P_BLANCO));
+  pinta_imgs(dc, y0, y1);
   for (k = 0; k < pag->n_ctl; k++) {
     Ctl *c = &pag->ctl[k];
     if (!c->visible || c->y + c->h <= sy || c->y >= sy + filas_vis) continue;
@@ -458,8 +537,10 @@ static void dir_pon(const char *u) {
 }
 static void muestra(Pagina *p, const char *url_hist) {
   char t[260];
+  int seg;
   if (!p) return;
   lista.activa = 0;
+  img_cancela();
   if (pag) pag_suelta(pag);
   pag = p;
   pag_maqueta(pag, cols);
@@ -486,6 +567,13 @@ static void muestra(Pagina *p, const char *url_hist) {
   SetWindowTextA(vent, t);
   estado[0] = 0;
   repinta();
+  /* <meta http-equiv="refresh">: a la dirección que diga, pasado el tiempo */
+  free(refresco); refresco = NULL;
+  KillTimer(vent, T_REFRESCO);
+  if (url_hist && (seg = pag_refresco(pag, &refresco)) >= 0) {
+    if (!refresco) { refresco = malloc(strlen(pag->url) + 1); if (refresco) strcpy(refresco, pag->url); }
+    if (refresco) SetTimer(vent, T_REFRESCO, seg ? seg * 1000 : 50, NULL);
+  }
 }
 /* una página hecha aquí: el inicio, los avisos */
 static void pagina_propia(const char *url, const char *html) {
@@ -521,14 +609,40 @@ static void pagina_inicio(void) {
     "<h3>C\363mo se maneja</h3><ul>"
     "<li><b>Tab</b> pasa al enlace o al campo siguiente; <b>Intro</b> lo abre o env\355a el formulario.</li>"
     "<li>Las <b>flechas</b>, <b>Re P\341g</b> y <b>Av P\341g</b> mueven la p\341gina; <b>Retroceso</b> vuelve atr\341s.</li>"
-    "<li><b>F6</b> lleva a la direcci\363n, <b>F5</b> recarga y <b>Esc</b> para la carga.</li></ul>"
-    "<p><small>Navegador 0.1. Entiende HTML sencillo y formularios; no ejecuta JavaScript ni ense\361a im\341genes. "
-    "Las conexiones https van cifradas con TLS 1.2 y se comprueba el certificado del servidor.</small></p>");
+    "<li><b>F6</b> lleva a la direcci\363n, <b>F5</b> recarga y <b>Esc</b> para la carga.</li>"
+    "<li><b>May\372s+Tab</b> vuelve al anterior. Los archivos que no son p\341ginas (un PDF) se guardan en el disco.</li></ul>"
+    "<p><small>Navegador " NAV_VERSION ". Entiende HTML sencillo, formularios (tambi\351n los de subir archivos) e im\341genes PNG, GIF y JPEG; "
+    "no ejecuta JavaScript. Las conexiones https van cifradas con TLS 1.2 y se comprueba el certificado del servidor. "
+    "Las galletas que lo piden se guardan al cerrar, para no tener que entrar cada vez.</small></p>");
   pagina_propia("about:inicio", h);
 }
-static void ir(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo) {
+/* ¿son del mismo sitio? (para SameSite: lo mismo de los dos últimos
+ * trozos del nombre del servidor, «clicgest.es») */
+static const char *sitio_de(const char *u, int *n) {
+  const char *a = strstr(u, "://"), *f, *p1 = NULL, *p2 = NULL, *q;
+  *n = 0;
+  if (!a) return NULL;
+  a += 3;
+  for (f = a; *f && *f != '/' && *f != ':' && *f != '?' && *f != '#'; f++) ;
+  for (q = a; q < f; q++) if (*q == '.') { p2 = p1; p1 = q; }
+  if (p2) a = p2 + 1;
+  *n = f - a;
+  return a;
+}
+static int cruzada(const char *de, const char *a) {
+  int n1, n2;
+  const char *s1, *s2;
+  if (!de || _strnicmp(de, "http", 4)) return 0;
+  s1 = sitio_de(de, &n1); s2 = sitio_de(a, &n2);
+  return !s1 || !s2 || n1 != n2 || _strnicmp(s1, s2, n1);
+}
+static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo, const char *tipo, const char *origen);
+static void ir(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo) { ir2(url, post, cuerpo, n_cuerpo, modo, NULL, NULL); }
+static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo, const char *tipo, const char *origen) {
   char *u;
   if (cargando) { http_suelta(&pet); cargando = 0; }
+  img_cancela();
+  KillTimer(vent, T_REFRESCO);
   lista.activa = 0;
   modo_hist = modo;
   if (!_strnicmp(url, "about:", 6)) {
@@ -543,6 +657,8 @@ static void ir(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo) 
   if (strchr(u, '#')) *strchr(u, '#') = 0;
   memset(&pet, 0, sizeof pet);
   pet.url = u; pet.post = post; pet.cuerpo = cuerpo; pet.n_cuerpo = n_cuerpo;
+  if (tipo) sprintf(pet.tipo_cuerpo, "%.94s", tipo);
+  pet.cruzada = cruzada(origen, u);
   http_empieza(&pet);
   cargando = 1;
   redirs = 0;
@@ -589,18 +705,342 @@ static int es_latin1(const Pet *p) {
   if (*c == '"' || *c == '\'') c++;
   return !strncmp(c, "iso-8859-1", 10) || !strncmp(c, "windows-1252", 12) || !strncmp(c, "latin1", 6);
 }
+/* =============================================================================
+ *  Las descargas: lo que no es una página (un PDF, un recibo) se guarda en
+ *  el disco y se ofrece abrirlo con su programa (el Lector, para los PDF)
+ * ============================================================================= */
+static int existe(const char *ruta) {
+  FILE *f = fopen(ruta, "rb");
+  if (f) fclose(f);
+  return f != NULL;
+}
+/* el programa que abre los archivos de la extensión ext (de \HISPADOS\ASOCIA.INI,
+ * como el Administrador de archivos; o los de serie), en prog; 0 si no hay */
+static int visor_de(const char *ext, char *prog, int max) {
+  char ruta[200], l[200], v[160];
+  FILE *f;
+  int k, n = strlen(ext);
+  v[0] = 0;
+  if (!n || n > 4) return 0;
+  sprintf(ruta, "%sASOCIA.INI", dir_hispados);
+  if ((f = fopen(ruta, "r"))) {
+    while (fgets(l, sizeof l, f)) {
+      for (k = 0; l[k] && l[k] != '\r' && l[k] != '\n'; k++) ;
+      l[k] = 0;
+      if (!_strnicmp(l, ext, n) && l[n] == '=') { sprintf(v, "%.150s", l + n + 1); break; }
+    }
+    fclose(f);
+  } else if (!_stricmp(ext, "PDF")) strcpy(v, "PROGS\\LECTOR.HVP");
+  else if (!_stricmp(ext, "PNG") || !_stricmp(ext, "JPG") || !_stricmp(ext, "GIF") || !_stricmp(ext, "BMP")) strcpy(v, "PROGS\\MIRADOR.HVP");
+  if (!v[0] || v[0] == '-' || v[0] == ':') return 0;
+  if (v[1] == ':' || v[0] == '\\') sprintf(prog, "%.*s", max - 1, v);
+  else sprintf(prog, "%.*s%.*s", 100, dir_hispados, max - 101, v);
+  return existe(prog);
+}
+/* el nombre que propone el servidor (Content-Disposition) o el de la
+ * dirección, en 8+3 y en mayúsculas */
+static void nombre_descarga(const Pet *p, char *d) {
+  const char *cd = http_cabecera(p, "Content-Disposition"), *t = NULL, *fin;
+  char b[200], ext[4];
+  int n = 0, k, e = 0, punto = -1;
+  if (cd) {
+    const char *f = cd;
+    while ((f = strstr(f, "filename"))) {
+      const char *v = f + 8;
+      if (*v == '*') { v++; while (*v == ' ') v++; if (*v == '=') { v++; for (fin = v; *fin && *fin != ';' && *fin != '\r'; fin++) ; for (; v < fin && !(v[0] == '\'' && v[1] == '\''); v++) ; if (v < fin) { t = v + 2; break; } } }
+      while (*v == ' ') v++;
+      if (*v == '=') { v++; while (*v == ' ') v++; if (*v == '"') v++; t = v; }
+      f = v;
+    }
+  }
+  if (!t) {                                      /* el último trozo de la ruta */
+    const char *q = p->url, *a = strstr(q, "://");
+    if (a) q = a + 3;
+    for (t = q; *q && *q != '?' && *q != '#'; q++) if (*q == '/') t = q + 1;
+    for (fin = t; *fin && *fin != '?' && *fin != '#'; fin++) ;
+  } else for (fin = t; *fin && *fin != '"' && *fin != ';' && *fin != '\r' && *fin != '\n'; fin++) ;
+  for (k = 0; t + k < fin && n < 190; k++) b[n++] = t[k];
+  b[n] = 0;
+  for (k = 0; k < n; k++) if (b[k] == '.') punto = k;
+  d[0] = 0;
+  for (k = 0, n = 0; b[k] && (punto < 0 || k < punto) && n < 8; k++) {
+    int c = (u8)b[k];
+    if (c == '%' && b[k + 1] && b[k + 2]) { k += 2; continue; }
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') d[n++] = (char)(c >= 'a' && c <= 'z' ? c - 32 : c);
+  }
+  if (!n) { strcpy(d, "DESCARGA"); n = 8; }
+  if (punto >= 0) for (k = punto + 1; b[k] && e < 3; k++) {
+    int c = (u8)b[k];
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ext[e++] = (char)(c >= 'a' && c <= 'z' ? c - 32 : c);
+  }
+  if (!e) {                                      /* sin extensión: la del tipo */
+    if (strstr(p->tipo, "pdf")) { memcpy(ext, "PDF", 3); e = 3; }
+    else if (strstr(p->tipo, "png")) { memcpy(ext, "PNG", 3); e = 3; }
+    else if (strstr(p->tipo, "jpeg")) { memcpy(ext, "JPG", 3); e = 3; }
+    else if (strstr(p->tipo, "gif")) { memcpy(ext, "GIF", 3); e = 3; }
+    else if (strstr(p->tipo, "csv")) { memcpy(ext, "CSV", 3); e = 3; }
+    else if (strstr(p->tipo, "text/")) { memcpy(ext, "TXT", 3); e = 3; }
+  }
+  d[n] = 0;
+  if (e) { d[n] = '.'; memcpy(d + n + 1, ext, e); d[n + 1 + e] = 0; }
+}
+/* ¿lo que llega es para guardar y no para ver? (un adjunto, o lo que no es
+ * una página ni un texto) */
+static int es_descarga(const Pet *p) {
+  const char *cd = http_cabecera(p, "Content-Disposition");
+  int html = !p->tipo[0] || strstr(p->tipo, "html") != NULL, plano = !strncmp(p->tipo, "text/", 5) && !html;
+  if (p->estado < 200 || p->estado >= 300 || p->estado == 204) return 0;
+  return (cd && !_strnicmp(cd, "attachment", 10)) || (!html && !plano);
+}
+/* las cabeceras de una descarga: dónde se guarda (el diálogo de Guardar
+ * como); lo que llegue desde ahora va derecho al archivo. 0 si no se guarda */
+static char desc_ruta[260];
+static int descarga_empieza(Pet *p) {
+  OPENFILENAMEA o;
+  char m[400];
+  FILE *f;
+  int k;
+  nombre_descarga(p, desc_ruta);
+  if (p->largo > 0) sprintf(m, "Descarga: %.60s (%u K). Elija d\363nde guardarla.", desc_ruta, ((u32)p->largo + 1023) / 1024);
+  else sprintf(m, "Descarga: %.60s. Elija d\363nde guardarla.", desc_ruta);
+  di(m);
+  memset(&o, 0, sizeof o);
+  o.lStructSize = sizeof o; o.hwndOwner = vent; o.lpstrFile = desc_ruta; o.nMaxFile = sizeof desc_ruta;
+  o.lpstrInitialDir = dir_descargas[0] ? dir_descargas : NULL; o.lpstrTitle = "Guardar la descarga";
+  if (!GetSaveFileNameA(&o) || !desc_ruta[0]) { di("No se ha guardado la descarga."); return 0; }
+  if (existe(desc_ruta)) {
+    sprintf(m, "Ya hay un archivo %.200s.\n\n\277Sustituirlo por el que se est\341 descargando?", desc_ruta);
+    if (MessageBoxA(vent, m, "Navegador", MB_YESNO | MB_ICONQUESTION) != IDYES) { di("No se ha guardado la descarga."); return 0; }
+  }
+  f = fopen(desc_ruta, "wb");
+  if (!f || (p->n_datos && fwrite(p->datos, 1, p->n_datos, f) != p->n_datos)) {
+    if (f) { fclose(f); remove(desc_ruta); }
+    sprintf(m, "No se puede escribir %.200s.\n\nPuede que el disco est\351 lleno o protegido contra escritura.", desc_ruta);
+    MessageBoxA(vent, m, "Navegador", MB_OK);
+    di("No se ha guardado la descarga.");
+    return 0;
+  }
+  free(p->datos); p->datos = NULL; p->cap_datos = 0;
+  p->disco = f;
+  p->max = 64u << 20;
+  /* la carpeta, para la siguiente */
+  for (k = strlen(desc_ruta); k > 0 && desc_ruta[k - 1] != '\\'; k--) ;
+  if (k > 0 && k < (int)sizeof dir_descargas) { memcpy(dir_descargas, desc_ruta, k); dir_descargas[k] = 0; if (k > 3) dir_descargas[k - 1] = 0; }
+  return 1;
+}
+/* la descarga ha acabado (bien, si ok): se cierra el archivo y se ofrece
+ * abrirlo con su programa (el Lector, para los PDF; desde él se imprime) */
+static void descarga_acaba(Pet *p, int ok) {
+  char m[700], prog[200], *ext;
+  u32 n = p->n_datos;
+  int mal = fclose(p->disco);
+  p->disco = NULL;
+  if (!ok || mal) {
+    remove(desc_ruta);
+    sprintf(m, "La descarga no se ha completado: %.200s\n\nNo se ha guardado nada.", ok ? "no se puede escribir en el disco." : p->error);
+    MessageBoxA(vent, m, "Navegador", MB_OK);
+    di("No se ha guardado la descarga.");
+    return;
+  }
+  sprintf(m, "Guardado en %.200s", desc_ruta);
+  di(m);
+  ext = strrchr(desc_ruta, '.');
+  if (ext && !strchr(ext, '\\') && visor_de(ext + 1, prog, sizeof prog)) {
+    const char *quien = strstr(prog, "LECTOR") ? "el Lector" : strstr(prog, "MIRADOR") ? "Mirador" : "su programa";
+    sprintf(m, "Guardado en %.200s (%u K).\n\n\277Abrirlo ahora con %s?%s", desc_ruta, (n + 1023) / 1024, quien,
+            strstr(prog, "LECTOR") ? "\nDesde el Lector tambi\351n se puede imprimir." : "");
+    if (MessageBoxA(vent, m, "Navegador", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+      char l[480];
+      sprintf(l, "%.200s %.250s", prog, desc_ruta);
+      WinExec(l, 1);
+    }
+  } else {
+    sprintf(m, "Guardado en %.200s (%u K).", desc_ruta, (n + 1023) / 1024);
+    MessageBoxA(vent, m, "Navegador", MB_OK);
+  }
+}
+
+/* =============================================================================
+ *  Las imágenes: después de la página, una a una, con la misma conexión
+ * ============================================================================= */
+static void img_cancela(void) {
+  if (icarga >= 0) {
+    http_suelta(&ipet);
+    if (pag && icarga < pag->n_img && pag->img[icarga].estado == IM_BAJANDO) pag->img[icarga].estado = IM_PENDIENTE;
+  }
+  icarga = -1;
+  i_remaq = 0; i_hechas = 0;
+}
+static int img_pendiente(void) {
+  int k;
+  if (!pag) return -1;
+  for (k = 0; k < pag->n_img; k++) if (pag->img[k].visto && pag->img[k].estado == IM_PENDIENTE) return k;
+  return -1;
+}
+static int img_trabajo(void) { return icarga >= 0 || i_remaq || i_hechas || img_pendiente() >= 0; }
+static int img_max_w(void) { int m = (cols - 4) * LW; return m < IMG_MAX_W ? m : IMG_MAX_W; }
+/* la imagen k ya está (o no se ha podido ver): si cabe en el sitio que
+ * tenía guardado, basta con pintarla; si no, hay que maquetar otra vez la
+ * página (no a cada una: ver img_avanza) */
+static void img_lista(int k) {
+  Img *im = &pag->img[k];
+  i_hechas++;
+  if (im->estado == IM_LISTA && im->y >= 0 && im->cw == (im->w + LW - 1) / LW && im->ch == (im->h + LH - 1) / LH) {
+    RECT r;
+    r.left = (im->x - sx) * LW; r.top = BARRA_H + (im->y - sy) * LH;
+    r.right = r.left + im->cw * LW; r.bottom = r.top + im->ch * LH;
+    if (r.top < BARRA_H) r.top = BARRA_H;
+    if (r.bottom > al - ESTADO_H) r.bottom = al - ESTADO_H;
+    if (r.bottom > r.top) InvalidateRect(vent, &r, 0);
+  } else if (im->estado == IM_LISTA || (im->y >= 0 && im->cw)) {
+    if (!i_remaq) i_remaq_t = GetTickCount();
+    i_remaq = 1;
+  }
+}
+static int base64(const char *t, u8 *d) {
+  int n = 0, b = 0, q = 0;
+  for (; *t; t++) {
+    int c = *t, v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+          : c == '+' || c == '-' ? 62 : c == '/' || c == '_' ? 63 : -1;
+    if (v < 0) continue;
+    b = b << 6 | v; q += 6;
+    if (q >= 8) { q -= 8; d[n++] = (u8)(b >> q); }
+  }
+  return n;
+}
+/* de los datos a los puntos de la imagen k */
+static void img_hace(int k, const u8 *d, u32 n) {
+  Img *im = &pag->img[k];
+  char e[80];
+  int w, h, c;
+  u32 tam = 0;
+  im->px = img_descodifica(d, n, im->pw, im->ph, img_max_w(), IMG_MAX_H, &w, &h, e);
+  if (!im->px) { im->estado = IM_FALLO; img_lista(k); return; }
+  im->w = w; im->h = h; im->estado = IM_LISTA;
+  /* a lo ya visto (sale una copia; se tira la más vieja si no cabe) */
+  for (c = 0; c < CACHE_N; c++) if (cache[c].px) tam += ((cache[c].w + 3) & ~3) * cache[c].h;
+  for (c = 0; c < CACHE_N; c++) if (!cache[c].url) break;
+  while (c == CACHE_N || tam + ((w + 3) & ~3) * h > CACHE_MAX) {
+    int j, v = -1;
+    for (j = 0; j < CACHE_N; j++) if (cache[j].url && (v < 0 || cache[j].uso < cache[v].uso)) v = j;
+    if (v < 0) break;
+    tam -= ((cache[v].w + 3) & ~3) * cache[v].h;
+    free(cache[v].url); free(cache[v].px); memset(&cache[v], 0, sizeof cache[v]);
+    c = v;
+  }
+  if (c < CACHE_N && ((w + 3) & ~3) * h <= CACHE_MAX / 2) {
+    cache[c].url = malloc(strlen(im->src) + 1);
+    cache[c].px = malloc(((w + 3) & ~3) * h);
+    if (cache[c].url && cache[c].px) {
+      strcpy(cache[c].url, im->src); memcpy(cache[c].px, im->px, ((w + 3) & ~3) * h);
+      cache[c].pw = im->pw; cache[c].ph = im->ph; cache[c].w = w; cache[c].h = h; cache[c].uso = ++cache_uso;
+    } else { free(cache[c].url); free(cache[c].px); memset(&cache[c], 0, sizeof cache[c]); }
+  }
+  img_lista(k);
+}
+static void img_avanza(void) {
+  int k, r;
+  Img *im;
+  if (icarga < 0) {
+    k = img_pendiente();
+    if (k < 0) {
+      if (i_remaq) { i_remaq = 0; remaqueta(); }
+      if (i_hechas) { i_hechas = 0; if (!cargando) di(""); }
+      return;
+    }
+    /* de vez en cuando, la página maquetada otra vez con las que ya han llegado */
+    if (i_remaq && GetTickCount() - i_remaq_t > 2500u) { i_remaq = 0; remaqueta(); }
+    im = &pag->img[k];
+    {                                            /* ¿ya vista? */
+      int c;
+      for (c = 0; c < CACHE_N; c++)
+        if (cache[c].url && !strcmp(cache[c].url, im->src) && cache[c].pw == im->pw && cache[c].ph == im->ph && cache[c].w <= img_max_w()) {
+          im->px = malloc(((cache[c].w + 3) & ~3) * cache[c].h);
+          if (!im->px) break;
+          memcpy(im->px, cache[c].px, ((cache[c].w + 3) & ~3) * cache[c].h);
+          im->w = cache[c].w; im->h = cache[c].h; im->estado = IM_LISTA;
+          cache[c].uso = ++cache_uso;
+          img_lista(k);
+          return;
+        }
+    }
+    if (!_strnicmp(im->src, "data:", 5)) {      /* data:image/png;base64,... */
+      const char *c = strchr(im->src, ',');
+      u8 *d;
+      if (!c || !strstr(im->src, ";base64") || strstr(im->src, ";base64") > c || !(d = malloc(strlen(c)))) { im->estado = IM_FALLO; img_lista(k); return; }
+      img_hace(k, d, base64(c + 1, d));
+      free(d);
+      return;
+    }
+    memset(&ipet, 0, sizeof ipet);
+    ipet.url = malloc(strlen(im->src) + 1);
+    if (!ipet.url) { im->estado = IM_FALLO; return; }
+    strcpy(ipet.url, im->src);
+    ipet.sub = 1; ipet.max = 1u << 20;
+    ipet.cruzada = cruzada(pag->url, ipet.url);
+    http_empieza(&ipet);
+    im->estado = IM_BAJANDO;
+    icarga = k; iredirs = 0;
+    return;
+  }
+  r = http_avanza(&ipet);
+  if (r == 0) {
+    char b[80];
+    int j, total = 0, hechas = 0;
+    for (j = 0; j < pag->n_img; j++) if (pag->img[j].visto && pag->img[j].src) { total++; if (pag->img[j].estado >= IM_LISTA) hechas++; }
+    sprintf(b, "Bajando las im\341genes (%d de %d)...", hechas + 1, total);
+    if (!sobre[0]) di(b);
+    return;
+  }
+  im = &pag->img[icarga];
+  k = icarga;
+  icarga = -1;
+  if (r > 0 && (ipet.estado == 301 || ipet.estado == 302 || ipet.estado == 303 || ipet.estado == 307 || ipet.estado == 308)
+      && http_cabecera(&ipet, "Location") && ++iredirs <= 5) {
+    const char *l = http_cabecera(&ipet, "Location");
+    char loc[1024], *nueva;
+    int j;
+    for (j = 0; l[j] && l[j] != '\r' && l[j] != '\n' && j < 1022; j++) loc[j] = l[j];
+    loc[j] = 0;
+    nueva = url_absoluta(ipet.url, loc);
+    http_suelta(&ipet);
+    if (nueva) {
+      ipet.url = nueva; ipet.sub = 1; ipet.max = 1u << 20; ipet.cruzada = cruzada(pag->url, nueva);
+      http_empieza(&ipet);
+      icarga = k;
+      return;
+    }
+    im->estado = IM_FALLO;
+    img_lista(k);
+    return;
+  }
+  if (r > 0 && ipet.estado == 200 && ipet.n_datos) img_hace(k, ipet.datos, ipet.n_datos);
+  else { im->estado = IM_FALLO; img_lista(k); }
+  http_suelta(&ipet);
+}
+
 /* un paso de la carga: se llama desde el bucle de mensajes */
 static void carga_avanza(void) {
   static const char *const fases[] = { "Abriendo...", "Buscando el servidor...", "Conectando con el servidor...",
     "Abriendo la conexi\363n segura...", "Enviando la petici\363n...", "Esperando la respuesta...", "Recibiendo la p\341gina..." };
   int r = http_avanza(&pet);
+  if (r >= 0 && !pet.decidido && pet.fase >= H_CUERPO) {     /* las cabeceras: ¿es para guardar? */
+    pet.decidido = 1;
+    if (es_descarga(&pet) && !descarga_empieza(&pet)) { cargando = 0; http_suelta(&pet); return; }
+  }
   if (r == 0) {
-    char b[120];
-    if (pet.fase == H_CUERPO && pet.n_datos) { sprintf(b, "Recibiendo la p\341gina... (%u K)", (pet.n_datos + 512) / 1024); di(b); }
+    char b[160];
+    if (pet.disco) {
+      if (pet.largo > 0) sprintf(b, "Guardando %.60s... (%u K de %u K)", desc_ruta, (pet.n_datos + 512) / 1024, ((u32)pet.largo + 512) / 1024);
+      else sprintf(b, "Guardando %.60s... (%u K)", desc_ruta, (pet.n_datos + 512) / 1024);
+      di(b);
+    }
+    else if (pet.fase == H_CUERPO && pet.n_datos) { sprintf(b, "Recibiendo la p\341gina... (%u K)", (pet.n_datos + 512) / 1024); di(b); }
     else if (pet.fase < 7) di(fases[pet.fase]);
     return;
   }
   cargando = 0;
+  if (pet.disco) { descarga_acaba(&pet, r > 0); http_suelta(&pet); return; }
   if (r < 0) {
     char *u = pet.url;
     pet.url = NULL;
@@ -619,10 +1059,13 @@ static void carga_avanza(void) {
     loc[k] = 0;
     nueva = url_absoluta(pet.url, loc);
     if (nueva && ++redirs <= 10) {
-      if ((pet.estado == 307 || pet.estado == 308) && pet.post) { post = 1; cuerpo = pet.cuerpo; nc = pet.n_cuerpo; pet.cuerpo = NULL; }
+      char tc[sizeof pet.tipo_cuerpo];
+      tc[0] = 0;
+      if ((pet.estado == 307 || pet.estado == 308) && pet.post) { post = 1; cuerpo = pet.cuerpo; nc = pet.n_cuerpo; pet.cuerpo = NULL; memcpy(tc, pet.tipo_cuerpo, sizeof tc); }
       http_suelta(&pet);
       if (strchr(nueva, '#')) *strchr(nueva, '#') = 0;
       pet.url = nueva; pet.post = post; pet.cuerpo = cuerpo; pet.n_cuerpo = nc;
+      memcpy(pet.tipo_cuerpo, tc, sizeof tc);
       http_empieza(&pet);
       cargando = 1;
       return;
@@ -708,31 +1151,106 @@ static void abre_enlace(int e) {
   if (en->href[0] == '#') { desplaza(sx, 0); return; }
   u = url_absoluta(pag->doc.base ? pag->doc.base : pag->url, en->href);
   if (!u) { di("Este enlace no se puede abrir aqu\355 (no es una p\341gina web)."); return; }
-  ir(u, 0, NULL, 0, 0);
+  ir2(u, 0, NULL, 0, 0, NULL, pag->url);
   free(u);
+}
+/* el nombre de un campo para los avisos: su <label>, su placeholder o su name */
+static void nombre_campo(Ctl *c, char *b, int max) {
+  const char *id = atr(c->nodo, "id"), *t;
+  int k, n;
+  b[0] = 0;
+  if (id && id[0])
+    for (k = 0; k < pag->n_enl; k++) {
+      Nodo *l = pag->enl[k].nodo;
+      if (!pag->enl[k].href && l->etq == E_LABEL && (t = atr(l, "for")) && !strcmp(t, id)) { texto_de(l, b, max); break; }
+    }
+  if (!b[0] && (t = atr(c->nodo, "aria-label"))) sprintf(b, "%.*s", max - 1, t);
+  if (!b[0] && (t = atr(c->nodo, "placeholder"))) sprintf(b, "%.*s", max - 1, t);
+  if (!b[0] && c->nombre) sprintf(b, "%.*s", max - 1, c->nombre);
+  n = strlen(b);
+  while (n && (b[n - 1] == ' ' || b[n - 1] == ':' || b[n - 1] == '*')) b[--n] = 0;
+  while (b[0] == ' ') memmove(b, b + 1, n--);
+}
+/* lo que pide el formulario antes de enviarse (required, pattern, type=email,
+ * los archivos que hay que subir): 1 si se puede enviar */
+static int valida(Nodo *forma) {
+  char m[400], nom[120];
+  int k;
+  for (k = 0; k < pag->n_ctl; k++) {
+    Ctl *c = &pag->ctl[k];
+    const char *t, *falta = NULL;
+    if (c->forma != forma || c->desactivado || !c->visible) continue;
+    if (c->obligado) {
+      if (es_texto(c) && !c->n_valor) falta = c->tipo == C_ARCHIVO ? "Falta elegir el archivo de" : "Falta rellenar";
+      else if (c->tipo == C_CASILLA && !c->marcado) falta = "Hay que marcar";
+      else if (c->tipo == C_LISTA && c->n_opc && (!(t = atr(c->opc[c->elegida], "value")) ? 0 : !t[0])) falta = "Falta elegir";
+      else if (c->tipo == C_RADIO) {
+        int j, alguno = 0;
+        for (j = 0; j < pag->n_ctl; j++) {
+          Ctl *o = &pag->ctl[j];
+          if (o->tipo == C_RADIO && o->forma == forma && o->nombre && c->nombre && !strcmp(o->nombre, c->nombre) && o->marcado) alguno = 1;
+        }
+        if (!alguno) falta = "Falta elegir";
+      }
+    }
+    if (!falta && (c->tipo == C_TEXTO || c->tipo == C_CLAVE) && c->n_valor) {
+      if ((t = atr(c->nodo, "type")) && !_stricmp(t, "email") && (!strchr(c->valor, '@') || c->valor[0] == '@' || c->valor[c->n_valor - 1] == '@'))
+        falta = "No es una direcci\363n de correo";
+      else if ((t = atr(c->nodo, "pattern")) && t[0] && !pag_patron(t, c->valor, c->n_valor)) falta = "No tiene la forma que se pide";
+      else if ((t = atr(c->nodo, "minlength")) && atoi(t) > c->n_valor) falta = "Es demasiado corto";
+    }
+    if (!falta && c->tipo == C_ARCHIVO && c->n_valor) {
+      long l = pag_archivo_mide(c->valor);
+      if (l == -1) falta = "No se puede leer el archivo de";
+      else if (l == -2) falta = "Es demasiado grande (m\341s de 2 MB) el archivo de";
+    }
+    if (falta) {
+      nombre_campo(c, nom, sizeof nom);
+      t = atr(c->nodo, "title");
+      sprintf(m, "%s%s%.100s%s%s%.150s", falta, nom[0] ? " \253" : " un campo obligatorio", nom, nom[0] ? "\273." : ".",
+              t && t[0] && strstr(falta, "forma") ? "\n\n" : "", t && strstr(falta, "forma") ? t : "");
+      MessageBoxA(vent, m, "Navegador", MB_OK);
+      foco_pon(foco_de_ctl(k));
+      return 0;
+    }
+  }
+  return 1;
 }
 static void envia(Ctl *boton) {
   Nodo *forma = boton->forma;
-  char b[300], *url, *cuerpo;
+  char b[300], *url, *cuerpo, tipo[96];
   u32 nc;
   int k, post, con = boton->tipo == C_ENVIAR ? (int)(boton - pag->ctl) : -1;
   if (!forma) return;
   if (con < 0)                                   /* Intro en un campo: como pulsar el primer botón de enviar */
     for (k = 0; k < pag->n_ctl; k++)
       if (pag->ctl[k].forma == forma && pag->ctl[k].tipo == C_ENVIAR && !pag->ctl[k].desactivado) { con = k; break; }
-  for (k = 0; k < pag->n_ctl; k++) {
-    Ctl *c = &pag->ctl[k];
-    if (c->forma == forma && c->obligado && !c->desactivado && c->visible && es_texto(c) && !c->n_valor) {
-      MessageBoxA(vent, "Falta rellenar un campo obligatorio.", "Navegador", MB_OK);
-      foco_pon(foco_de_ctl(k));
-      return;
-    }
-  }
+  if (!(con >= 0 && atr(pag->ctl[con].nodo, "formnovalidate")) && !atr(forma, "novalidate") && !valida(forma)) return;
   if ((pag_confirma(forma, b, sizeof b) || (con >= 0 && pag_confirma(pag->ctl[con].nodo, b, sizeof b)))
       && MessageBoxA(vent, b, "Navegador", MB_YESNO) != IDYES) return;
-  if (!pag_formulario(pag, forma, con, &url, &cuerpo, &nc, &post)) { di("Este formulario no se puede enviar."); return; }
-  ir(url, post, cuerpo, nc, 0);
+  if (!pag_formulario(pag, forma, con, &url, &cuerpo, &nc, &post, tipo)) { di("Este formulario no se puede enviar."); return; }
+  ir2(url, post, cuerpo, nc, 0, tipo[0] ? tipo : NULL, pag->url);
   free(url);
+}
+/* el diálogo de abrir, para el campo de subir un archivo */
+static void elige_archivo(Ctl *c) {
+  static char dir[150];
+  OPENFILENAMEA o;
+  char ruta[260];
+  int k;
+  sprintf(ruta, "%.250s", c->valor);
+  for (k = strlen(ruta); k > 0 && ruta[k - 1] != '\\'; k--) ;
+  if (k > 0) { sprintf(dir, "%.*s", k > 3 ? k - 1 : k, ruta); memmove(ruta, ruta + k, strlen(ruta + k) + 1); }
+  memset(&o, 0, sizeof o);
+  o.lStructSize = sizeof o; o.hwndOwner = vent; o.lpstrFile = ruta; o.nMaxFile = sizeof ruta;
+  o.lpstrInitialDir = dir[0] ? dir : dir_descargas[0] ? dir_descargas : NULL; o.lpstrTitle = "Elegir el archivo que se sube";
+  if (GetOpenFileNameA(&o) && ruta[0]) {
+    ctl_pon(c, ruta, -1);
+    c->cursor = c->n_valor;
+    for (k = strlen(ruta); k > 0 && ruta[k - 1] != '\\'; k--) ;
+    if (k > 0) sprintf(dir, "%.*s", k > 3 ? k - 1 : k, ruta);
+  }
+  repinta();
 }
 static void lista_abre(int idx) {
   Ctl *c = &pag->ctl[idx];
@@ -800,6 +1318,16 @@ static void pulsa_ctl(int idx) {
   }
   repinta();
 }
+static void pulsa_ctl_en(int idx, int col) {
+  Ctl *c = &pag->ctl[idx];
+  if (c->tipo == C_ARCHIVO && !c->desactivado && col >= c->x + c->w - ARCH_BOTON) {
+    foco = foco_de_ctl(idx); foco_dir = 0;
+    repinta();
+    elige_archivo(c);
+    return;
+  }
+  pulsa_ctl(idx);
+}
 /* escribir en un campo de una línea: 1 si ha cambiado algo que pintar */
 static int edita(Ctl *c, int vk, int ch) {
   if (c == &dir && dir_sel) {                    /* la dirección, elegida entera */
@@ -862,6 +1390,13 @@ static void tecla(int vk) {
   }
   if (vk == VK_ESCAPE) {
     if (cargando) { http_suelta(&pet); cargando = 0; di("Carga parada."); }
+    else if (icarga >= 0 || img_pendiente() >= 0) {      /* (y las imágenes que faltan, sin ellas) */
+      int k;
+      img_cancela();
+      for (k = 0; pag && k < pag->n_img; k++) if (pag->img[k].estado == IM_PENDIENTE) pag->img[k].estado = IM_FALLO;
+      remaqueta();
+      di("Carga parada.");
+    }
     else if (foco_dir) { foco_dir = 0; if (i_hist >= 0) dir_pon(hist[i_hist].url); repinta(); }
     return;
   }
@@ -869,7 +1404,7 @@ static void tecla(int vk) {
   if (vk == VK_F6) { foco_dir = 1; dir_sel = 1; foco = -1; dir.cursor = dir.n_valor; dir.desp = 0; repinta(); return; }
   if (foco_dir) {
     if (vk == VK_RETURN) { foco_dir = 0; ir_dir(dir.valor); repinta(); return; }
-    if (vk == VK_TAB) { foco_dir = 0; if (pag && pag->n_foco) foco_pon(0); else repinta(); return; }
+    if (vk == VK_TAB) { foco_dir = 0; if (pag && pag->n_foco) foco_pon((GetKeyState(0x10) & 0x8000) ? pag->n_foco - 1 : 0); else repinta(); return; }
     if ((vk == VK_BACK || vk == VK_DELETE || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_HOME || vk == VK_END) && edita(&dir, vk, 0)) {
       HANDLE dc = GetDC(vent);
       pinta_dir(dc);
@@ -880,7 +1415,8 @@ static void tecla(int vk) {
   if (!pag) return;
   if (vk == VK_TAB) {
     if (!pag->n_foco) return;
-    foco_pon(foco + 1 < pag->n_foco ? foco + 1 : 0);
+    if (GetKeyState(0x10) & 0x8000) foco_pon(foco > 0 ? foco - 1 : pag->n_foco - 1);   /* Mayús+Tab: hacia atrás */
+    else foco_pon(foco + 1 < pag->n_foco ? foco + 1 : 0);
     return;
   }
   if (es_texto(c)) {
@@ -901,7 +1437,7 @@ static void tecla(int vk) {
         repinta_ctl(c);
         return;
       }
-    } else if (vk == VK_RETURN) { envia(c); return; }
+    } else if (vk == VK_RETURN) { if (c->tipo == C_ARCHIVO) elige_archivo(c); else envia(c); return; }
     if (vk == VK_BACK || vk == VK_DELETE || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_HOME || vk == VK_END) {
       if (edita(c, vk, 0)) repinta_ctl(c);
       return;
@@ -1006,8 +1542,8 @@ static void clic(int px, int py) {
   a = en_punto(px, py, &col, &fil);
   if (a && a->ctl >= 0) {
     Ctl *c = &pag->ctl[a->ctl];
-    pulsa_ctl(a->ctl);
-    if (c->tipo == C_TEXTO || c->tipo == C_CLAVE) {
+    pulsa_ctl_en(a->ctl, col);
+    if (c->tipo == C_TEXTO || c->tipo == C_CLAVE || (c->tipo == C_ARCHIVO && col < c->x + c->w - ARCH_BOTON)) {
       c->cursor = c->desp + col - c->x - 1;
       if (c->cursor > c->n_valor) c->cursor = c->n_valor;
       if (c->cursor < 0) c->cursor = 0;
@@ -1089,7 +1625,14 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
   case WM_MOUSEMOVE:
     raton((short)(l & 0xFFFF), (short)(l >> 16), w & 1);
     return 0;
+  case WM_TIMER:
+    if (w == T_REFRESCO) {
+      KillTimer(h, T_REFRESCO);
+      if (refresco && !cargando) { char *u = refresco; refresco = NULL; ir2(u, 0, NULL, 0, 0, NULL, u); free(u); }
+    }
+    return 0;
   case WM_DESTROY:
+    guarda_galletas();
     PostQuitMessage(0);
     return 0;
   }
@@ -1098,6 +1641,15 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
 
 /* NAVEGA.INI, junto al programa: Inicio=dirección, Idioma=es, AlContenido=NO,
  * Favorito=nombre|dirección */
+static int guardar_galletas = 1;
+/* las galletas que caducan, al disco (al cerrar, y cuando cambian) */
+static void guarda_galletas(void) {
+  char ruta[200];
+  if (!http_galletas_cambio) return;
+  sprintf(ruta, "%sGALLETAS.TXT", carpeta);
+  if (!guardar_galletas) { http_galletas_cambio = 0; return; }   /* (Galletas=NO en NAVEGA.INI) */
+  http_galletas_guarda(ruta);
+}
 static void lee_ini(void) {
   char ruta[200], l[400];
   FILE *f;
@@ -1105,6 +1657,13 @@ static void lee_ini(void) {
   carpeta[n] = 0;
   for (k = n; k > 0 && carpeta[k - 1] != '\\' && carpeta[k - 1] != ':'; k--) ;
   carpeta[k] = 0;
+  /* la carpeta de Hispa-DOS (\HISPADOS\, la de encima de INTERNET\), la de
+   * las descargas y las galletas guardadas */
+  if (k >= 9 && !_stricmp(carpeta + k - 9, "INTERNET\\")) sprintf(dir_hispados, "%.*s", k - 9, carpeta);
+  else strcpy(dir_hispados, "C:\\HISPADOS\\");
+  if ((carpeta[0] | 32) == 'c') strcpy(dir_descargas, "C:\\");
+  sprintf(ruta, "%sGALLETAS.TXT", carpeta);
+  http_galletas_carga(ruta);
   sprintf(ruta, "%sNAVEGA.INI", carpeta);
   if (!(f = fopen(ruta, "r"))) return;
   while (fgets(l, sizeof l, f)) {
@@ -1114,6 +1673,8 @@ static void lee_ini(void) {
     if (!_strnicmp(l, "Inicio=", 7) && l[7]) sprintf(inicio, "%.290s", l + 7);
     if (!_strnicmp(l, "Idioma=", 7) && l[7]) sprintf(http_idioma, "%.30s", l + 7);
     if (!_strnicmp(l, "AlContenido=", 12)) al_contenido = !(l[12] == 'N' || l[12] == 'n' || l[12] == '0');
+    if (!_strnicmp(l, "Descargas=", 10) && l[10]) sprintf(dir_descargas, "%.140s", l + 10);
+    if (!_strnicmp(l, "Galletas=", 9) && (l[9] == 'N' || l[9] == 'n' || l[9] == '0')) guardar_galletas = 0;
   }
   fclose(f);
 }
@@ -1142,13 +1703,16 @@ void inicio_prog(void) {
   while (*cmd == ' ') cmd++;
   if (*cmd) ir_dir(cmd); else ir(inicio, 0, NULL, 0, 0);
   for (;;) {
-    if (cargando) {
+    if (cargando || img_trabajo()) {
       while (PeekMessageA(&m, NULL, 0, 0, 1)) {
         if (m.message == WM_QUIT) goto fin;
         TranslateMessage(&m);
         DispatchMessageA(&m);
       }
-      if (cargando) carga_avanza();
+      if (cargando) {
+        carga_avanza();
+        if (!cargando) guarda_galletas();
+      } else img_avanza();
     } else {
       if (!GetMessageA(&m, NULL, 0, 0)) break;
       TranslateMessage(&m);
@@ -1157,6 +1721,8 @@ void inicio_prog(void) {
   }
 fin:
   if (cargando) http_suelta(&pet);
+  img_cancela();
+  guarda_galletas();
   http_fin();
   ExitProcess(0);
 }

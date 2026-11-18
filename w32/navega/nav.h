@@ -29,6 +29,22 @@ char *strrchr(const char *, int);
 char *strstr(const char *, const char *);
 int atoi(const char *);
 int sprintf(char *, const char *, ...);
+u32 strtoul(const char *, char **, int);
+long time(long *);
+typedef struct FILE FILE;
+FILE *fopen(const char *, const char *);
+char *fgets(char *, int, FILE *);
+int fputs(const char *, FILE *);
+u32 fread(void *, u32, u32, FILE *);
+u32 fwrite(const void *, u32, u32, FILE *);
+int fseek(FILE *, long, int);
+long ftell(FILE *);
+int fclose(FILE *);
+int remove(const char *);
+
+/* cómo se presenta el Navegador a los servidores (User-Agent) */
+#define NAV_VERSION "0.2"
+#define HTTP_AGENTE "HispaNavegador/" NAV_VERSION " (Hispa-486)"
 
 /* ---- textos y memoria (html.c) ---- */
 typedef struct Trozo { struct Trozo *sig; u32 usado, tam; } Trozo;
@@ -114,6 +130,12 @@ typedef struct {
   char *url;
   int post;
   char *cuerpo; u32 n_cuerpo;
+  char tipo_cuerpo[96];  /* el Content-Type del POST ("": de formulario) */
+  int cruzada;           /* la pide una página de otro sitio (SameSite) */
+  int sub;               /* es una imagen de la página, no la página */
+  u32 max;               /* lo más que se acepta (0: 4 MB) */
+  FILE *disco;           /* una descarga: el cuerpo va a este archivo, no a la memoria */
+  int decidido;          /* (el Navegador ya ha mirado las cabeceras) */
   /* la marcha */
   int fase, reusada, reintento, enviado;
   Url u;
@@ -136,6 +158,13 @@ void http_suelta(Pet *p);
 const char *http_cabecera(const Pet *p, const char *nombre);  /* hasta el CR */
 const char *http_cifrado(void);  /* de la conexión en uso: "" si no va cifrada */
 extern char http_idioma[32];
+u32 http_fecha(const char *t, const char *fin);    /* fecha de HTTP -> segundos desde 1970 */
+u32 http_ahora(void);
+int http_galletas_guarda(const char *ruta);
+void http_galletas_carga(const char *ruta);
+int http_galletas_de(const char *servidor);
+void http_galletas_borra(void);
+extern int http_galletas_cambio;
 
 /* ---- la página: del documento a la rejilla de letras (pagina.c) ---- */
 enum { C_TEXTO, C_CLAVE, C_CASILLA, C_RADIO, C_ENVIAR, C_BOTON, C_REINICIO, C_LISTA, C_AREA, C_OCULTO, C_ARCHIVO };
@@ -151,7 +180,7 @@ typedef struct {
   int cursor, desp;                       /* texto: dónde se escribe y desde dónde se ve */
   Nodo **opc; int n_opc, elegida, elegida0;  /* lista */
 } Ctl;
-typedef struct { u8 est, fg, bg; short enlace, ctl; } Atr;
+typedef struct { u8 est, fg, bg; short enlace, ctl, img; } Atr;
 #define A_NEGRITA 1
 #define A_SUBRAYA 2
 #define A_RAYA 4         /* una raya horizontal en vez de letras */
@@ -160,6 +189,22 @@ typedef struct { u8 est, fg, bg; short enlace, ctl; } Atr;
 typedef struct { u16 n; u8 *c; u16 *a; } Fila;
 typedef struct { const char *href; Nodo *nodo; int x, y; } Enlace;
 typedef struct { u8 enlace; short n; } Foco;   /* enlace: 1 = enlace n; 0 = control n */
+/* las imágenes (<img>): se bajan después de la página, una a una */
+#define NAV_LW 8                 /* una letra de la rejilla, en puntos */
+#define NAV_LH 18                /* una fila */
+#define IMG_MAX_W 360            /* lo más grande que se ve una imagen */
+#define IMG_MAX_H 270
+enum { IM_PENDIENTE, IM_BAJANDO, IM_LISTA, IM_FALLO };
+typedef struct {
+  Nodo *nodo;
+  char *src;             /* la dirección entera (malloc); NULL: no se puede pedir */
+  int pw, ph;            /* lo que pide la página (puntos; 0: no lo dice) */
+  int w, h;              /* lo que se pinta (puntos), cuando ya está */
+  int x, y, cw, ch;      /* dónde va en la rejilla (letras, filas); y < 0: no se ve */
+  u8 estado;             /* IM_* */
+  u8 visto;              /* la maqueta ha llegado a ella (no está escondida) */
+  u8 *px;                /* w x h, filas de (w + 3) & ~3, colores de la paleta */
+} Img;
 typedef struct {
   Doc doc;
   char *url;
@@ -172,6 +217,7 @@ typedef struct {
   Foco *foco; int n_foco, cap_foco;
   u32 color[64]; int n_color;
   void *reglas; int n_reglas;
+  Img *img; int n_img, cap_img;
 } Pagina;
 /* colores fijos de la página (índices de Pagina.color) */
 enum { K_TINTA = 1, K_FONDO, K_ENLACE, K_GRIS, K_ROJO, K_VERDE, K_TITULO, K_ZEBRA, K_MARCA, K_CABEZA, K_AVISO, K_N };
@@ -181,7 +227,13 @@ void pag_suelta(Pagina *);
 /* el formulario del control «con» (el que se ha pulsado, o -1): la dirección
  * y, si es POST, el cuerpo; devuelve 0 si no hay a dónde enviar. aviso: lo
  * que hay que confirmar antes (onsubmit con confirm) o "" */
-int pag_formulario(Pagina *, Nodo *forma, int con, char **url, char **cuerpo, u32 *n_cuerpo, int *post);
+int pag_formulario(Pagina *, Nodo *forma, int con, char **url, char **cuerpo, u32 *n_cuerpo, int *post, char *tipo);
+int pag_multipart(Nodo *forma, int con, Pagina *p);   /* ¿se envía como multipart/form-data? */
+int pag_patron(const char *patron, const char *t, int n);   /* ¿casa entero con el pattern? */
+long pag_archivo_mide(const char *ruta);              /* -1 no se puede leer, -2 demasiado grande */
+int pag_refresco(Pagina *, char **url);               /* <meta http-equiv=refresh>: segundos (-1: no hay) */
+/* imagen.c */
+u8 *img_descodifica(const u8 *d, u32 n, int pw, int ph, int max_w, int max_h, int *w, int *h, char *error);
 const char *pag_confirma(Nodo *n, char *b, int max);   /* el texto de confirm('...') o NULL */
 void ctl_pon(Ctl *, const char *t, int n);
 int pag_ctl_de_label(Pagina *, Nodo *label);          /* el control de un <label>, o -1 */

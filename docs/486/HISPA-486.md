@@ -47,7 +47,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. Falta: los iconos del escritorio y «Mi PC» |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
-| 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Falta: imágenes, hojas de estilo de fuera |
+| 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Después, ClicGest entero: imágenes, subir y bajar archivos, galletas guardadas. Falta: hojas de estilo de fuera |
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
 | 8 | Arranque UEFI nativo (cargador propio, disco y pantalla sin BIOS) | arranca en un PC sin CSM |
 | 9 | Programas propios de la época: la oficina «-486», audio y vídeo | versión 1.0 |
@@ -153,9 +153,24 @@ para la biblio» (la biblioteca de la asociación, en ClicGest).
 - **Pruebas:** `tests/run_red32_tests.sh` (la red y TLS desde la consola) y
   `tests/run_navegador_tests.sh` (el Navegador dentro de Hispa Ventanas),
   las dos sin Internet, con un servidor propio en el anfitrión.
-- **Lo que sigue:** imágenes (GIF, JPEG y PNG pequeños), las hojas de estilo
-  de fuera cuando sean pequeñas, subir archivos, y la pila residente para
-  que dos programas usen la red a la vez.
+- **Después (18/11/2026), «haz el navegador compatible con ClicGest.es»:**
+  galletas que se guardan al cerrar (la de «Mantener la sesión iniciada»),
+  imágenes (PNG, GIF y JPEG, con los formatos de Mirador tal cual), subir
+  archivos (`multipart/form-data`, con el diálogo de abrir), descargas al
+  disco (el diálogo de guardar, y abrir el PDF con el Lector), `pattern`,
+  `<meta http-equiv=refresh>`, Mayús+Tab, y el User-Agent
+  `HispaNavegador/0.2 (Hispa-486)`. Para eso, Hispa Ventanas da a los
+  programas Hispa32 cinco funciones más (`ventanas/win32n.inc`):
+  `SetDIBitsToDevice` (mapas de 8 bits: de abajo arriba o de arriba abajo;
+  con `DIB_PAL_COLORS` los octetos son colores de su paleta),
+  `GetKeyState` (Mayús, Ctrl y Alt), `GetOpenFileNameA` y `GetSaveFileNameA`
+  (de `COMDLG32`, la cuarta DLL que reconoce: el diálogo de elegir archivo
+  de Hispa Ventanas, que deja la carpeta de trabajo como estaba) y `WinExec`
+  (abre otro programa como un acceso directo: un `.HVP` se abre dentro).
+  `tools/elf2pe.py -t` importa también de `COMDLG32.dll`. Todo en
+  [NAVEGADOR.md](NAVEGADOR.md).
+- **Lo que sigue:** las hojas de estilo de fuera cuando sean pequeñas, y la
+  pila residente para que dos programas usen la red a la vez.
 
 ## Fase 4a: la barra de tareas y el menú Inicio (hecha, 18/11/2026)
 

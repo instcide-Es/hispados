@@ -159,10 +159,13 @@ $(B)/HTTPS.EXE: w32/https.c $(B)/crt0.o $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MS
 	$(CC32) -march=i486 -Wall -c $< -o $(B)/https.o
 	python3 tools/elf2pe.py -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL $(B)/crt0.o $(B)/https.o
 # El Navegador de Hispa-486 (docs/486/NAVEGADOR.md): programa Hispa32 de ventanas
-NAVSRC = w32/navega/navega.c w32/navega/pagina.c w32/navega/html.c w32/navega/http.c
-NAVOBJ = $(patsubst w32/navega/%.c,$(B)/nav_%.o,$(NAVSRC))
+NAVSRC = w32/navega/navega.c w32/navega/pagina.c w32/navega/html.c w32/navega/http.c w32/navega/imagen.c
+NAVOBJ = $(patsubst w32/navega/%.c,$(B)/nav_%.o,$(NAVSRC)) $(B)/nav_formatos.o
 $(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h | $(B)
 	$(CC32) -march=i486 -Wall -Wextra -Wno-parentheses -Wno-sign-compare -c $< -o $@
+# las imágenes: el núcleo de Mirador tal cual (programas/mirador, programas/comun)
+$(B)/nav_formatos.o: w32/navega/imagen.asm $(wildcard programas/mirador/*.inc) programas/comun/desinfla_t.inc programas/comun/jpeg.inc | $(B)
+	$(NASM) -f elf32 -i programas/mirador/ -i programas/comun/ -o $@ $<
 $(B)/NAVEGA.EXE: $(NAVOBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
 	python3 tools/elf2pe.py --gui --pila 0x30000 -e inicio_prog -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(NAVOBJ)
 # El segundo disquete de Hispa-486: «Internet» (el Navegador, HTTPS y sus DLL;

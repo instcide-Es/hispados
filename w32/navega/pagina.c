@@ -16,6 +16,7 @@
  * ============================================================================= */
 typedef struct {
   u8 etq, oculto, negrita, alin, subraya, hay_color, hay_fondo, del_atr_hidden, bloque;
+  short ancho, alto;            /* width y height en puntos (px), para las imágenes; 0: no lo dice */
   const char *clase, *clase2, *id;
   u32 color, fondo;
 } Regla;
@@ -97,6 +98,16 @@ static void declaraciones(const char *t, const char *fin, Regla *r) {
         if (!_strnicmp(v, "center", 6)) r->alin = 1;
         else if (!_strnicmp(v, "right", 5) || !_strnicmp(v, "end", 3)) r->alin = 2;
       } else if (!strcmp(prop, "text-decoration")) { if (!_strnicmp(v, "underline", 9)) r->subraya = 1; }
+      else if (!strcmp(prop, "width") || !strcmp(prop, "height")) {
+        /* solo en puntos (px): lo demás (%, em, auto) no se sabe aquí */
+        const char *q = v;
+        int x = 0;
+        while (q < pc && *q >= '0' && *q <= '9') x = x * 10 + *q++ - '0';
+        if (q < pc && *q == '.') { q++; while (q < pc && *q >= '0' && *q <= '9') q++; }
+        if (q > v && q + 1 < pc + 1 && !_strnicmp(q, "px", 2) && x > 0 && x < 4000) {
+          if (prop[0] == 'w') r->ancho = (short)x; else r->alto = (short)x;
+        }
+      }
     }
     t = pc + 1;
   }
@@ -115,9 +126,11 @@ static int selector(Pagina *p, const char *t, const char *fin, Regla *r) {
   b[n] = 0;
   if (n) {
     static const char *const nom[] = { "div", "p", "span", "a", "table", "td", "th", "tr", "ul", "li", "h1", "h2", "h3",
-      "nav", "aside", "form", "label", "small", "section", "header", "footer", "button", "input", "details", "summary" };
+      "nav", "aside", "form", "label", "small", "section", "header", "footer", "button", "input", "details", "summary",
+      "img", "fieldset", "legend", "main", "article" };
     static const u8 cod[] = { E_DIV, E_P, E_SPAN, E_A, E_TABLE, E_TD, E_TH, E_TR, E_UL, E_LI, E_H1, E_H2, E_H3,
-      E_NAV, E_ASIDE, E_FORM, E_LABEL, E_SMALL, E_SECTION, E_HEADER, E_FOOTER, E_BUTTON, E_INPUT, E_DETAILS, E_SUMMARY };
+      E_NAV, E_ASIDE, E_FORM, E_LABEL, E_SMALL, E_SECTION, E_HEADER, E_FOOTER, E_BUTTON, E_INPUT, E_DETAILS, E_SUMMARY,
+      E_IMG, E_FIELDSET, E_LEGEND, E_MAIN, E_ARTICLE };
     u32 k;
     for (k = 0; k < sizeof cod; k++) if (!strcmp(nom[k], b)) { r->etq = cod[k]; break; }
     if (k == sizeof cod) return 0;
@@ -178,7 +191,7 @@ static void css_lee(Pagina *p, const char *c, const char *fin, int px) {
       memset(&r, 0, sizeof r);
       if (p->n_reglas < REGLAS_MAX && selector(p, s, coma, &r)) {
         declaraciones(llave + 1, cierre < fin ? cierre : fin, &r);
-        if (r.oculto || r.negrita || r.alin || r.subraya || r.hay_color || r.hay_fondo || r.bloque) rs[p->n_reglas++] = r;
+        if (r.oculto || r.negrita || r.alin || r.subraya || r.hay_color || r.hay_fondo || r.bloque || r.ancho || r.alto) rs[p->n_reglas++] = r;
       }
       s = coma + 1;
     }
@@ -278,6 +291,36 @@ static void estilo(Pagina *p, Nodo *n) {
     for (a = n->padre; a && !(a->est & EN_PLEGABLE); a = a->padre) ;
     if (!a) n->est |= EN_PLEGABLE;             /* (uno dentro de otro: solo el de fuera) */
   }
+}
+
+/* el ancho y el alto en puntos que la página pide para un elemento (una
+ * imagen): sus atributos width y height, las reglas de los <style> y su
+ * style; 0 si no lo dice */
+static void css_medidas(Pagina *p, Nodo *n, int *w, int *h) {
+  Regla *rs = p->reglas, q;
+  const char *t, *cl = atr(n, "class"), *id = atr(n, "id");
+  int k;
+  *w = *h = 0;
+  if ((t = atr(n, "width")) && *t >= '1' && *t <= '9' && !strchr(t, '%')) *w = atoi(t);
+  if ((t = atr(n, "height")) && *t >= '1' && *t <= '9' && !strchr(t, '%')) *h = atoi(t);
+  for (k = 0; k < p->n_reglas; k++) {
+    Regla *r = &rs[k];
+    if (r->del_atr_hidden || (!r->ancho && !r->alto)) continue;
+    if (r->etq && r->etq != n->etq) continue;
+    if (r->id && (!id || strcmp(id, r->id))) continue;
+    if (r->clase && (!cl || !tiene_clase(n, r->clase))) continue;
+    if (r->clase2 && !tiene_clase(n, r->clase2)) continue;
+    if (r->ancho) *w = r->ancho;
+    if (r->alto) *h = r->alto;
+  }
+  if ((t = atr(n, "style"))) {
+    memset(&q, 0, sizeof q);
+    declaraciones(t, t + strlen(t), &q);
+    if (q.ancho) *w = q.ancho;
+    if (q.alto) *h = q.alto;
+  }
+  if (*w > 4000) *w = 4000;
+  if (*h > 4000) *h = 4000;
 }
 
 /* =============================================================================
@@ -418,18 +461,154 @@ static void campo(const char *nom, const char *val, int n, char **d, u32 *nd, u3
   url_codifica("=", -2, d, nd, cap);
   url_codifica(val, n, d, nd, cap);
 }
-int pag_formulario(Pagina *p, Nodo *forma, int con, char **url, char **cuerpo, u32 *n_cuerpo, int *post) {
+/* ---- multipart/form-data (RFC 7578): el formulario que sube archivos ---- */
+int pag_multipart(Nodo *forma, int con, Pagina *p) {
+  const char *m = atr(forma, "method"), *e = atr(forma, "enctype"), *t;
+  if (con >= 0) {
+    if ((t = atr(p->ctl[con].nodo, "formmethod"))) m = t;
+    if ((t = atr(p->ctl[con].nodo, "formenctype"))) e = t;
+  }
+  return m && !_stricmp(m, "post") && e && !_strnicmp(e, "multipart/form-data", 19);
+}
+typedef struct { char *d; u32 n, cap; int mal; } Buf;
+static void b_pon(Buf *b, const void *t, u32 n) {
+  if (b->mal) return;
+  if (b->n + n + 1 > b->cap) {
+    u32 c = b->cap ? b->cap * 2 : 4096;
+    char *q;
+    while (c < b->n + n + 1) c *= 2;
+    q = realloc(b->d, c);
+    if (!q) { b->mal = 1; return; }
+    b->d = q; b->cap = c;
+  }
+  memcpy(b->d + b->n, t, n);
+  b->n += n;
+  b->d[b->n] = 0;
+}
+static void b_txt(Buf *b, const char *t) { b_pon(b, t, strlen(t)); }
+/* un texto de la página 1252 en UTF-8; las comillas y los saltos, como los
+ * escapa un navegador en los nombres */
+static void b_utf8(Buf *b, const char *t, int n, int nombre) {
+  char u[4];
+  int k, m;
+  for (k = 0; k < n; k++) {
+    if (nombre && t[k] == '"') { b_txt(b, "%22"); continue; }
+    if (nombre && (t[k] == '\r' || t[k] == '\n')) { b_txt(b, t[k] == '\r' ? "%0D" : "%0A"); continue; }
+    if (!nombre && t[k] == '\n' && (k == 0 || t[k - 1] != '\r')) { b_txt(b, "\r\n"); continue; }
+    m = a_utf8(t + k, 1, u);
+    b_pon(b, u, m);
+  }
+}
+static void parte(Buf *b, const char *frontera, const char *nombre) {
+  b_txt(b, "--"); b_txt(b, frontera); b_txt(b, "\r\nContent-Disposition: form-data; name=\"");
+  b_utf8(b, nombre, strlen(nombre), 1);
+  b_txt(b, "\"");
+}
+static void parte_txt(Buf *b, const char *frontera, const char *nombre, const char *v, int n) {
+  parte(b, frontera, nombre);
+  b_txt(b, "\r\n\r\n");
+  b_utf8(b, v, n, 0);
+  b_txt(b, "\r\n");
+}
+/* el tipo de un archivo por su extensión */
+static const char *tipo_de(const char *nombre) {
+  static const char *const t[] = { "jpg", "image/jpeg", "jpeg", "image/jpeg", "jpe", "image/jpeg", "png", "image/png",
+    "gif", "image/gif", "bmp", "image/bmp", "webp", "image/webp", "pdf", "application/pdf", "txt", "text/plain",
+    "csv", "text/csv", "htm", "text/html", "html", "text/html", "zip", "application/zip", "ico", "image/x-icon" };
+  const char *e = strrchr(nombre, '.');
+  u32 k;
+  if (e && !strchr(e, '\\'))
+    for (k = 0; k < sizeof t / sizeof t[0]; k += 2) if (!_stricmp(e + 1, t[k])) return t[k + 1];
+  return "application/octet-stream";
+}
+#define SUBIR_MAX (2u << 20)
+static void parte_archivo(Buf *b, const char *frontera, const char *nombre, const char *ruta) {
+  const char *base = ruta, *q;
+  FILE *f;
+  u32 n = 0;
+  long l;
+  for (q = base; *q; q++) if (*q == '\\' || *q == ':' || *q == '/') ruta = q + 1;
+  parte(b, frontera, nombre);
+  b_txt(b, "; filename=\"");
+  b_utf8(b, ruta, strlen(ruta), 1);
+  b_txt(b, "\"\r\nContent-Type: ");
+  b_txt(b, base[0] ? tipo_de(base) : "application/octet-stream");
+  b_txt(b, "\r\n\r\n");
+  if (base[0] && (f = fopen(base, "rb"))) {
+    if (!fseek(f, 0, 2) && (l = ftell(f)) > 0 && (u32)l <= SUBIR_MAX) {
+      fseek(f, 0, 0);
+      if (!b->mal && b->n + (u32)l + 1 > b->cap) {
+        char *q = realloc(b->d, b->n + l + 4096);
+        if (q) { b->d = q; b->cap = b->n + l + 4096; } else b->mal = 1;
+      }
+      if (!b->mal) { n = fread(b->d + b->n, 1, l, f); b->n += n; }
+    }
+    fclose(f);
+  }
+  b_txt(b, "\r\n");
+}
+/* el archivo de un control de subir: -1 no se puede leer, -2 es demasiado
+ * grande; o lo que ocupa */
+long pag_archivo_mide(const char *ruta) {
+  FILE *f = fopen(ruta, "rb");
+  long l;
+  if (!f) return -1;
+  l = fseek(f, 0, 2) ? -1 : ftell(f);
+  fclose(f);
+  if (l > (long)SUBIR_MAX) return -2;
+  return l;
+}
+static int formulario_mp(Pagina *p, Nodo *forma, int con, Buf *b, char *tipo) {
+  static u32 cuenta;
+  char frontera[48];
+  int k;
+  sprintf(frontera, "----HispaNavegador%u%u", http_ahora() & 0xFFFFF, ++cuenta);
+  sprintf(tipo, "multipart/form-data; boundary=%s", frontera);
+  for (k = 0; k < p->n_ctl; k++) {
+    Ctl *c = &p->ctl[k];
+    const char *t;
+    if (c->forma != forma || c->desactivado || !c->nombre || !c->nombre[0]) continue;
+    switch (c->tipo) {
+    case C_TEXTO: case C_CLAVE: case C_AREA: case C_OCULTO: parte_txt(b, frontera, c->nombre, c->valor, c->n_valor); break;
+    case C_CASILLA: case C_RADIO: if (c->marcado) parte_txt(b, frontera, c->nombre, c->valor, c->n_valor); break;
+    case C_LISTA:
+      if (c->n_opc && c->elegida < c->n_opc) {
+        char v[300];
+        t = atr(c->opc[c->elegida], "value");
+        if (!t) { v[0] = 0; texto_de(c->opc[c->elegida], v, sizeof v); t = v; while (*t == ' ') t++; }
+        parte_txt(b, frontera, c->nombre, t, strlen(t));
+      }
+      break;
+    case C_ENVIAR: if (k == con) parte_txt(b, frontera, c->nombre, c->valor, c->n_valor); break;
+    case C_ARCHIVO: parte_archivo(b, frontera, c->nombre, c->valor); break;
+    }
+  }
+  b_txt(b, "--"); b_txt(b, frontera); b_txt(b, "--\r\n");
+  return !b->mal;
+}
+int pag_formulario(Pagina *p, Nodo *forma, int con, char **url, char **cuerpo, u32 *n_cuerpo, int *post, char *tipo) {
   const char *accion, *metodo, *t;
   char *d = NULL, *abs;
   u32 nd = 0, cap = 0;
   int k;
   if (!forma) return 0;
+  tipo[0] = 0;
   accion = atr(forma, "action"); metodo = atr(forma, "method");
   if (con >= 0) {
     if ((t = atr(p->ctl[con].nodo, "formaction"))) accion = t;
     if ((t = atr(p->ctl[con].nodo, "formmethod"))) metodo = t;
   }
   *post = metodo && !_stricmp(metodo, "post");
+  if (*post && pag_multipart(forma, con, p)) {
+    Buf b;
+    memset(&b, 0, sizeof b);
+    if (!formulario_mp(p, forma, con, &b, tipo)) { free(b.d); return 0; }
+    abs = url_absoluta(p->doc.base ? p->doc.base : p->url, accion && accion[0] ? accion : p->url);
+    if (!abs) { free(b.d); return 0; }
+    if (strchr(abs, '#')) *strchr(abs, '#') = 0;
+    *url = abs; *cuerpo = b.d; *n_cuerpo = b.n;
+    return 1;
+  }
   for (k = 0; k < p->n_ctl; k++) {
     Ctl *c = &p->ctl[k];
     if (c->forma != forma || c->desactivado || !c->nombre || !c->nombre[0]) continue;
@@ -437,6 +616,12 @@ int pag_formulario(Pagina *p, Nodo *forma, int con, char **url, char **cuerpo, u
     case C_TEXTO: case C_CLAVE: case C_AREA: case C_OCULTO:
       campo(c->nombre, c->valor, c->n_valor, &d, &nd, &cap);
       break;
+    case C_ARCHIVO: {                          /* (sin multipart: solo el nombre, como los demás navegadores) */
+      const char *b = c->valor, *q;
+      for (q = b; *q; q++) if (*q == '\\' || *q == ':' || *q == '/') b = q + 1;
+      campo(c->nombre, b, strlen(b), &d, &nd, &cap);
+      break;
+    }
     case C_CASILLA: case C_RADIO:
       if (c->marcado) campo(c->nombre, c->valor, c->n_valor, &d, &nd, &cap);
       break;
@@ -473,11 +658,11 @@ int pag_formulario(Pagina *p, Nodo *forma, int con, char **url, char **cuerpo, u
 /* =============================================================================
  *  La rejilla
  * ============================================================================= */
-static int atr_id(Pagina *p, int est, int fg, int bg, int enlace, int ctl) {
+static int atr_id2(Pagina *p, int est, int fg, int bg, int enlace, int ctl, int img) {
   int k;
   for (k = p->n_atrs - 1; k >= 0; k--) {
     Atr *a = &p->atrs[k];
-    if (a->est == est && a->fg == fg && a->bg == bg && a->enlace == enlace && a->ctl == ctl) return k;
+    if (a->est == est && a->fg == fg && a->bg == bg && a->enlace == enlace && a->ctl == ctl && a->img == img) return k;
   }
   if (p->n_atrs == p->cap_atrs) {
     Atr *q = realloc(p->atrs, (p->cap_atrs + 64) * sizeof(Atr));
@@ -486,9 +671,10 @@ static int atr_id(Pagina *p, int est, int fg, int bg, int enlace, int ctl) {
   }
   if (p->n_atrs >= 65000) return 0;
   p->atrs[p->n_atrs].est = (u8)est; p->atrs[p->n_atrs].fg = (u8)fg; p->atrs[p->n_atrs].bg = (u8)bg;
-  p->atrs[p->n_atrs].enlace = (short)enlace; p->atrs[p->n_atrs].ctl = (short)ctl;
+  p->atrs[p->n_atrs].enlace = (short)enlace; p->atrs[p->n_atrs].ctl = (short)ctl; p->atrs[p->n_atrs].img = (short)img;
   return p->n_atrs++;
 }
+static int atr_id(Pagina *p, int est, int fg, int bg, int enlace, int ctl) { return atr_id2(p, est, fg, bg, enlace, ctl, -1); }
 static Fila *fila(Pagina *p, int y, int hasta) {
   Fila *f;
   if (y < 0 || y > 30000) return NULL;
@@ -529,7 +715,7 @@ static void fila_fondo(Pagina *p, int y, int x, int n, int bg) {
   if (!f) return;
   for (k = x; k < x + n; k++) {
     Atr a = p->atrs[f->a[k]];
-    if (!a.bg) f->a[k] = (u16)atr_id(p, a.est, a.fg, bg, a.enlace, a.ctl);
+    if (!a.bg) f->a[k] = (u16)atr_id2(p, a.est, a.fg, bg, a.enlace, a.ctl, a.img);
   }
 }
 
@@ -541,6 +727,9 @@ typedef struct {
   Pagina *p;
   int x0, ancho, y, col, espacio, margen, vacio, alin, pre, medir, max_an, min_an;
   int pegado;                   /* lo siguiente va pegado a lo de antes (tras «[») */
+  int linea;                    /* dentro de un enlace-botón: lo de dentro, en una línea (sin bloques) */
+  Nodo *fl_padre;               /* una imagen a la izquierda y el texto a su lado (como float o flex): */
+  int fl_hasta, fl_x0, fl_an;   /*   hasta qué fila, y el margen de antes */
   char pref[8];                 /* lo que va delante de la primera línea (la viñeta) */
   u8 lc[LMAX];
   u16 la[LMAX];
@@ -560,6 +749,12 @@ static void ctx_nuevo(Ctx *c, Pagina *p, int x0, int ancho, int y, int medir) {
   c->p = p; c->x0 = x0; c->ancho = ancho < 1 ? 1 : ancho > LMAX - 1 ? LMAX - 1 : ancho; c->y = y;
   c->col = c->espacio = c->margen = c->alin = c->pre = c->max_an = c->min_an = c->pegado = 0;
   c->vacio = 1; c->medir = medir; c->pref[0] = 0;
+  c->fl_padre = NULL; c->linea = 0;
+}
+/* se acaba lo de al lado de la imagen: debajo de ella */
+static void fin_flota(Ctx *c) {
+  if (!c->fl_padre) return;
+  c->x0 = c->fl_x0; c->ancho = c->fl_an; c->fl_padre = NULL;
 }
 /* la línea que se estaba llenando, a la página */
 static void salta(Ctx *c) {
@@ -578,10 +773,12 @@ static void salta(Ctx *c) {
       if (k && c->la[k] == c->la[k - 1]) continue;
       if (a->ctl >= 0 && (!k || p->atrs[c->la[k - 1]].ctl != a->ctl)) { p->ctl[a->ctl].x = c->x0 + desp + k; p->ctl[a->ctl].y = c->y; }
       if (a->enlace >= 0 && p->enl[a->enlace].y < 0) { p->enl[a->enlace].x = c->x0 + desp + k; p->enl[a->enlace].y = c->y; }
+      if (a->img >= 0 && (!k || p->atrs[c->la[k - 1]].img != a->img)) { p->img[a->img].x = c->x0 + desp + k; p->img[a->img].y = c->y; }
     }
   }
   c->y++;
   c->col = 0; c->espacio = 0; c->vacio = 0; c->margen = 0;
+  if (c->fl_padre && c->y >= c->fl_hasta) fin_flota(c);   /* (lo que sigue, ya debajo de la imagen) */
 }
 static void margen(Ctx *c) { salta(c); c->margen = 1; }
 /* empieza una línea: el margen pendiente y la viñeta */
@@ -677,7 +874,7 @@ static int enlace_nuevo(Ctx *c, const char *href, Nodo *n) { return enlace_nuevo
 static int ctl_dentro(Nodo *n) {
   Nodo *h;
   int k;
-  if (!n->texto && n->ctl) return n->ctl - 1;
+  if (!n->texto && n->ctl && n->etq != E_IMG) return n->ctl - 1;
   for (h = n->hijo; h; h = h->sig) if (!h->texto && (k = ctl_dentro(h)) >= 0) return k;
   return -1;
 }
@@ -713,7 +910,7 @@ static int ctl_ancho(Ctx *c, Ctl *k) {
     }
     w += 4;
     return w < 8 ? 8 : w > 44 ? 44 : w;
-  case C_ARCHIVO: return 22;
+  case C_ARCHIVO: return 40;
   case C_AREA:
     w = (t = atr(k->nodo, "cols")) ? atoi(t) : 60;
     if (w < 20) w = 20;
@@ -798,7 +995,7 @@ static int filas_de(Nodo *t, Nodo **f, int max, int n) {
 static void tabla(Ctx *c, Nodo *t, Est e) {
   Pagina *p = c->p;
   Nodo **fs, *h;
-  int nf, k, j, nc = 0, nat[COLS], mn[COLS], w[COLS], off[COLS], total, sitio, cebra, y0;
+  int nf, k, j, nc = 0, nat[COLS], mn[COLS], w[COLS], off[COLS], total, sitio, cebra, y0, sep;
   Ctx *s;
   nf = filas_de(t, NULL, 0, 0);
   salta(c);
@@ -838,7 +1035,10 @@ static void tabla(Ctx *c, Nodo *t, Est e) {
   }
   if (!nc) { free(fs); free(s); return; }
   for (k = 0, total = 0; k < nc; k++) { if (nat[k] < 1) nat[k] = 1; if (mn[k] < 1) mn[k] = 1; w[k] = nat[k]; total += w[k]; }
-  sitio = c->ancho - 2 * (nc - 1);
+  /* entre columna y columna, dos espacios; uno si no cabe (las tablas anchas
+   * de ClicGest: antes que partir las palabras) */
+  sep = total + 2 * (nc - 1) > c->ancho && !c->medir ? 1 : 2;
+  sitio = c->ancho - sep * (nc - 1);
   if (c->medir) {
     int tm = 0;
     for (k = 0; k < nc; k++) tm += mn[k];
@@ -857,8 +1057,8 @@ static void tabla(Ctx *c, Nodo *t, Est e) {
     }
     w[m]--; total--;
   }
-  for (k = 0, j = 0; k < nc; k++) { off[k] = j; j += w[k] + 2; }
-  total += 2 * (nc - 1);
+  for (k = 0, j = 0; k < nc; k++) { off[k] = j; j += w[k] + sep; }
+  total += sep * (nc - 1);
   cebra = nf >= 3;
   empieza(c);
   y0 = c->y;
@@ -876,7 +1076,7 @@ static void tabla(Ctx *c, Nodo *t, Est e) {
       span = (cs = atr(h, "colspan")) ? atoi(cs) : 1;
       if (span < 1) span = 1;
       if (j + span > nc) span = nc - j;
-      for (an = 0, q = j; q < j + span; q++) an += w[q] + (q > j ? 2 : 0);
+      for (an = 0, q = j; q < j + span; q++) an += w[q] + (q > j ? sep : 0);
       if (h->etq == E_TH) { e2.est |= A_NEGRITA; cab++; }
       if (h->fg) e2.fg = h->fg;
       if (h->est & EN_NEGRITA) e2.est |= A_NEGRITA;
@@ -915,7 +1115,124 @@ static void plegable(Ctx *c, Nodo *n, Est e, const char *titulo, Nodo *resumen) 
   salta(c);
 }
 
+/* ---- las imágenes ---- */
+static int es_blanco(const Nodo *n) {
+  u32 k;
+  for (k = 0; k < n->n; k++) if (!(n->t[k] == ' ' || n->t[k] == '\n' || n->t[k] == '\r' || n->t[k] == '\t' || (u8)n->t[k] == 0xA0)) return 0;
+  return 1;
+}
+
+/* la ficha de la imagen del <img> n (se hace la primera vez); -1 si no hay sitio */
+static int img_de(Pagina *p, Nodo *n) {
+  Img *im;
+  const char *src;
+  if (n->ctl) return n->ctl - 1;
+  if (p->n_img >= 400) return -1;
+  if (p->n_img == p->cap_img) {
+    Img *q = realloc(p->img, (p->cap_img + 16) * sizeof(Img));
+    if (!q) return -1;
+    p->img = q; p->cap_img += 16;
+  }
+  im = &p->img[p->n_img];
+  memset(im, 0, sizeof *im);
+  im->nodo = n;
+  im->y = -1;
+  src = atr(n, "src");
+  if (src && !_strnicmp(src, "data:", 5)) {      /* (dentro de la página: se copia tal cual) */
+    im->src = malloc(strlen(src) + 1);
+    if (im->src) strcpy(im->src, src);
+  } else if (src && src[0]) im->src = url_absoluta(p->doc.base ? p->doc.base : p->url, src);
+  if (!im->src) im->estado = IM_FALLO;
+  css_medidas(p, n, &im->pw, &im->ph);
+  n->ctl = (short)(p->n_img + 1);
+  return p->n_img++;
+}
+/* el tamaño en que se va a ver (puntos), con las proporciones; 0 si aún no se sabe */
+static void img_tam(const Img *im, int max_w, int *w, int *h) {
+  *w = *h = 0;
+  if (im->estado == IM_LISTA) { *w = im->w; *h = im->h; }
+  else if (im->estado != IM_FALLO && im->pw > 0 && im->ph > 0) { *w = im->pw; *h = im->ph; }
+  if (!*w) return;
+  if (*w > max_w) { *h = *h * max_w / *w; *w = max_w; }
+  if (*h > IMG_MAX_H) { *w = *w * IMG_MAX_H / *h; *h = IMG_MAX_H; }
+  if (*w < 1) *w = 1;
+  if (*h < 1) *h = 1;
+}
+/* una imagen en la rejilla: un bloque de letras. 0 si no (aún no se sabe su
+ * tamaño, o no se ha podido ver): entonces va su texto alternativo */
+static int imagen(Ctx *c, Nodo *n, Est e) {
+  Pagina *p = c->p;
+  int k = img_de(p, n), w, h, cw, ch, a, j, x;
+  Img *im;
+  u8 b[LMAX];
+  u16 at[LMAX];
+  if (k < 0) return 0;
+  im = &p->img[k];
+  if (!c->medir) im->visto = 1;
+  img_tam(im, c->medir ? IMG_MAX_W : (c->ancho * NAV_LW < IMG_MAX_W ? c->ancho * NAV_LW : IMG_MAX_W), &w, &h);
+  if (!w) return im->estado != IM_FALLO && !(atr(n, "alt") && atr(n, "alt")[0]);   /* (sin alt: nada, hasta que llegue) */
+  cw = (w + NAV_LW - 1) / NAV_LW;
+  ch = (h + NAV_LH - 1) / NAV_LH;
+  if (cw > LMAX - 2) cw = LMAX - 2;
+  e.est &= ~A_SUBRAYA;
+  a = atr_id2(p, e.est, e.fg, e.bg, e.enlace, -1, k);
+  memset(b, ' ', cw);
+  if (ch == 1) {                                 /* pequeña (un icono): como una palabra */
+    pon(c, b, cw, a);
+    if (!c->medir) { im->cw = cw; im->ch = 1; }
+    return 1;
+  }
+  salta(c);
+  empieza(c);
+  if (cw > c->max_an) c->max_an = cw;
+  if (cw > c->min_an) c->min_an = cw;
+  /* la portada de una ficha (lo primero de un bloque que sigue con texto, como
+   * hacen las hojas de estilo con flex o float): a la izquierda, y lo demás a
+   * su lado */
+  if (!c->medir && !c->fl_padre && !c->alin && c->ancho - cw - 1 >= 30) {
+    Nodo *q = n, *pa, *h;
+    int nivel;
+    for (nivel = 0; nivel < 4 && (pa = q->padre); nivel++, q = pa) {
+      for (h = pa->hijo; h && h != q; h = h->sig)
+        if (!(h->texto ? es_blanco(h) : (etq_band[h->etq] & EF_FUERA) || (h->est & EN_VISTO && h->oculto))) break;
+      if (h != q) break;                          /* (no es lo primero) */
+      for (h = q->sig; h; h = h->sig)
+        if (!(h->texto ? es_blanco(h) : (etq_band[h->etq] & EF_FUERA) || h->etq == E_BR)) break;
+      if (h) {                                    /* detrás hay algo: eso va al lado */
+        for (j = 0; j < cw; j++) at[j] = (u16)a;
+        for (j = 0; j < ch; j++) fila_pon(p, c->y + j, c->x0, b, at, cw);
+        im->x = c->x0; im->y = c->y; im->cw = cw; im->ch = ch;
+        if (e.enlace >= 0 && p->enl[e.enlace].y < 0) { p->enl[e.enlace].x = c->x0; p->enl[e.enlace].y = c->y; }
+        c->fl_padre = pa; c->fl_hasta = c->y + ch; c->fl_x0 = c->x0; c->fl_an = c->ancho;
+        c->x0 += cw + 1; c->ancho -= cw + 1;
+        c->vacio = 1; c->margen = 0;
+        return 1;
+      }
+    }
+  }
+  if (!c->medir) {
+    x = c->x0;
+    if (cw < c->ancho) x += c->alin == 1 ? (c->ancho - cw) / 2 : c->alin == 2 ? c->ancho - cw : 0;
+    for (j = 0; j < cw; j++) at[j] = (u16)a;
+    for (j = 0; j < ch; j++) fila_pon(p, c->y + j, x, b, at, cw);
+    im->x = x; im->y = c->y; im->cw = cw; im->ch = ch;
+    if (e.enlace >= 0 && p->enl[e.enlace].y < 0) { p->enl[e.enlace].x = x; p->enl[e.enlace].y = c->y; }
+  }
+  c->y += ch;
+  c->vacio = 0;
+  return 1;
+}
+
+static void caja2(Ctx *c, Nodo *n, Est e);
 static void caja(Ctx *c, Nodo *n, Est e) {
+  caja2(c, n, e);
+  if (c->fl_padre == n) {                        /* se acaba el bloque de la imagen: lo que siga, debajo */
+    salta(c);
+    if (c->fl_padre) { if (c->y < c->fl_hasta) c->y = c->fl_hasta; fin_flota(c); }
+    c->vacio = 0;
+  }
+}
+static void caja2(Ctx *c, Nodo *n, Est e) {
   Pagina *p = c->p;
   int band, alin0, x0, an0, k, a;
   const char *t;
@@ -927,6 +1244,7 @@ static void caja(Ctx *c, Nodo *n, Est e) {
   if (!(n->est & EN_VISTO)) estilo(p, n);
   if (n->oculto) return;
   if (n->est & EN_BLOQUE) band |= EF_BLOQUE;
+  if (c->linea) { if (band & EF_BLOQUE) c->espacio = 1; band &= ~EF_BLOQUE; }   /* (dentro de un botón, todo seguido) */
   if (p->y_cont < 0 && !c->medir && (band & EF_BLOQUE)) {
     t = atr(n, "role");
     if (n->etq == E_MAIN || (t && !_stricmp(t, "main")) || tiene_clase(n, "main") || tiene_clase(n, "content")
@@ -950,6 +1268,7 @@ static void caja(Ctx *c, Nodo *n, Est e) {
     raya(c, c->ancho);
     return;
   case E_IMG:
+    if (imagen(c, n, e)) return;
     t = atr(n, "alt");
     if (t && t[0]) {
       Est e2 = e;
@@ -979,7 +1298,9 @@ static void caja(Ctx *c, Nodo *n, Est e) {
         if (c->col) c->espacio = 1;
         literal(c, "[", a);
         c->pegado = 1;
+        c->linea++;
         hijos(c, n, e);
+        c->linea--;
         c->espacio = 0; c->pegado = 0;
         literal(c, "]", a);
         return;
@@ -1198,6 +1519,7 @@ void pag_maqueta(Pagina *p, int columnas) {
   for (k = 0; k < p->n_filas; k++) { free(p->filas[k].c); free(p->filas[k].a); }
   if (p->filas) memset(p->filas, 0, p->cap_filas * sizeof(Fila));
   p->n_filas = 0; p->ancho = 0; p->n_atrs = 0; p->n_enl = 0; p->n_foco = 0; p->y_cont = -1;
+  for (k = 0; k < p->n_img; k++) { p->img[k].y = -1; p->img[k].visto = 0; }
   for (k = 0; k < p->n_ctl; k++) p->ctl[k].visible = 0;
   if (columnas < 20) columnas = 20;
   if (columnas > LMAX - 2) columnas = LMAX - 2;
@@ -1217,7 +1539,243 @@ void pag_suelta(Pagina *p) {
   if (!p) return;
   for (k = 0; k < p->n_filas; k++) { free(p->filas[k].c); free(p->filas[k].a); }
   for (k = 0; k < p->n_ctl; k++) free(p->ctl[k].valor);
+  for (k = 0; k < p->n_img; k++) { free(p->img[k].src); free(p->img[k].px); }
+  free(p->img);
   free(p->filas); free(p->atrs); free(p->enl); free(p->ctl); free(p->foco);
   ar_suelta(&p->doc.ar);
   free(p);
+}
+
+/* =============================================================================
+ *  El atributo pattern de los campos: una expresión regular sencilla (la de
+ *  JavaScript, lo corriente: letras, «.», clases [a-z0-9] y [^...], \d \w \s
+ *  y sus contrarias, grupos con «|», y las repeticiones * + ? {n} {n,} {n,m}),
+ *  que tiene que casar con el valor ENTERO. Se traduce a un programa de una
+ *  máquina de estados (la de Thompson) que se recorre sin vuelta atrás.
+ * ============================================================================= */
+enum { R_LETRA, R_CUALQUIERA, R_CLASE, R_PARTE, R_SALTA, R_FIN };
+typedef struct { u8 op, c; short x, y; } RIns;
+#define R_MAX 1500
+#define R_CLASES 24
+typedef struct { RIns ins[R_MAX]; int n; u8 clase[R_CLASES][32]; int n_clases; int mal; } RProg;
+static int r_emite(RProg *r, int op, int c, int x, int y) {
+  if (r->n >= R_MAX) { r->mal = 1; return R_MAX - 1; }
+  r->ins[r->n].op = (u8)op; r->ins[r->n].c = (u8)c; r->ins[r->n].x = (short)x; r->ins[r->n].y = (short)y;
+  return r->n++;
+}
+static void r_rango(u8 *cl, int a, int b) { int k; for (k = a; k <= b; k++) cl[k >> 3] |= (u8)(1 << (k & 7)); }
+/* \d \w \s y sus contrarias a la clase cl; 0 si la letra no es de esas */
+static int r_esc_clase(u8 *cl, int l) {
+  u8 t[32];
+  int k, neg = l == 'D' || l == 'W' || l == 'S';
+  memset(t, 0, 32);
+  switch (l | 32) {
+  case 'd': r_rango(t, '0', '9'); break;
+  case 'w': r_rango(t, '0', '9'); r_rango(t, 'a', 'z'); r_rango(t, 'A', 'Z'); r_rango(t, '_', '_'); break;
+  case 's': r_rango(t, ' ', ' '); r_rango(t, 9, 13); r_rango(t, 0xA0, 0xA0); break;
+  default: return 0;
+  }
+  for (k = 0; k < 32; k++) cl[k] |= neg ? (u8)~t[k] : t[k];
+  return 1;
+}
+static int r_esc_letra(int l) { return l == 'n' ? '\n' : l == 't' ? '\t' : l == 'r' ? '\r' : l; }
+static const char *r_alt(RProg *r, const char *s);
+/* una pieza (sin su repetición) -> dónde acaba */
+static const char *r_pieza(RProg *r, const char *s, int emite) {
+  if (*s == '(') {
+    s++;
+    if (s[0] == '?' && s[1] == ':') s += 2;
+    if (emite) s = r_alt(r, s);
+    else {                                      /* (solo saltarla) */
+      int nivel = 1;
+      while (*s && nivel) {
+        if (*s == '\\' && s[1]) s++;
+        else if (*s == '[') { s++; if (*s == ']') s++; while (*s && *s != ']') { if (*s == '\\' && s[1]) s++; s++; } }
+        else if (*s == '(') nivel++;
+        else if (*s == ')') nivel--;
+        if (*s && nivel) s++;
+      }
+    }
+    if (*s != ')') { r->mal = 1; return s; }
+    return s + 1;
+  }
+  if (*s == '[') {
+    u8 cl[32];
+    int neg = 0, k;
+    memset(cl, 0, 32);
+    s++;
+    if (*s == '^') { neg = 1; s++; }
+    if (*s == ']') { r_rango(cl, ']', ']'); s++; }
+    while (*s && *s != ']') {
+      int a = (u8)*s++, b;
+      if (a == '\\' && *s) { if (r_esc_clase(cl, (u8)*s)) { s++; continue; } a = r_esc_letra((u8)*s++); }
+      b = a;
+      if (*s == '-' && s[1] && s[1] != ']') {
+        s++;
+        b = (u8)*s++;
+        if (b == '\\' && *s) b = r_esc_letra((u8)*s++);
+      }
+      if (b >= a) r_rango(cl, a, b);
+    }
+    if (*s != ']') { r->mal = 1; return s; }
+    if (emite) {
+      if (r->n_clases >= R_CLASES) { r->mal = 1; return s + 1; }
+      for (k = 0; k < 32; k++) r->clase[r->n_clases][k] = neg ? (u8)~cl[k] : cl[k];
+      r_emite(r, R_CLASE, 0, r->n_clases++, 0);
+    }
+    return s + 1;
+  }
+  if (*s == '\\' && s[1]) {
+    u8 cl[32];
+    memset(cl, 0, 32);
+    if (r_esc_clase(cl, (u8)s[1])) {
+      if (emite) {
+        if (r->n_clases >= R_CLASES) { r->mal = 1; return s + 2; }
+        memcpy(r->clase[r->n_clases], cl, 32);
+        r_emite(r, R_CLASE, 0, r->n_clases++, 0);
+      }
+    } else if (emite) r_emite(r, R_LETRA, r_esc_letra((u8)s[1]), 0, 0);
+    return s + 2;
+  }
+  if (emite) {
+    if (*s == '.') r_emite(r, R_CUALQUIERA, 0, 0, 0);
+    else r_emite(r, R_LETRA, (u8)*s, 0, 0);
+  }
+  return s + 1;
+}
+/* una serie de piezas con sus repeticiones, hasta «|», «)» o el final */
+static const char *r_serie(RProg *r, const char *s) {
+  while (*s && *s != '|' && *s != ')' && !r->mal) {
+    const char *ini = s, *fin;
+    int mn = 1, mx = 1, k;
+    if (*s == '^' || *s == '$') { s++; continue; }   /* (casa entero de todos modos) */
+    fin = r_pieza(r, s, 0);
+    if (r->mal) return fin;
+    s = fin;
+    if (*s == '*') { mn = 0; mx = -1; s++; }
+    else if (*s == '+') { mn = 1; mx = -1; s++; }
+    else if (*s == '?') { mn = 0; mx = 1; s++; }
+    else if (*s == '{' && s[1] >= '0' && s[1] <= '9') {
+      const char *q = s + 1;
+      mn = atoi(q);
+      while (*q >= '0' && *q <= '9') q++;
+      mx = mn;
+      if (*q == ',') { q++; mx = *q == '}' ? -1 : atoi(q); while (*q >= '0' && *q <= '9') q++; }
+      if (*q == '}' && (mx < 0 || mx >= mn) && mn <= 100 && mx <= 100) s = q + 1;
+      else mn = mx = 1;                           /* (no es una repetición: «{» de letra) */
+    }
+    if (*s == '?') s++;                           /* (las perezosas, igual: se casa entero) */
+    for (k = 0; k < mn; k++) r_pieza(r, ini, 1);
+    if (mx < 0) {                                 /* L: PARTE a, fin; a: pieza; SALTA L */
+      int l = r_emite(r, R_PARTE, 0, 0, 0);
+      r->ins[l].x = (short)r->n;
+      r_pieza(r, ini, 1);
+      r_emite(r, R_SALTA, 0, l, 0);
+      r->ins[l].y = (short)r->n;
+    } else for (k = mn; k < mx; k++) {            /* PARTE a, fin; a: pieza; fin */
+      int l = r_emite(r, R_PARTE, 0, 0, 0);
+      r->ins[l].x = (short)r->n;
+      r_pieza(r, ini, 1);
+      r->ins[l].y = (short)r->n;
+    }
+  }
+  return s;
+}
+/* alternativas: PARTE a, b; a: serie; SALTA fin; b: ... */
+static const char *r_alt(RProg *r, const char *s) {
+  int saltos[40], n = 0, k;
+  for (;;) {
+    int l = r_emite(r, R_PARTE, 0, 0, 0);
+    r->ins[l].x = (short)r->n;
+    s = r_serie(r, s);
+    if (*s != '|' || r->mal || n >= 40) { r->ins[l].y = r->ins[l].x; break; }   /* (la última: sin otra salida) */
+    saltos[n++] = r_emite(r, R_SALTA, 0, 0, 0);
+    r->ins[l].y = (short)r->n;
+    s++;
+  }
+  for (k = 0; k < n; k++) r->ins[saltos[k]].x = (short)r->n;
+  return s;
+}
+static void r_hilo(RProg *r, short *lista, int *n, u16 *marca, u16 gen, int pc) {
+  while (pc < r->n && marca[pc] != gen) {
+    marca[pc] = gen;
+    if (r->ins[pc].op == R_SALTA) { pc = r->ins[pc].x; continue; }
+    if (r->ins[pc].op == R_PARTE) { r_hilo(r, lista, n, marca, gen, r->ins[pc].x); pc = r->ins[pc].y; continue; }
+    lista[(*n)++] = (short)pc;
+    return;
+  }
+}
+int pag_patron(const char *patron, const char *t, int n) {
+  RProg *r = malloc(sizeof(RProg));
+  short *l0, *l1, *tmp;
+  u16 *marca;
+  int n0 = 0, n1, k, j, sale = 1;
+  u16 gen = 1;
+  const char *fin;
+  if (!r) return 1;
+  memset(r, 0, sizeof(RProg));
+  fin = r_alt(r, patron);
+  if (*fin) r->mal = 1;                         /* (un «)» de más) */
+  r_emite(r, R_FIN, 0, 0, 0);
+  l0 = malloc(r->n * sizeof(short)); l1 = malloc(r->n * sizeof(short)); marca = malloc(r->n * sizeof(u16));
+  if (r->mal || !l0 || !l1 || !marca) goto fuera;   /* (un pattern que no se entiende no impide enviar) */
+  memset(marca, 0, r->n * sizeof(u16));
+  r_hilo(r, l0, &n0, marca, gen, 0);
+  for (k = 0; k < n; k++) {
+    u8 ch = (u8)t[k];
+    n1 = 0; gen++;
+    for (j = 0; j < n0; j++) {
+      RIns *i = &r->ins[l0[j]];
+      if ((i->op == R_LETRA && i->c == ch) || (i->op == R_CUALQUIERA && ch != '\n')
+          || (i->op == R_CLASE && (r->clase[i->x][ch >> 3] >> (ch & 7) & 1)))
+        r_hilo(r, l1, &n1, marca, gen, l0[j] + 1);
+    }
+    tmp = l0; l0 = l1; l1 = tmp; n0 = n1;
+    if (!n0) break;
+  }
+  sale = 0;
+  for (j = 0; j < n0; j++) if (r->ins[l0[j]].op == R_FIN) sale = 1;
+  if (k < n) sale = 0;
+fuera:
+  free(l0); free(l1); free(marca); free(r);
+  return sale;
+}
+
+/* <meta http-equiv="refresh" content="5; url=..."> -> los segundos (y la
+ * dirección, malloc, o NULL: la misma); -1 si no lo hay */
+static Nodo *busca_meta(Nodo *n) {
+  Nodo *h, *r;
+  const char *t;
+  if (n->texto) return NULL;
+  if (n->etq == E_META && (t = atr(n, "http-equiv")) && !_stricmp(t, "refresh") && atr(n, "content")) return n;
+  for (h = n->hijo; h; h = h->sig) if ((r = busca_meta(h))) return r;
+  return NULL;
+}
+int pag_refresco(Pagina *p, char **url) {
+  Nodo *m = p->doc.raiz ? busca_meta(p->doc.raiz) : NULL;
+  const char *t, *u;
+  char b[600];
+  int s, k;
+  *url = NULL;
+  if (!m) return -1;
+  t = atr(m, "content");
+  while (*t == ' ') t++;
+  if (*t < '0' || *t > '9') return -1;
+  s = atoi(t);
+  while ((*t >= '0' && *t <= '9') || *t == '.') t++;
+  while (*t == ' ' || *t == ';' || *t == ',') t++;
+  if (!_strnicmp(t, "url", 3)) {
+    u = t + 3;
+    while (*u == ' ') u++;
+    if (*u == '=') {
+      u++;
+      while (*u == ' ') u++;
+      if (*u == '\'' || *u == '"') u++;
+      for (k = 0; u[k] && u[k] != '\'' && u[k] != '"' && k < 598; k++) b[k] = u[k];
+      while (k && b[k - 1] == ' ') k--;
+      b[k] = 0;
+      if (b[0]) *url = url_absoluta(p->doc.base ? p->doc.base : p->url, b);
+    }
+  }
+  return s > 3600 ? 3600 : s;
 }

@@ -20,6 +20,15 @@
 #    abren y se dice por qué; texto sin formato por RSA; Latin-1; una página
 #    grande y su desplazamiento; redirecciones a http (sin cifrar); respuesta
 #    sin longitud; el 404; un archivo que no es una página; javascript:;
+#  - imágenes (PNG con sus medidas, JPEG reducido por la hoja de estilo y
+#    dentro de un enlace, GIF sin medidas, un icono en la línea, data:, una
+#    rota y un SVG: su texto alternativo); Mayús+Tab;
+#  - subir un archivo (multipart/form-data): required y pattern lo paran; el
+#    diálogo de abrir elige C:\FOTOS\TAPA.PNG; llega entero y se ve;
+#  - una descarga (un PDF con Content-Disposition): el diálogo de guardar, el
+#    archivo en el disco y abrirlo con el Lector; <meta http-equiv=refresh>;
+#  - las galletas de «recordarme» se guardan al cerrar (GALLETAS.TXT, sin las
+#    de sesión ni las caducadas) y, al abrirlo otra vez, se entra sin clave;
 #  - se cierra y no queda memoria.
 #  (GUARDAR=carpeta deja las capturas y el registro del servidor; MEDIR=1
 #  además captura el Administrador de tareas con la página de la biblioteca
@@ -28,7 +37,7 @@
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
-make -s build/NAVEGA.EXE build/HSPTLS.DLL build/WSOCK32.DLL build/MSVCRT.DLL build/HW32.COM > /dev/null 2>&1 || {
+make -s build/NAVEGA.EXE build/HSPTLS.DLL build/WSOCK32.DLL build/MSVCRT.DLL build/HW32.COM build/LECTOR.HVP > /dev/null 2>&1 || {
   echo "== Hispa-486: el Navegador: sin gcc de 32 bits, se salta =="; exit 0; }
 . tests/tools/win32_ventanas.sh
 . tests/tools/nav_certs.sh
@@ -50,8 +59,15 @@ mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
 mkdir -p $T/c/HISPADOS/INTERNET
 cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
 cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
+mkdir -p $T/c/HISPADOS/PROGS $T/c/FOTOS
+cp $B/LECTOR.HVP $T/c/HISPADOS/PROGS/
+# la foto que se sube: un PNG naranja de 64x48 (el mismo escritor que el servidor)
+python3 -c "
+import sys; sys.argv = ['', '$T', '0']
+exec(open('tests/tools/nav_servidor.py').read().split('class Pedido')[0])
+open('$T/c/FOTOS/TAPA.PNG', 'wb').write(png(64, 48, (255, 153, 0)))"
 printf 'Inicio=https://10.0.2.2:%d/\r\nIdioma=es-ES\r\n' $((P + 1)) > $T/c/HISPADOS/INTERNET/NAVEGA.INI
-python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS > /dev/null
+python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS $T/c/FOTOS > /dev/null
 corre() {
   rm -f $T/mon
   timeout ${TMAX:-700} qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
@@ -106,14 +122,35 @@ fy() { echo $((89 + 18 * $1)); }
   clic 60 $(fy 12); sleep 7; aparta; shot r1; atras                                          # redirecciones
   clic 60 $(fy 14); sleep 6; aparta; shot r2; atras                                          # sin longitud
   clic 60 $(fy 16); sleep 6; aparta; shot r3; atras                                          # 404
-  clic 60 $(fy 18); sleep 7; aparta; shot r4; atras                                          # un archivo
+  clic 60 $(fy 18); sleep 7; aparta; shot r4; tecla esc; sleep 2; shot r4b                   # un archivo: guardarlo (no)
   clic 60 $(fy 20); sleep 2; aparta; shot r5                                                 # javascript:
   for i in 1 2 3 4 5 6 7 8 9 10 11; do tecla tab; done; sleep 1; shot t1                     # Tab: el último enlace...
+  tecla shift-tab; sleep 1; shot t3; tecla tab; sleep 0.5                                    # (Mayús+Tab: el de antes)
   tecla tab; sleep 0.5; tecla tab; sleep 0.5; tecla ret; sleep 7; aparta; shot t2            # ...vuelve al primero, al segundo, Intro
+  dir_https() { tecla f6; sleep 1; tecla h t t p s shift-semicolon slash slash 1 0 dot 0 dot 2 dot 2 shift-semicolon
+    for c in $(echo $((P + 1)) | sed 's/./& /g'); do tecla $c; done; tecla slash; tecla "$@"; tecla ret; }
+  dir_https i m a g e n e s; sleep 25; aparta; shot im1                                     # las imágenes
+  clic 30 $(fy 8); sleep 6; aparta; shot im2; atras 10; aparta; shot im3                   # la portada es un enlace; y al volver, de lo ya visto
+  dir_https p o r t a d a; sleep 8; aparta; shot u0                                         # subir: el formulario
+  clic 40 $(fy 7); sleep 3; shot u1; tecla ret; sleep 2                                     # sin archivo: required
+  clic 340 $(fy 3); sleep 3; aparta; shot u2                                                        # «Examinar...»: el diálogo de abrir
+  tecla shift-c shift-semicolon backslash shift-f shift-o shift-t shift-o shift-s backslash shift-t shift-a shift-p shift-a dot shift-p shift-n shift-g
+  sleep 0.5; tecla ret; sleep 3; aparta; shot u3
+  clic 150 $(fy 5); tecla a b; clic 40 $(fy 7); sleep 3; shot u4; tecla ret; sleep 2        # «ab»: el pattern lo para
+  clic 150 $(fy 5); tecla end c; clic 40 $(fy 7); sleep 15; aparta; shot u5                 # «abc»: se sube y se ve
+  dir_https r e c i b o dot p d f; sleep 8; shot s1                                         # el recibo: el diálogo de guardar
+  tecla ret; sleep 4; shot s2                                                               # guardado: ¿abrirlo con el Lector?
+  tecla ret; sleep 10; shot s3                                                              # el Lector, con el recibo
+  tecla alt-f4; sleep 3; aparta
+  dir_https r e f r e s c a; sleep 10; aparta; shot f1                                      # <meta http-equiv=refresh>
   tecla ctrl-esc; sleep 1; tecla a a a; sleep 0.5; tecla ret; sleep 5; aparta; shot m2       # la memoria con el Navegador
-  tecla alt-f4; sleep 1.5; tecla alt-f4; sleep 3                                             # fuera los dos
+  tecla alt-f4; sleep 1.5; tecla alt-f4; sleep 4                                             # fuera los dos (las galletas, al disco)
+  tecla ctrl-esc; sleep 1; tecla i; sleep 0.5; tecla right; sleep 1; tecla ret; sleep 12; aparta; shot k1   # otra vez: dentro sin clave
+  tecla alt-f4; sleep 4
   tecla ctrl-esc; sleep 1; tecla a a a; sleep 0.5; tecla ret; sleep 5; aparta; shot m1       # y la memoria después
   mon quit; } | corre
+mcopy -n -i $T/c.img@@32256 ::HISPADOS/INTERNET/GALLETAS.TXT $T/galletas.txt 2> /dev/null
+mcopy -n -i $T/c.img@@32256 ::RECIBO20.PDF $T/recibo.pdf 2> /dev/null
 PAG="0 78 640 548"
 echo "-- el menú Inicio: el grupo «Internet» con el Navegador --"
 chk $T/i1.ppm busca 20 410 60 440 9 7 "Internet" busca 270 410 320 440 9 12 "Navegador"
@@ -166,20 +203,22 @@ echo "-- redirecciones, sin longitud, 404, un archivo, javascript: --"
 chk $T/r1.ppm busca 96 56 130 74 0 9 "http://10.0.2.2:$P/final" busca $PAG 0 9 "Llegada tras dos redirecciones."
 chk $T/r2.ppm busca $PAG 0 9 "Hasta el cierre de la conexión."
 chk $T/r3.ppm busca $PAG 0 9 "Aquí no hay nada."
-chk $T/r4.ppm busca $PAG 0 9 "Esta dirección no es una página: es un archivo"
+chk $T/r4.ppm titulo 222 136 activa "Guardar la descarga" busca 0 548 600 570 0 15 "Descarga: ARCHIVO.BIN (147 K). Elija dónde guardarla."
+chk $T/r4b.ppm busca 0 548 100 570 0 15 "No se ha guardado la descarga." busca $PAG 12 9 "De otro nombre"
 chk $T/r5.ppm busca 0 548 100 570 0 15 "Este enlace no se puede abrir aquí (no es una página web)." busca $PAG 12 9 "De otro nombre"
-echo "-- Tab e Intro --"
+echo "-- Tab, Mayús+Tab e Intro --"
 chk $T/t1.ppm busca $PAG 9 12 "Solo JavaScript"
+chk $T/t3.ppm busca $PAG 9 12 "Un archivo" nobusca $PAG 9 12 "Solo JavaScript"
 chk $T/t2.ppm busca $PAG 0 9 "ninguna autoridad conocida."
 echo "-- lo que ha recibido el servidor --"
 pedido() { if grep -qF -- "$1" $T/pedidos.log; then ok "$2"; else ko "$2 (falta: $1)"; fi; }
-pedido "GET / | - |  | Navegador/0.1 (Hispa-486; Hispa32) | es-ES" "la primera petición: sin galletas, con su nombre y el idioma de NAVEGA.INI"
+pedido "GET / | - |  | HispaNavegador/0.2 (Hispa-486) | es-ES | text/html" "la primera petición: sin galletas, con su nombre y el idioma de NAVEGA.INI"
 pedido "POST /entrar | - | ficha=abc123&usuario=maria&clave=secreto&recordar=1 |" "el POST de la entrada"
-pedido "GET /biblioteca | SESION=S3S10N-de-prueba |" "la galleta de sesión vuelve (y la caducada, no)"
-pedido "GET /prestar?qs=garc | SESION=S3S10N-de-prueba |" "el formulario GET"
-pedido "POST /prestar | SESION=S3S10N-de-prueba | ficha=abc123&socio_id=2&marca=a%C3%B1o+%C2%AB%E2%82%AC%C2%BB&libro=3&nota=hola+luis%0D%0Ados&dias=15&avisar=si&accion=prestar |" \
+pedido "GET /biblioteca | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |" "la galleta de sesión vuelve (y la caducada, no)"
+pedido "GET /prestar?qs=garc | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |" "el formulario GET"
+pedido "POST /prestar | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | ficha=abc123&socio_id=2&marca=a%C3%B1o+%C2%AB%E2%82%AC%C2%BB&libro=3&nota=hola+luis%0D%0Ados&dias=15&avisar=si&accion=prestar |" \
   "el POST del préstamo: ocultos, lista, área de dos líneas, radio, casilla y botón; UTF-8"
-pedido "POST /devolver | SESION=S3S10N-de-prueba | ficha=abc123&libro=3&estado=bien |" "el POST de la devolución"
+pedido "POST /devolver | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | ficha=abc123&libro=3&estado=bien |" "el POST de la devolución"
 [ "$(grep -c '^POST /devolver' $T/pedidos.log)" = 1 ] && ok "con «No», la devolución no se envió" || ko "la devolución se envió $(grep -c '^POST /devolver' $T/pedidos.log) veces"
 [ "$(grep -c '^POST /prestar' $T/pedidos.log)" = 1 ] && ok "el botón de JavaScript no envió nada" || ko "el préstamo se envió $(grep -c '^POST /prestar' $T/pedidos.log) veces"
 grep -q "^GET /archivo.bin" $T/pedidos.log && ok "el archivo se pidió" || ko "el archivo no se pidió"
@@ -187,5 +226,48 @@ echo "-- la memoria: con el Navegador abierto y después de cerrarlo --"
 chk $T/m0.ppm busca 176 480 640 498 0 6 "4 programas en marcha"
 chk $T/m2.ppm busca 176 480 640 498 0 6 "5 programas en marcha" cambia $MEMZ $T/m0.ppm 50
 chk $T/m1.ppm busca 176 480 640 498 0 6 "4 programas en marcha" igual $MEMZ $T/m0.ppm ${MEMZ% * *} 0
-[ -n "${GUARDAR:-}" ] && cp $T/pedidos.log $T/log.txt "$GUARDAR"/ 2> /dev/null
+echo "-- imágenes --"
+# (los colores, del cubo de la paleta: rojo 196, verde 34, amarillo 226,
+# azul 21, magenta 201, cian 51, naranja 214)
+IMGS="px 50 168 196 logo-png-rojo px 100 182 196 logo-96x36 nopx 110 168 196 logo-acaba px 35 228 34 jpeg-verde px 35 270 226 jpeg-amarillo
+  nopx 70 270 226 jpeg-56-de-ancho px 30 340 21 gif-azul px 60 392 201 icono-png nopx 66 392 201 icono-transparente px 197 393 51 data-png"
+chk $T/im1.ppm $IMGS busca $PAG 0 9 "Una portada con enlace" busca $PAG 0 9 "sin medidas" busca $PAG 7 9 "[ROTA]" busca $PAG 7 9 "[SVG]" \
+  busca $PAG 0 9 "FIN-IMAGENES" nobusca $PAG 7 9 "[Logo]" nobusca $PAG 7 9 "[Azul]"
+chk $T/im2.ppm busca $PAG 0 9 "Llegada tras dos redirecciones."
+chk $T/im3.ppm $IMGS
+[ "$(grep -c '^GET /tapa.jpg' $T/pedidos.log)" = 1 ] && ok "al volver, las imágenes salen de lo ya visto (no se piden otra vez)" || ko "la portada se pidió $(grep -c '^GET /tapa.jpg' $T/pedidos.log) veces"
+pedido "GET /logo.png | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul |  | HispaNavegador/0.2 (Hispa-486) | es-ES | image/png" "las imágenes se piden con las galletas y diciendo que son imágenes"
+grep -q "^GET /data:\|^GET /dentro" $T/pedidos.log && ko "la imagen data: se pidió al servidor" || ok "la imagen data: no se pide (va en la página)"
+echo "-- subir un archivo (multipart/form-data) --"
+chk $T/u0.ppm busca $PAG 7 9 "(ningún archivo)"
+chk $T/u1.ppm busca 150 150 650 450 0 8 "Falta elegir el archivo de «Portada»."
+chk $T/u2.ppm titulo 222 136 activa "Elegir el archivo que se sube" busca 0 0 800 600 0 8 "Nombre del archivo:"
+chk $T/u3.ppm busca $PAG 0 9 "C:\\FOTOS\\TAPA.PNG"
+chk $T/u4.ppm busca 150 150 650 450 0 8 "No tiene la forma que se pide «Título»." busca 150 150 650 450 0 8 "Solo letras, tres o más."
+TAM=$(stat -c %s $T/c/FOTOS/TAPA.PNG); SHA=$(sha1sum $T/c/FOTOS/TAPA.PNG | cut -c1-8)
+chk $T/u5.ppm busca $PAG 237 230 "Subida: TAPA.PNG ($TAM octetos, image/png)." px 40 195 214 "la-subida-se-ve"
+pedido "POST /portada | SESION=S3S10N-de-prueba; RECUERDA=R3CU3RDA; PREF=azul | [multipart] ficha=abc123&portada=TAPA.PNG:image/png:$TAM:$SHA&titulo=abc |" \
+  "el POST multipart: el campo oculto, el archivo entero (tamaño y SHA-1) y el texto"
+[ "$(grep -c '^POST /portada' $T/pedidos.log)" = 1 ] && ok "required y pattern pararon los otros envíos" || ko "la portada se envió $(grep -c '^POST /portada' $T/pedidos.log) veces"
+pedido "GET /subida.img | SESION=" "la imagen subida se pidió para verla"
+echo "-- una descarga: guardarla y abrirla con el Lector --"
+chk $T/s1.ppm titulo 222 136 activa "Guardar la descarga" busca 0 548 600 570 0 15 "Descarga: RECIBO20.PDF (1 K). Elija dónde guardarla."
+chk $T/s2.ppm busca 150 150 650 450 0 8 "Guardado en C:\\RECIBO20.PDF (1 K)." busca 150 150 650 450 0 8 "¿Abrirlo ahora con el Lector?"
+chk $T/s3.ppm titulo 40 32 activa "Lector - C:\\RECIBO20.PDF"
+python3 -c "
+import sys; sys.argv = ['', '$T', '0']
+exec(open('tests/tools/nav_servidor.py').read().split('class Pedido')[0])
+sys.exit(0 if open('$T/recibo.pdf', 'rb').read() == PDF else 1)" 2> /dev/null && ok "C:\\RECIBO20.PDF es el PDF que dio el servidor" || ko "C:\\RECIBO20.PDF no está o no es el del servidor"
+echo "-- <meta http-equiv=refresh> --"
+chk $T/f1.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/final" busca $PAG 0 9 "Llegada tras dos redirecciones."
+grep -A1 "^GET /refresca" $T/pedidos.log | tail -1 | grep -q "^GET /final" && ok "el refresco pidió /final" || ko "el refresco no pidió /final"
+echo "-- las galletas de «recordarme», guardadas al cerrar --"
+if [ -f $T/galletas.txt ]; then
+  grep -q "RECUERDA	R3CU3RDA" $T/galletas.txt && grep -q "PREF	azul" $T/galletas.txt && ok "GALLETAS.TXT tiene las que caducan (Max-Age y Expires)" || ko "GALLETAS.TXT: faltan RECUERDA o PREF"
+  grep -q "SESION\|caduca" $T/galletas.txt && ko "GALLETAS.TXT tiene la de sesión o la caducada" || ok "GALLETAS.TXT no tiene la de sesión ni la caducada"
+else ko "no se ha escrito GALLETAS.TXT"; fi
+pedido "GET / | RECUERDA=R3CU3RDA; PREF=azul |" "al abrirlo otra vez: con las galletas guardadas (sin la de sesión)"
+grep -q "caduca=1" $T/pedidos.log && ko "se envió la galleta caducada (Expires de 2015)" || ok "la galleta caducada (Expires de 2015) no se envió nunca"
+chk $T/k1.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/biblioteca" busca $PAG 0 8 "Pilar Esteve"
+[ -n "${GUARDAR:-}" ] && cp $T/pedidos.log $T/log.txt $T/galletas.txt "$GUARDAR"/ 2> /dev/null
 fin

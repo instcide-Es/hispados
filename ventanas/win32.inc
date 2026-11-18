@@ -129,6 +129,7 @@ t_pe_error  db "Error", 0
 t_k32       db "KERNEL32", 0
 t_u32       db "USER32", 0
 t_g32       db "GDI32", 0
+t_c32       db "COMDLG32", 0
 
 ; ---- ¿es un programa de Windows de ventanas? ESI=ruta -> ZF=1 si lo es
 ; (acaba en .EXE, es un PE de 386 y su subsistema es el 2). Conserva todo ----
@@ -606,6 +607,7 @@ pe_tramp:
 H_KERNEL32  equ 0xBFF70000
 H_USER32    equ 0xBFF50000
 H_GDI32     equ 0xBFF20000
+H_COMDLG32  equ 0xBFF10000
 pe_resolver:
         push ds
         push es
@@ -664,6 +666,9 @@ pe_resolver:
         mov eax, H_GDI32
         cmp bl, 2
         je .x
+        mov eax, H_COMDLG32
+        cmp bl, 3
+        je .x
         jmp .cero
 .mango:
         mov ecx, ebx
@@ -675,6 +680,9 @@ pe_resolver:
         je .m1
         inc bl
         cmp ecx, H_GDI32
+        je .m1
+        inc bl
+        cmp ecx, H_COMDLG32
         jne .cero
 .m1:
         lea eax, [edi+ebp]
@@ -700,7 +708,7 @@ pe_resolver:
         mov eax, esi
         sub eax, ebp
         jmp .x
-; (interna) ESI=nombre de una DLL -> BL=0 KERNEL32, 1 USER32, 2 GDI32,
+; (interna) ESI=nombre de una DLL -> BL=0 KERNEL32, 1 USER32, 2 GDI32, 3 COMDLG32,
 ; FFh otra
 pe_que_dll:
         push edi
@@ -714,6 +722,10 @@ pe_que_dll:
         je .x
         mov bl, 2
         mov edi, t_g32
+        call pe_es_dll
+        je .x
+        mov bl, 3
+        mov edi, t_c32
         call pe_es_dll
         je .x
         mov bl, 0xFF
@@ -807,7 +819,7 @@ pe_es_dll:
         pop eax
         ret
 
-; (interna) EAX=nombre de la función BL=DLL (0 KERNEL32, 1 USER32, 2 GDI32)
+; (interna) EAX=nombre de la función BL=DLL (0 KERNEL32, 1 USER32, 2 GDI32, 3 COMDLG32)
 ; -> EAX=su ficha en w32_tabla (w32_e_falta si no está)
 w32_busca:
         push ecx
@@ -1084,7 +1096,7 @@ pe_limpiar:
 
 ; =============================================================================
 ;  Las funciones. Cada ficha: la rutina (4), los octetos de argumentos (2),
-;  la DLL (1: 0 KERNEL32, 1 USER32, 2 GDI32) y el nombre.
+;  la DLL (1: 0 KERNEL32, 1 USER32, 2 GDI32, 3 COMDLG32) y el nombre.
 ; =============================================================================
 %macro W32F 4
         dd %1
@@ -1209,6 +1221,12 @@ w32_tabla:
         W32F g_GetTextExtentPoint32A, 16, 2, 'GetTextExtentPoint32A'
         W32F g_GetTextExtentPoint32A, 16, 2, 'GetTextExtentPointA'
         W32F g_GetTextMetricsA, 8, 2, 'GetTextMetricsA'
+        ; [NAVEGADOR] (win32n.inc)
+        W32F g_SetDIBitsToDevice, 48, 2, 'SetDIBitsToDevice'
+        W32F u_GetKeyState, 4, 1, 'GetKeyState'
+        W32F u_GetOpenFileNameA, 4, 3, 'GetOpenFileNameA'
+        W32F u_GetSaveFileNameA, 4, 3, 'GetSaveFileNameA'
+        W32F k_WinExec, 8, 0, 'WinExec'
         dd 0
 %unmacro W32F 4
 

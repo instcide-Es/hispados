@@ -170,12 +170,16 @@ void url_codifica(const char *t, int n, char **d, u32 *nd, u32 *cap) {
 }
 
 /* =============================================================================
- *  Galletas (cookies): solo en memoria, hasta que se cierra el Navegador
+ *  Galletas (cookies). Las de sesión, en memoria hasta que se cierra el
+ *  Navegador; las que dicen hasta cuándo valen (Expires, Max-Age), además en
+ *  el disco (http_galletas_guarda): así no hay que entrar cada vez.
  * ============================================================================= */
-#define N_GAL 48
-typedef struct { char *dom, *ruta, *nombre, *valor; u8 seguro, exacto; u32 orden; } Galleta;
+#define N_GAL 64
+typedef struct { char *dom, *ruta, *nombre, *valor; u8 seguro, exacto, solo_http, mismo; u32 orden, caduca; } Galleta;
+enum { SS_LAX, SS_STRICT, SS_NONE };   /* SameSite: sin decirlo, como Lax (lo de los navegadores de hoy) */
 static Galleta gal[N_GAL];
 static u32 gal_orden;
+int http_galletas_cambio;              /* han cambiado las que se guardan en el disco */
 static char *copia(const char *t, int n) {
   char *p = malloc(n + 1);
   if (p) { memcpy(p, t, n); p[n] = 0; }
@@ -187,15 +191,60 @@ static int memchr_punto(const char *t, u32 n) {
   return 0;
 }
 static void gal_quita(Galleta *g) {
+  if (g->caduca) http_galletas_cambio = 1;
   free(g->dom); free(g->ruta); free(g->nombre); free(g->valor);
   memset(g, 0, sizeof *g);
 }
+/* los días desde el 1-1-1970 (calendario gregoriano) */
+static u32 dias_de(int a, int m, int d) {
+  int era, yoe, doy, doe;
+  a -= m <= 2;
+  era = a / 400;
+  yoe = a - era * 400;
+  doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return (u32)(era * 146097 + doe - 719468);
+}
+/* una fecha de HTTP («Wed, 21 Oct 2026 07:28:00 GMT», o con guiones, o con
+ * el año de dos cifras) -> segundos desde 1970; 0 si no se entiende */
+u32 http_fecha(const char *t, const char *fin) {
+  static const char meses[] = "janfebmaraprmayjunjulaugsepoctnovdec";
+  int dia = 0, mes = 0, anio = -1, h = -1, mi = 0, se = 0, k;
+  while (t < fin) {
+    if (*t >= '0' && *t <= '9') {
+      const char *i = t;
+      int v = 0, n;
+      while (t < fin && *t >= '0' && *t <= '9') v = v * 10 + *t++ - '0';
+      n = t - i;
+      if (t < fin && *t == ':' && h < 0) {           /* hh:mm:ss */
+        h = v; t++;
+        mi = atoi(t);
+        while (t < fin && ((*t >= '0' && *t <= '9') || *t == ':')) t++;
+        { const char *q = i; while (q < t && *q != ':') q++; q++; while (q < t && *q != ':') q++; if (q < t) se = atoi(q + 1); }
+      } else if (n >= 3 || (dia && mes && anio < 0)) anio = n <= 2 ? (v < 70 ? 2000 + v : 1900 + v) : v;
+      else if (!dia) dia = v;
+      continue;
+    }
+    if (((*t | 32) >= 'a' && (*t | 32) <= 'z') && t + 2 < fin && !mes) {
+      char b[4];
+      b[0] = (char)(*t | 32); b[1] = (char)(t[1] | 32); b[2] = (char)(t[2] | 32); b[3] = 0;
+      for (k = 0; k < 12; k++) if (!memcmp(meses + k * 3, b, 3)) { mes = k + 1; break; }
+      while (t < fin && ((*t | 32) >= 'a' && (*t | 32) <= 'z')) t++;
+      continue;
+    }
+    t++;
+  }
+  if (!dia || !mes || anio < 1970 || anio > 2105 || dia > 31) return 0;
+  if (h < 0) h = 0;
+  return dias_de(anio, mes, dia) * 86400u + (u32)(h * 3600 + mi * 60 + se);
+}
+u32 http_ahora(void) { return (u32)time(NULL); }
 /* «Set-Cookie: nombre=valor; Path=/; Secure...» de una respuesta de u */
 static void gal_pon(const Url *u, const char *l) {
   const char *f, *ig, *p;
   char dom[128], ruta[256], atrib[24];
-  int borra = 0, seguro = 0, exacto = 1, k, n, libre = -1, viejo = 0;
-  ST st;
+  int borra = 0, seguro = 0, exacto = 1, k, n, libre = -1, viejo = -1, solo_http = 0, mismo = SS_LAX, hay_edad = 0;
+  u32 caduca = 0, ahora = http_ahora();
   for (f = l; *f && *f != '\r' && *f != '\n' && *f != ';'; f++) ;
   for (ig = l; ig < f && *ig != '='; ig++) ;
   if (ig == f || ig == l) return;
@@ -212,14 +261,19 @@ static void gal_pon(const Url *u, const char *l) {
     while (*p == ' ') p++;
     for (fa = p; *fa && *fa != '\r' && *fa != '\n' && *fa != ';'; fa++) ;
     for (v = p, k = 0; v < fa && *v != '=' && k < 23; v++) atrib[k++] = (char)min_c(*v);
+    while (k && atrib[k - 1] == ' ') k--;
     atrib[k] = 0;
     if (v < fa && *v == '=') v++;
+    while (v < fa && *v == ' ') v++;
     if (!strcmp(atrib, "secure")) seguro = 1;
+    else if (!strcmp(atrib, "httponly")) solo_http = 1;
+    else if (!strcmp(atrib, "samesite")) mismo = !_strnicmp(v, "strict", 6) ? SS_STRICT : !_strnicmp(v, "none", 4) ? SS_NONE : SS_LAX;
     else if (!strcmp(atrib, "path") && *v == '/' && fa - v < 250) { memcpy(ruta, v, fa - v); ruta[fa - v] = 0; }
     else if (!strcmp(atrib, "domain") && fa > v) {
       u32 ld, ls = strlen(u->servidor);
       if (*v == '.') v++;
       ld = fa - v;
+      while (ld && v[ld - 1] == ' ') ld--;
       /* solo si es el servidor o uno de sus dominios de arriba (con algún punto) */
       if (ld < 127 && ld <= ls && !_strnicmp(u->servidor + ls - ld, v, ld) && (ld == ls || u->servidor[ls - ld - 1] == '.')
           && memchr_punto(v, ld)) {
@@ -227,24 +281,26 @@ static void gal_pon(const Url *u, const char *l) {
         for (k = 0; dom[k]; k++) dom[k] = (char)min_c(dom[k]);
         exacto = ld == ls;
       } else return;
-    } else if (!strcmp(atrib, "max-age")) { if (*v == '-' || *v == '0') borra = 1; }
-    else if (!strcmp(atrib, "expires")) {
-      /* caducada si el año es anterior al de hoy */
-      const char *y;
-      GetLocalTime(&st);
-      for (y = v; y + 3 < fa; y++)
-        if (y[0] >= '1' && y[0] <= '9' && y[1] >= '0' && y[1] <= '9' && y[2] >= '0' && y[2] <= '9' && y[3] >= '0' && y[3] <= '9'
-            && (y == v || y[-1] < '0' || y[-1] > '9')) { if (atoi(y) < st.anio) borra = 1; break; }
+    } else if (!strcmp(atrib, "max-age")) {        /* (manda sobre Expires) */
+      int e = (*v == '-') ? -1 : atoi(v);
+      hay_edad = 1;
+      if (e <= 0) borra = 1;
+      else { caduca = ahora + (u32)e; if (caduca < ahora) caduca = 0xFFFFFFF0u; borra = 0; }
+    } else if (!strcmp(atrib, "expires") && !hay_edad) {
+      u32 t = http_fecha(v, fa);
+      if (t) { if (t <= ahora) borra = 1; else caduca = t; }
     }
     p = fa;
   }
+  /* una galleta «segura» solo la puede poner una página cifrada */
+  if (seguro && !u->seguro) return;
   for (k = 0; k < N_GAL; k++) {
     Galleta *g = &gal[k];
     if (!g->nombre) { if (libre < 0) libre = k; continue; }
     if ((int)strlen(g->nombre) == ig - l && !memcmp(g->nombre, l, ig - l) && !strcmp(g->dom, dom) && !strcmp(g->ruta, ruta)) {
       gal_quita(g);
       if (libre < 0) libre = k;
-    } else if (gal[k].orden < gal[viejo].orden) viejo = k;
+    } else if (viejo < 0 || gal[k].orden < gal[viejo].orden) viejo = k;
   }
   if (borra) return;
   if (libre < 0) { gal_quita(&gal[viejo]); libre = viejo; }
@@ -253,19 +309,26 @@ static void gal_pon(const Url *u, const char *l) {
   gal[libre].dom = copia(dom, strlen(dom));
   gal[libre].ruta = copia(ruta, strlen(ruta));
   gal[libre].seguro = (u8)seguro; gal[libre].exacto = (u8)exacto;
+  gal[libre].solo_http = (u8)solo_http; gal[libre].mismo = (u8)mismo;
+  gal[libre].caduca = caduca;
   gal[libre].orden = ++gal_orden;
-  if (!gal[libre].nombre || !gal[libre].valor || !gal[libre].dom || !gal[libre].ruta) gal_quita(&gal[libre]);
+  if (!gal[libre].nombre || !gal[libre].valor || !gal[libre].dom || !gal[libre].ruta) { gal_quita(&gal[libre]); return; }
+  if (caduca) http_galletas_cambio = 1;
 }
-/* la cabecera «Cookie: a=b; c=d\r\n» para u, en d (malloc) o NULL */
-static char *gal_para(const Url *u) {
+/* la cabecera «Cookie: a=b; c=d\r\n» para u, en d (malloc) o NULL. cruzada:
+ * la pide una página de otro sitio (un enlace o un formulario de fuera); sub:
+ * no es la página sino algo de dentro (una imagen) */
+static char *gal_para(const Url *u, int cruzada, int sub, int post) {
   char *d = NULL;
-  u32 n = 0, k, ls = strlen(u->servidor);
+  u32 n = 0, k, ls = strlen(u->servidor), ahora = http_ahora();
   for (k = 0; k < N_GAL; k++) {
     Galleta *g = &gal[k];
     u32 ld, lr, ln, lv;
     char *q;
     if (!g->nombre) continue;
+    if (g->caduca && g->caduca <= ahora) { gal_quita(g); continue; }
     if (g->seguro && !u->seguro) continue;
+    if (cruzada && g->mismo != SS_NONE && (g->mismo == SS_STRICT || sub || post)) continue;
     ld = strlen(g->dom); lr = strlen(g->ruta);
     if (g->exacto ? strcmp(g->dom, u->servidor) != 0
                   : !(ld <= ls && !strcmp(u->servidor + ls - ld, g->dom) && (ld == ls || u->servidor[ls - ld - 1] == '.'))) continue;
@@ -281,6 +344,71 @@ static char *gal_para(const Url *u) {
   }
   if (d) { d[n++] = '\r'; d[n++] = '\n'; d[n] = 0; }
   return d;
+}
+/* el archivo de las galletas (GALLETAS.TXT, junto al programa): una por
+ * línea, «dominio TAB exacto TAB ruta TAB segura TAB solo_http TAB samesite
+ * TAB caduca TAB nombre TAB valor». Solo las que caducan (las de sesión se
+ * van al cerrar, como en cualquier navegador) */
+int http_galletas_guarda(const char *ruta) {
+  FILE *f;
+  u32 k, ahora = http_ahora();
+  f = fopen(ruta, "w");
+  if (!f) return 0;
+  fputs("# Galletas del Navegador de Hispa-486 (se escriben solas al cerrarlo)\n", f);
+  for (k = 0; k < N_GAL; k++) {
+    Galleta *g = &gal[k];
+    char l[64];
+    if (!g->nombre || !g->caduca || g->caduca <= ahora) continue;
+    fputs(g->dom, f);
+    sprintf(l, "\t%d\t", g->exacto); fputs(l, f);
+    fputs(g->ruta, f);
+    sprintf(l, "\t%d\t%d\t%d\t%u\t", g->seguro, g->solo_http, g->mismo, g->caduca); fputs(l, f);
+    fputs(g->nombre, f); fputs("\t", f); fputs(g->valor, f); fputs("\n", f);
+  }
+  fclose(f);
+  http_galletas_cambio = 0;
+  return 1;
+}
+void http_galletas_carga(const char *ruta) {
+  static char l[4200];
+  FILE *f = fopen(ruta, "r");
+  u32 ahora = http_ahora();
+  if (!f) return;
+  while (fgets(l, sizeof l, f)) {
+    char *c[9], *p = l;
+    int n = 0, k;
+    Galleta *g = NULL;
+    if (l[0] == '#') continue;
+    for (k = 0; l[k] && l[k] != '\r' && l[k] != '\n'; k++) ;
+    l[k] = 0;
+    c[n++] = p;
+    while (*p && n < 9) { if (*p == '\t') { *p = 0; c[n++] = p + 1; } p++; }
+    if (n < 9 || !c[0][0] || !c[7][0] || c[2][0] != '/') continue;
+    if ((u32)strtoul(c[6], NULL, 10) <= ahora) continue;
+    for (k = 0; k < N_GAL; k++) if (!gal[k].nombre) { g = &gal[k]; break; }
+    if (!g) break;
+    g->dom = copia(c[0], strlen(c[0])); g->exacto = (u8)atoi(c[1]);
+    g->ruta = copia(c[2], strlen(c[2]));
+    g->seguro = (u8)atoi(c[3]); g->solo_http = (u8)atoi(c[4]); g->mismo = (u8)atoi(c[5]);
+    g->caduca = (u32)strtoul(c[6], NULL, 10);
+    g->nombre = copia(c[7], strlen(c[7])); g->valor = copia(c[8], strlen(c[8]));
+    g->orden = ++gal_orden;
+    if (!g->dom || !g->ruta || !g->nombre || !g->valor) { free(g->dom); free(g->ruta); free(g->nombre); free(g->valor); memset(g, 0, sizeof *g); }
+  }
+  fclose(f);
+  http_galletas_cambio = 0;
+}
+/* ¿hay alguna galleta para ese servidor? (para la página de inicio) */
+int http_galletas_de(const char *servidor) {
+  u32 k;
+  for (k = 0; k < N_GAL; k++) if (gal[k].nombre && !strcmp(gal[k].dom, servidor)) return 1;
+  return 0;
+}
+/* borrarlas todas (y el archivo, al guardar) */
+void http_galletas_borra(void) {
+  u32 k;
+  for (k = 0; k < N_GAL; k++) if (gal[k].nombre) gal_quita(&gal[k]);
+  http_galletas_cambio = 1;
 }
 
 /* =============================================================================
@@ -328,32 +456,39 @@ const char *http_cabecera(const Pet *p, const char *nombre) {
   return NULL;
 }
 void http_empieza(Pet *p) {
-  char *u = p->url, *c = p->cuerpo;
-  int post = p->post;
-  u32 nc = p->n_cuerpo;
+  char *u = p->url, *c = p->cuerpo, tc[sizeof p->tipo_cuerpo];
+  int post = p->post, cruzada = p->cruzada, sub = p->sub;
+  u32 nc = p->n_cuerpo, max = p->max;
+  memcpy(tc, p->tipo_cuerpo, sizeof tc);
   memset(p, 0, sizeof *p);
   p->url = u; p->cuerpo = c; p->post = post; p->n_cuerpo = nc;
+  p->cruzada = cruzada; p->sub = sub; p->max = max ? max : CUERPO_MAX;
+  memcpy(p->tipo_cuerpo, tc, sizeof tc);
   p->fase = H_NADA;
   p->largo = -1;
 }
 void http_suelta(Pet *p) {
   if (p->fase != H_NADA && p->fase != H_HECHO && p->fase != H_ERROR) con_cierra();   /* a medias */
+  if (p->disco) fclose(p->disco);
   free(p->url); free(p->cuerpo); free(p->pet); free(p->cab); free(p->datos); free(p->u.ruta);
   memset(p, 0, sizeof *p);
 }
 static int pet_arma(Pet *p) {
-  char *g = gal_para(&p->u), host[150];
-  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 600;
+  char *g = gal_para(&p->u, p->cruzada, p->sub, p->post), host[150];
+  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 900;
   free(p->pet);
   p->pet = malloc(n);
   if (!p->pet) { free(g); return 0; }
   if (p->u.puerto != (p->u.seguro ? 443 : 80)) sprintf(host, "%s:%d", p->u.servidor, p->u.puerto);
   else strcpy(host, p->u.servidor);
-  n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Navegador/0.1 (Hispa-486; Hispa32)\r\n"
-              "Accept: text/html,text/plain;q=0.9,*/*;q=0.5\r\nAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
-              p->post ? "POST" : "GET", p->u.ruta, host, http_idioma, g ? g : "");
+  n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: " HTTP_AGENTE "\r\n"
+              "Accept: %s\r\nAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
+              p->post ? "POST" : "GET", p->u.ruta, host,
+              p->sub ? "image/png,image/gif,image/jpeg,image/bmp,image/x-icon;q=0.9,*/*;q=0.1" : "text/html,text/plain;q=0.9,*/*;q=0.5",
+              http_idioma, g ? g : "");
   free(g);
-  if (p->post) n += sprintf(p->pet + n, "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %u\r\n", p->n_cuerpo);
+  if (p->post) n += sprintf(p->pet + n, "Content-Type: %s\r\nContent-Length: %u\r\n",
+                            p->tipo_cuerpo[0] ? p->tipo_cuerpo : "application/x-www-form-urlencoded", p->n_cuerpo);
   memcpy(p->pet + n, "\r\n", 2); n += 2;
   if (p->post && p->n_cuerpo) { memcpy(p->pet + n, p->cuerpo, p->n_cuerpo); n += p->n_cuerpo; }
   p->n_pet = n;
@@ -361,6 +496,11 @@ static int pet_arma(Pet *p) {
   return 1;
 }
 static int datos_pon(Pet *p, const u8 *b, u32 n) {
+  if (p->disco) {                              /* una descarga: al archivo */
+    if (n && fwrite(b, 1, n, p->disco) != n) return 0;
+    p->n_datos += n;
+    return p->n_datos <= p->max;
+  }
   if (p->n_datos + n + 1 > p->cap_datos) {
     u32 c = p->cap_datos ? p->cap_datos * 2 : 16384;
     u8 *q;
@@ -372,7 +512,7 @@ static int datos_pon(Pet *p, const u8 *b, u32 n) {
   memcpy(p->datos + p->n_datos, b, n);
   p->n_datos += n;
   p->datos[p->n_datos] = 0;
-  return p->n_datos <= CUERPO_MAX;
+  return p->n_datos <= p->max;
 }
 /* octetos del cuerpo; 1 = ya está entero, -1 = no cabe */
 static int cuerpo_pon(Pet *p, const u8 *b, u32 n) {
@@ -390,7 +530,7 @@ static int cuerpo_pon(Pet *p, const u8 *b, u32 n) {
       if (c == ';') p->trozo_f = 4;
       else if (c != '\r' && c != ' ') {
         int h = c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1;
-        if (h < 0 || p->trozo_q > CUERPO_MAX) return -1;
+        if (h < 0 || p->trozo_q > p->max) return -1;
         p->trozo_q = p->trozo_q * 16 + h;
       }
     } else if (p->trozo_f == 4) {              /* (extensiones del trozo: hasta el fin de línea) */
@@ -427,7 +567,16 @@ static int cabeceras(Pet *p) {
   p->cerrar = !v11;
   if ((t = http_cabecera(p, "Connection"))) { if (!_strnicmp(t, "close", 5)) p->cerrar = 1; else if (!_strnicmp(t, "keep-alive", 10)) p->cerrar = 0; }
   if ((t = http_cabecera(p, "Transfer-Encoding")) && !_strnicmp(t, "chunked", 7)) p->troceado = 1;
-  else if ((t = http_cabecera(p, "Content-Length"))) p->largo = atoi(t);
+  else if ((t = http_cabecera(p, "Content-Length"))) {
+    p->largo = atoi(t);
+    /* sabiendo lo que viene, la memoria de una vez (sin ir doblando: con
+     * 4 MB, doblar pide 6 a la vez). Lo que no quepa, quizá se guarde en el
+     * disco (una descarga): lo decide quien llama */
+    if (p->largo > 0 && (u32)p->largo <= p->max && (u32)p->largo + 1 > p->cap_datos) {
+      u8 *q = realloc(p->datos, p->largo + 1);
+      if (q) { p->datos = q; p->cap_datos = p->largo + 1; }
+    }
+  }
   else { p->hasta_cierre = 1; p->cerrar = 1; }
   p->tipo[0] = 0;
   if ((t = http_cabecera(p, "Content-Type"))) {
@@ -562,7 +711,7 @@ int http_avanza(Pet *p) {
         }
         if (!(p->n_cab >= 5 && !memcmp(p->cab + p->n_cab - 4, "\r\n\r\n", 4)) && !(p->n_cab >= 3 && !memcmp(p->cab + p->n_cab - 2, "\n\n", 2)))
           continue;
-        if (cabeceras(p)) return falla(p, "La respuesta del servidor no se entiende.");
+        if ((r = cabeceras(p))) return falla(p, r == -2 ? "Es demasiado grande para el Navegador." : "La respuesta del servidor no se entiende.");
         if (p->estado >= 100 && p->estado < 200) {      /* de trámite: vienen otras */
           p->n_cab = 1; p->largo = -1; p->troceado = 0; p->hasta_cierre = 0;
           if (n) { memmove(b, d, n); d = b; }
@@ -574,7 +723,7 @@ int http_avanza(Pet *p) {
         if (!n) continue;
       }
       r = cuerpo_pon(p, d, n);
-      if (r < 0) return falla(p, "La p\341gina es demasiado grande o llega mal.");
+      if (r < 0) return falla(p, p->n_datos > p->max ? "Es demasiado grande para el Navegador." : "La p\341gina llega mal.");
       if (r > 0) return hecha(p);
     }
     return 0;
