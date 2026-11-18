@@ -44,7 +44,8 @@
 #      disco duro IDE de imagen (nucleo32/disco.sh; FAT12, FAT16, FAT32 y con
 #      tabla de particiones): el controlador ATA, la FAT, cargar programas
 #      del disco, las llamadas al sistema nuevas (teclado, archivos, lanzar y
-#      esperar, memoria que crece) y el intérprete de órdenes del anillo 3.
+#      esperar, memoria que crece), la pila que crece sola y el intérprete
+#      de órdenes del anillo 3.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools y mkfs.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
@@ -753,7 +754,7 @@ mira "lo que no es un programa, o no está, no se lanza (y se dice por qué)" "^
 # 2. el intérprete de órdenes del anillo 3 (ORDENES.BIN, del disco)
 DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" ordenes ayuda ver mem dir "dir textos" "dir nada" "type leeme.txt" "type textos\\pirata.txt" \
   "type nada.txt" "TYPE textos" "eco hola y adios" "textos\\eco2 desde una carpeta" hola malo nada noprog prueba :espera "prueba fuera" \
-  :espera salir tareas memoria disco apagar > $P/ordenes.sal 2>&1
+  "prueba pozo" :espera salir tareas memoria disco apagar > $P/ordenes.sal 2>&1
 S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
@@ -762,7 +763,7 @@ mira "VER y MEM" "^Hispa-Pentium 0\.2: un núcleo de 32 bits escrito en Castel" 
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *9 archivos  *[0-9]* octetos$" "^ *2 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
-  "^LARGO    TXT  *17600  " "^ *3 archivos  *18198 octetos$" "^No puedo abrir nada: no existe\.$"
+  "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
 mira "TYPE: un archivo de la raíz y uno de una carpeta (abrir, leer y cerrar por la llamada al sistema)" \
   "^Este archivo está en un disco FAT y lo enseña la orden TYPE\.$" "^Con diez cañones por banda,$" "^un velero bergantín\.$" \
   "^No puedo abrir nada.txt: no existe\.$" "^textos es una carpeta"
@@ -771,6 +772,11 @@ mira "un programa se lanza por su nombre, con sus argumentos, y se le espera (ta
 mira "un programa que hace lo que no debe se acaba, y el intérprete sigue; lo desconocido se dice" \
   "^\*\*\* se acaba la tarea [0-9]* (MALO.BIN)" "^(MALO.BIN ha acabado con el código 255)$" \
   "^Orden o nombre de programa desconocido: nada (escriba AYUDA)\.$" "^No puedo lanzar NOPROG.BIN: no es un programa de Hispa-Pentium\.$"
+mira "la pila de un programa crece sola: el fallo de página le pone páginas según baja (y el núcleo, si va a escribir en ella)" \
+  "^pila: leo 17600 octetos del disco a un arreglo local sin estrenar ([4-6] páginas más)$" \
+  "^pila: 200 llamadas, una dentro de otra, con 4000 octetos cada una: 200; la pila ha crecido 19[0-9] páginas$"
+mira "una pila que se desboca (una función que se llama sin fin) acaba en su tope de 4 MB: se acaba el programa, no el núcleo" \
+  "^pozo: una función que se llama a sí misma sin fin\.\.\.$" "fallo de página en 0xBFC00[0-9A-F]* (escritura, anillo 3, no presente)"
 mira "la memoria del programa crece y se devuelve (sbrk): páginas nuevas a cero, y vuelven" \
   "^memoria: pido 100000 octetos: 25 páginas más, a cero: cierto, y la suma de lo escrito es 312487500$" \
   "^memoria: la devuelvo: cierto, y quedan 0 páginas de más$" "^memoria: no me dan 3 GB: cierto; ni devuelvo lo que no pedí: cierto$"
@@ -791,7 +797,7 @@ if [ "$ra" = 120 ] && [ "$rb" = 120 ] && [ "$rm_" = 0 ] && [ "$alt" -gt 2 ]; the
 else ko "las líneas de dos programas que escriben a la vez se mezclan o se pierden: $ra de A, $rb de B, $rm_ rotas, $alt turnos"; fi
 mira "la memoria devuelta ya no se puede tocar: fallo de página, y se acaba el programa" "^fuera: escribo en la memoria que me han dado: cierto$" \
   "fallo de página en 0x4000[0-9A-F]*000 (escritura, anillo 3, no presente)" "^(PRUEBA.BIN ha acabado con el código 255)$"
-if grep -q "no tenía que salir" $S; then ko "un programa ha seguido después de lo que no podía hacer"; else ok "lo que no podían hacer (leer el núcleo, tocar lo devuelto), no lo han hecho"; fi
+if grep -q "no tenía que salir" $S; then ko "un programa ha seguido después de lo que no podía hacer"; else ok "lo que no podían hacer (leer el núcleo, tocar lo devuelto, salir del pozo), no lo han hecho"; fi
 m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
 mira "al salir, el núcleo ha recogido lo que dejó PRUEBA sin cerrar ni esperar (un archivo abierto y un programa)" \
   "^prueba: acabo con el código 7, un archivo abierto y un programa sin esperar$" "^(PRUEBA.BIN ha acabado con el código 7)$" \
@@ -816,9 +822,10 @@ for c in 12 32 mbr; do
     "^hijos: los dos ruidosos han acabado, con los códigos 9 y 9$" "^prueba.bin ha acabado con el código 7" "^hola$" "^eco2.bin ha acabado con el código 1"
 done
 # 4. el intérprete, él solo al arrancar (si el cargador dice «ordenes»); y sin disco
-DISCO=$P/d16.img ARRANQUE=ordenes $AQUI/nucleo32/probar.sh "" ver salir apagar > $P/arranque.sal 2>&1
+DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir apagar > $P/arranque.sal 2>&1
 S=$P/arranque.sal
-mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes" \
+mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
+  "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
   "^C:.>ver$" "^Hispa-Pentium 0\.2" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal

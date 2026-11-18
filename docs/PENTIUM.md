@@ -23,7 +23,7 @@ Con un disco (lo normal desde ahora):
 ```
 cd castel
 nucleo32/disco.sh /dev/shm/pentium.img            # un disco FAT16 con el intérprete y los programas
-DISCO=/dev/shm/pentium.img ARRANQUE=ordenes nucleo32/probar.sh "" ver mem dir "type leeme.txt" hola salir apagar
+DISCO=/dev/shm/pentium.img ARRANQUE=ordenes MODULOS= nucleo32/probar.sh "" dir "type leeme.txt" "eco hola y adios" malo mem salir apagar
 ```
 
 `nucleo32/disco.sh IMAGEN [12|16|32|mbr]` hace la imagen de un disco duro con
@@ -40,7 +40,8 @@ script lo enseña con el código con que acaba el núcleo. Con `ARRANQUE=ordenes
 (lo que QEMU pasa con `-append`), el núcleo lanza el intérprete de órdenes nada
 más arrancar; sin eso, se queda en su consola (la del núcleo, sección 9), y el
 intérprete se lanza con la orden `ordenes`. Sin `DISCO=` el núcleo arranca igual,
-con los programas de siempre como módulos de multiboot (`-initrd`).
+con los programas de siempre como módulos de multiboot (`-initrd`; `MODULOS=`
+para que no lleve ninguno).
 
 **Para verlo y teclear uno mismo** (en un terminal de texto; se sale con Esc y
 luego 2, `quit`; o tecleando `salir` y `apagar`):
@@ -61,7 +62,7 @@ primario.
 
 ```
 Hispa-Pentium (semilla), un núcleo de 32 bits escrito en Castel
-memoria: 32 MB, 7863 marcos libres; paginación activa; 0 programas de usuario.
+memoria: 32 MB, 7866 marcos libres; paginación activa; 0 programas de usuario.
 disco 0: QEMU HARDDISK, 16 MB, FAT16.
 lanzo ORDENES.BIN del disco (la tarea 3, en el anillo 3)
 
@@ -70,28 +71,37 @@ Escriba AYUDA para ver las órdenes.
 C:\>dir
  Directorio de C:\
 
-ORDENES  BIN        5876  19/11/2026  00:10
-HOLA     BIN         764  19/11/2026  00:10
-ECO      BIN         488  19/11/2026  00:10
-...
-LEEME    TXT         118  19/11/2026  00:10
-TEXTOS        <DIR>       19/11/2026  00:10
-       9 archivos         10858 octetos
-       2 carpetas      16672768 octetos libres
+ORDENES  BIN        5888  19/11/2026  00:11
+HOLA     BIN         760  19/11/2026  00:11
+ECO      BIN         480  19/11/2026  00:11
+MALO     BIN         280  19/11/2026  00:11
+CLI      BIN         208  19/11/2026  00:11
+PRUEBA   BIN        6392  19/11/2026  00:11
+LEEME    TXT         118  19/11/2026  00:11
+NOPROG   BIN          24  19/11/2026  00:11
+NOMBRE~1 TXT          32  19/11/2026  00:11
+TEXTOS        <DIR>       19/11/2026  00:11
+VACIA         <DIR>       19/11/2026  00:11
+       9 archivos         14182 octetos
+       2 carpetas      16670720 octetos libres
 C:\>type leeme.txt
 Hispa-Pentium: un núcleo de 32 bits escrito en Castel.
 Este archivo está en un disco FAT y lo enseña la orden TYPE.
-C:\>eco hola y adiós
+C:\>eco hola y adios
 hola y adios
 (ECO.BIN ha acabado con el código 3)
 C:\>malo
 soy un programa malo: voy a leer la memoria del núcleo
-*** excepción 14: fallo de página en 0x00100000 (lectura, anillo 3, protección) en 0x40000057, en el anillo 3
+he leído 
+*** excepción 14: fallo de página en 0x00100000 (lectura, anillo 3, protección) en 0x40000052, en el anillo 3
 *** se acaba la tarea 5 (MALO.BIN)
 (MALO.BIN ha acabado con el código 255)
 C:\>mem
-Memoria: 32640 K en total, 31408 K libres (7852 marcos de 4 K).
-Este intérprete ocupa 24 K. Tareas en marcha: 3.
+Memoria: 32640 K en total, 31428 K libres (7857 marcos de 4 K).
+Este intérprete ocupa 12 K. Tareas en marcha: 3.
+C:\>salir
+Hasta luego.
+ORDENES.BIN ha acabado con el código 0; marcos libres: 7866 antes y 7866 después
 ```
 
 ---
@@ -106,7 +116,7 @@ binario de unos 31 K.
 |---|---|
 | `cpu.cas` (Cpu) | La **GDT** nueva: código y datos del anillo 0 (0x08, 0x10), del anillo 3 (0x1B, 0x23) y el **TSS** (0x28, cargado con `ltr`). La **IDT** (`pon_puerta`, con puertas del anillo 0 o llamables desde el 3), los dos **8259** (IRQ en 0x20-0x2F) y el **reloj 8253** a 100 Hz. Lo que solo se dice en ensamblador: CR0, CR2, CR3, `cli`/`sti` (`sin_interrupciones` y `reponer`), `hlt`. |
 | `multiboot.cas` (Multiboot) | Lo que cuenta el cargador: la memoria alta, el **mapa de memoria** región a región, los **módulos** que ha cargado y lo que se le ha dicho al núcleo al arrancarlo (`-append`). |
-| `marcos.cas` (Marcos) | El **gestor de marcos físicos**: un mapa de bits, un bit por marco de 4 K (hasta 1 GB). Al empezar suelta lo que el mapa dice libre y tapa el primer mega, el propio núcleo, la información del cargador y sus módulos. `reservar_marco` (lo da a cero) y `soltar_marco` (no cuenta dos veces). |
+| `marcos.cas` (Marcos) | El **gestor de marcos físicos**: un mapa de bits, un bit por marco de 4 K (hasta 1 GB). Al empezar suelta lo que el mapa dice libre y tapa el primer mega, el propio núcleo, la información del cargador, sus textos (lo que se le dice al núcleo y los nombres de los módulos: QEMU los deja justo detrás del núcleo) y sus módulos. `reservar_marco` (lo da a cero) y `soltar_marco` (no cuenta dos veces). |
 | `paginas.cas` (Paginas) | La **paginación**: directorio y tablas de páginas, `mapear`, `desmapear`, `traducir`; el directorio del núcleo (la identidad) y uno por programa (`nuevo_espacio`, `soltar_espacio`); la **zona a la demanda**; y `usuario_puede`, para que la llamada al sistema no toque lo que no es del programa. |
 | `monton.cas` (Monton) | El **montón del núcleo**: `reservar` y `liberar`, con cabecera, pie, relleno y comprobación (sección 4). |
 | `tareas.cas` (Tareas) | Las **tareas**: fichas, colas, el **reloj que cambia de tarea**, `ceder`, `dormir`, `bloquear`/`despertar_tarea`, `terminar` y `esperar`; los **cerrojos** (`tomar`, `soltar`) y las tareas huérfanas (sección 5). |
@@ -136,7 +146,7 @@ Las direcciones (lo mismo en todos los espacios, menos la parte del usuario):
 | Desde | Hasta | Qué |
 |---|---|---|
 | `0x00000000` | la memoria que haya (hasta 1 GB) | **la identidad**: la memoria de verdad, tal cual. El núcleo, sus variables, la pantalla y los marcos (un marco se toca por su dirección física). Solo el anillo 0. |
-| `0x40000000` | `0xBFFFFFFF` | **el programa de usuario** (anillo 3): cada uno, en su directorio. Su código, sus datos y su pila; detrás, lo que pida de más (`más_memoria`, sección 6). |
+| `0x40000000` | `0xBFFFFFFF` | **el programa de usuario** (anillo 3): cada uno, en su directorio. Su código y sus datos; detrás, lo que pida de más (`más_memoria`, sección 6); y arriba del todo (desde `0xBFC00000`), **su pila**, que crece hacia abajo. |
 | `0xC0000000` | `0xC07FFFFF` | **el montón del núcleo** (8 MB). |
 | `0xD0000000` | `0xD03FFFFF` | **la zona a la demanda** (4 MB): vacía; el fallo de página pone un marco donde se toque. |
 
@@ -278,6 +288,16 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 - **Lanzar y esperar**: `lanzar` da el número de la tarea nueva; `esperar` solo
   vale para las que ha lanzado uno mismo, y da su código de salida (255 si el
   núcleo tuvo que acabarla). Lo que no se espera lo recoge el núcleo.
+- **La pila crece sola**: la pila del programa no va dentro de sus variables: el
+  núcleo se la pone arriba del todo de su zona (acaba en `0xC0000000`), con una
+  sola página; cuando la pila baja a una página que no tiene, el **fallo de página
+  le pone una nueva** y el programa sigue sin enterarse (hasta 4 MB). Solo se
+  atiende lo que cae de por donde va la pila (ESP) para arriba, o justo debajo
+  (lo que una instrucción apila): una dirección cualquiera de esa zona sigue
+  siendo un fallo. Si el programa le da al núcleo un arreglo local que aún no ha
+  tocado (para leer del disco en él), el núcleo le pone esas páginas antes. Una
+  pila que se desboca llega a su tope (la última página no se pone nunca) y el
+  programa se acaba, no el núcleo.
 - **La memoria que crece** (el `sbrk` de siempre): `más_memoria(n)` pone páginas
   nuevas, a cero, detrás de lo que tiene el programa, y `menos_memoria(n)` las
   devuelve (tocar luego ahí es un fallo de página, y se acaba el programa). Al
@@ -405,7 +425,9 @@ pantalla se mira), **lanza programas por su nombre** con sus argumentos (tambié
 una carpeta) y los espera, dice lo que no conoce, y sigue cuando un programa se
 acaba a la fuerza. Desde dentro de un programa (`PRUEBA.BIN`): la **memoria que
 crece** y se devuelve; **leer un archivo de varios clusters** a trozos de 777
-octetos (la suma de sus octetos es la del archivo de verdad); el tope de archivos
+octetos (la suma de sus octetos es la del archivo de verdad); la **pila que crece
+sola** (200 llamadas anidadas con 4000 octetos cada una, y leer del disco a un
+arreglo local sin estrenar) y la que se desboca, que acaba con el programa; el tope de archivos
 abiertos; que las **direcciones que no son del programa no se tocan**; **lanzar dos
 programas a la vez y esperarlos**; que **dos programas que escriben a la vez no se
 mezclan** (240 líneas enteras: el cerrojo de la consola); que tocar memoria
@@ -418,15 +440,16 @@ intérprete (`-append ordenes`); y el núcleo sin disco.
 Además, como con todo lo de Castel: **CASTEL** (el compilador escrito en Castel,
 dentro de Hispa-8086) saca el **mismo ensamblador** que `ccastel.py` para el núcleo
 (con sus módulos nuevos), el intérprete de órdenes y los demás programas de
-usuario, y **ENSAMBLA** da el **mismo binario que NASM**. (No ha hecho falta tocar
-el lenguaje ni los compiladores.)
+usuario, y **ENSAMBLA** da el **mismo binario que NASM**. (El lenguaje no se ha
+tocado; de los compiladores, solo el arranque de `modelo usuario`, en los dos: ya
+no pone la pila, que es del núcleo.)
 
 ## 11. Por dónde seguir
 
 Hecho en esta tanda (18-19/11/2026): el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de
-órdenes del anillo 3 y la memoria del usuario que crece (`más_memoria`). Lo
-siguiente:
+órdenes del anillo 3, la memoria del usuario que crece (`más_memoria`) y la pila
+que crece sola. Lo siguiente:
 
 1. **Escribir en el disco**: la orden de escribir sectores en `ata.cas`, y en la
    FAT crear, escribir, alargar y borrar archivos y carpetas (con las dos copias de
@@ -436,11 +459,8 @@ siguiente:
    rutas son siempre desde la raíz), `PATH`, archivos de órdenes (`.BAT`), la
    historia de la línea, y **Ctrl+C** para acabar el programa que corre (hoy un
    programa que no acaba nunca se queda con el teclado: no hay cómo pararlo).
-3. **Una pila que crece a la demanda**: hoy la pila de un programa son 16 K dentro
-   de sus variables (la pone el arranque de `modelo usuario`). Hay que cambiar ese
-   arranque **en los dos compiladores** para que la pila la ponga el núcleo arriba
-   de la zona del usuario, y que el fallo de página le añada páginas. Y páginas
-   compartidas o copiadas al escribir cuando haya procesos que se dupliquen.
+3. **Páginas compartidas o copiadas al escribir**, cuando haya procesos que se
+   dupliquen; y cargar los programas a la demanda (hoy se leen enteros).
 4. **El disco, mejor**: una caché de sectores de verdad (hoy, uno de datos y uno de
    FAT), leer varios sectores de una vez, la interrupción del disco en vez de mirar
    el estado, el canal secundario, LBA de 48 bits, y discos SATA (AHCI) y USB, que

@@ -288,9 +288,11 @@ compilador según el modelo.
   (`_datos_fin`), dónde acaba lo que empieza a cero (`_vacio_fin`) y por dónde se
   empieza (`C_arranque`). Con eso el núcleo sabe cuántas páginas ponerle y qué
   copiar en ellas (`nucleo32/usuario.cas`).
-- El arranque pone la pila (la suya, de 16 K, dentro de lo que empieza a cero),
-  borra sus variables y llama a `principal()`; al volver, `castel_salir`, que es la
-  llamada al sistema de acabar.
+- El arranque borra sus variables y llama a `principal()`; al volver,
+  `castel_salir`, que es la llamada al sistema de acabar. **La pila no la pone el
+  programa**: se la da el núcleo, arriba del todo de su zona (acaba en
+  `0xC0000000`), y crece sola hacia abajo, hasta 4 MB (PENTIUM.md §6). (Hasta el
+  19/11 eran 16 K fijos dentro de las variables del programa.)
 
 ### `modelo hispa32` → un programa Win32 de consola (PE, `ImageBase 0x400000`)
 
@@ -348,6 +350,5 @@ falta enlazar con otras cosas; de momento no hace falta.
 - **ELF32** de salida, si algún día hay que enlazar con código de fuera.
 - **El núcleo de Hispa-Pentium**: ha crecido desde la semilla (PENTIUM.md) y ya
   lee discos FAT, carga los programas del disco y tiene su intérprete de órdenes
-  en el anillo 3, todo sin tocar el lenguaje. Lo siguiente que sí lo toca: que la
-  **pila de un programa de `modelo usuario`** la ponga el núcleo (para que crezca a
-  la demanda) y no el arranque del programa, en los dos compiladores.
+  en el anillo 3, todo sin tocar el lenguaje; de los compiladores, solo el
+  arranque de `modelo usuario` (la pila ya la pone el núcleo: sección 8).
