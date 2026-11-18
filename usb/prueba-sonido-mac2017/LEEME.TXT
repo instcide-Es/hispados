@@ -1,0 +1,40 @@
+PRUEBA DE SONIDO EN EL MACBOOK AIR 2017 (A1466) - Hispa-DOS 0.9.26
+Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
+===================================================================
+
+Que es: en el MacBook Air 2017, arrancado por UEFI (HispaBIOS), no sonaba
+nada. Por su informe, no era el chip de sonido: el firmware de Apple deja
+puesta una proteccion (VT-d) que no deja a la tarjeta de sonido leer la
+memoria, y por eso "la posicion del flujo no avanzaba". Esta imagen lleva un
+HSPSND y una prueba de sonido que abren esa proteccion para la tarjeta. No
+se ha podido probar sin el equipo: por eso esta prueba.
+
+QUE HACER (5 minutos)
+---------------------
+1. Descomprima hispados-usb-sonido-mac2017.zip y grabe hispados-usb.img en
+   una memoria USB entera (como las otras veces). Se borra lo que tenga.
+2. Arranque el MacBook Air 2017 desde la memoria (tecla Opcion/Alt al
+   encender, "EFI Boot"), igual que la otra vez.
+3. En el menu elija "Normal". Al cargarse el sonido deberia salir una linea
+       Proteccion de DMA del firmware (VT-d, unidad en ...): abierta ...
+   No hace falta apuntarla: queda en el informe.
+4. Escriba DIAGNOSTICO y haga la prueba de sonido como siempre (S si lo
+   oye, N si no). Suba el volumen del Mac por si acaso.
+5. Suba al FTP la carpeta INFORMES de la memoria USB (a HispaDOS/informes),
+   suene o no suene: el informe nuevo dice que tenia puesto el firmware y
+   que se ha hecho.
+
+Si suena: ademas de la prueba, puede probar SONAR, un juego o Hispa
+Ventanas (escriba HISPA).
+
+Si algo va peor que antes (se queda parado al cargar el sonido o durante la
+prueba): apague con el boton, arranque otra vez y, en el menu, elija "Prueba
+del equipo y del sonido"; y si tambien se para, arranque en "Normal"
+pulsando F8 al salir "Iniciando Hispa-DOS" y diga que NO a la linea de
+HSPSND. Suba igualmente la carpeta INFORMES si existe.
+
+Notas
+-----
+- En los demas equipos esta imagen se porta como la 0.9.26 normal: la
+  proteccion solo se toca si el firmware la ha dejado encendida.
+- HSPSND /NOVTD carga el sonido sin tocar la proteccion (para comparar).

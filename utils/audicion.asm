@@ -330,6 +330,24 @@ parse_args:
         call mac_reset
         jmp .sp
 .sm:
+        ; [VTD] /SIM:VTD: la unidad de VT-d de QEMU (-device intel-iommu);
+        ; /SIM:VTB, además, sin el paso directo (apagar la traducción)
+        mov eax, [si]
+        and eax, 0x00DFDFFF
+        cmp eax, ':VT'
+        jne .sv
+        mov al, [si+3]
+        and al, 0xDF
+        cmp al, 'D'
+        je .sv1
+        cmp al, 'B'
+        jne .sv
+        mov byte [vtd_solo_b], 1
+.sv1:
+        add si, 4
+        mov dword [vtd_sim], 0xFED90000
+        jmp .sp
+.sv:
         ; [TOSHIBA] /SIM:ALC269: el Realtek ALC269 del Toshiba NB250 (simulado);
         ; /SIM:ALC269R, con la hipótesis «el DAC vuelve a 0 dB cada vez que se
         ; le programa el formato o el flujo»
@@ -2383,6 +2401,7 @@ hda_open:
         call .try
         mov [corb_ok], al
         mov [use_corb], al
+        call vtd_hda                ; [VTD] la DMA cerrada por el firmware
         mov byte [codec_dead], 0
         mov byte [fails], 0
         cmp byte [verbose], 0
@@ -4565,6 +4584,7 @@ plpib:
         mov di, sd_snap2
         call psnap
         PR ")", NL
+        call vtd_noavanza           ; [VTD]
 .x:
         cmp byte [sd_rst1], 0
         je .x2
@@ -7665,6 +7685,353 @@ pbitn:
         pop eax
         ret
 %include "cirrus.inc"
+
+; =============================================================================
+;  [VTD] la protección de DMA (VT-d) que deja un firmware UEFI (lib/vtd.inc)
+; =============================================================================
+; Desde hda_open, con CORB/RIRB ya probado (corb_ok): es la prueba de que la
+; controladora puede leer y escribir la memoria. Si hay traducción encendida
+; se abre el paso a esta controladora y se prueba otra vez; si sigue sin ir,
+; se guarda el informe y se apaga la traducción. Todo queda en el informe.
+vtd_hda:
+        pushad
+        call vtd_buscar
+        pushf
+        cmp byte [verbose], 0
+        je .nv
+        call vtd_informe
+.nv:
+        popf
+        jc .r
+        cmp byte [vtd_tes], 0
+        je .r
+        test byte [vtd_tes], 2
+        jz .np
+        call vtd_sin_pmr
+        cmp byte [verbose], 0
+        je .np
+        PR "  VT-d: regiones de memoria protegidas (PMEN) quitadas: "
+        mov al, [vtd_tes]
+        not al
+        and al, 2
+        call psino
+        PR NL
+.np:
+        test byte [vtd_tes], 1
+        jz .again
+        cmp byte [vtd_solo_b], 0
+        jne .b
+        mov bx, [cur_bdf]
+        call vtd_abrir
+        cmp byte [verbose], 0
+        je .again
+        MODE O_REP | O_SUM
+        PR "VT-d: el firmware tenía cerrada la DMA; paso directo para HD Audio "
+        mov bx, [cur_bdf]
+        call pbdf
+        PR ": resultado "
+        mov al, [vtd_res]
+        call phex2
+        PR "h", NL
+        MODE O_REP
+        PR "  (entrada de contexto en "
+        mov eax, [vtd_ent]
+        call phex8
+        PR "h; antes: "
+        mov eax, [vtd_viejo+12]
+        call phex8
+        mov eax, [vtd_viejo+8]
+        call phex8
+        PR " "
+        mov eax, [vtd_viejo+4]
+        call phex8
+        mov eax, [vtd_viejo]
+        call phex8
+        PR ")", NL
+.again:
+        call .corb
+        cmp byte [corb_ok], 0
+        jne .fin
+.b:
+        test byte [vtd_tes], 1
+        jz .fin
+        call rflush                 ; (por si acaso: el informe, al disco)
+        call vtd_apagar
+        MODE O_REP | O_SUM
+        PR "VT-d: traducción de DMA apagada: "
+        mov al, [vtd_tes]
+        not al
+        and al, 1
+        call psino
+        PR NL
+        MODE O_REP
+        call .corb
+.fin:
+        cmp byte [verbose], 0
+        je .r
+        mov esi, [vtd_base]
+        PR "  VT-d, faltas después:", NL
+        call vtd_faltas
+.r:
+        popad
+        ret
+; CORB/RIRB otra vez -> corb_ok y use_corb (y lo dice la primera vez)
+.corb:
+        call corb_init
+        mov byte [use_corb], 1
+        call hda_open.try
+        mov [corb_ok], al
+        mov [use_corb], al
+        cmp byte [verbose], 0
+        je .c1
+        MODE O_REP | O_SUM
+        PR "VT-d: órdenes por CORB/RIRB (por DMA) después: "
+        mov al, [corb_ok]
+        call psino
+        PR NL
+        MODE O_REP
+.c1:
+        ret
+
+; el flujo no avanza: ¿es la DMA? El error de descriptor, el estado PCI de la
+; controladora y las faltas que haya apuntado la unidad de VT-d
+vtd_noavanza:
+        pushad
+        test byte [sd_snap2+3], 0x10
+        jz .nd
+        PR "  (STS bit 4: ERROR DE DESCRIPTOR: la controladora no ha podido leer de la", NL
+        PR "   memoria la lista de búferes: la DMA no le funciona)", NL
+.nd:
+        PR "  (PCI orden/estado ahora: "
+        mov bx, [cur_bdf]
+        mov di, 0x04
+        call pci_rd32
+        call phex8
+        PR "h"
+        mov esi, [vtd_base]
+        test esi, esi
+        jz .nv
+        PR "; VT-d GSTS="
+        mov eax, [fs:esi+0x1C]
+        call phex8
+        PR " FSTS="
+        mov eax, [fs:esi+0x34]
+        call phex8
+        PR ")", NL
+        call vtd_faltas
+        jmp .r
+.nv:
+        PR ")", NL
+.r:
+        popad
+        ret
+
+; el estado de las unidades, al informe
+vtd_informe:
+        pushad
+        PR "  VT-d (protección de DMA del firmware): MCHBAR="
+        mov eax, [vtd_mch]
+        call phex8
+        PR "h, unidad de la gráfica "
+        mov eax, [vtd_gfx]
+        call phex8
+        PR "h, unidad general "
+        mov eax, [vtd_base]
+        call phex8
+        PR "h", NL
+        mov esi, [vtd_gfx]
+        call .unidad
+        mov esi, [vtd_base]
+        call .unidad
+        test esi, esi
+        jz .r
+        test dword [fs:esi+0x1C], 0x80000000
+        jnz .on
+        PR "  VT-d: traducción apagada (la DMA está libre).", NL
+        jmp .r
+.on:
+        PR "  VT-d: TRADUCCION ENCENDIDA: el firmware tiene cerrada la DMA.", NL
+        PR "  Faltas apuntadas (antes de tocar nada):", NL
+        call vtd_faltas
+        call vtd_contextos
+.r:
+        popad
+        ret
+; ESI = unidad (0: nada)
+.unidad:
+        test esi, esi
+        jz .u0
+        PR "   unidad "
+        mov eax, esi
+        call phex8
+        PR "h: VER="
+        mov eax, [fs:esi]
+        call phex8
+        PR " CAP="
+        mov eax, [fs:esi+0x0C]
+        call phex8
+        mov eax, [fs:esi+0x08]
+        call phex8
+        PR " ECAP="
+        mov eax, [fs:esi+0x14]
+        call phex8
+        mov eax, [fs:esi+0x10]
+        call phex8
+        PR NL, "     GSTS="
+        mov eax, [fs:esi+0x1C]
+        call phex8
+        PR " RTADDR="
+        mov eax, [fs:esi+0x24]
+        call phex8
+        mov eax, [fs:esi+0x20]
+        call phex8
+        PR " FSTS="
+        mov eax, [fs:esi+0x34]
+        call phex8
+        PR " PMEN="
+        mov eax, [fs:esi+0x64]
+        call phex8
+        PR " PLM="
+        mov eax, [fs:esi+0x68]
+        call phex8
+        PR "-"
+        mov eax, [fs:esi+0x6C]
+        call phex8
+        PR NL
+.u0:
+        ret
+
+; ESI = unidad: las faltas de DMA apuntadas (quién, por qué y a qué
+; dirección), y se borran para ver después las nuevas
+vtd_faltas:
+        pushad
+        test esi, esi
+        jz .r
+        mov eax, [fs:esi+0x08]
+        shr eax, 24
+        mov edx, [fs:esi+0x0C]
+        mov ecx, edx
+        and edx, 3
+        shl edx, 8
+        or eax, edx
+        shl eax, 4
+        lea edi, [esi+eax]          ; el primer registro
+        shr ecx, 8
+        and ecx, 0xFF
+        inc ecx                     ; cuántos
+        cmp ecx, 16
+        jbe .n
+        mov ecx, 16
+.n:
+        xor bp, bp
+.l:
+        mov eax, [fs:edi+12]
+        test eax, eax
+        jns .nx
+        inc bp
+        PR "    falta de "
+        mov eax, [fs:edi+8]
+        mov bx, ax
+        call pbdf
+        PR ": motivo "
+        mov eax, [fs:edi+12]
+        call phex2
+        PR "h, tipo "
+        mov eax, [fs:edi+12]
+        shr eax, 30
+        and al, 1
+        call phex1
+        PR " (0 escritura, 1 lectura), dirección "
+        mov eax, [fs:edi+4]
+        call phex8
+        mov eax, [fs:edi]
+        call phex8
+        PR "h", NL
+        mov dword [fs:edi+12], 0x80000000   ; borrada
+.nx:
+        add edi, 16
+        dec ecx
+        jnz .l
+        mov eax, [fs:esi+0x34]      ; y el estado (se borra escribiendo 1)
+        mov [fs:esi+0x34], eax
+        test bp, bp
+        jnz .r
+        PR "    (ninguna)", NL
+.r:
+        popad
+        ret
+
+; las entradas de contexto presentes del bus 0 (a quién abre el firmware)
+vtd_contextos:
+        pushad
+        mov esi, [vtd_base]
+        cmp dword [fs:esi+0x24], 0
+        jne .alto
+        mov eax, [fs:esi+0x20]
+        test ax, 0x0C00
+        jnz .alto
+        and eax, 0xFFFFF000
+        mov edi, eax
+        PR "  Tabla raíz: buses con tabla de contexto:"
+        xor cx, cx
+.b:
+        test byte [fs:edi], 1
+        jz .bn
+        PR " "
+        mov al, cl
+        call phex2
+.bn:
+        add edi, 16
+        inc cl
+        jnz .b
+        PR NL
+        sub edi, 0x1000
+        mov eax, [fs:edi]
+        test al, 1
+        jz .r
+        cmp dword [fs:edi+4], 0
+        jne .alto
+        and eax, 0xFFFFF000
+        mov edi, eax
+        PR "  Entradas de contexto del bus 0 (dispositivo: parte alta, parte baja):", NL
+        xor cx, cx
+        xor bp, bp
+.d:
+        test byte [fs:edi], 1
+        jz .dn
+        inc bp
+        cmp bp, 40
+        ja .dn
+        PR "    "
+        mov bx, cx
+        call pbdf
+        PR ": "
+        mov eax, [fs:edi+12]
+        call phex8
+        mov eax, [fs:edi+8]
+        call phex8
+        PR " "
+        mov eax, [fs:edi+4]
+        call phex8
+        mov eax, [fs:edi]
+        call phex8
+        PR NL
+.dn:
+        add edi, 16
+        inc cl
+        jnz .d
+        test bp, bp
+        jnz .r
+        PR "    (ninguna: el firmware no abre a nadie del bus 0)", NL
+.r:
+        popad
+        ret
+.alto:
+        PR "  (las tablas están por encima de 4 GB o son de otro formato: no se leen)", NL
+        popad
+        ret
+vtd_solo_b  db 0
+%include "vtd.inc"
 ; /SIM:MAC: el códec simulado; lo que va a los DAC, también al de QEMU
 %include "macsim.inc"
 mac_fwd_cmd:

@@ -87,7 +87,7 @@ $(B)/LOLTEST.COM: tests/progs/loltest.asm | $(B)
 $(B)/gen/lib/alcsim.bin: lib/alcsim.asm | $(B)
 	mkdir -p $(B)/gen/lib
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/HSPSND.COM: drivers/hspsnd.asm lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc lib/hspmez.inc lib/hspmezi.inc lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
+$(B)/HSPSND.COM: drivers/hspsnd.asm lib/vtd.inc lib/hspsb.inc lib/hspopl.inc lib/hspopl_st.inc lib/hspmez.inc lib/hspmezi.inc lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/HSPDPMI.COM: drivers/hspdpmi.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -280,7 +280,7 @@ $(B)/PLAYWAV.COM: utils/playwav.asm | $(B)
 $(B)/SONIDO.COM: utils/sonido.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # AUDICION: prueba de sonido con preguntas de sí o no (docs/AUDICION.md)
-$(B)/AUDICION.COM: utils/audicion.asm lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
+$(B)/AUDICION.COM: utils/audicion.asm lib/vtd.inc lib/cirrus.inc lib/macsim.inc $(B)/gen/lib/alcsim.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
  $(B)/INSTALAR.COM: utils/instalar.asm lib/copiaarbol.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -491,6 +491,9 @@ $(B)/acpi_sim: $(ACPI_SO)
 	ld -m elf_i386 -static -z noexecstack -o $@ $(ACPI_SO)
 # (pruebas) escribe en la CMOS: la batería de mentira de QEMU (tests/acpi/bateria-qemu.asl)
 $(B)/CMOSW.COM: tests/progs/cmosw.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+# [VTD] (pruebas) enciende la protección de DMA de QEMU, como un firmware UEFI (tests/run_vtd_tests.sh)
+$(B)/VTDON.COM: tests/progs/vtdon.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/FSTEST.COM: tests/progs/fstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -969,7 +972,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM
+TEST_DEPS = $(IMG) usb usb486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM
 
 para-pruebas: $(TEST_DEPS)
 
@@ -1003,6 +1006,7 @@ test: $(TEST_DEPS)
 	EMM=1 tests/run_sound_tests.sh $(IMG)
 	tests/run_sound_tests.sh $(IMG)
 	tests/run_audicion_tests.sh $(IMG)
+	tests/run_vtd_tests.sh $(IMG)
 	tests/run_aprendido_tests.sh $(IMG)
 	tests/run_sbemu_tests.sh $(IMG)
 	tests/run_sbpm_tests.sh $(IMG)

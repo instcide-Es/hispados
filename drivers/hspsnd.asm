@@ -3,7 +3,7 @@
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Uso:  HSPSND [/SB] [/SB8] [/NOSB] [/VOL:n] [/INFO] [/GPIO:hh] [/NOGPIO]
-;               [/EAPD:0] [/NOAPRENDIDO]
+;               [/EAPD:0] [/NOAPRENDIDO] [/NOVTD]
 ;               [/NOTECLAS]   (en AUTOEXEC.BAT o con INSTALL= en CONFIG.SYS)
 ;        /SB        Sound Blaster 16 emulada sobre el HD Audio o el AC'97,
 ;                   para los juegos (hace falta HSPEMM; si hay una Sound
@@ -23,6 +23,10 @@
 ;                   prueba de sonido: ver más abajo)
 ;        /NOTECLAS  sin teclas de volumen (Ctrl+Alt+flecha arriba/abajo,
 ;                   Ctrl+Alt+Fin = silencio, y las teclas multimedia)
+;        /NOVTD     [VTD] HD Audio: no tocar la protección de DMA (VT-d) que
+;                   deja encendida un firmware UEFI (arranque con HispaBIOS):
+;                   sin abrirla la controladora no puede leer el sonido de la
+;                   memoria (lib/vtd.inc, docs/AUDICION.md)
 ;
 ;  Tarjetas: Sound Blaster 2.0/Pro/16 (ISA; variable BLASTER o sondeo en
 ;  220h-280h; si no está BLASTER, la pone), Intel HD Audio (HDA, PCs
@@ -2674,6 +2678,12 @@ init:
 .np:
         mov si, msg_crlf2
         call puts
+        cmp byte [vtd_que], 0       ; [VTD] lo que se ha hecho con la DMA
+        je .nvt
+        cmp byte [opt_info], 0      ; (con /INFO lo dice después)
+        jne .nvt
+        call vtd_info
+.nvt:
         jmp .install
 .hfail:
         mov si, msg_hdafail
@@ -3205,6 +3215,18 @@ o_nokeys:
 o_info:
         mov byte [opt_info], 1
         ret
+; [VTD] /SIMVTD: la unidad de VT-d de QEMU (-device intel-iommu), que no
+; tiene MCHBAR; /SIMVTD:B, además, sin el paso directo (apagar la traducción)
+o_simvtd:
+        mov dword [vtd_sim], 0xFED90000
+        cmp byte [si], ':'
+        jne .r
+        mov byte [vtd_solo_b], 1
+.r:
+        ret
+o_novtd:
+        mov byte [opt_novtd], 1
+        ret
 o_simmac:                           ; [CIRRUS]
         mov byte [sim_mac], 1
         jmp mac_reset
@@ -3329,11 +3351,14 @@ opt_tab     dw k_noapr, o_noapr, k_nosb, o_nosb, k_nogpio, o_nogpio, k_nokeys, o
             dw k_vol, o_vol, k_info, o_info, k_diag, o_info
             dw k_gpio, o_gpio, k_eapd, o_eapd, k_help, o_help, k_tilde, o_tilde
             dw k_simmac, o_simmac   ; [CIRRUS]
+            dw k_simvtd, o_simvtd, k_novtd, o_novtd     ; [VTD]
             dw k_simalc, o_simalc   ; [TOSHIBA]
             dw k_sordo, o_sordo
             dw 0
 k_tilde     db "~", 0
 k_simmac    db "SIMMAC", 0          ; [CIRRUS] (solo para las pruebas)
+k_simvtd    db "SIMVTD", 0          ; [VTD] (solo para las pruebas)
+k_novtd     db "NOVTD", 0           ; [VTD] no tocar la protección de DMA
 k_simalc    db "SIMALC", 0          ; [TOSHIBA] (solo para las pruebas)
 opt_simalc  db 0
 alc_tmp     dd 0
@@ -3505,6 +3530,7 @@ show_info:
         call hex8
         mov si, msg_crlf2
         call puts
+        call vtd_info               ; [VTD]
         call hda_info
         call cr_info                ; [CIRRUS]
 .end:
@@ -4923,6 +4949,7 @@ hda_init:
         mov dx, 48000
         mov [cur_rate], dx
         call hda_rate_fmt
+        call vtd_paso               ; [VTD] la DMA, abierta (UEFI con VT-d)
         ; el primer códec con un grupo de audio y una salida analógica (puede
         ; haber también un módem o el HDMI)
         xor cl, cl
@@ -4952,6 +4979,7 @@ hda_init:
         stc
         ret
 .ok:
+        call vtd_paso2              ; [VTD] ¿va la DMA?
         call a20_restore
         clc
         ret
@@ -7092,7 +7120,7 @@ msg_sb_noemm db "/SB: hace falta HSPEMM.SYS (en CONFIG.SYS) para emular la Sound
 msg_sb_real db "/SB: hay una Sound Blaster de verdad; no se emula.", 13, 10, 0
 msg_sb_emu  db "Sound Blaster 16 emulada", 0
 msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh] [/NOGPIO]", 13, 10
-            db "            [/EAPD:0] [/NOAPRENDIDO]", 13, 10
+            db "            [/EAPD:0] [/NOAPRENDIDO] [/NOVTD]", 13, 10
             db "  /SB        Sound Blaster 16 emulada para los juegos, sobre el HD Audio o el", 13, 10
             db "             AC'97 (hace falta HSPEMM.SYS)", 13, 10
             db "  /VOL:n     volumen del 0 al 100 % (también con el driver ya cargado)", 13, 10
@@ -7106,6 +7134,7 @@ msg_usage   db "Uso: HSPSND [/SB] [/VOL:n] [/INFO] [/NOSB] [/NOTECLAS] [/GPIO:hh
             db "  /NOGPIO    HD Audio: no tocar las GPIO", 13, 10
             db "  /EAPD:0    HD Audio: apagar EAPD en vez de encenderlo", 13, 10
             db "  /NOAPRENDIDO  no usar lo aprendido en la prueba de sonido", 13, 10
+            db "  /NOVTD     no tocar la protección de DMA (VT-d) que deja el firmware UEFI", 13, 10
             db "Si la prueba de sonido (AUDICION) hizo sonar este equipo, HSPSND pone ese", 13, 10
             db "mismo camino (\HISPADOS\SONIDO.INI) en vez de buscarlo.", 13, 10
             db "El volumen se cambia después con SONIDO.", 13, 10, 0
@@ -7375,6 +7404,254 @@ msg_cr_h3   db "  GPIO: las de /GPIO.", 13, 10, 0
 msg_cr_h4   db "  GPIO: sin tocar (/NOGPIO).", 13, 10, 0
 msg_cr_h5   db "  GPIO: todas encendidas.", 13, 10, 0
 %include "cirrus.inc"
+
+; =============================================================================
+;  [VTD] la protección de DMA (VT-d) que deja puesta un firmware UEFI cuando
+;  se arranca con HispaBIOS (ver lib/vtd.inc): sin abrirla, la controladora
+;  no puede leer el sonido de la memoria y el flujo no avanza
+; =============================================================================
+; Desde hda_init, con los registros de la controladora a mano y el flujo de
+; salida ya elegido. vtd_que: 0 no hay protección encendida, 1 abierta con
+; el paso directo, 2 hubo que apagar la traducción, 3 sigue sin haber DMA,
+; 4 sin tocar (/NOVTD). vtd_paso, antes de preparar los códecs; vtd_paso2,
+; con el códec elegido ya preparado.
+vtd_paso:
+        pushad
+        mov byte [vtd_pend], 0
+        smsw ax
+        test al, 1                  ; (en modo V86 no se llega a la memoria)
+        jnz .r
+        call vtd_buscar
+        jc .r
+        cmp byte [vtd_tes], 0
+        je .r
+        mov byte [vtd_que], 4
+        cmp byte [opt_novtd], 0
+        jne .r
+        call vtd_sin_pmr
+        mov byte [vtd_pend], 1
+        mov byte [vtd_que], 1
+        cmp byte [vtd_solo_b], 0
+        jne .r
+        mov bx, [pci_bdf]
+        call vtd_abrir
+        mov [vtd_como], al
+.r:
+        popad
+        ret
+; Con el códec ya preparado (en QEMU el flujo solo corre si un DAC lo
+; escucha): ¿va la DMA? Si no, se apaga la traducción y se mira otra vez.
+vtd_paso2:
+        pushad
+        cmp byte [vtd_pend], 0
+        je .r
+        mov byte [vtd_pend], 0
+        cmp byte [vtd_solo_b], 0
+        jne .b
+        call vtd_dma
+        jnc .r
+.b:
+        mov byte [vtd_que], 2
+        call vtd_apagar
+        call vtd_dma
+        jnc .r
+        mov byte [vtd_que], 3
+.r:
+        popad
+        ret
+
+; ¿Puede la controladora leer de la memoria? Un flujo de 256 octetos de
+; silencio (dos descriptores de 128) sobre vtd_tmp: tiene que avanzar (la
+; posición, o un búfer acabado: BCIS) y sin error de descriptor (SDSTS bit
+; 4) -> CF si no. (El anillo de verdad no se
+; puede usar todavía: cae encima de este código de instalación.)
+vtd_dma:
+        pushad
+        push es
+        push ds
+        pop es
+        mov di, vtd_tmp
+        mov cx, 384
+        xor al, al
+        rep stosb
+        pop es
+        mov bx, vtd_tmp
+        call phys
+        add eax, 127
+        and eax, 0xFFFFFF80
+        mov ebp, eax                ; la lista, alineada a 128
+        mov ebx, eax
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        sub ebx, eax                ; BX = su desplazamiento
+        lea eax, [ebp+128]          ; el silencio, detrás
+        mov [bx], eax
+        mov dword [bx+8], 128
+        mov dword [bx+12], 1        ; (IOC: al acabarlo, BCIS; sin interrupción)
+        mov [bx+16], eax
+        mov dword [bx+24], 128
+        mov dword [bx+28], 1
+        call hda_halt
+        mov dx, [hda_sd]
+        mov al, 1
+        call hwr8
+        mov cx, 0xFFFF
+.r1:
+        call hrd8
+        test al, 1
+        loopz .r1
+        call hda_pause
+        xor al, al
+        call hwr8
+        mov cx, 0xFFFF
+.r2:
+        call hrd8
+        test al, 1
+        loopnz .r2
+        call hda_pause
+        mov dx, [hda_sd]
+        add dx, 0x18
+        mov eax, ebp
+        call hwr32
+        add dx, 4
+        xor eax, eax
+        call hwr32
+        mov dx, [hda_sd]
+        add dx, 0x08
+        mov eax, 256
+        call hwr32
+        mov dx, [hda_sd]
+        add dx, 0x0C
+        mov ax, 1
+        call hwr16
+        mov dx, [hda_sd]
+        add dx, 0x12
+        mov ax, [hda_fmt]
+        call hwr16
+        mov dx, [hda_sd]
+        add dx, 2
+        mov al, 0x10
+        call hwr8
+        mov dx, [hda_sd]
+        mov al, 2                   ; RUN
+        call hwr8
+        ; hasta 4 tics: que avance, o que diga el error
+        push ds
+        xor ax, ax
+        mov ds, ax
+        mov si, [0x46C]
+        pop ds
+        xor di, di                  ; DI = 1: va
+.w:
+        mov dx, [hda_sd]
+        add dx, 3
+        call hrd8
+        mov [vtd_sts], al
+        test al, 0x10
+        jnz .fin
+        test al, 0x04               ; un búfer acabado: va
+        jnz .va
+        inc dx
+        call hrd32
+        test eax, eax
+        jnz .va
+        push ds
+        xor ax, ax
+        mov ds, ax
+        mov ax, [0x46C]
+        pop ds
+        sub ax, si
+        cmp ax, 4
+        jb .w
+        jmp .fin
+.va:
+        inc di
+.fin:
+        call hda_halt
+        mov dx, [hda_sd]            ; y el flujo, como recién reiniciado
+        mov al, 1
+        call hwr8
+        call hda_pause
+        xor al, al
+        call hwr8
+        call hda_pause
+        cmp di, 1
+        popad
+        ret                         ; (CF = 1 si DI era 0)
+
+; /INFO: qué se ha hecho
+vtd_info:
+        cmp byte [vtd_que], 0
+        jne .hay
+        ; con el driver ya cargado: se mira cómo está ahora
+        smsw ax
+        test al, 1
+        jnz .r
+        call a20_open
+        call unreal
+        call vtd_buscar
+        jc .v0
+        test byte [vtd_tes], 1
+        jz .v0
+        mov byte [vtd_mirar], 1
+        mov bx, [pci_bdf]
+        call vtd_abrir
+        mov byte [vtd_mirar], 0
+        call a20_restore
+        mov si, msg_vtd0
+        call puts
+        mov eax, [vtd_base]
+        call hex8
+        mov si, msg_vtd1
+        cmp byte [vtd_res], 3
+        je .v1
+        mov si, msg_vtd8
+.v1:
+        jmp puts
+.v0:
+        jmp a20_restore
+.hay:
+        movzx bx, byte [vtd_que]
+        mov si, msg_vtd0
+        call puts
+        mov eax, [vtd_base]
+        call hex8
+        shl bx, 1
+        mov si, [vtd_ques+bx-2]
+        call puts
+        cmp byte [vtd_que], 4
+        je .r
+        mov si, msg_vtd5
+        call puts
+        mov al, [vtd_como]
+        call hex2
+        mov si, msg_vtd6
+        call puts
+        mov al, [vtd_sts]
+        call hex2
+        mov si, msg_vtd7
+        call puts
+.r:
+        ret
+vtd_que     db 0
+vtd_como    db 0
+vtd_sts     db 0
+vtd_solo_b  db 0
+vtd_pend    db 0
+opt_novtd   db 0
+vtd_ques    dw msg_vtd1, msg_vtd2, msg_vtd3, msg_vtd4
+msg_vtd0    db "Protección de DMA del firmware (VT-d, unidad en ", 0
+msg_vtd1    db "h): abierta para esta tarjeta (paso directo).", 13, 10, 0
+msg_vtd2    db "h): traducción apagada.", 13, 10, 0
+msg_vtd3    db "h): NO se ha podido abrir; la tarjeta no puede leer el sonido de la memoria.", 13, 10, 0
+msg_vtd4    db "h): sin tocar (/NOVTD).", 13, 10, 0
+msg_vtd8    db "h): CERRADA para esta tarjeta (no puede leer el sonido de la memoria).", 13, 10, 0
+msg_vtd5    db "  (paso directo: resultado ", 0
+msg_vtd6    db "h; estado del flujo de prueba ", 0
+msg_vtd7    db "h)", 13, 10, 0
+vtd_tmp     times 384 db 0
+%include "vtd.inc"
 ; /SIMMAC (solo para las pruebas): el códec simulado del MacBook Air 2012
 %include "macsim.inc"
 mac_fwd_cmd:

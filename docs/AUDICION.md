@@ -369,6 +369,85 @@ registros.) HSPSND para y reinicia el flujo de la misma manera: antes, al
 quedarse sin datos o cambiar de frecuencia, volvía a arrancar justo después
 de escribir RUN a 0, sin esperar a que parase.
 
+## La DMA cerrada por el firmware (VT-d) [VTD]
+
+En el MacBook Air 13" 2017 (A1466, Broadwell, Cirrus CS4208) arrancado con
+HispaBIOS (UEFI sin CSM) no sonaba nada (informe del 18/11/2026), y no era
+el códec. Lo que decía el informe:
+
+- las órdenes al códec **inmediatas** iban; por **CORB/RIRB**, no, en las
+  dos controladoras (00:03.0, la del HDMI, y 00:1B.0), también después de
+  reiniciar el enlace (CRST);
+- el flujo no avanzaba en ningún intento, con `CTL=00140000h STS=10h
+  LPIB=0`: RUN se había borrado solo y el bit 4 de SDSTS es «error de
+  descriptor» (la controladora no pudo leer la lista de búferes).
+
+Las dos cosas que fallan van por DMA (la controladora lee y escribe la
+memoria por su cuenta); la que funciona, no. En el MacBook Air 2012
+(CS4206), arrancado por el CSM de Apple, CORB/RIRB va y suena. La causa: el
+firmware de Apple enciende la traducción de DMA de VT-d (para que un
+dispositivo enchufado no pueda leer la memoria) y solo abre a lo que él
+maneja; un sistema UEFI la quita al salir de los servicios de arranque (lo
+hace también el CSM), pero HispaBIOS no sale, porque el firmware sigue
+leyendo el disco. La controladora de sonido se queda sin poder leer nada.
+
+`lib/vtd.inc` (HSPSND y AUDICION) lo arregla, solo en modo real y solo si la
+traducción está encendida (con una BIOS de las de siempre no lo está, y no
+se toca nada):
+
+1. busca la unidad de VT-d sin tablas ACPI (HispaBIOS no las da): `MCHBAR`
+   (puente principal de Intel, 00:00.0, registro 48h) y en él `VTDPVC0BAR`
+   (5410h), la unidad de todo lo que no es la gráfica (la de la gráfica,
+   `GFXVTBAR` en 5400h, no se toca);
+2. quita las regiones de memoria protegidas (PMEN), si las hay;
+3. **paso directo**: la entrada de contexto de la controladora (tabla raíz →
+   tabla de contexto del bus → entrada de 00:1B.0) se pone de tipo
+   «pass-through», con el último dominio; si el firmware ya tenía una
+   entrada (cerrada), se vacían las cachés. Lo de los demás dispositivos no
+   se toca: el firmware sigue leyendo el disco igual;
+4. comprueba que la DMA va: HSPSND, con un flujo de 256 octetos de silencio
+   (tiene que avanzar y sin error de descriptor); AUDICION, con CORB/RIRB;
+5. si no va (o el paso directo no se puede: tablas por encima de 4 GB,
+   formato «escalable», unidad sin paso directo), **apaga la traducción** de
+   esa unidad (GCMD.TE a 0), que es lo que haría un sistema al arrancar.
+   AUDICION guarda antes el informe en el disco.
+
+HSPSND lo dice al cargarse y en `/INFO`: «Protección de DMA del firmware
+(VT-d, unidad en FED91000h): abierta para esta tarjeta (paso directo).»
+(o «traducción apagada», o «NO se ha podido abrir»). `HSPSND /NOVTD` no la
+toca. En el informe de AUDICION sale, con cada controladora: `MCHBAR` y las
+unidades con sus registros (VER, CAP, ECAP, GSTS, RTADDR, FSTS, PMEN), las
+**faltas** que tenía apuntadas la unidad (qué dispositivo quiso leer qué
+dirección y por qué se le negó: ahí tiene que salir 00:1B.0), los buses con
+tabla de contexto y las entradas del bus 0 (a quién abre el firmware), el
+resultado del paso directo, si CORB/RIRB va después, y las faltas nuevas. En
+el resumen: «VT-d: el firmware tenía cerrada la DMA; paso directo para HD
+Audio 00:1B.0: resultado 01h» y «VT-d: órdenes por CORB/RIRB (por DMA)
+después: sí».
+
+Resultados del paso directo: 01h hecho (no había entrada), 02h hecho (había
+una, cerrada), 03h ya estaba, 04h cambiada pero sin poder vaciar las cachés,
+81h/84h tablas por encima de 4 GB, 82h tabla de otro formato, 83h el bus no
+tiene tabla de contexto, 85h la unidad no admite el paso directo.
+
+Lo que no cubre: otros fabricantes de procesador, las unidades de VT-d que
+no están en `VTDPVC0BAR` y el modo V86 (con HSPEMM). El sitio natural de
+este arreglo es HispaBIOS (abrir la DMA a todos antes de arrancar DOS: vale
+igual para la red o el USB propio); mientras, lo hace el sonido para sí.
+
+Sobre las «7 órdenes sin respuesta» de aquel informe: 6 son la prueba de
+CORB/RIRB (una por cada vez que se abre una controladora), o sea, lo mismo;
+la séptima, la primera escritura del índice de coeficientes del widget 24h
+del CS4208 recién puesto en marcha (una orden inmediata que no contestó a
+tiempo; las siguientes sí: no impide nada). El altavoz del PC no suena porque ese Mac no lo tiene.
+
+Pruebas: `tests/run_vtd_tests.sh`, con QEMU `-machine q35 -device
+intel-iommu` y `VTDON.COM` (`tests/progs/vtdon.asm`), que hace de firmware:
+enciende la traducción con todo cerrado y se queda residente. `/SIMVTD`
+(HSPSND) y `/SIM:VTD` (AUDICION), solo para las pruebas, dicen dónde está la
+unidad de QEMU (FED90000h: no tiene `MCHBAR`); `/SIMVTD:B` y `/SIM:VTB`
+saltan el paso directo, para probar el apagado.
+
 ## Equipos probados por Carlos
 
 Con su informe (`SONIDO.TXT`) en el FTP, `HispaDOS/Pruebas Sonido/`:
@@ -377,7 +456,8 @@ Con su informe (`SONIDO.TXT`) en el FTP, `HispaDOS/Pruebas Sonido/`:
 |---|---|---|---|---|
 | HP Mini 5103 | IDT 92HD75 (111D:7608, 00100202h) | pin 0Dh ← DAC 10h | DAC 10h, 127 pasos de 0,75 dB (con silencio) | suena; bajar y subir el volumen: sí |
 | ThinkPad A275 | Realtek ALC298 (10EC:0298) | pin 14h ← 0Ch ← DAC 02h | DAC 02h, 127 pasos de 0,5 dB | suena; bajar y subir el volumen: sí |
-| MacBook Air 13" 2012 (A1466) | Cirrus Logic CS4206 (1013:4206, 00100302h) | (pin 0Bh ← DAC 04h) | DAC 04h, 127 pasos de 0,5 dB (0 dB en el 115) | NO sonó en la prueba del 13/11 (9 intentos); los arreglos [CIRRUS] están por probar en el equipo |
+| MacBook Air 13" 2012 (A1466) | Cirrus Logic CS4206 (1013:4206, 00100302h) | pin 0Bh ← DAC 04h, GPIO de Apple 0Ah | DAC 04h, 127 pasos de 0,5 dB (0 dB en el 115) | suena (18/11, arrancado por el CSM de Apple): volumen, silencio, izquierda y derecha bien |
+| MacBook Air 13" 2017 (A1466) | Cirrus Logic CS4208 (1013:4208, 00100300h; subsistema 106B:7E00) | (pin 12h ← DAC 03h, GPIO 0) | DAC 03h, 127 pasos de 0,5 dB | NO sonó el 18/11 (arrancado con HispaBIOS): la DMA cerrada por el firmware → arreglo [VTD], por probar en el equipo |
 | Toshiba NB250-10N | Realtek ALC269VB (10EC:0269, 00100100h; subsistema 1179:FF6C) | pin 14h ← 0Ch ← DAC 02h, EAPD, GPIO 03h | DAC 02h, 87 pasos de 0,75 dB | suena; bajar y subir el volumen: NO (11/11) → arreglo [TOSHIBA], por probar en el equipo |
 
 ## El volumen del Toshiba NB250 (Realtek ALC269) [TOSHIBA]
