@@ -70,7 +70,12 @@ prepara() {
   # Mirador ni HSPUSB, salvo la prueba del propio Mirador)
   mdel -i $T/f.img ::HISPADOS/HSPUSB.SYS 2>/dev/null
   [ "$nom" = MIRADOR.HVP ] || mdel -i $T/f.img ::HISPADOS/PROGS/MIRADOR.HVP 2>/dev/null
-  mcopy -o -i $T/f.img programas/comun/TIPOS*.DAT ::HISPADOS/PROGS/ || echo "  FAIL no caben los tipos de letra en el disquete de la prueba"
+  # [GLIFOS] solo si el módulo los usa (incluye tipos.inc): Cuentas, Datos...
+  # no, y así les queda sitio para sus archivos
+  local src=programas/$(echo ${nom%.*} | tr A-Z a-z).asm
+  if [ ! -f $src ] || grep -q 'tipos\.inc' $src; then
+    mcopy -o -i $T/f.img programas/comun/TIPOS*.DAT ::HISPADOS/PROGS/ || echo "  FAIL no caben los tipos de letra en el disquete de la prueba"
+  fi
   printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\%s\r\n' "$nom" > $T/CENTRO.INI
   mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
 }
