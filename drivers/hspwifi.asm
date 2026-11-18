@@ -1450,11 +1450,12 @@ auto_pci:
         jne .sigue
         mov si, pci_ids
 .otra:
-        mov cx, [si]
-        jcxz .ninguna
+        mov dx, [si]                ; fabricante (0 = fin de la tabla)
+        test dx, dx
+        jz .ninguna
+        mov cx, [si+2]              ; aparato
         push si
         mov ax, 0xB102
-        mov dx, 0x14E4              ; Broadcom
         xor si, si
         int 0x1A
         pop si
@@ -1462,7 +1463,7 @@ auto_pci:
         test ah, ah
         jz .sigue
 .no_es:
-        add si, 2
+        add si, 4
         jmp .otra
 .ninguna:
         popad
@@ -1946,7 +1947,11 @@ o_unload    db 0
 o_auto      db 0                    ; /AUTO
 red_quitada db 0                    ; se ha descargado HSPRED (sin cable)
 k_wifi5     db "WIFI="
-pci_ids     dw 0x4353, 0x4357, 0x4727, 0x0576, 0xA8D8, 0   ; las de wifi/nucleo/radio_brcm.c
+; fabricante, aparato: las de wifi/nucleo/radio_brcm.c y radio_ath9k.c
+pci_ids     dw 0x14E4, 0x4353, 0x14E4, 0x4357, 0x14E4, 0x4727, 0x14E4, 0x0576, 0x14E4, 0xA8D8
+            dw 0x168C, 0x002B, 0x168C, 0x002A, 0x168C, 0x002E, 0x168C, 0x0029, 0x168C, 0x002D
+            dw 0x168C, 0x0024, 0x168C, 0x0023, 0x168C, 0x0027, 0x168C, 0x002C
+            dw 0
 ruta_ini    db "A:\HISPADOS\RED.INI", 0
 o_v         db 0
 o_int       db 0
