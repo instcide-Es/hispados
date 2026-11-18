@@ -642,6 +642,7 @@ ctx_raton_der:
 ; que se suelta (los Mac y los touchpads de un botón). Se quita en
 ; Configuración (AJ_CTRL_DER)
 ctx_ctrl_clic:
+        call bt_clic_fuera          ; [BARRA] un clic fuera del menú Inicio lo cierra
         cmp byte [ctx_ctrl], 0
         jne .dentro
         test bl, bl
@@ -665,11 +666,14 @@ ctx_ctrl_clic:
 
 ; (ges_tecla) AX=tecla: Mayús+F10 pide el menú contextual -> CF=1
 ctx_tecla:
+        call bt_tecla               ; [BARRA] Ctrl+Esc y las teclas del menú Inicio
+        jc .si
         test al, al
         jnz .no
         cmp ah, 0x5D
         jne .no
         call ctx_teclado
+.si:
         stc
         ret
 .no:
@@ -1005,13 +1009,15 @@ ctx_cascada:
         call ctx_sin_max
         imul eax, edi, CASC_PASO
         add eax, 8
-        lea ebx, [eax+BARRA_H]
+        mov ebx, eax                ; [BARRA] dentro del área de trabajo
+        add ebx, [area_y0]
         lea ecx, [ebx+120]          ; (si se sale por abajo, vuelve arriba)
-        cmp ecx, [vid_alto]
+        cmp ecx, [area_y1]
         jle .c0
         xor edi, edi
         mov eax, 8
-        mov ebx, BARRA_H + 8
+        mov ebx, [area_y0]
+        add ebx, 8
 .c0:
         mov ecx, [ebp+V_AN]
         mov edx, [ebp+V_AL]
@@ -1025,7 +1031,7 @@ ctx_cascada:
 .c1:
         mov eax, ebx
         add eax, edx
-        sub eax, [vid_alto]
+        sub eax, [area_y1]          ; [BARRA]
         jle .c2
         sub edx, eax
 .c2:
@@ -1089,8 +1095,8 @@ ctx_mosaico:
         xor edx, edx
         div dword [ctx_mcols]
         mov [ctx_man], eax
-        mov eax, [vid_alto]
-        sub eax, BARRA_H
+        mov eax, [area_y1]          ; [BARRA] el área de trabajo
+        sub eax, [area_y0]
         xor edx, edx
         div dword [ctx_mfilas]
         mov [ctx_mal], eax
@@ -1109,7 +1115,7 @@ ctx_mosaico:
         div dword [ctx_mcols]       ; EAX=fila EDX=columna
         mov ebx, eax
         imul ebx, [ctx_mal]
-        add ebx, BARRA_H
+        add ebx, [area_y0]          ; [BARRA]
         mov eax, edx
         imul eax, [ctx_man]
         mov ecx, [ebp+V_AN]

@@ -167,6 +167,7 @@ centro_tarea:
         add esp, P_TAM
         call cen_alargar            ; [GRUPOS] si no caben los grupos, se alarga
         call aj_iniciar             ; [Configuración] CONFIG.HVP aplica VENTANAS.INI
+        call bt_centro_ini          ; [BARRA] (Hispa-486) el escritorio empieza despejado
         mov ebx, [gr_tabla]
         mov ecx, MAX_GR
 .g:
@@ -754,6 +755,8 @@ vista_proc:
 .cerrar:
         cmp dword [ebp+V_ID], 0
         jne ven_defecto             ; un grupo: se cierra sin más
+        call bt_centro_cerrar       ; [BARRA] (Hispa-486) el Centro solo se esconde
+        jc .nada
 .salir:
         call apa_dialogo            ; [APAGAR] volver a Hispa-DOS, reiniciar o apagar
         jmp .nada

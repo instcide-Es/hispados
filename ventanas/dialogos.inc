@@ -80,7 +80,7 @@ dlg_modal:
         sub eax, [esp+P_AN]
         sar eax, 1
         mov [esp+P_X], eax
-        mov eax, [vid_alto]
+        mov eax, [area_y1]          ; [BARRA] (vid_alto; en Hispa-486, sin la barra de tareas)
         sub eax, [esp+P_AL]
         sar eax, 1
         cmp eax, BARRA_H            ; (uno muy alto: debajo de la barra)

@@ -956,7 +956,10 @@ grafico:
         je .obat
         cmp al, 10                  ; [TECLADO] (pruebas: equipo lento)
         je .olento
-        jmp .ayuda
+        cmp al, 11                  ; [BARRA] /486: el escritorio de Hispa-486
+        jne .ayuda
+        mov byte [op_486], 1
+        jmp .arg
 .olento:
         mov byte [op_lento], 1
         jmp .arg
@@ -1414,6 +1417,7 @@ principal:
         call tar_iniciar
         call ges_iniciar
         call esc_iniciar
+        call bt_iniciar             ; [BARRA] el área de trabajo y, en Hispa-486, la barra de tareas
         call programas_iniciar
         cmp byte [op_fallo], 0
         je .bucle
@@ -1456,6 +1460,7 @@ principal:
         dec ecx
         jnz .ronda
 .pres:
+        call bt_vigilar             ; [BARRA] la barra de tareas, al día
         call tar_limpiar
 %ifdef CON_PROGRAMAS
         call hvp_limpiar
@@ -1938,6 +1943,8 @@ opciones:
         dw 0
         db 8, "CONTORNO", 8         ; [TAMAÑO] arrastrar solo el contorno
         dw 0
+        db 3, "486", 11             ; [BARRA] el escritorio de Hispa-486 (barra.inc)
+        dw 0
         db 3, "BAT", 9              ; [BATERÍA] (oculta, pruebas): /BATnn[C] fija el nivel
         dw 0
         db 5, "LENTO", 10           ; [TECLADO] (oculta, pruebas): como en un equipo lento
@@ -1951,7 +1958,7 @@ opciones:
 m_ayuda     db "Hispa Ventanas 0.3 - entorno gráfico de Hispa-DOS (etapa 3)", 13, 10
             db 13, 10
             db "VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA]", 13, 10
-            db "         [/DEMO] [/CONTORNO]", 13, 10
+            db "         [/DEMO] [/CONTORNO] [/486]", 13, 10
             db 13, 10
             db "  /1024 /800 /640  resolución VESA: 1024x768, 800x600 (la normal) o 640x480", 13, 10
             db "  /8 ... /32       bits por punto (lo normal: 8, es decir, 256 colores)", 13, 10
@@ -1959,6 +1966,7 @@ m_ayuda     db "Hispa Ventanas 0.3 - entorno gráfico de Hispa-DOS (etapa 3)", 1
             db "  /VGA             no usar VESA: VGA de 640x480 y 16 colores", 13, 10
             db "  /DEMO            solo las ventanas de muestra (Tab, flechas y Esc)", 13, 10
             db "  /CONTORNO        al mover o cambiar el tamaño, arrastrar solo el contorno", 13, 10
+            db "  /486             escritorio de Hispa-486: barra de tareas y menú Inicio", 13, 10
             db 13, 10
             db "Necesita HSPXMS.SYS (CONFIG.SYS) y HSPDPMI; con HSPRATON hay ratón.", 13, 10
             db "Dentro: doble clic en un icono del Centro de programas para abrirlo;", 13, 10
@@ -2013,6 +2021,7 @@ en_grafico  resb 1
 salir       resb 1                  ; 1 salir; 2 salir con un encargo al lanzador; 3 lo mismo, con el adiós
 op_demo     resb 1
 op_contorno resb 1                  ; [TAMAÑO] /CONTORNO
+op_486      resb 1                  ; [BARRA] 1: el escritorio de Hispa-486 (/486 o VENTANAS.INI)
 op_bat      resb 1                  ; [BATERÍA] % forzado para pruebas (/BATnn)
 op_batac    resb 1                  ; enchufada/cargando forzado (/BATnnC)
 op_bathay   resb 1                  ; 1: usar la batería forzada (no la BIOS)
@@ -2063,6 +2072,7 @@ alto_ini:
 %include "tamano.inc"               ; [TAMAÑO] tamaño, cursores, barras y rueda
 %include "contexto.inc"             ; [CONTEXTO] el botón derecho: menús contextuales
 %include "archapi.inc"              ; [ARCHIVOS] lo que pide el Administrador de archivos
+%include "barra.inc"                ; [BARRA] Hispa-486: barra de tareas y menú Inicio
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
@@ -2083,6 +2093,7 @@ pila_fin:
 %include "bsstam.inc"               ; [TAMAÑO]
 %include "bssctx.inc"               ; [CONTEXTO]
 %include "bssarch.inc"              ; [ARCHIVOS]
+%include "bssbarra.inc"             ; [BARRA]
 %ifdef CON_PROGRAMAS
 %define TAREAS_BSS                  ; [TAREAS] las variables del Administrador de tareas
 %include "tareas_api.inc"

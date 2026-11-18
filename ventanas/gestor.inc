@@ -309,6 +309,7 @@ orden_poner:
         jae .x
         mov [orden+eax*4], ebp
         inc dword [n_orden]
+        call bt_orden               ; [BARRA] la barra de tareas, encima de las ventanas
 .x:
         pop eax
         ret
@@ -364,6 +365,7 @@ ven_crear:
         add ebx, [esi+P_Y]
         mov [edi+V_X], eax
         mov [edi+V_Y], ebx
+        call bt_colocar             ; [BARRA] (Hispa-486) que no nazca detrás de la barra
         mov dword [edi+V_USO], 1
         mov ebp, edi
         mov [esp+28], ebp
@@ -721,11 +723,7 @@ ven_mostrar:
         mov [ebp+V_RAL], eax
         call ges_exponer_ven
         or dword [ebp+V_ESTADO], S_MAXIM
-        xor eax, eax
-        mov ebx, BARRA_H
-        mov ecx, [vid_ancho]
-        mov edx, [vid_alto]
-        sub edx, BARRA_H
+        call bt_area                ; [BARRA] el área de trabajo: la pantalla menos la barra
         call ven_mover
         jmp .x
 .minimizar:
@@ -1479,11 +1477,11 @@ ges_acotar:
         jle .b
         mov eax, edx
 .b:
-        cmp ebx, BARRA_H
+        cmp ebx, [area_y0]          ; [BARRA] (BARRA_H; en Hispa-486, 0)
         jge .c
-        mov ebx, BARRA_H
+        mov ebx, [area_y0]
 .c:
-        mov edx, [vid_alto]
+        mov edx, [area_y1]          ; [BARRA] (vid_alto; en Hispa-486, menos la barra)
         sub edx, BORDE + TIT_H
         cmp ebx, edx
         jle .d
@@ -1560,9 +1558,9 @@ ges_raton_mueve:
         test byte [arr_bordes], 4
         jz .t4
         mov edi, ebx
-        cmp edi, BARRA_H
+        cmp edi, [area_y0]          ; [BARRA]
         jge .t3b
-        mov edi, BARRA_H
+        mov edi, [area_y0]
 .t3b:
         mov eax, edx
         sub eax, [arr_min_al]

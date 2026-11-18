@@ -317,6 +317,11 @@ ini_tabla:
         dd k_espera, a_espera, 0, 3, T_MS250, s_teclado
         dd k_repet, a_repet, 0, 31, T_NUM, 0
         dd k_dist, a_dist, 0, 1, T_DIST, 0
+        ; [BARRA] el escritorio (386 o 486): no se cambia aquí (lo pone la
+        ; instalación de Hispa-486 y lo lee VENTANAS.COM, ventanas/barra.inc);
+        ; solo se conserva al guardar. Sin la clave, ni se escribe la sección
+ini_e_escr:
+        dd k_escritorio, a_escritorio, 386, 486, T_NUM, s_escritorio
         dd 0
 INI_E       equ 24
 ; los ajustes de fábrica, en el orden de las variables a_*
@@ -342,6 +347,8 @@ k_ctrlclic  db "CtrlClic", 0        ; [CONTEXTO] Ctrl+clic = botón derecho
 k_espera    db "Espera", 0
 k_repet     db "Repeticion", 0
 k_dist      db "Distribucion", 0
+s_escritorio db "[Escritorio]", 0
+k_escritorio db "Escritorio", 0     ; [BARRA] 486: barra de tareas y menú Inicio
 n_ini       db "VENTANAS.INI", 0
 
 ; ---- los dibujos del fondo ----
@@ -661,6 +668,7 @@ entrada:
         jmp .cl
 .cl2:
         call de_fabrica
+        mov dword [a_escritorio], -1    ; [BARRA] (sin la clave, no se escribe)
         call ini_leer
         call red_ini_leer           ; [RED] la configuración de RED.INI
         ; «Sorpresa»: al arrancar (residente) se sortea un tema nuevo
@@ -2550,6 +2558,11 @@ ini_escribir:
 .e:
         cmp dword [ebx], 0
         je .fin
+        cmp ebx, ini_e_escr         ; [BARRA] el escritorio: solo si estaba
+        jne .e0
+        cmp dword [a_escritorio], 0
+        jl .sig
+.e0:
         mov esi, [ebx+20]
         test esi, esi
         jz .s
@@ -4486,6 +4499,7 @@ a_ctrlclic  resd 1                  ; [CONTEXTO] Ctrl+clic = botón derecho (0/1
 a_espera    resd 1                  ; teclado: 0-3 (-1: no se toca)
 a_repet     resd 1                  ; 0-31, 31 lo más rápido (-1: no se toca)
 a_dist      resd 1                  ; 1 española, 0 estadounidense (-1: no se toca)
+a_escritorio resd 1                 ; [BARRA] 386 o 486 (-1: no está en VENTANAS.INI); no es de «fabrica»
 ; [RED] el modelo del apartado «Red» (RED.INI, aparte de VENTANAS.INI)
 a_dhcp      resd 1                  ; 1 DHCP (automática), 0 IP a mano
 ; el salvapantallas
