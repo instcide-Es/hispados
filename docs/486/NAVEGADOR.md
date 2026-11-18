@@ -360,8 +360,10 @@ JS /E "print(2 ** 10)"
   (`w32/navega/dom.js`, el DOM y lo de window, hecho en JavaScript sobre lo
   que da el C), luego sus guiones en orden: los de dentro, los de fuera (se
   piden a la red sin parar la ventana; la página ya se ve mientras), los
-  `defer` y `async`, y después `DOMContentLoaded` y `load`. Los
-  `<noscript>` no se enseñan. Al irse de la página, el motor se suelta entero
+  `defer` y `async`, y después `DOMContentLoaded` y `load`. Lo de
+  dentro de los `<noscript>` no existe (ni se ve ni sus `<input>` van en el
+  formulario, como en los navegadores de verdad; ClicGest pone ahí
+  `_cg_sin_js` para preguntar él); con `JavaScript=NO`, sí cuenta. Al irse de la página, el motor se suelta entero
   y su memoria vuelve al sistema.
 - Lo compilado se guarda mientras el Navegador está abierto (450 KB como
   mucho): el preludio, una vez; los guiones de fuera, por su dirección (con su
