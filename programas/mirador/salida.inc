@@ -49,7 +49,7 @@ t_impreso   db "La imagen se ha enviado a la impresora.", 0
 ; [FONDO] poner como fondo de escritorio
 t_mifondo   db "MIFONDO.BMP", 0
 t_fondo_ok  db "La imagen se ha puesto de fondo del escritorio.", 10
-            db "Cómo se pone (ajustada, centrada o en mosaico) y", 10
+            db "Cómo se pone (ajustada, centrada, en mosaico...) y", 10
             db "«Sin fondo»: en Configuración, apartado Escritorio.", 0
 t_fondo_16  db "La imagen queda apuntada, pero en la VGA de 16 colores", 10
             db "no se ve: saldrá de fondo con 256 colores o más.", 0

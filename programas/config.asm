@@ -18,7 +18,8 @@
 ;    Fecha y hora   las enseña y las cambia (INT 21h, 2Ah-2Dh)
 ;    Sistema        versión, procesador, memoria, pantalla, ratón, sonido
 ;    Escritorio     [FONDO] la imagen de fondo del escritorio: elegirla (un
-;                   BMP), cómo se pone (ajustada, centrada o en mosaico) y
+;                   BMP), cómo se pone (ajustada, centrada, en mosaico,
+;                   estirada o rellenando) y
 ;                   «Sin fondo» (ventanas/fondo.inc; la entrada esc_imagen)
 ;  [MEZCLADOR] Mientras está en marcha (siempre, con la ventana oculta),
 ;  cada segundo mira si el mezclador de HSPSND ha cambiado y, si es así, lo
@@ -70,6 +71,7 @@ ESC_NOMBRE  equ 157                 ; la imagen puesta
 ESC_ELEGIR  equ 158                 ; «Elegir imagen...»
 ESC_SIN     equ 119                 ; «Sin fondo»
 ESC_AJ      equ 127                 ; las opciones: 127 ajustada, 128 centrada, 129 mosaico
+ESC_AJ2     equ 138                 ; y 138 estirada, 139 rellenar (del 130 al 136 son de Sonido)
 ESC_NOTA    equ 137                 ; lo que hay que saber (o lo que pasa)
 SEC_ESCRITORIO equ 7                ; el apartado
 ; la configuración IP compartida que da HSPRED (INT 2Fh DA00h; ver drivers/
@@ -312,7 +314,9 @@ pl_escritorio:
         PLANTILLA BOT, t_e_aj0, HT | BS_OPCION, PX, 156, 380, 20, ESC_AJ
         PLANTILLA BOT, t_e_aj1, HT | BS_OPCION, PX, 180, 380, 20, ESC_AJ + 1
         PLANTILLA BOT, t_e_aj2, HT | BS_OPCION, PX, 204, 380, 20, ESC_AJ + 2
-        PLANTILLA EST, 0, H, PX, 240, PAN_AN, 84, ESC_NOTA
+        PLANTILLA BOT, t_e_aj3, HT | BS_OPCION, PX, 228, 380, 20, ESC_AJ2
+        PLANTILLA BOT, t_e_aj4, HT | BS_OPCION, PX, 252, 380, 20, ESC_AJ2 + 1
+        PLANTILLA EST, 0, H, PX, 280, PAN_AN, 50, ESC_NOTA
         dd 0
 
 listas      dd pl_fijos, pl_pantalla, pl_raton, pl_teclado, pl_tecl_si, pl_tecl_no
@@ -374,7 +378,9 @@ k_dist      db "Distribucion", 0
 s_escritorio db "[Escritorio]", 0
 k_fondo     db "Fondo=", 0          ; [FONDO] la imagen de fondo y cómo se pone:
 k_ajuste    db "Ajuste=", 0         ; las lleva VENTANAS.COM; aquí se escriben
-aj_nombres  dd n_aj0, n_aj1, n_aj2
+aj_nombres  dd n_aj0, n_aj1, n_aj2, n_aj3, n_aj4
+n_aj3       db "estirada", 0
+n_aj4       db "rellenar", 0
 n_aj0       db "ajustada", 0
 n_aj1       db "centrada", 0
 n_aj2       db "mosaico", 0
@@ -477,6 +483,8 @@ t_e_como    db "Cómo se pone:", 0
 t_e_aj0     db "Ajustada a la pantalla (con su proporción)", 0
 t_e_aj1     db "Centrada (a su tamaño)", 0
 t_e_aj2     db "En mosaico (repetida)", 0
+t_e_aj3     db "Estirada a toda la pantalla (se deforma)", 0
+t_e_aj4     db "Rellenar la pantalla (recorta lo que sobra)", 0
 t_e_nota    db "Vale un BMP sin comprimir, de 8 o de 24 bits.", 10
             db "Las fotos en JPEG, PNG o GIF se ponen desde", 10
             db "Mirador: «Poner como fondo de escritorio».", 0
@@ -1062,11 +1070,15 @@ ordenes:
         call esc_poner
         jmp .hecho
 .e2:
-        cmp ecx, ESC_AJ
+        lea ebx, [ecx-ESC_AJ]       ; ajustada, centrada, mosaico
+        cmp ebx, 2
+        jbe .e2a
+        lea ebx, [ecx-ESC_AJ2+3]    ; estirada, rellenar
+        cmp ebx, 3
         jb .e3
-        cmp ecx, ESC_AJ + 2
+        cmp ebx, 4
         ja .e3
-        lea ebx, [ecx-ESC_AJ]
+.e2a:
         xor eax, eax
         HV esc_imagen
         cmp eax, ebx                ; (la que ya estaba)
@@ -2551,12 +2563,16 @@ esc_refrescar:
         xor edi, edi
 .o:
         lea ecx, [edi+ESC_AJ]
+        cmp edi, 3
+        jb .o1
+        lea ecx, [edi+ESC_AJ2-3]
+.o1:
         xor edx, edx
         cmp edi, ebx
         sete dl
         call marca_poner
         inc edi
-        cmp edi, 3
+        cmp edi, 5
         jb .o
         mov esi, t_e_nota
         cmp ebp, 2                  ; hay imagen apuntada pero no se ve

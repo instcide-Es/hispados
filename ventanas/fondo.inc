@@ -9,8 +9,9 @@
 ;  Pedido de Carlos: «igual ya tenemos imagen para el fondo de escritorio de
 ;  486». Detrás de las ventanas, en vez del dibujo de 16x16 (el mosaico), se
 ;  puede poner una imagen: ajustada a la pantalla (conserva la proporción; lo
-;  que sobra se rellena con el color del escritorio), centrada (a su tamaño)
-;  o en mosaico (repetida). Vale para los dos escritorios (el de Hispa-386 y
+;  que sobra se rellena con el color del escritorio), centrada (a su tamaño),
+;  en mosaico (repetida), estirada (toda la pantalla, aunque se deforme) o
+;  rellenando (toda la pantalla sin deformar: lo que sobra queda fuera). Vale para los dos escritorios (el de Hispa-386 y
 ;  el de Hispa-486) en todos los modos de VESA; en la VGA de 16 colores no
 ;  hay imagen: queda el dibujo. Sin la clave en VENTANAS.INI no hay imagen
 ;  (Hispa-386, de serie); la imagen de Hispa-486 la trae puesta.
@@ -57,6 +58,8 @@
 FON_AJUSTADA equ 0                  ; a la pantalla, con su proporción
 FON_CENTRADA equ 1                  ; a su tamaño, en el centro
 FON_MOSAICO  equ 2                  ; repetida desde la esquina
+FON_ESTIRADA equ 3                  ; a toda la pantalla, aunque se deforme
+FON_RELLENAR equ 4                  ; a toda la pantalla, recortando lo que sobra
 FON_E_ABRIR  equ 1                  ; no se puede abrir o leer
 FON_E_FORMATO equ 2                 ; no es un BMP de 8 o 24 bits sin comprimir
 FON_E_MEMORIA equ 3                 ; no hay memoria extendida
@@ -66,6 +69,7 @@ FON_INI     equ BT_BUF              ; VENTANAS.INI, como mucho (el búfer de bar
 
 fon_k_fondo  db "fondo", 0
 fon_k_ajuste db "ajuste", 0
+fon_letras  db "a0c1m2e3r4"         ; «Ajuste=»: la primera letra (o el número)
 ; el difuminado ordenado (4x4)
 fon_bayer   db 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5
 
@@ -133,23 +137,20 @@ fon_iniciar:
         mov edi, fon_k_ajuste
         call fon_clave
         jc .salta
-        mov al, [edx]               ; ajustada, centrada o mosaico (o 0, 1, 2)
-        or al, 0x20
+        mov al, [edx]               ; ajustada, centrada, mosaico, estirada o
+        or al, 0x20                 ; rellenar (o 0 a 4)
         xor ah, ah
-        cmp al, 'a'
+        mov edi, fon_letras
+.ajb:
+        cmp al, [edi]
         je .aj
-        cmp al, '0'
+        cmp al, [edi+1]
         je .aj
+        add edi, 2
         inc ah
-        cmp al, 'c'
-        je .aj
-        cmp al, '1'
-        je .aj
-        inc ah
-        cmp al, 'm'
-        je .aj
-        cmp al, '2'
-        jne .salta
+        cmp ah, FON_RELLENAR
+        jbe .ajb
+        jmp .salta
 .aj:
         mov [fon_ajuste], ah
 .salta:
@@ -242,7 +243,7 @@ esc_imagen:
         pop esi
         mov al, [fon_ajuste]
         mov [fon_ajuste_ant], al
-        cmp edx, FON_MOSAICO
+        cmp edx, FON_RELLENAR
         jbe .a
         xor edx, edx
 .a:
@@ -715,6 +716,49 @@ fon_montar:
         mov [fon_rh], ebx
         cmp byte [fon_ajuste], FON_AJUSTADA
         je .aj
+        cmp byte [fon_ajuste], FON_ESTIRADA
+        je .est
+        cmp byte [fon_ajuste], FON_RELLENAR
+        jne .cm
+        ; rellenar: del original, el trozo del centro con la proporción de la
+        ; pantalla; y ese trozo, a toda la pantalla
+        mov ecx, eax
+        imul ecx, [vid_alto]
+        mov edx, ebx
+        imul edx, [vid_ancho]
+        cmp ecx, edx
+        jbe .ralta
+        mov eax, edx                ; más ancha: sobran los lados
+        xor edx, edx
+        div dword [vid_alto]
+        test eax, eax
+        jnz .r1
+        inc eax
+.r1:
+        mov [fon_rw], eax
+        mov ecx, [fon_san]
+        sub ecx, eax
+        shr ecx, 1
+        mov [fon_rx], ecx
+        jmp .est
+.ralta:
+        mov eax, ecx                ; más alta: sobra por arriba y por abajo
+        xor edx, edx
+        div dword [vid_ancho]
+        test eax, eax
+        jnz .r2
+        inc eax
+.r2:
+        mov [fon_rh], eax
+        mov ecx, [fon_sal]
+        sub ecx, eax
+        shr ecx, 1
+        mov [fon_ry], ecx
+.est:
+        mov eax, [vid_ancho]        ; (y estirada: todo el original)
+        mov ebx, [vid_alto]
+        jmp .dims
+.cm:
         ; centrada y mosaico: a su tamaño; lo que no cabe, fuera (centrada:
         ; por los dos lados; mosaico: por la derecha y por abajo)
         cmp eax, [vid_ancho]

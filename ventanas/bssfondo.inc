@@ -30,7 +30,7 @@ fon_sr      resd 1                  ; sumas de rojo, verde y azul de una caja
 fon_sg      resd 1
 fon_sb      resd 1
 fon_hay     resb 1                  ; 1: hay imagen (se pinta ella y no el mosaico)
-fon_ajuste  resb 1                  ; FON_AJUSTADA, FON_CENTRADA o FON_MOSAICO
+fon_ajuste  resb 1                  ; FON_AJUSTADA, FON_CENTRADA, FON_MOSAICO...
 fon_ajuste_ant resb 1
 fon_arriba  resb 1                  ; el BMP va de arriba abajo
 fon_cbarras resb 1                  ; el color de lo que la imagen no tapa

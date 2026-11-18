@@ -15,7 +15,8 @@
 #     Configuración › Escritorio: «En mosaico», «Centrada» (con el color del
 #     escritorio alrededor), «Sin fondo» (vuelve el dibujo), «Elegir
 #     imagen...» (TESELA.BMP, con el diálogo de abrir), un archivo que no es
-#     una imagen (lo dice y se queda la que había) y «Ajustada» (ampliada).
+#     una imagen (lo dice y se queda la que había), «Ajustada» (ampliada),
+#     «Estirada» (toda la pantalla, deformada) y «Rellenar» (recortando).
 #     Al salir, VENTANAS.INI lleva «Fondo=» y «Ajuste=», y sigue «Escritorio=486».
 #  2.ª sesión, 640x480 en 256 colores, el escritorio de Hispa-386 con
 #     «Fondo = ANCHA.BMP» (ajustada: reducida a 640x38, en el centro): el
@@ -128,7 +129,8 @@ P=$T/PRUEBA.BMP; A=$T/ANCHA.BMP; TE=$T/TESELA.BMP
 # La barra de tareas: de y = 572 a 599. El Bloc de notas nace en 150,90.
 # Configuración: en 124,112 (su zona, en 126,137): el apartado «Escritorio»
 # (el octavo), en 196,400; «Elegir imagen...», en 353,240; «Sin fondo», en
-# 493,240; las opciones (ajustada, centrada, mosaico), en 286,303 / 327 / 351.
+# 493,240; las opciones (ajustada, centrada, mosaico, estirada, rellenar), en
+# 286,303 / 327 / 351 / 375 / 399.
 pon_ini '; prueba del fondo' '[Escritorio]' 'Escritorio=486' 'Fondo=PRUEBA.BMP'
 config() { tecla ctrl-esc; sleep 0.8; tecla c; sleep 0.4; tecla ret; sleep 3; }
 { sleep 6; send 'VENTANAS' 11
@@ -146,9 +148,11 @@ config() { tecla ctrl-esc; sleep 0.8; tecla c; sleep 0.4; tecla ret; sleep 3; }
   tecla esc; sleep 1.5; shot b7                     # TESELA.BMP, centrada
   config; clic 353 240; sleep 2; tecla c o n f i g dot s y s; sleep 0.4; tecla ret; sleep 2.5; ir 700 540; shot b8   # no es una imagen
   tecla ret; sleep 1; shot b0; clic 286 303; sleep 2; tecla esc; sleep 1.5; ir 700 540; shot b9    # «Ajustada»
+  config; clic 286 375; sleep 2; ir 700 540; shot e0; tecla esc; sleep 1.5; shot e1    # «Estirada»
+  config; clic 286 399; sleep 2; tecla esc; sleep 1.5; ir 700 540; shot e2    # «Rellenar»
   tecla ctrl-esc; sleep 0.8; tecla up; sleep 0.4; tecla ret; sleep 2; tecla ret; sleep 4
   send 'ECHO TRAS-SALIR' 2
-  mon quit; } | TMAX=220 run
+  mon quit; } | TMAX=270 run
 echo "-- el fondo, ajustado a la pantalla, detrás de la barra de tareas --"
 chk $T/a1.ppm tam 800 600 bmp $P 0 0 800 600 60 40 200 120 bmp $P 0 0 800 600 520 330 220 200 \
   bmp $P 0 0 800 600 0 0 800 4 bmp $P 0 0 800 600 0 560 800 12 \
@@ -165,7 +169,8 @@ echo "-- Configuración › Escritorio --"
 chk $T/b1.ppm titulo 124 110 activa "Configuración" texto 278 145 4 8 negrita "Escritorio" \
   busca 270 170 290 186 0 8 "Imagen de fondo del escritorio:" texto 278 197 0 8 negrita "PRUEBA.BMP" \
   busca 290 290 320 310 0 8 "Ajustada a la pantalla (con su proporción)" busca 290 314 320 334 0 8 "Centrada (a su tamaño)" \
-  busca 290 338 320 358 0 8 "En mosaico (repetida)" busca 270 370 290 390 0 8 "Vale un BMP sin comprimir, de 8 o de 24 bits."
+  busca 290 338 320 358 0 8 "En mosaico (repetida)" busca 290 362 320 382 0 8 "Estirada a toda la pantalla (se deforma)" \
+  busca 290 386 320 406 0 8 "Rellenar la pantalla (recorta lo que sobra)" busca 270 405 290 425 0 8 "Vale un BMP sin comprimir, de 8 o de 24 bits."
 chk $T/b2.ppm bmpmos $P 690 20 100 500 bmpmos $P 10 20 100 500 bmpmos $P 130 520 500 50
 chk $T/b3.ppm bmp $P 240 180 320 240 240 180 320 240 px 100 100 2 "el color del escritorio, a la izquierda" \
   px 700 300 2 "el color del escritorio, a la derecha" px 400 100 2 "arriba" px 400 500 2 "y abajo" \
@@ -180,11 +185,18 @@ chk $T/b8.ppm busca 100 150 700 450 0 8 "La imagen tiene que ser un BMP sin comp
 chk $T/b0.ppm texto 278 197 0 8 negrita "A:\\tesela.bmp"
 chk $T/b9.ppm bmp $TE 0 33 800 533 20 60 480 440 bmpmedia $TE 0 33 800 533 560 100 200 400 12 \
   px 400 10 2 "el color del escritorio, arriba" px 400 568 2 "y abajo"
+echo "-- «Estirada» (toda la pantalla, deformada) y «Rellenar» (toda la pantalla, recortando) --"
+# TESELA.BMP es de 48x32. Estirada: a 800x600. Rellenar: sus 42 columnas del
+# centro (de la 3 a la 44), a 800x600: cada cuadro de 8x8 queda de 152x150
+chk $T/e0.ppm busca 270 405 290 425 0 8 "Vale un BMP sin comprimir, de 8 o de 24 bits."
+chk $T/e1.ppm bmp $TE 0 0 800 600 20 20 500 540 bmpmedia $TE 0 0 800 600 560 20 220 540 12 bmp $TE 0 0 800 600 0 0 530 8
+chk $T/e2.ppm bmp $TE -57 0 914 600 110 20 120 110 bmp $TE -57 0 914 600 260 170 120 110 bmp $TE -57 0 914 600 420 320 110 110 \
+  bmp $TE -57 0 914 600 2 2 80 140 bmpmedia $TE -57 0 914 600 580 20 200 540 12
 check "Hispa Ventanas ha terminado."
 if sed -n '/Hispa Ventanas ha terminado/,$p' $T/log.txt | grep -qF 'TRAS-SALIR'; then ok "después, el intérprete de órdenes sigue"; else ko "sin el intérprete tras salir"; fi
 ini
-tiene 'Escritorio=486'; tiene 'Fondo=A:\\tesela.bmp'; tiene 'Ajuste=ajustada'
-guarda '[ab][0-9]'
+tiene 'Escritorio=486'; tiene 'Fondo=A:\\tesela.bmp'; tiene 'Ajuste=rellenar'
+guarda '[abe][0-9]'
 
 # ---- 2.ª: 640x480 en 256 colores, el escritorio de Hispa-386 ----
 # ANCHA.BMP (1000x60) ajustada: 640x38, en 0,221. El Centro de programas
@@ -221,7 +233,7 @@ RX=320; RY=240
 echo "-- VGA de 16 colores: no hay imagen, queda el dibujo; la clave no se pierde --"
 chk $T/v1.ppm tam 640 480 px 320 452 10 "el filete de la barra de tareas" texto 26 458 8 4 negrita "Inicio" \
   trama 0 0 640 440
-chk $T/v2.ppm texto 198 136 0 8 negrita "PRUEBA.BMP" busca 180 300 220 330 0 8 "En la VGA de 16 colores no se ve la imagen:"
+chk $T/v2.ppm texto 198 136 0 8 negrita "PRUEBA.BMP" busca 180 340 220 370 0 8 "En la VGA de 16 colores no se ve la imagen:"
 chk $T/v3.ppm trama 0 0 640 440
 check "Hispa Ventanas ha terminado."
 ini
