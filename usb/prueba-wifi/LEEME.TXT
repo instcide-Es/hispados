@@ -110,8 +110,8 @@ QUE HACE EXACTAMENTE (por si hay curiosidad)
 --------------------------------------------
 PRUWIFI:  HSPWIFI /PANTALLA /REG:C:\WIFI.LOG   (el controlador, con registro)
           WIFI REDES                           (busca redes)
-PASO2:    WIFI, CONFRED, PING 8.8.8.8 y hispados.es, DESCARGAR un archivo pequeno y
-          WIFI REGISTRO (guarda el registro del controlador).
+PASO2:    WIFI, CONFRED, PING 8.8.8.8 y hispados.es, DESCARGAR un archivo
+          pequeno y WIFI REGISTRO (guarda el registro del controlador).
 La contrasena no se guarda en ningun sitio; en RED.INI queda una clave
 derivada que solo vale para esa red. Para borrarla: WIFI OLVIDAR.
 BCM43XX.FW es el microcodigo de la tarjeta, de Broadcom (su licencia, en
