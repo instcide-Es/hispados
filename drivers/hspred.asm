@@ -2,7 +2,8 @@
 ;  HSPRED.COM - controlador de red de Hispa-DOS (residente, «packet driver»)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Uso:  HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/U] [/?]  (en AUTOEXEC.BAT; vale LH)
+;  Uso:  HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/DEPURA[:archivo]] [/U] [/?]
+;        (en AUTOEXEC.BAT; vale LH)
 ;        /INT:xx  vector del packet driver, en hexadecimal (60 a 80); si no
 ;                 se dice, el primero libre desde el 60h (el 67h, el de la
 ;                 memoria expandida, nunca)
@@ -14,6 +15,14 @@
 ;        /USB     usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque
 ;                 haya una tarjeta PCI de las que se saben usar
 ;        /U       descargarlo de la memoria (si ningún programa lo usa)
+;        /DEPURA[:archivo]  lo que HSPRED escribe en la pantalla se añade
+;                 además a un archivo (HSPRED.LOG si no se dice otro), y la
+;                 puesta en marcha de la tarjeta se cuenta paso a paso (la
+;                 Yukon). Con /INFO, para mandar el informe a quien depura.
+;        /MEMORIA, /PUERTOS  (Yukon) los registros, por memoria o por los
+;                 puertos, sin probar cuál contesta
+;        /SONDEO  (Yukon) sin IRQ: mirar la tarjeta en cada tic del reloj
+;                 (18 veces por segundo). Por si la interrupción no llega.
 ;
 ;  Interfaz: la especificación pública de «packet drivers» de FTP Software
 ;  (versión 1.09), la que usan mTCP, WATTCP, Arachne y muchos más. El vector
@@ -53,6 +62,9 @@
 ;    ni Hyper-V): ver docs/RED.md, «En una máquina virtual».
 ;    Su parte residente va en secciones «de quita y pon» (ver más abajo): la
 ;    de la tarjeta que no está no se queda en la memoria.
+;   - Marvell Yukon 2 «Optima» (88E8059, 11AB:4381): la del HP Mini 5103.
+;     A partir de sky2 de Linux; QEMU no la emula (ver su sección, .yukon).
+;     También de quita y pon.
 ;  Y, si no hay ninguna de ésas, un adaptador USB-Ethernet con la clase
 ;  estándar CDC-ECM, que lleva HSPUSB.SYS (lib/usb_red.inc): HSPRED lo
 ;  encuentra por INT 2Fh AX=DB00h y es una tarjeta más, también de quita y
@@ -93,7 +105,8 @@
         section .pcnet follows=.text align=1
         section .tulip follows=.pcnet vfollows=.text align=1 valign=1
         section .usb follows=.tulip vfollows=.text align=1 valign=1
-        section .init follows=.usb
+        section .yukon follows=.usb vfollows=.text align=1 valign=1
+        section .init follows=.yukon
         section .text
 
 NH          equ 8                   ; manejadores (tipos de paquete)
@@ -108,6 +121,7 @@ C_8168      equ 4
 C_PCNET     equ 5
 C_TULIP     equ 6
 C_USB       equ 7                   ; adaptador USB con CDC-ECM, por HSPUSB
+C_YUKON     equ 8                   ; Marvell Yukon 2 Optima (88E8059)
 
 ; configuración IP compartida (cfg, 30 octetos)
 CFG_FLAGS   equ 0                   ; bit 0 válida, bit 1 por DHCP
@@ -171,6 +185,23 @@ TU_SR       equ 0x00000002
 ; trama recibida) y RU (7: la tarjeta se ha quedado sin descriptores)
 TU_CSR7     equ 0x000180C0
 
+; Yukon 2: los tres anillos de elementos de 8 octetos tienen que empezar en
+; una página (4 KB): 64 elementos de estado, 16 de recepción (4 búferes: el
+; elemento i lleva el búfer i & 3) y 16 de envío (un búfer). dma_seg queda
+; una página por debajo del primer anillo, y los cinco búferes los reparte
+; yk_layout por los huecos: el que hay entre lo residente y el primer anillo
+; (sin usar hasta ahora: hasta 4 KB de relleno), los de detrás de los anillos
+; y, si no caben, detrás del último. Ocupa de 9,6 a 13,6 KB (eran 10 a 14).
+YK_ST       equ 0x1000
+YK_NST      equ 64
+YK_RX       equ 0x2000
+YK_NRX      equ 16
+YK_TX       equ 0x3000
+YK_NTX      equ 16
+YK_BUF      equ 1520                ; cada búfer (múltiplo de 16)
+YK_SIZE     equ 0x2800              ; lo que se pide (con LH; luego se recorta)
+YK_RXLEN    equ 1520                ; lo que cabe en cada búfer de recepción
+
 start:
         jmp init
 
@@ -205,6 +236,7 @@ dma_own     dw 0                    ; bloque aparte (cargado con LH) o 0
 dma_phys    dd 0                    ; dirección física de dma_seg:0
 res_paras   dw 0                    ; tamaño residente (párrafos, con el PSP)
 dma_bytes   dw 0                    ; tamaño de los búferes de DMA
+dma_z0      dw 0                    ; dónde empiezan (dentro de dma_seg)
 stats:
 st_pin      dd 0
 st_pout     dd 0
@@ -1943,7 +1975,7 @@ go_resident:
         mov cx, [dma_bytes]
         jcxz .nz
         mov es, [dma_seg]
-        xor di, di
+        mov di, [dma_z0]
         xor al, al
         rep stosb
 .nz:
@@ -2605,6 +2637,680 @@ us_end:
 US_LEN      equ us_end - us_base
 
 ; =============================================================================
+;  Marvell Yukon 2 «Optima» (88E8059, 11AB:4381): la tarjeta de cable del HP
+;  Mini 5103. Sección de quita y pon (se ensambla para ov_base; yk_init la
+;  copia allí): a las demás tarjetas no les cuesta ni un octeto residente.
+;
+;  Marvell no publicó la documentación de esta familia: los registros y el
+;  orden de las operaciones salen de leer el controlador sky2 de Linux
+;  (drivers/net/ethernet/marvell/sky2.c y sky2.h, GPL-2.0); el código es
+;  propio. QEMU no la emula: se prueba con un simulador del chip
+;  (tests/yukon_sim.py) y en el equipo de verdad. Ver docs/RED.md.
+;
+;  Registros (16 KB, BAR0, en memoria): por memoria con el modo «irreal»
+;  (e1_flat, como la e1000) o, si no se puede (modo V86), por los puertos
+;  (BAR de E/S, 256 puertos): los 128 primeros son el bloque 0 y los otros
+;  128 enseñan el bloque de 128 octetos que diga el registro RAP (puerto 0).
+;  El MAC («GMAC») está en 2800h y el PHY se lee por él (SMI).
+;
+;  Tres anillos de «elementos de lista» de 8 octetos (dirección, longitud,
+;  control y código; el bit 7 del código dice que el elemento vale):
+;   - recepción: cada elemento es un búfer libre; se le dice a la tarjeta
+;     hasta dónde hay (índice «put» de su unidad de precarga);
+;   - envío: lo mismo con las tramas que salen;
+;   - estado: lo escribe la tarjeta (una trama recibida con su longitud y su
+;     estado, hasta dónde ha enviado...) y la interrupción los va leyendo.
+; =============================================================================
+        section .yukon
+yk_base:
+
+%macro yw8 2
+        dw (%1) | 0x4000
+        db %2
+%endmacro
+%macro yw16 2
+        dw (%1) | 0x8000
+        dw %2
+%endmacro
+%macro yw32 2
+        dw (%1) | 0xC000
+        dd %2
+%endmacro
+
+; ---- lo que /INFO lee del residente (yk_diag a yk_diag_end) ----
+yk_diag:
+yk_chip     db 0                    ; B2_CHIP_ID (BCh = Optima)
+yk_rev      db 0                    ; revisión del chip
+yk_lnk      db 0                    ; el PHY dice que hay enlace
+yk_spd      db 0                    ; 1 = 10, 2 = 100, 3 = 1000 Mbit/s
+yk_up       db 0                    ; el MAC está enviando y recibiendo
+yk_run      db 0                    ; anillos en marcha (yk_start)
+yk_rx_nxt   db 0                    ; búfer de la próxima trama (0 a 3)
+yk_poll     db 0                    ; /SONDEO: sin IRQ, desde el reloj
+yk_st_i     dw 0                    ; siguiente elemento del anillo de estado
+yk_rx_put   dw 0                    ; siguiente elemento libre de recepción
+yk_tx_prd   dw 0                    ; siguiente elemento libre de envío
+yk_txdn     dw 0                    ; hasta dónde dice la tarjeta que ha enviado
+yk_txto     dw 0                    ; envíos que la tarjeta no ha confirmado
+yk_phst     dw 0                    ; el último registro 17 del PHY
+yk_irqs     dd 0                    ; interrupciones atendidas
+yk_stle     dd 0                    ; elementos de estado tratados
+yk_lastis   dd 0                    ; la última causa de interrupción
+yk_lastrx   dd 0                    ; el último estado de recepción del MAC
+yk_diag_end:
+YK_DIAG_LEN equ yk_diag_end - yk_diag
+
+yk_bufs     dw 0, 0, 0, 0               ; (los pone yk_layout)
+yk_txb      dw 0
+
+; ---- registros ----
+; DX = registro -> CF = 0: DX = su puerto (con RAP ya puesto); CF = 1: EBX =
+; su dirección (registros en memoria; FS plano). Interrupciones cerradas.
+yk_ea:
+        cmp byte [cs:e_io], 0
+        je .m
+        push ax
+        mov ax, dx
+        mov dx, [cs:iob]
+        cmp ax, 0x80
+        jb .b0
+        push ax
+        shr ax, 7
+        out dx, al                  ; RAP: el bloque de 128 octetos
+        pop ax
+        and ax, 0x7F
+        or al, 0x80
+.b0:
+        add dx, ax
+        pop ax
+        clc
+        ret
+.m:
+        xor bx, bx                  ; (por si el receptor de un programa ha
+        mov fs, bx                  ; tocado FS: la base, a cero otra vez)
+        movzx ebx, dx
+        add ebx, [cs:mmio]
+        stc
+        ret
+
+; DX = registro -> AL / AX / EAX. Conservan todo lo demás.
+yk_r8:
+        push ebx
+        push dx
+        pushf
+        cli
+        call yk_ea
+        jc .m
+        in al, dx
+        jmp short yk_x
+.m:
+        mov al, [fs:ebx]
+yk_x:
+        popf
+        pop dx
+        pop ebx
+        ret
+yk_r16:
+        push ebx
+        push dx
+        pushf
+        cli
+        call yk_ea
+        jc .m
+        in ax, dx
+        jmp short yk_x
+.m:
+        mov ax, [fs:ebx]
+        jmp short yk_x
+yk_r32:
+        push ebx
+        push dx
+        pushf
+        cli
+        call yk_ea
+        jc .m
+        in eax, dx
+        jmp short yk_x
+.m:
+        mov eax, [fs:ebx]
+        jmp short yk_x
+; DX = registro, AL / AX / EAX = valor. Conservan todo.
+yk_w8:
+        push ebx
+        push dx
+        pushf
+        cli
+        call yk_ea
+        jc .m
+        out dx, al
+        jmp short yk_x
+.m:
+        mov [fs:ebx], al
+        jmp short yk_x
+yk_w16:
+        push ebx
+        push dx
+        pushf
+        cli
+        call yk_ea
+        jc .m
+        out dx, ax
+        jmp short yk_x
+.m:
+        mov [fs:ebx], ax
+        jmp short yk_x
+yk_w32:
+        push ebx
+        push dx
+        pushf
+        cli
+        call yk_ea
+        jc .m
+        out dx, eax
+        jmp short yk_x
+.m:
+        mov [fs:ebx], eax
+        jmp short yk_x
+
+; DS:SI = tabla de escrituras (yw8, yw16, yw32) acabada en un cero
+yk_tab:
+.l:
+        lodsw
+        test ax, ax
+        jz .r
+        mov dx, ax
+        and dh, 0x3F
+        test ah, 0x80
+        jnz .w
+        lodsb
+        call yk_w8
+        jmp .l
+.w:
+        test ah, 0x40
+        jnz .d
+        lodsw
+        call yk_w16
+        jmp .l
+.d:
+        lodsd
+        call yk_w32
+        jmp .l
+.r:
+        ret
+
+; ---- el PHY, por el MAC (SMI; el PHY es el 0) ----
+; BL = registro -> AX; CF = 1 (y AX = FFFFh) si no contesta
+yk_phy_r:
+        push cx
+        push dx
+        movzx ax, bl
+        shl ax, 6
+        or al, 0x20                 ; leer
+        mov dx, 0x2880              ; GM_SMI_CTRL
+        call yk_w16
+        mov cx, 5000
+.w:
+        call yk_r16
+        test al, 0x10               ; el dato ya está
+        jnz .ok
+        call io_wait
+        loop .w
+        mov ax, 0xFFFF
+        stc
+        jmp short .r
+.ok:
+        mov dl, 0x84                ; GM_SMI_DATA
+        call yk_r16
+        clc
+.r:
+        pop dx
+        pop cx
+        ret
+
+; BL = registro, AX = valor
+yk_phy_w:
+        push ax
+        push cx
+        push dx
+        mov dx, 0x2884
+        call yk_w16
+        movzx ax, bl
+        shl ax, 6
+        mov dl, 0x80
+        call yk_w16
+        mov cx, 5000
+.w:
+        call yk_r16
+        test al, 0x08               ; ocupado
+        jz .r
+        call io_wait
+        loop .w
+.r:
+        pop dx
+        pop cx
+        pop ax
+        ret
+
+; ---- el enlace: lo que diga el PHY (registro 17), y el MAC detrás ----
+; Con las interrupciones cerradas (o desde la interrupción). No usa DS.
+yk_linkchk:
+        mov bl, 19
+        call yk_phy_r               ; las causas del PHY: se borran al leerlas
+        mov bl, 17
+        call yk_phy_r
+        jc .r
+        mov [cs:yk_phst], ax
+        mov bx, ax
+        and ax, 0x0C00              ; enlace, y velocidad y dúplex resueltos
+        cmp ax, 0x0C00
+        jne .dn
+        shr bh, 6                   ; 0 = 10, 1 = 100, 2 = 1000
+        inc bh
+        mov [cs:yk_spd], bh
+        mov byte [cs:yk_lnk], 1
+        cmp byte [cs:yk_run], 0     ; (antes de arrancar, solo se mira)
+        je .r
+        cmp byte [cs:yk_up], 0
+        jne .r
+        ; el hueco entre tramas, según la velocidad; y a enviar y recibir (la
+        ; velocidad y el dúplex los copia el MAC del PHY él solo)
+        mov dx, 0x2818              ; GM_SERIAL_MODE
+        call yk_r16
+        and al, 0xE0
+        or al, 0x18
+        cmp bh, 3
+        jne .ipg
+        or al, 0x06
+.ipg:
+        call yk_w16
+        mov dx, 0x2804              ; GM_GP_CTRL
+        call yk_r16
+        or ah, 0x18                 ; TX_ENA y RX_ENA
+        call yk_w16
+        mov dx, 0x0C3C              ; la luz del enlace
+        mov al, 0x16
+        call yk_w8
+        mov byte [cs:yk_up], 1
+.r:
+        ret
+.dn:
+        mov byte [cs:yk_lnk], 0
+        cmp byte [cs:yk_up], 0
+        je .r
+        mov dx, 0x2804
+        call yk_r16
+        and ah, 0xE7
+        call yk_w16
+        mov dx, 0x0C3C
+        mov al, 0x01
+        call yk_w8
+        mov byte [cs:yk_up], 0
+        ret
+
+; -> AL = enlace, AH = velocidad (para INT 2Fh AX=DA01h y /INFO)
+yk_link:
+        push fs
+        pushad
+        call e1_flat
+        pushf
+        cli
+        call yk_linkchk
+        popf
+        popad
+        pop fs
+        xor ax, ax
+        cmp byte [cs:yk_lnk], 0
+        je .r
+        mov ah, [cs:yk_spd]
+        inc ax
+.r:
+        ret
+
+; ---- enviar: DS:SI = paquete, CX = longitud -> CF ----
+yk_send:
+        push fs
+        call e1_flat
+        cmp byte [cs:yk_up], 0
+        jne .up
+        pushf
+        cli
+        call yk_linkchk             ; ¿acaba de llegar el enlace?
+        popf
+        cmp byte [cs:yk_up], 0
+        je .err
+.up:
+        mov es, [cs:dma_seg]
+        mov di, [cs:yk_txb]
+        mov bx, cx
+        rep movsb
+        mov cx, bx
+        cmp cx, 60
+        jae .l
+        mov cx, 60
+        sub cx, bx
+        xor al, al
+        rep stosb
+        mov cx, 60
+.l:
+        mov bx, [cs:yk_tx_prd]
+        shl bx, 3
+        mov eax, [cs:dma_phys]
+        movzx edx, word [cs:yk_txb]
+        add eax, edx
+        mov [es:bx+YK_TX], eax
+        mov [es:bx+YK_TX+4], cx
+        mov word [es:bx+YK_TX+6], 0xC180    ; fin de trama; OP_PACKET, vale
+        mov ax, [cs:yk_tx_prd]
+        inc ax
+        and ax, YK_NTX - 1
+        mov [cs:yk_tx_prd], ax
+        mov dx, 0x06E4              ; índice «put» del envío
+        call yk_w16
+        ; esperar a que la tarjeta la haya leído (el búfer es uno solo): su
+        ; índice «hecho» (Q_DONE) o el que da por el anillo de estado
+        mov cx, 60000
+.w:
+        mov dx, 0x06A4
+        call yk_r16
+        cmp ax, [cs:yk_tx_prd]
+        je .ok
+        mov ax, [cs:yk_txdn]
+        cmp ax, [cs:yk_tx_prd]
+        je .ok
+        call io_wait
+        loop .w
+        inc word [cs:yk_txto]       ; sin confirmar (se cuenta; /INFO lo dice)
+.ok:
+        pop fs
+        clc
+        ret
+.err:
+        pop fs
+        stc
+        ret
+
+; ---- interrupción ----
+yk_isr:
+        call e1_flat
+        mov dx, 0x001C              ; B0_Y2_SP_ISRC2: al leerlo, la tarjeta
+        call yk_r32                 ; deja de pedir interrupción
+        test eax, eax
+        jz .no
+        cmp eax, 0xFFFFFFFF
+        je .no
+        mov dx, 0x0024              ; B0_Y2_SP_EISR: las causas
+        call yk_r32
+        mov [yk_lastis], eax
+        inc dword [yk_irqs]
+        test al, 0x10               ; el PHY: ha cambiado el enlace
+        jz .np
+        call yk_linkchk
+.np:
+        call yk_drain
+        mov dx, 0x0028              ; B0_Y2_SP_LISR: puede volver a pedirla
+        call yk_r32
+        cmp byte [yk_poll], 1       ; con /SONDEO esto es el reloj (IRQ 0):
+        cmc                         ; siempre «no era mía», y sigue la BIOS
+        ret
+.no:
+        mov dx, 0x002C              ; B0_Y2_SP_ICR
+        mov eax, 2
+        call yk_w32
+        stc
+        ret
+
+; el anillo de estado, hasta donde ha escrito la tarjeta (STAT_PUT_IDX)
+yk_drain:
+        mov bp, 4 * YK_NST          ; (por si la tarjeta dijera disparates)
+.o:
+        mov dx, 0x0E9C
+        call yk_r16
+        cmp ax, [yk_st_i]
+        je .r
+        mov di, ax
+.l:
+        dec bp
+        jz .r
+        mov es, [dma_seg]
+        mov bx, [yk_st_i]
+        shl bx, 3
+        mov al, [es:bx+YK_ST+7]     ; código
+        test al, 0x80               ; ¿vale ya?
+        jz .clr
+        mov byte [es:bx+YK_ST+7], 0
+        mov dx, [yk_st_i]
+        inc dx
+        and dx, YK_NST - 1
+        mov [yk_st_i], dx
+        inc dword [yk_stle]
+        mov ecx, [es:bx+YK_ST]      ; estado
+        mov dx, [es:bx+YK_ST+4]     ; longitud
+        cmp al, 0xE0                ; OP_RXSTAT: una trama recibida
+        je .rx
+        cmp al, 0xE8                ; OP_TXINDEXLE: hasta dónde ha enviado
+        jne .n
+        and cx, 0x0FFF
+        mov [yk_txdn], cx
+        jmp short .n
+.rx:
+        mov [yk_lastrx], ecx
+        mov eax, ecx
+        mov cx, dx
+        push di
+        push bp
+        call yk_rx
+        pop bp
+        pop di
+.n:
+        cmp di, [yk_st_i]
+        jne .l
+.clr:
+        mov dx, 0x0E80              ; STAT_CTRL: interrupción de estado vista
+        mov eax, 0x10
+        call yk_w32
+        jmp .o
+.r:
+        ret
+
+; una trama recibida: EAX = estado del MAC, CX = longitud. Está en el búfer
+; yk_rx_nxt (la tarjeta los llena en el orden en que se le dieron), que
+; después se le vuelve a dar.
+yk_rx:
+        test eax, 0x187B            ; algún error (CRC, larga, corta, FIFO...)
+        jnz .bad
+        test ah, 0x01               ; recibida bien
+        jz .again
+        shr eax, 16
+        and ax, 0x7FFF
+        cmp ax, cx                  ; (si no coinciden, llegó cortada)
+        jne .bad
+        cmp cx, 14
+        jb .bad
+        cmp cx, 1518
+        ja .bad
+        movzx bx, byte [yk_rx_nxt]
+        add bx, bx
+        mov si, [yk_bufs+bx]
+        push si
+        push ds
+        mov di, rx_tmp
+        push ds
+        pop es
+        mov ds, [dma_seg]
+        push cx
+        mov cx, 7
+        rep movsw
+        pop cx
+        pop ds
+        call rx_find
+        pop si
+        jc .again
+        mov cx, [rx_len]
+        push ds
+        mov ds, [dma_seg]
+        rep movsb
+        pop ds
+        call rx_done
+        jmp short .again
+.bad:
+        inc dword [st_ein]
+.again:
+        call yk_rx_add
+        mov ax, [yk_rx_put]
+        mov dx, 0x0464              ; índice «put» de la recepción
+        jmp yk_w16
+
+; el búfer yk_rx_nxt, al siguiente elemento libre de recepción
+yk_rx_add:
+        mov es, [dma_seg]
+        movzx bx, byte [yk_rx_nxt]
+        add bx, bx
+        movzx eax, word [yk_bufs+bx]
+        add eax, [dma_phys]
+        mov bx, [yk_rx_put]
+        shl bx, 3
+        mov [es:bx+YK_RX], eax
+        mov dword [es:bx+YK_RX+4], 0xC1000000 | YK_RXLEN    ; OP_PACKET, vale
+        inc word [yk_rx_put]
+        and word [yk_rx_put], YK_NRX - 1
+        inc byte [yk_rx_nxt]
+        and byte [yk_rx_nxt], 3
+        ret
+
+; ---- arrancar: unidad de estado, colas, anillos e interrupciones ----
+; (el reinicio, el PHY y el MAC ya los ha dejado puestos yk_init)
+yk_start:
+        push fs
+        call e1_flat
+        mov si, yk_t_st1
+        call yk_tab
+        mov eax, [dma_phys]
+        add eax, YK_ST
+        mov dx, 0x0E88              ; STAT_LIST_ADDR_LO
+        call yk_w32
+        call yk_tab                 ; (yk_t_st2: sigue a la anterior)
+        mov eax, [dma_phys]
+        add eax, YK_TX
+        mov dx, 0x06D8              ; lista de envío
+        call yk_w32
+        call yk_tab                 ; (yk_t_st3)
+        mov eax, [dma_phys]
+        add eax, YK_RX
+        mov dx, 0x0458              ; lista de recepción
+        call yk_w32
+        call yk_tab                 ; (yk_t_st4)
+        xor ax, ax
+        mov [yk_st_i], ax
+        mov [yk_rx_put], ax
+        mov [yk_rx_nxt], al
+        mov [yk_up], al
+        mov cx, 4
+.b:
+        call yk_rx_add              ; los cuatro búferes, a la tarjeta
+        loop .b
+        mov ax, [yk_rx_put]
+        mov dx, 0x0464
+        call yk_w16
+        ; envío: el primer elemento dice la parte alta de las direcciones (0)
+        mov dword [es:YK_TX], 0
+        mov dword [es:YK_TX+4], 0xA1000000  ; OP_ADDR64, vale
+        mov word [yk_tx_prd], 1
+        mov word [yk_txdn], 1
+        mov byte [yk_run], 1
+        pushf
+        cli
+        mov eax, 0x40000010         ; B0_IMSK: el anillo de estado y el PHY
+        mov dx, 0x000C
+        call yk_w32
+        call yk_r32
+        mov dl, 0x28                ; B0_Y2_SP_LISR (por si se quedó tapada)
+        call yk_r32
+        call yk_linkchk
+        popf
+        pop fs
+        ret
+
+yk_t_st1:
+        yw32 0x0E80, 0x01           ; STAT_CTRL: reinicio de la unidad de estado
+        yw32 0x0E80, 0x02
+        dw 0
+yk_t_st2:
+        yw32 0x0E8C, 0              ; STAT_LIST_ADDR_HI
+        yw16 0x0E84, YK_NST - 1     ; STAT_LAST_IDX
+        yw16 0x0E98, 10             ; STAT_TX_IDX_TH
+        yw8  0x0EAC, 16             ; STAT_FIFO_WM
+        yw8  0x0EAD, 16             ; STAT_FIFO_ISR_WM
+        yw32 0x0EC0, 125 * 1000     ; temporizadores (reloj de 125 MHz): envío,
+        yw32 0x0ED0, 125 * 20       ; 1 ms; interrupción, 20 us; nivel, 100 us
+        yw32 0x0EB0, 125 * 100
+        yw32 0x0E80, 0x08           ; en marcha
+        yw8  0x0EC8, 0x04
+        yw8  0x0EB8, 0x04
+        yw8  0x0ED8, 0x04
+        ; cola de envío (Q_XA1, 680h): BMU y unidad de precarga (6D0h)
+        yw32 0x06B4, 0x0016         ; Q_CSR: fuera el reinicio
+        yw32 0x06B4, 0x0D28         ; en marcha
+        yw32 0x06B4, 0x0080         ; y su FIFO
+        yw32 0x06C0, 0x0600         ; Q_WM
+        yw32 0x06D0, 0x01           ; precarga: reinicio
+        yw32 0x06D0, 0x02
+        yw32 0x06DC, 0              ; dirección de la lista (alta)
+        dw 0
+yk_t_st3:
+        yw16 0x06D4, YK_NTX - 1     ; último índice
+        yw32 0x06D0, 0x08           ; en marcha
+        yw32 0x0C48, 0x01000000     ; sin quitar la etiqueta VLAN al recibir
+        yw32 0x0D48, 0x01000000     ; ni ponerla al enviar
+        ; cola de recepción (Q_R1, 400h) y su unidad de precarga (450h)
+        yw32 0x0434, 0x0016
+        yw32 0x0434, 0x0D28
+        yw32 0x0434, 0x0080
+        yw32 0x0440, 0x0600
+        yw32 0x0440, 0x0080         ; Q_WM para PCI Express
+        yw32 0x0450, 0x01
+        yw32 0x0450, 0x02
+        yw32 0x045C, 0
+        dw 0
+yk_t_st4:
+        yw16 0x0454, YK_NRX - 1
+        yw32 0x0450, 0x08
+        yw32 0x0434, 0x4000         ; sin el resumen RSS en el anillo de estado
+        yw16 0x0C54, (YK_RXLEN - 8) / 4     ; cortar las tramas más largas que
+        yw32 0x0C48, 0x08000000     ; el búfer (si no, la recepción se cuelga)
+        dw 0
+
+; ---- parar (antes de soltar la memoria): sin interrupciones ni DMA ----
+yk_stop:
+        push fs
+        pushad
+        call e1_flat
+        pushf
+        cli
+        mov si, yk_t_stop
+        call yk_tab
+        mov byte [yk_run], 0
+        mov byte [yk_up], 0
+        popf
+        popad
+        pop fs
+        ret
+yk_t_stop:
+        yw32 0x000C, 0              ; B0_IMSK
+        yw16 0x2804, 0x2012         ; GM_GP_CTRL: sin enviar ni recibir
+        yw8  0x0C3C, 0x01           ; luz del enlace
+        yw32 0x06B4, 0x0200         ; envío: parar
+        yw32 0x0434, 0x0011         ; recepción: BMU y FIFO en reinicio
+        yw32 0x0450, 0x01           ; y su precarga
+        yw32 0x06B4, 0x0011
+        yw32 0x06D0, 0x01
+        yw32 0x0E80, 0x01           ; unidad de estado
+        yw16 0x0004, 0x0100         ; B0_CTST: luz de «controlador cargado»
+        yw8  0x0004, 0x01           ; y el chip entero, en reinicio
+        dw 0
+yk_end:
+YK_LEN      equ yk_end - yk_base
+
+; =============================================================================
 ;  Instalación (se descarta)
 ; =============================================================================
         section .init
@@ -2615,8 +3321,8 @@ init:
         jnc .pok
         mov si, msg_usage
         call puts
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .pok:
         ; el banner (msg_title), salvo con /AUTO: así, en el AUTOEXEC.BAT de un
         ; equipo sin red, no se imprime nada (ni el banner ni el aviso); si hay
@@ -2630,8 +3336,8 @@ init:
         je .nh
         mov si, msg_usage
         call puts
-        mov ax, 0x4C00
-        int 0x21
+        mov al, 0
+        jmp salir
 .nh:
         ; ¿ya está?
         mov ax, 0xDA00
@@ -2657,19 +3363,34 @@ init:
         mov di, info
         mov cx, INFO_LEN
         rep movsb
+        mov [cs:res_seg], ds
         pop ds
+        cmp byte [card], C_YUKON
+        jne .ny
+        ; la Yukon: sus rutinas de registros a su sitio y lo que lleva
+        ; contado el residente (mismo programa: mismos desplazamientos)
+        call yk_place
+        push ds
+        mov ds, [res_seg]
+        mov si, yk_diag
+        mov di, yk_diag
+        mov cx, YK_DIAG_LEN
+        rep movsb
+        pop ds
+        mov byte [yk_live], 1
+.ny:
         mov ax, 0xDA01
         int 0x2F
         mov [i_link], ax
         mov word [name_ptr], card_name  ; (el del residente, copiado)
         call show_info
-        mov ax, 0x4C00
-        int 0x21
+        mov al, 0
+        jmp salir
 .alr:
         mov si, msg_already
         call puts
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .unl:
         mov ax, 0xDA02
         xor bl, bl
@@ -2683,19 +3404,19 @@ init:
         mov si, msg_noun2
 .ue1:
         call puts
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .ue:
         call puts
-        mov ax, 0x4C00
-        int 0x21
+        mov al, 0
+        jmp salir
 .new:
         cmp byte [o_unload], 0
         je .find
         mov si, msg_notres
         call puts
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .find:
         smsw ax
         and al, 1
@@ -2715,28 +3436,28 @@ init:
         call puts
         call list_net
 .silent:
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .found:
         call card_init
         jnc .cok
         call puts                   ; SI = el motivo
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .cok:
         ; vector del packet driver
         call pick_vector
         jnc .vok
         mov si, msg_novec
         call puts
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .vok:
         call dma_setup
         jnc .dok
         call puts
-        mov ax, 0x4C01
-        int 0x21
+        mov al, 1
+        jmp salir
 .dok:
         ; resumen
         mov ax, 0x00FF
@@ -2803,7 +3524,14 @@ init:
         mov es, [0x2C]
         mov ah, 0x49
         int 0x21
+        call log_flush
         jmp go_resident
+
+; salir con el código AL (antes, lo de /DEPURA al archivo)
+salir:
+        call log_flush
+        mov ah, 0x4C
+        int 0x21
 
 ; -----------------------------------------------------------------------------
 ;  Opciones
@@ -2841,6 +3569,14 @@ parse:
         je .auto
         cmp al, 'Q'                 ; /Q, lo mismo que /AUTO
         je .q
+        cmp al, 'D'                 ; /DEPURA[:archivo]
+        je .dbg
+        cmp al, 'M'                 ; /MEMORIA
+        je .ymem
+        cmp al, 'P'                 ; /PUERTOS
+        je .yio
+        cmp al, 'S'                 ; /SONDEO
+        je .poll
         cmp al, 'I'
         jne .bad
         lodsb
@@ -2908,6 +3644,65 @@ parse:
 .q:
         mov byte [o_auto], 1
         jmp .end
+.poll:
+        mov byte [o_poll], 1
+        jmp .word
+.ymem:
+        mov byte [o_ymode], 2
+        jmp .word
+.yio:
+        mov byte [o_ymode], 1
+.word:
+        ; el resto de la palabra (letras)
+        mov al, [si]
+        call upcase
+        cmp al, 'A'
+        jb .end
+        cmp al, 'Z'
+        ja .end
+        inc si
+        jmp .word
+.dbg:
+        ; (el registro va detrás del programa: si DOS le ha dado un bloque
+        ; justo, con LH por ejemplo, sin registro)
+        mov ax, log_buf + LOG_MAX + 1024 + 15
+        shr ax, 4
+        mov dx, cs
+        add ax, dx
+        cmp ax, [0x02]              ; el final de la memoria del programa
+        ja .dw
+        mov byte [o_dbg], 1
+.dw:
+        mov al, [si]
+        call upcase
+        cmp al, 'A'
+        jb .dn
+        cmp al, 'Z'
+        ja .dn
+        inc si
+        jmp .dw
+.dn:
+        cmp al, ':'
+        je .df
+        cmp al, '='
+        jne .end
+.df:
+        inc si
+        mov di, log_name
+        mov cx, 63
+.dc:
+        mov al, [si]
+        cmp al, ' '
+        jbe .de
+        cmp al, '/'
+        je .de
+        mov [di], al
+        inc di
+        inc si
+        loop .dc
+.de:
+        mov byte [di], 0
+        jmp .end
 .help:
         mov byte [o_help], 1
 .end:
@@ -2969,6 +3764,9 @@ o_unload    db 0
 o_auto      db 0
 o_usb       db 0
 o_int       db 0
+o_dbg       db 0                    ; /DEPURA
+o_ymode     db 0                    ; Yukon: 1 = /PUERTOS, 2 = /MEMORIA
+o_poll      db 0                    ; Yukon: /SONDEO
 v86         db 0
 i_link      dw 0
 
@@ -3045,9 +3843,13 @@ card_tab:
         db C_TULIP                  ; de red heredado»)
         dw 0x1011, 0x0019           ; DEC 21142/21143 (QEMU -device tulip)
         db C_TULIP
+        dw 0x11AB, 0x4381           ; Marvell Yukon 88E8059 «Optima» (HP Mini
+        db C_YUKON                  ; 5103)
+        dw 0x11AB, 0x4382           ; Marvell Yukon 88E8079 «Optima 2»
+        db C_YUKON
         dw 0
 card_names  dw 0, name_ne, name_8139, name_e1000, name_8168, name_pcnet
-            dw name_tulip, name_usb
+            dw name_tulip, name_usb, name_yukon
 ; los nombres: el de la tarjeta encontrada se copia a card_name (residente)
 name_ne     db "NE2000 PCI", 0
 name_8139   db "Realtek RTL8139", 0
@@ -3210,6 +4012,15 @@ card_init:
         mov di, 0x3C
         int 0x1A
         mov [irq], cl
+        ; Yukon con /SONDEO: sin IRQ. La «interrupción» es el reloj (IRQ 0,
+        ; INT 08h): yk_isr mira la tarjeta en cada tic y deja seguir a la BIOS
+        cmp byte [o_poll], 0
+        je .irq
+        cmp byte [card], C_YUKON
+        jne .irq
+        mov byte [irq], 0
+        jmp .bars
+.irq:
         mov si, msg_noirq
         cmp cl, 1
         jb .fail
@@ -3218,6 +4029,7 @@ card_init:
         cmp cl, 2
         je .fail
         ; puertos y memoria (BAR)
+.bars:
         call find_bars
         ; E/S, memoria y bus master
         mov bx, [pci_bdf]
@@ -3225,6 +4037,13 @@ card_init:
         mov di, 0x04
         int 0x1A
         or cx, 0x0007
+        cmp byte [card], C_YUKON    ; Yukon: y la interrupción INTx permitida
+        jne .cmd                    ; (bit 10 a cero), salvo con /SONDEO
+        and ch, 0xFB
+        cmp byte [o_poll], 0
+        je .cmd
+        or ch, 0x04
+.cmd:
         mov ax, 0xB10C
         int 0x1A
         mov al, [card]
@@ -3238,6 +4057,8 @@ card_init:
         je r68_init
         cmp al, C_PCNET
         je pn_init
+        cmp al, C_YUKON
+        je yk_init
         jmp tu_init
 .fail:
         stc
@@ -3895,6 +4716,851 @@ us_init:
 us_blk      dd 0
 us_vec      db 0
 
+; ---- Marvell Yukon 2 Optima (88E8059) ----
+; Lo que se hace una sola vez: reinicio y encendido del chip, el PHY (con la
+; autonegociación) y el MAC. Los anillos, en yk_start (residente).
+
+; la parte residente de la Yukon, a su sitio (yk_base): en el archivo va
+; detrás de las de la PCnet, la Tulip y el USB. Y la base de la GDT del modo
+; «irreal» (como en e1_init).
+yk_place:
+        push es
+        push ds
+        pop es
+        mov si, pn_end + TU_LEN + US_LEN
+        mov di, yk_base
+        mov cx, YK_LEN
+        rep movsb
+        pop es
+        xor eax, eax
+        mov ax, cs
+        shl eax, 4
+        add eax, gdt_tbl
+        mov [gdtr+2], eax
+        ret
+
+; con /DEPURA: «  [Yukon] texto XXXX» (SI = texto, AX = valor)
+yk_tr:
+        cmp byte [o_dbg], 0
+        je .r
+        push si
+        mov si, msg_yk_tr
+        call puts
+        pop si
+        call puts
+        call hex4
+        call crlf
+.r:
+        ret
+
+; -> AL = B2_CHIP_ID leído con el modo de acceso que diga e_io (antes, los
+; relojes del chip encendidos y fuera el reinicio, como hace sky2_init)
+yk_probe:
+        xor eax, eax
+        mov dx, 0x1C80              ; PCI_DEV_REG3 (por la ventana de la
+        call yk_w32                 ; configuración PCI, 1C00h)
+        mov dx, 0x0004              ; B0_CTST
+        mov al, 0x02                ; CS_RST_CLR
+        call yk_w8
+        mov dx, 0x011B              ; B2_CHIP_ID
+        call yk_r8
+        ret
+
+; AL = identificador del chip -> CF = 1 si no es de la familia Yukon 2
+yk_valid:
+        cmp al, 0xB3
+        jb .no
+        cmp al, 0xBE
+        ja .no
+        clc
+        ret
+.no:
+        stc
+        ret
+
+; DI = lo primero libre (dentro de dma_seg; los anillos van en 1000h, 2000h
+; y 3000h) -> yk_bufs, yk_txb y need_dma: cada búfer, en el primer hueco
+; donde quepa
+yk_layout:
+        push bp
+        mov si, yk_huecos
+        mov [si], di
+        xor bx, bx                  ; 0-6: recepción; 8: envío
+        mov dx, YK_TX + 8 * YK_NTX  ; hasta dónde llega
+.h:
+        lodsw
+        mov cx, ax
+        lodsw
+        xchg ax, cx                 ; AX = desde, CX = hasta
+.b:
+        mov bp, ax
+        add bp, YK_BUF
+        cmp bp, cx
+        ja .h
+        mov [yk_bufs+bx], ax
+        cmp bp, dx
+        jbe .n
+        mov dx, bp
+.n:
+        mov ax, bp
+        add bx, 2
+        cmp bx, 10
+        jb .b
+        mov [need_dma], dx
+        pop bp
+        ret
+yk_huecos   dw 0, YK_ST
+            dw YK_ST + 8 * YK_NST, YK_RX
+            dw YK_RX + 8 * YK_NRX, YK_TX
+            dw YK_TX + 8 * YK_NTX, 0xFFFF
+
+yk_init:
+        mov word [res_end], yk_end
+        call yk_place
+        mov al, [o_poll]
+        mov [yk_poll], al
+        push fs
+        ; ¿cómo se llega a los registros? Por memoria (lo que hace Linux; no
+        ; en modo V86) y, si no, por los puertos. Se prueban los dos (si se
+        ; puede) leyendo el identificador del chip; /MEMORIA y /PUERTOS mandan.
+        mov byte [yk_id_m], 0xFF
+        mov byte [yk_id_p], 0xFF
+        cmp byte [v86], 0
+        jne .nm
+        cmp dword [mmio], 0
+        je .nm
+        cmp byte [o_ymode], 1
+        je .nm
+        mov byte [e_io], 0
+        call e1_flat
+        call yk_probe
+        mov [yk_id_m], al
+.nm:
+        cmp word [iob], 0
+        je .np
+        cmp byte [o_ymode], 2
+        je .np
+        mov byte [e_io], 1
+        call yk_probe
+        mov [yk_id_p], al
+.np:
+        xor ah, ah
+        mov al, [yk_id_m]
+        mov si, msg_yk_t_idm
+        call yk_tr
+        mov al, [yk_id_p]
+        mov si, msg_yk_t_idp
+        call yk_tr
+        mov byte [e_io], 0
+        mov al, [yk_id_m]
+        call yk_valid
+        jnc .acc
+        mov byte [e_io], 1
+        mov al, [yk_id_p]
+        call yk_valid
+        jnc .acc
+        ; ninguno da un chip Yukon: si se ha pedido un modo, se sigue con él
+        ; (para depurar); si no, no se carga
+        mov al, [o_ymode]
+        cmp al, 1
+        je .acc
+        mov byte [e_io], 0
+        cmp al, 2
+        je .acc
+        pop fs
+        mov si, msg_yk_noacc
+        cmp byte [v86], 0
+        je .f
+        mov si, msg_yk_v86
+.f:
+        stc
+        ret
+.acc:
+        call e1_flat
+        call yk_probe
+        mov [yk_chip], al
+        mov dx, 0x011A              ; B2_MAC_CFG: la revisión, arriba
+        call yk_r8
+        shr al, 4
+        mov [yk_rev], al
+        mov ah, [yk_chip]
+        mov si, msg_yk_t_chip
+        call yk_tr
+        ; solo la Optima (BCh) y la Optima 2 (BEh): las demás de la familia
+        ; tienen otros pasos (PHY, búfer RAM, sumas) que aquí no están
+        mov al, [yk_chip]
+        cmp al, 0xBC
+        je .chip
+        cmp al, 0xBE
+        je .chip
+        cmp byte [o_ymode], 0       ; (con /MEMORIA o /PUERTOS, se intenta)
+        jne .chip
+        pop fs
+        mov si, msg_yk_nochip
+        call puts
+        mov al, [yk_chip]
+        call hex2
+        mov si, msg_yk_nochip2
+        stc
+        ret
+.chip:
+        ; ---- reinicio (sky2_reset) ----
+        mov si, yk_t_rst1
+        call yk_tab
+        mov dx, 0x1C06              ; estado PCI: quitar los errores apuntados
+        call yk_r16
+        or ax, 0xF900
+        call yk_w16
+        mov si, yk_t_rst2
+        call yk_tab
+        ; encendido (sky2_power_on), con el «control de energía avanzado»
+        mov dx, 0x1C84              ; PCI_DEV_REG4: solo quedan los bits de ASPM
+        call yk_r32
+        and eax, 0x0000F000
+        call yk_w32
+        mov dx, 0x1C88              ; PCI_DEV_REG5
+        call yk_r32
+        and eax, 0x18000000
+        call yk_w32
+        mov si, yk_t_rst3
+        call yk_tab
+        mov dx, 0x015C              ; B2_GP_IO: la errata de la carrera del
+        call yk_r32                 ; estado (dev. 4.107)
+        or ah, 0x20
+        call yk_w32
+        call yk_r32
+        mov si, yk_t_rst4
+        call yk_tab
+        ; lo propio de la Optima: el temporizador de detección de enlace del
+        ; PHY (y, en la revisión 0, que el PHY de PCI Express no se apague)
+        mov cx, 3                   ; 0,4 s
+        cmp word [yk_chip], 0x00BC  ; ¿Optima, revisión 0?
+        jne .nr0
+        mov eax, 0x00800080
+        mov dx, 0x0170              ; Y2_PEX_PHY_DATA: registro 80h, bit 7
+        call yk_w32
+        mov eax, 0x40080000         ; y el de depuración 8 (bit 12 a cero)
+        call yk_w32
+        mov cx, 10                  ; 1,1 s
+.nr0:
+        mov ax, cx
+        shl ax, 4
+        or al, 1                    ; reinicio de la detección de enlace
+        mov dx, 0x0158              ; B2_TST_CTRL1: se puede escribir en la
+        push ax                     ; configuración PCI
+        mov al, 0x02
+        call yk_w8
+        pop ax
+        mov dx, 0x1D68              ; PSM_CONFIG_REG4
+        call yk_w16
+        ; si la gestión de energía (PSM) estaba en marcha, el control del
+        ; enlace PCI Express vuelve a como lo guardó
+        mov dx, 0x1D64              ; PSM_CONFIG_REG3
+        call yk_r16
+        test al, 3
+        jz .nps
+        push ax
+        mov al, 0x10                ; capacidad PCI Express
+        call yk_cap
+        pop ax
+        jc .nps
+        add dx, 0x1C00 + 0x10       ; su registro de control del enlace
+        call yk_w16
+.nps:
+        mov si, yk_t_rst5
+        call yk_tab
+        ; la MAC (la carga el chip de su memoria al salir del reinicio)
+        mov dx, 0x0100              ; B2_MAC_1
+        mov di, mac
+        mov cx, 6
+.mc:
+        call yk_r8
+        mov [di], al
+        inc di
+        inc dx
+        loop .mc
+        mov ax, [mac+4]
+        mov si, msg_yk_t_rst
+        call yk_tr
+        ; ---- MAC y PHY (sky2_mac_init) ----
+        mov si, yk_t_mac1
+        call yk_tab
+        mov dx, 0x0F08              ; GMAC_IRQ_SRC (se borra al leerlo)
+        call yk_r16
+        ; el PHY, encendido (PCI_DEV_REG1, bit 26) y fuera de su reinicio
+        mov dx, 0x0158
+        mov al, 0x02
+        call yk_w8
+        mov dx, 0x1C40
+        call yk_r32
+        and eax, ~(1 << 26)
+        call yk_w32
+        mov dx, 0x0158
+        mov al, 0x01
+        call yk_w8
+        mov dx, 0x1C40
+        call yk_r32
+        mov dx, 0x0F04              ; GPHY_CTRL
+        mov al, 0x02
+        call yk_w8
+        ; ---- el PHY (sky2_phy_init) ----
+        mov bl, 2
+        call yk_phy_r
+        mov [yk_phyid], ax
+        mov si, msg_yk_t_phy
+        call yk_tr
+        mov bl, 3
+        call yk_phy_r
+        mov [yk_phyid+2], ax
+        mov bl, 20                  ; control ampliado: reloj de 25 MHz hacia
+        call yk_phy_r               ; el MAC y contadores de bajada de
+        and ax, ~0x0F70             ; velocidad
+        or ax, 0x0170
+        call yk_phy_w
+        mov bl, 16                  ; control propio: sin detección de energía
+        call yk_phy_r               ; y cruce de pares automático
+        and ax, ~0x0300
+        or ax, 0x0060
+        call yk_phy_w
+        mov dx, 0x2804              ; GM_GP_CTRL: sin control de flujo; la
+        mov ax, 0x2012              ; velocidad y el dúplex, los del PHY
+        call yk_w16
+        mov bl, 9                   ; 1000BASE-T: dúplex completo y medio
+        mov ax, 0x0300
+        call yk_phy_w
+        mov bl, 4                   ; se anuncia 10 y 100, completo y medio
+        mov ax, 0x01E1              ; (sin pausa)
+        call yk_phy_w
+        xor bl, bl                  ; reinicio del PHY y autonegociación
+        mov ax, 0x9200
+        call yk_phy_w
+        cmp word [yk_chip], 0x00BC  ; Optima revisión 0: arreglo de la
+        jne .nafe                   ; terminación (RDAC) del PHY
+        mov bl, 22
+        mov ax, 0x00FF
+        call yk_phy_w
+        mov bl, 24
+        mov ax, 0x2800
+        call yk_phy_w
+        mov bl, 23
+        mov ax, 0x2001
+        call yk_phy_w
+        mov bl, 22
+        xor ax, ax
+        call yk_phy_w
+.nafe:
+        mov bl, 18                  ; interrupciones del PHY: autonegociación
+        mov ax, 0x6C00              ; acabada, y cambios de enlace, velocidad
+        call yk_phy_w               ; y dúplex
+        ; contadores del MAC a cero (se borran al leerlos en este modo)
+        mov dx, 0x2888              ; GM_PHY_ADDR
+        call yk_r16
+        push ax
+        or al, 0x20
+        call yk_w16
+        mov dx, 0x2900
+.mib:
+        call yk_r16
+        add dx, 4
+        cmp dx, 0x2A5C
+        jbe .mib
+        pop ax
+        mov dx, 0x2888
+        call yk_w16
+        ; la dirección, en el MAC (las dos: la de las tramas y la de pausa)
+        mov dx, 0x281C              ; GM_SRC_ADDR_1L
+        call .addr
+        mov dx, 0x2828              ; GM_SRC_ADDR_2L
+        call .addr
+        mov si, yk_t_mac2
+        call yk_tab
+        ; el búfer RAM (las Optima no lo tienen; si lo hubiera, se dice)
+        mov dx, 0x011C              ; B2_E_0
+        call yk_r8
+        mov [yk_ram], al
+        ; esperar al enlace (la autonegociación tarda de 2 a 4 s): así el
+        ; primer CONFRED ya puede enviar. Como mucho 5 s (sin cable).
+        mov cx, 45
+.lw:
+        pushf
+        cli
+        call yk_linkchk
+        popf
+        cmp byte [yk_lnk], 0
+        jne .lok
+        push cx
+        mov cx, 1
+        call ticks_wait
+        pop cx
+        loop .lw
+.lok:
+        mov ax, [yk_phst]
+        mov si, msg_yk_t_lnk
+        call yk_tr
+        pop fs
+        mov si, name_yukon
+        cmp byte [yk_chip], 0xBE
+        jne .nm2
+        mov si, name_yukon2
+.nm2:
+        call set_name
+        mov word [c_send], yk_send
+        mov word [c_isr], yk_isr
+        mov word [c_stop], yk_stop
+        mov word [c_link], yk_link
+        mov word [c_start], yk_start
+        mov word [need_dma], YK_SIZE
+        mov word [dma_align], 4096
+        mov word [dma_lay], yk_layout
+        clc
+        ret
+; la MAC a los tres registros de 16 bits que empiezan en DX (cada 4)
+.addr:
+        mov si, mac
+        mov cx, 3
+.a:
+        lodsw
+        call yk_w16
+        add dx, 4
+        loop .a
+        ret
+
+; AL = capacidad PCI -> DX = su sitio en la configuración; CF si no la hay
+yk_cap:
+        push bx
+        push cx
+        push di
+        mov dh, al
+        mov bx, [pci_bdf]
+        mov ax, 0xB108
+        mov di, 0x34
+        int 0x1A
+        mov dl, 48
+.l:
+        and cl, 0xFC
+        jz .no
+        movzx di, cl
+        mov ax, 0xB109
+        int 0x1A
+        cmp cl, dh
+        je .ok
+        mov cl, ch
+        dec dl
+        jnz .l
+.no:
+        stc
+        jmp short .r
+.ok:
+        mov dx, di
+        clc
+.r:
+        pop di
+        pop cx
+        pop bx
+        ret
+
+yk_t_rst1:
+        yw8  0x0E68, 0x08           ; B28_Y2_ASF_STAT_CMD: ASF en reinicio
+        yw16 0x0004, 0x1000         ; B0_CTST: ASF desactivado
+        yw8  0x0004, 0x01           ; reinicio por programa
+        yw8  0x0004, 0x02
+        yw8  0x0158, 0x02           ; B2_TST_CTRL1: escribir en la conf. PCI
+        dw 0
+yk_t_rst2:
+        yw8  0x0004, 0x08           ; fuera el reinicio maestro
+        yw32 0x1D04, 0xFFFFFFFF     ; errores de PCI Express (AER), borrados
+        yw8  0x0007, 0xA6           ; B0_POWER_CTRL: alimentación de VCC
+        yw32 0x0120, 0x01           ; B2_Y2_CLK_CTRL: sin dividir el reloj
+        yw8  0x011D, 0x00           ; B2_Y2_CLK_GATE
+        yw32 0x1C80, 0              ; PCI_DEV_REG3: todos los relojes
+        dw 0
+yk_t_rst3:
+        yw32 0x1C94, 0              ; PCI_CFG_REG_1
+        yw16 0x0004, 0x8000         ; B0_CTST: Y2_HW_WOL_ON
+        dw 0
+yk_t_rst4:
+        yw16 0x0004, 0x0200         ; luz de «controlador cargado»
+        yw8  0x0158, 0x01           ; conf. PCI, otra vez protegida
+        yw8  0x0F10, 0x01           ; GMAC_LINK_CTRL: reinicio del enlace
+        yw8  0x0F10, 0x02
+        dw 0
+yk_t_rst5:
+        yw8  0x0158, 0x01
+        yw32 0x0170, 0x40080000     ; PHY de PCI Express: gestión de energía
+        yw32 0x0168, 0x01           ; B2_I2C_IRQ: ruido de I2C
+        yw8  0x0138, 0x02           ; B2_TI_CTRL: temporizador parado
+        yw8  0x0138, 0x01
+        yw32 0x0E08, 0x01           ; B28_DPT_CTRL: sin sondeo de descriptores
+        yw8  0x0E18, 0x02           ; GMAC_TI_ST_CTRL: sin marca de tiempo
+        yw8  0x0E18, 0x01
+        yw8  0x0210, 0x02           ; TXA_CTRL: árbitro de envío
+        yw8  0x01A0, 0x02           ; B3_RI_CTRL: interfaz de RAM
+        yw8  0x0190, 36             ; y sus doce plazos
+        yw8  0x0191, 36
+        yw8  0x0192, 36
+        yw8  0x0193, 36
+        yw8  0x0194, 36
+        yw8  0x0195, 36
+        yw8  0x0196, 36
+        yw8  0x0197, 36
+        yw8  0x0198, 36
+        yw8  0x0199, 36
+        yw8  0x019A, 36
+        yw8  0x019B, 36
+        yw32 0x000C, 0              ; B0_IMSK: sin interrupciones (yk_start)
+        yw32 0x0014, 0              ; B0_HWE_IMSK: ni las de error de hardware
+        yw8  0x0F0C, 0              ; GMAC_IRQ_MSK: ni las del MAC
+        yw16 0x2834, 0              ; filtro de multidifusión, vacío
+        yw16 0x2838, 0
+        yw16 0x283C, 0
+        yw16 0x2840, 0
+        dw 0
+yk_t_mac1:
+        yw8  0x0F04, 0x01           ; GPHY_CTRL: reinicio del PHY
+        yw8  0x0F04, 0x02
+        yw8  0x0F00, 0x02           ; GMAC_CTRL: fuera el reinicio del MAC
+        dw 0
+yk_t_mac2:
+        yw16 0x2808, 0x1000         ; GM_TX_CTRL: umbral de colisiones
+        yw16 0x280C, 0xA000         ; GM_RX_CTRL: solo las tramas para esta
+                                    ; dirección (y las de difusión y
+                                    ; multidifusión), sin el CRC
+        yw16 0x2810, 0xFFFF         ; GM_TX_FLOW_CTRL
+        yw16 0x2814, 0xD7C4         ; GM_TX_PARAM
+        yw16 0x2818, 0x221E         ; GM_SERIAL_MODE
+        yw16 0x2850, 0              ; sin interrupciones de los contadores
+        yw16 0x2854, 0
+        yw16 0x2858, 0
+        yw8  0x0C48, 0x02           ; RX_GMF_CTRL_T: FIFO de recepción
+        yw32 0x0C48, 0x88           ; en marcha, tirando las tramas malas
+        yw16 0x0C4C, 0x187B         ; RX_GMF_FL_MSK: cuáles son malas
+        yw16 0x0C50, 0x0B           ; RX_GMF_FL_THR
+        yw8  0x0D48, 0x02           ; TX_GMF_CTRL_T: FIFO de envío
+        yw16 0x0D48, 0x08
+        yw16 0x0C58, 128            ; umbrales de pausa (sin búfer RAM)
+        yw16 0x0C5A, 96
+        yw32 0x0D48, 0x40000000     ; guardar la trama entera antes de enviarla
+        yw8  0x0F00, 0x04           ; GMAC_CTRL: sin pausa
+        dw 0
+
+yk_id_m     db 0xFF                 ; identificador leído por memoria
+yk_id_p     db 0xFF                 ; y por los puertos (FFh: no se ha podido)
+yk_ram      db 0
+yk_live     db 0                    ; /INFO con el residente cargado
+yk_phyid    dw 0, 0
+res_seg     dw 0
+
+; ---- /INFO: lo de la Yukon (también con el residente cargado) ----
+yk_info:
+        push fs
+        call e1_flat
+        mov dx, 0x011C              ; B2_E_0: el búfer RAM
+        call yk_r8
+        mov [yk_ram], al
+        mov si, msg_yk_acc_m
+        cmp byte [e_io], 0
+        je .a
+        mov si, msg_yk_acc_p
+.a:
+        call puts
+        mov eax, [mmio]
+        push eax
+        shr eax, 16
+        call hex4
+        pop eax
+        call hex4
+        mov si, msg_yk_acc2
+        call puts
+        cmp byte [yk_live], 0
+        jne .nid
+        mov si, msg_yk_ids          ; (al cargar: lo leído por los dos caminos)
+        call puts
+        mov al, [yk_id_m]
+        call hex2
+        mov si, msg_yk_ids2
+        call puts
+        mov al, [yk_id_p]
+        call hex2
+        mov si, msg_yk_ids3
+        call puts
+.nid:
+        mov si, msg_yk_chip
+        call puts
+        mov al, [yk_chip]
+        call hex2
+        mov si, msg_yk_chip2
+        call puts
+        mov al, [yk_rev]
+        call hex2
+        mov si, yk_dump             ; los registros
+        call .dump
+        ; el PHY (el 19 no: se borra al leerlo y es de la interrupción)
+        mov si, msg_yk_phy
+        call puts
+        mov si, yk_phyregs
+.p:
+        lodsb
+        cmp al, 0xFF
+        je .pd
+        mov bl, al
+        call hex2
+        mov al, '='
+        call putc
+        pushf
+        cli
+        call yk_phy_r
+        popf
+        call hex4
+        mov al, ' '
+        call putc
+        jmp .p
+.pd:
+        call crlf
+        ; lo que lleva contado el controlador
+        mov si, yk_cnt
+.c:
+        lodsw
+        test ax, ax
+        jz .cd
+        push si
+        mov si, ax
+        call puts
+        pop si
+        lodsw
+        mov bx, ax
+        lodsb
+        cmp al, 4
+        jne .c2
+        mov ax, [bx+2]
+        call hex4
+.c2:
+        mov ax, [bx]
+        call hex4
+        jmp .c
+.cd:
+        call crlf
+        ; pistas
+        cmp byte [yk_live], 0
+        je .r
+        mov dx, 0x0E9C              ; ¿elementos de estado sin leer?
+        call yk_r16
+        cmp ax, [yk_st_i]
+        je .h2
+        mov si, msg_yk_h_irq
+        call puts
+.h2:
+        cmp word [yk_txto], 0
+        je .h3
+        mov si, msg_yk_h_tx
+        call puts
+.h3:
+        cmp byte [yk_ram], 0
+        je .r
+        mov si, msg_yk_h_ram
+        call puts
+.r:
+        pop fs
+        ret
+; SI = tabla (texto, registro, ancho): «texto» y el registro en hexadecimal.
+; Ancho 1, 2 o 4; 5 = contador del MAC (32 bits en dos registros de 16)
+.dump:
+        lodsw
+        test ax, ax
+        jz .dr
+        push si
+        mov si, ax
+        call puts
+        pop si
+        lodsw
+        mov dx, ax
+        lodsb
+        cmp al, 1
+        jne .d2
+        call yk_r8
+        call hex2
+        jmp .dump
+.d2:
+        cmp al, 2
+        jne .d4
+        call yk_r16
+        call hex4
+        jmp .dump
+.d4:
+        cmp al, 4
+        jne .d5
+        call yk_r32
+        jmp short .d32
+.d5:
+        add dx, 4
+        call yk_r16
+        shl eax, 16
+        sub dx, 4
+        call yk_r16
+.d32:
+        push eax
+        shr eax, 16
+        call hex4
+        pop eax
+        call hex4
+        jmp .dump
+.dr:
+        ret
+
+%macro ydump 3
+        dw %1, %2
+        db %3
+%endmacro
+yk_dump:
+        ydump msg_yd_00, 0x0119, 1
+        ydump msg_yd_01, 0x011C, 1
+        ydump msg_yd_02, 0x011E, 1
+        ydump msg_yd_03, 0x0004, 4
+        ydump msg_yd_04, 0x0008, 4
+        ydump msg_yd_05, 0x000C, 4
+        ydump msg_yd_06, 0x0010, 4
+        ydump msg_yd_07, 0x1C04, 4
+        ydump msg_yd_08, 0x1C3C, 2
+        ydump msg_yd_09, 0x1C40, 4
+        ydump msg_yd_10, 0x1C80, 4
+        ydump msg_yd_11, 0x1C84, 4
+        ydump msg_yd_12, 0x1C88, 4
+        ydump msg_yd_13, 0x1D68, 2
+        ydump msg_yd_14, 0x2800, 2
+        ydump msg_yd_15, 0x2804, 2
+        ydump msg_yd_16, 0x280C, 2
+        ydump msg_yd_17, 0x2818, 2
+        ydump msg_yd_18, 0x0F00, 4
+        ydump msg_yd_19, 0x0F04, 4
+        ydump msg_yd_20, 0x0C48, 4
+        ydump msg_yd_21, 0x0D48, 4
+        ydump msg_yd_22, 0x0E80, 4
+        ydump msg_yd_23, 0x0E9C, 2
+        ydump msg_yd_24, 0x0E88, 4
+        ydump msg_yd_25, 0x0434, 4
+        ydump msg_yd_26, 0x0460, 2
+        ydump msg_yd_27, 0x0464, 2
+        ydump msg_yd_28, 0x0458, 4
+        ydump msg_yd_29, 0x06B4, 4
+        ydump msg_yd_30, 0x06E0, 2
+        ydump msg_yd_31, 0x06E4, 2
+        ydump msg_yd_32, 0x06A4, 2
+        ydump msg_yd_33, 0x0E90, 2
+        ydump msg_yd_34, 0x2900, 5
+        ydump msg_yd_35, 0x2908, 5
+        ydump msg_yd_36, 0x2918, 5
+        ydump msg_yd_37, 0x2920, 5
+        ydump msg_yd_38, 0x29B0, 5
+        ydump msg_yd_39, 0x29C0, 5
+        ydump msg_yd_40, 0x29C8, 5
+        ydump msg_yd_41, 0x2A58, 5
+        dw 0
+msg_yd_00   db 13, 10, "Yukon, placa:    PMD=", 0
+msg_yd_01   db " RAM=", 0
+msg_yd_02   db " HW_RES=", 0
+msg_yd_03   db " CTST=", 0
+msg_yd_04   db 13, 10, "Yukon, interr.:  ISRC=", 0
+msg_yd_05   db " IMSK=", 0
+msg_yd_06   db " HWE_ISRC=", 0
+msg_yd_07   db 13, 10, "Yukon, PCI:      CMD/STAT=", 0
+msg_yd_08   db " IRQ=", 0
+msg_yd_09   db " REG1=", 0
+msg_yd_10   db 13, 10, "                 REG3=", 0
+msg_yd_11   db " REG4=", 0
+msg_yd_12   db " REG5=", 0
+msg_yd_13   db " PSM4=", 0
+msg_yd_14   db 13, 10, "Yukon, MAC:      GP_STAT=", 0
+msg_yd_15   db " GP_CTRL=", 0
+msg_yd_16   db " RX_CTRL=", 0
+msg_yd_17   db " SERIAL=", 0
+msg_yd_18   db 13, 10, "                 GMAC_CTRL=", 0
+msg_yd_19   db " GPHY_CTRL=", 0
+msg_yd_20   db 13, 10, "                 RX_GMF=", 0
+msg_yd_21   db " TX_GMF=", 0
+msg_yd_22   db 13, 10, "Yukon, estado:   CTRL=", 0
+msg_yd_23   db " PUT=", 0
+msg_yd_24   db " LISTA=", 0
+msg_yd_25   db 13, 10, "Yukon, recep.:   CSR=", 0
+msg_yd_26   db " GET=", 0
+msg_yd_27   db " PUT=", 0
+msg_yd_28   db " LISTA=", 0
+msg_yd_29   db 13, 10, "Yukon, envío:    CSR=", 0
+msg_yd_30   db " GET=", 0
+msg_yd_31   db " PUT=", 0
+msg_yd_32   db " HECHO=", 0
+msg_yd_33   db " DICHO=", 0
+msg_yd_34   db 13, 10, "Yukon, tramas:   rx_uni=", 0
+msg_yd_35   db " rx_dif=", 0
+msg_yd_36   db " rx_multi=", 0
+msg_yd_37   db " rx_crc=", 0
+msg_yd_38   db 13, 10, "                 rx_fifo=", 0
+msg_yd_39   db " tx_uni=", 0
+msg_yd_40   db " tx_dif=", 0
+msg_yd_41   db " tx_fifo=", 0
+msg_yk_phy  db 13, 10, "Yukon, PHY:      ", 0
+yk_phyregs  db 0, 1, 2, 3, 4, 5, 9, 10, 16, 17, 18, 0xFF
+%macro ycnt 3
+        dw %1, %2
+        db %3
+%endmacro
+yk_cnt:
+        ycnt msg_yc_0, yk_irqs, 4
+        ycnt msg_yc_1, yk_lastis, 4
+        ycnt msg_yc_2, yk_stle, 4
+        ycnt msg_yc_3, yk_st_i, 2
+        ycnt msg_yc_4, yk_rx_put, 2
+        ycnt msg_yc_5, yk_rx_nxt, 2
+        ycnt msg_yc_6, yk_lastrx, 4
+        ycnt msg_yc_7, yk_tx_prd, 2
+        ycnt msg_yc_8, yk_txdn, 2
+        ycnt msg_yc_9, yk_txto, 2
+        ycnt msg_yc_a, yk_phst, 2
+        ycnt msg_yc_b, yk_lnk, 2
+        ycnt msg_yc_c, yk_up, 2
+        ycnt msg_yc_d, dma_seg, 2
+        ycnt msg_yc_e, dma_phys, 4
+        dw 0
+msg_yc_0    db "Yukon, driver:   irqs=", 0
+msg_yc_1    db " causa=", 0
+msg_yc_2    db " elem_estado=", 0
+msg_yc_3    db " i_estado=", 0
+msg_yc_4    db 13, 10, "                 rx_put=", 0
+msg_yc_5    db " rx_bufer=", 0
+msg_yc_6    db " rx_estado=", 0
+msg_yc_7    db 13, 10, "                 tx_put=", 0
+msg_yc_8    db " tx_dicho=", 0
+msg_yc_9    db " tx_sin_confirmar=", 0
+msg_yc_a    db 13, 10, "                 phy17=", 0
+msg_yc_b    db " enlace/vel=", 0
+msg_yc_c    db " mac/arrancado=", 0
+msg_yc_d    db " dma_seg=", 0
+msg_yc_e    db " dma_fis=", 0
+msg_yk_acc_m db "Registros:       por memoria (modo «irreal»), en ", 0
+msg_yk_acc_p db "Registros:       por los puertos (bloques con RAP); en memoria, ", 0
+msg_yk_acc2 db "h", 13, 10, 0
+msg_yk_ids  db "                 identificador leído por memoria: ", 0
+msg_yk_ids2 db "h; por los puertos: ", 0
+msg_yk_ids3 db "h (FF: no se pudo)", 13, 10, 0
+msg_yk_chip db "Chip:            Yukon 2, identificador ", 0
+msg_yk_chip2 db "h (BC = Optima), revisión ", 0
+msg_yk_h_irq db "  (!) Hay elementos de estado sin leer: ¿no llega la interrupción?", 13, 10, 0
+msg_yk_h_tx db "  (!) Hay envíos que la tarjeta no ha confirmado (HECHO/DICHO no avanzan).", 13, 10, 0
+msg_yk_h_ram db "  (!) La tarjeta tiene búfer RAM y aquí no se programa.", 13, 10, 0
+msg_yk_tr   db "  [Yukon] ", 0
+msg_yk_t_idm db "identificador del chip por memoria: ", 0
+msg_yk_t_idp db "identificador del chip por los puertos: ", 0
+msg_yk_t_chip db "chip (identificador y revisión): ", 0
+msg_yk_t_rst db "reinicio hecho; final de la MAC: ", 0
+msg_yk_t_phy db "PHY encendido; su identificador (registro 2): ", 0
+msg_yk_t_lnk db "PHY y MAC puestos; registro 17 del PHY (enlace = bit 10): ", 0
+msg_yk_noacc db "La tarjeta Yukon no contesta ni por memoria ni por los puertos", 13, 10
+            db "(HSPRED /DEPURA dice lo que se lee; /MEMORIA o /PUERTOS lo fuerzan).", 13, 10, 0
+msg_yk_v86  db "En modo V86 (con HSPEMM u otro EMM386) a la tarjeta Yukon solo se llega por", 13, 10
+            db "los puertos, y por ahí no contesta: arranque en «Normal».", 13, 10, 0
+msg_yk_nochip db "Esta tarjeta Marvell Yukon 2 (chip ", 0
+msg_yk_nochip2 db "h) todavía no se sabe usar: solo la Optima.", 13, 10, 0
+name_yukon  db "Marvell Yukon 88E8059 (Optima)", 0
+name_yukon2 db "Marvell Yukon Optima 2", 0
+
 ; ---- DEC Tulip ----
 tu_init:
         mov si, msg_noio
@@ -4100,6 +5766,7 @@ tu_srom     times 128 db 0
 
 need_dma    dw 0
 dma_align   dw 16
+dma_lay     dw 0                    ; reparto propio de los búferes (o 0)
 res_end     dw resident_end         ; fin de lo residente (con la sección de
                                     ; quita y pon de la tarjeta, si la tiene)
 
@@ -4171,6 +5838,7 @@ dma_setup:
         mov [dma_bytes], cx
         test cx, cx
         jz .ok
+        mov word [dma_z0], 0
         ; alineación (en párrafos)
         mov bx, [dma_align]
         shr bx, 4
@@ -4179,10 +5847,12 @@ dma_setup:
         cmp ax, 0xA000
         jae .low
         add ax, [res_paras]
+        mov di, ax                  ; lo primero libre
         add ax, bx
         not bx
         and ax, bx
-        mov [dma_seg], ax
+        call .lay
+        mov ax, [dma_seg]
         mov dx, [need_dma]
         add dx, 15
         shr dx, 4
@@ -4224,23 +5894,44 @@ dma_setup:
         mov si, msg_nodmamem
         jc .fail
         mov [dma_own], ax
+        mov di, ax
         mov bx, [dma_align]
         shr bx, 4
         dec bx
         add ax, bx
         not bx
         and ax, bx
-        mov [dma_seg], ax
+        call .lay
+        cmp word [dma_lay], 0
+        je .phys
+        ; lo que sobre del bloque, se devuelve
+        mov es, [dma_own]
+        mov bx, [need_dma]
+        add bx, 15
+        shr bx, 4
+        add bx, [dma_seg]
+        sub bx, [dma_own]
+        mov ah, 0x4A
+        int 0x21
+        push cs
+        pop es
 .phys:
-        ; dirección física y continuidad, página a página
+        ; dirección física y continuidad, página a página (desde dma_z0)
         movzx eax, word [dma_seg]
         shl eax, 4
+        movzx ebx, word [dma_z0]
+        add eax, ebx
         call phys
+        sub eax, ebx
         mov [dma_phys], eax
         movzx ebx, word [dma_seg]
         shl ebx, 4
-        movzx ecx, word [need_dma]
-        add ecx, ebx
+        movzx eax, word [dma_z0]
+        add ebx, eax
+        movzx ecx, word [dma_seg]
+        shl ecx, 4
+        movzx eax, word [need_dma]
+        add ecx, eax
         dec ecx                     ; último octeto
         and ebx, 0xFFFFF000
 .pg:
@@ -4262,6 +5953,25 @@ dma_setup:
         ret
 .ok:
         clc
+        ret
+; AX = el segmento alineado; DI = lo primero libre -> dma_seg, dma_z0 y, si
+; la tarjeta reparte ella sus búferes (dma_lay), need_dma y dma_bytes
+.lay:
+        mov [dma_seg], ax
+        cmp word [dma_lay], 0
+        je .lr
+        mov bx, [dma_align]
+        shr bx, 4
+        sub ax, bx                  ; una alineación por debajo
+        mov [dma_seg], ax
+        sub di, ax
+        shl di, 4                   ; DI = desplazamiento de lo primero libre
+        mov [dma_z0], di
+        call [dma_lay]              ; -> need_dma (hasta dónde llega)
+        mov ax, [need_dma]
+        sub ax, [dma_z0]
+        mov [dma_bytes], ax
+.lr:
         ret
 sv_strat    dw 0
 sv_link     db 0
@@ -4327,6 +6037,13 @@ show_short:
         ret
 
 show_info:
+        call show_info0
+        cmp byte [card], C_YUKON
+        jne .r
+        call yk_info
+.r:
+        ret
+show_info0:
         mov si, msg_i_card
         call puts
         mov si, [name_ptr]
@@ -4462,6 +6179,13 @@ show_info:
         call puts
         movzx eax, byte [irq]
         call putdec
+        cmp byte [card], C_YUKON
+        jne .nsd
+        cmp byte [irq], 0
+        jne .nsd
+        mov si, msg_i_poll
+        call puts
+.nsd:
         call crlf
 .npn2:
         mov si, msg_i_mac
@@ -4620,9 +6344,61 @@ putc:
         mov dl, al
         mov ah, 2
         int 0x21
+        cmp byte [o_dbg], 0
+        je .r
+        ; /DEPURA: también al registro (en la memoria que hay detrás del
+        ; programa; al archivo, al acabar cada línea)
+        push bx
+        mov bx, [log_n]
+        mov [log_buf+bx], dl
+        inc bx
+        mov [log_n], bx
+        cmp bx, LOG_MAX
+        pop bx
+        jae .f
+        cmp dl, 10
+        jne .r
+.f:
+        call log_flush
+.r:
         pop dx
         pop ax
         ret
+
+; lo que hay en el registro, al final del archivo de /DEPURA
+log_flush:
+        pusha
+        mov cx, [log_n]
+        jcxz .r
+        mov dx, log_name
+        mov ax, 0x3D02
+        int 0x21
+        jnc .op
+        mov ah, 0x3C
+        xor cx, cx
+        int 0x21
+        jc .z
+.op:
+        mov bx, ax
+        mov ax, 0x4202
+        xor cx, cx
+        xor dx, dx
+        int 0x21
+        mov ah, 0x40
+        mov cx, [log_n]
+        mov dx, log_buf
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+.z:
+        mov word [log_n], 0
+.r:
+        popa
+        ret
+LOG_MAX     equ 200                 ; (una línea, como mucho)
+log_n       dw 0
+log_name    db "HSPRED.LOG", 0
+            times 64 - 11 db 0
 
 puts:
         push ax
@@ -4695,16 +6471,20 @@ putdec:
         ret
 
 msg_title   db "HSPRED 0.1: controlador de red de Hispa-DOS (packet driver)", 13, 10, 0
-msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/U]", 13, 10
+msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/DEPURA[:archivo]] [/U]", 13, 10
             db "  /INT:xx  vector del packet driver (60 a 80, hexadecimal; si no, el", 13, 10
             db "           primero libre desde el 60)", 13, 10
             db "  /INFO    tarjeta, MAC, enlace, IRQ, vector y la configuración IP", 13, 10
             db "  /AUTO    sin tarjeta, sale en silencio (para el AUTOEXEC.BAT)", 13, 10
             db "  /USB     el adaptador USB aunque haya una tarjeta PCI que valga", 13, 10
+            db "  /DEPURA  lo que sale por la pantalla, además a HSPRED.LOG (o al archivo", 13, 10
+            db "           que se diga); con /INFO, el informe para quien depura", 13, 10
             db "  /U       descargarlo de la memoria", 13, 10
             db "Tarjetas: NE2000 PCI (RTL8029), Realtek RTL8139 y RTL8111/8168/8101, Intel", 13, 10
             db "PRO/1000 (e1000, 82574L), AMD PCnet (VirtualBox, VMware) y DEC 21140/21143", 13, 10
-            db "(Hyper-V: adaptador heredado). Y, con HSPUSB.SYS cargado, un adaptador", 13, 10
+            db "(Hyper-V: adaptador heredado) y Marvell Yukon 88E8059 (HP Mini 5103; con", 13, 10
+            db "/MEMORIA o /PUERTOS se elige por dónde van sus registros y con /SONDEO no", 13, 10
+            db "usa IRQ). Y, con HSPUSB.SYS cargado, un adaptador", 13, 10
             db "USB-Ethernet con CDC-ECM (Realtek RTL8153). La IP: CONFRED (IPCONFIG).", 13, 10
             db "Sirve también para los programas de DOS que usan packet drivers (mTCP...).", 13, 10, 0
 msg_already db "HSPRED ya está cargado (HSPRED /INFO lo enseña; /U lo descarga).", 13, 10, 0
@@ -4744,6 +6524,7 @@ msg_i_mm    db "Registros:       ", 0
 msg_i_mmh   db "h (registros por memoria)", 13, 10, 0
 msg_i_mmp   db "h (registros por los puertos)", 13, 10, 0
 msg_i_irq   db "IRQ:             ", 0
+msg_i_poll  db " (/SONDEO: sin IRQ; se mira la tarjeta en cada tic del reloj)", 0
 msg_i_rev   db ", revisión ", 0
 msg_i_pnid  db "Chip (CSR88/89): ", 0
 msg_i_xid   db "Chip (TxConfig): ", 0
@@ -4834,3 +6615,6 @@ msg_i_noip  db "sin configurar (CONFRED la pide)", 13, 10, 0
 msg_i_dhcp  db " (DHCP)", 13, 10, 0
 msg_i_man   db " (a mano, RED.INI)", 13, 10, 0
 msg_crlf    db 13, 10, 0
+; el registro de /DEPURA, en la memoria que queda detrás del programa (no
+; ocupa en el archivo; como mucho una línea cada vez)
+log_buf:

@@ -55,9 +55,9 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 
 | Orden | Para qué |
 |---|---|
-| `HSPRED [/INT:xx] [/INFO] [/USB] [/U]` | El controlador. `/USB`: usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque haya una tarjeta PCI que valga. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). |
+| `HSPRED [/INT:xx] [/INFO] [/USB] [/DEPURA[:archivo]] [/U]` | El controlador. `/USB`: usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque haya una tarjeta PCI que valga. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). `/DEPURA[:archivo]`: todo lo que HSPRED escribe en la pantalla se añade además a un archivo (`HSPRED.LOG` si no se dice otro), línea a línea (si el equipo se cuelga, queda hasta donde llegó), y la Yukon cuenta su puesta en marcha paso a paso; con `/INFO`, es el informe para mandar a quien depura. Solo para la Marvell Yukon: `/MEMORIA` y `/PUERTOS` (por dónde van sus registros, sin probar cuál contesta) y `/SONDEO` (sin IRQ: mira la tarjeta en cada tic del reloj). |
 | `CONFRED [/RENOVAR] [/LIBERAR]` | La configuración IP. `/RENOVAR` (`/RENEW`) la pide otra vez; `/LIBERAR` (`/RELEASE`) la olvida. `/ALL` se acepta (como en Windows) y hace lo mismo que sin nada. |
-| `PING destino [/N:n] [/T]` | Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
+| `PING destino [/N:n] [/T]`, `PING /P` | `/P`: a la puerta de enlace (el router) que haya dado `CONFRED`, sin tener que escribir su dirección. Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
 | `CONSOLA [/PUERTO:n]` | Consola remota por red (servidor TCP, puerto 2323 por omisión): deja entrar a otra persona a este equipo, con un código de acceso de 6 cifras por conexión que solo se ve aquí. Abierta y controlada por el usuario. Ver [docs/CONSOLA.md](CONSOLA.md). |
 | `ACTUALIZAR [url]` | Instalador por red. Mira por HTTP (`versiones.txt`) si hay una versión más nueva o una edición más rica que la instalada (`lib/version.inc`), según la CPU/RAM/disco del equipo; y, si el usuario quiere, **baja el paquete `.PAQ` y lo instala en el sitio** conservando `*.INI`/`*.REC`. La dirección sale, por orden, de lo que se escriba, de `ACTUALIZAR=` en `RED.INI`, o de la de por omisión. Ver más abajo. |
@@ -193,6 +193,7 @@ disco al volver al intérprete). Por eso el mensaje final pide reiniciar.
 | Intel 82574L («e1000e») | `8086:10D3` | ✅ probada en QEMU (`-device e1000e`). Misma rutina que la e1000 (descriptores clásicos, interrupción INTx); en QEMU tiene los registros por puertos, así que va también con HSPEMM. Sin probar en VMware ni en una de verdad. |
 | Realtek RTL8111/8168, 8101E/8102E/8105E (8136), 8169 («r8169») | `10EC:8168`, `10EC:8136`... | ✅ **funciona en un equipo de verdad**: Toshiba NB250-10N (`10EC:8136`, revisión PCI 05h), desde el 15/11/2026 (red y consola remota). QEMU no la tiene. En otras revisiones (8111E/F/G/H, la 8111EP del Lenovo A275), sin probar: ver «RTL8168: lo que falta para las revisiones modernas». |
 | AMD PCnet-PCI II (Am79C970A) y PCnet-FAST III (Am79C973) | `1022:2000` | ✅ probada en QEMU (`-device pcnet`). ⚠️ Es la tarjeta por omisión de **VirtualBox** y la «vlance» de **VMware**, pero en ellos **no se ha probado** (aquí solo hay QEMU). |
+| Marvell Yukon 2 «Optima» 88E8059 (y «Optima 2», 88E8079) | `11AB:4381`, `11AB:4382` | ⚠️ **Hecha y sin probar en un equipo de verdad** (18/11/2026): es la de cable del HP Mini 5103. QEMU no la emula; se prueba contra un modelo del chip (`tests/run_yukon_tests.sh`). Ver «Marvell Yukon 88E8059 (HP Mini 5103)». |
 | Adaptador **USB**-Ethernet con la clase estándar CDC-ECM (Realtek RTL8152/RTL8153 y otros) | USB `0BDA:8153`... | ✅ probada en QEMU (`-device usb-net`), con las cuatro clases de controladora USB y detrás de un concentrador. ⚠️ En un adaptador de verdad, **sin probar**. La lleva `HSPUSB.SYS`: ver «Adaptadores USB-Ethernet (CDC-ECM)». |
 | DEC 21140/21140A y 21143 «Tulip» | `1011:0009`, `1011:0019` | ✅ probada en QEMU (`-device tulip`, que se presenta como 21143). ⚠️ La 21140A es el «Adaptador de red heredado» de **Hyper-V**, pero en Hyper-V **no se ha probado**. En tarjetas de verdad, sin probar y sin elección del medio (ver «Límites de las tarjetas nuevas»). |
 
@@ -331,6 +332,132 @@ una 8111 moderna: (1) `TXCFG_AUTO_FIFO` y `MaxTxPacketSize` según el XID,
 (2) `RxConfig` según la familia, (3) quitar ASPM/CLKREQ, (4) `RXDV_GATED_EN`
 en la 8168G en adelante.
 
+### Marvell Yukon 88E8059 (HP Mini 5103)
+
+La tarjeta de cable del HP Mini 5103 es una **Marvell Yukon 2 «Optima»
+88E8059** (`11AB:4381`, revisión PCI 11h, subsistema `103C:1608`), Gigabit,
+por PCI Express. Marvell no publicó la documentación de la familia: lo que
+se sabe sale de leer el controlador `sky2` de Linux (`sky2.c` y `sky2.h`,
+GPL-2.0, que valen para unos veinte chips distintos); el código de HSPRED es
+propio y solo lleva el camino de la Optima (identificador de chip BCh; la
+Optima 2, BEh, sigue el mismo camino en `sky2` y se admite; las demás de la
+familia —EC, EC Ultra, Extreme, FE, Supreme, Ultra 2, Prime— no: tienen
+otros pasos de PHY, búfer RAM o sumas de comprobación, y HSPRED lo dice).
+
+**Estado (18/11/2026): hecha, sin probar en el equipo de verdad.** QEMU no
+la emula, así que se ha probado contra un simulador propio del chip (ver
+«Pruebas»), que caza los fallos del ensamblador pero no demuestra que el
+chip se porte como se cree. La prueba de verdad es la memoria USB de
+`tools/prueba-cable` (más abajo).
+
+Cómo está hecha (sección `.yukon` de `drivers/hspred.asm`, de quita y pon:
+1.512 octetos residentes solo si la tarjeta es ésta):
+
+- **Registros** (16 KB, BAR0, de 64 bits, en memoria): por **memoria** con
+  el modo «irreal», como la e1000 (es lo que hace Linux, lo más seguro), o
+  por los **puertos** (la BAR de E/S, 256 puertos: los 128 primeros son el
+  bloque 0 y los otros 128 enseñan el bloque de 128 octetos que diga el
+  registro RAP, el puerto 0; `sky2` no usa este camino: es el del
+  controlador antiguo de Marvell, `sk98lin`, tal como se recuerda).
+  Al cargar se prueban los dos leyendo el identificador del chip
+  (`B2_CHIP_ID`, 11Bh): si por memoria sale un chip Yukon, por memoria; si
+  no (o en modo V86, donde no se llega a la memoria de la tarjeta), por los
+  puertos. `/MEMORIA` y `/PUERTOS` lo fuerzan. **Sin probar en el chip de
+  verdad si los puertos con RAP funcionan**: `HSPRED /DEPURA` dice lo que se
+  lee por cada camino, y de eso depende que vaya con HSPEMM.
+- **Reinicio y encendido** (`yk_init`, se descarta): ASF apagado, reinicio
+  por programa, borrado de errores PCI y AER, alimentación por VCC, relojes
+  (`PCI_DEV_REG3` a cero, sin división), el «control de energía avanzado»
+  (`PCI_DEV_REG4/5`, `PCI_CFG_REG_1`, la errata 4.107 de la carrera del
+  estado en `B2_GP_IO`) y lo propio de la Optima: el temporizador de
+  detección de enlace del PHY (`PSM_CONFIG_REG4`: 0,4 s; 1,1 s en la
+  revisión 0, que además necesita que el PHY de PCI Express no se apague y
+  un arreglo de la terminación del PHY de cobre), devolver el control del
+  enlace PCI Express a como lo dejó la gestión de energía, y el registro de
+  depuración 8 del PHY de PCI Express. La configuración PCI se escribe por
+  la ventana 1C00h de los registros (con el permiso de `B2_TST_CTRL1`).
+- **MAC**: la da el chip (`B2_MAC_1`, 100h) al salir del reinicio.
+- **PHY** (integrado, por SMI a través del MAC): encendido
+  (`PCI_DEV_REG1`, bit 26), reloj de 25 MHz, cruce de pares automático,
+  autonegociación de 10/100/1000 en dúplex completo y medio, **sin control
+  de flujo** (no se anuncia la pausa). La velocidad y el dúplex los copia el
+  MAC del PHY él solo; cuando el PHY dice «enlace, y velocidad resuelta»
+  (registro 17), HSPRED pone el hueco entre tramas de esa velocidad y
+  arranca el envío y la recepción del MAC; si el enlace cae, los para. Al
+  cargar se espera al enlace **hasta 5 segundos** (la autonegociación tarda
+  de 2 a 4): así el primer `CONFRED` ya puede enviar. Sin cable, la carga
+  tarda esos 5 segundos.
+- **Anillos** de «elementos de lista» de 8 octetos (dirección, longitud,
+  control y código; el bit 7 del código dice que el elemento vale), que
+  aquí empiezan cada uno en una página (4 KB: Linux se los da a la tarjeta
+  así, y no se sabe si con menos le vale): 16 de recepción (4 búferes de 1.520 octetos que van dando
+  la vuelta), 16 de envío (un búfer: cada envío espera a que la tarjeta lo
+  haya leído, por su índice «hecho» o por el que da en el anillo de estado;
+  si no lo confirma, lo cuenta y sigue) y 64 de **estado**, que escribe la
+  tarjeta (trama recibida con su longitud y su estado, hasta dónde ha
+  enviado) y lee la interrupción. Las tramas más largas que el búfer las
+  corta la tarjeta (si no, su recepción se cuelga: lo dice `sky2`).
+- **Filtro**: las tramas para la MAC de la tarjeta y las de difusión y
+  multidifusión (el filtro de multidifusión, apagado). Sin modo promiscuo
+  (las demás tarjetas tampoco lo tienen: el packet driver solo da los modos
+  1 a 3).
+- **Interrupción** (INTx, la que diga la BIOS en la configuración PCI; se
+  quita el bit que la tapa): solo el anillo de estado y el PHY. Las de error
+  de hardware y de descriptores no se piden (un error sin tratar dejaría la
+  interrupción pegada); `/INFO` enseña sus causas pendientes (`ISRC`).
+  Con **`/SONDEO`** no se usa: la rutina se engancha al reloj (IRQ 0) y mira
+  la tarjeta 18 veces por segundo (lento, pero la red y CONSOLA funcionan):
+  es el plan B si la interrupción no llega.
+- **Parar** (`/U`): sin interrupciones, MAC parado, colas y unidad de estado
+  en reinicio y el chip entero en reinicio por programa.
+
+`HSPRED /INFO` (también con el controlador ya cargado) enseña, además de lo
+de siempre: por dónde van los registros, el identificador y la revisión del
+chip, y un volcado para depurar a distancia: placa (`PMD`, búfer RAM),
+interrupciones (`ISRC`, `IMSK`, `HWE_ISRC`), configuración PCI propia
+(`REG1/3/4/5`, `PSM4`), MAC (`GP_STAT`, `GP_CTRL`, `RX_CTRL`, FIFO), los
+índices de los tres anillos (lo que dice la tarjeta y lo que lleva el
+controlador), los contadores de tramas del MAC (recibidas y enviadas, con
+error de CRC, desbordamientos), once registros del PHY y los contadores del
+controlador (interrupciones atendidas, última causa, elementos de estado
+tratados, envíos sin confirmar). Y avisa con «(!)» de lo raro: elementos de
+estado sin leer (la interrupción no llega), envíos sin confirmar, búfer RAM.
+
+Cómo leer el informe si no va:
+
+| Qué sale | Qué significa |
+|---|---|
+| «La tarjeta Yukon no contesta ni por memoria ni por los puertos» | Ningún camino lee un identificador de chip de la familia (B3h a BEh). `/DEPURA` dice lo que se lee por cada uno. |
+| `PHY: 02=FFFF 03=FFFF` | El PHY no contesta por SMI: no ha salido del reinicio o sigue apagado (`REG1`, bit 26). |
+| `Enlace: no` con el cable puesto y `11=` sin el bit 10 | La autonegociación no acaba: mirar `01=` (bit 5: acabada; bit 2: enlace) y `05=` (lo que anuncia el otro extremo). |
+| `irqs=00000000` y «(!) Hay elementos de estado sin leer» | La tarjeta recibe y lo apunta, pero la interrupción no llega: IRQ equivocado o tapado. Con `/SONDEO` debería ir. |
+| `rx_uni`/`rx_dif` suben y `elem_estado` no | El MAC recibe, pero no llega al anillo de estado: cola de recepción o unidad de estado mal arrancadas (`CSR`, `GET`/`PUT`). |
+| `tx_sin_confirmar` sube | La tarjeta no dice que ha leído lo enviado: `HECHO`/`DICHO` frente a `PUT` del envío; si `tx_uni`/`tx_dif` suben, sí que sale. |
+| `ISRC` con los bits 0 a 3 o el 31 | Error de descriptores (0: envío, 2: recepción), del MAC (3) o de hardware (31, con el detalle en `HWE_ISRC`). |
+
+Lo que no tiene (y `sky2` sí): control de flujo, sumas de comprobación por
+la tarjeta, VLAN, RSS, tramas gigantes, Wake-on-LAN, el «enlace rápido» de
+la Optima, el tratamiento de los errores de hardware y el vigilante que
+relanza la recepción si se cuelga. Los otros chips Yukon 2 y los Yukon
+antiguos (`skge`) tampoco.
+
+#### La memoria USB de prueba del HP Mini
+
+`tools/prueba-cable/hacer.sh` (después de `make usb`) hace
+`hispados-usb-cable.zip`: la imagen USB de siempre con `CABLE.BAT` en la
+raíz, que el `AUTOEXEC.BAT` llama al acabar. `CABLE.BAT` apunta
+`EQUIPO /PCI` (cómo ve el equipo la tarjeta), carga
+`HSPRED /DEPURA:C:\CABLE.TXT`, hace `CONFRED` y, si falla, apunta
+`HSPRED /INFO`, descarga el controlador y lo repite con `/SONDEO`; con la
+red en marcha, `PING /P` (a la puerta de enlace), `HSPRED /INFO` al archivo
+y pregunta si abrir `CONSOLA` (puerto 2323) para entrar a distancia. Todo
+queda en `C:\CABLE.TXT`, en la memoria USB. Las instrucciones para quien
+hace la prueba, en `tools/prueba-cable/LEEME.TXT` (arrancar el HP desde la
+memoria USB: F9). Probada en QEMU (18/11/2026), arrancando la imagen como
+disco duro: con una e1000 corre entera (CONFRED, `PING /P` con 4 de 4,
+`/INFO`, la pregunta de la consola) y sin tarjeta acaba en «HSPRED no ha
+podido poner en marcha la tarjeta»; con la Yukon, solo en el HP Mini.
+
 ### Adaptadores USB-Ethernet (CDC-ECM)
 
 Desde el 17/11/2026, un adaptador USB-Ethernet que ofrezca la **clase
@@ -466,7 +593,7 @@ volcados `PCI\*.BIN`, clase 02h):
 | Equipo | Ethernet (cable) | Inalámbrica (Wi-Fi) |
 |---|---|---|
 | Lenovo A275 | **Realtek RTL8111EP/8168EP** (`10EC:8168`, rev. 0Eh, subsistema `17AA:511F`; en 01:00.0, puertos 2400h, IRQ 5; con las funciones DASH 01:00.1-4: dos puertos serie, IPMI y un EHCI) | Realtek RTL8822BE (`10EC:B822`, en 03:00.0, clase FFh) |
-| HP Mini 5103 (los dos) | **Marvell Yukon 88E8059 «Yukon Optima»** (`11AB:4381`, rev. 11h, subsistema `103C:1608`) | Broadcom BCM43224 (`14E4:4353`) |
+| HP Mini 5103 (los dos) | **Marvell Yukon 88E8059 «Yukon Optima»** (`11AB:4381`, rev. 11h, subsistema `103C:1608`): en HSPRED desde el 18/11/2026, **pendiente de probar** | Broadcom BCM43224 (`14E4:4353`) |
 | MacBook Air 2012 | — (no tiene; el adaptador de Apple por Thunderbolt es una Broadcom BCM57762, `tg3`). Con un adaptador USB Realtek RTL8153 (`0BDA:8153`, «USB-C a Ethernet Gigabit con concentrador de 3 puertos»): por CDC-ECM, **pendiente de probar** | Broadcom BCM43224 (`14E4:4353`) |
 
 - **A275**: la RTL8168 de `HSPRED` funciona en el Toshiba NB250 (otra
@@ -479,10 +606,10 @@ volcados `PCI\*.BIN`, clase 02h):
 - **HP Mini 5103**: la Marvell Yukon 88E8059 no tiene documentación pública
   (Marvell solo la daba con acuerdo de confidencialidad); la única fuente es
   el controlador `sky2` de Linux (GPL-2.0, compatible, unas 5.000 líneas, con
-  muchas diferencias entre modelos). Es posible pero largo: se deja para más
-  adelante. Mientras, sirve un adaptador USB-Ethernet con CDC-ECM (los
-  Realtek RTL8152/8153: ver «Adaptadores USB-Ethernet»); una tarjeta
-  PCMCIA/ExpressCard, no.
+  muchas diferencias entre modelos). **Hecha el 18/11/2026** (solo el camino
+  de la Optima) y pendiente de probar en el equipo: ver «Marvell Yukon
+  88E8059 (HP Mini 5103)». Si no fuera, sirve un adaptador USB-Ethernet con
+  CDC-ECM (los Realtek RTL8152/8153: ver «Adaptadores USB-Ethernet»).
 - **Wi-Fi** (las tres): nada por ahora (ver «Pendiente»).
 
 Probar una tarjeta: `HSPRED /INFO` dice cuál ha encontrado y si hay enlace;
@@ -622,10 +749,11 @@ igual que las del cliente: la pila no es residente.
 | HSPRED con la PCnet | 13.424 | 7.840 (descriptores, bloque de inicialización, 4 búferes de recepción y uno de envío) | — |
 | HSPRED con la Tulip | 13.328 | 7.776 (descriptores, 4 búferes de recepción y uno de envío) | — |
 | HSPRED con un adaptador USB (CDC-ECM) | 5.152 | ninguno (los búferes son de HSPUSB: ver USB.md) | — |
+| HSPRED con la Marvell Yukon | de 16.368 a 18.928 (16.512 en la prueba) | de 9.840 a 12.400 (tres anillos, cada uno al principio de una página, y 4 búferes de recepción y uno de envío repartidos por los huecos, también el de antes del primer anillo) | — |
 
-La PCnet, la Tulip y el adaptador USB no les cuestan nada a las demás: su
-parte residente (582, 556 y 152 octetos) va en tres secciones «de quita y
-pon» del archivo, ensambladas las tres para la misma dirección (justo detrás de la pila), y la instalación
+La PCnet, la Tulip, el adaptador USB y la Yukon no les cuestan nada a las demás: su
+parte residente (582, 556, 152 y 1.512 octetos) va en cuatro secciones «de quita y
+pon» del archivo, ensambladas las cuatro para la misma dirección (justo detrás de la pila), y la instalación
 deja en la memoria solo la de la tarjeta encontrada, si es una de ellas. Las
 otras cuatro siguen juntas en la parte común (se podrían pasar al mismo
 sistema: la NE2000 bajaría a unos 3 KB). Los nombres de las tarjetas ya no
@@ -636,8 +764,20 @@ la rutina de interrupción de HSPRED se queda en un vector libre (del 80h
 hacia abajo) al que no llama nadie, y así la descarga y lo demás son iguales
 que con una tarjeta PCI.
 
-El archivo `HSPRED.COM` ocupa 14,6 KB (antes 13,7; lo que no es residente
-se descarta al instalarse). Cada orden de red, de 6 a 8 KB (la pila TCP/IP
+La Yukon es la que más ocupa: sus tres anillos empiezan cada uno en una
+página de 4 KB (así se los da Linux a la tarjeta; no se sabe si le vale con
+menos), y entre el final del código y la primera página queda un hueco que
+depende de dónde cargue DOS el programa. `yk_layout` pone los anillos en el
+orden que deja más sitio (estado, recepción, envío) y mete los cinco búferes
+en los huecos, empezando por ése (antes era relleno perdido: 10.240 a 14.320
+octetos de DMA; ahora, 9.840 a 12.400). Con `LH`, el bloque de la convencional
+se recorta (AH=4Ah) a lo que se usa. Cuando funcione en el equipo de verdad
+se podrá probar a quitar la alineación (y a usar 2 búferes de recepción en
+vez de 4): ver «Pendiente».
+
+El archivo `HSPRED.COM` ocupa 20,7 KB (14,6 antes de la Yukon, de los que
+1,5 son su parte residente y el resto su instalación, su informe de `/INFO`
+y `/DEPURA`; lo que no es residente se descarta al instalarse). Cada orden de red, de 6 a 8 KB (la pila TCP/IP
 va dentro).
 
 Con `LH`, el código va en la memoria superior y los búferes de DMA (las
@@ -648,7 +788,8 @@ comprueba que el bloque es continuo. Medido en QEMU con HSPEMM: `LH HSPRED`
 deja 5.008 octetos en la memoria superior (5.600 con la PCnet, 5.568 con la
 Tulip) y, con la RTL8139, 9.776 en la convencional (los búferes; 7.872 con
 la PCnet y 7.824 con la Tulip). Para cargarse arriba, `LH` necesita un hueco
-del tamaño del archivo (13,7 KB); si no lo hay, se queda abajo.
+del tamaño del archivo (20,7 KB desde que lleva la Yukon; antes, 14,6); si no
+lo hay, se queda abajo.
 
 ## Pruebas
 
@@ -665,12 +806,39 @@ redirección; DNS (PING y DESCARGAR por nombre, y un nombre que no existe);
 `RED.INI` con `DHCP=NO`; `HSPRED /U`. Y con HSPEMM (modo V86): `LH HSPRED`
 con la NE2000, la RTL8139, la PCnet, la Tulip y la 82574L (en la memoria
 superior, con los búferes en la convencional) y la e1000, que lo dice y no
-se carga. Tres QEMU a la vez; unos 8 minutos. `TARJETAS="pcnet tulip"` prueba
+se carga. Tres QEMU a la vez (`PARALELO=2`: de dos en dos); unos 8 minutos. `TARJETAS="pcnet tulip"` prueba
 solo esas, `SOLO=tarjetas` deja fuera la parte de HSPEMM, `SOLO=v86` hace
 solo ésa, `GUARDAR=carpeta` deja allí lo que salió en la pantalla de cada
 QEMU y `VOLCAR=carpeta`, las tramas de cada uno (pcap, para `tcpdump -r`). Si no se puede crear el
 espacio de nombres ni usar el puerto 53, se saltan las pruebas de DNS (lo
 dice).
+
+`tests/run_yukon_tests.sh` (en `make test`): la Marvell Yukon 88E8059, que
+QEMU no emula. `tests/yukon_sim.py` hace con KVM (`/dev/kvm`; sin él, la
+prueba se salta) una máquina mínima en modo real —1 MB de memoria, el PIC y
+el temporizador del núcleo— donde corre `HSPRED.COM` tal cual: lo que pide al
+DOS, a la BIOS y a la BIOS PCI lo contesta el propio programa de prueba, y
+los registros de la tarjeta (en memoria y por puertos con RAP) los contesta
+un **modelo del chip** escrito con lo que se sabe por `sky2`: PHY por SMI con
+su autonegociación, unidades de precarga con sus elementos de lista, anillo
+de estado, interrupción con su «entrar y salir», ventana de la configuración
+PCI. El modelo vigila al controlador (anillos alineados, elementos con el
+bit de «vale», índices dentro del anillo, escrituras con el chip en
+reinicio, PHY usado en reinicio, configuración PCI escrita sin permiso). Se
+prueba, por memoria y por puertos, con las revisiones 0 y 1 del chip, a 100
+y a 1000 Mbit/s, con cable y sin él, con IRQ y con `/SONDEO`: carga y MAC,
+`/DEPURA` al archivo, anillos y búferes sin pisarse entre ellos ni a lo
+residente, máscara de interrupciones, enlace (también
+quitar y poner el cable en marcha), `send_pkt` (60 octetos mínimos, la
+vuelta al anillo, sin enlace dice que no), 40 tramas recibidas de varios
+tamaños de una en una y a ráfagas (la vuelta a los anillos de recepción y
+de estado), las que no son para la tarjeta o traen error, `HSPRED /INFO` con
+el residente, `/U` (la tarjeta queda en reinicio y los vectores como
+estaban) y volver a cargar; también cargado arriba (como con `LH`: los
+búferes en un bloque de la convencional, recortado a lo que usa); y que otro chip de la familia, o una tarjeta que
+no contesta, lo dicen y no se quedan. Unos 15 segundos. **Lo que no prueba:**
+que el chip de verdad se porte como el modelo (está hecho con las mismas
+suposiciones que el controlador): eso, solo en el HP Mini.
 
 `tests/run_red_usb_tests.sh` (en `make test`): la red por USB, con
 `-device usb-net` de QEMU (RNDIS en su configuración 1, CDC-ECM en la 2), en
@@ -718,8 +886,14 @@ tardan más de un tic entre una conexión y la siguiente.
 - **PCnet en modo de 16 bits (WIO)**, de reserva, por si alguna emulación
   (VMware) no admite el de 32; y Tulip de verdad: elección del medio por la
   SROM (10BASE-T, MII) y estado del enlace.
-- **Marvell Yukon** (HP Mini 5103) y **Broadcom tg3** (el adaptador
-  Thunderbolt de los Mac), a partir de los controladores de Linux.
+- **Marvell Yukon 88E8059** (HP Mini 5103): **probarla en el equipo** con
+  la memoria USB de `tools/prueba-cable` (ver su apartado). Según salga:
+  quitar lo que sobre (¿hace falta de verdad que los anillos empiecen en
+  página?: son unos 2,5 KB más), saber si los registros por puertos
+  (RAP) funcionan (para usarla con HSPEMM) y, si la interrupción va, decidir
+  si `/SONDEO` se queda.
+- **Broadcom tg3** (el adaptador Thunderbolt de los Mac), a partir del
+  controlador de Linux.
 - **Adaptadores USB**: probar el Realtek RTL8153 de verdad (MacBook Air), y
   CDC-NCM, los modos propios (RTL8152/8153, AX88179) y RNDIS: ver «Lo que
   falta» en «Adaptadores USB-Ethernet».
@@ -731,9 +905,11 @@ tardan más de un tic entre una conexión y la siguiente.
   el acuerdo de claves). No hay nada parecido en DOS. **Decisión (Carlos,
   17/11/2026): en Hispa-386 no se hace Wi-Fi** (HSPRED solo enseña la tarjeta);
   queda para Hispa-486 y posteriores (ver docs/486/HISPA-486.md).
-- **Marvell Yukon 88E8059** (11AB:4381, la de cable del HP Mini 5103): HSPRED no
-  la lleva. **Decisión (Carlos, 17/11/2026): para Hispa-Pentium**, la gama de
-  Windows XP; en Hispa-386 no se hace.
+- **Marvell Yukon 88E8059** (11AB:4381, la de cable del HP Mini 5103): el
+  17/11/2026 se dejó para Hispa-Pentium; **el 18/11/2026 Carlos pidió que
+  funcione en todas las gamas** (Hispa-386 y por encima; además sirve para
+  depurar el HP Mini a distancia con CONSOLA mientras se hace su Wi-Fi), y
+  está en HSPRED desde ese día, pendiente de la prueba en el equipo.
 - **WINSOCK.DLL (Winsock 1.1)** para Windows para Trabajo en Grupo 3.11 y
   Hispa Ventanas: una DLL de 16 bits (Open Watcom) sobre una pila TCP/IP en
   la memoria (la de `lib/red.inc` hecha residente, con varias conexiones y

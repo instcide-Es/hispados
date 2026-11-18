@@ -3,6 +3,7 @@
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  PING nombre|a.b.c.d [/N:n]   (n ecos; 4 si no se dice; Esc para)
+;  PING /P [/N:n]               (a la puerta de enlace que haya dado CONFRED)
 ;  Necesita HSPRED (u otro packet driver). Ver docs/RED.md.
 ; =============================================================================
         cpu 386
@@ -49,9 +50,21 @@ start:
         call upcase
         cmp al, 'N'
         je .n
+        cmp al, 'P'                 ; /P (/PUERTA): a la puerta de enlace
+        je .p
         cmp al, 'T'                 ; /T: hasta que se pulse Esc
         jne uso
         mov word [n_ecos], 0xFFFF
+        jmp .o
+.p:
+        cmp word [destino], 0
+        jne uso
+        mov word [destino], m_puerta
+.pl:
+        lodsb                       ; (el resto de la palabra)
+        cmp al, ' '
+        ja .pl
+        dec si
         jmp .o
 .n:
         lodsb
@@ -77,8 +90,17 @@ start:
         call red_config
         jc error
         mov si, [destino]
+        cmp si, m_puerta
+        jne .dns
+        mov eax, [my_gw]            ; la puerta de enlace de la configuración
+        mov si, m_nopuerta
+        test eax, eax
+        jz error
+        jmp .ip
+.dns:
         call dns_buscar
         jc error
+.ip:
         mov [dst_ip], eax
         mov si, m_haciendo
         call puts
@@ -232,11 +254,15 @@ ayuda:
 m_uso       db "Comprueba si otro equipo contesta por la red (eco de ICMP).", 13, 10
             db 13, 10
             db "PING nombre|dirección [/N:n] [/T]", 13, 10
+            db "PING /P [/N:n] [/T]", 13, 10
             db 13, 10
             db "  nombre     un nombre (se busca por DNS) o una dirección IP (10.0.2.2)", 13, 10
+            db "  /P         a la puerta de enlace (el router) que haya dado CONFRED", 13, 10
             db "  /N:n       n ecos (4 si no se dice)", 13, 10
             db "  /T         hasta que se pulse Esc", 13, 10
             db "Esc para en cualquier momento. Necesita HSPRED (ver CONFRED).", 13, 10, 0
+m_puerta    db "la puerta de enlace", 0
+m_nopuerta  db "La configuración de la red no tiene puerta de enlace.", 0
 m_haciendo  db 13, 10, "Haciendo ping a ", 0
 m_abre      db " [", 0
 m_con32     db " con 32 octetos de datos:", 13, 10, 0

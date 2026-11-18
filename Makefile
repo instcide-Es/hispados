@@ -778,6 +778,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)
+	tests/run_yukon_tests.sh
 	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)
 	tests/run_actualizar_tests.sh $(IMG)

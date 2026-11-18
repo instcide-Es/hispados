@@ -99,17 +99,19 @@ PIDS=()
 # (TARJETAS="pcnet tulip": solo esas; SOLO=tarjetas: sin la parte de HSPEMM)
 RONDA1=${TARJETAS:-ne2k_pci rtl8139 e1000 pcnet tulip e1000e}
 [ "${SOLO:-}" = v86 ] && RONDA1=""
-# de tres en tres, para no tener más de 3 QEMU a la vez
+# de tres en tres, para no tener más de 3 QEMU a la vez (PARALELO=2: de dos
+# en dos)
+PARALELO=${PARALELO:-3}
 set -- $RONDA1
 while [ $# -gt 0 ]; do
   PIDS=()
-  for nic in ${1:-} ${2:-} ${3:-}; do
+  for nic in $(echo "$@" | cut -d' ' -f1-$PARALELO); do
     mkimg $T/$nic.img
     corre $nic $nic 150 "${CMDS[@]}" &
     PIDS+=($!)
   done
   wait "${PIDS[@]}"
-  shift; [ $# -gt 0 ] && shift; [ $# -gt 0 ] && shift
+  for i in $(seq $PARALELO); do [ $# -gt 0 ] && shift; done
 done
 for nic in $RONDA1; do
   case $nic in
@@ -235,15 +237,17 @@ NICOPT=",romfile="
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\nDOS=HIGH,UMB\r\nFILES=30\r\n' > $T/CONFIG.SYS
 CMDS2=('3|LH HSPRED' '3|MEM /C' '2|HSPRED /INFO' '4|CONFRED' '4|PING 10.0.2.2 /N:2'
        "12|DESCARGAR $U/PRUEBA.BIN" '2|HSPRED /U' '2|ECHO fin-de-la-prueba')
-for tanda in "ne2k_pci rtl8139 e1000" "pcnet tulip e1000e"; do
+set -- ne2k_pci rtl8139 e1000 pcnet tulip e1000e
+while [ $# -gt 0 ]; do
   PIDS=()
-  for nic in $tanda; do
+  for nic in $(echo "$@" | cut -d' ' -f1-$PARALELO); do
     mkimg $T/v$nic.img
     mcopy -o -i $T/v$nic.img $T/CONFIG.SYS ::CONFIG.SYS
     corre v$nic $nic 90 "${CMDS2[@]}" &
     PIDS+=($!)
   done
   wait "${PIDS[@]}"
+  for i in $(seq $PARALELO); do [ $# -gt 0 ] && shift; done
 done
 for nic in ne2k_pci rtl8139 pcnet tulip e1000e; do
   echo "== Hispa-DOS red con HSPEMM (LH): $nic =="

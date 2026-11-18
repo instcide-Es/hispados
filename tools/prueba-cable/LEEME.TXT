@@ -1,0 +1,118 @@
+PRUEBA DE LA RED POR CABLE DEL HP MINI 5103 (18/11/2026)
+=========================================================
+
+Para qué es: la tarjeta de red de cable del HP Mini es una Marvell Yukon
+88E8059. Hispa-DOS ya la lleva, pero solo se ha podido probar con un
+simulador. Esta memoria USB sirve para ver si funciona en el HP Mini de
+verdad. No instala nada ni toca el disco duro del HP Mini.
+
+Qué hace falta:
+   - una memoria USB de 1 GB o más (se borra entera),
+   - el PC con Windows (para grabar la memoria y para subir el informe),
+   - el HP Mini 5103, su cargador y un cable de red,
+   - el router (el cable va del HP Mini al router).
+
+Son 5 pasos. Tarda unos 10 minutos.
+
+
+PASO 1. GRABAR LA MEMORIA USB (en el PC con Windows)
+-----------------------------------------------------
+   1. Descargue del FTP, de la carpeta HispaDOS/prueba-cable-hpmini, el
+      archivo hispados-usb-cable.zip.
+   2. Descomprímalo (botón derecho > «Extraer todo»). Sale el archivo
+      hispados-usb-cable.img (ocupa 512 MB).
+   3. Enchufe la memoria USB al PC y abra Rufus.
+   4. En «Dispositivo», elija la memoria USB.
+   5. Pulse «SELECCIONAR» y elija hispados-usb-cable.img.
+   6. Pulse «EMPEZAR». Si pregunta cómo escribir, elija «Imagen DD».
+      Avisa de que se borra la memoria: acepte.
+   7. Cuando ponga «PREPARADO», cierre Rufus y quite la memoria.
+   (También vale balenaEtcher, como las otras veces.)
+
+
+PASO 2. ARRANCAR EL HP MINI DESDE LA MEMORIA USB
+------------------------------------------------
+   1. Con el HP Mini apagado, enchufe la memoria USB.
+   2. Enchufe el cable de red: un extremo al HP Mini y el otro al router.
+   3. Encienda el HP Mini y pulse F9 varias veces seguidas, hasta que salga
+      el menú de arranque («Boot Options» o «Boot Device Options»).
+   4. Con las flechas, elija la memoria USB (suele salir como «USB Hard
+      Drive» o con la marca de la memoria) y pulse Intro.
+   5. Sale el menú de Hispa-DOS (Normal / Juegos / Prueba). No toque nada:
+      a los 5 segundos arranca solo «Normal».
+
+
+PASO 3. LA PRUEBA (va sola)
+---------------------------
+   1. Sale un recuadro: «PRUEBA DE LA RED POR CABLE DEL HP MINI». Pulse
+      una tecla (por ejemplo, Intro).
+   2. Hispa-DOS hace solo, por este orden:
+        - HSPRED: pone en marcha la tarjeta. Puede tardar unos 5 segundos.
+        - CONFRED: pide una dirección al router.
+        - PING: comprueba que el router contesta.
+      Si no le sale a la primera, lo vuelve a intentar de otra manera (sin
+      la interrupción de la tarjeta). No hay que hacer nada.
+   3. Al final sale un recuadro con una de estas tres frases:
+        «LA RED POR CABLE FUNCIONA»
+             -> funciona. En el PING tiene que poner «Respuesta desde...».
+        «La red todavía NO va en este equipo»
+             -> no pasa nada: para eso es la prueba. Con el informe
+                sabremos por qué.
+        «HSPRED no ha podido poner en marcha la tarjeta»
+             -> lo mismo: con el informe sabremos por qué.
+   4. Si la pantalla se queda quieta más de un minuto sin cambiar nada,
+      haga una foto de la pantalla con el móvil y apague el HP Mini
+      (botón de encendido apretado unos 5 segundos). Siga en el paso 5:
+      el informe guarda hasta donde llegó.
+
+
+PASO 4. LA CONSOLA REMOTA (solo si funciona y si quiere que entremos)
+--------------------------------------------------------------------
+   Si la red funciona, la prueba pregunta: «¿Abrir la consola remota [S,N]?»
+      - N: no se abre. Siga en el paso 5.
+      - S: se abre CONSOLA, que enseña la dirección del HP Mini (por
+        ejemplo 192.168.1.37) y el puerto 2323. Con ella podemos escribir
+        órdenes en el HP Mini desde aquí; usted ve en la pantalla todo lo
+        que hacemos.
+   Para que podamos entrar desde fuera:
+      1. En el PC, entre en el router (en el navegador, http://192.168.1.1
+         o la dirección que tenga el suyo).
+      2. Busque «Redirección de puertos» (también puede llamarse «NAT»,
+         «Port forwarding» o «Servidor virtual») y añada una regla:
+            protocolo TCP, puerto externo 2323,
+            IP interna = la del HP Mini (la que sale en su pantalla),
+            puerto interno 2323.
+      3. Escríbanos su IP pública (en el PC, busque en Google «cuál es mi
+         IP»).
+      4. Cuando nos conectemos, en la pantalla del HP Mini saldrá
+         «Código de acceso: 123456» (6 cifras). Escríbanos ese código
+         enseguida: caduca al minuto. Si caduca, volvemos a conectar y
+         sale otro. Sin ese código no entra nadie.
+      5. Con Esc, en el HP Mini, se cierra la consola cuando quiera.
+      6. Cuando acabemos, borre la regla del router.
+
+
+PASO 5. SUBIR EL INFORME
+------------------------
+   1. En el HP Mini escriba APAGAR e Intro (o apriete el botón de
+      encendido unos 5 segundos).
+   2. Quite la memoria USB y enchúfela en el PC. Ábrala: dentro está el
+      archivo CABLE.TXT (es el informe).
+   3. Súbalo al FTP, a la carpeta HispaDOS/prueba-cable-hpmini (donde está
+      este LEEME), con las fotos si ha hecho alguna.
+   Con eso basta. Nos lo miramos y le decimos algo por escrito.
+
+
+Otras cosas
+-----------
+   - Para repetir la prueba sin reiniciar, escriba CABLE e Intro. Cada vez
+     se añade al final de CABLE.TXT (no se borra lo anterior).
+   - La memoria USB sigue siendo un Hispa-DOS normal: se puede usar para
+     otras cosas o volver a grabar con otra imagen.
+   - Las órdenes que usa la prueba, por si hace falta escribirlas a mano:
+        HSPRED /DEPURA:C:\CABLE.TXT        pone en marcha la tarjeta y lo apunta todo
+        HSPRED /SONDEO                     lo mismo, sin usar la interrupción
+        HSPRED /PUERTOS   o   /MEMORIA     elegir por dónde se habla con la tarjeta
+        HSPRED /INFO /DEPURA:C:\CABLE.TXT  el informe (con HSPRED ya puesto)
+        HSPRED /U                          quitar HSPRED
+        CONFRED      PING /P      CONSOLA
