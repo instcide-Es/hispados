@@ -116,7 +116,7 @@ packet driver Ethernet, así que todo lo que ya usaba `HSPRED` (y el
 navegador) funciona igual por Wi-Fi; la red se elige con la orden `WIFI`. El
 controlador de la radio son los fuentes de `brcmsmac` de Linux sin tocar,
 sobre una capa propia; la gestión 802.11 y WPA2 son nuestras. Va en un
-núcleo de 32 bits en memoria extendida (2 MB), con un residente de 4,5 KB.
+núcleo de 32 bits en memoria extendida (2 MB), con un residente de 4,6 KB.
 Todo, en [docs/WIFI.md](../WIFI.md). Falta la prueba en el equipo de verdad
 (hay una imagen preparada) y la ventana de Hispa Ventanas para elegir red.
 
