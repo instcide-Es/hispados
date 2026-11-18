@@ -2,12 +2,14 @@
 ;  Hispa-DOS CONSOLA.COM - consola remota por red (abierta, visible, con código)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  CONSOLA [/PUERTO:n]
+;  CONSOLA [/PUERTO:n] [/CADUCA:s]
 ;  Escucha en un puerto TCP (2323 si no se dice) y espera a que alguien se
 ;  conecte. NO es una puerta trasera: la lanza el usuario a mano, avisa en la
-;  pantalla del equipo de cada conexión y, por cada una, genera un CÓDIGO de 6
-;  cifras (vale 60 s) que se enseña aquí y hay que decirle a quien se conecta;
-;  sin ese código no se entra. Dentro, ejecuta órdenes (DIR, VER, TYPE...) con
+;  pantalla del equipo de cada conexión y enseña aquí, desde el principio, un
+;  CÓDIGO de 6 cifras que hay que decirle a quien se conecta; sin ese código
+;  no se entra. El código es de un solo uso, se cambia tras 3 intentos
+;  fallidos y caduca a los 10 minutos (/CADUCA:s), y siempre se ve en la
+;  pantalla el vigente y lo que le queda. Dentro, ejecuta órdenes (DIR, VER, TYPE...) con
 ;  %COMSPEC% /C y le manda su salida. SALIR cierra la sesión; Esc en el teclado
 ;  del equipo cierra la sesión (o CONSOLA si no hay sesión). Ver docs/CONSOLA.md.
 ;
@@ -20,6 +22,12 @@
         org 0x100
 
 PUERTO_DEF  equ 2323
+CADUCA_DEF  equ 600                 ; el código caduca a los 10 minutos (s)
+TICS_DIA    equ 0x1800B0            ; tics del reloj de la BIOS en un día
+FALLOS_MAX  equ 3                   ; intentos fallidos con un mismo código
+PAUSA_TICS  equ 546                 ; 30 s sin aceptar conexiones tras ellos,
+PAUSA_MAX   equ 546 * 32            ; el doble cada vez, hasta 16 minutos
+ESPERA_MAL  equ 36                  ; 2 s antes de contestar a un código malo
 LINEA_MAX   equ 256
 RX_SZ       equ 1024
 OBUF_SZ     equ 1024
@@ -40,6 +48,9 @@ start:
         ; la rutina que recibe los datos de la conexión
         mov word [t_rutina], con_rx
         mov word [puerto], PUERTO_DEF
+        mov dword [cod_dur], CADUCA_DEF * 182 / 10
+        mov dword [bloq_dur], PAUSA_TICS
+        call azar_ini
         ; la unidad de arranque: para COMMAND.COM y el archivo temporal
         mov ax, 0x3305
         int 0x21                    ; DL = unidad de arranque (1 = A)
@@ -63,6 +74,8 @@ start:
         cmp al, '?'
         je ayuda
         call upcase
+        cmp al, 'C'
+        je .fc
         cmp al, 'P'
         jne .o
 .fp:
@@ -78,6 +91,25 @@ start:
         cmp eax, 65535
         ja uso
         mov [puerto], ax
+        jmp .o
+.fc:                                ; /CADUCA:s (de 5 s a 1 día)
+        lodsb
+        cmp al, 13
+        je uso
+        cmp al, ':'
+        jne .fc
+        call parse_num
+        jc uso
+        cmp eax, 5
+        jb uso
+        cmp eax, 86400
+        ja uso
+        imul eax, eax, 182
+        add eax, 9
+        xor edx, edx
+        mov ecx, 10
+        div ecx
+        mov [cod_dur], eax
         jmp .o
 .fin_args:
         call find_comspec
@@ -108,14 +140,20 @@ start:
         call putnum
         mov si, m_banner3
         call puts
+        ; el primer código, ya en la pantalla (antes de que llegue nadie)
+        mov si, m_cod_ini
+        call nuevo_codigo
 
 ; ---- esperar una conexión ----
 esperar:
         mov bx, [puerto]
         call tcp_escuchar
         mov byte [est_ant], 3           ; (diag) estado de partida: escuchando
+        mov dword [cuenta_ult], -1      ; volver a pintar la línea del código
 .espl:
         call red_sondear
+        call azar_mezcla
+        call cuenta_atender
         call tcp_estado
         ; diagnóstico: si el estado del saludo TCP cambia, escribirlo en pantalla
         ; y en CONSOLA.LOG (así se ve si el SYN llega y si se contesta el SYN+ACK)
@@ -138,6 +176,7 @@ esperar:
 ;   3 = vuelto a escuchar
 diag_estado:
         pushad
+        call linea_cierra
         cmp al, 4
         jne .e2
         mov si, m_diag_syn
@@ -169,21 +208,41 @@ nored:
 
 ; ---- una conexión ha llegado: código de acceso ----
 conectada:
-        call gen_codigo
-        call codigo_texto
-        ; en la pantalla del equipo
+        ; quién llama y cuándo, al azar
+        mov eax, [t_ip]
+        call azar_mezcla_eax
+        movzx eax, word [t_rpuerto]
+        call azar_mezcla_eax
+        call linea_cierra
+        ; ¿en la pausa tras 3 intentos fallidos?
+        cmp byte [bloqueado], 0
+        je .nobloq
+        mov si, bloq_ini
+        call transcurrido
+        cmp eax, [bloq_dur]
+        jae .fin_bloq
+        mov si, m_rechazada
+        call puts
+        mov eax, [t_ip]
+        call ip_poner
+        mov si, m_rechazada2
+        call puts
+        mov si, m_espere
+        call manda_sz
+        jmp sesion_fin
+.fin_bloq:
+        mov byte [bloqueado], 0
+.nobloq:
+        ; en la pantalla del equipo (el código ya está en ella)
         mov si, m_entrante
         call puts
         mov eax, [t_ip]
         call ip_poner
-        mov si, m_codigo1
+        mov si, m_entrante2
         call puts
-        mov si, cod_txt
-        call puts
-        mov si, m_codigo2
-        call puts
+        mov dword [cuenta_ult], -1
         ; al cliente: pedir el código
-        mov byte [intentos], 3
+        mov byte [intentos], FALLOS_MAX
         mov si, m_pide
         call manda_sz
         jc sesion_fin
@@ -193,19 +252,65 @@ conectada:
         je sesion_fin               ; conexión cerrada
         cmp al, 2
         je sesion_fin               ; Esc en el teclado del equipo
-        call codigo_caducado
-        jc .caducado
+        call cuenta_atender         ; (si acaba de caducar, ya hay otro)
         call cmp_codigo
         cmp al, 1
         je concedido
-        ; código incorrecto
+        ; código incorrecto: se apunta en la pantalla y cuenta para ESTE código
+        inc byte [fallos]
+        call linea_cierra
+        mov si, m_fallo
+        call puts
+        mov eax, [t_ip]
+        call ip_poner
+        mov si, m_fallo2
+        call puts
+        movzx eax, byte [fallos]
+        call putnum
+        mov si, m_fallo3
+        call puts
+        mov dword [cuenta_ult], -1
+        call espera_mal             ; sin prisas para quien prueba
+        cmp byte [fallos], FALLOS_MAX
+        jae .quemado
         dec byte [intentos]
         jz .corta
         mov si, m_malcod
         call manda_sz
         jc sesion_fin
         jmp .pide
-.caducado:
+.quemado:
+        ; 3 fallos con este código (en esta conexión o sumando las de antes):
+        ; otro código en la pantalla y una pausa sin aceptar conexiones
+        ; (la pausa: 30 s la primera vez y el doble cada vez que se vuelve a
+        ; quemar un código sin que nadie entre, hasta 16 minutos)
+        cmp byte [bloq_veces], 0
+        je .pausa
+        cmp dword [bloq_dur], PAUSA_MAX
+        jae .pausa
+        shl dword [bloq_dur], 1
+.pausa:
+        inc byte [bloq_veces]
+        jnz .pausa1
+        dec byte [bloq_veces]
+.pausa1:
+        call linea_cierra
+        mov si, m_cod_fallos
+        call puts
+        mov eax, [bloq_dur]
+        imul eax, eax, 10
+        xor edx, edx
+        mov ecx, 182
+        div ecx
+        call putnum
+        mov si, m_cod_fallos2
+        call nuevo_codigo
+        call tic
+        mov [bloq_ini], eax
+        mov byte [bloqueado], 1
+        mov si, m_demasiados
+        call manda_sz
+        jmp sesion_fin
 .corta:
         mov si, m_malcod
         call manda_sz
@@ -213,6 +318,11 @@ conectada:
 
 ; ---- acceso concedido: consola de órdenes ----
 concedido:
+        mov byte [cod_valido], 0    ; un solo uso: este ya no vale
+        mov byte [fallos], 0
+        mov byte [bloq_veces], 0    ; la pausa vuelve a ser de 30 s
+        mov dword [bloq_dur], PAUSA_TICS
+        call linea_cierra
         mov si, m_conectado
         call puts
         mov eax, [t_ip]
@@ -238,12 +348,18 @@ concedido:
 ; ---- fin de la sesión: cerrar y volver a escuchar ----
 sesion_fin:
         call tcp_cerrar
+        call linea_cierra
         mov si, m_cerrada
         call puts
+        cmp byte [cod_valido], 0
+        jne esperar
+        mov si, m_cod_usado         ; el de esta sesión ya se usó: otro
+        call nuevo_codigo
         jmp esperar
 
 ; ---- Esc sin sesión: salir del programa (suelta el puerto) ----
 salir:
+        call linea_cierra
         mov si, m_fin
         call puts
         xor al, al
@@ -337,6 +453,11 @@ con_recv_linea:
         mov word [linea_len], 0
 .l:
         call red_sondear
+        call azar_mezcla
+        cmp byte [cod_valido], 0    ; antes de entrar: la cuenta atrás sigue
+        je .nocta
+        call cuenta_atender
+.nocta:
         call rx_getc
         jnc .got
         cmp byte [t_fin], 0
@@ -697,36 +818,239 @@ manda_archivo:
 ; =============================================================================
 ;  Código de acceso
 ; =============================================================================
-; Genera un código de 6 cifras (100000..999999) y su caducidad (60 s). Se
-; siembra con el reloj (tics) y el puerto de origen del cliente.
-gen_codigo:
-        push eax
-        push ebx
-        push ecx
-        push edx
+; Desde que arranca CONSOLA hay siempre un código vigente en la pantalla del
+; equipo (nunca se manda por la red). Se cambia por otro, y se enseña:
+;   - cuando alguien entra con él (un solo uso; el nuevo sale al acabar),
+;   - tras 3 intentos fallidos con él (en una conexión o sumando varias),
+;   - cuando caduca (10 minutos, o /CADUCA:s), aunque no llegue nadie.
+; La línea «Código de acceso: 123456   caduca en 9:59» se repinta en su sitio
+; cada segundo (retorno de carro sin salto de línea); linea_cierra la termina
+; antes de escribir cualquier otra cosa.
+
+; SI = el porqué (texto) -> código nuevo, vigente, y en la pantalla
+nuevo_codigo:
+        pushad
+        call linea_cierra
+        call puts
+        call gen_codigo
+        call codigo_texto
         call tic
+        mov [cod_ini], eax
+        mov byte [cod_valido], 1
+        mov byte [fallos], 0
+        mov dword [cuenta_ult], -1
+        call cuenta_atender
+        popad
+        ret
+
+; Si el código ha caducado, otro; si no, repinta lo que le queda (solo cuando
+; cambia el segundo). No hace nada sin código vigente (durante una sesión).
+cuenta_atender:
+        pushad
+        cmp byte [cod_valido], 0
+        je .r
+        mov si, cod_ini
+        call transcurrido
+        cmp eax, [cod_dur]
+        jb .vig
+        mov si, m_cod_cad
+        call nuevo_codigo
+        jmp .r
+.vig:
+        mov ecx, [cod_dur]
+        sub ecx, eax                ; tics que le quedan
+        imul eax, ecx, 10
+        add eax, 181
+        xor edx, edx
+        mov ebx, 182
+        div ebx                     ; segundos (redondeando hacia arriba)
+        cmp eax, [cuenta_ult]
+        je .r
+        mov [cuenta_ult], eax
+        push eax
+        mov si, m_linea1
+        call puts
+        mov si, cod_txt
+        call puts
+        mov si, m_linea2
+        call puts
+        pop eax
+        xor edx, edx
+        mov ebx, 60
+        div ebx                     ; EAX = minutos, EDX = segundos
+        push edx
+        call putnum
+        mov al, ':'
+        call putc
+        pop eax
+        mov bl, 10
+        div bl                      ; AL = decenas, AH = unidades
+        add ax, '00'
+        call putc
+        mov al, ah
+        call putc
+        mov si, m_linea3
+        call puts
+        mov byte [viva], 1
+.r:
+        popad
+        ret
+
+; termina la línea del código si está a medio escribir
+linea_cierra:
+        cmp byte [viva], 0
+        je .r
+        mov byte [viva], 0
+        call crlf
+.r:
+        ret
+
+; SI -> dd con un tic de partida. EAX = tics desde entonces (pasando la
+; medianoche, cuando el contador de la BIOS vuelve a cero).
+transcurrido:
+        call tic
+        sub eax, [si]
+        jnc .r
+        add eax, TICS_DIA
+.r:
+        ret
+
+; 2 s antes de contestar a un código erróneo (atendiendo a la red)
+espera_mal:
+        pushad
+        call tic
+        mov [espera_ini], eax
+.l:
+        call red_sondear
+        call azar_mezcla
+        mov si, espera_ini
+        call transcurrido
+        cmp eax, ESPERA_MAL
+        jb .l
+        popad
+        ret
+
+; ---- azar ----
+; Un estado de 64 bits (azar_s0, azar_s1) al que se le va echando lo que no
+; se puede adivinar desde fuera: el contador del temporizador (PIT, canal 0,
+; que da 1,19 millones de vueltas por segundo), el reloj de la BIOS, el
+; contador de ciclos del procesador (RDTSC, si lo tiene: Pentium o más), y en
+; cada conexión la IP y el puerto de quien llama. Se mezcla en CADA vuelta de
+; los bucles de espera (red, teclado), así que el momento exacto en que se
+; pide un código depende de cuándo han llegado las tramas y las teclas. La
+; mezcla es la de los finalizadores de MurmurHash3 (no es criptografía, pero
+; no hay atajo: el código no sale del reloj sin más).
+azar_ini:
+        pushad
+        mov dword [azar_s0], 0x6A09E667
+        mov dword [azar_s1], 0xBB67AE85
+        ; ¿CPUID? (si se puede cambiar el bit 21 de EFLAGS)
+        pushfd
+        pop eax
+        mov ecx, eax
+        xor eax, 0x200000
+        push eax
+        popfd
+        pushfd
+        pop eax
+        push ecx
+        popfd
+        xor eax, ecx
+        test eax, 0x200000
+        jz .sin
+        mov eax, 1
+        db 0x0F, 0xA2               ; CPUID
+        test dl, 0x10               ; TSC
+        jz .sin
+        mov byte [tsc_hay], 1
+.sin:
+        mov cx, 8
+.m:
+        call azar_mezcla
+        loop .m
+        popad
+        ret
+
+; azar_mezcla: echa al estado el PIT, el reloj y el TSC.
+; azar_mezcla_eax: lo mismo, más EAX.
+azar_mezcla:
+        pushad
+        xor eax, eax
+        jmp short azar_comun
+azar_mezcla_eax:
+        pushad
+azar_comun:
         mov ebx, eax
-        imul eax, eax, 1103515245
-        movzx edx, word [t_rpuerto]
-        add eax, edx
-        ror ebx, 7
-        xor eax, ebx
-        add eax, 12345
+        pushf
+        cli
+        xor al, al
+        out 0x43, al                ; PIT: congelar la cuenta del canal 0
+        in al, 0x40
+        mov cl, al
+        in al, 0x40
+        mov ch, al
+        popf
+        movzx ecx, cx
+        xor ebx, ecx
+        call tic
+        rol eax, 16
+        xor ebx, eax
+        cmp byte [tsc_hay], 0
+        je .m
+        db 0x0F, 0x31               ; RDTSC -> EDX:EAX
+        xor ebx, eax
+        rol edx, 7
+        xor ebx, edx
+.m:
+        mov eax, [azar_s0]
+        add eax, ebx
+        xor eax, [azar_s1]
+        imul eax, eax, 0x85EBCA6B
+        mov edx, eax
+        shr edx, 13
+        xor eax, edx
+        imul eax, eax, 0xC2B2AE35
+        mov edx, eax
+        shr edx, 16
+        xor eax, edx
+        mov [azar_s0], eax
+        mov edx, [azar_s1]
+        rol edx, 5
+        add edx, eax
+        add edx, 0x9E3779B9
+        mov [azar_s1], edx
+        popad
+        ret
+
+; Un código de 6 cifras (100000..999999) en [codigo], distinto del anterior.
+; Sin sesgo: de los 32 bits se descartan los valores por encima del último
+; múltiplo entero de 900000 y se vuelve a sacar.
+gen_codigo:
+        pushad
+.otra:
+        call azar_mezcla
+        call azar_mezcla
+        mov eax, [azar_s0]
+        mov edx, [azar_s1]
+        rol edx, 16
+        xor eax, edx
+        imul eax, eax, 0x27D4EB2D
+        mov edx, eax
+        shr edx, 15
+        xor eax, edx
+        cmp eax, 4772 * 900000
+        jae .otra
         xor edx, edx
         mov ecx, 900000
         div ecx                     ; EDX = resto 0..899999
         add edx, 100000
+        cmp edx, [codigo]
+        je .otra
         mov [codigo], edx
-        call tic
-        add eax, 1092               ; ~60 s (18,2 tics/s)
-        mov [cod_exp], eax
-        pop edx
-        pop ecx
-        pop ebx
-        pop eax
+        popad
         ret
 
-; [codigo] -> cod_txt (6 cifras ASCIIZ con ceros por delante)
+; [codigo] -> cod_txt (6 cifras ASCIIZ)
 codigo_texto:
         push eax
         push ebx
@@ -752,41 +1076,34 @@ codigo_texto:
         pop eax
         ret
 
-; CF = 1 si el código ha caducado
-codigo_caducado:
-        push eax
-        push edx
-        call tic
-        mov edx, [cod_exp]
-        cmp eax, edx                ; CF = 1 si eax < edx (aún vigente)
-        cmc                         ; -> CF = 1 si caducado
-        pop edx
-        pop eax
-        ret
-
-; -> AL = 1 si 'linea' == cod_txt
+; -> AL = 1 si 'linea' es el código vigente. Sin atajos: mira siempre las 6
+; cifras (no se para en la primera distinta) y sin código vigente no vale
+; nada.
 cmp_codigo:
-        push si
-        push di
-        mov si, linea
-        mov di, cod_txt
-.l:
-        mov ah, [si]
-        cmp ah, [di]
-        jne .no
-        test ah, ah
-        jz .si
-        inc si
-        inc di
-        jmp .l
-.si:
-        mov al, 1
-        jmp .r
-.no:
+        push bx
+        xor ah, ah
+        cmp word [linea_len], 6
+        je .l6
+        mov ah, 1
+.l6:
+        cmp byte [cod_valido], 0
+        jne .v
+        or ah, 1
+.v:
+        xor bx, bx
+.c:
+        mov al, [linea + bx]
+        xor al, [cod_txt + bx]
+        or ah, al
+        inc bx
+        cmp bx, 6
+        jb .c
         xor al, al
+        test ah, ah
+        jnz .r
+        mov al, 1
 .r:
-        pop di
-        pop si
+        pop bx
         ret
 
 ; DS:SI vs DS:DI (ASCIIZ) -> CF = 1 si iguales
@@ -868,9 +1185,22 @@ m_banner2   db "  Puerto: ", 0
 m_banner3   db 13, 10
             db "  Abra ese puerto TCP en el router hacia este equipo para entrar desde fuera.", 13, 10
             db "Esperando conexión...  (Esc para cerrar)", 13, 10, 0
-m_entrante  db 13, 10, "Conexión entrante desde ", 0
-m_codigo1   db ". Código de acceso: ", 0
-m_codigo2   db " (válido 60 s). Dígaselo a quien se conecta.", 13, 10, 0
+m_entrante  db "Conexión entrante desde ", 0
+m_entrante2 db ": pide el código de acceso.", 13, 10, 0
+m_cod_ini   db "Código de acceso para entrar (de un solo uso; dígaselo a quien se conecta):", 13, 10, 0
+m_cod_usado db "El código anterior ya se ha usado. Para la próxima conexión:", 13, 10, 0
+m_cod_cad   db "El código anterior ha caducado. El nuevo:", 13, 10, 0
+m_cod_fallos db "(!) 3 intentos fallidos con el código anterior: se ha cambiado.", 13, 10
+            db "    Durante ", 0
+m_cod_fallos2 db " s no se aceptan conexiones. El nuevo:", 13, 10, 0
+m_linea1    db 13, "  Código de acceso: ", 0
+m_linea2    db "   caduca en ", 0
+m_linea3    db "  ", 0
+m_fallo     db "(!) Código erróneo desde ", 0
+m_fallo2    db " (", 0
+m_fallo3    db " de 3 con este código).", 13, 10, 0
+m_rechazada db "Conexión de ", 0
+m_rechazada2 db " rechazada: pausa tras 3 intentos fallidos.", 13, 10, 0
 m_conectado db "CONECTADO desde ", 0
 m_conectado2 db ". Esc para cerrar la sesión.", 13, 10, 0
 m_cerrada   db "Sesión cerrada. Esperando conexión...  (Esc para cerrar)", 13, 10, 0
@@ -883,6 +1213,8 @@ m_fin_linea db 13, 10, 0
 ; al cliente (por la conexión)
 m_pide      db "Hispa-DOS CONSOLA. Introduzca el código de acceso: ", 0
 m_malcod    db "Código no válido.", 13, 10, 0
+m_demasiados db "Código no válido. Demasiados intentos: el código ha cambiado.", 13, 10, 0
+m_espere    db "Demasiados intentos fallidos. Espere y vuelva a probar más tarde.", 13, 10, 0
 m_concedido db 13, 10, "Acceso concedido. Escriba SALIR para terminar.", 13, 10, 0
 m_hasta     db "Hasta luego.", 13, 10, 0
 m_nodir     db "Ruta no encontrada.", 13, 10, 0
@@ -900,12 +1232,14 @@ comspec_def db "A:\COMMAND.COM", 0     ; idem (si no hay %COMSPEC%)
 
 m_uso       db "Consola remota de Hispa-DOS: deja que alguien entre por la red a este equipo.", 13, 10
             db 13, 10
-            db "CONSOLA [/PUERTO:n]", 13, 10
+            db "CONSOLA [/PUERTO:n] [/CADUCA:s]", 13, 10
             db 13, 10
             db "  /PUERTO:n   puerto TCP donde escuchar (2323 si no se dice)", 13, 10
+            db "  /CADUCA:s   segundos que vale cada código (600 = 10 minutos si no se dice)", 13, 10
             db 13, 10
-            db "Escucha y, al conectarse alguien, enseña en ESTA pantalla un código de 6", 13, 10
-            db "cifras (vale 60 s) que hay que decirle; sin ese código no se entra. Dentro,", 13, 10
+            db "Enseña en ESTA pantalla un código de 6 cifras que hay que decirle a quien", 13, 10
+            db "se conecta; sin él no se entra. Es de un solo uso, cambia tras 3 intentos", 13, 10
+            db "fallidos y caduca solo (en la pantalla se ve lo que le queda). Dentro,", 13, 10
             db "se ejecutan órdenes (DIR, VER, TYPE...) y se ve su salida. Los programas de", 13, 10
             db "pantalla completa (EDITAR, menús) no van por ahora. SALIR cierra la sesión;", 13, 10
             db "Esc en el teclado del equipo cierra la sesión (o CONSOLA si no hay sesión).", 13, 10
@@ -916,10 +1250,23 @@ m_uso       db "Consola remota de Hispa-DOS: deja que alguien entre por la red a
         section .bss
 puerto      resw 1
 intentos    resb 1
+fallos      resb 1                  ; intentos fallidos con el código vigente
+cod_valido  resb 1                  ; 0: no hay código (se acaba de usar)
+viva        resb 1                  ; la línea del código está a medio escribir
+bloqueado   resb 1                  ; pausa tras 3 fallos
+tsc_hay     resb 1                  ; el procesador tiene RDTSC
+bloq_ini    resd 1
+bloq_dur    resd 1                  ; tics de la pausa
+bloq_veces  resb 1                  ; códigos quemados seguidos
+espera_ini  resd 1
+cod_ini     resd 1                  ; tic en que se generó el código
+cod_dur     resd 1                  ; tics que vale
+cuenta_ult  resd 1                  ; los segundos que se enseñan ahora
+azar_s0     resd 1
+azar_s1     resd 1
 est_ant     resb 1                  ; (diag) estado TCP anterior, para ver los cambios
 uni_prev    resb 1
 codigo      resd 1
-cod_exp     resd 1
 cod_txt     resb 8
 arg_ptr     resw 1
 linea_len   resw 1

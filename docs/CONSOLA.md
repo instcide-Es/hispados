@@ -4,8 +4,8 @@
 trabajar o diagnosticar, con el permiso del dueño en cada conexión. No es una
 puerta trasera: la lanza el usuario **a mano**, **no arranca sola** ni se
 instala por omisión (no va en `AUTOEXEC.BAT`), **avisa en la pantalla** de cada
-conexión, exige **autorización humana por un código**, y se cierra cuando el
-usuario quiere. Todo el código está en el proyecto (abierto): es material de
+conexión, exige **autorización humana por un código** que solo se ve en la
+pantalla del equipo, y se cierra cuando el usuario quiere. Todo el código está en el proyecto (abierto): es material de
 diagnóstico y de trabajo controlado por el dueño del equipo.
 
 ```
@@ -14,12 +14,25 @@ A:\>CONFRED
 A:\>CONSOLA
 
 Consola remota de Hispa-DOS ACTIVADA.
-  IP: 10.0.2.15  Puerto: 2323
+  IP: 10.0.2.15  Puerto: 2.323
   Abra ese puerto TCP en el router hacia este equipo para entrar desde fuera.
 Esperando conexión...  (Esc para cerrar)
+Código de acceso para entrar (de un solo uso; dígaselo a quien se conecta):
+  Código de acceso: 537999   caduca en 9:41
+```
 
-Conexión entrante desde 10.0.2.2. Código de acceso: 537999 (válido 60 s). Dígaselo a quien se conecta.
+El código está en la pantalla **desde el principio**, antes de que llegue
+nadie: se le puede pasar de una vez a quien va a entrar, sin esperar a que se
+conecte. La última línea se repinta en su sitio cada segundo con lo que le
+queda. Cuando llega alguien:
+
+```
+[red] Conexión TCP establecida.
+Conexión entrante desde 10.0.2.2: pide el código de acceso.
 CONECTADO desde 10.0.2.2. Esc para cerrar la sesión.
+Sesión cerrada. Esperando conexión...  (Esc para cerrar)
+El código anterior ya se ha usado. Para la próxima conexión:
+  Código de acceso: 806114   caduca en 10:00
 ```
 
 Y lo que ve quien se conecta (con `telnet`, `nc`, PuTTY en modo «raw»...):
@@ -40,14 +53,17 @@ Hasta luego.
 ## Uso
 
 ```
-CONSOLA [/PUERTO:n]
+CONSOLA [/PUERTO:n] [/CADUCA:s]
 ```
 
 1. Cargar el controlador de red y configurarla: `HSPRED` y `CONFRED` (ver
    [docs/RED.md](RED.md)). Si no, CONSOLA lo dice y sale:
    «Cargue HSPRED y configure la red (CONFRED) antes de usar CONSOLA».
 2. `CONSOLA` escucha en el puerto TCP **2323** (se cambia con `/PUERTO:n`) y
-   enseña la IP del equipo y el puerto. Se queda esperando una conexión.
+   enseña la IP del equipo y el puerto, y el **código de acceso** vigente con
+   lo que le queda. Se queda esperando una conexión. `/CADUCA:s`: los
+   segundos que vale cada código (600, 10 minutos, si no se dice; de 5 a
+   86.400).
 3. **Para entrar desde dentro de la misma red** (otro PC de casa o de la
    oficina), quien se conecta usa `telnet <IP> 2323` (o `nc`, o PuTTY en modo
    «raw»/«telnet»).
@@ -55,9 +71,10 @@ CONSOLA [/PUERTO:n]
    **router** el puerto 2323 (TCP) hacia la IP de este equipo
    («port forwarding»/«redirección de puertos»); entonces se conecta a la IP
    pública del router.
-4. En cada conexión, CONSOLA genera un **código de 6 cifras** y lo enseña en la
-   pantalla de ESTE equipo. El dueño se lo dice (por teléfono, por mensaje...)
-   a quien se conecta. Sin ese código, no se entra.
+4. El **código de 6 cifras** está en la pantalla de ESTE equipo desde que se
+   lanza CONSOLA. El dueño se lo dice (por mensaje, por teléfono...) a quien
+   va a entrar, cuando quiera, aunque no se haya conectado todavía. Sin ese
+   código, no se entra.
 5. Dentro, se escriben órdenes como en el intérprete (`DIR`, `VER`, `TYPE`,
    `COPY`, `CD`, cambiar de unidad...). `SALIR` cierra la sesión.
 6. En cualquier momento, **Esc** en el teclado del equipo cierra la sesión (y,
@@ -65,22 +82,47 @@ CONSOLA [/PUERTO:n]
 
 ## La seguridad por código
 
-- Por **cada** conexión que llega, CONSOLA genera un **código único de 6
-  cifras**, aleatorio (sembrado con el reloj del equipo y el puerto de origen),
-  **válido 60 segundos** desde que se genera.
-- El código se enseña **solo en la pantalla del equipo** («Código de acceso:
-  123456»). Nunca se manda por la red antes de que se introduzca. El dueño
-  decide a quién se lo dice.
+- Siempre hay **un código vigente de 6 cifras** (100000 a 999999: 900.000
+  posibles) y se enseña **solo en la pantalla del equipo** («Código de acceso:
+  123456   caduca en 9:41»). Nunca se manda por la red. El dueño decide a
+  quién se lo dice.
 - A quien se conecta, CONSOLA le pide: «Introduzca el código de acceso:».
-- Si el código **coincide y no ha caducado**, se concede el acceso. Si no
-  coincide, caduca, o no hay un código vigente, dice «Código no válido» y, tras
-  **3 intentos**, corta la conexión. **Sin un código válido y vigente, ninguna
-  conexión entra.**
-- Cada conexión nueva genera un código **nuevo** (no se reutiliza el anterior).
+  Si coincide con el vigente, entra.
+- **Un solo uso.** En cuanto alguien entra, ese código deja de valer; al
+  acabar la sesión sale otro en la pantalla («El código anterior ya se ha
+  usado. Para la próxima conexión:»).
+- **3 intentos fallidos y se cambia.** Cada código erróneo se apunta en la
+  pantalla del equipo («(!) Código erróneo desde 1.2.3.4 (1 de 3 con este
+  código)») y se contesta a los 2 segundos. Al tercer fallo con el mismo
+  código —en una sola conexión **o sumando conexiones seguidas**— CONSOLA corta,
+  enseña **otro código** y hace una **pausa** sin aceptar conexiones («Espere
+  y vuelva a probar más tarde»): 30 segundos la primera vez y **el doble**
+  cada vez que se vuelve a quemar un código sin que nadie entre (1 minuto, 2,
+  4... hasta 16 minutos); cuando alguien entra, vuelve a 30 s. Así nadie
+  puede probar de 3 en 3 contra el mismo código, ni a toda prisa contra los
+  siguientes.
+- **Caduca solo.** Cada código vale **10 minutos** (o lo que diga
+  `/CADUCA:s`) aunque nadie se conecte; al caducar sale otro en la pantalla
+  («El código anterior ha caducado. El nuevo:»). Si caduca mientras alguien
+  lo está tecleando, se le dice «Código no válido» y se le da el nuevo.
+- **Azar.** El código no sale del reloj sin más: CONSOLA va echando a un
+  estado de 64 bits, en cada vuelta de sus bucles de espera, el contador del
+  temporizador del PC (PIT, 1,19 millones de vueltas por segundo), el reloj
+  de la BIOS, el contador de ciclos del procesador (`RDTSC`, si es un Pentium
+  o posterior) y, en cada conexión, la IP y el puerto de quien llama; lo
+  mezcla con los finalizadores de MurmurHash3 y saca el código sin sesgo
+  (descarta lo que no cabe en un múltiplo entero de 900.000). Nunca repite el
+  anterior.
+- **Comparación sin atajos.** Se miran siempre las 6 cifras enteras (no se
+  para en la primera distinta, así que el tiempo de la respuesta no dice
+  cuántas se han acertado), y sin código vigente no vale nada.
 
-Así, aunque el puerto esté abierto en el router, nadie entra sin que el dueño,
-delante del equipo, lea el código del momento y se lo dé. Es el dueño quien
-manda: con Esc corta cuando quiere.
+**Las cuentas.** Con 3 intentos por código entre 900.000, cada código
+quemado da 1 posibilidad entre 300.000. Con la pausa ya en sus 16 minutos,
+quien probara sin parar quemaría unos 4 códigos por hora: haría falta del
+orden de **8 años** de media para acertar (sin la pausa que crece, con 30 s
+fijos, serían unos 4 meses), y todo queda apuntado en la pantalla del
+equipo, con el código cambiando delante del dueño. Es el dueño quien manda: con Esc corta cuando quiere.
 
 ## Qué se puede hacer dentro (y qué no)
 
@@ -119,11 +161,13 @@ HSPRED y la red de usuario de QEMU, reenviando el puerto 2323 del invitado a un
 puerto local (`-netdev user,hostfwd=tcp:127.0.0.1:<puerto>-:2323`), dentro de un
 espacio de nombres de red propio (`unshare -rn`: no hace falta Internet ni se
 toca la red del equipo). Desde `tests/consola_cliente.py` comprueba que:
-pide el código; que el código que se enseña en la pantalla del equipo (que sale
-también por el puerto serie, como toda la consola del invitado) deja entrar y
-ejecuta `VER`; que `SALIR` cierra la sesión; que una segunda conexión genera
-**otro** código; y que un código erróneo se rechaza y, tras los intentos,
-corta. El código mostrado se lee del puerto serie del invitado (no se añade
+el código sale en la pantalla del equipo **antes** de que llegue nadie, con
+«caduca en»; que deja entrar, ejecuta `VER` y `SALIR` cierra la sesión; **un
+solo uso** (al acabar sale otro y el usado ya no vale); que **3 fallos
+sumando dos conexiones** cortan, cambian el código, dejan 30 s sin aceptar
+conexiones (la primera pausa) y, pasados, el nuevo deja entrar; que Esc cierra CONSOLA; y la
+**caducidad** con `CONSOLA /CADUCA:15`: sin que llegue nadie sale otro
+código, el caducado no vale y el nuevo sí. El código mostrado se lee del puerto serie del invitado (no se añade
 ningún modo especial: toda la consola del equipo sale ya por ahí en las
 pruebas).
 
