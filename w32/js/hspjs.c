@@ -89,17 +89,28 @@ int __popcountdi2(u64 x) { return __popcountsi2((u32)x) + __popcountsi2((u32)(x 
 
 /* =============================================================================
  *  La memoria. QuickJS pide muchísimos trozos pequeños (objetos, textos,
- *  formas): los de hasta 1 KB salen de bloques de 64 KB, por clases de 8 en
- *  8 octetos, cada clase con su lista de sueltos; delante de cada trozo, 4
- *  octetos con su clase. Los grandes van al montón de KERNEL32 con 8 octetos
- *  delante: el tamaño y un 0.
+ *  formas) y algunos grandes (tablas, código, textos largos). El montón de
+ *  HW32 da bloques de potencias de dos (con 16 octetos de cabecera): pedirle
+ *  cada trozo, o un bloque de 64 KB justos, desperdiciaría hasta la mitad.
+ *  Así que se le piden zonas que caben justas en su clase y se reparten aquí:
+ *   - los de hasta 1 KB, de bloques de casi 64 KB, por clases de 8 en 8
+ *     octetos, cada clase con su lista de sueltos; delante, 4 octetos con la
+ *     clase (1 a 128);
+ *   - los de más, de zonas de casi 1 MB, con el primero que quepa y
+ *     juntando los sueltos vecinos; delante, 8 octetos: el tamaño del de
+ *     antes y el suyo (con el bit 0 a 1 si está en uso);
+ *   - los que no caben en una zona, al montón tal cual: delante, el tamaño
+ *     y un 0.
  * ============================================================================= */
 #define PEQ_MAX 1024
-#define BLOQUE (64 * 1024)
+#define BLOQUE (65536 - 64)
+#define ZONA (1048576 - 64)
 static void *libres[PEQ_MAX / 8 + 1];
 static char *bump, *bump_fin;
 static u32 en_uso, pedido_sistema, pico;
 static HANDLE monton;
+typedef struct Suelto { u32 ant, tam; struct Suelto *sig, *prev; } Suelto;   /* (las dos primeras: la cabecera) */
+static Suelto *sueltos;
 
 static void *del_sistema(u32 n) {
   void *p;
@@ -108,52 +119,114 @@ static void *del_sistema(u32 n) {
   if (p) pedido_sistema += n;
   return p;
 }
+static void s_quita(Suelto *b) {
+  if (b->prev) b->prev->sig = b->sig; else sueltos = b->sig;
+  if (b->sig) b->sig->prev = b->prev;
+}
+static void s_pon(Suelto *b) {
+  b->prev = NULL; b->sig = sueltos;
+  if (sueltos) sueltos->prev = b;
+  sueltos = b;
+}
+#define SIG_DE(b) ((Suelto *)((char *)(b) + ((b)->tam & ~7u)))
+static int zona_nueva(void) {
+  char *z = del_sistema(ZONA);
+  Suelto *b, *fin;
+  if (!z) return 0;
+  b = (Suelto *)z;
+  b->ant = 0;
+  b->tam = (ZONA - 8) & ~7u;                     /* (libre) */
+  fin = SIG_DE(b);
+  fin->ant = b->tam; fin->tam = 1;               /* el centinela: en uso, tamaño 0 */
+  s_pon(b);
+  return 1;
+}
+static void *grande(u32 n) {
+  u32 total = (n + 8 + 7) & ~7u;
+  Suelto *b;
+  if (total > ZONA - 64) {                       /* (no cabe en una zona) */
+    u32 *p = del_sistema(n + 8);
+    if (!p) return NULL;
+    p[0] = n; p[1] = 0;
+    en_uso += n + 8;
+    return p + 2;
+  }
+  if (total < sizeof(Suelto) + 8) total = sizeof(Suelto) + 8;
+  for (;;) {
+    for (b = sueltos; b && b->tam < total; b = b->sig) ;
+    if (b) break;
+    if (!zona_nueva()) return NULL;
+  }
+  s_quita(b);
+  if (b->tam - total >= 1100) {                  /* lo que sobra, suelto */
+    Suelto *r = (Suelto *)((char *)b + total);
+    r->ant = total; r->tam = b->tam - total;
+    SIG_DE(r)->ant = r->tam;
+    b->tam = total;
+    s_pon(r);
+  }
+  b->tam |= 1;
+  en_uso += b->tam & ~7u;
+  return (u32 *)b + 2;
+}
+static void grande_suelta(u32 *p) {
+  Suelto *b = (Suelto *)(p - 2), *v;
+  b->tam &= ~7u;
+  en_uso -= b->tam;
+  v = SIG_DE(b);                                 /* con el de después, si está suelto */
+  if (!(v->tam & 1)) { s_quita(v); b->tam += v->tam; SIG_DE(b)->ant = b->tam; }
+  if (b->ant) {                                  /* y con el de antes */
+    v = (Suelto *)((char *)b - b->ant);
+    if (!(v->tam & 1)) { s_quita(v); v->tam += b->tam; SIG_DE(v)->ant = v->tam; b = v; }
+  }
+  s_pon(b);
+}
 void *malloc(size_t n) {
   u32 total, k;
   u32 *p;
   if (n == 0) n = 1;
+  if (n > 0x7FFFFFF0u) return NULL;
   total = (n + 4 + 7) & ~7u;
-  if (total <= PEQ_MAX) {
-    k = total >> 3;
-    if (libres[k]) {
-      p = libres[k];
-      libres[k] = *(void **)p;
-    } else {
-      if (bump_fin - bump < (int)total) {
-        bump = del_sistema(BLOQUE);
-        if (!bump) { bump_fin = NULL; return NULL; }
-        bump_fin = bump + BLOQUE;
-      }
-      p = (u32 *)bump;
-      bump += total;
-      *p++ = k;
-    }
-    en_uso += total;
-  } else {
-    if (n > 0x7FFFFFF0u) return NULL;
-    p = del_sistema(n + 8);
-    if (!p) return NULL;
-    p[0] = n; p[1] = 0;
-    p += 2;
-    en_uso += n + 8;
+  if (total > PEQ_MAX) {
+    p = grande(n);
+    if (en_uso > pico) pico = en_uso;
+    return p;
   }
+  k = total >> 3;
+  if (libres[k]) {
+    p = libres[k];
+    libres[k] = *(void **)p;
+  } else {
+    if (bump_fin - bump < (int)total) {
+      bump = del_sistema(BLOQUE);
+      if (!bump) { bump_fin = NULL; return NULL; }
+      bump_fin = bump + BLOQUE;
+    }
+    p = (u32 *)bump;
+    bump += total;
+    *p++ = k;
+  }
+  en_uso += total;
   if (en_uso > pico) pico = en_uso;
   return p;
 }
 size_t malloc_usable_size(void *v) {
   u32 *p = v;
   if (!p) return 0;
-  return p[-1] ? (p[-1] << 3) - 4 : p[-2];
+  if (p[-1] && p[-1] <= PEQ_MAX / 8) return (p[-1] << 3) - 4;
+  if (p[-1]) return (p[-1] & ~7u) - 8;
+  return p[-2];
 }
 void free(void *v) {
   u32 *p = v, k;
   if (!p) return;
   k = p[-1];
-  if (k) {
+  if (k && k <= PEQ_MAX / 8) {
     en_uso -= k << 3;
     *(void **)p = libres[k];
     libres[k] = p;
-  } else {
+  } else if (k) grande_suelta(p);
+  else {
     en_uso -= p[-2] + 8;
     pedido_sistema -= p[-2] + 8;
     HeapFree(monton, 0, p - 2);
@@ -173,7 +246,7 @@ void *realloc(void *v, size_t n) {
   if (!v) return malloc(n);
   if (!n) { free(v); return NULL; }
   u = malloc_usable_size(v);
-  if (n <= u && (((u32 *)v)[-1] == 0 ? n > u / 2 : 1)) return v;
+  if (n <= u && (n > PEQ_MAX || u <= PEQ_MAX) && (u <= 4096 || n > u / 2)) return v;
   q = malloc(n);
   if (!q) return NULL;
   memcpy(q, v, u < n ? u : n);

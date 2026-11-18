@@ -1,0 +1,9 @@
+# el buscador: sugiere al escribir (fetch y JSON), flechas e Intro
+vuelca
+escribe #q | soc
+vuelca
+tecla #q | Abajo
+tecla #q | Abajo
+vuelca
+tecla #q | Intro
+registro

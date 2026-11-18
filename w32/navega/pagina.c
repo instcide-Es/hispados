@@ -940,7 +940,8 @@ static void caja(Ctx *c, Nodo *n, Est e) {
   if (n->fg) e.fg = n->fg;
   if (n->bg) e.bg = n->bg;
   /* [JS] algo que se pulsa con JavaScript (una fila de una lista...): como un enlace sin dirección */
-  if (pag_clicable && e.enlace < 0 && !c->medir && pag_clicable(n)) { e.enlace = (short)enlace_nuevo2(c, NULL, n, 0); if (!n->fg) e.fg = K_ENLACE; }
+  if (pag_clicable && !c->medir && (e.enlace < 0 || (!p->enl[e.enlace].href && p->enl[e.enlace].nodo->etq != E_LABEL
+      && !(p->enl[e.enlace].nodo->est & EN_PLEGABLE) && p->enl[e.enlace].nodo->etq != E_DETAILS)) && pag_clicable(n)) {   /* (el de dentro gana: la fila, no la lista) */ e.enlace = (short)enlace_nuevo2(c, NULL, n, 0); if (!n->fg) e.fg = K_ENLACE; }
   if (n->est & EN_NEGRITA) e.est |= A_NEGRITA;
   if (n->est & EN_SUBRAYA) e.est |= A_SUBRAYA;
   alin0 = c->alin;

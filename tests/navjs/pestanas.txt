@@ -1,0 +1,7 @@
+vuelca
+clic [data-bs-target="#p2"]
+vuelca
+clic #abre
+vuelca
+js console.log('selector', document.querySelectorAll('ul.nav > li:first-child button.active, .tab-pane:not(.active)').length, document.querySelector('#p2').matches('div.tab-pane.active'))
+registro

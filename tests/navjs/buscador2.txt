@@ -1,0 +1,4 @@
+# pulsar una sugerencia (el clic va a la lista: delegación)
+escribe #q | ar
+vuelca
+clic #lista li:first-child

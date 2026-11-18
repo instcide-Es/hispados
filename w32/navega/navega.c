@@ -1240,6 +1240,8 @@ static void jn_a_la_vista(Nodo *n) {
       return;
     }
   }
+  for (k = 0; pag && k < pag->n_enl; k++)          /* (lo que se pulsa sin foco: las filas de una lista) */
+    if (pag->enl[k].y >= 0 && dom_dentro(n, pag->enl[k].nodo)) { a_la_vista(pag->enl[k].x, pag->enl[k].y, 1); return; }
 }
 static const JsNav js_nav = { jn_remaqueta, jn_ir, jn_envia, jn_pon_url, jn_historia, jn_foco, jn_cuadro, jn_pregunta,
                               jn_titulo, di, jn_a_la_vista };

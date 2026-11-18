@@ -29,6 +29,7 @@ u32 WINAPI SetTimer(HANDLE, u32, u32, void *);
 int WINAPI KillTimer(HANDLE, u32);
 typedef struct { int left, top, right, bottom; } RECTJ;
 int WINAPI GetClientRect(HANDLE, RECTJ *);
+void HjMemoria(u32 *uso, u32 *maximo, u32 *sistema);   /* (HSPJS.DLL) */
 
 int js_activo = 1;
 int js_tope_ms = 15000;
@@ -536,7 +537,8 @@ static u32 limite;
 static void reinicia_tope(void) { limite = GetTickCount() + (u32)js_tope_ms; }
 FN(f_envia) { USA; NODO(0, f); nav->envia(f, argc > 1 ? nodo_de(a[1]) : NULL); return JS_UNDEFINED; }
 FN(f_foco) { USA; nav->foco(argc > 0 ? nodo_de(a[0]) : NULL); return JS_UNDEFINED; }
-FN(f_a_la_vista) { USA; NODO(0, n); nav->a_la_vista(n); return JS_UNDEFINED; }
+static Nodo *a_ver;                              /* scrollIntoView: tras volver a maquetar */
+FN(f_a_la_vista) { USA; NODO(0, n); a_ver = n; return JS_UNDEFINED; }
 FN(f_cuadro) {
   int tipo = 0, r;
   char *t;
@@ -860,6 +862,7 @@ static void fin_turno(void) {
   if (!cx) return;
   if (dom_sucio_ctl) { pag_ctl_rehaz(pg, 1); dom_sucio_ctl = 0; dom_sucio = 1; }
   if (dom_sucio) { dom_sucio = 0; nav->remaqueta(); }
+  if (a_ver) { Nodo *n = a_ver; a_ver = NULL; if (dom_dentro(pg->doc.raiz, n)) nav->a_la_vista(n); }
   temp_ajusta();
   reg_vacia();
 }
@@ -938,6 +941,7 @@ static void ejecuta(const char *codigo, u32 n, const char *nombre, u32 clave, u3
 typedef struct { Nodo *n; char *url; char *codigo; u32 n_codigo; u8 estado; } Guion;   /* estado: 0 en la red, 1 listo, 2 hecho */
 static Guion *gs;
 static int n_gs, cap_gs, i_gs, fase_carga;
+static u32 t_pagina;
 static int es_js(const Nodo *n) {
   const char *t = atr(n, "type");
   if (!t || !t[0]) return 1;
@@ -1023,8 +1027,15 @@ static void avanza_guiones(void) {
   }
   if (cx && fase_carga == 1 && !jp_activa && !n_cola) {
     JSValue dos = JS_NewInt32(cx, 2);
+    u32 uso, max, sis;
+    char b[160];
     fase_carga = 2;
     JS_FreeValue(cx, llama(fn_cargado, 1, &dos));
+    HjMemoria(&uso, &max, &sis);
+    sprintf(b, "JavaScript: %u KB en uso (%u KB como mucho), %u KB pedidos al sistema; %u ms desde que llego la pagina",
+            (uso + 512) / 1024, (max + 512) / 1024, (sis + 512) / 1024, GetTickCount() - t_pagina);
+    reg("[memoria] ", b, strlen(b));
+    reg_vacia();
   }
 }
 /* un <script> que un guion mete en la página */
@@ -1117,6 +1128,7 @@ void js_pagina(Pagina *p) {
   JSValue g, nobj, f, r;
   js_suelta();
   if (!js_activo || !rt || !preludio_bc || !p) return;
+  t_pagina = GetTickCount();
   if (!pide_js(p->doc.raiz)) return;
   pg = p; dom_pag = p;
   dom_prepara(&p->doc);
@@ -1179,6 +1191,7 @@ void js_suelta(void) {
   for (j = 0; j < n_gs; j++) if (gs[j].url) { free(gs[j].url); free(gs[j].codigo); }
   free(gs); gs = NULL; n_gs = cap_gs = i_gs = 0;
   pag_clicable = NULL;
+  a_ver = NULL;
   if (!cx) { free(tabla); tabla = NULL; n_tabla = cap_tabla = 0; return; }
   for (k = 0; k < cap_tabla; k++) if (tabla[k].n) JS_FreeValue(cx, tabla[k].v);
   free(tabla); tabla = NULL; n_tabla = cap_tabla = 0;

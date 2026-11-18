@@ -19,6 +19,8 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 import os, random, ssl, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nav_js    # [JS] tests/tools/nav_js.py
 
 CARPETA, PUERTO = sys.argv[1], int(sys.argv[2])
 FICHA = 'abc123'
@@ -181,6 +183,8 @@ class Pedido(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(pagina('Sin longitud', '<p>Hasta el cierre de la conexi&oacute;n.</p>'))
             self.close_connection = True
+        elif u.path.startswith('/js') and nav_js.atiende(self, u, q):    # [JS] las páginas con JavaScript
+            pass
         else:
             self.manda(pagina('No existe', '<h1>404</h1><p>Aqu&iacute; no hay nada.</p>'), estado=404)
 
@@ -190,6 +194,8 @@ class Pedido(BaseHTTPRequestHandler):
         q = parse_qs(cuerpo, keep_blank_values=True)
         self.apunta(cuerpo)
         v = lambda k: q.get(k, [''])[0]
+        if self.path.startswith('/js') and nav_js.atiende_post(self, self.path, cuerpo):    # [JS]
+            return
         if self.path == '/entrar':
             if v('usuario') == 'maria' and v('clave') == 'secreto' and v('ficha') == FICHA:
                 seguro = '; Secure' if isinstance(self.connection, ssl.SSLSocket) else ''
