@@ -16,6 +16,12 @@
 #include "base.h"
 #include <linux/bcma/bcma.h>
 #include "bcma_private.h"
+#include <defs.h>
+#include "types.h"
+#include "d11.h"
+#include "pub.h"
+#include "mac80211_if.h"
+#include "main.h"
 #include "nucleo.h"
 
 int hl_modinit_bcma_host_pci_init(void);
@@ -155,6 +161,11 @@ int bcma_bus_register(struct bcma_bus *bus)
 		       bus->sprom.revision, bus->boardinfo.vendor, bus->boardinfo.type, bus->sprom.board_rev,
 		       bus->sprom.alpha2[0] ? bus->sprom.alpha2[0] : '-', bus->sprom.alpha2[1] ? bus->sprom.alpha2[1] : '-',
 		       bus->sprom.il0mac);
+	if (!err)
+		hl_log(2, "SPROM: indicadores %04X%04X %04X%04X, antenas 2,4 GHz %02X, cadenas tx %X rx %X, potencia máxima %d/%d (cuartos de dBm)\n",
+		       bus->sprom.boardflags_hi, bus->sprom.boardflags_lo, bus->sprom.boardflags2_hi, bus->sprom.boardflags2_lo,
+		       bus->sprom.ant_available_bg, bus->sprom.txchain, bus->sprom.rxchain,
+		       bus->sprom.core_pwr_info[0].maxpwr_2g, bus->sprom.core_pwr_info[1].maxpwr_2g);
 	core = bcma_find_core(bus, BCMA_CORE_CHIPCOMMON);
 	if (core) {
 		bus->drv_cc.core = core;
@@ -542,6 +553,14 @@ int brcm_busca(void)
 		hl_log(0, "la BIOS no ha dado a la tarjeta una dirección de memoria que se pueda usar (BAR0 %08X, BAR1 %08X)\n", b0, b1);
 		return -2;
 	}
+	{
+		/* la configuración PCI entera de la tarjeta, para el registro */
+		int i;
+		for (i = 0; i < 0x40; i += 16)
+			hl_log(2, "  PCI %02X: %08X %08X %08X %08X\n", i, hl_pci_lee(tarjeta.bus0.number, tarjeta.devfn, i),
+			       hl_pci_lee(tarjeta.bus0.number, tarjeta.devfn, i + 4), hl_pci_lee(tarjeta.bus0.number, tarjeta.devfn, i + 8),
+			       hl_pci_lee(tarjeta.bus0.number, tarjeta.devfn, i + 12));
+	}
 	tarjeta.bar0 = b0 & ~0xfu;
 	brcm.nombre = tarjeta.device == 0x4353 ? "Broadcom BCM43224" : "Broadcom 802.11n";
 	return 0;
@@ -565,6 +584,13 @@ int brcm_monta(struct radio **r)
 	if (err || !equipo) {
 		hl_log(0, "el controlador no se ha podido montar (%d)\n", err);
 		return -4;
+	}
+	{
+		struct brcms_info *wl = equipo->priv;
+		struct brcms_c_info *wlc = wl->wlc;
+		hl_log(2, "Núcleo 802.11 rev. %d; PHY tipo %d rev. %d; radio %04X rev. %d; bandas: %d; placa rev. %04X, indicadores %08X %08X\n",
+		       wlc->hw->corerev, wlc->band->phytype, wlc->band->phyrev, wlc->band->radioid, wlc->band->radiorev,
+		       wlc->pub->_nbands, wlc->hw->boardrev, wlc->hw->boardflags, wlc->hw->boardflags2);
 	}
 	hl_log(2, "Controlador montado. MAC %pM\n", brcm.mac);
 	brcm.canal = brcm_canal;
@@ -627,6 +653,11 @@ int brcm_enciende(void)
 	equipo->ops->configure_filter(equipo, filtro, &filtro, 0);
 	for (i = 0; i < 4; i++)
 		equipo->ops->conf_tx(equipo, interfaz, i, &cola_normal);
+	{
+		struct brcms_info *wl = equipo->priv;
+		hl_log(2, "Microcódigo en marcha: versión %d.%d; potencia pedida %d dBm\n",
+		       wl->wlc->ucode_rev >> 16, wl->wlc->ucode_rev & 0xffff, equipo->conf.power_level);
+	}
 	hl_log(2, "Radio encendida en el canal 1\n");
 	return 0;
 }
