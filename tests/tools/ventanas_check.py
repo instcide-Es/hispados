@@ -4,6 +4,7 @@
 uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
   tam ANCHO ALTO                    tamaño de la captura
   px X Y COLOR [nombre]             el punto es de ese color de la paleta
+  nopx X Y COLOR [nombre]           el punto NO es de ese color de la paleta
   rgb X Y RRGGBB [nombre]           el punto es de ese color (rojo, verde, azul)
   ventana X Y ANCHO ALTO activa|no  marco, barra de título, interior y sombra
   marco X Y ANCHO ALTO activa|no    lo mismo sin mirar el interior (ventanas
@@ -202,6 +203,12 @@ def main():
             c = cap.px(x, y)
             res(es(c, n), '%s: %s (%d,%d)%s' % (nombre, a[i + 4], x, y,
                 '' if es(c, n) else ' es %s y no %s' % (c, PAL[n])))
+            i += 5
+        elif op == 'nopx':
+            x, y, n = int(a[i + 1]), int(a[i + 2]), int(a[i + 3])
+            c = cap.px(x, y)
+            res(not es(c, n), '%s: %s (%d,%d)%s' % (nombre, a[i + 4], x, y,
+                '' if not es(c, n) else ' es %s' % (c,)))
             i += 5
         elif op == 'rgb':
             x, y = int(a[i + 1]), int(a[i + 2])

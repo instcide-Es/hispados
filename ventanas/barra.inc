@@ -631,6 +631,9 @@ bt_vigilar:
         cmp dword [menu_ven], 0
         jne .w
         call ini_alternar
+        cmp dword [mi_ven], 0       ; (como con Ctrl+Esc: la primera, marcada)
+        je .w
+        mov dword [mi_sel], 0
 .w:
         xor edx, edx                ; ¿ha cambiado algo?
         ; fuera de la lista las que ya no están

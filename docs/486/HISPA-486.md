@@ -44,7 +44,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 1 | **Cargador PE** (`HW32.COM`): cabeceras, secciones, importaciones; KERNEL32 mínimo de consola | **hecha (17/11/2026)**: PEHOLA (a mano) y HOLAC (en C) corren en Hispa-DOS |
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado |
-| 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio |
+| 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. Falta: los iconos del escritorio y «Mi PC» |
 | 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98 |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador |
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
@@ -106,6 +106,46 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    bits, tipos de letra, regiones), los iconos y los cursores del programa,
    los aceleradores y los diálogos comunes (abrir y guardar), probando con
    programas reales pequeños.
+
+## Fase 4a: la barra de tareas y el menú Inicio (hecha, 18/11/2026)
+
+Pedido de Carlos al probar la demo: «en 486 se echa de menos la barra de
+inicio abajo»; después: «todas las aplicaciones en el menú de inicio para
+que quede el escritorio despejado» y «en 386 no hace falta poner ese menú de
+inicio, porque así respeta la estética de Win 3.11».
+
+- **Qué es:** el escritorio propio de Hispa-486 dentro de Hispa Ventanas.
+  Abajo, una barra de tareas con el botón «Inicio», un botón por ventana
+  abierta (un clic la trae delante, la minimiza o la recupera) y, a la
+  derecha, la red, el volumen, la batería y la hora. El menú Inicio lleva
+  todos los programas: cada grupo del Centro de programas es un submenú con
+  sus accesos; debajo, Configuración, los administradores de archivos y de
+  tareas, «Centro de programas» y «Salir de Hispa Ventanas...». El
+  escritorio arranca despejado: el Centro no se abre (se abre desde Inicio,
+  para crear grupos y accesos) y no hay barra arriba. Los programas de
+  Windows (fase 3) salen en la barra como cualquier ventana.
+- **Cómo se pone:** es un ajuste de la instalación de Hispa-486, no un botón
+  de Configuración: la opción `VENTANAS /486` o la clave `Escritorio=486` en
+  `\HISPADOS\VENTANAS.INI` (sección `[Escritorio]`). **La imagen y la
+  instalación de Hispa-486 tienen que llevar una de las dos** (lo natural:
+  la clave en el VENTANAS.INI que instalan; Configuración la conserva).
+  Hispa-386 no lleva ninguna y su escritorio, el de la gama de Windows 3.1,
+  sigue exactamente igual.
+- **Aspecto:** el de Hispa Ventanas (marrón con filete ocre, terracota,
+  crema, el rombo). Hace lo que hacían los escritorios de mediados de los 90,
+  sin copiar el dibujo de ninguno.
+- **Cómo está hecho:** `ventanas/barra.inc`, en la parte alta de
+  VENTANAS.COM (unos 6 KB; en la parte baja, 132 octetos de ganchos). La
+  barra es una ventana más, siempre encima de las que tienen título; no hay
+  que avisarle de nada: mira las ventanas una vez por vuelta. Los detalles,
+  en docs/VENTANAS.md, «El escritorio de Hispa-486: barra de tareas y menú
+  Inicio».
+- **Prueba:** `tests/run_barra_tests.sh` (en `make test`): 800×600 con
+  `/486`, VGA de 640×480 y 16 colores con la clave de VENTANAS.INI y un
+  programa de Windows, y el escritorio de Hispa-386 sin el ajuste.
+- **Lo que sigue de la fase 4:** iconos en el escritorio (accesos directos y
+  «Mi PC» con las unidades), «Ejecutar...» y «Documentos» en el menú, y que
+  el instalador de Hispa-486 ponga la clave.
 
 ## Fase 1: el cargador PE
 

@@ -146,7 +146,8 @@ El archivo tiene dos partes:
 - la **parte baja**, hasta los 64 KB: todo el código de 16 bits, el código
   de 32 bits de siempre, los textos y las variables que usa el modo real
   (`bss.inc`, que van en el archivo como ceros). Si se sale de los 64 KB,
-  la compilación falla (`-w+error=number-overflow`). Quedan unos 11 KB;
+  la compilación falla (`-w+error=number-overflow`). Queda poco más de 1 KB
+  (1.268 octetos, medido el 18/11/2026): lo nuevo va en la parte alta;
 - la **parte alta** (`alto_ini`, detrás de la baja): los iconos, la fuente
   y el código de 32 bits que no cabe abajo (`accesos.inc`). El modo
   protegido llega a ella con punteros de 32 bits; desde el código de
@@ -164,7 +165,7 @@ texto).
 DEVICE=A:\HISPADOS\HSPXMS.SYS        (en CONFIG.SYS)
 KEYB SP                              (en AUTOEXEC.BAT, para el teclado español)
 VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DEMO]
-         [/CONTORNO]
+         [/CONTORNO] [/486]
 ```
 
 - Hace falta HSPXMS.SYS (si no está, lo dice y termina).
@@ -175,6 +176,10 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   (queda residente); sin ratón funciona igual con el teclado.
 - Sin opciones: VESA 800×600 de 256 colores; si la tarjeta no tiene VESA 2.0
   con marco lineal, VGA de 640×480 y 16 colores.
+- `/486` pone el **escritorio de Hispa-486**: la barra de tareas abajo y el
+  menú Inicio, sin la barra de arriba y con el Centro de programas cerrado
+  (ver «El escritorio de Hispa-486»; también con `Escritorio=486` en
+  VENTANAS.INI). Sin ella, todo lo que sigue es el escritorio de siempre.
 - Al entrar se abre el **Centro de programas** con sus grupos (Principal,
   Accesorios, Juegos): doble clic en un icono (o flechas e Intro) abre el
   grupo en su ventana y, dentro, el programa. `/DEMO` pone solo las ventanas
@@ -712,6 +717,143 @@ opción oculta de depuración, **`/BATnn[C]`**, que fija el nivel sin tocar la
 BIOS: `/BAT85` lo pone al 85 %, y una `C` al final («`/BAT100C`») lo marca
 enchufado/cargando. La usa `tests/run_ventanas_bateria_tests.sh`.
 
+### El escritorio de Hispa-486: barra de tareas y menú Inicio
+
+[BARRA] (`ventanas/barra.inc`, en la parte alta; fase 4 de
+docs/486/HISPA-486.md). Pedido de Carlos, probando la demo de Hispa-486: «en
+486 se echa de menos la barra de inicio abajo», «todas las aplicaciones en el
+menú de inicio para que quede el escritorio despejado» y «en 386 no hace
+falta poner ese menú de inicio, porque así respeta la estética de Win 3.11».
+Por eso Hispa Ventanas tiene **dos escritorios**:
+
+- el de **Hispa-386**, el de siempre: la barra arriba, el Centro de
+  programas abierto y los iconos de lo minimizado abajo. No ha cambiado nada
+  y no tiene ninguna opción nueva en Configuración;
+- el de **Hispa-486**: una **barra de tareas abajo** con el botón
+  **«Inicio»**, un botón por ventana y, a la derecha, la red, el volumen, la
+  batería y la hora; el escritorio **empieza despejado** (el Centro de
+  programas no se abre: todos los programas están en el menú Inicio).
+
+Es una función equivalente a la de los sistemas de mediados de los 90 con el
+aspecto de Hispa Ventanas (marrón con filete ocre, terracota, el rombo): no
+copia el dibujo de ninguno.
+
+**Cómo se pide.** No es un botón de Configuración: es un ajuste de la
+instalación de Hispa-486. Vale cualquiera de los dos:
+
+- la opción **`/486`** de la línea de órdenes (`VENTANAS /486`; se puede
+  juntar con las demás: `VENTANAS /486 /640`);
+- la clave **`Escritorio=486`** en `VENTANAS.INI` (sección `[Escritorio]`,
+  aunque las claves no miran la sección), que es lo que pone la imagen o la
+  instalación de Hispa-486. La lee el propio VENTANAS.COM al arrancar
+  (`bt_ini_leer`, antes de crear nada); Configuración no la enseña ni la
+  cambia, pero la **conserva** cuando guarda el archivo. `Escritorio=386` (o
+  no poner la clave) es el escritorio de siempre.
+
+No se cambia en marcha: vale para toda la sesión.
+
+**La barra de tareas** (28 puntos, como la de arriba; la misma en 800×600,
+640×480 y en la VGA de 16 colores):
+
+- **«Inicio»**, a la izquierda (un clic, **Ctrl+Esc** o la **tecla de
+  Windows** abren y cierran el menú; el botón se aclara mientras está
+  abierto).
+- **Un botón por ventana principal**, con su icono (a mitad de tamaño) y su
+  título recortado a lo que quepa; se reparten el sitio (160 puntos cada uno
+  como mucho; si hay muchas, se estrechan hasta quedarse en el icono). Un
+  clic **trae la ventana delante**; si ya está delante, **la minimiza**; si
+  está minimizada, **la recupera**. La de delante va en crema con una raya
+  terracota; las demás, en arena; las minimizadas, en arena oscura. Tienen
+  botón las ventanas que se pueden minimizar y, de un programa que no tiene
+  ninguna así (uno de Windows que solo saca un cuadro, por ejemplo), la
+  primera suya; los cuadros de diálogo de un programa con ventana no salen
+  (el botón de su dueña los trae delante). Los programas de Windows
+  (`win32*.inc`) salen como cualquier otro: son ventanas del mismo gestor.
+- **La bandeja**, a la derecha: el icono de red, el altavoz (un clic, la
+  ventanita del volumen, que aquí sale encima de la barra; doble clic, el
+  Mezclador), la batería si la hay y la hora. Son los mismos dibujos y las
+  mismas rutinas de la barra de arriba (`vol_pintar_icono`,
+  `bat_pintar_icono`, `red_pintar_icono`, `rel_pintar`), corridos al sitio
+  que deja «Salir».
+- **Botón derecho** en la barra: «Ventanas en cascada», «Ventanas en
+  mosaico», «Administrador de tareas...» y «Configuración...». En el botón
+  de una ventana: el menú de esa ventana (Restaurar, Minimizar, Maximizar,
+  Cerrar).
+- Las ventanas minimizadas **no van como icono al escritorio**: se quedan en
+  su botón.
+
+**La barra de arriba no está** en este escritorio (es lo más limpio: dos
+barras para lo mismo estorban, y en 640×480 se comerían 56 puntos). Lo que
+tenía se reparte: el nombre «Hispa Ventanas», en la cabecera del menú
+Inicio; «Salir», dentro del menú; el volumen, la red, la batería y la hora,
+en la bandeja. El fondo ocupa toda la pantalla.
+
+**El menú Inicio** (`ini_*`): arriba, una cabecera marrón con el rombo y
+«Hispa Ventanas»; debajo, **un grupo del Centro de programas por línea**
+(con su flecha: cada uno abre un **submenú con sus programas**, con el icono
+de cada acceso; el de un .HVP, el suyo); una raya; **Configuración**,
+**Administrador de archivos**, **Administrador de tareas** y **Centro de
+programas**; otra raya; y **«Salir de Hispa Ventanas...»** (el cuadro de
+siempre: volver a Hispa-DOS, reiniciar o apagar). Se lee de los grupos y los
+accesos de CENTRO.INI cada vez que se abre: lo que se añade o se cambia en
+el Centro sale en el menú sin hacer nada más.
+
+- Con el **ratón**: un clic en un grupo abre su submenú; también al parar el
+  ratón encima un cuarto de segundo (así se puede ir en diagonal al submenú
+  sin que se abra el de al lado). Un clic en un programa o en una orden la
+  hace; un clic fuera cierra el menú (y el clic sigue su camino).
+- Con el **teclado**: Ctrl+Esc lo abre con la primera línea marcada; flechas
+  arriba y abajo; derecha o Intro entran en el submenú; izquierda o Esc
+  salen de él; Intro abre el programa; la primera letra salta a la orden
+  siguiente que empieza por ella; Esc (o Ctrl+Esc otra vez, o Alt+F4) cierra.
+- Un grupo vacío dice «(vacío)». Si un grupo tiene más programas de los que
+  caben en la pantalla en varias columnas (solo pasa con decenas de juegos en
+  640×480), la última línea es «Más...», que abre la ventana del grupo.
+- El **Centro de programas** sigue existiendo, oculto: es el dueño de los
+  grupos y de los avisos. «Centro de programas» (en el menú Inicio y en el
+  menú del escritorio) lo enseña para crear grupos y accesos; **cerrarlo lo
+  vuelve a esconder** (no sale de Hispa Ventanas: para eso está «Salir»).
+  Los grupos que quedaran abiertos no se vuelven a abrir al entrar.
+
+**El área de trabajo** es la pantalla menos la barra (`area_y0`, `area_y1`:
+en Hispa-386, de debajo de la barra de arriba al final de la pantalla; en
+Hispa-486, de arriba del todo a la barra de tareas). La usan maximizar
+(`bt_area`), arrastrar y cambiar el tamaño (`ges_acotar`), la cascada y el
+mosaico, el centrado de los cuadros de diálogo y `bt_colocar`, que sube lo
+justo la ventana que nacería detrás de la barra.
+
+**Cómo está hecho.** Todo está en `barra.inc` (parte alta) y sus variables
+en `bssbarra.inc`; en los demás archivos solo hay ganchos de una o dos
+líneas, marcados con [BARRA] (en la parte baja son 132 octetos, contando la
+opción `/486` y su línea de ayuda; `barra.inc` ocupa unos 6 KB de la alta):
+
+| Gancho | Dónde | Qué hace |
+|---|---|---|
+| `bt_iniciar` | `principal` | pone el área de trabajo; lee `Escritorio=486`; en Hispa-486 crea la barra y le cambia el procedimiento al escritorio (`bt_esc_proc`: el fondo entero, sin barra arriba ni iconos) |
+| `bt_vigilar` | bucle del sistema, una vez por vuelta | la lista de ventanas con botón y la «firma» de lo que enseña cada una (estado, si está delante, título, icono) y de la bandeja: si algo cambia, repinta la barra. También hace lo que se ha elegido en el menú y mira la tecla de Windows |
+| `bt_orden` | `orden_poner` | la ventana con título que pasa delante se queda justo debajo de la barra (la barra está siempre encima de las ventanas; los menús y lo emergente, encima de ella) |
+| `bt_area` | `ven_mostrar` (maximizar) | el área de trabajo |
+| `bt_colocar` | `ven_crear` | que una ventana no nazca detrás de la barra |
+| `bt_centro_ini`, `bt_centro_cerrar` | `centro_tarea`, `vista_proc` | el Centro, oculto al entrar y al cerrarlo |
+| `bt_tecla` | `ctx_tecla` (de `ges_tecla`) | Ctrl+Esc y, con el menú abierto, todas las teclas |
+| `bt_clic_fuera` | `ctx_ctrl_clic` (de `eventos`) | un clic fuera del menú lo cierra |
+
+La barra es una ventana de primer nivel sin título, de la tarea del sistema;
+el menú y el submenú, dos ventanas emergentes con su propia clase
+(`c_inicio`), no los desplegables de `menus.inc` (aquellos no tienen iconos
+ni submenús). **El gestor no avisa de nada a la barra**: es ella la que mira
+(`bt_vigilar`), así que cualquier ventana —de un módulo, de un programa de
+Windows, de dentro— sale sola. Lo elegido en el menú no se hace dentro del
+procedimiento de la ventana del menú (que hay que destruir), sino en la
+vuelta siguiente (`ini_pendiente`); un programa se abre con `acc_lanzar`
+—lo mismo que un doble clic en su icono— en una tarea propia
+(`bt_lz_tarea`), porque lee del disco y puede sacar un aviso.
+
+Límites: 32 ventanas con botón (las de primer nivel que admite el gestor);
+el escritorio no se cambia sin reiniciar Hispa Ventanas; el escritorio de
+Hispa-486 todavía no tiene iconos propios ni «Mi PC» (lo siguiente de la
+fase 4).
+
 ### ASOCIA.INI: qué programa abre cada tipo de archivo
 
 `\HISPADOS\ASOCIA.INI` (0.9.22) dice con qué programa se abre cada
@@ -832,6 +974,9 @@ CtrlClic=1
 Espera=500
 Repeticion=20
 Distribucion=SP
+
+[Escritorio]
+Escritorio=486
 ```
 
 - Líneas `clave=valor`; no importan las mayúsculas de las claves ni los
@@ -856,6 +1001,11 @@ Distribucion=SP
   rápida: 30 por segundo) se dan a la BIOS (INT 16h, función 03h);
   `Distribucion` = `SP` o `US`, al residente TECLADO. Las tres **solo están
   si se han tocado**: sin ellas, Hispa Ventanas no cambia nada del teclado.
+- [BARRA] `Escritorio` = `486` (la barra de tareas y el menú Inicio de
+  Hispa-486) o `386` (el de siempre). **Solo está en las instalaciones de
+  Hispa-486**: la pone la instalación, la lee VENTANAS.COM al arrancar y
+  Configuración no la enseña; si está, la conserva al guardar, y si no,
+  no escribe ni la sección (ver «El escritorio de Hispa-486»).
 
 ### Memoria y modo del procesador
 
@@ -903,6 +1053,8 @@ devuelven algo.
   centro.inc bloc.inc calc.inc reloj.inc    los programas
   accesos.inc    grupos ligados a una carpeta de juegos y opciones de
                  juego de un acceso (va en la parte alta del archivo)
+  barra.inc      [BARRA] el escritorio de Hispa-486: barra de tareas y menú
+                 Inicio (parte alta)
   config.inc     CENTRO.INI: grupos, accesos directos, ventanas
   volumen.inc    el altavoz de la barra y su ventanita (HSPSND)
         |
@@ -2130,6 +2282,20 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 
 ## Pruebas
 
+- `tests/run_barra_tests.sh` ([BARRA]): el escritorio de Hispa-486. Con
+  `VENTANAS /486` en 800×600: el escritorio despejado con la barra de tareas
+  abajo; el menú Inicio con el ratón (los grupos, las órdenes fijas, el
+  submenú al parar el ratón) y con el teclado (Ctrl+Esc, flechas, Intro,
+  Esc); la Calculadora y el Bloc de notas abiertos desde él, con sus botones;
+  un clic en el botón trae delante, minimiza (al botón, sin icono en el
+  escritorio) y recupera; maximizar no tapa la barra; el botón derecho en la
+  barra (cascada) y en un botón; el Centro desde Inicio, que al cerrarse se
+  esconde; y «Salir». Segunda sesión en VGA de 640×480 y 16 colores con
+  `Escritorio=486` en VENTANAS.INI: el menú cabe, un programa de Windows
+  (WINCALC.EXE, si hay gcc de 32 bits) sale en la barra y se minimiza desde
+  su botón, y Configuración guarda VENTANAS.INI conservando la clave.
+  Tercera, sin el ajuste: el escritorio de Hispa-386 de siempre (y Ctrl+Esc
+  no hace nada). `GUARDAR=carpeta` deja las capturas.
 - `tests/run_win32crt_tests.sh`, `run_win32ctl_tests.sh`,
   `run_win32menu_tests.sh` y `run_win32calc_tests.sh` ([Hispa-486], fase 3c):
   un Win32 de ventanas en C con MSVCRT.DLL y una DLL propia (KERNEL32 es el
