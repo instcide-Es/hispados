@@ -5,7 +5,12 @@
 ;  tabletas y portátiles pequeños con Atom, y algunos Mac antiguos): pide al
 ;  firmware la memoria baja, busca la pantalla (GOP) y los discos (Block I/O),
 ;  copia la BIOS de modo real (bios64.asm ensamblada con ARQ32 = BIOS32.BIN)
-;  a BASE y la arranca. Después atiende sus peticiones (despachador).
+;  a su base y la arranca. Después atiende sus peticiones (despachador).
+;  La base es 90000h o, si el firmware usa esa zona, 70000h o 60000h
+;  (hay una copia de la BIOS ensamblada para cada sitio), como en efi64.asm;
+;  si no hay sitio o queda muy poca memoria, lo dice y dice qué hacer.
+;  (El registro HISPABIOS.LOG y el mapa de memoria solo los tiene, de
+;  momento, efi64.asm.)
 ;
 ;  Convención de UEFI en IA32: la de C (cdecl), con los argumentos en la pila
 ;  de derecha a izquierda, el que llama la limpia, el resultado en EAX y se
@@ -32,6 +37,7 @@ TXT_READKEY     equ 4
 BS_ALLOCPAGES   equ 32
 BS_HANDLEPROT   equ 88
 BS_STALL        equ 136
+BS_WATCHDOG     equ 140
 BS_LOCATEHBUF   equ 168
 BS_LOCATEPROT   equ 172
 RT_RESET        equ 64
@@ -46,8 +52,13 @@ GM_FB           equ 16
 
 ALLOC_ADDRESS   equ 2           ; AllocateAddress
 MEM_LOADERDATA  equ 2           ; EfiLoaderData
-BIOS_BASE       equ 90000h      ; la BIOS de modo real
-TX_BASE         equ BIOS_BASE + 8000h   ; su pantalla de texto (80x25x2)
+BIOS_TAM        equ 0F000h      ; la BIOS de modo real y sus zonas (bios64.asm)
+BIOS_PAGS       equ BIOS_TAM >> 12
+TX              equ 8000h       ; su pantalla de texto (80x25x2)
+PASO            equ 0C000h      ; su búfer de paso para el disco
+NPAG            equ 160         ; páginas de 0 a 9FFFFh
+PAG_ARRANQUE    equ 80h         ; la página del sector de arranque de Hispa-DOS (80000h)
+MEM_MIN_KB      equ 256         ; con menos memoria convencional no se arranca
 
 %define V(x) ebp + (x)          ; una variable de la imagen
 
@@ -77,12 +88,46 @@ pe_entrada:
         lea esi, [V(t_titulo)]
         call escribir
 
+        ; el vigilante del firmware reinicia el equipo a los 5 minutos de
+        ; arrancar un cargador: fuera
+        push dword 0                    ; datos
+        push dword 0                    ; tamaño de los datos
+        push dword 0                    ; código (64 bits)
+        push dword 0
+        push dword 0                    ; 0 segundos: quitado
+        mov eax, [V(bootserv)]
+        call [eax + BS_WATCHDOG]
+        add esp, 20
+
+%ifdef PRUEBA_OCUPA
+        ; (pruebas: -DPRUEBA_OCUPA=dir,n,...) páginas ocupadas de antemano,
+        ; como en un equipo cuyo firmware las usa
+        lea ebx, [V(prueba_ocupa)]
+.ocupa: mov eax, [ebx]
+        cmp eax, -1
+        je .ocupadas
+        mov [V(dir_pag)], eax
+        mov dword [V(dir_pag) + 4], 0
+        lea eax, [V(dir_pag)]
+        push eax
+        push dword [ebx + 4]
+        push dword 0                    ; EfiReservedMemoryType
+        push dword ALLOC_ADDRESS
+        mov eax, [V(bootserv)]
+        call [eax + BS_ALLOCPAGES]
+        add esp, 16
+        add ebx, 8
+        jmp .ocupa
+.ocupadas:
+%endif
+
         ; ---- pide las páginas bajas una a una (de 0 a 9F000h) ----
-        xor edi, edi                    ; EDI = dirección de la página
+        xor edi, edi                    ; EDI = número de página
         xor ebx, ebx                    ; EBX = cuántas se han dado
-        mov dword [V(bajo_tope)], BIOS_BASE
 .pagina:
-        mov [V(dir_pag)], edi
+        mov eax, edi
+        shl eax, 12
+        mov [V(dir_pag)], eax
         mov dword [V(dir_pag) + 4], 0
         lea eax, [V(dir_pag)]
         push eax
@@ -93,26 +138,13 @@ pe_entrada:
         call [eax + BS_ALLOCPAGES]
         add esp, 16
         test eax, eax
-        jnz .no_dada
+        setz byte [V(dada) + edi]
+        jnz .otra
         inc ebx
-        jmp .otra
-.no_dada:
-        cmp edi, 1000h
-        jb .no_cuenta
-        cmp edi, [V(bajo_tope)]
-        jae .no_cuenta
-        mov [V(bajo_tope)], edi
-.no_cuenta:
-        lea esi, [V(t_no_dada)]
-        call escribir
-        mov eax, edi
-        call hex32
-        lea esi, [V(t_nl)]
-        call escribir
-.otra:
-        add edi, 1000h
-        cmp edi, 0A0000h
+.otra:  inc edi
+        cmp edi, NPAG
         jb .pagina
+        call paginas_ensenar            ; las que no da, por tramos
         lea esi, [V(t_dadas)]
         call escribir
         mov eax, ebx
@@ -120,40 +152,102 @@ pe_entrada:
         lea esi, [V(t_de160)]
         call escribir
 
+        ; ---- dónde va la BIOS de modo real: 60 KB seguidos que haya dado ----
+        lea ebx, [V(bases)]
+.base:  mov eax, [ebx]
+        test eax, eax
+        jz .sin_base
+        shr eax, 12
+        lea esi, [V(dada) + eax]
+        mov ecx, BIOS_PAGS
+.bp:    cmp byte [esi], 0
+        je .otra_base
+        inc esi
+        dec ecx
+        jnz .bp
+        jmp .hay_base
+.otra_base:
+        add ebx, 12
+        jmp .base
+.sin_base:
+        lea esi, [V(t_sin_base)]
+        call escribir
+        jmp .fin
+.hay_base:
+        cmp byte [V(dada) + PAG_ARRANQUE], 0   ; (la página que usa el sector
+        je .sin_base                    ; de arranque de Hispa-DOS)
+        mov eax, [ebx]
+        mov [V(bios_base)], eax
+        mov [V(bios_cual)], ebx
+        ; la memoria convencional de DOS: hasta la primera página (de la 1 en
+        ; adelante) que el firmware no ha dado, o hasta la BIOS
+        mov eax, 1
+.tope:  cmp byte [V(dada) + eax], 0
+        je .tope_ya
+        inc eax
+        cmp eax, NPAG
+        jb .tope
+.tope_ya:
+        shl eax, 12
+        cmp eax, [V(bios_base)]
+        jbe .tope_bien
+        mov eax, [V(bios_base)]
+.tope_bien:
+        mov [V(bajo_tope)], eax
+        lea esi, [V(t_base)]
+        call escribir
+        mov eax, [V(bios_base)]
+        call hex32
+        lea esi, [V(t_base2)]
+        call escribir
+        mov eax, [V(bajo_tope)]
+        call hex32
+        lea esi, [V(t_nl)]
+        call escribir
+        cmp dword [V(bajo_tope)], MEM_MIN_KB * 1024
+        jae .mem_bien
+        lea esi, [V(t_poca)]
+        call escribir
+        jmp .fin
+.mem_bien:
+
         ; ---- la BIOS de modo real ----
         call gop_buscar
         jc .sin_gop
         lea esi, [V(t_viaje)]
         call escribir
-        mov edi, BIOS_BASE              ; la zona de la BIOS, a cero
-        mov ecx, 0F000h / 4
+        mov edi, [V(bios_base)]         ; la zona de la BIOS, a cero
+        mov ecx, BIOS_TAM / 4
         xor eax, eax
         cld
         rep stosd
-        lea esi, [V(bios)]              ; la BIOS, a su sitio
-        mov edi, BIOS_BASE
-        mov ecx, bios_finbin - bios
+        mov ebx, [V(bios_cual)]         ; la BIOS (la ensamblada para esa
+        mov esi, [ebx + 4]              ; base), a su sitio
+        add esi, ebp
+        mov edi, [V(bios_base)]
+        mov ecx, [ebx + 8]
         rep movsb
+        mov ebx, [V(bios_base)]         ; EBX = la tabla de traspaso
         lea eax, [V(despachador)]
-        mov [BIOS_BASE + 8], eax        ; T_DESPACHADOR
+        mov [ebx + 8], eax              ; T_DESPACHADOR
         mov eax, [V(bajo_tope)]         ; T_MEMKB
         shr eax, 10
-        mov [BIOS_BASE + 28], ax
+        mov [ebx + 28], ax
         call memoria_ext                ; T_EXTKB
-        mov [BIOS_BASE + 32], eax
+        mov [ebx + 32], eax
         call tsc_calibrar               ; T_TSC_TICK
-        mov [BIOS_BASE + 36], eax
+        mov [ebx + 36], eax
         call vector_irq0                ; T_VEC0
-        mov [BIOS_BASE + 182], al
+        mov [ebx + 182], al
         call discos_buscar              ; T_NDISCOS y T_DISCOS
-        mov [BIOS_BASE + 30], al
+        mov [ebx + 30], al
         test al, al
         jnz .hay_discos
         lea esi, [V(t_sin_discos)]
         call escribir
         jmp .fin
 .hay_discos:
-        mov eax, BIOS_BASE
+        mov eax, ebx
         call eax                        ; (no vuelve mientras DOS funcione)
         jmp .fin
 .sin_gop:
@@ -170,6 +264,40 @@ pe_entrada:
         pop esi
         pop ebx
         pop ebp
+        ret
+
+; ---- paginas_ensenar: los tramos de páginas bajas que el firmware no ha dado ----
+paginas_ensenar:
+        pushad
+        xor edi, edi                    ; EDI = página
+.busca: cmp edi, NPAG
+        jae .fin
+        cmp byte [V(dada) + edi], 0
+        je .tramo
+        inc edi
+        jmp .busca
+.tramo: mov ebx, edi                    ; EBX = primera del tramo
+.sigue: inc edi
+        cmp edi, NPAG
+        jae .tramo_fin
+        cmp byte [V(dada) + edi], 0
+        je .sigue
+.tramo_fin:
+        lea esi, [V(t_no_dada)]
+        call escribir
+        mov eax, ebx
+        shl eax, 12
+        call hex32
+        lea esi, [V(t_a)]
+        call escribir
+        mov eax, edi
+        shl eax, 12
+        dec eax
+        call hex32
+        lea esi, [V(t_nl)]
+        call escribir
+        jmp .busca
+.fin:   popad
         ret
 
 ; ---- memoria_ext: pide al firmware la memoria seguida desde 1 MB -> EAX = KB ----
@@ -340,9 +468,10 @@ discos_buscar:
         mov edx, [esi + 28]
         add ecx, 1
         adc edx, 0
-        mov [BIOS_BASE + 40 + eax], ecx ; T_DISCOS: sectores
-        mov [BIOS_BASE + 44 + eax], edx
-        mov dword [BIOS_BASE + 48 + eax], 512
+        add eax, [V(bios_base)]
+        mov [eax + 40], ecx             ; T_DISCOS: sectores
+        mov [eax + 44], edx
+        mov dword [eax + 48], 512
         inc byte [V(ndiscos)]
 .otro:
         inc dword [esp]
@@ -440,18 +569,20 @@ despachador:
 .leer:
 .escribir:
         mov ebx, ecx                    ; 3 = leer, 4 = escribir
-        movzx eax, byte [BIOS_BASE + 168]       ; P_DISCO
+        mov edx, [V(bios_base)]         ; EDX = la tabla de traspaso
+        movzx eax, byte [edx + 168]     ; P_DISCO
         cmp al, [V(ndiscos)]
         jae .mal
         lea esi, [V(discos)]
         mov edi, [esi + eax * 8]        ; Block I/O
-        push dword BIOS_BASE + 0C000h   ; el búfer de paso
-        movzx eax, word [BIOS_BASE + 170]       ; P_N
+        lea eax, [edx + PASO]           ; el búfer de paso
+        push eax
+        movzx eax, word [edx + 170]     ; P_N
         shl eax, 9                      ; octetos
         push eax
-        push dword [BIOS_BASE + 176]    ; P_LBA (alto)
-        push dword [BIOS_BASE + 172]    ; P_LBA (bajo)
-        movzx eax, byte [BIOS_BASE + 168]
+        push dword [edx + 176]          ; P_LBA (alto)
+        push dword [edx + 172]          ; P_LBA (bajo)
+        movzx eax, byte [edx + 168]
         push dword [esi + eax * 8 + 4]  ; MediaId
         push edi                        ; This
         sti
@@ -648,7 +779,7 @@ escala:
         popad
         ret
 
-; ---- pantalla_dibujar: pinta la pantalla de texto TX_BASE (80x25), ampliada ----
+; ---- pantalla_dibujar: pinta la pantalla de texto de la BIOS (80x25), ampliada ----
 pantalla_dibujar:
         pushad
         ; la primera vez se borra todo en negro; después solo se pintan las
@@ -672,7 +803,8 @@ pantalla_dibujar:
 .ya_borrada:
         xor edi, edi                    ; EDI = número de celda (0..1999)
 .celda:
-        movzx ebx, word [TX_BASE + edi * 2]  ; BL = carácter, BH = atributo
+        mov ebx, [V(bios_base)]
+        movzx ebx, word [ebx + TX + edi * 2] ; BL = carácter, BH = atributo
         cmp bx, [V(sombra) + edi * 2]
         je .siguiente                   ; igual que la última vez
         mov [V(sombra) + edi * 2], bx
@@ -800,14 +932,45 @@ hex32:
         popad
         ret
 
-t_titulo        db 'HispaBIOS 0.1 (IA32)', 13, 10, 0
+t_titulo        db 'HispaBIOS 0.2 (IA32)', 13, 10, 0
 t_nl            db 13, 10, 0
-t_no_dada       db '  el firmware no da la pagina ', 0
+t_no_dada       db '  el firmware no da de ', 0
+t_a             db ' a ', 0
 t_dadas         db 'Paginas bajas dadas: ', 0
 t_de160         db ' (de 000000A0)', 13, 10, 0
+t_base          db 'La BIOS de modo real va en ', 0
+t_base2         db '. Memoria convencional para DOS hasta ', 0
+t_sin_base      db 13, 10
+                db 'ESTE EQUIPO NO DEJA LIBRE LA MEMORIA BAJA QUE NECESITA HISPA-DOS', 13, 10
+                db '(60 KB seguidos entre 384 y 636 KB): la usa su firmware.', 13, 10
+                db 'Que hacer: entre en la configuracion del equipo (BIOS/UEFI) y, si tiene', 13, 10
+                db '"CSM", "Legacy" o "arranque heredado", activelo y arranque la memoria', 13, 10
+                db 'USB en ese modo (sin "UEFI:" delante en el menu de arranque).', 13, 10, 0
+t_poca          db 13, 10
+                db 'ESTE EQUIPO DEJA MUY POCA MEMORIA CONVENCIONAL (menos de 256 KB):', 13, 10
+                db 'su firmware usa la memoria baja y Hispa-DOS no cabe.', 13, 10
+                db 'Que hacer: entre en la configuracion del equipo (BIOS/UEFI) y, si tiene', 13, 10
+                db '"CSM", "Legacy" o "arranque heredado", activelo y arranque la memoria', 13, 10
+                db 'USB en ese modo (sin "UEFI:" delante en el menu de arranque).', 13, 10, 0
 t_sin_discos    db 'No se encuentra el disco de arranque.', 13, 10, 0
 t_viaje         db 'Arrancando la BIOS de modo real...', 13, 10, 0
 t_sin_gop       db 'No hay salida grafica (GOP) de 640x400 o mas.', 13, 10, 0
+
+; dónde puede ir la BIOS de modo real: base, dónde está su copia en esta
+; imagen y cuánto ocupa (por orden de preferencia; acaba en 0). En 80000h no:
+; ahí se copia el sector de arranque de Hispa-DOS (boot/boot16.asm, RELOC_SEG)
+        align 4
+bases:
+        dd 90000h, bios_9 - pe_inicio, bios_9_fin - bios_9
+        dd 70000h, bios_7 - pe_inicio, bios_7_fin - bios_7
+        dd 60000h, bios_6 - pe_inicio, bios_6_fin - bios_6
+        dd 0
+%ifdef PRUEBA_OCUPA
+prueba_ocupa    dd PRUEBA_OCUPA, -1
+%endif
+bios_base       dd 0                    ; dónde está la BIOS de modo real
+bios_cual       dd 0                    ; su entrada en «bases»
+dada            times NPAG db 0         ; 1: el firmware ha dado esa página baja
 
 guid_imagen     dd 5B1B31A1h
                 dw 9562h, 11D2h
@@ -864,7 +1027,7 @@ dir_pag         dq 0                    ; EFI_PHYSICAL_ADDRESS (64 bits)
 buf_hex         times 8 db '0'
                 db 0
                 align 4
-buf16           times 256 dw 0
+buf16           times 640 dw 0          ; (el texto más largo: unas 400 letras)
 sombra          times 2000 dw 0         ; lo que hay pintado (carácter y atributo)
 tab_x           times 641 dd 0
 tab_y           times 401 dd 0
@@ -879,7 +1042,12 @@ pc_y1           dd 0
 pc_gx           dd 0
 pc_gy           dd 0
 pc_bits         db 0
-bios:           incbin "BIOS32.BIN"
-bios_finbin:
+; la BIOS de modo real, ensamblada para cada base posible
+bios_9:         incbin "BIOS32.BIN"
+bios_9_fin:
+bios_7:         incbin "BIOS32_7.BIN"
+bios_7_fin:
+bios_6:         incbin "BIOS32_6.BIN"
+bios_6_fin:
 
 PE_FIN

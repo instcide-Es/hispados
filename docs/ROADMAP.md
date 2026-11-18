@@ -71,4 +71,6 @@ Herramientas previstas para el código Win16: **Open Watcom** (libre), que gener
 
 ## Arranque en PCs actuales (UEFI)
 
+**Puente ya hecho: HispaBIOS** (una aplicación UEFI que hace de BIOS para arrancar Hispa-DOS tal cual en equipos sin CSM; va en `\EFI\BOOT` de la memoria USB). Ver [HISPABIOS.md](HISPABIOS.md): la 0.2 (18/11/2026) arregla la parada en un PC actual (la pila sin alinear en las llamadas al firmware), elige dónde poner la BIOS según la memoria baja que deje el firmware y, si algo falla, lo dice y guarda `HISPABIOS.LOG` en la memoria. Falta la prueba en ese equipo.
+
 Muchos PCs modernos (más o menos desde 2020) ya no traen CSM (arranque de BIOS clásica). Acordado con Carlos (14/11/2026): **Hispa-DOS se queda con BIOS y CSM**, que es lo que tienen los equipos para los que existe; el arranque UEFI se hará **en Hispa 32**, de forma nativa (cargador UEFI propio y controladores propios de disco y pantalla), no con una BIOS prestada. Queda anotada como posible puente, sin compromiso, la opción de CSMWrap (SeaBIOS como CSM desde una aplicación UEFI), que obliga a quitar el Secure Boot y no funciona en todas las placas.

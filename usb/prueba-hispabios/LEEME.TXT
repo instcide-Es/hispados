@@ -1,0 +1,49 @@
+PRUEBA DE HISPABIOS (arranque por UEFI) EN EL PC ACTUAL - Hispa-DOS
+Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
+===================================================================
+
+Que es: en el PC actual, arrancando por UEFI, la memoria USB se quedaba en
+    HispaBIOS 0.1 (x64) - paso 2: la memoria baja
+    Mapa de memoria por debajo de 1 MB (inicio, paginas, tipo):
+Era un fallo de HispaBIOS (llamaba al firmware con la pila sin alinear:
+QEMU y el MacBook lo perdonan, los PC actuales no). Esta imagen lleva el
+arreglo (HispaBIOS 0.2) y, ademas, va apuntando lo que hace en un archivo
+de la propia memoria USB, HISPABIOS.LOG, por si se para en otro sitio.
+
+QUE HACER (2 minutos)
+---------------------
+1. Descomprima hispados-usb-hispabios.zip y grabe hispados-usb.img en una
+   memoria USB entera (como las otras veces: Rufus en modo DD, balenaEtcher
+   o dd). Se borra lo que tenga.
+2. Arranque el PC actual desde la memoria USB, por UEFI, igual que cuando
+   fallo.
+3. Mire que pasa:
+   a) Llega al menu de Hispa-DOS y a C:\> : arreglado. Pruebe DIR y
+      escriba algo con el teclado.
+   b) Sale un aviso en MAYUSCULAS (por ejemplo, ESTE EQUIPO NO DEJA LIBRE
+      LA MEMORIA BAJA...): dice que falta y que hacer. Pulse una tecla.
+   c) Se queda parado (pantalla negra, o la ultima linea "Arrancando la
+      BIOS de modo real..."): espere un minuto, haga una foto de la
+      pantalla y apague con el boton.
+4. EN LOS TRES CASOS suba al FTP, a la carpeta prueba-hispabios, el archivo
+       HISPABIOS.LOG
+   que ha quedado en la raiz de la memoria USB (se ve desde Windows, Linux
+   o Mac al pinchar la memoria; Hispa-DOS lo ensena como HISPAB~1.LOG).
+   Y la foto, si la hizo. Si puede, diga tambien la marca y el modelo del
+   equipo.
+
+Que lleva HISPABIOS.LOG: el fabricante y la version del firmware, el mapa
+de memoria entero del equipo, las paginas de memoria baja que el firmware
+no da, donde se ha puesto la BIOS de modo real, la pantalla, los discos y
+el ultimo paso al que ha llegado. Es texto: se puede abrir con el Bloc de
+notas. No lleva nada personal.
+
+Notas
+-----
+- Si el PC tiene Secure Boot activado no arranca ninguna memoria USB que
+  no este firmada (ni llega a salir "HispaBIOS"): hay que desactivarlo en
+  la configuracion del equipo.
+- Esta imagen escribe HISPABIOS.LOG en cada arranque por UEFI. La imagen
+  normal solo lo escribira cuando algo falle.
+- Arrancando por BIOS clasica (CSM / Legacy) no interviene HispaBIOS y no
+  se escribe nada.

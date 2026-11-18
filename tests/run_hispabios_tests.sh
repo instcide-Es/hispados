@@ -32,16 +32,16 @@ arranca() {
   if [ ! -f $code ]; then echo "  (falta $code: instale ovmf/ovmf-ia32; se salta $nombre)"; return 1; fi
   cp $vars $T/vars_$nombre.fd
   rm -f $T/serie_$nombre.txt $T/mon_$nombre
-  $q -m 512 -smp 2 -display none -monitor unix:$T/mon_$nombre,server,nowait \
+  $q -m ${HB_MEM:-512} ${HB_MAQ:-} -smp 2 -display none -monitor unix:$T/mon_$nombre,server,nowait \
     -serial file:$T/serie_$nombre.txt \
     -drive if=pflash,format=raw,readonly=on,file=$code \
     -drive if=pflash,format=raw,file=$T/vars_$nombre.fd \
     -netdev user,id=n0 -device e1000,netdev=n0 \
     -drive file=$img,format=raw,if=none,id=u -device qemu-xhci -device usb-storage,drive=u,bootindex=1 &
   local pid=$! i
-  for i in $(seq 1 240); do
+  for i in $(seq 1 ${HB_SEG:-240}); do
     sleep 1
-    grep -aq 'C:\\>' $T/serie_$nombre.txt 2>/dev/null && break
+    grep -aq "${HB_HASTA:-C:\\\\>}" $T/serie_$nombre.txt 2>/dev/null && break
   done
   if grep -aq 'C:\\>' $T/serie_$nombre.txt; then
     for k in $teclas; do echo "sendkey $k" | socat - UNIX-CONNECT:$T/mon_$nombre > /dev/null; sleep 0.4; done
@@ -114,6 +114,106 @@ if nasm -f bin -o $T/IRREAL.COM tests/progs/irreal.asm; then
   fi
 else
   ko "no se ha podido ensamblar tests/progs/irreal.asm"
+fi
+
+# ---- El arranque en un equipo «actual» y cuando algo falla ----
+# (El fallo de la 0.9.26 en un PC de verdad: HispaBIOS se quedaba parado tras
+# «Mapa de memoria por debajo de 1 MB», en la primera llamada al firmware con
+# la pila sin alinear a 16 octetos; OVMF lo perdona y los firmware actuales,
+# que usan SSE, no.) BOOTX64.EFI se ensambla aquí con las opciones de prueba
+# de hispabios/efi64.asm: PRUEBA_PILA avisa por COM1 («PILA-MAL») de una
+# llamada al firmware con la pila mal; PRUEBA_OCUPA ocupa antes páginas bajas
+# (como un equipo cuyo firmware las usa); REGISTRO_PASOS guarda HISPABIOS.LOG
+# aunque todo vaya bien (la imagen de prueba: tools/mkprueba_hispabios.sh).
+#   hb_variante nombre "opciones de nasm" [32] -> $T/nombre.img con ese
+#   BOOTX64.EFI (o BOOTIA32.EFI, de efi32.asm, que solo tiene PRUEBA_OCUPA)
+hb_variante() {
+  nasm -f bin -I hispabios/ -I $B/ $2 -o $T/$1.EFI hispabios/efi${3:-64}.asm || return 1
+  cp --sparse=always $USB $T/$1.img
+  mcopy -o -i $T/$1.img@@1048576 $T/$1.EFI ::EFI/BOOT/BOOT$( [ "${3:-64}" = 64 ] && echo X64 || echo IA32 ).EFI
+}
+hb_log() { mtype -i $T/$1.img@@1048576 ::HISPABIOS.LOG 2>/dev/null | tr -d '\r'; }
+
+echo "== HispaBIOS: equipo «actual» (q35, 8 GB) y la pila alineada en las llamadas al firmware =="
+if hb_variante pila "-DPRUEBA_PILA" && HB_MEM=8G HB_MAQ="-machine q35" arranca 64 $T/pila.img pila "d i r ret" "bytes libres"; then
+  S=$T/serie_pila.txt
+  grep -aq 'HispaBIOS 0\.' $S && ok "HispaBIOS arranca" || ko "HispaBIOS no arranca"
+  grep -aq 'Memoria del equipo: 819[0-9] MB' $S && ok "lee el mapa de memoria entero (8 GB)" || ko "no lee el mapa de memoria de 8 GB"
+  grep -aq 'La BIOS de modo real va en 90000h' $S && ok "la BIOS de modo real, en 90000h" || ko "la BIOS de modo real no va en 90000h"
+  grep -aq 'bytes libres' $S && ok "llega a C:\\> y DIR responde" || ko "no llega a C:\\> o DIR no responde"
+  grep -aq 'PILA-MAL' $S && ko "hay llamadas al firmware con la pila sin alinear ($(grep -ac 'PILA-MAL' $S))" || ok "todas las llamadas al firmware, con la pila alineada a 16"
+  [ -z "$(hb_log pila)" ] && ok "sin fallos no se escribe HISPABIOS.LOG en la memoria" || ko "se ha escrito HISPABIOS.LOG sin fallos"
+else
+  ko "no se ha podido ensamblar o arrancar la variante PRUEBA_PILA"
+fi
+
+# la memoria baja ocupada por el firmware: la BIOS de modo real en otro sitio
+# (90000h, 70000h o 60000h; en 80000h no, que ahí se copia el sector de
+# arranque de Hispa-DOS: con la BIOS en 80000h no arrancaba)
+for caso in "70000h 352 58000h,1,9E000h,2" "60000h 384 7E000h,1,9E000h,2"; do
+  set -- $caso
+  echo "== HispaBIOS: el firmware usa la memoria baja ($3): la BIOS en $1 =="
+  n=ocupa${1%0000h}
+  if hb_variante $n "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_OCUPA=$3" && HB_MEM=2G HB_MAQ="-machine q35" arranca 64 $T/$n.img $n "d i r ret" "bytes libres"; then
+    S=$T/serie_$n.txt
+    grep -aq "La BIOS de modo real va en $1. Memoria convencional para DOS: $2 KB" $S && ok "elige la base $1 y da $2 KB a DOS" || ko "no elige la base $1 con $2 KB"
+    grep -aq 'bytes libres' $S && ok "llega a C:\\> y DIR responde" || ko "no llega a C:\\> o DIR no responde"
+    grep -aq "$2 KB convencional" $S && ok "DOS ve $2 KB de memoria convencional" || ko "DOS no ve $2 KB"
+    grep -aq 'PILA-MAL' $S && ko "llamadas al firmware con la pila sin alinear" || ok "la pila, alineada"
+    n2=$(grep -ac 'BdsDxe: loading' $S)
+    [ "$n2" -le 1 ] && ok "no se ha reiniciado" || ko "se ha reiniciado ($n2 arranques)"
+    L=$(hb_log $n)
+    echo "$L" | grep -q '^Firmware: .*EDK II.*UEFI 2\.' && ok "HISPABIOS.LOG: el fabricante y la versión del firmware" || ko "HISPABIOS.LOG sin el firmware"
+    echo "$L" | grep -q '^Mapa de memoria: [0-9]* entradas de [0-9]* octetos' && [ "$(echo "$L" | grep -c ' atr\. ')" -ge 20 ] && ok "HISPABIOS.LOG: el mapa de memoria completo" || ko "HISPABIOS.LOG sin el mapa completo"
+    echo "$L" | grep -q 'Arrancando la BIOS de modo real' && echo "$L" | grep -q 'Memoria extendida: .*discos: 1' && ok "HISPABIOS.LOG: los pasos hasta arrancar la BIOS" || ko "HISPABIOS.LOG sin los pasos"
+  else
+    ko "no se ha podido ensamblar o arrancar la variante $n"
+  fi
+done
+
+echo "== HispaBIOS de 32 bits: el firmware usa la memoria baja (58000h, 8E000h, 9E000h-9FFFFh): la BIOS en 70000h =="
+if hb_variante ocupa32 "-DPRUEBA_OCUPA=58000h,1,8E000h,1,9E000h,2" 32 && arranca 32 $T/ocupa32.img ocupa32 "d i r ret" "bytes libres"; then
+  S=$T/serie_ocupa32.txt
+  grep -aq 'La BIOS de modo real va en 00070000' $S && ok "elige la base 70000h" || ko "no elige la base 70000h"
+  grep -aq '352 KB convencional' $S && ok "DOS ve 352 KB de memoria convencional" || ko "DOS no ve 352 KB"
+  grep -aq 'bytes libres' $S && ok "llega a C:\\> y DIR responde" || ko "no llega a C:\\> o DIR no responde"
+  n2=$(grep -ac 'BdsDxe: loading' $S)
+  [ "$n2" -le 1 ] && ok "no se ha reiniciado" || ko "se ha reiniciado ($n2 arranques)"
+else
+  echo "  (sin OVMF de 32 bits: se salta)"
+fi
+
+echo "== HispaBIOS: el firmware usa la página del sector de arranque (80000h): lo dice y no arranca =="
+if hb_variante pag80 "-DPRUEBA_PILA -DPRUEBA_OCUPA=80000h,1" && HB_HASTA="Pulse una tecla" HB_SEG=90 arranca 64 $T/pag80.img pag80 "" "Pulse una tecla"; then
+  S=$T/serie_pag80.txt
+  grep -aq 'El firmware usa la pagina 80000h' $S && grep -aq 'ESTE EQUIPO NO DEJA LIBRE LA MEMORIA BAJA' $S && ok "avisa y no arranca DOS encima" || ko "no avisa de la página 80000h"
+  grep -aq 'Hispa-DOS 0\.9' $S && ko "ha arrancado DOS" || ok "DOS no arranca"
+else
+  ko "no se ha podido ensamblar o arrancar la variante de la página 80000h"
+fi
+
+echo "== HispaBIOS: sin memoria baja libre: lo dice, dice qué hacer y guarda HISPABIOS.LOG =="
+if hb_variante sinbase "-DPRUEBA_PILA -DPRUEBA_OCUPA=5F000h,1,6E000h,1,7E000h,1,8E000h,1,9E000h,2" && HB_MEM=8G HB_MAQ="-machine q35" HB_HASTA="Pulse una tecla" HB_SEG=90 arranca 64 $T/sinbase.img sinbase "" "Pulse una tecla"; then
+  S=$T/serie_sinbase.txt
+  grep -aq 'ESTE EQUIPO NO DEJA LIBRE LA MEMORIA BAJA' $S && ok "avisa de que no hay memoria baja libre" || ko "no avisa de la memoria baja"
+  grep -aq 'arranque heredado' $S && ok "dice qué hacer (CSM / arranque heredado)" || ko "no dice qué hacer"
+  grep -aq 'Se ha guardado el registro en la memoria USB: HISPABIOS.LOG' $S && ok "dice que ha guardado el registro" || ko "no dice que ha guardado el registro"
+  grep -aq 'Pulse una tecla' $S && ok "espera una tecla (no se queda parado sin decir nada)" || ko "no llega a esperar la tecla"
+  grep -aq 'PILA-MAL' $S && ko "llamadas al firmware con la pila sin alinear" || ok "la pila, alineada"
+  L=$(hb_log sinbase)
+  echo "$L" | grep -q '^Firmware: ' && echo "$L" | grep -q 'no da de 9E000 a 9FFFF (2 pag.)' && echo "$L" | grep -q 'ESTE EQUIPO NO DEJA LIBRE' && ok "HISPABIOS.LOG: firmware, páginas que no da y el fallo" || ko "HISPABIOS.LOG incompleto"
+  [ "$(echo "$L" | grep -c ' atr\. ')" -ge 100 ] && ok "HISPABIOS.LOG: el mapa de memoria completo ($(echo "$L" | grep -c ' atr\. ') tramos)" || ko "HISPABIOS.LOG sin el mapa completo"
+else
+  ko "no se ha podido ensamblar o arrancar la variante sin memoria baja"
+fi
+
+echo "== HispaBIOS: sin pantalla gráfica (GOP): lo dice y guarda HISPABIOS.LOG =="
+if hb_variante singop "-DPRUEBA_PILA -DPRUEBA_SIN_GOP" && HB_HASTA="Pulse una tecla" HB_SEG=90 arranca 64 $T/singop.img singop "" "Pulse una tecla"; then
+  S=$T/serie_singop.txt
+  grep -aq 'ESTE EQUIPO NO DA UNA PANTALLA GRAFICA' $S && ok "avisa de que no hay pantalla gráfica" || ko "no avisa de la pantalla"
+  hb_log singop | grep -q 'ESTE EQUIPO NO DA UNA PANTALLA GRAFICA' && ok "HISPABIOS.LOG guardado con el fallo" || ko "HISPABIOS.LOG sin el fallo"
+else
+  ko "no se ha podido ensamblar o arrancar la variante sin GOP"
 fi
 
 exit $fail

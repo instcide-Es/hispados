@@ -19,7 +19,11 @@
 ;  Ensamblado con org 0: en modo real el segmento es BASE >> 4; en 32 y 64
 ;  bits las direcciones absolutas llevan BASE sumado (macro L).
 ; =============================================================================
-BASE            equ 90000h
+; BASE: por omisión 90000h; efi64.asm y efi32.asm llevan también copias para
+; 70000h y 60000h (-DBASE=...), por si el firmware usa esa zona
+%ifndef BASE
+%define BASE 90000h
+%endif
 SEG_BIOS        equ BASE >> 4
 
 SEL_C64         equ 08h
@@ -1074,8 +1078,10 @@ gdt:
         dq 00AF9A000000FFFFh            ; 08h código de 64 bits
         dq 00CF9A000000FFFFh            ; 10h código de 32 bits
         dq 00CF92000000FFFFh            ; 18h datos de 32 bits
-        dq 00009A090000FFFFh            ; 20h código de 16 bits, base 90000h
-        dq 000092090000FFFFh            ; 28h datos de 16 bits, base 90000h
+        dw 0FFFFh, BASE & 0FFFFh        ; 20h código de 16 bits, base BASE
+        db (BASE >> 16) & 0FFh, 9Ah, 00h, BASE >> 24
+        dw 0FFFFh, BASE & 0FFFFh        ; 28h datos de 16 bits, base BASE
+        db (BASE >> 16) & 0FFh, 92h, 00h, BASE >> 24
         dq 008F92000000FFFFh            ; 30h datos de 16 bits, límite de 4 GB
 gdt_fin:
 gdtr:   dw gdt_fin - gdt - 1            ; (para lgdt en modo largo: base de 64 bits)

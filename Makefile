@@ -850,9 +850,18 @@ $(B)/BIOS64.BIN: $(HBSRC) | $(B)
 	$(NASM) -f bin $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm
 $(B)/BIOS32.BIN: $(HBSRC) | $(B)
 	$(NASM) -f bin -DARQ32 $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm
-$(B)/BOOTX64.EFI: hispabios/efi64.asm hispabios/pe.inc $(B)/BIOS64.BIN $(B)/FUENTE16.BIN
+# La BIOS de modo real va en 90000h; si el firmware del equipo usa esa zona,
+# en 70000h o 60000h: una copia ensamblada para cada sitio (_7, _6). En 80000h
+# no: ahí se copia el sector de arranque de Hispa-DOS.
+$(B)/BIOS64_%.BIN: $(HBSRC) | $(B)
+	$(NASM) -f bin -DBASE=$*0000h $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm
+$(B)/BIOS32_%.BIN: $(HBSRC) | $(B)
+	$(NASM) -f bin -DARQ32 -DBASE=$*0000h $(HBFLAGS) -I hispabios/ -o $@ hispabios/bios64.asm
+HBBIOS64 = $(B)/BIOS64.BIN $(B)/BIOS64_7.BIN $(B)/BIOS64_6.BIN
+HBBIOS32 = $(B)/BIOS32.BIN $(B)/BIOS32_7.BIN $(B)/BIOS32_6.BIN
+$(B)/BOOTX64.EFI: hispabios/efi64.asm hispabios/pe.inc $(HBBIOS64) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi64.asm
-$(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUENTE16.BIN
+$(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
