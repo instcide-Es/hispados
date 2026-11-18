@@ -127,6 +127,26 @@ $(B)/UCRT.DLL: w32/msvcrt.c w32/ucrt.c tools/elf2pe.py | $(B)
 	$(CC32) -c w32/msvcrt.c -o $(B)/ucrt_msvcrt.o
 	$(CC32) -c w32/ucrt.c -o $(B)/ucrt.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/ucrt_msvcrt.o $(B)/ucrt.o
+# [DX] fase 5 de Hispa-486: DirectX hasta el 7 (sin Direct3D) y WINMM, en C
+# (w32/dx/). Se exporta lo global menos memcpy/memset; DDRAW, DSOUND y DINPUT
+# usan la mezcla y la hora de WINMM.DLL
+DXEXP = $$(nm -g --defined-only $(1) | awk '$$2=="T"{print $$3}' | grep -v '^mem' | paste -sd,)
+$(B)/WINMM.DLL: w32/dx/winmm.c w32/dx/dx.h tools/elf2pe.py ventanas/win32.inc | $(B)
+	$(CC32) -c $< -o $(B)/winmm.o
+	python3 tools/elf2pe.py --dll --exp $(call DXEXP,$(B)/winmm.o)  -t ventanas/win32.inc -o $@ $(B)/winmm.o
+$(B)/DDRAW.DLL: w32/dx/ddraw.c w32/dx/dx.h tools/elf2pe.py ventanas/win32.inc $(B)/WINMM.DLL | $(B)
+	$(CC32) -c $< -o $(B)/ddraw.o
+	python3 tools/elf2pe.py --dll --exp $(call DXEXP,$(B)/ddraw.o) -l $(B)/WINMM.DLL -t ventanas/win32.inc -o $@ $(B)/ddraw.o
+$(B)/DSOUND.DLL: w32/dx/dsound.c w32/dx/dx.h tools/elf2pe.py ventanas/win32.inc $(B)/WINMM.DLL | $(B)
+	$(CC32) -c $< -o $(B)/dsound.o
+	python3 tools/elf2pe.py --dll --exp $(call DXEXP,$(B)/dsound.o) --ordinal DirectSoundCreate=1 --ordinal DirectSoundEnumerateA=2 -l $(B)/WINMM.DLL -t ventanas/win32.inc -o $@ $(B)/dsound.o
+$(B)/DINPUT.DLL: w32/dx/dinput.c w32/dx/dx.h tools/elf2pe.py ventanas/win32.inc $(B)/WINMM.DLL | $(B)
+	$(CC32) -c $< -o $(B)/dinput.o
+	python3 tools/elf2pe.py --dll --exp $(call DXEXP,$(B)/dinput.o) -l $(B)/WINMM.DLL -t ventanas/win32.inc -o $@ $(B)/dinput.o
+$(B)/OLE32.DLL: w32/dx/ole32.c w32/dx/dx.h tools/elf2pe.py | $(B)
+	$(CC32) -c $< -o $(B)/ole32.o
+	python3 tools/elf2pe.py --dll -o $@ $(B)/ole32.o
+DXDLL = $(B)/WINMM.DLL $(B)/DDRAW.DLL $(B)/DSOUND.DLL $(B)/DINPUT.DLL $(B)/OLE32.DLL
 $(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/dllprue.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/dllprue.o
@@ -249,6 +269,15 @@ $(B)/WINCRT.EXE: tests/progs/wincrt.c $(W32DEP) $(B)/DLLPRUE.DLL | $(B)
 $(B)/WINSINDL.EXE: tests/progs/wincrt.c $(W32DEP) $(B)/DLLPRUE.DLL | $(B)
 	$(CC32) -DSINDLL -c $< -o $(B)/winsindl.o
 	python3 tools/elf2pe.py --gui -o $@ -i NOESTA.DLL:NoEsta -l $(B)/DLLPRUE.DLL $(W32L) $(B)/winsindl.o
+# [DX] fase 5: la prueba de DirectX y WINMM (tests/run_dx_tests.sh)
+DXL = -l $(B)/DDRAW.DLL -l $(B)/DSOUND.DLL -l $(B)/DINPUT.DLL -l $(B)/WINMM.DLL
+$(B)/WINDX.EXE: tests/progs/windx.c w32/dx/dxapi.h $(DXDLL) $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/windx.o
+	python3 tools/elf2pe.py --gui -o $@ $(DXL) $(W32L) $(B)/windx.o
+# [DX] «Naves», el juego de ejemplo de Hispa32 (w32/naves/, tests/run_naves_tests.sh)
+$(B)/NAVES.EXE: w32/naves/naves.c w32/dx/dxapi.h $(DXDLL) $(W32DEP) | $(B)
+	$(CC32) -c $< -o $(B)/naves.o
+	python3 tools/elf2pe.py --gui -o $@ $(DXL) $(W32L) $(B)/naves.o
 # los controles de serie (tests/run_win32ctl_tests.sh)
 $(B)/WINCTL.EXE: tests/progs/winctl.c $(W32DEP) | $(B)
 	$(CC32) -c $< -o $(B)/winctl.o
@@ -883,8 +912,8 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSD
 # ejemplo en \HISPA32, el Navegador en \HISPADOS\INTERNET (lo del disquete
 # «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
-H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [FONDO] la imagen de fondo del escritorio de Hispa-486 (sistema/486/FONDO.BMP,
@@ -997,6 +1026,9 @@ test: $(TEST_DEPS)
 	tests/run_win32gdi_tests.sh $(IMG)
 	tests/run_win32var_tests.sh $(IMG)
 	tests/run_win32fasmw_tests.sh $(IMG)
+	tests/run_dx_tests.sh $(IMG)
+	tests/run_naves_tests.sh $(IMG)
+	tests/run_dxterceros_tests.sh $(IMG)
 	tests/run_emm_tests.sh $(IMG)
 	tests/run_emmhigh_tests.sh $(IMG)
 	tests/run_modojuegos_tests.sh $(IMG)
