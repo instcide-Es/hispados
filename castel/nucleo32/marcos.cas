@@ -54,6 +54,15 @@ módulo Marcos
 
     ; prepara el mapa con lo que cuenta el cargador. «fin_núcleo», donde acaba
     ; el núcleo con sus variables (fin_programa()).
+    ; tapa los marcos donde hay un texto (acabado en 0)
+    función tapa_texto(t: puntero a byte)
+        variable n: nat32
+        si t = nulo entonces devolver fin
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        tapa_trozo(nat32(t), nat32(t) + n + 1)
+    fin
+
     público función prepara_marcos(fin_núcleo: nat32)
         variable i, n, base, final, m: nat32
         variable r: puntero a Región
@@ -99,9 +108,13 @@ módulo Marcos
         tapa_trozo(0x100000, fin_núcleo)
         tapa_trozo(dirección_info(), dirección_info() + 88)
         tapa_trozo(dirección_mapa(), dirección_mapa() + largo_mapa())
+        ; los textos que deja el cargador (lo que se le dijo al núcleo y el
+        ; nombre de cada módulo) pueden estar justo detrás del núcleo
+        tapa_texto(línea_del_cargador())
         si módulos() > 0 entonces
             tapa_trozo(dirección_módulos(), dirección_módulos() + 16 * módulos())
             para i desde 0 hasta módulos() - 1 hacer
+                tapa_texto(módulo_texto(i))
                 tapa_trozo(módulo_inicio(i), módulo_final(i))
             fin
         fin

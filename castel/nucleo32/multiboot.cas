@@ -130,6 +130,11 @@ módulo Multiboot
         devolver ficha_módulo(i).final
     fin
 
+    ; su nombre entero, como lo dejó el cargador (para no pisarlo); nulo si no tiene
+    público función módulo_texto(i: nat32): puntero a byte
+        devolver ficha_módulo(i).nombre
+    fin
+
     ; su nombre: lo que se dijo al cargarlo (en QEMU, la ruta del archivo); de
     ; él, lo que va detrás de la última «/»
     público función módulo_nombre(i: nat32): puntero a byte
