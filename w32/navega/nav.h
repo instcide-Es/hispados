@@ -54,7 +54,9 @@ int remove(const char *);
 
 /* cómo se presenta el Navegador a los servidores (User-Agent) */
 #define NAV_VERSION "0.3"
+#ifndef HTTP_AGENTE               /* [NETSURF] el Navegador completo (w32/surf) se presenta con el suyo */
 #define HTTP_AGENTE "HispaNavegador/" NAV_VERSION " (Hispa-486)"
+#endif
 
 /* ---- textos y memoria (html.c) ---- */
 typedef struct Trozo { struct Trozo *sig; u32 usado, tam; } Trozo;

@@ -219,6 +219,8 @@ $(B)/internet.img: $(INTERNET) w32/navega/NAVEGA.INI w32/navega/LEEME.TXT
 	iconv -f UTF-8 -t CP437 w32/navega/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet_leeme.txt
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet_leeme.txt ::LEEME.TXT
 internet: $(B)/internet.img
+# [NETSURF] el Navegador completo (NetSurf): NAVEGA2.EXE y el disquete «Internet 2»
+include w32/surf/surf.mk
 # [JS] HSPJS.DLL: JavaScript para los programas Hispa32 (QuickJS, que va en
 # terceros/quickjs con su licencia MIT, más w32/js: memoria, hora, Math) y
 # JS.EXE, la consola para probarlo. docs/486/NAVEGADOR.md, «JavaScript»

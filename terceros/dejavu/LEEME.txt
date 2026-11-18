@@ -1,0 +1,21 @@
+Letras DejaVu 2.37 (https://dejavu-fonts.github.io/), licencia de Bitstream
+Vera con los cambios de DejaVu en dominio público: ver LICENSE. Libres para
+copiar, cambiar y repartir.
+
+Las usa NAVEGA2.EXE, el Navegador completo (w32/surf/letra.c), desde
+\HISPADOS\INTERNET\FUENTES. Recortadas a lo que se escribe en español,
+catalán y las lenguas de Europa occidental (para que quepan en el disquete
+«Internet 2» y gasten poca memoria), sin «hinting» (stb_truetype no lo usa):
+  pyftsubset X.ttf --unicodes="U+0020-007E,U+00A0-017F,U+0192,U+02C6-02DC,
+    U+2010-2027,U+2030,U+2039-203A,U+20AC,U+2122,U+2190-2195,U+2212,U+2022,
+    U+25A0-25CF,U+2713-2717" --no-hinting --layout-features=''
+    --drop-tables+=GSUB,GPOS,GDEF,kern,FFTM --name-IDs='*'
+(fontTools). Como el nombre se ha cambiado, la licencia pide que no se llamen
+«Bitstream Vera»: aquí son SANS.TTF, SANSN.TTF (negrita), SERIF.TTF,
+SERIFN.TTF, MONO.TTF y MONON.TTF, de estos (SHA-256 de los originales):
+  DejaVuSans.ttf          ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280
+  DejaVuSans-Bold.ttf     5c1247acef7f2b8522a31742c76d6adcb5569bacc0be7ceaa4dc39dd252ce895
+  DejaVuSerif.ttf         8f2c103bfa3fd5de71f1b92b18f21906b5a26871fb7e19a9a4c9af539c3cc7ab
+  DejaVuSerif-Bold.ttf    847b33e13925f19ff87e4d934d6b3cf7cac35ce16424f6f670e40c2f377cf2df
+  DejaVuSansMono.ttf      c805f9436dbc268644c1d9584f01a601a653e028e08fd74b9b949f6cf8304d88
+  DejaVuSansMono-Bold.ttf 3a3c502eeff669a231549e80df9f7c49de109bafe303170409e905d0b31a38fe

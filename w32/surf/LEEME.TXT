@@ -1,0 +1,22 @@
+NAVEGADOR COMPLETO DE HISPA-486 (disquete «Internet 2»)
+
+NAVEGA2.EXE es NetSurf 3.11 (navegador libre, GPL-2.0) con la ventana de
+Hispa Ventanas: muestra la web entera, con sus hojas de estilo, letras de
+ancho variable e imágenes, como un navegador de los grandes. Para el modo
+ligero de ClicGest y las páginas sencillas, el Navegador de siempre
+(NAVEGA.EXE, disquete «Internet») va más deprisa.
+
+Instalar: copie TODO este disquete en C:\HISPADOS\INTERNET, donde ya está lo
+del disquete «Internet» (allí están las DLL que necesita: MSVCRT.DLL,
+WSOCK32.DLL y HSPTLS.DLL):
+    XCOPY A:\*.* C:\HISPADOS\INTERNET /S
+Sale en el menú Inicio, grupo Internet: «Navegador completo».
+
+Necesita un 486 o mejor y 16 MB de memoria (mejor 32 MB).
+
+F6: escribir la dirección.  F5: recargar.  Esc: parar.  Rueda: mover.
+
+NetSurf (c) The NetSurf Developers, GPL-2.0; sus bibliotecas, MIT; letras
+DejaVu (licencia libre de Bitstream Vera); stb_image y stb_truetype, dominio
+público. Lo demás: Copyright (C) 2026 Carlos Sanz y contribuidores,
+GPL-2.0 o posterior.

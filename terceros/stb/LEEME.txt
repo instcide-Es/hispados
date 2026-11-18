@@ -1,0 +1,8 @@
+stb_truetype.h 1.26 y stb_image.h 2.30 de Sean Barrett y colaboradores
+(https://github.com/nothings/stb, commit f58f558c120e9b32c217290b80bad1a0729fbb2c),
+de dominio público o MIT a elegir: ver LICENSE.
+SHA-256: stb_truetype.h ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab
+         stb_image.h    594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3
+Sin cambios. Los usa NAVEGA2.EXE, el Navegador completo (w32/surf):
+w32/surf/letra.c pinta las letras TrueType (en vez de FreeType) y
+w32/surf/imagen.c lee PNG y JPEG (en vez de libpng y libjpeg).
