@@ -339,7 +339,8 @@ cp $T/base.img $T/f.img
 printf '%s\r\n' '[Escritorio]' 'Escritorio=486' > $T/VENTANAS.INI
 MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/VENTANAS.INI ::HISPADOS/VENTANAS.INI
 # el grupo «Escritorio=1» de la 4.ª (sus iconos, arriba a la izquierda); el
-# Centro y los grupos, abajo a la derecha, para ver que los iconos se van
+# Centro y los grupos, abajo a la derecha, para ver que los iconos se van (en
+# el clásico, donde estaban, solo el dibujo del escritorio: trama)
 printf '%s\r\n' '[Centro]' 'Ventana=420,330,360,190' 'Activo=-1' 'SinRepetidos=1' 'TareasPrincipal=1' \
   '[Grupo]' 'Nombre=Principal' 'Ventana=420,330,360,190' 'Estado=0' \
   '[Acceso]' 'Nombre=Configuración' 'Icono=herramienta' 'Programa=A:\HISPADOS\CONFIG.HVP' \
@@ -362,8 +363,8 @@ chk $T/e1.ppm px 400 572 10 "el filete de la barra de tareas" nopx 400 10 1 "sin
   texto 32 102 9 12 doble "Biblioteca" nopx 100 180 2 "el icono de «Bloc de notas»"
 chk $T/e2.ppm titulo 124 110 activa "Configuración" busca 290 212 320 232 0 8 "Barra de tareas con menú Inicio"
 chk $T/e3.ppm px 400 10 1 "la barra de arriba" nopx 400 590 1 "sin barra de tareas" \
-  titulo 124 110 activa "Configuración" px 100 180 2 "sin el icono de «Bloc de notas» (el fondo)" \
-  px 40 110 2 "sin la etiqueta de «Biblioteca» (el fondo)"
+  titulo 124 110 activa "Configuración" \
+  trama 24 30 96 220
 check "Hispa Ventanas ha terminado."
 ini
 if grep -qi '^Escritorio=' $T/ven.txt; then ko "VENTANAS.INI sigue con la clave Escritorio"; cat $T/ven.txt; else ok "VENTANAS.INI: sin la clave Escritorio"; fi
