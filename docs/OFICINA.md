@@ -11,7 +11,7 @@ y está escrito en ensamblador, como el resto del sistema.
 | **Facturas** | facturas emitidas y recibidas | en uso |
 | **Publicaciones** | panfletos, carteles, tarjetas, folletos | en uso |
 | **Presentaciones** | diapositivas, temas, pase a pantalla completa | en uso |
-| **Lector** | leer documentos PDF (texto, rayas y recuadros) | en uso |
+| **Lector** | leer e imprimir documentos PDF (texto, rayas, recuadros e imágenes) | en uso |
 | **Datos** | base de datos sencilla: tablas, fichas, filtros, listados | en uso |
 | **Correo** | correo sencillo | en proyecto (le falta red cifrada en el sistema) |
 
@@ -98,7 +98,7 @@ como en el Administrador de archivos. Las reglas:
 | | el encabezado de una columna | ordenar, filtrar, resumen y las órdenes del campo (añadir, cambiar, quitar, mover) |
 | | la tabla, donde no hay registros | Añadir, Elegir todos, Buscar, Filtrar, las vistas, Elegir tabla, Añadir un campo |
 | | sin tablas | Nueva base, Abrir base |
-| Lector | la página | Copiar el texto, Buscar, Buscar siguiente, página anterior y siguiente, Ir a la página, ampliar, reducir, tamaño real, ancho de página, página entera, guardar e imprimir el texto, Información, Abrir |
+| Lector | la página | Copiar el texto, Buscar, Buscar siguiente, página anterior y siguiente, Ir a la página, ampliar, reducir, tamaño real, ancho de página, página entera, guardar el texto, imprimir la página (como se ve), Información, Abrir |
 | Mirador | la imagen | anterior, siguiente, ampliar, reducir, ajustar, tamaño real, pantalla completa, girar, elegir una zona, recortar, deshacer, copiar el nombre, guardar como BMP, información, miniaturas |
 | | una miniatura (queda elegida) | Abrir, Volver a la imagen |
 | Publicaciones y Presentaciones | un objeto (o varios elegidos) | Cortar, Copiar, Pegar, Borrar, Duplicar, Escribir en la caja, Traer al frente, Enviar al fondo, Agrupar, Desagrupar, Girar, tipo, tamaño y color de la letra, colores del relleno y del borde, grosor |
@@ -120,6 +120,30 @@ programa solo pone el menú de su página (`ctx_fondo`), otro suyo si lo tiene
 (`ctx_prog`) y su tabla de gris (`ctx_gris_prog`, con la macro `CTX_GRIS_ED`).
 Las pruebas de cada programa tienen su parte del botón secundario (`derecho X
 Y` en `tests/tools/hvp_arnes.sh`).
+
+## Imprimir como se ve
+
+Pluma («Imprimir como se ve»), Mirador y Lector imprimen la página tal como
+sale en la pantalla, punto por punto, en el modo gráfico de las impresoras de
+agujas (ESC/P) por el puerto paralelo (LPT1, con la BIOS: INT 17h): `ESC @`,
+el avance de línea a 8/72 de pulgada (`ESC A 8`) y tiras de 8 agujas de 576
+puntos con `ESC * 5` (72 puntos por pulgada: 8 pulgadas de ancho), así que
+los puntos son cuadrados; `FF` al acabar cada hoja.
+
+En **Lector**, Ctrl+P, el botón de la impresora y el primer «Imprimir» del
+menú Archivo imprimen la página que se ve; «Imprimir todo el documento (como
+se ve)», todas. Así salen las etiquetas con código de barras y los recibos
+que se bajan en PDF. La página va a su tamaño de verdad (un punto del PDF,
+uno del papel), centrada; si no cabe en 576 x 760 (un A4 no cabe), se reduce
+lo justo. Se pinta con lo mismo que la pantalla, por franjas de 128 filas, y
+cada punto pasa a negro o blanco según lo claro que sea su color: lo oscuro
+(el texto, las rayas, las barras de un código), negro macizo, sin tramar,
+para que las barras salgan nítidas; el blanco y el crema, blanco; los grises,
+los colores claros y las fotos, con un tramado ordenado de 4x4. «Imprimir
+solo el texto de la página» y «...del documento» siguen mandando el texto
+llano, como antes (más deprisa, en cualquier impresora). Sin impresora, o si
+no está lista, lo dice. La prueba: `tests/run_lector_tests.sh`, parte I
+(`tests/tools/lector_impresora.py` descodifica lo que sale por LPT1).
 
 ## Cómo está hecho un programa
 

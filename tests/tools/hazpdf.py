@@ -1148,10 +1148,37 @@ def caso_muchas(n=4100):
                                        ('texto', 3999, 'Una de muchas', 72, A4[1] - 780, 12, MAQUINA)]
 
 
+# las barras de la etiqueta de ETIQUETA.PDF: (x, ancho), en puntos
+BARRAS = [(30, 2), (34, 2), (38, 4), (44, 2), (48, 6), (56, 2), (60, 4), (66, 2), (70, 2), (74, 6), (82, 4),
+          (88, 2), (92, 2), (96, 4), (102, 6), (110, 2), (114, 2), (118, 4), (124, 2), (128, 6), (136, 2)]
+
+
+def caso_etiqueta():
+    """Para imprimir como se ve: una etiqueta de 4 x 2 pulgadas con un código
+    de barras (barras negras de 2 a 6 puntos) y su número; y una hoja A4 (no
+    cabe en el papel: se reduce) con un rectángulo negro y otro gris."""
+    p = Pdf()
+    f1 = p.fuente('Helvetica')
+    s = '0 g ' + ' '.join('%d 40 %d 70 re' % b for b in BARRAS) + ' f\n'
+    s += 'BT /F1 10 Tf 30 22 Td (LIBRO 000123) Tj ET\n'
+    c1 = p.flujo(s)
+    c2 = p.flujo('BT /F1 14 Tf 100 780 Td (ETIQUETAS DE PRUEBA) Tj ET\n'
+                 '0 g 100 600 200 100 re f 0.5 g 350 600 150 100 re f\n')
+    raiz = p.paginas([c1, c2], {'F1': f1}, mas_pagina={0: ' /MediaBox [0 0 288 144]'})
+    H = A4[1]
+    e = [('error', 0), ('paginas', 2), ('tam', 0, 288, 144), ('tam', 1, A4[0], A4[1]), ('sin_aviso', 0, 255),
+         ('rect', 0, 30, 144 - 110, 2, 70, NEGRO), ('rect', 0, 136, 144 - 110, 2, 70, NEGRO),
+         ('texto', 0, 'LIBRO 000123', 30, 144 - 22, 10),
+         ('rect', 1, 100, H - 700, 200, 100, NEGRO), ('rect', 1, 350, H - 700, 150, 100, 232 + 12),
+         ('texto', 1, 'ETIQUETAS DE PRUEBA', 100, H - 780, 14)]
+    return 'ETIQUETA', p.clasico(raiz), e
+
+
 def casos():
     c = [caso_carta(), caso_fuentes(), caso_factura(), caso_moderno(), caso_moderno('MODERNO2', False), caso_incremental(),
          caso_filtros(), caso_codif(), caso_cifrado(), caso_cifrado15(), caso_no_sabe(), caso_graficos(), caso_largo(),
-         caso_espacios(), caso_bomba(), caso_muchas(), caso_imagenes(), caso_recortes(), caso_jpeg(), caso_jpeg_no(), caso_mascaras()]
+         caso_espacios(), caso_bomba(), caso_muchas(), caso_imagenes(), caso_recortes(), caso_jpeg(), caso_jpeg_no(), caso_mascaras(),
+         caso_etiqueta()]
     return c + rotos()
 
 

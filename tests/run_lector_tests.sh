@@ -20,7 +20,7 @@
 #     busca una palabra: la encuentra en otra página, la marca, sigue con F3
 #     y da la vuelta; una que no está; la rueda del ratón;
 #  C. guarda el texto de una página y de un documento en .TXT y lo imprime
-#     (LPT1 a un archivo): se compara letra a letra;
+#     («Imprimir solo el texto», LPT1 a un archivo): se compara letra a letra;
 #  D. lo que no sabe: un PDF cifrado, uno que no es PDF, uno que no existe,
 #     páginas con filtro desconocido, letra ilegible, letras que no hay y
 #     contenido dañado (cada una con su aviso) y un PDF cortado, que se rehace;
@@ -34,7 +34,12 @@
 #     con ImageMagick: 4:2:0, 4:2:2, gris, CMYK, progresiva, grande), que se
 #     comparan en la pantalla con la foto; y una página A4 escaneada a 150
 #     puntos por pulgada, en gris y en color, con lo que tarda en componerse.
-# Con LECTOR_SOLO=ABCDEFGHK (las letras que se quieran) se pasan solo esas partes
+#  I. imprimir como se ve (ESC/P de agujas por LPT1, a un archivo): una
+#     etiqueta con un código de barras (Ctrl+P) y el documento entero, con
+#     una hoja A4 que se reduce; tests/tools/lector_impresora.py lo
+#     descodifica y mira las barras punto por punto.
+#  K. el menú del botón secundario; y sin impresora, el aviso.
+# Con LECTOR_SOLO=ABCDEFGHIK (las letras que se quieran) se pasan solo esas partes
 # de Hispa Ventanas; con LECTOR_SOLO=N, solo lo de fuera.
 #
 # Necesita qemu-system-i386, mtools, socat e ImageMagick (como las demás).
@@ -42,7 +47,7 @@ set -u
 IMG=${1:-build/hispados.img}
 . tests/tools/hvp_arnes.sh
 HVP=$B/LECTOR.HVP
-SOLO=${LECTOR_SOLO:-NABCDEFGHK}
+SOLO=${LECTOR_SOLO:-NABCDEFGHIK}
 NASM=${NASM:-nasm} python3 tools/mkhvp.py programas/lector.asm $HVP > $T/mkhvp.txt 2>&1 || { cat $T/mkhvp.txt; ko "LECTOR.HVP no se ensambla"; exit 1; }
 P=$T/pdf
 python3 tests/tools/hazpdf.py $P > /dev/null || { ko "hazpdf.py no hace los PDF"; exit 1; }
@@ -219,12 +224,12 @@ rm -f $T/prn.txt
   shot g0
   tecla ctrl-c; sleep 0.8; tecla ctrl-b; sleep 1; tecla ctrl-v; sleep 0.8; shot g0c; tecla esc; sleep 0.8   # copiar la página y pegarla en el cuadro de buscar
   clic 83 69; sleep 0.8; clic 150 139; sleep 1.5; shot g1; tecla ret; sleep 2.5; shot g2; tecla ret; sleep 1   # Guardar el texto de la página
-  tecla ctrl-p; sleep 5; shot g3; tecla ret; sleep 1                                   # imprimir la página
+  clic 83 69; sleep 0.8; clic 150 255; sleep 5; shot g3; tecla ret; sleep 1            # Imprimir solo el texto de la página
   tecla ctrl-a; sleep 1.2; escribe "fuentes.pdf"; tecla ret; sleep 2.5
   clic 153 90; sleep 0.8                                                               # a la página 2
   clic 83 69; sleep 0.8; clic 150 159; sleep 1.5; escribe "todo"; tecla ret; sleep 4; shot g4; tecla ret; sleep 1   # Guardar el texto del documento
   aparca; shot g5
-  clic 83 69; sleep 0.8; clic 150 235; sleep 8; shot g6; tecla ret; sleep 1            # Imprimir el texto del documento
+  clic 83 69; sleep 0.8; clic 150 275; sleep 8; shot g6; tecla ret; sleep 1            # Imprimir solo el texto del documento
   clic 83 69; sleep 0.8; clic 150 139; sleep 1.5; escribe "fuentes.pdf"; tecla ret; sleep 1.5; shot g7; tecla ret; sleep 1   # el nombre del PDF: no
   sal; } | PARALELO=file:$T/prn.txt run 280 -vga std
 puntos $T/g0c.ppm 250 292 290 18 0 400 700 "lo copiado, pegado en el cuadro de buscar (se ve el final: 35 letras)"
@@ -547,6 +552,32 @@ else
 fi
 fi
 
+if [[ $SOLO == *I* ]]; then
+echo "== Lector I: imprimir como se ve (una etiqueta con código de barras; el documento entero) =="
+prepara $HVP
+mete $P/ETIQUETA.PDF
+reabre 'A:\ETIQUETA.PDF'
+rm -f $T/lpt.bin
+{ arranca
+  shot l1
+  ir 89 90; shot l1b                                                       # el nombre del botón de la impresora
+  tecla ctrl-p; sleep 8; shot l2; tecla ret; sleep 1                       # Ctrl+P: esta página, como se ve
+  clic 83 69; sleep 0.8; shot l3m; clic 150 235; sleep 25; shot l3; tecla ret; sleep 1   # Archivo > Imprimir todo el documento
+  aparca; shot l4
+  sal; } | PARALELO=file:$T/lpt.bin run 240 -vga std
+pie l1 "Página 1 de 2"
+pie l1b "Imprimir esta página tal como se ve (Ctrl+P)"
+dice l2 "La página se ha enviado a la impresora."
+chk $T/l3m.ppm busca 55 200 420 285 0 8 "mprimir esta p" busca 55 200 420 285 0 8 "odo el documento (como se ve)" \
+  busca 55 200 420 285 0 8 "Imprimir solo el te" busca 55 200 420 285 0 8 "Imprimir solo el texto del doc"
+dice l3 "El documento se ha enviado a la impresora."
+pie l4 "Página 1 de 2"                                     # y sigue en su página
+chk $T/l4.ppm igual 60 140 600 300 $T/l1.ppm 60 140 0     # y como estaba
+if [ -s $T/lpt.bin ]; then python3 tests/tools/lector_impresora.py $T/lpt.bin || fail=1
+else ko "no ha salido nada por LPT1"; fi
+muestra l3m lector_menu_imprimir; muestra l2 lector_impreso
+fi
+
 if [[ $SOLO == *K* ]]; then
 echo "== Lector K: el botón secundario (el menú contextual) =="
 prepara $HVP
@@ -559,6 +590,7 @@ reabre 'A:\FACTURA.PDF'
   tecla t; sleep 1.2; aparca; shot k4           # Tamaño real
   tecla shift-f10; sleep 0.6; shot k5; tecla esc   # con el teclado
   derecho 300 90; sleep 0.5; shot k6            # en la barra de botones no hay menú
+  tecla ctrl-p; sleep 1.5; shot k6p; tecla ret; sleep 0.8   # imprimir sin impresora (sin LPT1): lo dice
   clic 83 69; sleep 0.8; clic 150 111; sleep 1  # Archivo > Cerrar
   derecho 300 250; shot k7                      # sin documento: solo vale Abrir
   sal; } | run 200 -vga std
@@ -570,6 +602,8 @@ chk $T/k3.ppm busca 300 250 420 560 0 8 "nterior" busca 300 250 420 560 7 8 "igu
 pie k4 "Página 2 de 2    100 %"
 chk $T/k5.ppm busca 40 90 200 420 0 8 "opiar el texto de la p"
 chk $T/k6.ppm nobusca 280 85 440 420 0 8 "opiar el texto de la p"
+dice k6p "No se ha podido imprimir."
+dice k6p "está encendida, en línea y con papel."
 chk $T/k7.ppm busca 300 250 420 560 7 8 "opiar el texto de la p" busca 300 250 420 560 7 8 "pliar" busca 300 250 420 580 0 8 "Abrir un d"
 muestra k1 lector_contexto; muestra k7 lector_contexto_sin
 fi

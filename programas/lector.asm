@@ -9,7 +9,11 @@
 ;  de página, se amplía y se reduce (página entera, ancho de página, tamaño
 ;  real y de 25 a 400 %), se busca un texto por todo el documento y el texto
 ;  de una página o de todo el documento se guarda en un .TXT (para abrirlo
-;  con Pluma) o se manda a la impresora.
+;  con Pluma). Se imprime la página, o el documento entero, como se ve: en
+;  el modo gráfico de las impresoras de agujas (ESC/P, por LPT1), así que
+;  salen también las imágenes y los códigos de barras de una etiqueta (Ctrl+P,
+;  el botón de la impresora); o, si se prefiere, solo el texto (Archivo >
+;  Imprimir solo el texto...).
 ;
 ;  Lo que no sabe, lo dice: un PDF cifrado no se abre; una página comprimida
 ;  de una forma que no conoce, un texto con letra de codificación propia o
@@ -32,7 +36,9 @@
 ;  es de 8 K y un PDF tiene listas dentro de listas.
 ;  Aquí está lo demás: la ventana, las órdenes y pintar la lista en un mapa
 ;  de puntos del tamaño de la zona de lectura (vbuf), que se copia a la
-;  ventana de una vez; solo se rehace cuando cambia lo que se ve.
+;  ventana de una vez; solo se rehace cuando cambia lo que se ve. Para
+;  imprimir como se ve, lo mismo se pinta en un mapa propio, por franjas del
+;  ancho del papel (imprime_g, más abajo).
 ;
 ;  El texto se pinta con los tipos de programas/comun/tipos.inc, en el tamaño
 ;  dibujado más cercano; cada trozo empieza donde dice el PDF y sus letras se
@@ -89,6 +95,8 @@ O_IMP_PAG   equ 105
 O_IMP_DOC   equ 106
 O_SALIR     equ 107
 O_CERRAR    equ 108
+O_IMPT_PAG  equ 109
+O_IMPT_DOC  equ 110
 O_BUSCAR    equ 111
 O_SIGUIENTE equ 112
 O_COPIAR    equ 113
@@ -168,9 +176,13 @@ lec_menu:
         dw 0
         db 0
         dw O_IMP_PAG
-        db "&Imprimir el texto de la página  Ctrl+P", 0
+        db "&Imprimir esta página (como se ve)  Ctrl+P", 0
         dw O_IMP_DOC
-        db "Imprimir el &texto del documento", 0
+        db "Imprimir &todo el documento (como se ve)", 0
+        dw O_IMPT_PAG
+        db "Imprimir solo el te&xto de la página", 0
+        dw O_IMPT_DOC
+        db "Imprimir solo el texto del doc&umento", 0
         dw 0
         db 0
         dw O_SALIR
@@ -249,7 +261,7 @@ ctx_pagina:
         dw O_TXT_PAG
         db "Guardar el te&xto de la página...", 0
         dw O_IMP_PAG
-        db "Im&primir el texto de la página Ctrl+P", 0
+        db "Im&primir esta página (como se ve)  Ctrl+P", 0
         dw O_INFO
         db "I&nformación del documento...", 0
         dw 0
@@ -298,7 +310,7 @@ botones     dd 6, 26, ic_abrir, O_ABRIR, nb_abrir, BT_ICONO
             dd 198, 26, ic_buscar, O_BUSCAR, nb_buscar, BT_ICONO
             dd 0, 0, 0, 0, 0, 0
 nb_abrir    db "Abrir un documento PDF (Ctrl+A)", 0
-nb_imprimir db "Imprimir el texto de esta página (Ctrl+P)", 0
+nb_imprimir db "Imprimir esta página tal como se ve (Ctrl+P)", 0
 nb_ant      db "Página anterior (RePág)", 0
 nb_sig      db "Página siguiente (AvPág)", 0
 nb_reducir  db "Reducir: ver la página más pequeña (-)", 0
@@ -361,7 +373,7 @@ t_info      db "Información del documento", 0
 t_acerca_tit db "Acerca de Lector", 0
 t_acerca    db "Lector", 10
             db "El lector de documentos PDF de Hispa Ventanas:", 10
-            db "pasa las páginas, amplía, busca y guarda o imprime el texto.", 10
+            db "pasa las páginas, amplía, busca, imprime y guarda el texto.", 10
             db "El texto se ve con los tipos de letra de Hispa Ventanas.", 10, 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores.", 10
             db "GPL-2.0 o posterior.", 0
@@ -402,6 +414,8 @@ t_no_guardar db "No se ha podido guardar el texto.", 10
 t_mismo     db "Ese es el nombre del propio documento PDF:", 10
             db "elija otro nombre para el texto.", 0
 t_impreso   db "El texto se ha enviado a la impresora.", 0
+t_impreso_g db "La página se ha enviado a la impresora.", 0
+t_impreso_d db "El documento se ha enviado a la impresora.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
             db "Compruebe que la impresora (la del puerto paralelo, LPT1)", 10
             db "está encendida, en línea y con papel.", 0
@@ -970,8 +984,12 @@ orden_haz:
         cmp ecx, O_INFO
         je informacion
         cmp ecx, O_IMP_PAG
-        je imprime_pag
+        je imprime_gpag
         cmp ecx, O_IMP_DOC
+        je imprime_gdoc
+        cmp ecx, O_IMPT_PAG
+        je imprime_pag
+        cmp ecx, O_IMPT_DOC
         je imprime_doc
         cmp ecx, O_COPIAR
         je copiar
@@ -2247,6 +2265,316 @@ bios:
         ret
 
 ; =============================================================================
+;  Imprimir como se ve: la página, punto por punto, en el modo gráfico de las
+;  impresoras de agujas (ESC/P), como «Imprimir como se ve» de Pluma y la
+;  impresión de Mirador: 72 puntos por pulgada a lo ancho («ESC * 5», 576
+;  puntos en la hoja) y tiras de 8 agujas con el avance a 8/72 de pulgada,
+;  así que los puntos son cuadrados. Un punto del PDF es uno del papel (la
+;  página sale a su tamaño de verdad: una etiqueta mide lo que tiene que
+;  medir), salvo que no quepa en 576 x 760: entonces se reduce lo justo.
+;  Va centrada a lo ancho y sin la sombra, el fondo ni lo marcado al buscar.
+;  Se pinta con lo mismo que la pantalla (dibuja_lista), por franjas de
+;  IG_FR filas, en un mapa propio (ig_buf). Cada punto pasa a negro o blanco
+;  según lo claro que sea su color: lo oscuro (el texto, las rayas, las
+;  barras de un código de barras), negro macizo; el blanco y el crema, en
+;  blanco; lo de en medio (grises, colores claros, fotos), con un tramado
+;  ordenado de 4x4 (Bayer), que no toca lo macizo: los bordes quedan limpios.
+; =============================================================================
+IG_AN       equ 576                 ; puntos de ancho de la hoja (8 pulgadas)
+IG_AL       equ 760                 ; y de alto que se usan
+IG_FR       equ 128                 ; filas que se pintan de una vez
+
+ig_ini      db 27, '@', 27, 'A', 8  ; la impresora, como de fábrica; avance de 8/72
+ig_graf     db 27, '*', 5, IG_AN & 0xFF, IG_AN >> 8
+ig_fin      db 27, '2'              ; al acabar, el avance de siempre (1/6)
+; el tramado: un punto es negro si su claridad (0-255) es menor que la de su
+; casilla (de 100 a 243, en el orden de Bayer); por debajo de 100, siempre
+; negro; de 243 arriba (el crema, el blanco), nunca
+ig_umbral   db 100, 176, 119, 195
+            db 214, 138, 233, 157
+            db 129, 205, 110, 186
+            db 243, 167, 224, 148
+
+imprime_gpag:
+        mov byte [imp_todo], 0
+        jmp imprime_g
+imprime_gdoc:
+        mov byte [imp_todo], 1
+imprime_g:
+        pushad
+        mov eax, 0                  ; ¿hay puerto paralelo? (INT 11h)
+        mov bl, 0x11
+        call bios
+        test ah, 0xC0
+        jz .mal
+        mov eax, 0x0200             ; ¿y la impresora está encendida?
+        mov bl, 0x17
+        call bios
+        test ah, 0x28
+        jnz .mal
+        test ah, 0x10
+        jz .mal
+        ; la claridad de cada color de la paleta (rojo, verde, azul, 0)
+        mov esi, [hv_api + HV_pal_rgb * 4]
+        xor ecx, ecx
+.lum:
+        movzx eax, byte [esi+ecx*4]
+        imul eax, 77
+        movzx edx, byte [esi+ecx*4+1]
+        imul edx, 150
+        add eax, edx
+        movzx edx, byte [esi+ecx*4+2]
+        imul edx, 29
+        add eax, edx
+        shr eax, 8
+        mov [ig_lum+ecx], al
+        inc ecx
+        cmp ecx, 256
+        jb .lum
+        ; lo que se cambia para pintar en el papel, guardado
+        mov esi, ig_vars
+        mov edi, ig_guarda
+        mov ecx, IG_NVARS
+.g:
+        mov eax, [esi]
+        mov eax, [eax]
+        stosd
+        add esi, 4
+        loop .g
+        mov dword [hl_n], 0         ; (lo marcado al buscar no se imprime)
+        mov esi, ig_ini
+        mov ecx, 5
+        call ig_manda
+        jc .mal_p
+        xor edi, edi                ; EDI=la página
+        cmp byte [imp_todo], 0
+        jne .pag
+        mov edi, [pag]
+.pag:
+        cmp edi, [pag_cargada]
+        je .p1
+        mov eax, edi
+        mov edx, pdf_pagina
+        call nuc
+        mov [pag_cargada], edi
+        mov dword [tx_pag], -1
+.p1:
+        call ig_pagina
+        jc .mal_p
+        mov al, 12                  ; la hoja, fuera
+        call imp_car
+        jc .mal_p
+        cmp byte [imp_todo], 0
+        je .fin
+        inc edi
+        cmp edi, [pdf_npag]
+        jb .pag
+.fin:
+        mov esi, ig_fin
+        mov ecx, 2
+        call ig_manda
+        jc .mal_p
+        call imp_lista
+        jc .mal_p
+        call .vuelve
+        mov esi, t_impreso_g
+        cmp byte [imp_todo], 0
+        je .dice
+        mov esi, t_impreso_d
+.dice:
+        call aviso
+        popad
+        ret
+.mal_p:
+        call .vuelve
+.mal:
+        mov esi, t_e_imprimir
+        call aviso
+        popad
+        ret
+; (interna) todo como estaba; y, si se ha compuesto otra, la página que se veía
+.vuelve:
+        mov esi, ig_vars
+        mov edx, ig_guarda
+        mov ecx, IG_NVARS
+.v0:
+        mov eax, [esi]
+        mov ebx, [edx]
+        mov [eax], ebx
+        add esi, 4
+        add edx, 4
+        loop .v0
+        mov eax, [pag]
+        cmp eax, [pag_cargada]
+        je .v1
+        call carga_pagina
+.v1:
+        ret
+
+; lo que la impresión cambia y luego deja como estaba
+ig_vars     dd zoom, vw, vh, pw, ph, ox, oy, vbuf_p, hl_n
+IG_NVARS    equ ($ - ig_vars) / 4
+
+; (interna) la página compuesta, al papel: sus tiras, sin la hoja de detrás
+; (eso lo pone quien llama). CF=1 si la impresora falla
+ig_pagina:
+        pushad
+        ; la ampliación: 1 (un punto del PDF, uno del papel), o lo que quepa
+        mov dword [zoom], 0x10000
+        mov eax, IG_AN
+        mov ebx, [pg_an]
+        call dispone.entre
+        cmp eax, [zoom]
+        jae .z1
+        mov [zoom], eax
+.z1:
+        mov eax, IG_AL
+        mov ebx, [pg_al]
+        call dispone.entre
+        cmp eax, [zoom]
+        jae .z2
+        mov [zoom], eax
+.z2:
+        cmp dword [zoom], 0x0800    ; (como en la pantalla: no menos de un 2 %)
+        jae .z3
+        mov dword [zoom], 0x0800
+.z3:
+        mov eax, [pg_an]
+        call a_px
+        cmp eax, IG_AN
+        jbe .w
+        mov eax, IG_AN
+.w:
+        mov [pw], eax
+        mov eax, [pg_al]
+        call a_px
+        cmp eax, IG_AL
+        jbe .h
+        mov eax, IG_AL
+.h:
+        mov [ph], eax
+        mov eax, IG_AN              ; centrada a lo ancho
+        sub eax, [pw]
+        sar eax, 1
+        mov [ox], eax
+        mov dword [vw], IG_AN
+        mov dword [vbuf_p], ig_buf
+        xor ebp, ebp                ; EBP=la fila del papel donde empieza la franja
+.franja:
+        cmp ebp, [ph]
+        jae .bien
+        mov eax, [ph]
+        sub eax, ebp
+        cmp eax, IG_FR
+        jbe .f1
+        mov eax, IG_FR
+.f1:
+        mov [vh], eax
+        mov eax, ebp
+        neg eax
+        mov [oy], eax
+        mov edi, ig_buf             ; en blanco, y lo que haya en la página
+        mov ecx, IG_AN * IG_FR / 4
+        mov eax, C_BLANCO * 0x01010101
+        rep stosd
+        call vc_todo
+        call dibuja_lista
+        xor ebx, ebx                ; EBX=la fila de la franja
+.tira:
+        cmp ebx, [vh]
+        jae .sig
+        call ig_tira
+        jc .mal
+        add ebx, 8
+        jmp .tira
+.sig:
+        add ebp, IG_FR
+        jmp .franja
+.bien:
+        popad
+        clc
+        ret
+.mal:
+        popad
+        stc
+        ret
+
+; (interna) la tira de 8 filas que empieza en la fila EBX de la franja (EBP:
+; la fila del papel donde empieza la franja), a la impresora; las filas que
+; pasan de [vh], en blanco. CF=1 si falla
+ig_tira:
+        pushad
+        mov edi, ig_cols
+        mov ecx, IG_AN / 4
+        xor eax, eax
+        rep stosd
+        mov byte [ig_mask], 0x80    ; la aguja de arriba, el bit 7
+        mov byte [ig_hay], 0
+        mov edi, ebx                ; EDI=la fila
+.fila:
+        cmp edi, [vh]
+        jae .manda
+        lea eax, [ebp+edi]          ; EDX=los umbrales de su fila del papel
+        and eax, 3
+        lea edx, [ig_umbral+eax*4]
+        mov esi, edi
+        imul esi, IG_AN
+        add esi, ig_buf
+        xor ecx, ecx                ; ECX=la columna
+.pt:
+        movzx ebx, byte [esi+ecx]
+        mov bl, [ig_lum+ebx]
+        mov eax, ecx
+        and eax, 3
+        cmp bl, [edx+eax]
+        jae .blanco
+        mov al, [ig_mask]
+        or [ig_cols+ecx], al
+        mov byte [ig_hay], 1
+.blanco:
+        inc ecx
+        cmp ecx, IG_AN
+        jb .pt
+        inc edi
+        shr byte [ig_mask], 1
+        jnz .fila
+.manda:
+        cmp byte [ig_hay], 0        ; (una tira en blanco: solo el avance)
+        je .avanza
+        mov esi, ig_graf
+        mov ecx, 5
+        call ig_manda
+        jc .mal
+        mov esi, ig_cols
+        mov ecx, IG_AN
+        call ig_manda
+        jc .mal
+.avanza:
+        mov al, 13
+        call imp_car
+        jc .mal
+        mov al, 10
+        call imp_car
+        jc .mal
+        popad
+        clc
+        ret
+.mal:
+        popad
+        stc
+        ret
+
+; (interna) manda ECX octetos de ESI; CF=1 si falla
+ig_manda:
+        lodsb
+        call imp_car
+        jc .x
+        dec ecx
+        jnz ig_manda
+.x:
+        ret
+
+; =============================================================================
 ;  Información del documento
 ; =============================================================================
 informacion:
@@ -2562,7 +2890,15 @@ dibuja:
         mov ecx, [pw]
         mov edx, [ph]
         call vb_rect
-        ; lo que hay en la página, en su orden
+        call dibuja_lista
+.x:
+        popad
+        ret
+
+; lo que hay en la página, en su orden, con la hoja en [ox], [oy] (lo usa
+; también la impresión como se ve)
+dibuja_lista:
+        pushad
         mov esi, it_tab
         xor ebx, ebx
 .it:
@@ -4164,4 +4500,13 @@ im_tab_hecha resb 1
             alignb 4
 nuc_pila    resb NUC_PILA
 copia_buf   resb COPIA_MAX + 4
+; imprimir como se ve: una franja de la página, ya en el papel; las columnas
+; de una tira (los ocho puntos de cada una, uno por bit); la claridad de cada
+; color de la paleta; y lo que se guarda mientras
+ig_buf      resb IG_AN * IG_FR
+ig_cols     resb IG_AN
+ig_lum      resb 256
+ig_guarda   resd 16
+ig_mask     resb 1
+ig_hay      resb 1
 HVP_FIN
