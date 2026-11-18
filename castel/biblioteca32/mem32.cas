@@ -1,0 +1,106 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; mem32.cas - memoria a granel para los programas de 32 bits (modelo núcleo,
+; usuario e hispa32), escrita en Castel: llenar, copiar y comparar trozos de
+; memoria, de octeto en octeto o de cuatro en cuatro. La memoria es plana: un
+; puntero llega a cualquier sitio, así que aquí no se reserva nada (eso es
+; cosa del montón de quien lo tenga: el del núcleo de Hispa-Pentium está en
+; nucleo32/monton.cas).
+;
+;   importar Mem32
+;   ...
+;   llenar(puntero(marco), 4096, 0)
+;   copiar_memoria(destino, origen, n)          ; aunque se pisen
+módulo Mem32
+
+    ; pone n octetos a «con», desde p. Si p y n van de cuatro en cuatro, por
+    ; palabras de 32 bits (cuatro veces menos vueltas)
+    público función llenar(p: puntero a byte, n: nat32, con: byte)
+        variable q: puntero a nat32
+        variable v: nat32
+        si (nat32(p) ob n) yb 3 = 0 entonces
+            v := nat32(con) * 0x01010101
+            q := puntero(p)
+            n := n >> 2
+            mientras n > 0 hacer
+                valor(q) := v
+                q := q + 1
+                n := n - 1
+            fin
+            devolver
+        fin
+        mientras n > 0 hacer
+            valor(p) := con
+            p := p + 1
+            n := n - 1
+        fin
+    fin
+
+    ; pone n palabras de 32 bits a «con», desde p
+    público función llenar32(p: puntero a nat32, n: nat32, con: nat32)
+        mientras n > 0 hacer
+            valor(p) := con
+            p := p + 1
+            n := n - 1
+        fin
+    fin
+
+    ; copia n octetos de origen a destino. Si los dos trozos se pisan, copia
+    ; desde el final (así sale bien igual: es el «memmove» de C)
+    público función copiar_memoria(destino: puntero a byte, origen: puntero a byte, n: nat32)
+        variable d, q: puntero a nat32
+        si destino = origen o n = 0 entonces devolver fin
+        si destino > origen y destino < origen + n entonces
+            mientras n > 0 hacer
+                n := n - 1
+                destino[n] := origen[n]
+            fin
+            devolver
+        fin
+        si (nat32(destino) ob nat32(origen) ob n) yb 3 = 0 entonces
+            d := puntero(destino)
+            q := puntero(origen)
+            n := n >> 2
+            mientras n > 0 hacer
+                valor(d) := valor(q)
+                d := d + 1
+                q := q + 1
+                n := n - 1
+            fin
+            devolver
+        fin
+        mientras n > 0 hacer
+            valor(destino) := valor(origen)
+            destino := destino + 1
+            origen := origen + 1
+            n := n - 1
+        fin
+    fin
+
+    ; compara n octetos: 0 si son iguales; si no, la resta del primero que
+    ; cambia (menos de 0 si el de a es menor)
+    público función comparar_memoria(a: puntero a byte, b: puntero a byte, n: nat32): ent32
+        mientras n > 0 hacer
+            si valor(a) <> valor(b) entonces devolver ent32(valor(a)) - ent32(valor(b)) fin
+            a := a + 1
+            b := b + 1
+            n := n - 1
+        fin
+        devolver 0
+    fin
+
+    ; ¿son n octetos todos iguales a «con»?
+    público función todo_igual(p: puntero a byte, n: nat32, con: byte): bool
+        mientras n > 0 hacer
+            si valor(p) <> con entonces devolver falso fin
+            p := p + 1
+            n := n - 1
+        fin
+        devolver cierto
+    fin
+
+    ; redondea hacia arriba a un múltiplo de «a» (que es una potencia de 2)
+    público función redondear(n: nat32, a: nat32): nat32
+        devolver (n + a - 1) yb nob (a - 1)
+    fin
+
+fin Mem32.

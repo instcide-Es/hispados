@@ -238,7 +238,7 @@ módulo Base
     público variable at_palabra: arreglo [N_PALABRAS + 1] de nat16
     variable at_simbolo: arreglo [N_SIMBOLOS + 1] de nat16
     público variable a_de, a_a, a_ref, a_modelo, a_grande, a_principal: nat16
-    público variable a_núcleo, a_hispa32, a_interrupción: nat16
+    público variable a_núcleo, a_hispa32, a_usuario, a_interrupción: nat16
 
     ; ---- los módulos: el programa (el último) y los que importa, cada uno detrás de los suyos ----
     público constante MAX_MODULOS = 24
@@ -802,6 +802,7 @@ módulo Base
         a_grande := átomo_de("grande")
         a_núcleo := átomo_de("n\xC3\xBAcleo")
         a_hispa32 := átomo_de("hispa32")
+        a_usuario := átomo_de("usuario")
         a_interrupción := átomo_de("interrupci\xC3\xB3n")
         a_principal := átomo_de("principal")
     fin

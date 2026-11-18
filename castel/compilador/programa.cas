@@ -125,18 +125,19 @@ módulo Programa
     función napoyo(): nat16
         si plano entonces
             si es_núcleo entonces devolver N_APOYO_NÚCLEO fin
+            si es_usuario entonces devolver N_APOYO_USUARIO fin
             devolver N_APOYO_HISPA32
         fin
         devolver N_APOYO
     fin
 
     función ap_nombre(i: nat16): puntero a byte
-        si plano entonces devolver apoyo32_nombre(es_núcleo, i) fin
+        si plano entonces devolver apoyo32_nombre(es_núcleo, es_usuario, i) fin
         devolver apoyo_nombre(i)
     fin
 
     función ap_texto(i: nat16): puntero a byte
-        si plano entonces devolver apoyo32_texto(es_núcleo, i) fin
+        si plano entonces devolver apoyo32_texto(es_núcleo, es_usuario, i) fin
         devolver apoyo_texto(i)
     fin
 
@@ -901,29 +902,50 @@ módulo Programa
         devolver falso
     fin
 
-    ; escribir el programa de 32 bits (modelo núcleo y modelo hispa32)
+    ; escribir el programa de 32 bits (modelo núcleo, usuario y hispa32): el
+    ; núcleo y los programas de usuario son binarios planos con su cabecera y su
+    ; pila; los de hispa32, un PE
     función escribe32(pr: nat16)
         variable k, i, n, v, r, m_, d, nm: nat16
         variable t: arreglo [TXT] de byte
-        variable vacío: bool
+        variable vacío, plano_bin: bool
         vacío := hay_vacío()
+        plano_bin := es_núcleo o es_usuario
         sl("; -----------------------------------------------------------------")
         s("; Generado por ccastel desde el m\xC3\xB3dulo ")
         at_texto(mod_nombre[prog], t)
         s(t)
         sl(". NO editar a mano.")
-        si es_núcleo entonces sl("; Ensamblar:  nasm -f bin ESTE.asm -o NUCLEO.BIN") sino sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.EXE") fin
+        si es_núcleo entonces
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o NUCLEO.BIN")
+        sino si es_usuario entonces
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o USUARIO.BIN")
+        sino
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA.EXE")
+        fin
         sl("; -----------------------------------------------------------------")
         sl("cpu 386")
         sl("bits 32")
-        si es_núcleo entonces s(ARRANQUE_NUCLEO) sino s(ARRANQUE_HISPA32) fin
-        si vacío o es_núcleo entonces
+        si es_núcleo entonces
+            s(ARRANQUE_NUCLEO)
+        sino si es_usuario entonces
+            s(ARRANQUE_USUARIO)
+        sino
+            s(ARRANQUE_HISPA32)
+        fin
+        si vacío o plano_bin entonces
             sl("    mov edi, _vacio")
             sl("    mov ecx, _vacio_fin-_vacio")
             sl("    xor eax, eax")
             sl("    rep stosb")
         fin
-        si es_núcleo entonces s(ARRANQUE_NUCLEO2) sino s(ARRANQUE_HISPA32_2) fin
+        si es_núcleo entonces
+            s(ARRANQUE_NUCLEO2)
+        sino si es_usuario entonces
+            s(ARRANQUE_USUARIO2)
+        sino
+            s(ARRANQUE_HISPA32_2)
+        fin
         sl("    call F_principal")
         si f_tret(pr) = T_NADA entonces sl("    xor eax, eax") fin
         sl("    jmp castel_salir")
@@ -958,7 +980,7 @@ módulo Programa
             fin
             i := i + 1
         fin
-        si es_núcleo entonces
+        si plano_bin entonces
             sl("    align 4, db 0")
             sl("_datos_fin:")
         sino
@@ -968,7 +990,7 @@ módulo Programa
         sl("; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----")
         sl("_vacio:")
         sl("    absolute _vacio")
-        si es_núcleo entonces
+        si plano_bin entonces
             sl("C_pila:")
             sl("    resb 16384")
             sl("C_pila_fin:")
@@ -1211,13 +1233,15 @@ módulo Programa
         grande := falso
         plano := falso
         es_núcleo := falso
+        es_usuario := falso
         d := nb(mod_arbol[prog])
         mientras d <> 0 hacer
             si nk(d) = K_MODELO entonces
                 grande := na(d) = a_grande
-                ; «modelo núcleo» o «modelo hispa32»: 32 bits, memoria plana (CASTEL32.md)
+                ; «modelo núcleo», «hispa32» o «usuario»: 32 bits, memoria plana (CASTEL32.md)
                 es_núcleo := na(d) = a_núcleo
-                plano := es_núcleo o na(d) = a_hispa32
+                es_usuario := na(d) = a_usuario
+                plano := es_núcleo o es_usuario o na(d) = a_hispa32
             fin
             d := nsig(d)
         fin

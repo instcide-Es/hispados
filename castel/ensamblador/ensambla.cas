@@ -74,7 +74,7 @@ módulo Ensambla
     constante C_TIMES = 28
     constante C_SUELTA_W = 29           ; las sueltas de 16 bits (en «bits 32», con 66h delante)
     constante C_SUELTA_D = 30           ; y las de 32 (en «bits 16», con 66h)
-    constante C_MOVX = 31               ; movzx y movsx (y lgdt, lidt, sgdt y sidt: código < 16)
+    constante C_MOVX = 31               ; movzx y movsx (y lgdt, lidt, sgdt, sidt y ltr: código < 16)
 
     ; las instrucciones y órdenes: nombre, clase y código + 1 (hecha con un guion a partir
     ; de las tablas de ensambla.py; por delante, las más frecuentes)
@@ -82,7 +82,7 @@ módulo Ensambla
     constante TABLA_2 = "adc\x02\x03sbb\x02\x04and\x02\x05rol\x03\x01ror\x03\x02rcl\x03\x03rcr\x03\x04shl\x03\x05sal\x03\x05shr\x03\x06sar\x03\x08not\x04\x03neg\x04\x04mul\x04\x05imul\x04\x06div\x04\x07idiv\x04\x08jo\x05\x01jno\x05\x02jb\x05\x03jc\x05\x03jnae\x05\x03jnb\x05\x04jnc\x05\x04jae\x05\x04jz\x05\x05jnz\x05\x06jbe\x05\x07jna\x05\x07ja\x05\x08jnbe\x05\x08js\x05\x09jns\x05\x0Ajp\x05\x0Bjpe\x05\x0Bjnp\x05\x0Cjpo\x05\x0Cjl\x05\x0D"
     constante TABLA_3 = "jnge\x05\x0Djge\x05\x0Ejnl\x05\x0Ejle\x05\x0Fjng\x05\x0Fjg\x05\x10jnle\x05\x10loopne\x06\xE1loopnz\x06\xE1loope\x06\xE2loopz\x06\xE2loop\x06\xE3jcxz\x06\xE4rep\x07\xF4repe\x07\xF4repz\x07\xF4repne\x07\xF3repnz\x07\xF3cld\x01\xFDstd\x01\xFEcli\x01\xFBsti\x01\xFCclc\x01\xF9stc\x01\xFAcmc\x01\xF6cwd\x1D\x9Acbw\x1D\x99pushf\x01\x9Dpopf\x01\x9Elodsb\x01\xADlodsw\x1D\xAEstosb\x01\xABstosw\x1D\xACmovsb\x01\xA5movsw\x1D\xA6"
     constante TABLA_4 = "cmpsb\x01\xA7cmpsw\x1D\xA8scasb\x01\xAFscasw\x1D\xB0nop\x01\x91hlt\x01\xF5lahf\x01\xA0sahf\x01\x9Fxlatb\x01\xD8iret\x01\xD0into\x01\xCF"
-    constante TABLA_5 = "movzx\x1F\xB7movsx\x1F\xBFsgdt\x1F\x01sidt\x1F\x02lgdt\x1F\x03lidt\x1F\x04cdq\x1E\x9Acwde\x1E\x99lodsd\x1E\xAEstosd\x1E\xACmovsd\x1E\xA6cmpsd\x1E\xA8scasd\x1E\xB0pushad\x1E\x61popad\x1E\x62pushfd\x1E\x9Dpopfd\x1E\x9Eiretd\x1E\xD0pusha\x01\x61popa\x01\x62int3\x01\xCDjecxz\x06\xE5"
+    constante TABLA_5 = "movzx\x1F\xB7movsx\x1F\xBFsgdt\x1F\x01sidt\x1F\x02lgdt\x1F\x03lidt\x1F\x04ltr\x1F\x0Dcdq\x1E\x9Acwde\x1E\x99lodsd\x1E\xAEstosd\x1E\xACmovsd\x1E\xA6cmpsd\x1E\xA8scasd\x1E\xB0pushad\x1E\x61popad\x1E\x62pushfd\x1E\x9Dpopfd\x1E\x9Eiretd\x1E\xD0pusha\x01\x61popa\x01\x62int3\x01\xCDjecxz\x06\xE5"
     constante TABLAS = 5
 
     variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4, TABLA_5)
@@ -1742,6 +1742,11 @@ módulo Ensambla
                     error("en el 8086 se desplaza 1 o «cl»")
                 fin
             caso C_MOVX:
+                si cod = 12 entonces            ; ltr: 0F 00 /3, de un registro o una palabra de memoria
+                    si n <> 1 o (op_a.k <> K_MEM y op_a.k <> K_R16) entonces mal("ltr") fin
+                    modrm_n(3, op_a, 2, 0x0F, 0x00, 0)
+                    devolver
+                fin
                 si cod < 16 entonces            ; lgdt, lidt, sgdt y sidt
                     si n <> 1 o op_a.k <> K_MEM entonces mal("esa instrucción") fin
                     modrm_n(cod, op_a, 2, 0x0F, 0x01, 0)

@@ -94,6 +94,7 @@ módulo Tablas
     público variable grande: bool               ; el programa es de «modelo grande»
     público variable plano: bool                ; «modelo núcleo» o «modelo hispa32»: 32 bits (CASTEL32.md)
     público variable es_núcleo: bool            ; «modelo núcleo»
+    público variable es_usuario: bool           ; «modelo usuario» (un programa del anillo 3 de Hispa-Pentium)
     ; de la última búsqueda: los módulos importados que traen ese nombre (si son dos o más)
     público variable amb_n: nat16
     público variable amb_mod: arreglo [MAX_MODULOS] de byte

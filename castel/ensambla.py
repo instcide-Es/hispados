@@ -558,6 +558,8 @@ class Ensamblador:
                 self.error("operandos que no valen para «xchg»")
         elif nem == 'lea' and n == 2 and a.k in ('r16', 'r32') and c.k == 'mem':
             self.modrm(a.reg, c, [0x8D], a.tam)
+        elif nem == 'ltr' and n == 1 and a.k in ('mem', 'r16'):
+            self.modrm(3, a, [0x0F, 0x00])
         elif nem in ('lgdt', 'lidt', 'sgdt', 'sidt') and n == 1 and a.k == 'mem':
             self.modrm({'sgdt': 0, 'sidt': 1, 'lgdt': 2, 'lidt': 3}[nem], a, [0x0F, 0x01])
         elif nem == 'int' and n == 1 and a.k == 'inm':

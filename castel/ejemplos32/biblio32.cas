@@ -1,0 +1,63 @@
+; biblio32.cas - la biblioteca de 32 bits (biblioteca32/): textos (Textos32),
+; memoria a granel (Mem32) y escribir con formato (Formato), en un núcleo.
+; código de salida: 0
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Biblio32
+
+    modelo núcleo
+
+    importar Textos32, Mem32, Formato
+
+    variable sitio: arreglo [64] de byte
+    variable otro: arreglo [64] de byte
+    variable grande: arreglo [4096] de byte
+    variable d: arreglo [4] de nat32
+
+    función principal()
+        variable n: nat32
+        variable e: ent32
+        variable p: puntero a byte
+        ; textos
+        copiar(sitio, "Hispa")
+        concatenar(sitio, "-Pentium")
+        escribir(sitio, " ", longitud(sitio), "\n")
+        escribir(comparar("abc", "abd"), " ", comparar("b", "a"), " ", iguales(sitio, "Hispa-Pentium"), "\n")
+        p := buscar(sitio, "Pent")
+        escribir(p, " ", nat32(p) - nat32(dirección(sitio)), " ", buscar(sitio, "XP") = nulo, "\n")
+        escribir(copiar_hasta(otro, sitio, 6), " ", otro, "\n")
+        natural_a_texto(4294967295, otro)
+        escribir(otro, " ")
+        número_a_texto(-2147483647, otro)
+        escribir(otro, " ")
+        hex_a_texto(0xC0DE, 8, otro)
+        escribir(otro, "\n")
+        escribir(texto_a_natural("0xFFFFFFFF", n), " ", n, " ", texto_a_natural("4294967296", n), " ")
+        escribir(texto_a_número("-123", e), " ", e, "\n")
+        escribir(palabra("  ejecutar   hola  2 ", 1, otro, 64), " «", otro, "» ", palabra("uno", 1, otro, 64), "\n")
+        ; memoria
+        llenar(grande, 4096, 0xAA)
+        escribir(todo_igual(grande, 4096, 0xAA), " ")
+        llenar(dirección(grande[1]), 7, 1)
+        escribir(grande[0], " ", grande[1], " ", grande[7], " ", grande[8], "\n")
+        copiar(grande, "0123456789")
+        copiar_memoria(dirección(grande[2]), grande, 8)
+        escribir(grande, "\n")
+        copiar(grande, "0123456789")
+        copiar_memoria(grande, dirección(grande[2]), 8)
+        escribir(grande, " ", comparar_memoria("abcd", "abce", 4), " ", comparar_memoria("abcd", "abce", 3), " ", redondear(4097, 4096), "\n")
+        ; formato
+        d[0] := 42
+        d[1] := nat32(-7)
+        d[2] := 0xBEEF
+        d[3] := nat32("texto")
+        imprimir("[%u] [%d] [%x] [%s] [%%] [%q]\n", d)
+        imprimir3("[%X] [%x] [%3x]\n", 0xBEEF, 0xBEEF, 0xA)
+        imprimir2("[%-4d] [%6d]\n", nat32(-42), nat32(-42))
+        imprimir4("[%5u] [%-5u] [%05d] [%08X]\n", 42, 42, nat32(-42), 0xC0DE)
+        imprimir4("[%c%c] [%10s] [%-6s]\n", 'o', 'k', nat32("derecha"), nat32("izq"))
+        d[0] := nat32("demasiado largo")
+        n := formatear(otro, 10, "%s", d)
+        escribir(n, " ", otro, "\n")
+    fin
+
+fin Biblio32.

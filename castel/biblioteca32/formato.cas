@@ -1,0 +1,181 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; formato.cas - escribir con formato, como el printf de C pero sencillo, para
+; los programas de 32 bits, escrito en Castel. Una plantilla lleva el texto
+; tal cual y, donde va cada dato, una marca con «%»:
+;
+;   %d  un entero con signo (ent32)       %u  un natural (nat32)
+;   %x  un natural en hexadecimal (a-f)   %X  lo mismo, con A-F
+;   %s  un texto (su dirección)           %c  una letra (su código)
+;   %%  un «%»
+;
+; Entre el «%» y la letra puede ir un ancho (%8u, %4d): se rellena con
+; espacios por delante; con un 0 delante del ancho (%08X), con ceros; y con
+; un «-» (%-10s), con espacios por detrás.
+;
+; Castel no tiene funciones con un número variable de argumentos: los datos
+; van en un arreglo de nat32 (un texto, como nat32(dirección)), o se usan las
+; de uno a cuatro datos:
+;
+;   importar Formato
+;   ...
+;   imprimir2("fallo de página en 0x%08X (%s)\n", dir, nat32("escritura"))
+;   n := formatear(línea, 80, "%5u marcos libres", datos)
+módulo Formato
+
+    importar Textos32
+
+    constante CABE = 256                        ; lo más largo que escribe imprimir de una vez
+
+    ; añade la letra c a destino[n] si cabe (deja sitio para el 0)
+    función pon(destino: puntero a byte, cabe: nat32, ref n: nat32, c: byte)
+        si n + 1 < cabe entonces
+            destino[n] := c
+            n := n + 1
+        fin
+    fin
+
+    ; escribe en destino (con sitio para «cabe» octetos, el 0 incluido) la
+    ; plantilla con los datos puestos. Devuelve cuántas letras ha escrito (lo
+    ; que no cabe, se corta).
+    público función formatear(destino: puntero a byte, cabe: nat32, plantilla: puntero a byte, datos: puntero a nat32): nat32
+        variable n, k, ancho, largo, i, v: nat32
+        variable cifras: arreglo [16] de byte
+        variable trozo: puntero a byte
+        variable c, relleno: byte
+        variable izquierda: bool
+        n := 0
+        k := 0
+        si cabe = 0 entonces devolver 0 fin
+        mientras valor(plantilla) <> 0 hacer
+            c := valor(plantilla)
+            plantilla := plantilla + 1
+            si c <> '%' entonces
+                pon(destino, cabe, n, c)
+                seguir
+            fin
+            ; una marca: «-», «0», el ancho y la letra
+            izquierda := falso
+            relleno := ' '
+            ancho := 0
+            si valor(plantilla) = '-' entonces
+                izquierda := cierto
+                plantilla := plantilla + 1
+            fin
+            si valor(plantilla) = '0' entonces
+                relleno := '0'
+                plantilla := plantilla + 1
+            fin
+            mientras es_cifra(valor(plantilla)) hacer
+                ancho := ancho * 10 + (valor(plantilla) - '0')
+                plantilla := plantilla + 1
+            fin
+            c := valor(plantilla)
+            si c = 0 entonces romper fin
+            plantilla := plantilla + 1
+            trozo := cifras
+            según c
+                caso 'd':
+                    número_a_texto(ent32(datos[k]), cifras)
+                    k := k + 1
+                caso 'u':
+                    natural_a_texto(datos[k], cifras)
+                    k := k + 1
+                caso 'x', 'X':
+                    v := datos[k]
+                    k := k + 1
+                    i := 1
+                    mientras i < 8 y v >> (i * 4) <> 0 hacer
+                        i := i + 1
+                    fin
+                    hex_a_texto(v, i, cifras)
+                    si c = 'x' entonces
+                        i := 0
+                        mientras cifras[i] <> 0 hacer
+                            cifras[i] := minúscula(cifras[i])
+                            i := i + 1
+                        fin
+                    fin
+                caso 's':
+                    trozo := puntero(datos[k])
+                    k := k + 1
+                    si trozo = nulo entonces trozo := "(nulo)" fin
+                caso 'c':
+                    cifras[0] := byte(datos[k])
+                    cifras[1] := 0
+                    k := k + 1
+                caso '%':
+                    cifras[0] := '%'
+                    cifras[1] := 0
+                si no:
+                    ; una marca que no se conoce: se escribe tal cual
+                    cifras[0] := '%'
+                    cifras[1] := c
+                    cifras[2] := 0
+            fin
+            largo := longitud(trozo)
+            ; con ceros, el signo va delante de ellos (-0042)
+            si relleno = '0' y no izquierda y valor(trozo) = '-' y largo < ancho entonces
+                pon(destino, cabe, n, '-')
+                trozo := trozo + 1
+                largo := largo - 1
+                ancho := ancho - 1
+            fin
+            si no izquierda entonces
+                mientras largo < ancho hacer
+                    pon(destino, cabe, n, relleno)
+                    ancho := ancho - 1
+                fin
+            fin
+            i := 0
+            mientras trozo[i] <> 0 hacer
+                pon(destino, cabe, n, trozo[i])
+                i := i + 1
+            fin
+            mientras izquierda y largo < ancho hacer
+                pon(destino, cabe, n, ' ')
+                ancho := ancho - 1
+            fin
+        fin
+        destino[n] := 0
+        devolver n
+    fin
+
+    ; escribe (con escribir) la plantilla con los datos
+    público función imprimir(plantilla: puntero a byte, datos: puntero a nat32)
+        variable línea: arreglo [CABE] de byte
+        formatear(línea, CABE, plantilla, datos)
+        escribir(línea)
+    fin
+
+    ; y con uno, dos, tres o cuatro datos sueltos
+    público función imprimir1(plantilla: puntero a byte, a: nat32)
+        variable d: arreglo [1] de nat32
+        d[0] := a
+        imprimir(plantilla, d)
+    fin
+
+    público función imprimir2(plantilla: puntero a byte, a: nat32, b: nat32)
+        variable d: arreglo [2] de nat32
+        d[0] := a
+        d[1] := b
+        imprimir(plantilla, d)
+    fin
+
+    público función imprimir3(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32)
+        variable d: arreglo [3] de nat32
+        d[0] := a
+        d[1] := b
+        d[2] := c
+        imprimir(plantilla, d)
+    fin
+
+    público función imprimir4(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32, e: nat32)
+        variable d: arreglo [4] de nat32
+        d[0] := a
+        d[1] := b
+        d[2] := c
+        d[3] := e
+        imprimir(plantilla, d)
+    fin
+
+fin Formato.

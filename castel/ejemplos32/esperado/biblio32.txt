@@ -1,0 +1,16 @@
+Hispa-Pentium 13
+-1 1 cierto
+Pentium 6 cierto
+falso Hispa
+4294967295 -2147483647 0000C0DE
+cierto 4294967295 falso cierto -123
+cierto «hola» falso
+cierto 170 1 1 170
+0101234567
+2345678989 -1 0 8192
+[42] [-7] [beef] [texto] [%] [%q]
+[BEEF] [beef] [  a]
+[-42 ] [   -42]
+[   42] [42   ] [-0042] [0000C0DE]
+[ok] [   derecha] [izq   ]
+9 demasiado

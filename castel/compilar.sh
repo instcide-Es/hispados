@@ -30,6 +30,7 @@ EXT=COM
 grep -q '^C_cab:' "$ASM" && EXT=EXE
 grep -q '^P_mz:' "$ASM" && EXT=EXE           # «modelo hispa32»: un programa Win32 (PE)
 grep -q '^C_multiboot:' "$ASM" && EXT=BIN    # «modelo núcleo»: un núcleo multiboot
+grep -q '^C_usuario:' "$ASM" && EXT=BIN      # «modelo usuario»: un programa del anillo 3 de Hispa-Pentium
 COM=${COM:-$DIR/$(echo "$BASE" | tr 'a-z' 'A-Z').$EXT}
 nasm -f bin "$ASM" -o "$COM"
 echo "compilar: $ENT -> $COM"

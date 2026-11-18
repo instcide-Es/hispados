@@ -432,9 +432,9 @@ class Sintactico:
         if self.es('PAL', 'ensamblador'):
             return self.ensamblador()
         if self.es('ID', 'modelo') and (self.es('ID', 'grande', 1) or self.es('ID', 'núcleo', 1)
-                                        or self.es('ID', 'hispa32', 1)):
+                                        or self.es('ID', 'hispa32', 1) or self.es('ID', 'usuario', 1)):
             pos = self.pos()                    # «modelo grande»: un .EXE de varios segmentos;
-            cual = self.tok(1)[1]               # «modelo núcleo» y «modelo hispa32»: 32 bits
+            cual = self.tok(1)[1]               # «modelo núcleo», «hispa32» y «usuario»: 32 bits
             self.p += 2
             return N('modelo', pos, cual=cual)
         if self.es('ID', self.nombre_modulo) or self.es('EOF'):
@@ -1027,8 +1027,8 @@ class Generador:
             if d.k == 'modelo':
                 self.modelo = d.cual
         self.grande = self.modelo == 'grande'
-        # «modelo núcleo» o «modelo hispa32»: 32 bits, memoria plana (CASTEL32.md)
-        self.plano = self.modelo in ('núcleo', 'hispa32')
+        # «modelo núcleo», «hispa32» o «usuario»: 32 bits, memoria plana (CASTEL32.md)
+        self.plano = self.modelo in ('núcleo', 'hispa32', 'usuario')
         self.tpunt = 4 if self.plano else 2     # lo que ocupa un puntero
         T_PUNT_U.tam = T_TEXTO.tam = self.tpunt
         for i, m in enumerate(modulos[:-1]):
@@ -1296,7 +1296,7 @@ class Generador:
         apoyos = APOYO
         if self.plano:
             apoyos = dict(APOYO32)
-            apoyos.update(APOYO_NUCLEO if self.modelo == 'núcleo' else APOYO_HISPA32)
+            apoyos.update({'núcleo': APOYO_NUCLEO, 'hispa32': APOYO_HISPA32, 'usuario': APOYO_USUARIO}[self.modelo])
         apoyo = [Trozo(nombre, txt.strip('\n').split('\n'), False) for nombre, txt in apoyos.items()]
         if self.plano:                          # el arranque acaba en castel_salir
             apoyo[list(apoyos).index('castel_salir')].vivo = True
@@ -4127,20 +4127,23 @@ class Generador32(Generador):
     def escribe32(self, prog, pr, codigo, apoyo, palabras):
         def vivos(lista):
             return [ln for t in lista if t.vivo for ln in t.lineas]
-        nucleo = self.modelo == 'núcleo'
+        # el núcleo y los programas de usuario (Hispa-Pentium) son binarios planos
+        # con su cabecera y su pila; los de hispa32, un PE
+        nucleo = self.modelo in ('núcleo', 'usuario')
         bss = vivos(self.bss)
         sal = [
             '; -----------------------------------------------------------------',
             f'; Generado por ccastel desde el módulo {prog.nombre}. NO editar a mano.',
-            '; Ensamblar:  nasm -f bin ESTE.asm -o ' + ('NUCLEO.BIN' if nucleo else 'PROGRAMA.EXE'),
+            '; Ensamblar:  nasm -f bin ESTE.asm -o ' + {'núcleo': 'NUCLEO.BIN', 'usuario': 'USUARIO.BIN',
+                                                     'hispa32': 'PROGRAMA.EXE'}[self.modelo],
             '; -----------------------------------------------------------------',
             'cpu 386',
             'bits 32',
         ]
-        sal += ARRANQUE32['núcleo' if nucleo else 'hispa32'].strip('\n').split('\n')
+        sal += ARRANQUE32[self.modelo].strip('\n').split('\n')
         if bss or nucleo:
             sal += ['    mov edi, _vacio', '    mov ecx, _vacio_fin-_vacio', '    xor eax, eax', '    rep stosb']
-        sal += ARRANQUE32['núcleo2' if nucleo else 'hispa32_2'].strip('\n').split('\n')
+        sal += ARRANQUE32[self.modelo + '2' if nucleo else 'hispa32_2'].strip('\n').split('\n')
         sal.append('    call F_principal')
         if pr.tret is T_NADA:
             sal.append('    xor eax, eax')
@@ -4643,6 +4646,31 @@ castel_salir:
 """,
 }
 
+# modelo usuario: un programa del anillo 3 de Hispa-Pentium; escribir y acabar
+# son llamadas al sistema (int 0x80: EAX = 1, escribir ECX octetos desde EBX;
+# EAX = 2, acabar con el código de EBX)
+APOYO_USUARIO = {
+    'castel_salida': r"""
+; castel_salida: escribe ECX octetos desde ESI (la llamada al sistema 1)
+castel_salida:
+    push ebx
+    mov eax, 1
+    mov ebx, esi
+    int 0x80
+    pop ebx
+    ret
+""",
+    'castel_salir': r"""
+; castel_salir: el programa acaba con el código de AL (la llamada al sistema 2)
+castel_salir:
+    movzx ebx, al
+    mov eax, 2
+    int 0x80
+.para:
+    jmp .para
+""",
+}
+
 # El arranque de 32 bits: lo que va delante del programa (y, en hispa32, la
 # tabla de lo que se importa, detrás de los datos). Entre el primer trozo y el
 # segundo, si hay variables sin valor inicial, se ponen a cero.
@@ -4720,6 +4748,27 @@ C_plano:
     mov edx, 0x3FC
     mov al, 3
     out dx, al
+""",
+    'usuario': r"""
+org 0x40000000
+; un programa de usuario de Hispa-Pentium (anillo 3, en su propio espacio de
+; direcciones): el núcleo lo carga en 0x40000000; la cabecera le dice hasta
+; dónde llega lo que hay en el archivo y hasta dónde lo que empieza a cero
+C_ini:
+    jmp C_arranque
+    align 4, db 0
+C_usuario:
+    dd 0x33555048
+    dd C_ini
+    dd _datos_fin
+    dd _vacio_fin
+    dd C_arranque
+C_arranque:
+    mov esp, C_pila_fin
+    cld
+""",
+    'usuario2': r"""
+; (lo demás ya lo ha preparado el núcleo)
 """,
     'hispa32': r"""
 org 0x400E00
@@ -4818,7 +4867,8 @@ P_arch_fin:
 class Cargador:
     """Lee el archivo que se compila y, detrás, los módulos que importa (y los que
     importan estos). «importar Textos» busca textos.cas (o Textos.cas) en la carpeta
-    del que lo importa, en las de -I y en biblioteca/, al lado del compilador."""
+    del que lo importa, en las de -I y en biblioteca/ y biblioteca32/, al lado del
+    compilador."""
     def __init__(self, rutas):
         self.rutas = rutas
         self.mods = {}              # nombre -> Modulo
@@ -4836,7 +4886,8 @@ class Cargador:
         """El archivo del módulo que se importa: (ruta, árbol). Un archivo que se
         llame así pero sea un programa (con principal()) no vale: se sigue buscando."""
         carpetas = [os.path.dirname(m.ruta) or '.'] + self.rutas + \
-                   [os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca')]
+                   [os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca'),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca32')]
         programas = []
         for c in carpetas:
             for n in dict.fromkeys((nombre + '.cas', nombre.lower() + '.cas')):
@@ -4898,7 +4949,7 @@ def compila(ruta, rutas=(), todo=False):
     try:
         c.carga(ruta).principal = True
         clase = Generador
-        if any(d.k == 'modelo' and d.cual in ('núcleo', 'hispa32') for d in c.orden[-1].arbol.decls):
+        if any(d.k == 'modelo' and d.cual in ('núcleo', 'hispa32', 'usuario') for d in c.orden[-1].arbol.decls):
             clase = Generador32                 # 32 bits (CASTEL32.md)
         return clase(c.orden, todo).genera()
     except ErrorCastel as e:

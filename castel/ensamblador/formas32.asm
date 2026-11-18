@@ -51,6 +51,13 @@ test eax, 1
 test byte [eax], 1
 lgdt [ebx]
 lidt [0x2000]
+ltr ax
+ltr cx
+ltr [ebx]
+ltr word [ebp-4]
+mov eax, cr2
+mov cr3, eax
+mov eax, cr3
 jmp 0x08:0x1234
 mov ds, ax
 mov ds, eax
