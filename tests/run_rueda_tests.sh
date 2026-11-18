@@ -32,7 +32,7 @@ B=build
 make -s $B/MOUSETST.COM $B/SYNTEST.COM $B/HSPRATON.COM $B/HSPUSB.SYS > /dev/null 2>&1 || {
   echo "== la rueda del ratón: no se puede compilar =="; exit 1; }
 CON32=1
-make -s $B/WINRUEDA.EXE $B/NAVEGA.EXE $B/HSPTLS.DLL $B/WSOCK32.DLL $B/MSVCRT.DLL $B/HW32.COM > /dev/null 2>&1 || CON32=0
+make -s $B/WINRUEDA.EXE $B/NAVEGA.EXE $B/HSPJS.DLL $B/HSPTLS.DLL $B/WSOCK32.DLL $B/MSVCRT.DLL $B/HW32.COM > /dev/null 2>&1 || CON32=0
 T=$(mktemp -d)
 fail=0
 export MTOOLS_SKIP_CHECK=1
@@ -195,9 +195,9 @@ if quiere 4 && [ $CON32 = 1 ]; then
     rm -rf $T/c; mkdir -p $T/c
     mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
     mkdir -p $T/c/HISPADOS/INTERNET
-    cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
+    cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
     cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
-    printf 'Inicio=http://10.0.2.2:%d/larga\r\nIdioma=es-ES\r\n' $P > $T/c/HISPADOS/INTERNET/NAVEGA.INI
+    printf 'Inicio=http://10.0.2.2:%d/larga\r\nIdioma=es-ES\r\nJavaScript=NO\r\n' $P > $T/c/HISPADOS/INTERNET/NAVEGA.INI
     python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS > /dev/null
     RX=400; RY=300
     # La ventana va a toda la pantalla: la fila f de la página, en y = 80 + 18 f.
