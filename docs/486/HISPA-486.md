@@ -107,6 +107,19 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
    los aceleradores y los diálogos comunes (abrir y guardar), probando con
    programas reales pequeños.
 
+## Wi-Fi (hecho el 18/11/2026; sin probar en la tarjeta)
+
+Pedido de Carlos: «Wifi y Explorador web es lo único que necesitamos para que
+el HP Mini pueda ser útil» (para la web de la biblioteca). `HSPWIFI` lleva la
+Broadcom BCM43224 del HP Mini 5103 con WPA2-Personal y se presenta como un
+packet driver Ethernet, así que todo lo que ya usaba `HSPRED` (y el
+navegador) funciona igual por Wi-Fi; la red se elige con la orden `WIFI`. El
+controlador de la radio son los fuentes de `brcmsmac` de Linux sin tocar,
+sobre una capa propia; la gestión 802.11 y WPA2 son nuestras. Va en un
+núcleo de 32 bits en memoria extendida (2 MB), con un residente de 4,5 KB.
+Todo, en [docs/WIFI.md](../WIFI.md). Falta la prueba en el equipo de verdad
+(hay una imagen preparada) y la ventana de Hispa Ventanas para elegir red.
+
 ## Fase 4a: la barra de tareas y el menú Inicio (hecha, 18/11/2026)
 
 Pedido de Carlos al probar la demo: «en 486 se echa de menos la barra de

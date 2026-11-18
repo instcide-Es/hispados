@@ -388,10 +388,20 @@ static int a_cp437(u32 u)
 	return '?';
 }
 
+static int principio = 1;
+
+/* acabar la línea que esté a medias (los avisos de Linux sin fin de línea) */
+void hl_linea(void)
+{
+	if (!principio) {
+		hl_reg_c('\r');
+		hl_reg_c('\n');
+		principio = 1;
+	}
+}
+
 static void reg_texto(const char *s)
 {
-	static int principio = 1;
-
 	while (*s) {
 		u32 u = (u8)*s++;
 		if (u >= 0xc0 && u < 0xe0 && (*s & 0xc0) == 0x80)
@@ -605,6 +615,7 @@ void hl_aviso(const char *archivo, int linea, const char *que)
 
 	if (++cuantos > 60)
 		return;		/* que un aviso repetido no llene el registro */
+	hl_linea();
 	hl_log(1, "AVISO del controlador: %s (%s, línea %d)\n", que, a ? a + 1 : archivo, linea);
 }
 

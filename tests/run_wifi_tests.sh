@@ -1,0 +1,138 @@
+#!/bin/bash
+# Pruebas del Wi-Fi de Hispa-486 (docs/WIFI.md). Sin la tarjeta:
+#  1. build/prueba_wifi (anfitrión): vectores de las normas (SHA-1, HMAC,
+#     PBKDF2, PRF, AES, envoltorio de claves, CCMP) y la gestión 802.11 con
+#     WPA2 contra el punto de acceso de mentira.
+#  2. build/chip_sim (anfitrión): el controlador de la Broadcom (brcmsmac,
+#     bcma y nuestra capa) contra el modelo de la tarjeta.
+#  3. QEMU, HSPWIFI /SIMULA: el residente, el paso a modo protegido, el
+#     packet driver y la orden WIFI con la radio simulada: buscar, conectar
+#     (clave equivocada, clave preguntada sin enseñarla, por número, un
+#     punto de acceso que no contesta),
+#     CONFRED (DHCP), PING, RED.INI (sin la contraseña), /AUTO, OLVIDAR, /U.
+#  4. QEMU, núcleo de pruebas (HSPWSIM.BIN: el núcleo de verdad con el modelo
+#     de la tarjeta dentro) y el microcódigo de verdad: puesta en marcha,
+#     WPA2, DHCP, PING y el registro en el disco.
+#  5. QEMU con HSPEMM (modo V86): lo dice y no se carga.
+# Dos QEMU a la vez como mucho. Wi-Fi tests without the hardware.
+set -u
+cd "$(dirname "$0")/.."
+IMG=${1:-build/hispados.img}
+B=build
+for f in HSPWIFI.COM WIFI.COM HSPWIFI.BIN HSPWSIM.BIN BCM43XX.FW BCM43XXH.FW CONFRED.COM PING.COM prueba_wifi chip_sim; do
+  [ -f $B/$f ] || { echo "falta $B/$f (make)"; exit 1; }
+done
+T=$(mktemp -d)
+trap '[ -n "${GUARDAR:-}" ] && cp $T/*.txt "$GUARDAR"/ 2>/dev/null; rm -rf $T' EXIT
+fail=0
+ok() { echo "  OK   $1"; }
+ko() { echo "  FAIL $1"; fail=1; }
+check() { if grep -qF -- "$2" $T/$1.txt; then ok "$2"; else ko "$2"; fi; }
+checkn() { if grep -qF -- "$2" $T/$1.txt; then ko "(no debía salir) $2"; else ok "sin «$2»"; fi; }
+
+echo "== Wi-Fi: normas y gestión 802.11 (anfitrión) =="
+if $B/prueba_wifi > $T/host.txt 2>&1 && grep -q ", 0 fallos" $T/host.txt; then ok "$(tail -1 $T/host.txt)"; else ko "prueba_wifi"; tail -20 $T/host.txt; fi
+echo "== Wi-Fi: controlador de la BCM43224 contra el modelo de la tarjeta (anfitrión) =="
+if $B/chip_sim > $T/chip.txt 2>&1 && grep -q ", 0 fallos" $T/chip.txt; then ok "$(tail -1 $T/chip.txt)"; else ko "chip_sim"; tail -20 $T/chip.txt | iconv -f CP437 -t UTF-8 -c; fi
+
+mkimg() {   # mkimg nombre núcleo config
+  cp "$IMG" $T/$1.img
+  # sitio para el núcleo (400 KB) y el microcódigo
+  for f in HISPA.WAV VENTANAS.COM AUDICION.COM HSPSND.COM EQUIPO.COM CONFIG.HVP HSPUSB.SYS HSPDPMI.COM; do
+    mdel -i $T/$1.img ::HISPADOS/$f 2>/dev/null
+  done
+  mdeltree -i $T/$1.img ::HISPADOS/PROGS ::HISPADOS/JUEGOS 2>/dev/null
+  printf "$3" > $T/CONFIG.SYS
+  mcopy -o -i $T/$1.img $T/CONFIG.SYS ::CONFIG.SYS
+  cp $B/$2 $T/HSPWIFI.BIN
+  mcopy -o -i $T/$1.img $B/HSPWIFI.COM $B/WIFI.COM $T/HSPWIFI.BIN $B/BCM43XX.FW $B/BCM43XXH.FW ::HISPADOS/
+}
+corre() {   # corre nombre plazo 'segundos|orden'...
+  local n=$1 tmo=$2; shift 2
+  { sleep 7
+    for c in "$@"; do printf '%s\r' "${c#*|}"; sleep "${c%%|*}"; done
+  } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
+        -m 32 -drive file=$T/$n.img,format=raw,if=floppy -boot a -no-reboot > $T/$n.raw 2>&1
+  tr -d '\r' < $T/$n.raw | iconv -f CP437 -t UTF-8 -c > $T/$n.txt
+}
+XMS='DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDOS=HIGH\r\n'
+
+mkimg sim HSPWIFI.BIN "$XMS"
+corre sim 150 '3|WIFI' '6|HSPWIFI /SIMULA' '2|HSPWIFI' '5|WIFI REDES' '3|WIFI' \
+  '9|WIFI CONECTAR HispaPrueba otra clave mala' '3|WIFI' \
+  '9|WIFI CONECTAR NoExiste clave' '5|WIFI CONECTAR 1' '6|WIFI CONECTAR 3' '2|WIFI CONECTAR 9' '2|WIFI DESCONECTAR' \
+  '3|WIFI CONECTAR 2' '8|clave de prueba' '2|WIFI' '6|CONFRED' '7|PING 192.168.77.1 /N:3' \
+  '3|TYPE A:\HISPADOS\RED.INI' '2|WIFI DESCONECTAR' '2|PING 192.168.77.1 /N:1' '6|WIFI /AUTO' \
+  '5|PING 192.168.77.1 /N:2' '3|WIFI REGISTRO A:\W.LOG' '2|WIFI OLVIDAR' '3|TYPE A:\HISPADOS\RED.INI' \
+  '2|WIFI /AUTO' '3|HSPWIFI /U' '2|WIFI' '2|WIFI /AUTO' '2|ECHO fin-de-la-prueba' &
+P1=$!
+mkimg chip HSPWSIM.BIN "$XMS"
+corre chip 90 '14|HSPWIFI /REG:A:\WIFI.LOG' '10|WIFI CONECTAR HispaPrueba clave de prueba' '6|CONFRED' \
+  '7|PING 192.168.77.1 /N:3' '3|WIFI' '3|HSPWIFI /U' '2|ECHO fin-de-la-prueba' &
+P2=$!
+wait $P1 $P2
+
+echo "== Wi-Fi en QEMU: radio simulada (residente, packet driver y orden WIFI) =="
+check sim "HSPWIFI no está cargado. Cárguelo antes: HSPWIFI"
+check sim "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, packet driver en INT 60h"
+check sim "HSPWIFI ya está cargado."
+check sim "  2  HispaPrueba                        6  ████ -47 dBm  WPA2"
+check sim "  3  Vecina abierta                    11  ████ -47 dBm  abierta"
+check sim "Wi-Fi: sin conectar. Para ver las redes: WIFI REDES"
+check sim "No se ha podido conectar: la contraseña no es la de esta red."
+check sim "Esa red no aparece. Mire las que hay con WIFI REDES."
+check sim "Esa red no se puede usar: su seguridad es WPA antigua (no se admite)."
+check sim "Conectando con «Vecina abierta»..."
+check sim "No se ha podido conectar: el punto de acceso no contesta (señal débil)."
+check sim "Ese número no está en la lista de WIFI REDES."
+check sim "Contraseña de la red: ***************"
+checkn sim "Contraseña de la red: clave"
+check sim "Conectado a «HispaPrueba» (señal -47 dBm)."
+check sim "Wi-Fi: conectado a «HispaPrueba» (canal 6, señal -47 dBm ████, WPA2)"
+check sim "  Tarjeta . . . . . . . : Wi-Fi simulado (pruebas) (INT 60h)"
+check sim "  Dirección IP  . . . . : 192.168.77.10"
+check sim "  Obtenida  . . . . . . : por DHCP (servidor 192.168.77.1"
+n=$(grep -c "Respuesta desde 192.168.77.1: octetos=32" $T/sim.txt)
+if [ "$n" -eq 5 ]; then ok "PING: 5 respuestas (3 y, tras /AUTO, 2); ninguna estando desconectado"; else ko "PING: $n respuestas (tenían que ser 5)"; fi
+check sim "WIFI=HispaPrueba"
+if grep -Eq "^WIFICLAVE=[0-9a-f]{64}$" $T/sim.txt; then ok "RED.INI guarda la clave preparada (64 cifras)"; else ko "WIFICLAVE= en RED.INI"; fi
+checkn sim "WIFICLAVE=clave"
+check sim "DHCP=SI"
+check sim "Registro guardado en A:\\W.LOG"
+check sim "Red quitada de RED.INI."
+n=$(grep -c "^WIFI=HispaPrueba" $T/sim.txt)
+if [ "$n" -eq 1 ]; then ok "tras OLVIDAR, RED.INI ya no lleva la red"; else ko "WIFI= sale $n veces"; fi
+check sim "HSPWIFI descargado."
+rm -f $T/w.log; mcopy -i $T/sim.img ::W.LOG $T/w.log 2>/dev/null
+iconv -f CP437 -t UTF-8 -c $T/w.log > $T/wlog.txt 2>/dev/null
+check wlog "WPA: paso 3 de 4 correcto; se manda el 4. Claves puestas"
+check wlog "802.11: CONECTADO a «HispaPrueba»"
+check wlog "ESTADO: CONECTADO"
+check sim "fin-de-la-prueba"
+
+echo "== Wi-Fi en QEMU: el núcleo con la tarjeta simulada y el microcódigo de verdad =="
+check chip "Tarjeta Wi-Fi Broadcom BCM43224, MAC 00:26:82:12:34:56, packet driver en INT 60h"
+check chip "Conectado a «HispaPrueba»"
+check chip "  Dirección IP  . . . . : 192.168.77.10"
+n=$(grep -c "Respuesta desde 192.168.77.1: octetos=32" $T/chip.txt)
+if [ "$n" -eq 3 ]; then ok "PING: 3 respuestas"; else ko "PING: $n respuestas"; fi
+check chip "HSPWIFI descargado."
+rm -f $T/w.log; mcopy -i $T/chip.img ::WIFI.LOG $T/w.log 2>/dev/null
+iconv -f CP437 -t UTF-8 -c $T/w.log > $T/clog.txt 2>/dev/null
+check clog "Chip BCM43224 (0xA8D8), revisión 1"
+check clog "SPROM: revisión 8"
+check clog "Microcódigo brcm/bcm43xx-0.fw: 96224 octetos"
+check clog "Radio encendida en el canal 1"
+check clog "802.11: CONECTADO a «HispaPrueba»"
+checkn clog "EXCEPCI"
+check chip "fin-de-la-prueba"
+
+echo "== Wi-Fi en QEMU: con HSPEMM (modo V86) no se carga =="
+mkimg v86 HSPWIFI.BIN 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\nDOS=HIGH\r\n'
+corre v86 30 '4|HSPWIFI /SIMULA' '2|WIFI' '2|ECHO fin-de-la-prueba'
+check v86 "HSPWIFI no funciona con HSPEMM"
+check v86 "HSPWIFI no está cargado."
+check v86 "fin-de-la-prueba"
+
+if [ $fail -eq 0 ]; then echo "Wi-Fi: todas las pruebas pasan"; else echo "Wi-Fi: HAY FALLOS"; fi
+exit $fail

@@ -339,6 +339,7 @@ cmd_redes:
 buscar:
         mov cx, LL_BARRE
         call nucleo
+espera_busqueda:
         mov bp, 110                 ; 6 s como mucho
 .l:
         call espera_tic
@@ -593,14 +594,31 @@ cmd_conectar:
 .kz:
         mov byte [di], 0
         mov [clave_n], cl
-        ; ¿un número de la lista?
+        ; ¿un número de la lista? (si hay una búsqueda a medias, se espera)
+        call espera_busqueda
         call lista
         call es_numero
         jc .nombre
         cmp ax, 1
         jb .nombre
         cmp ax, [nredes]
-        ja .nombre
+        jbe .num
+        ; no hay tantas: si la lista está vacía se busca ahora
+        cmp word [nredes], 0
+        jne .nonum
+        push ax
+        mov si, m_buscando
+        call puts
+        call buscar
+        call lista
+        pop ax
+        cmp ax, [nredes]
+        jbe .num
+.nonum:
+        mov si, m_nonum
+        call puts
+        jmp salir1
+.num:
         dec ax
         imul bx, ax, R_LEN
         add bx, redes
@@ -1563,6 +1581,7 @@ m_vel       db "; velocidad: ", 0
 m_coma5     db ",5", 0
 m_mbit      db " Mbit/s", 0
 m_noaparece db "Esa red no aparece. Mire las que hay con WIFI REDES.", 13, 10, 0
+m_nonum     db "Ese número no está en la lista de WIFI REDES.", 13, 10, 0
 m_noseg     db "Esa red no se puede usar: su seguridad es ", 0
 m_noseg2    db ".", 13, 10, "Hace falta una red abierta o con WPA2-Personal (AES).", 13, 10, 0
 m_pideclave db "Contraseña de la red: ", 0

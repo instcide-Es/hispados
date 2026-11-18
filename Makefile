@@ -262,7 +262,10 @@ $(B)/BCM43XX.FW: wifi/firmware/bcm43xx-0.fw | $(B)
 	cp $< $@
 $(B)/BCM43XXH.FW: wifi/firmware/bcm43xx_hdr-0.fw | $(B)
 	cp $< $@
-WIFI = $(B)/HSPWIFI.COM $(B)/WIFI.COM $(B)/HSPWIFI.BIN $(B)/BCM43XX.FW $(B)/BCM43XXH.FW
+# (la licencia del microcódigo va siempre con él: lo pide la propia licencia)
+$(B)/BCM43XX.TXT: wifi/firmware/LICENCE.broadcom_bcm43xx | $(B)
+	cp $< $@
+WIFI = $(B)/HSPWIFI.COM $(B)/WIFI.COM $(B)/HSPWIFI.BIN $(B)/BCM43XX.FW $(B)/BCM43XXH.FW $(B)/BCM43XX.TXT
 # la prueba del controlador de la Broadcom contra un modelo de la tarjeta
 # (tests/wifi/chip_sim.c): los mismos fuentes, con -DHL_SIMULA_ES (los
 # registros pasan por el modelo) y -DANFITRION, en un programa de Linux de
@@ -658,7 +661,7 @@ $(B)/BOOTIA32.EFI: hispabios/efi32.asm hispabios/pe.inc $(B)/BIOS32.BIN $(B)/FUE
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(wildcard usb/* floppy/*)
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(wildcard usb/* floppy/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 run: $(IMG)
@@ -721,7 +724,7 @@ $(B)/MEMJUEGO.COM: tests/progs/memjuego.asm | $(B)
 $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM
+test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -858,6 +861,7 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 	tests/run_red_tests.sh $(IMG)
 	tests/run_yukon_tests.sh
 	tests/run_red_usb_tests.sh $(IMG)
+	tests/run_wifi_tests.sh $(IMG)
 	tests/run_consola_tests.sh $(IMG)
 	tests/run_actualizar_tests.sh $(IMG)
 	tests/run_actualizar_hspred_tests.sh $(IMG)

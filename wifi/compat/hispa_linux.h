@@ -276,9 +276,10 @@ int printk(const char *f, ...) __printf(1, 2);
 #define printk_ratelimit() 1
 #define print_hex_dump_bytes(a...) do { } while (0)
 void hl_aviso(const char *archivo, int linea, const char *que);
+void hl_linea(void);
 #define WARN_ON(c) ({ int _c = !!(c); if (_c) hl_aviso(__FILE__, __LINE__, #c); _c; })
 #define WARN_ON_ONCE(c) WARN_ON(c)
-#define WARN(c, f, a...) ({ int _c = !!(c); if (_c) { hl_aviso(__FILE__, __LINE__, #c); hl_log(1, f, ##a); } _c; })
+#define WARN(c, f, a...) ({ int _c = !!(c); if (_c) { hl_aviso(__FILE__, __LINE__, #c); hl_log(1, f, ##a); hl_linea(); } _c; })
 #define WARN_ONCE WARN
 #define BUG_ON(c) do { if (c) hl_aviso(__FILE__, __LINE__, "BUG: " #c); } while (0)
 #define BUG() hl_aviso(__FILE__, __LINE__, "BUG")

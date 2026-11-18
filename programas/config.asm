@@ -61,7 +61,7 @@ RED_IP      equ 153                 ; los cuadros de las direcciones (DHCP=NO)
 RED_MASK    equ 154
 RED_GW      equ 155
 RED_DNS     equ 156
-RED_BUFSZ   equ 1024                ; RED.INI es pequeño
+RED_BUFSZ   equ 2048                ; RED.INI es pequeño
 ; la configuración IP compartida que da HSPRED (INT 2Fh DA00h; ver drivers/
 ; hspred.asm y docs/RED.md); la MAC sale de DA03h (los datos de /INFO)
 RC_FLAGS    equ 0                   ; bit 0 válida, bit 1 por DHCP
@@ -595,7 +595,8 @@ k_si        db "SI", 0
 k_no        db "NO", 0
 n_red       db "RED.INI", 0
 ; las claves que reconoce la lectura de RED.INI: nombre, destino, tipo
-; (0 = DHCP SI/NO, 1 = dirección, 2 = texto libre)
+; (0 = DHCP SI/NO, 1 = dirección, 2 = texto libre, 3 = texto hasta el fin
+; de la línea, con sus espacios: el nombre de una red Wi-Fi)
 red_claves  dd kr_dhcp, a_dhcp, 0
             dd kr_ip, r_ip_txt, 1
             dd kr_mask, r_mask_txt, 1
@@ -604,6 +605,10 @@ red_claves  dd kr_dhcp, a_dhcp, 0
             dd kr_gw, r_gw_txt, 1
             dd kr_dns, r_dns_txt, 1
             dd kr_act, r_act_txt, 2
+            ; [WIFI] la red inalámbrica y su clave preparada (las escribe la
+            ; orden WIFI, docs/WIFI.md): no se enseñan, pero se conservan
+            dd kr_wclave, r_wclave_txt, 3
+            dd kr_wifi, r_wifi_txt, 3
             dd 0
 kr_dhcp     db "DHCP", 0
 kr_ip       db "IP", 0
@@ -613,6 +618,10 @@ kr_puerta   db "PUERTA", 0
 kr_gw       db "GATEWAY", 0
 kr_dns      db "DNS", 0
 kr_act      db "ACTUALIZAR", 0
+kr_wifi     db "WIFI", 0
+kr_wclave   db "WIFICLAVE", 0
+k_wifi      db "WIFI=", 0
+k_wclave    db "WIFICLAVE=", 0
 
 ; =============================================================================
 ;  La entrada: EBX=base ESI=ruta del módulo EDI=parámetros
@@ -2897,6 +2906,8 @@ red_ini_leer:
         mov byte [r_gw_txt], 0
         mov byte [r_dns_txt], 0
         mov byte [r_act_txt], 0
+        mov byte [r_wifi_txt], 0
+        mov byte [r_wclave_txt], 0
         mov esi, red_ruta
         mov edi, red_buf
         mov ecx, RED_BUFSZ
@@ -2960,6 +2971,20 @@ red_ini_leer:
         jmp .salta
 .txt:
         mov edi, [ebx + 4]          ; el destino
+        cmp dword [ebx + 8], 3
+        jne .cp
+        ; tipo 3: hasta el fin de la línea, 66 letras como mucho
+        mov ecx, 66
+.cp3:
+        mov al, [edx]
+        cmp al, ' '
+        jb .cpf
+        mov [edi], al
+        inc edi
+        inc edx
+        dec ecx
+        jnz .cp3
+        jmp .cpf
 .cp:
         mov al, [edx]
         cmp al, ' '
@@ -3078,6 +3103,22 @@ red_escribir_ini:
         call app_trim
         call .crlf
 .wr:
+        ; [WIFI] la red inalámbrica guardada, tal cual estaba
+        cmp byte [r_wifi_txt], 0
+        je .wr2
+        mov esi, k_wifi
+        call hvl_cad
+        mov esi, r_wifi_txt
+        call hvl_cad
+        call .crlf
+        cmp byte [r_wclave_txt], 0
+        je .wr2
+        mov esi, k_wclave
+        call hvl_cad
+        mov esi, r_wclave_txt
+        call hvl_cad
+        call .crlf
+.wr2:
         mov ecx, edi
         mov edx, red_buf
         sub ecx, edx
@@ -4566,6 +4607,8 @@ r_mask_txt  resb 20
 r_gw_txt    resb 20
 r_dns_txt   resb 20
 r_act_txt   resb 100                ; ACTUALIZAR= (se conserva)
+r_wifi_txt  resb 68                 ; WIFI= (se conserva)
+r_wclave_txt resb 68                ; WIFICLAVE= (se conserva)
 red_mac     resb 6
             alignb 4
 red_cfg     resb 32                 ; configuración IP compartida (30 octetos)

@@ -75,6 +75,8 @@ LA RED
   DESCARGAR               baja un archivo por la red (HTTP)
   ACTUALIZAR              busca, descarga e instala la versión nueva
   CONSOLA: consola remota por red, abierta y con código de acceso.
+  HSPWIFI                 el controlador del Wi-Fi (Broadcom BCM43224)
+  WIFI                    elige la red inalámbrica (WIFI /? lo explica)
 
 [SONIDOS]
 EL SONIDO

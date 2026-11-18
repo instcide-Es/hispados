@@ -610,7 +610,10 @@ volcados `PCI\*.BIN`, clase 02h):
   de la Optima) y pendiente de probar en el equipo: ver «Marvell Yukon
   88E8059 (HP Mini 5103)». Si no fuera, sirve un adaptador USB-Ethernet con
   CDC-ECM (los Realtek RTL8152/8153: ver «Adaptadores USB-Ethernet»).
-- **Wi-Fi** (las tres): nada por ahora (ver «Pendiente»).
+- **Wi-Fi**: la Broadcom BCM43224 (HP Mini 5103 y MacBook Air de 2012) la
+  lleva `HSPWIFI`, de Hispa-486, con WPA2: ver [WIFI.md](WIFI.md) (hecho el
+  18/11/2026; **sin probar aún en la tarjeta de verdad**). La Realtek
+  RTL8822BE del A275, todavía no.
 
 Probar una tarjeta: `HSPRED /INFO` dice cuál ha encontrado y si hay enlace;
 `CONFRED` hace el DHCP; `PING` a la puerta de enlace. Si no hay tarjeta que
@@ -630,6 +633,7 @@ proyecto). Claves (sin importar mayúsculas; `;` y `#` empiezan comentarios):
 | `PUERTA=` (`GATEWAY=`) | la puerta de enlace (el router) |
 | `DNS=` | el servidor de nombres; con `DHCP=SI` también, y manda sobre el que da el DHCP |
 | `ACTUALIZAR=` | la dirección HTTP del archivo `versiones.txt` que mira `ACTUALIZAR` (si no, la de por omisión). Opcional. |
+| `WIFI=`, `WIFICLAVE=` | la red inalámbrica y su clave ya preparada (no la contraseña); las escribe la orden `WIFI` de Hispa-486: ver [WIFI.md](WIFI.md). Configuración de Hispa Ventanas las conserva. |
 
 También se puede poner con ratón en **Hispa Ventanas**: Configuración ›
 apartado **«Red»** (una casilla para el DHCP y, a mano, la IP, la máscara, la
@@ -900,11 +904,12 @@ tardan más de un tic entre una conexión y la siguiente.
 - **Más tarjetas**: Intel e1000e integradas (ICH8 en adelante: I217/I218/I219,
   con otro PHY), virtio-net (para las máquinas virtuales), 3Com 3c59x/3c90x.
   Tarjetas ISA (NE2000 ISA, 3c509) con su dirección en la línea de órdenes.
-- **Wi-Fi**: las tarjetas de los portátiles (Broadcom BCM43224, Realtek
-  RTL8822BE) necesitan su firmware, la gestión 802.11 y WPA2 (cifrado AES y
-  el acuerdo de claves). No hay nada parecido en DOS. **Decisión (Carlos,
-  17/11/2026): en Hispa-386 no se hace Wi-Fi** (HSPRED solo enseña la tarjeta);
-  queda para Hispa-486 y posteriores (ver docs/486/HISPA-486.md).
+- **Wi-Fi**: **Decisión (Carlos, 17/11/2026): en Hispa-386 no se hace Wi-Fi**
+  (HSPRED solo enseña la tarjeta); es de Hispa-486. Hecho el 18/11/2026 para
+  la Broadcom BCM43224, con WPA2-Personal: `HSPWIFI` (otro packet driver, con
+  la misma interfaz que HSPRED: las órdenes de red funcionan igual) y la
+  orden `WIFI`. Ver [WIFI.md](WIFI.md). Falta probarlo en la tarjeta de
+  verdad, y la Realtek RTL8822BE.
 - **Marvell Yukon 88E8059** (11AB:4381, la de cable del HP Mini 5103): el
   17/11/2026 se dejó para Hispa-Pentium; **el 18/11/2026 Carlos pidió que
   funcione en todas las gamas** (Hispa-386 y por encima; además sirve para

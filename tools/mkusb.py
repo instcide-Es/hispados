@@ -89,6 +89,12 @@ def main():
                      ('PING.COM', 'PING.COM'), ('DESCARGAR.COM', 'DESCARGA.COM'),
                      ('CONSOLA.COM', 'CONSOLA.COM'), ('ACTUALIZAR.COM', 'ACTUALIZ.COM'),
                      ('RED.INI', 'RED.INI'),
+                     # [HISPA-486] el Wi-Fi (docs/WIFI.md): el residente, su
+                     # núcleo de 32 bits, la orden WIFI y el microcódigo de
+                     # Broadcom con su licencia (archivos aparte, sin tocar)
+                     ('HSPWIFI.COM', 'HSPWIFI.COM'), ('HSPWIFI.BIN', 'HSPWIFI.BIN'),
+                     ('WIFI.COM', 'WIFI.COM'), ('BCM43XX.FW', 'BCM43XX.FW'),
+                     ('BCM43XXH.FW', 'BCM43XXH.FW'), ('BCM43XX.TXT', 'BCM43XX.TXT'),
                      # [HISPA-486] los programas de Windows de consola
                      # (docs/486/HISPA-486.md): HW32 y su MSVCRT.DLL, juntos
                      # (HW32 busca las DLL en su carpeta)

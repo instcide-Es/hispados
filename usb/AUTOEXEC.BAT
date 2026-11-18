@@ -19,6 +19,12 @@ REM DESCARGAR o CONSOLA, antes y a mano: HSPRED. Para tener la red siempre,
 REM quite el REM de la línea siguiente (con /AUTO, si no hay tarjeta sale en
 REM silencio y no gasta memoria):
 REM C:\HISPADOS\HSPRED /AUTO
+REM Wi-Fi (tarjetas Broadcom BCM43224/43225, con WPA2): quite el REM de las
+REM dos líneas siguientes. La red se elige una vez con WIFI REDES y WIFI
+REM CONECTAR; queda guardada en RED.INI y WIFI /AUTO la pone al arrancar.
+REM (No va con HSPEMM: solo en la configuración «Normal».)
+REM C:\HISPADOS\HSPWIFI
+REM C:\HISPADOS\WIFI /AUTO
 GOTO COMUN
 
 :JUEGOS

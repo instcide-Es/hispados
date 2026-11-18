@@ -196,8 +196,8 @@ static u32 plano_lee(u32 dir, int tam)
 		case 0x3e0:
 			return 0x0406;			/* PHY N, revisión 6 */
 		case 0x3fe:
-			if ((le(r_d11, 0x3fc, 2) & 0xfff) == 0x78)
-				return 0;		/* los disparos de secuencias se borran solos */
+			if ((le(r_d11, 0x3fc, 2) & 0xfff) == 0x78 || (le(r_d11, 0x3fc, 2) & 0xfff) == 0x129)
+				return 0;		/* los disparos (secuencias, medidas) se borran solos */
 			return phy[le(r_d11, 0x3fc, 2) & 0xfff];
 		case 0x3fa:
 			if ((le(r_d11, 0x3f6, 2) & 0xfff) == 1)
