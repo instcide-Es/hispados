@@ -46,7 +46,7 @@ tar --exclude=./build --exclude=./.git -cf - . | $SSH "rm -rf /dev/shm/$NOMBRE &
 $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS='${QEMU_MAS:-}' && mkdir -p \$TMPDIR build/pc qbin && \
   printf '#!/bin/sh\\nexec /usr/bin/qemu-system-i386 \"\$@\" %s\\n' '${QEMU_MAS:-}' > qbin/qemu-system-i386 && chmod +x qbin/qemu-system-i386 && \
   export PATH=/dev/shm/$NOMBRE/qbin:\$PATH && \
-  { { make -s > build/pc/make.log 2>&1 && make -s usb nucprogs joyprogs build/LANZTEST.COM build/ACCJUEGO.COM >> build/pc/make.log 2>&1; } \
+  { { make -s > build/pc/make.log 2>&1 && make -s para-pruebas >> build/pc/make.log 2>&1; } \
     || { tail -25 build/pc/make.log; exit 1; }; } && tail -3 build/pc/make.log" \
   || { echo "pruebas_pc: la COMPILACIÓN ha fallado en el PC (el error, arriba): no se lanzan las pruebas."; exit 4; }
 $SSH "cd /dev/shm/$NOMBRE && export TMPDIR=/dev/shm/$NOMBRE/tmp TZ=UTC QEMU_MAS='${QEMU_MAS:-}' PATH=/dev/shm/$NOMBRE/qbin:\$PATH && \

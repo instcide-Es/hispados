@@ -724,7 +724,12 @@ $(B)/MEMJUEGO.COM: tests/progs/memjuego.asm | $(B)
 $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
-test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN
+# Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
+TEST_DEPS = $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN
+
+para-pruebas: $(TEST_DEPS)
+
+test: $(TEST_DEPS)
 	tests/run_tests.sh $(IMG)
 	tests/run_boot_tests.sh $(IMG)
 	tests/run_hdd_tests.sh $(IMG)
@@ -871,4 +876,4 @@ test: $(IMG) usb nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM 
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb run run-hdd test clean nucprogs emmprogs joyprogs nesprogs smsprogs
+.PHONY: all usb run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs
