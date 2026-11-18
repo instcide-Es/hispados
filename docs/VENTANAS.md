@@ -716,6 +716,11 @@ equipo de sobremesa) y el tanto por ciento (CL)—. Si no hay APM, el nivel es
 desconocido o no se puede llamar a la BIOS en modo real (V86 sin VCPI), se
 toma como «sin batería» y no se dibuja la pila.
 
+[ACPI] Los portátiles de 2008 en adelante no tienen APM (el HP Mini 5103, el
+Toshiba NB250): en ellos la batería la lee **`HSPACPI`** por ACPI y contesta
+él a esas mismas llamadas de APM, así que aquí no cambia nada
+([ACPI.md](ACPI.md)).
+
 Un **temporizador del escritorio** de cinco segundos (número 1, puesto en
 `WM_CREATE`) refresca la hora —y la batería, si la hay— y, comparando una
 «firma» de lo que se ve (hora, nivel y estado), solo repinta la zona de la

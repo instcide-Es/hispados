@@ -122,6 +122,22 @@ núcleo de 32 bits en memoria extendida (2 MB), con un residente de 4,6 KB.
 Todo, en [docs/WIFI.md](../WIFI.md). Falta la prueba en el equipo de verdad
 (hay una imagen preparada) y la ventana de Hispa Ventanas para elegir red.
 
+## La batería por ACPI (hecha el 18/11/2026; sin probar en los equipos)
+
+«HP Mini no se ve el indicador de la batería»: ni el HP Mini 5103 ni el
+Toshiba NB250 tienen APM, que es por donde Hispa Ventanas pregunta la batería.
+`HSPACPI` (nuevo, [docs/ACPI.md](../ACPI.md)) la lee por **ACPI** —ejecuta los
+métodos de la batería que trae el propio equipo, con ACPICA de Intel en un
+núcleo de 32 bits cargado en memoria extendida, como el de `HSPWIFI`— y
+contesta él a INT 15h AX=530Ah como una BIOS con APM: el indicador de la
+barra funciona sin tocarlo. `HSPACPI /AUTO` va en el `AUTOEXEC.BAT` de
+Hispa-486 antes de `VENTANAS` (solo se queda si el equipo tiene una batería
+que la BIOS no enseña). Residente: 1,6 KB; `HSPACPI.BIN`: 146 KB en disco;
+3,1 MB de memoria extendida. Probado con las tablas ACPI de verdad de los dos
+equipos y un controlador embebido simulado, y en QEMU hasta la pila de la
+barra (`tests/run_acpi_tests.sh`); la prueba en los equipos, con la imagen de
+`tools/mkprueba_bateria.sh` (FTP, `prueba-bateria`).
+
 ## Fase 6a: la red, HTTPS y el Navegador (hecha, 18/11/2026)
 
 Pedido de Carlos: «Si le ponemos un explorador web al 486 ya lo podemos usar
@@ -222,7 +238,7 @@ pocos archivos; los programas y el núcleo son los mismos.
 
 | Dónde | Qué | De dónde sale |
 |---|---|---|
-| `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, en vez de las líneas de la red con `REM`: `HSPRED /AUTO`, `HSPWIFI /AUTO` y `WIFI /AUTO` (la red puesta sola: ver «La red al arrancar») y `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `autoexec486()` de `tools/mkusb.py` |
+| `\AUTOEXEC.BAT` | el de Hispa-386 y, en el arranque normal, en vez de las líneas de la red con `REM`: `HSPRED /AUTO`, `HSPWIFI /AUTO` y `WIFI /AUTO` (la red puesta sola: ver «La red al arrancar»), `IF EXIST C:\HISPADOS\HSPACPI.COM C:\HISPADOS\HSPACPI /AUTO` (la batería por ACPI: docs/ACPI.md) y `C:\HISPADOS\VENTANAS`: arranca al escritorio | `usb/AUTOEXEC.BAT` (o `floppy/`), cambiado por `autoexec486()` de `tools/mkusb.py` |
 | `\HISPADOS\VENTANAS.INI` | `[Escritorio]` `Escritorio=486`: la barra de tareas y el menú Inicio; `Fondo=FONDO.BMP` y `Ajuste=ajustada`: la imagen de fondo | `sistema/486/VENTANAS.INI` |
 | `\HISPADOS\FONDO.BMP` | **la imagen de fondo del escritorio** (ver «La imagen de fondo»): 800×600, 8 bits, 481.078 octetos (470 KB) | `sistema/486/FONDO.BMP`, que `tools/mkfondo.py` saca de `sistema/486/HISPADOS.JPG` (`make fondo486`) |
 | `\HISPADOS\CENTRO.INI` | los grupos de siempre más **«Hispa32»** (Calculadora, Hola, mundo, Controles, Menús y diálogos, Cuadros de mensaje) e **«Internet»** (Navegador), con `Internet=1` | `sistema/486/CENTRO.INI` |
