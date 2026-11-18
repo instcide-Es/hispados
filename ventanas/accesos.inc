@@ -1203,3 +1203,86 @@ jd_tras_volver:
 .x:
         popad
         ret
+
+; =============================================================================
+;  [INTERNET] El grupo «Internet» con el acceso al Navegador de Hispa-486
+;  (docs/486/NAVEGADOR.md). Una sola vez (la clave Internet de [Centro] lo
+;  recuerda): si NAVEGA.EXE está en la carpeta INTERNET de la de Hispa
+;  Ventanas (\HISPADOS\INTERNET, donde se copia el disquete «Internet») o en
+;  la propia carpeta, se crea el grupo con su acceso; sale también en el menú
+;  Inicio de Hispa-486, como todos los grupos. Si luego se borra, no vuelve.
+;  -> EAX = 1 si ha creado algo (hay que guardar CENTRO.INI)
+; =============================================================================
+k_internet  db "Internet", 0
+ti_grupo    db "Internet", 0
+ti_acceso   db "Navegador", 0
+ti_ruta1    db "INTERNET\NAVEGA.EXE", 0
+ti_ruta2    db "NAVEGA.EXE", 0
+inet_arranque:
+        pushad
+        xor ebp, ebp
+        cmp dword [inet_hecho], 0
+        jne .x
+        mov ebx, ti_ruta1
+        call .prueba
+        jnc .hay
+        mov ebx, ti_ruta2
+        call .prueba
+        jc .x
+.hay:
+        call gr_nuevo               ; EAX = el grupo, EDX = su número
+        test eax, eax
+        jz .x
+        lea edi, [eax+GR_NOMBRE]
+        mov esi, ti_grupo
+        mov ecx, 27
+        call cad_copiar
+        call ac_nuevo
+        test eax, eax
+        jz .marca
+        mov ebx, eax
+        lea edi, [ebx+AC_PROG]
+        mov esi, inet_ruta
+        mov ecx, 79
+        call cad_copiar
+        lea edi, [ebx+AC_NOMBRE]
+        mov esi, ti_acceso
+        mov ecx, 31
+        call cad_copiar
+        mov byte [ebx+AC_ICONO], 0
+        mov eax, [inet_ruta]        ; carpeta de trabajo: la raíz de su unidad
+        and eax, 0x00FFFFFF
+        mov [ebx+AC_DIR], eax
+.marca:
+        mov dword [inet_hecho], 1
+        inc ebp
+.x:
+        mov [esp+28], ebp
+        popad
+        ret
+; (interna) ¿existe <carpeta propia><EBX>? La ruta queda en inet_ruta. CF=1: no
+.prueba:
+        mov edi, inet_ruta
+        mov esi, dir_propia
+        call pon_cad
+        mov esi, ebx
+        call pon_cad
+        mov byte [edi], 0
+        mov esi, inet_ruta
+        xor al, al
+        call dos_abrir
+        jc .no
+        mov ebx, eax
+        call dos_cerrar
+        clc
+.no:
+        ret
+; (cfg_guardar) la clave, si ya está hecho
+inet_guardar:
+        mov eax, [inet_hecho]
+        test eax, eax
+        jz .x
+        mov esi, k_internet
+        call pon_clave_num
+.x:
+        ret
