@@ -480,7 +480,7 @@ static void pinta_desp(HANDLE dc) {
   if (total <= filas_vis || h < 40) return;
   ph = h * filas_vis / total;
   if (ph < 16) ph = 16;
-  py = y0 + (h - ph) * sy / (total - filas_vis);
+  py = y0 + (h - ph) * (sy < total - filas_vis ? sy : total - filas_vis) / (total - filas_vis);
   rect(dc, x + 2, py, DESP_W - 3, ph, P(P_ARENA));
   marco(dc, x + 2, py, DESP_W - 3, ph, P(P_TINTA));
 }
@@ -1294,6 +1294,9 @@ static void remaqueta2(int fija) {
   desplaza(sx, ny);
   if (sy < 0) sy = 0;
   if (sy > pag->n_filas - filas_vis) { sy = pag->n_filas - filas_vis; if (sy < 0) sy = 0; }
+  /* (en una página corta, lo que se mira tampoco se mueve: queda blanco
+   * abajo; la primera flecha o Inicio la sube) */
+  if (a >= 0 && ny > sy && ny < pag->n_filas) sy = ny;
   if (tab_fila >= pag->n_filas) tab_fila = 0;
   repinta();
 }
