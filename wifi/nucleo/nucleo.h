@@ -157,6 +157,7 @@ void wpa_ptk(const o8 *pmk, const o8 *aa, const o8 *spa, const o8 *anonce, const
 /* ---------------------------------------------------- radio de mentira */
 struct radio *sim_radio(void);
 void sim_configura(const char *ssid, const char *clave, int canal);
+extern void (*sim_entrega)(const o8 *trama, int n, int senal, int canal);
 extern int sim_fallos;		/* para las pruebas: tramas que se «pierden» */
 
 #endif

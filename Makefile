@@ -237,7 +237,7 @@ WIFI_CF = -m32 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno
 WIFI_LINUX = $(wildcard wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil/*.c \
              wifi/linux/bcma/*.c) wifi/linux/cordic.c
 WIFI_PROPIO = wifi/compat/base.c $(wildcard wifi/nucleo/*.c)
-WIFI_DEP = $(wildcard wifi/compat/*.h wifi/nucleo/*.h wifi/linux/brcmsmac/*.h wifi/linux/brcmsmac/phy/*.h \
+WIFI_DEP = $(wildcard tests/wifi/*.h wifi/compat/*.h wifi/nucleo/*.h wifi/linux/brcmsmac/*.h wifi/linux/brcmsmac/phy/*.h \
            wifi/linux/bcma/*.h wifi/linux/include/linux/bcma/*.h)
 WIFI_OL = $(patsubst %.c,$(B)/wifi/%.o,$(notdir $(WIFI_LINUX)))
 WIFI_OP = $(patsubst %.c,$(B)/wifi/%.o,$(notdir $(WIFI_PROPIO)))
@@ -263,6 +263,37 @@ $(B)/BCM43XX.FW: wifi/firmware/bcm43xx-0.fw | $(B)
 $(B)/BCM43XXH.FW: wifi/firmware/bcm43xx_hdr-0.fw | $(B)
 	cp $< $@
 WIFI = $(B)/HSPWIFI.COM $(B)/WIFI.COM $(B)/HSPWIFI.BIN $(B)/BCM43XX.FW $(B)/BCM43XXH.FW
+# la prueba del controlador de la Broadcom contra un modelo de la tarjeta
+# (tests/wifi/chip_sim.c): los mismos fuentes, con -DHL_SIMULA_ES (los
+# registros pasan por el modelo) y -DANFITRION, en un programa de Linux de
+# 32 bits sin biblioteca
+WIFI_SIMF = $(WIFI_CF) -DHL_SIMULA_ES -DANFITRION -O1 -g -Itests/wifi
+WIFI_SL = $(patsubst %.c,$(B)/wifisim/%.o,$(notdir $(WIFI_LINUX)))
+WIFI_SP = $(patsubst %.c,$(B)/wifisim/%.o,base.c radio_brcm.c w80211.c wpa.c sim.c chip_sim.c tarjeta_sim.c)
+vpath %.c tests/wifi
+$(B)/wifisim:
+	mkdir -p $(B)/wifisim
+$(WIFI_SL): $(B)/wifisim/%.o: %.c $(WIFI_DEP) | $(B)/wifisim
+	nice gcc $(WIFI_SIMF) -w -c $< -o $@
+$(WIFI_SP): $(B)/wifisim/%.o: %.c $(WIFI_DEP) wifi/firmware/bcm43xx-0.fw | $(B)/wifisim
+	nice gcc $(WIFI_SIMF) -Wall -Wno-unused -c $< -o $@
+$(B)/chip_sim: $(WIFI_SL) $(WIFI_SP)
+	ld -m elf_i386 -static -z noexecstack -o $@ $(WIFI_SL) $(WIFI_SP)
+# HSPWSIM.BIN: el núcleo de verdad con el modelo de la tarjeta dentro, para
+# probarlo en QEMU (tests/run_wifi_tests.sh lo copia como HSPWIFI.BIN)
+WIFI_CHF = $(WIFI_CF) -DHL_SIMULA_ES -DCHIP_SIMULADO -Itests/wifi
+WIFI_CL = $(patsubst %.c,$(B)/wifichip/%.o,$(notdir $(WIFI_LINUX)))
+WIFI_CP = $(patsubst %.c,$(B)/wifichip/%.o,$(notdir $(WIFI_PROPIO)) tarjeta_sim.c)
+$(B)/wifichip:
+	mkdir -p $(B)/wifichip
+$(WIFI_CL): $(B)/wifichip/%.o: %.c $(WIFI_DEP) | $(B)/wifichip
+	nice gcc $(WIFI_CHF) -w -c $< -o $@
+$(WIFI_CP): $(B)/wifichip/%.o: %.c $(WIFI_DEP) | $(B)/wifichip
+	nice gcc $(WIFI_CHF) -Wall -Wno-unused -c $< -o $@
+$(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) wifi/nucleo/nucleo.ld
+	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack -T wifi/nucleo/nucleo.ld -o $(B)/wifichip/nucleo.elf \
+	    $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP)
+	objcopy -O binary $(B)/wifichip/nucleo.elf $@
 # la prueba del anfitrión (tests/run_wifi_tests.sh)
 $(B)/prueba_wifi: tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c wifi/nucleo/nucleo.h | $(B)
 	gcc -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c

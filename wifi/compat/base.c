@@ -797,7 +797,7 @@ void kfree_skb(struct sk_buff *s)
 u32 hl_skb_vivos(void) { return skb_vivos; }
 
 /* ------------------------------------------------------------------- PCI */
-#ifndef ANFITRION
+#ifndef HL_SIMULA_ES
 static u32 pci_dir(struct pci_dev *d, int w)
 {
 	return 0x80000000u | (d->bus0.number << 16) | (d->devfn << 8) | (w & 0xfc);
@@ -898,20 +898,12 @@ void pci_apaga(struct pci_dev *d)
 
 void __iomem *pci_iomap(struct pci_dev *d, int bar, unsigned long max)
 {
-#ifdef ANFITRION
-	return (void *)d->bar0;
-#else
 	return hl_virt(d->bar0);
-#endif
 }
 
 void __iomem *ioremap(u32 fis, unsigned long tam)
 {
-#ifdef ANFITRION
-	return (void *)fis;
-#else
 	return hl_virt(fis);
-#endif
 }
 
 /* ----------------------------------------------------------- microcódigo */

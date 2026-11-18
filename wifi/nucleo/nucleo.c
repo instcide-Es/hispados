@@ -15,6 +15,17 @@ int brcm_monta(struct radio **r);
 int brcm_enciende(void);
 void brcm_cuentas(d32 *bien, d32 *mal, int *vel);
 
+#ifdef CHIP_SIMULADO
+/* núcleo de pruebas (HSPWSIM.BIN): el controlador de verdad contra el modelo
+ * de la tarjeta de tests/wifi/tarjeta_sim.c y el punto de acceso de mentira */
+#include "tarjeta_sim.h"
+static struct radio *ap_sim;
+static int (*canal_real)(int);
+static void (*sondear_real)(void);
+static int canal_sim(int c) { tsim_canal = c; return canal_real(c); }
+static void sondear_sim(void) { ap_sim->canal(tsim_canal); ap_sim->sondear(); sondear_real(); }
+#endif
+
 extern char _fin_bss[];
 static int roto;		/* hubo una excepción: no se toca nada más */
 static int listo;		/* la radio está en marcha */
@@ -76,7 +87,7 @@ static int inicia(struct ll_inicio *p)
 	if (p->fw_tam[1] && p->fw_des[1] + p->fw_tam[1] > tope)
 		tope = p->fw_des[1] + p->fw_tam[1];
 	tope = (tope + 4095) & ~4095u;
-	if (tope + 0x100000 > p->tam) {
+	if (tope + 0x80000 > p->tam) {
 		hl_log(0, "el bloque de memoria es pequeño (%u KB)\n", p->tam >> 10);
 		return -20;
 	}
@@ -98,6 +109,12 @@ static int inicia(struct ll_inicio *p)
 		listo = 1;
 		return 0;
 	}
+#ifdef CHIP_SIMULADO
+	hl_log(2, "NÚCLEO DE PRUEBAS: tarjeta BCM43224 simulada, red «HispaPrueba» en el canal 6\n");
+	sim_configura("HispaPrueba", "clave de prueba", 6);
+	ap_sim = sim_radio();
+	tarjeta_sim_monta(ap_sim);
+#endif
 	hl_fw_pon(0, "brcm/bcm43xx-0.fw", (const u8 *)p->fw_des[0], p->fw_tam[0]);
 	hl_fw_pon(1, "brcm/bcm43xx_hdr-0.fw", (const u8 *)p->fw_des[1], p->fw_tam[1]);
 	r = brcm_monta(&la_radio);
@@ -118,6 +135,10 @@ static int enciende(void)
 	r = brcm_enciende();
 	if (r < 0)
 		return r;
+#ifdef CHIP_SIMULADO
+	canal_real = la_radio->canal; la_radio->canal = canal_sim;
+	sondear_real = la_radio->sondear; la_radio->sondear = sondear_sim;
+#endif
 	w80211_inicia(la_radio);
 	listo = 1;
 	hl_monton_info(&t, &u, &pk);

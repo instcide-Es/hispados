@@ -386,10 +386,13 @@ static void brcm_sondear(void)
 
 	if (!arriba)
 		return;
+	/* la rutina de interrupción de brcmsmac, llamada por sondeo: si la
+	 * tarjeta tiene algo, deja pendiente el trabajo que lo atiende */
 	for (i = 0; i < 4; i++) {
-		if (irq_rutina)
-			irq_rutina(0, irq_dato);
+		int algo = irq_rutina ? irq_rutina(0, irq_dato) : 0;
 		hl_trabajos();
+		if (algo != IRQ_HANDLED)
+			break;
 	}
 }
 
@@ -403,18 +406,32 @@ static void brcm_barrido(int empieza)
 		equipo->ops->sw_scan_complete(equipo, interfaz);
 }
 
+/* El punto de acceso. Como mac80211: al elegirlo (antes de autenticar) se
+ * dan su dirección, sus velocidades básicas, el intervalo de balizas y la
+ * ranura; al asociar, solo que ya se está asociado (las velocidades básicas
+ * no se pueden cambiar a la vez: brcmsmac las valida contra las de la
+ * asociación, que aún no tiene). */
 static void brcm_bss(const o8 *bssid, int asociado, int intervalo, int ranura_corta, const o8 *vels, int nvel)
 {
 	static const u8 nadie[6];
 	struct ieee80211_bss_conf *b = &interfaz->bss_conf;
-	u32 cambios = BSS_CHANGED_BSSID | BSS_CHANGED_ASSOC;
+	u32 cambios;
 	int i, j;
 
 	if (!arriba)
 		return;
+	if (bssid && asociado) {
+		b->assoc = 1;
+		equipo->ops->bss_info_changed(equipo, interfaz, b, BSS_CHANGED_ASSOC);
+		return;
+	}
+	cambios = BSS_CHANGED_BSSID;
+	if (b->assoc) {
+		b->assoc = 0;
+		cambios |= BSS_CHANGED_ASSOC;
+	}
 	memcpy(bssid_ap, bssid ? bssid : nadie, 6);
 	b->bssid = bssid_ap;
-	b->assoc = asociado;
 	if (bssid) {
 		b->beacon_int = intervalo ? intervalo : 100;
 		b->use_short_slot = ranura_corta;
@@ -430,6 +447,7 @@ static void brcm_bss(const o8 *bssid, int asociado, int intervalo, int ranura_co
 						escalera[nesc++] = x;
 					if (vels[j] & 0x80)
 						b->basic_rates |= 1u << x;
+					break;
 				}
 		}
 		if (!nesc)
@@ -562,6 +580,14 @@ int brcm_enciende(void)
 	int err, i;
 
 	hl_log(2, "Encendiendo la radio (microcódigo, PHY N, calibración)...\n");
+	/* como mac80211: el canal y los límites tienen que estar puestos antes
+	 * de arrancar (brcms_c_init los lee) */
+	equipo->conf.chandef.chan = &sb->channels[0];
+	equipo->conf.chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
+	equipo->conf.power_level = sb->channels[0].max_power;
+	equipo->conf.listen_interval = 1;
+	equipo->conf.short_frame_max_tx_count = 7;
+	equipo->conf.long_frame_max_tx_count = 4;
 	err = equipo->ops->start(equipo);
 	if (err == -ERFKILL) {
 		hl_log(0, "la radio está APAGADA por el interruptor o el botón del Wi-Fi del equipo: enciéndalo y vuelva a cargar HSPWIFI\n");

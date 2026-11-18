@@ -51,7 +51,7 @@ PILA        equ 768
 VERSION     equ 1
 C_WIFI      equ 8                   ; «tarjeta» para quien lea los datos de /INFO
 CFG_LEN     equ 30
-BLOQUE_KB   equ 3072                ; memoria extendida para el núcleo
+BLOQUE_KB   equ 2048                ; memoria extendida para el núcleo
 
 ; funciones del núcleo (wifi/nucleo/llamadas.h)
 LL_INICIA   equ 0
@@ -1333,7 +1333,7 @@ copia_archivo:
         mov [x_mov+12], edx
         add edx, eax
         ; no pasarse del bloque
-        cmp edx, BLOQUE_KB * 1024 - 0x100000
+        cmp edx, BLOQUE_KB * 1024 - 0x80000
         ja .mal
         mov [x_des], edx
         mov si, x_mov
@@ -1728,7 +1728,7 @@ msg_noxms   db "HSPWIFI necesita memoria extendida: cargue HSPXMS.SYS en CONFIG.
 msg_novec   db "No queda ningún vector libre para el packet driver (60h-80h).", 13, 10, 0
 msg_nobin   db "Falta el archivo ", 0
 msg_badbin  db "El archivo HSPWIFI.BIN no vale (dañado o de otra versión).", 13, 10, 0
-msg_nomem   db "No hay 3 MB de memoria extendida libres para HSPWIFI.", 13, 10, 0
+msg_nomem   db "No hay 2 MB de memoria extendida libres para HSPWIFI.", 13, 10, 0
 msg_nofw    db "Falta el microcódigo de la tarjeta: ", 0
 msg_nl      db 13, 10, 0
 msg_card    db "Tarjeta ", 0

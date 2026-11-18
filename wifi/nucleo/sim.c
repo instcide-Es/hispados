@@ -39,6 +39,9 @@ static struct {
 } s;
 
 int sim_fallos;
+/* por dónde sale lo que emite el punto de acceso (la prueba del chip simulado
+ * lo desvía al anillo de recepción de la tarjeta de mentira) */
+void (*sim_entrega)(const o8 *trama, int n, int senal, int canal) = w80211_rx;
 int sim_renovar_grupo;		/* las pruebas lo ponen a 1 */
 int sim_echar;			/* las pruebas: mandar una desautenticación */
 int sim_silencio;		/* las pruebas: el punto de acceso desaparece */
@@ -457,7 +460,7 @@ static void sim_sondear(void)
 	while (s.cab != s.fin) {
 		int i = s.cab;
 		s.cab = (s.cab + 1) % COLA;
-		w80211_rx(s.cola[i], s.cola_n[i], -47, s.canal_sta);
+		sim_entrega(s.cola[i], s.cola_n[i], -47, s.canal_sta);
 	}
 }
 
