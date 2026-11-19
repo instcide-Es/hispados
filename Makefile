@@ -341,7 +341,7 @@ $(B)/HSPRATON.COM: drivers/hspraton.asm | $(B)
 # Red (docs/RED.md): HSPRED (packet driver residente) y las órdenes CONFRED
 # (IPCONFIG), PING y DESCARGAR (en el disco DESCARGA.COM), con la pila TCP/IP
 # propia de lib/red.inc
-$(B)/HSPRED.COM: drivers/hspred.asm | $(B)
+$(B)/HSPRED.COM: drivers/hspred.asm lib/redpref.inc lib/wifi_ids.inc | $(B)
 	$(ASM) -l $(B)/gen/HSPRED.lst -o $@ $(B)/gen/$<
 	@# lo residente no puede usar nada de la instalación (se descarta)
 	python3 tools/initcheck.py $(B)/gen/HSPRED.lst init || { rm -f $@; exit 1; }
@@ -366,7 +366,7 @@ RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CON
 # de brcmsmac y bcma de Linux, 802.11 y WPA2 propios) y la orden WIFI. El
 # núcleo es un binario plano enlazado para la dirección 0 (wifi/nucleo/
 # nucleo.ld); gcc es solo la herramienta, como con MSVCRT.DLL.
-$(B)/HSPWIFI.COM: drivers/hspwifi.asm | $(B)
+$(B)/HSPWIFI.COM: drivers/hspwifi.asm lib/redpref.inc lib/wifi_ids.inc | $(B)
 	$(ASM) -l $(B)/gen/HSPWIFI.lst -o $@ $(B)/gen/$<
 	python3 tools/initcheck.py $(B)/gen/HSPWIFI.lst init || { rm -f $@; exit 1; }
 $(B)/WIFI.COM: utils/wifi.asm | $(B)
@@ -606,13 +606,13 @@ joyprogs: $(JOYPROGS)
 # Hispa Ventanas (docs/VENTANAS.md): el entorno gráfico, en ventanas/.
 # La fuente de mapa de bits sale del diseño en texto ventanas/fuente.txt.
 VENSRC = $(wildcard ventanas/*.asm ventanas/*.inc)
-$(B)/VENTANAS.COM: $(VENSRC) ventanas/fuente.txt tools/mkfuente.py tools/hispa437.py tools/cp437.py tools/icopack.py | $(B)
+$(B)/VENTANAS.COM: $(VENSRC) lib/wifi_ids.inc ventanas/fuente.txt tools/mkfuente.py tools/hispa437.py tools/cp437.py tools/icopack.py | $(B)
 	for f in $(VENSRC); do python3 tools/cp437.py --ventanas $$f $(B)/gen/$$f || exit 1; done
 	python3 tools/mkfuente.py ventanas/fuente.txt $(B)/gen/ventanas/fuente.inc $(B)/gen/ventanas/fuente.ppm
 	python3 tools/icopack.py $(B)/gen/ventanas/iconos.inc $(B)/gen/ventanas/iconos2.inc $(B)/gen/ventanas/apagado.inc
 	# (lo que usa la parte de modo real tiene que caber en 64 KB: si no, error)
 	# (-w-zeroing: las variables de la parte de modo real van en el archivo, a cero)
-	$(NASM) -f bin -w+error=number-overflow -w-zeroing -i $(B)/gen/ventanas/ -o $@ $(B)/gen/ventanas/ventanas.asm
+	$(NASM) -f bin -w+error=number-overflow -w-zeroing -i $(B)/gen/ventanas/ -i lib/ -o $@ $(B)/gen/ventanas/ventanas.asm
 
 # Programas de Hispa Ventanas (.HVP, docs/VENTANAS.md «Programas aparte»): los
 # juegos, en juegos/ (HVPS: van a \HISPADOS\JUEGOS), y los accesorios, en

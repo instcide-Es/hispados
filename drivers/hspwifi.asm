@@ -5,14 +5,19 @@
 ;  Uso:  HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO] [/SIMULA]
 ;        HSPWIFI /AUTO     para el AUTOEXEC.BAT (ver abajo)
 ;        HSPWIFI /U        descargarlo
-;  /AUTO: solo se queda si hay una red guardada en RED.INI (WIFI=), una
-;  tarjeta de las admitidas en el PCI (lo pregunta a la BIOS, sin cargar el
-;  núcleo) y no hay red por cable con enlace; si no, sale en silencio (nivel
-;  de error 1). Así el AUTOEXEC.BAT de Hispa-486 elige solo la red que haya:
-;  primero HSPRED /AUTO (el cable) y después HSPWIFI /AUTO.
+;  /AUTO: solo se queda si hay una tarjeta de las admitidas en el PCI (lo
+;  pregunta a la BIOS, sin cargar el núcleo) y no se queda la red por cable;
+;  si no, sale en silencio (nivel de error 1). Desde la 0.9.28 no hace falta
+;  una red guardada: así, sin cable, la ventanita de la red de Hispa Ventanas
+;  puede buscar las redes. Así el AUTOEXEC.BAT de Hispa-486 elige solo la red
+;  que haya: primero HSPRED /AUTO (que, sin cable y con tarjeta Wi-Fi, ya no
+;  se queda) y después HSPWIFI /AUTO. Respeta Preferir= de RED.INI
+;  (lib/redpref.inc): con CABLE no quita HSPRED; con WIFI lo quita aunque
+;  tenga enlace.
 ;  Con HSPRED cargado (sin /JUNTO): si su tarjeta dice que no tiene enlace (y
 ;  sigue sin él 3 segundos), HSPRED se descarga y se usa el Wi-Fi; con enlace,
-;  o si no se sabe, se queda el cable (HSPWIFI no se carga).
+;  o si no se sabe, se queda el cable (HSPWIFI no se carga). Si HSPRED no se
+;  puede descargar (otro residente encima), lo dice y cómo arreglarlo.
 ;  /JUNTO: convivir con HSPRED ya cargado (para depurar el Wi-Fi por la
 ;  consola remota de la red por cable): HSPWIFI no contesta a INT 2Fh AH=DAh
 ;  y su packet driver queda en otro vector; las órdenes de red siguen
@@ -1029,11 +1034,10 @@ init:
         mov si, msg_notres
         cmp byte [o_unload], 0
         jne fin_mal
-        ; /AUTO: sin red guardada o sin tarjeta, en silencio
+        call rp_leer                ; Preferir= de RED.INI
+        ; /AUTO: sin tarjeta, en silencio
         cmp byte [o_auto], 0
         je .red
-        call auto_red_ini
-        jc fin_mal_callado
         test byte [opciones], 1     ; (la radio simulada no está en el PCI)
         jnz .red
         call auto_pci
@@ -1049,11 +1053,22 @@ init:
         int 0x2F
         cmp al, 0xFF
         jne .sin_red
+        cmp byte [rp_pref], 1       ; Preferir=CABLE: con /AUTO se queda el cable
+        jne .q
+        cmp byte [o_auto], 0
+        jne fin_mal_callado
+.q:
         call quita_hspred
         jnc .sin_red
         cmp byte [o_auto], 0        ; /AUTO: hay cable, se queda el cable
-        jne fin_mal_callado
+        je .q2
+        cmp byte [red_noquita], 0   ; (salvo si no se ha podido quitar: se dice)
+        je fin_mal_callado
+.q2:
         mov si, msg_hspred
+        cmp byte [red_noquita], 0
+        je fin_mal
+        mov si, msg_noquita
         jmp fin_mal
 .sin_red:
         cmp byte [o_auto], 0
@@ -1377,67 +1392,10 @@ fin_mal_callado:
         mov ax, 0x4C01
         int 0x21
 
-; [/AUTO] ¿hay una red guardada? (una línea WIFI=algo en \HISPADOS\RED.INI
-; de la unidad de arranque, como la que escribe WIFI CONECTAR) CF=1: no
-auto_red_ini:
-        mov ax, 0x3305
-        int 0x21
-        add dl, 'A' - 1
-        mov [ruta_ini], dl
-        mov dx, ruta_ini
-        mov ax, 0x3D00
-        int 0x21
-        jc .no
-        mov bx, ax
-        mov dx, tbuf
-        mov cx, TBUF
-        mov ah, 0x3F
-        int 0x21
-        jnc .leido
-        xor ax, ax
-.leido:
-        mov bp, tbuf
-        add bp, ax
-        mov ah, 0x3E
-        int 0x21
-        mov si, tbuf
-.linea:
-        mov bx, si
-        mov di, k_wifi5
-        mov cx, 5
-.cmp:
-        cmp bx, bp
-        jae .sig
-        mov al, [bx]
-        call upcase
-        cmp al, [di]
-        jne .sig
-        inc bx
-        inc di
-        loop .cmp
-        cmp bx, bp                  ; y algo detrás del «=»
-        jae .sig
-        mov al, [bx]
-        cmp al, 13
-        je .sig
-        cmp al, 10
-        je .sig
-        clc
-        ret
-.sig:
-        cmp si, bp
-        jae .no
-        lodsb
-        cmp al, 10
-        jne .sig
-        jmp .linea
-.no:
-        stc
-        ret
-
 ; [/AUTO] ¿hay una tarjeta de las admitidas? (a la BIOS del PCI: INT 1Ah
-; AX=B102h, buscar el aparato). Sin BIOS del PCI no se sabe: se sigue (lo
-; mirará el núcleo). CF=1: seguro que no hay
+; AX=B102h, buscar el aparato; la tabla, rp_ids de lib/redpref.inc). Sin
+; BIOS del PCI no se sabe: se sigue (lo mirará el núcleo). CF=1: seguro que
+; no hay
 auto_pci:
         pushad
         mov ax, 0xB101
@@ -1448,7 +1406,7 @@ auto_pci:
         jnz .sigue
         cmp edx, 0x20494350         ; «PCI »
         jne .sigue
-        mov si, pci_ids
+        mov si, rp_ids
 .otra:
         mov dx, [si]                ; fabricante (0 = fin de la tabla)
         test dx, dx
@@ -1475,9 +1433,12 @@ auto_pci:
         ret
 
 ; HSPRED está cargado: si su tarjeta no tiene enlace (y no le llega en 3
-; segundos), descargarlo -> CF=0 descargado ([red_quitada] = 1); CF=1 se
-; queda (hay enlace, no se sabe o no se puede descargar)
+; segundos), o con Preferir=WIFI, descargarlo -> CF=0 descargado
+; ([red_quitada] = 1); CF=1 se queda (hay enlace, no se sabe o no se puede
+; descargar: entonces [red_noquita] = 1)
 quita_hspred:
+        cmp byte [rp_pref], 2       ; Preferir=WIFI: sin mirar el enlace
+        je .quita
         mov ax, 0xDA01
         int 0x2F
         test al, al
@@ -1497,11 +1458,15 @@ quita_hspred:
         cmp ax, 55                  ; 3 s (18,2 tics por segundo)
         jb .espera
         pop es
+.quita:
         mov ax, 0xDA02
         xor bl, bl
         int 0x2F
         test al, al
-        jnz .queda
+        jz .fuera
+        mov byte [red_noquita], 1
+        jmp .queda
+.fuera:
         mov byte [red_quitada], 1
         clc
         ret
@@ -1946,13 +1911,12 @@ o_help      db 0
 o_unload    db 0
 o_auto      db 0                    ; /AUTO
 red_quitada db 0                    ; se ha descargado HSPRED (sin cable)
-k_wifi5     db "WIFI="
-; fabricante, aparato: las de wifi/nucleo/radio_brcm.c y radio_ath9k.c
-pci_ids     dw 0x14E4, 0x4353, 0x14E4, 0x4357, 0x14E4, 0x4727, 0x14E4, 0x0576, 0x14E4, 0xA8D8
-            dw 0x168C, 0x002B, 0x168C, 0x002A, 0x168C, 0x002E, 0x168C, 0x0029, 0x168C, 0x002D
-            dw 0x168C, 0x0024, 0x168C, 0x0023, 0x168C, 0x0027, 0x168C, 0x002C
-            dw 0
-ruta_ini    db "A:\HISPADOS\RED.INI", 0
+red_noquita db 0                    ; HSPRED no se ha podido descargar
+; Preferir= y la tabla de las tarjetas (rp_ids: las de wifi/nucleo/
+; radio_brcm.c y radio_ath9k.c)
+RP_BUF      equ tbuf
+RP_TAM      equ TBUF
+%include "redpref.inc"
 o_v         db 0
 o_int       db 0
 fh          dw 0
@@ -1972,8 +1936,8 @@ msg_title   db "HSPWIFI 0.1: controlador Wi-Fi de Hispa-486 (packet driver)", 13
 msg_usage   db "Uso: HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx]", 13, 10
             db "     HSPWIFI /AUTO", 13, 10
             db "     HSPWIFI /U", 13, 10
-            db "  /AUTO       para el AUTOEXEC.BAT: solo se carga si hay tarjeta, red", 13, 10
-            db "              guardada (WIFI CONECTAR) y no hay cable; si no, calla", 13, 10
+            db "  /AUTO       para el AUTOEXEC.BAT: solo se carga si hay tarjeta y no", 13, 10
+            db "              se queda el cable (Preferir= en RED.INI); si no, calla", 13, 10
             db "  /V          enseña el registro de la puesta en marcha", 13, 10
             db "  /PANTALLA   el registro, además, directo a la pantalla (por si se cuelga)", 13, 10
             db "  /REG:arch   guarda el registro en ese archivo (se añade al final)", 13, 10
@@ -1987,7 +1951,12 @@ msg_noun1   db "No se puede descargar: otro programa residente se cargó despué
 msg_noun2   db "No se puede descargar: hay programas usando la red.", 13, 10, 0
 msg_notres  db "HSPWIFI no está cargado.", 13, 10, 0
 msg_quitada db "La red por cable no tiene enlace (sin cable): HSPRED descargado.", 13, 10, 0
-msg_hspred  db "Ya hay un controlador de red cargado (HSPRED). Descárguelo antes: HSPRED /U", 13, 10, 0
+msg_hspred  db "La red va por el cable (HSPRED). Para usar el Wi-Fi:", 13, 10
+            db "quite el cable y reinicie, o elija «Usar: Wi-Fi» en el icono de la red de", 13, 10
+            db "Hispa Ventanas (o Preferir=WIFI en \HISPADOS\RED.INI) y reinicie.", 13, 10, 0
+msg_noquita db "No se puede quitar HSPRED (la red por cable): hay otro programa residente", 13, 10
+            db "cargado después. Para usar el Wi-Fi: elija «Usar: Wi-Fi» en el icono de la", 13, 10
+            db "red de Hispa Ventanas (o Preferir=WIFI en \HISPADOS\RED.INI) y reinicie.", 13, 10, 0
 msg_v86     db "HSPWIFI no funciona con HSPEMM ni otro gestor de memoria expandida (modo V86).", 13, 10
             db "Quite HSPEMM.SYS de CONFIG.SYS para usar el Wi-Fi.", 13, 10, 0
 msg_noxms   db "HSPWIFI necesita memoria extendida: cargue HSPXMS.SYS en CONFIG.SYS.", 13, 10, 0

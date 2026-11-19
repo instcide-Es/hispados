@@ -3448,6 +3448,15 @@ init:
         mov al, 1
         jmp salir
 .cok:
+        ; /AUTO: ¿el cable o el Wi-Fi? (RED.INI Preferir=, el enlace y si hay
+        ; tarjeta Wi-Fi). Si va el Wi-Fi, se sale sin quedarse (lo dice)
+        cmp byte [o_elige], 0
+        je .cok2
+        call elegir_red
+        jnc .cok2
+        mov al, 2
+        jmp salir
+.cok2:
         ; vector del packet driver
         call pick_vector
         jnc .vok
@@ -3644,6 +3653,7 @@ parse:
         call upcase
         cmp al, 'O'
         jne .bad
+        mov byte [o_elige], 1       ; (con /Q no: así lo carga ACTUALIZAR)
 .q:
         mov byte [o_auto], 1
         jmp .end
@@ -3761,10 +3771,88 @@ upcase:
 .r:
         ret
 
+; [/AUTO] ¿se queda el cable? (docs/RED.md, «Cable o Wi-Fi»). Con la tarjeta
+; ya puesta (card_init). CF=0: se queda; CF=1: no (ya se ha dicho por qué).
+;   Preferir=CABLE                    se queda (como antes de la 0.9.28)
+;   sin tarjeta Wi-Fi (de HSPWIFI)    se queda: al enchufar el cable, irá
+;   Preferir=WIFI                     no se queda
+;   Preferir=AUTO (o nada)            espera al enlace hasta 3 s: con él (o si
+;                                     la tarjeta no lo dice) se queda; sin él
+;                                     no, y el AUTOEXEC.BAT pone el Wi-Fi
+elegir_red:
+        pusha
+        push es
+        ; RED.INI, detrás del programa (y del registro de /DEPURA), sin pasar
+        ; del final del bloque de memoria (con LH puede ser justo)
+        mov ax, [0x02]
+        mov dx, cs
+        sub ax, dx
+        cmp ax, 0x1000
+        jae .grande
+        shl ax, 4
+        sub ax, RP_BUF + 16
+        jbe .ini_no
+        cmp ax, RP_TAM - 1
+        jbe .tam
+.grande:
+        mov ax, RP_TAM - 1
+.tam:
+        mov [rp_tam], ax
+        call rp_leer
+.ini_no:
+        cmp byte [rp_pref], 1       ; CABLE
+        je .queda
+        cmp byte [rp_haywifi], 0
+        jne .hay
+        call rp_wifi_pci
+        jc .queda
+.hay:
+        mov si, msg_e_pref
+        cmp byte [rp_pref], 2       ; WIFI
+        je .vete
+        xor ax, ax
+        mov es, ax
+        mov bx, [es:0x46C]
+.esp:
+        push bx
+        push es
+        call [c_link]
+        pop es
+        pop bx
+        test al, al
+        jnz .queda                  ; enlace (1) o no se sabe (FFh)
+        mov ax, [es:0x46C]
+        sub ax, bx
+        cmp ax, 55                  ; 3 s (18,2 tics por segundo)
+        jae .sin
+        mov cx, 1
+        call ticks_wait
+        jmp .esp
+.sin:
+        mov si, msg_e_sin
+.vete:
+        call puts
+        pop es
+        popa
+        stc
+        ret
+.queda:
+        pop es
+        popa
+        clc
+        ret
+
+RP_BUF      equ log_buf + LOG_MAX + 16
+RP_TAM      equ 4096
+%include "redpref.inc"
+msg_e_sin   db "HSPRED: no hay cable enchufado; la red irá por el Wi-Fi.", 13, 10, 0
+msg_e_pref  db "HSPRED: RED.INI dice Preferir=WIFI; la red irá por el Wi-Fi, no por el cable.", 13, 10, 0
+
 o_help      db 0
 o_info      db 0
 o_unload    db 0
 o_auto      db 0
+o_elige     db 0                    ; /AUTO (no /Q): elegir entre cable y Wi-Fi
 o_usb       db 0
 o_int       db 0
 o_dbg       db 0                    ; /DEPURA
