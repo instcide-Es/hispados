@@ -71,6 +71,9 @@ BS_WATCHDOG     equ 256
 BS_LOCATEPROT   equ 320
 BS_HANDLEPROT   equ 152
 BS_LOCATEHBUF   equ 312
+BS_CONNECT      equ 264         ; ConnectController
+BS_OPENPROTINFO equ 296         ; OpenProtocolInformation
+PCIIO_LEER      equ 48          ; EFI_PCI_IO_PROTOCOL.Pci.Read
 ST_CONIN        equ 48
 ST_CONINH       equ 40           ; ConsoleInHandle (para SimpleTextInputEx)
 ST_RUNTIME      equ 88
@@ -106,6 +109,9 @@ PAG_ARRANQUE    equ 80h         ; la página del sector de arranque de Hispa-DOS
 MEM_MIN_KB      equ 256         ; con menos memoria convencional no se arranca
 REG_MAX         equ 60000       ; octetos del registro (HISPABIOS.LOG)
 PANT_MAX        equ 14          ; líneas del mapa que salen en pantalla
+DISCO_MIN       equ 65536       ; sectores (32 MB): un disco fijo más pequeño que no sea
+                                ; el de arranque no se da a DOS (las particiones de
+                                ; arranque de una eMMC: 4 MB cada una)
 
 ; FW: una llamada al firmware (la pila tiene que estar alineada a 16)
 %macro FW 1
@@ -118,10 +124,12 @@ PANT_MAX        equ 14          ; líneas del mapa que salen en pantalla
         call %1
 %endmacro
 
-; DI: «escribir» un texto
+; DI: «escribir» un texto (conserva todos los registros, también RSI)
 %macro DI 1
+        push rsi
         lea rsi, [rel %1]
         call escribir
+        pop rsi
 %endmacro
 
 pe_entrada:
@@ -364,6 +372,7 @@ pe_entrada:
         call vector_irq0                ; T_VEC0
         mov [r15 + 182], al
         movzx r14d, al
+        mov byte [rel callado], 1       ; (solo al registro)
         call discos_buscar              ; T_NDISCOS y T_DISCOS
         mov [r15 + 30], al
         movzx ebx, al
@@ -876,10 +885,49 @@ t_pila_mal      db 13, 10, 'PILA-MAL', 13, 10, 0
 %endif
 
 ; ---- memoria_ext: pide al firmware la memoria seguida desde 1 MB -> EAX = KB ----
+; Lo que diga el mapa: el tramo libre que empieza en 1 MB (y los libres que
+; le sigan), 64 MB como mucho. Si el firmware no lo da entero, o el mapa no
+; dice nada, a potencias de dos: 64 MB, 32... (lo mismo que efi32.asm; antes,
+; solo a potencias de dos: en OVMF, 4 MB en vez de 7)
 memoria_ext:
         push rbx
-        sub rsp, 32                     ; (8 + 8 + 32 = 48: pila alineada)
-        mov ebx, 16384                  ; 64 MB en páginas; si no, la mitad...
+        push rsi
+        push rdi
+        sub rsp, 32                     ; (8 + 24 + 32 = 64: pila alineada)
+        mov ebx, 100h                   ; EBX = hasta qué página llega lo libre
+        mov rsi, [rel mapa_dir]
+        mov rdi, [rel mapa_tam]
+        add rdi, rsi
+.e:     lea rax, [rsi + 40]
+        cmp rax, rdi
+        ja .visto
+        cmp dword [rsi], 7              ; libre (EfiConventionalMemory)
+        jne .sig
+        mov rax, [rsi + 8]
+        shr rax, 12                     ; su primera página y cuántas
+        cmp rax, 100000h                ; (de 4 GB para arriba no importa)
+        jae .sig
+        mov rdx, [rsi + 24]
+        cmp rdx, 100000h
+        jbe .mide
+        mov edx, 100000h
+.mide:  add rdx, rax
+        cmp rax, rbx                    ; ¿sigue (o contiene) lo que se lleva?
+        ja .sig
+        cmp rdx, rbx
+        jbe .sig
+        mov rbx, rdx
+        mov rsi, [rel mapa_dir]         ; (el mapa no tiene por qué venir en orden:
+        jmp .e                          ; otra vuelta desde el principio)
+.sig:   add rsi, [rel desc_tam]
+        jmp .e
+.visto: sub rbx, 100h                   ; páginas libres seguidas desde 1 MB
+        cmp rbx, 16384
+        jbe .tope
+        mov ebx, 16384                  ; 64 MB en páginas
+.tope:  cmp ebx, 256
+        jae .prueba
+        mov ebx, 16384                  ; (el mapa no da nada: a probar)
 .prueba:
         mov qword [rel dir_pag], 100000h
         mov rax, [rel bootserv]
@@ -890,14 +938,23 @@ memoria_ext:
         FW [rax + BS_ALLOCPAGES]
         test rax, rax
         jz .dada
-        shr ebx, 1
-        cmp ebx, 256                    ; menos de 1 MB: nada
+        lea eax, [ebx - 1]              ; si no era una potencia de dos, la de debajo;
+        test eax, ebx                   ; si lo era, la mitad
+        jz .mitad
+        bsr ecx, ebx
+        mov ebx, 1
+        shl ebx, cl
+        jmp .menos
+.mitad: shr ebx, 1
+.menos: cmp ebx, 256                    ; menos de 1 MB: nada
         jae .prueba
         xor eax, eax
         jmp .fin
 .dada:  mov eax, ebx
         shl eax, 2                      ; páginas -> KB
 .fin:   add rsp, 32
+        pop rdi
+        pop rsi
         pop rbx
         ret
 
@@ -925,6 +982,14 @@ tsc_calibrar:
         ret
 
 ; ---- discos_buscar: el disco de arranque (80h) y los demás -> AL = cuántos ----
+; Cada disco entero que da el firmware (Block I/O) con sectores de 512: la
+; memoria USB, un disco SATA o NVMe, una eMMC. Primero el que contiene el
+; camino del que se ha arrancado (será el 80h) y después los demás, por el
+; orden del firmware (81h...). Antes se pide al firmware que ponga en marcha
+; sus controladoras de disco (discos_conectar). Una eMMC se presenta además
+; con sus dos particiones de arranque (4 MB cada una) como discos aparte: los
+; discos fijos de menos de 32 MB que no son el de arranque no se dan a DOS.
+; Todo queda en el registro (lo mismo que efi32.asm).
 discos_buscar:
         push rbx
         push rsi
@@ -934,6 +999,8 @@ discos_buscar:
         push r14
         sub rsp, 56
         mov byte [rel ndiscos], 0
+        call discos_conectar
+        DI t_d_tit
         ; el camino del dispositivo del que se ha arrancado
         mov rax, [rel bootserv]
         mov rcx, [rel imagen]
@@ -984,8 +1051,6 @@ discos_buscar:
         je .otro
         cmp byte [rsi + 6], 0           ; LogicalPartition: solo discos enteros
         jne .otro
-        cmp dword [rsi + 12], 512       ; sectores de 512 octetos
-        jne .otro
         ; ¿contiene el camino de arranque?
         mov rax, [rel bootserv]
         mov rcx, r13
@@ -1009,23 +1074,89 @@ discos_buscar:
         sub eax, r14d                   ; pasada 0 quiere EDI = 1; pasada 1, EDI = 0
         cmp edi, eax
         jne .otro
-        ; apunta el disco
+        mov rsi, [rbx + 8]              ; RSI = Media
+        ; al registro: sectores, tamaño del sector, MB, fijo o extraíble
+        DI t_d_disco
+        mov rax, [rsi + 24]             ; LastBlock + 1
+        inc rax
+        mov [rel db_sec], rax
+        mov ecx, 8
+        mov rdx, rax
+        shr rdx, 32
+        jz .h8
+        mov ecx, 16
+.h8:    call hex
+        push rsi
+        DI t_d_sec
+        pop rsi
+        mov eax, [rsi + 12]
+        call decimal
+        push rsi
+        DI t_d_oct
+        pop rsi
+        cmp dword [rsi + 12], 512
+        jne .sin_mb
+        push rsi
+        DI t_parentesis
+        mov rax, [rel db_sec]
+        shr rax, 11                     ; sectores de 512 -> MB
+        call decimal
+        DI t_d_mb
+        pop rsi
+.sin_mb:
+        push rsi
+        lea rax, [rel t_d_fijo]
+        cmp byte [rsi + 4], 0           ; RemovableMedia
+        je .fijo
+        lea rax, [rel t_d_extra]
+.fijo:  mov rsi, rax
+        call escribir
+        pop rsi
+        cmp byte [rsi + 7], 0           ; ReadOnly
+        je .escribe
+        push rsi
+        DI t_d_sololee
+        pop rsi
+.escribe:
+        test edi, edi
+        jz .no_arr
+        push rsi
+        DI t_d_arr
+        pop rsi
+.no_arr:
+        cmp dword [rsi + 12], 512       ; sectores de 512 octetos
+        je .de512
+        DI t_d_no512
+        jmp .otro
+.de512: test edi, edi                   ; (el de arranque, siempre)
+        jnz .vale
+        cmp byte [rsi + 4], 0
+        jne .vale
+        cmp qword [rel db_sec], DISCO_MIN
+        jae .vale
+        DI t_d_chico
+        jmp .otro
+.vale:  ; apunta el disco
         movzx eax, byte [rel ndiscos]
         cmp eax, 8
-        jae .otro
-        lea rdx, [rel discos]
+        jb .cabe
+        DI t_d_sobra
+        jmp .otro
+.cabe:  lea rdx, [rel discos]
         shl eax, 4
         mov [rdx + rax], rbx            ; Block I/O
-        mov rsi, [rbx + 8]
         mov ecx, [rsi]                  ; MediaId
         mov [rdx + rax + 8], ecx
-        mov rcx, [rsi + 24]             ; LastBlock
-        inc rcx
-        movzx eax, byte [rel ndiscos]
-        imul eax, 16
+        mov rcx, [rel db_sec]
         mov rdi, [rel bios_base]
         mov [rdi + 40 + rax], rcx       ; T_DISCOS: sectores
         mov dword [rdi + 48 + rax], 512
+        DI t_d_es
+        movzx eax, byte [rel ndiscos]
+        add eax, 80h
+        mov ecx, 2
+        call hex
+        DI t_d_h
         inc byte [rel ndiscos]
 .otro:
         inc r12
@@ -1039,6 +1170,118 @@ discos_buscar:
         add rsp, 56
         pop r14
         pop r13
+        pop r12
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; ---- discos_conectar: que el firmware ponga en marcha todas sus controladoras
+;      de disco ----
+; Muchos firmware, para arrancar deprisa, solo ponen en marcha el dispositivo
+; del que arrancan: arrancando de la memoria USB, el disco SATA o NVMe de
+; dentro no aparecería entre los discos (Block I/O). Se pide al firmware que
+; conecte sus controladores a cada dispositivo PCI de almacenamiento (clase
+; 01h) o lector de tarjetas SD/eMMC (clase 0805h): ConnectController,
+; recursivo. Lo que ya estaba en marcha se queda como está. En el modo seguro
+; no se hace.
+discos_conectar:
+        push rbx
+        push rsi
+        push rdi
+        sub rsp, 48
+        cmp byte [rel seguro], 0
+        jne .f
+        mov word [rel pc_clase], 01FFh  ; clases 01h (cualquier subclase) y 0805h
+        mov word [rel pc_clase2], 0805h
+        lea rax, [rel t_dc]
+        mov [rel pc_texto], rax
+        call pci_conectar
+.f:     add rsp, 48
+        pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; ---- pci_conectar: ConnectController recursivo sobre los dispositivos PCI
+;      cuya clase y subclase (palabra: clase en el octeto alto) sea pc_clase
+;      (subclase FFh: cualquiera) o pc_clase2; cada uno, al registro con el
+;      texto pc_texto y el resultado ----
+pci_conectar:
+        push rbx
+        push rsi
+        push rdi
+        push r12
+        sub rsp, 56                     ; (8 + 32 + 56 = 96: pila alineada)
+        mov rax, [rel bootserv]
+        mov ecx, 2                      ; ByProtocol
+        lea rdx, [rel guid_pciio]
+        xor r8d, r8d
+        lea r9, [rel pc_n]
+        lea r10, [rel pc_man]
+        mov [rsp + 32], r10
+        FW [rax + BS_LOCATEHBUF]
+        test rax, rax
+        jnz .f
+        xor r12d, r12d
+.c:     cmp r12, [rel pc_n]
+        jae .libera
+        mov rax, [rel pc_man]
+        mov rbx, [rax + r12 * 8]
+        mov rax, [rel bootserv]
+        mov rcx, rbx
+        lea rdx, [rel guid_pciio]
+        lea r8, [rel dc_pci]
+        FW [rax + BS_HANDLEPROT]
+        test rax, rax
+        jnz .sig
+        mov rcx, [rel dc_pci]           ; Pci.Read: las 4 primeras dobles palabras
+        mov edx, 2                      ; EfiPciIoWidthUint32
+        xor r8d, r8d
+        mov r9d, 4
+        lea rax, [rel dc_cfg]
+        mov [rsp + 32], rax
+        FW [rcx + PCIIO_LEER]
+        test rax, rax
+        jnz .sig
+        mov ax, [rel dc_cfg + 10]       ; subclase (bajo) y clase (alto)
+        cmp ax, [rel pc_clase2]
+        je .es
+        cmp ax, [rel pc_clase]
+        je .es
+        cmp byte [rel pc_clase], 0FFh   ; (subclase FFh: vale cualquiera)
+        jne .sig
+        cmp ah, [rel pc_clase + 1]
+        jne .sig
+.es:    mov rsi, [rel pc_texto]
+        call escribir
+        movzx eax, word [rel dc_cfg]
+        mov ecx, 4
+        call hex
+        DI t_dc2
+        movzx eax, word [rel dc_cfg + 2]
+        call hex
+        DI t_dc3
+        movzx eax, word [rel dc_cfg + 10]
+        call hex
+        DI t_dc4
+        call registro_paso              ; (por si el equipo se queda aquí)
+        mov rax, [rel bootserv]
+        mov rcx, rbx
+        xor edx, edx
+        xor r8d, r8d
+        mov r9d, 1                      ; recursivo
+        FW [rax + BS_CONNECT]
+        mov ecx, 8
+        call hex
+        DI t_nl
+.sig:   inc r12
+        jmp .c
+.libera:
+        mov rax, [rel bootserv]
+        mov rcx, [rel pc_man]
+        FW [rax + BS_FREEPOOL]
+.f:     add rsp, 56
         pop r12
         pop rdi
         pop rsi
@@ -2833,11 +3076,174 @@ tablas_copiar:
 .fin:   DI t_nl
         mov [r15 + 228], bl             ; T_TABLAS
         mov byte [rel callado], 0
+        mov [rel tc_smb], r13
+        mov [rel tc_smb3], r14
+        call smbios_decir               ; el equipo, al registro y a la pantalla
         add rsp, 40
         pop r14
         pop r13
         pop r12
         pop rbx
+        ret
+
+; ---- smbios_decir: el equipo y su firmware según SMBIOS, al registro y a la
+;      pantalla: «Equipo: fabricante modelo (versión); placa ...; BIOS ...» ----
+; (Especificación SMBIOS de la DMTF: la entrada «_SM_» lleva la tabla en +18h
+; y su tamaño en +16h; la «_SM3_», en +10h (64 bits) y +0Ch. Cada estructura:
+; tipo, largo de la parte fija y, detrás, sus textos acabados en 0 con otro 0
+; al final. Tipo 0: la BIOS; 1: el equipo; 2: la placa.) Como en efi32.asm.
+smbios_decir:
+        push rbx
+        push rsi
+        push rdi
+        mov rsi, [rel tc_smb]
+        test rsi, rsi
+        jz .sm3
+        cmp dword [rsi], '_SM_'
+        jne .sm3
+        mov ebx, [rsi + 18h]            ; la tabla
+        movzx ecx, word [rsi + 16h]     ; y lo que ocupa
+        jmp .tabla
+.sm3:   mov rsi, [rel tc_smb3]
+        test rsi, rsi
+        jz .f
+        cmp dword [rsi], '_SM3'
+        jne .f
+        mov rbx, [rsi + 10h]
+        mov ecx, [rsi + 0Ch]
+.tabla: test rbx, rbx
+        jz .f
+        cmp ecx, 100000h
+        ja .f
+        add rcx, rbx
+        mov [rel sd_fin], rcx
+        xor eax, eax
+        mov [rel sd_t0], rax
+        mov [rel sd_t1], rax
+        mov [rel sd_t2], rax
+        mov edx, 400                    ; (como mucho, tantas estructuras)
+.e:     lea rax, [rbx + 4]
+        cmp rax, [rel sd_fin]
+        ja .vistas
+        movzx eax, byte [rbx]
+        movzx ecx, byte [rbx + 1]
+        cmp ecx, 4
+        jb .vistas
+        cmp eax, 127                    ; el final
+        je .vistas
+        cmp eax, 2
+        ja .salta
+        lea rdi, [rel sd_t0]
+        cmp qword [rdi + rax * 8], 0
+        jne .salta
+        mov [rdi + rax * 8], rbx
+.salta: add rbx, rcx                    ; los textos: hasta dos ceros seguidos
+.z:     lea rax, [rbx + 2]
+        cmp rax, [rel sd_fin]
+        ja .vistas
+        cmp word [rbx], 0
+        je .zf
+        inc rbx
+        jmp .z
+.zf:    add rbx, 2
+        dec edx
+        jnz .e
+.vistas:
+        mov rbx, [rel sd_t1]
+        test rbx, rbx
+        jz .placa
+        DI t_s_equipo
+        mov al, [rbx + 4]               ; fabricante
+        call smb_texto
+        DI t_espacio
+        mov al, [rbx + 5]               ; modelo
+        call smb_texto
+        DI t_parentesis
+        mov al, [rbx + 6]               ; versión
+        call smb_texto
+        DI t_parentesis2
+.placa: mov rbx, [rel sd_t2]
+        test rbx, rbx
+        jz .bios
+        cmp byte [rbx + 1], 6
+        jb .bios
+        DI t_s_placa
+        mov al, [rbx + 4]
+        call smb_texto
+        DI t_espacio
+        mov al, [rbx + 5]
+        call smb_texto
+.bios:  mov rbx, [rel sd_t0]
+        test rbx, rbx
+        jz .nl
+        cmp byte [rbx + 1], 9
+        jb .nl
+        DI t_s_bios
+        mov al, [rbx + 4]               ; quién la ha hecho
+        call smb_texto
+        DI t_espacio
+        mov al, [rbx + 5]               ; versión
+        call smb_texto
+        DI t_espacio
+        mov al, [rbx + 8]               ; fecha
+        call smb_texto
+.nl:    mov rax, [rel sd_t0]
+        or rax, [rel sd_t1]
+        or rax, [rel sd_t2]
+        jz .f
+        DI t_nl
+.f:     pop rdi
+        pop rsi
+        pop rbx
+        ret
+
+; smb_texto: RBX = estructura de SMBIOS, AL = número de texto (1...; 0: no hay)
+; -> lo escribe (40 letras como mucho; lo que no sea ASCII, «?»)
+smb_texto:
+        push rax
+        push rcx
+        push rdx
+        push rsi
+        push rdi
+        movzx edx, al
+        test edx, edx
+        jz .no
+        movzx eax, byte [rbx + 1]
+        lea rsi, [rbx + rax]
+.b:     dec edx
+        jz .es
+.s:     cmp rsi, [rel sd_fin]
+        jae .no
+        lodsb
+        test al, al
+        jnz .s
+        cmp byte [rsi], 0               ; (se han acabado los textos)
+        je .no
+        jmp .b
+.es:    lea rdi, [rel buf_txt]
+        mov ecx, 40
+.c:     cmp rsi, [rel sd_fin]
+        jae .cf
+        lodsb
+        test al, al
+        jz .cf
+        cmp al, 20h
+        jb .raro
+        cmp al, 7Eh
+        jbe .pon
+.raro:  mov al, '?'
+.pon:   stosb
+        dec ecx
+        jnz .c
+.cf:    mov byte [rdi], 0
+        DI buf_txt
+        jmp .f
+.no:    DI t_s_nada
+.f:     pop rdi
+        pop rsi
+        pop rdx
+        pop rcx
+        pop rax
         ret
 
 ; ---- escala: tablas de dónde cae cada punto de 640x400 en la pantalla real ----
@@ -3406,6 +3812,46 @@ guid_smbios     dd 0EB9D2D31h
 guid_smbios3    dd 0F2FD1544h
                 dw 9794h, 4A2Ch
                 db 99h, 2Eh, 0E5h, 0BBh, 0CFh, 20h, 0E3h, 94h
+t_s_equipo      db 'Equipo: ', 0
+t_s_placa       db '; placa ', 0
+t_s_bios        db '; BIOS ', 0
+t_s_nada        db '-', 0
+t_dc            db 'Controladora de disco ', 0
+t_dc2           db ':', 0
+t_dc3           db ' (clase ', 0
+t_dc4           db 'h): se pide al firmware que la ponga en marcha. Resultado ', 0
+t_d_tit         db 'Discos del firmware (Block I/O, enteros y con medio):', 13, 10, 0
+t_d_disco       db '  ', 0
+t_d_sec         db 'h sectores de ', 0
+t_d_oct         db ' octetos', 0
+t_d_mb          db ' MB)', 0
+t_d_fijo        db ', fijo', 0
+t_d_extra       db ', extraible', 0
+t_d_sololee     db ', solo lectura', 0
+t_d_arr         db ', EL DE ARRANQUE', 0
+t_d_no512       db ': no se da a DOS (hacen falta sectores de 512)', 13, 10, 0
+t_d_chico       db ': no se da a DOS (fijo y de menos de 32 MB: una particion de arranque de eMMC)', 13, 10, 0
+t_d_sobra       db ': no cabe (8 discos como mucho)', 13, 10, 0
+t_d_es          db ': disco ', 0
+t_d_h           db 'h de DOS', 13, 10, 0
+        align 8
+tc_smb          dq 0                    ; las entradas de SMBIOS («_SM_» y «_SM3_»)
+tc_smb3         dq 0
+sd_fin          dq 0                    ; smbios_decir: el final de la tabla
+sd_t0           dq 0                    ; las estructuras de tipo 0, 1 y 2
+sd_t1           dq 0
+sd_t2           dq 0
+db_sec          dq 0                    ; discos_buscar: sectores del disco
+dc_pci          dq 0                    ; pci_conectar: el PCI I/O del dispositivo
+dc_cfg          dd 0, 0, 0, 0           ; y sus 16 primeros octetos
+pc_n            dq 0
+pc_man          dq 0
+pc_texto        dq 0
+pc_clase        dw 0
+pc_clase2       dw 0
+guid_pciio      dd 4CF5B200h            ; EFI_PCI_IO_PROTOCOL
+                dw 68B8h, 4CA5h
+                db 9Eh, 0ECh, 0B2h, 3Eh, 3Fh, 50h, 02h, 9Ah
 presta_dir      dd 0, 0, 0, 0           ; las páginas prestadas
 presta_guarda   dd 0                    ; dónde se guarda su otra versión
 presta_n        db 0
