@@ -12,7 +12,9 @@
 ;    4  los tics desde que arrancó el núcleo
 ;    5  el número de la tarea
 ;    6  leer una tecla (EBX = 0: la espera; 1: solo si la hay) -> la letra, o 0
-;    7  abrir el archivo o la carpeta de nombre EBX  -> su manejador
+;    7  abrir el archivo o la carpeta de nombre EBX, del modo ECX (0: leer;
+;       1: leer y escribir; 2: crearlo, o dejarlo vacío; 3: escribir al
+;       final, creándolo si no está)                 -> su manejador
 ;    8  leer del archivo EBX, a ECX, hasta EDX octetos -> los leídos (0: el final)
 ;    9  cerrar el archivo EBX
 ;   10  lanzar el programa de nombre EBX, con los argumentos ECX (un texto, o 0)
@@ -25,6 +27,29 @@
 ;   16  borrar la pantalla
 ;   17  mover el final de la memoria del programa EBX octetos (con signo)
 ;                                                    -> el final de antes
+;   18  escribir en el archivo EBX, desde ECX, EDX octetos -> los escritos
+;   19  mover la posición del archivo EBX a ECX octetos (con signo) del
+;       principio (EDX = 0), de donde está (1) o del final (2) -> la posición
+;   20  dejar el archivo EBX con el tamaño de su posición (cortarlo ahí)
+;   21  borrar el archivo de nombre EBX
+;   22  cambiar el nombre EBX por el nombre ECX (un archivo, también a otra carpeta)
+;   23  hacer la carpeta de nombre EBX
+;   24  borrar la carpeta de nombre EBX (vacía)
+;   25  la carpeta de trabajo pasa a ser la de nombre EBX
+;   26  la carpeta de trabajo, a EBX (donde caben ECX octetos) -> su largo
+;   27  lo que escriba el programa (y los que lance), al archivo EBX, abierto
+;       para escribir (0xFFFFFFFF: otra vez a la pantalla)
+;   28  la entrada siguiente de la carpeta EBX, a ECX (32 octetos), y su
+;       nombre largo, a EDX (256 octetos)            -> 1, o 0 si no hay más
+;   29  Ctrl+C: lo atiende el programa (EBX = 1) o lo acaba (0)
+;   30  ¿se ha pulsado Ctrl+C desde la última vez que se preguntó? -> 1 o 0
+;   31  el teclado: el español (EBX = 1) o el de EE. UU. (0); con otra cosa,
+;       solo dice cuál hay                           -> 1 o 0
+;
+;  Los nombres de archivo que no empiezan por una barra se entienden desde la
+;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
+;  valen. Lo que se escribe en un archivo (27) lleva sus finales de línea
+;  como los del DOS (retorno de carro y avance).
 ;
 ;  Lo que no puede ser da un número de 0xFFFFFFF0 para arriba (los de fat.cas
 ;  y los de aquí: NO_PROGRAMA, SIN_MEMORIA, NO_VALE). Lo que el programa da
@@ -42,11 +67,11 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Mem32, Formato
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Fecha, Mem32, Formato
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
-    público constante VERSIÓN = 0x0002          ; la 0.2
+    público constante VERSIÓN = 0x0003          ; la 0.3
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
     público constante NO_PROGRAMA = 0xFFFFFFFB  ; el archivo no es un programa de Hispa-Pentium
@@ -64,9 +89,10 @@ módulo Usuario
     público constante DATO_CLUSTERS_LIBRES = 7  ; (0xFFFFFFFF si no se sabe)
     público constante DATO_CLUSTERS = 8
     público constante DATO_HZ = 9               ; los tics por segundo
+    público constante DATO_FECHA = 10           ; la fecha (arriba) y la hora (abajo), como las guarda la FAT
 
     constante MAX_PROGRAMA = 0x200000           ; lo más que mide un programa en el disco
-    constante MAX_RUTA = 80
+    constante MAX_RUTA = 128
     constante MAX_ARGS = 128
 
     tipo Cabecera = estructura
@@ -93,6 +119,135 @@ módulo Usuario
             i := i + 1
         fin
         devolver falso
+    fin
+
+    función es_barra(c: byte): bool
+        devolver c = '\\' o c = '/'
+    fin
+
+    función mayús(c: byte): byte
+        si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        devolver c
+    fin
+
+    ; la ruta entera de un nombre, desde la raíz: si no empieza por una
+    ; barra, va detrás de la carpeta de trabajo de la tarea; «.» y «..» se
+    ; resuelven. Queda en «destino» (donde caben «cabe» octetos) como
+    ; «\UNA\OTRA» (la raíz, «\»). Falso si no cabe.
+    función ruta_entera(dada: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable p: puntero a byte
+        variable n, k, i: nat32
+        p := dada
+        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        n := 0
+        si no es_barra(p[0]) entonces
+            mientras actual.carpeta[n] <> 0 y n + 1 < cabe hacer
+                destino[n] := actual.carpeta[n]
+                n := n + 1
+            fin
+        fin
+        mientras cierto hacer
+            mientras es_barra(valor(p)) hacer p := p + 1 fin
+            si valor(p) = 0 entonces romper fin
+            k := 0
+            mientras p[k] <> 0 y no es_barra(p[k]) hacer k := k + 1 fin
+            si k = 1 y p[0] = '.' entonces
+                ; aquí mismo
+            sino si k = 2 y p[0] = '.' y p[1] = '.' entonces
+                mientras n > 0 y destino[n - 1] <> '\\' hacer n := n - 1 fin
+                si n > 0 entonces n := n - 1 fin
+            sino
+                si n + k + 2 > cabe entonces devolver falso fin
+                destino[n] := '\\'
+                n := n + 1
+                para i desde 0 hasta k - 1 hacer destino[n + i] := p[i] fin
+                n := n + k
+            fin
+            p := p + k
+        fin
+        si n = 0 entonces
+            destino[0] := '\\'
+            n := 1
+        fin
+        destino[n] := 0
+        devolver cierto
+    fin
+
+    ; el nombre de archivo que da el programa, copiado al núcleo y con su
+    ; ruta entera. Falso si no es suyo o no cabe.
+    función ruta_de_usuario(dir: nat32, destino: puntero a byte): bool
+        variable dada: arreglo [MAX_RUTA] de byte
+        si no texto_de_usuario(dir, dada, MAX_RUTA) entonces devolver falso fin
+        devolver ruta_entera(dada, destino, MAX_RUTA)
+    fin
+
+    ; ¿es esa carpeta (su ruta entera) la de trabajo de alguna tarea, o está
+    ; por encima de ella?
+    función es_carpeta_de_alguien(ruta: puntero a byte): bool
+        variable i, k: nat32
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si tareas[i].estado <> Tareas.LIBRE entonces
+                k := 0
+                mientras ruta[k] <> 0 y mayús(ruta[k]) = mayús(tareas[i].carpeta[k]) hacer k := k + 1 fin
+                si ruta[k] = 0 y (tareas[i].carpeta[k] = 0 o tareas[i].carpeta[k] = '\\') entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; la carpeta de trabajo de la tarea pasa a ser esa (su ruta entera)
+    función cambiar_carpeta(ruta: puntero a byte): nat32
+        variable m, n: nat32
+        m := abrir_archivo(ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver m fin
+        si no es_carpeta(m) entonces
+            cerrar_archivo(m)
+            devolver NO_CARPETA
+        fin
+        cerrar_archivo(m)
+        n := 0
+        mientras ruta[n] <> 0 hacer n := n + 1 fin
+        si n >= MAX_CARPETA entonces devolver NO_VALE fin
+        si n = 1 entonces n := 0 fin                    ; la raíz se guarda como «»
+        actual.carpeta[n] := 0
+        mientras n > 0 hacer
+            n := n - 1
+            actual.carpeta[n] := mayús(ruta[n])
+        fin
+        devolver 0
+    fin
+
+    ; lo que escribe un programa cuya salida va a un archivo: cada final de
+    ; línea, como los del DOS (retorno de carro y avance). Da los octetos
+    ; tomados; si el archivo ya no está, la salida vuelve a la pantalla.
+    función a_la_salida(p: puntero a byte, n: nat32): nat32
+        variable trozo: arreglo [256] de byte
+        variable i, k, r: nat32
+        variable c: byte
+        i := 0
+        k := 0
+        r := 0
+        mientras i < n y r < PRIMER_ERROR hacer
+            c := p[i]
+            si c = '\n' y no actual.salida_cr entonces
+                trozo[k] := '\r'
+                k := k + 1
+            fin
+            trozo[k] := c
+            k := k + 1
+            actual.salida_cr := c = '\r'
+            i := i + 1
+            si k >= 254 o i = n entonces
+                r := escribir_salida(actual.salida, actual.salida_serie, trozo, k)
+                k := 0
+            fin
+        fin
+        si r = MAL entonces
+            actual.salida := SIN_SALIDA
+            escribir_trozo(p, n)
+        fin
+        si r >= PRIMER_ERROR entonces devolver r fin
+        devolver n
     fin
 
     ; ¿puede el programa leer (o escribir) ahí? Como usuario_puede, pero si
@@ -147,7 +302,7 @@ módulo Usuario
     fin
 
     función dato(cuál: nat32): nat32
-        variable tablas: nat32
+        variable tablas, f, h: nat32
         según cuál
             caso DATO_MARCOS_LIBRES: devolver marcos_libres()
             caso DATO_MARCOS: devolver marcos_totales()
@@ -162,19 +317,23 @@ módulo Usuario
             caso DATO_CLUSTERS_LIBRES: devolver clusters_libres()
             caso DATO_CLUSTERS: devolver clusters
             caso DATO_HZ: devolver HZ
+            caso DATO_FECHA:
+                ahora(f, h)
+                devolver (f << 16) ob h
         fin
         devolver NO_VALE
     fin
 
     función atender(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable t: puntero a Tarea
-        variable ruta: arreglo [MAX_RUTA] de byte
+        variable ruta, ruta2: arreglo [MAX_RUTA] de byte
         variable args: arreglo [MAX_ARGS] de byte
         variable r: nat32
         variable p: puntero a byte
         según n
             caso 1:
                 si no puede(a, b, falso) entonces devolver 0xFFFFFFFF fin
+                si actual.salida <> SIN_SALIDA entonces devolver a_la_salida(puntero(a), b) fin
                 escribir_trozo(puntero(a), b)
                 devolver b
             caso 2:
@@ -191,15 +350,15 @@ módulo Usuario
                 si a = 0 o hay_tecla() entonces devolver leer_tecla() fin
                 devolver 0
             caso 7:
-                si no texto_de_usuario(a, ruta, MAX_RUTA) entonces devolver NO_VALE fin
-                devolver abrir_archivo(ruta)
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                devolver abrir_archivo(ruta, b)
             caso 8:
                 si no puede(b, c, cierto) entonces devolver NO_VALE fin
                 devolver leer_archivo(a, puntero(b), c)
             caso 9:
                 devolver cerrar_archivo(a)
             caso 10:
-                si no texto_de_usuario(a, ruta, MAX_RUTA) entonces devolver NO_VALE fin
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
                 args[0] := 0
                 si b <> 0 y no texto_de_usuario(b, args, MAX_ARGS) entonces devolver NO_VALE fin
                 t := cargar_archivo(ruta, args, r)
@@ -212,6 +371,9 @@ módulo Usuario
             caso 12:
                 si no puede(b, tamaño(Entrada), cierto) entonces devolver NO_VALE fin
                 devolver leer_entrada(a, puntero(b))
+            caso 28:
+                si no puede(b, tamaño(Entrada), cierto) o no puede(c, MAX_LARGO, cierto) entonces devolver NO_VALE fin
+                devolver leer_entrada_larga(a, puntero(b), puntero(c), MAX_LARGO)
             caso 13:
                 devolver tamaño_archivo(a)
             caso 14:
@@ -232,6 +394,69 @@ módulo Usuario
                 devolver 0
             caso 17:
                 devolver mover_quiebre(a)
+            caso 18:
+                si no puede(b, c, falso) entonces devolver NO_VALE fin
+                devolver escribir_archivo(a, puntero(b), c)
+            caso 19:
+                devolver mover_archivo(a, b, c)
+            caso 20:
+                devolver cortar_archivo(a)
+            caso 21:
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                devolver borrar_archivo(ruta)
+            caso 22:
+                si no ruta_de_usuario(a, ruta) o no ruta_de_usuario(b, ruta2) entonces devolver NO_VALE fin
+                devolver renombrar(ruta, ruta2)
+            caso 23:
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                devolver crear_carpeta(ruta)
+            caso 24:
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                si es_carpeta_de_alguien(ruta) entonces devolver EN_USO fin
+                devolver borrar_carpeta(ruta)
+            caso 25:
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                devolver cambiar_carpeta(ruta)
+            caso 26:
+                si b = 0 o no puede(a, b, cierto) entonces devolver NO_VALE fin
+                p := puntero(a)
+                r := 0
+                si actual.carpeta[0] = 0 entonces
+                    si b > 1 entonces
+                        p[0] := '\\'
+                        r := 1
+                    fin
+                sino
+                    mientras r + 1 < b y actual.carpeta[r] <> 0 hacer
+                        p[r] := actual.carpeta[r]
+                        r := r + 1
+                    fin
+                fin
+                p[r] := 0
+                devolver r
+            caso 27:
+                si a = SIN_SALIDA entonces
+                    actual.salida := SIN_SALIDA
+                    devolver 0
+                fin
+                r := serie_de(a)
+                si r = 0 entonces devolver NO_VALE fin
+                actual.salida := a
+                actual.salida_serie := r
+                actual.salida_cr := falso
+                devolver 0
+            caso 29:
+                actual.aguanta := a <> 0
+                devolver 0
+            caso 30:
+                r := 0
+                si actual.corte entonces r := 1 fin
+                actual.corte := falso
+                devolver r
+            caso 31:
+                si a <= 1 entonces pon_teclado(a = 1) fin
+                si teclado_español() entonces devolver 1 fin
+                devolver 0
         fin
         devolver NO_VALE
     fin
@@ -257,7 +482,11 @@ módulo Usuario
             sti
         fin
         actual.esp_usuario := esp_u
+        ; si a la tarea la han cortado con Ctrl+C, se acaba aquí (antes de
+        ; hacer nada, o al volver: no está a medias de nada del núcleo)
+        si actual.matar entonces cortar_actual() fin
         r := atender(n, a, b, c)
+        si actual.matar entonces cortar_actual() fin
         ensamblador
             cli
             mov eax, {r}
@@ -265,8 +494,18 @@ módulo Usuario
         fin
     fin
 
+    ; la tarea del anillo 3 que corre, cortada con Ctrl+C: se acaba con el
+    ; código CORTADA. No vuelve. (La llaman la llamada al sistema y, por su
+    ; dirección, el reloj: tareas.cas.)
+    función cortar_actual()
+        escribir_trozo("^C\n", 3)
+        cerrar_todos(actual.id)
+        terminar(CORTADA)
+    fin
+
     público función prepara_usuario()
         pon_puerta(0x80, nat32(dirección(llamada_al_sistema)), PUERTA_USUARIO)
+        al_cortar := nat32(dirección(cortar_actual))
     fin
 
     ; -------------------------------------------------------------------------
@@ -302,6 +541,14 @@ módulo Usuario
             caso NO_PROGRAMA: devolver "no es un programa de Hispa-Pentium (le falta la cabecera «HPU3»)"
             caso SIN_MEMORIA: devolver "no hay memoria, o no quedan tareas libres"
             caso NO_VALE: devolver "la cabecera del programa no tiene sentido"
+            caso DISCO_LLENO: devolver "no queda sitio en el disco"
+            caso YA_EXISTE: devolver "ya existe"
+            caso EN_USO: devolver "está en uso"
+            caso PROTEGIDO: devolver "es de solo lectura"
+            caso NO_VACÍA: devolver "la carpeta no está vacía"
+            caso NOMBRE_MALO: devolver "el nombre no vale"
+            caso ES_CARPETA: devolver "es una carpeta"
+            caso NO_CARPETA: devolver "no es una carpeta"
         fin
         devolver "no se puede"
     fin
@@ -386,7 +633,7 @@ módulo Usuario
         variable m, largo, leídos: nat32
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
-        m := abrir_archivo(ruta)
+        m := abrir_archivo(ruta, PARA_LEER)
         si m >= PRIMER_ERROR entonces
             error := m
             devolver nulo

@@ -34,6 +34,10 @@ módulo Tareas
     público constante ACABADA = 5               ; ha terminado; falta recogerla
     público constante EN_CERROJO = 6            ; en la cola de un cerrojo, hasta que se lo den
 
+    público constante MAX_CARPETA = 80          ; lo que cabe de la carpeta de trabajo de una tarea
+    público constante SIN_SALIDA = 0xFFFFFFFF   ; la tarea escribe en la pantalla
+    público constante CORTADA = 254             ; el código de una tarea acabada con Ctrl+C
+
     público tipo Tarea = estructura
         marco: nat32                            ; dónde quedó su marco (en su pila)
         estado: nat32
@@ -54,6 +58,12 @@ módulo Tareas
         quiebre_inicio, quiebre: nat32          ; del anillo 3: dónde acaba su memoria (sbrk)
         esp_usuario: nat32                      ; por dónde iba su pila al entrar en la llamada al sistema
         nombre_propio: arreglo [16] de byte     ; donde se guarda su nombre
+        carpeta: arreglo [MAX_CARPETA] de byte  ; su carpeta de trabajo («»: la raíz; si no, «\UNA\OTRA»)
+        salida, salida_serie: nat32             ; el archivo al que va lo que escribe (SIN_SALIDA: a la pantalla)
+        salida_cr: bool                         ; lo último que escribió ahí fue un retorno de carro
+        aguanta: bool                           ; atiende ella Ctrl+C (un intérprete de órdenes): no se la acaba
+        matar: bool                             ; hay que acabarla (Ctrl+C) en cuanto vuelva al anillo 3
+        corte: bool                             ; se ha pulsado Ctrl+C (para las que lo atienden)
     fin
 
     público tipo Cola = estructura
@@ -79,6 +89,10 @@ módulo Tareas
     público variable tics: nat32
     público variable cambios: nat32             ; las veces que ha cambiado de tarea
     variable pantalla: puntero a nat16 = puntero(0xB8000)
+    ; la función (sin argumentos) que acaba la tarea que corre cuando se la
+    ; ha cortado con Ctrl+C: la pone usuario.cas (cierra sus archivos y la
+    ; termina); se la llama por su dirección
+    público variable al_cortar: nat32
 
     ; -------------------------------------------------------------------------
     ;  Las colas
@@ -200,6 +214,20 @@ módulo Tareas
         sacar_puerto(PIC1, FIN_INT)
         si actual = nulo entonces devolver fin
         actual.tics_usados := actual.tics_usados + 1
+        ; una tarea cortada con Ctrl+C a la que el reloj pilla en el anillo 3
+        ; (no está a medias de nada del núcleo): se acaba aquí. No vuelve.
+        si actual.matar y al_cortar <> 0 entonces
+            ensamblador
+                mov eax, [ebp+36]
+                mov {s}, eax
+            fin
+            si s yb 3 = 3 entonces
+                ensamblador
+                    mov eax, {al_cortar}
+                    call eax
+                fin
+            fin
+        fin
         t := dormidas.primera
         mientras t <> nulo hacer
             sig := t.sig
@@ -284,6 +312,24 @@ módulo Tareas
         t.turnos := 0
         t.tics_usados := 0
         t.usuario := falso
+        ; la carpeta de trabajo y adónde va lo que escribe, los de quien la hace
+        t.carpeta[0] := 0
+        t.salida := SIN_SALIDA
+        t.salida_serie := 0
+        si actual <> nulo entonces
+            i := 0
+            mientras i < MAX_CARPETA - 1 y actual.carpeta[i] <> 0 hacer
+                t.carpeta[i] := actual.carpeta[i]
+                i := i + 1
+            fin
+            t.carpeta[i] := 0
+            t.salida := actual.salida
+            t.salida_serie := actual.salida_serie
+        fin
+        t.salida_cr := falso
+        t.aguanta := falso
+        t.matar := falso
+        t.corte := falso
         devolver t
     fin
 
@@ -375,6 +421,7 @@ módulo Tareas
         t.cr3 := leer_cr3()
         t.estado := CORRIENDO
         t.turnos := 1
+        t.salida := SIN_SALIDA
         actual := t
         ociosa := nueva("ociosa")
         ociosa.padre := 1
@@ -450,6 +497,13 @@ módulo Tareas
         variable b, c: nat32
         b := sin_interrupciones()
         mientras t.estado <> ACABADA hacer
+            ; si a la que espera la están acabando (Ctrl+C), no espera más:
+            ; la otra se queda huérfana y la recogerá el núcleo
+            si actual.matar entonces
+                t.esperador := nulo
+                reponer(b)
+                devolver CORTADA
+            fin
             t.esperador := actual
             bloquear()
         fin
@@ -463,6 +517,38 @@ módulo Tareas
         t.estado := LIBRE
         reponer(b)
         devolver c
+    fin
+
+    ; Ctrl+C: los programas del anillo 3 que no han dicho que lo atienden
+    ; ellos quedan marcados para acabar (en cuanto vuelvan al anillo 3: al
+    ; salir de una llamada al sistema, o cuando el reloj los pille allí), y
+    ; los que dormían o esperaban, despiertos para que lleguen. A los que lo
+    ; atienden se les apunta. Da cuántos se van a acabar. (La llama el
+    ; teclado, con las interrupciones tapadas.)
+    público función cortar_programas(): nat32
+        variable i, n: nat32
+        variable t: puntero a Tarea
+        n := 0
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario entonces
+                si t.aguanta entonces
+                    t.corte := cierto
+                sino
+                    t.matar := cierto
+                    n := n + 1
+                    si t.estado = DORMIDA entonces
+                        quitar(dormidas, t)
+                        t.estado := LISTA
+                        meter(listas, t)
+                    sino si t.estado = ESPERANDO entonces
+                        t.estado := LISTA
+                        meter(listas, t)
+                    fin
+                fin
+            fin
+        fin
+        devolver n
     fin
 
     ; recoge las tareas acabadas a las que ya nadie va a esperar (las que

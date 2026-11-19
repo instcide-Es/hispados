@@ -2,6 +2,14 @@
 ;  consola.cas - la consola del núcleo de Hispa-Pentium: el teclado (IRQ 1,
 ;  con su cola de letras) y la pantalla, cada uno con su cerrojo.
 ;
+;  El teclado es el español (o el de EE. UU., con pon_teclado): ñ, ç, ¿, ¡,
+;  º, ª, los acentos con su tecla muerta (´ ` ^ ¨ y luego la vocal) y Alt Gr
+;  (\ | @ # ~ [ ] { }). Las letras son las de la página 437, la del PC y la
+;  de Hispa-DOS (la 437 no tiene Á, Í, Ó ni Ú: salen sin acento, como allí).
+;  Las teclas que no son letras (las flechas, Inicio, Fin, Supr...) se dan
+;  como 0x100 más su código. Ctrl+C acaba los programas en marcha (los que
+;  no han dicho que lo atienden ellos: tareas.cas).
+;
 ;  Leer una tecla deja a la tarea esperando hasta que la haya (y corren las
 ;  demás); el cerrojo del teclado hace que, si varias leen, esperen en fila.
 ;  Escribir un trozo entero (lo que hace la llamada al sistema «escribir») va
@@ -19,14 +27,45 @@ módulo Consola
 
     constante TECLADO = 0x60
 
+    ; ---- las teclas que no son letras: 0x100 más su código de rastreo ----
+    público constante TECLA_ESPECIAL = 0x100
+    público constante TECLA_ARRIBA = 0x148
+    público constante TECLA_ABAJO = 0x150
+    público constante TECLA_IZQUIERDA = 0x14B
+    público constante TECLA_DERECHA = 0x14D
+    público constante TECLA_INICIO = 0x147
+    público constante TECLA_FIN = 0x14F
+    público constante TECLA_SUPR = 0x153
+    público constante CTRL_C = 3
+
+    ; las teclas muertas, en las tablas
+    constante AGUDO = 1
+    constante GRAVE = 2
+    constante CIRCUNFLEJO = 3
+    constante DIÉRESIS = 4
+
     público variable teclas: nat32              ; las teclas (letras) que han llegado
     constante COLA = 64
-    variable cola: arreglo [COLA] de byte
+    variable cola: arreglo [COLA] de nat16
     variable cola_ent, cola_sal: nat32
-    variable mayúsculas: bool
+    variable mayúsculas, control, alt_gr, extendida, bloqueo: bool
+    variable muerta: nat32                      ; la tecla muerta que espera su vocal (0: ninguna)
+    variable español: bool = cierto
     variable esperando_tecla: puntero a Tarea
-    variable minúsculas_tabla: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
-    variable mayúsculas_tabla: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
+    ; el teclado español: sin nada, con Mayús y con Alt Gr (por el código de la tecla)
+    variable es_normal: arreglo [59] de byte = "\0\e1234567890'\xAD\x08\tqwertyuiop\x02+\n\0asdfghjkl\xA4\x01\xA7\0\x87zxcvbnm,.-\0*\0 "
+    variable es_mayús: arreglo [59] de byte = "\0\e!\"\xFA$%&/()=?\xA8\x08\tQWERTYUIOP\x03*\n\0ASDFGHJKL\xA5\x04\xA6\0\x80ZXCVBNM;:_\0*\0 "
+    variable es_altgr: arreglo [59] de byte = "\0\0|@#~\0\xAA\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0[]\0\0\0\0\0\0\0\0\0\0\0\0{\\\0}"
+    ; y el de EE. UU.
+    variable us_normal: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
+    variable us_mayús: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
+    ; las vocales con cada acento (a e i o u, y A E I O U), en la página 437
+    variable con_agudo: arreglo [11] de byte = "\xA0\x82\xA1\xA2\xA3A\x90IOU"
+    variable con_grave: arreglo [11] de byte = "\x85\x8A\x8D\x95\x97AEIOU"
+    variable con_circunflejo: arreglo [11] de byte = "\x83\x88\x8C\x93\x96AEIOU"
+    variable con_diéresis: arreglo [11] de byte = "\x84\x89\x8B\x94\x81\x8EEI\x99\x9A"
+    variable vocales: arreglo [11] de byte = "aeiouAEIOU"
+    variable acentos: arreglo [6] de byte = " '`^\""
 
     variable cerrojo_teclado: Cerrojo
     variable cerrojo_pantalla: Cerrojo
@@ -34,22 +73,150 @@ módulo Consola
     ; -------------------------------------------------------------------------
     ;  El teclado
     ; -------------------------------------------------------------------------
+    función a_la_cola(c: nat32)
+        si cola_ent - cola_sal < COLA entonces
+            cola[cola_ent mod COLA] := c
+            cola_ent := cola_ent + 1
+            teclas := teclas + 1
+        fin
+    fin
+
+    ; una letra que llega: si había una tecla muerta esperando, se junta con
+    ; ella (la vocal con su acento; con el espacio, el acento solo; con otra
+    ; letra, el acento y la letra)
+    función llega(c: nat32)
+        variable i: nat32
+        variable m: nat32
+        si muerta = 0 entonces
+            a_la_cola(c)
+            devolver
+        fin
+        m := muerta
+        muerta := 0
+        si c = ' ' entonces
+            a_la_cola(acentos[m])
+            devolver
+        fin
+        para i desde 0 hasta 9 hacer
+            si vocales[i] = c entonces
+                según m
+                    caso AGUDO: a_la_cola(con_agudo[i])
+                    caso GRAVE: a_la_cola(con_grave[i])
+                    caso CIRCUNFLEJO: a_la_cola(con_circunflejo[i])
+                    caso DIÉRESIS: a_la_cola(con_diéresis[i])
+                fin
+                devolver
+            fin
+        fin
+        a_la_cola(acentos[m])
+        a_la_cola(c)
+    fin
+
+    ; la letra de una tecla, por su código (0 si no es de letra); las teclas
+    ; muertas dan su número (de AGUDO a DIÉRESIS)
+    función letra_de(código: nat32): nat32
+        variable c: nat32
+        si no español entonces
+            si código = 0x56 entonces código := 0x2B fin
+            si código > 0x39 entonces devolver 0 fin
+            si mayúsculas entonces c := us_mayús[código] sino c := us_normal[código] fin
+        sino si código = 0x56 entonces
+            si mayúsculas entonces c := '>' sino c := '<' fin
+        sino si código > 0x39 entonces
+            devolver 0
+        sino si alt_gr entonces
+            c := es_altgr[código]
+        sino si mayúsculas entonces
+            c := es_mayús[código]
+        sino
+            c := es_normal[código]
+        fin
+        ; Bloq Mayús: las letras, al revés
+        si bloqueo entonces
+            si c >= 'a' y c <= 'z' entonces
+                c := c - 32
+            sino si c >= 'A' y c <= 'Z' entonces
+                c := c + 32
+            sino si c = 0xA4 entonces
+                c := 0xA5
+            sino si c = 0xA5 entonces
+                c := 0xA4
+            sino si c = 0x87 entonces
+                c := 0x80
+            sino si c = 0x80 entonces
+                c := 0x87
+            fin
+        fin
+        devolver c
+    fin
+
     ; cada tecla, de su código a su letra, a la cola; y si alguien estaba
     ; esperando, se le despierta
     interrupción función teclado()
-        variable código: byte
-        variable c: byte
+        variable código, c: nat32
+        variable era_extendida: bool
         código := meter_puerto(TECLADO)
-        si código = 0x2A o código = 0x36 entonces
+        era_extendida := extendida
+        extendida := código = 0xE0
+        si código = 0xE0 entonces
+            ; el prefijo de las teclas «extendidas»: la que viene es una de ellas
+        sino si era_extendida entonces
+            si código = 0x1D entonces
+                control := cierto
+            sino si código = 0x9D entonces
+                control := falso
+            sino si código = 0x38 entonces
+                alt_gr := cierto
+            sino si código = 0xB8 entonces
+                alt_gr := falso
+            sino si código = 0x1C entonces
+                llega('\n')                             ; el Intro del teclado numérico
+            sino si código = 0x35 entonces
+                llega('/')
+            sino si código >= 0x47 y código <= 0x53 entonces
+                muerta := 0
+                a_la_cola(TECLA_ESPECIAL + código)      ; las flechas, Inicio, Fin, Supr...
+            fin
+        sino si código = 0x2A o código = 0x36 entonces
             mayúsculas := cierto
         sino si código = 0xAA o código = 0xB6 entonces
             mayúsculas := falso
-        sino si código <= 0x39 entonces
-            si mayúsculas entonces c := mayúsculas_tabla[código] sino c := minúsculas_tabla[código] fin
-            si c <> 0 y cola_ent - cola_sal < COLA entonces
-                cola[cola_ent mod COLA] := c
-                cola_ent := cola_ent + 1
-                teclas := teclas + 1
+        sino si código = 0x1D entonces
+            control := cierto
+        sino si código = 0x9D entonces
+            control := falso
+        sino si código = 0x3A entonces
+            bloqueo := no bloqueo
+        sino si código = 0x4A entonces
+            llega('-')                                  ; el teclado numérico: - y +; lo demás, como las flechas
+        sino si código = 0x4E entonces
+            llega('+')
+        sino si código >= 0x3B y código <= 0x53 y código <> 0x45 y código <> 0x46 entonces
+            muerta := 0
+            a_la_cola(TECLA_ESPECIAL + código)          ; F1 a F10 y el teclado numérico
+        sino si código < 0x80 entonces
+            c := letra_de(código)
+            si control entonces
+                ; Ctrl y una letra: su número de control (Ctrl+C es el 3)
+                c := us_normal[código yb 0x3F]
+                si código <= 0x39 y c >= 'a' y c <= 'z' entonces
+                    muerta := 0
+                    c := c - 0x60
+                    ; Ctrl+C acaba los programas en marcha; si no hay ninguno
+                    ; que acabar, llega como una tecla más (el 3)
+                    si c <> CTRL_C o cortar_programas() = 0 entonces a_la_cola(c) fin
+                fin
+            sino si c >= AGUDO y c <= DIÉRESIS entonces
+                si muerta <> 0 entonces
+                    c := muerta
+                    muerta := 0
+                    a_la_cola(acentos[c])               ; dos acentos seguidos: el primero, solo
+                    a_la_cola(acentos[letra_de(código)])
+                sino
+                    muerta := c
+                fin
+            sino si c <> 0 entonces
+                llega(c)
             fin
         fin
         sacar_puerto(PIC1, FIN_INT)
@@ -63,24 +230,40 @@ módulo Consola
         pon_puerta(33, nat32(dirección(teclado)), PUERTA_NÚCLEO)
     fin
 
+    ; qué teclado es: el español (cierto) o el de EE. UU. (falso)
+    público función pon_teclado(el_español: bool)
+        español := el_español
+        muerta := 0
+    fin
+
+    público función teclado_español(): bool
+        devolver español
+    fin
+
     ; ¿hay alguna tecla en la cola?
     público función hay_tecla(): bool
         devolver cola_sal <> cola_ent
     fin
 
     ; espera una tecla de la cola: mientras no la hay, la tarea se queda
-    ; esperando (y corren las demás, o la ociosa)
-    público función leer_tecla(): byte
-        variable c: byte
+    ; esperando (y corren las demás, o la ociosa). Da su letra (de la página
+    ; 437), o 0x100 más su código si no es una letra (TECLA_ARRIBA...). Si a
+    ; la tarea la están acabando (Ctrl+C), no espera más: da 0.
+    público función leer_tecla(): nat32
+        variable c: nat32
         variable b: nat32
         tomar(cerrojo_teclado)
         b := sin_interrupciones()
-        mientras cola_sal = cola_ent hacer
+        mientras cola_sal = cola_ent y no actual.matar hacer
             esperando_tecla := actual
             bloquear()
         fin
-        c := cola[cola_sal mod COLA]
-        cola_sal := cola_sal + 1
+        c := 0
+        si cola_sal <> cola_ent entonces
+            c := cola[cola_sal mod COLA]
+            cola_sal := cola_sal + 1
+        fin
+        si esperando_tecla = actual entonces esperando_tecla := nulo fin
         reponer(b)
         soltar(cerrojo_teclado)
         devolver c
@@ -97,13 +280,46 @@ módulo Consola
         soltar(cerrojo_pantalla)
     fin
 
+    ; la tecla de retroceso: el cursor, un sitio atrás (y por el puerto
+    ; serie, el 8). Lo que escribe el lenguaje no la entiende: pinta su dibujo.
+    público función retroceder()
+        ensamblador
+            mov edx, 0x3FD
+        .espera:
+            in al, dx
+            test al, 0x20
+            jz .espera
+            mov edx, 0x3F8
+            mov al, 8
+            out dx, al
+            mov ebx, [C_cursor]
+            test ebx, ebx
+            jz .ya
+            dec ebx
+            mov [C_cursor], ebx
+            mov edx, 0x3D4
+            mov al, 0x0F
+            out dx, al
+            inc edx
+            mov al, bl
+            out dx, al
+            dec edx
+            mov al, 0x0E
+            out dx, al
+            inc edx
+            mov al, bh
+            out dx, al
+        .ya:
+        fin
+    fin
+
     ; escribe n letras seguidas, sin que se cuele lo de otra tarea
     público función escribir_trozo(p: puntero a byte, n: nat32)
         variable i: nat32
         tomar(cerrojo_pantalla)
         i := 0
         mientras i < n hacer
-            escribir_car(p[i])
+            si p[i] = 8 entonces retroceder() sino escribir_car(p[i]) fin
             i := i + 1
         fin
         soltar(cerrojo_pantalla)
