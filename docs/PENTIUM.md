@@ -397,6 +397,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 39 | **un menú emergente** para la ventana EBX, como dice lo de ECX (dónde, las opciones separadas por «\|», las que salen en gris y una etiqueta): lo elegido llega luego como el suceso «menú» | `menú` | 0 |
 | 40 | **el portapapeles**: EBX = 0, guardar los EDX octetos de ECX; 1, copiar lo que hay a ECX (hasta EDX); 2, cuánto hay | `al_portapapeles`, `del_portapapeles`, `en_portapapeles` | los octetos |
 | 41 | **lanzar un programa y soltarlo** (EBX: el nombre; ECX: sus argumentos): no hay que esperarlo | `lanzar_suelto` | su tarea |
+| 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -997,6 +998,76 @@ pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
 tamaños y de ancho variable; el ajuste del doble clic; y que el tapiz pueda ser
 una imagen del disco.
 
+### La oficina de Hispa-386, dentro: HVPRUN
+
+| | |
+|---|---|
+| ![El menú Inicio con el grupo «Oficina»](pentium/oficina-menu.png) | ![Facturas: una factura nueva](pentium/oficina-facturas.png) |
+| ![Pluma, con lo guardado](pentium/oficina-pluma.png) | ![Cuentas: una suma con una fórmula](pentium/oficina-cuentas.png) |
+| ![Mirador, abierto desde Mi equipo](pentium/oficina-mirador.png) | ![El cuadro de un programa de Ventanas, dentro de su ventana](pentium/oficina-dialogo.png) |
+
+Los programas de la **oficina de Hispa-386** (Facturas, Pluma, Cuentas y
+Mirador: módulos `.HVP` de Hispa Ventanas) corren en el escritorio de
+Hispa-Pentium **sin tocarles una línea**: son los mismos archivos que en
+Hispa-386, hechos con `tools/mkhvp.py` de `programas/*.asm`. Los abre
+**`HVPRUN.BIN`** (`castel/nucleo32/hvprun/`), un programa del anillo 3 (cabecera
+`HPU3`) escrito en NASM:
+
+```
+HVPRUN \OFICINA\FACTURAS.HVP [ARCHIVO]
+```
+
+- **Lo de arriba es Hispa Ventanas**: el gestor de ventanas, los mensajes y las
+  tareas cooperativas, los controles (botones, cuadros de texto, listas, barras
+  de desplazamiento), los menús, los menús contextuales, los cuadros de diálogo
+  (también el de elegir archivo) y el dibujo (`ventanas/gestor.inc`,
+  `nucleo.inc`, `controles.inc`, `menus.inc`, `contexto.inc`, `dialogos.inc`,
+  `tamano.inc`, `dc.inc`, `gdi.inc`...) **se reensamblan tal cual**: son de 32
+  bits plano y no tocan el hardware. `ventanas/` no se ha tocado.
+- **Lo de debajo es de Hispa-Pentium** (`pent.inc`, `ppantalla.inc`,
+  `pdos.inc`, `pfaltan.inc`): la «pantalla» de Ventanas es una superficie de 8
+  bits del tamaño de lo de dentro de **una ventana de Hispa-Pentium**; lo que
+  cambia se pasa a 32 bits con la paleta de Ventanas y se le da al núcleo como
+  un mapa de puntos (llamada 34). El ratón (con el doble clic que cuenta el
+  núcleo) y las teclas llegan como sucesos (35); los archivos `dos_*`, por las
+  llamadas 7-9 y 18-26; buscar archivos (`INT 21h`, 4Eh y 4Fh) abre la carpeta
+  y la lee entrada a entrada (12); la fecha y la hora, de la llamada 15; la
+  memoria (`mem_bloque` y el montón de Ventanas), de la 17; el reloj de la BIOS
+  (18,2 tics por segundo), de los tics del núcleo.
+- **La ventana principal** del programa ocupa esa ventana entera: su marco y su
+  título de Ventanas quedan fuera (el título lo pone Hispa-Pentium, y cambia
+  cuando el programa lo cambia: «Pluma - carta.PLU»); su barra de menús sí se
+  ve. Al estirar o maximizar la ventana de Hispa-Pentium, el programa recibe
+  `WM_SIZE` y se recoloca. Los **cuadros de diálogo y los menús** salen dentro de
+  la ventana, con el aire de Hispa Ventanas. La ventana nace **en el centro**
+  (la llamada 80, nueva) y del tamaño que el programa pide según la pantalla.
+- **El portapapeles** de Ventanas se pone al día con el del sistema (llamada
+  40) al entrar en la ventana, al salir de ella y al acabar: lo copiado en
+  Pluma se pega en el Bloc de notas, y al revés.
+- El **botón de cerrar** es un `WM_CLOSE` para el programa (Pluma pregunta si
+  hay cambios sin guardar); con un cuadro abierto encima, lo cierra a él.
+- Lo que el programa pide de modo real (`rm_interrup`): de `INT 21h`, 0Eh,
+  19h, 1Ah, 2Ah, 2Ch, 36h, 39h-3Bh, 3Ch-42h, 4408h, 47h, 4Eh, 4Fh y 56h. La
+  **impresora** aún no: `INT 11h` dice que no hay puerto paralelo, y Facturas y
+  Pluma lo avisan. Lo demás contesta «función no válida» y lo dice por el
+  puerto serie (o el terminal), para saber qué falta.
+
+En el **menú Inicio**, el grupo **«Oficina»** (debajo de los programas) los
+abre; **Mi equipo** abre con HVPRUN los `.HVP`, los documentos de Pluma
+(`.PLU`), las hojas de Cuentas (`.HOJ`) y las imágenes (`.BMP`, `.PCX`, `.GIF`,
+`.PNG`, `.JPG`, `.TGA`, `.ICO`, `.PPM`, con Mirador). En el disco van
+`\HVPRUN.BIN` y la carpeta `\OFICINA` (los cuatro `.HVP`, `TIPOS.DAT` y
+`DICCIO.DAT`): los pone `nucleo32/hvprun/hacer.sh`, y de ahí `usb.sh` (la
+memoria USB) y `disco.sh IMAGEN 16 oficina`. Facturas guarda sus datos al lado
+de su módulo (`\OFICINA\FACTURAS.DAT`).
+
+Lo que falta: imprimir; el sonido; las teclas con Alt (el núcleo aún no las
+da: los menús se abren con F10 o con el ratón) y F11-F12; la forma del cursor
+que pide el programa (la flecha es siempre la del sistema); que cada cuadro de
+diálogo sea una ventana de Hispa-Pentium aparte; abrir otros programas desde
+uno de Ventanas (`prog_abrir`); y probar los otros de la oficina (Datos, el
+Lector, Publicaciones y Presentaciones), que deberían ir igual.
+
 ## 11. En un PC de verdad: GRUB, la memoria USB y el USB
 
 `nucleo32/usb.sh IMAGEN` hace la imagen de una **memoria USB** (64 MB, FAT16,
@@ -1399,7 +1470,8 @@ tamaño**, la **barra de menús** y el escritorio **a la medida de la pantalla**
 en la del 19/11 por la tarde (la 0.6): los **discos SATA (AHCI)**, la **capa de
 discos** con su permiso de escritura, la **FAT con varios volúmenes**, las
 **unidades con letra** y el **USB** (xHCI, EHCI y UHCI; teclado, ratón,
-concentradores y memorias). Lo siguiente:
+concentradores y memorias). Y en la del 19/11 por la noche: **la oficina de Hispa-386 dentro** (HVPRUN,
+sección 10). Lo siguiente:
 
 0. **Instalar Hispa-Pentium en el disco duro** (para eso era la 0.6: el núcleo ya
    ve el disco de dentro y la memoria de arranque): un **instalador** que haga la
