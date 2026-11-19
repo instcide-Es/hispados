@@ -1635,7 +1635,8 @@ núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 
 Con todo, `pruebas.sh` tiene ahora **408 comprobaciones** (eran 369; unos
 cuarenta minutos en el VPS). La última pasada entera (19/11/2026, con la 0.7) dio
-**408 bien, 0 mal**; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar
+**407 bien, 0 mal**; después se añadió la de `CARPETAS.TXT` a la parte 10, que
+pasada sola (`SOLO=07`) da sus 93 bien; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar
 en el disco) son unos cuatro minutos; `SOLO=06` (la parte 9, lo de la 0.6), unos
 ocho, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a la 7, con los dos
 compiladores y los dos ensambladores), otros siete.
