@@ -59,6 +59,12 @@ L=$(losetup -fP --show $IMG)
 mkfs.fat -F 16 -n HISPAPENT ${L}p1 > /dev/null
 mount ${L}p1 $W/m
 cp $W/f/* $W/m/
+# la oficina de Hispa-386 (Facturas, Pluma, Cuentas, Mirador: programas de
+# Hispa Ventanas) y su ejecutor, HVPRUN.BIN: el menú Inicio los abre de ahí
+bash $AQUI/hvprun/hacer.sh $W/of > /dev/null
+cp $W/of/HVPRUN.BIN $W/m/
+mkdir -p $W/m/OFICINA
+cp $W/of/*.HVP $W/of/*.DAT $W/m/OFICINA/
 mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8
