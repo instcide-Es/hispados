@@ -5,8 +5,10 @@
 ;
 ;  identificar() pregunta a cada disco quién es (la orden IDENTIFY: el modelo y
 ;  cuántos sectores tiene); leer_sectores() trae sectores de 512 octetos, de
-;  palabra en palabra por el puerto de datos. No se usa la interrupción del
-;  disco (se le dice que no la dé): se mira el estado hasta que tiene el dato.
+;  palabra en palabra por el puerto de datos, y escribir_sectores() los lleva
+;  al disco igual; asentar() le dice al disco que pase a la superficie lo que
+;  tenga guardado (FLUSH CACHE). No se usa la interrupción del disco (se le
+;  dice que no la dé): se mira el estado hasta que tiene (o quiere) el dato.
 ;  Un cerrojo hace que las tareas usen el canal de una en una.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -31,6 +33,8 @@ módulo Ata
     constante ERROR = 0x01
 
     constante ORDEN_LEER = 0x20
+    constante ORDEN_ESCRIBIR = 0x30
+    constante ORDEN_ASENTAR = 0xE7
     constante ORDEN_IDENTIFICAR = 0xEC
 
     constante PACIENCIA = 4000000               ; las veces que se mira el estado antes de rendirse
@@ -47,6 +51,7 @@ módulo Ata
 
     público variable discos: arreglo [DISCOS] de Disco
     público variable sectores_leídos: nat32
+    público variable sectores_escritos: nat32
     público variable fallos_de_disco: nat32
 
     variable cerrojo: Cerrojo
@@ -96,6 +101,33 @@ módulo Ata
             stosw
             loop .otra
         fin
+    fin
+
+    ; y al revés: un sector de la memoria al puerto de datos
+    función lleva_sector(origen: puntero a byte)
+        ensamblador
+            mov esi, {origen}
+            mov ecx, 256
+            mov edx, 0x1F0
+        .otra:
+            lodsw
+            out dx, ax
+            loop .otra
+        fin
+    fin
+
+    ; espera a que el disco acabe lo que está haciendo; falso si da un error
+    ; o se pasa de tiempo
+    función espera_hecho(): bool
+        variable i: nat32
+        variable e: byte
+        para i desde 1 hasta PACIENCIA hacer
+            e := meter_puerto(ORDEN)
+            si e yb OCUPADO = 0 entonces
+                devolver e yb (ERROR ob FALLO_DISCO) = 0
+            fin
+        fin
+        devolver falso
     fin
 
     función identifica(u: nat32): bool
@@ -183,6 +215,68 @@ módulo Ata
             n := n - k
         fin
         si no bien entonces fallos_de_disco := fallos_de_disco + 1 fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; lleva n sectores de origen al disco u, desde el sector lba. Da falso si
+    ; no hay tal disco, si se sale de él o si el disco da un error.
+    público función escribir_sectores(u: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
+        variable k, i: nat32
+        variable bien: bool
+        si u >= DISCOS entonces devolver falso fin
+        si no discos[u].hay o lba >= discos[u].sectores o n > discos[u].sectores - lba entonces devolver falso fin
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > 255 entonces k := 255 fin
+            bien := espera_libre()
+            si bien entonces
+                sacar_puerto(UNIDAD, 0xE0 ob (u << 4) ob ((lba >> 24) yb 0x0F))
+                sacar_puerto(CUENTA, k)
+                sacar_puerto(LBA_BAJO, lba)
+                sacar_puerto(LBA_MEDIO, lba >> 8)
+                sacar_puerto(LBA_ALTO, lba >> 16)
+                sacar_puerto(ORDEN, ORDEN_ESCRIBIR)
+                i := 0
+                mientras bien y i < k hacer
+                    pausa()
+                    bien := espera_datos()
+                    si bien entonces
+                        lleva_sector(origen)
+                        origen := origen + SECTOR
+                        sectores_escritos := sectores_escritos + 1
+                        i := i + 1
+                    fin
+                fin
+                ; el último sector: hasta que el disco lo ha tomado
+                si bien entonces
+                    pausa()
+                    bien := espera_hecho()
+                fin
+            fin
+            lba := lba + k
+            n := n - k
+        fin
+        si no bien entonces fallos_de_disco := fallos_de_disco + 1 fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; le dice al disco u que pase a la superficie lo que tenga guardado
+    público función asentar(u: nat32): bool
+        variable bien: bool
+        si u >= DISCOS entonces devolver falso fin
+        si no discos[u].hay entonces devolver falso fin
+        tomar(cerrojo)
+        bien := espera_libre()
+        si bien entonces
+            sacar_puerto(UNIDAD, 0xE0 ob (u << 4))
+            sacar_puerto(ORDEN, ORDEN_ASENTAR)
+            pausa()
+            bien := espera_hecho()
+        fin
         soltar(cerrojo)
         devolver bien
     fin

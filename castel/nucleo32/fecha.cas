@@ -1,0 +1,66 @@
+; =============================================================================
+;  fecha.cas - la fecha y la hora del núcleo de Hispa-Pentium: las del reloj
+;  de pila del PC (el de la CMOS, puertos 0x70 y 0x71), como las guarda la
+;  FAT en las entradas de sus carpetas:
+;    fecha: (año - 1980) << 9 | mes << 5 | día
+;    hora:  horas << 11 | minutos << 5 | segundos div 2
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Fecha
+
+    importar Cpu
+
+    función cmos(r: nat32): nat32
+        sacar_puerto(0x70, r)
+        devolver meter_puerto(0x71)
+    fin
+
+    función de_bcd(v: nat32): nat32
+        devolver (v >> 4) * 10 + (v yb 15)
+    fin
+
+    ; la fecha y la hora de ahora, como las quiere la FAT
+    público función ahora(ref fecha: nat32, ref hora: nat32)
+        variable s, mi, h, d, me, a, b, s2, i, j, t, tarde: nat32
+        t := sin_interrupciones()
+        i := 0
+        s := 0
+        s2 := 1
+        ; se lee hasta que dos veces seguidas da el mismo segundo (y no
+        ; mientras el reloj se está poniendo al día)
+        mientras i < 5 y s <> s2 hacer
+            j := 0
+            mientras j < 100000 y cmos(0x0A) yb 0x80 <> 0 hacer j := j + 1 fin
+            s := cmos(0)
+            mi := cmos(2)
+            h := cmos(4)
+            d := cmos(7)
+            me := cmos(8)
+            a := cmos(9)
+            s2 := cmos(0)
+            i := i + 1
+        fin
+        b := cmos(0x0B)
+        reponer(t)
+        tarde := h yb 0x80
+        h := h yb 0x7F
+        si b yb 4 = 0 entonces                  ; en BCD
+            s := de_bcd(s)
+            mi := de_bcd(mi)
+            h := de_bcd(h)
+            d := de_bcd(d)
+            me := de_bcd(me)
+            a := de_bcd(a)
+        fin
+        si b yb 2 = 0 entonces                  ; de 12 horas
+            h := h mod 12
+            si tarde <> 0 entonces h := h + 12 fin
+        fin
+        si a >= 80 entonces a := a + 1900 sino a := a + 2000 fin
+        si me < 1 o me > 12 entonces me := 1 fin
+        si d < 1 o d > 31 entonces d := 1 fin
+        fecha := ((a - 1980) << 9) ob (me << 5) ob d
+        hora := ((h mod 24) << 11) ob ((mi mod 60) << 5) ob ((s mod 60) div 2)
+    fin
+
+fin Fecha.

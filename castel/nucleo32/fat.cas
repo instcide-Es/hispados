@@ -1,25 +1,53 @@
 ; =============================================================================
-;  fat.cas - el sistema de archivos FAT del núcleo de Hispa-Pentium, de solo
-;  lectura: FAT12, FAT16 y FAT32, en un disco entero o en su primera partición
-;  FAT (tabla de particiones del MBR). Nombres de 8+3 (los largos se saltan),
-;  sin distinguir mayúsculas; carpetas con «\» o «/».
+;  fat.cas - el sistema de archivos FAT del núcleo de Hispa-Pentium: FAT12,
+;  FAT16 y FAT32, en un disco entero o en su primera partición FAT (tabla de
+;  particiones del MBR). Se lee y se escribe: crear, escribir, alargar,
+;  cortar, borrar y cambiar de nombre archivos; crear y borrar carpetas. Lo
+;  que se cambia en la FAT va a todas sus copias y, en FAT32, el sector de
+;  información lleva la cuenta de los clusters libres.
+;
+;  Los nombres, sin distinguir mayúsculas; carpetas con «\» o «/». Al leer se
+;  entienden los nombres largos (VFAT): se enseñan, y se puede abrir por
+;  ellos. Al crear, solo nombres de 8+3.
 ;
 ;  Un archivo (o una carpeta) abierto es un número, su «manejador»; es de la
-;  tarea que lo abrió. De un archivo se leen octetos; de una carpeta, sus
-;  entradas, una a una (leer_entrada). El disco se lee por ata.cas, sector a
-;  sector, con un sector de datos y uno de la FAT en la memoria.
+;  tarea que lo abrió. De un archivo se leen y se escriben octetos; de una
+;  carpeta, sus entradas, una a una (leer_entrada). El disco va por ata.cas,
+;  sector a sector, con un sector de datos y uno de la FAT en la memoria; lo
+;  que se escribe va al disco en el momento (nada se queda esperando en la
+;  memoria más que el sector de la FAT, hasta que acaba la operación).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Fat
 
-    importar Ata, Tareas, Mem32
+    importar Ata, Tareas, Mem32, Fecha
 
     ; ---- lo que devuelven las funciones cuando no puede ser ----
     público constante NO_HAY = 0xFFFFFFFF       ; no existe ese archivo
     público constante SIN_DISCO = 0xFFFFFFFE    ; no hay disco, o no es FAT
     público constante LLENO = 0xFFFFFFFD        ; demasiados archivos abiertos
     público constante MAL = 0xFFFFFFFC          ; el manejador no vale, o el disco falla
+    ; (0xFFFFFFFB, 0xFFFFFFFA y 0xFFFFFFF9 son de usuario.cas)
+    público constante DISCO_LLENO = 0xFFFFFFF8  ; no queda sitio en el disco (o en la raíz)
+    público constante YA_EXISTE = 0xFFFFFFF7    ; ya hay algo con ese nombre
+    público constante EN_USO = 0xFFFFFFF6       ; está abierto (o es la carpeta de trabajo de alguien)
+    público constante PROTEGIDO = 0xFFFFFFF5    ; es de solo lectura, o es la raíz
+    público constante NO_VACÍA = 0xFFFFFFF4     ; la carpeta tiene algo dentro
+    público constante NOMBRE_MALO = 0xFFFFFFF3  ; el nombre no vale (8+3, sin letras raras)
+    público constante ES_CARPETA = 0xFFFFFFF2   ; es una carpeta, y hacía falta un archivo
+    público constante NO_CARPETA = 0xFFFFFFF1   ; no es una carpeta
     público constante PRIMER_ERROR = 0xFFFFFFF0 ; de aquí arriba, todo son errores
+
+    ; ---- cómo se abre un archivo ----
+    público constante PARA_LEER = 0                  ; solo para leer (un archivo o una carpeta)
+    público constante PARA_ESCRIBIR = 1              ; uno que ya está, para leer y escribir
+    público constante PARA_CREAR = 2                 ; nuevo (si ya estaba, se queda vacío), para escribir
+    público constante PARA_AÑADIR = 3                ; para escribir al final (si no estaba, se crea)
+
+    ; ---- desde dónde se mueve la posición ----
+    público constante DESDE_INICIO = 0
+    público constante DESDE_AQUÍ = 1
+    público constante DESDE_FINAL = 2
 
     público constante MAX_ABIERTOS = 16
 
@@ -29,6 +57,10 @@ módulo Fat
     público constante DE_SISTEMA = 0x04
     público constante ETIQUETA = 0x08
     público constante CARPETA = 0x10
+    público constante ARCHIVAR = 0x20
+    constante TROZO_LARGO = 0x0F                ; una entrada que lleva un trozo de nombre largo
+    constante ES_RAÍZ = 1                       ; lo que da camina() si la ruta es la raíz
+    público constante MAX_LARGO = 256           ; lo que cabe de un nombre largo (con su 0)
 
     constante NINGUNO = 0xFFFFFFFF
 
@@ -79,11 +111,25 @@ módulo Fat
         usado: bool
         carpeta: bool
         fija: bool                              ; la raíz de FAT12/16, que no va por clusters
+        escribe: bool                           ; abierto para escribir
+        cambiado: bool                          ; hay que poner al día su entrada en la carpeta
+        atributos: byte
         dueño: nat32                            ; el número de la tarea que lo abrió
-        primero: nat32                          ; su primer cluster
+        serie: nat32                            ; cada vez que se abre algo, un número nuevo
+        primero: nat32                          ; su primer cluster (0: un archivo vacío)
         tamaño: nat32
         posición: nat32
         cluster, índice: nat32                  ; el cluster donde cae la posición, y cuál es de la cadena
+        ent_sector, ent_despl: nat32            ; dónde está su entrada: el sector (0: la raíz) y dentro de él
+    fin
+
+    ; lo que se encuentra al recorrer una carpeta
+    tipo Hallazgo = estructura
+        pos: nat32                              ; dónde está la entrada, dentro de su carpeta
+        lfn: nat32                              ; dónde empiezan sus trozos de nombre largo (pos, si no tiene)
+        sector, despl: nat32                    ; y en el disco: el sector del volumen y dentro de él
+        hueco: nat32                            ; el primer sitio libre de la carpeta (NINGUNO: no hay)
+        c: Cruda
     fin
 
     ; ---- el volumen ----
@@ -95,14 +141,30 @@ módulo Fat
     público variable total: nat32               ; los sectores del volumen
     variable unidad: nat32
     variable fat_inicio, fat_sectores, raíz_inicio, raíz_entradas, datos_inicio, raíz_cluster, info_sector: nat32
+    variable copias: nat32                      ; las copias de la FAT que se llevan al día
+    variable libres: nat32 = 0xFFFFFFFF         ; los clusters libres (NINGUNO: aún no se han contado)
+    variable pista: nat32                       ; por dónde se busca el siguiente cluster libre
+    variable info_sucio: bool                   ; hay que poner al día el sector de información (FAT32)
+    variable serie: nat32
 
     variable cerrojo: Cerrojo
     variable buf: arreglo [512] de byte         ; un sector de datos
     variable buf_sector: nat32 = 0xFFFFFFFF
     variable fat_buf: arreglo [512] de byte     ; un sector de la FAT
     variable fat_buf_sector: nat32 = 0xFFFFFFFF
+    variable fat_sucio: bool                    ; lo de fat_buf no está aún en el disco
     variable fallo: bool                        ; el disco ha fallado en la última operación
     variable abiertos: arreglo [MAX_ABIERTOS] de Abierto
+
+    ; ---- el nombre largo de la última entrada vista ----
+    variable largo: arreglo [MAX_LARGO] de byte ; en la página 437, acabado en 0
+    variable largo_hay: bool                    ; la última entrada vista lo tiene
+    variable largo_falta: nat32                 ; el trozo que tiene que venir ahora (0: ninguno)
+    variable largo_suma: nat32                  ; la suma del nombre corto que llevan sus trozos
+    ; las letras de fuera del ASCII que hay en la página 437: su número de
+    ; Unicode y el de la 437 (en dos tablas, por no hacer una línea tan larga)
+    variable de_unicode: arreglo [35] de byte = "\xE1\xA0\xE9\x82\xED\xA1\xF3\xA2\xFA\xA3\xF1\xA4\xD1\xA5\xFC\x81\xDC\x9A\xE7\x87\xC7\x80\xBF\xA8\xA1\xAD\xBA\xA7\xAA\xA6\xC9\x90\xE0\x85"
+    variable de_unicode2: arreglo [33] de byte = "\xE8\x8A\xEC\x8D\xF2\x95\xF9\x97\xE4\x84\xEB\x89\xEF\x8B\xF6\x94\xC4\x8E\xD6\x99\xE2\x83\xEA\x88\xEE\x8C\xF4\x93\xFB\x96\xB7\xFA"
 
     ; -------------------------------------------------------------------------
     ;  Los sectores y la FAT
@@ -119,19 +181,53 @@ módulo Fat
         devolver cierto
     fin
 
-    ; el octeto número d de la FAT
-    función fat_octeto(d: nat32): nat32
+    ; lo de buf, a su sector del disco
+    función guarda(): bool
+        si escribir_sectores(unidad, base + buf_sector, 1, buf) entonces devolver cierto fin
+        buf_sector := NINGUNO
+        fallo := cierto
+        devolver falso
+    fin
+
+    ; lo de fat_buf, a todas las copias de la FAT
+    función fat_guarda(): bool
+        variable k: nat32
+        si no fat_sucio entonces devolver cierto fin
+        fat_sucio := falso
+        para k desde 0 hasta copias - 1 hacer
+            si no escribir_sectores(unidad, base + fat_buf_sector + k * fat_sectores, 1, fat_buf) entonces
+                fallo := cierto
+                devolver falso
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; deja en fat_buf el sector de la FAT donde cae su octeto número d
+    función fat_trae(d: nat32): bool
         variable s: nat32
         s := fat_inicio + d div SECTOR
-        si fat_buf_sector <> s entonces
-            fat_buf_sector := NINGUNO
-            si no leer_sectores(unidad, base + s, 1, fat_buf) entonces
-                fallo := cierto
-                devolver 0xFF
-            fin
-            fat_buf_sector := s
+        si fat_buf_sector = s entonces devolver cierto fin
+        fat_guarda()
+        fat_buf_sector := NINGUNO
+        si no leer_sectores(unidad, base + s, 1, fat_buf) entonces
+            fallo := cierto
+            devolver falso
         fin
+        fat_buf_sector := s
+        devolver cierto
+    fin
+
+    ; el octeto número d de la FAT
+    función fat_octeto(d: nat32): nat32
+        si no fat_trae(d) entonces devolver 0xFF fin
         devolver fat_buf[d mod SECTOR]
+    fin
+
+    función fat_pon_octeto(d: nat32, v: nat32)
+        si no fat_trae(d) entonces devolver fin
+        fat_buf[d mod SECTOR] := v
+        fat_sucio := cierto
     fin
 
     ; lo que dice la FAT del cluster c, tal cual
@@ -151,6 +247,32 @@ módulo Fat
         devolver v yb 0x0FFFFFFF
     fin
 
+    ; pone en la FAT lo que sigue al cluster c (0: libre; FIN_CADENA: el último)
+    constante FIN_CADENA = 0x0FFFFFFF
+    función pon_fat(c: nat32, v: nat32)
+        variable d: nat32
+        si clase = 12 entonces
+            d := c + c div 2
+            si c yb 1 <> 0 entonces
+                fat_pon_octeto(d, (fat_octeto(d) yb 0x0F) ob ((v << 4) yb 0xF0))
+                fat_pon_octeto(d + 1, (v >> 4) yb 0xFF)
+            sino
+                fat_pon_octeto(d, v yb 0xFF)
+                fat_pon_octeto(d + 1, (fat_octeto(d + 1) yb 0xF0) ob ((v >> 8) yb 0x0F))
+            fin
+        sino si clase = 16 entonces
+            d := c * 2
+            fat_pon_octeto(d, v yb 0xFF)
+            fat_pon_octeto(d + 1, (v >> 8) yb 0xFF)
+        sino
+            d := c * 4
+            fat_pon_octeto(d, v yb 0xFF)
+            fat_pon_octeto(d + 1, (v >> 8) yb 0xFF)
+            fat_pon_octeto(d + 2, (v >> 16) yb 0xFF)
+            fat_pon_octeto(d + 3, (fat_octeto(d + 3) yb 0xF0) ob ((v >> 24) yb 0x0F))
+        fin
+    fin
+
     ; el cluster que sigue a c en su cadena; 0 si es el último (o si la FAT
     ; dice algo que no puede ser)
     función siguiente(c: nat32): nat32
@@ -164,9 +286,110 @@ módulo Fat
         devolver datos_inicio + (c - 2) * sectores_cluster
     fin
 
+    ; cuenta los clusters libres, si aún no se sabe cuántos son: en FAT32,
+    ; lo que diga su sector de información (si dice algo que puede ser); si
+    ; no, se cuentan en la FAT
+    función cuenta_libres()
+        variable c, n: nat32
+        variable p: puntero a nat32
+        si libres <> NINGUNO entonces devolver fin
+        si clase = 32 y info_sector <> 0 y info_sector <> 0xFFFF y trae(info_sector) entonces
+            p := puntero(dirección(buf))
+            si p[0] = 0x41615252 y p[121] = 0x61417272 y p[122] <= clusters entonces
+                libres := p[122]
+                si p[123] >= 2 y p[123] < clusters + 2 entonces pista := p[123] fin
+                devolver
+            fin
+        fin
+        n := 0
+        para c desde 2 hasta clusters + 1 hacer
+            si fat_de(c) = 0 entonces n := n + 1 fin
+        fin
+        si no fallo entonces
+            libres := n
+            info_sucio := cierto
+        fin
+    fin
+
+    ; un cluster libre, que queda como el último de una cadena. 0 si no hay.
+    función reserva_cluster(): nat32
+        variable c, i: nat32
+        cuenta_libres()
+        si fallo o libres = 0 entonces devolver 0 fin
+        c := pista
+        para i desde 1 hasta clusters hacer
+            si c < 2 o c >= clusters + 2 entonces c := 2 fin
+            si fat_de(c) = 0 entonces
+                si fallo entonces devolver 0 fin
+                pon_fat(c, FIN_CADENA)
+                si libres <> NINGUNO entonces libres := libres - 1 fin
+                pista := c + 1
+                info_sucio := cierto
+                devolver c
+            fin
+            c := c + 1
+        fin
+        devolver 0
+    fin
+
+    ; deja libres todos los clusters de la cadena que empieza en c
+    función suelta_cadena(c: nat32)
+        variable s, i: nat32
+        cuenta_libres()
+        i := 0
+        mientras c >= 2 y c < clusters + 2 y i < clusters y no fallo hacer
+            s := fat_de(c)
+            pon_fat(c, 0)
+            si libres <> NINGUNO entonces libres := libres + 1 fin
+            si c < pista entonces pista := c fin
+            info_sucio := cierto
+            c := s
+            i := i + 1
+        fin
+    fin
+
+    ; un cluster entero, a cero (el de una carpeta nueva)
+    función limpia_cluster(c: nat32): bool
+        variable i: nat32
+        llenar(buf, SECTOR, 0)
+        para i desde 0 hasta sectores_cluster - 1 hacer
+            buf_sector := sector_de_cluster(c) + i
+            si no guarda() entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; lo que queda por llevar al disco: el sector de la FAT y, con «del_todo»
+    ; (al cerrar un archivo, al borrar, al hacer una carpeta...), en FAT32 la
+    ; cuenta de clusters libres de su sector de información, y se le dice al
+    ; disco que lo pase todo a la superficie.
+    función asienta(del_todo: bool)
+        variable p: puntero a nat32
+        fat_guarda()
+        si no del_todo entonces devolver fin
+        si info_sucio y clase = 32 y info_sector <> 0 y info_sector <> 0xFFFF y libres <> NINGUNO entonces
+            si trae(info_sector) entonces
+                p := puntero(dirección(buf))
+                si p[0] = 0x41615252 y p[121] = 0x61417272 entonces
+                    p[122] := libres
+                    p[123] := pista
+                    guarda()
+                fin
+            fin
+        fin
+        info_sucio := falso
+        asentar(unidad)
+    fin
+
     ; -------------------------------------------------------------------------
-    ;  Leer de un archivo o de una carpeta
+    ;  Leer y escribir en un archivo o en una carpeta
     ; -------------------------------------------------------------------------
+    función al_principio(ref a: Abierto)
+        a.posición := 0
+        a.cluster := a.primero
+        a.índice := 0
+    fin
+
     ; el sector del volumen donde cae la posición de a; 0 si ya no hay más
     función sector_de(ref a: Abierto): nat32
         variable oc, quiero, s: nat32
@@ -184,6 +407,40 @@ módulo Fat
         mientras a.índice < quiero hacer
             s := siguiente(a.cluster)
             si s = 0 entonces devolver 0 fin
+            a.cluster := s
+            a.índice := a.índice + 1
+        fin
+        devolver sector_de_cluster(a.cluster) + (a.posición mod oc) div SECTOR
+    fin
+
+    ; lo mismo, para escribir: si la cadena no llega hasta la posición, se le
+    ; añaden clusters (a cero los de una carpeta). 0 si no queda sitio.
+    función sector_para_escribir(ref a: Abierto): nat32
+        variable oc, quiero, s: nat32
+        si a.fija entonces devolver sector_de(a) fin
+        oc := sectores_cluster * SECTOR
+        quiero := a.posición div oc
+        si a.primero < 2 entonces
+            s := reserva_cluster()
+            si s = 0 entonces devolver 0 fin
+            a.primero := s
+            a.cluster := s
+            a.índice := 0
+            a.cambiado := cierto
+        fin
+        si quiero < a.índice o a.cluster < 2 o a.cluster >= clusters + 2 entonces
+            a.cluster := a.primero
+            a.índice := 0
+        fin
+        mientras a.índice < quiero hacer
+            s := siguiente(a.cluster)
+            si s = 0 entonces
+                si fallo entonces devolver 0 fin
+                s := reserva_cluster()
+                si s = 0 entonces devolver 0 fin
+                pon_fat(a.cluster, s)
+                si a.carpeta y no limpia_cluster(s) entonces devolver 0 fin
+            fin
             a.cluster := s
             a.índice := a.índice + 1
         fin
@@ -210,15 +467,89 @@ módulo Fat
         devolver hechos
     fin
 
-    ; la entrada siguiente de la carpeta a que sea de un archivo o de una
-    ; carpeta (se saltan las borradas, los trozos de nombre largo y la
-    ; etiqueta del volumen). Falso cuando no hay más.
-    función entrada_cruda(ref a: Abierto, ref c: Cruda): bool
-        mientras lee(a, puntero(dirección(c)), 32) = 32 hacer
-            si c.nombre[0] = 0 entonces devolver falso fin
-            si c.nombre[0] <> 0xE5 y c.atributos yb ETIQUETA = 0 entonces devolver cierto fin
+    ; escribe n octetos de origen (o n ceros, si origen es nulo) desde la
+    ; posición de a, que avanza; el archivo crece si hace falta. Da los
+    ; escritos (menos de n si se acaba el disco).
+    función pon(ref a: Abierto, origen: puntero a byte, n: nat32): nat32
+        variable hechos, s, d, k: nat32
+        hechos := 0
+        si n > 0xFFFFFFFF - a.posición entonces n := 0xFFFFFFFF - a.posición fin
+        mientras hechos < n hacer
+            s := sector_para_escribir(a)
+            si s = 0 entonces romper fin
+            d := a.posición mod SECTOR
+            k := SECTOR - d
+            si k > n - hechos entonces k := n - hechos fin
+            si k < SECTOR y (a.carpeta o a.posición - d < a.tamaño) entonces
+                ; un trozo de un sector que ya tiene algo: se trae antes
+                si no trae(s) entonces romper fin
+            sino
+                si k < SECTOR entonces llenar(buf, SECTOR, 0) fin
+                buf_sector := s
+            fin
+            si origen = nulo entonces
+                llenar(dirección(buf[d]), k, 0)
+            sino
+                copiar_memoria(dirección(buf[d]), origen + hechos, k)
+            fin
+            si no guarda() entonces romper fin
+            hechos := hechos + k
+            a.posición := a.posición + k
+            si no a.carpeta y a.posición > a.tamaño entonces a.tamaño := a.posición fin
         fin
-        devolver falso
+        si hechos > 0 entonces a.cambiado := cierto fin
+        devolver hechos
+    fin
+
+    ; deja el archivo a con el tamaño de su posición: lo que sobra de su
+    ; cadena queda libre (y si la posición está más allá del final, se
+    ; alarga con ceros). Falso si no ha podido ser.
+    función corta(ref a: Abierto): bool
+        variable tope, oc, s: nat32
+        tope := a.posición
+        si tope > a.tamaño entonces
+            a.posición := a.tamaño
+            pon(a, nulo, tope - a.tamaño)
+            devolver a.posición = tope
+        fin
+        si tope = a.tamaño entonces devolver cierto fin
+        si tope = 0 entonces
+            suelta_cadena(a.primero)
+            a.primero := 0
+        sino
+            oc := sectores_cluster * SECTOR
+            a.posición := tope - 1
+            si sector_de(a) = 0 entonces devolver falso fin
+            s := siguiente(a.cluster)
+            si fallo entonces devolver falso fin
+            pon_fat(a.cluster, FIN_CADENA)
+            si s <> 0 entonces suelta_cadena(s) fin
+        fin
+        a.tamaño := tope
+        a.posición := tope
+        a.cluster := a.primero
+        a.índice := 0
+        a.cambiado := cierto
+        devolver no fallo
+    fin
+
+    ; pone al día la entrada de un archivo que se ha escrito: su tamaño, su
+    ; primer cluster, la fecha y la hora, y la marca de «por archivar»
+    función pon_entrada(ref a: Abierto)
+        variable c: puntero a Cruda
+        variable f, h: nat32
+        si no a.cambiado o a.carpeta o a.ent_sector = 0 entonces devolver fin
+        si no trae(a.ent_sector) entonces devolver fin
+        c := puntero(dirección(buf[a.ent_despl]))
+        ahora(f, h)
+        c.tamaño := a.tamaño
+        c.cluster_bajo := a.primero
+        si clase = 32 entonces c.cluster_alto := a.primero >> 16 fin
+        c.fecha := f
+        c.hora := h
+        c.fecha_acceso := f
+        c.atributos := c.atributos ob ARCHIVAR
+        si guarda() entonces a.cambiado := falso fin
     fin
 
     función cluster_de(ref c: Cruda): nat32
@@ -229,8 +560,23 @@ módulo Fat
     ; -------------------------------------------------------------------------
     ;  Los nombres
     ; -------------------------------------------------------------------------
+    ; la mayúscula de una letra de la página 437 (las vocales con acento, que
+    ; en mayúscula no están en la 437, quedan sin él, como hace el DOS)
     función mayúscula(c: byte): byte
         si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        si c < 0x80 entonces devolver c fin
+        según c
+            caso 0xA4: devolver 0xA5            ; ñ
+            caso 0x87: devolver 0x80            ; ç
+            caso 0x81: devolver 0x9A            ; ü
+            caso 0x82: devolver 0x90            ; é
+            caso 0x84: devolver 0x8E            ; ä
+            caso 0x94: devolver 0x99            ; ö
+            caso 0xA0: devolver 'A'
+            caso 0xA1: devolver 'I'
+            caso 0xA2: devolver 'O'
+            caso 0xA3: devolver 'U'
+        fin
         devolver c
     fin
 
@@ -267,6 +613,20 @@ módulo Fat
         devolver cierto
     fin
 
+    ; ¿vale ese nombre (ya en sus once letras) para un archivo nuevo?
+    función nombre_vale(once: puntero a byte): bool
+        variable i: nat32
+        variable c: byte
+        si once[0] = ' ' o once[0] = '.' o once[0] = 0xE5 entonces devolver falso fin
+        para i desde 0 hasta 10 hacer
+            c := once[i]
+            si c < ' ' o c = 0x7F entonces devolver falso fin
+            si c = '"' o c = '*' o c = '+' o c = ',' o c = '/' o c = ':' o c = ';' o c = '<' entonces devolver falso fin
+            si c = '=' o c = '>' o c = '?' o c = '[' o c = '\\' o c = ']' o c = '|' entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
     ; y al revés: las once letras de la FAT como «NOMBRE.EXT»
     función de_once(once: puntero a byte, t: puntero a byte)
         variable i, j: nat32
@@ -290,66 +650,293 @@ módulo Fat
         t[j] := 0
     fin
 
+    ; la suma de un nombre corto, la que llevan los trozos de su nombre largo
+    función suma_de(once: puntero a byte): nat32
+        variable i, s: nat32
+        s := 0
+        para i desde 0 hasta 10 hacer
+            s := (((s yb 1) << 7) + (s >> 1) + once[i]) yb 0xFF
+        fin
+        devolver s
+    fin
+
+    ; una letra de un nombre largo (Unicode, 16 bits), en la página 437
+    función de_letra_larga(u: nat32): byte
+        variable i: nat32
+        si u < 0x80 entonces devolver u fin
+        si u < 0x100 entonces
+            i := 0
+            mientras i < 34 hacer
+                si de_unicode[i] = u entonces devolver de_unicode[i + 1] fin
+                si i < 32 y de_unicode2[i] = u entonces devolver de_unicode2[i + 1] fin
+                i := i + 2
+            fin
+        fin
+        devolver '_'
+    fin
+
+    ; un trozo de nombre largo (una entrada con los atributos 0x0F): sus 13
+    ; letras van a su sitio de «largo». Los trozos vienen del último al
+    ; primero, numerados; si uno no es el que toca, no hay nombre largo.
+    función trozo_largo(p: puntero a byte)
+        variable n, i, d, u: nat32
+        n := p[0]
+        si n yb 0x40 <> 0 entonces                      ; el último trozo: aquí empieza
+            n := n yb 0x3F
+            largo_suma := p[13]
+            si n = 0 o n * 13 >= MAX_LARGO entonces
+                largo_falta := 0
+                devolver
+            fin
+            largo[n * 13] := 0
+        sino si n <> largo_falta o p[13] <> largo_suma o n = 0 entonces
+            largo_falta := 0
+            devolver
+        fin
+        para i desde 0 hasta 12 hacer
+            si i < 5 entonces
+                d := 1 + i * 2
+            sino si i < 11 entonces
+                d := 14 + (i - 5) * 2
+            sino
+                d := 28 + (i - 11) * 2
+            fin
+            u := p[d] ob (p[d + 1] << 8)
+            si u = 0 o u = 0xFFFF entonces
+                largo[(n - 1) * 13 + i] := 0
+            sino
+                largo[(n - 1) * 13 + i] := de_letra_larga(u)
+            fin
+        fin
+        largo_falta := n - 1
+        si largo_falta = 0 entonces largo_falta := 0x100 fin    ; ya están todos: falta la entrada
+    fin
+
+    ; ¿es el nombre largo de la última entrada vista ese trozo de ruta?
+    función es_el_largo(t: puntero a byte, n: nat32): bool
+        variable i: nat32
+        si no largo_hay entonces devolver falso fin
+        para i desde 0 hasta n - 1 hacer
+            si largo[i] = 0 o mayúscula(largo[i]) <> mayúscula(t[i]) entonces devolver falso fin
+        fin
+        devolver largo[n] = 0
+    fin
+
     ; -------------------------------------------------------------------------
-    ;  Buscar por la ruta
+    ;  Recorrer las carpetas
     ; -------------------------------------------------------------------------
     función pon_raíz(ref a: Abierto)
         a.carpeta := cierto
         a.fija := clase <> 32
         si a.fija entonces a.primero := 0 sino a.primero := raíz_cluster fin
         a.tamaño := 0
-        a.posición := 0
-        a.cluster := a.primero
-        a.índice := 0
+        a.atributos := CARPETA
+        a.ent_sector := 0
+        a.ent_despl := 0
+        al_principio(a)
     fin
 
-    ; deja en a el archivo o la carpeta de esa ruta («», «\» o «C:\» son la
-    ; raíz). Da 0, o por qué no.
-    función busca(ruta: puntero a byte, ref a: Abierto): nat32
-        variable p: puntero a byte
-        variable n, cl: nat32
+    ; deja en a el archivo o la carpeta de esa entrada
+    función entra(ref a: Abierto, ref h: Hallazgo)
+        variable cl: nat32
+        cl := cluster_de(h.c)
+        si h.c.atributos yb CARPETA <> 0 y cl = 0 entonces
+            pon_raíz(a)                                 ; el «..» de una carpeta de la raíz
+            devolver
+        fin
+        a.carpeta := h.c.atributos yb CARPETA <> 0
+        a.fija := falso
+        a.primero := cl
+        si a.carpeta entonces a.tamaño := 0 sino a.tamaño := h.c.tamaño fin
+        a.atributos := h.c.atributos
+        a.ent_sector := h.sector
+        a.ent_despl := h.despl
+        al_principio(a)
+    fin
+
+    ; la entrada siguiente de la carpeta d que sea de un archivo o de una
+    ; carpeta (se saltan las borradas y la etiqueta del volumen; los trozos
+    ; de nombre largo se van juntando en «largo»). Apunta en h dónde está, y
+    ; el primer hueco que ve. Falso cuando no hay más.
+    función siguiente_entrada(ref d: Abierto, ref h: Hallazgo): bool
+        variable principio: nat32
+        principio := NINGUNO
+        largo_falta := 0
+        mientras lee(d, puntero(dirección(h.c)), 32) = 32 hacer
+            h.pos := d.posición - 32
+            si h.c.nombre[0] = 0 entonces
+                si h.hueco = NINGUNO entonces h.hueco := h.pos fin
+                d.posición := h.pos                     ; aquí se acaba: no se pasa de aquí
+                largo_hay := falso
+                devolver falso
+            fin
+            si h.c.nombre[0] = 0xE5 entonces
+                si h.hueco = NINGUNO entonces h.hueco := h.pos fin
+                principio := NINGUNO
+                largo_falta := 0
+            sino si h.c.atributos yb 0x3F = TROZO_LARGO entonces
+                si principio = NINGUNO entonces principio := h.pos fin
+                trozo_largo(puntero(dirección(h.c)))
+            sino si h.c.atributos yb ETIQUETA <> 0 entonces
+                principio := NINGUNO
+                largo_falta := 0
+            sino
+                h.lfn := h.pos
+                si principio <> NINGUNO entonces h.lfn := principio fin
+                h.sector := buf_sector
+                h.despl := h.pos mod SECTOR
+                largo_hay := largo_falta = 0x100 y largo_suma = suma_de(dirección(h.c.nombre[0]))
+                devolver cierto
+            fin
+        fin
+        ; se ha llegado al final de la carpeta sin ver su marca de final: si
+        ; va por clusters, se le puede añadir uno
+        si h.hueco = NINGUNO y no d.fija y no fallo entonces h.hueco := d.posición fin
+        largo_hay := falso
+        devolver falso
+    fin
+
+    ; busca en la carpeta d la entrada de ese nombre (un trozo de ruta de n
+    ; letras): por su nombre corto o por el largo. Si no está, en h.hueco
+    ; queda dónde se puede poner una nueva.
+    función busca_en(ref d: Abierto, t: puntero a byte, n: nat32, ref h: Hallazgo): bool
         variable once: arreglo [11] de byte
-        variable c: Cruda
-        variable hallado: bool
+        variable corto: bool
+        corto := a_once(t, n, once)
+        al_principio(d)
+        h.hueco := NINGUNO
+        mientras siguiente_entrada(d, h) hacer
+            si corto y comparar_memoria(dirección(h.c.nombre[0]), once, 11) = 0 entonces devolver cierto fin
+            si es_el_largo(t, n) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función es_barra(c: byte): bool
+        devolver c = '\\' o c = '/'
+    fin
+
+    ; anda la ruta hasta su último trozo: deja en d la carpeta donde tiene
+    ; que estar, y en «nombre» y «n» ese trozo. Da 0; ES_RAÍZ si la ruta es
+    ; la raíz («», «\» o «C:\»); o por qué no.
+    función camina(ruta: puntero a byte, ref d: Abierto, ref nombre: puntero a byte, ref n: nat32): nat32
+        variable p, q: puntero a byte
+        variable k: nat32
+        variable h: Hallazgo
         fallo := falso
-        pon_raíz(a)
+        pon_raíz(d)
         p := ruta
         si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        mientras es_barra(valor(p)) hacer p := p + 1 fin
+        si valor(p) = 0 entonces devolver ES_RAÍZ fin
         mientras cierto hacer
-            mientras valor(p) = '\\' o valor(p) = '/' hacer p := p + 1 fin
-            si valor(p) = 0 entonces devolver 0 fin
-            n := 0
-            mientras p[n] <> 0 y p[n] <> '\\' y p[n] <> '/' hacer n := n + 1 fin
-            si no a.carpeta entonces devolver NO_HAY fin
-            si no a_once(p, n, once) entonces devolver NO_HAY fin
-            hallado := falso
-            mientras no hallado y entrada_cruda(a, c) hacer
-                hallado := c.atributos yb 0x0F <> 0x0F y comparar_memoria(dirección(c.nombre[0]), once, 11) = 0
+            k := 0
+            mientras p[k] <> 0 y no es_barra(p[k]) hacer k := k + 1 fin
+            q := p + k
+            mientras es_barra(valor(q)) hacer q := q + 1 fin
+            si valor(q) = 0 entonces
+                nombre := p
+                n := k
+                devolver 0
             fin
-            si fallo entonces devolver MAL fin
-            si no hallado entonces devolver NO_HAY fin
-            cl := cluster_de(c)
-            si c.atributos yb CARPETA <> 0 entonces
-                si cl = 0 entonces
-                    pon_raíz(a)                         ; el «..» de una carpeta de la raíz
-                sino
-                    a.carpeta := cierto
-                    a.fija := falso
-                    a.primero := cl
-                    a.tamaño := 0
-                fin
-            sino
-                a.carpeta := falso
-                a.fija := falso
-                a.primero := cl
-                a.tamaño := c.tamaño
+            si no busca_en(d, p, k, h) entonces
+                si fallo entonces devolver MAL fin
+                devolver NO_HAY
             fin
-            a.posición := 0
-            a.cluster := a.primero
-            a.índice := 0
-            p := p + n
+            si h.c.atributos yb CARPETA = 0 entonces devolver NO_HAY fin
+            entra(d, h)
+            p := q
         fin
         devolver NO_HAY
+    fin
+
+    ; deja en a el archivo o la carpeta de esa ruta. Da 0, o por qué no.
+    función busca(ruta: puntero a byte, ref a: Abierto): nat32
+        variable d: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r: nat32
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces
+            pon_raíz(a)
+            devolver 0
+        fin
+        si r <> 0 entonces devolver r fin
+        si no busca_en(d, nombre, n, h) entonces
+            si fallo entonces devolver MAL fin
+            devolver NO_HAY
+        fin
+        entra(a, h)
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Cambiar las carpetas
+    ; -------------------------------------------------------------------------
+    ; ¿está abierto lo que tiene su entrada ahí? (con «escribiendo», solo si
+    ; alguien lo tiene para escribir)
+    función está_abierto(sector: nat32, despl: nat32, escribiendo: bool): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+            si abiertos[i].usado y abiertos[i].ent_sector = sector y abiertos[i].ent_despl = despl y sector <> 0 entonces
+                si abiertos[i].escribe o no escribiendo entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; pone una entrada nueva en la carpeta d, en el hueco que se vio al
+    ; buscar (h.hueco), y deja en h dónde ha quedado. Da 0, o por qué no.
+    función nueva_entrada(ref d: Abierto, once: puntero a byte, atributos: byte, cluster: nat32, ref h: Hallazgo): nat32
+        variable f, hora: nat32
+        si h.hueco = NINGUNO entonces devolver DISCO_LLENO fin
+        llenar(puntero(dirección(h.c)), 32, 0)
+        copiar_memoria(dirección(h.c.nombre[0]), once, 11)
+        ahora(f, hora)
+        h.c.atributos := atributos
+        h.c.fecha := f
+        h.c.hora := hora
+        h.c.fecha_alta := f
+        h.c.hora_alta := hora
+        h.c.fecha_acceso := f
+        h.c.cluster_bajo := cluster
+        si clase = 32 entonces h.c.cluster_alto := cluster >> 16 fin
+        d.posición := h.hueco
+        si pon(d, puntero(dirección(h.c)), 32) <> 32 entonces
+            si fallo entonces devolver MAL fin
+            devolver DISCO_LLENO
+        fin
+        h.pos := h.hueco
+        h.lfn := h.pos
+        h.sector := buf_sector
+        h.despl := h.pos mod SECTOR
+        devolver 0
+    fin
+
+    ; tacha en la carpeta d las entradas que van de «de» a «tope»
+    función tacha(ref d: Abierto, de: nat32, tope: nat32)
+        variable s: nat32
+        mientras de <= tope hacer
+            d.posición := de
+            s := sector_de(d)
+            si s = 0 entonces devolver fin
+            si no trae(s) entonces devolver fin
+            buf[de mod SECTOR] := 0xE5
+            si no guarda() entonces devolver fin
+            de := de + 32
+        fin
+    fin
+
+    ; ¿tiene algo dentro la carpeta de esa entrada (aparte de «.» y «..»)?
+    función tiene_algo(ref h: Hallazgo): bool
+        variable d: Abierto
+        variable dentro: Hallazgo
+        entra(d, h)
+        dentro.hueco := NINGUNO
+        mientras siguiente_entrada(d, dentro) hacer
+            si dentro.c.nombre[0] <> '.' entonces devolver cierto fin
+        fin
+        devolver falso
     fin
 
     ; -------------------------------------------------------------------------
@@ -359,22 +946,74 @@ módulo Fat
         devolver m < MAX_ABIERTOS y abiertos[m].usado y abiertos[m].dueño = actual.id
     fin
 
-    ; abre un archivo o una carpeta: da su manejador, o un error (NO_HAY...)
-    público función abrir_archivo(ruta: puntero a byte): nat32
+    ; abre (o crea) en a lo que dice la ruta, de ese modo. Da 0, o por qué no.
+    función abre(ruta: puntero a byte, modo: nat32, ref a: Abierto): nat32
+        variable d: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r: nat32
+        variable once: arreglo [11] de byte
+        a.escribe := falso
+        a.cambiado := falso
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces
+            si modo <> PARA_LEER entonces devolver ES_CARPETA fin
+            pon_raíz(a)
+            devolver 0
+        fin
+        si r <> 0 entonces devolver r fin
+        si busca_en(d, nombre, n, h) entonces
+            si modo = PARA_LEER entonces
+                si está_abierto(h.sector, h.despl, cierto) entonces devolver EN_USO fin
+                entra(a, h)
+                devolver 0
+            fin
+            si h.c.atributos yb CARPETA <> 0 entonces devolver ES_CARPETA fin
+            si h.c.atributos yb SOLO_LECTURA <> 0 entonces devolver PROTEGIDO fin
+            si está_abierto(h.sector, h.despl, falso) entonces devolver EN_USO fin
+            entra(a, h)
+            a.escribe := cierto
+            si modo = PARA_CREAR y (a.tamaño <> 0 o a.primero <> 0) entonces
+                si no corta(a) entonces devolver MAL fin
+                pon_entrada(a)
+            sino si modo = PARA_CREAR entonces
+                a.cambiado := cierto                    ; la hora, por lo menos
+            fin
+            si modo = PARA_AÑADIR entonces a.posición := a.tamaño fin
+            devolver 0
+        fin
+        si fallo entonces devolver MAL fin
+        si modo = PARA_LEER o modo = PARA_ESCRIBIR entonces devolver NO_HAY fin
+        si no a_once(nombre, n, once) entonces devolver NOMBRE_MALO fin
+        si no nombre_vale(once) entonces devolver NOMBRE_MALO fin
+        r := nueva_entrada(d, once, ARCHIVAR, 0, h)
+        si r <> 0 entonces devolver r fin
+        entra(a, h)
+        a.escribe := cierto
+        devolver 0
+    fin
+
+    ; abre un archivo o una carpeta, de ese modo (PARA_LEER, PARA_ESCRIBIR, PARA_CREAR o
+    ; PARA_AÑADIR): da su manejador, o un error (NO_HAY...)
+    público función abrir_archivo(ruta: puntero a byte, modo: nat32): nat32
         variable i, r: nat32
         si no montado entonces devolver SIN_DISCO fin
+        si modo > PARA_AÑADIR entonces devolver MAL fin
         tomar(cerrojo)
         i := 0
         mientras i < MAX_ABIERTOS y abiertos[i].usado hacer i := i + 1 fin
         si i = MAX_ABIERTOS entonces
             r := LLENO
         sino
-            r := busca(ruta, abiertos[i])
+            r := abre(ruta, modo, abiertos[i])
             si r = 0 entonces
+                serie := serie + 1
+                abiertos[i].serie := serie
                 abiertos[i].usado := cierto
                 abiertos[i].dueño := actual.id
                 r := i
             fin
+            si modo <> PARA_LEER entonces asienta(falso) fin
         fin
         soltar(cerrojo)
         devolver r
@@ -395,39 +1034,160 @@ módulo Fat
         devolver r
     fin
 
-    ; la entrada siguiente de una carpeta abierta: 1 si la hay, 0 si se han
-    ; acabado, o MAL
-    público función leer_entrada(m: nat32, e: puntero a Entrada): nat32
+    ; escribe n octetos en el archivo a (ya con el cerrojo): da los escritos,
+    ; o por qué no
+    función escribe_en(ref a: Abierto, origen: puntero a byte, n: nat32): nat32
+        variable r, tope: nat32
+        fallo := falso
+        si a.posición > a.tamaño entonces
+            ; se ha movido más allá del final: lo de en medio, a cero
+            tope := a.posición
+            a.posición := a.tamaño
+            pon(a, nulo, tope - a.tamaño)
+            si a.posición <> tope entonces
+                asienta(falso)
+                si fallo entonces devolver MAL fin
+                devolver DISCO_LLENO
+            fin
+        fin
+        r := pon(a, origen, n)
+        asienta(falso)
+        si fallo entonces devolver MAL fin
+        si r = 0 y n > 0 entonces devolver DISCO_LLENO fin
+        devolver r
+    fin
+
+    ; escribe n octetos en el archivo, desde su posición (crece si hace
+    ; falta): da los escritos (menos de n si el disco se llena), o un error
+    público función escribir_archivo(m: nat32, origen: puntero a byte, n: nat32): nat32
         variable r: nat32
-        variable c: Cruda
-        variable hay: bool
+        tomar(cerrojo)
+        si no vale(m) o abiertos[m].carpeta o no abiertos[m].escribe entonces
+            r := MAL
+        sino
+            r := escribe_en(abiertos[m], origen, n)
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; lo mismo, para la salida de un programa mandada a un archivo: escribe
+    ; quien sea (no hace falta ser quien lo abrió), si el manejador sigue
+    ; siendo el de entonces (su número de serie)
+    público función escribir_salida(m: nat32, su_serie: nat32, origen: puntero a byte, n: nat32): nat32
+        variable r: nat32
+        tomar(cerrojo)
+        si m >= MAX_ABIERTOS o no abiertos[m].usado o abiertos[m].serie <> su_serie o no abiertos[m].escribe entonces
+            r := MAL
+        sino
+            r := escribe_en(abiertos[m], origen, n)
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; el número de serie de un archivo abierto para escribir (0 si no lo es)
+    público función serie_de(m: nat32): nat32
+        si no vale(m) o no abiertos[m].escribe entonces devolver 0 fin
+        devolver abiertos[m].serie
+    fin
+
+    ; mueve la posición del archivo: a «cuánto» octetos (con signo) del
+    ; principio, de donde está o del final. Da la posición nueva, o MAL.
+    público función mover_archivo(m: nat32, cuánto: nat32, origen: nat32): nat32
+        variable r, de: nat32
+        tomar(cerrojo)
+        si no vale(m) o abiertos[m].carpeta o origen > DESDE_FINAL entonces
+            r := MAL
+        sino
+            de := 0
+            si origen = DESDE_AQUÍ entonces de := abiertos[m].posición fin
+            si origen = DESDE_FINAL entonces de := abiertos[m].tamaño fin
+            r := de + cuánto
+            si cuánto >= 0x80000000 y r > de entonces
+                r := MAL                                ; antes del principio
+            sino si cuánto < 0x80000000 y r < de entonces
+                r := MAL                                ; más de lo que cabe en un archivo
+            sino si r >= PRIMER_ERROR entonces
+                r := MAL
+            sino
+                abiertos[m].posición := r
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; deja el archivo con el tamaño de su posición (lo corta ahí, o lo
+    ; alarga con ceros). Da 0, o un error.
+    público función cortar_archivo(m: nat32): nat32
+        variable r: nat32
+        tomar(cerrojo)
+        si no vale(m) o abiertos[m].carpeta o no abiertos[m].escribe entonces
+            r := MAL
+        sino
+            fallo := falso
+            r := 0
+            si no corta(abiertos[m]) entonces
+                r := DISCO_LLENO
+                si fallo entonces r := MAL fin
+            fin
+            pon_entrada(abiertos[m])
+            asienta(falso)
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; la entrada siguiente de una carpeta abierta: 1 si la hay, 0 si se han
+    ; acabado, o MAL. Si «nombre_largo» no es nulo, deja ahí su nombre largo
+    ; (el corto si no tiene), donde caben «cabe» octetos.
+    público función leer_entrada_larga(m: nat32, e: puntero a Entrada, nombre_largo: puntero a byte, cabe: nat32): nat32
+        variable r, i: nat32
+        variable h: Hallazgo
         tomar(cerrojo)
         si no vale(m) o no abiertos[m].carpeta entonces
             r := MAL
         sino
             fallo := falso
-            hay := entrada_cruda(abiertos[m], c)
-            mientras hay y c.atributos yb 0x0F = 0x0F hacer        ; un trozo de nombre largo
-                hay := entrada_cruda(abiertos[m], c)
-            fin
-            si fallo entonces
-                r := MAL
-            sino si hay entonces
-                de_once(dirección(c.nombre[0]), dirección(e.nombre[0]))
-                e.atributos := c.atributos
+            h.hueco := NINGUNO
+            si siguiente_entrada(abiertos[m], h) entonces
+                de_once(dirección(h.c.nombre[0]), dirección(e.nombre[0]))
+                e.atributos := h.c.atributos
                 e.reservado := 0
-                e.tamaño := c.tamaño
-                e.fecha := c.fecha
-                e.hora := c.hora
-                e.cluster := cluster_de(c)
+                e.tamaño := h.c.tamaño
+                e.fecha := h.c.fecha
+                e.hora := h.c.hora
+                e.cluster := cluster_de(h.c)
                 e.libre := 0
+                si nombre_largo <> nulo y cabe > 0 entonces
+                    i := 0
+                    si largo_hay entonces
+                        mientras i + 1 < cabe y largo[i] <> 0 hacer
+                            nombre_largo[i] := largo[i]
+                            i := i + 1
+                        fin
+                    sino
+                        mientras i + 1 < cabe y e.nombre[i] <> 0 hacer
+                            nombre_largo[i] := e.nombre[i]
+                            i := i + 1
+                        fin
+                    fin
+                    nombre_largo[i] := 0
+                fin
                 r := 1
+            sino si fallo entonces
+                r := MAL
             sino
                 r := 0
             fin
         fin
         soltar(cerrojo)
         devolver r
+    fin
+
+    público función leer_entrada(m: nat32, e: puntero a Entrada): nat32
+        devolver leer_entrada_larga(m, e, nulo, 0)
     fin
 
     ; lo que mide un archivo abierto (0 una carpeta), o MAL
@@ -440,10 +1200,29 @@ módulo Fat
         devolver vale(m) y abiertos[m].carpeta
     fin
 
+    ; cierra el abierto número i (con el cerrojo ya tomado): si se ha
+    ; escrito, pone al día su entrada y lo asienta todo en el disco
+    función cierra(i: nat32)
+        si abiertos[i].escribe entonces
+            fallo := falso
+            pon_entrada(abiertos[i])
+            asienta(cierto)
+        fin
+        abiertos[i].usado := falso
+        abiertos[i].escribe := falso
+    fin
+
     público función cerrar_archivo(m: nat32): nat32
-        si no vale(m) entonces devolver MAL fin
-        abiertos[m].usado := falso
-        devolver 0
+        variable r: nat32
+        tomar(cerrojo)
+        si vale(m) entonces
+            cierra(m)
+            r := 0
+        sino
+            r := MAL
+        fin
+        soltar(cerrojo)
+        devolver r
     fin
 
     ; cierra todo lo que tenía abierto una tarea (cuando acaba). Da cuántos.
@@ -452,8 +1231,12 @@ módulo Fat
         n := 0
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer
             si abiertos[i].usado y abiertos[i].dueño = dueño entonces
-                abiertos[i].usado := falso
-                n := n + 1
+                tomar(cerrojo)
+                si abiertos[i].usado y abiertos[i].dueño = dueño entonces
+                    cierra(i)
+                    n := n + 1
+                fin
+                soltar(cerrojo)
             fin
         fin
         devolver n
@@ -468,28 +1251,216 @@ módulo Fat
         devolver n
     fin
 
+    ; borra un archivo. Da 0, o por qué no.
+    público función borrar_archivo(ruta: puntero a byte): nat32
+        variable d: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r: nat32
+        si no montado entonces devolver SIN_DISCO fin
+        tomar(cerrojo)
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces
+            r := ES_CARPETA
+        sino si r = 0 entonces
+            si no busca_en(d, nombre, n, h) entonces
+                r := NO_HAY
+                si fallo entonces r := MAL fin
+            sino si h.c.atributos yb CARPETA <> 0 entonces
+                r := ES_CARPETA
+            sino si h.c.atributos yb SOLO_LECTURA <> 0 entonces
+                r := PROTEGIDO
+            sino si está_abierto(h.sector, h.despl, falso) entonces
+                r := EN_USO
+            sino
+                suelta_cadena(cluster_de(h.c))
+                tacha(d, h.lfn, h.pos)
+                asienta(cierto)
+                si fallo entonces r := MAL fin
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; cambia de nombre un archivo o una carpeta; un archivo, además, puede
+    ; pasar a otra carpeta. Da 0, o por qué no.
+    público función renombrar(vieja: puntero a byte, nueva: puntero a byte): nat32
+        variable d, d2: Abierto
+        variable h, h2: Hallazgo
+        variable nombre, nombre2: puntero a byte
+        variable n, n2, r: nat32
+        variable once: arreglo [11] de byte
+        variable c: puntero a Cruda
+        si no montado entonces devolver SIN_DISCO fin
+        tomar(cerrojo)
+        r := camina(vieja, d, nombre, n)
+        si r = ES_RAÍZ entonces r := PROTEGIDO fin
+        si r = 0 y no busca_en(d, nombre, n, h) entonces
+            r := NO_HAY
+            si fallo entonces r := MAL fin
+        fin
+        si r = 0 y h.c.nombre[0] = '.' entonces r := NOMBRE_MALO fin
+        si r = 0 y está_abierto(h.sector, h.despl, falso) entonces r := EN_USO fin
+        si r = 0 entonces
+            r := camina(nueva, d2, nombre2, n2)
+            si r = ES_RAÍZ entonces r := YA_EXISTE fin
+        fin
+        si r = 0 y (no a_once(nombre2, n2, once) o no nombre_vale(once)) entonces r := NOMBRE_MALO fin
+        si r = 0 y busca_en(d2, nombre2, n2, h2) entonces
+            ; ya hay algo con ese nombre: vale solo si es el mismo (cambiar
+            ; el nombre largo por el corto, que aquí no se distinguen)
+            si h2.sector <> h.sector o h2.despl <> h.despl entonces r := YA_EXISTE fin
+        fin
+        si r = 0 y fallo entonces r := MAL fin
+        si r = 0 entonces
+            si d.fija = d2.fija y d.primero = d2.primero entonces
+                ; en la misma carpeta: el nombre nuevo, en su sitio; y sus
+                ; trozos de nombre largo, que ya no son suyos, fuera
+                si trae(h.sector) entonces
+                    c := puntero(dirección(buf[h.despl]))
+                    copiar_memoria(dirección(c.nombre[0]), once, 11)
+                    c.nt := 0
+                    guarda()
+                    si h.lfn < h.pos entonces tacha(d, h.lfn, h.pos - 32) fin
+                fin
+            sino si h.c.atributos yb CARPETA <> 0 entonces
+                r := ES_CARPETA                         ; una carpeta no se cambia de sitio (su «..»)
+            sino
+                ; a otra carpeta: la entrada nueva allí, y la vieja, tachada
+                copiar_memoria(puntero(dirección(h2.c)), puntero(dirección(h.c)), 32)
+                r := nueva_entrada(d2, once, h.c.atributos, cluster_de(h.c), h2)
+                si r = 0 entonces
+                    si trae(h2.sector) entonces
+                        c := puntero(dirección(buf[h2.despl]))
+                        c.tamaño := h.c.tamaño
+                        c.fecha := h.c.fecha
+                        c.hora := h.c.hora
+                        guarda()
+                    fin
+                    tacha(d, h.lfn, h.pos)
+                fin
+            fin
+            asienta(cierto)
+            si r = 0 y fallo entonces r := MAL fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; hace una carpeta nueva (vacía: con su «.» y su «..»). Da 0, o por qué no.
+    público función crear_carpeta(ruta: puntero a byte): nat32
+        variable d, nueva: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r, c, padre, f, hora: nat32
+        variable once: arreglo [11] de byte
+        variable e: puntero a Cruda
+        si no montado entonces devolver SIN_DISCO fin
+        tomar(cerrojo)
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces r := YA_EXISTE fin
+        si r = 0 y busca_en(d, nombre, n, h) entonces r := YA_EXISTE fin
+        si r = 0 y fallo entonces r := MAL fin
+        si r = 0 y (no a_once(nombre, n, once) o no nombre_vale(once)) entonces r := NOMBRE_MALO fin
+        si r = 0 entonces
+            c := reserva_cluster()
+            si c = 0 entonces
+                r := DISCO_LLENO
+            sino
+                padre := d.primero                      ; (0 si la de arriba es la raíz, también en FAT32)
+                si d.fija o (clase = 32 y d.primero = raíz_cluster) entonces padre := 0 fin
+                r := nueva_entrada(d, once, CARPETA, c, h)
+                si r <> 0 entonces
+                    suelta_cadena(c)
+                sino si limpia_cluster(c) entonces
+                    ; (lo que queda en buf es el último sector del cluster, a cero)
+                    llenar(buf, SECTOR, 0)
+                    buf_sector := sector_de_cluster(c)
+                    ahora(f, hora)
+                    e := puntero(dirección(buf))
+                    llenar(dirección(e.nombre[0]), 11, ' ')
+                    e.nombre[0] := '.'
+                    e.atributos := CARPETA
+                    e.fecha := f
+                    e.hora := hora
+                    e.fecha_alta := f
+                    e.hora_alta := hora
+                    e.fecha_acceso := f
+                    e.cluster_bajo := c
+                    si clase = 32 entonces e.cluster_alto := c >> 16 fin
+                    e := puntero(dirección(buf[32]))
+                    llenar(dirección(e.nombre[0]), 11, ' ')
+                    e.nombre[0] := '.'
+                    e.nombre[1] := '.'
+                    e.atributos := CARPETA
+                    e.fecha := f
+                    e.hora := hora
+                    e.fecha_alta := f
+                    e.hora_alta := hora
+                    e.fecha_acceso := f
+                    e.cluster_bajo := padre
+                    si clase = 32 entonces e.cluster_alto := padre >> 16 fin
+                    guarda()
+                fin
+            fin
+            asienta(cierto)
+            si r = 0 y fallo entonces r := MAL fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; borra una carpeta, si está vacía. Da 0, o por qué no.
+    público función borrar_carpeta(ruta: puntero a byte): nat32
+        variable d: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r, i, cl: nat32
+        si no montado entonces devolver SIN_DISCO fin
+        tomar(cerrojo)
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces
+            r := PROTEGIDO
+        sino si r = 0 entonces
+            si no busca_en(d, nombre, n, h) entonces
+                r := NO_HAY
+                si fallo entonces r := MAL fin
+            sino si h.c.atributos yb CARPETA = 0 entonces
+                r := NO_CARPETA
+            sino si h.c.nombre[0] = '.' entonces
+                r := NOMBRE_MALO
+            sino si h.c.atributos yb SOLO_LECTURA <> 0 entonces
+                r := PROTEGIDO
+            sino si tiene_algo(h) entonces
+                r := NO_VACÍA
+            sino
+                cl := cluster_de(h.c)
+                para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+                    si abiertos[i].usado y abiertos[i].carpeta y abiertos[i].primero = cl entonces r := EN_USO fin
+                fin
+                si r = 0 y no fallo entonces
+                    suelta_cadena(cl)
+                    tacha(d, h.lfn, h.pos)
+                    asienta(cierto)
+                fin
+                si r = 0 y fallo entonces r := MAL fin
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
     ; los clusters libres del volumen (NINGUNO = 0xFFFFFFFF si no se sabe):
-    ; en FAT12 y FAT16 se cuentan en la FAT; en FAT32, lo que diga su sector
-    ; de información
+    ; se cuentan en la FAT la primera vez (en FAT32, vale lo que diga su
+    ; sector de información) y luego se lleva la cuenta
     público función clusters_libres(): nat32
-        variable c, n: nat32
-        variable p: puntero a nat32
+        variable n: nat32
         si no montado entonces devolver NINGUNO fin
         tomar(cerrojo)
         fallo := falso
-        n := NINGUNO
-        si clase = 32 entonces
-            si info_sector <> 0 y info_sector <> 0xFFFF y trae(info_sector) entonces
-                p := puntero(dirección(buf))
-                si p[0] = 0x41615252 y p[121] = 0x61417272 y p[122] <= clusters entonces n := p[122] fin
-            fin
-        sino
-            n := 0
-            para c desde 2 hasta clusters + 1 hacer
-                si fat_de(c) = 0 entonces n := n + 1 fin
-            fin
-            si fallo entonces n := NINGUNO fin
-        fin
+        cuenta_libres()
+        n := libres
         soltar(cerrojo)
         devolver n
     fin
@@ -522,6 +1493,10 @@ módulo Fat
         base := 0
         buf_sector := NINGUNO
         fat_buf_sector := NINGUNO
+        fat_sucio := falso
+        info_sucio := falso
+        libres := NINGUNO
+        pista := 2
         si trae(0) y no es_volumen() y buf[510] = 0x55 y buf[511] = 0xAA entonces
             ; una tabla de particiones: la primera que sea FAT
             para i desde 0 hasta 3 hacer
@@ -544,6 +1519,7 @@ módulo Fat
             raíz_entradas := b.entradas_raíz
             fat_inicio := b.reservados
             raíz_inicio := fat_inicio + b.fats * fat_sectores
+            copias := b.fats
             datos_inicio := raíz_inicio + (raíz_entradas * 32 + SECTOR - 1) div SECTOR
             raíz_cluster := b.raíz_cluster
             info_sector := b.info_sector
@@ -557,6 +1533,11 @@ módulo Fat
                     clase := 32
                 fin
                 montado := clusters > 0 y (clase = 32 o raíz_entradas <> 0)
+                ; una FAT32 puede llevar al día una sola de sus copias
+                si clase = 32 y b.banderas yb 0x80 <> 0 entonces
+                    si (b.banderas yb 0x0F) < copias entonces fat_inicio := fat_inicio + (b.banderas yb 0x0F) * fat_sectores fin
+                    copias := 1
+                fin
             fin
         fin
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer abiertos[i].usado := falso fin
