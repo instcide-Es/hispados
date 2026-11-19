@@ -18,7 +18,7 @@
 #  sus variables y en la pila con cada trama; ver fill_buffer).
 #  Con Intel AC'97, con Intel HD Audio y con una Sound Blaster 16:
 #  - SONIDOS.HVP está en \HISPADOS\PROGS, y HISPA.WAV y CAMPANA.WAV en
-#    \HISPADOS (disquete e imagen USB); su acceso sale en el grupo «Sonido»
+#    \HISPADOS (disquete, o «Instalación 2» el WAV, e imagen USB); su acceso sale en el grupo «Sonido»
 #    ([MEZCLADOR], con el Mezclador);
 #  - la ventana dice qué tarjeta lleva HSPSND;
 #  - «Tono 440 Hz»: dos segundos a 440 Hz por los dos canales;
@@ -116,8 +116,12 @@ EST="texto 174 461 0 9 fina"                # la barra de estado
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 
 echo "== Reproductor de sonido: los archivos del disco =="
+# (desde la 0.9.28 HISPA.WAV va en el disquete «Instalación 2», no en el de
+# arranque: la prueba lo pone en su copia)
 for f in PROGS/SONIDOS.HVP HISPA.WAV CAMPANA.WAV; do
-  if mdir -i "$IMG" ::HISPADOS/$f > /dev/null 2>&1; then ok "$f está en \\HISPADOS del disquete"; else ko "falta $f en \\HISPADOS del disquete"; fi
+  disq="$IMG"; nom="disquete"
+  [ $f = HISPA.WAV ] && { disq=$B/hispados-instal2.img; nom="disquete «Instalación 2»"; }
+  if mdir -i "$disq" ::HISPADOS/$f > /dev/null 2>&1; then ok "$f está en \\HISPADOS del $nom"; else ko "falta $f en \\HISPADOS del $nom"; fi
   if [ -f $B/hispados-usb.img ]; then
     if MTOOLS_SKIP_CHECK=1 mdir -i $B/hispados-usb.img@@1048576 ::HISPADOS/$f > /dev/null 2>&1; then
       ok "y en la imagen USB"
@@ -155,6 +159,7 @@ for CARD in ${CARDS:-ac97 hda sb16}; do
   echo "== Reproductor de sonido con $NAME: tono, sonido de prueba, izquierda, derecha, parar, WAV y campanita =="
   cp "$IMG" $T/f.img
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
+  mcopy -o -i $T/f.img $B/HISPA.WAV ::HISPADOS/HISPA.WAV     # (como queda instalado)
   python3 tests/tools/audio.py make $T/OCHO.WAV 300 1500 8000 8 1
   mcopy -o -i $T/f.img $T/OCHO.WAV ::OCHO.WAV
   # un WAV que no es PCM (formato 3: coma flotante)

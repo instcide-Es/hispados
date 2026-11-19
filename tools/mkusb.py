@@ -329,11 +329,13 @@ def mkfloppy():
 # [GLIFOS] los datos de la oficina (PROGSDAT) que van en el disquete
 # «Instalación 2» en vez de en el de «Oficina», que ya no tiene sitio
 INSTAL2_PROGS = ('TIPOS32.DAT',)
+# [0.9.28] lo de \\HISPADOS que va en «Instalación 2» y no en el de arranque
+INSTAL2_SIS = ('HISPA.WAV',)
 
 def mkinstal2():
     """[0.9.24] El disquete «Instalación 2»: lo que ya no cabe en el de
     arranque (los programas de Windows de consola de Hispa-486: HW32 y
-    MSVCRT.DLL), en \\HISPADOS, como queda en el disco duro, y lo de la
+    MSVCRT.DLL, y el sonido de prueba, HISPA.WAV), en \\HISPADOS, como queda en el disco duro, y lo de la
     oficina que ya no cabe en «Oficina» (INSTAL2_PROGS), en \\HISPADOS\\PROGS. INSTALAR lo pide
     antes que el de Oficina; también se puede copiar a mano con
     XCOPIAR A:\\HISPADOS C:\\HISPADOS."""
@@ -342,7 +344,10 @@ def mkinstal2():
         os.remove(out)
     run('mformat', '-C', '-f', '1440', '-v', 'INSTAL2', '-i', out, '::')
     run('mmd', '-i', out, '::HISPADOS', '::HISPADOS/PROGS')
-    for f in ('HW32.COM', 'MSVCRT.DLL'):
+    # [0.9.28] y el sonido de prueba del Reproductor (HISPA.WAV, 103 K): el
+    # disquete de arranque se quedaba sin sitio para los archivos de quien lo
+    # usa (el Reproductor, sin él, ofrece el tono de 440 Hz)
+    for f in ('HW32.COM', 'MSVCRT.DLL') + INSTAL2_SIS:
         run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
     # [GLIFOS] lo de la oficina que ya no cabe en el de «Oficina» (con Á, Ó,
     # €... los tipos crecieron): en su \HISPADOS\PROGS, que INSTALAR copia

@@ -2627,7 +2627,10 @@ suena. Diseño, textos y sonidos propios.
 - **Sonido de prueba**: toca `\HISPADOS\HISPA.WAV` (si no está ahí, lo busca
   al lado del módulo), una melodía de 4,6 s hecha por `tools/mksample.py`
   (un arpegio de do mayor, una frase y un acorde; 11.025 Hz, 16 bits,
-  mono, para que quepa holgado en el disquete; 101 KB). **Izquierda** y **Derecha**:
+  mono; 101 KB). Desde la 0.9.28 no va en el disquete de arranque (que se
+  quedaba sin sitio) sino en el de «Instalación 2», que INSTALAR copia a
+  `\HISPADOS`; arrancando del disquete, el Reproductor avisa de que falta y
+  queda el tono de 440 Hz. **Izquierda** y **Derecha**:
   el mismo sonido por un solo altavoz (con una Sound Blaster de 8 bits, que
   es mono, lo dice y suena por los dos). La primera vez se lee del disco
   («Cargando... 40 %», sin parar la ventana) y se queda en memoria.

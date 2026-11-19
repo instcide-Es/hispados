@@ -839,7 +839,9 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/AYUDA.HLP sistema/MANDO
 	mcopy -i $@ $(B)/RED.INI ::HISPADOS/RED.INI
 	mcopy -i $@ $(B)/VENTANAS.COM ::HISPADOS/VENTANAS.COM
 	for f in $(HVPSIS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# [Configuración]
-	for f in $(SONS); do mcopy -i $@ $$f ::HISPADOS/ || exit 1; done	# el sonido de prueba y la campanita
+	# la campanita del volumen; el sonido de prueba (HISPA.WAV, 103 K) va en el
+	# disquete «Instalación 2» (tools/mkusb.py): sitio libre en este
+	mcopy -i $@ $(B)/CAMPANA.WAV ::HISPADOS/CAMPANA.WAV
 	# los juegos de Hispa Ventanas, en \HISPADOS\JUEGOS, y los cartuchos de
 	# sus emuladores, cada uno en su carpeta: JUEGOS\NES y JUEGOS\SMS
 	mmd   -i $@ ::HISPADOS/JUEGOS ::HISPADOS/JUEGOS/NES ::HISPADOS/JUEGOS/SMS

@@ -612,6 +612,7 @@ run_tal:
 ; A: o B: y el origen no lo trae, se ofrece ese disquete y se copia. [GLIFOS]
 ; También su \HISPADOS\PROGS: lo de la oficina que ya no cabe en «Oficina»
 ; (TIPOS32.DAT, los tipos de letra grandes).
+; [0.9.28] Y el sonido de prueba del Reproductor (HISPA.WAV), en su \HISPADOS.
 instal2:
         mov al, [src]
         and al, 0xDF
@@ -2284,8 +2285,8 @@ sd_i2       db "Inserte el disco rotulado", 10, 10
             db "        Hispa-DOS - Instalación 2", 10, 10
             db "en la unidad "
 sd_letra1   db "A: y pulse INTRO.", 10, 10
-            db "Trae los programas de Windows de consola (HW32) y los tipos de letra", 10
-            db "grandes de la oficina. Sin él, se pueden copiar después.", 0
+            db "Trae los programas de Windows de consola (HW32), el sonido de prueba y", 10
+            db "los tipos de letra grandes de la oficina. Sin él, se pueden copiar después.", 0
 sd_of       db "Inserte el disco rotulado", 10, 10
             db "        Hispa-DOS - Oficina", 10, 10
             db "en la unidad "
