@@ -282,7 +282,7 @@ if hb_variante rapida "-DPRUEBA_PILA -DREGISTRO_PASOS"; then
   # se puede (la serie no las lleva): se cuenta que HBLOG, tecleado 6 s después, sale
   # DESPUÉS de la lista entera (con la 0.2 la lista tardaba 11 s y HBLOG no llegaba a verse)
   awk '/HBLOG: registro de la BIOS/ { h = NR } /bytes libres/ { b = NR } END { exit !(h && b && b < h) }' $S && ok "DIR C:\\HISPADOS (75 líneas) acaba en menos de 6 s (con la 0.2, 11 s)" || ko "DIR C:\\HISPADOS tarda más de 6 s"
-  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.5' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
+  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.6' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
   grep -aq 'tics dados sin IRQ: [0-9]* (ahora la IRQ 0 llega)' $S && ok "HBLOG: la IRQ 0 llega" || ko "HBLOG: la IRQ 0 no llega"
   grep -aq 'Pantalla: dibujada [0-9]* veces; el ultimo dibujo, [0-9]* us' $S && ok "HBLOG: las cuentas de la pantalla" || ko "HBLOG sin las cuentas de la pantalla"
   mtype -i $T/rapida.img@@1048576 ::HBLOG.TXT 2>/dev/null | grep -q 'lo apuntado por HispaBIOS' && ok "HBLOG guarda \\HBLOG.TXT" || ko "HBLOG no guarda \\HBLOG.TXT"

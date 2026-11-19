@@ -43,7 +43,7 @@ if hb_variante acer "-DREGISTRO_PASOS" 32; then
   hb_reloj 'Tabla APIC de ACPI: banderas .*IOAPIC en FEC00000 .*la IRQ 0 va a la entrada 2; el IOAPIC tiene la entrada 0 = ' "HISPABIOS.LOG: el IOAPIC y a dónde va la IRQ 0" "HISPABIOS.LOG sin el IOAPIC"
   hb_reloj 'Reloj de DOS: LLEGA. Queda: la IRQ 0 del 8254 (PIT), con el 8259 por LINT0' "la BIOS prueba el reloj y lo apunta en HISPABIOS.LOG (PET_REGISTRO)" "sin la prueba del reloj en el registro"
   awk '/HBLOG: registro de la BIOS/ { h = NR } /bytes libres/ { b = NR } END { exit !(h && b && b < h) }' $S && ok "DIR C:\\HISPADOS (75 líneas) acaba en menos de 6 s (el teclado, sin viajes continuos al firmware)" || ko "DIR C:\\HISPADOS tarda más de 6 s"
-  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.5' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
+  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.6' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
   grep -aq 'tics dados sin IRQ: [0-9]* (ahora la IRQ 0 llega)' $S && ok "HBLOG: la IRQ 0 llega" || ko "HBLOG: la IRQ 0 no llega"
   grep -aq 'Pantalla: dibujada [0-9]* veces; el ultimo dibujo, [0-9]* us' $S && ok "HBLOG: las cuentas de la pantalla" || ko "HBLOG sin las cuentas de la pantalla"
   grep -aq 'ACPI: RSDP en 000[0-9A-F]*h' $S && ok "EQUIPO encuentra la RSDP de ACPI (en la EBDA de HispaBIOS)" || ko "EQUIPO no encuentra ACPI"

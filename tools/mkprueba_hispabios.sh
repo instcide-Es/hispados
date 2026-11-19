@@ -72,13 +72,8 @@ if [ "${2:-}" = medion ]; then
   nasm -f bin -o $T/TECLAPRU.COM tests/progs/teclapru.asm
   mcopy -o -i "$P" $T/TECLAPRU.COM ::TECLAPRU.COM
   mcopy -o -i "$P" ::AUTOEXEC.BAT $T/AUTOEXEC.BAT
-  python3 -c "
-import sys
-t = open(sys.argv[1], 'rb').read()
-a = b'PATH C:\\HISPADOS\r\n'
-assert t.count(a) == 1, 'AUTOEXEC.BAT sin la linea de PATH'
-t = t.replace(a, a + b'C:\\TECLAPRU\r\nC:\\HISPADOS\\HBLOG > NUL\r\n')
-open(sys.argv[1], 'wb').write(t)" $T/AUTOEXEC.BAT
+  grep -q '^PATH C:\\HISPADOS' $T/AUTOEXEC.BAT || { echo "AUTOEXEC.BAT sin la linea de PATH"; exit 1; }
+  sed -i 's/^PATH C:\\HISPADOS\r$/&\nC:\\TECLAPRU\r\nC:\\HISPADOS\\HBLOG > NUL\r/' $T/AUTOEXEC.BAT
   mcopy -o -i "$P" $T/AUTOEXEC.BAT ::AUTOEXEC.BAT
 fi
 [ ! -e "$D/$Z" ] || mv -f "$D/$Z" "$D/$Z.ant"
