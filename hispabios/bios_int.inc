@@ -13,6 +13,7 @@ PET_ESCRIBIR    equ 4
 PET_TECLA       equ 5
 PET_MICROSEG    equ 6
 PET_REINICIAR   equ 7
+PET_VACIAR      equ 10              ; FlushBlocks de todos los discos
 TROZO           equ 16              ; sectores por viaje al firmware (8 KB)
 SEG_PASO        equ SEG_BIOS + (0C000h >> 4)
 
@@ -858,6 +859,30 @@ int15:
         mov ax, 6864h
         jmp d_bien
 .no_hd:
+        ; [APAGAR-USB] 'HF': lo que el firmware tenga pendiente de escribir,
+        ; a los discos (FlushBlocks de cada Block I/O) -> AX = 'hf', CF = 0.
+        ; 'HA': apagar el equipo como lo hace un sistema UEFI (antes, 'HF'):
+        ; ResetSystem(EfiResetShutdown). Si vuelve, no se ha apagado: CF = 1.
+        ; Lo usa APAGAR (utils/apagar.asm), después de vaciar los búferes.
+        cmp ax, 4846h
+        jne .no_hf
+        mov ax, PET_VACIAR
+        call llamar_fw
+        mov ax, 6866h
+        jmp d_bien
+.no_hf:
+        cmp ax, 4841h
+        jne .no_ha
+        mov ax, PET_VACIAR
+        call llamar_fw
+        push ebx
+        mov ebx, 2                      ; EfiResetShutdown
+        mov ax, PET_REINICIAR
+        call llamar_fw
+        pop ebx
+        mov ah, 86h
+        jmp d_error
+.no_ha:
         cmp ah, 88h
         je s_ext
         cmp ax, 0E801h

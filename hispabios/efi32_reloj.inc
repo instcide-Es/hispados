@@ -713,7 +713,22 @@ despachador:
         je .modo
         cmp ecx, 9                      ; lo apuntado por la BIOS, a HISPABIOS.LOG
         je .registro
+        cmp ecx, 10                     ; [APAGAR-USB] FlushBlocks de todos los discos
+        je .vaciar
         mov eax, -1                     ; (0: un viaje sin más)
+        jmp .fin
+.vaciar:
+        sti
+        xor ebx, ebx
+.vac_l: cmp bl, [V(ndiscos)]
+        jae .vac_f
+        lea esi, [V(discos)]
+        mov edi, [esi + ebx * 8]        ; Block I/O
+        FW [edi + BIO_FLUSH], edi       ; FlushBlocks(This)
+        inc ebx
+        jmp .vac_l
+.vac_f: cli
+        xor eax, eax
         jmp .fin
 .registro:
         ; EDX = desde dónde (desplazamiento en el registro de la BIOS); bit 16:

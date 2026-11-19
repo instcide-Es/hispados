@@ -399,6 +399,17 @@ por el teclado, si llega la IRQ 0 y **cada llamada de VBE con lo que se
 contestó** (también un modo de la VGA que no hay). `HBLOG` (en `\HISPADOS`) lo
 enseña y lo guarda en `\HBLOG.TXT`; lo pide por INT 15h AX = 4844h.
 
+### Apagar: INT 15h AX = 4846h y 4841h
+
+- **4846h** («HF»): lo que el firmware tenga pendiente de escribir, a los
+  discos (`FlushBlocks` de cada Block I/O) → AX = 6866h («hf»), CF = 0.
+- **4841h** («HA»): apagar como un sistema UEFI: antes 4846h y luego
+  `ResetSystem(EfiResetShutdown)`. Si vuelve, no ha apagado: CF = 1.
+
+Los usa `APAGAR` (y 4846h también `REINICIAR`) después de vaciar los
+búferes de DOS: con HispaBIOS se apaga con el firmware y no se toca
+`SMI_CMD` ni `PM1a_CNT` (si el firmware no apaga, sigue con ACPI).
+
 ### El registro: `HISPABIOS.LOG`
 
 Si algo falla, HispaBIOS deja en la raíz de la memoria USB el archivo

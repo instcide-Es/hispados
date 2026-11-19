@@ -90,6 +90,7 @@ LI_DEVICE       equ 12          ; EFI_LOADED_IMAGE.DeviceHandle
 BIO_MEDIA       equ 8           ; EFI_BLOCK_IO.Media
 BIO_READ        equ 16
 BIO_WRITE       equ 20
+BIO_FLUSH       equ 24
 P8259_GETVEC    equ 16
 PCIIO_LEER      equ 24          ; EFI_PCI_IO_PROTOCOL.Pci.Read
 GOP_QUERY       equ 0
