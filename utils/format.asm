@@ -11,6 +11,8 @@
 ;     /FAT32     disco duro: FAT32 aunque la partición sea de FAT16
 ;     /Q /U      aceptadas por compatibilidad (el formato siempre es rápido)
 ;     /AUTOTEST  no pedir confirmación (para guiones y pruebas)
+;     /FORZAR    dejar dar formato a la memoria USB de la que se ha arrancado
+;                (sin ella FORMAT se niega: es fácil borrarla por error)
 ;
 ;  Disquetes: FAT12 con la geometría estándar. Discos duros: FAT16 o, como
 ;  MS-DOS 7.1 (Windows 95 OSR2/98), FAT32 si la partición es de FAT32 (tipo
@@ -41,6 +43,7 @@ start:
         call puts
         call parse_args
         jc usage
+        call proteger               ; [LETRAS] ni la memoria de arranque ni la C: sin partir
         ; parámetros de la unidad (la categoría 48h, la de FAT32, da el BPB
         ; ampliado; si no existe, la de siempre)
         mov ax, 0x440D
@@ -174,6 +177,52 @@ usage:
         call puts
         mov ax, 0x4C01
         int 0x21
+; [LETRAS] (docs/UNIDADES.md) La memoria USB de la que se ha arrancado no se
+; formatea (solo con /FORZAR): ni su unidad ni otra partición del mismo
+; disco. Y la C: reservada para el disco duro, que aún no tiene partición,
+; tampoco: antes hay que crearla con PARTIR. Lo dice el núcleo (INT 21h
+; AX=3368h y 3369h, propias de Hispa-DOS).
+proteger:
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        jne .r
+        test cl, 4
+        jz .nres
+        cmp byte [drv], 2
+        jne .nres
+        mov si, msg_reserva
+        jmp .fuera
+.nres:
+        test cl, 1
+        jz .r
+        cmp byte [opt_forzar], 0
+        jne .r
+        mov [prot_disk], dh
+        dec dl
+        cmp dl, [drv]
+        je .no
+        mov dl, [drv]
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        cmp al, 2
+        jne .r
+        cmp cl, [prot_disk]
+        jne .r
+.no:
+        mov al, [drv]
+        add al, 'A'
+        mov [msg_esarr], al
+        mov si, msg_esarr
+.fuera:
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.r:
+        ret
 bad_drive:
         mov si, msg_baddrv
         call puts
@@ -230,6 +279,14 @@ parse_args:
         je .f
         jmp .bad
 .f:
+        ; /FORZAR
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'ORZA'
+        jne .f32
+        mov byte [opt_forzar], 1
+        jmp .skip
+.f32:
         ; /FAT32
         mov eax, [si]
         and eax, 0xFFFFDFDF
@@ -1385,9 +1442,13 @@ fs32        db "FAT32   "
 label       db "           "
 
 msg_title   db 13, 10, "Hispa-DOS FORMAT 0.9", 13, 10, 0
-msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/FAT32] [/Q] [/U] [/AUTOTEST]", 13, 10
+msg_usage   db "Uso: FORMAT unidad: [/S] [/V:etiqueta] [/F:tamaño] [/FAT32] [/Q] [/U] [/AUTOTEST] [/FORZAR]", 13, 10
             db "  /F:tamaño  capacidad del disquete: 360, 720, 1200, 1440 o 2880 (KB)", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
+msg_esarr   db "X: es la memoria USB desde la que ha arrancado Hispa-DOS: no se puede", 13, 10
+            db "partir ni formatear. (Quien sepa lo que hace: /FORZAR.)", 13, 10, 0
+msg_reserva db "C: es el disco duro del ordenador, que todavía no tiene ninguna partición", 13, 10
+            db "de DOS. Créela antes con PARTIR (o use INSTALAR, que lo hace todo).", 13, 10, 0
 msg_ioerr   db "Error de escritura en el disco: formato interrumpido", 13, 10, 0
 msg_badfl   db "Tamaño de disquete no admitido", 13, 10, 0
 msg_toobig  db "Partición demasiado grande para FAT16 (máximo 2 GB)", 13, 10, 0
@@ -1422,6 +1483,8 @@ opt_s       resb 1
 opt_v       resb 1
 opt_auto    resb 1
 opt_f32     resb 1
+opt_forzar  resb 1
+prot_disk   resb 1
 fat32       resb 1
 no7305      resb 1
 nfats       resb 1

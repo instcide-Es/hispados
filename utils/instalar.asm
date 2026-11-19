@@ -136,6 +136,11 @@ start:
         add si, 8
         jmp .op
 .noori:
+        cmp eax, 'FORZ'             ; [LETRAS] /FORZAR: también en la memoria
+        jne .nfz                    ; USB de la que se ha arrancado
+        mov byte [forzar], 1
+        jmp .op
+.nfz:
         cmp eax, 'NOSO'
         jne .op
         mov eax, [si+4]
@@ -154,6 +159,28 @@ start:
         mov [src], dl
         call elige_origen
         call pon_origen
+        ; [LETRAS] (docs/UNIDADES.md) lo que dice el núcleo del arranque
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        je .hd
+        xor cx, cx
+        xor dx, dx
+.hd:
+        mov [k_flags], cl
+        mov [k_disk], dh
+        ; INSTALAR C: con la C: reservada (el disco duro aún no tiene
+        ; partición): como INSTALAR a secas, que la crea
+        test cl, 4
+        jz .nres
+        cmp byte [guided], 0
+        jne .nres
+        cmp byte [dst], 'C'
+        jne .nres
+        mov byte [guided], 1
+.nres:
         cmp byte [setup], 0
         jne setup_main
         cmp byte [guided], 0
@@ -165,9 +192,30 @@ start:
         je .same
         mov dl, [arranque]
         cmp dl, [dst]
-        jne .ok
+        jne .ok0
 .same:
         mov si, msg_same
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.ok0:
+        ; otra partición de la memoria USB de arranque: tampoco (/FORZAR)
+        test byte [k_flags], 1
+        jz .ok
+        cmp byte [forzar], 0
+        jne .ok
+        mov dl, [dst]
+        sub dl, 'A'
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        cmp al, 2
+        jne .ok
+        cmp cl, [k_disk]
+        jne .ok
+        mov al, [dst]
+        mov [msg_esarr], al
+        mov si, msg_esarr
         call puts
         mov ax, 0x4C01
         int 0x21
@@ -1955,6 +2003,11 @@ puts:
         ret
 
 nosnd       db 0
+forzar      db 0
+k_flags     db 0
+k_disk      db 0
+msg_esarr   db "X: está en la memoria USB desde la que ha arrancado Hispa-DOS: ahí no se", 13, 10
+            db "instala (ni se parte ni se formatea). (Quien sepa lo que hace: /FORZAR.)", 13, 10, 0
 aud_path    db "C:\HISPADOS\AUDICION.COM", 0
 aud_tail    db aud_te - aud_tail - 1, " /RAPIDA "
 aud_d1      db "C:\HISPADOS /INI:"

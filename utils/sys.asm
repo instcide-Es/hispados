@@ -10,6 +10,8 @@
 ;  SYS origen: unidad:   como en MS-DOS: con dos parámetros el primero es el
 ;                  origen (unidad y, si se quiere, carpeta) y el segundo el
 ;                  destino.
+;  SYS ... /FORZAR  dejar escribir en la memoria USB de la que se ha arrancado
+;                  (sin ella SYS se niega; docs/UNIDADES.md)
 ; =============================================================================
         cpu 386
         bits 16
@@ -26,6 +28,27 @@ start:
         mov [srcp], dl
         mov word [srcp+1], ':\'
         mov byte [srcp+3], 0
+        ; [LETRAS] /FORZAR, en cualquier sitio: se apunta y se borra
+        mov si, 0x81
+.fz:
+        lodsb
+        cmp al, 13
+        je .fze
+        cmp al, '/'
+        jne .fz
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'FORZ'
+        jne .fz
+        mov byte [forzar], 1
+        dec si
+.fzb:
+        mov byte [si], ' '
+        inc si
+        cmp byte [si], ' '
+        ja .fzb
+        jmp .fz
+.fze:
         ; parámetros: «destino» u «origen destino» (como SYS de MS-DOS)
         mov si, 0x81
 .sk:
@@ -108,6 +131,38 @@ start:
         mov ax, 0x4C01
         int 0x21
 .diff:
+        ; [LETRAS] la memoria USB de la que se ha arrancado no se toca (solo
+        ; con /FORZAR): ni su unidad ni otra partición del mismo disco
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        jne .libre
+        test cl, 1
+        jz .libre
+        cmp byte [forzar], 0
+        jne .libre
+        mov [prot_disk], dh
+        dec dl
+        cmp dl, [drv]
+        je .esarr
+        mov dl, [drv]
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        cmp al, 2
+        jne .libre
+        cmp cl, [prot_disk]
+        jne .libre
+.esarr:
+        mov al, [dst_k]
+        mov [msg_esarr], al
+        mov si, msg_esarr
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.libre:
         ; sector de arranque de la unidad (paquete de 32 bits)
         mov dword [pk_sec], 0
         mov word [pk_cnt], 1
@@ -186,9 +241,17 @@ start:
         mov byte [boot+bx], 0x80
 .copy:
         ; código de arranque nuevo sin tocar el BPB (0Bh-3Dh; FAT32: 0Bh-59h)
+        mov eax, [boot+3]           ; [LETRAS] (la marca de memoria USB,
+        mov edx, [boot+7]           ; «HISPAUSB», se conserva)
         mov di, boot
         mov cx, 0x0B
         rep movsb
+        cmp eax, 'HISP'
+        jne .oem
+        cmp edx, 'AUSB'
+        jne .oem
+        mov [boot+7], edx
+.oem:
         mov ax, 0x3E - 0x0B
         cmp byte [is32], 0
         je .cb
@@ -388,8 +451,12 @@ src_c       times 80 db 0
 dst_k       db "A:\KERNEL.SYS", 0
 dst_c       db "A:\COMMAND.COM", 0
 msg_title   db "Hispa-DOS SYS 0.9", 13, 10, 0
-msg_usage   db "Uso: SYS [origen:[ruta]] unidad:", 13, 10, 0
+msg_usage   db "Uso: SYS [origen:[ruta]] unidad: [/FORZAR]", 13, 10, 0
 msg_same    db "No se puede transferir el sistema a la unidad de arranque.", 13, 10, 0
+msg_esarr   db "X: es la memoria USB desde la que ha arrancado Hispa-DOS: no se puede", 13, 10
+            db "partir ni formatear, ni cambiarle el sistema. (Quien sepa lo que hace: /FORZAR.)", 13, 10, 0
+forzar      db 0
+prot_disk   db 0
 msg_ioerr   db "Error al leer o escribir el disco.", 13, 10, 0
 msg_nofat   db "La unidad no tiene un sistema de ficheros FAT.", 13, 10, 0
 msg_cperr   db "No se han podido copiar los ficheros del sistema.", 13, 10, 0
