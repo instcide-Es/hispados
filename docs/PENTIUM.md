@@ -1330,8 +1330,10 @@ arranque de la partición) que lea el núcleo de la FAT32 y pida el modo a la VB
   revés que con `escritura=usb`: **solo en los discos de dentro**; en las
   memorias USB no se escribe ni un sector (los dos cerrojos de la sección 7).
   Y solo entonces vale la llamada 65 (escribir sectores), en un disco de dentro
-  que no lleve la unidad del sistema: **nunca en una memoria USB**. Sin
-  `instalar`, INSTALAR no encuentra ningún disco donde escribir.
+  que no lleve la unidad del sistema ni sea él mismo un medio de arranque (con
+  el sistema en su raíz: la imagen de la memoria USB grabada en un disco de
+  dentro): **nunca en una memoria USB**. Sin `instalar`, INSTALAR no encuentra
+  ningún disco donde escribir.
 - **Las llamadas nuevas** (60 a 68, sección 6): texto con color en la pantalla
   de texto y su cursor, un texto solo al puerto serie, lo que se sabe de un
   disco, leer y escribir sectores, reiniciar, poner en hora el reloj del PC y

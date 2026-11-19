@@ -385,6 +385,7 @@ módulo Instala
         cursor := ALINEA
         para i desde 0 hasta n_partes hacer
             si i < n_partes entonces fin_ := partes[i].inicio sino fin_ := total fin
+            si fin_ > total entonces fin_ := total fin                      ; (una tabla que se sale del disco)
             si es_gpt y i = n_partes entonces fin_ := total - ALINEA fin    ; (al final va la copia de la tabla)
             fin_ := fin_ - fin_ mod ALINEA
             si fin_ > cursor y fin_ - cursor > hueco_sectores entonces
