@@ -281,6 +281,11 @@ compilador según el modelo.
 - No hace falta formato ELF: el binario plano vale tal cual (la cabecera
   multiboot dice dónde empieza y acaba). Es lo más barato y es lo que arranca en
   QEMU con una orden.
+- Detrás de la cabecera van **cuatro palabras a cero**: el sitio donde multiboot
+  deja que el núcleo le pida al cargador un **modo gráfico** (la clase de modo, el
+  ancho, el alto y los bits por punto). A cero y sin su bandera, no se pide nada
+  (modo texto, como siempre). `nucleo32/modo_grafico.py` hace una copia del
+  núcleo que sí lo pide, para GRUB en los PC de verdad (PENTIUM.md §11).
 
 ### `modelo usuario` → un programa del anillo 3 (`org 0x40000000`)
 
@@ -350,7 +355,12 @@ falta enlazar con otras cosas; de momento no hace falta.
 - **Funciones de interrupción públicas** (`público interrupción función`): hoy cada
   módulo pone en la IDT las suyas.
 - **ELF32** de salida, si algún día hay que enlazar con código de fuera.
-- **El núcleo de Hispa-Pentium**: ha crecido desde la semilla (PENTIUM.md) y ya
+- **Tablas de datos grandes**: un bloque `ensamblador` no puede pasar de 6000
+  octetos en CASTEL (la letra del entorno gráfico de Hispa-Pentium va en cuatro
+  bloques seguidos), y un arreglo con valor inicial, de unos 4000.
+- **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
+  escritorio, PENTIUM.md §10), escrito también en Castel sin tocar el lenguaje.
+  Ha crecido desde la semilla (PENTIUM.md) y ya
   lee y escribe discos FAT, carga los programas del disco y tiene su intérprete de
   órdenes en el anillo 3 (con archivos .BAT, Ctrl+C y el teclado español), todo
   sin tocar el lenguaje; de los compiladores, solo el arranque de `modelo usuario`
