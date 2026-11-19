@@ -515,13 +515,18 @@ módulo Instala
             fin
             f := f + 1
         fin
-        ; las memorias USB, para que se vea que están y que no se tocan
+        ; las memorias USB (y un disco de dentro que sea el de arranque),
+        ; para que se vea que están y que no se tocan
         para d desde 0 hasta MAX_DISCOS - 1 hacer
-            si hay[d] y info[d].clase = MEDIO_USB y f < 22 entonces
+            si hay[d] y (info[d].clase = MEDIO_USB o info[d].se_puede = 0) y f < 22 entonces
                 tamaño_de(info[d].sectores, t)
                 dd[0] := nat32(dirección(info[d].modelo[0]))
                 dd[1] := nat32(dirección(t[0]))
-                ponf(4, f, AZUL, "Memoria USB  %-28s %10s  (no se toca)")
+                si info[d].clase = MEDIO_USB entonces
+                    ponf(4, f, AZUL, "Memoria USB  %-28s %10s  (no se toca)")
+                sino
+                    ponf(4, f, AZUL, "Otro disco   %-28s %10s  (no se toca)")
+                fin
                 f := f + 1
             fin
         fin

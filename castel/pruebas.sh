@@ -1644,7 +1644,7 @@ else ko "\\HISPA\\GRUB.CFG no es el que tiene que ser:"; sed 's/^/        /' $Z/
 
 # (y otra vez encima: el disco ya tiene su FAT32, que el núcleo ha montado
 # como C:; al escribir en él por debajo deja de estarlo)
-instala $Z/blanco.img otravez ":tecla ret" ":tecla ret" ":texto r1" ":tecla ret" ":tecla s" ":escribe BORRAR" ":tecla ret" ":tecla ret" ":pausa 5" ":texto r2" ":tecla ret"
+instala $Z/blanco.img otravez ":tecla ret" ":texto r1" ":tecla ret" ":tecla ret" ":tecla s" ":escribe BORRAR" ":tecla ret" ":tecla ret" ":pausa 5" ":texto r2" ":tecla ret"
 if grep -q "^disco 0: QEMU HARDDISK, 300 MB, FAT32 (SATA)\.$" $S && grep -q "partición 1: FAT32  *299 MB" $Z/r1.txt && grep -q "^instalar: terminado$" $S \
   && grep -q "Hispa-Pentium está instalado" $Z/r2.txt && volumen $Z/blanco.img 2048 && instalado $Z/blanco.img; then
   ok "instalar otra vez encima (el disco ya llevaba Hispa-Pentium, montado como C:): borrándolo con sus dos confirmaciones, queda instalado y sano"
@@ -1753,7 +1753,12 @@ espera_a() {   # espera (hasta $2 segundos) a que salga esa línea por el puerto
 }
 espera_menu() {    # espera (hasta 15 s) a que el menú de GRUB esté en la pantalla, con ese texto; queda en $Z/$2.txt
   local i
-  for ((i = 0; i < 40; i++)); do textoz $2; grep -q -- "$1" $Z/$2.txt && return 0; sleep 0.1; done
+  for ((i = 0; i < 40; i++)); do
+    textoz $2
+    # (ya está: un momento más, que acabe de pintarse, y otra vez)
+    if grep -q -- "$1" $Z/$2.txt; then sleep 0.6; textoz $2; return 0; fi
+    sleep 0.1
+  done
   return 1
 }
 desde_disco() {    # arranca solo del disco $1 (SATA); lo que sale, a $2

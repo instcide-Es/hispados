@@ -739,12 +739,22 @@ módulo Usuario
 
     ; ¿puede el programa INSTALAR escribir sector a sector en el disco d?
     ; Solo con «instalar» en la línea del cargador, en un disco de dentro
-    ; (nunca una memoria USB) que no lleve la unidad del sistema.
+    ; (nunca una memoria USB) que no lleve la unidad del sistema ni sea un
+    ; medio de arranque (uno con el sistema en su raíz, como la memoria USB:
+    ; por si se ha grabado su imagen en un disco de dentro).
     función se_puede_instalar(d: nat32): bool
+        variable u, m: nat32
         si no instalando o d >= MAX_DISCOS entonces devolver falso fin
         si no discos[d].hay o discos[d].clase = DE_USB o no se_puede_escribir(d) entonces devolver falso fin
-        si del_sistema < MAX_UNIDADES entonces
-            si unidades[del_sistema].clase = U_FAT y unidades[del_sistema].disco = d entonces devolver falso fin
+        para u desde 0 hasta MAX_UNIDADES - 2 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                si u = del_sistema entonces devolver falso fin
+                m := abrir_archivo(u, "\\ORDENES.BIN", PARA_LEER)
+                si m < PRIMER_ERROR entonces
+                    cerrar_archivo(m)
+                    devolver falso
+                fin
+            fin
         fin
         devolver cierto
     fin
