@@ -38,6 +38,19 @@
 ;  los de un canal de una controladora IDE del PCI (clase 0101h, en modo
 ;  compatible o nativo); en modo AHCI no se tocan. Todas las esperas tienen
 ;  un tope de medio segundo con el reloj de la BIOS (40:6Ch).
+;  PARTIR /INSTALAR /SI   lo mismo sin preguntar (para el programa de
+;                         instalación, INSTALAR /SETUP, que ya lo ha
+;                         preguntado): crea la partición con todo lo libre,
+;                         FAT16 (FAT32 solo con /FAT32)
+;  PARTIR /SITUACION      (para INSTALAR /SETUP) cómo está el disco donde se
+;                         instalaría (el mismo que elige /INSTALAR), sin tocar
+;                         nada; nivel de error: la letra (67 = C:...) si ya
+;                         tiene una partición primaria DOS, 2 si no tiene
+;                         particiones, 3 si tiene otras y queda sitio libre,
+;                         4 si no queda sitio, 1 si no hay disco duro
+;  PARTIR /BORRARTODO     (para INSTALAR /SETUP, que lo ha preguntado antes)
+;                         borra la tabla de particiones de ese disco (se
+;                         pierde todo lo que tenga); nunca el de arranque
 ;  PARTIR /ARRANQUE:X:    (para INSTALAR) deja arrancable la partición de X:
 ;                         (activa y, si el disco no tiene, con el MBR propio)
 ;
@@ -137,6 +150,17 @@ start:
         je .o_disco
         cmp dword [di], 'INST'
         je .o_inst
+        cmp dword [di], 'SITU'
+        je .o_situ
+        cmp dword [di], 'BORR'
+        je .o_borr
+        cmp word [di], 'SI'
+        jne .nsi
+        cmp byte [di+2], 0
+        jne .nsi
+        mov byte [autosi], 1
+        jmp .arg
+.nsi:
         cmp dword [di], 'ARRA'
         je .o_arr
         cmp dword [di], 'SINM'
@@ -186,6 +210,12 @@ start:
         jmp .arg
 .o_inst:
         mov byte [mode], 9
+        jmp .arg
+.o_situ:
+        mov byte [mode], 12
+        jmp .arg
+.o_borr:
+        mov byte [mode], 13
         jmp .arg
 .o_pri:
         mov byte [mode], 2
@@ -266,7 +296,12 @@ start:
         cmp byte [mode], 10
         je c_arr                    ; busca él mismo el disco
         cmp byte [mode], 9
+        je .pick
+        cmp byte [mode], 12
+        je .pick
+        cmp byte [mode], 13
         jne .ld
+.pick:
         cmp byte [explicit], 0
         jne .ld
         call inst_pick_disk
@@ -291,7 +326,66 @@ exit_ok:
         int 0x21
 
 modetab dw menu, c_status, c_pri, c_act, c_del, c_mbr, c_empty, c_ext, c_log
-        dw c_inst, c_arr, c_dellog
+        dw c_inst, c_arr, c_dellog, c_situ, c_borr
+
+; /SITUACION: cómo está el disco de /INSTALAR (ver la cabecera); sin tocarlo
+c_situ:
+        call first_dos_prim
+        jnc .letra
+        mov si, mbrbuf+0x1BE
+        mov cx, 4
+.ce:
+        cmp byte [si+4], 0
+        jne .some
+        add si, 16
+        loop .ce
+        mov al, 2                   ; sin particiones
+        jmp .fin
+.some:
+        call max_free_mb
+        mov dl, 4                   ; sin sitio
+        cmp eax, 3
+        jb .fin2
+        mov dl, 3                   ; con sitio libre
+.fin2:
+        mov al, dl
+        jmp .fin
+.letra:
+.fin:
+        mov ah, 0x4C
+        int 0x21
+
+; /BORRARTODO: la tabla de particiones del disco de /INSTALAR, vacía (y el
+; código de arranque de Hispa-DOS en el MBR); nunca la del disco de arranque
+c_borr:
+        mov al, [disk]
+        cmp al, [bootdisk]
+        jne .ok
+        mov si, msg_noother
+        call puts
+        jmp exit_err
+.ok:
+        mov di, mbrbuf+0x1BE
+        mov cx, 64
+        xor al, al
+        rep stosb
+        mov byte [newmbr], 1
+        call write_mbr
+        jc exit_err
+        mov si, msg_borrado
+        call puts
+        jmp exit_ok
+
+; [SETUP] ¿S/N?, o «sí» sin preguntar con /SI -> CF=0 si es que sí
+pregunta_si:
+        cmp byte [autosi], 0
+        je ask_yes
+        push si
+        mov si, msg_si_auto
+        call puts
+        pop si
+        clc
+        ret
 
 c_mbr:
         call install_mbr
@@ -2181,6 +2275,8 @@ ask_big:
         jne .r
         cmp dword [total], BIG_MIN
         jbe .r
+        cmp byte [autosi], 0        ; [SETUP] sin preguntar: FAT16
+        jne .r
         mov si, msg_askbig
         call puts
         call ask_yes
@@ -2767,7 +2863,7 @@ c_inst:
         call puts
         mov si, msg_inst_all
         call puts
-        call ask_yes
+        call pregunta_si
         jc .cancel
         jmp .create
 .some:
@@ -2787,7 +2883,7 @@ c_inst:
         call putnum
         mov si, msg_inst_free2
         call puts
-        call ask_yes
+        call pregunta_si
         jc .cancel
 .create:
         call ask_big                ; (disco de más de 512 MB: ¿FAT32?)
@@ -3306,6 +3402,8 @@ msg_baddisk db "Número de disco duro no válido.", 13, 10, 0
 msg_badopt  db "Opción no válida. Use /STATUS /PRI[:MB] /EXT[:MB] /LOG[:MB] /ACT:n /DEL:n", 13, 10
             db "/DELLOG:n /MBR /EMPTY /DISCO:n /FAT32", 13, 10, 0
 msg_isempty db "El disco duro no tiene particiones.", 13, 10, 0
+msg_si_auto db "S", 13, 10, 0
+msg_borrado db "Tabla de particiones borrada.", 13, 10, 0
 msg_notempty db "El disco duro ya tiene particiones.", 13, 10, 0
 msg_ioerr   db "Error al leer o escribir el disco duro. No se ha terminado el cambio.", 13, 10, 0
 msg_menu1   db "                  Opciones de PARTIR (FDISK)", 13, 10, 13, 10, 0
@@ -3434,6 +3532,7 @@ pletter     resb 1
 lletter     resb 1
 cl_tmp      resb 1
 explicit    resb 1
+autosi      resb 1                  ; /SI: sin preguntar (INSTALAR /SETUP)
 autosw      resb 1
 bootdisk    resb 1
 bootusb     resb 1
