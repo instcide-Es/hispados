@@ -9,7 +9,10 @@
 ;  escribir (en un PC de verdad, el disco es el del dueño). permiso() lo da a
 ;  todos («escritura» en la línea del cargador) o solo a las memorias USB
 ;  («escritura=usb»); y además cada controlador se niega por su cuenta a
-;  mandar una orden de escribir si no se le ha dicho que puede.
+;  mandar una orden de escribir si no se le ha dicho que puede. Para
+;  instalar el sistema («instalar» en la línea del cargador) el permiso es
+;  al revés: solo en los discos de dentro, y en las memorias USB (la de
+;  arranque) no se escribe ni un sector.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Discos
@@ -28,6 +31,7 @@ módulo Discos
     público constante SIN_PERMISO = 0           ; no se escribe en ningún disco
     público constante PERMISO_USB = 1           ; solo en las memorias USB
     público constante PERMISO_TODOS = 2         ; en todos
+    público constante PERMISO_INTERNOS = 3      ; solo en los de dentro (para instalar: la memoria USB de arranque no se toca)
 
     público tipo Disco = estructura
         hay: bool
@@ -57,11 +61,11 @@ módulo Discos
 
     función reparte_permiso()
         variable d: nat32
-        Ata.escritura := el_permiso = PERMISO_TODOS
-        Ahci.escritura := el_permiso = PERMISO_TODOS
-        Usbalm.escritura := el_permiso <> SIN_PERMISO
+        Ata.escritura := el_permiso = PERMISO_TODOS o el_permiso = PERMISO_INTERNOS
+        Ahci.escritura := Ata.escritura
+        Usbalm.escritura := el_permiso = PERMISO_USB o el_permiso = PERMISO_TODOS
         para d desde 0 hasta MAX_DISCOS - 1 hacer
-            discos[d].escribible := discos[d].hay y (el_permiso = PERMISO_TODOS o (el_permiso = PERMISO_USB y discos[d].clase = DE_USB))
+            discos[d].escribible := discos[d].hay y (el_permiso = PERMISO_TODOS o (el_permiso = PERMISO_USB y discos[d].clase = DE_USB) o (el_permiso = PERMISO_INTERNOS y discos[d].clase <> DE_USB))
         fin
     fin
 

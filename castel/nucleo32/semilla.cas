@@ -595,7 +595,13 @@ módulo Semilla
         ; en los discos solo se escribe si el cargador lo dice: «escritura»
         ; (en todos) o «escritura=usb» (solo en las memorias USB). En un PC
         ; de verdad, el disco es el del dueño.
-        si buscar(línea_del_cargador(), "escritura=usb") <> nulo entonces
+        ; («instalar»: para instalar el sistema en el disco de dentro, al
+        ; revés: solo en los de dentro, y la memoria USB de arranque no se toca)
+        si buscar(línea_del_cargador(), "instalar") <> nulo entonces
+            permiso(PERMISO_INTERNOS)
+            instalando := cierto
+            sin_segundos := cierto
+        sino si buscar(línea_del_cargador(), "escritura=usb") <> nulo entonces
             permiso(PERMISO_USB)
         sino si buscar(línea_del_cargador(), "escritura") <> nulo entonces
             permiso(PERMISO_TODOS)
@@ -698,7 +704,11 @@ módulo Semilla
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
         ; (las teclas son de las ventanas; lo que diga el núcleo sale por el
         ; puerto serie)
-        si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
+        si buscar(línea_del_cargador(), "instalar") <> nulo entonces
+            ; el programa que instala el sistema en el disco duro (la
+            ; pantalla es suya: esta consola espera a que acabe)
+            lanza("INSTALAR.BIN", nulo)
+        sino si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
             arranca()
         sino si buscar(línea_del_cargador(), "ordenes") <> nulo entonces
             lanza("ORDENES.BIN", nulo)

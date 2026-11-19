@@ -12,8 +12,9 @@
 ;
 ;  «La unidad del sistema» es de la que se cargan los programas cuando no se
 ;  dice otra: la que diga el cargador («unidad=X» en su línea) si está y
-;  lleva el sistema (ORDENES.BIN); si no, la primera que lo lleve (C:... y
-;  luego X:...); si no, M:.
+;  lleva el sistema (ORDENES.BIN, en su raíz o en \HISPA); si no, la primera
+;  que lo lleve (C:... y luego X:...); si no, M:. Un sistema INSTALADO en el
+;  disco (por el programa INSTALAR) lo lleva en la carpeta \HISPA.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Unidades
@@ -203,9 +204,40 @@ módulo Unidades
         si u >= MAX_UNIDADES entonces devolver falso fin
         si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver falso fin
         m := abrir_archivo(u, "\\ORDENES.BIN", PARA_LEER)
+        si m >= PRIMER_ERROR entonces m := abrir_archivo(u, "\\HISPA\\ORDENES.BIN", PARA_LEER) fin
         si m >= PRIMER_ERROR entonces devolver falso fin
         cerrar_archivo(m)
         devolver cierto
+    fin
+
+    ; ¿está el sistema INSTALADO en la unidad del sistema? (lo está si es un
+    ; disco y lleva sus programas en la carpeta \HISPA, y no en la raíz, como
+    ; la memoria de arranque: lo deja así el programa INSTALAR)
+    público función instalado(): bool
+        variable m: nat32
+        si del_sistema >= MAX_UNIDADES entonces devolver falso fin
+        si no unidades[del_sistema].hay o unidades[del_sistema].clase <> U_FAT entonces devolver falso fin
+        m := abrir_archivo(del_sistema, "\\ORDENES.BIN", PARA_LEER)
+        si m < PRIMER_ERROR entonces
+            cerrar_archivo(m)
+            devolver falso
+        fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\ORDENES.BIN", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        cerrar_archivo(m)
+        devolver cierto
+    fin
+
+    ; las unidades del disco d dejan de serlo (se va a escribir en él por
+    ; debajo, sector a sector: el programa INSTALAR)
+    público función desmonta_disco(d: nat32)
+        variable u: nat32
+        para u desde 0 hasta MAX_UNIDADES - 2 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                desmontar(u)
+                unidades[u].hay := falso
+            fin
+        fin
     fin
 
     ; la memoria USB de arranque es X:: si hay varias memorias y la que lleva

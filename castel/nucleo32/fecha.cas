@@ -63,4 +63,57 @@ módulo Fecha
         hora := ((h mod 24) << 11) ob ((mi mod 60) << 5) ob ((s mod 60) div 2)
     fin
 
+    función a_bcd(v: nat32): nat32
+        devolver ((v div 10) << 4) ob (v mod 10)
+    fin
+
+    función pon_cmos(r: nat32, v: nat32)
+        sacar_puerto(0x70, r)
+        sacar_puerto(0x71, v)
+    fin
+
+    ; pone en hora el reloj de pila del PC: la fecha y la hora, como las
+    ; guarda la FAT. Se escribe como lo tenga puesto la CMOS (en BCD o en
+    ; binario, de 24 horas o de 12), con el reloj parado mientras tanto.
+    público función pon_reloj(fecha: nat32, hora: nat32)
+        variable s, mi, h, d, me, a, b, t: nat32
+        s := (hora yb 31) * 2
+        mi := (hora >> 5) yb 63
+        h := (hora >> 11) yb 31
+        d := fecha yb 31
+        me := (fecha >> 5) yb 15
+        a := ((fecha >> 9) + 80) mod 100
+        t := sin_interrupciones()
+        b := cmos(0x0B)
+        pon_cmos(0x0B, b ob 0x80)               ; el reloj, parado
+        si b yb 2 = 0 entonces                  ; de 12 horas: la tarde lleva el bit de arriba
+            si h >= 12 entonces
+                h := h - 12
+                si h = 0 entonces h := 12 fin
+                si b yb 4 = 0 entonces h := a_bcd(h) fin
+                h := h ob 0x80
+            sino
+                si h = 0 entonces h := 12 fin
+                si b yb 4 = 0 entonces h := a_bcd(h) fin
+            fin
+        sino si b yb 4 = 0 entonces
+            h := a_bcd(h)
+        fin
+        si b yb 4 = 0 entonces
+            s := a_bcd(s)
+            mi := a_bcd(mi)
+            d := a_bcd(d)
+            me := a_bcd(me)
+            a := a_bcd(a)
+        fin
+        pon_cmos(0, s)
+        pon_cmos(2, mi)
+        pon_cmos(4, h)
+        pon_cmos(7, d)
+        pon_cmos(8, me)
+        pon_cmos(9, a)
+        pon_cmos(0x0B, b yb 0x7F)               ; y otra vez en marcha
+        reponer(t)
+    fin
+
 fin Fecha.

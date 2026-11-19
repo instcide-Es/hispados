@@ -35,7 +35,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Textos32, Formato
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -140,6 +140,7 @@ módulo Escritorio
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
     variable texto_aviso: arreglo [128] de byte
+    variable saludo: arreglo [40] de byte       ; «Hola, » y el nombre del usuario (el menú Inicio)
     variable renglón: arreglo [96] de byte
     público variable lanzados: nat32            ; los programas que ha lanzado el escritorio
 
@@ -595,9 +596,18 @@ módulo Escritorio
         redondeado(valor(l), 1, 1, MENÚ_ANCHO - 2, MENÚ_CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
         rectángulo(valor(l), 8, 2, MENÚ_ANCHO - 16, 1, 0x9CCBFA)
         disquete(valor(l), 9, 7, 42)
-        texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
-        texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-        texto(valor(l), 58, 30, "el escritorio, versión 0.6", 0xD3E7FD)
+        ; (con el nombre del usuario, si se sabe: el saludo)
+        si Ajustes.usuario[0] <> 0 entonces
+            copiar_hasta(saludo, "Hola, ", 40)
+            concatenar(saludo, Ajustes.usuario)
+            texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
+            texto_negrita(valor(l), 58, 12, saludo, BLANCO)
+            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.7", 0xD3E7FD)
+        sino
+            texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
+            texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
+            texto(valor(l), 58, 30, "el escritorio, versión 0.7", 0xD3E7FD)
+        fin
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
         rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
@@ -757,7 +767,7 @@ módulo Escritorio
         fin
         degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 16, 14, 64)
-        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.6", TINTA)
+        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.7", TINTA)
         texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
         texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
         texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
@@ -776,7 +786,7 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.6", TINTA)
+        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.7", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)
@@ -1231,6 +1241,11 @@ módulo Escritorio
         d[4] := fondo
         imprimir("escritorio: en marcha, %u x %u con %u bits por punto (el modo %s), tapiz %u\n", d)
         soltar_consola()
+        ; un sistema instalado en el disco: sus ajustes (HISPA.INI); si aún
+        ; no los tiene, es su primer arranque: el asistente
+        si instalado() entonces
+            si no lee_ajustes() entonces lanza("\\HISPA\\ASISTE.BIN", nulo) fin
+        fin
         devolver 1
     fin
 

@@ -1697,6 +1697,29 @@ módulo Fat
         devolver volúmenes[v].montado
     fin
 
+    ; olvida el volumen v (su disco se ha escrito por debajo, sector a
+    ; sector: lo que se sabía de él ya no vale). Lo que quedara por escribir
+    ; de él NO se escribe; sus archivos abiertos dejan de valer.
+    público función desmontar(v: nat32)
+        variable i: nat32
+        si v >= VOLÚMENES entonces devolver fin
+        tomar(cerrojo)
+        si en_uso = v entonces
+            fat_sucio := falso
+            info_sucio := falso
+            buf_sector := NINGUNO
+            fat_buf_sector := NINGUNO
+            montado := falso
+            en_uso := NINGUNO
+        fin
+        volúmenes[v].montado := falso
+        volúmenes[v].info_sucio := falso
+        para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+            si abiertos[i].usado y abiertos[i].vol = v entonces abiertos[i].usado := falso fin
+        fin
+        soltar(cerrojo)
+    fin
+
     función iguales_once(a: puntero a byte, b: puntero a byte): bool
         variable i: nat32
         i := 0

@@ -53,6 +53,9 @@ módulo Llamadas
     público constante TECLA_SUPR = 0x153
     público constante TECLA_RE_PÁG = 0x149
     público constante TECLA_AV_PÁG = 0x151
+    público constante TECLA_F1 = 0x13B
+    público constante TECLA_F3 = 0x13D
+    público constante TECLA_F8 = 0x142
     público constante CTRL_C = 3
 
     público constante CORTADA = 254             ; el código de un programa acabado con Ctrl+C
@@ -82,11 +85,25 @@ módulo Llamadas
         relleno: arreglo [3] de byte
     fin
 
+    ; ---- lo que se sabe de un disco: info_disco(n, ...) ----
+    público tipo Info_disco = estructura
+        clase: nat32                            ; MEDIO_IDE, MEDIO_SATA o MEDIO_USB
+        sectores: nat32                         ; de 512 octetos
+        se_puede: nat32                         ; 1: el programa INSTALAR puede escribir en él
+        del_sistema: nat32                      ; 1: lleva la unidad del sistema
+        modelo: arreglo [44] de byte
+    fin
+    tipo Pedido_disco = estructura
+        lba, n: nat32
+        datos: puntero a byte
+    fin
+    variable pedido: Pedido_disco
+
     ; ---- los datos del sistema: dato(...) ----
     público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
     público constante DATO_MARCOS = 1           ; los que hay
     público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
-    público constante DATO_VERSIÓN = 3          ; 0x0006 es la 0.6
+    público constante DATO_VERSIÓN = 3          ; 0x0007 es la 0.7
     público constante DATO_TAREAS = 4
     público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
     público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
@@ -729,6 +746,87 @@ módulo Llamadas
     ; Ctrl+C para los programas de dentro
     público función cortar_terminal()
         llamada(37, 3, 0, 0)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Para instalar el sistema (INSTALAR.BIN) y para el asistente del primer
+    ;  arranque (ASISTE.BIN): la pantalla de texto, los discos sector a
+    ;  sector, reiniciar, el reloj del PC y los ajustes (desde la 0.7)
+    ; -------------------------------------------------------------------------
+    ; escribe n letras de t en la pantalla de texto, en esa columna (0 a 79)
+    ; y esa fila (0 a 24), con ese color (el de la VGA: el fondo arriba)
+    público función texto_en(columna: nat32, fila: nat32, color: nat32, t: puntero a byte, n: nat32)
+        llamada(60, columna ob (fila << 8) ob (color << 16), nat32(t), n)
+    fin
+
+    ; lo mismo, n veces la misma letra (para borrar y para las rayas)
+    público función letras_en(columna: nat32, fila: nat32, color: nat32, letra: nat32, n: nat32)
+        llamada(60, columna ob (fila << 8) ob (color << 16) ob 0x80000000, letra, n)
+    fin
+
+    ; el cursor de la pantalla de texto (una fila de 25 para arriba: no se ve)
+    público función cursor_en(columna: nat32, fila: nat32)
+        llamada(62, columna ob (fila << 8), 0, 0)
+    fin
+
+    ; un texto solo al puerto serie (para ver desde fuera lo que pasa)
+    público función al_serie(t: puntero a byte)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        llamada(61, nat32(t), n, 0)
+    fin
+
+    ; lo que se sabe del disco número n (desde 0). Falso si no hay tal disco.
+    público función info_disco(n: nat32, ref i: Info_disco): bool
+        devolver llamada(63, n, nat32(dirección(i)), 0) = 1
+    fin
+
+    ; trae n sectores (hasta 128) del disco d, desde su sector lba
+    público función leer_disco(d: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        pedido.lba := lba
+        pedido.n := n
+        pedido.datos := destino
+        devolver llamada(64, d, nat32(dirección(pedido)), 0) = 0
+    fin
+
+    ; los lleva al disco. Solo vale con «instalar» en la línea del cargador,
+    ; en un disco de dentro que no sea el del sistema (nunca una memoria USB)
+    público función escribir_disco(d: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
+        pedido.lba := lba
+        pedido.n := n
+        pedido.datos := origen
+        devolver llamada(65, d, nat32(dirección(pedido)), 0) = 0
+    fin
+
+    público función reiniciar()
+        llamada(66, 0, 0, 0)
+    fin
+
+    ; pone en hora el reloj del PC: la fecha y la hora como las guarda la FAT
+    público función poner_reloj(fecha: nat32, hora: nat32)
+        llamada(67, fecha, hora, 0)
+    fin
+
+    ; el núcleo lee otra vez los ajustes (\HISPA\HISPA.INI). Falso si no están.
+    público función releer_ajustes(): bool
+        devolver llamada(68, 0, 0, 0) = 1
+    fin
+
+    ; el nombre del usuario (vacío si no se sabe), a destino
+    público función nombre_usuario(destino: puntero a byte, cabe: nat32)
+        destino[0] := 0
+        llamada(68, 1, nat32(destino), cabe)
+    fin
+
+    público función nombre_equipo(destino: puntero a byte, cabe: nat32)
+        destino[0] := 0
+        llamada(68, 3, nat32(destino), cabe)
+    fin
+
+    ; ¿está el sistema instalado en el disco (y no arrancado de la memoria USB)?
+    público función sistema_instalado(): bool
+        devolver llamada(68, 2, 0, 0) = 1
     fin
 
 fin Llamadas.

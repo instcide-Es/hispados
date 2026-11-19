@@ -45,6 +45,27 @@
 ;   30  ¿se ha pulsado Ctrl+C desde la última vez que se preguntó? -> 1 o 0
 ;   31  el teclado: el español (EBX = 1) o el de EE. UU. (0); con otra cosa,
 ;       solo dice cuál hay                           -> 1 o 0
+;   (32 a 43: las ventanas, el portapapeles, los terminales y las unidades)
+;   Para instalar el sistema en el disco (el programa INSTALAR) y para el
+;   asistente del primer arranque (ASISTE.BIN), desde la 0.7:
+;   60  texto en la pantalla de texto: EDX letras de ECX en la columna (bits
+;       0-7 de EBX) y la fila (8-15), con el color de los bits 16-23; con el
+;       bit 31, EDX veces la letra ECX
+;   61  ECX octetos de EBX, solo al puerto serie (para ver lo que pasa)
+;   62  el cursor de la pantalla de texto, a la columna y la fila de EBX
+;       (como en la 60; una fila de 25 para arriba: no se ve)
+;   63  lo que se sabe del disco número EBX, a ECX (Info_disco) -> 1, o 0
+;   64  leer sectores del disco EBX como dice ECX (el primer sector,
+;       cuántos —hasta 128— y adónde)                -> 0
+;   65  escribirlos (solo con «instalar» en la línea del cargador, en un
+;       disco de dentro que no lleve la unidad del sistema: nunca en una
+;       memoria USB); sus unidades dejan de estar montadas -> 0
+;   66  reiniciar el equipo
+;   67  poner en hora el reloj del PC: la fecha (EBX) y la hora (ECX), como
+;       las guarda la FAT
+;   68  los ajustes (HISPA.INI): EBX = 0, leerlos otra vez; 1, el nombre
+;       del usuario a ECX (caben EDX); 2, ¿está el sistema instalado en el
+;       disco?; 3, el nombre del equipo a ECX
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -67,11 +88,11 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
-    público constante VERSIÓN = 0x0006          ; la 0.6
+    público constante VERSIÓN = 0x0007          ; la 0.7
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -116,6 +137,21 @@ módulo Usuario
         etiqueta: arreglo [12] de byte          ; el nombre del volumen
         relleno: arreglo [3] de byte
     fin
+
+    ; lo que se da de un disco (la llamada 63; es la misma de llamadas.cas)
+    público tipo Info_disco = estructura
+        clase: nat32                            ; 1: IDE; 2: SATA; 3: USB
+        sectores: nat32
+        se_puede: nat32                         ; 1: el programa INSTALAR puede escribir en él
+        del_sistema: nat32                      ; 1: lleva la unidad del sistema
+        modelo: arreglo [44] de byte
+    fin
+    tipo Pedido_disco = estructura              ; (las llamadas 64 y 65)
+        lba, n, datos: nat32
+    fin
+    ; con «instalar» en la línea del cargador: se deja escribir en los discos
+    ; de dentro sector a sector (lo dice semilla.cas)
+    público variable instalando: bool
 
     tipo Cabecera = estructura
         salto: nat32
@@ -695,6 +731,142 @@ módulo Usuario
             caso 43:
                 si no puede(b, tamaño(Info_unidad), cierto) entonces devolver NO_VALE fin
                 devolver info_unidad(a, puntero(b))
+            caso 60..68:
+                devolver atender_instalar(n, a, b, c)
+        fin
+        devolver NO_VALE
+    fin
+
+    ; ¿puede el programa INSTALAR escribir sector a sector en el disco d?
+    ; Solo con «instalar» en la línea del cargador, en un disco de dentro
+    ; (nunca una memoria USB) que no lleve la unidad del sistema.
+    función se_puede_instalar(d: nat32): bool
+        si no instalando o d >= MAX_DISCOS entonces devolver falso fin
+        si no discos[d].hay o discos[d].clase = DE_USB o no se_puede_escribir(d) entonces devolver falso fin
+        si del_sistema < MAX_UNIDADES entonces
+            si unidades[del_sistema].clase = U_FAT y unidades[del_sistema].disco = d entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; un octeto, solo al puerto serie
+    función al_serie(c: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < 100000 y meter_puerto(0x3FD) yb 0x20 = 0 hacer i := i + 1 fin
+        sacar_puerto(0x3F8, c)
+    fin
+
+    ; lo del programa INSTALAR y el asistente del primer arranque (60 a 68)
+    función atender_instalar(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable pd: puntero a Pedido_disco
+        variable i: puntero a Info_disco
+        variable p: puntero a byte
+        variable vga: puntero a nat16
+        variable pos, k, color: nat32
+        según n
+            caso 60:
+                si escritorio_en_marcha o actual.terminal <> 0 entonces devolver NO_VALE fin
+                pos := ((a >> 8) yb 0xFF) * 80 + (a yb 0xFF)
+                color := ((a >> 16) yb 0xFF) << 8
+                si pos >= 2000 o c > 2000 - pos entonces devolver NO_VALE fin
+                vga := puntero(0xB8000)
+                si a yb 0x80000000 = 0 y no puede(b, c, falso) entonces devolver NO_VALE fin
+                ; (con la pantalla tomada: lo que esté diciendo el núcleo acaba antes)
+                tomar_consola()
+                si a yb 0x80000000 <> 0 entonces
+                    para k desde 1 hasta c hacer vga[pos + k - 1] := color ob (b yb 0xFF) fin
+                sino
+                    p := puntero(b)
+                    para k desde 1 hasta c hacer vga[pos + k - 1] := color ob p[k - 1] fin
+                fin
+                soltar_consola()
+                devolver c
+            caso 61:
+                si b > 512 o no puede(a, b, falso) entonces devolver NO_VALE fin
+                p := puntero(a)
+                tomar_consola()
+                para k desde 1 hasta b hacer al_serie(p[k - 1]) fin
+                soltar_consola()
+                devolver b
+            caso 62:
+                si escritorio_en_marcha o actual.terminal <> 0 entonces devolver NO_VALE fin
+                pos := ((a >> 8) yb 0xFF) * 80 + (a yb 0xFF)
+                k := pos
+                si k > 1920 entonces k := 1920 fin
+                tomar_consola()
+                ensamblador
+                    mov eax, {k}
+                    mov [C_cursor], eax
+                    mov ebx, {pos}
+                    mov edx, 0x3D4
+                    mov al, 0x0F
+                    out dx, al
+                    inc edx
+                    mov al, bl
+                    out dx, al
+                    dec edx
+                    mov al, 0x0E
+                    out dx, al
+                    inc edx
+                    mov al, bh
+                    out dx, al
+                fin
+                soltar_consola()
+                devolver 0
+            caso 63:
+                si no puede(b, tamaño(Info_disco), cierto) entonces devolver NO_VALE fin
+                si a >= MAX_DISCOS entonces devolver 0 fin
+                si no discos[a].hay entonces devolver 0 fin
+                i := puntero(b)
+                llenar(puntero(b), tamaño(Info_disco), 0)
+                i.clase := discos[a].clase
+                i.sectores := discos[a].sectores
+                si se_puede_instalar(a) entonces i.se_puede := 1 fin
+                si del_sistema < MAX_UNIDADES entonces
+                    si unidades[del_sistema].clase = U_FAT y unidades[del_sistema].disco = a entonces i.del_sistema := 1 fin
+                fin
+                copiar_memoria(dirección(i.modelo[0]), dirección(discos[a].modelo[0]), 40)
+                devolver 1
+            caso 64, 65:
+                si no puede(b, tamaño(Pedido_disco), falso) entonces devolver NO_VALE fin
+                pd := puntero(b)
+                si pd.n = 0 o pd.n > 128 o no puede(pd.datos, pd.n * SECTOR, n = 64) entonces devolver NO_VALE fin
+                si n = 64 entonces
+                    si no leer_sectores(a, pd.lba, pd.n, puntero(pd.datos)) entonces devolver MAL fin
+                    devolver 0
+                fin
+                si no se_puede_instalar(a) entonces devolver PROTEGIDO fin
+                si unidades_de(a) <> 0 entonces desmonta_disco(a) fin
+                si no escribir_sectores(a, pd.lba, pd.n, puntero(pd.datos)) entonces devolver MAL fin
+                devolver 0
+            caso 66:
+                para k desde 0 hasta MAX_DISCOS - 1 hacer asentar(k) fin
+                tomar_consola()
+                escribir("reiniciar\n")
+                soltar_consola()
+                ensamblador
+                    cli
+                    mov al, 0xFE
+                    out 0x64, al
+                .quieto:
+                    hlt
+                    jmp .quieto
+                fin
+            caso 67:
+                pon_reloj(a, b)
+                devolver 0
+            caso 68:
+                si a = 0 entonces
+                    si lee_ajustes() entonces devolver 1 fin
+                    devolver 0
+                sino si a = 2 entonces
+                    si instalado() entonces devolver 1 fin
+                    devolver 0
+                fin
+                si c = 0 o no puede(b, c, cierto) entonces devolver NO_VALE fin
+                si a = 1 entonces copiar_hasta(puntero(b), Ajustes.usuario, c) sino copiar_hasta(puntero(b), Ajustes.equipo, c) fin
+                devolver 0
         fin
         devolver NO_VALE
     fin
@@ -1135,6 +1307,7 @@ módulo Usuario
         variable m, largo, leídos: nat32
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
+        variable en_hispa: arreglo [24] de byte
         si u >= MAX_UNIDADES entonces
             error := SIN_DISCO
             devolver nulo
@@ -1149,6 +1322,20 @@ módulo Usuario
             devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error)
         fin
         m := abrir_archivo(u, ruta, PARA_LEER)
+        si m = NO_HAY y del_sistema < MAX_UNIDADES y no en_memoria(del_sistema) entonces
+            ; los programas de un sistema instalado en el disco están en su
+            ; carpeta \HISPA: lo que no está donde se pide se busca allí
+            nombre := ruta
+            p := ruta
+            mientras valor(p) <> 0 hacer
+                si valor(p) = '\\' o valor(p) = '/' o valor(p) = ':' entonces nombre := p + 1 fin
+                p := p + 1
+            fin
+            copiar_hasta(en_hispa, "\\HISPA\\", 24)
+            copiar_hasta(dirección(en_hispa[7]), nombre, 13)
+            u := del_sistema
+            m := abrir_archivo(u, en_hispa, PARA_LEER)
+        fin
         si m >= PRIMER_ERROR entonces
             error := m
             devolver nulo

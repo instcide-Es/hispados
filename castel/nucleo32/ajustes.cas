@@ -1,0 +1,80 @@
+; =============================================================================
+;  ajustes.cas - los ajustes de un Hispa-Pentium instalado en el disco: los
+;  guarda el asistente del primer arranque (uasiste.cas, ASISTE.BIN) en
+;  \HISPA\HISPA.INI, en la unidad del sistema, y el núcleo los lee al
+;  arrancar el escritorio (y cuando el asistente dice que han cambiado):
+;
+;      [hispa]
+;      usuario=Carlos
+;      equipo=TOSHIBA
+;      teclado=es
+;      modo=1024x600
+;
+;  De aquí se usan el nombre del usuario (el saludo del menú Inicio), el del
+;  equipo y el teclado («es» o «us»). El modo de la pantalla lo pone el
+;  cargador (GRUB): el asistente lo deja también en \HISPA\GRUB.CFG.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ajustes
+
+    importar Fat, Unidades, Consola
+
+    público constante MAX_NOMBRE = 24
+    público variable usuario: arreglo [MAX_NOMBRE] de byte
+    público variable equipo: arreglo [MAX_NOMBRE] de byte
+    público variable hay_ajustes: bool          ; se ha leído HISPA.INI
+    variable texto_ini: arreglo [513] de byte
+
+    ; lo que vale «clave» (con su «=») en el texto leído, a destino (donde
+    ; caben «cabe» octetos con el 0). Falso si no está.
+    función saca(clave: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable i, j, n: nat32
+        i := 0
+        mientras texto_ini[i] <> 0 hacer
+            ; al principio de una línea: ¿es la clave?
+            j := 0
+            mientras clave[j] <> 0 y texto_ini[i + j] = clave[j] hacer j := j + 1 fin
+            si clave[j] = 0 entonces
+                i := i + j
+                n := 0
+                mientras texto_ini[i] <> 0 y texto_ini[i] <> '\r' y texto_ini[i] <> '\n' hacer
+                    si n + 1 < cabe entonces
+                        destino[n] := texto_ini[i]
+                        n := n + 1
+                    fin
+                    i := i + 1
+                fin
+                destino[n] := 0
+                devolver cierto
+            fin
+            ; a la línea siguiente
+            mientras texto_ini[i] <> 0 y texto_ini[i] <> '\n' hacer i := i + 1 fin
+            si texto_ini[i] = '\n' entonces i := i + 1 fin
+        fin
+        devolver falso
+    fin
+
+    ; lee \HISPA\HISPA.INI de la unidad del sistema y pone lo que dice (el
+    ; teclado). Falso si no está (un sistema recién instalado: toca el
+    ; asistente del primer arranque) o si el sistema no está instalado.
+    público función lee_ajustes(): bool
+        variable m, n: nat32
+        variable t: arreglo [8] de byte
+        hay_ajustes := falso
+        usuario[0] := 0
+        equipo[0] := 0
+        si no instalado() entonces devolver falso fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\HISPA.INI", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := leer_archivo(m, texto_ini, 512)
+        cerrar_archivo(m)
+        si n > 512 entonces devolver falso fin
+        texto_ini[n] := 0
+        saca("usuario=", usuario, MAX_NOMBRE)
+        saca("equipo=", equipo, MAX_NOMBRE)
+        si saca("teclado=", t, 8) entonces pon_teclado(t[0] <> 'u') fin
+        hay_ajustes := cierto
+        devolver cierto
+    fin
+
+fin Ajustes.

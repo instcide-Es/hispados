@@ -91,6 +91,7 @@ módulo Tareas
     público variable tics: nat32
     público variable cambios: nat32             ; las veces que ha cambiado de tarea
     variable pantalla: puntero a nat16 = puntero(0xB8000)
+    público variable sin_segundos: bool         ; no se enseñan los segundos (la pantalla es de un programa: INSTALAR)
     ; la función (sin argumentos) que acaba la tarea que corre cuando se la
     ; ha cortado con Ctrl+C: la pone usuario.cas (cierra sus archivos y la
     ; termina); se la llama por su dirección
@@ -206,7 +207,7 @@ módulo Tareas
         variable marco, s, i: nat32
         variable t, sig: puntero a Tarea
         tics := tics + 1
-        si tics mod HZ = 0 entonces
+        si tics mod HZ = 0 y no sin_segundos entonces
             s := tics div HZ
             para i desde 0 hasta 5 hacer
                 pantalla[79 - i] := 0x1F00 ob (s mod 10 + '0')
