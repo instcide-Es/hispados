@@ -194,7 +194,7 @@ config "$XMS"
 check "VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA]"
 check "Hispa Ventanas: cargando el servidor DPMI (HSPDPMI)..."
 check "Instalado: clientes de 16 y de 32 bits, memoria de XMS."
-check "Ratón PS/2 preparado."
+check "Ratón PS/2"; check " preparado."  # (con rueda: «Ratón PS/2 con rueda (IntelliMouse) preparado.»)
 basico c1 800 600
 chk $T/c1.ppm cursor 400 300 texto 76 515 0 8 fina "Ratón: driver INT 33h (HSPRATON)"
 basico c2 640 480
