@@ -1,0 +1,1307 @@
+; =============================================================================
+;  uinstala.cas - INSTALAR.BIN: el programa que instala Hispa-Pentium en el
+;  disco duro. Es un programa del anillo 3: lo lanza el núcleo cuando el
+;  cargador le dice «instalar» (la entrada «Instalar Hispa-Pentium en el disco
+;  duro» de la memoria USB), en modo texto, con la pantalla azul de las
+;  instalaciones de siempre: arriba el título, abajo las teclas (INTRO sigue,
+;  F1 ayuda, F3 sale).
+;
+;  Los pasos: la bienvenida; elegir el disco (los de dentro del PC, con su
+;  tamaño y sus particiones; las memorias USB no se ofrecen nunca); dónde
+;  (en el espacio sin usar, si lo hay, sin tocar lo demás; o borrando el
+;  disco entero, que pide confirmarlo dos veces: una S y escribir BORRAR);
+;  hacer la partición (en la tabla del MBR), darle formato FAT32 (desde cero:
+;  sector de arranque, sector de información, las dos FAT, la raíz), copiar
+;  el sistema a C:\HISPA con su barra y dejar el disco arrancable (GRUB: su
+;  primer sector en el MBR y el resto en el hueco de antes de la primera
+;  partición; los dos vienen hechos con el sistema: BOOT.IMG y CORE.IMG).
+;
+;  Lo que se instala es lo que hay en la raíz de la unidad del sistema (los
+;  archivos que ha traído el cargador: la unidad M:): NUCLEO.BIN, los
+;  programas y los textos. En el disco se escribe sector a sector (las
+;  llamadas 64 y 65 del núcleo), con una FAT32 propia: los archivos van
+;  seguidos, uno detrás de otro. La memoria USB no se toca: el núcleo no
+;  deja escribir en ella ni un sector.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Instala
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Mem32, Formato
+
+    ; ---- los colores (los de la pantalla de texto: el fondo, arriba) ----
+    constante AZUL = 0x17                       ; gris claro sobre azul: el texto
+    constante BLANCO = 0x1F                     ; blanco sobre azul: lo que destaca
+    constante AMARILLO = 0x1E
+    constante ELEGIDO = 0x70                    ; negro sobre gris: lo elegido, el pie
+    constante ROJO = 0x4F                       ; blanco sobre rojo: los avisos graves
+    constante BARRA = 0x1E
+
+    constante MAX_DISCOS = 8
+    constante MAX_PARTES = 16
+    constante MAX_ARCHIVOS = 48
+    constante MIN_MB = 64                       ; lo menos que mide la partición
+    constante MAX_SECTORES = 67108864           ; lo más: 32 GB (una FAT32 mayor tarda mucho en repasarse)
+    constante ALINEA = 2048                     ; las particiones, a 1 MB
+    constante RESERVADOS = 32
+    constante TROZO = 65536                     ; lo que se lee y se escribe de una vez (128 sectores)
+    constante MAX_TABLA = 65536                 ; los clusters que se pueden ocupar al instalar
+
+    ; ---- lo que se sabe de cada disco ----
+    tipo Parte = estructura
+        inicio, sectores: nat32
+        clase: nat32                            ; la del MBR (o la de la GPT, traducida)
+        activa: bool
+    fin
+    variable info: arreglo [MAX_DISCOS] de Info_disco
+    variable hay: arreglo [MAX_DISCOS] de bool
+    variable candidatos: arreglo [MAX_DISCOS] de nat32   ; los discos que se ofrecen
+    variable n_candidatos: nat32
+
+    ; ---- el disco que se está mirando (analiza) ----
+    variable partes: arreglo [MAX_PARTES] de Parte
+    variable n_partes: nat32
+    variable es_gpt: bool
+    variable en_blanco: bool                    ; su primer sector está a cero
+    variable sin_tabla: bool                    ; no tiene tabla de particiones (y no está en blanco)
+    variable hueco_inicio, hueco_sectores: nat32        ; el mayor trozo sin usar
+    variable ranura: nat32                      ; un sitio libre en la tabla (4: no hay)
+    variable primera_parte: nat32               ; dónde empieza la primera partición
+    variable mbr: arreglo [512] de byte
+    variable mbr_viejo: arreglo [512] de byte
+
+    ; ---- lo que se va a hacer ----
+    variable disco: nat32
+    variable borrar_todo: bool
+    variable p_inicio, p_sectores: nat32        ; la partición nueva
+    variable p_número: nat32                    ; su sitio en la tabla (desde 1)
+    variable otra: nat32                        ; la partición del sistema que ya había (0: ninguno)
+
+    ; ---- los archivos que se instalan ----
+    variable nombres: arreglo [MAX_ARCHIVOS] de arreglo [13] de byte
+    variable tamaños: arreglo [MAX_ARCHIVOS] de nat32
+    variable n_archivos: nat32
+    variable sectores_core: nat32
+
+    ; ---- la FAT32 que se escribe ----
+    variable por_cluster: nat32                 ; sectores por cluster
+    variable fat_sectores, clusters, datos_inicio: nat32
+    variable siguiente: nat32                   ; el primer cluster sin dar
+    variable tabla: puntero a nat32             ; el principio de la FAT (MAX_TABLA entradas; memoria pedida al núcleo)
+    variable raíz: arreglo [32768] de byte      ; el cluster de la raíz
+    variable carpeta: arreglo [32768] de byte   ; los de la carpeta HISPA
+    variable carpeta_octetos, carpeta_clusters, carpeta_n, raíz_n: nat32
+    variable trozo: puntero a byte              ; TROZO octetos (memoria pedida al núcleo)
+    variable fecha, hora: nat32
+    variable hecho, por_hacer: nat32            ; (la barra) los sectores escritos y los que hay que escribir
+    variable cfg: arreglo [4096] de byte        ; GRUB.CFG
+    variable ln: arreglo [200] de byte
+    variable dd: arreglo [6] de nat32
+
+    ; -------------------------------------------------------------------------
+    ;  La pantalla
+    ; -------------------------------------------------------------------------
+    función pon(columna: nat32, fila: nat32, color: nat32, t: puntero a byte)
+        variable n: nat32
+        n := longitud(t)
+        si columna + n > 80 entonces n := 80 - columna fin
+        texto_en(columna, fila, color, t, n)
+    fin
+
+    ; lo mismo con datos (los de dd)
+    función ponf(columna: nat32, fila: nat32, color: nat32, plantilla: puntero a byte)
+        formatear(ln, 200, plantilla, dd)
+        pon(columna, fila, color, ln)
+    fin
+
+    función registra(plantilla: puntero a byte)
+        formatear(ln, 200, plantilla, dd)
+        al_serie(ln)
+    fin
+
+    función pie(t: puntero a byte)
+        letras_en(0, 24, ELEGIDO, ' ', 80)
+        pon(2, 24, ELEGIDO, t)
+    fin
+
+    ; la pantalla entera: el título arriba, el cuerpo vacío
+    función pantalla(título: puntero a byte)
+        variable f: nat32
+        para f desde 0 hasta 23 hacer letras_en(0, f, AZUL, ' ', 80) fin
+        pon(2, 1, BLANCO, "Instalación de Hispa-Pentium 0.7")
+        letras_en(0, 2, BLANCO, 0xCD, 80)
+        si título[0] <> 0 entonces pon(3, 4, BLANCO, título) fin
+        cursor_en(0, 25)
+    fin
+
+    ; un recuadro de aviso (rojo), con su texto dentro
+    función recuadro(fila: nat32, alto: nat32, color: nat32)
+        variable f: nat32
+        para f desde fila hasta fila + alto - 1 hacer letras_en(8, f, color, ' ', 64) fin
+        letras_en(9, fila, color, 0xCD, 62)
+        letras_en(9, fila + alto - 1, color, 0xCD, 62)
+        texto_en(8, fila, color, "\xC9", 1)
+        texto_en(71, fila, color, "\xBB", 1)
+        texto_en(8, fila + alto - 1, color, "\xC8", 1)
+        texto_en(71, fila + alto - 1, color, "\xBC", 1)
+        para f desde fila + 1 hasta fila + alto - 2 hacer
+            texto_en(8, f, color, "\xBA", 1)
+            texto_en(71, f, color, "\xBA", 1)
+        fin
+    fin
+
+    ; el tamaño de n sectores, para enseñarlo, en t («1500 MB», «120 GB»)
+    función tamaño_de(sectores: nat32, t: puntero a byte)
+        variable d: arreglo [1] de nat32
+        d[0] := sectores div 2048
+        si d[0] >= 20480 entonces
+            d[0] := d[0] div 1024
+            formatear(t, 16, "%u GB", d)
+        sino
+            formatear(t, 16, "%u MB", d)
+        fin
+    fin
+
+    ; se acaba: el equipo se reinicia (y si no se deja, el programa acaba)
+    función fuera()
+        variable f: nat32
+        al_serie("instalar: se sale\n")
+        reiniciar()
+        para f desde 0 hasta 24 hacer letras_en(0, f, 0x07, ' ', 80) fin
+        cursor_en(0, 0)
+        salir(0)
+    fin
+
+    ; algo ha ido mal y no se puede seguir: se dice y se espera
+    función fallo(t: puntero a byte, t2: puntero a byte)
+        pantalla("No se puede seguir")
+        recuadro(7, 7, ROJO)
+        pon(11, 9, ROJO, t)
+        pon(11, 10, ROJO, t2)
+        pie("INTRO=Reiniciar el equipo")
+        dd[0] := nat32(t)
+        registra("instalar: FALLO: %s\n")
+        mientras tecla() <> '\n' hacer fin
+        fuera()
+    fin
+
+    ; F3: salir (se pregunta). Si se dice que no, hay que volver a pintar.
+    función quiere_salir()
+        variable c: nat32
+        recuadro(9, 6, ROJO)
+        pon(11, 11, ROJO, "Hispa-Pentium no se ha instalado todavía.")
+        pon(11, 12, ROJO, "¿Salir de la instalación y reiniciar el equipo?  (S/N)")
+        pie("S=Salir y reiniciar   N=Seguir con la instalación")
+        mientras cierto hacer
+            c := tecla()
+            si c = 's' o c = 'S' entonces fuera() fin
+            si c = 'n' o c = 'N' o c = 27 entonces devolver fin
+        fin
+    fin
+
+    función ayuda()
+        pantalla("Ayuda")
+        pon(3, 6, AZUL, "Este programa instala Hispa-Pentium en un disco duro de este equipo,")
+        pon(3, 7, AZUL, "para arrancarlo luego sin la memoria USB.")
+        pon(3, 9, AZUL, "\x07 Solo se ofrecen los discos de dentro del equipo (IDE y SATA). La")
+        pon(3, 10, AZUL, "  memoria USB de arranque no se toca nunca.")
+        pon(3, 11, AZUL, "\x07 Si el disco tiene espacio sin usar (sin partición), Hispa-Pentium se")
+        pon(3, 12, AZUL, "  puede instalar ahí, en una partición nueva, sin tocar lo que hay.")
+        pon(3, 13, AZUL, "\x07 Si no, se puede borrar el disco entero: se pierde TODO lo que tiene,")
+        pon(3, 14, AZUL, "  y hay que confirmarlo dos veces (una S y escribir la palabra BORRAR).")
+        pon(3, 15, AZUL, "\x07 La partición nueva lleva formato FAT32 (hasta 32 GB) y el sistema")
+        pon(3, 16, AZUL, "  queda en la carpeta \\HISPA. El arranque del disco pasa a ser el de")
+        pon(3, 17, AZUL, "  Hispa-Pentium (GRUB), con una entrada para el sistema que ya hubiera.")
+        pon(3, 19, AZUL, "Hasta que no se confirma en la última pantalla no se escribe nada en")
+        pon(3, 20, AZUL, "ningún disco: con F3 se sale sin haber cambiado nada.")
+        pie("INTRO=Volver")
+        mientras tecla() <> '\n' hacer fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los discos y sus particiones
+    ; -------------------------------------------------------------------------
+    función palabra32(p: puntero a byte): nat32
+        devolver p[0] ob (nat32(p[1]) << 8) ob (nat32(p[2]) << 16) ob (nat32(p[3]) << 24)
+    fin
+
+    función pon32(p: puntero a byte, v: nat32)
+        p[0] := v yb 0xFF
+        p[1] := (v >> 8) yb 0xFF
+        p[2] := (v >> 16) yb 0xFF
+        p[3] := (v >> 24) yb 0xFF
+    fin
+
+    función pon16(p: puntero a byte, v: nat32)
+        p[0] := v yb 0xFF
+        p[1] := (v >> 8) yb 0xFF
+    fin
+
+    ; cómo se llama una clase de partición
+    función nombre_clase(c: nat32): puntero a byte
+        según c
+            caso 0x01: devolver "FAT12"
+            caso 0x04, 0x06, 0x0E: devolver "FAT16"
+            caso 0x0B, 0x0C: devolver "FAT32"
+            caso 0x07: devolver "NTFS o exFAT (Windows)"
+            caso 0x05, 0x0F, 0x85: devolver "extendida (con unidades lógicas)"
+            caso 0x27: devolver "recuperación de Windows"
+            caso 0x82: devolver "Linux (intercambio)"
+            caso 0x83: devolver "Linux"
+            caso 0x8E: devolver "Linux (LVM)"
+            caso 0xA5, 0xA6, 0xA9: devolver "BSD"
+            caso 0xAF: devolver "Mac OS"
+            caso 0xEF: devolver "arranque EFI"
+            caso 0xEE: devolver "tabla GPT"
+            caso 0x100: devolver "reservada de Windows"
+            caso 0x101: devolver "arranque de GRUB"
+        fin
+        devolver "de otra clase"
+    fin
+
+    ; la clase de una partición de una tabla GPT (por el principio de su
+    ; identificador), traducida a las del MBR
+    función clase_gpt(g: nat32): nat32
+        según g
+            caso 0xC12A7328: devolver 0xEF
+            caso 0xEBD0A0A2: devolver 0x07
+            caso 0xE3C9E316: devolver 0x100
+            caso 0xDE94BBA4: devolver 0x27
+            caso 0x0FC63DAF: devolver 0x83
+            caso 0x0657FD6D: devolver 0x82
+            caso 0xE6D6D379: devolver 0x8E
+            caso 0x21686148: devolver 0x101
+            caso 0x48465300, 0x7C3457EF: devolver 0xAF
+        fin
+        devolver 0xFF
+    fin
+
+    función añade_parte(inicio: nat32, sectores: nat32, clase: nat32, activa: bool)
+        si n_partes >= MAX_PARTES entonces devolver fin
+        partes[n_partes].inicio := inicio
+        partes[n_partes].sectores := sectores
+        partes[n_partes].clase := clase
+        partes[n_partes].activa := activa
+        n_partes := n_partes + 1
+    fin
+
+    ; las particiones de una tabla GPT
+    función mira_gpt(d: nat32)
+        variable lba, cuántas, mide, n, i, primero, último: nat32
+        variable e: puntero a byte
+        si no leer_disco(d, 1, 1, trozo) entonces devolver fin
+        si palabra32((trozo)) <> 0x20494645 o palabra32((trozo + 4)) <> 0x54524150 entonces devolver fin
+        lba := palabra32((trozo + 72))
+        cuántas := palabra32((trozo + 80))
+        mide := palabra32((trozo + 84))
+        si mide < 128 o mide > 512 o 512 mod mide <> 0 o palabra32((trozo + 76)) <> 0 entonces devolver fin
+        si cuántas > 128 entonces cuántas := 128 fin
+        n := 0
+        mientras n < cuántas hacer
+            i := n mod (512 div mide)
+            si i = 0 entonces
+                si no leer_disco(d, lba + n div (512 div mide), 1, trozo) entonces devolver fin
+            fin
+            e := (trozo + i * mide)
+            si palabra32(e) <> 0 o palabra32(e + 4) <> 0 o palabra32(e + 8) <> 0 o palabra32(e + 12) <> 0 entonces
+                primero := palabra32(e + 32)
+                último := palabra32(e + 40)
+                si palabra32(e + 36) <> 0 o palabra32(e + 44) <> 0 entonces último := 0xFFFFFFFE fin
+                añade_parte(primero, último - primero + 1, clase_gpt(palabra32(e)), falso)
+            fin
+            n := n + 1
+        fin
+    fin
+
+    ; mira el disco d: su tabla de particiones (en «partes», por orden de
+    ; sitio en el disco), si está en blanco, y su mayor trozo sin usar
+    función analiza(d: nat32)
+        variable i, j, c, ini, n, cursor, fin_, total: nat32
+        variable p: Parte
+        variable cero: bool
+        n_partes := 0
+        es_gpt := falso
+        en_blanco := falso
+        sin_tabla := falso
+        hueco_inicio := 0
+        hueco_sectores := 0
+        ranura := 4
+        primera_parte := 0xFFFFFFFF
+        si no leer_disco(d, 0, 1, mbr) entonces
+            sin_tabla := cierto
+            devolver
+        fin
+        cero := cierto
+        para i desde 0 hasta 511 hacer
+            si mbr[i] <> 0 entonces cero := falso fin
+        fin
+        total := info[d].sectores
+        si cero entonces
+            en_blanco := cierto
+        sino si mbr[510] <> 0x55 o mbr[511] <> 0xAA o (mbr[0] = 0xEB y mbr[11] = 0 y mbr[12] = 2 y mbr[21] >= 0xF0) entonces
+            ; sin tabla: otra cosa, o un volumen que ocupa el disco entero
+            sin_tabla := cierto
+        sino
+            para i desde 0 hasta 3 hacer
+                c := mbr[446 + i * 16 + 4]
+                ini := palabra32(dirección(mbr[446 + i * 16 + 8]))
+                n := palabra32(dirección(mbr[446 + i * 16 + 12]))
+                si c = 0 o n = 0 entonces
+                    si ranura = 4 entonces ranura := i fin
+                sino si c = 0xEE entonces
+                    es_gpt := cierto
+                sino
+                    añade_parte(ini, n, c, mbr[446 + i * 16] = 0x80)
+                fin
+            fin
+            si es_gpt entonces
+                n_partes := 0
+                mira_gpt(d)
+            fin
+        fin
+        ; por orden de sitio
+        para i desde 1 hasta n_partes hacer
+            para j desde 1 hasta n_partes - 1 hacer
+                si partes[j].inicio < partes[j - 1].inicio entonces
+                    p.inicio := partes[j].inicio
+                    p.sectores := partes[j].sectores
+                    p.clase := partes[j].clase
+                    p.activa := partes[j].activa
+                    partes[j].inicio := partes[j - 1].inicio
+                    partes[j].sectores := partes[j - 1].sectores
+                    partes[j].clase := partes[j - 1].clase
+                    partes[j].activa := partes[j - 1].activa
+                    partes[j - 1].inicio := p.inicio
+                    partes[j - 1].sectores := p.sectores
+                    partes[j - 1].clase := p.clase
+                    partes[j - 1].activa := p.activa
+                fin
+            fin
+        fin
+        si n_partes > 0 entonces primera_parte := partes[0].inicio fin
+        ; el mayor trozo sin usar (de 1 MB en adelante, a megas enteros)
+        si total < ALINEA * 2 entonces devolver fin
+        cursor := ALINEA
+        para i desde 0 hasta n_partes hacer
+            si i < n_partes entonces fin_ := partes[i].inicio sino fin_ := total fin
+            si es_gpt y i = n_partes entonces fin_ := total - ALINEA fin    ; (al final va la copia de la tabla)
+            fin_ := fin_ - fin_ mod ALINEA
+            si fin_ > cursor y fin_ - cursor > hueco_sectores entonces
+                hueco_inicio := cursor
+                hueco_sectores := fin_ - cursor
+            fin
+            si i < n_partes entonces
+                fin_ := partes[i].inicio + partes[i].sectores
+                si fin_ < partes[i].inicio entonces fin_ := 0xFFFFF800 fin
+                fin_ := redondear(fin_, ALINEA)
+                si fin_ > cursor entonces cursor := fin_ fin
+            fin
+        fin
+        si hueco_sectores > MAX_SECTORES entonces hueco_sectores := MAX_SECTORES fin
+    fin
+
+    función nombre_medio(c: nat32): puntero a byte
+        según c
+            caso MEDIO_IDE: devolver "IDE"
+            caso MEDIO_SATA: devolver "SATA"
+            caso MEDIO_USB: devolver "USB"
+        fin
+        devolver "?"
+    fin
+
+    ; busca los discos. Los que se ofrecen: los de dentro en los que el
+    ; núcleo deja escribir (nunca una memoria USB ni el disco del sistema).
+    función busca_discos()
+        variable d: nat32
+        n_candidatos := 0
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            hay[d] := info_disco(d, info[d])
+            si hay[d] entonces
+                dd[0] := d
+                dd[1] := nat32(nombre_medio(info[d].clase))
+                dd[2] := info[d].sectores div 2048
+                dd[3] := info[d].se_puede
+                registra("instalar: disco %u, %s, %u MB, se puede: %u\n")
+                si info[d].se_puede = 1 y info[d].clase <> MEDIO_USB entonces
+                    candidatos[n_candidatos] := d
+                    n_candidatos := n_candidatos + 1
+                fin
+            fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las pantallas
+    ; -------------------------------------------------------------------------
+    función bienvenida()
+        variable c: nat32
+        mientras cierto hacer
+            pantalla("Bienvenido a la instalación de Hispa-Pentium")
+            pon(3, 6, AZUL, "Este programa instala Hispa-Pentium en el disco duro de este equipo,")
+            pon(3, 7, AZUL, "para que arranque de él, sin la memoria USB.")
+            pon(5, 10, AZUL, "\x07  Para instalar Hispa-Pentium ahora, pulse INTRO.")
+            pon(5, 12, AZUL, "\x07  Para saber antes lo que va a hacer, pulse F1.")
+            pon(5, 14, AZUL, "\x07  Para salir sin instalar nada, pulse F3.")
+            pon(3, 18, AMARILLO, "No se escribe nada en ningún disco hasta que usted lo confirme.")
+            pon(3, 19, AMARILLO, "La memoria USB de arranque no se toca.")
+            pie("INTRO=Continuar   F1=Ayuda   F3=Salir")
+            al_serie("instalar: bienvenida\n")
+            c := tecla()
+            si c = '\n' entonces devolver fin
+            si c = TECLA_F1 entonces ayuda() fin
+            si c = TECLA_F3 entonces quiere_salir() fin
+        fin
+    fin
+
+    ; pinta la lista de discos, con el elegido resaltado
+    función pinta_discos(elegido: nat32)
+        variable k, d, i, f, color, hasta_: nat32
+        variable t: arreglo [16] de byte
+        pantalla("Elija el disco donde instalar Hispa-Pentium")
+        f := 6
+        si n_candidatos = 0 entonces
+            recuadro(8, 6, ROJO)
+            pon(11, 10, ROJO, "No se ha encontrado ningún disco duro en este equipo")
+            pon(11, 11, ROJO, "(IDE o SATA) en el que se pueda instalar.")
+        fin
+        para k desde 1 hasta n_candidatos hacer
+            d := candidatos[k - 1]
+            analiza(d)
+            si f < 21 entonces
+                color := BLANCO
+                si k - 1 = elegido entonces color := ELEGIDO fin
+                tamaño_de(info[d].sectores, t)
+                dd[0] := k
+                dd[1] := nat32(nombre_medio(info[d].clase))
+                dd[2] := nat32(dirección(info[d].modelo[0]))
+                dd[3] := nat32(dirección(t[0]))
+                letras_en(3, f, color, ' ', 74)
+                ponf(4, f, color, "Disco %u   %-4s  %-40s %10s")
+                f := f + 1
+            fin
+            hasta_ := n_partes
+            si hasta_ > 5 entonces hasta_ := 5 fin
+            para i desde 1 hasta hasta_ hacer
+                si f < 21 entonces
+                    tamaño_de(partes[i - 1].sectores, t)
+                    dd[0] := i
+                    dd[1] := nat32(nombre_clase(partes[i - 1].clase))
+                    dd[2] := nat32(dirección(t[0]))
+                    ponf(8, f, AZUL, "partición %u: %-36s %10s")
+                    f := f + 1
+                fin
+            fin
+            si f < 21 entonces
+                si n_partes > hasta_ entonces
+                    dd[0] := n_partes - hasta_
+                    ponf(8, f, AZUL, "(y %u particiones más)")
+                    f := f + 1
+                sino si en_blanco entonces
+                    pon(8, f, AZUL, "(en blanco: sin particiones)")
+                    f := f + 1
+                sino si sin_tabla entonces
+                    pon(8, f, AZUL, "(sin tabla de particiones: no se sabe lo que tiene)")
+                    f := f + 1
+                fin
+            fin
+            si f < 21 y hueco_sectores >= 2048 y no en_blanco y no sin_tabla entonces
+                tamaño_de(hueco_sectores, t)
+                dd[0] := nat32(dirección(t[0]))
+                ponf(8, f, AZUL, "espacio sin usar:                               %10s")
+                f := f + 1
+            fin
+            f := f + 1
+        fin
+        ; las memorias USB, para que se vea que están y que no se tocan
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si hay[d] y info[d].clase = MEDIO_USB y f < 22 entonces
+                tamaño_de(info[d].sectores, t)
+                dd[0] := nat32(dirección(info[d].modelo[0]))
+                dd[1] := nat32(dirección(t[0]))
+                ponf(4, f, AZUL, "Memoria USB  %-28s %10s  (no se toca)")
+                f := f + 1
+            fin
+        fin
+        si n_candidatos = 0 entonces
+            pie("F3=Salir")
+        sino
+            pie("INTRO=Elegir este disco   \x18\x19=Cambiar de disco   F1=Ayuda   F3=Salir")
+        fin
+    fin
+
+    ; elegir el disco. Da su número.
+    función elige_disco(): nat32
+        variable c, elegido: nat32
+        elegido := 0
+        mientras cierto hacer
+            pinta_discos(elegido)
+            al_serie("instalar: elegir disco\n")
+            c := tecla()
+            si c = TECLA_F1 entonces ayuda() fin
+            si c = TECLA_F3 entonces
+                si n_candidatos = 0 entonces fuera() fin
+                quiere_salir()
+            fin
+            si n_candidatos > 0 entonces
+                si c = TECLA_ABAJO y elegido + 1 < n_candidatos entonces elegido := elegido + 1 fin
+                si c = TECLA_ARRIBA y elegido > 0 entonces elegido := elegido - 1 fin
+                si c = '\n' entonces devolver candidatos[elegido] fin
+            fin
+        fin
+    fin
+
+    ; los sectores que hacen falta delante de la primera partición para el
+    ; arranque (el primero es el MBR)
+    función cabe_arranque(primera: nat32): bool
+        devolver primera > sectores_core
+    fin
+
+    ; las dos confirmaciones de borrar el disco entero. Cierto si se dan.
+    función confirma_borrar(): bool
+        variable c, n: nat32
+        variable t: arreglo [16] de byte
+        variable palabra_: arreglo [8] de byte
+        tamaño_de(info[disco].sectores, t)
+        pantalla("Borrar el disco entero")
+        recuadro(6, 10, ROJO)
+        pon(11, 8, ROJO, "ATENCION: se va a BORRAR TODO lo que hay en este disco:")
+        dd[0] := nat32(nombre_medio(info[disco].clase))
+        dd[1] := nat32(dirección(info[disco].modelo[0]))
+        dd[2] := nat32(dirección(t[0]))
+        ponf(13, 10, ROJO, "%s  %-34s %s")
+        dd[0] := n_partes
+        si n_partes > 0 entonces ponf(11, 12, ROJO, "Sus %u particiones, con todos sus archivos, se pierden") sino pon(11, 12, ROJO, "Lo que tenga, sea lo que sea, se pierde") fin
+        pon(11, 13, ROJO, "para siempre. No se puede deshacer.")
+        pon(3, 18, AZUL, "Si está seguro, pulse S. Para volver sin tocar nada, pulse ESC.")
+        pie("S=Sí, borrar el disco   ESC=Volver (no se toca nada)   F3=Salir")
+        al_serie("instalar: confirmar borrar (1)\n")
+        mientras cierto hacer
+            c := tecla()
+            si c = 27 o c = 'n' o c = 'N' entonces devolver falso fin
+            si c = TECLA_F3 entonces
+                quiere_salir()
+                devolver falso
+            fin
+            si c = 's' o c = 'S' entonces romper fin
+        fin
+        ; la segunda: escribir la palabra
+        pantalla("Borrar el disco entero: segunda confirmación")
+        recuadro(6, 8, ROJO)
+        pon(11, 8, ROJO, "Segundo aviso. Se va a borrar TODO el disco:")
+        dd[0] := nat32(nombre_medio(info[disco].clase))
+        dd[1] := nat32(dirección(info[disco].modelo[0]))
+        dd[2] := nat32(dirección(t[0]))
+        ponf(13, 10, ROJO, "%s  %-34s %s")
+        pon(3, 16, AZUL, "Para borrarlo, escriba la palabra BORRAR y pulse INTRO.")
+        pon(3, 17, AZUL, "Con cualquier otra cosa (o con ESC) se vuelve sin tocar nada.")
+        pon(3, 19, BLANCO, "Escriba BORRAR: ")
+        pie("INTRO=Confirmar   ESC=Volver (no se toca nada)")
+        al_serie("instalar: confirmar borrar (2)\n")
+        n := 0
+        mientras cierto hacer
+            letras_en(19, 19, ELEGIDO, ' ', 8)
+            texto_en(19, 19, ELEGIDO, palabra_, n)
+            cursor_en(19 + n, 19)
+            c := tecla()
+            si c = 27 entonces devolver falso fin
+            si c = '\n' entonces romper fin
+            si c = 8 entonces
+                si n > 0 entonces n := n - 1 fin
+            sino si c >= ' ' y c < 0x100 y n < 7 entonces
+                palabra_[n] := mayúscula(c)
+                n := n + 1
+            fin
+        fin
+        cursor_en(0, 25)
+        palabra_[n] := 0
+        devolver iguales(palabra_, "BORRAR")
+    fin
+
+    ; qué hacer con el disco elegido. Cierto si se sigue (queda dicho en
+    ; borrar_todo, p_inicio y p_sectores); falso para volver a elegir disco.
+    función elige_sitio(): bool
+        variable c, elegida, opciones, f, total: nat32
+        variable t: arreglo [16] de byte
+        variable libre_vale, arranque_cabe: bool
+        mientras cierto hacer
+            analiza(disco)
+            total := info[disco].sectores
+            si total < MIN_MB * 2048 + ALINEA entonces
+                pantalla("El disco es demasiado pequeño")
+                pon(3, 7, AZUL, "Hacen falta al menos 65 MB.")
+                pie("INTRO=Volver")
+                mientras tecla() <> '\n' hacer fin
+                devolver falso
+            fin
+            arranque_cabe := n_partes = 0 o cabe_arranque(primera_parte)
+            libre_vale := no en_blanco y no sin_tabla y no es_gpt y ranura < 4 y hueco_sectores >= MIN_MB * 2048 y arranque_cabe
+            ; un disco en blanco: no hay nada que perder
+            si en_blanco entonces
+                borrar_todo := cierto
+                devolver cierto
+            fin
+            pantalla("Dónde instalar Hispa-Pentium en este disco")
+            tamaño_de(total, t)
+            dd[0] := nat32(nombre_medio(info[disco].clase))
+            dd[1] := nat32(dirección(info[disco].modelo[0]))
+            dd[2] := nat32(dirección(t[0]))
+            ponf(3, 6, AZUL, "%s  %s, %s")
+            f := 8
+            si sin_tabla entonces
+                pon(3, f, AZUL, "No tiene tabla de particiones: no se sabe lo que hay en él.")
+            sino si es_gpt entonces
+                pon(3, f, AZUL, "Usa una tabla de particiones GPT: por ahora solo se puede instalar")
+                pon(3, f + 1, AZUL, "en él borrándolo entero (queda con una tabla MBR).")
+            sino si hueco_sectores < MIN_MB * 2048 entonces
+                pon(3, f, AZUL, "No tiene bastante espacio sin usar (hacen falta 64 MB sin partición).")
+            sino si ranura >= 4 entonces
+                pon(3, f, AZUL, "Tiene espacio sin usar, pero su tabla ya tiene las cuatro particiones.")
+            sino si no arranque_cabe entonces
+                pon(3, f, AZUL, "Tiene espacio sin usar, pero su primera partición empieza demasiado")
+                pon(3, f + 1, AZUL, "pronto y no deja sitio para el arranque de Hispa-Pentium.")
+            sino
+                tamaño_de(hueco_sectores, t)
+                dd[0] := nat32(dirección(t[0]))
+                ponf(3, f, AZUL, "Tiene %s sin usar: se puede instalar ahí sin tocar lo que hay.")
+            fin
+            elegida := 0
+            mientras cierto hacer
+                opciones := 0
+                f := 12
+                si libre_vale entonces
+                    c := AZUL
+                    si elegida = opciones entonces c := ELEGIDO fin
+                    letras_en(5, f, c, ' ', 70)
+                    pon(6, f, c, "Instalar en el espacio sin usar (no se toca lo que hay)")
+                    opciones := opciones + 1
+                    f := f + 2
+                fin
+                c := AZUL
+                si elegida = opciones entonces c := ELEGIDO fin
+                letras_en(5, f, c, ' ', 70)
+                pon(6, f, c, "Borrar el disco entero e instalar (se pierde TODO lo que tiene)")
+                opciones := opciones + 1
+                f := f + 2
+                c := AZUL
+                si elegida = opciones entonces c := ELEGIDO fin
+                letras_en(5, f, c, ' ', 70)
+                pon(6, f, c, "Volver a elegir el disco")
+                opciones := opciones + 1
+                pie("INTRO=Elegir   \x18\x19=Cambiar   F1=Ayuda   F3=Salir")
+                al_serie("instalar: elegir sitio\n")
+                c := tecla()
+                si c = TECLA_ABAJO y elegida + 1 < opciones entonces elegida := elegida + 1 fin
+                si c = TECLA_ARRIBA y elegida > 0 entonces elegida := elegida - 1 fin
+                si c = TECLA_F1 entonces
+                    ayuda()
+                    romper
+                fin
+                si c = TECLA_F3 entonces
+                    quiere_salir()
+                    romper
+                fin
+                si c = 27 entonces devolver falso fin
+                si c = '\n' entonces
+                    si elegida = opciones - 1 entonces devolver falso fin
+                    si libre_vale y elegida = 0 entonces
+                        borrar_todo := falso
+                        devolver cierto
+                    fin
+                    si confirma_borrar() entonces
+                        borrar_todo := cierto
+                        devolver cierto
+                    fin
+                    al_serie("instalar: no se borra\n")
+                    romper
+                fin
+            fin
+        fin
+    fin
+
+    ; la última pantalla antes de escribir: lo que se va a hacer
+    función confirma_final(): bool
+        variable c: nat32
+        variable t: arreglo [16] de byte
+        mientras cierto hacer
+            pantalla("Todo listo para instalar")
+            tamaño_de(info[disco].sectores, t)
+            dd[0] := nat32(nombre_medio(info[disco].clase))
+            dd[1] := nat32(dirección(info[disco].modelo[0]))
+            dd[2] := nat32(dirección(t[0]))
+            ponf(3, 6, AZUL, "Disco:      %s  %s, %s")
+            tamaño_de(p_sectores, t)
+            dd[0] := nat32(dirección(t[0]))
+            si borrar_todo y en_blanco entonces
+                ponf(3, 8, AZUL, "Partición:  una nueva de %s (el disco está en blanco)")
+            sino si borrar_todo entonces
+                ponf(3, 8, AMARILLO, "Partición:  una nueva de %s, BORRANDO todo lo que tiene el disco")
+            sino
+                ponf(3, 8, AZUL, "Partición:  una nueva de %s en el espacio sin usar; lo demás no se toca")
+            fin
+            pon(3, 10, AZUL, "Formato:    FAT32 (será la unidad C: de Hispa-Pentium)")
+            dd[0] := n_archivos
+            ponf(3, 12, AZUL, "Sistema:    %u archivos, en la carpeta \\HISPA")
+            si otra <> 0 entonces
+                dd[0] := otra
+                ponf(3, 14, AZUL, "Arranque:   el de Hispa-Pentium, con una entrada para el sistema que ya")
+                ponf(3, 15, AZUL, "            hay en el disco (su partición %u)")
+            sino
+                pon(3, 14, AZUL, "Arranque:   el de Hispa-Pentium (GRUB), en este disco")
+            fin
+            pon(3, 18, BLANCO, "Al pulsar INTRO se empieza a escribir en el disco.")
+            pie("INTRO=Instalar   ESC=Volver   F3=Salir")
+            al_serie("instalar: todo listo\n")
+            c := tecla()
+            si c = '\n' entonces devolver cierto fin
+            si c = 27 entonces devolver falso fin
+            si c = TECLA_F3 entonces quiere_salir() fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Escribir: la barra, los sectores
+    ; -------------------------------------------------------------------------
+    función pinta_barra()
+        variable n, por_ciento: nat32
+        si por_hacer = 0 entonces devolver fin
+        si hecho > por_hacer entonces hecho := por_hacer fin
+        n := hecho div 64 * 60 div (por_hacer div 64 + 1)
+        por_ciento := hecho div 64 * 100 div (por_hacer div 64 + 1)
+        si hecho = por_hacer entonces
+            n := 60
+            por_ciento := 100
+        fin
+        letras_en(10, 14, BARRA, 0xDB, n)
+        si n < 60 entonces letras_en(10 + n, 14, BARRA, 0xB0, 60 - n) fin
+        dd[0] := por_ciento
+        ponf(37, 16, BLANCO, "%3u %%")
+    fin
+
+    función etapa(t: puntero a byte)
+        letras_en(3, 11, AZUL, ' ', 74)
+        pon(10, 11, BLANCO, t)
+        dd[0] := nat32(t)
+        registra("instalar: %s\n")
+    fin
+
+    ; n sectores al disco (cuentan para la barra)
+    función esc(lba: nat32, n: nat32, p: puntero a byte)
+        si no escribir_disco(disco, lba, n, p) entonces
+            dd[0] := lba
+            registra("instalar: no se puede escribir en el sector %u\n")
+            fallo("El disco ha dado un error al escribir.", "La instalación no se ha completado.")
+        fin
+        hecho := hecho + n
+        pinta_barra()
+    fin
+
+    ; n sectores a cero desde lba (con el trozo, que queda a cero)
+    función ceros(lba: nat32, n: nat32)
+        variable k: nat32
+        llenar(trozo, TROZO, 0)
+        mientras n > 0 hacer
+            k := n
+            si k > 128 entonces k := 128 fin
+            esc(lba, k, trozo)
+            lba := lba + k
+            n := n - k
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La FAT32
+    ; -------------------------------------------------------------------------
+    función sector_de(cluster: nat32): nat32
+        devolver p_inicio + datos_inicio + (cluster - 2) * por_cluster
+    fin
+
+    ; da n clusters seguidos (encadenados en la tabla); el primero
+    función da_clusters(n: nat32): nat32
+        variable primero, i: nat32
+        primero := siguiente
+        si n = 0 entonces devolver 0 fin
+        si siguiente + n >= MAX_TABLA o siguiente + n >= clusters + 2 entonces
+            fallo("El sistema no cabe en la partición nueva.", "")
+        fin
+        para i desde 0 hasta n - 1 hacer
+            si i = n - 1 entonces tabla[primero + i] := 0x0FFFFFFF sino tabla[primero + i] := primero + i + 1 fin
+        fin
+        siguiente := siguiente + n
+        devolver primero
+    fin
+
+    ; una entrada de carpeta nueva en p, con ese nombre («NOMBRE.EXT» o, con
+    ; once := cierto, ya en sus once letras)
+    función pon_entrada(p: puntero a byte, nombre: puntero a byte, once: bool, atributos: nat32, cluster: nat32, mide: nat32)
+        variable i, j: nat32
+        para i desde 0 hasta 10 hacer p[i] := ' ' fin
+        si once entonces
+            para i desde 0 hasta 10 hacer p[i] := nombre[i] fin
+        sino
+            i := 0
+            j := 0
+            mientras nombre[i] <> 0 y nombre[i] <> '.' hacer
+                si j < 8 entonces
+                    p[j] := mayúscula(nombre[i])
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            si nombre[i] = '.' entonces
+                i := i + 1
+                j := 8
+                mientras nombre[i] <> 0 y j < 11 hacer
+                    p[j] := mayúscula(nombre[i])
+                    j := j + 1
+                    i := i + 1
+                fin
+            fin
+        fin
+        p[11] := atributos
+        pon16(p + 14, hora)
+        pon16(p + 16, fecha)
+        pon16(p + 18, fecha)
+        pon16(p + 20, cluster >> 16)
+        pon16(p + 22, hora)
+        pon16(p + 24, fecha)
+        pon16(p + 26, cluster yb 0xFFFF)
+        pon32(p + 28, mide)
+    fin
+
+    ; apunta un archivo en la carpeta HISPA (o en la raíz)
+    función apunta(en_raíz: bool, nombre: puntero a byte, cluster: nat32, mide: nat32)
+        si en_raíz entonces
+            pon_entrada(dirección(raíz[raíz_n * 32]), nombre, falso, 0x20, cluster, mide)
+            raíz_n := raíz_n + 1
+        sino
+            si (carpeta_n + 1) * 32 > carpeta_octetos entonces fallo("Hay demasiados archivos que instalar.", "") fin
+            pon_entrada(dirección(carpeta[carpeta_n * 32]), nombre, falso, 0x20, cluster, mide)
+            carpeta_n := carpeta_n + 1
+        fin
+    fin
+
+    ; lleva al disco n octetos de la memoria como un archivo nuevo de HISPA
+    función graba_memoria(nombre: puntero a byte, p: puntero a byte, n: nat32)
+        variable c, sectores: nat32
+        si n > TROZO entonces n := TROZO fin
+        sectores := (n + 511) div 512
+        c := da_clusters((sectores + por_cluster - 1) div por_cluster)
+        llenar(trozo, TROZO, 0)
+        copiar_memoria(trozo, p, n)
+        si n > 0 entonces esc(sector_de(c), sectores, trozo) fin
+        apunta(falso, nombre, c, n)
+    fin
+
+    ; copia un archivo de la unidad del sistema a HISPA (y, si se dice, lo
+    ; apunta también en la raíz: otra copia)
+    función copia_archivo(i: nat32, en_raíz: bool)
+        variable m, mide, c, lba, n, k, sectores, queda, leídos: nat32
+        m := abrir(nombres[i])
+        si es_error(m) entonces fallo("No se puede leer uno de los archivos del sistema:", nombres[i]) fin
+        mide := tamaños[i]
+        sectores := (mide + 511) div 512
+        c := da_clusters((sectores + por_cluster - 1) div por_cluster)
+        lba := sector_de(c)
+        queda := mide
+        mientras queda > 0 hacer
+            n := queda
+            si n > TROZO entonces n := TROZO fin
+            ; (lo que se pide puede llegar en varias veces)
+            k := 0
+            mientras k < n hacer
+                leídos := leer(m, (trozo + k), n - k)
+                si es_error(leídos) o leídos = 0 entonces fallo("No se puede leer uno de los archivos del sistema:", nombres[i]) fin
+                k := k + leídos
+            fin
+            si n mod 512 <> 0 entonces llenar((trozo + n), 512 - n mod 512, 0) fin
+            esc(lba, (n + 511) div 512, trozo)
+            lba := lba + (n + 511) div 512
+            queda := queda - n
+        fin
+        cerrar(m)
+        si mide = 0 entonces c := 0 fin
+        apunta(en_raíz, nombres[i], c, mide)
+        dd[0] := nat32(dirección(nombres[i][0]))
+        dd[1] := mide
+        si en_raíz entonces registra("instalar: copiado %s a la raíz (%u octetos)\n") sino registra("instalar: copiado %s (%u octetos)\n") fin
+    fin
+
+    ; el sector de arranque de la partición (no arranca: lo dice)
+    función sector_arranque(s: puntero a byte)
+        variable i: nat32
+        variable aviso: puntero a byte
+        variable código: puntero a byte
+        llenar(s, 512, 0)
+        s[0] := 0xEB
+        s[1] := 0x58
+        s[2] := 0x90
+        copiar_memoria(s + 3, "HISPAPEN", 8)
+        pon16(s + 11, 512)
+        s[13] := por_cluster
+        pon16(s + 14, RESERVADOS)
+        s[16] := 2
+        s[21] := 0xF8
+        pon16(s + 24, 63)
+        pon16(s + 26, 255)
+        pon32(s + 28, p_inicio)
+        pon32(s + 32, p_sectores)
+        pon32(s + 36, fat_sectores)
+        pon32(s + 44, 2)
+        pon16(s + 48, 1)
+        pon16(s + 50, 6)
+        s[64] := 0x80
+        s[66] := 0x29
+        pon32(s + 67, tics() xob (fecha << 16) xob hora)
+        copiar_memoria(s + 71, "HISPA      ", 11)
+        copiar_memoria(s + 82, "FAT32   ", 8)
+        ; (si se arranca de la partición y no del disco: un aviso, una
+        ; tecla y a probar con otro disco)
+        código := "\x0E\x1F\xBE\x77\x7C\xAC\x22\xC0\x74\x0B\x56\xB4\x0E\xBB\x07\x00\xCD\x10\x5E\xEB\xF0\x32\xE4\xCD\x16\xCD\x19\xEB\xFE"
+        copiar_memoria(s + 90, código, 29)
+        aviso := "Esta particion es la unidad de Hispa-Pentium: se arranca desde el disco.\r\nPulse una tecla...\r\n"
+        i := 0
+        mientras aviso[i] <> 0 hacer
+            s[119 + i] := aviso[i]
+            i := i + 1
+        fin
+        s[510] := 0x55
+        s[511] := 0xAA
+    fin
+
+    ; calcula la FAT32 de la partición (p_sectores)
+    función mide_fat()
+        variable megas: nat32
+        megas := p_sectores div 2048
+        si megas <= 260 entonces
+            por_cluster := 1
+        sino si megas <= 8192 entonces
+            por_cluster := 8
+        sino si megas <= 16384 entonces
+            por_cluster := 16
+        sino
+            por_cluster := 32
+        fin
+        fat_sectores := (p_sectores - RESERVADOS + 2 * por_cluster + 128 * por_cluster + 1) div (128 * por_cluster + 2)
+        datos_inicio := RESERVADOS + 2 * fat_sectores
+        clusters := (p_sectores - datos_inicio) div por_cluster
+        carpeta_octetos := 4096
+        si por_cluster * 512 > carpeta_octetos entonces carpeta_octetos := por_cluster * 512 fin
+        carpeta_clusters := carpeta_octetos div (por_cluster * 512)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El arranque: GRUB.CFG
+    ; -------------------------------------------------------------------------
+    función cfg_más(t: puntero a byte)
+        si longitud(cfg) + longitud(t) + 1 < 4096 entonces concatenar(cfg, t) fin
+    fin
+
+    función acaba_en(t: puntero a byte, ext: puntero a byte): bool
+        variable n: nat32
+        n := longitud(t)
+        devolver n > 4 y t[n - 4] = '.' y t[n - 3] = ext[0] y t[n - 2] = ext[1] y t[n - 1] = ext[2]
+    fin
+
+    ; el menú de arranque del disco. El asistente del primer arranque cambia
+    ; luego su línea «set modo=» (la medida de la pantalla).
+    función haz_cfg()
+        variable i: nat32
+        cfg[0] := 0
+        cfg_más("# Hispa-Pentium: el menu de arranque del disco. Lo escribe INSTALAR; el\n")
+        cfg_más("# asistente del primer arranque cambia la linea de set modo= (la medida\n")
+        cfg_más("# de la pantalla: ANCHOxALTOx32, o auto: la que prefiera el monitor).\n")
+        cfg_más("set modo=800x600x32,800x600,auto\n")
+        si otra <> 0 entonces cfg_más("set timeout=8\n") sino cfg_más("set timeout=3\n") fin
+        cfg_más("set default=0\n")
+        cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
+        cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
+        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos ni el USB (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb\n")
+        para i desde 1 hasta n_archivos hacer
+            si (acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT") entonces
+                cfg_más("  module /HISPA/")
+                cfg_más(nombres[i - 1])
+                cfg_más(" ")
+                cfg_más(nombres[i - 1])
+                cfg_más("\n")
+            fin
+        fin
+        cfg_más("  boot\n}\n")
+        si otra <> 0 entonces
+            dd[0] := otra
+            dd[1] := otra
+            formatear(ln, 200, "menuentry \"El sistema que ya estaba en el disco (particion %u)\" {\n  set root=(hd0,msdos%u)\n  chainloader +1\n  boot\n}\n", dd)
+            cfg_más(ln)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los archivos que se instalan
+    ; -------------------------------------------------------------------------
+    función busca_archivos()
+        variable m, i: nat32
+        variable e: Entrada
+        variable hay_núcleo, hay_boot, hay_core, hay_órdenes: bool
+        n_archivos := 0
+        hay_núcleo := falso
+        hay_boot := falso
+        hay_core := falso
+        hay_órdenes := falso
+        m := abrir("\\")
+        si es_error(m) entonces fallo("No se puede leer la unidad del sistema.", "") fin
+        mientras n_archivos < MAX_ARCHIVOS y entrada(m, e) hacer
+            si e.nombre[0] <> '.' y e.atributos yb (CARPETA ob 0x08) = 0 entonces
+                para i desde 0 hasta 12 hacer nombres[n_archivos][i] := mayúscula(e.nombre[i]) fin
+                tamaños[n_archivos] := e.tamaño
+                si iguales(nombres[n_archivos], "NUCLEO.BIN") entonces hay_núcleo := cierto fin
+                si iguales(nombres[n_archivos], "ORDENES.BIN") entonces hay_órdenes := cierto fin
+                si iguales(nombres[n_archivos], "BOOT.IMG") entonces hay_boot := cierto fin
+                si iguales(nombres[n_archivos], "CORE.IMG") entonces
+                    hay_core := cierto
+                    sectores_core := (e.tamaño + 511) div 512
+                fin
+                n_archivos := n_archivos + 1
+            fin
+        fin
+        cerrar(m)
+        dd[0] := n_archivos
+        registra("instalar: %u archivos que instalar\n")
+        si no hay_núcleo o no hay_boot o no hay_core o no hay_órdenes o sectores_core = 0 o sectores_core > 2000 entonces
+            fallo("Faltan los archivos del sistema que hay que instalar (NUCLEO.BIN,", "ORDENES.BIN, BOOT.IMG y CORE.IMG). Arranque de la memoria USB.")
+        fin
+    fin
+
+    ; lee un archivo corto de la unidad del sistema entero, a p. Da lo leído.
+    función lee_entero(nombre: puntero a byte, p: puntero a byte, cabe: nat32): nat32
+        variable m, n, k: nat32
+        m := abrir(nombre)
+        si es_error(m) entonces fallo("No se puede leer uno de los archivos del sistema:", nombre) fin
+        n := 0
+        mientras n < cabe hacer
+            k := leer(m, p + n, cabe - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Instalar
+    ; -------------------------------------------------------------------------
+    función instala()
+        variable i, k, n, f, m: nat32
+        variable e: puntero a byte
+        variable t: arreglo [16] de byte
+        pantalla("Instalando Hispa-Pentium")
+        pon(3, 6, AZUL, "Espere mientras se prepara el disco y se copia el sistema.")
+        pon(3, 7, AZUL, "No apague el equipo.")
+        pie("Instalando...")
+        f := dato(DATO_FECHA)
+        fecha := f >> 16
+        hora := f yb 0xFFFF
+        mide_fat()
+        ; lo que hay que escribir, para la barra
+        por_hacer := 8 + RESERVADOS + 2 * fat_sectores + por_cluster + carpeta_octetos div 512 + 2 * 128 + sectores_core + 3 + 16
+        si borrar_todo entonces por_hacer := por_hacer + 80 fin
+        para i desde 1 hasta n_archivos hacer por_hacer := por_hacer + (tamaños[i - 1] + 511) div 512 fin
+        hecho := 0
+        pinta_barra()
+
+        ; 1. la partición, en la tabla del MBR (el arranque que hubiera sigue igual por ahora)
+        etapa("Haciendo la partición...")
+        copiar_memoria(mbr_viejo, mbr, 512)
+        si borrar_todo entonces
+            ; fuera lo que hubiera: la tabla (también una GPT y su copia del final)
+            ceros(1, 40)
+            ceros(info[disco].sectores - 40, 40)
+            si en_blanco o sin_tabla entonces llenar(mbr, 512, 0) fin
+            llenar(dirección(mbr[446]), 64, 0)
+            pon32(dirección(mbr[440]), tics() xob (fecha << 16) xob hora xob 0x48495350)
+            p_número := 1
+        sino
+            p_número := ranura + 1
+            para i desde 0 hasta 3 hacer mbr[446 + i * 16] := 0 fin        ; la activa pasa a ser la nueva
+        fin
+        e := dirección(mbr[446 + (p_número - 1) * 16])
+        e[0] := 0x80
+        e[1] := 0xFE
+        e[2] := 0xFF
+        e[3] := 0xFF
+        e[4] := 0x0C                            ; FAT32, por LBA
+        e[5] := 0xFE
+        e[6] := 0xFF
+        e[7] := 0xFF
+        pon32(e + 8, p_inicio)
+        pon32(e + 12, p_sectores)
+        mbr[510] := 0x55
+        mbr[511] := 0xAA
+        esc(0, 1, mbr)
+        dd[0] := p_número
+        dd[1] := p_inicio
+        dd[2] := p_sectores
+        registra("instalar: partición %u, desde el sector %u, %u sectores\n")
+
+        ; 2. el formato: lo reservado y las dos FAT, a cero
+        etapa("Dando formato FAT32 a la partición...")
+        ceros(p_inicio, RESERVADOS)
+        k := 0
+        mientras k < 2 * fat_sectores hacer
+            n := 2 * fat_sectores - k
+            si n > 128 entonces n := 128 fin
+            esc(p_inicio + RESERVADOS + k, n, trozo)
+            k := k + n
+        fin
+        tabla[0] := 0x0FFFFFF8
+        tabla[1] := 0x0FFFFFFF
+        tabla[2] := 0x0FFFFFFF                  ; la raíz: un cluster
+        siguiente := 3
+        llenar(raíz, 32768, 0)
+        llenar(carpeta, 32768, 0)
+        pon_entrada(raíz, "HISPA      ", cierto, 0x08, 0, 0)            ; el nombre del volumen
+        k := da_clusters(carpeta_clusters)
+        pon_entrada(dirección(raíz[32]), "HISPA      ", cierto, 0x10, k, 0)
+        raíz_n := 2
+        pon_entrada(carpeta, ".          ", cierto, 0x10, k, 0)
+        pon_entrada(dirección(carpeta[32]), "..         ", cierto, 0x10, 0, 0)
+        carpeta_n := 2
+        dd[0] := por_cluster * 512
+        dd[1] := clusters
+        dd[2] := fat_sectores
+        registra("instalar: FAT32 con clusters de %u octetos, %u clusters, %u sectores por FAT\n")
+
+        ; 3. los archivos
+        etapa("Copiando el sistema a la carpeta \\HISPA...")
+        para i desde 1 hasta n_archivos hacer
+            letras_en(10, 12, AZUL, ' ', 60)
+            pon(10, 12, AZUL, nombres[i - 1])
+            copia_archivo(i - 1, falso)
+            si iguales(nombres[i - 1], "LEEME.TXT") entonces copia_archivo(i - 1, cierto) fin
+        fin
+        letras_en(10, 12, AZUL, ' ', 60)
+        haz_cfg()
+        graba_memoria("GRUB.CFG", cfg, longitud(cfg))
+        graba_memoria("MBR.ANT", mbr_viejo, 512)            ; el primer sector que tenía el disco, por si acaso
+        ; las carpetas y la FAT
+        esc(sector_de(2), por_cluster, raíz)
+        esc(sector_de(3), carpeta_octetos div 512, carpeta)
+        n := (siguiente + 127) div 128
+        k := 0
+        mientras k < n hacer
+            i := n - k
+            si i > 128 entonces i := 128 fin
+            esc(p_inicio + RESERVADOS + k, i, puntero(nat32(tabla) + k * 512))
+            esc(p_inicio + RESERVADOS + fat_sectores + k, i, puntero(nat32(tabla) + k * 512))
+            k := k + i
+        fin
+        ; el sector de arranque y el de información, con sus copias
+        sector_arranque(trozo)
+        e := (trozo + 512)
+        llenar(e, 512, 0)
+        pon32(e, 0x41615252)
+        pon32(e + 484, 0x61417272)
+        pon32(e + 488, clusters + 2 - siguiente)
+        pon32(e + 492, siguiente)
+        pon32(e + 508, 0xAA550000)
+        llenar((trozo + 1024), 512, 0)
+        trozo[1024 + 510] := 0x55
+        trozo[1024 + 511] := 0xAA
+        esc(p_inicio, 3, trozo)
+        esc(p_inicio + 6, 3, trozo)
+        dd[0] := siguiente - 2
+        dd[1] := clusters + 2 - siguiente
+        registra("instalar: %u clusters ocupados, %u libres\n")
+
+        ; 4. el arranque: GRUB en el hueco de delante y su primer sector en el MBR
+        etapa("Dejando el disco arrancable...")
+        m := abrir("CORE.IMG")
+        si es_error(m) entonces fallo("No se puede leer uno de los archivos del sistema:", "CORE.IMG") fin
+        k := 0                                  ; los sectores escritos
+        mientras cierto hacer
+            llenar(trozo, TROZO, 0)
+            n := 0
+            mientras n < TROZO hacer
+                i := leer(m, trozo + n, TROZO - n)
+                si es_error(i) o i = 0 entonces romper fin
+                n := n + i
+            fin
+            si n = 0 entonces romper fin
+            esc(1 + k, (n + 511) div 512, trozo)
+            k := k + (n + 511) div 512
+            si n < TROZO entonces romper fin
+        fin
+        cerrar(m)
+        si k <> sectores_core entonces fallo("No se puede leer uno de los archivos del sistema:", "CORE.IMG") fin
+        llenar(trozo, 1024, 0)
+        n := lee_entero("BOOT.IMG", trozo, 512)
+        si n < 440 entonces fallo("BOOT.IMG no vale.", "") fin
+        copiar_memoria(mbr, trozo, 440)
+        esc(0, 1, mbr)
+        hecho := por_hacer
+        pinta_barra()
+        al_serie("instalar: terminado\n")
+    fin
+
+    función final()
+        variable c: nat32
+        pantalla("Hispa-Pentium está instalado")
+        pon(3, 7, AZUL, "El sistema está en el disco duro, en la carpeta \\HISPA, y el disco")
+        pon(3, 8, AZUL, "arranca ya con Hispa-Pentium.")
+        pon(3, 11, BLANCO, "Quite ahora la memoria USB y pulse INTRO para reiniciar el equipo.")
+        pon(3, 14, AZUL, "En el primer arranque, un asistente le preguntará su nombre, la fecha")
+        pon(3, 15, AZUL, "y la hora, el teclado y la medida de la pantalla.")
+        si otra <> 0 entonces
+            pon(3, 17, AZUL, "El sistema que ya había en el disco sigue en su sitio: está en el menú")
+            pon(3, 18, AZUL, "que sale al arrancar.")
+        fin
+        pie("INTRO=Reiniciar el equipo")
+        mientras tecla() <> '\n' hacer fin
+        fuera()
+    fin
+
+    función principal(): byte
+        variable i: nat32
+        si dato(DATO_ESCRITORIO) = 1 entonces
+            escribir("INSTALAR se usa arrancando de la memoria USB, con la entrada «Instalar Hispa-Pentium en el disco duro».\n")
+            devolver 1
+        fin
+        trozo := más_memoria(TROZO)
+        tabla := puntero(más_memoria(MAX_TABLA * 4))
+        si trozo = nulo o tabla = nulo entonces
+            escribir("INSTALAR: no hay memoria.\n")
+            devolver 1
+        fin
+        bienvenida()
+        busca_archivos()
+        busca_discos()
+        mientras cierto hacer
+            disco := elige_disco()
+            si elige_sitio() entonces
+                ; (analiza ha dejado dicho lo que hay en el disco)
+                otra := 0
+                si borrar_todo entonces
+                    p_inicio := ALINEA
+                    p_sectores := info[disco].sectores - ALINEA
+                    p_sectores := p_sectores - p_sectores mod ALINEA
+                    si p_sectores > MAX_SECTORES entonces p_sectores := MAX_SECTORES fin
+                sino
+                    p_inicio := hueco_inicio
+                    p_sectores := hueco_sectores
+                    ; el sistema que ya había: su partición activa o, si no, la primera
+                    para i desde 0 hasta 3 hacer
+                        si mbr[446 + i * 16 + 4] <> 0 y mbr[446 + i * 16 + 4] <> 0x05 y mbr[446 + i * 16 + 4] <> 0x0F entonces
+                            si otra = 0 o mbr[446 + i * 16] = 0x80 entonces
+                                si otra = 0 o mbr[446 + (otra - 1) * 16] <> 0x80 entonces otra := i + 1 fin
+                            fin
+                        fin
+                    fin
+                fin
+                si confirma_final() entonces romper fin
+            fin
+        fin
+        instala()
+        final()
+        devolver 0
+    fin
+
+fin Instala.

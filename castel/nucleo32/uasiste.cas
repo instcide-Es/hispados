@@ -1,0 +1,486 @@
+; =============================================================================
+;  uasiste.cas - ASISTE.BIN: el asistente del primer arranque de un
+;  Hispa-Pentium instalado en el disco. Lo lanza el escritorio cuando el
+;  sistema está instalado (en \HISPA) y aún no tiene sus ajustes
+;  (\HISPA\HISPA.INI). En una ventana corta pregunta el nombre del usuario y
+;  el del equipo, la fecha y la hora (las pone en el reloj del PC), el
+;  teclado (español o de EE. UU.) y la medida de la pantalla; lo guarda en
+;  HISPA.INI, cambia la línea «set modo=» del menú de arranque del disco
+;  (\HISPA\GRUB.CFG: la medida se pone al arrancar) y le dice al núcleo que
+;  lea los ajustes: el menú Inicio saluda ya con el nombre.
+;  Se maneja con el ratón o con el teclado: Tab pasa de una casilla a otra,
+;  el espacio (o las flechas) cambia el teclado y la pantalla, Intro acepta.
+;  Si se cierra sin aceptar, vuelve a salir en el arranque siguiente.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Asiste
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Mem32, Formato
+
+    constante ANCHO = 470
+    constante ALTO = 380
+    constante PAPEL = 0xF1F6FD
+    constante TINTA = 0x14294A
+    constante SUAVE = 0x5A7396
+    constante RESALTE = 0x2F74D0
+    constante ROJO = 0xB02A1E
+    constante X_CASILLA = 196
+    constante ALTO_CASILLA = 24
+    constante RENGLÓN = 34
+    constante PRIMERA = 74                      ; la fila de la primera casilla
+
+    ; ---- las casillas ----
+    constante C_NOMBRE = 0
+    constante C_EQUIPO = 1
+    constante C_FECHA = 2
+    constante C_HORA = 3
+    constante C_TECLADO = 4
+    constante C_PANTALLA = 5
+    constante C_ACEPTAR = 6
+    constante CASILLAS = 7
+    constante MODOS = 6
+
+    variable v: nat32
+    variable nombre: arreglo [24] de byte
+    variable equipo: arreglo [24] de byte = "HISPA"
+    variable fecha: arreglo [16] de byte
+    variable hora: arreglo [16] de byte
+    variable español: bool
+    variable modo: nat32                        ; 0: 800 x 600 ... 5: la del monitor
+    variable casilla: nat32
+    variable aviso: arreglo [80] de byte
+    variable hecho: bool                        ; ya se ha guardado: la pantalla del final
+    variable fecha_tocada: bool
+    variable texto_cfg: arreglo [4200] de byte
+    variable nuevo_cfg: arreglo [4300] de byte
+    variable ini: arreglo [200] de byte
+    variable dd: arreglo [6] de nat32
+    variable ln: arreglo [100] de byte
+
+    función ancho_modo(m: nat32): nat32
+        según m
+            caso 0: devolver 800
+            caso 1: devolver 1024
+            caso 2: devolver 1024
+            caso 3: devolver 1280
+            caso 4: devolver 1366
+        fin
+        devolver 0
+    fin
+
+    función alto_modo(m: nat32): nat32
+        según m
+            caso 0: devolver 600
+            caso 1: devolver 600
+            caso 2: devolver 768
+            caso 3: devolver 800
+            caso 4: devolver 768
+        fin
+        devolver 0
+    fin
+
+    ; el texto de una casilla (nulo si no es de escribir)
+    función texto_de(c: nat32): puntero a byte
+        según c
+            caso C_NOMBRE: devolver nombre
+            caso C_EQUIPO: devolver equipo
+            caso C_FECHA: devolver fecha
+            caso C_HORA: devolver hora
+        fin
+        devolver nulo
+    fin
+
+    función cabe_en(c: nat32): nat32
+        según c
+            caso C_NOMBRE: devolver 20
+            caso C_EQUIPO: devolver 15
+            caso C_FECHA: devolver 10
+        fin
+        devolver 5
+    fin
+
+    función fila_de(c: nat32): ent32
+        devolver ent32(PRIMERA + c * RENGLÓN)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Pintar
+    ; -------------------------------------------------------------------------
+    función pinta_casilla(c: nat32)
+        variable yy, an: ent32
+        variable t: puntero a byte
+        variable borde: nat32
+        yy := fila_de(c)
+        borde := 0x9DB4D4
+        si c = casilla entonces borde := RESALTE fin
+        si c <= C_HORA entonces
+            an := ent32(cabe_en(c) * 8 + 22)
+            rectángulo(v, X_CASILLA - 2, yy - 2, 250, ALTO_CASILLA + 4, PAPEL)
+            rectángulo(v, X_CASILLA, yy, an, ALTO_CASILLA, 0xFFFFFF)
+            marco(v, X_CASILLA, yy, an, ALTO_CASILLA, borde)
+            si c = casilla entonces marco(v, X_CASILLA - 1, yy - 1, an + 2, ALTO_CASILLA + 2, borde) fin
+            t := texto_de(c)
+            texto(v, X_CASILLA + 6, yy + 4, t, TINTA)
+            si c = casilla entonces rectángulo(v, X_CASILLA + 7 + ent32(longitud(t)) * 8, yy + 4, 2, 16, TINTA) fin
+        sino si c = C_TECLADO entonces
+            rectángulo(v, X_CASILLA - 2, yy - 2, 262, ALTO_CASILLA + 4, PAPEL)
+            si c = casilla entonces marco(v, X_CASILLA - 1, yy - 1, 258, ALTO_CASILLA + 2, borde) fin
+            redondeado(v, X_CASILLA + 6, yy + 5, 14, 14, 7, 0x6F87A8, 0x6F87A8)
+            redondeado(v, X_CASILLA + 7, yy + 6, 12, 12, 6, 0xFFFFFF, 0xFFFFFF)
+            redondeado(v, X_CASILLA + 126, yy + 5, 14, 14, 7, 0x6F87A8, 0x6F87A8)
+            redondeado(v, X_CASILLA + 127, yy + 6, 12, 12, 6, 0xFFFFFF, 0xFFFFFF)
+            si español entonces redondeado(v, X_CASILLA + 10, yy + 9, 6, 6, 3, RESALTE, RESALTE) sino redondeado(v, X_CASILLA + 130, yy + 9, 6, 6, 3, RESALTE, RESALTE) fin
+            texto(v, X_CASILLA + 26, yy + 4, "español", TINTA)
+            texto(v, X_CASILLA + 146, yy + 4, "de EE. UU.", TINTA)
+        sino si c = C_PANTALLA entonces
+            rectángulo(v, X_CASILLA - 2, yy - 2, 262, ALTO_CASILLA + 4, PAPEL)
+            redondeado(v, X_CASILLA, yy, 256, ALTO_CASILLA, 4, borde, borde)
+            redondeado(v, X_CASILLA + 1, yy + 1, 254, ALTO_CASILLA - 2, 3, 0xFFFFFF, 0xE3ECF8)
+            si modo >= MODOS - 1 entonces
+                texto(v, X_CASILLA + 8, yy + 4, "la que prefiera el monitor", TINTA)
+            sino
+                dd[0] := ancho_modo(modo)
+                dd[1] := alto_modo(modo)
+                formatear(ln, 100, "%u x %u", dd)
+                texto(v, X_CASILLA + 8, yy + 4, ln, TINTA)
+            fin
+            ; (la flechita: hay más donde elegir)
+            rectángulo(v, X_CASILLA + 234, yy + 9, 9, 2, SUAVE)
+            rectángulo(v, X_CASILLA + 236, yy + 11, 5, 2, SUAVE)
+            rectángulo(v, X_CASILLA + 238, yy + 13, 1, 2, SUAVE)
+        sino
+            ; el botón «Aceptar»
+            rectángulo(v, ANCHO - 136, ALTO - 50, 120, 38, PAPEL)
+            si c = casilla entonces redondeado(v, ANCHO - 132, ALTO - 48, 112, 34, 7, 0x123F85, 0x123F85) sino redondeado(v, ANCHO - 132, ALTO - 48, 112, 34, 7, 0x7E9CC4, 0x7E9CC4) fin
+            redondeado(v, ANCHO - 130, ALTO - 46, 108, 30, 6, 0x5FA6F2, 0x2C6FD0)
+            texto_negrita(v, ANCHO - 104, ALTO - 39, "Aceptar", 0xFFFFFF)
+        fin
+    fin
+
+    función pinta_aviso()
+        rectángulo(v, 16, ALTO - 44, ANCHO - 156, 32, PAPEL)
+        si aviso[0] <> 0 entonces texto(v, 20, ALTO - 38, aviso, ROJO) fin
+    fin
+
+    función pinta_cabeza(t: puntero a byte, t2: puntero a byte)
+        degradado(v, 0, 0, ANCHO, 58, 0x4E99EE, 0x1F62C0)
+        rectángulo(v, 0, 58, ANCHO, 2, 0xF29A2E)
+        disquete(v, 14, 9, 40)
+        texto_negrita(v, 67, 13, t, 0x123F85)
+        texto_negrita(v, 66, 12, t, 0xFFFFFF)
+        texto(v, 66, 32, t2, 0xD3E7FD)
+    fin
+
+    función pinta_todo()
+        variable c: nat32
+        rectángulo(v, 0, 60, ANCHO, ALTO - 60, PAPEL)
+        si hecho entonces
+            pinta_cabeza("Todo listo", "Hispa-Pentium ya está a su gusto")
+            Textos32.copiar(ln, "¡Hola, ")
+            concatenar(ln, nombre)
+            concatenar(ln, "!")
+            texto_negrita(v, 24, 90, ln, TINTA)
+            texto(v, 24, 122, "Sus datos están guardados en C:\\HISPA\\HISPA.INI.", TINTA)
+            texto(v, 24, 150, "La fecha, la hora y el teclado ya están puestos.", TINTA)
+            texto(v, 24, 178, "La medida de la pantalla se pone al arrancar: si la", TINTA)
+            texto(v, 24, 198, "ha cambiado, la verá la próxima vez que encienda.", TINTA)
+            texto(v, 24, 238, "En el menú Inicio están el Bloc de notas, la Consola", SUAVE)
+            texto(v, 24, 258, "y Mi equipo.", SUAVE)
+            redondeado(v, ANCHO - 132, ALTO - 48, 112, 34, 7, 0x123F85, 0x123F85)
+            redondeado(v, ANCHO - 130, ALTO - 46, 108, 30, 6, 0x5FA6F2, 0x2C6FD0)
+            texto_negrita(v, ANCHO - 104, ALTO - 39, "Empezar", 0xFFFFFF)
+            devolver
+        fin
+        pinta_cabeza("Bienvenido a Hispa-Pentium", "Unos datos para dejarlo a su gusto")
+        texto(v, 24, fila_de(C_NOMBRE) + 4, "Su nombre:", TINTA)
+        texto(v, 24, fila_de(C_EQUIPO) + 4, "Nombre del equipo:", TINTA)
+        texto(v, 24, fila_de(C_FECHA) + 4, "Fecha (día/mes/año):", TINTA)
+        texto(v, 24, fila_de(C_HORA) + 4, "Hora (horas:minutos):", TINTA)
+        texto(v, 24, fila_de(C_TECLADO) + 4, "Teclado:", TINTA)
+        texto(v, 24, fila_de(C_PANTALLA) + 4, "Pantalla:", TINTA)
+        para c desde 0 hasta CASILLAS - 1 hacer pinta_casilla(c) fin
+        texto(v, 24, fila_de(C_PANTALLA) + 34, "Tab: otra casilla   Espacio: cambiar   Intro: aceptar", SUAVE)
+        pinta_aviso()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Guardar
+    ; -------------------------------------------------------------------------
+    ; el número que hay en t desde i (que avanza); 0xFFFFFFFF si no hay cifras
+    función número(t: puntero a byte, ref i: nat32): nat32
+        variable n, cifras: nat32
+        n := 0
+        cifras := 0
+        mientras t[i] >= '0' y t[i] <= '9' y cifras < 5 hacer
+            n := n * 10 + (t[i] - '0')
+            i := i + 1
+            cifras := cifras + 1
+        fin
+        si cifras = 0 entonces devolver 0xFFFFFFFF fin
+        devolver n
+    fin
+
+    ; la fecha y la hora escritas, como las guarda la FAT. Falso si no valen.
+    función lee_fecha(ref f: nat32, ref h: nat32): bool
+        variable i, d, m, a, ho, mi, tope: nat32
+        i := 0
+        d := número(fecha, i)
+        si fecha[i] <> '/' y fecha[i] <> '-' y fecha[i] <> '.' entonces devolver falso fin
+        i := i + 1
+        m := número(fecha, i)
+        si fecha[i] <> '/' y fecha[i] <> '-' y fecha[i] <> '.' entonces devolver falso fin
+        i := i + 1
+        a := número(fecha, i)
+        si fecha[i] <> 0 entonces devolver falso fin
+        si a < 100 entonces a := a + 2000 fin
+        si a < 1980 o a > 2079 o m < 1 o m > 12 o d < 1 entonces devolver falso fin
+        tope := 31
+        si m = 4 o m = 6 o m = 9 o m = 11 entonces tope := 30 fin
+        si m = 2 entonces
+            tope := 28
+            si a mod 4 = 0 entonces tope := 29 fin
+        fin
+        si d > tope entonces devolver falso fin
+        i := 0
+        ho := número(hora, i)
+        si hora[i] <> ':' y hora[i] <> '.' entonces devolver falso fin
+        i := i + 1
+        mi := número(hora, i)
+        si hora[i] <> 0 o ho > 23 o mi > 59 entonces devolver falso fin
+        f := ((a - 1980) << 9) ob (m << 5) ob d
+        h := (ho << 11) ob (mi << 5)
+        devolver cierto
+    fin
+
+    ; quita los espacios de los lados y lo que no puede ir en HISPA.INI
+    función limpia(t: puntero a byte)
+        variable i, n: nat32
+        n := longitud(t)
+        mientras n > 0 y t[n - 1] = ' ' hacer
+            n := n - 1
+            t[n] := 0
+        fin
+        i := 0
+        mientras t[i] = ' ' hacer i := i + 1 fin
+        si i > 0 entonces Textos32.copiar(t, t + i) fin
+    fin
+
+    ; escribe un texto entero en un archivo nuevo. Falso si no se puede.
+    función guarda(ruta: puntero a byte, t: puntero a byte): bool
+        variable m, n, r: nat32
+        m := crear(ruta)
+        si es_error(m) entonces devolver falso fin
+        n := longitud(t)
+        r := escribir_archivo(m, t, n)
+        cerrar(m)
+        devolver r = n
+    fin
+
+    ; cambia la línea «set modo=» del menú de arranque del disco
+    función guarda_modo(): bool
+        variable m, n, k, i, j: nat32
+        m := abrir("\\HISPA\\GRUB.CFG")
+        si es_error(m) entonces devolver falso fin
+        n := 0
+        mientras n < 4096 hacer
+            k := leer(m, dirección(texto_cfg[n]), 4096 - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        texto_cfg[n] := 0
+        i := 0
+        j := 0
+        mientras i < n hacer
+            ; al principio de una línea
+            si empieza_por(dirección(texto_cfg[i]), "set modo=") entonces
+                si modo >= MODOS - 1 entonces
+                    Textos32.copiar(dirección(nuevo_cfg[j]), "set modo=auto\n")
+                sino
+                    dd[0] := ancho_modo(modo)
+                    dd[1] := alto_modo(modo)
+                    dd[2] := dd[0]
+                    dd[3] := dd[1]
+                    formatear(dirección(nuevo_cfg[j]), 80, "set modo=%ux%ux32,%ux%u,auto\n", dd)
+                fin
+                j := j + longitud(dirección(nuevo_cfg[j]))
+                mientras i < n y texto_cfg[i] <> '\n' hacer i := i + 1 fin
+                si i < n entonces i := i + 1 fin
+            sino
+                mientras i < n y texto_cfg[i] <> '\n' hacer
+                    nuevo_cfg[j] := texto_cfg[i]
+                    i := i + 1
+                    j := j + 1
+                fin
+                si i < n entonces
+                    nuevo_cfg[j] := '\n'
+                    i := i + 1
+                    j := j + 1
+                fin
+            fin
+        fin
+        nuevo_cfg[j] := 0
+        devolver guarda("\\HISPA\\GRUB.CFG", nuevo_cfg)
+    fin
+
+    ; Aceptar: se comprueba, se guarda y se pone. Falso (con su aviso) si no vale.
+    función acepta(): bool
+        variable f, h: nat32
+        limpia(nombre)
+        limpia(equipo)
+        si nombre[0] = 0 entonces
+            Textos32.copiar(aviso, "Escriba su nombre.")
+            casilla := C_NOMBRE
+            devolver falso
+        fin
+        si equipo[0] = 0 entonces Textos32.copiar(equipo, "HISPA") fin
+        si no lee_fecha(f, h) entonces
+            Textos32.copiar(aviso, "La fecha o la hora no valen (25/12/2026 y 18:30).")
+            casilla := C_FECHA
+            devolver falso
+        fin
+        si fecha_tocada entonces poner_reloj(f, h) fin
+        poner_teclado(español)
+        dd[0] := nat32(dirección(nombre[0]))
+        dd[1] := nat32(dirección(equipo[0]))
+        si español entonces dd[2] := nat32("es") sino dd[2] := nat32("us") fin
+        si modo >= MODOS - 1 entonces
+            formatear(ini, 200, "[hispa]\r\nusuario=%s\r\nequipo=%s\r\nteclado=%s\r\nmodo=auto\r\n", dd)
+        sino
+            dd[3] := ancho_modo(modo)
+            dd[4] := alto_modo(modo)
+            formatear(ini, 200, "[hispa]\r\nusuario=%s\r\nequipo=%s\r\nteclado=%s\r\nmodo=%ux%u\r\n", dd)
+        fin
+        si no guarda("\\HISPA\\HISPA.INI", ini) entonces
+            Textos32.copiar(aviso, "No se puede guardar en el disco (C:\\HISPA).")
+            devolver falso
+        fin
+        guarda_modo()
+        releer_ajustes()
+        escribir("asistente: guardado HISPA.INI (", nombre, ", ", equipo, ")\n")
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El teclado y el ratón
+    ; -------------------------------------------------------------------------
+    función cambia(c: nat32, atrás: bool)
+        si c = C_TECLADO entonces
+            español := no español
+            poner_teclado(español)
+        sino si c = C_PANTALLA entonces
+            si atrás entonces modo := (modo + MODOS - 1) mod MODOS sino modo := (modo + 1) mod MODOS fin
+        fin
+    fin
+
+    función a_casilla(c: nat32)
+        variable antes: nat32
+        antes := casilla
+        casilla := c
+        pinta_casilla(antes)
+        pinta_casilla(casilla)
+    fin
+
+    ; da cierto cuando hay que acabar
+    función tecla_pulsada(c: nat32): bool
+        variable t: puntero a byte
+        variable n: nat32
+        si hecho entonces devolver c = '\n' o c = ' ' o c = 27 fin
+        si c = '\t' o c = TECLA_ABAJO entonces
+            a_casilla((casilla + 1) mod CASILLAS)
+        sino si c = TECLA_ARRIBA entonces
+            a_casilla((casilla + CASILLAS - 1) mod CASILLAS)
+        sino si c = '\n' entonces
+            aviso[0] := 0
+            si acepta() entonces hecho := cierto fin
+            pinta_todo()
+        sino si casilla <= C_HORA entonces
+            t := texto_de(casilla)
+            n := longitud(t)
+            si c = 8 entonces
+                si n > 0 entonces t[n - 1] := 0 fin
+            sino si c >= ' ' y c < 0x100 y c <> '=' y n < cabe_en(casilla) entonces
+                t[n] := c
+                t[n + 1] := 0
+            fin
+            si casilla >= C_FECHA entonces fecha_tocada := cierto fin
+            pinta_casilla(casilla)
+        sino si casilla = C_ACEPTAR entonces
+            si c = ' ' entonces devolver tecla_pulsada('\n') fin
+        sino si c = ' ' o c = TECLA_DERECHA o c = TECLA_IZQUIERDA entonces
+            cambia(casilla, c = TECLA_IZQUIERDA)
+            pinta_casilla(casilla)
+        fin
+        devolver falso
+    fin
+
+    función clic(x: ent32, yy: ent32): bool
+        variable c: nat32
+        si x >= ANCHO - 132 y yy >= ALTO - 48 y yy < ALTO - 14 entonces
+            si hecho entonces devolver cierto fin
+            a_casilla(C_ACEPTAR)
+            devolver tecla_pulsada('\n')
+        fin
+        si hecho entonces devolver falso fin
+        para c desde 0 hasta C_PANTALLA hacer
+            si yy >= fila_de(c) - 2 y yy < fila_de(c) + ALTO_CASILLA + 2 y x >= X_CASILLA - 2 entonces
+                a_casilla(c)
+                si c = C_TECLADO entonces
+                    si (x < X_CASILLA + 120) <> español entonces cambia(c, falso) fin
+                    pinta_casilla(c)
+                sino si c = C_PANTALLA entonces
+                    cambia(c, falso)
+                    pinta_casilla(c)
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable f, h: nat32
+        v := ventana("Bienvenido a Hispa-Pentium", ANCHO, ALTO)
+        si es_error(v) entonces
+            escribir("asistente: no hay escritorio (o no hay memoria para la ventana)\n")
+            devolver 1
+        fin
+        ; lo que ya se sabe: el nombre (si se le llama otra vez), la fecha y
+        ; la hora del reloj, el teclado y la pantalla que hay
+        nombre_usuario(nombre, 21)
+        nombre_equipo(ln, 16)
+        si ln[0] <> 0 entonces Textos32.copiar(equipo, ln) fin
+        f := dato(DATO_FECHA)
+        h := f yb 0xFFFF
+        f := f >> 16
+        dd[0] := f yb 31
+        dd[1] := (f >> 5) yb 15
+        dd[2] := (f >> 9) + 1980
+        formatear(fecha, 16, "%02u/%02u/%u", dd)
+        dd[0] := h >> 11
+        dd[1] := (h >> 5) yb 63
+        formatear(hora, 16, "%02u:%02u", dd)
+        español := teclado_español()
+        modo := MODOS - 1
+        para f desde 0 hasta MODOS - 2 hacer
+            si dato(DATO_ANCHO_PANTALLA) = ancho_modo(f) y dato(DATO_ALTO_PANTALLA) = alto_modo(f) entonces modo := f fin
+        fin
+        escribir("asistente: el primer arranque\n")
+        pinta_todo()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                si tecla_pulsada(s.a) entonces devolver 0 fin
+            sino si s.clase = EV_RATÓN_BAJA entonces
+                si clic(ent32(s.a), ent32(s.b)) entonces devolver 0 fin
+            sino si s.clase = EV_TAMAÑO entonces
+                pinta_todo()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+fin Asiste.
