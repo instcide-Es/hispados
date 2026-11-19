@@ -64,6 +64,7 @@ módulo Tareas
         aguanta: bool                           ; atiende ella Ctrl+C (un intérprete de órdenes): no se la acaba
         matar: bool                             ; hay que acabarla (Ctrl+C) en cuanto vuelva al anillo 3
         corte: bool                             ; se ha pulsado Ctrl+C (para las que lo atienden)
+        terminal: nat32                         ; el terminal por el que escribe y lee (terminal.cas), o 0: la consola
     fin
 
     público tipo Cola = estructura
@@ -326,6 +327,8 @@ módulo Tareas
             t.salida := actual.salida
             t.salida_serie := actual.salida_serie
         fin
+        t.terminal := 0
+        si actual <> nulo entonces t.terminal := actual.terminal fin
         t.salida_cr := falso
         t.aguanta := falso
         t.matar := falso
@@ -519,6 +522,23 @@ módulo Tareas
         devolver c
     fin
 
+    ; marca una tarea para acabar (en cuanto vuelva al anillo 3) y, si
+    ; dormía o esperaba, la despierta para que llegue
+    público función acabar_tarea(t: puntero a Tarea)
+        variable b: nat32
+        b := sin_interrupciones()
+        t.matar := cierto
+        si t.estado = DORMIDA entonces
+            quitar(dormidas, t)
+            t.estado := LISTA
+            meter(listas, t)
+        sino si t.estado = ESPERANDO entonces
+            t.estado := LISTA
+            meter(listas, t)
+        fin
+        reponer(b)
+    fin
+
     ; Ctrl+C: los programas del anillo 3 que no han dicho que lo atienden
     ; ellos quedan marcados para acabar (en cuanto vuelvan al anillo 3: al
     ; salir de una llamada al sistema, o cuando el reloj los pille allí), y
@@ -535,16 +555,8 @@ módulo Tareas
                 si t.aguanta entonces
                     t.corte := cierto
                 sino
-                    t.matar := cierto
+                    acabar_tarea(t)
                     n := n + 1
-                    si t.estado = DORMIDA entonces
-                        quitar(dormidas, t)
-                        t.estado := LISTA
-                        meter(listas, t)
-                    sino si t.estado = ESPERANDO entonces
-                        t.estado := LISTA
-                        meter(listas, t)
-                    fin
                 fin
             fin
         fin

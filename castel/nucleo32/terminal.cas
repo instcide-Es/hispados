@@ -1,0 +1,202 @@
+; =============================================================================
+;  terminal.cas - los terminales de Hispa-Pentium: lo que hace falta para que
+;  un programa del anillo 3 (la «Consola» del escritorio) tenga dentro de su
+;  ventana a otros programas que escriben y leen el teclado como siempre (el
+;  intérprete de órdenes y lo que este lance).
+;
+;  Un terminal son dos tubos. Su dueño (el programa que lo hace) lee por uno
+;  lo que escriben los programas que tiene dentro, y mete por el otro las
+;  teclas que ellos leerán. Los programas que lanza el dueño heredan el
+;  terminal (y los que lancen estos): su «escribir» va al tubo en vez de a
+;  la pantalla, y su «tecla» sale de él en vez del teclado. No se enteran.
+;
+;  Si el tubo de salida está lleno, quien escribe espera a que el dueño lea.
+;  Ctrl+C en un terminal acaba los programas que tiene dentro (menos los que
+;  lo atienden ellos), como en la consola. Cuando el dueño acaba (o cuelga),
+;  se acaban todos los que quedaban dentro.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Terminal
+
+    importar Cpu, Tareas
+
+    público constante MAX_TERMINALES = 4
+    constante SALIDA = 4096                     ; lo que cabe en el tubo de salida
+    constante ENTRADA = 64                      ; las teclas que caben en el de entrada
+
+    tipo Term = estructura
+        usado: bool
+        dueño: nat32                            ; el número de la tarea que lo hizo
+        salida: arreglo [SALIDA] de byte
+        s_ent, s_sal: nat32
+        entrada: arreglo [ENTRADA] de nat16
+        e_ent, e_sal: nat32
+    fin
+
+    variable terminales: arreglo [MAX_TERMINALES] de Term
+
+    ; el terminal número n (desde 1) si está en uso; nulo si no
+    función el_terminal(n: nat32): puntero a Term
+        si n = 0 o n > MAX_TERMINALES entonces devolver nulo fin
+        si no terminales[n - 1].usado entonces devolver nulo fin
+        devolver dirección(terminales[n - 1])
+    fin
+
+    ; un terminal nuevo, de la tarea que corre (pasa a ser el suyo y el de los
+    ; programas que lance): da su número, o 0 si no quedan
+    público función crear_terminal(): nat32
+        variable i, b: nat32
+        b := sin_interrupciones()
+        para i desde 0 hasta MAX_TERMINALES - 1 hacer
+            si no terminales[i].usado entonces
+                terminales[i].usado := cierto
+                terminales[i].dueño := actual.id
+                terminales[i].s_ent := 0
+                terminales[i].s_sal := 0
+                terminales[i].e_ent := 0
+                terminales[i].e_sal := 0
+                actual.terminal := i + 1
+                reponer(b)
+                devolver i + 1
+            fin
+        fin
+        reponer(b)
+        devolver 0
+    fin
+
+    ; lo que escribe un programa de dentro: n octetos, al tubo de salida. Si
+    ; se llena, espera a que el dueño lea (el dueño no espera: lo suyo que no
+    ; quepa se pierde). Da los octetos que han entrado.
+    público función escribir_terminal(t: nat32, p: puntero a byte, n: nat32): nat32
+        variable e: puntero a Term
+        variable i, b: nat32
+        i := 0
+        mientras i < n hacer
+            e := el_terminal(t)
+            si e = nulo entonces devolver n fin         ; ya no hay quien lo lea: se pierde
+            b := sin_interrupciones()
+            mientras i < n y e.s_ent - e.s_sal < SALIDA hacer
+                e.salida[e.s_ent mod SALIDA] := p[i]
+                e.s_ent := e.s_ent + 1
+                i := i + 1
+            fin
+            reponer(b)
+            si i < n entonces
+                si actual.matar o actual.id = e.dueño entonces devolver i fin
+                dormir(1)
+            fin
+        fin
+        devolver n
+    fin
+
+    ; lo que lee el dueño: hasta «cabe» octetos de lo que han escrito los de
+    ; dentro. Da cuántos (0 si no hay nada).
+    público función leer_salida(t: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable e: puntero a Term
+        variable i, b: nat32
+        e := el_terminal(t)
+        si e = nulo o e.dueño <> actual.id entonces devolver 0 fin
+        b := sin_interrupciones()
+        i := 0
+        mientras i < cabe y e.s_sal <> e.s_ent hacer
+            destino[i] := e.salida[e.s_sal mod SALIDA]
+            e.s_sal := e.s_sal + 1
+            i := i + 1
+        fin
+        reponer(b)
+        devolver i
+    fin
+
+    ; el dueño mete una tecla para los de dentro
+    público función teclear(t: nat32, c: nat32)
+        variable e: puntero a Term
+        variable b: nat32
+        e := el_terminal(t)
+        si e = nulo entonces devolver fin
+        b := sin_interrupciones()
+        si e.e_ent - e.e_sal < ENTRADA entonces
+            e.entrada[e.e_ent mod ENTRADA] := c
+            e.e_ent := e.e_ent + 1
+        fin
+        reponer(b)
+    fin
+
+    ; ¿hay alguna tecla esperando en el terminal?
+    público función hay_tecla_terminal(t: nat32): bool
+        variable e: puntero a Term
+        e := el_terminal(t)
+        devolver e <> nulo y e.e_sal <> e.e_ent
+    fin
+
+    ; la tecla siguiente para un programa de dentro: la espera (0 si a la
+    ; tarea la están acabando, o si el terminal ya no está)
+    público función tecla_terminal(t: nat32): nat32
+        variable e: puntero a Term
+        variable c, b: nat32
+        mientras cierto hacer
+            e := el_terminal(t)
+            si e = nulo o actual.matar entonces devolver 0 fin
+            b := sin_interrupciones()
+            si e.e_sal <> e.e_ent entonces
+                c := e.entrada[e.e_sal mod ENTRADA]
+                e.e_sal := e.e_sal + 1
+                reponer(b)
+                devolver c
+            fin
+            reponer(b)
+            dormir(1)
+        fin
+        devolver 0
+    fin
+
+    ; Ctrl+C en el terminal: los programas de dentro que no lo atienden ellos
+    ; quedan marcados para acabar; a los que lo atienden se les apunta y, si
+    ; no había nadie a quien acabar, les llega como una tecla (el 3)
+    público función cortar_terminal(t: nat32)
+        variable i, n, b: nat32
+        variable e: puntero a Term
+        variable ta: puntero a Tarea
+        e := el_terminal(t)
+        si e = nulo entonces devolver fin
+        n := 0
+        b := sin_interrupciones()
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            ta := dirección(tareas[i])
+            si ta.estado <> LIBRE y ta.estado <> ACABADA y ta.usuario y ta.terminal = t y ta.id <> e.dueño entonces
+                si ta.aguanta entonces
+                    ta.corte := cierto
+                sino
+                    acabar_tarea(ta)
+                    n := n + 1
+                fin
+            fin
+        fin
+        reponer(b)
+        si n = 0 entonces teclear(t, 3) fin
+    fin
+
+    ; se acaba el terminal: los programas que tenía dentro se acaban todos
+    función colgar(t: nat32)
+        variable i, b: nat32
+        variable e: puntero a Term
+        variable ta: puntero a Tarea
+        e := el_terminal(t)
+        si e = nulo entonces devolver fin
+        b := sin_interrupciones()
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            ta := dirección(tareas[i])
+            si ta.estado <> LIBRE y ta.estado <> ACABADA y ta.terminal = t y ta.id <> e.dueño entonces acabar_tarea(ta) fin
+        fin
+        e.usado := falso
+        reponer(b)
+    fin
+
+    ; al acabar una tarea: si tenía hecho un terminal, se cuelga
+    público función soltar_terminales_de(dueño: nat32)
+        variable i: nat32
+        para i desde 0 hasta MAX_TERMINALES - 1 hacer
+            si terminales[i].usado y terminales[i].dueño = dueño entonces colgar(i + 1) fin
+        fin
+    fin
+
+fin Terminal.

@@ -1,0 +1,159 @@
+; =============================================================================
+;  raton.cas - el ratón PS/2 de Hispa-Pentium (la segunda boca del 8042, la
+;  IRQ 12). Cada movimiento son tres octetos: los botones y los signos, lo
+;  que se ha movido a lo ancho y lo que se ha movido a lo alto (hacia arriba
+;  es positivo: se le da la vuelta). La interrupción lleva la cuenta de dónde
+;  está la flecha (dentro de la pantalla) y apunta cada cambio de botón en
+;  una cola, con el sitio donde fue: así no se pierde un clic aunque quien lo
+;  atiende tarde.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Raton
+
+    importar Cpu
+
+    constante DATOS = 0x60
+    constante ESTADO = 0x64
+
+    público constante BOTÓN_IZQUIERDO = 1
+    público constante BOTÓN_DERECHO = 2
+    público constante BOTÓN_MEDIO = 4
+
+    público tipo Clic = estructura              ; un cambio de botones
+        x, ye: ent32                            ; dónde estaba la flecha
+        botones: nat32                          ; cómo quedan
+    fin
+
+    público variable hay_ratón: bool
+    público variable ratón_x, ratón_y: ent32    ; dónde está la flecha
+    público variable ratón_botones: nat32       ; los que están pulsados
+    público variable paquetes: nat32            ; los movimientos que han llegado
+    variable ancho, alto: ent32                 ; hasta dónde llega
+    variable trozo: arreglo [3] de byte
+    variable cuántos: nat32
+    constante COLA = 32
+    variable cola: arreglo [COLA] de Clic
+    variable cola_ent, cola_sal: nat32
+
+    ; espera a que el 8042 admita una orden (falso si no llega a admitirla)
+    función espera_escribir(): bool
+        variable i: nat32
+        para i desde 1 hasta 100000 hacer
+            si meter_puerto(ESTADO) yb 2 = 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; espera un octeto del 8042 y lo da (0xFFFFFFFF si no llega)
+    función espera_leer(): nat32
+        variable i: nat32
+        para i desde 1 hasta 200000 hacer
+            si meter_puerto(ESTADO) yb 1 <> 0 entonces devolver meter_puerto(DATOS) fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; una orden al ratón (por el 8042): da su respuesta (0xFA, «entendido»)
+    función al_ratón(orden: byte): nat32
+        si no espera_escribir() entonces devolver 0xFFFFFFFF fin
+        sacar_puerto(ESTADO, 0xD4)
+        si no espera_escribir() entonces devolver 0xFFFFFFFF fin
+        sacar_puerto(DATOS, orden)
+        devolver espera_leer()
+    fin
+
+    interrupción función ratón()
+        variable e, d, b: nat32
+        variable dx, dy: ent32
+        e := meter_puerto(ESTADO)
+        si e yb 0x21 = 0x21 entonces
+            d := meter_puerto(DATOS)
+            ; el primero de los tres lleva siempre el bit 3: así no se pierde el paso
+            si cuántos <> 0 o d yb 8 <> 0 entonces
+                trozo[cuántos] := d
+                cuántos := cuántos + 1
+            fin
+            si cuántos = 3 entonces
+                cuántos := 0
+                paquetes := paquetes + 1
+                b := trozo[0]
+                si b yb 0xC0 = 0 entonces               ; (si se ha desbordado, no vale)
+                    dx := ent32(trozo[1])
+                    si b yb 0x10 <> 0 entonces dx := dx - 256 fin
+                    dy := ent32(trozo[2])
+                    si b yb 0x20 <> 0 entonces dy := dy - 256 fin
+                    ratón_x := ratón_x + dx
+                    ratón_y := ratón_y - dy
+                    si ratón_x < 0 entonces ratón_x := 0 fin
+                    si ratón_y < 0 entonces ratón_y := 0 fin
+                    si ratón_x >= ancho entonces ratón_x := ancho - 1 fin
+                    si ratón_y >= alto entonces ratón_y := alto - 1 fin
+                    si b yb 7 <> ratón_botones entonces
+                        ratón_botones := b yb 7
+                        si cola_ent - cola_sal < COLA entonces
+                            cola[cola_ent mod COLA].x := ratón_x
+                            cola[cola_ent mod COLA].ye := ratón_y
+                            cola[cola_ent mod COLA].botones := ratón_botones
+                            cola_ent := cola_ent + 1
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        sacar_puerto(PIC2, FIN_INT)
+        sacar_puerto(PIC1, FIN_INT)
+    fin
+
+    ; el cambio de botones siguiente de la cola; falso si no hay
+    público función saca_clic(ref c: Clic): bool
+        variable b: nat32
+        b := sin_interrupciones()
+        si cola_sal = cola_ent entonces
+            reponer(b)
+            devolver falso
+        fin
+        c.x := cola[cola_sal mod COLA].x
+        c.ye := cola[cola_sal mod COLA].ye
+        c.botones := cola[cola_sal mod COLA].botones
+        cola_sal := cola_sal + 1
+        reponer(b)
+        devolver cierto
+    fin
+
+    ; enciende el ratón, con la flecha en el centro de una pantalla de ese
+    ; ancho y ese alto. Falso si no contesta (no hay ratón PS/2).
+    público función prepara_ratón(an: ent32, al: ent32): bool
+        variable b, c, r: nat32
+        ancho := an
+        alto := al
+        ratón_x := an div 2
+        ratón_y := al div 2
+        b := sin_interrupciones()
+        ; la segunda boca del 8042, encendida, y con su interrupción
+        espera_escribir()
+        sacar_puerto(ESTADO, 0xA8)
+        espera_escribir()
+        sacar_puerto(ESTADO, 0x20)
+        c := espera_leer()
+        si c <> 0xFFFFFFFF entonces
+            c := (c ob 2) yb 0xDF
+            espera_escribir()
+            sacar_puerto(ESTADO, 0x60)
+            espera_escribir()
+            sacar_puerto(DATOS, c)
+        fin
+        r := al_ratón(0xF6)                     ; como de fábrica
+        si r = 0xFA entonces r := al_ratón(0xF4) fin    ; y que cuente lo que se mueve
+        hay_ratón := r = 0xFA
+        si hay_ratón entonces
+            cuántos := 0
+            pon_puerta(0x2C, nat32(dirección(ratón)), PUERTA_NÚCLEO)
+            ; se destapan la IRQ 12 y la 2 (por donde llega el segundo 8259)
+            sacar_puerto(PIC2 + 1, meter_puerto(PIC2 + 1) yb 0xEF)
+            sacar_puerto(PIC1 + 1, meter_puerto(PIC1 + 1) yb 0xFB)
+        fin
+        reponer(b)
+        devolver hay_ratón
+    fin
+
+fin Raton.

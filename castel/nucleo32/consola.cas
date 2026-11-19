@@ -36,6 +36,7 @@ módulo Consola
     público constante TECLA_INICIO = 0x147
     público constante TECLA_FIN = 0x14F
     público constante TECLA_SUPR = 0x153
+    público constante TECLA_LOGO = 0x15B         ; la tecla del logo (la que abre el menú Inicio)
     público constante CTRL_C = 3
 
     ; las teclas muertas, en las tablas
@@ -45,6 +46,10 @@ módulo Consola
     constante DIÉRESIS = 4
 
     público variable teclas: nat32              ; las teclas (letras) que han llegado
+    ; con el entorno gráfico en marcha, las teclas son suyas: las saca con
+    ; saca_tecla() y las reparte entre las ventanas; quien lee de la consola
+    ; se queda esperando, y Ctrl+C es una tecla más
+    público variable desviado: bool
     constante COLA = 64
     variable cola: arreglo [COLA] de nat16
     variable cola_ent, cola_sal: nat32
@@ -176,6 +181,8 @@ módulo Consola
             sino si código >= 0x47 y código <= 0x53 entonces
                 muerta := 0
                 a_la_cola(TECLA_ESPECIAL + código)      ; las flechas, Inicio, Fin, Supr...
+            sino si código = 0x5B o código = 0x5C entonces
+                a_la_cola(TECLA_LOGO)                   ; la tecla del logo
             fin
         sino si código = 0x2A o código = 0x36 entonces
             mayúsculas := cierto
@@ -204,7 +211,7 @@ módulo Consola
                     c := c - 0x60
                     ; Ctrl+C acaba los programas en marcha; si no hay ninguno
                     ; que acabar, llega como una tecla más (el 3)
-                    si c <> CTRL_C o cortar_programas() = 0 entonces a_la_cola(c) fin
+                    si c <> CTRL_C o desviado o cortar_programas() = 0 entonces a_la_cola(c) fin
                 fin
             sino si c >= AGUDO y c <= DIÉRESIS entonces
                 si muerta <> 0 entonces
@@ -220,7 +227,7 @@ módulo Consola
             fin
         fin
         sacar_puerto(PIC1, FIN_INT)
-        si esperando_tecla <> nulo entonces
+        si esperando_tecla <> nulo y no desviado entonces
             despertar_tarea(esperando_tecla)
             esperando_tecla := nulo
         fin
@@ -242,7 +249,21 @@ módulo Consola
 
     ; ¿hay alguna tecla en la cola?
     público función hay_tecla(): bool
-        devolver cola_sal <> cola_ent
+        devolver cola_sal <> cola_ent y no desviado
+    fin
+
+    ; la tecla siguiente de la cola, sin esperar (0 si no hay): para el
+    ; entorno gráfico, que es quien las reparte cuando está en marcha
+    público función saca_tecla(): nat32
+        variable c, b: nat32
+        b := sin_interrupciones()
+        c := 0
+        si cola_sal <> cola_ent entonces
+            c := cola[cola_sal mod COLA]
+            cola_sal := cola_sal + 1
+        fin
+        reponer(b)
+        devolver c
     fin
 
     ; espera una tecla de la cola: mientras no la hay, la tarea se queda
@@ -254,12 +275,12 @@ módulo Consola
         variable b: nat32
         tomar(cerrojo_teclado)
         b := sin_interrupciones()
-        mientras cola_sal = cola_ent y no actual.matar hacer
+        mientras (cola_sal = cola_ent o desviado) y no actual.matar hacer
             esperando_tecla := actual
             bloquear()
         fin
         c := 0
-        si cola_sal <> cola_ent entonces
+        si cola_sal <> cola_ent y no desviado entonces
             c := cola[cola_sal mod COLA]
             cola_sal := cola_sal + 1
         fin
