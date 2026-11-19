@@ -57,6 +57,9 @@
 ;            el núcleo no se vuelve a llamar (INT 15h 530Ah sigue dando lo
 ;            último leído); lo pide APAGAR/REINICIAR antes de vaciar los
 ;            búferes y de tocar ACPI -> AL = 0
+;    AL=05h -> ES:BX = struct ll_salud ([SALUD] el desgaste de cada batería:
+;            capacidad de fábrica, la de la última carga completa, unidades
+;            y ciclos; ver llamadas.h). Lo enseña la barra de Hispa-486.
 ; =============================================================================
         cpu 586
         bits 16
@@ -67,7 +70,8 @@
         section .text
 
 PILA        equ 384
-VERSION     equ 1
+VERSION     equ 2                   ; 2: AL=05h, la salud ([SALUD])
+LL_VER      equ 2                   ; la de HSPACPI.BIN (+24), que tiene que casar
 BLOQUE_KB   equ 3072                ; memoria extendida para el núcleo (más 64 KB
                                     ; para alinear su base)
 
@@ -108,6 +112,12 @@ a_nbat      db 0
 a_min       dw 0xFFFF               ; DX
 a_lect      dd 0
 a_error     dd 0
+; [SALUD] struct ll_salud: también la escribe el núcleo después de cada lectura
+salud:
+s_nbat      db 0
+s_pct       db 0xFF
+s_lect      dw 0
+            times 4*12 db 0         ; struct ll_salud_bat bat[4]
 
 old15       dd 0
 old2f       dd 0
@@ -448,7 +458,14 @@ int2f:
         pop eax
 .n4x:
         xor al, al
+        iret
 .n5:
+        cmp al, 5                   ; [SALUD]
+        jne .n6
+        push cs
+        pop es
+        mov bx, salud
+.n6:
         iret
 
 ; descargar -> AL = 0 hecho, 1 otro residente encima. DS = CS.
@@ -670,6 +687,8 @@ init:
         cmp ax, 32
         jne .mal_bin
         cmp dword [tbuf+4], 0x31434148  ; «HAC1»
+        jne .mal_bin
+        cmp dword [tbuf+24], LL_VER     ; [SALUD] y de esta versión
         je .cab
 .mal_bin:
         mov si, msg_badbin
@@ -756,6 +775,8 @@ init:
         mov [p_ini+20], eax
         movzx eax, word [o_cada]
         mov [p_ini+24], eax
+        lea eax, [edx + salud]      ; [SALUD]
+        mov [p_ini+28], eax
         add edx, p_ini
         mov eax, LL_INICIA
         call nuc
@@ -993,6 +1014,58 @@ di_estado:
         mov si, msg_nl
         jmp puts
 
+; ---- [SALUD] «  Salud: 68 % (3400 de 5000 mAh de fábrica), 312 ciclos»:
+; de cada batería con la salud leída (INT 2Fh AX=DB05h) ----
+di_salud:
+        push es
+        mov ax, 0xDB05
+        int 0x2F
+        mov cx, 4
+.b:
+        cmp byte [es:bx+4], 1       ; valida
+        jne .sig
+        push cx
+        mov si, msg_s_sal
+        call puts
+        mov eax, [es:bx+12]         ; llena × 100 / diseño
+        mov ecx, 100
+        mul ecx
+        div dword [es:bx+8]
+        call putdec32
+        mov si, msg_s_pct
+        call puts
+        mov eax, [es:bx+12]
+        call putdec32
+        mov si, msg_d_de
+        call puts
+        mov eax, [es:bx+8]
+        call putdec32
+        mov si, msg_d_mah
+        cmp byte [es:bx+5], 0
+        jne .u
+        mov si, msg_d_mwh
+.u:
+        call puts
+        mov si, msg_s_fab
+        call puts
+        movzx eax, word [es:bx+6]
+        cmp ax, 0xFFFF
+        je .nc
+        mov si, msg_s_coma
+        call puts
+        call putdec32
+        mov si, msg_s_cic
+        call puts
+.nc:
+        mov si, msg_nl
+        call puts
+        pop cx
+.sig:
+        add bx, 12
+        loop .b
+        pop es
+        ret
+
 ; ---- el detalle (struct ll_estado, por INT 2Fh AX=DB01h CX=3) ----
 E_EC        equ 20
 E_ECRUTA    equ 68
@@ -1061,6 +1134,7 @@ di_detalle:
 .sig:
         add di, B_TAM
         loop .b
+        call di_salud               ; [SALUD]
         cmp dword [tbuf+E_EC], 0
         je .mem
         mov si, msg_d_ec
@@ -1625,7 +1699,7 @@ x_des       dd 0
 x_tam       dd 0
 relleno     dd 0
 x_mov       times 16 db 0
-p_ini       times 7 dd 0            ; struct ll_inicio
+p_ini       times 8 dd 0            ; struct ll_inicio
 pet_t       times 4 dd 0
 tbuf_cab    times 32 db 0
 pal         times 14 db 0
@@ -1687,6 +1761,11 @@ msg_d_mwh   db " mWh", 0
 msg_d_dis   db " (de fábrica, ", 0
 msg_d_v     db "), ", 0
 msg_d_mv    db " mV", 13, 10, 0
+msg_s_sal   db "  Salud: ", 0
+msg_s_pct   db " % (", 0
+msg_s_fab   db " de fábrica)", 0
+msg_s_coma  db ", ", 0
+msg_s_cic   db " ciclos de carga", 0
 msg_d_ec    db "  Controlador embebido ", 0
 msg_d_ec2   db ": ", 0
 msg_d_ec3   db " lecturas, ", 0

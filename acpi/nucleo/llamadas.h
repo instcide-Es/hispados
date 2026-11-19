@@ -4,7 +4,7 @@
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #ifndef LLAMADAS_ACPI_H
 #define LLAMADAS_ACPI_H
-#define LL_VERSION 1
+#define LL_VERSION 2		/* 2: ll_inicio.dir_salud y struct ll_salud (19/11/2026) */
 #define LL_INICIA 0		/* petición: struct ll_inicio. Prepara la tarea (no toca ACPI todavía) */
 #define LL_PASO 1		/* deja correr la tarea hasta que se duerma -> tics hasta la próxima (>= 1) */
 #define LL_REGISTRO 2		/* [0] búfer, [1] tamaño -> octetos copiados (se van del registro) */
@@ -37,6 +37,7 @@ struct ll_inicio {
 	unsigned int tsc_ms;	/* vueltas del contador de tiempo del procesador por milisegundo (0: no hay) */
 	unsigned int dir_apm;	/* dirección física de la struct ll_apm del residente */
 	unsigned int cada_s;	/* segundos entre lecturas */
+	unsigned int dir_salud;	/* dirección física de la struct ll_salud del residente (0: no hay) */
 };
 
 /* lo que el residente contesta por INT 15h AX=530Ah (APM 1.2), ya cocinado */
@@ -57,6 +58,23 @@ struct ll_apm {
 } __attribute__((packed));
 
 #define LL_NBAT 4
+
+/* [SALUD] el desgaste de cada batería (INT 2Fh AX=DB05h -> ES:BX): lo que
+ * guarda llena ahora frente a lo que guardaba nueva (_BIF/_BIX) y, si _BIX
+ * lo da, los ciclos de carga. APM no lleva nada de esto. */
+struct ll_salud_bat {
+	unsigned char valida;	/* 1: diseño y llena, leídos y creíbles */
+	unsigned char unidad;	/* 0 mWh, 1 mAh */
+	unsigned short ciclos;	/* ciclos de carga (_BIX); FFFFh: no se sabe */
+	unsigned int diseno;	/* lo que guardaba nueva (de fábrica) */
+	unsigned int llena;	/* lo que guarda en la última carga completa */
+} __attribute__((packed));
+struct ll_salud {
+	unsigned char nbat;	/* baterías con salud válida */
+	unsigned char pct;	/* salud de todas juntas: suma de llena × 100 / suma de diseño (FFh no se sabe) */
+	unsigned short lecturas;	/* (las 16 bajas de ll_apm.lecturas: para ver que cambia) */
+	struct ll_salud_bat bat[LL_NBAT];
+} __attribute__((packed));
 struct ll_bat {
 	unsigned int hay;	/* 1: el equipo la declara */
 	unsigned int sta;	/* _STA (bit 4: puesta) */

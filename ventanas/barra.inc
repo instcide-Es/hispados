@@ -1274,6 +1274,7 @@ bt_vigilar:
 .a1:
         call ini_pendiente
         call wf_vigilar             ; [WIFI] cómo está la red (y lo que tarda)
+        call bt_ayuda               ; [AYUDA] el recuadro de ayuda de la bandeja
         ; la tecla de Windows (la BIOS no la da: se mira en tec_mapa)
         mov al, [tec_mapa+0x5B]
         or al, [tec_mapa+0x5C]
@@ -3150,4 +3151,754 @@ bt_lz_tarea:
         mov eax, [bt_lz_acc]
         mov ebp, [cen_ven]
         call acc_lanzar
+        ret
+
+; =============================================================================
+;  [AYUDA] el recuadro de ayuda de la bandeja (batería, red y volumen)
+; =============================================================================
+; Pedido de Carlos (19/11/2026): «cuando esté desenchufado, pon el estado de
+; batería en % como información al pasar el cursor por encima del nivel de
+; batería», y luego la SALUD de la batería (lo que guarda ahora frente a lo
+; que guardaba nueva). Con el puntero quieto medio segundo sobre un icono de
+; la bandeja sale encima de la barra un recuadro pequeño (una ventana
+; emergente que no toma el foco) con lo que dice ese icono; se va al sacar el
+; puntero del icono o al pulsar un botón (y no vuelve hasta salir y entrar).
+; Mientras se ve, bt_ayuda rehace el texto en cada vuelta: si cambia (la
+; batería se lee cada 5 s), se pinta otra vez. Sirve para cualquier icono:
+; ay_zona_en dice cuál hay bajo el puntero y ay_texto, qué se escribe.
+; La letra de la barra y la del recuadro son la de siempre (8x16): los
+; tamaños de iconos de Configuración no cambian la barra.
+;
+;    bt_ayuda        (bt_vigilar) una vez por vuelta
+;    bat_mas         (bat_leer) tras leer APM: cargando, minutos y salud
+;    bat_forzada     (bat_leer) lo mismo con /BATnn[C]
+AY_ESPERA   equ 9                   ; tics (medio segundo) con el puntero quieto
+AY_TAM      equ 320                 ; el texto (líneas separadas por 10)
+AY_LH       equ 16                  ; alto de una línea
+AY_MX       equ 6                   ; margen a los lados
+AY_MY       equ 3                   ; y arriba y abajo
+AY_AVISO    equ 1                   ; una línea que empieza así, en terracota
+AY_BAT      equ 1                   ; las zonas: la batería,
+AY_RED      equ 2                   ;   la red
+AY_VOL      equ 3                   ;   y el volumen
+
+c_ayuda     dd ay_proc
+            db C_CREMA, 0, 0, 0
+ay_t_bat    db "Batería: ", 0
+ay_t_quedan db " · quedan ", 0
+ay_t_h      db " h", 0
+ay_t_min    db " min", 0
+ay_t_pct    db " %", 0
+ay_t_carga  db "Enchufado · cargando: ", 0
+ay_t_llena  db "Enchufado · cargada (", 0
+ay_t_cierra db ")", 0
+ay_t_nose   db "Batería: no se sabe", 0
+ay_t_salud  db "Salud: ", 0
+ay_t_guarda db " % (guarda ", 0
+ay_t_guardan db " % (entre las ", 0
+ay_t_guardan2 db " guardan ", 0
+ay_t_de     db " de ", 0
+ay_t_mah    db " mAh", 0
+ay_t_mwh    db " mWh", 0
+ay_t_nueva  db " de cuando era nueva)", 0
+ay_t_nuevas db " de cuando eran nuevas)", 0
+ay_t_ciclos db " ciclos de carga", 0
+ay_t_y      db " y ", 0
+ay_t_gastada db AY_AVISO, "La batería está gastada: dura menos de la mitad que nueva", 0
+ay_t_wifi   db "Wi-Fi: ", 0
+ay_t_senal  db " · señal ", 0
+ay_t_de4    db " de 4", 0
+ay_t_wcon   db "Wi-Fi: conectando con ", 0
+ay_t_wsin   db "Wi-Fi: sin conectar", 0
+ay_t_cablesi db "Cable: conectado", 0
+ay_t_cableno db "Cable: sin cable", 0
+ay_t_cable  db "Red por cable", 0
+ay_t_sinred db "Sin red", 0
+ay_t_vol    db "Volumen: ", 0
+ay_t_mudo   db " · en silencio", 0
+ay_t_volno  db "Volumen: no se sabe", 0
+ay_t_sinson db "Sin sonido (no hay HSPSND o no ha encontrado la tarjeta)", 0
+
+; (bat_leer, con APM recién leído en rmcs) cargando (BL = 3), los minutos
+; (DX: bit 15, en minutos; si no, segundos; FFFFh no se sabe) y la salud
+bat_mas:
+        pushad
+        xor eax, eax
+        cmp byte [rmcs+0x10], 3     ; BL
+        sete al
+        mov [bat_carga], al
+        mov ax, [rmcs+0x14]         ; DX
+        mov [bat_min], ax
+        call bat_salud_leer
+        popad
+        ret
+
+; (bat_leer, /BATnn[C]) enchufada y sin llenar: cargando; sin minutos ni salud
+bat_forzada:
+        push eax
+        xor eax, eax
+        cmp byte [op_batac], 0
+        je .c
+        cmp dword [bat_pct], 100
+        setb al
+.c:
+        mov [bat_carga], al
+        mov word [bat_min], 0xFFFF
+        mov byte [bat_sal_hay], 0
+        pop eax
+        ret
+
+; [SALUD] HSPACPI (versión 2 o más) da la salud por INT 2Fh AX=DB05h -> ES:BX
+; = struct ll_salud (acpi/nucleo/llamadas.h); se copia a bat_salud. Con APM
+; de la BIOS (sin HSPACPI) no se sabe: bat_sal_hay = 0.
+SAL_TAM     equ 4 + 4 * 12
+bat_salud_leer:
+        pushad
+        mov byte [bat_sal_hay], 0
+        mov dword [rmcs+0x1C], 0xDB00
+        mov dword [rmcs+0x10], 0
+        mov dword [rmcs+0x18], 0
+        mov bl, 0x2F
+        call rm_int
+        cmp byte [rmcs+0x1C], 0xFF
+        jne .x
+        cmp word [rmcs+0x10], 0x4143        ; «AC»
+        jne .x
+        cmp word [rmcs+0x18], 2             ; la versión con la salud
+        jb .x
+        mov dword [rmcs+0x1C], 0xDB05
+        mov dword [rmcs+0x10], 0
+        mov bl, 0x2F
+        call rm_int
+        movzx esi, word [rmcs+0x22]         ; ES:BX
+        shl esi, 4
+        movzx eax, word [rmcs+0x10]
+        add esi, eax
+        add esi, [cero]
+        mov edi, bat_salud
+        mov ecx, SAL_TAM
+        rep movsb
+        cmp byte [bat_salud], 0             ; ninguna batería con la salud leída
+        je .x
+        cmp byte [bat_salud+1], 0xFF        ; o no se sabe
+        je .x
+        mov byte [bat_sal_hay], 1
+.x:
+        popad
+        ret
+
+; (bt_vigilar) el recuadro: sale, se va o se pone al día
+bt_ayuda:
+        pushad
+        mov ebp, [ay_ven]           ; ¿sigue siendo el nuestro?
+        test ebp, ebp
+        jz .v
+        cmp dword [ebp+V_USO], 1
+        jne .perdido
+        cmp dword [ebp+V_CLASE], c_ayuda
+        je .v
+.perdido:
+        mov dword [ay_ven], 0
+.v:
+        call ay_zona_en
+        cmp byte [rat_boton], 0     ; un botón pulsado: fuera, hasta otra zona
+        je .nb
+        mov [ay_zona], eax
+        mov byte [ay_bloq], 1
+        call ay_quitar
+        jmp .x
+.nb:
+        mov ecx, [rat_x]
+        mov edx, [rat_y]
+        cmp eax, [ay_zona]
+        je .misma
+        mov [ay_zona], eax          ; otra zona: lo de antes se va y se espera
+        mov byte [ay_bloq], 0
+        call ay_quitar
+        jmp .espera
+.misma:
+        test eax, eax
+        jz .x
+        cmp byte [ay_bloq], 0
+        jne .x
+        cmp dword [ay_ven], 0
+        jne .aldia
+        cmp ecx, [ay_rx]            ; sin recuadro: el puntero, quieto
+        jne .espera
+        cmp edx, [ay_ry]
+        jne .espera
+        call tics
+        sub eax, [ay_tic]
+        cmp eax, AY_ESPERA
+        jb .x
+.aldia:
+        mov eax, [ay_zona]
+        call ay_texto               ; -> ay_nuevo
+        cmp dword [ay_ven], 0
+        je .poner
+        mov esi, ay_nuevo           ; ¿ha cambiado?
+        mov edi, ay_txt
+        mov ecx, AY_TAM
+        repe cmpsb
+        je .x
+.poner:
+        call ay_poner
+        jmp .x
+.espera:
+        mov [ay_rx], ecx
+        mov [ay_ry], edx
+        call tics
+        mov [ay_tic], eax
+.x:
+        popad
+        ret
+
+; (interna) -> EAX = la zona de la bandeja bajo el puntero (0: ninguna). Con
+; un menú abierto o algo agarrado, ninguna.
+ay_zona_en:
+        push ebx
+        xor eax, eax
+        cmp byte [op_demo], 0
+        jne .r
+        cmp dword [bt_ven], 0
+        je .r
+        cmp dword [mi_ven], 0
+        jne .r
+        cmp dword [menu_ven], 0
+        jne .r
+        cmp dword [captura], 0
+        jne .r
+        mov ebx, [rat_y]
+        sub ebx, [area_y1]          ; (la barra está en x = 0, y = area_y1)
+        js .r
+        cmp ebx, BT_H
+        jge .r
+        mov eax, [rat_x]
+        sub eax, BT_DESP            ; (los iconos van corridos BT_DESP)
+        call wf_en_icono
+        jc .red
+        call vol_en_icono
+        jc .vol
+        call bat_en_icono
+        jc .bat
+        xor eax, eax
+.r:
+        pop ebx
+        ret
+.red:
+        mov eax, AY_RED
+        pop ebx
+        ret
+.vol:
+        mov eax, AY_VOL
+        pop ebx
+        ret
+.bat:
+        mov eax, AY_BAT
+        pop ebx
+        ret
+
+; (interna) EAX=x EBX=y (como vol_en_icono) -> CF=1 si está en la pila o en
+; su número
+bat_en_icono:
+        push ecx
+        cmp byte [bat_hay], 0
+        je .no
+        mov ecx, [vid_ancho]
+        sub ecx, BAT_X + 2
+        cmp eax, ecx
+        jl .no
+        add ecx, BAT_X - BAT_NUM_X + 2 + BAT_NUM
+        cmp eax, ecx
+        jge .no
+        cmp ebx, 2
+        jl .no
+        cmp ebx, BARRA_H - 3
+        jge .no
+        pop ecx
+        stc
+        ret
+.no:
+        pop ecx
+        clc
+        ret
+
+; (interna) el recuadro, fuera
+ay_quitar:
+        pushad
+        mov ebp, [ay_ven]
+        mov dword [ay_ven], 0
+        test ebp, ebp
+        jz .x
+        call ven_destruir
+.x:
+        popad
+        ret
+
+; (interna) el recuadro con el texto de ay_nuevo (otro, si ya había uno):
+; tan ancho como la línea más larga, encima de la barra, centrado en el
+; puntero sin salirse de la pantalla
+ay_poner:
+        pushad
+        call ay_quitar
+        mov esi, ay_nuevo
+        mov edi, ay_txt
+        mov ecx, AY_TAM
+        rep movsb
+        ; las medidas
+        mov esi, ay_txt
+        xor ecx, ecx                ; la línea más larga
+        mov edx, 1                  ; líneas
+        xor ebx, ebx                ; letras de esta
+.l:
+        lodsb
+        test al, al
+        jz .lf
+        cmp al, 10
+        je .ln
+        cmp al, AY_AVISO
+        je .l
+        inc ebx
+        jmp .l
+.ln:
+        cmp ebx, ecx
+        jbe .ln1
+        mov ecx, ebx
+.ln1:
+        xor ebx, ebx
+        inc edx
+        jmp .l
+.lf:
+        cmp ebx, ecx
+        jbe .lf1
+        mov ecx, ebx
+.lf1:
+        shl ecx, 3
+        add ecx, 2 * AY_MX + 2      ; (y el filete de la emergente)
+        shl edx, 4                  ; × AY_LH
+        add edx, 2 * AY_MY + 2
+        mov eax, [rat_x]
+        mov ebx, ecx
+        shr ebx, 1
+        sub eax, ebx
+        mov ebx, [vid_ancho]
+        sub ebx, ecx
+        sub ebx, SOMBRA + 2
+        cmp eax, ebx
+        jle .x1
+        mov eax, ebx
+.x1:
+        cmp eax, 2
+        jge .x2
+        mov eax, 2
+.x2:
+        mov ebx, [area_y1]
+        sub ebx, edx
+        sub ebx, SOMBRA + 2
+        sub esp, P_TAM
+        mov esi, esp
+        mov dword [esi+P_CLASE], c_ayuda
+        mov dword [esi+P_TEXTO], 0
+        mov dword [esi+P_ESTILO], E_EMERGENTE | E_SINFOCO
+        mov [esi+P_X], eax
+        mov [esi+P_Y], ebx
+        mov [esi+P_AN], ecx
+        mov [esi+P_AL], edx
+        mov dword [esi+P_ID], 0
+        xor ebp, ebp
+        call ven_crear
+        add esp, P_TAM
+        mov [ay_ven], eax
+        popad
+        ret
+
+ay_proc:
+        cmp eax, WM_PAINT
+        je .pintar
+        cmp eax, WM_DESTROY
+        jne .nada
+        cmp ebp, [ay_ven]
+        jne .nada
+        mov dword [ay_ven], 0
+.nada:
+        xor eax, eax
+        ret
+.pintar:
+        call dc_pintar
+        COLOR C_CREMA
+        xor eax, eax
+        xor ebx, ebx
+        mov ecx, [ebp+V_AN]
+        mov edx, [ebp+V_AL]
+        call dc_rect
+        mov esi, ay_txt
+        mov ebx, AY_MY
+.lin:
+        COLOR C_TINTA
+        cmp byte [esi], AY_AVISO
+        jne .t
+        COLOR C_TERRACOTA
+        inc esi
+.t:
+        xor ecx, ecx                ; las letras de la línea
+.c:
+        mov al, [esi+ecx]
+        test al, al
+        jz .c1
+        cmp al, 10
+        je .c1
+        inc ecx
+        jmp .c
+.c1:
+        jecxz .sig
+        mov eax, AY_MX
+        call dc_texto_n
+.sig:
+        add esi, ecx
+        cmp byte [esi], 10
+        jne .fin
+        inc esi
+        add ebx, AY_LH
+        jmp .lin
+.fin:
+        call dc_cerrar
+        xor eax, eax
+        ret
+
+; =============================================================================
+;  [AYUDA] lo que dice cada zona (EAX) -> ay_nuevo (líneas separadas por 10)
+; =============================================================================
+ay_texto:
+        pushad
+        mov edi, ay_nuevo
+        push eax
+        push edi
+        mov ecx, AY_TAM
+        xor eax, eax
+        rep stosb
+        pop edi
+        pop eax
+        cmp eax, AY_RED
+        je .red
+        cmp eax, AY_VOL
+        je .vol
+        call ay_t_bateria
+        jmp .x
+.red:
+        call ay_t_redes
+        jmp .x
+.vol:
+        call ay_t_volumen
+.x:
+        popad
+        ret
+
+; (interna) ESI=texto: a EDI (sin el cero)
+ay_pon:
+        push eax
+        push esi
+.l:
+        lodsb
+        test al, al
+        jz .x
+        stosb
+        jmp .l
+.x:
+        pop esi
+        pop eax
+        ret
+
+; (interna) EAX en decimal con punto de miles («7.350»), a EDI
+ay_miles:
+        cmp eax, 1000
+        jb pon_num
+        push eax
+        push ecx
+        push edx
+        xor edx, edx
+        mov ecx, 1000
+        div ecx
+        call ay_miles
+        mov eax, edx
+        push eax
+        mov al, '.'
+        stosb
+        pop eax
+        mov cl, 100
+        div cl                      ; AL centenas, AH lo demás
+        add al, '0'
+        stosb
+        movzx eax, ah
+        mov cl, 10
+        div cl
+        add ax, '00'
+        stosw
+        pop edx
+        pop ecx
+        pop eax
+        ret
+
+; (interna) EAX=minutos: «2 h 10 min», «45 min» o «3 h»
+ay_horas:
+        push ecx
+        push edx
+        xor edx, edx
+        mov ecx, 60
+        div ecx
+        test eax, eax
+        jz .m
+        call pon_num
+        mov esi, ay_t_h
+        call ay_pon
+        test edx, edx
+        jz .x
+        mov al, ' '
+        stosb
+.m:
+        mov eax, edx
+        call pon_num
+        mov esi, ay_t_min
+        call ay_pon
+.x:
+        pop edx
+        pop ecx
+        ret
+
+ay_t_bateria:
+        cmp byte [bat_hay], 0
+        jne .hay
+        mov esi, ay_t_nose
+        jmp ay_pon
+.hay:
+        cmp dword [bat_ac], 0
+        jne .ench
+        mov esi, ay_t_bat           ; «Batería: 73 % · quedan 2 h 10 min»
+        call ay_pon
+        mov eax, [bat_pct]
+        call pon_num
+        mov esi, ay_t_pct
+        call ay_pon
+        movzx eax, word [bat_min]
+        cmp eax, 0xFFFF
+        je .salud
+        btr eax, 15                 ; bit 15: minutos; si no, segundos
+        jc .min
+        push edx
+        push ecx
+        xor edx, edx
+        mov ecx, 60
+        div ecx
+        pop ecx
+        pop edx
+.min:
+        test eax, eax
+        jz .salud
+        mov esi, ay_t_quedan
+        call ay_pon
+        call ay_horas
+        jmp .salud
+.ench:
+        cmp byte [bat_carga], 0
+        je .llena
+        mov esi, ay_t_carga         ; «Enchufado · cargando: 73 %»
+        call ay_pon
+        mov eax, [bat_pct]
+        call pon_num
+        mov esi, ay_t_pct
+        call ay_pon
+        jmp .salud
+.llena:
+        mov esi, ay_t_llena         ; «Enchufado · cargada (100 %)»
+        call ay_pon
+        mov eax, [bat_pct]
+        call pon_num
+        mov esi, ay_t_pct
+        call ay_pon
+        mov esi, ay_t_cierra
+        call ay_pon
+.salud:
+        ; [SALUD] «Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era
+        ; nueva)»; con dos baterías, las dos juntas (lo que guardan entre
+        ; las dos); los ciclos de carga, si los da el equipo; y, por debajo
+        ; del 50 %, el aviso
+        cmp byte [bat_sal_hay], 0
+        je .x
+        mov al, 10
+        stosb
+        mov esi, ay_t_salud
+        call ay_pon
+        movzx eax, byte [bat_salud+1]
+        call pon_num
+        xor ecx, ecx                ; las sumas: llena (ECX) y diseño (EDX)
+        xor edx, edx
+        xor ebx, ebx                ; la unidad de la última
+        mov esi, bat_salud + 4
+        push edi
+        mov edi, 4
+.s:
+        cmp byte [esi], 1
+        jne .s1
+        add ecx, [esi+8]
+        add edx, [esi+4]
+        mov bl, [esi+1]
+.s1:
+        add esi, 12
+        dec edi
+        jnz .s
+        pop edi
+        cmp byte [bat_salud], 1
+        ja .dos
+        mov esi, ay_t_guarda
+        call ay_pon
+        jmp .nums
+.dos:
+        mov esi, ay_t_guardan
+        call ay_pon
+        movzx eax, byte [bat_salud]
+        call pon_num
+        mov esi, ay_t_guardan2
+        call ay_pon
+.nums:
+        mov eax, ecx
+        call ay_miles
+        mov esi, ay_t_de
+        call ay_pon
+        mov eax, edx
+        call ay_miles
+        mov esi, ay_t_mah
+        test bl, bl
+        jnz .u
+        mov esi, ay_t_mwh
+.u:
+        call ay_pon
+        mov esi, ay_t_nueva
+        cmp byte [bat_salud], 1
+        jbe .u1
+        mov esi, ay_t_nuevas
+.u1:
+        call ay_pon
+        ; los ciclos: «312 ciclos de carga» o «312 y 45 ciclos de carga»
+        mov esi, bat_salud + 4
+        mov ecx, 4
+        xor ebx, ebx                ; cuántos van
+.c:
+        cmp byte [esi], 1
+        jne .c1
+        movzx eax, word [esi+2]
+        cmp eax, 0xFFFF
+        je .c1
+        test ebx, ebx
+        jnz .c0
+        mov al, 10
+        stosb
+        movzx eax, word [esi+2]
+        jmp .c2
+.c0:
+        push esi
+        mov esi, ay_t_y
+        call ay_pon
+        pop esi
+.c2:
+        call ay_miles
+        inc ebx
+.c1:
+        add esi, 12
+        loop .c
+        test ebx, ebx
+        jz .aviso
+        mov esi, ay_t_ciclos
+        call ay_pon
+.aviso:
+        cmp byte [bat_salud+1], 50
+        jae .x
+        mov al, 10
+        stosb
+        mov esi, ay_t_gastada
+        call ay_pon
+.x:
+        ret
+
+ay_t_redes:
+        cmp byte [wf_modo], 2
+        je .wifi
+        cmp byte [wf_modo], 1
+        je .cable
+        mov esi, ay_t_sinred
+        jmp ay_pon
+.cable:
+        mov esi, ay_t_cablesi
+        cmp byte [wf_enlace], 1
+        je .c
+        mov esi, ay_t_cableno
+        cmp byte [wf_enlace], 0
+        je .c
+        mov esi, ay_t_cable
+.c:
+        jmp ay_pon
+.wifi:
+        mov al, [wf_info+WI_ESTADO]
+        test al, al
+        jnz .w1
+        mov esi, ay_t_wsin
+        jmp ay_pon
+.w1:
+        mov esi, ay_t_wcon
+        cmp al, 5
+        jne .w2
+        mov esi, ay_t_wifi
+.w2:
+        call ay_pon
+        movzx ecx, byte [wf_info+WI_SSID_N]   ; el nombre de la red
+        cmp ecx, 32
+        jbe .w3
+        mov ecx, 32
+.w3:
+        mov esi, wf_info + WI_SSID
+        jecxz .w4
+.w5:
+        lodsb
+        cmp al, 10                  ; (sin saltos de línea ni ceros)
+        je .w6
+        test al, al
+        jnz .w7
+.w6:
+        mov al, ' '
+.w7:
+        stosb
+        loop .w5
+.w4:
+        cmp byte [wf_info+WI_ESTADO], 5
+        jne .x
+        mov esi, ay_t_senal         ; « · señal 3 de 4»
+        call ay_pon
+        movsx eax, byte [wf_info+WI_SENAL]
+        call wf_nivel
+        call pon_num
+        mov esi, ay_t_de4
+        call ay_pon
+.x:
+        ret
+
+ay_t_volumen:
+        cmp byte [snd_hay], 0
+        jne .hay
+        mov esi, ay_t_sinson
+        jmp ay_pon
+.hay:
+        mov eax, [vol_pct]
+        test eax, eax
+        jns .p
+        mov esi, ay_t_volno
+        jmp ay_pon
+.p:
+        mov esi, ay_t_vol
+        call ay_pon
+        call pon_num
+        mov esi, ay_t_pct
+        call ay_pon
+        test dword [vol_mudo], 1
+        jz .x
+        mov esi, ay_t_mudo
+        call ay_pon
+.x:
         ret

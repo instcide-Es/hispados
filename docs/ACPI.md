@@ -118,6 +118,22 @@ AX=5300h contesta «APM 1.2» (AX=0102h, BX=«PM», CX=0). Las demás funciones
 53xxh van a la BIOS, que dirá que no las tiene: `APAGAR` ya apaga por ACPI
 por su cuenta (probado con `HSPACPI` cargado).
 
+**[SALUD] El desgaste.** APM no lleva nada de eso, así que el núcleo, tras
+cada lectura, deja también en el residente (`ll_inicio.dir_salud`) lo que
+guarda cada batería llena frente a lo que guardaba nueva: `_BIF` (o `_BIX`)
+da las dos capacidades y la unidad; los **ciclos de carga** solo los da
+`_BIX` (el elemento 8): si se ha leído `_BIF` y el equipo tiene también
+`_BIX` (se mira con `AcpiGetHandle`, sin evaluar nada que no exista), se
+evalúa una vez más para sacarlos. No se inventa: una batería sin las dos
+capacidades, o con la llena más de un 5 % por encima de la de fábrica, no
+cuenta («no se sabe»); si es algo mayor (pasa con baterías nuevas), se toma
+como el 100 %. Con dos baterías, la salud es la de las dos juntas (si van en
+la misma unidad) y los ciclos, de cada una. Lo enseña `HSPACPI /E` («Salud:
+68 % (5000 de 7350 mAh de fábrica), 312 ciclos de carga») y el recuadro de
+ayuda de la pila de la barra de Hispa-486 (docs/VENTANAS.md, «[AYUDA]»).
+Desde esta versión (la 2) `HSPACPI.COM` y `HSPACPI.BIN` tienen que ser de
+la misma: si no, «El archivo HSPACPI.BIN no vale (dañado o de otra versión)».
+
 **Si falla algo.** Un fallo suelto de `_BST` deja el último valor; al tercero
 seguido, «no se sabe» (no se inventa un nivel). Si el controlador embebido no
 contesta, cada orden se intenta 3 veces con un plazo de 0,1 s, soltando el
@@ -231,10 +247,11 @@ arranca sin ella y se pone después, la pila no sale hasta volver a entrar.
 | 02h | → ES:BX = `struct ll_apm` (lo último leído: `acpi/nucleo/llamadas.h`) |
 | 03h | descargar → AL = 0 hecho, 1 hay otro residente encima |
 | 04h | parar: avisa al controlador embebido (`_REG (3, 0)`) y el núcleo no se vuelve a llamar (530Ah sigue dando lo último leído) → AL = 0. Lo piden APAGAR y REINICIAR antes de vaciar los búferes y de tocar ACPI |
+| 05h | [SALUD] → ES:BX = `struct ll_salud` (`acpi/nucleo/llamadas.h`): de cada batería puesta, la capacidad de fábrica (`DesignCapacity`), la de la última carga completa (`LastFullChargeCapacity`), la unidad (mAh o mWh) y los ciclos de carga (solo con `_BIX`; FFFFh si no se saben); y la salud de todas juntas (la suma de las llenas × 100 / la suma de las de fábrica; FFh si no se sabe). Desde la versión 2 (AX=DB00h → CX = 2) |
 
 ## Las pruebas
 
-`tests/run_acpi_tests.sh` (en `make test`; 95 comprobaciones):
+`tests/run_acpi_tests.sh` (en `make test`; 124 comprobaciones):
 
 1. **En el equipo de compilación** (`build/acpi_sim`, 32 bits): el mismo
    núcleo con `tests/acpi/maquina_sim.c` debajo —la memoria física (las
@@ -255,7 +272,14 @@ arranca sin ella y se pone después, la pila no sale hasta volver a entrar.
    INT 15h y **Hispa Ventanas pinta la pila** (los mismos puntos que la prueba
    de `/BAT`), también al cambiar el nivel y el cable con Ventanas en marcha;
    `/E`, `/U`, `/AUTO`, `/COMPLETO`, el registro en un archivo, el sobremesa
-   (calla y no se queda) y `APAGAR` con `HSPACPI` cargado.
+   (calla y no se queda) y `APAGAR` con `HSPACPI` cargado. [SALUD] La
+   batería de mentira está algo gastada (7350 mAh de fábrica, 5000 en la
+   última carga completa: el 68 %; `_BIX` con 312 ciclos; un tercer octeto
+   de la CMOS, 62h, cambia la salud y avisa con `Notify 81h`): `/E` enseña
+   la salud, y el escritorio de Hispa-486 el recuadro de ayuda de la pila
+   (sin cable, enchufada y con la batería gastada) y los del altavoz y la
+   red. En el equipo de compilación, la salud del Toshiba (100 %) y la del
+   HP (92 %: 4800 de 5200).
 
 Lo que **no** se puede probar sin el equipo: el controlador embebido de
 verdad (sus tiempos, y si la BIOS, que en este modo sigue hablando con él por

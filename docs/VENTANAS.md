@@ -961,6 +961,40 @@ así que no hace falta volver a entrar.
   arriba (`vol_pintar_icono`, `bat_pintar_icono`, `rel_pintar`), corridos
   al sitio que deja «Salir»; el de red es propio de esta barra
   (`wf_pintar_icono`).
+- **[AYUDA] El recuadro de ayuda de la bandeja.** Con el puntero quieto
+  medio segundo (9 tics) sobre la pila, el altavoz o el icono de red sale,
+  encima de la barra y centrado en el puntero (sin salirse de la pantalla),
+  un recuadro crema pequeño con lo que dice ese icono:
+  - la pila, sin cable: «Batería: 73 % · quedan 2 h 10 min» (lo que queda,
+    solo si el equipo lo da: DX de APM 530Ah); con cable: «Enchufado ·
+    cargando: 73 %» o, si no está cargando, «Enchufado · cargada (100 %)».
+    Debajo, **[SALUD] el desgaste de la batería** por los años, si se sabe:
+    «Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era nueva)» (o en mWh,
+    según la batería), «312 ciclos de carga» si el equipo los da (solo con
+    `_BIX`) y, por debajo del 50 %, en terracota, «La batería está gastada:
+    dura menos de la mitad que nueva». Con **dos baterías** (el ThinkPad
+    A275) se suman: «Salud: 61 % (entre las 2 guardan ... de cuando eran
+    nuevas)» y «312 y 45 ciclos de carga». La salud solo la da `HSPACPI`
+    (versión 2: INT 2Fh AX=DB05h, docs/ACPI.md): con APM de la BIOS no se
+    sabe y no se pone. (Si no hay batería no hay pila, ni recuadro.)
+  - el altavoz: «Volumen: 80 %» (con « · en silencio» si lo está), o «Sin
+    sonido (no hay HSPSND o no ha encontrado la tarjeta)»;
+  - la red: «Wi-Fi: <la red> · señal 3 de 4» (las rayitas del icono),
+    «Wi-Fi: conectando con <la red>», «Wi-Fi: sin conectar», «Cable:
+    conectado», «Cable: sin cable» o «Sin red».
+
+  Se va al sacar el puntero del icono o al pulsar un botón (y no vuelve
+  hasta salir del icono y entrar otra vez); moverlo dentro del mismo icono
+  no lo quita. Mientras se ve, `bt_ayuda` rehace el texto en cada vuelta y,
+  si ha cambiado (la batería se lee cada 5 s), lo vuelve a poner: el
+  porcentaje y el cable se ven cambiar sin mover el puntero. Es una ventana
+  emergente de la tarea del sistema que **no toma el foco** (`E_EMERGENTE |
+  E_SINFOCO`; ni se activa ni quita la activa) y, al quitarla, el gestor
+  repinta lo que tapaba (también la sombra). Va con la letra de siempre
+  (8x16): el tamaño de los iconos de Configuración no cambia la barra.
+  Para otro icono basta una zona más en `ay_zona_en` y su texto en
+  `ay_texto` (`barra.inc`, «[AYUDA]»; variables `ay_*` y `bat_salud` en
+  `bssbarra.inc`).
 - **[WIFI] El icono de red** dice por la forma (no solo por el color) si no
   hay red (nodos huecos y un aspa), si hay cable con o sin enlace (nodos
   llenos; con aspa, sin enlace) o Wi-Fi (cuatro rayitas: llenas, las de la
@@ -1077,6 +1111,8 @@ opción `/486` y su línea de ayuda; `barra.inc` ocupa unos 6 KB de la alta):
 | `bt_tecla` | `ctx_tecla` (de `ges_tecla`) | Ctrl+Esc y, con el menú abierto, todas las teclas; sin ventana activa, Intro y las flechas de los iconos del escritorio (`be_tecla`) |
 | `bt_esc_inv` | `vistas_repintar` | los iconos del escritorio, a repintar (han cambiado los accesos) |
 | `bt_clic_fuera` | `ctx_ctrl_clic` (de `eventos`) | un clic fuera del menú lo cierra |
+| `bt_ayuda` | `bt_vigilar` | [AYUDA] el recuadro de ayuda de la bandeja: lo pone tras medio segundo con el puntero quieto en un icono, lo pone al día y lo quita |
+| `bat_mas`, `bat_forzada` | `bat_leer` (`escritorio.inc`) | [AYUDA] [SALUD] tras leer la batería: si carga, lo que queda y la salud (`bat_salud_leer`: HSPACPI, INT 2Fh AX=DB05h) |
 | `wf_vigilar` | `bt_vigilar` | [WIFI] mira la red cada segundo (cada 3 tics con la ventanita abierta o algo en marcha) y lleva a trozos buscar, preparar la clave y conectar |
 | `wf_pintar_icono`, `wf_en_icono`, `wf_alternar` | `bt_pintar`, `bt_proc` | [WIFI] el icono de red y su ventanita |
 
@@ -2770,6 +2806,15 @@ También se abre con doble clic en el altavoz de la barra, con el botón
   1440×900 de 32 bits. Con la imagen de Hispa-486, su escritorio a
   1440×900 con «Biblioteca» y el menú Inicio con los iconos grandes.
   Capturas en `docs/ventanas/`.
+
+- `tests/run_acpi_tests.sh` (docs/ACPI.md), sesión 2b ([AYUDA] [SALUD]):
+  `VENTANAS /486` con `HSPACPI` y la batería de mentira de QEMU (5.000 de
+  7.350 mAh, 312 ciclos): el puntero quieto en la pila saca «Batería: 85 % ·
+  quedan 4 h 15 min», la salud y los ciclos; al enchufar con el recuadro a
+  la vista, «Enchufado · cargando: 85 %»; al sacar el puntero, la pantalla
+  queda igual que antes (sin restos); con la salud al 40 %, el aviso de
+  batería gastada; el del altavoz y el de la red. Capturas en
+  `build/acpi_ayuda_*.png`.
 
 - `tests/run_fondo_tests.sh` ([FONDO]): la imagen de fondo del escritorio.
   La prueba hace sus imágenes (con `tools/mkfondo.py` las de 8 bits, y una

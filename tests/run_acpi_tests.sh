@@ -60,6 +60,8 @@ for modo in minimo completo; do
   linea t_$modo "APM 1: fase=1 ca=00 estado=00 banderas=01 pct=72 min=126 nbat=1" "Toshiba ($modo): 72 %, sin cable, quedan 126 min"
   linea t_$modo "APM 3: fase=1 ca=01 estado=03 banderas=09 pct=75 min=0 nbat=1" "Toshiba ($modo): enchufado: 75 %, con cable, cargando"
   linea t_$modo "APM 4: fase=1 ca=01 estado=FF banderas=80 pct=255 min=0 nbat=0" "Toshiba ($modo): sin batería: no hay pila que pintar"
+  linea t_$modo "SALUD 1: pct=100 nbat=1 [1: 4400 de 4400 mAh, ciclos=-1]" "Toshiba ($modo): [SALUD] 100 % (4400 de 4400 mAh; sin _BIX, sin ciclos)"
+  linea t_$modo "SALUD 4: pct=255 nbat=0" "Toshiba ($modo): [SALUD] sin batería, no se sabe"
   tiene t_$modo "modelo=[] tipo=[Li-Ion] marca=[TOSHIBA]" "Toshiba ($modo): tipo y marca"
   tiene t_$modo "ACPICA: 0 avisos o errores" "Toshiba ($modo): ACPICA no se queja de nada"
 
@@ -71,6 +73,7 @@ for modo in minimo completo; do
   tiene h_$modo "Equipo de HP: antes de cada lectura se llama a" "HP Mini ($modo): se le pide releer (PWUP)"
   tiene h_$modo '._BIF -> Package(13){1h, 1450h, 12C0h, 1h, 2A30h,' "HP Mini ($modo): _BIF (5200 de fábrica, 4800 llena)"
   linea h_$modo "APM 1: fase=1 ca=00 estado=00 banderas=01 pct=50 min=120 nbat=1" "HP Mini ($modo): 50 %, sin cable, quedan 120 min"
+  linea h_$modo "SALUD 1: pct=92 nbat=1 [1: 4800 de 5200 mAh, ciclos=-1]" "HP Mini ($modo): [SALUD] 92 % (4800 de los 5200 mAh de fábrica)"
   linea h_$modo "APM 3: fase=1 ca=00 estado=00 banderas=01 pct=45 min=108 nbat=1" "HP Mini ($modo): baja al 45 % sin aviso del controlador y se ve"
   linea h_$modo "APM 4: fase=1 ca=01 estado=03 banderas=09 pct=47 min=0 nbat=1" "HP Mini ($modo): enchufado: con cable, cargando"
   linea h_$modo "APM 5: fase=1 ca=01 estado=03 banderas=09 pct=56 min=0 nbat=1" "HP Mini ($modo): 56 %"
@@ -150,7 +153,8 @@ run "$SSDT" '
 '
 check "HSPACPI 0.1: la batería del portátil por ACPI"
 check "Batería: 85 %, sin cable, quedan 255 min"
-check '  \_SB_.HBAT: HISPA-PRUEBA LION Hispa-DOS 4250 de 5000 mAh (de fábrica, 5000), 11000 mV'
+check '  \_SB_.HBAT: HISPA-PRUEBA LION Hispa-DOS 4250 de 5000 mAh (de fábrica, 7350), 11000 mV'
+check "  Salud: 68 % (5000 de 7350 mAh de fábrica), 312 ciclos de carga"
 check "Batería: 60 %, con cable, cargando"
 check "HSPACPI descargado."
 check "HSPACPI no está cargado."
@@ -201,6 +205,68 @@ muestra w2 15
 chk $T/w3.ppm px 614 12 11 "relleno verde al 100 %" px 618 13 9 "rayo blanco (con cable)" \
   texto 636 5 8 1 fina "100%"
 muestra w3 100c
+[ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/Ejecutando/,$p' $T/log.txt
+
+# -- 2b: [AYUDA] [SALUD] el escritorio de Hispa-486 (VENTANAS /486): con el
+#       puntero quieto en la pila de la barra, el recuadro de ayuda: el nivel,
+#       lo que queda y la salud (5000 de los 7350 mAh de fábrica: 68 %; 312
+#       ciclos, de _BIX). Se pone al día con el recuadro a la vista (se
+#       enchufa: «cargando»), se va al sacar el puntero y vuelve; con la
+#       salud al 40 % (CMOS 62h), el aviso de batería gastada. El altavoz y
+#       la red tienen el suyo. La barra: y = 572..599; la pila, x = 676..697;
+#       su número, 704; el altavoz, 648; la red, 624 --
+RX=400; RY=300
+ir() {
+  local dx=$(( $1 - RX )) dy=$(( $2 - RY )) sx sy
+  while [ $dx -ne 0 ] || [ $dy -ne 0 ]; do
+    sx=$dx; [ $sx -gt 60 ] && sx=60; [ $sx -lt -60 ] && sx=-60
+    sy=$dy; [ $sy -gt 60 ] && sy=60; [ $sy -lt -60 ] && sy=-60
+    mon "mouse_move $sx $sy" 0.07
+    dx=$(( dx - sx )); dy=$(( dy - sy ))
+  done
+  RX=$1; RY=$2; sleep 0.3
+}
+run "$SSDT" '
+  send "A:\\HISPADOS\\CMOSW 60 55" 1
+  send "A:\\HISPADOS\\CMOSW 61 02" 1
+  send "A:\\HISPADOS\\HSPACPI /CADA:2" 6
+  send "A:\\HISPADOS\\HSPDPMI" 2
+  send "A:\\HISPADOS\\HSPRATON" 2
+  send "A:\\HISPADOS\\HSPSND" 3
+  send "VENTANAS /486" 9
+  ir 300 200; shot y0
+  ir 686 586; sleep 1.2; shot y1
+  cmos 61 03
+  sleep 9; shot y2
+  ir 686 520; sleep 1; shot y3
+  ir 707 586; sleep 1.2; shot y4
+  ir 707 520; cmos 62 28; cmos 61 02
+  sleep 9; ir 686 586; sleep 1.2; shot y5
+  ir 652 586; sleep 1.2; shot y6
+  ir 628 586; sleep 1.2; shot y7
+  ir 300 200; sleep 1; shot y8
+' 150
+Y0=480; Y1=572
+chk $T/y1.ppm tam 800 600 \
+  busca 300 $Y0 800 $Y1 0 8 "Batería: 85 % · quedan 4 h 15 min" \
+  busca 300 $Y0 800 $Y1 0 8 "Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era nueva)" \
+  busca 300 $Y0 800 $Y1 0 8 "312 ciclos de carga" \
+  nobusca 0 0 800 600 4 8 "La batería está gastada"
+muestra y1 ayuda_bateria
+chk $T/y2.ppm busca 300 $Y0 800 $Y1 0 8 "Enchufado · cargando: 85 %" \
+  busca 300 $Y0 800 $Y1 0 8 "Salud: 68 %" nobusca 300 $Y0 800 $Y1 0 8 "Batería: 85 %"
+muestra y2 ayuda_enchufado
+chk $T/y3.ppm nobusca 0 400 800 572 0 8 "Salud" \
+  igual 0 400 640 172 $T/y0.ppm 0 400 0 \
+  igual 640 400 160 115 $T/y0.ppm 640 400 0
+chk $T/y4.ppm busca 300 $Y0 800 $Y1 0 8 "Enchufado · cargando: 85 %"
+chk $T/y5.ppm busca 0 $Y0 800 $Y1 0 8 "Batería: 85 % · quedan 4 h 15 min" \
+  busca 0 $Y0 800 $Y1 0 8 "Salud: 40 % (guarda 5.000 de 12.500 mAh de cuando era nueva)" \
+  busca 0 $Y0 800 $Y1 4 8 "La batería está gastada: dura menos de la mitad que nueva"
+muestra y5 ayuda_gastada
+chk $T/y6.ppm busca 400 $Y0 800 $Y1 0 8 "Volumen: "
+chk $T/y7.ppm busca 400 $Y0 800 $Y1 0 8 "Sin red"
+chk $T/y8.ppm nobusca 0 400 800 572 0 8 "Sin red" igual 0 0 800 572 $T/y0.ppm 0 0 0
 [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/Ejecutando/,$p' $T/log.txt
 
 # -- 3: un QEMU sin batería (el sobremesa): /AUTO calla y no se queda --

@@ -741,9 +741,11 @@ bat_leer:
         movzx eax, byte [op_batac]
         mov [bat_ac], eax
         mov byte [bat_hay], 1
+        call bat_forzada            ; [AYUDA] (barra.inc) cargando, minutos, salud
         jmp .x
 .apm:
         mov byte [bat_hay], 0
+        mov byte [bat_sal_hay], 0   ; [SALUD]
         ; 1) ¿hay APM? INT 15h AX=5300h BX=0000h -> CF=0 y BX='PM'
         mov dword [rmcs+0x1C], 0x5300       ; EAX
         mov dword [rmcs+0x10], 0            ; EBX (dispositivo: la BIOS de APM)
@@ -782,6 +784,7 @@ bat_leer:
 .ac:
         mov [bat_ac], edx
         mov byte [bat_hay], 1
+        call bat_mas                ; [AYUDA] (barra.inc) cargando, minutos, salud
 .x:
         ; el altavoz: con pila, a la izquierda del cuerpo (BAT_X+28); sin pila,
         ; pegado a la hora (REL_X+28) para no dejar hueco en blanco.

@@ -28,6 +28,7 @@ extern u32 osl_errores, osl_dormido_ms;
 static ACPI_HANDLE bat[LL_NBAT], ca, refresco;
 static int nbat, releer_info[LL_NBAT], fallos[LL_NBAT];
 static u32 ciclos;
+static u32 ciclos_carga[LL_NBAT];	/* [SALUD] de _BIX (FFFFFFFFh: no se sabe) */
 static int hablar;			/* esta lectura se apunta entera */
 
 /* ---- apuntar un objeto de ACPI en el registro ---- */
@@ -292,9 +293,65 @@ static void lee_info(int i, struct ll_bat *b)
 		texto(p, x ? 19 : 12, b->marca, sizeof b->marca);
 		b->valida = 1;
 		releer_info[i] = 0;
+		/* [SALUD] los ciclos de carga: solo los da _BIX (el octavo
+		 * elemento tras la revisión). Si se ha leído _BIF, se mira si el
+		 * equipo tiene también _BIX, y solo entonces se evalúa. */
+		ciclos_carga[i] = 0xFFFFFFFF;
+		if (x)
+			entero(p, 8, &ciclos_carga[i]);
+		else {
+			ACPI_HANDLE h;
+			ACPI_OBJECT *q;
+
+			if (ACPI_SUCCESS(AcpiGetHandle(bat[i], "_BIX", &h)) &&
+			    ACPI_SUCCESS(evalua(bat[i], b->ruta, "_BIX", &q))) {
+				entero(q, 8, &ciclos_carga[i]);
+				AcpiOsFree(q);
+			}
+		}
 	} else
 		reg("%s: la información de la batería no tiene la forma esperada\n", b->ruta);
 	AcpiOsFree(p);
+}
+
+/* [SALUD] el desgaste, para INT 2Fh AX=DB05h: de cada batería puesta con
+ * _BIF/_BIX leído, la capacidad de fábrica y la de la última carga completa
+ * (si la segunda es mayor que la primera, o falta alguna, no se sabe: no se
+ * inventa), y la salud de todas juntas (si todas van en la misma unidad). */
+static void salud_cocina(void)
+{
+	struct ll_salud s;
+	u32 dis = 0, lle = 0;
+	int i, unidad = -1, mezcla = 0;
+
+	memset(&s, 0, sizeof s);
+	s.pct = 0xFF;
+	for (i = 0; i < nbat && i < LL_NBAT; i++) {
+		struct ll_bat *b = &estado.bat[i];
+		struct ll_salud_bat *d = &s.bat[i];
+		u32 c = ciclos_carga[i];
+
+		d->ciclos = c == 0xFFFFFFFF || c > 0xFFFE ? 0xFFFF : (unsigned short)c;
+		if (!(b->sta & 0x10) || !b->valida || b->diseno == 0 || b->diseno >= 0x7FFFFFFF ||
+		    b->llena == 0 || b->llena >= 0x7FFFFFFF || b->llena > b->diseno + b->diseno / 20) {
+			d->ciclos = 0xFFFF;
+			continue;
+		}
+		d->valida = 1;
+		d->unidad = b->unidad ? 1 : 0;
+		d->diseno = b->diseno;
+		d->llena = b->llena > b->diseno ? b->diseno : b->llena;
+		if (unidad >= 0 && unidad != d->unidad)
+			mezcla = 1;
+		unidad = d->unidad;
+		dis += d->diseno;
+		lle += d->llena;
+		s.nbat++;
+	}
+	if (s.nbat && !mezcla && dis)
+		s.pct = (unsigned char)((u64)lle * 100 / dis);
+	s.lecturas = (unsigned short)ciclos;
+	salud = s;
 }
 
 static int desconocido(u32 v)
@@ -457,6 +514,7 @@ suma:
 		reg("\n");
 	}
 	apm = a;
+	salud_cocina();
 	apm_publica();
 }
 

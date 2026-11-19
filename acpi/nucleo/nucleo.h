@@ -34,6 +34,7 @@ void tarea_duerme(u32 ms);		/* suelta el procesador hasta el próximo LL_PASO qu
 extern int tarea_prisa;			/* LL_AHORA: acorta el descanso entre lecturas */
 extern struct ll_inicio ini;
 extern struct ll_apm apm;
+extern struct ll_salud salud;
 extern struct ll_estado estado;
 void apm_publica(void);
 extern unsigned char pila_tarea_fin[];

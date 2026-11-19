@@ -158,6 +158,7 @@ static u8 mem_acpica[6 << 20];
 static u8 baja[0x1000], bios[0x20000];
 static struct ll_inicio in;
 static struct ll_apm ap;
+static struct ll_salud sa;
 static struct ll_estado es;
 static u32 pet[4];
 #define FIS_TABLAS 0x7FE00000u
@@ -254,9 +255,11 @@ void entrada_c(long *pila)
 	mem_inicia(mem_acpica, sizeof mem_acpica);
 	sim_region((u32)&in, sizeof in, &in);
 	sim_region((u32)&ap, sizeof ap, &ap);
+	sim_region((u32)&sa, sizeof sa, &sa);
 	sim_region((u32)&es, sizeof es, &es);
 	sim_region((u32)pet, sizeof pet, pet);
 	in.dir_apm = (u32)&ap;
+	in.dir_salud = (u32)&sa;
 	escenario(1);
 	if (nucleo_llamada(LL_INICIA, (u32)&in))
 		sim_muere("LL_INICIA falla");
@@ -277,6 +280,12 @@ void entrada_c(long *pila)
 			di("APM %u: fase=%u ca=%02X estado=%02X banderas=%02X pct=%u min=%u nbat=%u\n", hechas,
 			   ap.fase, ap.ca, ap.estado, ap.banderas, ap.pct,
 			   ap.minutos == 0xFFFF ? 0 : ap.minutos & 0x7FFF, ap.nbat);
+			di("SALUD %u: pct=%u nbat=%u", hechas, sa.pct, sa.nbat);
+			for (i = 0; i < LL_NBAT; i++)
+				if (sa.bat[i].valida)
+					di(" [%d: %u de %u %s, ciclos=%d]", i + 1, sa.bat[i].llena, sa.bat[i].diseno,
+					   sa.bat[i].unidad ? "mAh" : "mWh", sa.bat[i].ciclos == 0xFFFF ? -1 : sa.bat[i].ciclos);
+			di("\n");
 			if ((int)hechas >= lecturas)
 				break;
 			escenario(hechas + 1);

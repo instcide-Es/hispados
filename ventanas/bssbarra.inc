@@ -52,3 +52,18 @@ bt_edicion  resb 16                 ; [FRANJA] «Hispa-486» (EDICION.INI) o «H
 bt_fr_al    resd 1                  ; [FRANJA] el alto de la franja
 bt_fr_buf   resb MI_FR * MI_FR_MAXAL ; [FRANJA] la franja, dibujada
 bt_buf      resb BT_BUF             ; VENTANAS.INI, para buscar «Escritorio=486»
+; ---- [AYUDA] el recuadro de ayuda de la bandeja ----
+            alignb 4
+ay_ven      resd 1                  ; el recuadro (0: no se ve)
+ay_zona     resd 1                  ; la zona bajo el puntero (AY_BAT...; 0 ninguna)
+ay_tic      resd 1                  ; desde cuándo está quieto
+ay_rx       resd 1                  ; dónde estaba
+ay_ry       resd 1
+bat_min     resw 1                  ; [AYUDA] DX de APM 530Ah: lo que queda (FFFFh no se sabe)
+bat_carga   resb 1                  ; [AYUDA] 1: cargando (BL = 3)
+bat_sal_hay resb 1                  ; [SALUD] 1: bat_salud vale
+ay_bloq     resb 1                  ; 1: se pulsó; no sale hasta otra zona
+            alignb 4
+bat_salud   resb 4 + 4 * 12         ; [SALUD] struct ll_salud (HSPACPI, INT 2Fh AX=DB05h)
+ay_txt      resb AY_TAM             ; lo que se ve
+ay_nuevo    resb AY_TAM             ; lo que tocaría ver

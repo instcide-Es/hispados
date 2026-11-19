@@ -23,6 +23,7 @@ static int descansando;
 
 struct ll_inicio ini;
 struct ll_apm apm;
+struct ll_salud salud;		/* [SALUD] (bateria.c) */
 struct ll_estado estado;
 extern u32 osl_errores;
 extern char _fin_bss[];
@@ -105,6 +106,8 @@ void apm_publica(void)
 	estado.apm = apm;
 	if (ini.dir_apm)
 		memcpy(mq_mapa(ini.dir_apm, sizeof apm), &apm, sizeof apm);
+	if (ini.dir_salud)
+		memcpy(mq_mapa(ini.dir_salud, sizeof salud), &salud, sizeof salud);
 }
 
 int nucleo_llamada(u32 f, u32 dir_pet)
@@ -122,6 +125,8 @@ int nucleo_llamada(u32 f, u32 dir_pet)
 #endif
 		memset(&estado, 0, sizeof estado);
 		memset(&apm, 0, sizeof apm);
+		memset(&salud, 0, sizeof salud);
+		salud.pct = 0xFF;
 		estado.version = LL_VERSION;
 		apm.ca = apm.estado = apm.pct = 0xFF;
 		apm.minutos = 0xFFFF;

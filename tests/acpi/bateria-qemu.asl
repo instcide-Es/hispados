@@ -7,6 +7,11 @@
  * DOS con CMOSW:
  *    CMOS 60h   el nivel, de 0 a 100 (la batería es de 5000 mAh)
  *    CMOS 61h   bit 0: con cable (y cargando); bit 1: la batería está puesta
+ *    CMOS 62h   [SALUD] la salud en %, para probar el aviso de batería
+ *               gastada (0: la de siempre, 68 %: nueva guardaba 7350 mAh);
+ *               al cambiarla, _BST avisa con Notify 81h (hay que releer _BIF)
+ * [SALUD] La batería está algo gastada: de fábrica, 7350 mAh; en la última
+ * carga completa, 5000 (el 68 %). _BIX da además 312 ciclos de carga.
  * _BST usa un Mutex, duerme 20 ms (Sleep) y avisa (Notify), como los equipos
  * de verdad, para que la prueba pase por lo mismo.
  * Compilar: iasl bateria-qemu.asl  (el .aml va en el repositorio)
@@ -27,11 +32,13 @@ DefinitionBlock ("", "SSDT", 1, "HISPA ", "BATPRUEB", 0x00000001)
         {
             Offset (0x60),
             HPCT,   8,
-            HFLG,   8
+            HFLG,   8,
+            HSAL,   8
         }
 
         Mutex (HMUT, 0x00)
         Name (HANT, 0xFF)
+        Name (HSAN, Zero)
 
         Device (HBAT)
         {
@@ -51,12 +58,23 @@ DefinitionBlock ("", "SSDT", 1, "HISPA ", "BATPRUEB", 0x00000001)
                 Return (0x0F)
             }
 
+            Method (HDIS, 0, NotSerialized)
+            {
+                Local0 = HSAL
+                If ((Local0 == Zero))
+                {
+                    Return (7350)
+                }
+
+                Return ((500000 / Local0))
+            }
+
             Method (_BIF, 0, NotSerialized)
             {
-                Return (Package (0x0D)
+                Name (PBIF, Package (0x0D)
                 {
                     One,
-                    5000,
+                    7350,
                     5000,
                     One,
                     11100,
@@ -69,6 +87,37 @@ DefinitionBlock ("", "SSDT", 1, "HISPA ", "BATPRUEB", 0x00000001)
                     "LION",
                     "Hispa-DOS"
                 })
+                PBIF [One] = HDIS ()
+                Return (PBIF)
+            }
+
+            Method (_BIX, 0, NotSerialized)
+            {
+                Name (PBIX, Package (0x14)
+                {
+                    Zero,
+                    One,
+                    7350,
+                    5000,
+                    One,
+                    11100,
+                    500,
+                    250,
+                    312,
+                    95000,
+                    0xFFFFFFFF,
+                    0xFFFFFFFF,
+                    0xFFFFFFFF,
+                    0xFFFFFFFF,
+                    10,
+                    10,
+                    "HISPA-PRUEBA",
+                    "0001",
+                    "LION",
+                    "Hispa-DOS"
+                })
+                PBIX [0x02] = HDIS ()
+                Return (PBIX)
             }
 
             Method (_BST, 0, Serialized)
@@ -99,6 +148,12 @@ DefinitionBlock ("", "SSDT", 1, "HISPA ", "BATPRUEB", 0x00000001)
                 {
                     HANT = Local1
                     Notify (\_SB.HBAT, 0x80)
+                }
+
+                If ((HSAN != HSAL))
+                {
+                    HSAN = HSAL
+                    Notify (\_SB.HBAT, 0x81)
                 }
 
                 Return (PBST)

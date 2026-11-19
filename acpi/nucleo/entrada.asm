@@ -29,7 +29,7 @@ _inicio:
         dd _fin_bss                 ; +12 memoria (archivo y datos a cero)
         dd pila_tope                ; +16 pila
         dd idt                      ; +20 tabla de interrupciones (256 octetos)
-        dd 1                        ; +24 versión (LL_VERSION)
+        dd 2                        ; +24 versión (LL_VERSION)
 entra:
         cld
         test eax, eax
