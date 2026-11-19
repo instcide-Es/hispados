@@ -1275,7 +1275,9 @@ porque el volumen nace vacío: cada archivo ocupa clusters seguidos.
 
 **Lo que no hace todavía.** En un disco con tabla **GPT** solo instala
 borrándolo entero (lee sus particiones y las enseña, pero no añade una: el disco
-queda con tabla MBR); no mira dentro de una partición **extendida** (la cuenta
+queda con tabla MBR). Añadirla no bastaría: los sistemas que viven en un disco
+GPT arrancan por UEFI, y Hispa-Pentium arranca por la BIOS; para convivir con
+ellos hace falta antes el arranque por UEFI. No mira dentro de una partición **extendida** (la cuenta
 entera como ocupada); no deja elegir el **tamaño** de la partición ni usar una
 que ya exista; y en un disco **de los de antes**, cuya primera partición
 empieza en el sector 63, no hay sitio delante para el arranque: lo dice, y solo
