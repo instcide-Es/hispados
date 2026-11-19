@@ -59,7 +59,7 @@ C:\>CONFRED
 | Orden | Para qué |
 |---|---|
 | `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO]` | El controlador. Si `HSPRED` está cargado sin enlace (sin cable), lo descarga y sigue; con enlace no se carga (salvo `/JUNTO`). `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del packet driver. `/JUNTO`: cargarse al lado de `HSPRED` (para depurar el Wi-Fi por la consola remota de la red por cable: las órdenes de red siguen yendo por el cable y `HSPWIFI` deja `INT 2Fh AH=DAh` a `HSPRED`). `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
-| `HSPWIFI /AUTO` | Para el `AUTOEXEC.BAT` (el de Hispa-486 la lleva: docs/486/HISPA-486.md, «La red al arrancar»). Solo se carga si hay una red guardada en `RED.INI` (`WIFI=`), una tarjeta admitida en el PCI (lo pregunta a la BIOS, sin cargar el núcleo) y no hay red por cable con enlace; si no, sale en silencio con nivel de error 1. Si `HSPRED` está cargado y su tarjeta no tiene enlace (3 segundos de espera), lo descarga y se carga; con enlace, o si no se sabe, se queda el cable. |
+| `HSPWIFI /AUTO` | Para el `AUTOEXEC.BAT` (el de Hispa-486 la lleva: docs/486/HISPA-486.md, «La red al arrancar»). Solo se carga si hay una tarjeta admitida en el PCI (lo pregunta a la BIOS, sin cargar el núcleo) y no se ha quedado la red por cable; si no, sale en silencio con nivel de error 1. Desde la 0.9.28 **no hace falta una red guardada** (así, sin cable, la ventanita de Hispa Ventanas puede buscar las redes) y respeta `Preferir=` de `RED.INI` (docs/RED.md, «Cable o Wi-Fi»): con `CABLE` no quita `HSPRED`; con `WIFI` lo quita aunque tenga enlace; con `AUTO`, si `HSPRED` está cargado y su tarjeta no tiene enlace (3 segundos de espera), lo descarga y se carga; con enlace, o si no se sabe, se queda el cable. Si no puede quitarlo (otro residente encima), lo dice y cómo arreglarlo. |
 | `WIFI` | Cómo está la conexión: red, canal, señal, punto de acceso, paquetes, velocidad y, si no hay conexión, por qué. |
 | `WIFI REDES` | Busca (unos 2 segundos) y enseña las redes, con su señal y su seguridad. |
 | `WIFI CONECTAR red [clave]` | Conecta. «red» es el nombre (entre comillas si lleva espacios) o su número en la lista de `WIFI REDES` (lo más cómodo si el nombre lleva eñes o símbolos). Si la red pide contraseña y no se da, la pregunta **sin enseñarla** (asteriscos). Al conectar la guarda en `RED.INI`. |
@@ -115,11 +115,23 @@ como la del volumen:
   contraseña, usa la de `RED.INI` si es esa red; si no, la pide),
   **«Desconectar»**, **«Olvidar»** (desconecta y quita la red de
   `RED.INI`) y **«Configuración de red...»**.
-- **Con HSPRED**: el enlace (conectado, «no hay (¿está el cable?)» o «no se
+- **Con HSPRED**: el enlace (conectado, «no hay cable enchufado» o «no se
   sabe»), la dirección IP y la puerta de enlace (o «todavía sin dirección»).
-- **Sin red**: lo dice (hay que cargar HSPRED o HSPWIFI).
-- Siempre, **«Configuración de red...»**: abre Configuración en el
-  apartado «Red».
+  Sin cable enchufado y con tarjeta Wi-Fi: «Para usar el Wi-Fi, elija
+  «Wi-Fi».».
+- **Sin red**: «No hay ninguna red en marcha.» y, si el equipo tiene una
+  tarjeta Wi-Fi de las admitidas, «Para usar el Wi-Fi, elija «Wi-Fi».» (si
+  no, «Enchufe el cable y reinicie el equipo.»).
+- Siempre, **«Usar: Automático / Cable / Wi-Fi»** (desde la 0.9.28; docs/
+  RED.md, «Cable o Wi-Fi»): marcada la de `Preferir=` de `RED.INI`. Al
+  elegir otra la guarda y, si para usarla hace falta otro controlador
+  (HSPRED y HSPWIFI solo se ponen al arrancar), pregunta «Hace falta
+  reiniciar para usar el Wi-Fi. ¿Reiniciar ahora?» (o «...el cable»):
+  **Sí** reinicia como «Reiniciar» del cuadro «Salir»; **No** deja el aviso
+  «Cambiará la próxima vez que arranque.». Si no hace falta, lo dice («Ya
+  se está usando el Wi-Fi.», «Guardado: al arrancar elegirá solo.»); sin
+  tarjeta Wi-Fi, «Este equipo no tiene Wi-Fi.».
+- Y **«Configuración de red...»**: abre Configuración en el apartado «Red».
 
 Lo que hace es lo mismo que la orden `WIFI`, por la misma interfaz del
 residente (`INT 2Fh AX=DC01h` con las funciones de

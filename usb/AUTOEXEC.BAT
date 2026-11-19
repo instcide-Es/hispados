@@ -17,7 +17,8 @@ REM 13 KB de memoria convencional, que les faltan a los juegos y programas
 REM grandes. ACTUALIZAR lo carga solo cuando lo necesita; para CONFRED, PING,
 REM DESCARGAR o CONSOLA, antes y a mano: HSPRED. Para tener la red siempre,
 REM quite el REM de la línea siguiente (con /AUTO, si no hay tarjeta sale en
-REM silencio y no gasta memoria):
+REM silencio y no gasta memoria; en un equipo con Wi-Fi, sin cable enchufado
+REM tampoco se queda, salvo con Preferir=CABLE en RED.INI):
 REM C:\HISPADOS\HSPRED /AUTO
 REM Wi-Fi (tarjetas Broadcom BCM43224/43225, con WPA2): quite el REM de las
 REM dos líneas siguientes. La red se elige una vez con WIFI REDES y WIFI

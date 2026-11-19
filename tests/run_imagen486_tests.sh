@@ -29,7 +29,7 @@
 #     de Hispa-486, con el AUTOEXEC.BAT que arranca el escritorio y la red, y
 #     el Navegador en \HISPADOS\INTERNET.
 #  9) La red al arrancar (QEMU con una e1000): HSPRED /AUTO se queda,
-#     HSPWIFI /AUTO no (no hay tarjeta Wi-Fi ni red guardada) y no dice nada;
+#     HSPWIFI /AUTO no (no hay tarjeta Wi-Fi) y no dice nada;
 #     Inicio › Internet › Navegador abre una página del servidor de pruebas
 #     (tests/tools/nav_servidor.py, por HTTP: sin Internet), y otra vez con
 #     Intro en el escritorio (el icono «Biblioteca», marcado) y después CONFRED

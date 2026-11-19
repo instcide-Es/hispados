@@ -859,8 +859,10 @@ así que no hace falta volver a entrar.
   una ventanita: con HSPWIFI, el estado, la lista de redes con su señal y su
   seguridad, la contraseña (en asteriscos) y «Buscar», «Conectar»,
   «Desconectar» y «Olvidar»; con HSPRED, el enlace, la IP y la puerta de
-  enlace; y siempre «Configuración de red...» (Configuración › Red). Todo
-  en `ventanas/wifi.inc` (parte alta: 6.784 octetos; la parte baja no cambia) y `bsswifi.inc`; los
+  enlace; y siempre «Usar: Automático / Cable / Wi-Fi» (`Preferir=` de
+  `RED.INI`; si hace falta otro controlador, ofrece reiniciar: docs/RED.md,
+  «Cable o Wi-Fi») y «Configuración de red...» (Configuración › Red). Todo
+  en `ventanas/wifi.inc` (parte alta; la parte baja no cambia) y `bsswifi.inc`; los
   detalles, en docs/WIFI.md («En Hispa Ventanas»). En Hispa-386 no cambia
   nada.
 - **Botón derecho** en la barra: «Ventanas en cascada», «Ventanas en

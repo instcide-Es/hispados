@@ -55,7 +55,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
 
 | Orden | Para qué |
 |---|---|
-| `HSPRED [/INT:xx] [/INFO] [/USB] [/DEPURA[:archivo]] [/U]` | El controlador. `/USB`: usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque haya una tarjeta PCI que valga. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). `/DEPURA[:archivo]`: todo lo que HSPRED escribe en la pantalla se añade además a un archivo (`HSPRED.LOG` si no se dice otro), línea a línea (si el equipo se cuelga, queda hasta donde llegó), y la Yukon cuenta su puesta en marcha paso a paso; con `/INFO`, es el informe para mandar a quien depura. Solo para la Marvell Yukon: `/MEMORIA` y `/PUERTOS` (por dónde van sus registros, sin probar cuál contesta) y `/SONDEO` (sin IRQ: mira la tarjeta en cada tic del reloj). |
+| `HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/DEPURA[:archivo]] [/U]` | El controlador. `/AUTO`: para el `AUTOEXEC.BAT`: sin tarjeta sale en silencio y, con una tarjeta Wi-Fi, elige entre el cable y el Wi-Fi (ver «Cable o Wi-Fi»). `/USB`: usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque haya una tarjeta PCI que valga. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). `/DEPURA[:archivo]`: todo lo que HSPRED escribe en la pantalla se añade además a un archivo (`HSPRED.LOG` si no se dice otro), línea a línea (si el equipo se cuelga, queda hasta donde llegó), y la Yukon cuenta su puesta en marcha paso a paso; con `/INFO`, es el informe para mandar a quien depura. Solo para la Marvell Yukon: `/MEMORIA` y `/PUERTOS` (por dónde van sus registros, sin probar cuál contesta) y `/SONDEO` (sin IRQ: mira la tarjeta en cada tic del reloj). |
 | `CONFRED [/RENOVAR] [/LIBERAR]` | La configuración IP. `/RENOVAR` (`/RENEW`) la pide otra vez; `/LIBERAR` (`/RELEASE`) la olvida. `/ALL` se acepta (como en Windows) y hace lo mismo que sin nada. |
 | `PING destino [/N:n] [/T]`, `PING /P` | `/P`: a la puerta de enlace (el router) que haya dado `CONFRED`, sin tener que escribir su dirección. Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
 | `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
@@ -690,6 +690,47 @@ Probar una tarjeta: `HSPRED /INFO` dice cuál ha encontrado y si hay enlace;
 sepa usar, `HSPRED` enseña las de red que hay con su `fabricante:modelo`,
 para poder pedirla.
 
+## Cable o Wi-Fi (Hispa-486, desde la 0.9.28)
+
+El `AUTOEXEC.BAT` de Hispa-486 lleva `HSPRED /AUTO`, `HSPWIFI /AUTO` y
+`WIFI /AUTO`, por este orden, antes del escritorio. Hasta la 0.9.27,
+`HSPRED /AUTO` se quedaba siempre que hubiera tarjeta de cable, aunque no
+hubiera cable enchufado; en un portátil con las dos tarjetas (como el Toshiba
+NB250, con su Realtek RTL8136 de cable) el Wi-Fi solo llegaba si `HSPWIFI`
+podía descargar `HSPRED`, y con otro residente encima (`HSPACPI`) no podía:
+sin Wi-Fi y sin manera fácil de cambiarlo. Ahora:
+
+| `Preferir=` (RED.INI) | `HSPRED /AUTO` | `HSPWIFI /AUTO` |
+|---|---|---|
+| `AUTO` (o nada) | Pone la tarjeta en marcha y espera hasta **3 segundos** al enlace. Con enlace (cable enchufado), o si la tarjeta no sabe decirlo (NE2000, Tulip, USB), se queda. Sin enlace y **con una tarjeta Wi-Fi** de las de HSPWIFI, sale sin quedarse y lo dice en una línea («HSPRED: no hay cable enchufado; la red irá por el Wi-Fi.», nivel de error 2). Sin enlace y sin Wi-Fi, se queda como antes (al enchufar el cable, va). | Se carga si hay tarjeta Wi-Fi y no se ha quedado el cable (aunque no haya red guardada: así se puede elegir desde la ventanita). Si `HSPRED` está y no tiene enlace en 3 s, lo descarga. |
+| `CABLE` | Se queda siempre que haya tarjeta (como hasta la 0.9.27), sin esperar. | Con `HSPRED` cargado, calla (no lo quita). Sin `HSPRED`, se carga si hay tarjeta Wi-Fi. |
+| `WIFI` | Con tarjeta Wi-Fi, sale sin quedarse («HSPRED: RED.INI dice Preferir=WIFI; ...»); sin ella, se queda. | Se carga si hay tarjeta Wi-Fi; si `HSPRED` está, lo descarga aunque tenga enlace. |
+
+Las tarjetas Wi-Fi se buscan en el PCI (la BIOS, `INT 1Ah AX=B102h`) con la
+tabla de `lib/wifi_ids.inc` (Broadcom 14E4:4353/4357/4727/0576/A8D8 y
+Atheros 168C:0023/0024/0027/0029/002A/002B/002C/002D/002E), la misma que
+usan `HSPWIFI /AUTO` y Hispa Ventanas. Lo de `RED.INI` lo lee
+`lib/redpref.inc` (de `HSPRED` y de `HSPWIFI`). `HSPRED /Q` (lo que usa
+`ACTUALIZAR` al cargarlo) no elige nada: se queda como siempre.
+
+Si `HSPWIFI` no puede quitar `HSPRED` (otro residente cargado después), ya
+no dice «Descárguelo antes: HSPRED /U» (que tampoco podía): dice que se elija
+el Wi-Fi en Hispa Ventanas (o `Preferir=WIFI`) y se reinicie.
+
+**En Hispa Ventanas**, la ventanita del icono de red (docs/WIFI.md, «En
+Hispa Ventanas») dice por dónde va la red ahora (cable con o sin cable
+enchufado, Wi-Fi, ninguna) y lleva **«Usar: Automático / Cable / Wi-Fi»**:
+guarda `Preferir=` y, si para eso hace falta otro controlador (los
+residentes no se pueden cambiar con el escritorio en marcha), pregunta
+«Hace falta reiniciar para usar el Wi-Fi. ¿Reiniciar ahora?» (o «...el
+cable»): **Sí** reinicia como «Reiniciar» del cuadro «Salir»; **No** lo deja
+para el próximo arranque.
+
+En Hispa-386 el `AUTOEXEC.BAT` trae la red con `REM` (a mano): nada cambia
+mientras no se quite. Quien quite el `REM` de `HSPRED /AUTO` en un equipo
+con Wi-Fi y sin cable verá que no se queda; con `Preferir=CABLE` se queda
+siempre.
+
 ## RED.INI
 
 `\HISPADOS\RED.INI` de la unidad de arranque (`sistema/RED.INI` en el
@@ -704,6 +745,13 @@ proyecto). Claves (sin importar mayúsculas; `;` y `#` empiezan comentarios):
 | `DNS=` | el servidor de nombres; con `DHCP=SI` también, y manda sobre el que da el DHCP |
 | `ACTUALIZAR=` | la dirección HTTP del archivo `versiones.txt` que mira `ACTUALIZAR` (si no, la de por omisión). Opcional. |
 | `WIFI=`, `WIFICLAVE=` | la red inalámbrica y su clave ya preparada (no la contraseña); las escribe la orden `WIFI` de Hispa-486: ver [WIFI.md](WIFI.md). Configuración de Hispa Ventanas las conserva. |
+| `Preferir=` | `AUTO` (lo normal; también si no está), `CABLE` o `WIFI`: por dónde va la red al arrancar con `HSPRED /AUTO` y `HSPWIFI /AUTO` (ver «Cable o Wi-Fi»). La escribe la ventanita de la red de Hispa Ventanas («Usar:»); Configuración la conserva. |
+| `HAYWIFI=SI` | solo para las pruebas: `HSPRED /AUTO` y la ventanita hacen como si hubiera una tarjeta Wi-Fi (QEMU no tiene ninguna de las admitidas). |
+
+`RED.INI` no tiene secciones: las claves van sueltas (una línea `[Red]`, si
+se pone, no estorba: las líneas que empiezan por `[` no cuentan). Si una
+clave sale dos veces, vale la última (la ventanita añade `Preferir=` al
+final y quita las de antes).
 
 También se puede poner con ratón en **Hispa Ventanas**: Configuración ›
 apartado **«Red»** (una casilla para el DHCP y, a mano, la IP, la máscara, la

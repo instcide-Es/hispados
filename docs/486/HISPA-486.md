@@ -322,20 +322,24 @@ C:\HISPADOS\VENTANAS
 
 - `HSPRED /AUTO`: si hay tarjeta de cable de las admitidas, se queda
   (13 KB de memoria convencional); si no, sale en silencio sin ocupar nada.
-- `HSPWIFI /AUTO` (nuevo, docs/WIFI.md): solo se carga si hay **una red
-  guardada** en `RED.INI` (la clave `WIFI=`, que escribe `WIFI CONECTAR`) y
-  **una tarjeta Wi-Fi** de las admitidas (se pregunta a la BIOS del PCI, sin
-  cargar los 400 KB del núcleo: el arranque sin Wi-Fi no se alarga). Si
-  `HSPRED` está cargado y su tarjeta **tiene enlace**, o no lo sabe (NE2000,
-  Tulip), se queda el cable y `HSPWIFI` calla. Si **no tiene enlace** (no
-  hay cable) y no le llega en 3 segundos, `HSPWIFI` descarga `HSPRED` y se
-  carga él. En todos los casos en que no se carga, no dice nada.
+  Desde la 0.9.28, si además hay **una tarjeta Wi-Fi** de las admitidas,
+  espera hasta 3 segundos al enlace y, **sin cable enchufado**, no se queda
+  (lo dice en una línea): va el Wi-Fi. `Preferir=` de `RED.INI` (o «Usar:»
+  en el icono de la red) lo cambia: docs/RED.md, «Cable o Wi-Fi».
+- `HSPWIFI /AUTO` (docs/WIFI.md): solo se carga si hay **una tarjeta Wi-Fi**
+  de las admitidas (se pregunta a la BIOS del PCI, sin cargar los 400 KB del
+  núcleo: el arranque sin Wi-Fi no se alarga) y no se ha quedado el cable.
+  Desde la 0.9.28 ya no hace falta una red guardada: así se elige en la
+  ventanita de la red de Hispa Ventanas. Si `HSPRED` está cargado y su
+  tarjeta **tiene enlace**, o no lo sabe (NE2000, Tulip), se queda el cable
+  y `HSPWIFI` calla. Si **no tiene enlace** y no le llega en 3 segundos,
+  `HSPWIFI` descarga `HSPRED` y se carga él.
 - `WIFI /AUTO`: conecta con la red guardada (sin `HSPWIFI`, calla).
 
 Las dos a la vez no van (docs/WIFI.md, «Límites»); así siempre queda una
-sola. La primera vez, en el HP Mini, se elige la red a mano: `HSPWIFI`
-(si se cargó `HSPRED` y no hay cable, `HSPWIFI` lo descarga solo),
-`WIFI REDES` y `WIFI CONECTAR número`; desde el siguiente arranque, sola.
+sola. La primera vez se elige la red en el icono de la red de Hispa Ventanas
+(o con `WIFI REDES` y `WIFI CONECTAR número`); desde el siguiente arranque,
+sola.
 La dirección (DHCP) la pide el primer programa que usa la red (el Navegador
 o `CONFRED`), como siempre.
 
@@ -535,9 +539,11 @@ completo, en docs/RED.md, «Formato de versiones.txt».
   por HTTP, sin Internet) y `CONFRED` enseña la dirección del DHCP; el disco
   duro arranca sin tarjeta de red y sin ningún aviso. Y que Hispa-386 sigue
   con su `AUTOEXEC.BAT` (la red a mano) y sin `\HISPADOS\INTERNET`.
-- `tests/run_wifi_tests.sh`: `HSPWIFI /AUTO` calla sin red guardada, sin
-  tarjeta y con `HSPRED` con enlace; con el cable quitado (`set_link off`
-  de QEMU) descarga `HSPRED` y se carga.
+- `tests/run_wifi_tests.sh`: `HSPWIFI /AUTO` se carga sin red guardada;
+  calla sin tarjeta y con `HSPRED` con enlace; con el cable quitado
+  (`set_link off` de QEMU) descarga `HSPRED` y se carga. Y «Cable o Wi-Fi»:
+  `HSPRED /AUTO` sin enlace y con Wi-Fi (`HAYWIFI=SI`) no se queda; con
+  enlace, sí; `Preferir=WIFI` y `Preferir=CABLE`.
 - `tests/run_actualizar_tests.sh`: en un Hispa-386, una sección con
   `gama=486` no se mira.
 - Siguen igual las de Hispa-386: `run_usb_tests.sh`, `run_instalar_usb_tests.sh`,
