@@ -149,6 +149,20 @@ T_RAT_DZ        dd 0                    ; +296 la rueda (positivo: hacia el usua
 T_RAT_LEC       dd 0                    ; +300 lecturas del firmware que traían algo
 T_RAT_PAQ       dd 0                    ; +304 paquetes entregados a la rutina del programa
 T_RAT_CB        dd 0                    ; +308 informes del ratón USB propio (raton_cb)
+;  ---- (0.6) el teclado del firmware y su reloj (ver «El teclado USB del firmware
+;       se quedaba sin reloj» en docs/HISPABIOS.md) ----
+T_TEC_OPC       db 0                    ; +312 lo pone la parte UEFI: bit 0, sondeo continuo (modo
+                                        ;      seguro: INT 16h pregunta siempre al firmware y la
+                                        ;      espera de tecla no usa HLT, como la 0.2); bit 7
+                                        ;      (pruebas, PRUEBA_FW_SIN_RELOJ): el firmware se queda
+                                        ;      sin interrupciones (TPR a F0h también en sus viajes)
+T_FWT_VIA       db 0                    ; +313 cómo se le dan sus tics al firmware: 0, no se le
+                                        ;      dan; 1, GenerateSoftInterrupt de su temporizador
+                                        ;      (Timer Arch); 2, su rutina de la IRQ 0 (INT T_VEC0)
+                dw 0
+T_FWT_N         dd 0                    ; +316 tics dados al firmware (lo cuenta la parte UEFI)
+T_TEC_N         dd 0                    ; +320 teclas que ha dado el firmware
+T_TEC_USB       dd 0                    ; +324 informes del teclado USB propio (reservado)
 
 %ifdef ARQ32
 ; =============================================================================
@@ -580,6 +594,8 @@ reloj_fw:
         mov [ebx + 350h], eax
         mov eax, [L(sv_lvtt)]
         mov [ebx + 320h], eax
+        test byte [L(T_TEC_OPC)], 80h   ; (pruebas: el firmware, sin interrupciones)
+        jnz .pic
         mov eax, [L(sv_tpr)]
         mov [ebx + 80h], eax
         jmp .pic
@@ -590,6 +606,8 @@ reloj_fw:
         mov ecx, 832h
         mov eax, [L(sv_lvtt)]
         wrmsr
+        test byte [L(T_TEC_OPC)], 80h
+        jnz .pic
         mov ecx, 808h
         mov eax, [L(sv_tpr)]
         wrmsr
@@ -1999,7 +2017,7 @@ t_rj_aviso      db 'AVISO: en este equipo no llega la interrupcion del reloj (IR
                 db 'Hispa-DOS arranca, pero las esperas y los programas que usan el reloj', 13, 10
                 db 'pueden ir a saltos o quedarse parados (pulsar una tecla los despierta).', 13, 10
                 db 'Suba al FTP el archivo HISPABIOS.LOG de la memoria USB.', 13, 10, 13, 10, 0
-t_prueba        db 'HispaBIOS 0.5 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
+t_prueba        db 'HispaBIOS 0.6 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
 t_vbe_oem       db 'HispaBIOS (VBE sobre la pantalla del firmware UEFI)', 0
 t_r_vbe         db 'INT 10h AX=', 0
 t_r_bx          db ' BX=', 0

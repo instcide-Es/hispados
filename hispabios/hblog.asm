@@ -34,6 +34,10 @@ T_RAT_BOT       equ 286
 T_RAT_LEC       equ 300
 T_RAT_PAQ       equ 304
 T_RAT_CB        equ 308
+T_TEC_OPC       equ 312                 ; (0.6) el teclado: bit 0, sondeo continuo (modo seguro)
+T_FWT_VIA       equ 313                 ; cómo se dan los tics al firmware (0 no, 1, 2)
+T_FWT_N         equ 316                 ; tics dados al firmware
+T_TEC_N         equ 320                 ; teclas que ha dado el firmware
 
 inicio:
         cld
@@ -194,6 +198,35 @@ inicio:
         mov si, m_nl
         call txt
 .sin_raton:
+        cmp word [version], 6           ; (desde la 0.6: el teclado y los tics
+        jb .sin_teclado                 ; que se dan al firmware)
+        mov si, m_tec
+        call txt
+        mov bx, T_TEC_N
+        call num_tab
+        mov si, m_tec_fwt
+        call txt
+        mov bx, T_FWT_N
+        call num_tab
+        mov bx, T_FWT_VIA
+        call leer_tab
+        mov si, m_fwt_0
+        cmp al, 1
+        jb .via
+        mov si, m_fwt_1
+        je .via
+        mov si, m_fwt_2
+.via:   call txt
+        mov bx, T_TEC_OPC
+        call leer_tab
+        test al, 1
+        jz .tec_nl
+        mov si, m_tec_seg
+        call txt
+.tec_nl:
+        mov si, m_nl
+        call txt
+.sin_teclado:
         mov si, m_reg
         call txt
         ; el registro de la BIOS, tal cual
@@ -316,6 +349,12 @@ m_rat_lec       db '; lecturas del firmware: ', 0
 m_rat_cb        db '; informes USB: ', 0
 m_rat_paq       db '; paquetes al programa: ', 0
 m_rat_bot       db '; botones ahora: ', 0
+m_tec           db 'Teclado: teclas dadas por el firmware: ', 0
+m_tec_fwt       db '; tics dados al firmware: ', 0
+m_fwt_0         db ' (no se le dan)', 0
+m_fwt_1         db ' (por GenerateSoftInterrupt de su reloj)', 0
+m_fwt_2         db ' (por su rutina de la interrupcion del reloj)', 0
+m_tec_seg       db '; modo seguro: sondeo continuo, sin HLT', 0
 m_nl            db 13, 10, 0
 m_reg           db '--- lo apuntado por HispaBIOS (pantalla y llamadas de VBE) ---', 13, 10, 0
 m_fin           db '--- fin ---', 13, 10, 0

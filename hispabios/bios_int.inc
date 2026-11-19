@@ -598,6 +598,8 @@ k_leer:                                 ; 00h/10h: espera una tecla -> AX
         mov ax, PET_DIBUJAR
         call llamar_fw
 .espera:
+        test byte [T_TEC_OPC], 1        ; (modo seguro: sin HLT, sondeo continuo)
+        jnz .sin_hlt
         cmp byte [T_SIN_IRQ], 0         ; (si la IRQ 0 no llega, o no ha llegado
         jne .sin_hlt                    ; nunca, HLT no despertaría: se sigue
         cmp dword [T_N_IRQ], 0          ; sondeando, que el firmware ya espera
@@ -620,8 +622,11 @@ k_mirar:                                ; 01h/11h: ¿hay tecla? -> ZF, AX
         ; escribe (Ctrl+C): sin medida, la pantalla va a tirones. Se pregunta
         ; como mucho cada octavo de tic (unos 7 ms).
 %ifndef PRUEBA_TECLADO_SIEMPRE          ; (pruebas: como antes, sin medida)
+        test byte [cs:T_TEC_OPC], 1     ; (modo seguro: siempre, como la 0.2)
+        jnz .ya
         call k_toca
         jc .nohay
+.ya:
 %endif
         call k_sondear
         call k_mirar_buf
@@ -840,7 +845,7 @@ int15:
         cmp ax, 4842h                   ; 'HB': ¿es HispaBIOS? -> AX = 'hb',
         jne .no_hb                      ; BX = versión (0.4), CF = 0
         mov ax, 6862h
-        mov bx, 0005h
+        mov bx, 0006h
         jmp d_bien
 .no_hb:
         cmp ax, 4844h                   ; 'HD': los datos para depurar (HBLOG.COM)

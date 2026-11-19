@@ -32,6 +32,9 @@ reloj_mirar:
 %ifdef PRUEBA_RELOJ
         mov byte [edi + 255], PRUEBA_RELOJ      ; T_PRUEBA
 %endif
+%ifdef PRUEBA_FW_SIN_RELOJ
+        or byte [edi + 312], 80h        ; T_TEC_OPC: el firmware, sin interrupciones
+%endif
         cmp byte [V(seguro)], 0
         je .mirar
         or byte [edi + 255], 2Eh        ; modo seguro: solo el 8254 y el reloj CMOS
@@ -686,6 +689,7 @@ despachador:
         push ebp
         BASE_EBP
         cld
+        call fwt_dar                    ; al firmware, los tics de su reloj que le tocan
         mov eax, [V(bios_base)]         ; con el ratón activado, en cada viaje
         cmp byte [eax + 285], 0         ; se le pregunta (T_RAT_ON)
         je .sin_raton
@@ -791,6 +795,7 @@ despachador:
         sti                             ; atienda el teclado (USB)
         FW [eax + BS_STALL], 1000
         cli
+        call tecla_esperada             ; (CheckEvent de WaitForKey)
         cmp byte [V(inex_est)], 1       ; el protocolo con el estado de Ctrl/Alt
         je .ex                          ; (SimpleTextInputEx): 1 = localizado y hay
         ja .plano                       ; 2 = no hay -> sin modificadores
@@ -832,6 +837,8 @@ despachador:
 .giro:  call giro_cambiar
         jmp .sin_tecla
 .devolver:
+        mov eax, [V(bios_base)]
+        inc dword [eax + 320]           ; T_TEC_N
         movzx eax, word [V(keydata)]    ; ScanCode (bajo)
         movzx edx, word [V(keydata) + 2]   ; UnicodeChar (alto)
         shl edx, 16
@@ -845,6 +852,8 @@ despachador:
         cli
         test eax, eax
         jnz .sin_tecla
+        mov eax, [V(bios_base)]
+        inc dword [eax + 320]           ; T_TEC_N
         mov eax, [V(tecla_efi)]         ; ScanCode (bajo) y UnicodeChar (alto)
         jmp .fin
 .sin_tecla:
