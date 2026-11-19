@@ -48,6 +48,10 @@
 ;    -DPRUEBA_GIRO=n           el giro por omisión (1: 90 grados a la derecha,
 ;                              2: 180, 3: 90 a la izquierda) aunque la
 ;                              pantalla sea apaisada
+;    -DPRUEBA_FW_SIN_RELOJ     el firmware no recibe interrupciones en sus viajes
+;    -DPRUEBA_FWT=n            los tics al firmware: 0 no se dan; 2 por su rutina
+;                              de la interrupción (los dos, en efi32_tecl.inc
+;                              y también en efi64.asm)
 ;    -DPRUEBA_SIN_PAG          las tablas propias de escritura combinada se
 ;                              ponen y se quitan desde un estado sin
 ;                              paginación (como en un firmware que no la usa)

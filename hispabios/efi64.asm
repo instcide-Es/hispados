@@ -45,6 +45,9 @@
 ;    -DPRUEBA_RELOJ=mascara    fuentes del reloj que la BIOS no prueba (bit 0: el
 ;                              8254 por LINT0; 1: por el IOAPIC; 2 y 3: el HPET;
 ;                              4 y 5: el reloj CMOS), como si no dieran la IRQ 0
+;    -DPRUEBA_FW_SIN_RELOJ     el firmware no recibe interrupciones en sus viajes
+;    -DPRUEBA_FWT=n            los tics al firmware: 0 no se dan; 2 por su rutina
+;                              de la interrupcion (efi64_tecl.inc)
 ;    -DREGISTRO_PASOS          guarda HISPABIOS.LOG en cada paso aunque todo
 ;                              vaya bien (la imagen de prueba para un equipo
 ;                              que se queda parado: tools/mkprueba_hispabios.sh)
@@ -54,7 +57,7 @@
 %define PE_ARQ 64
 %include "pe.inc"
 
-%define HB_VERSION '0.5'
+%define HB_VERSION '0.6'
 
 ; ---- tablas de UEFI (x64) ----
 ST_VENDOR       equ 24          ; FirmwareVendor (CHAR16 *)
@@ -399,6 +402,7 @@ pe_entrada:
 .hay_discos:
         mov byte [rel callado], 1       ; (solo al registro)
         call raton_preparar             ; el ratón: del firmware o USB (T_RAT_HAY)
+        call teclado_preparar           ; el teclado del firmware y los tics de su reloj
         call gop_modos                  ; los modos que da el firmware
         call wc_preparar                ; la pantalla con escritura combinada y su velocidad
 %ifndef PANTALLA_NATIVA
@@ -1366,6 +1370,9 @@ reloj_mirar:
 %ifdef PRUEBA_RELOJ
         mov byte [r15 + 255], PRUEBA_RELOJ      ; T_PRUEBA
 %endif
+%ifdef PRUEBA_FW_SIN_RELOJ
+        or byte [r15 + 312], 80h        ; T_TEC_OPC: el firmware, sin interrupciones
+%endif
         cmp byte [rel seguro], 0
         je .mirar
         or byte [r15 + 255], 2Eh        ; modo seguro: solo el 8254 y el reloj CMOS
@@ -2007,6 +2014,7 @@ despachador:
         push rsi
         push rdi
         sub rsp, 48
+        call fwt_dar                    ; al firmware, los tics de su reloj que le tocan
         mov rax, [rel bios_base]        ; con el ratón activado, en cada viaje
         cmp byte [rax + 285], 0         ; se le pregunta (T_RAT_ON)
         je .sin_raton
@@ -2122,6 +2130,7 @@ despachador:
         sti
         FW [rax + BS_STALL]
         cli
+        call tecla_esperada             ; (CheckEvent de WaitForKey)
         cmp qword [rel coninex], 0      ; el protocolo con el estado de Ctrl/Alt
         jg .ex                          ; (SimpleTextInputEx): localizado y hay
         jl .plano                       ; localizado y no hay -> sin modificadores
@@ -2156,6 +2165,8 @@ despachador:
         xor edx, edx                    ; EfiResetCold
         jmp .reiniciar
 .devolver:
+        mov rax, [rel bios_base]
+        inc dword [rax + 320]           ; T_TEC_N
         movzx eax, word [rel keydata]   ; ScanCode (bajo)
         movzx edx, word [rel keydata + 2]  ; UnicodeChar (alto)
         shl edx, 16
@@ -2170,6 +2181,8 @@ despachador:
         cli
         test rax, rax
         jnz .sin_tecla
+        mov rax, [rel bios_base]
+        inc dword [rax + 320]           ; T_TEC_N
         mov eax, [rel tecla_efi]        ; ScanCode (bajo) y UnicodeChar (alto)
         jmp .fin
 .sin_tecla:
@@ -3733,6 +3746,7 @@ decimal:
         ret
 
 %include "efi64_raton.inc"
+%include "efi64_tecl.inc"
 
 t_titulo        db 'HispaBIOS ', HB_VERSION, ' (x64)', 13, 10, 0
 t_r_fab         db '[registro de HispaBIOS ', HB_VERSION, ' x64]', 13, 10, 'Firmware: ', 0
