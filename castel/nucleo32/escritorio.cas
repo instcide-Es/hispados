@@ -43,7 +43,7 @@ módulo Escritorio
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
     constante MENÚ_ANCHO = 330
-    constante MENÚ_ALTO = 380
+    constante MENÚ_ALTO = 416
     constante MENÚ_CABEZA = 54
     constante MENÚ_PIE = 42
     constante MENÚ_COLUMNA = 172                ; donde empieza la columna de la derecha
@@ -78,6 +78,8 @@ módulo Escritorio
     constante AM_CONFIG = 23
     constante AM_APAGAR = 24
     constante AM_EQUIPO = 25
+    constante AM_OFICINA = 26                   ; un programa de la oficina (dato: cuál)
+    constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
     constante AC_TAPIZ_SIGUIENTE = 13
@@ -99,7 +101,7 @@ módulo Escritorio
         acción: nat32
     fin
 
-    constante MAX_OPCIONES = 12
+    constante MAX_OPCIONES = 16
     constante MAX_DOCUMENTOS = 5
     constante MAX_PULSADORES = 16
     constante MAX_BOTONES = 12
@@ -583,6 +585,33 @@ módulo Escritorio
         fin
     fin
 
+    ; los programas de la oficina: su nombre (o, con «ruta», su .HVP)
+    función de_oficina(i: nat32, ruta: bool): puntero a byte
+        si ruta entonces
+            según i
+                caso 0: devolver "\\OFICINA\\FACTURAS.HVP"
+                caso 1: devolver "\\OFICINA\\PLUMA.HVP"
+                caso 2: devolver "\\OFICINA\\CUENTAS.HVP"
+            fin
+            devolver "\\OFICINA\\MIRADOR.HVP"
+        fin
+        según i
+            caso 0: devolver "Facturas"
+            caso 1: devolver "Pluma"
+            caso 2: devolver "Cuentas"
+        fin
+        devolver "Mirador"
+    fin
+
+    función color_oficina(i: nat32): nat32
+        según i
+            caso 0: devolver 0x46C282
+            caso 1: devolver 0x4C97EC
+            caso 2: devolver 0xF0A030
+        fin
+        devolver 0xC85A9E
+    fin
+
     función pinta_menú()
         variable l: puntero a Lienzo
         variable yy: ent32
@@ -619,6 +648,18 @@ módulo Escritorio
         degradado(valor(l), 15, yy + 8, 20, 13, 0x7FC2FA, 0x2A7AD6)
         rectángulo(valor(l), 22, yy + 23, 6, 2, 0x7F95B6)
         rectángulo(valor(l), 17, yy + 25, 16, 3, 0x6F87A8)
+        ; y la oficina de Hispa-386 (programas de Hispa Ventanas: HVPRUN.BIN)
+        yy := yy + ALTO_OPCIÓN + 4
+        texto_negrita(valor(l), 12, yy, "Oficina", TINTA_SUAVE)
+        rectángulo(valor(l), 12, yy + 19, MENÚ_COLUMNA - 26, 1, 0xC9D8EC)
+        yy := yy + 24
+        i := 0
+        mientras i < N_OFICINA hacer
+            pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, de_oficina(i, falso), AM_OFICINA, i, cierto)
+            icono_hoja(valor(l), 14, yy + 4, color_oficina(i))
+            yy := yy + ALTO_OPCIÓN + 2
+            i := i + 1
+        fin
         ; a la derecha: los documentos y la configuración
         yy := MENÚ_CABEZA + 10
         texto_negrita(valor(l), MENÚ_COLUMNA + 10, yy, "Documentos", TINTA_SUAVE)
@@ -898,6 +939,7 @@ módulo Escritorio
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
+            caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
             caso AC_ORGANIZAR:
