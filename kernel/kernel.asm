@@ -262,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xF400          ; .init, al arrancar (por debajo de BOOT_TMP)
+INIT_ORG        equ 0xF480          ; .init, al arrancar (por debajo de BOOT_TMP)
         section .low
 start:
         jmp short .go
