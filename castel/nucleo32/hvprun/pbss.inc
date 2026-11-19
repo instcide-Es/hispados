@@ -18,7 +18,8 @@ pr_orden    resd 9                  ; la orden de dibujar (op, x, y, ancho, alto
 pal32       resd 256                ; la paleta, como 0x00RRGGBB
 mb_tabla    resb MB_MAX * 12        ; mem_bloque: puntero, tamaño, en uso
 p_dta_ptr   resd 1                  ; la zona de transferencia (INT 21h, 1Ah)
-bus_m       resd 1                  ; buscar: la carpeta abierta (0: ninguna)
+bus_m       resd 1                  ; buscar: la carpeta abierta (su manejador)
+bus_abierta resb 1                  ; 1: lo está
 bus_atr     resb 1
 bus_patron  resb 11
 bus_nom     resb 11

@@ -681,7 +681,17 @@ bus_primero:
         ; sin la «\» del final (salvo en la raíz: «\», «C:\»)
         cmp edi, bus_dir
         jne .d1
-        mov word [bus_dir], '.'     ; nada: la carpeta de trabajo
+        push ebx                    ; nada: la carpeta de trabajo
+        mov ebx, bus_dir
+        mov ecx, 100
+        PSIS PS_DIR_ACTUAL
+        pop ebx
+        cmp eax, 100
+        jb .d0
+        mov word [bus_dir], '\'
+        jmp .d3
+.d0:
+        mov byte [bus_dir+eax], 0
         jmp .d3
 .d1:
         cmp byte [edi-1], ':'       ; «C:» solo: su raíz
@@ -715,6 +725,7 @@ bus_primero:
         cmp eax, PRIMER_ERROR
         jae .nocarpeta
         mov [bus_m], eax
+        mov byte [bus_abierta], 1
         popad
         jmp bus_siguiente
 .nocarpeta:
@@ -767,7 +778,7 @@ bus_mayus:
 ; -> el siguiente en la zona de transferencia; CF=1 y EAX=18 si no hay más
 bus_siguiente:
         pushad
-        cmp dword [bus_m], 0
+        cmp byte [bus_abierta], 0
         je .fin
 .l:
         mov ebx, [bus_m]
@@ -854,11 +865,11 @@ bus_siguiente:
 bus_cerrar:
         push eax
         push ebx
+        cmp byte [bus_abierta], 0
+        je .x
         mov ebx, [bus_m]
-        test ebx, ebx
-        jz .x
         PSIS PS_CERRAR
-        mov dword [bus_m], 0
+        mov byte [bus_abierta], 0
 .x:
         pop ebx
         pop eax
