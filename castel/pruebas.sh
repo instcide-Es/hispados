@@ -72,6 +72,8 @@
 #      verdad: arrancar la memoria USB (xHCI y EHCI), instalar, arrancar
 #      SOLO del disco (GRUB en el MBR), el asistente del primer arranque,
 #      HISPA.INI y el saludo del menú Inicio; la memoria USB, intacta.
+#      Y la oficina en el disco instalado (C:\OFICINA y C:\HISPA\HVPRUN.BIN):
+#      desde el menú Inicio y desde Mi equipo.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
@@ -1961,6 +1963,33 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
+    # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
+    # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
+    desde_disco $Z/d$hc.img $Z/c$hc.sal
+    espera_a "escritorio: en marcha" 50 $Z/c$hc.sal; sleep 3
+    monz "mouse_move -360 285" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 1
+    monz "screendump $G/c1$hc.ppm" 0.6
+    monz "mouse_move 40 -165" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 5
+    monz "screendump $G/c2$hc.ppm" 0.6
+    monz "mouse_move 654 -386" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
+    monz "mouse_move -672 -4" 0.4; monz "mouse_button 1" 0.1; monz "mouse_button 0" 0.1; monz "mouse_button 1" 0.1; monz "mouse_button 0" 3
+    teclas ret; sleep 2; teclas down down ret; sleep 2
+    monz "screendump $G/c3$hc.ppm" 0.6
+    teclas down ret; sleep 5
+    monz "screendump $G/c4$hc.ppm" 0.6
+    monz quit 0.5; wait $QPID 2> /dev/null; QPID=
+    tr -d '\r' < $Z/c$hc.sal | iconv -f CP437 -t UTF-8 > $Z/c$hc.txt
+    S=$Z/c$hc.txt
+    volumen $Z/d$hc.img 2048; sano=$?
+    if grep -q "escritorio: lanzo .HVPRUN.BIN (la tarea [0-9]*)" $S && ! grep -q "ASISTE.BIN" $S \
+      && cap $G/c1$hc.ppm negrita 8 382 16 390 Oficina negrita 38 410 46 418 Facturas negrita 54 194 62 202 "Hola, Ana:" \
+      && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
+      ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
+    else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
+    if cap $G/c3$hc.ppm negrita 170 116 180 124 "Mi equipo" negrita 176 168 190 180 "C:\\OFICINA" texto 180 216 190 226 "CUENTAS.HVP" texto 180 296 190 306 "DICCIO.DAT" \
+      && cap $G/c4$hc.ppm negrita 80 16 110 36 "Cuentas - (sin nombre)" && [ $sano = 0 ]; then
+      ok "y Mi equipo entra en C:\\OFICINA y abre CUENTAS.HVP (Cuentas, con HVPRUN); el disco queda sano"
+    else ko "Mi equipo no abre la oficina de C:\\OFICINA en el disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; sed 's/^/        /' $Z/fsck.txt | head -3; fi
   fi
 done
 else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
