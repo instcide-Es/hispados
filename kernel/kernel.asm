@@ -2394,7 +2394,12 @@ boot_menu:
         xor byte [cfg_dis+bx], 1
         jmp .draw
 .ta:
-        xor byte [bm_noauto], 1
+        ; AUTOEXEC.BAT: sí -> no -> paso a paso (2: el intérprete pregunta
+        ; cada línea, como en MS-DOS 6.22) -> sí
+        inc byte [bm_noauto]
+        cmp byte [bm_noauto], 3
+        jb .draw
+        mov byte [bm_noauto], 0
         jmp .draw
 .clean:
         mov byte [boot_clean], 1
@@ -2413,9 +2418,18 @@ boot_menu:
         pop di
         mov byte [bm_noauto], 0
 .go:
-        cmp byte [bm_noauto], 0
-        je .end
+        cmp byte [bm_noauto], 1
+        jb .end
+        ja .step
         call no_autoexec
+        jmp .end
+.step:
+        ; paso a paso: " /Y" en la línea del intérprete (como /D)
+        movzx bx, byte [shell_tail]
+        cmp bx, 120
+        ja .end
+        mov dword [shell_tail+1+bx], 0x0D592F20     ; " /Y", CR
+        add byte [shell_tail], 3
 .end:
         mov ax, 0x0003
         int 0x10
@@ -2526,7 +2540,7 @@ bm_draw:
         jmp .ib
 .ia:
         mov bl, [bm_noauto]
-        xor bl, 1
+        xor bl, 1                   ; (paso a paso: 3, sale «?»)
 .ib:
         mov ah, BM_ON
         test bl, bl
@@ -2555,6 +2569,10 @@ bm_draw:
         mov al, '['
         stosw
         mov al, 0xFE                ; ■
+        cmp bl, 3
+        jne .ig
+        mov al, '?'                 ; AUTOEXEC.BAT paso a paso
+.ig:
         test bl, bl
         jnz .if
         mov al, ' '
@@ -15361,7 +15379,7 @@ d_install   db "Programa residente.", 0
 d_switches  db "Opciones de arranque.", 0
 d_dos       db "El n", 0xA3, "cleo, en la|memoria alta (HMA):|m", 0xA0, "s memoria|convencional libre.", 0
 d_other     db "Ajuste del sistema.", 0
-d_auto      db "Ordenes de inicio:|teclado, rat", 0xA2, "n,|sonido, ruta...", 0
+d_auto      db "Ordenes de inicio:|teclado, rat", 0xA2, "n,|sonido, ruta...||Espacio: s", 0xA1, ", no o|[?] paso a paso:|pregunta cada l", 0xA1, "nea|[S/N] (Esc: el resto)", 0
         section .low
 
             times 124 db 0
