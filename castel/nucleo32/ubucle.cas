@@ -1,0 +1,45 @@
+; =============================================================================
+;  ubucle.cas - un programa de usuario de Hispa-Pentium que no acaba nunca
+;  (BUCLE.BIN en el disco), para probar Ctrl+C: da vueltas sin llamar al
+;  sistema; o, con el argumento «duerme», duerme sin fin; con «tecla», espera
+;  teclas; con «escribe», escribe sin parar en el archivo BUCLE.DAT.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UBucle
+
+    modelo usuario
+
+    importar Llamadas, Textos32
+
+    variable args: arreglo [128] de byte
+    variable trozo: arreglo [1000] de byte
+    variable vueltas: nat32
+
+    función principal(): byte
+        variable m, i: nat32
+        argumentos(args, 128)
+        si iguales(args, "duerme") entonces
+            escribir("bucle: duermo sin fin (Ctrl+C para acabar)\n")
+            mientras cierto hacer dormir(1000) fin
+        sino si iguales(args, "tecla") entonces
+            escribir("bucle: espero teclas sin fin (Ctrl+C para acabar)\n")
+            mientras cierto hacer
+                i := tecla()
+                escribir("tecla ", i, "\n")
+            fin
+        sino si iguales(args, "escribe") entonces
+            escribir("bucle: escribo sin parar en BUCLE.DAT (Ctrl+C para acabar)\n")
+            para i desde 0 hasta 999 hacer trozo[i] := 'a' + i mod 26 fin
+            m := crear("BUCLE.DAT")
+            mientras no es_error(escribir_archivo(m, trozo, 1000)) hacer
+                vueltas := vueltas + 1
+            fin
+            escribir("bucle: ya no puedo escribir más\n")
+            mientras cierto hacer dormir(1000) fin
+        fin
+        escribir("bucle: doy vueltas sin fin (Ctrl+C para acabar)\n")
+        mientras cierto hacer vueltas := vueltas + 1 fin
+        devolver 0
+    fin
+
+fin UBucle.

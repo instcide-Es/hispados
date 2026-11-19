@@ -1,7 +1,8 @@
 ; =============================================================================
 ;  llamadas.cas - las llamadas al sistema de Hispa-Pentium, para los programas
-;  del anillo 3 («modelo usuario»): el teclado, los archivos del disco, lanzar
-;  otros programas y esperarlos, los argumentos, la memoria. Cada función es
+;  del anillo 3 («modelo usuario»): el teclado, los archivos del disco (leer,
+;  escribir, crear, borrar, las carpetas), lanzar otros programas y
+;  esperarlos, los argumentos, la memoria. Cada función es
 ;  una «int 0x80» con su número (los de nucleo32/usuario.cas). escribir() y
 ;  salir() son del lenguaje y ya van por ahí.
 ;  Lo que no puede ser da un número de PRIMER_ERROR para arriba: se mira con
@@ -18,7 +19,41 @@ módulo Llamadas
     público constante NO_PROGRAMA = 0xFFFFFFFB  ; el archivo no es un programa de Hispa-Pentium
     público constante SIN_MEMORIA = 0xFFFFFFFA  ; no hay memoria (o no quedan tareas)
     público constante NO_VALE = 0xFFFFFFF9      ; lo que se pide no tiene sentido
+    público constante DISCO_LLENO = 0xFFFFFFF8  ; no queda sitio en el disco (o en la raíz)
+    público constante YA_EXISTE = 0xFFFFFFF7    ; ya hay algo con ese nombre
+    público constante EN_USO = 0xFFFFFFF6       ; está abierto (o es la carpeta de trabajo de alguien)
+    público constante PROTEGIDO = 0xFFFFFFF5    ; es de solo lectura, o es la raíz
+    público constante NO_VACÍA = 0xFFFFFFF4     ; la carpeta tiene algo dentro
+    público constante NOMBRE_MALO = 0xFFFFFFF3  ; el nombre no vale (8+3, sin letras raras)
+    público constante ES_CARPETA = 0xFFFFFFF2   ; es una carpeta, y hacía falta un archivo
+    público constante NO_CARPETA = 0xFFFFFFF1   ; no es una carpeta
     público constante PRIMER_ERROR = 0xFFFFFFF0
+
+    ; ---- cómo se abre un archivo: abrir_para(nombre, ...) ----
+    público constante PARA_LEER = 0             ; solo para leer (un archivo o una carpeta)
+    público constante PARA_ESCRIBIR = 1         ; uno que ya está, para leer y escribir
+    público constante PARA_CREAR = 2            ; nuevo (si ya estaba, se queda vacío), para escribir
+    público constante PARA_AÑADIR = 3           ; para escribir al final (si no estaba, se crea)
+
+    ; ---- desde dónde se mueve la posición: mover(m, cuánto, ...) ----
+    público constante DESDE_INICIO = 0
+    público constante DESDE_AQUÍ = 1
+    público constante DESDE_FINAL = 2
+
+    ; ---- las teclas que no son letras (lo que da tecla()) ----
+    público constante TECLA_ESPECIAL = 0x100    ; de aquí arriba, no son letras
+    público constante TECLA_ARRIBA = 0x148
+    público constante TECLA_ABAJO = 0x150
+    público constante TECLA_IZQUIERDA = 0x14B
+    público constante TECLA_DERECHA = 0x14D
+    público constante TECLA_INICIO = 0x147
+    público constante TECLA_FIN = 0x14F
+    público constante TECLA_SUPR = 0x153
+    público constante CTRL_C = 3
+
+    público constante CORTADA = 254             ; el código de un programa acabado con Ctrl+C
+    público constante SIN_SALIDA = 0xFFFFFFFF   ; redirigir(SIN_SALIDA): otra vez a la pantalla
+    público constante MAX_LARGO = 256           ; lo que ocupa un nombre largo (con su 0)
 
     ; ---- los atributos de una entrada de carpeta ----
     público constante SOLO_LECTURA = 0x01
@@ -30,13 +65,14 @@ módulo Llamadas
     público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
     público constante DATO_MARCOS = 1           ; los que hay
     público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
-    público constante DATO_VERSIÓN = 3          ; 0x0002 es la 0.2
+    público constante DATO_VERSIÓN = 3          ; 0x0003 es la 0.3
     público constante DATO_TAREAS = 4
     público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
     público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
     público constante DATO_CLUSTERS_LIBRES = 7  ; (0xFFFFFFFF si no se sabe)
     público constante DATO_CLUSTERS = 8
     público constante DATO_HZ = 9               ; los tics por segundo
+    público constante DATO_FECHA = 10           ; la fecha (arriba) y la hora (abajo), como las guarda la FAT
 
     ; una entrada de una carpeta (32 octetos)
     público tipo Entrada = estructura
@@ -72,6 +108,14 @@ módulo Llamadas
             caso MAL: devolver "el disco falla"
             caso NO_PROGRAMA: devolver "no es un programa de Hispa-Pentium"
             caso SIN_MEMORIA: devolver "no hay memoria"
+            caso DISCO_LLENO: devolver "no queda sitio en el disco"
+            caso YA_EXISTE: devolver "ya existe"
+            caso EN_USO: devolver "está en uso"
+            caso PROTEGIDO: devolver "es de solo lectura"
+            caso NO_VACÍA: devolver "la carpeta no está vacía"
+            caso NOMBRE_MALO: devolver "el nombre no vale (son 8 letras, un punto y 3)"
+            caso ES_CARPETA: devolver "es una carpeta"
+            caso NO_CARPETA: devolver "no es una carpeta"
         fin
         devolver "no puede ser"
     fin
@@ -107,15 +151,38 @@ módulo Llamadas
         devolver llamada(14, nat32(destino), cabe, 0)
     fin
 
+    ; Ctrl+C acaba los programas en marcha; el que dice aquí que lo atiende
+    ; él (un intérprete de órdenes) no se acaba: le llega como una tecla
+    ; (CTRL_C) si no había otro programa que acabar, y hubo_corte() se lo dice
+    público función atender_corte(sí: bool)
+        si sí entonces llamada(29, 1, 0, 0) sino llamada(29, 0, 0, 0) fin
+    fin
+
+    ; ¿se ha pulsado Ctrl+C desde la última vez que se preguntó?
+    público función hubo_corte(): bool
+        devolver llamada(30, 0, 0, 0) = 1
+    fin
+
     ; ---- el teclado y la pantalla ----
-    ; espera una tecla y da su letra
-    público función tecla(): byte
+    ; espera una tecla y da su letra (de la página 437); o, si no es una
+    ; letra, TECLA_ARRIBA, TECLA_SUPR... (de TECLA_ESPECIAL para arriba)
+    público función tecla(): nat32
         devolver llamada(6, 0, 0, 0)
     fin
 
     ; la tecla que haya pulsada, o 0 si no hay ninguna (no espera)
-    público función tecla_si_hay(): byte
+    público función tecla_si_hay(): nat32
         devolver llamada(6, 1, 0, 0)
+    fin
+
+    ; pone el teclado español (cierto) o el de EE. UU. (falso)
+    público función poner_teclado(español: bool)
+        si español entonces llamada(31, 1, 0, 0) sino llamada(31, 0, 0, 0) fin
+    fin
+
+    ; ¿es el teclado el español?
+    público función teclado_español(): bool
+        devolver llamada(31, 2, 0, 0) = 1
     fin
 
     público función borrar_pantalla()
@@ -127,37 +194,216 @@ módulo Llamadas
         devolver llamada(1, nat32(p), n, 0)
     fin
 
-    ; lee una línea del teclado (hasta Intro), enseñándola y dejando borrar
-    ; con la tecla de retroceso; la deja en «destino» (donde caben «cabe»
-    ; octetos, con el 0 del final). Da su largo.
+    ; ---- leer una línea, con su historia ----
+    constante HISTORIA = 8                      ; las líneas que se recuerdan
+    constante ANCHO = 128                       ; lo que cabe de cada una
+    variable historia: arreglo [HISTORIA * ANCHO] de byte
+    variable guardadas: nat32                   ; las que se han guardado desde el principio
+    variable atrás: arreglo [ANCHO] de byte
+
+    ; el cursor, n sitios atrás
+    función retrocede(n: nat32)
+        variable i, k: nat32
+        mientras n > 0 hacer
+            k := n
+            si k > ANCHO entonces k := ANCHO fin
+            para i desde 0 hasta k - 1 hacer atrás[i] := 8 fin
+            escribir_trozo(atrás, k)
+            n := n - k
+        fin
+    fin
+
+    ; pinta la línea desde «pos» hasta su final, «sobran» espacios más (para
+    ; tapar lo que había) y deja el cursor otra vez en «pos»
+    función pinta_cola(t: puntero a byte, pos: nat32, largo: nat32, sobran: nat32)
+        variable i: nat32
+        si largo > pos entonces escribir_trozo(t + pos, largo - pos) fin
+        para i desde 1 hasta sobran hacer escribir_car(' ') fin
+        retrocede(largo - pos + sobran)
+    fin
+
+    ; lee una línea del teclado (hasta Intro), enseñándola; la deja en
+    ; «destino» (donde caben «cabe» octetos, con el 0 del final) y da su
+    ; largo. Se corrige con Retroceso y Supr, moviéndose con las flechas,
+    ; Inicio y Fin; Esc la borra; las flechas de arriba y abajo traen las
+    ; líneas de antes (las ocho últimas). Con Ctrl+C se deja: da 0.
     público función leer_línea(destino: puntero a byte, cabe: nat32): nat32
-        variable c: byte
-        variable largo: nat32
+        variable c, largo, pos, h, i, n, antes: nat32
+        variable vieja: puntero a byte
         largo := 0
+        pos := 0
+        h := guardadas
+        si cabe > ANCHO entonces cabe := ANCHO fin
         mientras cierto hacer
             c := tecla()
             si c = '\n' entonces
                 escribir("\n")
                 destino[largo] := 0
-                devolver largo
-            sino si c = 8 entonces
+                ; a la historia, si no es la misma de antes
                 si largo > 0 entonces
-                    largo := largo - 1
-                    escribir("\x08 \x08")
+                    vieja := dirección(historia[((guardadas + HISTORIA - 1) mod HISTORIA) * ANCHO])
+                    i := 0
+                    si guardadas > 0 entonces
+                        mientras i < largo y vieja[i] = destino[i] hacer i := i + 1 fin
+                    fin
+                    si guardadas = 0 o i < largo o vieja[i] <> 0 entonces
+                        vieja := dirección(historia[(guardadas mod HISTORIA) * ANCHO])
+                        para i desde 0 hasta largo hacer vieja[i] := destino[i] fin
+                        guardadas := guardadas + 1
+                    fin
                 fin
-            sino si c >= ' ' y largo + 1 < cabe entonces
-                destino[largo] := c
+                devolver largo
+            sino si c = CTRL_C entonces
+                escribir("^C\n")
+                destino[0] := 0
+                devolver 0
+            sino si c = 8 entonces
+                si pos > 0 entonces
+                    para i desde pos hasta largo - 1 hacer destino[i - 1] := destino[i] fin
+                    pos := pos - 1
+                    largo := largo - 1
+                    retrocede(1)
+                    pinta_cola(destino, pos, largo, 1)
+                fin
+            sino si c = TECLA_SUPR entonces
+                si pos < largo entonces
+                    para i desde pos + 1 hasta largo - 1 hacer destino[i - 1] := destino[i] fin
+                    largo := largo - 1
+                    pinta_cola(destino, pos, largo, 1)
+                fin
+            sino si c = TECLA_IZQUIERDA entonces
+                si pos > 0 entonces
+                    pos := pos - 1
+                    retrocede(1)
+                fin
+            sino si c = TECLA_DERECHA entonces
+                si pos < largo entonces
+                    escribir_car(destino[pos])
+                    pos := pos + 1
+                fin
+            sino si c = TECLA_INICIO entonces
+                retrocede(pos)
+                pos := 0
+            sino si c = TECLA_FIN entonces
+                si largo > pos entonces escribir_trozo(destino + pos, largo - pos) fin
+                pos := largo
+            sino si c = TECLA_ARRIBA o c = TECLA_ABAJO o c = 27 entonces
+                ; otra línea de la historia (o ninguna) en lugar de esta
+                antes := largo
+                n := h
+                si c = TECLA_ARRIBA entonces
+                    si h > 0 y h + HISTORIA > guardadas entonces n := h - 1 fin
+                sino si c = TECLA_ABAJO entonces
+                    si h < guardadas entonces n := h + 1 fin
+                sino
+                    n := guardadas
+                fin
+                si n <> h o c = 27 entonces
+                    h := n
+                    retrocede(pos)
+                    largo := 0
+                    si h < guardadas entonces
+                        vieja := dirección(historia[(h mod HISTORIA) * ANCHO])
+                        mientras vieja[largo] <> 0 y largo + 1 < cabe hacer
+                            destino[largo] := vieja[largo]
+                            largo := largo + 1
+                        fin
+                    fin
+                    pos := 0
+                    si antes > largo entonces pinta_cola(destino, 0, largo, antes - largo) sino pinta_cola(destino, 0, largo, 0) fin
+                    si largo > 0 entonces escribir_trozo(destino, largo) fin
+                    pos := largo
+                fin
+            sino si c >= ' ' y c < TECLA_ESPECIAL y largo + 1 < cabe entonces
+                i := largo
+                mientras i > pos hacer
+                    destino[i] := destino[i - 1]
+                    i := i - 1
+                fin
+                destino[pos] := c
                 largo := largo + 1
                 escribir_car(c)
+                pos := pos + 1
+                si pos < largo entonces pinta_cola(destino, pos, largo, 0) fin
             fin
         fin
         devolver largo
     fin
 
     ; ---- los archivos ----
-    ; abre un archivo o una carpeta («\» es la raíz): da su manejador, o un error
+    ; abre un archivo o una carpeta («\» es la raíz) para leer: da su
+    ; manejador, o un error. Los nombres que no empiezan por una barra se
+    ; entienden desde la carpeta de trabajo; «.» y «..» valen.
     público función abrir(nombre: puntero a byte): nat32
-        devolver llamada(7, nat32(nombre), 0, 0)
+        devolver llamada(7, nat32(nombre), PARA_LEER, 0)
+    fin
+
+    ; abre un archivo para lo que se diga: PARA_LEER, PARA_ESCRIBIR (uno que
+    ; ya está), PARA_CREAR (nuevo; si estaba, queda vacío) o PARA_AÑADIR
+    ; (para escribir al final; se crea si no estaba)
+    público función abrir_para(nombre: puntero a byte, modo: nat32): nat32
+        devolver llamada(7, nat32(nombre), modo, 0)
+    fin
+
+    ; un archivo nuevo, para escribir (si ya estaba, queda vacío)
+    público función crear(nombre: puntero a byte): nat32
+        devolver llamada(7, nat32(nombre), PARA_CREAR, 0)
+    fin
+
+    ; escribe n octetos en el archivo, desde su posición (crece si hace
+    ; falta): da los escritos (menos de n si el disco se llena), o un error
+    público función escribir_archivo(m: nat32, origen: puntero a byte, n: nat32): nat32
+        devolver llamada(18, m, nat32(origen), n)
+    fin
+
+    ; mueve la posición del archivo a «cuánto» octetos (con signo) del
+    ; principio (DESDE_INICIO), de donde está (DESDE_AQUÍ) o del final
+    ; (DESDE_FINAL): da la posición nueva, o un error. Más allá del final se
+    ; puede ir: al escribir, lo de en medio queda a cero.
+    público función mover(m: nat32, cuánto: ent32, origen: nat32): nat32
+        devolver llamada(19, m, nat32(cuánto), origen)
+    fin
+
+    ; deja el archivo con el tamaño de su posición: lo corta ahí (o lo
+    ; alarga con ceros)
+    público función cortar(m: nat32): nat32
+        devolver llamada(20, m, 0, 0)
+    fin
+
+    público función borrar(nombre: puntero a byte): nat32
+        devolver llamada(21, nat32(nombre), 0, 0)
+    fin
+
+    ; cambia de nombre un archivo o una carpeta (un archivo, también a otra carpeta)
+    público función renombrar(viejo: puntero a byte, nuevo: puntero a byte): nat32
+        devolver llamada(22, nat32(viejo), nat32(nuevo), 0)
+    fin
+
+    público función crear_carpeta(nombre: puntero a byte): nat32
+        devolver llamada(23, nat32(nombre), 0, 0)
+    fin
+
+    ; borra una carpeta (tiene que estar vacía)
+    público función borrar_carpeta(nombre: puntero a byte): nat32
+        devolver llamada(24, nat32(nombre), 0, 0)
+    fin
+
+    ; la carpeta de trabajo del programa pasa a ser esa (la heredan los que lance)
+    público función cambiar_carpeta(nombre: puntero a byte): nat32
+        devolver llamada(25, nat32(nombre), 0, 0)
+    fin
+
+    ; la carpeta de trabajo, a «destino» (donde caben «cabe» octetos): «\» o
+    ; «\UNA\OTRA». Da su largo.
+    público función carpeta_actual(destino: puntero a byte, cabe: nat32): nat32
+        devolver llamada(26, nat32(destino), cabe, 0)
+    fin
+
+    ; lo que escriba el programa de aquí en adelante (y los que lance) va al
+    ; archivo m, abierto para escribir, con los finales de línea del DOS; con
+    ; SIN_SALIDA, otra vez a la pantalla
+    público función redirigir(m: nat32): nat32
+        devolver llamada(27, m, 0, 0)
     fin
 
     ; lee hasta n octetos: da los leídos (0 al final), o un error
@@ -172,6 +418,12 @@ módulo Llamadas
     ; la entrada siguiente de una carpeta abierta; falso cuando no hay más
     público función entrada(m: nat32, ref e: Entrada): bool
         devolver llamada(12, m, nat32(dirección(e)), 0) = 1
+    fin
+
+    ; lo mismo, con su nombre largo (el corto si no tiene) en «nombre», donde
+    ; tienen que caber MAX_LARGO octetos
+    público función entrada_larga(m: nat32, ref e: Entrada, nombre: puntero a byte): bool
+        devolver llamada(28, m, nat32(dirección(e)), nat32(nombre)) = 1
     fin
 
     ; lo que mide un archivo abierto

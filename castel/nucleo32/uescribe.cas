@@ -1,0 +1,246 @@
+; =============================================================================
+;  uescribe.cas - un programa de usuario de Hispa-Pentium que prueba, desde el
+;  anillo 3, las llamadas al sistema que escriben en el disco (ESCRIBE.BIN):
+;  crear un archivo y escribirlo a trozos, leerlo de vuelta, escribir en
+;  medio, cortarlo, alargarlo dejando un hueco (que queda a cero), añadir al
+;  final; lo que no se puede (abrir dos veces para escribir, borrar lo
+;  abierto, nombres que no valen...); las carpetas (hacerlas, entrar, llenarlas
+;  hasta que crecen, vaciarlas, borrarlas), cambiar nombres y mover archivos.
+;  Al acabar lo deja todo como estaba: los mismos clusters libres.
+;  Con el argumento «lleno» escribe hasta llenar el disco, y luego lo borra.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UEscribe
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato
+
+    constante TOTAL = 10000
+
+    variable args: arreglo [128] de byte
+    variable trozo: arreglo [4096] de byte
+    variable nombre: arreglo [40] de byte
+    variable aquí: arreglo [80] de byte
+    variable e: Entrada
+
+    ; el octeto número i del archivo de prueba
+    función octeto(i: nat32): byte
+        devolver (i * 7 + 3) mod 251
+    fin
+
+    ; ¿está ese archivo (o esa carpeta)?
+    función está(cuál: puntero a byte): bool
+        variable m: nat32
+        m := abrir(cuál)
+        si es_error(m) entonces devolver falso fin
+        cerrar(m)
+        devolver cierto
+    fin
+
+    ; los clusters que ocupan n octetos
+    función clusters_de(n: nat32): nat32
+        variable c: nat32
+        c := dato(DATO_CLUSTER)
+        devolver (n + c - 1) div c
+    fin
+
+    función prueba_archivo()
+        variable m, i, k, n, r, libres, mal: nat32
+        libres := dato(DATO_CLUSTERS_LIBRES)
+        ; crear y escribir a trozos de 777
+        m := crear("P1.DAT")
+        i := 0
+        mientras i < TOTAL hacer
+            k := 777
+            si k > TOTAL - i entonces k := TOTAL - i fin
+            para n desde 0 hasta k - 1 hacer trozo[n] := octeto(i + n) fin
+            r := escribir_archivo(m, trozo, k)
+            si r <> k entonces romper fin
+            i := i + k
+        fin
+        imprimir2("escribir: un archivo nuevo, %u octetos a trozos de 777; mide %u", i, largo_de(m))
+        escribir("; ocupa los clusters que tocan: ", libres - dato(DATO_CLUSTERS_LIBRES) = clusters_de(TOTAL), "\n")
+        cerrar(m)
+        ; leerlo de vuelta
+        m := abrir("P1.DAT")
+        mal := 0
+        i := 0
+        n := leer(m, trozo, 1000)
+        mientras no es_error(n) y n > 0 hacer
+            para k desde 0 hasta n - 1 hacer
+                si trozo[k] <> octeto(i + k) entonces mal := mal + 1 fin
+            fin
+            i := i + n
+            n := leer(m, trozo, 1000)
+        fin
+        imprimir2("escribir: leído de vuelta: %u octetos, %u distintos", i, mal)
+        escribir("; no se deja escribir si se abrió para leer: ", es_error(escribir_archivo(m, trozo, 1)), "\n")
+        cerrar(m)
+        ; escribir en medio, y leer lo escrito
+        m := abrir_para("P1.DAT", PARA_ESCRIBIR)
+        r := mover(m, 5000, DESDE_INICIO)
+        escribir_archivo(m, "HOLA", 4)
+        mover(m, -4, DESDE_AQUÍ)
+        trozo[4] := 0
+        leer(m, trozo, 4)
+        imprimir3("en medio: en %u escribo HOLA y leo %s; sigue midiendo %u\n", r, nat32(dirección(trozo[0])), largo_de(m))
+        ; cortarlo
+        libres := dato(DATO_CLUSTERS_LIBRES)
+        mover(m, 3000, DESDE_INICIO)
+        r := cortar(m)
+        imprimir2("cortar: en 3000: %u; mide %u", r, largo_de(m))
+        escribir("; quedan libres los clusters que sobran: ", dato(DATO_CLUSTERS_LIBRES) - libres = clusters_de(TOTAL) - clusters_de(3000), "\n")
+        ; alargarlo dejando un hueco
+        mover(m, 20000, DESDE_INICIO)
+        escribir_archivo(m, "X", 1)
+        mover(m, 3000, DESDE_INICIO)
+        mal := 0
+        i := 3000
+        mientras i < 20000 hacer
+            n := leer(m, trozo, 1000)
+            si es_error(n) o n = 0 entonces romper fin
+            para k desde 0 hasta n - 1 hacer
+                si i + k < 20000 y trozo[k] <> 0 entonces mal := mal + 1 fin
+            fin
+            i := i + n
+        fin
+        imprimir2("hueco: escribo en 20000: mide %u, y lo de en medio está a cero (%u octetos que no)\n", largo_de(m), mal)
+        cerrar(m)
+        ; añadir al final
+        m := abrir_para("P1.DAT", PARA_AÑADIR)
+        escribir_archivo(m, "FIN", 3)
+        imprimir1("añadir: tres octetos al final: mide %u", largo_de(m))
+        mover(m, -3, DESDE_FINAL)
+        trozo[3] := 0
+        leer(m, trozo, 3)
+        imprimir1(" y acaba en %s\n", nat32(dirección(trozo[0])))
+        ; lo que no puede ser
+        escribir("no se puede: abrirlo otra vez para escribir: ", abrir_para("P1.DAT", PARA_ESCRIBIR) = EN_USO)
+        escribir("; ni para leer: ", abrir("P1.DAT") = EN_USO)
+        escribir("; ni borrarlo: ", borrar("P1.DAT") = EN_USO)
+        escribir("; ni cambiarle el nombre: ", renombrar("P1.DAT", "P2.DAT") = EN_USO, "\n")
+        cerrar(m)
+        escribir("no se puede: crear en una carpeta que no está: ", crear("NOESTA\\P.DAT") = NO_HAY)
+        escribir("; un nombre de más de 8+3: ", crear("NOMBRELARGO.DAT") = NOMBRE_MALO)
+        escribir("; ni con letras raras: ", crear("A*B.DAT") = NOMBRE_MALO)
+        escribir("; escribir en una carpeta: ", crear("TEXTOS") = ES_CARPETA, "\n")
+        escribir("no se puede: borrar lo que no está: ", borrar("NOESTA.DAT") = NO_HAY)
+        escribir("; borrar una carpeta como archivo: ", borrar("TEXTOS") = ES_CARPETA)
+        escribir("; abrir para escribir lo que no está: ", abrir_para("NOESTA.DAT", PARA_ESCRIBIR) = NO_HAY, "\n")
+        ; crear encima: queda vacío
+        m := crear("P1.DAT")
+        imprimir1("crear encima: mide %u", largo_de(m))
+        cerrar(m)
+        r := borrar("P1.DAT")
+        imprimir1("; borrado: %u", r)
+        escribir("; ya no está: ", abrir("P1.DAT") = NO_HAY, "\n")
+    fin
+
+    función prueba_carpetas()
+        variable m, i, r, n, bien: nat32
+        variable d: arreglo [2] de nat32
+        r := crear_carpeta("PD")
+        imprimir1("carpetas: hago PD: %u", r)
+        escribir("; otra vez no: ", crear_carpeta("PD") = YA_EXISTE)
+        r := cambiar_carpeta("PD")
+        carpeta_actual(aquí, 80)
+        imprimir2("; entro: %u; estoy en %s\n", r, nat32(dirección(aquí[0])))
+        ; setenta archivos: la carpeta tiene que crecer
+        bien := 0
+        para i desde 0 hasta 69 hacer
+            d[0] := i
+            formatear(nombre, 40, "F%02u.TXT", d)
+            m := crear(nombre)
+            si no es_error(m) entonces
+                n := formatear(trozo, 100, "soy el archivo %u\r\n", d)
+                si escribir_archivo(m, trozo, n) = n entonces bien := bien + 1 fin
+                cerrar(m)
+            fin
+        fin
+        n := 0
+        m := abrir(".")
+        mientras entrada(m, e) hacer n := n + 1 fin
+        cerrar(m)
+        imprimir2("carpetas: 70 archivos en PD: %u hechos; la carpeta tiene %u entradas (con «.» y «..»)\n", bien, n)
+        m := abrir("F42.TXT")
+        n := leer(m, trozo, 100)
+        cerrar(m)
+        trozo[n - 2] := 0
+        imprimir1("carpetas: F42.TXT dice «%s»", nat32(dirección(trozo[0])))
+        m := abrir("..\\PD\\.\\F07.TXT")
+        escribir("; y «..\\PD\\.\\F07.TXT» se abre: ", no es_error(m), "\n")
+        cerrar(m)
+        ; una carpeta dentro, cambiar nombres y mover un archivo
+        crear_carpeta("DENTRO")
+        r := renombrar("F00.TXT", "DENTRO\\CERO.TXT")
+        imprimir1("mover: F00.TXT a DENTRO\\CERO.TXT: %u", r)
+        escribir("; está allí: ", está("DENTRO\\CERO.TXT"), " y no aquí: ", no está("F00.TXT"))
+        r := renombrar("DENTRO", "FUERA")
+        imprimir1("; la carpeta pasa a llamarse FUERA: %u", r)
+        m := abrir("\\PD\\FUERA\\CERO.TXT")
+        escribir(" y lleva lo suyo: ", largo_de(m) = 18, "\n")
+        escribir("no se puede: llamarlo como otro que ya está: ", renombrar("F01.TXT", "F02.TXT") = YA_EXISTE)
+        escribir("; borrar una carpeta con algo: ", borrar_carpeta("FUERA") = NO_VACÍA)
+        escribir("; ni la carpeta donde estoy: ", borrar_carpeta("\\PD") = EN_USO)
+        escribir("; ni un archivo como carpeta: ", borrar_carpeta("F01.TXT") = NO_CARPETA, "\n")
+        ; vaciarlo todo
+        cerrar(m)
+        bien := 0
+        si borrar("FUERA\\CERO.TXT") = 0 entonces bien := bien + 1 fin
+        para i desde 1 hasta 69 hacer
+            d[0] := i
+            formatear(nombre, 40, "F%02u.TXT", d)
+            si borrar(nombre) = 0 entonces bien := bien + 1 fin
+        fin
+        r := borrar_carpeta("FUERA")
+        cambiar_carpeta("..")
+        imprimir3("carpetas: borrados %u archivos; FUERA: %u; PD: %u", bien, r, borrar_carpeta("PD"))
+        escribir("; ya no se puede entrar: ", cambiar_carpeta("PD") = NO_HAY, "\n")
+    fin
+
+    ; escribe hasta que no cabe más, y lo borra
+    función prueba_lleno()
+        variable m, i, r, libres, total: nat32
+        libres := dato(DATO_CLUSTERS_LIBRES)
+        para i desde 0 hasta 4095 hacer trozo[i] := octeto(i) fin
+        m := crear("LLENO.DAT")
+        total := 0
+        r := escribir_archivo(m, trozo, 4096)
+        mientras no es_error(r) y r = 4096 hacer
+            total := total + r
+            r := escribir_archivo(m, trozo, 4096)
+        fin
+        si no es_error(r) entonces total := total + r fin
+        escribir("lleno: escribo hasta que no cabe: ", total = libres * dato(DATO_CLUSTER), "; quedan ", dato(DATO_CLUSTERS_LIBRES), " clusters libres")
+        escribir("; el siguiente: ", texto_error(escribir_archivo(m, trozo, 1)), "\n")
+        escribir("lleno: ni otro archivo con algo: ")
+        r := crear("OTRO.DAT")
+        si es_error(r) entonces
+            escribir(texto_error(r))
+        sino
+            escribir(texto_error(escribir_archivo(r, trozo, 1)))
+            cerrar(r)
+            borrar("OTRO.DAT")
+        fin
+        escribir("; ni una carpeta: ", texto_error(crear_carpeta("OTRA")), "\n")
+        cerrar(m)
+        r := borrar("LLENO.DAT")
+        escribir("lleno: lo borro: ", r, "; vuelven a estar libres los de antes: ", dato(DATO_CLUSTERS_LIBRES) = libres, "\n")
+    fin
+
+    función principal(): byte
+        variable libres: nat32
+        argumentos(args, 128)
+        libres := dato(DATO_CLUSTERS_LIBRES)
+        si iguales(args, "lleno") entonces
+            prueba_lleno()
+            devolver 0
+        fin
+        prueba_archivo()
+        prueba_carpetas()
+        escribir("escribe: todo queda como estaba (los mismos clusters libres): ", dato(DATO_CLUSTERS_LIBRES) = libres, "\n")
+        devolver 0
+    fin
+
+fin UEscribe.

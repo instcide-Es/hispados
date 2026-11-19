@@ -4,16 +4,33 @@
 ;  teclado y hace lo que dice. En el disco es ORDENES.BIN; lo lanza el núcleo
 ;  (la orden «ordenes» de su consola, o él solo si se arranca con «ordenes»).
 ;
-;    AYUDA            las órdenes
-;    VER              la versión del sistema
-;    CLS              borra la pantalla
-;    MEM              la memoria
-;    DIR [carpeta]    los archivos de una carpeta del disco (la raíz, si no se dice)
-;    TYPE archivo     enseña un archivo de texto
-;    SALIR            acaba el intérprete (se vuelve a la consola del núcleo)
+;    AYUDA                 las órdenes
+;    VER                   la versión del sistema
+;    CLS                   borra la pantalla
+;    MEM                   la memoria
+;    FECHA                 la fecha y la hora
+;    TECLADO [ES|US]       el teclado: español o de EE. UU.
+;    DIR [carpeta]         los archivos de una carpeta (o los que casen: DIR *.TXT)
+;    TYPE archivo          enseña un archivo de texto
+;    COPY origen destino   copia un archivo (o varios: COPY *.TXT CARPETA)
+;    DEL archivo           borra un archivo (o varios: DEL *.BAK)
+;    REN viejo nuevo       cambia el nombre de un archivo o de una carpeta
+;    MD carpeta            hace una carpeta
+;    RD carpeta            borra una carpeta vacía
+;    CD [carpeta]          cambia de carpeta de trabajo (sin nada, dice cuál es)
+;    PATH [carpetas]       dónde se buscan los programas (separadas con «;»)
+;    ECHO texto            escribe el texto (ECHO. una línea en blanco)
+;    REM                   un comentario (en los archivos .BAT)
+;    PAUSE                 espera una tecla
+;    SALIR                 acaba el intérprete (se vuelve a la consola del núcleo)
 ;
-;  y cualquier otra cosa es el nombre de un programa del disco (con .BIN o
-;  sin él), que se lanza con lo que siga como sus argumentos y se le espera.
+;  Cualquier otra cosa es el nombre de un programa (.BIN) o de un archivo de
+;  órdenes (.BAT): se busca en la carpeta de trabajo y luego en las del PATH;
+;  lo que siga son sus argumentos (en un .BAT, %1 a %9). Un programa se lanza
+;  y se le espera. Detrás de una orden, «> archivo» manda al archivo lo que
+;  escriba, y «>> archivo» lo añade al final. Ctrl+C acaba el programa que
+;  corre (o el archivo de órdenes). La línea se corrige con las flechas, y las
+;  de arriba y abajo traen las órdenes de antes.
 ;  Todo lo hace por las llamadas al sistema (llamadas.cas): no toca nada del
 ;  núcleo. Las órdenes valen en mayúsculas o en minúsculas.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -25,24 +42,181 @@ módulo UOrdenes
     importar Llamadas, Textos32, Formato
 
     constante LÍNEA = 128
+    constante TROZO = 4096
+    constante NINGUNO = 0xFFFFFFFF
 
-    variable línea: arreglo [LÍNEA] de byte
+    variable línea: arreglo [LÍNEA] de byte         ; la que se teclea (o la del archivo de órdenes)
+    variable cruda: arreglo [LÍNEA] de byte         ; la del archivo de órdenes, sin tocar
+    variable trabajo: arreglo [LÍNEA] de byte       ; la que se está haciendo
     variable orden: arreglo [80] de byte
-    variable ruta: arreglo [LÍNEA + 8] de byte
-    variable trozo: arreglo [512] de byte
+    variable ruta: arreglo [LÍNEA + 16] de byte
+    variable ruta2: arreglo [LÍNEA + 16] de byte
+    variable aquí: arreglo [LÍNEA] de byte          ; la carpeta de trabajo
+    variable carpeta: arreglo [LÍNEA] de byte
+    variable patrón: arreglo [16] de byte
+    variable trozo: arreglo [TROZO] de byte
     variable e: Entrada
+    variable largo: arreglo [MAX_LARGO] de byte
 
+    variable camino: arreglo [LÍNEA] de byte = "C:\\"   ; el PATH
+    variable acabar: bool                           ; se ha dicho SALIR
+
+    ; ---- el archivo de órdenes (.BAT) que se está haciendo ----
+    variable lote: nat32 = 0xFFFFFFFF               ; su manejador (NINGUNO: se lee del teclado)
+    variable lote_eco: bool                         ; se enseña cada orden antes de hacerla
+    variable lote_args: arreglo [LÍNEA] de byte     ; su nombre y sus argumentos (%0, %1...)
+
+    ; -------------------------------------------------------------------------
+    ;  Cosas de nombres
+    ; -------------------------------------------------------------------------
+    función es_barra(c: byte): bool
+        devolver c = '\\' o c = '/'
+    fin
+
+    función tiene_comodín(t: puntero a byte): bool
+        devolver buscar_car(t, '*') <> nulo o buscar_car(t, '?') <> nulo
+    fin
+
+    ; dónde empieza el nombre de una ruta: detrás de su última barra (o de los dos puntos)
+    función nombre_de(t: puntero a byte): puntero a byte
+        variable n: puntero a byte
+        n := t
+        mientras valor(t) <> 0 hacer
+            si es_barra(valor(t)) o valor(t) = ':' entonces n := t + 1 fin
+            t := t + 1
+        fin
+        devolver n
+    fin
+
+    ; parte una ruta en su carpeta (con la barra del final; «» si no lleva) y su nombre
+    función parte(t: puntero a byte, su_carpeta: puntero a byte, su_nombre: puntero a byte, cabe: nat32)
+        variable n: puntero a byte
+        variable i: nat32
+        n := nombre_de(t)
+        i := 0
+        mientras t + i <> n hacer
+            su_carpeta[i] := t[i]
+            i := i + 1
+        fin
+        su_carpeta[i] := 0
+        copiar_hasta(su_nombre, n, cabe)
+    fin
+
+    ; un nombre (o un patrón con * y ?) en sus once letras: ocho y tres,
+    ; rellenas con espacios (o con ? detrás de un *)
+    función a_once(t: puntero a byte, once: puntero a byte)
+        variable i, j: nat32
+        variable relleno: byte
+        para i desde 0 hasta 10 hacer once[i] := ' ' fin
+        i := 0
+        j := 0
+        relleno := ' '
+        mientras t[i] <> 0 y t[i] <> '.' hacer
+            si t[i] = '*' entonces
+                relleno := '?'
+            sino si j < 8 y relleno = ' ' entonces
+                once[j] := mayúscula(t[i])
+                j := j + 1
+            fin
+            i := i + 1
+        fin
+        mientras j < 8 hacer
+            once[j] := relleno
+            j := j + 1
+        fin
+        si t[i] = '.' y i > 0 entonces
+            i := i + 1
+            relleno := ' '
+            mientras t[i] <> 0 hacer
+                si t[i] = '*' entonces
+                    relleno := '?'
+                sino si j < 11 y relleno = ' ' entonces
+                    once[j] := mayúscula(t[i])
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            mientras j < 11 hacer
+                once[j] := relleno
+                j := j + 1
+            fin
+        sino si t[0] = '.' entonces
+            ; «.» y «..»
+            once[0] := '.'
+            si t[1] = '.' entonces once[1] := '.' fin
+        fin
+    fin
+
+    ; ¿casa el nombre con el patrón? (* y ?, como en el DOS; sin patrón, todo casa)
+    función casa(su_patrón: puntero a byte, nombre: puntero a byte): bool
+        variable p, n: arreglo [11] de byte
+        variable i: nat32
+        si su_patrón[0] = 0 entonces devolver cierto fin
+        a_once(su_patrón, p)
+        a_once(nombre, n)
+        para i desde 0 hasta 10 hacer
+            si p[i] <> '?' y p[i] <> n[i] entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; ¿es eso una carpeta que está?
+    función es_carpeta(t: puntero a byte): bool
+        variable m: nat32
+        variable sí: bool
+        m := abrir(t)
+        si es_error(m) entonces devolver falso fin
+        sí := es_error(leer(m, trozo, 0))           ; una carpeta no se deja leer como un archivo
+        cerrar(m)
+        devolver sí
+    fin
+
+    ; ¿es eso un archivo que está?
+    función es_archivo(t: puntero a byte): bool
+        variable m: nat32
+        variable sí: bool
+        m := abrir(t)
+        si es_error(m) entonces devolver falso fin
+        sí := no es_error(leer(m, trozo, 0))
+        cerrar(m)
+        devolver sí
+    fin
+
+    función no_puedo(qué: puntero a byte, cuál: puntero a byte, error: nat32)
+        imprimir3("No puedo %s %s: %s.\n", nat32(qué), nat32(cuál), nat32(texto_error(error)))
+    fin
+
+    ; la petición de órdenes: la carpeta de trabajo
+    función petición()
+        carpeta_actual(aquí, LÍNEA)
+        imprimir1("C:%s>", nat32(dirección(aquí[0])))
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las órdenes
+    ; -------------------------------------------------------------------------
     función orden_ayuda()
         escribir("Las órdenes de Hispa-Pentium:\n")
         escribir("  AYUDA           esta lista\n")
         escribir("  VER             la versión del sistema\n")
         escribir("  CLS             borra la pantalla\n")
         escribir("  MEM             la memoria que hay y la que queda libre\n")
-        escribir("  DIR [carpeta]   los archivos de una carpeta del disco\n")
+        escribir("  FECHA           la fecha y la hora\n")
+        escribir("  TECLADO [ES|US] el teclado: español o de EE. UU.\n")
+        escribir("  DIR [carpeta]   los archivos de una carpeta del disco (DIR *.TXT)\n")
         escribir("  TYPE archivo    enseña un archivo de texto\n")
+        escribir("  COPY a b        copia el archivo a en b (COPY *.TXT CARPETA)\n")
+        escribir("  DEL archivo     borra un archivo (DEL *.BAK)\n")
+        escribir("  REN viejo nuevo cambia el nombre de un archivo o de una carpeta\n")
+        escribir("  MD carpeta      hace una carpeta          RD carpeta   la borra (vacía)\n")
+        escribir("  CD [carpeta]    cambia de carpeta de trabajo (CD .. sube una)\n")
+        escribir("  PATH [carpetas] dónde se buscan los programas (PATH C:\\;C:\\UTIL)\n")
+        escribir("  ECHO texto      escribe el texto          PAUSE        espera una tecla\n")
         escribir("  SALIR           acaba el intérprete de órdenes\n")
-        escribir("Cualquier otro nombre es un programa del disco: se lanza (PROGRAMA o\n")
-        escribir("PROGRAMA.BIN) con lo que se escriba detrás como sus argumentos.\n")
+        escribir("Cualquier otro nombre es un programa del disco (PROGRAMA o PROGRAMA.BIN) o un\n")
+        escribir("archivo de órdenes (.BAT), con lo que se escriba detrás como sus argumentos.\n")
+        escribir("Con «> archivo» detrás, lo que escriba la orden va al archivo (>> lo añade).\n")
+        escribir("Ctrl+C acaba el programa que corre. Las flechas traen las órdenes de antes.\n")
     fin
 
     función orden_ver()
@@ -60,8 +234,39 @@ módulo UOrdenes
         imprimir2("Este intérprete ocupa %u K. Tareas en marcha: %u.\n", dato(DATO_MIS_PÁGINAS) * 4, dato(DATO_TAREAS))
     fin
 
+    función orden_fecha()
+        variable v, f, h: nat32
+        variable d: arreglo [6] de nat32
+        v := dato(DATO_FECHA)
+        f := v >> 16
+        h := v yb 0xFFFF
+        d[0] := f yb 31
+        d[1] := (f >> 5) yb 15
+        d[2] := 1980 + (f >> 9)
+        d[3] := h >> 11
+        d[4] := (h >> 5) yb 63
+        d[5] := (h yb 31) * 2
+        imprimir("Hoy es %02u/%02u/%u y son las %02u:%02u:%02u.\n", d)
+    fin
+
+    función orden_teclado(cuál: puntero a byte)
+        si iguales_sin_caja(cuál, "ES") o iguales_sin_caja(cuál, "SP") entonces
+            poner_teclado(cierto)
+        sino si iguales_sin_caja(cuál, "US") entonces
+            poner_teclado(falso)
+        sino si valor(cuál) <> 0 entonces
+            escribir("TECLADO ES (el español) o TECLADO US (el de EE. UU.)\n")
+            devolver
+        fin
+        si teclado_español() entonces
+            escribir("Teclado: español (ES).\n")
+        sino
+            escribir("Teclado: de EE. UU. (US).\n")
+        fin
+    fin
+
     ; una entrada de DIR: el nombre y la extensión en sus columnas, el
-    ; tamaño (o <DIR>), la fecha y la hora
+    ; tamaño (o <DIR>), la fecha y la hora; y su nombre largo, si lo tiene
     función enseña_entrada()
         variable nombre, ext: arreglo [12] de byte
         variable i, j: nat32
@@ -93,15 +298,25 @@ módulo UOrdenes
         d[2] := 1980 + (e.fecha >> 9)
         d[3] := e.hora >> 11
         d[4] := (e.hora >> 5) yb 63
-        imprimir(" %02u/%02u/%u  %02u:%02u\n", d)
+        imprimir(" %02u/%02u/%u  %02u:%02u", d)
+        si no iguales_sin_caja(largo, dirección(e.nombre[0])) entonces imprimir1("  %s", nat32(dirección(largo[0]))) fin
+        escribir("\n")
     fin
 
     función orden_dir(dónde: puntero a byte)
         variable m, archivos, carpetas, octetos, libres, cluster: nat32
-        si valor(dónde) = 0 entonces dónde := "\\" fin
-        m := abrir(dónde)
+        variable punto: bool
+        patrón[0] := 0
+        copiar_hasta(ruta, dónde, LÍNEA)
+        si tiene_comodín(nombre_de(dónde)) entonces
+            parte(dónde, ruta, patrón, 16)
+            ; DIR HOLA* enseña también HOLA.TXT
+            si buscar_car(patrón, '.') = nulo y longitud(patrón) < 12 entonces concatenar(patrón, ".*") fin
+        fin
+        si ruta[0] = 0 entonces copiar(ruta, ".") fin
+        m := abrir(ruta)
         si es_error(m) entonces
-            imprimir2("No puedo abrir %s: %s.\n", nat32(dónde), nat32(texto_error(m)))
+            no_puedo("abrir", dónde, m)
             devolver
         fin
         ; ¿es un archivo, y no una carpeta? (un archivo se deja leer)
@@ -110,17 +325,18 @@ módulo UOrdenes
             cerrar(m)
             devolver
         fin
-        ; el nombre de la carpeta, entero: C:\CARPETA
-        copiar(ruta, "C:")
-        si valor(dónde) <> '\\' y valor(dónde) <> '/' entonces concatenar(ruta, "\\") fin
-        concatenar(ruta, dónde)
-        a_mayúsculas(ruta)
-        imprimir1(" Directorio de %s\n\n", nat32(dirección(ruta[0])))
+        ; el nombre de la carpeta, entero: se entra en ella un momento
+        carpeta_actual(aquí, LÍNEA)
+        cambiar_carpeta(ruta)
+        carpeta_actual(carpeta, LÍNEA)
+        cambiar_carpeta(aquí)
+        imprimir1(" Directorio de C:%s\n\n", nat32(dirección(carpeta[0])))
         archivos := 0
         carpetas := 0
         octetos := 0
-        mientras entrada(m, e) hacer
-            si e.atributos yb OCULTO = 0 entonces
+        mientras entrada_larga(m, e, largo) hacer
+            punto := e.nombre[0] = '.' y patrón[0] <> 0
+            si e.atributos yb OCULTO = 0 y no punto y casa(patrón, dirección(e.nombre[0])) entonces
                 enseña_entrada()
                 si e.atributos yb CARPETA <> 0 entonces
                     carpetas := carpetas + 1
@@ -152,7 +368,7 @@ módulo UOrdenes
         fin
         m := abrir(nombre)
         si es_error(m) entonces
-            imprimir2("No puedo abrir %s: %s.\n", nat32(nombre), nat32(texto_error(m)))
+            no_puedo("abrir", nombre, m)
             devolver
         fin
         n := leer(m, trozo, 512)
@@ -166,70 +382,519 @@ módulo UOrdenes
         cerrar(m)
     fin
 
-    ; lanza el programa «orden» (añadiéndole .BIN si no lleva extensión) con
-    ; esos argumentos, y lo espera
+    ; copia un archivo en otro. Falso (y lo dice) si no puede.
+    función copia(origen: puntero a byte, destino: puntero a byte): bool
+        variable de, a, n, puestos: nat32
+        de := abrir(origen)
+        si es_error(de) entonces
+            no_puedo("abrir", origen, de)
+            devolver falso
+        fin
+        n := leer(de, trozo, TROZO)
+        si es_error(n) entonces
+            imprimir1("%s es una carpeta: no se copia.\n", nat32(origen))
+            cerrar(de)
+            devolver falso
+        fin
+        a := crear(destino)
+        si es_error(a) entonces
+            no_puedo("crear", destino, a)
+            cerrar(de)
+            devolver falso
+        fin
+        mientras no es_error(n) y n > 0 hacer
+            puestos := escribir_archivo(a, trozo, n)
+            si es_error(puestos) o puestos < n entonces
+                si es_error(puestos) entonces no_puedo("escribir en", destino, puestos) sino no_puedo("escribir en", destino, DISCO_LLENO) fin
+                cerrar(a)
+                cerrar(de)
+                borrar(destino)
+                devolver falso
+            fin
+            n := leer(de, trozo, TROZO)
+        fin
+        cerrar(a)
+        cerrar(de)
+        si es_error(n) entonces
+            no_puedo("leer", origen, n)
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    función orden_copy(args: puntero a byte)
+        variable m, hechos: nat32
+        variable origen, destino, nombre: arreglo [80] de byte
+        variable a_carpeta: bool
+        si no palabra(args, 0, origen, 80) entonces
+            escribir("Falta qué copiar: COPY origen destino\n")
+            devolver
+        fin
+        si no palabra(args, 1, destino, 80) entonces copiar(destino, ".") fin
+        a_carpeta := es_carpeta(destino)
+        hechos := 0
+        si tiene_comodín(nombre_de(origen)) entonces
+            ; varios: los de la carpeta que casen, a la carpeta de destino
+            si no a_carpeta entonces
+                imprimir1("Para copiar varios archivos, el destino tiene que ser una carpeta: %s no lo es.\n", nat32(dirección(destino[0])))
+                devolver
+            fin
+            parte(origen, carpeta, patrón, 16)
+            si carpeta[0] = 0 entonces m := abrir(".") sino m := abrir(carpeta) fin
+            si es_error(m) entonces
+                no_puedo("abrir", carpeta, m)
+                devolver
+            fin
+            mientras entrada(m, e) hacer
+                si e.atributos yb (CARPETA ob OCULTO) = 0 y casa(patrón, dirección(e.nombre[0])) entonces
+                    copiar(ruta, carpeta)
+                    concatenar(ruta, dirección(e.nombre[0]))
+                    copiar(ruta2, destino)
+                    si no es_barra(ruta2[longitud(ruta2) - 1]) entonces concatenar(ruta2, "\\") fin
+                    concatenar(ruta2, dirección(e.nombre[0]))
+                    imprimir1("%s\n", nat32(dirección(ruta[0])))
+                    si copia(ruta, ruta2) entonces hechos := hechos + 1 fin
+                    si hubo_corte() entonces romper fin
+                fin
+            fin
+            cerrar(m)
+        sino
+            copiar(ruta2, destino)
+            si a_carpeta entonces
+                si no es_barra(ruta2[longitud(ruta2) - 1]) entonces concatenar(ruta2, "\\") fin
+                copiar_hasta(nombre, nombre_de(origen), 80)
+                concatenar(ruta2, nombre)
+            fin
+            si copia(origen, ruta2) entonces hechos := 1 fin
+        fin
+        imprimir1("%9u archivo(s) copiado(s).\n", hechos)
+    fin
+
+    función orden_del(cuál: puntero a byte)
+        variable m, r, hechos: nat32
+        si valor(cuál) = 0 entonces
+            escribir("Falta el nombre del archivo: DEL archivo\n")
+            devolver
+        fin
+        si no tiene_comodín(nombre_de(cuál)) entonces
+            r := borrar(cuál)
+            si es_error(r) entonces no_puedo("borrar", cuál, r) fin
+            devolver
+        fin
+        parte(cuál, carpeta, patrón, 16)
+        si carpeta[0] = 0 entonces m := abrir(".") sino m := abrir(carpeta) fin
+        si es_error(m) entonces
+            no_puedo("abrir", carpeta, m)
+            devolver
+        fin
+        hechos := 0
+        mientras entrada(m, e) hacer
+            si e.atributos yb (CARPETA ob OCULTO) = 0 y casa(patrón, dirección(e.nombre[0])) entonces
+                copiar(ruta, carpeta)
+                concatenar(ruta, dirección(e.nombre[0]))
+                r := borrar(ruta)
+                si es_error(r) entonces no_puedo("borrar", ruta, r) sino hechos := hechos + 1 fin
+            fin
+        fin
+        cerrar(m)
+        si hechos = 0 entonces imprimir1("No hay ningún archivo que sea %s.\n", nat32(cuál)) fin
+    fin
+
+    función orden_ren(args: puntero a byte)
+        variable viejo, nuevo: arreglo [80] de byte
+        variable r: nat32
+        si no palabra(args, 0, viejo, 80) o no palabra(args, 1, nuevo, 80) entonces
+            escribir("Faltan los nombres: REN viejo nuevo\n")
+            devolver
+        fin
+        ; el nombre nuevo, sin carpeta, es en la misma carpeta que el viejo
+        si nombre_de(nuevo) = dirección(nuevo[0]) entonces
+            parte(viejo, ruta, orden, 80)
+            concatenar(ruta, nuevo)
+        sino
+            copiar(ruta, nuevo)
+        fin
+        r := renombrar(viejo, ruta)
+        si es_error(r) entonces
+            imprimir3("No puedo llamar %s a %s: %s.\n", nat32(dirección(nuevo[0])), nat32(dirección(viejo[0])), nat32(texto_error(r)))
+        fin
+    fin
+
+    función orden_md(cuál: puntero a byte)
+        variable r: nat32
+        si valor(cuál) = 0 entonces
+            escribir("Falta el nombre de la carpeta: MD carpeta\n")
+            devolver
+        fin
+        r := crear_carpeta(cuál)
+        si es_error(r) entonces no_puedo("hacer la carpeta", cuál, r) fin
+    fin
+
+    función orden_rd(cuál: puntero a byte)
+        variable r: nat32
+        si valor(cuál) = 0 entonces
+            escribir("Falta el nombre de la carpeta: RD carpeta\n")
+            devolver
+        fin
+        r := borrar_carpeta(cuál)
+        si es_error(r) entonces no_puedo("borrar la carpeta", cuál, r) fin
+    fin
+
+    función orden_cd(cuál: puntero a byte)
+        variable r: nat32
+        si valor(cuál) = 0 entonces
+            carpeta_actual(aquí, LÍNEA)
+            imprimir1("C:%s\n", nat32(dirección(aquí[0])))
+            devolver
+        fin
+        r := cambiar_carpeta(cuál)
+        si es_error(r) entonces no_puedo("entrar en", cuál, r) fin
+    fin
+
+    función orden_path(cuál: puntero a byte)
+        si valor(cuál) = 0 entonces
+            si camino[0] = 0 entonces escribir("No hay PATH.\n") sino imprimir1("PATH=%s\n", nat32(dirección(camino[0]))) fin
+        sino si iguales(cuál, ";") entonces
+            camino[0] := 0
+        sino
+            copiar_hasta(camino, cuál, LÍNEA)
+            a_mayúsculas(camino)
+        fin
+    fin
+
+    función orden_echo(texto: puntero a byte)
+        si valor(texto) = 0 entonces
+            si lote_eco entonces escribir("ECHO está activado.\n") sino escribir("ECHO está desactivado.\n") fin
+        sino si iguales_sin_caja(texto, "OFF") entonces
+            lote_eco := falso
+        sino si iguales_sin_caja(texto, "ON") entonces
+            lote_eco := cierto
+        sino
+            imprimir1("%s\n", nat32(texto))
+        fin
+    fin
+
+    función deja_el_lote()
+        si lote <> NINGUNO entonces
+            cerrar(lote)
+            lote := NINGUNO
+        fin
+    fin
+
+    función orden_pause()
+        variable c: nat32
+        escribir("Pulse una tecla para seguir . . . ")
+        c := tecla()
+        escribir("\n")
+        si c = CTRL_C entonces
+            escribir("^C\n")
+            deja_el_lote()
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los programas y los archivos de órdenes
+    ; -------------------------------------------------------------------------
+    ; busca el programa «orden» en la carpeta «dónde» («»: la de trabajo, o
+    ; la que lleve el propio nombre): deja en «ruta» el que haya. Da 1 si es
+    ; un programa, 2 si es un archivo de órdenes, 0 si no hay ninguno.
+    función busca_en(dónde: puntero a byte, punto: bool): nat32
+        variable n: nat32
+        copiar(ruta, dónde)
+        n := longitud(ruta)
+        si n > 0 y no es_barra(ruta[n - 1]) entonces concatenar(ruta, "\\") fin
+        si longitud(ruta) + longitud(orden) + 5 > LÍNEA entonces devolver 0 fin
+        concatenar(ruta, orden)
+        a_mayúsculas(ruta)
+        n := longitud(ruta)
+        si punto entonces
+            si no es_archivo(ruta) entonces devolver 0 fin
+            si n > 4 y iguales(dirección(ruta[n - 4]), ".BAT") entonces devolver 2 fin
+            devolver 1
+        fin
+        concatenar(ruta, ".BIN")
+        si es_archivo(ruta) entonces devolver 1 fin
+        ruta[n] := 0
+        concatenar(ruta, ".BAT")
+        si es_archivo(ruta) entonces devolver 2 fin
+        devolver 0
+    fin
+
+    ; lanza el programa (o el archivo de órdenes) «orden», buscándolo en la
+    ; carpeta de trabajo y en las del PATH, con esos argumentos; a un
+    ; programa se le espera
     función lanza(args: puntero a byte)
-        variable i, punto, t, c: nat32
-        ; ¿lleva extensión? (un punto detrás de la última barra)
-        punto := 0
+        variable i, k, t, c, clase: nat32
+        variable punto, suelto: bool
+        ; ¿lleva extensión? (un punto detrás de la última barra) ¿y carpeta?
+        punto := falso
+        suelto := cierto
         i := 0
         mientras orden[i] <> 0 hacer
-            si orden[i] = '.' entonces punto := 1 fin
-            si orden[i] = '\\' o orden[i] = '/' entonces punto := 0 fin
+            si orden[i] = '.' entonces punto := cierto fin
+            si es_barra(orden[i]) o orden[i] = ':' entonces
+                punto := falso
+                suelto := falso
+            fin
             i := i + 1
         fin
-        copiar(ruta, orden)
-        si punto = 0 entonces concatenar(ruta, ".BIN") fin
-        a_mayúsculas(ruta)
-        t := lanzar(ruta, args)
-        si t = NO_HAY entonces
+        clase := busca_en("", punto)
+        ; si no está aquí y es un nombre suelto, en las carpetas del PATH
+        i := 0
+        mientras clase = 0 y suelto y camino[i] <> 0 hacer
+            k := 0
+            mientras camino[i] <> 0 y camino[i] <> ';' hacer
+                si k < LÍNEA - 1 entonces
+                    carpeta[k] := camino[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            carpeta[k] := 0
+            si camino[i] = ';' entonces i := i + 1 fin
+            si k > 0 entonces clase := busca_en(carpeta, punto) fin
+        fin
+        si clase = 0 entonces
             imprimir1("Orden o nombre de programa desconocido: %s (escriba AYUDA).\n", nat32(dirección(orden[0])))
             devolver
         fin
+        si clase = 2 entonces
+            ; un archivo de órdenes: de aquí en adelante, las líneas salen de él
+            ; (si ya se estaba haciendo otro, se deja)
+            t := abrir(ruta)
+            si es_error(t) entonces
+                no_puedo("abrir", ruta, t)
+                devolver
+            fin
+            deja_el_lote()
+            lote := t
+            lote_eco := cierto
+            copiar(lote_args, orden)
+            si longitud(lote_args) + longitud(args) + 2 < LÍNEA entonces
+                concatenar(lote_args, " ")
+                concatenar(lote_args, args)
+            fin
+            devolver
+        fin
+        t := lanzar(ruta, args)
         si es_error(t) entonces
-            imprimir2("No puedo lanzar %s: %s.\n", nat32(dirección(ruta[0])), nat32(texto_error(t)))
+            no_puedo("lanzar", ruta, t)
             devolver
         fin
         c := esperar(t)
-        si c <> 0 entonces
+        si c <> 0 y c <> CORTADA entonces
+            ; (a la pantalla, aunque lo que escriba la orden vaya a un archivo)
+            redirigir(SIN_SALIDA)
             imprimir2("(%s ha acabado con el código %u)\n", nat32(dirección(ruta[0])), c)
         fin
     fin
 
-    función principal(): byte
-        variable resto: puntero a byte
-        variable mayús: arreglo [80] de byte
-        escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
-        escribir("Escriba AYUDA para ver las órdenes.\n")
+    ; la línea siguiente del archivo de órdenes, a «destino». Falso si se ha acabado.
+    función lee_lote(destino: puntero a byte, cabe: nat32): bool
+        variable n, r: nat32
+        variable c: byte
+        n := 0
         mientras cierto hacer
-            escribir("C:\\>")
-            leer_línea(línea, LÍNEA)
-            si no palabra(línea, 0, orden, 80) entonces seguir fin
-            ; lo que va detrás de la primera palabra
-            resto := saltar_espacios(línea)
-            mientras valor(resto) <> 0 y no es_espacio(valor(resto)) hacer resto := resto + 1 fin
-            resto := saltar_espacios(resto)
-            copiar(mayús, orden)
-            a_mayúsculas(mayús)
-            si iguales(mayús, "AYUDA") o iguales(mayús, "?") entonces
-                orden_ayuda()
-            sino si iguales(mayús, "VER") entonces
-                orden_ver()
-            sino si iguales(mayús, "CLS") entonces
-                borrar_pantalla()
-            sino si iguales(mayús, "MEM") entonces
-                orden_mem()
-            sino si iguales(mayús, "DIR") entonces
-                orden_dir(resto)
-            sino si iguales(mayús, "TYPE") entonces
-                orden_type(resto)
-            sino si iguales(mayús, "SALIR") entonces
-                escribir("Hasta luego.\n")
-                devolver 0
-            sino
-                lanza(resto)
+            r := leer(lote, dirección(c), 1)
+            si es_error(r) o r = 0 o c = 0x1A entonces
+                destino[n] := 0
+                devolver n > 0
+            fin
+            si c = '\n' entonces
+                destino[n] := 0
+                devolver cierto
+            fin
+            si c <> '\r' y n + 1 < cabe entonces
+                destino[n] := c
+                n := n + 1
             fin
         fin
+        devolver falso
+    fin
+
+    ; pone en «destino» la línea de un archivo de órdenes con sus %0 a %9
+    ; cambiados por los argumentos (y %% por %)
+    función con_argumentos(origen: puntero a byte, destino: puntero a byte, cabe: nat32)
+        variable i, n, k: nat32
+        variable uno: arreglo [80] de byte
+        i := 0
+        n := 0
+        mientras origen[i] <> 0 y n + 1 < cabe hacer
+            si origen[i] = '%' y origen[i + 1] >= '0' y origen[i + 1] <= '9' entonces
+                palabra(lote_args, origen[i + 1] - '0', uno, 80)
+                k := 0
+                mientras uno[k] <> 0 y n + 1 < cabe hacer
+                    destino[n] := uno[k]
+                    n := n + 1
+                    k := k + 1
+                fin
+                i := i + 2
+            sino
+                si origen[i] = '%' y origen[i + 1] = '%' entonces i := i + 1 fin
+                destino[n] := origen[i]
+                n := n + 1
+                i := i + 1
+            fin
+        fin
+        destino[n] := 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Hacer una línea
+    ; -------------------------------------------------------------------------
+    ; hace la orden que hay en «trabajo» (ya sin su «> archivo»)
+    función haz_orden()
+        variable resto: puntero a byte
+        variable mayús: arreglo [80] de byte
+        variable n: nat32
+        si no palabra(trabajo, 0, orden, 80) entonces devolver fin
+        ; lo que va detrás de la primera palabra
+        resto := saltar_espacios(trabajo)
+        mientras valor(resto) <> 0 y no es_espacio(valor(resto)) hacer resto := resto + 1 fin
+        resto := saltar_espacios(resto)
+        copiar(mayús, orden)
+        a_mayúsculas(mayús)
+        ; CD.. y CD\ (y ECHO.), sin espacio en medio
+        si mayús[0] = 'C' y mayús[1] = 'D' y (mayús[2] = '.' o es_barra(mayús[2])) entonces
+            orden_cd(saltar_espacios(trabajo) + 2)
+            devolver
+        fin
+        si empieza_por(mayús, "ECHO.") entonces
+            resto := saltar_espacios(trabajo) + 5
+            imprimir1("%s\n", nat32(resto))
+            devolver
+        fin
+        ; quitar los espacios del final de lo que sigue
+        n := longitud(resto)
+        mientras n > 0 y es_espacio(resto[n - 1]) hacer
+            n := n - 1
+            resto[n] := 0
+        fin
+        si iguales(mayús, "AYUDA") o iguales(mayús, "?") o iguales(mayús, "HELP") entonces
+            orden_ayuda()
+        sino si iguales(mayús, "VER") entonces
+            orden_ver()
+        sino si iguales(mayús, "CLS") entonces
+            borrar_pantalla()
+        sino si iguales(mayús, "MEM") entonces
+            orden_mem()
+        sino si iguales(mayús, "FECHA") o iguales(mayús, "HORA") entonces
+            orden_fecha()
+        sino si iguales(mayús, "TECLADO") o iguales(mayús, "KEYB") entonces
+            orden_teclado(resto)
+        sino si iguales(mayús, "DIR") entonces
+            orden_dir(resto)
+        sino si iguales(mayús, "TYPE") entonces
+            orden_type(resto)
+        sino si iguales(mayús, "COPY") o iguales(mayús, "COPIAR") entonces
+            orden_copy(resto)
+        sino si iguales(mayús, "DEL") o iguales(mayús, "ERASE") o iguales(mayús, "BORRAR") entonces
+            orden_del(resto)
+        sino si iguales(mayús, "REN") o iguales(mayús, "RENAME") entonces
+            orden_ren(resto)
+        sino si iguales(mayús, "MD") o iguales(mayús, "MKDIR") entonces
+            orden_md(resto)
+        sino si iguales(mayús, "RD") o iguales(mayús, "RMDIR") entonces
+            orden_rd(resto)
+        sino si iguales(mayús, "CD") o iguales(mayús, "CHDIR") entonces
+            orden_cd(resto)
+        sino si iguales(mayús, "PATH") entonces
+            orden_path(resto)
+        sino si iguales(mayús, "ECHO") entonces
+            orden_echo(resto)
+        sino si iguales(mayús, "REM") entonces
+            ; un comentario
+        sino si iguales(mayús, "PAUSE") o iguales(mayús, "PAUSA") entonces
+            orden_pause()
+        sino si iguales(mayús, "SALIR") o iguales(mayús, "EXIT") entonces
+            acabar := cierto
+        sino
+            lanza(resto)
+        fin
+    fin
+
+    ; hace una línea: si lleva «> archivo» (o «>> archivo»), lo que escriba
+    ; la orden va a ese archivo
+    función haz(t: puntero a byte)
+        variable i, j, k, m: nat32
+        variable añade: bool
+        variable archivo: arreglo [80] de byte
+        copiar_hasta(trabajo, t, LÍNEA)
+        m := NINGUNO
+        i := 0
+        mientras trabajo[i] <> 0 y trabajo[i] <> '>' hacer i := i + 1 fin
+        si trabajo[i] = '>' entonces
+            j := i + 1
+            añade := trabajo[j] = '>'
+            si añade entonces j := j + 1 fin
+            mientras trabajo[j] = ' ' hacer j := j + 1 fin
+            k := 0
+            mientras trabajo[j] <> 0 y trabajo[j] <> ' ' y k < 79 hacer
+                archivo[k] := trabajo[j]
+                k := k + 1
+                j := j + 1
+            fin
+            archivo[k] := 0
+            ; la orden, sin eso (lo que hubiera detrás del nombre se queda)
+            mientras i > 0 y trabajo[i - 1] = ' ' hacer i := i - 1 fin
+            mientras trabajo[j] <> 0 hacer
+                trabajo[i] := trabajo[j]
+                i := i + 1
+                j := j + 1
+            fin
+            trabajo[i] := 0
+            si k = 0 entonces
+                escribir("Falta el nombre del archivo detrás de «>».\n")
+                devolver
+            fin
+            si añade entonces m := abrir_para(archivo, PARA_AÑADIR) sino m := crear(archivo) fin
+            si es_error(m) entonces
+                no_puedo("escribir en", archivo, m)
+                devolver
+            fin
+            redirigir(m)
+        fin
+        haz_orden()
+        si m <> NINGUNO entonces
+            redirigir(SIN_SALIDA)
+            cerrar(m)
+        fin
+    fin
+
+    función principal(): byte
+        variable p: puntero a byte
+        atender_corte(cierto)
+        escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
+        escribir("Escriba AYUDA para ver las órdenes.\n")
+        mientras no acabar hacer
+            si lote <> NINGUNO entonces
+                ; la línea siguiente del archivo de órdenes (Ctrl+C lo deja)
+                si hubo_corte() entonces
+                    deja_el_lote()
+                    seguir
+                fin
+                si no lee_lote(cruda, LÍNEA) entonces
+                    deja_el_lote()
+                    seguir
+                fin
+                con_argumentos(cruda, línea, LÍNEA)
+                p := saltar_espacios(línea)
+                si valor(p) = '@' entonces
+                    p := p + 1
+                sino si lote_eco y valor(p) <> 0 entonces
+                    petición()
+                    imprimir1("%s\n", nat32(p))
+                fin
+                haz(p)
+            sino
+                hubo_corte()
+                petición()
+                leer_línea(línea, LÍNEA)
+                haz(línea)
+            fin
+        fin
+        deja_el_lote()
+        escribir("Hasta luego.\n")
         devolver 0
     fin
 
