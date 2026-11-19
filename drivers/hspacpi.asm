@@ -53,6 +53,10 @@
 ;            palabras; las direcciones, lineales) -> DX:AX = resultado
 ;    AL=02h -> ES:BX = struct ll_apm (lo último leído, ver llamadas.h)
 ;    AL=03h  descargar -> AL = 0 hecho, 1 otro residente encima
+;    AL=04h  [APAGAR-USB] parar: avisa al controlador embebido (_REG 3,0) y
+;            el núcleo no se vuelve a llamar (INT 15h 530Ah sigue dando lo
+;            último leído); lo pide APAGAR/REINICIAR antes de vaciar los
+;            búferes y de tocar ACPI -> AL = 0
 ; =============================================================================
         cpu 586
         bits 16
@@ -417,7 +421,27 @@ int2f:
         pop ds
         call unload
         pop ds
+        iret
 .n4:
+        cmp al, 4                   ; [APAGAR-USB] parar
+        jne .n5
+        cmp byte [cs:muerto], 0
+        jne .n4x
+        mov byte [cs:muerto], 1     ; (primero: el reloj ya no lo llama)
+        push eax
+        push edx
+        push ds
+        push cs
+        pop ds
+        mov eax, LL_PARA
+        xor edx, edx
+        call nuc
+        pop ds
+        pop edx
+        pop eax
+.n4x:
+        xor al, al
+.n5:
         iret
 
 ; descargar -> AL = 0 hecho, 1 otro residente encima. DS = CS.

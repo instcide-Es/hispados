@@ -20,7 +20,8 @@
 #    (los mismos puntos que tests/run_ventanas_bateria_tests.sh), también al
 #    cambiar el nivel y enchufar con Ventanas en marcha; /E, /U, /AUTO y el
 #    registro en un archivo. Y en un QEMU sin batería: /AUTO calla y no se
-#    queda. Y que APAGAR sigue apagando con HSPACPI cargado.
+#    queda. Y que APAGAR sigue apagando con HSPACPI cargado, y que APAGAR y
+#    REINICIAR lo paran antes de vaciar los búferes y de tocar ACPI.
 # Deja capturas en build/acpi_*.png.
 set -u
 cd "$(dirname "$0")/.."
@@ -118,6 +119,8 @@ run() {
   cp "$IMG" $T/f.img
   printf "DEVICE=A:\\\\HISPADOS\\\\HSPXMS.SYS\r\nFILES=30\r\n" > $T/CONFIG.SYS
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
+  # (sitio para HSPACPI.BIN y su BATERIA.LOG: el disquete va casi lleno)
+  mdel -i $T/f.img ::HISPADOS/JUEGOS/SMS/BUZO.SMS 2>/dev/null
   mcopy -o -i $T/f.img $B/HSPACPI.COM $B/HSPACPI.BIN $B/CMOSW.COM ::HISPADOS/
   rm -f $T/mon
   { sleep 6
@@ -221,6 +224,28 @@ run "$SSDT" '
 ' 60
 check "Batería: 0 %, sin cable"
 grep -q "terminating on signal" $T/raw && ko "APAGAR con HSPACPI cargado apaga el equipo" || ok "APAGAR con HSPACPI cargado apaga el equipo"
+[ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/Ejecutando/,$p' $T/log.txt
+
+# -- 5: [APAGAR-USB] APAGAR y REINICIAR paran HSPACPI antes de vaciar los
+#       búferes y de tocar ACPI (INT 2Fh AX=DB04h): después ya no lee la
+#       batería (las lecturas no suben). REINICIAR /SOLO:ACPI en -M pc no
+#       tiene con qué reiniciar y vuelve a DOS: se ve lo que ha hecho --
+run "$SSDT" '
+  send "A:\\HISPADOS\\HSPACPI /CADA:2" 6
+  send "A:\\HISPADOS\\HSPACPI /E" 6
+  send "A:\\HISPADOS\\HSPACPI /E" 2
+  send "REINICIAR /SOLO:ACPI" 6
+  send "A:\\HISPADOS\\HSPACPI /E" 6
+  send "A:\\HISPADOS\\HSPACPI /E" 3
+  send "ECHO FIN-5" 2
+' 90
+grep -o "; lecturas: [0-9]*" $T/log.txt | sed 's/.*: //' > $T/lect.txt
+mapfile -t L < $T/lect.txt
+if [ ${#L[@]} = 4 ] && [ "${L[1]}" -gt "${L[0]}" ]; then ok "HSPACPI lee la batería sola (${L[0]} -> ${L[1]} lecturas)"
+else ko "HSPACPI no lee sola la batería (${L[*]})"; fi
+if [ ${#L[@]} = 4 ] && [ "${L[3]}" = "${L[2]}" ]; then ok "tras REINICIAR, HSPACPI está parado (${L[2]} -> ${L[3]} lecturas)"
+else ko "tras REINICIAR, HSPACPI sigue leyendo (${L[*]})"; fi
+check "No se ha podido reiniciar el equipo."
 [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ] && sed -n '/Ejecutando/,$p' $T/log.txt
 rm -rf $T
 exit $fail

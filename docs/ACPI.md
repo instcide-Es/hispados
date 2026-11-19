@@ -230,6 +230,7 @@ arranca sin ella y se pone después, la pila no sale hasta volver a entrar.
 | 01h | llamar al núcleo: CX = función (2 registro, 3 estado, 5 leer ya), DS:SI = petición → DX:AX |
 | 02h | → ES:BX = `struct ll_apm` (lo último leído: `acpi/nucleo/llamadas.h`) |
 | 03h | descargar → AL = 0 hecho, 1 hay otro residente encima |
+| 04h | parar: avisa al controlador embebido (`_REG (3, 0)`) y el núcleo no se vuelve a llamar (530Ah sigue dando lo último leído) → AL = 0. Lo piden APAGAR y REINICIAR antes de vaciar los búferes y de tocar ACPI |
 
 ## Las pruebas
 
