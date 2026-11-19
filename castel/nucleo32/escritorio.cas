@@ -1,0 +1,865 @@
+; =============================================================================
+;  escritorio.cas - el escritorio de Hispa-Pentium: el primer entorno gráfico
+;  del núcleo, con la comodidad de los escritorios de principios de los 2000
+;  y diseño propio (azules y verdes, esquinas redondas, y el disquete de la
+;  casa de logo).
+;
+;   - el tapiz (tres a elegir: «Olas», «Azul» y «Verde»), con el disquete;
+;   - la barra de tareas, abajo: el botón «Inicio» (verde, redondeado), un
+;     botón por cada ventana abierta (pulsarlo la trae delante, la minimiza o
+;     la recupera) y, a la derecha, la bandeja con el reloj (el de la CMOS);
+;   - el menú Inicio, de dos columnas: a la izquierda (en blanco) los
+;     programas; a la derecha (en azul muy claro) los documentos del disco
+;     (los .TXT de la raíz: se abren con el Bloc de notas) y la
+;     configuración; y abajo, «Apagar el equipo»;
+;   - los cuadros «Apagar el equipo» (apagar, reiniciar), «Configuración»
+;     (el teclado, el tapiz, lo que hay) y los avisos.
+;
+;  Todo son ventanas del gestor (ventanas.cas): la barra y el menú, sin
+;  marco y por delante de las demás; los cuadros, con él. Una tarea del
+;  núcleo, «escritorio», da el pulso al gestor cien veces por segundo y
+;  atiende los sucesos de estas ventanas. Los programas (BLOC.BIN,
+;  CONSOLA.BIN) son del anillo 3 y se cargan del disco.
+;
+;  Se pone en marcha con arranca(): lo llama el núcleo si el cargador dice
+;  «escritorio» (QEMU: -append escritorio), su orden «escritorio», o un
+;  programa por la llamada al sistema 38 (la orden ESCRITORIO del intérprete).
+;  Con «modo=1024x768» en la línea del cargador, ese modo (si no, 800x600).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Escritorio
+
+    importar Cpu, Tareas, Multiboot, Marcos, Grafico, Letra, Video, Raton, Ventanas, Consola, Fat, Fecha, Usuario, Textos32, Formato
+
+    público constante ALTO_BARRA = 34
+    constante INICIO_ANCHO = 100
+    constante BANDEJA_ANCHO = 68
+    constante BOTONES_X = 108
+    constante BOTÓN_MÁXIMO = 160
+    constante MENÚ_ANCHO = 330
+    constante MENÚ_ALTO = 380
+    constante MENÚ_CABEZA = 54
+    constante MENÚ_PIE = 42
+    constante MENÚ_COLUMNA = 172                ; donde empieza la columna de la derecha
+    constante ALTO_OPCIÓN = 34
+
+    ; ---- los colores (los propios de Hispa-Pentium) ----
+    constante BLANCO = 0xFFFFFF
+    constante BARRA_ARRIBA = 0x4C97EC
+    constante BARRA_ABAJO = 0x1D5DBA
+    constante VERDE_ARRIBA = 0x5CC45E
+    constante VERDE_ABAJO = 0x2A8A3C
+    constante BANDEJA_ARRIBA = 0x6FBDF7
+    constante BANDEJA_ABAJO = 0x3393E0
+    constante AZUL_CLARO = 0xDCEAFB             ; la columna derecha del menú
+    constante AZUL_ELEGIDO = 0x2F74D0
+    constante TINTA = 0x14294A
+    constante TINTA_SUAVE = 0x5A7396
+    constante NARANJA = 0xFF7A33                ; el del disquete
+
+    ; ---- lo que hace cada pulsador y cada opción del menú ----
+    constante AC_APAGAR = 1
+    constante AC_REINICIAR = 2
+    constante AC_CANCELAR = 3
+    constante AC_TECLADO_ES = 4
+    constante AC_TECLADO_US = 5
+    constante AC_FONDO = 6                      ; 6, 7 y 8: los tres tapices
+    constante AC_CERRAR_CONFIG = 9
+    constante AC_CERRAR_AVISO = 10
+    constante AM_BLOC = 20
+    constante AM_CONSOLA = 21
+    constante AM_DOCUMENTO = 22
+    constante AM_CONFIG = 23
+    constante AM_APAGAR = 24
+
+    tipo Opción = estructura                    ; una opción del menú Inicio
+        x, ye, an, al: ent32
+        acción, dato: nat32
+    fin
+    tipo Pulsador = estructura                  ; un botón de un cuadro
+        ventana: nat32
+        x, ye, an, al: ent32
+        acción: nat32
+    fin
+
+    constante MAX_OPCIONES = 12
+    constante MAX_DOCUMENTOS = 5
+    constante MAX_PULSADORES = 16
+    constante MAX_BOTONES = 12
+
+    variable v_barra, v_menú, v_apagar, v_config, v_aviso: nat32
+    variable menú_abierto: bool
+    variable menú_cerrado_en: nat32             ; el tic en que se cerró (por un clic fuera)
+    variable opciones: arreglo [MAX_OPCIONES] de Opción
+    variable n_opciones: nat32
+    variable elegida: ent32 = -1
+    variable documentos: arreglo [MAX_DOCUMENTOS] de arreglo [13] de byte
+    variable n_documentos: nat32
+    variable pulsadores: arreglo [MAX_PULSADORES] de Pulsador
+    variable n_pulsadores: nat32
+    variable botones: arreglo [MAX_BOTONES] de nat32    ; la ventana de cada botón de la barra
+    variable n_botones: nat32
+    variable ancho_botón: ent32
+    variable cambios_vistos: nat32
+    variable minuto_visto: nat32 = 0xFFFFFFFF
+    variable segundo_visto: nat32
+    variable fondo: nat32                       ; el tapiz: 0, 1 o 2
+    variable texto_aviso: arreglo [128] de byte
+    variable renglón: arreglo [96] de byte
+    público variable lanzados: nat32            ; los programas que ha lanzado el escritorio
+
+    ; -------------------------------------------------------------------------
+    ;  El tapiz
+    ; -------------------------------------------------------------------------
+    ; la altura de una ola en la columna x: sube y baja cada «largo» puntos
+    ; (un arco detrás de otro, sin senos)
+    función ola(x: ent32, largo: ent32, alza: ent32): ent32
+        variable u: ent32
+        u := x mod largo
+        devolver alza * 4 * u * (largo - u) div (largo * largo)
+    fin
+
+    ; tiñe del color «tinte» lo que queda por debajo de una ola
+    función pinta_ola(línea_base: ent32, largo: ent32, fase: ent32, alza: ent32, tinte: nat32, cuánto: nat32)
+        variable x, yy, desde_y: ent32
+        variable p: puntero a nat32
+        para x desde 0 hasta tapiz.ancho - 1 hacer
+            desde_y := línea_base - ola(x + fase, largo, alza)
+            si desde_y < 0 entonces desde_y := 0 fin
+            p := tapiz.puntos + (desde_y * ent32(tapiz.salto) + x)
+            yy := desde_y
+            mientras yy < tapiz.alto hacer
+                valor(p) := mezcla(valor(p), tinte, cuánto)
+                p := p + tapiz.salto
+                yy := yy + 1
+            fin
+        fin
+    fin
+
+    función pinta_tapiz()
+        variable an, al: ent32
+        an := tapiz.ancho
+        al := tapiz.alto
+        según fondo
+            caso 1: degradado(tapiz, 0, 0, an, al, 0x16468E, 0x4E9FE6)
+            caso 2: degradado(tapiz, 0, 0, an, al, 0x1E6A52, 0x7CC878)
+            si no:
+                ; «Olas»: del azul de arriba al verde de abajo, en cuatro olas
+                degradado(tapiz, 0, 0, an, al, 0x154C9C, 0x2F8FD2)
+                pinta_ola(al * 52 div 100, an * 70 div 100, an * 20 div 100, al * 9 div 100, 0x2FA7C9, 90)
+                pinta_ola(al * 66 div 100, an * 55 div 100, an * 48 div 100, al * 8 div 100, 0x33B5A6, 110)
+                pinta_ola(al * 80 div 100, an * 85 div 100, an * 5 div 100, al * 10 div 100, 0x46C282, 120)
+                pinta_ola(al * 93 div 100, an * 60 div 100, an * 33 div 100, al * 7 div 100, 0x7ED46A, 130)
+        fin
+        ; la firma: el disquete y el nombre, abajo a la derecha
+        disquete(tapiz, an - 226, al - ALTO_BARRA - 74, 56)
+        texto_negrita(tapiz, an - 163, al - ALTO_BARRA - 59, "Hispa-Pentium", 0x0E3A66)
+        texto_negrita(tapiz, an - 164, al - ALTO_BARRA - 60, "Hispa-Pentium", BLANCO)
+        texto(tapiz, an - 164, al - ALTO_BARRA - 40, "hecho en Castel", 0xE2F2FF)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Dibujos pequeños: los iconos y los pulsadores
+    ; -------------------------------------------------------------------------
+    ; una hoja de papel con renglones (22 x 26)
+    función icono_hoja(ref l: Lienzo, x: ent32, yy: ent32, cabecera: nat32)
+        variable i: ent32
+        rectángulo(l, x, yy, 22, 26, 0x6F87A8)
+        rectángulo(l, x + 1, yy + 1, 20, 24, BLANCO)
+        rectángulo(l, x + 1, yy + 1, 20, 5, cabecera)
+        para i desde 0 hasta 3 hacer
+            rectángulo(l, x + 4, yy + 9 + i * 4, 14 - (i mod 2) * 4, 1, 0x7D93B2)
+        fin
+    fin
+
+    ; una pantalla oscura con su «>_» (24 x 22)
+    función icono_consola(ref l: Lienzo, x: ent32, yy: ent32)
+        redondeado(l, x, yy, 24, 22, 3, 0x6F87A8, 0x6F87A8, TODAS)
+        redondeado(l, x + 1, yy + 1, 22, 20, 2, 0x1B2B44, 0x0D1626, TODAS)
+        línea(l, x + 5, yy + 6, x + 9, yy + 10, 0x7CE88A)
+        línea(l, x + 9, yy + 10, x + 5, yy + 14, 0x7CE88A)
+        rectángulo(l, x + 12, yy + 14, 6, 2, 0x7CE88A)
+    fin
+
+    ; una rueda dentada (24 x 24)
+    función icono_rueda(ref l: Lienzo, x: ent32, yy: ent32, fondo_: nat32)
+        rectángulo(l, x + 10, yy, 4, 24, 0x5C7FB0)
+        rectángulo(l, x, yy + 10, 24, 4, 0x5C7FB0)
+        línea(l, x + 4, yy + 4, x + 19, yy + 19, 0x5C7FB0)
+        línea(l, x + 5, yy + 4, x + 20, yy + 19, 0x5C7FB0)
+        línea(l, x + 19, yy + 4, x + 4, yy + 19, 0x5C7FB0)
+        línea(l, x + 20, yy + 4, x + 5, yy + 19, 0x5C7FB0)
+        círculo(l, x + 12, yy + 12, 8, 0x5C7FB0)
+        círculo(l, x + 12, yy + 12, 6, 0x8FB2E0)
+        círculo(l, x + 12, yy + 12, 3, fondo_)
+    fin
+
+    ; el botón de apagar: un redondel naranja con su raya (22 x 22)
+    función icono_apagar(ref l: Lienzo, x: ent32, yy: ent32)
+        círculo(l, x + 11, yy + 11, 11, BLANCO)
+        círculo(l, x + 11, yy + 11, 10, NARANJA)
+        círculo(l, x + 11, yy + 12, 6, BLANCO)
+        círculo(l, x + 11, yy + 12, 4, NARANJA)
+        rectángulo(l, x + 8, yy + 3, 7, 7, NARANJA)
+        rectángulo(l, x + 10, yy + 4, 2, 8, BLANCO)
+    fin
+
+    ; un pulsador redondeado, con su texto en blanco centrado
+    función pinta_pulsador(ref l: Lienzo, x: ent32, yy: ent32, an: ent32, al: ent32, t: puntero a byte, arriba: nat32, abajo: nat32)
+        variable tx: ent32
+        redondeado(l, x, yy, an, al, 6, mezcla(abajo, 0, 80), mezcla(abajo, 0, 80), TODAS)
+        redondeado(l, x + 1, yy + 1, an - 2, al - 2, 5, arriba, abajo, TODAS)
+        rectángulo(l, x + 6, yy + 2, an - 12, 1, mezcla(arriba, BLANCO, 120))
+        tx := x + (an - ancho_texto(t)) div 2
+        texto_negrita(l, tx + 1, yy + (al - ALTO_LETRA) div 2 + 1, t, mezcla(abajo, 0, 110))
+        texto_negrita(l, tx, yy + (al - ALTO_LETRA) div 2, t, BLANCO)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los pulsadores de los cuadros
+    ; -------------------------------------------------------------------------
+    función quita_pulsadores(ventana: nat32)
+        variable i, k: nat32
+        k := 0
+        i := 0
+        mientras i < n_pulsadores hacer
+            si pulsadores[i].ventana <> ventana entonces
+                si k <> i entonces
+                    pulsadores[k].ventana := pulsadores[i].ventana
+                    pulsadores[k].x := pulsadores[i].x
+                    pulsadores[k].ye := pulsadores[i].ye
+                    pulsadores[k].an := pulsadores[i].an
+                    pulsadores[k].al := pulsadores[i].al
+                    pulsadores[k].acción := pulsadores[i].acción
+                fin
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        n_pulsadores := k
+    fin
+
+    ; pinta un pulsador en la ventana y lo apunta para cuando se pulse
+    función pulsador(ventana: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, t: puntero a byte, arriba: nat32, abajo: nat32, acción: nat32)
+        variable l: puntero a Lienzo
+        l := lienzo_de(ventana)
+        si l = nulo o n_pulsadores >= MAX_PULSADORES entonces devolver fin
+        pinta_pulsador(valor(l), x, yy, an, al, t, arriba, abajo)
+        pulsadores[n_pulsadores].ventana := ventana
+        pulsadores[n_pulsadores].x := x
+        pulsadores[n_pulsadores].ye := yy
+        pulsadores[n_pulsadores].an := an
+        pulsadores[n_pulsadores].al := al
+        pulsadores[n_pulsadores].acción := acción
+        n_pulsadores := n_pulsadores + 1
+    fin
+
+    ; lo que hace el pulsador de esa ventana que está en ese punto (0: ninguno)
+    función pulsador_en(ventana: nat32, x: ent32, yy: ent32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < n_pulsadores hacer
+            si pulsadores[i].ventana = ventana y x >= pulsadores[i].x y yy >= pulsadores[i].ye y x < pulsadores[i].x + pulsadores[i].an y yy < pulsadores[i].ye + pulsadores[i].al entonces
+                devolver pulsadores[i].acción
+            fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La barra de tareas
+    ; -------------------------------------------------------------------------
+    función pinta_barra()
+        variable l: puntero a Lienzo
+        variable an, x, caben, n: ent32
+        variable i: nat32
+        variable f, h: nat32
+        variable hora: arreglo [8] de byte
+        variable d: arreglo [2] de nat32
+        l := lienzo_de(v_barra)
+        si l = nulo entonces devolver fin
+        an := l.ancho
+        degradado(valor(l), 0, 0, an, ALTO_BARRA, BARRA_ARRIBA, BARRA_ABAJO)
+        rectángulo(valor(l), 0, 0, an, 1, 0x8FC4FA)
+        rectángulo(valor(l), 0, 1, an, 1, 0x62A8F2)
+        ; «Inicio»: verde, redondeado por la derecha (más claro con el menú abierto)
+        si menú_abierto entonces
+            redondeado(valor(l), -16, 2, INICIO_ANCHO + 16, ALTO_BARRA - 3, 14, 0x3FA24C, 0x1F7532, TODAS)
+        sino
+            redondeado(valor(l), -16, 2, INICIO_ANCHO + 16, ALTO_BARRA - 3, 14, VERDE_ARRIBA, VERDE_ABAJO, TODAS)
+            rectángulo(valor(l), 0, 3, INICIO_ANCHO - 12, 1, 0x9EE69A)
+        fin
+        disquete(valor(l), 7, 5, 24)
+        texto_negrita(valor(l), 39, 10, "Inicio", 0x1B5E2A)
+        texto_negrita(valor(l), 38, 9, "Inicio", BLANCO)
+        ; la bandeja, con el reloj
+        degradado(valor(l), an - BANDEJA_ANCHO, 2, BANDEJA_ANCHO, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
+        rectángulo(valor(l), an - BANDEJA_ANCHO, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
+        rectángulo(valor(l), an - BANDEJA_ANCHO + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
+        ahora(f, h)
+        d[0] := h >> 11
+        d[1] := (h >> 5) yb 63
+        minuto_visto := d[1]
+        formatear(hora, 8, "%02u:%02u", d)
+        texto_negrita(valor(l), an - BANDEJA_ANCHO + 15, 10, hora, 0x1E5CA8)
+        texto_negrita(valor(l), an - BANDEJA_ANCHO + 14, 9, hora, BLANCO)
+        ; un botón por cada ventana con marco (también las minimizadas)
+        n_botones := 0
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].banderas yb (SIN_MARCO ob OCULTA) = 0 y n_botones < MAX_BOTONES entonces
+                botones[n_botones] := i
+                n_botones := n_botones + 1
+            fin
+        fin
+        si n_botones > 0 entonces
+            ancho_botón := (an - BOTONES_X - BANDEJA_ANCHO - 6) div ent32(n_botones)
+            si ancho_botón > BOTÓN_MÁXIMO entonces ancho_botón := BOTÓN_MÁXIMO fin
+            i := 0
+            mientras i < n_botones hacer
+                x := BOTONES_X + ent32(i) * ancho_botón
+                si ent32(botones[i]) = activa entonces
+                    ; la activa: hundido, más oscuro
+                    redondeado(valor(l), x, 4, ancho_botón - 4, ALTO_BARRA - 7, 5, 0x0F3F8A, 0x0F3F8A, TODAS)
+                    redondeado(valor(l), x + 1, 5, ancho_botón - 6, ALTO_BARRA - 9, 4, 0x1A52A6, 0x2B6FCC, TODAS)
+                sino
+                    redondeado(valor(l), x, 4, ancho_botón - 4, ALTO_BARRA - 7, 5, 0x2A6BC8, 0x2A6BC8, TODAS)
+                    redondeado(valor(l), x + 1, 5, ancho_botón - 6, ALTO_BARRA - 9, 4, 0x6DB4F8, 0x3E86E2, TODAS)
+                fin
+                disquete(valor(l), x + 5, 8, 18)
+                caben := (ancho_botón - 36) div ANCHO_LETRA
+                n := 0
+                mientras ventanas[botones[i]].título[n] <> 0 hacer n := n + 1 fin
+                si n > caben entonces n := caben fin
+                si n > 0 entonces texto_n(valor(l), x + 27, 9, ventanas[botones[i]].título, nat32(n), BLANCO) fin
+                botones[i] := ventanas[botones[i]].id
+                i := i + 1
+            fin
+        fin
+        cambios_vistos := Ventanas.cambios
+        repintada(v_barra, 0, 0, an, ALTO_BARRA)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El menú Inicio
+    ; -------------------------------------------------------------------------
+    ; los documentos: los .TXT de la raíz del disco (los cinco primeros)
+    función lee_documentos()
+        variable m, r, n, i: nat32
+        variable e: Entrada
+        n_documentos := 0
+        si no montado entonces devolver fin
+        m := abrir_archivo("\\", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        r := leer_entrada(m, dirección(e))
+        mientras r = 1 y n_documentos < MAX_DOCUMENTOS hacer
+            n := 0
+            mientras e.nombre[n] <> 0 hacer n := n + 1 fin
+            si e.atributos yb CARPETA = 0 y n > 4 y e.nombre[n - 4] = '.' y e.nombre[n - 3] = 'T' y e.nombre[n - 2] = 'X' y e.nombre[n - 1] = 'T' entonces
+                para i desde 0 hasta n hacer documentos[n_documentos][i] := e.nombre[i] fin
+                n_documentos := n_documentos + 1
+            fin
+            r := leer_entrada(m, dirección(e))
+        fin
+        cerrar_archivo(m)
+    fin
+
+    función nueva_opción(x: ent32, yy: ent32, an: ent32, al: ent32, acción: nat32, dato: nat32): ent32
+        si n_opciones >= MAX_OPCIONES entonces devolver -2 fin
+        opciones[n_opciones].x := x
+        opciones[n_opciones].ye := yy
+        opciones[n_opciones].an := an
+        opciones[n_opciones].al := al
+        opciones[n_opciones].acción := acción
+        opciones[n_opciones].dato := dato
+        n_opciones := n_opciones + 1
+        devolver ent32(n_opciones) - 1
+    fin
+
+    ; una opción del menú: su franja (resaltada si es la elegida) y su texto;
+    ; da el color con que hay que pintar lo demás (su icono lo pinta quien llama)
+    función pinta_opción(ref l: Lienzo, x: ent32, yy: ent32, an: ent32, t: puntero a byte, acción: nat32, dato: nat32, negrita: bool)
+        variable n: ent32
+        variable c: nat32
+        n := nueva_opción(x, yy, an, ALTO_OPCIÓN, acción, dato)
+        c := TINTA
+        si n = elegida entonces
+            redondeado(l, x + 2, yy + 1, an - 4, ALTO_OPCIÓN - 2, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
+            c := BLANCO
+        fin
+        si negrita entonces
+            texto_negrita(l, x + 38, yy + 9, t, c)
+        sino
+            texto(l, x + 38, yy + 9, t, c)
+        fin
+    fin
+
+    función pinta_menú()
+        variable l: puntero a Lienzo
+        variable yy: ent32
+        variable i: nat32
+        l := lienzo_de(v_menú)
+        si l = nulo entonces devolver fin
+        n_opciones := 0
+        ; el marco y la cabecera, azul, con el disquete y el nombre
+        rectángulo(valor(l), 0, 0, MENÚ_ANCHO, MENÚ_ALTO, 0x1A56AC)
+        redondeado(valor(l), 1, 1, MENÚ_ANCHO - 2, MENÚ_CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
+        rectángulo(valor(l), 8, 2, MENÚ_ANCHO - 16, 1, 0x9CCBFA)
+        disquete(valor(l), 9, 7, 42)
+        texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
+        texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
+        texto(valor(l), 58, 30, "el escritorio, versión 0.4", 0xD3E7FD)
+        rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
+        ; las dos columnas
+        rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
+        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, MENÚ_ANCHO - MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, AZUL_CLARO)
+        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, 1, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, 0xA9C6EC)
+        ; a la izquierda: los programas
+        yy := MENÚ_CABEZA + 10
+        texto_negrita(valor(l), 12, yy, "Programas", TINTA_SUAVE)
+        rectángulo(valor(l), 12, yy + 19, MENÚ_COLUMNA - 26, 1, 0xC9D8EC)
+        yy := yy + 26
+        pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Bloc de notas", AM_BLOC, 0, cierto)
+        icono_hoja(valor(l), 14, yy + 4, 0x4C97EC)
+        yy := yy + ALTO_OPCIÓN + 2
+        pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Consola", AM_CONSOLA, 0, cierto)
+        icono_consola(valor(l), 13, yy + 6)
+        ; a la derecha: los documentos y la configuración
+        yy := MENÚ_CABEZA + 10
+        texto_negrita(valor(l), MENÚ_COLUMNA + 10, yy, "Documentos", TINTA_SUAVE)
+        rectángulo(valor(l), MENÚ_COLUMNA + 10, yy + 19, MENÚ_ANCHO - MENÚ_COLUMNA - 22, 1, 0xA9C6EC)
+        yy := yy + 24
+        si n_documentos = 0 entonces
+            texto(valor(l), MENÚ_COLUMNA + 14, yy + 6, "(no hay ninguno)", TINTA_SUAVE)
+            yy := yy + 28
+        sino
+            i := 0
+            mientras i < n_documentos hacer
+                pinta_opción(valor(l), MENÚ_COLUMNA + 2, yy, MENÚ_ANCHO - MENÚ_COLUMNA - 4, documentos[i], AM_DOCUMENTO, i, falso)
+                icono_hoja(valor(l), MENÚ_COLUMNA + 12, yy + 4, 0x46C282)
+                yy := yy + ALTO_OPCIÓN
+                i := i + 1
+            fin
+        fin
+        yy := MENÚ_ALTO - MENÚ_PIE - ALTO_OPCIÓN - 6
+        rectángulo(valor(l), MENÚ_COLUMNA + 10, yy - 5, MENÚ_ANCHO - MENÚ_COLUMNA - 22, 1, 0xA9C6EC)
+        pinta_opción(valor(l), MENÚ_COLUMNA + 2, yy, MENÚ_ANCHO - MENÚ_COLUMNA - 4, "Configuración", AM_CONFIG, 0, cierto)
+        si elegida >= 0 y opciones[elegida].acción = AM_CONFIG entonces
+            icono_rueda(valor(l), MENÚ_COLUMNA + 11, yy + 5, AZUL_ELEGIDO)
+        sino
+            icono_rueda(valor(l), MENÚ_COLUMNA + 11, yy + 5, AZUL_CLARO)
+        fin
+        ; el pie: «Apagar el equipo»
+        degradado(valor(l), 1, MENÚ_ALTO - MENÚ_PIE, MENÚ_ANCHO - 2, MENÚ_PIE - 1, 0x3D86E2, 0x1C5CB8)
+        rectángulo(valor(l), 1, MENÚ_ALTO - MENÚ_PIE, MENÚ_ANCHO - 2, 1, 0x7FB6F4)
+        i := nat32(nueva_opción(MENÚ_ANCHO - 190, MENÚ_ALTO - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, AM_APAGAR, 0))
+        si ent32(i) = elegida entonces
+            redondeado(valor(l), MENÚ_ANCHO - 190, MENÚ_ALTO - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS)
+        fin
+        icono_apagar(valor(l), MENÚ_ANCHO - 184, MENÚ_ALTO - MENÚ_PIE + 10)
+        texto_negrita(valor(l), MENÚ_ANCHO - 153, MENÚ_ALTO - MENÚ_PIE + 14, "Apagar el equipo", 0x123F85)
+        texto_negrita(valor(l), MENÚ_ANCHO - 154, MENÚ_ALTO - MENÚ_PIE + 13, "Apagar el equipo", BLANCO)
+        repintada(v_menú, 0, 0, MENÚ_ANCHO, MENÚ_ALTO)
+    fin
+
+    función abre_menú()
+        lee_documentos()
+        elegida := -1
+        menú_abierto := cierto
+        pinta_menú()
+        mostrar(v_menú, cierto)
+        emergente := v_menú
+        teclas_a := v_menú
+        pinta_barra()
+    fin
+
+    función cierra_menú()
+        si no menú_abierto entonces devolver fin
+        menú_abierto := falso
+        emergente := 0
+        teclas_a := 0
+        mostrar(v_menú, falso)
+        pinta_barra()
+    fin
+
+    ; la opción del menú que está en ese punto; -1 si no hay
+    función opción_en(x: ent32, yy: ent32): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_opciones hacer
+            si x >= opciones[i].x y yy >= opciones[i].ye y x < opciones[i].x + opciones[i].an y yy < opciones[i].ye + opciones[i].al entonces
+                devolver ent32(i)
+            fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los cuadros: avisos, apagar, configuración
+    ; -------------------------------------------------------------------------
+    ; un cuadro nuevo (una ventana con marco que no se maximiza), centrado
+    función cuadro(nombre: puntero a byte, an: ent32, al: ent32): nat32
+        devolver crear_ventana(nombre, (pantalla.ancho - an) div 2, (pantalla.alto - ALTO_BARRA - al) div 2 - 20, an, al, FIJA, 0)
+    fin
+
+    función cierra_cuadro(ref v: nat32)
+        si v = 0 entonces devolver fin
+        quita_pulsadores(v)
+        cerrar_ventana(v, 0)
+        v := 0
+    fin
+
+    ; un aviso con su botón «Aceptar»
+    función aviso(t: puntero a byte)
+        variable l: puntero a Lienzo
+        cierra_cuadro(v_aviso)
+        v_aviso := cuadro("Hispa-Pentium", 440, 118)
+        l := lienzo_de(v_aviso)
+        si l = nulo entonces
+            v_aviso := 0
+            devolver
+        fin
+        círculo(valor(l), 34, 38, 16, NARANJA)
+        rectángulo(valor(l), 32, 28, 4, 13, BLANCO)
+        rectángulo(valor(l), 32, 44, 4, 4, BLANCO)
+        texto(valor(l), 64, 30, t, TINTA)
+        pulsador(v_aviso, 170, 76, 100, 30, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_AVISO)
+        repintada(v_aviso, 0, 0, 440, 118)
+        escribir("escritorio: aviso: ", t, "\n")
+    fin
+
+    función abre_apagar()
+        variable l: puntero a Lienzo
+        si v_apagar <> 0 entonces
+            cierra_cuadro(v_apagar)
+        fin
+        v_apagar := cuadro("Apagar el equipo", 420, 150)
+        l := lienzo_de(v_apagar)
+        si l = nulo entonces
+            v_apagar := 0
+            devolver
+        fin
+        degradado(valor(l), 0, 0, 420, 150, 0xEAF3FE, 0xC4DCF8)
+        disquete(valor(l), 14, 10, 44)
+        texto_negrita(valor(l), 70, 16, "¿Qué quiere hacer con el equipo?", TINTA)
+        texto(valor(l), 70, 38, "Guarde antes lo que tenga a medias.", TINTA_SUAVE)
+        pulsador(v_apagar, 22, 92, 118, 38, "Apagar", 0xF59A5E, 0xD2571E, AC_APAGAR)
+        pulsador(v_apagar, 151, 92, 118, 38, "Reiniciar", VERDE_ARRIBA, VERDE_ABAJO, AC_REINICIAR)
+        pulsador(v_apagar, 280, 92, 118, 38, "Cancelar", 0x5AA6F4, 0x2468C8, AC_CANCELAR)
+        repintada(v_apagar, 0, 0, 420, 150)
+    fin
+
+    función pinta_config()
+        variable l: puntero a Lienzo
+        variable d: arreglo [4] de nat32
+        l := lienzo_de(v_config)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_config)
+        degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
+        disquete(valor(l), 14, 10, 48)
+        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.4", TINTA)
+        texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
+        rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
+        d[0] := nat32(pantalla.ancho)
+        d[1] := nat32(pantalla.alto)
+        formatear(renglón, 96, "Pantalla:  %u x %u, 32 bits por punto", d)
+        texto(valor(l), 20, 78, renglón, TINTA)
+        d[0] := (límite + 0xFFFFF) div 0x100000
+        d[1] := marcos_libres() * 4 div 1024
+        d[2] := cuántas_tareas()
+        formatear(renglón, 96, "Memoria:   %u MB (%u MB libres); %u tareas", d)
+        texto(valor(l), 20, 100, renglón, TINTA)
+        texto(valor(l), 20, 136, "Teclado:", TINTA)
+        si teclado_español() entonces
+            pulsador(v_config, 110, 128, 110, 30, "Español", VERDE_ARRIBA, VERDE_ABAJO, AC_TECLADO_ES)
+            pulsador(v_config, 228, 128, 110, 30, "EE. UU.", 0xA9BDD8, 0x7C95B8, AC_TECLADO_US)
+        sino
+            pulsador(v_config, 110, 128, 110, 30, "Español", 0xA9BDD8, 0x7C95B8, AC_TECLADO_ES)
+            pulsador(v_config, 228, 128, 110, 30, "EE. UU.", VERDE_ARRIBA, VERDE_ABAJO, AC_TECLADO_US)
+        fin
+        texto(valor(l), 20, 182, "Tapiz:", TINTA)
+        si fondo = 0 entonces
+            pulsador(v_config, 110, 174, 100, 30, "Olas", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO)
+        sino
+            pulsador(v_config, 110, 174, 100, 30, "Olas", 0xA9BDD8, 0x7C95B8, AC_FONDO)
+        fin
+        si fondo = 1 entonces
+            pulsador(v_config, 218, 174, 100, 30, "Azul", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO + 1)
+        sino
+            pulsador(v_config, 218, 174, 100, 30, "Azul", 0xA9BDD8, 0x7C95B8, AC_FONDO + 1)
+        fin
+        si fondo = 2 entonces
+            pulsador(v_config, 326, 174, 100, 30, "Verde", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO + 2)
+        sino
+            pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
+        fin
+        pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        repintada(v_config, 0, 0, 460, 280)
+    fin
+
+    función abre_config()
+        si v_config <> 0 entonces cierra_cuadro(v_config) fin
+        v_config := cuadro("Configuración", 460, 280)
+        pinta_config()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lanzar programas, apagar
+    ; -------------------------------------------------------------------------
+    ; lanza un programa del disco, con sus argumentos; si no se puede, lo dice
+    función lanza(ruta: puntero a byte, args: puntero a byte)
+        variable t: puntero a Tarea
+        variable e: nat32
+        variable d: arreglo [2] de nat32
+        t := cargar_archivo(ruta, args, e)
+        si t = nulo entonces
+            d[0] := nat32(ruta)
+            d[1] := nat32(texto_error(e))
+            formatear(texto_aviso, 128, "No se puede abrir %s: %s.", d)
+            aviso(texto_aviso)
+            devolver
+        fin
+        ; nadie la va a esperar: al acabar, la recoge el núcleo
+        t.padre := 0
+        lanzados := lanzados + 1
+        tomar_consola()
+        imprimir2("escritorio: lanzo %s (la tarea %u)\n", nat32(ruta), t.id)
+        soltar_consola()
+    fin
+
+    ; la pantalla del final, y se apaga (en QEMU; un PC de verdad, sin ACPI
+    ; todavía, se queda con el aviso: ya se puede apagar)
+    función apaga(reiniciar: bool)
+        variable t: puntero a byte
+        desviado := falso
+        degradado(pantalla, 0, 0, pantalla.ancho, pantalla.alto, 0x123E7E, 0x1F6FC4)
+        disquete(pantalla, pantalla.ancho div 2 - 48, pantalla.alto div 2 - 120, 96)
+        si reiniciar entonces t := "Reiniciando el equipo..." sino t := "Ya puede apagar el equipo." fin
+        texto_negrita(pantalla, (pantalla.ancho - ancho_texto(t)) div 2, pantalla.alto div 2, t, BLANCO)
+        texto(pantalla, (pantalla.ancho - 13 * 8) div 2, pantalla.alto div 2 + 28, "Hispa-Pentium", 0xBFDCFA)
+        si reiniciar entonces
+            escribir("escritorio: reiniciar\n")
+            ensamblador
+                cli
+                mov al, 0xFE
+                out 0x64, al
+            fin
+        sino
+            escribir("escritorio: apagar\n")
+        fin
+        ; apagar: QEMU (el puerto de pruebas, con el código 5; si no está, el
+        ; de su ACPI); y si no se apaga, parado con el aviso en la pantalla
+        ensamblador
+            cli
+            mov edx, 0xF4
+            mov al, 5
+            out dx, al
+            mov edx, 0x604
+            mov eax, 0x2000
+            out dx, ax
+        .parado:
+            hlt
+            jmp .parado
+        fin
+    fin
+
+    función haz(acción: nat32, dato: nat32)
+        según acción
+            caso AM_BLOC: lanza("\\BLOC.BIN", nulo)
+            caso AM_CONSOLA: lanza("\\CONSOLA.BIN", nulo)
+            caso AM_DOCUMENTO: lanza("\\BLOC.BIN", documentos[dato])
+            caso AM_CONFIG: abre_config()
+            caso AM_APAGAR: abre_apagar()
+            caso AC_APAGAR: apaga(falso)
+            caso AC_REINICIAR: apaga(cierto)
+            caso AC_CANCELAR: cierra_cuadro(v_apagar)
+            caso AC_TECLADO_ES:
+                pon_teclado(cierto)
+                pinta_config()
+            caso AC_TECLADO_US:
+                pon_teclado(falso)
+                pinta_config()
+            caso AC_FONDO..AC_FONDO + 2:
+                fondo := acción - AC_FONDO
+                pinta_tapiz()
+                repintar_todo()
+                pinta_config()
+            caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
+            caso AC_CERRAR_AVISO: cierra_cuadro(v_aviso)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los sucesos de las ventanas del escritorio
+    ; -------------------------------------------------------------------------
+    función atiende_menú()
+        variable e: Evento
+        variable n: ent32
+        mientras saca_evento(v_menú, 0, e) hacer
+            según e.clase
+                caso EV_FUERA:
+                    cierra_menú()
+                    menú_cerrado_en := tics
+                caso EV_RATÓN_MUEVE:
+                    n := opción_en(ent32(e.a), ent32(e.b))
+                    si n <> elegida y menú_abierto entonces
+                        elegida := n
+                        pinta_menú()
+                    fin
+                caso EV_RATÓN_BAJA:
+                    n := opción_en(ent32(e.a), ent32(e.b))
+                    si n >= 0 y menú_abierto entonces
+                        cierra_menú()
+                        haz(opciones[n].acción, opciones[n].dato)
+                    fin
+                caso EV_TECLA:
+                    si menú_abierto entonces
+                        si e.a = 27 entonces
+                            cierra_menú()
+                        sino si e.a = TECLA_ABAJO entonces
+                            elegida := elegida + 1
+                            si elegida >= ent32(n_opciones) entonces elegida := 0 fin
+                            pinta_menú()
+                        sino si e.a = TECLA_ARRIBA entonces
+                            elegida := elegida - 1
+                            si elegida < 0 entonces elegida := ent32(n_opciones) - 1 fin
+                            pinta_menú()
+                        sino si e.a = '\n' y elegida >= 0 entonces
+                            n := elegida
+                            cierra_menú()
+                            haz(opciones[n].acción, opciones[n].dato)
+                        fin
+                    fin
+            fin
+        fin
+    fin
+
+    función atiende_barra()
+        variable e: Evento
+        variable n: ent32
+        mientras saca_evento(v_barra, 0, e) hacer
+            si e.clase = EV_TECLA y e.a = TECLA_LOGO entonces
+                si menú_abierto entonces cierra_menú() sino abre_menú() fin
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                si ent32(e.a) < INICIO_ANCHO entonces
+                    ; «Inicio»: abre el menú (si no se acaba de cerrar con este mismo clic)
+                    si no menú_abierto y tics - menú_cerrado_en > 3 entonces abre_menú() fin
+                sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
+                    n := (ent32(e.a) - BOTONES_X) div ancho_botón
+                    si n < ent32(n_botones) entonces botón_de_barra(botones[n]) fin
+                fin
+            fin
+        fin
+    fin
+
+    ; los sucesos de un cuadro: sus pulsadores y su botón de cerrar
+    función atiende_cuadro(ref v: nat32)
+        variable e: Evento
+        variable a: nat32
+        mientras v <> 0 y saca_evento(v, 0, e) hacer
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                cierra_cuadro(v)
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                a := pulsador_en(v, ent32(e.a), ent32(e.b))
+                si a <> 0 entonces haz(a, 0) fin
+            fin
+        fin
+    fin
+
+    ; la tarea del escritorio: el pulso del gestor y lo suyo, cien veces por segundo
+    función tarea_escritorio(n: nat32)
+        variable f, h: nat32
+        mientras cierto hacer
+            pulso()
+            atiende_menú()
+            atiende_barra()
+            atiende_cuadro(v_apagar)
+            atiende_cuadro(v_config)
+            atiende_cuadro(v_aviso)
+            si Ventanas.cambios <> cambios_vistos entonces pinta_barra() fin
+            ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
+            si tics div HZ <> segundo_visto entonces
+                segundo_visto := tics div HZ
+                ahora(f, h)
+                si (h >> 5) yb 63 <> minuto_visto entonces pinta_barra() fin
+                recoger_huérfanas()
+            fin
+            dormir(1)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Ponerlo en marcha
+    ; -------------------------------------------------------------------------
+    ; el número que hay detrás de «clave» en la línea del cargador (0 si no está)
+    función número_tras(t: puntero a byte, ref sigue: puntero a byte): nat32
+        variable n: nat32
+        n := 0
+        mientras valor(t) >= '0' y valor(t) <= '9' hacer
+            n := n * 10 + (valor(t) - '0')
+            t := t + 1
+        fin
+        sigue := t
+        devolver n
+    fin
+
+    ; pone en marcha el escritorio: el modo gráfico, el ratón, el gestor de
+    ; ventanas, el tapiz, la barra y el menú, y su tarea. Da 1 si queda en
+    ; marcha (o ya lo estaba); 0 si no se puede (y dice por qué).
+    público función arranca(): nat32
+        variable an, al: nat32
+        variable p, q: puntero a byte
+        variable t: puntero a Tarea
+        si escritorio_en_marcha entonces devolver 1 fin
+        an := 800
+        al := 600
+        p := buscar(línea_del_cargador(), "modo=")
+        si p <> nulo entonces
+            an := número_tras(p + 5, q)
+            si valor(q) = 'x' entonces al := número_tras(q + 1, q) fin
+            si an < 640 o al < 480 o an > 1920 o al > 1200 entonces
+                an := 800
+                al := 600
+            fin
+        fin
+        p := buscar(línea_del_cargador(), "tapiz=")
+        si p <> nulo entonces fondo := número_tras(p + 6, q) mod 3 fin
+        si no pon_modo(an, al) entonces devolver 0 fin
+        si no prepara_ventanas() entonces
+            escribir("escritorio: no hay memoria para la pantalla\n")
+            devolver 0
+        fin
+        si no prepara_ratón(pantalla.ancho, pantalla.alto) entonces escribir("escritorio: no hay ratón PS/2 (se sigue, con el teclado)\n") fin
+        alto_barra := ALTO_BARRA
+        pinta_tapiz()
+        v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
+        v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - MENÚ_ALTO, MENÚ_ANCHO, MENÚ_ALTO, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
+        si v_barra = 0 o v_menú = 0 entonces
+            escribir("escritorio: no hay memoria para la barra de tareas\n")
+            devolver 0
+        fin
+        ventana_inicio := v_barra
+        pinta_barra()
+        repintar_todo()
+        t := crear_tarea("escritorio", nat32(dirección(tarea_escritorio)), 0)
+        si t = nulo entonces
+            escribir("escritorio: no quedan tareas\n")
+            devolver 0
+        fin
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.padre := 1
+        desviado := cierto
+        escritorio_en_marcha := cierto
+        tomar_consola()
+        imprimir3("escritorio: en marcha, %u x %u, tapiz %u\n", nat32(pantalla.ancho), nat32(pantalla.alto), fondo)
+        soltar_consola()
+        devolver 1
+    fin
+
+    público función prepara_escritorio()
+        al_escritorio := nat32(dirección(arranca))
+    fin
+
+fin Escritorio.

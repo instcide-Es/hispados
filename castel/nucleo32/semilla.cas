@@ -33,7 +33,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Ata, Fat, Usuario, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Ata, Fat, Usuario, Escritorio, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -545,6 +545,7 @@ módulo Semilla
         prepara_tareas()
         prepara_consola()
         prepara_usuario()
+        prepara_escritorio()
         permitir_interrupciones()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
@@ -554,7 +555,14 @@ módulo Semilla
         ; si el cargador lo pide («ordenes» en su línea), el intérprete de
         ; órdenes del anillo 3, ya
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin
-        si buscar(línea_del_cargador(), "ordenes") <> nulo entonces lanza("ORDENES.BIN", nulo) fin
+        ; o el escritorio (el entorno gráfico): esta consola se queda esperando
+        ; (las teclas son de las ventanas; lo que diga el núcleo sale por el
+        ; puerto serie)
+        si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
+            arranca()
+        sino si buscar(línea_del_cargador(), "ordenes") <> nulo entonces
+            lanza("ORDENES.BIN", nulo)
+        fin
         escribir("Escriba «ayuda».\n")
         mientras cierto hacer
             recoger_huérfanas()
@@ -567,7 +575,7 @@ módulo Semilla
                 escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
                 escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
                 escribir("         disco dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
-                escribir("         teclado es, teclado us\n")
+                escribir("         teclado es, teclado us, escritorio\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
             sino si es("memoria") entonces
@@ -608,6 +616,8 @@ módulo Semilla
             sino si es("teclado es") entonces
                 pon_teclado(cierto)
                 escribir("teclado: el español\n")
+            sino si es("escritorio") entonces
+                si arranca() = 0 entonces escribir("no se puede poner en marcha el escritorio\n") fin
             sino si es("fallo") entonces
                 escribir("leo 0xDEAD0000, donde no hay nada...\n")
                 malo := puntero(0xDEAD0000)

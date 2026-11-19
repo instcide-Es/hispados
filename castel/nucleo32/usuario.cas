@@ -67,11 +67,12 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Fecha, Mem32, Formato
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
-    público constante VERSIÓN = 0x0003          ; la 0.3
+    público constante VERSIÓN = 0x0004          ; la 0.4
+    público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
     público constante NO_PROGRAMA = 0xFFFFFFFB  ; el archivo no es un programa de Hispa-Pentium
@@ -90,6 +91,14 @@ módulo Usuario
     público constante DATO_CLUSTERS = 8
     público constante DATO_HZ = 9               ; los tics por segundo
     público constante DATO_FECHA = 10           ; la fecha (arriba) y la hora (abajo), como las guarda la FAT
+    público constante DATO_ANCHO_PANTALLA = 11  ; el ancho de la pantalla gráfica (0 si no hay)
+    público constante DATO_ALTO_PANTALLA = 12
+    público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
+
+    ; la función (sin argumentos; da 1 o 0) que pone en marcha el escritorio:
+    ; la pone escritorio.cas, y se la llama por su dirección
+    público variable al_escritorio: nat32
+    público variable escritorio_en_marcha: bool
 
     constante MAX_PROGRAMA = 0x200000           ; lo más que mide un programa en el disco
     constante MAX_RUTA = 128
@@ -320,6 +329,15 @@ módulo Usuario
             caso DATO_FECHA:
                 ahora(f, h)
                 devolver (f << 16) ob h
+            caso DATO_ANCHO_PANTALLA:
+                si hay_pantalla entonces devolver nat32(pantalla.ancho) fin
+                devolver 0
+            caso DATO_ALTO_PANTALLA:
+                si hay_pantalla entonces devolver nat32(pantalla.alto) fin
+                devolver 0
+            caso DATO_ESCRITORIO:
+                si escritorio_en_marcha entonces devolver 1 fin
+                devolver 0
         fin
         devolver NO_VALE
     fin
@@ -334,10 +352,11 @@ módulo Usuario
             caso 1:
                 si no puede(a, b, falso) entonces devolver 0xFFFFFFFF fin
                 si actual.salida <> SIN_SALIDA entonces devolver a_la_salida(puntero(a), b) fin
+                si actual.terminal <> 0 entonces devolver escribir_terminal(actual.terminal, puntero(a), b) fin
                 escribir_trozo(puntero(a), b)
                 devolver b
             caso 2:
-                cerrar_todos(actual.id)
+                recoge_lo_suyo()
                 terminar(a)
             caso 3:
                 dormir(a)
@@ -347,6 +366,10 @@ módulo Usuario
             caso 5:
                 devolver actual.id
             caso 6:
+                si actual.terminal <> 0 entonces
+                    si a = 0 o hay_tecla_terminal(actual.terminal) entonces devolver tecla_terminal(actual.terminal) fin
+                    devolver 0
+                fin
                 si a = 0 o hay_tecla() entonces devolver leer_tecla() fin
                 devolver 0
             caso 7:
@@ -367,6 +390,7 @@ módulo Usuario
             caso 11:
                 t := tarea_de(a)
                 si t = nulo o t.padre <> actual.id entonces devolver NO_VALE fin
+                si b = 1 y t.estado <> ACABADA entonces devolver SIGUE fin     ; sin quedarse esperando
                 devolver esperar(t)
             caso 12:
                 si no puede(b, tamaño(Entrada), cierto) entonces devolver NO_VALE fin
@@ -390,6 +414,10 @@ módulo Usuario
             caso 15:
                 devolver dato(a)
             caso 16:
+                si actual.terminal <> 0 entonces
+                    escribir_terminal(actual.terminal, "\x0C", 1)       ; (el salto de página: lo entiende la Consola)
+                    devolver 0
+                fin
                 borrar_pantalla()
                 devolver 0
             caso 17:
@@ -457,8 +485,106 @@ módulo Usuario
                 si a <= 1 entonces pon_teclado(a = 1) fin
                 si teclado_español() entonces devolver 1 fin
                 devolver 0
+            caso 32..39:
+                devolver atender_ventanas(n, a, b, c)
         fin
         devolver NO_VALE
+    fin
+
+    ; las llamadas del entorno gráfico (32 a 39)
+    función atender_ventanas(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable nombre: arreglo [MAX_TÍTULO] de byte
+        variable ord: puntero a Orden
+        variable e: Evento
+        variable p: puntero a nat32
+        variable r: nat32
+        según n
+            caso 32:
+                ; una ventana nueva: el nombre en a, lo que mide por dentro en b y c
+                si no escritorio_en_marcha entonces devolver NO_VALE fin
+                si no texto_de_usuario(a, nombre, MAX_TÍTULO) entonces devolver NO_VALE fin
+                si b > 2048 o c > 2048 entonces devolver NO_VALE fin
+                siguiente_sitio := (siguiente_sitio + 1) mod 6
+                r := crear_ventana(nombre, 60 + ent32(siguiente_sitio) * 28, 36 + ent32(siguiente_sitio) * 26, ent32(b), ent32(c), 0, actual.id)
+                si r = 0 entonces devolver SIN_MEMORIA fin
+                devolver r
+            caso 33:
+                si cerrar_ventana(a, actual.id) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 34:
+                ; dibujar en la ventana a lo que dice la orden de b
+                si no puede(b, tamaño(Orden), falso) entonces devolver NO_VALE fin
+                ord := puntero(b)
+                según ord.op
+                    caso OP_TEXTO, OP_TEXTO_FONDO, OP_NEGRITA:
+                        si ord.n < 0 o ord.n > 4096 o no puede(nat32(ord.datos), nat32(ord.n), falso) entonces devolver NO_VALE fin
+                    caso OP_MAPA:
+                        si ord.ancho < 1 o ord.alto < 1 o ord.ancho > 2048 o ord.alto > 2048 entonces devolver NO_VALE fin
+                        si no puede(nat32(ord.datos), nat32(ord.ancho * ord.alto * 4), falso) entonces devolver NO_VALE fin
+                fin
+                si dibujar(a, actual.id, valor(ord)) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 35:
+                ; el suceso siguiente de la ventana a, a b; con c = 1, lo espera
+                si no puede(b, tamaño(Evento), cierto) entonces devolver NO_VALE fin
+                mientras cierto hacer
+                    si saca_evento(a, actual.id, e) entonces
+                        p := puntero(b)
+                        p[0] := e.clase
+                        p[1] := e.a
+                        p[2] := e.b
+                        p[3] := e.c
+                        devolver 1
+                    fin
+                    si e.clase = 0xFFFFFFFF entonces devolver NO_VALE fin
+                    si c <> 1 o actual.matar entonces devolver 0 fin
+                    dormir(1)
+                fin
+            caso 36:
+                si no texto_de_usuario(b, nombre, MAX_TÍTULO) entonces devolver NO_VALE fin
+                si poner_título(a, actual.id, nombre) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 37:
+                ; los terminales: a dice qué (0 hacer uno; 1 leer lo que han
+                ; escrito los de dentro, a b, hasta c octetos; 2 la tecla b
+                ; para ellos; 3 Ctrl+C)
+                según a
+                    caso 0:
+                        si actual.terminal <> 0 entonces devolver NO_VALE fin
+                        r := crear_terminal()
+                        si r = 0 entonces devolver SIN_MEMORIA fin
+                        devolver r
+                    caso 1:
+                        si no puede(b, c, cierto) entonces devolver NO_VALE fin
+                        devolver leer_salida(actual.terminal, puntero(b), c)
+                    caso 2:
+                        teclear(actual.terminal, b)
+                        devolver 0
+                    caso 3:
+                        cortar_terminal(actual.terminal)
+                        devolver 0
+                fin
+            caso 38:
+                ; poner en marcha el escritorio (si no lo está ya)
+                si escritorio_en_marcha entonces devolver 1 fin
+                si al_escritorio = 0 entonces devolver 0 fin
+                ensamblador
+                    mov eax, {al_escritorio}
+                    call eax
+                    mov {r}, eax
+                fin
+                devolver r
+        fin
+        devolver NO_VALE
+    fin
+
+    variable siguiente_sitio: nat32             ; para que las ventanas nuevas no nazcan una encima de otra
+
+    ; lo que deja una tarea al acabar: sus archivos, sus ventanas y su terminal
+    función recoge_lo_suyo()
+        cerrar_todos(actual.id)
+        cerrar_ventanas_de(actual.id)
+        soltar_terminales_de(actual.id)
     fin
 
     ; la interrupción 0x80: lo que se pide va en los registros que guardó
@@ -498,8 +624,8 @@ módulo Usuario
     ; código CORTADA. No vuelve. (La llaman la llamada al sistema y, por su
     ; dirección, el reloj: tareas.cas.)
     función cortar_actual()
-        escribir_trozo("^C\n", 3)
-        cerrar_todos(actual.id)
+        si actual.terminal <> 0 entonces escribir_terminal(actual.terminal, "^C\n", 3) sino escribir_trozo("^C\n", 3) fin
+        recoge_lo_suyo()
         terminar(CORTADA)
     fin
 
@@ -673,7 +799,7 @@ módulo Usuario
     ; quien llama): se acaba con el código MATADA. No vuelve.
     público función matar_actual()
         imprimir2("*** se acaba la tarea %u (%s)\n", actual.id, nat32(actual.nombre))
-        cerrar_todos(actual.id)
+        recoge_lo_suyo()
         terminar(MATADA)
     fin
 
