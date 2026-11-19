@@ -113,7 +113,7 @@ módulo Llamadas
             caso EN_USO: devolver "está en uso"
             caso PROTEGIDO: devolver "es de solo lectura"
             caso NO_VACÍA: devolver "la carpeta no está vacía"
-            caso NOMBRE_MALO: devolver "el nombre no vale (son 8 letras, un punto y 3)"
+            caso NOMBRE_MALO: devolver "el nombre no vale (son 8 letras, un punto y 3; y no CON, NUL, PRN...)"
             caso ES_CARPETA: devolver "es una carpeta"
             caso NO_CARPETA: devolver "no es una carpeta"
         fin

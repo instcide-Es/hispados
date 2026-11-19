@@ -124,6 +124,7 @@ módulo UEscribe
         escribir("no se puede: crear en una carpeta que no está: ", crear("NOESTA\\P.DAT") = NO_HAY)
         escribir("; un nombre de más de 8+3: ", crear("NOMBRELARGO.DAT") = NOMBRE_MALO)
         escribir("; ni con letras raras: ", crear("A*B.DAT") = NOMBRE_MALO)
+        escribir("; ni el de un dispositivo: ", crear("NUL") = NOMBRE_MALO)
         escribir("; escribir en una carpeta: ", crear("TEXTOS") = ES_CARPETA, "\n")
         escribir("no se puede: borrar lo que no está: ", borrar("NOESTA.DAT") = NO_HAY)
         escribir("; borrar una carpeta como archivo: ", borrar("TEXTOS") = ES_CARPETA)

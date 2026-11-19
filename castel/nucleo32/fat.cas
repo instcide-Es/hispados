@@ -372,7 +372,7 @@ módulo Fat
                 p := puntero(dirección(buf))
                 si p[0] = 0x41615252 y p[121] = 0x61417272 entonces
                     p[122] := libres
-                    p[123] := pista
+                    si pista >= 2 y pista < clusters + 2 entonces p[123] := pista sino p[123] := NINGUNO fin
                     guarda()
                 fin
             fin
@@ -613,11 +613,19 @@ módulo Fat
         devolver cierto
     fin
 
-    ; ¿vale ese nombre (ya en sus once letras) para un archivo nuevo?
+    ; ¿vale ese nombre (ya en sus once letras) para un archivo nuevo? (No
+    ; valen las letras que la FAT no admite, ni los nombres que el DOS guarda
+    ; para sus dispositivos: CON, PRN, AUX, NUL, COM1 a COM4 y LPT1 a LPT3.)
     función nombre_vale(once: puntero a byte): bool
         variable i: nat32
         variable c: byte
         si once[0] = ' ' o once[0] = '.' o once[0] = 0xE5 entonces devolver falso fin
+        si comparar_memoria(once, "CON     ", 8) = 0 o comparar_memoria(once, "PRN     ", 8) = 0 entonces devolver falso fin
+        si comparar_memoria(once, "AUX     ", 8) = 0 o comparar_memoria(once, "NUL     ", 8) = 0 entonces devolver falso fin
+        si once[4] = ' ' y once[3] >= '1' y once[3] <= '4' entonces
+            si comparar_memoria(once, "COM", 3) = 0 entonces devolver falso fin
+            si comparar_memoria(once, "LPT", 3) = 0 y once[3] <= '3' entonces devolver falso fin
+        fin
         para i desde 0 hasta 10 hacer
             c := once[i]
             si c < ' ' o c = 0x7F entonces devolver falso fin
