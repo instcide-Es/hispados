@@ -1,0 +1,439 @@
+; =============================================================================
+;  grafico.cas - dibujar en Hispa-Pentium: rectángulos, degradados, esquinas
+;  redondeadas, líneas, círculos, texto con la letra de 8x16 (letra.cas) y
+;  copiar trozos de un lienzo a otro.
+;
+;  Un «lienzo» es un rectángulo de puntos de 32 bits (0x00RRGGBB) en la
+;  memoria: la pantalla, el doble búfer, lo que tiene dentro una ventana...
+;  Tiene su ancho y su alto, y su «salto» (los puntos que hay de una fila a la
+;  siguiente en la memoria, que pueden ser más que su ancho: así un trozo de
+;  un lienzo es otro lienzo). Todo se recorta a los bordes del lienzo: se
+;  puede dibujar a medias fuera, o fuera del todo, sin pisar nada.
+;  Las filas se llenan y se copian con «rep stosd» y «rep movsd».
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Grafico
+
+    importar Letra
+
+    público tipo Lienzo = estructura
+        puntos: puntero a nat32                 ; el primer punto (arriba a la izquierda)
+        salto: nat32                             ; puntos de una fila a la siguiente
+        ancho, alto: ent32
+    fin
+
+    ; qué esquinas se redondean
+    público constante ARRIBA = 1
+    público constante ABAJO = 2
+    público constante TODAS = 3
+
+    ; -------------------------------------------------------------------------
+    ;  Las piezas en ensamblador
+    ; -------------------------------------------------------------------------
+    función llena_fila(p: puntero a nat32, n: nat32, color: nat32)
+        ensamblador
+            mov edi, {p}
+            mov ecx, {n}
+            mov eax, {color}
+            rep stosd
+        fin
+    fin
+
+    función copia_fila(destino: puntero a nat32, origen: puntero a nat32, n: nat32)
+        ensamblador
+            mov edi, {destino}
+            mov esi, {origen}
+            mov ecx, {n}
+            rep movsd
+        fin
+    fin
+
+    ; lo mismo, desde el final (para cuando los dos trozos se pisan)
+    función copia_fila_atrás(destino: puntero a nat32, origen: puntero a nat32, n: nat32)
+        ensamblador
+            mov ecx, {n}
+            mov edi, {destino}
+            mov esi, {origen}
+            lea edi, [edi+ecx*4-4]
+            lea esi, [esi+ecx*4-4]
+            std
+            rep movsd
+            cld
+        fin
+    fin
+
+    ; los ocho puntos de una fila de una letra (el de la izquierda, en el bit 7)
+    función fila_letra(p: puntero a nat32, bits: nat32, color: nat32)
+        ensamblador
+            mov edi, {p}
+            mov edx, {bits}
+            mov eax, {color}
+            shl edx, 24
+        .otro:
+            shl edx, 1
+            jnc .no
+            mov [edi], eax
+        .no:
+            add edi, 4
+            test edx, edx
+            jnz .otro
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los colores
+    ; -------------------------------------------------------------------------
+    público función color(rojo: nat32, verde: nat32, azul: nat32): nat32
+        devolver (rojo << 16) ob (verde << 8) ob azul
+    fin
+
+    ; entre el color a (k = 0) y el b (k = 256)
+    público función mezcla(a: nat32, b: nat32, k: nat32): nat32
+        variable r, v, z, q: nat32
+        si k >= 256 entonces devolver b fin
+        q := 256 - k
+        r := (((a >> 16) yb 255) * q + ((b >> 16) yb 255) * k) >> 8
+        v := (((a >> 8) yb 255) * q + ((b >> 8) yb 255) * k) >> 8
+        z := ((a yb 255) * q + (b yb 255) * k) >> 8
+        devolver (r << 16) ob (v << 8) ob z
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los lienzos
+    ; -------------------------------------------------------------------------
+    público función pon_lienzo(ref l: Lienzo, puntos: puntero a nat32, salto: nat32, ancho: ent32, alto: ent32)
+        l.puntos := puntos
+        l.salto := salto
+        l.ancho := ancho
+        l.alto := alto
+    fin
+
+    ; «trozo» pasa a ser el rectángulo (x, yy, ancho, alto) de «l» (recortado a él)
+    público función trozo_de(ref trozo: Lienzo, ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32)
+        si x < 0 entonces x := 0 fin
+        si yy < 0 entonces yy := 0 fin
+        si x > l.ancho entonces x := l.ancho fin
+        si yy > l.alto entonces yy := l.alto fin
+        si x + ancho > l.ancho entonces ancho := l.ancho - x fin
+        si yy + alto > l.alto entonces alto := l.alto - yy fin
+        si ancho < 0 entonces ancho := 0 fin
+        si alto < 0 entonces alto := 0 fin
+        trozo.puntos := l.puntos + (yy * l.salto + x)
+        trozo.salto := l.salto
+        trozo.ancho := ancho
+        trozo.alto := alto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Rectángulos y degradados
+    ; -------------------------------------------------------------------------
+    público función punto(ref l: Lienzo, x: ent32, yy: ent32, c: nat32)
+        si x < 0 o yy < 0 o x >= l.ancho o yy >= l.alto entonces devolver fin
+        l.puntos[yy * l.salto + x] := c
+    fin
+
+    público función leer_punto(ref l: Lienzo, x: ent32, yy: ent32): nat32
+        si x < 0 o yy < 0 o x >= l.ancho o yy >= l.alto entonces devolver 0 fin
+        devolver l.puntos[yy * l.salto + x]
+    fin
+
+    ; una fila de puntos, recortada
+    función fila(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, c: nat32)
+        si yy < 0 o yy >= l.alto entonces devolver fin
+        si x < 0 entonces
+            ancho := ancho + x
+            x := 0
+        fin
+        si x + ancho > l.ancho entonces ancho := l.ancho - x fin
+        si ancho <= 0 entonces devolver fin
+        llena_fila(l.puntos + (yy * l.salto + x), ancho, c)
+    fin
+
+    público función rectángulo(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32, c: nat32)
+        variable p: puntero a nat32
+        si x < 0 entonces
+            ancho := ancho + x
+            x := 0
+        fin
+        si yy < 0 entonces
+            alto := alto + yy
+            yy := 0
+        fin
+        si x + ancho > l.ancho entonces ancho := l.ancho - x fin
+        si yy + alto > l.alto entonces alto := l.alto - yy fin
+        si ancho <= 0 o alto <= 0 entonces devolver fin
+        p := l.puntos + (yy * l.salto + x)
+        mientras alto > 0 hacer
+            llena_fila(p, ancho, c)
+            p := p + l.salto
+            alto := alto - 1
+        fin
+    fin
+
+    ; el borde de un rectángulo, de un punto de grueso
+    público función marco(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32, c: nat32)
+        si ancho <= 0 o alto <= 0 entonces devolver fin
+        rectángulo(l, x, yy, ancho, 1, c)
+        rectángulo(l, x, yy + alto - 1, ancho, 1, c)
+        rectángulo(l, x, yy, 1, alto, c)
+        rectángulo(l, x + ancho - 1, yy, 1, alto, c)
+    fin
+
+    ; cuánto se mete la fila «f» (desde el borde) de una esquina redonda de
+    ; ese radio
+    público función sangría(radio: ent32, f: ent32): ent32
+        variable dx, dy: ent32
+        si f < 0 o f >= radio entonces devolver 0 fin
+        dy := radio - 1 - f
+        dx := radio
+        mientras dx > 0 y dx * dx + dy * dy > radio * radio hacer dx := dx - 1 fin
+        devolver radio - dx
+    fin
+
+    ; un rectángulo con las esquinas que se digan redondeadas, de un color
+    ; arriba que pasa poco a poco a otro abajo (el mismo: liso)
+    público función redondeado(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32, radio: ent32, arriba: nat32, abajo: nat32, cuáles: nat32)
+        variable i, s: ent32
+        variable c: nat32
+        si ancho <= 0 o alto <= 0 entonces devolver fin
+        para i desde 0 hasta alto - 1 hacer
+            si yy + i >= 0 y yy + i < l.alto entonces
+                s := 0
+                si cuáles yb ARRIBA <> 0 y i < radio entonces
+                    s := sangría(radio, i)
+                sino si cuáles yb ABAJO <> 0 y i >= alto - radio entonces
+                    s := sangría(radio, alto - 1 - i)
+                fin
+                si arriba = abajo o alto < 2 entonces
+                    c := arriba
+                sino
+                    c := mezcla(arriba, abajo, nat32(i * 256 div (alto - 1)))
+                fin
+                fila(l, x + s, yy + i, ancho - 2 * s, c)
+            fin
+        fin
+    fin
+
+    ; de un color arriba a otro abajo
+    público función degradado(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32, arriba: nat32, abajo: nat32)
+        redondeado(l, x, yy, ancho, alto, 0, arriba, abajo, 0)
+    fin
+
+    ; de un color a la izquierda a otro a la derecha
+    público función degradado_h(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32, izquierda: nat32, derecha: nat32)
+        variable i: ent32
+        si ancho <= 0 o alto <= 0 entonces devolver fin
+        para i desde 0 hasta ancho - 1 hacer
+            si ancho < 2 entonces
+                rectángulo(l, x + i, yy, 1, alto, izquierda)
+            sino
+                rectángulo(l, x + i, yy, 1, alto, mezcla(izquierda, derecha, nat32(i * 256 div (ancho - 1))))
+            fin
+        fin
+    fin
+
+    ; oscurece (k < 256) lo que hay en el rectángulo: cada color, por k/256
+    público función oscurecer(ref l: Lienzo, x: ent32, yy: ent32, ancho: ent32, alto: ent32, k: nat32)
+        variable i, j: ent32
+        variable p: puntero a nat32
+        si x < 0 entonces
+            ancho := ancho + x
+            x := 0
+        fin
+        si yy < 0 entonces
+            alto := alto + yy
+            yy := 0
+        fin
+        si x + ancho > l.ancho entonces ancho := l.ancho - x fin
+        si yy + alto > l.alto entonces alto := l.alto - yy fin
+        si ancho <= 0 o alto <= 0 entonces devolver fin
+        para j desde 0 hasta alto - 1 hacer
+            p := l.puntos + ((yy + j) * l.salto + x)
+            para i desde 0 hasta ancho - 1 hacer
+                p[i] := mezcla(0, p[i], k)
+            fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Líneas y círculos
+    ; -------------------------------------------------------------------------
+    público función línea(ref l: Lienzo, x1: ent32, y1: ent32, x2: ent32, y2: ent32, c: nat32)
+        variable dx, dy, sx, sy, e, e2: ent32
+        dx := x2 - x1
+        si dx < 0 entonces dx := -dx fin
+        dy := y2 - y1
+        si dy < 0 entonces dy := -dy fin
+        si x1 < x2 entonces sx := 1 sino sx := -1 fin
+        si y1 < y2 entonces sy := 1 sino sy := -1 fin
+        e := dx - dy
+        mientras cierto hacer
+            punto(l, x1, y1, c)
+            si x1 = x2 y y1 = y2 entonces romper fin
+            e2 := e * 2
+            si e2 > -dy entonces
+                e := e - dy
+                x1 := x1 + sx
+            fin
+            si e2 < dx entonces
+                e := e + dx
+                y1 := y1 + sy
+            fin
+        fin
+    fin
+
+    ; un círculo relleno, de centro (cx, cy)
+    público función círculo(ref l: Lienzo, cx: ent32, cy: ent32, radio: ent32, c: nat32)
+        variable dx, dy: ent32
+        dx := radio
+        para dy desde 0 hasta radio hacer
+            mientras dx > 0 y dx * dx + dy * dy > radio * radio + radio hacer dx := dx - 1 fin
+            fila(l, cx - dx, cy - dy, 2 * dx + 1, c)
+            fila(l, cx - dx, cy + dy, 2 * dx + 1, c)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El logo de la casa
+    ; -------------------------------------------------------------------------
+    ; el disquete de Hispa-DOS (docs/logo/hispados.svg), de «lado» puntos de
+    ; lado, hecho con rectángulos: el cuerpo naranja con su esquina cortada,
+    ; la chapa oscura con su ventanilla, la etiqueta clara con la H y el cursor
+    público función disquete(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32)
+        variable i, n: ent32
+        ; (las medidas, en 120 partes, como en el dibujo)
+        ; el cuerpo: sus primeras filas, más cortas (la esquina cortada de
+        ; arriba a la derecha)
+        n := lado * 16 div 120
+        para i desde 0 hasta n - 1 hacer
+            rectángulo(l, x + lado * 14 div 120, yy + lado * 14 div 120 + i, lado * 92 div 120 - n + i, 1, 0xFF7A33)
+        fin
+        rectángulo(l, x + lado * 14 div 120, yy + lado * 14 div 120 + n, lado * 92 div 120, lado * 96 div 120 - n, 0xFF7A33)
+        rectángulo(l, x + lado * 34 div 120, yy + lado * 14 div 120, lado * 44 div 120, lado * 28 div 120, 0x1A130C)
+        rectángulo(l, x + lado * 64 div 120, yy + lado * 19 div 120, lado * 9 div 120, lado * 18 div 120, 0xFFB64A)
+        rectángulo(l, x + lado * 26 div 120, yy + lado * 56 div 120, lado * 68 div 120, lado * 46 div 120, 0xF3E9D8)
+        si lado >= 24 entonces
+            ; la H: dos palos y el travesaño
+            n := lado * 5 div 120 + 1
+            rectángulo(l, x + lado * 42 div 120, yy + lado * 66 div 120, n, lado * 28 div 120, 0x1A130C)
+            rectángulo(l, x + lado * 60 div 120, yy + lado * 66 div 120, n, lado * 28 div 120, 0x1A130C)
+            rectángulo(l, x + lado * 42 div 120, yy + lado * 77 div 120, lado * 18 div 120 + n, n, 0x1A130C)
+            rectángulo(l, x + lado * 70 div 120, yy + lado * 88 div 120, lado * 14 div 120, lado * 6 div 120 + 1, 0xFF7A33)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El texto
+    ; -------------------------------------------------------------------------
+    ; una letra (de la página 437), con su esquina de arriba a la izquierda
+    ; en (x, yy); solo sus puntos (lo de debajo se queda)
+    público función letra(ref l: Lienzo, x: ent32, yy: ent32, c: nat32, tinta: nat32)
+        variable d: puntero a byte
+        variable f, i: ent32
+        variable bits: nat32
+        d := dibujo_letra(c)
+        si x >= 0 y yy >= 0 y x + ANCHO_LETRA <= l.ancho y yy + ALTO_LETRA <= l.alto entonces
+            ; entera dentro: sin mirar punto a punto
+            para f desde 0 hasta ALTO_LETRA - 1 hacer
+                si d[f] <> 0 entonces fila_letra(l.puntos + ((yy + f) * l.salto + x), d[f], tinta) fin
+            fin
+            devolver
+        fin
+        si x <= -ANCHO_LETRA o yy <= -ALTO_LETRA o x >= l.ancho o yy >= l.alto entonces devolver fin
+        para f desde 0 hasta ALTO_LETRA - 1 hacer
+            bits := d[f]
+            para i desde 0 hasta ANCHO_LETRA - 1 hacer
+                si bits yb (0x80 >> i) <> 0 entonces punto(l, x + i, yy + f, tinta) fin
+            fin
+        fin
+    fin
+
+    ; n letras seguidas
+    público función texto_n(ref l: Lienzo, x: ent32, yy: ent32, t: puntero a byte, n: nat32, tinta: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            si x >= l.ancho entonces devolver fin
+            letra(l, x, yy, t[i], tinta)
+            x := x + ANCHO_LETRA
+            i := i + 1
+        fin
+    fin
+
+    ; un texto acabado en 0
+    público función texto(ref l: Lienzo, x: ent32, yy: ent32, t: puntero a byte, tinta: nat32)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        texto_n(l, x, yy, t, n, tinta)
+    fin
+
+    ; en negrita (cada letra, dos veces: la segunda, un punto a la derecha)
+    público función texto_negrita(ref l: Lienzo, x: ent32, yy: ent32, t: puntero a byte, tinta: nat32)
+        texto(l, x, yy, t, tinta)
+        texto(l, x + 1, yy, t, tinta)
+    fin
+
+    ; lo que ocupa a lo ancho un texto
+    público función ancho_texto(t: puntero a byte): ent32
+        variable n: ent32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        devolver n * ANCHO_LETRA
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Copiar de un lienzo a otro
+    ; -------------------------------------------------------------------------
+    ; el rectángulo (ox, oy, ancho, alto) de «origen» va a (dx, dy) de
+    ; «destino», recortado a los dos. Si son el mismo lienzo y se pisan, sale
+    ; bien igual (así se desplaza lo que hay en una ventana).
+    público función copiar_lienzo(ref destino: Lienzo, dx: ent32, dy: ent32, ref origen: Lienzo, ox: ent32, oy: ent32, ancho: ent32, alto: ent32)
+        variable d, q: puntero a nat32
+        variable j: ent32
+        si ox < 0 entonces
+            ancho := ancho + ox
+            dx := dx - ox
+            ox := 0
+        fin
+        si oy < 0 entonces
+            alto := alto + oy
+            dy := dy - oy
+            oy := 0
+        fin
+        si dx < 0 entonces
+            ancho := ancho + dx
+            ox := ox - dx
+            dx := 0
+        fin
+        si dy < 0 entonces
+            alto := alto + dy
+            oy := oy - dy
+            dy := 0
+        fin
+        si ox + ancho > origen.ancho entonces ancho := origen.ancho - ox fin
+        si oy + alto > origen.alto entonces alto := origen.alto - oy fin
+        si dx + ancho > destino.ancho entonces ancho := destino.ancho - dx fin
+        si dy + alto > destino.alto entonces alto := destino.alto - dy fin
+        si ancho <= 0 o alto <= 0 entonces devolver fin
+        d := destino.puntos + (dy * destino.salto + dx)
+        q := origen.puntos + (oy * origen.salto + ox)
+        si d <= q entonces
+            para j desde 1 hasta alto hacer
+                copia_fila(d, q, ancho)
+                d := d + destino.salto
+                q := q + origen.salto
+            fin
+        sino
+            ; hacia abajo o hacia la derecha en el mismo lienzo: desde el final
+            d := d + (alto - 1) * destino.salto
+            q := q + (alto - 1) * origen.salto
+            para j desde 1 hasta alto hacer
+                copia_fila_atrás(d, q, ancho)
+                d := d - destino.salto
+                q := q - origen.salto
+            fin
+        fin
+    fin
+
+fin Grafico.
