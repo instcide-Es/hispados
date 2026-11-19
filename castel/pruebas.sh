@@ -57,7 +57,12 @@
 #      ratón PS/2: el teclado USB (el español), el ratón USB en el
 #      escritorio, un concentrador, la memoria USB como unidad X: (leer,
 #      escribir, fsck.fat), «sinusb», Mi equipo con sus unidades, y la
-#      memoria USB con GRUB arrancada como tal (el núcleo la lee él).
+#      memoria USB con GRUB arrancada como tal (el núcleo la lee él). Y la
+#      oficina de Hispa-386 dentro de Hispa-Pentium (HVPRUN.BIN, los programas
+#      de Hispa Ventanas): el grupo «Oficina» del menú Inicio, Facturas (hacer
+#      una factura, que queda en el disco, y volver a abrirla), Pluma (escribir
+#      y guardar), el portapapeles hasta el Bloc de notas, Cuentas, y Mi equipo
+#      abriendo un documento de Pluma y una imagen con Mirador.
 #  10. Hispa-Pentium 0.7: instalarlo en el disco duro. El programa INSTALAR
 #      (pantalla azul, en modo texto) con discos SATA e IDE en blanco, con
 #      una partición de otro sistema y espacio sin usar (no se toca lo que
@@ -1567,6 +1572,59 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
 fi
+
+# 12. la oficina de Hispa-386 (programas de Hispa Ventanas, .HVP) con HVPRUN.BIN
+echo "== Hispa-Pentium: la oficina de Hispa-386 dentro (HVPRUN: Facturas, Pluma, Cuentas y Mirador) =="
+if $AQUI/nucleo32/disco.sh $N/of.img 16 oficina > $N/discoof.txt 2>&1; then
+  CAPTURAS=$G ESCRIBE=1 DISCO=$N/of.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":raton 80 449" ":captura of1" \
+    ":clic 80 420" ":pausa 4" ":captura of2" ":clic 70 83" ":pausa 2" ":clic 440 190" ":escribe Taller Peña" ":clic 456 434" ":escribe Revisión del año" \
+    ":clic 360 466" ":escribe 121,50" ":pausa 1" ":captura of3" ":clic 356 509" ":pausa 2" ":captura of4" ":clic 734 34" ":pausa 2" ":captura of5" \
+    ":clic 40 585" ":clic 80 420" ":pausa 4" ":captura of6" ":clic 734 34" ":pausa 2" \
+    ":clic 40 585" ":clic 80 448" ":pausa 4" ":escribe Hola, señor Pérez." ":tecla ret" ":escribe Segunda línea." ":clic 186 92" ":pausa 2" ":escribe carta" \
+    ":tecla ret" ":pausa 2" ":captura of7" ":tecla ctrl-e" ":tecla ctrl-c" ":clic 695 44" ":pausa 2" ":doble 64 110" ":pausa 3" ":tecla ctrl-v" ":pausa 1" ":captura of8" \
+    ":clic 40 585" ":clic 80 476" ":pausa 4" ":escribe 12" ":tecla ret" ":escribe 30" ":tecla ret" ":escribe =A1+A2" ":tecla ret" ":pausa 1" ":captura of9" > $N/oficina.sal 2>&1
+  S=$N/oficina.sal
+  mira "el menú Inicio lanza los programas de la oficina con HVPRUN.BIN" "escritorio: lanzo .HVPRUN.BIN (la tarea [0-9]*)"
+  miracap "el menú Inicio tiene el grupo «Oficina»: Facturas, Pluma, Cuentas y Mirador" of1 negrita 4 380 20 392 Oficina negrita 36 408 48 420 Facturas \
+    negrita 36 464 48 476 Cuentas negrita 36 492 48 504 Mirador negrita 36 280 50 290 "Bloc de notas" negrita 170 532 182 542 "Apagar el equipo"
+  miracap "Facturas (FACTURAS.HVP, de Hispa-386) en una ventana de Hispa-Pentium: su barra de menús, sus botones y su lista" of2 negrita 72 22 84 30 Facturas \
+    texto 62 126 74 138 "No hay facturas emitidas." texto 206 70 218 80 Emitidas
+  miracap "sus cuadros de diálogo salen dentro, con la fecha de hoy (INT 21h), y se escribe en ellos (con eñe y acentos)" of3 negrita 202 76 214 86 "Datos de la factura" \
+    texto 310 178 322 188 "Taller Peña"
+  miracap "la factura nueva: base, IVA y total, como saldrá en el papel" of4 texto 150 178 162 190 "Taller Peña" texto 70 252 82 264 "Revisión del año" negrita 670 314 682 326 "147,02"
+  miracap "el botón de cerrar de la ventana acaba Facturas (ni ventana ni botón en la barra de tareas)" of5 notexto 50 20 200 40 Facturas notexto 100 570 400 595 Facturas
+  miracap "y al volver a abrirla, la factura está (FACTURAS.DAT, en el disco FAT)" of6 texto 274 115 286 127 "Taller Peña" texto 590 115 602 127 "147,02" texto 54 497 66 509 "1 factura"
+  miracap "Pluma (el procesador de textos): lo tecleado, y «Guardar» con su cuadro de elegir archivo; el título lo dice" of7 negrita 110 30 122 42 "Pluma - carta.PLU" \
+    texto 98 142 110 154 "Hola, señor Pérez." texto 98 158 110 170 "Segunda línea."
+  miracap "el portapapeles: lo copiado en Pluma (Ctrl+E, Ctrl+C) se pega en el Bloc de notas" of8 texto 140 180 260 260 "Hola, señor Pérez."
+  miracap "Cuentas (la hoja de cálculo): dos números y su suma con una fórmula" of9 negrita 92 20 104 32 "Cuentas - (sin nombre)" texto 170 196 184 210 42
+  saca $N/of.img OFICINA/FACTURAS.DAT $N/facturas.dat; saca $N/of.img CARTA.PLU $N/carta.plu
+  if [ -s $N/facturas.dat ] && LC_ALL=C grep -qa "Taller Pe.a" $N/facturas.dat && LC_ALL=C grep -qa "Hola, se.or P.rez" $N/carta.plu && sano $N/of.img; then
+    ok "lo guardado está en el disco: OFICINA\\FACTURAS.DAT (con la factura) y CARTA.PLU (lo de Pluma), y el disco queda sano"
+  else ko "lo guardado por Facturas o Pluma no está en el disco, o no queda sano:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
+  # Mi equipo: un documento de Pluma y una imagen (Mirador), con dos clics o Intro
+  python3 - $N/FOTO.BMP <<'PY'
+import struct, sys
+an, al = 160, 100
+filas = []
+for y in range(al):
+    f = bytearray()
+    for x in range(an):
+        f += bytes([255 * x // an, 255 * y // al, 200 if (x // 20 + y // 20) % 2 else 60])
+    filas.append(bytes(f))
+datos = b''.join(reversed(filas))
+cab = b'BM' + struct.pack('<IHHI', 54 + len(datos), 0, 0, 54) + struct.pack('<IiiHHIIiiII', 40, an, al, 1, 24, 0, len(datos), 2835, 2835, 0, 0)
+open(sys.argv[1], 'wb').write(cab + datos)
+PY
+  MTOOLS_SKIP_CHECK=1 mcopy -i $N/of.img $N/FOTO.BMP ::
+  CAPTURAS=$G DISCO=$N/of.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 62 30" ":pausa 3" ":tecla ret" ":pausa 2" \
+    ":tecla pgdn pgdn pgdn" ":pausa 1" ":tecla ret" ":pausa 5" ":raton 400 450" ":captura of10" ":clic 180 582" ":pausa 1" ":tecla up" ":tecla ret" ":pausa 5" ":captura of11" > $N/oficina2.sal 2>&1
+  miracap "Mi equipo abre una imagen con Mirador (MIRADOR.HVP): su nombre, lo que mide y la imagen" of10 negrita 30 20 42 32 "Mirador - FOTO.BMP" \
+    texto 10 520 20 535 "FOTO.BMP" texto 108 519 120 531 "160 x 100"
+  miracap "y un documento de Pluma (.PLU) con Pluma: lo guardado antes, con sus acentos" of11 negrita 110 30 122 42 "Pluma - \\CARTA.PLU" \
+    texto 146 142 158 154 "señor Pérez." texto 98 158 110 170 "Segunda línea."
+else ko "disco.sh no puede hacer el disco con la oficina: $(tail -1 $N/discoof.txt)"; fi
+
 fi   # SOLO=07
 
 # ------------------------------------------------- 10. Hispa-Pentium 0.7

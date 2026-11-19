@@ -130,7 +130,7 @@ Todas, con sus imágenes, en [Releases](https://github.com/instcide-Es/hispados/
 | `HSPRAM.SYS` (disco RAM) y `HSPTEST.SYS` (dispositivo de ejemplo) | ✅ |
 | Funciones FCB (DOS 1.x), SDA (5D06h/5D0Bh), EXEC 4B01h/4B03h, 26h/55h, 65h (país CP437), Ctrl+C | ✅ |
 | Probado con programas reales de FreeDOS: EDIT, DEBUG, MEM, XCOPY, FC, DELTREE, LABEL, SORT, FIND, MORE, TREE, ATTRIB, CHOICE, NANSI.SYS, CTMOUSE | ✅ |
-| `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits) | ✅ |
+| `HSPXMS.SYS`: gestor XMS 3.0 propio (A20, HMA, bloques, movimientos, 32 bits); la memoria sale del mapa E820 de la BIOS y salta sus huecos | ✅ |
 | Memoria para los programas (juegos): con XMS, `COMMAND.COM` solo deja 2 KB residentes (el resto se guarda en memoria extendida mientras corre el programa); `tests/juegos/lab.sh`, laboratorio de compatibilidad con un ISO propio de juegos | ✅ |
 | `DOS=HIGH`: el código del núcleo en la memoria alta (HMA); unos 33 KB más de memoria convencional. INT 2Fh 4A01h/4A02h (HMA libre) y `MEM` lo dice | ✅ |
 | `HSPDPMI.COM`: servidor DPMI 0.9 propio (clientes de 16 y 32 bits, memoria de XMS; los programas de DJGPP funcionan sin CWSDPMI) | ✅ |
@@ -194,6 +194,8 @@ El disquete y la memoria USB arrancan con un menú (el de `CONFIG.SYS` de MS-DOS
 
 Se elige con las flechas o el número, e Intro. **F5** arranca en limpio y **F8** enseña además el menú paso a paso de la opción elegida. La opción queda en la variable `CONFIG`, y `AUTOEXEC.BAT` carga lo de cada una (`IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS`). Para cambiar la opción por omisión o la espera: `MENUDEFAULT=JUEGOS,10` en `CONFIG.SYS`.
 
+En el menú de **F8** cada línea de `CONFIG.SYS` se marca o desmarca con Espacio. La última, `AUTOEXEC.BAT`, tiene tres estados: `[■]` se ejecuta, `[ ]` no y `[?]` **paso a paso**, como en MS-DOS 6.22: el intérprete enseña cada línea de `AUTOEXEC.BAT` con `[S/N]?` antes de ejecutarla (las de `ECHO`, `REM`, `@ECHO OFF` y las etiquetas van sin preguntar); **Esc** ejecuta esa línea y el resto sin preguntar. (El núcleo solo pasa `/Y` al intérprete, como `/D` para no ejecutarlo.)
+
 ## Sonido y volumen
 
 `HSPSND` (lo carga `AUTOEXEC.BAT`) detecta una Sound Blaster, Intel HD Audio o AC'97. En HD Audio saca el sonido a la vez por los altavoces internos, los auriculares y la salida de línea, enciende el amplificador externo (EAPD y las patillas GPIO del códec) y, si el códec no admite la frecuencia del archivo, la cambia él.
@@ -238,6 +240,16 @@ boton4=INTRO
 
 Los mandos USB necesitan que `HSPUSB` lleve el USB (`/F` o `/U`) y estar conectados al arrancar. Está probado en QEMU con mandos simulados (los descriptores de mandos reales); falta probarlo con mandos, puertos y cables de verdad.
 
+## Memoria extendida: `HSPXMS` y el mapa de la BIOS
+
+`HSPXMS.SYS` mira el mapa de memoria de la BIOS (INT 15h E820h): usa los trozos libres por encima de 1 MB y por debajo de 4 GB, y lo que la BIOS reserva entre ellos queda apuntado como «bloque de la BIOS» que ningún programa puede reservar. El MacBook Air 2012, por ejemplo, aparta 2 MB en 512 MB; al cargar se ve así:
+
+```
+HSPXMS 0.1: gestor XMS 3.0, 2273368 KB de memoria extendida, en 6 trozos (la BIOS reserva 2920 KB en medio)
+```
+
+Sin mapa E820 (BIOS antiguas) se mide como antes, con INT 15h E801h o AH=88h, de un solo trozo. `MEM` y `EQUIPO` enseñan la libre y el mayor bloque; si hay huecos, el mayor bloque es menor que la libre. Lo prueba `tests/run_xmshueco_tests.sh` (un mapa de pega como el del Mac).
+
 ## Memoria: `DOS=HIGH`
 
 Con estas dos líneas en `CONFIG.SYS` (vienen puestas en el disquete y en la memoria USB), el código del núcleo se va a la memoria alta (HMA, los primeros 64 KB por encima de 1 MB) y deja **unos 33 KB más de memoria convencional** (de los 52 KB que ocupa el núcleo se quedan 20 abajo):
@@ -247,7 +259,7 @@ DEVICE=A:\HISPADOS\HSPXMS.SYS
 DOS=HIGH
 ```
 
-`MEM` lo confirma («Hispa-DOS está cargado en la memoria alta (HMA)»). También se aceptan `DOS=LOW` (lo de siempre) y `DOS=HIGH,UMB` (la parte `UMB` aún no hace nada). Si no hay gestor XMS o la HMA ya es de otro, Hispa-DOS lo dice y se queda en la memoria convencional. Con F5 (arranque limpio) no se usa.
+`MEM` lo confirma («Hispa-DOS está cargado en la memoria alta (HMA)») y dice también la memoria extendida (XMS) libre y su mayor bloque. También se aceptan `DOS=LOW` (lo de siempre) y `DOS=HIGH,UMB` (la parte `UMB` aún no hace nada). Si no hay gestor XMS o la HMA ya es de otro, Hispa-DOS lo dice y se queda en la memoria convencional. Con F5 (arranque limpio) no se usa.
 
 En la memoria convencional se queda lo que tienen que ver los programas, la BIOS y Windows: los vectores y unos trozos de entrada (INT 20h, 21h, 25h-27h, 29h, 2Fh), la lista de listas, la SDA, la CDS, los DPB, la tabla de ficheros (SFT), las cabeceras de los dispositivos, los búferes de sector (la BIOS no puede llevar un disquete por DMA por encima de 1 MB), las pilas del núcleo y los datos de instancia de Windows. La línea A20 queda abierta; si un programa la cierra, el núcleo la vuelve a abrir en cuanto se le llama. Los 28 KB de HMA que sobran se ofrecen a otros programas por INT 2Fh AX=4A01h/4A02h, como en MS-DOS.
 

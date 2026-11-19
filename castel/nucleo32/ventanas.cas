@@ -939,6 +939,20 @@ módulo Ventanas
         soltar(cerrojo)
     fin
 
+    ; la pone en el centro de la pantalla (encima de la barra de tareas)
+    público función centrar_ventana(id: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 entonces
+            ensuciar_ventana(ventanas[i])
+            ventanas[i].px := mayor(0, (pantalla.ancho - ventanas[i].ancho) div 2)
+            ventanas[i].py := mayor(0, (pantalla.alto - alto_barra - ventanas[i].alto) div 2)
+            ensuciar_ventana(ventanas[i])
+        fin
+        soltar(cerrojo)
+    fin
+
     ; lo que hace el botón de una ventana en la barra de tareas: si está
     ; minimizada, vuelve; si es la activa, se minimiza; si no, pasa delante
     público función botón_de_barra(id: nat32)

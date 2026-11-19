@@ -503,7 +503,8 @@ boot:
         mov ax, 0x2524
         int 0x21
         pop ds
-        ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT) y /C orden
+        ; opciones: /P (intérprete principal), /D (sin AUTOEXEC.BAT), /Y
+        ; (AUTOEXEC.BAT paso a paso: lo pide el menú F8) y /C orden
         mov si, 0x81
 .opt:
         lodsb
@@ -523,6 +524,11 @@ boot:
         mov byte [no_auto], 1
         jmp .opt
 .notd:
+        cmp al, 'Y'
+        jne .noty
+        mov byte [paso], 1
+        jmp .opt
+.noty:
         cmp al, 'C'
         jne .opt
         inc si
@@ -575,6 +581,7 @@ boot:
 main_loop:
         cmp byte [bdepth], 0
         jne .batch
+        mov byte [paso], 0          ; se acabó el lote: ya no se pregunta
         cmp byte [exit_after], 0
         jne .exit
         cmp byte [echo_on], 0
@@ -2694,8 +2701,11 @@ mem_summary:
         mov cl, 12
         call putnum_w
         mov si, msg_mularge
-        jmp puts
+        call puts
+        jmp mem_xms
 .noupper:
+        call .conv
+        jmp mem_xms
 .conv:
         push edx
         push ebx
@@ -2723,6 +2733,45 @@ mem_summary:
         test dh, 0x10
         jz .r
         mov si, msg_mhma
+        call puts
+.r:
+        ret
+
+; memoria extendida (XMS): la libre y el mayor bloque (si la BIOS reserva
+; huecos en medio, el mayor bloque es menor que la libre: HSPXMS los salta)
+mem_xms:
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .r
+        push es
+        mov ax, 0x4310
+        int 0x2F
+        mov [mx_ent], bx
+        mov [mx_ent+2], es
+        pop es
+        mov ah, 0x88                ; XMS 3.0: en 32 bits
+        xor bl, bl
+        call far [mx_ent]
+        test bl, bl
+        jz .got
+        mov ah, 0x08                ; XMS 2.0: hasta 64 MB
+        call far [mx_ent]
+        movzx eax, ax
+        movzx edx, dx
+.got:
+        push eax
+        push edx
+        call crlf
+        pop eax
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mxfree
+        call puts
+        pop eax
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mxlarge
         call puts
 .r:
         ret
@@ -7041,6 +7090,12 @@ batch_line:
         cmp byte [si], ':'
         je .skip
         call expand
+        cmp byte [paso], 0
+        je .noask
+        call step_ask               ; menú F8: ¿esta línea sí?
+        jc .skip
+        jz .ok                      ; (ya se ha enseñado la línea)
+.noask:
         cmp byte [echo_on], 0
         je .ok
         mov si, eline
@@ -7063,6 +7118,91 @@ batch_line:
         jnz .skip
         mov byte [echo_on], 1
         stc
+        ret
+
+; AUTOEXEC.BAT paso a paso (F8 en el arranque, /Y): enseñar la línea de
+; eline y preguntar «[S/N]?», como MS-DOS 6.22. ECHO, REM y @ECHO OFF van
+; sin preguntar. -> CF = 1: no se ejecuta; ZF = 1: se ha preguntado (la
+; línea ya está en la pantalla); ZF = 0: no se ha preguntado. Esc: esta y
+; el resto sin preguntar. La tecla se espera mirando antes si hay (INT 21h
+; 0Bh, que mira INT 16h 01h): en el Mac el INT 16h 00h no vuelve.
+step_ask:
+        mov si, eline
+        call skip_sp
+        cmp byte [si], '@'
+        jne .w
+        inc si
+        call skip_sp
+.w:
+        mov eax, [si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'ECHO'
+        jne .rem
+        mov al, [si+4]
+        jmp .sep
+.rem:
+        and eax, 0x00FFFFFF
+        cmp eax, 'REM'
+        jne .ask
+        mov al, [si+3]
+.sep:
+        ; la palabra acaba ahí (ECHO, ECHO., REM: sí; ECHOX: no)
+        call upcase
+        cmp al, 'A'
+        jb .s1
+        cmp al, 'Z'
+        jbe .ask
+.s1:
+        cmp al, '0'
+        jb .free
+        cmp al, '9'
+        jbe .ask
+.free:
+        or al, 1                    ; ZF = 0, CF = 0
+        clc
+        ret
+.ask:
+        mov si, eline
+        call skip_sp
+        cmp byte [si], '@'
+        jne .a1
+        inc si
+.a1:
+        call puts
+        mov si, msg_step
+        call puts
+.k:
+        mov ah, 0x0B
+        int 0x21
+        test al, al
+        jz .k
+        mov ah, 0x07
+        int 0x21
+        test al, al
+        jnz .k1
+        mov ah, 0x07                ; tecla extendida: fuera las dos
+        int 0x21
+        jmp .k
+.k1:
+        cmp al, 27
+        je .esc
+        call upcase
+        cmp al, 'S'
+        je .yes
+        cmp al, 'N'
+        jne .k
+        call putc
+        call crlf
+        stc
+        ret
+.esc:
+        mov byte [paso], 0          ; (sin letra: la línea va, y el resto)
+        jmp .nl
+.yes:
+        call putc
+.nl:
+        call crlf
+        xor al, al                  ; ZF = 1, CF = 0
         ret
 
 ; bline -> eline con %0-%9, %% y %VARIABLE% sustituidos
@@ -7824,6 +7964,9 @@ msg_mfree   db " bytes libres", 13, 10, 0
 msg_mutotal db " bytes de memoria superior (UMB) en total", 13, 10, 0
 msg_mularge db " bytes del mayor bloque superior libre", 13, 10, 0
 msg_mlarge  db " bytes del mayor programa ejecutable", 13, 10, 0
+msg_step    db " [S/N]? ", 0
+msg_mxfree  db " KB libres de memoria extendida (XMS)", 13, 10, 0
+msg_mxlarge db " KB del mayor bloque de memoria extendida", 13, 10, 0
 msg_mhma    db "Hispa-DOS está cargado en la memoria alta (HMA)", 13, 10, 0
 msg_baddate db "Fecha no válida (dd-mm-aaaa)", 13, 10, 0
 msg_badtime db "Hora no válida (hh:mm[:ss])", 13, 10, 0
@@ -8181,6 +8324,8 @@ mu_free     resd 1
 mu_large    resd 1
 alias_buf   resb ALIAS_MAX
 no_auto     resb 1
+paso        resb 1                  ; 1 = AUTOEXEC.BAT paso a paso (/Y)
+mx_ent      resd 1                  ; MEM: entrada del gestor XMS
 exit_after  resb 1
 errlvl      resb 1
 bdepth      resb 1
