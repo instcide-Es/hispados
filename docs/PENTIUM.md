@@ -1135,8 +1135,12 @@ textos** de un programa de 40 a 64 K (`compilador/base.cas`): el núcleo, con el
 escritorio de la 0.5, ya no le cabía («demasiados textos»). Es el único cambio en
 los compiladores de esta tanda; lo que sacan no cambia.
 
-Con todo, `pruebas.sh` entero da **281 bien, 0 mal** (19/11/2026; unos diecinueve
-minutos en el VPS).
+Con todo, `pruebas.sh` tiene ahora **320 comprobaciones** (eran 281; unos
+veinticuatro minutos en el VPS). La última pasada entera (19/11/2026) dio 319 bien
+y 1 mal: un punto mal elegido en una comprobación nueva (caía en la raya del
+cursor), que se corrigió; después, `SOLO=32 ./pruebas.sh` (lo de Hispa-Pentium y
+los errores) da **239 bien, 0 mal**, y CASTEL y `ccastel.py` siguen sacando el
+mismo ensamblador para el núcleo tal como ha quedado.
 
 ## 13. Por dónde seguir
 

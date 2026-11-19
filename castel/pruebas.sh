@@ -65,7 +65,7 @@ set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
-USU="$AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas"
+USU="$AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -410,17 +410,19 @@ done
 if [ -z "$distintos" ]; then ok "ensambla.py: los $iguales archivos (ejemplos de 16 y de 32 bits, biblioteca entera, formas y ENSAMBLA), iguales que con NASM"
 else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
 # ENSAMBLA, dentro de Hispa-8086: los ensambla todos (también a sí mismo)
-# (en dos disquetes: en uno no caben ya todos; el segundo, lo de
-# Hispa-Pentium: la semilla, que con el entorno gráfico pasa de medio mega, y
-# sus programas de usuario)
-NUC=" semilla $(for f in $USU; do basename $f .cas; done | tr '\n' ' ')"
+# (en tres disquetes: en uno no caben ya todos; el segundo, la semilla de
+# Hispa-Pentium, que con el entorno gráfico pasa de 600 K; el tercero, sus
+# programas de usuario)
+NUC=" $(for f in $USU; do basename $f .cas; done | tr '\n' ' ')"
+# en qué tanda va cada uno: 2, la semilla; 3, sus programas; 1, lo demás
+tanda_de() { case "$1" in semilla) echo 2 ;; *) case "$NUC" in *" $1 "*) echo 3 ;; *) echo 1 ;; esac ;; esac; }
 mkdir $T/ens/sal
-for tanda in 1 2; do
+for tanda in 1 2 3; do
 cp $H/build/hispa8086-1440.img $T/e.img
 { printf '@ECO OFF\r\n'
   for f in $T/ens/*.asm; do
     n=$(basename $f .asm)
-    case "$NUC" in *" $n "*) [ $tanda = 1 ] && continue ;; *) [ $tanda = 2 ] && continue ;; esac
+    [ "$(tanda_de $n)" = $tanda ] || continue
     N=$(echo $n | tr a-z A-Z)
     mcopy -o -i $T/e.img $f ::$N.ASM || ko "ENSAMBLA: $N.ASM no cabe en el disquete $tanda"
     printf 'ENSAMBLA %s.ASM %s.BIN > %s.SAL\r\n' $N $N $N
@@ -471,12 +473,12 @@ else ko "el compilador en Castel no compila: $(head -1 $T/comp.txt)"; fi
 python3 -I $AQUI/azar.py 7 45 $A/azar16.cas $A/azar16.esp
 python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
 python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
-# (en dos tandas, cada una con sus disquetes: en la primera, los ejemplos, la
-# biblioteca, ENSAMBLA, las cuentas al azar y los errores; en la segunda, lo
-# de Hispa-Pentium, que con el entorno gráfico ya no cabe con lo demás: los
-# fuentes del núcleo en A: y, en B:, el ensamblador de la semilla, de más de
-# medio mega, y el de sus programas de usuario)
-for tanda in 1 2; do
+# (en tres tandas, cada una con sus disquetes: en la primera, los ejemplos, la
+# biblioteca, ENSAMBLA, las cuentas al azar y los errores; en la segunda y la
+# tercera, lo de Hispa-Pentium, que con el entorno gráfico ya no cabe con lo
+# demás: los fuentes del núcleo en A: y, en B:, el ensamblador de la semilla,
+# de más de 600 K (la segunda), o el de sus programas de usuario (la tercera))
+for tanda in 1 2 3; do
 cp $H/build/hispa8086-1440.img $T/c.img
 mmd -i $T/c.img ::BIB ::PARTES ::BIB32
 for f in $AQUI/biblioteca32/*.cas; do mcopy -i $T/c.img $f ::BIB32/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
@@ -486,7 +488,7 @@ if [ $tanda = 1 ]; then
   LOTE="$(echo $AQUI/ejemplos/*.cas) $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas $(echo $AQUI/ejemplos32/*.cas) $A/azar32p.cas"
 else
   for f in $AQUI/nucleo32/*.cas; do mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-  LOTE="$AQUI/nucleo32/semilla.cas $USU"
+  if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; else LOTE="$USU"; fi
 fi
 mcopy -i $T/c.img $A/CASTEL.EXE ::
 mformat -C -f 1440 -i $T/cb.img ::
@@ -767,7 +769,7 @@ mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primari
   "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: no hay"
 mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
   "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
-  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^19 entradas"
+  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^20 entradas"
 mira "una carpeta dentro de otra, y una que no está" "^LARGO.TXT  *17600$" "^PIRATA.TXT  *110$" "^5 entradas" "^no puedo abrir «nada»: no existe"
 m1=$(grep "^hola.bin ha acabado" $S | awk '{print $10, $13}')
 mira "un programa del anillo 3 cargado del disco (no de multiboot): corre y acaba con su código" \
@@ -785,10 +787,10 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.4: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium 0\.5: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
-  "^TEXTOS  *<DIR>  " "^ *16 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
+  "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
   "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
 mira "TYPE: un archivo de la raíz y uno de una carpeta (abrir, leer y cerrar por la llamada al sistema)" \
   "^Este archivo está en un disco FAT y lo enseña la orden TYPE\.$" "^Con diez cañones por banda,$" "^un velero bergantín\.$" \
@@ -852,7 +854,7 @@ DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir
 S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
-  "^C:.>ver$" "^Hispa-Pentium 0\.4" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+  "^C:.>ver$" "^Hispa-Pentium 0\.5" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
 mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
@@ -957,7 +959,7 @@ else ko "ECHO OFF o la @ no callan lo que deben (o callan de más)"; grep -n "lo
 # la historia: lo que queda en la pantalla, quitando lo que borra cada retroceso
 python3 -I $AQUI/nucleo32/pantalla.py < $S > $P/historia.txt
 if [ "$(grep -c '^C:.>eco primera$' $P/historia.txt)" = 2 ] && [ "$(grep -c '^primera$' $S)" = 2 ] && grep -q '^C:.>zco prixeray$' $P/historia.txt \
-    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.4" $S; then
+    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.5" $S; then
   ok "la historia de la línea: la flecha de arriba trae las órdenes de antes; se corrigen con las flechas, Retroceso, Supr, Inicio y Fin; Esc borra la línea"
 else ko "la historia o la corrección de la línea no van:"; grep -n "primera\|zco\|ver" $P/historia.txt | sed 's/^/        /' | head; fi
 mira "FECHA: la fecha y la hora del reloj del PC" "^Hoy es $(date +%d/%m/%Y) y son las [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\.$"
@@ -1053,7 +1055,7 @@ if ! grep -q "^disco 0: QEMU" $S && grep -q "^disco 0: no hay" $S && grep -q "^ 
   ok "con «sindisco» el núcleo ni mira los discos del PC: la unidad es la de los módulos"
 else ko "«sindisco» no deja los discos sin mirar:"; sed 's/^/        /' $S | head -12; fi
 
-echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de tareas, menú Inicio, Bloc de notas y Consola) =="
+echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de tareas, menú Inicio, iconos, Bloc de notas, Consola y Mi equipo) =="
 cap() { python3 -I $AQUI/nucleo32/mira_captura.py "$@" > $G/cap.txt 2>&1; }
 miracap() {    # lo que se prueba, la captura y sus comprobaciones
   local que=$1 c=$2; shift 2
@@ -1082,26 +1084,27 @@ miracap "el menú Inicio: dos columnas (Programas a la izquierda, Documentos y C
   rgb 100 400 FFFFFF rgb 250 400 DCEAFB
 mira "el menú lanza el Bloc de notas (un programa del anillo 3, del disco)" "escritorio: lanzo .BLOC.BIN (la tarea [0-9]*)"
 miracap "el Bloc de notas en su ventana: el título con su nombre, su botón en la barra de tareas, y lo tecleado (con eñe, acentos y ¿?) dentro" e3 \
-  negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas" texto 130 572 140 580 "NOTAS.TXT - Blo" texto 94 124 102 134 "Querida señora: ¿qué tal está?" \
-  texto 94 140 102 150 "Adiós." negrita 110 96 130 112 Nuevo negrita 190 96 220 112 Guardar notexto 0 180 330 560 Programas
+  negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas" texto 130 572 140 580 "NOTAS.TXT - Blo" texto 94 146 102 156 "Querida señora: ¿qué tal está?" \
+  texto 94 162 102 172 "Adiós." negrita 110 116 130 126 Nuevo negrita 190 116 220 126 Guardar texto 100 88 108 98 Archivo texto 168 88 178 98 "Edición" \
+  notexto 0 180 330 560 Programas
 mira "F2 guarda el texto en el disco (lo dice el propio programa)" "^bloc: guardado NOTAS.TXT, 38 octetos"
-miracap "y lo dice abajo, en la ventana" e4 texto 94 406 104 426 "Guardado en NOTAS.TXT (38 octetos)."
+miracap "y lo dice abajo, en la ventana" e4 texto 94 428 104 448 "Guardado en NOTAS.TXT (38 octetos)."
 miracap "arrastrar la ventana por su título la mueve (y donde estaba queda el tapiz)" e5 negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas" \
-  texto 194 224 202 234 "Querida señora: ¿qué tal está?" notexto 100 60 140 80 "NOTAS.TXT - Bloc de notas"
+  texto 194 246 202 256 "Querida señora: ¿qué tal está?" notexto 100 60 140 80 "NOTAS.TXT - Bloc de notas"
 miracap "dos clics en el título la maximizan (de lado a lado, hasta la barra de tareas), y el programa vuelve a pintar lo suyo" e6 \
-  negrita 24 2 36 10 "NOTAS.TXT - Bloc de notas" texto 6 62 14 72 "Querida señora: ¿qué tal está?" rgb 797 300 1A5AB6 negrita 30 570 46 580 Inicio
+  negrita 24 2 36 10 "NOTAS.TXT - Bloc de notas" texto 6 84 14 94 "Querida señora: ¿qué tal está?" rgb 797 300 1A5AB6 negrita 30 570 46 580 Inicio
 miracap "otros dos la devuelven a su tamaño, y el botón de minimizar la recoge en la barra de tareas" e7 notexto 150 150 300 180 "NOTAS.TXT - Bloc de notas" \
   notexto 0 0 100 20 "NOTAS.TXT - Bloc de notas" texto 130 572 140 580 "NOTAS.TXT - Blo"
-miracap "su botón de la barra de tareas la recupera, con lo que tenía" e8 negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas" texto 194 240 202 250 "Adiós."
+miracap "su botón de la barra de tareas la recupera, con lo que tenía" e8 negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas" texto 194 262 202 272 "Adiós."
 mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
   negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
   texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
-  texto 120 116 132 520 "Hispa-Pentium 0.4: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+  texto 120 116 132 520 "Hispa-Pentium 0.5: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.4" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium 0.5" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1117,6 +1120,85 @@ printf 'Querida se\xa4ora: \xa8qu\x82 tal est\xa0?\r\nAdi\xa2s.' > $G/notas.esp
 if cmp -s $G/notas.bin $G/notas.esp && ! grep -qi "differ\|error\|unused\|orphan" $G/fsck.txt; then
   ok "NOTAS.TXT está en el disco con lo tecleado, octeto a octeto (página 437, finales de línea del DOS), y fsck.fat da el disco por sano"
 else ko "lo que guarda el Bloc de notas no está bien en el disco:"; od -c $G/notas.bin | head -4 | sed 's/^/        /'; head -5 $G/fsck.txt | sed 's/^/        /'; fi
+# ---- la 0.5: el botón secundario y sus menús, seleccionar, el portapapeles, los iconos, cambiar el tamaño ----
+echo "== Hispa-Pentium 0.5: los menús del botón secundario, seleccionar texto, cortar, copiar y pegar, los iconos, las ventanas que se estiran y Mi equipo =="
+RES=2F74D0     # el azul de lo seleccionado
+CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clicd 400 300" ":captura a1" ":clic 440 345" ":pausa 1" ":captura a2" \
+  ":doble 60 110" ":pausa 2" ":escribe Hola mundo cruel" ":tecla ret" ":escribe segunda linea" ":doble 150 158" ":raton 300 300" ":captura a3" ":clicd 155 158" ":captura a4" ":clic 175 175" \
+  ":captura a5" ":tecla end" ":tecla ctrl-v" ":tecla shift-left" ":tecla shift-left" ":tecla shift-left" ":captura a6" ":tecla ctrl-c" ":tecla right" ":tecla ctrl-v" \
+  ":triple 150 174" ":captura a7" ":escribe X" ":clic 98 158" ":mayusclic 138 158" ":captura a8" ":tecla delete" ":arrastra 98 158 122 160" ":clic 200 100" ":captura a9" ":clic 220 152" \
+  ":arrastra 595 455 695 505" ":pausa 1" ":captura a10" ":clic 40 585" ":clicd 80 329" ":captura a11" ":clic 100 346" ":pausa 3" ":clicd 400 400" ":captura a12" ":clic 420 440" \
+  ":pausa 1" ":captura a13" > $G/menus.sal 2>&1
+S=$G/menus.sal
+miracap "los iconos del tapiz (Mi equipo, Bloc de notas, Consola), con su rótulo en letra normal" a1 texto 24 50 32 58 "Mi equipo" texto 8 126 16 134 "Bloc de notas" \
+  texto 32 202 40 210 Consola
+miracap "el botón secundario en el tapiz saca su menú: Configuración, Cambiar el tapiz, Organizar iconos y Acerca de Hispa-Pentium" a1 texto 410 304 418 314 "Configuración" \
+  texto 410 328 418 338 "Cambiar el tapiz" texto 410 352 418 362 "Organizar iconos" texto 410 385 418 395 "Acerca de Hispa-Pentium" rgb 500 302 FFFFFF 12
+miracap "«Cambiar el tapiz» pasa al siguiente (de «Olas» a «Azul»), y el menú se cierra" a2 rgb 300 4 16468E 8 notexto 400 300 430 400 "Organizar iconos" \
+  texto 24 50 32 58 "Mi equipo"
+mira "dos clics en el icono «Bloc de notas» lo abren" "escritorio: lanzo .BLOC.BIN (la tarea [0-9]*)"
+miracap "en el Bloc de notas, dos clics seleccionan la palabra, que se ve en blanco sobre azul" a3 texto 134 146 142 154 mundo rgb 139 151 $RES rgb 176 164 $RES \
+  nrgb 135 151 $RES nrgb 181 151 $RES texto 94 162 102 170 "segunda linea"
+miracap "el botón secundario en el Bloc saca Cortar, Copiar, Pegar y Seleccionar todo" a4 texto 165 163 173 171 Cortar texto 165 187 173 195 Copiar texto 165 211 173 219 Pegar \
+  texto 165 244 173 252 "Seleccionar todo"
+miracap "«Cortar» quita lo seleccionado" a5 texto 94 146 102 154 "Hola  cruel" notexto 90 140 200 160 mundo
+miracap "Ctrl+V lo pega donde está el cursor, y Mayús con la flecha selecciona hacia atrás, letra a letra" a6 texto 94 146 102 154 "Hola  cruelmu" rgb 203 151 $RES \
+  rgb 225 164 $RES nrgb 199 151 $RES
+miracap "Ctrl+C copia lo seleccionado y Ctrl+V lo pega; tres clics seleccionan la línea entera" a7 texto 94 146 102 154 "Hola  cruelmundondo" rgb 99 167 $RES rgb 200 180 $RES \
+  nrgb 99 151 $RES
+miracap "lo que se teclea sustituye a lo seleccionado; y un clic y Mayús con otro clic seleccionan de uno a otro" a8 texto 94 162 102 170 X notexto 90 160 200 176 segunda \
+  rgb 99 151 $RES rgb 136 164 $RES nrgb 141 151 $RES
+miracap "la barra de menús del Bloc (Archivo, Edición, Ayuda): «Edición» abre Cortar, Copiar, Pegar y Seleccionar todo, con sus teclas" a9 \
+  texto 178 116 186 124 "Cortar            Ctrl+X" texto 178 140 186 148 "Copiar            Ctrl+C" texto 178 197 186 205 "Seleccionar todo  Ctrl+A" rgb 99 151 $RES
+miracap "arrastrar la esquina de la ventana la cambia de tamaño, y el programa vuelve a pintar lo suyo (el pie, más abajo; el papel, más ancho)" a10 \
+  texto 94 480 102 488 "Copiado (3 letras)." texto 118 146 126 154 uelmundondo rgb 650 300 FFFFFF rgb 693 300 1A5AB6 10 notexto 90 430 110 446 NOTAS.TXT
+miracap "el botón secundario en un programa del menú Inicio: «Abrir»" a11 texto 90 334 98 342 Abrir negrita 36 280 50 290 "Bloc de notas"
+mira "y «Abrir» lo lanza" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
+miracap "el botón secundario en la Consola: Copiar (en gris: no hay nada seleccionado) y Pegar" a12 texto 410 405 418 413 Copiar texto 410 429 418 437 Pegar
+miracap "el portapapeles es del sistema: lo copiado en el Bloc de notas (con el menú Edición) se pega en la Consola" a13 texto 120 140 132 300 "C:\\> cr"
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# la Consola: seleccionar y copiar; el menú de una ventana (en el título y en la barra); Mi equipo; Acerca de
+CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 60 186" ":pausa 4" ":doble 150 140" ":raton 400 300" ":captura b1" ":tecla ctrl-c" \
+  ":clicd 300 75" ":captura b2" ":clic 320 164" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 445" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
+  ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 293" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 197" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
+  ":captura b9" ":doble 250 230" ":pausa 1" ":captura b10" ":doble 250 348" ":pausa 2" ":captura b11" ":clicd 700 300" ":clic 650 398" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
+S=$G/menus2.sal
+mira "dos clics en el icono «Consola» la abren" "escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
+miracap "en la Consola, dos clics seleccionan una palabra de lo que hay en la pantalla" b1 rgb 97 133 $RES rgb 206 146 $RES nrgb 213 133 $RES texto 92 128 100 136 "Hispa-Pentium:"
+miracap "el botón secundario en el título de una ventana: Restaurar, Mover, Minimizar, Maximizar y Cerrar" b2 texto 310 80 318 88 Restaurar texto 310 104 318 112 Mover \
+  texto 310 128 318 136 Minimizar texto 310 152 318 160 Maximizar texto 310 185 318 193 Cerrar
+miracap "«Maximizar», desde ese menú, la maximiza" b3 negrita 24 2 36 10 Consola rgb 797 300 1A5AB6 notexto 300 70 330 200 Minimizar
+miracap "el botón secundario en su botón de la barra de tareas saca el mismo menú (hacia arriba)" b4 texto 190 433 198 441 Restaurar texto 190 542 198 550 Cerrar
+miracap "y «Restaurar» la devuelve a su tamaño" b5 negrita 112 64 124 72 Consola rgb 780 300 154C9C 60 nrgb 780 300 0C1626
+miracap "la Consola también cambia de tamaño por la esquina (su pantalla sigue siendo de 80 x 25: lo que no cabe no se ve)" b6 rgb 600 300 0C1626 nrgb 700 300 0C1626 \
+  nrgb 400 480 0C1626 negrita 112 64 124 72 Consola
+miracap "lo copiado en la Consola (Ctrl+C con algo seleccionado) se pega en el Bloc de notas" b7 texto 122 172 130 180 "Hispa-Pentium:"
+miracap "«Cerrar», en el menú de la ventana, la cierra: ni ventana ni botón en la barra" b8 notexto 100 60 200 80 Consola notexto 120 570 300 582 Consola \
+  negrita 140 90 152 98 "NOTAS.TXT - Bloc de notas"
+miracap "dos clics en «Mi equipo»: las unidades (C:, el disco FAT16, con lo que mide)" b9 negrita 168 116 180 124 "Mi equipo" negrita 154 167 162 175 "Las unidades de este equipo" \
+  negrita 220 204 228 212 "Unidad C:" texto 220 222 228 230 "disco duro, FAT16"
+miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 167 186 175 "C:\\" texto 180 336 188 344 LEEME.TXT texto 180 396 188 404 TEXTOS \
+  texto 180 196 188 204 ".."
+miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
+  texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.5" \
+  texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# a la medida de un netbook (1024 x 600); llevar un icono a otro sitio y organizarlos; mover una ventana desde su menú
+CAPTURAS=$G DISCO=$P/d16.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura c1" ":arrastra 60 190 500 300" \
+  ":raton 700 100" ":captura c2" ":clicd 600 200" ":clic 620 265" ":captura c3" ":clicd 600 200" ":clic 620 215" ":pausa 1" ":captura c4" ":clicd 400 137" ":clic 420 173" \
+  ":raton 460 233" ":clic 460 233" ":raton 700 400" ":captura c5" > $G/medida.sal 2>&1
+S=$G/medida.sal
+mira "con «modo=1024x600» en la línea del cargador, el escritorio arranca a esa medida" "^escritorio: en marcha, 1024 x 600 con 32 bits por punto"
+miracap "a 1024 x 600 (la pantalla de un netbook): la barra de tareas abajo, de lado a lado, el reloj a la derecha y los iconos" c1 tam 1024 600 negrita 30 570 46 580 Inicio \
+  rgb 1019 597 3393E0 12 rgb 600 598 1D5DBA 10 texto 24 50 32 58 "Mi equipo" negrita 854 505 869 520 Hispa-Pentium
+miracap "un icono del tapiz se lleva a otro sitio arrastrándolo" c2 texto 472 312 480 320 Consola notexto 20 196 60 214 Consola texto 24 50 32 58 "Mi equipo"
+miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Consola notexto 460 300 500 330 Consola
+miracap "Configuración dice la medida de la pantalla" c4 texto 302 225 310 233 "Pantalla:  1024 x 600, 32 bits por punto"
+miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 348 185 356 193 "Configuración" \
+  notexto 300 120 330 140 "Configuración"
 # la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 240 291" ":pausa 2" \
   ":captura o1" ":clic 40 585" ":clic 230 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
@@ -1124,7 +1206,7 @@ S=$G/orden.sal
 mira "la orden ESCRITORIO del intérprete de órdenes (por la llamada al sistema) pone en marcha el escritorio, y ese intérprete acaba" \
   "^C:.>escritorio$" "^escritorio: en marcha, 800 x 600" "^El escritorio está en marcha\.$" "^ORDENES.BIN ha acabado con el código 0"
 miracap "un documento del menú Inicio se abre con el Bloc de notas (LEEME.TXT, leído del disco)" o1 negrita 112 64 124 72 "LEEME.TXT - Bloc de notas" \
-  texto 94 124 102 134 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
+  texto 94 146 102 156 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
 miracap "«Cancelar» cierra el cuadro de apagar y todo sigue" o2 notexto 200 180 240 210 "Apagar el equipo" negrita 112 64 124 72 "LEEME.TXT - Bloc de notas"
 # otros modos: 1024x768, y una pantalla de 24 bits por punto (se dibuja en 32 y se vuelca)
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE="escritorio modo=1024x768 bits=24 tapiz=1" PANTALLA=1024x768 MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" \
@@ -1162,13 +1244,32 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas como módulos y sin mirar los discos" \
-      "^memoria: 64 MB, .* 8 programas de usuario" "^sin disco: los 8 archivos que ha traído el cargador hacen de unidad C:" \
+      "^memoria: 64 MB, .* 9 programas de usuario" "^sin disco: los 9 archivos que ha traído el cargador hacen de unidad C:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
     if grep -q "escritorio: lanzo .BLOC.BIN" $S && cap $G/u2.ppm negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas"; then
       ok "y desde su menú se lanza el Bloc de notas, que viene como módulo (de la unidad en memoria)"
     else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
+    # la entrada de 1024 x 600 (la tercera): el modo lo pide la cabecera de ESCRIT6.BIN
+    rm -f $G/monu
+    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
+      -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
+    QPID=$!
+    for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
+    sleep 6; monu "sendkey down"; monu "sendkey down"; monu "sendkey ret" 12
+    monu "screendump $G/u3.ppm" 0.6
+    monu quit 0.5; wait $QPID 2> /dev/null; QPID=
+    tr -d '\r' < $G/usb6.sal | iconv -f CP437 -t UTF-8 > $G/usb6.txt
+    S=$G/usb6.txt
+    mira "la memoria USB, con la entrada de 1024 x 600: GRUB pone ese modo (el de la cabecera de esa copia del núcleo) y el escritorio sale a esa medida" \
+      "^escritorio: en marcha, 1024 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
+    miracap "y se ve entero: la barra abajo y los iconos" u3 tam 1024 600 negrita 30 570 46 580 Inicio texto 24 50 32 58 "Mi equipo"
+    MTOOLS_SKIP_CHECK=1 mtype -i $G/usb.img@@1M ::/boot/grub/grub.cfg > $G/grub.cfg 2> /dev/null
+    if grep -q "a la medida de la pantalla" $G/grub.cfg && grep -q "^  set gfxpayload=auto$" $G/grub.cfg && grep -q "^  videoinfo$" $G/grub.cfg \
+      && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 5 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg; then
+      ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, y los modos de vídeo de la BIOS (videoinfo)"
+    else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
