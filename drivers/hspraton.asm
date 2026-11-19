@@ -792,6 +792,24 @@ packet:
         ret
 
 ; -----------------------------------------------------------------------------
+;  bios_sinc: tras pasar de la BIOS a la vía directa, la BIOS vuelve a dar el
+;  ratón por activado (C200h, BH = 1) sin que se le devuelva la IRQ 12 (INT 74h
+;  sigue siendo nuestra). Hay BIOS (SeaBIOS, la de QEMU; también coreboot) que
+;  guardan su copia del byte de órdenes del 8042 y la reescriben tras cada
+;  orden al teclado, como las luces de Bloq Mayús, Bloq Num y Bloq Despl: con
+;  el ratón parado por C200h BH = 0, esa copia lleva el puerto auxiliar
+;  apagado y sin interrupción, y a la primera luz el ratón se quedaba quieto
+;  para siempre. El FAh de la orden lo lee la BIOS; si llega por la IRQ 12, lo
+;  descarta ack_wait. Los fallos no importan (la vía directa ya va).
+; -----------------------------------------------------------------------------
+bios_sinc:
+        mov byte [ack_wait], 1
+        mov ax, 0xC200
+        mov bh, 1
+        int 0x15
+        ret
+
+; -----------------------------------------------------------------------------
 ;  IRQ 12 (INT 74h) en la vía directa. Solo se lee del puerto 60h lo que el
 ;  8042 marca como del auxiliar (bit 5 del estado): lo demás es del teclado
 ;  (o una tecla que inyecta HSPUSB con D2h) y lo recogerá INT 09h.
@@ -1333,7 +1351,10 @@ init:
         call dir_init
         mov byte [d_estricto], 0
         mov byte [d_rueda], 0
-        jnc .ready
+        jc .vbios
+        call bios_sinc
+        jmp .ready
+.vbios:
         call bios_init              ; no va: otra vez por la BIOS
         jmp .ready
 .nob:
