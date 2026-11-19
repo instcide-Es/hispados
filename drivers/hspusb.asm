@@ -2608,6 +2608,12 @@ soft_key:
         jne .nocad
         cmp bl, 0x53
         jne .nocad
+        ; [REINICIO-SILENCIO] el aviso de tecla de la BIOS, como lo haría su
+        ; INT 09h: el núcleo (y quien esté enganchado) calla el sonido antes
+        ; del reinicio (lib/silencio.inc)
+        mov ax, 0x4F53
+        stc
+        int 0x15
         mov word [0x72], 0x1234
         jmp 0xFFFF:0x0000
 .nocad:

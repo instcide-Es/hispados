@@ -105,12 +105,23 @@
 ;                     SONIDO.INI; AL = 1 ya están guardados; AL = 2 los hay
 ;  Al cargarse, HSPSND pone lo de la sección [Mezclador] de SONIDO.INI (lo
 ;  guardan Hispa Ventanas y su Mezclador); /VOL:n manda sobre «General».
+;  [REINICIO-SILENCIO] (versión 5 de la interfaz)
+;    10h apagar       antes de reiniciar o apagar el equipo: los flujos
+;                     parados (también la Sound Blaster emulada), y en HD
+;                     Audio los amplificadores en silencio, el generador de
+;                     pitido apagado, los pines sin salida ni EAPD y el
+;                     códec en D3; en AC'97, los volúmenes en silencio; en
+;                     la Sound Blaster, el DSP reiniciado y su altavoz fuera.
+;                     Después ya no suena nada (01h no hace nada). Lo llaman
+;                     lib/silencio.inc (Ctrl+Alt+Supr en el núcleo, APAGAR,
+;                     REINICIAR, HSPUSB) para que la BIOS no arranque con la
+;                     tarjeta sonando: la «lluvia de interferencias».
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
 
-VERSION     equ 0x0004
+VERSION     equ 0x0005
 
 ; el mezclador por fuentes (lib/hspmez.inc)
 MZ_N        equ 7                   ; fuentes
@@ -259,6 +270,7 @@ vol_dirty   db 0                    ; hay que llevarlo a la tarjeta
 mz_todo     db 1                    ; ... y no solo General (HD Audio: las
                                     ; entradas del mezclador del códec)
 busy        db 0                    ; dentro de la API
+apagado     db 0                    ; [REINICIO-SILENCIO] función 10h: ya no suena
 att_q       db 0                    ; General, izquierda: atenuación en
 att_r       db 0                    ; cuartos de dB (0..187); y derecha
 vol_zero    db 0                    ; silencio efectivo (General)
@@ -336,6 +348,15 @@ entry:
         popf
         retf
 .disp:
+        cmp byte [cs:apagado], 0    ; [REINICIO-SILENCIO] apagada: 01h, nada
+        je .vivo
+        cmp ah, 1
+        jne .vivo
+        clc
+        retf
+.vivo:
+        cmp ah, 0x10                ; apagar: también en la tarjeta
+        je .hw
         cmp ah, 8                   ; (el sitio de HD Audio se mira en la tarjeta)
         je .hw
         cmp ah, 1
@@ -396,7 +417,47 @@ entry:
         je f_mzfab
         cmp ah, 0x0F
         je f_mzchg
+        cmp ah, 0x10
+        je f_off
         stc
+        retf
+
+; 10h: [REINICIO-SILENCIO] apagar, antes de reiniciar o apagar el equipo
+f_off:
+        pushad
+        push ds
+        push es
+        mov byte [cs:apagado], 1
+        mov byte [cs:vol_dirty], 0
+        cmp byte [cs:e_on], 0       ; la Sound Blaster emulada (residente)
+        je .ne
+        call e_winoff
+        mov byte [cs:e_wason], 0    ; (y que Windows no la vuelva a poner)
+.ne:
+        mov al, [cs:dev_type]
+        cmp al, 4
+        je .hda
+        cmp al, 3
+        je .ac
+        test al, al
+        jz .x
+        call sb_halt
+        mov al, 0xD3                ; el altavoz de la tarjeta, fuera
+        call sb_out
+        jmp .x
+.ac:
+        call ac_stop
+        call ac_apagar
+        jmp .x
+.hda:
+        call unreal
+        call hda_halt
+        call hda_apagar
+.x:
+        pop es
+        pop ds
+        popad
+        clc
         retf
 
 ; 08h: -> AL = trozos que caben en la cola sin esperar
@@ -1768,6 +1829,122 @@ hda_halt:
         pop cx
         pop ax
         ret
+; [REINICIO-SILENCIO] el grupo de audio hda_afg, callado y en D3 (como al
+; encender): los amplificadores en silencio, luego los pines sin salida ni
+; EAPD y el generador de pitido apagado, y luego el grupo en D3
+hda_apagar:
+        pushad
+        mov bl, [cs:hda_afg]
+        mov cl, 4                   ; los nodos del grupo
+        call hda_param
+        jc .r
+        mov dl, al
+        and dl, 0x7F                ; DL = cuántos
+        jz .r
+        shr eax, 16
+        mov dh, al                  ; DH = el primero
+        mov bl, dh
+        movzx di, dl
+.m:
+        mov cl, 9                   ; capacidades
+        call hda_param
+        jc .mn
+        mov esi, eax
+        test si, 4                  ; amplificador de salida
+        jz .mi
+        mov al, 3
+        mov cx, 0xB080              ; salida, los dos lados, silencio
+        call hda_verb4
+.mi:
+        test si, 2                  ; amplificadores de entrada
+        jz .mn
+        mov cl, 0x0E                ; cuántas conexiones
+        call hda_param
+        jc .mn
+        and al, 0x7F
+        jnz .m1
+        inc al
+.m1:
+        cmp al, 16
+        jbe .m2
+        mov al, 16
+.m2:
+        movzx bp, al
+        mov cx, 0x7080              ; entrada 0, los dos lados, silencio
+.mj:
+        mov al, 3
+        call hda_verb4
+        inc ch                      ; la entrada siguiente
+        dec bp
+        jnz .mj
+.mn:
+        inc bl
+        dec di
+        jnz .m
+        call .espera
+        mov bl, dh
+        movzx di, dl
+.p:
+        mov cl, 9
+        call hda_param
+        jc .pn
+        shr eax, 20
+        and al, 0x0F
+        cmp al, 4                   ; pin
+        jne .pb
+        mov ax, 0x707               ; sin salida
+        xor cl, cl
+        call hda_verb
+        mov ax, 0x70C               ; EAPD apagado
+        xor cl, cl
+        call hda_verb
+        jmp .pn
+.pb:
+        cmp al, 7                   ; generador de pitido
+        jne .pn
+        mov ax, 0x70A
+        xor cl, cl
+        call hda_verb
+.pn:
+        inc bl
+        dec di
+        jnz .p
+        call .espera
+        mov bl, [cs:hda_afg]
+        mov ax, 0x705               ; D3
+        mov cl, 3
+        call hda_verb
+.r:
+        popad
+        ret
+.espera:                            ; unos 2 ms
+        push cx
+        mov cx, 64
+.e:
+        call hda_pause
+        loop .e
+        pop cx
+        ret
+; [REINICIO-SILENCIO] AC'97: general, auriculares, altavoz del PC y PCM, en
+; silencio
+ac_apagar:
+        push ax
+        push dx
+        mov dx, [cs:nam]
+        add dx, 0x02
+        mov ax, 0x8000
+        out dx, ax
+        add dx, 0x02
+        out dx, ax
+        add dx, 0x06
+        out dx, ax
+        add dx, 0x0E
+        mov ax, 0x8808
+        out dx, ax
+        pop dx
+        pop ax
+        ret
+
 ; unos microsegundos entre los pasos del reinicio del flujo
 hda_pause:
         push ax

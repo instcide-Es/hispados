@@ -4229,6 +4229,11 @@ vectors_init:
         mov word [es:bx+2], KSEG
         jmp .l
 .done:
+        ; [REINICIO-SILENCIO] INT 15h: Ctrl+Alt+Supr, con el sonido callado
+        mov eax, [es:0x15*4]
+        mov [old15], eax
+        mov word [es:0x15*4], l_int15
+        mov word [es:0x15*4+2], KSEG
         ; manejador de INT 13h de la BIOS (lo cambia INT 2Fh AX=1302h)
         mov eax, [es:0x13*4]
         mov [i13_cur], eax
@@ -14962,6 +14967,13 @@ int29:
         call con_out
         pop ds
         iret
+; [REINICIO-SILENCIO] Ctrl+Alt+Supr (l_int15): el sonido, callado antes de que
+; la BIOS reinicie (lib/silencio.inc)
+silencio_lejos:
+        call silencio
+        retf
+%include "silencio.inc"
+
         section .low
 int2f:
 %ifdef TRACE
@@ -15205,6 +15217,35 @@ a20_gate:
         LSTUB l_int26, int26
         LSTUB l_int29, int29
         LSTUB l_dev_con, dev_intr_con
+
+; [REINICIO-SILENCIO] INT 15h AH=4Fh: la BIOS lo llama desde INT 09h con cada
+; código de tecla, antes de mirar si es Ctrl+Alt+Supr. Con Supr (53h, también
+; la gris, E0 53) y Ctrl y Alt pulsadas, la BIOS va a reiniciar en caliente:
+; antes se calla el sonido (el altavoz del PC, HSPSND y la tarjeta), que si no
+; sigue sonando mientras arranca la BIOS. La tecla sigue su camino.
+l_int15:
+        cmp ah, 0x4F
+        jne .sigue
+        cmp al, 0x53
+        jne .sigue
+        push ds
+        push ax
+        xor ax, ax
+        mov ds, ax
+        mov al, [0x417]
+        and al, 0x0C                ; Ctrl y Alt
+        cmp al, 0x0C
+        pop ax
+        pop ds
+        jne .sigue
+        call a20_gate
+        push cs
+        push word .sigue
+        push word [cs:code_seg]
+        push word silencio_lejos
+        retf
+.sigue:
+        jmp far [cs:old15]
 
 ; salidas: el código llama aquí (CALL/JMP lejano a KSEG) y a la vuelta se
 ; comprueba A20 antes de volver a él
@@ -15653,6 +15694,7 @@ lk_sft      resb 1
 lk_start    resd 1
 lk_end      resd 1
 i13_cur     resd 1
+old15       resd 1                  ; [REINICIO-SILENCIO] INT 15h de antes
 i13_halt    resd 1
 boot_clean  resb 1
 boot_noauto resb 1

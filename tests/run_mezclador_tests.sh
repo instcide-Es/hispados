@@ -255,7 +255,7 @@ RX=400; RY=300
 } | run 900 -vga std -device sb16,audiodev=snd0
 cp $T/ini.txt $T/ini_a.txt
 ct uno " (de fábrica)"
-estado uno "MEZ versión 4 tarjeta 2 fuentes=7F tarjeta=7F ajustes=00BF grabar=3C sonar=38" \
+estado uno "MEZ versión 5 tarjeta 2 fuentes=7F tarjeta=7F ajustes=00BF grabar=3C sonar=38" \
   "F0 vol=80 cas=0 bal=50" "F1 vol=90 cas=0 bal=50" "F2 vol=85 cas=0 bal=50" "F3 vol=85 cas=2 bal=50" \
   "F4 vol=85 cas=0 bal=50" "F5 vol=85 cas=4 bal=50" "F6 vol=50 cas=0 bal=50" "AJ 0=50 1=50 2=0 3=0 4=1 5=0"
 ct dos " (lo movido en el Mezclador)"
@@ -343,7 +343,7 @@ for CARD in hda ac97; do
     send 'SONAR /TONE 1575 500' 3
     listo; mon quit
   } | run 600 $DEV
-  estado uno "MEZ versión 4 tarjeta" "$FU"
+  estado uno "MEZ versión 5 tarjeta" "$FU"
   # (QEMU solo graba mientras suena: con HD Audio los tonos salen pegados.
   # Se miden por tramos de la misma frecuencia, con el pico de cada canal)
   python3 - $T/out.wav $CARD > $T/audio.txt <<'EOF' || fail=1

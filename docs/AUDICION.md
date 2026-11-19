@@ -525,6 +525,65 @@ Desde ahora:
 - Si aun así se contesta que no baja, como antes: `Volumen=por programa` en
   `SONIDO.INI` y HSPSND baja el volumen en las muestras.
 
+## El ruido al reiniciar con Ctrl+Alt+Supr [REINICIO-SILENCIO]
+
+En el HP Mini 5103 (IDT) y en el Toshiba NB250 (ALC269), con cualquier
+sistema de la familia (de Hispa-8086 a Hispa-486), Ctrl+Alt+Supr reiniciaba
+al instante y, mientras arrancaba la BIOS, salía por los altavoces una lluvia
+de interferencias que se iba apagando. Ctrl+Alt+Supr lo atiende la BIOS
+(INT 09h): pone 40:72 = 1234h y hace un reinicio «en caliente» que solo
+reinicia el procesador (el 8042 o un salto a FFFF:0, por eso es instantáneo).
+La tarjeta no se entera: queda tal cual estaba. Y estaba sonando:
+
+- la BIOS de estos portátiles deja la HD Audio encendida (en los informes:
+  `GCTL=00000001`, el pin del altavoz con control 40h y EAPD encendido, los
+  amplificadores a 0 dB). Hispa-8086 no la toca y HSPSND la deja igual al
+  acabar cada sonido;
+- si HSPSND tocaba (o con `/SB`, donde el flujo no para nunca), la DMA sigue
+  leyendo su búfer mientras la BIOS reparte y borra la memoria;
+- el altavoz del PC suena por el códec (entrada PCBEEP o el generador de
+  pitido): si un programa deja la puerta abierta (puerto 61h, bits 0 y 1) o
+  el canal 2 del 8254 contando, suena con él.
+
+Cuando la BIOS reinicia la controladora y el códec con todo eso encendido,
+se oye. Ahora, antes de reiniciar (o apagar), `lib/silencio.inc`:
+
+1. cierra la puerta del altavoz del PC (61h &= FCh) y para el canal 2;
+2. llama a HSPSND, si está, con su función 10h «apagar»: los flujos parados
+   (también la Sound Blaster emulada), los amplificadores en silencio, el
+   generador de pitido apagado, los pines sin salida ni EAPD y el grupo de
+   audio en D3; en AC'97, los volúmenes en silencio. Después ya no suena
+   nada (en modo V86, con HSPEMM, es lo único que llega a la tarjeta);
+3. en un 386 o mayor, en modo real y con PCI, hace lo mismo él solo con cada
+   HD Audio (clase 0403h) que no esté en reinicio, por la interfaz inmediata
+   de órdenes, y con cada AC'97 de Intel. Así también sin HSPSND y en
+   Hispa-8086.
+
+Lo usan Ctrl+Alt+Supr en el núcleo de Hispa-DOS y en el de Hispa-8086 (los
+dos se enganchan a INT 15h AH=4Fh, el aviso de tecla que la BIOS llama desde
+INT 09h antes de mirar si es Ctrl+Alt+Supr), HSPUSB en los equipos sin 8042
+(antes de su salto a FFFF:0 llama a ese mismo aviso), APAGAR y REINICIAR (y
+con ellos «Reiniciar» y «Apagar» de Hispa Ventanas, que los lanzan). HSPDPMI
+(tres veces Ctrl+Alt+Supr en modo protegido) solo cierra la puerta del
+altavoz.
+
+Para distinguir en el equipo de verdad qué sonaba:
+- Hispa-8086 o Hispa-DOS sin HSPSND, Ctrl+Alt+Supr: si con la versión de
+  antes sonaba y con esta no, era la tarjeta tal como la deja la BIOS
+  encendida (no un flujo de HSPSND); con HSPSND tocando, igual;
+- si con esta versión sigue sonando: apagar y encender con el botón. Si al
+  arrancar también suena, lo hace la propia BIOS y ningún sistema puede
+  quitarlo; si no, comparar `REINICIAR /SOLO:CF9` (reinicio de todo el
+  chipset, también la tarjeta) con `REINICIAR /SOLO:TECLADO` (solo el
+  procesador) y decir cuál suena.
+
+`tests/run_reinicio_silencio_tests.sh` lo comprueba en QEMU (que sí reinicia
+la tarjeta, así que no tiene el ruido): con `-action reboot=shutdown` la
+máquina se para justo al pedir el reinicio y se mira el puerto 61h y las
+órdenes que le han llegado al códec (`hda-output,debug=3`, y la traza
+`hda_audio_running` para el flujo). `HDAVIVO.COM` deja la tarjeta como la
+BIOS de los portátiles y `PITIDO.COM` el altavoz del PC sonando.
+
 ## Pruebas
 
 `tests/run_audicion_tests.sh`: en QEMU, con las respuestas simuladas por la

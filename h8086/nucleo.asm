@@ -70,7 +70,7 @@ entrada:
 ; es lo único que se queda en la memoria baja cuando el núcleo sube. Cada
 ; entrada se asegura de que la puerta A20 está abierta (si hace falta: en un
 ; 8086 es una comparación y sigue) y salta al núcleo, esté donde esté.
-N_PUENTES   equ 7
+N_PUENTES   equ 8
 %macro PUENTE 2
 %1:
         call b_a20
@@ -82,6 +82,7 @@ N_PUENTES   equ 7
         PUENTE b_int26, b_punteros + 12
         PUENTE b_int27, b_punteros + 16
         PUENTE b_int2f, b_punteros + 20
+        PUENTE b_int15, b_punteros + 28  ; [REINICIO-SILENCIO]
 ; el punto de entrada del gestor de memoria extendida (empieza así para que
 ; otro programa pueda engancharse, como manda la norma)
 b_xms:
@@ -230,7 +231,7 @@ b_f_cierra:
         pop ax
         retf
             align 2
-b_punteros  dw int20, 0, int21, 0, int25, 0, int26, 0, int27, 0, int2f, 0, xms_entra, 0
+b_punteros  dw int20, 0, int21, 0, int25, 0, int26, 0, int27, 0, int2f, 0, xms_entra, 0, int15, 0
 b_gdt       times 48 db 0           ; la tabla que pide INT 15h/87h
 b_quiere    db 0                    ; A20 tiene que estar abierta
 ; para el banco de pruebas: «HCFG:» y un octeto con lo que vale sin decir nada
@@ -282,6 +283,16 @@ inicio:
         mov [es:0x26*4+2], cs
         mov word [es:0x27*4], b_int27
         mov [es:0x27*4+2], cs
+        ; [REINICIO-SILENCIO] INT 15h (el aviso de tecla, AH=4Fh): con
+        ; Ctrl+Alt+Supr, el sonido callado antes de que la BIOS reinicie
+        cli
+        mov ax, [es:0x15*4]
+        mov [ant15], ax
+        mov ax, [es:0x15*4+2]
+        mov [ant15+2], ax
+        mov word [es:0x15*4], b_int15
+        mov [es:0x15*4+2], cs
+        sti
         mov bx, b_punteros          ; el puente: de momento, el núcleo está aquí
         mov cx, N_PUENTES
 .pt:
@@ -1562,6 +1573,35 @@ ed_guarda:
 ; =============================================================================
 ;  El equipo: procesador y memoria
 ; =============================================================================
+; [REINICIO-SILENCIO] INT 15h AH=4Fh: la BIOS (la de un AT o posterior) lo
+; llama desde INT 09h con cada código de tecla, antes de mirar si es
+; Ctrl+Alt+Supr. Con Supr (53h) y Ctrl y Alt pulsadas va a reiniciar en
+; caliente: antes se calla el sonido (el altavoz del PC que deja SOUND o BEEP
+; y, en un 386 o mayor con PCI, la tarjeta HD Audio o AC'97, que en los
+; portátiles sigue encendida y suena mientras arranca la BIOS). La tecla
+; sigue su camino. lib/silencio.inc
+int15:
+        cmp ah, 0x4F
+        jne .sigue
+        cmp al, 0x53
+        jne .sigue
+        push ds
+        push ax
+        xor ax, ax
+        mov ds, ax
+        mov al, [0x417]
+        and al, 0x0C                ; Ctrl y Alt
+        cmp al, 0x0C
+        pop ax
+        pop ds
+        jne .sigue
+        call silencio
+.sigue:
+        jmp far [cs:ant15]
+%define SILENCIO_8086
+%define SILENCIO_SIN_AC97
+%include "silencio.inc"
+
 ; reconoce el procesador -> [cpu_tipo]. Cada prueba solo usa lo que ya se sabe
 ; que el procesador tiene
 cpu_detecta:
@@ -1703,6 +1743,7 @@ p_abre      resw 2
 p_cierra    resw 2
 p_mueve     resw 2
 ant2f       resw 2                  ; la INT 2Fh que había
+ant15       resw 2                  ; [REINICIO-SILENCIO] la INT 15h que había
 err_bios    resw 1                  ; el último error de disco de la BIOS
 ext_k       resw 1                  ; memoria extendida, en K
 x_ini       resw 1                  ; de dónde a dónde se reparte (K)

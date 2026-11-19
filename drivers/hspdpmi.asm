@@ -2726,6 +2726,11 @@ kb_look:
         jb .no
         ; tres veces: reiniciar (el 8042 y, si no, el puerto CF9h)
         cli
+        ; [REINICIO-SILENCIO] la puerta del altavoz del PC, cerrada (en modo
+        ; protegido no se llega a HSPSND ni a la tarjeta: lib/silencio.inc)
+        in al, 0x61
+        and al, 0xFC
+        out 0x61, al
         mov al, 0xFE
         out 0x64, al
         mov cx, 0xFFFF

@@ -313,6 +313,10 @@ mz_fsoft:
 
 ; llevar el volumen y el mezclador a la tarjeta. Conserva todo.
 vol_apply:
+        cmp byte [cs:apagado], 0    ; [REINICIO-SILENCIO] apagada (función 10h)
+        je .va
+        ret
+.va:
         pushad
 .otra:
         mov byte [cs:vol_dirty], 0

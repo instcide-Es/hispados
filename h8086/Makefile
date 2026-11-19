@@ -32,8 +32,9 @@ $(B)/arranque.bin: arranque.asm | $(B)
 	$(CP437) $< $(B)/gen/arranque.asm && $(NASM) -f bin -o $@ $(B)/gen/arranque.asm
 
 NUCLEO = nucleo.asm disco.inc archivos.inc proceso.inc config.inc dispositivos.inc alta.inc
-$(B)/NUCLEO86.SYS: $(NUCLEO) | $(B)
+$(B)/NUCLEO86.SYS: $(NUCLEO) ../lib/silencio.inc | $(B)
 	for f in $(NUCLEO); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
+	$(CP437) ../lib/silencio.inc $(B)/gen/silencio.inc
 	cd $(B)/gen && $(NASM) -f bin -l nucleo.lst -o ../NUCLEO86.SYS nucleo.asm
 
 $(B)/COMMAND.COM: command.asm | $(B)

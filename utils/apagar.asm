@@ -67,6 +67,12 @@
 ;   La palabra 0040:0072h queda en 1234h (reinicio en caliente, sin la
 ;   prueba de memoria), como hace Ctrl+Alt+Supr.
 ;
+;  [REINICIO-SILENCIO] Antes de todo (de vaciar los discos), el sonido
+;  callado (lib/silencio.inc): la puerta del altavoz del PC cerrada, HSPSND
+;  apagado (su función 10h) y la tarjeta HD Audio o AC'97 en silencio y en
+;  D3. Si no, en los portátiles la tarjeta sigue sonando mientras arranca la
+;  BIOS (REINICIAR por el 8042 solo reinicia el procesador).
+;
 ;  /INFO no apaga ni reinicia: dice qué ha encontrado (tablas, \_S5,
 ;  puertos, APM) y qué haría, para probar en equipos de verdad. /NOxxx quita
 ;  un método y /SOLO:xxx prueba solo uno (con REINICIAR, si ese no reinicia,
@@ -172,6 +178,10 @@ start:
         mov ax, 0x4C00
         int 0x21
 .hacer:
+        ; [REINICIO-SILENCIO] lo primero, el sonido callado: el altavoz del
+        ; PC, HSPSND (su función 10h) y la tarjeta HD Audio o AC'97, para que
+        ; no suene nada mientras la BIOS arranca (lib/silencio.inc)
+        call silencio
         ; [APAGAR-USB] primero, todo al disco; después, las tablas y apagar
         PR "Escribiendo en el disco lo que queda pendiente...", NL
         call vaciar
@@ -222,6 +232,8 @@ opciones:
         OPCION 2, M_FALLO, "SOLO:FALLO"
 %endif
         dw 0
+
+%include "silencio.inc"
 
 ; =============================================================================
 ;  Vaciar los búferes y la caché de disco, y esperar unos instantes

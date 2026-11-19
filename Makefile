@@ -27,7 +27,7 @@ $(B)/boot32.bin: boot/boot32.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/mbr.bin: boot/mbr.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/KERNEL.SYS: kernel/kernel.asm lib/version.inc | $(B)
+$(B)/KERNEL.SYS: kernel/kernel.asm lib/version.inc lib/silencio.inc | $(B)
 	$(ASM) $(KFLAGS) -o $@ $(B)/gen/$<
 $(B)/COMMAND.COM: shell/command.asm lib/version.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -65,6 +65,12 @@ $(B)/SBTEST.COM: tests/progs/sbtest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # VOLTIME: cuánto tarda un cambio de volumen en HSPSND (tests/run_volumen_tests.sh)
 $(B)/VOLTIME.COM: tests/progs/voltime.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+# [REINICIO-SILENCIO] el altavoz sonando y la HD Audio como la deja la BIOS
+# de los portátiles (tests/run_reinicio_silencio_tests.sh)
+$(B)/PITIDO.COM: tests/progs/pitido.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HDAVIVO.COM: tests/progs/hdavivo.asm lib/silencio.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # [SB-EOI] KBSB: el teclado mientras suena la SB (tests/run_sbeoi_tests.sh)
 $(B)/KBSB.COM: tests/progs/kbsb.asm | $(B)
@@ -331,9 +337,9 @@ $(B)/SYSINFO.COM: utils/sysinfo.asm lib/version.inc | $(B)
 $(B)/EQUIPO.COM: utils/equipo.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # APAGAR y REINICIAR (en el disco REINICIA.COM): el mismo fuente
-$(B)/APAGAR.COM: utils/apagar.asm lib/util.inc | $(B)
+$(B)/APAGAR.COM: utils/apagar.asm lib/util.inc lib/silencio.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
-$(B)/REINICIAR.COM: utils/apagar.asm lib/util.inc | $(B)
+$(B)/REINICIAR.COM: utils/apagar.asm lib/util.inc lib/silencio.inc | $(B)
 	$(ASM) -DREINICIAR -o $@ $(B)/gen/$<
 $(B)/HSPCD.SYS: drivers/hspcd.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -1019,7 +1025,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM
+TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
 
 para-pruebas: $(TEST_DEPS)
 

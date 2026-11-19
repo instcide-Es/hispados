@@ -107,6 +107,7 @@ Las funciones 00h-08h siguen igual; **la 00h devuelve BX = 4**.
 | 0Dh poner ajuste | AL = ajuste, BL = valor | AL = valor |
 | 0Eh | AL = 0: todo a los valores de fábrica; AL = 1: volver a escribirlo todo en la tarjeta | — |
 | 0Fh cambios | AL = 0: ¿hay cambios sin guardar? AL = 1: ya están guardados; AL = 2: los hay | AL = 1 si los hay |
+| 10h apagar (versión 5) | — | antes de reiniciar o apagar: flujos parados, todo en silencio y el códec en D3; después ya no suena nada (docs/AUDICION.md, [REINICIO-SILENCIO]) |
 
 CF = 1 si la fuente o el ajuste no existen. Todo se aplica al salir de la
 llamada (como el volumen). HSPSND apunta que hay **cambios sin guardar** con
