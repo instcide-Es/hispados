@@ -35,7 +35,7 @@ arranca() {
     send 'VENTANAS' 7
     shot "$1"
     mon quit
-  } | timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  } | timeout 90 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -parallel none -m 16 -rtc "base=2026-11-15T10:${2}:00" \
       -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a > $T/raw 2>&1
 }

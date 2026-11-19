@@ -103,7 +103,7 @@ caso() {
   mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
   rm -f $T/in $T/log
   mkfifo $T/in
-  QEMU_AUDIO_DRV=none qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  QEMU_AUDIO_DRV=none qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -vga std -m 32 -audiodev wav,id=snd0,path=$T/out.wav -device intel-hda -device hda-duplex,audiodev=snd0 \
       -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot < $T/in > $T/log 2>&1 &
   QP=$!

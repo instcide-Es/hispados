@@ -80,7 +80,7 @@ hdnotiene() { if mdir -i $T/hdd.img@@$OFF "::$1" > /dev/null 2>&1; then ko "(no 
 maquina() {
   local n=$1 tmo=$2; shift 2
   rm -f $T/mon
-  timeout $tmo qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  timeout $tmo qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 32 -no-reboot "$@" > $T/l$n 2>&1
   txt $T/l$n
 }

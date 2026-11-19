@@ -72,7 +72,7 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   sleep 3
   hasta a2 texto 202 213 0 6 fina "Ganancia de salida: x2"
   mon quit
-} | timeout 600 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+} | timeout 600 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 32 -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot \
     -audiodev none,id=snd0 -vga std -device sb16,audiodev=snd0 > $T/raw 2>&1
 

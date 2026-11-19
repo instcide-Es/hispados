@@ -72,7 +72,7 @@ ECHO fin
 EOF
   sleep 2
   mon quit
-} | timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait -parallel none \
+} | timeout 90 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait -parallel none \
       -rtc base=2026-03-10T10:20:30 -drive file=$T/f.img,format=raw,if=floppy -boot a > $T/raw 2>&1
 tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log
 sec() { sed -n "/^$1\$/,/^$2\$/p" $T/log; }
@@ -417,7 +417,7 @@ rm -f $T/mon
   clic 756 13; sleep 1; tecla ret; sleep 2.5    # salir de Hispa Ventanas
   send 'ECHO SIGUE-VIVO'
   mon quit
-} | timeout 200 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+} | timeout 200 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -parallel none -m 16 -drive file=$T/v.img,format=raw,if=floppy,index=0 -boot a -no-reboot > $T/raw2 2>&1
 tr -d '\r' < $T/raw2 | iconv -f CP437 -t UTF-8 > $T/log2
 

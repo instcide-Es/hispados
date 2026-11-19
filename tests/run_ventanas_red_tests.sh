@@ -36,7 +36,7 @@ run() {
     send 'VENTANAS' 7
     shot "$1"
     mon quit
-  } | timeout 60 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  } | timeout 60 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -parallel none -m 32 -rtc base=2026-11-15T23:58:04 \
       -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot $red > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 -c > $T/$1.log

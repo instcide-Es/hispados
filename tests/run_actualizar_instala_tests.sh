@@ -72,7 +72,7 @@ echo "== ACTUALIZAR instalador por red (bajar e instalar en el sitio) =="
   send "S" 5            # dar formato e instalar
   sleep 28
   send "ECHO =FIN1=" 1
-} | timeout 150 qemu-system-i386 -display none -serial stdio -monitor none -no-reboot \
+} | timeout 150 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor none -no-reboot \
       -drive file=$T/usb.img,format=raw,if=ide,index=0 \
       -drive file=$HDD,format=raw,if=ide,index=1 -boot c > $T/l1 2>&1
 txt $T/l1
@@ -120,7 +120,7 @@ echo "-- 3) ACTUALIZAR por red, contestando que SÍ --"
   send "ACTUALIZAR" 11       # carga HSPRED, DHCP, baja versiones.txt, pregunta
   send "S" 20               # SÍ: baja el paquete, desempaqueta y aplica
   send "ECHO =FIN3=" 2
-} | timeout 150 qemu-system-i386 -display none -serial stdio -monitor none -no-reboot \
+} | timeout 150 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor none -no-reboot \
       -drive file=$HDD,format=raw,if=ide -boot c \
       -netdev user,id=n0 -device $NIC,netdev=n0 > $T/l3 2>&1
 txt $T/l3

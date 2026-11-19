@@ -48,7 +48,7 @@ doble() { ir $1 $2; mon "mouse_button 1" 0.12; mon "mouse_button 0" 0.12; mon "m
 chk() { python3 -I tests/tools/ventanas_check.py "$@" || fail=1; }
 run() {
   rm -f $T/mon
-  timeout ${TMAX:-150} qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  timeout ${TMAX:-150} qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 16 -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
 }

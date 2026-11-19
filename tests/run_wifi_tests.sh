@@ -53,7 +53,7 @@ corre() {   # corre nombre plazo 'segundos|orden'...
   local n=$1 tmo=$2; shift 2
   { sleep 7
     for c in "$@"; do printf '%s\r' "${c#*|}"; sleep "${c%%|*}"; done
-  } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
+  } | timeout $tmo qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor none -parallel none \
         -m 32 -drive file=$T/$n.img,format=raw,if=floppy -boot a -no-reboot > $T/$n.raw 2>&1
   tr -d '\r' < $T/$n.raw | iconv -f CP437 -t UTF-8 -c > $T/$n.txt
 }
@@ -149,7 +149,7 @@ mkimg junto HSPWIFI.BIN "$XMS"
            '3|HSPWIFI /U' '3|PING 10.0.2.2 /N:1' '2|HSPRED /U' '2|ECHO fin-de-la-prueba'; do
     printf '%s\r' "${c#*|}"; sleep "${c%%|*}"
   done
-} | timeout 70 qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
+} | timeout 70 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor none -parallel none \
       -m 32 -drive file=$T/junto.img,format=raw,if=floppy -boot a -no-reboot \
       -netdev user,id=n0 -device ne2k_pci,netdev=n0 > $T/junto.raw 2>&1
 tr -d '\r' < $T/junto.raw | iconv -f CP437 -t UTF-8 -c > $T/junto.txt
@@ -180,7 +180,7 @@ rm -f $T/amon
     if [ "${c%%|*}" = L ]; then printf 'set_link n0 off\n' | socat - UNIX-CONNECT:$T/amon > /dev/null 2>&1; sleep 1; continue; fi
     printf '%s\r' "${c#*|}"; sleep "${c%%|*}"
   done
-} | timeout 120 qemu-system-i386 -display none -serial stdio -monitor unix:$T/amon,server,nowait -parallel none \
+} | timeout 120 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/amon,server,nowait -parallel none \
       -m 32 -drive file=$T/auto.img,format=raw,if=floppy -boot a -no-reboot \
       -netdev user,id=n0 -device e1000,netdev=n0 > $T/auto.raw 2>&1
 tr -d '\r' < $T/auto.raw | iconv -f CP437 -t UTF-8 -c > $T/auto.txt

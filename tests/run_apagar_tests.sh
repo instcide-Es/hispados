@@ -59,7 +59,7 @@ espera() {
 # $T/log y el teclado de la consola en el descriptor 3
 arranca() {
   : > $T/log; rm -f $T/in $T/mon $T/rc; mkfifo $T/in
-  ( timeout 120 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  ( timeout 120 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -parallel none -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a $1 < $T/in > $T/log 2>&1
     echo $? > $T/rc ) &
   QP=$!

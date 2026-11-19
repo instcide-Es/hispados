@@ -41,7 +41,7 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
 key() { sleep "${2:-1}"; printf '%s' "$1"; }
 txt() { tr -d '\r' < $1 | iconv -f CP437 -t UTF-8 > $1.txt; }
 part() { awk -v a="$2" -v b="$3" 'index($0, a) {p=1; next} p && index($0, b) {exit} p' "$1"; }
-QEMU="timeout 150 qemu-system-i386 -display none -serial stdio -monitor none -no-reboot"
+QEMU="timeout 150 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor none -no-reboot"
 HDD=$T/hdd.img
 dd() { command dd "$@"; }
 mdos() { mtype -i $HDD@@$OFF "$@" 2>/dev/null; }
@@ -161,7 +161,7 @@ echo "-- 5) arrancar el disco actualizado --"
   send "TYPE C:\\HISPADOS\\RED.INI" 2
   send "DIR C:\\" 2
   send "ECHO =B2=" 1
-} | timeout 50 qemu-system-i386 -display none -serial stdio -monitor none -no-reboot \
+} | timeout 50 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor none -no-reboot \
       -drive file=$HDD,format=raw,if=ide -boot c > $T/l5 2>&1
 txt $T/l5
 check $T/l5.txt "Bienvenido a Hispa-DOS"

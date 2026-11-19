@@ -9,7 +9,7 @@ set -u
 IMG=$1; OUT=$2; SCRIPT=$3
 T=$(mktemp -d)
 cp "$IMG" $T/disk.img
-qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait \
+qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -monitor unix:$T/mon,server,nowait \
     -drive file=$T/disk.img,format=raw,if=floppy ${QEMU_EXTRA:-} -boot a &
 QP=$!
 sleep 4

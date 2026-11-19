@@ -109,7 +109,7 @@ printf 'Inicio=https://10.0.2.2:%d/js/\r\nTiempoJS=3\r\n' $((P + 1)) > $T/c/HISP
 python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS > /dev/null
 corre() {
   rm -f $T/mon
-  timeout ${TMAX:-700} qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  timeout ${TMAX:-700} qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 16 -drive file=$T/f.img,format=raw,if=floppy,index=0 -drive file=$T/c.img,format=raw,if=ide,index=0 \
     -boot a -no-reboot -netdev user,id=n0 -device rtl8139,netdev=n0 > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 -c > $T/log.txt

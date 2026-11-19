@@ -56,7 +56,7 @@ run() {   # run ETIQUETA "ORDEN VENTANAS" [ordenes extra con el ratón...]
     shot "$1"
     eval "${3:-:}"
     mon quit
-  } | timeout 45 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  } | timeout 45 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -parallel none -m 32 -rtc base=2026-11-15T23:58:04 \
       -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot \
       -audiodev none,id=snd0 -device sb16,audiodev=snd0 > $T/raw 2>&1

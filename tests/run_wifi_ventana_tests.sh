@@ -71,7 +71,7 @@ salir() {   # salir S: Inicio > Salir de Hispa Ventanas > Volver a Hispa-DOS (el
 qemu() {   # qemu S plazo [opciones de QEMU]
   local s=$1 tmo=$2; shift 2
   rm -f $T/$s.mon
-  timeout $tmo qemu-system-i386 -display none -serial stdio -monitor unix:$T/$s.mon,server,nowait \
+  timeout $tmo qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/$s.mon,server,nowait \
     -parallel none -m 32 -drive file=$T/$s.img,format=raw,if=floppy,index=0 -boot a -no-reboot "$@" > $T/$s.raw 2>&1
   tr -d '\r' < $T/$s.raw | iconv -f CP437 -t UTF-8 -c > $T/$s.txt
 }

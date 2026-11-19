@@ -48,7 +48,7 @@ derecho() { ir $1 $2; mon "mouse_button 2" 0.25; mon "mouse_button 0" 0.5; }
 chk() { python3 -I tests/tools/ventanas_check.py "$@" || fail=1; }
 run() {
   rm -f $T/mon
-  timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  timeout 90 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 16 -drive file=$T/f.img,format=raw,if=floppy,index=0 -boot a -no-reboot > $T/raw 2>&1
   tr -d '\r' < $T/raw | iconv -f CP437 -t UTF-8 > $T/log.txt
 }

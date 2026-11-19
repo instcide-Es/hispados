@@ -11,6 +11,8 @@ uso: ventanas_check.py CAPTURA.ppm COMPROBACION...
                                     con controles o maximizadas)
   titulo X Y activa|no TEXTO        el título de la ventana que está en X,Y
   texto X Y COLOR FONDO fina|negrita TEXTO   texto dibujado con la fuente propia
+                                    (FONDO «-»: solo se miran los puntos de la
+                                    letra, sobre cualquier fondo)
                                     (doble: a doble tamaño, cada punto 2x2, 16
                                     puntos por letra: los iconos del escritorio
                                     de Hispa-486)
@@ -168,7 +170,9 @@ def texto_ok(cap, x, y, fg, bg, negrita, texto, paso=8):
                 if negrita and col == 0 and i > 0:
                     enc = enc or (F[a437(texto)[i - 1]][fila] & 1)
                 c = cap.px(x + i * paso + col, y + fila)
-                if not es(c, fg if enc else bg):
+                if enc and not es(c, fg):
+                    mal += 1
+                elif not enc and bg is not None and not es(c, bg):
                     mal += 1
     return mal
 
@@ -309,7 +313,8 @@ def main():
                                                    '' if mal == 0 else ' (%d puntos distintos)' % mal))
             i += 5
         elif op == 'texto':
-            x, y, fg, bg = (int(v) for v in a[i + 1:i + 5])
+            x, y, fg = (int(v) for v in a[i + 1:i + 4])
+            bg = None if a[i + 4] == '-' else int(a[i + 4])     # «-»: sobre cualquier fondo
             t = a[i + 6]
             if a[i + 5] == 'doble':
                 mal = texto2_ok(cap, x, y, fg, bg, t)

@@ -54,7 +54,7 @@ prepara() {
 }
 rundx() {
   rm -f $T/mon $T/out.wav
-  timeout ${TMAX:-200} qemu-system-i386 -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  timeout ${TMAX:-200} qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
     -parallel none -m 32 -drive file=$T/f.img,format=raw,if=floppy,index=0 \
     -drive file=$T/b.img,format=raw,if=floppy,index=1 -boot a -no-reboot \
     -vga std -audiodev wav,id=snd0,path=$T/out.wav -device AC97,audiodev=snd0 > $T/raw 2>&1
