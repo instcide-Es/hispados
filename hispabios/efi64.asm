@@ -54,7 +54,7 @@
 %define PE_ARQ 64
 %include "pe.inc"
 
-%define HB_VERSION '0.4'
+%define HB_VERSION '0.5'
 
 ; ---- tablas de UEFI (x64) ----
 ST_VENDOR       equ 24          ; FirmwareVendor (CHAR16 *)
@@ -398,6 +398,7 @@ pe_entrada:
         jmp .fallo
 .hay_discos:
         mov byte [rel callado], 1       ; (solo al registro)
+        call raton_preparar             ; el ratón: del firmware o USB (T_RAT_HAY)
         call gop_modos                  ; los modos que da el firmware
         call wc_preparar                ; la pantalla con escritura combinada y su velocidad
 %ifndef PANTALLA_NATIVA
@@ -2006,6 +2007,15 @@ despachador:
         push rsi
         push rdi
         sub rsp, 48
+        mov rax, [rel bios_base]        ; con el ratón activado, en cada viaje
+        cmp byte [rax + 285], 0         ; se le pregunta (T_RAT_ON)
+        je .sin_raton
+        push rcx
+        push rdx
+        call raton_sondear
+        pop rdx
+        pop rcx
+.sin_raton:
         cmp ecx, 1                      ; dibujar la pantalla
         je .dibujar
         cmp ecx, 2                      ; esperar EDX segundos
@@ -3721,6 +3731,8 @@ decimal:
         pop rcx
         pop rax
         ret
+
+%include "efi64_raton.inc"
 
 t_titulo        db 'HispaBIOS ', HB_VERSION, ' (x64)', 13, 10, 0
 t_r_fab         db '[registro de HispaBIOS ', HB_VERSION, ' x64]', 13, 10, 'Firmware: ', 0

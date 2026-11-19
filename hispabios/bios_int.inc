@@ -194,14 +194,21 @@ tic_fin:
         out 20h, al
         mov ax, SEG_BIOS                ; si la pantalla ha cambiado, se dibuja
         mov ds, ax                      ; (en un modo gráfico, en cada tic)
-        mov al, [sucia]
-        or al, [T_GRAF]
-        jz .fin
         cmp byte [en_fw], 0
         jne .fin
+        mov al, [sucia]
+        or al, [T_GRAF]
+        jz .raton
         mov byte [sucia], 0
-        mov ax, PET_DIBUJAR
+        mov ax, PET_DIBUJAR             ; (de paso, la parte UEFI mira el ratón)
         call llamar_fw
+        jmp .entregar
+.raton: cmp byte [T_RAT_ON], 0          ; con el ratón activado, un viaje en cada
+        je .fin                         ; tic para preguntarle
+        mov ax, PET_NADA
+        call llamar_fw
+.entregar:
+        call rat_entregar
 .fin:   pop ds
         pop eax
         iret
@@ -757,6 +764,16 @@ k_sondear:
         inc dword [cs:T_N_TECLA]
         mov ax, PET_TECLA
         call llamar_fw
+        cmp byte [cs:T_RAT_NUEVO], 0    ; (el viaje ha mirado también el ratón:
+        je .sin_raton                   ; lo que traiga, al programa ya)
+        push ds
+        push ax
+        mov ax, SEG_BIOS
+        mov ds, ax
+        call rat_entregar
+        pop ax
+        pop ds
+.sin_raton:
         cmp eax, -1
         je .f
         ; EAX: bajo = código de exploración de UEFI, alto = carácter Unicode
@@ -823,7 +840,7 @@ int15:
         cmp ax, 4842h                   ; 'HB': ¿es HispaBIOS? -> AX = 'hb',
         jne .no_hb                      ; BX = versión (0.4), CF = 0
         mov ax, 6862h
-        mov bx, 0004h
+        mov bx, 0005h
         jmp d_bien
 .no_hb:
         cmp ax, 4844h                   ; 'HD': los datos para depurar (HBLOG.COM)
@@ -852,6 +869,8 @@ int15:
         je s_config
         cmp ah, 4Fh
         je s_teclado
+        cmp ah, 0C2h
+        je s_raton
         cmp ah, 90h
         je s_cero
         cmp ah, 91h
@@ -992,6 +1011,232 @@ s_mover:
         sti
         xor ah, ah
         jmp d_bien
+
+; =============================================================================
+;  INT 15h C2xxh - el ratón «PS/2» de la BIOS
+; =============================================================================
+;  Con UEFI no hay controlador 8042 que dé el ratón (o lo hay y el firmware no
+;  lo usa): el ratón es USB y lo lleva el firmware. La parte UEFI lo lee en
+;  cada viaje (el del dibujo de cada tic, el del teclado) y deja aquí lo que
+;  se ha movido (T_RAT_*); la BIOS se lo da al programa como lo haría la IRQ 12
+;  de una BIOS de las de siempre: llamando a la rutina de C207h con el estado,
+;  X, Y y 0 en la pila (paquetes de 3 octetos del PS/2). Es lo que usa HSPRATON
+;  («vía BIOS»), y con él Hispa Ventanas. Según la lista de Ralf Brown (INT 15h
+;  AX = C200h a C207h) y la especificación del ratón PS/2 de IBM.
+s_raton:
+        cmp byte [cs:T_RAT_HAY], 0      ; sin ratón: «no se admite» (HSPRATON
+        jne .hay                        ; prueba entonces el 8042)
+        mov ah, 86h
+        jmp d_error
+.hay:   push ds
+        push SEG_BIOS
+        pop ds
+        cmp al, 00h
+        je .activar
+        cmp al, 01h
+        je .reiniciar
+        cmp al, 02h
+        je .tasa
+        cmp al, 03h
+        je .res
+        cmp al, 04h
+        je .tipo
+        cmp al, 05h
+        je .iniciar
+        cmp al, 06h
+        je .ext
+        cmp al, 07h
+        je .rutina
+        mov ah, 01h                     ; función que no hay
+        jmp .mal
+.activar:                               ; 00h: BH = 0 parar, 1 activar
+        cmp bh, 1
+        ja .entrada
+        je .act1
+        mov byte [rat_act], 0
+        mov byte [T_RAT_ON], 0
+        jmp .bien
+.act1:  cmp dword [rat_man], 0          ; sin rutina no se activa
+        jne .act2
+        mov ah, 05h
+        jmp .mal
+.act2:  call rat_vaciar
+        mov byte [rat_act], 1
+        mov byte [T_RAT_ON], 1
+        jmp .bien
+.reiniciar:                             ; 01h -> BH = identificador, BL = AAh
+        call rat_omision
+        mov bx, 00AAh
+        jmp .bien
+.tasa:  cmp bh, 6                       ; 02h: BH = 0-6 (10, 20, 40, 60, 80,
+        ja .entrada                     ; 100 o 200 por segundo)
+        mov [rat_tasa], bh
+        jmp .bien
+.res:   cmp bh, 3                       ; 03h: BH = 0-3 (1, 2, 4 u 8 cuentas por mm)
+        ja .entrada
+        mov [rat_res], bh
+        jmp .bien
+.tipo:  xor bh, bh                      ; 04h -> BH = 0: ratón normal (sin rueda)
+        jmp .bien
+.iniciar:                               ; 05h: BH = octetos por paquete (1-8)
+        dec bh
+        cmp bh, 7
+        ja .entrada
+        inc bh
+        mov [rat_tam], bh
+        call rat_omision
+        jmp .bien
+.ext:   cmp bh, 0                       ; 06h: BH = 0 estado; 1 escala 1:1; 2 escala 2:1
+        jne .escala
+        mov bl, [T_RAT_BOT]             ; BL = estado (bit 0 derecho, 1 central,
+        and bl, 7                       ; 2 izquierdo, 4 escala 2:1, 5 activado),
+        xor al, al                      ; CL = resolución, DL = tasa
+        test bl, 1
+        jz .e1
+        or al, 4
+.e1:    test bl, 2
+        jz .e2
+        or al, 1
+.e2:    test bl, 4
+        jz .e3
+        or al, 2
+.e3:    cmp byte [rat_escala], 0
+        je .e4
+        or al, 10h
+.e4:    cmp byte [rat_act], 0
+        je .e5
+        or al, 20h
+.e5:    mov bl, al
+        mov cl, [rat_res]
+        push si
+        movzx si, byte [rat_tasa]
+        mov dl, [cs:rat_tasas + si]
+        pop si
+        mov al, 06h
+        jmp .bien
+.escala:
+        cmp bh, 2
+        ja .entrada
+        dec bh
+        mov [rat_escala], bh
+        jmp .bien
+.rutina:                                ; 07h: ES:BX = la rutina (0:0, ninguna)
+        mov [rat_man], bx
+        mov [rat_man + 2], es
+        jmp .bien
+.entrada:
+        mov ah, 02h                     ; dato que no vale
+.mal:   pop ds
+        jmp d_error
+.bien:  xor ah, ah
+        pop ds
+        jmp d_bien
+rat_tasas       db 10, 20, 40, 60, 80, 100, 200
+
+; rat_omision: como tras reiniciar el ratón: parado y con lo de siempre
+rat_omision:
+        mov byte [rat_act], 0
+        mov byte [T_RAT_ON], 0
+        mov byte [rat_tasa], 5
+        mov byte [rat_res], 2
+        mov byte [rat_escala], 0
+rat_vaciar:                             ; lo que hubiera sin entregar, fuera
+        xor eax, eax
+        mov [T_RAT_DX], eax
+        mov [T_RAT_DY], eax
+        mov [T_RAT_DZ], eax
+        mov byte [T_RAT_NUEVO], 0
+        mov al, [T_RAT_BOT]
+        and al, 7
+        mov [rat_bot_ent], al
+        ret
+
+; rat_entregar (DS = la BIOS): lo que haya dejado la parte UEFI, a la rutina
+; del programa, en paquetes del PS/2 (cada uno, de -255 a 255 por eje; como
+; mucho 4 por vez: lo que sobre, en la siguiente). Se llama con las
+; interrupciones como estén (en el tic, cerradas) y nunca dos veces a la vez.
+rat_entregar:
+        cmp byte [T_RAT_NUEVO], 0
+        je .r
+        cmp byte [rat_act], 0
+        jne .act
+        call rat_vaciar                 ; parado: no se guarda nada
+.r:     ret
+.act:   cmp byte [rat_dentro], 0
+        jne .r
+        cmp dword [rat_man], 0
+        je .r
+        mov byte [rat_dentro], 1
+        pushad
+        push es
+        push fs
+        push gs
+        mov cx, 4                       ; paquetes, como mucho
+.p:     mov eax, [T_RAT_DX]
+        call rat_recorta
+        mov esi, eax                    ; ESI = X de este paquete
+        mov eax, [T_RAT_DY]
+        call rat_recorta
+        mov edi, eax                    ; EDI = Y
+        mov dl, [T_RAT_BOT]
+        and dl, 7
+        test esi, esi
+        jnz .paq
+        test edi, edi
+        jnz .paq
+        cmp dl, [rat_bot_ent]
+        je .hecho
+.paq:   sub [T_RAT_DX], esi
+        sub [T_RAT_DY], edi
+        mov [rat_bot_ent], dl
+        mov al, dl                      ; estado: botones, bit 3 siempre, signos
+        or al, 08h
+        test esi, esi
+        jns .xp
+        or al, 10h
+.xp:    test edi, edi
+        jns .yp
+        or al, 20h
+.yp:    xor ah, ah
+        push cx
+        push ds
+        push ax                         ; estado
+        and si, 0FFh
+        push si                         ; X
+        and di, 0FFh
+        push di                         ; Y
+        push word 0                     ; (Z)
+        call far [rat_man]
+        add sp, 8
+        pop ds
+        pop cx
+        inc dword [T_RAT_PAQ]
+        dec cx
+        jnz .p
+.hecho: xor al, al                      ; ¿queda movimiento para la próxima?
+        cmp dword [T_RAT_DX], 0
+        setne al
+        cmp dword [T_RAT_DY], 0
+        setne ah
+        or al, ah
+        mov [T_RAT_NUEVO], al
+        mov dword [T_RAT_DZ], 0
+        pop gs
+        pop fs
+        pop es
+        popad
+        mov byte [rat_dentro], 0
+        ret
+
+; rat_recorta: EAX -> EAX entre -255 y 255
+rat_recorta:
+        cmp eax, 255
+        jle .a
+        mov eax, 255
+.a:     cmp eax, -255
+        jge .b
+        mov eax, -255
+.b:     ret
 
 ; =============================================================================
 ;  INT 1Ah - reloj (tics de 40:6C y el reloj CMOS) y BIOS PCI
@@ -1274,7 +1519,10 @@ pci_dir:
 ;  INT 11h, 12h, 18h, 19h y las de impresora y serie (sin aparatos)
 ; =============================================================================
 int11:  mov ax, 0022h                   ; coprocesador y vídeo en color 80x25
-        iret
+        cmp byte [cs:T_RAT_HAY], 0      ; (bit 2: hay ratón, el de INT 15h C2xxh)
+        je .r
+        or al, 4
+.r:     iret
 int12:  push ds
         mov ax, 40h
         mov ds, ax

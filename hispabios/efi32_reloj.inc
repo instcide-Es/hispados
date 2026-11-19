@@ -686,6 +686,11 @@ despachador:
         push ebp
         BASE_EBP
         cld
+        mov eax, [V(bios_base)]         ; con el ratón activado, en cada viaje
+        cmp byte [eax + 285], 0         ; se le pregunta (T_RAT_ON)
+        je .sin_raton
+        call raton_sondear
+.sin_raton:
         cmp ecx, 1                      ; dibujar la pantalla
         je .dibujar
         cmp ecx, 2                      ; esperar EDX segundos

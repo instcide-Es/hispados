@@ -28,6 +28,12 @@ T_N_TECLA       equ 216
 T_N_FW          equ 220
 T_DIB_TOT       equ 224
 T_PIT           equ 254                 ; bit 0: el 8254 contaba; 1: cuenta ahora; 2: desbloqueado
+T_RAT_HAY       equ 284                 ; (0.5) el ratón: bit 0 Simple Pointer, 1 Absolute, 2 USB propio
+T_RAT_ON        equ 285
+T_RAT_BOT       equ 286
+T_RAT_LEC       equ 300
+T_RAT_PAQ       equ 304
+T_RAT_CB        equ 308
 
 inicio:
         cld
@@ -137,6 +143,57 @@ inicio:
         jz .modo
         mov si, m_modo_g
 .modo:  call txt
+        cmp word [version], 5           ; (desde la 0.5: el ratón)
+        jb .sin_raton
+        mov si, m_rat
+        call txt
+        mov bx, T_RAT_HAY
+        call leer_tab
+        mov ah, al
+        mov si, m_rat_no
+        test ah, 7
+        jz .rat_t
+        mov si, m_rat_sp
+        test ah, 1
+        jz .rat_a
+        call txt
+.rat_a: mov si, m_rat_ap
+        test ah, 2
+        jz .rat_u
+        call txt
+.rat_u: mov si, m_rat_usb
+        test ah, 4
+        jz .rat_d
+.rat_t: call txt
+.rat_d: mov si, m_rat_act
+        mov bx, T_RAT_ON
+        call leer_tab
+        test al, al
+        jnz .rat_on
+        mov si, m_rat_par
+.rat_on:
+        call txt
+        mov si, m_rat_lec
+        call txt
+        mov bx, T_RAT_LEC
+        call num_tab
+        mov si, m_rat_cb
+        call txt
+        mov bx, T_RAT_CB
+        call num_tab
+        mov si, m_rat_paq
+        call txt
+        mov bx, T_RAT_PAQ
+        call num_tab
+        mov si, m_rat_bot
+        call txt
+        mov bx, T_RAT_BOT
+        call leer_tab
+        and eax, 7
+        call num
+        mov si, m_nl
+        call txt
+.sin_raton:
         mov si, m_reg
         call txt
         ; el registro de la BIOS, tal cual
@@ -248,6 +305,18 @@ m_max           db ' us; el mas lento, ', 0
 m_tot           db ' us; en total, ', 0
 m_modo_t        db ' us. Ahora: modo texto', 13, 10, 0
 m_modo_g        db ' us. Ahora: modo grafico (VBE)', 13, 10, 0
+m_rat           db 'Raton (INT 15h C2xxh):', 0
+m_rat_no        db ' no hay (ni del firmware ni USB)', 0
+m_rat_sp        db ' del firmware (Simple Pointer)', 0
+m_rat_ap        db ' del firmware (Absolute Pointer)', 0
+m_rat_usb       db ' USB (lo lee HispaBIOS)', 0
+m_rat_act       db '; activado', 0
+m_rat_par       db '; sin activar', 0
+m_rat_lec       db '; lecturas del firmware: ', 0
+m_rat_cb        db '; informes USB: ', 0
+m_rat_paq       db '; paquetes al programa: ', 0
+m_rat_bot       db '; botones ahora: ', 0
+m_nl            db 13, 10, 0
 m_reg           db '--- lo apuntado por HispaBIOS (pantalla y llamadas de VBE) ---', 13, 10, 0
 m_fin           db '--- fin ---', 13, 10, 0
 

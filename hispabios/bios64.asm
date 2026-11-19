@@ -134,6 +134,21 @@ T_HPET_CFG      dd 0                    ; +268 HPET: configuración general que 
 T_HPET_T0       dd 0                    ; +272 ... y la del temporizador 0
 T_HPET_PER      dd 0                    ; +276 cuentas del HPET por tic
 T_HPET_FS       dd 0                    ; +280 femtosegundos por cuenta del HPET
+;  ---- (0.5) el ratón: lo que da el firmware (EFI_SIMPLE_POINTER, EFI_ABSOLUTE_
+;       POINTER) o un ratón USB que lee la parte UEFI (raton_*), por INT 15h C2xxh ----
+T_RAT_HAY       db 0                    ; +284 lo pone la parte UEFI: bit 0, Simple Pointer del
+                                        ;      firmware; 1, Absolute Pointer; 2, ratón USB propio
+                                        ;      (0: no hay ratón; INT 15h C2xxh contesta que no)
+T_RAT_ON        db 0                    ; +285 lo pone la BIOS: 1 = activado (INT 15h C200h): en
+                                        ;      cada viaje la parte UEFI le pregunta al ratón
+T_RAT_BOT       db 0                    ; +286 los botones: bit 0 izquierdo, 1 derecho, 2 central
+T_RAT_NUEVO     db 0                    ; +287 1: hay algo nuevo (movimiento o botones)
+T_RAT_DX        dd 0                    ; +288 movimiento sin entregar, en cuentas del PS/2:
+T_RAT_DY        dd 0                    ; +292 X a la derecha, Y hacia arriba
+T_RAT_DZ        dd 0                    ; +296 la rueda (positivo: hacia el usuario)
+T_RAT_LEC       dd 0                    ; +300 lecturas del firmware que traían algo
+T_RAT_PAQ       dd 0                    ; +304 paquetes entregados a la rutina del programa
+T_RAT_CB        dd 0                    ; +308 informes del ratón USB propio (raton_cb)
 
 %ifdef ARQ32
 ; =============================================================================
@@ -1984,7 +1999,7 @@ t_rj_aviso      db 'AVISO: en este equipo no llega la interrupcion del reloj (IR
                 db 'Hispa-DOS arranca, pero las esperas y los programas que usan el reloj', 13, 10
                 db 'pueden ir a saltos o quedarse parados (pulsar una tecla los despierta).', 13, 10
                 db 'Suba al FTP el archivo HISPABIOS.LOG de la memoria USB.', 13, 10, 13, 10, 0
-t_prueba        db 'HispaBIOS 0.4 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
+t_prueba        db 'HispaBIOS 0.5 - BIOS de Hispa-DOS sobre UEFI. Arrancando el disco 80h...', 13, 10, 13, 10, 0
 t_vbe_oem       db 'HispaBIOS (VBE sobre la pantalla del firmware UEFI)', 0
 t_r_vbe         db 'INT 10h AX=', 0
 t_r_bx          db ' BX=', 0
@@ -2022,6 +2037,16 @@ v_atr           db 0
 v_cmodo         db 0
 sucia           db 0
 rm_pila         dw 0, 0
+; el ratón (INT 15h C2xxh, bios_int.inc)
+rat_act         db 0                    ; 1: activado (C200h BH = 1)
+rat_dentro      db 0                    ; 1: entregando (no se entra dos veces)
+rat_bot_ent     db 0                    ; los botones del último paquete entregado
+rat_tasa        db 5                    ; C202h: 0-6 (10 a 200 por segundo); 5 = 100
+rat_res         db 2                    ; C203h: 0-3 (1 a 8 cuentas por mm); 2 = 4
+rat_escala      db 0                    ; C206h: 0 = 1:1, 1 = 2:1
+rat_tam         db 3                    ; C205h: octetos por paquete
+        align 4
+rat_man         dd 0                    ; C207h: la rutina del programa (segmento:desplazamiento)
 
         align 16
 gdt:

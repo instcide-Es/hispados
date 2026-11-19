@@ -57,7 +57,7 @@
 %define PE_ARQ 32
 %include "pe.inc"
 
-%define HB_VERSION '0.4'
+%define HB_VERSION '0.5'
 
 ; ---- tablas de UEFI (IA32: punteros de 4 octetos) ----
 ST_VENDOR       equ 24          ; FirmwareVendor (CHAR16 *)
@@ -413,6 +413,7 @@ pe_entrada:
         jmp .fallo
 .hay_discos:
         mov byte [V(callado)], 1        ; (solo al registro)
+        call raton_preparar             ; el ratón: del firmware o USB (T_RAT_HAY)
         call gop_modos                  ; los modos que da el firmware
         call wc_preparar                ; la pantalla con escritura combinada y su velocidad
 %ifndef PANTALLA_NATIVA
@@ -1643,6 +1644,7 @@ smb_texto:
         popad
         ret
 
+%include "efi32_raton.inc"
 %include "efi32_reloj.inc"
 %include "efi32_pant.inc"
 %include "efi32_datos.inc"
