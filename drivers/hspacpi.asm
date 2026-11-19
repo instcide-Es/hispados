@@ -89,6 +89,7 @@ SEL_C32     equ 0x08
 SEL_D32     equ 0x10
 SEL_C16     equ 0x18
 SEL_D16     equ 0x20
+SEL_D4G     equ 0x28                ; datos de 16 bits con límite de 4 GB (ver nuc)
 
 start:
         jmp init
@@ -133,7 +134,7 @@ vuelta_rm   dw nuc.rm
             dw 0
 bloque      dd 0
 pila32      dd 0
-gdtr        dw 5 * 8 - 1
+gdtr        dw 6 * 8 - 1
             dd 0
 idtr        dw 32 * 8 - 1
             dd 0
@@ -147,6 +148,7 @@ gdt         dq 0
             dq 0x00CF92000000FFFF   ; datos de 32 bits
             dq 0x00009A000000FFFF   ; código de 16 bits
             dq 0x000092000000FFFF   ; datos de 16 bits
+            dq 0x008F92000000FFFF   ; datos de 16 bits, base 0 y límite de 4 GB
 
 ; =============================================================================
 ;  Llamar al núcleo: EAX = función, EDX = dirección lineal de la petición
@@ -204,12 +206,17 @@ nuc:
         mov ss, cx
         mov esp, [cs:pila32]
         o32 call far [cs:entrada32]
+        ; DS, ES, FS y GS, con el límite de 4 GB: esta llamada puede venir
+        ; del reloj y haber interrumpido a un controlador en modo «irreal»
+        ; (HSPUSB, HSPSND); con 64 KB se quedaría colgado al volver (como en
+        ; drivers/hspwifi.asm, nuc: MacBook Air 2012). La pila, con 64 KB.
         mov cx, SEL_D16
+        mov ss, cx
+        mov cx, SEL_D4G
         mov ds, cx
         mov es, cx
         mov fs, cx
         mov gs, cx
-        mov ss, cx
         mov ecx, cr0
         and cl, 0xFE
         mov cr0, ecx
