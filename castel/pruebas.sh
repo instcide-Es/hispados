@@ -1277,13 +1277,13 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
-    mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas como módulos y sin mirar los discos" \
-      "^memoria: 64 MB, .* 9 programas de usuario" "^sin disco: los 9 archivos que ha traído el cargador hacen de unidad M:" \
+    mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
+      "^memoria: 64 MB, .* 9 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
     if grep -q "escritorio: lanzo .BLOC.BIN" $S && cap $G/u2.ppm negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas"; then
-      ok "y desde su menú se lanza el Bloc de notas, que viene como módulo (de la unidad en memoria)"
+      ok "y desde su menú se lanza el Bloc de notas (de la memoria USB, la unidad del sistema)"
     else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
     # la entrada de 1024 x 600 (la tercera): el modo lo pide la cabecera de ESCRIT6.BIN
     rm -f $G/monu
@@ -1301,8 +1301,9 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     miracap "y se ve entero: la barra abajo y los iconos" u3 tam 1024 600 negrita 30 570 46 580 Inicio texto 24 50 32 58 "Mi equipo"
     MTOOLS_SKIP_CHECK=1 mtype -i $G/usb.img@@1M ::/boot/grub/grub.cfg > $G/grub.cfg 2> /dev/null
     if grep -q "a la medida de la pantalla" $G/grub.cfg && grep -q "^  set gfxpayload=auto$" $G/grub.cfg && grep -q "^  videoinfo$" $G/grub.cfg \
-      && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 5 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg; then
-      ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, y los modos de vídeo de la BIOS (videoinfo)"
+      && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 6 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg \
+      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb$" $G/grub.cfg; then
+      ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, uno sin tocar el USB ni los discos, y los modos de vídeo de la BIOS (videoinfo); las demás, con «escritura=usb unidad=X registro»"
     else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
@@ -1534,6 +1535,23 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
         ok "$que: lo tecleado con el teclado USB y guardado con el Bloc de notas está en la memoria (sana), con el registro del arranque (ARRANQUE.TXT)"
       else ko "$que: en la memoria USB de arranque no queda lo guardado, o no queda sana:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
     done
+    # la sexta entrada, «sin tocar el USB ni los discos»: como la 0.5 (con el
+    # teclado y el ratón PS/2, y los programas de la unidad en memoria)
+    rm -f $G/monu
+    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
+      -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
+    QPID=$!
+    for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
+    sleep 6; for i in 1 2 3 4 5; do monu "sendkey down"; done; monu "sendkey ret" 12
+    monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8
+    monu "mouse_move 40 -292" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5
+    monu quit 0.5; wait $QPID 2> /dev/null; QPID=
+    tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
+    S=$N/gsin.txt
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 9 archivos que ha traído el cargador hacen de unidad M:" $S \
+      && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
+      ok "la entrada «sin tocar el USB ni los discos»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
+    else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
