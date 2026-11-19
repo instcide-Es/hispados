@@ -60,6 +60,7 @@
 #                                 (azar32.py): lo que calculan frente a lo
 #                                 que tiene que dar. Unos 10 s más cada uno.
 #   VER=1 ./pruebas.sh            deja lo que sale en /tmp/castel-pruebas
+#   CAPTURAS_A=carpeta ./pruebas.sh   deja ahí las capturas del escritorio (PPM)
 set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
@@ -766,7 +767,7 @@ mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primari
   "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: no hay"
 mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
   "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
-  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^17 entradas"
+  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^19 entradas"
 mira "una carpeta dentro de otra, y una que no está" "^LARGO.TXT  *17600$" "^PIRATA.TXT  *110$" "^5 entradas" "^no puedo abrir «nada»: no existe"
 m1=$(grep "^hola.bin ha acabado" $S | awk '{print $10, $13}')
 mira "un programa del anillo 3 cargado del disco (no de multiboot): corre y acaba con su código" \
@@ -784,10 +785,10 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.3: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium 0\.4: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
-  "^TEXTOS  *<DIR>  " "^ *14 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
+  "^TEXTOS  *<DIR>  " "^ *16 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
   "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
 mira "TYPE: un archivo de la raíz y uno de una carpeta (abrir, leer y cerrar por la llamada al sistema)" \
   "^Este archivo está en un disco FAT y lo enseña la orden TYPE\.$" "^Con diez cañones por banda,$" "^un velero bergantín\.$" \
@@ -851,7 +852,7 @@ DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir
 S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
-  "^C:.>ver$" "^Hispa-Pentium 0\.3" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+  "^C:.>ver$" "^Hispa-Pentium 0\.4" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
 mira "sin disco, el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
@@ -956,7 +957,7 @@ else ko "ECHO OFF o la @ no callan lo que deben (o callan de más)"; grep -n "lo
 # la historia: lo que queda en la pantalla, quitando lo que borra cada retroceso
 python3 -I $AQUI/nucleo32/pantalla.py < $S > $P/historia.txt
 if [ "$(grep -c '^C:.>eco primera$' $P/historia.txt)" = 2 ] && [ "$(grep -c '^primera$' $S)" = 2 ] && grep -q '^C:.>zco prixeray$' $P/historia.txt \
-    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.3" $S; then
+    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.4" $S; then
   ok "la historia de la línea: la flecha de arriba trae las órdenes de antes; se corrigen con las flechas, Retroceso, Supr, Inicio y Fin; Esc borra la línea"
 else ko "la historia o la corrección de la línea no van:"; grep -n "primera\|zco\|ver" $P/historia.txt | sed 's/^/        /' | head; fi
 mira "FECHA: la fecha y la hora del reloj del PC" "^Hoy es $(date +%d/%m/%Y) y son las [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\.$"
@@ -1011,6 +1012,163 @@ if sano $I && saca $I CANCION.TXT $P/x.txt && [ "$(wc -c < $P/x.txt)" = 57 ] && 
   ok "al cambiar el nombre o borrar un archivo con nombre largo, sus trozos se van con él (fsck.fat no ve nombres largos sueltos)"
 else ko "los nombres largos no quedan bien al renombrar o borrar:"; sed 's/^/        /' $P/fsck.txt | head -8; mdir -i $I ::LARGOS 2>&1 | sed 's/^/        /'; fi
 fi
+
+# ---- sin disco (la unidad en memoria), el permiso de escritura y el escritorio ----
+echo "== Hispa-Pentium: sin disco, los módulos del cargador hacen de unidad C:; en el disco no se escribe sin permiso =="
+G=$P/graf
+mkdir -p $G $G/mod
+for p in uordenes:ORDENES uhola:HOLA ueco:ECO; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${p%%:*}.cas -o $G/mod/x.asm > /dev/null 2>&1 && nasm -f bin $G/mod/x.asm -o $G/mod/${p##*:}.BIN
+done
+printf 'un texto que ha venido con el cargador\r\n' > $G/mod/LEEME.TXT
+MODULOS="$G/mod/ORDENES.BIN,$G/mod/HOLA.BIN,$G/mod/ECO.BIN,$G/mod/LEEME.TXT" ARRANQUE=ordenes $AQUI/nucleo32/probar.sh "" dir "type leeme.txt" "eco uno dos" hola \
+  "echo x > a.txt" "del leeme.txt" "md c" "cd nada" nada salir "lanzar eco.bin desde la consola" apagar > $G/mem.sal 2>&1
+S=$G/mem.sal
+mira "sin disco, lo que trae el cargador (los módulos de multiboot) hace de unidad C: en memoria: «ordenes» lanza el ORDENES.BIN que venga" \
+  "^sin disco: los 4 archivos que ha traído el cargador hacen de unidad C: (en memoria, de solo lectura)" "^Hispa-Pentium: intérprete de órdenes"
+mira "la unidad en memoria: DIR enseña los módulos, TYPE los lee y los programas se lanzan por su nombre" \
+  "^ORDENES  BIN  *[0-9]* " "^LEEME    TXT  *40 " "^ *4 archivos  *[0-9]* octetos$" "^un texto que ha venido con el cargador$" "^uno dos$" \
+  "^1 + 2 + ... + 1000 = 500500" "^(HOLA.BIN ha acabado con el código 3)" "^Orden o nombre de programa desconocido: nada "
+mira "la unidad en memoria es de solo lectura: ni crear, ni borrar, ni carpetas (y se dice)" "^No puedo escribir en a.txt: es de solo lectura\.$" \
+  "^No puedo borrar leeme.txt: es de solo lectura\.$" "^No puedo hacer la carpeta c: es de solo lectura\.$"
+mira "y desde la consola del núcleo también se lanzan por su nombre" "^desde la consola$" \
+  "^ECO.BIN ha acabado con el código 3; marcos libres" "^\[código 5\]"
+m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ]; then ok "sin disco, al salir del intérprete quedan los mismos marcos libres ($m1)"
+else ko "sin disco, el intérprete se deja marcos: «$m1»"; fi
+# el disco, sin permiso para escribir (como en un PC de verdad: hay que decir «escritura»)
+cp $P/d16.img $G/sl.img
+SOLO_LECTURA=1 ESCRIBE=1 DISCO=$G/sl.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "echo hola > nuevo.txt" "del leeme.txt" "md cosas" \
+  "ren leeme.txt otro.txt" "copy leeme.txt copia.txt" "type leeme.txt" hola salir apagar > $G/sl.sal 2>&1
+S=$G/sl.sal
+mira "sin «escritura» en la línea del cargador, el disco es de solo lectura: se lee y se lanzan sus programas, pero no se crea, borra ni cambia nada" \
+  "^el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador)" "^No puedo escribir en nuevo.txt: es de solo lectura\.$" \
+  "^No puedo borrar leeme.txt: es de solo lectura\.$" "^No puedo hacer la carpeta cosas: es de solo lectura\.$" \
+  "^Este archivo está en un disco FAT" "^1 + 2 + ... + 1000 = 500500" "^\[código 5\]"
+if cmp -s $P/d16.img $G/sl.img; then ok "y la imagen del disco queda idéntica, octeto a octeto: no se ha escrito ni un sector"
+else ko "sin permiso de escritura, el disco ha cambiado"; fi
+DISCO=$P/d16.img ARRANQUE="ordenes sindisco" MODULOS="$G/mod/ORDENES.BIN,$G/mod/ECO.BIN" $AQUI/nucleo32/probar.sh "" dir salir disco apagar > $G/sin.sal 2>&1
+S=$G/sin.sal
+if ! grep -q "^disco 0: QEMU" $S && grep -q "^disco 0: no hay" $S && grep -q "^ *2 archivos " $S && grep -q "^sin disco: los 2 archivos" $S; then
+  ok "con «sindisco» el núcleo ni mira los discos del PC: la unidad es la de los módulos"
+else ko "«sindisco» no deja los discos sin mirar:"; sed 's/^/        /' $S | head -12; fi
+
+echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de tareas, menú Inicio, Bloc de notas y Consola) =="
+cap() { python3 -I $AQUI/nucleo32/mira_captura.py "$@" > $G/cap.txt 2>&1; }
+miracap() {    # lo que se prueba, la captura y sus comprobaciones
+  local que=$1 c=$2; shift 2
+  if [ -f $G/$c.ppm ] && cap $G/$c.ppm "$@"; then ok "$que"; else ko "$que:"; sed 's/^/        /' $G/cap.txt | head -6; [ -f $G/$c.ppm ] || echo "        (no hay captura $c)"; fi
+}
+cp $P/d16.img $G/e.img
+hora1=$(date +%H:%M); hora2=$(date -d "+1 minute" +%H:%M)
+CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura e1" \
+  ":clic 40 585" ":captura e2" ":clic 80 293" ":pausa 2" ":escribe Querida señora: ¿qué tal está?" ":tecla ret" ":escribe Adiós." ":captura e3" \
+  ":tecla f2" ":pausa 1" ":captura e4" ":arrastra 300 75 400 175" ":raton 600 450" ":captura e5" ":doble 400 175" ":pausa 1" ":captura e6" \
+  ":doble 400 14" ":pausa 1" ":clic 630 176" ":captura e7" ":clic 150 585" ":captura e8" \
+  ":clic 40 585" ":clic 80 329" ":pausa 3" "eco hola desde la ventana" "bucle" ":pausa 1" ":tecla ctrl-c" ":pausa 1" "ver" ":captura e9" \
+  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 250 500" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 399" \
+  ":clic 678 176" ":pausa 1" ":captura e13" ":clic 40 585" ":clic 230 545" ":captura e14" ":clic 275 327" > $G/escritorio.sal 2>&1
+S=$G/escritorio.sal
+mira "«escritorio» en la línea del cargador: el núcleo pone el modo gráfico (VBE de Bochs/QEMU, 800x600 con 32 bits) y arranca el escritorio" \
+  "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha puesto el núcleo, por la VBE de Bochs/QEMU), tapiz 0"
+miracap "el escritorio: el tapiz con el disquete y su nombre, la barra de tareas con «Inicio» y el reloj en la bandeja" e1 tam 800 600 \
+  negrita 30 570 46 580 Inicio negrita 630 505 645 520 Hispa-Pentium rgb 400 2 154C9C rgb 300 598 1D5DBA 10 rgb 795 597 3393E0 12
+if cap $G/e1.ppm negrita 740 570 752 580 $hora1 || cap $G/e1.ppm negrita 740 570 752 580 $hora2; then ok "el reloj de la bandeja da la hora del PC (la de la CMOS: $hora1)"
+else ko "el reloj de la bandeja no da la hora ($hora1)"; fi
+miracap "la flecha del ratón está pintada donde está el ratón (y solo ahí)" e2 rgb 40 585 10233F rgb 42 589 FFFFFF nrgb 400 300 10233F
+miracap "el menú Inicio: dos columnas (Programas a la izquierda, Documentos y Configuración a la derecha) y «Apagar el equipo» abajo" e2 \
+  negrita 50 195 66 205 Hispa-Pentium negrita 4 244 20 256 Programas negrita 36 280 50 290 "Bloc de notas" negrita 36 316 50 328 Consola \
+  negrita 176 244 190 256 Documentos texto 204 278 220 290 LEEME.TXT negrita 204 488 220 498 "Configuración" negrita 170 532 182 542 "Apagar el equipo" \
+  rgb 100 400 FFFFFF rgb 250 400 DCEAFB
+mira "el menú lanza el Bloc de notas (un programa del anillo 3, del disco)" "escritorio: lanzo .BLOC.BIN (la tarea [0-9]*)"
+miracap "el Bloc de notas en su ventana: el título con su nombre, su botón en la barra de tareas, y lo tecleado (con eñe, acentos y ¿?) dentro" e3 \
+  negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas" texto 130 572 140 580 "NOTAS.TXT - Blo" texto 94 124 102 134 "Querida señora: ¿qué tal está?" \
+  texto 94 140 102 150 "Adiós." negrita 110 96 130 112 Nuevo negrita 190 96 220 112 Guardar notexto 0 180 330 560 Programas
+mira "F2 guarda el texto en el disco (lo dice el propio programa)" "^bloc: guardado NOTAS.TXT, 38 octetos"
+miracap "y lo dice abajo, en la ventana" e4 texto 94 406 104 426 "Guardado en NOTAS.TXT (38 octetos)."
+miracap "arrastrar la ventana por su título la mueve (y donde estaba queda el tapiz)" e5 negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas" \
+  texto 194 224 202 234 "Querida señora: ¿qué tal está?" notexto 100 60 140 80 "NOTAS.TXT - Bloc de notas"
+miracap "dos clics en el título la maximizan (de lado a lado, hasta la barra de tareas), y el programa vuelve a pintar lo suyo" e6 \
+  negrita 24 2 36 10 "NOTAS.TXT - Bloc de notas" texto 6 62 14 72 "Querida señora: ¿qué tal está?" rgb 797 300 1A5AB6 negrita 30 570 46 580 Inicio
+miracap "otros dos la devuelven a su tamaño, y el botón de minimizar la recoge en la barra de tareas" e7 notexto 150 150 300 180 "NOTAS.TXT - Bloc de notas" \
+  notexto 0 0 100 20 "NOTAS.TXT - Bloc de notas" texto 130 572 140 580 "NOTAS.TXT - Blo"
+miracap "su botón de la barra de tareas la recupera, con lo que tenía" e8 negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas" texto 194 240 202 250 "Adiós."
+mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
+miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
+  negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
+  texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
+  texto 120 116 132 520 "Hispa-Pentium 0.4: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
+  negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
+miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
+  negrita 240 160 256 170 "Hispa-Pentium 0.4" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
+  negrita 196 126 206 136 "Configuración"
+miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
+  notexto 180 150 260 180 "NOTAS.TXT - Bloc de notas" notexto 100 570 200 582 "NOTAS.TXT - Blo" notexto 180 120 220 140 "Configuración"
+miracap "«Apagar el equipo»: el cuadro con Apagar, Reiniciar y Cancelar" e14 negrita 216 190 228 200 "Apagar el equipo" \
+  negrita 244 314 258 324 Apagar negrita 360 314 376 324 Reiniciar negrita 494 314 508 324 Cancelar
+mira "«Apagar» apaga (el núcleo acaba con su código)" "^escritorio: apagar" "^\[código 5\]"
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda la sesión del escritorio, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado durante la sesión del escritorio:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+fsck.fat -n $G/e.img > $G/fsck.txt 2>&1
+MTOOLS_SKIP_CHECK=1 mtype -i $G/e.img ::NOTAS.TXT > $G/notas.bin 2> /dev/null
+printf 'Querida se\xa4ora: \xa8qu\x82 tal est\xa0?\r\nAdi\xa2s.' > $G/notas.esp
+if cmp -s $G/notas.bin $G/notas.esp && ! grep -qi "differ\|error\|unused\|orphan" $G/fsck.txt; then
+  ok "NOTAS.TXT está en el disco con lo tecleado, octeto a octeto (página 437, finales de línea del DOS), y fsck.fat da el disco por sano"
+else ko "lo que guarda el Bloc de notas no está bien en el disco:"; od -c $G/notas.bin | head -4 | sed 's/^/        /'; head -5 $G/fsck.txt | sed 's/^/        /'; fi
+# la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
+CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 240 291" ":pausa 2" \
+  ":captura o1" ":clic 40 585" ":clic 230 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
+S=$G/orden.sal
+mira "la orden ESCRITORIO del intérprete de órdenes (por la llamada al sistema) pone en marcha el escritorio, y ese intérprete acaba" \
+  "^C:.>escritorio$" "^escritorio: en marcha, 800 x 600" "^El escritorio está en marcha\.$" "^ORDENES.BIN ha acabado con el código 0"
+miracap "un documento del menú Inicio se abre con el Bloc de notas (LEEME.TXT, leído del disco)" o1 negrita 112 64 124 72 "LEEME.TXT - Bloc de notas" \
+  texto 94 124 102 134 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
+miracap "«Cancelar» cierra el cuadro de apagar y todo sigue" o2 notexto 200 180 240 210 "Apagar el equipo" negrita 112 64 124 72 "LEEME.TXT - Bloc de notas"
+# otros modos: 1024x768, y una pantalla de 24 bits por punto (se dibuja en 32 y se vuelca)
+CAPTURAS=$G DISCO=$P/d16.img ARRANQUE="escritorio modo=1024x768 bits=24 tapiz=1" PANTALLA=1024x768 MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" \
+  ":clic 40 753" ":raton 600 300" ":captura m1" > $G/modo.sal 2>&1
+S=$G/modo.sal
+mira "con «modo=1024x768 bits=24 tapiz=1» en la línea del cargador, ese modo y ese tapiz" "^escritorio: en marcha, 1024 x 768 con 24 bits por punto .*, tapiz 1"
+miracap "a 1024x768 y con 24 bits por punto se ve igual: la barra abajo, el menú Inicio y el tapiz «Azul»" m1 tam 1024 768 negrita 30 738 46 748 Inicio \
+  negrita 36 448 50 458 "Bloc de notas" rgb 500 3 16468E 8
+# sin tarjeta gráfica que valga, se dice y la consola sigue
+VGA=none $AQUI/nucleo32/probar.sh "" escritorio hora apagar > $G/sinvga.sal 2>&1
+S=$G/sinvga.sal
+mira "sin modo gráfico (ni del cargador ni VBE de Bochs), «escritorio» lo dice y la consola del núcleo sigue" \
+  "^pantalla: no hay modo gráfico" "^no se puede poner en marcha el escritorio" "^llevo [0-9]* segundos" "^\[código 5\]"
+# el núcleo que le pide el modo gráfico al cargador (para GRUB, en los PC de verdad)
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $G/semilla.asm > /dev/null 2>&1 && nasm -f bin $G/semilla.asm -o $G/SEMILLA.BIN
+python3 -I $AQUI/nucleo32/modo_grafico.py $G/SEMILLA.BIN $G/GRAFICO.BIN 1024 768 32 > $G/mg.txt 2>&1
+if python3 -I $AQUI/nucleo32/modo_grafico.py --mira $G/SEMILLA.BIN $G/GRAFICO.BIN 1024 768 32 >> $G/mg.txt 2>&1; then
+  ok "modo_grafico.py: la copia del núcleo pide al cargador 1024x768x32 en su cabecera multiboot (bandera de vídeo y suma al día); lo demás, igual"
+else ko "modo_grafico.py no deja bien la cabecera multiboot: $(tail -1 $G/mg.txt)"; fi
+# la memoria USB con GRUB (hace falta ser root, y grub-install para PC)
+if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
+  if $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1; then
+    rm -f $G/monu
+    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
+      -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
+    QPID=$!
+    monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
+    for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
+    sleep 6; monu "sendkey ret" 12
+    monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8; monu "mouse_move 300 -200" 0.6
+    monu "screendump $G/u1.ppm" 0.6
+    monu quit 0.5; wait $QPID 2> /dev/null; QPID=
+    tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
+    S=$G/usb.txt2
+    mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas como módulos y sin mirar los discos" \
+      "^memoria: 64 MB, .* 8 programas de usuario" "^sin disco: los 8 archivos que ha traído el cargador hacen de unidad C:" \
+      "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
+    miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
+      negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
+  else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
+else
+  echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
+fi
+[ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))
