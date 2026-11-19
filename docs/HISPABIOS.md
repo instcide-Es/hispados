@@ -1,8 +1,11 @@
 # HispaBIOS: Hispa-DOS en equipos que solo arrancan por UEFI
 
-**Estado (19/11/2026):** versión 0.5, con **ratón** (ver «El ratón con UEFI»).
+**Estado (19/11/2026):** versión 0.6: el **teclado USB del firmware** ya no se
+queda mudo (ver «El teclado USB del firmware se quedaba sin reloj»: el MEDION
+S2217, **pendiente de probar en ese equipo** con la imagen de la carpeta
+`prueba-medion` del FTP). La 0.5 trajo el **ratón** (ver «El ratón con UEFI»).
 Probada en QEMU con OVMF (64 y 32 bits, i440fx y q35, hasta 8 GB, pantalla de
-1920x1200, con y sin 8254 y HPET, ratón USB). La 0.3 arranca en equipos de
+1920x1200, con y sin 8254 y HPET, ratón USB, teclado solo USB sin 8042). La 0.3 arranca en equipos de
 verdad: ThinkPad E14 (Raptor Lake), MacBook Air de 2017 y Asus GL553V (Kaby
 Lake; con sonido). En el **Monovate 14.1** (Core i3-1115G4, Tiger Lake) se
 quedaba a la mitad: el reloj no andaba. La 0.4 lleva el arreglo (ver «El reloj
@@ -38,6 +41,7 @@ interviene: la memoria arranca por el MBR.
 | `hispabios/efi32.asm` | Lo mismo para firmware de 32 bits (tabletas y portátiles con Atom): arranque, memoria, registro, discos y tablas |
 | `hispabios/efi32_reloj.inc`, `efi32_pant.inc`, `efi32_datos.inc` | El resto de la parte de 32 bits: el reloj y el despachador; la pantalla (escritura combinada, VBE, el giro); textos y variables |
 | `hispabios/efi64_raton.inc`, `efi32_raton.inc` | El ratón (0.5): los del firmware y los ratones USB que lee HispaBIOS |
+| `hispabios/efi64_tecl.inc`, `efi32_tecl.inc` | El teclado (0.6): qué teclado da el firmware y los tics de su reloj en cada viaje |
 | `hispabios/bios64.asm`, `bios_int.inc` | La BIOS de modo real y los cambios de modo (con `-DARQ32`, para firmware de 32 bits) |
 | `hispabios/pe.inc` | La cabecera PE/COFF, escrita a mano |
 | `hispabios/hblog.asm` | `HBLOG.COM`: enseña y guarda (`\HBLOG.TXT`) el registro de la BIOS de modo real |
@@ -208,12 +212,95 @@ SPI sin controlador del firmware no tiene arreglo desde aquí.
 - DOS mira el teclado en cada letra que escribe (Ctrl+C) y cada pregunta era
   un viaje al firmware con 1 ms de espera: era lo que más frenaba. Ahora INT
   16h AH = 01h pregunta al firmware **como mucho cada octavo de tic** (7 ms).
+  Desde la 0.6, en cada viaje se le dan al firmware los tics de su reloj: sin
+  ellos su teclado USB se quedaba mudo (apartado siguiente).
 - El reloj de DOS es el PIT por el 8259 y LINT0; los tics que se pierden se
   recuperan con el TSC. Desde la 0.4 la BIOS **comprueba al arrancar que la
   interrupción llega** y, si no, busca otra fuente (apartado siguiente). Si
   ninguna llega, lo dice en pantalla, guarda el registro y los tics se dan al
   entrar en las interrupciones de la BIOS (`k_tics`), como en la 0.3; la
   espera de tecla no usa HLT. `HBLOG` dice si llega y de dónde.
+
+## El teclado USB del firmware se quedaba sin reloj (0.6)
+
+**El fallo.** En el MEDION S2217 MD99526 (2 en 1 con Atom Z3735F «Bay Trail»,
+firmware Phoenix UEFI 2.31 de 32 bits, **sin 8042**: el teclado de la base es
+USB, en el xHCI 8086:0F35) el teclado iba en el menú de CONFIG.SYS y dejaba
+de ir después: en `C:\>`, con F8 (línea a línea) y en la pregunta S/N de
+DIAGNOSTICO. El registro (`informes/Medion/HISPABIOS.LOG`, de la 0.4) acababa
+bien: el 8254 cuenta y la IRQ 0 llega a DOS.
+
+**La causa.** El teclado USB del firmware (UsbKbDxe de EDK II y los que salen
+de él) no se lee al preguntarle (`ReadKeyStroke` solo mira su cola): las
+teclas llegan por una transferencia de interrupción que el controlador del
+xHCI repasa en un **suceso de temporizador** del firmware. Los temporizadores
+del firmware solo avanzan con la **interrupción de su reloj** (el protocolo
+«Timer Arch»; en el Medion, el 8254 por el 8259, vector 68h, a 18,2 Hz: el
+8254 está a 65536 cuentas ya antes de HispaBIOS). Con DOS en marcha el 8254 y
+el 8259 son de DOS, y el firmware solo ve un tic si el flanco del 8254 cae
+justo dentro de uno de sus viajes (1 ms de espera con las interrupciones
+abiertas):
+
+- en el **menú de CONFIG.SYS** el núcleo pregunta por el teclado sin parar
+  (INT 16h 01h en bucle, un viaje cada 7 ms): algunos flancos caen dentro y
+  el teclado va, con algo de retraso;
+- **después**, todo el que espera una tecla (el núcleo en `con_getc_bios`,
+  INT 16h 00h en la BIOS) descansa con **HLT hasta el tic siguiente** y
+  pregunta justo *después* de cada flanco: el firmware no ve ni uno, sus
+  temporizadores no avanzan y el teclado USB se queda mudo para siempre.
+
+La HispaBIOS de la 0.9.26 (0.1/0.2) hacía un viaje en cada pregunta, sin
+medida y sin parar: el firmware se llevaba casi todos los tics, y por eso con
+ella el teclado iba (y la pantalla iba a tirones: la «lentitud de la 0.2»).
+Un teclado **PS/2** no depende de esto (su controlador mira el 8042 al
+preguntarle), y en OVMF el reloj del firmware es el del APIC local, que no va
+acompasado con el 8254 y siempre cuela algún tic: por eso no se había visto
+ni en los equipos probados ni en QEMU. No es cosa del `ConnectController` de
+las controladoras (el registro del fallo es de la 0.4, que no conecta el
+USB), ni de TECLADO (INT 15h 87h no toca nada del firmware y la A20 está
+siempre abierta: no escribe en el puerto 92h), ni de las tablas propias de la
+escritura combinada.
+
+**Se reproduce en QEMU** con el teclado solo USB (`-machine q35,i8042=off`,
+`usb-kbd` en el xHCI) y `-DPRUEBA_FW_SIN_RELOJ` (el firmware no recibe
+ninguna interrupción en sus viajes: el TPR del APIC local se queda en F0h):
+llega a `C:\>` y el teclado no responde. Con un teclado PS/2, en las mismas
+condiciones, sí.
+
+**El arreglo** (`efi32_tecl.inc`, `efi64_tecl.inc`): en **cada viaje al
+firmware** se le dan los tics de su reloj que le tocan por el tiempo pasado
+(`fwt_dar`: medido con el TSC y el periodo que dice `GetTimerPeriod`; como
+mucho 3 por viaje), sin esperar a su interrupción:
+
+1. `GenerateSoftInterrupt()` de su `EFI_TIMER_ARCH_PROTOCOL` (PI, vol. 2): la
+   manera prevista de darle un tic «a mano». Se prueba una vez al arrancar;
+2. si no lo tiene o no lo admite, y usa el 8259 con la IRQ 0 abierta: **su
+   propia rutina de la IRQ 0**, llamada como la llamaría la interrupción (por
+   su IDT, vector `T_VEC0`, con el marco de pila de una interrupción).
+
+Con eso corren sus sucesos de temporizador en cada viaje: el repaso del USB
+(las teclas, y el ratón USB de la 0.5) y la repetición de teclas. La espera
+de 1 ms sigue, y antes de leer la tecla se llama a `CheckEvent(WaitForKey)`,
+que es como pregunta un programa de UEFI (hay firmware que atiende ahí su
+teclado). En el **modo seguro** (S) no se dan tics: INT 16h pregunta siempre
+al firmware y la espera de tecla no usa HLT (`T_TEC_OPC` bit 0), como la 0.2:
+más lento, pero el firmware se lleva sus tics; sirve para distinguir en un
+equipo de verdad si el fallo es el reloj del firmware.
+
+**El registro.** `HISPABIOS.LOG`, apartado «Teclado:»: la consola de entrada
+y si da `SimpleTextInputEx`, cada teclado del firmware (Simple Text Input: si
+es USB, con su fabricante y producto), cada interfaz USB HID de teclado y
+quién la lleva (el firmware, un controlador sin teclado, o nadie), el reloj
+del firmware y su periodo, y cómo se le dan los tics. `HBLOG` dice las teclas
+que ha dado el firmware y los tics que se le han dado. La imagen de prueba
+(`tools/mkprueba_hispabios.sh ... medion`) lanza sola `TECLAPRU`
+(`tests/progs/teclapru.asm`: 20 s esperando teclas con HLT, como el núcleo;
+deja `\TECLAPRU.TXT`) y `HBLOG`, sin que haga falta teclear nada.
+
+**No se hace**: leer nosotros un teclado USB que el firmware no lleve (como
+se hace con el ratón): el registro lo dice («SIN controlador del firmware»)
+y se hará si aparece un equipo así. Si el firmware no da Timer Arch ni usa el
+8259, queda como antes (lo dice el registro).
 
 ## El reloj en los equipos con el 8254 parado (0.4)
 
@@ -478,6 +565,8 @@ y los del ratón y los discos de `efi64.asm`, en `tests/hispabios_raton_casos.sh
 | `-DPANTALLA_NATIVA` | No cambiar de modo de pantalla aunque sea lenta |
 | `-DPRUEBA_RELOJ=máscara` | Fuentes del reloj que la BIOS no prueba (bit = número de la tabla de arriba) |
 | `-DPRUEBA_P2SB` | Un P2SB de mentira con el 8254 bloqueado (QEMU no tiene PCH con banda lateral) |
+| `-DPRUEBA_FW_SIN_RELOJ` | El firmware no recibe ninguna interrupción en sus viajes (el caso del Medion: su reloj no anda con DOS en marcha) |
+| `-DPRUEBA_FWT=n` | Los tics al firmware: 0, no se dan (el fallo); 2, por la rutina de su interrupción (en OVMF, la del temporizador del APIC local) |
 
 `efi32.asm` tiene las mismas (menos `PRUEBA_PILA`: la pila la alinea
 `fw_llamar`) y dos más: `-DPRUEBA_GIRO=n` (el giro por omisión aunque la
@@ -527,12 +616,27 @@ conecta controladoras. Los discos de `efi64.asm`: la memoria USB (80h), un
 disco SATA de 64 MB (81h, D:, leer y escribir) y uno de 4 MB que no se da;
 el equipo de SMBIOS y la memoria extendida según el mapa.
 
+El teclado (0.6), en `tests/hispabios_teclado_casos.sh` (`HB_SOLO=teclado`):
+QEMU **sin 8042** (`-machine q35,i8042=off`) con un `usb-kbd` en el xHCI y el
+firmware sin interrupciones (`PRUEBA_FW_SIN_RELOJ`). Sin dar tics
+(`PRUEBA_FWT=0`) llega a `C:\>` y el teclado no responde (el fallo); con
+los tics por `GenerateSoftInterrupt` y por la rutina de la interrupción, en 32
+bits (procesador de 64 y de 32) y en 64, DIR responde, `TECLAPRU` (la espera
+con HLT) recibe las teclas, y el registro y `HBLOG` dicen el teclado USB, el
+reloj del firmware y los tics dados; el modo seguro con teclado solo USB.
+Lo que QEMU no puede decir: si el firmware Phoenix del Medion da Timer Arch y
+admite `GenerateSoftInterrupt` (si no, queda su rutina del vector 68h).
+
 OJO con QEMU y KVM: con el 8259 del núcleo (KVM) la IRQ 0 por LINT0 no llega
 tras enmascarar y abrir LINT0, cosa que un equipo de verdad sí hace; las
 pruebas van sin KVM.
 
 ## Pendiente
 
+- Probar la 0.6 en el **MEDION S2217** (`prueba-medion` en el FTP) y ver en
+  `HISPABIOS.LOG` el apartado «Teclado:» y en `HBLOG.TXT` las teclas y los
+  tics. Si el teclado de algún equipo no lo lleva el firmware: leerlo por
+  `EFI_USB_IO` (informes de arranque), como el ratón.
 - Probar la parte de 32 bits en el **Acer One 10** con la imagen de prueba
   (`LEEME-ACER.TXT` en la carpeta `prueba-hispabios` del FTP).
 - Llevar a `efi64.asm` la pantalla girada de la de 32 (hay tabletas con
