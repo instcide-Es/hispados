@@ -1470,7 +1470,7 @@ else ko "con el EHCI y sus compañeras, la memoria no queda bien"; fi
 # 7 ter. una UHCI sola (un PC de antes), con la memoria en ella (a velocidad plena): leer y escribir
 cp $P/d16.img $N/uhci.img
 ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura" QEMU_MAS="-device piix3-usb-uhci,id=u -drive id=mu,file=$N/uhci.img,format=raw,if=none -device usb-storage,bus=u.0,port=1,drive=mu" \
-  $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" escribe :espera :espera :espera :espera :espera :espera :espera :espera salir disco apagar > $N/uhci.sal 2>&1
+  $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" escribe :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera salir disco apagar > $N/uhci.sal 2>&1
 S=$N/uhci.sal
 mira "UHCI: una memoria USB a velocidad plena (cada paquete, un TD; la alternancia, llevada aquí): se lee y se escribe" \
   "^usb: controladora UHCI 8086:7020, 2 puertos$" "velocidad plena, en el puerto 1 (UHCI); almacenamiento$" "^ *1 archivo(s) copiado(s)\.$" \
@@ -1986,7 +1986,7 @@ for hc in xhci ehci; do
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
-    if cap $G/c3$hc.ppm negrita 170 116 180 124 "Mi equipo" negrita 176 168 190 180 "C:\\OFICINA" texto 180 216 190 226 "CUENTAS.HVP" texto 180 296 190 306 "DICCIO.DAT" \
+    if cap $G/c3$hc.ppm negrita 142 90 150 98 "Mi equipo" negrita 150 141 158 149 "C:\\OFICINA" texto 152 190 160 198 "CUENTAS.HVP" texto 152 270 160 278 "DICCIO.DAT" \
       && cap $G/c4$hc.ppm negrita 80 16 110 36 "Cuentas - (sin nombre)" && [ $sano = 0 ]; then
       ok "y Mi equipo entra en C:\\OFICINA y abre CUENTAS.HVP (Cuentas, con HVPRUN); el disco queda sano"
     else ko "Mi equipo no abre la oficina de C:\\OFICINA en el disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; sed 's/^/        /' $Z/fsck.txt | head -3; fi
