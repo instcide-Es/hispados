@@ -1,14 +1,14 @@
 # Red en Hispa-DOS
 
 Primer paso de la red (14/11/2026): un controlador residente con la interfaz
-de *packet driver* (`HSPRED`), una pila TCP/IP propia y tres órdenes:
+de controlador de paquetes («packet driver», `HSPRED`), una pila TCP/IP propia y tres órdenes:
 `CONFRED` (`IPCONFIG`), `PING` y `DESCARGAR`. El objetivo es llegar a lo que
 tenía Windows para Trabajo en Grupo 3.11 con TCP/IP: ver «Pendiente».
 
 ```
 A:\>HSPRED
-HSPRED 0.1: controlador de red de Hispa-DOS (packet driver)
-Tarjeta Realtek RTL8139, MAC 52:54:00:12:34:56, IRQ 11, packet driver en INT 60h
+HSPRED 0.1: controlador de red de Hispa-DOS
+Tarjeta Realtek RTL8139, MAC 52:54:00:12:34:56, IRQ 11, controlador de paquetes en INT 60h
 
 A:\>CONFRED
 
@@ -433,7 +433,7 @@ Cómo está hecha (sección `.yukon` de `drivers/hspred.asm`, de quita y pon:
   corta la tarjeta (si no, su recepción se cuelga: lo dice `sky2`).
 - **Filtro**: las tramas para la MAC de la tarjeta y las de difusión y
   multidifusión (el filtro de multidifusión, apagado). Sin modo promiscuo
-  (las demás tarjetas tampoco lo tienen: el packet driver solo da los modos
+  (las demás tarjetas tampoco lo tienen: el controlador de paquetes solo da los modos
   1 a 3).
 - **Interrupción** (INTx, la que diga la BIOS en la configuración PCI; se
   quita el bit que la tapa): solo el anillo de estado y el PHY. Las de error
@@ -486,7 +486,7 @@ como se dice arriba; `tests/yukon_sim.py` lo reproduce (tramas llegando
 mientras `/INFO` escribe) y prueba que con la IRQ cortada sí avisa.
 
 **«Descartados»** (`Paquetes: ... descartados`) no son errores: son tramas
-que han llegado bien y que **ningún programa ha pedido** (el packet driver
+que han llegado bien y que **ningún programa ha pedido** (el controlador de paquetes
 las tira porque nadie se ha apuntado a su tipo): IPv6, tipos que no son IP
 ni ARP, y todo lo que llega cuando no hay ningún programa de red abierto
 (entre `CONFRED` y `CONSOLA`, por ejemplo). Los errores van aparte
@@ -533,7 +533,7 @@ podido poner en marcha la tarjeta»; con la Yukon, solo en el HP Mini.
 Desde el 17/11/2026, un adaptador USB-Ethernet que ofrezca la **clase
 estándar CDC-ECM** es una tarjeta más de HSPRED. El aparato lo lleva
 `HSPUSB.SYS` (enumeración, transferencias y sondeo: `lib/usb_red.inc`, ver
-[USB.md](USB.md)) y HSPRED solo pone el puente con el packet driver. Vale
+[USB.md](USB.md)) y HSPRED solo pone el puente con el controlador de paquetes. Vale
 para:
 
 - los **Realtek RTL8152 y RTL8153** (los adaptadores «USB a Ethernet
@@ -553,7 +553,7 @@ CONFIG.SYS:   DEVICE=A:\HISPADOS\HSPUSB.SYS /F /RED /INFO
 Adaptador de red USB preparado (CDC-ECM), MAC 00:E0:4C:68:xx:xx: cargue HSPRED.
 
 A:\>HSPRED
-Tarjeta Adaptador USB (CDC-ECM), MAC 00:E0:4C:68:xx:xx, por HSPUSB, packet driver en INT 60h
+Tarjeta Adaptador USB (CDC-ECM), MAC 00:E0:4C:68:xx:xx, por HSPUSB, controlador de paquetes en INT 60h
 A:\>HSPRED /INFO
 Tarjeta:         Adaptador USB (CDC-ECM)
 USB:             0BDA:8153, supervelocidad (USB 3), por xHCI (lo lleva HSPUSB)
@@ -765,7 +765,7 @@ casa suele ser de un día o más): `CONFRED /RENOVAR`.
 
 ## API
 
-### HSPRED: packet driver (especificación de FTP Software 1.09)
+### HSPRED: controlador de paquetes («packet driver», especificación de FTP Software 1.09)
 
 El vector (`INT 60h` si no se dice otro) apunta a la entrada, que lleva
 `PKT DRVR` 3 octetos después, como pide la especificación. Funciones (AH):
@@ -794,7 +794,7 @@ de la tarjeta, con las interrupciones desactivadas y la pila propia de
 HSPRED (512 octetos).
 
 Por ser la interfaz estándar, sirven también los programas de DOS de otros
-que usan *packet drivers*: mTCP (DHCP, FTP, Telnet, IRC, HTGET...), WATTCP
+que usan controladores de paquetes: mTCP (DHCP, FTP, Telnet, IRC, HTGET...), WATTCP
 y lo que se hizo con él, Arachne... Sin probar todavía con ellos (no van en
 el proyecto).
 
@@ -802,7 +802,7 @@ el proyecto).
 
 | AX | |
 |---|---|
-| DA00h | AL = FFh si está, BX = 5248h («HR»), CL = vector del packet driver, ES:DI = configuración IP compartida (30 octetos: +0 indicadores (bit 0 válida, bit 1 por DHCP), +2 IP, +6 máscara, +10 puerta, +14 DNS, +18 servidor DHCP, +22 concesión en segundos, +26 día, mes y año) |
+| DA00h | AL = FFh si está, BX = 5248h («HR»), CL = vector del controlador de paquetes, ES:DI = configuración IP compartida (30 octetos: +0 indicadores (bit 0 válida, bit 1 por DHCP), +2 IP, +6 máscara, +10 puerta, +14 DNS, +18 servidor DHCP, +22 concesión en segundos, +26 día, mes y año) |
 | DA01h | AL = enlace (0 no, 1 sí, FFh no se sabe), AH = velocidad (1 = 10, 2 = 100, 3 = 1000 Mbit/s; 0 no se sabe) |
 | DA02h | descargar (BL = 1: aunque haya programas usándolo) -> AL = 0 hecho, 1 hay otro residente encima, 2 en uso |
 | DA03h | ES:BX = datos del controlador (los que enseña `/INFO`) |
@@ -836,7 +836,7 @@ descargarse (`HSPRED /U`).
 
 Escrita aquí, desde las RFC (791 IP, 792 ICMP, 768 UDP, 793 TCP, 826 ARP,
 2131 DHCP, 1035 DNS, 1945 HTTP/1.0); se incluye en cada programa (unos 5 KB
-de código). Habla con cualquier packet driver. Tiene: Ethernet II; ARP
+de código). Habla con cualquier controlador de paquetes. Tiene: Ethernet II; ARP
 (pregunta, contesta, recuerda 4 direcciones y **aprende** la MAC de quien
 envía si está en nuestra red, para poder contestarle sin preguntar); IPv4
 (sin fragmentos); ICMP (contesta al eco y hace eco); UDP; cliente de DHCP;
@@ -890,12 +890,12 @@ si HW32.COM está junto a COMMAND.COM o en el PATH.)
 
 Tres funciones nuestras en el KERNEL32 de HW32 (no son del API de Windows):
 `HispaRedAbrir(info)`, `HispaRedEnviar(trama, octetos)` y `HispaRedCerrar()`.
-Al abrir, HW32 busca el packet driver, pide los tipos IP y ARP y pone como
+Al abrir, HW32 busca el controlador de paquetes, pide los tipos IP y ARP y pone como
 receptor un trozo de código de modo real que copia a un bloque de memoria
 convencional (19 KB): desde la interrupción de la tarjeta, cada trama cae en
 una ranura de un anillo de 12, y el programa (en modo protegido) lo lee
 directamente de esa memoria, sin llamar a nadie. Enviar es una llamada al
-packet driver por DPMI. `info` trae la MAC, el anillo y la configuración IP
+controlador de paquetes por DPMI. `info` trae la MAC, el anillo y la configuración IP
 compartida de HSPRED.
 
 Al acabar el programa, **como sea** (`ExitProcess`, un error, que lo termine
@@ -917,7 +917,7 @@ un programa de 32 bits en modo protegido era pasar a modo real en cada
 llamada y copiar cada dato, y aun así faltaban varias conexiones y los
 sockets sin bloqueo que pide un navegador. Las DLL de Hispa32 se escriben en
 C (como MSVCRT.DLL), TLS (BearSSL) es C y lo que hay que compartir con la de
-16 bits no es el código sino lo que ya se comparte: el packet driver y la
+16 bits no es el código sino lo que ya se comparte: el controlador de paquetes y la
 configuración IP que guarda HSPRED.
 
 - Ethernet II, ARP (8 direcciones; la trama que espera a que ARP conteste
@@ -1204,7 +1204,7 @@ tardan más de un tic entre una conexión y la siguiente.
   Tarjetas ISA (NE2000 ISA, 3c509) con su dirección en la línea de órdenes.
 - **Wi-Fi**: **Decisión (Carlos, 17/11/2026): en Hispa-386 no se hace Wi-Fi**
   (HSPRED solo enseña la tarjeta); es de Hispa-486. Hecho el 18/11/2026 para
-  la Broadcom BCM43224, con WPA2-Personal: `HSPWIFI` (otro packet driver, con
+  la Broadcom BCM43224, con WPA2-Personal: `HSPWIFI` (otro controlador de paquetes, con
   la misma interfaz que HSPRED: las órdenes de red funcionan igual) y la
   orden `WIFI`. Ver [WIFI.md](WIFI.md). Falta probarlo en la tarjeta de
   verdad, y la Realtek RTL8822BE.
@@ -1218,7 +1218,7 @@ tardan más de un tic entre una conexión y la siguiente.
   la memoria (la de `lib/red.inc` hecha residente, con varias conexiones y
   sockets UDP), para los navegadores y clientes de correo de la época. Para
   Windows 3.11 hay que ver también cómo convive con su propia pila de
-  Microsoft (que usa NDIS, no packet drivers).
+  Microsoft (que usa NDIS, no controladores de paquetes).
 - **Pila residente** con varias conexiones a la vez, ventana que crece y
   renovación de la concesión de DHCP.
 - ~~Un navegador para Hispa Ventanas~~: hecho en Hispa-486 (18/11/2026,

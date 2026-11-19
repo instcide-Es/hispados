@@ -114,7 +114,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 Pedido de Carlos: «Wifi y Explorador web es lo único que necesitamos para que
 el HP Mini pueda ser útil» (para la web de la biblioteca). `HSPWIFI` lleva la
 Broadcom BCM43224 del HP Mini 5103 con WPA2-Personal y se presenta como un
-packet driver Ethernet, así que todo lo que ya usaba `HSPRED` (y el
+controlador de paquetes Ethernet, así que todo lo que ya usaba `HSPRED` (y el
 navegador) funciona igual por Wi-Fi; la red se elige con la orden `WIFI`. El
 controlador de la radio son los fuentes de `brcmsmac` de Linux sin tocar,
 sobre una capa propia; la gestión 802.11 y WPA2 son nuestras. Va en un
@@ -156,7 +156,7 @@ para la biblio» (la biblioteca de la asociación, en ClicGest).
 - **Lo que ha tocado de lo que había:**
   - HW32 (`utils/hw32k.inc`): tres funciones nuestras en KERNEL32
     (`HispaRedAbrir`, `HispaRedEnviar`, `HispaRedCerrar`) para las tramas del
-    packet driver, y soltar la red al acabar el programa.
+    controlador de paquetes, y soltar la red al acabar el programa.
   - Hispa Ventanas: los colores de GDI admiten `PALETTEINDEX(n)` (los de su
     paleta: así un programa Hispa32 se pinta con la crema, la arena y la
     terracota de verdad, no con lo más parecido del cubo de colores); y el

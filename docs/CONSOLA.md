@@ -187,4 +187,4 @@ La pila TCP/IP de [`lib/red.inc`](../lib/red.inc) ya hacía de **cliente**
   SYN nuevo a ese puerto se descarta (el cliente reintenta más tarde).
 
 CONSOLA **no se queda residente**: es un `.COM` normal que, al salir, suelta el
-puerto y los tipos del packet driver y deja todo como estaba.
+puerto y los tipos del controlador de paquetes y deja todo como estaba.

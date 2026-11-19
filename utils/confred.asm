@@ -6,7 +6,7 @@
 ;                       \HISPADOS\RED.INI)
 ;  CONFRED /RENOVAR     pedirla otra vez por DHCP (/RENEW)
 ;  CONFRED /LIBERAR     olvidarla (/RELEASE): la próxima orden de red la pide
-;  Necesita HSPRED (u otro packet driver). Ver docs/RED.md.
+;  Necesita HSPRED (u otro controlador de paquetes). Ver docs/RED.md.
 ; =============================================================================
         cpu 386
         bits 16
@@ -260,7 +260,7 @@ m_uso       db "Muestra y renueva la configuración de la red (IP, máscara, pue
             db 13, 10
             db "La configuración está en \HISPADOS\RED.INI de la unidad de arranque:", 13, 10
             db "DHCP=SI (lo normal) o DHCP=NO con IP=, MASCARA=, PUERTA= y DNS=.", 13, 10
-            db "Hace falta el controlador de la tarjeta: HSPRED (u otro packet driver).", 13, 10
+            db "Hace falta el controlador de la tarjeta: HSPRED (u otro controlador de paquetes).", 13, 10
             db "Otras órdenes de red: PING y DESCARGAR.", 13, 10, 0
 m_pidiendo  db "Pidiendo la configuración por DHCP...", 13, 10, 0
 m_liberada  db "Configuración olvidada (la próxima orden de red la pedirá otra vez).", 0

@@ -13,7 +13,8 @@
 ;                             AUTOEXEC.BAT; si no hay ninguna, no dice nada)
 ;  WIFI REGISTRO [archivo]    guarda el registro del controlador
 ;
-;  Necesita HSPWIFI cargado (INT 2Fh AH=DCh). Al conectar guarda en
+;  Usa HSPWIFI (INT 2Fh AH=DCh); si no está cargado, lo carga él (salvo con
+;  HSPEMM o sin tarjeta: lo dice; con /AUTO, callado). Al conectar guarda en
 ;  \HISPADOS\RED.INI de la unidad de arranque el nombre (WIFI=) y la clave ya
 ;  preparada (WIFICLAVE=, 64 cifras: la PMK de WPA2, no la contraseña).
 ;  Ver docs/WIFI.md.
@@ -65,29 +66,18 @@ MAXREDES    equ 24
 
 start:
         cld
+        mov sp, pila_tope           ; pila propia: para poder encoger el bloque
         mov di, bss_ini
         mov cx, bss_fin - bss_ini
         xor al, al
         rep stosb
-        ; ¿está HSPWIFI?
-        mov ax, 0xDC00
-        xor bx, bx
-        int 0x2F
-        cmp al, 0xFF
-        jne .no
-        cmp bx, 0x5746
+        ; ¿está HSPWIFI? Si no, se carga (carga_wifi: si no se puede, sale)
+        call hay_wifi
         je .si
-.no:
-        ; con /AUTO y sin controlador, callado (AUTOEXEC.BAT de un equipo sin Wi-Fi)
         call palabra
-        cmp word [si], '/A'
-        je salir0
         cmp word [si], '/?'
         je ayuda
-        mov si, m_nores
-        call puts
-        mov ax, 0x4C01
-        int 0x21
+        call carga_wifi
 .si:
         call palabra
         mov al, [si]
@@ -154,6 +144,260 @@ salir_bien:
         call registro_auto
         mov ax, 0x4C00
         int 0x21
+
+; ---- ¿está HSPWIFI? ZF=1 sí ----
+hay_wifi:
+        mov ax, 0xDC00
+        xor bx, bx
+        int 0x2F
+        cmp al, 0xFF
+        jne .r
+        cmp bx, 0x5746
+.r:
+        ret
+
+; =============================================================================
+;  HSPWIFI no está: cargarlo (\HISPADOS\HSPWIFI.COM de la unidad de arranque,
+;  como ACTUALIZAR carga HSPRED) y seguir con la orden. Vuelve solo si queda
+;  cargado; si no, sale: con /AUTO, callado (un AUTOEXEC.BAT en un equipo sin
+;  Wi-Fi, con HSPEMM o que ya va por el cable).
+;  Antes de lanzarlo, WIFI se muda al final de la memoria (sube_alto): así el
+;  residente queda donde estaba WIFI y, al acabar, no deja su hueco debajo.
+; =============================================================================
+carga_wifi:
+        call palabra
+        mov byte [auto_c], 0
+        cmp byte [si], '/'
+        jne .n
+        mov al, [si+1]
+        and al, 0xDF
+        cmp al, 'A'
+        jne .n
+        mov byte [auto_c], 1
+.n:
+        ; modo V86 (HSPEMM, la configuración «Juegos»): HSPWIFI no puede ir
+        smsw ax
+        mov si, m_v86
+        test al, 1
+        jnz .falla
+        cmp byte [auto_c], 0
+        je .tarjeta
+        ; /AUTO con otro controlador de red: el AUTOEXEC.BAT ya eligió el cable
+        mov ax, 0xDA00
+        xor bx, bx
+        int 0x2F
+        cmp al, 0xFF
+        je salir0
+.tarjeta:
+        ; ¿hay una tarjeta de las que sabe usar HSPWIFI? (sin ella, ni se prueba)
+        call rp_leer
+        cmp byte [rp_haywifi], 0    ; (HAYWIFI=SI: las pruebas)
+        jne .hay
+        call rp_wifi_pci
+        mov si, m_notarjeta
+        jc .falla
+.hay:
+        cmp byte [auto_c], 0
+        jne .callado
+        mov si, m_cargando
+        call puts
+.callado:
+        call sube_alto
+        call exec_hspwifi
+        mov si, m_nohw
+        jc .falla_ruta
+        call hay_wifi
+        je .r
+        ; HSPWIFI ya ha dicho por qué no se queda (el cable, la memoria...)
+        cmp byte [auto_c], 0
+        jne salir0
+        mov ax, 0x4C01
+        int 0x21
+.falla_ruta:
+        cmp byte [auto_c], 0
+        jne salir0
+        call puts
+        mov si, hw_ruta
+        call puts
+        call crlf
+        mov ax, 0x4C01
+        int 0x21
+.falla:
+        cmp byte [auto_c], 0
+        jne salir0
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.r:
+        ret
+
+; ---- mudarse arriba ----
+; Se encoge el bloque a lo justo, se pide otro del mismo tamaño (más el
+; entorno) al final de la memoria (último ajuste), se copia ahí el programa
+; entero, PSP incluido, y el entorno; pasa a ser el proceso (AH=50h) y se
+; sueltan el bloque y el entorno de abajo. Si algo falla, se queda donde está
+; (HSPWIFI se carga igual, solo que encima de WIFI).
+sube_alto:
+        mov bx, prog_end + 15
+        shr bx, 4
+        mov [mis_par], bx
+        push cs
+        pop es
+        mov ah, 0x4A
+        int 0x21
+        jc .r
+        mov ax, cs
+        mov [bajo], ax
+        ; el entorno (hasta 32 KB; más, no se muda nada)
+        xor dx, dx
+        mov ax, [0x2C]
+        mov [bajo_env], ax
+        test ax, ax
+        jz .e0
+        dec ax
+        mov es, ax
+        mov dx, [es:3]
+        push cs
+        pop es
+        cmp dx, 0x800
+        ja .r
+.e0:
+        mov [env_par], dx
+        ; un bloque al final de la memoria
+        mov ax, 0x5800
+        int 0x21
+        mov [estrat], ax
+        mov ax, 0x5801
+        mov bx, 2                   ; último ajuste
+        int 0x21
+        mov bx, [mis_par]
+        add bx, [env_par]
+        mov ah, 0x48
+        int 0x21
+        pushf
+        push ax
+        mov ax, 0x5801
+        mov bx, [estrat]
+        int 0x21
+        pop ax
+        popf
+        jc .r
+        mov bx, cs
+        cmp ax, bx
+        jbe .suelta                 ; (no ha quedado más arriba: no sirve)
+        mov [alto], ax
+        ; copiar el programa (con todas sus variables ya puestas)
+        mov es, ax
+        xor si, si
+        xor di, di
+        mov cx, [mis_par]
+        shl cx, 3
+        rep movsw
+        ; y el entorno, detrás
+        mov cx, [env_par]
+        jcxz .sin_env
+        push ds
+        mov ds, [bajo_env]
+        xor si, si
+        shl cx, 3
+        rep movsw
+        pop ds
+        mov ax, [alto]
+        add ax, [mis_par]
+        mov [es:0x2C], ax
+.sin_env:
+        ; la tabla de handles, si es la de dentro del PSP
+        cmp word [es:0x34], 0x18
+        jne .jft
+        mov ax, cs
+        cmp [es:0x36], ax
+        jne .jft
+        mov [es:0x36], es
+.jft:
+        ; su MCB: es suyo y lleva el nombre del programa
+        mov ax, es
+        dec ax
+        mov es, ax
+        inc ax
+        mov [es:1], ax
+        push ds
+        mov ax, cs
+        dec ax
+        mov ds, ax
+        mov si, 8
+        mov di, 8
+        mov cx, 4
+        rep movsw
+        pop ds
+        ; ser el proceso y seguir arriba
+        mov bx, [alto]
+        mov ah, 0x50
+        int 0x21
+        push word [alto]
+        push word .arriba
+        retf
+.arriba:
+        mov ax, cs
+        cli
+        mov ss, ax
+        sti
+        mov ds, ax
+        mov es, ax
+        mov dx, 0x80                ; la DTA, la de este PSP
+        mov ah, 0x1A
+        int 0x21
+        ; soltar lo de abajo
+        cmp word [env_par], 0
+        je .sin_env2
+        mov es, [bajo_env]
+        mov ah, 0x49
+        int 0x21
+.sin_env2:
+        mov es, [bajo]
+        mov ah, 0x49
+        int 0x21
+        jmp .r
+.suelta:
+        mov es, ax
+        mov ah, 0x49
+        int 0x21
+.r:
+        push cs
+        pop es
+        ret
+
+; ---- lanzar HSPWIFI (con /AUTO, HSPWIFI /AUTO). CF=1: no está el archivo ----
+exec_hspwifi:
+        mov ax, 0x3305
+        int 0x21
+        add dl, 'A' - 1
+        mov [hw_ruta], dl
+        mov word [pblk], 0          ; el entorno: una copia del de WIFI
+        mov ax, hw_cola
+        cmp byte [auto_c], 0
+        je .c
+        mov ax, hw_cola_auto
+.c:
+        mov [pblk + 2], ax
+        mov [pblk + 4], cs
+        mov word [pblk + 6], fcb0
+        mov [pblk + 8], cs
+        mov word [pblk + 10], fcb0
+        mov [pblk + 12], cs
+        mov [sv_sp], sp
+        mov dx, hw_ruta
+        mov bx, pblk
+        mov ax, 0x4B00
+        int 0x21
+        cli
+        mov bx, cs
+        mov ss, bx
+        mov sp, [cs:sv_sp]
+        sti
+        mov ds, bx
+        mov es, bx
+        cld
+        ret
 
 ; ---- SI = después del nombre del programa: salta los blancos ----
 palabra:
@@ -1548,7 +1792,15 @@ f_8         db "el punto de acceso ha cortado la conexión.", 0
 f_9         db "se ha perdido la señal.", 0
 f_10        db "no ha contestado a tiempo.", 0
 
-m_nores     db "HSPWIFI no está cargado. Cárguelo antes: HSPWIFI", 13, 10, 0
+m_cargando  db "Cargando el controlador Wi-Fi (HSPWIFI)...", 13, 10, 0
+m_v86       db "El Wi-Fi solo funciona en la configuración «Normal» (sin HSPEMM).", 13, 10
+            db "Reinicie y elija «Normal».", 13, 10, 0
+m_notarjeta db "Este equipo no tiene una tarjeta Wi-Fi de las que conoce Hispa-DOS.", 13, 10, 0
+m_nohw      db "No se encuentra el controlador Wi-Fi: ", 0
+hw_ruta     db "A:\HISPADOS\HSPWIFI.COM", 0
+hw_cola     db 0, 13
+hw_cola_auto db 6, " /AUTO", 13
+auto_c      db 0
 m_uso       db "WIFI: la red inalámbrica (Wi-Fi) de Hispa-486", 13, 10, 13, 10
             db "  WIFI                       cómo está la conexión", 13, 10
             db "  WIFI REDES                 busca las redes y las enseña con su señal", 13, 10
@@ -1624,6 +1876,10 @@ fh          dw 0
 ini_n       dw 0
 
 INI_MAX     equ 4096
+RP_BUF      equ ini_buf             ; (lib/redpref.inc: RED.INI, antes de cargar)
+RP_TAM      equ INI_MAX
+%include "redpref.inc"
+
         section .bss
 bss_ini:
 pet         resd 4
@@ -1635,4 +1891,18 @@ reg_ruta    resb 64
 info        resb I_LEN + 8
 redes       resb MAXREDES * R_LEN
 ini_buf     resb INI_MAX + 2
+; --- la mudanza y el EXEC de HSPWIFI ---
+mis_par     resw 1
+env_par     resw 1
+bajo        resw 1
+bajo_env    resw 1
+alto        resw 1
+estrat      resw 1
+sv_sp       resw 1
+pblk        resb 14
+fcb0        resb 40
 bss_fin:
+            alignb 16
+            resb 2048
+pila_tope:
+prog_end:

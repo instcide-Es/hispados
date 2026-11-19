@@ -13,9 +13,13 @@
 #  4. QEMU, núcleo de pruebas (HSPWSIM.BIN: el núcleo de verdad con el modelo
 #     de la tarjeta dentro) y el microcódigo de verdad: puesta en marcha,
 #     WPA2, DHCP, PING y el registro en el disco.
-#  5. QEMU con HSPEMM (modo V86): lo dice y no se carga.
+#  5. QEMU con HSPEMM (modo V86): lo dice y no se carga (y WIFI tampoco lo
+#     intenta: «solo en la configuración Normal»).
 #  6. QEMU con HSPRED y una NE2000: HSPWIFI no se carga al lado... salvo con
 #     /JUNTO, y entonces la red sigue yendo por el cable.
+#  7. QEMU, WIFI sin HSPWIFI cargado: lo carga él (HAYWIFI=SI y el núcleo de
+#     pruebas) y sigue con la orden; el residente queda donde quedaría
+#     cargándolo a mano (MEM /F igual: WIFI no deja su hueco debajo).
 # Dos QEMU a la vez como mucho. Wi-Fi tests without the hardware.
 set -u
 cd "$(dirname "$0")/.."
@@ -75,8 +79,10 @@ P2=$!
 wait $P1 $P2
 
 echo "== Wi-Fi en QEMU: radio simulada (residente, packet driver y orden WIFI) =="
-check sim "HSPWIFI no está cargado. Cárguelo antes: HSPWIFI"
-check sim "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, packet driver en INT 60h"
+check sim "Este equipo no tiene una tarjeta Wi-Fi de las que conoce Hispa-DOS."
+checkn sim "Cárguelo antes"
+checkn sim "Cargando el controlador Wi-Fi"
+check sim "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, controlador de paquetes en INT 60h"
 check sim "HSPWIFI ya está cargado."
 check sim "  2  HispaPrueba                        6  ████ -47 dBm  WPA2"
 check sim "  3  Vecina abierta                    11  ████ -47 dBm  abierta"
@@ -113,7 +119,7 @@ check wlog "ESTADO: CONECTADO"
 check sim "fin-de-la-prueba"
 
 echo "== Wi-Fi en QEMU: el núcleo con la tarjeta simulada y el microcódigo de verdad =="
-check chip "Tarjeta Wi-Fi Broadcom BCM43224, MAC 00:26:82:12:34:56, packet driver en INT 60h"
+check chip "Tarjeta Wi-Fi Broadcom BCM43224, MAC 00:26:82:12:34:56, controlador de paquetes en INT 60h"
 check chip "Conectado a «HispaPrueba»"
 check chip "  Dirección IP  . . . . : 192.168.77.10"
 n=$(grep -c "Respuesta desde 192.168.77.1: octetos=32" $T/chip.txt)
@@ -136,9 +142,13 @@ check chip "fin-de-la-prueba"
 
 echo "== Wi-Fi en QEMU: con HSPEMM (modo V86) no se carga =="
 mkimg v86 HSPWIFI.BIN 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPEMM.SYS\r\nDOS=HIGH\r\n'
-corre v86 30 '4|HSPWIFI /SIMULA' '2|WIFI' '2|ECHO fin-de-la-prueba'
+corre v86 30 '4|HSPWIFI /SIMULA' '2|WIFI REDES' '2|WIFI /AUTO' '2|ECHO fin-de-la-prueba'
 check v86 "HSPWIFI no funciona con HSPEMM"
-check v86 "HSPWIFI no está cargado."
+check v86 "El Wi-Fi solo funciona en la configuración «Normal» (sin HSPEMM)."
+check v86 "Reinicie y elija «Normal»."
+n=$(grep -c "Reinicie y elija" $T/v86.txt)
+if [ "$n" -eq 1 ]; then ok "WIFI /AUTO con HSPEMM: calla"; else ko "«Reinicie y elija» sale $n veces (WIFI /AUTO tenía que callar)"; fi
+checkn v86 "Cargando el controlador Wi-Fi"
 check v86 "fin-de-la-prueba"
 
 echo "== Wi-Fi en QEMU: /JUNTO, al lado de HSPRED (la red sigue por el cable) =="
@@ -154,7 +164,7 @@ mkimg junto HSPWIFI.BIN "$XMS"
       -netdev user,id=n0 -device ne2k_pci,netdev=n0 > $T/junto.raw 2>&1
 tr -d '\r' < $T/junto.raw | iconv -f CP437 -t UTF-8 -c > $T/junto.txt
 check junto "La red va por el cable (HSPRED). Para usar el Wi-Fi:"
-check junto "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, packet driver en INT 61h"
+check junto "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, controlador de paquetes en INT 61h"
 check junto "Conectado a «HispaPrueba» (señal -47 dBm)."
 n=$(grep -c "Respuesta desde 10.0.2.2: octetos=32" $T/junto.txt)
 if [ "$n" -eq 3 ]; then ok "PING por el cable con el Wi-Fi al lado, y tras descargarlo: 3 respuestas"; else ko "PING 10.0.2.2: $n respuestas"; fi
@@ -191,7 +201,7 @@ if grep -q "HSPWIFI 0.1" $T/auto2.txt; then ko "/AUTO sin tarjeta: tenía que ca
 sed -n '/HSPRED \/AUTO/,/=A3=/p' $T/auto.txt > $T/auto3.txt
 if grep -q "HSPWIFI 0.1" $T/auto3.txt; then ko "/AUTO con cable: tenía que callar"; else ok "/AUTO con HSPRED y enlace: calla y se queda el cable"; fi
 check auto "La red por cable no tiene enlace (sin cable): HSPRED descargado."
-check auto "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, packet driver en INT 60h"
+check auto "Tarjeta Wi-Fi simulado (pruebas), MAC 02:48:53:57:46:01, controlador de paquetes en INT 60h"
 check auto "  Dirección IP  . . . . : 192.168.77.10"
 check auto "HSPWIFI descargado."
 check auto "fin-de-la-prueba"
@@ -211,7 +221,7 @@ rm -f $T/pmon
            'E|' '4|HSPRED /AUTO' '1|ECHO =P3=' '3|HSPRED /U' \
            '1|ECHO Preferir=WIFI>>A:\HISPADOS\RED.INI' '4|HSPRED /AUTO' '1|ECHO =P4=' \
            'D|' '1|ECHO Preferir=CABLE>>A:\HISPADOS\RED.INI' '4|HSPRED /AUTO' '1|ECHO =P5=' '6|HSPWIFI /AUTO /SIMULA' '1|ECHO =P6=' \
-           'E|' '6|HSPWIFI /SIMULA' '1|ECHO =P7=' '3|HSPRED /U' '2|ECHO fin-de-la-prueba'; do
+           'E|' '6|HSPWIFI /SIMULA' '1|ECHO =P7=' '6|WIFI REDES' '1|ECHO =P8=' '3|HSPRED /U' '2|ECHO fin-de-la-prueba'; do
     case "${c%%|*}" in
       E) printf 'set_link n0 on\n' | socat - UNIX-CONNECT:$T/pmon > /dev/null 2>&1; sleep 1; continue;;
       D) printf 'set_link n0 off\n' | socat - UNIX-CONNECT:$T/pmon > /dev/null 2>&1; sleep 1; continue;;
@@ -241,7 +251,39 @@ tramo '=P5=' '=P6=' p6
 checkn p6 "HSPWIFI 0.1"
 tramo '=P6=' '=P7=' p7
 check p7 "Para usar el Wi-Fi:"
+tramo '=P7=' '=P8=' p8
+check p8 "Cargando el controlador Wi-Fi (HSPWIFI)..."
+check p8 "La red va por el cable (HSPRED). Para usar el Wi-Fi:"
+check p8 "Preferir=WIFI en \\HISPADOS\\RED.INI) y reinicie."
 check pref "fin-de-la-prueba"
+
+echo "== WIFI carga HSPWIFI solo (HAYWIFI=SI, núcleo de pruebas) =="
+# primero a mano (HSPWIFI y MEM /F), se descarga; luego WIFI REDES sin
+# cargarlo: lo carga y sigue; los bloques libres tienen que salir iguales
+mkimg carga HSPWSIM.BIN "$XMS"
+mtype -i $T/carga.img ::HISPADOS/RED.INI > $T/RED.INI 2>/dev/null
+printf 'HAYWIFI=SI\r\n' >> $T/RED.INI
+mcopy -o -i $T/carga.img $T/RED.INI ::HISPADOS/RED.INI
+corre carga 120 '14|HSPWIFI' '2|MEM /F' '1|ECHO =M1=' '3|HSPWIFI /U' '1|ECHO =M2=' \
+  '16|WIFI REDES' '2|MEM /F' '1|ECHO =M3=' '10|WIFI CONECTAR HispaPrueba clave de prueba' '3|WIFI' \
+  '3|HSPWIFI /U' '14|WIFI /AUTO' '1|ECHO =M4=' '2|ECHO fin-de-la-prueba'
+tc() { sed -n "/$1/,/$2/{p;/$2/q}" $T/carga.txt > $T/$3.txt; }
+tc '>WIFI REDES' '=M3=' c1
+check c1 "Cargando el controlador Wi-Fi (HSPWIFI)..."
+check c1 "HSPWIFI 0.1: controlador Wi-Fi de Hispa-486"
+check c1 "  2  HispaPrueba"
+check carga "Conectado a «HispaPrueba»"
+check carga "Wi-Fi: conectado a «HispaPrueba»"
+tc '=M1=' '=M2=' c2
+check c2 "HSPWIFI descargado."
+sed -n '/>HSPWIFI$/,/=M1=/p' $T/carga.txt | sed -n '/Bloques libres/,/Mayor bloque/p' > $T/mf1.txt
+sed -n '/>WIFI REDES/,/=M3=/p' $T/carga.txt | sed -n '/Bloques libres/,/Mayor bloque/p' > $T/mf2.txt
+if [ -s $T/mf1.txt ] && cmp -s $T/mf1.txt $T/mf2.txt; then ok "la memoria libre, igual que cargándolo a mano (sin hueco de WIFI)"; else ko "MEM /F distinto tras cargarlo WIFI"; diff $T/mf1.txt $T/mf2.txt; fi
+tc '>WIFI \/AUTO' '=M4=' c3
+check c3 "HSPWIFI 0.1: controlador Wi-Fi de Hispa-486"
+check c3 "Conectado a «HispaPrueba»"
+checkn c3 "Cargando el controlador Wi-Fi"
+check carga "fin-de-la-prueba"
 
 if [ $fail -eq 0 ]; then echo "Wi-Fi: todas las pruebas pasan"; else echo "Wi-Fi: HAY FALLOS"; fi
 exit $fail

@@ -4,7 +4,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
 Red inalámbrica con **WPA2-Personal** para Hispa-486, empezando por la tarjeta
 **Broadcom BCM43224** (PCI `14E4:4353`) de los HP Mini 5103 y del MacBook Air
-de 2012. El controlador se presenta como un *packet driver* Ethernet, igual
+de 2012. El controlador se presenta como un controlador de paquetes Ethernet, igual
 que `HSPRED`: `CONFRED`, `PING`, `DESCARGAR`, `ACTUALIZAR`, `CONSOLA` y lo
 demás funcionan sin cambios.
 
@@ -19,8 +19,8 @@ demás funcionan sin cambios.
 
 ```
 C:\>HSPWIFI
-HSPWIFI 0.1: controlador Wi-Fi de Hispa-486 (packet driver)
-Tarjeta Wi-Fi Broadcom BCM43224, MAC 00:26:82:xx:xx:xx, packet driver en INT 60h
+HSPWIFI 0.1: controlador Wi-Fi de Hispa-486
+Tarjeta Wi-Fi Broadcom BCM43224, MAC 00:26:82:xx:xx:xx, controlador de paquetes en INT 60h
 Para elegir la red: WIFI REDES y WIFI CONECTAR nombre
 
 C:\>WIFI REDES
@@ -50,7 +50,9 @@ C:\>CONFRED
 1. `HSPXMS.SYS` en `CONFIG.SYS` (ya está) y **sin HSPEMM** (configuración
    «Normal»): ver «Límites».
 2. `HSPWIFI` (a mano o en `AUTOEXEC.BAT`). Busca la tarjeta, carga su núcleo
-   y el microcódigo y enciende la radio (un par de segundos).
+   y el microcódigo y enciende la radio (un par de segundos). No hace falta
+   cargarlo antes: si no está, la orden `WIFI` lo carga ella sola (ver
+   «WIFI carga HSPWIFI sola»).
 3. `WIFI REDES` y `WIFI CONECTAR red` la primera vez. La red y su clave
    quedan en `RED.INI`; desde entonces basta `WIFI /AUTO` en `AUTOEXEC.BAT`
    (las dos líneas vienen con `REM` en el `AUTOEXEC.BAT` que se instala).
@@ -58,15 +60,57 @@ C:\>CONFRED
 
 | Orden | Para qué |
 |---|---|
-| `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO]` | El controlador. Si `HSPRED` está cargado sin enlace (sin cable), lo descarga y sigue; con enlace no se carga (salvo `/JUNTO`). `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del packet driver. `/JUNTO`: cargarse al lado de `HSPRED` (para depurar el Wi-Fi por la consola remota de la red por cable: las órdenes de red siguen yendo por el cable y `HSPWIFI` deja `INT 2Fh AH=DAh` a `HSPRED`). `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
+| `HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx] [/JUNTO]` | El controlador. Si `HSPRED` está cargado sin enlace (sin cable), lo descarga y sigue; con enlace no se carga (salvo `/JUNTO`). `/V` enseña el registro de la puesta en marcha; `/PANTALLA` lo escribe además directo en la pantalla mientras trabaja (se ve aunque el equipo se quede colgado); `/REG:archivo` lo guarda en un archivo (se añade al final, y `WIFI` va añadiendo lo nuevo cada vez que se usa). `/INT:xx`: el vector del controlador de paquetes. `/JUNTO`: cargarse al lado de `HSPRED` (para depurar el Wi-Fi por la consola remota de la red por cable: las órdenes de red siguen yendo por el cable y `HSPWIFI` deja `INT 2Fh AH=DAh` a `HSPRED`). `/U`: descargarlo. `/SIMULA`: una radio de mentira con una red «HispaPrueba» (para las pruebas). |
 | `HSPWIFI /AUTO` | Para el `AUTOEXEC.BAT` (el de Hispa-486 la lleva: docs/486/HISPA-486.md, «La red al arrancar»). Solo se carga si hay una tarjeta admitida en el PCI (lo pregunta a la BIOS, sin cargar el núcleo) y no se ha quedado la red por cable; si no, sale en silencio con nivel de error 1. Desde la 0.9.28 **no hace falta una red guardada** (así, sin cable, la ventanita de Hispa Ventanas puede buscar las redes) y respeta `Preferir=` de `RED.INI` (docs/RED.md, «Cable o Wi-Fi»): con `CABLE` no quita `HSPRED`; con `WIFI` lo quita aunque tenga enlace; con `AUTO`, si `HSPRED` está cargado y su tarjeta no tiene enlace (3 segundos de espera), lo descarga y se carga; con enlace, o si no se sabe, se queda el cable. Si no puede quitarlo (otro residente encima), lo dice y cómo arreglarlo. |
 | `WIFI` | Cómo está la conexión: red, canal, señal, punto de acceso, paquetes, velocidad y, si no hay conexión, por qué. |
 | `WIFI REDES` | Busca (unos 2 segundos) y enseña las redes, con su señal y su seguridad. |
 | `WIFI CONECTAR red [clave]` | Conecta. «red» es el nombre (entre comillas si lleva espacios) o su número en la lista de `WIFI REDES` (lo más cómodo si el nombre lleva eñes o símbolos). Si la red pide contraseña y no se da, la pregunta **sin enseñarla** (asteriscos). Al conectar la guarda en `RED.INI`. |
 | `WIFI DESCONECTAR` | Corta la conexión (hasta el próximo `WIFI /AUTO` o `CONECTAR`). |
 | `WIFI OLVIDAR` | La corta y quita la red de `RED.INI`. |
-| `WIFI /AUTO` | Conecta con la red guardada. Sin red guardada o sin `HSPWIFI` no dice nada (para `AUTOEXEC.BAT`). Si no conecta a la primera, el controlador lo sigue intentando solo. |
+| `WIFI /AUTO` | Conecta con la red guardada. Si `HSPWIFI` no está y hay tarjeta, lo carga (`HSPWIFI /AUTO`, sin aviso); sin red guardada, sin tarjeta, con HSPEMM o con otro controlador de red ya cargado (el cable) no dice nada (para `AUTOEXEC.BAT`). Si no conecta a la primera, el controlador lo sigue intentando solo. |
 | `WIFI REGISTRO [archivo]` | Guarda el registro del controlador, con un resumen del estado (si no se dice el archivo: el de `/REG:` o `\WIFI.LOG` de la unidad de arranque). |
+
+### WIFI carga HSPWIFI sola
+
+Como `ACTUALIZAR` con `HSPRED`: si `HSPWIFI` no está residente (`INT 2Fh
+AX=DC00h` no contesta `AL=FFh`, `BX=5746h`), cualquier orden `WIFI` (salvo
+`WIFI /?`) lo carga antes de seguir:
+
+```
+C:\>WIFI REDES
+Cargando el controlador Wi-Fi (HSPWIFI)...
+HSPWIFI 0.1: controlador Wi-Fi de Hispa-486
+Tarjeta Wi-Fi Broadcom BCM43224, MAC 00:26:82:xx:xx:xx, controlador de paquetes en INT 60h
+Para elegir la red: WIFI REDES y WIFI CONECTAR nombre
+Buscando redes...
+```
+
+- Antes de cargarlo mira dos cosas, y si fallan lo dice y no lo intenta:
+  con HSPEMM (modo V86, la configuración «Juegos») sale «El Wi-Fi solo
+  funciona en la configuración «Normal» (sin HSPEMM). Reinicie y elija
+  «Normal».»; sin una tarjeta de las admitidas en el PCI (la misma tabla que
+  `HSPWIFI /AUTO`, `lib/wifi_ids.inc`; con `HAYWIFI=SI` en `RED.INI`, para las
+  pruebas, como si la hubiera), «Este equipo no tiene una tarjeta Wi-Fi de
+  las que conoce Hispa-DOS.».
+- Lanza `\HISPADOS\HSPWIFI.COM` de la unidad de arranque **sin opciones**
+  (no hace falta red guardada). Si `HSPWIFI` no se queda, ya ha dicho por qué
+  (el cable con enlace, o `HSPRED` con otro residente encima: que elija
+  «Usar: Wi-Fi» en el icono de la red o `Preferir=WIFI` en `RED.INI` y
+  reinicie; sin memoria extendida...) y `WIFI` sale con nivel de error 1.
+- Con `WIFI /AUTO` no avisa ni lanza nada si no hay tarjeta, con HSPEMM o si
+  ya hay otro controlador de red (el `AUTOEXEC.BAT` ya eligió el cable); si
+  hay tarjeta, lanza `HSPWIFI /AUTO`, que respeta `Preferir=`.
+- **La memoria convencional**: lanzado desde `WIFI` sin más, el residente
+  quedaría encima de `WIFI` y, al acabar `WIFI`, su hueco (unos 14 KB y el
+  entorno) quedaría debajo del residente. Por eso `WIFI`, antes de lanzarlo,
+  se muda al final de la memoria: encoge su bloque (`AH=4Ah`), pide otro
+  igual con la estrategia de último ajuste (`AX=5801h`, `BX=2`), copia ahí el
+  programa entero (PSP incluido) y su entorno, arregla el PSP copiado (el
+  entorno, la tabla de archivos) y el MCB (dueño y nombre), pasa a ser el
+  proceso (`AH=50h`) y suelta el bloque y el entorno de abajo. `HSPWIFI` se
+  carga entonces donde estaba `WIFI`, igual que si se hubiera cargado a mano
+  (las pruebas comparan `MEM /F` de las dos maneras). Si la mudanza no se
+  puede hacer (sin memoria arriba), se carga igual, con el hueco.
 
 ### RED.INI
 
@@ -95,7 +139,7 @@ forma**, no solo por el color:
 |---|---|
 | dos nodos huecos y un aspa | sin red: no hay ningún controlador cargado |
 | dos nodos llenos y un aspa | cable (HSPRED) sin enlace |
-| dos nodos llenos unidos | cable (HSPRED u otro *packet driver*) |
+| dos nodos llenos unidos | cable (HSPRED u otro controlador de paquetes) |
 | cuatro rayitas de alto creciente | Wi-Fi conectado: llenas, las de la señal (de 1 a 4, como en `WIFI REDES`); huecas, las demás |
 | las cuatro rayitas huecas | Wi-Fi conectando |
 | las cuatro huecas y un aspa | Wi-Fi sin conectar |
@@ -246,7 +290,7 @@ carga programas de Windows), para las tarjetas sin controlador libre.
 
 ```
  CONFRED, PING, DESCARGAR, CONSOLA, navegador...   (lib/red.inc, sin cambios)
-        │  packet driver (INT 60h), INT 2Fh AH=DAh
+        │  controlador de paquetes (INT 60h), INT 2Fh AH=DAh
  ┌──────┴───────────────────────────┐   WIFI.COM ── INT 2Fh AH=DCh
  │ HSPWIFI.COM (modo real, 4,6 KB)  │◄──────────────┘
  └──────┬───────────────────────────┘
@@ -268,7 +312,7 @@ carga programas de Windows), para las tarjetas sin controlador libre.
 ### El residente (drivers/hspwifi.asm)
 
 Lo que queda en la memoria convencional son **4,6 KB** (código, el
-búfer de una trama y la pila). Hace de *packet driver* (las mismas funciones
+búfer de una trama y la pila). Hace de controlador de paquetes (las mismas funciones
 que `HSPRED`, copiadas de él) y contesta a `INT 2Fh AH=DAh` como `HSPRED`
 (configuración IP compartida, enlace, descarga, datos de `/INFO` con la MAC
 en el mismo sitio: Configuración de Hispa Ventanas la lee igual). Por eso
@@ -396,14 +440,21 @@ tiene).
    pérdidas de memoria. El modelo dice lo que el controlador *espera* de la
    tarjeta: prueba nuestro código, no la tarjeta.
 4. **En QEMU, con la radio simulada** (`HSPWIFI /SIMULA`): el residente, el
-   paso a modo protegido, el packet driver y la orden `WIFI` enteros, con
+   paso a modo protegido, el controlador de paquetes y la orden `WIFI` enteros, con
    `CONFRED` (DHCP) y `PING` de verdad por encima; la clave preguntada sin
    enseñarla; `RED.INI` sin la contraseña; `/AUTO`, `OLVIDAR`, `/U`.
 5. **En QEMU, el núcleo de verdad con el modelo de la tarjeta dentro**
    (`build/HSPWSIM.BIN`) y el microcódigo cargado del disco: lo mismo, por el
    camino completo del controlador, y el registro en el disco.
-6. Con HSPEMM: lo dice y no se carga. Con HSPRED: tampoco, salvo con
+6. Con HSPEMM: lo dice y no se carga (y `WIFI` lo dice sin intentarlo:
+   «solo en la configuración Normal»; `WIFI /AUTO` calla). Con HSPRED: tampoco, salvo con
    `/JUNTO` (y entonces la red sigue por el cable).
+7. **`WIFI` carga `HSPWIFI` sola** (`HAYWIFI=SI` y el núcleo de pruebas):
+   `WIFI REDES` sin el controlador lo carga, avisa y enseña las redes; los
+   bloques libres (`MEM /F`) salen iguales que cargándolo a mano (no queda el
+   hueco de `WIFI`); `WIFI /AUTO` lo carga callado; sin tarjeta, «Este equipo
+   no tiene una tarjeta Wi-Fi...»; con HSPRED y enlace, el texto de
+   `HSPWIFI` («La red va por el cable...»).
 
 `tests/run_wifi_ventana_tests.sh` (en `make test`): el icono y la ventanita
 de Hispa Ventanas en QEMU, con `HSPWIFI /SIMULA` (sin conectar, la lista,

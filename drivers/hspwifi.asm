@@ -1394,9 +1394,12 @@ fin_mal_callado:
 
 ; [/AUTO] ¿hay una tarjeta de las admitidas? (a la BIOS del PCI: INT 1Ah
 ; AX=B102h, buscar el aparato; la tabla, rp_ids de lib/redpref.inc). Sin
-; BIOS del PCI no se sabe: se sigue (lo mirará el núcleo). CF=1: seguro que
-; no hay
+; BIOS del PCI no se sabe: se sigue (lo mirará el núcleo). Con HAYWIFI=SI en
+; RED.INI (las pruebas, como HSPRED /AUTO), como si la hubiera. CF=1: seguro
+; que no hay
 auto_pci:
+        cmp byte [rp_haywifi], 0    ; HAYWIFI=SI en RED.INI (las pruebas): la hay
+        jne .si_hay
         pushad
         mov ax, 0xB101
         xor edi, edi
@@ -1429,6 +1432,7 @@ auto_pci:
         ret
 .sigue:
         popad
+.si_hay:
         clc
         ret
 
@@ -1932,7 +1936,7 @@ ruta_fw     db "A:\HISPADOS\BCM43XX.FW", 0
 ruta_fwh    db "A:\HISPADOS\BCM43XXH.FW", 0
 n_sim       db "Wi-Fi simulado (pruebas)", 0
 
-msg_title   db "HSPWIFI 0.1: controlador Wi-Fi de Hispa-486 (packet driver)", 13, 10, 0
+msg_title   db "HSPWIFI 0.1: controlador Wi-Fi de Hispa-486", 13, 10, 0
 msg_usage   db "Uso: HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx]", 13, 10
             db "     HSPWIFI /AUTO", 13, 10
             db "     HSPWIFI /U", 13, 10
@@ -1941,7 +1945,8 @@ msg_usage   db "Uso: HSPWIFI [/V] [/PANTALLA] [/REG:archivo] [/INT:xx]", 13, 10
             db "  /V          enseña el registro de la puesta en marcha", 13, 10
             db "  /PANTALLA   el registro, además, directo a la pantalla (por si se cuelga)", 13, 10
             db "  /REG:arch   guarda el registro en ese archivo (se añade al final)", 13, 10
-            db "  /INT:xx     vector del packet driver (60 a 80; si no, el primero libre)", 13, 10
+            db "  /INT:xx     vector del controlador de paquetes (60 a 80; si no, el", 13, 10
+            db "              primero libre)", 13, 10
             db "  /JUNTO      convive con HSPRED (la red sigue yendo por el cable)", 13, 10
             db "  /U          lo descarga", 13, 10
             db "Tarjetas: Broadcom BCM43224 y BCM43225. Después, la orden WIFI elige la red.", 13, 10, 0
@@ -1960,7 +1965,7 @@ msg_noquita db "No se puede quitar HSPRED (la red por cable): hay otro programa 
 msg_v86     db "HSPWIFI no funciona con HSPEMM ni otro gestor de memoria expandida (modo V86).", 13, 10
             db "Quite HSPEMM.SYS de CONFIG.SYS para usar el Wi-Fi.", 13, 10, 0
 msg_noxms   db "HSPWIFI necesita memoria extendida: cargue HSPXMS.SYS en CONFIG.SYS.", 13, 10, 0
-msg_novec   db "No queda ningún vector libre para el packet driver (60h-80h).", 13, 10, 0
+msg_novec   db "No queda ningún vector libre para el controlador de paquetes (60h-80h).", 13, 10, 0
 msg_nobin   db "Falta el archivo ", 0
 msg_badbin  db "El archivo HSPWIFI.BIN no vale (dañado o de otra versión).", 13, 10, 0
 msg_nomem   db "No hay 2,1 MB de memoria extendida libres para HSPWIFI.", 13, 10, 0
@@ -1968,7 +1973,7 @@ msg_nofw    db "Falta el microcódigo de la tarjeta: ", 0
 msg_nl      db 13, 10, 0
 msg_card    db "Tarjeta ", 0
 msg_mac     db ", MAC ", 0
-msg_pkt     db ", packet driver en INT ", 0
+msg_pkt     db ", controlador de paquetes en INT ", 0
 msg_h       db "h", 13, 10, 0
 msg_sigue   db "Para elegir la red: WIFI REDES y WIFI CONECTAR nombre", 13, 10, 0
 msg_fallo   db "El Wi-Fi no se ha podido poner en marcha (código ", 0

@@ -6707,10 +6707,10 @@ putdec:
         pop eax
         ret
 
-msg_title   db "HSPRED 0.1: controlador de red de Hispa-DOS (packet driver)", 13, 10, 0
+msg_title   db "HSPRED 0.1: controlador de red de Hispa-DOS", 13, 10, 0
 msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/DEPURA[:archivo]] [/U]", 13, 10
-            db "  /INT:xx  vector del packet driver (60 a 80, hexadecimal; si no, el", 13, 10
-            db "           primero libre desde el 60)", 13, 10
+            db "  /INT:xx  vector del controlador de paquetes (60 a 80, hexadecimal; si", 13, 10
+            db "           no, el primero libre desde el 60)", 13, 10
             db "  /INFO    tarjeta, MAC, enlace, IRQ, vector y la configuración IP", 13, 10
             db "  /AUTO    sin tarjeta, sale en silencio (para el AUTOEXEC.BAT)", 13, 10
             db "  /USB     el adaptador USB aunque haya una tarjeta PCI que valga", 13, 10
@@ -6723,7 +6723,7 @@ msg_usage   db "Uso: HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/DEPURA[:archivo]]
             db "/MEMORIA o /PUERTOS se elige por dónde van sus registros y con /SONDEO no", 13, 10
             db "usa IRQ). Y, con HSPUSB.SYS cargado, un adaptador", 13, 10
             db "USB-Ethernet con CDC-ECM (Realtek RTL8153). La IP: CONFRED (IPCONFIG).", 13, 10
-            db "Sirve también para los programas de DOS que usan packet drivers (mTCP...).", 13, 10, 0
+            db "Sirve también para los programas de DOS que hablan con controladores de paquetes (mTCP...).", 13, 10, 0
 msg_already db "HSPRED ya está cargado (HSPRED /INFO lo enseña; /U lo descarga).", 13, 10, 0
 msg_notres  db "HSPRED no está cargado.", 13, 10, 0
 msg_unloaded db "HSPRED descargado.", 13, 10, 0
@@ -6745,14 +6745,14 @@ msg_tu_mac  db "La tarjeta Tulip no da su dirección MAC (SROM).", 13, 10, 0
 msg_nommio  db "La tarjeta no tiene sus registros en memoria asignados.", 13, 10, 0
 msg_e1v86   db "Esta tarjeta e1000 solo da sus registros en memoria, y en modo V86 (con", 13, 10
             db "HSPEMM u otro EMM386) no se llega a ellos: arranque en «Normal».", 13, 10, 0
-msg_novec   db "No hay ningún vector libre para el packet driver (60h-80h).", 13, 10, 0
+msg_novec   db "No hay ningún vector libre para el controlador de paquetes (60h-80h).", 13, 10, 0
 msg_nodmamem db "No hay memoria convencional para los búferes de la tarjeta.", 13, 10, 0
 msg_nocont  db "Los búferes de la tarjeta no quedan en memoria física continua.", 13, 10, 0
 msg_s1      db "Tarjeta ", 0
 msg_s2      db ", MAC ", 0
 msg_s3      db ", IRQ ", 0
-msg_s3u     db ", por HSPUSB, packet driver en INT ", 0
-msg_s4      db ", packet driver en INT ", 0
+msg_s3u     db ", por HSPUSB, controlador de paquetes en INT ", 0
+msg_s4      db ", controlador de paquetes en INT ", 0
 msg_s5      db "h", 13, 10, 0
 msg_i_card  db "Tarjeta:         ", 0
 msg_i_pci   db "PCI:             ", 0
@@ -6837,7 +6837,7 @@ msg_sp_10   db ", 10 Mbit/s", 0
 msg_sp_100  db ", 100 Mbit/s", 0
 msg_sp_1000 db ", 1000 Mbit/s", 0
 msg_empty   db 0
-msg_i_vec   db "Packet driver:   INT ", 0
+msg_i_vec   db "Interrupción:    INT ", 0
 msg_i_vec2  db "h", 13, 10, 0
 msg_i_mem   db "Memoria:         ", 0
 msg_i_bytes db " octetos", 0

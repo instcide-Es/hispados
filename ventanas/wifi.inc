@@ -150,7 +150,7 @@ wf_m_uwifi  db "Ya se está usando el Wi-Fi.", 0
 wf_m_nowifi db "Este equipo no tiene Wi-Fi.", 0
 wf_m_luego  db "Cambiará la próxima vez que arranque.", 0
 wf_t_cable  db "Red por cable", 0
-wf_t_otro   db "Hay un controlador de red (packet driver),", 0
+wf_t_otro   db "Hay un controlador de red,", 0
 wf_t_otro2  db "pero no da el enlace ni la dirección.", 0
 wf_t_enl    db "Enlace: ", 0
 wf_t_enl1   db "conectado", 0

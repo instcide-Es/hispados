@@ -369,7 +369,7 @@ RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CON
 $(B)/HSPWIFI.COM: drivers/hspwifi.asm lib/redpref.inc lib/wifi_ids.inc | $(B)
 	$(ASM) -l $(B)/gen/HSPWIFI.lst -o $@ $(B)/gen/$<
 	python3 tools/initcheck.py $(B)/gen/HSPWIFI.lst init || { rm -f $@; exit 1; }
-$(B)/WIFI.COM: utils/wifi.asm | $(B)
+$(B)/WIFI.COM: utils/wifi.asm lib/redpref.inc lib/wifi_ids.inc | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 WIFI_INC = -Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/brcminc \
            -Iwifi/linux/brcmsmac -Iwifi/linux/brcmsmac/phy -Iwifi/linux/bcma -Iwifi/linux -Iwifi/nucleo

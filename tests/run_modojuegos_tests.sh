@@ -279,14 +279,14 @@ c_normal() {
 }
 c_normal_sinred() {
   c_normal 590000 " (sin tarjeta de red)"
-  nocheck "packet driver en INT"
+  nocheck "controlador de paquetes en INT"
 }
 c_normal_red() {
   c_normal 590000 " (con tarjeta de red: HSPRED no se carga al arrancar)"
   n=$(grep -a 'bytes libres' $T/log.txt | sed -n 2p | tr -cd '0-9')
   if [ -n "$n" ] && [ "$n" -ge 575000 ] && [ "$n" -lt 590000 ]; then ok "con HSPRED cargado a mano: $n bytes libres"; else ko "con HSPRED cargado a mano: $n bytes libres (se esperaban de 575000 a 590000)"; fi
   check "Tarjeta Intel PRO/1000 (e1000)"
-  check "packet driver en INT 60h"
+  check "controlador de paquetes en INT 60h"
   check "  HSPRED  "
 }
 if quiere normal; then
