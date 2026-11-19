@@ -24,6 +24,13 @@
 ;                   [ESTILO] y el estilo: el clásico (Centro de programas) o
 ;                   la barra de tareas con el menú Inicio (Escritorio=486),
 ;                   que se cambia en marcha (ventanas/barra.inc)
+;    Resolución     [PANTALLA] la resolución y los colores de la pantalla (los
+;                   modos que da de verdad la tarjeta; la de la pantalla, por
+;                   su EDID) con «Probar», que vuelve a cargar Hispa Ventanas
+;                   en ese modo y pregunta «¿Se ve bien?» (15 segundos, si no
+;                   se contesta, y vuelve al de antes); [ICONOS] y el tamaño
+;                   de los iconos: pequeños, normales o grandes (los de los
+;                   grupos del Centro, los del escritorio y el menú Inicio)
 ;  [MEZCLADOR] Mientras está en marcha (siempre, con la ventana oculta),
 ;  cada segundo mira si el mezclador de HSPSND ha cambiado y, si es así, lo
 ;  guarda en \HISPADOS\SONIDO.INI (ventanas/hvpmez.inc): el estado del sonido
@@ -49,7 +56,7 @@ CLI_AL      equ 376
 PX          equ 152                 ; donde empieza el apartado
 PAN_AN      equ 388
 SEC_AL      equ 34                  ; alto de cada apartado en el selector
-N_SEC       equ 8                   ; (Pantalla..Sistema, Red y Escritorio)
+N_SEC       equ 9                   ; (Pantalla..Sistema, Red, Escritorio y Resolución)
 N_DIB       equ 10                  ; dibujos del fondo
 N_TEMAS     equ 8
 ID_SEC      equ 10
@@ -78,6 +85,18 @@ ESC_AJ2     equ 138                 ; y 138 estirada, 139 rellenar (del 130 al 1
 ESC_NOTA    equ 137                 ; lo que hay que saber (o lo que pasa)
 ESC_EST     equ 160                 ; [ESTILO] las opciones: 160 clásico, 161 barra de tareas
 SEC_ESCRITORIO equ 7                ; el apartado
+; [PANTALLA] [ICONOS] los controles del apartado «Resolución» (162-170)
+SEC_RES     equ 8
+RES_LISTA   equ 162                 ; las resoluciones
+RES_COL     equ 163                 ; los colores: 163 256, 164 miles, 165 millones
+RES_PROBAR  equ 166
+RES_NOTA    equ 167                 ; la que hay ahora y la de la pantalla
+RES_ICO     equ 168                 ; los iconos: 168 pequeños, 169 normales, 170 grandes
+RES_MAX     equ 33                  ; en la lista: «Automática» y 32
+RES_TXT     equ 48
+PREG_SEG    equ 15                  ; «¿Se ve bien?»: segundos para contestar
+PREG_AN     equ 400
+PREG_AL     equ 132
 ; la configuración IP compartida que da HSPRED (INT 2Fh DA00h; ver drivers/
 ; hspred.asm y docs/RED.md); la MAC sale de DA03h (los datos de /INFO)
 RC_FLAGS    equ 0                   ; bit 0 válida, bit 1 por DHCP
@@ -110,6 +129,8 @@ T_MS55      equ 2                   ; milisegundos <-> tics de reloj
 T_MS250     equ 3                   ; milisegundos <-> 0-3 (250 ms cada uno)
 T_DIST      equ 4                   ; SP o US
 T_SAL       equ 5                   ; nombre de un dibujo del salvapantallas
+T_ICO       equ 6                   ; [ICONOS] pequeños, normales, grandes
+T_MODO      equ 7                   ; [PANTALLA] «auto» o AxB[xC]
 
 HVP_CABECERA "Configuración", entrada
         db "................................"
@@ -157,6 +178,8 @@ c_prueba    dd pru_proc
             db C_BLANCO, 0, 0, 0
 c_salva     dd sal_proc
             db C_TINTA, 0, 0, 0
+c_preg      dd preg_proc            ; [PANTALLA] «¿Se ve bien?»
+            db C_CREMA, 0, 0, 0
 
 %define EST HV_c_estatico
 %define BOT HV_c_boton
@@ -326,11 +349,37 @@ pl_escritorio:
         PLANTILLA EST, 0, H, PX, 294, PAN_AN, 48, ESC_NOTA
         dd 0
 
+; ---- [PANTALLA] [ICONOS] Resolución ----
+pl_resolucion:
+        PLANTILLA EST, t_r_res, H, PX, 40, 250, 18, ID_FIJO
+        PLANTILLA LIS, 0, HT, PX, 60, 252, 118, RES_LISTA
+        PLANTILLA EST, t_r_col, H, PX + 262, 40, 126, 18, ID_FIJO
+        PLANTILLA BOT, t_r_c0, HT | BS_OPCION, PX + 262, 60, 126, 20, RES_COL
+        PLANTILLA BOT, t_r_c1, HT | BS_OPCION, PX + 262, 80, 126, 20, RES_COL + 1
+        PLANTILLA BOT, t_r_c2, HT | BS_OPCION, PX + 262, 100, 126, 20, RES_COL + 2
+        PLANTILLA BOT, t_r_probar, HT, PX + 262, 152, 124, 26, RES_PROBAR
+        PLANTILLA EST, 0, H, PX, 184, PAN_AN, 50, RES_NOTA
+        PLANTILLA EST, t_r_ico, H, PX, 244, PAN_AN, 18, ID_FIJO
+        PLANTILLA BOT, t_r_i0, HT | BS_OPCION, PX, 264, 120, 20, RES_ICO
+        PLANTILLA BOT, t_r_i1, HT | BS_OPCION, PX + 128, 264, 120, 20, RES_ICO + 1
+        PLANTILLA BOT, t_r_i2, HT | BS_OPCION, PX + 256, 264, 120, 20, RES_ICO + 2
+        PLANTILLA EST, t_r_inota, H, PX, 290, PAN_AN, 36, ID_FIJO
+        dd 0
+; la pregunta tras «Probar» (una ventana aparte, al arrancar con /PRUEBA)
+preg_plant:
+        PLANTILLA c_preg, t_r_tit, E_TITULO, 0, 0, PREG_AN + 2*BORDE, PREG_AL + 2*BORDE + TIT_H + 1, 0
+pl_preg:
+        PLANTILLA EST, t_p_1, H | SS_NEGRITA, 16, 14, PREG_AN - 32, 18, ID_FIJO
+        PLANTILLA EST, 0, H, 16, 40, PREG_AN - 32, 36, 201
+        PLANTILLA BOT, t_p_si, HT, 16, 90, 176, 28, 202
+        PLANTILLA BOT, t_p_no, HT, 208, 90, 176, 28, 203
+        dd 0
+
 listas      dd pl_fijos, pl_pantalla, pl_raton, pl_teclado, pl_tecl_si, pl_tecl_no
             dd pl_sonido, pl_sonido_no, pl_fecha, pl_sistema, pl_red, pl_red_manual
-            dd pl_escritorio, 0
+            dd pl_escritorio, pl_resolucion, preg_plant, pl_preg, 0
 paneles     dd pan_pantalla, pan_raton, pan_teclado, pan_sonido, pan_fecha, pan_sistema
-            dd pan_red, pan_escritorio
+            dd pan_red, pan_escritorio, pan_resolucion
 sel_pintores dd pin_color, pin_dibujo, pin_seccion
 dib_tabla   dd dib_rombos, dib_liso, dib_puntos, dib_rayas, dib_cuadros
             dd dib_ladrillos, dib_olas, dib_damero, dib_trama, dib_zigzag
@@ -345,6 +394,11 @@ ini_tabla:
         dd k_salva, a_salva, 0, 1, T_NUM, 0
         dd k_minutos, a_minutos, 1, 60, T_NUM, 0
         dd k_sdib, a_sdib, 0, N_SALVA - 1, T_SAL, 0
+        dd k_iconos, a_iconos, 0, 2, T_ICO, 0       ; [ICONOS]
+        ; [PANTALLA] «Modo=»: lo lee VENTANAS.COM al arrancar (video16.inc),
+        ; antes de poner el modo; aquí solo se escribe al decir «Sí» tras
+        ; «Probar» (-1: no está, no se escribe; 0: «auto»)
+        dd k_modo, a_modo, 0, 0x7FFFFFFF, T_MODO, 0
         dd k_vel, a_vel, 1, 6, T_NUM, s_raton
         dd k_doble, a_doble, 3, 18, T_MS55, 0
         dd k_zurdo, a_zurdo, 0, 1, T_NUM, 0
@@ -376,6 +430,12 @@ k_sorpresa  db "Sorpresa", 0     ; «Sorpresa»: tema al azar en cada sesión
 k_salva     db "Salvapantallas", 0
 k_minutos   db "Minutos", 0
 k_sdib      db "SalvaDibujo", 0     ; (no «Dibujo»: ese es el del fondo)
+k_iconos    db "Iconos", 0          ; [ICONOS]
+k_modo      db "Modo", 0            ; [PANTALLA]
+ico_nombres dd n_ico0, n_ico1, n_ico2
+n_ico0      db "pequeños", 0
+n_ico1      db "normales", 0
+n_ico2      db "grandes", 0
 k_vel       db "Velocidad", 0
 k_doble     db "DobleClic", 0
 k_zurdo     db "Zurdo", 0
@@ -473,7 +533,7 @@ ritmos      dw 300, 267, 240, 218, 200, 185, 171, 160, 150, 133, 120, 109, 100, 
 
 ; ---- textos ----
 t_titulo    db "Configuración", 0
-secc_nombres dd n_s0, n_s1, n_s2, n_s3, n_s4, n_s5, n_s6, n_s7
+secc_nombres dd n_s0, n_s1, n_s2, n_s3, n_s4, n_s5, n_s6, n_s7, n_s8
 n_s0        db "Pantalla", 0
 n_s1        db "Ratón", 0
 n_s2        db "Teclado", 0
@@ -482,6 +542,52 @@ n_s4        db "Fecha y hora", 0
 n_s5        db "Sistema", 0
 n_s6        db "Red", 0
 n_s7        db "Escritorio", 0
+n_s8        db "Resolución", 0
+; ---- [PANTALLA] [ICONOS] Resolución ----
+t_r_res     db "Resolución de la pantalla:", 0
+t_r_col     db "Colores:", 0
+t_r_c0      db "256", 0
+t_r_c1      db "Miles", 0
+t_r_c2      db "Millones", 0
+t_r_probar  db "Probar...", 0
+t_r_auto    db "Automática", 0
+t_r_ya      db " (ahora)", 0
+t_r_suya    db " (pantalla", 0
+t_r_ahora2  db " (ahora", 0
+t_r_coma    db ", ahora", 0
+t_r_ahora   db "Ahora: ", 0
+t_r_x       db " x ", 0
+t_r_256     db ", 256 colores", 0
+t_r_miles   db ", miles de colores", 0
+t_r_mill    db ", millones de colores", 0
+t_r_vga     db "Ahora: VGA de 640 x 480 y 16 colores", 0
+t_r_o0      db " (sola).", 0
+t_r_o1      db " (VENTANAS.INI).", 0
+t_r_o2      db " (la manda la línea de órdenes).", 0
+t_r_o3      db " (a prueba).", 0
+t_r_edid    db 10, "La pantalla dice que la suya es ", 0
+t_r_noedid  db 10, "La pantalla no dice cuál es la suya.", 0
+t_r_nota2   db 10, "«Probar» vuelve a cargar Hispa Ventanas en ella.", 0
+t_r_ico     db "Tamaño de los iconos y de su texto:", 0
+t_r_i0      db "Pequeños", 0
+t_r_i1      db "Normales", 0
+t_r_i2      db "Grandes", 0
+t_r_inota   db "Los de los grupos del Centro, los del escritorio", 10
+            db "y los del menú Inicio. Se aplica al momento.", 0
+t_r_tit     db "Resolución de la pantalla", 0
+t_r_nolz    db "No se puede probar: Hispa Ventanas no se ha arrancado", 10
+            db "con VENTANAS (sin su lanzador). Ponga «Modo=» en", 10
+            db "VENTANAS.INI a mano o use VENTANAS /MODO:1440x900.", 0
+t_r_nosel   db "Elija primero una resolución de la lista.", 0
+t_p_1       db "¿Se ve bien la pantalla?", 0
+t_p_2a      db "Si no contesta, se vuelve a la de antes", 10, "en ", 0
+t_p_2b      db " segundos.", 0
+t_p_si      db "Sí, dejarla así", 0
+t_p_no      db "No, volver atrás", 0
+o_modo      db " /MODO:", 0
+o_auto      db "AUTO", 0
+o_prueba    db " /PRUEBA", 0
+o_resol     db " /RESOL", 0
 ; ---- [FONDO] Escritorio ----
 t_e_estilo  db "Estilo del escritorio:", 0        ; [ESTILO]
 t_e_est0    db "Clásico (Centro de programas)", 0
@@ -763,6 +869,7 @@ entrada:
 .cl2:
         call de_fabrica
         mov dword [a_escritorio], -1    ; [BARRA] (sin la clave, no se escribe)
+        mov dword [a_modo], -1      ; [PANTALLA] (lo mismo)
         call ini_leer
         call red_ini_leer           ; [RED] la configuración de RED.INI
         ; «Sorpresa»: al arrancar (residente) se sortea un tema nuevo
@@ -816,6 +923,18 @@ entrada:
         mov ecx, 1
         mov edx, 1000
         HV tmp_poner
+        cmp byte [residente], 0     ; [PANTALLA] arrancado con /PRUEBA: «¿Se ve bien?»
+        je .bucle                   ; (y con /RESOL, de vuelta: «Resolución»)
+        mov eax, AJ_PRUEBA
+        HV aj_leer
+        cmp eax, 1
+        jb .bucle
+        ja .resol
+        call preg_abrir
+        jmp .bucle
+.resol:
+        call res_ensenar
+.bucle:
         HV app_bucle
 .x:
         ret
@@ -963,6 +1082,10 @@ cfg_proc:
 
 ; ---- el segundero: salvapantallas, guardar solo y lo que cambia a la vista ----
 reloj:
+        cmp dword [preg_ven], 0     ; [PANTALLA] la cuenta atrás de «¿Se ve bien?»
+        je .r0
+        call preg_tic
+.r0:
         ; [MEZCLADOR] el mezclador de HSPSND se guarda solo, sin preguntar: si
         ; ha cambiado algo (lo cambie quien lo cambie), a SONIDO.INI
         call mz_vigila
@@ -1082,6 +1205,34 @@ ordenes:
         mov byte [red_cambiado], 1
         jmp .cambio
 .nored:
+        ; ---- [PANTALLA] [ICONOS] Resolución ----
+        cmp ecx, RES_PROBAR
+        jne .rs1
+        call res_probar
+        jmp .hecho
+.rs1:
+        lea ebx, [ecx-RES_ICO]
+        cmp ebx, 2
+        ja .rs2
+        mov [a_iconos], ebx
+        call iconos_aplicar
+        call res_marcas
+        jmp .cambio
+.rs2:
+        lea ebx, [ecx-RES_COL]
+        cmp ebx, 2
+        ja .rs3
+        mov [res_col], ebx
+        call res_marcas
+        jmp .hecho
+.rs3:
+        cmp ecx, RES_LISTA
+        jne .rs4
+        cmp eax, LN_DOBLE           ; doble clic o Intro en una: «Probar»
+        jne .hecho
+        call res_probar
+        jmp .hecho
+.rs4:
         ; ---- [FONDO] Escritorio ----
         cmp ecx, ESC_ELEGIR
         jne .e1
@@ -1522,7 +1673,7 @@ panel_desmontar:
         jmp .b
 .s:
         inc ecx
-        cmp ecx, ID_PAN + 62        ; (del 100 al 159, y [ESTILO] 160 y 161)
+        cmp ecx, ID_PAN + 71        ; (del 100 al 159, [ESTILO] 160 y 161 y [PANTALLA] 162-170)
         jb .b
         popad
         ret
@@ -2450,10 +2601,12 @@ de_fabrica:
         mov edi, a_dibujo
         mov ecx, N_AJ
         rep movsd
+        mov dword [a_iconos], 1     ; [ICONOS] (la resolución no: hay que probarla)
         popad
         ret
 
 aplicar:
+        call iconos_aplicar         ; [ICONOS]
         call fondo_poner
         call raton_aplicar
         call tecl_aplicar
@@ -2834,6 +2987,11 @@ ini_valor:
         mov ebp, dib_nombres        ; el nombre de un dibujo (del fondo
         cmp ecx, T_DIB              ; o del salvapantallas)
         je .d0
+        cmp ecx, T_MODO             ; [PANTALLA]
+        je .modo
+        mov ebp, ico_nombres        ; [ICONOS]
+        cmp ecx, T_ICO
+        je .d0
         mov ebp, sal_nombres
         cmp ecx, T_SAL
         jne .num
@@ -2896,6 +3054,10 @@ ini_valor:
         jne .x
 .dp:
         mov eax, edx
+        jmp .pon
+.modo:
+        call modo_leer
+        jc .x
 .pon:
         cmp eax, [ebx+8]
         jl .x
@@ -2939,9 +3101,19 @@ ini_escribir:
         mov byte [edi], '='
         inc edi
         mov ecx, [ebx+16]
+        cmp ecx, T_MODO             ; [PANTALLA] (antes de mirar los nombres)
+        jne .t0
+        call modo_escribir
+        jmp .nl
+.t0:
         mov esi, [dib_nombres+eax*4]
         cmp ecx, T_DIB
         je .t1
+        cmp ecx, T_ICO              ; [ICONOS]
+        jne .t0b
+        mov esi, [ico_nombres+eax*4]
+        jmp .t1
+.t0b:
         cmp ecx, T_SAL
         jne .t2
         mov esi, [sal_nombres+eax*4]
@@ -3012,6 +3184,609 @@ ini_escribir:
         mov esi, ini_ruta
         call hvl_escribir
         popad
+        ret
+
+; =============================================================================
+;  [PANTALLA] [ICONOS] Resolución: la resolución y los colores de la
+;  pantalla, y el tamaño de los iconos (docs/VENTANAS.md, «La pantalla»)
+; =============================================================================
+; (ini_valor) ESI=«auto», «AxB» o «AxBxC» -> EAX=a_modo; CF=1 si no vale
+modo_leer:
+        push ebx
+        push ecx
+        push edx
+        mov eax, [esi]
+        or eax, 0x20202020
+        cmp eax, 'auto'
+        jne .n
+        xor eax, eax
+        jmp .si
+.n:
+        mov al, [esi]
+        sub al, '0'
+        cmp al, 9
+        ja .no
+        call hvl_lee_num
+        cmp eax, 640
+        jb .no
+        cmp eax, 2560
+        ja .no
+        mov ebx, eax
+        call .por
+        jc .no
+        call hvl_lee_num
+        cmp eax, 480
+        jb .no
+        cmp eax, 1600
+        ja .no
+        mov ecx, eax
+        xor edx, edx                ; los colores (0: sin decir)
+        call .por
+        jc .pon
+        call hvl_lee_num
+        mov edi, modo_bits
+.b:
+        inc edx
+        cmp edx, 5
+        ja .no
+        cmp al, [edi+edx-1]
+        jne .b
+.pon:
+        mov eax, ebx
+        shl eax, 16
+        shl ecx, 4
+        or eax, ecx
+        or eax, edx
+.si:
+        clc
+        jmp .x
+.no:
+        stc
+.x:
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+.por:
+        mov al, [esi]
+        or al, 0x20
+        cmp al, 'x'
+        jne .pn
+        inc esi
+        clc
+        ret
+.pn:
+        stc
+        ret
+modo_bits   db 8, 15, 16, 24, 32
+
+; (ini_escribir) EAX=a_modo -> en EDI: «auto» o «AxB[xC]»
+modo_escribir:
+        push eax
+        push ebx
+        push esi
+        test eax, eax
+        jnz .n
+        mov esi, k_auto
+        call hvl_cad
+        jmp .x
+.n:
+        mov ebx, eax
+        shr eax, 16
+        call hvl_num
+        mov al, 'x'
+        stosb
+        mov eax, ebx
+        shr eax, 4
+        and eax, 0xFFF
+        call hvl_num
+        and ebx, 15
+        jz .x
+        cmp ebx, 5
+        ja .x
+        mov al, 'x'
+        stosb
+        movzx eax, byte [modo_bits+ebx-1]
+        call hvl_num
+.x:
+        pop esi
+        pop ebx
+        pop eax
+        ret
+k_auto      db "auto", 0
+
+; el tamaño de los iconos (a_iconos), al entorno
+iconos_aplicar:
+        pushad
+        mov eax, AJ_ICONOS
+        mov edx, [a_iconos]
+        HV aj_poner
+        popad
+        ret
+
+; ---- el apartado ----
+pan_resolucion:
+        mov esi, pl_resolucion
+        HV ven_lista
+        mov eax, AJ_PANTALLA
+        HV aj_leer
+        mov [res_pan], eax
+        ; la lista: «Automática» y las de la tarjeta, de menor a mayor
+        mov dword [res_fichas], 0
+        mov edi, res_txt
+        mov esi, t_r_auto
+        call hvl_cad
+        mov eax, [res_pan]
+        cmp byte [eax+9], 0
+        je .a0
+        mov esi, t_r_ya
+        call hvl_cad
+.a0:
+        mov byte [edi], 0
+        mov dword [res_n], 1
+        mov ebx, [res_pan]
+        movzx ecx, word [ebx]
+        lea esi, [ebx+12]
+.f:
+        test ecx, ecx
+        jz .ordenada
+        mov edx, [res_n]            ; se mete en su sitio (por puntos, y si no
+        cmp edx, RES_MAX            ; por ancho)
+        jae .ordenada
+.busca:
+        cmp edx, 1
+        jbe .mete
+        mov edi, [res_fichas+edx*4-4]
+        call res_menor              ; ¿ESI va antes que EDI?
+        jnc .mete
+        mov [res_fichas+edx*4], edi
+        dec edx
+        jmp .busca
+.mete:
+        mov [res_fichas+edx*4], esi
+        inc dword [res_n]
+        add esi, 16
+        dec ecx
+        jmp .f
+.ordenada:
+        mov ecx, 1                  ; los textos
+.t:
+        cmp ecx, [res_n]
+        jae .tf
+        imul edi, ecx, RES_TXT
+        add edi, res_txt
+        mov esi, [res_fichas+ecx*4]
+        movzx eax, word [esi]
+        call hvl_num
+        push esi
+        mov esi, t_r_x
+        call hvl_cad
+        pop esi
+        movzx eax, word [esi+2]
+        call hvl_num
+        mov ebx, [res_pan]          ; ¿la de la pantalla? ¿la de ahora?
+        xor edx, edx
+        mov eax, [esi]
+        cmp eax, [ebx+2]
+        jne .t1
+        push esi
+        mov esi, t_r_suya
+        call hvl_cad
+        pop esi
+        inc edx
+.t1:
+        cmp byte [ebx+9], 0         ; (si se ha elegido sola, «ahora» va en
+        jne .t3                     ;  «Automática»)
+        movzx eax, word [ebx+6]
+        cmp eax, esi
+        jne .t3
+        mov esi, t_r_ahora2
+        test edx, edx
+        jz .t2
+        mov esi, t_r_coma
+.t2:
+        call hvl_cad
+        inc edx
+.t3:
+        test edx, edx
+        jz .t4
+        mov al, ')'
+        stosb
+.t4:
+        mov byte [edi], 0
+        inc ecx
+        jmp .t
+.tf:
+        mov ecx, RES_LISTA
+        call hija
+        push ebp
+        mov ebp, eax
+        xor ebx, ebx
+.a:
+        imul edx, ebx, RES_TXT
+        add edx, res_txt
+        mov eax, LM_ANADIR
+        HV msg_enviar
+        inc ebx
+        cmp ebx, [res_n]
+        jb .a
+        ; la elegida: la que hay (o «Automática» si se ha elegido sola)
+        xor ecx, ecx
+        mov ebx, [res_pan]
+        cmp byte [ebx+9], 0
+        jne .s
+        movzx edx, word [ebx+6]
+        test edx, edx
+        jz .s
+        mov ecx, 1
+.sb:
+        cmp ecx, [res_n]
+        jae .s0
+        cmp [res_fichas+ecx*4], edx
+        je .s
+        inc ecx
+        jmp .sb
+.s0:
+        xor ecx, ecx
+.s:
+        mov eax, LM_PONER_SELEC
+        HV msg_enviar
+        pop ebp
+        ; los colores de ahora
+        mov eax, AJ_VID_BITS
+        HV aj_leer
+        xor edx, edx
+        cmp eax, 8
+        jbe .c
+        inc edx
+        cmp eax, 16
+        jbe .c
+        inc edx
+.c:
+        mov [res_col], edx
+        call res_marcas
+        call res_nota_poner
+        ret
+
+; (interna) ESI, EDI: fichas -> CF=1 si ESI va antes (menos puntos)
+res_menor:
+        push eax
+        push ebx
+        movzx eax, word [esi]
+        movzx ebx, word [esi+2]
+        imul eax, ebx
+        push eax
+        movzx eax, word [edi]
+        movzx ebx, word [edi+2]
+        imul eax, ebx
+        cmp [esp], eax
+        pop eax
+        pop ebx
+        pop eax
+        ret
+
+; las marcas de las opciones (colores e iconos)
+res_marcas:
+        pushad
+        xor ebx, ebx
+.c:
+        lea ecx, [ebx+RES_COL]
+        xor edx, edx
+        cmp ebx, [res_col]
+        sete dl
+        call marca_poner
+        lea ecx, [ebx+RES_ICO]
+        xor edx, edx
+        cmp ebx, [a_iconos]
+        sete dl
+        call marca_poner
+        inc ebx
+        cmp ebx, 3
+        jb .c
+        popad
+        ret
+
+; la nota: la resolución de ahora, de dónde sale y la de la pantalla
+res_nota_poner:
+        pushad
+        mov edi, res_nota
+        mov ebx, [res_pan]
+        movzx edx, word [ebx+6]
+        test edx, edx
+        jnz .vesa
+        mov esi, t_r_vga
+        call hvl_cad
+        jmp .o
+.vesa:
+        mov esi, t_r_ahora
+        call hvl_cad
+        movzx eax, word [edx]
+        call hvl_num
+        mov esi, t_r_x
+        call hvl_cad
+        movzx eax, word [edx+2]
+        call hvl_num
+        mov eax, AJ_VID_BITS
+        HV aj_leer
+        mov esi, t_r_256
+        cmp eax, 8
+        jbe .b
+        mov esi, t_r_miles
+        cmp eax, 16
+        jbe .b
+        mov esi, t_r_mill
+.b:
+        call hvl_cad
+        movzx eax, byte [ebx+8]
+        mov esi, [res_origenes+eax*4]
+        call hvl_cad
+.o:
+        movzx eax, word [ebx+2]
+        test eax, eax
+        jnz .e
+        mov esi, t_r_noedid
+        call hvl_cad
+        jmp .n2
+.e:
+        mov esi, t_r_edid
+        call hvl_cad
+        call hvl_num
+        mov esi, t_r_x
+        call hvl_cad
+        movzx eax, word [ebx+4]
+        call hvl_num
+        mov al, '.'
+        stosb
+.n2:
+        mov esi, t_r_nota2
+        call hvl_cad
+        mov byte [edi], 0
+        mov ecx, RES_NOTA
+        mov esi, res_nota
+        call texto_poner
+        popad
+        ret
+res_origenes dd t_r_o0, t_r_o1, t_r_o2, t_r_o3
+
+; «Probar...»: vuelve a cargar Hispa Ventanas con la elegida
+res_probar:
+        pushad
+        mov ecx, RES_LISTA
+        call hija
+        test eax, eax
+        jz .x
+        push ebp
+        mov ebp, eax
+        mov eax, LM_SELEC
+        HV msg_enviar
+        pop ebp
+        test eax, eax
+        js .nosel
+        cmp eax, [res_n]
+        jae .nosel
+        mov ebx, [res_fichas+eax*4]
+        mov edi, tmp
+        mov esi, o_modo
+        call hvl_cad
+        test ebx, ebx
+        jnz .r
+        mov esi, o_auto
+        call hvl_cad
+        jmp .p
+.r:
+        movzx eax, word [ebx]
+        call hvl_num
+        mov al, 'x'
+        stosb
+        movzx eax, word [ebx+2]
+        call hvl_num
+        mov al, 'x'
+        stosb
+        mov eax, [res_col]
+        movzx eax, byte [res_bits+eax]
+        call hvl_num
+.p:
+        mov esi, o_prueba
+        call hvl_cad
+        mov byte [edi], 0
+        cmp byte [cambiado], 0      ; lo que haya sin guardar, antes
+        je .g
+        call guardar
+.g:
+        call red_guardar
+        mov eax, AJ_REINICIAR
+        mov edx, tmp
+        mov ebp, [ven]
+        HV aj_poner
+        cmp eax, 1
+        jne .x
+        mov esi, t_r_nolz
+        jmp .aviso
+.nosel:
+        mov esi, t_r_nosel
+.aviso:
+        mov edi, t_r_tit
+        mov eax, DM_ACEPTAR
+        mov ebp, [ven]
+        HV dlg_mensaje
+.x:
+        popad
+        ret
+res_bits    db 8, 16, 32
+
+; ---- la pregunta tras «Probar» (Hispa Ventanas arrancado con /PRUEBA) ----
+preg_abrir:
+        pushad
+        mov esi, preg_plant
+        mov edi, plant2
+        mov ecx, P_TAM / 4
+        rep movsd
+        HV pantalla
+        sub eax, [plant2+P_AN]
+        sar eax, 1
+        mov [plant2+P_X], eax
+        sub ebx, [plant2+P_AL]
+        sar ebx, 1
+        mov [plant2+P_Y], ebx
+        mov dword [preg_seg], PREG_SEG
+        mov esi, plant2
+        xor ebp, ebp
+        HV ven_crear
+        test eax, eax
+        jz .x
+        mov [preg_ven], eax
+        mov ebp, eax
+        mov esi, pl_preg
+        HV ven_lista
+        call preg_texto
+        mov ebp, [preg_ven]
+        HV ven_activar
+        mov ecx, 202
+        HV ven_hija_id
+        test eax, eax
+        jz .x
+        mov ebp, eax
+        HV ven_enfocar
+.x:
+        popad
+        ret
+
+; (interna) «Si no contesta, se vuelve a la de antes en N segundos.»
+preg_texto:
+        pushad
+        mov edi, preg_txt
+        mov esi, t_p_2a
+        call hvl_cad
+        mov eax, [preg_seg]
+        call hvl_num
+        mov esi, t_p_2b
+        call hvl_cad
+        mov byte [edi], 0
+        mov ebp, [preg_ven]
+        mov ecx, 201
+        HV ven_hija_id
+        test eax, eax
+        jz .x
+        mov ebp, eax
+        mov esi, preg_txt
+        HV ven_texto
+.x:
+        popad
+        ret
+
+; (reloj, cada segundo) la cuenta atrás; a cero, la de antes
+preg_tic:
+        dec dword [preg_seg]
+        jle preg_no
+        jmp preg_texto
+
+; Configuración, a la vista y en «Resolución»
+res_ensenar:
+        pushad
+        mov ebp, [ven]
+        test ebp, ebp
+        jz .x
+        mov eax, WM_APARTADO
+        mov ecx, SEC_RES
+        xor edx, edx
+        HV msg_enviar
+        mov eax, 1
+        HV ven_mostrar
+        HV ven_activar
+.x:
+        popad
+        ret
+
+; «Sí»: se queda en VENTANAS.INI
+preg_si:
+        pushad
+        call preg_cerrar
+        mov eax, AJ_PANTALLA
+        HV aj_leer
+        mov ebx, eax
+        xor eax, eax                ; «auto»
+        cmp byte [ebx+9], 0
+        jne .pon
+        movzx edx, word [ebx+6]
+        test edx, edx
+        jz .pon                     ; (en la VGA: la automática)
+        movzx eax, word [edx]
+        shl eax, 16
+        movzx ecx, word [edx+2]
+        shl ecx, 4
+        or eax, ecx
+        push eax
+        mov eax, AJ_VID_BITS
+        HV aj_leer
+        xor ecx, ecx
+.b:
+        inc ecx
+        cmp ecx, 5
+        ja .bf
+        cmp al, [modo_bits+ecx-1]
+        jne .b
+        or [esp], ecx
+.bf:
+        pop eax
+.pon:
+        mov [a_modo], eax
+        call guardar
+        cmp byte [montado], 0
+        je .e
+        cmp dword [seccion], SEC_RES
+        jne .e
+        call res_nota_poner
+.e:
+        call res_ensenar
+        popad
+        ret
+
+; «No» (o nadie contesta): Hispa Ventanas otra vez, con la de antes
+preg_no:
+        pushad
+        call preg_cerrar
+        mov eax, AJ_REINICIAR
+        mov edx, o_resol
+        mov ebp, [ven]
+        HV aj_poner
+        popad
+        ret
+
+preg_cerrar:
+        pushad
+        mov ebp, [preg_ven]
+        mov dword [preg_ven], 0
+        test ebp, ebp
+        jz .x
+        HV ven_destruir
+.x:
+        popad
+        ret
+
+preg_proc:
+        cmp eax, WM_COMMAND
+        je .orden
+        cmp eax, WM_CLOSE
+        je .no
+        cmp eax, WM_KEYDOWN
+        jne .def
+        cmp ecx, TC_ESC
+        je .no
+.def:
+        HVJ ven_defecto
+.orden:
+        movzx ecx, cx
+        cmp ecx, 202
+        je .si
+        cmp ecx, 203
+        jne .hecho
+.no:
+        call preg_no
+        jmp .hecho
+.si:
+        call preg_si
+.hecho:
+        xor eax, eax
         ret
 
 ; =============================================================================
@@ -4975,6 +5750,18 @@ a_espera    resd 1                  ; teclado: 0-3 (-1: no se toca)
 a_repet     resd 1                  ; 0-31, 31 lo más rápido (-1: no se toca)
 a_dist      resd 1                  ; 1 española, 0 estadounidense (-1: no se toca)
 a_escritorio resd 1                 ; [BARRA] 386 o 486 (-1: no está en VENTANAS.INI); no es de «fabrica»; [ESTILO] lo cambia «Estilo del escritorio»
+a_iconos    resd 1                  ; [ICONOS] 0 pequeños, 1 normales, 2 grandes
+a_modo      resd 1                  ; [PANTALLA] -1 no está; 0 «auto»; ancho*65536 + alto*16 + colores (0 sin decir, 1-5: 8, 15, 16, 24, 32)
+; [PANTALLA] el apartado «Resolución» y la pregunta tras «Probar»
+res_pan     resd 1                  ; lo que da aj_leer(AJ_PANTALLA)
+res_n       resd 1                  ; filas de la lista
+res_col     resd 1                  ; los colores elegidos: 0 256, 1 miles, 2 millones
+res_fichas  resd RES_MAX            ; la ficha de cada fila (0: «Automática»)
+res_txt     resb RES_MAX * RES_TXT
+res_nota    resb 256
+preg_ven    resd 1
+preg_seg    resd 1
+preg_txt    resb 96
 ; [RED] el modelo del apartado «Red» (RED.INI, aparte de VENTANAS.INI)
 a_dhcp      resd 1                  ; 1 DHCP (automática), 0 IP a mano
 ; el salvapantallas
