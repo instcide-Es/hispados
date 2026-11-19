@@ -60,6 +60,7 @@ módulo UOrdenes
 
     variable camino: arreglo [LÍNEA] de byte = "C:\\"   ; el PATH
     variable acabar: bool                           ; se ha dicho SALIR
+    variable cortado: bool                          ; se ha pulsado Ctrl+C mientras se hacía una orden
 
     ; ---- el archivo de órdenes (.BAT) que se está haciendo ----
     variable lote: nat32 = 0xFFFFFFFF               ; su manejador (NINGUNO: se lee del teclado)
@@ -180,6 +181,13 @@ módulo UOrdenes
         sí := no es_error(leer(m, trozo, 0))
         cerrar(m)
         devolver sí
+    fin
+
+    ; ¿se ha pulsado Ctrl+C? (lo recuerda hasta la siguiente línea que se teclee:
+    ; la orden que se está haciendo lo deja, y el archivo de órdenes también)
+    función corte(): bool
+        si hubo_corte() entonces cortado := cierto fin
+        devolver cortado
     fin
 
     función no_puedo(qué: puntero a byte, cuál: puntero a byte, error: nat32)
@@ -334,7 +342,7 @@ módulo UOrdenes
         archivos := 0
         carpetas := 0
         octetos := 0
-        mientras entrada_larga(m, e, largo) hacer
+        mientras entrada_larga(m, e, largo) y no corte() hacer
             punto := e.nombre[0] = '.' y patrón[0] <> 0
             si e.atributos yb OCULTO = 0 y no punto y casa(patrón, dirección(e.nombre[0])) entonces
                 enseña_entrada()
@@ -375,7 +383,7 @@ módulo UOrdenes
         si es_error(n) entonces
             imprimir1("%s es una carpeta (o el disco falla).\n", nat32(nombre))
         fin
-        mientras no es_error(n) y n > 0 hacer
+        mientras no es_error(n) y n > 0 y no corte() hacer
             escribir_trozo(trozo, n)
             n := leer(m, trozo, 512)
         fin
@@ -454,7 +462,7 @@ módulo UOrdenes
                     concatenar(ruta2, dirección(e.nombre[0]))
                     imprimir1("%s\n", nat32(dirección(ruta[0])))
                     si copia(ruta, ruta2) entonces hechos := hechos + 1 fin
-                    si hubo_corte() entonces romper fin
+                    si corte() entonces romper fin
                 fin
             fin
             cerrar(m)
@@ -869,7 +877,7 @@ módulo UOrdenes
         mientras no acabar hacer
             si lote <> NINGUNO entonces
                 ; la línea siguiente del archivo de órdenes (Ctrl+C lo deja)
-                si hubo_corte() entonces
+                si corte() entonces
                     deja_el_lote()
                     seguir
                 fin
@@ -888,6 +896,7 @@ módulo UOrdenes
                 haz(p)
             sino
                 hubo_corte()
+                cortado := falso
                 petición()
                 leer_línea(línea, LÍNEA)
                 haz(línea)

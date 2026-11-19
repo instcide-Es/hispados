@@ -406,10 +406,13 @@ módulo Semilla
             devolver
         fin
         antes := marcos_libres()
-        t := cargar(n)
-        si t = nulo entonces devolver fin
-        nombre := t.nombre
         tomar_consola()
+        t := cargar(n)
+        si t = nulo entonces
+            soltar_consola()
+            devolver
+        fin
+        nombre := t.nombre
         imprimir2("ejecuto %s (la tarea %u, en el anillo 3)\n", nat32(nombre), t.id)
         soltar_consola()
         c := esperar(t)
@@ -424,13 +427,16 @@ módulo Semilla
         variable t: puntero a Tarea
         variable nombre: arreglo [16] de byte
         antes := marcos_libres()
+        ; con la pantalla tomada desde antes de hacer la tarea: lo primero que
+        ; escriba el programa espera a que esté dicho que se le lanza
+        tomar_consola()
         t := cargar_archivo(ruta, args, e)
         si t = nulo entonces
+            soltar_consola()
             imprimir2("no puedo lanzar %s: %s\n", nat32(ruta), nat32(texto_error(e)))
             devolver
         fin
         copiar_hasta(nombre, t.nombre, 16)
-        tomar_consola()                         ; (que no se le cuele lo primero que escriba el programa)
         imprimir2("lanzo %s del disco (la tarea %u, en el anillo 3)\n", nat32(dirección(nombre[0])), t.id)
         soltar_consola()
         c := esperar(t)
