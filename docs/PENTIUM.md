@@ -1448,7 +1448,10 @@ usan en la tercera). Lo que sacan los dos compiladores sigue siendo lo mismo.
 
 Con todo, `pruebas.sh` tiene ahora **369 comprobaciones** (eran 320; unos treinta
 y cinco minutos en el VPS). La última pasada entera (19/11/2026, con la 0.6) dio
-**369 bien, 0 mal**; `SOLO=06 ./pruebas.sh` (los errores y la parte 9, lo de la
+**369 bien, 0 mal**. Con la oficina de Hispa-386 dentro (HVPRUN, sección 10:
+el grupo «Oficina» del menú Inicio, Facturas, Pluma, el portapapeles, Cuentas y
+Mi equipo abriendo un `.PLU` y una imagen) son **382**: la pasada del
+19/11/2026 por la noche dio **382 bien, 0 mal**; `SOLO=06 ./pruebas.sh` (los errores y la parte 9, lo de la
 0.6) son unos ocho minutos, y `SOLO=16`, lo que no arranca el núcleo (de la parte
 1 a la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
