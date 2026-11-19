@@ -571,7 +571,13 @@ módulo Instala
         dd[2] := nat32(dirección(t[0]))
         ponf(13, 10, ROJO, "%s  %-34s %s")
         dd[0] := n_partes
-        si n_partes > 0 entonces ponf(11, 12, ROJO, "Sus %u particiones, con todos sus archivos, se pierden") sino pon(11, 12, ROJO, "Lo que tenga, sea lo que sea, se pierde") fin
+        si n_partes > 1 entonces
+            ponf(11, 12, ROJO, "Sus %u particiones, con todos sus archivos, se pierden")
+        sino si n_partes = 1 entonces
+            pon(11, 12, ROJO, "Su partición, con todos sus archivos, se pierde")
+        sino
+            pon(11, 12, ROJO, "Lo que tenga, sea lo que sea, se pierde")
+        fin
         pon(11, 13, ROJO, "para siempre. No se puede deshacer.")
         pon(3, 18, AZUL, "Si está seguro, pulse S. Para volver sin tocar nada, pulse ESC.")
         pie("S=Sí, borrar el disco   ESC=Volver (no se toca nada)   F3=Salir")

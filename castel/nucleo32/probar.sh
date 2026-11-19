@@ -22,6 +22,8 @@
 # texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
 # se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
+# «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
+# $CAPTURAS/NOMBRE.txt (para el programa que instala, que la pinta entera).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
 # primario): la hace nucleo32/disco.sh, con el intérprete de órdenes y los
 # programas. Lo que se escriba en el disco no llega a la imagen (se queda en
@@ -140,6 +142,7 @@ for orden in "${ORDENES[@]}"; do
     ":mayusclic "*) set -- ${orden:11}; ir $1 $2; mon "sendkey shift 900" 0.3; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.9; continue ;;
     ":arrastra "*) set -- ${orden:10}; ir $1 $2; mon "mouse_button 1" 0.25; ir $3 $4; mon "mouse_button 0" 0.4; continue ;;
     ":captura "*) sleep 0.4; mon "screendump ${CAPTURAS:-/tmp}/${orden:9}.ppm" 0.5; continue ;;
+    ":texto "*) sleep 0.4; pantalla; cp $T/pantalla.txt "${CAPTURAS:-/tmp}/${orden:7}.txt"; continue ;;
     ":escribe "*)
       t=${orden:9}
       for ((j = 0; j < ${#t}; j++)); do for k in $(tecla "${t:$j:1}"); do mon "sendkey $k"; done; done

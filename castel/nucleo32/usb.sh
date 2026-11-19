@@ -43,7 +43,7 @@ AQUI=$(dirname "$(readlink -f "$0")")
 OUT=${1:?uso: usb.sh IMAGEN}
 W=$(mktemp -d /dev/shm/pgraf-usb.XXXX)
 L=
-trap '[ -n "$L" ] && { umount $W/m 2>/dev/null; losetup -d $L 2>/dev/null; }; rm -rf $W' EXIT
+trap '[ -n "$L" ] && { umount $W/m 2>/dev/null || true; losetup -d $L 2>/dev/null || true; }; rm -rf $W' EXIT
 mkdir $W/f $W/m
 python3 -I $AQUI/../ccastel.py $AQUI/semilla.cas -o $W/semilla.asm > /dev/null
 nasm -f bin $W/semilla.asm -o $W/f/SEMILLA.BIN
@@ -141,6 +141,9 @@ IMG=$W/usb.img
 truncate -s 64M $IMG
 parted -s $IMG mklabel msdos mkpart primary fat16 1MiB 100% set 1 boot on
 L=$(losetup -fP --show $IMG)
+# (la partición tarda un momento en aparecer)
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -b ${L}p1 ] && break; sleep 0.1; done
+[ -b ${L}p1 ] || { partprobe $L 2> /dev/null; sleep 0.5; }
 mkfs.fat -F 16 -n HISPAPENT ${L}p1 > /dev/null
 mount ${L}p1 $W/m
 cp $W/f/* $W/m/
