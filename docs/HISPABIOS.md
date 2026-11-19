@@ -1,19 +1,24 @@
 # HispaBIOS: Hispa-DOS en equipos que solo arrancan por UEFI
 
-**Estado (18/11/2026):** versión 0.4. Probada en QEMU con OVMF (64 y 32 bits,
-i440fx y q35, hasta 8 GB, pantalla de 1920x1200, con y sin 8254 y HPET). La
-0.3 arranca en equipos de verdad: ThinkPad E14 (Raptor Lake), MacBook Air de
-2017 y Asus GL553V (Kaby Lake; con sonido). En el **Monovate 14.1** (Core
-i3-1115G4, Tiger Lake) se quedaba a la mitad: el reloj no andaba. La 0.4 lleva
-el arreglo (ver «El reloj en los equipos con el 8254 parado») y **está
-pendiente de probar en ese equipo** con la imagen de prueba del FTP, carpeta
-`prueba-hispabios`.
+**Estado (19/11/2026):** versión 0.5, con **ratón** (ver «El ratón con UEFI»).
+Probada en QEMU con OVMF (64 y 32 bits, i440fx y q35, hasta 8 GB, pantalla de
+1920x1200, con y sin 8254 y HPET, ratón USB). La 0.3 arranca en equipos de
+verdad: ThinkPad E14 (Raptor Lake), MacBook Air de 2017 y Asus GL553V (Kaby
+Lake; con sonido). En el **Monovate 14.1** (Core i3-1115G4, Tiger Lake) se
+quedaba a la mitad: el reloj no andaba. La 0.4 lleva el arreglo (ver «El reloj
+en los equipos con el 8254 parado») y **está pendiente de probar en ese
+equipo** con la imagen de prueba del FTP, carpeta `prueba-hispabios`. El ratón
+de la 0.5 está **pendiente de probar en el ThinkPad E14 y el MacBook Air de
+2017** con la imagen de la carpeta `prueba-hispabios-raton`.
 
 La parte de **32 bits** (`efi32.asm`, para firmware UEFI de 32 bits) está al
 nivel de la de 64 desde el 18/11/2026 y lleva además la **pantalla girada** de
 las tabletas (ver «La parte de 32 bits»). Probada en QEMU con OVMF de 32 bits
 (procesador de 64 y de 32, 1 GB, 1280x800 y 800x1280 vertical); **pendiente de
-probar en un equipo de verdad**: el Acer One 10 (Atom «Bay Trail»).
+probar en un equipo de verdad**: el Acer One 10 (Atom «Bay Trail»). Desde la
+0.5 la de 64 bits hace también lo que estrenó la de 32: conectar las
+controladoras de disco, los discos que no son el de arranque (81h...), el
+equipo en el registro y la memoria extendida según el mapa.
 
 ## Qué es
 
@@ -32,6 +37,7 @@ interviene: la memoria arranca por el MBR.
 | `hispabios/efi64.asm` | La parte UEFI de 64 bits: memoria, pantalla, discos, el registro y el despachador de las peticiones |
 | `hispabios/efi32.asm` | Lo mismo para firmware de 32 bits (tabletas y portátiles con Atom): arranque, memoria, registro, discos y tablas |
 | `hispabios/efi32_reloj.inc`, `efi32_pant.inc`, `efi32_datos.inc` | El resto de la parte de 32 bits: el reloj y el despachador; la pantalla (escritura combinada, VBE, el giro); textos y variables |
+| `hispabios/efi64_raton.inc`, `efi32_raton.inc` | El ratón (0.5): los del firmware y los ratones USB que lee HispaBIOS |
 | `hispabios/bios64.asm`, `bios_int.inc` | La BIOS de modo real y los cambios de modo (con `-DARQ32`, para firmware de 32 bits) |
 | `hispabios/pe.inc` | La cabecera PE/COFF, escrita a mano |
 | `hispabios/hblog.asm` | `HBLOG.COM`: enseña y guarda (`\HBLOG.TXT`) el registro de la BIOS de modo real |
@@ -55,7 +61,9 @@ interviene: la memoria arranca por el MBR.
    ir: ahí se copia el sector de arranque de Hispa-DOS (`RELOC_SEG`), y por lo
    mismo esa página tiene que estar libre.
 5. Busca la pantalla (GOP, 640x400 o más, color de 32 bits) y los discos (Block
-   I/O de 512 octetos; el de arranque es el 80h), copia la BIOS y la arranca.
+   I/O de 512 octetos; el de arranque es el 80h, los demás 81h en adelante;
+   antes pide al firmware que ponga en marcha sus controladoras de disco),
+   busca el ratón (0.5), copia la BIOS y la arranca.
 
 Desde la 0.3, además: **presta a DOS las páginas sueltas** de memoria baja que
 usa el firmware, **copia las entradas de ACPI y SMBIOS** donde las ve un
@@ -122,6 +130,78 @@ compara cada línea con lo ya pintado y lleva a la pantalla las que han
 cambiado, ampliadas por un entero y centradas (800x600 en 1920x1200: al doble).
 No hay modos de 8 bits (su paleta se pone por los puertos de la VGA, que no
 existen) ni ventanas de 64 KB en A0000h. INT 10h AH = 00h vuelve al texto.
+
+## El ratón con UEFI (0.5)
+
+**El fallo.** En el ThinkPad E14 y el MacBook Air de 2017, arrancando por UEFI,
+Hispa Ventanas no tenía ratón ni panel táctil. Con UEFI no hay emulación del
+ratón PS/2 (la BIOS «heredada» la hacía con el ratón USB) y el panel táctil va
+por USB (el Mac) o por I2C (el E14); HSPUSB no se carga (el USB es del
+firmware) y la BIOS de HispaBIOS no daba ratón: HSPRATON decía «fallo en
+C205h, AH=86h» y no había nada.
+
+**El arreglo.** La parte UEFI busca el ratón al arrancar (`raton_preparar`, en
+`efi64_raton.inc` y `efi32_raton.inc`), por este orden:
+
+1. Pide al firmware que ponga en marcha sus **controladoras USB** (PCI clase
+   0C03h, `ConnectController` recursivo): arrancando «deprisa» solo enciende
+   lo necesario para arrancar.
+2. El **ratón del firmware**: cada `EFI_SIMPLE_POINTER_PROTOCOL` (ratones y,
+   si el firmware lo lleva, el panel táctil) y `EFI_ABSOLUTE_POINTER_PROTOCOL`
+   (pantallas táctiles, tabletas). No el de la consola de entrada
+   (`ConsoleInHandle`): ese reúne a los demás (en EDK II, ConSplitter) y lo
+   hay aunque no haya ningún ratón.
+3. Un **ratón USB que el firmware no lleva** (OVMF no lleva ratón; muchos
+   firmware tampoco): cada interfaz HID de ratón (`EFI_USB_IO_PROTOCOL`, clase
+   03h, protocolo 02h) que no tenga Simple Pointer ni la tenga abierta un
+   controlador del firmware. Si es de arranque (subclase 01h), o acepta el
+   protocolo de arranque, se le pide ese protocolo (`SET_PROTOCOL`: informes
+   de botones, X, Y y rueda), `SET_IDLE` y se le pone una **transferencia de
+   interrupción asíncrona**: el firmware atiende el USB durante los viajes,
+   como hace con su teclado USB, y llama a `raton_cb` con cada informe.
+
+Mientras DOS tiene el ratón activado (`T_RAT_ON`), en **cada viaje al
+firmware** la parte UEFI pregunta a los ratones del firmware (`GetState`) y
+suma lo que se han movido en la tabla de la BIOS (`T_RAT_DX/DY`, en cuentas
+del PS/2) y los botones (`T_RAT_BOT`); `raton_cb` hace lo mismo con los
+informes USB. El tic de la BIOS hace un viaje si no tenía ya que dibujar (en
+los modos gráficos ya lo hace en cada tic), y el teclado hace los suyos.
+
+La BIOS de modo real da el ratón por **INT 15h C200h a C207h**, el «ratón PS/2»
+de la BIOS de siempre: tras cada viaje (en el tic y tras cada pregunta al
+teclado) llama a la rutina que el programa dio con C207h con el estado, X, Y
+y 0 en la pila (paquetes de 3 octetos, de -255 a 255 por eje; como mucho 4 por
+vez). Es lo que usa HSPRATON por la «vía BIOS», y con él Hispa Ventanas y los
+programas de INT 33h. INT 11h pone el bit 2 (hay ratón). **Sin ratón**, C2xxh
+contesta «no se admite» (AH = 86h) como antes, y HSPRATON prueba el 8042
+directamente (lo que ya hacía).
+
+Las cuentas: un Simple Pointer dice sus cuentas por milímetro; hasta 8 se
+pasan tal cual (lo que hace la emulación PS/2 de las BIOS con un ratón USB) y,
+si son más (paneles de mucha resolución), se llevan a 8 por milímetro. Un
+Absolute Pointer da la posición: se pasa a movimiento con todo el ancho (y
+todo el alto) = 1024 cuentas. La rueda se lee pero no se da (los paquetes de
+la BIOS son de 3 octetos).
+
+En el **modo seguro** no se conectan las controladoras USB ni se pone el ratón
+USB propio (los ratones que ya diera el firmware sí se usan). Lo que se ha
+encontrado va al registro (`HISPABIOS.LOG`, apartado «Raton:») y `HBLOG` dice
+de dónde sale el ratón y sus cuentas (lecturas del firmware, informes USB,
+paquetes entregados).
+
+**Lo que QEMU no puede decir** (lo dirá el registro del equipo): si el
+firmware del E14 o del Mac da un Simple Pointer para su panel táctil, si el
+panel del Mac aparece como interfaz USB de ratón (en los Mac, el panel
+interno es USB y en su modo «de ratón» manda informes de ratón normales: es
+lo que espera HispaBIOS si el firmware no lo lleva) o si el panel I2C del E14
+no lo da nadie. En el E14 hay además un 8042 con puerto auxiliar que contesta
+(el informe de EQUIPO): si no hay ratón del firmware, HSPRATON va al 8042
+como siempre.
+
+**No se hace**: los ratones USB que solo dan informes «de informe» (sin
+protocolo de arranque) ni las tabletas USB absolutas (el `usb-tablet` de
+QEMU): haría falta leer su descriptor de informe. El panel táctil por I2C o
+SPI sin controlador del firmware no tiene arreglo desde aquí.
 
 ## El teclado y el reloj
 
@@ -255,9 +335,9 @@ queda parado sin llegar a avisar está la **imagen de prueba**
 (`tools/mkprueba_hispabios.sh`, ensamblada con `-DREGISTRO_PASOS`): guarda el
 registro en cada paso, así que el archivo dice hasta dónde llegó.
 
-La parte de 32 bits escribe el mismo registro, con dos cosas más: el
-**equipo** (fabricante, modelo y BIOS según SMBIOS) y **cada disco** que da el
-firmware.
+Desde la 0.5 las dos partes escriben además el **equipo** (fabricante, modelo
+y BIOS según SMBIOS), **cada disco** que da el firmware y lo que se ha hecho con
+él, y el **ratón** (las controladoras USB, los ratones del firmware y los USB).
 
 ## La parte de 32 bits (`efi32.asm`): Atom «Bay Trail», Acer One 10
 
@@ -303,7 +383,7 @@ mismos. Lo que cambia o es propio:
   2 del revés, 3 a la izquierda) para los arranques siguientes. Vale también
   en una pantalla apaisada (una que esté del revés). Se acepta una pantalla de
   640x400 «de frente o de lado».
-- **Los discos.** Arrancando «deprisa», el firmware solo pone en marcha el
+- **Los discos** (desde la 0.5, igual en `efi64.asm`). Arrancando «deprisa», el firmware solo pone en marcha el
   dispositivo del que arranca, y la eMMC no aparecería: HispaBIOS le pide que
   **conecte sus controladoras de disco** (`ConnectController` recursivo sobre
   los dispositivos PCI de clase 01h y 0805h; `discos_conectar`). El disco del
@@ -313,7 +393,8 @@ mismos. Lo que cambia o es propio:
   de 32 MB que no sea el de arranque no se da a DOS. Hacen falta sectores de
   512. Cada disco va al registro con su tamaño y lo que se ha hecho con él.
 - **La memoria extendida** se pide según el mapa: el tramo libre entero que
-  empieza en 1 MB (64 MB como mucho; en OVMF, 7 MB en vez de 4).
+  empieza en 1 MB (64 MB como mucho; en OVMF, 7 MB en vez de 4). Desde la
+  0.5, también en `efi64.asm`.
 - El **modo seguro** deja además de conectar controladoras; el giro se
   mantiene (es solo dibujo).
 
@@ -372,14 +453,16 @@ gráfico». Causas y arreglos:
    Arreglo: VBE de 32 bits con el marco por debajo de 4 GB.
 
 Queda por saber en los equipos de verdad (lo dirán `HISPABIOS.LOG` y
-`HBLOG.TXT`): lo que cuesta pintar con y sin WC, si llega la IRQ 0 y si el
-ratón funciona (con UEFI no hay ratón USB: HSPUSB no se carga).
+`HBLOG.TXT`): lo que cuesta pintar con y sin WC y si llega la IRQ 0. El ratón,
+desde la 0.5 (ver «El ratón con UEFI»).
 
 ## Pruebas
 
 `tests/run_hispabios_tests.sh` (en `make test`; necesita los paquetes `ovmf` y
 `ovmf-ia32`). Los casos de la parte de 32 bits están en
-`tests/hispabios32_casos.sh` (a solas: `HB_SOLO=32 tests/run_hispabios_tests.sh`). Además del arranque de siempre (64 y 32 bits, «Juegos», modo
+`tests/hispabios32_casos.sh` (a solas: `HB_SOLO=32 tests/run_hispabios_tests.sh`)
+y los del ratón y los discos de `efi64.asm`, en `tests/hispabios_raton_casos.sh`
+(`HB_SOLO=raton`). Además del arranque de siempre (64 y 32 bits, «Juegos», modo
 «irreal»), ensambla variantes de `BOOTX64.EFI` con las opciones de prueba:
 
 | Opción de `efi64.asm` | Para qué |
@@ -431,6 +514,19 @@ bits sin 8254 (el reloj CMOS); la memoria baja ocupada (70000h, 448 KB con la
 página prestada), sin memoria baja (aviso y registro) y la pantalla lenta
 simulada con `VBEPRU`.
 
+El ratón (0.5): un `usb-mouse` en el xHCI de la memoria USB, movido y pulsado
+desde el monitor de QEMU (`mouse_move`, `mouse_button`; en `arranca`, las
+«teclas» `m:orden+con+mas`): el registro (la controladora USB conectada, el
+Simple Pointer de la consola apartado, el ratón USB en marcha por
+`EFI_USB_IO`), HSPRATON por la «vía BIOS», `MOUSETST` (INT 33h) viendo el
+movimiento y los dos botones, y `HBLOG` con las cuentas; en 64 y en 32 bits.
+**Hispa Ventanas**: el puntero se mueve (dos capturas) y un doble clic en el
+grupo «Juegos» abre su ventana (la captura cambia en más de 20.000 puntos).
+Sin ratón USB, C2xxh dice que no y HSPRATON no usa la BIOS; el modo seguro no
+conecta controladoras. Los discos de `efi64.asm`: la memoria USB (80h), un
+disco SATA de 64 MB (81h, D:, leer y escribir) y uno de 4 MB que no se da;
+el equipo de SMBIOS y la memoria extendida según el mapa.
+
 OJO con QEMU y KVM: con el 8259 del núcleo (KVM) la IRQ 0 por LINT0 no llega
 tras enmascarar y abrir LINT0, cosa que un equipo de verdad sí hace; las
 pruebas van sin KVM.
@@ -439,21 +535,21 @@ pruebas van sin KVM.
 
 - Probar la parte de 32 bits en el **Acer One 10** con la imagen de prueba
   (`LEEME-ACER.TXT` en la carpeta `prueba-hispabios` del FTP).
-- Llevar a `efi64.asm` lo que ha estrenado la de 32: la pantalla girada (hay
-  tabletas con firmware de 64 bits y panel vertical), conectar las
-  controladoras de disco, los discos y el equipo en el registro, y la memoria
-  extendida según el mapa.
+- Llevar a `efi64.asm` la pantalla girada de la de 32 (hay tabletas con
+  firmware de 64 bits y panel vertical). Lo demás (discos, equipo, memoria
+  extendida) ya está desde la 0.5.
+- Probar el **ratón** de la 0.5 en el ThinkPad E14 y el MacBook Air de 2017
+  (`prueba-hispabios-raton` en el FTP) y, según diga `HISPABIOS.LOG`: si el
+  panel del Mac es una interfaz USB «de informe» sin protocolo de arranque,
+  leer su descriptor de informe; la rueda (paquetes de 4 octetos,
+  IntelliMouse) y las tabletas USB absolutas.
 - Un modo de VBE con la medida de la pantalla (1280x800): hoy Hispa Ventanas
   sale en 800x600 o 1024x768, centrada.
 - Probar la 0.4 en el Monovate 14.1 (y que el ThinkPad E14, el MacBook Air y
   el Asus GL553V siguen bien) con la imagen de prueba, y ver `HISPABIOS.LOG` y
   `HBLOG.TXT`.
-- **Ratón** con UEFI: no hay ratón USB (el USB lo lleva el firmware). Haría
-  falta sacarlo del firmware (Simple Pointer) y darlo por INT 33h / INT 15h C2h.
 - **Alt y Ctrl** con las teclas de función (Alt+F4 en Hispa Ventanas): el
   teclado del firmware da el estado de las teclas, la BIOS aún no lo traduce.
 - Modos VBE de 8 bits (con la paleta por INT 10h 4F09h) para juegos.
 - Si en algún equipo no llega ninguna fuente por el 8259: el temporizador del
   APIC local (ver «Límites» del reloj).
-- En `efi64.asm` la memoria extendida se pide a potencias de dos desde 1 MB
-  (en OVMF, 4 MB; 64 MB como mucho): usar el mapa, como en `efi32.asm`.

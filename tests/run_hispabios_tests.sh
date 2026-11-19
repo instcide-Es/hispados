@@ -50,10 +50,12 @@ arranca() {
     grep -aq "${HB_HASTA:-C:\\\\>}" $T/serie_$nombre.txt 2>/dev/null && break
   done
   if grep -aq 'C:\\>' $T/serie_$nombre.txt; then
-    # (una «tecla» que empieza por «w» es una espera en segundos: w8)
+    # (una «tecla» que empieza por «w» es una espera en segundos: w8; por «m:»,
+    # una orden del monitor con «+» en vez de espacios: m:mouse_move+20+10)
     for k in $teclas; do
       case $k in
         w[0-9]*) sleep ${k#w};;
+        m:*) echo "${k#m:}" | tr '+' ' ' | socat - UNIX-CONNECT:$T/mon_$nombre > /dev/null; sleep 0.12;;
         *) echo "sendkey $k" | socat - UNIX-CONNECT:$T/mon_$nombre > /dev/null; sleep 0.4;;
       esac
     done
@@ -83,8 +85,10 @@ hb_colores() { convert "$1" -format %k info: 2>/dev/null || echo 0; }
 # hb_reloj patrón "bien" "mal": el patrón tiene que estar en $L (HISPABIOS.LOG)
 hb_reloj() { echo "$L" | grep -q "$1" && ok "$2" || ko "$3"; }
 
-# HB_SOLO=32: solo las pruebas de la parte de 32 bits (tests/hispabios32_casos.sh)
+# HB_SOLO=32: solo las pruebas de la parte de 32 bits (tests/hispabios32_casos.sh);
+# HB_SOLO=raton: solo las del ratón y los discos de efi64 (tests/hispabios_raton_casos.sh)
 if [ "${HB_SOLO:-}" = 32 ]; then . tests/hispabios32_casos.sh; exit $fail; fi
+if [ "${HB_SOLO:-}" = raton ]; then . tests/hispabios_raton_casos.sh; exit $fail; fi
 
 for arq in 64 32; do
   echo "== HispaBIOS: arranque por UEFI de $arq bits (sin CSM) =="
@@ -276,7 +280,7 @@ if hb_variante rapida "-DPRUEBA_PILA -DREGISTRO_PASOS"; then
   # se puede (la serie no las lleva): se cuenta que HBLOG, tecleado 6 s después, sale
   # DESPUÉS de la lista entera (con la 0.2 la lista tardaba 11 s y HBLOG no llegaba a verse)
   awk '/HBLOG: registro de la BIOS/ { h = NR } /bytes libres/ { b = NR } END { exit !(h && b && b < h) }' $S && ok "DIR C:\\HISPADOS (75 líneas) acaba en menos de 6 s (con la 0.2, 11 s)" || ko "DIR C:\\HISPADOS tarda más de 6 s"
-  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.4' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
+  grep -aq 'HBLOG: registro de la BIOS de HispaBIOS 0\.5' $S && ok "HBLOG enseña el registro de la BIOS" || ko "HBLOG no funciona"
   grep -aq 'tics dados sin IRQ: [0-9]* (ahora la IRQ 0 llega)' $S && ok "HBLOG: la IRQ 0 llega" || ko "HBLOG: la IRQ 0 no llega"
   grep -aq 'Pantalla: dibujada [0-9]* veces; el ultimo dibujo, [0-9]* us' $S && ok "HBLOG: las cuentas de la pantalla" || ko "HBLOG sin las cuentas de la pantalla"
   mtype -i $T/rapida.img@@1048576 ::HBLOG.TXT 2>/dev/null | grep -q 'lo apuntado por HispaBIOS' && ok "HBLOG guarda \\HBLOG.TXT" || ko "HBLOG no guarda \\HBLOG.TXT"
@@ -371,6 +375,7 @@ if hb_variante segrel "-DPRUEBA_PILA -DREGISTRO_PASOS -DPRUEBA_SEGURO" && HB_MEM
   hb_reloj 'Reloj: modo seguro, no se toca el PCH, el HPET ni el IOAPIC' "modo seguro: no toca el PCH, el HPET ni el IOAPIC" "el modo seguro no se nota en el reloj"
   echo "$L" | grep -q 'HPET en el sitio\|por la entrada 0 del IOAPIC\|Bloqueo del 8254' && ko "el modo seguro prueba el HPET, el IOAPIC o el PCH" || ok "modo seguro: no prueba el HPET ni el IOAPIC"
   hb_reloj 'Reloj de DOS: LLEGA. Queda: el reloj CMOS' "modo seguro sin 8254: el reloj CMOS" "modo seguro sin 8254: sin reloj"
+  echo "$L" | grep -q 'Controladora USB\|Controladora de disco' && ko "el modo seguro conecta controladoras" || ok "modo seguro: no conecta las controladoras USB ni las de disco"
   grep -aq 'bytes libres' $S && ok "modo seguro sin 8254: llega a C:\\> y DIR responde" || ko "modo seguro sin 8254: no llega a C:\\>"
 else
   ko "no se ha podido ensamblar o arrancar la variante del modo seguro"
@@ -407,5 +412,8 @@ fi
 
 # ---- La parte de 32 bits (firmware UEFI de 32: Atom «Bay Trail», Acer One 10) ----
 . tests/hispabios32_casos.sh
+
+# ---- El ratón con UEFI (0.5) y los discos de efi64.asm ----
+. tests/hispabios_raton_casos.sh
 
 exit $fail
