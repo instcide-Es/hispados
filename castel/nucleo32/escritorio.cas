@@ -668,16 +668,22 @@ módulo Escritorio
         sino
             escribir("escritorio: apagar\n")
         fin
-        ; apagar: QEMU (el puerto de pruebas, con el código 5; si no está, el
-        ; de su ACPI); y si no se apaga, parado con el aviso en la pantalla
+        ; apagar: en QEMU (se sabe por su tarjeta), su puerto de pruebas, con
+        ; el código 5, y si no está, el de su ACPI. En un PC de verdad no se
+        ; toca ningún puerto: parado, con el aviso en la pantalla
+        si hay_bochs() entonces
+            ensamblador
+                cli
+                mov edx, 0xF4
+                mov al, 5
+                out dx, al
+                mov edx, 0x604
+                mov eax, 0x2000
+                out dx, ax
+            fin
+        fin
         ensamblador
             cli
-            mov edx, 0xF4
-            mov al, 5
-            out dx, al
-            mov edx, 0x604
-            mov eax, 0x2000
-            out dx, ax
         .parado:
             hlt
             jmp .parado
@@ -842,10 +848,21 @@ módulo Escritorio
         si p <> nulo entonces
             an := número_tras(p + 5, q)
             si valor(q) = 'x' entonces al := número_tras(q + 1, q) fin
-            si an < 640 o al < 480 o an > 1920 o al > 1200 entonces
+            si an < 640 o al < 480 o an > 1600 o al > 1200 entonces
                 an := 800
                 al := 600
             fin
+        fin
+        ; la memoria que pide: el doble búfer, el tapiz y unas cuantas
+        ; ventanas. Si no la hay para ese modo, 800x600; y si ni para ese, no
+        ; se entra (mejor decirlo en modo texto que quedarse a oscuras)
+        si marcos_libres() < (an * al * 12 + 0x300000) div 4096 entonces
+            an := 800
+            al := 600
+        fin
+        si marcos_libres() < (an * al * 12 + 0x300000) div 4096 entonces
+            escribir("escritorio: no hay memoria bastante (hacen falta unos 12 MB libres)\n")
+            devolver 0
         fin
         p := buscar(línea_del_cargador(), "tapiz=")
         si p <> nulo entonces fondo := número_tras(p + 6, q) mod 3 fin

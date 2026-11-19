@@ -31,7 +31,7 @@ módulo Monton
     constante CABECERA = 16
     constante PIE = 8
     constante MÍNIMO = 48                       ; lo más pequeño que se deja como hueco
-    constante MÁXIMO = 0x400000                 ; lo más que se pide de una vez
+    constante MÁXIMO = 0x1000000                ; lo más que se pide de una vez (16 MB: el doble búfer de una pantalla grande)
 
     tipo Bloque = estructura
         magia, tam, estado, pedido: nat32

@@ -66,6 +66,13 @@ módulo Video
         fin
     fin
 
+    ; ¿está la tarjeta de Bochs/QEMU? (o sea: ¿es una máquina de mentira?)
+    público función hay_bochs(): bool
+        variable id: nat32
+        id := vbe_lee(VBE_ID)
+        devolver id >= 0xB0C0 y id <= 0xB0CF
+    fin
+
     ; una palabra de 32 bits de la configuración PCI de un dispositivo
     función pci_lee(bus: nat32, dispositivo: nat32, registro: nat32): nat32
         variable dir: nat32
@@ -190,8 +197,7 @@ módulo Video
                 devolver falso
             fin
         sino
-            id := vbe_lee(VBE_ID)
-            si id < 0xB0C0 o id > 0xB0CF entonces
+            si no hay_bochs() entonces
                 escribir("pantalla: no hay modo gráfico (ni lo ha puesto el cargador ni hay VBE de Bochs/QEMU)\n")
                 devolver falso
             fin

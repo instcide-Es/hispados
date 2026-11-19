@@ -36,7 +36,7 @@ módulo Paginas
     público constante PILA_FINAL = 0xC0000000    ; donde empieza (arriba) la pila de un programa
     público constante PILA_INICIO = 0xBFC00000   ; hasta donde puede bajar: 4 MB (y la primera página, nunca)
     público constante MONTÓN_INICIO = 0xC0000000
-    público constante MONTÓN_TABLAS = 8         ; 32 MB (los lienzos de las ventanas salen de él)
+    público constante MONTÓN_TABLAS = 16        ; 64 MB (los lienzos de las ventanas salen de él)
     público constante DEMANDA_INICIO = 0xD0000000
     público constante DEMANDA_FINAL = 0xD0400000 ; 4 MB, una tabla
     público constante GRÁFICOS_INICIO = 0xE0000000   ; donde se ve la memoria de la pantalla gráfica
