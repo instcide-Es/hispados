@@ -1338,16 +1338,19 @@ con esa entrada es **M:**: GRUB trae como módulos todo lo que hay que instalar
 (`NUCLEO.BIN` —la copia del núcleo que pide 800 x 600—, los programas,
 `ASISTE.BIN`, los textos, `BOOT.IMG` y `CORE.IMG`). Así se puede instalar
 aunque el USB de ese equipo no se deje leer por el núcleo, y **la memoria USB no
-hace falta ni leerla**.
+hace falta ni leerla**. (En la memoria, lo que solo vale para instalar —los textos
+del sistema instalado, `BOOT.IMG`, `CORE.IMG` y `CARPETAS.TXT`— está en su
+carpeta `\INSTALA`.)
 
 **Lo que no va a `\HISPA`.** Todo va a `C:\HISPA`, menos lo que diga
 **`CARPETAS.TXT`**, si viene entre los módulos: cada línea suya,
 `ARCHIVO.EXT=CARPETA`, manda ese archivo a esa carpeta de la raíz del disco
-(hasta cuatro carpetas; él no se instala). Es para **la oficina**: cuando está
-en el árbol (`nucleo32/hvprun`), `usb.sh` añade a la entrada de instalar
-`HVPRUN.BIN` (que va con los programas, a `\HISPA`: el núcleo lo encuentra ahí)
-y los programas y los datos de `\OFICINA`, con su `CARPETAS.TXT`, y quedan en
-**`C:\OFICINA`**, como en la memoria USB.
+(hasta cuatro carpetas; él no se instala). Es para **la oficina** (sección 10):
+`usb.sh` añade a la entrada de instalar `HVPRUN.BIN` (que va con los programas,
+a `\HISPA`: el núcleo lo encuentra ahí) y los programas y los datos de
+`\OFICINA`, con su `CARPETAS.TXT`, y quedan en **`C:\OFICINA`**, como en la
+memoria USB: en el sistema instalado, el grupo «Oficina» del menú Inicio y Mi
+equipo los abren igual.
 
 **Cómo escribe.** INSTALAR no usa los archivos del núcleo para el disco nuevo
 (el núcleo monta los volúmenes al arrancar, y ese todavía no existe): escribe
@@ -1672,8 +1675,10 @@ pantalla a 1024 x 600) y, en la otra pasada, con el ratón (el teclado de
 EE. UU., que cambia en el momento); `HISPA.INI` y la línea `set modo=` de
 `GRUB.CFG` quedan como se ha dicho, el reloj de la barra marca la hora puesta,
 **el menú Inicio saluda con el nombre**; en el **segundo arranque** ya no sale
-el asistente y el escritorio está a **1024 x 600**; y la entrada de modo texto
-del disco arranca el intérprete, con el teclado guardado.
+el asistente y el escritorio está a **1024 x 600**; la entrada de modo texto
+del disco arranca el intérprete, con el teclado guardado; y **la oficina, en el
+disco instalado**: el menú Inicio abre Facturas (con `C:\HISPA\HVPRUN.BIN`) y
+Mi equipo entra en `C:\OFICINA` y abre Cuentas.
 
 Lo que **no se puede probar en QEMU**: las transacciones partidas del EHCI (el
 teclado y el panel de un MacBook: sección 11), el traspaso de verdad desde la

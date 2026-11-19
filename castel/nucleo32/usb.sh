@@ -34,7 +34,9 @@
 #     de GRUB, para el MBR) y CORE.IMG (el resto de GRUB, con sus módulos
 #     dentro, para el hueco de delante de la primera partición; busca en los
 #     discos \HISPA\GRUB.CFG y sigue lo que diga). Con «instalar», el núcleo
-#     no deja escribir en la memoria USB ni un sector. Con ellos van la oficina
+#     no deja escribir en la memoria USB ni un sector. Lo que solo vale
+#     para instalar (esos textos, BOOT.IMG, CORE.IMG y CARPETAS.TXT) está en
+#     la carpeta \INSTALA de la memoria. Con ellos van la oficina
 #     (nucleo32/hvprun): HVPRUN.BIN y lo de \OFICINA, con
 #     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
@@ -46,7 +48,7 @@ OUT=${1:?uso: usb.sh IMAGEN}
 W=$(mktemp -d /dev/shm/pgraf-usb.XXXX)
 L=
 trap '[ -n "$L" ] && { umount $W/m 2>/dev/null || true; losetup -d $L 2>/dev/null || true; }; rm -rf $W' EXIT
-mkdir $W/f $W/m
+mkdir $W/f $W/m $W/i
 python3 -I $AQUI/../ccastel.py $AQUI/semilla.cas -o $W/semilla.asm > /dev/null
 nasm -f bin $W/semilla.asm -o $W/f/SEMILLA.BIN
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT8.BIN 800 600 32 > /dev/null
@@ -68,10 +70,10 @@ done
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
   module /INSTALAR.BIN INSTALAR.BIN
   module /ASISTE.BIN ASISTE.BIN
-$MODULOS  module /LEEMEDIS.TXT LEEME.TXT
-  module /MANUAL.TXT MANUAL.TXT
-  module /BOOT.IMG BOOT.IMG
-  module /CORE.IMG CORE.IMG
+$MODULOS  module /INSTALA/LEEME.TXT LEEME.TXT
+  module /INSTALA/MANUAL.TXT MANUAL.TXT
+  module /INSTALA/BOOT.IMG BOOT.IMG
+  module /INSTALA/CORE.IMG CORE.IMG
 "
 # la oficina (nucleo32/hvprun/hacer.sh): su ejecutor, HVPRUN.BIN,
 # va con los programas, a \HISPA; lo de \OFICINA, a C:\OFICINA: lo dice
@@ -79,16 +81,16 @@ $MODULOS  module /LEEMEDIS.TXT LEEME.TXT
 bash $AQUI/hvprun/hacer.sh $W/of > /dev/null
 INSTALA="$INSTALA  module /HVPRUN.BIN HVPRUN.BIN
 "
-: > $W/f/CARPETAS.TXT
+: > $W/i/CARPETAS.TXT
 for f in $W/of/*.HVP $W/of/*.DAT; do
   n=$(basename $f)
   INSTALA="$INSTALA  module /OFICINA/$n $n
 "
-  printf '%s=OFICINA\r\n' $n >> $W/f/CARPETAS.TXT
+  printf '%s=OFICINA\r\n' $n >> $W/i/CARPETAS.TXT
 done
-INSTALA="$INSTALA  module /CARPETAS.TXT CARPETAS.TXT
+INSTALA="$INSTALA  module /INSTALA/CARPETAS.TXT CARPETAS.TXT
 "
-iconv -f UTF-8 -t CP437 > $W/f/LEEMEDIS.TXT <<'L'
+iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.7, instalado en el disco duro.
 
 El sistema está en la carpeta \HISPA de esta unidad (C:): el núcleo
@@ -96,7 +98,7 @@ El sistema está en la carpeta \HISPA de esta unidad (C:): el núcleo
 sus ajustes (HISPA.INI) y el menú de arranque (GRUB.CFG).
 En MANUAL.TXT, en esa carpeta, hay un resumen de lo que se puede hacer.
 L
-iconv -f UTF-8 -t CP437 > $W/f/MANUAL.TXT <<'L'
+iconv -f UTF-8 -t CP437 > $W/i/MANUAL.TXT <<'L'
 HISPA-PENTIUM 0.7 - RESUMEN
 
 Hispa-Pentium es un sistema de 32 bits escrito en Castel, de la familia
@@ -140,17 +142,17 @@ EL ARRANQUE
 
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 L
-sed -i 's/$/\r/' $W/f/LEEMEDIS.TXT $W/f/MANUAL.TXT
+sed -i 's/$/\r/' $W/i/LEEME.TXT $W/i/MANUAL.TXT
 # el arranque del disco: GRUB con todo lo que necesita dentro (en el disco
 # instalado no hay carpeta de módulos), que busca \HISPA\GRUB.CFG
 printf 'search.file /HISPA/GRUB.CFG root\nset prefix=($root)/HISPA\n' > $W/antes.cfg
-grub-mkimage -O i386-pc -o $W/f/CORE.IMG -c $W/antes.cfg -p /HISPA biosdisk part_msdos part_gpt fat multiboot normal configfile \
+grub-mkimage -O i386-pc -o $W/i/CORE.IMG -c $W/antes.cfg -p /HISPA biosdisk part_msdos part_gpt fat multiboot normal configfile \
   search_fs_file vbe vga video video_fb video_bochs video_cirrus chain echo test read boot halt reboot videoinfo ls cat
-cp /usr/lib/grub/i386-pc/boot.img $W/f/BOOT.IMG
+cp /usr/lib/grub/i386-pc/boot.img $W/i/BOOT.IMG
 # (como hace grub-bios-setup en un disco duro: no fiarse de la unidad que
 # dice la BIOS si no es un disco; el resto de GRUB, desde el sector 1)
-printf '\x90\x90' | dd of=$W/f/BOOT.IMG bs=1 seek=102 conv=notrunc status=none
-[ $(stat -c %s $W/f/CORE.IMG) -le 1000000 ] || { echo "usb.sh: CORE.IMG no cabe en el hueco de arranque"; exit 1; }
+printf '\x90\x90' | dd of=$W/i/BOOT.IMG bs=1 seek=102 conv=notrunc status=none
+[ $(stat -c %s $W/i/CORE.IMG) -le 1000000 ] || { echo "usb.sh: CORE.IMG no cabe en el hueco de arranque"; exit 1; }
 printf 'Hispa-Pentium 0.7: un n\xa3cleo de 32 bits escrito en Castel.\r\nEste archivo est\xa0 en la memoria USB de arranque (la unidad X:) y, por si\r\nel USB no se deja, ha venido tambi\x82n con el cargador (la unidad M:).\r\n' > $W/f/LEEME.TXT
 MODULOS="$MODULOS  module /LEEME.TXT LEEME.TXT
 "
@@ -164,6 +166,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -b ${L}p1 ] &&
 mkfs.fat -F 16 -n HISPAPENT ${L}p1 > /dev/null
 mount ${L}p1 $W/m
 cp $W/f/* $W/m/
+# lo que solo es para instalar (los textos del sistema instalado, lo que va a
+# otra carpeta y el arranque del disco), en \INSTALA
+mkdir $W/m/INSTALA
+cp $W/i/* $W/m/INSTALA/
 # la oficina de Hispa-386 (Facturas, Pluma, Cuentas, Mirador: programas de
 # Hispa Ventanas) y su ejecutor, HVPRUN.BIN: el menú Inicio los abre de ahí
 # (ya están hechos, más arriba, para la entrada de instalar)
