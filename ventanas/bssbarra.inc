@@ -47,4 +47,8 @@ be_sy       resd 1
 be_acc      resd BE_MAX             ; los accesos
 be_marca    resb 1                  ; [ICONOS] 1: se ve la marca (tras un clic o una flecha)
 be_hecho    resb 1                  ; (be_tecla) la tecla era suya
+bt_edicion  resb 16                 ; [FRANJA] «Hispa-486» (EDICION.INI) o «Hispa-386»
+            alignb 4
+bt_fr_al    resd 1                  ; [FRANJA] el alto de la franja
+bt_fr_buf   resb MI_FR * MI_FR_MAXAL ; [FRANJA] la franja, dibujada
 bt_buf      resb BT_BUF             ; VENTANAS.INI, para buscar «Escritorio=486»

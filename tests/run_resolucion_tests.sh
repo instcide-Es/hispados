@@ -211,11 +211,18 @@ if [ -f "$USB486" ]; then
   cp "$USB486" $T/u.img
   tests/tools/sinmenu.sh $T/u.img > /dev/null || ko "sinmenu"
   { sleep 24; shot d1
+    tecla ctrl-esc; sleep 1.5; shot d1m             # [FRANJA] el menú Inicio, con «Hispa-486»
     mon quit; } | run 60 $PANT -no-reboot -drive file=$T/u.img,format=raw,if=ide,index=0 -boot c
   tam d1 1440 900
   # la casilla en (12,12): el dibujo (32) en (48,28) y el nombre centrado en x=64, y=70
   chk $T/d1.ppm texto 24 70 9 - fina "Biblioteca" nopx 64 44 2 "el dibujo del icono «Biblioteca»"
   muestra d1 escritorio486
+  # [FRANJA] la franja de la izquierda del menú (de x = 2 a 41): ni crema ni
+  # el fondo; el nombre, en crema y blanco (la columna de x = 20 lo cruza)
+  chk $T/d1m.ppm nopx 10 700 8 "la franja, abajo" nopx 10 560 8 "y arriba" \
+    cuenta 4 540 36 340 FBF3E0 40 6000 "«Hispa» en crema, en la franja" \
+    cuenta 4 540 36 340 FFFFFF 40 6000 "«-486» en blanco"
+  muestra d1m inicio486_franja
   mtype -i $T/u.img@@1M ::HISPADOS/VENTANAS.INI > $T/v.ini; printf '[Pantalla]\r\nIconos=grandes\r\n' >> $T/v.ini
   mcopy -o -i $T/u.img@@1M $T/v.ini ::HISPADOS/VENTANAS.INI
   { sleep 24; tecla ctrl-esc; sleep 1.5; shot d2

@@ -1012,7 +1012,20 @@ tenía se reparte: el nombre «Hispa Ventanas», en la cabecera del menú
 Inicio; «Salir», dentro del menú; el volumen, la red, la batería y la hora,
 en la bandeja. El fondo ocupa toda la pantalla.
 
-**El menú Inicio** (`ini_*`): arriba, una cabecera marrón con el rombo y
+**El menú Inicio** (`ini_*`): [FRANJA] a la izquierda, de arriba abajo,
+una **franja** de 40 puntos que dice qué sistema es, al estilo de su época:
+un degradado propio de ámbar (arriba) a terracota oscuro (abajo; con 256
+colores, con la trama de Bayer de 4×4 para que no se vean escalones; en la
+VGA de 16 colores, terracota lisa), el nombre de la edición girado (se lee
+de abajo arriba) a doble tamaño y en negrita, con sombra, «Hispa» en crema
+y «-486» en blanco, y el disquete abajo. El nombre es `Nombre=` de
+`EDICION.INI` (al lado de VENTANAS.COM, la pone la instalación de
+Hispa-486); sin ese archivo, «Hispa-386» (el escritorio de la barra en
+Hispa-386, con `/486` o `Escritorio=486`). Se dibuja una vez al abrir el
+menú (`ini_franja_hacer`, en `bt_fr_buf`) y al pintar se copia; un clic en
+la franja no hace nada. Lo pide Carlos, como la cabecera del menú de
+Hispa-Pentium. Captura: `docs/ventanas/resolucion_inicio486_franja.png`.
+A su derecha, arriba, una cabecera marrón con el rombo y
 «Hispa Ventanas»; debajo, **un grupo del Centro de programas por línea**
 (con su flecha: cada uno abre un **submenú con sus programas**, con el icono
 de cada acceso; el de un .HVP, el suyo); una raya; **Configuración**,

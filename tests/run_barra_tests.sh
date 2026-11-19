@@ -84,14 +84,15 @@ cp $T/f.img $T/base.img
 # ---- 1.ª: VENTANAS /486, 800x600 ----
 # La barra: de y = 572 a 599 (el filete ocre, arriba); «Inicio», en 4,577;
 # los botones de las ventanas, desde x = 88, de 160 de ancho como mucho.
-# El menú Inicio: en 2,322, de 258 de ancho; el submenú, a su derecha.
+# El menú Inicio: en 2,322, de 298 de ancho (con la franja de «Hispa-386»,
+# de 40, a la izquierda: lo demás, 40 más a la derecha); el submenú, a su derecha.
 # La Calculadora nace en 500,60 y el Bloc de notas en 150,90.
 BY=588
 { sleep 6; send 'VENTANAS /486' 10
   ir 300 200; shot a1                               # el escritorio, despejado
   clic 30 $BY; sleep 1; ir 300 $BY; ir 300 200; shot a2     # Inicio, con el ratón (que sale por la barra)
   ir 300 383; ir 200 383; sleep 1.2; shot a3        # parado en «Accesorios»: su submenú
-  clic 320 406; sleep 3; ir 300 200; shot a4        # «Calculadora»
+  clic 360 406; sleep 3; ir 300 200; shot a4        # «Calculadora»
   tecla ctrl-esc; sleep 1; shot a5                  # Inicio, con el teclado
   tecla down; sleep 0.3; tecla right; sleep 1; shot a6      # «Accesorios» y dentro
   tecla left; sleep 0.6; shot a7                    # fuera del submenú
@@ -118,20 +119,20 @@ chk $T/a1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" px 84 
   nobusca 0 0 500 300 1 6 "Centro de programas" px 40 100 2 "el fondo, donde estaba el Centro" \
   busca 730 572 790 584 8 1 ":"
 echo "-- el menú Inicio, con el ratón --"
-chk $T/a2.ppm texto 26 578 0 10 negrita "Inicio" texto 29 326 8 1 negrita "Hispa Ventanas" \
-  busca 20 340 60 372 0 8 "Principal" busca 20 360 60 396 0 8 "Accesorios" busca 20 380 60 420 0 8 "Juegos" \
-  busca 20 430 60 470 0 8 "Configuración" busca 20 450 60 492 0 8 "Administrador de archivos" \
-  busca 20 470 60 514 0 8 "Administrador de tareas" busca 20 490 60 536 0 8 "Centro de programas" \
-  busca 20 520 60 566 0 8 "Salir de Hispa Ventanas..."
-chk $T/a3.ppm busca 20 360 60 396 9 12 "Accesorios" busca 270 370 320 400 0 8 "Bloc de notas" \
-  busca 270 390 320 420 0 8 "Calculadora" busca 270 410 320 450 0 8 "Reloj"
+chk $T/a2.ppm texto 26 578 0 10 negrita "Inicio" texto 69 326 8 1 negrita "Hispa Ventanas" \
+  busca 60 340 100 372 0 8 "Principal" busca 60 360 100 396 0 8 "Accesorios" busca 60 380 100 420 0 8 "Juegos" \
+  busca 60 430 100 470 0 8 "Configuración" busca 60 450 100 492 0 8 "Administrador de archivos" \
+  busca 60 470 100 514 0 8 "Administrador de tareas" busca 60 490 100 536 0 8 "Centro de programas" \
+  busca 60 520 100 566 0 8 "Salir de Hispa Ventanas..."
+chk $T/a3.ppm busca 60 360 100 396 9 12 "Accesorios" busca 310 370 360 400 0 8 "Bloc de notas" \
+  busca 310 390 360 420 0 8 "Calculadora" busca 310 410 360 450 0 8 "Reloj"
 chk $T/a4.ppm titulo 500 60 activa "Calculadora" busca 100 574 130 582 0 8 "Calculadora" \
-  nobusca 20 340 60 372 0 8 "Principal" texto 26 578 8 4 negrita "Inicio"
+  nobusca 60 340 100 372 0 8 "Principal" texto 26 578 8 4 negrita "Inicio"
 echo "-- el menú Inicio, con el teclado --"
-chk $T/a5.ppm busca 20 340 60 372 9 12 "Principal" busca 20 360 60 396 0 8 "Accesorios"
-chk $T/a6.ppm busca 270 370 320 400 9 12 "Bloc de notas" busca 270 390 320 420 0 8 "Calculadora"
-chk $T/a7.ppm nobusca 270 370 320 400 9 12 "Bloc de notas" busca 20 360 60 396 9 12 "Accesorios"
-chk $T/a8.ppm nobusca 20 360 60 396 9 12 "Accesorios" nobusca 20 340 60 372 0 8 "Principal" titulo 500 60 activa "Calculadora"
+chk $T/a5.ppm busca 60 340 100 372 9 12 "Principal" busca 60 360 100 396 0 8 "Accesorios"
+chk $T/a6.ppm busca 310 370 360 400 9 12 "Bloc de notas" busca 310 390 360 420 0 8 "Calculadora"
+chk $T/a7.ppm nobusca 310 370 360 400 9 12 "Bloc de notas" busca 60 360 100 396 9 12 "Accesorios"
+chk $T/a8.ppm nobusca 60 360 100 396 9 12 "Accesorios" nobusca 60 340 100 372 0 8 "Principal" titulo 500 60 activa "Calculadora"
 chk $T/a9.ppm titulo 150 90 activa "Bloc de notas - (sin nombre)" busca 260 574 290 582 0 8 "Bloc de notas - " \
   busca 100 574 130 582 0 6 "Calculadora"
 echo "-- los botones de las ventanas: delante, minimizar y recuperar --"
@@ -148,7 +149,7 @@ chk $T/b5.ppm busca 360 440 420 572 0 8 "Ventanas en c" busca 360 440 420 572 0 
   busca 360 440 420 572 0 8 "Administrador de " busca 360 440 420 572 0 8 "onfiguración..."
 chk $T/b6.ppm titulo 34 34 activa "Bloc de notas - (sin nombre)" titulo 8 8 no "Calculadora"
 chk $T/b7.ppm busca 140 440 200 572 0 8 "Mi" busca 140 440 200 572 0 8 "errar"
-chk $T/b8.ppm nobusca 20 340 60 372 0 8 "Principal" texto 26 578 8 4 negrita "Inicio"
+chk $T/b8.ppm nobusca 60 340 100 372 0 8 "Principal" texto 26 578 8 4 negrita "Inicio"
 echo "-- el Centro de programas, desde Inicio; cerrarlo lo esconde --"
 chk $T/c1.ppm titulo 36 52 activa "Centro de programas" busca 420 574 450 582 0 8 "Centro de progra"
 chk $T/c2.ppm nobusca 0 40 200 70 8 4 "Centro de programas" nobusca 420 574 450 582 0 8 "Centro de progra" \
@@ -205,8 +206,8 @@ echo "-- 640x480 en VGA de 16 colores, con «Escritorio=486» en VENTANAS.INI --
 chk $T/v1.ppm tam 640 480 px 320 452 10 "el filete de la barra de tareas" px 320 470 1 "la barra de tareas" \
   texto 26 458 8 4 negrita "Inicio" nopx 320 10 1 "sin barra arriba" \
   nobusca 0 200 400 260 1 6 "Windows" nobusca 0 0 500 100 1 6 "Centro de programas"
-chk $T/v2.ppm busca 20 200 60 452 9 12 "Windows" busca 20 200 60 452 0 8 "Principal" \
-  busca 20 200 60 452 0 8 "Configuración" busca 20 200 60 452 0 8 "Salir de Hispa Ventanas..." \
+chk $T/v2.ppm busca 60 200 100 452 9 12 "Windows" busca 60 200 100 452 0 8 "Principal" \
+  busca 60 200 100 452 0 8 "Configuración" busca 60 200 100 452 0 8 "Salir de Hispa Ventanas..." \
   px 320 470 1 "la barra de tareas, sin tapar"
 if [ $W32 = 1 ]; then
   echo "-- un programa de Windows, en la barra como cualquier ventana --"
@@ -285,8 +286,8 @@ chk $T/d3.ppm titulo 150 90 activa "Bloc de notas - (sin nombre)" nobusca 100 57
 chk $T/d4.ppm texto 24 70 9 - fina "Biblioteca" nopx 20 74 12 "«Biblioteca», sin marca" \
   texto 36 162 9 12 fina "Bloc de" texto 44 177 9 12 fina "notas"
 chk $T/d5.ppm texto 24 70 9 12 fina "Biblioteca" texto 36 162 9 - fina "Bloc de" nopx 33 170 12 "«Bloc de notas», sin marca"
-chk $T/d6.ppm busca 20 300 60 572 9 12 "Principal" nobusca 0 300 260 572 0 8 "Escritorio" \
-  nobusca 0 300 260 572 0 8 "Biblioteca" busca 20 300 60 572 0 8 "Salir de Hispa Ventanas..."
+chk $T/d6.ppm busca 60 300 100 572 9 12 "Principal" nobusca 0 300 260 572 0 8 "Escritorio" \
+  nobusca 0 300 260 572 0 8 "Biblioteca" busca 60 300 100 572 0 8 "Salir de Hispa Ventanas..."
 chk $T/d7.ppm titulo 212 157 activa "Salir de Hispa Ventanas" texto 358 235 0 6 fina "Apagar el equipo" \
   px 285 232 4 "el foco en «Apagar el equipo»"
 check "Apagando el equipo..."
@@ -324,7 +325,7 @@ chk $T/g2.ppm titulo 124 110 activa "Configuración" busca 270 172 290 190 0 8 "
 chk $T/g3.ppm px 400 572 10 "el filete de la barra de tareas" px 84 590 1 "la barra de tareas" texto 26 578 8 4 negrita "Inicio" \
   nopx 400 10 1 "sin barra arriba" px 40 100 2 "el fondo, donde estaba el Centro" titulo 124 110 activa "Configuración" \
   busca 100 574 130 582 0 8 "Configuración"
-chk $T/g4.ppm texto 29 326 8 1 negrita "Hispa Ventanas" busca 20 340 60 372 9 12 "Principal" busca 20 520 60 566 0 8 "Salir de Hispa Ventanas..."
+chk $T/g4.ppm texto 69 326 8 1 negrita "Hispa Ventanas" busca 60 340 100 372 9 12 "Principal" busca 60 520 100 566 0 8 "Salir de Hispa Ventanas..."
 chk $T/g5.ppm busca 260 574 290 582 0 7 "Bloc de notas - " nobusca 140 80 400 110 8 4 "Bloc de notas" titulo 124 110 activa "Configuración"
 chk $T/g6.ppm px 400 10 1 "la barra de arriba otra vez" texto 12 5 8 1 negrita "Hispa Ventanas" nopx 400 590 1 "sin barra de tareas" \
   titulo 36 52 no "Centro de programas" titulo 124 110 activa "Configuración" \

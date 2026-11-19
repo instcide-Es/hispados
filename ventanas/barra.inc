@@ -64,6 +64,7 @@ BT_DESP     equ SALIR_AN + 12 - 8   ; lo que se corre la bandeja al no haber «S
 INI_MAX      equ MAX_GR + 8          ; órdenes del menú Inicio
 INI_SMAX      equ MAX_AC              ; programas de un submenú
 MI_CAB      equ 26                  ; la cabecera del menú
+MI_FR       equ 40                  ; [FRANJA] la franja de la izquierda con «Hispa-486»
 ; [ICONOS] el alto de una orden (mi_h: 22, con un icono de 16 y aire; 38 con
 ; los iconos grandes, de 32), en bt_mi_tallas
 MI_SEP      equ 8                   ; una raya
@@ -151,6 +152,7 @@ bt_crear:
         mov eax, [vid_alto]
         sub eax, BT_H
         mov [area_y1], eax
+        call bt_edicion_leer        ; [FRANJA] el nombre de la edición
         mov ebp, [escritorio]       ; el escritorio, con el procedimiento de
         mov dword [ebp+V_PROC], bt_esc_proc ; Hispa-486 (sin barra arriba)
         call ven_invalidar
@@ -1882,6 +1884,12 @@ ini_abrir:
         add ecx, [mi_ico]           ; [ICONOS]
         lea eax, [ecx-2]
         mov [mi_an], eax
+        add ecx, MI_FR              ; [FRANJA] y la franja, a la izquierda
+        cmp ebx, MI_FR_MIN          ; (alta como para que quepa el nombre)
+        jge .alto
+        mov ebx, MI_FR_MIN
+.alto:
+        call ini_franja_hacer       ; [FRANJA] (EBX=el alto)
         sub esp, P_TAM
         mov esi, esp
         mov dword [esi+P_CLASE], c_inicio
@@ -2178,6 +2186,8 @@ ini_proc:
         sar ebx, 16
         cmp ebp, [ms_ven]
         je .msub
+        cmp eax, MI_FR              ; [FRANJA] (en la franja no hay órdenes)
+        jl .nada
         call ini_orden_en
         test eax, eax
         js .nada
@@ -2214,6 +2224,8 @@ ini_proc:
         sar ebx, 16
         cmp ebp, [ms_ven]
         je .psub
+        cmp eax, MI_FR              ; [FRANJA]
+        jl .nada
         call ini_orden_en
         test eax, eax
         js .nada
@@ -2283,6 +2295,8 @@ ini_pintar:
         cmp ebp, [ms_ven]
         je sub_pintar
         call dc_pintar
+        call ini_franja             ; [FRANJA] y lo demás, a su derecha
+        add dword [dc_ox], MI_FR
         ; la cabecera: el nombre de la casa, que ya no está en la barra de arriba
         COLOR C_MARRON
         xor eax, eax
@@ -2362,9 +2376,286 @@ ini_pintar:
         inc edi
         jmp .o
 .f:
+        sub dword [dc_ox], MI_FR
         call dc_cerrar
         xor eax, eax
         ret
+
+; =============================================================================
+;  [FRANJA] La franja del menú Inicio: a la izquierda, de arriba abajo, con
+;  un degradado propio (ámbar arriba, terracota oscuro abajo, con la trama
+;  de Bayer para que no se vean escalones con 256 colores) y el nombre de la
+;  edición («Hispa-486», de EDICION.INI; sin ella, «Hispa-386») girado: se
+;  lee de abajo arriba, a doble tamaño y en negrita, «Hispa» en crema y lo
+;  de detrás del guion en blanco; abajo, el disquete. Pedido de Carlos: que
+;  el menú diga qué sistema es, como Hispa-Pentium, al estilo de su época.
+;  Se dibuja en bt_fr_buf al abrir el menú (ini_abrir) y al pintar se copia
+;  de una vez.
+; =============================================================================
+MI_FR_MIN   equ 200                 ; el menú, alto al menos esto (cabe el nombre)
+MI_FR_MAXAL equ 1600
+fr_paradas  db 5, 3, 0,  5, 2, 0,  4, 1, 0,  3, 1, 0,  2, 0, 0   ; rojo, verde, azul (0-5) de arriba abajo
+fr_bayer    db 0, 8, 2, 10,  12, 4, 14, 6,  3, 11, 1, 9,  15, 7, 13, 5
+bt_n_edic   db "EDICION.INI", 0
+bt_k_nombre db "nombre", 0
+bt_ed_def   db "Hispa-386", 0
+
+; (bt_crear) el nombre de la edición: «Nombre=» de EDICION.INI (al lado de
+; VENTANAS.COM; la pone la instalación de Hispa-486) -> bt_edicion
+bt_edicion_leer:
+        pushad
+        mov esi, bt_ed_def
+        mov edi, bt_edicion
+        mov ecx, 15
+        call cad_copiar
+        call dir_propia_poner
+        mov edi, cfg_ruta
+        mov esi, dir_propia
+        call pon_cad
+        mov esi, bt_n_edic
+        call pon_cad
+        mov byte [edi], 0
+        mov esi, cfg_ruta
+        xor al, al
+        call dos_abrir
+        jc .x
+        mov ebx, eax
+        mov edi, bt_buf
+        mov ecx, 1023
+        call dos_leer
+        jnc .l
+        xor eax, eax
+.l:
+        call dos_cerrar
+        mov byte [bt_buf+eax], 0
+        mov esi, bt_buf
+.linea:
+        mov edi, bt_k_nombre
+        mov edx, esi
+.c:
+        mov al, [edi]
+        test al, al
+        jz .fk
+        mov ah, [edx]
+        or ah, 0x20
+        cmp al, ah
+        jne .salta
+        inc edi
+        inc edx
+        jmp .c
+.fk:
+        cmp byte [edx], '='
+        jne .salta
+        inc edx
+        mov edi, bt_edicion
+        mov ecx, 15
+.v:
+        mov al, [edx]
+        cmp al, ' '
+        jb .vf
+        mov [edi], al
+        inc edi
+        inc edx
+        dec ecx
+        jnz .v
+.vf:
+        mov byte [edi], 0
+        cmp edi, bt_edicion
+        jne .x
+        mov esi, bt_ed_def          ; (vacío: el de siempre)
+        mov ecx, 15
+        call cad_copiar
+        jmp .x
+.salta:
+        mov al, [esi]
+        test al, al
+        jz .x
+        inc esi
+        cmp al, 10
+        jne .salta
+        jmp .linea
+.x:
+        popad
+        ret
+
+; (ini_abrir) EBX=el alto del menú: la franja, a bt_fr_buf
+ini_franja_hacer:
+        pushad
+        cmp ebx, MI_FR_MAXAL
+        jbe .a
+        mov ebx, MI_FR_MAXAL
+.a:
+        mov [bt_fr_al], ebx
+        mov edi, bt_fr_buf
+        xor edx, edx                ; EDX=fila
+.f:
+        mov eax, edx                ; dónde va, de 0 a 64 (4 tramos de 16)
+        shl eax, 6
+        push edx
+        xor edx, edx
+        div dword [bt_fr_al]
+        pop edx
+        mov ebp, eax
+        shr ebp, 4                  ; EBP=tramo
+        and eax, 15                 ; EAX=cuánto del siguiente
+        xor ecx, ecx                ; ECX=columna
+.c:
+        mov esi, edx
+        and esi, 3
+        shl esi, 2
+        mov ebx, ecx
+        and ebx, 3
+        add esi, ebx
+        movzx ebx, byte [fr_bayer+esi]
+        mov esi, ebp
+        cmp eax, ebx
+        jbe .p
+        inc esi
+.p:
+        cmp esi, 4
+        jbe .p2
+        mov esi, 4
+.p2:
+        imul esi, 3
+        movzx ebx, byte [fr_paradas+esi]    ; 16 + 36r + 6g + b
+        imul ebx, 36
+        movzx esi, byte [fr_paradas+esi+1]
+        imul esi, 6
+        add ebx, esi
+        add ebx, 16
+        cmp byte [vid_bits], 4      ; (en la VGA de 16 colores, terracota lisa)
+        jne .p3
+        mov ebx, C_TERRACOTA
+.p3:
+        mov [edi], bl
+        inc edi
+        inc ecx
+        cmp ecx, MI_FR
+        jb .c
+        inc edx
+        cmp edx, [bt_fr_al]
+        jb .f
+        ; un filete oscuro a la derecha
+        mov edi, bt_fr_buf + MI_FR - 1
+        mov ecx, [bt_fr_al]
+.r:
+        mov byte [edi], C_MARRON
+        add edi, MI_FR
+        loop .r
+        ; el nombre, de abajo arriba: la sombra (marrón) y encima la letra
+        mov esi, bt_edicion
+        call cad_largo
+        mov ecx, eax
+        mov ebp, [bt_fr_al]
+        sub ebp, 34                 ; (debajo, el disquete)
+        mov eax, 1                  ; (la sombra, un punto a la derecha y abajo)
+        mov byte [fr_color], C_MARRON
+        mov byte [fr_claro], C_MARRON
+        call fr_texto
+        xor eax, eax
+        mov byte [fr_color], C_CREMA
+        mov byte [fr_claro], C_BLANCO
+        call fr_texto
+        popad
+        ret
+
+; (interna) ESI=texto ECX=letras EBP=dónde empieza abajo EAX=corrimiento:
+; el texto girado (de abajo arriba), a doble tamaño y en negrita, en
+; bt_fr_buf; hasta el guion con fr_color y desde él con fr_claro
+fr_texto:
+        pushad
+        mov [fr_corre], eax
+        mov dl, [fr_color]
+        mov [fr_ahora], dl
+.ch:
+        test ecx, ecx
+        jz .x
+        movzx edi, byte [esi]
+        cmp edi, '-'
+        jne .ch1
+        mov dl, [fr_claro]
+        mov [fr_ahora], dl
+.ch1:
+        shl edi, 4
+        add edi, fuente8x16
+        xor ebx, ebx                ; EBX=fila de la letra (0-15)
+.fila:
+        movzx edx, byte [edi+ebx]
+        mov eax, edx                ; negrita: y un punto a la derecha
+        shr eax, 1
+        or edx, eax
+        push ecx
+        xor ecx, ecx                ; ECX=columna (0-7)
+.col:
+        test edx, 0x80
+        jz .cs
+        ; (columna c, fila r) -> x = 4 + 2r, y = EBP - 2(c+1)
+        pushad
+        lea eax, [ebx*2+4]
+        add eax, [fr_corre]
+        mov edx, ebp
+        lea ecx, [ecx*2+2]
+        sub edx, ecx
+        add edx, [fr_corre]
+        call fr_2x2
+        popad
+.cs:
+        shl edx, 1
+        inc ecx
+        cmp ecx, 8
+        jb .col
+        pop ecx
+        inc ebx
+        cmp ebx, 16
+        jb .fila
+        inc esi
+        sub ebp, 16
+        dec ecx
+        jmp .ch
+.x:
+        popad
+        ret
+
+; (interna) EAX=x EDX=y: un cuadrado de 2x2 con fr_ahora (si cabe)
+fr_2x2:
+        test edx, edx
+        js .x
+        lea ecx, [edx+1]
+        cmp ecx, [bt_fr_al]
+        jae .x
+        cmp eax, MI_FR - 2
+        ja .x
+        imul edx, MI_FR
+        add edx, eax
+        mov cl, [fr_ahora]
+        mov [bt_fr_buf+edx], cl
+        mov [bt_fr_buf+edx+1], cl
+        mov [bt_fr_buf+edx+MI_FR], cl
+        mov [bt_fr_buf+edx+MI_FR+1], cl
+.x:
+        ret
+
+; (ini_pintar, con el contexto abierto) la franja y el disquete
+ini_franja:
+        pushad
+        xor eax, eax
+        xor ebx, ebx
+        mov ecx, MI_FR
+        mov edx, [bt_fr_al]
+        mov esi, bt_fr_buf
+        call dc_copiar
+        mov esi, ico_disco
+        mov eax, (MI_FR - 1 - 16) / 2
+        mov ebx, [bt_fr_al]
+        sub ebx, 24
+        call bt_icono16
+        popad
+        ret
+fr_color    db 0
+fr_claro    db 0
+fr_ahora    db 0
+            align 4
+fr_corre    dd 0
 
 ; (interna) ECX=programa del submenú -> ESI=su texto; EBX=el acceso (0: no
 ; es un acceso: «(vacío)» o «Más...»)
