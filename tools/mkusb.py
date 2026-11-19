@@ -99,6 +99,33 @@ def autoexec486(txt, letra):
              '%sVENTANAS\n' % (d, d, d, d, d, d))
     return red.sub(lambda m: nuevo, txt)
 
+def sin_letra(nombre, txt):
+    r"""[LETRAS] La memoria USB no siempre es la C: (con un disco duro interno
+    es la X:; docs/UNIDADES.md): sus archivos de arranque no llevan la letra.
+    En usb/ siguen escritos con «C:\» (como quedan en el disco duro) y aquí,
+    al hacer la imagen, se cambian: en CONFIG.SYS las rutas van sin unidad
+    (\HISPADOS\HSPXMS.SYS: la de arranque es la unidad actual) y en
+    AUTOEXEC.BAT con la variable ARRANQUE, que pone el núcleo («X:»):
+    %ARRANQUE%\HISPADOS. Instalados en el disco duro valen igual."""
+    if nombre == 'CONFIG.SYS':
+        return txt.replace('C:\\', '\\')
+    if nombre == 'AUTOEXEC.BAT':
+        return txt.replace('C:\\', '%ARRANQUE%\\')
+    return txt
+
+def marca_usb(out):
+    """[LETRAS] La imagen es para una memoria USB: el nombre OEM del sector de
+    arranque de la partición pasa de «HISPADOS» a «HISPAUSB». Así el núcleo
+    sabe que ha arrancado de una memoria (aunque la BIOS no lo diga) y le da
+    la X:, dejando la C: para el disco duro interno; PARTIR, FORMATEA e
+    INSTALAR la protegen. El disco donde se instala no lleva la marca."""
+    with open(out, 'r+b') as f:
+        f.seek(START * 512 + 3)
+        if f.read(8) != b'HISPADOS':
+            sys.exit('mkusb: el sector de arranque no lleva el nombre OEM «HISPADOS»')
+        f.seek(START * 512 + 3)
+        f.write(b'HISPAUSB')
+
 def centro486(en_imagen):
     """[HISPA-486] sistema/486/CENTRO.INI para una imagen que lleva los
     archivos en_imagen (rutas «C:\\...» en mayúsculas): sin los accesos a
@@ -123,6 +150,9 @@ def centro486(en_imagen):
         txt = re.sub(r'(?m)^Modulos=.*$', 'Modulos=%d' % len(modulos), txt)
     else:
         txt = re.sub(r'(?m)^Modulos=.*$', 'Modulos=0', txt)
+    # [LETRAS] sin la letra: Hispa Ventanas pone la de su unidad al leerlo
+    # (la memoria USB puede ser la X:; en el disco duro, la C:)
+    txt = re.sub(r'(?m)^(Programa|Carpeta)=C:\\', r'\1=\\', txt)
     return txt
 
 def main(edicion='386'):
@@ -144,6 +174,7 @@ def main(edicion='386'):
         spc *= 2
     run('mformat', '-i', img, '-T', str(psize), '-h', str(HEADS), '-s', str(SPT),
         '-H', str(START), '-c', str(spc), '-v', 'HISPADOS', '-B', os.path.join(B, 'boot16.bin'), '::')
+    marca_usb(out)
     en_imagen = set()                # lo copiado, como «C:\\HISPADOS\\...»
     def cp(src, dst):
         run('mcopy', '-o', '-i', img, src, '::' + dst)
@@ -166,6 +197,7 @@ def main(edicion='386'):
         txt = open(os.path.join('usb', f), encoding='utf-8').read()
         if edicion == '486' and f == 'AUTOEXEC.BAT':
             txt = autoexec486(txt, 'C')
+        txt = sin_letra(f, txt)
         dst = os.path.join(dusb, f)
         with open(dst, 'wb') as o:
             o.write(dos(txt))
@@ -177,7 +209,7 @@ def main(edicion='386'):
                      ('KEYB.COM', 'TECLADO.COM'), ('PLAYWAV.COM', 'SONAR.COM'), ('SONIDO.COM', 'SONIDO.COM'), ('AUDICION.COM', 'AUDICION.COM'),
                      ('SYSINFO.COM', 'INFO.COM'), ('GESTOR.COM', 'GESTOR.COM'),
                      ('EQUIPO.COM', 'EQUIPO.COM'), ('HBLOG.COM', 'HBLOG.COM'), ('DIAGNOST.BAT', 'DIAGNOST.BAT'),
-                     ('INSTALAR.COM', 'INSTALAR.COM'), ('APAGAR.COM', 'APAGAR.COM'), ('REINICIAR.COM', 'REINICIA.COM'), ('MOVER.COM', 'MOVER.COM'), ('ATRIBUTO.COM', 'ATRIBUTO.COM'), ('ARBOL.COM', 'ARBOL.COM'), ('BUSCAR.COM', 'BUSCAR.COM'), ('ORDENAR.COM', 'ORDENAR.COM'), ('PAGINAR.COM', 'PAGINAR.COM'), ('ELEGIR.COM', 'ELEGIR.COM'), ('EXPANDIR.COM', 'EXPANDIR.COM'), ('ETIQUETA.COM', 'ETIQUETA.COM'), ('TECLA.COM', 'TECLA.COM'), ('XCOPIAR.COM', 'XCOPIAR.COM'), ('REVISAR.COM', 'REVISAR.COM'),
+                     ('INSTALAR.COM', 'INSTALAR.COM'), ('APAGAR.COM', 'APAGAR.COM'), ('REINICIAR.COM', 'REINICIA.COM'), ('MOVER.COM', 'MOVER.COM'), ('ATRIBUTO.COM', 'ATRIBUTO.COM'), ('ARBOL.COM', 'ARBOL.COM'), ('BUSCAR.COM', 'BUSCAR.COM'), ('ORDENAR.COM', 'ORDENAR.COM'), ('PAGINAR.COM', 'PAGINAR.COM'), ('ELEGIR.COM', 'ELEGIR.COM'), ('EXPANDIR.COM', 'EXPANDIR.COM'), ('ETIQUETA.COM', 'ETIQUETA.COM'), ('TECLA.COM', 'TECLA.COM'), ('UNIDADES.COM', 'UNIDADES.COM'), ('XCOPIAR.COM', 'XCOPIAR.COM'), ('REVISAR.COM', 'REVISAR.COM'),
                      ('VELOCIDAD.COM', 'VELOCIDA.COM'), ('LOADFIX.COM', 'LOADFIX.COM'), ('PROTECTOR.COM', 'PROTECTO.COM'),
                      ('ALIAS.INI', 'ALIAS.INI'), ('AYUDA.HLP', 'AYUDA.HLP'), ('TECLAS.INI', 'TECLAS.INI'),
                      ('HSPXMS.SYS', 'HSPXMS.SYS'), ('HSPEMM.SYS', 'HSPEMM.SYS'), ('HSPRAM.SYS', 'HSPRAM.SYS'),

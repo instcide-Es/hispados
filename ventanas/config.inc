@@ -553,6 +553,7 @@ cfg_cargar:
         call cfg_sumar
         mov [cfg_suma], eax
         call cfg_leer
+        call cfg_rutas_letra        ; [LETRAS] las rutas sin unidad: la propia
         mov eax, [gr_tabla]         ; sin ningún grupo no vale
         mov ecx, MAX_GR
 .g:
@@ -1186,6 +1187,83 @@ pon_clave_cad:
         call pon_cad
         jmp pon_nl
 
+; [LETRAS] La unidad de Hispa Ventanas no siempre es la C:: la memoria USB de
+; arranque es la X: si el equipo tiene disco duro (docs/UNIDADES.md), y luego
+; se instala en la C:. Para que el mismo CENTRO.INI valga en los dos sitios,
+; las rutas de los accesos (Programa= y Carpeta=) pueden ir sin unidad
+; («\HISPADOS\PROGS\PLUMA.HVP»): al leerlo se les pone la de Hispa Ventanas
+; y, cuando esa unidad no es la C:, al guardarlo se les quita otra vez.
+cfg_rutas_letra:
+        pushad
+        mov ebp, [ac_tabla]
+        mov ecx, MAX_AC
+.a:
+        cmp byte [ebp+AC_USO], 0
+        je .s
+        lea edi, [ebp+AC_PROG]
+        mov edx, 79
+        call .una
+        lea edi, [ebp+AC_DIR]
+        mov edx, 67
+        call .una
+.s:
+        add ebp, AC_TAM
+        dec ecx
+        jnz .a
+        popad
+        ret
+; EDI = ruta, EDX = lo que cabe: si empieza por «\» (y no es «\\»), con unidad
+.una:
+        cmp byte [edi], '\'
+        jne .r
+        cmp byte [edi+1], '\'
+        je .r
+        cmp byte [dir_propia+1], ':'
+        jne .r
+        xor eax, eax
+.l:
+        cmp byte [edi+eax], 0
+        je .lf
+        inc eax
+        jmp .l
+.lf:
+        add eax, 2
+        cmp eax, edx
+        ja .r
+.m:
+        mov bl, [edi+eax-2]         ; (de atrás adelante, con el cero)
+        mov [edi+eax], bl
+        dec eax
+        cmp eax, 2
+        jae .m
+        mov al, [dir_propia]
+        mov ah, ':'
+        mov [edi], ax
+.r:
+        ret
+
+; como pon_clave_cad, para una ruta: sin la unidad si es la de Hispa Ventanas
+; y no es la C:
+pon_clave_ruta:
+        call pon_clave
+        mov esi, edx
+        mov al, [dir_propia]
+        and al, 0xDF
+        cmp al, 'C'
+        je .p
+        mov ah, [esi]
+        and ah, 0xDF
+        cmp al, ah
+        jne .p
+        cmp word [esi+1], ':\'
+        jne .p
+        cmp byte [dir_propia+1], ':'
+        jne .p
+        add esi, 2
+.p:
+        call pon_cad
+        jmp pon_nl
+
 cfg_guardar:
         pushad
         mov byte [cfg_fallo], 0     ; [APAGAR] cfg_fallo = 1 si no se ha podido escribir
@@ -1311,10 +1389,10 @@ cfg_guardar:
         call pon_clave_cad
         mov esi, k_programa
         lea edx, [ebp+AC_PROG]
-        call pon_clave_cad
+        call pon_clave_ruta
         mov esi, k_carpeta
         lea edx, [ebp+AC_DIR]
-        call pon_clave_cad
+        call pon_clave_ruta
         mov esi, k_parametros
         lea edx, [ebp+AC_PARAM]
         call pon_clave_cad
