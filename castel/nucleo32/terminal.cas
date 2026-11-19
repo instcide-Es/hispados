@@ -22,7 +22,7 @@ módulo Terminal
 
     público constante MAX_TERMINALES = 4
     constante SALIDA = 4096                     ; lo que cabe en el tubo de salida
-    constante ENTRADA = 64                      ; las teclas que caben en el de entrada
+    constante ENTRADA = 256                     ; las teclas que caben en el de entrada
 
     tipo Term = estructura
         usado: bool
@@ -108,17 +108,21 @@ módulo Terminal
     fin
 
     ; el dueño mete una tecla para los de dentro
-    público función teclear(t: nat32, c: nat32)
+    ; (cierto si ha cabido: si el tubo está lleno, se le da más tarde)
+    público función teclear(t: nat32, c: nat32): bool
         variable e: puntero a Term
         variable b: nat32
+        variable cabe: bool
         e := el_terminal(t)
-        si e = nulo entonces devolver fin
+        si e = nulo entonces devolver cierto fin
         b := sin_interrupciones()
-        si e.e_ent - e.e_sal < ENTRADA entonces
+        cabe := e.e_ent - e.e_sal < ENTRADA
+        si cabe entonces
             e.entrada[e.e_ent mod ENTRADA] := c
             e.e_ent := e.e_ent + 1
         fin
         reponer(b)
+        devolver cabe
     fin
 
     ; ¿hay alguna tecla esperando en el terminal?

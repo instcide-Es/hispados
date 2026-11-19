@@ -6,33 +6,54 @@
 ;    BLOC [ARCHIVO]      abre ese archivo de texto (NOTAS.TXT si no se dice)
 ;
 ;  Se escribe como en cualquier editor: las letras entran donde está el
-;  cursor; Intro, Retroceso y Supr; las flechas, Inicio y Fin; un clic pone
-;  el cursor. Las líneas largas siguen en la de debajo. Arriba, «Nuevo» y
-;  «Guardar» (también F2 y Ctrl+S). El archivo se guarda con los finales de
-;  línea del DOS, en la página 437. Si se cierra con cambios sin guardar,
-;  avisa (cerrar otra vez sale sin guardar).
+;  cursor; Intro, Retroceso y Supr; las flechas, Inicio, Fin, Re Pág y Av Pág;
+;  un clic pone el cursor. Las líneas largas siguen en la de debajo.
+;  Se selecciona arrastrando el ratón, con dos clics (la palabra), con tres
+;  (la línea), con Mayús y un clic (hasta ahí) o con Mayús y las flechas; lo
+;  seleccionado se ve resaltado, y lo que se teclea lo sustituye. Cortar,
+;  Copiar y Pegar (Ctrl+X, Ctrl+C, Ctrl+V; todo, Ctrl+A) van con el
+;  portapapeles del sistema: lo copiado aquí se pega en otro programa.
+;  Arriba, la barra de menús (Archivo, Edición, Ayuda) y los botones «Nuevo»
+;  y «Guardar» (también F2 y Ctrl+S); el botón secundario del ratón saca el
+;  menú de Cortar, Copiar, Pegar y Seleccionar todo. El archivo se guarda con
+;  los finales de línea del DOS, en la página 437. Si se cierra con cambios
+;  sin guardar, avisa (cerrar otra vez sale sin guardar).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UBloc
 
     modelo usuario
 
-    importar Llamadas, Textos32, Formato
+    importar Llamadas, Barramenu, Textos32, Formato
 
     constante MÁXIMO = 30000                    ; las letras que caben
     constante BARRA = 34                        ; lo que mide la franja de los botones
+    constante ARRIBA = ALTO_MENÚS + BARRA       ; donde empieza el texto: debajo de los menús y los botones
     constante PIE = 22                          ; y la de abajo
     constante MARGEN = 6
     constante TECLA_F2 = 0x13C
     constante PAPEL = 0xFFFFFF
     constante TINTA = 0x14294A
     constante SUAVE = 0x5A7396
+    constante RESALTE = 0x2F74D0                ; el fondo de lo seleccionado
+    ; las teclas con Ctrl
+    constante CTRL_A = 1
+    constante CTRL_S = 19
+    constante CTRL_V = 22
+    constante CTRL_X = 24
+    ; los menús: los de la barra (su número) y el del botón secundario
+    constante M_ARCHIVO = 0
+    constante M_EDICIÓN = 1
+    constante M_AYUDA = 2
+    constante M_CONTEXTO = 100
 
     variable v: nat32
     variable ancho, alto: ent32                 ; lo de dentro de la ventana
     variable columnas, filas: ent32             ; las letras que caben a lo ancho y a lo alto
     variable letras: arreglo [MÁXIMO + 4] de byte
     variable largo, cursor: nat32
+    variable ancla: nat32                       ; el otro extremo de lo seleccionado (igual que el cursor: nada)
+    variable arrastrando: bool                  ; se está seleccionando con el ratón
     variable primera: ent32                     ; la primera línea que se ve
     variable nombre: arreglo [64] de byte
     variable rótulo: arreglo [96] de byte
@@ -40,6 +61,9 @@ módulo UBloc
     variable cambiado, cerrando: bool
     variable aviso_malo: bool                   ; el aviso es de algo que ha ido mal
     variable trozo: arreglo [512] de byte
+    variable pegado: arreglo [MÁXIMO] de byte   ; lo que viene del portapapeles
+    variable menús: arreglo [24] de byte = "Archivo|Edición|Ayuda"
+    variable menú_abierto: ent32 = -1           ; el de la barra que está abierto
 
     ; -------------------------------------------------------------------------
     ;  Dónde cae cada letra (las líneas largas se parten al ancho de la ventana)
@@ -92,20 +116,90 @@ módulo UBloc
         devolver largo
     fin
 
+    ; la letra que cae en ese punto de la ventana (por arriba y por abajo
+    ; del texto, la línea de antes y la de después: así, arrastrando, pasa)
+    función letra_del_punto(x: ent32, yy: ent32): nat32
+        variable lin, col: ent32
+        si yy < ARRIBA entonces
+            lin := primera - 1
+        sino si yy >= alto - PIE entonces
+            lin := primera + filas
+        sino
+            lin := primera + (yy - ARRIBA - 4) div ALTO_LETRA
+            si yy < ARRIBA + 4 entonces lin := primera fin
+        fin
+        col := (x - MARGEN + 3) div ANCHO_LETRA
+        si x < MARGEN entonces col := 0 fin
+        devolver letra_en(lin, col)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo seleccionado: de «desde» a «hasta» (sin contar esta)
+    ; -------------------------------------------------------------------------
+    función sel_inicio(): nat32
+        si ancla < cursor entonces devolver ancla fin
+        devolver cursor
+    fin
+
+    función sel_fin(): nat32
+        si ancla > cursor entonces devolver ancla fin
+        devolver cursor
+    fin
+
+    función hay_selección(): bool
+        devolver ancla <> cursor
+    fin
+
+    ; ¿es de palabra esa letra? (las letras, también las de la eñe y los acentos, las cifras y «_»)
+    función de_palabra(c: byte): bool
+        devolver es_letra(c) o es_cifra(c) o c = '_' o c >= 128
+    fin
+
+    ; selecciona la palabra que está en «pos» (o, si no es de palabra, esa letra sola)
+    función elige_palabra(pos: nat32)
+        variable a, b: nat32
+        a := pos
+        b := pos
+        si pos < largo y de_palabra(letras[pos]) entonces
+            mientras a > 0 y de_palabra(letras[a - 1]) hacer a := a - 1 fin
+            mientras b < largo y de_palabra(letras[b]) hacer b := b + 1 fin
+        sino si pos < largo y letras[pos] <> '\n' entonces
+            b := pos + 1
+        sino
+            ; al final de la línea: la palabra de antes
+            mientras a > 0 y de_palabra(letras[a - 1]) hacer a := a - 1 fin
+        fin
+        ancla := a
+        cursor := b
+    fin
+
+    ; selecciona la línea entera (con su final) donde está «pos»
+    función elige_línea(pos: nat32)
+        variable a, b: nat32
+        a := pos
+        b := pos
+        mientras a > 0 y letras[a - 1] <> '\n' hacer a := a - 1 fin
+        mientras b < largo y letras[b] <> '\n' hacer b := b + 1 fin
+        si b < largo entonces b := b + 1 fin
+        ancla := a
+        cursor := b
+    fin
+
     ; -------------------------------------------------------------------------
     ;  Pintar
     ; -------------------------------------------------------------------------
     función botón(x: ent32, t: puntero a byte, arriba: nat32, abajo: nat32)
-        redondeado(v, x, 5, 84, 24, 5, arriba, abajo)
-        texto_negrita(v, x + (84 - ent32(longitud(t)) * ANCHO_LETRA) div 2, 9, t, PAPEL)
+        redondeado(v, x, ALTO_MENÚS + 5, 84, 24, 5, arriba, abajo)
+        texto_negrita(v, x + (84 - ent32(longitud(t)) * ANCHO_LETRA) div 2, ALTO_MENÚS + 9, t, PAPEL)
     fin
 
     función pinta_barra()
-        degradado(v, 0, 0, ancho, BARRA, 0xF4F8FE, 0xD3E3F8)
-        rectángulo(v, 0, BARRA - 1, ancho, 1, 0x9DBBE4)
+        pinta_menús(v, ancho, menús, menú_abierto)
+        degradado(v, 0, ALTO_MENÚS, ancho, BARRA, 0xF4F8FE, 0xD3E3F8)
+        rectángulo(v, 0, ARRIBA - 1, ancho, 1, 0x9DBBE4)
         botón(8, "Nuevo", 0x5AA6F4, 0x2468C8)
         botón(98, "Guardar", 0x5CC45E, 0x2A8A3C)
-        texto(v, 196, 9, "F2 guarda", SUAVE)
+        texto(v, 196, ALTO_MENÚS + 9, "F2 guarda", SUAVE)
     fin
 
     función pinta_pie()
@@ -129,6 +223,29 @@ módulo UBloc
         texto(v, MARGEN, alto - PIE + 4, rótulo, TINTA)
     fin
 
+    ; una línea de la pantalla: las letras de «a» a «b» (sin contar esta), en
+    ; la fila «f» de las que se ven; lo seleccionado, en blanco sobre azul
+    función pinta_línea(a: nat32, b: nat32, f: ent32)
+        variable s0, s1: nat32
+        variable yy: ent32
+        yy := ARRIBA + 4 + f * ALTO_LETRA
+        s0 := sel_inicio()
+        s1 := sel_fin()
+        si s0 < a entonces s0 := a fin
+        si s1 > b entonces s1 := b fin
+        si no hay_selección() o s1 <= s0 entonces
+            si b > a entonces texto_n(v, MARGEN, yy, dirección(letras[a]), b - a, TINTA) fin
+        sino
+            si s0 > a entonces texto_n(v, MARGEN, yy, dirección(letras[a]), s0 - a, TINTA) fin
+            texto_fondo(v, MARGEN + ent32(s0 - a) * ANCHO_LETRA, yy, dirección(letras[s0]), s1 - s0, PAPEL, RESALTE)
+            si b > s1 entonces texto_n(v, MARGEN + ent32(s1 - a) * ANCHO_LETRA, yy, dirección(letras[s1]), b - s1, TINTA) fin
+        fin
+        ; el final de línea seleccionado: un poco de azul detrás de la última letra
+        si hay_selección() y b < largo y letras[b] = '\n' y b >= sel_inicio() y b < sel_fin() entonces
+            rectángulo(v, MARGEN + ent32(b - a) * ANCHO_LETRA, yy, 4, ALTO_LETRA, RESALTE)
+        fin
+    fin
+
     ; el texto: las líneas que se ven, y el cursor
     función pinta_texto()
         variable i, inicio: nat32
@@ -137,7 +254,7 @@ módulo UBloc
         sitio(cursor, clin, ccol)
         si clin < primera entonces primera := clin fin
         si clin >= primera + filas entonces primera := clin - filas + 1 fin
-        rectángulo(v, 0, BARRA, ancho, alto - BARRA - PIE, PAPEL)
+        rectángulo(v, 0, ARRIBA, ancho, alto - ARRIBA - PIE, PAPEL)
         lin := 0
         col := 0
         inicio := 0
@@ -145,9 +262,7 @@ módulo UBloc
         mientras i <= largo y lin < primera + filas hacer
             si i = largo o letras[i] = '\n' o col = columnas entonces
                 ; se acaba una línea de la pantalla: de «inicio» a «i»
-                si lin >= primera y i > inicio entonces
-                    texto_n(v, MARGEN, BARRA + 4 + (lin - primera) * ALTO_LETRA, dirección(letras[inicio]), i - inicio, TINTA)
-                fin
+                si lin >= primera entonces pinta_línea(inicio, i, lin - primera) fin
                 si i = largo entonces romper fin
                 lin := lin + 1
                 col := 0
@@ -162,12 +277,12 @@ módulo UBloc
             i := i + 1
         fin
         ; el cursor: una raya entre dos letras
-        rectángulo(v, MARGEN + ccol * ANCHO_LETRA - 1, BARRA + 4 + (clin - primera) * ALTO_LETRA, 1, ALTO_LETRA, 0x2468C8)
+        rectángulo(v, MARGEN + ccol * ANCHO_LETRA - 1, ARRIBA + 4 + (clin - primera) * ALTO_LETRA, 1, ALTO_LETRA, 0x2468C8)
     fin
 
     función pinta_todo()
         columnas := (ancho - 2 * MARGEN) div ANCHO_LETRA
-        filas := (alto - BARRA - PIE - 8) div ALTO_LETRA
+        filas := (alto - ARRIBA - PIE - 8) div ALTO_LETRA
         si columnas < 8 entonces columnas := 8 fin
         si filas < 1 entonces filas := 1 fin
         pinta_barra()
@@ -189,6 +304,7 @@ módulo UBloc
         variable m, n, i: nat32
         largo := 0
         cursor := 0
+        ancla := 0
         primera := 0
         cambiado := falso
         m := abrir(nombre)
@@ -255,93 +371,293 @@ módulo UBloc
     fin
 
     ; -------------------------------------------------------------------------
-    ;  Escribir
+    ;  Escribir, cortar, copiar y pegar
     ; -------------------------------------------------------------------------
-    función mete(c: byte)
+    ; mete n letras donde está el cursor (las que quepan), que queda detrás
+    función mete_trozo(p: puntero a byte, n: nat32)
         variable i: nat32
-        si largo >= MÁXIMO entonces devolver fin
+        si largo + n > MÁXIMO entonces n := MÁXIMO - largo fin
+        si n = 0 entonces devolver fin
         i := largo
         mientras i > cursor hacer
-            letras[i] := letras[i - 1]
             i := i - 1
+            letras[i + n] := letras[i]
         fin
-        letras[cursor] := c
-        largo := largo + 1
-        cursor := cursor + 1
+        para i desde 0 hasta n - 1 hacer letras[cursor + i] := p[i] fin
+        largo := largo + n
+        cursor := cursor + n
+        ancla := cursor
         cambiado := cierto
     fin
 
-    función quita(pos: nat32)
+    ; quita n letras desde «pos»
+    función quita_trozo(pos: nat32, n: nat32)
         variable i: nat32
-        si pos >= largo entonces devolver fin
-        para i desde pos + 1 hasta largo - 1 hacer letras[i - 1] := letras[i] fin
-        largo := largo - 1
+        si pos >= largo o n = 0 entonces devolver fin
+        si pos + n > largo entonces n := largo - pos fin
+        i := pos + n
+        mientras i < largo hacer
+            letras[i - n] := letras[i]
+            i := i + 1
+        fin
+        largo := largo - n
         cambiado := cierto
     fin
 
-    función tecla_pulsada(c: nat32)
+    ; quita lo seleccionado (cierto si había algo): el cursor queda en su sitio
+    función quita_selección(): bool
+        variable a: nat32
+        si no hay_selección() entonces devolver falso fin
+        a := sel_inicio()
+        quita_trozo(a, sel_fin() - a)
+        cursor := a
+        ancla := a
+        devolver cierto
+    fin
+
+    función mete(c: byte)
+        variable uno: arreglo [1] de byte
+        uno[0] := c
+        mete_trozo(uno, 1)
+    fin
+
+    función copia()
+        variable d: arreglo [1] de nat32
+        si no hay_selección() entonces devolver fin
+        aviso_malo := no al_portapapeles(dirección(letras[sel_inicio()]), sel_fin() - sel_inicio())
+        d[0] := sel_fin() - sel_inicio()
+        si aviso_malo entonces
+            Textos32.copiar(aviso, "No se ha podido copiar.")
+        sino
+            formatear(aviso, 96, "Copiado (%u letras).", d)
+        fin
+    fin
+
+    función corta()
+        si no hay_selección() entonces devolver fin
+        copia()
+        si no aviso_malo entonces quita_selección() fin
+        aviso[0] := 0
+    fin
+
+    ; lo del portapapeles, donde está el cursor (en lugar de lo seleccionado)
+    función pega()
+        variable n, i, k: nat32
+        n := del_portapapeles(pegado, MÁXIMO)
+        ; solo el texto: sin los «\r», y los tabuladores, un espacio
+        k := 0
+        i := 0
+        mientras i < n hacer
+            si pegado[i] = '\t' entonces pegado[i] := ' ' fin
+            si pegado[i] = '\n' o pegado[i] >= ' ' entonces
+                pegado[k] := pegado[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        si k = 0 entonces devolver fin
+        quita_selección()
+        mete_trozo(pegado, k)
+    fin
+
+    función elige_todo()
+        ancla := 0
+        cursor := largo
+    fin
+
+    función tecla_pulsada(c: nat32, con_mayús: bool)
         variable lin, col: ent32
+        variable mueve: bool
         aviso[0] := 0
         cerrando := falso
-        si c = TECLA_F2 o c = 19 entonces
+        mueve := falso
+        si c = TECLA_F2 o c = CTRL_S entonces
             guarda()
+        sino si c = CTRL_A entonces
+            elige_todo()
+        sino si c = CTRL_C entonces
+            copia()
+        sino si c = CTRL_X entonces
+            corta()
+        sino si c = CTRL_V entonces
+            pega()
         sino si c = '\n' o (c >= ' ' y c < TECLA_ESPECIAL) entonces
+            quita_selección()
             mete(c)
         sino si c = '\t' entonces
-            mete(' ')
-            mete(' ')
-            mete(' ')
-            mete(' ')
+            quita_selección()
+            mete_trozo("    ", 4)
         sino si c = 8 entonces
-            si cursor > 0 entonces
+            si no quita_selección() y cursor > 0 entonces
                 cursor := cursor - 1
-                quita(cursor)
+                ancla := cursor
+                quita_trozo(cursor, 1)
             fin
         sino si c = TECLA_SUPR entonces
-            quita(cursor)
+            si no quita_selección() entonces quita_trozo(cursor, 1) fin
         sino si c = TECLA_IZQUIERDA entonces
-            si cursor > 0 entonces cursor := cursor - 1 fin
+            mueve := cierto
+            si hay_selección() y no con_mayús entonces
+                cursor := sel_inicio()
+            sino si cursor > 0 entonces
+                cursor := cursor - 1
+            fin
         sino si c = TECLA_DERECHA entonces
-            si cursor < largo entonces cursor := cursor + 1 fin
+            mueve := cierto
+            si hay_selección() y no con_mayús entonces
+                cursor := sel_fin()
+            sino si cursor < largo entonces
+                cursor := cursor + 1
+            fin
         sino si c = TECLA_ARRIBA entonces
+            mueve := cierto
             sitio(cursor, lin, col)
             si lin > 0 entonces cursor := letra_en(lin - 1, col) fin
         sino si c = TECLA_ABAJO entonces
+            mueve := cierto
             sitio(cursor, lin, col)
             cursor := letra_en(lin + 1, col)
+        sino si c = TECLA_RE_PÁG entonces
+            mueve := cierto
+            sitio(cursor, lin, col)
+            si lin > filas entonces cursor := letra_en(lin - filas, col) sino cursor := letra_en(0, col) fin
+        sino si c = TECLA_AV_PÁG entonces
+            mueve := cierto
+            sitio(cursor, lin, col)
+            cursor := letra_en(lin + filas, col)
         sino si c = TECLA_INICIO entonces
+            mueve := cierto
             sitio(cursor, lin, col)
             cursor := letra_en(lin, 0)
         sino si c = TECLA_FIN entonces
+            mueve := cierto
             sitio(cursor, lin, col)
             cursor := letra_en(lin, columnas)
+        fin
+        ; una tecla de moverse, sin Mayús, deja de seleccionar
+        si mueve y no con_mayús entonces ancla := cursor fin
+        pinta_texto()
+        pinta_pie()
+    fin
+
+    ; «Nuevo»: en blanco (el archivo no se toca hasta guardar)
+    función nuevo()
+        largo := 0
+        cursor := 0
+        ancla := 0
+        primera := 0
+        cambiado := cierto
+    fin
+
+    ; el botón principal del ratón en (x, yy); «c», lo que dice su suceso
+    función clic(x: ent32, yy: ent32, c: nat32)
+        variable pos: nat32
+        aviso[0] := 0
+        si yy < ARRIBA entonces
+            si yy >= ALTO_MENÚS entonces
+                si x >= 8 y x < 92 entonces
+                    nuevo()
+                sino si x >= 98 y x < 182 entonces
+                    guarda()
+                fin
+            fin
+        sino si yy < alto - PIE entonces
+            pos := letra_del_punto(x, yy)
+            si veces(c) = 2 entonces
+                elige_palabra(pos)
+            sino si veces(c) = 3 entonces
+                elige_línea(pos)
+            sino
+                ; un clic: el cursor ahí (con Mayús, selecciona hasta ahí), y
+                ; arrastrando se sigue seleccionando
+                cursor := pos
+                si c yb CON_MAYÚS = 0 entonces ancla := cursor fin
+                arrastrando := cierto
+            fin
         fin
         pinta_texto()
         pinta_pie()
     fin
 
-    función clic(x: ent32, yy: ent32)
+    ; lo que no se puede hacer ahora en el menú de Edición (un bit por opción)
+    función grises_de_edición(): nat32
+        variable g: nat32
+        g := 0
+        si no hay_selección() entonces g := g ob 3 fin
+        si en_portapapeles() = 0 entonces g := g ob 4 fin
+        si largo = 0 entonces g := g ob 16 fin
+        devolver g
+    fin
+
+    ; el botón secundario: el cursor va ahí (si no es sobre lo seleccionado) y sale el menú
+    función clic_secundario(x: ent32, yy: ent32)
+        variable pos: nat32
+        si yy < ARRIBA o yy >= alto - PIE entonces devolver fin
+        pos := letra_del_punto(x, yy)
+        si no hay_selección() o pos < sel_inicio() o pos >= sel_fin() entonces
+            cursor := pos
+            ancla := pos
+            pinta_texto()
+            pinta_pie()
+        fin
+        menú(v, x, yy, "Cortar|Copiar|Pegar|-|Seleccionar todo", grises_de_edición(), M_CONTEXTO)
+    fin
+
+    ; se ha pulsado un rótulo de la barra de menús
+    función abre_el_menú(cuál: ent32)
+        menú_abierto := cuál
+        pinta_menús(v, ancho, menús, menú_abierto)
+        según cuál
+            caso M_ARCHIVO: abre_menú(v, menús, M_ARCHIVO, "Nuevo|Guardar         F2|-|Salir", 0)
+            caso M_EDICIÓN: abre_menú(v, menús, M_EDICIÓN, "Cortar            Ctrl+X|Copiar            Ctrl+C|Pegar             Ctrl+V|-|Seleccionar todo  Ctrl+A", grises_de_edición())
+            caso M_AYUDA: abre_menú(v, menús, M_AYUDA, "Acerca del Bloc de notas", 0)
+        fin
+    fin
+
+    ; lo elegido en un menú: cierto si hay que salir
+    función elegido(cuál: nat32, opción: nat32): bool
+        si ent32(cuál) = menú_abierto entonces
+            menú_abierto := -1
+            pinta_menús(v, ancho, menús, menú_abierto)
+        fin
+        si opción = SIN_ELEGIR entonces devolver falso fin
         aviso[0] := 0
-        si yy < BARRA entonces
-            si x >= 8 y x < 92 entonces
-                ; «Nuevo»: en blanco (el archivo no se toca hasta guardar)
-                largo := 0
-                cursor := 0
-                primera := 0
-                cambiado := cierto
-            sino si x >= 98 y x < 182 entonces
-                guarda()
+        si cuál = M_ARCHIVO entonces
+            según opción
+                caso 0: nuevo()
+                caso 1: guarda()
+                caso 3: devolver cierto
             fin
-        sino si yy < alto - PIE entonces
-            cursor := letra_en(primera + (yy - BARRA - 4) div ALTO_LETRA, (x - MARGEN + 3) div ANCHO_LETRA)
+        sino si cuál = M_EDICIÓN o cuál = M_CONTEXTO entonces
+            según opción
+                caso 0: corta()
+                caso 1: copia()
+                caso 2: pega()
+                caso 4: elige_todo()
+            fin
+        sino si cuál = M_AYUDA entonces
+            aviso_malo := falso
+            Textos32.copiar(aviso, "Bloc de notas de Hispa-Pentium 0.5: un programa escrito en Castel.")
         fin
         pinta_texto()
         pinta_pie()
+        devolver falso
+    fin
+
+    ; quieren cerrar: cierto si se puede salir ya (sin cambios, o avisado antes)
+    función sale(): bool
+        si no cambiado o cerrando entonces devolver cierto fin
+        cerrando := cierto
+        aviso_malo := cierto
+        Textos32.copiar(aviso, "Hay cambios sin guardar: F2 guarda; cerrar otra vez, sale.")
+        pinta_pie()
+        devolver falso
     fin
 
     función principal(): byte
         variable s: Suceso
         variable n: nat32
+        variable pos: nat32
         argumentos(nombre, 64)
         n := longitud(nombre)
         mientras n > 0 y es_espacio(nombre[n - 1]) hacer
@@ -351,7 +667,7 @@ módulo UBloc
         si n = 0 entonces Textos32.copiar(nombre, "NOTAS.TXT") fin
         a_mayúsculas(nombre)
         ancho := 500
-        alto := 340
+        alto := 340 + ALTO_MENÚS
         v := ventana("Bloc de notas", nat32(ancho), nat32(alto))
         si es_error(v) entonces
             escribir("bloc: no hay escritorio (o no hay memoria para la ventana)\n")
@@ -363,19 +679,36 @@ módulo UBloc
         pinta_todo()
         mientras suceso(v, s, cierto) hacer
             si s.clase = EV_TECLA entonces
-                tecla_pulsada(s.a)
-            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
-                clic(ent32(s.a), ent32(s.b))
+                tecla_pulsada(s.a, s.b yb TECLA_CON_MAYÚS <> 0)
+            sino si s.clase = EV_RATÓN_BAJA entonces
+                n := nat32(menú_en(menús, ent32(s.a), ent32(s.b)))
+                si ent32(n) >= 0 entonces
+                    abre_el_menú(ent32(n))
+                sino si s.c yb BOTÓN_DERECHO <> 0 entonces
+                    clic_secundario(ent32(s.a), ent32(s.b))
+                sino si s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    clic(ent32(s.a), ent32(s.b), s.c)
+                fin
+            sino si s.clase = EV_RATÓN_MUEVE entonces
+                ; arrastrando con el botón pulsado: se selecciona hasta donde va el ratón
+                si arrastrando y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    pos := letra_del_punto(ent32(s.a), ent32(s.b))
+                    si pos <> cursor entonces
+                        cursor := pos
+                        pinta_texto()
+                        pinta_pie()
+                    fin
+                fin
+            sino si s.clase = EV_RATÓN_SUBE entonces
+                arrastrando := falso
+            sino si s.clase = EV_MENÚ entonces
+                si elegido(s.b, s.a) y sale() entonces devolver 0 fin
             sino si s.clase = EV_TAMAÑO entonces
                 ancho := ent32(s.a)
                 alto := ent32(s.b)
                 pinta_todo()
             sino si s.clase = EV_CERRAR entonces
-                si no cambiado o cerrando entonces devolver 0 fin
-                cerrando := cierto
-                aviso_malo := cierto
-                Textos32.copiar(aviso, "Hay cambios sin guardar: F2 guarda; cerrar otra vez, sale.")
-                pinta_pie()
+                si sale() entonces devolver 0 fin
             fin
         fin
         devolver 0

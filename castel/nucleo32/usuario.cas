@@ -67,11 +67,11 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
-    público constante VERSIÓN = 0x0004          ; la 0.4
+    público constante VERSIÓN = 0x0005          ; la 0.5
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -634,7 +634,7 @@ módulo Usuario
                 si a <= 1 entonces pon_teclado(a = 1) fin
                 si teclado_español() entonces devolver 1 fin
                 devolver 0
-            caso 32..39:
+            caso 32..41:
                 devolver atender_ventanas(n, a, b, c)
         fin
         devolver NO_VALE
@@ -655,13 +655,68 @@ módulo Usuario
         devolver borrar_carpeta(ruta)
     fin
 
-    ; las llamadas del entorno gráfico (32 a 39)
+    ; el portapapeles del sistema: un texto (en la página 437, con sus
+    ; líneas acabadas en «\n»), el último que se ha copiado o cortado en
+    ; cualquier programa
+    constante MAX_PORTAPAPELES = 65536
+    variable portapapeles: puntero a byte
+    variable en_portapapeles: nat32
+    variable cerrojo_portapapeles: Cerrojo
+
+    ; a = 0: guarda los c octetos de b; a = 1: copia lo que hay a b (hasta
+    ; c octetos) y dice cuántos; a = 2: cuántos hay
+    función atender_portapapeles(a: nat32, b: nat32, c: nat32): nat32
+        variable m: puntero a byte
+        variable r: nat32
+        según a
+            caso 0:
+                si c > MAX_PORTAPAPELES o no puede(b, c, falso) entonces devolver NO_VALE fin
+                m := nulo
+                si c > 0 entonces
+                    m := reservar(c)
+                    si m = nulo entonces devolver SIN_MEMORIA fin
+                    copiar_memoria(m, puntero(b), c)
+                fin
+                tomar(cerrojo_portapapeles)
+                si portapapeles <> nulo entonces liberar(portapapeles) fin
+                portapapeles := m
+                en_portapapeles := c
+                soltar(cerrojo_portapapeles)
+                devolver c
+            caso 1:
+                si no puede(b, c, cierto) entonces devolver NO_VALE fin
+                tomar(cerrojo_portapapeles)
+                r := en_portapapeles
+                si r > c entonces r := c fin
+                si r > 0 entonces copiar_memoria(puntero(b), portapapeles, r) fin
+                soltar(cerrojo_portapapeles)
+                devolver r
+            caso 2:
+                devolver en_portapapeles
+        fin
+        devolver NO_VALE
+    fin
+
+    ; lo que pide un programa para abrir un menú emergente (la llamada 39)
+    tipo PideMenú = estructura
+        x, ye: ent32                            ; dónde, dentro de su ventana
+        opciones: puntero a byte                ; separadas por «|»
+        inactivas: nat32
+        etiqueta: nat32
+    fin
+
+    ; las llamadas del entorno gráfico (32 a 41)
     función atender_ventanas(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable nombre: arreglo [MAX_TÍTULO] de byte
+        variable opciones: arreglo [256] de byte
+        variable ruta: arreglo [MAX_RUTA] de byte
+        variable t: puntero a Tarea
         variable ord: puntero a Orden
+        variable pm: puntero a PideMenú
         variable e: Evento
         variable p: puntero a nat32
         variable r: nat32
+        variable x, yy: ent32
         según n
             caso 32:
                 ; una ventana nueva: el nombre en a, lo que mide por dentro en b y c
@@ -722,8 +777,9 @@ módulo Usuario
                         si no puede(b, c, cierto) entonces devolver NO_VALE fin
                         devolver leer_salida(actual.terminal, puntero(b), c)
                     caso 2:
-                        teclear(actual.terminal, b)
-                        devolver 0
+                        ; (1 si no ha cabido: el tubo de las teclas está lleno)
+                        si teclear(actual.terminal, b) entonces devolver 0 fin
+                        devolver 1
                     caso 3:
                         cortar_terminal(actual.terminal)
                         devolver 0
@@ -738,6 +794,29 @@ módulo Usuario
                     mov {r}, eax
                 fin
                 devolver r
+            caso 39:
+                ; un menú emergente para la ventana a (suya), como dice lo de b
+                si no puede(b, tamaño(PideMenú), falso) entonces devolver NO_VALE fin
+                pm := puntero(b)
+                si no es_de(a, actual.id) o no texto_de_usuario(nat32(pm.opciones), opciones, 256) entonces devolver NO_VALE fin
+                x := pm.x
+                yy := pm.ye
+                si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin
+                a_pantalla(a, x, yy)
+                si abrir_emergente(x, yy, opciones, pm.inactivas, a, pm.etiqueta) entonces devolver 0 fin
+                devolver SIN_MEMORIA
+            caso 40:
+                devolver atender_portapapeles(a, b, c)
+            caso 41:
+                ; lanzar un programa y soltarlo: no es hijo de nadie (al
+                ; acabar lo recoge el núcleo), ni hereda el terminal
+                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                opciones[0] := 0
+                si b <> 0 y no texto_de_usuario(b, opciones, MAX_ARGS) entonces devolver NO_VALE fin
+                t := cargar_archivo(ruta, opciones, r)
+                si t = nulo entonces devolver r fin
+                t.padre := 0
+                devolver t.id
         fin
         devolver NO_VALE
     fin

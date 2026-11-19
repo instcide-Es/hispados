@@ -16,6 +16,8 @@
 # Para el escritorio (ARRANQUE=escritorio, o la orden «escritorio»), el ratón y
 # las capturas: «:raton X Y» lleva la flecha a ese punto de la pantalla;
 # «:clic X Y» pulsa allí el botón izquierdo; «:doble X Y», dos veces;
+# «:triple X Y», tres; «:clicd X Y», el botón derecho (el secundario);
+# «:mayusclic X Y», el izquierdo con Mayús pulsada;
 # «:arrastra X1 Y1 X2 Y2» lo lleva pulsado de un sitio a otro; «:escribe
 # texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
@@ -125,6 +127,9 @@ for orden in "${ORDENES[@]}"; do
     ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
     ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;
     ":doble "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
+    ":triple "*) set -- ${orden:8}; ir $1 $2; for _ in 1 2; do mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; done; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
+    ":clicd "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 2" 0.2; mon "mouse_button 0" 0.4; continue ;;
+    ":mayusclic "*) set -- ${orden:11}; ir $1 $2; mon "sendkey shift 900" 0.3; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.9; continue ;;
     ":arrastra "*) set -- ${orden:10}; ir $1 $2; mon "mouse_button 1" 0.25; ir $3 $4; mon "mouse_button 0" 0.4; continue ;;
     ":captura "*) sleep 0.4; mon "screendump ${CAPTURAS:-/tmp}/${orden:9}.ppm" 0.5; continue ;;
     ":escribe "*)

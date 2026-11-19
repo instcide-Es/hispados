@@ -120,6 +120,20 @@ módulo Raton
         devolver cierto
     fin
 
+    ; lleva la flecha a ese punto de la pantalla (para mover una ventana
+    ; desde su menú: la flecha va a su título)
+    público función pon_ratón(x: ent32, yy: ent32)
+        variable b: nat32
+        b := sin_interrupciones()
+        si x < 0 entonces x := 0 fin
+        si yy < 0 entonces yy := 0 fin
+        si x >= ancho entonces x := ancho - 1 fin
+        si yy >= alto entonces yy := alto - 1 fin
+        ratón_x := x
+        ratón_y := yy
+        reponer(b)
+    fin
+
     ; enciende el ratón, con la flecha en el centro de una pantalla de ese
     ; ancho y ese alto. Falso si no contesta (no hay ratón PS/2).
     público función prepara_ratón(an: ent32, al: ent32): bool

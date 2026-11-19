@@ -13,7 +13,13 @@
 ;     (los .TXT de la raíz: se abren con el Bloc de notas) y la
 ;     configuración; y abajo, «Apagar el equipo»;
 ;   - los cuadros «Apagar el equipo» (apagar, reiniciar), «Configuración»
-;     (el teclado, el tapiz, lo que hay) y los avisos.
+;     (el teclado, el tapiz, lo que hay), «Acerca de» y los avisos;
+;   - los iconos del tapiz (Mi equipo, Bloc de notas, Consola): un clic lo
+;     elige, dos lo abren, y se llevan a otro sitio arrastrándolos;
+;   - los menús del botón secundario (emergente.cas): el del tapiz, el de
+;     una ventana (en su título o en su botón de la barra de tareas:
+;     Restaurar, Mover, Minimizar, Maximizar, Cerrar) y «Abrir» en un icono
+;     o en una opción del menú Inicio.
 ;
 ;  Todo son ventanas del gestor (ventanas.cas): la barra y el menú, sin
 ;  marco y por delante de las demás; los cuadros, con él. Una tarea del
@@ -29,7 +35,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Grafico, Letra, Video, Raton, Ventanas, Consola, Fat, Fecha, Usuario, Textos32, Formato
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Fecha, Usuario, Textos32, Formato
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -71,6 +77,17 @@ módulo Escritorio
     constante AM_DOCUMENTO = 22
     constante AM_CONFIG = 23
     constante AM_APAGAR = 24
+    constante AM_EQUIPO = 25
+    constante AC_CERRAR_ACERCA = 11
+    constante AC_ACERCA = 12
+    constante AC_TAPIZ_SIGUIENTE = 13
+    constante AC_ORGANIZAR = 14
+
+    ; ---- los menús del botón secundario (la etiqueta de cada uno) ----
+    constante ME_FONDO = 1                      ; el del tapiz
+    constante ME_VENTANA = 2                    ; el de una ventana (menú_dato: cuál)
+    constante ME_INICIO = 3                     ; «Abrir» en una opción del menú Inicio
+    constante ME_ICONO = 4                      ; «Abrir» en un icono del tapiz
 
     tipo Opción = estructura                    ; una opción del menú Inicio
         x, ye, an, al: ent32
@@ -87,7 +104,25 @@ módulo Escritorio
     constante MAX_PULSADORES = 16
     constante MAX_BOTONES = 12
 
-    variable v_barra, v_menú, v_apagar, v_config, v_aviso: nat32
+    ; ---- los iconos del tapiz ----
+    constante MAX_ICONOS = 4
+    constante CELDA_AN = 112                    ; lo que ocupa uno, con su rótulo
+    constante CELDA_AL = 62
+    tipo Icono = estructura
+        x, ye: ent32
+        acción: nat32
+        nombre: puntero a byte
+        debajo: puntero a nat32                 ; lo que tapa del tapiz (para quitarlo de ahí)
+    fin
+    variable iconos: arreglo [MAX_ICONOS] de Icono
+    variable n_iconos: nat32
+    variable icono_elegido: ent32 = -1
+    variable icono_cogido: ent32 = -1           ; el que se está arrastrando
+    variable cog_dx, cog_dy, cog_x, cog_y: ent32
+    variable cog_movido: bool
+    variable menú_dato, menú_acción: nat32      ; de qué va el menú emergente abierto
+
+    variable v_barra, v_menú, v_apagar, v_config, v_aviso, v_fondo, v_acerca: nat32
     variable menú_abierto: bool
     variable menú_cerrado_en: nat32             ; el tic en que se cerró (por un clic fuera)
     variable opciones: arreglo [MAX_OPCIONES] de Opción
@@ -157,6 +192,8 @@ módulo Escritorio
         texto_negrita(tapiz, an - 163, al - ALTO_BARRA - 59, "Hispa-Pentium", 0x0E3A66)
         texto_negrita(tapiz, an - 164, al - ALTO_BARRA - 60, "Hispa-Pentium", BLANCO)
         texto(tapiz, an - 164, al - ALTO_BARRA - 40, "hecho en Castel", 0xE2F2FF)
+        ; y los iconos, encima (el tapiz es nuevo: lo que tapan se guarda otra vez)
+        pon_iconos()
     fin
 
     ; -------------------------------------------------------------------------
@@ -214,6 +251,141 @@ módulo Escritorio
         tx := x + (an - ancho_texto(t)) div 2
         texto_negrita(l, tx + 1, yy + (al - ALTO_LETRA) div 2 + 1, t, mezcla(abajo, 0, 110))
         texto_negrita(l, tx, yy + (al - ALTO_LETRA) div 2, t, BLANCO)
+    fin
+
+    ; un equipo: la pantalla, con el disquete dentro, y su pie (32 x 32)
+    función icono_equipo(ref l: Lienzo, x: ent32, yy: ent32)
+        redondeado(l, x + 1, yy, 30, 23, 3, 0x4F6890, 0x4F6890, TODAS)
+        redondeado(l, x + 2, yy + 1, 28, 21, 2, 0xE4ECF7, 0xB7C7DE, TODAS)
+        degradado(l, x + 4, yy + 3, 24, 16, 0x7FC2FA, 0x2A7AD6)
+        disquete(l, x + 10, yy + 5, 12)
+        rectángulo(l, x + 13, yy + 23, 6, 3, 0x7F95B6)
+        redondeado(l, x + 5, yy + 26, 22, 6, 2, 0x4F6890, 0x4F6890, TODAS)
+        redondeado(l, x + 6, yy + 27, 20, 4, 1, 0xDCE6F3, 0xA9BBD6, TODAS)
+    fin
+
+    ; una hoja grande, con su esquina doblada (26 x 32)
+    función icono_hoja_grande(ref l: Lienzo, x: ent32, yy: ent32)
+        variable i: ent32
+        rectángulo(l, x, yy, 26, 32, 0x4F6890)
+        rectángulo(l, x + 1, yy + 1, 24, 30, BLANCO)
+        rectángulo(l, x + 1, yy + 1, 24, 6, 0x4C97EC)
+        rectángulo(l, x + 1, yy + 7, 24, 1, 0x2A6BC8)
+        para i desde 0 hasta 4 hacer
+            rectángulo(l, x + 4, yy + 11 + i * 4, 18 - (i mod 2) * 5, 1, 0x6F87A8)
+        fin
+    fin
+
+    ; una pantalla oscura grande con su «>_» (32 x 28)
+    función icono_consola_grande(ref l: Lienzo, x: ent32, yy: ent32)
+        redondeado(l, x, yy, 32, 28, 4, 0x4F6890, 0x4F6890, TODAS)
+        redondeado(l, x + 1, yy + 1, 30, 26, 3, 0xDCE6F3, 0xA9BBD6, TODAS)
+        redondeado(l, x + 3, yy + 3, 26, 22, 2, 0x1B2B44, 0x0D1626, TODAS)
+        línea(l, x + 7, yy + 8, x + 12, yy + 13, 0x7CE88A)
+        línea(l, x + 7, yy + 9, x + 12, yy + 14, 0x7CE88A)
+        línea(l, x + 12, yy + 13, x + 7, yy + 18, 0x7CE88A)
+        línea(l, x + 12, yy + 14, x + 7, yy + 19, 0x7CE88A)
+        rectángulo(l, x + 15, yy + 18, 8, 2, 0x7CE88A)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los iconos del tapiz. Se pintan en el propio tapiz: de cada uno se
+    ;  guarda lo que tapa, para quitarlo de ahí al moverlo o al elegirlo.
+    ; -------------------------------------------------------------------------
+    ; quita todos del tapiz (del último al primero: pueden estar unos sobre otros)
+    función quita_iconos()
+        variable i: ent32
+        variable l: Lienzo
+        i := ent32(n_iconos) - 1
+        mientras i >= 0 hacer
+            pon_lienzo(l, iconos[i].debajo, CELDA_AN, CELDA_AN, CELDA_AL)
+            copiar_lienzo(tapiz, iconos[i].x, iconos[i].ye, l, 0, 0, CELDA_AN, CELDA_AL)
+            repintar_trozo(iconos[i].x, iconos[i].ye, CELDA_AN, CELDA_AL)
+            i := i - 1
+        fin
+    fin
+
+    ; y los pinta todos, cada uno donde está, guardando antes lo que tapa
+    función pon_iconos()
+        variable i: nat32
+        variable x, yy, tx, n: ent32
+        variable l: Lienzo
+        i := 0
+        mientras i < n_iconos hacer
+            x := iconos[i].x
+            yy := iconos[i].ye
+            pon_lienzo(l, iconos[i].debajo, CELDA_AN, CELDA_AN, CELDA_AL)
+            copiar_lienzo(l, 0, 0, tapiz, x, yy, CELDA_AN, CELDA_AL)
+            según iconos[i].acción
+                caso AM_EQUIPO: icono_equipo(tapiz, x + (CELDA_AN - 32) div 2, yy + 3)
+                caso AM_BLOC: icono_hoja_grande(tapiz, x + (CELDA_AN - 26) div 2, yy + 3)
+                si no: icono_consola_grande(tapiz, x + (CELDA_AN - 32) div 2, yy + 5)
+            fin
+            ; el rótulo, con letra normal: blanco con su sombra; el del elegido, sobre azul
+            n := ancho_texto(iconos[i].nombre)
+            tx := x + (CELDA_AN - n) div 2
+            si ent32(i) = icono_elegido entonces
+                redondeado(tapiz, tx - 4, yy + 40, n + 8, ALTO_LETRA + 4, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
+            sino
+                texto(tapiz, tx + 1, yy + 43, iconos[i].nombre, 0x0B2A52)
+            fin
+            texto(tapiz, tx, yy + 42, iconos[i].nombre, BLANCO)
+            repintar_trozo(x, yy, CELDA_AN, CELDA_AL)
+            i := i + 1
+        fin
+    fin
+
+    ; cada uno a su sitio de siempre: en columna, arriba a la izquierda
+    función organiza_iconos()
+        variable i: nat32
+        i := 0
+        mientras i < n_iconos hacer
+            iconos[i].x := 8
+            iconos[i].ye := 12 + ent32(i) * 76
+            i := i + 1
+        fin
+    fin
+
+    función nuevo_icono(nombre: puntero a byte, acción: nat32)
+        variable m: puntero a byte
+        si n_iconos >= MAX_ICONOS entonces devolver fin
+        m := reservar(CELDA_AN * CELDA_AL * 4)
+        si m = nulo entonces devolver fin
+        iconos[n_iconos].debajo := puntero(m)
+        iconos[n_iconos].nombre := nombre
+        iconos[n_iconos].acción := acción
+        n_iconos := n_iconos + 1
+    fin
+
+    ; el icono que está en ese punto de la pantalla (el de más arriba); -1 si no hay
+    función icono_en(x: ent32, yy: ent32): ent32
+        variable i: ent32
+        i := ent32(n_iconos) - 1
+        mientras i >= 0 hacer
+            si x >= iconos[i].x + 8 y x < iconos[i].x + CELDA_AN - 8 y yy >= iconos[i].ye y yy < iconos[i].ye + CELDA_AL entonces devolver i fin
+            i := i - 1
+        fin
+        devolver -1
+    fin
+
+    función elige_icono(k: ent32)
+        si k = icono_elegido entonces devolver fin
+        quita_iconos()
+        icono_elegido := k
+        pon_iconos()
+    fin
+
+    ; lleva un icono a otro sitio (sin salirse de la pantalla ni meterse bajo la barra)
+    función mueve_icono(k: ent32, x: ent32, yy: ent32)
+        si x > tapiz.ancho - CELDA_AN entonces x := tapiz.ancho - CELDA_AN fin
+        si yy > tapiz.alto - ALTO_BARRA - CELDA_AL entonces yy := tapiz.alto - ALTO_BARRA - CELDA_AL fin
+        si x < 0 entonces x := 0 fin
+        si yy < 0 entonces yy := 0 fin
+        si x = iconos[k].x y yy = iconos[k].ye entonces devolver fin
+        quita_iconos()
+        iconos[k].x := x
+        iconos[k].ye := yy
+        pon_iconos()
     fin
 
     ; -------------------------------------------------------------------------
@@ -426,7 +598,7 @@ módulo Escritorio
         disquete(valor(l), 9, 7, 42)
         texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
         texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-        texto(valor(l), 58, 30, "el escritorio, versión 0.4", 0xD3E7FD)
+        texto(valor(l), 58, 30, "el escritorio, versión 0.5", 0xD3E7FD)
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
         rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
@@ -442,6 +614,12 @@ módulo Escritorio
         yy := yy + ALTO_OPCIÓN + 2
         pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Consola", AM_CONSOLA, 0, cierto)
         icono_consola(valor(l), 13, yy + 6)
+        yy := yy + ALTO_OPCIÓN + 2
+        pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Mi equipo", AM_EQUIPO, 0, cierto)
+        redondeado(valor(l), 13, yy + 6, 24, 17, 2, 0x4F6890, 0x4F6890, TODAS)
+        degradado(valor(l), 15, yy + 8, 20, 13, 0x7FC2FA, 0x2A7AD6)
+        rectángulo(valor(l), 22, yy + 23, 6, 2, 0x7F95B6)
+        rectángulo(valor(l), 17, yy + 25, 16, 3, 0x6F87A8)
         ; a la derecha: los documentos y la configuración
         yy := MENÚ_CABEZA + 10
         texto_negrita(valor(l), MENÚ_COLUMNA + 10, yy, "Documentos", TINTA_SUAVE)
@@ -494,8 +672,8 @@ módulo Escritorio
     función cierra_menú()
         si no menú_abierto entonces devolver fin
         menú_abierto := falso
-        emergente := 0
-        teclas_a := 0
+        si emergente = v_menú entonces emergente := 0 fin
+        si teclas_a = v_menú entonces teclas_a := 0 fin
         mostrar(v_menú, falso)
         pinta_barra()
     fin
@@ -568,6 +746,29 @@ módulo Escritorio
         repintada(v_apagar, 0, 0, 420, 150)
     fin
 
+    ; «Acerca de Hispa-Pentium»
+    función abre_acerca()
+        variable l: puntero a Lienzo
+        si v_acerca <> 0 entonces cierra_cuadro(v_acerca) fin
+        v_acerca := cuadro("Acerca de Hispa-Pentium", 440, 214)
+        l := lienzo_de(v_acerca)
+        si l = nulo entonces
+            v_acerca := 0
+            devolver
+        fin
+        degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
+        disquete(valor(l), 16, 14, 64)
+        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.5", TINTA)
+        texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
+        texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
+        texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
+        rectángulo(valor(l), 16, 104, 408, 1, 0xA9C6EC)
+        texto(valor(l), 16, 114, "Copyright (C) 2026 Carlos Sanz y contribuidores.", TINTA)
+        texto(valor(l), 16, 134, "Software libre: GPL-2.0 o posterior.", TINTA_SUAVE)
+        pulsador(v_acerca, 324, 168, 100, 32, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_ACERCA)
+        repintada(v_acerca, 0, 0, 440, 214)
+    fin
+
     función pinta_config()
         variable l: puntero a Lienzo
         variable d: arreglo [4] de nat32
@@ -576,7 +777,7 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.4", TINTA)
+        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.5", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)
@@ -697,6 +898,18 @@ módulo Escritorio
             caso AM_DOCUMENTO: lanza("\\BLOC.BIN", documentos[dato])
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
+            caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
+            caso AC_ACERCA: abre_acerca()
+            caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
+            caso AC_ORGANIZAR:
+                quita_iconos()
+                organiza_iconos()
+                pon_iconos()
+            caso AC_TAPIZ_SIGUIENTE:
+                fondo := (fondo + 1) mod 3
+                pinta_tapiz()
+                repintar_todo()
+                si v_config <> 0 entonces pinta_config() fin
             caso AC_APAGAR: apaga(falso)
             caso AC_REINICIAR: apaga(cierto)
             caso AC_CANCELAR: cierra_cuadro(v_apagar)
@@ -710,7 +923,7 @@ módulo Escritorio
                 fondo := acción - AC_FONDO
                 pinta_tapiz()
                 repintar_todo()
-                pinta_config()
+                si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
             caso AC_CERRAR_AVISO: cierra_cuadro(v_aviso)
         fin
@@ -719,6 +932,22 @@ módulo Escritorio
     ; -------------------------------------------------------------------------
     ;  Los sucesos de las ventanas del escritorio
     ; -------------------------------------------------------------------------
+    ; el menú de una ventana (el del botón secundario en su título o en su
+    ; botón de la barra de tareas), en ese punto de la pantalla: en gris, lo
+    ; que ahora no toca
+    función menú_de_ventana(id: nat32, x: ent32, yy: ent32)
+        variable m, grises: nat32
+        m := marcas_de(id)
+        si m = 0xFFFFFFFF o m yb SIN_MARCO <> 0 entonces devolver fin
+        grises := 0
+        si m yb (MINIMIZADA ob MAXIMIZADA) = 0 entonces grises := grises ob 1 fin
+        si m yb (MINIMIZADA ob MAXIMIZADA) <> 0 entonces grises := grises ob 2 fin
+        si m yb (MINIMIZADA ob FIJA) <> 0 entonces grises := grises ob 4 fin
+        si m yb (MAXIMIZADA ob FIJA) <> 0 entonces grises := grises ob 8 fin
+        menú_dato := id
+        abrir_emergente(x, yy, "Restaurar|Mover|Minimizar|Maximizar|-|Cerrar", grises, 0, ME_VENTANA)
+    fin
+
     función atiende_menú()
         variable e: Evento
         variable n: ent32
@@ -736,8 +965,17 @@ módulo Escritorio
                 caso EV_RATÓN_BAJA:
                     n := opción_en(ent32(e.a), ent32(e.b))
                     si n >= 0 y menú_abierto entonces
-                        cierra_menú()
-                        haz(opciones[n].acción, opciones[n].dato)
+                        si e.c yb BOTÓN_DERECHO <> 0 entonces
+                            ; el botón secundario en un programa o un documento: «Abrir»
+                            si opciones[n].acción <> AM_APAGAR entonces
+                                menú_acción := opciones[n].acción
+                                menú_dato := opciones[n].dato
+                                abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA - MENÚ_ALTO + ent32(e.b), "Abrir", 0, 0, ME_INICIO)
+                            fin
+                        sino
+                            cierra_menú()
+                            haz(opciones[n].acción, opciones[n].dato)
+                        fin
                     fin
                 caso EV_TECLA:
                     si menú_abierto entonces
@@ -773,9 +1011,86 @@ módulo Escritorio
                     si no menú_abierto y tics - menú_cerrado_en > 3 entonces abre_menú() fin
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
-                    si n < ent32(n_botones) entonces botón_de_barra(botones[n]) fin
+                    si n < ent32(n_botones) entonces
+                        ; el botón secundario: el menú de esa ventana; el principal, la trae o la recoge
+                        si e.c yb BOTÓN_DERECHO <> 0 entonces
+                            menú_de_ventana(botones[n], ent32(e.a), pantalla.alto - ALTO_BARRA)
+                        sino
+                            botón_de_barra(botones[n])
+                        fin
+                    fin
                 fin
             fin
+        fin
+    fin
+
+    ; lo que cae en el tapiz (los iconos, el menú del botón secundario) y el
+    ; botón secundario en el título de una ventana
+    función atiende_fondo()
+        variable e: Evento
+        variable k, x, yy: ent32
+        mientras saca_evento(v_fondo, 0, e) hacer
+            x := ent32(e.a)
+            yy := ent32(e.b)
+            según e.clase
+                caso EV_MENÚ_VENTANA:
+                    menú_de_ventana(e.a, ent32(e.b), ent32(e.c))
+                caso EV_RATÓN_BAJA:
+                    k := icono_en(x, yy)
+                    elige_icono(k)
+                    si e.c yb BOTÓN_DERECHO <> 0 entonces
+                        si k >= 0 entonces
+                            menú_dato := nat32(k)
+                            abrir_emergente(x, yy, "Abrir", 0, 0, ME_ICONO)
+                        sino
+                            abrir_emergente(x, yy, "Configuración|Cambiar el tapiz|Organizar iconos|-|Acerca de Hispa-Pentium", 0, 0, ME_FONDO)
+                        fin
+                    sino si k >= 0 entonces
+                        si (e.c >> DESPLAZA_VECES) = 2 entonces
+                            haz(iconos[k].acción, 0)
+                        sino
+                            icono_cogido := k
+                            cog_dx := x - iconos[k].x
+                            cog_dy := yy - iconos[k].ye
+                            cog_x := x
+                            cog_y := yy
+                            cog_movido := falso
+                        fin
+                    fin
+                caso EV_RATÓN_MUEVE:
+                    si icono_cogido >= 0 y e.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                        si x - cog_x > 4 o cog_x - x > 4 o yy - cog_y > 4 o cog_y - yy > 4 entonces cog_movido := cierto fin
+                        si cog_movido entonces mueve_icono(icono_cogido, x - cog_dx, yy - cog_dy) fin
+                    fin
+                caso EV_RATÓN_SUBE:
+                    icono_cogido := -1
+            fin
+        fin
+    fin
+
+    ; lo que se ha elegido en un menú emergente del escritorio
+    función elegido_en_menú(cuál: nat32, opción: nat32)
+        según cuál
+            caso ME_FONDO:
+                según opción
+                    caso 0: abre_config()
+                    caso 1: haz(AC_TAPIZ_SIGUIENTE, 0)
+                    caso 2: haz(AC_ORGANIZAR, 0)
+                    caso 4: abre_acerca()
+                fin
+            caso ME_VENTANA:
+                según opción
+                    caso 0: orden_ventana(menú_dato, PIDE_RESTAURAR)
+                    caso 1: orden_ventana(menú_dato, PIDE_MOVER)
+                    caso 2: orden_ventana(menú_dato, PIDE_MINIMIZAR)
+                    caso 3: orden_ventana(menú_dato, PIDE_MAXIMIZAR)
+                    caso 5: orden_ventana(menú_dato, PIDE_CERRAR)
+                fin
+            caso ME_INICIO:
+                cierra_menú()
+                si opción = 0 entonces haz(menú_acción, menú_dato) fin
+            caso ME_ICONO:
+                si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, 0) fin
         fin
     fin
 
@@ -798,11 +1113,18 @@ módulo Escritorio
         variable f, h: nat32
         mientras cierto hacer
             pulso()
+            atiende_emergente()
+            si hay_resultado entonces
+                hay_resultado := falso
+                elegido_en_menú(resultado_etiqueta, resultado)
+            fin
             atiende_menú()
             atiende_barra()
+            atiende_fondo()
             atiende_cuadro(v_apagar)
             atiende_cuadro(v_config)
             atiende_cuadro(v_aviso)
+            atiende_cuadro(v_acerca)
             si Ventanas.cambios <> cambios_vistos entonces pinta_barra() fin
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
@@ -881,6 +1203,15 @@ módulo Escritorio
             devolver 0
         fin
         ventana_inicio := v_barra
+        ; la ventana «del fondo» (no se ve): le llega lo que cae en el tapiz
+        v_fondo := crear_ventana("fondo", 0, 0, 1, 1, SIN_MARCO ob OCULTA, 0)
+        ventana_fondo := v_fondo
+        ; los iconos del tapiz
+        nuevo_icono("Mi equipo", AM_EQUIPO)
+        nuevo_icono("Bloc de notas", AM_BLOC)
+        nuevo_icono("Consola", AM_CONSOLA)
+        organiza_iconos()
+        pon_iconos()
         pinta_barra()
         repintar_todo()
         t := crear_tarea("escritorio", nat32(dirección(tarea_escritorio)), 0)

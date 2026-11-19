@@ -1,0 +1,96 @@
+; =============================================================================
+;  barramenu.cas - la barra de menús de una ventana (Archivo, Edición,
+;  Ayuda...), para los programas del escritorio de Hispa-Pentium: una franja
+;  arriba del todo, con un rótulo por menú. Al pulsar un rótulo, el programa
+;  abre debajo su menú emergente (la llamada «menú»), con el número del
+;  rótulo de etiqueta: lo elegido le llega luego con el suceso EV_MENÚ.
+;
+;      pinta_menús(v, ancho, "Archivo|Edición|Ayuda", abierto)
+;      ...
+;      n := menú_en("Archivo|Edición|Ayuda", x, yy)      ; en un EV_RATÓN_BAJA
+;      si n = 1 entonces abre_menú(v, "Archivo|Edición|Ayuda", 1, "Cortar|Copiar|Pegar", 0) fin
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Barramenu
+
+    importar Llamadas
+
+    público constante ALTO_MENÚS = 22           ; lo que mide la franja
+    constante MARGEN = 4
+    constante HUECO = 16                        ; lo que hay de más a los lados de cada rótulo
+
+    ; dónde empieza el rótulo número «cuál» y cuántas letras tiene (0 si no hay tantos)
+    función rótulo(nombres: puntero a byte, cuál: nat32, ref x: ent32): nat32
+        variable i, n, k: nat32
+        x := MARGEN
+        i := 0
+        k := 0
+        mientras cierto hacer
+            n := 0
+            mientras nombres[i + n] <> 0 y nombres[i + n] <> '|' hacer n := n + 1 fin
+            si k = cuál entonces devolver n fin
+            si nombres[i + n] = 0 entonces devolver 0 fin
+            x := x + ent32(n) * ANCHO_LETRA + HUECO
+            i := i + n + 1
+            k := k + 1
+        fin
+        devolver 0
+    fin
+
+    ; pinta la franja con sus rótulos; el de «abierto» (-1: ninguno), resaltado
+    público función pinta_menús(v: nat32, ancho: ent32, nombres: puntero a byte, abierto: ent32)
+        variable k, n: nat32
+        variable x: ent32
+        degradado(v, 0, 0, ancho, ALTO_MENÚS, 0xFBFDFF, 0xE3EDFA)
+        rectángulo(v, 0, ALTO_MENÚS - 1, ancho, 1, 0xB4CBEA)
+        k := 0
+        n := rótulo(nombres, 0, x)
+        mientras n > 0 hacer
+            si ent32(k) = abierto entonces
+                redondeado(v, x, 2, ent32(n) * ANCHO_LETRA + HUECO, ALTO_MENÚS - 4, 4, 0x3F86E0, 0x2F74D0)
+                texto_n(v, x + HUECO div 2, 3, inicio_de(nombres, k), n, 0xFFFFFF)
+            sino
+                texto_n(v, x + HUECO div 2, 3, inicio_de(nombres, k), n, 0x14294A)
+            fin
+            k := k + 1
+            n := rótulo(nombres, k, x)
+        fin
+    fin
+
+    ; dónde empieza, en el texto, el rótulo número «cuál»
+    función inicio_de(nombres: puntero a byte, cuál: nat32): puntero a byte
+        variable i, k: nat32
+        i := 0
+        k := 0
+        mientras k < cuál y nombres[i] <> 0 hacer
+            si nombres[i] = '|' entonces k := k + 1 fin
+            i := i + 1
+        fin
+        devolver dirección(nombres[i])
+    fin
+
+    ; el rótulo que está en ese punto de la ventana; -1 si no es ninguno
+    público función menú_en(nombres: puntero a byte, x: ent32, yy: ent32): ent32
+        variable k, n: nat32
+        variable rx: ent32
+        si yy < 0 o yy >= ALTO_MENÚS entonces devolver -1 fin
+        k := 0
+        n := rótulo(nombres, 0, rx)
+        mientras n > 0 hacer
+            si x >= rx y x < rx + ent32(n) * ANCHO_LETRA + HUECO entonces devolver ent32(k) fin
+            k := k + 1
+            n := rótulo(nombres, k, rx)
+        fin
+        devolver -1
+    fin
+
+    ; abre, debajo de su rótulo, el menú número «cuál», con esas opciones
+    ; (como en «menú»: separadas por «|»). La etiqueta del suceso EV_MENÚ que
+    ; llegará es «cuál».
+    público función abre_menú(v: nat32, nombres: puntero a byte, cuál: nat32, opciones: puntero a byte, inactivas: nat32)
+        variable x: ent32
+        si rótulo(nombres, cuál, x) = 0 entonces devolver fin
+        menú(v, x, ALTO_MENÚS - 1, opciones, inactivas, cuál)
+    fin
+
+fin Barramenu.

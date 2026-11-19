@@ -14,10 +14,14 @@
 ;
 ;  El ratón y el teclado: pulso() (lo llama la tarea del escritorio cien
 ;  veces por segundo) recoge lo que ha pasado y lo reparte: mover una ventana
-;  por su título, traerla delante, minimizarla, maximizarla (también con dos
-;  clics en el título) o cerrarla lo hace aquí; lo demás va a la cola de
-;  sucesos de la ventana que toca (un clic dentro, las teclas a la que está
-;  activa), y su dueño los recoge.
+;  por su título, cambiarla de tamaño por su borde o su esquina (la flecha
+;  cambia de forma encima de ellos), traerla delante, minimizarla,
+;  maximizarla (también con dos clics en el título) o cerrarla lo hace aquí;
+;  lo demás va a la cola de sucesos de la ventana que toca (un clic dentro,
+;  con los botones, las teclas de cambio y si es el primero, el segundo o el
+;  tercero seguido; las teclas a la que está activa), y su dueño los recoge.
+;  Lo que cae fuera de todas (el tapiz), y el botón secundario en un título,
+;  van a la ventana «del fondo»: la del escritorio, que pone sus menús.
 ;
 ;  Todo lo de las ventanas va con un cerrojo: los programas dibujan a la vez
 ;  que el escritorio compone.
@@ -27,7 +31,7 @@ módulo Ventanas
 
     importar Cpu, Tareas, Monton, Grafico, Letra, Video, Raton, Consola
 
-    público constante MAX_VENTANAS = 16
+    público constante MAX_VENTANAS = 20
     público constante MAX_TÍTULO = 64
 
     ; ---- las banderas de una ventana ----
@@ -58,6 +62,20 @@ módulo Ventanas
     público constante EV_FOCO = 7               ; a: 1 si pasa a ser la activa, 0 si deja de serlo
     público constante EV_FUERA = 8              ; (a un menú) se ha pulsado fuera de él
     público constante EV_SALE = 9               ; el ratón ya no está encima
+    público constante EV_MENÚ = 10              ; se ha cerrado el menú que pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
+    público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
+    público constante SIN_ELEGIR = 0xFFFFFFFF
+    ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
+    ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)
+    público constante DESPLAZA_CAMBIO = 8
+    público constante DESPLAZA_VECES = 16
+
+    ; ---- lo que se le puede pedir a una ventana: orden_ventana() ----
+    público constante PIDE_RESTAURAR = 1
+    público constante PIDE_MOVER = 2
+    público constante PIDE_MINIMIZAR = 3
+    público constante PIDE_MAXIMIZAR = 4
+    público constante PIDE_CERRAR = 5
 
     ; ---- lo que se puede dibujar desde un programa (la llamada «dibujar») ----
     público constante OP_RECTÁNGULO = 1
@@ -86,7 +104,7 @@ módulo Ventanas
 
     constante COLA_EV = 32
     constante LEJOS = 8192                      ; ninguna medida de un dibujo pasa de aquí
-    constante DEL_NÚCLEO = 5                    ; las ventanas que se guardan para el núcleo (la barra, el menú, los cuadros)
+    constante DEL_NÚCLEO = 9                    ; las ventanas que se guardan para el núcleo (la barra, el menú, el fondo, los cuadros, un menú emergente)
 
     público tipo Ventana = estructura
         usada: bool
@@ -122,6 +140,7 @@ módulo Ventanas
     público variable emergente: nat32           ; el menú abierto: si se pulsa fuera, se le dice (EV_FUERA)
     público variable teclas_a: nat32            ; la ventana que se lleva las teclas (0: la activa)
     público variable ventana_inicio: nat32      ; la que recibe la tecla del logo
+    público variable ventana_fondo: nat32       ; la que recibe lo que cae en el tapiz y el botón secundario en los títulos
     público variable alto_barra: ent32          ; lo que ocupa abajo la barra de tareas (no lo tapa una maximizada)
     público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
 
@@ -138,12 +157,36 @@ módulo Ventanas
     variable botones_antes: nat32
     variable arrastrada: ent32 = -1             ; la ventana que se está moviendo
     variable arr_dx, arr_dy: ent32
+    variable mov_suelto: bool                   ; se mueve sin botón pulsado (desde su menú): hasta el clic siguiente
+    ; cambiar el tamaño: la ventana que se estira, de qué lados, y cómo estaba
+    constante LADO_IZQUIERDO = 1
+    constante LADO_DERECHO = 2
+    constante LADO_ARRIBA = 4
+    constante LADO_ABAJO = 8
+    constante AGARRE = 3                        ; lo que se puede agarrar por fuera del borde
+    constante ESQUINA = 14                      ; lo que mide una esquina, a lo largo del borde
+    constante ANCHO_MÍNIMO = 170
+    constante ALTO_MÍNIMO = 90
+    variable estirada: ent32 = -1
+    variable est_lados: nat32
+    variable est_x, est_y, est_px, est_py, est_an, est_al: ent32
+    ; los clics seguidos (el doble y el triple)
+    variable clic_ventana, clic_botones, clic_tic, clic_veces: nat32
+    variable clic_x, clic_y: ent32
     variable capturada: ent32 = -1              ; la que recibió el clic (hasta que se suelte)
     variable debajo: ent32 = -1                 ; la última sobre la que estaba el ratón
     variable último_clic, última_clicada: nat32
-    ; la flecha: X, el borde oscuro; o, lo de dentro (claro)
+    ; la flecha: X, el borde oscuro; o, lo de dentro (claro). Y las de
+    ; cambiar el tamaño (de lado a lado, de arriba abajo y las dos de
+    ; esquina), que se agarran por el centro
     constante FLECHA_ANCHO = 12
     constante FLECHA_ALTO = 19
+    variable forma: nat32                       ; 0, la flecha; 1 a 4, las de cambiar el tamaño
+    variable fp_x, fp_y, fp_an, fp_al: ent32    ; lo que ocupa la que está pintada
+    variable flecha_h: arreglo [210] de byte = "                      XXX       XXX     XXoX       XoXX   XXooX       XooXX  XoooXXXXXXXXXoooX  XoooooooooooooooX  XoooXXXXXXXXXoooX  XXooX       XooXX   XXoX       XoXX     XXX       XXX                      "
+    variable flecha_v: arreglo [210] de byte = "              XXXXX     XXoooXX   XXoooooXX  XoooooooX  XXXXoXXXX     XoX        XoX        XoX        XoX        XoX        XoX        XoX     XXXXoXXXX  XoooooooX  XXoooooXX   XXoooXX     XXXXX              "
+    variable flecha_d1: arreglo [226] de byte = "                XXXXXXX        XoooooX        XooooXX        XoooXX         XooXoXX        XoXXXoXX       XXX XXoXX XXX       XXoXXXoX        XXoXooX         XXoooX        XXooooX        XoooooX        XXXXXXX                "
+    variable flecha_d2: arreglo [226] de byte = "                      XXXXXXX        XoooooX        XXooooX         XXoooX        XXoXooX       XXoXXXoX  XXX XXoXX XXX  XoXXXoXX       XooXoXX        XoooXX         XooooXX        XoooooX        XXXXXXX                      "
     variable flecha: arreglo [232] de byte = "X           XX          XoX         XooX        XoooX       XooooX      XoooooX     XooooooX    XoooooooX   XooooooooX  XoooooooooX XooooooXXXXXXoooXooX    XooX XooX   XoX  XooX   XX    XooX  X     XooX         XooX        XXX  "
 
     ; -------------------------------------------------------------------------
@@ -265,27 +308,58 @@ módulo Ventanas
     fin
 
     función pinta_flecha()
-        variable i, j: ent32
+        variable i, j, an, al: ent32
         variable c: byte
-        para j desde 0 hasta FLECHA_ALTO - 1 hacer
-            para i desde 0 hasta FLECHA_ANCHO - 1 hacer
-                c := flecha[j * FLECHA_ANCHO + i]
+        variable p: puntero a byte
+        según forma
+            caso 1:
+                p := dirección(flecha_h[0])
+                an := 19
+                al := 11
+            caso 2:
+                p := dirección(flecha_v[0])
+                an := 11
+                al := 19
+            caso 3:
+                p := dirección(flecha_d1[0])
+                an := 15
+                al := 15
+            caso 4:
+                p := dirección(flecha_d2[0])
+                an := 15
+                al := 15
+            si no:
+                p := dirección(flecha[0])
+                an := FLECHA_ANCHO
+                al := FLECHA_ALTO
+        fin
+        fp_x := flecha_x
+        fp_y := flecha_y
+        si forma <> 0 entonces
+            fp_x := flecha_x - an div 2
+            fp_y := flecha_y - al div 2
+        fin
+        fp_an := an
+        fp_al := al
+        para j desde 0 hasta al - 1 hacer
+            para i desde 0 hasta an - 1 hacer
+                c := p[j * an + i]
                 si c = 'X' entonces
-                    punto(pantalla, flecha_x + i, flecha_y + j, 0x10233F)
+                    punto(pantalla, fp_x + i, fp_y + j, 0x10233F)
                 sino si c = 'o' entonces
-                    punto(pantalla, flecha_x + i, flecha_y + j, BLANCO)
+                    punto(pantalla, fp_x + i, fp_y + j, BLANCO)
                 fin
             fin
         fin
         flecha_pintada := cierto
-        volcar(flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
+        volcar(fp_x, fp_y, fp_an, fp_al)
     fin
 
     ; quita la flecha: lo que había debajo está en el doble búfer
     función borra_flecha()
         si flecha_pintada entonces
-            copiar_lienzo(pantalla, flecha_x, flecha_y, trasero, flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
-            volcar(flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
+            copiar_lienzo(pantalla, fp_x, fp_y, trasero, fp_x, fp_y, fp_an, fp_al)
+            volcar(fp_x, fp_y, fp_an, fp_al)
         fin
         flecha_pintada := falso
     fin
@@ -443,10 +517,11 @@ módulo Ventanas
     función pon_evento(i: ent32, clase: nat32, a: nat32, b: nat32, c: nat32)
         variable k: nat32
         si i < 0 o no ventanas[i].usada entonces devolver fin
-        ; un movimiento del ratón detrás de otro: vale con el último
-        si clase = EV_RATÓN_MUEVE y ventanas[i].ent <> ventanas[i].sal entonces
+        ; un movimiento del ratón detrás de otro (o un tamaño nuevo detrás
+        ; de otro): vale con el último
+        si (clase = EV_RATÓN_MUEVE o clase = EV_TAMAÑO) y ventanas[i].ent <> ventanas[i].sal entonces
             k := (ventanas[i].ent - 1) mod COLA_EV
-            si ventanas[i].cola[k].clase = EV_RATÓN_MUEVE entonces
+            si ventanas[i].cola[k].clase = clase entonces
                 ventanas[i].cola[k].a := a
                 ventanas[i].cola[k].b := b
                 ventanas[i].cola[k].c := c
@@ -521,13 +596,17 @@ módulo Ventanas
     fin
 
     ; cambia el tamaño de la ventana entera: memoria nueva, el marco pintado
-    ; y lo de dentro en blanco (su dueño lo vuelve a pintar: EV_TAMAÑO)
+    ; y, dentro, lo que había (lo que quepa, desde arriba a la izquierda; lo
+    ; nuevo, en blanco): su dueño lo vuelve a pintar (EV_TAMAÑO)
     función cambia_tamaño(i: ent32, x: ent32, yy: ent32, an: ent32, al: ent32): bool
-        variable m: puntero a byte
+        variable m, vieja: puntero a byte
+        variable antes_todo, antes: Lienzo
         m := reservar(nat32(an * al * 4))
         si m = nulo entonces devolver falso fin
         ensuciar_ventana(ventanas[i])
-        liberar(ventanas[i].memoria)
+        vieja := ventanas[i].memoria
+        pon_lienzo(antes_todo, puntero(vieja), ventanas[i].ancho, ventanas[i].ancho, ventanas[i].alto)
+        trozo_de(antes, antes_todo, BORDE, ALTO_TÍTULO, ventanas[i].ancho - 2 * BORDE, ventanas[i].alto - ALTO_TÍTULO - BORDE)
         ventanas[i].memoria := m
         ventanas[i].px := x
         ventanas[i].py := yy
@@ -535,6 +614,8 @@ módulo Ventanas
         ventanas[i].alto := al
         pon_lienzos(ventanas[i])
         rectángulo(ventanas[i].dentro, 0, 0, an, al, CARA)
+        copiar_lienzo(ventanas[i].dentro, 0, 0, antes, 0, 0, antes.ancho, antes.alto)
+        liberar(vieja)
         pinta_marco(ventanas[i], i = activa)
         ensuciar_ventana(ventanas[i])
         pon_evento(i, EV_TAMAÑO, nat32(ventanas[i].dentro.ancho), nat32(ventanas[i].dentro.alto), 0)
@@ -568,6 +649,7 @@ módulo Ventanas
         ventanas[i].banderas := ventanas[i].banderas ob bandera
         si capturada = i entonces capturada := -1 fin
         si arrastrada = i entonces arrastrada := -1 fin
+        si estirada = i entonces estirada := -1 fin
         si debajo = i entonces debajo := -1 fin
         cambios := cambios + 1
         mira_activa()
@@ -588,8 +670,10 @@ módulo Ventanas
         si emergente = ventanas[i].id entonces emergente := 0 fin
         si teclas_a = ventanas[i].id entonces teclas_a := 0 fin
         ventanas[i].usada := falso
+        si ventana_fondo = ventanas[i].id entonces ventana_fondo := 0 fin
         si capturada = i entonces capturada := -1 fin
         si arrastrada = i entonces arrastrada := -1 fin
+        si estirada = i entonces estirada := -1 fin
         si debajo = i entonces debajo := -1 fin
         si activa = i entonces activa := -1 fin
         cambios := cambios + 1
@@ -888,6 +972,99 @@ módulo Ventanas
         soltar(cerrojo)
     fin
 
+    ; un trozo de la pantalla, a recomponer (se ha dibujado en el tapiz)
+    público función repintar_trozo(x: ent32, yy: ent32, an: ent32, al: ent32)
+        tomar(cerrojo)
+        ensuciar(x, yy, an, al)
+        soltar(cerrojo)
+    fin
+
+    ; deja un suceso en la cola de una ventana (el resultado de un menú)
+    público función avisar(id: nat32, clase: nat32, a: nat32, b: nat32, c: nat32)
+        tomar(cerrojo)
+        pon_evento(busca(id), clase, a, b, c)
+        soltar(cerrojo)
+    fin
+
+    ; las banderas de una ventana (MINIMIZADA, MAXIMIZADA, FIJA...);
+    ; 0xFFFFFFFF si no está
+    público función marcas_de(id: nat32): nat32
+        variable i: ent32
+        variable r: nat32
+        tomar(cerrojo)
+        i := busca(id)
+        r := 0xFFFFFFFF
+        si i >= 0 entonces r := ventanas[i].banderas fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; ¿es de esa tarea la ventana? (0: del núcleo)
+    público función es_de(id: nat32, dueño: nat32): bool
+        variable i: ent32
+        variable r: bool
+        tomar(cerrojo)
+        i := busca(id)
+        r := i >= 0 y ventanas[i].dueño = dueño
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; dónde cae en la pantalla el punto (x, yy) de dentro de la ventana
+    público función a_pantalla(id: nat32, ref x: ent32, ref yy: ent32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 entonces
+            x := x + ventanas[i].px
+            yy := yy + ventanas[i].py
+            si con_marco(ventanas[i]) entonces
+                x := x + BORDE
+                yy := yy + ALTO_TÍTULO
+            fin
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; lo que se le pide a una ventana desde su menú (el del título o el de
+    ; su botón de la barra): restaurarla, moverla, minimizarla, maximizarla o
+    ; cerrarla
+    público función orden_ventana(id: nat32, qué: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 y con_marco(ventanas[i]) entonces
+            según qué
+                caso PIDE_RESTAURAR:
+                    si ventanas[i].banderas yb MINIMIZADA <> 0 entonces
+                        enseña(i, MINIMIZADA)
+                    sino si ventanas[i].banderas yb MAXIMIZADA <> 0 entonces
+                        cambia_máximo(i)
+                    fin
+                caso PIDE_MINIMIZAR:
+                    si ventanas[i].banderas yb FIJA = 0 entonces esconde(i, MINIMIZADA) fin
+                caso PIDE_MAXIMIZAR:
+                    si ventanas[i].banderas yb MINIMIZADA <> 0 entonces enseña(i, MINIMIZADA) fin
+                    si ventanas[i].banderas yb MAXIMIZADA = 0 entonces cambia_máximo(i) fin
+                caso PIDE_CERRAR:
+                    pon_evento(i, EV_CERRAR, 0, 0, 0)
+                caso PIDE_MOVER:
+                    ; la flecha va a su título y la ventana la sigue, sin
+                    ; botón pulsado, hasta el clic siguiente (o Intro, o Esc)
+                    si ventanas[i].banderas yb (MINIMIZADA ob MAXIMIZADA ob OCULTA) = 0 entonces
+                        al_frente(i)
+                        mira_activa()
+                        arr_dx := ventanas[i].ancho div 2
+                        arr_dy := ALTO_TÍTULO div 2
+                        pon_ratón(ventanas[i].px + arr_dx, ventanas[i].py + arr_dy)
+                        arrastrada := i
+                        mov_suelto := cierto
+                    fin
+            fin
+        fin
+        soltar(cerrojo)
+    fin
+
     ; -------------------------------------------------------------------------
     ;  El ratón
     ; -------------------------------------------------------------------------
@@ -923,25 +1100,139 @@ módulo Ventanas
         devolver lx >= 0 y ly >= 0 y lx < ventanas[i].dentro.ancho y ly < ventanas[i].dentro.alto
     fin
 
+    ; ¿se puede cambiar de tamaño? (con marco, que no sea un cuadro, ni maximizada)
+    función elástica(ref v: Ventana): bool
+        devolver v.banderas yb (SIN_MARCO ob FIJA ob MAXIMIZADA) = 0
+    fin
+
+    ; los lados por los que se agarra la ventana desde ese punto (que está
+    ; en su borde, o un poco por fuera): 0 si no es del borde
+    función lados_en(ref v: Ventana, x: ent32, yy: ent32): nat32
+        variable lx, ly: ent32
+        variable l: nat32
+        lx := x - v.px
+        ly := yy - v.py
+        l := 0
+        si lx < BORDE entonces l := l ob LADO_IZQUIERDO fin
+        si lx >= v.ancho - BORDE entonces l := l ob LADO_DERECHO fin
+        si ly < AGARRE entonces l := l ob LADO_ARRIBA fin
+        si ly >= v.alto - BORDE entonces l := l ob LADO_ABAJO fin
+        si l = 0 entonces devolver 0 fin
+        ; cerca de una esquina, los dos lados
+        si l yb (LADO_ARRIBA ob LADO_ABAJO) <> 0 entonces
+            si lx < ESQUINA entonces l := l ob LADO_IZQUIERDO fin
+            si lx >= v.ancho - ESQUINA entonces l := l ob LADO_DERECHO fin
+        fin
+        si l yb (LADO_IZQUIERDO ob LADO_DERECHO) <> 0 entonces
+            si ly < ESQUINA entonces l := l ob LADO_ARRIBA fin
+            si ly >= v.alto - ESQUINA entonces l := l ob LADO_ABAJO fin
+        fin
+        devolver l
+    fin
+
+    ; la ventana de más adelante que está en ese punto, o que se agarra desde
+    ; él por su borde («lados»: por cuáles; 0 si no es para cambiar el tamaño)
+    función ventana_o_borde(x: ent32, yy: ent32, ref lados: nat32): ent32
+        variable k, i: ent32
+        lados := 0
+        k := ent32(cuántas) - 1
+        mientras k >= 0 hacer
+            i := orden[k]
+            si se_ve(ventanas[i]) entonces
+                si x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto entonces
+                    si elástica(ventanas[i]) entonces lados := lados_en(ventanas[i], x, yy) fin
+                    devolver i
+                fin
+                si elástica(ventanas[i]) y x >= ventanas[i].px - AGARRE y yy >= ventanas[i].py - AGARRE y x < ventanas[i].px + ventanas[i].ancho + AGARRE y yy < ventanas[i].py + ventanas[i].alto + AGARRE entonces
+                    lados := lados_en(ventanas[i], x, yy)
+                    devolver i
+                fin
+            fin
+            k := k - 1
+        fin
+        devolver -1
+    fin
+
+    ; la forma de la flecha para esos lados
+    función forma_de(lados: nat32): nat32
+        si lados = 0 entonces devolver 0 fin
+        si lados = LADO_IZQUIERDO o lados = LADO_DERECHO entonces devolver 1 fin
+        si lados = LADO_ARRIBA o lados = LADO_ABAJO entonces devolver 2 fin
+        si lados = (LADO_IZQUIERDO ob LADO_ARRIBA) o lados = (LADO_DERECHO ob LADO_ABAJO) entonces devolver 3 fin
+        devolver 4
+    fin
+
+    ; las veces seguidas que se ha pulsado ahí (1, 2 o 3): mismo sitio, mismos
+    ; botones y menos de medio segundo
+    función cuenta_clic(id: nat32, x: ent32, yy: ent32, nuevos: nat32): nat32
+        si id = clic_ventana y nuevos = clic_botones y tics - clic_tic < 45 y x - clic_x < 5 y clic_x - x < 5 y yy - clic_y < 5 y clic_y - yy < 5 y clic_veces < 3 entonces
+            clic_veces := clic_veces + 1
+        sino
+            clic_veces := 1
+        fin
+        clic_ventana := id
+        clic_botones := nuevos
+        clic_tic := tics
+        clic_x := x
+        clic_y := yy
+        devolver clic_veces
+    fin
+
     ; se ha pulsado un botón del ratón en (x, yy); «b», los que quedan pulsados
     función pulsado(x: ent32, yy: ent32, b: nat32, nuevos: nat32)
         variable i, lx, ly, n: ent32
-        i := ventana_en(x, yy)
+        variable lados, c: nat32
+        ; una ventana que se movía suelta: este clic la deja donde está
+        si mov_suelto entonces
+            mov_suelto := falso
+            arrastrada := -1
+            devolver
+        fin
+        i := ventana_o_borde(x, yy, lados)
         si emergente <> 0 y i <> busca(emergente) entonces pon_evento(busca(emergente), EV_FUERA, 0, 0, 0) fin
-        si i < 0 entonces devolver fin
+        c := b ob (modificadores() << DESPLAZA_CAMBIO)
+        si i < 0 entonces
+            ; en el tapiz: a la ventana del fondo (la del escritorio), con el
+            ; punto de la pantalla
+            i := busca(ventana_fondo)
+            si i >= 0 entonces
+                capturada := i
+                pon_evento(i, EV_RATÓN_BAJA, nat32(x), nat32(yy), c ob (cuenta_clic(ventana_fondo, x, yy, nuevos) << DESPLAZA_VECES))
+            fin
+            devolver
+        fin
         si ventanas[i].banderas yb (SIN_MARCO ob ENCIMA) = 0 y (cuántas = 0 o i <> activa) entonces
             al_frente(i)
             mira_activa()
         fin
-        si está_dentro(i, x, yy) entonces
-            capturada := i
-            pon_evento(i, EV_RATÓN_BAJA, nat32(dentro_x(i, x)), nat32(dentro_y(i, yy)), b)
+        si lados <> 0 entonces
+            ; en el borde: con el botón principal, se estira
+            si nuevos yb BOTÓN_IZQUIERDO <> 0 entonces
+                estirada := i
+                est_lados := lados
+                est_x := x
+                est_y := yy
+                est_px := ventanas[i].px
+                est_py := ventanas[i].py
+                est_an := ventanas[i].ancho
+                est_al := ventanas[i].alto
+            fin
             devolver
         fin
-        si nuevos yb BOTÓN_IZQUIERDO = 0 o no con_marco(ventanas[i]) entonces devolver fin
+        si está_dentro(i, x, yy) entonces
+            capturada := i
+            pon_evento(i, EV_RATÓN_BAJA, nat32(dentro_x(i, x)), nat32(dentro_y(i, yy)), c ob (cuenta_clic(ventanas[i].id, x, yy, nuevos) << DESPLAZA_VECES))
+            devolver
+        fin
+        si no con_marco(ventanas[i]) entonces devolver fin
         lx := x - ventanas[i].px
         ly := yy - ventanas[i].py
-        si ly >= ALTO_TÍTULO entonces devolver fin      ; el borde: nada
+        si nuevos yb BOTÓN_IZQUIERDO = 0 entonces
+            ; el botón secundario en el título: su menú (lo pone el escritorio)
+            si nuevos yb BOTÓN_DERECHO <> 0 y ly < ALTO_TÍTULO entonces pon_evento(busca(ventana_fondo), EV_MENÚ_VENTANA, ventanas[i].id, nat32(x), nat32(yy)) fin
+            devolver
+        fin
+        si ly >= ALTO_TÍTULO entonces devolver fin      ; el borde de un cuadro: nada
         ; ¿en uno de los botones del título?
         si ly >= BOTÓN_Y y ly < BOTÓN_Y + BOTÓN_ALTO entonces
             para n desde 0 hasta 2 hacer
@@ -971,15 +1262,70 @@ módulo Ventanas
     fin
 
     función soltado(x: ent32, yy: ent32, b: nat32)
-        si b yb BOTÓN_IZQUIERDO = 0 entonces arrastrada := -1 fin
+        si b yb BOTÓN_IZQUIERDO = 0 entonces
+            si no mov_suelto entonces arrastrada := -1 fin
+            estirada := -1
+        fin
         si capturada >= 0 entonces
             pon_evento(capturada, EV_RATÓN_SUBE, nat32(dentro_x(capturada, x)), nat32(dentro_y(capturada, yy)), b)
             si b = 0 entonces capturada := -1 fin
         fin
     fin
 
+    ; la ventana que se estira, a la medida que dice el ratón
+    función estira(x: ent32, yy: ent32)
+        variable nx, ny, an, al, d: ent32
+        nx := est_px
+        ny := est_py
+        an := est_an
+        al := est_al
+        d := x - est_x
+        si est_lados yb LADO_DERECHO <> 0 entonces
+            an := est_an + d
+            si an < ANCHO_MÍNIMO entonces an := ANCHO_MÍNIMO fin
+        sino si est_lados yb LADO_IZQUIERDO <> 0 entonces
+            an := est_an - d
+            si an < ANCHO_MÍNIMO entonces an := ANCHO_MÍNIMO fin
+            nx := est_px + est_an - an
+        fin
+        d := yy - est_y
+        si est_lados yb LADO_ABAJO <> 0 entonces
+            al := est_al + d
+            si al < ALTO_MÍNIMO entonces al := ALTO_MÍNIMO fin
+        sino si est_lados yb LADO_ARRIBA <> 0 entonces
+            al := est_al - d
+            si al < ALTO_MÍNIMO entonces al := ALTO_MÍNIMO fin
+            si est_py + est_al - al < 0 entonces al := est_py + est_al fin
+            ny := est_py + est_al - al
+        fin
+        si an > pantalla.ancho entonces
+            an := pantalla.ancho
+            si est_lados yb LADO_IZQUIERDO <> 0 entonces nx := est_px + est_an - an fin
+        fin
+        si al > pantalla.alto entonces
+            al := pantalla.alto
+            si est_lados yb LADO_ARRIBA <> 0 entonces ny := est_py + est_al - al fin
+        fin
+        si nx <> ventanas[estirada].px o ny <> ventanas[estirada].py o an <> ventanas[estirada].ancho o al <> ventanas[estirada].alto entonces
+            si an = ventanas[estirada].ancho y al = ventanas[estirada].alto entonces
+                ensuciar_ventana(ventanas[estirada])
+                ventanas[estirada].px := nx
+                ventanas[estirada].py := ny
+                ensuciar_ventana(ventanas[estirada])
+            sino
+                cambia_tamaño(estirada, nx, ny, an, al)
+            fin
+        fin
+    fin
+
     función movido(x: ent32, yy: ent32)
         variable i, nx, ny: ent32
+        variable lados: nat32
+        si estirada >= 0 entonces
+            estira(x, yy)
+            forma := forma_de(est_lados)
+            devolver
+        fin
         si arrastrada >= 0 entonces
             nx := x - arr_dx
             ny := yy - arr_dy
@@ -994,13 +1340,16 @@ módulo Ventanas
                 ventanas[arrastrada].py := ny
                 ensuciar_ventana(ventanas[arrastrada])
             fin
+            forma := 0
             devolver
         fin
         i := capturada
+        lados := 0
         si i < 0 entonces
-            i := ventana_en(x, yy)
-            si i >= 0 y no está_dentro(i, x, yy) entonces i := -1 fin
+            i := ventana_o_borde(x, yy, lados)
+            si i >= 0 y (lados <> 0 o no está_dentro(i, x, yy)) entonces i := -1 fin
         fin
+        forma := forma_de(lados)
         si i <> debajo entonces
             pon_evento(debajo, EV_SALE, 0, 0, 0)
             debajo := i
@@ -1014,7 +1363,7 @@ módulo Ventanas
     público función pulso()
         variable c: Clic
         variable x, yy: ent32
-        variable k, i: nat32
+        variable k, i, m: nat32
         tomar(cerrojo)
         ; los botones del ratón, cada cambio donde fue
         mientras saca_clic(c) hacer
@@ -1035,15 +1384,23 @@ módulo Ventanas
             pinta_flecha()
         fin
         ; las teclas: la del logo, a la barra de tareas; las demás, al menú
-        ; que esté abierto o a la ventana activa
+        ; que esté abierto o a la ventana activa (en «b», si venía con Mayús)
         k := saca_tecla()
         mientras k <> 0 hacer
-            si k = TECLA_LOGO entonces
+            m := 0
+            si k >= TECLA_CON_MAYÚS entonces
+                m := MOD_MAYÚS
+                k := k - TECLA_CON_MAYÚS
+            fin
+            si mov_suelto y (k = 27 o k = '\n') entonces
+                mov_suelto := falso
+                arrastrada := -1
+            sino si k = TECLA_LOGO entonces
                 pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)
             sino si teclas_a <> 0 entonces
-                pon_evento(busca(teclas_a), EV_TECLA, k, 0, 0)
+                pon_evento(busca(teclas_a), EV_TECLA, k, m, 0)
             sino
-                pon_evento(activa, EV_TECLA, k, 0, 0)
+                pon_evento(activa, EV_TECLA, k, m, 0)
             fin
             k := saca_tecla()
         fin

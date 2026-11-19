@@ -8,61 +8,130 @@
 ;  al llegar abajo); y las teclas que llegan a la ventana se las da a ellos.
 ;  Ctrl+C acaba el programa que corra dentro. Al salir del intérprete
 ;  (SALIR), o al cerrar la ventana, se acaba.
+;
+;  Lo que hay en la pantalla se selecciona con el ratón: arrastrando, con dos
+;  clics (la palabra), con tres (la línea) o con Mayús y un clic (hasta ahí).
+;  Copiar lo deja en el portapapeles del sistema (el menú Edición, el del
+;  botón secundario, o Ctrl+C si hay algo seleccionado); Pegar teclea lo del
+;  portapapeles, como si se escribiera. Lo seleccionado se suelta en cuanto
+;  se escribe algo en la pantalla.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UConsola
 
     modelo usuario
 
-    importar Llamadas
+    importar Llamadas, Barramenu
 
     constante COLUMNAS = 80
     constante FILAS = 25
+    constante CELDAS = COLUMNAS * FILAS
     constante MARGEN = 4
+    constante ARRIBA = ALTO_MENÚS + MARGEN      ; donde empieza la primera fila
     constante FONDO = 0x0C1626
     constante TINTA = 0xD6E2F0
     constante CURSOR = 0x6FE08A
+    constante RESALTE = 0x2F74D0                ; el fondo de lo seleccionado
+    constante MAX_PEGAR = 4096                  ; lo más que se pega de una vez
+    constante M_ARCHIVO = 0
+    constante M_EDICIÓN = 1
+    constante M_AYUDA = 2
+    constante M_CONTEXTO = 100
 
     variable v: nat32
-    variable letras: arreglo [COLUMNAS * FILAS] de byte     ; lo que hay en la pantalla
+    variable letras: arreglo [CELDAS] de byte   ; lo que hay en la pantalla
     variable cx, cy: ent32                      ; dónde va el cursor
     variable tramo_x, tramo_n: ent32            ; las letras seguidas que faltan por pintar en la fila del cursor
     variable trozo: arreglo [512] de byte
     variable ancho, alto: ent32
+    ; lo seleccionado: de una celda a otra (sin contar la última), por su número
+    variable ancla, extremo: ent32
+    variable arrastrando: bool
+    variable copiado: arreglo [CELDAS + FILAS] de byte
+    ; lo que falta por teclear de lo pegado
+    variable pegado: arreglo [MAX_PEGAR] de byte
+    variable por_pegar, pegados: nat32
+    variable menús: arreglo [24] de byte = "Archivo|Edición|Ayuda"
+    variable menú_abierto: ent32 = -1
+
+    función sel_inicio(): ent32
+        si ancla < extremo entonces devolver ancla fin
+        devolver extremo
+    fin
+
+    función sel_fin(): ent32
+        si ancla > extremo entonces devolver ancla fin
+        devolver extremo
+    fin
+
+    función hay_selección(): bool
+        devolver ancla <> extremo
+    fin
 
     ; pinta las letras de la fila del cursor que estaban esperando
     función pinta_tramo()
         si tramo_n > 0 entonces
-            texto_fondo(v, MARGEN + tramo_x * ANCHO_LETRA, MARGEN + cy * ALTO_LETRA, dirección(letras[cy * COLUMNAS + tramo_x]), nat32(tramo_n), TINTA, FONDO)
+            texto_fondo(v, MARGEN + tramo_x * ANCHO_LETRA, ARRIBA + cy * ALTO_LETRA, dirección(letras[cy * COLUMNAS + tramo_x]), nat32(tramo_n), TINTA, FONDO)
         fin
         tramo_n := 0
     fin
 
     función pinta_cursor(visible: bool)
         si visible entonces
-            rectángulo(v, MARGEN + cx * ANCHO_LETRA, MARGEN + cy * ALTO_LETRA + 13, ANCHO_LETRA, 2, CURSOR)
+            rectángulo(v, MARGEN + cx * ANCHO_LETRA, ARRIBA + cy * ALTO_LETRA + 13, ANCHO_LETRA, 2, CURSOR)
         sino
-            texto_fondo(v, MARGEN + cx * ANCHO_LETRA, MARGEN + cy * ALTO_LETRA, dirección(letras[cy * COLUMNAS + cx]), 1, TINTA, FONDO)
+            texto_fondo(v, MARGEN + cx * ANCHO_LETRA, ARRIBA + cy * ALTO_LETRA, dirección(letras[cy * COLUMNAS + cx]), 1, TINTA, FONDO)
         fin
+    fin
+
+    ; una fila entera, con lo seleccionado en blanco sobre azul
+    función pinta_fila(f: ent32)
+        variable a, b, s0, s1, yy: ent32
+        a := f * COLUMNAS
+        b := a + COLUMNAS
+        yy := ARRIBA + f * ALTO_LETRA
+        s0 := sel_inicio()
+        s1 := sel_fin()
+        si s0 < a entonces s0 := a fin
+        si s1 > b entonces s1 := b fin
+        si s1 <= s0 entonces
+            texto_fondo(v, MARGEN, yy, dirección(letras[a]), COLUMNAS, TINTA, FONDO)
+            devolver
+        fin
+        si s0 > a entonces texto_fondo(v, MARGEN, yy, dirección(letras[a]), nat32(s0 - a), TINTA, FONDO) fin
+        texto_fondo(v, MARGEN + (s0 - a) * ANCHO_LETRA, yy, dirección(letras[s0]), nat32(s1 - s0), 0xFFFFFF, RESALTE)
+        si b > s1 entonces texto_fondo(v, MARGEN + (s1 - a) * ANCHO_LETRA, yy, dirección(letras[s1]), nat32(b - s1), TINTA, FONDO) fin
+    fin
+
+    función pinta_filas()
+        variable f: ent32
+        para f desde 0 hasta FILAS - 1 hacer pinta_fila(f) fin
+        pinta_cursor(cierto)
     fin
 
     función borra_todo()
         variable i: nat32
-        para i desde 0 hasta COLUMNAS * FILAS - 1 hacer letras[i] := ' ' fin
-        rectángulo(v, 0, 0, ancho, alto, FONDO)
+        para i desde 0 hasta CELDAS - 1 hacer letras[i] := ' ' fin
+        rectángulo(v, 0, ALTO_MENÚS, ancho, alto - ALTO_MENÚS, FONDO)
         cx := 0
         cy := 0
         tramo_n := 0
     fin
 
-    ; la pantalla entera otra vez (ha cambiado el tamaño de la ventana)
+    ; la ventana entera otra vez (ha cambiado su tamaño): los menús y la
+    ; pantalla, que sigue siendo de 80 x 25 (lo que no quepa, no se ve)
     función pinta_todo()
-        variable f: ent32
-        rectángulo(v, 0, 0, ancho, alto, FONDO)
-        para f desde 0 hasta FILAS - 1 hacer
-            texto_fondo(v, MARGEN, MARGEN + f * ALTO_LETRA, dirección(letras[f * COLUMNAS]), COLUMNAS, TINTA, FONDO)
-        fin
-        pinta_cursor(cierto)
+        pinta_menús(v, ancho, menús, menú_abierto)
+        rectángulo(v, 0, ALTO_MENÚS, ancho, alto - ALTO_MENÚS, FONDO)
+        pinta_filas()
+    fin
+
+    ; deja de haber nada seleccionado
+    función suelta_selección()
+        si no hay_selección() entonces devolver fin
+        ancla := 0
+        extremo := 0
+        pinta_filas()
     fin
 
     ; a la línea siguiente; si era la última, todo sube una
@@ -75,9 +144,9 @@ módulo UConsola
             devolver
         fin
         para i desde 0 hasta COLUMNAS * (FILAS - 1) - 1 hacer letras[i] := letras[i + COLUMNAS] fin
-        para i desde COLUMNAS * (FILAS - 1) hasta COLUMNAS * FILAS - 1 hacer letras[i] := ' ' fin
-        desplazar(v, MARGEN, MARGEN, COLUMNAS * ANCHO_LETRA, FILAS * ALTO_LETRA, ALTO_LETRA)
-        rectángulo(v, MARGEN, MARGEN + (FILAS - 1) * ALTO_LETRA, COLUMNAS * ANCHO_LETRA, ALTO_LETRA, FONDO)
+        para i desde COLUMNAS * (FILAS - 1) hasta CELDAS - 1 hacer letras[i] := ' ' fin
+        desplazar(v, MARGEN, ARRIBA, COLUMNAS * ANCHO_LETRA, FILAS * ALTO_LETRA, ALTO_LETRA)
+        rectángulo(v, MARGEN, ARRIBA + (FILAS - 1) * ALTO_LETRA, COLUMNAS * ANCHO_LETRA, ALTO_LETRA, FONDO)
     fin
 
     función pon_letra(c: byte)
@@ -92,6 +161,7 @@ módulo UConsola
     función escribe(p: puntero a byte, n: nat32)
         variable i: nat32
         variable c: byte
+        suelta_selección()
         pinta_cursor(falso)
         i := 0
         mientras i < n hacer
@@ -118,27 +188,198 @@ módulo UConsola
         pinta_cursor(cierto)
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  Seleccionar, copiar y pegar
+    ; -------------------------------------------------------------------------
+    ; la celda (entre dos letras) más cercana a ese punto de la ventana
+    función celda_del_punto(x: ent32, yy: ent32): ent32
+        variable f, c: ent32
+        f := (yy - ARRIBA) div ALTO_LETRA
+        si yy < ARRIBA entonces f := 0 fin
+        si f >= FILAS entonces f := FILAS - 1 fin
+        c := (x - MARGEN + ANCHO_LETRA div 2) div ANCHO_LETRA
+        si x < MARGEN entonces c := 0 fin
+        si c > COLUMNAS entonces c := COLUMNAS fin
+        devolver f * COLUMNAS + c
+    fin
+
+    ; selecciona la palabra (las letras seguidas, sin espacios) que hay en ese punto
+    función elige_palabra(x: ent32, yy: ent32)
+        variable f, c, a, b: ent32
+        f := (yy - ARRIBA) div ALTO_LETRA
+        c := (x - MARGEN) div ANCHO_LETRA
+        si yy < ARRIBA o f >= FILAS o x < MARGEN o c >= COLUMNAS entonces devolver fin
+        a := c
+        b := c
+        si letras[f * COLUMNAS + c] <> ' ' entonces
+            mientras a > 0 y letras[f * COLUMNAS + a - 1] <> ' ' hacer a := a - 1 fin
+            mientras b < COLUMNAS y letras[f * COLUMNAS + b] <> ' ' hacer b := b + 1 fin
+        fin
+        ancla := f * COLUMNAS + a
+        extremo := f * COLUMNAS + b
+    fin
+
+    ; lo seleccionado, al portapapeles: cada fila sin sus espacios del final,
+    ; y un salto de línea entre una y otra
+    función copia()
+        variable s0, s1, f, a, b, i: ent32
+        variable n: nat32
+        si no hay_selección() entonces devolver fin
+        s0 := sel_inicio()
+        s1 := sel_fin()
+        n := 0
+        f := s0 div COLUMNAS
+        mientras f < FILAS y f * COLUMNAS < s1 hacer
+            a := f * COLUMNAS
+            b := a + COLUMNAS
+            si a < s0 entonces a := s0 fin
+            si b > s1 entonces
+                b := s1
+            sino
+                ; llega al final de la fila: sin los espacios que sobran
+                mientras b > a y letras[b - 1] = ' ' hacer b := b - 1 fin
+            fin
+            para i desde a hasta b - 1 hacer
+                copiado[n] := letras[i]
+                n := n + 1
+            fin
+            si (f + 1) * COLUMNAS < s1 entonces
+                copiado[n] := '\n'
+                n := n + 1
+            fin
+            f := f + 1
+        fin
+        al_portapapeles(copiado, n)
+    fin
+
+    ; lo del portapapeles se teclea (poco a poco: teclea_lo_pegado)
+    función pega()
+        por_pegar := del_portapapeles(pegado, MAX_PEGAR)
+        pegados := 0
+    fin
+
+    función teclea_texto(t: puntero a byte)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 y n < MAX_PEGAR hacer
+            pegado[n] := t[n]
+            n := n + 1
+        fin
+        por_pegar := n
+        pegados := 0
+    fin
+
+    ; da a los de dentro las letras pegadas que quepan; cierto si ha dado alguna
+    función teclea_lo_pegado(): bool
+        variable c: byte
+        variable algo: bool
+        algo := falso
+        mientras pegados < por_pegar hacer
+            c := pegado[pegados]
+            si c = '\n' o c >= ' ' entonces
+                si no teclear(c) entonces devolver algo fin
+                algo := cierto
+            fin
+            pegados := pegados + 1
+        fin
+        devolver algo
+    fin
+
+    ; el botón principal en la pantalla: empieza a seleccionar (dos clics, la
+    ; palabra; tres, la fila; con Mayús, hasta ahí)
+    función clic(x: ent32, yy: ent32, c: nat32)
+        variable f: ent32
+        si veces(c) = 2 entonces
+            elige_palabra(x, yy)
+        sino si veces(c) = 3 entonces
+            f := (yy - ARRIBA) div ALTO_LETRA
+            si yy >= ARRIBA y f < FILAS entonces
+                ancla := f * COLUMNAS
+                extremo := ancla + COLUMNAS
+            fin
+        sino
+            extremo := celda_del_punto(x, yy)
+            si c yb CON_MAYÚS = 0 entonces ancla := extremo fin
+            arrastrando := cierto
+        fin
+        pinta_filas()
+    fin
+
+    función abre_el_menú(cuál: ent32)
+        variable g: nat32
+        menú_abierto := cuál
+        pinta_menús(v, ancho, menús, menú_abierto)
+        g := 0
+        si no hay_selección() entonces g := g ob 1 fin
+        si en_portapapeles() = 0 entonces g := g ob 2 fin
+        según cuál
+            caso M_ARCHIVO: abre_menú(v, menús, M_ARCHIVO, "Cerrar", 0)
+            caso M_EDICIÓN: abre_menú(v, menús, M_EDICIÓN, "Copiar|Pegar|-|Seleccionar todo", g)
+            caso M_AYUDA: abre_menú(v, menús, M_AYUDA, "Las órdenes (AYUDA)|Acerca de la Consola", 0)
+        fin
+    fin
+
+    ; lo elegido en un menú: cierto si hay que cerrar
+    función elegido(cuál: nat32, opción: nat32): bool
+        variable t: puntero a byte
+        variable n: nat32
+        si ent32(cuál) = menú_abierto entonces
+            menú_abierto := -1
+            pinta_menús(v, ancho, menús, menú_abierto)
+        fin
+        si opción = SIN_ELEGIR entonces devolver falso fin
+        si cuál = M_ARCHIVO entonces
+            devolver opción = 0
+        sino si cuál = M_EDICIÓN o cuál = M_CONTEXTO entonces
+            según opción
+                caso 0:
+                    copia()
+                    suelta_selección()
+                caso 1:
+                    suelta_selección()
+                    pega()
+                caso 3:
+                    ancla := 0
+                    extremo := CELDAS
+                    pinta_filas()
+            fin
+        sino si cuál = M_AYUDA entonces
+            si opción = 0 entonces
+                teclea_texto("AYUDA\n")
+            sino
+                t := "\r\nConsola de Hispa-Pentium 0.5: el intérprete de órdenes en una ventana.\r\n"
+                n := 0
+                mientras t[n] <> 0 hacer n := n + 1 fin
+                escribe(t, n)
+                teclea_texto("\n")
+            fin
+        fin
+        devolver falso
+    fin
+
     función principal(): byte
         variable s: Suceso
         variable hijo, n, c: nat32
         variable algo: bool
+        variable k: ent32
         ancho := COLUMNAS * ANCHO_LETRA + 2 * MARGEN
-        alto := FILAS * ALTO_LETRA + 2 * MARGEN
+        alto := ALTO_MENÚS + FILAS * ALTO_LETRA + 2 * MARGEN
         v := ventana("Consola", nat32(ancho), nat32(alto))
         si es_error(v) entonces
             escribir("consola: no hay escritorio (o no hay memoria para la ventana)\n")
             devolver 1
         fin
+        pinta_menús(v, ancho, menús, -1)
         borra_todo()
         si no hacer_terminal() entonces
-            texto(v, MARGEN, MARGEN, "No quedan terminales libres.", TINTA)
+            texto(v, MARGEN, ARRIBA, "No quedan terminales libres.", TINTA)
             dormir(300)
             devolver 1
         fin
         hijo := lanzar("\\ORDENES.BIN", nulo)
         si es_error(hijo) entonces
-            texto(v, MARGEN, MARGEN, "No se puede lanzar ORDENES.BIN:", TINTA)
-            texto(v, MARGEN, MARGEN + ALTO_LETRA, texto_error(hijo), TINTA)
+            texto(v, MARGEN, ARRIBA, "No se puede lanzar ORDENES.BIN:", TINTA)
+            texto(v, MARGEN, ARRIBA + ALTO_LETRA, texto_error(hijo), TINTA)
             mientras suceso(v, s, cierto) y s.clase <> EV_CERRAR hacer fin
             devolver 1
         fin
@@ -147,7 +388,40 @@ módulo UConsola
             mientras suceso(v, s, falso) hacer
                 algo := cierto
                 si s.clase = EV_TECLA entonces
-                    si s.a = CTRL_C entonces cortar_terminal() sino teclear(s.a) fin
+                    si s.a = CTRL_C y hay_selección() entonces
+                        ; con algo seleccionado, Ctrl+C lo copia
+                        copia()
+                        suelta_selección()
+                    sino si s.a = CTRL_C entonces
+                        cortar_terminal()
+                    sino
+                        suelta_selección()
+                        teclear(s.a)
+                    fin
+                sino si s.clase = EV_RATÓN_BAJA entonces
+                    k := menú_en(menús, ent32(s.a), ent32(s.b))
+                    si k >= 0 entonces
+                        abre_el_menú(k)
+                    sino si s.c yb BOTÓN_DERECHO <> 0 entonces
+                        n := 0
+                        si no hay_selección() entonces n := n ob 1 fin
+                        si en_portapapeles() = 0 entonces n := n ob 2 fin
+                        menú(v, ent32(s.a), ent32(s.b), "Copiar|Pegar", n, M_CONTEXTO)
+                    sino si s.c yb BOTÓN_IZQUIERDO <> 0 y ent32(s.b) >= ALTO_MENÚS entonces
+                        clic(ent32(s.a), ent32(s.b), s.c)
+                    fin
+                sino si s.clase = EV_RATÓN_MUEVE entonces
+                    si arrastrando y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                        k := celda_del_punto(ent32(s.a), ent32(s.b))
+                        si k <> extremo entonces
+                            extremo := k
+                            pinta_filas()
+                        fin
+                    fin
+                sino si s.clase = EV_RATÓN_SUBE entonces
+                    arrastrando := falso
+                sino si s.clase = EV_MENÚ entonces
+                    si elegido(s.b, s.a) entonces devolver 0 fin
                 sino si s.clase = EV_CERRAR entonces
                     devolver 0                  ; (el núcleo acaba a los de dentro)
                 sino si s.clase = EV_TAMAÑO entonces
@@ -156,6 +430,7 @@ módulo UConsola
                     pinta_todo()
                 fin
             fin
+            si teclea_lo_pegado() entonces algo := cierto fin
             n := leer_terminal(trozo, 512)
             si n > 0 entonces
                 algo := cierto

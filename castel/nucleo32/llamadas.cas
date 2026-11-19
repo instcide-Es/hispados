@@ -3,7 +3,8 @@
 ;  del anillo 3 («modelo usuario»): el teclado, los archivos del disco (leer,
 ;  escribir, crear, borrar, las carpetas), lanzar otros programas y
 ;  esperarlos, los argumentos, la memoria; y las ventanas del escritorio
-;  (hacer una, dibujar en ella, sus sucesos) y los terminales. Cada función es
+;  (hacer una, dibujar en ella, sus sucesos, los menús emergentes), el
+;  portapapeles y los terminales. Cada función es
 ;  una «int 0x80» con su número (los de nucleo32/usuario.cas). escribir() y
 ;  salir() son del lenguaje y ya van por ahí.
 ;  Lo que no puede ser da un número de PRIMER_ERROR para arriba: se mira con
@@ -50,6 +51,8 @@ módulo Llamadas
     público constante TECLA_INICIO = 0x147
     público constante TECLA_FIN = 0x14F
     público constante TECLA_SUPR = 0x153
+    público constante TECLA_RE_PÁG = 0x149
+    público constante TECLA_AV_PÁG = 0x151
     público constante CTRL_C = 3
 
     público constante CORTADA = 254             ; el código de un programa acabado con Ctrl+C
@@ -66,7 +69,7 @@ módulo Llamadas
     público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
     público constante DATO_MARCOS = 1           ; los que hay
     público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
-    público constante DATO_VERSIÓN = 3          ; 0x0004 es la 0.4
+    público constante DATO_VERSIÓN = 3          ; 0x0005 es la 0.5
     público constante DATO_TAREAS = 4
     público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
     público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
@@ -89,8 +92,13 @@ módulo Llamadas
     público constante EV_TAMAÑO = 6             ; a, b: el ancho y el alto nuevos (hay que volver a pintar todo)
     público constante EV_FOCO = 7               ; a: 1 si pasa a ser la ventana activa, 0 si deja de serlo
     público constante EV_SALE = 9               ; el ratón ya no está encima
-    público constante BOTÓN_IZQUIERDO = 1
+    público constante EV_MENÚ = 10              ; se ha cerrado el menú que se pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
+    público constante SIN_ELEGIR = 0xFFFFFFFF
+    público constante BOTÓN_IZQUIERDO = 1       ; en «c» de los sucesos del ratón: los botones pulsados...
     público constante BOTÓN_DERECHO = 2
+    público constante CON_MAYÚS = 0x100         ; ...las teclas de cambio (también en «b» de EV_TECLA, como 1)...
+    público constante CON_CONTROL = 0x200
+    público constante TECLA_CON_MAYÚS = 1       ; en «b» de EV_TECLA: la tecla (una flecha, Inicio, Fin...) llegó con Mayús
     público constante ANCHO_LETRA = 8           ; lo que mide cada letra del texto
     público constante ALTO_LETRA = 16
 
@@ -118,6 +126,15 @@ módulo Llamadas
     constante OP_NEGRITA = 10
     constante OP_DISQUETE = 11
     variable ord: Orden
+
+    ; lo que se le pide para abrir un menú emergente (la llamada 39)
+    tipo PideMenú = estructura
+        x, ye: ent32
+        opciones: puntero a byte
+        inactivas: nat32
+        etiqueta: nat32
+    fin
+    variable pide: PideMenú
 
     ; una entrada de una carpeta (32 octetos)
     público tipo Entrada = estructura
@@ -615,6 +632,51 @@ módulo Llamadas
         dibuja(v, OP_DISQUETE, x, yy, lado, lado, 0, 0)
     fin
 
+    ; las veces seguidas que se ha pulsado el ratón ahí (1; 2, el doble clic;
+    ; 3, el triple): con la «c» de un suceso EV_RATÓN_BAJA
+    público función veces(c: nat32): nat32
+        devolver c >> 16
+    fin
+
+    ; abre un menú emergente en el punto (x, yy) de la ventana, con esas
+    ; opciones (un texto, separadas por «|»; «-» es una raya). «inactivas»: un
+    ; bit por opción (contando las rayas) para las que salen en gris. Al
+    ; cerrarse, a la ventana le llega EV_MENÚ con la opción elegida (o
+    ; SIN_ELEGIR) y esa etiqueta. Pedir el mismo estando abierto lo cierra.
+    público función menú(v: nat32, x: ent32, yy: ent32, opciones: puntero a byte, inactivas: nat32, etiqueta: nat32)
+        pide.x := x
+        pide.ye := yy
+        pide.opciones := opciones
+        pide.inactivas := inactivas
+        pide.etiqueta := etiqueta
+        llamada(39, v, nat32(dirección(pide)), 0)
+    fin
+
+    ; ---- el portapapeles del sistema (un texto, con sus líneas acabadas en «\n») ----
+    ; guarda n letras: lo que se copia o se corta
+    público función al_portapapeles(p: puntero a byte, n: nat32): bool
+        devolver llamada(40, 0, nat32(p), n) < PRIMER_ERROR
+    fin
+
+    ; lo que hay guardado, a «destino» (hasta «cabe» letras): da cuántas
+    público función del_portapapeles(destino: puntero a byte, cabe: nat32): nat32
+        variable r: nat32
+        r := llamada(40, 1, nat32(destino), cabe)
+        si r >= PRIMER_ERROR entonces devolver 0 fin
+        devolver r
+    fin
+
+    ; cuántas letras hay guardadas
+    público función en_portapapeles(): nat32
+        devolver llamada(40, 2, 0, 0)
+    fin
+
+    ; lanza un programa y lo suelta: no hay que esperarlo (lo recoge el
+    ; núcleo al acabar). Da su número de tarea, o un error.
+    público función lanzar_suelto(nombre: puntero a byte, args: puntero a byte): nat32
+        devolver llamada(41, nat32(nombre), nat32(args), 0)
+    fin
+
     ; ---- los terminales (para un programa que tiene a otros dentro de su ventana) ----
     ; hace un terminal: los programas que se lancen desde ahora escriben en
     ; él y leen sus teclas de él. Falso si no quedan.
@@ -627,9 +689,10 @@ módulo Llamadas
         devolver llamada(37, 1, nat32(destino), cabe)
     fin
 
-    ; una tecla para los programas de dentro
-    público función teclear(c: nat32)
-        llamada(37, 2, c, 0)
+    ; una tecla para los programas de dentro: falso si no cabe (hay muchas
+    ; esperando: se le da más tarde)
+    público función teclear(c: nat32): bool
+        devolver llamada(37, 2, c, 0) = 0
     fin
 
     ; Ctrl+C para los programas de dentro
