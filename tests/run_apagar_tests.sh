@@ -348,10 +348,12 @@ else ko "q35: CENTRO.INI no se ha guardado"; fi
 U486=${USB486:-$B/hispa486-usb.img}
 U386=${USB386:-$B/hispados-usb.img}
 UOFF=1048576                                # la partición empieza en el sector 2048
-# uarranca "opciones de QEMU" [qemu]: la memoria USB es $T/u.img
+# uarranca "opciones de QEMU" [qemu]: la memoria USB es $T/u.img; la pantalla,
+# de 800x600 como en las demás (QEMU_PANTALLA): con la de QEMU (su EDID dice
+# 1280x800) Hispa Ventanas se pone a 1280x800 y la barra no está donde se mira
 uarranca() {
   : > $T/log; rm -f $T/in $T/mon $T/rc; mkfifo $T/in
-  ( timeout 150 ${2:-qemu-system-i386} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+  ( timeout 150 ${2:-qemu-system-i386} ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
       -parallel none -m 64 $1 < $T/in > $T/log 2>&1
     echo $? > $T/rc ) &
   QP=$!
