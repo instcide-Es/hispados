@@ -204,7 +204,7 @@ D_SPF           equ 72              ; sectores por FAT (dword)
 DF_DRIVER       equ 32
 NEXT            equ 6
 DRV_LEN         equ 76
-NDRV            equ 16
+NDRV            equ 24              ; [LETRAS] de la A: a la X: (la memoria USB es X:)
 
 DF_EXISTS       equ 1
 DF_MOUNTED      equ 2
@@ -262,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xF000          ; .init, al arrancar (por debajo de BOOT_TMP)
+INIT_ORG        equ 0xF400          ; .init, al arrancar (por debajo de BOOT_TMP)
         section .low
 start:
         jmp short .go
@@ -474,6 +474,8 @@ drives_scan:
         mov dword [cache_lba], 0xFFFFFFFF
         mov dword [fatc_lba], 0xFFFFFFFF
         mov byte [ndrives], 2
+        mov byte [hd_total], 0
+        mov byte [hd_int], 0
         ; disquetes según la lista de equipo de la BIOS
         int 0x11
         test al, 1
@@ -543,16 +545,19 @@ drives_scan:
         jmp .probe
 .counted:
         mov [hd_total], al
+        ; [LETRAS] cuál es el disco duro interno (para él, la C:), cuáles son
+        ; memorias USB (de la X: hacia abajo) y en qué orden se recorren
+        call hd_plan
         ; Letras como en MS-DOS: primero las particiones primarias de cada
         ; disco y después las unidades lógicas (las de la partición
         ; extendida) de cada disco. Dos pasadas por los discos.
         mov byte [scan_pass], 0
 .pass:
-        mov al, [hd_total]
-        mov [hd_count], al
-        mov byte [hd_cur], 0x80
+        mov byte [hd_count], 0
 .disk:
-        mov dl, [hd_cur]
+        movzx bx, byte [hd_count]
+        mov dl, [hd_ord+bx]
+        mov [hd_cur], dl
         call bios_geom
         jc .nextdisk
         push ax
@@ -700,13 +705,16 @@ drives_scan:
         dec byte [ebr_n]
         jnz .ebr
 .nextdisk:
-        inc byte [hd_cur]
-        dec byte [hd_count]
-        jnz .disk
+        inc byte [hd_count]
+        mov al, [hd_count]
+        cmp al, [hd_total]
+        jb .disk
         inc byte [scan_pass]
         cmp byte [scan_pass], 2
         jb .pass
 .done:
+        call c_reserva
+        call nd_top
         mov al, [ndrives]
         mov [bios_nd], al
         call append_ext
@@ -747,9 +755,8 @@ is_ext_type:
 drv_add:
         push bx
         push di
-        movzx bx, byte [ndrives]
-        cmp bx, NDRV
-        jae .r
+        call hd_slot
+        jc .r
         imul bx, bx, DRV_LEN
         add bx, drv_tab
         push si
@@ -766,10 +773,299 @@ drv_add:
         mov eax, [si+12]
         mov [bx+D_SIZE], eax
         mov [bx+D_HIDDEN], edx
-        inc byte [ndrives]
 .r:
         pop di
         pop bx
+        ret
+
+; -----------------------------------------------------------------------------
+;  [LETRAS] El reparto de las letras (docs/UNIDADES.md)
+;    A: y B:  disquetes
+;    C:       el disco duro interno: su primera partición FAT o, si no tiene
+;             (sin particiones, sin formato, de otro sistema), RESERVADA
+;    D:...    las demás particiones de los discos internos, en el orden de
+;             MS-DOS, y detrás, en la primera libre, los lectores de CD/DVD
+;             (HSPCD) y los demás drivers de bloque
+;    X:, W:.. las memorias USB (la de arranque, la primera), hacia abajo
+;  En CONFIG.SYS, LETRAS=CD:R,USB:U cambia la letra del CD y la de las
+;  memorias USB, y LETRAS=CLASICO lo deja como siempre (MS-DOS): todo
+;  seguido desde la C: en el orden de la BIOS.
+; -----------------------------------------------------------------------------
+; clasificar los discos de la BIOS -> hd_class (1 = memoria USB o extraíble),
+; hd_let (lo mismo, para las letras), hd_int (el interno; 0 = no hay) y
+; hd_ord (el orden: el interno primero)
+hd_plan:
+        pushad
+        mov byte [boot_ext], 0
+        xor bx, bx
+.c:
+        cmp bl, [hd_total]
+        jae .cd
+        mov dl, bl
+        add dl, 0x80
+        mov [hd_ord+bx], dl
+        xor al, al
+        call disk_usb
+        jnc .cn
+        inc al
+        cmp dl, [boot_drive]
+        jne .cn
+        mov byte [boot_ext], 1
+.cn:
+        mov [hd_class+bx], al
+        mov [hd_let+bx], al
+        inc bx
+        jmp .c
+.cd:
+        cmp byte [uni_modo], 0
+        jne .r
+        ; el interno: el primero que no es una memoria USB
+        xor bx, bx
+.i:
+        cmp bl, [hd_total]
+        jae .noint
+        cmp byte [hd_class+bx], 0
+        je .int
+        inc bx
+        jmp .i
+.noint:
+        ; solo hay memorias USB: la de arranque hace de disco interno (C:)
+        mov bl, [boot_drive]
+        sub bl, 0x80
+        jb .r
+        cmp bl, [hd_total]
+        jae .r
+        xor bh, bh
+        mov byte [hd_let+bx], 0
+.int:
+        mov al, bl
+        add al, 0x80
+        mov [hd_int], al
+        ; orden: el interno y luego los demás como los da la BIOS
+        mov [hd_ord], al
+        mov di, 1
+        mov ah, 0x80
+        xor cx, cx
+.o:
+        cmp cl, [hd_total]
+        jae .r
+        cmp ah, al
+        je .on
+        mov [hd_ord+di], ah
+        inc di
+.on:
+        inc ah
+        inc cx
+        jmp .o
+.r:
+        popad
+        ret
+
+; DL = disco de la BIOS: CF=1 si es una memoria USB (o un disco extraíble):
+; lo dice la BIOS (INT 13h 48h, EDD 3.0: interfaz USB o 1394, o la bandera
+; de «extraíble») o, si es el de arranque, lo dice su sector de arranque
+; (el de las imágenes para memorias USB lleva «HISPAUSB» en el nombre OEM)
+disk_usb:
+        pushad
+        cmp dl, [boot_drive]
+        jne .edd
+        cmp dword [cs:bootsec+3], 'HISP'
+        jne .edd
+        cmp dword [cs:bootsec+7], 'AUSB'
+        je .yes
+.edd:
+        mov [du_dl], dl
+        mov ah, 0x41
+        mov bx, 0x55AA
+        push bp
+        call KSEG:l_int13
+        pop bp
+        jc .no
+        cmp bx, 0xAA55
+        jne .no
+        test cl, 1
+        jz .no
+        push ax
+        mov di, secbuf
+        mov cx, 0x4A / 2
+        xor ax, ax
+        rep stosw
+        mov dword [cache_lba], 0xFFFFFFFF
+        pop ax
+        mov word [secbuf], 0x1E
+        cmp ah, 0x30
+        jb .v
+        mov word [secbuf], 0x42
+.v:
+        mov ah, 0x48
+        mov dl, [du_dl]
+        mov si, secbuf
+        push bp
+        call KSEG:l_int13
+        pop bp
+        jc .no
+        cmp word [secbuf], 0x1A
+        jb .no
+        test byte [secbuf+2], 4     ; «el medio es extraíble»
+        jnz .yes
+        cmp word [secbuf], 0x42
+        jb .no
+        cmp word [secbuf+0x1E], 0xBEDD
+        jne .no
+        mov eax, [secbuf+0x28]
+        and eax, 0x00FFFFFF
+        cmp eax, 'USB'
+        je .yes
+        cmp eax, '139'              ; 1394 (FireWire)
+        je .yes
+.no:
+        popad
+        clc
+        ret
+.yes:
+        popad
+        stc
+        ret
+
+; hueco (letra) para una partición del disco [hd_cur] -> BX; CF si no queda
+hd_slot:
+        push ax
+        push di
+        mov bx, 2
+        cmp byte [uni_modo], 0
+        jne .asc
+        mov al, [hd_cur]
+        movzx di, al
+        sub di, 0x80
+        cmp byte [hd_let+di], 0
+        jne .usb
+        cmp al, [hd_int]
+        je .asc                     ; el interno: desde la C:
+        cmp byte [hd_int], 0
+        je .asc
+        mov bx, 3                   ; los demás: desde la D:
+.asc:
+        call slot_asc
+        jmp .r
+.usb:
+        call slot_desc
+.r:
+        pop di
+        pop ax
+        ret
+
+; primer hueco libre desde BX hacia arriba -> BX; CF si no hay
+slot_asc:
+        cmp bx, NDRV
+        jae .no
+        push bx
+        imul bx, bx, DRV_LEN
+        test byte [drv_tab+bx+D_FLAGS], DF_EXISTS
+        pop bx
+        jz .ok
+        inc bx
+        jmp slot_asc
+.no:
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+; primer hueco libre desde la X: (o la de LETRAS=USB:) hacia abajo, hasta la
+; D: -> BX; CF si no hay
+slot_desc:
+        movzx bx, byte [usb_base]
+        test bx, bx
+        jnz .l
+        mov bx, 'X' - 'A'
+.l:
+        push bx
+        imul bx, bx, DRV_LEN
+        test byte [drv_tab+bx+D_FLAGS], DF_EXISTS
+        pop bx
+        jz .ok
+        dec bx
+        cmp bx, 3
+        jae .l
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+; ndrives = la última unidad que existe, más una
+nd_top:
+        push ax
+        push bx
+        mov bx, (NDRV-1)*DRV_LEN
+        mov al, NDRV
+.l:
+        test byte [drv_tab+bx+D_FLAGS], DF_EXISTS
+        jnz .r
+        sub bx, DRV_LEN
+        dec al
+        cmp al, 2
+        ja .l
+.r:
+        mov [ndrives], al
+        pop bx
+        pop ax
+        ret
+
+; la C: es del disco duro interno aunque no tenga ninguna partición FAT:
+; queda reservada (existe, pero no se puede montar: «sin formato») hasta que
+; PARTIR y FORMATEA (o INSTALAR) la preparen. Es todo el disco, sin tipo.
+c_reserva:
+        cmp byte [uni_modo], 0
+        jne .r
+        cmp byte [hd_int], 0
+        je .r
+        test byte [drv_tab+2*DRV_LEN+D_FLAGS], DF_EXISTS
+        jnz .r
+        pushad
+        mov dl, [hd_int]
+        call bios_geom
+        jc .n
+        push ax
+        push cx
+        mov di, cur_drv
+        mov cx, DRV_LEN/2
+        xor ax, ax
+        rep stosw
+        pop cx
+        pop ax
+        mov [cur_drv+D_SPT], cx
+        mov [cur_drv+D_HEADS], dx
+        movzx eax, ax
+        movzx ecx, cx
+        imul eax, ecx
+        movzx edx, dx
+        imul eax, edx
+        mov [cur_drv+D_SIZE], eax
+        mov dl, [hd_int]
+        mov [cur_drv+D_BIOS], dl
+        mov byte [cur_drv+D_FLAGS], DF_EXISTS | DF_FIXED
+        call check_ext
+        mov si, cur_drv
+        mov di, drv_tab + 2*DRV_LEN
+        mov cx, DRV_LEN/2
+        rep movsw
+.n:
+        popad
+.r:
+        ret
+
+; ¿la unidad seleccionada (cur_drv) es la C: reservada, sin partición? ZF=1 sí
+es_reserva:
+        push ax
+        mov al, [cur_drv+D_FLAGS]
+        and al, DF_FIXED | DF_DRIVER
+        cmp al, DF_FIXED
+        jne .r
+        cmp byte [cur_drv+D_PTYPE], 0
+.r:
+        pop ax
         ret
 
 ; añadir las unidades de los drivers de bloque tras las de la BIOS
@@ -781,9 +1077,14 @@ append_ext:
         movzx cx, byte [ext_count]
         jcxz .noext
 .ext:
-        movzx bx, byte [ndrives]
-        cmp bx, NDRV
-        jae .noext
+        push es
+        push di
+        les di, [si]
+        call ext_slot               ; [LETRAS] CD: la D:; USB: la X:...
+        pop di
+        pop es
+        jc .noext
+        mov [ae_slot], bl
         imul bx, bx, DRV_LEN
         add bx, drv_tab
         mov byte [bx+D_FLAGS], DF_EXISTS | DF_DRIVER | DF_FIXED
@@ -799,7 +1100,7 @@ append_ext:
         and byte [bx+D_FLAGS], ~DF_FIXED
 .fixed:
         ; identificador propio para las cachés (no es una unidad de la BIOS)
-        mov al, [ndrives]
+        mov al, [ae_slot]
         or al, 0xE0
         mov [bx+D_BIOS], al
         mov eax, [si]
@@ -825,10 +1126,11 @@ append_ext:
         mov [bx+D_MEDIA], al
         pop di
         pop es
-        inc byte [ndrives]
         add si, 9
-        loop .ext
+        dec cx
+        jnz .ext
 .noext:
+        call nd_top
         mov al, [ndrives]
         mov [lol+0x20], al
         call cds_all
@@ -843,19 +1145,54 @@ drives_ext:
         push es
         push ds
         pop es
-        movzx ax, byte [bios_nd]
-        mov [ndrives], al
-        mov di, ax
-        imul di, di, DRV_LEN
-        add di, drv_tab
-        mov cx, NDRV
-        sub cx, ax
-        imul cx, cx, DRV_LEN/2
+        ; [LETRAS] fuera las unidades de los drivers (están salteadas)
+        mov di, drv_tab
+        mov dx, NDRV
+.q:
+        test byte [di+D_FLAGS], DF_DRIVER
+        jz .qn
+        push di
+        mov cx, DRV_LEN/2
         xor ax, ax
         rep stosw
+        pop di
+.qn:
+        add di, DRV_LEN
+        dec dx
+        jnz .q
         pop es
         call append_ext
         popad
+        ret
+
+; [LETRAS] ES:DI = cabecera de un driver de bloque -> BX = el hueco (letra)
+; para su siguiente unidad; CF si no queda. Con el reparto de siempre, el
+; primero libre desde la C:. Si no: los de soporte extraíble que no son
+; HSPCD (HSPUSB: las memorias USB), de la X: hacia abajo; HSPCD (los
+; lectores de CD/DVD), el primero libre desde la D: (o desde la letra de
+; LETRAS=CD:); el resto (HSPRAM...), el primero libre desde la D:.
+ext_slot:
+        mov bx, 2
+        cmp byte [uni_modo], 0
+        jne slot_asc
+        mov bx, 3
+        call es_hspcd
+        jne .nocd
+        cmp byte [cd_base], 0
+        je slot_asc
+        mov bl, [cd_base]
+        jmp slot_asc
+.nocd:
+        test word [es:di+4], 0x0800
+        jnz slot_desc
+        jmp slot_asc
+
+; ES:DI = cabecera de un driver: ZF=1 si es HSPCD
+es_hspcd:
+        cmp dword [es:di+11], 'HSPC'
+        jne .r
+        cmp byte [es:di+15], 'D'
+.r:
         ret
 
 ; elegir la unidad de arranque como unidad actual
@@ -954,7 +1291,126 @@ config_load:
         je .scan
         call boot_menu              ; F8: el menú paso a paso
 .scan:
+        call uni_scan               ; LETRAS=
         jmp dos_scan                ; DOS=HIGH
+
+; [LETRAS] LETRAS= en CONFIG.SYS, con una o varias de estas, entre comas:
+;   CLASICO  las letras como siempre (MS-DOS: seguidas desde la C: en el
+;            orden de la BIOS, el disco de arranque el primero)
+;   INTERNO  el reparto normal (el disco duro interno es la C:)
+;   CD:R     el primer lector de CD/DVD, la R: (si está ocupada, la siguiente)
+;   USB:U    las memorias USB, desde la U: hacia abajo
+; Las letras se vuelven a repartir aquí mismo, antes de cargar nada.
+uni_scan:
+        cmp byte [boot_clean], 0
+        jne .r
+        xor bx, bx
+        mov si, cfgbuf
+.line:
+        cmp byte [cs:si], 0
+        je .r
+        inc bx
+        call .skip
+        cmp bx, MAXCL
+        jae .on
+        cmp byte [cs:cfg_dis+bx], 0
+        jne .eol
+.on:
+        mov eax, [cs:si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'LETR'
+        jne .eol
+        mov ax, [cs:si+4]
+        and ax, 0xDFDF
+        cmp ax, 'AS'
+        jne .eol
+        add si, 6
+        call .skip
+        cmp byte [cs:si], '='
+        jne .eol
+        inc si
+.item:
+        call .skip
+        mov eax, [cs:si]
+        and eax, 0x00DFDFDF
+        cmp eax, 'CLA'
+        jne .i1
+        mov byte [uni_modo], 1
+        jmp .next
+.i1:
+        cmp eax, 'INT'
+        jne .i2
+        mov byte [uni_modo], 0
+        jmp .next
+.i2:
+        cmp eax, 0x003A4443         ; «CD:»
+        jne .i3
+        mov al, [cs:si+3]
+        call .letra
+        jc .next
+        mov [cd_base], al
+        jmp .next
+.i3:
+        cmp eax, 'USB'
+        jne .next
+        cmp byte [cs:si+3], ':'
+        jne .next
+        mov al, [cs:si+4]
+        call .letra
+        jc .next
+        mov [usb_base], al
+.next:
+        mov al, [cs:si]
+        cmp al, ','
+        je .comma
+        cmp al, ' '
+        jb .redo
+        inc si
+        jmp .next
+.comma:
+        inc si
+        jmp .item
+.redo:
+        push bx
+        push si
+        call drives_scan
+        call boot_select
+        pop si
+        pop bx
+.eol:
+        mov al, [cs:si]
+        test al, al
+        jz .r
+        inc si
+        cmp al, 10
+        jne .eol
+        jmp .line
+.r:
+        ret
+; AL = letra -> AL = número de unidad (de la D: a la X:); CF si no vale
+.letra:
+        and al, 0xDF
+        sub al, 'A'
+        cmp al, 3
+        jb .lno
+        cmp al, NDRV - 1
+        ja .lno
+        clc
+        ret
+.lno:
+        stc
+        ret
+.skip:
+        mov al, [cs:si]
+        cmp al, ' '
+        je .s1
+        cmp al, 9
+        jne .sr
+.s1:
+        inc si
+        jmp .skip
+.sr:
+        ret
 
 config_run:
         mov byte [lastdrive], 5
@@ -2996,6 +3452,7 @@ cfg_cmds:
         dw k_menuitem, cfg_ignore
         dw k_menudef, cfg_ignore
         dw k_include, cfg_ignore
+        dw k_letras, cfg_ignore
         dw 0, 0
 k_device    db "DEVICE", 0
 k_devhigh   db "DEVICEHIGH", 0
@@ -3017,6 +3474,7 @@ k_switches  db "SWITCHES", 0
 k_menuitem  db "MENUITEM", 0
 k_menudef   db "MENUDEFAULT", 0
 k_include   db "INCLUDE", 0
+k_letras    db "LETRAS", 0
         section .text
 
 cfg_ignore:
@@ -3348,7 +3806,39 @@ cfg_device_do:
         mov ax, [cfg_val]
         mov [dreq+0x12], ax
         mov [dreq+0x14], ds
-        mov al, [ndrives]
+        push es
+        push di
+        push bx
+        les di, [dc_hdr]
+        call ext_slot               ; [LETRAS] la letra que le va a tocar
+        mov al, bl
+        ; la letra pedida para el CD (LETRAS=CD:) está ocupada: se avisa
+        test word [es:di+4], 0x8000
+        jnz .lok
+        call es_hspcd
+        jne .lok
+        cmp byte [uni_modo], 0
+        jne .lok
+        mov ah, [cd_base]
+        test ah, ah
+        jz .lok
+        cmp ah, al
+        je .lok
+        add ah, 'A'
+        mov [msg_letocu_a], ah
+        mov ah, al
+        add ah, 'A'
+        mov [msg_letocu_b], ah
+        push si
+        push ax
+        mov si, msg_letocu
+        call kputs
+        pop ax
+        pop si
+.lok:
+        pop bx
+        pop di
+        pop es
         mov [dreq+0x16], al
         call dev_call
         test word [dreq+3], 0x8000
@@ -3500,6 +3990,20 @@ build_root_env:
         mov si, s_pg
         call .strz
 .npr:
+        ; [LETRAS] ARRANQUE=X: la unidad de la que se arrancó (la memoria
+        ; USB puede ser la X:): %ARRANQUE%\HISPADOS en AUTOEXEC.BAT
+        mov si, s_arranque
+        call .has
+        jnc .narr
+        mov si, s_arranque
+        call .str
+        mov al, [boot_letter]
+        add al, 'A'
+        mov ah, ':'
+        stosw
+        xor al, al
+        stosb
+.narr:
         ; variables de SET
         mov si, setbuf
 .sv:
@@ -3940,6 +4444,8 @@ mount:
         push ds
         pop es
         mov byte [mnt_try], 0
+        call es_reserva             ; [LETRAS] la C: reservada: sin formato
+        je .fail2
         xor eax, eax
         mov bx, secbuf
         call read_sector
@@ -11217,6 +11723,10 @@ fn_33:
         je .boot
         cmp al, 6
         je .ver
+        cmp al, 0x68
+        je .letras
+        cmp al, 0x69
+        je .quees
         ret
 .get:
         mov al, [break_flag]
@@ -11231,6 +11741,103 @@ fn_33:
         mov al, [boot_letter]
         inc al
         mov [F_DL], al
+        ret
+        ; [LETRAS] AX=3368h (propia de Hispa-DOS): el medio de arranque y el
+        ; reparto de las letras. BX = 'HD', DL = unidad de arranque (1 = A:),
+        ; DH = su disco de la BIOS, CH = el disco duro interno (0 = no hay),
+        ; CL: bit 0 = se arrancó de una memoria USB (o disco extraíble),
+        ; bit 1 = reparto nuevo (interno C:, CD D:, USB X:), bit 2 = la C:
+        ; está reservada (el interno no tiene partición FAT)
+.letras:
+        mov word [F_BX], 'HD'
+        mov al, [boot_letter]
+        inc al
+        mov ah, [boot_drive]
+        mov [F_DX], ax
+        mov cl, [boot_ext]
+        cmp byte [uni_modo], 0
+        jne .lc
+        or cl, 2
+        mov al, [drv_tab+2*DRV_LEN+D_FLAGS]
+        and al, DF_EXISTS | DF_FIXED | DF_DRIVER
+        cmp al, DF_EXISTS | DF_FIXED
+        jne .lc
+        cmp byte [drv_tab+2*DRV_LEN+D_PTYPE], 0
+        jne .lc
+        or cl, 4
+.lc:
+        mov ch, [hd_int]
+        mov [F_CX], cx
+        ret
+        ; [LETRAS] AX=3369h (propia): qué es la unidad DL (0 = A:). BX = 'HD',
+        ; AL = 0 no existe, 1 disquete, 2 partición de un disco de la BIOS,
+        ; 3 CD/DVD (HSPCD), 4 de un driver de soporte extraíble (HSPUSB),
+        ; 5 de otro driver, 6 la C: reservada (sin partición). AH: bit 0 = es
+        ; la de arranque, bit 1 = del disco duro interno, bit 2 = de una
+        ; memoria USB (disco de la BIOS). CL = disco de la BIOS, CH = tipo de
+        ; partición, SI:DI = su primer sector, DX = tamaño en MB.
+.quees:
+        mov word [F_BX], 'HD'
+        mov word [F_AX], 0
+        movzx bx, byte [F_DL]
+        cmp bx, NDRV
+        jae .qr
+        mov ah, 1
+        cmp bl, [boot_letter]
+        je .qb
+        xor ah, ah
+.qb:
+        imul bx, bx, DRV_LEN
+        add bx, drv_tab
+        mov dl, [bx+D_FLAGS]
+        test dl, DF_EXISTS
+        jz .qr
+        mov al, 1
+        test dl, DF_DRIVER
+        jnz .qdrv
+        test dl, DF_FIXED
+        jz .qs
+        inc al
+        mov cl, [bx+D_BIOS]
+        mov ch, [bx+D_PTYPE]
+        mov [F_CX], cx
+        cmp cl, [hd_int]
+        jne .qni
+        or ah, 2
+.qni:
+        movzx si, cl
+        cmp byte [hd_class+si-0x80], 0
+        je .qnu
+        or ah, 4
+.qnu:
+        test ch, ch
+        jnz .qs
+        mov al, 6
+        jmp .qs
+.qdrv:
+        push es
+        push di
+        les di, [bx+D_DRVHDR]
+        mov al, 3
+        call es_hspcd
+        je .qd
+        inc al
+        test word [es:di+4], 0x0800
+        jnz .qd
+        inc al
+.qd:
+        pop di
+        pop es
+.qs:
+        mov [F_AX], ax
+        mov eax, [bx+D_START]
+        mov [F_DI], ax
+        shr eax, 16
+        mov [F_SI], ax
+        mov eax, [bx+D_SIZE]
+        shr eax, 11
+        mov [F_DX], ax
+.qr:
         ret
 .ver:
         mov word [F_BX], DOS_MAJOR | (DOS_MINOR << 8)
@@ -14851,6 +15458,8 @@ abs_io:
         ; está INT 21h AX=7305h
         test byte [cur_drv+D_FLAGS], DF_FAT32
         jnz .b32
+        call es_reserva             ; [LETRAS] ni la C: reservada (es todo
+        je .b32                     ; el disco: se prepara con PARTIR)
         cmp cx, 0xFFFF
         jne .short
         mov eax, [es:bx]
@@ -15422,6 +16031,10 @@ cfg_path    db "A:\CONFIG.SYS", 0
 s_comspec   db "COMSPEC=", 0
 s_path      db "PATH=", 0
 s_prompt    db "PROMPT=", 0
+s_arranque  db "ARRANQUE=", 0
+msg_letocu  db "LETRAS: la "
+msg_letocu_a db "D: est", 0xA0, " ocupada; el CD/DVD ser", 0xA0, " la "
+msg_letocu_b db "E:", 13, 10, 0
 s_pg        db "$P$G", 0
 msg_cfgunk  db "Orden no reconocida en CONFIG.SYS", 13, 10, 0
 msg_cfgline db "Error en CONFIG.SYS, línea ", 0
@@ -15580,6 +16193,16 @@ hist_count  resb 1
 bios_nd     resb 1
 sf_entry    resb 16
 boot_letter resb 1
+uni_modo    resb 1                  ; [LETRAS] 0 = interno C:, CD D:, USB X:; 1 = como siempre
+boot_ext    resb 1                  ; se arrancó de una memoria USB (o disco extraíble)
+hd_int      resb 1                  ; disco de la BIOS que es el duro interno (0 = no hay)
+hd_class    resb 8                  ; por disco de la BIOS: 1 = memoria USB
+hd_let      resb 8                  ; lo mismo, para las letras
+hd_ord      resb 8                  ; el orden en que se recorren
+du_dl       resb 1
+ae_slot     resb 1
+cd_base     resb 1                  ; LETRAS=CD:x (0 = la primera libre)
+usb_base    resb 1                  ; LETRAS=USB:x (0 = la X:)
 cu_drv      resb 1
 fcb_ext     resb 1
 fcb_attr    resb 1
