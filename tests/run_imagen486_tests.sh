@@ -10,7 +10,7 @@
 #     ve en la 3.ª y llega con el disquete «Hispa-486» en la 8.ª); el menú Inicio lleva el grupo
 #     «Hispa32» con sus programas; desde él se abre la calculadora de 32 bits
 #     (CALC32.EXE), que calcula, y «Hola, mundo». Al salir de Hispa Ventanas,
-#     el intérprete de órdenes con el aviso de INSTALL.
+#     el intérprete de órdenes con el aviso de cómo instalar (el primer menú).
 #  2) INSTALL desde ella en un disco duro vacío: el disco queda con
 #     \HISPA32, EDICION.INI, la clave de VENTANAS.INI, el CENTRO.INI con el
 #     grupo «Hispa32» y el AUTOEXEC.BAT que arranca el escritorio (solo C:).
@@ -133,7 +133,7 @@ chk $T/a5.ppm busca 68 98 256 132 0 9 "42"
 chk $T/a6.ppm titulo 48 52 activa "Hola desde Win32" texto 60 87 16 231 fina "¡Hola, mundo de Win32!" busca 88 574 300 582 0 8 "Hola desde Win32"
 check $T/l1.txt "Hispa Ventanas ha terminado."
 if sed -n '/Hispa Ventanas ha terminado/,$p' $T/l1.txt | grep -qF 'TRAS-SALIR'; then ok "después, el intérprete de órdenes"; else ko "sin el intérprete tras salir"; fi
-check $T/l1.txt "Para instalarlo en el disco duro escriba INSTALL"
+check $T/l1.txt "Para instalarlo en el disco duro: reinicie y elija «Instalar Hispa-DOS en"
 checkn $T/l1.txt "HSPWIFI"                 # sin tarjeta Wi-Fi ni red guardada: calla
 chk $T/a2.ppm busca 0 0 260 572 0 8 "Internet"
 [ -n "${GUARDAR:-}" ] && for f in $T/a[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null
