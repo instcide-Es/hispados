@@ -1,0 +1,1057 @@
+; =============================================================================
+;  ventanas.cas - el gestor de ventanas de Hispa-Pentium.
+;
+;  Cada ventana tiene su propio lienzo (grafico.cas) con todo lo suyo: el
+;  marco (la barra de título redondeada por arriba, con sus tres botones) y
+;  lo de dentro, donde dibuja su dueño: un programa del anillo 3, por las
+;  llamadas al sistema, o el propio núcleo (la barra de tareas, el menú
+;  Inicio y los cuadros del escritorio son ventanas sin marco del núcleo:
+;  escritorio.cas). Componer la pantalla es copiar: el tapiz y, encima, las
+;  ventanas de la de más atrás a la de más adelante, a un doble búfer; y de
+;  ahí a la pantalla. Solo se recompone lo que ha cambiado («lo sucio»: una
+;  lista corta de rectángulos). La flecha del ratón se pinta al final,
+;  directamente en la pantalla.
+;
+;  El ratón y el teclado: pulso() (lo llama la tarea del escritorio cien
+;  veces por segundo) recoge lo que ha pasado y lo reparte: mover una ventana
+;  por su título, traerla delante, minimizarla, maximizarla (también con dos
+;  clics en el título) o cerrarla lo hace aquí; lo demás va a la cola de
+;  sucesos de la ventana que toca (un clic dentro, las teclas a la que está
+;  activa), y su dueño los recoge.
+;
+;  Todo lo de las ventanas va con un cerrojo: los programas dibujan a la vez
+;  que el escritorio compone.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ventanas
+
+    importar Cpu, Tareas, Monton, Grafico, Letra, Video, Raton, Consola
+
+    público constante MAX_VENTANAS = 16
+    público constante MAX_TÍTULO = 64
+
+    ; ---- las banderas de una ventana ----
+    público constante SIN_MARCO = 1             ; sin título ni borde (la barra de tareas, un menú)
+    público constante ENCIMA = 2                ; siempre por delante de las normales
+    público constante OCULTA = 4                ; no se ve (ni cuenta para nada)
+    público constante MINIMIZADA = 8            ; recogida en su botón de la barra de tareas
+    público constante MAXIMIZADA = 16
+    público constante FIJA = 32                 ; no se maximiza (un cuadro de diálogo)
+    público constante REDONDA = 64              ; sin marco, pero con las esquinas de arriba redondas y sombra (un menú)
+
+    ; ---- las medidas del marco ----
+    público constante BORDE = 4
+    público constante ALTO_TÍTULO = 28
+    constante RADIO = 8                         ; el de las esquinas de arriba
+    constante SOMBRA = 5                        ; lo que asoma la sombra por la derecha y por abajo
+    constante BOTÓN_ANCHO = 22
+    constante BOTÓN_ALTO = 20
+    constante BOTÓN_Y = 4
+
+    ; ---- los sucesos que llegan a una ventana ----
+    público constante EV_TECLA = 1              ; a: la tecla (como las da el teclado)
+    público constante EV_RATÓN_BAJA = 2         ; a, b: dónde (dentro de la ventana); c: los botones
+    público constante EV_RATÓN_SUBE = 3
+    público constante EV_RATÓN_MUEVE = 4
+    público constante EV_CERRAR = 5             ; se ha pulsado el botón de cerrar
+    público constante EV_TAMAÑO = 6             ; a, b: el ancho y el alto nuevos de lo de dentro (hay que volver a pintar)
+    público constante EV_FOCO = 7               ; a: 1 si pasa a ser la activa, 0 si deja de serlo
+    público constante EV_FUERA = 8              ; (a un menú) se ha pulsado fuera de él
+    público constante EV_SALE = 9               ; el ratón ya no está encima
+
+    ; ---- lo que se puede dibujar desde un programa (la llamada «dibujar») ----
+    público constante OP_RECTÁNGULO = 1
+    público constante OP_DEGRADADO = 2          ; de color (arriba) a color2 (abajo)
+    público constante OP_MARCO = 3
+    público constante OP_LÍNEA = 4              ; de (x, ye) a (ancho, alto)
+    público constante OP_TEXTO = 5              ; n letras desde «datos»
+    público constante OP_TEXTO_FONDO = 6        ; lo mismo, sobre un fondo de color2
+    público constante OP_MAPA = 7               ; ancho x alto puntos de 32 bits desde «datos»
+    público constante OP_DESPLAZAR = 8          ; el rectángulo, n puntos hacia arriba (hacia abajo si es negativo)
+    público constante OP_REDONDEADO = 9         ; con las esquinas de radio n, de color a color2
+    público constante OP_NEGRITA = 10           ; texto en negrita
+    público constante OP_DISQUETE = 11          ; el logo, de «ancho» puntos de lado
+
+    público tipo Orden = estructura             ; lo que se pide dibujar
+        op: nat32
+        x, ye, ancho, alto: ent32
+        tinta, tinta2: nat32
+        datos: puntero a byte
+        n: ent32
+    fin
+
+    público tipo Evento = estructura
+        clase, a, b, c: nat32
+    fin
+
+    constante COLA_EV = 32
+
+    público tipo Ventana = estructura
+        usada: bool
+        id: nat32                               ; su número (no se repite)
+        dueño: nat32                            ; la tarea que la hizo (0: el núcleo)
+        banderas: nat32
+        px, py, ancho, alto: ent32              ; dónde está en la pantalla, y lo que mide entera
+        gx, gy, gancho, galto: ent32            ; lo que medía antes de maximizarla
+        título: arreglo [MAX_TÍTULO] de byte
+        memoria: puntero a byte                 ; sus puntos (del montón)
+        todo: Lienzo                            ; la ventana entera
+        dentro: Lienzo                          ; lo de dentro del marco
+        cola: arreglo [COLA_EV] de Evento
+        ent, sal: nat32
+    fin
+
+    ; ---- los colores del marco (los propios de Hispa-Pentium) ----
+    constante AZUL_ARRIBA = 0x3F8DEA
+    constante AZUL_ABAJO = 0x1A5AB6
+    constante GRIS_ARRIBA = 0x9DB7D9
+    constante GRIS_ABAJO = 0x7391BD
+    constante CIERRE_ARRIBA = 0xF08A4C          ; el botón de cerrar, del naranja del disquete
+    constante CIERRE_ABAJO = 0xCC531C
+    público constante CARA = 0xF1F5FB           ; el fondo de una ventana recién hecha
+    constante BLANCO = 0xFFFFFF
+
+    público variable ventanas: arreglo [MAX_VENTANAS] de Ventana
+    público variable orden: arreglo [MAX_VENTANAS] de nat32     ; de la de más atrás a la de más adelante
+    público variable cuántas: nat32
+    público variable activa: ent32 = -1         ; la ventana activa (su sitio en «ventanas»), o -1
+    público variable cambios: nat32             ; sube cada vez que cambia algo que se ve en la barra de tareas
+    público variable tapiz: Lienzo              ; el fondo del escritorio (lo pinta escritorio.cas)
+    público variable emergente: nat32           ; el menú abierto: si se pulsa fuera, se le dice (EV_FUERA)
+    público variable teclas_a: nat32            ; la ventana que se lleva las teclas (0: la activa)
+    público variable ventana_inicio: nat32      ; la que recibe la tecla del logo
+    público variable alto_barra: ent32          ; lo que ocupa abajo la barra de tareas (no lo tapa una maximizada)
+    público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
+
+    variable trasero: Lienzo                    ; el doble búfer
+    variable siguiente_id: nat32
+    variable cerrojo: Cerrojo
+    ; lo sucio
+    constante MAX_SUCIOS = 8
+    variable sx, sy, sa, sl: arreglo [MAX_SUCIOS] de ent32
+    variable sucios: nat32
+    ; el ratón
+    variable flecha_x, flecha_y: ent32          ; dónde está pintada la flecha
+    variable flecha_pintada: bool
+    variable botones_antes: nat32
+    variable arrastrada: ent32 = -1             ; la ventana que se está moviendo
+    variable arr_dx, arr_dy: ent32
+    variable capturada: ent32 = -1              ; la que recibió el clic (hasta que se suelte)
+    variable debajo: ent32 = -1                 ; la última sobre la que estaba el ratón
+    variable último_clic, última_clicada: nat32
+    ; la flecha: X, el borde oscuro; o, lo de dentro (claro)
+    constante FLECHA_ANCHO = 12
+    constante FLECHA_ALTO = 19
+    variable flecha: arreglo [232] de byte = "X           XX          XoX         XooX        XoooX       XooooX      XoooooX     XooooooX    XoooooooX   XooooooooX  XoooooooooX XooooooXXXXXXoooXooX    XooX XooX   XoX  XooX   XX    XooX  X     XooX         XooX        XXX  "
+
+    ; -------------------------------------------------------------------------
+    ;  Lo sucio y componer
+    ; -------------------------------------------------------------------------
+    función menor(a: ent32, b: ent32): ent32
+        si a < b entonces devolver a fin
+        devolver b
+    fin
+
+    función mayor(a: ent32, b: ent32): ent32
+        si a > b entonces devolver a fin
+        devolver b
+    fin
+
+    ; apunta un rectángulo de la pantalla para recomponerlo
+    función ensuciar(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable i: nat32
+        variable x2, y2: ent32
+        x2 := menor(x + an, pantalla.ancho)
+        y2 := menor(yy + al, pantalla.alto)
+        x := mayor(x, 0)
+        yy := mayor(yy, 0)
+        si x2 <= x o y2 <= yy entonces devolver fin
+        ; si toca a uno que ya había, se junta con él
+        i := 0
+        mientras i < sucios hacer
+            si x <= sx[i] + sa[i] y x2 >= sx[i] y yy <= sy[i] + sl[i] y y2 >= sy[i] entonces
+                x2 := mayor(x2, sx[i] + sa[i])
+                y2 := mayor(y2, sy[i] + sl[i])
+                sx[i] := menor(x, sx[i])
+                sy[i] := menor(yy, sy[i])
+                sa[i] := x2 - sx[i]
+                sl[i] := y2 - sy[i]
+                devolver
+            fin
+            i := i + 1
+        fin
+        si sucios < MAX_SUCIOS entonces
+            sx[sucios] := x
+            sy[sucios] := yy
+            sa[sucios] := x2 - x
+            sl[sucios] := y2 - yy
+            sucios := sucios + 1
+            devolver
+        fin
+        ; no caben más: todos en uno
+        para i desde 0 hasta sucios - 1 hacer
+            x2 := mayor(x2, sx[i] + sa[i])
+            y2 := mayor(y2, sy[i] + sl[i])
+            x := menor(x, sx[i])
+            yy := menor(yy, sy[i])
+        fin
+        sx[0] := x
+        sy[0] := yy
+        sa[0] := x2 - x
+        sl[0] := y2 - yy
+        sucios := 1
+    fin
+
+    función con_marco(ref v: Ventana): bool
+        devolver v.banderas yb SIN_MARCO = 0
+    fin
+
+    función se_ve(ref v: Ventana): bool
+        devolver v.usada y v.banderas yb (OCULTA ob MINIMIZADA) = 0
+    fin
+
+    ; ¿lleva las esquinas redondas y la sombra? (una con marco, sin maximizar)
+    función suelta(ref v: Ventana): bool
+        devolver v.banderas yb (SIN_MARCO ob MAXIMIZADA) = 0 o v.banderas yb REDONDA <> 0
+    fin
+
+    ; apunta la ventana entera (con su sombra) para recomponerla
+    función ensuciar_ventana(ref v: Ventana)
+        ensuciar(v.px, v.py, v.ancho + SOMBRA, v.alto + SOMBRA)
+    fin
+
+    ; oscurece en el doble búfer lo que cae de ese rectángulo dentro del
+    ; trozo que se está componiendo
+    función sombra(x: ent32, yy: ent32, an: ent32, al: ent32, k: nat32, rx: ent32, ry: ent32, ran: ent32, ral: ent32)
+        variable x2, y2: ent32
+        x2 := menor(x + an, rx + ran)
+        y2 := menor(yy + al, ry + ral)
+        x := mayor(x, rx)
+        yy := mayor(yy, ry)
+        si x2 > x y y2 > yy entonces oscurecer(trasero, x, yy, x2 - x, y2 - yy, k) fin
+    fin
+
+    ; lo que cae de una ventana en el trozo (rx, ry, ran, ral), al doble búfer
+    función pinta_ventana(ref v: Ventana, rx: ent32, ry: ent32, ran: ent32, ral: ent32)
+        variable x1, y1, x2, y2, j, f, s, a, b: ent32
+        si suelta(v) entonces
+            ; su sombra, antes: a la derecha y por debajo
+            sombra(v.px + v.ancho, v.py + SOMBRA + 3, SOMBRA - 2, v.alto - 3, 176, rx, ry, ran, ral)
+            sombra(v.px + v.ancho + SOMBRA - 2, v.py + SOMBRA + 5, 2, v.alto - 5, 222, rx, ry, ran, ral)
+            sombra(v.px + SOMBRA + 3, v.py + v.alto, v.ancho - SOMBRA - 3, SOMBRA - 2, 176, rx, ry, ran, ral)
+            sombra(v.px + SOMBRA + 5, v.py + v.alto + SOMBRA - 2, v.ancho - SOMBRA - 3, 2, 222, rx, ry, ran, ral)
+        fin
+        x1 := mayor(rx, v.px)
+        y1 := mayor(ry, v.py)
+        x2 := menor(rx + ran, v.px + v.ancho)
+        y2 := menor(ry + ral, v.py + v.alto)
+        si x2 <= x1 o y2 <= y1 entonces devolver fin
+        si suelta(v) entonces
+            ; las filas de las esquinas redondas, una a una y más cortas
+            j := y1
+            mientras j < y2 y j - v.py < RADIO hacer
+                f := j - v.py
+                s := sangría(RADIO, f)
+                a := mayor(x1, v.px + s)
+                b := menor(x2, v.px + v.ancho - s)
+                si b > a entonces copiar_lienzo(trasero, a, j, v.todo, a - v.px, f, b - a, 1) fin
+                j := j + 1
+            fin
+            y1 := j
+        fin
+        si y2 > y1 entonces copiar_lienzo(trasero, x1, y1, v.todo, x1 - v.px, y1 - v.py, x2 - x1, y2 - y1) fin
+    fin
+
+    función pinta_flecha()
+        variable i, j: ent32
+        variable c: byte
+        para j desde 0 hasta FLECHA_ALTO - 1 hacer
+            para i desde 0 hasta FLECHA_ANCHO - 1 hacer
+                c := flecha[j * FLECHA_ANCHO + i]
+                si c = 'X' entonces
+                    punto(pantalla, flecha_x + i, flecha_y + j, 0x10233F)
+                sino si c = 'o' entonces
+                    punto(pantalla, flecha_x + i, flecha_y + j, BLANCO)
+                fin
+            fin
+        fin
+        flecha_pintada := cierto
+    fin
+
+    ; quita la flecha: lo que había debajo está en el doble búfer
+    función borra_flecha()
+        si flecha_pintada entonces
+            copiar_lienzo(pantalla, flecha_x, flecha_y, trasero, flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
+        fin
+        flecha_pintada := falso
+    fin
+
+    ; recompone lo sucio: al doble búfer y, de ahí, a la pantalla
+    función componer()
+        variable i, k: nat32
+        variable x, yy, an, al: ent32
+        si sucios = 0 entonces devolver fin
+        para i desde 0 hasta sucios - 1 hacer
+            x := sx[i]
+            yy := sy[i]
+            an := sa[i]
+            al := sl[i]
+            copiar_lienzo(trasero, x, yy, tapiz, x, yy, an, al)
+            k := 0
+            mientras k < cuántas hacer
+                si se_ve(ventanas[orden[k]]) entonces pinta_ventana(ventanas[orden[k]], x, yy, an, al) fin
+                k := k + 1
+            fin
+            copiar_lienzo(pantalla, x, yy, trasero, x, yy, an, al)
+            composiciones := composiciones + 1
+        fin
+        sucios := 0
+        pinta_flecha()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El marco de una ventana
+    ; -------------------------------------------------------------------------
+    ; dónde empieza (a lo ancho) el botón número n del título: 0, cerrar; 1,
+    ; maximizar; 2, minimizar
+    función botón_x(ref v: Ventana, n: ent32): ent32
+        devolver v.ancho - 7 - (n + 1) * BOTÓN_ANCHO - n * 2
+    fin
+
+    función pinta_botón(ref v: Ventana, n: ent32, es_activa: bool)
+        variable x, cx, cy, i: ent32
+        variable arriba, abajo: nat32
+        x := botón_x(v, n)
+        si n = 0 entonces
+            arriba := CIERRE_ARRIBA
+            abajo := CIERRE_ABAJO
+        sino si es_activa entonces
+            arriba := 0x5FA6F5
+            abajo := 0x2468C8
+        sino
+            arriba := 0xAEC4E2
+            abajo := 0x86A2CB
+        fin
+        redondeado(v.todo, x, BOTÓN_Y, BOTÓN_ANCHO, BOTÓN_ALTO, 4, BLANCO, BLANCO, TODAS)
+        redondeado(v.todo, x + 1, BOTÓN_Y + 1, BOTÓN_ANCHO - 2, BOTÓN_ALTO - 2, 3, arriba, abajo, TODAS)
+        cx := x + BOTÓN_ANCHO div 2
+        cy := BOTÓN_Y + BOTÓN_ALTO div 2
+        si n = 0 entonces
+            ; un aspa
+            para i desde 0 hasta 1 hacer
+                línea(v.todo, cx - 4 + i, cy - 4, cx + 3 + i, cy + 3, BLANCO)
+                línea(v.todo, cx + 3 + i, cy - 4, cx - 4 + i, cy + 3, BLANCO)
+            fin
+        sino si n = 1 entonces
+            si v.banderas yb MAXIMIZADA <> 0 entonces
+                ; dos cuadros: volver al tamaño de antes
+                marco(v.todo, cx - 2, cy - 5, 8, 7, BLANCO)
+                rectángulo(v.todo, cx - 2, cy - 5, 8, 2, BLANCO)
+                rectángulo(v.todo, cx - 5, cy - 1, 8, 6, abajo)
+                marco(v.todo, cx - 5, cy - 2, 8, 7, BLANCO)
+                rectángulo(v.todo, cx - 5, cy - 2, 8, 2, BLANCO)
+            sino
+                marco(v.todo, cx - 5, cy - 5, 10, 10, BLANCO)
+                rectángulo(v.todo, cx - 5, cy - 5, 10, 3, BLANCO)
+            fin
+        sino
+            rectángulo(v.todo, cx - 5, cy + 2, 9, 3, BLANCO)
+        fin
+    fin
+
+    ; pinta el marco: el título (con su degradado, el disquete, el nombre y
+    ; los botones) y el borde. Lo de dentro no se toca.
+    función pinta_marco(ref v: Ventana, es_activa: bool)
+        variable arriba, abajo, oscuro: nat32
+        variable caben, n: ent32
+        si no con_marco(v) entonces devolver fin
+        si es_activa entonces
+            arriba := AZUL_ARRIBA
+            abajo := AZUL_ABAJO
+        sino
+            arriba := GRIS_ARRIBA
+            abajo := GRIS_ABAJO
+        fin
+        oscuro := mezcla(abajo, 0, 70)
+        si suelta(v) entonces
+            ; (lo de fuera de las esquinas redondas no se copia nunca a la pantalla)
+            redondeado(v.todo, 0, 0, v.ancho, ALTO_TÍTULO, RADIO, oscuro, oscuro, ARRIBA)
+            redondeado(v.todo, 1, 1, v.ancho - 2, ALTO_TÍTULO - 1, RADIO - 1, arriba, abajo, ARRIBA)
+            rectángulo(v.todo, RADIO, 1, v.ancho - 2 * RADIO, 1, mezcla(arriba, BLANCO, 110))
+        sino
+            degradado(v.todo, 0, 0, v.ancho, ALTO_TÍTULO, arriba, abajo)
+        fin
+        ; el borde: a los lados y abajo, con un filo oscuro por fuera
+        rectángulo(v.todo, 0, ALTO_TÍTULO, BORDE, v.alto - ALTO_TÍTULO, abajo)
+        rectángulo(v.todo, v.ancho - BORDE, ALTO_TÍTULO, BORDE, v.alto - ALTO_TÍTULO, abajo)
+        rectángulo(v.todo, 0, v.alto - BORDE, v.ancho, BORDE, abajo)
+        rectángulo(v.todo, 0, ALTO_TÍTULO, 1, v.alto - ALTO_TÍTULO, oscuro)
+        rectángulo(v.todo, v.ancho - 1, ALTO_TÍTULO, 1, v.alto - ALTO_TÍTULO, oscuro)
+        rectángulo(v.todo, 0, v.alto - 1, v.ancho, 1, oscuro)
+        disquete(v.todo, 7, 5, 18)
+        ; el nombre, en negrita, con su sombra; lo que quepa
+        n := 0
+        mientras v.título[n] <> 0 hacer n := n + 1 fin
+        caben := (botón_x(v, 2) - 34) div ANCHO_LETRA
+        si n > caben entonces n := caben fin
+        si n > 0 entonces
+            texto_n(v.todo, 31, 7, v.título, n, oscuro)
+            texto_n(v.todo, 32, 7, v.título, n, oscuro)
+            si es_activa entonces
+                texto_n(v.todo, 30, 6, v.título, n, BLANCO)
+                texto_n(v.todo, 31, 6, v.título, n, BLANCO)
+            sino
+                texto_n(v.todo, 30, 6, v.título, n, 0xE6EEF8)
+                texto_n(v.todo, 31, 6, v.título, n, 0xE6EEF8)
+            fin
+        fin
+        pinta_botón(v, 0, es_activa)
+        si v.banderas yb FIJA = 0 entonces
+            pinta_botón(v, 1, es_activa)
+            pinta_botón(v, 2, es_activa)
+        fin
+    fin
+
+    ; pone los dos lienzos de la ventana sobre su memoria
+    función pon_lienzos(ref v: Ventana)
+        pon_lienzo(v.todo, puntero(v.memoria), v.ancho, v.ancho, v.alto)
+        si con_marco(v) entonces
+            trozo_de(v.dentro, v.todo, BORDE, ALTO_TÍTULO, v.ancho - 2 * BORDE, v.alto - ALTO_TÍTULO - BORDE)
+        sino
+            trozo_de(v.dentro, v.todo, 0, 0, v.ancho, v.alto)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las ventanas: buscarlas, ordenarlas, sus sucesos
+    ; -------------------------------------------------------------------------
+    ; el sitio en «ventanas» de la que tiene ese número; -1 si no está
+    función busca(id: nat32): ent32
+        variable i: ent32
+        si id = 0 entonces devolver -1 fin
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].id = id entonces devolver i fin
+        fin
+        devolver -1
+    fin
+
+    función pon_evento(i: ent32, clase: nat32, a: nat32, b: nat32, c: nat32)
+        variable k: nat32
+        si i < 0 o no ventanas[i].usada entonces devolver fin
+        ; un movimiento del ratón detrás de otro: vale con el último
+        si clase = EV_RATÓN_MUEVE y ventanas[i].ent <> ventanas[i].sal entonces
+            k := (ventanas[i].ent - 1) mod COLA_EV
+            si ventanas[i].cola[k].clase = EV_RATÓN_MUEVE entonces
+                ventanas[i].cola[k].a := a
+                ventanas[i].cola[k].b := b
+                ventanas[i].cola[k].c := c
+                devolver
+            fin
+        fin
+        si ventanas[i].ent - ventanas[i].sal >= COLA_EV entonces devolver fin
+        k := ventanas[i].ent mod COLA_EV
+        ventanas[i].cola[k].clase := clase
+        ventanas[i].cola[k].a := a
+        ventanas[i].cola[k].b := b
+        ventanas[i].cola[k].c := c
+        ventanas[i].ent := ventanas[i].ent + 1
+    fin
+
+    ; la ventana activa es la de más adelante de las normales que se ven: si
+    ; ha cambiado, se repintan los dos marcos y se les dice
+    función mira_activa()
+        variable k, nueva, vieja: ent32
+        nueva := -1
+        k := ent32(cuántas) - 1
+        mientras k >= 0 y nueva < 0 hacer
+            si se_ve(ventanas[orden[k]]) y ventanas[orden[k]].banderas yb (SIN_MARCO ob ENCIMA) = 0 entonces nueva := orden[k] fin
+            k := k - 1
+        fin
+        si nueva = activa entonces devolver fin
+        vieja := activa
+        activa := nueva
+        cambios := cambios + 1
+        si vieja >= 0 y ventanas[vieja].usada entonces
+            pinta_marco(ventanas[vieja], falso)
+            ensuciar_ventana(ventanas[vieja])
+            pon_evento(vieja, EV_FOCO, 0, 0, 0)
+        fin
+        si nueva >= 0 entonces
+            pinta_marco(ventanas[nueva], cierto)
+            ensuciar_ventana(ventanas[nueva])
+            pon_evento(nueva, EV_FOCO, 1, 0, 0)
+        fin
+    fin
+
+    función quita_del_orden(i: ent32)
+        variable k, j: nat32
+        k := 0
+        mientras k < cuántas hacer
+            si orden[k] = i entonces
+                para j desde k + 1 hasta cuántas - 1 hacer orden[j - 1] := orden[j] fin
+                cuántas := cuántas - 1
+                devolver
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; pone la ventana delante de las de su clase (las de «encima» van
+    ; siempre por delante de las normales)
+    función al_frente(i: ent32)
+        variable k, j: nat32
+        quita_del_orden(i)
+        k := cuántas
+        si ventanas[i].banderas yb ENCIMA = 0 entonces
+            mientras k > 0 y ventanas[orden[k - 1]].banderas yb ENCIMA <> 0 hacer k := k - 1 fin
+        fin
+        j := cuántas
+        mientras j > k hacer
+            orden[j] := orden[j - 1]
+            j := j - 1
+        fin
+        orden[k] := i
+        cuántas := cuántas + 1
+        ensuciar_ventana(ventanas[i])
+    fin
+
+    ; cambia el tamaño de la ventana entera: memoria nueva, el marco pintado
+    ; y lo de dentro en blanco (su dueño lo vuelve a pintar: EV_TAMAÑO)
+    función cambia_tamaño(i: ent32, x: ent32, yy: ent32, an: ent32, al: ent32): bool
+        variable m: puntero a byte
+        m := reservar(nat32(an * al * 4))
+        si m = nulo entonces devolver falso fin
+        ensuciar_ventana(ventanas[i])
+        liberar(ventanas[i].memoria)
+        ventanas[i].memoria := m
+        ventanas[i].px := x
+        ventanas[i].py := yy
+        ventanas[i].ancho := an
+        ventanas[i].alto := al
+        pon_lienzos(ventanas[i])
+        rectángulo(ventanas[i].dentro, 0, 0, an, al, CARA)
+        pinta_marco(ventanas[i], i = activa)
+        ensuciar_ventana(ventanas[i])
+        pon_evento(i, EV_TAMAÑO, nat32(ventanas[i].dentro.ancho), nat32(ventanas[i].dentro.alto), 0)
+        devolver cierto
+    fin
+
+    ; maximiza la ventana, o la vuelve a como estaba
+    función cambia_máximo(i: ent32)
+        si ventanas[i].banderas yb (SIN_MARCO ob FIJA) <> 0 entonces devolver fin
+        si ventanas[i].banderas yb MAXIMIZADA = 0 entonces
+            ventanas[i].gx := ventanas[i].px
+            ventanas[i].gy := ventanas[i].py
+            ventanas[i].gancho := ventanas[i].ancho
+            ventanas[i].galto := ventanas[i].alto
+            ventanas[i].banderas := ventanas[i].banderas ob MAXIMIZADA
+            si no cambia_tamaño(i, 0, 0, pantalla.ancho, pantalla.alto - alto_barra) entonces
+                ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
+            fin
+        sino
+            ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
+            si no cambia_tamaño(i, ventanas[i].gx, ventanas[i].gy, ventanas[i].gancho, ventanas[i].galto) entonces
+                ventanas[i].banderas := ventanas[i].banderas ob MAXIMIZADA
+            fin
+        fin
+        cambios := cambios + 1
+    fin
+
+    función esconde(i: ent32, bandera: nat32)
+        si ventanas[i].banderas yb bandera <> 0 entonces devolver fin
+        ensuciar_ventana(ventanas[i])
+        ventanas[i].banderas := ventanas[i].banderas ob bandera
+        si capturada = i entonces capturada := -1 fin
+        si arrastrada = i entonces arrastrada := -1 fin
+        si debajo = i entonces debajo := -1 fin
+        cambios := cambios + 1
+        mira_activa()
+    fin
+
+    función enseña(i: ent32, bandera: nat32)
+        ventanas[i].banderas := ventanas[i].banderas yb nob bandera
+        al_frente(i)
+        cambios := cambios + 1
+        mira_activa()
+    fin
+
+    función quita_ventana(i: ent32)
+        si no ventanas[i].usada entonces devolver fin
+        ensuciar_ventana(ventanas[i])
+        quita_del_orden(i)
+        liberar(ventanas[i].memoria)
+        si emergente = ventanas[i].id entonces emergente := 0 fin
+        si teclas_a = ventanas[i].id entonces teclas_a := 0 fin
+        ventanas[i].usada := falso
+        si capturada = i entonces capturada := -1 fin
+        si arrastrada = i entonces arrastrada := -1 fin
+        si debajo = i entonces debajo := -1 fin
+        si activa = i entonces activa := -1 fin
+        cambios := cambios + 1
+        mira_activa()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que se pide desde fuera (cada cosa, con el cerrojo)
+    ; -------------------------------------------------------------------------
+    ; una ventana nueva, de la tarea «dueño» (0: del núcleo). Con marco, el
+    ; ancho y el alto son los de dentro; sin él, los de toda la ventana. Da
+    ; su número, o 0 si no hay sitio o memoria.
+    público función crear_ventana(nombre: puntero a byte, x: ent32, yy: ent32, an: ent32, al: ent32, marcas: nat32, dueño: nat32): nat32
+        variable i, k: ent32
+        variable m: puntero a byte
+        si no hay_pantalla o an < 1 o al < 1 o an > 4096 o al > 4096 entonces devolver 0 fin
+        si marcas yb SIN_MARCO = 0 entonces
+            an := an + 2 * BORDE
+            al := al + ALTO_TÍTULO + BORDE
+            si an < 120 entonces an := 120 fin
+        fin
+        tomar(cerrojo)
+        i := 0
+        mientras i < MAX_VENTANAS y ventanas[i].usada hacer i := i + 1 fin
+        si i = MAX_VENTANAS entonces
+            soltar(cerrojo)
+            devolver 0
+        fin
+        m := reservar(nat32(an * al * 4))
+        si m = nulo entonces
+            soltar(cerrojo)
+            devolver 0
+        fin
+        siguiente_id := siguiente_id + 1
+        ventanas[i].usada := cierto
+        ventanas[i].id := siguiente_id
+        ventanas[i].dueño := dueño
+        ventanas[i].banderas := marcas yb nob (MINIMIZADA ob MAXIMIZADA)
+        ventanas[i].px := x
+        ventanas[i].py := yy
+        ventanas[i].ancho := an
+        ventanas[i].alto := al
+        ventanas[i].memoria := m
+        ventanas[i].ent := 0
+        ventanas[i].sal := 0
+        k := 0
+        mientras k < MAX_TÍTULO - 1 y nombre[k] <> 0 hacer
+            ventanas[i].título[k] := nombre[k]
+            k := k + 1
+        fin
+        ventanas[i].título[k] := 0
+        pon_lienzos(ventanas[i])
+        rectángulo(ventanas[i].todo, 0, 0, an, al, CARA)
+        pinta_marco(ventanas[i], falso)
+        al_frente(i)
+        cambios := cambios + 1
+        mira_activa()
+        k := ent32(ventanas[i].id)
+        soltar(cerrojo)
+        devolver nat32(k)
+    fin
+
+    ; cierra la ventana (si «dueño» no es 0, solo si es suya)
+    público función cerrar_ventana(id: nat32, dueño: nat32): bool
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o (dueño <> 0 y ventanas[i].dueño <> dueño) entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        quita_ventana(i)
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; cierra todas las ventanas de una tarea (que acaba)
+    público función cerrar_ventanas_de(dueño: nat32)
+        variable i: ent32
+        si no hay_pantalla o dueño = 0 entonces devolver fin
+        tomar(cerrojo)
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño = dueño entonces quita_ventana(i) fin
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; el suceso siguiente de la ventana: cierto si lo había. Si la ventana no
+    ; existe (o no es de ese dueño), «clase» queda en 0xFFFFFFFF.
+    público función saca_evento(id: nat32, dueño: nat32, ref e: Evento): bool
+        variable i: ent32
+        variable k: nat32
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o (dueño <> 0 y ventanas[i].dueño <> dueño) entonces
+            e.clase := 0xFFFFFFFF
+            soltar(cerrojo)
+            devolver falso
+        fin
+        si ventanas[i].ent = ventanas[i].sal entonces
+            e.clase := 0
+            soltar(cerrojo)
+            devolver falso
+        fin
+        k := ventanas[i].sal mod COLA_EV
+        e.clase := ventanas[i].cola[k].clase
+        e.a := ventanas[i].cola[k].a
+        e.b := ventanas[i].cola[k].b
+        e.c := ventanas[i].cola[k].c
+        ventanas[i].sal := ventanas[i].sal + 1
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; cambia el nombre de la ventana (el de su título y el de su botón)
+    público función poner_título(id: nat32, dueño: nat32, nombre: puntero a byte): bool
+        variable i, k: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o (dueño <> 0 y ventanas[i].dueño <> dueño) entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        k := 0
+        mientras k < MAX_TÍTULO - 1 y nombre[k] <> 0 hacer
+            ventanas[i].título[k] := nombre[k]
+            k := k + 1
+        fin
+        ventanas[i].título[k] := 0
+        pinta_marco(ventanas[i], i = activa)
+        si se_ve(ventanas[i]) entonces ensuciar(ventanas[i].px, ventanas[i].py, ventanas[i].ancho, ALTO_TÍTULO) fin
+        cambios := cambios + 1
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; apunta para recomponer un trozo de lo de dentro de una ventana
+    función ensuciar_dentro(i: ent32, x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable ox, oy, x2, y2: ent32
+        si no se_ve(ventanas[i]) entonces devolver fin
+        ox := 0
+        oy := 0
+        si con_marco(ventanas[i]) entonces
+            ox := BORDE
+            oy := ALTO_TÍTULO
+        fin
+        x2 := menor(x + an, ventanas[i].dentro.ancho)
+        y2 := menor(yy + al, ventanas[i].dentro.alto)
+        x := mayor(x, 0)
+        yy := mayor(yy, 0)
+        si x2 <= x o y2 <= yy entonces devolver fin
+        ensuciar(ventanas[i].px + ox + x, ventanas[i].py + oy + yy, x2 - x, y2 - yy)
+    fin
+
+    ; dibuja dentro de la ventana lo que dice la orden (lo piden los
+    ; programas: «datos» ya está comprobado). Falso si la ventana no es suya
+    ; o la orden no vale.
+    público función dibujar(id: nat32, dueño: nat32, ref ord: Orden): bool
+        variable i, an, al, x, yy: ent32
+        variable otro: Lienzo
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o (dueño <> 0 y ventanas[i].dueño <> dueño) entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        x := ord.x
+        yy := ord.ye
+        an := ord.ancho
+        al := ord.alto
+        según ord.op
+            caso OP_RECTÁNGULO: rectángulo(ventanas[i].dentro, x, yy, an, al, ord.tinta)
+            caso OP_DEGRADADO: degradado(ventanas[i].dentro, x, yy, an, al, ord.tinta, ord.tinta2)
+            caso OP_MARCO: marco(ventanas[i].dentro, x, yy, an, al, ord.tinta)
+            caso OP_REDONDEADO: redondeado(ventanas[i].dentro, x, yy, an, al, ord.n, ord.tinta, ord.tinta2, TODAS)
+            caso OP_DISQUETE:
+                disquete(ventanas[i].dentro, x, yy, an)
+                al := an
+            caso OP_LÍNEA:
+                línea(ventanas[i].dentro, x, yy, an, al, ord.tinta)
+                x := menor(ord.x, ord.ancho)
+                yy := menor(ord.ye, ord.alto)
+                an := mayor(ord.x, ord.ancho) - x + 1
+                al := mayor(ord.ye, ord.alto) - yy + 1
+            caso OP_TEXTO, OP_TEXTO_FONDO, OP_NEGRITA:
+                an := ord.n * ANCHO_LETRA
+                al := ALTO_LETRA
+                si ord.op = OP_TEXTO_FONDO entonces rectángulo(ventanas[i].dentro, x, yy, an, al, ord.tinta2) fin
+                texto_n(ventanas[i].dentro, x, yy, ord.datos, nat32(ord.n), ord.tinta)
+                si ord.op = OP_NEGRITA entonces
+                    texto_n(ventanas[i].dentro, x + 1, yy, ord.datos, nat32(ord.n), ord.tinta)
+                    an := an + 1
+                fin
+            caso OP_MAPA:
+                pon_lienzo(otro, puntero(ord.datos), nat32(an), an, al)
+                copiar_lienzo(ventanas[i].dentro, x, yy, otro, 0, 0, an, al)
+            caso OP_DESPLAZAR:
+                ; el rectángulo sube n puntos (lo que sale por arriba se pierde)
+                trozo_de(otro, ventanas[i].dentro, x, yy, an, al)
+                copiar_lienzo(otro, 0, -ord.n, otro, 0, 0, otro.ancho, otro.alto)
+            si no:
+                soltar(cerrojo)
+                devolver falso
+        fin
+        ensuciar_dentro(i, x, yy, an, al)
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; ---- para el escritorio (el núcleo): dibuja él mismo en sus ventanas ----
+    ; lo de dentro de una ventana del núcleo, para dibujar en ella (luego,
+    ; repintada())
+    público función lienzo_de(id: nat32): puntero a Lienzo
+        variable i: ent32
+        i := busca(id)
+        si i < 0 entonces devolver nulo fin
+        devolver dirección(ventanas[i].dentro)
+    fin
+
+    ; se ha dibujado en ese trozo de la ventana: hay que recomponerlo
+    público función repintada(id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 entonces ensuciar_dentro(i, x, yy, an, al) fin
+        soltar(cerrojo)
+    fin
+
+    ; enseña o esconde una ventana (un menú); al enseñarla pasa delante
+    público función mostrar(id: nat32, visible: bool)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 entonces
+            si visible entonces enseña(i, OCULTA) sino esconde(i, OCULTA) fin
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; mueve una ventana a otro sitio de la pantalla
+    público función mover_ventana(id: nat32, x: ent32, yy: ent32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 entonces
+            ensuciar_ventana(ventanas[i])
+            ventanas[i].px := x
+            ventanas[i].py := yy
+            ensuciar_ventana(ventanas[i])
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; lo que hace el botón de una ventana en la barra de tareas: si está
+    ; minimizada, vuelve; si es la activa, se minimiza; si no, pasa delante
+    público función botón_de_barra(id: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 entonces
+            si ventanas[i].banderas yb MINIMIZADA <> 0 entonces
+                enseña(i, MINIMIZADA)
+            sino si i = activa entonces
+                esconde(i, MINIMIZADA)
+            sino
+                al_frente(i)
+                mira_activa()
+            fin
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; le pide a una ventana que se cierre (como si se pulsara su botón)
+    público función pedir_cierre(id: nat32)
+        tomar(cerrojo)
+        pon_evento(busca(id), EV_CERRAR, 0, 0, 0)
+        soltar(cerrojo)
+    fin
+
+    ; todo el escritorio, a recomponer (ha cambiado el tapiz)
+    público función repintar_todo()
+        tomar(cerrojo)
+        ensuciar(0, 0, pantalla.ancho, pantalla.alto)
+        soltar(cerrojo)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El ratón
+    ; -------------------------------------------------------------------------
+    ; la ventana de más adelante que está en ese punto; -1 si es el tapiz
+    función ventana_en(x: ent32, yy: ent32): ent32
+        variable k, i: ent32
+        k := ent32(cuántas) - 1
+        mientras k >= 0 hacer
+            i := orden[k]
+            si se_ve(ventanas[i]) y x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto entonces
+                devolver i
+            fin
+            k := k - 1
+        fin
+        devolver -1
+    fin
+
+    ; el punto de la pantalla, visto desde dentro de la ventana
+    función dentro_x(i: ent32, x: ent32): ent32
+        si con_marco(ventanas[i]) entonces devolver x - ventanas[i].px - BORDE fin
+        devolver x - ventanas[i].px
+    fin
+
+    función dentro_y(i: ent32, yy: ent32): ent32
+        si con_marco(ventanas[i]) entonces devolver yy - ventanas[i].py - ALTO_TÍTULO fin
+        devolver yy - ventanas[i].py
+    fin
+
+    función está_dentro(i: ent32, x: ent32, yy: ent32): bool
+        variable lx, ly: ent32
+        lx := dentro_x(i, x)
+        ly := dentro_y(i, yy)
+        devolver lx >= 0 y ly >= 0 y lx < ventanas[i].dentro.ancho y ly < ventanas[i].dentro.alto
+    fin
+
+    ; se ha pulsado un botón del ratón en (x, yy); «b», los que quedan pulsados
+    función pulsado(x: ent32, yy: ent32, b: nat32, nuevos: nat32)
+        variable i, lx, ly, n: ent32
+        i := ventana_en(x, yy)
+        si emergente <> 0 y i <> busca(emergente) entonces pon_evento(busca(emergente), EV_FUERA, 0, 0, 0) fin
+        si i < 0 entonces devolver fin
+        si ventanas[i].banderas yb (SIN_MARCO ob ENCIMA) = 0 y (cuántas = 0 o i <> activa) entonces
+            al_frente(i)
+            mira_activa()
+        fin
+        si está_dentro(i, x, yy) entonces
+            capturada := i
+            pon_evento(i, EV_RATÓN_BAJA, nat32(dentro_x(i, x)), nat32(dentro_y(i, yy)), b)
+            devolver
+        fin
+        si nuevos yb BOTÓN_IZQUIERDO = 0 o no con_marco(ventanas[i]) entonces devolver fin
+        lx := x - ventanas[i].px
+        ly := yy - ventanas[i].py
+        si ly >= ALTO_TÍTULO entonces devolver fin      ; el borde: nada
+        ; ¿en uno de los botones del título?
+        si ly >= BOTÓN_Y y ly < BOTÓN_Y + BOTÓN_ALTO entonces
+            para n desde 0 hasta 2 hacer
+                si lx >= botón_x(ventanas[i], n) y lx < botón_x(ventanas[i], n) + BOTÓN_ANCHO entonces
+                    si n = 0 entonces
+                        pon_evento(i, EV_CERRAR, 0, 0, 0)
+                    sino si ventanas[i].banderas yb FIJA = 0 entonces
+                        si n = 1 entonces cambia_máximo(i) sino esconde(i, MINIMIZADA) fin
+                    fin
+                    devolver
+                fin
+            fin
+        fin
+        ; en el título: dos clics seguidos la maximizan; uno, y se arrastra
+        si última_clicada = ventanas[i].id y tics - último_clic < 40 entonces
+            última_clicada := 0
+            cambia_máximo(i)
+            devolver
+        fin
+        última_clicada := ventanas[i].id
+        último_clic := tics
+        si ventanas[i].banderas yb MAXIMIZADA = 0 entonces
+            arrastrada := i
+            arr_dx := lx
+            arr_dy := ly
+        fin
+    fin
+
+    función soltado(x: ent32, yy: ent32, b: nat32)
+        si b yb BOTÓN_IZQUIERDO = 0 entonces arrastrada := -1 fin
+        si capturada >= 0 entonces
+            pon_evento(capturada, EV_RATÓN_SUBE, nat32(dentro_x(capturada, x)), nat32(dentro_y(capturada, yy)), b)
+            si b = 0 entonces capturada := -1 fin
+        fin
+    fin
+
+    función movido(x: ent32, yy: ent32)
+        variable i, nx, ny: ent32
+        si arrastrada >= 0 entonces
+            nx := x - arr_dx
+            ny := yy - arr_dy
+            ; que no se pierda: el título, siempre a mano
+            si ny < 0 entonces ny := 0 fin
+            si ny > pantalla.alto - alto_barra - ALTO_TÍTULO entonces ny := pantalla.alto - alto_barra - ALTO_TÍTULO fin
+            si nx > pantalla.ancho - 60 entonces nx := pantalla.ancho - 60 fin
+            si nx < 60 - ventanas[arrastrada].ancho entonces nx := 60 - ventanas[arrastrada].ancho fin
+            si nx <> ventanas[arrastrada].px o ny <> ventanas[arrastrada].py entonces
+                ensuciar_ventana(ventanas[arrastrada])
+                ventanas[arrastrada].px := nx
+                ventanas[arrastrada].py := ny
+                ensuciar_ventana(ventanas[arrastrada])
+            fin
+            devolver
+        fin
+        i := capturada
+        si i < 0 entonces
+            i := ventana_en(x, yy)
+            si i >= 0 y no está_dentro(i, x, yy) entonces i := -1 fin
+        fin
+        si i <> debajo entonces
+            pon_evento(debajo, EV_SALE, 0, 0, 0)
+            debajo := i
+        fin
+        si i >= 0 entonces pon_evento(i, EV_RATÓN_MUEVE, nat32(dentro_x(i, x)), nat32(dentro_y(i, yy)), botones_antes) fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El pulso: lo llama la tarea del escritorio, cien veces por segundo
+    ; -------------------------------------------------------------------------
+    público función pulso()
+        variable c: Clic
+        variable x, yy: ent32
+        variable k, i: nat32
+        tomar(cerrojo)
+        ; los botones del ratón, cada cambio donde fue
+        mientras saca_clic(c) hacer
+            si c.botones yb nob botones_antes <> 0 entonces pulsado(c.x, c.ye, c.botones, c.botones yb nob botones_antes) fin
+            si botones_antes yb nob c.botones <> 0 entonces soltado(c.x, c.ye, c.botones) fin
+            botones_antes := c.botones
+        fin
+        ; y dónde está ahora
+        k := sin_interrupciones()
+        x := ratón_x
+        yy := ratón_y
+        reponer(k)
+        si x <> flecha_x o yy <> flecha_y entonces
+            movido(x, yy)
+            borra_flecha()
+            flecha_x := x
+            flecha_y := yy
+            pinta_flecha()
+        fin
+        ; las teclas: la del logo, a la barra de tareas; las demás, al menú
+        ; que esté abierto o a la ventana activa
+        k := saca_tecla()
+        mientras k <> 0 hacer
+            si k = TECLA_LOGO entonces
+                pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)
+            sino si teclas_a <> 0 entonces
+                pon_evento(busca(teclas_a), EV_TECLA, k, 0, 0)
+            sino
+                pon_evento(activa, EV_TECLA, k, 0, 0)
+            fin
+            k := saca_tecla()
+        fin
+        componer()
+        soltar(cerrojo)
+    fin
+
+    ; prepara el gestor: el doble búfer y el tapiz (con la pantalla ya en modo
+    ; gráfico). Falso si no hay memoria.
+    público función prepara_ventanas(): bool
+        variable m: puntero a byte
+        variable n: nat32
+        si no hay_pantalla entonces devolver falso fin
+        n := nat32(pantalla.ancho * pantalla.alto * 4)
+        m := reservar(n)
+        si m = nulo entonces devolver falso fin
+        pon_lienzo(trasero, puntero(m), nat32(pantalla.ancho), pantalla.ancho, pantalla.alto)
+        m := reservar(n)
+        si m = nulo entonces devolver falso fin
+        pon_lienzo(tapiz, puntero(m), nat32(pantalla.ancho), pantalla.ancho, pantalla.alto)
+        cuántas := 0
+        sucios := 0
+        flecha_x := ratón_x
+        flecha_y := ratón_y
+        devolver cierto
+    fin
+
+fin Ventanas.
