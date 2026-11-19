@@ -51,6 +51,9 @@ for f in PRUWIFI.BAT PASO2.BAT; do txt usb/prueba-wifi-mac2012/$f $T/$f; done
 txt usb/prueba-wifi-mac2012/LEEME.TXT $T/LEEME-WI.TXT
 mcopy -o -i "$P" $T/CONFIG.SYS $T/AUTOEXEC.BAT $T/PRUWIFI.BAT $T/PASO2.BAT $T/LEEME-WI.TXT ::
 mcopy -o -i "$P" $T/PASO2.BAT ::HISPADOS/PASO2.BAT
+# [LETRAS] los guiones y las instrucciones de esta imagen dicen «C:\»: las
+# letras, como siempre (la memoria es la C: aunque haya disco duro)
+tools/letras_clasico.sh "$IMG"
 Z="$(realpath "$D")/hispa486-usb-wifi-mac2012.zip"
 rm -f "$Z"
 (cd $T && zip -q -9 "$Z" hispa486-usb-wifi-mac2012.img)

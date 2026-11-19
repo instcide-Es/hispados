@@ -19,7 +19,10 @@
 #             «Instalación 2» y «Oficina» (con el de arranque puesto dice
 #             que no es ese) y, con ESC al de «Hispa-486», queda Hispa-386
 #   usb       la opción 2 desde la memoria USB (disco 1) a un disco duro
-#             vacío (disco 2): CONFIG.SYS con C: y la memoria sin tocar
+#             vacío (disco 2): la memoria es la X:, se instala en la C:
+#             y la memoria queda sin tocar
+#   sola      la opción 2 desde la memoria USB sin más disco: no la toca
+#             (ni PARTIR /BORRARTODO): «no hay disco duro donde instalar»
 #   486       el CD de Hispa-486 arranca hasta el escritorio
 # Sin argumento, todas. CAPTURAS=carpeta guarda las capturas de las pantallas
 # (docs/cd/*.png).
@@ -115,6 +118,9 @@ prueba_instalar() {
   tecla 2
   espera 1 "Bienvenido al programa de instalación" 60
   captura setup-1-bienvenida
+  # [LETRAS] con disco duro, aunque esté vacío, la C: es suya y el CD la D:
+  check "Primera unidad de CD/DVD: D:"
+  check "El CD de Hispa-DOS está en la unidad D:"
   check "Programa de instalación de Hispa-DOS"
   check "Hispa-386"
   check "INTRO=Continuar   F1=Ayuda   F3=Salir"
@@ -184,7 +190,7 @@ prueba_disquete() {
   check "2. Instalar Hispa-DOS en el disco duro"
   tecla 2
   espera 1 "Bienvenido al programa de instalación" 60
-  check "Primera unidad de CD/DVD: C:"
+  check "Primera unidad de CD/DVD: D:"
   tecla ret
   espera 1 "está vacío" 60
   tecla ret
@@ -263,7 +269,8 @@ prueba_usb() {
   check "El disco duro de este ordenador está vacío"
   tecla ret
   espera 1 "en esta carpeta del disco duro" 120
-  check ":\\HISPADOS"
+  check "C:\\HISPADOS"
+  check "Se copia desde la unidad X:"
   tecla ret
   espera 1 "Hispa-DOS está instalado en el disco duro" 400
   check "Hispa-DOS está instalado en el disco duro"
@@ -272,10 +279,40 @@ prueba_usb() {
   hdtiene KERNEL.SYS
   hdtiene HISPADOS/PROGS/PLUMA.HVP
   hdtxt CONFIG.SYS > $T/cfg.txt
-  if grep -q "^DEVICE=C:.HISPADOS.HSPXMS.SYS" $T/cfg.txt && ! grep -q "SOLO-MEDIO\|[ABD-Z]:.HISPADOS" $T/cfg.txt; then
-    ok "CONFIG.SYS del disco: con C: y sin el primer menú"; else ko "CONFIG.SYS del disco"; fi
+  # [LETRAS] los archivos de la memoria van sin letra (valen en el disco duro)
+  if grep -q "^DEVICE=.HISPADOS.HSPXMS.SYS" $T/cfg.txt && ! grep -q "SOLO-MEDIO\|[A-Z]:.HISPADOS" $T/cfg.txt; then
+    ok "CONFIG.SYS del disco: sin letra de unidad y sin el primer menú"; else ko "CONFIG.SYS del disco"; fi
   if cmp -s <(dd if=$T/usb.img bs=1M count=1 status=none) <(dd if=$B/hispados-usb.img bs=1M count=1 status=none); then
     ok "la memoria USB no se ha tocado (MBR y tabla)"; else ko "la memoria USB ha cambiado"; fi
+}
+
+# ---------------------------------------------------------------- sola
+# [LETRAS] la memoria USB es el único disco (es la C:): el programa de
+# instalación no la toca; dice que no hay disco duro donde instalar
+prueba_sola() {
+  echo "== El programa de instalación desde la memoria USB, sin disco duro: no se toca =="
+  local USBIMG=$B/hispados-usb.img
+  [ -f $USBIMG ] || { ko "falta $USBIMG (make usb)"; return; }
+  cp --sparse=always $USBIMG $T/usb.img
+  md5sum < $T/usb.img > $T/usb_antes
+  arranca -cpu pentium -drive file=$T/usb.img,format=raw,if=ide,index=0 -boot c
+  espera 1 "Elija una opci" 30
+  tecla 2
+  espera 1 "Bienvenido al programa de instalación" 60
+  tecla ret
+  espera 1 "ningún disco duro donde instalar" 60
+  captura setup-6-sindisco
+  check "No se ha encontrado ningún disco duro donde instalar Hispa-DOS."
+  checkn "está vacío"
+  checkn "ya tiene Hispa-DOS instalado"
+  tecla ret
+  espera 1 "C:\\>" 20
+  escribe "PARTIR /BORRARTODO" 3
+  escribe "PARTIR 1 /BORRARTODO" 3
+  check "No hay ningún disco duro aparte del de arranque"
+  checkn "Tabla de particiones borrada"
+  para
+  if md5sum < $T/usb.img | cmp -s - $T/usb_antes; then ok "la memoria USB, intacta (ni un octeto)"; else ko "la memoria USB ha cambiado"; fi
 }
 
 # ---------------------------------------------------------------- 486
@@ -299,9 +336,10 @@ case $MODO in
   disquete) prueba_disquete ;;
   disquetes) prueba_disquetes ;;
   usb) prueba_usb ;;
+  sola) prueba_sola ;;
   486) prueba_486 ;;
-  todo) prueba_cd; prueba_instalar; prueba_disquete; prueba_disquetes; prueba_usb; prueba_486 ;;
-  *) echo "uso: $0 [cd|instalar|disquete|disquetes|usb|486|todo]"; exit 2 ;;
+  todo) prueba_cd; prueba_instalar; prueba_disquete; prueba_disquetes; prueba_usb; prueba_sola; prueba_486 ;;
+  *) echo "uso: $0 [cd|instalar|disquete|disquetes|usb|sola|486|todo]"; exit 2 ;;
 esac
 [ $fail -ne 0 ] && [ -n "${VERBOSE:-}" ] && log
 exit $fail

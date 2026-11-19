@@ -17,6 +17,9 @@ Ejemplos:
 
 - Memoria USB de arranque + disco duro con una partición + un lector: C: el
   disco, D: el CD, X: la memoria.
+- CD de arranque (o su disquete) + disco duro, aunque esté vacío: A: el
+  disquete de arranque del CD, C: el disco duro, D: el CD. Sin disco duro,
+  el CD es la C:. El AUTOEXEC.BAT del CD busca su letra (`%CD%`).
 - Lo mismo con dos lectores: D: y E:.
 - Disco con dos particiones (C: y D:) y un lector: el CD es E:. Quien ya tenía
   su segunda partición en D: la conserva.
@@ -117,6 +120,15 @@ disco duro. Vale también con `LETRAS=CLASICO` y cuando la memoria es la C:.
 El disco duro de arranque (el sistema instalado) sigue como antes: PARTIR pide
 escribir SI.
 
+El **programa de instalación** (`INSTALAR /SETUP`, la opción «Instalar» del
+menú de arranque; docs/CD.md) sigue la misma regla: instala en el disco duro
+interno que dice el núcleo (INT 21h AX=3368h), que es la C: (si está
+reservada, la prepara él con `PARTIR /INSTALAR /SI`); nunca en la unidad de
+arranque ni en otra partición de la memoria de arranque (ahí no hay
+`/FORZAR`: dice que no hay dónde instalar), y `PARTIR /BORRARTODO` nunca
+vacía el disco de arranque. Arrancando de disquete o de CD con una memoria
+USB puesta, tampoco elige la memoria aunque la BIOS la dé como primer disco.
+
 ## Los archivos de arranque no llevan la letra
 
 Como la memoria USB puede ser la X: (o la C:), sus archivos no dicen «C:»:
@@ -177,8 +189,11 @@ otros), `uni_scan` (LETRAS=). La tabla de unidades (`NDRV`) pasó de 16 a 24.
 - La tabla de unidades de 24 (antes 16) ocupa 1,2 KB más de memoria
   convencional (2 KB sin DOS=HIGH, por el código nuevo).
 - El núcleo tiene que caber, al arrancar, por debajo de `INIT_ORG` (ahora
-  F400h): quedan unos 250 octetos de margen. Si hace falta más, `.init` ocupa
-  1,8 KB de los 2 KB que tiene reservados.
+  F480h; era F400h): quedan unos 135 octetos de margen, y a `.init` (1,8 KB)
+  le quedan unos 120 hasta `BOOT_TMP`. Entre los dos, unos 250 octetos: el
+  núcleo va **casi lleno**. Lo siguiente que crezca tendrá que salir de otro
+  sitio (pasar código de arranque a `.init` ya no da más; bajar `NDRV` a 23,
+  hasta la W:, daría unos 150 octetos por letra).
 - UNIDADES.COM va en la imagen para memorias USB (y en lo que se instala
   desde ella); en el disquete de arranque no (no sobra sitio): ahí,
   `EQUIPO /DISCOS`.

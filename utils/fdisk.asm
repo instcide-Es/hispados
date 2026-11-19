@@ -654,8 +654,32 @@ other_disk:
 .r:
         ret
 
-; /INSTALAR sin disco: el disco duro que no es el de arranque; CF si no hay
+; /INSTALAR sin disco: el disco duro interno (nunca el de arranque); CF si no hay
 inst_pick_disk:
+        ; [LETRAS] el disco duro interno que dice el núcleo (INT 21h AX=3368h,
+        ; docs/UNIDADES.md), si no es el de arranque: arrancando de disquete
+        ; o de CD con una memoria USB puesta, la BIOS puede dar la memoria
+        ; como primer disco, y no es ahí donde se instala
+        push dx
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        pop dx
+        cmp bx, 'HD'
+        jne .viejo
+        cmp ch, 0x80
+        jb .viejo
+        cmp ch, [bootdisk]
+        je .viejo
+        mov al, ch
+        sub al, 0x80
+        cmp al, [ndisks]
+        jae .viejo
+        mov [disk], ch
+        clc
+        ret
+.viejo:
         mov byte [disk], 0x80
         cmp byte [bootdisk], 0
         je .ok

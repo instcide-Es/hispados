@@ -1146,7 +1146,8 @@ pon_origen:
         ret
 
 ; [SETUP] tras cambiar las particiones el núcleo reparte otra vez las letras
-; (el CD, que era C: con el disco vacío, pasa a D:): volver a buscar el CD
+; (con el reparto clásico, LETRAS=CLASICO, el CD que era C: con el disco
+; vacío pasa a D:; con el normal no se mueve): volver a buscar el CD
 rebusca_cd:
         cmp byte [desde_cd], 0
         je .r
@@ -1311,6 +1312,8 @@ setup_main:
         ja .parterr
         mov byte [s_formatear], 1   ; partición nueva: formato sin preguntar más
         call set_dst
+        call dst_prohibido          ; [LETRAS] nunca el medio de arranque
+        jc .esarr
         call drv_params
         jnc .carpeta
         ; el núcleo no ve aún la unidad: reiniciar y volver a empezar
@@ -1326,8 +1329,13 @@ setup_main:
 .parterr:
         mov si, sc_parterr
         jmp s_error
+.esarr:
+        mov si, sc_esarr
+        jmp s_error
 .letra:
         call set_dst
+        call dst_prohibido          ; [LETRAS] nunca el medio de arranque
+        jc .esarr
         call drv_params
         jnc .ex
         mov si, sc_parterr
@@ -1444,6 +1452,34 @@ setup_main:
         je instala_comun
         call ed_guardar
         jmp instala_comun
+
+; [LETRAS] ¿el destino [dst] es el origen, la unidad de arranque u otra
+; partición de la memoria USB de la que se ha arrancado? -> CF=1: ahí no se
+; instala (el programa de instalación no admite /FORZAR)
+dst_prohibido:
+        mov dl, [dst]
+        cmp dl, [src]
+        je .si
+        cmp dl, [arranque]
+        je .si
+        test byte [k_flags], 1
+        jz .no
+        sub dl, 'A'
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        cmp bx, 'HD'
+        jne .no
+        cmp al, 2
+        jne .no
+        cmp cl, [k_disk]
+        je .si
+.no:
+        clc
+        ret
+.si:
+        stc
+        ret
 
 ; el final: instalado; quitar el medio y reiniciar
 setup_fin:
@@ -2281,6 +2317,11 @@ sc_borrar   db 1, "Se va a BORRAR TODO EL DISCO DURO.", 10, 10
 sc_preparando db "Preparando el disco duro para Hispa-DOS...", 0
 sc_parterr  db "No se ha podido preparar el disco duro. No se ha instalado nada.", 10, 10
             db "Puede hacerlo a mano con la orden PARTIR y volver a empezar.", 0
+sc_esarr    db "El único disco donde se podría instalar es el mismo desde el que ha", 10
+            db "arrancado Hispa-DOS (la memoria USB o el disco de arranque): ahí no", 10
+            db "se instala. No se ha tocado nada.", 10, 10
+            db "Si el ordenador tiene disco duro, compruebe en la BIOS que está", 10
+            db "activado.", 0
 sc_reinicio db "El disco duro ya está preparado, pero hay que reiniciar el ordenador", 10
             db "para seguir.", 10, 10
             db "Deje puesto el disquete, la memoria USB o el CD. Al volver a salir", 10
