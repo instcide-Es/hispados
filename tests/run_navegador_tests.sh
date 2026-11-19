@@ -185,7 +185,8 @@ mcopy -n -i $T/c.img@@32256 ::HISPADOS/INTERNET/DESCARGA/RECIBO20.PDF $T/recibo.
 mcopy -n -i $T/c.img@@32256 ::HISPADOS/INTERNET/DESCARGA/RECIBO01.PDF $T/recibo1.pdf 2> /dev/null
 PAG="0 78 640 548"
 echo "-- el menú Inicio: el grupo «Internet» con el Navegador --"
-chk $T/i1.ppm busca 20 410 60 440 9 7 "Internet" busca 270 410 320 440 9 12 "Navegador"
+# (con la franja de la edición, de 40, a la izquierda del menú: todo 40 más a la derecha)
+chk $T/i1.ppm busca 60 410 100 440 9 7 "Internet" busca 310 410 360 440 9 12 "Navegador"
 echo "-- la entrada, por HTTPS --"
 chk $T/n1.ppm busca 96 56 130 74 0 9 "https://10.0.2.2:$((P + 1))/" busca $PAG 0 9 "Escriba su usuario y su clave." \
   busca $PAG 0 9 "Usuario" busca $PAG 0 9 "Recordarme" busca 0 80 60 300 0 6 "Entrar" \
