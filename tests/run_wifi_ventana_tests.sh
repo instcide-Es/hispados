@@ -171,7 +171,7 @@ P1=$!
   send 'TYPE A:\HISPADOS\RED.INI' 3
   send 'ECHO fin-de-la-prueba' 1
   mon r quit; } | { rm -f $T/r.mon
-  timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/r.mon,server,nowait \
+  timeout 90 qemu-system-i386 ${QEMU_PANTALLA--vga std -global VGA.xres=800 -global VGA.yres=600} -display none -serial stdio -monitor unix:$T/r.mon,server,nowait \
     -parallel none -m 32 -drive file=$T/r.img,format=raw,if=floppy,index=0 -boot a \
     -netdev user,id=n0 -device e1000,netdev=n0 > $T/r.raw 2>&1
   tr -d '\r' < $T/r.raw | iconv -f CP437 -t UTF-8 -c > $T/r.txt; } &
