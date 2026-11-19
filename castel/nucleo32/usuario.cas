@@ -67,11 +67,11 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Fat, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
-    público constante VERSIÓN = 0x0005          ; la 0.5
+    público constante VERSIÓN = 0x0006          ; la 0.6
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -103,6 +103,19 @@ módulo Usuario
     constante MAX_PROGRAMA = 0x200000           ; lo más que mide un programa en el disco
     constante MAX_RUTA = 128
     constante MAX_ARGS = 128
+
+    ; lo que se da de una unidad (la llamada 43; es la misma de llamadas.cas)
+    público tipo Info_unidad = estructura
+        letra: byte                             ; 0: un disco sin ningún volumen que se pueda leer
+        clase: byte                             ; 12, 16 o 32 (FAT); 1: en memoria; 0: nada
+        medio: byte                             ; 0: memoria; 1: IDE; 2: SATA; 3: USB
+        solo_lectura: byte
+        total_k, libre_k: nat32                 ; en K (libre_k = 0xFFFFFFFF: no se sabe)
+        del_sistema: nat32                      ; 1: es la unidad del sistema
+        nombre: arreglo [41] de byte            ; el modelo del disco
+        etiqueta: arreglo [12] de byte          ; el nombre del volumen
+        relleno: arreglo [3] de byte
+    fin
 
     tipo Cabecera = estructura
         salto: nat32
@@ -139,17 +152,30 @@ módulo Usuario
         devolver c
     fin
 
-    ; la ruta entera de un nombre, desde la raíz: si no empieza por una
-    ; barra, va detrás de la carpeta de trabajo de la tarea; «.» y «..» se
+    ; la unidad de trabajo de una tarea: su número (NINGUNA si no hay ninguna)
+    función unidad_de(t: puntero a Tarea): nat32
+        si t.unidad = 0 entonces devolver del_sistema fin
+        devolver t.unidad - 1
+    fin
+
+    ; la ruta entera de un nombre, desde la raíz de su unidad. Si empieza
+    ; por una letra y dos puntos («X:»), es de esa unidad; si no, de la de
+    ; trabajo de la tarea. Si no empieza por una barra, va detrás de la
+    ; carpeta de trabajo (si es de la unidad de trabajo); «.» y «..» se
     ; resuelven. Queda en «destino» (donde caben «cabe» octetos) como
-    ; «\UNA\OTRA» (la raíz, «\»). Falso si no cabe.
-    función ruta_entera(dada: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+    ; «\UNA\OTRA» (la raíz, «\»), y en «u», la unidad (NINGUNA si no hay
+    ; tal unidad). Falso si no cabe.
+    función ruta_entera(dada: puntero a byte, destino: puntero a byte, cabe: nat32, ref u: nat32): bool
         variable p: puntero a byte
         variable n, k, i: nat32
         p := dada
-        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        u := unidad_de(actual)
+        si p[0] <> 0 y p[1] = ':' entonces
+            u := por_letra(p[0])
+            p := p + 2
+        fin
         n := 0
-        si no es_barra(p[0]) entonces
+        si no es_barra(p[0]) y u = unidad_de(actual) entonces
             mientras actual.carpeta[n] <> 0 y n + 1 < cabe hacer
                 destino[n] := actual.carpeta[n]
                 n := n + 1
@@ -183,19 +209,19 @@ módulo Usuario
     fin
 
     ; el nombre de archivo que da el programa, copiado al núcleo y con su
-    ; ruta entera. Falso si no es suyo o no cabe.
-    función ruta_de_usuario(dir: nat32, destino: puntero a byte): bool
+    ; ruta entera; en «u», su unidad. Falso si no es suyo o no cabe.
+    función ruta_de_usuario(dir: nat32, destino: puntero a byte, ref u: nat32): bool
         variable dada: arreglo [MAX_RUTA] de byte
         si no texto_de_usuario(dir, dada, MAX_RUTA) entonces devolver falso fin
-        devolver ruta_entera(dada, destino, MAX_RUTA)
+        devolver ruta_entera(dada, destino, MAX_RUTA, u)
     fin
 
-    ; ¿es esa carpeta (su ruta entera) la de trabajo de alguna tarea, o está
-    ; por encima de ella?
-    función es_carpeta_de_alguien(ruta: puntero a byte): bool
+    ; ¿es esa carpeta (su ruta entera, en la unidad u) la de trabajo de
+    ; alguna tarea, o está por encima de ella?
+    función es_carpeta_de_alguien(u: nat32, ruta: puntero a byte): bool
         variable i, k: nat32
         para i desde 0 hasta MAX_TAREAS - 1 hacer
-            si tareas[i].estado <> Tareas.LIBRE entonces
+            si tareas[i].estado <> Tareas.LIBRE y unidad_de(dirección(tareas[i])) = u entonces
                 k := 0
                 mientras ruta[k] <> 0 y mayús(ruta[k]) = mayús(tareas[i].carpeta[k]) hacer k := k + 1 fin
                 si ruta[k] = 0 y (tareas[i].carpeta[k] = 0 o tareas[i].carpeta[k] = '\\') entonces devolver cierto fin
@@ -204,10 +230,25 @@ módulo Usuario
         devolver falso
     fin
 
-    ; la carpeta de trabajo de la tarea pasa a ser esa (su ruta entera)
-    función cambiar_carpeta(ruta: puntero a byte): nat32
+    ; ¿es la unidad u la que está en memoria (los módulos del cargador)?
+    función en_memoria(u: nat32): bool
+        si u >= MAX_UNIDADES entonces devolver falso fin
+        devolver unidades[u].hay y unidades[u].clase = U_MEMORIA
+    fin
+
+    ; la unidad y la carpeta de trabajo de la tarea pasan a ser esas (la
+    ; ruta entera de la carpeta, en la unidad u)
+    función cambiar_carpeta(u: nat32, ruta: puntero a byte): nat32
         variable m, n: nat32
-        m := abrir_archivo(ruta, PARA_LEER)
+        si u >= MAX_UNIDADES entonces devolver SIN_DISCO fin
+        si en_memoria(u) entonces
+            ; (en la unidad en memoria no hay más carpeta que la raíz)
+            si busca_módulo(ruta) <> MOD_RAÍZ entonces devolver NO_CARPETA fin
+            actual.carpeta[0] := 0
+            actual.unidad := u + 1
+            devolver 0
+        fin
+        m := abrir_archivo(u, ruta, PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver m fin
         si no es_carpeta(m) entonces
             cerrar_archivo(m)
@@ -223,16 +264,18 @@ módulo Usuario
             n := n - 1
             actual.carpeta[n] := mayús(ruta[n])
         fin
+        actual.unidad := u + 1
         devolver 0
     fin
 
     ; -------------------------------------------------------------------------
-    ;  La unidad en memoria: sin disco, los módulos del cargador hacen de C:
+    ;  La unidad en memoria: los módulos del cargador hacen de M:
     ; -------------------------------------------------------------------------
-    ; Si no hay disco FAT (un PC sin disco IDE, arrancado de una memoria USB
-    ; con GRUB), los programas y archivos que el cargador ha traído como
-    ; módulos se ven como los archivos de la raíz de una unidad de solo
-    ; lectura: se abren, se leen, salen en DIR y se lanzan por su nombre.
+    ; Los programas y archivos que el cargador ha traído como módulos (un
+    ; PC arrancado de una memoria USB con GRUB) se ven como los archivos de
+    ; la raíz de una unidad de solo lectura, M: (unidades.cas): se abren, se
+    ; leen, salen en DIR y se lanzan por su nombre. Si no hay disco con FAT
+    ; ni memoria USB que se pueda leer, es la unidad del sistema.
     constante MOD_BASE = 0x4D00                 ; sus manejadores: de aquí en adelante
     constante MOD_ABIERTOS = 8
     constante MOD_RAÍZ = 0xFFFFFF00             ; «el módulo» que es la carpeta raíz
@@ -242,8 +285,9 @@ módulo Usuario
     fin
     variable mod_abiertos: arreglo [MOD_ABIERTOS] de Abierto_mod
 
+    ; ¿es la unidad del sistema la que está en memoria?
     público función unidad_en_memoria(): bool
-        devolver no montado y módulos() > 0
+        devolver en_memoria(del_sistema)
     fin
 
     ; el nombre de archivo del módulo i (hasta el primer espacio, en
@@ -267,7 +311,6 @@ módulo Usuario
         variable nombre: arreglo [13] de byte
         variable i, k: nat32
         p := ruta
-        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
         mientras es_barra(valor(p)) hacer p := p + 1 fin
         si valor(p) = 0 entonces devolver MOD_RAÍZ fin
         i := 0
@@ -454,7 +497,9 @@ módulo Usuario
     fin
 
     función dato(cuál: nat32): nat32
-        variable tablas, f, h: nat32
+        variable tablas, f, h, u: nat32
+        u := unidad_de(actual)
+        si u >= MAX_UNIDADES o en_memoria(u) entonces u := NINGUNA fin
         según cuál
             caso DATO_MARCOS_LIBRES: devolver marcos_libres()
             caso DATO_MARCOS: devolver marcos_totales()
@@ -463,11 +508,15 @@ módulo Usuario
             caso DATO_VERSIÓN: devolver VERSIÓN
             caso DATO_TAREAS: devolver cuántas_tareas()
             caso DATO_FAT:
-                si montado entonces devolver clase fin
+                si u <> NINGUNA entonces devolver volúmenes[u].clase fin
                 devolver 0
-            caso DATO_CLUSTER: devolver sectores_cluster * 512
-            caso DATO_CLUSTERS_LIBRES: devolver clusters_libres()
-            caso DATO_CLUSTERS: devolver clusters
+            caso DATO_CLUSTER:
+                si u <> NINGUNA entonces devolver volúmenes[u].sectores_cluster * 512 fin
+                devolver 0
+            caso DATO_CLUSTERS_LIBRES: devolver clusters_libres(u)
+            caso DATO_CLUSTERS:
+                si u <> NINGUNA entonces devolver volúmenes[u].clusters fin
+                devolver 0
             caso DATO_HZ: devolver HZ
             caso DATO_FECHA:
                 ahora(f, h)
@@ -489,7 +538,7 @@ módulo Usuario
         variable t: puntero a Tarea
         variable ruta, ruta2: arreglo [MAX_RUTA] de byte
         variable args: arreglo [MAX_ARGS] de byte
-        variable r: nat32
+        variable r, u: nat32
         variable p: puntero a byte
         según n
             caso 1:
@@ -516,9 +565,9 @@ módulo Usuario
                 si a = 0 o hay_tecla() entonces devolver leer_tecla() fin
                 devolver 0
             caso 7:
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
-                si unidad_en_memoria() entonces devolver abrir_módulo(ruta, b) fin
-                devolver abrir_archivo(ruta, b)
+                si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+                si en_memoria(u) entonces devolver abrir_módulo(ruta, b) fin
+                devolver abrir_archivo(u, ruta, b)
             caso 8:
                 si no puede(b, c, cierto) entonces devolver NO_VALE fin
                 si es_de_módulo(a) entonces devolver leer_módulo(a, puntero(b), c) fin
@@ -530,10 +579,10 @@ módulo Usuario
                 fin
                 devolver cerrar_archivo(a)
             caso 10:
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 args[0] := 0
                 si b <> 0 y no texto_de_usuario(b, args, MAX_ARGS) entonces devolver NO_VALE fin
-                t := cargar_archivo(ruta, args, r)
+                t := carga_de(u, ruta, args, r)
                 si t = nulo entonces devolver r fin
                 devolver t.id
             caso 11:
@@ -583,17 +632,10 @@ módulo Usuario
             caso 20:
                 devolver cortar_archivo(a)
             caso 21..24:
-                ; (en la unidad en memoria no se borra ni se crea nada)
-                si unidad_en_memoria() entonces devolver PROTEGIDO fin
                 devolver atender_carpetas(n, a, b)
             caso 25:
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
-                si unidad_en_memoria() entonces
-                    si busca_módulo(ruta) <> MOD_RAÍZ entonces devolver NO_CARPETA fin
-                    actual.carpeta[0] := 0
-                    devolver 0
-                fin
-                devolver cambiar_carpeta(ruta)
+                si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+                devolver cambiar_carpeta(u, ruta)
             caso 26:
                 si b = 0 o no puede(a, b, cierto) entonces devolver NO_VALE fin
                 p := puntero(a)
@@ -636,23 +678,99 @@ módulo Usuario
                 devolver 0
             caso 32..41:
                 devolver atender_ventanas(n, a, b, c)
+            caso 42:
+                ; la unidad de trabajo: cambiarla (a: su letra; 0: solo
+                ; preguntar). Da la letra de la que queda.
+                si a <> 0 entonces
+                    u := por_letra(a)
+                    si u = NINGUNA entonces devolver NO_HAY fin
+                    si u <> unidad_de(actual) entonces
+                        actual.unidad := u + 1
+                        actual.carpeta[0] := 0
+                    fin
+                fin
+                u := unidad_de(actual)
+                si u >= MAX_UNIDADES entonces devolver 0 fin
+                devolver unidades[u].letra
+            caso 43:
+                si no puede(b, tamaño(Info_unidad), cierto) entonces devolver NO_VALE fin
+                devolver info_unidad(a, puntero(b))
         fin
         devolver NO_VALE
+    fin
+
+    ; lo que se sabe de la unidad (o del disco sin unidad) número «cuál»,
+    ; para Mi equipo: primero van las unidades, por su letra; detrás, los
+    ; discos en los que no se ha encontrado ningún volumen que se pueda
+    ; leer (con la letra a 0). Da 1, o 0 si no hay tantos.
+    función info_unidad(cuál: nat32, i: puntero a Info_unidad): nat32
+        variable u, d, n, letra, k: nat32
+        llenar(puntero(nat32(i)), tamaño(Info_unidad), 0)
+        n := 0
+        para letra desde 'A' hasta 'Z' hacer
+            u := por_letra(letra)
+            si u <> NINGUNA entonces
+                si n = cuál entonces
+                    i.letra := letra
+                    i.del_sistema := 0
+                    si u = del_sistema entonces i.del_sistema := 1 fin
+                    i.solo_lectura := 1
+                    si en_memoria(u) entonces
+                        i.clase := 1
+                        i.medio := 0
+                        k := 0
+                        para d desde 1 hasta módulos() hacer k := k + módulo_final(d - 1) - módulo_inicio(d - 1) fin
+                        i.total_k := (k + 1023) div 1024
+                        copiar_memoria(dirección(i.nombre[0]), "en memoria", 11)
+                    sino
+                        d := unidades[u].disco
+                        i.clase := volúmenes[u].clase
+                        i.medio := discos[d].clase
+                        si escribible(u) entonces i.solo_lectura := 0 fin
+                        i.total_k := volúmenes[u].clusters * volúmenes[u].sectores_cluster div 2
+                        k := clusters_libres(u)
+                        si k = 0xFFFFFFFF entonces i.libre_k := k sino i.libre_k := k * volúmenes[u].sectores_cluster div 2 fin
+                        copiar_memoria(dirección(i.nombre[0]), dirección(discos[d].modelo[0]), 40)
+                        copiar_memoria(dirección(i.etiqueta[0]), dirección(volúmenes[u].etiqueta[0]), 12)
+                    fin
+                    devolver 1
+                fin
+                n := n + 1
+            fin
+        fin
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[d].hay y unidades_de(d) = 0 entonces
+                si n = cuál entonces
+                    i.medio := discos[d].clase
+                    i.solo_lectura := 1
+                    i.total_k := discos[d].sectores div 2
+                    copiar_memoria(dirección(i.nombre[0]), dirección(discos[d].modelo[0]), 40)
+                    devolver 1
+                fin
+                n := n + 1
+            fin
+        fin
+        devolver 0
     fin
 
     ; borrar, cambiar de nombre y las carpetas (21 a 24)
     función atender_carpetas(n: nat32, a: nat32, b: nat32): nat32
         variable ruta, ruta2: arreglo [MAX_RUTA] de byte
-        si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+        variable u, u2: nat32
+        si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+        si u >= MAX_UNIDADES entonces devolver SIN_DISCO fin
+        ; (en la unidad en memoria no se borra ni se crea nada)
+        si en_memoria(u) entonces devolver PROTEGIDO fin
         según n
-            caso 21: devolver borrar_archivo(ruta)
+            caso 21: devolver borrar_archivo(u, ruta)
             caso 22:
-                si no ruta_de_usuario(b, ruta2) entonces devolver NO_VALE fin
-                devolver renombrar(ruta, ruta2)
-            caso 23: devolver crear_carpeta(ruta)
+                si no ruta_de_usuario(b, ruta2, u2) entonces devolver NO_VALE fin
+                si u2 <> u entonces devolver NO_VALE fin       ; (de una unidad a otra no se cambia de nombre: se copia)
+                devolver renombrar(u, ruta, ruta2)
+            caso 23: devolver crear_carpeta(u, ruta)
         fin
-        si es_carpeta_de_alguien(ruta) entonces devolver EN_USO fin
-        devolver borrar_carpeta(ruta)
+        si es_carpeta_de_alguien(u, ruta) entonces devolver EN_USO fin
+        devolver borrar_carpeta(u, ruta)
     fin
 
     ; el portapapeles del sistema: un texto (en la página 437, con sus
@@ -715,7 +833,7 @@ módulo Usuario
         variable pm: puntero a PideMenú
         variable e: Evento
         variable p: puntero a nat32
-        variable r: nat32
+        variable r, u: nat32
         variable x, yy: ent32
         según n
             caso 32:
@@ -810,10 +928,10 @@ módulo Usuario
             caso 41:
                 ; lanzar un programa y soltarlo: no es hijo de nadie (al
                 ; acabar lo recoge el núcleo), ni hereda el terminal
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 opciones[0] := 0
                 si b <> 0 y no texto_de_usuario(b, opciones, MAX_ARGS) entonces devolver NO_VALE fin
-                t := cargar_archivo(ruta, opciones, r)
+                t := carga_de(u, ruta, opciones, r)
                 si t = nulo entonces devolver r fin
                 t.padre := 0
                 devolver t.id
@@ -997,14 +1115,32 @@ módulo Usuario
         devolver t
     fin
 
-    ; carga un programa del disco: lo lee entero a la memoria del núcleo y, de
-    ; ahí, a su espacio de direcciones. Da la tarea; o nulo, y en «error» por qué.
+    ; carga un programa por su ruta, como la escribe el núcleo: con la
+    ; letra de su unidad delante («X:\BLOC.BIN») o, sin ella, de la unidad
+    ; del sistema. Da la tarea; o nulo, y en «error» por qué.
     público función cargar_archivo(ruta: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
+        variable u: nat32
+        u := del_sistema
+        si ruta[0] <> 0 y ruta[1] = ':' entonces
+            u := por_letra(ruta[0])
+            ruta := ruta + 2
+        fin
+        devolver carga_de(u, ruta, args, error)
+    fin
+
+    ; carga un programa de la unidad u: lo lee entero a la memoria del núcleo
+    ; y, de ahí, a su espacio de direcciones. Da la tarea; o nulo, y en
+    ; «error» por qué.
+    función carga_de(u: nat32, ruta: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
         variable m, largo, leídos: nat32
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
-        ; sin disco: de los módulos del cargador (la unidad en memoria)
-        si unidad_en_memoria() entonces
+        si u >= MAX_UNIDADES entonces
+            error := SIN_DISCO
+            devolver nulo
+        fin
+        ; de los módulos del cargador (la unidad en memoria)
+        si en_memoria(u) entonces
             m := busca_módulo(ruta)
             si m >= MOD_RAÍZ entonces
                 error := NO_HAY
@@ -1012,7 +1148,7 @@ módulo Usuario
             fin
             devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error)
         fin
-        m := abrir_archivo(ruta, PARA_LEER)
+        m := abrir_archivo(u, ruta, PARA_LEER)
         si m >= PRIMER_ERROR entonces
             error := m
             devolver nulo

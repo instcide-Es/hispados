@@ -197,7 +197,7 @@ módulo UOrdenes
     ; la petición de órdenes: la carpeta de trabajo
     función petición()
         carpeta_actual(aquí, LÍNEA)
-        imprimir1("C:%s>", nat32(dirección(aquí[0])))
+        imprimir2("%c:%s>", unidad(0), nat32(dirección(aquí[0])))
     fin
 
     ; -------------------------------------------------------------------------
@@ -313,7 +313,7 @@ módulo UOrdenes
     fin
 
     función orden_dir(dónde: puntero a byte)
-        variable m, archivos, carpetas, octetos, libres, cluster: nat32
+        variable m, archivos, carpetas, octetos, libres, cluster, mía: nat32
         variable punto: bool
         patrón[0] := 0
         copiar_hasta(ruta, dónde, LÍNEA)
@@ -335,11 +335,13 @@ módulo UOrdenes
             devolver
         fin
         ; el nombre de la carpeta, entero: se entra en ella un momento
+        ; (y en su unidad, si es otra: así lo que queda libre es lo de ella;
+        ; al acabar, de vuelta a la de antes)
         carpeta_actual(aquí, LÍNEA)
+        mía := unidad(0)
         cambiar_carpeta(ruta)
         carpeta_actual(carpeta, LÍNEA)
-        cambiar_carpeta(aquí)
-        imprimir1(" Directorio de C:%s\n\n", nat32(dirección(carpeta[0])))
+        imprimir2(" Directorio de %c:%s\n\n", unidad(0), nat32(dirección(carpeta[0])))
         archivos := 0
         carpetas := 0
         octetos := 0
@@ -367,6 +369,8 @@ módulo UOrdenes
         sino
             imprimir1("  %12u K libres\n", libres * (cluster div 512) div 2)
         fin
+        unidad(mía)
+        cambiar_carpeta(aquí)
     fin
 
     función orden_type(nombre: puntero a byte)
@@ -553,7 +557,7 @@ módulo UOrdenes
         variable r: nat32
         si valor(cuál) = 0 entonces
             carpeta_actual(aquí, LÍNEA)
-            imprimir1("C:%s\n", nat32(dirección(aquí[0])))
+            imprimir2("%c:%s\n", unidad(0), nat32(dirección(aquí[0])))
             devolver
         fin
         r := cambiar_carpeta(cuál)
@@ -768,6 +772,11 @@ módulo UOrdenes
             orden_cd(saltar_espacios(trabajo) + 2)
             devolver
         fin
+        ; «X:» cambia de unidad
+        si mayús[0] <> 0 y mayús[1] = ':' y mayús[2] = 0 entonces
+            si es_error(unidad(mayús[0])) entonces imprimir1("No hay unidad %c:.\n", mayús[0]) fin
+            devolver
+        fin
         si empieza_por(mayús, "ECHO.") entonces
             resto := saltar_espacios(trabajo) + 5
             imprimir1("%s\n", nat32(resto))
@@ -884,6 +893,7 @@ módulo UOrdenes
     función principal(): byte
         variable p: puntero a byte
         atender_corte(cierto)
+        camino[0] := unidad(0)                  ; el PATH de fábrica: la raíz de la unidad de trabajo
         escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
         escribir("Escriba AYUDA para ver las órdenes.\n")
         mientras no acabar hacer

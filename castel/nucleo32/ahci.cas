@@ -1,0 +1,340 @@
+; =============================================================================
+;  ahci.cas - los discos SATA del núcleo de Hispa-Pentium, por una
+;  controladora AHCI (la de los PC de 2006 en adelante: PCI clase 01, subclase
+;  06, interfaz 01). Según «Serial ATA AHCI 1.3».
+;
+;  La controladora se ve en la memoria (su registro base número 5): unos
+;  registros generales y, por cada puerto, 0x80 octetos. A cada puerto con un
+;  disco se le da una página: la lista de órdenes (32 cabeceras de 32
+;  octetos; solo se usa la primera), el sitio donde el disco deja lo que
+;  contesta (FIS recibidos) y la tabla de la orden (el FIS de la orden y la
+;  lista de trozos de memoria, PRD). Los datos van por DMA: el disco los deja
+;  (o los toma) él solo en una página del núcleo, y de ahí se copian adonde
+;  se piden (así da igual de dónde sea la memoria de quien pide).
+;
+;  Órdenes: IDENTIFY, READ DMA EXT y WRITE DMA EXT (LBA de 48 bits; las de 28
+;  si el disco es de los de antes) y FLUSH CACHE. No se usa la interrupción:
+;  se mira el puerto hasta que acaba la orden. No se reinicia la
+;  controladora (los discos ya giran: los arrancó la BIOS); se le pide a la
+;  BIOS que la suelte si la norma lo prevé, se para cada puerto, se le dan
+;  sus tablas y se vuelve a poner en marcha.
+;
+;  De fábrica NO se escribe (como en ata.cas): solo si «escritura» es cierto.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ahci
+
+    importar Pci, Paginas, Marcos, Tareas, Mem32
+
+    público constante SECTOR = 512
+    público constante MAX_SATA = 4              ; los discos que se llevan
+
+    ; ---- los registros generales ----
+    constante CAP = 0x00
+    constante GHC = 0x04
+    constante PI = 0x0C                         ; los puertos que hay (un bit cada uno)
+    constante CAP2 = 0x24
+    constante BOHC = 0x28                       ; el traspaso desde la BIOS
+    ; ---- los de cada puerto (desde 0x100 + 0x80 * puerto) ----
+    constante P_CLB = 0x00                      ; la lista de órdenes
+    constante P_FB = 0x08                       ; los FIS recibidos
+    constante P_IS = 0x10
+    constante P_IE = 0x14
+    constante P_CMD = 0x18
+    constante P_TFD = 0x20                      ; el estado del disco (como el del puerto 0x1F7)
+    constante P_SIG = 0x24
+    constante P_SSTS = 0x28
+    constante P_SERR = 0x30
+    constante P_CI = 0x38                       ; las órdenes en marcha
+
+    constante CMD_ST = 0x0001                   ; el puerto atiende órdenes
+    constante CMD_FRE = 0x0010                  ; y recibe FIS
+    constante CMD_FR = 0x4000
+    constante CMD_CR = 0x8000
+
+    constante FIRMA_DISCO = 0x00000101
+
+    constante ORDEN_IDENTIFICAR = 0xEC
+    constante ORDEN_LEER = 0xC8                 ; READ DMA
+    constante ORDEN_LEER48 = 0x25               ; READ DMA EXT
+    constante ORDEN_ESCRIBIR = 0xCA
+    constante ORDEN_ESCRIBIR48 = 0x35
+    constante ORDEN_ASENTAR = 0xE7
+    constante ORDEN_ASENTAR48 = 0xEA
+
+    constante POR_VEZ = 8                       ; los sectores de cada orden (una página)
+
+    público tipo Sata = estructura
+        hay: bool
+        lba48: bool
+        puerto: nat32
+        sectores: nat32                         ; (hasta 2 TB: lo que cabe en 32 bits)
+        tablas: nat32                           ; su página: lista, FIS y tabla de la orden
+        datos: nat32                            ; su página para los datos
+        modelo: arreglo [41] de byte
+    fin
+
+    público variable satas: arreglo [MAX_SATA] de Sata
+    público variable cuántos: nat32
+    público variable hay_ahci: bool             ; hay controladora
+    público variable aparato: nat32             ; cuál es (su número de PCI)
+    público variable puertos_con_algo: nat32    ; los puertos con algo enchufado (aunque no sea un disco)
+    público variable sectores_leídos, sectores_escritos, fallos_de_disco: nat32
+    público variable escritura: bool
+
+    variable reg: puntero a nat32               ; los registros, a la vista del núcleo
+    variable cerrojo: Cerrojo
+
+    función lee(d: nat32): nat32
+        devolver reg[d >> 2]
+    fin
+
+    función pon(d: nat32, v: nat32)
+        reg[d >> 2] := v
+    fin
+
+    función del_puerto(p: nat32, d: nat32): nat32
+        devolver 0x100 + p * 0x80 + d
+    fin
+
+    ; espera (hasta «cs» centésimas) a que los bits «máscara» del registro d
+    ; valgan «valor». Falso si se pasa el tiempo.
+    función espera(d: nat32, máscara: nat32, valor_: nat32, cs: nat32): bool
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras (lee(d) yb máscara) <> valor_ hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 40000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; para el puerto: ni órdenes ni FIS
+    función para_puerto(p: nat32): bool
+        variable c: nat32
+        c := lee(del_puerto(p, P_CMD))
+        si c yb (CMD_ST ob CMD_CR ob CMD_FRE ob CMD_FR) = 0 entonces devolver cierto fin
+        pon(del_puerto(p, P_CMD), c yb nob CMD_ST)
+        si no espera(del_puerto(p, P_CMD), CMD_CR, 0, 60) entonces devolver falso fin
+        pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) yb nob CMD_FRE)
+        devolver espera(del_puerto(p, P_CMD), CMD_FR, 0, 60)
+    fin
+
+    ; manda al disco s la orden «orden» con el sector «lba» y la cuenta «n»;
+    ; «octetos» de datos van (escribe) o vienen por su página de datos.
+    función manda(s: nat32, orden: nat32, lba: nat32, n: nat32, octetos: nat32, escribe: bool): bool
+        variable cab, prd: puntero a nat32
+        variable fis: puntero a byte
+        variable p, b: nat32
+        variable bien: bool
+        p := satas[s].puerto
+        b := satas[s].tablas
+        ; el disco, libre (ni ocupado ni pidiendo datos)
+        si no espera(del_puerto(p, P_TFD), 0x88, 0, 300) entonces devolver falso fin
+        llenar(puntero(b + 0x500), 0x80 + 16, 0)
+        ; la cabecera de la orden 0: el FIS mide 5 palabras; si se escribe,
+        ; el bit 6; una entrada en la lista de trozos si hay datos
+        cab := puntero(b)
+        cab[0] := 5
+        si escribe entonces cab[0] := cab[0] ob 0x40 fin
+        si octetos <> 0 entonces cab[0] := cab[0] ob 0x10000 fin
+        cab[1] := 0
+        cab[2] := b + 0x500
+        cab[3] := 0
+        ; el FIS de la orden (del núcleo al disco)
+        fis := puntero(b + 0x500)
+        fis[0] := 0x27
+        fis[1] := 0x80                          ; es una orden
+        fis[2] := orden
+        fis[4] := lba
+        fis[5] := lba >> 8
+        fis[6] := lba >> 16
+        fis[7] := 0x40                          ; con LBA
+        si satas[s].lba48 entonces
+            fis[8] := lba >> 24
+        sino
+            fis[7] := 0x40 ob ((lba >> 24) yb 0x0F)
+        fin
+        fis[12] := n
+        fis[13] := n >> 8
+        ; el único trozo de memoria: la página de datos
+        si octetos <> 0 entonces
+            prd := puntero(b + 0x580)
+            prd[0] := satas[s].datos
+            prd[1] := 0
+            prd[2] := 0
+            prd[3] := octetos - 1
+        fin
+        pon(del_puerto(p, P_IS), 0xFFFFFFFF)
+        pon(del_puerto(p, P_CI), 1)
+        ; hasta que la orden sale de la lista, o el disco da un error (bit 30)
+        bien := cierto
+        b := tics + 1000
+        n := 0
+        mientras lee(del_puerto(p, P_CI)) yb 1 <> 0 y bien hacer
+            n := n + 1
+            si lee(del_puerto(p, P_IS)) yb 0x40000000 <> 0 o tics > b o n > 200000000 entonces bien := falso fin
+        fin
+        si lee(del_puerto(p, P_IS)) yb 0x40000000 <> 0 o lee(del_puerto(p, P_TFD)) yb 0x01 <> 0 entonces bien := falso fin
+        si no bien entonces
+            ; que el puerto quede listo para otra orden: parar y arrancar
+            fallos_de_disco := fallos_de_disco + 1
+            pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) yb nob CMD_ST)
+            espera(del_puerto(p, P_CMD), CMD_CR, 0, 60)
+            pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
+            pon(del_puerto(p, P_IS), 0xFFFFFFFF)
+            pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_ST)
+        fin
+        devolver bien
+    fin
+
+    ; prepara el puerto p y, si tiene un disco, lo apunta
+    función mira_puerto(p: nat32)
+        variable s, i, t: nat32
+        variable id: puntero a nat16
+        t := lee(del_puerto(p, P_SSTS))
+        si (t yb 0x0F) <> 3 entonces devolver fin               ; nada enchufado (o sin enlace)
+        puertos_con_algo := puertos_con_algo + 1
+        si cuántos >= MAX_SATA entonces devolver fin
+        si no para_puerto(p) entonces devolver fin
+        s := cuántos
+        satas[s].hay := falso
+        satas[s].puerto := p
+        si satas[s].tablas = 0 entonces satas[s].tablas := reservar_marco() fin
+        si satas[s].datos = 0 entonces satas[s].datos := reservar_marco() fin
+        si satas[s].tablas = 0 o satas[s].datos = 0 entonces devolver fin
+        pon(del_puerto(p, P_CLB), satas[s].tablas)
+        pon(del_puerto(p, P_CLB + 4), 0)
+        pon(del_puerto(p, P_FB), satas[s].tablas + 0x400)
+        pon(del_puerto(p, P_FB + 4), 0)
+        pon(del_puerto(p, P_IE), 0)                             ; sin interrupciones: se mira
+        pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
+        pon(del_puerto(p, P_IS), 0xFFFFFFFF)
+        pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_FRE)
+        pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_ST)
+        ; un lector de CD (ATAPI) u otra cosa: no es un disco
+        si lee(del_puerto(p, P_SIG)) <> FIRMA_DISCO entonces devolver fin
+        satas[s].lba48 := falso
+        si no manda(s, ORDEN_IDENTIFICAR, 0, 0, SECTOR, falso) entonces devolver fin
+        id := puntero(satas[s].datos)
+        si id[49] yb 0x200 = 0 entonces devolver fin            ; sin LBA: no es de esta época
+        satas[s].sectores := nat32(id[60]) ob (nat32(id[61]) << 16)
+        si id[83] yb 0x400 <> 0 entonces
+            satas[s].lba48 := cierto
+            si id[102] <> 0 o id[103] <> 0 entonces
+                satas[s].sectores := 0xFFFFFFFF                 ; más de 2 TB: se ve hasta ahí
+            sino si id[100] <> 0 o id[101] <> 0 entonces
+                satas[s].sectores := nat32(id[100]) ob (nat32(id[101]) << 16)
+            fin
+        fin
+        para i desde 0 hasta 19 hacer
+            satas[s].modelo[i * 2] := id[27 + i] >> 8
+            satas[s].modelo[i * 2 + 1] := id[27 + i]
+        fin
+        i := 40
+        mientras i > 0 y (satas[s].modelo[i - 1] = ' ' o satas[s].modelo[i - 1] = 0) hacer i := i - 1 fin
+        satas[s].modelo[i] := 0
+        si satas[s].sectores = 0 entonces devolver fin
+        satas[s].hay := cierto
+        cuántos := cuántos + 1
+    fin
+
+    ; busca la controladora AHCI y sus discos. Da cuántos discos hay.
+    público función identificar(): nat32
+        variable base, pi, p, v: nat32
+        cuántos := 0
+        puertos_con_algo := 0
+        hay_ahci := falso
+        aparato := pci_busca(0x010601, 0xFFFFFF, NO_HAY_PCI)
+        si aparato = NO_HAY_PCI entonces devolver 0 fin
+        base := pci_memoria(aparato, 5)
+        si base = 0 entonces devolver 0 fin
+        pci_enciende(aparato)
+        v := mapear_aparato(base, 0x1100)
+        si v = 0 entonces devolver 0 fin
+        reg := puntero(v)
+        tomar(cerrojo)
+        hay_ahci := cierto
+        ; que la BIOS la suelte, si la norma lo prevé en esta controladora
+        si lee(CAP2) yb 1 <> 0 entonces
+            pon(BOHC, lee(BOHC) ob 2)
+            espera(BOHC, 1, 0, 200)
+        fin
+        pon(GHC, lee(GHC) ob 0x80000000)                        ; en modo AHCI
+        pon(GHC, lee(GHC) yb nob 2)                             ; y sin interrupciones
+        pi := lee(PI)
+        para p desde 0 hasta 31 hacer
+            si pi yb (nat32(1) << p) <> 0 entonces mira_puerto(p) fin
+        fin
+        soltar(cerrojo)
+        devolver cuántos
+    fin
+
+    ; trae n sectores del disco s, desde el sector lba, a destino
+    público función leer_sectores(s: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        variable k, orden: nat32
+        variable bien: bool
+        si s >= MAX_SATA entonces devolver falso fin
+        si no satas[s].hay o lba >= satas[s].sectores o n > satas[s].sectores - lba entonces devolver falso fin
+        orden := ORDEN_LEER
+        si satas[s].lba48 entonces orden := ORDEN_LEER48 fin
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > POR_VEZ entonces k := POR_VEZ fin
+            bien := manda(s, orden, lba, k, k * SECTOR, falso)
+            si bien entonces
+                copiar_memoria(destino, puntero(satas[s].datos), k * SECTOR)
+                destino := destino + k * SECTOR
+                sectores_leídos := sectores_leídos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; lleva n sectores de origen al disco s, desde el sector lba
+    público función escribir_sectores(s: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
+        variable k, orden: nat32
+        variable bien: bool
+        si s >= MAX_SATA o no escritura entonces devolver falso fin    ; (sin permiso, ni una orden de escribir al disco)
+        si no satas[s].hay o lba >= satas[s].sectores o n > satas[s].sectores - lba entonces devolver falso fin
+        orden := ORDEN_ESCRIBIR
+        si satas[s].lba48 entonces orden := ORDEN_ESCRIBIR48 fin
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > POR_VEZ entonces k := POR_VEZ fin
+            copiar_memoria(puntero(satas[s].datos), origen, k * SECTOR)
+            bien := manda(s, orden, lba, k, k * SECTOR, cierto)
+            si bien entonces
+                origen := origen + k * SECTOR
+                sectores_escritos := sectores_escritos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; le dice al disco s que pase a la superficie lo que tenga guardado
+    público función asentar(s: nat32): bool
+        variable bien: bool
+        variable orden: nat32
+        si s >= MAX_SATA o no escritura entonces devolver falso fin
+        si no satas[s].hay entonces devolver falso fin
+        orden := ORDEN_ASENTAR
+        si satas[s].lba48 entonces orden := ORDEN_ASENTAR48 fin
+        tomar(cerrojo)
+        bien := manda(s, orden, 0, 0, 0, falso)
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+fin Ahci.

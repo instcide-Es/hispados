@@ -65,11 +65,28 @@ módulo Llamadas
     público constante DE_SISTEMA = 0x04
     público constante CARPETA = 0x10
 
+    ; ---- lo que se sabe de una unidad: info_unidad(n, ...) ----
+    público constante MEDIO_MEMORIA = 0         ; los archivos que trajo el cargador
+    público constante MEDIO_IDE = 1
+    público constante MEDIO_SATA = 2
+    público constante MEDIO_USB = 3
+    público tipo Info_unidad = estructura
+        letra: byte                             ; 0: un disco sin ningún volumen que se pueda leer
+        clase: byte                             ; 12, 16 o 32 (FAT); 1: en memoria; 0: nada
+        medio: byte                             ; MEDIO_...
+        solo_lectura: byte
+        total_k, libre_k: nat32                 ; en K (libre_k = 0xFFFFFFFF: no se sabe)
+        del_sistema: nat32                      ; 1: es la unidad del sistema
+        nombre: arreglo [41] de byte            ; el modelo del disco
+        etiqueta: arreglo [12] de byte          ; el nombre del volumen
+        relleno: arreglo [3] de byte
+    fin
+
     ; ---- los datos del sistema: dato(...) ----
     público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
     público constante DATO_MARCOS = 1           ; los que hay
     público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
-    público constante DATO_VERSIÓN = 3          ; 0x0005 es la 0.5
+    público constante DATO_VERSIÓN = 3          ; 0x0006 es la 0.6
     público constante DATO_TAREAS = 4
     público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
     público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
@@ -453,6 +470,20 @@ módulo Llamadas
     ; la carpeta de trabajo del programa pasa a ser esa (la heredan los que lance)
     público función cambiar_carpeta(nombre: puntero a byte): nat32
         devolver llamada(25, nat32(nombre), 0, 0)
+    fin
+
+    ; la unidad de trabajo del programa pasa a ser la de esa letra ('X'), con
+    ; su raíz como carpeta de trabajo; con 0, solo se pregunta. Da la letra
+    ; de la unidad de trabajo que queda (o un error: no hay tal unidad).
+    público función unidad(letra: nat32): nat32
+        devolver llamada(42, letra, 0, 0)
+    fin
+
+    ; lo que se sabe de la unidad número «cuál» (0, 1, 2...: primero las
+    ; unidades, por su letra; luego los discos sin ninguna unidad que se
+    ; pueda leer, con la letra a 0). Falso si no hay tantas.
+    público función info_unidad(cuál: nat32, ref i: Info_unidad): bool
+        devolver llamada(43, cuál, nat32(dirección(i)), 0) = 1
     fin
 
     ; la carpeta de trabajo, a «destino» (donde caben «cabe» octetos): «\» o

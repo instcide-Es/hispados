@@ -347,7 +347,7 @@ módulo UConsola
             si opción = 0 entonces
                 teclea_texto("AYUDA\n")
             sino
-                t := "\r\nConsola de Hispa-Pentium 0.5: el intérprete de órdenes en una ventana.\r\n"
+                t := "\r\nConsola de Hispa-Pentium 0.6: el intérprete de órdenes en una ventana.\r\n"
                 n := 0
                 mientras t[n] <> 0 hacer n := n + 1 fin
                 escribe(t, n)

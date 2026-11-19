@@ -5,7 +5,9 @@
 ;
 ;    EQUIPO [CARPETA]    abre ya en esa carpeta (sin ella: las unidades)
 ;
-;  Primero, las unidades (de momento, una: C:, el disco FAT o, sin disco, lo
+;  Primero, las unidades, con su letra (C: el disco de dentro, X: la memoria
+;  USB, M: lo que ha traído el cargador, en memoria) y los discos en los que
+;  no hay nada que se pueda leer; antes, solo una (C:, el disco FAT o, sin disco, lo
 ;  que ha traído el cargador, en memoria), con lo que miden y lo que les
 ;  queda libre. Con dos clics (o Intro) se entra: salen sus carpetas y sus
 ;  archivos. Dos clics en una carpeta entran en ella; en «..», se vuelve; en
@@ -49,6 +51,11 @@ módulo UEquipo
     variable otra: arreglo [MAX_RUTA + 16] de byte
     variable menús: arreglo [20] de byte = "Archivo|Ver|Ayuda"
     variable menú_abierto: ent32 = -1
+    constante MAX_UNIDADES = 8
+    constante ALTO_UNIDAD = 60                  ; lo que ocupa cada unidad en la lista
+    variable us: arreglo [MAX_UNIDADES] de Info_unidad
+    variable n_unidades: ent32
+    variable letra: nat32 = 'C'                 ; la unidad que se está viendo
 
     ; -------------------------------------------------------------------------
     ;  Leer la carpeta
@@ -118,13 +125,14 @@ módulo UEquipo
     fin
 
     función pinta_cabeza()
-        variable d: arreglo [1] de nat32
+        variable d: arreglo [2] de nat32
         pinta_menús(v, ancho, menús, menú_abierto)
         degradado(v, 0, ALTO_MENÚS, ancho, CABEZA, 0xF4F8FE, 0xD3E3F8)
         rectángulo(v, 0, ARRIBA - 1, ancho, 1, 0x9DBBE4)
         si dentro entonces
-            d[0] := nat32(dirección(ruta[0]))
-            formatear(renglón, 120, "C:%s", d)
+            d[0] := letra
+            d[1] := nat32(dirección(ruta[0]))
+            formatear(renglón, 120, "%c:%s", d)
             dibujo_carpeta(8, ALTO_MENÚS + 8)
             texto_negrita(v, 34, ALTO_MENÚS + 7, renglón, TINTA)
         sino
@@ -147,33 +155,79 @@ módulo UEquipo
         fin
     fin
 
-    ; las unidades: de momento, C:
+    ; pregunta al núcleo por las unidades (y los discos sin ninguna)
+    función lee_unidades()
+        n_unidades := 0
+        mientras n_unidades < MAX_UNIDADES y info_unidad(nat32(n_unidades), us[n_unidades]) hacer
+            n_unidades := n_unidades + 1
+        fin
+    fin
+
+    ; de qué es la unidad: «disco duro (SATA)», «memoria USB»...
+    función texto_medio(medio: nat32): puntero a byte
+        según medio
+            caso MEDIO_IDE: devolver "disco duro (IDE)"
+            caso MEDIO_SATA: devolver "disco duro (SATA)"
+            caso MEDIO_USB: devolver "memoria USB"
+        fin
+        devolver "en memoria"
+    fin
+
+    ; las unidades, una debajo de otra: su letra, de qué son y lo que cabe
     función pinta_unidades()
         variable d: arreglo [3] de nat32
-        variable fat, por_mega: nat32
+        variable i, yy: ent32
         rectángulo(v, 0, ARRIBA, ancho, alto - ARRIBA - PIE, PAPEL)
-        si elegida = 0 entonces redondeado(v, 8, ARRIBA + 8, ancho - 16, 58, 6, 0xDCEAFB, 0xC6DCF8) fin
-        dibujo_unidad(20, ARRIBA + 20)
-        texto_negrita(v, 76, ARRIBA + 14, "Unidad C:", TINTA)
-        fat := dato(DATO_FAT)
-        si fat = 0 entonces
-            texto(v, 76, ARRIBA + 32, "en memoria: lo que ha traído el cargador", TINTA)
-            texto(v, 76, ARRIBA + 48, "(de solo lectura)", SUAVE)
-        sino
-            d[0] := fat
-            formatear(renglón, 120, "disco duro, FAT%u", d)
-            texto(v, 76, ARRIBA + 32, renglón, TINTA)
-            ; los megas: los clusters entre los que caben en uno
-            por_mega := 0x100000 div dato(DATO_CLUSTER)
-            si por_mega = 0 entonces por_mega := 1 fin
-            d[0] := dato(DATO_CLUSTERS) div por_mega
-            d[1] := dato(DATO_CLUSTERS_LIBRES) div por_mega
-            si dato(DATO_CLUSTERS_LIBRES) = 0xFFFFFFFF entonces
-                formatear(renglón, 120, "%u MB", d)
+        i := 0
+        mientras i < n_unidades y ARRIBA + 8 + (i + 1) * ALTO_UNIDAD <= alto - PIE + 4 hacer
+            yy := ARRIBA + i * ALTO_UNIDAD
+            si elegida = i entonces redondeado(v, 8, yy + 8, ancho - 16, 58, 6, 0xDCEAFB, 0xC6DCF8) fin
+            dibujo_unidad(20, yy + 20)
+            si us[i].letra = 0 entonces
+                ; un disco sin nada que se pueda leer
+                d[0] := nat32(texto_medio(us[i].medio))
+                formatear(renglón, 120, "Un %s", d)
+                texto_negrita(v, 76, yy + 14, renglón, TINTA)
+                texto(v, 76, yy + 32, us[i].nombre, TINTA)
+                d[0] := us[i].total_k div 1024
+                formatear(renglón, 120, "%u MB; sin ninguna partición FAT: no se puede leer", d)
+                texto(v, 76, yy + 48, renglón, SUAVE)
             sino
-                formatear(renglón, 120, "%u MB, %u MB libres", d)
+                d[0] := us[i].letra
+                d[1] := nat32(dirección(us[i].etiqueta[0]))
+                si us[i].etiqueta[0] <> 0 entonces
+                    formatear(renglón, 120, "Unidad %c:  %s", d)
+                sino
+                    formatear(renglón, 120, "Unidad %c:", d)
+                fin
+                texto_negrita(v, 76, yy + 14, renglón, TINTA)
+                si us[i].clase = 1 entonces
+                    texto(v, 76, yy + 32, "en memoria: lo que ha traído el cargador", TINTA)
+                    texto(v, 76, yy + 48, "(de solo lectura)", SUAVE)
+                sino
+                    d[0] := nat32(texto_medio(us[i].medio))
+                    d[1] := us[i].clase
+                    si us[i].medio = MEDIO_IDE entonces
+                        d[0] := us[i].clase
+                        formatear(renglón, 120, "disco duro, FAT%u", d)
+                    sino
+                        formatear(renglón, 120, "%s, FAT%u", d)
+                    fin
+                    texto(v, 76, yy + 32, renglón, TINTA)
+                    d[0] := us[i].total_k div 1024
+                    d[1] := us[i].libre_k div 1024
+                    d[2] := nat32("")
+                    si us[i].solo_lectura <> 0 entonces d[2] := nat32(" (de solo lectura)") fin
+                    si us[i].libre_k = 0xFFFFFFFF entonces
+                        d[1] := d[2]
+                        formatear(renglón, 120, "%u MB%s", d)
+                    sino
+                        formatear(renglón, 120, "%u MB, %u MB libres%s", d)
+                    fin
+                    texto(v, 76, yy + 48, renglón, SUAVE)
+                fin
             fin
-            texto(v, 76, ARRIBA + 48, renglón, SUAVE)
+            i := i + 1
         fin
     fin
 
@@ -226,6 +280,13 @@ módulo UEquipo
     ;  Andar por las carpetas y abrir
     ; -------------------------------------------------------------------------
     función entra_en_unidad()
+        si elegida < 0 o elegida >= n_unidades entonces devolver fin
+        si us[elegida].letra = 0 entonces
+            Textos32.copiar(aviso, "En ese disco no hay ninguna partición FAT.")
+            devolver
+        fin
+        si es_error(unidad(us[elegida].letra)) entonces devolver fin
+        letra := us[elegida].letra
         dentro := cierto
         Textos32.copiar(ruta, "\\")
         lee_carpeta()
@@ -238,6 +299,7 @@ módulo UEquipo
         si n <= 1 entonces
             dentro := falso
             elegida := 0
+            lee_unidades()
             devolver
         fin
         mientras n > 1 y ruta[n - 1] <> '\\' hacer n := n - 1 fin
@@ -294,7 +356,8 @@ módulo UEquipo
         variable i: ent32
         si yy < ARRIBA o yy >= alto - PIE entonces devolver -1 fin
         si no dentro entonces
-            si yy >= ARRIBA + 8 y yy < ARRIBA + 66 entonces devolver 0 fin
+            i := (yy - ARRIBA - 8) div ALTO_UNIDAD
+            si yy >= ARRIBA + 8 y i < n_unidades entonces devolver i fin
             devolver -1
         fin
         si yy < ARRIBA + 4 entonces devolver -1 fin
@@ -309,7 +372,10 @@ módulo UEquipo
             abre()
         sino si c = 8 entonces
             si dentro entonces sube() fin
-        sino si dentro entonces
+        sino si no dentro entonces
+            si c = TECLA_ARRIBA y elegida > 0 entonces elegida := elegida - 1 fin
+            si c = TECLA_ABAJO y elegida < n_unidades - 1 entonces elegida := elegida + 1 fin
+        sino
             si c = TECLA_ARRIBA y elegida > 0 entonces
                 elegida := elegida - 1
             sino si c = TECLA_ABAJO y elegida < cuántas - 1 entonces
@@ -357,13 +423,14 @@ módulo UEquipo
                 caso 0:
                     dentro := falso
                     elegida := 0
+                    lee_unidades()
                 caso 1:
                     si dentro entonces sube() fin
                 caso 3:
                     si dentro entonces lee_carpeta() fin
             fin
         sino
-            Textos32.copiar(aviso, "Mi equipo, de Hispa-Pentium 0.5: las unidades y sus archivos.")
+            Textos32.copiar(aviso, "Mi equipo, de Hispa-Pentium 0.6: las unidades y sus archivos.")
         fin
         pinta_todo()
         devolver falso
@@ -385,8 +452,16 @@ módulo UEquipo
             k := k - 1
             ruta[k] := 0
         fin
+        letra := unidad(0)
+        lee_unidades()
         si k > 0 entonces
             a_mayúsculas(ruta)
+            ; (con la letra de la unidad delante: se entra en ella)
+            si ruta[1] = ':' entonces
+                si no es_error(unidad(ruta[0])) entonces letra := ruta[0] fin
+                Textos32.copiar(ruta, dirección(ruta[2]))
+                si ruta[0] = 0 entonces Textos32.copiar(ruta, "\\") fin
+            fin
             dentro := cierto
             lee_carpeta()
         fin

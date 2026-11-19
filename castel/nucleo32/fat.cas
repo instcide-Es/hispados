@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  fat.cas - el sistema de archivos FAT del núcleo de Hispa-Pentium: FAT12,
-;  FAT16 y FAT32, en un disco entero o en su primera partición FAT (tabla de
-;  particiones del MBR). Se lee y se escribe: crear, escribir, alargar,
+;  FAT16 y FAT32, en varios volúmenes a la vez (cada uno, un disco entero o
+;  una partición: los reparte unidades.cas). Se lee y se escribe: crear, escribir, alargar,
 ;  cortar, borrar y cambiar de nombre archivos; crear y borrar carpetas. Lo
 ;  que se cambia en la FAT va a todas sus copias y, en FAT32, el sector de
 ;  información lleva la cuenta de los clusters libres.
@@ -12,7 +12,7 @@
 ;
 ;  Un archivo (o una carpeta) abierto es un número, su «manejador»; es de la
 ;  tarea que lo abrió. De un archivo se leen y se escriben octetos; de una
-;  carpeta, sus entradas, una a una (leer_entrada). El disco va por ata.cas,
+;  carpeta, sus entradas, una a una (leer_entrada). El disco va por discos.cas,
 ;  sector a sector, con un sector de datos y uno de la FAT en la memoria; lo
 ;  que se escribe va al disco en el momento (nada se queda esperando en la
 ;  memoria más que el sector de la FAT, hasta que acaba la operación).
@@ -20,7 +20,7 @@
 ; =============================================================================
 módulo Fat
 
-    importar Ata, Tareas, Mem32, Fecha
+    importar Discos, Tareas, Mem32, Fecha
 
     ; ---- lo que devuelven las funciones cuando no puede ser ----
     público constante NO_HAY = 0xFFFFFFFF       ; no existe ese archivo
@@ -121,6 +121,7 @@ módulo Fat
         posición: nat32
         cluster, índice: nat32                  ; el cluster donde cae la posición, y cuál es de la cadena
         ent_sector, ent_despl: nat32            ; dónde está su entrada: el sector (0: la raíz) y dentro de él
+        vol: nat32                              ; el volumen donde está
     fin
 
     ; lo que se encuentra al recorrer una carpeta
@@ -132,14 +133,38 @@ módulo Fat
         c: Cruda
     fin
 
-    ; ---- el volumen ----
-    público variable montado: bool
-    público variable clase: nat32               ; 12, 16 o 32
-    público variable base: nat32                ; el sector del disco donde empieza el volumen
-    público variable sectores_cluster: nat32
-    público variable clusters: nat32
-    público variable total: nat32               ; los sectores del volumen
-    variable unidad: nat32
+    ; ---- los volúmenes ----
+    ; Lo de cada volumen montado se guarda en su ficha. Las funciones de este
+    ; módulo trabajan con UNO, «el que está en uso», cuyos datos están además
+    ; en las variables de más abajo (y del que son el sector de datos y el de
+    ; la FAT que hay en la memoria): elige() cambia de uno a otro. Todo, con
+    ; el cerrojo tomado.
+    público constante VOLÚMENES = 8
+    público tipo Volumen = estructura
+        montado: bool
+        clase: nat32                            ; 12, 16 o 32
+        disco: nat32                            ; en qué disco está (discos.cas)
+        base: nat32                             ; el sector del disco donde empieza
+        sectores_cluster: nat32
+        clusters: nat32
+        total: nat32                            ; los sectores del volumen
+        fat_inicio, fat_sectores, raíz_inicio, raíz_entradas, datos_inicio, raíz_cluster, info_sector: nat32
+        copias: nat32
+        libres: nat32
+        pista: nat32
+        info_sucio: bool
+        etiqueta: arreglo [12] de byte          ; el nombre que le puso quien lo formateó
+    fin
+    público variable volúmenes: arreglo [VOLÚMENES] de Volumen
+    variable en_uso: nat32 = 0xFFFFFFFF         ; el volumen que está en uso (NINGUNO: ninguno)
+
+    variable montado: bool
+    variable clase: nat32                       ; 12, 16 o 32
+    variable base: nat32                        ; el sector del disco donde empieza el volumen
+    variable sectores_cluster: nat32
+    variable clusters: nat32
+    variable total: nat32                       ; los sectores del volumen
+    variable disco: nat32
     variable fat_inicio, fat_sectores, raíz_inicio, raíz_entradas, datos_inicio, raíz_cluster, info_sector: nat32
     variable copias: nat32                      ; las copias de la FAT que se llevan al día
     variable libres: nat32 = 0xFFFFFFFF         ; los clusters libres (NINGUNO: aún no se han contado)
@@ -173,7 +198,7 @@ módulo Fat
     función trae(n: nat32): bool
         si buf_sector = n entonces devolver cierto fin
         buf_sector := NINGUNO
-        si no leer_sectores(unidad, base + n, 1, buf) entonces
+        si no leer_sectores(disco, base + n, 1, buf) entonces
             fallo := cierto
             devolver falso
         fin
@@ -183,7 +208,7 @@ módulo Fat
 
     ; lo de buf, a su sector del disco
     función guarda(): bool
-        si escribir_sectores(unidad, base + buf_sector, 1, buf) entonces devolver cierto fin
+        si escribir_sectores(disco, base + buf_sector, 1, buf) entonces devolver cierto fin
         buf_sector := NINGUNO
         fallo := cierto
         devolver falso
@@ -195,12 +220,53 @@ módulo Fat
         si no fat_sucio entonces devolver cierto fin
         fat_sucio := falso
         para k desde 0 hasta copias - 1 hacer
-            si no escribir_sectores(unidad, base + fat_buf_sector + k * fat_sectores, 1, fat_buf) entonces
+            si no escribir_sectores(disco, base + fat_buf_sector + k * fat_sectores, 1, fat_buf) entonces
                 fallo := cierto
                 devolver falso
             fin
         fin
         devolver cierto
+    fin
+
+    ; lo que cambia de un volumen mientras se usa, a su ficha
+    función apunta_volumen()
+        si en_uso >= VOLÚMENES entonces devolver fin
+        volúmenes[en_uso].libres := libres
+        volúmenes[en_uso].pista := pista
+        volúmenes[en_uso].info_sucio := info_sucio
+    fin
+
+    ; pone en uso el volumen v (que está montado): lo que quedara por
+    ; escribir del anterior va a su disco, y los dos sectores que hay en la
+    ; memoria se olvidan (son del otro)
+    función elige(v: nat32)
+        si v = en_uso entonces devolver fin
+        si en_uso < VOLÚMENES entonces
+            fat_guarda()
+            apunta_volumen()
+        fin
+        en_uso := v
+        buf_sector := NINGUNO
+        fat_buf_sector := NINGUNO
+        fat_sucio := falso
+        montado := volúmenes[v].montado
+        clase := volúmenes[v].clase
+        disco := volúmenes[v].disco
+        base := volúmenes[v].base
+        sectores_cluster := volúmenes[v].sectores_cluster
+        clusters := volúmenes[v].clusters
+        total := volúmenes[v].total
+        fat_inicio := volúmenes[v].fat_inicio
+        fat_sectores := volúmenes[v].fat_sectores
+        raíz_inicio := volúmenes[v].raíz_inicio
+        raíz_entradas := volúmenes[v].raíz_entradas
+        datos_inicio := volúmenes[v].datos_inicio
+        raíz_cluster := volúmenes[v].raíz_cluster
+        info_sector := volúmenes[v].info_sector
+        copias := volúmenes[v].copias
+        libres := volúmenes[v].libres
+        pista := volúmenes[v].pista
+        info_sucio := volúmenes[v].info_sucio
     fin
 
     ; deja en fat_buf el sector de la FAT donde cae su octeto número d
@@ -210,7 +276,7 @@ módulo Fat
         si fat_buf_sector = s entonces devolver cierto fin
         fat_guarda()
         fat_buf_sector := NINGUNO
-        si no leer_sectores(unidad, base + s, 1, fat_buf) entonces
+        si no leer_sectores(disco, base + s, 1, fat_buf) entonces
             fallo := cierto
             devolver falso
         fin
@@ -378,7 +444,7 @@ módulo Fat
             fin
         fin
         info_sucio := falso
-        asentar(unidad)
+        asentar(disco)
     fin
 
     ; -------------------------------------------------------------------------
@@ -886,7 +952,7 @@ módulo Fat
     función está_abierto(sector: nat32, despl: nat32, escribiendo: bool): bool
         variable i: nat32
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer
-            si abiertos[i].usado y abiertos[i].ent_sector = sector y abiertos[i].ent_despl = despl y sector <> 0 entonces
+            si abiertos[i].usado y abiertos[i].vol = en_uso y abiertos[i].ent_sector = sector y abiertos[i].ent_despl = despl y sector <> 0 entonces
                 si abiertos[i].escribe o no escribiendo entonces devolver cierto fin
             fin
         fin
@@ -1003,13 +1069,15 @@ módulo Fat
 
     ; abre un archivo o una carpeta, de ese modo (PARA_LEER, PARA_ESCRIBIR, PARA_CREAR o
     ; PARA_AÑADIR): da su manejador, o un error (NO_HAY...)
-    público función abrir_archivo(ruta: puntero a byte, modo: nat32): nat32
+    público función abrir_archivo(v: nat32, ruta: puntero a byte, modo: nat32): nat32
         variable i, r: nat32
-        si no montado entonces devolver SIN_DISCO fin
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
         si modo > PARA_AÑADIR entonces devolver MAL fin
         ; sin permiso para escribir en el disco (ata.cas), todo es de solo lectura
-        si modo <> PARA_LEER y no escritura entonces devolver PROTEGIDO fin
+        si modo <> PARA_LEER y no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
         tomar(cerrojo)
+        elige(v)
         i := 0
         mientras i < MAX_ABIERTOS y abiertos[i].usado hacer i := i + 1 fin
         si i = MAX_ABIERTOS entonces
@@ -1021,6 +1089,7 @@ módulo Fat
                 abiertos[i].serie := serie
                 abiertos[i].usado := cierto
                 abiertos[i].dueño := actual.id
+                abiertos[i].vol := v
                 r := i
             fin
             si modo <> PARA_LEER entonces asienta(falso) fin
@@ -1036,6 +1105,7 @@ módulo Fat
         si no vale(m) o abiertos[m].carpeta entonces
             r := MAL
         sino
+            elige(abiertos[m].vol)
             fallo := falso
             r := lee(abiertos[m], destino, n)
             si fallo entonces r := MAL fin
@@ -1048,6 +1118,7 @@ módulo Fat
     ; o por qué no
     función escribe_en(ref a: Abierto, origen: puntero a byte, n: nat32): nat32
         variable r, tope: nat32
+        elige(a.vol)
         fallo := falso
         si a.posición > a.tamaño entonces
             ; se ha movido más allá del final: lo de en medio, a cero
@@ -1136,6 +1207,7 @@ módulo Fat
         si no vale(m) o abiertos[m].carpeta o no abiertos[m].escribe entonces
             r := MAL
         sino
+            elige(abiertos[m].vol)
             fallo := falso
             r := 0
             si no corta(abiertos[m]) entonces
@@ -1159,6 +1231,7 @@ módulo Fat
         si no vale(m) o no abiertos[m].carpeta entonces
             r := MAL
         sino
+            elige(abiertos[m].vol)
             fallo := falso
             h.hueco := NINGUNO
             si siguiente_entrada(abiertos[m], h) entonces
@@ -1214,6 +1287,7 @@ módulo Fat
     ; escrito, pone al día su entrada y lo asienta todo en el disco
     función cierra(i: nat32)
         si abiertos[i].escribe entonces
+            elige(abiertos[i].vol)
             fallo := falso
             pon_entrada(abiertos[i])
             asienta(cierto)
@@ -1262,14 +1336,16 @@ módulo Fat
     fin
 
     ; borra un archivo. Da 0, o por qué no.
-    público función borrar_archivo(ruta: puntero a byte): nat32
+    público función borrar_archivo(v: nat32, ruta: puntero a byte): nat32
         variable d: Abierto
         variable h: Hallazgo
         variable nombre: puntero a byte
         variable n, r: nat32
-        si no montado entonces devolver SIN_DISCO fin
-        si no escritura entonces devolver PROTEGIDO fin
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        si no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
         tomar(cerrojo)
+        elige(v)
         r := camina(ruta, d, nombre, n)
         si r = ES_RAÍZ entonces
             r := ES_CARPETA
@@ -1296,16 +1372,18 @@ módulo Fat
 
     ; cambia de nombre un archivo o una carpeta; un archivo, además, puede
     ; pasar a otra carpeta. Da 0, o por qué no.
-    público función renombrar(vieja: puntero a byte, nueva: puntero a byte): nat32
+    público función renombrar(v: nat32, vieja: puntero a byte, nueva: puntero a byte): nat32
         variable d, d2: Abierto
         variable h, h2: Hallazgo
         variable nombre, nombre2: puntero a byte
         variable n, n2, r: nat32
         variable once: arreglo [11] de byte
         variable c: puntero a Cruda
-        si no montado entonces devolver SIN_DISCO fin
-        si no escritura entonces devolver PROTEGIDO fin
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        si no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
         tomar(cerrojo)
+        elige(v)
         r := camina(vieja, d, nombre, n)
         si r = ES_RAÍZ entonces r := PROTEGIDO fin
         si r = 0 y no busca_en(d, nombre, n, h) entonces
@@ -1361,16 +1439,18 @@ módulo Fat
     fin
 
     ; hace una carpeta nueva (vacía: con su «.» y su «..»). Da 0, o por qué no.
-    público función crear_carpeta(ruta: puntero a byte): nat32
+    público función crear_carpeta(v: nat32, ruta: puntero a byte): nat32
         variable d, nueva: Abierto
         variable h: Hallazgo
         variable nombre: puntero a byte
         variable n, r, c, padre, f, hora: nat32
         variable once: arreglo [11] de byte
         variable e: puntero a Cruda
-        si no montado entonces devolver SIN_DISCO fin
-        si no escritura entonces devolver PROTEGIDO fin
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        si no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
         tomar(cerrojo)
+        elige(v)
         r := camina(ruta, d, nombre, n)
         si r = ES_RAÍZ entonces r := YA_EXISTE fin
         si r = 0 y busca_en(d, nombre, n, h) entonces r := YA_EXISTE fin
@@ -1425,14 +1505,16 @@ módulo Fat
     fin
 
     ; borra una carpeta, si está vacía. Da 0, o por qué no.
-    público función borrar_carpeta(ruta: puntero a byte): nat32
+    público función borrar_carpeta(v: nat32, ruta: puntero a byte): nat32
         variable d: Abierto
         variable h: Hallazgo
         variable nombre: puntero a byte
         variable n, r, i, cl: nat32
-        si no montado entonces devolver SIN_DISCO fin
-        si no escritura entonces devolver PROTEGIDO fin
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        si no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
         tomar(cerrojo)
+        elige(v)
         r := camina(ruta, d, nombre, n)
         si r = ES_RAÍZ entonces
             r := PROTEGIDO
@@ -1468,10 +1550,12 @@ módulo Fat
     ; los clusters libres del volumen (NINGUNO = 0xFFFFFFFF si no se sabe):
     ; se cuentan en la FAT la primera vez (en FAT32, vale lo que diga su
     ; sector de información) y luego se lleva la cuenta
-    público función clusters_libres(): nat32
+    público función clusters_libres(v: nat32): nat32
         variable n: nat32
-        si no montado entonces devolver NINGUNO fin
+        si v >= VOLÚMENES entonces devolver NINGUNO fin
+        si no volúmenes[v].montado entonces devolver NINGUNO fin
         tomar(cerrojo)
+        elige(v)
         fallo := falso
         cuenta_libres()
         n := libres
@@ -1493,36 +1577,45 @@ módulo Fat
         devolver s <> 0 y s yb (s - 1) = 0
     fin
 
-    ; mira el disco u: si es FAT (entero, o su primera partición FAT), lo
-    ; deja listo para abrir archivos
-    público función montar(u: nat32): bool
+    ; ¿se puede escribir en el volumen v? (lo dice su disco: discos.cas)
+    público función escribible(v: nat32): bool
+        si v >= VOLÚMENES entonces devolver falso fin
+        devolver volúmenes[v].montado y se_puede_escribir(volúmenes[v].disco)
+    fin
+
+    ; ¿hay algún archivo abierto en el volumen v?
+    público función abiertos_en(v: nat32): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+            si abiertos[i].usado y abiertos[i].vol = v entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; mira si en el disco d, desde su sector «inicio», hay un volumen FAT
+    ; (el disco entero, con inicio 0, o una partición); si lo hay, queda
+    ; montado como el volumen número v, listo para abrir archivos
+    público función montar(v: nat32, d: nat32, inicio: nat32): bool
         variable b: puntero a Bpb
-        variable i, t: nat32
-        variable p: puntero a nat32
-        montado := falso
-        si u >= DISCOS entonces devolver falso fin
-        si no discos[u].hay entonces devolver falso fin
+        variable i, donde: nat32
+        si v >= VOLÚMENES entonces devolver falso fin
         tomar(cerrojo)
-        unidad := u
-        base := 0
+        si en_uso < VOLÚMENES entonces
+            fat_guarda()
+            apunta_volumen()
+        fin
+        en_uso := v
+        montado := falso
+        disco := d
+        base := inicio
         buf_sector := NINGUNO
         fat_buf_sector := NINGUNO
         fat_sucio := falso
         info_sucio := falso
         libres := NINGUNO
         pista := 2
-        si trae(0) y no es_volumen() y buf[510] = 0x55 y buf[511] = 0xAA entonces
-            ; una tabla de particiones: la primera que sea FAT
-            para i desde 0 hasta 3 hacer
-                t := buf[446 + i * 16 + 4]
-                si t = 0x01 o t = 0x04 o t = 0x06 o t = 0x0B o t = 0x0C o t = 0x0E entonces
-                    p := puntero(dirección(buf[446 + i * 16 + 8]))
-                    base := valor(p)
-                    romper
-                fin
-            fin
-            buf_sector := NINGUNO
-        fin
+        fallo := falso
         si trae(0) y es_volumen() entonces
             b := puntero(dirección(buf))
             sectores_cluster := b.sectores_cluster
@@ -1552,11 +1645,42 @@ módulo Fat
                     si (b.banderas yb 0x0F) < copias entonces fat_inicio := fat_inicio + (b.banderas yb 0x0F) * fat_sectores fin
                     copias := 1
                 fin
+                ; su etiqueta: 11 letras, en un sitio u otro según la clase
+                donde := 43
+                si clase = 32 entonces donde := 71 fin
+                para i desde 0 hasta 10 hacer volúmenes[v].etiqueta[i] := buf[donde + i] fin
+                i := 11
+                mientras i > 0 y (volúmenes[v].etiqueta[i - 1] = ' ' o volúmenes[v].etiqueta[i - 1] = 0) hacer i := i - 1 fin
+                volúmenes[v].etiqueta[i] := 0
+                si buf[donde - 5] <> 0x29 o iguales_once(dirección(volúmenes[v].etiqueta[0]), "NO NAME") entonces volúmenes[v].etiqueta[0] := 0 fin
             fin
         fin
-        para i desde 0 hasta MAX_ABIERTOS - 1 hacer abiertos[i].usado := falso fin
+        volúmenes[v].montado := montado
+        volúmenes[v].clase := clase
+        volúmenes[v].disco := disco
+        volúmenes[v].base := base
+        volúmenes[v].sectores_cluster := sectores_cluster
+        volúmenes[v].clusters := clusters
+        volúmenes[v].total := total
+        volúmenes[v].fat_inicio := fat_inicio
+        volúmenes[v].fat_sectores := fat_sectores
+        volúmenes[v].raíz_inicio := raíz_inicio
+        volúmenes[v].raíz_entradas := raíz_entradas
+        volúmenes[v].datos_inicio := datos_inicio
+        volúmenes[v].raíz_cluster := raíz_cluster
+        volúmenes[v].info_sector := info_sector
+        volúmenes[v].copias := copias
+        apunta_volumen()
+        si no montado entonces en_uso := NINGUNO fin
         soltar(cerrojo)
-        devolver montado
+        devolver volúmenes[v].montado
+    fin
+
+    función iguales_once(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y a[i] = b[i] hacer i := i + 1 fin
+        devolver a[i] = b[i]
     fin
 
 fin Fat.

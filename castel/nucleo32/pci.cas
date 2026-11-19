@@ -1,0 +1,199 @@
+; =============================================================================
+;  pci.cas - el bus PCI del núcleo de Hispa-Pentium: leer y escribir el
+;  espacio de configuración de cada aparato (el «mecanismo 1»: los puertos
+;  0xCF8 y 0xCFC) y buscar los que hay de una clase (una controladora SATA,
+;  las de USB...). Un aparato se nombra con un número: bus, aparato y
+;  función, juntos como los quiere el puerto 0xCF8 (bus << 16, aparato << 11,
+;  función << 8).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Pci
+
+    importar Cpu
+
+    constante DIRECCIÓN = 0xCF8
+    constante DATOS = 0xCFC
+
+    público constante NO_HAY_PCI = 0xFFFFFFFF
+
+    ; ---- los registros de configuración que se usan ----
+    público constante PCI_ORDEN = 0x04          ; (16 bits) bit 0: puertos; 1: memoria; 2: manda en el bus
+    público constante PCI_CLASE = 0x08          ; clase, subclase, interfaz y revisión
+    público constante PCI_BAR0 = 0x10
+    público constante PCI_IRQ = 0x3C
+
+    variable mirado, hay: bool
+    variable último_bus: nat32
+
+    función entra32(puerto: nat32): nat32
+        ensamblador
+            mov edx, {puerto}
+            in eax, dx
+        fin
+    fin
+
+    función saca32(puerto: nat32, v: nat32)
+        ensamblador
+            mov edx, {puerto}
+            mov eax, {v}
+            out dx, eax
+        fin
+    fin
+
+    ; el registro de 32 bits «reg» (múltiplo de 4) del aparato «a»
+    público función pci_leer(a: nat32, reg: nat32): nat32
+        variable b, v: nat32
+        b := sin_interrupciones()
+        saca32(DIRECCIÓN, 0x80000000 ob a ob (reg yb 0xFC))
+        v := entra32(DATOS)
+        reponer(b)
+        devolver v
+    fin
+
+    público función pci_escribir(a: nat32, reg: nat32, v: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        saca32(DIRECCIÓN, 0x80000000 ob a ob (reg yb 0xFC))
+        saca32(DATOS, v)
+        reponer(b)
+    fin
+
+    público función pci_leer8(a: nat32, reg: nat32): nat32
+        devolver (pci_leer(a, reg) >> ((reg yb 3) * 8)) yb 0xFF
+    fin
+
+    público función pci_leer16(a: nat32, reg: nat32): nat32
+        devolver (pci_leer(a, reg) >> ((reg yb 2) * 8)) yb 0xFFFF
+    fin
+
+    público función pci_escribir8(a: nat32, reg: nat32, v: nat32)
+        variable d, s: nat32
+        s := (reg yb 3) * 8
+        d := pci_leer(a, reg) yb nob (nat32(0xFF) << s)
+        pci_escribir(a, reg, d ob ((v yb 0xFF) << s))
+    fin
+
+    público función pci_escribir16(a: nat32, reg: nat32, v: nat32)
+        variable d, s: nat32
+        s := (reg yb 2) * 8
+        d := pci_leer(a, reg) yb nob (nat32(0xFFFF) << s)
+        pci_escribir(a, reg, d ob ((v yb 0xFFFF) << s))
+    fin
+
+    ; ¿hay bus PCI? (el puerto de la dirección guarda lo que se le escribe)
+    público función hay_pci(): bool
+        variable antes, v, b: nat32
+        si mirado entonces devolver hay fin
+        mirado := cierto
+        b := sin_interrupciones()
+        antes := entra32(DIRECCIÓN)
+        saca32(DIRECCIÓN, 0x80000000)
+        v := entra32(DIRECCIÓN)
+        saca32(DIRECCIÓN, antes)
+        reponer(b)
+        hay := v = 0x80000000
+        último_bus := 0                         ; (los de detrás de los puentes se ven al buscar)
+        devolver hay
+    fin
+
+    ; el aparato que sigue a «tras» (NO_HAY_PCI: empezar por el primero) cuya
+    ; clase, subclase e interfaz son las de «clase» (0xCCSSII), mirando solo
+    ; los bits de «máscara» (0xFFFF00: cualquier interfaz). Da su número, o
+    ; NO_HAY_PCI si no quedan.
+    público función pci_busca(clase: nat32, máscara: nat32, tras: nat32): nat32
+        variable bus, ap, fu, a, v, cab, hallado: nat32
+        variable salta: bool
+        si no hay_pci() entonces devolver NO_HAY_PCI fin
+        bus := 0
+        ap := 0
+        fu := 0
+        si tras <> NO_HAY_PCI entonces
+            bus := (tras >> 16) yb 0xFF
+            ap := (tras >> 11) yb 0x1F
+            fu := ((tras >> 8) yb 7) + 1
+            ; si el aparato no tiene más funciones, al siguiente
+            si fu = 8 o pci_leer8(tras yb 0xFFF800, 0x0E) yb 0x80 = 0 entonces
+                fu := 0
+                ap := ap + 1
+                si ap = 32 entonces
+                    ap := 0
+                    bus := bus + 1
+                fin
+            fin
+        fin
+        mientras bus <= último_bus hacer
+            a := (bus << 16) ob (ap << 11) ob (fu << 8)
+            v := pci_leer(a, 0) yb 0xFFFF
+            salta := falso
+            hallado := NO_HAY_PCI
+            si v = 0xFFFF o v = 0 entonces
+                salta := fu = 0
+            sino
+                cab := pci_leer8(a, 0x0E)
+                ; un puente PCI-PCI: detrás hay más buses (como mucho se
+                ; miran 32: los portátiles con Thunderbolt dicen tener cien)
+                si (cab yb 0x7F) = 1 entonces
+                    v := pci_leer8(a, 0x1A)
+                    si v > 31 entonces v := 31 fin
+                    si v > último_bus entonces último_bus := v fin
+                fin
+                si ((pci_leer(a, PCI_CLASE) >> 8) yb máscara) = (clase yb máscara) entonces hallado := a fin
+                salta := fu = 0 y cab yb 0x80 = 0
+            fin
+            si hallado <> NO_HAY_PCI entonces devolver hallado fin
+            si salta o fu = 7 entonces
+                fu := 0
+                ap := ap + 1
+                si ap = 32 entonces
+                    ap := 0
+                    bus := bus + 1
+                fin
+            sino
+                fu := fu + 1
+            fin
+        fin
+        devolver NO_HAY_PCI
+    fin
+
+    ; la dirección de memoria del registro base número n (0 a 5) del aparato;
+    ; 0 si es de puertos, no está puesta o cae por encima de los 4 GB
+    público función pci_memoria(a: nat32, n: nat32): nat32
+        variable v: nat32
+        v := pci_leer(a, PCI_BAR0 + n * 4)
+        si v yb 1 <> 0 entonces devolver 0 fin
+        si (v yb 6) = 4 y n < 5 entonces
+            si pci_leer(a, PCI_BAR0 + n * 4 + 4) <> 0 entonces devolver 0 fin
+        fin
+        devolver v yb 0xFFFFFFF0
+    fin
+
+    ; y la de puertos (0 si es de memoria)
+    público función pci_puertos(a: nat32, n: nat32): nat32
+        variable v: nat32
+        v := pci_leer(a, PCI_BAR0 + n * 4)
+        si v yb 1 = 0 entonces devolver 0 fin
+        devolver v yb 0xFFFC
+    fin
+
+    ; que el aparato atienda en la memoria (o en los puertos) y mande en el
+    ; bus (para que pueda leer y escribir él en la memoria: DMA)
+    público función pci_enciende(a: nat32)
+        pci_escribir16(a, PCI_ORDEN, pci_leer16(a, PCI_ORDEN) ob 0x07)
+    fin
+
+    ; la capacidad número «cuál» de la lista del aparato: dónde está (0 si
+    ; no la tiene)
+    público función pci_capacidad(a: nat32, cuál: nat32): nat32
+        variable p, n: nat32
+        si pci_leer16(a, 0x06) yb 0x10 = 0 entonces devolver 0 fin
+        p := pci_leer8(a, 0x34) yb 0xFC
+        n := 0
+        mientras p <> 0 y n < 48 hacer
+            si pci_leer8(a, p) = cuál entonces devolver p fin
+            p := pci_leer8(a, p + 1) yb 0xFC
+            n := n + 1
+        fin
+        devolver 0
+    fin
+
+fin Pci.

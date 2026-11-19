@@ -1,0 +1,173 @@
+; =============================================================================
+;  discos.cas - los discos del núcleo de Hispa-Pentium, sean de la clase que
+;  sean: los ATA del canal IDE clásico (ata.cas), los SATA de una
+;  controladora AHCI (ahci.cas) y las memorias USB (usbalm.cas). Quien lee o
+;  escribe sectores (la FAT, las particiones) lo hace por aquí, con el número
+;  del disco en esta tabla, y no sabe qué hay debajo.
+;
+;  El permiso de escritura se lleva por disco: de fábrica NINGUNO se puede
+;  escribir (en un PC de verdad, el disco es el del dueño). permiso() lo da a
+;  todos («escritura» en la línea del cargador) o solo a las memorias USB
+;  («escritura=usb»); y además cada controlador se niega por su cuenta a
+;  mandar una orden de escribir si no se le ha dicho que puede.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Discos
+
+    importar Ata, Ahci, Usbalm, Textos32
+
+    público constante SECTOR = 512
+    público constante MAX_DISCOS = 8
+
+    ; ---- de qué clase es un disco ----
+    público constante DE_ATA = 1                ; del canal IDE clásico
+    público constante DE_AHCI = 2               ; SATA, por AHCI
+    público constante DE_USB = 3                ; una memoria (o un disco) USB
+
+    ; ---- los permisos de escritura ----
+    público constante SIN_PERMISO = 0           ; no se escribe en ningún disco
+    público constante PERMISO_USB = 1           ; solo en las memorias USB
+    público constante PERMISO_TODOS = 2         ; en todos
+
+    público tipo Disco = estructura
+        hay: bool
+        clase: nat32                            ; DE_ATA, DE_AHCI o DE_USB
+        cuál: nat32                             ; su número para su controlador
+        sectores: nat32
+        escribible: bool                        ; se puede escribir en él
+        modelo: arreglo [41] de byte
+    fin
+
+    público variable discos: arreglo [MAX_DISCOS] de Disco
+    público variable cuántos_discos: nat32
+    variable el_permiso: nat32
+
+    función añade(clase: nat32, cuál: nat32, sectores: nat32, modelo: puntero a byte)
+        variable d: nat32
+        si cuántos_discos >= MAX_DISCOS entonces devolver fin
+        d := cuántos_discos
+        discos[d].hay := cierto
+        discos[d].clase := clase
+        discos[d].cuál := cuál
+        discos[d].sectores := sectores
+        discos[d].escribible := falso
+        copiar_hasta(discos[d].modelo, modelo, 41)
+        cuántos_discos := d + 1
+    fin
+
+    función reparte_permiso()
+        variable d: nat32
+        Ata.escritura := el_permiso = PERMISO_TODOS
+        Ahci.escritura := el_permiso = PERMISO_TODOS
+        Usbalm.escritura := el_permiso <> SIN_PERMISO
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            discos[d].escribible := discos[d].hay y (el_permiso = PERMISO_TODOS o (el_permiso = PERMISO_USB y discos[d].clase = DE_USB))
+        fin
+    fin
+
+    ; dice en qué discos se puede escribir (SIN_PERMISO, PERMISO_USB o
+    ; PERMISO_TODOS)
+    público función permiso(cuál: nat32)
+        el_permiso := cuál
+        reparte_permiso()
+    fin
+
+    público función permiso_dado(): nat32
+        devolver el_permiso
+    fin
+
+    ; mira los discos del PC (los de dentro: ATA y SATA) y los apunta. Da
+    ; cuántos ha encontrado.
+    público función busca_internos(): nat32
+        variable u, n: nat32
+        n := cuántos_discos
+        Ata.identificar()
+        para u desde 0 hasta Ata.DISCOS - 1 hacer
+            si Ata.discos[u].hay entonces añade(DE_ATA, u, Ata.discos[u].sectores, dirección(Ata.discos[u].modelo[0])) fin
+        fin
+        Ahci.identificar()
+        para u desde 0 hasta MAX_SATA - 1 hacer
+            si satas[u].hay entonces añade(DE_AHCI, u, satas[u].sectores, dirección(satas[u].modelo[0])) fin
+        fin
+        reparte_permiso()
+        devolver cuántos_discos - n
+    fin
+
+    ; apunta las memorias USB que ha encontrado usbalm.cas (después de
+    ; enumerar el USB). Da cuántas.
+    público función busca_usb(): nat32
+        variable u, n: nat32
+        n := cuántos_discos
+        para u desde 0 hasta MAX_MEMORIAS - 1 hacer
+            si memorias[u].hay entonces añade(DE_USB, u, memorias[u].sectores, dirección(memorias[u].modelo[0])) fin
+        fin
+        reparte_permiso()
+        devolver cuántos_discos - n
+    fin
+
+    función vale(d: nat32, lba: nat32, n: nat32): bool
+        si d >= MAX_DISCOS entonces devolver falso fin
+        devolver discos[d].hay y lba < discos[d].sectores y n <= discos[d].sectores - lba
+    fin
+
+    ; trae n sectores del disco d, desde el sector lba, a destino. Falso si
+    ; no hay tal disco, si se sale de él o si el disco da un error.
+    público función leer_sectores(d: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        si no vale(d, lba, n) entonces devolver falso fin
+        según discos[d].clase
+            caso DE_ATA: devolver Ata.leer_sectores(discos[d].cuál, lba, n, destino)
+            caso DE_AHCI: devolver Ahci.leer_sectores(discos[d].cuál, lba, n, destino)
+            caso DE_USB: devolver Usbalm.leer_sectores(discos[d].cuál, lba, n, destino)
+        fin
+        devolver falso
+    fin
+
+    ; lleva n sectores de origen al disco d, desde el sector lba. Falso si no
+    ; puede ser... o si en ese disco no se puede escribir.
+    público función escribir_sectores(d: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
+        si no vale(d, lba, n) entonces devolver falso fin
+        si no discos[d].escribible entonces devolver falso fin
+        según discos[d].clase
+            caso DE_ATA: devolver Ata.escribir_sectores(discos[d].cuál, lba, n, origen)
+            caso DE_AHCI: devolver Ahci.escribir_sectores(discos[d].cuál, lba, n, origen)
+            caso DE_USB: devolver Usbalm.escribir_sectores(discos[d].cuál, lba, n, origen)
+        fin
+        devolver falso
+    fin
+
+    ; le dice al disco d que pase a la superficie lo que tenga guardado
+    público función asentar(d: nat32): bool
+        si d >= MAX_DISCOS entonces devolver falso fin
+        si no discos[d].hay o no discos[d].escribible entonces devolver falso fin
+        según discos[d].clase
+            caso DE_ATA: devolver Ata.asentar(discos[d].cuál)
+            caso DE_AHCI: devolver Ahci.asentar(discos[d].cuál)
+            caso DE_USB: devolver Usbalm.asentar(discos[d].cuál)
+        fin
+        devolver falso
+    fin
+
+    público función sectores_leídos(): nat32
+        devolver Ata.sectores_leídos + Ahci.sectores_leídos + Usbalm.sectores_leídos
+    fin
+
+    público función sectores_escritos(): nat32
+        devolver Ata.sectores_escritos + Ahci.sectores_escritos + Usbalm.sectores_escritos
+    fin
+
+    público función se_puede_escribir(d: nat32): bool
+        si d >= MAX_DISCOS entonces devolver falso fin
+        devolver discos[d].hay y discos[d].escribible
+    fin
+
+    ; cómo se llama la clase de un disco, para enseñarla
+    público función nombre_de_clase(clase: nat32): puntero a byte
+        según clase
+            caso DE_ATA: devolver "IDE"
+            caso DE_AHCI: devolver "SATA"
+            caso DE_USB: devolver "USB"
+        fin
+        devolver "?"
+    fin
+
+fin Discos.

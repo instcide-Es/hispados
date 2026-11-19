@@ -56,9 +56,17 @@ INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 [ -n "${DISCO:-}" ] && INITRD+=(-drive "file=$DISCO,format=raw,if=ide,index=0,snapshot=$INSTANTANEA")
 # con un disco (una imagen), se deja escribir en él; con SOLO_LECTURA=1, no
 # (como en un PC de verdad, donde hay que pedirlo: «escritura»)
-[ -n "${DISCO:-}" ] && [ -z "${SOLO_LECTURA:-}" ] && ARRANQUE="${ARRANQUE:+$ARRANQUE }escritura"
+[ -n "${DISCO:-}${SATA:-}" ] && [ -z "${SOLO_LECTURA:-}" ] && ARRANQUE="${ARRANQUE:+$ARRANQUE }escritura"
 [ -n "${ARRANQUE:-}" ] && INITRD+=(-append "$ARRANQUE")
 [ -n "${VGA:-}" ] && INITRD+=(-vga "$VGA")        # (VGA=none: un PC sin tarjeta gráfica que valga)
+# con SATA=imagen, esa imagen como disco SATA de una controladora AHCI (con
+# ESCRIBE=1, lo que se escriba llega a ella); con MAQUINA=..., esa máquina de
+# QEMU (MAQUINA=pc,i8042=off: un PC sin teclado ni ratón PS/2, como un Mac);
+# con QEMU_MAS="...", lo que se quiera añadir (controladoras y aparatos USB)
+[ -n "${SATA:-}" ] && INITRD+=(-device ahci,id=sata -drive "id=dsata,file=$SATA,format=raw,if=none,snapshot=$INSTANTANEA" -device ide-hd,drive=dsata,bus=sata.0)
+[ -n "${MAQUINA:-}" ] && INITRD+=(-machine "$MAQUINA")
+# shellcheck disable=SC2206
+[ -n "${QEMU_MAS:-}" ] && INITRD+=($QEMU_MAS)
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
   -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=localtime -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!

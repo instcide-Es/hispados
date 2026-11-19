@@ -35,7 +35,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Fecha, Usuario, Textos32, Formato
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Textos32, Formato
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -538,8 +538,7 @@ módulo Escritorio
             fin
             devolver
         fin
-        si no montado entonces devolver fin
-        m := abrir_archivo("\\", PARA_LEER)
+        m := abrir_archivo(del_sistema, "\\", PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver fin
         r := leer_entrada(m, dirección(e))
         mientras r = 1 y n_documentos < MAX_DOCUMENTOS hacer
@@ -598,7 +597,7 @@ módulo Escritorio
         disquete(valor(l), 9, 7, 42)
         texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
         texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-        texto(valor(l), 58, 30, "el escritorio, versión 0.5", 0xD3E7FD)
+        texto(valor(l), 58, 30, "el escritorio, versión 0.6", 0xD3E7FD)
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
         rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
@@ -758,7 +757,7 @@ módulo Escritorio
         fin
         degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 16, 14, 64)
-        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.5", TINTA)
+        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.6", TINTA)
         texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
         texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
         texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
@@ -777,7 +776,7 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.5", TINTA)
+        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.6", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)

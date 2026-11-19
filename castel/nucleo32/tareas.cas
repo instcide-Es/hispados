@@ -59,6 +59,7 @@ módulo Tareas
         esp_usuario: nat32                      ; por dónde iba su pila al entrar en la llamada al sistema
         nombre_propio: arreglo [16] de byte     ; donde se guarda su nombre
         carpeta: arreglo [MAX_CARPETA] de byte  ; su carpeta de trabajo («»: la raíz; si no, «\UNA\OTRA»)
+        unidad: nat32                           ; y en qué unidad (0: la del sistema; si no, su número más uno: unidades.cas)
         salida, salida_serie: nat32             ; el archivo al que va lo que escribe (SIN_SALIDA: a la pantalla)
         salida_cr: bool                         ; lo último que escribió ahí fue un retorno de carro
         aguanta: bool                           ; atiende ella Ctrl+C (un intérprete de órdenes): no se la acaba
@@ -315,6 +316,7 @@ módulo Tareas
         t.usuario := falso
         ; la carpeta de trabajo y adónde va lo que escribe, los de quien la hace
         t.carpeta[0] := 0
+        t.unidad := 0
         t.salida := SIN_SALIDA
         t.salida_serie := 0
         si actual <> nulo entonces
@@ -324,6 +326,7 @@ módulo Tareas
                 i := i + 1
             fin
             t.carpeta[i] := 0
+            t.unidad := actual.unidad
             t.salida := actual.salida
             t.salida_serie := actual.salida_serie
         fin

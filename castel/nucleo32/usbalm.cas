@@ -1,0 +1,21 @@
+; (provisional)
+módulo Usbalm
+    público constante MAX_MEMORIAS = 2
+    público tipo Memoria = estructura
+        hay: bool
+        sectores: nat32
+        modelo: arreglo [41] de byte
+    fin
+    público variable memorias: arreglo [MAX_MEMORIAS] de Memoria
+    público variable escritura: bool
+    público variable sectores_leídos, sectores_escritos: nat32
+    público función leer_sectores(s: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        devolver falso
+    fin
+    público función escribir_sectores(s: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
+        devolver falso
+    fin
+    público función asentar(s: nat32): bool
+        devolver falso
+    fin
+fin Usbalm.

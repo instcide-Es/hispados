@@ -41,11 +41,14 @@ módulo Paginas
     público constante DEMANDA_FINAL = 0xD0400000 ; 4 MB, una tabla
     público constante GRÁFICOS_INICIO = 0xE0000000   ; donde se ve la memoria de la pantalla gráfica
     público constante GRÁFICOS_TABLAS = 4       ; 16 MB
+    público constante APARATOS_INICIO = 0xE8000000   ; donde se ven los registros de los aparatos (AHCI, USB)
+    público constante APARATOS_FINAL = 0xE8400000    ; 4 MB, una tabla
 
     público variable directorio_núcleo: nat32   ; el del núcleo (dirección física)
     público variable activa: bool
     público variable atendidos: nat32           ; fallos atendidos en la zona a la demanda
     público variable pilas_crecidas: nat32      ; páginas puestas a las pilas de los programas
+    variable aparatos_usado: nat32              ; lo que ya se ha dado de la zona de los aparatos
 
     ; la entrada del directorio y la de la tabla de una dirección
     función entrada_dir(dir: nat32, virtual: nat32): puntero a nat32
@@ -170,9 +173,31 @@ módulo Paginas
         para i desde 0 hasta GRÁFICOS_TABLAS - 1 hacer
             si entrada(directorio_núcleo, GRÁFICOS_INICIO + i * 0x400000, cierto, 0) = nulo entonces devolver falso fin
         fin
+        si entrada(directorio_núcleo, APARATOS_INICIO, cierto, 0) = nulo entonces devolver falso fin
         activar_paginación(directorio_núcleo)
         activa := leer_cr0() yb 0x80000000 <> 0
         devolver activa
+    fin
+
+    ; pone a la vista del núcleo los registros de un aparato que se ven en la
+    ; memoria (los de una controladora AHCI o USB): «octetos» desde la
+    ; dirección física «física». Da dónde han quedado (0 si no cabe más). La
+    ; tabla de páginas de esa zona es la misma en todos los espacios de
+    ; direcciones, así que vale en cualquier momento.
+    público función mapear_aparato(física: nat32, octetos: nat32): nat32
+        variable v, d, n: nat32
+        d := física yb (PÁGINA - 1)
+        n := (d + octetos + PÁGINA - 1) yb DIRECCIÓN
+        si n = 0 o aparatos_usado + n > APARATOS_FINAL - APARATOS_INICIO entonces devolver 0 fin
+        v := 0
+        mientras v < n hacer
+            si no mapear(directorio_núcleo, APARATOS_INICIO + aparatos_usado + v, (física yb DIRECCIÓN) + v, ESCRIBIR ob 0x10) entonces devolver 0 fin    ; (0x10: sin caché)
+            v := v + PÁGINA
+        fin
+        v := APARATOS_INICIO + aparatos_usado + d
+        aparatos_usado := aparatos_usado + n
+        si activa entonces poner_cr3(leer_cr3()) fin
+        devolver v
     fin
 
     ; -------------------------------------------------------------------------

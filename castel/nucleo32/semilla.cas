@@ -16,8 +16,11 @@
 ;     dormir, esperar y acabar, y los cerrojos;
 ;   - consola.cas: el teclado (el español, con sus acentos) y la pantalla,
 ;     cada uno con su cerrojo;
-;   - ata.cas: los discos duros ATA (PIO, LBA de 28 bits), leer y escribir;
+;   - pci.cas: el bus PCI (buscar las controladoras);
+;   - ata.cas, ahci.cas: los discos duros IDE (PIO) y SATA (AHCI, por DMA);
+;   - discos.cas: todos los discos, sean de la clase que sean;
 ;   - fat.cas: el sistema de archivos FAT12/16/32: leer y escribir;
+;   - unidades.cas: las particiones y las letras de las unidades (C:, X:, M:);
 ;   - fecha.cas: la fecha y la hora (el reloj de la CMOS);
 ;   - usuario.cas: los programas del anillo 3 (del disco, o de los módulos
 ;     de multiboot) y su llamada al sistema, la int 0x80;
@@ -33,7 +36,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Ata, Fat, Usuario, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usuario, Escritorio, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -462,32 +465,61 @@ módulo Semilla
         lanza(palabra1, args)
     fin
 
+    ; lo que se dice de cada unidad: su letra, de dónde es y su FAT
+    función enseña_unidades()
+        variable u, letra: nat32
+        variable d: arreglo [4] de nat32
+        escribir("unidades:")
+        para letra desde 'A' hasta 'Z' hacer
+            u := por_letra(letra)
+            si u <> NINGUNA entonces
+                d[0] := letra
+                si unidades[u].clase = U_MEMORIA entonces
+                    imprimir(" %c: (en memoria)", d)
+                sino
+                    d[1] := unidades[u].disco
+                    d[2] := nat32(nombre_de_clase(discos[unidades[u].disco].clase))
+                    d[3] := volúmenes[u].clase
+                    imprimir(" %c: (disco %u, %s, FAT%u)", d)
+                fin
+            fin
+        fin
+        si del_sistema = NINGUNA entonces
+            escribir(" ninguna\n")
+        sino
+            imprimir1("; la del sistema, %c:\n", unidades[del_sistema].letra)
+        fin
+    fin
+
     función orden_disco()
         variable u, libres: nat32
         variable d: arreglo [4] de nat32
-        para u desde 0 hasta DISCOS - 1 hacer
+        para u desde 0 hasta MAX_DISCOS - 1 hacer
             si discos[u].hay entonces
                 d[0] := u
                 d[1] := nat32(dirección(discos[u].modelo[0]))
                 d[2] := discos[u].sectores
                 d[3] := discos[u].sectores div 2048
-                imprimir("disco %u: %s, %u sectores (%u MB), LBA\n", d)
-            sino
+                imprimir("disco %u: %s, %u sectores (%u MB), LBA", d)
+                imprimir1(", %s\n", nat32(nombre_de_clase(discos[u].clase)))
+            sino si u < 2 entonces
                 imprimir1("disco %u: no hay\n", u)
             fin
         fin
-        si no montado entonces
-            escribir("sistema de archivos: no hay (el disco 0 no es FAT)\n")
-            devolver
+        u := del_sistema
+        si u = NINGUNA o unidades[u].clase <> U_FAT entonces
+            escribir("sistema de archivos: no hay (la unidad del sistema no es un disco con FAT)\n")
+        sino
+            d[0] := volúmenes[u].clase
+            d[1] := volúmenes[u].base
+            d[2] := volúmenes[u].clusters
+            d[3] := volúmenes[u].sectores_cluster * SECTOR
+            imprimir("sistema de archivos: FAT%u, desde el sector %u, %u clusters de %u octetos", d)
+            libres := clusters_libres(u)
+            si libres <> 0xFFFFFFFF entonces imprimir1(", %u libres", libres) fin
+            imprimir3("\nsectores leídos: %u, escritos: %u; archivos abiertos: %u\n", sectores_leídos(), sectores_escritos(), cuántos_abiertos())
         fin
-        d[0] := clase
-        d[1] := base
-        d[2] := clusters
-        d[3] := sectores_cluster * SECTOR
-        imprimir("sistema de archivos: FAT%u, desde el sector %u, %u clusters de %u octetos", d)
-        libres := clusters_libres()
-        si libres <> 0xFFFFFFFF entonces imprimir1(", %u libres", libres) fin
-        imprimir3("\nsectores leídos: %u, escritos: %u; archivos abiertos: %u\n", sectores_leídos, sectores_escritos, cuántos_abiertos())
+        enseña_unidades()
     fin
 
     ; las entradas de una carpeta del disco (la raíz, si no se dice otra)
@@ -495,7 +527,7 @@ módulo Semilla
         variable m, r, n: nat32
         variable e: Entrada
         palabra(línea, 1, palabra1, 40)
-        m := abrir_archivo(palabra1, PARA_LEER)
+        m := abrir_archivo(del_sistema, palabra1, PARA_LEER)
         si m >= PRIMER_ERROR entonces
             imprimir2("no puedo abrir «%s»: %s\n", nat32(dirección(palabra1[0])), nat32(texto_error(m)))
             devolver
@@ -525,6 +557,70 @@ módulo Semilla
         devolver iguales(línea, t)
     fin
 
+    ; lo que va detrás de «nombre» en la línea del cargador (su primera
+    ; letra), o 0 si no está: «unidad=X» da 'X'
+    función opción(nombre: puntero a byte): nat32
+        variable p: puntero a byte
+        p := buscar(línea_del_cargador(), nombre)
+        si p = nulo entonces devolver 0 fin
+        devolver p[longitud(nombre)]
+    fin
+
+    ; los discos y las unidades: los de dentro (IDE y SATA), las memorias
+    ; USB y lo que haya traído el cargador. Dice lo que encuentra.
+    función busca_discos()
+        variable d, u, n, pedida: nat32
+        variable dd: arreglo [4] de nat32
+        ; en los discos solo se escribe si el cargador lo dice: «escritura»
+        ; (en todos) o «escritura=usb» (solo en las memorias USB). En un PC
+        ; de verdad, el disco es el del dueño.
+        si buscar(línea_del_cargador(), "escritura=usb") <> nulo entonces
+            permiso(PERMISO_USB)
+        sino si buscar(línea_del_cargador(), "escritura") <> nulo entonces
+            permiso(PERMISO_TODOS)
+        fin
+        ; con «sindisco», ni se miran los discos de dentro del PC
+        si buscar(línea_del_cargador(), "sindisco") = nulo entonces busca_internos() fin
+        n := 0
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[d].hay entonces
+                monta_disco(d)
+                dd[0] := d
+                dd[1] := nat32(dirección(discos[d].modelo[0]))
+                dd[2] := discos[d].sectores div 2048
+                imprimir("disco %u: %s, %u MB", dd)
+                si unidades_de(d) = 0 entonces escribir(", sin FAT") fin
+                para u desde 0 hasta MAX_UNIDADES - 1 hacer
+                    si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                        imprimir1(", FAT%u", volúmenes[u].clase)
+                        si no escribible(u) entonces n := n + 1 fin
+                    fin
+                fin
+                si discos[d].clase <> DE_ATA entonces imprimir1(" (%s)", nat32(nombre_de_clase(discos[d].clase))) fin
+                escribir(".\n")
+            fin
+        fin
+        si n <> 0 entonces
+            si permiso_dado() = PERMISO_USB entonces
+                escribir("los discos de dentro son de solo lectura (para escribir en ellos: «escritura» en la línea del cargador).\n")
+            sino
+                escribir("el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador).\n")
+            fin
+        fin
+        monta_memoria()
+        pedida := 0
+        si buscar(línea_del_cargador(), "unidad=") <> nulo entonces pedida := opción("unidad=") fin
+        elige_sistema(pedida)
+        si unidad_en_memoria() entonces
+            imprimir1("sin disco: los %u archivos que ha traído el cargador hacen de unidad M: (en memoria, de solo lectura).\n", módulos())
+        fin
+        n := 0
+        para u desde 0 hasta MAX_UNIDADES - 1 hacer
+            si unidades[u].hay entonces n := n + 1 fin
+        fin
+        si n > 1 entonces enseña_unidades() fin
+    fin
+
     función principal(): byte
         variable malo: puntero a nat32
         prepara_gdt()
@@ -549,17 +645,7 @@ módulo Semilla
         permitir_interrupciones()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
-        ; en los discos solo se escribe si el cargador lo dice («escritura»):
-        ; en un PC de verdad, el disco es el del dueño
-        escritura := buscar(línea_del_cargador(), "escritura") <> nulo
-        ; con «sindisco», ni se miran los discos del PC (para arrancar de una
-        ; memoria USB sin tocar para nada el disco de dentro)
-        si buscar(línea_del_cargador(), "sindisco") = nulo y identificar() > 0 y montar(0) entonces
-            imprimir3("disco 0: %s, %u MB, FAT%u.\n", nat32(dirección(discos[0].modelo[0])), discos[0].sectores div 2048, clase)
-            si no escritura entonces escribir("el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador).\n") fin
-        sino si unidad_en_memoria() entonces
-            imprimir1("sin disco: los %u archivos que ha traído el cargador hacen de unidad C: (en memoria, de solo lectura).\n", módulos())
-        fin
+        busca_discos()
         ; si el cargador lo pide («ordenes» en su línea), el intérprete de
         ; órdenes del anillo 3, ya
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin

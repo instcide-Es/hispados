@@ -1,0 +1,191 @@
+; =============================================================================
+;  unidades.cas - las unidades de Hispa-Pentium, con sus letras, como en
+;  Hispa-DOS:
+;     C: D: ...   los volúmenes FAT de los discos de dentro (IDE y SATA);
+;     X: Y: Z:    los de las memorias USB (X: es la memoria de arranque);
+;     M:          la unidad en memoria: los archivos que ha traído el
+;                 cargador (los módulos de multiboot), de solo lectura.
+;  Aquí se miran las particiones de cada disco (la tabla del MBR, y la GPT
+;  de los discos de ahora) y se monta cada volumen FAT que haya (fat.cas);
+;  un disco sin tabla, entero, también vale. La unidad número n es el
+;  volumen número n de fat.cas (la de memoria no tiene volumen).
+;
+;  «La unidad del sistema» es de la que se cargan los programas cuando no se
+;  dice otra: la que diga el cargador («unidad=X» en su línea) si está; si
+;  no, la primera que haya: C:, luego X:, luego M:.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Unidades
+
+    importar Discos, Fat, Multiboot
+
+    público constante MAX_UNIDADES = 8          ; (las de fat.cas: VOLÚMENES)
+    público constante NINGUNA = 0xFFFFFFFF
+    público constante U_FAT = 1                 ; un volumen FAT de un disco
+    público constante U_MEMORIA = 2             ; los módulos del cargador
+
+    público tipo Unidad = estructura
+        hay: bool
+        letra: byte
+        clase: nat32                            ; U_FAT o U_MEMORIA
+        disco: nat32                            ; (U_FAT) en qué disco está
+        partición: nat32                        ; (U_FAT) cuál de sus particiones (0: el disco entero)
+    fin
+
+    público variable unidades: arreglo [MAX_UNIDADES] de Unidad
+    público variable del_sistema: nat32 = 0xFFFFFFFF    ; la unidad del sistema (NINGUNA: no hay ninguna)
+    variable sector: arreglo [512] de byte
+    variable letra_interna: nat32 = 'C'
+    variable letra_usb: nat32 = 'X'
+
+    ; la unidad que lleva esa letra (en mayúscula o minúscula), o NINGUNA
+    público función por_letra(letra: nat32): nat32
+        variable u: nat32
+        si letra >= 'a' y letra <= 'z' entonces letra := letra - 32 fin
+        para u desde 0 hasta MAX_UNIDADES - 1 hacer
+            si unidades[u].hay y unidades[u].letra = letra entonces devolver u fin
+        fin
+        devolver NINGUNA
+    fin
+
+    ; una ficha libre (que no sea la última: es la de la unidad en memoria)
+    función libre(): nat32
+        variable u: nat32
+        para u desde 0 hasta MAX_UNIDADES - 2 hacer
+            si no unidades[u].hay entonces devolver u fin
+        fin
+        devolver NINGUNA
+    fin
+
+    ; prueba a montar lo que haya en el disco d desde el sector «inicio»
+    función prueba(d: nat32, inicio: nat32, partición: nat32): bool
+        variable u: nat32
+        u := libre()
+        si u = NINGUNA entonces devolver falso fin
+        si discos[d].clase = DE_USB y letra_usb > 'Z' entonces devolver falso fin
+        si discos[d].clase <> DE_USB y letra_interna >= 'M' entonces devolver falso fin
+        si no montar(u, d, inicio) entonces devolver falso fin
+        unidades[u].hay := cierto
+        unidades[u].clase := U_FAT
+        unidades[u].disco := d
+        unidades[u].partición := partición
+        si discos[d].clase = DE_USB entonces
+            unidades[u].letra := letra_usb
+            letra_usb := letra_usb + 1
+        sino
+            unidades[u].letra := letra_interna
+            letra_interna := letra_interna + 1
+        fin
+        devolver cierto
+    fin
+
+    función palabra32(p: puntero a byte): nat32
+        devolver p[0] ob (nat32(p[1]) << 8) ob (nat32(p[2]) << 16) ob (nat32(p[3]) << 24)
+    fin
+
+    ; las particiones de una tabla GPT (la de los discos de ahora): la
+    ; cabecera está en el sector 1 y dice dónde están las entradas. Se
+    ; prueba a montar cada una (la FAT se reconoce por su primer sector).
+    función mira_gpt(d: nat32): nat32
+        variable n, i, lba, cuántas, tamaño_, primero, hechas: nat32
+        variable e: puntero a byte
+        si no leer_sectores(d, 1, 1, sector) entonces devolver 0 fin
+        si palabra32(dirección(sector[0])) <> 0x20494645 o palabra32(dirección(sector[4])) <> 0x54524150 entonces devolver 0 fin
+        si palabra32(dirección(sector[76])) <> 0 entonces devolver 0 fin       ; (las entradas, más allá de 2 TB)
+        lba := palabra32(dirección(sector[72]))
+        cuántas := palabra32(dirección(sector[80]))
+        tamaño_ := palabra32(dirección(sector[84]))
+        si tamaño_ < 128 o tamaño_ > 512 o 512 mod tamaño_ <> 0 entonces devolver 0 fin
+        si cuántas > 64 entonces cuántas := 64 fin
+        hechas := 0
+        n := 0
+        mientras n < cuántas hacer
+            i := n mod (512 div tamaño_)
+            si i = 0 entonces
+                si no leer_sectores(d, lba + n div (512 div tamaño_), 1, sector) entonces devolver hechas fin
+            fin
+            e := dirección(sector[i * tamaño_])
+            ; una entrada en uso (su clase no es todo ceros) que empieza por debajo de los 2 TB
+            si (palabra32(e) <> 0 o palabra32(e + 4) <> 0 o palabra32(e + 8) <> 0 o palabra32(e + 12) <> 0) y palabra32(e + 36) = 0 entonces
+                primero := palabra32(e + 32)
+                si primero <> 0 y prueba(d, primero, n + 1) entonces
+                    hechas := hechas + 1
+                    ; (montar ha usado otro sector: el de las entradas se vuelve a leer)
+                    si no leer_sectores(d, lba + n div (512 div tamaño_), 1, sector) entonces devolver hechas fin
+                fin
+            fin
+            n := n + 1
+        fin
+        devolver hechas
+    fin
+
+    ; mira el disco d y monta los volúmenes FAT que tenga. Da cuántos.
+    público función monta_disco(d: nat32): nat32
+        variable i, t, hechas: nat32
+        variable inicios: arreglo [4] de nat32
+        variable clases: arreglo [4] de byte
+        si d >= MAX_DISCOS entonces devolver 0 fin
+        si no discos[d].hay entonces devolver 0 fin
+        ; el disco entero, sin tabla de particiones
+        si prueba(d, 0, 0) entonces devolver 1 fin
+        si no leer_sectores(d, 0, 1, sector) entonces devolver 0 fin
+        si sector[510] <> 0x55 o sector[511] <> 0xAA entonces devolver 0 fin
+        para i desde 0 hasta 3 hacer
+            clases[i] := sector[446 + i * 16 + 4]
+            inicios[i] := palabra32(dirección(sector[446 + i * 16 + 8]))
+        fin
+        hechas := 0
+        para i desde 0 hasta 3 hacer
+            t := clases[i]
+            si t = 0xEE entonces
+                devolver mira_gpt(d)
+            sino si t = 0x01 o t = 0x04 o t = 0x06 o t = 0x0B o t = 0x0C o t = 0x0E o t = 0xEF entonces
+                si inicios[i] <> 0 y prueba(d, inicios[i], i + 1) entonces hechas := hechas + 1 fin
+            fin
+        fin
+        devolver hechas
+    fin
+
+    ; cuántas unidades tiene el disco d
+    público función unidades_de(d: nat32): nat32
+        variable u, n: nat32
+        n := 0
+        para u desde 0 hasta MAX_UNIDADES - 1 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; si el cargador ha traído archivos, hacen de unidad M:
+    público función monta_memoria(): bool
+        si módulos() = 0 entonces devolver falso fin
+        unidades[MAX_UNIDADES - 1].hay := cierto
+        unidades[MAX_UNIDADES - 1].letra := 'M'
+        unidades[MAX_UNIDADES - 1].clase := U_MEMORIA
+        devolver cierto
+    fin
+
+    ; elige la unidad del sistema: la de la letra pedida (0: ninguna pedida)
+    ; si está; si no, C:, luego la primera memoria USB, luego la de memoria
+    público función elige_sistema(pedida: nat32)
+        variable u: nat32
+        del_sistema := NINGUNA
+        si pedida <> 0 entonces del_sistema := por_letra(pedida) fin
+        si del_sistema = NINGUNA entonces del_sistema := por_letra('C') fin
+        si del_sistema = NINGUNA entonces del_sistema := por_letra('X') fin
+        si del_sistema = NINGUNA entonces del_sistema := por_letra('M') fin
+        si del_sistema = NINGUNA entonces
+            para u desde 0 hasta MAX_UNIDADES - 1 hacer
+                si unidades[u].hay y del_sistema = NINGUNA entonces del_sistema := u fin
+            fin
+        fin
+    fin
+
+    ; ¿es de solo lectura la unidad u?
+    público función protegida(u: nat32): bool
+        si u >= MAX_UNIDADES entonces devolver cierto fin
+        si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver cierto fin
+        devolver no escribible(u)
+    fin
+
+fin Unidades.
