@@ -1587,6 +1587,10 @@ for f in ESCRIT8.BIN:NUCLEO.BIN INSTALAR.BIN ASISTE.BIN ORDENES.BIN BLOC.BIN CON
   INST=$INST${INST:+,}$K/${f##*:}
 done
 mcopy -n -i $G/usb.img@@1M ::SEMILLA.BIN $K/SEMILLA.BIN > /dev/null 2>&1
+# (y dos archivos para otra carpeta, como los de la oficina: CARPETAS.TXT
+# dice adónde va cada uno, y él no se instala)
+head -c 3000 /dev/urandom > $K/UNO.DAT; printf 'el dos\r\n' > $K/DOS.TXT; printf 'UNO.DAT=COSAS\r\ndos.txt=cosas\r\n' > $K/CARPETAS.TXT
+INST=$INST,$K/UNO.DAT,$K/DOS.TXT,$K/CARPETAS.TXT
 # instala con el núcleo arrancado por QEMU (-kernel) y lo que se instala como
 # módulos (la unidad M:, como con la entrada de la memoria USB): el disco
 # (SATA; con IDE=1, IDE), el nombre de lo que sale y las teclas
@@ -1608,6 +1612,20 @@ instalado() {
     rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::HISPA/$f $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/$f || { bien=0; echo "distinto: $f" >> $Z/fsck.txt; }
   done
   rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::LEEME.TXT $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/LEEME.TXT || { bien=0; echo "distinto: LEEME.TXT de la raíz" >> $Z/fsck.txt; }
+  if [ "${2:-}" = usb ]; then
+    # (instalado desde la memoria USB: si lleva la oficina, HVPRUN.BIN en \HISPA y lo suyo en \OFICINA)
+    if mcopy -n -i $G/usb.img@@1M ::OFICINA/PLUMA.HVP $Z/o.bin > /dev/null 2>&1; then
+      rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::OFICINA/PLUMA.HVP $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $Z/o.bin || { bien=0; echo "distinto: OFICINA/PLUMA.HVP" >> $Z/fsck.txt; }
+      mcopy -n -i $G/usb.img@@1M ::HVPRUN.BIN $Z/o.bin > /dev/null 2>&1
+      rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::HISPA/HVPRUN.BIN $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $Z/o.bin || { bien=0; echo "distinto: HVPRUN.BIN" >> $Z/fsck.txt; }
+      rm -f $Z/o.bin
+    fi
+  else
+    for f in UNO.DAT DOS.TXT; do
+      rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::COSAS/$f $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/$f || { bien=0; echo "distinto: COSAS/$f" >> $Z/fsck.txt; }
+    done
+    mdir -i $Z/vol.img ::HISPA 2> /dev/null | grep -q "^UNO \|^DOS \|^CARPETAS" && { bien=0; echo "en HISPA hay lo que no toca" >> $Z/fsck.txt; }
+  fi
   # el arranque: el primer sector de GRUB en el MBR (sus 440 octetos) y el resto desde el sector 1
   cmp -s -n 440 $1 $K/BOOT.IMG || { bien=0; echo "el MBR no lleva BOOT.IMG" >> $Z/fsck.txt; }
   cmp -s <(dd if=$1 bs=512 skip=1 status=none | head -c $(stat -c %s $K/CORE.IMG)) $K/CORE.IMG || { bien=0; echo "CORE.IMG no está desde el sector 1" >> $Z/fsck.txt; }
@@ -1636,6 +1654,10 @@ if volumen $Z/blanco.img 2048 && instalado $Z/blanco.img && grep -q "^Partition 
   && grep -q "^ 1 2048s 614399s 612352s primary fat32 boot, lba" $Z/tabla.txt; then
   ok "el disco instalado: una partición FAT32 arrancable en el MBR, sana para fsck.fat, con el sistema en \\HISPA igual que el original y GRUB en el MBR y en el hueco de delante"
 else ko "el disco instalado no queda bien:"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; fi
+if grep -q "^instalar: copiado UNO.DAT (3000 octetos) a .COSAS$" $S && grep -q "^instalar: copiado DOS.TXT (8 octetos) a .COSAS$" $S && grep -q "^instalar: 14 archivos que instalar$" $S \
+  && [ "$(mdir -b -i $Z/vol.img ::COSAS 2> /dev/null | tr '\n' ' ')" = "::/COSAS/UNO.DAT ::/COSAS/DOS.TXT " ]; then
+  ok "lo que dice CARPETAS.TXT («ARCHIVO.EXT=CARPETA») va a su carpeta de la raíz (C:\\COSAS: así irá la oficina a C:\\OFICINA) y no a \\HISPA; CARPETAS.TXT no se instala"
+else ko "lo de CARPETAS.TXT no va a su carpeta:"; mdir -i $Z/vol.img :: 2>&1 | sed 's/^/        /' | head -8; grep "archivos que\|COSAS" $S | sed 's/^/        /' | head -4; fi
 rm -f $Z/cfg.txt; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt > /dev/null 2>&1
 if grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura$" $Z/cfg.txt && grep -q "module /HISPA/ORDENES.BIN ORDENES.BIN" $Z/cfg.txt \
   && ! grep -q chainloader $Z/cfg.txt && ! grep -q "INSTALAR.BIN" $Z/cfg.txt; then
@@ -1804,7 +1826,7 @@ for hc in xhci ehci; do
     && [ "$(grep -c '^|    Disco ' $Z/u1$hc.txt)" = 1 ] && grep -q "Hispa-Pentium está instalado" $Z/u2$hc.txt && cmp -s $Z/u$hc.img $G/usb.img; then
     ok "$que: la memoria USB de arranque no se ofrece como disco (se enseña: «no se toca») y, después de instalar, está idéntica octeto a octeto"
   else ko "$que: la memoria USB de arranque se ofrece como disco, o ha cambiado al instalar:"; sed 's/^/        /' $Z/u1$hc.txt | sed -n 5,12p; fi
-  if volumen $Z/d$hc.img 2048 && instalado $Z/d$hc.img; then ok "$que: el disco de 2 GB queda con su FAT32 sana (fsck.fat), el sistema en \\HISPA y el arranque puesto"
+  if volumen $Z/d$hc.img 2048 && instalado $Z/d$hc.img usb; then ok "$que: el disco de 2 GB queda con su FAT32 sana (fsck.fat), el sistema en \\HISPA y el arranque puesto"
   else ko "$que: el disco instalado desde la memoria USB no queda bien:"; sed 's/^/        /' $Z/fsck.txt | head -6; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal

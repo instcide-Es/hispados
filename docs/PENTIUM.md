@@ -1272,6 +1272,15 @@ con esa entrada es **M:**: GRUB trae como módulos todo lo que hay que instalar
 aunque el USB de ese equipo no se deje leer por el núcleo, y **la memoria USB no
 hace falta ni leerla**.
 
+**Lo que no va a `\HISPA`.** Todo va a `C:\HISPA`, menos lo que diga
+**`CARPETAS.TXT`**, si viene entre los módulos: cada línea suya,
+`ARCHIVO.EXT=CARPETA`, manda ese archivo a esa carpeta de la raíz del disco
+(hasta cuatro carpetas; él no se instala). Es para **la oficina**: cuando está
+en el árbol (`nucleo32/hvprun`), `usb.sh` añade a la entrada de instalar
+`HVPRUN.BIN` (que va con los programas, a `\HISPA`: el núcleo lo encuentra ahí)
+y los programas y los datos de `\OFICINA`, con su `CARPETAS.TXT`, y quedan en
+**`C:\OFICINA`**, como en la memoria USB.
+
 **Cómo escribe.** INSTALAR no usa los archivos del núcleo para el disco nuevo
 (el núcleo monta los volúmenes al arrancar, y ese todavía no existe): escribe
 **sector a sector** (las llamadas 64 y 65) su propia FAT32, que es sencilla
@@ -1564,7 +1573,10 @@ INSTALAR apunta por el puerto serie:
   desde fuera: la tabla (`parted`: una partición FAT32, la activa), **`fsck.fat`
   da el volumen por sano**, los archivos de `\HISPA` son **iguales octeto a
   octeto** que los originales (`mtools`), el MBR lleva `BOOT.IMG` y `CORE.IMG`
-  está desde el sector 1; y `GRUB.CFG` es el que tiene que ser.
+  está desde el sector 1; `GRUB.CFG` es el que tiene que ser; y lo que dice
+  `CARPETAS.TXT` (dos archivos de prueba) está en su carpeta, `C:\COSAS`, y no
+  en `\HISPA`. Y **otra vez encima** del disco recién instalado (que el núcleo
+  ya monta como C:).
 - **Un disco con la partición de otro sistema** (100 MB de datos al azar, de
   la clase de NTFS) **y espacio sin usar**: se enseña lo que tiene; **borrar pide
   sus dos confirmaciones**, y con la palabra mal escrita, con N o saliendo con
@@ -1621,9 +1633,9 @@ crecido en un módulo corto (`ajustes.cas`) y nueve llamadas. CASTEL compila el
 núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para el árbol.
 
-Con todo, `pruebas.sh` tiene ahora **@@N@@ comprobaciones** (eran 369; unos
+Con todo, `pruebas.sh` tiene ahora **408 comprobaciones** (eran 369; unos
 cuarenta minutos en el VPS). La última pasada entera (19/11/2026, con la 0.7) dio
-**@@N@@ bien, 0 mal**; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar
+**408 bien, 0 mal**; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar
 en el disco) son unos cuatro minutos; `SOLO=06` (la parte 9, lo de la 0.6), unos
 ocho, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a la 7, con los dos
 compiladores y los dos ensambladores), otros siete.

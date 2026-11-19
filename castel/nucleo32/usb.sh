@@ -34,7 +34,9 @@
 #     de GRUB, para el MBR) y CORE.IMG (el resto de GRUB, con sus módulos
 #     dentro, para el hueco de delante de la primera partición; busca en los
 #     discos \HISPA\GRUB.CFG y sigue lo que diga). Con «instalar», el núcleo
-#     no deja escribir en la memoria USB ni un sector.
+#     no deja escribir en la memoria USB ni un sector. Si está la oficina
+#     (nucleo32/hvprun), también HVPRUN.BIN y lo de \OFICINA, con
+#     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc).
 set -eu
@@ -71,6 +73,23 @@ $MODULOS  module /LEEMEDIS.TXT LEEME.TXT
   module /BOOT.IMG BOOT.IMG
   module /CORE.IMG CORE.IMG
 "
+# la oficina (si está en el árbol: nucleo32/hvprun): su ejecutor, HVPRUN.BIN,
+# va con los programas, a \HISPA; lo de \OFICINA, a C:\OFICINA: lo dice
+# CARPETAS.TXT («ARCHIVO.EXT=CARPETA»), que INSTALAR lee y no instala
+if [ -f $AQUI/hvprun/hacer.sh ]; then
+  [ -f $W/of/HVPRUN.BIN ] || bash $AQUI/hvprun/hacer.sh $W/of > /dev/null
+  INSTALA="$INSTALA  module /HVPRUN.BIN HVPRUN.BIN
+"
+  : > $W/f/CARPETAS.TXT
+  for f in $W/of/*.HVP $W/of/*.DAT; do
+    n=$(basename $f)
+    INSTALA="$INSTALA  module /OFICINA/$n $n
+"
+    printf '%s=OFICINA\r\n' $n >> $W/f/CARPETAS.TXT
+  done
+  INSTALA="$INSTALA  module /CARPETAS.TXT CARPETAS.TXT
+"
+fi
 iconv -f UTF-8 -t CP437 > $W/f/LEEMEDIS.TXT <<'L'
 Hispa-Pentium 0.7, instalado en el disco duro.
 
@@ -147,6 +166,11 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -b ${L}p1 ] &&
 mkfs.fat -F 16 -n HISPAPENT ${L}p1 > /dev/null
 mount ${L}p1 $W/m
 cp $W/f/* $W/m/
+if [ -f $W/of/HVPRUN.BIN ]; then
+  cp $W/of/HVPRUN.BIN $W/m/
+  mkdir -p $W/m/OFICINA
+  cp $W/of/*.HVP $W/of/*.DAT $W/m/OFICINA/
+fi
 mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8

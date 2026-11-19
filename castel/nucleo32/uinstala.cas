@@ -18,7 +18,9 @@
 ;
 ;  Lo que se instala es lo que hay en la raíz de la unidad del sistema (los
 ;  archivos que ha traído el cargador: la unidad M:): NUCLEO.BIN, los
-;  programas y los textos. En el disco se escribe sector a sector (las
+;  programas y los textos. Todo va a \HISPA, menos lo que diga CARPETAS.TXT
+;  (si viene): cada línea suya, «ARCHIVO.EXT=CARPETA», manda ese archivo a
+;  esa carpeta de la raíz del disco (los programas de la oficina, a \OFICINA). En el disco se escribe sector a sector (las
 ;  llamadas 64 y 65 del núcleo), con una FAT32 propia: los archivos van
 ;  seguidos, uno detrás de otro. La memoria USB no se toca: el núcleo no
 ;  deja escribir en ella ni un sector.
@@ -83,6 +85,19 @@ módulo Instala
     variable tamaños: arreglo [MAX_ARCHIVOS] de nat32
     variable n_archivos: nat32
     variable sectores_core: nat32
+    ; adónde va cada uno: 0, a \HISPA; 1, a la raíz; de 2 en adelante, a una
+    ; de las otras carpetas (las que dice CARPETAS.TXT)
+    constante A_HISPA = 0
+    constante A_RAÍZ = 1
+    constante A_OTRA = 2
+    constante MAX_OTRAS = 4
+    variable destinos: arreglo [MAX_ARCHIVOS] de byte
+    variable otras: arreglo [MAX_OTRAS] de arreglo [13] de byte   ; sus nombres
+    variable otras_dir: arreglo [MAX_OTRAS] de puntero a byte    ; lo que llevan dentro (memoria pedida al núcleo)
+    variable otras_n: arreglo [MAX_OTRAS] de nat32
+    variable otras_cluster: arreglo [MAX_OTRAS] de nat32
+    variable n_otras: nat32
+    variable mapa: arreglo [1025] de byte       ; CARPETAS.TXT
 
     ; ---- la FAT32 que se escribe ----
     variable por_cluster: nat32                 ; sectores por cluster
@@ -883,11 +898,17 @@ módulo Instala
         pon32(p + 28, mide)
     fin
 
-    ; apunta un archivo en la carpeta HISPA (o en la raíz)
-    función apunta(en_raíz: bool, nombre: puntero a byte, cluster: nat32, mide: nat32)
-        si en_raíz entonces
+    ; apunta un archivo en la carpeta HISPA, en la raíz o en otra carpeta
+    función apunta(dónde: nat32, nombre: puntero a byte, cluster: nat32, mide: nat32)
+        variable k: nat32
+        si dónde = A_RAÍZ entonces
             pon_entrada(dirección(raíz[raíz_n * 32]), nombre, falso, 0x20, cluster, mide)
             raíz_n := raíz_n + 1
+        sino si dónde >= A_OTRA entonces
+            k := dónde - A_OTRA
+            si (otras_n[k] + 1) * 32 > carpeta_octetos entonces fallo("Hay demasiados archivos que instalar.", "") fin
+            pon_entrada(otras_dir[k] + otras_n[k] * 32, nombre, falso, 0x20, cluster, mide)
+            otras_n[k] := otras_n[k] + 1
         sino
             si (carpeta_n + 1) * 32 > carpeta_octetos entonces fallo("Hay demasiados archivos que instalar.", "") fin
             pon_entrada(dirección(carpeta[carpeta_n * 32]), nombre, falso, 0x20, cluster, mide)
@@ -904,12 +925,11 @@ módulo Instala
         llenar(trozo, TROZO, 0)
         copiar_memoria(trozo, p, n)
         si n > 0 entonces esc(sector_de(c), sectores, trozo) fin
-        apunta(falso, nombre, c, n)
+        apunta(A_HISPA, nombre, c, n)
     fin
 
-    ; copia un archivo de la unidad del sistema a HISPA (y, si se dice, lo
-    ; apunta también en la raíz: otra copia)
-    función copia_archivo(i: nat32, en_raíz: bool)
+    ; copia un archivo de la unidad del sistema a HISPA, a la raíz o a otra carpeta
+    función copia_archivo(i: nat32, dónde: nat32)
         variable m, mide, c, lba, n, k, sectores, queda, leídos: nat32
         m := abrir(nombres[i])
         si es_error(m) entonces fallo("No se puede leer uno de los archivos del sistema:", nombres[i]) fin
@@ -935,10 +955,17 @@ módulo Instala
         fin
         cerrar(m)
         si mide = 0 entonces c := 0 fin
-        apunta(en_raíz, nombres[i], c, mide)
+        apunta(dónde, nombres[i], c, mide)
         dd[0] := nat32(dirección(nombres[i][0]))
         dd[1] := mide
-        si en_raíz entonces registra("instalar: copiado %s a la raíz (%u octetos)\n") sino registra("instalar: copiado %s (%u octetos)\n") fin
+        si dónde = A_RAÍZ entonces
+            registra("instalar: copiado %s a la raíz (%u octetos)\n")
+        sino si dónde >= A_OTRA entonces
+            dd[2] := nat32(dirección(otras[dónde - A_OTRA][0]))
+            registra("instalar: copiado %s (%u octetos) a \\%s\n")
+        sino
+            registra("instalar: copiado %s (%u octetos)\n")
+        fin
     fin
 
     ; el sector de arranque de la partición (no arranca: lo dice)
@@ -1032,7 +1059,7 @@ módulo Instala
         cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
         cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos ni el USB (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb\n")
         para i desde 1 hasta n_archivos hacer
-            si (acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT") entonces
+            si destinos[i - 1] = A_HISPA y ((acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT")) entonces
                 cfg_más("  module /HISPA/")
                 cfg_más(nombres[i - 1])
                 cfg_más(" ")
@@ -1052,11 +1079,47 @@ módulo Instala
     ; -------------------------------------------------------------------------
     ;  Los archivos que se instalan
     ; -------------------------------------------------------------------------
+    ; adónde va ese archivo: a \HISPA, o a la carpeta que diga CARPETAS.TXT
+    ; (una línea «ARCHIVO.EXT=CARPETA»; la carpeta, de hasta 8 letras)
+    función destino_de(nombre: puntero a byte): nat32
+        variable i, j, k: nat32
+        variable cuál: arreglo [13] de byte
+        i := 0
+        mientras mapa[i] <> 0 hacer
+            j := 0
+            mientras nombre[j] <> 0 y mayúscula(mapa[i + j]) = nombre[j] hacer j := j + 1 fin
+            si nombre[j] = 0 y mapa[i + j] = '=' entonces
+                i := i + j + 1
+                j := 0
+                mientras mapa[i] > ' ' y j < 8 hacer
+                    cuál[j] := mayúscula(mapa[i])
+                    j := j + 1
+                    i := i + 1
+                fin
+                cuál[j] := 0
+                si j = 0 o iguales(cuál, "HISPA") entonces devolver A_HISPA fin
+                para k desde 1 hasta n_otras hacer
+                    si iguales(otras[k - 1], cuál) entonces devolver A_OTRA + k - 1 fin
+                fin
+                si n_otras >= MAX_OTRAS entonces devolver A_HISPA fin
+                otras_dir[n_otras] := más_memoria(32768)
+                si otras_dir[n_otras] = nulo entonces devolver A_HISPA fin
+                Textos32.copiar(otras[n_otras], cuál)
+                n_otras := n_otras + 1
+                devolver A_OTRA + n_otras - 1
+            fin
+            mientras mapa[i] <> 0 y mapa[i] <> '\n' hacer i := i + 1 fin
+            si mapa[i] = '\n' entonces i := i + 1 fin
+        fin
+        devolver A_HISPA
+    fin
+
     función busca_archivos()
         variable m, i: nat32
         variable e: Entrada
-        variable hay_núcleo, hay_boot, hay_core, hay_órdenes: bool
+        variable hay_núcleo, hay_boot, hay_core, hay_órdenes, hay_mapa: bool
         n_archivos := 0
+        hay_mapa := falso
         hay_núcleo := falso
         hay_boot := falso
         hay_core := falso
@@ -1067,6 +1130,11 @@ módulo Instala
             si e.nombre[0] <> '.' y e.atributos yb (CARPETA ob 0x08) = 0 entonces
                 para i desde 0 hasta 12 hacer nombres[n_archivos][i] := mayúscula(e.nombre[i]) fin
                 tamaños[n_archivos] := e.tamaño
+                ; (CARPETAS.TXT no se instala: dice adónde van los demás)
+                si iguales(nombres[n_archivos], "CARPETAS.TXT") entonces
+                    hay_mapa := cierto
+                    seguir
+                fin
                 si iguales(nombres[n_archivos], "NUCLEO.BIN") entonces hay_núcleo := cierto fin
                 si iguales(nombres[n_archivos], "ORDENES.BIN") entonces hay_órdenes := cierto fin
                 si iguales(nombres[n_archivos], "BOOT.IMG") entonces hay_boot := cierto fin
@@ -1078,6 +1146,13 @@ módulo Instala
             fin
         fin
         cerrar(m)
+        mapa[0] := 0
+        n_otras := 0
+        si hay_mapa entonces
+            i := lee_entero("CARPETAS.TXT", mapa, 1024)
+            mapa[i] := 0
+        fin
+        para i desde 1 hasta n_archivos hacer destinos[i - 1] := destino_de(nombres[i - 1]) fin
         dd[0] := n_archivos
         registra("instalar: %u archivos que instalar\n")
         si no hay_núcleo o no hay_boot o no hay_core o no hay_órdenes o sectores_core = 0 o sectores_core > 2000 entonces
@@ -1118,6 +1193,7 @@ módulo Instala
         ; lo que hay que escribir, para la barra
         por_hacer := 8 + RESERVADOS + 2 * fat_sectores + por_cluster + carpeta_octetos div 512 + 2 * 128 + sectores_core + 3 + 16
         si borrar_todo entonces por_hacer := por_hacer + 80 fin
+        por_hacer := por_hacer + n_otras * (carpeta_octetos div 512)
         para i desde 1 hasta n_archivos hacer por_hacer := por_hacer + (tamaños[i - 1] + 511) div 512 fin
         hecho := 0
         pinta_barra()
@@ -1183,6 +1259,17 @@ módulo Instala
         pon_entrada(carpeta, ".          ", cierto, 0x10, k, 0)
         pon_entrada(dirección(carpeta[32]), "..         ", cierto, 0x10, 0, 0)
         carpeta_n := 2
+        ; las otras carpetas (las de CARPETAS.TXT), en la raíz
+        para i desde 1 hasta n_otras hacer
+            llenar(otras_dir[i - 1], 32768, 0)
+            k := da_clusters(carpeta_clusters)
+            otras_cluster[i - 1] := k
+            pon_entrada(dirección(raíz[raíz_n * 32]), otras[i - 1], falso, 0x10, k, 0)
+            raíz_n := raíz_n + 1
+            pon_entrada(otras_dir[i - 1], ".          ", cierto, 0x10, k, 0)
+            pon_entrada(otras_dir[i - 1] + 32, "..         ", cierto, 0x10, 0, 0)
+            otras_n[i - 1] := 2
+        fin
         dd[0] := por_cluster * 512
         dd[1] := clusters
         dd[2] := fat_sectores
@@ -1193,8 +1280,8 @@ módulo Instala
         para i desde 1 hasta n_archivos hacer
             letras_en(10, 12, AZUL, ' ', 60)
             pon(10, 12, AZUL, nombres[i - 1])
-            copia_archivo(i - 1, falso)
-            si iguales(nombres[i - 1], "LEEME.TXT") entonces copia_archivo(i - 1, cierto) fin
+            copia_archivo(i - 1, destinos[i - 1])
+            si iguales(nombres[i - 1], "LEEME.TXT") entonces copia_archivo(i - 1, A_RAÍZ) fin
         fin
         letras_en(10, 12, AZUL, ' ', 60)
         haz_cfg()
@@ -1203,6 +1290,7 @@ módulo Instala
         ; las carpetas y la FAT
         esc(sector_de(2), por_cluster, raíz)
         esc(sector_de(3), carpeta_octetos div 512, carpeta)
+        para i desde 1 hasta n_otras hacer esc(sector_de(otras_cluster[i - 1]), carpeta_octetos div 512, otras_dir[i - 1]) fin
         n := (siguiente + 127) div 128
         k := 0
         mientras k < n hacer
