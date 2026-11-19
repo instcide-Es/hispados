@@ -110,6 +110,26 @@ módulo Multiboot
         devolver puntero(info().línea)
     fin
 
+    ; ---- la pantalla gráfica ----
+    ; si el cargador ha dejado puesto un modo gráfico (GRUB, cuando se le
+    ; pide: PENTIUM.md), dónde está su memoria, los octetos de una fila a la
+    ; siguiente, su ancho, su alto y los bits de cada punto. Falso si no (QEMU
+    ; con -kernel no lo da nunca) o si no es de color directo.
+    público función pantalla_del_cargador(ref base: nat32, ref octetos_fila: nat32, ref ancho: nat32, ref alto: nat32, ref bits: nat32): bool
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        si no hay_multiboot() o info().banderas yb 0x1000 = 0 entonces devolver falso fin
+        p := puntero(nat32(info()) + 88)
+        q := puntero(nat32(info()) + 108)
+        si p[1] <> 0 o q[1] <> 1 entonces devolver falso fin      ; por encima de 4 GB, o no es de color directo
+        base := p[0]
+        octetos_fila := p[2]
+        ancho := p[3]
+        alto := p[4]
+        bits := q[0]
+        devolver cierto
+    fin
+
     ; ---- los módulos ----
     público función módulos(): nat32
         si no hay_multiboot() o info().banderas yb 8 = 0 entonces devolver 0 fin

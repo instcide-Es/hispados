@@ -1,0 +1,144 @@
+; =============================================================================
+;  video.cas - la pantalla gráfica de Hispa-Pentium: un modo de 32 bits por
+;  punto con la memoria de la pantalla seguida («framebuffer lineal»), que se
+;  ve como un lienzo (grafico.cas).
+;
+;  El modo sale de uno de dos sitios:
+;   1. del cargador, si ya lo ha dejado puesto (multiboot: GRUB con un modo
+;      gráfico) y es de 32 bits por punto;
+;   2. de la tarjeta «VBE de Bochs» (la VGA de QEMU, Bochs y VirtualBox): se
+;      le pide por sus dos puertos (0x1CE, el índice; 0x1CF, el dato) y la
+;      memoria de la pantalla está en su primera zona PCI (1234:1111).
+;  En un PC de verdad sin esa tarjeta el modo lo tiene que poner el cargador
+;  (PENTIUM.md lo cuenta).
+;
+;  La memoria de la pantalla está muy por encima de la RAM: se pone en la
+;  zona de los gráficos del núcleo (paginas.cas, GRÁFICOS_INICIO), cuyas
+;  tablas ven todos los espacios de direcciones.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Video
+
+    importar Cpu, Multiboot, Paginas, Grafico
+
+    constante VBE_ÍNDICE = 0x1CE
+    constante VBE_DATO = 0x1CF
+    constante VBE_ID = 0
+    constante VBE_ANCHO = 1
+    constante VBE_ALTO = 2
+    constante VBE_BITS = 3
+    constante VBE_ACTIVAR = 4
+    constante VBE_ENCENDIDO = 0x41              ; encendido, con la memoria seguida
+
+    público variable hay_pantalla: bool         ; ya hay un modo gráfico puesto
+    público variable pantalla: Lienzo           ; la pantalla de verdad
+    público variable pantalla_física: nat32     ; dónde está su memoria (dirección física)
+    público variable por_bochs: bool            ; el modo lo ha puesto la VBE de Bochs (no el cargador)
+
+    función vbe_pon(índice: nat32, dato: nat32)
+        ensamblador
+            mov edx, {VBE_ÍNDICE}
+            mov eax, {índice}
+            out dx, ax
+            mov edx, {VBE_DATO}
+            mov eax, {dato}
+            out dx, ax
+        fin
+    fin
+
+    función vbe_lee(índice: nat32): nat32
+        ensamblador
+            mov edx, {VBE_ÍNDICE}
+            mov eax, {índice}
+            out dx, ax
+            mov edx, {VBE_DATO}
+            xor eax, eax
+            in ax, dx
+        fin
+    fin
+
+    ; una palabra de 32 bits de la configuración PCI de un dispositivo
+    función pci_lee(bus: nat32, dispositivo: nat32, registro: nat32): nat32
+        variable dir: nat32
+        dir := 0x80000000 ob (bus << 16) ob (dispositivo << 11) ob (registro yb 0xFC)
+        ensamblador
+            mov edx, 0xCF8
+            mov eax, {dir}
+            out dx, eax
+            mov edx, 0xCFC
+            in eax, dx
+        fin
+    fin
+
+    ; la memoria de la pantalla de la VGA de Bochs/QEMU (PCI 1234:1111, su
+    ; primera zona); si no aparece en el PCI, donde la ponía la de ISA
+    función memoria_bochs(): nat32
+        variable bus, d, id: nat32
+        para bus desde 0 hasta 3 hacer
+            para d desde 0 hasta 31 hacer
+                id := pci_lee(bus, d, 0)
+                si id = 0x11111234 o id = 0xBEEF80EE entonces     ; (la segunda, la de VirtualBox)
+                    devolver pci_lee(bus, d, 0x10) yb 0xFFFFFFF0
+                fin
+            fin
+        fin
+        devolver 0xE0000000
+    fin
+
+    ; pone la memoria física de la pantalla en la zona de los gráficos
+    función a_la_vista(física: nat32, octetos: nat32): bool
+        variable v: nat32
+        si octetos > GRÁFICOS_TABLAS * 0x400000 entonces devolver falso fin
+        v := 0
+        mientras v < octetos + (física yb 0xFFF) hacer
+            si no mapear(directorio_núcleo, GRÁFICOS_INICIO + v, (física yb 0xFFFFF000) + v, ESCRIBIR) entonces devolver falso fin
+            v := v + PÁGINA
+        fin
+        poner_cr3(leer_cr3())
+        devolver cierto
+    fin
+
+    ; pone un modo gráfico de 32 bits por punto, de ese ancho y ese alto si
+    ; se puede elegir. Falso si no hay manera (y dice por qué).
+    público función pon_modo(ancho: nat32, alto: nat32): bool
+        variable base, fila, an, al, bits, id: nat32
+        si hay_pantalla entonces devolver cierto fin
+        si pantalla_del_cargador(base, fila, an, al, bits) entonces
+            si bits <> 32 o fila yb 3 <> 0 entonces
+                escribir("pantalla: el cargador ha puesto un modo de ", bits, " bits por punto, y tiene que ser de 32\n")
+                devolver falso
+            fin
+            fila := fila div 4
+        sino
+            id := vbe_lee(VBE_ID)
+            si id < 0xB0C0 o id > 0xB0CF entonces
+                escribir("pantalla: no hay modo gráfico (ni lo ha puesto el cargador ni hay VBE de Bochs/QEMU)\n")
+                devolver falso
+            fin
+            vbe_pon(VBE_ACTIVAR, 0)
+            vbe_pon(VBE_ANCHO, ancho)
+            vbe_pon(VBE_ALTO, alto)
+            vbe_pon(VBE_BITS, 32)
+            vbe_pon(VBE_ACTIVAR, VBE_ENCENDIDO)
+            si vbe_lee(VBE_ANCHO) <> ancho o vbe_lee(VBE_ALTO) <> alto o vbe_lee(VBE_BITS) <> 32 entonces
+                vbe_pon(VBE_ACTIVAR, 0)
+                escribir("pantalla: la tarjeta no da ", ancho, "x", alto, " con 32 bits por punto\n")
+                devolver falso
+            fin
+            base := memoria_bochs()
+            an := ancho
+            al := alto
+            fila := ancho
+            por_bochs := cierto
+        fin
+        si no a_la_vista(base, fila * al * 4) entonces
+            escribir("pantalla: no se puede poner a la vista la memoria de la pantalla\n")
+            devolver falso
+        fin
+        pantalla_física := base
+        pon_lienzo(pantalla, puntero(GRÁFICOS_INICIO + (base yb 0xFFF)), fila, an, al)
+        hay_pantalla := cierto
+        devolver cierto
+    fin
+
+fin Video.

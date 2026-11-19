@@ -36,9 +36,11 @@ módulo Paginas
     público constante PILA_FINAL = 0xC0000000    ; donde empieza (arriba) la pila de un programa
     público constante PILA_INICIO = 0xBFC00000   ; hasta donde puede bajar: 4 MB (y la primera página, nunca)
     público constante MONTÓN_INICIO = 0xC0000000
-    público constante MONTÓN_TABLAS = 2         ; 8 MB
+    público constante MONTÓN_TABLAS = 8         ; 32 MB (los lienzos de las ventanas salen de él)
     público constante DEMANDA_INICIO = 0xD0000000
     público constante DEMANDA_FINAL = 0xD0400000 ; 4 MB, una tabla
+    público constante GRÁFICOS_INICIO = 0xE0000000   ; donde se ve la memoria de la pantalla gráfica
+    público constante GRÁFICOS_TABLAS = 4       ; 16 MB
 
     público variable directorio_núcleo: nat32   ; el del núcleo (dirección física)
     público variable activa: bool
@@ -163,6 +165,11 @@ módulo Paginas
             si entrada(directorio_núcleo, MONTÓN_INICIO + i * 0x400000, cierto, 0) = nulo entonces devolver falso fin
         fin
         si entrada(directorio_núcleo, DEMANDA_INICIO, cierto, 0) = nulo entonces devolver falso fin
+        ; y las de la pantalla gráfica (video.cas la pone ahí cuando se pide):
+        ; hechas ya, las ven todos los espacios de direcciones
+        para i desde 0 hasta GRÁFICOS_TABLAS - 1 hacer
+            si entrada(directorio_núcleo, GRÁFICOS_INICIO + i * 0x400000, cierto, 0) = nulo entonces devolver falso fin
+        fin
         activar_paginación(directorio_núcleo)
         activa := leer_cr0() yb 0x80000000 <> 0
         devolver activa
