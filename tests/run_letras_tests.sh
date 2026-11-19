@@ -190,6 +190,8 @@ fi
 # ------------------------------------------------------------------ d
 if toca d; then
 cp "$FLOPPY" $T/f.img
+# (el disquete de las pruebas va lleno: UNIDADES.COM no va en él de serie)
+mcopy -o -i $T/f.img build/UNIDADES.COM ::HISPADOS/UNIDADES.COM || ko "UNIDADES.COM no cabe en el disquete"
 disco $T/hdd.img 2
 { sleep 4
   send "ECHO =D1=" 1; send "HISPADOS\\UNIDADES" 2; send "TYPE C:\\QUIEN.TXT" 1.5; send "TYPE D:\\QUIEN.TXT" 1.5

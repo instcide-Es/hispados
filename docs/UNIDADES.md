@@ -172,6 +172,17 @@ elige el interno), `disk_usb` (EDD y la marca), `hd_slot`/`slot_asc`/
 `ext_slot` (la letra de las unidades de los controladores: HSPCD, HSPUSB,
 otros), `uni_scan` (LETRAS=). La tabla de unidades (`NDRV`) pasó de 16 a 24.
 
+## Lo que cuesta
+
+- La tabla de unidades de 24 (antes 16) ocupa 1,2 KB más de memoria
+  convencional (2 KB sin DOS=HIGH, por el código nuevo).
+- El núcleo tiene que caber, al arrancar, por debajo de `INIT_ORG` (ahora
+  F400h): quedan unos 250 octetos de margen. Si hace falta más, `.init` ocupa
+  1,8 KB de los 2 KB que tiene reservados.
+- UNIDADES.COM va en la imagen para memorias USB (y en lo que se instala
+  desde ella); en el disquete de arranque no (no sobra sitio): ahí,
+  `EQUIPO /DISCOS`.
+
 ## Programas antiguos y letras altas
 
 - Un juego instalado en C: que guarda su ruta («C:\JUEGO») sigue igual.
