@@ -43,11 +43,12 @@ módulo Escritorio
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
     constante MENÚ_ANCHO = 330
-    constante MENÚ_ALTO = 416
+    constante MENÚ_ALTO = 380
     constante MENÚ_CABEZA = 54
     constante MENÚ_PIE = 42
     constante MENÚ_COLUMNA = 172                ; donde empieza la columna de la derecha
     constante ALTO_OPCIÓN = 34
+    constante ALTO_OFICINA = 28                 ; las de la oficina, más bajas (caben debajo de los programas)
 
     ; ---- los colores (los propios de Hispa-Pentium) ----
     constante BLANCO = 0xFFFFFF
@@ -570,18 +571,23 @@ módulo Escritorio
     ; una opción del menú: su franja (resaltada si es la elegida) y su texto;
     ; da el color con que hay que pintar lo demás (su icono lo pinta quien llama)
     función pinta_opción(ref l: Lienzo, x: ent32, yy: ent32, an: ent32, t: puntero a byte, acción: nat32, dato: nat32, negrita: bool)
+        pinta_opción_de(l, x, yy, an, ALTO_OPCIÓN, t, acción, dato, negrita)
+    fin
+
+    ; lo mismo, de ese alto
+    función pinta_opción_de(ref l: Lienzo, x: ent32, yy: ent32, an: ent32, al: ent32, t: puntero a byte, acción: nat32, dato: nat32, negrita: bool)
         variable n: ent32
         variable c: nat32
-        n := nueva_opción(x, yy, an, ALTO_OPCIÓN, acción, dato)
+        n := nueva_opción(x, yy, an, al, acción, dato)
         c := TINTA
         si n = elegida entonces
-            redondeado(l, x + 2, yy + 1, an - 4, ALTO_OPCIÓN - 2, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
+            redondeado(l, x + 2, yy + 1, an - 4, al - 2, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
             c := BLANCO
         fin
         si negrita entonces
-            texto_negrita(l, x + 38, yy + 9, t, c)
+            texto_negrita(l, x + 38, yy + (al - 16) div 2, t, c)
         sino
-            texto(l, x + 38, yy + 9, t, c)
+            texto(l, x + 38, yy + (al - 16) div 2, t, c)
         fin
     fin
 
@@ -652,12 +658,12 @@ módulo Escritorio
         yy := yy + ALTO_OPCIÓN + 4
         texto_negrita(valor(l), 12, yy, "Oficina", TINTA_SUAVE)
         rectángulo(valor(l), 12, yy + 19, MENÚ_COLUMNA - 26, 1, 0xC9D8EC)
-        yy := yy + 24
+        yy := yy + 22
         i := 0
         mientras i < N_OFICINA hacer
-            pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, de_oficina(i, falso), AM_OFICINA, i, cierto)
-            icono_hoja(valor(l), 14, yy + 4, color_oficina(i))
-            yy := yy + ALTO_OPCIÓN + 2
+            pinta_opción_de(valor(l), 4, yy, MENÚ_COLUMNA - 6, ALTO_OFICINA, de_oficina(i, falso), AM_OFICINA, i, cierto)
+            icono_hoja(valor(l), 14, yy + 1, color_oficina(i))
+            yy := yy + ALTO_OFICINA
             i := i + 1
         fin
         ; a la derecha: los documentos y la configuración
