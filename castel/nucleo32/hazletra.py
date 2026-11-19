@@ -45,12 +45,18 @@ def main():
     s.append('    público constante ANCHO_LETRA = 8')
     s.append('    público constante ALTO_LETRA = 16')
     s.append('')
-    s.append('    ensamblador')
-    s.append('    HP_letra8x16:')
+    # (CASTEL, el compilador escrito en Castel, no admite un bloque de más de
+    # 6000 octetos: la tabla va en varios bloques seguidos, que se ensamblan
+    # uno detrás de otro)
     for c in range(256):
+        if c % 64 == 0:
+            s.append('    ensamblador')
+            if c == 0:
+                s.append('    HP_letra8x16:')
         s.append('        db ' + ','.join('0x%02X' % v for v in filas[c]))
-    s.append('    fin')
-    s.append('')
+        if c % 64 == 63:
+            s.append('    fin')
+            s.append('')
     s.append('    ; dónde están las 16 filas de la letra c')
     s.append('    público función dibujo_letra(c: nat32): puntero a byte')
     s.append('        ensamblador')

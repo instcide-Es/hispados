@@ -409,11 +409,19 @@ done
 if [ -z "$distintos" ]; then ok "ensambla.py: los $iguales archivos (ejemplos de 16 y de 32 bits, biblioteca entera, formas y ENSAMBLA), iguales que con NASM"
 else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
 # ENSAMBLA, dentro de Hispa-8086: los ensambla todos (también a sí mismo)
+# (en dos disquetes: en uno no caben ya todos; el segundo, lo de
+# Hispa-Pentium: la semilla, que con el entorno gráfico pasa de medio mega, y
+# sus programas de usuario)
+NUC=" semilla $(for f in $USU; do basename $f .cas; done | tr '\n' ' ')"
+mkdir $T/ens/sal
+for tanda in 1 2; do
 cp $H/build/hispa8086-1440.img $T/e.img
 { printf '@ECO OFF\r\n'
   for f in $T/ens/*.asm; do
-    N=$(basename $f .asm | tr a-z A-Z)
-    mcopy -o -i $T/e.img $f ::$N.ASM
+    n=$(basename $f .asm)
+    case "$NUC" in *" $n "*) [ $tanda = 1 ] && continue ;; *) [ $tanda = 2 ] && continue ;; esac
+    N=$(echo $n | tr a-z A-Z)
+    mcopy -o -i $T/e.img $f ::$N.ASM || ko "ENSAMBLA: $N.ASM no cabe en el disquete $tanda"
     printf 'ENSAMBLA %s.ASM %s.BIN > %s.SAL\r\n' $N $N $N
   done
   printf 'ECO [castel-fin]\r\n'; } > $T/AUTOEXEC.BAT
@@ -432,9 +440,9 @@ done
 mon quit 0.5
 wait $QPID 2>/dev/null
 QPID=
-[ $hecho = 1 ] || ko "ENSAMBLA: el lote no ha llegado al final"
-mkdir $T/ens/sal
+[ $hecho = 1 ] || ko "ENSAMBLA: el lote $tanda no ha llegado al final"
 mcopy -n -i $T/e.img '::*.BIN' $T/ens/sal/ > /dev/null 2>&1
+done
 iguales=0
 distintos=
 for f in $T/ens/*.asm; do
@@ -459,33 +467,45 @@ else ko "el compilador en Castel no compila: $(head -1 $T/comp.txt)"; fi
 # temporal de CASTEL; en B:, lo que sale (el ensamblador de cada uno son, todos
 # juntos, más de un disquete si va con los fuentes: el de ENSAMBLA solo pasa de
 # 250 K)
+python3 -I $AQUI/azar.py 7 45 $A/azar16.cas $A/azar16.esp
+python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
+python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
+# (en dos tandas, cada una con sus disquetes: en la primera, los ejemplos, la
+# biblioteca, ENSAMBLA, las cuentas al azar y los errores; en la segunda, lo
+# de Hispa-Pentium, que con el entorno gráfico ya no cabe con lo demás: los
+# fuentes del núcleo en A: y, en B:, el ensamblador de la semilla, de más de
+# medio mega, y el de sus programas de usuario)
+for tanda in 1 2; do
 cp $H/build/hispa8086-1440.img $T/c.img
 mmd -i $T/c.img ::BIB ::PARTES ::BIB32
-for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 for f in $AQUI/biblioteca32/*.cas; do mcopy -i $T/c.img $f ::BIB32/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-for f in $AQUI/nucleo32/*.cas; do mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+if [ $tanda = 1 ]; then
+  for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  LOTE="$(echo $AQUI/ejemplos/*.cas) $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas $(echo $AQUI/ejemplos32/*.cas) $A/azar32p.cas"
+else
+  for f in $AQUI/nucleo32/*.cas; do mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  LOTE="$AQUI/nucleo32/semilla.cas $USU"
+fi
 mcopy -i $T/c.img $A/CASTEL.EXE ::
 mformat -C -f 1440 -i $T/cb.img ::
 { printf '@ECO OFF\r\n'
-  python3 -I $AQUI/azar.py 7 45 $A/azar16.cas $A/azar16.esp
-  python3 -I $AQUI/azar32.py 7 28 $A/azar32.cas $A/azar32.esp
-  python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
-  for f in $AQUI/ejemplos/*.cas $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas \
-           $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $A/azar32p.cas; do
+  for f in $LOTE; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
     mcopy -o -i $T/c.img $f ::$N.CAS
     python3 -I $AQUI/ccastel.py $todo $f -o $A/ref/$N.ASM -I $AQUI/ejemplos/partes > /dev/null 2>&1
     printf 'CASTEL %s.CAS -o B:%s.ASM -I BIB -I PARTES -I BIB32 %s > B:%s.SAL\r\n' $N $N "$todo" $N
   done
-  i=0
-  for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
-    i=$((i + 1)); N=$(printf 'E%02d' $i)
-    mcopy -i $T/c.img $f ::$N.CAS
-    echo "$N $(basename $f .cas)" >> $A/errores.txt
-    printf 'CASTEL %s.CAS -I BIB -I PARTES > B:%s.SAL\r\n' $N $N
-  done
+  if [ $tanda = 1 ]; then
+    i=0
+    for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
+      i=$((i + 1)); N=$(printf 'E%02d' $i)
+      mcopy -i $T/c.img $f ::$N.CAS
+      echo "$N $(basename $f .cas)" >> $A/errores.txt
+      printf 'CASTEL %s.CAS -I BIB -I PARTES > B:%s.SAL\r\n' $N $N
+    done
+  fi
   printf 'ECO [castel-fin]\r\n'; } > $T/AUTOEXEC.BAT
 mcopy -o -i $T/c.img $T/AUTOEXEC.BAT ::
 qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu 486 -m 4 \
@@ -502,8 +522,9 @@ done
 mon quit 0.5
 wait $QPID 2>/dev/null
 QPID=
-[ $hecho = 1 ] || ko "CASTEL: el lote de los ejemplos no ha llegado al final"
+[ $hecho = 1 ] || ko "CASTEL: el lote $tanda no ha llegado al final"
 mcopy -n -i $T/cb.img '::*.ASM' '::*.SAL' $A/sal/ > /dev/null 2>&1
+done
 iguales=0
 distintos=
 for f in $A/ref/*.ASM; do
