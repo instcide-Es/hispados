@@ -85,6 +85,8 @@ módulo Ventanas
     fin
 
     constante COLA_EV = 32
+    constante LEJOS = 8192                      ; ninguna medida de un dibujo pasa de aquí
+    constante DEL_NÚCLEO = 5                    ; las ventanas que se guardan para el núcleo (la barra, el menú, los cuadros)
 
     público tipo Ventana = estructura
         usada: bool
@@ -610,9 +612,14 @@ módulo Ventanas
             si an < 120 entonces an := 120 fin
         fin
         tomar(cerrojo)
+        ; los programas no pueden gastar todas: quedan las del núcleo
+        k := 0
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 entonces k := k + 1 fin
+        fin
         i := 0
         mientras i < MAX_VENTANAS y ventanas[i].usada hacer i := i + 1 fin
-        si i = MAX_VENTANAS entonces
+        si i = MAX_VENTANAS o (dueño <> 0 y k >= MAX_VENTANAS - DEL_NÚCLEO) entonces
             soltar(cerrojo)
             devolver 0
         fin
@@ -758,12 +765,19 @@ módulo Ventanas
         yy := ord.ye
         an := ord.ancho
         al := ord.alto
+        ; medidas disparatadas, no: el núcleo no se queda dando vueltas por
+        ; una línea de mil millones de puntos
+        si x < -LEJOS o x > LEJOS o yy < -LEJOS o yy > LEJOS o an < -LEJOS o an > LEJOS o al < -LEJOS o al > LEJOS o ord.n < -LEJOS o ord.n > LEJOS entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
         según ord.op
             caso OP_RECTÁNGULO: rectángulo(ventanas[i].dentro, x, yy, an, al, ord.tinta)
             caso OP_DEGRADADO: degradado(ventanas[i].dentro, x, yy, an, al, ord.tinta, ord.tinta2)
             caso OP_MARCO: marco(ventanas[i].dentro, x, yy, an, al, ord.tinta)
-            caso OP_REDONDEADO: redondeado(ventanas[i].dentro, x, yy, an, al, ord.n, ord.tinta, ord.tinta2, TODAS)
+            caso OP_REDONDEADO: redondeado(ventanas[i].dentro, x, yy, an, al, menor(mayor(ord.n, 0), 64), ord.tinta, ord.tinta2, TODAS)
             caso OP_DISQUETE:
+                an := menor(mayor(an, 8), 512)
                 disquete(ventanas[i].dentro, x, yy, an)
                 al := an
             caso OP_LÍNEA:
