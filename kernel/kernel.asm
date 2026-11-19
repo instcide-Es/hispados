@@ -2343,6 +2343,10 @@ boot_menu:
         int 0x10
 .draw:
         call bm_draw
+.espera:                            ; preguntar antes de leer (INT 16h 01h): la
+        mov ah, 1                   ; espera de INT 16h 00h no vuelve nunca con
+        int 0x16                    ; el teclado USB del CSM de Apple (MacBook
+        jz .espera                  ; Air 2012: el menú F8 se quedaba sin teclado)
         xor ah, ah
         int 0x16
         cmp ah, 0x48
