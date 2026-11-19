@@ -7,10 +7,12 @@
 # USB en cada paso aunque todo vaya bien (la imagen normal solo lo guarda si
 # algo falla). Deja en la carpeta de destino el .zip con la imagen, los LEEME
 # y los .EFI sueltos.
-#   tools/mkprueba_hispabios.sh [carpeta de destino] [acer]
+#   tools/mkprueba_hispabios.sh [carpeta de destino] [acer | raton]
 # (por omisión, build/prueba-hispabios). Con «acer», la misma imagen con otro
 # nombre (hispados-usb-acer-one-10.zip) y solo lo del firmware de 32 bits
 # (LEEME-ACER.TXT, sueltos/BOOTIA32.EFI): no toca lo que haya de la de 64.
+# Con «raton» (HispaBIOS 0.5, el ratón con UEFI), hispados-usb-raton.zip con
+# LEEME-RATON.TXT (como LEEME.TXT), MOUSETST.COM y PRUEBARA.BAT, y los dos .EFI.
 set -eu
 cd "$(dirname "$0")/.."
 B=build
@@ -45,11 +47,27 @@ printf '@ECHO OFF\r\nC:\r\nCD \\\r\nC:\\HISPADOS\\HBLOG\r\nC:\\HISPADOS\\VENTANA
 mcopy -o -i "$P" $T/PRUEBAHB.BAT ::
 Z=hispados-usb-hispabios.zip
 [ "${2:-}" = acer ] && Z=hispados-usb-acer-one-10.zip
+if [ "${2:-}" = raton ]; then
+  # PRUEBARA.BAT: lo que dice HSPRATON, el registro (HBLOG), MOUSETST (mover y
+  # pulsar; una tecla acaba), Hispa Ventanas, y otra vez el registro y HSPRATON
+  # (con las cuentas de lo que ha llegado)
+  Z=hispados-usb-raton.zip
+  txt usb/prueba-hispabios/LEEME-RATON.TXT $T/LEEME-RA.TXT
+  mcopy -o -i "$P" $T/LEEME-RA.TXT ::
+  mcopy -o -i "$P" $B/MOUSETST.COM ::MOUSETST.COM
+  printf '@ECHO OFF\r\nC:\r\nCD \\\r\nC:\\HISPADOS\\HSPRATON /INFO > \\RATON.TXT\r\nC:\\HISPADOS\\HBLOG > NUL\r\nECHO Mueva el raton o el panel; pulse sus botones. Una tecla acaba.\r\n\\MOUSETST\r\nC:\\HISPADOS\\VENTANAS\r\nC:\\HISPADOS\\HBLOG > NUL\r\nC:\\HISPADOS\\HSPRATON /INFO >> \\RATON.TXT\r\nECHO Hecho: suba HISPABIOS.LOG, HBLOG.TXT y RATON.TXT\r\n' > $T/PRUEBARA.BAT
+  mcopy -o -i "$P" $T/PRUEBARA.BAT ::
+fi
 [ ! -e "$D/$Z" ] || mv -f "$D/$Z" "$D/$Z.ant"
 (cd $T && zip -q -9 "$D/$Z" hispados-usb.img)
-txt usb/prueba-hispabios/LEEME-ACER.TXT "$D/LEEME-ACER.TXT"
 cp $T/BOOTIA32.EFI "$D/sueltos/"
-if [ "${2:-}" != acer ]; then
+if [ "${2:-}" = raton ]; then
+  txt usb/prueba-hispabios/LEEME-RATON.TXT "$D/LEEME.TXT"
+  cp $T/BOOTX64.EFI "$D/sueltos/"
+else
+  txt usb/prueba-hispabios/LEEME-ACER.TXT "$D/LEEME-ACER.TXT"
+fi
+if [ -z "${2:-}" ]; then
   txt usb/prueba-hispabios/LEEME.TXT "$D/LEEME.TXT"
   cp $T/BOOTX64.EFI "$D/sueltos/"
 fi

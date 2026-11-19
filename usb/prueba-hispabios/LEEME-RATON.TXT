@@ -1,0 +1,55 @@
+PRUEBA DEL RATON CON UEFI (HispaBIOS 0.5) - Hispa-DOS
+Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
+=====================================================
+
+Para que equipos: ThinkPad E14 y MacBook Air de 2017.
+
+Que es: arrancando por UEFI, Hispa Ventanas no tenia raton ni panel
+tactil. HispaBIOS 0.5 busca el raton: el que da el firmware del equipo
+(raton o panel tactil) y los ratones USB. Despues HSPRATON lo usa como
+siempre.
+
+QUE HACER (unos 10 minutos por equipo)
+--------------------------------------
+1. Descomprima hispados-usb-raton.zip y grabe hispados-usb.img en una
+   memoria USB entera (Rufus en modo DD, balenaEtcher o dd).
+2. Arranque el equipo desde la memoria USB, por UEFI. Primero SIN
+   raton USB enchufado: solo el panel tactil del equipo.
+3. En C:\> escriba
+       PRUEBARA
+   a) Sale MOUSETST: mueva el dedo por el panel. Deben cambiar los
+      numeros X= e Y=. Pulse el panel (o su boton): B= debe cambiar.
+      Pulse una tecla para acabar.
+   b) Sale Hispa Ventanas: mire si la flecha se mueve con el panel y
+      si un doble clic en un grupo lo abre. Para salir: boton "Salir"
+      de arriba a la derecha; sin raton, F10, Archivo > Salir e Intro.
+4. Apague. Enchufe un raton USB (si tiene uno) y repita los pasos 2
+   y 3 con el raton USB. El raton tiene que estar enchufado ANTES de
+   arrancar.
+5. Suba al FTP, a la carpeta de informes de ese equipo, estos archivos
+   de la raiz de la memoria USB:
+       HISPABIOS.LOG   (DOS lo ensena como HISPAB~1.LOG)
+       HBLOG.TXT
+       RATON.TXT
+   y cuente que ha ido y que no: el panel, el raton USB, los botones.
+
+Si no arranca o va peor que antes: reinicie y, en cuanto salga
+"HispaBIOS 0.5", vaya pulsando la tecla S (MODO SEGURO). En el modo
+seguro no se busca el raton USB.
+
+Que llevan los archivos
+-----------------------
+HISPABIOS.LOG: lo que ha encontrado HispaBIOS al arrancar (apartado
+"Raton:": las controladoras USB, el raton del firmware, los ratones
+USB), ademas de la pantalla, los discos y el reloj.
+HBLOG.TXT: de donde sale el raton y cuantos movimientos han llegado.
+RATON.TXT: lo que dice HSPRATON /INFO (por donde va el raton).
+Son texto y no llevan nada personal.
+
+Notas
+-----
+- En el ThinkPad E14 el panel puede no salir por el firmware: entonces
+  HSPRATON lo busca como siempre (el controlador 8042). RATON.TXT dira
+  por donde ha ido.
+- Con Secure Boot activado no arranca: hay que desactivarlo.
+- Esta imagen escribe HISPABIOS.LOG en cada arranque por UEFI.
