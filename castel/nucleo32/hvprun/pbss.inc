@@ -9,6 +9,7 @@ pan_max_al  resd 1
 pan_ven     resd 1                  ; la ventana de Hispa-Pentium (0: aún no)
 pan_ppal    resd 1                  ; la principal del programa (ficha de Ventanas)
 pan_suceso  resd 4                  ; el suceso que se atiende: clase, a, b, c
+pp_visto    resd 1                  ; la cuenta del portapapeles de Ventanas al ponerlo al día
 pan_hay_guardado resb 1             ; 1: hay uno en pan_suceso (de esperar)
         alignb 4
 pr_ox       resd 1                  ; presentar

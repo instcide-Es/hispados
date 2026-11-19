@@ -471,6 +471,88 @@ pan_uno:
         je pan_cerrar
         cmp eax, EVP_TAMANO
         je pan_tamano
+        cmp eax, EVP_FOCO
+        je pan_foco
+        ret
+
+; ---- el portapapeles ----
+; Ventanas tiene el suyo (controles.inc: pp_buf, pp_len), y los programas
+; copian y pegan por él. Se pone al día con el de Hispa-Pentium (llamada 40)
+; cuando la ventana pasa a ser la activa (lo que se haya copiado en otro
+; programa, aquí) y cuando deja de serlo (lo copiado aquí, si ha cambiado,
+; para los demás).
+pan_foco:
+        pushad
+        cmp dword [pan_suceso+4], 0
+        je .sale
+        mov ebx, 2                  ; entra: ¿hay algo en el del sistema?
+        PSIS PS_PORTAPAPELES
+        test eax, eax
+        jz .x
+        cmp eax, PRIMER_ERROR
+        jae .x
+        mov ebx, 1
+        mov ecx, pres_buf
+        mov edx, PP_MAX
+        PSIS PS_PORTAPAPELES
+        cmp eax, PRIMER_ERROR
+        jae .x
+        test eax, eax
+        jz .x
+        mov esi, pres_buf
+        mov ecx, eax
+        call pp_poner
+        call pp_sello
+        mov [pp_visto], eax
+        jmp .x
+.sale:
+        mov ecx, [pp_len]           ; sale: si se ha copiado algo, al del sistema
+        test ecx, ecx
+        jz .x
+        cmp dword [pp_buf], 0
+        je .x
+        call pp_sello
+        cmp eax, [pp_visto]
+        je .x
+        mov [pp_visto], eax
+        mov esi, [pp_buf]           ; (sin los retornos de carro)
+        mov edi, pres_buf
+.c:
+        lodsb
+        cmp al, 13
+        je .s
+        stosb
+.s:
+        loop .c
+        mov edx, edi
+        sub edx, pres_buf
+        xor ebx, ebx
+        mov ecx, pres_buf
+        PSIS PS_PORTAPAPELES
+.x:
+        popad
+        ret
+
+; (interna) -> EAX=una cuenta de lo que hay en el portapapeles de Ventanas
+pp_sello:
+        push ecx
+        push esi
+        mov eax, [pp_len]
+        mov ecx, eax
+        mov esi, [pp_buf]
+        test esi, esi
+        jz .x
+.l:
+        test ecx, ecx
+        jz .x
+        rol eax, 5
+        xor al, [esi]
+        inc esi
+        dec ecx
+        jmp .l
+.x:
+        pop esi
+        pop ecx
         ret
 
 ; el botón de cerrar de la ventana: WM_CLOSE a la principal (o, si hay un
