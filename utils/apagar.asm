@@ -5,16 +5,31 @@
 ;
 ;  El mismo fuente da los dos programas: con -DREINICIAR, REINICIAR.
 ;
-;    APAGAR    [/INFO] [/NOACPI] [/NOAPM] [/SOLO:ACPI|APM|MENSAJE]
+;    APAGAR    [/INFO] [/NOUEFI] [/NOACPI] [/NOAPM] [/SOLO:UEFI|ACPI|APM|MENSAJE]
 ;    REINICIAR [/INFO] [/NOACPI] [/SOLO:ACPI|TECLADO|CF9|FALLO]
 ;
-;  Antes de nada, los dos escriben en el disco lo que quede pendiente:
-;  INT 21h función 0Dh (vaciar los búferes de DOS) y, si hay una caché de
-;  disco residente con la interfaz de SMARTDRV (INT 2Fh AX=4A10h), su orden de
-;  escribirlo todo; después esperan unos instantes (2 s) para que los discos
-;  acaben.
+;  Antes de nada (y antes de mirar las tablas de ACPI), los dos escriben en
+;  el disco lo que quede pendiente, por este orden [APAGAR-USB]:
+;   1. HSPACPI, si está, se para (INT 2Fh AX=DB04h: avisa al controlador
+;      embebido y ya no ejecuta más métodos de ACPI desde el reloj, ni apunta
+;      nada en su registro): desde aquí nadie más escribe ni toca ACPI;
+;   2. INT 21h función 0Dh (vaciar los búferes de DOS) y, si hay una caché de
+;      disco residente con la interfaz de SMARTDRV (INT 2Fh AX=4A10h), su
+;      orden de escribirlo todo, y otra vez 0Dh;
+;   3. con HispaBIOS (equipos UEFI), lo que el firmware tenga pendiente
+;      (INT 15h AX=4846h: FlushBlocks de cada disco);
+;   4. una espera para que los discos acaben: 2 s, y 3 s si se ha arrancado
+;      de una memoria USB (EDD: la unidad 80h es «USB») o con HispaBIOS: las
+;      memorias USB terminan de escribir por su cuenta después de decir que
+;      ya está, y la BIOS no tiene ninguna orden para esperarlas.
+;  Solo después se toca ACPI, APM o el firmware para apagar o reiniciar: al
+;  poner el modo ACPI (SMI_CMD <- ACPI_ENABLE), muchas BIOS dejan de atender
+;  el USB «heredado» con el que dan la memoria USB por INT 13h.
 ;
-;  APAGAR (hecho con las especificaciones públicas de ACPI y APM 1.2):
+;  APAGAR (hecho con las especificaciones públicas de UEFI, ACPI y APM 1.2):
+;   0) Con HispaBIOS (Hispa-DOS en un equipo UEFI), como un sistema UEFI: el
+;      servicio ResetSystem(EfiResetShutdown) del firmware (INT 15h
+;      AX=4841h). Si vuelve (no ha apagado), lo siguiente.
 ;   a) ACPI. Se busca la RSDP («RSD PTR », en la EBDA o entre E0000h y
 ;      FFFFFh), la RSDT (o la XSDT) y en ella la FADT (firma «FACP»): de ahí
 ;      salen PM1a_CNT_BLK y PM1b_CNT_BLK (o sus X_ si son de E/S), SMI_CMD,
@@ -146,18 +161,24 @@ start:
         smsw ax
         and al, 1
         mov [v86], al
+        call hb_buscar
+        cmp byte [opt_info], 0
+        je .hacer
         call acpi_buscar
 %ifndef REINICIAR
         call apm_buscar
 %endif
-        cmp byte [opt_info], 0
-        je .hacer
         call informe
         mov ax, 0x4C00
         int 0x21
 .hacer:
+        ; [APAGAR-USB] primero, todo al disco; después, las tablas y apagar
         PR "Escribiendo en el disco lo que queda pendiente...", NL
         call vaciar
+        call acpi_buscar
+%ifndef REINICIAR
+        call apm_buscar
+%endif
 %ifdef REINICIAR
         jmp reiniciar
 %else
@@ -173,6 +194,7 @@ ayuda:
 ; los métodos (bits de «metodos»)
 M_ACPI      equ 1
 M_APM       equ 2                   ; (APAGAR)
+M_UEFI      equ 4                   ; (APAGAR) [APAGAR-USB] ResetSystem de HispaBIOS
 M_TECLADO   equ 2                   ; (REINICIAR)
 M_CF9       equ 4
 M_FALLO     equ 8
@@ -191,6 +213,8 @@ opciones:
 %ifndef REINICIAR
         OPCION 1, M_APM, "NOAPM"
         OPCION 2, M_APM, "SOLO:APM"
+        OPCION 1, M_UEFI, "NOUEFI"
+        OPCION 2, M_UEFI, "SOLO:UEFI"
         OPCION 2, 0, "SOLO:MENSAJE"
 %else
         OPCION 2, M_TECLADO, "SOLO:TECLADO"
@@ -203,6 +227,7 @@ opciones:
 ;  Vaciar los búferes y la caché de disco, y esperar unos instantes
 ; =============================================================================
 vaciar:
+        call hspacpi_parar          ; [APAGAR-USB] nadie más toca ACPI ni el disco
         mov ah, 0x0D                ; los búferes de DOS
         int 0x21
         mov ax, 0x4A10              ; ¿una caché con la interfaz de SMARTDRV?
@@ -217,8 +242,89 @@ vaciar:
 .sin:
         mov ah, 0x0D                ; (otra vez, por si la caché tenía algo)
         int 0x21
+        cmp byte [hay_hb], 0        ; [APAGAR-USB] HispaBIOS: lo del firmware
+        je .sinhb
+        mov ax, 0x4846              ; (FlushBlocks de cada disco)
+        int 0x15
+.sinhb:
+        call arranque_usb           ; (cambia CX)
         mov cx, 36                  ; unos 2 s para que los discos acaben
+        jnc .esp
+        mov cx, 55                  ; y 3 s si es una memoria USB
+.esp:
         jmp espera
+
+; [APAGAR-USB] HSPACPI, si está: que se pare (INT 2Fh AX=DB04h; uno de antes
+; no lo entiende y no hace nada)
+hspacpi_parar:
+        mov ax, 0xDB00
+        xor bx, bx
+        int 0x2F
+        cmp al, 0xFF
+        jne .x
+        cmp bx, 0x4143              ; «AC»
+        jne .x
+        mov ax, 0xDB04
+        int 0x2F
+.x:
+        ret
+
+; [APAGAR-USB] ¿HispaBIOS? (INT 15h AX=4842h -> AX = 'hb') -> hay_hb
+hb_buscar:
+        mov ax, 0x4842
+        int 0x15
+        jc .x
+        cmp ax, 0x6862
+        jne .x
+        mov byte [hay_hb], 1
+.x:
+        ret
+
+; [APAGAR-USB] CF = 1 si se ha arrancado de una memoria USB: con HispaBIOS
+; (lo normal en los equipos UEFI) o si la unidad 80h, con la que ha
+; arrancado DOS desde un disco, dice ser USB (EDD 3.0, tipo de interfaz)
+arranque_usb:
+        cmp byte [hay_hb], 0
+        jne .si
+        push cs
+        pop es
+        cld
+        mov ax, 0x3305              ; la unidad de arranque
+        xor dl, dl
+        int 0x21
+        cmp dl, 3
+        jb .no                      ; (un disquete)
+        mov ah, 0x41
+        mov bx, 0x55AA
+        mov dl, 0x80
+        int 0x13
+        jc .no
+        cmp bx, 0xAA55
+        jne .no
+        mov di, edd_buf
+        mov cx, 0x4A / 2
+        xor ax, ax
+        rep stosw
+        mov word [edd_buf], 0x42
+        mov ah, 0x48
+        mov dl, 0x80
+        mov si, edd_buf
+        int 0x13
+        jc .no
+        cmp word [edd_buf], 0x42
+        jb .no
+        cmp word [edd_buf+0x1E], 0xBEDD
+        jne .no
+        mov eax, [edd_buf+0x28]
+        and eax, 0x00FFFFFF
+        cmp eax, 'USB'
+        jne .no
+.si:
+        stc
+        ret
+.no:
+        clc
+        ret
 
 ; CX = tics del reloj de la BIOS (18,2 por segundo) que hay que esperar
 espera:
@@ -654,6 +760,15 @@ aml_entero:
 ; =============================================================================
 apagar:
         PR "Apagando el equipo...", NL
+        test byte [metodos], M_UEFI ; [APAGAR-USB] con HispaBIOS, el firmware
+        jz .acpi
+        cmp byte [hay_hb], 0
+        je .acpi
+        mov ax, 0x4841              ; ResetSystem(EfiResetShutdown)
+        int 0x15
+        mov cx, 18                  ; (vuelve si no ha apagado: lo siguiente)
+        call espera
+.acpi:
         test byte [metodos], M_ACPI
         jz .apm
         call acpi_apagar
@@ -1312,7 +1427,17 @@ informe:
         call puthex4
         PR "h", NL
 .met:
+        cmp byte [hay_hb], 0
+        je .mhb
+        PR "HispaBIOS (equipo UEFI): sí", NL
+.mhb:
         PR "Para apagar: "
+        test byte [metodos], M_UEFI
+        jz .m0
+        cmp byte [hay_hb], 0
+        je .m0
+        PR "el firmware UEFI (ResetSystem); si no apaga, "
+.m0:
         test byte [metodos], M_ACPI
         jz .m1
         cmp word [f_pm1a], 0
@@ -1597,8 +1722,9 @@ h_ayuda     db "Reinicia el equipo.", 13, 10, 13, 10
 h_uso       db "REINICIAR [/INFO] [/NOACPI | /SOLO:método]", 13, 10, 0
 h_resto     equ $
             db 13, 10
-            db "Antes escribe en el disco lo que quede pendiente (los búferes de DOS y una", 13, 10
-            db "caché de disco, si la hay) y espera unos instantes. Después prueba, por", 13, 10
+            db "Antes escribe en el disco lo que quede pendiente (los búferes de DOS, una", 13, 10
+            db "caché de disco, si la hay, y lo del firmware UEFI) y espera unos instantes", 13, 10
+            db "(más si se ha arrancado de una memoria USB). Después prueba, por", 13, 10
             db "este orden: el registro de reinicio de ACPI (RESET_REG de la FADT), el", 13, 10
             db "controlador del teclado (orden FEh), el puerto CF9h y, si nada de eso", 13, 10
             db "funciona, un triple fallo del procesador.", 13, 10, 13, 10
@@ -1608,19 +1734,23 @@ h_resto     equ $
             db "            método (para buscar el que sirve en un equipo)", 13, 10, 0
 %else
 h_ayuda     db "Apaga el equipo.", 13, 10, 13, 10
-h_uso       db "APAGAR [/INFO] [/NOACPI] [/NOAPM] [/SOLO:método]", 13, 10, 0
+h_uso       db "APAGAR [/INFO] [/NOUEFI] [/NOACPI] [/NOAPM] [/SOLO:método]", 13, 10, 0
 h_resto     equ $
             db 13, 10
-            db "Antes escribe en el disco lo que quede pendiente (los búferes de DOS y una", 13, 10
-            db "caché de disco, si la hay) y espera unos instantes. Después apaga por ACPI", 13, 10
-            db "(el estado S5) y, si el equipo no tiene ACPI o no se apaga, por APM. Si", 13, 10
-            db "tampoco, deja en la pantalla «Ya puede apagar el equipo.» y para el", 13, 10
-            db "procesador: entonces se apaga con el botón.", 13, 10, 13, 10
+            db "Antes escribe en el disco lo que quede pendiente (los búferes de DOS, una", 13, 10
+            db "caché de disco, si la hay, y lo del firmware UEFI) y espera unos instantes", 13, 10
+            db "(más si se ha arrancado de una memoria USB). Después apaga: en un equipo", 13, 10
+            db "UEFI (HispaBIOS), con el firmware; si no, por ACPI (el estado S5) y, si el", 13, 10
+            db "equipo no tiene ACPI o no se apaga, por APM. Si tampoco, deja en la", 13, 10
+            db "pantalla «Ya puede apagar el equipo.» y para el procesador: entonces se", 13, 10
+            db "apaga con el botón.", 13, 10, 13, 10
             db "  /INFO     dice qué ha encontrado (ACPI, \_S5, puertos, APM) y qué", 13, 10
             db "            haría, sin apagar", 13, 10
+            db "  /NOUEFI   no apagar con el firmware UEFI (HispaBIOS)", 13, 10
             db "  /NOACPI   no usar ACPI", 13, 10
             db "  /NOAPM    no usar APM", 13, 10
-            db "  /SOLO:ACPI, /SOLO:APM o /SOLO:MENSAJE   probar solo ese método", 13, 10, 0
+            db "  /SOLO:UEFI, /SOLO:ACPI, /SOLO:APM o /SOLO:MENSAJE   probar solo ese", 13, 10
+            db "            método", 13, 10, 0
 %endif
 
 ; ---- variables (a cero al cargar: van en el archivo) ----
@@ -1628,6 +1758,7 @@ opt_info    db 0
 metodos     db 0xFF
 v86         db 0
 hubo_cache  db 0
+hay_hb      db 0                    ; [APAGAR-USB] HispaBIOS (equipo UEFI)
 hay_acpi    db 0
 a_ent       db 0
 a_nssdt     db 0
@@ -1675,4 +1806,5 @@ i15gdt      resb 48
 rootbuf     resb 36 + TABLAS_MAX * 8 + 4
 blq         resb BLQ + 72 + 4
 u_numbuf    resb 16
+edd_buf     resb 0x4A               ; [APAGAR-USB] INT 13h AH=48h (EDD 3.0)
 u_lbuf      resb 84
