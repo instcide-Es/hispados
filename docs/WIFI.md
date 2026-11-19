@@ -399,9 +399,13 @@ el microcódigo y encender la radio.
 
 Además, el residente apunta **su arranque paso a paso** (líneas «HSPWIFI
 paso: ...»): salen por la pantalla con `/V` o `/PANTALLA` y van al archivo de
-`/REG:`, que se abre, se escribe y se **cierra en cada línea** (y se vacían
-los búferes del disco): lo último que haya en el archivo es lo último que se
-hizo. Van desde antes de pedir la memoria (el gestor XMS, el archivo del
+`/REG:`, que se abre, se escribe y se **cierra en cada línea**: lo último
+que haya en el archivo es lo último que se hizo. (No usa la función 0Dh de
+DOS: en Hispa-DOS vuelve a mirar todos los discos; la primera imagen de
+prueba la usaba y en el MacBook Air sacó «Error al leer la unidad C: no se
+encuentra el sector» por el lector de tarjetas vacío, que la BIOS cuenta
+como un disco. Ese aviso ya no sale al mirar los discos: `drives_scan` del
+núcleo, con su prueba en `tests/run_criterr_tests.sh`.) Van desde antes de pedir la memoria (el gestor XMS, el archivo del
 núcleo, el bloque y su dirección, la A20, la copia, cada ida y vuelta al modo
 protegido con su resultado) hasta después de engancharse: con los vectores ya
 puestos espera 6 tics del reloj (cuenta los sondeos de la tarjeta), lee

@@ -1971,7 +1971,7 @@ putc:
 ;  El arranque, paso a paso (para saber dónde se para si el equipo se cuelga).
 ;  Cada paso es una línea «HSPWIFI paso: ...»: sale por la pantalla con /V o
 ;  /PANTALLA y va al archivo de /REG, que se abre, se escribe y se CIERRA en
-;  cada línea (y se vacían los búferes del disco): lo último que haya en el
+;  cada línea: lo último que haya en el
 ;  archivo es lo último que se hizo.
 ;    PASO "texto"              una línea entera
 ;    call paso_abre ... (puts, hex2, hex16, hex32, putdec) ... call paso_cierra
@@ -2033,8 +2033,7 @@ paso_cierra:
         int 0x21
         mov ah, 0x3E
         int 0x21
-        mov ah, 0x0D                ; y los búferes del DOS
-        int 0x21
+        ; (sin la función 0Dh: en Hispa-DOS vuelve a mirar todos los discos)
 .fin:
         pop es
         pop ds

@@ -23,6 +23,8 @@
 #  8. El arranque paso a paso en el registro (/REG) y, si hay KVM, que el
 #     sondeo desde el reloj no le quita el modo «irreal» a quien interrumpe
 #     (HSPUSB en un MacBook: tests/progs/irreal2.asm).
+#  8. Arrancando de una memoria USB sin 8042 (el MacBook Air 2012): HSPUSB
+#     lleva el disco, HSPWIFI residente con su registro allí, la función 0Dh.
 # Dos QEMU a la vez como mucho. Wi-Fi tests without the hardware.
 set -u
 cd "$(dirname "$0")/.."
@@ -322,6 +324,49 @@ if [ -w /dev/kvm ] && qemu-system-i386 -accel kvm -display none -monitor none -S
   check irreal "fin-de-la-prueba"
 else
   echo "  (sin KVM: se salta; QEMU sin KVM no comprueba los límites de los segmentos)"
+fi
+
+echo "== Wi-Fi arrancando de una memoria USB sin 8042 (como el MacBook Air 2012): HSPUSB lleva el disco =="
+# Sin controlador de teclado, HSPUSB se queda con el USB y atiende él la
+# memoria de arranque (INT 13h propio, por EHCI, en modo «irreal»). Con
+# HSPWIFI residente (sondea desde el reloj) y su registro en esa memoria: se
+# vuelve a mirar los discos (función 0Dh, como APAGAR), se copia un archivo
+# grande y sigue todo en su sitio. Con KVM si lo hay (límites de verdad).
+USBIMG=${USBIMG:-$B/hispados-usb.img}
+if [ -f "$USBIMG" ]; then
+  KV=""
+  if [ -w /dev/kvm ] && qemu-system-i386 -accel kvm -display none -monitor none -S -daemonize -pidfile $T/kvm2.pid 2>/dev/null; then
+    kill "$(cat $T/kvm2.pid)" 2>/dev/null; KV="-accel kvm"
+  fi
+  cp "$USBIMG" $T/usb.img
+  tests/tools/sinmenu.sh $T/usb.img || ko "sinmenu.sh"
+  nasm -f bin -o $T/D0D.COM tests/progs/d0d.asm || ko "no se puede ensamblar D0D.COM"
+  MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/usb.img@@1048576 $T/D0D.COM ::HISPADOS/D0D.COM
+  { sleep 20
+    for c in '7|HSPWIFI /SIMULA /REG:C:\WIFI.LOG' '4|D0D' '4|DIR C:\HISPADOS\HSPUSB.SYS' '6|WIFI REDES' \
+             '8|COPY C:\HISPADOS\HSPWIFI.BIN C:\X.BIN' '3|ECHO fin-de-la-prueba'; do
+      printf '%s\r' "${c#*|}"; sleep "${c%%|*}"
+    done
+  } | timeout 100 qemu-system-i386 $KV -display none -serial stdio -monitor none -machine pc,i8042=off \
+        -device usb-ehci,id=hc -drive if=none,id=usbd,format=raw,file=$T/usb.img \
+        -device usb-storage,bus=hc.0,drive=usbd,bootindex=0 -device usb-kbd,bus=hc.0 -device usb-mouse,bus=hc.0 \
+        -no-reboot > $T/usb.raw 2>&1
+  tr -d '\r' < $T/usb.raw | iconv -f CP437 -t UTF-8 -c > $T/usb.txt
+  check usb "Disco de arranque USB atendido por HSPUSB (INT 13h)."
+  check usb "Tarjeta Wi-Fi simulado (pruebas)"
+  check usb "funcion-0D-hecha"
+  check usb "HSPUSB   SYS"
+  check usb "  2  HispaPrueba"
+  check usb "1 archivo(s) copiado(s)"
+  checkn usb "Error al leer"
+  check usb "fin-de-la-prueba"
+  MTOOLS_SKIP_CHECK=1 mtype -i $T/usb.img@@1048576 ::WIFI.LOG 2>/dev/null | iconv -f CP437 -t UTF-8 -c > $T/ulog.txt
+  check ulog "HSPWIFI paso: disco leído: "
+  check ulog "HSPWIFI paso: arranque terminado"
+  if MTOOLS_SKIP_CHECK=1 mcopy -n -i $T/usb.img@@1048576 ::X.BIN $T/X.BIN 2>/dev/null && cmp -s $T/X.BIN $B/HSPWIFI.BIN; then ok "el archivo copiado en la memoria USB es idéntico"; else ko "el archivo copiado en la memoria USB"; fi
+  [ -n "$KV" ] || echo "  (sin KVM: hecho con QEMU a secas, que no comprueba los límites)"
+else
+  echo "  (falta $USBIMG: make usb)"
 fi
 
 if [ $fail -eq 0 ]; then echo "Wi-Fi: todas las pruebas pasan"; else echo "Wi-Fi: HAY FALLOS"; fi

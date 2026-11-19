@@ -6,25 +6,29 @@
 # (HSPUSB lleva el teclado del Mac) y lanza PRUWIFI.BAT en vez del
 # AUTOEXEC.BAT de siempre. Deja en la carpeta de destino el .zip con la
 # imagen y el LEEME.TXT.
-#   tools/mkprueba_wifi_mac2012.sh [carpeta de destino]
+#   tools/mkprueba_wifi_mac2012.sh [carpeta de destino [nombre]]
+#   (nombre: el del .zip y la imagen, sin extensión; por omisión
+#   hispa486-usb-wifi-mac2012)
 set -eu
 cd "$(dirname "$0")/.."
 B=build
 D=${1:-$B/prueba-wifi-mac2012}
+N=${2:-hispa486-usb-wifi-mac2012}
 [ -f $B/hispa486-usb.img ] || { echo "falta $B/hispa486-usb.img (make usb486)"; exit 1; }
 T=$B/prueba-wifi-mac2012-tmp
 rm -rf $T; mkdir -p "$D" $T
-IMG=$T/hispa486-usb-wifi-mac2012.img
+IMG=$T/$N.img
 cp $B/hispa486-usb.img $IMG
 P="$IMG@@$((2048 * 512))"
 export MTOOLS_SKIP_CHECK=1
 FECHA=$(date +%d/%m/%Y); HORA=$(date +%H:%M)
 VERSION=$(git describe --always --dirty 2>/dev/null || echo "sin git")
-export FECHA HORA VERSION
+NOMBRE=$N
+export FECHA HORA VERSION NOMBRE
 txt() { python3 -c "
 import os, sys
 t = open(sys.argv[1], encoding='utf-8').read().replace('\r\n', '\n').replace('\n', '\r\n')
-for k in ('FECHA', 'HORA', 'VERSION'): t = t.replace('@' + k + '@', os.environ[k])
+for k in ('FECHA', 'HORA', 'VERSION', 'NOMBRE'): t = t.replace('@' + k + '@', os.environ[k])
 open(sys.argv[2], 'wb').write(t.encode('cp437'))" "$1" "$2"; }
 mtype -i "$P" ::CONFIG.SYS > $T/CONFIG.0
 mtype -i "$P" ::AUTOEXEC.BAT > $T/AUTOEXEC.0
@@ -51,9 +55,9 @@ for f in PRUWIFI.BAT PASO2.BAT; do txt usb/prueba-wifi-mac2012/$f $T/$f; done
 txt usb/prueba-wifi-mac2012/LEEME.TXT $T/LEEME-WI.TXT
 mcopy -o -i "$P" $T/CONFIG.SYS $T/AUTOEXEC.BAT $T/PRUWIFI.BAT $T/PASO2.BAT $T/LEEME-WI.TXT ::
 mcopy -o -i "$P" $T/PASO2.BAT ::HISPADOS/PASO2.BAT
-Z="$(realpath "$D")/hispa486-usb-wifi-mac2012.zip"
+Z="$(realpath "$D")/$N.zip"
 rm -f "$Z"
-(cd $T && zip -q -9 "$Z" hispa486-usb-wifi-mac2012.img)
+(cd $T && zip -q -9 "$Z" $N.img)
 txt usb/prueba-wifi-mac2012/LEEME.TXT "$D/LEEME.TXT"
 ls -l "$D"
 echo "imagen de prueba: $IMG (y $Z)"
