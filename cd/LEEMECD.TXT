@@ -1,0 +1,40 @@
+Hispa-DOS en CD
+===============
+
+Este CD lleva Hispa-DOS entero, lo mismo que la memoria USB de su gama
+(Hispa-386 o Hispa-486): el sistema, Hispa Ventanas, los programas, la
+oficina, los juegos y, en Hispa-486, los programas de 32 bits y el
+Navegador. Es para los ordenadores de los 90 que no arrancan desde una
+memoria USB pero tienen lector de CD.
+
+Arrancar desde el CD
+--------------------
+Ponga el CD y encienda el ordenador (si no arranca del CD, busque en la
+BIOS el orden de arranque y ponga el CD-ROM primero). Sale un menú:
+
+  1. Arrancar Hispa-DOS sin instalar   (se elige sola a los 10 segundos)
+  2. Instalar Hispa-DOS en el disco duro
+
+Con la 1 sale el menú de siempre: Normal, Juegos, y Prueba del equipo y
+del sonido. Todo se usa desde el CD: la orden PATH ya lleva su carpeta
+\HISPADOS. El CD no se puede escribir: lo que cambie (ajustes, documentos)
+guárdelo en el disco duro o en un disquete.
+
+Con la 2 empieza el programa de instalación: pantallas azules, como las
+del de MS-DOS 6.22, que preparan el disco duro (avisando antes si se va a
+borrar algo), le dan formato, copian Hispa-DOS en C:\HISPADOS y lo dejan
+listo para arrancar. Al final, saque el CD y reinicie.
+
+Si el ordenador no arranca desde el CD (casi todos los 386 y muchos 486)
+------------------------------------------------------------------------
+Arranque con el disquete de arranque de Hispa-DOS (el de siempre; el
+archivo ARRANQUE.IMG de este CD es también un disquete de arranque, que se
+puede grabar en un disquete de 1,44 MB). El disquete carga HSPCD, el
+controlador de los lectores de CD de Hispa-DOS (IDE y SATA), y el CD sale
+como una unidad más (la primera letra libre). Elija en su menú «Instalar
+Hispa-DOS en el disco duro»: el programa de instalación encuentra el CD
+solo y copia todo de él, sin pedir los demás disquetes. También se puede
+escribir INSTALAR /SETUP o, sin pantallas, INSTALAR (o INSTALAR C:).
+
+Para usar el CD sin instalar, desde el disquete: los programas están en la
+carpeta \HISPADOS del CD (por ejemplo, D:\HISPADOS\VENTANAS).

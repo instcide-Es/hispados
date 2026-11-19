@@ -918,6 +918,15 @@ H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)
 usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
+# [CD] las imágenes de CD (docs/CD.md): lo mismo que la imagen USB de cada
+# gama, en ISO 9660 nivel 1 + Joliet, con arranque El Torito en emulación de
+# disquete de 1,44 MB (ARRANQUE.IMG: el disquete de arranque del CD, que busca
+# el CD con HSPCD y lo usa todo de allí). Hace falta genisoimage o mkisofs.
+cd: usb tools/mkcd.py cd/LEEMECD.TXT
+	python3 tools/mkcd.py
+cd486: usb486 tools/mkcd.py cd/LEEMECD.TXT
+	python3 tools/mkcd.py 486
+
 # [FONDO] la imagen de fondo del escritorio de Hispa-486 (sistema/486/FONDO.BMP,
 # que va en el repositorio ya hecha): 800x600 con los colores fijos de Hispa
 # Ventanas y difuminado, a partir de sistema/486/HISPADOS.JPG (la imagen es de
@@ -1003,7 +1012,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM
+TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM
 
 para-pruebas: $(TEST_DEPS)
 
@@ -1079,6 +1088,7 @@ test: $(TEST_DEPS)
 	tests/run_instalar_sonido_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG)
 	tests/run_cd_tests.sh $(IMG) ahci
+	tests/run_cd_imagen_tests.sh
 	tests/run_edit_tests.sh $(IMG)
 	tests/run_deltree_tests.sh $(IMG)
 	tests/run_share_tests.sh $(IMG)
@@ -1171,4 +1181,5 @@ test: $(TEST_DEPS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all usb usb486 fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs
+PHONY_CD = cd cd486
+.PHONY: all usb usb486 $(PHONY_CD) fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs
