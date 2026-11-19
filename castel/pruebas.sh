@@ -1642,6 +1642,14 @@ if grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt && grep -q "multiboot
   ok "el menú de arranque del disco (\\HISPA\\GRUB.CFG): el escritorio, el modo texto y el de emergencia con los programas como módulos"
 else ko "\\HISPA\\GRUB.CFG no es el que tiene que ser:"; sed 's/^/        /' $Z/cfg.txt | head -8; fi
 
+# (y otra vez encima: el disco ya tiene su FAT32, que el núcleo ha montado
+# como C:; al escribir en él por debajo deja de estarlo)
+instala $Z/blanco.img otravez ":tecla ret" ":tecla ret" ":texto r1" ":tecla ret" ":tecla s" ":escribe BORRAR" ":tecla ret" ":tecla ret" ":pausa 5" ":texto r2" ":tecla ret"
+if grep -q "^disco 0: QEMU HARDDISK, 300 MB, FAT32 (SATA)\.$" $S && grep -q "partición 1: FAT32  *299 MB" $Z/r1.txt && grep -q "^instalar: terminado$" $S \
+  && grep -q "Hispa-Pentium está instalado" $Z/r2.txt && volumen $Z/blanco.img 2048 && instalado $Z/blanco.img; then
+  ok "instalar otra vez encima (el disco ya llevaba Hispa-Pentium, montado como C:): borrándolo con sus dos confirmaciones, queda instalado y sano"
+else ko "instalar encima de un Hispa-Pentium ya instalado no va:"; sed 's/^/        /' $Z/fsck.txt | head -6; tail -4 $S | sed 's/^/        /'; fi
+
 # 2. un disco con la partición de otro sistema y espacio sin usar: salir con
 # F3 y no confirmar el borrado no tocan nada; se instala en lo libre
 truncate -s 300M $Z/otro.img

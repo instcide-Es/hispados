@@ -461,9 +461,11 @@ módulo Instala
         pantalla("Elija el disco donde instalar Hispa-Pentium")
         f := 6
         si n_candidatos = 0 entonces
-            recuadro(8, 6, ROJO)
+            recuadro(8, 8, ROJO)
             pon(11, 10, ROJO, "No se ha encontrado ningún disco duro en este equipo")
             pon(11, 11, ROJO, "(IDE o SATA) en el que se pueda instalar.")
+            pon(11, 13, ROJO, "(Solo se instala arrancando de la memoria USB con su")
+            pon(11, 14, ROJO, "entrada «Instalar Hispa-Pentium en el disco duro».)")
         fin
         para k desde 1 hasta n_candidatos hacer
             d := candidatos[k - 1]
@@ -1118,9 +1120,13 @@ módulo Instala
         etapa("Haciendo la partición...")
         copiar_memoria(mbr_viejo, mbr, 512)
         si borrar_todo entonces
-            ; fuera lo que hubiera: la tabla (también una GPT y su copia del final)
+            ; fuera lo que hubiera: la tabla (también una GPT y, si se llega, su
+            ; copia del final del disco)
             ceros(1, 40)
-            ceros(info[disco].sectores - 40, 40)
+            si es_gpt entonces
+                llenar(trozo, TROZO, 0)
+                escribir_disco(disco, info[disco].sectores - 40, 40, trozo)
+            fin
             si en_blanco o sin_tabla entonces llenar(mbr, 512, 0) fin
             llenar(dirección(mbr[446]), 64, 0)
             pon32(dirección(mbr[440]), tics() xob (fecha << 16) xob hora xob 0x48495350)

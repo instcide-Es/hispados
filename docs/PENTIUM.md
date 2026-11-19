@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 19/11/2026 (la 0.6: los discos SATA, las unidades con letra y el USB). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 19/11/2026 (la 0.7: instalarlo en el disco duro). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
@@ -34,7 +34,12 @@ disco duro**: que el núcleo vea los discos y el USB de los PC de verdad): los
 disco, la **FAT con varios volúmenes a la vez**, las **unidades con letra** (C: el
 disco de dentro, X: la memoria USB de arranque, M: lo que trae el cargador) y el
 **USB** (xHCI, EHCI y UHCI): **teclado, ratón y panel táctil**, **concentradores**
-y **memorias** (secciones 7 y 11). Todo está en `castel/nucleo32/`.*
+y **memorias** (secciones 7 y 11). Y en la del 19/11 por la noche (la **0.7**):
+**instalarlo en el disco duro** (sección 12): el programa **INSTALAR**, en
+pantalla azul (elegir el disco, hacer la partición, darle formato FAT32, copiar
+el sistema a `C:\HISPA`), el **arranque desde el disco** (GRUB en el MBR) y el
+**asistente del primer arranque** (el nombre, la fecha y la hora, el teclado, la
+pantalla: `HISPA.INI`). Todo está en `castel/nucleo32/`.*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -172,9 +177,9 @@ apagar`; después, `fsck.fat -n /dev/shm/pentium.img` da el disco por sano y `md
 
 ## 2. Las piezas
 
-El núcleo son unas 14.500 líneas de Castel en treinta y dos módulos (más la
+El núcleo son unas 15.000 líneas de Castel en treinta y tres módulos (más la
 biblioteca de 32 bits, `castel/biblioteca32/`: Textos32, Mem32 y Formato,
-CASTEL32.md §7). Sale un binario de unos 135 K (un tercio, el entorno gráfico; una
+CASTEL32.md §7). Sale un binario de unos 141 K (un tercio, el entorno gráfico; una
 cuarta parte, los discos y el USB).
 
 | Módulo | Qué hace |
@@ -196,7 +201,8 @@ cuarta parte, los discos y el USB).
 | `usbhid.cas` (Usbhid) | Los **teclados y ratones USB** (y los paneles táctiles que se presentan como ratón): le dan a `consola.cas` y a `raton.cas` lo mismo que los PS/2. |
 | `usbalm.cas` (Usbalm) | Las **memorias USB** (almacenamiento «solo a granel», órdenes SCSI): un disco más para `discos.cas`. |
 | `registro.cas` (Registro) | El **registro del arranque**: lo que el núcleo dice de los discos y del USB, apuntado para guardarlo en `ARRANQUE.TXT`. |
-| `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT. |
+| `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT; y **ponerlo en hora**. |
+| `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
 | `usuario.cas` (Usuario) | Los **programas del anillo 3**: los carga **del disco** (o de los módulos de multiboot) en su espacio de direcciones y atiende la **llamada al sistema** (`int 0x80`, sección 6). |
 | `video.cas` (Video) | El **modo gráfico**: el que haya dejado el cargador (multiboot) o el de la **VBE de Bochs/QEMU**; la memoria de la pantalla, a la vista del núcleo; y, si el modo no es de 32 bits, el volcado a 24 o a 16 (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
@@ -213,6 +219,8 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 |---|---|---|
 | `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`...; y las **ventanas** (`ventana`, `suceso`, `rectángulo`, `degradado`, `texto`, `mapa`...), los **menús** (`menú`), el **portapapeles** (`al_portapapeles`, `del_portapapeles`) y los terminales. Un programa lo importa y no escribe ni una `int 0x80`. |
 | `barramenu.cas` (Barramenu) | — | La **barra de menús** de una ventana (Archivo, Edición, Ayuda): pintarla, saber qué rótulo se ha pulsado y abrir su menú. |
+| `uinstala.cas` | `INSTALAR.BIN` | **INSTALAR**: instala el sistema en el disco duro, en pantalla azul (sección 12). |
+| `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
@@ -397,6 +405,20 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 39 | **un menú emergente** para la ventana EBX, como dice lo de ECX (dónde, las opciones separadas por «\|», las que salen en gris y una etiqueta): lo elegido llega luego como el suceso «menú» | `menú` | 0 |
 | 40 | **el portapapeles**: EBX = 0, guardar los EDX octetos de ECX; 1, copiar lo que hay a ECX (hasta EDX); 2, cuánto hay | `al_portapapeles`, `del_portapapeles`, `en_portapapeles` | los octetos |
 | 41 | **lanzar un programa y soltarlo** (EBX: el nombre; ECX: sus argumentos): no hay que esperarlo | `lanzar_suelto` | su tarea |
+| 42 | **la unidad de trabajo**: cambiarla (EBX: su letra; 0: solo preguntar) | `unidad` | la letra de la que queda |
+| 43 | lo que se sabe de **la unidad** número EBX (o del disco sin unidad), a ECX | `info_unidad` | 1, o 0 si no hay tantas |
+| 60 | **texto en la pantalla de texto**: EDX letras de ECX en la columna (bits 0-7 de EBX) y la fila (8-15), con el color de los bits 16-23; con el bit 31, EDX veces la letra ECX. No con el escritorio en marcha ni en un terminal | `texto_en`, `letras_en` | las escritas |
+| 61 | ECX octetos de EBX, **solo al puerto serie** | `al_serie` | |
+| 62 | **el cursor** de la pantalla de texto, a la columna y la fila de EBX (una fila de 25 para arriba: no se ve) | `cursor_en` | 0 |
+| 63 | lo que se sabe del **disco** número EBX (su clase, sus sectores, su modelo, si se puede instalar en él), a ECX | `info_disco` | 1, o 0 si no hay tal disco |
+| 64 | **leer sectores** del disco EBX, como dice ECX (el primero, cuántos —hasta 128— y adónde) | `leer_disco` | 0 |
+| 65 | **escribirlos**. Solo con `instalar` en la línea del cargador, en un disco de dentro que no lleve la unidad del sistema (nunca en una memoria USB); las unidades de ese disco dejan de estar montadas | `escribir_disco` | 0 |
+| 66 | **reiniciar** el equipo | `reiniciar` | (no vuelve) |
+| 67 | **poner en hora el reloj del PC**: la fecha (EBX) y la hora (ECX), como las guarda la FAT | `poner_reloj` | 0 |
+| 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
+
+(Los números 44 a 59 se dejan para el ejecutor de programas de oficina, que se
+hace aparte; lo de instalar empieza en el 60.)
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -509,6 +531,7 @@ cargador en la línea del núcleo:
 | (nada) | en ningún disco |
 | **`escritura=usb`** | solo en las **memorias USB** (los discos de dentro se ven, pero no se tocan): lo que lleva la memoria USB de prueba (sección 11) |
 | **`escritura`** | en todos (`-append "ordenes escritura"`; `probar.sh` lo dice él solo cuando se le da una imagen de disco; con `SOLO_LECTURA=1`, no) |
+| **`instalar`** | solo en los **discos de dentro** (en las memorias USB, ni un sector): para instalar el sistema (sección 12) |
 
 Hay dos cerrojos, uno detrás de otro: `discos.cas` no pasa una escritura a un
 disco sin permiso, y cada controlador se niega por su cuenta si no se le ha dicho
@@ -536,7 +559,8 @@ particiones lógicas (las de dentro de una extendida).
 
 **La unidad del sistema** es de la que se cargan los programas cuando no se dice
 otra (el intérprete, el Bloc de notas...): la que diga el cargador
-(**`unidad=X`**) si está y lleva el sistema (`ORDENES.BIN` en su raíz); si no,
+(**`unidad=X`**) si está y lleva el sistema (`ORDENES.BIN` en su raíz, o en
+`\HISPA` si es un sistema instalado en el disco: sección 12); si no,
 la primera que lo lleve (`C:`, `D:`... y luego `X:`...); si no, `M:`. (Así, el
 disco de dentro de un PC, que puede tener una partición FAT con otras cosas
 —la de arranque EFI, por ejemplo—, no pasa por unidad del sistema.) Cada tarea tiene **su unidad y su carpeta de trabajo** (las hereda de quien
@@ -1002,7 +1026,7 @@ una imagen del disco.
 `nucleo32/usb.sh IMAGEN` hace la imagen de una **memoria USB** (64 MB, FAT16,
 arranque BIOS con GRUB) para probar Hispa-Pentium en un PC: se graba tal cual en la
 memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
-`grub-pc-bin`.) El menú de GRUB (la 0.6):
+`grub-pc-bin`.) El menú de GRUB (la 0.7):
 
 | Entrada | Qué arranca | El modo |
 |---|---|---|
@@ -1015,6 +1039,7 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
 | ver los modos de vídeo que da la BIOS | la orden `videoinfo` de GRUB | — |
 | el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes escritura=usb unidad=X registro` | texto |
 | la consola del núcleo (modo texto) | `SEMILLA.BIN escritura=usb unidad=X registro` | texto |
+| **Instalar Hispa-Pentium en el disco duro** (desde la 0.7) | `SEMILLA.BIN instalar unidad=M`, con todo lo que se instala como módulos (sección 12) | texto |
 
 - **La memoria de arranque es la unidad X:**, la del sistema (`unidad=X`): desde
   la 0.6 el núcleo la lee él, con su USB (más abajo). De ella se cargan el
@@ -1173,16 +1198,181 @@ absolutos); las luces del teclado; los discos USB con sectores que no sean de 51
 `-device usb-ehci`, `-device piix3-usb-uhci`, y un EHCI con sus UHCI compañeras:
 `ich9-usb-ehci1` e `ich9-usb-uhci1`), teclado, ratón, concentrador (de USB 1.1) y memoria
 (`usb-kbd`, `usb-mouse`, `usb-hub`, `usb-storage`), y con `-machine pc,i8042=off`
-quita el teclado y el ratón PS/2, como en un Mac: sección 12. **Lo que QEMU no
+quita el teclado y el ratón PS/2, como en un Mac: sección 13. **Lo que QEMU no
 puede probar**: las transacciones partidas del EHCI (no tiene concentrador de
 alta velocidad), que son justo el camino del teclado y el panel del MacBook;
 están hechas según la norma y como las hace HSPUSB, pero hasta que no se prueben
 en el equipo no se sabe.
 
-## 12. Las pruebas
+## 12. Instalarlo en el disco duro
 
-`castel/pruebas.sh` (las partes 8 y 9; `SOLO=32 ./pruebas.sh` hace solo esas y la
-de los errores; `SOLO=06`, solo la 9, lo de la 0.6) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+Desde la **0.7**, Hispa-Pentium se instala en el disco duro del PC y arranca de
+él, sin la memoria USB. Son tres piezas: el programa **INSTALAR** (en pantalla
+azul, en modo texto), el **arranque del disco** (GRUB, en el MBR) y el
+**asistente del primer arranque** (una ventana del escritorio).
+
+![La bienvenida de INSTALAR](pentium/instalar-bienvenida.png)
+
+### El programa INSTALAR
+
+`uinstala.cas` (`INSTALAR.BIN`): **un programa del anillo 3**, en Castel, como el
+intérprete de órdenes. Se arranca con la última entrada del menú de la memoria
+USB, **«Instalar Hispa-Pentium 0.7 en el disco duro»**: el núcleo en modo texto
+con `instalar unidad=M` en su línea, que lo lanza él. La pantalla es la de las
+instalaciones de siempre: fondo azul, el título arriba y, abajo, las teclas
+(**INTRO** sigue, **F1** ayuda, **F3** sale). Los pasos:
+
+1. **La bienvenida.** No se escribe nada en ningún disco hasta la última
+   confirmación: con F3 se sale (lo pregunta) y el equipo se reinicia.
+2. **Elegir el disco.** La lista de los **discos de dentro** del PC (IDE y
+   SATA), cada uno con su tamaño, sus particiones (su clase —NTFS, FAT32,
+   Linux, extendida, EFI...— y su tamaño; las de una tabla GPT también) y su
+   **espacio sin usar**. Las **memorias USB** salen debajo, con un «no se toca»:
+   **no se ofrecen nunca** (y el núcleo, además, no deja: más abajo).
+3. **Dónde.** Según lo que tenga el disco:
+   - **en blanco** (su primer sector, a cero): se usa entero, sin más preguntas
+     que la confirmación del final;
+   - con particiones y **espacio sin usar** (64 MB o más, sin partición, y un
+     sitio libre en la tabla): se ofrece **instalar ahí**, en una partición
+     nueva, **sin tocar lo que hay**;
+   - siempre, **borrar el disco entero**: pide **dos confirmaciones**, en dos
+     pantallas con el recuadro en rojo y el disco dicho por su nombre: una
+     **S** y, después, **escribir la palabra BORRAR**. Con cualquier otra cosa
+     se vuelve atrás sin haber tocado nada.
+
+   ![La segunda confirmación de borrar el disco](pentium/instalar-borrar.png)
+4. **«Todo listo para instalar»**: el disco, la partición que se va a hacer, lo
+   que se copia y cómo queda el arranque. Al pulsar INTRO se empieza a escribir.
+5. **Instalar**, con su barra:
+   - **la partición**, en la tabla del **MBR** (de la clase 0C, FAT32, a megas
+     enteros, la activa; hasta **32 GB**: una FAT32 mayor tarda mucho en
+     repasarse con este núcleo, y lo que sobra queda sin usar);
+   - **el formato FAT32, escrito desde cero**: el sector de arranque (con su
+     copia), el sector de información, las dos FAT y la raíz; clusters de 512
+     octetos hasta 260 MB, de 4 K hasta 8 GB, de 8 K hasta 16 y de 16 K de ahí
+     arriba;
+   - **el sistema, a `C:\HISPA`**: el núcleo (`NUCLEO.BIN`), los programas, el
+     asistente, los textos (`LEEME.TXT`, también en la raíz, y `MANUAL.TXT`),
+     el menú de arranque (`GRUB.CFG`) y `MBR.ANT`, el primer sector que tenía
+     el disco, por si acaso. Los archivos van seguidos, uno detrás de otro;
+   - **el arranque**: lo último, para que si algo falla antes el disco siga
+     arrancando como arrancaba.
+6. **El final**: quitar la memoria USB e INTRO para reiniciar.
+
+![Instalado](pentium/instalar-final.png)
+
+**De dónde sale lo que se instala.** De la raíz de la unidad del sistema, que
+con esa entrada es **M:**: GRUB trae como módulos todo lo que hay que instalar
+(`NUCLEO.BIN` —la copia del núcleo que pide 800 x 600—, los programas,
+`ASISTE.BIN`, los textos, `BOOT.IMG` y `CORE.IMG`). Así se puede instalar
+aunque el USB de ese equipo no se deje leer por el núcleo, y **la memoria USB no
+hace falta ni leerla**.
+
+**Cómo escribe.** INSTALAR no usa los archivos del núcleo para el disco nuevo
+(el núcleo monta los volúmenes al arrancar, y ese todavía no existe): escribe
+**sector a sector** (las llamadas 64 y 65) su propia FAT32, que es sencilla
+porque el volumen nace vacío: cada archivo ocupa clusters seguidos.
+
+**Lo que no hace todavía.** En un disco con tabla **GPT** solo instala
+borrándolo entero (lee sus particiones y las enseña, pero no añade una: el disco
+queda con tabla MBR); no mira dentro de una partición **extendida** (la cuenta
+entera como ocupada); no deja elegir el **tamaño** de la partición ni usar una
+que ya exista; y en un disco **de los de antes**, cuya primera partición
+empieza en el sector 63, no hay sitio delante para el arranque: lo dice, y solo
+ofrece borrarlo.
+
+### El arranque del disco
+
+**GRUB 2**, el mismo cargador de la memoria USB, por dos razones: es lo que ya
+arranca este núcleo en los PC de verdad (multiboot, con el modo gráfico puesto
+por él: sección 11), y deja en el menú una entrada para **el sistema que ya
+hubiera** en el disco. El núcleo no puede «hacer» un GRUB, así que viene hecho
+con el sistema (`usb.sh`):
+
+- **`BOOT.IMG`**: el primer sector de GRUB. Sus 440 octetos de código van al
+  **MBR** (la tabla de particiones no se toca); lleva dicho que el resto está
+  desde el sector 1.
+- **`CORE.IMG`** (unos 160 K): el resto de GRUB, **con todos sus módulos
+  dentro** (los discos por la BIOS, las tablas MBR y GPT, la FAT, multiboot, el
+  vídeo por VBE, `chainloader`...), porque en el disco instalado no hay carpeta
+  de módulos. Va al **hueco** de delante de la primera partición (del sector 1
+  en adelante; las particiones empiezan en el 2048). Lleva dentro dos órdenes:
+  buscar en los discos el archivo `/HISPA/GRUB.CFG` y seguir lo que diga. No
+  lleva escrito en qué disco ni en qué partición está: vale para cualquiera.
+
+**`C:\HISPA\GRUB.CFG`**, el menú, lo escribe INSTALAR:
+
+| Entrada | Qué arranca |
+|---|---|
+| Hispa-Pentium | `NUCLEO.BIN escritorio escritura`, con la medida de pantalla de la línea `set modo=` |
+| el intérprete de órdenes (modo texto) | `NUCLEO.BIN ordenes escritura`, en modo texto |
+| de emergencia | `NUCLEO.BIN escritorio sindisco sinusb`, con los programas como módulos (la unidad M:) |
+| el sistema que ya estaba en el disco | (si se instaló junto a otro) `chainloader +1` de su partición |
+
+La primera línea que cuenta, **`set modo=800x600x32,800x600,auto`**, es la medida
+de la pantalla: la cambia el asistente (o se cambia a mano).
+
+**Sin GRUB**, otro camino para más adelante: un cargador propio (MBR y sector de
+arranque de la partición) que lea el núcleo de la FAT32 y pida el modo a la VBE.
+
+### El núcleo, instalado
+
+- **La carpeta del sistema.** Un sistema instalado lleva sus programas en
+  **`\HISPA`** y no en la raíz, como la memoria de arranque. La unidad del
+  sistema se reconoce por `ORDENES.BIN` en la raíz **o en `\HISPA`**; y un
+  programa que no está donde se pide **se busca en `\HISPA`** de la unidad del
+  sistema (así el escritorio, la Consola y el intérprete lanzan lo de siempre
+  sin saber dónde está, y `BLOC` vale desde cualquier carpeta).
+- **`C:\HISPA\HISPA.INI`** (`ajustes.cas`): `usuario=`, `equipo=`, `teclado=`
+  (`es` o `us`) y `modo=`. El núcleo lo lee al arrancar: pone el teclado y
+  guarda el nombre, con el que **saluda el menú Inicio** («Hola, Carlos»).
+- **Con `instalar` en la línea del cargador**, el permiso de escritura es al
+  revés que con `escritura=usb`: **solo en los discos de dentro**; en las
+  memorias USB no se escribe ni un sector (los dos cerrojos de la sección 7).
+  Y solo entonces vale la llamada 65 (escribir sectores), en un disco de dentro
+  que no lleve la unidad del sistema: **nunca en una memoria USB**. Sin
+  `instalar`, INSTALAR no encuentra ningún disco donde escribir.
+- **Las llamadas nuevas** (60 a 68, sección 6): texto con color en la pantalla
+  de texto y su cursor, un texto solo al puerto serie, lo que se sabe de un
+  disco, leer y escribir sectores, reiniciar, poner en hora el reloj del PC y
+  los ajustes.
+
+### El asistente del primer arranque
+
+`uasiste.cas` (`ASISTE.BIN`), una ventana del escritorio. El escritorio lo lanza
+si el sistema está instalado y **no hay `HISPA.INI`**: la primera vez (o si se
+cierra sin aceptar, o si se borra el archivo). Pregunta el **nombre** del
+usuario y el del **equipo**, la **fecha y la hora** (las pone en el reloj del
+PC, el de la CMOS), el **teclado** (español o de EE. UU.: cambia en el momento)
+y la **medida de la pantalla** (800 x 600, 1024 x 600, 1024 x 768, 1280 x 800,
+1366 x 768 o «la que prefiera el monitor»). Con el ratón o con el teclado: Tab
+pasa de casilla en casilla, el espacio o las flechas cambian el teclado y la
+pantalla, Intro acepta. Al aceptar guarda `HISPA.INI`, cambia la línea `set
+modo=` de `GRUB.CFG` (la medida la pone GRUB **al arrancar**: se ve la próxima
+vez) y le dice al núcleo que lea los ajustes.
+
+![El asistente del primer arranque](pentium/asistente.png)
+
+![El menú Inicio saluda con el nombre](pentium/inicio-saludo.png)
+
+### Probarlo en QEMU
+
+```
+cd castel
+nucleo32/usb.sh /dev/shm/usb.img                  # la memoria USB (como root)
+truncate -s 2G /dev/shm/disco.img                 # un disco SATA en blanco
+qemu-system-i386 -m 64 -rtc base=localtime -device qemu-xhci,id=u \
+  -drive file=/dev/shm/usb.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 \
+  -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0,bootindex=2
+# (la última entrada del menú, INTRO tres veces, y al final INTRO para reiniciar)
+qemu-system-i386 -m 64 -rtc base=localtime \
+  -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0
+```
+
+## 13. Las pruebas
+
+`castel/pruebas.sh` (las partes 8, 9 y 10; `SOLO=32 ./pruebas.sh` hace solo esas y la
+de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -1355,6 +1545,48 @@ de vídeo de la BIOS).
   el Bloc de notas con el ratón USB, se teclea, se guarda, y en la imagen quedan
   `NOTAS.TXT` y **`ARRANQUE.TXT`** (el registro del arranque), con la FAT sana.
 
+**La 0.7** (la parte 10 de `pruebas.sh`: instalar en el disco), todo en QEMU. Con
+el núcleo arrancado con `-kernel`, `instalar unidad=M` y lo que se instala como
+módulos (lo mismo que hace la entrada de la memoria USB), tecleando por el
+monitor y mirando la **pantalla de texto** (`:texto` en `probar.sh`) y lo que
+INSTALAR apunta por el puerto serie:
+
+- **Un disco SATA en blanco**: la bienvenida (el título y el pie con sus
+  teclas), la ayuda (F1), la lista de discos, «todo listo» y el final; después,
+  desde fuera: la tabla (`parted`: una partición FAT32, la activa), **`fsck.fat`
+  da el volumen por sano**, los archivos de `\HISPA` son **iguales octeto a
+  octeto** que los originales (`mtools`), el MBR lleva `BOOT.IMG` y `CORE.IMG`
+  está desde el sector 1; y `GRUB.CFG` es el que tiene que ser.
+- **Un disco con la partición de otro sistema** (100 MB de datos al azar, de
+  la clase de NTFS) **y espacio sin usar**: se enseña lo que tiene; **borrar pide
+  sus dos confirmaciones**, y con la palabra mal escrita, con N o saliendo con
+  F3 **el disco queda idéntico octeto a octeto**; instalando en lo libre, **la
+  partición de antes queda idéntica**, la nueva es la segunda y la activa, el
+  menú de arranque lleva la entrada del otro sistema y `MBR.ANT` es el primer
+  sector de antes.
+- **Un disco lleno**: solo se ofrece borrarlo; confirmado (S y BORRAR), queda
+  instalado (199 MB: la FAT32 de clusters de 512 octetos). **Uno de los de
+  antes** (la partición en el sector 63): se dice que no hay sitio para el
+  arranque, y no se toca. **Uno con tabla GPT**: se leen sus particiones y solo
+  se instala borrándolo (queda con tabla MBR). **Un disco IDE** de 2 GB
+  (clusters de 4 K).
+- **Sin `instalar`** en la línea del cargador (aunque haya `escritura`),
+  INSTALAR no encuentra ningún disco donde escribir, y la imagen queda idéntica.
+
+Y de verdad, **con la memoria USB arrancada como tal** (GRUB, de un **xHCI** y de
+un **EHCI**) y un disco SATA en blanco de 2 GB: el menú trae la entrada
+«Instalar...»; se instala; **la memoria USB no se ofrece como disco y queda
+idéntica octeto a octeto**; el disco, sano y con el sistema. Después, **SOLO con
+el disco**: la BIOS arranca **GRUB desde su MBR** y sale el menú de
+`\HISPA\GRUB.CFG`; el núcleo lee el disco (C:, FAT32), arranca el escritorio y
+lanza **el asistente**: con el teclado (el nombre, el equipo, la hora, la
+pantalla a 1024 x 600) y, en la otra pasada, con el ratón (el teclado de
+EE. UU., que cambia en el momento); `HISPA.INI` y la línea `set modo=` de
+`GRUB.CFG` quedan como se ha dicho, el reloj de la barra marca la hora puesta,
+**el menú Inicio saluda con el nombre**; en el **segundo arranque** ya no sale
+el asistente y el escritorio está a **1024 x 600**; y la entrada de modo texto
+del disco arranca el intérprete, con el teclado guardado.
+
 Lo que **no se puede probar en QEMU**: las transacciones partidas del EHCI (el
 teclado y el panel de un MacBook: sección 11), el traspaso de verdad desde la
 BIOS de cada equipo, y los discos SATA de verdad.
@@ -1375,13 +1607,20 @@ donde CASTEL deja su archivo temporal y la salida (en A:, los fuentes: solo los
 módulos del núcleo en la segunda tanda, y los programas con los dos módulos que
 usan en la tercera). Lo que sacan los dos compiladores sigue siendo lo mismo.
 
-Con todo, `pruebas.sh` tiene ahora **369 comprobaciones** (eran 320; unos treinta
-y cinco minutos en el VPS). La última pasada entera (19/11/2026, con la 0.6) dio
-**369 bien, 0 mal**; `SOLO=06 ./pruebas.sh` (los errores y la parte 9, lo de la
-0.6) son unos ocho minutos, y `SOLO=16`, lo que no arranca el núcleo (de la parte
-1 a la 7, con los dos compiladores y los dos ensambladores), otros siete.
+Con la 0.7 no ha hecho falta tocar los compiladores: lo de instalar son dos
+programas del anillo 3 aparte (INSTALAR y el asistente), y el núcleo solo ha
+crecido en un módulo corto (`ajustes.cas`) y nueve llamadas. CASTEL compila el
+núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
+2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para el árbol.
 
-## 13. Por dónde seguir
+Con todo, `pruebas.sh` tiene ahora **@@N@@ comprobaciones** (eran 369; unos
+cuarenta minutos en el VPS). La última pasada entera (19/11/2026, con la 0.7) dio
+**@@N@@ bien, 0 mal**; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar
+en el disco) son unos cuatro minutos; `SOLO=06` (la parte 9, lo de la 0.6), unos
+ocho, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a la 7, con los dos
+compiladores y los dos ensambladores), otros siete.
+
+## 14. Por dónde seguir
 
 Hecho en la tanda del 18-19/11/2026: el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de
@@ -1399,13 +1638,18 @@ tamaño**, la **barra de menús** y el escritorio **a la medida de la pantalla**
 en la del 19/11 por la tarde (la 0.6): los **discos SATA (AHCI)**, la **capa de
 discos** con su permiso de escritura, la **FAT con varios volúmenes**, las
 **unidades con letra** y el **USB** (xHCI, EHCI y UHCI; teclado, ratón,
-concentradores y memorias). Lo siguiente:
+concentradores y memorias). Y en la del 19/11 por la noche (la 0.7): **instalarlo
+en el disco duro** (sección 12): INSTALAR, el arranque del disco y el asistente
+del primer arranque. Lo siguiente:
 
-0. **Instalar Hispa-Pentium en el disco duro** (para eso era la 0.6: el núcleo ya
-   ve el disco de dentro y la memoria de arranque): un **instalador** que haga la
-   partición (o use una que ya haya), la **formatee** en FAT, copie el sistema
-   desde `X:` y deje un **cargador** en el disco (GRUB, o uno propio). Antes:
-   formatear y hacer particiones desde el núcleo, y las particiones lógicas.
+0. **La instalación, más**: probarla **en un PC de verdad** (en un disco que no
+   importe); añadir una partición a un disco con tabla **GPT** (con su partición
+   de arranque de BIOS) en vez de borrarlo; elegir el **tamaño** de la partición
+   y usar una que ya exista; las particiones **lógicas**; una orden para
+   **reparar el arranque** (volver a poner `BOOT.IMG` y `CORE.IMG`, que ya están
+   en `\HISPA`); `FORMAT` y hacer particiones desde el intérprete; un **cargador
+   propio** en vez de GRUB; y el arranque por **UEFI**. En el escritorio: que
+   Configuración deje cambiar lo del asistente, y usuarios con su carpeta.
    Y **los PC de verdad**: probar la 0.6 en el Mac de 2012 (el teclado y el panel
    por el EHCI con transacciones partidas), en el Toshiba y en el HP Mini; la
    **medida del panel** cuando la BIOS no la da por VBE (sección 11); **enchufar

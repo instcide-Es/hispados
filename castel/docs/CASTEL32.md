@@ -371,7 +371,12 @@ falta enlazar con otras cosas; de momento no hace falta.
   que ya no hace falta, o compilar por módulos). Y su **archivo temporal** (el
   código de todas las funciones, que se lee dos veces) pasa de 800 K con el
   núcleo: ya no cabe en un disquete de 1,44 MB con los fuentes o con la salida;
-  las pruebas lo ponen, con la salida, en uno de 2,88.
+  las pruebas lo ponen, con la salida, en uno de 2,88. Con la 0.7 (instalar en
+  el disco) no se ha tocado nada: lo nuevo son dos programas del anillo 3
+  aparte y un módulo corto en el núcleo, que usa 2.644 párrafos de 3.072 para
+  los nombres, 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para
+  el árbol (`CASTEL ... --gasto`). Un programa no puede declarar un arreglo de
+  más de 64 K: lo que haga falta mayor se pide con `más_memoria`.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
   escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5) y,
   desde la 0.6, los discos SATA y el USB de los PC de verdad (PENTIUM.md §7 y

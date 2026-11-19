@@ -59,12 +59,13 @@ escribir con formato).
   `escritorio`; y `emergente`, los menús, desde la 0.5; y, desde la 0.6, los discos y el USB
   de los PC de verdad: `pci`, `ahci` (SATA), `discos`, `unidades` (las letras: C:, X:, M:),
   `usbbase`, `xhci`, `ehci`, `uhci`, `usb`, `usbhid` (teclado y ratón), `usbalm` (memorias) y
-  `registro`), el módulo de
+  `registro`; y, desde la 0.7, `ajustes`: los de un sistema instalado en el disco), el módulo de
   las llamadas al sistema para los programas (`llamadas.cas`), el intérprete de órdenes
   (`uordenes.cas`) y los demás programas de usuario (`uhola.cas`, `ueco.cas`, `umalo.cas`,
   `ucli.cas`, `uprueba.cas`, `uescribe.cas`, `ubucle.cas`; y los del escritorio: `ubloc.cas`, el
   Bloc de notas, `uconsola.cas`, la Consola, y `uequipo.cas`, Mi equipo, con `barramenu.cas`, la
-  barra de menús de sus ventanas); `disco.sh`, que hace la imagen de un
+  barra de menús de sus ventanas; y, desde la 0.7, `uinstala.cas`, el programa que **instala el
+  sistema en el disco duro**, y `uasiste.cas`, el asistente del primer arranque); `disco.sh`, que hace la imagen de un
   disco FAT con todos ellos; `probar.sh`, que arranca el núcleo en QEMU (con ese disco) y le
   teclea órdenes (en el teclado español) y, en el escritorio, le mueve el ratón y saca
   capturas; `pantalla.py`, que deja lo que sale como se ve en la pantalla; `mira_captura.py`,
@@ -80,11 +81,12 @@ escribir con formato).
 - `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA,
   el ensamblador propio contra NASM, el compilador en Castel contra `ccastel.py` y el
   arranque en tres pasos, y lo de 32 bits con Hispa-Pentium, su escritorio, sus discos y su
-  USB). Tarda unos treinta y cinco minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el arranque; `SOLO=32 ./pruebas.sh`, solo los
+  USB, y la instalación en el disco duro). Tarda unos cuarenta minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el arranque; `SOLO=32 ./pruebas.sh`, solo los
   errores y lo de 32 bits, con el núcleo de Hispa-Pentium, su disco —también escribiendo en
   él—, su intérprete de órdenes y su teclado: unos diez minutos, casi todo en teclear las
   órdenes tecla a tecla; `SOLO=06 ./pruebas.sh`, solo lo de la 0.6: los discos SATA, las
-  unidades y el USB). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
+  unidades y el USB; `SOLO=07 ./pruebas.sh`, solo lo de la 0.7: instalar en el disco duro,
+  arrancar de él y el asistente del primer arranque). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
   cuentas al azar de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits
   (`azar32.py`, unas 200), comparadas con lo que tienen que dar.
 - `ejemplos/` — los programas de ejemplo; `ejemplos/esperado/` — lo que tiene que escribir
@@ -303,5 +305,7 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
    (ventanas, ratón, barra de tareas, menú Inicio, Bloc de notas y Consola), todo en Castel
    ([../docs/PENTIUM.md](../docs/PENTIUM.md)); y, desde la 0.6, los discos SATA (AHCI), las
    unidades con letra y el USB (xHCI, EHCI y UHCI: teclado, ratón, concentradores y
-   memorias). Lo siguiente, **instalarlo en el disco duro**; y crear nombres largos, tuberías
-   y una caché de disco de verdad.
+   memorias); y, desde la 0.7, **se instala en el disco duro** (el programa INSTALAR, el
+   arranque del disco con GRUB y el asistente del primer arranque). Lo siguiente: probarlo
+   instalado en un PC de verdad; y crear nombres largos, tuberías y una caché de disco de
+   verdad.
