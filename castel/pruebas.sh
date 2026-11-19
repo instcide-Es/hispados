@@ -853,9 +853,9 @@ S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
   "^C:.>ver$" "^Hispa-Pentium 0\.4" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
-$AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
+MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
-mira "sin disco, el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
+mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
 
 # ---- escribir en el disco: ATA, la FAT (12, 16, 32 y con particiones) y las órdenes ----
 # (cada prueba escribe en una copia del disco, con ESCRIBE=1; luego la miran fsck.fat y mtools)
@@ -1156,6 +1156,8 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     sleep 6; monu "sendkey ret" 12
     monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8; monu "mouse_move 300 -200" 0.6
     monu "screendump $G/u1.ppm" 0.6
+    monu "mouse_move -260 -92" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5; monu "mouse_move 400 200" 0.6
+    monu "screendump $G/u2.ppm" 0.6
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
@@ -1164,6 +1166,9 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
+    if grep -q "escritorio: lanzo .BLOC.BIN" $S && cap $G/u2.ppm negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas"; then
+      ok "y desde su menú se lanza el Bloc de notas, que viene como módulo (de la unidad en memoria)"
+    else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
