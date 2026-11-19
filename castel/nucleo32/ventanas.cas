@@ -1068,20 +1068,6 @@ módulo Ventanas
     ; -------------------------------------------------------------------------
     ;  El ratón
     ; -------------------------------------------------------------------------
-    ; la ventana de más adelante que está en ese punto; -1 si es el tapiz
-    función ventana_en(x: ent32, yy: ent32): ent32
-        variable k, i: ent32
-        k := ent32(cuántas) - 1
-        mientras k >= 0 hacer
-            i := orden[k]
-            si se_ve(ventanas[i]) y x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto entonces
-                devolver i
-            fin
-            k := k - 1
-        fin
-        devolver -1
-    fin
-
     ; el punto de la pantalla, visto desde dentro de la ventana
     función dentro_x(i: ent32, x: ent32): ent32
         si con_marco(ventanas[i]) entonces devolver x - ventanas[i].px - BORDE fin
