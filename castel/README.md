@@ -74,8 +74,8 @@ escribir con formato).
   lo que escribe.
 - `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA,
   el ensamblador propio contra NASM, el compilador en Castel contra `ccastel.py` y el
-  arranque en tres pasos, y lo de 32 bits con Hispa-Pentium). Tarda unos trece minutos y
-  medio (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el arranque; `SOLO=32 ./pruebas.sh`, solo los
+  arranque en tres pasos, y lo de 32 bits con Hispa-Pentium y su escritorio). Tarda unos
+  diecinueve minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el arranque; `SOLO=32 ./pruebas.sh`, solo los
   errores y lo de 32 bits, con el núcleo de Hispa-Pentium, su disco —también escribiendo en
   él—, su intérprete de órdenes y su teclado: unos diez minutos, casi todo en teclear las
   órdenes tecla a tecla). Con `AZAR=3 ./pruebas.sh`, además, tres programas de

@@ -927,7 +927,7 @@ Los disquetes de las pruebas de los dos compiladores y los dos ensambladores van
 ahora en **dos tandas** (lo de Hispa-Pentium, aparte): el ensamblador de la semilla
 pasa de medio mega y ya no cabía con lo demás.
 
-Con todo, `pruebas.sh` entero da **TOTAL_BIEN bien, 0 mal** (19/11/2026; unos TOTAL_MIN
+Con todo, `pruebas.sh` entero da **281 bien, 0 mal** (19/11/2026; unos diecinueve
 minutos en el VPS).
 
 ## 13. Por dónde seguir
